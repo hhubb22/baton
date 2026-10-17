@@ -1,0 +1,183 @@
+:root {
+  color: #1c2430;
+  background: #f3f5f8;
+  font: 16px/1.5 ui-sans-serif, system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  min-height: 44px;
+  padding: 0.4rem 0.9rem;
+  border: 1px solid #1f4e79;
+  border-radius: 6px;
+  background: #1f4e79;
+  color: #fff;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+button.danger {
+  border-color: #7a1f2b;
+  background: #7a1f2b;
+}
+
+input,
+select,
+textarea {
+  display: block;
+  width: 100%;
+  margin-top: 0.25rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid #c5ced8;
+  border-radius: 6px;
+  background: #fff;
+  color: inherit;
+}
+
+textarea {
+  font-family: ui-monospace, monospace;
+}
+
+label {
+  display: block;
+  margin: 0.8rem 0;
+}
+
+.page {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 1.25rem;
+}
+
+.top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.top h1,
+.card h2,
+.card h3 {
+  margin: 0;
+}
+
+.card {
+  margin: 0 0 1rem;
+  padding: 1rem;
+  border: 1px solid #d5dbe3;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.card-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.meta,
+.hint {
+  color: #526070;
+}
+
+.error,
+.notice {
+  padding: 0.6rem 0.75rem;
+  border-radius: 6px;
+}
+
+.error {
+  background: #fdecee;
+  color: #7a1f2b;
+}
+
+.notice {
+  background: #eef5ea;
+  color: #1d4d32;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+}
+
+.badge-online {
+  background: #e5f6ef;
+  color: #0f6b4c;
+}
+
+.badge-offline {
+  background: #fff1e4;
+  color: #8a4b12;
+}
+
+.status-pending,
+.status-effective {
+  margin-top: 0.8rem;
+  padding: 0.7rem 0.8rem;
+  border-radius: 6px;
+}
+
+.status-pending {
+  background: #fff6e8;
+  color: #6d4a00;
+}
+
+.status-effective {
+  background: #fdecee;
+  color: #7a1f2b;
+}
+
+.confirm {
+  margin-top: 0.8rem;
+  padding: 0.7rem 0.8rem;
+  border-radius: 6px;
+  background: #f7f4ef;
+}
+
+pre {
+  white-space: pre-wrap;
+  padding: 0.75rem;
+  border-radius: 6px;
+  background: #f3f5f8;
+}
+
+:focus-visible {
+  outline: 2px solid #1f4e79;
+  outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  .top,
+  .card-title {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

@@ -2,7 +2,7 @@
 
 员工使用部署管理员分配的本地账号登录 Coordinator，退出，查询本人身份，领取一次性节点注册凭据，设置默认 PC，吊销本人节点的连接凭据，并提交任务。初始口令只能使用到员工完成更换为止。`batond register` 用这张凭据注册节点，把身份保存在本机。`batond run` 用这份身份主动连接 Relay，断线后重连，并在同步完成前不会显示为可执行。吊销生效后，同一连接凭据不能再接入。
 
-本目录目前包含这条路径的构建、迁移、HTTP 接口、Coordinator、Relay、batond 和测试。任务接口会保存接受记录和投递意图。实际投递、Worker、Session 和管理员网页不在这里。
+本目录目前包含这条路径的构建、迁移、HTTP 接口、Coordinator、Relay、batond、员工 Web UI 和测试。任务接口会保存接受记录和投递意图。实际投递、Worker、Session 和管理员网页不在这里。
 
 ## 运行要求
 
@@ -175,6 +175,30 @@ Relay 重新连上 Coordinator 时会取得包含该吊销的安全快照；已�
 `GET /tasks` 返回本人最近 100 条任务。`GET /tasks/{id}` 和 `GET /tasks/{id}/events` 只返回本人的记录和变更，不返回 Session 原文。其他员工的任务和不存在的任务都返回 403，响应相同。非法任务标识返回 400。这三个读取接口不要求 CSRF。
 
 `dispatch_outbox` 只保存 `prepare` 投递意图。当前进程不发送、也不消费它。
+
+## Web UI
+
+员工页面在 `web/`。Coordinator 用 `go:embed` 提供 `internal/webui/dist` 里的构建结果，不另起 Node.js 服务，页面也不从第三方 CDN 加载脚本或样式。仓库保留这次构建结果，所以没有 pnpm 时 `go build ./...` 和 `go test ./...` 仍能编译。页面改动后需要重新构建，再编译 Coordinator，二进制里才是新页面。
+
+浏览器只使用 `Secure`、`HttpOnly` 的会话 Cookie。登录响应里的 CSRF 令牌放在内存和当前标签页的 sessionStorage，用来设置 `X-CSRF-Token`。它不是会话凭据。注册凭据和节点连接凭据不写入 localStorage、sessionStorage、URL 或日志。
+
+```text
+cd web
+pnpm install
+pnpm dev
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm test:e2e
+pnpm check:dist
+```
+
+`pnpm check:dist` 重新构建页面，`internal/webui/dist` 与仓库里的版本不一致时失败。构建结果是确定的，改了 `web/` 却没有提交新的构建结果，就会在这里发现。
+
+`pnpm dev` 在 `https://localhost:5173` 启动，并把 `/api` 代理到 `BATON_DEV_API`（默认 `https://127.0.0.1:8080`）。Coordinator 的 `BATON_ALLOWED_ORIGINS` 需要包含 `https://localhost:5173`。
+
+`pnpm test:e2e` 会先构建页面，再用 Playwright 驱动本机 Chromium，对真实的 Coordinator、PostgreSQL、Relay 和 batond 覆盖登录、注册节点、修改默认 PC、吊销从处理中到已生效，以及跨员工和无效会话被拒绝。运行前设置 `BATON_TEST_DATABASE_URL`。
 
 ## 测试
 

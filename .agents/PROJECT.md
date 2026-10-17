@@ -20,6 +20,7 @@
 
 - `go build ./...`、`go vet ./...`
 - `go test ./...` 需要 `BATON_TEST_DATABASE_URL` 指向可创建临时 schema 的 PostgreSQL 17，不设置时测试失败。
+- 改动 `web/` 时在该目录运行 `pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm test:e2e`，提交前运行 `pnpm check:dist`，确认嵌入的构建结果已更新。
 - 本地隔离验证使用自建测试数据库、真实 Baton 进程与计数执行器，不动用户已有数据库或共享设备。
 - 真实 Agent、macOS、Windows、Linux 虚拟机、Plane 测试项目和跨网络验证的环境条件写在对应 Issue 中；开发环境无法覆盖时用 `lab-request`。
 

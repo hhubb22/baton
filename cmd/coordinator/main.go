@@ -25,6 +25,7 @@ import (
 	"baton/internal/node"
 	"baton/internal/redact"
 	"baton/internal/store"
+	"baton/internal/webui"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -186,7 +187,7 @@ func cmdServe(ctx context.Context, stderr io.Writer, getenv func(string) string)
 			return err
 		}
 		apiSrv := &http.Server{
-			Handler:           api,
+			Handler:           webui.Handler(api),
 			ReadHeaderTimeout: 5 * time.Second,
 			ReadTimeout:       20 * time.Second,
 			WriteTimeout:      60 * time.Second,
