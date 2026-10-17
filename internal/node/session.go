@@ -15,6 +15,7 @@ import (
 
 	"baton/internal/identity"
 	"baton/internal/protocol"
+	"baton/internal/session"
 
 	"github.com/coder/websocket"
 )
@@ -33,6 +34,7 @@ type RunOptions struct {
 	Heartbeat time.Duration
 	RootCAs   *x509.CertPool
 	Logger    *slog.Logger
+	DataDir   string
 }
 
 // Maintain 保持到 Relay 的出站连接。同一进程的重连沿用启动时生成的 incarnation。
@@ -53,13 +55,35 @@ func Maintain(ctx context.Context, opts RunOptions) error {
 	if err != nil {
 		return errors.New("无法生成节点化身")
 	}
+	var ledger *Ledger
+	var host *session.Host
+	if opts.DataDir != "" {
+		release, err := acquireDataLock(opts.DataDir)
+		if err != nil {
+			return err
+		}
+		defer release()
+		ledger, err = OpenLedger(opts.DataDir)
+		if err != nil {
+			return err
+		}
+		defer ledger.Close()
+		host = &session.Host{DataDir: opts.DataDir, Logger: opts.Logger}
+		sessions, err := ledger.WorkerSessions()
+		if err != nil {
+			return err
+		}
+		reconnectCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		host.Reconnect(reconnectCtx, sessions)
+		cancel()
+	}
 	attempt := 0
 	for {
 		if ctx.Err() != nil {
 			return nil
 		}
 		started := time.Now()
-		err := runOnce(ctx, opts, incarnation)
+		err := runOnce(ctx, opts, incarnation, ledger, host)
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -87,7 +111,7 @@ func Maintain(ctx context.Context, opts RunOptions) error {
 	}
 }
 
-func runOnce(ctx context.Context, opts RunOptions, incarnation string) error {
+func runOnce(ctx context.Context, opts RunOptions, incarnation string, ledger *Ledger, host *session.Host) error {
 	ws, err := dialRelay(ctx, opts)
 	if err != nil {
 		return err
@@ -127,16 +151,17 @@ func runOnce(ctx context.Context, opts RunOptions, incarnation string) error {
 	var acked atomic.Bool
 	var expect atomic.Value
 	expect.Store("")
+	writer := newWSWriter(ws)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- readRelay(ctx, ws, &acked, &expect, opts.Logger, opts.Identity.NodeID)
+		errCh <- readRelay(ctx, writer, &acked, &expect, opts.Logger, opts.Identity, ledger, host)
 	}()
 	ticker := time.NewTicker(opts.Heartbeat)
 	defer ticker.Stop()
-	if err := writeSync(ctx, ws, opts, &expect, &acked); err != nil {
+	if err := writeSync(ctx, writer, opts, &expect, &acked); err != nil {
 		return err
 	}
-	if err := writeHeartbeat(ctx, ws); err != nil {
+	if err := writeHeartbeat(ctx, writer); err != nil {
 		return err
 	}
 	for {
@@ -150,11 +175,11 @@ func runOnce(ctx context.Context, opts RunOptions, incarnation string) error {
 			return errors.New("与 Relay 的连接已断开")
 		case <-ticker.C:
 			if !acked.Load() {
-				if err := writeSync(ctx, ws, opts, &expect, &acked); err != nil {
+				if err := writeSync(ctx, writer, opts, &expect, &acked); err != nil {
 					return err
 				}
 			}
-			if err := writeHeartbeat(ctx, ws); err != nil {
+			if err := writeHeartbeat(ctx, writer); err != nil {
 				return err
 			}
 		}
@@ -177,9 +202,9 @@ func dialRelay(ctx context.Context, opts RunOptions) (*websocket.Conn, error) {
 	return ws, nil
 }
 
-func readRelay(ctx context.Context, ws *websocket.Conn, acked *atomic.Bool, expect *atomic.Value, log *slog.Logger, nodeID string) error {
+func readRelay(ctx context.Context, w *wsWriter, acked *atomic.Bool, expect *atomic.Value, log *slog.Logger, ident Identity, ledger *Ledger, host *session.Host) error {
 	for {
-		_, raw, err := ws.Read(ctx)
+		_, raw, err := w.ws.Read(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
@@ -205,6 +230,9 @@ func readRelay(ctx context.Context, ws *websocket.Conn, acked *atomic.Bool, expe
 			if err := json.Unmarshal(raw, &wrap); err != nil {
 				continue
 			}
+			if handleNodeEnvelope(ctx, raw, w, ledger, host, ident.Capabilities, log) {
+				continue
+			}
 			var body struct {
 				Type string `json:"type"`
 				OK   bool   `json:"ok"`
@@ -213,14 +241,14 @@ func readRelay(ctx context.Context, ws *websocket.Conn, acked *atomic.Bool, expe
 			want, _ := expect.Load().(string)
 			if body.Type == "node.sync_result" && body.OK && wrap.Envelope.CorrelationID == want && want != "" {
 				if acked.CompareAndSwap(false, true) {
-					log.Info("event=synced", "node_id", nodeID)
+					log.Info("event=synced", "node_id", ident.NodeID)
 				}
 			}
 		}
 	}
 }
 
-func writeSync(ctx context.Context, ws *websocket.Conn, opts RunOptions, expect *atomic.Value, acked *atomic.Bool) error {
+func writeSync(ctx context.Context, w *wsWriter, opts RunOptions, expect *atomic.Value, acked *atomic.Bool) error {
 	if acked.Load() {
 		return nil
 	}
@@ -262,20 +290,20 @@ func writeSync(ctx context.Context, ws *websocket.Conn, opts RunOptions, expect 
 		return errors.New("无法同步节点状态")
 	}
 	expect.Store(messageID)
-	if err := ws.Write(ctx, websocket.MessageText, frame); err != nil {
+	if err := w.write(ctx, frame); err != nil {
 		return errors.New("与 Relay 的连接已断开")
 	}
 	return nil
 }
 
-func writeHeartbeat(ctx context.Context, ws *websocket.Conn) error {
+func writeHeartbeat(ctx context.Context, w *wsWriter) error {
 	frame, err := json.Marshal(struct {
 		Kind string `json:"kind"`
 	}{Kind: protocol.KindHeartbeat})
 	if err != nil {
 		return errors.New("无法发送心跳")
 	}
-	if err := ws.Write(ctx, websocket.MessageText, frame); err != nil {
+	if err := w.write(ctx, frame); err != nil {
 		return errors.New("与 Relay 的连接已断开")
 	}
 	return nil

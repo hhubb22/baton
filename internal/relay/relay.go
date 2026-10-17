@@ -598,16 +598,17 @@ func (r *Relay) readControl(ctx context.Context, ws *websocket.Conn) error {
 }
 
 func (r *Relay) deliverControl(raw json.RawMessage) {
+	messageID := protocol.MessageID(raw)
 	nodeID, prepared, err := protocol.PrepareControlEnvelope(raw)
 	if err != nil {
 		r.reject(protocol.CodeOf(err))
-		r.controlError(protocol.CodeOf(err), "")
+		r.controlError(protocol.CodeOf(err), messageID)
 		return
 	}
 	out, err := json.Marshal(protocol.Frame{Kind: protocol.KindEnvelope, Envelope: prepared})
 	if err != nil || len(out) > protocol.MaxMessageBytes {
 		r.reject(protocol.CodeMessageTooLarge)
-		r.controlError(protocol.CodeMessageTooLarge, "")
+		r.controlError(protocol.CodeMessageTooLarge, messageID)
 		return
 	}
 	r.mu.Lock()
@@ -615,12 +616,12 @@ func (r *Relay) deliverControl(raw json.RawMessage) {
 	r.mu.Unlock()
 	if nc == nil {
 		r.reject(protocol.CodeNodeUnavailable)
-		r.controlError(protocol.CodeNodeUnavailable, "")
+		r.controlError(protocol.CodeNodeUnavailable, messageID)
 		return
 	}
 	if err := nc.out.Push(out); err != nil {
 		r.reject(protocol.CodeOf(err))
-		r.controlError(protocol.CodeOf(err), "")
+		r.controlError(protocol.CodeOf(err), messageID)
 		return
 	}
 	r.countForward()

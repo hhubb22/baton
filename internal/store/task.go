@@ -124,10 +124,7 @@ func (s *Store) acceptOnce(ctx context.Context, employeeID string, prepared task
 	if err := task.Validate(prepared.Input); err != nil {
 		return task.Record{}, false, err
 	}
-	// 旧请求已经在上面返回。这里才解析默认值，并拒绝还不能核对归属的 Session。
-	if err := task.RejectUnownedSession(prepared.Input); err != nil {
-		return task.Record{}, false, err
-	}
+	// 旧请求已经在上面返回。这里才解析默认值，并按员工核对 Session 归属。
 	if err := checkParent(ctx, tx, employeeID, prepared.Input.ParentTaskID); err != nil {
 		return task.Record{}, false, err
 	}
@@ -135,7 +132,7 @@ func (s *Store) acceptOnce(ctx context.Context, employeeID string, prepared task
 	if err != nil {
 		return task.Record{}, false, err
 	}
-	agent, err := chooseAgent(prepared.Input.AgentType, target.defaultAgent, target.caps)
+	agent, err := resolveSession(ctx, tx, employeeID, prepared.Input, target)
 	if err != nil {
 		return task.Record{}, false, err
 	}
@@ -223,7 +220,7 @@ func (s *Store) ListTaskEvents(ctx context.Context, employeeID, taskID string) (
 	rows, err := s.pool.Query(ctx, `
 		SELECT id::text, task_id::text, version, kind, actor_employee_id::text,
 		       status, target_node_id::text, agent_type, queue_expires_at,
-		       execution_timeout_seconds, created_at
+		       execution_timeout_seconds, reason_code, created_at
 		FROM task_events
 		WHERE employee_id = $1::uuid AND task_id = $2::uuid
 		ORDER BY version ASC`, employeeID, taskID)
@@ -237,7 +234,7 @@ func (s *Store) ListTaskEvents(ctx context.Context, employeeID, taskID string) (
 		if err := rows.Scan(
 			&ev.EventID, &ev.TaskID, &ev.Version, &ev.Kind, &ev.ActorEmployeeID,
 			&ev.Status, &ev.TargetNodeID, &ev.AgentType, &ev.QueueExpiresAt,
-			&ev.ExecutionTimeoutSeconds, &ev.CreatedAt,
+			&ev.ExecutionTimeoutSeconds, &ev.ReasonCode, &ev.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("读取任务事件失败: %s", redact.Scrub(err.Error()))
 		}
@@ -538,6 +535,32 @@ func insertAccepted(ctx context.Context, tx pgx.Tx, employeeID string, prepared 
 		)`, employeeID, in.RequestID, prepared.Hash, taskID, rec.AcceptedAt); err != nil {
 		return task.Record{}, fmt.Errorf("保存去重记录失败: %s", redact.Scrub(err.Error()))
 	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO task_relations (
+			employee_id, task_id, source_task_id, source_session_id, target_session_id,
+			created_at, updated_at
+		) VALUES (
+			$1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, $6
+		)`, employeeID, taskID, nullString(in.ParentTaskID), nullString(in.SourceSessionID), nullString(in.TargetSessionID), rec.AcceptedAt); err != nil {
+		return task.Record{}, fmt.Errorf("保存任务关系失败: %s", redact.Scrub(err.Error()))
+	}
+	if in.TargetSessionID != nil {
+		tag, err := tx.Exec(ctx, `
+			UPDATE sessions
+			SET bound_execution_id = $1::uuid, updated_at = $2
+			WHERE employee_id = $3::uuid AND id = $4::uuid AND bound_execution_id IS NULL`,
+			executionID, rec.AcceptedAt, employeeID, *in.TargetSessionID)
+		if err != nil {
+			return task.Record{}, fmt.Errorf("占用 Session 失败: %s", redact.Scrub(err.Error()))
+		}
+		if tag.RowsAffected() != 1 {
+			return task.Record{}, &task.Rejection{
+				Code:    task.CodeSessionBusy,
+				Message: "Session 正在执行其他任务",
+				Fields:  []string{"target_session_id"},
+			}
+		}
+	}
 	return rec, nil
 }
 
@@ -546,7 +569,7 @@ const taskSelect = `
 	       source_session_id::text, parent_task_id::text, target_session_id::text,
 	       working_directory, device_names, authorization_scope, expected_outputs,
 	       target_node_id::text, agent_type, execution_timeout_seconds,
-	       queue_expires_at, status, version, created_at
+	       queue_expires_at, status, version, created_at, error_code, error_message
 	FROM tasks`
 
 type queryer interface {
@@ -582,6 +605,7 @@ func scanTask(row pgx.Row) (task.Record, []byte, error) {
 		&rec.WorkingDirectory, &devices, &rec.AuthorizationScope, &rec.ExpectedOutputs,
 		&rec.TargetNodeID, &rec.AgentType, &rec.ExecutionTimeoutSeconds,
 		&rec.QueueExpiresAt, &rec.Status, &rec.Version, &rec.AcceptedAt,
+		&rec.ErrorCode, &rec.ErrorMessage,
 	); err != nil {
 		return task.Record{}, nil, fmt.Errorf("读取任务失败: %s", redact.Scrub(err.Error()))
 	}

@@ -172,6 +172,9 @@ func TestAcceptRejectsBeforeStart(t *testing.T) {
 	setDefaultAgent(t, ctx, pool, pc.NodeID, "kiro")
 	_, err = repo.AcceptTask(ctx, alice.ID, task.Input{RequestID: "bad-default", Description: "调查"})
 	assertCode(t, err, task.CodeUnsupported, "agent_type")
+	sessionID := "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+	_, err = repo.AcceptTask(ctx, alice.ID, task.Input{RequestID: "session", Description: "调查", SourceSessionID: &sessionID, AgentType: strPtr("pi"), TargetNodeID: &pc.NodeID})
+	assertCode(t, err, task.CodeInvalidTarget, "source_session_id")
 	if _, err := pool.Exec(ctx, `UPDATE nodes SET revoked_at = now() WHERE id = $1::uuid`, pc.NodeID); err != nil {
 		t.Fatal(err)
 	}
@@ -190,9 +193,6 @@ func TestAcceptRejectsBeforeStart(t *testing.T) {
 	assertCode(t, err, task.CodeInvalidRequest, "authorization_scope")
 	_, err = repo.AcceptTask(ctx, alice.ID, task.Input{RequestID: "bad-session", Description: "调查", SourceSessionID: strPtr("session")})
 	assertCode(t, err, task.CodeInvalidRequest, "source_session_id")
-	sessionID := "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
-	_, err = repo.AcceptTask(ctx, alice.ID, task.Input{RequestID: "session", Description: "调查", SourceSessionID: &sessionID, AgentType: strPtr("pi"), TargetNodeID: &bobNode.NodeID})
-	assertCode(t, err, task.CodeInvalidTarget, "source_session_id")
 	_, err = repo.AcceptTask(ctx, alice.ID, task.Input{RequestID: "missing-parent", Description: "调查", ParentTaskID: &missing, AgentType: strPtr("pi"), TargetNodeID: &bobNode.NodeID})
 	assertCode(t, err, task.CodeInvalidTarget, "parent_task_id")
 	_, err = repo.AcceptTask(ctx, carol.ID, task.Input{RequestID: "no-pc", Description: "调查", AgentType: strPtr("pi")})
@@ -455,6 +455,7 @@ func TestTombstoneOutlivesTask(t *testing.T) {
 	for _, stmt := range []string{
 		`DELETE FROM dispatch_outbox WHERE task_id = $1::uuid`,
 		`DELETE FROM task_events WHERE task_id = $1::uuid`,
+		`DELETE FROM task_relations WHERE task_id = $1::uuid`,
 		`DELETE FROM executions WHERE task_id = $1::uuid`,
 		`DELETE FROM tasks WHERE id = $1::uuid`,
 	} {
@@ -594,14 +595,15 @@ func assertCode(t *testing.T, err error, code, field string) {
 func assertTaskSchema(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
 	var version int
-	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM schema_migrations WHERE version = '0005_tasks.sql'`).Scan(&version); err != nil || version != 1 {
-		t.Fatalf("缺少 0005_tasks.sql: %v %d", err, version)
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM schema_migrations WHERE version = '0006_sessions.sql'`).Scan(&version); err != nil || version != 1 {
+		t.Fatalf("缺少 0006_sessions.sql: %v %d", err, version)
 	}
-	var extra int
+	var sessions, relations int
 	if err := pool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM information_schema.tables
-		WHERE table_schema = current_schema() AND table_name IN ('sessions', 'task_relations')`).Scan(&extra); err != nil || extra != 0 {
-		t.Fatalf("不应该创建 sessions 或 task_relations: %v %d", err, extra)
+		SELECT
+			(SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = 'sessions'),
+			(SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = 'task_relations')`).Scan(&sessions, &relations); err != nil || sessions != 1 || relations != 1 {
+		t.Fatalf("sessions 或 task_relations 不存在: %v %d %d", err, sessions, relations)
 	}
 	var column int
 	if err := pool.QueryRow(ctx, `

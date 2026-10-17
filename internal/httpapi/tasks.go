@@ -144,7 +144,7 @@ func (s *Server) writeTaskError(w http.ResponseWriter, r *http.Request, employee
 		switch rej.Code {
 		case task.CodeForbidden:
 			status = http.StatusForbidden
-		case task.CodeConflict:
+		case task.CodeConflict, task.CodeSessionBusy:
 			status = http.StatusConflict
 		}
 		body := errorBody{

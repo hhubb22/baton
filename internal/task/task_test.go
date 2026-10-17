@@ -90,12 +90,7 @@ func TestValidateRequestShape(t *testing.T) {
 		})
 	}
 	session := "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
-	err := RejectUnownedSession(Input{SourceSessionID: &session})
-	rej, isRejection := err.(*Rejection)
-	if !isRejection || rej.Code != CodeInvalidTarget || rej.Fields[0] != "source_session_id" {
-		t.Fatalf("Session 拒绝结果是 %#v", err)
-	}
-	if err := RejectUnownedSession(okInput()); err != nil {
+	if err := Validate(Input{RequestID: "req-1", Description: "调查", SourceSessionID: &session}); err != nil {
 		t.Fatal(err)
 	}
 }

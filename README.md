@@ -1,8 +1,8 @@
 # Baton
 
-员工使用部署管理员分配的本地账号登录 Coordinator，退出，查询本人身份，领取一次性节点注册凭据，设置默认 PC，吊销本人节点的连接凭据，并提交任务。初始口令只能使用到员工完成更换为止。`batond register` 用这张凭据注册节点，把身份保存在本机。`batond run` 用这份身份主动连接 Relay，断线后重连，并在同步完成前不会显示为可执行。吊销生效后，同一连接凭据不能再接入。
+员工使用部署管理员分配的本地账号登录 Coordinator，退出，查询本人身份，领取一次性节点注册凭据，设置默认 PC，吊销本人节点的连接凭据，并提交任务。初始口令只能使用到员工完成更换为止。`batond register` 用这张凭据注册节点，把身份保存在本机。`batond run` 用这份身份主动连接 Relay，断线后重连，并在同步完成前不会显示为可执行。吊销生效后，同一连接凭据不能再接入。任务被接受后，Coordinator 把准备命令送到节点；节点先把执行映射写入本地账本，再绑定一个独立的 Session Worker。
 
-本目录目前包含这条路径的构建、迁移、HTTP 接口、Coordinator、Relay、batond、员工 Web UI 和测试。任务接口会保存接受记录和投递意图。实际投递、Worker、Session 和管理员网页不在这里。
+本目录目前包含这条路径的构建、迁移、HTTP 接口、Coordinator、Relay、batond、Session Worker、员工 Web UI 和测试。准备阶段不启动 Agent。启动许可、Agent 适配和管理员网页不在这里。
 
 ## 运行要求
 
@@ -160,13 +160,13 @@ Relay 重新连上 Coordinator 时会取得包含该吊销的安全快照；已�
 
 调用方自己生成 `request_id`，同一次提交的重试保持不变。`description` 必填，最多 32768 个字符，可以包含换行、回车和制表符；其他控制字符会被拒绝。`authorization_scope` 和 `expected_outputs` 同样。`request_id` 和 `working_directory` 仍是单行。`target_node_id` 可以省略，省略时使用当前默认 PC；没有可用的默认 PC 时拒绝，不会改派到别的节点。显式指定时可以使用本人尚未吊销的 PC 或 Ubuntu 节点。节点离线也可以接受，状态是 `queued`。
 
-`agent_type` 可以省略。省略时使用目标节点上的 `default_agent_type`。这个值只是节点表里的可空列，当前没有修改它的接口；列为空时拒绝。节点最后上报的能力里没有这个 Agent 时拒绝，不会创建任务。
+`agent_type` 可以省略。指定了目标 Session 时沿用该 Session 的 Agent；否则使用目标节点上的 `default_agent_type`。这个值只是节点表里的可空列，当前没有修改它的接口；列为空且没有目标 Session 时拒绝。节点最后上报的能力里没有这个 Agent 时拒绝，不会创建任务。
 
 `queue_timeout_seconds` 省略时是 600 秒，从接受时起算，响应里给出 `queue_expires_at`。`execution_timeout_seconds` 省略时是 7200 秒，响应里给出这个秒数。省略和写成同一个数字不是同一份内容。`device_names` 省略和空列表也不是同一份内容；列表非空时必须给出 `authorization_scope`。
 
-`source_session_id` 和 `target_session_id` 一旦填写就会被拒绝。中心还没有 Session 归属表，不能确认它们属于当前员工。两个都省略时可以接受，目标 Session 留到以后创建。
+`source_session_id` 和 `target_session_id` 可以省略。填写时必须是当前员工已经拥有的 Session；其他员工的 Session 返回 `forbidden`，不存在的 Session 返回 `invalid_target`。目标 Session 还必须位于本次解析出的节点上，并且处于可以接收的状态。`running`、`waiting_input`，或已经绑定了执行的 Session，返回 409，`code` 是 `session_busy`。显式 `agent_type` 与 Session 已有 Agent 不一致时返回 `unsupported`。省略 `agent_type` 时沿用该 Session 的 Agent，不再使用节点默认 Agent。两个 Session 字段都省略时可以接受，目标 Session 由节点在准备时创建。
 
-中心先按员工和 `request_id` 查找已经提交的请求。内容相同就返回原来的任务，不再解析默认 PC 或默认 Agent。内容不同返回 409，`code` 是 `conflict`，并带上已有的 `task_id`。新请求在同一个数据库事务里保存任务、解析结果、execution、初始事件、`dispatch_outbox` 和去重墓碑。事务提交成功后才返回 200。提交失败时响应不是接受记录，库里也没有这次投递意图。
+中心先按员工和 `request_id` 查找已经提交的请求。内容相同就返回原来的任务，不再解析默认 PC 或默认 Agent。内容不同返回 409，`code` 是 `conflict`，并带上已有的 `task_id`。新请求在同一个数据库事务里保存任务、解析结果、execution、初始事件、任务关系、`dispatch_outbox` 和去重墓碑。指定了已有目标 Session 时，同一个事务会占用它。事务提交成功后才返回 200。提交失败时响应不是接受记录，库里也没有这次投递意图。
 
 成功记录包含 `task_id`、`request_id`、`target_node_id`、`agent_type`、`status`、`queue_expires_at`、`execution_timeout_seconds` 和 `version`。新接受和幂等重试都返回 200。错误响应里的 `request_id` 是这一次 HTTP 调用的编号，与正文里的 `request_id` 不是同一个值。
 
@@ -174,7 +174,19 @@ Relay 重新连上 Coordinator 时会取得包含该吊销的安全快照；已�
 
 `GET /tasks` 返回本人最近 100 条任务。`GET /tasks/{id}` 和 `GET /tasks/{id}/events` 只返回本人的记录和变更，不返回 Session 原文。其他员工的任务和不存在的任务都返回 403，响应相同。非法任务标识返回 400。这三个读取接口不要求 CSRF。
 
-`dispatch_outbox` 只保存 `prepare` 投递意图。当前进程不发送、也不消费它。
+`dispatch_outbox` 保存 `prepare` 投递意图。Coordinator 在节点在线且已同步时按租约领取，经 Relay 投递，并用同一条消息 ID 重发。从未交给 Relay 的过期消息记为 `queue_timeout`。已经交给 Relay 但还没有确定结果的消息，过期后仍按租约重发，直到节点返回已准备的原映射或 `queue_timeout`。接受响应里的 `target_session_id` 在准备完成前可能是 null。准备成功后任务仍是 `queued`，`GET /tasks/{id}` 能看到节点返回的 Session。
+
+## 准备与 Session
+
+节点收到 prepare 后，先把 `task_id` 到 `execution_id` 的映射写入数据目录里的 SQLite 账本，再绑定 Session Worker，然后才回 ACK。重复的 prepare 返回已经保存的执行和 Session，不创建第二份。账本使用 WAL，并按 FULL 同步。本地写入失败或 Worker 没有绑定成功时，节点不回 ACK，中心稍后重发同一条消息。
+
+`batond run` 会锁定数据目录。另一个 `batond run` 不能共用这个目录。Worker 由 batond 用同一可执行文件的内部子命令启动，使用独立进程组和认证过的本地连接。Windows 上是命名管道。Unix 上是套接字文件；会话目录下的路径经常超过系统对套接字路径的长度限制，因此套接字放在 `/tmp/baton-<uid>/` 下仅当前用户可进入的目录中，认证令牌仍在数据目录里。batond 退出后 Worker 继续运行；下次 `batond run` 会连回原来的 Worker，而不是新开一份执行。`worker` 不是给操作者使用的命令。
+
+准备只做绑定和被动检查，不把任务说明交给模型，不启动 Agent，也不运行启动钩子。启动许可还不在这条路径里。
+
+同一 Session 的本地写入互相等待。明确拒绝会带上原因：Session 正在执行其他任务、Agent 或节点不匹配、工作目录不可用、存储代次不匹配，或排队期限已过。
+
+`GET /sessions` 返回本人最近 100 条 Session 的元数据、是否被占用，以及关联的任务标识。`GET /sessions/{id}` 返回其中一条。其他员工的 Session 和不存在的 Session 都返回 403，响应相同。这两个读取接口不要求 CSRF，也不返回 Session 原文。
 
 ## Web UI
 
@@ -209,4 +221,4 @@ go test ./...
 go vet ./...
 ```
 
-登录、退出、身份查询、CSRF 和 Origin 的通过路径使用本地 TLS 服务，并把测试证书放进客户端信任池。明文 HTTP 测试确认响应仍带 `Secure` Cookie：按正式 Cookie 规则、不把环回地址当作安全来源的客户端不会在明文请求里带回它。CSRF 和 Origin 检查在两条路径上都生效。节点注册的通过路径同样使用该 TLS 服务；`batond register` 通过 `BATON_TLS_CA_FILE` 信任测试证书。节点连接测试使用真实的 Coordinator、Relay 和 batond 进程，以及 TLS WebSocket，并注入断线、Coordinator 重启和 Relay 重启。
+登录、退出、身份查询、CSRF 和 Origin 的通过路径使用本地 TLS 服务，并把测试证书放进客户端信任池。明文 HTTP 测试确认响应仍带 `Secure` Cookie：按正式 Cookie 规则、不把环回地址当作安全来源的客户端不会在明文请求里带回它。CSRF 和 Origin 检查在两条路径上都生效。节点注册的通过路径同样使用该 TLS 服务；`batond register` 通过 `BATON_TLS_CA_FILE` 信任测试证书。节点连接测试使用真实的 Coordinator、Relay 和 batond 进程，以及 TLS WebSocket，并注入断线、Coordinator 重启和 Relay 重启。准备测试另外启动真实的 Session Worker 和本地 SQLite，覆盖重复投递、batond 重启后连回原 Worker、同一 Session 的并发写入，以及本地持久化失败。测试进程可以设置 `BATON_TEST_DROP_PREPARE_ACKS`、`BATON_TEST_FAIL_PERSIST`、`BATON_TEST_EXECUTOR_LOG` 和 `BATON_TEST_SLOW_WRITE`。未设置时这些变量没有作用，它们不是操作者配置。

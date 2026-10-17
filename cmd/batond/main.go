@@ -15,6 +15,7 @@ import (
 
 	"baton/internal/node"
 	"baton/internal/redact"
+	"baton/internal/session"
 )
 
 func main() {
@@ -61,6 +62,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, getenv fu
 		return cmdRegister(ctx, args[1:], stdout, stderr, getenv)
 	case "run":
 		return cmdRun(ctx, args[1:], stderr, getenv)
+	case "worker":
+		return cmdWorker(ctx, args[1:])
 	default:
 		return &exitCode{code: 2, err: errors.New(usage())}
 	}
@@ -103,11 +106,27 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer, getenv func(st
 		Heartbeat: heartbeat,
 		RootCAs:   roots,
 		Logger:    logger,
+		DataDir:   dir,
 	})
 	if errors.Is(err, node.ErrNeedsReauth) {
 		return err
 	}
 	return err
+}
+
+func cmdWorker(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("worker", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	var dataDir, sessionID string
+	fs.StringVar(&dataDir, "data-dir", "", "")
+	fs.StringVar(&sessionID, "session", "", "")
+	if err := fs.Parse(args); err != nil || strings.TrimSpace(dataDir) == "" || strings.TrimSpace(sessionID) == "" {
+		return &exitCode{code: 2, err: errors.New("batond worker 是内部子命令")}
+	}
+	if err := session.RunWorker(ctx, dataDir, sessionID); err != nil {
+		return &exitCode{code: 1, err: err}
+	}
+	return nil
 }
 
 func parseRun(args []string) (string, string, error) {

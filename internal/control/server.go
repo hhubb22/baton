@@ -35,6 +35,7 @@ type Server struct {
 	writeMu sync.Mutex
 	mu      sync.Mutex
 	link    *controlLink
+	pending map[string]chan prepareNotice
 }
 
 func New(st *store.Store, signer node.Signer, token string, heartbeat, offline time.Duration, log *slog.Logger) (*Server, error) {
@@ -55,6 +56,7 @@ func New(st *store.Store, signer node.Signer, token string, heartbeat, offline t
 		heartbeat: heartbeat,
 		offline:   offline,
 		log:       log,
+		pending:   map[string]chan prepareNotice{},
 	}, nil
 }
 
@@ -187,6 +189,7 @@ func (s *Server) read(ctx context.Context, link *controlLink) {
 			s.completeAck(ctx, link, frame.CorrelationID)
 			s.log.Info("event=revocation_acked", "revocation_id", frame.CorrelationID)
 		case protocol.KindError:
+			s.notePrepareTransport(frame.CorrelationID, frame.Code)
 			s.log.Info("event=relay_error", "code", frame.Code)
 		}
 	}
@@ -196,6 +199,21 @@ func (s *Server) onEnvelope(ctx context.Context, ws *websocket.Conn, raw json.Ra
 	var env protocol.Envelope
 	if err := json.Unmarshal(raw, &env); err != nil || env.Source == nil || env.Source.Kind != protocol.SourceNode {
 		_ = s.writeControlError(ctx, ws, protocol.CodeInvalidMessage, "")
+		return
+	}
+	var kind struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(env.Body, &kind); err != nil {
+		s.reply(ctx, ws, env, false, protocol.CodeInvalidMessage)
+		return
+	}
+	if kind.Type == protocol.BodyPrepareResult {
+		s.notePrepareResult(env)
+		return
+	}
+	if kind.Type != "node.sync" {
+		s.reply(ctx, ws, env, false, protocol.CodeInvalidMessage)
 		return
 	}
 	var body struct {

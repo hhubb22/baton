@@ -228,6 +228,7 @@ func cmdServe(ctx context.Context, stderr io.Writer, getenv func(string) string)
 			}
 			errCh <- controlSrv.Serve(controlLn)
 		}()
+		go ctrl.DeliverPrepares(ctx)
 		shutdown := func() {
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()

@@ -20,9 +20,15 @@ const (
 	CodeInvalidTarget  = "invalid_target"
 	CodeUnsupported    = "unsupported"
 	CodeConflict       = "conflict"
+	CodeSessionBusy    = "session_busy"
+	CodeQueueTimeout   = "queue_timeout"
+	CodeUnavailable    = "unavailable"
 
 	StatusQueued  = "queued"
+	StatusFailed  = "failed"
 	EventAccepted = "accepted"
+	EventPrepared = "prepared"
+	EventFailed   = "failed"
 	ActionPrepare = "prepare"
 
 	DefaultQueueTimeoutSeconds     = 10 * 60
@@ -82,6 +88,8 @@ type Record struct {
 	ExecutionTimeoutSeconds int       `json:"execution_timeout_seconds"`
 	Version                 int       `json:"version"`
 	AcceptedAt              time.Time `json:"accepted_at"`
+	ErrorCode               *string   `json:"error_code,omitempty"`
+	ErrorMessage            *string   `json:"error_message,omitempty"`
 }
 
 // Event 是允许保存的一条任务变更，不包含 Session 原文。
@@ -96,6 +104,7 @@ type Event struct {
 	AgentType               string    `json:"agent_type"`
 	QueueExpiresAt          time.Time `json:"queue_expires_at"`
 	ExecutionTimeoutSeconds int       `json:"execution_timeout_seconds"`
+	ReasonCode              *string   `json:"reason_code,omitempty"`
 	CreatedAt               time.Time `json:"created_at"`
 }
 
@@ -239,27 +248,6 @@ func Validate(in Input) error {
 		return err
 	}
 	return nil
-}
-
-// RejectUnownedSession 在中心还没有 Session 归属表时拒绝显式 Session。
-// 技术设计要求按员工核对 Session 归属；没有归属行就不能把引用写进任务。
-// 两个标识都未指定时可以接受，执行阶段再创建新的目标 Session。
-func RejectUnownedSession(in Input) error {
-	var fields []string
-	if in.SourceSessionID != nil {
-		fields = append(fields, "source_session_id")
-	}
-	if in.TargetSessionID != nil {
-		fields = append(fields, "target_session_id")
-	}
-	if len(fields) == 0 {
-		return nil
-	}
-	return &Rejection{
-		Code:    CodeInvalidTarget,
-		Message: "找不到可确认归属的 Session",
-		Fields:  fields,
-	}
 }
 
 func validateUUID(p *string, message, field string) error {

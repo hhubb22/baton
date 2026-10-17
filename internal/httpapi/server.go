@@ -178,6 +178,10 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 			s.writeError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "不支持该请求方法")
 		}
 	default:
+		if r.URL.Path == "/api/v1/sessions" || strings.HasPrefix(r.URL.Path, "/api/v1/sessions/") {
+			s.routeSession(w, r)
+			return
+		}
 		const taskPrefix = "/api/v1/tasks/"
 		if strings.HasPrefix(r.URL.Path, taskPrefix) {
 			s.routeTask(w, r)
