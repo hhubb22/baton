@@ -175,6 +175,27 @@ func handleWorker(db *workerDB, sessionID string, msg ipcMessage) ipcMessage {
 		reply.Started = started
 		reply.StartIntent = started
 		return reply
+	case "submit_input":
+		reports, err := db.SubmitInput(sessionID, msg.Payload)
+		if err != nil {
+			return ipcMessage{Type: "result", Code: "unavailable", Message: "无法提交任务输入"}
+		}
+		reply := statusMessage(db, sessionID, 0)
+		reply.Reports = reports
+		return reply
+	case "pending":
+		reports, err := db.Pending()
+		if err != nil {
+			return ipcMessage{Type: "result", Code: "unavailable", Message: "无法读取待确认记录"}
+		}
+		reply := statusMessage(db, sessionID, 0)
+		reply.Reports = reports
+		return reply
+	case "ack":
+		if err := db.Ack(msg.EventID); err != nil {
+			return ipcMessage{Type: "result", Code: "unavailable", Message: "无法确认交付"}
+		}
+		return statusMessage(db, sessionID, 0)
 	case "status":
 		return statusMessage(db, sessionID, 0)
 	case "append":
@@ -190,17 +211,20 @@ func handleWorker(db *workerDB, sessionID string, msg ipcMessage) ipcMessage {
 }
 
 func statusMessage(db *workerDB, sessionID string, seq int64) ipcMessage {
-	attaches, intent := db.snapshot()
+	snap := db.snapshot()
 	return ipcMessage{
-		Type:           "result",
-		OK:             true,
-		PID:            os.Getpid(),
-		SessionID:      sessionID,
-		ExecutorStarts: db.observer.Starts(),
-		HookRuns:       db.observer.Hooks(),
-		Attaches:       attaches,
-		Seq:            seq,
-		StartIntent:    intent,
+		Type:            "result",
+		OK:              true,
+		PID:             os.Getpid(),
+		SessionID:       sessionID,
+		ExecutorStarts:  db.observer.Starts(),
+		ExecutorInputs:  snap.inputs,
+		HookRuns:        db.observer.Hooks(),
+		InputSubmitted:  snap.inputSubmitted,
+		ResultDelivered: snap.resultDelivered,
+		Attaches:        snap.attaches,
+		Seq:             seq,
+		StartIntent:     snap.intent,
 	}
 }
 

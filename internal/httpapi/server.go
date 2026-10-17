@@ -27,6 +27,10 @@ import (
 
 const maxJSONBytes = 64 << 10
 
+// maxTaskJSONBytes 要盖住字段长度合法、但执行器输入超过 256 KiB 的任务请求。
+// 这样 POST /tasks 能返回 invalid_request，而不是在读正文时被截断。
+const maxTaskJSONBytes = 1 << 20
+
 type requestIDKey struct{}
 
 // Settings 是 API 进程使用的来源和有效期。有效期与 config 的允许范围一致。
@@ -509,12 +513,16 @@ func (s *Server) allowCSRF(w http.ResponseWriter, r *http.Request, want []byte) 
 }
 
 func (s *Server) readJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	return s.readJSONLimit(w, r, dst, maxJSONBytes)
+}
+
+func (s *Server) readJSONLimit(w http.ResponseWriter, r *http.Request, dst any, limit int64) bool {
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
 		s.writeError(w, r, http.StatusUnsupportedMediaType, "unsupported_media", "需要 application/json")
 		return false
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBytes)
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {

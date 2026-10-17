@@ -117,16 +117,46 @@ func (c *Client) roundTrip(msg ipcMessage) (Status, error) {
 		return Status{}, errors.New("Worker 拒绝了命令")
 	}
 	return Status{
-		PID:            reply.PID,
-		SessionID:      reply.SessionID,
-		ExecutorStarts: reply.ExecutorStarts,
-		HookRuns:       reply.HookRuns,
-		Attaches:       reply.Attaches,
-		Seq:            reply.Seq,
-		Nonce:          reply.Nonce,
-		Started:        reply.Started,
-		Refused:        reply.Refused,
-		StartIntent:    reply.StartIntent,
-		Code:           reply.Code,
+		PID:             reply.PID,
+		SessionID:       reply.SessionID,
+		ExecutorStarts:  reply.ExecutorStarts,
+		HookRuns:        reply.HookRuns,
+		Attaches:        reply.Attaches,
+		Seq:             reply.Seq,
+		ExecutorInputs:  reply.ExecutorInputs,
+		InputSubmitted:  reply.InputSubmitted,
+		ResultDelivered: reply.ResultDelivered,
+		Nonce:           reply.Nonce,
+		Started:         reply.Started,
+		Refused:         reply.Refused,
+		StartIntent:     reply.StartIntent,
+		Code:            reply.Code,
+		Reports:         copyReports(reply.Reports),
 	}, nil
+}
+
+// SubmitInput 把任务输入交给 Worker。Worker 保证执行器最多收到一次。
+func (c *Client) SubmitInput(payload string) (Status, error) {
+	return c.roundTrip(ipcMessage{Type: "submit_input", Payload: payload})
+}
+
+// Pending 读取还没有拿到中心确认的执行报告。
+func (c *Client) Pending() (Status, error) {
+	return c.roundTrip(ipcMessage{Type: "pending"})
+}
+
+// Ack 在中心持久化确认之后标记本地交付。
+func (c *Client) Ack(eventID string) (Status, error) {
+	return c.roundTrip(ipcMessage{Type: "ack", EventID: eventID})
+}
+
+func copyReports(in []ipcReport) []Report {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]Report, len(in))
+	for i, item := range in {
+		out[i] = Report{EventID: item.EventID, Kind: item.Kind, Body: append(json.RawMessage(nil), item.Body...)}
+	}
+	return out
 }

@@ -2,7 +2,7 @@
 
 员工使用部署管理员分配的本地账号登录 Coordinator，退出，查询本人身份，领取一次性节点注册凭据，设置默认 PC，吊销本人节点的连接凭据，并提交任务。初始口令只能使用到员工完成更换为止。`batond register` 用这张凭据注册节点，把身份保存在本机。`batond run` 用这份身份主动连接 Relay，断线后重连，并在同步完成前不会显示为可执行。吊销生效后，同一连接凭据不能再接入。任务被接受后，Coordinator 把准备命令送到节点；节点先把执行映射写入本地账本，再绑定一个独立的 Session Worker。
 
-本目录目前包含这条路径的构建、迁移、HTTP 接口、Coordinator、Relay、batond、Session Worker、受限文件浏览、员工 Web UI 和测试。准备阶段不启动 Agent。启动许可通过后，测试执行器才会进入启动；任务输入、结果回传、Agent 适配和管理员网页不在这里。
+本目录目前包含这条路径的构建、迁移、HTTP 接口、Coordinator、Relay、batond、Session Worker、受限文件浏览、员工 Web UI 和测试。准备阶段不启动 Agent。启动许可通过后，测试执行器先进入启动，再只接收一次任务输入；结构化结果在中心保存之后才算交付。Agent 适配和管理员网页不在这里。
 
 ## 运行要求
 
@@ -194,7 +194,17 @@ Relay 重新连上 Coordinator 时会取得包含该吊销的安全快照；已�
 
 许可寿命最长 5 秒，并且不会晚于排队到期时间。如果剩余时间扣掉 1 秒安全余量后已经不是正数，中心不会授权，任务按尚未启动失败。Worker 用许可请求的往返耗时计算本地预算，时钟是包含系统暂停的单调时钟，不使用可被改动的墙上时钟。预算不是正数、许可过期、受众不对、执行身份不对或存储代次不对时，Worker 不写入 `start_intent`，也不调用执行器。
 
-校验通过后，Worker 先把 `start_intent` 写入自己的 SQLite，然后才调用测试执行器的 `Start`。这一步不提交任务输入，也不运行启动钩子，中心任务状态仍是 `queued`。测试执行器只把 `start` 记到日志里，方便确认没有在准备阶段启动。
+校验通过后，Worker 先把 `start_intent` 写入自己的 SQLite，然后才调用测试执行器的 `Start`。这一步还不运行启动钩子。测试执行器把 `start` 记到日志里，方便确认没有在准备阶段启动。
+
+## 任务输入与结果
+
+`start_intent` 落盘之后，节点向中心领取这一次任务的说明、授权范围、期望产物、工作目录和设备名，再交给 Worker。Worker 在自己的账本里同步记下“已经提交输入”，然后只调用一次测试执行器的 `SubmitInput`。重复的启动命令或输入命令不会让执行器再收到一次，也不会新建 execution。接受任务时按这份 JSON 计算大小，超过 256 KiB 返回 `invalid_request` 并指出字段，不创建任务。Worker 如果仍然收到超限输入，不调用执行器，直接把执行记为失败并回报。
+
+执行器接受输入后，Worker 持续把过程记在本地 `execution_log`。它向中心上报 `started`，任务变为 `running`。最终输出要能通过结构校验，并且执行器明确给出 `completed` 或 `failed`。平台用自己保存的任务、节点和 Session 覆盖执行器正文里的身份字段。证据或产物为空时必须有原因。引用要带资源标识、访问状态，以及节点或存储位置。
+
+进程退出、自由文本（包括单独一句“完成”）不会变成成功。测试执行器没有外部副作用，这种情况记为 `failed`，原因是 `result_format`。结果先留在 Worker 的本地 outbox。中心在同一个事务里保存状态、摘要、引用和 `delivery_records` 并提交之后，才回复确认；Worker 收到确认后才把这条结果标成已交付。同一 `event_id` 的重复上报只确认原来的记录。完整过程和原始输出不写入 `task_events`。
+
+`GET /tasks/{id}` 返回摘要、证据引用和产物引用。`GET /tasks/{id}/events` 仍然只有状态变更，没有会话原文。已经结束的任务不会被后到的另一份结论改写；未结束的子委托还在时，不能把父任务标成完成。取消一个已经确认启动的任务仍只保留取消标记，不会在这里中止执行。
 
 `POST /tasks/{id}/cancel` 需要登录会话、Origin 和 CSRF，正文是 `{}`。尚未发出启动许可、或者节点已经明确拒绝启动时，任务变为 `cancelled`。许可已经发出但还没有这张未启动回执时，任务变为 `needs_verification`，响应里的 `possible_start` 为 true。缺少启动回执不会被当成“没有执行”。重复取消不发起新的执行。取消父任务时还不会级联子委托。
 
@@ -253,4 +263,4 @@ go test ./...
 go vet ./...
 ```
 
-登录、退出、身份查询、CSRF 和 Origin 的通过路径使用本地 TLS 服务，并把测试证书放进客户端信任池。明文 HTTP 测试确认响应仍带 `Secure` Cookie：按正式 Cookie 规则、不把环回地址当作安全来源的客户端不会在明文请求里带回它。CSRF 和 Origin 检查在两条路径上都生效。节点注册的通过路径同样使用该 TLS 服务；`batond register` 通过 `BATON_TLS_CA_FILE` 信任测试证书。节点连接测试使用真实的 Coordinator、Relay 和 batond 进程，以及 TLS WebSocket，并注入断线、Coordinator 重启和 Relay 重启。准备测试另外启动真实的 Session Worker 和本地 SQLite，覆盖重复投递、batond 重启后连回原 Worker、同一 Session 的并发写入，以及本地持久化失败。启动许可测试覆盖中心事务和节点校验，并注入延迟、取消、吊销、墙上时钟跳变和暂停后唤醒。测试进程可以设置 `BATON_TEST_DROP_PREPARE_ACKS`、`BATON_TEST_FAIL_PERSIST`、`BATON_TEST_EXECUTOR_LOG`、`BATON_TEST_SLOW_WRITE`、`BATON_TEST_HOLD_START`、`BATON_TEST_START_DELAY`、`BATON_TEST_START_GATE`、`BATON_TEST_WALL_OFFSET`、`BATON_TEST_SUSPEND_AFTER_ARM` 和 `BATON_TEST_PERMIT_FILE`。未设置时这些变量没有作用，它们不是操作者配置。
+登录、退出、身份查询、CSRF 和 Origin 的通过路径使用本地 TLS 服务，并把测试证书放进客户端信任池。明文 HTTP 测试确认响应仍带 `Secure` Cookie：按正式 Cookie 规则、不把环回地址当作安全来源的客户端不会在明文请求里带回它。CSRF 和 Origin 检查在两条路径上都生效。节点注册的通过路径同样使用该 TLS 服务；`batond register` 通过 `BATON_TLS_CA_FILE` 信任测试证书。节点连接测试使用真实的 Coordinator、Relay 和 batond 进程，以及 TLS WebSocket，并注入断线、Coordinator 重启和 Relay 重启。准备测试另外启动真实的 Session Worker 和本地 SQLite，覆盖重复投递、batond 重启后连回原 Worker、同一 Session 的并发写入，以及本地持久化失败。启动许可测试覆盖中心事务和节点校验，并注入延迟、取消、吊销、墙上时钟跳变和暂停后唤醒。测试进程可以设置 `BATON_TEST_DROP_PREPARE_ACKS`、`BATON_TEST_FAIL_PERSIST`、`BATON_TEST_EXECUTOR_LOG`、`BATON_TEST_EXECUTOR_SCRIPT`、`BATON_TEST_SLOW_WRITE`、`BATON_TEST_HOLD_START`、`BATON_TEST_START_DELAY`、`BATON_TEST_START_GATE`、`BATON_TEST_RESULT_GATE`、`BATON_TEST_DUPLICATE_REPORT`、`BATON_TEST_WALL_OFFSET`、`BATON_TEST_SUSPEND_AFTER_ARM` 和 `BATON_TEST_PERMIT_FILE`。未设置时这些变量没有作用，它们不是操作者配置。

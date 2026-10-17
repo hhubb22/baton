@@ -7,7 +7,14 @@ import (
 	"testing"
 
 	"baton/internal/identity"
+	"baton/internal/task"
 )
+
+func TestExecutorInputLimitMatchesTransport(t *testing.T) {
+	if task.ExecutorInputLimit != MaxMessageBytes {
+		t.Fatalf("执行器输入上限 %d 与单条消息上限 %d 不一致", task.ExecutorInputLimit, MaxMessageBytes)
+	}
+}
 
 func TestPrepareNodeEnvelopeStampsSourceAndKeepsUnknownFields(t *testing.T) {
 	messageID, err := identity.NewUUID()

@@ -19,7 +19,8 @@ func TestStartPermitEntersObservableExecutor(t *testing.T) {
 		"BATON_TEST_WALL_OFFSET": "24h",
 	})
 	created := acceptTask(t, st, "start-ok")
-	waitExecutor(t, st, "start\n")
+	waitExecutor(t, st, "start\ninput\n")
+	waitTaskStatus(t, st, created.TaskID, task.StatusRunning)
 	assertNoHooks(t, st, created.TaskID)
 	var status string
 	var authorized, refused bool
@@ -29,7 +30,7 @@ func TestStartPermitEntersObservableExecutor(t *testing.T) {
 		WHERE t.id = $1::uuid`, created.TaskID).Scan(&status, &authorized, &refused); err != nil {
 		t.Fatal(err)
 	}
-	if status != task.StatusQueued || !authorized || refused {
+	if status != task.StatusRunning || !authorized || refused {
 		t.Fatalf("启动后的中心状态不正确: %s authorized %v refused %v", status, authorized, refused)
 	}
 	if strings.Contains(st.coord.out.String(), "eyJ") {
@@ -51,10 +52,13 @@ func TestStartPermitCancelRacePreservesPossibleStart(t *testing.T) {
 	if code := postJSON(t, st.client, st.base+"/api/v1/tasks/"+created.TaskID+"/cancel", map[string]any{}, st.csrf, &view); code != 200 || view.Status != task.StatusNeedsVerification || !view.PossibleStart {
 		t.Fatalf("竞态取消得到 %d %+v", code, view)
 	}
-	waitExecutor(t, st, "start\n")
-	var status string
-	if err := st.pool.QueryRow(context.Background(), `SELECT status FROM tasks WHERE id = $1::uuid`, created.TaskID).Scan(&status); err != nil || status != task.StatusNeedsVerification {
-		t.Fatalf("执行器启动后任务被改成未执行: %v %s", err, status)
+	waitExecutor(t, st, "start\ninput\n")
+	waitTaskStatus(t, st, created.TaskID, task.StatusRunning)
+	var running, cancelRequested bool
+	if err := st.pool.QueryRow(context.Background(), `
+		SELECT status = 'running', cancel_requested_at IS NOT NULL
+		FROM tasks WHERE id = $1::uuid`, created.TaskID).Scan(&running, &cancelRequested); err != nil || !running || !cancelRequested {
+		t.Fatalf("确认启动后的取消被当成未执行: %v running %v cancel %v", err, running, cancelRequested)
 	}
 }
 
@@ -223,9 +227,22 @@ func assertNoHooks(t *testing.T, st *prepareStack, taskID string) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	stStatus := workerStatus(t, st.dataDir, sessionID)
-	if stStatus.ExecutorStarts != 1 || stStatus.HookRuns != 0 {
+	if stStatus.ExecutorStarts != 1 || stStatus.ExecutorInputs != 1 || stStatus.HookRuns != 0 {
 		t.Fatalf("执行器计数不正确: %+v", stStatus)
 	}
+}
+
+func waitTaskStatus(t *testing.T, st *prepareStack, taskID, want string) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	var status string
+	for time.Now().Before(deadline) {
+		if err := st.pool.QueryRow(context.Background(), `SELECT status FROM tasks WHERE id = $1::uuid`, taskID).Scan(&status); err == nil && status == want {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("任务状态是 %s，想要 %s\ncoord %s\nnode %s", status, want, st.coord.out.String(), st.batond.out.String())
 }
 
 func waitGateFile(t *testing.T, gate string) string {

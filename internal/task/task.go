@@ -15,15 +15,17 @@ import (
 )
 
 const (
-	CodeInvalidRequest = "invalid_request"
-	CodeForbidden      = "forbidden"
-	CodeInvalidTarget  = "invalid_target"
-	CodeUnsupported    = "unsupported"
-	CodeConflict       = "conflict"
-	CodeSessionBusy    = "session_busy"
-	CodeQueueTimeout   = "queue_timeout"
-	CodeUnavailable    = "unavailable"
-	CodeRevoked        = "revoked"
+	CodeInvalidRequest  = "invalid_request"
+	CodeForbidden       = "forbidden"
+	CodeInvalidTarget   = "invalid_target"
+	CodeUnsupported     = "unsupported"
+	CodeConflict        = "conflict"
+	CodeSessionBusy     = "session_busy"
+	CodeQueueTimeout    = "queue_timeout"
+	CodeUnavailable     = "unavailable"
+	CodeRevoked         = "revoked"
+	CodeResultFormat    = "result_format"
+	CodeExecutionFailed = "execution_failed"
 
 	StatusQueued            = "queued"
 	StatusRunning           = "running"
@@ -37,7 +39,13 @@ const (
 	EventStartAuthorized    = "start_authorized"
 	EventNeedsVerification  = "needs_verification"
 	EventCancelled          = "cancelled"
+	EventStarted            = "started"
+	EventResult             = "result"
 	ActionPrepare           = "prepare"
+
+	AccessAvailable   = "available"
+	AccessUnavailable = "unavailable"
+	AccessUnknown     = "unknown"
 
 	DefaultQueueTimeoutSeconds     = 10 * 60
 	DefaultExecutionTimeoutSeconds = 2 * 60 * 60
@@ -79,25 +87,30 @@ type Prepared struct {
 
 // Record 是已经提交的任务记录。
 type Record struct {
-	TaskID                  string    `json:"task_id"`
-	RequestID               string    `json:"request_id"`
-	Description             string    `json:"description"`
-	SourceSessionID         *string   `json:"source_session_id"`
-	ParentTaskID            *string   `json:"parent_task_id"`
-	TargetSessionID         *string   `json:"target_session_id"`
-	WorkingDirectory        *string   `json:"working_directory"`
-	DeviceNames             []string  `json:"device_names"`
-	AuthorizationScope      *string   `json:"authorization_scope"`
-	ExpectedOutputs         *string   `json:"expected_outputs"`
-	TargetNodeID            string    `json:"target_node_id"`
-	AgentType               string    `json:"agent_type"`
-	Status                  string    `json:"status"`
-	QueueExpiresAt          time.Time `json:"queue_expires_at"`
-	ExecutionTimeoutSeconds int       `json:"execution_timeout_seconds"`
-	Version                 int       `json:"version"`
-	AcceptedAt              time.Time `json:"accepted_at"`
-	ErrorCode               *string   `json:"error_code,omitempty"`
-	ErrorMessage            *string   `json:"error_message,omitempty"`
+	TaskID                  string      `json:"task_id"`
+	RequestID               string      `json:"request_id"`
+	Description             string      `json:"description"`
+	SourceSessionID         *string     `json:"source_session_id"`
+	ParentTaskID            *string     `json:"parent_task_id"`
+	TargetSessionID         *string     `json:"target_session_id"`
+	WorkingDirectory        *string     `json:"working_directory"`
+	DeviceNames             []string    `json:"device_names"`
+	AuthorizationScope      *string     `json:"authorization_scope"`
+	ExpectedOutputs         *string     `json:"expected_outputs"`
+	TargetNodeID            string      `json:"target_node_id"`
+	AgentType               string      `json:"agent_type"`
+	Status                  string      `json:"status"`
+	QueueExpiresAt          time.Time   `json:"queue_expires_at"`
+	ExecutionTimeoutSeconds int         `json:"execution_timeout_seconds"`
+	Version                 int         `json:"version"`
+	AcceptedAt              time.Time   `json:"accepted_at"`
+	ErrorCode               *string     `json:"error_code,omitempty"`
+	ErrorMessage            *string     `json:"error_message,omitempty"`
+	Summary                 *string     `json:"summary,omitempty"`
+	EvidenceEmptyReason     *string     `json:"evidence_empty_reason,omitempty"`
+	ArtifactsEmptyReason    *string     `json:"artifacts_empty_reason,omitempty"`
+	Evidence                []ResultRef `json:"evidence,omitempty"`
+	Artifacts               []ResultRef `json:"artifacts,omitempty"`
 }
 
 // Event 是允许保存的一条任务变更，不包含 Session 原文。
@@ -253,6 +266,9 @@ func Validate(in Input) error {
 		return err
 	}
 	if err := validateTimeout(in.ExecutionTimeoutSeconds, "执行期限必须是正整数", "execution_timeout_seconds"); err != nil {
+		return err
+	}
+	if err := rejectOversizedExecutorInput(in); err != nil {
 		return err
 	}
 	return nil

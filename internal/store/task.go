@@ -215,6 +215,9 @@ func (s *Store) ListTasks(ctx context.Context, employeeID string) ([]task.Record
 	if out == nil {
 		out = []task.Record{}
 	}
+	if err := s.attachResults(ctx, employeeID, out); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -236,7 +239,11 @@ func (s *Store) GetTask(ctx context.Context, employeeID, taskID string) (task.Re
 	if !found {
 		return task.Record{}, ErrNotVisible
 	}
-	return rec, nil
+	loaded := []task.Record{rec}
+	if err := s.attachResults(ctx, employeeID, loaded); err != nil {
+		return task.Record{}, err
+	}
+	return loaded[0], nil
 }
 
 // ListTaskEvents 返回本人任务的变更。任务不可见时不返回任何事件。
@@ -604,7 +611,8 @@ const taskSelect = `
 	       source_session_id::text, parent_task_id::text, target_session_id::text,
 	       working_directory, device_names, authorization_scope, expected_outputs,
 	       target_node_id::text, agent_type, execution_timeout_seconds,
-	       queue_expires_at, status, version, created_at, error_code, error_message
+	       queue_expires_at, status, version, created_at, error_code, error_message,
+	       summary, evidence_empty_reason, artifacts_empty_reason
 	FROM tasks`
 
 type queryer interface {
@@ -641,6 +649,7 @@ func scanTask(row pgx.Row) (task.Record, []byte, error) {
 		&rec.TargetNodeID, &rec.AgentType, &rec.ExecutionTimeoutSeconds,
 		&rec.QueueExpiresAt, &rec.Status, &rec.Version, &rec.AcceptedAt,
 		&rec.ErrorCode, &rec.ErrorMessage,
+		&rec.Summary, &rec.EvidenceEmptyReason, &rec.ArtifactsEmptyReason,
 	); err != nil {
 		return task.Record{}, nil, fmt.Errorf("读取任务失败: %s", redact.Scrub(err.Error()))
 	}

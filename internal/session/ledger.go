@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -14,23 +15,28 @@ import (
 	"time"
 
 	"baton/internal/identity"
+	"baton/internal/protocol"
 	"baton/internal/startpermit"
+	"baton/internal/task"
 
 	_ "modernc.org/sqlite"
 )
 
 type workerDB struct {
-	db        *sql.DB
-	mu        sync.Mutex
-	execution string
-	task      string
-	nonce     string
-	armedMono int64
-	intent    bool
-	cancelled bool
-	attaches  int
-	observer  *Observer
-	clock     *startpermit.Clock
+	db              *sql.DB
+	mu              sync.Mutex
+	execution       string
+	task            string
+	nonce           string
+	armedMono       int64
+	intent          bool
+	cancelled       bool
+	inputSubmitted  bool
+	resultDelivered bool
+	generation      int
+	attaches        int
+	observer        *Observer
+	clock           *startpermit.Clock
 }
 
 func openWorkerDB(path string, observer *Observer) (*workerDB, error) {
@@ -53,6 +59,18 @@ func openWorkerDB(path string, observer *Observer) (*workerDB, error) {
 			seq INTEGER PRIMARY KEY AUTOINCREMENT,
 			note TEXT NOT NULL,
 			created_at TEXT NOT NULL
+		);
+		CREATE TABLE IF NOT EXISTS execution_log (
+			seq INTEGER PRIMARY KEY AUTOINCREMENT,
+			kind TEXT NOT NULL,
+			body TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		);
+		CREATE TABLE IF NOT EXISTS outbox (
+			event_id TEXT PRIMARY KEY,
+			kind TEXT NOT NULL,
+			payload TEXT NOT NULL,
+			delivered INTEGER NOT NULL DEFAULT 0
 		);
 	`); err != nil {
 		db.Close()
@@ -98,6 +116,15 @@ func (w *workerDB) load() error {
 	w.intent = intent == "1"
 	_ = w.db.QueryRow(`SELECT value FROM meta WHERE key = 'start_cancelled'`).Scan(&cancelled)
 	w.cancelled = cancelled == "1"
+	var submitted, delivered, generation string
+	_ = w.db.QueryRow(`SELECT value FROM meta WHERE key = 'input_submitted'`).Scan(&submitted)
+	w.inputSubmitted = submitted == "1"
+	_ = w.db.QueryRow(`SELECT value FROM meta WHERE key = 'result_delivered'`).Scan(&delivered)
+	w.resultDelivered = delivered == "1"
+	_ = w.db.QueryRow(`SELECT value FROM meta WHERE key = 'input_generation'`).Scan(&generation)
+	if generation != "" {
+		fmt.Sscan(generation, &w.generation)
+	}
 	if w.nonce != "" && w.clock != nil {
 		w.clock.Restore()
 	}
@@ -177,7 +204,7 @@ func (w *workerDB) Arm(taskID, executionID string) (string, error) {
 }
 
 // Authorize 在 Session 互斥区内校验许可、排队期限和取消，先提交 start_intent，然后才调用测试执行器。
-// 不提交任务输入，也不运行启动钩子。已经有 start_intent 时不会再次启动。
+// 这里只进入启动，不提交任务输入，也不运行启动钩子。已经有 start_intent 时不会再次启动。
 func (w *workerDB) Authorize(taskID, executionID, permit, publicKey, generation string, queueExpires time.Time) (started bool, refused bool, code string, err error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -281,10 +308,277 @@ func (w *workerDB) Attaches() int {
 	return w.attaches
 }
 
-func (w *workerDB) snapshot() (int, bool) {
+type workerSnap struct {
+	attaches        int
+	intent          bool
+	inputs          int64
+	inputSubmitted  bool
+	resultDelivered bool
+}
+
+func (w *workerDB) snapshot() workerSnap {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.attaches, w.intent
+	var inputs int64
+	if w.observer != nil {
+		inputs = w.observer.Inputs()
+	}
+	return workerSnap{
+		attaches: w.attaches, intent: w.intent, inputs: inputs,
+		inputSubmitted: w.inputSubmitted, resultDelivered: w.resultDelivered,
+	}
+}
+
+// SubmitInput 在 start_intent 已经同步之后，只向执行器提交一次任务输入。
+// 重复调用返回尚未确认的报告，不会再次调用执行器。
+func (w *workerDB) SubmitInput(sessionID, payload string) ([]ipcReport, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.intent || w.execution == "" || w.task == "" {
+		return nil, errors.New("还没有启动意图")
+	}
+	if w.inputSubmitted {
+		return w.pendingLocked()
+	}
+	if payload == "" || w.observer == nil {
+		return nil, errors.New("任务输入无效")
+	}
+	if len(payload) > task.ExecutorInputLimit {
+		return w.failOversizedLocked(sessionID)
+	}
+	tx, err := w.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := putMeta(tx, "input_submitted", "1"); err != nil {
+		return nil, err
+	}
+	if err := putMeta(tx, "input_generation", "1"); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	w.inputSubmitted = true
+	w.generation = 1
+	out, err := w.observer.SubmitInput(context.Background(), payload)
+	if err != nil {
+		return nil, err
+	}
+	return w.recordExecution(sessionID, payload, out)
+}
+
+// failOversizedLocked 不把超限输入交给执行器，而是记下失败并留下可回报的结果。
+func (w *workerDB) failOversizedLocked(sessionID string) ([]ipcReport, error) {
+	candidate := task.Candidate{
+		Status:               task.StatusFailed,
+		Summary:              "任务输入超过单条消息上限，没有提交给执行器",
+		EvidenceEmptyReason:  "输入没有提交，没有证据",
+		ArtifactsEmptyReason: "输入没有提交，没有产物",
+		ErrorCode:            task.CodeExecutionFailed,
+		ErrorMessage:         "任务输入超过单条消息上限",
+	}
+	if err := task.ValidateCandidate(candidate); err != nil {
+		return nil, err
+	}
+	tx, err := w.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := putMeta(tx, "input_submitted", "1"); err != nil {
+		return nil, err
+	}
+	if err := putMeta(tx, "input_generation", "1"); err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := insertLog(tx, "input", "任务输入超过单条消息上限", now); err != nil {
+		return nil, err
+	}
+	resultID, err := identity.NewUUID()
+	if err != nil {
+		return nil, err
+	}
+	body, err := json.Marshal(reportFromCandidate(resultID, w.task, w.execution, sessionID, 1, candidate, true))
+	if err != nil {
+		return nil, err
+	}
+	if err := insertOutbox(tx, resultID, protocol.ReportResult, body); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	w.inputSubmitted = true
+	w.generation = 1
+	return w.pendingLocked()
+}
+
+func (w *workerDB) recordExecution(sessionID, payload string, out Output) ([]ipcReport, error) {
+	tx, err := w.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := insertLog(tx, "input", payload, now); err != nil {
+		return nil, err
+	}
+	for _, line := range out.Progress {
+		if err := insertLog(tx, "progress", line, now); err != nil {
+			return nil, err
+		}
+	}
+	startedID, err := identity.NewUUID()
+	if err != nil {
+		return nil, err
+	}
+	started, err := json.Marshal(protocol.ExecutionReport{
+		Type: protocol.BodyExecutionReport, EventID: startedID, TaskID: w.task, ExecutionID: w.execution,
+		SessionID: sessionID, Kind: protocol.ReportStarted, InputGeneration: w.generation, Status: task.StatusRunning,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := insertOutbox(tx, startedID, protocol.ReportStarted, started); err != nil {
+		return nil, err
+	}
+	if out.Final != "" {
+		if err := insertLog(tx, "output", out.Final, now); err != nil {
+			return nil, err
+		}
+	}
+	if out.Exited || out.Uncertain || out.Final != "" {
+		candidate := terminalCandidate(out)
+		if candidate.Status == task.StatusCompleted && !out.Exited {
+			candidate = task.Candidate{}
+		}
+		if candidate.Status != "" {
+			resultID, err := identity.NewUUID()
+			if err != nil {
+				return nil, err
+			}
+			body, err := json.Marshal(reportFromCandidate(resultID, w.task, w.execution, sessionID, w.generation, candidate, out.Exited || out.Uncertain))
+			if err != nil {
+				return nil, err
+			}
+			if err := insertOutbox(tx, resultID, protocol.ReportResult, body); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return w.pendingLocked()
+}
+
+func terminalCandidate(out Output) task.Candidate {
+	if out.Uncertain {
+		return task.FormatFailure(true)
+	}
+	if !out.Exited && out.Final == "" {
+		return task.Candidate{}
+	}
+	parsed, err := task.ParseCandidate(out.Final)
+	if err != nil || (parsed.Status == task.StatusCompleted && !out.Exited) {
+		if out.Exited || out.Final != "" {
+			return task.FormatFailure(false)
+		}
+		return task.Candidate{}
+	}
+	return parsed
+}
+
+func reportFromCandidate(eventID, taskID, executionID, sessionID string, generation int, candidate task.Candidate, stopped bool) protocol.ExecutionReport {
+	return protocol.ExecutionReport{
+		Type: protocol.BodyExecutionReport, EventID: eventID, TaskID: taskID, ExecutionID: executionID,
+		SessionID: sessionID, Kind: protocol.ReportResult, InputGeneration: generation, Status: candidate.Status,
+		Summary: candidate.Summary, Evidence: candidate.Evidence, Artifacts: candidate.Artifacts,
+		EvidenceEmptyReason: candidate.EvidenceEmptyReason, ArtifactsEmptyReason: candidate.ArtifactsEmptyReason,
+		ErrorCode: candidate.ErrorCode, ErrorMessage: candidate.ErrorMessage, AgentStopped: stopped,
+	}
+}
+
+func (w *workerDB) Pending() ([]ipcReport, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.pendingLocked()
+}
+
+func (w *workerDB) pendingLocked() ([]ipcReport, error) {
+	rows, err := w.db.Query(`SELECT event_id, kind, payload FROM outbox WHERE delivered = 0 ORDER BY rowid`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ipcReport
+	for rows.Next() {
+		var item ipcReport
+		var payload string
+		if err := rows.Scan(&item.EventID, &item.Kind, &payload); err != nil {
+			return nil, err
+		}
+		item.Body = json.RawMessage(payload)
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// Ack 只在调用方已经拿到中心持久化确认之后标记本地交付。
+func (w *workerDB) Ack(eventID string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	var kind string
+	var delivered int
+	err := w.db.QueryRow(`SELECT kind, delivered FROM outbox WHERE event_id = ?`, eventID).Scan(&kind, &delivered)
+	if errors.Is(err, sql.ErrNoRows) {
+		return errors.New("没有这条待确认记录")
+	}
+	if err != nil {
+		return err
+	}
+	if delivered == 1 {
+		if kind == protocol.ReportResult {
+			w.resultDelivered = true
+		}
+		return nil
+	}
+	tx, err := w.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`UPDATE outbox SET delivered = 1 WHERE event_id = ?`, eventID); err != nil {
+		return err
+	}
+	if kind == protocol.ReportResult {
+		if err := putMeta(tx, "result_delivered", "1"); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if kind == protocol.ReportResult {
+		w.resultDelivered = true
+	}
+	return nil
+}
+
+func insertLog(tx *sql.Tx, kind, body, now string) error {
+	_, err := tx.Exec(`INSERT INTO execution_log (kind, body, created_at) VALUES (?, ?, ?)`, kind, body, now)
+	return err
+}
+
+func insertOutbox(tx *sql.Tx, eventID, kind string, payload []byte) error {
+	_, err := tx.Exec(`INSERT INTO outbox (event_id, kind, payload, delivered) VALUES (?, ?, ?, 0)`, eventID, kind, string(payload))
+	return err
 }
 
 func putMeta(tx *sql.Tx, key, value string) error {

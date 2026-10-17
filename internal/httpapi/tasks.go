@@ -68,7 +68,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in task.Input
-	if !s.readJSON(w, r, &in) {
+	if !s.readJSONLimit(w, r, &in, maxTaskJSONBytes) {
 		return
 	}
 	rec, err := s.store.AcceptTask(r.Context(), sess.Employee.ID, in)

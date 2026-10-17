@@ -26,8 +26,9 @@ type startLoop struct {
 	writer *wsWriter
 	log    *slog.Logger
 
-	mu   sync.Mutex
-	jobs map[string]*startJob
+	mu      sync.Mutex
+	jobs    map[string]*startJob
+	waiters map[string]chan json.RawMessage
 }
 
 type startJob struct {
@@ -158,7 +159,7 @@ func (s *startLoop) onResult(env protocol.Envelope) bool {
 		return true
 	}
 	s.finish(job)
-	s.authorize(job, result.Permit)
+	go s.authorize(job, result.Permit)
 	return true
 }
 
@@ -200,6 +201,7 @@ func (s *startLoop) authorize(job *startJob, permit string) {
 	}
 	if st.Started || st.StartIntent {
 		s.log.Info("event=start_entered", "task_id", job.taskID, "execution_id", job.executionID, "starts", st.ExecutorStarts)
+		s.followInput(job)
 	}
 }
 

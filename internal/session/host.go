@@ -79,6 +79,27 @@ func (h *Host) Authorize(ctx context.Context, sessionID, taskID, executionID, pe
 	})
 }
 
+// SubmitInput 把任务输入交给 Worker。重复调用不会让执行器再收到一次。
+func (h *Host) SubmitInput(ctx context.Context, sessionID, payload string) (Status, error) {
+	return h.call(ctx, sessionID, func(c *Client) (Status, error) {
+		return c.SubmitInput(payload)
+	})
+}
+
+// Pending 读取 Worker 里还没有确认交付的报告。
+func (h *Host) Pending(ctx context.Context, sessionID string) (Status, error) {
+	return h.call(ctx, sessionID, func(c *Client) (Status, error) {
+		return c.Pending()
+	})
+}
+
+// Ack 在中心确认持久化之后通知 Worker。
+func (h *Host) Ack(ctx context.Context, sessionID, eventID string) (Status, error) {
+	return h.call(ctx, sessionID, func(c *Client) (Status, error) {
+		return c.Ack(eventID)
+	})
+}
+
 func (h *Host) call(ctx context.Context, sessionID string, fn func(*Client) (Status, error)) (Status, error) {
 	token, err := readToken(h.DataDir, sessionID)
 	if err != nil {
