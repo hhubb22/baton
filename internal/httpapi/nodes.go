@@ -3,7 +3,9 @@ package httpapi
 import (
 	"errors"
 	"net/http"
+	"time"
 
+	"baton/internal/identity"
 	"baton/internal/node"
 	"baton/internal/store"
 )
@@ -63,7 +65,7 @@ func (s *Server) registerNode(w http.ResponseWriter, r *http.Request) {
 		Role:          body.Role,
 		Capabilities:  *body.Capabilities,
 		CredentialTTL: s.nodeCredentialTTL,
-	})
+	}, s.signer)
 	if err != nil {
 		s.writeRegisterError(w, r, err)
 		return
@@ -76,6 +78,78 @@ func (s *Server) registerNode(w http.ResponseWriter, r *http.Request) {
 		"registration_seq", ident.RegistrationSeq,
 	)
 	s.writeJSON(w, http.StatusOK, ident)
+}
+
+type nodeStatusJSON struct {
+	ID              string     `json:"id"`
+	DisplayName     string     `json:"display_name"`
+	System          string     `json:"system"`
+	Role            string     `json:"role"`
+	Capabilities    []string   `json:"capabilities"`
+	RegistrationSeq int64      `json:"registration_seq"`
+	Online          bool       `json:"online"`
+	LastContact     *time.Time `json:"last_contact_at"`
+	StatusUpdated   *time.Time `json:"status_updated_at"`
+	Synced          bool       `json:"synced"`
+	Executable      bool       `json:"executable"`
+}
+
+func nodeStatusFrom(view store.NodeView) nodeStatusJSON {
+	return nodeStatusJSON{
+		ID:              view.ID,
+		DisplayName:     view.DisplayName,
+		System:          view.System,
+		Role:            view.Role,
+		Capabilities:    view.Capabilities,
+		RegistrationSeq: view.RegistrationSeq,
+		Online:          view.Online,
+		LastContact:     view.LastContact,
+		StatusUpdated:   view.StatusUpdated,
+		Synced:          view.Synced,
+		Executable:      view.Executable(),
+	}
+}
+
+func (s *Server) listNodes(w http.ResponseWriter, r *http.Request) {
+	sess, ok := s.requireSession(w, r)
+	if !ok {
+		return
+	}
+	views, err := s.store.ListNodes(r.Context(), sess.Employee.ID)
+	if err != nil {
+		s.log.Error("list nodes failed", "request_id", requestID(r.Context()), "employee_id", sess.Employee.ID)
+		s.writeError(w, r, http.StatusInternalServerError, "unavailable", "暂时无法处理请求")
+		return
+	}
+	out := make([]nodeStatusJSON, 0, len(views))
+	for _, view := range views {
+		out = append(out, nodeStatusFrom(view))
+	}
+	s.writeJSON(w, http.StatusOK, struct {
+		Nodes []nodeStatusJSON `json:"nodes"`
+	}{Nodes: out})
+}
+
+func (s *Server) getNode(w http.ResponseWriter, r *http.Request, rawID string) {
+	sess, ok := s.requireSession(w, r)
+	if !ok {
+		return
+	}
+	if _, err := identity.ParseUUID(rawID); err != nil {
+		s.writeError(w, r, http.StatusBadRequest, "invalid_id", "节点标识不正确")
+		return
+	}
+	view, err := s.store.OwnNode(r.Context(), sess.Employee.ID, rawID)
+	if errors.Is(err, store.ErrSyncRejected) {
+		s.writeError(w, r, http.StatusForbidden, "forbidden", "不能查看该节点")
+		return
+	}
+	if err != nil {
+		s.log.Error("get node failed", "request_id", requestID(r.Context()), "employee_id", sess.Employee.ID)
+		s.writeError(w, r, http.StatusInternalServerError, "unavailable", "暂时无法处理请求")
+		return
+	}
+	s.writeJSON(w, http.StatusOK, nodeStatusFrom(view))
 }
 
 func (s *Server) putDefaultPC(w http.ResponseWriter, r *http.Request) {

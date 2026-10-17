@@ -19,6 +19,7 @@ import (
 	"baton/internal/auth"
 	"baton/internal/db"
 	"baton/internal/httpapi"
+	"baton/internal/node"
 	"baton/internal/redact"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -69,6 +70,10 @@ func TestCLIMigrateCreateResetAndServeGuard(t *testing.T) {
 			return "https://baton.example"
 		case "BATON_HTTP_ADDR":
 			return "127.0.0.1:0"
+		case "BATON_CONTROL_TOKEN":
+			return "control-token-value-0001"
+		case "BATON_NODE_SIGNING_KEY":
+			return "node-signing.key"
 		default:
 			return ""
 		}
@@ -97,11 +102,16 @@ func TestCLIMigrateCreateResetAndServeGuard(t *testing.T) {
 
 	pool := openSchema(t, raw, schema)
 	defer pool.Close()
+	signer, err := node.GenerateSigner()
+	if err != nil {
+		t.Fatal(err)
+	}
 	api, err := httpapi.New(pool, httpapi.Settings{
 		Origins:           []string{"https://baton.example"},
 		SessionTTL:        time.Hour,
 		EnrollmentTTL:     10 * time.Minute,
 		NodeCredentialTTL: 30 * 24 * time.Hour,
+		Signer:            signer,
 	})
 	if err != nil {
 		t.Fatal(err)

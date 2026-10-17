@@ -388,12 +388,98 @@ func assertCredentialHash(t *testing.T, pool *pgxpool.Pool, ident node.Identity)
 	var n int
 	err := pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM node_credentials
-		WHERE id = $1::uuid AND node_id = $2::uuid AND token_hash = $3`,
-		ident.Credential.ID, ident.NodeID, auth.Digest(ident.Credential.Token)).Scan(&n)
+		WHERE id = $1::uuid AND node_id = $2::uuid AND revoked_at IS NULL`,
+		ident.Credential.ID, ident.NodeID).Scan(&n)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if n != 1 {
-		t.Fatal("数据库没有按摘要保存连接凭据")
+		t.Fatal("数据库没有保存可吊销的 credential_id")
 	}
+	var blob string
+	err = pool.QueryRow(ctx, `
+		SELECT id::text || node_id::text || employee_id::text || version::text || expires_at::text
+		FROM node_credentials WHERE id = $1::uuid`, ident.Credential.ID).Scan(&blob)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(blob, ident.Credential.Token) || strings.Count(ident.Credential.Token, ".") != 2 {
+		t.Fatal("数据库保存了连接凭据明文，或返回的不是 JWT")
+	}
+}
+
+func TestNodeStatusIsEmployeeScoped(t *testing.T) {
+	pool := dbtest.Open(t)
+	logs := &bytes.Buffer{}
+	api := newAPI(t, pool, logs)
+	srv := httptest.NewTLSServer(api)
+	t.Cleanup(srv.Close)
+	aliceClient := tlsClient(t, srv)
+	bobClient := tlsClient(t, srv)
+	const password = "node-status-password-1"
+	createEmployee(t, pool, "alice", "Alice", password)
+	createEmployee(t, pool, "bob", "Bob", password)
+	aliceCSRF := loginFor(t, aliceClient, srv.URL, "alice", password)
+	bobCSRF := loginFor(t, bobClient, srv.URL, "bob", password)
+	aliceNode := registerIdent(t, aliceClient, srv.URL, aliceCSRF, "Alice Desk")
+	bobNode := registerIdent(t, bobClient, srv.URL, bobCSRF, "Bob Desk")
+
+	status, body := getText(t, tlsClient(t, srv), srv.URL+"/api/v1/nodes")
+	if status != http.StatusUnauthorized {
+		t.Fatalf("未登录查询状态 %d", status)
+	}
+	status, body = getText(t, aliceClient, srv.URL+"/api/v1/nodes")
+	if status != http.StatusOK || !strings.Contains(body, aliceNode.NodeID) || strings.Contains(body, bobNode.NodeID) || strings.Contains(body, `"executable":true`) {
+		t.Fatalf("本人节点列表不正确: %d %s", status, body)
+	}
+	if !strings.Contains(body, `"online":false`) || !strings.Contains(body, `"synced":false`) || !strings.Contains(body, `"last_contact_at":null`) || !strings.Contains(body, `"status_updated_at":null`) {
+		t.Fatalf("未连接节点的状态字段不正确: %s", body)
+	}
+	status, body = getText(t, aliceClient, srv.URL+"/api/v1/nodes/"+aliceNode.NodeID)
+	if status != http.StatusOK || !strings.Contains(body, `"executable":false`) || !strings.Contains(body, aliceNode.NodeID) {
+		t.Fatalf("本人节点详情不正确: %d %s", status, body)
+	}
+	status, body = getText(t, aliceClient, srv.URL+"/api/v1/nodes/"+bobNode.NodeID)
+	if status != http.StatusForbidden || strings.Contains(body, bobNode.NodeID) || !strings.Contains(body, "不能查看该节点") {
+		t.Fatalf("查看他人节点状态 %d %s", status, body)
+	}
+	status, _ = getText(t, aliceClient, srv.URL+"/api/v1/nodes/not-a-uuid")
+	if status != http.StatusBadRequest {
+		t.Fatalf("非法节点标识状态 %d", status)
+	}
+	if strings.Contains(logs.String(), aliceNode.Credential.Token) || strings.Contains(logs.String(), password) {
+		t.Fatal("状态查询日志包含凭据或口令")
+	}
+}
+
+func registerIdent(t *testing.T, client *browser, base, csrf, name string) node.Identity {
+	t.Helper()
+	enrollment := issueEnrollment(t, client, base, csrf)
+	status, body, _ := postJSON(t, client, base+"/api/v1/nodes/register", "", "", registerBody(enrollment.EnrollmentToken, name, "pc", []string{"start"}))
+	if status != http.StatusOK {
+		t.Fatalf("注册状态 %d", status)
+	}
+	var ident node.Identity
+	if err := json.Unmarshal([]byte(body), &ident); err != nil || ident.NodeID == "" {
+		t.Fatal(err)
+	}
+	return ident
+}
+
+func getText(t *testing.T, client *browser, rawURL string) (int, string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := client.http.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp.StatusCode, string(body)
 }

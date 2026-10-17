@@ -21,6 +21,7 @@ import (
 	"baton/internal/auth"
 	"baton/internal/dbtest"
 	"baton/internal/httpapi"
+	"baton/internal/node"
 	"baton/internal/redact"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -508,11 +509,16 @@ func createEmployee(t *testing.T, pool *pgxpool.Pool, username, displayName, pas
 func newAPI(t *testing.T, pool *pgxpool.Pool, logs io.Writer) http.Handler {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(logs, nil))
+	signer, err := node.GenerateSigner()
+	if err != nil {
+		t.Fatal(err)
+	}
 	api, err := httpapi.New(pool, httpapi.Settings{
 		Origins:           []string{origin},
 		SessionTTL:        time.Hour,
 		EnrollmentTTL:     10 * time.Minute,
 		NodeCredentialTTL: 30 * 24 * time.Hour,
+		Signer:            signer,
 		Logger:            logger,
 	})
 	if err != nil {

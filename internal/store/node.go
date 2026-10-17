@@ -67,13 +67,17 @@ func (s *Store) IssueEnrollment(ctx context.Context, employeeID string, ttl time
 	return id, token, expires.UTC(), nil
 }
 
-// Register 消费一次性注册凭据，写入节点和连接凭据，并在尚无默认 PC 时按注册序号选择最早的有效 PC。
-func (s *Store) Register(ctx context.Context, in RegisterInput) (node.Identity, error) {
+// Register 消费一次性注册凭据，写入节点和可吊销的 credential_id，并在尚无默认 PC 时按注册序号选择最早的有效 PC。
+// 连接凭据是签名后的 JWT，只在返回值里出现一次，不写入数据库。
+func (s *Store) Register(ctx context.Context, in RegisterInput, signer node.TokenSigner) (node.Identity, error) {
 	if err := node.Validate(in.DisplayName, in.System, in.Role, normalizeCaps(in.Capabilities)); err != nil {
 		return node.Identity{}, err
 	}
 	if !node.ValidSecret(in.Token) {
 		return node.Identity{}, ErrEnrollmentInvalid
+	}
+	if signer == nil {
+		return node.Identity{}, errors.New("节点凭据签名器未配置")
 	}
 	seconds, err := positiveSeconds(in.CredentialTTL, maxCredentialSeconds)
 	if err != nil {
@@ -122,7 +126,8 @@ func (s *Store) Register(ctx context.Context, in RegisterInput) (node.Identity, 
 	if err != nil {
 		return node.Identity{}, err
 	}
-	connectionToken, err := auth.NewSecret()
+	expiresAt := time.Now().UTC().Add(time.Duration(seconds) * time.Second).Truncate(time.Second)
+	connectionToken, err := signer.SignNodeToken(nodeID, employeeID, credentialID, expiresAt)
 	if err != nil {
 		return node.Identity{}, err
 	}
@@ -146,12 +151,12 @@ func (s *Store) Register(ctx context.Context, in RegisterInput) (node.Identity, 
 	var credentialExpires time.Time
 	err = tx.QueryRow(ctx, `
 		INSERT INTO node_credentials (
-			id, node_id, employee_id, version, token_hash, created_at, expires_at
+			id, node_id, employee_id, version, created_at, expires_at
 		) VALUES (
-			$1::uuid, $2::uuid, $3::uuid, 1, $4, now(), now() + ($5::int * interval '1 second')
+			$1::uuid, $2::uuid, $3::uuid, 1, now(), $4
 		)
 		RETURNING expires_at`,
-		credentialID, nodeID, employeeID, auth.Digest(connectionToken), seconds,
+		credentialID, nodeID, employeeID, expiresAt,
 	).Scan(&credentialExpires)
 	if err != nil {
 		return node.Identity{}, fmt.Errorf("保存节点凭据失败: %s", redact.Scrub(err.Error()))

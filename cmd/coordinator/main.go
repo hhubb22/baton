@@ -18,10 +18,13 @@ import (
 	"baton/internal/admin"
 	"baton/internal/auth"
 	"baton/internal/config"
+	"baton/internal/control"
 	"baton/internal/db"
 	"baton/internal/httpapi"
 	"baton/internal/migrate"
+	"baton/internal/node"
 	"baton/internal/redact"
+	"baton/internal/store"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -161,18 +164,27 @@ func cmdServe(ctx context.Context, stderr io.Writer, getenv func(string) string)
 				return errors.New("无法读取 TLS 密钥文件")
 			}
 		}
+		signer, err := node.LoadSigner(cfg.SigningKeyFile)
+		if err != nil {
+			return err
+		}
+		logger := slog.New(slog.NewTextHandler(stderr, nil))
 		api, err := httpapi.New(pool, httpapi.Settings{
 			Origins:           cfg.AllowedOrigins,
 			SessionTTL:        cfg.SessionTTL,
 			EnrollmentTTL:     cfg.EnrollmentTTL,
 			NodeCredentialTTL: cfg.NodeCredentialTTL,
-			Logger:            slog.New(slog.NewTextHandler(stderr, nil)),
+			Signer:            signer,
+			Logger:            logger,
 		})
 		if err != nil {
 			return err
 		}
-		srv := &http.Server{
-			Addr:              cfg.HTTPAddr,
+		ctrl, err := control.New(store.New(pool), signer, cfg.ControlToken, cfg.Heartbeat, cfg.OfflineAfter, logger)
+		if err != nil {
+			return err
+		}
+		apiSrv := &http.Server{
 			Handler:           api,
 			ReadHeaderTimeout: 5 * time.Second,
 			ReadTimeout:       20 * time.Second,
@@ -181,25 +193,51 @@ func cmdServe(ctx context.Context, stderr io.Writer, getenv func(string) string)
 			MaxHeaderBytes:    1 << 16,
 			ErrorLog:          log.New(scrubWriter{stderr}, "", 0),
 		}
-		ln, err := net.Listen("tcp", cfg.HTTPAddr)
+		// 控制连接是长生命周期 WebSocket，不能套用 API 的读写超时。
+		controlSrv := &http.Server{
+			Handler:           ctrl,
+			ReadHeaderTimeout: 5 * time.Second,
+			MaxHeaderBytes:    1 << 16,
+			ErrorLog:          log.New(scrubWriter{stderr}, "", 0),
+		}
+		apiLn, err := net.Listen("tcp", cfg.HTTPAddr)
 		if err != nil {
 			return fmt.Errorf("监听失败: %s", redact.Scrub(err.Error()))
 		}
-		errCh := make(chan error, 1)
+		controlLn, err := net.Listen("tcp", cfg.ControlAddr)
+		if err != nil {
+			_ = apiLn.Close()
+			return fmt.Errorf("控制监听失败: %s", redact.Scrub(err.Error()))
+		}
+		errCh := make(chan error, 2)
 		go func() {
+			logger.Info("event=listening", "kind", "http", "addr", apiLn.Addr().String())
 			if cfg.TLS() {
-				errCh <- srv.ServeTLS(ln, cfg.TLSCertFile, cfg.TLSKeyFile)
+				errCh <- apiSrv.ServeTLS(apiLn, cfg.TLSCertFile, cfg.TLSKeyFile)
 				return
 			}
-			errCh <- srv.Serve(ln)
+			errCh <- apiSrv.Serve(apiLn)
 		}()
-		select {
-		case <-ctx.Done():
+		go func() {
+			logger.Info("event=listening", "kind", "control", "addr", controlLn.Addr().String())
+			if cfg.TLS() {
+				errCh <- controlSrv.ServeTLS(controlLn, cfg.TLSCertFile, cfg.TLSKeyFile)
+				return
+			}
+			errCh <- controlSrv.Serve(controlLn)
+		}()
+		shutdown := func() {
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			_ = srv.Shutdown(shutdownCtx)
+			_ = apiSrv.Shutdown(shutdownCtx)
+			_ = controlSrv.Shutdown(shutdownCtx)
+		}
+		select {
+		case <-ctx.Done():
+			shutdown()
 			return nil
 		case err := <-errCh:
+			shutdown()
 			if err == nil || errors.Is(err, http.ErrServerClosed) {
 				return nil
 			}

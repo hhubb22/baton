@@ -1,4 +1,4 @@
-// Package httpapi 提供员工登录、退出、本人身份、初始口令更换、节点注册和默认 PC。
+// Package httpapi 提供员工登录、退出、本人身份、初始口令更换、节点注册、默认 PC 和本人节点状态。
 package httpapi
 
 import (
@@ -17,6 +17,7 @@ import (
 	"baton/internal/auth"
 	"baton/internal/config"
 	"baton/internal/identity"
+	"baton/internal/node"
 	"baton/internal/redact"
 	"baton/internal/store"
 
@@ -33,6 +34,7 @@ type Settings struct {
 	SessionTTL        time.Duration
 	EnrollmentTTL     time.Duration
 	NodeCredentialTTL time.Duration
+	Signer            node.TokenSigner
 	Logger            *slog.Logger
 }
 
@@ -43,6 +45,7 @@ type Server struct {
 	ttl               time.Duration
 	enrollmentTTL     time.Duration
 	nodeCredentialTTL time.Duration
+	signer            node.TokenSigner
 	log               *slog.Logger
 }
 
@@ -60,6 +63,9 @@ func New(pool *pgxpool.Pool, settings Settings) (*Server, error) {
 	if settings.NodeCredentialTTL < time.Hour || settings.NodeCredentialTTL > 90*24*time.Hour {
 		return nil, errors.New("节点凭据有效期无效")
 	}
+	if settings.Signer == nil {
+		return nil, errors.New("节点凭据签名器未配置")
+	}
 	logger := settings.Logger
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
@@ -70,6 +76,7 @@ func New(pool *pgxpool.Pool, settings Settings) (*Server, error) {
 		ttl:               settings.SessionTTL,
 		enrollmentTTL:     settings.EnrollmentTTL,
 		nodeCredentialTTL: settings.NodeCredentialTTL,
+		signer:            settings.Signer,
 		log:               slog.New(redact.NewHandler(logger.Handler())),
 	}, nil
 }
@@ -141,6 +148,12 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.registerNode(w, r)
+	case "/api/v1/nodes":
+		if r.Method != http.MethodGet {
+			s.writeError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "不支持该请求方法")
+			return
+		}
+		s.listNodes(w, r)
 	case "/api/v1/me/default-pc":
 		if r.Method != http.MethodPut {
 			s.writeError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "不支持该请求方法")
@@ -148,6 +161,20 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		}
 		s.putDefaultPC(w, r)
 	default:
+		const nodePrefix = "/api/v1/nodes/"
+		if strings.HasPrefix(r.URL.Path, nodePrefix) {
+			id := strings.TrimPrefix(r.URL.Path, nodePrefix)
+			if id == "" || strings.Contains(id, "/") {
+				s.writeError(w, r, http.StatusNotFound, "not_found", "找不到对应接口")
+				return
+			}
+			if r.Method != http.MethodGet {
+				s.writeError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "不支持该请求方法")
+				return
+			}
+			s.getNode(w, r, id)
+			return
+		}
 		const prefix = "/api/v1/employees/"
 		if strings.HasPrefix(r.URL.Path, prefix) {
 			id := strings.TrimPrefix(r.URL.Path, prefix)
@@ -500,8 +527,15 @@ func requestID(ctx context.Context) string {
 func safePath(path string) string {
 	switch path {
 	case "/api/v1/login", "/api/v1/logout", "/api/v1/me", "/api/v1/me/password",
-		"/api/v1/node-enrollments", "/api/v1/nodes/register", "/api/v1/me/default-pc":
+		"/api/v1/node-enrollments", "/api/v1/nodes", "/api/v1/nodes/register", "/api/v1/me/default-pc":
 		return path
+	}
+	const nodePrefix = "/api/v1/nodes/"
+	if strings.HasPrefix(path, nodePrefix) {
+		rest := strings.TrimPrefix(path, nodePrefix)
+		if rest != "" && !strings.Contains(rest, "/") {
+			return "/api/v1/nodes/:id"
+		}
 	}
 	const prefix = "/api/v1/employees/"
 	if strings.HasPrefix(path, prefix) {

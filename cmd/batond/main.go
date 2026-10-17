@@ -6,10 +6,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"baton/internal/node"
 	"baton/internal/redact"
@@ -40,10 +42,13 @@ func (e *exitCode) Unwrap() error { return e.err }
 func usage() string {
 	return `用法:
   batond register --coordinator https://主机 --display-name 名称 --system windows|macos|linux --role pc|ubuntu [--data-dir 目录] [--capability 名称 ...] [--enrollment-file 文件]
+  batond run --relay wss://主机/v1/node [--data-dir 目录]
 
 注册凭据从环境变量 BATON_ENROLLMENT_TOKEN 或 --enrollment-file 读取，不能作为命令行参数，也不能放进地址。
 可选环境变量 BATON_TLS_CA_FILE 指向额外的 CA 证书。
 未指定 --data-dir 时使用当前用户的应用数据目录。
+batond run 使用已保存的身份连接 Relay。BATON_HEARTBEAT_INTERVAL 默认 10s，允许 100ms 到 2m。
+认证失效时退出并说明需要重新认证，不会重新注册。
 `
 }
 
@@ -51,10 +56,82 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, getenv fu
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
 		return &exitCode{code: 2, err: errors.New(usage())}
 	}
-	if args[0] != "register" {
+	switch args[0] {
+	case "register":
+		return cmdRegister(ctx, args[1:], stdout, stderr, getenv)
+	case "run":
+		return cmdRun(ctx, args[1:], stderr, getenv)
+	default:
 		return &exitCode{code: 2, err: errors.New(usage())}
 	}
-	return cmdRegister(ctx, args[1:], stdout, stderr, getenv)
+}
+
+func cmdRun(ctx context.Context, args []string, stderr io.Writer, getenv func(string) string) error {
+	relayURL, dataDir, err := parseRun(args)
+	if err != nil {
+		return err
+	}
+	if getenv == nil {
+		getenv = func(string) string { return "" }
+	}
+	dir := dataDir
+	if dir == "" {
+		dir, err = node.DefaultDataDir(getenv)
+		if err != nil {
+			return err
+		}
+	}
+	ident, err := node.ReadIdentity(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return errors.New("本地没有节点身份")
+	}
+	if err != nil {
+		return err
+	}
+	heartbeat, err := heartbeatInterval(getenv("BATON_HEARTBEAT_INTERVAL"))
+	if err != nil {
+		return err
+	}
+	roots, err := node.LoadRootCAs(strings.TrimSpace(getenv("BATON_TLS_CA_FILE")))
+	if err != nil {
+		return err
+	}
+	logger := slog.New(slog.NewTextHandler(stderr, nil))
+	err = node.Maintain(ctx, node.RunOptions{
+		RelayURL:  relayURL,
+		Identity:  ident,
+		Heartbeat: heartbeat,
+		RootCAs:   roots,
+		Logger:    logger,
+	})
+	if errors.Is(err, node.ErrNeedsReauth) {
+		return err
+	}
+	return err
+}
+
+func parseRun(args []string) (string, string, error) {
+	fs := flag.NewFlagSet("run", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	var relayURL, dataDir string
+	fs.StringVar(&relayURL, "relay", "", "")
+	fs.StringVar(&dataDir, "data-dir", "", "")
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || strings.TrimSpace(relayURL) == "" {
+		return "", "", &exitCode{code: 2, err: errors.New(usage())}
+	}
+	return relayURL, dataDir, nil
+}
+
+func heartbeatInterval(raw string) (time.Duration, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 10 * time.Second, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d < 100*time.Millisecond || d > 2*time.Minute {
+		return 0, errors.New("BATON_HEARTBEAT_INTERVAL 无效")
+	}
+	return d, nil
 }
 
 type registerOpts struct {

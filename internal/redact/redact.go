@@ -13,9 +13,10 @@ var (
 	kvPattern         = regexp.MustCompile(`(?i)\b(password|sslpassword|token|secret)=([^\s]+)`)
 	cookiePattern     = regexp.MustCompile(`(?i)\bbaton_session=[^;\s]+`)
 	csrfPattern       = regexp.MustCompile(`(?i)\bcsrf_token=[^;\s&]+`)
-	bearerPattern     = regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9_-]+`)
+	bearerPattern     = regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._=-]+`)
 	enrollmentPattern = regexp.MustCompile(`(?i)\benrollment_token=[^;\s&]+`)
 	connectionPattern = regexp.MustCompile(`(?i)\bconnection_token=[^;\s&]+`)
+	jwtPattern        = regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`)
 )
 
 // Scrub 替换连接串、口令参数和会话 Cookie。输入不是这些内容时原样返回。
@@ -27,6 +28,7 @@ func Scrub(s string) string {
 	s = bearerPattern.ReplaceAllString(s, "bearer [redacted]")
 	s = enrollmentPattern.ReplaceAllString(s, "enrollment_token=[redacted]")
 	s = connectionPattern.ReplaceAllString(s, "connection_token=[redacted]")
+	s = jwtPattern.ReplaceAllString(s, "[redacted]")
 	return s
 }
 
@@ -50,6 +52,8 @@ var sensitiveKeys = map[string]struct{}{
 	"connection_token": {},
 	"credential_token": {},
 	"node_token":       {},
+	"control_token":    {},
+	"signing_key":      {},
 }
 
 // Handler 在写入下一级日志前去掉敏感字段。

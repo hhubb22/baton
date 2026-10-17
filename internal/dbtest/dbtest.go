@@ -57,7 +57,8 @@ func Open(t *testing.T) *pgxpool.Pool {
 			WHERE table_schema = 'public'
 			  AND table_name IN (
 			    'employees', 'login_sessions', 'schema_migrations',
-			    'node_enrollments', 'nodes', 'node_credentials', 'employee_settings'
+			    'node_enrollments', 'nodes', 'node_credentials', 'employee_settings',
+			    'node_presence'
 			  )`).Scan(&n); err != nil {
 			t.Errorf("检查 public 失败: %s", redact.Scrub(err.Error()))
 		} else if n != 0 {

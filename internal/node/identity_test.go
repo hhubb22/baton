@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"baton/internal/auth"
 	"baton/internal/identity"
 )
 
@@ -94,7 +93,7 @@ func TestValidateRejectsRoleAndDuplicateCapability(t *testing.T) {
 
 func sampleIdentity(t *testing.T) Identity {
 	t.Helper()
-	token, err := auth.NewSecret()
+	signer, err := GenerateSigner()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,6 +106,11 @@ func sampleIdentity(t *testing.T) Identity {
 		t.Fatal(err)
 	}
 	credentialID, err := identity.NewUUID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	expires := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	token, err := signer.SignNodeToken(nodeID, employeeID, credentialID, expires)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +127,7 @@ func sampleIdentity(t *testing.T) Identity {
 			ID:        credentialID,
 			Version:   1,
 			Token:     token,
-			ExpiresAt: time.Now().UTC().Add(time.Hour),
+			ExpiresAt: expires,
 		},
 	}
 }

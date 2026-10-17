@@ -76,7 +76,7 @@ func Validate(displayName, system, role string, capabilities []string) error {
 	return nil
 }
 
-// ValidSecret 检查一次性注册凭据或连接凭据的文本形状。
+// ValidSecret 检查一次性注册凭据的文本形状。节点连接凭据是 JWT，用 ValidNodeToken。
 func ValidSecret(secret string) bool {
 	if len(secret) < 20 || len(secret) > 200 {
 		return false
@@ -86,6 +86,30 @@ func ValidSecret(secret string) bool {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
 		default:
 			return false
+		}
+	}
+	return true
+}
+
+// ValidNodeToken 只检查连接凭据的 JWT 文本形状，不验证签名。
+func ValidNodeToken(token string) bool {
+	if len(token) < 40 || len(token) > 4096 {
+		return false
+	}
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" {
+			return false
+		}
+		for _, r := range part {
+			switch {
+			case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			default:
+				return false
+			}
 		}
 	}
 	return true

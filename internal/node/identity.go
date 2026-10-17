@@ -70,7 +70,7 @@ func (id Identity) complete() error {
 	if _, err := identity.ParseUUID(id.Credential.ID); err != nil {
 		return err
 	}
-	if id.Credential.Token == "" || !ValidSecret(id.Credential.Token) || id.Credential.Version < 1 {
+	if id.Credential.Token == "" || !ValidNodeToken(id.Credential.Token) || id.Credential.Version < 1 {
 		return errors.New("incomplete credential")
 	}
 	if id.RegistrationSeq < 1 || id.RegisteredAt.IsZero() || id.Credential.ExpiresAt.IsZero() {

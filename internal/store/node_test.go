@@ -71,6 +71,10 @@ func TestConcurrentRegistrationChoosesEarliestPC(t *testing.T) {
 		}
 	}
 
+	signer, err := node.GenerateSigner()
+	if err != nil {
+		t.Fatal(err)
+	}
 	start := make(chan struct{})
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(jobs))
@@ -86,7 +90,7 @@ func TestConcurrentRegistrationChoosesEarliestPC(t *testing.T) {
 				Role:          job.role,
 				Capabilities:  []string{"start"},
 				CredentialTTL: 30 * 24 * time.Hour,
-			})
+			}, signer)
 			if err != nil {
 				errCh <- err
 			}
@@ -133,6 +137,10 @@ func TestEnrollmentSingleUseUnderConcurrency(t *testing.T) {
 		t.Fatal(err)
 	}
 	const n = 4
+	signer, err := node.GenerateSigner()
+	if err != nil {
+		t.Fatal(err)
+	}
 	start := make(chan struct{})
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -150,7 +158,7 @@ func TestEnrollmentSingleUseUnderConcurrency(t *testing.T) {
 				Role:          node.RolePC,
 				Capabilities:  []string{},
 				CredentialTTL: 30 * 24 * time.Hour,
-			})
+			}, signer)
 			mu.Lock()
 			defer mu.Unlock()
 			switch {
@@ -195,6 +203,10 @@ func mustRegister(t *testing.T, ctx context.Context, pool *pgxpool.Pool, repo *s
 	if err != nil {
 		t.Fatal(err)
 	}
+	signer, err := node.GenerateSigner()
+	if err != nil {
+		t.Fatal(err)
+	}
 	ident, err := repo.Register(ctx, store.RegisterInput{
 		Token:         token,
 		DisplayName:   name,
@@ -202,18 +214,27 @@ func mustRegister(t *testing.T, ctx context.Context, pool *pgxpool.Pool, repo *s
 		Role:          role,
 		Capabilities:  caps,
 		CredentialTTL: 30 * 24 * time.Hour,
-	})
+	}, signer)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ident.EmployeeID != employeeID {
 		t.Fatal("节点归属不是注册凭据对应的员工")
 	}
+	pub, err := signer.PublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := node.VerifyNodeToken(pub, ident.Credential.Token, time.Now())
+	if err != nil || claims.NodeID != ident.NodeID || claims.EmployeeID != employeeID || claims.CredentialID != ident.Credential.ID {
+		t.Fatal("连接凭据没有绑定节点、员工和 credential_id")
+	}
 	var n int
 	err = pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM node_credentials
-		WHERE id = $1::uuid AND token_hash = $2 AND version = 1 AND revoked_at IS NULL`,
-		ident.Credential.ID, auth.Digest(ident.Credential.Token)).Scan(&n)
+		WHERE id = $1::uuid AND node_id = $2::uuid AND employee_id = $3::uuid
+		  AND version = 1 AND revoked_at IS NULL AND expires_at > now()`,
+		ident.Credential.ID, ident.NodeID, employeeID).Scan(&n)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,8 +1,8 @@
 # Baton
 
-员工使用部署管理员分配的本地账号登录 Coordinator，退出，查询本人身份，领取一次性节点注册凭据，并设置默认 PC。初始口令只能使用到员工完成更换为止。`batond register` 用这张凭据注册节点，把身份保存在本机；进程再次启动时继续使用同一身份。
+员工使用部署管理员分配的本地账号登录 Coordinator，退出，查询本人身份，领取一次性节点注册凭据，并设置默认 PC。初始口令只能使用到员工完成更换为止。`batond register` 用这张凭据注册节点，把身份保存在本机。`batond run` 用这份身份主动连接 Relay，断线后重连，并在同步完成前不会显示为可执行。
 
-本目录目前包含这条路径的构建、迁移、HTTP 接口、batond 注册命令和测试。节点连接、心跳、凭据吊销、任务委托和管理员网页不在这里。
+本目录目前包含这条路径的构建、迁移、HTTP 接口、Coordinator、Relay、batond 和测试。凭据吊销、任务委托和管理员网页不在这里。
 
 ## 运行要求
 
@@ -22,17 +22,25 @@
 | `BATON_NODE_CREDENTIAL_TTL` | 节点连接凭据有效期，默认 `720h`，允许 `1h` 到 `2160h` |
 | `BATON_TLS_CERT_FILE` | 与 `BATON_TLS_KEY_FILE` 同时设置时，进程直接提供 TLS |
 | `BATON_TLS_KEY_FILE` | TLS 私钥文件 |
+| `BATON_CONTROL_ADDR` | Coordinator 控制连接监听地址，默认 `127.0.0.1:9443`，不能与 API 地址相同 |
+| `BATON_CONTROL_TOKEN` | Coordinator 与 Relay 共用的控制凭据，20 到 200 个字符。不要写入日志 |
+| `BATON_NODE_SIGNING_KEY` | Coordinator 的 Ed25519 PKCS#8 私钥文件，权限必须是仅当前用户可读 |
+| `BATON_HEARTBEAT_INTERVAL` | 心跳间隔，默认 `10s`，允许 `100ms` 到 `2m` |
+| `BATON_OFFLINE_AFTER` | 未联系超过该时间判离线，默认 `30s`，允许 `200ms` 到 `10m`，并且必须晚于心跳 |
+| `BATON_LISTEN_ADDR` | Relay 接受节点连接的地址 |
+| `BATON_COORDINATOR_URL` | Relay 连接的 Coordinator 控制入口，必须是不带路径和凭据的 `https` 地址 |
 | `BATON_ENROLLMENT_TOKEN` | `batond register` 读取的一次性注册凭据。不要写入命令行 |
-| `BATON_TLS_CA_FILE` | `batond` 额外信任的 CA 证书文件。地址仍必须是 https |
+| `BATON_TLS_CA_FILE` | `batond` 和 Relay 额外信任的 CA 证书文件。地址仍必须是 https 或 wss |
 
 会话 Cookie 名为 `baton_session`，固定带 `Secure`、`HttpOnly` 和 `SameSite=Strict`。进程监听 HTTP 时也保持这些属性。浏览器只在 HTTPS 请求里送回该 Cookie；入口代理终止 TLS 时，浏览器看到的来源仍是 HTTPS。
 
-注册凭据和节点连接凭据不进入 URL、命令行参数或日志。数据库只保存它们的 SHA-256。
+注册凭据和节点连接凭据不进入 URL、命令行参数或日志。注册凭据和浏览器会话在数据库里只保存 SHA-256。节点连接凭据是 Ed25519 签名的 JWT，数据库只保存可吊销的 `credential_id`，不保存 JWT。签名私钥只在 Coordinator。
 
 ## 命令
 
 ```text
 go build -o bin/coordinator ./cmd/coordinator
+go build -o bin/relay ./cmd/relay
 go build -o bin/batond ./cmd/batond
 ```
 
@@ -49,7 +57,11 @@ BATON_DATABASE_URL=postgres://127.0.0.1:5432/baton ./bin/coordinator admin emplo
 ```
 
 ```text
-BATON_DATABASE_URL=postgres://127.0.0.1:5432/baton BATON_ALLOWED_ORIGINS=https://baton.example ./bin/coordinator serve
+BATON_DATABASE_URL=postgres://127.0.0.1:5432/baton BATON_ALLOWED_ORIGINS=https://baton.example BATON_CONTROL_TOKEN=change-this-control-token BATON_NODE_SIGNING_KEY=./node-signing.pem ./bin/coordinator serve
+```
+
+```text
+BATON_LISTEN_ADDR=127.0.0.1:9444 BATON_COORDINATOR_URL=https://127.0.0.1:9443 BATON_CONTROL_TOKEN=change-this-control-token BATON_TLS_CERT_FILE=./tls.pem BATON_TLS_KEY_FILE=./tls.key ./bin/relay
 ```
 
 创建和重置把一次性口令写到标准输出，只显示这一次。数据库保存 Argon2id 摘要。标准错误和 HTTP 日志不记录口令、会话令牌、CSRF 令牌、注册凭据或节点连接凭据。不要把标准输出并进普通运行日志。
@@ -65,6 +77,12 @@ batond register --coordinator https://baton.example --display-name "Desk" --syst
 系统取 `windows`、`macos` 或 `linux`。角色取 `pc`（PC 执行节点）或 `ubuntu`（Ubuntu 开发节点）。`--capability` 可重复，名称使用小写字母、数字、点、下划线和连字符。
 
 连接凭据只写入数据目录中的 `identity.json`，权限为仅当前用户可读写。标准输出只打印节点 ID 等非秘密字段。命令会说明当前使用文件保存，而不是系统凭据存储。数据目录里已经有身份时，命令不会再次注册。
+
+```text
+batond run --relay wss://baton.example/v1/node
+```
+
+`run` 读取同一份身份，主动建立 TLS WebSocket。断线后按 1 到 30 秒、带抖动的指数退避重连。认证失效时进程退出并说明需要重新认证，不会重新注册。每次启动生成一个 incarnation；已有另一个 incarnation 在线时，后启动的进程不能接管该节点。
 
 ## 会话
 
@@ -108,7 +126,7 @@ batond register --coordinator https://baton.example --display-name "Desk" --syst
 {"enrollment_token":"...","display_name":"Desk","system":"linux","role":"pc","capabilities":["start"]}
 ```
 
-成功时中心保存归属、显示名、系统、角色、能力列表和注册序号，并返回只出示一次的连接凭据。连接凭据默认 30 天。节点连接、心跳和吊销尚未实现。
+成功时中心保存归属、显示名、系统、角色、能力列表和注册序号，并返回只出示一次的连接凭据。连接凭据是绑定节点、员工、`credential_id`、签发方、受众和有效期的 JWT，默认 30 天。
 
 员工还没有默认 PC 时，注册会按注册序号选择最早的、尚未吊销的 PC 执行节点并保存。之后新注册的节点不改变它。Ubuntu 开发节点不会被选为默认 PC。
 
@@ -120,6 +138,8 @@ batond register --coordinator https://baton.example --display-name "Desk" --syst
 
 只能改成自己的其他有效 PC 执行节点。其他员工的节点返回 403，不说明该节点是否存在。成功响应里的 `default_pc_node_id`、显示名、系统和注册序号是数据库里实际保存的值。
 
+`GET /nodes` 和 `GET /nodes/{id}` 凭登录会话返回本人节点。响应包含在线状态、最后联系时间、状态更新时间、是否已同步，以及 `executable`。尚未同步的节点 `executable` 为 false。查询其他员工的节点或不存在的节点都返回 403，响应相同。非法节点标识返回 400。这两个读取接口不要求 CSRF。
+
 ## 测试
 
 集成测试读取 `BATON_TEST_DATABASE_URL`，只连接这个 PostgreSQL，并在其中创建临时 schema。未设置该变量或连接失败时，测试失败，不会改用模拟数据库。
@@ -129,4 +149,4 @@ go test ./...
 go vet ./...
 ```
 
-登录、退出、身份查询、CSRF 和 Origin 的通过路径使用本地 TLS 服务，并把测试证书放进客户端信任池。明文 HTTP 测试确认响应仍带 `Secure` Cookie：按正式 Cookie 规则、不把环回地址当作安全来源的客户端不会在明文请求里带回它。CSRF 和 Origin 检查在两条路径上都生效。节点注册的通过路径同样使用该 TLS 服务；`batond register` 通过 `BATON_TLS_CA_FILE` 信任测试证书。
+登录、退出、身份查询、CSRF 和 Origin 的通过路径使用本地 TLS 服务，并把测试证书放进客户端信任池。明文 HTTP 测试确认响应仍带 `Secure` Cookie：按正式 Cookie 规则、不把环回地址当作安全来源的客户端不会在明文请求里带回它。CSRF 和 Origin 检查在两条路径上都生效。节点注册的通过路径同样使用该 TLS 服务；`batond register` 通过 `BATON_TLS_CA_FILE` 信任测试证书。节点连接测试使用真实的 Coordinator、Relay 和 batond 进程，以及 TLS WebSocket，并注入断线、Coordinator 重启和 Relay 重启。

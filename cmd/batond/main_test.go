@@ -51,11 +51,16 @@ func TestRegisterKeepsIdentityAcrossRestart(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	logs := &bytes.Buffer{}
+	signer, err := node.GenerateSigner()
+	if err != nil {
+		t.Fatal(err)
+	}
 	api, err := httpapi.New(pool, httpapi.Settings{
 		Origins:           []string{"https://baton.example"},
 		SessionTTL:        time.Hour,
 		EnrollmentTTL:     10 * time.Minute,
 		NodeCredentialTTL: 30 * 24 * time.Hour,
+		Signer:            signer,
 		Logger:            slog.New(slog.NewTextHandler(logs, nil)),
 	})
 	if err != nil {
@@ -152,8 +157,8 @@ func TestRegisterKeepsIdentityAcrossRestart(t *testing.T) {
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("身份文件权限是 %o", info.Mode().Perm())
 	}
-	if count(t, pool, `SELECT COUNT(*) FROM node_credentials WHERE token_hash = $1`, auth.Digest(ident.Credential.Token)) != 1 {
-		t.Fatal("数据库没有保存连接凭据摘要")
+	if count(t, pool, `SELECT COUNT(*) FROM node_credentials WHERE id = $1::uuid AND node_id = $2::uuid AND revoked_at IS NULL`, ident.Credential.ID, ident.NodeID) != 1 {
+		t.Fatal("数据库没有保存可吊销的 credential_id")
 	}
 
 	stdout.Reset()

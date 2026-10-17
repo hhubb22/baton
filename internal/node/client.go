@@ -65,7 +65,7 @@ func Register(ctx context.Context, req RegisterRequest) (Identity, error) {
 	if err != nil {
 		return Identity{}, errors.New("无法编码注册请求")
 	}
-	roots, err := rootCAs(req.CAFile)
+	roots, err := LoadRootCAs(req.CAFile)
 	if err != nil {
 		return Identity{}, err
 	}
@@ -137,7 +137,8 @@ func coordinatorRegisterURL(base string) (string, error) {
 	return u.String(), nil
 }
 
-func rootCAs(caFile string) (*x509.CertPool, error) {
+// LoadRootCAs 读取额外信任的 CA。空路径使用系统信任库。
+func LoadRootCAs(caFile string) (*x509.CertPool, error) {
 	if strings.TrimSpace(caFile) == "" {
 		return nil, nil
 	}
