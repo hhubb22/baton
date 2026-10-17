@@ -1,0 +1,39 @@
+# 云端实施约束
+
+这段附在每个派给 Cursor Cloud Agent 的 Baton 工单后面。工单本身的范围、验收和迁移编号写在前面。
+
+## 环境
+
+- 测试数据库由 `.cursor/start.sh` 启动，`BATON_TEST_DATABASE_URL` 已经设置。数据库没有响应时先运行 `bash .cursor/start.sh`。
+- 不要连接任何其他数据库或外部服务。
+
+## 实现
+
+- 先读 `specs/baton/PRODUCT.md` 与 `specs/baton/TECH.md` 中工单列出的条目，再读相关代码，按现有风格实现。
+- 优先使用维护活跃的成熟库，不手写 syscall、协议或通用算法。
+- 新迁移文件只使用工单中分配的编号；不要修改已有迁移，除非工单明确要求。
+- 同步更新 README 和 `specs/baton/TECH.md` 开头的「当前已实现」。实现与 TECH 不一致的地方写进最终回复，不要改设计条款。
+- 不要修改 Linear，不要合并 PR。
+
+## 验证
+
+完成前以下命令全部通过：
+
+```text
+go build ./...
+GOOS=windows go build ./...
+GOOS=darwin go build ./...
+go vet ./...
+go test -count=1 ./...
+```
+
+并发相关的包再跑 `go test -race`。改动 `web/` 时，在 `web/` 下运行 `pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm test:e2e` 和 `pnpm check:dist`，并提交更新后的 `internal/webui/dist`。Windows、macOS 只能交叉编译的部分，在回复里列出。
+
+## 提交
+
+- 提交信息使用 `type(scope): 中文摘要`，正文说明改了什么，最后一行写 `Refs: <工单编号>`。
+- 推送到你的工作分支并开 PR。
+
+## 最终回复
+
+用中文简短写：改动文件、实现要点、新增依赖、实际运行的测试命令和结果、与设计的偏离、需要决定的问题。

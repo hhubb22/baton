@@ -1,0 +1,8 @@
+{
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "."
+  },
+  "install": "go mod download && cd web && pnpm install --frozen-lockfile && pnpm exec playwright install chromium",
+  "start": "bash .cursor/start.sh"
+}
