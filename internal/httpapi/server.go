@@ -1,4 +1,4 @@
-// Package httpapi 提供员工登录、退出、本人身份、初始口令更换、节点注册、默认 PC 和本人节点状态。
+// Package httpapi 提供员工登录、退出、本人身份、初始口令更换、节点注册、默认 PC、本人节点状态和凭据吊销。
 package httpapi
 
 import (
@@ -35,7 +35,13 @@ type Settings struct {
 	EnrollmentTTL     time.Duration
 	NodeCredentialTTL time.Duration
 	Signer            node.TokenSigner
+	Revocations       RevocationDispatcher
 	Logger            *slog.Logger
+}
+
+// RevocationDispatcher 把已保存的吊销交给当前 Relay。没有控制连接时应尽快返回。
+type RevocationDispatcher interface {
+	DispatchRevocations(ctx context.Context) error
 }
 
 // Server 是 /api/v1 的登录与节点接口。会话 Cookie 始终带 Secure、HttpOnly 和 SameSite=Strict。
@@ -46,6 +52,7 @@ type Server struct {
 	enrollmentTTL     time.Duration
 	nodeCredentialTTL time.Duration
 	signer            node.TokenSigner
+	revocations       RevocationDispatcher
 	log               *slog.Logger
 }
 
@@ -77,6 +84,7 @@ func New(pool *pgxpool.Pool, settings Settings) (*Server, error) {
 		enrollmentTTL:     settings.EnrollmentTTL,
 		nodeCredentialTTL: settings.NodeCredentialTTL,
 		signer:            settings.Signer,
+		revocations:       settings.Revocations,
 		log:               slog.New(redact.NewHandler(logger.Handler())),
 	}, nil
 }
@@ -163,8 +171,21 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	default:
 		const nodePrefix = "/api/v1/nodes/"
 		if strings.HasPrefix(r.URL.Path, nodePrefix) {
-			id := strings.TrimPrefix(r.URL.Path, nodePrefix)
-			if id == "" || strings.Contains(id, "/") {
+			rest := strings.TrimPrefix(r.URL.Path, nodePrefix)
+			if strings.HasSuffix(rest, "/revoke") {
+				id := strings.TrimSuffix(rest, "/revoke")
+				if id == "" || strings.Contains(id, "/") {
+					s.writeError(w, r, http.StatusNotFound, "not_found", "找不到对应接口")
+					return
+				}
+				if r.Method != http.MethodPost {
+					s.writeError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "不支持该请求方法")
+					return
+				}
+				s.revokeNode(w, r, id)
+				return
+			}
+			if rest == "" || strings.Contains(rest, "/") {
 				s.writeError(w, r, http.StatusNotFound, "not_found", "找不到对应接口")
 				return
 			}
@@ -172,7 +193,7 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 				s.writeError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "不支持该请求方法")
 				return
 			}
-			s.getNode(w, r, id)
+			s.getNode(w, r, rest)
 			return
 		}
 		const prefix = "/api/v1/employees/"
@@ -533,6 +554,12 @@ func safePath(path string) string {
 	const nodePrefix = "/api/v1/nodes/"
 	if strings.HasPrefix(path, nodePrefix) {
 		rest := strings.TrimPrefix(path, nodePrefix)
+		if strings.HasSuffix(rest, "/revoke") {
+			id := strings.TrimSuffix(rest, "/revoke")
+			if id != "" && !strings.Contains(id, "/") {
+				return "/api/v1/nodes/:id/revoke"
+			}
+		}
 		if rest != "" && !strings.Contains(rest, "/") {
 			return "/api/v1/nodes/:id"
 		}

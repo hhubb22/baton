@@ -18,17 +18,22 @@ var ErrSyncRejected = errors.New("sync rejected")
 
 // NodeView 是本人节点的注册信息和连接状态。
 type NodeView struct {
-	ID              string
-	DisplayName     string
-	System          string
-	Role            string
-	Capabilities    []string
-	RegistrationSeq int64
-	Online          bool
-	Synced          bool
-	Revoked         bool
-	LastContact     *time.Time
-	StatusUpdated   *time.Time
+	ID                   string
+	DisplayName          string
+	System               string
+	Role                 string
+	Capabilities         []string
+	RegistrationSeq      int64
+	Online               bool
+	Synced               bool
+	Revoked              bool
+	RevocationStatus     string
+	RevokedBy            string
+	RevocationRequested  *time.Time
+	RevocationApplied    *time.Time
+	RevokedCredentialIDs []string
+	LastContact          *time.Time
+	StatusUpdated        *time.Time
 }
 
 // Executable 只有在线、已同步且未吊销时为真。
@@ -270,6 +275,35 @@ func (s *Store) OwnNode(ctx context.Context, employeeID, nodeID string) (NodeVie
 const nodeStatusSQL = `
 	SELECT n.id::text, n.display_name, n.system_name, n.role, n.capabilities, n.registration_seq,
 	       n.revoked_at IS NOT NULL,
+	       CASE
+	           WHEN n.revoked_at IS NULL THEN 'none'
+	           WHEN EXISTS (
+	               SELECT 1 FROM node_revocations r
+	               WHERE r.node_id = n.id AND r.applied_at IS NULL
+	           ) THEN 'pending'
+	           WHEN EXISTS (
+	               SELECT 1 FROM node_revocations r WHERE r.node_id = n.id
+	           ) THEN 'effective'
+	           ELSE 'pending'
+	       END,
+	       COALESCE((
+	           SELECT r.actor_employee_id::text
+	           FROM node_revocations r
+	           WHERE r.node_id = n.id
+	           ORDER BY r.requested_at, r.id
+	           LIMIT 1
+	       ), ''),
+	       (
+	           SELECT MIN(r.requested_at) FROM node_revocations r WHERE r.node_id = n.id
+	       ),
+	       (
+	           SELECT MAX(r.applied_at) FROM node_revocations r WHERE r.node_id = n.id
+	       ),
+	       COALESCE((
+	           SELECT array_agg(r.credential_id::text ORDER BY r.requested_at, r.credential_id)
+	           FROM node_revocations r
+	           WHERE r.node_id = n.id
+	       ), ARRAY[]::text[]),
 	       COALESCE(p.online, false),
 	       COALESCE(p.synced, false),
 	       p.last_contact_at,
@@ -280,9 +314,11 @@ const nodeStatusSQL = `
 func scanNodeView(row pgx.Row) (NodeView, error) {
 	var view NodeView
 	var caps []string
+	var creds []string
 	if err := row.Scan(
 		&view.ID, &view.DisplayName, &view.System, &view.Role, &caps, &view.RegistrationSeq,
-		&view.Revoked, &view.Online, &view.Synced, &view.LastContact, &view.StatusUpdated,
+		&view.Revoked, &view.RevocationStatus, &view.RevokedBy, &view.RevocationRequested, &view.RevocationApplied, &creds,
+		&view.Online, &view.Synced, &view.LastContact, &view.StatusUpdated,
 	); err != nil {
 		return NodeView{}, fmt.Errorf("读取节点状态失败: %s", redact.Scrub(err.Error()))
 	}
@@ -290,6 +326,21 @@ func scanNodeView(row pgx.Row) (NodeView, error) {
 		caps = []string{}
 	}
 	view.Capabilities = caps
+	if creds == nil {
+		creds = []string{}
+	}
+	view.RevokedCredentialIDs = creds
+	if view.RevocationStatus != RevocationEffective {
+		view.RevocationApplied = nil
+	}
+	if view.RevocationRequested != nil {
+		t := view.RevocationRequested.UTC()
+		view.RevocationRequested = &t
+	}
+	if view.RevocationApplied != nil {
+		t := view.RevocationApplied.UTC()
+		view.RevocationApplied = &t
+	}
 	if view.LastContact != nil {
 		t := view.LastContact.UTC()
 		view.LastContact = &t

@@ -33,6 +33,8 @@ const (
 	KindError      = "error"
 	KindSnapshot   = "snapshot"
 	KindSnapshotOK = "snapshot_ok"
+	KindRevoke     = "revoke"
+	KindRevokeOK   = "revoke_ok"
 	KindSessions   = "sessions"
 	KindPresence   = "presence"
 
@@ -87,8 +89,9 @@ type Source struct {
 }
 
 // Snapshot 是 Relay 开放节点认证前必须拿到的安全快照。
-// 吊销列表现在就可以携带；断开已建立的连接不在本快照的应用范围内。
+// 应用快照时拒绝其中的凭据和节点，并断开已经建立的对应连接。
 type Snapshot struct {
+	ID                 string       `json:"id,omitempty"`
 	Version            int          `json:"version"`
 	IssuedAt           time.Time    `json:"issued_at"`
 	PublicKey          string       `json:"public_key"`
@@ -98,6 +101,13 @@ type Snapshot struct {
 	OfflineMS          int64        `json:"offline_ms"`
 	RevokedCredentials []Revocation `json:"revoked_credentials"`
 	RevokedNodes       []Revocation `json:"revoked_nodes"`
+}
+
+// RevokeNotice 是发给已连接 Relay 的吊销补发。Relay 合并进当前快照、断开连接后再回执。
+type RevokeNotice struct {
+	ID          string       `json:"id"`
+	Credentials []Revocation `json:"credentials"`
+	Nodes       []Revocation `json:"nodes"`
 }
 
 // Revocation 是一条可吊销对象。kind 为 credential 或 node。
@@ -129,6 +139,7 @@ type Frame struct {
 	Incarnation   string          `json:"incarnation,omitempty"`
 	CorrelationID string          `json:"correlation_id,omitempty"`
 	Snapshot      *Snapshot       `json:"snapshot,omitempty"`
+	Revoke        *RevokeNotice   `json:"revoke,omitempty"`
 	Sessions      []Presence      `json:"sessions,omitempty"`
 	Presence      *Presence       `json:"presence,omitempty"`
 	Envelope      json.RawMessage `json:"envelope,omitempty"`

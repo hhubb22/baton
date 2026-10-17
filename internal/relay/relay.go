@@ -53,6 +53,7 @@ type Relay struct {
 	httpSrv     *http.Server
 	metrics     protocol.Metrics
 	wake        chan struct{}
+	ctrlWrite   sync.Mutex
 }
 
 type security struct {
@@ -191,7 +192,7 @@ func (r *Relay) serveControl(ctx context.Context) (bool, error) {
 	metrics.OnlineNodes = int64(len(r.nodes))
 	r.mu.Unlock()
 
-	if err := writeFrame(ctx, ws, protocol.Frame{Kind: protocol.KindSnapshotOK}); err != nil {
+	if err := writeFrame(ctx, ws, protocol.Frame{Kind: protocol.KindSnapshotOK, CorrelationID: frame.Snapshot.ID}); err != nil {
 		return true, err
 	}
 	if err := writeFrame(ctx, ws, protocol.Frame{Kind: protocol.KindSessions, Sessions: sessions, Metrics: &metrics}); err != nil {
@@ -259,10 +260,89 @@ func (r *Relay) apply(snap protocol.Snapshot) error {
 			next.revokedNode[item.ID] = struct{}{}
 		}
 	}
+	r.publish(next)
+	return nil
+}
+
+func (r *Relay) publish(next *security) {
 	r.mu.Lock()
 	r.snap = next
+	drop := matchingLocked(r.nodes, next)
 	r.mu.Unlock()
+	closeConns(drop)
+}
+
+func (r *Relay) applyRevoke(notice protocol.RevokeNotice) error {
+	r.mu.Lock()
+	if r.snap == nil {
+		r.mu.Unlock()
+		return errors.New("安全快照无效")
+	}
+	next := &security{
+		public:      r.snap.public,
+		offline:     r.snap.offline,
+		revokedID:   cloneSet(r.snap.revokedID),
+		revokedNode: cloneSet(r.snap.revokedNode),
+	}
+	for _, item := range notice.Credentials {
+		if item.ID != "" {
+			next.revokedID[item.ID] = struct{}{}
+		}
+	}
+	for _, item := range notice.Nodes {
+		if item.ID != "" {
+			next.revokedNode[item.ID] = struct{}{}
+		}
+	}
+	r.snap = next
+	drop := matchingLocked(r.nodes, next)
+	r.mu.Unlock()
+	closeConns(drop)
 	return nil
+}
+
+func matchingLocked(nodes map[string]*nodeConn, sec *security) []*nodeConn {
+	if sec == nil {
+		return nil
+	}
+	var drop []*nodeConn
+	for _, nc := range nodes {
+		if _, ok := sec.revokedID[nc.credentialID]; ok {
+			drop = append(drop, nc)
+			continue
+		}
+		if _, ok := sec.revokedNode[nc.nodeID]; ok {
+			drop = append(drop, nc)
+		}
+	}
+	return drop
+}
+
+func closeConns(conns []*nodeConn) {
+	for _, nc := range conns {
+		nc.ws.Close(websocket.StatusPolicyViolation, "")
+	}
+}
+
+func cloneSet(in map[string]struct{}) map[string]struct{} {
+	out := make(map[string]struct{}, len(in))
+	for key := range in {
+		out[key] = struct{}{}
+	}
+	return out
+}
+
+func credentialAllowed(sec *security, credentialID, nodeID string) bool {
+	if sec == nil {
+		return false
+	}
+	if _, revoked := sec.revokedID[credentialID]; revoked {
+		return false
+	}
+	if _, revoked := sec.revokedNode[nodeID]; revoked {
+		return false
+	}
+	return true
 }
 
 func (r *Relay) ensureListen() error {
@@ -336,12 +416,7 @@ func (r *Relay) handleNode(ws *websocket.Conn) {
 		r.rejectNode(ws, protocol.CodeInvalidCredential, "")
 		return
 	}
-	if _, revoked := snap.revokedID[claims.CredentialID]; revoked {
-		r.reject(protocol.CodeInvalidCredential)
-		r.rejectNode(ws, protocol.CodeInvalidCredential, "")
-		return
-	}
-	if _, revoked := snap.revokedNode[claims.NodeID]; revoked {
+	if !credentialAllowed(snap, claims.CredentialID, claims.NodeID) {
 		r.reject(protocol.CodeInvalidCredential)
 		r.rejectNode(ws, protocol.CodeInvalidCredential, "")
 		return
@@ -364,6 +439,13 @@ func (r *Relay) handleNode(ws *websocket.Conn) {
 	}
 	var previous *nodeConn
 	r.mu.Lock()
+	if !credentialAllowed(r.snap, claims.CredentialID, claims.NodeID) {
+		r.metrics.Rejects++
+		r.mu.Unlock()
+		r.log.Info("event=rejected", "code", protocol.CodeInvalidCredential)
+		r.rejectNode(ws, protocol.CodeInvalidCredential, "")
+		return
+	}
 	if current := r.nodes[claims.NodeID]; current != nil && current.incarnation != frame.Incarnation {
 		r.metrics.Rejects++
 		r.mu.Unlock()
@@ -499,6 +581,18 @@ func (r *Relay) readControl(ctx context.Context, ws *websocket.Conn) error {
 			if frame.Snapshot != nil {
 				_ = r.apply(*frame.Snapshot)
 			}
+		case protocol.KindRevoke:
+			if frame.Revoke == nil || frame.Revoke.ID == "" {
+				continue
+			}
+			if err := r.applyRevoke(*frame.Revoke); err != nil {
+				r.log.Info("event=revocation_rejected")
+				continue
+			}
+			r.log.Info("event=revocation_applied", "revocation_id", frame.Revoke.ID)
+			if err := r.writeControlFrame(ctx, ws, protocol.Frame{Kind: protocol.KindRevokeOK, CorrelationID: frame.Revoke.ID}); err != nil {
+				return err
+			}
 		}
 	}
 }
@@ -556,7 +650,7 @@ func (r *Relay) flush(ctx context.Context, ws *websocket.Conn) error {
 	r.mu.Unlock()
 	for _, item := range pending {
 		copied := item
-		if err := writeFrame(ctx, ws, protocol.Frame{Kind: protocol.KindPresence, Presence: &copied}); err != nil {
+		if err := r.writeControlFrame(ctx, ws, protocol.Frame{Kind: protocol.KindPresence, Presence: &copied}); err != nil {
 			r.restore(pending)
 			return err
 		}
@@ -569,11 +663,23 @@ func (r *Relay) flush(ctx context.Context, ws *websocket.Conn) error {
 		if !ok {
 			return nil
 		}
-		if err := writeRaw(ctx, ws, raw); err != nil {
+		if err := r.writeControlRaw(ctx, ws, raw); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (r *Relay) writeControlFrame(ctx context.Context, ws *websocket.Conn, frame protocol.Frame) error {
+	r.ctrlWrite.Lock()
+	defer r.ctrlWrite.Unlock()
+	return writeFrame(ctx, ws, frame)
+}
+
+func (r *Relay) writeControlRaw(ctx context.Context, ws *websocket.Conn, raw []byte) error {
+	r.ctrlWrite.Lock()
+	defer r.ctrlWrite.Unlock()
+	return writeRaw(ctx, ws, raw)
 }
 
 func (r *Relay) restore(pending map[string]protocol.Presence) {

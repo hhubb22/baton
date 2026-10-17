@@ -169,18 +169,19 @@ func cmdServe(ctx context.Context, stderr io.Writer, getenv func(string) string)
 			return err
 		}
 		logger := slog.New(slog.NewTextHandler(stderr, nil))
+		ctrl, err := control.New(store.New(pool), signer, cfg.ControlToken, cfg.Heartbeat, cfg.OfflineAfter, logger)
+		if err != nil {
+			return err
+		}
 		api, err := httpapi.New(pool, httpapi.Settings{
 			Origins:           cfg.AllowedOrigins,
 			SessionTTL:        cfg.SessionTTL,
 			EnrollmentTTL:     cfg.EnrollmentTTL,
 			NodeCredentialTTL: cfg.NodeCredentialTTL,
 			Signer:            signer,
+			Revocations:       ctrl,
 			Logger:            logger,
 		})
-		if err != nil {
-			return err
-		}
-		ctrl, err := control.New(store.New(pool), signer, cfg.ControlToken, cfg.Heartbeat, cfg.OfflineAfter, logger)
 		if err != nil {
 			return err
 		}

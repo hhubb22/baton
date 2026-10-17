@@ -12,6 +12,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"baton/internal/identity"
@@ -30,6 +31,10 @@ type Server struct {
 	heartbeat time.Duration
 	offline   time.Duration
 	log       *slog.Logger
+
+	writeMu sync.Mutex
+	mu      sync.Mutex
+	link    *controlLink
 }
 
 func New(st *store.Store, signer node.Signer, token string, heartbeat, offline time.Duration, log *slog.Logger) (*Server, error) {
@@ -70,16 +75,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ws.SetReadLimit(protocol.MaxMessageBytes)
+	link := s.bind(ws)
 	s.log.Info("event=control_connected")
 	defer func() {
+		s.unbind(link)
 		ws.Close(websocket.StatusNormalClosure, "")
 		s.log.Info("event=control_disconnected")
 	}()
-	if err := s.writeSnapshot(r.Context(), ws); err != nil {
+	if err := s.writeSnapshot(r.Context(), link); err != nil {
 		s.log.Info("event=snapshot_failed")
 		return
 	}
-	s.read(r.Context(), ws)
+	s.markReady(link)
+	s.read(r.Context(), link)
 }
 
 func (s *Server) authorized(header string) bool {
@@ -91,12 +99,26 @@ func (s *Server) authorized(header string) bool {
 	return subtle.ConstantTimeCompare(sum[:], s.tokenHash[:]) == 1
 }
 
-func (s *Server) writeSnapshot(ctx context.Context, ws *websocket.Conn) error {
+func (s *Server) writeSnapshot(ctx context.Context, link *controlLink) error {
 	creds, nodes, err := s.store.Revocations(ctx)
 	if err != nil {
 		return err
 	}
+	snapID, err := identity.NewUUID()
+	if err != nil {
+		return err
+	}
+	credIDs := make([]string, 0, len(creds))
+	for _, item := range creds {
+		if item.ID != "" {
+			credIDs = append(credIDs, item.ID)
+		}
+	}
+	s.mu.Lock()
+	link.acks[snapID] = credIDs
+	s.mu.Unlock()
 	snap := protocol.Snapshot{
+		ID:                 snapID,
 		Version:            protocol.Version,
 		IssuedAt:           time.Now().UTC(),
 		PublicKey:          base64.RawURLEncoding.EncodeToString(s.public),
@@ -107,10 +129,15 @@ func (s *Server) writeSnapshot(ctx context.Context, ws *websocket.Conn) error {
 		RevokedCredentials: creds,
 		RevokedNodes:       nodes,
 	}
-	return writeFrame(ctx, ws, protocol.Frame{Kind: protocol.KindSnapshot, Snapshot: &snap})
+	if err := s.send(ctx, link.ws, protocol.Frame{Kind: protocol.KindSnapshot, Snapshot: &snap}); err != nil {
+		s.dropAck(link, snapID)
+		return err
+	}
+	return nil
 }
 
-func (s *Server) read(ctx context.Context, ws *websocket.Conn) {
+func (s *Server) read(ctx context.Context, link *controlLink) {
+	ws := link.ws
 	for {
 		_, raw, err := ws.Read(ctx)
 		if err != nil {
@@ -122,7 +149,11 @@ func (s *Server) read(ctx context.Context, ws *websocket.Conn) {
 		}
 		switch frame.Kind {
 		case protocol.KindSnapshotOK:
+			s.completeAck(ctx, link, frame.CorrelationID)
 			s.log.Info("event=snapshot_applied")
+			if _, _, err := s.pushPending(ctx); err != nil {
+				s.log.Error("event=revocation_dispatch_failed")
+			}
 		case protocol.KindSessions:
 			if err := s.store.ApplySessions(ctx, frame.Sessions); err != nil {
 				s.log.Error("event=sessions_failed")
@@ -152,6 +183,9 @@ func (s *Server) read(ctx context.Context, ws *websocket.Conn) {
 			}
 		case protocol.KindEnvelope:
 			s.onEnvelope(ctx, ws, frame.Envelope)
+		case protocol.KindRevokeOK:
+			s.completeAck(ctx, link, frame.CorrelationID)
+			s.log.Info("event=revocation_acked", "revocation_id", frame.CorrelationID)
 		case protocol.KindError:
 			s.log.Info("event=relay_error", "code", frame.Code)
 		}
@@ -161,7 +195,7 @@ func (s *Server) read(ctx context.Context, ws *websocket.Conn) {
 func (s *Server) onEnvelope(ctx context.Context, ws *websocket.Conn, raw json.RawMessage) {
 	var env protocol.Envelope
 	if err := json.Unmarshal(raw, &env); err != nil || env.Source == nil || env.Source.Kind != protocol.SourceNode {
-		_ = writeError(ctx, ws, protocol.CodeInvalidMessage, "")
+		_ = s.writeControlError(ctx, ws, protocol.CodeInvalidMessage, "")
 		return
 	}
 	var body struct {
@@ -212,11 +246,11 @@ func (s *Server) reply(ctx context.Context, ws *websocket.Conn, req protocol.Env
 	if err != nil {
 		return
 	}
-	_ = writeFrame(ctx, ws, protocol.Frame{Kind: protocol.KindEnvelope, Envelope: env})
+	_ = s.send(ctx, ws, protocol.Frame{Kind: protocol.KindEnvelope, Envelope: env})
 }
 
-func writeError(ctx context.Context, ws *websocket.Conn, code, correlation string) error {
-	return writeFrame(ctx, ws, protocol.Frame{
+func (s *Server) writeControlError(ctx context.Context, ws *websocket.Conn, code, correlation string) error {
+	return s.send(ctx, ws, protocol.Frame{
 		Kind:          protocol.KindError,
 		Code:          code,
 		Message:       protocol.MessageOf(code),
