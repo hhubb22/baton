@@ -1,4 +1,5 @@
-# Cursor Cloud Agent 的 Baton 开发环境：Go、PostgreSQL 17、Node.js 与 pnpm、Playwright Chromium 的系统依赖。
+# Cursor Cloud Agent 的 Baton 开发环境：Go、PostgreSQL 17、Node.js 与 pnpm、Playwright Chromium 的系统依赖，
+# 以及读取测试凭据用的 1Password CLI（凭据由 OP_SERVICE_ACCOUNT_TOKEN 对应的只读 Service Account 提供）。
 FROM node:24-bookworm-slim AS node
 
 FROM golang:1.27-bookworm
@@ -10,8 +11,13 @@ RUN apt-get update \
     && install -d /usr/share/postgresql-common/pgdg \
     && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
     && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+    && curl -fsSL https://downloads.1password.com/linux/keys/1password.asc | gpg --dearmor -o /usr/share/keyrings/1password-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/1password-archive-keyring.gpg] https://downloads.1password.com/linux/debian/$(dpkg --print-architecture) stable main" > /etc/apt/sources.list.d/1password.list \
+    && install -d /etc/debsig/policies/AC2D62742012EA22 /usr/share/debsig/keyrings/AC2D62742012EA22 \
+    && curl -fsSL https://downloads.1password.com/linux/debian/debsig/1password.pol -o /etc/debsig/policies/AC2D62742012EA22/1password.pol \
+    && curl -fsSL https://downloads.1password.com/linux/keys/1password.asc | gpg --dearmor -o /usr/share/debsig/keyrings/AC2D62742012EA22/debsig.gpg \
     && apt-get update \
-    && apt-get install -y --no-install-recommends postgresql-17 \
+    && apt-get install -y --no-install-recommends postgresql-17 1password-cli \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=node /usr/local/bin/node /usr/local/bin/node

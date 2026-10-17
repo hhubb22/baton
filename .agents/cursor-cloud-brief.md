@@ -7,7 +7,8 @@
 - 开始前运行 `git fetch origin`，确认工作分支包含工单给出的基线提交；落后于 `origin/main` 时先快进或变基到 `origin/main`，再开始改动。
 - 环境变量在 `/etc/profile.d/baton.sh`。`go`、`BATON_TEST_DATABASE_URL` 不可用时先执行 `. /etc/profile.d/baton.sh`。
 - 测试数据库由 `.cursor/start.sh` 启动。数据库没有响应时运行 `bash .cursor/start.sh`。
-- 不要连接任何其他数据库或外部服务。
+- 不要连接工单没有要求的数据库或外部服务。
+- 工单需要的测试凭据在 1Password 保险库 `Baton Test`，用 `op read "op://Baton Test/<条目>/<字段>"` 或 `op run` 读取（`OP_SERVICE_ACCOUNT_TOKEN` 已由环境提供，只读）。不要把凭据的值写进文件、日志、测试数据、提交或回复。
 
 ## 实现
 

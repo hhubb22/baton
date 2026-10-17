@@ -27,6 +27,12 @@
 - 用后台的 `cursor-cloud wait` 等待完成。审查时把分支取到独立 worktree，变基到 `main` 后在本机复跑验证；需要修改时用 `followup` 发回同一个 Agent。
 - 审查通过后以 squash 方式合并 PR，提交信息符合下方约定，然后按「代码交付」写提交链接并关闭工单。云端开的 PR 是 draft，合并前先 `gh pr ready`；本地变基后推回 PR 分支用 `--force-with-lease`。
 
+## 凭据
+
+- 测试凭据放在 1Password 保险库 `Baton Test`，不写进仓库、工单、提示词或明文文件。
+- 本机 Agent 用 Service Account `baton-local-agents`（读写），云端 Agent 用 `baton-cloud`（只读），令牌分别由 `~/.zshenv` 的非交互分支和 Cursor 环境 Secret `OP_SERVICE_ACCOUNT_TOKEN` 提供。
+- 派发时只引用 `op://Baton Test/...`。
+
 ## 验证环境
 
 - `go build ./...`、`go vet ./...`
