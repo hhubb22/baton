@@ -1,4 +1,4 @@
-import type { Employee, Enrollment, NodeList, SavedDefault } from '../types.ts'
+import type { Employee, Enrollment, FileQuery, FileView, NodeList, SavedDefault } from '../types.ts'
 import { DefaultPCForm } from './DefaultPCForm.tsx'
 import { EnrollmentPanel } from './EnrollmentPanel.tsx'
 import { NodeCard } from './NodeCard.tsx'
@@ -19,6 +19,7 @@ type Props = {
   onDismissEnrollment: () => void
   onSaveDefault: (nodeId: string) => void
   onRevoke: (nodeId: string) => void
+  loadFiles: (nodeId: string, query: FileQuery) => Promise<FileView>
 }
 
 export function NodesPage({
@@ -37,6 +38,7 @@ export function NodesPage({
   onDismissEnrollment,
   onSaveDefault,
   onRevoke,
+  loadFiles,
 }: Props) {
   const canWrite = csrf !== ''
   return (
@@ -80,6 +82,7 @@ export function NodesPage({
               canWrite={canWrite}
               busy={busy}
               onRevoke={onRevoke}
+              loadFiles={loadFiles}
             />
           ))}
         </div>

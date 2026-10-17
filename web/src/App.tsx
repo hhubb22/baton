@@ -3,6 +3,7 @@ import {
   ApiError,
   changePassword,
   getMe,
+  getNodeFiles,
   getNodes,
   issueEnrollment,
   login,
@@ -245,6 +246,7 @@ export default function App() {
           onDismissEnrollment={() => setEnrollment(null)}
           onSaveDefault={(nodeId) => void onSaveDefault(nodeId)}
           onRevoke={(nodeId) => void onRevoke(nodeId)}
+          loadFiles={(nodeId, query) => getNodeFiles(nodeId, query)}
         />
       ) : null}
     </main>
