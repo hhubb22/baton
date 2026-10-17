@@ -17,12 +17,17 @@ const (
 	FileKindDirectory = "directory"
 	FileKindFile      = "file"
 	FileKindSymlink   = "symlink"
+	FileKindFIFO      = "fifo"
+	FileKindDevice    = "device"
+	FileKindSocket    = "socket"
+	FileKindSpecial   = "special"
 
 	FileCodePathEscaped   = "path_escaped"
 	FileCodeRootForbidden = "root_forbidden"
 	FileCodeInvalidPath   = "invalid_path"
 	FileCodeNotFound      = "not_found"
 	FileCodeNotText       = "not_text"
+	FileCodeUnsupported   = "unsupported_type"
 	FileCodeUnavailable   = "unavailable"
 )
 

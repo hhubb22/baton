@@ -212,7 +212,7 @@ batond files remove --id notes [--data-dir 目录]
 
 `--path` 必须是已经存在的真实目录。符号链接不能登记为浏览根。配置写在数据目录的 `browse-roots.json`，权限为仅当前用户可读写。`batond run` 正在使用该数据目录时也可以登记，下一次浏览会读到新配置。
 
-`GET /nodes/{id}/files` 需要登录会话，不要求 CSRF。不带 `root_id` 时返回已登记目录的标识，不返回本机绝对路径。带 `root_id` 和可选的 `path` 时，目录返回条目，文本文件返回最多 64 KiB 的预览。一次最多返回 200 条目录项；扫描超过 1024 条就停止，并标记这次没有列完。`truncated` 为 true 时，响应里的 `remainder` 只说明剩余内容仍在节点本地，不能用 `offset` 或其他参数把剩余部分继续取回来。二进制文件返回 `not_text`，不附带内容。
+`GET /nodes/{id}/files` 需要登录会话，不要求 CSRF。不带 `root_id` 时返回已登记目录的标识，不返回本机绝对路径。带 `root_id` 和可选的 `path` 时，目录返回条目，文本文件返回最多 64 KiB 的预览。一次最多返回 200 条目录项；扫描超过 1024 条就停止，并标记这次没有列完。`truncated` 为 true 时，响应里的 `remainder` 只说明剩余内容仍在节点本地，不能用 `offset` 或其他参数把剩余部分继续取回来。二进制文件返回 `not_text`，不附带内容。命名管道、设备文件和套接字会在目录里标出类型；打开后如果不是目录或普通文件，返回 `unsupported_type`，不读取内容。
 
 节点离线返回 `node_offline`，已吊销返回 `revoked`。其他员工的节点和不存在的节点都返回 `forbidden`，响应相同。路径越界和符号链接逃逸返回 `path_escaped`。未登记的 `root_id` 返回 `root_forbidden`。
 

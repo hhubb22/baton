@@ -210,6 +210,9 @@ func Browse(dir string, req protocol.FileRequest) protocol.FileResult {
 	if err != nil {
 		return browseOpenFail(result, err)
 	}
+	if !openedKindAllowed(info) {
+		return browseFail(result, protocol.FileCodeUnsupported, "只能浏览目录和普通文件")
+	}
 	result.OK = true
 	result.RootID = req.RootID
 	result.Path = rel
@@ -244,7 +247,16 @@ func browseOpenFail(result protocol.FileResult, err error) protocol.FileResult {
 	return browseFail(result, code, message)
 }
 
+var errSpecialFile = errors.New("special file")
+
+func openedKindAllowed(info os.FileInfo) bool {
+	return info.IsDir() || info.Mode().IsRegular()
+}
+
 func classifyOpen(err error) (string, string) {
+	if errors.Is(err, errSpecialFile) {
+		return protocol.FileCodeUnsupported, "只能浏览目录和普通文件"
+	}
 	if pathEscaped(err) {
 		return protocol.FileCodePathEscaped, "路径超出允许的目录"
 	}
@@ -357,25 +369,42 @@ func readDirLimited(file *os.File, limit int) ([]os.DirEntry, bool, error) {
 }
 
 func entryKind(entry os.DirEntry) (string, int64, bool) {
-	mode := entry.Type()
-	if mode == 0 {
-		info, err := entry.Info()
-		if err != nil {
-			return "", 0, false
-		}
-		mode = info.Mode().Type()
-	}
-	if mode&os.ModeSymlink != 0 {
-		return protocol.FileKindSymlink, 0, true
-	}
-	if mode.IsDir() {
-		return protocol.FileKindDirectory, 0, true
-	}
 	info, err := entry.Info()
 	if err != nil {
-		return protocol.FileKindFile, 0, true
+		mode := entry.Type()
+		if mode == 0 {
+			return "", 0, false
+		}
+		return kindFromMode(mode), 0, true
 	}
-	return protocol.FileKindFile, info.Size(), true
+	kind := kindFromMode(info.Mode())
+	if kind == protocol.FileKindFile {
+		size := info.Size()
+		return kind, size, true
+	}
+	return kind, 0, true
+}
+
+func kindFromMode(mode os.FileMode) string {
+	if mode&os.ModeSymlink != 0 {
+		return protocol.FileKindSymlink
+	}
+	if mode.IsDir() {
+		return protocol.FileKindDirectory
+	}
+	if mode&os.ModeNamedPipe != 0 {
+		return protocol.FileKindFIFO
+	}
+	if mode&os.ModeSocket != 0 {
+		return protocol.FileKindSocket
+	}
+	if mode&os.ModeDevice != 0 {
+		return protocol.FileKindDevice
+	}
+	if mode.IsRegular() {
+		return protocol.FileKindFile
+	}
+	return protocol.FileKindSpecial
 }
 
 func previewOpened(result protocol.FileResult, file *os.File, info os.FileInfo, rootID, rel string) protocol.FileResult {
@@ -431,14 +460,6 @@ func readPreview(file *os.File) (string, bool, error) {
 		return "", false, errNotText
 	}
 	return string(chunk), truncated, nil
-}
-
-func openInRoot(root *os.Root, rel string) (*os.File, error) {
-	name := rel
-	if name == "" {
-		name = "."
-	}
-	return root.Open(name)
 }
 
 func openConfiguredRoot(rootPath string) (*os.Root, error) {

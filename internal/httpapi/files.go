@@ -188,6 +188,7 @@ var fileStatuses = map[string]fileStatus{
 	protocol.FileCodeInvalidPath:   {http.StatusBadRequest, "路径不正确"},
 	protocol.FileCodeNotFound:      {http.StatusNotFound, "找不到该路径"},
 	protocol.FileCodeNotText:       {http.StatusUnsupportedMediaType, "只能预览文本，不能通过浏览接口读取该文件"},
+	protocol.FileCodeUnsupported:   {http.StatusUnsupportedMediaType, "只能浏览目录和普通文件"},
 	protocol.FileCodeUnavailable:   {http.StatusServiceUnavailable, "暂时无法浏览该路径"},
 }
 
@@ -197,6 +198,7 @@ var allowedFileMessages = map[string]struct{}{
 	"路径不正确":     {},
 	"找不到该路径":    {},
 	"只能预览文本，不能通过浏览接口读取该文件": {},
+	"只能浏览目录和普通文件":          {},
 	"暂时无法浏览该路径":            {},
 	"没有权限读取该路径":            {},
 	"浏览目录无法打开":             {},
