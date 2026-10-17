@@ -3,6 +3,7 @@
 Goal: 用户当前目标
 Authorization: 已获准操作及仍需批准事项
 Snapshot: 当前仓库、分支、commit 与采集时间
+Issue: 工单标识/链接及最后确认的状态（如果有）
 
 ## Current state
 
