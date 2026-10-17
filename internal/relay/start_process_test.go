@@ -171,6 +171,8 @@ func TestSuspendAloneRefusesStart(t *testing.T) {
 	})
 	created := acceptTask(t, st, "start-suspend")
 	waitLog(t, st.batond, "event=start_refusal_sent")
+	// 节点发出回执后，中心还要写库；等中心记录完再取消，否则会按“许可已发出、尚无回执”得到待核实。
+	waitLog(t, st.coord, "event=start_refused")
 	if raw, err := os.ReadFile(filepath.Join(st.dataDir, "executor.log")); err == nil && len(strings.TrimSpace(string(raw))) > 0 {
 		t.Fatalf("暂停后仍然启动: %s", raw)
 	}
