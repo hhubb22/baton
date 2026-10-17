@@ -267,10 +267,23 @@ func TestAcceptMultilineText(t *testing.T) {
 	if utf8.RuneCountInString(long) != 32768 {
 		t.Fatalf("边界长度是 %d", utf8.RuneCountInString(long))
 	}
-	longIn := task.Input{RequestID: "long", Description: long, AuthorizationScope: &long, ExpectedOutputs: &long}
+	longIn := task.Input{RequestID: "long", Description: long}
 	longRec, err := repo.AcceptTask(ctx, alice.ID, longIn)
 	if err != nil || longRec.Description != long {
 		t.Fatalf("32768 个字符没有被接受: %v", err)
+	}
+	before := countFor(t, ctx, pool, alice.ID)
+	_, err = repo.AcceptTask(ctx, alice.ID, task.Input{
+		RequestID: "too-big", Description: long, AuthorizationScope: &long, ExpectedOutputs: &long,
+	})
+	var rej *task.Rejection
+	if !errors.As(err, &rej) || rej.Code != task.CodeInvalidRequest || len(rej.Fields) != 3 ||
+		rej.Fields[0] != "description" || rej.Fields[1] != "authorization_scope" || rej.Fields[2] != "expected_outputs" {
+		t.Fatalf("超限输入没有指出字段: %v", err)
+	}
+	after := countFor(t, ctx, pool, alice.ID)
+	if after.tasks != before.tasks || after.outbox != before.outbox {
+		t.Fatalf("超限输入留下了任务或投递: before %+v after %+v", before, after)
 	}
 	var length int
 	if err := pool.QueryRow(ctx, `SELECT char_length(description) FROM tasks WHERE id = $1::uuid`, longRec.TaskID).Scan(&length); err != nil {

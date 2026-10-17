@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"baton/internal/protocol"
 	"baton/internal/startpermit"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -166,6 +167,44 @@ func TestWorkerExitIsNotSuccess(t *testing.T) {
 		if body.Status != "failed" || body.ErrorCode != "result_format" {
 			t.Fatalf("进程退出被当成成功: %+v", body)
 		}
+	}
+}
+
+func TestWorkerOversizedInputFailsWithoutSecondSubmit(t *testing.T) {
+	client, pub, priv, taskID, execID, _ := startBoundWorker(t)
+	defer client.Close()
+	nonce := armNonce(t, client, taskID, execID)
+	generation := mustSessionID(t)
+	queue := time.Now().UTC().Add(time.Minute).Truncate(time.Millisecond)
+	permit := signPermit(t, priv, taskID, execID, generation, nonce, queue, startpermit.PermitTTL)
+	if _, err := client.Authorize(taskID, execID, permit, base64.RawURLEncoding.EncodeToString(pub), generation, queue.Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	huge := strings.Repeat("x", protocol.MaxMessageBytes+1)
+	first, err := client.SubmitInput(huge)
+	if err != nil || first.ExecutorInputs != 0 || first.ExecutorStarts != 1 || first.ResultDelivered {
+		t.Fatalf("超限输入不该交给执行器: %v %+v", err, first)
+	}
+	var failed bool
+	for _, rep := range first.Reports {
+		if rep.Kind != "result" {
+			continue
+		}
+		var body struct {
+			Status    string `json:"status"`
+			ErrorCode string `json:"error_code"`
+		}
+		if err := json.Unmarshal(rep.Body, &body); err != nil {
+			t.Fatal(err)
+		}
+		failed = body.Status == "failed" && body.ErrorCode == "execution_failed"
+	}
+	if !failed {
+		t.Fatalf("超限输入没有回报失败: %+v", first.Reports)
+	}
+	again, err := client.SubmitInput(huge)
+	if err != nil || again.ExecutorInputs != 0 {
+		t.Fatalf("超限输入被再次提交: %v %+v", err, again)
 	}
 }
 

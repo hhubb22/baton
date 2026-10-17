@@ -129,13 +129,16 @@ func TestMultilineTextAndLimits(t *testing.T) {
 	if utf8.RuneCountInString(limit) != 32768 {
 		t.Fatalf("边界长度是 %d", utf8.RuneCountInString(limit))
 	}
+	if err := Validate(Input{RequestID: "req-1", Description: limit}); err != nil {
+		t.Fatal(err)
+	}
 	if err := Validate(Input{
 		RequestID:          "req-1",
 		Description:        limit,
 		AuthorizationScope: &limit,
 		ExpectedOutputs:    &limit,
-	}); err != nil {
-		t.Fatal(err)
+	}); err == nil {
+		t.Fatal("三份上限文本仍被接受")
 	}
 
 	cases := []struct {

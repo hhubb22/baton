@@ -12,6 +12,7 @@ import (
 	"baton/internal/identity"
 	"baton/internal/protocol"
 	"baton/internal/session"
+	"baton/internal/task"
 )
 
 func (s *startLoop) followInput(job *startJob) {
@@ -90,18 +91,10 @@ func (s *startLoop) fetchInput(ctx context.Context, job *startJob) (string, erro
 	if strings.TrimSpace(result.Description) == "" {
 		return "", errors.New("任务输入无效")
 	}
-	payload, err := json.Marshal(struct {
-		Description        string   `json:"description"`
-		AuthorizationScope *string  `json:"authorization_scope,omitempty"`
-		ExpectedOutputs    *string  `json:"expected_outputs,omitempty"`
-		WorkingDirectory   *string  `json:"working_directory,omitempty"`
-		DeviceNames        []string `json:"device_names,omitempty"`
-		Generation         int      `json:"generation"`
-	}{
-		Description: result.Description, AuthorizationScope: result.AuthorizationScope,
-		ExpectedOutputs: result.ExpectedOutputs, WorkingDirectory: result.WorkingDirectory,
-		DeviceNames: result.DeviceNames, Generation: result.Generation,
-	})
+	payload, err := task.MarshalExecutorInput(
+		result.Description, result.AuthorizationScope, result.ExpectedOutputs,
+		result.WorkingDirectory, result.DeviceNames, result.Generation,
+	)
 	if err != nil {
 		return "", err
 	}

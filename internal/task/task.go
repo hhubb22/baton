@@ -268,6 +268,9 @@ func Validate(in Input) error {
 	if err := validateTimeout(in.ExecutionTimeoutSeconds, "执行期限必须是正整数", "execution_timeout_seconds"); err != nil {
 		return err
 	}
+	if err := rejectOversizedExecutorInput(in); err != nil {
+		return err
+	}
 	return nil
 }
 

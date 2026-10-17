@@ -340,8 +340,11 @@ func (w *workerDB) SubmitInput(sessionID, payload string) ([]ipcReport, error) {
 	if w.inputSubmitted {
 		return w.pendingLocked()
 	}
-	if payload == "" || len(payload) > 256*1024 || w.observer == nil {
+	if payload == "" || w.observer == nil {
 		return nil, errors.New("任务输入无效")
+	}
+	if len(payload) > task.ExecutorInputLimit {
+		return w.failOversizedLocked(sessionID)
 	}
 	tx, err := w.db.Begin()
 	if err != nil {
@@ -364,6 +367,53 @@ func (w *workerDB) SubmitInput(sessionID, payload string) ([]ipcReport, error) {
 		return nil, err
 	}
 	return w.recordExecution(sessionID, payload, out)
+}
+
+// failOversizedLocked 不把超限输入交给执行器，而是记下失败并留下可回报的结果。
+func (w *workerDB) failOversizedLocked(sessionID string) ([]ipcReport, error) {
+	candidate := task.Candidate{
+		Status:               task.StatusFailed,
+		Summary:              "任务输入超过单条消息上限，没有提交给执行器",
+		EvidenceEmptyReason:  "输入没有提交，没有证据",
+		ArtifactsEmptyReason: "输入没有提交，没有产物",
+		ErrorCode:            task.CodeExecutionFailed,
+		ErrorMessage:         "任务输入超过单条消息上限",
+	}
+	if err := task.ValidateCandidate(candidate); err != nil {
+		return nil, err
+	}
+	tx, err := w.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := putMeta(tx, "input_submitted", "1"); err != nil {
+		return nil, err
+	}
+	if err := putMeta(tx, "input_generation", "1"); err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := insertLog(tx, "input", "任务输入超过单条消息上限", now); err != nil {
+		return nil, err
+	}
+	resultID, err := identity.NewUUID()
+	if err != nil {
+		return nil, err
+	}
+	body, err := json.Marshal(reportFromCandidate(resultID, w.task, w.execution, sessionID, 1, candidate, true))
+	if err != nil {
+		return nil, err
+	}
+	if err := insertOutbox(tx, resultID, protocol.ReportResult, body); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	w.inputSubmitted = true
+	w.generation = 1
+	return w.pendingLocked()
 }
 
 func (w *workerDB) recordExecution(sessionID, payload string, out Output) ([]ipcReport, error) {

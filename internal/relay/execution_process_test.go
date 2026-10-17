@@ -42,6 +42,7 @@ func TestExecutionPersistsStructuredResultOnce(t *testing.T) {
 	if countLocal(t, path, session.LocalHistoryMarker) == 0 || countLocal(t, path, session.ForgedTaskID) == 0 {
 		t.Fatal("节点账本没有留下执行过程和原始结果")
 	}
+	waitResultDelivered(t, st.dataDir, sessionID)
 	client := dialWorker(t, st.dataDir, sessionID)
 	defer client.Close()
 	again, err := client.SubmitInput(`{"description":"重复命令"}`)
@@ -125,6 +126,20 @@ func TestExecutionFreeTextAndExitAreNotSuccess(t *testing.T) {
 			assertCenterOmits(t, st, created.TaskID, "完成")
 		})
 	}
+}
+
+func waitResultDelivered(t *testing.T, dataDir, sessionID string) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	var last session.Status
+	for time.Now().Before(deadline) {
+		last = workerStatus(t, dataDir, sessionID)
+		if last.ResultDelivered {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("中心已经保存结果，Worker 仍未确认交付: %+v", last)
 }
 
 func assertCenterOmits(t *testing.T, st *prepareStack, taskID, needle string) {

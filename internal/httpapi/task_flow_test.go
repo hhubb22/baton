@@ -166,6 +166,13 @@ func TestTaskAPIAcceptQueryAndReplay(t *testing.T) {
 	if status != http.StatusBadRequest || !strings.Contains(body, `"code":"invalid_request"`) {
 		t.Fatalf("小数期限响应是 %d %s", status, body)
 	}
+	big := strings.Repeat("测", 32768)
+	status, body, _ = postJSON(t, aliceClient, srv.URL+"/api/v1/tasks", origin, "", map[string]any{
+		"request_id": "too-big", "description": big, "authorization_scope": big, "expected_outputs": big,
+	}, aliceCSRF)
+	if status != http.StatusBadRequest || !strings.Contains(body, `"code":"invalid_request"`) || !strings.Contains(body, `"description"`) || !strings.Contains(body, `"authorization_scope"`) || !strings.Contains(body, `"expected_outputs"`) {
+		t.Fatalf("超限任务输入响应是 %d %s", status, body)
+	}
 	status, body, _ = postJSON(t, aliceClient, srv.URL+"/api/v1/tasks", origin, "", map[string]any{
 		"request_id": "with-employee", "description": "调查", "employee_id": bob.ID,
 	}, aliceCSRF)
