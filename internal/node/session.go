@@ -157,6 +157,7 @@ func runOnce(ctx context.Context, opts RunOptions, incarnation string, ledger *L
 	go func() {
 		errCh <- readRelay(ctx, writer, &acked, &expect, opts.Logger, opts.Identity, ledger, host, loop, opts.DataDir)
 	}()
+	go loop.resendPending(ctx)
 	ticker := time.NewTicker(opts.Heartbeat)
 	defer ticker.Stop()
 	if err := writeSync(ctx, writer, opts, &expect, &acked); err != nil {

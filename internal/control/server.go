@@ -223,6 +223,12 @@ func (s *Server) onEnvelope(ctx context.Context, ws *websocket.Conn, raw json.Ra
 	case protocol.BodyStartReport:
 		s.onStartReport(ctx, ws, env)
 		return
+	case protocol.BodyExecutionInput:
+		s.onExecutionInput(ctx, ws, env)
+		return
+	case protocol.BodyExecutionReport:
+		s.onExecutionReport(ctx, ws, env)
+		return
 	}
 	if kind.Type == protocol.BodyFileResult {
 		s.noteFileResult(env)

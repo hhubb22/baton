@@ -46,6 +46,9 @@ func handleNodeEnvelope(ctx context.Context, raw []byte, w *wsWriter, ledger *Le
 	if kind.Type == protocol.BodyStartPermitResult {
 		return loop.onResult(wrap.Envelope)
 	}
+	if loop != nil && loop.onReply(wrap.Envelope) {
+		return true
+	}
 	if kind.Type != protocol.BodyPrepare {
 		return false
 	}

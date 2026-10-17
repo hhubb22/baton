@@ -4,10 +4,13 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,7 +21,7 @@ import (
 
 func TestWorkerStartsOnceAfterValidPermit(t *testing.T) {
 	t.Setenv("BATON_TEST_WALL_OFFSET", "24h")
-	client, pub, priv, taskID, execID := startBoundWorker(t)
+	client, pub, priv, taskID, execID, _ := startBoundWorker(t)
 	defer client.Close()
 	nonce := armNonce(t, client, taskID, execID)
 	generation := mustSessionID(t)
@@ -39,7 +42,7 @@ func TestWorkerStartsOnceAfterValidPermit(t *testing.T) {
 }
 
 func TestWorkerRejectsBadPermitsBeforeStart(t *testing.T) {
-	client, pub, priv, taskID, execID := startBoundWorker(t)
+	client, pub, priv, taskID, execID, _ := startBoundWorker(t)
 	defer client.Close()
 	key := base64.RawURLEncoding.EncodeToString(pub)
 	nonce := armNonce(t, client, taskID, execID)
@@ -79,9 +82,96 @@ func TestWorkerRejectsBadPermitsBeforeStart(t *testing.T) {
 	}
 }
 
+func TestWorkerSubmitsInputOnceAndDoesNotTreatTextAsSuccess(t *testing.T) {
+	t.Setenv("BATON_TEST_EXECUTOR_SCRIPT", "text")
+	client, pub, priv, taskID, execID, dir := startBoundWorker(t)
+	defer client.Close()
+	nonce := armNonce(t, client, taskID, execID)
+	generation := mustSessionID(t)
+	queue := time.Now().UTC().Add(time.Minute).Truncate(time.Millisecond)
+	permit := signPermit(t, priv, taskID, execID, generation, nonce, queue, startpermit.PermitTTL)
+	if _, err := client.Authorize(taskID, execID, permit, base64.RawURLEncoding.EncodeToString(pub), generation, queue.Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	first, err := client.SubmitInput(`{"description":"调查天线"}`)
+	if err != nil || first.ExecutorInputs != 1 || first.ExecutorStarts != 1 || first.ResultDelivered {
+		t.Fatalf("第一次输入不正确: %v %+v", err, first)
+	}
+	again, err := client.SubmitInput(`{"description":"再来一次"}`)
+	if err != nil || again.ExecutorInputs != 1 || again.ResultDelivered {
+		t.Fatalf("重复输入又执行了一次: %v %+v", err, again)
+	}
+	var failed bool
+	for _, rep := range first.Reports {
+		var body struct {
+			Status    string `json:"status"`
+			Summary   string `json:"summary"`
+			ErrorCode string `json:"error_code"`
+			TaskID    string `json:"task_id"`
+		}
+		if err := json.Unmarshal(rep.Body, &body); err != nil {
+			t.Fatal(err)
+		}
+		if body.TaskID != taskID {
+			t.Fatalf("报告里的任务标识不是平台填写的: %s", body.TaskID)
+		}
+		if rep.Kind == "result" {
+			failed = body.Status == "failed" && body.ErrorCode == "result_format" && !strings.Contains(body.Summary, "完成")
+		}
+	}
+	if !failed {
+		t.Fatalf("自由文本被当成了成功: %+v", first.Reports)
+	}
+	path, err := LedgerPath(dir, first.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?mode=ro&_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var local int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM execution_log WHERE body LIKE '%' || ? || '%'`, "完成").Scan(&local); err != nil || local == 0 {
+		t.Fatalf("本地没有留下自由文本: %v %d", err, local)
+	}
+}
+
+func TestWorkerExitIsNotSuccess(t *testing.T) {
+	t.Setenv("BATON_TEST_EXECUTOR_SCRIPT", "exit")
+	client, pub, priv, taskID, execID, _ := startBoundWorker(t)
+	defer client.Close()
+	nonce := armNonce(t, client, taskID, execID)
+	generation := mustSessionID(t)
+	queue := time.Now().UTC().Add(time.Minute).Truncate(time.Millisecond)
+	permit := signPermit(t, priv, taskID, execID, generation, nonce, queue, startpermit.PermitTTL)
+	if _, err := client.Authorize(taskID, execID, permit, base64.RawURLEncoding.EncodeToString(pub), generation, queue.Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	st, err := client.SubmitInput(`{"description":"调查天线"}`)
+	if err != nil || st.ExecutorInputs != 1 || st.ResultDelivered {
+		t.Fatalf("退出后的输入状态不正确: %v %+v", err, st)
+	}
+	for _, rep := range st.Reports {
+		if rep.Kind != "result" {
+			continue
+		}
+		var body struct {
+			Status    string `json:"status"`
+			ErrorCode string `json:"error_code"`
+		}
+		if err := json.Unmarshal(rep.Body, &body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Status != "failed" || body.ErrorCode != "result_format" {
+			t.Fatalf("进程退出被当成成功: %+v", body)
+		}
+	}
+}
+
 func TestWorkerSuspendConsumesBudget(t *testing.T) {
 	t.Setenv("BATON_TEST_SUSPEND_AFTER_ARM", "6s")
-	client, pub, priv, taskID, execID := startBoundWorker(t)
+	client, pub, priv, taskID, execID, _ := startBoundWorker(t)
 	defer client.Close()
 	nonce := armNonce(t, client, taskID, execID)
 	generation := mustSessionID(t)
@@ -98,7 +188,7 @@ func TestWorkerSuspendConsumesBudget(t *testing.T) {
 	}
 }
 
-func startBoundWorker(t *testing.T) (*Client, ed25519.PublicKey, ed25519.PrivateKey, string, string) {
+func startBoundWorker(t *testing.T) (*Client, ed25519.PublicKey, ed25519.PrivateKey, string, string, string) {
 	t.Helper()
 	dir := t.TempDir()
 	sessionID := mustSessionID(t)
@@ -130,12 +220,14 @@ func startBoundWorker(t *testing.T) (*Client, ed25519.PublicKey, ed25519.Private
 	t.Cleanup(func() {
 		if _, err := os.Stat(logPath); err == nil {
 			raw, _ := os.ReadFile(logPath)
-			if string(raw) != "" && string(raw) != "start\n" {
-				t.Errorf("执行器日志是 %q", raw)
+			for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+				if line != "" && line != "start" && line != "input" {
+					t.Errorf("执行器日志是 %q", raw)
+				}
 			}
 		}
 	})
-	return client, pub, priv, taskID, execID
+	return client, pub, priv, taskID, execID, dir
 }
 
 func armNonce(t *testing.T, client *Client, taskID, execID string) string {
