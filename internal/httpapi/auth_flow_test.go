@@ -171,6 +171,57 @@ func TestCSRFAndOrigin(t *testing.T) {
 	assertNoSecrets(t, "服务日志", logs.String(), password, token, csrf)
 }
 
+func TestWriteGuardsBindCSRFToSession(t *testing.T) {
+	pool := dbtest.Open(t)
+	logs := &bytes.Buffer{}
+	srv := httptest.NewTLSServer(newAPI(t, pool, logs))
+	t.Cleanup(srv.Close)
+	const password = "initial-secret-for-guards-001"
+	createEmployee(t, pool, "alice", "Alice", password)
+	first, second := tlsClient(t, srv), tlsClient(t, srv)
+	status, body, _ := postJSON(t, first, srv.URL+"/api/v1/login", origin, "", map[string]string{
+		"username": "alice", "password": password,
+	})
+	if status != http.StatusOK {
+		t.Fatal("第一个会话登录失败")
+	}
+	firstCSRF := mustCSRF(t, body)
+	status, body, _ = postJSON(t, second, srv.URL+"/api/v1/login", origin, "", map[string]string{
+		"username": "alice", "password": password,
+	})
+	if status != http.StatusOK {
+		t.Fatal("第二个会话登录失败")
+	}
+	secondCSRF := mustCSRF(t, body)
+	for _, path := range []string{"/api/v1/logout", "/api/v1/me/password"} {
+		for _, tc := range []struct{ name, origin, csrf string }{
+			{"missing_origin", "", firstCSRF},
+			{"wrong_origin", "https://evil.example", firstCSRF},
+			{"missing_csrf", origin, ""},
+			{"wrong_csrf", origin, "synthetic-wrong-csrf-token"},
+			{"other_session_csrf", origin, secondCSRF},
+		} {
+			t.Run(path+"/"+tc.name, func(t *testing.T) {
+				status, body, _ := postJSON(t, first, srv.URL+path, tc.origin, "", map[string]string{
+					"current_password": password, "new_password": "replacement-for-guards-002",
+				}, tc.csrf)
+				if status != http.StatusForbidden {
+					t.Fatalf("写请求应被拒绝，状态 %d", status)
+				}
+				assertNoSecrets(t, "拒绝响应", body, password, firstCSRF, secondCSRF)
+			})
+		}
+	}
+	if countActiveSessions(t, pool, "alice") != 2 {
+		t.Fatal("被拒绝的写请求修改了会话")
+	}
+	if getRaw(t, first, srv.URL+"/api/v1/me").StatusCode != http.StatusOK ||
+		getRaw(t, second, srv.URL+"/api/v1/me").StatusCode != http.StatusOK {
+		t.Fatal("被拒绝的写请求使已有会话失效")
+	}
+	assertNoSecrets(t, "服务日志", logs.String(), password, firstCSRF, secondCSRF)
+}
+
 func replayCookie(t *testing.T, srv *httptest.Server, token string) int {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodGet, srv.URL+"/api/v1/me", nil)
