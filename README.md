@@ -2,7 +2,7 @@
 
 员工使用部署管理员分配的本地账号登录 Coordinator，退出，查询本人身份，领取一次性节点注册凭据，设置默认 PC，吊销本人节点的连接凭据，并提交任务。初始口令只能使用到员工完成更换为止。`batond register` 用这张凭据注册节点，把身份保存在本机。`batond run` 用这份身份主动连接 Relay，断线后重连，并在同步完成前不会显示为可执行。吊销生效后，同一连接凭据不能再接入。任务被接受后，Coordinator 把准备命令送到节点；节点先把执行映射写入本地账本，再绑定一个独立的 Session Worker。
 
-本目录目前包含这条路径的构建、迁移、HTTP 接口、Coordinator、Relay、batond、Session Worker、员工 Web UI 和测试。准备阶段不启动 Agent。启动许可通过后，测试执行器才会进入启动；任务输入、结果回传、Agent 适配和管理员网页不在这里。
+本目录目前包含这条路径的构建、迁移、HTTP 接口、Coordinator、Relay、batond、Session Worker、受限文件浏览、员工 Web UI 和测试。准备阶段不启动 Agent。启动许可通过后，测试执行器才会进入启动；任务输入、结果回传、Agent 适配和管理员网页不在这里。
 
 ## 运行要求
 
@@ -199,6 +199,26 @@ Relay 重新连上 Coordinator 时会取得包含该吊销的安全快照；已�
 `POST /tasks/{id}/cancel` 需要登录会话、Origin 和 CSRF，正文是 `{}`。尚未发出启动许可、或者节点已经明确拒绝启动时，任务变为 `cancelled`。许可已经发出但还没有这张未启动回执时，任务变为 `needs_verification`，响应里的 `possible_start` 为 true。缺少启动回执不会被当成“没有执行”。重复取消不发起新的执行。取消父任务时还不会级联子委托。
 
 排队到期时，能确认还没启动的任务失败，原因是 `queue_timeout`。已经授权且没有未启动回执的任务改为 `needs_verification`。节点被吊销时也按同样的规则处理：还没授权就失败，原因是 `revoked`；已经授权就进入待核实。
+
+## 文件浏览
+
+员工在节点本机登记可以浏览的目录。浏览器只提交 `root_id` 和相对路径，不能提交绝对路径、`..` 或读取偏移。
+
+```text
+batond files add --id notes --path /绝对路径/到/目录 [--data-dir 目录]
+batond files list [--data-dir 目录]
+batond files remove --id notes [--data-dir 目录]
+```
+
+`--path` 必须是已经存在的真实目录。符号链接不能登记为浏览根。配置写在数据目录的 `browse-roots.json`，权限为仅当前用户可读写。`batond run` 正在使用该数据目录时也可以登记，下一次浏览会读到新配置。
+
+`GET /nodes/{id}/files` 需要登录会话，不要求 CSRF。不带 `root_id` 时返回已登记目录的标识，不返回本机绝对路径。带 `root_id` 和可选的 `path` 时，目录返回条目，文本文件返回最多 64 KiB 的预览。一次最多返回 200 条目录项；扫描超过 1024 条就停止，并标记这次没有列完。`truncated` 为 true 时，响应里的 `remainder` 只说明剩余内容仍在节点本地，不能用 `offset` 或其他参数把剩余部分继续取回来。二进制文件返回 `not_text`，不附带内容。命名管道、设备文件和套接字会在目录里标出类型；打开后如果不是目录或普通文件，返回 `unsupported_type`，不读取内容。
+
+节点离线返回 `node_offline`，已吊销返回 `revoked`。其他员工的节点和不存在的节点都返回 `forbidden`，响应相同。路径越界和符号链接逃逸返回 `path_escaped`。未登记的 `root_id` 返回 `root_forbidden`。
+
+这次请求经 Relay 发给节点并等待同一次响应。它不写入 `dispatch_outbox`，失败后也不会自动重发。节点在实际打开目标时确认它仍在授权目录内；只检查路径字符串不算通过。
+
+首版没有远程编辑，也没有完整文件下载。`POST`、`PUT` 和 `DELETE` 都不会修改节点上的文件。
 
 ## Web UI
 

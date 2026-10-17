@@ -1,7 +1,10 @@
+import { execFile } from 'node:child_process'
+import { mkdir, symlink, writeFile } from 'node:fs/promises'
 import { readFile } from 'node:fs/promises'
 import { expect, request as apiRequest, test, type Page } from '@playwright/test'
 import {
   assertLogsClean,
+  childEnv,
   readState,
   registerNode,
   restartRelay,
@@ -69,6 +72,65 @@ test('员工可以登录、管理节点并看到真实的吊销结果', async ({
   await expect(laptop.getByTestId('node-executable')).toHaveText('不可执行')
   const laptopId = await laptop.getAttribute('data-node-id')
   expect(laptopId).toBeTruthy()
+
+  const notes = `${deskDir}/notes`
+  const outside = `${deskDir}/outside`
+  await mkdir(notes, { recursive: true })
+  await mkdir(outside, { recursive: true })
+  await writeFile(`${notes}/hello.txt`, 'hello from node\n', { mode: 0o600 })
+  await writeFile(`${notes}/big.txt`, 'A'.repeat(70 * 1024), { mode: 0o600 })
+  await writeFile(`${outside}/secret.txt`, 'OUTSIDE_SENTINEL', { mode: 0o600 })
+  await symlink(`${outside}/secret.txt`, `${notes}/escape.txt`)
+  await new Promise<void>((resolve, reject) => {
+    execFile(state.batondBin, ['files', 'add', '--id', 'notes', '--path', notes, '--data-dir', deskDir], { env: childEnv({}) }, (err, _stdout, stderr) => {
+      if (err) reject(new Error(stderr || err.message))
+      else resolve()
+    })
+  })
+  await desk.getByTestId('browse-open').click()
+  await expect(desk.getByTestId('browse-root-notes')).toBeVisible()
+  await desk.getByTestId('browse-root-notes').click()
+  await desk.getByTestId('browse-entry-hello.txt').click()
+  await expect(desk.getByTestId('browse-preview')).toContainText('hello from node')
+  await expect(desk.getByTestId('browse-truncated')).toHaveCount(0)
+  await expect(desk.locator('textarea')).toHaveCount(0)
+  await desk.getByTestId('browse-entry-big.txt').click()
+  await expect(desk.getByTestId('browse-truncated')).toContainText('不会继续传输')
+  const preview = await desk.getByTestId('browse-preview').innerText()
+  expect(preview.length).toBeLessThanOrEqual(64 * 1024)
+  expect(preview.length).toBeGreaterThan(1024)
+  expect(preview).not.toContain('OUTSIDE_SENTINEL')
+  await desk.getByTestId('browse-entry-escape.txt').click()
+  await expect(desk.getByTestId('browse-error')).toContainText('路径超出允许的目录')
+  await expect(page.locator('body')).not.toContainText('OUTSIDE_SENTINEL')
+  const rejected = await page.evaluate(async (id) => {
+    const escaped = await fetch(`/api/v1/nodes/${id}/files?root_id=notes&path=${encodeURIComponent('../outside/secret.txt')}`, { credentials: 'same-origin' })
+    const escapedBody = await escaped.json() as { code?: string; message?: string }
+    const absolute = await fetch(`/api/v1/nodes/${id}/files?root_id=notes&path=${encodeURIComponent('/etc/passwd')}`, { credentials: 'same-origin' })
+    const absoluteBody = await absolute.json() as { code?: string }
+    const offset = await fetch(`/api/v1/nodes/${id}/files?root_id=notes&path=big.txt&offset=65536`, { credentials: 'same-origin' })
+    const offsetBody = await offset.json() as { code?: string }
+    const unknown = await fetch(`/api/v1/nodes/${id}/files?root_id=nope&path=hello.txt`, { credentials: 'same-origin' })
+    const unknownBody = await unknown.json() as { code?: string }
+    return {
+      escaped: { status: escaped.status, code: escapedBody.code ?? '', message: escapedBody.message ?? '' },
+      absolute: { status: absolute.status, code: absoluteBody.code ?? '' },
+      offset: { status: offset.status, code: offsetBody.code ?? '' },
+      unknown: { status: unknown.status, code: unknownBody.code ?? '' },
+    }
+  }, deskId)
+  expect(rejected.escaped).toMatchObject({ status: 403, code: 'path_escaped' })
+  expect(rejected.escaped.message).not.toContain('OUTSIDE_SENTINEL')
+  expect(rejected.absolute).toMatchObject({ status: 403, code: 'path_escaped' })
+  expect(rejected.offset.status).toBe(400)
+  expect(rejected.unknown).toMatchObject({ status: 403, code: 'root_forbidden' })
+  await expect(laptop.getByTestId('browse-open')).toBeDisabled()
+  const offline = await page.evaluate(async (id) => {
+    const response = await fetch(`/api/v1/nodes/${id}/files`, { credentials: 'same-origin' })
+    const body = await response.json() as { code?: string }
+    return { status: response.status, code: body.code ?? '' }
+  }, laptopId)
+  expect(offline).toEqual({ status: 409, code: 'node_offline' })
 
   await page.getByTestId('default-pc-select').selectOption(laptopId ?? '')
   await expect(page.getByTestId('default-pc-offline')).toBeVisible()

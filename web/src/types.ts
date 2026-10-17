@@ -66,6 +66,47 @@ export type SavedDefault = {
   registration_seq: number
 }
 
+export type FileQuery = {
+  root_id?: string
+  path?: string
+  cursor?: string
+}
+
+export type FileRoot = {
+  id: string
+}
+
+export type FileEntry = {
+  name: string
+  kind: string
+  size?: number
+}
+
+export type FileRemainder = {
+  root_id: string
+  path: string
+  kind: string
+  offset?: number
+  size?: number
+  listed?: number
+  scan_limited?: boolean
+}
+
+export type FileView = {
+  operation_id: string
+  node_id: string
+  kind: string
+  root_id?: string
+  path?: string
+  roots?: FileRoot[]
+  entries?: FileEntry[]
+  content?: string
+  size?: number
+  truncated?: boolean
+  remainder?: FileRemainder
+  next_cursor?: string
+}
+
 export type RevokeResult = {
   node_id: string
   status: string

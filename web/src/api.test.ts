@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, login, logout, messageOf, putDefaultPC, revokeNode } from './api.ts'
+import { ApiError, getNodeFiles, login, logout, messageOf, putDefaultPC, revokeNode } from './api.ts'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -56,6 +56,27 @@ describe('API 客户端', () => {
     expect(messageOf(new ApiError(401, 'invalid_credentials', '账号或口令不正确', 'req-9'))).toBe('账号或口令不正确（req-9）')
     await expect(putDefaultPC('csrf-token-value-0123456789', '../other')).rejects.toMatchObject({ code: 'invalid_id' })
     await expect(revokeNode('csrf-token-value-0123456789', 'not-a-uuid')).rejects.toMatchObject({ code: 'invalid_id' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('文件浏览只提交 root_id 和相对路径', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(init?.method ?? 'GET').toBe('GET')
+      expect(new Headers(init?.headers).get('X-CSRF-Token')).toBeNull()
+      expect(String(input)).toBe('/api/v1/nodes/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/files?root_id=notes&path=docs%2Fhello.txt')
+      expect(String(input)).not.toContain('offset')
+      return json({
+        operation_id: 'op-1',
+        node_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        kind: 'file',
+        content: 'hello',
+        truncated: false,
+      })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const view = await getNodeFiles('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', { root_id: 'notes', path: 'docs/hello.txt' })
+    expect(view.content).toBe('hello')
+    await expect(getNodeFiles('/etc/passwd')).rejects.toMatchObject({ code: 'invalid_id' })
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

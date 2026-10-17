@@ -2,10 +2,12 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
+import { ApiError } from '../api.ts'
 import type { Enrollment, NodeStatus } from '../types.ts'
 import { deskId, laptopId, listOf, node, saved } from '../test/fixtures.ts'
 import { DefaultPCForm } from './DefaultPCForm.tsx'
 import { EnrollmentPanel } from './EnrollmentPanel.tsx'
+import { FileBrowser } from './FileBrowser.tsx'
 import { NodeCard } from './NodeCard.tsx'
 
 const notice = '吊销连接凭据不会停止离线节点上的本地进程。重新接入需要新的连接凭据。'
@@ -35,6 +37,7 @@ describe('节点卡片', () => {
         canWrite
         busy={false}
         onRevoke={vi.fn()}
+        loadFiles={vi.fn()}
       />,
     )
     expect(screen.getByTestId('node-presence')).toHaveTextContent('离线')
@@ -51,13 +54,13 @@ describe('节点卡片', () => {
     const user = userEvent.setup()
     const onRevoke = vi.fn()
     const { rerender } = render(
-      <NodeCard node={deskNode()} notice={notice} canWrite busy={false} onRevoke={onRevoke} />,
+      <NodeCard node={deskNode()} notice={notice} canWrite busy={false} onRevoke={onRevoke} loadFiles={vi.fn()} />,
     )
     await user.click(screen.getByTestId('revoke-open'))
     expect(screen.queryByText('已生效')).not.toBeInTheDocument()
-    rerender(<NodeCard node={deskNode()} notice={notice} canWrite busy onRevoke={onRevoke} />)
+    rerender(<NodeCard node={deskNode()} notice={notice} canWrite busy onRevoke={onRevoke} loadFiles={vi.fn()} />)
     expect(screen.getByTestId('revoke-confirm')).toHaveTextContent('正在提交')
-    rerender(<NodeCard node={deskNode()} notice={notice} canWrite busy={false} onRevoke={onRevoke} />)
+    rerender(<NodeCard node={deskNode()} notice={notice} canWrite busy={false} onRevoke={onRevoke} loadFiles={vi.fn()} />)
     await user.click(screen.getByTestId('revoke-confirm'))
     expect(onRevoke).toHaveBeenCalledWith(deskId)
 
@@ -80,6 +83,7 @@ describe('节点卡片', () => {
         canWrite
         busy={false}
         onRevoke={onRevoke}
+        loadFiles={vi.fn()}
       />,
     )
     const pending = screen.getByTestId('revoke-status')
@@ -108,6 +112,7 @@ describe('节点卡片', () => {
         canWrite
         busy={false}
         onRevoke={onRevoke}
+        loadFiles={vi.fn()}
       />,
     )
     const done = screen.getByTestId('revoke-status')
@@ -115,6 +120,90 @@ describe('节点卡片', () => {
     expect(done).toHaveTextContent('已生效')
     expect(done).toHaveTextContent('不会停止')
     expect(done).not.toHaveTextContent('处理中')
+  })
+})
+
+describe('文件浏览', () => {
+  it('列出授权目录、预览文本，并标出截断', async () => {
+    const user = userEvent.setup()
+    const load = vi.fn(async (_nodeId: string, query: { root_id?: string; path?: string }) => {
+      if (!query.root_id) {
+        return { operation_id: 'op-1', node_id: deskId, kind: 'roots', roots: [{ id: 'notes' }], truncated: false }
+      }
+      if (query.path === 'hello.txt') {
+        return { operation_id: 'op-2', node_id: deskId, kind: 'file', root_id: 'notes', path: 'hello.txt', content: 'hello from node', truncated: false }
+      }
+      if (query.path === 'big.txt') {
+        return {
+          operation_id: 'op-3',
+          node_id: deskId,
+          kind: 'file',
+          root_id: 'notes',
+          path: 'big.txt',
+          content: 'AAAA',
+          truncated: true,
+          remainder: { root_id: 'notes', path: 'big.txt', kind: 'file', offset: 4, size: 99999 },
+        }
+      }
+      return {
+        operation_id: 'op-4',
+        node_id: deskId,
+        kind: 'directory',
+        root_id: 'notes',
+        path: '',
+        entries: [
+          { name: 'hello.txt', kind: 'file', size: 15 },
+          { name: 'big.txt', kind: 'file', size: 99999 },
+        ],
+        truncated: false,
+      }
+    })
+    render(<FileBrowser nodeId={deskId} online revoked={false} load={load} />)
+    await user.click(screen.getByTestId('browse-open'))
+    expect(await screen.findByTestId('browse-root-notes')).toBeInTheDocument()
+    await user.click(screen.getByTestId('browse-root-notes'))
+    await user.click(await screen.findByTestId('browse-entry-hello.txt'))
+    expect(await screen.findByTestId('browse-preview')).toHaveTextContent('hello from node')
+    expect(screen.queryByTestId('browse-truncated')).not.toBeInTheDocument()
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    await user.click(screen.getByTestId('browse-entry-big.txt'))
+    expect(await screen.findByTestId('browse-truncated')).toHaveTextContent('不会继续传输')
+    expect(screen.getByTestId('browse-preview')).toHaveTextContent('AAAA')
+  })
+
+  it('离线节点不能发起浏览', () => {
+    const load = vi.fn()
+    render(<FileBrowser nodeId={deskId} online={false} revoked={false} load={load} />)
+    expect(screen.getByTestId('browse-open')).toBeDisabled()
+    expect(screen.getByTestId('browse-offline')).toHaveTextContent('节点离线')
+    expect(load).not.toHaveBeenCalled()
+  })
+
+  it('符号链接逃逸显示拒绝原因，不显示目录外内容', async () => {
+    const user = userEvent.setup()
+    const load = vi.fn(async (_nodeId: string, query: { root_id?: string; path?: string }) => {
+      if (!query.root_id) {
+        return { operation_id: 'op-5', node_id: deskId, kind: 'roots', roots: [{ id: 'notes' }], truncated: false }
+      }
+      if (query.path === 'escape.txt') {
+        throw new ApiError(403, 'path_escaped', '路径超出允许的目录', 'req-1')
+      }
+      return {
+        operation_id: 'op-6',
+        node_id: deskId,
+        kind: 'directory',
+        root_id: 'notes',
+        entries: [{ name: 'escape.txt', kind: 'symlink' }],
+        truncated: false,
+      }
+    })
+    render(<FileBrowser nodeId={deskId} online revoked={false} load={load} />)
+    await user.click(screen.getByTestId('browse-open'))
+    await user.click(await screen.findByTestId('browse-root-notes'))
+    await user.click(await screen.findByTestId('browse-entry-escape.txt'))
+    expect(await screen.findByTestId('browse-error')).toHaveTextContent('路径超出允许的目录')
+    expect(screen.queryByTestId('browse-preview')).not.toBeInTheDocument()
+    expect(screen.queryByText('OUTSIDE_SENTINEL')).not.toBeInTheDocument()
   })
 })
 

@@ -181,6 +181,7 @@ func cmdServe(ctx context.Context, stderr io.Writer, getenv func(string) string)
 			NodeCredentialTTL: cfg.NodeCredentialTTL,
 			Signer:            signer,
 			Revocations:       ctrl,
+			Files:             ctrl,
 			Logger:            logger,
 		})
 		if err != nil {

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { formatReportTime, revocationLabel, roleLabel } from '../model.ts'
-import type { NodeStatus } from '../types.ts'
+import type { FileQuery, FileView, NodeStatus } from '../types.ts'
+import { FileBrowser } from './FileBrowser.tsx'
 
 type Props = {
   node: NodeStatus
@@ -8,9 +9,10 @@ type Props = {
   canWrite: boolean
   busy: boolean
   onRevoke: (nodeId: string) => void
+  loadFiles: (nodeId: string, query: FileQuery) => Promise<FileView>
 }
 
-export function NodeCard({ node, notice, canWrite, busy, onRevoke }: Props) {
+export function NodeCard({ node, notice, canWrite, busy, onRevoke, loadFiles }: Props) {
   const [confirming, setConfirming] = useState(false)
   const caps = node.capabilities.length === 0 ? ['未报告能力'] : node.capabilities
 
@@ -76,6 +78,12 @@ export function NodeCard({ node, notice, canWrite, busy, onRevoke }: Props) {
           {node.revocation?.applied_at ? <p>生效时间 {formatReportTime(node.revocation.applied_at)}</p> : null}
         </div>
       )}
+      <FileBrowser
+        nodeId={node.id}
+        online={node.online}
+        revoked={node.revocation_status !== 'none'}
+        load={loadFiles}
+      />
     </article>
   )
 }

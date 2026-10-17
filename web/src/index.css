@@ -169,6 +169,22 @@ pre {
   background: #f3f5f8;
 }
 
+.browse {
+  margin-top: 0.8rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid #d5dbe3;
+}
+
+button.secondary {
+  background: #fff;
+  color: #1f4e79;
+}
+
+.browse pre {
+  max-height: 16rem;
+  overflow: auto;
+}
+
 :focus-visible {
   outline: 2px solid #1f4e79;
   outline-offset: 2px;

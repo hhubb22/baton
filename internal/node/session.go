@@ -155,7 +155,7 @@ func runOnce(ctx context.Context, opts RunOptions, incarnation string, ledger *L
 	loop := newStartLoop(ctx, opts.Identity, ledger, host, writer, opts.Logger)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- readRelay(ctx, writer, &acked, &expect, opts.Logger, opts.Identity, ledger, host, loop)
+		errCh <- readRelay(ctx, writer, &acked, &expect, opts.Logger, opts.Identity, ledger, host, loop, opts.DataDir)
 	}()
 	ticker := time.NewTicker(opts.Heartbeat)
 	defer ticker.Stop()
@@ -203,7 +203,7 @@ func dialRelay(ctx context.Context, opts RunOptions) (*websocket.Conn, error) {
 	return ws, nil
 }
 
-func readRelay(ctx context.Context, w *wsWriter, acked *atomic.Bool, expect *atomic.Value, log *slog.Logger, ident Identity, ledger *Ledger, host *session.Host, loop *startLoop) error {
+func readRelay(ctx context.Context, w *wsWriter, acked *atomic.Bool, expect *atomic.Value, log *slog.Logger, ident Identity, ledger *Ledger, host *session.Host, loop *startLoop, dataDir string) error {
 	for {
 		_, raw, err := w.ws.Read(ctx)
 		if err != nil {
@@ -232,6 +232,9 @@ func readRelay(ctx context.Context, w *wsWriter, acked *atomic.Bool, expect *ato
 				continue
 			}
 			if handleNodeEnvelope(ctx, raw, w, ledger, host, ident.Capabilities, log, loop) {
+				continue
+			}
+			if handleFileEnvelope(ctx, raw, w, dataDir, log) {
 				continue
 			}
 			var body struct {

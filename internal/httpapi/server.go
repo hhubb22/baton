@@ -1,4 +1,4 @@
-// Package httpapi 提供员工登录、退出、本人身份、初始口令更换、节点注册、默认 PC、本人节点状态、凭据吊销和任务接受。
+// Package httpapi 提供员工登录、退出、本人身份、初始口令更换、节点注册、默认 PC、本人节点状态、凭据吊销、任务接受和受限文件浏览。
 package httpapi
 
 import (
@@ -18,6 +18,7 @@ import (
 	"baton/internal/config"
 	"baton/internal/identity"
 	"baton/internal/node"
+	"baton/internal/protocol"
 	"baton/internal/redact"
 	"baton/internal/store"
 
@@ -36,12 +37,18 @@ type Settings struct {
 	NodeCredentialTTL time.Duration
 	Signer            node.TokenSigner
 	Revocations       RevocationDispatcher
+	Files             FileBrowser
 	Logger            *slog.Logger
 }
 
 // RevocationDispatcher 把已保存的吊销交给当前 Relay。没有控制连接时应尽快返回。
 type RevocationDispatcher interface {
 	DispatchRevocations(ctx context.Context) error
+}
+
+// FileBrowser 向本人节点发起一次临时文件浏览。它不把请求写入中心业务 outbox。
+type FileBrowser interface {
+	BrowseFiles(ctx context.Context, employeeID, nodeID string, req protocol.FileRequest) (protocol.FileResult, error)
 }
 
 // Server 是 /api/v1 的登录与节点接口。会话 Cookie 始终带 Secure、HttpOnly 和 SameSite=Strict。
@@ -53,6 +60,7 @@ type Server struct {
 	nodeCredentialTTL time.Duration
 	signer            node.TokenSigner
 	revocations       RevocationDispatcher
+	files             FileBrowser
 	log               *slog.Logger
 }
 
@@ -85,6 +93,7 @@ func New(pool *pgxpool.Pool, settings Settings) (*Server, error) {
 		nodeCredentialTTL: settings.NodeCredentialTTL,
 		signer:            settings.Signer,
 		revocations:       settings.Revocations,
+		files:             settings.Files,
 		log:               slog.New(redact.NewHandler(logger.Handler())),
 	}, nil
 }
@@ -201,6 +210,19 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				s.revokeNode(w, r, id)
+				return
+			}
+			if strings.HasSuffix(rest, "/files") {
+				id := strings.TrimSuffix(rest, "/files")
+				if id == "" || strings.Contains(id, "/") {
+					s.writeError(w, r, http.StatusNotFound, "not_found", "找不到对应接口")
+					return
+				}
+				if r.Method != http.MethodGet {
+					s.writeError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "不支持该请求方法")
+					return
+				}
+				s.browseFiles(w, r, id)
 				return
 			}
 			if rest == "" || strings.Contains(rest, "/") {
@@ -602,6 +624,12 @@ func safePath(path string) string {
 			id := strings.TrimSuffix(rest, "/revoke")
 			if id != "" && !strings.Contains(id, "/") {
 				return "/api/v1/nodes/:id/revoke"
+			}
+		}
+		if strings.HasSuffix(rest, "/files") {
+			id := strings.TrimSuffix(rest, "/files")
+			if id != "" && !strings.Contains(id, "/") {
+				return "/api/v1/nodes/:id/files"
 			}
 		}
 		if rest != "" && !strings.Contains(rest, "/") {

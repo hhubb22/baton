@@ -1,5 +1,5 @@
 import { isNodeID } from './model.ts'
-import type { Enrollment, LoginResponse, MeResponse, NodeList, RevokeResult, SavedDefault } from './types.ts'
+import type { Enrollment, FileQuery, FileView, LoginResponse, MeResponse, NodeList, RevokeResult, SavedDefault } from './types.ts'
 
 export class ApiError extends Error {
   readonly status: number
@@ -103,6 +103,16 @@ export async function putDefaultPC(csrf: string, nodeId: string): Promise<SavedD
     csrf,
     body: { node_id: nodeId },
   })
+}
+
+export async function getNodeFiles(nodeId: string, query: FileQuery = {}): Promise<FileView> {
+  if (!isNodeID(nodeId)) throw new ApiError(400, 'invalid_id', '节点标识不正确', '')
+  const params = new URLSearchParams()
+  if (query.root_id) params.set('root_id', query.root_id)
+  if (query.path) params.set('path', query.path)
+  if (query.cursor) params.set('cursor', query.cursor)
+  const suffix = params.toString()
+  return request<FileView>(`/api/v1/nodes/${nodeId}/files${suffix ? `?${suffix}` : ''}`)
 }
 
 export async function revokeNode(csrf: string, nodeId: string): Promise<RevokeResult> {
