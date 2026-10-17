@@ -236,6 +236,13 @@ func startBoundWorker(t *testing.T) (*Client, ed25519.PublicKey, ed25519.Private
 	if _, err := EnsureToken(dir, sessionID); err != nil {
 		t.Fatal(err)
 	}
+	ledgerPath, err := LedgerPath(dir, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := CreateLedger(ledgerPath); err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go func() { _ = RunWorker(ctx, dir, sessionID) }()

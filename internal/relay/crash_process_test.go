@@ -7,7 +7,9 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -148,9 +150,8 @@ func TestStalePIDDoesNotRerun(t *testing.T) {
 	stopWorker(worker.PID)
 	waitWorkerSocketDown(t, st.dataDir, sessionID)
 	restartBatond(t, st)
-	waitTaskStatus(t, st, created.TaskID, task.StatusNeedsVerification)
 	status, executions, _ := taskFacts(t, st, created.TaskID)
-	if status != task.StatusNeedsVerification || executions != 1 || executorCount(t, st, "input") != 1 {
+	if status != task.StatusRunning || executions != 1 || executorCount(t, st, "input") != 1 {
 		t.Fatalf("旧进程号或中心状态触发了重跑: %s executions %d inputs %d", status, executions, executorCount(t, st, "input"))
 	}
 	if err := syscall.Kill(decoy.Process.Pid, 0); err != nil {
@@ -185,9 +186,58 @@ func TestCorruptHistoryDoesNotLookLikeRecovery(t *testing.T) {
 	}
 	restartBatond(t, st)
 	waitLog(t, st.batond, "event=history_unreadable")
+	waitTaskCode(t, st, created.TaskID, task.CodeUncertainHistory)
 	status, executions, _ := taskFacts(t, st, created.TaskID)
 	if status != task.StatusNeedsVerification || executions != 1 || executorCount(t, st, "input") != 1 {
 		t.Fatalf("损坏历史被当成恢复成功: %s executions %d inputs %d log %s", status, executions, executorCount(t, st, "input"), st.batond.out.String())
+	}
+}
+
+func TestCrashAfterInputIntentDoesNotSendInput(t *testing.T) {
+	st := startPrepareStack(t, map[string]string{
+		"BATON_TEST_HOLD_START":      "0",
+		"BATON_TEST_EXECUTOR_SCRIPT": "success",
+		"BATON_TEST_CRASH_AFTER":     "input_intent",
+	})
+	created := acceptTask(t, st, "crash-input-intent")
+	waitTaskStatus(t, st, created.TaskID, task.StatusNeedsVerification)
+	waitTaskCode(t, st, created.TaskID, task.CodeUncertainInput)
+	if executorCount(t, st, "start") != 1 || executorCount(t, st, "input") != 0 {
+		t.Fatalf("输入意图崩溃后的执行器日志不正确: start %d input %d", executorCount(t, st, "start"), executorCount(t, st, "input"))
+	}
+	_, executions, deliveries := taskFacts(t, st, created.TaskID)
+	if executions != 1 || deliveries != 0 {
+		t.Fatalf("输入意图崩溃后的账本是 executions %d deliveries %d", executions, deliveries)
+	}
+}
+
+func TestMissingHistoryFromRunningIsReported(t *testing.T) {
+	st := startPrepareStack(t, map[string]string{
+		"BATON_TEST_HOLD_START":      "0",
+		"BATON_TEST_EXECUTOR_SCRIPT": "success",
+		"BATON_TEST_CRASH_AFTER":     "after_started",
+	})
+	created := acceptTask(t, st, "missing-history")
+	waitTaskStatus(t, st, created.TaskID, task.StatusRunning)
+	sessionID := sessionOf(t, st, created.TaskID)
+	worker := workerStatus(t, st.dataDir, sessionID)
+	stopWorker(worker.PID)
+	waitWorkerSocketDown(t, st.dataDir, sessionID)
+	path, err := session.LedgerPath(st.dataDir, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Rename(path, path+".aside")
+	_ = os.Rename(path+"-wal", path+"-wal.aside")
+	_ = os.Rename(path+"-shm", path+"-shm.aside")
+	restartBatond(t, st)
+	waitTaskCode(t, st, created.TaskID, task.CodeUncertainHistory)
+	status, executions, deliveries := taskFacts(t, st, created.TaskID)
+	if status != task.StatusNeedsVerification || executions != 1 || deliveries != 0 || executorCount(t, st, "input") != 1 {
+		t.Fatalf("缺失历史没有单独记下: %s executions %d deliveries %d inputs %d", status, executions, deliveries, executorCount(t, st, "input"))
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("缺失历史被新建了: %v", err)
 	}
 }
 
@@ -288,6 +338,19 @@ func sessionOf(t *testing.T, st *prepareStack, taskID string) string {
 	return sessionID
 }
 
+func waitTaskCode(t *testing.T, st *prepareStack, taskID, want string) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	var code string
+	for time.Now().Before(deadline) {
+		if err := st.pool.QueryRow(context.Background(), `SELECT COALESCE(error_code, '') FROM tasks WHERE id = $1::uuid`, taskID).Scan(&code); err == nil && code == want {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("任务原因是 %s，想要 %s\ncoord %s\nnode %s", code, want, st.coord.out.String(), st.batond.out.String())
+}
+
 func waitDeliveryCount(t *testing.T, st *prepareStack, taskID string, want int) {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
@@ -356,30 +419,37 @@ type privatePostgres struct {
 	url  string
 	port int
 	bin  string
+	user string
 }
 
 func startPrivatePostgres(t *testing.T) *privatePostgres {
 	t.Helper()
-	bin := "/usr/lib/postgresql/17/bin"
-	if _, err := os.Stat(filepath.Join(bin, "initdb")); err != nil {
+	bin, user := postgresBinDir(t)
+	base := t.TempDir()
+	parent := filepath.Dir(base)
+	if parent != os.TempDir() {
+		if err := os.Chmod(parent, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chmod(base, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	dir, err := os.MkdirTemp("/tmp", "baton-pg-")
-	if err != nil {
-		t.Fatal(err)
+	dir := filepath.Join(base, "pg")
+	if user != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		account, err := userLookup(user)
+		if err != nil {
+			t.Skipf("找不到运行数据库的用户 %s: %v", user, err)
+		}
+		if err := os.Chown(dir, account.uid, account.gid); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if err := os.Chown(dir, 100, 103); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = exec.Command("trash-put", "--", dir).Run()
-	})
-	init := exec.Command("runuser", "-u", "postgres", "--", filepath.Join(bin, "initdb"), "-D", dir, "-A", "trust", "--locale=C", "--encoding=UTF8")
-	if out, err := init.CombinedOutput(); err != nil {
-		t.Fatalf("initdb: %v %s", err, out)
+	if err := runPostgres(user, filepath.Join(bin, "initdb"), "-D", dir, "-A", "trust", "--locale=C", "--encoding=UTF8", "--username="+postgresRole(user)); err != nil {
+		t.Fatalf("initdb: %v", err)
 	}
 	hba := "local all all trust\nhost all all 127.0.0.1/32 trust\nhost all all ::1/128 trust\n"
 	if err := os.WriteFile(filepath.Join(dir, "pg_hba.conf"), []byte(hba), 0o600); err != nil {
@@ -391,7 +461,21 @@ func startPrivatePostgres(t *testing.T) *privatePostgres {
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
 	ln.Close()
-	pg := &privatePostgres{dir: dir, port: port, bin: bin, url: fmt.Sprintf("postgres://postgres@127.0.0.1:%d/postgres?sslmode=disable", port)}
+	role := postgresRole(user)
+	hbaPath := filepath.Join(dir, "pg_hba.conf")
+	if user != "" {
+		account, err := userLookup(user)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chown(hbaPath, account.uid, account.gid); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pg := &privatePostgres{
+		dir: dir, port: port, bin: bin, user: user,
+		url: fmt.Sprintf("postgres://%s@127.0.0.1:%d/postgres?sslmode=disable", role, port),
+	}
 	pg.start(t)
 	t.Cleanup(func() { pg.stop(t) })
 	return pg
@@ -399,33 +483,119 @@ func startPrivatePostgres(t *testing.T) *privatePostgres {
 
 func (p *privatePostgres) start(t *testing.T) {
 	t.Helper()
-	if err := runPostgresCtl(p.dir, p.bin, "start", "-w", "-o", fmt.Sprintf("-p %d -h 127.0.0.1 -k /tmp", p.port)); err != nil {
+	if err := runPostgresCtl(p.user, p.dir, p.bin, "start", "-w", "-o", fmt.Sprintf("-p %d -h 127.0.0.1 -k /tmp", p.port)); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func (p *privatePostgres) stop(t *testing.T) {
 	t.Helper()
-	err := runPostgresCtl(p.dir, p.bin, "stop", "-m", "fast", "-w")
+	err := runPostgresCtl(p.user, p.dir, p.bin, "stop", "-m", "fast", "-w")
 	if err != nil && !strings.Contains(err.Error(), "no server running") {
 		t.Fatal(err)
 	}
 }
 
-func runPostgresCtl(dir, bin, action string, args ...string) error {
+func postgresBinDir(t *testing.T) (string, string) {
+	t.Helper()
+	bin := strings.TrimSpace(os.Getenv("BATON_TEST_POSTGRES_BINDIR"))
+	if bin == "" {
+		pgConfig, err := exec.LookPath("pg_config")
+		if err != nil {
+			t.Skip("没有 pg_config，也没有 BATON_TEST_POSTGRES_BINDIR，跳过独立数据库停机测试")
+		}
+		out, err := exec.Command(pgConfig, "--bindir").Output()
+		if err != nil {
+			t.Skipf("pg_config --bindir 失败: %v", err)
+		}
+		bin = strings.TrimSpace(string(out))
+	}
+	if _, err := os.Stat(filepath.Join(bin, "initdb")); err != nil {
+		t.Skipf("找不到 initdb（%s），跳过独立数据库停机测试", bin)
+	}
+	if os.Geteuid() != 0 {
+		return bin, ""
+	}
+	if _, err := exec.LookPath("runuser"); err != nil {
+		t.Skip("当前是 root，且没有 runuser，跳过独立数据库停机测试")
+	}
+	if _, err := user.Lookup("postgres"); err != nil {
+		t.Skip("当前是 root，且没有 postgres 用户，跳过独立数据库停机测试")
+	}
+	return bin, "postgres"
+}
+
+func postgresRole(runAs string) string {
+	if runAs != "" {
+		return runAs
+	}
+	current, err := user.Current()
+	if err != nil || current.Username == "" {
+		return "postgres"
+	}
+	return current.Username
+}
+
+type systemAccount struct {
+	uid int
+	gid int
+}
+
+func userLookup(name string) (systemAccount, error) {
+	account, err := user.Lookup(name)
+	if err != nil {
+		return systemAccount{}, err
+	}
+	uid, err := strconv.Atoi(account.Uid)
+	if err != nil {
+		return systemAccount{}, err
+	}
+	gid, err := strconv.Atoi(account.Gid)
+	if err != nil {
+		return systemAccount{}, err
+	}
+	return systemAccount{uid: uid, gid: gid}, nil
+}
+
+func runPostgres(runAs, bin string, args ...string) error {
+	var cmd *exec.Cmd
+	if runAs == "" {
+		cmd = exec.Command(bin, args...)
+	} else {
+		cmd = exec.Command("runuser", append([]string{"-u", runAs, "--", bin}, args...)...)
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s: %v %s", filepath.Base(bin), err, out)
+	}
+	return nil
+}
+
+func runPostgresCtl(runAs, dir, bin, action string, args ...string) error {
 	logFile, err := os.OpenFile(filepath.Join(dir, "ctl.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
 	defer logFile.Close()
-	cmdArgs := append([]string{"-u", "postgres", "--", filepath.Join(bin, "pg_ctl"), "-D", dir}, args...)
-	cmdArgs = append(cmdArgs, action)
-	cmd := exec.Command("runuser", cmdArgs...)
+	if runAs != "" {
+		if account, err := userLookup(runAs); err == nil {
+			_ = os.Chown(logFile.Name(), account.uid, account.gid)
+		}
+	}
+	argv := []string{"-D", dir, "-l", filepath.Join(dir, "server.log"), action}
+	argv = append(argv, args...)
+	var cmd *exec.Cmd
+	if runAs == "" {
+		cmd = exec.Command(filepath.Join(bin, "pg_ctl"), argv...)
+	} else {
+		cmd = exec.Command("runuser", append([]string{"-u", runAs, "--", filepath.Join(bin, "pg_ctl")}, argv...)...)
+	}
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	if err := cmd.Run(); err != nil {
-		raw, _ := os.ReadFile(filepath.Join(dir, "ctl.log"))
-		return fmt.Errorf("pg_ctl %s: %w %s", action, err, raw)
+		logged, _ := os.ReadFile(filepath.Join(dir, "ctl.log"))
+		server, _ := os.ReadFile(filepath.Join(dir, "server.log"))
+		return fmt.Errorf("pg_ctl %s: %v %s %s", action, err, logged, server)
 	}
 	return nil
 }

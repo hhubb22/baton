@@ -20,6 +20,13 @@ func TestWorkerBindDoesNotStartExecutor(t *testing.T) {
 	if _, err := EnsureToken(dir, sessionID); err != nil {
 		t.Fatal(err)
 	}
+	ledgerPath, err := LedgerPath(dir, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := CreateLedger(ledgerPath); err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	errCh := make(chan error, 1)

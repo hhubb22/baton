@@ -24,11 +24,12 @@ func (h *Host) Reconnect(ctx context.Context, sessionIDs []string) {
 			return c.Status()
 		})
 		if err != nil {
-			if h.Logger != nil {
-				h.Logger.Info("event=worker_pid_not_proof", "session_id", id)
-			}
 			if recErr := h.Reconcile(ctx, id); recErr != nil && h.Logger != nil {
 				h.Logger.Info("event=history_unreadable", "session_id", id, "reason", recErr.Error())
+				continue
+			}
+			if h.Logger != nil {
+				h.Logger.Info("event=worker_pid_not_proof", "session_id", id)
 			}
 			continue
 		}
@@ -49,8 +50,12 @@ func (h *Host) Reconcile(ctx context.Context, sessionID string) error {
 	if err != nil {
 		return err
 	}
-	if err := InspectLedger(path); err != nil {
+	needs, err := LedgerNeedsWorker(path)
+	if err != nil {
 		return err
+	}
+	if !needs {
+		return nil
 	}
 	return h.spawn(ctx, sessionID)
 }
@@ -64,6 +69,18 @@ func (h *Host) Bind(ctx context.Context, sessionID, taskID, executionID, agentTy
 		return st.PID, nil
 	} else if errors.Is(err, ErrSessionBusy) {
 		return 0, err
+	}
+	path, pathErr := LedgerPath(h.DataDir, sessionID)
+	if pathErr != nil {
+		return 0, pathErr
+	}
+	switch inspectErr := InspectLedger(path); {
+	case errors.Is(inspectErr, ErrHistoryMissing):
+		if err := CreateLedger(path); err != nil {
+			return 0, err
+		}
+	case inspectErr != nil:
+		return 0, inspectErr
 	}
 	if err := h.spawn(ctx, sessionID); err != nil {
 		if st, err2 := h.call(ctx, sessionID, call); err2 == nil {

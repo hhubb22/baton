@@ -44,7 +44,7 @@ type workerDB struct {
 	inputResolved      bool
 	resultDelivered    bool
 	recoveredUncertain bool
-	uncertainMessage   string
+	uncertainCode      string
 	generation         int
 	attaches           int
 	observer           *Observer
@@ -54,10 +54,13 @@ type workerDB struct {
 func openWorkerDB(path string, observer *Observer) (*workerDB, error) {
 	info, statErr := os.Stat(path)
 	fresh := errors.Is(statErr, os.ErrNotExist)
-	if statErr != nil && !fresh {
+	if fresh {
+		return nil, ErrHistoryMissing
+	}
+	if statErr != nil {
 		return nil, ErrHistoryIncompatible
 	}
-	if !fresh && (info.IsDir() || info.Size() == 0) {
+	if info.IsDir() || info.Size() == 0 {
 		return nil, ErrHistoryIncompatible
 	}
 	db, err := sql.Open("sqlite", sqliteDSN(path))
@@ -70,12 +73,7 @@ func openWorkerDB(path string, observer *Observer) (*workerDB, error) {
 		db.Close()
 		return nil, ErrHistoryIncompatible
 	}
-	if fresh {
-		if err := createWorkerSchema(db); err != nil {
-			db.Close()
-			return nil, err
-		}
-	} else if err := verifyWorkerSchema(db); err != nil {
+	if err := verifyWorkerSchema(db); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -144,10 +142,10 @@ func (w *workerDB) load() error {
 		w.inputResolved = true
 	} else if w.intent && !w.inputResolved {
 		w.recoveredUncertain = true
-		w.uncertainMessage = task.UncertainInputMessage
+		w.uncertainCode = task.CodeUncertainInput
 	} else if w.inputResolved {
 		w.recoveredUncertain = true
-		w.uncertainMessage = task.UncertainWorkerMessage
+		w.uncertainCode = task.CodeUncertainWorker
 	}
 	return nil
 }
@@ -396,7 +394,7 @@ func (w *workerDB) SubmitInput(sessionID, payload string) ([]ipcReport, error) {
 	out, err := w.observer.SubmitInput(context.Background(), payload)
 	if err != nil {
 		w.recoveredUncertain = true
-		w.uncertainMessage = task.UncertainInputMessage
+		w.uncertainCode = task.CodeUncertainInput
 		return w.ensureVerificationLocked(sessionID)
 	}
 	CrashAfter("input_send")
@@ -642,11 +640,11 @@ func (w *workerDB) ensureVerificationLocked(sessionID string) ([]ipcReport, erro
 	if w.execution == "" || w.task == "" {
 		return nil, errors.New("还没有启动意图")
 	}
-	if w.uncertainMessage == "" {
-		w.uncertainMessage = task.UncertainInputMessage
+	if w.uncertainCode == "" {
+		w.uncertainCode = task.CodeUncertainInput
 	}
 	w.recoveredUncertain = true
-	eventID, err := VerificationEventID(w.execution)
+	eventID, err := VerificationEventID(w.execution, w.uncertainCode)
 	if err != nil {
 		return nil, err
 	}
@@ -658,7 +656,7 @@ func (w *workerDB) ensureVerificationLocked(sessionID string) ([]ipcReport, erro
 		body, err := json.Marshal(protocol.ExecutionReport{
 			Type: protocol.BodyExecutionReport, EventID: eventID, TaskID: w.task, ExecutionID: w.execution,
 			SessionID: sessionID, Kind: protocol.ReportNeedsVerification, Status: task.StatusNeedsVerification,
-			ErrorMessage: w.uncertainMessage,
+			ErrorCode: w.uncertainCode,
 		})
 		if err != nil {
 			return nil, err
@@ -674,8 +672,6 @@ func (w *workerDB) ensureVerificationLocked(sessionID string) ([]ipcReport, erro
 		if err := tx.Commit(); err != nil {
 			return nil, err
 		}
-	} else if _, err := w.db.Exec(`UPDATE outbox SET delivered = 0 WHERE event_id = ?`, eventID); err != nil {
-		return nil, err
 	}
 	return w.pendingLocked()
 }
@@ -759,13 +755,87 @@ func InspectLedger(path string) error {
 	return verifyWorkerSchema(db)
 }
 
-// VerificationEventID 是同一次执行的待核实报告标识。重复上报使用同一个值。
-func VerificationEventID(executionID string) (string, error) {
+// CreateLedger 只在首次准备 Session 时新建账本。文件已经存在时不会覆盖。
+func CreateLedger(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return ErrHistoryIncompatible
+	}
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return ErrHistoryIncompatible
+	}
+	db, err := sql.Open("sqlite", sqliteDSN(path))
+	if err != nil {
+		return ErrHistoryIncompatible
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if err := db.Ping(); err != nil {
+		return ErrHistoryIncompatible
+	}
+	if err := createWorkerSchema(db); err != nil {
+		return err
+	}
+	return chmodDB(path)
+}
+
+// LedgerNeedsWorker 判断这个账本是否还要有一个常驻 Worker。已经交付或已经上报待核实的 Session 不再拉起。
+func LedgerNeedsWorker(path string) (bool, error) {
+	if err := InspectLedger(path); err != nil {
+		return false, err
+	}
+	db, err := sql.Open("sqlite", sqliteDSN(path))
+	if err != nil {
+		return false, ErrHistoryIncompatible
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	var pending, verification int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE delivered = 0`).Scan(&pending); err != nil {
+		return false, ErrHistoryIncompatible
+	}
+	if pending > 0 {
+		return true, nil
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE kind = ?`, protocol.ReportNeedsVerification).Scan(&verification); err != nil {
+		return false, ErrHistoryIncompatible
+	}
+	meta := map[string]string{}
+	rows, err := db.Query(`SELECT key, value FROM meta`)
+	if err != nil {
+		return false, ErrHistoryIncompatible
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			return false, ErrHistoryIncompatible
+		}
+		meta[key] = value
+	}
+	if err := rows.Err(); err != nil {
+		return false, ErrHistoryIncompatible
+	}
+	if meta["result_delivered"] == "1" || verification > 0 {
+		return false, nil
+	}
+	if meta["start_cancelled"] == "1" && meta["start_intent"] != "1" {
+		return false, nil
+	}
+	return true, nil
+}
+
+// VerificationEventID 是同一次执行、同一个原因的待核实报告标识。不同原因不会互相覆盖。
+func VerificationEventID(executionID, reason string) (string, error) {
 	id, err := identity.ParseUUID(executionID)
 	if err != nil {
 		return "", err
 	}
-	sum := sha256.Sum256([]byte("baton-needs-verification-v1:" + id))
+	if _, ok := task.UncertainMessage(reason); !ok {
+		return "", errors.New("待核实原因无效")
+	}
+	sum := sha256.Sum256([]byte("baton-needs-verification-v1:" + reason + ":" + id))
 	b := sum[:16]
 	b[6] = (b[6] & 0x0f) | 0x50
 	b[8] = (b[8] & 0x3f) | 0x80

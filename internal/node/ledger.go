@@ -112,6 +112,14 @@ func (l *Ledger) Generation() string {
 	return l.generation
 }
 
+func (l *Ledger) HasWorker(sessionID string) (bool, error) {
+	var n int
+	if err := l.db.QueryRow(`SELECT COUNT(*) FROM workers WHERE session_id = ?`, sessionID).Scan(&n); err != nil {
+		return false, errors.New("无法读取 Worker 索引")
+	}
+	return n > 0, nil
+}
+
 func (l *Ledger) WorkerSessions() ([]string, error) {
 	rows, err := l.db.Query(`SELECT session_id FROM workers ORDER BY session_id`)
 	if err != nil {

@@ -91,6 +91,19 @@ func handleNodeEnvelope(ctx context.Context, raw []byte, w *wsWriter, ledger *Le
 		if host == nil {
 			return nil
 		}
+		known, err := ledger.HasWorker(sessionID)
+		if err != nil {
+			return err
+		}
+		if known {
+			path, err := session.LedgerPath(host.DataDir, sessionID)
+			if err != nil {
+				return err
+			}
+			if err := session.InspectLedger(path); err != nil {
+				return err
+			}
+		}
 		bindCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 		pid, err := host.Bind(bindCtx, sessionID, cmd.TaskID, cmd.ExecutionID, cmd.AgentType)

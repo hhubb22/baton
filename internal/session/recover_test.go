@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -24,6 +25,13 @@ func TestRestartAfterStartIntentDoesNotResendInput(t *testing.T) {
 	logPath := filepath.Join(dir, "executor.log")
 	t.Setenv("BATON_TEST_EXECUTOR_LOG", logPath)
 	if _, err := EnsureToken(dir, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	ledgerPath, err := LedgerPath(dir, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := CreateLedger(ledgerPath); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -75,13 +83,13 @@ func TestRestartAfterStartIntentDoesNotResendInput(t *testing.T) {
 			continue
 		}
 		var body struct {
-			Status       string `json:"status"`
-			ErrorMessage string `json:"error_message"`
+			Status    string `json:"status"`
+			ErrorCode string `json:"error_code"`
 		}
 		if err := json.Unmarshal(rep.Body, &body); err != nil {
 			t.Fatal(err)
 		}
-		verified = body.Status == task.StatusNeedsVerification && body.ErrorMessage == task.UncertainInputMessage
+		verified = body.Status == task.StatusNeedsVerification && body.ErrorCode == task.CodeUncertainInput
 	}
 	if !verified {
 		t.Fatalf("没有留下待核实报告: %+v", got.Reports)
@@ -131,6 +139,65 @@ func TestMissingLedgerIsNotCreated(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("检查缺失账本时创建了文件: %v", err)
+	}
+	if _, err := EnsureToken(dir, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err = RunWorker(ctx, dir, sessionID)
+	if !errors.Is(err, ErrHistoryMissing) {
+		t.Fatalf("缺失账本被当成可以新建: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("Worker 新建了缺失账本: %v", err)
+	}
+}
+
+func TestVerificationReasonsDoNotShareAnEventID(t *testing.T) {
+	id := mustSessionID(t)
+	inputID, err := VerificationEventID(id, task.CodeUncertainInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	historyID, err := VerificationEventID(id, task.CodeUncertainHistory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inputID == historyID {
+		t.Fatal("不同原因共用了事件标识")
+	}
+	again, err := VerificationEventID(id, task.CodeUncertainInput)
+	if err != nil || again != inputID {
+		t.Fatalf("同一原因的事件标识不稳定: %s %v", again, err)
+	}
+}
+
+func TestDeliveredLedgerDoesNotNeedAWorker(t *testing.T) {
+	dir := t.TempDir()
+	sessionID := mustSessionID(t)
+	path, err := LedgerPath(dir, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := CreateLedger(path); err != nil {
+		t.Fatal(err)
+	}
+	needs, err := LedgerNeedsWorker(path)
+	if err != nil || !needs {
+		t.Fatalf("新建账本应该还能启动 Worker: %v %v", needs, err)
+	}
+	db, err := sql.Open("sqlite", sqliteDSN(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO meta (key, value) VALUES ('result_delivered', '1')`); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	needs, err = LedgerNeedsWorker(path)
+	if err != nil || needs {
+		t.Fatalf("已交付账本仍会拉起 Worker: %v %v", needs, err)
 	}
 }
 

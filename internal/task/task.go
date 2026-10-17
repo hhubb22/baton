@@ -26,6 +26,12 @@ const (
 	CodeRevoked         = "revoked"
 	CodeResultFormat    = "result_format"
 	CodeExecutionFailed = "execution_failed"
+	// CodeUncertainInput 表示启动意图已经落盘，但不能证明输入是否送出。
+	CodeUncertainInput = "uncertain_input"
+	// CodeUncertainWorker 表示原 Worker 已退出，进程号不能证明同一次执行仍在运行。
+	CodeUncertainWorker = "uncertain_worker"
+	// CodeUncertainHistory 表示本地历史缺失或损坏，不能当成空历史恢复成功。
+	CodeUncertainHistory = "uncertain_history"
 
 	StatusQueued            = "queued"
 	StatusRunning           = "running"
@@ -49,7 +55,29 @@ const (
 	UncertainWorkerMessage = "原 Worker 已经退出，不能把进程号当成同一次执行仍在运行"
 	// UncertainHistoryMessage 表示本地历史不能读取，不能伪造空历史当作恢复成功。
 	UncertainHistoryMessage = "本地 Session 历史缺失或无法读取，不能把它当成空历史恢复成功"
+)
 
+// UncertainMessage 返回中心保存的待核实展示文案。未知原因码没有文案。
+func UncertainMessage(code string) (string, bool) {
+	switch code {
+	case CodeUncertainInput:
+		return UncertainInputMessage, true
+	case CodeUncertainWorker:
+		return UncertainWorkerMessage, true
+	case CodeUncertainHistory:
+		return UncertainHistoryMessage, true
+	default:
+		return "", false
+	}
+}
+
+// IsUncertainCode 表示这个原因码属于崩溃窗口或历史缺失，而不是取消造成的待核实。
+func IsUncertainCode(code string) bool {
+	_, ok := UncertainMessage(code)
+	return ok
+}
+
+const (
 	AccessAvailable   = "available"
 	AccessUnavailable = "unavailable"
 	AccessUnknown     = "unknown"

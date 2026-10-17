@@ -58,6 +58,19 @@ func (s *startLoop) resendPending(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		path, err := session.LedgerPath(s.host.DataDir, id)
+		if err != nil {
+			continue
+		}
+		needs, err := session.LedgerNeedsWorker(path)
+		if errors.Is(err, session.ErrHistoryMissing) || errors.Is(err, session.ErrHistoryIncompatible) {
+			s.log.Info("event=history_unreadable", "session_id", id, "reason", err.Error())
+			s.reportHistory(ctx, id)
+			continue
+		}
+		if err != nil || !needs {
+			continue
+		}
 		callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		st, err := s.host.Pending(callCtx, id)
 		cancel()
@@ -71,6 +84,7 @@ func (s *startLoop) resendPending(ctx context.Context) {
 		if st.Uncertain || st.InputSubmitted || !st.StartIntent || st.TaskID == "" || st.ExecutionID == "" {
 			continue
 		}
+		// 这里补发的是尚未送出的同一次输入。取消标记和执行期限留到 T10 再拦。
 		s.followInput(&startJob{
 			taskID: st.TaskID, executionID: st.ExecutionID, sessionID: id,
 		})
@@ -110,19 +124,24 @@ func (s *startLoop) reportHistory(ctx context.Context, sessionID string) {
 	if err != nil || !ok {
 		return
 	}
-	eventID, err := session.VerificationEventID(executionID)
+	eventID, err := session.VerificationEventID(executionID, task.CodeUncertainHistory)
 	if err != nil {
 		return
 	}
 	body, err := json.Marshal(protocol.ExecutionReport{
 		Type: protocol.BodyExecutionReport, EventID: eventID, TaskID: taskID, ExecutionID: executionID,
 		SessionID: sessionID, Kind: protocol.ReportNeedsVerification, Status: task.StatusNeedsVerification,
-		ErrorMessage: task.UncertainHistoryMessage,
+		ErrorCode: task.CodeUncertainHistory,
 	})
 	if err != nil {
 		return
 	}
 	if err := s.pushReport(ctx, body); err != nil {
+		if err.Error() == task.CodeInvalidTarget {
+			s.mu.Lock()
+			s.reported[sessionID] = true
+			s.mu.Unlock()
+		}
 		s.log.Info("event=history_report_failed", "session_id", sessionID)
 		return
 	}
@@ -189,6 +208,9 @@ func (s *startLoop) deliver(ctx context.Context, sessionID string, reports []ses
 			return
 		}
 		s.log.Info("event=execution_report_acked", "event_id", rep.EventID, "kind", rep.Kind)
+		if rep.Kind == protocol.ReportStarted {
+			session.CrashAfter("after_started")
+		}
 	}
 }
 
