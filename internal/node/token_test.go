@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"baton/internal/identity"
+	"baton/internal/startpermit"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -89,6 +90,15 @@ func TestNodeTokenRoundTripAndRejection(t *testing.T) {
 	}
 	if _, err := VerifyNodeToken(pub, signed, time.Now()); err == nil {
 		t.Fatal("启动许可被接受为连接凭据")
+	}
+}
+
+func TestStartPermitConstantsMatchNodeCredentials(t *testing.T) {
+	if startpermit.Issuer != Issuer || startpermit.StartAudience != StartAudience || startpermit.NodeAudience != NodeAudience {
+		t.Fatal("启动许可和连接凭据的签发声明不一致")
+	}
+	if StartAudience == NodeAudience {
+		t.Fatal("启动许可和连接凭据使用了同一个受众")
 	}
 }
 

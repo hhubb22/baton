@@ -32,6 +32,9 @@ func (s *Server) DeliverPrepares(ctx context.Context) {
 			if err := s.store.FailUnsentPrepares(ctx); err != nil {
 				s.log.Error("event=prepare_expire_failed")
 			}
+			if err := s.store.ExpireQueuedTasks(ctx); err != nil {
+				s.log.Error("event=queue_expire_failed")
+			}
 			s.deliverOne(ctx)
 		}
 	}

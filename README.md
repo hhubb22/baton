@@ -2,7 +2,7 @@
 
 员工使用部署管理员分配的本地账号登录 Coordinator，退出，查询本人身份，领取一次性节点注册凭据，设置默认 PC，吊销本人节点的连接凭据，并提交任务。初始口令只能使用到员工完成更换为止。`batond register` 用这张凭据注册节点，把身份保存在本机。`batond run` 用这份身份主动连接 Relay，断线后重连，并在同步完成前不会显示为可执行。吊销生效后，同一连接凭据不能再接入。任务被接受后，Coordinator 把准备命令送到节点；节点先把执行映射写入本地账本，再绑定一个独立的 Session Worker。
 
-本目录目前包含这条路径的构建、迁移、HTTP 接口、Coordinator、Relay、batond、Session Worker、员工 Web UI 和测试。准备阶段不启动 Agent。启动许可、Agent 适配和管理员网页不在这里。
+本目录目前包含这条路径的构建、迁移、HTTP 接口、Coordinator、Relay、batond、Session Worker、员工 Web UI 和测试。准备阶段不启动 Agent。启动许可通过后，测试执行器才会进入启动；任务输入、结果回传、Agent 适配和管理员网页不在这里。
 
 ## 运行要求
 
@@ -182,11 +182,23 @@ Relay 重新连上 Coordinator 时会取得包含该吊销的安全快照；已�
 
 `batond run` 会锁定数据目录。另一个 `batond run` 不能共用这个目录。Worker 由 batond 用同一可执行文件的内部子命令启动，使用独立进程组和认证过的本地连接。Windows 上是命名管道。Unix 上是套接字文件；会话目录下的路径经常超过系统对套接字路径的长度限制，因此套接字放在 `/tmp/baton-<uid>/` 下仅当前用户可进入的目录中，认证令牌仍在数据目录里。batond 退出后 Worker 继续运行；下次 `batond run` 会连回原来的 Worker，而不是新开一份执行。`worker` 不是给操作者使用的命令。
 
-准备只做绑定和被动检查，不把任务说明交给模型，不启动 Agent，也不运行启动钩子。启动许可还不在这条路径里。
+准备只做绑定和被动检查，不把任务说明交给模型，不启动 Agent，也不运行启动钩子。准备成功后，Worker 才向中心申请启动许可。
 
 同一 Session 的本地写入互相等待。明确拒绝会带上原因：Session 正在执行其他任务、Agent 或节点不匹配、工作目录不可用、存储代次不匹配，或排队期限已过。
 
 `GET /sessions` 返回本人最近 100 条 Session 的元数据、是否被占用，以及关联的任务标识。`GET /sessions/{id}` 返回其中一条。其他员工的 Session 和不存在的 Session 都返回 403，响应相同。这两个读取接口不要求 CSRF，也不返回 Session 原文。
+
+## 启动许可
+
+已准备的 Worker 用同一条节点连接向中心申请短时启动许可。许可是 Ed25519 签名的 JWT，受众是 `baton-start`，和节点连接凭据的受众 `baton-node` 不能互换。许可绑定执行身份、任务、节点、存储代次、请求摘要和有效期。中心在事务里重新检查任务仍在排队、没有取消、节点没有吊销、执行身份和存储代次一致，并且排队期限还够用。事务写入 `start_authorized_at` 并提交成功之后才签名。提交失败不会签发许可。
+
+许可寿命最长 5 秒，并且不会晚于排队到期时间。如果剩余时间扣掉 1 秒安全余量后已经不是正数，中心不会授权，任务按尚未启动失败。Worker 用许可请求的往返耗时计算本地预算，时钟是包含系统暂停的单调时钟，不使用可被改动的墙上时钟。预算不是正数、许可过期、受众不对、执行身份不对或存储代次不对时，Worker 不写入 `start_intent`，也不调用执行器。
+
+校验通过后，Worker 先把 `start_intent` 写入自己的 SQLite，然后才调用测试执行器的 `Start`。这一步不提交任务输入，也不运行启动钩子，中心任务状态仍是 `queued`。测试执行器只把 `start` 记到日志里，方便确认没有在准备阶段启动。
+
+`POST /tasks/{id}/cancel` 需要登录会话、Origin 和 CSRF，正文是 `{}`。尚未发出启动许可、或者节点已经明确拒绝启动时，任务变为 `cancelled`。许可已经发出但还没有这张未启动回执时，任务变为 `needs_verification`，响应里的 `possible_start` 为 true。缺少启动回执不会被当成“没有执行”。重复取消不发起新的执行。取消父任务时还不会级联子委托。
+
+排队到期时，能确认还没启动的任务失败，原因是 `queue_timeout`。已经授权且没有未启动回执的任务改为 `needs_verification`。节点被吊销时也按同样的规则处理：还没授权就失败，原因是 `revoked`；已经授权就进入待核实。
 
 ## Web UI
 
@@ -221,4 +233,4 @@ go test ./...
 go vet ./...
 ```
 
-登录、退出、身份查询、CSRF 和 Origin 的通过路径使用本地 TLS 服务，并把测试证书放进客户端信任池。明文 HTTP 测试确认响应仍带 `Secure` Cookie：按正式 Cookie 规则、不把环回地址当作安全来源的客户端不会在明文请求里带回它。CSRF 和 Origin 检查在两条路径上都生效。节点注册的通过路径同样使用该 TLS 服务；`batond register` 通过 `BATON_TLS_CA_FILE` 信任测试证书。节点连接测试使用真实的 Coordinator、Relay 和 batond 进程，以及 TLS WebSocket，并注入断线、Coordinator 重启和 Relay 重启。准备测试另外启动真实的 Session Worker 和本地 SQLite，覆盖重复投递、batond 重启后连回原 Worker、同一 Session 的并发写入，以及本地持久化失败。测试进程可以设置 `BATON_TEST_DROP_PREPARE_ACKS`、`BATON_TEST_FAIL_PERSIST`、`BATON_TEST_EXECUTOR_LOG` 和 `BATON_TEST_SLOW_WRITE`。未设置时这些变量没有作用，它们不是操作者配置。
+登录、退出、身份查询、CSRF 和 Origin 的通过路径使用本地 TLS 服务，并把测试证书放进客户端信任池。明文 HTTP 测试确认响应仍带 `Secure` Cookie：按正式 Cookie 规则、不把环回地址当作安全来源的客户端不会在明文请求里带回它。CSRF 和 Origin 检查在两条路径上都生效。节点注册的通过路径同样使用该 TLS 服务；`batond register` 通过 `BATON_TLS_CA_FILE` 信任测试证书。节点连接测试使用真实的 Coordinator、Relay 和 batond 进程，以及 TLS WebSocket，并注入断线、Coordinator 重启和 Relay 重启。准备测试另外启动真实的 Session Worker 和本地 SQLite，覆盖重复投递、batond 重启后连回原 Worker、同一 Session 的并发写入，以及本地持久化失败。启动许可测试覆盖中心事务和节点校验，并注入延迟、取消、吊销、墙上时钟跳变和暂停后唤醒。测试进程可以设置 `BATON_TEST_DROP_PREPARE_ACKS`、`BATON_TEST_FAIL_PERSIST`、`BATON_TEST_EXECUTOR_LOG`、`BATON_TEST_SLOW_WRITE`、`BATON_TEST_HOLD_START`、`BATON_TEST_START_DELAY`、`BATON_TEST_START_GATE`、`BATON_TEST_WALL_OFFSET`、`BATON_TEST_SUSPEND_AFTER_ARM` 和 `BATON_TEST_PERMIT_FILE`。未设置时这些变量没有作用，它们不是操作者配置。

@@ -39,9 +39,11 @@ type Session struct {
 }
 
 type Store struct {
-	pool         *pgxpool.Pool
-	mu           sync.Mutex
-	beforeCommit func(context.Context) error
+	pool               *pgxpool.Pool
+	mu                 sync.Mutex
+	beforeCommit       func(context.Context) error
+	beforeStartCommit  func(context.Context) error
+	beforeCancelCommit func(context.Context) error
 }
 
 var _ identity.Directory = (*Store)(nil)

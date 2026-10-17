@@ -26,6 +26,7 @@ import (
 // Server 在独立监听器上接受 Relay。节点凭据不能打开这条连接。
 type Server struct {
 	store     *store.Store
+	signer    node.Signer
 	public    ed25519.PublicKey
 	tokenHash [32]byte
 	heartbeat time.Duration
@@ -51,6 +52,7 @@ func New(st *store.Store, signer node.Signer, token string, heartbeat, offline t
 	}
 	return &Server{
 		store:     st,
+		signer:    signer,
 		public:    pub,
 		tokenHash: sha256.Sum256([]byte(token)),
 		heartbeat: heartbeat,
@@ -208,8 +210,15 @@ func (s *Server) onEnvelope(ctx context.Context, ws *websocket.Conn, raw json.Ra
 		s.reply(ctx, ws, env, false, protocol.CodeInvalidMessage)
 		return
 	}
-	if kind.Type == protocol.BodyPrepareResult {
+	switch kind.Type {
+	case protocol.BodyPrepareResult:
 		s.notePrepareResult(env)
+		return
+	case protocol.BodyStartPermit:
+		s.onStartPermit(ctx, ws, env)
+		return
+	case protocol.BodyStartReport:
+		s.onStartReport(ctx, ws, env)
 		return
 	}
 	if kind.Type != "node.sync" {
