@@ -21,7 +21,7 @@
 工单默认派给 Cursor Cloud Agent，用 `cursor-cloud` skill 调度；需要本机资源的工作才在 Herdr 中起本地 Cursor。
 
 - 仓库 `https://github.com/hhubb22/baton`，起点 `main`，开 PR。云端环境由 `.cursor/` 定义，环境 ID `49b419f4-ca28-11f1-bec7-b2318963e0b6`；改动 `.cursor/environment.json` 后用 `cursor-cloud env-sync` 同步。
-- 模型固定为 `grok-4.7`，参数 `context=500k`、`reasoning_effort=xhigh`、`fast=false`，派发时显式传入，不用 fast 变体或其他模型。
+- 模型固定为 `grok-4.7`，参数 `context=500k`、`reasoning_effort=xhigh`、`fast=true`，派发时显式传入，不用其他模型。
 - 提示词由工单要求、当前 `origin/main` 的提交号和 `.agents/cursor-cloud-brief.md` 组成。同时派发的工单如需新迁移，在派发时分配不同编号。
 - 创建前先生成 `agentId`，创建后在工单评论写 Agent 链接、`agentId` 和 `runId`，并把 Agent 链接加为工单链接。网络失败时用同一个 `agentId` 重试。
 - 用后台的 `cursor-cloud wait` 等待完成。审查时把分支取到独立 worktree，变基到 `main` 后在本机复跑验证；需要修改时用 `followup` 发回同一个 Agent。
