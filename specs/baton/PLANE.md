@@ -4,7 +4,7 @@ Status: 调查记录。文末方案待批准，批准前不写入行为规格或
 Date: 2026-10-17
 Basis: PRODUCT R-01、R-33、R-34、R-35、R-36；TECH「Plane 接入」与 Q4。
 
-本次只在项目 Baton Test 中创建、修改和删除名称以 `baton-t25-` 开头的测试工单及评论，结束后 `GET /api/v1/workspaces/baton/projects/823da8c2-1bc0-4f22-9552-a72956c337f6/issues/` 的 `total_count` 回到 8，与调查开始前的演示工单数量一致。没有修改实例设置、其他项目、账号或 Webhook 的事件开关。为观察非 2xx，曾把该 Webhook 的 `url` 临时改为 `https://example.com/baton-plane-probe-missing`，记录到响应后立即改回原来的接收地址；改回后 `is_active` 仍为 true，五个事件开关和 `version` 与改前相同。
+本次只在项目 Baton Test 中创建、修改和删除名称以 `baton-t25-` 开头的测试工单及评论，结束后 `GET /api/v1/workspaces/baton/projects/{project_id}/issues/` 的 `total_count` 回到 8，与调查开始前的演示工单数量一致。没有修改实例设置、其他项目、账号或 Webhook 的事件开关。为观察非 2xx，曾把该 Webhook 的 `url` 临时改为 `https://example.com/baton-plane-probe-missing`，记录到响应后立即改回原来的接收地址；改回后 `is_active` 仍为 true，五个事件开关和 `version` 与改前相同。
 
 下文不记录口令、API token、Webhook 秘密、签名值或邮箱。身份以用户 ID 和显示名区分。
 
@@ -15,10 +15,10 @@ Basis: PRODUCT R-01、R-33、R-34、R-35、R-36；TECH「Plane 接入」与 Q4�
 | 对象 | 实测值 |
 |---|---|
 | 工作区 slug | `baton` |
-| 工作区 ID | `11c3a8f1-c1e4-4449-8cbf-ab28267d5356` |
+| 工作区 ID | `op://Baton Test/plane/PLANE_WORKSPACE_ID` |
 | 项目 | Baton Test，identifier `BATON` |
-| 项目 ID | `823da8c2-1bc0-4f22-9552-a72956c337f6` |
-| Webhook ID | `457429ea-accd-466c-9c1f-6c3609d2a52a` |
+| 项目 ID | `op://Baton Test/plane/PLANE_PROJECT_ID` |
+| Webhook ID | `op://Baton Test/plane/PLANE_WEBHOOK_ID` |
 
 这些 ID 属于这一套测试数据。适配器应读取部署配置，不要把上表写死。
 
@@ -33,7 +33,7 @@ Basis: PRODUCT R-01、R-33、R-34、R-35、R-36；TECH「Plane 接入」与 Q4�
 
 ## Webhook 来源验证
 
-管理员会话 `GET /api/workspaces/baton/webhooks/457429ea-accd-466c-9c1f-6c3609d2a52a/` 返回的 Webhook 属于上述工作区。`project`、`issue`、`cycle`、`module`、`issue_comment` 都是布尔值且均为 true，不是项目 ID。`version` 为 `v1`，`is_internal` 为 false，`is_active` 为 true。同一响应包含 `secret_key`；适配器不得记录这个响应。`GET /api/v1/workspaces/baton/webhooks/` 为 404。普通成员请求 Webhook 和工作日志均为 403，正文 `error` 为 `You don't have the required permissions.`
+管理员会话 `GET /api/workspaces/baton/webhooks/{webhook_id}/` 返回的 Webhook 属于上述工作区。`project`、`issue`、`cycle`、`module`、`issue_comment` 都是布尔值且均为 true，不是项目 ID。`version` 为 `v1`，`is_internal` 为 false，`is_active` 为 true。同一响应包含 `secret_key`；适配器不得记录这个响应。`GET /api/v1/workspaces/baton/webhooks/` 为 404。普通成员请求 Webhook 和工作日志均为 403，正文 `error` 为 `You don't have the required permissions.`
 
 接收服务保存的 Plane 请求，以及 Plane 自己在 405 那次投递中记录的 `request_headers`，来自 Plane 的头是：
 
@@ -87,7 +87,7 @@ Basis: PRODUCT R-01、R-33、R-34、R-35、R-36；TECH「Plane 接入」与 Q4�
 
 ## 触发与审批字段
 
-`GET /api/v1/workspaces/baton/projects/823da8c2-1bc0-4f22-9552-a72956c337f6/` 使用 `X-API-Key`。与触发有关的实测字段：
+`GET /api/v1/workspaces/baton/projects/{project_id}/` 使用 `X-API-Key`。与触发有关的实测字段：
 
 | 字段 | 实测 |
 |---|---|
@@ -103,15 +103,15 @@ Basis: PRODUCT R-01、R-33、R-34、R-35、R-36；TECH「Plane 接入」与 Q4�
 
 | 名称 | 组 | 默认 | ID |
 |---|---|---|---|
-| Backlog | `backlog` | true | `a528e3a3-6e95-48d8-ac9b-9fe1b709f3d5` |
-| Todo | `unstarted` | false | `6704a2ad-9784-472d-9e2c-4ecb8decb18e` |
-| In Progress | `started` | false | `9d3da331-0a7f-4303-bde3-3bc3cc882fbf` |
-| Done | `completed` | false | `be348433-da7f-4f33-9faf-8b90220fd58c` |
-| Cancelled | `cancelled` | false | `c5f356c3-18b4-4808-b5ca-0c6843175615` |
+| Backlog | `backlog` | true | `{state_id}` |
+| Todo | `unstarted` | false | `{state_id}` |
+| In Progress | `started` | false | `{state_id}` |
+| Done | `completed` | false | `{state_id}` |
+| Cancelled | `cancelled` | false | `{state_id}` |
 
 状态对象含 `external_id` 与 `external_source`，当前均为 null。没有改过状态定义。
 
-标签 `GET .../labels/` 有 `concepts`（`e3cd67e4-91ff-4f11-8554-5f2dbfed2a4c`）和 `admin`（`9ac1746f-a196-479c-95e9-01eaa6c4dc7b`），二者的 `external_id` 与 `external_source` 也为 null。
+标签 `GET .../labels/` 有 `concepts`（`{label_id}`）和 `admin`（`{label_id}`），二者的 `external_id` 与 `external_source` 也为 null。
 
 优先级实际写入并读回的值有 `none`、`low`、`medium`、`high`、`urgent`。
 
@@ -119,7 +119,7 @@ Basis: PRODUCT R-01、R-33、R-34、R-35、R-36；TECH「Plane 接入」与 Q4�
 
 读取当前工单：
 
-- `GET /api/v1/workspaces/baton/projects/823da8c2-1bc0-4f22-9552-a72956c337f6/issues/{id}/`
+- `GET /api/v1/workspaces/baton/projects/{project_id}/issues/{id}/`
 - 同时带 `external_id` 与 `external_source` 查询 `GET .../issues/` 时，返回这一张工单对象，不是分页列表。不存在时 404，正文 `error` 为 `The requested resource does not exist.`
 - 只带 `external_id` 不会过滤，仍返回分页列表。
 - `GET /api/v1/workspaces/baton/work-items/BATON-1/` 与 `GET /api/v1/workspaces/baton/issues/BATON-8/` 都能按 identifier 和序号读到已有演示工单。
@@ -128,7 +128,7 @@ v1 工单响应里的 `state`、`labels`、`assignees` 是 ID 或 ID 数组。We
 
 ## 身份与权限
 
-v1 认证头是 `X-API-Key`。`GET /api/v1/users/me/` 返回管理员：ID `006cd168-49fd-46b7-b546-d068e5097c1c`，`display_name` 为 `admin`，邮箱与配置的管理员邮箱一致。响应头有 `X-RateLimit-Remaining` 和 `X-RateLimit-Reset`，没有看到 `X-RateLimit-Limit`。
+v1 认证头是 `X-API-Key`。`GET /api/v1/users/me/` 返回管理员：ID `{admin_user_id}`，`display_name` 为 `admin`，邮箱与配置的管理员邮箱一致。响应头有 `X-RateLimit-Remaining` 和 `X-RateLimit-Reset`，没有看到 `X-RateLimit-Limit`。
 
 管理员会话 `GET /api/users/api-tokens/` 只有一条 token：`is_active` true，`expired_at` null，`user_type` 0，`workspace` null，`is_service` false，`allowed_rate_limit` 为 `60/min`，`user` 就是上面的管理员。列表响应不含 token 秘密。用该 token 请求不存在的工作区 slug 返回 403。`GET /api/v1/workspaces/baton/` 即使带这个 token 也返回 401，正文 `detail` 为 `Authentication credentials were not provided.`；同 token 可以列出项目和工单。token 不能调用 `/api/workspaces/...` 应用接口，返回同样的 401。
 
@@ -138,11 +138,11 @@ v1 认证头是 `X-API-Key`。`GET /api/v1/users/me/` 返回管理员：ID `006c
 
 | 用户 ID | 显示名 | `role` | 说明 |
 |---|---|---|---|
-| `006cd168-49fd-46b7-b546-d068e5097c1c` | admin | 20 | 管理员，`is_bot` false |
-| `002c6c44-90dc-4c9c-a6ba-9a628aea78ef` | member | 15 | 普通成员，`is_bot` false；ID 与配置的成员 ID 一致 |
-| `2f4f52f0-df21-4ca1-9823-0a0f85a124e6` | Plane | 20 | 邮箱不是两个已配置的人类账号 |
+| `{admin_user_id}` | admin | 20 | 管理员，`is_bot` false |
+| `op://Baton Test/plane/PLANE_MEMBER_ID` | member | 15 | 普通成员，`is_bot` false；ID 与配置的成员 ID 一致 |
+| `{plane_bot_user_id}` | Plane | 20 | 邮箱不是两个已配置的人类账号 |
 
-应用接口 `GET /api/workspaces/baton/projects/823da8c2-1bc0-4f22-9552-a72956c337f6/members/` 只有两行成员关系：管理员 `role` 20，普通成员 `role` 15。Plane 那个用户不在项目成员关系里。项目 `total_members` 为 2。v1 的 `GET .../projects/{id}/members/` 却返回三个用户对象且没有 `role`。判断项目角色时不能只看 v1 的这个列表。
+应用接口 `GET /api/workspaces/baton/projects/{project_id}/members/` 只有两行成员关系：管理员 `role` 20，普通成员 `role` 15。Plane 那个用户不在项目成员关系里。项目 `total_members` 为 2。v1 的 `GET .../projects/{id}/members/` 却返回三个用户对象且没有 `role`。判断项目角色时不能只看 v1 的这个列表。
 
 普通成员在应用接口上的实测：
 
@@ -165,7 +165,7 @@ Webhook `activity.actor` 是用户对象，含 `id`、`email`、`display_name`�
 
 ## 回写与去重
 
-v1 写操作使用 `X-API-Key`，路径前缀 `/api/v1/workspaces/baton/projects/823da8c2-1bc0-4f22-9552-a72956c337f6`。
+v1 写操作使用 `X-API-Key`，路径前缀 `/api/v1/workspaces/baton/projects/{project_id}`。
 
 | 动作 | 方法与路径 | 结果 |
 |---|---|---|
@@ -186,7 +186,7 @@ v1 写操作使用 `X-API-Key`，路径前缀 `/api/v1/workspaces/baton/projects
 
 ## 工单摘要可见性
 
-未登录请求 v1 或应用接口的工单列表均为 401。`GET /api/public/workspaces/baton/projects/823da8c2-1bc0-4f22-9552-a72956c337f6/anchor/` 在无认证、成员会话、管理员会话和 API token 下都是 404，正文 `error` 为 `The required object does not exist.` 项目 `is_deployed` 为 false。因此当前没有可匿名打开的公开页。`network` 数值为 2；本次没有改这个字段，也不能由此推出改成其他值后的可见性。
+未登录请求 v1 或应用接口的工单列表均为 401。`GET /api/public/workspaces/baton/projects/{project_id}/anchor/` 在无认证、成员会话、管理员会话和 API token 下都是 404，正文 `error` 为 `The required object does not exist.` 项目 `is_deployed` 为 false。因此当前没有可匿名打开的公开页。`network` 数值为 2；本次没有改这个字段，也不能由此推出改成其他值后的可见性。
 
 项目成员能在列表和详情中看到工单 `name` 与 `description_html`，并能看到 `INTERNAL` 评论。Webhook 正文同样带有描述。回写若写进工单描述或 `EXTERNAL` 评论，项目成员现在就能阅读；项目一旦被公开，`EXTERNAL` 评论还会进入公开评论接口。本次没有公开项目，匿名读取公开评论的结果未知。
 
@@ -206,7 +206,7 @@ v1 写操作使用 `X-API-Key`，路径前缀 `/api/v1/workspaces/baton/projects
 
 **回写。** 评论使用 `POST .../issues/{id}/comments/`，正文至少包含 `comment_html`、`external_source`、`external_id`。状态使用 `PATCH .../issues/{id}/`，v1 字段名是 `state`。创建返回 201；相同标记返回 409 且带已有 `id`。409 或网络失败后用该 `id` 做 `GET`，确认 `external_source` 与 `external_id`，确认过就不再创建第二条。评论列表查询参数不能用来找回。工单或评论删除后标记可以再次使用，所以不能把已删除对象的标记继续当成永久幂等键。
 
-**身份。** 触发身份取 `activity.actor.id`，并核对该对象上的邮箱。只接受配置过的 Plane 用户 ID。`2f4f52f0-df21-4ca1-9823-0a0f85a124e6` 没有项目成员关系，不能映射为员工。没有映射则不执行。当前 API token 的写操作会显示为管理员 `006cd168-49fd-46b7-b546-d068e5097c1c`，因此回写事件的 actor 是集成账号，不是工单上的指派人。
+**身份。** 触发身份取 `activity.actor.id`，并核对该对象上的邮箱。只接受配置过的 Plane 用户 ID。`{plane_bot_user_id}` 没有项目成员关系，不能映射为员工。没有映射则不执行。当前 API token 的写操作会显示为管理员 `{admin_user_id}`，因此回写事件的 actor 是集成账号，不是工单上的指派人。
 
 ## 未知
 
@@ -225,6 +225,6 @@ v1 写操作使用 `X-API-Key`，路径前缀 `/api/v1/workspaces/baton/projects
 
 **设计已批准。** 不用自定义属性，这个实例没有该接口。也不要占用 Done：Done 的组是 `completed`，和人工验收完成混在一起。建议新增一个项目标签，名称固定为 `design-approved`，用它的标签 ID 表示设计已批准。执行触发另行使用状态组 `started`（当前名称是 In Progress）。两者都在执行前用 v1 `GET` 工单确认，不按单条 Webhook 快照放行。现有的 Backlog、Todo、Done、Cancelled 继续只表达 Plane 工作流。
 
-**员工映射。** 配置 Plane 用户 ID 到 Baton 员工的显式表，并用 `activity.actor.email` 核对。管理员 ID `006cd168-49fd-46b7-b546-d068e5097c1c` 只在他本人发起时代表该员工；集成 token 造成的回写不代表他发起了新执行。成员 ID `002c6c44-90dc-4c9c-a6ba-9a628aea78ef` 映射到对应员工。Plane 显示名账号不映射。未映射的 actor 拒绝执行。
+**员工映射。** 配置 Plane 用户 ID 到 Baton 员工的显式表，并用 `activity.actor.email` 核对。管理员 ID `{admin_user_id}` 只在该账号本人发起时代表该员工；集成 token 造成的回写不代表他发起了新执行。成员 ID `{member_id}` 映射到对应员工。Plane 显示名账号不映射。未映射的 actor 拒绝执行。
 
 **回写摘要。** 用评论而不是改写工单描述。`external_source` 固定为 `baton`，`external_id` 使用 Baton 回写记录 ID。`access` 使用 `INTERNAL`。`comment_html` 只包含固定前缀 `baton-writeback`、Baton 任务链接、状态、短结果和证据引用，不包含 Session 原文、命令输出或凭据。状态变更仍由项目映射决定，并且必须带可查询标记，避免响应丢失后重复评论。当前项目成员都能阅读工单描述和 `INTERNAL` 评论；匿名用户现在不能。若以后公开项目，保持 `INTERNAL`，避免摘要进入公开评论。
