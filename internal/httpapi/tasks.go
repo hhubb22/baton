@@ -1,0 +1,168 @@
+package httpapi
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"strings"
+
+	"baton/internal/identity"
+	"baton/internal/store"
+	"baton/internal/task"
+)
+
+// SetTaskCommitHookForTest 让测试在任务事务提交前失败或观察未提交的写入。
+func (s *Server) SetTaskCommitHookForTest(fn func(context.Context) error) {
+	s.store.SetTaskCommitHook(fn)
+}
+
+func (s *Server) routeTask(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/api/v1/tasks/")
+	if rest == "" {
+		s.writeError(w, r, http.StatusNotFound, "not_found", "找不到对应接口")
+		return
+	}
+	if strings.HasSuffix(rest, "/events") {
+		id := strings.TrimSuffix(rest, "/events")
+		if id == "" || strings.Contains(id, "/") {
+			s.writeError(w, r, http.StatusNotFound, "not_found", "找不到对应接口")
+			return
+		}
+		if r.Method != http.MethodGet {
+			s.writeError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "不支持该请求方法")
+			return
+		}
+		s.listTaskEvents(w, r, id)
+		return
+	}
+	if strings.Contains(rest, "/") {
+		s.writeError(w, r, http.StatusNotFound, "not_found", "找不到对应接口")
+		return
+	}
+	if r.Method != http.MethodGet {
+		s.writeError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "不支持该请求方法")
+		return
+	}
+	s.getTask(w, r, rest)
+}
+
+func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
+	if s.rejectQuery(w, r) {
+		return
+	}
+	sess, ok := s.allowWrite(w, r)
+	if !ok {
+		return
+	}
+	var in task.Input
+	if !s.readJSON(w, r, &in) {
+		return
+	}
+	rec, err := s.store.AcceptTask(r.Context(), sess.Employee.ID, in)
+	if err != nil {
+		s.writeTaskError(w, r, sess.Employee.ID, err)
+		return
+	}
+	s.log.Info("task accepted",
+		"request_id", requestID(r.Context()),
+		"employee_id", sess.Employee.ID,
+		"task_id", rec.TaskID,
+		"target_node_id", rec.TargetNodeID,
+	)
+	s.writeJSON(w, http.StatusOK, rec)
+}
+
+func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
+	if s.rejectQuery(w, r) {
+		return
+	}
+	sess, ok := s.requireSession(w, r)
+	if !ok {
+		return
+	}
+	tasks, err := s.store.ListTasks(r.Context(), sess.Employee.ID)
+	if err != nil {
+		s.writeTaskError(w, r, sess.Employee.ID, err)
+		return
+	}
+	s.writeJSON(w, http.StatusOK, struct {
+		Tasks []task.Record `json:"tasks"`
+	}{Tasks: tasks})
+}
+
+func (s *Server) getTask(w http.ResponseWriter, r *http.Request, rawID string) {
+	if s.rejectQuery(w, r) {
+		return
+	}
+	sess, ok := s.requireSession(w, r)
+	if !ok {
+		return
+	}
+	if _, err := identity.ParseUUID(rawID); err != nil {
+		s.writeError(w, r, http.StatusBadRequest, "invalid_id", "任务标识不正确")
+		return
+	}
+	rec, err := s.store.GetTask(r.Context(), sess.Employee.ID, rawID)
+	if err != nil {
+		s.writeTaskError(w, r, sess.Employee.ID, err)
+		return
+	}
+	s.writeJSON(w, http.StatusOK, rec)
+}
+
+func (s *Server) listTaskEvents(w http.ResponseWriter, r *http.Request, rawID string) {
+	if s.rejectQuery(w, r) {
+		return
+	}
+	sess, ok := s.requireSession(w, r)
+	if !ok {
+		return
+	}
+	if _, err := identity.ParseUUID(rawID); err != nil {
+		s.writeError(w, r, http.StatusBadRequest, "invalid_id", "任务标识不正确")
+		return
+	}
+	events, err := s.store.ListTaskEvents(r.Context(), sess.Employee.ID, rawID)
+	if err != nil {
+		s.writeTaskError(w, r, sess.Employee.ID, err)
+		return
+	}
+	s.writeJSON(w, http.StatusOK, struct {
+		Events []task.Event `json:"events"`
+	}{Events: events})
+}
+
+func (s *Server) writeTaskError(w http.ResponseWriter, r *http.Request, employeeID string, err error) {
+	var rej *task.Rejection
+	if errors.As(err, &rej) {
+		s.log.Info("task rejected",
+			"request_id", requestID(r.Context()),
+			"employee_id", employeeID,
+			"code", rej.Code,
+		)
+		status := http.StatusBadRequest
+		switch rej.Code {
+		case task.CodeForbidden:
+			status = http.StatusForbidden
+		case task.CodeConflict:
+			status = http.StatusConflict
+		}
+		body := errorBody{
+			Code:      rej.Code,
+			Message:   rej.Message,
+			RequestID: requestID(r.Context()),
+			TaskID:    rej.TaskID,
+		}
+		if len(rej.Fields) > 0 {
+			body.Details = &errorDetails{Fields: append([]string(nil), rej.Fields...)}
+		}
+		s.writeJSON(w, status, body)
+		return
+	}
+	if errors.Is(err, store.ErrNotVisible) {
+		s.writeError(w, r, http.StatusForbidden, "forbidden", "不能查看该任务")
+		return
+	}
+	s.log.Error("task failed", "request_id", requestID(r.Context()), "employee_id", employeeID)
+	s.writeError(w, r, http.StatusInternalServerError, "unavailable", "暂时无法处理请求")
+}

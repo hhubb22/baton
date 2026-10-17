@@ -1,8 +1,8 @@
 # Baton
 
-员工使用部署管理员分配的本地账号登录 Coordinator，退出，查询本人身份，领取一次性节点注册凭据，设置默认 PC，并吊销本人节点的连接凭据。初始口令只能使用到员工完成更换为止。`batond register` 用这张凭据注册节点，把身份保存在本机。`batond run` 用这份身份主动连接 Relay，断线后重连，并在同步完成前不会显示为可执行。吊销生效后，同一连接凭据不能再接入。
+员工使用部署管理员分配的本地账号登录 Coordinator，退出，查询本人身份，领取一次性节点注册凭据，设置默认 PC，吊销本人节点的连接凭据，并提交任务。初始口令只能使用到员工完成更换为止。`batond register` 用这张凭据注册节点，把身份保存在本机。`batond run` 用这份身份主动连接 Relay，断线后重连，并在同步完成前不会显示为可执行。吊销生效后，同一连接凭据不能再接入。
 
-本目录目前包含这条路径的构建、迁移、HTTP 接口、Coordinator、Relay、batond 和测试。任务委托和管理员网页不在这里。
+本目录目前包含这条路径的构建、迁移、HTTP 接口、Coordinator、Relay、batond 和测试。任务接口会保存接受记录和投递意图。实际投递、Worker、Session 和管理员网页不在这里。
 
 ## 运行要求
 
@@ -153,6 +153,28 @@ batond run --relay wss://baton.example/v1/node
 响应里的 `status` 表示处理状态。Relay 已把吊销应用到内存、断开对应连接并回执时为 `effective`，同时给出 `applied_at`。Relay 当时不可达，或回执还没到，则为 `pending`，`applied_at` 为 null。不能把 `pending` 理解成凭据已经不能连接，也不能理解成离线节点上的本地进程已经停止。
 
 Relay 重新连上 Coordinator 时会取得包含该吊销的安全快照；已经连着时，Coordinator 会补发吊销。两种路径都会拒绝同一 `credential_id`，避免 Relay 用过期的内存状态放行。`batond` 收到认证失败后退出并说明需要重新认证，不会用失效凭据重新注册。
+
+## 任务接受
+
+`POST /tasks` 需要登录会话、Origin 和 CSRF。员工身份来自会话。正文里如果出现 `employee_id`，请求会因未知字段被拒绝，不会创建任务。
+
+调用方自己生成 `request_id`，同一次提交的重试保持不变。`description` 必填，最多 32768 个字符，可以包含换行、回车和制表符；其他控制字符会被拒绝。`authorization_scope` 和 `expected_outputs` 同样。`request_id` 和 `working_directory` 仍是单行。`target_node_id` 可以省略，省略时使用当前默认 PC；没有可用的默认 PC 时拒绝，不会改派到别的节点。显式指定时可以使用本人尚未吊销的 PC 或 Ubuntu 节点。节点离线也可以接受，状态是 `queued`。
+
+`agent_type` 可以省略。省略时使用目标节点上的 `default_agent_type`。这个值只是节点表里的可空列，当前没有修改它的接口；列为空时拒绝。节点最后上报的能力里没有这个 Agent 时拒绝，不会创建任务。
+
+`queue_timeout_seconds` 省略时是 600 秒，从接受时起算，响应里给出 `queue_expires_at`。`execution_timeout_seconds` 省略时是 7200 秒，响应里给出这个秒数。省略和写成同一个数字不是同一份内容。`device_names` 省略和空列表也不是同一份内容；列表非空时必须给出 `authorization_scope`。
+
+`source_session_id` 和 `target_session_id` 一旦填写就会被拒绝。中心还没有 Session 归属表，不能确认它们属于当前员工。两个都省略时可以接受，目标 Session 留到以后创建。
+
+中心先按员工和 `request_id` 查找已经提交的请求。内容相同就返回原来的任务，不再解析默认 PC 或默认 Agent。内容不同返回 409，`code` 是 `conflict`，并带上已有的 `task_id`。新请求在同一个数据库事务里保存任务、解析结果、execution、初始事件、`dispatch_outbox` 和去重墓碑。事务提交成功后才返回 200。提交失败时响应不是接受记录，库里也没有这次投递意图。
+
+成功记录包含 `task_id`、`request_id`、`target_node_id`、`agent_type`、`status`、`queue_expires_at`、`execution_timeout_seconds` 和 `version`。新接受和幂等重试都返回 200。错误响应里的 `request_id` 是这一次 HTTP 调用的编号，与正文里的 `request_id` 不是同一个值。
+
+字段不合法返回 `invalid_request`，`details.fields` 指出字段。其他员工的节点或任务返回 `forbidden`。找不到或已失效的目标返回 `invalid_target`。已知能力不匹配返回 `unsupported`。
+
+`GET /tasks` 返回本人最近 100 条任务。`GET /tasks/{id}` 和 `GET /tasks/{id}/events` 只返回本人的记录和变更，不返回 Session 原文。其他员工的任务和不存在的任务都返回 403，响应相同。非法任务标识返回 400。这三个读取接口不要求 CSRF。
+
+`dispatch_outbox` 只保存 `prepare` 投递意图。当前进程不发送、也不消费它。
 
 ## 测试
 

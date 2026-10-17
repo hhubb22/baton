@@ -1,4 +1,4 @@
-// Package httpapi 提供员工登录、退出、本人身份、初始口令更换、节点注册、默认 PC、本人节点状态和凭据吊销。
+// Package httpapi 提供员工登录、退出、本人身份、初始口令更换、节点注册、默认 PC、本人节点状态、凭据吊销和任务接受。
 package httpapi
 
 import (
@@ -168,7 +168,21 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.putDefaultPC(w, r)
+	case "/api/v1/tasks":
+		switch r.Method {
+		case http.MethodPost:
+			s.createTask(w, r)
+		case http.MethodGet:
+			s.listTasks(w, r)
+		default:
+			s.writeError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "不支持该请求方法")
+		}
 	default:
+		const taskPrefix = "/api/v1/tasks/"
+		if strings.HasPrefix(r.URL.Path, taskPrefix) {
+			s.routeTask(w, r)
+			return
+		}
 		const nodePrefix = "/api/v1/nodes/"
 		if strings.HasPrefix(r.URL.Path, nodePrefix) {
 			rest := strings.TrimPrefix(r.URL.Path, nodePrefix)
@@ -522,10 +536,16 @@ func employeeJSON(emp identity.Employee) employeeBody {
 	}
 }
 
+type errorDetails struct {
+	Fields []string `json:"fields,omitempty"`
+}
+
 type errorBody struct {
-	Code      string `json:"code"`
-	Message   string `json:"message"`
-	RequestID string `json:"request_id"`
+	Code      string        `json:"code"`
+	Message   string        `json:"message"`
+	RequestID string        `json:"request_id"`
+	TaskID    string        `json:"task_id,omitempty"`
+	Details   *errorDetails `json:"details,omitempty"`
 }
 
 func (s *Server) writeError(w http.ResponseWriter, r *http.Request, status int, code, message string) {
@@ -548,8 +568,22 @@ func requestID(ctx context.Context) string {
 func safePath(path string) string {
 	switch path {
 	case "/api/v1/login", "/api/v1/logout", "/api/v1/me", "/api/v1/me/password",
-		"/api/v1/node-enrollments", "/api/v1/nodes", "/api/v1/nodes/register", "/api/v1/me/default-pc":
+		"/api/v1/node-enrollments", "/api/v1/nodes", "/api/v1/nodes/register", "/api/v1/me/default-pc",
+		"/api/v1/tasks":
 		return path
+	}
+	const taskPrefix = "/api/v1/tasks/"
+	if strings.HasPrefix(path, taskPrefix) {
+		rest := strings.TrimPrefix(path, taskPrefix)
+		if strings.HasSuffix(rest, "/events") {
+			id := strings.TrimSuffix(rest, "/events")
+			if id != "" && !strings.Contains(id, "/") {
+				return "/api/v1/tasks/:id/events"
+			}
+		}
+		if rest != "" && !strings.Contains(rest, "/") {
+			return "/api/v1/tasks/:id"
+		}
 	}
 	const nodePrefix = "/api/v1/nodes/"
 	if strings.HasPrefix(path, nodePrefix) {

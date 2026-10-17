@@ -1,10 +1,11 @@
-// Package store 把员工、登录会话和节点身份写入 PostgreSQL。口令与凭据明文不进入数据库。
+// Package store 把员工、登录会话、节点和任务接受记录写入 PostgreSQL。口令与凭据明文不进入数据库。
 package store
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"baton/internal/auth"
@@ -38,7 +39,9 @@ type Session struct {
 }
 
 type Store struct {
-	pool *pgxpool.Pool
+	pool         *pgxpool.Pool
+	mu           sync.Mutex
+	beforeCommit func(context.Context) error
 }
 
 var _ identity.Directory = (*Store)(nil)
