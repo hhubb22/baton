@@ -3,6 +3,6 @@
     "dockerfile": "Dockerfile",
     "context": "."
   },
-  "install": "go mod download && cd web && pnpm install --frozen-lockfile && pnpm exec playwright install chromium",
+  "install": "bash .cursor/install.sh",
   "start": "bash .cursor/start.sh"
 }
