@@ -4,7 +4,9 @@
 
 ## 环境
 
-- 测试数据库由 `.cursor/start.sh` 启动，`BATON_TEST_DATABASE_URL` 已经设置。数据库没有响应时先运行 `bash .cursor/start.sh`。
+- 开始前运行 `git fetch origin`，确认工作分支包含工单给出的基线提交；落后于 `origin/main` 时先快进或变基到 `origin/main`，再开始改动。
+- 环境变量在 `/etc/profile.d/baton.sh`。`go`、`BATON_TEST_DATABASE_URL` 不可用时先执行 `. /etc/profile.d/baton.sh`。
+- 测试数据库由 `.cursor/start.sh` 启动。数据库没有响应时运行 `bash .cursor/start.sh`。
 - 不要连接任何其他数据库或外部服务。
 
 ## 实现

@@ -3,6 +3,8 @@
 # root 时使用系统集群；普通用户在 $HOME 下建自己的集群，不依赖 sudo。
 set -euo pipefail
 
+. /etc/profile.d/baton.sh
+
 bin=/usr/lib/postgresql/17/bin
 export PGHOST=127.0.0.1 PGPORT=5432 PGUSER=postgres PGPASSWORD=baton
 
