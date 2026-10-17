@@ -24,8 +24,16 @@ func (h *Host) Reconnect(ctx context.Context, sessionIDs []string) {
 			return c.Status()
 		})
 		if err != nil {
+			if recErr := h.Reconcile(ctx, id); recErr != nil && h.Logger != nil {
+				if errors.Is(recErr, ErrHistoryMissing) || errors.Is(recErr, ErrHistoryIncompatible) {
+					h.Logger.Info("event=history_unreadable", "session_id", id, "reason", recErr.Error())
+				} else {
+					h.Logger.Info("event=history_read_failed", "session_id", id, "reason", recErr.Error())
+				}
+				continue
+			}
 			if h.Logger != nil {
-				h.Logger.Info("event=worker_missing", "session_id", id)
+				h.Logger.Info("event=worker_pid_not_proof", "session_id", id)
 			}
 			continue
 		}
@@ -33,6 +41,35 @@ func (h *Host) Reconnect(ctx context.Context, sessionIDs []string) {
 			h.Logger.Info("event=worker_reconnected", "session_id", id, "pid", st.PID)
 		}
 	}
+}
+
+// Reconcile 在原来的 Worker 已经不在时打开它的账本。套接字不通时，不会把账本里记下的进程号当成执行仍在继续，也不会新建空历史。
+func (h *Host) Reconcile(ctx context.Context, sessionID string) error {
+	if _, err := h.call(ctx, sessionID, func(c *Client) (Status, error) {
+		return c.Status()
+	}); err == nil {
+		return nil
+	}
+	path, err := LedgerPath(h.DataDir, sessionID)
+	if err != nil {
+		return err
+	}
+	needs, err := LedgerNeedsWorker(path)
+	if err != nil {
+		return err
+	}
+	if !needs {
+		return nil
+	}
+	return h.spawn(ctx, sessionID)
+}
+
+// Reachable 只探测原来的 Worker 是否还能应答。不会新建账本，也不会拉起进程。
+func (h *Host) Reachable(ctx context.Context, sessionID string) bool {
+	_, err := h.call(ctx, sessionID, func(c *Client) (Status, error) {
+		return c.Status()
+	})
+	return err == nil
 }
 
 // Bind 确保 Session Worker 在运行，并把这次执行交给它。不会启动 Agent。
@@ -44,6 +81,18 @@ func (h *Host) Bind(ctx context.Context, sessionID, taskID, executionID, agentTy
 		return st.PID, nil
 	} else if errors.Is(err, ErrSessionBusy) {
 		return 0, err
+	}
+	path, pathErr := LedgerPath(h.DataDir, sessionID)
+	if pathErr != nil {
+		return 0, pathErr
+	}
+	switch inspectErr := InspectLedger(path); {
+	case errors.Is(inspectErr, ErrHistoryMissing):
+		if err := CreateLedger(path); err != nil {
+			return 0, err
+		}
+	case inspectErr != nil:
+		return 0, inspectErr
 	}
 	if err := h.spawn(ctx, sessionID); err != nil {
 		if st, err2 := h.call(ctx, sessionID, call); err2 == nil {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
@@ -90,6 +91,28 @@ func handleNodeEnvelope(ctx context.Context, raw []byte, w *wsWriter, ledger *Le
 	}, func(sessionID string) error {
 		if host == nil {
 			return nil
+		}
+		known, err := ledger.HasWorker(sessionID)
+		if err != nil {
+			return err
+		}
+		if known {
+			path, err := session.LedgerPath(host.DataDir, sessionID)
+			if err != nil {
+				return err
+			}
+			inspectErr := session.InspectLedger(path)
+			if errors.Is(inspectErr, session.ErrHistoryMissing) || errors.Is(inspectErr, session.ErrHistoryIncompatible) {
+				pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+				reachable := host.Reachable(pingCtx, sessionID)
+				cancel()
+				if !reachable {
+					log.Info("event=prepare_history_unreadable", "session_id", sessionID, "reason", inspectErr.Error())
+					return errHistoryUnreadable
+				}
+			} else if inspectErr != nil {
+				return inspectErr
+			}
 		}
 		bindCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()

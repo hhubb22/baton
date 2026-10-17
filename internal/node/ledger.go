@@ -112,6 +112,14 @@ func (l *Ledger) Generation() string {
 	return l.generation
 }
 
+func (l *Ledger) HasWorker(sessionID string) (bool, error) {
+	var n int
+	if err := l.db.QueryRow(`SELECT COUNT(*) FROM workers WHERE session_id = ?`, sessionID).Scan(&n); err != nil {
+		return false, errors.New("无法读取 Worker 索引")
+	}
+	return n > 0, nil
+}
+
 func (l *Ledger) WorkerSessions() ([]string, error) {
 	rows, err := l.db.Query(`SELECT session_id FROM workers ORDER BY session_id`)
 	if err != nil {
@@ -130,6 +138,18 @@ func (l *Ledger) WorkerSessions() ([]string, error) {
 		return nil, errors.New("无法读取 Worker 索引")
 	}
 	return out, nil
+}
+
+func (l *Ledger) TaskForSession(sessionID string) (string, string, bool, error) {
+	var taskID, executionID string
+	err := l.db.QueryRow(`SELECT task_id, execution_id FROM receipts WHERE session_id = ?`, sessionID).Scan(&taskID, &executionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", false, nil
+	}
+	if err != nil {
+		return "", "", false, errors.New("无法读取执行映射")
+	}
+	return taskID, executionID, true, nil
 }
 
 func (l *Ledger) RememberWorker(sessionID string, pid int) error {
@@ -201,6 +221,9 @@ func (l *Ledger) Prepare(in PrepareInput, bind func(sessionID string) error) Pre
 func (l *Ledger) finishExisting(saved savedReceipt, taskID string, bind func(string) error) PrepareReport {
 	if bind != nil {
 		if err := bind(saved.sessionID); err != nil {
+			if errors.Is(err, errHistoryUnreadable) {
+				return rejected(task.CodeUnavailable, "本地 Session 历史缺失或无法读取，不能继续准备")
+			}
 			return PrepareReport{Silent: true}
 		}
 	}
@@ -452,6 +475,9 @@ var dropState struct {
 	once sync.Once
 	left atomic.Int32
 }
+
+// errHistoryUnreadable 表示已知 Session 的账本缺失或损坏，准备必须明确拒绝，不能一直不回 ACK。
+var errHistoryUnreadable = errors.New("本地 Session 历史缺失或无法读取")
 
 func failPersist() bool {
 	return os.Getenv("BATON_TEST_FAIL_PERSIST") == "1"

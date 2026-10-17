@@ -56,6 +56,7 @@ type executionHead struct {
 	authorized   bool
 	refused      bool
 	generation   *int
+	errorCode    string
 }
 
 // LoadTaskInput 读取已经授权且尚未确认结束的执行输入。它不记录交付，也不启动执行。
@@ -123,6 +124,10 @@ func (s *Store) ApplyExecutionReport(ctx context.Context, in ExecutionReport) (b
 		if in.Status == task.StatusCompleted && !in.AgentStopped {
 			return false, task.CodeConflict, nil
 		}
+	} else if in.Kind == task.EventNeedsVerification {
+		if in.Status != task.StatusNeedsVerification {
+			return false, task.CodeInvalidTarget, nil
+		}
 	} else if in.Status != task.StatusRunning {
 		return false, task.CodeInvalidTarget, nil
 	}
@@ -131,18 +136,25 @@ func (s *Store) ApplyExecutionReport(ctx context.Context, in ExecutionReport) (b
 		return false, "", fmt.Errorf("保存执行记录失败: %s", redact.Scrub(err.Error()))
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	var seen bool
-	if err := tx.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM task_events WHERE id = $1::uuid AND employee_id = $2::uuid
-		)`, in.EventID, in.EmployeeID).Scan(&seen); err != nil {
-		return false, "", fmt.Errorf("保存执行记录失败: %s", redact.Scrub(err.Error()))
-	}
-	if seen {
+	var seenTask, seenKind string
+	var seenExec *string
+	err = tx.QueryRow(ctx, `
+		SELECT task_id::text, kind, execution_id::text
+		FROM task_events
+		WHERE id = $1::uuid AND employee_id = $2::uuid`,
+		in.EventID, in.EmployeeID).Scan(&seenTask, &seenKind, &seenExec)
+	if err == nil {
+		sameExec := seenExec == nil || *seenExec == "" || *seenExec == in.ExecutionID
+		if seenTask != in.TaskID || seenKind != in.Kind || !sameExec {
+			return false, task.CodeInvalidTarget, nil
+		}
 		if err := tx.Commit(ctx); err != nil {
 			return false, "", fmt.Errorf("保存执行记录失败: %s", redact.Scrub(err.Error()))
 		}
 		return true, "", nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return false, "", fmt.Errorf("保存执行记录失败: %s", redact.Scrub(err.Error()))
 	}
 	head, ok, err := lockExecution(ctx, tx, in)
 	if err != nil {
@@ -154,14 +166,26 @@ func (s *Store) ApplyExecutionReport(ctx context.Context, in ExecutionReport) (b
 	if !head.authorized || head.refused || head.sessionID != in.SessionID || head.nodeID != in.NodeID {
 		return false, task.CodeInvalidTarget, nil
 	}
-	if head.generation != nil && *head.generation != in.InputGeneration {
+	if in.Kind != task.EventNeedsVerification && head.generation != nil && *head.generation != in.InputGeneration {
 		return false, task.CodeConflict, nil
 	}
 	switch head.status {
 	case task.StatusCancelled:
-		return false, task.CodeConflict, nil
+		if in.Kind != task.EventNeedsVerification {
+			return false, task.CodeConflict, nil
+		}
+		err = retainLateUncertain(ctx, tx, in, head)
+		if err != nil {
+			return false, "", err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return false, "", fmt.Errorf("保存执行记录失败: %s", redact.Scrub(err.Error()))
+		}
+		return true, "", nil
 	}
-	if in.Kind == task.EventStarted {
+	if in.Kind == task.EventNeedsVerification {
+		err = applyUncertain(ctx, tx, in, head)
+	} else if in.Kind == task.EventStarted {
 		err = applyStarted(ctx, tx, in, head)
 	} else if head.status == task.StatusCompleted || head.status == task.StatusFailed || head.status == task.StatusCancelled {
 		err = retainLateResult(ctx, tx, in, head)
@@ -187,8 +211,64 @@ func (s *Store) ApplyExecutionReport(ctx context.Context, in ExecutionReport) (b
 	return true, "", nil
 }
 
+func applyUncertain(ctx context.Context, tx pgx.Tx, in ExecutionReport, head executionHead) error {
+	switch head.status {
+	case task.StatusCompleted, task.StatusFailed, task.StatusCancelled:
+		return retainLateUncertain(ctx, tx, in, head)
+	case task.StatusQueued, task.StatusRunning, task.StatusNeedsVerification:
+	default:
+		return nil
+	}
+	message, ok := task.UncertainMessage(in.ErrorCode)
+	if !ok {
+		return errors.New("待核实原因无效")
+	}
+	tag, err := tx.Exec(ctx, `
+		UPDATE tasks
+		SET status = 'needs_verification', error_code = $3, error_message = $4, version = version + 1, updated_at = now()
+		WHERE id = $1::uuid AND employee_id = $2::uuid AND version = $5`,
+		in.TaskID, in.EmployeeID, in.ErrorCode, message, head.version)
+	if err != nil {
+		return fmt.Errorf("保存执行记录失败: %s", redact.Scrub(err.Error()))
+	}
+	if tag.RowsAffected() != 1 {
+		return errors.New("任务版本已变化")
+	}
+	if err := insertReportEvent(ctx, tx, in, head, head.version+1, task.EventNeedsVerification, task.StatusNeedsVerification, in.ErrorCode); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE sessions
+		SET status = 'unknown', updated_at = now()
+		WHERE employee_id = $1::uuid AND id = $2::uuid`,
+		in.EmployeeID, in.SessionID); err != nil {
+		return fmt.Errorf("保存执行记录失败: %s", redact.Scrub(err.Error()))
+	}
+	return nil
+}
+
 func applyStarted(ctx context.Context, tx pgx.Tx, in ExecutionReport, head executionHead) error {
-	if head.status != task.StatusQueued && head.status != task.StatusNeedsVerification && head.status != task.StatusRunning {
+	if head.status == task.StatusNeedsVerification && task.IsUncertainCode(head.errorCode) {
+		tag, err := tx.Exec(ctx, `
+			UPDATE executions
+			SET started_at = COALESCE(started_at, now()),
+			    input_generation = COALESCE(input_generation, $3)
+			WHERE id = $1::uuid AND employee_id = $2::uuid
+			  AND start_authorized_at IS NOT NULL
+			  AND (input_generation IS NULL OR input_generation = $3)`,
+			in.ExecutionID, in.EmployeeID, in.InputGeneration)
+		if err != nil {
+			return fmt.Errorf("保存执行记录失败: %s", redact.Scrub(err.Error()))
+		}
+		if tag.RowsAffected() != 1 {
+			return errors.New("执行代次不一致")
+		}
+		if err := bumpVersion(ctx, tx, in.EmployeeID, in.TaskID, head.version); err != nil {
+			return err
+		}
+		return insertReportEvent(ctx, tx, in, head, head.version+1, task.EventStarted, task.StatusNeedsVerification, "")
+	}
+	if head.status != task.StatusQueued && head.status != task.StatusRunning && head.status != task.StatusNeedsVerification {
 		return nil
 	}
 	tag, err := tx.Exec(ctx, `
@@ -339,14 +419,15 @@ func lockExecution(ctx context.Context, tx pgx.Tx, in ExecutionReport) (executio
 	err := tx.QueryRow(ctx, `
 		SELECT t.version, t.status, t.agent_type, t.target_node_id::text, t.target_session_id::text,
 		       t.source_session_id::text, t.queue_expires_at, t.execution_timeout_seconds,
-		       e.start_authorized_at IS NOT NULL, e.start_refused_at IS NOT NULL, e.input_generation
+		       e.start_authorized_at IS NOT NULL, e.start_refused_at IS NOT NULL, e.input_generation,
+		       COALESCE(t.error_code, '')
 		FROM tasks t
 		JOIN executions e ON e.task_id = t.id AND e.employee_id = t.employee_id
 		WHERE t.id = $1::uuid AND t.employee_id = $2::uuid AND e.id = $3::uuid
 		FOR UPDATE`, in.TaskID, in.EmployeeID, in.ExecutionID).Scan(
 		&head.version, &head.status, &head.agent, &head.nodeID, &sessionID,
 		&head.sourceID, &head.queueExpires, &head.execSeconds,
-		&head.authorized, &head.refused, &head.generation,
+		&head.authorized, &head.refused, &head.generation, &head.errorCode,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return executionHead{}, false, nil
@@ -365,12 +446,12 @@ func insertReportEvent(ctx context.Context, tx pgx.Tx, in ExecutionReport, head 
 		INSERT INTO task_events (
 			id, task_id, employee_id, version, actor_employee_id, kind,
 			status, target_node_id, agent_type, queue_expires_at,
-			execution_timeout_seconds, reason_code, created_at
+			execution_timeout_seconds, reason_code, execution_id, created_at
 		) VALUES (
 			$1::uuid, $2::uuid, $3::uuid, $4, $3::uuid, $5,
-			$6, $7::uuid, $8, $9, $10, $11, now()
+			$6, $7::uuid, $8, $9, $10, $11, $12::uuid, now()
 		)`, in.EventID, in.TaskID, in.EmployeeID, version, kind, status, head.nodeID, head.agent,
-		head.queueExpires, head.execSeconds, nullText(reason))
+		head.queueExpires, head.execSeconds, nullText(reason), in.ExecutionID)
 	if err != nil {
 		return fmt.Errorf("保存执行记录失败: %s", redact.Scrub(err.Error()))
 	}
@@ -469,15 +550,35 @@ func normalizeReport(in *ExecutionReport) error {
 			return err
 		}
 	}
-	if in.InputGeneration < 1 {
-		return errors.New("代次无效")
-	}
 	switch in.Kind {
+	case task.EventNeedsVerification:
+		if in.Status != task.StatusNeedsVerification {
+			return errors.New("报告类型无效")
+		}
+		message, ok := task.UncertainMessage(in.ErrorCode)
+		if !ok {
+			return errors.New("报告类型无效")
+		}
+		in.ErrorMessage = message
+		return nil
 	case task.EventStarted, task.EventResult:
+		if in.InputGeneration < 1 {
+			return errors.New("代次无效")
+		}
 		return nil
 	default:
 		return errors.New("报告类型无效")
 	}
+}
+
+func retainLateUncertain(ctx context.Context, tx pgx.Tx, in ExecutionReport, head executionHead) error {
+	if _, ok := task.UncertainMessage(in.ErrorCode); !ok {
+		return errors.New("待核实原因无效")
+	}
+	if err := bumpVersion(ctx, tx, in.EmployeeID, in.TaskID, head.version); err != nil {
+		return err
+	}
+	return insertReportEvent(ctx, tx, in, head, head.version+1, task.EventNeedsVerification, head.status, in.ErrorCode)
 }
 
 func nullText(value string) any {

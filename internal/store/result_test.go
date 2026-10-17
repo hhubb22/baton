@@ -117,6 +117,110 @@ func completedReport(in store.StartRequest, eventID string) store.ExecutionRepor
 	}
 }
 
+func TestNeedsVerificationAcksOnceAndKeepsTheSameExecution(t *testing.T) {
+	ctx, repo, pool, in, _ := preparedStart(t)
+	if _, err := repo.AuthorizeStart(ctx, in); err != nil {
+		t.Fatal(err)
+	}
+	startedID := mustUUID(t)
+	if ack, code, err := repo.ApplyExecutionReport(ctx, startedReport(in, startedID)); err != nil || !ack || code != "" {
+		t.Fatalf("启动事实没有保存: %v %s", err, code)
+	}
+	eventID := mustUUID(t)
+	report := store.ExecutionReport{
+		EmployeeID: in.EmployeeID, NodeID: in.NodeID, EventID: eventID, TaskID: in.TaskID,
+		ExecutionID: in.ExecutionID, SessionID: in.SessionID, Kind: task.EventNeedsVerification,
+		Status: task.StatusNeedsVerification, ErrorCode: task.CodeUncertainInput,
+	}
+	ack, code, err := repo.ApplyExecutionReport(ctx, report)
+	if err != nil || !ack || code != "" {
+		t.Fatalf("待核实没有保存: %v %s", err, code)
+	}
+	ack, code, err = repo.ApplyExecutionReport(ctx, report)
+	if err != nil || !ack || code != "" {
+		t.Fatalf("重复待核实没有按原记录确认: %v %s", err, code)
+	}
+	var status, message, errorCode, sessionStatus string
+	var bound *string
+	var executions, deliveries, events, version int
+	if err := pool.QueryRow(ctx, `
+		SELECT t.status, t.error_code, t.error_message, t.version, s.status, s.bound_execution_id::text,
+		       (SELECT COUNT(*) FROM executions WHERE task_id = t.id),
+		       (SELECT COUNT(*) FROM delivery_records WHERE task_id = t.id),
+		       (SELECT COUNT(*) FROM task_events WHERE task_id = t.id AND kind = 'needs_verification')
+		FROM tasks t
+		JOIN sessions s ON s.id = t.target_session_id
+		WHERE t.id = $1::uuid`, in.TaskID).Scan(&status, &errorCode, &message, &version, &sessionStatus, &bound, &executions, &deliveries, &events); err != nil {
+		t.Fatal(err)
+	}
+	if status != task.StatusNeedsVerification || errorCode != task.CodeUncertainInput || message != task.UncertainInputMessage || sessionStatus != "unknown" || bound == nil || *bound != in.ExecutionID || executions != 1 || deliveries != 0 || events != 1 {
+		t.Fatalf("待核实记录不正确: %s %s %s session %s bound %v executions %d deliveries %d events %d", status, errorCode, message, sessionStatus, bound, executions, deliveries, events)
+	}
+	reused := startedReport(in, startedID)
+	reused.Kind = task.EventNeedsVerification
+	reused.Status = task.StatusNeedsVerification
+	reused.ErrorCode = task.CodeUncertainWorker
+	reused.NodeID = mustUUID(t)
+	if ack, code, err = repo.ApplyExecutionReport(ctx, reused); err != nil || ack || code != task.CodeInvalidTarget {
+		t.Fatalf("旧事件被当成新的待核实: %v %v %s", err, ack, code)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE tasks SET status = 'running' WHERE id = $1::uuid`, in.TaskID); err != nil {
+		t.Fatal(err)
+	}
+	ack, code, err = repo.ApplyExecutionReport(ctx, report)
+	if err != nil || !ack || code != "" {
+		t.Fatalf("重复待核实没有按原记录确认: %v %s", err, code)
+	}
+	var versionAfter int
+	if err := pool.QueryRow(ctx, `
+		SELECT status, version, (SELECT COUNT(*) FROM task_events WHERE task_id = tasks.id AND kind = 'needs_verification')
+		FROM tasks WHERE id = $1::uuid`, in.TaskID).Scan(&status, &versionAfter, &events); err != nil || status != task.StatusRunning || versionAfter != version || events != 1 {
+		t.Fatalf("重复事件改写了任务: %s version %d→%d events %d %v", status, version, versionAfter, events, err)
+	}
+	history := report
+	history.EventID = mustUUID(t)
+	history.ErrorCode = task.CodeUncertainHistory
+	if ack, code, err = repo.ApplyExecutionReport(ctx, history); err != nil || !ack || code != "" {
+		t.Fatalf("历史原因没有单独记下: %v %s", err, code)
+	}
+	if err := pool.QueryRow(ctx, `
+		SELECT status, error_code, error_message,
+		       (SELECT COUNT(*) FROM task_events WHERE task_id = tasks.id AND kind = 'needs_verification')
+		FROM tasks WHERE id = $1::uuid`, in.TaskID).Scan(&status, &errorCode, &message, &events); err != nil || status != task.StatusNeedsVerification || errorCode != task.CodeUncertainHistory || message != task.UncertainHistoryMessage || events != 2 {
+		t.Fatalf("历史原因被吞掉了: %s %s %s events %d %v", status, errorCode, message, events, err)
+	}
+	if ack, code, err = repo.ApplyExecutionReport(ctx, startedReport(in, mustUUID(t))); err != nil || !ack || code != "" {
+		t.Fatalf("后到的启动事实被拒绝: %v %s", err, code)
+	}
+	if err := pool.QueryRow(ctx, `SELECT status FROM tasks WHERE id = $1::uuid`, in.TaskID).Scan(&status); err != nil || status != task.StatusNeedsVerification {
+		t.Fatalf("后到的启动把待核实改回了执行中: %s %v", status, err)
+	}
+	if ack, code, err = repo.ApplyExecutionReport(ctx, completedReport(in, mustUUID(t))); err != nil || !ack || code != "" {
+		t.Fatalf("真实结果没有结束待核实: %v %s", err, code)
+	}
+	if err := pool.QueryRow(ctx, `
+		SELECT t.status, (SELECT COUNT(*) FROM executions WHERE task_id = t.id),
+		       (SELECT COUNT(*) FROM delivery_records WHERE task_id = t.id)
+		FROM tasks t WHERE t.id = $1::uuid`, in.TaskID).Scan(&status, &executions, &deliveries); err != nil {
+		t.Fatal(err)
+	}
+	if status != task.StatusCompleted || executions != 1 || deliveries != 1 {
+		t.Fatalf("结束后的记录不正确: %s executions %d deliveries %d", status, executions, deliveries)
+	}
+	if ack, code, err = repo.ApplyExecutionReport(ctx, store.ExecutionReport{
+		EmployeeID: in.EmployeeID, NodeID: in.NodeID, EventID: mustUUID(t), TaskID: in.TaskID,
+		ExecutionID: in.ExecutionID, SessionID: in.SessionID, Kind: task.EventNeedsVerification,
+		Status: task.StatusNeedsVerification, ErrorCode: task.CodeUncertainWorker,
+	}); err != nil || !ack || code != "" {
+		t.Fatalf("已经结束的任务没有确认待核实: %v %s", err, code)
+	}
+	if err := pool.QueryRow(ctx, `
+		SELECT status, (SELECT COUNT(*) FROM task_events WHERE task_id = tasks.id AND kind = 'needs_verification' AND status = 'completed')
+		FROM tasks WHERE id = $1::uuid`, in.TaskID).Scan(&status, &events); err != nil || status != task.StatusCompleted || events != 1 {
+		t.Fatalf("结束后的待核实没有留下证据: %s events %d %v", status, events, err)
+	}
+}
+
 func TestFormatFailureIsNotCompleted(t *testing.T) {
 	ctx, repo, pool, in, _ := preparedStart(t)
 	if _, err := repo.AuthorizeStart(ctx, in); err != nil {

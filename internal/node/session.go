@@ -157,7 +157,15 @@ func runOnce(ctx context.Context, opts RunOptions, incarnation string, ledger *L
 	go func() {
 		errCh <- readRelay(ctx, writer, &acked, &expect, opts.Logger, opts.Identity, ledger, host, loop, opts.DataDir)
 	}()
-	go loop.resendPending(ctx)
+	var replayBusy atomic.Bool
+	replay := func() {
+		if !replayBusy.CompareAndSwap(false, true) {
+			return
+		}
+		defer replayBusy.Store(false)
+		loop.resendPending(ctx)
+	}
+	go replay()
 	ticker := time.NewTicker(opts.Heartbeat)
 	defer ticker.Stop()
 	if err := writeSync(ctx, writer, opts, &expect, &acked); err != nil {
@@ -176,6 +184,7 @@ func runOnce(ctx context.Context, opts RunOptions, incarnation string, ledger *L
 			}
 			return errors.New("与 Relay 的连接已断开")
 		case <-ticker.C:
+			go replay()
 			if !acked.Load() {
 				if err := writeSync(ctx, writer, opts, &expect, &acked); err != nil {
 					return err

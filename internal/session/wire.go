@@ -40,6 +40,7 @@ type ipcMessage struct {
 	HookRuns          int64       `json:"hook_runs"`
 	InputSubmitted    bool        `json:"input_submitted,omitempty"`
 	ResultDelivered   bool        `json:"result_delivered,omitempty"`
+	Uncertain         bool        `json:"uncertain,omitempty"`
 	Attaches          int         `json:"attaches,omitempty"`
 	Seq               int64       `json:"seq,omitempty"`
 	Reports           []ipcReport `json:"reports,omitempty"`
@@ -60,6 +61,9 @@ type Status struct {
 	HookRuns        int64
 	InputSubmitted  bool
 	ResultDelivered bool
+	Uncertain       bool
+	TaskID          string
+	ExecutionID     string
 	Attaches        int
 	Seq             int64
 	Nonce           string
