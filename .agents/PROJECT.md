@@ -1,37 +1,26 @@
 # 项目配置：Baton
 
-本文件与代码一起版本管理。任务管理约定适用于本仓库的开发过程；产品内的 Plane 集成功能仍以 `specs/baton/PRODUCT.md` 和 `TECH.md` 为依据。
-
 ## 任务管理
 
 - 模式：issue
 - 提供方：Linear MCP
 - Team：Personal（PS）
-- Project：Baton
-- 当前任务进展同步：针对用户已授权实施的当前 Issue，可更新 In Progress、In Review 等实际状态并记录测试与审查证据；主 Agent 在独立审查和验收证据通过后负责完成状态
+- Project：Baton（P-PS-11），https://linear.app/kakenhe/project/baton-66c31f86dce5
+- 任务权威来源：Linear Issue。首版任务 T01～T37 对应 PS-105～PS-141，标题保留 T 编号；阶段对应 Project milestone，任务依赖用 blocked by 关系记录。
+- 当前任务进展同步：在用户已授权的当前任务内更新状态与证据
 - 新建或批量变更工单：逐次授权
-- 修改需求、验收条件、优先级及跨项目写入：逐次授权
-
-Linear 保存开发任务的目标、依赖、优先级、状态和本次验收标准。Git 保存代码、长期规格、测试和设计决定。启动工作时先核对目标 Issue、真实阻塞关系及 Git 状态；未指定 Issue 且未授权挑选时，仅提出候选。Linear 不可用时继续已获准的本地工作，报告待同步信息，不另起一份 TASKS.md。实施子代理不负责最终验收，独立审查者只交付审查报告。
 
 ## 验证环境
 
-- Go 版本：以 `go.mod` 为准，目前为 Go 1.27。
-- 静态检查：`go vet ./...`。
-- 测试：`go test ./...`，其中数据库集成测试需要 PostgreSQL 17 和显式提供的 `BATON_TEST_DATABASE_URL`；未准备隔离测试数据库时报告无法执行，不自动连接生产库。
-- 敏感凭据、账号及真实用户数据不进入工单评论、提交或通用日志。
+- `go build ./...`、`go vet ./...`
+- `go test ./...` 需要 `BATON_TEST_DATABASE_URL` 指向可创建临时 schema 的 PostgreSQL 17，不设置时测试失败。
+- 本地隔离验证使用自建测试数据库、真实 Baton 进程与计数执行器，不动用户已有数据库或共享设备。
+- 真实 Agent、macOS、Windows、Linux 虚拟机、Plane 测试项目和跨网络验证的环境条件写在对应 Issue 中；开发环境无法覆盖时用 `lab-request`。
 
 ## 长期文档位置
 
-- 行为规格：`specs/baton/PRODUCT.md`
-- 技术设计：`specs/baton/TECH.md`
+`specs/baton/PRODUCT.md`（行为规格）与 `specs/baton/TECH.md`（技术设计），与对应代码同一提交。
 
-涉及产品行为或设计变化时，遵循已有批准边界，并与代码在同一提交或 PR 中更新对应文档。Linear Issue 保留具体任务的交付和验收证据，链接相关 Commit/PR。
+## 术语与约定
 
-## PR/MR 材料
-
-优先使用仓库实际模板；未定义模板时按改动事实和测试结果准备描述。提交、推送和合并遵循当前用户授权。
-
-## 外部反馈
-
-公司内网 Plane 可作为反馈来源，但跨环境同步必须符合公司许可与数据处理要求。未经批准，不把内部地址、设备配置、日志、账号或客户数据复制到个人 Linear。
+提交信息使用 `type(scope): 中文摘要`，例如 `feat(auth): 实现员工账号与安全登录会话`。
