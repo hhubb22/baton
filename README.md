@@ -1,8 +1,8 @@
 # Baton
 
-员工使用部署管理员分配的本地账号登录 Coordinator，退出，并查询本人身份。初始口令只能使用到员工完成更换为止。
+员工使用部署管理员分配的本地账号登录 Coordinator，退出，查询本人身份，领取一次性节点注册凭据，并设置默认 PC。初始口令只能使用到员工完成更换为止。`batond register` 用这张凭据注册节点，把身份保存在本机；进程再次启动时继续使用同一身份。
 
-本目录目前包含这条路径的构建、迁移、HTTP 接口和测试。节点注册、任务和管理员网页不在这里。
+本目录目前包含这条路径的构建、迁移、HTTP 接口、batond 注册命令和测试。节点连接、心跳、凭据吊销、任务委托和管理员网页不在这里。
 
 ## 运行要求
 
@@ -16,17 +16,24 @@
 | `BATON_DATABASE_URL` | Coordinator 的 PostgreSQL 连接串 |
 | `BATON_DB_SCHEMA` | 数据所在 schema，默认 `public` |
 | `BATON_HTTP_ADDR` | 监听地址，默认 `127.0.0.1:8080` |
-| `BATON_ALLOWED_ORIGINS` | 逗号分隔的 https Origin。`serve` 必填，写操作必须匹配其中一项 |
+| `BATON_ALLOWED_ORIGINS` | 逗号分隔的 https Origin。`serve` 必填，浏览器写操作必须匹配其中一项 |
 | `BATON_SESSION_TTL` | 会话有效期，默认 `12h`，允许 `5m` 到 `168h` |
+| `BATON_ENROLLMENT_TTL` | 一次性注册凭据有效期，默认 `10m`，允许 `1m` 到 `24h` |
+| `BATON_NODE_CREDENTIAL_TTL` | 节点连接凭据有效期，默认 `720h`，允许 `1h` 到 `2160h` |
 | `BATON_TLS_CERT_FILE` | 与 `BATON_TLS_KEY_FILE` 同时设置时，进程直接提供 TLS |
 | `BATON_TLS_KEY_FILE` | TLS 私钥文件 |
+| `BATON_ENROLLMENT_TOKEN` | `batond register` 读取的一次性注册凭据。不要写入命令行 |
+| `BATON_TLS_CA_FILE` | `batond` 额外信任的 CA 证书文件。地址仍必须是 https |
 
 会话 Cookie 名为 `baton_session`，固定带 `Secure`、`HttpOnly` 和 `SameSite=Strict`。进程监听 HTTP 时也保持这些属性。浏览器只在 HTTPS 请求里送回该 Cookie；入口代理终止 TLS 时，浏览器看到的来源仍是 HTTPS。
+
+注册凭据和节点连接凭据不进入 URL、命令行参数或日志。数据库只保存它们的 SHA-256。
 
 ## 命令
 
 ```text
 go build -o bin/coordinator ./cmd/coordinator
+go build -o bin/batond ./cmd/batond
 ```
 
 ```text
@@ -45,13 +52,23 @@ BATON_DATABASE_URL=postgres://127.0.0.1:5432/baton ./bin/coordinator admin emplo
 BATON_DATABASE_URL=postgres://127.0.0.1:5432/baton BATON_ALLOWED_ORIGINS=https://baton.example ./bin/coordinator serve
 ```
 
-创建和重置把一次性口令写到标准输出，只显示这一次。数据库保存 Argon2id 摘要。标准错误和 HTTP 日志不记录口令、会话令牌或 CSRF 令牌。不要把标准输出并进普通运行日志。
+创建和重置把一次性口令写到标准输出，只显示这一次。数据库保存 Argon2id 摘要。标准错误和 HTTP 日志不记录口令、会话令牌、CSRF 令牌、注册凭据或节点连接凭据。不要把标准输出并进普通运行日志。
 
 `serve` 在迁移完成前拒绝启动。
 
+```text
+batond register --coordinator https://baton.example --display-name "Desk" --system linux --role pc --capability start
+```
+
+注册凭据放在 `BATON_ENROLLMENT_TOKEN`，或放在仅当前用户可读的文件里并用 `--enrollment-file` 指向它。两种方式只能选一种。未指定 `--data-dir` 时，Linux 使用 `$XDG_DATA_HOME/baton/node`（未设置时为 `~/.local/share/baton/node`），macOS 使用 `~/Library/Application Support/baton/node`，Windows 使用 `%LOCALAPPDATA%\baton\node`。
+
+系统取 `windows`、`macos` 或 `linux`。角色取 `pc`（PC 执行节点）或 `ubuntu`（Ubuntu 开发节点）。`--capability` 可重复，名称使用小写字母、数字、点、下划线和连字符。
+
+连接凭据只写入数据目录中的 `identity.json`，权限为仅当前用户可读写。标准输出只打印节点 ID 等非秘密字段。命令会说明当前使用文件保存，而不是系统凭据存储。数据目录里已经有身份时，命令不会再次注册。
+
 ## 会话
 
-接口都在 `/api/v1` 下。写操作要求 `Origin` 属于 `BATON_ALLOWED_ORIGINS`。已登录的写操作还要求请求头 `X-CSRF-Token` 与登录响应里的 `csrf_token` 一致。服务端只保存会话令牌和 CSRF 令牌的 SHA-256。
+接口都在 `/api/v1` 下。浏览器写操作要求 `Origin` 属于 `BATON_ALLOWED_ORIGINS`。已登录的写操作还要求请求头 `X-CSRF-Token` 与登录响应里的 `csrf_token` 一致。服务端只保存会话令牌和 CSRF 令牌的 SHA-256。
 
 `POST /login` 接收 JSON：
 
@@ -81,6 +98,28 @@ BATON_DATABASE_URL=postgres://127.0.0.1:5432/baton BATON_ALLOWED_ORIGINS=https:/
 
 本地账号的用户名以小写字母开头，后续可以是小写字母、数字、点、下划线和连字符。认证模块保留 `Directory.FindExternal`，用于以后按已核实的外部主体查找员工。当前没有外部登录入口，这个查找本身不创建会话。
 
+## 节点注册与默认 PC
+
+`POST /node-enrollments` 需要登录会话、Origin 和 CSRF。正文是 `{}`。成功时返回 `enrollment_id`、`enrollment_token` 和 `expires_at`。凭据默认 10 分钟，只能成功注册一次。过期返回 `enrollment_expired`，再次使用返回 `enrollment_used`。
+
+`POST /nodes/register` 不使用浏览器会话。员工身份只来自注册凭据；正文若包含 `employee_id` 会被拒绝，也不会核销凭据。请求不能在 URL 中放参数。正文至少包含：
+
+```json
+{"enrollment_token":"...","display_name":"Desk","system":"linux","role":"pc","capabilities":["start"]}
+```
+
+成功时中心保存归属、显示名、系统、角色、能力列表和注册序号，并返回只出示一次的连接凭据。连接凭据默认 30 天。节点连接、心跳和吊销尚未实现。
+
+员工还没有默认 PC 时，注册会按注册序号选择最早的、尚未吊销的 PC 执行节点并保存。之后新注册的节点不改变它。Ubuntu 开发节点不会被选为默认 PC。
+
+`PUT /me/default-pc` 需要登录会话、Origin 和 CSRF：
+
+```json
+{"node_id":"..."}
+```
+
+只能改成自己的其他有效 PC 执行节点。其他员工的节点返回 403，不说明该节点是否存在。成功响应里的 `default_pc_node_id`、显示名、系统和注册序号是数据库里实际保存的值。
+
 ## 测试
 
 集成测试读取 `BATON_TEST_DATABASE_URL`，只连接这个 PostgreSQL，并在其中创建临时 schema。未设置该变量或连接失败时，测试失败，不会改用模拟数据库。
@@ -90,4 +129,4 @@ go test ./...
 go vet ./...
 ```
 
-登录、退出、身份查询、CSRF 和 Origin 的通过路径使用本地 TLS 服务，并把测试证书放进客户端信任池。明文 HTTP 测试确认响应仍带 `Secure` Cookie：按正式 Cookie 规则、不把环回地址当作安全来源的客户端不会在明文请求里带回它。CSRF 和 Origin 检查在两条路径上都生效。
+登录、退出、身份查询、CSRF 和 Origin 的通过路径使用本地 TLS 服务，并把测试证书放进客户端信任池。明文 HTTP 测试确认响应仍带 `Secure` Cookie：按正式 Cookie 规则、不把环回地址当作安全来源的客户端不会在明文请求里带回它。CSRF 和 Origin 检查在两条路径上都生效。节点注册的通过路径同样使用该 TLS 服务；`batond register` 通过 `BATON_TLS_CA_FILE` 信任测试证书。

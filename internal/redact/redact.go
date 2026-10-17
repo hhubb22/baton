@@ -9,10 +9,13 @@ import (
 )
 
 var (
-	uriPattern    = regexp.MustCompile(`(?i)\bpostgres(?:ql)?://\S+`)
-	kvPattern     = regexp.MustCompile(`(?i)\b(password|sslpassword|token|secret)=([^\s]+)`)
-	cookiePattern = regexp.MustCompile(`(?i)\bbaton_session=[^;\s]+`)
-	csrfPattern   = regexp.MustCompile(`(?i)\bcsrf_token=[^;\s&]+`)
+	uriPattern        = regexp.MustCompile(`(?i)\bpostgres(?:ql)?://\S+`)
+	kvPattern         = regexp.MustCompile(`(?i)\b(password|sslpassword|token|secret)=([^\s]+)`)
+	cookiePattern     = regexp.MustCompile(`(?i)\bbaton_session=[^;\s]+`)
+	csrfPattern       = regexp.MustCompile(`(?i)\bcsrf_token=[^;\s&]+`)
+	bearerPattern     = regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9_-]+`)
+	enrollmentPattern = regexp.MustCompile(`(?i)\benrollment_token=[^;\s&]+`)
+	connectionPattern = regexp.MustCompile(`(?i)\bconnection_token=[^;\s&]+`)
 )
 
 // Scrub 替换连接串、口令参数和会话 Cookie。输入不是这些内容时原样返回。
@@ -21,6 +24,9 @@ func Scrub(s string) string {
 	s = kvPattern.ReplaceAllString(s, "$1=[redacted]")
 	s = cookiePattern.ReplaceAllString(s, "baton_session=[redacted]")
 	s = csrfPattern.ReplaceAllString(s, "csrf_token=[redacted]")
+	s = bearerPattern.ReplaceAllString(s, "bearer [redacted]")
+	s = enrollmentPattern.ReplaceAllString(s, "enrollment_token=[redacted]")
+	s = connectionPattern.ReplaceAllString(s, "connection_token=[redacted]")
 	return s
 }
 
@@ -40,6 +46,10 @@ var sensitiveKeys = map[string]struct{}{
 	"password_hash":    {},
 	"database_url":     {},
 	"dsn":              {},
+	"enrollment_token": {},
+	"connection_token": {},
+	"credential_token": {},
+	"node_token":       {},
 }
 
 // Handler 在写入下一级日志前去掉敏感字段。

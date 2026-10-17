@@ -1,4 +1,4 @@
-// Package store 把员工和登录会话写入 PostgreSQL。口令明文不进入本包。
+// Package store 把员工、登录会话和节点身份写入 PostgreSQL。口令与凭据明文不进入数据库。
 package store
 
 import (

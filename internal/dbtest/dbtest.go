@@ -55,7 +55,10 @@ func Open(t *testing.T) *pgxpool.Pool {
 		if err := pool.QueryRow(cctx, `
 			SELECT COUNT(*) FROM information_schema.tables
 			WHERE table_schema = 'public'
-			  AND table_name IN ('employees', 'login_sessions', 'schema_migrations')`).Scan(&n); err != nil {
+			  AND table_name IN (
+			    'employees', 'login_sessions', 'schema_migrations',
+			    'node_enrollments', 'nodes', 'node_credentials', 'employee_settings'
+			  )`).Scan(&n); err != nil {
 			t.Errorf("检查 public 失败: %s", redact.Scrub(err.Error()))
 		} else if n != 0 {
 			t.Errorf("迁移写入了 public，共 %d 张表", n)

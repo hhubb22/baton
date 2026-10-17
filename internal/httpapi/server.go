@@ -1,4 +1,4 @@
-// Package httpapi 提供员工登录、退出、本人身份和初始口令更换。
+// Package httpapi 提供员工登录、退出、本人身份、初始口令更换、节点注册和默认 PC。
 package httpapi
 
 import (
@@ -27,30 +27,50 @@ const maxJSONBytes = 64 << 10
 
 type requestIDKey struct{}
 
-// Server 是 /api/v1 的登录接口。会话 Cookie 始终带 Secure、HttpOnly 和 SameSite=Strict。
-type Server struct {
-	store   *store.Store
-	origins map[string]struct{}
-	ttl     time.Duration
-	log     *slog.Logger
+// Settings 是 API 进程使用的来源和有效期。有效期与 config 的允许范围一致。
+type Settings struct {
+	Origins           []string
+	SessionTTL        time.Duration
+	EnrollmentTTL     time.Duration
+	NodeCredentialTTL time.Duration
+	Logger            *slog.Logger
 }
 
-func New(pool *pgxpool.Pool, origins []string, ttl time.Duration, logger *slog.Logger) (*Server, error) {
-	set, err := config.OriginSet(origins)
+// Server 是 /api/v1 的登录与节点接口。会话 Cookie 始终带 Secure、HttpOnly 和 SameSite=Strict。
+type Server struct {
+	store             *store.Store
+	origins           map[string]struct{}
+	ttl               time.Duration
+	enrollmentTTL     time.Duration
+	nodeCredentialTTL time.Duration
+	log               *slog.Logger
+}
+
+func New(pool *pgxpool.Pool, settings Settings) (*Server, error) {
+	set, err := config.OriginSet(settings.Origins)
 	if err != nil {
 		return nil, err
 	}
-	if ttl < 5*time.Minute || ttl > 168*time.Hour {
+	if settings.SessionTTL < 5*time.Minute || settings.SessionTTL > 168*time.Hour {
 		return nil, errors.New("会话有效期无效")
 	}
+	if settings.EnrollmentTTL < time.Minute || settings.EnrollmentTTL > 24*time.Hour {
+		return nil, errors.New("注册凭据有效期无效")
+	}
+	if settings.NodeCredentialTTL < time.Hour || settings.NodeCredentialTTL > 90*24*time.Hour {
+		return nil, errors.New("节点凭据有效期无效")
+	}
+	logger := settings.Logger
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
 	return &Server{
-		store:   store.New(pool),
-		origins: set,
-		ttl:     ttl,
-		log:     slog.New(redact.NewHandler(logger.Handler())),
+		store:             store.New(pool),
+		origins:           set,
+		ttl:               settings.SessionTTL,
+		enrollmentTTL:     settings.EnrollmentTTL,
+		nodeCredentialTTL: settings.NodeCredentialTTL,
+		log:               slog.New(redact.NewHandler(logger.Handler())),
 	}, nil
 }
 
@@ -109,6 +129,24 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.changePassword(w, r)
+	case "/api/v1/node-enrollments":
+		if r.Method != http.MethodPost {
+			s.writeError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "不支持该请求方法")
+			return
+		}
+		s.issueEnrollment(w, r)
+	case "/api/v1/nodes/register":
+		if r.Method != http.MethodPost {
+			s.writeError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "不支持该请求方法")
+			return
+		}
+		s.registerNode(w, r)
+	case "/api/v1/me/default-pc":
+		if r.Method != http.MethodPut {
+			s.writeError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "不支持该请求方法")
+			return
+		}
+		s.putDefaultPC(w, r)
 	default:
 		const prefix = "/api/v1/employees/"
 		if strings.HasPrefix(r.URL.Path, prefix) {
@@ -461,7 +499,8 @@ func requestID(ctx context.Context) string {
 
 func safePath(path string) string {
 	switch path {
-	case "/api/v1/login", "/api/v1/logout", "/api/v1/me", "/api/v1/me/password":
+	case "/api/v1/login", "/api/v1/logout", "/api/v1/me", "/api/v1/me/password",
+		"/api/v1/node-enrollments", "/api/v1/nodes/register", "/api/v1/me/default-pc":
 		return path
 	}
 	const prefix = "/api/v1/employees/"

@@ -97,7 +97,12 @@ func TestCLIMigrateCreateResetAndServeGuard(t *testing.T) {
 
 	pool := openSchema(t, raw, schema)
 	defer pool.Close()
-	api, err := httpapi.New(pool, []string{"https://baton.example"}, time.Hour, nil)
+	api, err := httpapi.New(pool, httpapi.Settings{
+		Origins:           []string{"https://baton.example"},
+		SessionTTL:        time.Hour,
+		EnrollmentTTL:     10 * time.Minute,
+		NodeCredentialTTL: 30 * 24 * time.Hour,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

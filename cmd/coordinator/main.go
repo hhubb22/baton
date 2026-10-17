@@ -161,7 +161,13 @@ func cmdServe(ctx context.Context, stderr io.Writer, getenv func(string) string)
 				return errors.New("无法读取 TLS 密钥文件")
 			}
 		}
-		api, err := httpapi.New(pool, cfg.AllowedOrigins, cfg.SessionTTL, slog.New(slog.NewTextHandler(stderr, nil)))
+		api, err := httpapi.New(pool, httpapi.Settings{
+			Origins:           cfg.AllowedOrigins,
+			SessionTTL:        cfg.SessionTTL,
+			EnrollmentTTL:     cfg.EnrollmentTTL,
+			NodeCredentialTTL: cfg.NodeCredentialTTL,
+			Logger:            slog.New(slog.NewTextHandler(stderr, nil)),
+		})
 		if err != nil {
 			return err
 		}

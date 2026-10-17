@@ -193,7 +193,7 @@ func TestWriteGuardsBindCSRFToSession(t *testing.T) {
 		t.Fatal("第二个会话登录失败")
 	}
 	secondCSRF := mustCSRF(t, body)
-	for _, path := range []string{"/api/v1/logout", "/api/v1/me/password"} {
+	for _, path := range []string{"/api/v1/logout", "/api/v1/me/password", "/api/v1/node-enrollments"} {
 		for _, tc := range []struct{ name, origin, csrf string }{
 			{"missing_origin", "", firstCSRF},
 			{"wrong_origin", "https://evil.example", firstCSRF},
@@ -508,7 +508,13 @@ func createEmployee(t *testing.T, pool *pgxpool.Pool, username, displayName, pas
 func newAPI(t *testing.T, pool *pgxpool.Pool, logs io.Writer) http.Handler {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(logs, nil))
-	api, err := httpapi.New(pool, []string{origin}, time.Hour, logger)
+	api, err := httpapi.New(pool, httpapi.Settings{
+		Origins:           []string{origin},
+		SessionTTL:        time.Hour,
+		EnrollmentTTL:     10 * time.Minute,
+		NodeCredentialTTL: 30 * 24 * time.Hour,
+		Logger:            logger,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
