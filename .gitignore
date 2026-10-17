@@ -1,0 +1,12 @@
+/bin/
+*.exe
+*.test
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+.DS_Store
+__pycache__/
+*.pyc

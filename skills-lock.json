@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "skills": {
+    "align": {
+      "source": "hhubb22/asa-skills",
+      "sourceType": "github",
+      "skillPath": "skills/align/SKILL.md",
+      "computedHash": "08e7e3df9fb686568fde96d9465c81f899c9af11dff91d9afa57655780ff8984"
+    },
+    "code-review": {
+      "source": "hhubb22/asa-skills",
+      "sourceType": "github",
+      "skillPath": "skills/code-review/SKILL.md",
+      "computedHash": "1d7202c349dc3fc4a5594233c36076b31b92235378f3e8a7e8f15488262f95af"
+    },
+    "diagnose-bugs": {
+      "source": "hhubb22/asa-skills",
+      "sourceType": "github",
+      "skillPath": "skills/diagnose-bugs/SKILL.md",
+      "computedHash": "86f0a2cfc9662d65ddba81a4eb82d4e81eb34099d8b3f430b0c7780fd906bdab"
+    },
+    "domain-modeling": {
+      "source": "hhubb22/asa-skills",
+      "sourceType": "github",
+      "skillPath": "skills/domain-modeling/SKILL.md",
+      "computedHash": "95fb8d90f51392586ac6cbae3131b7089962db294952f744e3b3b9294d7d66d7"
+    },
+    "handoff": {
+      "source": "hhubb22/asa-skills",
+      "sourceType": "github",
+      "skillPath": "skills/handoff/SKILL.md",
+      "computedHash": "c4d30fa67edbb174143e1691f9c03cdac91641473c432200a3f346b2ab8858f4"
+    },
+    "implement-specs": {
+      "source": "hhubb22/asa-skills",
+      "sourceType": "github",
+      "skillPath": "skills/implement-specs/SKILL.md",
+      "computedHash": "b5288b0f1dc92803833e21bde33675465cdaa20c8d111aedaecab6e21491aff0"
+    },
+    "lab-request": {
+      "source": "hhubb22/asa-skills",
+      "sourceType": "github",
+      "skillPath": "skills/lab-request/SKILL.md",
+      "computedHash": "821937c37e9a0f19952d794894309ad9df7bb0c7430ec070044ee92911904d8c"
+    },
+    "research": {
+      "source": "hhubb22/asa-skills",
+      "sourceType": "github",
+      "skillPath": "skills/research/SKILL.md",
+      "computedHash": "65ae3fc586e3e21dc7c7ac92012553b922f4fb90fa882784123c28fb6fec60f8"
+    },
+    "skill-doctor": {
+      "source": "hhubb22/asa-skills",
+      "sourceType": "github",
+      "skillPath": "skills/skill-doctor/SKILL.md",
+      "computedHash": "b30c999cd9bfd8ec4f31d47b7e9cd28ab5c2eff895c03305fcecfdd7ae76f169"
+    },
+    "to-questionnaire": {
+      "source": "hhubb22/asa-skills",
+      "sourceType": "github",
+      "skillPath": "skills/to-questionnaire/SKILL.md",
+      "computedHash": "a4b995f485dfd5661865d0bc573b8df92db24b322ae56b50e1e50cf450f82388"
+    },
+    "to-tasks": {
+      "source": "hhubb22/asa-skills",
+      "sourceType": "github",
+      "skillPath": "skills/to-tasks/SKILL.md",
+      "computedHash": "26a722984ed8ae2782a6fb6bec04a919faa8390ffd4e317ccfa0923a122a4a7f"
+    },
+    "wait-what": {
+      "source": "hhubb22/asa-skills",
+      "sourceType": "github",
+      "skillPath": "skills/wait-what/SKILL.md",
+      "computedHash": "3fca3ba97e34a0d177442837ba54d1030f1eb563534e494a1b9305b53175344b"
+    },
+    "work": {
+      "source": "hhubb22/asa-skills",
+      "sourceType": "github",
+      "skillPath": "skills/work/SKILL.md",
+      "computedHash": "82a083355f8a6fb99db6a94f23258c85d6a7c6557d70a66394dc53e77903a7d2"
+    },
+    "write-pr": {
+      "source": "hhubb22/asa-skills",
+      "sourceType": "github",
+      "skillPath": "skills/write-pr/SKILL.md",
+      "computedHash": "63def8ee8ebb4eb77a10aa55e7a5273861e942124717dda9d122aba6fa6177e1"
+    },
+    "write-product-spec": {
+      "source": "hhubb22/asa-skills",
+      "sourceType": "github",
+      "skillPath": "skills/write-product-spec/SKILL.md",
+      "computedHash": "e69290150d34ca23a28b81d33003909d743ddaae35d5f551a46e7f4472666a09"
+    },
+    "write-tech-spec": {
+      "source": "hhubb22/asa-skills",
+      "sourceType": "github",
+      "skillPath": "skills/write-tech-spec/SKILL.md",
+      "computedHash": "badf418b1080a9166ddbc4601917a9398b7c97552dd538730a273eba0999cd20"
+    },
+    "write-tr": {
+      "source": "hhubb22/asa-skills",
+      "sourceType": "github",
+      "skillPath": "skills/write-tr/SKILL.md",
+      "computedHash": "a0f1295c4e3383263ec99d5c388edcf119b6a1b4dd9dd03be31928715c0032f0"
+    }
+  }
+}
