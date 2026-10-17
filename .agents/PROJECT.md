@@ -25,7 +25,7 @@
 - 提示词由工单要求、当前 `origin/main` 的提交号和 `.agents/cursor-cloud-brief.md` 组成。同时派发的工单如需新迁移，在派发时分配不同编号。
 - 创建前先生成 `agentId`，创建后在工单评论写 Agent 链接、`agentId` 和 `runId`，并把 Agent 链接加为工单链接。网络失败时用同一个 `agentId` 重试。
 - 用后台的 `cursor-cloud wait` 等待完成。审查时把分支取到独立 worktree，变基到 `main` 后在本机复跑验证；需要修改时用 `followup` 发回同一个 Agent。
-- 审查通过后以 squash 方式合并 PR，提交信息符合下方约定，然后按「代码交付」写提交链接并关闭工单。
+- 审查通过后以 squash 方式合并 PR，提交信息符合下方约定，然后按「代码交付」写提交链接并关闭工单。云端开的 PR 是 draft，合并前先 `gh pr ready`；本地变基后推回 PR 分支用 `--force-with-lease`。
 
 ## 验证环境
 
