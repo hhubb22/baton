@@ -1,4 +1,5 @@
 // Package migrate 按文件名顺序应用嵌入的 SQL。
+// 每个迁移文件在一个事务中整段交给 PostgreSQL，不在客户端拆分语句。
 package migrate
 
 import (
@@ -13,15 +14,22 @@ import (
 	"baton/internal/redact"
 	"baton/migrations"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const lockKey int64 = 4815162342
 
+var errNoStatement = errors.New("没有可执行语句")
+
 // Versions 返回嵌入的迁移文件名。
 func Versions() ([]string, error) {
-	entries, err := fs.ReadDir(migrations.Files, ".")
+	return readVersions(migrations.Files)
+}
+
+func readVersions(files fs.FS) ([]string, error) {
+	entries, err := fs.ReadDir(files, ".")
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +66,11 @@ func fileNameOK(name string) bool {
 
 // Up 在当前 search_path 中执行尚未记录的迁移。重复执行不会改写已完成的版本。
 func Up(ctx context.Context, pool *pgxpool.Pool) error {
-	want, err := Versions()
+	return upFS(ctx, pool, migrations.Files)
+}
+
+func upFS(ctx context.Context, pool *pgxpool.Pool, files fs.FS) error {
+	want, err := readVersions(files)
 	if err != nil {
 		return err
 	}
@@ -99,23 +111,23 @@ func Up(ctx context.Context, pool *pgxpool.Pool) error {
 		if exists {
 			continue
 		}
-		body, err := migrations.Files.ReadFile(version)
+		body, err := fs.ReadFile(files, version)
 		if err != nil {
 			return err
 		}
-		statements := splitSQL(string(body))
-		if len(statements) == 0 {
+		if strings.TrimSpace(string(body)) == "" {
 			return fmt.Errorf("迁移 %s 没有可执行语句", version)
 		}
 		tx, err := conn.Begin(ctx)
 		if err != nil {
 			return fmt.Errorf("开始迁移事务失败: %s", redact.Scrub(err.Error()))
 		}
-		for _, stmt := range statements {
-			if _, err := tx.Exec(ctx, stmt); err != nil {
-				_ = tx.Rollback(ctx)
-				return fmt.Errorf("执行迁移 %s 失败: %s", version, redact.Scrub(err.Error()))
+		if err := execScript(ctx, tx, string(body)); err != nil {
+			_ = tx.Rollback(ctx)
+			if errors.Is(err, errNoStatement) {
+				return fmt.Errorf("迁移 %s 没有可执行语句", version)
 			}
+			return fmt.Errorf("执行迁移 %s 失败: %s", version, redact.Scrub(err.Error()))
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO schema_migrations (version, applied_at) VALUES ($1, now())`, version); err != nil {
 			_ = tx.Rollback(ctx)
@@ -124,6 +136,30 @@ func Up(ctx context.Context, pool *pgxpool.Pool) error {
 		if err := tx.Commit(ctx); err != nil {
 			return fmt.Errorf("提交迁移 %s 失败: %s", version, redact.Scrub(err.Error()))
 		}
+	}
+	return nil
+}
+
+// execScript 用简单查询协议执行整段脚本，不绑定参数。
+// 调用时事务必须已经开始。脚本不能自行提交或回滚这段事务。
+func execScript(ctx context.Context, tx pgx.Tx, script string) error {
+	mrr := tx.Conn().PgConn().Exec(ctx, script)
+	saw := false
+	for mrr.NextResult() {
+		saw = true
+		if _, err := mrr.ResultReader().Close(); err != nil {
+			_ = mrr.Close()
+			return err
+		}
+	}
+	if err := mrr.Close(); err != nil {
+		return err
+	}
+	if !saw {
+		return errNoStatement
+	}
+	if tx.Conn().PgConn().TxStatus() != 'T' {
+		return errors.New("迁移脚本不能结束当前事务")
 	}
 	return nil
 }

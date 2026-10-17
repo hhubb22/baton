@@ -3,11 +3,10 @@ package identity
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
-	"fmt"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 const (
@@ -32,28 +31,22 @@ type Directory interface {
 
 // NewUUID 生成小写 UUID 版本 4。
 func NewUUID() (string, error) {
-	var raw [16]byte
-	if _, err := rand.Read(raw[:]); err != nil {
+	id, err := uuid.NewRandom()
+	if err != nil {
 		return "", err
 	}
-	raw[6] = (raw[6] & 0x0f) | 0x40
-	raw[8] = (raw[8] & 0x3f) | 0x80
-	return formatUUID(raw[:]), nil
+	return id.String(), nil
 }
 
 // ParseUUID 接受标准 UUID 文本并返回小写规范形式。
 func ParseUUID(s string) (string, error) {
-	if len(s) != 36 || s[8] != '-' || s[13] != '-' || s[18] != '-' || s[23] != '-' {
+	id, err := uuid.Parse(s)
+	if err != nil {
 		return "", errors.New("invalid uuid")
 	}
-	compact := strings.ReplaceAll(s, "-", "")
-	raw, err := hex.DecodeString(compact)
-	if err != nil || len(raw) != 16 {
+	canonical := id.String()
+	if !strings.EqualFold(s, canonical) {
 		return "", errors.New("invalid uuid")
 	}
-	return formatUUID(raw), nil
-}
-
-func formatUUID(raw []byte) string {
-	return fmt.Sprintf("%x-%x-%x-%x-%x", raw[0:4], raw[4:6], raw[6:8], raw[8:10], raw[10:16])
+	return canonical, nil
 }
