@@ -17,7 +17,8 @@ func openInRoot(root *os.Root, rel string) (*os.File, error) {
 		name = "."
 	}
 	file, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
-	if err == nil || !errors.Is(err, syscall.ENXIO) {
+	// 打开套接字时 Linux 返回 ENXIO，macOS 返回 EOPNOTSUPP。
+	if err == nil || !(errors.Is(err, syscall.ENXIO) || errors.Is(err, syscall.EOPNOTSUPP)) {
 		return file, err
 	}
 	info, statErr := root.Lstat(name)

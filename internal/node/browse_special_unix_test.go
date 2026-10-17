@@ -16,7 +16,16 @@ import (
 
 func TestBrowseRejectsFIFOAndSocketWithinOneSecond(t *testing.T) {
 	dir := t.TempDir()
-	root := filepath.Join(dir, "notes")
+	// Unix socket 路径在 macOS 上限 104 字节，t.TempDir() 太长，浏览根放在 /tmp 下的短目录。
+	short, err := os.MkdirTemp("/tmp", "bt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(short) })
+	if short, err = filepath.EvalSymlinks(short); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(short, "notes")
 	if err := os.Mkdir(root, 0o700); err != nil {
 		t.Fatal(err)
 	}
