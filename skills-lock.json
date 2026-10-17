@@ -5,109 +5,109 @@
       "source": "hhubb22/asa-skills",
       "sourceType": "github",
       "skillPath": "skills/align/SKILL.md",
-      "computedHash": "2145de45dba613af2f058baac6b45f117ba03591759f2ce0c3063bed28c10b1a"
+      "computedHash": "cbbe46fa25b362102c503e3e8e43a049437b933f4ba8f16d5543180259a512aa"
     },
     "code-review": {
       "source": "hhubb22/asa-skills",
       "sourceType": "github",
       "skillPath": "skills/code-review/SKILL.md",
-      "computedHash": "66a6eafcda4d42ada8c698e24dd6f7ed1a454be28e8585b0c38a6b9c590ab4e5"
+      "computedHash": "de899faf4b376ace1ca53ffc132f1e53b49bb82f12c894530399a0ee7d36171a"
     },
     "diagnose-bugs": {
       "source": "hhubb22/asa-skills",
       "sourceType": "github",
       "skillPath": "skills/diagnose-bugs/SKILL.md",
-      "computedHash": "7323280e43f42afd8a95bbb6c2fd9e2bbfe45c3c93dd8a9ef11b4ed90a3950c9"
+      "computedHash": "8f9e6fe36efbc6a3e8a76ffc7677279ca917cdf35286c15595b1ef40d41df4a8"
     },
     "domain-modeling": {
       "source": "hhubb22/asa-skills",
       "sourceType": "github",
       "skillPath": "skills/domain-modeling/SKILL.md",
-      "computedHash": "7bf1a10cbb22a553743360c7c9ef8851248330989f8c79f27584d710468a86fe"
+      "computedHash": "552b88a75745492256b1aa350c805a59dd6d6266ae6e37c1af907396759241df"
     },
     "handoff": {
       "source": "hhubb22/asa-skills",
       "sourceType": "github",
       "skillPath": "skills/handoff/SKILL.md",
-      "computedHash": "a1534df1a445a5f25df1bb2d25484e0c080e3e88de5cc2222f2e6ce8328348e1"
+      "computedHash": "2bfbd03ddcd2eab3083a985b3d64075378c2a5abde331f6a162370bcf6d2bbe5"
     },
     "implement-specs": {
       "source": "hhubb22/asa-skills",
       "sourceType": "github",
       "skillPath": "skills/implement-specs/SKILL.md",
-      "computedHash": "554c6628e26d43604a5b701c827d89785a3b7b13fc70b2669a386453225d49d9"
+      "computedHash": "d1814389411bee27ee233f067d060f480b446c2ac64fae41b7effa00f30dfca5"
     },
     "issue-tracking": {
       "source": "hhubb22/asa-skills",
       "sourceType": "github",
       "skillPath": "skills/issue-tracking/SKILL.md",
-      "computedHash": "a9caf8c38e8e40e96d507d2aa82c6acb1d859a0bf4153532baf88a5043dd53f3"
+      "computedHash": "369a79d0e988cd277c67fade6cefc65eeef0bb391bb1ac633594a320a772ca91"
     },
     "lab-request": {
       "source": "hhubb22/asa-skills",
       "sourceType": "github",
       "skillPath": "skills/lab-request/SKILL.md",
-      "computedHash": "000fe70464d2c46b8cdbc56be14cfac45c89b476dd09b89ff203bddf54ab7aa7"
+      "computedHash": "1609ad5d4478ef586cf79afad96c902f897d0638a569365b20d69c3a690800d5"
     },
     "research": {
       "source": "hhubb22/asa-skills",
       "sourceType": "github",
       "skillPath": "skills/research/SKILL.md",
-      "computedHash": "b093dc1071488c86a51ccb1b3210d7ef3b8edf118d968c4903ff7f7015d06075"
+      "computedHash": "c9e642031530c1676fc006c3dd3b036c7c3d92ef667804cf708a1b45405e553c"
     },
     "skill-doctor": {
       "source": "hhubb22/asa-skills",
       "sourceType": "github",
       "skillPath": "skills/skill-doctor/SKILL.md",
-      "computedHash": "929fb6ffea9e5a5f5b54c2026e51a616854d5f8e8d2ee8b06de3b347cebbe58f"
+      "computedHash": "ce1bbe042bfe79c77f6614a2ea7b35448df5987d54c0f9cb48c99adc71f50278"
     },
     "to-questionnaire": {
       "source": "hhubb22/asa-skills",
       "sourceType": "github",
       "skillPath": "skills/to-questionnaire/SKILL.md",
-      "computedHash": "f90c5f4d3eba129d89ff1a1aa87954cac1d98d1b6a5b940fe1a4256a7a01e03c"
+      "computedHash": "44fd8a14b747ee3df07ac291869a03a9b9da5d9dbd198ff8f11ebedc16b14f5e"
     },
     "to-tasks": {
       "source": "hhubb22/asa-skills",
       "sourceType": "github",
       "skillPath": "skills/to-tasks/SKILL.md",
-      "computedHash": "4c4bbcf8a82cb850b68da4281fe60ef14c415db566c05b4e0dd9ea0052fe5981"
+      "computedHash": "ca4db05b0be95eb3311cf968dcc6de1ceccebf8089c95cd609f6f44671ecc2a6"
     },
     "wait-what": {
       "source": "hhubb22/asa-skills",
       "sourceType": "github",
       "skillPath": "skills/wait-what/SKILL.md",
-      "computedHash": "10c20751c03387544b034a9baf1dc99505a8e1cde9bab812c8805ed81103b908"
+      "computedHash": "1a5c3bf70c48a1125a88a6a682a935ba0b85cf95a39f65e0d50d9c0ead9158db"
     },
     "work": {
       "source": "hhubb22/asa-skills",
       "sourceType": "github",
       "skillPath": "skills/work/SKILL.md",
-      "computedHash": "76c643b93ee77c9fbf4d7eaf6d254170fc699f551e0777b847aed164a0d4cd8c"
+      "computedHash": "6ac0983e0d8a69f7ccf25c604481396d162fcef0760151d3f0b415e5038b09f0"
     },
     "write-pr": {
       "source": "hhubb22/asa-skills",
       "sourceType": "github",
       "skillPath": "skills/write-pr/SKILL.md",
-      "computedHash": "c5563801be780a101bb08a2047eeece7034d02f45aa7468013b9606d81b74166"
+      "computedHash": "5359363eed1516c0c6408753afc0db39d0a4c1715ded57aa77d7416d539b6596"
     },
     "write-product-spec": {
       "source": "hhubb22/asa-skills",
       "sourceType": "github",
       "skillPath": "skills/write-product-spec/SKILL.md",
-      "computedHash": "9d8e75d3be0f8d4204f0324e5271d83bf4135eacb4c8c33d122c523c9ce194cc"
+      "computedHash": "a5160f56a7378dc93d8905e0c52cef9615f26c5849b398a799ffb1989266a0ed"
     },
     "write-tech-spec": {
       "source": "hhubb22/asa-skills",
       "sourceType": "github",
       "skillPath": "skills/write-tech-spec/SKILL.md",
-      "computedHash": "2887b3096d032571dc1443572c5f80213795f75a75e8708b49d1f2d280df6f2c"
+      "computedHash": "fbb45b64e687206e251bef172202f4fd31298a0e4cea8cc57b54e2da855cbeed"
     },
     "write-tr": {
       "source": "hhubb22/asa-skills",
       "sourceType": "github",
       "skillPath": "skills/write-tr/SKILL.md",
-      "computedHash": "9497064354709328de8dfc90e5fae70aa2e9ddda738ead66972d71fc81fe3db5"
+      "computedHash": "5197a1f8e09f91aac27585969bc9f36048cae386e097759d371790888744bca5"
     }
   }
 }
