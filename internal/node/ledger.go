@@ -221,6 +221,9 @@ func (l *Ledger) Prepare(in PrepareInput, bind func(sessionID string) error) Pre
 func (l *Ledger) finishExisting(saved savedReceipt, taskID string, bind func(string) error) PrepareReport {
 	if bind != nil {
 		if err := bind(saved.sessionID); err != nil {
+			if errors.Is(err, errHistoryUnreadable) {
+				return rejected(task.CodeUnavailable, "本地 Session 历史缺失或无法读取，不能继续准备")
+			}
 			return PrepareReport{Silent: true}
 		}
 	}
@@ -472,6 +475,9 @@ var dropState struct {
 	once sync.Once
 	left atomic.Int32
 }
+
+// errHistoryUnreadable 表示已知 Session 的账本缺失或损坏，准备必须明确拒绝，不能一直不回 ACK。
+var errHistoryUnreadable = errors.New("本地 Session 历史缺失或无法读取")
 
 func failPersist() bool {
 	return os.Getenv("BATON_TEST_FAIL_PERSIST") == "1"

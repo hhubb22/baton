@@ -210,7 +210,7 @@ func TestWorkerOversizedInputFailsWithoutSecondSubmit(t *testing.T) {
 
 func TestWorkerSuspendConsumesBudget(t *testing.T) {
 	t.Setenv("BATON_TEST_SUSPEND_AFTER_ARM", "6s")
-	client, pub, priv, taskID, execID, _ := startBoundWorker(t)
+	client, pub, priv, taskID, execID, dir := startBoundWorker(t)
 	defer client.Close()
 	nonce := armNonce(t, client, taskID, execID)
 	generation := mustSessionID(t)
@@ -224,6 +224,14 @@ func TestWorkerSuspendConsumesBudget(t *testing.T) {
 	st, err := client.Status()
 	if err != nil || st.ExecutorStarts != 0 || st.StartIntent {
 		t.Fatalf("没有预算仍然启动: %v %+v", err, st)
+	}
+	path, err := LedgerPath(dir, st.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	needs, err := LedgerNeedsWorker(path)
+	if err != nil || needs {
+		t.Fatalf("排队超时后的 Session 仍会拉起 Worker: %v %v", needs, err)
 	}
 }
 

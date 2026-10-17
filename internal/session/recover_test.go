@@ -154,6 +154,48 @@ func TestMissingLedgerIsNotCreated(t *testing.T) {
 	}
 }
 
+func TestBusyLedgerIsNotTreatedAsCorrupt(t *testing.T) {
+	dir := t.TempDir()
+	sessionID := mustSessionID(t)
+	path, err := LedgerPath(dir, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := CreateLedger(path); err != nil {
+		t.Fatal(err)
+	}
+	holder, err := sql.Open("sqlite", sqliteDSN(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close()
+	if _, err := holder.Exec(`PRAGMA journal_mode=DELETE`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder.Exec(`BEGIN EXCLUSIVE`); err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Exec(`ROLLBACK`)
+	reader, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?mode=ro&_pragma=busy_timeout(100)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	_, err = reader.Exec(`SELECT COUNT(*) FROM outbox`)
+	if err == nil {
+		t.Fatal("独占锁没有挡住读取")
+	}
+	if !errors.Is(classifyLedgerErr(err), ErrHistoryUnread) || errors.Is(classifyLedgerErr(err), ErrHistoryIncompatible) {
+		t.Fatalf("暂时读不了被当成历史损坏: %v", err)
+	}
+	if err := os.WriteFile(path+".bad", []byte("not-a-database"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := InspectLedger(path + ".bad"); !errors.Is(err, ErrHistoryIncompatible) {
+		t.Fatalf("损坏文件没有标成不兼容: %v", err)
+	}
+}
+
 func TestVerificationReasonsDoNotShareAnEventID(t *testing.T) {
 	id := mustSessionID(t)
 	inputID, err := VerificationEventID(id, task.CodeUncertainInput)

@@ -21,7 +21,7 @@ import (
 	"baton/internal/startpermit"
 	"baton/internal/task"
 
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
 )
 
 var (
@@ -29,6 +29,8 @@ var (
 	ErrHistoryMissing = errors.New("Session 历史缺失")
 	// ErrHistoryIncompatible 表示账本已损坏或不是本组件能读取的格式。
 	ErrHistoryIncompatible = errors.New("Session 历史已损坏或不兼容")
+	// ErrHistoryUnread 表示这次没有读成账本。它不是损坏证据，调用方应在下次心跳重试。
+	ErrHistoryUnread = errors.New("Session 历史这次没有读成")
 )
 
 type workerDB struct {
@@ -232,21 +234,21 @@ func (w *workerDB) Authorize(taskID, executionID, permit, publicKey, generation 
 		return true, false, "", nil
 	}
 	if w.execution == "" || w.execution != executionID || w.task != taskID {
-		return false, true, "invalid_target", nil
+		return w.refuse("invalid_target")
 	}
 	if w.cancelled {
-		return false, true, "cancelled", nil
+		return w.refuse("cancelled")
 	}
 	raw, decErr := base64.RawURLEncoding.DecodeString(publicKey)
 	if decErr != nil || len(raw) != ed25519.PublicKeySize {
-		return false, true, "invalid_target", nil
+		return w.refuse("invalid_target")
 	}
 	claims, verErr := startpermit.Verify(ed25519.PublicKey(raw), permit)
 	if verErr != nil || claims.ExecutionID != w.execution || claims.TaskID != w.task || claims.Nonce != w.nonce || claims.StorageGeneration != generation {
-		return false, true, "invalid_target", nil
+		return w.refuse("invalid_target")
 	}
 	if queueExpires.IsZero() || !claims.QueueExpiresAt.Equal(queueExpires.UTC()) {
-		return false, true, "invalid_target", nil
+		return w.refuse("invalid_target")
 	}
 	nowMono, monoErr := w.clock.Mono()
 	if monoErr != nil || w.armedMono <= 0 {
@@ -254,7 +256,7 @@ func (w *workerDB) Authorize(taskID, executionID, permit, publicKey, generation 
 	}
 	rtt := nowMono - time.Duration(w.armedMono)
 	if _, ok := startpermit.Remaining(claims.ExpiresAt.Sub(claims.IssuedAt), rtt); !ok {
-		return false, true, "queue_timeout", nil
+		return w.refuse("queue_timeout")
 	}
 	tx, err := w.db.Begin()
 	if err != nil {
@@ -296,6 +298,22 @@ func (w *workerDB) CancelLocal() (started bool, err error) {
 	}
 	w.cancelled = true
 	return false, nil
+}
+
+// refuse 记下启动前的拒绝。这样的 Session 没有 start_intent，重启时不再拉起 Worker。
+func (w *workerDB) refuse(code string) (bool, bool, string, error) {
+	tx, err := w.db.Begin()
+	if err != nil {
+		return false, false, "", err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := putMeta(tx, "start_refused", code); err != nil {
+		return false, false, "", err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, false, "", err
+	}
+	return false, true, code, nil
 }
 
 func (w *workerDB) Append(note string) (int64, error) {
@@ -714,21 +732,30 @@ func createWorkerSchema(db *sql.DB) error {
 
 func verifyWorkerSchema(db *sql.DB) error {
 	var metaCount, outboxCount int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'meta'`).Scan(&metaCount); err != nil || metaCount != 1 {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'meta'`).Scan(&metaCount); err != nil {
+		return classifyLedgerErr(err)
+	}
+	if metaCount != 1 {
 		return ErrHistoryIncompatible
 	}
-	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'outbox'`).Scan(&outboxCount); err != nil || outboxCount != 1 {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'outbox'`).Scan(&outboxCount); err != nil {
+		return classifyLedgerErr(err)
+	}
+	if outboxCount != 1 {
 		return ErrHistoryIncompatible
 	}
 	var schema string
 	err := db.QueryRow(`SELECT value FROM meta WHERE key = 'ledger_schema'`).Scan(&schema)
 	if errors.Is(err, sql.ErrNoRows) {
 		if _, err := db.Exec(`INSERT INTO meta (key, value) VALUES ('ledger_schema', '1')`); err != nil {
-			return ErrHistoryIncompatible
+			return classifyLedgerErr(err)
 		}
 		return nil
 	}
-	if err != nil || schema != "1" {
+	if err != nil {
+		return classifyLedgerErr(err)
+	}
+	if schema != "1" {
 		return ErrHistoryIncompatible
 	}
 	return nil
@@ -750,7 +777,7 @@ func InspectLedger(path string) error {
 	defer db.Close()
 	db.SetMaxOpenConns(1)
 	if err := db.Ping(); err != nil {
-		return ErrHistoryIncompatible
+		return classifyLedgerErr(err)
 	}
 	return verifyWorkerSchema(db)
 }
@@ -787,43 +814,64 @@ func LedgerNeedsWorker(path string) (bool, error) {
 	}
 	db, err := sql.Open("sqlite", sqliteDSN(path))
 	if err != nil {
-		return false, ErrHistoryIncompatible
+		return false, classifyLedgerErr(err)
 	}
 	defer db.Close()
 	db.SetMaxOpenConns(1)
 	var pending, verification int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE delivered = 0`).Scan(&pending); err != nil {
-		return false, ErrHistoryIncompatible
+		return false, classifyLedgerErr(err)
 	}
 	if pending > 0 {
 		return true, nil
 	}
 	if err := db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE kind = ?`, protocol.ReportNeedsVerification).Scan(&verification); err != nil {
-		return false, ErrHistoryIncompatible
+		return false, classifyLedgerErr(err)
 	}
 	meta := map[string]string{}
 	rows, err := db.Query(`SELECT key, value FROM meta`)
 	if err != nil {
-		return false, ErrHistoryIncompatible
+		return false, classifyLedgerErr(err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var key, value string
 		if err := rows.Scan(&key, &value); err != nil {
-			return false, ErrHistoryIncompatible
+			return false, classifyLedgerErr(err)
 		}
 		meta[key] = value
 	}
 	if err := rows.Err(); err != nil {
-		return false, ErrHistoryIncompatible
+		return false, classifyLedgerErr(err)
 	}
 	if meta["result_delivered"] == "1" || verification > 0 {
 		return false, nil
 	}
-	if meta["start_cancelled"] == "1" && meta["start_intent"] != "1" {
+	if meta["start_intent"] != "1" && (meta["start_cancelled"] == "1" || meta["start_refused"] != "") {
 		return false, nil
 	}
 	return true, nil
+}
+
+// classifyLedgerErr 只把文件损坏当成不兼容。锁、忙和暂时打不开留到下次心跳。
+func classifyLedgerErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	var sqErr *sqlite.Error
+	if errors.As(err, &sqErr) {
+		switch sqErr.Code() & 0xff {
+		case 11, 26: // SQLITE_CORRUPT, SQLITE_NOTADB
+			return ErrHistoryIncompatible
+		default:
+			return ErrHistoryUnread
+		}
+	}
+	text := strings.ToLower(err.Error())
+	if strings.Contains(text, "not a database") || strings.Contains(text, "malformed") {
+		return ErrHistoryIncompatible
+	}
+	return ErrHistoryUnread
 }
 
 // VerificationEventID 是同一次执行、同一个原因的待核实报告标识。不同原因不会互相覆盖。

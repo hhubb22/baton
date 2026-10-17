@@ -58,36 +58,40 @@ func (s *startLoop) resendPending(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		path, err := session.LedgerPath(s.host.DataDir, id)
-		if err != nil {
-			continue
-		}
-		needs, err := session.LedgerNeedsWorker(path)
-		if errors.Is(err, session.ErrHistoryMissing) || errors.Is(err, session.ErrHistoryIncompatible) {
-			s.log.Info("event=history_unreadable", "session_id", id, "reason", err.Error())
-			s.reportHistory(ctx, id)
-			continue
-		}
-		if err != nil || !needs {
-			continue
-		}
 		callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		st, err := s.host.Pending(callCtx, id)
 		cancel()
-		if err != nil {
-			s.reconcile(ctx, id)
+		if err == nil {
+			if len(st.Reports) > 0 {
+				s.deliver(ctx, id, st.Reports)
+			}
+			if st.Uncertain || st.InputSubmitted || !st.StartIntent || st.TaskID == "" || st.ExecutionID == "" {
+				continue
+			}
+			// 这里补发的是尚未送出的同一次输入。取消标记和执行期限留到 T10 再拦。
+			s.followInput(&startJob{
+				taskID: st.TaskID, executionID: st.ExecutionID, sessionID: id,
+			})
 			continue
 		}
-		if len(st.Reports) > 0 {
-			s.deliver(ctx, id, st.Reports)
-		}
-		if st.Uncertain || st.InputSubmitted || !st.StartIntent || st.TaskID == "" || st.ExecutionID == "" {
+		path, pathErr := session.LedgerPath(s.host.DataDir, id)
+		if pathErr != nil {
 			continue
 		}
-		// 这里补发的是尚未送出的同一次输入。取消标记和执行期限留到 T10 再拦。
-		s.followInput(&startJob{
-			taskID: st.TaskID, executionID: st.ExecutionID, sessionID: id,
-		})
+		needs, readErr := session.LedgerNeedsWorker(path)
+		if errors.Is(readErr, session.ErrHistoryMissing) || errors.Is(readErr, session.ErrHistoryIncompatible) {
+			s.log.Info("event=history_unreadable", "session_id", id, "reason", readErr.Error())
+			s.reportHistory(ctx, id)
+			continue
+		}
+		if readErr != nil {
+			s.log.Info("event=history_read_failed", "session_id", id, "reason", readErr.Error())
+			continue
+		}
+		if !needs {
+			continue
+		}
+		s.reconcile(ctx, id)
 	}
 }
 
@@ -105,6 +109,10 @@ func (s *startLoop) reconcile(ctx context.Context, sessionID string) {
 	if errors.Is(err, session.ErrHistoryMissing) || errors.Is(err, session.ErrHistoryIncompatible) {
 		s.log.Info("event=history_unreadable", "session_id", sessionID, "reason", err.Error())
 		s.reportHistory(ctx, sessionID)
+		return
+	}
+	if errors.Is(err, session.ErrHistoryUnread) {
+		s.log.Info("event=history_read_failed", "session_id", sessionID, "reason", err.Error())
 		return
 	}
 	s.log.Info("event=worker_missing", "session_id", sessionID)

@@ -144,15 +144,12 @@ func TestStalePIDDoesNotRerun(t *testing.T) {
 	}
 	t.Cleanup(func() { stopWorker(decoy.Process.Pid) })
 	setWorkerPID(t, st.dataDir, sessionID, decoy.Process.Pid)
-	if _, err := st.pool.Exec(context.Background(), `UPDATE tasks SET status = 'running' WHERE id = $1::uuid`, created.TaskID); err != nil {
-		t.Fatal(err)
-	}
 	stopWorker(worker.PID)
 	waitWorkerSocketDown(t, st.dataDir, sessionID)
 	restartBatond(t, st)
 	status, executions, _ := taskFacts(t, st, created.TaskID)
-	if status != task.StatusRunning || executions != 1 || executorCount(t, st, "input") != 1 {
-		t.Fatalf("旧进程号或中心状态触发了重跑: %s executions %d inputs %d", status, executions, executorCount(t, st, "input"))
+	if status != task.StatusNeedsVerification || executions != 1 || executorCount(t, st, "input") != 1 {
+		t.Fatalf("旧进程号触发了重跑或改写了待核实: %s executions %d inputs %d", status, executions, executorCount(t, st, "input"))
 	}
 	if err := syscall.Kill(decoy.Process.Pid, 0); err != nil {
 		t.Fatalf("诱饵进程被当成 Worker 处理了: %v", err)
@@ -238,6 +235,36 @@ func TestMissingHistoryFromRunningIsReported(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("缺失历史被新建了: %v", err)
+	}
+}
+
+func TestLivingWorkerResultSurvivesMissingLedger(t *testing.T) {
+	st := startPrepareStack(t, map[string]string{
+		"BATON_TEST_HOLD_START":      "0",
+		"BATON_TEST_EXECUTOR_SCRIPT": "success",
+		"BATON_TEST_CRASH_AFTER":     "after_started",
+	})
+	created := acceptTask(t, st, "living-result")
+	waitTaskStatus(t, st, created.TaskID, task.StatusRunning)
+	sessionID := sessionOf(t, st, created.TaskID)
+	worker := workerStatus(t, st.dataDir, sessionID)
+	if worker.PID <= 0 {
+		t.Fatal("结果还在 Worker 里，进程却不在")
+	}
+	path, err := session.LedgerPath(st.dataDir, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(path, path+".aside"); err != nil {
+		t.Fatal(err)
+	}
+	restartBatond(t, st)
+	waitTaskStatus(t, st, created.TaskID, task.StatusCompleted)
+	status, executions, deliveries := taskFacts(t, st, created.TaskID)
+	code := ""
+	_ = st.pool.QueryRow(context.Background(), `SELECT COALESCE(error_code, '') FROM tasks WHERE id = $1::uuid`, created.TaskID).Scan(&code)
+	if status != task.StatusCompleted || code == task.CodeUncertainHistory || executions != 1 || deliveries != 1 || executorCount(t, st, "input") != 1 {
+		t.Fatalf("存活 Worker 的结果被降级了: %s %s executions %d deliveries %d inputs %d\n%s", status, code, executions, deliveries, executorCount(t, st, "input"), st.batond.out.String())
 	}
 }
 

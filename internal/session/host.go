@@ -25,7 +25,11 @@ func (h *Host) Reconnect(ctx context.Context, sessionIDs []string) {
 		})
 		if err != nil {
 			if recErr := h.Reconcile(ctx, id); recErr != nil && h.Logger != nil {
-				h.Logger.Info("event=history_unreadable", "session_id", id, "reason", recErr.Error())
+				if errors.Is(recErr, ErrHistoryMissing) || errors.Is(recErr, ErrHistoryIncompatible) {
+					h.Logger.Info("event=history_unreadable", "session_id", id, "reason", recErr.Error())
+				} else {
+					h.Logger.Info("event=history_read_failed", "session_id", id, "reason", recErr.Error())
+				}
 				continue
 			}
 			if h.Logger != nil {
@@ -58,6 +62,14 @@ func (h *Host) Reconcile(ctx context.Context, sessionID string) error {
 		return nil
 	}
 	return h.spawn(ctx, sessionID)
+}
+
+// Reachable 只探测原来的 Worker 是否还能应答。不会新建账本，也不会拉起进程。
+func (h *Host) Reachable(ctx context.Context, sessionID string) bool {
+	_, err := h.call(ctx, sessionID, func(c *Client) (Status, error) {
+		return c.Status()
+	})
+	return err == nil
 }
 
 // Bind 确保 Session Worker 在运行，并把这次执行交给它。不会启动 Agent。

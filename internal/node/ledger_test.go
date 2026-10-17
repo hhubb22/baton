@@ -113,6 +113,19 @@ func TestPrepareStopsWhenPersistFails(t *testing.T) {
 	}
 }
 
+func TestPrepareNamesUnreadableHistory(t *testing.T) {
+	led := openTestLedger(t)
+	in := samplePrepare(t)
+	got := led.Prepare(in, func(string) error { return errHistoryUnreadable })
+	if got.OK || got.Silent || got.Code != task.CodeUnavailable || got.Message == "" {
+		t.Fatalf("损坏历史被静默掉了: %+v", got)
+	}
+	again := led.Prepare(in, func(string) error { return errors.New("绑定失败") })
+	if !again.Silent {
+		t.Fatalf("普通绑定失败不应该变成拒绝: %+v", again)
+	}
+}
+
 func TestPrepareDuplicateAfterBindFailureReturnsStoredMapping(t *testing.T) {
 	led := openTestLedger(t)
 	in := samplePrepare(t)
