@@ -25,7 +25,10 @@ func (h *Host) Reconnect(ctx context.Context, sessionIDs []string) {
 		})
 		if err != nil {
 			if h.Logger != nil {
-				h.Logger.Info("event=worker_missing", "session_id", id)
+				h.Logger.Info("event=worker_pid_not_proof", "session_id", id)
+			}
+			if recErr := h.Reconcile(ctx, id); recErr != nil && h.Logger != nil {
+				h.Logger.Info("event=history_unreadable", "session_id", id, "reason", recErr.Error())
 			}
 			continue
 		}
@@ -33,6 +36,23 @@ func (h *Host) Reconnect(ctx context.Context, sessionIDs []string) {
 			h.Logger.Info("event=worker_reconnected", "session_id", id, "pid", st.PID)
 		}
 	}
+}
+
+// Reconcile 在原来的 Worker 已经不在时打开它的账本。套接字不通时，不会把账本里记下的进程号当成执行仍在继续，也不会新建空历史。
+func (h *Host) Reconcile(ctx context.Context, sessionID string) error {
+	if _, err := h.call(ctx, sessionID, func(c *Client) (Status, error) {
+		return c.Status()
+	}); err == nil {
+		return nil
+	}
+	path, err := LedgerPath(h.DataDir, sessionID)
+	if err != nil {
+		return err
+	}
+	if err := InspectLedger(path); err != nil {
+		return err
+	}
+	return h.spawn(ctx, sessionID)
 }
 
 // Bind 确保 Session Worker 在运行，并把这次执行交给它。不会启动 Agent。

@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,57 +24,58 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+var (
+	// ErrHistoryMissing 表示已知 Session 的账本文件不存在。调用方不能新建空账本假装恢复成功。
+	ErrHistoryMissing = errors.New("Session 历史缺失")
+	// ErrHistoryIncompatible 表示账本已损坏或不是本组件能读取的格式。
+	ErrHistoryIncompatible = errors.New("Session 历史已损坏或不兼容")
+)
+
 type workerDB struct {
-	db              *sql.DB
-	mu              sync.Mutex
-	execution       string
-	task            string
-	nonce           string
-	armedMono       int64
-	intent          bool
-	cancelled       bool
-	inputSubmitted  bool
-	resultDelivered bool
-	generation      int
-	attaches        int
-	observer        *Observer
-	clock           *startpermit.Clock
+	db                 *sql.DB
+	mu                 sync.Mutex
+	execution          string
+	task               string
+	nonce              string
+	armedMono          int64
+	intent             bool
+	cancelled          bool
+	inputSubmitted     bool
+	inputResolved      bool
+	resultDelivered    bool
+	recoveredUncertain bool
+	uncertainMessage   string
+	generation         int
+	attaches           int
+	observer           *Observer
+	clock              *startpermit.Clock
 }
 
 func openWorkerDB(path string, observer *Observer) (*workerDB, error) {
+	info, statErr := os.Stat(path)
+	fresh := errors.Is(statErr, os.ErrNotExist)
+	if statErr != nil && !fresh {
+		return nil, ErrHistoryIncompatible
+	}
+	if !fresh && (info.IsDir() || info.Size() == 0) {
+		return nil, ErrHistoryIncompatible
+	}
 	db, err := sql.Open("sqlite", sqliteDSN(path))
 	if err != nil {
-		return nil, err
+		return nil, ErrHistoryIncompatible
 	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 	if err := db.Ping(); err != nil {
 		db.Close()
-		return nil, err
+		return nil, ErrHistoryIncompatible
 	}
-	if _, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS meta (
-			key TEXT PRIMARY KEY,
-			value TEXT NOT NULL
-		);
-		CREATE TABLE IF NOT EXISTS writes (
-			seq INTEGER PRIMARY KEY AUTOINCREMENT,
-			note TEXT NOT NULL,
-			created_at TEXT NOT NULL
-		);
-		CREATE TABLE IF NOT EXISTS execution_log (
-			seq INTEGER PRIMARY KEY AUTOINCREMENT,
-			kind TEXT NOT NULL,
-			body TEXT NOT NULL,
-			created_at TEXT NOT NULL
-		);
-		CREATE TABLE IF NOT EXISTS outbox (
-			event_id TEXT PRIMARY KEY,
-			kind TEXT NOT NULL,
-			payload TEXT NOT NULL,
-			delivered INTEGER NOT NULL DEFAULT 0
-		);
-	`); err != nil {
+	if fresh {
+		if err := createWorkerSchema(db); err != nil {
+			db.Close()
+			return nil, err
+		}
+	} else if err := verifyWorkerSchema(db); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -116,9 +119,11 @@ func (w *workerDB) load() error {
 	w.intent = intent == "1"
 	_ = w.db.QueryRow(`SELECT value FROM meta WHERE key = 'start_cancelled'`).Scan(&cancelled)
 	w.cancelled = cancelled == "1"
-	var submitted, delivered, generation string
+	var submitted, resolved, delivered, generation string
 	_ = w.db.QueryRow(`SELECT value FROM meta WHERE key = 'input_submitted'`).Scan(&submitted)
 	w.inputSubmitted = submitted == "1"
+	_ = w.db.QueryRow(`SELECT value FROM meta WHERE key = 'input_resolved'`).Scan(&resolved)
+	w.inputResolved = resolved == "1"
 	_ = w.db.QueryRow(`SELECT value FROM meta WHERE key = 'result_delivered'`).Scan(&delivered)
 	w.resultDelivered = delivered == "1"
 	_ = w.db.QueryRow(`SELECT value FROM meta WHERE key = 'input_generation'`).Scan(&generation)
@@ -135,7 +140,24 @@ func (w *workerDB) load() error {
 	if attaches != "" {
 		fmt.Sscan(attaches, &w.attaches)
 	}
+	if w.hasResultLocked() {
+		w.inputResolved = true
+	} else if w.intent && !w.inputResolved {
+		w.recoveredUncertain = true
+		w.uncertainMessage = task.UncertainInputMessage
+	} else if w.inputResolved {
+		w.recoveredUncertain = true
+		w.uncertainMessage = task.UncertainWorkerMessage
+	}
 	return nil
+}
+
+func (w *workerDB) hasResultLocked() bool {
+	var n int
+	if err := w.db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE kind = ?`, protocol.ReportResult).Scan(&n); err != nil {
+		return false
+	}
+	return n > 0
 }
 
 func (w *workerDB) Bind(taskID, executionID, agentType string) error {
@@ -248,6 +270,7 @@ func (w *workerDB) Authorize(taskID, executionID, permit, publicKey, generation 
 		return false, false, "", err
 	}
 	w.intent = true
+	CrashAfter("start_intent")
 	// 意图已经落盘。此后即使执行器失败，也不能再报告“尚未启动”。
 	if w.observer != nil {
 		_ = w.observer.Start(context.Background())
@@ -314,6 +337,9 @@ type workerSnap struct {
 	inputs          int64
 	inputSubmitted  bool
 	resultDelivered bool
+	uncertain       bool
+	taskID          string
+	executionID     string
 }
 
 func (w *workerDB) snapshot() workerSnap {
@@ -326,6 +352,7 @@ func (w *workerDB) snapshot() workerSnap {
 	return workerSnap{
 		attaches: w.attaches, intent: w.intent, inputs: inputs,
 		inputSubmitted: w.inputSubmitted, resultDelivered: w.resultDelivered,
+		uncertain: w.recoveredUncertain, taskID: w.task, executionID: w.execution,
 	}
 }
 
@@ -337,7 +364,10 @@ func (w *workerDB) SubmitInput(sessionID, payload string) ([]ipcReport, error) {
 	if !w.intent || w.execution == "" || w.task == "" {
 		return nil, errors.New("还没有启动意图")
 	}
-	if w.inputSubmitted {
+	if w.recoveredUncertain || (w.inputSubmitted && !w.inputResolved) {
+		return w.ensureVerificationLocked(sessionID)
+	}
+	if w.inputSubmitted || w.inputResolved {
 		return w.pendingLocked()
 	}
 	if payload == "" || w.observer == nil {
@@ -362,11 +392,20 @@ func (w *workerDB) SubmitInput(sessionID, payload string) ([]ipcReport, error) {
 	}
 	w.inputSubmitted = true
 	w.generation = 1
+	CrashAfter("input_intent")
 	out, err := w.observer.SubmitInput(context.Background(), payload)
+	if err != nil {
+		w.recoveredUncertain = true
+		w.uncertainMessage = task.UncertainInputMessage
+		return w.ensureVerificationLocked(sessionID)
+	}
+	CrashAfter("input_send")
+	reports, err := w.recordExecution(sessionID, payload, out)
 	if err != nil {
 		return nil, err
 	}
-	return w.recordExecution(sessionID, payload, out)
+	CrashAfter("result_save")
+	return reports, nil
 }
 
 // failOversizedLocked 不把超限输入交给执行器，而是记下失败并留下可回报的结果。
@@ -388,6 +427,9 @@ func (w *workerDB) failOversizedLocked(sessionID string) ([]ipcReport, error) {
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := putMeta(tx, "input_submitted", "1"); err != nil {
+		return nil, err
+	}
+	if err := putMeta(tx, "input_resolved", "1"); err != nil {
 		return nil, err
 	}
 	if err := putMeta(tx, "input_generation", "1"); err != nil {
@@ -412,6 +454,7 @@ func (w *workerDB) failOversizedLocked(sessionID string) ([]ipcReport, error) {
 		return nil, err
 	}
 	w.inputSubmitted = true
+	w.inputResolved = true
 	w.generation = 1
 	return w.pendingLocked()
 }
@@ -469,9 +512,13 @@ func (w *workerDB) recordExecution(sessionID, payload string, out Output) ([]ipc
 			}
 		}
 	}
+	if err := putMeta(tx, "input_resolved", "1"); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
+	w.inputResolved = true
 	return w.pendingLocked()
 }
 
@@ -581,10 +628,159 @@ func insertOutbox(tx *sql.Tx, eventID, kind string, payload []byte) error {
 	return err
 }
 
+func (w *workerDB) recover(sessionID string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.recoveredUncertain {
+		return nil
+	}
+	_, err := w.ensureVerificationLocked(sessionID)
+	return err
+}
+
+func (w *workerDB) ensureVerificationLocked(sessionID string) ([]ipcReport, error) {
+	if w.execution == "" || w.task == "" {
+		return nil, errors.New("还没有启动意图")
+	}
+	if w.uncertainMessage == "" {
+		w.uncertainMessage = task.UncertainInputMessage
+	}
+	w.recoveredUncertain = true
+	eventID, err := VerificationEventID(w.execution)
+	if err != nil {
+		return nil, err
+	}
+	var existing int
+	if err := w.db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE event_id = ?`, eventID).Scan(&existing); err != nil {
+		return nil, err
+	}
+	if existing == 0 {
+		body, err := json.Marshal(protocol.ExecutionReport{
+			Type: protocol.BodyExecutionReport, EventID: eventID, TaskID: w.task, ExecutionID: w.execution,
+			SessionID: sessionID, Kind: protocol.ReportNeedsVerification, Status: task.StatusNeedsVerification,
+			ErrorMessage: w.uncertainMessage,
+		})
+		if err != nil {
+			return nil, err
+		}
+		tx, err := w.db.Begin()
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = tx.Rollback() }()
+		if err := insertOutbox(tx, eventID, protocol.ReportNeedsVerification, body); err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+	} else if _, err := w.db.Exec(`UPDATE outbox SET delivered = 0 WHERE event_id = ?`, eventID); err != nil {
+		return nil, err
+	}
+	return w.pendingLocked()
+}
+
 func putMeta(tx *sql.Tx, key, value string) error {
 	_, err := tx.Exec(`INSERT INTO meta (key, value) VALUES (?, ?)
 		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value)
 	return err
+}
+
+func createWorkerSchema(db *sql.DB) error {
+	if _, err := db.Exec(`
+		CREATE TABLE meta (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		);
+		CREATE TABLE writes (
+			seq INTEGER PRIMARY KEY AUTOINCREMENT,
+			note TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		);
+		CREATE TABLE execution_log (
+			seq INTEGER PRIMARY KEY AUTOINCREMENT,
+			kind TEXT NOT NULL,
+			body TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		);
+		CREATE TABLE outbox (
+			event_id TEXT PRIMARY KEY,
+			kind TEXT NOT NULL,
+			payload TEXT NOT NULL,
+			delivered INTEGER NOT NULL DEFAULT 0
+		);
+		INSERT INTO meta (key, value) VALUES ('ledger_schema', '1');
+	`); err != nil {
+		return ErrHistoryIncompatible
+	}
+	return nil
+}
+
+func verifyWorkerSchema(db *sql.DB) error {
+	var metaCount, outboxCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'meta'`).Scan(&metaCount); err != nil || metaCount != 1 {
+		return ErrHistoryIncompatible
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'outbox'`).Scan(&outboxCount); err != nil || outboxCount != 1 {
+		return ErrHistoryIncompatible
+	}
+	var schema string
+	err := db.QueryRow(`SELECT value FROM meta WHERE key = 'ledger_schema'`).Scan(&schema)
+	if errors.Is(err, sql.ErrNoRows) {
+		if _, err := db.Exec(`INSERT INTO meta (key, value) VALUES ('ledger_schema', '1')`); err != nil {
+			return ErrHistoryIncompatible
+		}
+		return nil
+	}
+	if err != nil || schema != "1" {
+		return ErrHistoryIncompatible
+	}
+	return nil
+}
+
+// InspectLedger 只检查已有账本能不能读。文件不存在或内容不对时不会创建新文件。
+func InspectLedger(path string) error {
+	info, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return ErrHistoryMissing
+	}
+	if err != nil || info.IsDir() || info.Size() == 0 {
+		return ErrHistoryIncompatible
+	}
+	db, err := sql.Open("sqlite", sqliteDSN(path))
+	if err != nil {
+		return ErrHistoryIncompatible
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if err := db.Ping(); err != nil {
+		return ErrHistoryIncompatible
+	}
+	return verifyWorkerSchema(db)
+}
+
+// VerificationEventID 是同一次执行的待核实报告标识。重复上报使用同一个值。
+func VerificationEventID(executionID string) (string, error) {
+	id, err := identity.ParseUUID(executionID)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256([]byte("baton-needs-verification-v1:" + id))
+	b := sum[:16]
+	b[6] = (b[6] & 0x0f) | 0x50
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
+}
+
+// CrashAfter 在故障注入点结束当前进程。只有测试环境变量匹配时才生效。
+func CrashAfter(point string) {
+	if strings.TrimSpace(os.Getenv("BATON_TEST_CRASH_AFTER")) != point {
+		return
+	}
+	if path := strings.TrimSpace(os.Getenv("BATON_TEST_CRASH_FILE")); path != "" {
+		_ = os.WriteFile(path, []byte(point+"\n"), 0o600)
+	}
+	os.Exit(75)
 }
 
 func sqliteDSN(path string) string {

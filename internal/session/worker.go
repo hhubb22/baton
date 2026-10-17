@@ -72,7 +72,13 @@ func RunWorker(ctx context.Context, dataDir, sessionID string) error {
 	}
 	db, err := openWorkerDB(ledgerPath, NewObserver(os.Getenv("BATON_TEST_EXECUTOR_LOG")))
 	if err != nil {
+		if errors.Is(err, ErrHistoryMissing) || errors.Is(err, ErrHistoryIncompatible) {
+			return err
+		}
 		return errors.New("无法打开 Session 账本")
+	}
+	if err := db.recover(sessionID); err != nil {
+		return errors.New("无法恢复 Session 历史")
 	}
 	defer db.Close()
 	endpoint, err := Endpoint(dataDir, sessionID)
@@ -217,11 +223,14 @@ func statusMessage(db *workerDB, sessionID string, seq int64) ipcMessage {
 		OK:              true,
 		PID:             os.Getpid(),
 		SessionID:       sessionID,
+		TaskID:          snap.taskID,
+		ExecutionID:     snap.executionID,
 		ExecutorStarts:  db.observer.Starts(),
 		ExecutorInputs:  snap.inputs,
 		HookRuns:        db.observer.Hooks(),
 		InputSubmitted:  snap.inputSubmitted,
 		ResultDelivered: snap.resultDelivered,
+		Uncertain:       snap.uncertain,
 		Attaches:        snap.attaches,
 		Seq:             seq,
 		StartIntent:     snap.intent,

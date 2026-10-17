@@ -43,6 +43,13 @@ const (
 	EventResult             = "result"
 	ActionPrepare           = "prepare"
 
+	// UncertainInputMessage 表示启动意图已经落盘，但不能证明输入是否送出。
+	UncertainInputMessage = "启动意图已经记下，但不能确认任务输入是否已经送出"
+	// UncertainWorkerMessage 表示原 Worker 已退出，进程号不能证明同一次执行仍在运行。
+	UncertainWorkerMessage = "原 Worker 已经退出，不能把进程号当成同一次执行仍在运行"
+	// UncertainHistoryMessage 表示本地历史不能读取，不能伪造空历史当作恢复成功。
+	UncertainHistoryMessage = "本地 Session 历史缺失或无法读取，不能把它当成空历史恢复成功"
+
 	AccessAvailable   = "available"
 	AccessUnavailable = "unavailable"
 	AccessUnknown     = "unknown"

@@ -56,6 +56,7 @@ type executionHead struct {
 	authorized   bool
 	refused      bool
 	generation   *int
+	errorMessage string
 }
 
 // LoadTaskInput 读取已经授权且尚未确认结束的执行输入。它不记录交付，也不启动执行。
@@ -123,6 +124,10 @@ func (s *Store) ApplyExecutionReport(ctx context.Context, in ExecutionReport) (b
 		if in.Status == task.StatusCompleted && !in.AgentStopped {
 			return false, task.CodeConflict, nil
 		}
+	} else if in.Kind == task.EventNeedsVerification {
+		if in.Status != task.StatusNeedsVerification {
+			return false, task.CodeInvalidTarget, nil
+		}
 	} else if in.Status != task.StatusRunning {
 		return false, task.CodeInvalidTarget, nil
 	}
@@ -139,6 +144,11 @@ func (s *Store) ApplyExecutionReport(ctx context.Context, in ExecutionReport) (b
 		return false, "", fmt.Errorf("保存执行记录失败: %s", redact.Scrub(err.Error()))
 	}
 	if seen {
+		if in.Kind == task.EventNeedsVerification {
+			if err := reconcileSeenUncertain(ctx, tx, in); err != nil {
+				return false, "", err
+			}
+		}
 		if err := tx.Commit(ctx); err != nil {
 			return false, "", fmt.Errorf("保存执行记录失败: %s", redact.Scrub(err.Error()))
 		}
@@ -154,14 +164,22 @@ func (s *Store) ApplyExecutionReport(ctx context.Context, in ExecutionReport) (b
 	if !head.authorized || head.refused || head.sessionID != in.SessionID || head.nodeID != in.NodeID {
 		return false, task.CodeInvalidTarget, nil
 	}
-	if head.generation != nil && *head.generation != in.InputGeneration {
+	if in.Kind != task.EventNeedsVerification && head.generation != nil && *head.generation != in.InputGeneration {
 		return false, task.CodeConflict, nil
 	}
 	switch head.status {
 	case task.StatusCancelled:
+		if in.Kind == task.EventNeedsVerification {
+			if err := tx.Commit(ctx); err != nil {
+				return false, "", fmt.Errorf("保存执行记录失败: %s", redact.Scrub(err.Error()))
+			}
+			return true, "", nil
+		}
 		return false, task.CodeConflict, nil
 	}
-	if in.Kind == task.EventStarted {
+	if in.Kind == task.EventNeedsVerification {
+		err = applyUncertain(ctx, tx, in, head)
+	} else if in.Kind == task.EventStarted {
 		err = applyStarted(ctx, tx, in, head)
 	} else if head.status == task.StatusCompleted || head.status == task.StatusFailed || head.status == task.StatusCancelled {
 		err = retainLateResult(ctx, tx, in, head)
@@ -187,8 +205,99 @@ func (s *Store) ApplyExecutionReport(ctx context.Context, in ExecutionReport) (b
 	return true, "", nil
 }
 
+// reconcileSeenUncertain 在同一待核实事件已经存在时，把被改回排队或执行中的任务纠正回来。
+// 不新增事件，也不新开执行。
+func reconcileSeenUncertain(ctx context.Context, tx pgx.Tx, in ExecutionReport) error {
+	head, ok, err := lockExecution(ctx, tx, in)
+	if err != nil || !ok {
+		return err
+	}
+	if head.status != task.StatusQueued && head.status != task.StatusRunning {
+		return nil
+	}
+	message := strings.TrimSpace(in.ErrorMessage)
+	if message == "" {
+		message = task.UncertainInputMessage
+	}
+	tag, err := tx.Exec(ctx, `
+		UPDATE tasks
+		SET status = 'needs_verification', error_message = $3, version = version + 1, updated_at = now()
+		WHERE id = $1::uuid AND employee_id = $2::uuid AND version = $4`,
+		in.TaskID, in.EmployeeID, message, head.version)
+	if err != nil {
+		return fmt.Errorf("保存执行记录失败: %s", redact.Scrub(err.Error()))
+	}
+	if tag.RowsAffected() != 1 {
+		return errors.New("任务版本已变化")
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE sessions
+		SET status = 'unknown', updated_at = now()
+		WHERE employee_id = $1::uuid AND id = $2::uuid`,
+		in.EmployeeID, in.SessionID); err != nil {
+		return fmt.Errorf("保存执行记录失败: %s", redact.Scrub(err.Error()))
+	}
+	return nil
+}
+
+func applyUncertain(ctx context.Context, tx pgx.Tx, in ExecutionReport, head executionHead) error {
+	switch head.status {
+	case task.StatusCompleted, task.StatusFailed, task.StatusCancelled:
+		return nil
+	case task.StatusQueued, task.StatusRunning, task.StatusNeedsVerification:
+	default:
+		return nil
+	}
+	message := strings.TrimSpace(in.ErrorMessage)
+	if message == "" {
+		message = task.UncertainInputMessage
+	}
+	tag, err := tx.Exec(ctx, `
+		UPDATE tasks
+		SET status = 'needs_verification', error_message = $3, version = version + 1, updated_at = now()
+		WHERE id = $1::uuid AND employee_id = $2::uuid AND version = $4`,
+		in.TaskID, in.EmployeeID, message, head.version)
+	if err != nil {
+		return fmt.Errorf("保存执行记录失败: %s", redact.Scrub(err.Error()))
+	}
+	if tag.RowsAffected() != 1 {
+		return errors.New("任务版本已变化")
+	}
+	if err := insertReportEvent(ctx, tx, in, head, head.version+1, task.EventNeedsVerification, task.StatusNeedsVerification, ""); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE sessions
+		SET status = 'unknown', updated_at = now()
+		WHERE employee_id = $1::uuid AND id = $2::uuid`,
+		in.EmployeeID, in.SessionID); err != nil {
+		return fmt.Errorf("保存执行记录失败: %s", redact.Scrub(err.Error()))
+	}
+	return nil
+}
+
 func applyStarted(ctx context.Context, tx pgx.Tx, in ExecutionReport, head executionHead) error {
-	if head.status != task.StatusQueued && head.status != task.StatusNeedsVerification && head.status != task.StatusRunning {
+	if head.status == task.StatusNeedsVerification && crashWindowMessage(head.errorMessage) {
+		tag, err := tx.Exec(ctx, `
+			UPDATE executions
+			SET started_at = COALESCE(started_at, now()),
+			    input_generation = COALESCE(input_generation, $3)
+			WHERE id = $1::uuid AND employee_id = $2::uuid
+			  AND start_authorized_at IS NOT NULL
+			  AND (input_generation IS NULL OR input_generation = $3)`,
+			in.ExecutionID, in.EmployeeID, in.InputGeneration)
+		if err != nil {
+			return fmt.Errorf("保存执行记录失败: %s", redact.Scrub(err.Error()))
+		}
+		if tag.RowsAffected() != 1 {
+			return errors.New("执行代次不一致")
+		}
+		if err := bumpVersion(ctx, tx, in.EmployeeID, in.TaskID, head.version); err != nil {
+			return err
+		}
+		return insertReportEvent(ctx, tx, in, head, head.version+1, task.EventStarted, task.StatusNeedsVerification, "")
+	}
+	if head.status != task.StatusQueued && head.status != task.StatusRunning && head.status != task.StatusNeedsVerification {
 		return nil
 	}
 	tag, err := tx.Exec(ctx, `
@@ -339,14 +448,15 @@ func lockExecution(ctx context.Context, tx pgx.Tx, in ExecutionReport) (executio
 	err := tx.QueryRow(ctx, `
 		SELECT t.version, t.status, t.agent_type, t.target_node_id::text, t.target_session_id::text,
 		       t.source_session_id::text, t.queue_expires_at, t.execution_timeout_seconds,
-		       e.start_authorized_at IS NOT NULL, e.start_refused_at IS NOT NULL, e.input_generation
+		       e.start_authorized_at IS NOT NULL, e.start_refused_at IS NOT NULL, e.input_generation,
+		       COALESCE(t.error_message, '')
 		FROM tasks t
 		JOIN executions e ON e.task_id = t.id AND e.employee_id = t.employee_id
 		WHERE t.id = $1::uuid AND t.employee_id = $2::uuid AND e.id = $3::uuid
 		FOR UPDATE`, in.TaskID, in.EmployeeID, in.ExecutionID).Scan(
 		&head.version, &head.status, &head.agent, &head.nodeID, &sessionID,
 		&head.sourceID, &head.queueExpires, &head.execSeconds,
-		&head.authorized, &head.refused, &head.generation,
+		&head.authorized, &head.refused, &head.generation, &head.errorMessage,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return executionHead{}, false, nil
@@ -469,14 +579,28 @@ func normalizeReport(in *ExecutionReport) error {
 			return err
 		}
 	}
-	if in.InputGeneration < 1 {
-		return errors.New("代次无效")
-	}
 	switch in.Kind {
+	case task.EventNeedsVerification:
+		if in.Status != task.StatusNeedsVerification {
+			return errors.New("报告类型无效")
+		}
+		return nil
 	case task.EventStarted, task.EventResult:
+		if in.InputGeneration < 1 {
+			return errors.New("代次无效")
+		}
 		return nil
 	default:
 		return errors.New("报告类型无效")
+	}
+}
+
+func crashWindowMessage(message string) bool {
+	switch strings.TrimSpace(message) {
+	case task.UncertainInputMessage, task.UncertainWorkerMessage, task.UncertainHistoryMessage:
+		return true
+	default:
+		return false
 	}
 }
 

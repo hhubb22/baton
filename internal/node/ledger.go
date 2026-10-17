@@ -132,6 +132,18 @@ func (l *Ledger) WorkerSessions() ([]string, error) {
 	return out, nil
 }
 
+func (l *Ledger) TaskForSession(sessionID string) (string, string, bool, error) {
+	var taskID, executionID string
+	err := l.db.QueryRow(`SELECT task_id, execution_id FROM receipts WHERE session_id = ?`, sessionID).Scan(&taskID, &executionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", false, nil
+	}
+	if err != nil {
+		return "", "", false, errors.New("无法读取执行映射")
+	}
+	return taskID, executionID, true, nil
+}
+
 func (l *Ledger) RememberWorker(sessionID string, pid int) error {
 	if _, err := identity.ParseUUID(sessionID); err != nil || pid <= 0 {
 		return errors.New("Worker 索引无效")

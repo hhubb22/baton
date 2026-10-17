@@ -39,8 +39,16 @@ type prepareStack struct {
 	dataDir     string
 	certFile    string
 	nodeAddr    string
+	apiAddr     string
 	batondBin   string
+	relayBin    string
+	coordBin    string
 	signingFile string
+	relayEnv    []string
+	coordEnv    []string
+	batondArgs  []string
+	batondEnv   []string
+	relay       *running
 	coord       *running
 	batond      *running
 	roots       *x509.CertPool
@@ -228,7 +236,7 @@ func startPrepareStack(t *testing.T, extra map[string]string) *prepareStack {
 		"BATON_TLS_KEY_FILE":    keyFile,
 		"BATON_TLS_CA_FILE":     certFile,
 	})
-	startCmd(t, relayBin, nil, relayEnv)
+	relay := startCmd(t, relayBin, nil, relayEnv)
 	time.Sleep(400 * time.Millisecond)
 	coord := startCmd(t, coordBin, []string{"serve"}, coordEnv)
 	waitListen(t, apiAddr)
@@ -258,12 +266,16 @@ func startPrepareStack(t *testing.T, extra map[string]string) *prepareStack {
 	for key, value := range extra {
 		env[key] = value
 	}
-	batond := startCmd(t, batondBin, []string{"run", "--relay", "wss://" + nodeAddr + "/v1/node", "--data-dir", dataDir}, childEnv(env))
+	batondArgs := []string{"run", "--relay", "wss://" + nodeAddr + "/v1/node", "--data-dir", dataDir}
+	batondEnv := childEnv(env)
+	batond := startCmd(t, batondBin, batondArgs, batondEnv)
 	waitNode(t, client, base, ident.NodeID, true, true, true)
 	return &prepareStack{
 		pool: pool, client: client, base: base, csrf: csrf, ident: ident, employeeID: emp.ID,
-		dataDir: dataDir, certFile: certFile, nodeAddr: nodeAddr, batondBin: batondBin, signingFile: signingFile,
-		coord: coord, batond: batond, roots: roots,
+		dataDir: dataDir, certFile: certFile, nodeAddr: nodeAddr, apiAddr: apiAddr,
+		batondBin: batondBin, relayBin: relayBin, coordBin: coordBin, signingFile: signingFile,
+		relayEnv: relayEnv, coordEnv: coordEnv, batondArgs: batondArgs, batondEnv: batondEnv,
+		relay: relay, coord: coord, batond: batond, roots: roots,
 	}
 }
 
@@ -475,4 +487,43 @@ func stopWorker(pid int) {
 	_ = syscall.Kill(pid, syscall.SIGTERM)
 	time.Sleep(200 * time.Millisecond)
 	_ = syscall.Kill(pid, syscall.SIGKILL)
+}
+
+func restartBatond(t *testing.T, st *prepareStack) {
+	t.Helper()
+	st.batond.stop()
+	st.batond = startCmd(t, st.batondBin, st.batondArgs, dropEnv(st.batondEnv, "BATON_TEST_CRASH_AFTER", "BATON_TEST_CRASH_FILE"))
+	waitNode(t, st.client, st.base, st.ident.NodeID, true, true, true)
+}
+
+func restartRelay(t *testing.T, st *prepareStack) {
+	t.Helper()
+	st.relay.stop()
+	time.Sleep(300 * time.Millisecond)
+	st.relay = startCmd(t, st.relayBin, nil, st.relayEnv)
+	waitListen(t, st.nodeAddr)
+	waitNode(t, st.client, st.base, st.ident.NodeID, true, true, true)
+}
+
+func restartCoord(t *testing.T, st *prepareStack) {
+	t.Helper()
+	st.coord.stop()
+	st.coord = startCmd(t, st.coordBin, []string{"serve"}, st.coordEnv)
+	waitListen(t, st.apiAddr)
+}
+
+func dropEnv(env []string, keys ...string) []string {
+	skip := map[string]bool{}
+	for _, key := range keys {
+		skip[key] = true
+	}
+	out := make([]string, 0, len(env))
+	for _, item := range env {
+		name, _, _ := strings.Cut(item, "=")
+		if skip[name] {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
 }

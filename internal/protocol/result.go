@@ -12,8 +12,9 @@ const (
 	// BodyExecutionReportResult 是中心在持久化之后返回的确认。
 	BodyExecutionReportResult = "execution.report_result"
 
-	ReportStarted = task.EventStarted
-	ReportResult  = task.EventResult
+	ReportStarted           = task.EventStarted
+	ReportResult            = task.EventResult
+	ReportNeedsVerification = task.EventNeedsVerification
 )
 
 // InputRequest 只标识已经授权的执行，不携带任务说明。

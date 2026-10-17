@@ -117,6 +117,88 @@ func completedReport(in store.StartRequest, eventID string) store.ExecutionRepor
 	}
 }
 
+func TestNeedsVerificationAcksOnceAndKeepsTheSameExecution(t *testing.T) {
+	ctx, repo, pool, in, _ := preparedStart(t)
+	if _, err := repo.AuthorizeStart(ctx, in); err != nil {
+		t.Fatal(err)
+	}
+	startedID := mustUUID(t)
+	if ack, code, err := repo.ApplyExecutionReport(ctx, startedReport(in, startedID)); err != nil || !ack || code != "" {
+		t.Fatalf("启动事实没有保存: %v %s", err, code)
+	}
+	eventID := mustUUID(t)
+	report := store.ExecutionReport{
+		EmployeeID: in.EmployeeID, NodeID: in.NodeID, EventID: eventID, TaskID: in.TaskID,
+		ExecutionID: in.ExecutionID, SessionID: in.SessionID, Kind: task.EventNeedsVerification,
+		Status: task.StatusNeedsVerification, ErrorMessage: task.UncertainInputMessage,
+	}
+	ack, code, err := repo.ApplyExecutionReport(ctx, report)
+	if err != nil || !ack || code != "" {
+		t.Fatalf("待核实没有保存: %v %s", err, code)
+	}
+	ack, code, err = repo.ApplyExecutionReport(ctx, report)
+	if err != nil || !ack || code != "" {
+		t.Fatalf("重复待核实没有按原记录确认: %v %s", err, code)
+	}
+	var status, message, sessionStatus string
+	var bound *string
+	var executions, deliveries, events int
+	if err := pool.QueryRow(ctx, `
+		SELECT t.status, t.error_message, s.status, s.bound_execution_id::text,
+		       (SELECT COUNT(*) FROM executions WHERE task_id = t.id),
+		       (SELECT COUNT(*) FROM delivery_records WHERE task_id = t.id),
+		       (SELECT COUNT(*) FROM task_events WHERE task_id = t.id AND kind = 'needs_verification')
+		FROM tasks t
+		JOIN sessions s ON s.id = t.target_session_id
+		WHERE t.id = $1::uuid`, in.TaskID).Scan(&status, &message, &sessionStatus, &bound, &executions, &deliveries, &events); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE tasks SET status = 'running' WHERE id = $1::uuid`, in.TaskID); err != nil {
+		t.Fatal(err)
+	}
+	ack, code, err = repo.ApplyExecutionReport(ctx, report)
+	if err != nil || !ack || code != "" {
+		t.Fatalf("重复待核实没有纠正执行中状态: %v %s", err, code)
+	}
+	if err := pool.QueryRow(ctx, `
+		SELECT t.status, (SELECT COUNT(*) FROM task_events WHERE task_id = t.id AND kind = 'needs_verification'),
+		       (SELECT COUNT(*) FROM executions WHERE task_id = t.id)
+		FROM tasks t WHERE t.id = $1::uuid`, in.TaskID).Scan(&status, &events, &executions); err != nil || status != task.StatusNeedsVerification || events != 1 || executions != 1 {
+		t.Fatalf("纠正后的待核实不正确: %s events %d executions %d %v", status, events, executions, err)
+	}
+	if status != task.StatusNeedsVerification || message != task.UncertainInputMessage || sessionStatus != "unknown" || bound == nil || *bound != in.ExecutionID || executions != 1 || deliveries != 0 || events != 1 {
+		t.Fatalf("待核实记录不正确: %s %s session %s bound %v executions %d deliveries %d events %d", status, message, sessionStatus, bound, executions, deliveries, events)
+	}
+	if ack, code, err = repo.ApplyExecutionReport(ctx, startedReport(in, mustUUID(t))); err != nil || !ack || code != "" {
+		t.Fatalf("后到的启动事实被拒绝: %v %s", err, code)
+	}
+	if err := pool.QueryRow(ctx, `SELECT status FROM tasks WHERE id = $1::uuid`, in.TaskID).Scan(&status); err != nil || status != task.StatusNeedsVerification {
+		t.Fatalf("后到的启动把待核实改回了执行中: %s %v", status, err)
+	}
+	if ack, code, err = repo.ApplyExecutionReport(ctx, completedReport(in, mustUUID(t))); err != nil || !ack || code != "" {
+		t.Fatalf("真实结果没有结束待核实: %v %s", err, code)
+	}
+	if err := pool.QueryRow(ctx, `
+		SELECT t.status, (SELECT COUNT(*) FROM executions WHERE task_id = t.id),
+		       (SELECT COUNT(*) FROM delivery_records WHERE task_id = t.id)
+		FROM tasks t WHERE t.id = $1::uuid`, in.TaskID).Scan(&status, &executions, &deliveries); err != nil {
+		t.Fatal(err)
+	}
+	if status != task.StatusCompleted || executions != 1 || deliveries != 1 {
+		t.Fatalf("结束后的记录不正确: %s executions %d deliveries %d", status, executions, deliveries)
+	}
+	if ack, code, err = repo.ApplyExecutionReport(ctx, store.ExecutionReport{
+		EmployeeID: in.EmployeeID, NodeID: in.NodeID, EventID: mustUUID(t), TaskID: in.TaskID,
+		ExecutionID: in.ExecutionID, SessionID: in.SessionID, Kind: task.EventNeedsVerification,
+		Status: task.StatusNeedsVerification, ErrorMessage: task.UncertainWorkerMessage,
+	}); err != nil || !ack || code != "" {
+		t.Fatalf("已经结束的任务没有确认待核实: %v %s", err, code)
+	}
+	if err := pool.QueryRow(ctx, `SELECT status FROM tasks WHERE id = $1::uuid`, in.TaskID).Scan(&status); err != nil || status != task.StatusCompleted {
+		t.Fatalf("待核实改写了已经结束的任务: %s %v", status, err)
+	}
+}
+
 func TestFormatFailureIsNotCompleted(t *testing.T) {
 	ctx, repo, pool, in, _ := preparedStart(t)
 	if _, err := repo.AuthorizeStart(ctx, in); err != nil {
