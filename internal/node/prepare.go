@@ -30,7 +30,7 @@ func (w *wsWriter) write(ctx context.Context, payload []byte) error {
 	return w.ws.Write(ctx, websocket.MessageText, payload)
 }
 
-func handleNodeEnvelope(ctx context.Context, raw []byte, w *wsWriter, ledger *Ledger, host *session.Host, caps []string, log *slog.Logger) bool {
+func handleNodeEnvelope(ctx context.Context, raw []byte, w *wsWriter, ledger *Ledger, host *session.Host, caps []string, log *slog.Logger, loop *startLoop) bool {
 	var wrap struct {
 		Envelope protocol.Envelope `json:"envelope"`
 	}
@@ -40,7 +40,13 @@ func handleNodeEnvelope(ctx context.Context, raw []byte, w *wsWriter, ledger *Le
 	var kind struct {
 		Type string `json:"type"`
 	}
-	if err := json.Unmarshal(wrap.Envelope.Body, &kind); err != nil || kind.Type != protocol.BodyPrepare {
+	if err := json.Unmarshal(wrap.Envelope.Body, &kind); err != nil {
+		return false
+	}
+	if kind.Type == protocol.BodyStartPermitResult {
+		return loop.onResult(wrap.Envelope)
+	}
+	if kind.Type != protocol.BodyPrepare {
 		return false
 	}
 	if wrap.Envelope.Source == nil || wrap.Envelope.Source.Kind != protocol.SourceControl {
@@ -100,6 +106,9 @@ func handleNodeEnvelope(ctx context.Context, raw []byte, w *wsWriter, ledger *Le
 		log.Info("event=prepare_rejected", "task_id", cmd.TaskID, "code", report.Code)
 	}
 	writePrepareResult(ctx, w, wrap.Envelope.MessageID, report)
+	if report.OK {
+		loop.afterPrepare(report)
+	}
 	return true
 }
 

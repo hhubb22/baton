@@ -22,6 +22,19 @@ func (s *Server) routeTask(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, http.StatusNotFound, "not_found", "找不到对应接口")
 		return
 	}
+	if strings.HasSuffix(rest, "/cancel") {
+		id := strings.TrimSuffix(rest, "/cancel")
+		if id == "" || strings.Contains(id, "/") {
+			s.writeError(w, r, http.StatusNotFound, "not_found", "找不到对应接口")
+			return
+		}
+		if r.Method != http.MethodPost {
+			s.writeError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "不支持该请求方法")
+			return
+		}
+		s.cancelTask(w, r, id)
+		return
+	}
 	if strings.HasSuffix(rest, "/events") {
 		id := strings.TrimSuffix(rest, "/events")
 		if id == "" || strings.Contains(id, "/") {
@@ -108,6 +121,47 @@ func (s *Server) getTask(w http.ResponseWriter, r *http.Request, rawID string) {
 		return
 	}
 	s.writeJSON(w, http.StatusOK, rec)
+}
+
+func (s *Server) cancelTask(w http.ResponseWriter, r *http.Request, rawID string) {
+	if s.rejectQuery(w, r) {
+		return
+	}
+	sess, ok := s.allowWrite(w, r)
+	if !ok {
+		return
+	}
+	if _, err := identity.ParseUUID(rawID); err != nil {
+		s.writeError(w, r, http.StatusBadRequest, "invalid_id", "任务标识不正确")
+		return
+	}
+	var body struct{}
+	if !s.readJSON(w, r, &body) {
+		return
+	}
+	decision, err := s.store.RequestCancel(r.Context(), sess.Employee.ID, rawID)
+	if err != nil {
+		s.writeTaskError(w, r, sess.Employee.ID, err)
+		return
+	}
+	s.log.Info("task cancel requested",
+		"request_id", requestID(r.Context()),
+		"employee_id", sess.Employee.ID,
+		"task_id", decision.TaskID,
+		"status", decision.Status,
+		"possible_start", decision.PossibleStart,
+	)
+	s.writeJSON(w, http.StatusOK, struct {
+		TaskID        string `json:"task_id"`
+		Status        string `json:"status"`
+		PossibleStart bool   `json:"possible_start"`
+		Version       int    `json:"version"`
+	}{
+		TaskID:        decision.TaskID,
+		Status:        decision.Status,
+		PossibleStart: decision.PossibleStart,
+		Version:       decision.Version,
+	})
 }
 
 func (s *Server) listTaskEvents(w http.ResponseWriter, r *http.Request, rawID string) {

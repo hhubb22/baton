@@ -142,6 +142,39 @@ func handleWorker(db *workerDB, sessionID string, msg ipcMessage) ipcMessage {
 			return ipcMessage{Type: "result", Code: code, Message: err.Error()}
 		}
 		return statusMessage(db, sessionID, 0)
+	case "arm":
+		nonce, err := db.Arm(msg.TaskID, msg.ExecutionID)
+		if err != nil {
+			return ipcMessage{Type: "result", Code: "unavailable", Message: err.Error()}
+		}
+		reply := statusMessage(db, sessionID, 0)
+		reply.Nonce = nonce
+		return reply
+	case "authorize":
+		expires, err := time.Parse(time.RFC3339Nano, msg.QueueExpiresAt)
+		if err != nil {
+			return ipcMessage{Type: "result", Refused: true, Code: "invalid_target", Message: "排队期限无效"}
+		}
+		started, refused, code, err := db.Authorize(msg.TaskID, msg.ExecutionID, msg.Permit, msg.PublicKey, msg.StorageGeneration, expires)
+		if err != nil {
+			return ipcMessage{Type: "result", Code: "unavailable", Message: "无法记录启动意图"}
+		}
+		if refused {
+			return ipcMessage{Type: "result", Refused: true, Code: code, Message: "启动许可被拒绝"}
+		}
+		reply := statusMessage(db, sessionID, 0)
+		reply.Started = started
+		reply.StartIntent = started
+		return reply
+	case "cancel_local":
+		started, err := db.CancelLocal()
+		if err != nil {
+			return ipcMessage{Type: "result", Code: "unavailable", Message: "无法记录取消"}
+		}
+		reply := statusMessage(db, sessionID, 0)
+		reply.Started = started
+		reply.StartIntent = started
+		return reply
 	case "status":
 		return statusMessage(db, sessionID, 0)
 	case "append":
@@ -157,6 +190,7 @@ func handleWorker(db *workerDB, sessionID string, msg ipcMessage) ipcMessage {
 }
 
 func statusMessage(db *workerDB, sessionID string, seq int64) ipcMessage {
+	attaches, intent := db.snapshot()
 	return ipcMessage{
 		Type:           "result",
 		OK:             true,
@@ -164,8 +198,9 @@ func statusMessage(db *workerDB, sessionID string, seq int64) ipcMessage {
 		SessionID:      sessionID,
 		ExecutorStarts: db.observer.Starts(),
 		HookRuns:       db.observer.Hooks(),
-		Attaches:       db.Attaches(),
+		Attaches:       attaches,
 		Seq:            seq,
+		StartIntent:    intent,
 	}
 }
 

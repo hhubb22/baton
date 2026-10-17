@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"encoding/base64"
+
 	"baton/internal/auth"
 	"baton/internal/identity"
 	"baton/internal/node"
@@ -183,6 +185,10 @@ func (s *Store) Register(ctx context.Context, in RegisterInput, signer node.Toke
 	if err := tx.Commit(ctx); err != nil {
 		return node.Identity{}, fmt.Errorf("提交节点注册失败: %s", redact.Scrub(err.Error()))
 	}
+	pub, err := signer.PublicKey()
+	if err != nil {
+		return node.Identity{}, err
+	}
 	return node.Identity{
 		NodeID:          nodeID,
 		EmployeeID:      employeeID,
@@ -198,6 +204,7 @@ func (s *Store) Register(ctx context.Context, in RegisterInput, signer node.Toke
 			Token:     connectionToken,
 			ExpiresAt: credentialExpires.UTC(),
 		},
+		SigningPublicKey: base64.RawURLEncoding.EncodeToString(pub),
 	}, nil
 }
 

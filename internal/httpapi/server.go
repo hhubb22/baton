@@ -585,6 +585,12 @@ func safePath(path string) string {
 				return "/api/v1/tasks/:id/events"
 			}
 		}
+		if strings.HasSuffix(rest, "/cancel") {
+			id := strings.TrimSuffix(rest, "/cancel")
+			if id != "" && !strings.Contains(id, "/") {
+				return "/api/v1/tasks/:id/cancel"
+			}
+		}
 		if rest != "" && !strings.Contains(rest, "/") {
 			return "/api/v1/tasks/:id"
 		}

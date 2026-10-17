@@ -23,13 +23,21 @@ const (
 	CodeSessionBusy    = "session_busy"
 	CodeQueueTimeout   = "queue_timeout"
 	CodeUnavailable    = "unavailable"
+	CodeRevoked        = "revoked"
 
-	StatusQueued  = "queued"
-	StatusFailed  = "failed"
-	EventAccepted = "accepted"
-	EventPrepared = "prepared"
-	EventFailed   = "failed"
-	ActionPrepare = "prepare"
+	StatusQueued            = "queued"
+	StatusRunning           = "running"
+	StatusNeedsVerification = "needs_verification"
+	StatusFailed            = "failed"
+	StatusCompleted         = "completed"
+	StatusCancelled         = "cancelled"
+	EventAccepted           = "accepted"
+	EventPrepared           = "prepared"
+	EventFailed             = "failed"
+	EventStartAuthorized    = "start_authorized"
+	EventNeedsVerification  = "needs_verification"
+	EventCancelled          = "cancelled"
+	ActionPrepare           = "prepare"
 
 	DefaultQueueTimeoutSeconds     = 10 * 60
 	DefaultExecutionTimeoutSeconds = 2 * 60 * 60

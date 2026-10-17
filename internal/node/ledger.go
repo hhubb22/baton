@@ -82,6 +82,10 @@ func OpenLedger(dir string) (*Ledger, error) {
 		db.Close()
 		return nil, errors.New("无法创建节点账本")
 	}
+	if err := ensureReceiptExpiry(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err := chmodDB(path); err != nil {
 		db.Close()
 		return nil, err
@@ -289,10 +293,11 @@ func (l *Ledger) insertReceipt(in PrepareInput, sessionID string) (PrepareReport
 	}
 	if _, err := tx.Exec(`
 		INSERT INTO receipts (
-			task_id, execution_id, message_id, session_id, agent_type, storage_generation, task_version, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			task_id, execution_id, message_id, session_id, agent_type, storage_generation, task_version,
+			queue_expires_at, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		in.TaskID, in.ExecutionID, in.MessageID, sessionID, in.AgentType, l.generation, in.TaskVersion,
-		time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		in.QueueExpiresAt.UTC().Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		return PrepareReport{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -326,6 +331,43 @@ func checkDirectory(path string) (string, bool) {
 		return "工作目录不可用", false
 	}
 	return "", true
+}
+
+func ensureReceiptExpiry(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(receipts)`)
+	if err != nil {
+		return errors.New("无法读取节点账本")
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, typ string
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
+			return errors.New("无法读取节点账本")
+		}
+		if name == "queue_expires_at" {
+			return nil
+		}
+	}
+	if _, err := db.Exec(`ALTER TABLE receipts ADD COLUMN queue_expires_at TEXT NOT NULL DEFAULT ''`); err != nil {
+		return errors.New("无法创建节点账本")
+	}
+	return nil
+}
+
+// QueueExpiry 返回准备时保存的排队到期时间。
+func (l *Ledger) QueueExpiry(taskID string) (time.Time, error) {
+	var raw string
+	err := l.db.QueryRow(`SELECT queue_expires_at FROM receipts WHERE task_id = ?`, taskID).Scan(&raw)
+	if err != nil {
+		return time.Time{}, err
+	}
+	expires, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return expires.UTC(), nil
 }
 
 func ensureGeneration(db *sql.DB) (string, error) {
@@ -390,6 +432,7 @@ CREATE TABLE IF NOT EXISTS receipts (
     agent_type TEXT NOT NULL,
     storage_generation TEXT NOT NULL,
     task_version INTEGER NOT NULL,
+    queue_expires_at TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS sessions (

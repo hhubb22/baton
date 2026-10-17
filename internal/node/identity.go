@@ -34,15 +34,16 @@ type Credential struct {
 
 // Identity 是注册成功后保存在节点本地的身份。重启后继续使用同一份。
 type Identity struct {
-	NodeID          string     `json:"node_id"`
-	EmployeeID      string     `json:"employee_id"`
-	DisplayName     string     `json:"display_name"`
-	System          string     `json:"system"`
-	Role            string     `json:"role"`
-	Capabilities    []string   `json:"capabilities"`
-	RegistrationSeq int64      `json:"registration_seq"`
-	RegisteredAt    time.Time  `json:"registered_at"`
-	Credential      Credential `json:"credential"`
+	NodeID           string     `json:"node_id"`
+	EmployeeID       string     `json:"employee_id"`
+	DisplayName      string     `json:"display_name"`
+	System           string     `json:"system"`
+	Role             string     `json:"role"`
+	Capabilities     []string   `json:"capabilities"`
+	RegistrationSeq  int64      `json:"registration_seq"`
+	RegisteredAt     time.Time  `json:"registered_at"`
+	Credential       Credential `json:"credential"`
+	SigningPublicKey string     `json:"signing_public_key,omitempty"`
 }
 
 // SavedDefault 是中心实际保存的默认 PC，字段来自数据库而不是请求正文。
@@ -74,6 +75,9 @@ func (id Identity) complete() error {
 		return errors.New("incomplete credential")
 	}
 	if id.RegistrationSeq < 1 || id.RegisteredAt.IsZero() || id.Credential.ExpiresAt.IsZero() {
+		return errors.New("incomplete identity")
+	}
+	if id.SigningPublicKey != "" && !ValidSigningPublicKey(id.SigningPublicKey) {
 		return errors.New("incomplete identity")
 	}
 	caps := id.Capabilities

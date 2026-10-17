@@ -61,6 +61,24 @@ func (h *Host) Bind(ctx context.Context, sessionID, taskID, executionID, agentTy
 	return st.PID, nil
 }
 
+// Arm 让 Worker 记下许可请求的起点。不会启动执行器。
+func (h *Host) Arm(ctx context.Context, sessionID, taskID, executionID string) (string, error) {
+	st, err := h.call(ctx, sessionID, func(c *Client) (Status, error) {
+		return c.Arm(taskID, executionID)
+	})
+	if err != nil {
+		return "", err
+	}
+	return st.Nonce, nil
+}
+
+// Authorize 把许可交给 Worker。拒绝发生在 start_intent 之前时，Refused 为 true。
+func (h *Host) Authorize(ctx context.Context, sessionID, taskID, executionID, permit, publicKey, generation, queueExpires string) (Status, error) {
+	return h.call(ctx, sessionID, func(c *Client) (Status, error) {
+		return c.Authorize(taskID, executionID, permit, publicKey, generation, queueExpires)
+	})
+}
+
 func (h *Host) call(ctx context.Context, sessionID string, fn func(*Client) (Status, error)) (Status, error) {
 	token, err := readToken(h.DataDir, sessionID)
 	if err != nil {

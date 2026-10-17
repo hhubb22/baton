@@ -30,19 +30,20 @@ import (
 )
 
 type prepareStack struct {
-	pool       *pgxpool.Pool
-	client     *http.Client
-	base       string
-	csrf       string
-	ident      node.Identity
-	employeeID string
-	dataDir    string
-	certFile   string
-	nodeAddr   string
-	batondBin  string
-	coord      *running
-	batond     *running
-	roots      *x509.CertPool
+	pool        *pgxpool.Pool
+	client      *http.Client
+	base        string
+	csrf        string
+	ident       node.Identity
+	employeeID  string
+	dataDir     string
+	certFile    string
+	nodeAddr    string
+	batondBin   string
+	signingFile string
+	coord       *running
+	batond      *running
+	roots       *x509.CertPool
 }
 
 func TestPrepareReconnectsWorkerAndRejectsBusySession(t *testing.T) {
@@ -200,7 +201,7 @@ func startPrepareStack(t *testing.T, extra map[string]string) *prepareStack {
 	controlAddr := freeAddr(t)
 	nodeAddr := freeAddr(t)
 	dbURL := strings.TrimSpace(os.Getenv("BATON_TEST_DATABASE_URL"))
-	coordEnv := childEnv(map[string]string{
+	coordValues := map[string]string{
 		"BATON_DATABASE_URL":       dbURL,
 		"BATON_DB_SCHEMA":          schema,
 		"BATON_HTTP_ADDR":          apiAddr,
@@ -212,7 +213,13 @@ func startPrepareStack(t *testing.T, extra map[string]string) *prepareStack {
 		"BATON_TLS_KEY_FILE":       keyFile,
 		"BATON_HEARTBEAT_INTERVAL": "200ms",
 		"BATON_OFFLINE_AFTER":      "8s",
-	})
+	}
+	for key, value := range extra {
+		if strings.HasPrefix(key, "BATON_TEST_") {
+			coordValues[key] = value
+		}
+	}
+	coordEnv := childEnv(coordValues)
 	relayEnv := childEnv(map[string]string{
 		"BATON_LISTEN_ADDR":     nodeAddr,
 		"BATON_COORDINATOR_URL": "https://" + controlAddr,
@@ -246,6 +253,7 @@ func startPrepareStack(t *testing.T, extra map[string]string) *prepareStack {
 		"BATON_TLS_CA_FILE":        certFile,
 		"BATON_HEARTBEAT_INTERVAL": "200ms",
 		"BATON_TEST_EXECUTOR_LOG":  filepath.Join(dataDir, "executor.log"),
+		"BATON_TEST_HOLD_START":    "1",
 	}
 	for key, value := range extra {
 		env[key] = value
@@ -254,7 +262,7 @@ func startPrepareStack(t *testing.T, extra map[string]string) *prepareStack {
 	waitNode(t, client, base, ident.NodeID, true, true, true)
 	return &prepareStack{
 		pool: pool, client: client, base: base, csrf: csrf, ident: ident, employeeID: emp.ID,
-		dataDir: dataDir, certFile: certFile, nodeAddr: nodeAddr, batondBin: batondBin,
+		dataDir: dataDir, certFile: certFile, nodeAddr: nodeAddr, batondBin: batondBin, signingFile: signingFile,
 		coord: coord, batond: batond, roots: roots,
 	}
 }

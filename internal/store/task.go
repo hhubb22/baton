@@ -41,6 +41,41 @@ func (s *Store) runBeforeCommit(ctx context.Context) error {
 	return fn(ctx)
 }
 
+// SetStartCommitHook 在启动许可写入完成之后、事务提交之前运行。
+// 返回错误会回滚，调用方不能签发许可。
+func (s *Store) SetStartCommitHook(fn func(context.Context) error) {
+	s.mu.Lock()
+	s.beforeStartCommit = fn
+	s.mu.Unlock()
+}
+
+// SetCancelCommitHook 在取消写入完成之后、事务提交之前运行。
+func (s *Store) SetCancelCommitHook(fn func(context.Context) error) {
+	s.mu.Lock()
+	s.beforeCancelCommit = fn
+	s.mu.Unlock()
+}
+
+func (s *Store) runStartHook(ctx context.Context) error {
+	s.mu.Lock()
+	fn := s.beforeStartCommit
+	s.mu.Unlock()
+	if fn == nil {
+		return nil
+	}
+	return fn(ctx)
+}
+
+func (s *Store) runCancelHook(ctx context.Context) error {
+	s.mu.Lock()
+	fn := s.beforeCancelCommit
+	s.mu.Unlock()
+	if fn == nil {
+		return nil
+	}
+	return fn(ctx)
+}
+
 // AcceptTask 保存一次任务接受。已有的相同请求直接返回原记录，不重新解析默认 PC 或默认 Agent。
 // 任务、execution、初始事件、outbox 和去重墓碑在同一个事务里提交；提交失败时调用方得不到接受记录。
 func (s *Store) AcceptTask(ctx context.Context, employeeID string, in task.Input) (task.Record, error) {
