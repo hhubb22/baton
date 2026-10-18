@@ -1,10 +1,10 @@
 # Project Agent 实施顺序与工单调整
 
-Status: draft
+Status: approved
 Owner: Asa
 Date: 2026-10-18
 Baseline: `hhubb22/baton@6da5ebef0d4d129fad4776de3dafd8b2e681f958`；Linear 项目 Baton（P-PS-11）在 2026-10-18 的状态
-Approval: 尚未批准。表中的工作项和工单调整是提案，规格批准后再在 Linear 上逐项创建或修改。
+Approval: 2026-10-18 用户确认。工作项在 Linear 的 Baton 项目中创建，标题保留 PA-W 编号；进度以 Linear 为准。
 
 ## 新增工作
 

@@ -1,10 +1,10 @@
 # Project Agent 数据库迁移
 
-Status: draft
+Status: approved
 Owner: Asa
 Date: 2026-10-18
 Baseline: `hhubb22/baton@6da5ebef0d4d129fad4776de3dafd8b2e681f958`
-Approval: 尚未批准
+Approval: 2026-10-18 用户确认，合并进 main
 Basis: [TECH.md](TECH.md) 第 3 节；[Baton TECH](../baton/TECH.md)「中心数据」
 
 ## 编号

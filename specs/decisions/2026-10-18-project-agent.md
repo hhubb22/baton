@@ -1,6 +1,6 @@
 # Project Agent：长期协调角色与中心化状态
 
-Status: proposed
+Status: accepted（2026-10-18）
 Date: 2026-10-18
 Related: [Project Agent 行为规格](../project-agent/PRODUCT.md)、[技术设计](../project-agent/TECH.md)、[Baton 行为规格](../baton/PRODUCT.md)
 

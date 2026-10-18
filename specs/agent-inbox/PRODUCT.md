@@ -1,10 +1,10 @@
 # Agent Inbox 行为规格
 
-Status: draft
+Status: approved
 Owner: Asa
 Date: 2026-10-18
 Baseline: `hhubb22/baton@3450d12`
-Approval: 尚未批准
+Approval: 2026-10-18 用户确认，合并进 main
 Basis: 2026-10-18 关于 Agent Inbox、可操作成果和 Generative UI 的讨论及确认的决定；[Project Agent 行为规格](../project-agent/PRODUCT.md)；[Baton 行为规格](../baton/PRODUCT.md) R-30、R-31；任务结果结构 `internal/task/result.go` 的 `ResultRef`；[OpenUI Lang 1.0 规范](https://www.openui.com/docs/openui-lang/specification)（`@openuidev/lang-core` 1.0.1、`@openuidev/react-lang` 1.0.1）。
 
 ## Summary

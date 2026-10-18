@@ -1,10 +1,10 @@
 # Project Agent 技术设计
 
-Status: draft
+Status: approved
 Owner: Asa
 Date: 2026-10-18
 Baseline: `hhubb22/baton@6da5ebef0d4d129fad4776de3dafd8b2e681f958`；Pi `earendil-works/pi@482c138`（2026-10-18，各包 1.3.0）；DSH `deepseek-ai/deepseek-harness@687f282`（2026-10-17）
-Approval: 尚未批准
+Approval: 2026-10-18 用户确认，合并进 main
 Basis: [PRODUCT.md](PRODUCT.md) PA-01～PA-22；[Agent Inbox 行为规格](../agent-inbox/PRODUCT.md) IB-01～IB-27 中与 Project Agent 相关的部分；[Baton TECH](../baton/TECH.md)
 
 ## Context

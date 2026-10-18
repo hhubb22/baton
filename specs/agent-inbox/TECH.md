@@ -1,10 +1,10 @@
 # Agent Inbox 技术设计
 
-Status: draft
+Status: approved
 Owner: Asa
 Date: 2026-10-18
 Baseline: `hhubb22/baton@3450d12`；`@openuidev/lang-core` 1.0.1、`@openuidev/react-lang` 1.0.1；`github.com/SherClockHolmes/webpush-go` v1.4.0；Web Push 协议 RFC 8030、消息加密 RFC 8291、VAPID RFC 8292
-Approval: 尚未批准
+Approval: 2026-10-18 用户确认，合并进 main
 Basis: [PRODUCT.md](PRODUCT.md) IB-01～IB-32；[Project Agent TECH](../project-agent/TECH.md) 第 3、4、7 节；[Baton TECH](../baton/TECH.md)
 
 ## Context

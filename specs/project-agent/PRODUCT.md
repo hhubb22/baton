@@ -1,10 +1,10 @@
 # Project Agent 行为规格
 
-Status: draft
+Status: approved
 Owner: Asa
 Date: 2026-10-18
 Baseline: `hhubb22/baton@6da5ebef0d4d129fad4776de3dafd8b2e681f958`
-Approval: 尚未批准
+Approval: 2026-10-18 用户确认，合并进 main
 Basis: 《Baton Project Agent 需求说明》及其后续讨论确定的决定；[Baton 行为规格](../baton/PRODUCT.md)。
 
 ## Summary
