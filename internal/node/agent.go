@@ -11,11 +11,11 @@ import (
 	"io"
 	"net"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
 	"baton/internal/agentcli"
+	"baton/internal/privatefile"
 	"baton/internal/protocol"
 	"baton/internal/session"
 	"baton/internal/task"
@@ -63,22 +63,7 @@ func (l *Ledger) ensureAgentContext(report PrepareReport) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(filepath.Dir(path), ".agent-*")
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	defer os.Remove(f.Name())
-	if _, err := f.Write(data); err != nil {
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	return os.Rename(f.Name(), path)
+	return privatefile.WriteFile(path, data)
 }
 
 func (l *Ledger) agentBinding(token string) (protocol.AgentRequest, error) {
@@ -124,6 +109,21 @@ func (b *agentBridge) call(ctx context.Context, req protocol.AgentRequest) proto
 	var result protocol.AgentResult
 	if agentcli.Decode(raw, &result) != nil || result.Type != protocol.BodyAgentResult {
 		return agentFailure(task.CodeUnavailable)
+	}
+	if result.OK && req.Operation == "result" && req.TaskID != req.SourceTaskID {
+		var view struct {
+			Ready  bool   `json:"ready"`
+			Status string `json:"status"`
+		}
+		if json.Unmarshal(result.Data, &view) == nil && (view.Ready || view.Status == task.StatusCancelled || view.Status == task.StatusFailed || view.Status == task.StatusCompleted) {
+			if err := loop.receiveChildren(ctx, &startJob{taskID: req.SourceTaskID, executionID: req.SourceExecutionID, sessionID: req.SourceSessionID}, req.TaskID, true); err != nil {
+				return agentFailure(task.CodeUnavailable)
+			}
+			raw, err = loop.roundTrip(ctx, body)
+			if err != nil || agentcli.Decode(raw, &result) != nil || result.Type != protocol.BodyAgentResult {
+				return agentFailure(task.CodeUnavailable)
+			}
+		}
 	}
 	return result
 }

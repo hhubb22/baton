@@ -219,6 +219,8 @@ func (s *Server) onEnvelope(ctx context.Context, ws *websocket.Conn, raw json.Ra
 		return
 	case protocol.BodyExecutionControl:
 		s.onExecutionControl(ctx, ws, env)
+	case protocol.BodyChildDeliveries, protocol.BodyChildDeliveryAck:
+		s.onChildDelivery(ctx, ws, env)
 		return
 	case protocol.BodyPrepareResult:
 		s.notePrepareResult(env)

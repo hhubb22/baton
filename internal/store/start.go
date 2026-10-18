@@ -42,6 +42,7 @@ type CancelDecision struct {
 	Status        string
 	PossibleStart bool
 	Version       int
+	Children      []CancelDecision `json:"children,omitempty"`
 }
 
 type lockedTask struct {
@@ -121,6 +122,17 @@ func (s *Store) RequestCancel(ctx context.Context, employeeID, taskID string) (C
 		return CancelDecision{}, fmt.Errorf("保存取消失败: %s", redact.Scrub(err.Error()))
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	decision, err := s.cancelTree(ctx, tx, employeeID, taskID)
+	if err != nil {
+		return CancelDecision{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return CancelDecision{}, fmt.Errorf("保存取消失败: %s", redact.Scrub(err.Error()))
+	}
+	return decision, nil
+}
+
+func (s *Store) cancelTree(ctx context.Context, tx pgx.Tx, employeeID, taskID string) (CancelDecision, error) {
 	row, exec, err := lockCancel(ctx, tx, employeeID, taskID)
 	if err != nil {
 		return CancelDecision{}, err
@@ -154,8 +166,31 @@ func (s *Store) RequestCancel(ctx context.Context, employeeID, taskID string) (C
 			return CancelDecision{}, err
 		}
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return CancelDecision{}, fmt.Errorf("保存取消失败: %s", redact.Scrub(err.Error()))
+	rows, err := tx.Query(ctx, `SELECT id::text FROM tasks WHERE employee_id = $1::uuid AND parent_task_id = $2::uuid
+      ORDER BY created_at, id`, employeeID, taskID)
+	if err != nil {
+		return CancelDecision{}, err
+	}
+	var children []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return CancelDecision{}, err
+		}
+		children = append(children, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return CancelDecision{}, err
+	}
+	for _, id := range children {
+		child, err := s.cancelTree(ctx, tx, employeeID, id)
+		if err != nil {
+			return CancelDecision{}, err
+		}
+		decision.Children = append(decision.Children, child)
 	}
 	return decision, nil
 }

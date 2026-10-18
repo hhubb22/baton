@@ -156,6 +156,20 @@ func serveConn(conn net.Conn, token, sessionID string, db *workerDB, logger *slo
 
 func handleWorker(db *workerDB, sessionID string, msg ipcMessage) ipcMessage {
 	switch msg.Type {
+	case "child_delivery":
+		if msg.ChildDelivery == nil {
+			return ipcMessage{Type: "result", Code: "invalid_message"}
+		}
+		if err := db.ReceiveChild(sessionID, *msg.ChildDelivery, msg.Queried); err != nil {
+			return ipcMessage{Type: "result", Code: "unavailable", Message: "无法保存子结果交付"}
+		}
+		reply := statusMessage(db, sessionID, 0)
+		reports, err := db.Pending()
+		if err != nil {
+			return ipcMessage{Type: "result", Code: "unavailable"}
+		}
+		reply.Reports = reports
+		return reply
 	case "stop":
 		reports, err := db.Stop(sessionID, msg.StopReason)
 		if err != nil {
@@ -253,7 +267,12 @@ func handleWorker(db *workerDB, sessionID string, msg ipcMessage) ipcMessage {
 
 func statusMessage(db *workerDB, sessionID string, seq int64) ipcMessage {
 	snap := db.snapshot()
+	receipts, err := db.ChildReceipts()
+	if err != nil {
+		return ipcMessage{Type: "result", Code: "unavailable", Message: "无法读取子结果交付账本"}
+	}
 	return ipcMessage{
+		ChildReceipts:   receipts,
 		Type:            "result",
 		OK:              true,
 		PID:             os.Getpid(),

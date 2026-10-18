@@ -22,6 +22,21 @@ func (s *Server) routeTask(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, http.StatusNotFound, "not_found", "找不到对应接口")
 		return
 	}
+	for _, action := range []string{"resolve", "rerun"} {
+		if strings.HasSuffix(rest, "/"+action) {
+			id := strings.TrimSuffix(rest, "/"+action)
+			if id == "" || strings.Contains(id, "/") {
+				s.writeError(w, r, http.StatusNotFound, "not_found", "找不到对应接口")
+				return
+			}
+			if r.Method != http.MethodPost {
+				s.writeError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "不支持该请求方法")
+				return
+			}
+			s.manualTask(w, r, id, action)
+			return
+		}
+	}
 	if strings.HasSuffix(rest, "/cancel") {
 		id := strings.TrimSuffix(rest, "/cancel")
 		if id == "" || strings.Contains(id, "/") {
@@ -202,10 +217,12 @@ func (s *Server) writeTaskError(w http.ResponseWriter, r *http.Request, employee
 			status = http.StatusConflict
 		}
 		body := errorBody{
-			Code:      rej.Code,
-			Message:   rej.Message,
-			RequestID: requestID(r.Context()),
-			TaskID:    rej.TaskID,
+			CurrentVersion: rej.CurrentVersion,
+			CurrentStatus:  rej.CurrentStatus,
+			Code:           rej.Code,
+			Message:        rej.Message,
+			RequestID:      requestID(r.Context()),
+			TaskID:         rej.TaskID,
 		}
 		if len(rej.Fields) > 0 {
 			body.Details = &errorDetails{Fields: append([]string(nil), rej.Fields...)}

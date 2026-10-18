@@ -22,8 +22,8 @@ var ErrNotVisible = errors.New("task not visible")
 
 var errTaskRequestUnique = errors.New("task request unique")
 
-// SetTaskCommitHook 在新任务的写入完成之后、事务提交之前运行。
-// 返回错误会回滚这次接受，调用方不能把它当成已接受。nil 表示直接提交。
+// SetTaskCommitHook 在接受、核实或重做的写入完成之后、事务提交之前运行。
+// 返回错误会回滚这次操作，调用方不能把它当成已提交。nil 表示直接提交。
 // 命中已有请求时不会调用它。
 func (s *Store) SetTaskCommitHook(fn func(context.Context) error) {
 	s.mu.Lock()
@@ -277,7 +277,7 @@ func (s *Store) ListTaskEvents(ctx context.Context, employeeID, taskID string) (
 	rows, err := s.pool.Query(ctx, `
 		SELECT id::text, task_id::text, version, kind, actor_employee_id::text,
 		       status, target_node_id::text, agent_type, queue_expires_at,
-		       execution_timeout_seconds, reason_code, created_at, occurred_at, agent_stopped, outcome_known, not_started, stop_reason, worker_sequence, execution_id::text
+		       execution_timeout_seconds, reason_code, created_at, occurred_at, agent_stopped, outcome_known, not_started, stop_reason, worker_sequence, execution_id::text, resolution, rerun
 		FROM task_events
 		WHERE employee_id = $1::uuid AND task_id = $2::uuid
 		ORDER BY version ASC`, employeeID, taskID)
@@ -294,7 +294,7 @@ func (s *Store) ListTaskEvents(ctx context.Context, employeeID, taskID string) (
 			&ev.ExecutionTimeoutSeconds, &ev.ReasonCode, &ev.CreatedAt,
 			&ev.OccurredAt, &ev.AgentStopped,
 			&ev.OutcomeKnown, &ev.NotStarted, &ev.StopReason,
-			&ev.WorkerSequence, &ev.ExecutionID,
+			&ev.WorkerSequence, &ev.ExecutionID, &ev.Resolution, &ev.Rerun,
 		); err != nil {
 			return nil, fmt.Errorf("读取任务事件失败: %s", redact.Scrub(err.Error()))
 		}
@@ -636,7 +636,8 @@ const taskSelect = `
 	       (SELECT acknowledged_at FROM execution_stops x JOIN executions e ON e.id = x.execution_id WHERE e.task_id = tasks.id),
 	       (SELECT stopped_at FROM execution_stops x JOIN executions e ON e.id = x.execution_id WHERE e.task_id = tasks.id),
 	       (SELECT reason FROM execution_stops x JOIN executions e ON e.id = x.execution_id WHERE e.task_id = tasks.id),
-	       COALESCE((SELECT outcome_known FROM execution_stops x JOIN executions e ON e.id = x.execution_id WHERE e.task_id = tasks.id), false)
+	       COALESCE((SELECT outcome_known FROM execution_stops x JOIN executions e ON e.id = x.execution_id WHERE e.task_id = tasks.id), false),
+	       (SELECT rerun_of_task_id::text FROM task_relations r WHERE r.task_id = tasks.id AND r.employee_id = tasks.employee_id)
 	FROM tasks`
 
 type queryer interface {
@@ -675,7 +676,7 @@ func scanTask(row pgx.Row) (task.Record, []byte, error) {
 		&rec.ErrorCode, &rec.ErrorMessage,
 		&rec.Summary, &rec.EvidenceEmptyReason, &rec.ArtifactsEmptyReason,
 		&rec.CancelRequestedAt, &rec.ExecutionExpiresAt, &rec.StopRequestedAt,
-		&rec.StopAcknowledgedAt, &rec.StopConfirmedAt, &rec.StopReason, &rec.StopOutcomeKnown,
+		&rec.StopAcknowledgedAt, &rec.StopConfirmedAt, &rec.StopReason, &rec.StopOutcomeKnown, &rec.RerunOfTaskID,
 	); err != nil {
 		return task.Record{}, nil, fmt.Errorf("读取任务失败: %s", redact.Scrub(err.Error()))
 	}
