@@ -101,19 +101,20 @@ var agentTypePattern = regexp.MustCompile(`^[a-z][a-z0-9._-]{0,63}$`)
 
 // Input 是调用方提交的原始字段。nil 表示未指定，不代表已经填上默认值。
 type Input struct {
-	RequestID               string    `json:"request_id"`
-	Description             string    `json:"description"`
-	SourceSessionID         *string   `json:"source_session_id"`
-	ParentTaskID            *string   `json:"parent_task_id"`
-	TargetNodeID            *string   `json:"target_node_id"`
-	AgentType               *string   `json:"agent_type"`
-	TargetSessionID         *string   `json:"target_session_id"`
-	WorkingDirectory        *string   `json:"working_directory"`
-	DeviceNames             *[]string `json:"device_names"`
-	AuthorizationScope      *string   `json:"authorization_scope"`
-	ExpectedOutputs         *string   `json:"expected_outputs"`
-	QueueTimeoutSeconds     *int      `json:"queue_timeout_seconds"`
-	ExecutionTimeoutSeconds *int      `json:"execution_timeout_seconds"`
+	RequiredArtifacts       []ArtifactRef `json:"required_artifacts,omitempty"`
+	RequestID               string        `json:"request_id"`
+	Description             string        `json:"description"`
+	SourceSessionID         *string       `json:"source_session_id"`
+	ParentTaskID            *string       `json:"parent_task_id"`
+	TargetNodeID            *string       `json:"target_node_id"`
+	AgentType               *string       `json:"agent_type"`
+	TargetSessionID         *string       `json:"target_session_id"`
+	WorkingDirectory        *string       `json:"working_directory"`
+	DeviceNames             *[]string     `json:"device_names"`
+	AuthorizationScope      *string       `json:"authorization_scope"`
+	ExpectedOutputs         *string       `json:"expected_outputs"`
+	QueueTimeoutSeconds     *int          `json:"queue_timeout_seconds"`
+	ExecutionTimeoutSeconds *int          `json:"execution_timeout_seconds"`
 }
 
 // Prepared 是计算摘要后的请求。能解析的 UUID 已规范成小写。
@@ -124,38 +125,39 @@ type Prepared struct {
 
 // Record 是已经提交的任务记录。
 type Record struct {
-	RerunOfTaskID           *string     `json:"rerun_of_task_id,omitempty"`
-	CancelRequestedAt       *time.Time  `json:"cancel_requested_at,omitempty"`
-	ExecutionExpiresAt      *time.Time  `json:"execution_expires_at,omitempty"`
-	StopRequestedAt         *time.Time  `json:"stop_requested_at,omitempty"`
-	StopAcknowledgedAt      *time.Time  `json:"stop_acknowledged_at,omitempty"`
-	StopConfirmedAt         *time.Time  `json:"stop_confirmed_at,omitempty"`
-	StopReason              *string     `json:"stop_reason,omitempty"`
-	StopOutcomeKnown        bool        `json:"stop_outcome_known"`
-	TaskID                  string      `json:"task_id"`
-	RequestID               string      `json:"request_id"`
-	Description             string      `json:"description"`
-	SourceSessionID         *string     `json:"source_session_id"`
-	ParentTaskID            *string     `json:"parent_task_id"`
-	TargetSessionID         *string     `json:"target_session_id"`
-	WorkingDirectory        *string     `json:"working_directory"`
-	DeviceNames             []string    `json:"device_names"`
-	AuthorizationScope      *string     `json:"authorization_scope"`
-	ExpectedOutputs         *string     `json:"expected_outputs"`
-	TargetNodeID            string      `json:"target_node_id"`
-	AgentType               string      `json:"agent_type"`
-	Status                  string      `json:"status"`
-	QueueExpiresAt          time.Time   `json:"queue_expires_at"`
-	ExecutionTimeoutSeconds int         `json:"execution_timeout_seconds"`
-	Version                 int         `json:"version"`
-	AcceptedAt              time.Time   `json:"accepted_at"`
-	ErrorCode               *string     `json:"error_code,omitempty"`
-	ErrorMessage            *string     `json:"error_message,omitempty"`
-	Summary                 *string     `json:"summary,omitempty"`
-	EvidenceEmptyReason     *string     `json:"evidence_empty_reason,omitempty"`
-	ArtifactsEmptyReason    *string     `json:"artifacts_empty_reason,omitempty"`
-	Evidence                []ResultRef `json:"evidence,omitempty"`
-	Artifacts               []ResultRef `json:"artifacts,omitempty"`
+	RequiredArtifacts       []ArtifactRef `json:"required_artifacts,omitempty"`
+	RerunOfTaskID           *string       `json:"rerun_of_task_id,omitempty"`
+	CancelRequestedAt       *time.Time    `json:"cancel_requested_at,omitempty"`
+	ExecutionExpiresAt      *time.Time    `json:"execution_expires_at,omitempty"`
+	StopRequestedAt         *time.Time    `json:"stop_requested_at,omitempty"`
+	StopAcknowledgedAt      *time.Time    `json:"stop_acknowledged_at,omitempty"`
+	StopConfirmedAt         *time.Time    `json:"stop_confirmed_at,omitempty"`
+	StopReason              *string       `json:"stop_reason,omitempty"`
+	StopOutcomeKnown        bool          `json:"stop_outcome_known"`
+	TaskID                  string        `json:"task_id"`
+	RequestID               string        `json:"request_id"`
+	Description             string        `json:"description"`
+	SourceSessionID         *string       `json:"source_session_id"`
+	ParentTaskID            *string       `json:"parent_task_id"`
+	TargetSessionID         *string       `json:"target_session_id"`
+	WorkingDirectory        *string       `json:"working_directory"`
+	DeviceNames             []string      `json:"device_names"`
+	AuthorizationScope      *string       `json:"authorization_scope"`
+	ExpectedOutputs         *string       `json:"expected_outputs"`
+	TargetNodeID            string        `json:"target_node_id"`
+	AgentType               string        `json:"agent_type"`
+	Status                  string        `json:"status"`
+	QueueExpiresAt          time.Time     `json:"queue_expires_at"`
+	ExecutionTimeoutSeconds int           `json:"execution_timeout_seconds"`
+	Version                 int           `json:"version"`
+	AcceptedAt              time.Time     `json:"accepted_at"`
+	ErrorCode               *string       `json:"error_code,omitempty"`
+	ErrorMessage            *string       `json:"error_message,omitempty"`
+	Summary                 *string       `json:"summary,omitempty"`
+	EvidenceEmptyReason     *string       `json:"evidence_empty_reason,omitempty"`
+	ArtifactsEmptyReason    *string       `json:"artifacts_empty_reason,omitempty"`
+	Evidence                []ResultRef   `json:"evidence,omitempty"`
+	Artifacts               []ResultRef   `json:"artifacts,omitempty"`
 }
 
 // Event 是允许保存的一条任务变更，不包含 Session 原文。
@@ -209,26 +211,28 @@ func reject(code, message, field string) *Rejection {
 }
 
 type canon struct {
-	Schema                  int       `json:"schema"`
-	RequestID               string    `json:"request_id"`
-	Description             string    `json:"description"`
-	SourceSessionID         *string   `json:"source_session_id"`
-	ParentTaskID            *string   `json:"parent_task_id"`
-	TargetNodeID            *string   `json:"target_node_id"`
-	AgentType               *string   `json:"agent_type"`
-	TargetSessionID         *string   `json:"target_session_id"`
-	WorkingDirectory        *string   `json:"working_directory"`
-	DeviceNames             *[]string `json:"device_names"`
-	AuthorizationScope      *string   `json:"authorization_scope"`
-	ExpectedOutputs         *string   `json:"expected_outputs"`
-	QueueTimeoutSeconds     *int      `json:"queue_timeout_seconds"`
-	ExecutionTimeoutSeconds *int      `json:"execution_timeout_seconds"`
+	Schema                  int           `json:"schema"`
+	RequestID               string        `json:"request_id"`
+	Description             string        `json:"description"`
+	SourceSessionID         *string       `json:"source_session_id"`
+	ParentTaskID            *string       `json:"parent_task_id"`
+	TargetNodeID            *string       `json:"target_node_id"`
+	AgentType               *string       `json:"agent_type"`
+	TargetSessionID         *string       `json:"target_session_id"`
+	WorkingDirectory        *string       `json:"working_directory"`
+	DeviceNames             *[]string     `json:"device_names"`
+	AuthorizationScope      *string       `json:"authorization_scope"`
+	ExpectedOutputs         *string       `json:"expected_outputs"`
+	QueueTimeoutSeconds     *int          `json:"queue_timeout_seconds"`
+	ExecutionTimeoutSeconds *int          `json:"execution_timeout_seconds"`
+	RequiredArtifacts       []ArtifactRef `json:"required_artifacts,omitempty"`
 }
 
 // Prepare 用调用方原始字段计算摘要。未指定的字段保持为空，不填默认节点、Agent 或期限。
 // 修改 canon 的字段或顺序后，已保存的 request_hash 将无法与重试对齐。
 func Prepare(in Input) (Prepared, error) {
 	norm := Input{
+		RequiredArtifacts:       copyArtifacts(in.RequiredArtifacts),
 		RequestID:               in.RequestID,
 		Description:             in.Description,
 		SourceSessionID:         foldUUID(in.SourceSessionID),
@@ -244,6 +248,7 @@ func Prepare(in Input) (Prepared, error) {
 		ExecutionTimeoutSeconds: copyInt(in.ExecutionTimeoutSeconds),
 	}
 	body, err := json.Marshal(canon{
+		RequiredArtifacts:       norm.RequiredArtifacts,
 		Schema:                  hashSchema,
 		RequestID:               norm.RequestID,
 		Description:             norm.Description,
@@ -282,6 +287,9 @@ func ValidateRequestID(id string) error {
 // Validate 检查新请求的字段形状。调用方应先查找旧请求，再调用它。
 // 这里不要求目标节点和 Agent 已经指定，默认值由存储层在未命中旧请求后解析。
 func Validate(in Input) error {
+	if err := validateRequiredArtifacts(in.RequiredArtifacts); err != nil {
+		return err
+	}
 	if err := ValidateRequestID(in.RequestID); err != nil {
 		return err
 	}

@@ -77,7 +77,12 @@ func handleNodeEnvelope(ctx context.Context, raw []byte, w *wsWriter, ledger *Le
 		})
 		return true
 	}
+	nodeID := ""
+	if loop != nil {
+		nodeID = loop.ident.NodeID
+	}
 	report := ledger.Prepare(PrepareInput{
+		NodeID: nodeID, RequiredArtifacts: cmd.RequiredArtifacts,
 		MessageID:         wrap.Envelope.MessageID,
 		TaskID:            cmd.TaskID,
 		ExecutionID:       cmd.ExecutionID,

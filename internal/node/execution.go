@@ -231,6 +231,7 @@ func (s *startLoop) fetchInput(ctx context.Context, job *startJob) (string, erro
 	payload, err := task.MarshalExecutorInput(
 		result.Description, result.AuthorizationScope, result.ExpectedOutputs,
 		result.WorkingDirectory, result.DeviceNames, result.Generation,
+		result.RequiredArtifacts,
 	)
 	if err != nil {
 		return "", err

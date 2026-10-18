@@ -1,6 +1,9 @@
 package protocol
 
-import "encoding/json"
+import (
+	"baton/internal/task"
+	"encoding/json"
+)
 
 const (
 	// BodyPrepare 是发给节点的准备命令。Relay 不解释 body。
@@ -17,15 +20,16 @@ const (
 
 // PrepareCommand 只携带绑定 Worker 和被动检查所需的字段，不包含任务说明。
 type PrepareCommand struct {
-	Type              string `json:"type"`
-	TaskID            string `json:"task_id"`
-	ExecutionID       string `json:"execution_id"`
-	TaskVersion       int    `json:"task_version"`
-	StorageGeneration string `json:"storage_generation,omitempty"`
-	QueueExpiresAt    string `json:"queue_expires_at"`
-	AgentType         string `json:"agent_type"`
-	TargetSessionID   string `json:"target_session_id,omitempty"`
-	WorkingDirectory  string `json:"working_directory,omitempty"`
+	RequiredArtifacts []task.ArtifactRef `json:"required_artifacts,omitempty"`
+	Type              string             `json:"type"`
+	TaskID            string             `json:"task_id"`
+	ExecutionID       string             `json:"execution_id"`
+	TaskVersion       int                `json:"task_version"`
+	StorageGeneration string             `json:"storage_generation,omitempty"`
+	QueueExpiresAt    string             `json:"queue_expires_at"`
+	AgentType         string             `json:"agent_type"`
+	TargetSessionID   string             `json:"target_session_id,omitempty"`
+	WorkingDirectory  string             `json:"working_directory,omitempty"`
 }
 
 // PrepareResult 是一次准备的业务结果。OK 为 false 时表示节点明确拒绝，不是传输失败。

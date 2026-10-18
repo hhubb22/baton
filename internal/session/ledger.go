@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"baton/internal/fileaccess"
 	"baton/internal/identity"
 	"baton/internal/protocol"
 	"baton/internal/startpermit"
@@ -35,6 +36,8 @@ var (
 )
 
 type workerDB struct {
+	dataDir            string
+	nodeID             string
 	db                 *sql.DB
 	mu                 sync.Mutex
 	execution          string
@@ -125,6 +128,7 @@ func (w *workerDB) load() error {
 	w.execution = execution
 	_ = w.db.QueryRow(`SELECT value FROM meta WHERE key = 'task_id'`).Scan(&taskID)
 	w.task = taskID
+	_ = w.db.QueryRow(`SELECT value FROM meta WHERE key = 'node_id'`).Scan(&w.nodeID)
 	_ = w.db.QueryRow(`SELECT value FROM meta WHERE key = 'start_nonce'`).Scan(&nonce)
 	w.nonce = nonce
 	_ = w.db.QueryRow(`SELECT value FROM meta WHERE key = 'start_armed_mono'`).Scan(&armed)
@@ -302,6 +306,9 @@ func (w *workerDB) Authorize(taskID, executionID, permit, publicKey, generation 
 	if err := putMeta(tx, "start_intent", "1"); err != nil {
 		return false, false, "", err
 	}
+	if err := putMeta(tx, "node_id", claims.NodeID); err != nil {
+		return false, false, "", err
+	}
 	w.inputDueAt = w.executionClock.Wall().UTC()
 	if err := putMeta(tx, "input_due_at", w.inputDueAt.Format(time.RFC3339Nano)); err != nil {
 		return false, false, "", err
@@ -310,6 +317,7 @@ func (w *workerDB) Authorize(taskID, executionID, permit, publicKey, generation 
 		return false, false, "", err
 	}
 	w.intent = true
+	w.nodeID = claims.NodeID
 	w.startedMono, w.executionBudget = startedMono, budget
 	w.queueBudget = claims.QueueExpiresAt.Sub(claims.IssuedAt) - rtt - startpermit.SafetyMargin
 	CrashAfter("start_intent")
@@ -460,6 +468,20 @@ func (w *workerDB) SubmitInput(sessionID, payload string) ([]ipcReport, error) {
 	if len(payload) > task.ExecutorInputLimit {
 		return w.failOversizedLocked(sessionID)
 	}
+	var input struct {
+		RequiredArtifacts []task.ArtifactRef `json:"required_artifacts"`
+	}
+	if err := json.Unmarshal([]byte(payload), &input); err != nil {
+		return nil, errors.New("任务输入无效")
+	}
+	refs, reason := fileaccess.CheckArtifacts(w.dataDir, w.nodeID, input.RequiredArtifacts)
+	if reason != "" {
+		return w.failInputLocked(sessionID, task.Candidate{
+			Status: task.StatusFailed, Summary: "所需产物不可用，没有提交任务输入",
+			EvidenceEmptyReason: "输入没有提交，没有证据", Artifacts: refs,
+			ErrorCode: task.CodeArtifactUnavailable, ErrorMessage: reason,
+		})
+	}
 	tx, err := w.db.Begin()
 	if err != nil {
 		return nil, err
@@ -502,14 +524,17 @@ func (w *workerDB) SubmitInput(sessionID, payload string) ([]ipcReport, error) {
 
 // failOversizedLocked 不把超限输入交给执行器，而是记下失败并留下可回报的结果。
 func (w *workerDB) failOversizedLocked(sessionID string) ([]ipcReport, error) {
-	candidate := task.Candidate{
+	return w.failInputLocked(sessionID, task.Candidate{
 		Status:               task.StatusFailed,
 		Summary:              "任务输入超过单条消息上限，没有提交给执行器",
 		EvidenceEmptyReason:  "输入没有提交，没有证据",
 		ArtifactsEmptyReason: "输入没有提交，没有产物",
 		ErrorCode:            task.CodeExecutionFailed,
 		ErrorMessage:         "任务输入超过单条消息上限",
-	}
+	})
+}
+
+func (w *workerDB) failInputLocked(sessionID string, candidate task.Candidate) ([]ipcReport, error) {
 	if err := task.ValidateCandidate(candidate); err != nil {
 		return nil, err
 	}
@@ -518,9 +543,6 @@ func (w *workerDB) failOversizedLocked(sessionID string) ([]ipcReport, error) {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := putMeta(tx, "input_submitted", "1"); err != nil {
-		return nil, err
-	}
 	if err := putMeta(tx, "input_resolved", "1"); err != nil {
 		return nil, err
 	}
@@ -528,7 +550,7 @@ func (w *workerDB) failOversizedLocked(sessionID string) ([]ipcReport, error) {
 		return nil, err
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if err := insertLog(tx, "input", "任务输入超过单条消息上限", now); err != nil {
+	if err := insertLog(tx, "input", candidate.ErrorMessage, now); err != nil {
 		return nil, err
 	}
 	resultID, err := identity.NewUUID()
@@ -545,7 +567,6 @@ func (w *workerDB) failOversizedLocked(sessionID string) ([]ipcReport, error) {
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	w.inputSubmitted = true
 	w.inputResolved = true
 	w.generation = 1
 	return w.pendingLocked()

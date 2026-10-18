@@ -1,6 +1,6 @@
 //go:build unix
 
-package node
+package fileaccess
 
 import (
 	"errors"
