@@ -2,7 +2,11 @@
 # 准备 Go 模块和前端依赖。Chromium 已装在镜像的 /opt/ms-playwright。每次环境构建都会执行，重复执行无副作用。
 set -euxo pipefail
 
-. /etc/profile.d/baton.sh
+if [ -f /etc/profile.d/baton.sh ]; then
+  . /etc/profile.d/baton.sh
+elif [ -f "$HOME/.baton-env.sh" ]; then
+  . "$HOME/.baton-env.sh"
+fi
 
 id -un
 go version
