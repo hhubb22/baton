@@ -22,7 +22,7 @@
 
 - 仓库 `https://github.com/hhubb22/baton`，起点 `main`，开 PR。云端环境由 `.devin/blueprint.yaml` 定义，Devin 中对应 blueprint `snapshot-blueprint-63b9d03b81a449748bda1858087c796a`；改动后用 `devin cloud drs blueprint-write` 同步，再 `devin cloud drs build`。
 - 模型固定为 GPT（当前显示为 GPT-6.1 Sol (Preview)）。v3 API 创建会话时不能选这个模型，所以会话从 CLI 创建：在 Herdr 面板里运行 `devin --cloud`，用 `/model` 选 GPT、`/repo` 选 baton，需要 macOS 或 Windows 时用 `/platform` 选，然后提交提示词。
-- 每个会话占一个 Herdr 面板，面板以工单编号命名（如 `ps114`）。会话结束前不要退出这个 CLI；退出后会话会停在 `waiting_for_user`，要用 `devin --cloud -r devin-<会话 ID>` 重新接上。会话结束后优先复用它的面板：在同一 CLI 里 `/clear` 开始新会话，重新选 GPT 和 baton，再把面板改名为新工单编号。
+- 每个会话占一个 Herdr 面板，面板以工单编号命名（如 `ps114`），放在单独的 `devin` 标签页里两列排布，每个面板保持 15 行以上；面板太矮时 Herdr 读不全画面，会把运行中的会话误判为 idle。会话结束前不要退出这个 CLI；退出后会话会停在 `waiting_for_user`，要用 `devin --cloud -r devin-<会话 ID>` 重新接上。会话结束后优先复用它的面板：在同一 CLI 里 `/clear` 开始新会话，重新选 GPT 和 baton，再把面板改名为新工单编号。
 - 提示词由工单要求、当前 `origin/main` 的提交号和 `.agents/devin-cloud-brief.md` 组成。同时派发的工单如需新迁移，在派发时分配不同编号。
 - 创建后在工单评论写会话链接和会话 ID，并把会话链接加为工单链接。
 - 状态用 v3 API 的 `GET /v3/organizations/{org_id}/sessions/{id}` 查，看 `status`、`status_detail` 和 `pull_requests`。后续指令在该会话的 CLI 面板里发。
