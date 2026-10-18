@@ -1,12 +1,17 @@
 package session
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"baton/internal/protocol"
+	"baton/internal/startpermit"
+	"baton/internal/task"
 )
 
 func TestAuthorizeIdentityMismatchDoesNotRefuseBoundExecution(t *testing.T) {
@@ -79,6 +84,79 @@ func TestAuthorizeRefusalSurvivesPersistenceFailure(t *testing.T) {
 	})
 	if reply.OK || !reply.Refused || reply.Code != "invalid_target" || w.intent || w.observer.Starts() != 0 {
 		t.Fatalf("写库失败把拒绝变成普通错误或启动: %+v", reply)
+	}
+}
+
+func TestAuthorizeExecutionClockFailureRecordsRefusal(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "worker.db")
+	if err := CreateLedger(path); err != nil {
+		t.Fatal(err)
+	}
+	w, err := openWorkerDB(path, NewObserver(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	taskID, executionID, generation := mustSessionID(t), mustSessionID(t), mustSessionID(t)
+	if err := w.Bind(taskID, executionID, "pi"); err != nil {
+		t.Fatal(err)
+	}
+	nonce, err := w.Arm(taskID, executionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queue := time.Now().UTC().Add(time.Minute).Truncate(time.Millisecond)
+	permit := signPermit(t, priv, taskID, executionID, generation, nonce, queue, startpermit.PermitTTL)
+	w.executionClock = (*startpermit.Clock)(nil)
+	started, refused, code, err := w.Authorize(taskID, executionID, permit, base64.RawURLEncoding.EncodeToString(pub), generation, queue)
+	if err != nil || started || !refused || code != "unavailable" || w.observer.Starts() != 0 {
+		t.Fatalf("执行时钟故障没有拒绝启动: %v %v %s %v", started, refused, code, err)
+	}
+	var saved string
+	if err := w.db.QueryRow(`SELECT value FROM meta WHERE key = 'start_refused'`).Scan(&saved); err != nil || saved != "unavailable" {
+		t.Fatalf("执行时钟故障未保存拒绝: %s %v", saved, err)
+	}
+	if needs, err := LedgerNeedsWorker(path); err != nil || needs {
+		t.Fatalf("执行时钟拒绝后仍会恢复: %v %v", needs, err)
+	}
+}
+
+func TestStartRefusalPreservesPendingStopReportRecovery(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "worker.db")
+	if err := CreateLedger(path); err != nil {
+		t.Fatal(err)
+	}
+	w, err := openWorkerDB(path, NewObserver(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	taskID, executionID := mustSessionID(t), mustSessionID(t)
+	if err := w.Bind(taskID, executionID, "pi"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Arm(taskID, executionID); err != nil {
+		t.Fatal(err)
+	}
+	reports, err := w.Stop(mustSessionID(t), task.StatusCancelled)
+	if err != nil || len(reports) != 1 || reports[0].Kind != task.EventStopReport {
+		t.Fatalf("未保存中止回执: %+v %v", reports, err)
+	}
+	if err := w.RejectStart(taskID, executionID, task.StatusCancelled); err != nil {
+		t.Fatal(err)
+	}
+	if needs, err := LedgerNeedsWorker(path); err != nil || !needs {
+		t.Fatalf("启动拒绝阻止了待交付中止回执恢复: %v %v", needs, err)
+	}
+	if err := w.Ack(reports[0].EventID); err != nil {
+		t.Fatal(err)
+	}
+	if needs, err := LedgerNeedsWorker(path); err != nil || needs {
+		t.Fatalf("中止回执交付后仍会恢复未启动执行: %v %v", needs, err)
 	}
 }
 

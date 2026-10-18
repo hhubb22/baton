@@ -30,11 +30,11 @@ func TestCentralStartRejectionDoesNotRespawnWorker(t *testing.T) {
 			sessionID := sessionOf(t, st, created.TaskID)
 			before := workerStatus(t, st.dataDir, sessionID)
 			t.Cleanup(func() { stopWorker(before.PID) })
-			var view struct {
-				Status string `json:"status"`
-			}
-			if code := postJSON(t, st.client, st.base+"/api/v1/tasks/"+created.TaskID+"/cancel", map[string]any{}, st.csrf, &view); code != 200 || view.Status != task.StatusCancelled {
-				t.Fatalf("取消失败: %d %+v", code, view)
+			// 中心已有另一 nonce 的许可；隔离 conflict 拒绝，不触发中止回执恢复。
+			if _, err := st.pool.Exec(context.Background(), `UPDATE executions
+				SET start_authorized_at = now(), start_permit_expires_at = now() + interval '5 seconds', permit_nonce = $2
+				WHERE id = $1::uuid`, executionID, newID(t)); err != nil {
+				t.Fatal(err)
 			}
 			if workerExited {
 				ctx := context.Background()
@@ -56,6 +56,19 @@ func TestCentralStartRejectionDoesNotRespawnWorker(t *testing.T) {
 				releaseGate(t, gate, executionID)
 			}
 			waitLog(t, st.batond, "event=start_rejected")
+			path, err := session.LedgerPath(st.dataDir, sessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			db, err := sql.Open("sqlite", path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			var code string
+			if err := db.QueryRow(`SELECT value FROM meta WHERE key = 'start_refused'`).Scan(&code); err != nil || code != task.CodeConflict {
+				t.Fatalf("中心拒绝未落盘: %s %v", code, err)
+			}
 			if workerExited && workerStatus(t, st.dataDir, sessionID).PID == before.PID {
 				t.Fatal("中心拒绝到达前原 Worker 没有退出")
 			}
@@ -159,7 +172,7 @@ func assertWorkerStaysDownAfterRestart(t *testing.T, st *prepareStack, sessionID
 		reachable := host.Reachable(ctx, sessionID)
 		cancel()
 		if reachable {
-			t.Fatal("不再等待许可的 Session 被重新拉起")
+			t.Fatalf("不再等待许可的 Session 被重新拉起: %+v\n%s", workerStatus(t, st.dataDir, sessionID), st.batond.out.String())
 		}
 	}
 	assertSingleUnstartedExecution(t, st, taskID)

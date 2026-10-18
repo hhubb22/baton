@@ -270,7 +270,7 @@ func (w *workerDB) Authorize(taskID, executionID, permit, publicKey, generation 
 	}
 	startedMono, clockErr := w.executionClock.Mono()
 	if clockErr != nil {
-		return false, true, "unavailable", nil
+		return w.refuse("unavailable")
 	}
 	budget := time.Duration(claims.ExecutionTimeoutSeconds) * time.Second
 	if budget <= 0 {
