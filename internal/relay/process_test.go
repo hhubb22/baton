@@ -25,6 +25,7 @@ import (
 	"baton/internal/identity"
 	"baton/internal/node"
 	"baton/internal/protocol"
+	"baton/internal/session"
 
 	"github.com/coder/websocket"
 )
@@ -324,7 +325,17 @@ func startCmd(t *testing.T, bin string, args, env []string) *running {
 	processMu.Lock()
 	processHandles = append(processHandles, proc)
 	processMu.Unlock()
-	t.Cleanup(func() { proc.stop() })
+	t.Cleanup(func() {
+		proc.stop()
+		if len(args) > 0 && args[0] == "run" {
+			for i, arg := range args {
+				if arg == "--data-dir" && i+1 < len(args) {
+					cleanupSessionWorkers(args[i+1])
+					break
+				}
+			}
+		}
+	})
 	return proc
 }
 
@@ -662,4 +673,31 @@ func (p *tcpProxy) drop() {
 		_ = conn.Close()
 	}
 	p.conns = nil
+}
+
+// cleanupSessionWorkers 在测试节点退出后结束其 Worker，防止恢复循环抢先重新拉起进程。
+func cleanupSessionWorkers(dataDir string) {
+	paths, _ := filepath.Glob(filepath.Join(dataDir, "sessions", "*", "token"))
+	for _, path := range paths {
+		sessionID := filepath.Base(filepath.Dir(path))
+		endpoint, err := session.Endpoint(dataDir, sessionID)
+		if err != nil {
+			continue
+		}
+		token, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		client, err := session.Dial(ctx, endpoint, strings.TrimSpace(string(token)))
+		if err == nil {
+			if status, err := client.Status(); err == nil {
+				_ = client.Close()
+				stopWorker(status.PID)
+			} else {
+				_ = client.Close()
+			}
+		}
+		cancel()
+	}
 }

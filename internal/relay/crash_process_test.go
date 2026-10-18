@@ -3,6 +3,7 @@ package relay_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -294,7 +296,9 @@ func TestMissingHistoryFromRunningIsReported(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = os.Rename(path, path+".aside")
+	if err := os.Rename(path, path+".aside"); err != nil {
+		t.Fatal(err)
+	}
 	_ = os.Rename(path+"-wal", path+"-wal.aside")
 	_ = os.Rename(path+"-shm", path+"-shm.aside")
 	restartBatond(t, st)
@@ -413,7 +417,10 @@ func TestLivingWorkerResultSurvivesMissingLedger(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Rename(path, path+".aside"); err != nil {
-		t.Fatal(err)
+		if runtime.GOOS != "windows" || !errors.Is(err, syscall.Errno(32)) {
+			t.Fatal(err)
+		}
+		t.Log("Windows 保持打开账本的文件锁，本用例继续验证原 Worker 的结果交付")
 	}
 	restartBatond(t, st)
 	releaseGate(t, gate, waitGateFile(t, gate))

@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"testing"
@@ -18,6 +19,13 @@ func TestRelayProcessHelper(t *testing.T) {
 	code, err := strconv.Atoi(os.Args[len(os.Args)-1])
 	if err != nil {
 		t.Fatal(err)
+	}
+	if path := os.Getenv("BATON_TEST_HELD_FILE"); path != "" {
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer file.Close()
 	}
 	fmt.Println("idle_process_ready")
 	_, _ = io.Copy(io.Discard, os.Stdin)
@@ -106,4 +114,15 @@ func TestPrivatePostgresProcessLifecycle(t *testing.T) {
 	postgres := startPrivatePostgres(t)
 	postgres.stop(t)
 	postgres.start(t)
+}
+
+func TestStopWorkerWaitsForFileRelease(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "held-file")
+	t.Setenv("BATON_TEST_HELD_FILE", path)
+	process, _ := startIdleProcess(t, 0)
+	stopWorker(process.cmd.Process.Pid)
+	if err := os.Rename(path, path+".released"); err != nil {
+		t.Fatalf("进程退出后文件仍被占用: %v", err)
+	}
+	process.waitExit(t, 10*time.Second)
 }

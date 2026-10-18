@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -499,6 +500,16 @@ func stopWorker(pid int) {
 	}
 	defer process.Release()
 	_ = process.Kill()
+	if runtime.GOOS != "windows" {
+		return
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if processAlive(pid) != nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func restartBatond(t *testing.T, st *prepareStack) {
