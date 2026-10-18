@@ -14,7 +14,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"testing"
 	"time"
 
@@ -104,7 +103,7 @@ func TestPrepareReconnectsWorkerAndRejectsBusySession(t *testing.T) {
 	}
 
 	st.batond.stop()
-	if err := syscall.Kill(first.PID, 0); err != nil {
+	if err := processAlive(first.PID); err != nil {
 		t.Fatalf("batond 退出时 Worker 也退出了: %v", err)
 	}
 	st.batond = startCmd(t, st.batondBin, []string{"run", "--relay", "wss://" + st.nodeAddr + "/v1/node", "--data-dir", st.dataDir}, childEnv(map[string]string{
@@ -480,9 +479,12 @@ func stopWorker(pid int) {
 	if pid <= 0 {
 		return
 	}
-	_ = syscall.Kill(pid, syscall.SIGTERM)
-	time.Sleep(200 * time.Millisecond)
-	_ = syscall.Kill(pid, syscall.SIGKILL)
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return
+	}
+	defer process.Release()
+	_ = process.Kill()
 }
 
 func restartBatond(t *testing.T, st *prepareStack) {

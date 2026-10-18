@@ -9,9 +9,9 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -108,7 +108,7 @@ func TestBatondRestartKeepsLivingWorker(t *testing.T) {
 	sessionID := sessionOf(t, st, created.TaskID)
 	before := workerStatus(t, st.dataDir, sessionID)
 	st.batond.stop()
-	if err := syscall.Kill(before.PID, 0); err != nil {
+	if err := processAlive(before.PID); err != nil {
 		t.Fatalf("batond 退出时 Worker 也退出了: %v", err)
 	}
 	restartBatond(t, st)
@@ -138,12 +138,8 @@ func TestStalePIDDoesNotRerun(t *testing.T) {
 	sessionID := sessionOf(t, st, created.TaskID)
 	st.batond.stop()
 	worker := workerStatus(t, st.dataDir, sessionID)
-	decoy := exec.Command("sleep", "180")
-	if err := decoy.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { stopWorker(decoy.Process.Pid) })
-	setWorkerPID(t, st.dataDir, sessionID, decoy.Process.Pid)
+	decoy, _ := startIdleProcess(t, 0)
+	setWorkerPID(t, st.dataDir, sessionID, decoy.cmd.Process.Pid)
 	stopWorker(worker.PID)
 	waitWorkerSocketDown(t, st.dataDir, sessionID)
 	restartBatond(t, st)
@@ -151,7 +147,7 @@ func TestStalePIDDoesNotRerun(t *testing.T) {
 	if status != task.StatusNeedsVerification || executions != 1 || executorCount(t, st, "input") != 1 {
 		t.Fatalf("旧进程号触发了重跑或改写了待核实: %s executions %d inputs %d", status, executions, executorCount(t, st, "input"))
 	}
-	if err := syscall.Kill(decoy.Process.Pid, 0); err != nil {
+	if err := processAlive(decoy.cmd.Process.Pid); err != nil {
 		t.Fatalf("诱饵进程被当成 Worker 处理了: %v", err)
 	}
 	if !strings.Contains(st.batond.out.String(), "event=worker_pid_not_proof") {
@@ -612,7 +608,10 @@ func startPrivatePostgres(t *testing.T) *privatePostgres {
 	if err := runPostgres(user, filepath.Join(bin, "initdb"), "-D", dir, "-A", "trust", "--locale=C", "--encoding=UTF8", "--username="+postgresRole(user)); err != nil {
 		t.Fatalf("initdb: %v", err)
 	}
-	hba := "local all all trust\nhost all all 127.0.0.1/32 trust\nhost all all ::1/128 trust\n"
+	hba := "host all all 127.0.0.1/32 trust\nhost all all ::1/128 trust\n"
+	if runtime.GOOS != "windows" {
+		hba = "local all all trust\n" + hba
+	}
 	if err := os.WriteFile(filepath.Join(dir, "pg_hba.conf"), []byte(hba), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -644,7 +643,11 @@ func startPrivatePostgres(t *testing.T) *privatePostgres {
 
 func (p *privatePostgres) start(t *testing.T) {
 	t.Helper()
-	if err := runPostgresCtl(p.user, p.dir, p.bin, "start", "-w", "-o", fmt.Sprintf("-p %d -h 127.0.0.1 -k /tmp", p.port)); err != nil {
+	options := fmt.Sprintf("-p %d -h 127.0.0.1", p.port)
+	if runtime.GOOS != "windows" {
+		options += " -k /tmp"
+	}
+	if err := runPostgresCtl(p.user, p.dir, p.bin, "start", "-w", "-o", options); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -671,7 +674,7 @@ func postgresBinDir(t *testing.T) (string, string) {
 		}
 		bin = strings.TrimSpace(string(out))
 	}
-	if _, err := os.Stat(filepath.Join(bin, "initdb")); err != nil {
+	if _, err := exec.LookPath(filepath.Join(bin, "initdb")); err != nil {
 		t.Skipf("找不到 initdb（%s），跳过独立数据库停机测试", bin)
 	}
 	if os.Geteuid() != 0 {
@@ -689,6 +692,9 @@ func postgresBinDir(t *testing.T) (string, string) {
 func postgresRole(runAs string) string {
 	if runAs != "" {
 		return runAs
+	}
+	if runtime.GOOS == "windows" {
+		return "postgres"
 	}
 	current, err := user.Current()
 	if err != nil || current.Username == "" {
