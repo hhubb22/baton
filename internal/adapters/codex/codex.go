@@ -74,6 +74,9 @@ type notification struct {
 var _ adapters.Adapter = (*Adapter)(nil)
 
 func New(c Config) *Adapter {
+	if directory, err := filepath.EvalSymlinks(c.Directory); err == nil {
+		c.Directory = filepath.Clean(directory)
+	}
 	if c.Binary == "" {
 		c.Binary = "codex"
 	}
@@ -301,6 +304,7 @@ func (a *Adapter) Attach(ctx context.Context) error {
 		} `json:"thread"`
 	}
 	p := map[string]any{"threadId": s.ThreadID, "excludeTurns": true, "approvalPolicy": "never", "sandbox": "workspace-write", "cwd": a.config.Directory}
+	p["config"] = map[string]any{"sandbox_workspace_write.network_access": true, "shell_environment_policy.inherit": "all"}
 	if a.config.Model != "" {
 		p["model"] = a.config.Model
 	}

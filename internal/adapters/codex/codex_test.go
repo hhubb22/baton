@@ -314,6 +314,43 @@ func TestReplayCompleteAndResume(t *testing.T) {
 	validateRequests(t, c)
 }
 
+func TestCanonicalDirectoryRecovery(t *testing.T) {
+	c := fixtureConfig(t, "complete")
+	original := c.Directory
+	link := filepath.Join(t.TempDir(), "workspace")
+	if err := os.Symlink(original, link); err != nil {
+		t.Skip("directory symlink unavailable")
+	}
+	c.Directory = link
+	a := New(c)
+	ctx := context.Background()
+	if err := a.CreateSession(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.StartTask(ctx, "operation-1", "task"); err != nil {
+		t.Fatal(err)
+	}
+	settled(t, a)
+	_ = a.Close()
+	b := New(c)
+	if err := b.Attach(ctx); err != nil {
+		t.Fatal(err)
+	}
+	settled(t, b)
+	_ = b.Close()
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), link); err != nil {
+		t.Fatal(err)
+	}
+	d := New(c)
+	defer d.Close()
+	if err := d.Attach(ctx); !errors.Is(err, ErrHistoryMissing) {
+		t.Fatal("retargeted working directory accepted", err)
+	}
+}
+
 func TestReplayInterruptAndSteer(t *testing.T) {
 	c := fixtureConfig(t, "running")
 	a := New(c)
