@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"baton/internal/protocol"
 	"baton/internal/session"
 	"baton/internal/task"
 
@@ -279,6 +280,7 @@ func TestMissingHistoryFromRunningIsReported(t *testing.T) {
 		"BATON_TEST_HOLD_START":      "0",
 		"BATON_TEST_EXECUTOR_SCRIPT": "success",
 		"BATON_TEST_CRASH_AFTER":     "after_started",
+		"BATON_TEST_RESULT_GATE":     t.TempDir(),
 	})
 	created := acceptTask(t, st, "missing-history")
 	waitTaskStatus(t, st, created.TaskID, task.StatusRunning)
@@ -313,6 +315,7 @@ func TestPersistentHistoryPermissionFailureIsReported(t *testing.T) {
 				"BATON_TEST_HOLD_START":      "0",
 				"BATON_TEST_EXECUTOR_SCRIPT": "success",
 				"BATON_TEST_CRASH_AFTER":     "after_started",
+				"BATON_TEST_RESULT_GATE":     t.TempDir(),
 			})
 			created := acceptTask(t, st, "unread-history")
 			waitTaskStatus(t, st, created.TaskID, task.StatusRunning)
@@ -369,17 +372,42 @@ func TestPersistentHistoryPermissionFailureIsReported(t *testing.T) {
 }
 
 func TestLivingWorkerResultSurvivesMissingLedger(t *testing.T) {
+	gate := t.TempDir()
 	st := startPrepareStack(t, map[string]string{
 		"BATON_TEST_HOLD_START":      "0",
 		"BATON_TEST_EXECUTOR_SCRIPT": "success",
 		"BATON_TEST_CRASH_AFTER":     "after_started",
+		"BATON_TEST_RESULT_GATE":     gate,
 	})
 	created := acceptTask(t, st, "living-result")
 	waitTaskStatus(t, st, created.TaskID, task.StatusRunning)
+	st.batond.waitExit(t, 20*time.Second)
 	sessionID := sessionOf(t, st, created.TaskID)
 	worker := workerStatus(t, st.dataDir, sessionID)
 	if worker.PID <= 0 {
 		t.Fatal("结果还在 Worker 里，进程却不在")
+	}
+	releaseGate(t, gate, waitGateFile(t, gate))
+	client := dialWorker(t, st.dataDir, sessionID)
+	defer client.Close()
+	resultSaved := false
+	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline) && !resultSaved; {
+		pending, err := client.Pending()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, report := range pending.Reports {
+			if report.Kind == protocol.ReportResult {
+				resultSaved = true
+				break
+			}
+		}
+		if !resultSaved {
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	if !resultSaved {
+		t.Fatal("Worker 结果尚未持久化")
 	}
 	path, err := session.LedgerPath(st.dataDir, sessionID)
 	if err != nil {
