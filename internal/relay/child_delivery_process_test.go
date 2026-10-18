@@ -47,7 +47,7 @@ func TestChildDeliveryAcrossWorkersAndCrashWindows(t *testing.T) {
 				t.Fatal(err)
 			}
 			execID := waitGateFile(t, gate)
-			childSID := sessionOf(t, st, child.TaskID)
+			childSID := waitChildPreparedSession(t, st, child.TaskID)
 			second := workerStatus(t, targetDir, childSID)
 			t.Cleanup(func() { stopWorker(second.PID) })
 			if second.PID == first.PID {
@@ -131,5 +131,21 @@ func waitChildDelivery(t *testing.T, st *prepareStack, sourceExecutionID, expect
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Fatalf("子交付未达到 %s，实际 %s；node %s", expected, status, st.batond.out.String())
+	return ""
+}
+
+func waitChildPreparedSession(t *testing.T, st *prepareStack, taskID string) string {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		var sid string
+		if err := st.pool.QueryRow(context.Background(), `SELECT t.target_session_id::text FROM tasks t
+          JOIN executions e ON e.task_id = t.id WHERE t.id = $1::uuid AND e.prepared_at IS NOT NULL
+          AND t.target_session_id IS NOT NULL`, taskID).Scan(&sid); err == nil {
+			return sid
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatal("子任务准备事实尚未写入中心")
 	return ""
 }
