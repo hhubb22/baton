@@ -45,7 +45,7 @@ PA-W02 和 PA-W03 可以并行。PA-W06 的 TypeScript 部分只依赖 PA-W04 �
 | PS-119 T15 Codex 真实任务（PR #21） | 已合并 | 不受影响。适配接口已统一到 `internal/agent.Adapter` |
 | PS-121 T17、PS-123 T19 Cursor、Kiro 接入 | Backlog | 不受影响 |
 | PS-125 T21、PS-127 T23 Web UI 与本地历史 | Backlog | 不受影响 |
-| PS-126 T22 Web UI 任务、委托、取消与核实 | Backlog | 任务详情页的只读部分由 Agent Inbox 的 IB-W03 先做；T22 在同一个页面加入发起任务、委托链、取消、核实和新执行，验收条件相应调整。「由 Project Agent 发起」由 PA-W07 补充 |
+| PS-126 T22 Web UI 任务、委托、取消与核实 | Backlog | 任务详情页由 T22 和 Agent Inbox 的 IB-W03 中先开始的一方建立，另一方补充，两者互不阻塞；验收条件相应调整。「由 Project Agent 发起」由 PA-W07 补充 |
 | PS-131 T27 Plane 回写 | Backlog | 不受影响；Plane 不接入 Project Agent |
 | PS-133 T29 凭据轮换、保留与空间不足 | Backlog | 验收增加一条：Project Agent 的对话事件不被 180 天清理删除；空间不足时拒绝新消息 |
 | PS-134～PS-136 T30～T32 macOS、Windows、Linux 安装验收 | Backlog | 验收增加可选项：安装 `baton-project-runtime`、`login`、`probe` 能正确上报；可以等 PA-W11 一起做 |

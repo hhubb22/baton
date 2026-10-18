@@ -163,7 +163,7 @@ lang-core 的 `postinstall` 会发送匿名安装统计。pnpm 默认不运行�
 
 **主对话里的事项。** 主对话按 `conversation_events` 渲染。遇到 `inbox.ask` 的工具调用和它的结果时，用结果里的 `request_id` 读取事项，在这个位置显示事项卡片。
 
-**任务详情（IB-20）。** 任务详情页由本特性先做只读部分，按 2026-10-18 的桌面原型：顶部分开显示节点连接、执行状态和结果交付，下面是结果摘要和错误、证据及预览、产物、相关事项和任务信息。T22（PS-126）以后在同一个页面加入发起任务、委托链、取消、核实和新执行。这样 Agent Inbox 不用等 T22，T22 又排在 T21（Session 树与实时输出）之后；两者共用一个页面，也不会出现两份任务详情。页面读取现有的 `GET /tasks/{id}`。`storage_ref` 以 `root:` 开头的引用显示「预览」，调用 `GET /nodes/{node_id}/files?root_id=&path=`；返回 `node_offline` 时显示暂不可查看。其他引用只显示字段，不提供预览。
+**任务详情（IB-20）。** 任务详情页按 2026-10-18 的桌面原型：顶部分开显示节点连接、执行状态和结果交付，下面是结果摘要和错误、证据及预览、产物、相关事项和任务信息，再加上 T22（PS-126）负责的发起任务、委托链、取消、核实和新执行。IB-W03 和 T22 谁先开始，谁建立这个页面，另一方在同一个页面上补充自己的部分。两者互不阻塞：T22 是平台验收（T30～T34）的前置工单，不能等 Project Agent；Agent Inbox 也不必等 T21、T22。页面读取现有的 `GET /tasks/{id}`。`storage_ref` 以 `root:` 开头的引用显示「预览」，调用 `GET /nodes/{node_id}/files?root_id=&path=`；返回 `node_offline` 时显示暂不可查看。其他引用只显示字段，不提供预览。
 
 **问 Project Agent（IB-21、IB-22）。** 在浏览器里完成：把选中的文字（超过 8 KiB 时截短并注明原长度）和来源组成一段引用，预填进主对话的输入框。用户修改后发送，作为普通文本走 `POST /projects/{id}/messages`。引用不另设结构化字段，Project Agent 收到的就是用户看到的那段文字。
 
@@ -220,7 +220,7 @@ webpush-go 依赖的 `golang-jwt/jwt/v5` 和 `golang.org/x/crypto` 已经在 `go
 |---|---|---|
 | IB-W01 | 0018 迁移；`internal/inbox` 的状态变化与锁顺序；四个工具接入 `call_tool`；处理接口；归档时撤回 | PA-W05 |
 | IB-W02 | Baton 组件库、`gen:openui` 与 CI 比对；Runtime 的工具说明和展示内容检查 | PA-W06、IB-W01 |
-| IB-W03 | 页面路由；Inbox 页面、事项卡片、`AttentionContent`；主对话里的事项；任务详情页的只读部分（第 6 节）；问 Project Agent | PA-W07、IB-W01、IB-W02 |
+| IB-W03 | 页面路由；Inbox 页面、事项卡片、`AttentionContent`；主对话里的事项；任务详情页（与 T22 谁先开始谁建立，第 6 节）；问 Project Agent | PA-W07、IB-W01、IB-W02 |
 | IB-W04 | `/api/v1/events` 的连接与 `attention_request.changed`（T21 尚未实现时） | IB-W01 |
 | IB-W05 | VAPID、订阅接口、发送循环、`sw.js`、设置页、页面清理通知；CSP 改动 | IB-W01、IB-W03 |
 | IB-W06 | 验收 IB-A01～IB-A15 | 以上全部，PA-W08 |
