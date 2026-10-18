@@ -7,11 +7,10 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"errors"
-	"os"
-	"runtime"
 	"time"
 
 	"baton/internal/identity"
+	"baton/internal/privatefile"
 	"baton/internal/startpermit"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -63,17 +62,7 @@ func GenerateSigner() (Signer, error) {
 
 // LoadSigner 读取 PKCS#8 PEM。文件必须只有当前用户可读，也不能是符号链接。
 func LoadSigner(path string) (Signer, error) {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return Signer{}, errors.New("无法读取节点签名密钥")
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return Signer{}, errors.New("节点签名密钥无效")
-	}
-	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
-		return Signer{}, errors.New("节点签名密钥允许其他用户读取")
-	}
-	raw, err := os.ReadFile(path)
+	raw, err := privatefile.ReadFile(path)
 	if err != nil {
 		return Signer{}, errors.New("无法读取节点签名密钥")
 	}
@@ -92,7 +81,16 @@ func LoadSigner(path string) (Signer, error) {
 	return Signer{key: priv}, nil
 }
 
-// MarshalPKCS8PEM 导出私钥，供进程把它写到受限文件。
+// WriteFile 将 PKCS#8 私钥原子写入仅当前用户可访问的文件。
+func (s Signer) WriteFile(path string) error {
+	raw, err := s.MarshalPKCS8PEM()
+	if err != nil {
+		return err
+	}
+	return privatefile.WriteFile(path, raw)
+}
+
+// MarshalPKCS8PEM 导出私钥；保存到磁盘应使用 WriteFile。
 func (s Signer) MarshalPKCS8PEM() ([]byte, error) {
 	if len(s.key) == 0 {
 		return nil, errors.New("没有节点签名密钥")

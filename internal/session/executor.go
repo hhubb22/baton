@@ -28,10 +28,11 @@ type Observer struct {
 
 // Output 是测试执行器对一次任务输入的回应。进程退出和自由文本都不是成功。
 type Output struct {
-	Progress  []string
-	Final     string
-	Exited    bool
-	Uncertain bool
+	WaitingForChildren bool
+	Progress           []string
+	Final              string
+	Exited             bool
+	Uncertain          bool
 }
 
 func NewObserver(path string) *Observer {
@@ -79,11 +80,26 @@ func (o *Observer) SubmitInput(context.Context, string) (Output, error) {
 	return scriptedOutput(os.Getenv("BATON_TEST_EXECUTOR_SCRIPT")), nil
 }
 
+func (o *Observer) DeliverResult(_ context.Context, deliveryID, payload string) (Output, error) {
+	if o == nil || deliveryID == "" || !json.Valid([]byte(payload)) {
+		return Output{}, errors.New("结果输入无效")
+	}
+	o.inputs.Add(1)
+	if err := o.record("delivery:" + deliveryID); err != nil {
+		return Output{}, err
+	}
+	return scriptedOutput(os.Getenv("BATON_TEST_DELIVERY_SCRIPT")), nil
+}
+
 func scriptedOutput(script string) Output {
 	progress := []string{LocalHistoryMarker}
 	switch script {
 	case "", "running":
 		return Output{Progress: progress}
+	case "waiting":
+		return Output{Progress: progress, WaitingForChildren: true}
+	case "candidate_waiting":
+		return Output{Progress: progress, Final: successDocument(), WaitingForChildren: true}
 	case "text":
 		return Output{Progress: progress, Final: "完成", Exited: true}
 	case "exit":

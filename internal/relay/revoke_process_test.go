@@ -206,12 +206,8 @@ func revokeProcessEnv(t *testing.T, schema string) revokeEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signingPEM, err := signer.MarshalPKCS8PEM()
-	if err != nil {
-		t.Fatal(err)
-	}
 	signingFile := filepath.Join(dir, "signing.pem")
-	if err := os.WriteFile(signingFile, signingPEM, 0o600); err != nil {
+	if err := signer.WriteFile(signingFile); err != nil {
 		t.Fatal(err)
 	}
 	roots := x509.NewCertPool()
