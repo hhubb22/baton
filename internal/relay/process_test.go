@@ -13,9 +13,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -242,21 +242,25 @@ func buildBins(t *testing.T) (string, string, string) {
 			return
 		}
 		out := filepath.Join(root, "bin")
+		suffix := ""
+		if runtime.GOOS == "windows" {
+			suffix = ".exe"
+		}
 		if err := os.MkdirAll(out, 0o755); err != nil {
 			buildErr = err
 			return
 		}
 		for _, name := range []string{"coordinator", "relay", "batond"} {
-			cmd := exec.Command("go", "build", "-o", filepath.Join(out, name), "./cmd/"+name)
+			cmd := exec.Command("go", "build", "-o", filepath.Join(out, name+suffix), "./cmd/"+name)
 			cmd.Dir = root
 			if raw, err := cmd.CombinedOutput(); err != nil {
 				buildErr = errString(name + ": " + string(raw) + ": " + err.Error())
 				return
 			}
 		}
-		builtCoord = filepath.Join(out, "coordinator")
-		builtRelay = filepath.Join(out, "relay")
-		builtBatond = filepath.Join(out, "batond")
+		builtCoord = filepath.Join(out, "coordinator"+suffix)
+		builtRelay = filepath.Join(out, "relay"+suffix)
+		builtBatond = filepath.Join(out, "batond"+suffix)
 	})
 	if buildErr != nil {
 		t.Fatal(buildErr)
@@ -341,7 +345,7 @@ func (p *running) stop() {
 	if p == nil || p.cmd.Process == nil {
 		return
 	}
-	_ = p.cmd.Process.Signal(syscall.SIGTERM)
+	_ = terminateProcess(p.cmd.Process)
 	done := make(chan struct{})
 	go func() {
 		p.once.Do(func() { _ = p.cmd.Wait() })

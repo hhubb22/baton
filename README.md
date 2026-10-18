@@ -8,6 +8,8 @@
 
 节点与 Session 的 SQLite 账本支持 Windows 盘符路径，以及含空格、中文、`%`、`#` 的数据目录；相对路径按进程工作目录解析。账本格式、WAL 与 FULL 同步设置不变。历史损坏按 SQLite 错误码识别，权限、锁、IO 和路径/URI 错误归为暂时读不了（`ErrHistoryUnread`），保留底层原因，不把打开失败当成损坏或新建空历史。
 
+Relay 进程测试的存活探测按平台实现：Unix 使用 `os.FindProcess` 与零信号，Windows 使用 `x/sys/windows` 打开进程句柄并查询等待状态，不把已退出但句柄尚存的进程判为存活。Worker 故障清理统一使用 `os.Process.Kill`；测试服务在 Unix 先发送 SIGTERM，在不支持该信号的 Windows 直接终止。诱饵进程由 Go 测试二进制启动，不依赖 `sleep`；Windows 子进程构建使用 `.exe`。独立停库测试按平台查找 PostgreSQL 可执行文件，Windows 使用 TCP 与固定测试角色，不依赖 Unix socket 或域用户名。产品恢复仍通过认证本地 IPC 确认原 Worker，不把 PID 存在当成同一执行的证据。
+
 ## 运行要求
 
 - Go 1.27
