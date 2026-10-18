@@ -243,7 +243,10 @@ func TestEnvironmentExcludesDaemonCredentials(t *testing.T) {
 
 func fixtureConfig(t *testing.T, mode string) Config {
 	t.Helper()
-	dir := t.TempDir()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	binary, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
