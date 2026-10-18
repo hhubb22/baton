@@ -67,3 +67,27 @@ func TestPrivateFileRejectsSymlink(t *testing.T) {
 		t.Fatal("符号链接的目标被改动")
 	}
 }
+
+func TestProtectDirPreservesChildAccess(t *testing.T) {
+	dir := t.TempDir()
+	child := filepath.Join(dir, "existing")
+	if err := os.Mkdir(child, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(child, "secret")
+	if err := os.WriteFile(path, []byte("before"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := privatefile.ProtectDir(dir); err != nil {
+			t.Fatal(err)
+		}
+		privatefiletest.AssertPrivate(t, dir)
+		if err := os.WriteFile(filepath.Join(child, "new"), []byte("after"), 0o600); err != nil {
+			t.Fatalf("保护父目录后无法写入已有子目录: %v", err)
+		}
+		if _, err := os.ReadFile(path); err != nil {
+			t.Fatalf("保护父目录后无法读取已有文件: %v", err)
+		}
+	}
+}

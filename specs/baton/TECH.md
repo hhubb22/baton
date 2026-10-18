@@ -146,7 +146,7 @@ request_id 去重使用调用方提交的原始字段计算摘要，缺省字段
 
 节点数据保存在员工自己的应用数据目录，不放进代码仓库。Linux 使用 XDG 对应目录，macOS 使用 Application Support，Windows 使用当前用户 LocalAppData。身份秘密优先进入系统凭据存储；文件回退必须限制到当前用户，并明确报告使用了回退。
 
-身份文件、Coordinator 的 Ed25519 签名私钥、Agent CLI 上下文及文件形式的注册凭据统一按秘密文件处理。Linux/macOS 拒绝组或其他用户权限位，写入使用 `0600`，节点数据目录使用 `0700`。Windows 使用 `golang.org/x/sys/windows`：所有者为当前进程用户 SID，DACL 受保护且只显式授予该 SID 完全控制，不额外授予 SYSTEM 或 Administrators；秘密临时文件在创建时即设置安全描述符，写入同步后再替换目标。读取从实际打开的句柄校验所有者、非空受保护 DACL，拒绝继承 ACE、其他主体的允许 ACE 及无法识别的 ACE 类型。Windows 路径还拒绝文件及祖先目录中的符号链接、junction 和其他 reparse point。Coordinator 加载外部提供的私钥时也执行相同校验，不能依赖默认继承 ACL；程序保存私钥使用 `Signer.WriteFile`。这些限制不改变本机管理员可通过系统特权接管文件的操作系统边界。
+身份文件、Coordinator 的 Ed25519 签名私钥、Agent CLI 上下文及文件形式的注册凭据统一按秘密文件处理。Linux/macOS 拒绝组或其他用户权限位，写入使用 `0600`，节点数据目录使用 `0700`。Windows 使用 `golang.org/x/sys/windows`：所有者为当前进程用户 SID，DACL 受保护且只显式授予该 SID 完全控制，不额外授予 SYSTEM 或 Administrators；数据目录不接受祖先的继承权限，但将当前用户授权以 `OI/CI` 传递给子项，避免保护目录时撤掉已有子目录的访问权限。秘密临时文件在创建时即设置独立安全描述符，写入同步后再替换目标。读取从实际打开的句柄校验所有者、非空受保护 DACL，拒绝继承 ACE、其他主体的允许 ACE 及无法识别的 ACE 类型。Windows 路径还拒绝文件及祖先目录中的符号链接、junction 和其他 reparse point。Coordinator 加载外部提供的私钥时也执行相同校验，不能依赖默认继承 ACL；程序保存私钥使用 `Signer.WriteFile`。这些限制不改变本机管理员可通过系统特权接管文件的操作系统边界。
 
 | 数据 | 唯一写入者 | 处理方式 |
 |---|---|---|

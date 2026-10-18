@@ -22,12 +22,16 @@ func currentUser() (*windows.SID, error) {
 	return user.User.Sid, nil
 }
 
-func descriptor() (*windows.SECURITY_DESCRIPTOR, error) {
+func descriptor(inheritChildren bool) (*windows.SECURITY_DESCRIPTOR, error) {
 	user, err := currentUser()
 	if err != nil {
 		return nil, err
 	}
-	return windows.SecurityDescriptorFromString("O:" + user.String() + "D:P(A;;FA;;;" + user.String() + ")")
+	flags := ""
+	if inheritChildren {
+		flags = "OICI"
+	}
+	return windows.SecurityDescriptorFromString("O:" + user.String() + "D:P(A;" + flags + ";FA;;;" + user.String() + ")")
 }
 
 // checkPath 也拒绝祖先目录中的 junction 和其他 reparse point。
@@ -149,7 +153,7 @@ func CreateTemp(dir, prefix string) (*os.File, error) {
 	if err := checkPath(dir); err != nil {
 		return nil, err
 	}
-	sd, err := descriptor()
+	sd, err := descriptor(false)
 	if err != nil {
 		return nil, err
 	}
@@ -182,7 +186,7 @@ func ProtectDir(path string) error {
 		return fmt.Errorf("保护目录打开失败: %w", err)
 	}
 	defer windows.CloseHandle(h)
-	sd, err := descriptor()
+	sd, err := descriptor(true)
 	if err != nil {
 		return err
 	}

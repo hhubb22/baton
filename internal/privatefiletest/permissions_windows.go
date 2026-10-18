@@ -1,6 +1,7 @@
 package privatefiletest
 
 import (
+	"os"
 	"testing"
 	"unsafe"
 
@@ -34,8 +35,16 @@ func AssertPrivate(t *testing.T, path string) {
 		t.Fatal(err)
 	}
 	sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var flags byte
+	if info.IsDir() {
+		flags = windows.OBJECT_INHERIT_ACE | windows.CONTAINER_INHERIT_ACE
+	}
 	want := uint32(windows.FILE_GENERIC_READ | windows.FILE_GENERIC_WRITE | windows.DELETE | windows.WRITE_DAC | windows.WRITE_OWNER)
-	if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE || ace.Header.AceFlags != 0 ||
+	if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE || ace.Header.AceFlags != flags ||
 		!windows.EqualSid(sid, user.User.Sid) || uint32(ace.Mask)&want != want {
 		t.Fatal("DACL 不是仅当前用户完全控制")
 	}
