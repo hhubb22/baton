@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { formatReportTime, revocationLabel, roleLabel } from '../model.ts'
+import { formatReportTime, revocationLabel } from '../model.ts'
 import type { FileQuery, FileView, NodeStatus } from '../types.ts'
 import { FileBrowser } from './FileBrowser.tsx'
 
@@ -24,7 +24,7 @@ export function NodeCard({ node, notice, canWrite, busy, onRevoke, loadFiles }: 
           {node.online ? '在线' : '离线'}
         </span>
       </header>
-      <p className="meta">{roleLabel(node.role)} · {node.system} · 序号 {node.registration_seq}</p>
+      <p className="meta">{node.system} · 序号 {node.registration_seq}</p>
       <p className="meta">节点 {node.id}</p>
       <p data-testid="node-last-contact">最后报告于 {formatReportTime(node.last_contact_at)}</p>
       <p data-testid="node-status-updated">状态更新于 {formatReportTime(node.status_updated_at)}</p>

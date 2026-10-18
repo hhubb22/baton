@@ -33,7 +33,6 @@ export type NodeStatus = {
   id: string
   display_name: string
   system: string
-  role: string
   capabilities: string[]
   registration_seq: number
   online: boolean
@@ -45,7 +44,7 @@ export type NodeStatus = {
   revocation?: Revocation
 }
 
-export type DefaultPC = {
+export type DefaultDevice = {
   node_id: string
   invalid: boolean
   needs_reselection: boolean
@@ -54,15 +53,14 @@ export type DefaultPC = {
 
 export type NodeList = {
   nodes: NodeStatus[]
-  default_pc: DefaultPC
+  default_device: DefaultDevice
   local_process_notice: string
 }
 
 export type SavedDefault = {
-  default_pc_node_id: string
+  default_device_node_id: string
   display_name: string
   system: string
-  role: string
   registration_seq: number
 }
 
@@ -116,7 +114,7 @@ export type RevokeResult = {
   applied_at: string | null
   message: string
   local_process_notice: string
-  default_pc: DefaultPC
+  default_device: DefaultDevice
 }
 
 export type Enrollment = {

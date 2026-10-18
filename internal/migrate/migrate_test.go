@@ -235,7 +235,7 @@ func openTestDB(t *testing.T) *pgxpool.Pool {
 var publicTables = []string{
 	"employees", "login_sessions", "schema_migrations",
 	"node_enrollments", "nodes", "node_credentials", "employee_settings",
-	"node_presence",
+	"node_presence", "node_runtime_reports",
 	"plane_issues", "plane_triggers", "plane_deliveries",
 	"widget", "kept", "doomed", "once_run", "should_not_exist",
 }

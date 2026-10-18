@@ -49,19 +49,20 @@ type Identity struct {
 	SigningPublicKey string     `json:"signing_public_key,omitempty"`
 }
 
-// SavedDefault 是中心实际保存的默认 PC，字段来自数据库而不是请求正文。
+// SavedDefault 是中心实际保存的默认设备，字段来自数据库而不是请求正文。
 type SavedDefault struct {
-	NodeID          string `json:"default_pc_node_id"`
+	NodeID          string `json:"default_device_node_id"`
+	LegacyNodeID    string `json:"default_pc_node_id"`
+	Role            string `json:"role"` // 旧接口响应的固定兼容值。
 	DisplayName     string `json:"display_name"`
 	System          string `json:"system"`
-	Role            string `json:"role"`
 	RegistrationSeq int64  `json:"registration_seq"`
 }
 
 // FormatPublic 写出可以给操作者看的身份摘要，不包含连接凭据。
 func FormatPublic(id Identity) string {
-	return fmt.Sprintf("node_id=%s\nemployee_id=%s\ndisplay_name=%s\nsystem=%s\nrole=%s\ncredential_id=%s\nregistration_seq=%d\n",
-		id.NodeID, id.EmployeeID, id.DisplayName, id.System, id.Role, id.Credential.ID, id.RegistrationSeq)
+	return fmt.Sprintf("node_id=%s\nemployee_id=%s\ndisplay_name=%s\nsystem=%s\ncredential_id=%s\nregistration_seq=%d\n",
+		id.NodeID, id.EmployeeID, id.DisplayName, id.System, id.Credential.ID, id.RegistrationSeq)
 }
 
 func (id Identity) complete() error {

@@ -1,4 +1,4 @@
-// Package httpapi 提供员工登录、退出、本人身份、初始口令更换、节点注册、默认 PC、本人节点状态、凭据吊销、任务接受和受限文件浏览。
+// Package httpapi 提供员工登录、退出、本人身份、初始口令更换、节点注册、默认设备、本人节点状态、凭据吊销、任务接受和受限文件浏览。
 package httpapi
 
 import (
@@ -175,12 +175,12 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.listNodes(w, r)
-	case "/api/v1/me/default-pc":
+	case "/api/v1/me/default-device", "/api/v1/me/default-pc":
 		if r.Method != http.MethodPut {
 			s.writeError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "不支持该请求方法")
 			return
 		}
-		s.putDefaultPC(w, r)
+		s.putDefaultDevice(w, r)
 	case "/api/v1/tasks":
 		switch r.Method {
 		case http.MethodPost:
@@ -604,7 +604,7 @@ func requestID(ctx context.Context) string {
 func safePath(path string) string {
 	switch path {
 	case "/api/v1/login", "/api/v1/logout", "/api/v1/me", "/api/v1/me/password",
-		"/api/v1/node-enrollments", "/api/v1/nodes", "/api/v1/nodes/register", "/api/v1/me/default-pc",
+		"/api/v1/node-enrollments", "/api/v1/nodes", "/api/v1/nodes/register", "/api/v1/me/default-pc", "/api/v1/me/default-device",
 		"/api/v1/tasks":
 		return path
 	}

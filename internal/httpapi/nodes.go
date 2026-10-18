@@ -63,7 +63,6 @@ func (s *Server) registerNode(w http.ResponseWriter, r *http.Request) {
 		Token:         body.EnrollmentToken,
 		DisplayName:   body.DisplayName,
 		System:        body.System,
-		Role:          body.Role,
 		Capabilities:  *body.Capabilities,
 		CredentialTTL: s.nodeCredentialTTL,
 	}, s.signer)
@@ -75,7 +74,6 @@ func (s *Server) registerNode(w http.ResponseWriter, r *http.Request) {
 		"request_id", requestID(r.Context()),
 		"employee_id", ident.EmployeeID,
 		"node_id", ident.NodeID,
-		"role", ident.Role,
 		"registration_seq", ident.RegistrationSeq,
 	)
 	s.writeJSON(w, http.StatusOK, ident)
@@ -87,7 +85,6 @@ type nodeStatusJSON struct {
 	ID               string          `json:"id"`
 	DisplayName      string          `json:"display_name"`
 	System           string          `json:"system"`
-	Role             string          `json:"role"`
 	Capabilities     []string        `json:"capabilities"`
 	RegistrationSeq  int64           `json:"registration_seq"`
 	Online           bool            `json:"online"`
@@ -109,7 +106,7 @@ type revocationJSON struct {
 	LocalProcessNotice string     `json:"local_process_notice"`
 }
 
-type defaultPCJSON struct {
+type defaultDeviceJSON struct {
 	NodeID           string `json:"node_id"`
 	Invalid          bool   `json:"invalid"`
 	NeedsReselection bool   `json:"needs_reselection"`
@@ -121,7 +118,6 @@ func nodeStatusFrom(view store.NodeView) nodeStatusJSON {
 		ID:               view.ID,
 		DisplayName:      view.DisplayName,
 		System:           view.System,
-		Role:             view.Role,
 		Capabilities:     view.Capabilities,
 		RegistrationSeq:  view.RegistrationSeq,
 		Online:           view.Online,
@@ -163,14 +159,14 @@ func revocationMessage(status string) string {
 	return "吊销正在处理，尚未生效。"
 }
 
-func defaultPCFrom(state store.DefaultPCState) defaultPCJSON {
-	out := defaultPCJSON{NodeID: state.NodeID}
+func defaultDeviceFrom(state store.DefaultDeviceState) defaultDeviceJSON {
+	out := defaultDeviceJSON{NodeID: state.NodeID}
 	if state.Status != store.RevocationPending && state.Status != store.RevocationEffective {
 		return out
 	}
 	out.Invalid = true
 	out.NeedsReselection = true
-	out.Message = "默认 PC 仍指向该节点，需要重新选择。系统不会自动改选其他节点。" + revocationMessage(state.Status) + localProcessNotice
+	out.Message = "默认设备仍指向该节点，需要重新选择。系统不会自动改选其他节点。" + revocationMessage(state.Status) + localProcessNotice
 	return out
 }
 
@@ -189,17 +185,18 @@ func (s *Server) listNodes(w http.ResponseWriter, r *http.Request) {
 	for _, view := range views {
 		out = append(out, nodeStatusFrom(view))
 	}
-	state, err := s.store.DefaultPCState(r.Context(), sess.Employee.ID)
+	state, err := s.store.DefaultDeviceState(r.Context(), sess.Employee.ID)
 	if err != nil {
 		s.log.Error("list nodes failed", "request_id", requestID(r.Context()), "employee_id", sess.Employee.ID)
 		s.writeError(w, r, http.StatusInternalServerError, "unavailable", "暂时无法处理请求")
 		return
 	}
 	s.writeJSON(w, http.StatusOK, struct {
-		Nodes              []nodeStatusJSON `json:"nodes"`
-		DefaultPC          defaultPCJSON    `json:"default_pc"`
-		LocalProcessNotice string           `json:"local_process_notice"`
-	}{Nodes: out, DefaultPC: defaultPCFrom(state), LocalProcessNotice: localProcessNotice})
+		Nodes              []nodeStatusJSON  `json:"nodes"`
+		DefaultDevice      defaultDeviceJSON `json:"default_device"`
+		DefaultPC          defaultDeviceJSON `json:"default_pc"`
+		LocalProcessNotice string            `json:"local_process_notice"`
+	}{Nodes: out, DefaultDevice: defaultDeviceFrom(state), DefaultPC: defaultDeviceFrom(state), LocalProcessNotice: localProcessNotice})
 }
 
 func (s *Server) getNode(w http.ResponseWriter, r *http.Request, rawID string) {
@@ -263,7 +260,7 @@ func (s *Server) revokeNode(w http.ResponseWriter, r *http.Request, rawID string
 			decision = reloaded
 		}
 	}
-	state, err := s.store.DefaultPCState(r.Context(), sess.Employee.ID)
+	state, err := s.store.DefaultDeviceState(r.Context(), sess.Employee.ID)
 	if err != nil {
 		s.log.Error("node revoke failed", "request_id", requestID(r.Context()), "employee_id", sess.Employee.ID, "node_id", decision.NodeID)
 		s.writeError(w, r, http.StatusInternalServerError, "unavailable", "暂时无法处理请求")
@@ -274,15 +271,16 @@ func (s *Server) revokeNode(w http.ResponseWriter, r *http.Request, rawID string
 	}
 	s.log.Info("node revoke", "request_id", requestID(r.Context()), "employee_id", sess.Employee.ID, "node_id", decision.NodeID, "status", decision.Status)
 	s.writeJSON(w, http.StatusOK, struct {
-		NodeID             string        `json:"node_id"`
-		Status             string        `json:"status"`
-		OperatorID         string        `json:"operator_id"`
-		CredentialIDs      []string      `json:"credential_ids"`
-		RequestedAt        time.Time     `json:"requested_at"`
-		AppliedAt          *time.Time    `json:"applied_at"`
-		Message            string        `json:"message"`
-		LocalProcessNotice string        `json:"local_process_notice"`
-		DefaultPC          defaultPCJSON `json:"default_pc"`
+		NodeID             string            `json:"node_id"`
+		Status             string            `json:"status"`
+		OperatorID         string            `json:"operator_id"`
+		CredentialIDs      []string          `json:"credential_ids"`
+		RequestedAt        time.Time         `json:"requested_at"`
+		AppliedAt          *time.Time        `json:"applied_at"`
+		Message            string            `json:"message"`
+		LocalProcessNotice string            `json:"local_process_notice"`
+		DefaultDevice      defaultDeviceJSON `json:"default_device"`
+		DefaultPC          defaultDeviceJSON `json:"default_pc"`
 	}{
 		NodeID:             decision.NodeID,
 		Status:             decision.Status,
@@ -292,11 +290,12 @@ func (s *Server) revokeNode(w http.ResponseWriter, r *http.Request, rawID string
 		AppliedAt:          decision.AppliedAt,
 		Message:            revocationMessage(decision.Status),
 		LocalProcessNotice: localProcessNotice,
-		DefaultPC:          defaultPCFrom(state),
+		DefaultDevice:      defaultDeviceFrom(state),
+		DefaultPC:          defaultDeviceFrom(state),
 	})
 }
 
-func (s *Server) putDefaultPC(w http.ResponseWriter, r *http.Request) {
+func (s *Server) putDefaultDevice(w http.ResponseWriter, r *http.Request) {
 	if s.rejectQuery(w, r) {
 		return
 	}
@@ -310,26 +309,22 @@ func (s *Server) putDefaultPC(w http.ResponseWriter, r *http.Request) {
 	if !s.readJSON(w, r, &body) {
 		return
 	}
-	saved, err := s.store.SetDefaultPC(r.Context(), sess.Employee.ID, body.NodeID)
+	saved, err := s.store.SetDefaultDevice(r.Context(), sess.Employee.ID, body.NodeID)
 	if errors.Is(err, store.ErrDefaultRejected) {
-		s.log.Info("default pc rejected", "request_id", requestID(r.Context()), "employee_id", sess.Employee.ID, "code", "forbidden")
-		s.writeError(w, r, http.StatusForbidden, "forbidden", "不能将该节点设为默认 PC")
-		return
-	}
-	if errors.Is(err, store.ErrNotPCNode) {
-		s.writeError(w, r, http.StatusBadRequest, "invalid_node", "只能选择本人的 PC 执行节点")
+		s.log.Info("default device rejected", "request_id", requestID(r.Context()), "employee_id", sess.Employee.ID, "code", "forbidden")
+		s.writeError(w, r, http.StatusForbidden, "forbidden", "不能将该节点设为默认设备")
 		return
 	}
 	if errors.Is(err, store.ErrNodeInactive) {
-		s.writeError(w, r, http.StatusBadRequest, "invalid_node", "该节点已不能作为默认 PC")
+		s.writeError(w, r, http.StatusBadRequest, "invalid_node", "该节点已不能作为默认设备")
 		return
 	}
 	if err != nil {
-		s.log.Error("default pc failed", "request_id", requestID(r.Context()), "employee_id", sess.Employee.ID)
+		s.log.Error("default device failed", "request_id", requestID(r.Context()), "employee_id", sess.Employee.ID)
 		s.writeError(w, r, http.StatusInternalServerError, "unavailable", "暂时无法处理请求")
 		return
 	}
-	s.log.Info("default pc updated", "request_id", requestID(r.Context()), "employee_id", sess.Employee.ID, "node_id", saved.NodeID)
+	s.log.Info("default device updated", "request_id", requestID(r.Context()), "employee_id", sess.Employee.ID, "node_id", saved.NodeID)
 	s.writeJSON(w, http.StatusOK, saved)
 }
 

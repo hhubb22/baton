@@ -14,7 +14,6 @@ export const laptopId = '22222222-2222-4222-8222-222222222222'
 export function node(partial: Partial<NodeStatus> & Pick<NodeStatus, 'id' | 'display_name'>): NodeStatus {
   return {
     system: 'linux',
-    role: 'pc',
     capabilities: [],
     registration_seq: 1,
     online: false,
@@ -30,11 +29,11 @@ export function node(partial: Partial<NodeStatus> & Pick<NodeStatus, 'id' | 'dis
 export function listOf(nodes: NodeStatus[], nodeId = '', invalid = false): NodeList {
   return {
     nodes,
-    default_pc: {
+    default_device: {
       node_id: nodeId,
       invalid,
       needs_reselection: invalid,
-      message: invalid ? '默认 PC 仍指向该节点，需要重新选择。系统不会自动改选其他节点。' : undefined,
+      message: invalid ? '默认设备仍指向该节点，需要重新选择。系统不会自动改选其他节点。' : undefined,
     },
     local_process_notice: '吊销连接凭据不会停止离线节点上的本地进程。重新接入需要新的连接凭据。',
   }
@@ -42,10 +41,9 @@ export function listOf(nodes: NodeStatus[], nodeId = '', invalid = false): NodeL
 
 export function saved(id: string, displayName: string, seq: number): SavedDefault {
   return {
-    default_pc_node_id: id,
+    default_device_node_id: id,
     display_name: displayName,
     system: 'linux',
-    role: 'pc',
     registration_seq: seq,
   }
 }

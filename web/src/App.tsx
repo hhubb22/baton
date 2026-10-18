@@ -9,7 +9,7 @@ import {
   login,
   logout,
   messageOf,
-  putDefaultPC,
+  putDefaultDevice,
   revokeNode,
 } from './api.ts'
 import { applyRevoke, applySavedDefault } from './model.ts'
@@ -170,7 +170,7 @@ export default function App() {
     setBusy(true)
     setError('')
     try {
-      const result = await putDefaultPC(phase.csrf, nodeId)
+      const result = await putDefaultDevice(phase.csrf, nodeId)
       setSaved(result)
       listGen.current += 1
       setList((current) => (current ? applySavedDefault(current, result) : current))

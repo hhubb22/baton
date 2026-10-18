@@ -83,10 +83,10 @@ func TestRevokeIsOwnerScopedAndStaysPendingWithoutRelay(t *testing.T) {
 		t.Fatalf("处理中的说明不正确: %s", body)
 	}
 	if revoked.DefaultPC.NodeID != desk.NodeID || !revoked.DefaultPC.Invalid || !revoked.DefaultPC.NeedsReselection || !strings.Contains(revoked.DefaultPC.Message, "需要重新选择") || !strings.Contains(revoked.DefaultPC.Message, "不会自动改选") {
-		t.Fatalf("默认 PC 提示不正确: %+v", revoked.DefaultPC)
+		t.Fatalf("默认设备提示不正确: %+v", revoked.DefaultPC)
 	}
 	if defaultPC(t, pool, alice.ID) != desk.NodeID {
-		t.Fatal("吊销改写了默认 PC")
+		t.Fatal("吊销改写了默认设备")
 	}
 
 	status, body = getText(t, aliceClient, srv.URL+"/api/v1/nodes")
