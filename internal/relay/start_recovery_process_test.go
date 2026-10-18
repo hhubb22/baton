@@ -26,6 +26,7 @@ func TestCentralStartRejectionDoesNotRespawnWorker(t *testing.T) {
 			})
 			created := acceptTask(t, st, name)
 			executionID := waitGateFile(t, gate)
+			waitLog(t, st.coord, "event=prepare_saved")
 			sessionID := sessionOf(t, st, created.TaskID)
 			before := workerStatus(t, st.dataDir, sessionID)
 			t.Cleanup(func() { stopWorker(before.PID) })
@@ -73,6 +74,7 @@ func TestPreparedWorkerRecoveryDependsOnStartRequest(t *testing.T) {
 			st := startPrepareStack(t, nil)
 			created := acceptTask(t, st, name)
 			waitLog(t, st.batond, "event=prepare_acked")
+			waitLog(t, st.coord, "event=prepare_saved")
 			sessionID := sessionOf(t, st, created.TaskID)
 			if !requested {
 				assertWorkerStaysDownAfterRestart(t, st, sessionID, created.TaskID)
