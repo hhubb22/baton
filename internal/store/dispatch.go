@@ -15,6 +15,7 @@ import (
 
 // PrepareIntent 是一条可以重发的 prepare。MessageID 在整个重发过程中保持不变。
 type PrepareIntent struct {
+	RequiredArtifacts []task.ArtifactRef
 	MessageID         string
 	EmployeeID        string
 	TaskID            string
@@ -55,7 +56,7 @@ func (s *Store) ClaimPrepare(ctx context.Context, lease time.Duration) (PrepareI
 	err = tx.QueryRow(ctx, `
 		SELECT o.id::text, o.employee_id::text, o.task_id::text, o.execution_id::text, o.target_node_id::text,
 		       t.version, t.agent_type, t.target_session_id::text, t.working_directory, t.queue_expires_at,
-		       e.storage_generation
+		       e.storage_generation, t.required_artifacts
 		FROM dispatch_outbox o
 		JOIN tasks t ON t.id = o.task_id AND t.employee_id = o.employee_id
 		JOIN executions e ON e.id = o.execution_id AND e.employee_id = o.employee_id
@@ -75,7 +76,7 @@ func (s *Store) ClaimPrepare(ctx context.Context, lease time.Duration) (PrepareI
 		LIMIT 1`).Scan(
 		&intent.MessageID, &intent.EmployeeID, &intent.TaskID, &intent.ExecutionID, &intent.NodeID,
 		&intent.TaskVersion, &intent.AgentType, &targetSession, &directory, &intent.QueueExpiresAt,
-		&generation,
+		&generation, &intent.RequiredArtifacts,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PrepareIntent{}, false, nil
@@ -480,7 +481,7 @@ func checkFact(fact PreparedFact) error {
 
 func allowedPrepareCode(code string) bool {
 	switch code {
-	case task.CodeSessionBusy, task.CodeUnsupported, task.CodeInvalidTarget, task.CodeQueueTimeout, task.CodeUnavailable:
+	case task.CodeSessionBusy, task.CodeUnsupported, task.CodeInvalidTarget, task.CodeQueueTimeout, task.CodeUnavailable, task.CodeArtifactUnavailable:
 		return true
 	default:
 		return false

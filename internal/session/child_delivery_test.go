@@ -2,8 +2,11 @@ package session
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"baton/internal/fileaccess"
 	"baton/internal/protocol"
 	"baton/internal/task"
 )
@@ -17,7 +20,20 @@ func TestChildDeliveryPersistsOnceAndAdvancesGeneration(t *testing.T) {
 	t.Setenv("BATON_TEST_EXECUTOR_SCRIPT", "candidate_waiting")
 	t.Setenv("BATON_TEST_DELIVERY_SCRIPT", "success")
 	w, _, sid := clockWorker(t, 60)
-	if _, err := w.SubmitInput(sid, "原任务"); err != nil {
+	w.dataDir = t.TempDir()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "firmware.bin"), []byte("FIRMWARE"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := fileaccess.AddBrowseRoot(w.dataDir, "build", root); err != nil {
+		t.Fatal(err)
+	}
+	input, err := task.MarshalExecutorInput("原任务", nil, nil, nil, nil, 1,
+		[]task.ArtifactRef{{NodeID: w.nodeID, RootID: "build", Path: "firmware.bin"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.SubmitInput(sid, string(input)); err != nil {
 		t.Fatal(err)
 	}
 	pending, err := w.Pending()
@@ -67,7 +83,7 @@ func TestChildDeliveryOnlyContinuesWaitingLiveAgent(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			t.Setenv("BATON_TEST_EXECUTOR_SCRIPT", "running")
 			w, _, sid := clockWorker(t, 60)
-			if _, err := w.SubmitInput(sid, "原任务"); err != nil {
+			if _, err := w.SubmitInput(sid, `{"description":"原任务"}`); err != nil {
 				t.Fatal(err)
 			}
 			if mode == "stopped" {
@@ -113,7 +129,7 @@ func TestChildDeliveryOnlyContinuesWaitingLiveAgent(t *testing.T) {
 func TestOldCandidateCannotCompleteAfterChildQuery(t *testing.T) {
 	t.Setenv("BATON_TEST_EXECUTOR_SCRIPT", "candidate_waiting")
 	w, _, sid := clockWorker(t, 60)
-	if _, err := w.SubmitInput(sid, "原任务"); err != nil {
+	if _, err := w.SubmitInput(sid, `{"description":"原任务"}`); err != nil {
 		t.Fatal(err)
 	}
 	if err := w.ReceiveChild(sid, childInput(t, w, sid), true); err != nil {
@@ -143,7 +159,7 @@ func TestOldCandidateCannotCompleteAfterChildQuery(t *testing.T) {
 func TestCurrentCandidateCompletesOnlyAfterAgentStops(t *testing.T) {
 	t.Setenv("BATON_TEST_EXECUTOR_SCRIPT", "candidate_waiting")
 	w, _, sid := clockWorker(t, 60)
-	if _, err := w.SubmitInput(sid, "原任务"); err != nil {
+	if _, err := w.SubmitInput(sid, `{"description":"原任务"}`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := w.recordExecution(sid, "", Output{Exited: true}); err != nil {
@@ -181,7 +197,7 @@ func TestCurrentCandidateCompletesOnlyAfterAgentStops(t *testing.T) {
 func TestChildDeliveryUnconfirmedHistoryDoesNotReinject(t *testing.T) {
 	t.Setenv("BATON_TEST_EXECUTOR_SCRIPT", "candidate_waiting")
 	w, _, sid := clockWorker(t, 60)
-	if _, err := w.SubmitInput(sid, "原任务"); err != nil {
+	if _, err := w.SubmitInput(sid, `{"description":"原任务"}`); err != nil {
 		t.Fatal(err)
 	}
 	w.observer.path = t.TempDir()

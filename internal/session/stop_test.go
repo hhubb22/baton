@@ -135,7 +135,7 @@ func TestStopEvidenceDoesNotInventConfirmation(t *testing.T) {
 		t.Run(script, func(t *testing.T) {
 			t.Setenv("BATON_TEST_ABORT_SCRIPT", script)
 			w, _, sessionID := clockWorker(t, 30)
-			if _, err := w.SubmitInput(sessionID, "运行"); err != nil {
+			if _, err := w.SubmitInput(sessionID, `{"description":"运行"}`); err != nil {
 				t.Fatal(err)
 			}
 			reps, err := w.Stop(sessionID, task.StatusCancelled)
@@ -156,7 +156,7 @@ func TestStopEvidenceDoesNotInventConfirmation(t *testing.T) {
 
 func TestQueueDeadlineDoesNotStopAnAlreadyExecutingTask(t *testing.T) {
 	w, clock, sessionID := clockWorker(t, 120)
-	if _, err := w.SubmitInput(sessionID, "执行"); err != nil {
+	if _, err := w.SubmitInput(sessionID, `{"description":"执行"}`); err != nil {
 		t.Fatal(err)
 	}
 	clock.Suspend(60 * time.Second)

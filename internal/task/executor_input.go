@@ -7,21 +7,23 @@ import "encoding/json"
 const ExecutorInputLimit = 256 * 1024
 
 type executorInput struct {
-	Description        string   `json:"description"`
-	AuthorizationScope *string  `json:"authorization_scope,omitempty"`
-	ExpectedOutputs    *string  `json:"expected_outputs,omitempty"`
-	WorkingDirectory   *string  `json:"working_directory,omitempty"`
-	DeviceNames        []string `json:"device_names,omitempty"`
-	Generation         int      `json:"generation"`
+	RequiredArtifacts  []ArtifactRef `json:"required_artifacts,omitempty"`
+	Description        string        `json:"description"`
+	AuthorizationScope *string       `json:"authorization_scope,omitempty"`
+	ExpectedOutputs    *string       `json:"expected_outputs,omitempty"`
+	WorkingDirectory   *string       `json:"working_directory,omitempty"`
+	DeviceNames        []string      `json:"device_names,omitempty"`
+	Generation         int           `json:"generation"`
 }
 
 // MarshalExecutorInput 是 Worker 实际交给执行器的 JSON。空的可选字段不出现。
-func MarshalExecutorInput(description string, authorization, expected, directory *string, devices []string, generation int) ([]byte, error) {
+func MarshalExecutorInput(description string, authorization, expected, directory *string, devices []string, generation int, artifacts []ArtifactRef) ([]byte, error) {
 	var names []string
 	if len(devices) > 0 {
 		names = append([]string(nil), devices...)
 	}
 	return json.Marshal(executorInput{
+		RequiredArtifacts:  artifacts,
 		Description:        description,
 		AuthorizationScope: nonEmpty(authorization),
 		ExpectedOutputs:    nonEmpty(expected),
@@ -36,7 +38,7 @@ func rejectOversizedExecutorInput(in Input) error {
 	if in.DeviceNames != nil {
 		devices = *in.DeviceNames
 	}
-	raw, err := MarshalExecutorInput(in.Description, in.AuthorizationScope, in.ExpectedOutputs, in.WorkingDirectory, devices, 1)
+	raw, err := MarshalExecutorInput(in.Description, in.AuthorizationScope, in.ExpectedOutputs, in.WorkingDirectory, devices, 1, in.RequiredArtifacts)
 	if err != nil {
 		return reject(CodeInvalidRequest, "任务输入无效", "description")
 	}
@@ -55,6 +57,9 @@ func rejectOversizedExecutorInput(in Input) error {
 	}
 	if len(devices) > 0 {
 		fields = append(fields, "device_names")
+	}
+	if len(in.RequiredArtifacts) > 0 {
+		fields = append(fields, "required_artifacts")
 	}
 	return &Rejection{
 		Code:    CodeInvalidRequest,

@@ -19,6 +19,8 @@ type nativeStub struct {
 	outputs                            []Output
 }
 
+const nativeTestInput = `{"description":"task"}`
+
 func (a *nativeStub) Start(context.Context) error { a.starts++; return nil }
 func (a *nativeStub) SubmitInput(context.Context, string) (Output, error) {
 	a.inputs++
@@ -42,12 +44,12 @@ func TestNativeWorkerUsesAsyncSettlementAndHistoryConfirmation(t *testing.T) {
 			w, _, sid := clockWorker(t, 60)
 			a := &nativeStub{}
 			w.adapterFactory = func(typ, payload string) (agent.Adapter, error) {
-				if typ != "pi" || payload != "task" {
+				if typ != "pi" || payload != nativeTestInput {
 					t.Fatal("wrong adapter input")
 				}
 				return a, nil
 			}
-			if _, err := w.SubmitInput(sid, "task"); err != nil {
+			if _, err := w.SubmitInput(sid, nativeTestInput); err != nil {
 				t.Fatal(err)
 			}
 			if a.starts != 1 || a.inputs != 1 {
@@ -116,7 +118,7 @@ func TestNativeWorkerExitAndUnconfirmedHistoryRemainUncertain(t *testing.T) {
 			w, _, sid := clockWorker(t, 60)
 			a := &nativeStub{}
 			w.adapterFactory = func(string, string) (agent.Adapter, error) { return a, nil }
-			if _, err := w.SubmitInput(sid, "task"); err != nil {
+			if _, err := w.SubmitInput(sid, nativeTestInput); err != nil {
 				t.Fatal(err)
 			}
 			if missingHistory {
@@ -160,7 +162,7 @@ func TestNativeWorkerCrashKeepsUncertainReceiptWithoutReinjection(t *testing.T) 
 	w, _, sid := clockWorker(t, 60)
 	a := &nativeStub{}
 	w.adapterFactory = func(string, string) (agent.Adapter, error) { return a, nil }
-	if _, err := w.SubmitInput(sid, "task"); err != nil {
+	if _, err := w.SubmitInput(sid, nativeTestInput); err != nil {
 		t.Fatal(err)
 	}
 	a.outputs = []Output{{WaitingForChildren: true}}
@@ -202,7 +204,7 @@ func TestNativeWorkerCrashKeepsUncertainReceiptWithoutReinjection(t *testing.T) 
 func TestNativeWorkerHistoryMissingProducesHistoryUncertainty(t *testing.T) {
 	w, _, sid := clockWorker(t, 60)
 	w.adapterFactory = func(string, string) (agent.Adapter, error) { return nil, agent.ErrHistoryMissing }
-	reports, err := w.SubmitInput(sid, "task")
+	reports, err := w.SubmitInput(sid, nativeTestInput)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +224,7 @@ func TestNativeWorkerStopsLiveAdapterEvenIfInputIsUncertain(t *testing.T) {
 	w, _, sid := clockWorker(t, 60)
 	a := &nativeStub{}
 	w.adapterFactory = func(string, string) (agent.Adapter, error) { return a, nil }
-	if _, err := w.SubmitInput(sid, "task"); err != nil {
+	if _, err := w.SubmitInput(sid, nativeTestInput); err != nil {
 		t.Fatal(err)
 	}
 	w.recoveredUncertain = true

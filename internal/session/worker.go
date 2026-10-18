@@ -77,6 +77,7 @@ func RunWorker(ctx context.Context, dataDir, sessionID string) error {
 		}
 		return errors.New("无法打开 Session 账本")
 	}
+	db.dataDir = dataDir
 	configureAdapter(db, dataDir, sessionID)
 	if err := db.recover(sessionID); err != nil {
 		return errors.New("无法恢复 Session 历史")

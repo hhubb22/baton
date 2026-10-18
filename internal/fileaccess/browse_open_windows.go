@@ -1,6 +1,6 @@
 //go:build windows
 
-package node
+package fileaccess
 
 import "os"
 

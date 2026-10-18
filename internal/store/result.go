@@ -44,6 +44,7 @@ type ExecutionReport struct {
 
 // TaskInput 是同一次执行可以交给执行器的任务输入。
 type TaskInput struct {
+	RequiredArtifacts  []task.ArtifactRef
 	Description        string
 	AuthorizationScope *string
 	ExpectedOutputs    *string
@@ -80,7 +81,7 @@ func (s *Store) LoadTaskInput(ctx context.Context, employeeID, nodeID, taskID, e
 	var blocked bool
 	err := s.pool.QueryRow(ctx, `
 		SELECT t.description, t.authorization_scope, t.expected_outputs, t.working_directory,
-		       t.device_names, t.status,
+		       t.device_names, t.status, t.required_artifacts,
 		       e.start_authorized_at IS NOT NULL, e.start_refused_at IS NOT NULL,
 		       t.cancel_requested_at IS NOT NULL OR COALESCE(t.execution_expires_at <= now(), false)
 		       OR (e.started_at IS NULL AND t.queue_expires_at <= now())
@@ -91,7 +92,7 @@ func (s *Store) LoadTaskInput(ctx context.Context, employeeID, nodeID, taskID, e
 		  AND t.target_node_id = $4::uuid AND t.target_session_id = $5::uuid`,
 		employeeID, taskID, executionID, nodeID, sessionID).Scan(
 		&out.Description, &out.AuthorizationScope, &out.ExpectedOutputs, &out.WorkingDirectory,
-		&out.DeviceNames, &status, &authorized, &refused, &blocked,
+		&out.DeviceNames, &status, &out.RequiredArtifacts, &authorized, &refused, &blocked,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return TaskInput{}, task.CodeInvalidTarget, nil
