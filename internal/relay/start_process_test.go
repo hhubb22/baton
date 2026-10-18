@@ -157,6 +157,8 @@ func TestStartPermitSuspendAndWrongGenerationDoNotStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitLog(t, st.batond, "event=start_refusal_sent")
+	// 中心保存拒绝回执后，数据库才包含拒绝事实。
+	waitLog(t, st.coord, "event=start_refused")
 	if raw, err := os.ReadFile(filepath.Join(st.dataDir, "executor.log")); err == nil && strings.Contains(string(raw), "start") {
 		t.Fatalf("错误代次启动了执行器: %s", raw)
 	}
