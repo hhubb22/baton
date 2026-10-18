@@ -123,7 +123,9 @@ BATON_PI_PROBE=1 go test -v -count=1 ./internal/agent/pi -run '^TestPiNoModelPro
 BATON_REAL_PI=1 go test -v -count=1 -timeout=30m ./... -run '^TestRealPi$'
 ```
 
-此入口在临时目录构建 Baton 二进制，创建独立 HOME/Pi 配置/工作区、测试 schema 与真实 Coordinator/Relay/batond/Worker，透传允许的 provider 环境变量，不复制或打印凭据。macOS `sandbox-exec` 在 `deny default` 后导入系统 `bsd.sb` 提供进程启动权限，再收紧文件读写，只额外允许系统/运行时只读路径与测试 IPC。先验证目录内可写可读，再检查目录外测试哨兵不可读写、符号链接不能越界；沙箱启动崩溃不能冒充隔离成功。失败输出退出码、错误（含信号）和 stderr，不退回无沙箱模式；Go 的退出码 `-1` 表示没有普通退出码，例如进程被信号终止。使用模型验证一次输入/结构化结果、CLI 委托与子结果原生历史确认、执行中中止、batond 重连，以及原生 Session 加载后新回合的上下文回忆与夹具未重放；另检查缺失历史拒绝。输出工具版本、平台、请求/实际模型及各能力“支持/不支持/未验证”，失败不打印原生历史；退出清理临时目录与测试进程。模型不遵循协议或环境问题会使对应能力保留未验证，不能据此宣称跨平台支持。
+若需要在本机检查失败时的原生历史，可在同一命令前增加 `BATON_REAL_PI_KEEP=1`。入口会提前打印独立隔离目录的绝对路径，结束后不自动删除其中的 `isolated`（HOME、工作区、探针）与 `stack/node/sessions`（Worker 原生历史）；两者为兄弟目录，沙箱仍只允许 Pi 读取指定的会话目录，而非 `stack` 中的节点密钥。默认不设置时两处目录照常由 `go test` 清理。保留目录还包含测试用密钥、节点身份、上下文令牌和会话原文：**仅在自己的开发机检查，不上传/粘贴原始文件或目录清单；排查完成后自行删除整个隔离目录。** 临时测试数据库 schema 仍按原有清理流程处理，不在保留目录内。
+
+此入口在临时目录构建 Baton 二进制，创建独立 HOME/Pi 配置/工作区、测试 schema 与真实 Coordinator/Relay/batond/Worker，透传允许的 provider 环境变量，不复制或打印凭据。macOS `sandbox-exec` 在 `deny default` 后导入系统 `bsd.sb` 提供进程启动权限，再收紧文件读写，只额外允许系统/运行时只读路径与测试 IPC。先验证目录内可写可读，再检查目录外测试哨兵不可读写、符号链接不能越界；沙箱启动崩溃不能冒充隔离成功。失败输出退出码、错误（含信号）和 stderr，不退回无沙箱模式；Go 的退出码 `-1` 表示没有普通退出码，例如进程被信号终止。使用模型验证一次输入/结构化结果、CLI 委托与子结果原生历史确认、执行中中止、batond 重连，以及原生 Session 加载后新回合的上下文回忆与夹具未重放；另检查缺失历史拒绝。输出工具版本、平台、请求/实际模型及各能力“支持/不支持/未验证”；任务失败/待核实时先脱敏，再只输出中心记录的 `status`、`error_code`、`error_message`、`summary` 和 `evidence_empty_reason`，不打印原生历史。若中心为 `result_format`，本次模型的结构化结果标为“不支持”（可换更强模型复验），不能推断其他模型均不支持。任务提示给出完整有效 JSON 示例，但真实模型是否遵循仍待实测。默认退出清理临时目录与测试进程；模型不遵循协议或环境问题会使其他对应能力保留未验证，不能据此宣称跨平台支持。
 
 Pi 初始化探针及历史恢复失败时，入口输出 `Start` 错误与阶段（`version` / `rpc`、具体握手步骤）、子进程退出码和错误/信号、stderr 最后 20 行（至多保留 8 KiB 原始尾部，截断时丢弃首段不完整行）。诊断仅通过 `pi.WithDiagnostics()` 显式启用，保存在内存、不写原始日志文件；输出前屏蔽实际敏感环境值、常见凭据字段/Bearer/JWT 和疑似 key 的长串，不输出 stdout、RPC 状态或原生历史。`sandbox-exec` 或 Pi 写到 stderr 的拒绝原因也保留；`exit_code=unavailable` 表示没有取得进程退出状态，`-1` 需结合信号错误判断，`cleanup_kill_requested=true` 表示 Baton 曾请求强制清理。生产默认继续丢弃 stderr。
 

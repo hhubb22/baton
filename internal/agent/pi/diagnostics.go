@@ -23,6 +23,14 @@ func WithDiagnostics() Option {
 	return func(a *Adapter) { a.diagnostic = &startupDiagnostics{} }
 }
 
+// ScrubDiagnosticText applies the same credential masking used by startup
+// diagnostics to a short, explicit diagnostic field. Do not pass native history.
+func ScrubDiagnosticText(s string, env []string) string {
+	d := &startupDiagnostics{}
+	d.configure(env)
+	return d.scrub(s)
+}
+
 var (
 	diagnosticANSI       = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
 	diagnosticCredential = regexp.MustCompile(`(?i)((?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|client[_-]?secret|authorization|password|cookie|credential)["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)`)

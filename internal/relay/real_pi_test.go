@@ -54,7 +54,7 @@ func TestRealPi(t *testing.T) {
 	if !keyPresent {
 		t.Fatal("export the selected provider API key; existing login files are intentionally not read")
 	}
-	root := t.TempDir()
+	root, dataRoot := realPiDirectories(t)
 	root, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		t.Fatal(err)
@@ -102,7 +102,7 @@ func TestRealPi(t *testing.T) {
 	if err := os.WriteFile(wrapper, []byte("#!/bin/sh\nexec /usr/bin/sandbox-exec -f "+quote(profile)+" "+quote(bin)+" \"$@\"\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	st := startPrepareStackWithBins(t, map[string]string{"BATON_AGENT_DRIVER": "native", "BATON_TEST_HOLD_START": "0", "BATON_PI_BIN": wrapper, "BATON_PI_MODEL": model, "BATON_PI_HOME": filepath.Join(root, "home"), "PATH": filepath.Join(root, "bin") + string(os.PathListSeparator) + os.Getenv("PATH")}, coord, relay, batond)
+	st := startPrepareStackWithBins(t, map[string]string{"BATON_AGENT_DRIVER": "native", "BATON_TEST_HOLD_START": "0", "BATON_PI_BIN": wrapper, "BATON_PI_MODEL": model, "BATON_PI_HOME": filepath.Join(root, "home"), "PATH": filepath.Join(root, "bin") + string(os.PathListSeparator) + os.Getenv("PATH")}, coord, relay, batond, dataRoot)
 	t.Cleanup(func() {
 		st.batond.stop()
 		entries, _ := os.ReadDir(filepath.Join(st.dataDir, "sessions"))
@@ -167,8 +167,8 @@ func TestRealPi(t *testing.T) {
 		}
 		return rec
 	}
-	finished := accept("real-pi-complete", "Write exactly 'one\\n' to count.txt once. Then return the required structured completed result with summary real-pi-complete. Do not invoke any other tool or inspect any other file.")
-	waitRealPiStatus(t, st, finished.TaskID, task.StatusCompleted)
+	finished := accept("real-pi-complete", "Write exactly 'one\\n' to count.txt once. After the command finishes, your final reply must be ONLY this JSON object, without Markdown or prose: "+realPiCompletedExample("real-pi-complete")+" Do not invoke any other tool or inspect any other file.")
+	waitRealPiStatus(t, st, finished.TaskID, task.StatusCompleted, capabilities)
 	capabilities["输入"], capabilities["结构化结果"] = "支持", "支持"
 	sid := sessionOf(t, st, finished.TaskID)
 	worker := workerStatus(t, st.dataDir, sid)
@@ -192,7 +192,8 @@ func TestRealPi(t *testing.T) {
 		t.Fatal("restore unexpectedly replayed a model turn")
 	}
 	// Ask a new, explicit turn to recall old context; do not replay the task.
-	if _, err := restored.SubmitInput(context.Background(), `{"description":"Without tools, recall the previous task's requested summary and return a structured completed result whose summary is exactly real-pi-complete. This is a new recall-only task."}`); err != nil {
+	recall, _ := json.Marshal(map[string]string{"description": "Without tools, recall the previous task's requested summary. This is a new recall-only task; reply ONLY with this JSON object, without Markdown or prose: " + realPiCompletedExample("real-pi-complete")})
+	if _, err := restored.SubmitInput(context.Background(), string(recall)); err != nil {
 		t.Fatal(err)
 	}
 	out := waitRealPiOutput(t, restored)
@@ -216,13 +217,13 @@ func TestRealPi(t *testing.T) {
 	// Leave the parent idle waiting for a real child. BATON_CONTEXT_FILE is only
 	// consumed by the CLI, never opened by the model or included in its prompt.
 	childRequest := filepath.Join(work, "delegate.json")
-	request := map[string]any{"request_id": "real-pi-child", "description": "Return the required structured completed result with summary real-pi-child; use no tools.", "target_node_id": st.ident.NodeID, "agent_type": "pi", "working_directory": work}
+	request := map[string]any{"request_id": "real-pi-child", "description": "Use no tools. Reply ONLY with this JSON object, without Markdown or prose: " + realPiCompletedExample("real-pi-child"), "target_node_id": st.ident.NodeID, "agent_type": "pi", "working_directory": work}
 	raw, _ = json.Marshal(request)
 	if err := os.WriteFile(childRequest, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	parent := accept("real-pi-parent", fmt.Sprintf("Run exactly %s delegate --request-file %s --json using bash. Do not read the context file, environment or credentials. Then return exactly {\"baton_waiting_for_children\":true}. When Baton delivers the child result, return the required structured completed result with summary real-pi-parent; do not delegate a second time.", quote(cli), quote(childRequest)))
-	waitRealPiStatus(t, st, parent.TaskID, task.StatusCompleted)
+	parent := accept("real-pi-parent", fmt.Sprintf("Run exactly %s delegate --request-file %s --json using bash. Do not read the context file, environment or credentials. Then return exactly {\"baton_waiting_for_children\":true}. When Baton delivers the child result, reply ONLY with %s without Markdown or prose; do not delegate a second time.", quote(cli), quote(childRequest), realPiCompletedExample("real-pi-parent")))
+	waitRealPiStatus(t, st, parent.TaskID, task.StatusCompleted, capabilities)
 	parentSID := sessionOf(t, st, parent.TaskID)
 	parentWorker := workerStatus(t, st.dataDir, parentSID)
 	t.Cleanup(func() { stopWorker(parentWorker.PID) })
@@ -236,7 +237,7 @@ func TestRealPi(t *testing.T) {
 	capabilities["委托"], capabilities["原生历史确认"] = "支持", "支持"
 	// Wait for a deterministic tool-start fixture before cancellation, not just
 	// a running row that can precede the model's first tool call.
-	abortTask := accept("real-pi-abort", "Use bash to execute exactly: printf started > abort-started; sleep 15; printf late > abort-finished. Do not finish early. Return a structured result only after this command finishes.")
+	abortTask := accept("real-pi-abort", "Use bash to execute exactly: printf started > abort-started; sleep 15; printf late > abort-finished. Do not finish early. Only after the command finishes, reply with this JSON object without Markdown or prose: "+realPiCompletedExample("real-pi-abort"))
 	deadline := time.Now().Add(3 * time.Minute)
 	for {
 		if _, err := os.Stat(filepath.Join(work, "abort-started")); err == nil {
@@ -283,23 +284,130 @@ func TestRealPi(t *testing.T) {
 	capabilities["中止"] = "支持"
 }
 
-func waitRealPiStatus(t *testing.T, st *prepareStack, id, want string) {
+func waitRealPiStatus(t *testing.T, st *prepareStack, id, want string, capabilities map[string]string) {
 	t.Helper()
 	deadline := time.Now().Add(4 * time.Minute)
 	for time.Now().Before(deadline) {
-		var got string
-		if err := st.pool.QueryRow(context.Background(), `SELECT status FROM tasks WHERE id=$1::uuid`, id).Scan(&got); err != nil {
+		var got realPiCenterStatus
+		if err := st.pool.QueryRow(context.Background(), `
+			SELECT status, COALESCE(error_code, ''), COALESCE(error_message, ''),
+			       COALESCE(summary, ''), COALESCE(evidence_empty_reason, '')
+			FROM tasks WHERE id=$1::uuid`, id).Scan(&got.Status, &got.ErrorCode, &got.ErrorMessage, &got.Summary, &got.EvidenceEmptyReason); err != nil {
 			t.Fatal("task status unavailable")
 		}
-		if got == want {
+		if got.Status == want {
 			return
 		}
-		if got == task.StatusFailed || got == task.StatusNeedsVerification {
-			t.Fatalf("real Pi task ended as %s; inspect isolated history locally, do not publish raw history", got)
+		if got.Status == task.StatusFailed || got.Status == task.StatusNeedsVerification {
+			if got.ErrorCode == task.CodeResultFormat {
+				capabilities["结构化结果"] = "不支持"
+				t.Fatalf("real Pi task ended: %s; 本次模型未交回约定 JSON，结构化结果=不支持（可用更强模型复验）", formatRealPiCenterStatus(got))
+			}
+			t.Fatalf("real Pi task ended: %s; inspect isolated history locally, do not publish raw history", formatRealPiCenterStatus(got))
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
 	t.Fatal("real Pi task timed out; capability remains unverified")
+}
+
+type realPiCenterStatus struct {
+	Status              string
+	ErrorCode           string
+	ErrorMessage        string
+	Summary             string
+	EvidenceEmptyReason string
+}
+
+func formatRealPiCenterStatus(got realPiCenterStatus) string {
+	env := os.Environ()
+	scrub := func(s string) string { return pi.ScrubDiagnosticText(s, env) }
+	return fmt.Sprintf("status=%q error_code=%q error_message=%q summary=%q evidence_empty_reason=%q",
+		scrub(got.Status), scrub(got.ErrorCode), scrub(got.ErrorMessage), scrub(got.Summary), scrub(got.EvidenceEmptyReason))
+}
+
+func realPiCompletedExample(summary string) string {
+	return fmt.Sprintf(`{"status":"completed","summary":%q,"evidence":[],"evidence_empty_reason":"本次无结构化证据引用","artifacts":[],"artifacts_empty_reason":"本次无结构化产物引用","error":null}`, summary)
+}
+
+func realPiDirectories(t *testing.T) (root, dataRoot string) {
+	t.Helper()
+	if os.Getenv("BATON_REAL_PI_KEEP") != "1" {
+		return t.TempDir(), ""
+	}
+	base, err := os.MkdirTemp("", "baton-real-pi-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err = filepath.EvalSymlinks(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, dataRoot = filepath.Join(base, "isolated"), filepath.Join(base, "stack")
+	for _, dir := range []string{root, dataRoot} {
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Logf("BATON_REAL_PI_KEEP=1 isolated_directory=%q native_history_under=%q; contains credentials and history: keep private, remove after inspection", base, filepath.Join(dataRoot, "node", "sessions"))
+	return root, dataRoot
+}
+
+func TestRealPiResultDiagnostics(t *testing.T) {
+	t.Setenv("GOOGLE_CLOUD_API_KEY", "tiny-fixture-key")
+	fields := realPiCenterStatus{
+		Status: task.StatusFailed, ErrorCode: task.CodeResultFormat,
+		ErrorMessage: "invalid JSON: GOOGLE_CLOUD_API_KEY=tiny-fixture-key",
+		Summary:      "执行器没有交回可校验的结构化结果", EvidenceEmptyReason: "没有结构化证据",
+	}
+	got := formatRealPiCenterStatus(fields)
+	for _, field := range []string{`status="failed"`, `error_code="result_format"`, `error_message=`,
+		`summary="执行器没有交回可校验的结构化结果"`, `evidence_empty_reason="没有结构化证据"`, "[redacted]"} {
+		if !strings.Contains(got, field) {
+			t.Fatalf("missing %q in center diagnostic: %s", field, got)
+		}
+	}
+	if strings.Contains(got, "tiny-fixture-key") {
+		t.Fatal("provider credential leaked")
+	}
+	candidate, err := task.ParseCandidate(realPiCompletedExample("real-pi-complete"))
+	if err != nil || candidate.Status != task.StatusCompleted || candidate.Summary != "real-pi-complete" {
+		t.Fatalf("example is not an accepted result: %+v %v", candidate, err)
+	}
+}
+
+func TestRealPiDirectoryRetention(t *testing.T) {
+	var removed string
+	t.Run("default", func(t *testing.T) {
+		t.Setenv("BATON_REAL_PI_KEEP", "0")
+		root, dataRoot := realPiDirectories(t)
+		if dataRoot != "" {
+			t.Fatalf("default unexpectedly kept stack directory: %q", dataRoot)
+		}
+		removed = root
+	})
+	if _, err := os.Stat(removed); !os.IsNotExist(err) {
+		t.Fatalf("default isolation root was not removed: %v", err)
+	}
+	var base string
+	t.Run("explicit_keep", func(t *testing.T) {
+		t.Setenv("BATON_REAL_PI_KEEP", "1")
+		root, dataRoot := realPiDirectories(t)
+		base = filepath.Dir(root)
+		if filepath.Dir(dataRoot) != base || root == dataRoot {
+			t.Fatalf("isolated and node data directories must be siblings: %q %q", root, dataRoot)
+		}
+		for _, dir := range []string{root, dataRoot} {
+			if err := os.WriteFile(filepath.Join(dir, "retention-fixture"), []byte("fixture"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	})
+	t.Cleanup(func() { _ = os.RemoveAll(base) })
+	for _, dir := range []string{"isolated", "stack"} {
+		if raw, err := os.ReadFile(filepath.Join(base, dir, "retention-fixture")); err != nil || string(raw) != "fixture" {
+			t.Fatalf("retained isolation tree missing %s: %q %v", dir, raw, err)
+		}
+	}
 }
 
 func waitRealPiOutput(t *testing.T, a *pi.Adapter) agent.Output {
