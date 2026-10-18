@@ -18,19 +18,21 @@
 
 ## 实施代理
 
-工单默认派给 Cursor Cloud Agent，用 `cursor-cloud` skill 调度；需要本机资源的工作才在 Herdr 中起本地 Cursor。
+工单默认派给 Devin 云端会话；需要本机资源的工作才在 Herdr 中起本地 Agent。
 
-- 仓库 `https://github.com/hhubb22/baton`，起点 `main`，开 PR。云端环境由 `.cursor/` 定义，环境 ID `49b419f4-ca28-11f1-bec7-b2318963e0b6`；改动 `.cursor/environment.json` 后用 `cursor-cloud env-sync` 同步。
-- 模型固定为 `grok-4.7`，参数 `context=500k`、`reasoning_effort=xhigh`、`fast=true`，派发时显式传入，不用其他模型。
-- 提示词由工单要求、当前 `origin/main` 的提交号和 `.agents/cursor-cloud-brief.md` 组成。同时派发的工单如需新迁移，在派发时分配不同编号。
-- 创建前先生成 `agentId`，创建后在工单评论写 Agent 链接、`agentId` 和 `runId`，并把 Agent 链接加为工单链接。网络失败时用同一个 `agentId` 重试。
-- 用后台的 `cursor-cloud wait` 等待完成。审查时把分支取到独立 worktree，变基到 `main` 后在本机复跑验证；需要修改时用 `followup` 发回同一个 Agent。
-- 审查通过后以 squash 方式合并 PR，提交信息符合下方约定，然后按「代码交付」写提交链接并关闭工单。云端开的 PR 是 draft，合并前先 `gh pr ready`；本地变基后推回 PR 分支用 `--force-with-lease`。
+- 仓库 `https://github.com/hhubb22/baton`，起点 `main`，开 PR。云端环境由 `.devin/blueprint.yaml` 定义，Devin 中对应 blueprint `snapshot-blueprint-63b9d03b81a449748bda1858087c796a`；改动后用 `devin cloud drs blueprint-write` 同步，再 `devin cloud drs build`。
+- 模型固定为 GPT（当前显示为 GPT-6.1 Sol (Preview)）。v3 API 创建会话时不能选这个模型，所以会话从 CLI 创建：在 Herdr 面板里运行 `devin --cloud`，用 `/model` 选 GPT、`/repo` 选 baton，需要 macOS 或 Windows 时用 `/platform` 选，然后提交提示词。
+- 每个会话占一个 Herdr 面板，面板以工单编号命名（如 `ps114`）。会话结束前不要退出这个 CLI；退出后会话会停在 `waiting_for_user`，要用 `devin --cloud -r devin-<会话 ID>` 重新接上。
+- 提示词由工单要求、当前 `origin/main` 的提交号和 `.agents/devin-cloud-brief.md` 组成。同时派发的工单如需新迁移，在派发时分配不同编号。
+- 创建后在工单评论写会话链接和会话 ID，并把会话链接加为工单链接。
+- 状态用 v3 API 的 `GET /v3/organizations/{org_id}/sessions/{id}` 查，看 `status`、`status_detail` 和 `pull_requests`。后续指令在该会话的 CLI 面板里发。
+- 审查时把分支取到独立 worktree，变基到 `main` 后在本机复跑验证；需要修改时在同一会话的 CLI 里跟进。
+- 审查通过后以 squash 方式合并 PR，提交信息符合下方约定，然后按「代码交付」写提交链接并关闭工单。PR 是 draft 时合并前先 `gh pr ready`；本地变基后推回 PR 分支用 `--force-with-lease`。
 
 ## 凭据
 
 - 测试凭据放在 1Password 保险库 `Baton Test`，不写进仓库、工单、提示词或明文文件。
-- 本机 Agent 用 Service Account `baton-local-agents`（读写），云端 Agent 用 `baton-cloud`（只读），令牌分别由 `~/.zshenv` 的非交互分支和 Cursor 环境 Secret `OP_SERVICE_ACCOUNT_TOKEN` 提供。
+- 本机 Agent 用 Service Account `baton-local-agents`（读写），云端 Agent 用 `baton-cloud`（只读），令牌分别由 `~/.zshenv` 的非交互分支和 Devin Secret `OP_SERVICE_ACCOUNT_TOKEN` 提供。
 - 派发时只引用 `op://Baton Test/...`。
 
 ## 验证环境
