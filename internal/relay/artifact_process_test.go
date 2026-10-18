@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -101,6 +102,9 @@ func TestArtifactsAcrossTwoNodesBlockUnavailableInputs(t *testing.T) {
 		{"escape", other.NodeID, "build", "../firmware.bin", "path_escaped:"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.name == "permissions" && runtime.GOOS == "windows" {
+				t.Skip("POSIX 模式位不能验证 Windows ACL")
+			}
 			created := create(tc.name, other.NodeID, task.ArtifactRef{NodeID: tc.owner, RootID: tc.root, Path: tc.path})
 			waitTaskStatus(t, st, created.TaskID, task.StatusFailed)
 			var view task.Record

@@ -82,6 +82,9 @@ func TestArtifactsRejectReplacedAuthorizedRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(t.TempDir(), root); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skip("当前 Windows 用户不能创建符号链接")
+		}
 		t.Fatal(err)
 	}
 	refs, reason := CheckArtifacts(dir, "local", []task.ArtifactRef{{NodeID: "local", RootID: "build", Path: "artifact.bin"}})

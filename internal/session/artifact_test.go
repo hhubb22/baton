@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"baton/internal/fileaccess"
@@ -14,6 +15,9 @@ import (
 func TestWorkerRechecksArtifactsBeforeSubmittingInput(t *testing.T) {
 	for _, change := range []string{"deleted", "other_node", "permissions", "available"} {
 		t.Run(change, func(t *testing.T) {
+			if change == "permissions" && runtime.GOOS == "windows" {
+				t.Skip("POSIX 模式位不能验证 Windows ACL")
+			}
 			w, _, sessionID := clockWorker(t, 120)
 			w.dataDir = t.TempDir()
 			root := t.TempDir()
