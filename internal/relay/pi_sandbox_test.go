@@ -18,9 +18,9 @@ import (
 
 func piSandboxPolicy(readDirs, writeDirs []string, endpoint string) string {
 	var policy strings.Builder
-	// Keep Apple's process-startup permissions, not its filesystem exceptions.
 	policy.WriteString("(version 1)\n(deny default)\n(import \"bsd.sb\")\n(deny file-read* file-write*)\n(allow process* sysctl-read mach-lookup network*)\n(allow file-read-metadata)\n(allow file-read* (literal \"/\"))\n")
-	for _, dir := range append([]string{"/System", "/usr", "/bin", "/sbin", "/Library", "/opt/homebrew", "/private/etc", "/dev", "/private/var/db", "/private/var/select"}, readDirs...) {
+	readDirs = append([]string{"/System", "/usr", "/bin", "/sbin", "/Library", "/opt/homebrew", "/private/etc", "/dev", "/private/var/db", "/private/var/select"}, readDirs...)
+	for _, dir := range readDirs {
 		fmt.Fprintf(&policy, "(allow file-read* (subpath %s))\n", strconv.Quote(dir))
 	}
 	for _, dir := range writeDirs {
@@ -28,7 +28,36 @@ func piSandboxPolicy(readDirs, writeDirs []string, endpoint string) string {
 	}
 	physicalEndpoint := strings.Replace(endpoint, "/tmp/", "/private/tmp/", 1)
 	fmt.Fprintf(&policy, "(allow file-read* file-write* (literal %s) (literal %s) (literal \"/dev/null\"))\n", strconv.Quote(endpoint), strconv.Quote(physicalEndpoint))
+	// Unconditional deny does not remove bsd.sb's filtered file exceptions.
+	for _, rule := range []struct {
+		operations string
+		dirs       []string
+		literals   []string
+	}{
+		{"file-read-data file-read-xattr", readDirs, []string{"/", endpoint, physicalEndpoint, "/dev/null"}},
+		{"file-write*", writeDirs, []string{endpoint, physicalEndpoint, "/dev/null"}},
+	} {
+		fmt.Fprintf(&policy, "(deny %s (require-not (require-any\n", rule.operations)
+		for _, dir := range rule.dirs {
+			fmt.Fprintf(&policy, "  (subpath %s)\n", strconv.Quote(dir))
+		}
+		for _, path := range rule.literals {
+			fmt.Fprintf(&policy, "  (literal %s)\n", strconv.Quote(path))
+		}
+		policy.WriteString(")))\n")
+	}
 	return policy.String()
+}
+
+func piSandboxRuntimeDir(binary string) string {
+	dir := filepath.Dir(binary)
+	for parent := dir; parent != filepath.Dir(parent); parent = filepath.Dir(parent) {
+		if filepath.Base(filepath.Dir(parent)) == "node_modules" ||
+			(strings.HasPrefix(filepath.Base(filepath.Dir(parent)), "@") && filepath.Base(filepath.Dir(filepath.Dir(parent))) == "node_modules") {
+			return parent
+		}
+	}
+	return dir
 }
 
 func runPiSandbox(profile, home string, args ...string) (int, string, error) {
@@ -36,6 +65,7 @@ func runPiSandbox(profile, home string, args ...string) (int, string, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "/usr/bin/sandbox-exec", append([]string{"-f", profile}, args...)...)
 	cmd.Env = pi.IsolatedEnv(home)
+	cmd.Dir = home
 	return piSandboxCommandResult(cmd)
 }
 
@@ -93,6 +123,8 @@ func TestPiSandboxPolicy(t *testing.T) {
 		`(allow file-read* (subpath "/isolated"))`,
 		`(allow file-write* (subpath "/isolated/work"))`,
 		`(literal "/tmp/pi.sock") (literal "/private/tmp/pi.sock")`,
+		"(deny file-read-data file-read-xattr (require-not (require-any\n",
+		"(deny file-write* (require-not (require-any\n",
 	} {
 		if !strings.Contains(policy, rule) {
 			t.Fatalf("missing sandbox rule %s", rule)
@@ -100,6 +132,27 @@ func TestPiSandboxPolicy(t *testing.T) {
 	}
 	if strings.Contains(policy, "(allow default)") {
 		t.Fatal("sandbox must not allow all operations")
+	}
+}
+
+func TestPiSandboxRuntimeDir(t *testing.T) {
+	root := t.TempDir()
+	for _, parts := range [][]string{
+		{"node_modules", "@vendor", "pi", "dist", "src", "cli.js"},
+		{"node_modules", "pi", "dist", "cli.js"},
+		{"bin", "pi"},
+	} {
+		binary := filepath.Join(append([]string{root}, parts...)...)
+		want := filepath.Join(root, "bin")
+		if parts[0] == "node_modules" {
+			want = filepath.Join(root, "node_modules", "pi")
+			if parts[1] == "@vendor" {
+				want = filepath.Join(root, "node_modules", "@vendor", "pi")
+			}
+		}
+		if got := piSandboxRuntimeDir(binary); got != want {
+			t.Fatalf("runtime directory escaped its package: got %q want %q", got, want)
+		}
 	}
 }
 

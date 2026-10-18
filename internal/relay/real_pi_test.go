@@ -139,7 +139,7 @@ func TestRealPi(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	readDirs := []string{root, filepath.Join(physicalDataDir, "sessions"), filepath.Dir(nodeBin), filepath.Dir(filepath.Dir(filepath.Dir(bin)))}
+	readDirs := []string{root, filepath.Join(physicalDataDir, "sessions"), filepath.Dir(nodeBin), piSandboxRuntimeDir(bin)}
 	writeDirs := []string{filepath.Join(root, "home"), filepath.Join(root, "work"), filepath.Join(root, "probe"), filepath.Join(root, "missing-native"), filepath.Join(physicalDataDir, "sessions")}
 	if err := os.WriteFile(profile, []byte(piSandboxPolicy(readDirs, writeDirs, endpoint)), 0o600); err != nil {
 		t.Fatal(err)
