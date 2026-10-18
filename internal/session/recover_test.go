@@ -8,9 +8,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -193,6 +195,54 @@ func TestBusyLedgerIsNotTreatedAsCorrupt(t *testing.T) {
 	}
 	if err := InspectLedger(path + ".bad"); !errors.Is(err, ErrHistoryIncompatible) {
 		t.Fatalf("损坏文件没有标成不兼容: %v", err)
+	}
+}
+
+func TestLedgerPermissionErrorsAreUnread(t *testing.T) {
+	for _, statDenied := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stat_denied=%v", statDenied), func(t *testing.T) {
+			dir := t.TempDir()
+			path, err := LedgerPath(dir, mustSessionID(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := CreateLedger(path); err != nil {
+				t.Fatal(err)
+			}
+			denied := path
+			mode := os.FileMode(0o600)
+			if statDenied {
+				denied = filepath.Dir(path)
+				mode = 0o700
+			}
+			if err := os.Chmod(denied, 0); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(denied, mode) })
+			if f, err := os.Open(path); err == nil {
+				f.Close()
+				t.Skip("当前用户仍能读取无权限文件")
+			}
+			if _, err := os.Stat(path); errors.Is(err, os.ErrPermission) != statDenied {
+				t.Fatalf("没有建立预期的 Stat 权限前提: %v", err)
+			}
+			if err := InspectLedger(path); !errors.Is(err, ErrHistoryUnread) {
+				t.Fatalf("权限错误被当成损坏: %v", err)
+			}
+			if w, err := openWorkerDB(path, nil); !errors.Is(err, ErrHistoryUnread) {
+				if w != nil {
+					w.Close()
+				}
+				t.Fatalf("Worker 打开权限错误被当成损坏: %v", err)
+			}
+		})
+	}
+}
+
+func TestLedgerIOErrorIsUnread(t *testing.T) {
+	err := &os.PathError{Op: "read", Path: "ledger.db", Err: syscall.EIO}
+	if got := classifyLedgerErr(err); !errors.Is(got, ErrHistoryUnread) || errors.Is(got, ErrHistoryIncompatible) {
+		t.Fatalf("IO 错误被当成历史损坏: %v", got)
 	}
 }
 

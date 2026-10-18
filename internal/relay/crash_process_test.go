@@ -286,6 +286,7 @@ func TestMissingHistoryFromRunningIsReported(t *testing.T) {
 	})
 	created := acceptTask(t, st, "missing-history")
 	waitTaskStatus(t, st, created.TaskID, task.StatusRunning)
+	st.batond.waitExit(t, 20*time.Second)
 	sessionID := sessionOf(t, st, created.TaskID)
 	worker := workerStatus(t, st.dataDir, sessionID)
 	stopWorker(worker.PID)
@@ -305,6 +306,68 @@ func TestMissingHistoryFromRunningIsReported(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("缺失历史被新建了: %v", err)
+	}
+}
+
+func TestPersistentHistoryPermissionFailureIsReported(t *testing.T) {
+	for _, statDenied := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stat_denied=%v", statDenied), func(t *testing.T) {
+			st := startPrepareStack(t, map[string]string{
+				"BATON_TEST_HOLD_START":      "0",
+				"BATON_TEST_EXECUTOR_SCRIPT": "success",
+				"BATON_TEST_CRASH_AFTER":     "after_started",
+			})
+			created := acceptTask(t, st, "unread-history")
+			waitTaskStatus(t, st, created.TaskID, task.StatusRunning)
+			sessionID := sessionOf(t, st, created.TaskID)
+			worker := workerStatus(t, st.dataDir, sessionID)
+			st.batond.stop()
+			stopWorker(worker.PID)
+			waitWorkerSocketDown(t, st.dataDir, sessionID)
+			path, err := session.LedgerPath(st.dataDir, sessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			denied, mode := path, os.FileMode(0o600)
+			if statDenied {
+				denied, mode = filepath.Dir(path), 0o700
+			}
+			if err := os.Chmod(denied, 0); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(denied, mode) })
+			if f, err := os.Open(path); err == nil {
+				f.Close()
+				t.Skip("当前用户仍能读取无权限文件")
+			}
+			restartBatond(t, st)
+			waitTaskCode(t, st, created.TaskID, task.CodeUncertainHistory)
+			waitLog(t, st.batond, "event=history_reported")
+			time.Sleep(time.Second)
+			before := strings.Count(st.batond.out.String(), "event=history_read_failed")
+			if before < 3 || before > 4 || strings.Contains(st.batond.out.String(), "event=history_unreadable") {
+				t.Fatalf("权限错误没有走有界读取失败路径: %s", st.batond.out.String())
+			}
+			time.Sleep(time.Second)
+			if after := strings.Count(st.batond.out.String(), "event=history_read_failed"); after != before {
+				t.Fatalf("上报后还在无限读取: before %d after %d", before, after)
+			}
+			status, executions, deliveries := taskFacts(t, st, created.TaskID)
+			if status != task.StatusNeedsVerification || executions != 1 || deliveries != 0 ||
+				executorCount(t, st, "start") != 1 || executorCount(t, st, "input") != 1 {
+				t.Fatalf("不可读历史触发了重跑: %s executions %d deliveries %d", status, executions, deliveries)
+			}
+			if err := os.Chmod(denied, mode); err != nil {
+				t.Fatal(err)
+			}
+			restartBatond(t, st)
+			waitLog(t, st.batond, "event=history_reported")
+			waitWorkerSocketDown(t, st.dataDir, sessionID)
+			if strings.Contains(st.batond.out.String(), "event=history_read_failed") ||
+				strings.Contains(st.batond.out.String(), "event=worker_pid_not_proof") {
+				t.Fatalf("重启清空了已耗尽的读取预算: %s", st.batond.out.String())
+			}
+		})
 	}
 }
 

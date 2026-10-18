@@ -202,6 +202,8 @@ Relay 重新连上 Coordinator 时会取得包含该吊销的安全快照；已�
 
 `start_intent` 已经记下、但还不能证明输入已经送出时，Worker 进程再启动不会重发输入，任务变为 `needs_verification`，原因码是 `uncertain_input`。输入已经确认、原 Worker 却已退出时原因码是 `uncertain_worker`，账本里的进程号不能当成同一次执行仍在运行。本地历史缺失或损坏时原因码是 `uncertain_history`，不会新建一份空账本假装恢复成功。展示句子由中心根据原因码生成。同一 `event_id` 的重复上报只确认原记录，不改写任务状态。本地结果已经保存而中心确认丢失时，恢复后用同一个 `event_id` 补报一次。数据库短时不可用时不确认交付；恢复后补报，不重复记账，也不再执行一次。batond 重启会连回仍在运行的 Worker；已经交付或已经上报待核实的历史 Session 不再拉起常驻进程。
 
+Worker 无法应答时，账本的权限、IO、打开失败和锁忙统一作为读取失败，不直接判为损坏。每个 Session 连续 3 次心跳补报检查读取失败后，上报 `needs_verification` / `uncertain_history`，停止离线账本的自动读取与 Worker 重建；中心未确认时只补报同一事件。计数保存在节点账本已有的 `meta` 中，重连或重启不清零；阈值前成功读取会清零，因此短暂锁忙只记录 `history_read_failed` 并留待下次心跳。原 Worker 仍可补回同一次执行的有效证据，成功连回时也会清零；不新建执行或重发不确定输入。
+
 执行器接受输入后，Worker 持续把过程记在本地 `execution_log`。它向中心上报 `started`，任务变为 `running`。最终输出要能通过结构校验，并且执行器明确给出 `completed` 或 `failed`。平台用自己保存的任务、节点和 Session 覆盖执行器正文里的身份字段。证据或产物为空时必须有原因。引用要带资源标识、访问状态，以及节点或存储位置。
 
 进程退出、自由文本（包括单独一句“完成”）不会变成成功。测试执行器没有外部副作用，这种情况记为 `failed`，原因是 `result_format`。结果先留在 Worker 的本地 outbox。中心在同一个事务里保存状态、摘要、引用和 `delivery_records` 并提交之后，才回复确认；Worker 收到确认后才把这条结果标成已交付。同一 `event_id` 的重复上报只确认原来的记录。完整过程和原始输出不写入 `task_events`。

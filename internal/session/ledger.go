@@ -30,7 +30,7 @@ var (
 	ErrHistoryMissing = errors.New("Session 历史缺失")
 	// ErrHistoryIncompatible 表示账本已损坏或不是本组件能读取的格式。
 	ErrHistoryIncompatible = errors.New("Session 历史已损坏或不兼容")
-	// ErrHistoryUnread 表示这次没有读成账本。它不是损坏证据，调用方应在下次心跳重试。
+	// ErrHistoryUnread 不是损坏证据；调用方应有界重试，持续失败后报告历史待核实。
 	ErrHistoryUnread = errors.New("Session 历史这次没有读成")
 )
 
@@ -71,20 +71,20 @@ func openWorkerDB(path string, observer *Observer) (*workerDB, error) {
 		return nil, ErrHistoryMissing
 	}
 	if statErr != nil {
-		return nil, ErrHistoryIncompatible
+		return nil, classifyLedgerErr(statErr)
 	}
 	if info.IsDir() || info.Size() == 0 {
 		return nil, ErrHistoryIncompatible
 	}
 	db, err := sql.Open("sqlite", sqliteDSN(path))
 	if err != nil {
-		return nil, ErrHistoryIncompatible
+		return nil, classifyLedgerErr(err)
 	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 	if err := db.Ping(); err != nil {
 		db.Close()
-		return nil, ErrHistoryIncompatible
+		return nil, classifyLedgerErr(err)
 	}
 	if err := verifyWorkerSchema(db); err != nil {
 		db.Close()
@@ -855,12 +855,15 @@ func InspectLedger(path string) error {
 	if errors.Is(err, os.ErrNotExist) {
 		return ErrHistoryMissing
 	}
-	if err != nil || info.IsDir() || info.Size() == 0 {
+	if err != nil {
+		return classifyLedgerErr(err)
+	}
+	if info.IsDir() || info.Size() == 0 {
 		return ErrHistoryIncompatible
 	}
 	db, err := sql.Open("sqlite", sqliteDSN(path))
 	if err != nil {
-		return ErrHistoryIncompatible
+		return classifyLedgerErr(err)
 	}
 	defer db.Close()
 	db.SetMaxOpenConns(1)
@@ -941,7 +944,7 @@ func LedgerNeedsWorker(path string) (bool, error) {
 	return true, nil
 }
 
-// classifyLedgerErr 只把文件损坏当成不兼容。锁、忙和暂时打不开留到下次心跳。
+// classifyLedgerErr 只把文件损坏当成不兼容，其余读取失败交给调用方有界重试。
 func classifyLedgerErr(err error) error {
 	if err == nil {
 		return nil

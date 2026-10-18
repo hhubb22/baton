@@ -73,8 +73,18 @@ func Maintain(ctx context.Context, opts RunOptions) error {
 		if err != nil {
 			return err
 		}
+		var reconnectable []string
+		for _, id := range sessions {
+			failures, err := ledger.historyReadFailures(id)
+			if err != nil {
+				return errors.New("无法读取历史重试状态")
+			}
+			if failures < historyReadFailureLimit {
+				reconnectable = append(reconnectable, id)
+			}
+		}
 		reconnectCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		host.Reconnect(reconnectCtx, sessions)
+		host.Reconnect(reconnectCtx, reconnectable)
 		cancel()
 	}
 	attempt := 0
