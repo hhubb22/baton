@@ -387,7 +387,6 @@ func TestLivingWorkerResultSurvivesMissingLedger(t *testing.T) {
 	if worker.PID <= 0 {
 		t.Fatal("结果还在 Worker 里，进程却不在")
 	}
-	releaseGate(t, gate, waitGateFile(t, gate))
 	client := dialWorker(t, st.dataDir, sessionID)
 	defer client.Close()
 	resultSaved := false
@@ -417,6 +416,7 @@ func TestLivingWorkerResultSurvivesMissingLedger(t *testing.T) {
 		t.Fatal(err)
 	}
 	restartBatond(t, st)
+	releaseGate(t, gate, waitGateFile(t, gate))
 	waitTaskStatus(t, st, created.TaskID, task.StatusCompleted)
 	status, executions, deliveries := taskFacts(t, st, created.TaskID)
 	code := ""
