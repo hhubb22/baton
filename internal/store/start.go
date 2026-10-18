@@ -594,6 +594,8 @@ func lockCancel(ctx context.Context, tx pgx.Tx, employeeID, taskID string) (lock
 	return row, exec, err
 }
 
+// 中心事务同时锁定 tasks 与 executions 时，必须先锁 tasks，再锁 executions；
+// 不依赖 JOIN 的执行计划决定行锁顺序，准备落库、许可、报告、取消和到期路径均遵守此约定。
 func lockTask(ctx context.Context, tx pgx.Tx, employeeID, taskID string) (lockedTask, error) {
 	var row lockedTask
 	err := tx.QueryRow(ctx, `

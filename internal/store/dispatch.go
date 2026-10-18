@@ -168,21 +168,6 @@ func (s *Store) SavePrepared(ctx context.Context, fact PreparedFact) error {
 	if executionID != fact.ExecutionID || taskID != fact.TaskID || nodeID != fact.NodeID {
 		return errors.New("准备结果与投递意图不一致")
 	}
-	var preparedAt *time.Time
-	err = tx.QueryRow(ctx, `
-		SELECT prepared_at
-		FROM executions
-		WHERE id = $1::uuid AND employee_id = $2::uuid AND task_id = $3::uuid
-		FOR UPDATE`, fact.ExecutionID, fact.EmployeeID, fact.TaskID).Scan(&preparedAt)
-	if err != nil {
-		return fmt.Errorf("保存准备事实失败: %s", redact.Scrub(err.Error()))
-	}
-	if preparedAt != nil {
-		if err := ackOutbox(ctx, tx, fact.MessageID); err != nil {
-			return err
-		}
-		return tx.Commit(ctx)
-	}
 	var version int
 	var status, agent, targetNode string
 	var targetSession *string
@@ -198,6 +183,21 @@ func (s *Store) SavePrepared(ctx context.Context, fact PreparedFact) error {
 	)
 	if err != nil {
 		return fmt.Errorf("保存准备事实失败: %s", redact.Scrub(err.Error()))
+	}
+	var preparedAt *time.Time
+	err = tx.QueryRow(ctx, `
+		SELECT prepared_at
+		FROM executions
+		WHERE id = $1::uuid AND employee_id = $2::uuid AND task_id = $3::uuid
+		FOR UPDATE`, fact.ExecutionID, fact.EmployeeID, fact.TaskID).Scan(&preparedAt)
+	if err != nil {
+		return fmt.Errorf("保存准备事实失败: %s", redact.Scrub(err.Error()))
+	}
+	if preparedAt != nil {
+		if err := ackOutbox(ctx, tx, fact.MessageID); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
 	}
 	if status != task.StatusQueued || targetNode != fact.NodeID {
 		return errors.New("任务状态不能保存准备事实")
@@ -322,12 +322,12 @@ func (s *Store) FailPrepare(ctx context.Context, fact PreparedFact, code, messag
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	var acked *time.Time
-	var executionID, taskID string
+	var executionID, taskID, employeeID string
 	err = tx.QueryRow(ctx, `
-		SELECT acked_at, execution_id::text, task_id::text
+		SELECT acked_at, execution_id::text, task_id::text, employee_id::text
 		FROM dispatch_outbox
 		WHERE id = $1::uuid
-		FOR UPDATE`, fact.MessageID).Scan(&acked, &executionID, &taskID)
+		FOR UPDATE`, fact.MessageID).Scan(&acked, &executionID, &taskID, &employeeID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return errors.New("找不到准备投递")
 	}
@@ -339,23 +339,7 @@ func (s *Store) FailPrepare(ctx context.Context, fact PreparedFact, code, messag
 	}
 	fact.ExecutionID = executionID
 	fact.TaskID = taskID
-	var preparedAt *time.Time
-	var employeeID string
-	err = tx.QueryRow(ctx, `
-		SELECT employee_id::text, prepared_at
-		FROM executions
-		WHERE id = $1::uuid
-		FOR UPDATE`, executionID).Scan(&employeeID, &preparedAt)
-	if err != nil {
-		return fmt.Errorf("保存准备失败: %s", redact.Scrub(err.Error()))
-	}
 	fact.EmployeeID = employeeID
-	if preparedAt != nil {
-		if err := ackOutbox(ctx, tx, fact.MessageID); err != nil {
-			return err
-		}
-		return tx.Commit(ctx)
-	}
 	var version int
 	var status, agent, nodeID string
 	var queueExpires time.Time
@@ -367,6 +351,21 @@ func (s *Store) FailPrepare(ctx context.Context, fact PreparedFact, code, messag
 		FOR UPDATE`, taskID, employeeID).Scan(&version, &status, &agent, &nodeID, &queueExpires, &execSeconds)
 	if err != nil {
 		return fmt.Errorf("保存准备失败: %s", redact.Scrub(err.Error()))
+	}
+	var preparedAt *time.Time
+	err = tx.QueryRow(ctx, `
+		SELECT prepared_at
+		FROM executions
+		WHERE id = $1::uuid AND employee_id = $2::uuid AND task_id = $3::uuid
+		FOR UPDATE`, executionID, employeeID, taskID).Scan(&preparedAt)
+	if err != nil {
+		return fmt.Errorf("保存准备失败: %s", redact.Scrub(err.Error()))
+	}
+	if preparedAt != nil {
+		if err := ackOutbox(ctx, tx, fact.MessageID); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
 	}
 	if status != task.StatusQueued {
 		if err := ackOutbox(ctx, tx, fact.MessageID); err != nil {
