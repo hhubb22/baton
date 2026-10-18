@@ -1,5 +1,9 @@
 # Baton 技术设计
 
+当前已实现补充（PS-119 / T15）：独立 `internal/adapters` 最小边界与 Codex CLI **0.162.1** stdio app-server 接入 Worker 既有许可、输入意图、输入代次、中止、outbox 和本地历史路径。实现 initialize/initialized、thread/start/read/resume、turn/start/steer/interrupt、turn/completed 及 thread/turns/list、thread/items/list 分页；固定版本不匹配、实验方法不兼容、原生身份/cwd/Session 映射不符、历史缺失或输入发送窗口不明均拒绝自动重放，不创建替代 thread。clientUserMessageId 仅作关联；steer ACK 不证明历史落盘，历史中的关联 userMessage 才确认注入。Agent 经受限 BATON_CONTEXT_FILE 使用既有委托 CLI，完整原始历史不上传中心；本地已认证 IPC 提供分页历史，尚无中心原文查询 API。只注入 Agent 必要环境，使用禁止审批的 workspace-write sandbox（为本地委托开启网络），拒绝服务端审批、认证刷新和交互工具请求。
+
+验证分工：已提供 CLI 官方导出的固定 Schema、人工协议帧回放、真实 stdio 子进程与 Worker 账本回归；它们不证明真实模型任务通过。显式开启的 `TestRealCodex` 使用临时工作目录和独立已认证临时 CODEX_HOME，覆盖启动、活动输入、结构化输出、完成、中止、同一 thread/turn 恢复及真实父子委托，输出逐项支持矩阵。云端不登录模型账号，仅验证版本、帮助、Schema 导出和无模型初始化；真实模型与 macOS/Windows Codex 行为须由本机实测回传后验收，确切命令见 README。此次不实现 Pi/T14、不新增迁移；适配器接口按 TECH 最小方法独立定义，T14 合并时需协调接口。
+
 Status: approved
 Owner: 待指定
 Date: 2026-10-17

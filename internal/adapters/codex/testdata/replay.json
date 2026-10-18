@@ -1,0 +1,8 @@
+{
+  "initialize":{"userAgent":"codex/0.162.1","platformFamily":"unix","platformOs":"linux","codexHome":"/fixture"},
+  "thread/start":{"approvalPolicy":"never","approvalsReviewer":"user","cwd":"/fixture","model":"fixture-model","modelProvider":"openai","sandbox":{"type":"workspaceWrite","networkAccess":true},"thread":{"id":"thread-fixture","cliVersion":"0.162.1","createdAt":1,"updatedAt":1,"cwd":"/fixture","ephemeral":false,"modelProvider":"openai","preview":"fixture","projectId":null,"sessionId":"native-session-fixture","source":"appServer","status":{"type":"idle"},"turns":[]}},
+  "turn/start":{"turn":{"id":"turn-fixture","status":"inProgress","items":[]}},
+  "turn/steer":{"turnId":"turn-fixture"},
+  "turn/interrupt":{},
+  "turn/completed":{"threadId":"thread-fixture","turn":{"id":"turn-fixture","status":"completed","items":[{"type":"agentMessage","id":"message-fixture","phase":"final_answer","text":"{\"status\":\"completed\",\"summary\":\"fixture\",\"evidence\":[],\"artifacts\":[],\"evidence_empty_reason\":\"no external evidence\",\"artifacts_empty_reason\":\"no artifacts\",\"error\":null}"}]}}
+}

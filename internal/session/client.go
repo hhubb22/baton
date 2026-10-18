@@ -122,6 +122,7 @@ func (c *Client) roundTrip(msg ipcMessage) (Status, error) {
 		return Status{}, errors.New("Worker 拒绝了命令")
 	}
 	return Status{
+		History: reply.History, HistoryCursor: reply.HistoryCursor,
 		ChildReceipts: reply.ChildReceipts,
 		Cancelled:     reply.Cancelled, InputDueAt: reply.InputDueAt,
 		PID:             reply.PID,
