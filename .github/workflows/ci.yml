@@ -1,0 +1,142 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  BATON_TEST_DATABASE_URL: postgres://postgres:baton@127.0.0.1:55432/baton_test?sslmode=disable
+
+jobs:
+  linux:
+    name: Linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: baton
+          POSTGRES_DB: baton_test
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d baton_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: actions/setup-go@v6.1.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build
+        run: go build ./...
+      - name: Cross-build Windows
+        run: GOOS=windows go build ./...
+      - name: Cross-build macOS
+        run: GOOS=darwin go build ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        id: test
+        run: go test -v -count=1 ./...
+      - name: Race test
+        if: ${{ !cancelled() && steps.test.outcome != 'skipped' }}
+        run: go test -race -v -count=1 ./internal/session ./internal/node ./internal/store ./internal/relay ./internal/control
+
+  native:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-latest
+          - name: Windows
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: actions/setup-go@v6.1.0
+        id: go
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: ikalnytskyi/action-setup-postgres@v8
+        id: postgres
+        with:
+          postgres-version: '17'
+          username: postgres
+          password: baton
+          database: baton_test
+          port: '55432'
+      - name: Build
+        run: go build ./...
+      - name: Vet
+        if: ${{ !cancelled() && steps.go.outcome == 'success' && steps.postgres.outcome == 'success' }}
+        run: go vet ./...
+      - name: Test
+        if: ${{ !cancelled() && steps.go.outcome == 'success' && steps.postgres.outcome == 'success' }}
+        run: go test -v -count=1 ./...
+
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: web
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: baton
+          POSTGRES_DB: baton_test
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d baton_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: actions/setup-go@v6.1.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: pnpm/action-setup@v4.2.0
+        with:
+          version: '12.11.2'
+      - uses: actions/setup-node@v6.0.0
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Lint
+        run: pnpm lint
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Unit tests
+        run: pnpm test
+      - name: E2E tests
+        run: pnpm test:e2e
+      - name: Check embedded dist
+        run: pnpm check:dist
