@@ -1,13 +1,13 @@
 package node
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"baton/internal/identity"
+	"baton/internal/privatefiletest"
 )
 
 func TestIdentityFileSurvivesReloadAndRejectsLoosePermissions(t *testing.T) {
@@ -16,20 +16,8 @@ func TestIdentityFileSurvivesReloadAndRejectsLoosePermissions(t *testing.T) {
 	if err := WriteIdentity(dir, ident); err != nil {
 		t.Fatal(err)
 	}
-	info, err := os.Stat(filepath.Join(dir, IdentityFileName))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("身份文件权限是 %o", info.Mode().Perm())
-	}
-	dirInfo, err := os.Stat(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if dirInfo.Mode().Perm() != 0o700 {
-		t.Fatalf("数据目录权限是 %o", dirInfo.Mode().Perm())
-	}
+	privatefiletest.AssertPrivate(t, filepath.Join(dir, IdentityFileName))
+	privatefiletest.AssertPrivate(t, dir)
 	got, err := ReadIdentity(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -40,9 +28,7 @@ func TestIdentityFileSurvivesReloadAndRejectsLoosePermissions(t *testing.T) {
 	if strings.Contains(FormatPublic(got), ident.Credential.Token) {
 		t.Fatal("公开摘要包含连接凭据")
 	}
-	if err := os.Chmod(filepath.Join(dir, IdentityFileName), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	privatefiletest.MakePublic(t, filepath.Join(dir, IdentityFileName))
 	_, err = ReadIdentity(dir)
 	if err == nil || strings.Contains(err.Error(), ident.Credential.Token) {
 		t.Fatal("权限过宽的身份文件仍被读取，或错误包含凭据")

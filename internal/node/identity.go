@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"baton/internal/identity"
+	"baton/internal/privatefile"
 )
 
 const (
@@ -95,7 +97,7 @@ func PrepareDataDir(dir string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return errors.New("无法创建节点数据目录")
 	}
-	if err := os.Chmod(dir, 0o700); err != nil {
+	if err := privatefile.ProtectDir(dir); err != nil {
 		return errors.New("无法限制节点数据目录的权限")
 	}
 	info, err := os.Lstat(dir)
@@ -105,7 +107,7 @@ func PrepareDataDir(dir string) error {
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return errors.New("节点数据目录无效")
 	}
-	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
+	if err := privatefile.CheckDir(dir); err != nil {
 		return errors.New("节点数据目录允许其他用户进入")
 	}
 	return nil
@@ -127,7 +129,7 @@ func WriteIdentity(dir string, ident Identity) error {
 		return errors.New("节点身份无法编码")
 	}
 	body = append(body, '\n')
-	tmp, err := os.CreateTemp(dir, ".identity-*.tmp")
+	tmp, err := privatefile.CreateTemp(dir, ".identity-")
 	if err != nil {
 		return errors.New("无法写入节点身份")
 	}
@@ -138,10 +140,6 @@ func WriteIdentity(dir string, ident Identity) error {
 			_ = os.Remove(tmpName)
 		}
 	}()
-	if err := tmp.Chmod(0o600); err != nil {
-		_ = tmp.Close()
-		return errors.New("无法限制节点身份文件的权限")
-	}
 	if _, err := tmp.Write(body); err != nil {
 		_ = tmp.Close()
 		return errors.New("无法写入节点身份")
@@ -163,9 +161,6 @@ func WriteIdentity(dir string, ident Identity) error {
 		return errors.New("无法写入节点身份")
 	}
 	written = true
-	if err := os.Chmod(dest, 0o600); err != nil {
-		return errors.New("无法限制节点身份文件的权限")
-	}
 	if dirFile, err := os.Open(dir); err == nil {
 		_ = dirFile.Sync()
 		_ = dirFile.Close()
@@ -177,24 +172,15 @@ func WriteIdentity(dir string, ident Identity) error {
 // 权限过宽、符号链接或内容损坏时返回其他错误，调用方不能据此重新注册。
 func ReadIdentity(dir string) (Identity, error) {
 	path := filepath.Join(dir, IdentityFileName)
-	info, err := os.Lstat(path)
+	f, err := privatefile.Open(path)
 	if err != nil {
 		return Identity{}, err
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return Identity{}, errors.New("节点身份文件无法读取")
-	}
-	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
-		return Identity{}, errors.New("节点身份文件允许其他用户读取")
-	}
-	dirInfo, err := os.Lstat(dir)
-	if err != nil {
-		return Identity{}, errors.New("节点身份文件无法读取")
-	}
-	if runtime.GOOS != "windows" && dirInfo.Mode().Perm()&0o077 != 0 {
+	defer f.Close()
+	if err := privatefile.CheckDir(dir); err != nil {
 		return Identity{}, errors.New("节点数据目录允许其他用户进入")
 	}
-	raw, err := os.ReadFile(path)
+	raw, err := io.ReadAll(f)
 	if err != nil {
 		return Identity{}, errors.New("节点身份文件无法读取")
 	}
@@ -213,20 +199,19 @@ func ReadIdentity(dir string) (Identity, error) {
 
 // ReadSecretFile 读取仅当前用户可读的注册凭据文件。错误文本不包含文件内容。
 func ReadSecretFile(path string) (string, error) {
-	info, err := os.Lstat(path)
+	f, err := privatefile.Open(path)
 	if err != nil {
 		return "", errors.New("无法读取注册凭据文件")
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return "", errors.New("注册凭据文件无效")
-	}
-	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
-		return "", errors.New("注册凭据文件允许其他用户读取")
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return "", errors.New("无法读取注册凭据文件")
 	}
 	if info.Size() == 0 || info.Size() > 512 {
 		return "", errors.New("注册凭据文件无效")
 	}
-	raw, err := os.ReadFile(path)
+	raw, err := io.ReadAll(io.LimitReader(f, 513))
 	if err != nil {
 		return "", errors.New("无法读取注册凭据文件")
 	}

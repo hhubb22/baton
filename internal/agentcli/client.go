@@ -8,9 +8,9 @@ import (
 	"errors"
 	"io"
 	"os"
-	"runtime"
 	"time"
 
+	"baton/internal/privatefile"
 	"baton/internal/protocol"
 	"baton/internal/session"
 	"baton/internal/task"
@@ -95,11 +95,13 @@ func Call(ctx context.Context, path string, req Request) (protocol.AgentResult, 
 }
 
 func ReadContext(path string, out *Context) error {
-	info, err := os.Lstat(path)
-	if err != nil || !info.Mode().IsRegular() || (runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0) {
+	f, err := privatefile.Open(path)
+	if err != nil {
 		return errors.New("上下文文件不可用或权限过宽")
 	}
-	if ReadFile(path, out) != nil || out.Endpoint == "" || len(out.Token) != 64 {
+	defer f.Close()
+	raw, err := io.ReadAll(io.LimitReader(f, protocol.MaxMessageBytes+1))
+	if err != nil || Decode(raw, out) != nil || out.Endpoint == "" || len(out.Token) != 64 {
 		return errors.New("上下文文件无效")
 	}
 	return nil

@@ -38,6 +38,8 @@
 
 注册凭据和节点连接凭据不进入 URL、命令行参数或日志。注册凭据和浏览器会话在数据库里只保存 SHA-256。节点连接凭据是 Ed25519 签名的 JWT，数据库只保存可吊销的 `credential_id`，不保存 JWT。签名私钥只在 Coordinator。
 
+身份文件、签名私钥、Agent CLI 上下文和文件形式的注册凭据均只允许当前用户访问。Linux/macOS 写入权限为 `0600`（节点数据目录为 `0700`）；Windows 写入时设置当前用户为所有者，并使用只授予该用户访问的受保护 DACL，去掉继承，不额外授权 SYSTEM/Administrators。读取时检查真实文件句柄的权限；其他用户或组可访问、继承或未保护的 DACL 均拒绝。外部提供的 Windows 签名私钥和注册凭据文件也必须满足此 ACL，默认继承 ACL 不会被自动接受。秘密文件不能是符号链接，Windows 还拒绝路径中的 junction 等 reparse point。
+
 ## 命令
 
 ```text
@@ -89,7 +91,7 @@ batond run --relay wss://baton.example/v1/node
 
 ## Agent 本地 CLI
 
-batond 在准备执行时创建 `sessions/<session_id>/agent-<execution_id>.json`（相对于节点数据目录，文件权限 `0600`）。执行环境用 `BATON_CONTEXT_FILE` 指向**该次执行**的文件；不要把文件内容、令牌或节点连接凭据放进命令行、任务说明或日志。当前测试执行器不启动真实 Agent，真实适配器仍需负责传入这个环境变量。
+batond 在准备执行时创建 `sessions/<session_id>/agent-<execution_id>.json`（相对于节点数据目录；Unix 文件权限 `0600`，Windows 使用上述受保护 DACL）。执行环境用 `BATON_CONTEXT_FILE` 指向**该次执行**的文件；不要把文件内容、令牌或节点连接凭据放进命令行、任务说明或日志。当前测试执行器不启动真实 Agent，真实适配器仍需负责传入这个环境变量。
 
 ```text
 baton delegate --request-file request.json --json

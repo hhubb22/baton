@@ -9,12 +9,13 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"baton/internal/identity"
+	"baton/internal/privatefile"
+	"baton/internal/privatefiletest"
 	"baton/internal/protocol"
 	"baton/internal/session"
 	"baton/internal/task"
@@ -42,9 +43,6 @@ func TestStrictRequestAndWaitFlags(t *testing.T) {
 }
 
 func TestContextRejectsInsecureFiles(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix 文件权限与符号链接")
-	}
 	path := filepath.Join(t.TempDir(), "context.json")
 	token := make([]byte, 32)
 	if _, err := rand.Read(token); err != nil {
@@ -54,19 +52,17 @@ func TestContextRejectsInsecureFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, raw, 0o600); err != nil {
+	if err := privatefile.WriteFile(path, raw); err != nil {
 		t.Fatal(err)
 	}
 	if err := ReadContext(path, new(Context)); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(path, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	privatefiletest.MakePublic(t, path)
 	if err := ReadContext(path, new(Context)); err == nil {
 		t.Fatal("接受了权限过宽的上下文")
 	}
-	if err := os.Chmod(path, 0o600); err != nil {
+	if err := privatefile.WriteFile(path, raw); err != nil {
 		t.Fatal(err)
 	}
 	link := filepath.Join(filepath.Dir(path), "link.json")
@@ -106,7 +102,7 @@ func TestWaitOnlyReadsAndHonorsDeadline(t *testing.T) {
 				t.Fatal(err)
 			}
 			path := filepath.Join(dir, "context.json")
-			if err := os.WriteFile(path, raw, 0o600); err != nil {
+			if err := privatefile.WriteFile(path, raw); err != nil {
 				t.Fatal(err)
 			}
 			var reads, writes atomic.Int64

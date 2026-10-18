@@ -11,11 +11,11 @@ import (
 	"io"
 	"net"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
 	"baton/internal/agentcli"
+	"baton/internal/privatefile"
 	"baton/internal/protocol"
 	"baton/internal/session"
 	"baton/internal/task"
@@ -63,22 +63,7 @@ func (l *Ledger) ensureAgentContext(report PrepareReport) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(filepath.Dir(path), ".agent-*")
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	defer os.Remove(f.Name())
-	if _, err := f.Write(data); err != nil {
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	return os.Rename(f.Name(), path)
+	return privatefile.WriteFile(path, data)
 }
 
 func (l *Ledger) agentBinding(token string) (protocol.AgentRequest, error) {
