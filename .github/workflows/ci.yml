@@ -100,6 +100,10 @@ jobs:
         if: ${{ !cancelled() && steps.go.outcome == 'success' && steps.postgres.outcome == 'success' }}
         run: go test -v -count=1 ./...
 
+      - name: Pi sandbox smoke test (no model)
+        if: ${{ !cancelled() && matrix.name == 'macOS' }}
+        run: go test -v -count=10 ./internal/relay -run '^TestPiSandbox$'
+
   web:
     name: Web
     runs-on: ubuntu-latest

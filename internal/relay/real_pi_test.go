@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -49,7 +48,7 @@ func TestRealPi(t *testing.T) {
 		t.Fatal("BATON_PI_MODEL is required; select an inexpensive provider/model")
 	}
 	keyPresent := false
-	for _, key := range []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY", "XAI_API_KEY", "OPENROUTER_API_KEY", "MISTRAL_API_KEY", "ZAI_API_KEY"} {
+	for _, key := range []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_CLOUD_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY", "XAI_API_KEY", "OPENROUTER_API_KEY", "MISTRAL_API_KEY", "ZAI_API_KEY"} {
 		keyPresent = keyPresent || os.Getenv(key) != ""
 	}
 	if !keyPresent {
@@ -136,40 +135,16 @@ func TestRealPi(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var policy strings.Builder
 	physicalDataDir, err := filepath.EvalSymlinks(st.dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy.WriteString("(version 1)\n(deny default)\n(allow process* sysctl-read mach-lookup network*)\n(allow file-read-metadata)\n")
-	readDirs := []string{root, filepath.Join(physicalDataDir, "sessions"), "/System", "/usr", "/bin", "/sbin", "/Library", "/opt/homebrew", "/private/etc", "/dev", "/private/var/db", filepath.Dir(nodeBin), filepath.Dir(filepath.Dir(filepath.Dir(bin)))}
-	for _, dir := range readDirs {
-		fmt.Fprintf(&policy, "(allow file-read* (subpath %s))\n", strconv.Quote(dir))
-	}
-	for _, dir := range []string{filepath.Join(root, "home"), filepath.Join(root, "work"), filepath.Join(root, "probe"), filepath.Join(root, "missing-native"), filepath.Join(physicalDataDir, "sessions")} {
-		fmt.Fprintf(&policy, "(allow file-write* (subpath %s))\n", strconv.Quote(dir))
-	}
-	physicalEndpoint := strings.Replace(endpoint, "/tmp/", "/private/tmp/", 1)
-	fmt.Fprintf(&policy, "(allow file-read* file-write* (literal %s) (literal %s) (literal \"/dev/null\"))\n", strconv.Quote(endpoint), strconv.Quote(physicalEndpoint))
-	if err := os.WriteFile(profile, []byte(policy.String()), 0o600); err != nil {
+	readDirs := []string{root, filepath.Join(physicalDataDir, "sessions"), filepath.Dir(nodeBin), filepath.Dir(filepath.Dir(filepath.Dir(bin)))}
+	writeDirs := []string{filepath.Join(root, "home"), filepath.Join(root, "work"), filepath.Join(root, "probe"), filepath.Join(root, "missing-native"), filepath.Join(physicalDataDir, "sessions")}
+	if err := os.WriteFile(profile, []byte(piSandboxPolicy(readDirs, writeDirs, endpoint)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// Prove the boundary without asking a model to inspect any real user file.
-	outside := filepath.Join(t.TempDir(), "forbidden")
-	if err := os.WriteFile(outside, []byte("isolated-test-sentinel"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	guard := exec.Command("/usr/bin/sandbox-exec", "-f", profile, "/bin/sh", "-c", `test -r "$1" && cat "$1"`, "sh", outside)
-	guard.Env = pi.IsolatedEnv(filepath.Join(root, "home"))
-	if err := guard.Run(); err == nil {
-		capabilities["目录隔离"] = "不支持"
-		t.Fatal("sandbox allowed an outside file read")
-	}
-	guard = exec.Command("/usr/bin/sandbox-exec", "-f", profile, "/bin/sh", "-c", `printf ok > "$1"`, "sh", filepath.Join(root, "work", "sandbox-check"))
-	guard.Env = pi.IsolatedEnv(filepath.Join(root, "home"))
-	if err := guard.Run(); err != nil {
-		t.Fatal("sandbox unavailable; refusing unsandboxed execution")
-	}
+	checkPiSandbox(t, profile, root)
 	capabilities["目录隔离"] = "支持"
 	probeID, _ := identity.NewUUID()
 	probe := pi.New(agent.Config{Binary: wrapper, Model: model, Directory: filepath.Join(root, "probe"), SessionDir: filepath.Join(root, "probe", "native"), SessionID: probeID, Env: pi.IsolatedEnv(filepath.Join(root, "home"))})

@@ -115,13 +115,19 @@ Pi 使用 `--mode rpc`，禁用自动任务重试、启动联网、扩展/MCP/sk
 BATON_PI_PROBE=1 go test -v -count=1 ./internal/agent/pi -run '^TestPiNoModelProbe$'
 ```
 
-真实入口默认跳过、CI 不启用。**在 macOS 开发机**准备 Go、PostgreSQL 17 测试库、上述 Pi/Node 版本，设置 `BATON_TEST_DATABASE_URL`、`BATON_PI_MODEL` 与所选 provider 的 API key 环境变量（例如 `OPENAI_API_KEY` 或 `ANTHROPIC_API_KEY`）。不要把 key 值写进命令、文件或输出；入口不会读取已登录用户的 auth.json、HOME 或真实工作区，因此只有 OAuth 登录、没有独立环境凭据时需先准备所选入口的环境凭据。已有测试库需允许创建临时 schema，禁止指向业务库。运行：
+真实入口默认跳过、CI 不启用。**在 macOS 开发机**准备 Go、PostgreSQL 17 测试库、上述 Pi/Node 版本，设置 `BATON_TEST_DATABASE_URL`、`BATON_PI_MODEL` 与所选 provider 的 API key 环境变量（例如 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY` 或 Vertex 的 `GOOGLE_CLOUD_API_KEY`）。`GOOGLE_CLOUD_API_KEY` 会保留在隔离进程环境中，Vertex 可选择 `BATON_PI_MODEL=google-vertex/gemini-3.1-flash-lite`。不要把 key 值写进命令、文件或输出；入口不会读取已登录用户的 auth.json、HOME 或真实工作区，因此只有 OAuth 登录、没有独立环境凭据时需先准备所选入口的环境凭据。已有测试库需允许创建临时 schema，禁止指向业务库。运行：
 
 ```sh
 BATON_REAL_PI=1 go test -v -count=1 -timeout=30m ./... -run '^TestRealPi$'
 ```
 
-此入口在临时目录构建 Baton 二进制，创建独立 HOME/Pi 配置/工作区、测试 schema 与真实 Coordinator/Relay/batond/Worker，透传允许的 provider 环境变量，不复制或打印凭据。macOS `sandbox-exec` 限制 Pi 与其工具读写临时业务目录，只额外允许系统/运行时只读路径与测试 IPC；先验证目录外测试哨兵不可读、目录内可写，沙箱不可用就拒绝运行，不退回无沙箱模式。使用模型验证一次输入/结构化结果、CLI 委托与子结果原生历史确认、执行中中止、batond 重连，以及原生 Session 加载后新回合的上下文回忆与夹具未重放；另检查缺失历史拒绝。输出工具版本、平台、请求/实际模型及各能力“支持/不支持/未验证”，失败不打印原生历史；退出清理临时目录与测试进程。模型不遵循协议或环境问题会使对应能力保留未验证，不能据此宣称跨平台支持。
+此入口在临时目录构建 Baton 二进制，创建独立 HOME/Pi 配置/工作区、测试 schema 与真实 Coordinator/Relay/batond/Worker，透传允许的 provider 环境变量，不复制或打印凭据。macOS `sandbox-exec` 在 `deny default` 后导入系统 `bsd.sb` 提供进程启动权限，再收紧文件读写，只额外允许系统/运行时只读路径与测试 IPC。先验证目录内可写可读，再检查目录外测试哨兵不可读写、符号链接不能越界；沙箱启动崩溃不能冒充隔离成功。失败输出退出码、错误（含信号）和 stderr，不退回无沙箱模式；Go 的退出码 `-1` 表示没有普通退出码，例如进程被信号终止。使用模型验证一次输入/结构化结果、CLI 委托与子结果原生历史确认、执行中中止、batond 重连，以及原生 Session 加载后新回合的上下文回忆与夹具未重放；另检查缺失历史拒绝。输出工具版本、平台、请求/实际模型及各能力“支持/不支持/未验证”，失败不打印原生历史；退出清理临时目录与测试进程。模型不遵循协议或环境问题会使对应能力保留未验证，不能据此宣称跨平台支持。
+
+沙箱自检可不带模型或数据库单独运行；macOS CI 重复执行 10 次并记录 Darwin 版本，不能据此推断其他 macOS 版本兼容性：
+
+```sh
+go test -v -count=10 ./internal/relay -run '^TestPiSandbox$'
+```
 
 生产适配器**不是 OS 沙箱**：工作目录与系统提示不能限制工具访问。需按部署环境提供外部沙箱和最小权限；`BATON_PI_HOME` 可选择隔离 HOME/配置与有限环境变量，但它本身不限制文件或网络权限。真实入口的沙箱也只证明本地文件隔离，不是网络隔离或抵御恶意模型泄露凭据的安全证明。Linux/Windows 真实模型入口尚未验证；不能把 Go 交叉编译、原生 CI 的 fake RPC 子进程回放或无模型握手当成真实模型通过。
 
