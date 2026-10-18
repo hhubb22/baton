@@ -446,9 +446,13 @@ func hasOpenChildren(ctx context.Context, tx pgx.Tx, employeeID, taskID string) 
 }
 
 func lockExecution(ctx context.Context, tx pgx.Tx, in ExecutionReport) (executionHead, bool, error) {
+	row, err := lockTask(ctx, tx, in.EmployeeID, in.TaskID)
+	if err != nil || row.status == "" {
+		return executionHead{}, false, err
+	}
 	var head executionHead
 	var sessionID *string
-	err := tx.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		SELECT t.version, t.status, t.agent_type, t.target_node_id::text, t.target_session_id::text,
 		       t.source_session_id::text, t.queue_expires_at, t.execution_timeout_seconds,
 		       e.start_authorized_at IS NOT NULL, e.start_refused_at IS NOT NULL, e.input_generation,
@@ -456,7 +460,7 @@ func lockExecution(ctx context.Context, tx pgx.Tx, in ExecutionReport) (executio
 		FROM tasks t
 		JOIN executions e ON e.task_id = t.id AND e.employee_id = t.employee_id
 		WHERE t.id = $1::uuid AND t.employee_id = $2::uuid AND e.id = $3::uuid
-		FOR UPDATE`, in.TaskID, in.EmployeeID, in.ExecutionID).Scan(
+		FOR UPDATE OF e`, in.TaskID, in.EmployeeID, in.ExecutionID).Scan(
 		&head.version, &head.status, &head.agent, &head.nodeID, &sessionID,
 		&head.sourceID, &head.queueExpires, &head.execSeconds,
 		&head.authorized, &head.refused, &head.generation, &head.errorCode,
