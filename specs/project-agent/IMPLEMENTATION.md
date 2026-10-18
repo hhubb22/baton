@@ -44,7 +44,8 @@ PA-W02 和 PA-W03 可以并行。PA-W06 的 TypeScript 部分只依赖 PA-W04 �
 | PS-118 T14 Pi 真实任务（PR #22） | 已合并 | 不受影响。这是执行 Agent 的接入，和 Project Agent 的 Runtime 是两回事 |
 | PS-119 T15 Codex 真实任务（PR #21） | 已合并 | 不受影响。适配接口已统一到 `internal/agent.Adapter` |
 | PS-121 T17、PS-123 T19 Cursor、Kiro 接入 | Backlog | 不受影响 |
-| PS-125 T21、PS-126 T22、PS-127 T23 Web UI 与本地历史 | Backlog | 不受影响。T22 的任务详情页需要显示「由 Project Agent 发起」时，由 PA-W07 补充 |
+| PS-125 T21、PS-127 T23 Web UI 与本地历史 | Backlog | 不受影响 |
+| PS-126 T22 Web UI 任务、委托、取消与核实 | Backlog | 任务详情页的只读部分由 Agent Inbox 的 IB-W03 先做；T22 在同一个页面加入发起任务、委托链、取消、核实和新执行，验收条件相应调整。「由 Project Agent 发起」由 PA-W07 补充 |
 | PS-131 T27 Plane 回写 | Backlog | 不受影响；Plane 不接入 Project Agent |
 | PS-133 T29 凭据轮换、保留与空间不足 | Backlog | 验收增加一条：Project Agent 的对话事件不被 180 天清理删除；空间不足时拒绝新消息 |
 | PS-134～PS-136 T30～T32 macOS、Windows、Linux 安装验收 | Backlog | 验收增加可选项：安装 `baton-project-runtime`、`login`、`probe` 能正确上报；可以等 PA-W11 一起做 |
@@ -53,11 +54,11 @@ PA-W02 和 PA-W03 可以并行。PA-W06 的 TypeScript 部分只依赖 PA-W04 �
 | PS-141 T37 首版交付审查 | Backlog | 审查范围加入 Project Agent |
 | PS-152 Windows 单调时钟 panic | Backlog | 不受影响，继续 |
 
-需要修改验收条件的只有 PS-133、PS-134～PS-136、PS-138～PS-141，都还没有开始。已完成的工单不重新打开，新增内容由 PA-W01 等新工作项承担。
+需要修改验收条件的只有 PS-126、PS-133、PS-134～PS-136、PS-138～PS-141，都还没有开始。已完成的工单不重新打开，新增内容由 PA-W01 等新工作项承担。
 
 ## 规格批准后的操作
 
 1. 合并本规格变更：`specs/baton/PRODUCT.md`、`specs/baton/TECH.md`、`specs/project-agent/` 和决策记录。
 2. 在 Linear 的 Baton 项目里新建 PA-W01～PA-W11，用 blocked by 记录上表的依赖，并新建一个「Project Agent」里程碑。
-3. 修改 PS-133、PS-134～PS-136、PS-138～PS-141 的验收条件。
+3. 修改 PS-126、PS-133、PS-134～PS-136、PS-138～PS-141 的验收条件。
 4. 派发 PA-W01 时登记迁移编号 0015～0017。

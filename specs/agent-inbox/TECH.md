@@ -159,11 +159,11 @@ lang-core 的 `postinstall` 会发送匿名安装统计。pnpm 默认不运行�
 | `GET /push/config` | VAPID 公钥及其 ID |
 | `GET /push-subscriptions`、`POST /push-subscriptions`、`DELETE /push-subscriptions/{id}` | 第 7 节 |
 
-**同步（IB-08）。** Coordinator 进程内维护一个按员工分组的广播器。事项状态变化的事务提交后，发出 `attention_request.changed {id, state, version, open_count}`，经 `/api/v1/events` 送到本人所有打开的页面，页面收到后重新读取这个事项。事件只用来提醒页面刷新，丢失也不影响正确性：页面在 WebSocket 重连后、窗口重新获得焦点时都会重新读取。Coordinator 只有一个实例，不需要跨进程广播。`/api/v1/events` 如果在本特性之前还没有实现，由本特性的工作项实现它的连接、鉴权和这一种事件，其余事件由 T21 补充。
+**同步（IB-08）。** Coordinator 进程内维护一个按员工分组的广播器。事项状态变化的事务提交后，发出 `attention_request.changed {id, state, version, open_count}`，经 `/api/v1/events` 送到本人所有打开的页面，页面收到后重新读取这个事项。事件只用来提醒页面刷新，丢失也不影响正确性：页面在 WebSocket 重连后、窗口重新获得焦点时都会重新读取。WebSocket 断开期间，页面每 5 秒读取一次 `GET /inbox?state=open` 和正在查看的事项，重连后停止轮询，所以连接出问题时也满足 5 秒的要求。Coordinator 只有一个实例，不需要跨进程广播。`/api/v1/events` 如果在本特性之前还没有实现，由本特性的工作项实现它的连接、鉴权和这一种事件，其余事件由 T21 补充。
 
 **主对话里的事项。** 主对话按 `conversation_events` 渲染。遇到 `inbox.ask` 的工具调用和它的结果时，用结果里的 `request_id` 读取事项，在这个位置显示事项卡片。
 
-**任务详情（IB-20）。** 读取现有的 `GET /tasks/{id}`。`storage_ref` 以 `root:` 开头的引用显示「预览」，调用 `GET /nodes/{node_id}/files?root_id=&path=`；返回 `node_offline` 时显示暂不可查看。其他引用只显示字段，不提供预览。
+**任务详情（IB-20）。** 任务详情页由本特性先做只读部分，按 2026-10-18 的桌面原型：顶部分开显示节点连接、执行状态和结果交付，下面是结果摘要和错误、证据及预览、产物、相关事项和任务信息。T22（PS-126）以后在同一个页面加入发起任务、委托链、取消、核实和新执行。这样 Agent Inbox 不用等 T22，T22 又排在 T21（Session 树与实时输出）之后；两者共用一个页面，也不会出现两份任务详情。页面读取现有的 `GET /tasks/{id}`。`storage_ref` 以 `root:` 开头的引用显示「预览」，调用 `GET /nodes/{node_id}/files?root_id=&path=`；返回 `node_offline` 时显示暂不可查看。其他引用只显示字段，不提供预览。
 
 **问 Project Agent（IB-21、IB-22）。** 在浏览器里完成：把选中的文字（超过 8 KiB 时截短并注明原长度）和来源组成一段引用，预填进主对话的输入框。用户修改后发送，作为普通文本走 `POST /projects/{id}/messages`。引用不另设结构化字段，Project Agent 收到的就是用户看到的那段文字。
 
@@ -220,7 +220,7 @@ webpush-go 依赖的 `golang-jwt/jwt/v5` 和 `golang.org/x/crypto` 已经在 `go
 |---|---|---|
 | IB-W01 | 0018 迁移；`internal/inbox` 的状态变化与锁顺序；四个工具接入 `call_tool`；处理接口；归档时撤回 | PA-W05 |
 | IB-W02 | Baton 组件库、`gen:openui` 与 CI 比对；Runtime 的工具说明和展示内容检查 | PA-W06、IB-W01 |
-| IB-W03 | 页面路由；Inbox 页面、事项卡片、`AttentionContent`；主对话里的事项；任务详情的结果与预览；问 Project Agent | PA-W07、IB-W01、IB-W02；任务详情页与 T22 的分工待定 |
+| IB-W03 | 页面路由；Inbox 页面、事项卡片、`AttentionContent`；主对话里的事项；任务详情页的只读部分（第 6 节）；问 Project Agent | PA-W07、IB-W01、IB-W02 |
 | IB-W04 | `/api/v1/events` 的连接与 `attention_request.changed`（T21 尚未实现时） | IB-W01 |
 | IB-W05 | VAPID、订阅接口、发送循环、`sw.js`、设置页、页面清理通知；CSP 改动 | IB-W01、IB-W03 |
 | IB-W06 | 验收 IB-A01～IB-A15 | 以上全部，PA-W08 |
@@ -240,7 +240,7 @@ IB-W01 和 IB-W02 可以并行。IB-W05 的服务器部分只依赖 IB-W01。
 | IB-19 | 用旧版组件库生成的内容在删除一个组件后渲染；组件渲染时抛错 | 整段内容空白；选项不可用；单独一行的组件没有原位占位 | Web 单元测试 | planned |
 | IB-19 | 修改组件 schema 但不增加 `library_version` | CI 通过 | CI | planned |
 | 第 5 节 | 构建 `dist` 后扫描第三方地址；开发模式启动页面 | 出现 `cdn.jsdelivr.net`；开发模式请求了 jsDelivr | 现有 webui 测试；Web E2E | planned |
-| IB-08 | 两个浏览器页面打开同一事项，在一个页面回答；断开另一个页面的 WebSocket 后再回答 | 5 秒内另一个页面没有更新；重连后仍显示旧状态 | Web E2E | planned |
+| IB-08 | 两个浏览器页面打开同一事项，在一个页面回答；断开另一个页面的 WebSocket 后再回答 | 5 秒内另一个页面没有更新，包括 WebSocket 断开时；重连后仍显示旧状态或仍在轮询 | Web E2E | planned |
 | IB-20 | 任务结果包含 `root:` 引用和其他引用；预览时节点离线 | 其他引用出现预览按钮；离线时显示了旧内容 | Web E2E | planned |
 | IB-21、IB-22 | 选中 10 KiB 文字并选择「问 Project Agent」，修改后发送 | 未截短；发送前没有经过输入框；发出的内容和输入框不一致 | Web E2E | planned |
 | IB-25 | 归档有 3 个待处理事项的 Project | 有事项仍是 open；未发送的推送仍被发出 | PostgreSQL 集成测试 | planned |
@@ -248,8 +248,3 @@ IB-W01 和 IB-W02 可以并行。IB-W05 的服务器部分只依赖 IB-W01。
 | 第 7 节 | 提交 `http`、IP 地址、非 443 端口、不在允许列表的 `endpoint`；替身返回 302 | 被接受；跟随了重定向 | Go 单元测试 | planned |
 | IB-29、IB-30、IB-32 | macOS 上的 Chrome 和 Safari 开启通知后创建事项、点击通知、在另一个浏览器回答 | 没有收到通知；点击没有打开事项；打开页面后旧通知仍在；Safari 撤销了权限 | 真实浏览器手工验收 | planned |
 | IB-A01 | 真实 Runtime、最便宜的订阅模型、三台设备 | 见 PRODUCT 验收表 | 实机 | planned |
-
-## Open questions
-
-- 任务详情页由 T22 先做，还是由 IB-W03 补上需要的部分。影响 IB-W03 的范围，不阻塞本设计。
-- 同步 5 秒的预算是提案值，依赖 `/api/v1/events`。WebSocket 断开时页面只在重连和重新获得焦点时刷新；需要更强的保证时再加轮询。
