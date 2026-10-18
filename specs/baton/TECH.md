@@ -42,6 +42,8 @@ T14 实测入口修正：macOS 沙箱在 deny default 后导入系统 bsd.sb，�
 
 T14 初始化诊断补充：用户在 Darwin 27.2 arm64 反馈沙箱目录隔离自检通过，Pi RPC 初始化仍失败，根因待诊断，不据此认定真实能力支持。入口对初始化探针和原生恢复显式启用 pi.WithDiagnostics()，t.Fatal 保留 Start 错误、握手阶段、进程退出码/信号与 stderr 最后 20 行；内存尾部上限 8 KiB，截断首段不完整行不输出。所有诊断先屏蔽实际敏感环境值、常见凭据字段/Bearer/JWT 和疑似 key 长串；不输出 stdout、RPC 状态或原生历史，不写原始 stderr 文件，生产默认仍丢弃 stderr。sandbox-exec/Pi 的 stderr 拒绝原因随诊断输出；stdout 关闭后短暂等待自然退出，仍未退出则记录 cleanup_kill_requested 并终止，不能仅凭 -1 判断系统拒绝。
 
+T14 cwd 修正：后续本机诊断定位为 version 子进程继承仓库 cwd，Node process.cwd 被沙箱拒绝，而非模型返回失败。版本检查现与 RPC（含恢复）一致，显式使用已校验的配置 Directory，不修改调用方 cwd；原生历史仍由 Go 直接读取，无额外 Pi 子进程。跨平台回放检查版本及 RPC cwd；macOS 无模型回归先证明调用方 cwd 在子进程沙箱内不可读、Node 返回 EPERM，再从该调用方验证新建与恢复的四个子进程均使用授权工作目录。CI 要求 Node.js 并重复沙箱回归 10 轮；真实 Pi/Vertex 任务仍待用户本机复跑，不以夹具替代模型验收。
+
 ## 现状与设计约束
 
 任务需要从 Ubuntu Agent 发到员工 PC，经过北京中转，但北京不能主动访问节点。任务被接受后，中心需要留下可查询记录；完整 Session 历史仍在节点。PC 断线或操作回执丢失时，系统必须核实原执行，不能靠重启 Agent 来恢复任务。

@@ -111,7 +111,7 @@ func (a *Adapter) Start(ctx context.Context) error {
 	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	version := exec.CommandContext(checkCtx, a.config.Binary, "--version")
-	version.Env = a.environment()
+	version.Dir, version.Env = a.config.Directory, a.environment()
 	a.captureStderr(version, "version")
 	raw, err := version.Output()
 	a.recordExit(version, err)

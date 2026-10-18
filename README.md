@@ -125,7 +125,9 @@ BATON_REAL_PI=1 go test -v -count=1 -timeout=30m ./... -run '^TestRealPi$'
 
 此入口在临时目录构建 Baton 二进制，创建独立 HOME/Pi 配置/工作区、测试 schema 与真实 Coordinator/Relay/batond/Worker，透传允许的 provider 环境变量，不复制或打印凭据。macOS `sandbox-exec` 在 `deny default` 后导入系统 `bsd.sb` 提供进程启动权限，再收紧文件读写，只额外允许系统/运行时只读路径与测试 IPC。先验证目录内可写可读，再检查目录外测试哨兵不可读写、符号链接不能越界；沙箱启动崩溃不能冒充隔离成功。失败输出退出码、错误（含信号）和 stderr，不退回无沙箱模式；Go 的退出码 `-1` 表示没有普通退出码，例如进程被信号终止。使用模型验证一次输入/结构化结果、CLI 委托与子结果原生历史确认、执行中中止、batond 重连，以及原生 Session 加载后新回合的上下文回忆与夹具未重放；另检查缺失历史拒绝。输出工具版本、平台、请求/实际模型及各能力“支持/不支持/未验证”，失败不打印原生历史；退出清理临时目录与测试进程。模型不遵循协议或环境问题会使对应能力保留未验证，不能据此宣称跨平台支持。
 
-Pi 初始化探针及历史恢复失败时，入口输出 `Start` 错误与阶段（`version` / `rpc`、具体握手步骤）、子进程退出码和错误/信号、stderr 最后 20 行（至多保留 8 KiB 原始尾部，截断时丢弃首段不完整行）。诊断仅通过 `pi.WithDiagnostics()` 显式启用，保存在内存、不写原始日志文件；输出前屏蔽实际敏感环境值、常见凭据字段/Bearer/JWT 和疑似 key 的长串，不输出 stdout、RPC 状态或原生历史。`sandbox-exec` 或 Pi 写到 stderr 的拒绝原因也保留；`exit_code=unavailable` 表示没有取得进程退出状态，`-1` 需结合信号错误判断，`cleanup_kill_requested=true` 表示 stdout 关闭后子进程未及时退出而被清理。生产默认继续丢弃 stderr。
+Pi 初始化探针及历史恢复失败时，入口输出 `Start` 错误与阶段（`version` / `rpc`、具体握手步骤）、子进程退出码和错误/信号、stderr 最后 20 行（至多保留 8 KiB 原始尾部，截断时丢弃首段不完整行）。诊断仅通过 `pi.WithDiagnostics()` 显式启用，保存在内存、不写原始日志文件；输出前屏蔽实际敏感环境值、常见凭据字段/Bearer/JWT 和疑似 key 的长串，不输出 stdout、RPC 状态或原生历史。`sandbox-exec` 或 Pi 写到 stderr 的拒绝原因也保留；`exit_code=unavailable` 表示没有取得进程退出状态，`-1` 需结合信号错误判断，`cleanup_kill_requested=true` 表示 Baton 曾请求强制清理。生产默认继续丢弃 stderr。
+
+适配器启动的版本检查与 RPC 子进程（含恢复）均显式使用配置 `Directory` 的规范路径作为 cwd，不依赖 batond/Worker/调用方当前目录，不放宽沙箱。原生历史直接由 Go 文件 API 在已校验的目录内读取，不另启动 Pi。macOS 沙箱回归使用 Node.js 无模型夹具：先确认继承调用方目录会触发 cwd 的 EPERM，再验证从同一调用方完成版本检查、新建握手和历史恢复；这不代表真实 Pi 模型验收。该回归需要 Node.js，macOS CI 检查其存在并重复运行 10 轮。
 
 沙箱自检和初始化拒绝诊断可不带模型或数据库单独运行；macOS CI 重复执行 10 次并记录 Darwin 版本，不能据此推断其他 macOS 版本兼容性：
 

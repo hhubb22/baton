@@ -206,6 +206,93 @@ func TestPiSandboxStartupDiagnostics(t *testing.T) {
 	}
 }
 
+func TestPiSandboxUnreadableCallerCwd(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("requires macOS sandbox-exec; no model or database needed")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("requires Node.js for the sandbox cwd regression")
+	}
+	node, err = filepath.EvalSymlinks(node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{"work", "native", "home"} {
+		if err := os.Mkdir(filepath.Join(root, dir), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	home, work := filepath.Join(root, "home"), filepath.Join(root, "work")
+	profile, wrapper, fixture := filepath.Join(root, "policy.sb"), filepath.Join(root, "pi-wrapper"), filepath.Join(root, "pi-fixture.cjs")
+	policy := piSandboxPolicy([]string{root, filepath.Dir(node)}, []string{root}, filepath.Join(root, "ipc"))
+	policy += fmt.Sprintf("(deny file-read* file-read-metadata file-read-data file-read-xattr (subpath %s))\n", strconv.Quote(caller))
+	js := fmt.Sprintf(`const fs = require('node:fs');
+const path = require('node:path');
+const cwd = process.cwd();
+const version = process.argv.includes('--version');
+fs.appendFileSync(path.join(cwd, 'cwd-observations'), (version ? 'version' : 'rpc') + '\n');
+if (version) { console.log(%q); process.exit(0); }
+const arg = name => process.argv[process.argv.indexOf(name) + 1];
+let file, id;
+if (process.argv.includes('--session')) {
+  file = arg('--session');
+  id = JSON.parse(fs.readFileSync(file, 'utf8').split('\n')[0]).id;
+} else {
+  id = arg('--session-id');
+  file = path.join(arg('--session-dir'), id + '.jsonl');
+  fs.writeFileSync(file, JSON.stringify({type: 'session', id, version: 3, cwd}) + '\n');
+}
+require('node:readline').createInterface({input: process.stdin}).on('line', line => {
+  const cmd = JSON.parse(line);
+  const reply = {type: 'response', id: cmd.id, command: cmd.type, success: true};
+  if (cmd.type === 'get_state') reply.data = {sessionId: id, sessionFile: file};
+  console.log(JSON.stringify(reply));
+});
+`, pi.Version)
+	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
+	script := "#!/bin/sh\nexec /usr/bin/sandbox-exec -f " + quote(profile) + " " + quote(node) + " " + quote(fixture) + " \"$@\"\n"
+	for file, content := range map[string]string{profile: policy, fixture: js, wrapper: script} {
+		if err := os.WriteFile(file, []byte(content), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Chdir(caller)
+	probe := exec.Command(wrapper, "--version")
+	probe.Env = pi.IsolatedEnv(home)
+	code, stderr, err := piSandboxCommandResult(probe)
+	if err == nil || !strings.Contains(stderr, "EPERM") || !strings.Contains(stderr, "cwd") {
+		t.Fatalf("inherited cwd was not denied: exit_code=%d error=%v stderr=%q", code, err, stderr)
+	}
+	config := agent.Config{Binary: wrapper, Directory: work, SessionDir: filepath.Join(root, "native"), SessionID: "cwd-fixture", Env: pi.IsolatedEnv(home)}
+	for _, restore := range []bool{false, true} {
+		config.Restore = restore
+		a := pi.New(config, pi.WithDiagnostics())
+		t.Cleanup(func() { _ = a.Close() })
+		if err := a.Start(context.Background()); err != nil {
+			t.Fatalf("restore=%t: %s", restore, a.Diagnostics(err))
+		}
+		if err := a.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	observed, err := os.ReadFile(filepath.Join(work, "cwd-observations"))
+	if err != nil || string(observed) != "version\nrpc\nversion\nrpc\n" {
+		t.Fatalf("configured cwd not used for every process: observations=%q error=%v", observed, err)
+	}
+	if cwd, err := os.Getwd(); err != nil || cwd != caller {
+		t.Fatalf("adapter changed caller cwd: %q %v", cwd, err)
+	}
+}
+
 func TestPiSandboxDiagnostic(t *testing.T) {
 	cmd := exec.Command(os.Args[0], "-test.run=^TestPiSandboxDiagnosticChild$")
 	cmd.Env = append(os.Environ(), "BATON_TEST_SANDBOX_DIAGNOSTIC=1")

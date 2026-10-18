@@ -30,6 +30,13 @@ func TestMain(m *testing.M) {
 }
 
 func replayChild() {
+	if expected := os.Getenv("BATON_PI_EXPECT_DIRECTORY"); expected != "" {
+		cwd, err := os.Getwd()
+		if err != nil || cwd != expected {
+			fmt.Fprintln(os.Stderr, "Pi fixture cwd is outside the authorized directory")
+			os.Exit(23)
+		}
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--version" {
 		fmt.Println(Version)
 		return
@@ -123,6 +130,37 @@ func replayChild() {
 		write(r)
 		return nil
 	})
+}
+
+func TestPiProcessesUseConfiguredDirectory(t *testing.T) {
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(t.TempDir())
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := agent.Config{Binary: exe, Directory: dir, SessionDir: filepath.Join(dir, "native"), SessionID: "cwd-fixture",
+		Env: append(os.Environ(), "BATON_PI_REPLAY_CHILD=1", "BATON_PI_EXPECT_DIRECTORY="+dir)}
+	for _, restore := range []bool{false, true} {
+		config.Restore = restore
+		a := New(config)
+		t.Cleanup(func() { _ = a.Close() })
+		if err := a.Start(context.Background()); err != nil {
+			t.Fatalf("restore=%t: %v", restore, err)
+		}
+		if !restore {
+			header, _ := json.Marshal(map[string]any{"type": "session", "id": config.SessionID, "version": 3, "cwd": dir})
+			if err := os.WriteFile(a.history.File, append(header, '\n'), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := a.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func replayAdapter(t *testing.T) *Adapter {
