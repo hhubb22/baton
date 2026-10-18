@@ -26,13 +26,17 @@ func TestArtifactsUseAuthorizedOpenWithoutReadingContent(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := task.ArtifactRef{NodeID: nodeID, RootID: "build", Path: "firmware.bin"}
+	absoluteReason := "path_escaped"
+	if runtime.GOOS == "windows" {
+		absoluteReason = "invalid_path"
+	}
 	for _, tc := range []struct{ name, node, root, path, reason string }{
 		{"large binary", nodeID, "build", "firmware.bin", ""},
 		{"missing", nodeID, "build", "missing.bin", "not_found"},
 		{"other node", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "build", "firmware.bin", "other_node"},
 		{"unregistered", nodeID, "other", "firmware.bin", "root_forbidden"},
 		{"parent", nodeID, "build", "../firmware.bin", "path_escaped"},
-		{"absolute", nodeID, "build", file, "path_escaped"},
+		{"absolute", nodeID, "build", file, absoluteReason},
 		{"directory", nodeID, "build", ".", "unsupported_type"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
