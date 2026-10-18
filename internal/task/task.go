@@ -124,6 +124,7 @@ type Prepared struct {
 
 // Record 是已经提交的任务记录。
 type Record struct {
+	RerunOfTaskID           *string     `json:"rerun_of_task_id,omitempty"`
 	CancelRequestedAt       *time.Time  `json:"cancel_requested_at,omitempty"`
 	ExecutionExpiresAt      *time.Time  `json:"execution_expires_at,omitempty"`
 	StopRequestedAt         *time.Time  `json:"stop_requested_at,omitempty"`
@@ -159,33 +160,37 @@ type Record struct {
 
 // Event 是允许保存的一条任务变更，不包含 Session 原文。
 type Event struct {
-	WorkerSequence          int64      `json:"worker_sequence,omitempty"`
-	ExecutionID             *string    `json:"execution_id,omitempty"`
-	OutcomeKnown            *bool      `json:"outcome_known,omitempty"`
-	NotStarted              *bool      `json:"not_started,omitempty"`
-	StopReason              *string    `json:"stop_reason,omitempty"`
-	OccurredAt              *time.Time `json:"occurred_at,omitempty"`
-	AgentStopped            *bool      `json:"agent_stopped,omitempty"`
-	EventID                 string     `json:"event_id"`
-	TaskID                  string     `json:"task_id"`
-	Version                 int        `json:"version"`
-	Kind                    string     `json:"kind"`
-	ActorEmployeeID         string     `json:"actor_employee_id"`
-	Status                  string     `json:"status"`
-	TargetNodeID            string     `json:"target_node_id"`
-	AgentType               string     `json:"agent_type"`
-	QueueExpiresAt          time.Time  `json:"queue_expires_at"`
-	ExecutionTimeoutSeconds int        `json:"execution_timeout_seconds"`
-	ReasonCode              *string    `json:"reason_code,omitempty"`
-	CreatedAt               time.Time  `json:"created_at"`
+	Resolution              *Resolution `json:"resolution,omitempty"`
+	Rerun                   *Rerun      `json:"rerun,omitempty"`
+	WorkerSequence          int64       `json:"worker_sequence,omitempty"`
+	ExecutionID             *string     `json:"execution_id,omitempty"`
+	OutcomeKnown            *bool       `json:"outcome_known,omitempty"`
+	NotStarted              *bool       `json:"not_started,omitempty"`
+	StopReason              *string     `json:"stop_reason,omitempty"`
+	OccurredAt              *time.Time  `json:"occurred_at,omitempty"`
+	AgentStopped            *bool       `json:"agent_stopped,omitempty"`
+	EventID                 string      `json:"event_id"`
+	TaskID                  string      `json:"task_id"`
+	Version                 int         `json:"version"`
+	Kind                    string      `json:"kind"`
+	ActorEmployeeID         string      `json:"actor_employee_id"`
+	Status                  string      `json:"status"`
+	TargetNodeID            string      `json:"target_node_id"`
+	AgentType               string      `json:"agent_type"`
+	QueueExpiresAt          time.Time   `json:"queue_expires_at"`
+	ExecutionTimeoutSeconds int         `json:"execution_timeout_seconds"`
+	ReasonCode              *string     `json:"reason_code,omitempty"`
+	CreatedAt               time.Time   `json:"created_at"`
 }
 
 // Rejection 是可以返回给调用方的拒绝，不包含其他员工的数据。
 type Rejection struct {
-	Code    string
-	Message string
-	Fields  []string
-	TaskID  string
+	CurrentVersion int
+	CurrentStatus  string
+	Code           string
+	Message        string
+	Fields         []string
+	TaskID         string
 }
 
 func (e *Rejection) Error() string {

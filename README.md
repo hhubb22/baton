@@ -248,6 +248,30 @@ Worker 无法应答时，账本的权限、IO、打开失败和锁忙统一作�
 
 执行期限通过签名许可传给 Worker，从本地 `start_intent` 起用包含休眠的单调时钟计时，墙钟跳变不会增加预算，节点离线也会中止。中心首次收到启动事实时以剩余执行预算估算 `execution_expires_at` 并扫描；传输延迟可能使中心扫描略晚，本地计时不依赖中心。超时先中止、待核实，只有停止且结果已知才按 `execution_timeout` 失败。中心输入读取与 Worker 提交均检查取消/期限，不会补发已取消或已超期输入。实际输入发送的原定时间、发送时间和单调 `delay_ms` 存在本地 `execution_log` 的 `input_dispatch` 条目及同名日志中，不只记录重试尝试。
 
+## 人工核实与显式重做
+
+员工可通过 `POST /api/v1/tasks/{id}/resolve` 核实本人待核实或已结束的任务；排队、运行中的任务先查询或请求取消。接口沿用登录、Origin 与 CSRF 校验，不启动 Agent、不重发输入，也不宣称节点进程已经停止。
+
+```json
+{
+  "expected_version": 5,
+  "status": "completed",
+  "summary": "现场核对后确认已完成",
+  "reason": "已检查设备状态及执行记录",
+  "evidence": [{"storage_ref": "inspection", "resource_id": "check-42", "access_status": "available"}]
+}
+```
+
+结论只接受 `completed`、`failed`、`cancelled`。证据为空时提供 `evidence_empty_reason`。任务版本、结论、摘要与人工证据在同一事务保存；原状态、摘要、错误、证据、取消事实保存在 `resolved` 事件的 `resolution.previous`，同时记录理由、操作者与时间。原产物引用和节点停止事实不变。迟到报告仍按同一执行补充事实，不覆盖人工终态。通过任务查询及 `/events` 读取当前记录和审计。
+
+`POST /api/v1/tasks/{id}/rerun` 才会创建新的任务和执行：
+
+```json
+{"request_id":"redo-42","expected_version":6,"reason":"明确要求重新执行","confirm_side_effects":true}
+```
+
+原任务仍为 `needs_verification` 时必须明确确认重复副作用风险；未确认返回 `409 conflict`。重做沿用原任务的目标节点、Agent、描述、授权和期限长度（排队期限重新起算），不自动改派，不复用原 Session、execution 或委托来源；新任务的 `rerun_of_task_id` 关联原任务。原任务只增加版本及 `rerun_requested` 审计。相同员工、相同 `request_id` 与请求内容返回同一新任务，内容变化返回冲突。并发核实或重做使用 `expected_version`，版本不符时返回 `409 conflict`、`current_version` 与 `current_status`，须先查询最新事实。核实的网络重试也遵守版本检查，不会重新执行。此处仅提供 API，Web 核实界面不在本次实现内。
+
 ## 文件浏览
 
 员工在节点本机登记可以浏览的目录。浏览器只提交 `root_id` 和相对路径，不能提交绝对路径、`..` 或读取偏移。
