@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -22,6 +23,9 @@ func coordinatorEnv(t *testing.T, f *fixture) (string, []string) {
 	t.Helper()
 	dir := t.TempDir()
 	binary := filepath.Join(dir, "coordinator")
+	if runtime.GOOS == "windows" {
+		binary += ".exe"
+	}
 	cmd := exec.Command("go", "build", "-o", binary, "../../cmd/coordinator")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build coordinator: %v\n%s", err, out)
