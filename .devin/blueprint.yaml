@@ -1,0 +1,24 @@
+# Devin 云端会话的 Baton 环境，用 `devin cloud drs blueprint-write` 同步到 Devin。
+runs-on: linux
+
+initialize:
+  - name: 系统依赖
+    run: bash .devin/setup-linux.sh
+
+maintenance:
+  - name: Go 模块与前端依赖
+    run: bash .cursor/install.sh
+
+knowledge:
+  - name: 环境
+    contents: |
+      环境变量在 /etc/profile.d/baton.sh，命令找不到 go 或 pnpm 时先执行 `. /etc/profile.d/baton.sh`。
+      会话开始时测试数据库没有运行，先执行 `bash .cursor/start.sh`，它在 $HOME/.baton-postgres 启动 PostgreSQL 17 并建好 baton_test。
+  - name: 验证
+    contents: |
+      go build ./...
+      GOOS=windows go build ./...
+      GOOS=darwin go build ./...
+      go vet ./...
+      go test -count=1 ./...
+      改动 web/ 时在 web/ 下运行 pnpm lint、pnpm typecheck、pnpm test、pnpm test:e2e、pnpm check:dist。
