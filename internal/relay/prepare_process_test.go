@@ -284,7 +284,7 @@ func startPrepareStackWithBins(t *testing.T, extra map[string]string, coordBin, 
 	}
 }
 
-func registerAgent(t *testing.T, client *http.Client, base, csrf, name string, caps []string) node.Identity {
+func registerAgent(t *testing.T, client *http.Client, base, csrf, name string, caps []string, legacyRole ...string) node.Identity {
 	t.Helper()
 	var enrollment struct {
 		Token string `json:"enrollment_token"`
@@ -293,12 +293,16 @@ func registerAgent(t *testing.T, client *http.Client, base, csrf, name string, c
 	if code != http.StatusOK || enrollment.Token == "" {
 		t.Fatalf("领取注册凭据状态 %d", code)
 	}
+	role := "pc"
+	if len(legacyRole) != 0 {
+		role = legacyRole[0]
+	}
 	var ident node.Identity
 	code = postJSON(t, client, base+"/api/v1/nodes/register", map[string]any{
 		"enrollment_token": enrollment.Token,
 		"display_name":     name,
 		"system":           "linux",
-		"role":             "pc",
+		"role":             role,
 		"capabilities":     caps,
 	}, "", &ident)
 	if code != http.StatusOK || ident.NodeID == "" {

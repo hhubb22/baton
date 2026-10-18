@@ -1,5 +1,5 @@
 import type { Employee, Enrollment, FileQuery, FileView, NodeList, SavedDefault } from '../types.ts'
-import { DefaultPCForm } from './DefaultPCForm.tsx'
+import { DefaultDeviceForm } from './DefaultDeviceForm.tsx'
 import { EnrollmentPanel } from './EnrollmentPanel.tsx'
 import { NodeCard } from './NodeCard.tsx'
 
@@ -88,7 +88,7 @@ export function NodesPage({
         </div>
       </section>
       {list ? (
-        <DefaultPCForm list={list} saved={saved} canWrite={canWrite} busy={busy} onSave={onSaveDefault} />
+        <DefaultDeviceForm list={list} saved={saved} canWrite={canWrite} busy={busy} onSave={onSaveDefault} />
       ) : null}
     </>
   )

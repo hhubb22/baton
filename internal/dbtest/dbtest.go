@@ -58,7 +58,7 @@ func Open(t *testing.T) *pgxpool.Pool {
 			  AND table_name IN (
 			    'employees', 'login_sessions', 'schema_migrations',
 			    'node_enrollments', 'nodes', 'node_credentials', 'employee_settings',
-			    'node_presence', 'node_revocations', 'tasks', 'task_events', 'executions',
+			    'node_presence', 'node_revocations', 'node_runtime_reports', 'tasks', 'task_events', 'executions',
 			    'dispatch_outbox', 'request_tombstones', 'sessions', 'task_relations',
 			    'plane_issues', 'plane_triggers', 'plane_deliveries'
 			  )`).Scan(&n); err != nil {

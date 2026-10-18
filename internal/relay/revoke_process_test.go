@@ -66,7 +66,7 @@ func TestProcessRevokeDisconnectsAndSurvivesRelayRestart(t *testing.T) {
 		t.Fatalf("吊销响应不正确: %d %s", status, body)
 	}
 	if !strings.Contains(body, `"needs_reselection":true`) || !strings.Contains(body, desk.NodeID) || !strings.Contains(body, alice.ID) {
-		t.Fatalf("吊销响应没有保留默认 PC 或操作者: %s", body)
+		t.Fatalf("吊销响应没有保留默认设备或操作者: %s", body)
 	}
 	batondProc.waitExit(t, 20*time.Second)
 	if !strings.Contains(batondProc.out.String(), "需要重新认证") {
@@ -89,7 +89,7 @@ func TestProcessRevokeDisconnectsAndSurvivesRelayRestart(t *testing.T) {
 		t.Fatal("没有记下操作者、时间和已生效回执")
 	}
 	if defaultQuery(t, pool, alice.ID) != desk.NodeID {
-		t.Fatal("吊销改写了默认 PC")
+		t.Fatal("吊销改写了默认设备")
 	}
 
 	relayProc := latestProc(t, relayBin)
@@ -104,7 +104,7 @@ func TestProcessRevokeDisconnectsAndSurvivesRelayRestart(t *testing.T) {
 	}
 	third := registerThrough(t, client, base, csrf, "Third")
 	if defaultQuery(t, pool, alice.ID) != desk.NodeID || third.NodeID == desk.NodeID {
-		t.Fatal("新节点被自动选成了默认 PC")
+		t.Fatal("新节点被自动选成了默认设备")
 	}
 	waitRevocationHTTP(t, client, base, desk.NodeID, "effective")
 	logs := coordProc.out.String() + relayProc.out.String() + batondProc.out.String()
@@ -151,7 +151,7 @@ func TestProcessRevokeStaysPendingWhileRelayIsDown(t *testing.T) {
 		t.Fatal("不可达时没有保存未确认的吊销")
 	}
 	if defaultQuery(t, pool, alice.ID) != desk.NodeID {
-		t.Fatal("不可达时改写了默认 PC")
+		t.Fatal("不可达时改写了默认设备")
 	}
 
 	startCmd(t, relayBin, nil, env.relay)
@@ -177,7 +177,7 @@ func TestProcessRevokeStaysPendingWhileRelayIsDown(t *testing.T) {
 	}
 	other := registerThrough(t, client, base, csrf, "Other")
 	if defaultQuery(t, pool, alice.ID) != desk.NodeID {
-		t.Fatal("Relay 恢复后自动改选了默认 PC")
+		t.Fatal("Relay 恢复后自动改选了默认设备")
 	}
 	if result := authProcess(t, env.nodeAddr, other.Credential.Token, newProcessID(t), env.roots); !result.OK {
 		t.Fatalf("未吊销节点不能连接: %+v", result)
@@ -329,7 +329,7 @@ func defaultQuery(t *testing.T, pool *pgxpool.Pool, employeeID string) string {
 	t.Helper()
 	var id string
 	if err := pool.QueryRow(context.Background(), `
-		SELECT COALESCE(default_pc_node_id::text, '')
+		SELECT COALESCE(default_device_node_id::text, '')
 		FROM employee_settings WHERE employee_id = $1::uuid`, employeeID).Scan(&id); err != nil {
 		t.Fatal(err)
 	}

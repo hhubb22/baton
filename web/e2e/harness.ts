@@ -207,15 +207,15 @@ async function tail(file: string, secrets: string[]): Promise<string> {
   }
 }
 
-export async function registerNode(state: E2EState, token: string, displayName: string, caps: string[], dataDir: string): Promise<void> {
+export async function registerNode(state: E2EState, token: string, displayName: string, caps: string[], dataDir: string, legacyRole?: string): Promise<void> {
   const args = [
     'register',
     '--coordinator', state.baseURL,
     '--display-name', displayName,
     '--system', 'linux',
-    '--role', 'pc',
     '--data-dir', dataDir,
   ]
+  if (legacyRole !== undefined) args.push('--role', legacyRole)
   for (const cap of caps) args.push('--capability', cap)
   if (args.some((arg) => arg.includes(token))) throw new Error('注册命令包含凭据')
   const { stderr } = await runLogged(state.batondBin, args, childEnv({

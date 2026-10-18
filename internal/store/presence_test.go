@@ -117,7 +117,7 @@ func TestPresenceKeepsSyncForTheSameConnection(t *testing.T) {
 	}
 }
 
-func TestSyncRejectsChangingDefaultPCIntoUbuntu(t *testing.T) {
+func TestSyncIgnoresLegacyRoleAndPreservesSystem(t *testing.T) {
 	pool := dbtest.Open(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -135,33 +135,30 @@ func TestSyncRejectsChangingDefaultPCIntoUbuntu(t *testing.T) {
 		t.Fatal(err)
 	}
 	err := repo.SyncNode(ctx, alice.ID, ident.NodeID, conn, "Renamed", node.SystemLinux, node.RoleUbuntu, []string{"build"})
-	if !errors.Is(err, store.ErrSyncRejected) {
-		t.Fatalf("把默认 PC 同步成 ubuntu 未被拒绝: %v", err)
+	if err != nil {
+		t.Fatalf("旧版 role 字段影响了同步: %v", err)
 	}
 	view := mustOwn(t, ctx, repo, alice.ID, ident.NodeID)
-	if view.Synced || view.Executable() || view.Role != node.RolePC || view.System != node.SystemLinux || view.DisplayName != "Desk" || len(view.Capabilities) != 1 || view.Capabilities[0] != "start" {
-		t.Fatalf("被拒绝的同步改写了身份或标成了已同步: %+v", view)
-	}
-	if defaultPC(t, ctx, pool, alice.ID) != ident.NodeID {
-		t.Fatal("被拒绝的同步改动了默认 PC")
+	if !view.Synced || !view.Executable() || view.DisplayName != "Renamed" || len(view.Capabilities) != 1 || view.Capabilities[0] != "build" {
+		t.Fatalf("兼容同步没有更新显示名和能力: %+v", view)
 	}
 	err = repo.SyncNode(ctx, alice.ID, ident.NodeID, conn, "Renamed", node.SystemWindows, node.RolePC, []string{"build"})
 	if !errors.Is(err, store.ErrSyncRejected) {
 		t.Fatalf("系统与注册值不一致时未被拒绝: %v", err)
 	}
 	view = mustOwn(t, ctx, repo, alice.ID, ident.NodeID)
-	if view.Synced || view.System != node.SystemLinux || view.Role != node.RolePC || defaultPC(t, ctx, pool, alice.ID) != ident.NodeID {
-		t.Fatalf("系统不一致的同步改写了身份或默认 PC: %+v", view)
+	if !view.Synced || view.System != node.SystemLinux || defaultPC(t, ctx, pool, alice.ID) != ident.NodeID {
+		t.Fatalf("系统不一致的同步改写了身份或默认设备: %+v", view)
 	}
 	if err := repo.SyncNode(ctx, alice.ID, ident.NodeID, conn, "Renamed", node.SystemLinux, node.RolePC, []string{"start", "files"}); err != nil {
 		t.Fatal(err)
 	}
 	view = mustOwn(t, ctx, repo, alice.ID, ident.NodeID)
-	if !view.Synced || view.DisplayName != "Renamed" || view.Role != node.RolePC || view.System != node.SystemLinux || len(view.Capabilities) != 2 || view.Capabilities[0] != "start" || view.Capabilities[1] != "files" {
+	if !view.Synced || view.DisplayName != "Renamed" || view.System != node.SystemLinux || len(view.Capabilities) != 2 || view.Capabilities[0] != "start" || view.Capabilities[1] != "files" {
 		t.Fatalf("一致的同步没有只更新显示名和能力: %+v", view)
 	}
 	if defaultPC(t, ctx, pool, alice.ID) != ident.NodeID {
-		t.Fatal("更新显示名后默认 PC 变了")
+		t.Fatal("更新显示名后默认设备变了")
 	}
 }
 

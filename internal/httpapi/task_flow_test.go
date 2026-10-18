@@ -93,7 +93,7 @@ func TestTaskAPIAcceptQueryAndReplay(t *testing.T) {
 
 	status, body = putJSON(t, aliceClient, srv.URL+"/api/v1/me/default-pc", origin, aliceCSRF, map[string]string{"node_id": later.NodeID})
 	if status != http.StatusOK || !strings.Contains(body, later.NodeID) {
-		t.Fatalf("修改默认 PC 状态 %d", status)
+		t.Fatalf("修改默认设备状态 %d", status)
 	}
 	setNodeAgent(t, ctx, pool, early.NodeID, "codex")
 	setNodeAgent(t, ctx, pool, later.NodeID, "codex")

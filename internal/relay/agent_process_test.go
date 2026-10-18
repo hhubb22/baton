@@ -95,7 +95,7 @@ func TestAgentCLIDelegatesBetweenTwoNodes(t *testing.T) {
 	if _, err := st.pool.Exec(ctx, `UPDATE nodes SET default_agent_type = 'pi' WHERE id = $1::uuid`, target.NodeID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.pool.Exec(ctx, `UPDATE employee_settings SET default_pc_node_id = $1::uuid WHERE employee_id = $2::uuid`, target.NodeID, st.employeeID); err != nil {
+	if _, err := st.pool.Exec(ctx, `UPDATE employee_settings SET default_device_node_id = $1::uuid WHERE employee_id = $2::uuid`, target.NodeID, st.employeeID); err != nil {
 		t.Fatal(err)
 	}
 	input := map[string]any{"request_id": "agent-child", "description": "读取目标信息"}

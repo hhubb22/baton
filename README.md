@@ -1,6 +1,6 @@
 # Baton
 
-员工使用部署管理员分配的本地账号登录 Coordinator，退出，查询本人身份，领取一次性节点注册凭据，设置默认 PC，吊销本人节点的连接凭据，并提交任务。初始口令只能使用到员工完成更换为止。`batond register` 用这张凭据注册节点，把身份保存在本机。`batond run` 用这份身份主动连接 Relay，断线后重连，并在同步完成前不会显示为可执行。吊销生效后，同一连接凭据不能再接入。任务被接受后，Coordinator 把准备命令送到节点；节点先把执行映射写入本地账本，再绑定一个独立的 Session Worker。
+员工使用部署管理员分配的本地账号登录 Coordinator，退出，查询本人身份，领取一次性节点注册凭据，设置默认设备，吊销本人节点的连接凭据，并提交任务。初始口令只能使用到员工完成更换为止。`batond register` 用这张凭据注册节点，把身份保存在本机。`batond run` 用这份身份主动连接 Relay，断线后重连，并在同步完成前不会显示为可执行。吊销生效后，同一连接凭据不能再接入。任务被接受后，Coordinator 把准备命令送到节点；节点先把执行映射写入本地账本，再绑定一个独立的 Session Worker。
 
 本目录目前包含这条路径的构建、迁移、HTTP 接口、Coordinator、Relay、batond、Session Worker、Agent 本地 CLI、受限文件浏览、员工 Web UI 和测试。准备阶段不启动 Agent。启动许可通过后，Worker 按 agent_type 选择 Pi 1.3.0 RPC 或 Codex CLI 0.162.1 thread/turn 适配器，任务输入只提交一次；结构化结果在中心保存之后才算交付。两者共用 internal/agent.Adapter 与 Worker 生命周期，测试执行器仍供故障注入使用。其他真实 Agent 适配和管理员网页不在这里；支持范围以明确版本和本机实测报告为准，不能用回放通过代替。
 
@@ -124,21 +124,27 @@ BATON_LISTEN_ADDR=127.0.0.1:9444 BATON_COORDINATOR_URL=https://127.0.0.1:9443 BA
 
 ## Plane 触发（社区版 1.4.2）
 
-可选的独立入口 `POST /hooks/plane` 使用迁移 `0013`；不设置 Plane 环境变量时不启用。部署时在**非秘密**的 `BATON_PLANE_CONFIG` JSON 中配置 `workspace_id`、`workspace_slug`、`project_id`、`webhook_id`、`approval_label_id`（项目标签名称须为 `design-approved`）和 `actors`。每个 actor 明确填写 `plane_user_id`、`email`、`employee_id`，以及 `task` 内的 `target_node_id`、`agent_type`、`working_directory`、`authorization_scope`、`expected_outputs`；不能借用默认 PC 或推测授权。目标节点必须归该员工所有且可用于任务接受。描述来自 Plane 工单名称和非空 HTML 正文，不接受配置覆盖 `request_id`、`description` 或来源 Session。
+可选的独立入口 `POST /hooks/plane` 使用迁移 `0013`；不设置 Plane 环境变量时不启用。部署时在**非秘密**的 `BATON_PLANE_CONFIG` JSON 中配置 `workspace_id`、`workspace_slug`、`project_id`、`webhook_id`、`approval_label_id`（项目标签名称须为 `design-approved`）和 `actors`。每个 actor 明确填写 `plane_user_id`、`email`、`employee_id`，以及 `task` 内的 `target_node_id`、`agent_type`、`working_directory`、`authorization_scope`、`expected_outputs`；不能借用默认设备或推测授权。目标节点必须归该员工所有且可用于任务接受。描述来自 Plane 工单名称和非空 HTML 正文，不接受配置覆盖 `request_id`、`description` 或来源 Session。
 
 Plane Origin、API token、Webhook 密钥分别只通过 `BATON_PLANE_URL`、`BATON_PLANE_API_KEY`、`BATON_PLANE_WEBHOOK_SECRET` 注入环境变量；JSON 不能含凭据，URL 使用 HTTPS（仅本机 loopback 测试可用 HTTP）。接收端须能访问 Plane 的 v1 工单、状态、标签、活动列表和实例版本接口，并有项目可见性。公网部署由可信反向代理提供 TLS，不把密钥放在 URL、日志或配置文件。Webhook 需携带 `X-Plane-Event`、`X-Plane-Delivery` 和对**原始正文**计算的 `X-Plane-Signature`；本入口最多读取 1 MiB。
 
-创建事件只关联工单；工单当前属于 `started` 状态组、含已配置的 `design-approved` 标签、状态活动证明该轮操作者且员工映射及显式任务字段齐全时，才经现有 `AcceptTask` 接受任务。签名/范围错误返回 4xx；验签与范围检查后，先在一个事务里保存关联、去重摘要和判断所需的精简事件字段，不保存完整 Webhook 正文。不可读取 Plane 或暂时无法接受时返回 503，但不依赖 Plane 重投：Coordinator 每秒扫描到期 pending，使用已存事件和重新 GET 的当前事实补做，最多尝试 8 次（含首次），以 5 秒起指数退避、上限 5 分钟；进程重启后继续。耗尽后收件记录标为 `blocked/retry_exhausted`，保留输入与 `last_error_code` 供以后人工处理，不自动重新放行。接受成功但确认丢失时仍先恢复已有任务，不因耗尽误报阻塞。200 的 `outcome` 为 `linked`、`ignored`、`blocked` 或 `accepted`；`blocked` 附有 `code`/`fields` 并保存在 `plane_deliveries`，状态轮次存在时也保存在 `plane_triggers`。同一轮次重复投递只返回已有任务，不启动第二个执行。若首个收件事务都无法提交，则无法补做；返回 503 并记录带 `delivery_id` 的 `plane_inbox_write_failed` 错误，须从来源人工核查/补发。此阶段不向 Plane 回写结果，也不改动既有任务状态机或 Worker。
+创建事件只关联工单；工单当前属于 `started` 状态组、含已配置的 `design-approved` 标签、状态活动证明该轮操作者且员工映射及显式任务字段齐全时，才经现有 `AcceptTask` 接受任务。签名/范围错误返回 4xx；验签与范围检查后，先在一个事务里保存关联、去重摘要和判断所需的精简事件字段，不保存完整 Webhook 正文。不可读取 Plane 或暂时无法接受时返回 503，但不依赖 Plane 重投：Coordinator 每秒扫描到期 pending，使用已存事件和重新 GET 的当前事实补做，最多尝试 8 次（含首次），以 5 秒起指数退避、上限 5 分钟；进程重启后继续。耗尽后收件记录标为 `blocked/retry_exhausted`，保留输入与 `last_error_code` 供以后人工处理，不自动重新放行。接受成功但确认丢失时仍先恢复已有任务，不因耗尽误报阻塞。200 的 `outcome` 为 `linked`、`ignored`、`blocked` 或 `accepted`；`blocked` 附有 `code`/`fields` 并保存在 `plane_deliveries`，状态轮次存在时也保存在 `plane_triggers`。同一轮次重复投递只返回已有任务，不启动第二个执行。若首个收件事务都无法提交，则无法补做；返回 503 并记录带 `delivery_id` 的 `plane_inbox_write_failed` 错误，须从来源人工核查/补发。
 
-隔离实测使用 `BATON_PLANE_LIVE=1 go test -run '^TestPlaneLiveReplay$' -count=1 -v ./internal/plane`：仅在拥有 `Baton Test` 保险库只读权限、测试数据库和已授权的测试项目时启用。测试用 `baton-t25-` 前缀新建工单与必要的审批标签，最终清理并核对原有计数；不触碰生产工单或打印凭据。
+结果回写使用迁移 `0019`。在 `BATON_PLANE_CONFIG` 加入 `baton_url`（Baton 的 HTTPS Origin）后启用后台回写；未配置时保留队列并记录 `plane_writeback_config_missing`，补齐配置并重启即可继续。任务变化及其结果快照在同一事务提交；关联任务时补入当前版本。评论带 `external_source=baton`、稳定的回写记录 UUID 和 `access=INTERNAL`，正文含任务链接、版本、状态、最多 500 字摘要及证据入口。证据通过受本人权限保护的任务 API 查询，评论不复制资源名、存储路径、Session 历史或工具输出。摘要和验收意见经过现有敏感内容过滤及 HTML 转义，发布前仍须将结构化摘要限定为允许项目成员阅读的内容。
+
+后台每秒扫描，每批最多处理 16 条；领取租约为 45 秒加退避，同一任务按版本依次发送。失败从 5 秒起指数退避，上限 5 分钟，持续保留待回写，不重跑任务。每次尝试先逐页列出评论并核对标记；读取失败时不创建。无匹配评论才用同一标记 POST，201 或 409 后 GET 核对评论 ID、工单、项目、工作区、可见性和来源。进程重启及确认落库失败继续使用原回写 ID。已确认的评论不因后续删除而自动重建。
+
+执行成功回写“执行成功，待员工验收”。员工通过 `POST /api/v1/tasks/{id}/acceptance` 提交 `expected_version`、`decision`（`passed` 或 `rejected`）和 1～400 字 `comment`；接口使用本人登录会话、CSRF 与 Origin 检查。任务须已有完成、失败或取消的确定结论；待核实任务先走 `/resolve`。验收保留执行状态、摘要和证据，增加任务版本，单独记录员工、时间及意见并生成回写；不会启动 Agent，也不自动修改 Plane 的 Done 状态。`GET /api/v1/tasks/{id}/acceptance` 返回本人任务的验收历史。旧版本请求返回 409；响应丢失时先查询验收历史和最新任务版本，不能直接重发。人工 `/resolve` 修正结论后需要重新验收；迟到证据和原任务重做审计保留已有验收，既有验收历史始终保留。
+
+隔离实测使用 `BATON_PLANE_LIVE=1 go test -run '^TestPlaneLiveReplay$' -count=1 -v ./internal/plane`：仅在拥有 `Baton Test` 保险库只读权限、测试数据库和已授权的测试项目时启用。测试用 `baton-t25-` 前缀新建工单与必要的审批标签，最终清理并核对原有计数；不触碰生产工单或打印凭据。T27 真实评论契约测试使用 `BATON_PLANE_LIVE=1 go test -run '^TestPlaneLiveWriteback$' -count=1 -v ./internal/plane`，只在同一测试项目创建并清理 `baton-t27-` 工单，覆盖外部成功后响应丢失、短时 503、稳定标记恢复和单独验收；不运行真实模型。
 
 ```text
-batond register --coordinator https://baton.example --display-name "Desk" --system linux --role pc --capability start
+batond register --coordinator https://baton.example --display-name "Desk" --system linux --capability start
 ```
 
 注册凭据放在 `BATON_ENROLLMENT_TOKEN`，或放在仅当前用户可读的文件里并用 `--enrollment-file` 指向它。两种方式只能选一种。未指定 `--data-dir` 时，Linux 使用 `$XDG_DATA_HOME/baton/node`（未设置时为 `~/.local/share/baton/node`），macOS 使用 `~/Library/Application Support/baton/node`，Windows 使用 `%LOCALAPPDATA%\baton\node`。
 
-系统取 `windows`、`macos` 或 `linux`。角色取 `pc`（PC 执行节点）或 `ubuntu`（Ubuntu 开发节点）。`--capability` 可重复，名称使用小写字母、数字、点、下划线和连字符。
+系统取 `windows`、`macos` 或 `linux`。`--role` 兼容旧命令且可省略，不影响节点选择。`--capability` 可重复，名称使用小写字母、数字、点、下划线和连字符。
 
 连接凭据只写入数据目录中的 `identity.json`，权限为仅当前用户可读写。标准输出只打印节点 ID 等非秘密字段。命令会说明当前使用文件保存，而不是系统凭据存储。数据目录里已经有身份时，命令不会再次注册。
 
@@ -208,7 +214,7 @@ baton task relations TASK_ID --json
 baton task cancel TASK_ID --json
 ```
 
-委托文件最小内容为 `{"request_id":"stable-request-id","description":"读取目标现场信息"}`。调用方自行保存稳定的 `request_id`；重试必须沿用原 ID 和原内容。CLI 不生成 ID，也不因等待到期或响应丢失重新委托。相同内容返回原任务，不同内容返回 `conflict`，即使默认 PC 后来改变也不改派原任务。未指定目标时使用中心保存的本人默认 PC；目标离线仍保留这个目标。
+委托文件最小内容为 `{"request_id":"stable-request-id","description":"读取目标现场信息"}`。调用方自行保存稳定的 `request_id`；重试必须沿用原 ID 和原内容。CLI 不生成 ID，也不因等待到期或响应丢失重新委托。相同内容返回原任务，不同内容返回 `conflict`，即使默认设备后来改变也不改派原任务。未指定目标时使用中心保存的本人默认设备；目标离线仍保留这个目标。
 
 所有命令走当前用户限定的 Unix socket / Windows named pipe，再经已有认证 Relay 通道访问中心。文件只含 IPC 地址和随机凭据，来源三元组由 batond 的 SQLite 绑定解析；员工、节点由 Relay 认证决定。中心重新核对来源任务、Session、Execution 和节点。新委托只允许从尚在执行、未取消且未到期的当前绑定发起；已接受任务在来源结束后仍可查询。请求不能指定其他员工或替换来源；授权文本完全继承来源，显式指定时必须逐字相同，不推断自由文本权限包含关系。查询和取消仅限来源任务及其直接委托，不开放同员工的其他任务。
 
@@ -258,31 +264,33 @@ batond 在心跳补报周期领取中心已保存的子结果，先写入来源 
 
 本地账号的用户名以小写字母开头，后续可以是小写字母、数字、点、下划线和连字符。认证模块保留 `Directory.FindExternal`，用于以后按已核实的外部主体查找员工。当前没有外部登录入口，这个查找本身不创建会话。
 
-## 节点注册与默认 PC
+## 节点注册与默认设备
 
 `POST /node-enrollments` 需要登录会话、Origin 和 CSRF。正文是 `{}`。成功时返回 `enrollment_id`、`enrollment_token` 和 `expires_at`。凭据默认 10 分钟，只能成功注册一次。过期返回 `enrollment_expired`，再次使用返回 `enrollment_used`。
 
 `POST /nodes/register` 不使用浏览器会话。员工身份只来自注册凭据；正文若包含 `employee_id` 会被拒绝，也不会核销凭据。请求不能在 URL 中放参数。正文至少包含：
 
 ```json
-{"enrollment_token":"...","display_name":"Desk","system":"linux","role":"pc","capabilities":["start"]}
+{"enrollment_token":"...","display_name":"Desk","system":"linux","capabilities":["start"]}
 ```
 
 成功时中心保存归属、显示名、系统、角色、能力列表和注册序号，并返回只出示一次的连接凭据。连接凭据是绑定节点、员工、`credential_id`、签发方、受众和有效期的 JWT，默认 30 天。
 
-员工还没有默认 PC 时，注册会按注册序号选择最早的、尚未吊销的 PC 执行节点并保存。之后新注册的节点不改变它。Ubuntu 开发节点不会被选为默认 PC。
+注册和节点同步继续接受旧版 batond 的 `role` 字段，中心忽略该字段。注册响应的 `role` 固定返回 `pc`，供旧版 batond 校验身份；此兼容值不表示节点角色。新的 `batond register` 可以省略 `--role`，旧命令仍可使用。
 
-`PUT /me/default-pc` 需要登录会话、Origin 和 CSRF：
+员工还没有默认设备时，注册会按注册序号选择最早的、尚未吊销的节点并保存。之后新注册的节点不改变它。所有节点都可以成为默认设备。迁移 `0015_equal_nodes.sql` 为没有默认值的员工补选最早的有效节点，已有默认引用保持原值，包括指向已吊销节点的引用。
+
+`PUT /me/default-device` 需要登录会话、Origin 和 CSRF；`PUT /me/default-pc` 保留为兼容别名：
 
 ```json
 {"node_id":"..."}
 ```
 
-只能改成自己的其他有效 PC 执行节点。其他员工的节点返回 403，不说明该节点是否存在。成功响应里的 `default_pc_node_id`、显示名、系统和注册序号是数据库里实际保存的值。
+可以改成本人的任一有效节点，包括离线节点。其他员工的节点返回 403，不说明该节点是否存在。成功响应里的 `default_device_node_id`、显示名、系统和注册序号是数据库里实际保存的值；`default_pc_node_id` 保留并返回相同 ID。
 
 `GET /nodes` 和 `GET /nodes/{id}` 凭登录会话返回本人节点。响应包含在线状态、最后联系时间、状态更新时间、是否已同步、`executable` 和 `revocation_status`。尚未同步或已有吊销决定的节点 `executable` 为 false。`revocation_status` 为 `none`、`pending` 或 `effective`。只有 Relay 确认应用后才是 `effective`；决定已保存但还没有回执时是 `pending`。查询其他员工的节点或不存在的节点都返回 403，响应相同。非法节点标识返回 400。这两个读取接口不要求 CSRF。
 
-`GET /nodes` 同时返回当前 `default_pc`。节点被吊销后，这里仍返回原来的 `node_id`，并把 `invalid` 和 `needs_reselection` 设为 true，提示需要重新选择。系统不会自动改选其他节点。
+`GET /nodes` 和吊销响应同时返回当前 `default_device` 及内容相同的 `default_pc`。Web 使用 `default_device` 和新设置接口。节点列表和详情不包含 `role`。节点被吊销后，这里仍返回原来的 `node_id`，并把 `invalid` 和 `needs_reselection` 设为 true，提示需要重新选择。系统不会自动改选其他节点。
 
 列表和吊销响应都包含 `local_process_notice`：吊销连接凭据不会停止离线节点上的本地进程。重新接入需要新的连接凭据。
 
@@ -290,7 +298,7 @@ batond 在心跳补报周期领取中心已保存的子结果，先写入来源 
 
 `POST /nodes/{id}/revoke` 需要登录会话、Origin 和 CSRF。正文是 `{}`。请求不能在 URL 中放参数。只能吊销自己的节点；其他员工的节点和不存在的节点都返回 403，响应相同，不说明该节点是否存在。
 
-成功时中心先把吊销决定写入数据库，记录操作者、时间和关联的节点与 `credential_id`。从这时起，该节点不能再同步，也不能被选为新的默认 PC。历史节点和凭据记录保留，不删除。
+成功时中心先把吊销决定写入数据库，记录操作者、时间和关联的节点与 `credential_id`。从这时起，该节点不能再同步，也不能被选为新的默认设备。历史节点和凭据记录保留，不删除。
 
 响应里的 `status` 表示处理状态。Relay 已把吊销应用到内存、断开对应连接并回执时为 `effective`，同时给出 `applied_at`。Relay 当时不可达，或回执还没到，则为 `pending`，`applied_at` 为 null。不能把 `pending` 理解成凭据已经不能连接，也不能理解成离线节点上的本地进程已经停止。
 
@@ -300,7 +308,7 @@ Relay 重新连上 Coordinator 时会取得包含该吊销的安全快照；已�
 
 `POST /tasks` 需要登录会话、Origin 和 CSRF。员工身份来自会话。正文里如果出现 `employee_id`，请求会因未知字段被拒绝，不会创建任务。
 
-调用方自己生成 `request_id`，同一次提交的重试保持不变。`description` 必填，最多 32768 个字符，可以包含换行、回车和制表符；其他控制字符会被拒绝。`authorization_scope` 和 `expected_outputs` 同样。`request_id` 和 `working_directory` 仍是单行。`target_node_id` 可以省略，省略时使用当前默认 PC；没有可用的默认 PC 时拒绝，不会改派到别的节点。显式指定时可以使用本人尚未吊销的 PC 或 Ubuntu 节点。节点离线也可以接受，状态是 `queued`。
+调用方自己生成 `request_id`，同一次提交的重试保持不变。`description` 必填，最多 32768 个字符，可以包含换行、回车和制表符；其他控制字符会被拒绝。`authorization_scope` 和 `expected_outputs` 同样。`request_id` 和 `working_directory` 仍是单行。`target_node_id` 可以省略，省略时使用当前默认设备；没有可用的默认设备时拒绝，不会改派到别的节点。显式指定时可以使用本人尚未吊销的节点。节点离线也可以接受，状态是 `queued`。
 
 `agent_type` 可以省略。指定了目标 Session 时沿用该 Session 的 Agent；否则使用目标节点上的 `default_agent_type`。这个值只是节点表里的可空列，当前没有修改它的接口；列为空且没有目标 Session 时拒绝。节点最后上报的能力里没有这个 Agent 时拒绝，不会创建任务。
 
@@ -308,7 +316,7 @@ Relay 重新连上 Coordinator 时会取得包含该吊销的安全快照；已�
 
 `source_session_id` 和 `target_session_id` 可以省略。填写时必须是当前员工已经拥有的 Session；其他员工的 Session 返回 `forbidden`，不存在的 Session 返回 `invalid_target`。目标 Session 还必须位于本次解析出的节点上，并且处于可以接收的状态。`running`、`waiting_input`，或已经绑定了执行的 Session，返回 409，`code` 是 `session_busy`。显式 `agent_type` 与 Session 已有 Agent 不一致时返回 `unsupported`。省略 `agent_type` 时沿用该 Session 的 Agent，不再使用节点默认 Agent。两个 Session 字段都省略时可以接受，目标 Session 由节点在准备时创建。
 
-中心先按员工和 `request_id` 查找已经提交的请求。内容相同就返回原来的任务，不再解析默认 PC 或默认 Agent。内容不同返回 409，`code` 是 `conflict`，并带上已有的 `task_id`。新请求在同一个数据库事务里保存任务、解析结果、execution、初始事件、任务关系、`dispatch_outbox` 和去重墓碑。指定了已有目标 Session 时，同一个事务会占用它。事务提交成功后才返回 200。提交失败时响应不是接受记录，库里也没有这次投递意图。
+中心先按员工和 `request_id` 查找已经提交的请求。内容相同就返回原来的任务，不再解析默认设备或默认 Agent。内容不同返回 409，`code` 是 `conflict`，并带上已有的 `task_id`。新请求在同一个数据库事务里保存任务、解析结果、execution、初始事件、任务关系、`dispatch_outbox` 和去重墓碑。指定了已有目标 Session 时，同一个事务会占用它。事务提交成功后才返回 200。提交失败时响应不是接受记录，库里也没有这次投递意图。
 
 成功记录包含 `task_id`、`request_id`、`target_node_id`、`agent_type`、`status`、`queue_expires_at`、`execution_timeout_seconds` 和 `version`。新接受和幂等重试都返回 200。错误响应里的 `request_id` 是这一次 HTTP 调用的编号，与正文里的 `request_id` 不是同一个值。
 
@@ -459,7 +467,7 @@ pnpm check:dist
 
 `pnpm dev` 在 `https://localhost:5173` 启动，并把 `/api` 代理到 `BATON_DEV_API`（默认 `https://127.0.0.1:8080`）。Coordinator 的 `BATON_ALLOWED_ORIGINS` 需要包含 `https://localhost:5173`。
 
-`pnpm test:e2e` 会先构建页面，再用 Playwright 驱动本机 Chromium，对真实的 Coordinator、PostgreSQL、Relay 和 batond 覆盖登录、注册节点、修改默认 PC、吊销从处理中到已生效，以及跨员工和无效会话被拒绝。运行前设置 `BATON_TEST_DATABASE_URL`。Session 用例另外覆盖真实 Worker 输出、恶意文本、断流和缓存边界；设置 `BATON_REAL_PI_BROWSER=1` 可使用本机已授权的 Pi 登录验证模型、补充输入、Worker 退出后的恢复和同一 Session 的第二个任务，可用 `BATON_PI_MODEL` 显式选择模型。
+`pnpm test:e2e` 会先构建页面，再用 Playwright 驱动本机 Chromium，对真实的 Coordinator、PostgreSQL、Relay 和 batond 覆盖登录、注册节点、修改默认设备、吊销从处理中到已生效，以及跨员工和无效会话被拒绝。运行前设置 `BATON_TEST_DATABASE_URL`。Session 用例另外覆盖真实 Worker 输出、恶意文本、断流和缓存边界；设置 `BATON_REAL_PI_BROWSER=1` 可使用本机已授权的 Pi 登录验证模型、补充输入、Worker 退出后的恢复和同一 Session 的第二个任务，可用 `BATON_PI_MODEL` 显式选择模型。
 
 ## 测试
 

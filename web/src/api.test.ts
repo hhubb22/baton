@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, getNodeFiles, login, logout, messageOf, putDefaultPC, revokeNode } from './api.ts'
+import { ApiError, getNodeFiles, login, logout, messageOf, putDefaultDevice, revokeNode } from './api.ts'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -54,7 +54,7 @@ describe('API 客户端', () => {
       requestId: 'req-9',
     })
     expect(messageOf(new ApiError(401, 'invalid_credentials', '账号或口令不正确', 'req-9'))).toBe('账号或口令不正确（req-9）')
-    await expect(putDefaultPC('csrf-token-value-0123456789', '../other')).rejects.toMatchObject({ code: 'invalid_id' })
+    await expect(putDefaultDevice('csrf-token-value-0123456789', '../other')).rejects.toMatchObject({ code: 'invalid_id' })
     await expect(revokeNode('csrf-token-value-0123456789', 'not-a-uuid')).rejects.toMatchObject({ code: 'invalid_id' })
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })

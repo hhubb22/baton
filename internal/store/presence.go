@@ -21,7 +21,6 @@ type NodeView struct {
 	ID                   string
 	DisplayName          string
 	System               string
-	Role                 string
 	Capabilities         []string
 	RegistrationSeq      int64
 	Online               bool
@@ -153,8 +152,8 @@ func (s *Store) ApplySessions(ctx context.Context, sessions []protocol.Presence)
 	return nil
 }
 
-// SyncNode 只更新显示名和能力。系统和角色必须与注册时保存的值一致，否则拒绝且不标为已同步。
-func (s *Store) SyncNode(ctx context.Context, employeeID, nodeID, connID, displayName, system, role string, capabilities []string) error {
+// SyncNode 只更新显示名和能力。系统必须与注册值一致，否则拒绝且不标为已同步；旧版 role 字段被忽略。
+func (s *Store) SyncNode(ctx context.Context, employeeID, nodeID, connID, displayName, system, _ string, capabilities []string) error {
 	var err error
 	employeeID, err = identity.ParseUUID(employeeID)
 	if err != nil {
@@ -170,7 +169,7 @@ func (s *Store) SyncNode(ctx context.Context, employeeID, nodeID, connID, displa
 	if capabilities == nil {
 		capabilities = []string{}
 	}
-	if err := node.Validate(displayName, system, role, capabilities); err != nil {
+	if err := node.Validate(displayName, system, "", capabilities); err != nil {
 		return err
 	}
 	tx, err := s.pool.Begin(ctx)
@@ -178,13 +177,13 @@ func (s *Store) SyncNode(ctx context.Context, employeeID, nodeID, connID, displa
 		return fmt.Errorf("开始事务失败: %s", redact.Scrub(err.Error()))
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	var registeredSystem, registeredRole string
+	var registeredSystem string
 	err = tx.QueryRow(ctx, `
-		SELECT system_name, role
+		SELECT system_name
 		FROM nodes
 		WHERE id = $1::uuid AND employee_id = $2::uuid AND revoked_at IS NULL
-		FOR UPDATE`, nodeID, employeeID).Scan(&registeredSystem, &registeredRole)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && (system != registeredSystem || role != registeredRole)) {
+		FOR UPDATE`, nodeID, employeeID).Scan(&registeredSystem)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && system != registeredSystem) {
 		return ErrSyncRejected
 	}
 	if err != nil {
@@ -194,8 +193,8 @@ func (s *Store) SyncNode(ctx context.Context, employeeID, nodeID, connID, displa
 		UPDATE nodes
 		SET display_name = $1, capabilities = $2
 		WHERE id = $3::uuid AND employee_id = $4::uuid AND revoked_at IS NULL
-		  AND system_name = $5 AND role = $6`,
-		displayName, capabilities, nodeID, employeeID, system, role)
+		  AND system_name = $5`,
+		displayName, capabilities, nodeID, employeeID, system)
 	if err != nil {
 		return fmt.Errorf("保存节点状态失败: %s", redact.Scrub(err.Error()))
 	}
@@ -273,7 +272,7 @@ func (s *Store) OwnNode(ctx context.Context, employeeID, nodeID string) (NodeVie
 }
 
 const nodeStatusSQL = `
-	SELECT n.id::text, n.display_name, n.system_name, n.role, n.capabilities, n.registration_seq,
+	SELECT n.id::text, n.display_name, n.system_name, n.capabilities, n.registration_seq,
 	       n.revoked_at IS NOT NULL,
 	       CASE
 	           WHEN n.revoked_at IS NULL THEN 'none'
@@ -316,7 +315,7 @@ func scanNodeView(row pgx.Row) (NodeView, error) {
 	var caps []string
 	var creds []string
 	if err := row.Scan(
-		&view.ID, &view.DisplayName, &view.System, &view.Role, &caps, &view.RegistrationSeq,
+		&view.ID, &view.DisplayName, &view.System, &caps, &view.RegistrationSeq,
 		&view.Revoked, &view.RevocationStatus, &view.RevokedBy, &view.RevocationRequested, &view.RevocationApplied, &creds,
 		&view.Online, &view.Synced, &view.LastContact, &view.StatusUpdated,
 	); err != nil {

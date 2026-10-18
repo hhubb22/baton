@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../api.ts'
 import type { Enrollment, NodeStatus } from '../types.ts'
 import { deskId, laptopId, listOf, node, saved } from '../test/fixtures.ts'
-import { DefaultPCForm } from './DefaultPCForm.tsx'
+import { DefaultDeviceForm } from './DefaultDeviceForm.tsx'
 import { EnrollmentPanel } from './EnrollmentPanel.tsx'
 import { FileBrowser } from './FileBrowser.tsx'
 import { NodeCard } from './NodeCard.tsx'
@@ -207,17 +207,17 @@ describe('文件浏览', () => {
   })
 })
 
-describe('默认 PC', () => {
+describe('默认设备', () => {
   it('默认节点失效时不自动改选', () => {
     const list = listOf([
       node({ id: deskId, display_name: 'Desk', revocation_status: 'effective' }),
       node({ id: laptopId, display_name: 'Laptop' }),
     ], deskId, true)
-    render(<DefaultPCForm list={list} saved={null} canWrite busy={false} onSave={vi.fn()} />)
-    expect(screen.getByTestId('default-pc-select')).toHaveValue('')
-    expect(screen.getByTestId('default-pc-current')).toHaveTextContent(deskId)
-    expect(screen.getByTestId('default-pc-current')).not.toHaveTextContent('Laptop')
-    expect(screen.getByTestId('default-pc-invalid')).toHaveTextContent('需要重新选择')
+    render(<DefaultDeviceForm list={list} saved={null} canWrite busy={false} onSave={vi.fn()} />)
+    expect(screen.getByTestId('default-device-select')).toHaveValue('')
+    expect(screen.getByTestId('default-device-current')).toHaveTextContent(deskId)
+    expect(screen.getByTestId('default-device-current')).not.toHaveTextContent('Laptop')
+    expect(screen.getByTestId('default-device-invalid')).toHaveTextContent('需要重新选择')
   })
 
   it('展示响应里保存的节点，并允许选择离线节点', async () => {
@@ -227,17 +227,17 @@ describe('默认 PC', () => {
       node({ id: deskId, display_name: 'Desk', online: true }),
       node({ id: laptopId, display_name: 'Laptop', online: false }),
     ], deskId)
-    const { rerender } = render(<DefaultPCForm list={list} saved={null} canWrite busy={false} onSave={onSave} />)
-    await user.selectOptions(screen.getByTestId('default-pc-select'), laptopId)
-    expect(screen.getByTestId('default-pc-offline')).toBeInTheDocument()
-    expect(screen.getByTestId('default-pc-current')).toHaveTextContent(deskId)
-    await user.click(screen.getByTestId('default-pc-save'))
+    const { rerender } = render(<DefaultDeviceForm list={list} saved={null} canWrite busy={false} onSave={onSave} />)
+    await user.selectOptions(screen.getByTestId('default-device-select'), laptopId)
+    expect(screen.getByTestId('default-device-offline')).toBeInTheDocument()
+    expect(screen.getByTestId('default-device-current')).toHaveTextContent(deskId)
+    await user.click(screen.getByTestId('default-device-save'))
     expect(onSave).toHaveBeenCalledWith(laptopId)
     const actual = saved(deskId, 'Desk From Server', 9)
-    rerender(<DefaultPCForm list={list} saved={actual} canWrite busy={false} onSave={onSave} />)
-    expect(screen.getByTestId('default-pc-saved')).toHaveTextContent('Desk From Server')
-    expect(screen.getByTestId('default-pc-saved')).toHaveTextContent(deskId)
-    expect(screen.getByTestId('default-pc-saved')).not.toHaveTextContent('Laptop')
+    rerender(<DefaultDeviceForm list={list} saved={actual} canWrite busy={false} onSave={onSave} />)
+    expect(screen.getByTestId('default-device-saved')).toHaveTextContent('Desk From Server')
+    expect(screen.getByTestId('default-device-saved')).toHaveTextContent(deskId)
+    expect(screen.getByTestId('default-device-saved')).not.toHaveTextContent('Laptop')
   })
 
   it('已选节点失效后清空选择，不改派到其他节点', async () => {
@@ -247,10 +247,10 @@ describe('默认 PC', () => {
       node({ id: deskId, display_name: 'Desk', online: true }),
       node({ id: laptopId, display_name: 'Laptop', online: false }),
     ], laptopId)
-    const { rerender } = render(<DefaultPCForm list={list} saved={null} canWrite busy={false} onSave={onSave} />)
-    await user.selectOptions(screen.getByTestId('default-pc-select'), laptopId)
+    const { rerender } = render(<DefaultDeviceForm list={list} saved={null} canWrite busy={false} onSave={onSave} />)
+    await user.selectOptions(screen.getByTestId('default-device-select'), laptopId)
     rerender(
-      <DefaultPCForm
+      <DefaultDeviceForm
         list={listOf([
           node({ id: deskId, display_name: 'Desk', online: true }),
           node({ id: laptopId, display_name: 'Laptop', revocation_status: 'pending' }),
@@ -261,11 +261,11 @@ describe('默认 PC', () => {
         onSave={onSave}
       />,
     )
-    expect(screen.getByTestId('default-pc-select')).toHaveValue('')
-    expect(screen.getByTestId('default-pc-select')).not.toHaveValue(deskId)
-    expect(screen.getByTestId('default-pc-current')).toHaveTextContent(laptopId)
-    expect(screen.getByTestId('default-pc-invalid')).toHaveTextContent('需要重新选择')
-    expect(screen.getByTestId('default-pc-save')).toBeDisabled()
+    expect(screen.getByTestId('default-device-select')).toHaveValue('')
+    expect(screen.getByTestId('default-device-select')).not.toHaveValue(deskId)
+    expect(screen.getByTestId('default-device-current')).toHaveTextContent(laptopId)
+    expect(screen.getByTestId('default-device-invalid')).toHaveTextContent('需要重新选择')
+    expect(screen.getByTestId('default-device-save')).toBeDisabled()
     expect(onSave).not.toHaveBeenCalled()
   })
 })

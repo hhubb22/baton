@@ -42,7 +42,7 @@ func (e *exitCode) Unwrap() error { return e.err }
 
 func usage() string {
 	return `用法:
-  batond register --coordinator https://主机 --display-name 名称 --system windows|macos|linux --role pc|ubuntu [--data-dir 目录] [--capability 名称 ...] [--enrollment-file 文件]
+  batond register --coordinator https://主机 --display-name 名称 --system windows|macos|linux [--data-dir 目录] [--capability 名称 ...] [--enrollment-file 文件]
   batond run --relay wss://主机/v1/node [--data-dir 目录]
   batond files add --id 标识 --path 绝对路径 [--data-dir 目录]
   batond files remove --id 标识 [--data-dir 目录]
@@ -239,7 +239,7 @@ func parseRegister(args []string) (registerOpts, error) {
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
 		return registerOpts{}, &exitCode{code: 2, err: errors.New(usage())}
 	}
-	if opts.coordinator == "" || opts.displayName == "" || opts.system == "" || opts.role == "" {
+	if opts.coordinator == "" || opts.displayName == "" || opts.system == "" {
 		return registerOpts{}, &exitCode{code: 2, err: errors.New(usage())}
 	}
 	opts.capabilities = []string(caps)

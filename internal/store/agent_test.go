@@ -29,7 +29,7 @@ func TestDelegationSourceIsolationAndReplay(t *testing.T) {
 	}
 	target := mustRegister(t, ctx, pool, repo, in.EmployeeID, "Target", node.RolePC, []string{"pi", "start"})
 	setDefaultAgent(t, ctx, pool, target.NodeID, "pi")
-	if _, err := repo.SetDefaultPC(ctx, in.EmployeeID, target.NodeID); err != nil {
+	if _, err := repo.SetDefaultDevice(ctx, in.EmployeeID, target.NodeID); err != nil {
 		t.Fatal(err)
 	}
 	bob := mustEmployee(t, ctx, pool, "bob", "Bob")
@@ -93,7 +93,7 @@ func TestDelegationSourceIsolationAndReplay(t *testing.T) {
 	if child.AuthorizationScope == nil || *child.AuthorizationScope != scope || child.TargetNodeID != target.NodeID {
 		t.Fatalf("继承授权或默认目标错误: %+v", child)
 	}
-	if _, err := repo.SetDefaultPC(ctx, in.EmployeeID, ident.NodeID); err != nil {
+	if _, err := repo.SetDefaultDevice(ctx, in.EmployeeID, ident.NodeID); err != nil {
 		t.Fatal(err)
 	}
 	replay, err := repo.AcceptDelegation(ctx, source, input)

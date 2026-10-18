@@ -96,9 +96,9 @@ export function issueEnrollment(csrf: string): Promise<Enrollment> {
   })
 }
 
-export async function putDefaultPC(csrf: string, nodeId: string): Promise<SavedDefault> {
+export async function putDefaultDevice(csrf: string, nodeId: string): Promise<SavedDefault> {
   if (!isNodeID(nodeId)) throw new ApiError(400, 'invalid_id', '节点标识不正确', '')
-  return request<SavedDefault>('/api/v1/me/default-pc', {
+  return request<SavedDefault>('/api/v1/me/default-device', {
     method: 'PUT',
     csrf,
     body: { node_id: nodeId },

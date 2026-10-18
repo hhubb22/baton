@@ -88,11 +88,17 @@ func retryDelay(attempt int) time.Duration {
 }
 
 func (s *Service) Run(ctx context.Context) {
+	if s.cfg.BatonURL == "" {
+		s.logger.Warn("event=plane_writeback_config_missing")
+	}
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
 		if err := s.retryPending(ctx); err != nil && ctx.Err() == nil {
 			s.logger.Warn("event=plane_retry_scan_failed")
+		}
+		if err := s.retryWritebacks(ctx); err != nil && ctx.Err() == nil {
+			s.logger.Warn("event=plane_writeback_scan_failed")
 		}
 		select {
 		case <-ctx.Done():
