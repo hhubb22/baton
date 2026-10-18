@@ -48,6 +48,8 @@ T14 真实模型验证进展：用户在 fa125f9、Darwin 27.2 arm64、Pi 1.3.0 
 
 T14 真实入口继续只输出脱敏中心字段，不读取或打印原生历史；result_format 仍只说明本次模型未通过结构要求。显式 BATON_REAL_PI_KEEP=1 保留业务/探针与节点/Worker 的兄弟文件树，Pi 沙箱仍仅可读会话子目录；保留目录含敏感材料，仅本机检查、排查后删除，默认及测试 schema 清理不变。中止入口给当前 15 秒工具、settled 与报告交付留出 90 秒窗口，确认中心已停止且副作用未知、任务仍待核实；允许并记录请求后的写入，不再把缺少尾部写入当中止成功条件。
 
+T14 中止状态读取修正：用户复跑 edd1e33 时，其余八项仍支持，但入口错将 stop_acknowledged_at、stop_confirmed_at、stop_outcome_known 当作 tasks 列，触发 SQLSTATE 42703，尚未完成真实中止闭环。入口现复用 store.GetTask/taskSelect 派生 execution_stops 字段；读取失败输出经过凭据脱敏的实际错误。默认无模型 TestRealPiStopStatusRead 使用真实 PostgreSQL 与计数执行器，在有/无 execution_stops 记录时调用和真实入口相同的读取辅助函数，校验确认时间、待核实状态和副作用未知，并覆盖读取错误传播；不作为真实模型中止能力证明。
+
 ## 现状与设计约束
 
 任务需要从 Ubuntu Agent 发到员工 PC，经过北京中转，但北京不能主动访问节点。任务被接受后，中心需要留下可查询记录；完整 Session 历史仍在节点。PC 断线或操作回执丢失时，系统必须核实原执行，不能靠重启 Agent 来恢复任务。

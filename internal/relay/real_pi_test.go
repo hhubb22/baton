@@ -17,6 +17,7 @@ import (
 	"baton/internal/agent/pi"
 	"baton/internal/identity"
 	"baton/internal/session"
+	"baton/internal/store"
 	"baton/internal/task"
 )
 
@@ -258,27 +259,25 @@ func TestRealPi(t *testing.T) {
 	// Pi 1.3.0 may finish its current tool before settling. Allow the tool's
 	// remaining 15 seconds plus settlement and central report delivery.
 	deadline = time.Now().Add(90 * time.Second)
-	var status string
-	var acknowledged, confirmed, outcomeKnown bool
+	var aborted task.Record
 	for {
-		if err := st.pool.QueryRow(context.Background(), `SELECT status, stop_acknowledged_at IS NOT NULL,
-		 stop_confirmed_at IS NOT NULL, stop_outcome_known FROM tasks WHERE id = $1::uuid`, abortTask.TaskID).
-			Scan(&status, &acknowledged, &confirmed, &outcomeKnown); err != nil {
-			t.Fatal("abort status unavailable")
+		aborted, err = readRealPiStopStatus(st, abortTask.TaskID)
+		if err != nil {
+			t.Fatalf("abort status unavailable: %s", pi.ScrubDiagnosticText(err.Error(), os.Environ()))
 		}
-		if confirmed {
+		if aborted.StopConfirmedAt != nil {
 			break
 		}
 		if time.Now().After(deadline) {
 			capabilities["中止"] = "不支持"
-			t.Fatalf("abort did not settle within 90s: status=%q acknowledged=%t confirmed=%t outcome_known=%t", status, acknowledged, confirmed, outcomeKnown)
+			t.Fatalf("abort did not settle within 90s: status=%q acknowledged=%t confirmed=%t outcome_known=%t", aborted.Status, aborted.StopAcknowledgedAt != nil, aborted.StopConfirmedAt != nil, aborted.StopOutcomeKnown)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 	abortSID := sessionOf(t, st, abortTask.TaskID)
 	abortWorker := workerStatus(t, st.dataDir, abortSID)
 	t.Cleanup(func() { stopWorker(abortWorker.PID) })
-	if status != task.StatusNeedsVerification || !acknowledged || outcomeKnown {
+	if aborted.Status != task.StatusNeedsVerification || aborted.StopAcknowledgedAt == nil || aborted.StopOutcomeKnown {
 		t.Fatal("tool side effects were incorrectly declared known")
 	}
 	if info, err := os.Stat(filepath.Join(work, "abort-finished")); err == nil {
@@ -292,6 +291,42 @@ func TestRealPi(t *testing.T) {
 		t.Fatal("abort side-effect fixture unavailable")
 	}
 	capabilities["中止"] = "支持（等当前工具结束后生效，不能中断运行中的工具）"
+}
+
+func readRealPiStopStatus(st *prepareStack, id string) (task.Record, error) {
+	return store.New(st.pool).GetTask(context.Background(), st.employeeID, id)
+}
+
+func TestRealPiStopStatusRead(t *testing.T) {
+	st := startPrepareStack(t, map[string]string{"BATON_TEST_HOLD_START": "0", "BATON_TEST_ABORT_SCRIPT": "unknown"})
+	created := acceptTask(t, st, "real-pi-stop-status-read")
+	waitTaskStatus(t, st, created.TaskID, task.StatusRunning)
+	taskWorker(t, st, created.TaskID)
+	before, err := readRealPiStopStatus(st, created.TaskID)
+	if err != nil {
+		t.Fatalf("read running task: %v", err)
+	}
+	if before.Status != task.StatusRunning || before.StopAcknowledgedAt != nil || before.StopConfirmedAt != nil || before.StopOutcomeKnown {
+		t.Fatal("task without stop evidence invented a stop")
+	}
+	if code := postJSON(t, st.client, st.base+"/api/v1/tasks/"+created.TaskID+"/cancel", map[string]any{}, st.csrf, nil); code != http.StatusOK {
+		t.Fatalf("cancel fixture: %d", code)
+	}
+	waitStopEvidence(t, st, created.TaskID)
+	var stops int
+	if err := st.pool.QueryRow(context.Background(), `SELECT COUNT(*) FROM execution_stops x JOIN executions e ON e.id=x.execution_id WHERE e.task_id=$1::uuid`, created.TaskID).Scan(&stops); err != nil || stops != 1 {
+		t.Fatalf("execution_stops fixture missing: count=%d err=%v", stops, err)
+	}
+	got, err := readRealPiStopStatus(st, created.TaskID)
+	if err != nil {
+		t.Fatalf("read task with execution_stops evidence: %v", err)
+	}
+	if got.Status != task.StatusNeedsVerification || got.StopAcknowledgedAt == nil || got.StopConfirmedAt == nil || got.StopOutcomeKnown {
+		t.Fatal("derived stop evidence lost or unknown outcome declared known")
+	}
+	if _, err := readRealPiStopStatus(st, "invalid-id"); err != store.ErrNotVisible {
+		t.Fatalf("task read error was swallowed: %v", err)
+	}
 }
 
 func waitRealPiStatus(t *testing.T, st *prepareStack, id, want string, capabilities map[string]string) {

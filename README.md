@@ -120,6 +120,8 @@ Pi 使用 `--mode rpc`，禁用自动任务重试、启动联网、扩展/MCP/sk
 
 Worker 在首次中止报告后继续只读观察适配器的停止证据；即使 `Abort` 等待超时，后来观察到 `agent_settled` 仍会持久化并补报确认停止。两份报告使用不同且稳定的事件 ID，重复轮询、ACK 丢失或账本重开不重复创建确认事件；中心沿用已有事件去重记录 `stop_confirmed_at`。Pi 使用过工具时仍上报 `OutcomeKnown=false`，任务保持待核实与执行绑定，不把稍后的 assistant error 当普通失败结果覆盖。是否在超时后强制结束 Pi 进程树尚未决定，本轮不实现，见 TECH 的 Q6。
 
+真实入口的中止轮询通过 `store.GetTask` 读取状态与从 `execution_stops` 派生的停止字段，不直接把它们当作 `tasks` 的列；读取失败保留脱敏后的实际错误。无模型回归 `go test -v -count=1 ./internal/relay -run '^TestRealPiStopStatusRead$'` 使用测试 PostgreSQL、真实 Baton 进程及计数执行器，覆盖无停止记录和已有停止确认但结果未知的读取，不启动 Pi 或调用模型。
+
 无模型检查（不登录、不执行任务）：
 
 ```sh
