@@ -143,3 +143,31 @@ func TestParentCancelTracksDescendantsIndependently(t *testing.T) {
 		t.Fatal("重复取消", err)
 	}
 }
+
+func TestPendingChildDeliveryIsNotStarvedBySavedResults(t *testing.T) {
+	ctx, repo, _, in, ident := preparedStart(t)
+	if d, err := repo.AuthorizeStart(ctx, in); err != nil || !d.Issue {
+		t.Fatalf("授权: %+v %v", d, err)
+	}
+	if ok, code, err := repo.ApplyExecutionReport(ctx, startedReport(in, mustUUID(t))); err != nil || !ok {
+		t.Fatalf("启动: %s %v", code, err)
+	}
+	source := store.AgentSource{EmployeeID: in.EmployeeID, NodeID: in.NodeID, TaskID: in.TaskID, ExecutionID: in.ExecutionID, SessionID: in.SessionID}
+	for _, state := range []string{"available", "source_stopped", "available"} {
+		child, err := repo.AcceptDelegation(ctx, source, task.Input{RequestID: mustUUID(t), Description: "新的子结果", TargetNodeID: &ident.NodeID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repo.RequestCancel(ctx, in.EmployeeID, child.TaskID); err != nil {
+			t.Fatal(err)
+		}
+		deliveries, err := repo.ChildDeliveries(ctx, source, "")
+		if err != nil || len(deliveries) != 1 || deliveries[0].ChildTaskID != child.TaskID {
+			t.Fatalf("已保存交付饿死新通知: %+v %v", deliveries, err)
+		}
+		receipt := protocol.ChildReceipt{DeliveryID: deliveries[0].DeliveryID, Status: state}
+		if err := repo.RecordChildReceipt(ctx, source, receipt); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

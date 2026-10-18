@@ -42,7 +42,8 @@ func (s *Store) ChildDeliveries(ctx context.Context, source AgentSource, childID
       JOIN executions e ON e.id = d.child_execution_id JOIN tasks t ON t.id = e.task_id
       WHERE d.employee_id = $1::uuid AND d.source_execution_id = $2::uuid
         AND (($3 = '' AND d.status IN ('pending', 'available', 'source_stopped')) OR t.id::text = $3)
-      ORDER BY d.created_at, d.id LIMIT 1`, source.EmployeeID, source.ExecutionID, childID).Scan(&id, &deliveryID, &executionID)
+      ORDER BY CASE d.status WHEN 'pending' THEN 0 WHEN 'available' THEN 1 ELSE 2 END,
+        d.created_at, d.id LIMIT 1`, source.EmployeeID, source.ExecutionID, childID).Scan(&id, &deliveryID, &executionID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, tx.Commit(ctx)
 	}
