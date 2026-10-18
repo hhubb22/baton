@@ -30,6 +30,10 @@ CI 已配置为在 pull request 与推送 `main` 时运行 Linux、macOS、Windo
 
 当前已实现补充（PS-116 / T12）：新增中心迁移 `0011_child_deliveries.sql`，以稳定 `delivery_id` 保存子结果到来源执行的交付状态；batond 心跳领取通知，来源 Worker 先写本地 SQLite 交付账本。忙碌来源只保留供当前工具查询的结果，明确等待子结果的存活来源才串行提交一次带交付标识的新输入，不重发原始任务。来源已停止或恢复后无法证明原 Agent 存活时不自动启动 Agent；结果仍可查询。交付意图与来源输入代次先同步提交，历史确认后记录 delivered；意图后崩溃保留 uncertain，不自动重注入。CLI 的子任务状态和结果查询区分交付状态与执行结果；来源自身的 delivery_status 仍表示结果已存中心。候选结果在本地绑定 input_generation，存活时提交候选不完成；新输入使旧候选失效，中心拒绝旧代次，并拒绝存在未结束或未处理交付子委托的父任务完成。父取消递归保存独立的子任务取消/中止请求，父停止回执不代替子停止回执。新增两节点、两 Worker 的重复通知、来源停止、意图前后/发送后/确认后崩溃与重连进程测试，以及代次、权限和独立取消回归。原生历史确认目前仅由测试执行器建模，真实 Agent 适配、环境注入、result submit 和人工核实接口不在本次范围；无新增依赖。
 
+当前已实现补充（PS-118 / T14）：新增 `internal/agent.Adapter` 与独立 `internal/agent/pi`，Worker 仅以一个选择点接入 Pi 1.3.0，不包含其他 Agent 适配。Pi 启动注入每次执行的 `BATON_CONTEXT_FILE`，可配置 Binary/Model/Env；启动关闭任务级自动重试，JSONL 仅按 LF 分帧并持续消费 stdout，prompt response、agent_end、进程退出都不是成功证据，等 agent_settled 后才沿已有 outbox 回报结构化结果。中止先 clear_queue 后 abort，活动回合等待 settled；使用过工具时保留副作用未知，不承诺进程树均已停止。委托复用 Agent 本地 CLI 与 T12 delivery ledger：持久化意图和代次后注入一次结果，只有原生 user 输入/成功 bash toolResult 中的精确 delivery_id 才确认 delivered，确认前不提前回执；未确认或崩溃保留 uncertain、不重注入。原生映射和 v3 header 校验 ID、工作目录、文件存在与目录边界，显式恢复只加载历史，不自动发送 prompt；batond 重连原 Worker，Worker 丢失仍待核实，不以恢复为理由重放输入。
+
+T14 的固定版本 testdata 是文档转录的协议契约样本，不是模型录制。回放覆盖 LF/CRLF、跨读取边界、大帧、Unicode 分隔符、settled/控制响应、中止顺序、错误和进程异常、等待子任务、原生历史缺失/不匹配/越界；Worker 测试覆盖异步结果、原生交付确认、代次、重复通知和崩溃 uncertain 回执。云端仅做 Pi 1.3.0 版本/帮助与隔离无模型初始化。`BATON_REAL_PI=1 go test -v -count=1 -timeout=30m ./... -run '^TestRealPi$'` 为默认跳过的 macOS 真实入口，使用独立临时 HOME/配置/业务目录及 sandbox-exec，需显式模型与环境凭据，不读用户登录文件，输出版本/平台/实际模型与能力结论。真实模型的启动、输入、结构化结果、执行中中止、恢复与委托尚待用户 macOS 运行，不能据回放或交叉构建宣称支持。生产 Pi 适配不提供 OS 沙箱；外部隔离责任及实测前提见 README。无新增 Go 依赖或中心迁移（仅 Worker SQLite 增加内部确认表），不占用 0015；未改动以下批准设计条款。
+
 ## 现状与设计约束
 
 任务需要从 Ubuntu Agent 发到员工 PC，经过北京中转，但北京不能主动访问节点。任务被接受后，中心需要留下可查询记录；完整 Session 历史仍在节点。PC 断线或操作回执丢失时，系统必须核实原执行，不能靠重启 Agent 来恢复任务。

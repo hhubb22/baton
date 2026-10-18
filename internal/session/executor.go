@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
+
+	"baton/internal/agent"
 )
 
 const (
@@ -27,13 +29,7 @@ type Observer struct {
 }
 
 // Output 是测试执行器对一次任务输入的回应。进程退出和自由文本都不是成功。
-type Output struct {
-	WaitingForChildren bool
-	Progress           []string
-	Final              string
-	Exited             bool
-	Uncertain          bool
-}
+type Output = agent.Output
 
 func NewObserver(path string) *Observer {
 	return &Observer{path: strings.TrimSpace(path)}

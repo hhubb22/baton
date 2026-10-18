@@ -62,7 +62,7 @@ jobs:
         run: go test -v -count=1 ./...
       - name: Race test
         if: ${{ !cancelled() && steps.test.outcome != 'skipped' }}
-        run: go test -race -v -count=1 ./internal/session ./internal/node ./internal/store ./internal/relay ./internal/control
+        run: go test -race -v -count=1 ./internal/agent/... ./internal/session ./internal/node ./internal/store ./internal/relay ./internal/control
 
   native:
     name: ${{ matrix.name }}

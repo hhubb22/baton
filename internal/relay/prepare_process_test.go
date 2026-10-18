@@ -183,6 +183,11 @@ func TestPrepareDoesNotAckWhenPersistFails(t *testing.T) {
 func startPrepareStack(t *testing.T, extra map[string]string) *prepareStack {
 	t.Helper()
 	coordBin, relayBin, batondBin := buildBins(t)
+	return startPrepareStackWithBins(t, extra, coordBin, relayBin, batondBin)
+}
+
+func startPrepareStackWithBins(t *testing.T, extra map[string]string, coordBin, relayBin, batondBin string) *prepareStack {
+	t.Helper()
 	pool := dbtest.Open(t)
 	ctx := context.Background()
 	var schema string

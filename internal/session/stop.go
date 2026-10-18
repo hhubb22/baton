@@ -31,6 +31,9 @@ func (w *workerDB) deadlineReasonLocked() (string, error) {
 func (w *workerDB) checkDeadline(sessionID string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if err := w.pollAdapterLocked(sessionID); err != nil {
+		return err
+	}
 	if w.cancelled && w.stopReason != "" && !w.stopReported {
 		_, err := w.stopLocked(sessionID, w.stopReason)
 		return err
@@ -90,6 +93,9 @@ func (w *workerDB) stopLocked(sessionID, reason string) ([]ipcReport, error) {
 		return nil, err
 	}
 	w.cancelled, w.stopReason = true, reason
+	if _, err := w.finishNativeChecksLocked(); err != nil {
+		return nil, err
+	}
 	notStarted := !w.inputSubmitted && !w.recoveredUncertain
 	stopped, known := notStarted, notStarted
 	if w.hasResultLocked() {
@@ -104,8 +110,12 @@ func (w *workerDB) stopLocked(sessionID, reason string) ([]ipcReport, error) {
 		stopped = result.AgentStopped
 		known = stopped && (result.Status == task.StatusCompleted || result.Status == task.StatusFailed)
 		notStarted = false
-	} else if !notStarted && !w.recoveredUncertain {
-		stopped, known, err = w.observer.Abort()
+	} else if !notStarted && (w.adapter != nil || !w.recoveredUncertain) {
+		if w.adapter != nil {
+			stopped, known, err = w.adapter.Abort()
+		} else if w.adapterFactory == nil {
+			stopped, known, err = w.observer.Abort()
+		}
 		if err != nil {
 			stopped, known = false, false
 		}
