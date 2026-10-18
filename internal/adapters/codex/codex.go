@@ -215,7 +215,7 @@ func (a *Adapter) CreateSession(ctx context.Context) error {
 		} `json:"thread"`
 	}
 	p := map[string]any{"cwd": a.config.Directory, "approvalPolicy": "never", "sandbox": "workspace-write", "historyMode": "paginated", "ephemeral": false, "developerInstructions": Instructions}
-	p["config"] = map[string]any{"sandbox_workspace_write.network_access": true}
+	p["config"] = map[string]any{"sandbox_workspace_write.network_access": true, "shell_environment_policy.inherit": "all"}
 	if a.config.Model != "" {
 		p["model"] = a.config.Model
 	}
