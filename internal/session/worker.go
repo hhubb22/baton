@@ -224,6 +224,14 @@ func handleWorker(db *workerDB, sessionID string, msg ipcMessage) ipcMessage {
 		reply := statusMessage(db, sessionID, 0)
 		reply.Reports = reports
 		return reply
+	case "submit_result":
+		reports, err := db.SubmitResult(sessionID, msg.TaskID, msg.ExecutionID, msg.Payload)
+		if err != nil {
+			return ipcMessage{Type: "result", Code: "conflict", Message: "候选结果被拒绝"}
+		}
+		reply := statusMessage(db, sessionID, 0)
+		reply.Reports = reports
+		return reply
 	case "pending":
 		reports, err := db.Pending()
 		if err != nil {

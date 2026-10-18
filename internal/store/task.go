@@ -79,6 +79,10 @@ func (s *Store) runCancelHook(ctx context.Context) error {
 // AcceptTask 保存一次任务接受。已有的相同请求直接返回原记录，不重新解析默认 PC 或默认 Agent。
 // 任务、execution、初始事件、outbox 和去重墓碑在同一个事务里提交；提交失败时调用方得不到接受记录。
 func (s *Store) AcceptTask(ctx context.Context, employeeID string, in task.Input) (task.Record, error) {
+	return s.acceptTask(ctx, employeeID, in, nil)
+}
+
+func (s *Store) acceptTask(ctx context.Context, employeeID string, in task.Input, source *AgentSource) (task.Record, error) {
 	var err error
 	employeeID, err = identity.ParseUUID(employeeID)
 	if err != nil {
@@ -93,7 +97,7 @@ func (s *Store) AcceptTask(ctx context.Context, employeeID string, in task.Input
 	}
 	var last error
 	for attempt := 0; attempt < 3; attempt++ {
-		rec, retry, err := s.acceptOnce(ctx, employeeID, prepared)
+		rec, retry, err := s.acceptOnce(ctx, employeeID, prepared, source)
 		if !retry {
 			return rec, err
 		}
@@ -105,12 +109,20 @@ func (s *Store) AcceptTask(ctx context.Context, employeeID string, in task.Input
 	return task.Record{}, fmt.Errorf("保存任务失败: %s", redact.Scrub(last.Error()))
 }
 
-func (s *Store) acceptOnce(ctx context.Context, employeeID string, prepared task.Prepared) (task.Record, bool, error) {
+func (s *Store) acceptOnce(ctx context.Context, employeeID string, prepared task.Prepared, source *AgentSource) (task.Record, bool, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return task.Record{}, false, fmt.Errorf("开始事务失败: %s", redact.Scrub(err.Error()))
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	var active bool
+	if source != nil {
+		var err error
+		active, err = validateAgentSource(ctx, tx, *source)
+		if err != nil {
+			return task.Record{}, false, err
+		}
+	}
 
 	rec, hash, found, err := loadTask(ctx, tx, ` WHERE employee_id = $1::uuid AND request_id = $2 FOR UPDATE`, employeeID, prepared.Input.RequestID)
 	if err != nil {
@@ -158,6 +170,9 @@ func (s *Store) acceptOnce(ctx context.Context, employeeID string, prepared task
 	}
 	if err := task.Validate(prepared.Input); err != nil {
 		return task.Record{}, false, err
+	}
+	if source != nil && !active {
+		return task.Record{}, false, agentDenied()
 	}
 	// 旧请求已经在上面返回。这里才解析默认值，并按员工核对 Session 归属。
 	if err := checkParent(ctx, tx, employeeID, prepared.Input.ParentTaskID); err != nil {

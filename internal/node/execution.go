@@ -338,7 +338,7 @@ func (s *startLoop) onReply(env protocol.Envelope) bool {
 		return false
 	}
 	switch kind.Type {
-	case protocol.BodyExecutionInputResult, protocol.BodyExecutionReportResult, protocol.BodyExecutionControlResult:
+	case protocol.BodyExecutionInputResult, protocol.BodyExecutionReportResult, protocol.BodyExecutionControlResult, protocol.BodyAgentResult:
 	default:
 		return false
 	}

@@ -626,6 +626,10 @@ func nullText(value string) any {
 }
 
 func (s *Store) attachResults(ctx context.Context, employeeID string, tasks []task.Record) error {
+	return attachResults(ctx, s.pool, employeeID, tasks)
+}
+
+func attachResults(ctx context.Context, q queryer, employeeID string, tasks []task.Record) error {
 	if len(tasks) == 0 {
 		return nil
 	}
@@ -635,7 +639,7 @@ func (s *Store) attachResults(ctx context.Context, employeeID string, tasks []ta
 		ids[i] = tasks[i].TaskID
 		index[tasks[i].TaskID] = i
 	}
-	rows, err := s.pool.Query(ctx, `
+	rows, err := q.Query(ctx, `
 		SELECT task_id::text, kind, node_id::text, storage_ref, resource_id, access_status, note
 		FROM task_result_refs
 		WHERE employee_id = $1::uuid AND task_id::text = ANY($2::text[])
