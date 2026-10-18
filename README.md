@@ -435,6 +435,14 @@ batond files remove --id notes [--data-dir 目录]
 
 浏览器只使用 `Secure`、`HttpOnly` 的会话 Cookie。登录响应里的 CSRF 令牌放在内存和当前标签页的 sessionStorage，用来设置 `X-CSRF-Token`。它不是会话凭据。注册凭据和节点连接凭据不写入 localStorage、sessionStorage、URL 或日志。
 
+Session 页面按节点显示最近 100 个 Session，本机父 Session 和跨节点委托分别列出。节点离线时显示状态未知，并保留最后报告时间。可以在页面选择节点、Agent 和工作目录提交任务，任务接受后显示稳定任务 ID；节点实际准备成功后才出现 Session。
+
+`GET /api/v1/events` 是同源 WebSocket，不接受 URL 凭据或查询参数。登录 Cookie 在升级时和连接期间校验，连接上限为每个中心进程 128 个。客户端发送 `{"session_id":"<UUID>","cursor":"<可选游标>"}` 选择一个本人 Session；空 ID 取消输出订阅。服务端发送 `ready`、`session.changed`、`task.changed` 和 `session.output`。变化通知只提醒刷新本人列表；输出事件包含 `session_id`、`ok`、`code`、`state`、`input_supported`、`text`、`cursor` 和 `gap`。每页最多 16 KiB，节点最近缓存 256 KiB，页面最近缓存 128 KiB；旧游标、Worker 重启、缓存超限与连接中断都能显示缺口。页面把输出作为文本渲染，不执行 HTML、链接或终端控制序列。
+
+`POST /api/v1/sessions/{id}/input` 的正文为 `{"operation_id":"<UUID>","text":"补充当前任务"}`，需要 Origin 和 CSRF，正文最多 16 KiB。成功回执表示节点确认接收；失败时读取 `code`，不把超时当成未提交。`GET /api/v1/sessions/{id}/input?operation_id=<UUID>` 只查询原操作；`delivered` 表示确认接收，`uncertain` 表示需要核实，`not_received` 表示尚无该操作记录，均不自动重发输入。原操作标识按员工保留在标签页存储中，切页或刷新后仍可查询。
+
+`POST /api/v1/sessions/{id}/resume` 接受 `{"operation_id":"<UUID>"}`，只连接或恢复已存在的原生历史。原结果尚未确认时返回 `result_pending`；结果已交付后将 Session 标记为空闲。此时通过启动表单选取该 Session，或用 `POST /api/v1/tasks` 的 `target_session_id` 提交新目标，会创建新任务和新执行，继续原生上下文，并重新申请执行许可。复用保持原工作目录，指定其他目录时拒绝。当前 Pi 提供执行中补充输入和结算后的显式恢复；它没有独立的等待员工输入事件。
+
 ```text
 cd web
 pnpm install
@@ -451,7 +459,7 @@ pnpm check:dist
 
 `pnpm dev` 在 `https://localhost:5173` 启动，并把 `/api` 代理到 `BATON_DEV_API`（默认 `https://127.0.0.1:8080`）。Coordinator 的 `BATON_ALLOWED_ORIGINS` 需要包含 `https://localhost:5173`。
 
-`pnpm test:e2e` 会先构建页面，再用 Playwright 驱动本机 Chromium，对真实的 Coordinator、PostgreSQL、Relay 和 batond 覆盖登录、注册节点、修改默认 PC、吊销从处理中到已生效，以及跨员工和无效会话被拒绝。运行前设置 `BATON_TEST_DATABASE_URL`。
+`pnpm test:e2e` 会先构建页面，再用 Playwright 驱动本机 Chromium，对真实的 Coordinator、PostgreSQL、Relay 和 batond 覆盖登录、注册节点、修改默认 PC、吊销从处理中到已生效，以及跨员工和无效会话被拒绝。运行前设置 `BATON_TEST_DATABASE_URL`。Session 用例另外覆盖真实 Worker 输出、恶意文本、断流和缓存边界；设置 `BATON_REAL_PI_BROWSER=1` 可使用本机已授权的 Pi 登录验证模型、补充输入、Worker 退出后的恢复和同一 Session 的第二个任务，可用 `BATON_PI_MODEL` 显式选择模型。
 
 ## 测试
 

@@ -62,10 +62,17 @@ func (a *Adapter) DeliverResult(ctx context.Context, deliveryID, payload string)
 }
 
 func (a *Adapter) Drain() []agent.Output {
+	a.mu.Lock()
+	turnID := a.state.TurnID
+	a.mu.Unlock()
 	var outputs []agent.Output
 	for {
 		select {
 		case e := <-a.events:
+			// 原 Session 的新执行只消费当前 turn，旧结算事件仍属于原任务。
+			if e.TurnID != "" && e.TurnID != turnID {
+				continue
+			}
 			out := agent.Output{Raw: e.Raw, Final: e.Final, Exited: e.Settled || e.Stopped, Uncertain: e.Uncertain}
 			var waiting struct {
 				Waiting bool `json:"baton_waiting_for_children"`
@@ -149,4 +156,15 @@ func (a *Adapter) HistoryContains(deliveryID string, queried bool) (bool, error)
 		}
 		cursor, seen[page.NextCursor] = page.NextCursor, true
 	}
+}
+
+func (a *Adapter) DrainLive() (string, bool) { return a.live.Drain() }
+func (a *Adapter) Supplement(ctx context.Context, operationID, text string) error {
+	a.mu.Lock()
+	active := a.active
+	a.mu.Unlock()
+	if active {
+		return a.SendInput(ctx, operationID, text)
+	}
+	return a.StartTask(ctx, operationID, text)
 }

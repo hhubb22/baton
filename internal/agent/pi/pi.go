@@ -32,6 +32,8 @@ type response struct {
 }
 
 type Adapter struct {
+	streamed   bool
+	live       agent.LiveBuffer
 	config     agent.Config
 	diagnostic *startupDiagnostics
 	history    mapping
@@ -306,12 +308,29 @@ func (a *Adapter) consume(raw []byte) error {
 		return nil
 	}
 	switch r.Type {
+	case "message_start":
+		a.streamed = false
+	case "message_update":
+		var event struct {
+			Event struct {
+				Type  string `json:"type"`
+				Delta string `json:"delta"`
+			} `json:"assistantMessageEvent"`
+		}
+		if json.Unmarshal(raw, &event) == nil && event.Event.Type == "text_delta" {
+			a.live.Append(event.Event.Delta)
+			a.streamed = true
+		}
 	case "tool_execution_start":
+		a.live.Append("\n[工具开始]\n")
 		a.usedTools = true
 	case "message_end":
 		if r.Message.Role == "assistant" {
 			a.stopReason = r.Message.StopReason
 			a.final = textContent(r.Message.Content)
+			if !a.streamed {
+				a.live.Append(a.final)
+			}
 			if len(a.final) > 256*1024 {
 				a.final = ""
 			}
@@ -445,4 +464,19 @@ func (a *Adapter) Close() error {
 		<-a.done
 	}
 	return nil
+}
+
+func (a *Adapter) DrainLive() (string, bool) { return a.live.Drain() }
+
+// Supplement 对当前任务补充输入，Pi 返回确认后才向调用方报告送达。
+func (a *Adapter) Supplement(ctx context.Context, operationID, text string) error {
+	a.mu.Lock()
+	active := a.active
+	a.mu.Unlock()
+	if !active {
+		_, err := a.SubmitInput(ctx, text)
+		return err
+	}
+	_, err := a.call(ctx, "steer", map[string]any{"message": text})
+	return err
 }

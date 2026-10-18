@@ -311,3 +311,27 @@ func receipts(t *testing.T, led *Ledger) int {
 	}
 	return n
 }
+
+func TestResumedSessionReleaseCannotClearNewBinding(t *testing.T) {
+	led := openTestLedger(t)
+	first := samplePrepare(t)
+	original := led.Prepare(first, nil)
+	if !original.OK {
+		t.Fatal(original)
+	}
+	if err := led.releaseSession(original.SessionID, first.ExecutionID); err != nil {
+		t.Fatal(err)
+	}
+	second := samplePrepare(t)
+	second.TargetSessionID = original.SessionID
+	if next := led.Prepare(second, nil); !next.OK {
+		t.Fatal(next)
+	}
+	if err := led.releaseSession(original.SessionID, first.ExecutionID); err != nil {
+		t.Fatal(err)
+	}
+	var bound string
+	if err := led.db.QueryRow(`SELECT bound_execution_id FROM sessions WHERE session_id=?`, original.SessionID).Scan(&bound); err != nil || bound != second.ExecutionID {
+		t.Fatal("迟到的恢复请求清除了新执行绑定")
+	}
+}

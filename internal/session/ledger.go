@@ -37,6 +37,11 @@ var (
 )
 
 type workerDB struct {
+	liveText           string
+	liveBase           int64
+	liveEnd            int64
+	liveEpoch          string
+	liveGap            bool
 	dataDir            string
 	nodeID             string
 	db                 *sql.DB
@@ -206,7 +211,7 @@ func (w *workerDB) Bind(taskID, executionID, agentType string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.execution != "" && w.execution != executionID {
-		return ErrSessionBusy
+		return w.reuseLocked(taskID, executionID, agentType)
 	}
 	tx, err := w.db.Begin()
 	if err != nil {
@@ -605,6 +610,12 @@ func (w *workerDB) failInputLocked(sessionID string, candidate task.Candidate) (
 }
 
 func (w *workerDB) recordExecution(sessionID, payload string, out Output) ([]ipcReport, error) {
+	if w.adapter == nil {
+		for _, text := range out.Progress {
+			w.appendLiveLocked(text+"\n", false)
+		}
+		w.appendLiveLocked(out.Final, false)
+	}
 	tx, err := w.db.Begin()
 	if err != nil {
 		return nil, err

@@ -62,6 +62,7 @@ type turn struct {
 }
 
 type Adapter struct {
+	live        agent.LiveBuffer
 	config      Config
 	mu          sync.Mutex
 	state       State
@@ -74,6 +75,7 @@ type Adapter struct {
 	closed      chan struct{}
 	closeOnce   sync.Once
 	inbox       chan notification
+	liveInbox   chan notification
 }
 
 type notification struct {
@@ -94,13 +96,15 @@ func New(c Config) *Adapter {
 	if c.Model == "" && !c.Restore {
 		c.Model = os.Getenv("BATON_CODEX_MODEL")
 	}
-	a := &Adapter{config: c, events: make(chan Event, 128), closed: make(chan struct{}), inbox: make(chan notification, 128)}
+	a := &Adapter{config: c, events: make(chan Event, 128), closed: make(chan struct{}), inbox: make(chan notification, 128), liveInbox: make(chan notification, 32)}
 	go func() {
 		for {
 			select {
 			case <-a.closed:
 				return
 			case n := <-a.inbox:
+				a.notification(n.method, n.raw)
+			case n := <-a.liveInbox:
 				a.notification(n.method, n.raw)
 			}
 		}
@@ -544,6 +548,19 @@ func (a *Adapter) handle(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2
 	if !req.Notif {
 		return nil, &jsonrpc2.Error{Code: jsonrpc2.CodeMethodNotFound, Message: "Baton refuses unattended approval/auth/tool requests"}
 	}
+	if req.Method == "item/agentMessage/delta" && req.Params != nil {
+		params := append(json.RawMessage(nil), (*req.Params)...)
+		if len(params) > 64*1024 {
+			a.live.MarkGap()
+			return nil, nil
+		}
+		select {
+		case a.liveInbox <- notification{req.Method, params}:
+		default:
+			a.live.MarkGap()
+		}
+		return nil, nil
+	}
 	if req.Method != "item/completed" && req.Method != "turn/completed" {
 		return nil, nil
 	}
@@ -562,6 +579,19 @@ func (a *Adapter) handle(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2
 }
 
 func (a *Adapter) notification(method string, raw json.RawMessage) {
+	if method == "item/agentMessage/delta" {
+		var p struct{ ThreadID, TurnID, Delta string }
+		if json.Unmarshal(raw, &p) != nil {
+			return
+		}
+		a.mu.Lock()
+		matched := p.ThreadID == a.state.ThreadID && p.TurnID == a.state.TurnID
+		a.mu.Unlock()
+		if matched {
+			a.live.Append(p.Delta)
+		}
+		return
+	}
 	if method != "item/completed" && method != "turn/completed" {
 		return
 	}

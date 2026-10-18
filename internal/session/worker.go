@@ -162,6 +162,12 @@ func serveConn(conn net.Conn, token, sessionID string, db *workerDB, logger *slo
 
 func handleWorker(db *workerDB, sessionID string, msg ipcMessage) ipcMessage {
 	switch msg.Type {
+	case "session_request":
+		if msg.SessionRequest == nil {
+			return ipcMessage{Type: "result", Code: "invalid_message"}
+		}
+		result := db.sessionRequest(sessionID, *msg.SessionRequest)
+		return ipcMessage{Type: "result", OK: true, SessionResult: &result}
 	case "child_delivery":
 		if msg.ChildDelivery == nil {
 			return ipcMessage{Type: "result", Code: "invalid_message"}

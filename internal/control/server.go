@@ -33,11 +33,12 @@ type Server struct {
 	offline   time.Duration
 	log       *slog.Logger
 
-	writeMu  sync.Mutex
-	mu       sync.Mutex
-	link     *controlLink
-	pending  map[string]chan prepareNotice
-	fileWait map[string]chan fileNotice
+	writeMu        sync.Mutex
+	mu             sync.Mutex
+	link           *controlLink
+	pending        map[string]chan prepareNotice
+	fileWait       map[string]chan fileNotice
+	sessionWaiters map[string]chan sessionNotice
 }
 
 func New(st *store.Store, signer node.Signer, token string, heartbeat, offline time.Duration, log *slog.Logger) (*Server, error) {
@@ -195,6 +196,7 @@ func (s *Server) read(ctx context.Context, link *controlLink) {
 		case protocol.KindError:
 			s.notePrepareTransport(frame.CorrelationID, frame.Code)
 			s.noteFileTransport(frame.CorrelationID, frame.Code)
+			s.noteSessionTransport(frame.CorrelationID, frame.Code)
 			s.log.Info("event=relay_error", "code", frame.Code)
 		}
 	}
@@ -214,6 +216,9 @@ func (s *Server) onEnvelope(ctx context.Context, ws *websocket.Conn, raw json.Ra
 		return
 	}
 	switch kind.Type {
+	case protocol.BodySessionResult:
+		s.noteSessionResult(env)
+		return
 	case protocol.BodyAgentRequest:
 		s.onAgentRequest(ctx, ws, env)
 		return

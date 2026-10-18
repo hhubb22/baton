@@ -41,6 +41,7 @@ type Settings struct {
 	NodeCredentialTTL time.Duration
 	Signer            node.TokenSigner
 	Revocations       RevocationDispatcher
+	Sessions          SessionGateway
 	Files             FileBrowser
 	Logger            *slog.Logger
 }
@@ -64,6 +65,9 @@ type Server struct {
 	nodeCredentialTTL time.Duration
 	signer            node.TokenSigner
 	revocations       RevocationDispatcher
+	sessions          SessionGateway
+	browserSlots      chan struct{}
+	eventInterval     time.Duration
 	files             FileBrowser
 	log               *slog.Logger
 }
@@ -98,6 +102,9 @@ func New(pool *pgxpool.Pool, settings Settings) (*Server, error) {
 		signer:            settings.Signer,
 		revocations:       settings.Revocations,
 		files:             settings.Files,
+		sessions:          settings.Sessions,
+		browserSlots:      make(chan struct{}, 128),
+		eventInterval:     time.Second,
 		log:               slog.New(redact.NewHandler(logger.Handler())),
 	}, nil
 }
@@ -133,6 +140,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
+	case "/api/v1/events":
+		s.events(w, r)
 	case "/api/v1/login":
 		if r.Method != http.MethodPost {
 			s.writeError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "不支持该请求方法")
@@ -685,3 +694,11 @@ func (w *statusWriter) Write(p []byte) (int, error) {
 	}
 	return w.ResponseWriter.Write(p)
 }
+
+func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+// SetEventIntervalForTest 在启动服务前调整测试采样间隔，便于验证传输反压。
+func (s *Server) SetEventIntervalForTest(interval time.Duration) { s.eventInterval = interval }
+
+// BrowserConnectionsForTest 返回当前占用的浏览器连接名额。
+func (s *Server) BrowserConnectionsForTest() int { return len(s.browserSlots) }

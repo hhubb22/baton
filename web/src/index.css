@@ -197,3 +197,9 @@ button.secondary {
     flex-direction: column;
   }
 }
+
+.session-layout { display:grid; grid-template-columns: minmax(240px, 1fr) minmax(0, 2fr); gap: 24px; margin-top: 24px; }
+.session-output { white-space:pre-wrap; overflow-wrap:anywhere; overflow:auto; max-height:480px; min-height:120px; padding:16px; border:1px solid #ccc; }
+.sessions textarea { min-height:80px; width:100%; }
+.sessions small { display:block; }
+@media(max-width:760px) { .session-layout { grid-template-columns:1fr; } }

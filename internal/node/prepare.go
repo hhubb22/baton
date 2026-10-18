@@ -17,12 +17,13 @@ import (
 )
 
 type wsWriter struct {
-	ws *websocket.Conn
-	mu sync.Mutex
+	sessionSlots chan struct{}
+	ws           *websocket.Conn
+	mu           sync.Mutex
 }
 
 func newWSWriter(ws *websocket.Conn) *wsWriter {
-	return &wsWriter{ws: ws}
+	return &wsWriter{ws: ws, sessionSlots: make(chan struct{}, 16)}
 }
 
 func (w *wsWriter) write(ctx context.Context, payload []byte) error {
@@ -80,6 +81,14 @@ func handleNodeEnvelope(ctx context.Context, raw []byte, w *wsWriter, ledger *Le
 	nodeID := ""
 	if loop != nil {
 		nodeID = loop.ident.NodeID
+	}
+	if cmd.TargetSessionID != "" && cmd.WorkingDirectory != "" && host != nil {
+		operation, _ := identity.NewUUID()
+		checked, err := host.BrowserRequest(ctx, protocol.SessionRequest{SessionID: cmd.TargetSessionID, OperationID: operation, Action: "validate_directory", Text: cmd.WorkingDirectory})
+		if err != nil || !checked.OK {
+			writePrepareResult(ctx, w, wrap.Envelope.MessageID, PrepareReport{Code: "invalid_target", Message: "复用 Session 的工作目录无法确认或与原目录不一致"})
+			return true
+		}
 	}
 	report := ledger.Prepare(PrepareInput{
 		NodeID: nodeID, RequiredArtifacts: cmd.RequiredArtifacts,

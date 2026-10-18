@@ -1,5 +1,9 @@
 # Baton 技术设计
 
+当前已实现补充（PS-125 / T21）：Web 提供按节点分组的 Session 树，分别显示本机父子关系与跨节点委托，可提交新任务、补充当前任务、查询原输入操作及显式恢复。`/api/v1/events` 使用同源 Cookie 鉴权，连接期间复核登录，退出、改密与到期关闭旧连接；`session.changed`、`task.changed` 提醒页面重新读取，`session.output` 返回受限纯文本、游标和缺口。通知按本人元数据版本每秒检查，重连及窗口获得焦点重新读取。历史、输出和补充输入使用临时 Relay RPC，不进入中心 outbox 或 task_events。每次输出最多 16 KiB，Worker 和适配器各保留最近 256 KiB，页面保留最近 128 KiB；中心最多 128 个浏览器连接及 128 个临时 RPC，节点最多 16 个并发 Session RPC，浏览器写超时为 2 秒。Relay 的输出使用独立队列，最多 128 条且最多 32 MiB，控制队列优先发送，输出超限不会占满任务控制队列。慢订阅丢失的片段以 gap 显示，完整原生历史仍留在节点。
+
+补充输入在 Worker 串行区内先保存操作 ID、正文摘要和不确定状态，再调用适配器；确认丢失后只查询原操作，不自动补发。页面按员工保存待确认的操作 ID 和 Session，不保存正文。旧结果已确认且全部旧报告已交付后，显式恢复将原 Session 标记为空闲；后续新目标创建独立任务和执行，重新申请许可，保留原生 Session 与固定工作目录，清除旧执行的活动回执，拒绝变更目录。恢复不创建缺失历史，不重放旧任务。Pi/Codex 提供实际补充输入和有界文本增量；Pi 没有独立的员工等待事件，页面保留中心 `waiting_input` 的显示能力。Inbox、Project Agent、完整历史分页与任务干预页面分别由其后续工单扩展。无新增中心迁移或依赖。
+
 当前已实现补充（PS-119 / T15）：沿用已合并 T14 的唯一 `internal/agent.Adapter`，Codex 位于 `internal/agent/codex`，旧 internal/adapters 接口已删除。统一接口为 Start / SubmitInput / DeliverResult / HistoryContains / ReadHistory / Drain / Abort / Close；Output 保留等待子任务、进度、最终结果、settled 与 uncertain，扩展仅限节点本地的 Raw 事件；StopObserver 持续观察中止 ACK 后的停止事实。Worker 唯一选择点为 `internal/session/adapter.go:configureAdapter`，按 agent_type 从 registeredAdapters 注册表选择 Pi/Codex，新增类型只增加注册项。两者共用许可、输入意图、输入代次、中止、outbox、恢复与认证本地历史 IPC；Pi 同步增加校验本地 JSONL 的有限分页，不再引入 Codex 专用 Worker 生命周期。启动前将非凭据配置绑定账本，恢复沿用原 Session/Execution、cwd/model/home，不保存 Env、不发送恢复输入。
 
 Codex CLI **0.162.1** 使用 stdio app-server，实现 initialize/initialized、thread/start/read/resume、turn/start/steer/interrupt、turn/completed 及 thread/turns/list、thread/items/list 分页；版本不匹配、实验方法不兼容、原生身份/cwd/Session 映射不符、历史缺失或输入发送窗口不明均拒绝自动重放，不创建替代 thread。clientUserMessageId 仅作关联，steer ACK 不证明历史落盘；原生 userMessage 或成功查询工具输出中的精确 delivery_id 才确认注入。Agent 经受限 BATON_CONTEXT_FILE 使用既有委托 CLI，完整原始历史不上传中心；本地已认证 IPC 提供分页历史，尚无中心原文查询 API。只注入 Agent 必要环境，使用禁止审批的 workspace-write sandbox（为本地委托开启网络），拒绝服务端审批、认证刷新和交互工具请求。

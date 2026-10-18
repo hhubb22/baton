@@ -178,3 +178,15 @@ func TestUnifiedHistoryConfirmsOnlyPersistedInput(t *testing.T) {
 		})
 	}
 }
+
+func TestDrainIgnoresPreviousTurnAfterSessionReuse(t *testing.T) {
+	a := New(Config{})
+	defer a.Close()
+	a.state.TurnID = "new-turn"
+	a.emit(Event{TurnID: "old-turn", Final: `{"summary":"旧结果"}`, Settled: true, Stopped: true})
+	a.emit(Event{TurnID: "new-turn", Final: `{"summary":"新结果"}`, Settled: true, Stopped: true})
+	output := a.Drain()
+	if len(output) != 1 || output[0].Final != `{"summary":"新结果"}` {
+		t.Fatal("旧执行结果进入了新执行")
+	}
+}

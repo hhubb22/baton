@@ -1,6 +1,7 @@
 package session
 
 import (
+	"baton/internal/protocol"
 	"context"
 	"encoding/json"
 	"errors"
@@ -128,7 +129,8 @@ func (c *Client) roundTrip(msg ipcMessage) (Status, error) {
 		return Status{}, errors.New("Worker 拒绝了命令")
 	}
 	return Status{
-		History: reply.History, HistoryCursor: reply.HistoryCursor,
+		SessionResult: reply.SessionResult,
+		History:       reply.History, HistoryCursor: reply.HistoryCursor,
 		ChildReceipts: reply.ChildReceipts,
 		Cancelled:     reply.Cancelled, InputDueAt: reply.InputDueAt,
 		PID:             reply.PID,
@@ -180,4 +182,8 @@ func copyReports(in []ipcReport) []Report {
 		out[i] = Report{EventID: item.EventID, Kind: item.Kind, Body: append(json.RawMessage(nil), item.Body...)}
 	}
 	return out
+}
+
+func (c *Client) SessionRequest(req protocol.SessionRequest) (Status, error) {
+	return c.roundTrip(ipcMessage{Type: "session_request", SessionRequest: &req})
 }

@@ -14,6 +14,7 @@ const (
 	Version         = 1
 	ToControl       = "control"
 	PriorityControl = "control"
+	PriorityOutput  = "output"
 	SourceNode      = "node"
 	SourceControl   = "control"
 
@@ -178,7 +179,7 @@ func PrepareNodeEnvelope(raw []byte, src Source) ([]byte, error) {
 	if _, err := identity.ParseUUID(env.MessageID); err != nil {
 		return nil, ErrInvalidMessage
 	}
-	if env.Priority != "" && env.Priority != PriorityControl {
+	if env.Priority != "" && env.Priority != PriorityControl && env.Priority != PriorityOutput {
 		return nil, ErrPriority
 	}
 	if env.Route.To != "" && env.Route.To != ToControl {
