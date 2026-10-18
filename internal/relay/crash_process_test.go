@@ -159,6 +159,76 @@ func TestStalePIDDoesNotRerun(t *testing.T) {
 	}
 }
 
+func TestStaleCentralStateDoesNotRerun(t *testing.T) {
+	for _, staleStatus := range []string{task.StatusQueued, task.StatusRunning} {
+		t.Run(staleStatus, func(t *testing.T) {
+			st := startPrepareStack(t, map[string]string{
+				"BATON_TEST_HOLD_START":      "0",
+				"BATON_TEST_EXECUTOR_SCRIPT": "success",
+				"BATON_TEST_CRASH_AFTER":     "input_send",
+			})
+			created := acceptTask(t, st, "stale-center-"+staleStatus)
+			waitTaskStatus(t, st, created.TaskID, task.StatusNeedsVerification)
+			waitLog(t, st.batond, "event=execution_report_acked")
+			sessionID := sessionOf(t, st, created.TaskID)
+			worker := workerStatus(t, st.dataDir, sessionID)
+			if !worker.Uncertain || !worker.StartIntent || !worker.InputSubmitted {
+				t.Fatalf("节点没有保留输入不确定的账本: %+v", worker)
+			}
+			if starts, inputs := executorCount(t, st, "start"), executorCount(t, st, "input"); starts != 1 || inputs != 1 {
+				t.Fatalf("制造状态不一致前的执行次数不正确: starts %d inputs %d", starts, inputs)
+			}
+			st.batond.stop()
+			stopWorker(worker.PID)
+			waitWorkerSocketDown(t, st.dataDir, sessionID)
+			path, err := session.LedgerPath(st.dataDir, sessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if needs, err := session.LedgerNeedsWorker(path); err != nil || needs {
+				t.Fatalf("已确认待核实的账本仍需启动 Worker: needs %v err %v", needs, err)
+			}
+
+			var version, events int
+			if err := st.pool.QueryRow(context.Background(), `
+				SELECT version, (SELECT COUNT(*) FROM task_events WHERE task_id = tasks.id)
+				FROM tasks WHERE id = $1::uuid`, created.TaskID).Scan(&version, &events); err != nil {
+				t.Fatal(err)
+			}
+			changed, err := st.pool.Exec(context.Background(), `
+				UPDATE tasks SET status = $2 WHERE id = $1::uuid AND status = 'needs_verification'`, created.TaskID, staleStatus)
+			if err != nil || changed.RowsAffected() != 1 {
+				t.Fatalf("没有制造中心旧状态: %v rows %d", err, changed.RowsAffected())
+			}
+			if status, executions, deliveries := taskFacts(t, st, created.TaskID); status != staleStatus || executions != 1 || deliveries != 0 {
+				t.Fatalf("重启前中心记录不正确: %s executions %d deliveries %d", status, executions, deliveries)
+			}
+
+			restartBatond(t, st)
+			waitLog(t, st.batond, "event=worker_pid_not_proof")
+			waitLog(t, st.batond, "event=connected")
+			waitNode(t, st.client, st.base, st.ident.NodeID, true, true, true)
+			for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); {
+				status, executions, deliveries := taskFacts(t, st, created.TaskID)
+				starts, inputs := executorCount(t, st, "start"), executorCount(t, st, "input")
+				if status != staleStatus || executions != 1 || deliveries != 0 || starts != 1 || inputs != 1 {
+					t.Fatalf("中心旧状态触发了重跑或被旧事件改写: %s executions %d deliveries %d starts %d inputs %d\n%s", status, executions, deliveries, starts, inputs, st.batond.out.String())
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+			var afterVersion, afterEvents int
+			if err := st.pool.QueryRow(context.Background(), `
+				SELECT version, (SELECT COUNT(*) FROM task_events WHERE task_id = tasks.id)
+				FROM tasks WHERE id = $1::uuid`, created.TaskID).Scan(&afterVersion, &afterEvents); err != nil {
+				t.Fatal(err)
+			}
+			if afterVersion != version || afterEvents != events {
+				t.Fatalf("重启后用事件回写了中心: version %d -> %d events %d -> %d", version, afterVersion, events, afterEvents)
+			}
+		})
+	}
+}
+
 func TestCorruptHistoryDoesNotLookLikeRecovery(t *testing.T) {
 	st := startPrepareStack(t, map[string]string{
 		"BATON_TEST_HOLD_START":      "0",
