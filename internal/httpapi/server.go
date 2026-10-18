@@ -611,7 +611,7 @@ func safePath(path string) string {
 	const taskPrefix = "/api/v1/tasks/"
 	if strings.HasPrefix(path, taskPrefix) {
 		rest := strings.TrimPrefix(path, taskPrefix)
-		for _, action := range []string{"resolve", "rerun"} {
+		for _, action := range []string{"resolve", "rerun", "acceptance"} {
 			if strings.HasSuffix(rest, "/"+action) {
 				id := strings.TrimSuffix(rest, "/"+action)
 				if id != "" && !strings.Contains(id, "/") {

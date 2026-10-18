@@ -22,6 +22,15 @@ func (s *Server) routeTask(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, http.StatusNotFound, "not_found", "找不到对应接口")
 		return
 	}
+	if strings.HasSuffix(rest, "/acceptance") {
+		id := strings.TrimSuffix(rest, "/acceptance")
+		if id == "" || strings.Contains(id, "/") {
+			s.writeError(w, r, http.StatusNotFound, "not_found", "找不到对应接口")
+			return
+		}
+		s.taskAcceptance(w, r, id)
+		return
+	}
 	for _, action := range []string{"resolve", "rerun"} {
 		if strings.HasSuffix(rest, "/"+action) {
 			id := strings.TrimSuffix(rest, "/"+action)

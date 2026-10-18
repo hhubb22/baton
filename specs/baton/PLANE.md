@@ -228,3 +228,15 @@ v1 写操作使用 `X-API-Key`，路径前缀 `/api/v1/workspaces/baton/projects
 **员工映射。** 配置 Plane 用户 ID 到 Baton 员工的显式表，并用 `activity.actor.email` 核对。管理员 ID `{admin_user_id}` 只在该账号本人发起时代表该员工；集成 token 造成的回写不代表他发起了新执行。成员 ID `{member_id}` 映射到对应员工。Plane 显示名账号不映射。未映射的 actor 拒绝执行。
 
 **回写摘要。** 用评论而不是改写工单描述。`external_source` 固定为 `baton`，`external_id` 使用 Baton 回写记录 ID。`access` 使用 `INTERNAL`。`comment_html` 只包含固定前缀 `baton-writeback`、Baton 任务链接、状态、短结果和证据引用，不包含 Session 原文、命令输出或凭据。状态变更仍由项目映射决定，并且必须带可查询标记，避免响应丢失后重复评论。当前项目成员都能阅读工单描述和 `INTERNAL` 评论；匿名用户现在不能。若以后公开项目，保持 `INTERNAL`，避免摘要进入公开评论。
+
+
+## T27 回写实测（2026-10-18）
+
+测试使用 Railway `baton-plane-test` 的 Plane 社区版 1.4.2、工作区 baton、Baton Test 项目；只读取 1Password `Baton Test/plane` 中已授权字段，凭据不落盘。`TestPlaneLiveWriteback` 新建一个 `baton-t27-` 工单，并在结束时删除该工单。
+
+- 真实 POST 返回 201 后在本地丢弃响应，Baton 保留待回写；重试逐页查到原 `external_source=baton` 与回写 UUID，确认同一评论，没有增加第二条。
+- 本地故障注入层对实际 Plane 连接短时返回 503。恢复后使用原 outbox 记录发送，任务和 execution 记录均保持 1 份。
+- 取消、人工核实完成和员工验收分别回写；共有 4 条 UUID 不同的 INTERNAL 评论。完成评论明确“待员工验收”，验收评论单独包含员工 ID、时间和意见。测试中的验收操作由测试员工身份提交；不代表产品发布验收。
+- 结构化证据在本机事务与接口测试中验证，评论只放本人任务 API 入口，不公开存储路径、资源名或工具输出。测试使用示例 Baton HTTPS Origin，未验证该外链在真实部署上的可达性。
+
+本次通过真实 Plane API 验证评论契约，故障由本地注入，不停用共享 Plane 服务、不修改现有 Webhook、不运行真实模型。Coordinator 进程重启由独立进程测试覆盖。Plane 页面中的员工人工操作、真实模型执行及跨网络部署验收仍需对应环境验证。

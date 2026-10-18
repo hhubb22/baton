@@ -128,9 +128,15 @@ BATON_LISTEN_ADDR=127.0.0.1:9444 BATON_COORDINATOR_URL=https://127.0.0.1:9443 BA
 
 Plane Origin、API token、Webhook 密钥分别只通过 `BATON_PLANE_URL`、`BATON_PLANE_API_KEY`、`BATON_PLANE_WEBHOOK_SECRET` 注入环境变量；JSON 不能含凭据，URL 使用 HTTPS（仅本机 loopback 测试可用 HTTP）。接收端须能访问 Plane 的 v1 工单、状态、标签、活动列表和实例版本接口，并有项目可见性。公网部署由可信反向代理提供 TLS，不把密钥放在 URL、日志或配置文件。Webhook 需携带 `X-Plane-Event`、`X-Plane-Delivery` 和对**原始正文**计算的 `X-Plane-Signature`；本入口最多读取 1 MiB。
 
-创建事件只关联工单；工单当前属于 `started` 状态组、含已配置的 `design-approved` 标签、状态活动证明该轮操作者且员工映射及显式任务字段齐全时，才经现有 `AcceptTask` 接受任务。签名/范围错误返回 4xx；验签与范围检查后，先在一个事务里保存关联、去重摘要和判断所需的精简事件字段，不保存完整 Webhook 正文。不可读取 Plane 或暂时无法接受时返回 503，但不依赖 Plane 重投：Coordinator 每秒扫描到期 pending，使用已存事件和重新 GET 的当前事实补做，最多尝试 8 次（含首次），以 5 秒起指数退避、上限 5 分钟；进程重启后继续。耗尽后收件记录标为 `blocked/retry_exhausted`，保留输入与 `last_error_code` 供以后人工处理，不自动重新放行。接受成功但确认丢失时仍先恢复已有任务，不因耗尽误报阻塞。200 的 `outcome` 为 `linked`、`ignored`、`blocked` 或 `accepted`；`blocked` 附有 `code`/`fields` 并保存在 `plane_deliveries`，状态轮次存在时也保存在 `plane_triggers`。同一轮次重复投递只返回已有任务，不启动第二个执行。若首个收件事务都无法提交，则无法补做；返回 503 并记录带 `delivery_id` 的 `plane_inbox_write_failed` 错误，须从来源人工核查/补发。此阶段不向 Plane 回写结果，也不改动既有任务状态机或 Worker。
+创建事件只关联工单；工单当前属于 `started` 状态组、含已配置的 `design-approved` 标签、状态活动证明该轮操作者且员工映射及显式任务字段齐全时，才经现有 `AcceptTask` 接受任务。签名/范围错误返回 4xx；验签与范围检查后，先在一个事务里保存关联、去重摘要和判断所需的精简事件字段，不保存完整 Webhook 正文。不可读取 Plane 或暂时无法接受时返回 503，但不依赖 Plane 重投：Coordinator 每秒扫描到期 pending，使用已存事件和重新 GET 的当前事实补做，最多尝试 8 次（含首次），以 5 秒起指数退避、上限 5 分钟；进程重启后继续。耗尽后收件记录标为 `blocked/retry_exhausted`，保留输入与 `last_error_code` 供以后人工处理，不自动重新放行。接受成功但确认丢失时仍先恢复已有任务，不因耗尽误报阻塞。200 的 `outcome` 为 `linked`、`ignored`、`blocked` 或 `accepted`；`blocked` 附有 `code`/`fields` 并保存在 `plane_deliveries`，状态轮次存在时也保存在 `plane_triggers`。同一轮次重复投递只返回已有任务，不启动第二个执行。若首个收件事务都无法提交，则无法补做；返回 503 并记录带 `delivery_id` 的 `plane_inbox_write_failed` 错误，须从来源人工核查/补发。
 
-隔离实测使用 `BATON_PLANE_LIVE=1 go test -run '^TestPlaneLiveReplay$' -count=1 -v ./internal/plane`：仅在拥有 `Baton Test` 保险库只读权限、测试数据库和已授权的测试项目时启用。测试用 `baton-t25-` 前缀新建工单与必要的审批标签，最终清理并核对原有计数；不触碰生产工单或打印凭据。
+结果回写使用迁移 `0019`。在 `BATON_PLANE_CONFIG` 加入 `baton_url`（Baton 的 HTTPS Origin）后启用后台回写；未配置时保留队列并记录 `plane_writeback_config_missing`，补齐配置并重启即可继续。任务变化及其结果快照在同一事务提交；关联任务时补入当前版本。评论带 `external_source=baton`、稳定的回写记录 UUID 和 `access=INTERNAL`，正文含任务链接、版本、状态、最多 500 字摘要及证据入口。证据通过受本人权限保护的任务 API 查询，评论不复制资源名、存储路径、Session 历史或工具输出。摘要和验收意见经过现有敏感内容过滤及 HTML 转义，发布前仍须将结构化摘要限定为允许项目成员阅读的内容。
+
+后台每秒扫描，每批最多处理 16 条；领取租约为 45 秒加退避，同一任务按版本依次发送。失败从 5 秒起指数退避，上限 5 分钟，持续保留待回写，不重跑任务。每次尝试先逐页列出评论并核对标记；读取失败时不创建。无匹配评论才用同一标记 POST，201 或 409 后 GET 核对评论 ID、工单、项目、工作区、可见性和来源。进程重启及确认落库失败继续使用原回写 ID。已确认的评论不因后续删除而自动重建。
+
+执行成功回写“执行成功，待员工验收”。员工通过 `POST /api/v1/tasks/{id}/acceptance` 提交 `expected_version`、`decision`（`passed` 或 `rejected`）和 1～400 字 `comment`；接口使用本人登录会话、CSRF 与 Origin 检查。任务须已有完成、失败或取消的确定结论；待核实任务先走 `/resolve`。验收保留执行状态、摘要和证据，增加任务版本，单独记录员工、时间及意见并生成回写；不会启动 Agent，也不自动修改 Plane 的 Done 状态。`GET /api/v1/tasks/{id}/acceptance` 返回本人任务的验收历史。旧版本请求返回 409；响应丢失时先查询验收历史和最新任务版本，不能直接重发。人工 `/resolve` 修正结论后需要重新验收；迟到证据和原任务重做审计保留已有验收，既有验收历史始终保留。
+
+隔离实测使用 `BATON_PLANE_LIVE=1 go test -run '^TestPlaneLiveReplay$' -count=1 -v ./internal/plane`：仅在拥有 `Baton Test` 保险库只读权限、测试数据库和已授权的测试项目时启用。测试用 `baton-t25-` 前缀新建工单与必要的审批标签，最终清理并核对原有计数；不触碰生产工单或打印凭据。T27 真实评论契约测试使用 `BATON_PLANE_LIVE=1 go test -run '^TestPlaneLiveWriteback$' -count=1 -v ./internal/plane`，只在同一测试项目创建并清理 `baton-t27-` 工单，覆盖外部成功后响应丢失、短时 503、稳定标记恢复和单独验收；不运行真实模型。
 
 ```text
 batond register --coordinator https://baton.example --display-name "Desk" --system linux --capability start
