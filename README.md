@@ -75,6 +75,16 @@ BATON_LISTEN_ADDR=127.0.0.1:9444 BATON_COORDINATOR_URL=https://127.0.0.1:9443 BA
 
 `serve` 在迁移完成前拒绝启动。
 
+## Plane 触发（社区版 1.4.2）
+
+可选的独立入口 `POST /hooks/plane` 使用迁移 `0013`；不设置 Plane 环境变量时不启用。部署时在**非秘密**的 `BATON_PLANE_CONFIG` JSON 中配置 `workspace_id`、`workspace_slug`、`project_id`、`webhook_id`、`approval_label_id`（项目标签名称须为 `design-approved`）和 `actors`。每个 actor 明确填写 `plane_user_id`、`email`、`employee_id`，以及 `task` 内的 `target_node_id`、`agent_type`、`working_directory`、`authorization_scope`、`expected_outputs`；不能借用默认 PC 或推测授权。目标节点必须归该员工所有且可用于任务接受。描述来自 Plane 工单名称和非空 HTML 正文，不接受配置覆盖 `request_id`、`description` 或来源 Session。
+
+Plane Origin、API token、Webhook 密钥分别只通过 `BATON_PLANE_URL`、`BATON_PLANE_API_KEY`、`BATON_PLANE_WEBHOOK_SECRET` 注入环境变量；JSON 不能含凭据，URL 使用 HTTPS（仅本机 loopback 测试可用 HTTP）。接收端须能访问 Plane 的 v1 工单、状态、标签、活动列表和实例版本接口，并有项目可见性。公网部署由可信反向代理提供 TLS，不把密钥放在 URL、日志或配置文件。Webhook 需携带 `X-Plane-Event`、`X-Plane-Delivery` 和对**原始正文**计算的 `X-Plane-Signature`；本入口最多读取 1 MiB。
+
+创建事件只关联工单；工单当前属于 `started` 状态组、含已配置的 `design-approved` 标签、状态活动证明该轮操作者且员工映射及显式任务字段齐全时，才经现有 `AcceptTask` 接受任务。签名/范围错误返回 4xx；验签与范围检查后，先在一个事务里保存关联、去重摘要和判断所需的精简事件字段，不保存完整 Webhook 正文。不可读取 Plane 或暂时无法接受时返回 503，但不依赖 Plane 重投：Coordinator 每秒扫描到期 pending，使用已存事件和重新 GET 的当前事实补做，最多尝试 8 次（含首次），以 5 秒起指数退避、上限 5 分钟；进程重启后继续。耗尽后收件记录标为 `blocked/retry_exhausted`，保留输入与 `last_error_code` 供以后人工处理，不自动重新放行。接受成功但确认丢失时仍先恢复已有任务，不因耗尽误报阻塞。200 的 `outcome` 为 `linked`、`ignored`、`blocked` 或 `accepted`；`blocked` 附有 `code`/`fields` 并保存在 `plane_deliveries`，状态轮次存在时也保存在 `plane_triggers`。同一轮次重复投递只返回已有任务，不启动第二个执行。若首个收件事务都无法提交，则无法补做；返回 503 并记录带 `delivery_id` 的 `plane_inbox_write_failed` 错误，须从来源人工核查/补发。此阶段不向 Plane 回写结果，也不改动既有任务状态机或 Worker。
+
+隔离实测使用 `BATON_PLANE_LIVE=1 go test -run '^TestPlaneLiveReplay$' -count=1 -v ./internal/plane`：仅在拥有 `Baton Test` 保险库只读权限、测试数据库和已授权的测试项目时启用。测试用 `baton-t25-` 前缀新建工单与必要的审批标签，最终清理并核对原有计数；不触碰生产工单或打印凭据。
+
 ```text
 batond register --coordinator https://baton.example --display-name "Desk" --system linux --role pc --capability start
 ```

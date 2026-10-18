@@ -59,7 +59,8 @@ func Open(t *testing.T) *pgxpool.Pool {
 			    'employees', 'login_sessions', 'schema_migrations',
 			    'node_enrollments', 'nodes', 'node_credentials', 'employee_settings',
 			    'node_presence', 'node_revocations', 'tasks', 'task_events', 'executions',
-			    'dispatch_outbox', 'request_tombstones', 'sessions', 'task_relations'
+			    'dispatch_outbox', 'request_tombstones', 'sessions', 'task_relations',
+			    'plane_issues', 'plane_triggers', 'plane_deliveries'
 			  )`).Scan(&n); err != nil {
 			t.Errorf("检查 public 失败: %s", redact.Scrub(err.Error()))
 		} else if n != 0 {

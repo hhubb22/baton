@@ -23,6 +23,7 @@ import (
 	"baton/internal/httpapi"
 	"baton/internal/migrate"
 	"baton/internal/node"
+	"baton/internal/plane"
 	"baton/internal/redact"
 	"baton/internal/store"
 	"baton/internal/webui"
@@ -187,8 +188,23 @@ func cmdServe(ctx context.Context, stderr io.Writer, getenv func(string) string)
 		if err != nil {
 			return err
 		}
+		planeConfig, err := plane.Load(getenv)
+		if err != nil {
+			return err
+		}
+		mux := http.NewServeMux()
+		mux.Handle("/", api)
+		var planeHook *plane.Service
+		if planeConfig != nil {
+			hook, err := plane.New(pool, *planeConfig, store.New(pool), nil, logger)
+			if err != nil {
+				return err
+			}
+			mux.Handle(plane.Path, hook)
+			planeHook = hook
+		}
 		apiSrv := &http.Server{
-			Handler:           webui.Handler(api),
+			Handler:           webui.Handler(mux),
 			ReadHeaderTimeout: 5 * time.Second,
 			ReadTimeout:       20 * time.Second,
 			WriteTimeout:      60 * time.Second,
@@ -230,6 +246,18 @@ func cmdServe(ctx context.Context, stderr io.Writer, getenv func(string) string)
 			errCh <- controlSrv.Serve(controlLn)
 		}()
 		go ctrl.DeliverPrepares(ctx)
+		if planeHook != nil {
+			retryCtx, cancel := context.WithCancel(ctx)
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				planeHook.Run(retryCtx)
+			}()
+			defer func() {
+				cancel()
+				<-done
+			}()
+		}
 		shutdown := func() {
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
