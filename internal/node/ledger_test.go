@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -188,8 +189,53 @@ func TestLedgerUsesWALAndFullSync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("账本权限是 %o", info.Mode().Perm())
+	}
+}
+
+func TestLedgerPathRoundTrip(t *testing.T) {
+	for _, name := range []string{"absolute", "relative"} {
+		t.Run(name, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			dir := "节点 data %23 # &+"
+			if name == "absolute" {
+				var err error
+				dir, err = filepath.Abs(dir)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			led, err := OpenLedger(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			generation := led.Generation()
+			in := samplePrepare(t)
+			in.WorkingDirectory = t.TempDir()
+			prepared := led.Prepare(in, nil)
+			if !prepared.OK {
+				led.Close()
+				t.Fatalf("准备失败: %+v", prepared)
+			}
+			if err := led.Close(); err != nil {
+				t.Fatal(err)
+			}
+			led, err = OpenLedger(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer led.Close()
+			if led.Generation() != generation || receipts(t, led) != 1 {
+				t.Fatal("重开账本丢失存储代次或准备映射")
+			}
+			if got := led.Prepare(in, nil); got != prepared {
+				t.Fatalf("重开后重复准备改变映射: %+v want %+v", got, prepared)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "node.db")); err != nil {
+				t.Fatalf("账本没有保存在指定路径: %v", err)
+			}
+		})
 	}
 }
 

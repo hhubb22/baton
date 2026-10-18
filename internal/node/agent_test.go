@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"baton/internal/agentcli"
+	"baton/internal/privatefile"
 	"baton/internal/privatefiletest"
 	"baton/internal/session"
 	"baton/internal/task"
@@ -86,7 +87,7 @@ func TestAgentContextBindsAndSurvivesRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(bad, data, 0o600); err != nil {
+	if err := privatefile.WriteFile(bad, data); err != nil {
 		t.Fatal(err)
 	}
 	got, err = agentcli.Call(ctx, bad, agentcli.Request{Operation: "get", TaskID: report.TaskID})

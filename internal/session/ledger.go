@@ -93,7 +93,7 @@ func openWorkerDB(path string, observer *Observer) (*workerDB, error) {
 	}
 	if err := chmodDB(path); err != nil {
 		db.Close()
-		return nil, err
+		return nil, classifyLedgerErr(err)
 	}
 	w := &workerDB{db: db, observer: observer, clock: startpermit.NewClock(), executionClock: startpermit.NewClock()}
 	if err := ensureChildSchema(w); err != nil {
@@ -878,7 +878,7 @@ func createWorkerSchema(db *sql.DB) error {
 		);
 		INSERT INTO meta (key, value) VALUES ('ledger_schema', '1');
 	`); err != nil {
-		return ErrHistoryIncompatible
+		return classifyLedgerErr(err)
 	}
 	return nil
 }
@@ -941,26 +941,26 @@ func InspectLedger(path string) error {
 // CreateLedger 只在首次准备 Session 时新建账本。文件已经存在时不会覆盖。
 func CreateLedger(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return ErrHistoryIncompatible
+		return classifyLedgerErr(err)
 	}
 	if _, err := os.Stat(path); err == nil {
 		return nil
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return ErrHistoryIncompatible
+		return classifyLedgerErr(err)
 	}
 	db, err := sql.Open("sqlite", sqliteDSN(path))
 	if err != nil {
-		return ErrHistoryIncompatible
+		return classifyLedgerErr(err)
 	}
 	defer db.Close()
 	db.SetMaxOpenConns(1)
 	if err := db.Ping(); err != nil {
-		return ErrHistoryIncompatible
+		return classifyLedgerErr(err)
 	}
 	if err := createWorkerSchema(db); err != nil {
 		return err
 	}
-	return chmodDB(path)
+	return classifyLedgerErr(chmodDB(path))
 }
 
 // LedgerNeedsWorker 优先恢复待交付和已启动事实；启动前只恢复已申请许可且未拒绝的 Session。
@@ -1018,16 +1018,10 @@ func classifyLedgerErr(err error) error {
 	if errors.As(err, &sqErr) {
 		switch sqErr.Code() & 0xff {
 		case 11, 26: // SQLITE_CORRUPT, SQLITE_NOTADB
-			return ErrHistoryIncompatible
-		default:
-			return ErrHistoryUnread
+			return fmt.Errorf("%w: %w", ErrHistoryIncompatible, err)
 		}
 	}
-	text := strings.ToLower(err.Error())
-	if strings.Contains(text, "not a database") || strings.Contains(text, "malformed") {
-		return ErrHistoryIncompatible
-	}
-	return ErrHistoryUnread
+	return fmt.Errorf("%w: %w", ErrHistoryUnread, err)
 }
 
 // VerificationEventID 是同一次执行、同一个原因的待核实报告标识。不同原因不会互相覆盖。
@@ -1058,7 +1052,10 @@ func CrashAfter(point string) {
 }
 
 func sqliteDSN(path string) string {
-	u := url.URL{Scheme: "file", Path: filepath.ToSlash(path)}
+	u := url.URL{Scheme: "file", Path: filepath.ToSlash(path), OmitHost: !filepath.IsAbs(path)}
+	if filepath.IsAbs(path) && !strings.HasPrefix(u.Path, "/") {
+		u.Path = "/" + u.Path
+	}
 	u.RawQuery = "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)&_txlock=immediate"
 	return u.String()
 }
@@ -1066,9 +1063,15 @@ func sqliteDSN(path string) string {
 func chmodDB(path string) error {
 	for _, name := range []string{path, path + "-wal", path + "-shm"} {
 		if _, err := os.Stat(name); err != nil {
-			continue
+			if name != path && errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return err
 		}
-		if err := os.Chmod(name, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := os.Chmod(name, 0o600); err != nil {
+			if name != path && errors.Is(err, os.ErrNotExist) {
+				continue
+			}
 			return err
 		}
 	}

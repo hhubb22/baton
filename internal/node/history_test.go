@@ -39,14 +39,19 @@ func TestPersistentHistoryReadFailureIsBounded(t *testing.T) {
 	if err := session.CreateLedger(path); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(path, 0); err != nil {
+	db, err := sql.Open("sqlite", sqliteDSN(path))
+	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
-	if f, err := os.Open(path); err == nil {
-		f.Close()
-		t.Skip("当前用户仍能读取无权限文件")
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(`PRAGMA journal_mode=DELETE`); err != nil {
+		t.Fatal(err)
 	}
+	if _, err := db.Exec(`BEGIN EXCLUSIVE`); err != nil {
+		t.Fatal(err)
+	}
+	defer db.Exec(`ROLLBACK`)
 	var logs bytes.Buffer
 	loop, reports := historyTestLoop(t, led, &logs, true)
 	for i := 1; i < historyReadFailureLimit; i++ {
@@ -73,7 +78,7 @@ func TestPersistentHistoryReadFailureIsBounded(t *testing.T) {
 		t.Fatalf("待核实报告不正确: %+v", first)
 	}
 	// 首次 ACK 失败后只补报相同事件，不再读取账本或拉起 Worker。
-	if err := os.Chmod(path, 0o600); err != nil {
+	if _, err := db.Exec(`ROLLBACK`); err != nil {
 		t.Fatal(err)
 	}
 	loop.resendPending(context.Background())
