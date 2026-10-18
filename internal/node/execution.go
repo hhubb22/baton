@@ -69,6 +69,9 @@ func (s *startLoop) resendPending(ctx context.Context) {
 		cancel()
 		if err == nil {
 			s.clearHistoryReadFailures(id)
+			if !s.syncStatusReceipts(ctx, id, st) {
+				continue
+			}
 			if len(st.Reports) > 0 {
 				s.deliver(ctx, id, st.Reports)
 			}
@@ -76,6 +79,9 @@ func (s *startLoop) resendPending(ctx context.Context) {
 				if !s.checkControl(ctx, &startJob{taskID: st.TaskID, executionID: st.ExecutionID, sessionID: id}) {
 					continue
 				}
+			}
+			if st.TaskID != "" && st.ExecutionID != "" {
+				_ = s.receiveChildren(ctx, &startJob{taskID: st.TaskID, executionID: st.ExecutionID, sessionID: id}, "", false)
 			}
 			if st.Cancelled || st.Uncertain || st.InputSubmitted || !st.StartIntent || st.TaskID == "" || st.ExecutionID == "" {
 				continue
@@ -119,7 +125,7 @@ func (s *startLoop) reconcile(ctx context.Context, sessionID string) {
 		callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		st, pendingErr := s.host.Pending(callCtx, sessionID)
 		cancel()
-		if pendingErr == nil && len(st.Reports) > 0 {
+		if pendingErr == nil && s.syncStatusReceipts(ctx, sessionID, st) && len(st.Reports) > 0 {
 			s.deliver(ctx, sessionID, st.Reports)
 		}
 		return
@@ -338,7 +344,7 @@ func (s *startLoop) onReply(env protocol.Envelope) bool {
 		return false
 	}
 	switch kind.Type {
-	case protocol.BodyExecutionInputResult, protocol.BodyExecutionReportResult, protocol.BodyExecutionControlResult, protocol.BodyAgentResult:
+	case protocol.BodyExecutionInputResult, protocol.BodyExecutionReportResult, protocol.BodyExecutionControlResult, protocol.BodyAgentResult, protocol.BodyChildDeliveriesResult:
 	default:
 		return false
 	}

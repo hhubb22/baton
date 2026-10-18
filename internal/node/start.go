@@ -26,10 +26,11 @@ type startLoop struct {
 	writer *wsWriter
 	log    *slog.Logger
 
-	mu       sync.Mutex
-	jobs     map[string]*startJob
-	waiters  map[string]chan json.RawMessage
-	reported map[string]bool
+	mu         sync.Mutex
+	deliveryMu sync.Mutex
+	jobs       map[string]*startJob
+	waiters    map[string]chan json.RawMessage
+	reported   map[string]bool
 }
 
 type startJob struct {

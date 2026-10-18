@@ -104,11 +104,19 @@ baton task cancel TASK_ID --json
 
 所有命令走当前用户限定的 Unix socket / Windows named pipe，再经已有认证 Relay 通道访问中心。文件只含 IPC 地址和随机凭据，来源三元组由 batond 的 SQLite 绑定解析；员工、节点由 Relay 认证决定。中心重新核对来源任务、Session、Execution 和节点。新委托只允许从尚在执行、未取消且未到期的当前绑定发起；已接受任务在来源结束后仍可查询。请求不能指定其他员工或替换来源；授权文本完全继承来源，显式指定时必须逐字相同，不推断自由文本权限包含关系。查询和取消仅限来源任务及其直接委托，不开放同员工的其他任务。
 
-`task get` 返回中心状态、Execution 和 `delivery_status`；这里的 `delivered` 指现有执行结果交付记录已在中心保存，不表示结果已经自动注入来源 Agent。`task result` 返回可信 `task_id`、`target_node_id`、`session_id`、`execution_id`、状态、摘要、证据、产物和错误；未保存候选结果时 `ready` 为 false。`task relations` 返回该任务的来源与执行边，以及从当前来源 Session 发出的直接子委托，单次上限 100 条，超出明确报错，不静默截断。
+`task get` 返回中心状态、Execution 和 `input_generation`。查询子委托时，`delivery_status` 表示子结果交给来源 Worker 的状态，`delivery_id` 是稳定交付标识；查询来源任务自身时，`delivery_status` 仍表示该执行结果是否已存中心。`task result` 同时返回可信 `task_id`、`target_node_id`、`session_id`、`execution_id`、状态、摘要、证据、产物和错误；未保存候选结果时 `ready` 为 false。`task relations` 返回该任务的来源与执行边，以及从当前来源 Session 发出的直接子委托，单次上限 100 条，超出明确报错，不静默截断。
 
 `task wait` 默认 30 秒，允许大于 0、最多 5 分钟；只轮询中心已保存事实，在任务结束、进入待核实或版本变化时返回。到期返回 `waiting:true`、`timed_out:true` 和最后读到的任务（尚未读到时为 null），退出码为 0；Ctrl-C 或传输错误返回非零，不取消任务。其他成功命令输出 JSON、退出码为 0，业务拒绝输出结构化错误、退出码非零。
 
-`result submit` 尚未实现。真实 Agent、自动子结果通知/再次输入和父子级联取消尚未接入。本次复用已有中心表，无新增 PostgreSQL 迁移或依赖。
+`result submit`、真实 Agent 适配与环境注入尚未实现。子结果交付使用迁移 `0011`，无新增依赖；当前由测试执行器验证下面的账本和继续输入边界，不能据此宣称真实 Agent 的原生历史接口已通过。
+
+### 子结果交付与父子取消
+
+batond 在心跳补报周期领取中心已保存的子结果，先写入来源 Worker 的 SQLite 交付账本。`pending` 表示尚未写入来源账本，`available` 表示已保存、等待当前工具查询或明确等待子结果的 Agent；来源停止时为 `source_stopped`，结果仍可查询。通知不会重发原始任务说明或启动新的 Agent。当前工具调用 `task result` 可消费结果，不额外注入一次自动输入；只有存活且明确等待子结果时才串行继续原任务。
+
+自动输入前同步提交 `delivery_intent` 并推进来源的 `input_generation`，历史确认后才记为 `delivered`。意图后崩溃时显示 `uncertain`（交付待核实），不自动再次注入。交付状态与子任务的 `status`、摘要和证据独立；子任务已完成不会因交付不确定变为执行失败。当前代次的完成候选必须有效、Agent 已停止自动工作，且所有子委托已结束并处理交付，父任务才能完成；后续子结果使旧候选失效。
+
+取消父任务会递归保存各子任务的取消请求和各自的中止命令，包括已结束中间任务下仍未结束的后代。未启动者可直接取消；已运行者等待自己的停止回执，不能用父任务已停止来证明子任务也已停止。`task cancel` 返回的 `children` 保留各自决定；离线或停止未确认的子任务仍为待核实。
 
 ## 会话
 

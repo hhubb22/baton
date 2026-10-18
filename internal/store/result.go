@@ -440,9 +440,11 @@ func hasOpenChildren(ctx context.Context, tx pgx.Tx, employeeID, taskID string) 
 	var blocked bool
 	err := tx.QueryRow(ctx, `
 		SELECT EXISTS (
-			SELECT 1 FROM tasks
-			WHERE employee_id = $1::uuid AND parent_task_id = $2::uuid
-			  AND status IN ('queued', 'running', 'needs_verification')
+			SELECT 1 FROM tasks c
+			WHERE c.employee_id = $1::uuid AND c.parent_task_id = $2::uuid
+			  AND (c.status IN ('queued', 'running', 'needs_verification') OR NOT EXISTS (
+                SELECT 1 FROM child_deliveries d JOIN executions e ON e.id = d.child_execution_id
+                WHERE e.task_id = c.id AND d.status = 'delivered'))
 		)`, employeeID, taskID).Scan(&blocked)
 	if err != nil {
 		return false, fmt.Errorf("保存执行记录失败: %s", redact.Scrub(err.Error()))
