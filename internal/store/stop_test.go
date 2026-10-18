@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -8,6 +9,104 @@ import (
 	"baton/internal/store"
 	"baton/internal/task"
 )
+
+func TestCancelBeforePermitRetainsStopEvidence(t *testing.T) {
+	ctx, repo, pool, in, _ := preparedStart(t)
+	if d, err := repo.RequestCancel(ctx, in.EmployeeID, in.TaskID); err != nil || d.Status != task.StatusCancelled || d.PossibleStart {
+		t.Fatalf("授权前取消: %+v %v", d, err)
+	}
+	before, err := repo.GetTask(ctx, in.EmployeeID, in.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := store.ExecutionReport{EmployeeID: in.EmployeeID, NodeID: in.NodeID, TaskID: in.TaskID, ExecutionID: in.ExecutionID, SessionID: in.SessionID,
+		EventID: mustUUID(t), Kind: task.EventStopReport, Status: task.StatusNeedsVerification, StopReason: task.StatusCancelled,
+		OccurredAt: time.Now().UTC().Truncate(time.Microsecond), AgentStopped: true, OutcomeKnown: true, NotStarted: true, WorkerSequence: 1}
+	for i := 0; i < 2; i++ {
+		if ack, code, err := repo.ApplyExecutionReport(ctx, report); err != nil || !ack || code != "" {
+			t.Fatalf("未启动补充证据确认: %v %s %v", ack, code, err)
+		}
+	}
+	after, err := repo.GetTask(ctx, in.EmployeeID, in.TaskID)
+	if err != nil || after.Status != task.StatusCancelled || after.Version != before.Version+1 || !reflect.DeepEqual(after.Summary, before.Summary) || !reflect.DeepEqual(after.ErrorCode, before.ErrorCode) || !reflect.DeepEqual(after.ErrorMessage, before.ErrorMessage) {
+		t.Fatalf("补充证据改写终态: before %+v after %+v %v", before, after, err)
+	}
+	if after.StopAcknowledgedAt == nil || after.StopConfirmedAt == nil || !after.StopOutcomeKnown {
+		t.Fatalf("中止证据未保存: %+v", after)
+	}
+	var authorized, bound bool
+	if err := pool.QueryRow(ctx, `SELECT e.start_authorized_at IS NOT NULL, s.bound_execution_id IS NOT NULL
+ FROM executions e JOIN sessions s ON s.id = $2::uuid WHERE e.id = $1::uuid`, in.ExecutionID, in.SessionID).Scan(&authorized, &bound); err != nil || authorized || bound {
+		t.Fatalf("补充证据改变授权或重新绑定: %v %v %v", authorized, bound, err)
+	}
+	events, err := repo.ListTaskEvents(ctx, in.EmployeeID, in.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	for _, ev := range events {
+		if ev.Kind != task.EventStopReport {
+			continue
+		}
+		count++
+		if ev.Status != task.StatusCancelled || ev.WorkerSequence != 1 || ev.OccurredAt == nil || !ev.OccurredAt.Equal(report.OccurredAt) || ev.NotStarted == nil || !*ev.NotStarted || ev.StopReason == nil || *ev.StopReason != task.StatusCancelled {
+			t.Fatalf("补充证据不完整: %+v", ev)
+		}
+	}
+	if count != 1 {
+		t.Fatalf("重复回执产生 %d 份证据", count)
+	}
+}
+
+func TestUnauthorizedStopEvidenceRequiresCancelledNotStartedExecution(t *testing.T) {
+	ctx, repo, pool, in, _ := preparedStart(t)
+	report := store.ExecutionReport{EmployeeID: in.EmployeeID, NodeID: in.NodeID, TaskID: in.TaskID, ExecutionID: in.ExecutionID, SessionID: in.SessionID,
+		Kind: task.EventStopReport, Status: task.StatusNeedsVerification, StopReason: task.StatusCancelled,
+		OccurredAt: time.Now().UTC(), AgentStopped: true, OutcomeKnown: true, NotStarted: true}
+	reject := func(t *testing.T, r store.ExecutionReport) {
+		t.Helper()
+		r.EventID = mustUUID(t)
+		if ack, code, err := repo.ApplyExecutionReport(ctx, r); err != nil || ack || code != task.CodeInvalidTarget {
+			t.Fatalf("越界报告被接受: %+v ack %v code %s err %v", r, ack, code, err)
+		}
+	}
+	reject(t, report)
+	if _, err := repo.RequestCancel(ctx, in.EmployeeID, in.TaskID); err != nil {
+		t.Fatal(err)
+	}
+	before, err := repo.GetTask(ctx, in.EmployeeID, in.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, mutate := range map[string]func(*store.ExecutionReport){
+		"员工":      func(r *store.ExecutionReport) { r.EmployeeID = mustUUID(t) },
+		"节点":      func(r *store.ExecutionReport) { r.NodeID = mustUUID(t) },
+		"任务":      func(r *store.ExecutionReport) { r.TaskID = mustUUID(t) },
+		"执行":      func(r *store.ExecutionReport) { r.ExecutionID = mustUUID(t) },
+		"Session": func(r *store.ExecutionReport) { r.SessionID = mustUUID(t) },
+		"非未启动":    func(r *store.ExecutionReport) { r.NotStarted = false },
+		"未停止":     func(r *store.ExecutionReport) { r.AgentStopped = false },
+		"结果未知":    func(r *store.ExecutionReport) { r.OutcomeKnown = false },
+		"排队超时":    func(r *store.ExecutionReport) { r.StopReason = task.CodeQueueTimeout },
+		"执行超时":    func(r *store.ExecutionReport) { r.StopReason = task.CodeExecutionTimeout },
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := report
+			mutate(&r)
+			reject(t, r)
+		})
+	}
+	reject(t, startedReport(in, mustUUID(t)))
+	reject(t, completedReport(in, mustUUID(t)))
+	after, err := repo.GetTask(ctx, in.EmployeeID, in.TaskID)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("拒绝迟到报告仍改变任务: before %+v after %+v %v", before, after, err)
+	}
+	var count int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM task_events WHERE task_id = $1::uuid AND kind = 'stop_report'`, in.TaskID).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("越界报告留下证据: %d %v", count, err)
+	}
+}
 
 func TestCancelStopFactsAndIdempotency(t *testing.T) {
 	for _, tc := range []struct {
