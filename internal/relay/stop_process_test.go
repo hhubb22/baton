@@ -304,11 +304,19 @@ func waitStopEvidence(t *testing.T, st *prepareStack, taskID string) task.Record
 
 func taskWorker(t *testing.T, st *prepareStack, taskID string) string {
 	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
 	var sid string
-	if err := st.pool.QueryRow(context.Background(), `SELECT target_session_id::text FROM tasks WHERE id = $1::uuid`, taskID).Scan(&sid); err != nil {
-		t.Fatal(err)
+	for time.Now().Before(deadline) {
+		if err := st.pool.QueryRow(context.Background(), `SELECT COALESCE(target_session_id::text, '') FROM tasks WHERE id = $1::uuid`, taskID).Scan(&sid); err != nil {
+			t.Fatal(err)
+		}
+		if sid != "" {
+			status := workerStatus(t, st.dataDir, sid)
+			t.Cleanup(func() { stopWorker(status.PID) })
+			return sid
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
-	status := workerStatus(t, st.dataDir, sid)
-	t.Cleanup(func() { stopWorker(status.PID) })
-	return sid
+	t.Fatalf("中心没有保存目标 Session\ncoord %s\nnode %s", st.coord.out.String(), st.batond.out.String())
+	return ""
 }
