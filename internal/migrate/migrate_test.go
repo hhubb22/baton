@@ -236,6 +236,7 @@ var publicTables = []string{
 	"employees", "login_sessions", "schema_migrations",
 	"node_enrollments", "nodes", "node_credentials", "employee_settings",
 	"node_presence",
+	"plane_issues", "plane_triggers", "plane_deliveries",
 	"widget", "kept", "doomed", "once_run", "should_not_exist",
 }
 

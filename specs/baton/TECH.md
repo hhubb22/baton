@@ -16,6 +16,8 @@ Basis: 已批准的 [行为规格](PRODUCT.md)，R-01 至 R-39。
 
 CI 已配置为在 pull request 与推送 `main` 时运行 Linux、macOS、Windows 原生构建、vet 和完整测试；Linux 另做 Windows/macOS 交叉编译及 session、node、store、relay、control 包的 race 测试，Web 在 Linux 上运行 lint、typecheck、单元测试、Chromium E2E 与嵌入产物一致性检查。测试使用 CI 内的 PostgreSQL 17，不依赖仓库 Secret。平台通过情况以对应 CI 运行结果为准，不把工作流覆盖范围视为兼容性已验证；命令和覆盖限制见 README「CI 与本地等价命令」。
 
+当前已实现补充（PS-130 / T26）：独立 Plane 1.4.2 适配器在 Coordinator 的 `/hooks/plane` 验证原始正文 HMAC、投递 UUID、工作区和项目；按当前工单、状态、标签与最新状态活动核对执行轮次，以显式用户 ID/邮箱/员工及目标和授权配置经 `AcceptTask` 接受。创建事件只建立关联；同一状态活动轮次复用任务，缺映射、审批或字段时保存结构化阻塞原因。迁移 `0013` 保存关联、状态轮次和投递/正文摘要去重，接受事务后响应丢失可按冻结的任务输入恢复。自身来源和评论不触发。真实测试项目和 Coordinator 的隔离回放覆盖重复、乱序、伪造、缺字段和重启，测试产物已清理；Plane 结果回写仍未实现，属于 T27。Plane 异步活动可能晚于 Webhook，尚需依赖接收端重投 pending 投递或人工补发；不把 HTTP 503 视作已接受。
+
 ## 现状与设计约束
 
 任务需要从 Ubuntu Agent 发到员工 PC，经过北京中转，但北京不能主动访问节点。任务被接受后，中心需要留下可查询记录；完整 Session 历史仍在节点。PC 断线或操作回执丢失时，系统必须核实原执行，不能靠重启 Agent 来恢复任务。

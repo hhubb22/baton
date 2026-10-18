@@ -23,6 +23,7 @@ import (
 	"baton/internal/httpapi"
 	"baton/internal/migrate"
 	"baton/internal/node"
+	"baton/internal/plane"
 	"baton/internal/redact"
 	"baton/internal/store"
 	"baton/internal/webui"
@@ -187,8 +188,21 @@ func cmdServe(ctx context.Context, stderr io.Writer, getenv func(string) string)
 		if err != nil {
 			return err
 		}
+		planeConfig, err := plane.Load(getenv)
+		if err != nil {
+			return err
+		}
+		mux := http.NewServeMux()
+		mux.Handle("/", api)
+		if planeConfig != nil {
+			hook, err := plane.New(pool, *planeConfig, store.New(pool), nil)
+			if err != nil {
+				return err
+			}
+			mux.Handle(plane.Path, hook)
+		}
 		apiSrv := &http.Server{
-			Handler:           webui.Handler(api),
+			Handler:           webui.Handler(mux),
 			ReadHeaderTimeout: 5 * time.Second,
 			ReadTimeout:       20 * time.Second,
 			WriteTimeout:      60 * time.Second,
