@@ -68,6 +68,7 @@ func (s *startLoop) resendPending(ctx context.Context) {
 		st, err := s.host.Pending(callCtx, id)
 		cancel()
 		if err == nil {
+			s.clearHistoryReadFailures(id)
 			if len(st.Reports) > 0 {
 				s.deliver(ctx, id, st.Reports)
 			}
@@ -85,21 +86,26 @@ func (s *startLoop) resendPending(ctx context.Context) {
 			})
 			continue
 		}
+		failures, stateErr := s.ledger.historyReadFailures(id)
+		if stateErr != nil {
+			s.log.Info("event=history_retry_state_failed", "session_id", id)
+			continue
+		}
+		if failures >= historyReadFailureLimit {
+			s.reportHistory(ctx, id)
+			continue
+		}
 		path, pathErr := session.LedgerPath(s.host.DataDir, id)
 		if pathErr != nil {
 			continue
 		}
 		needs, readErr := session.LedgerNeedsWorker(path)
-		if errors.Is(readErr, session.ErrHistoryMissing) || errors.Is(readErr, session.ErrHistoryIncompatible) {
-			s.log.Info("event=history_unreadable", "session_id", id, "reason", readErr.Error())
-			s.reportHistory(ctx, id)
-			continue
-		}
 		if readErr != nil {
-			s.log.Info("event=history_read_failed", "session_id", id, "reason", readErr.Error())
+			s.historyReadFailed(ctx, id, readErr)
 			continue
 		}
 		if !needs {
+			s.clearHistoryReadFailures(id)
 			continue
 		}
 		s.reconcile(ctx, id)
@@ -109,6 +115,7 @@ func (s *startLoop) resendPending(ctx context.Context) {
 func (s *startLoop) reconcile(ctx context.Context, sessionID string) {
 	err := s.host.Reconcile(ctx, sessionID)
 	if err == nil {
+		s.clearHistoryReadFailures(sessionID)
 		callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		st, pendingErr := s.host.Pending(callCtx, sessionID)
 		cancel()
@@ -117,16 +124,38 @@ func (s *startLoop) reconcile(ctx context.Context, sessionID string) {
 		}
 		return
 	}
-	if errors.Is(err, session.ErrHistoryMissing) || errors.Is(err, session.ErrHistoryIncompatible) {
-		s.log.Info("event=history_unreadable", "session_id", sessionID, "reason", err.Error())
-		s.reportHistory(ctx, sessionID)
-		return
-	}
-	if errors.Is(err, session.ErrHistoryUnread) {
-		s.log.Info("event=history_read_failed", "session_id", sessionID, "reason", err.Error())
+	if s.historyReadFailed(ctx, sessionID, err) {
 		return
 	}
 	s.log.Info("event=worker_missing", "session_id", sessionID)
+}
+
+func (s *startLoop) clearHistoryReadFailures(sessionID string) {
+	if err := s.ledger.clearHistoryReadFailures(sessionID); err != nil {
+		s.log.Info("event=history_retry_state_failed", "session_id", sessionID)
+	}
+}
+
+func (s *startLoop) historyReadFailed(ctx context.Context, sessionID string, err error) bool {
+	if errors.Is(err, session.ErrHistoryMissing) || errors.Is(err, session.ErrHistoryIncompatible) {
+		s.log.Info("event=history_unreadable", "session_id", sessionID, "reason", err.Error())
+		s.reportHistory(ctx, sessionID)
+		return true
+	}
+	if errors.Is(err, session.ErrHistoryUnread) {
+		failures, stateErr := s.ledger.recordHistoryReadFailure(sessionID)
+		if stateErr != nil {
+			s.log.Info("event=history_retry_state_failed", "session_id", sessionID)
+			return true
+		}
+		s.log.Info("event=history_read_failed", "session_id", sessionID, "reason", err.Error(), "attempt", failures)
+		if failures >= historyReadFailureLimit {
+			s.log.Info("event=history_read_exhausted", "session_id", sessionID)
+			s.reportHistory(ctx, sessionID)
+		}
+		return true
+	}
+	return false
 }
 
 func (s *startLoop) reportHistory(ctx context.Context, sessionID string) {

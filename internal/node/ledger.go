@@ -140,6 +140,30 @@ func (l *Ledger) WorkerSessions() ([]string, error) {
 	return out, nil
 }
 
+const historyReadFailureLimit = 3
+
+func (l *Ledger) historyReadFailures(sessionID string) (int, error) {
+	var count int
+	err := l.db.QueryRow(`SELECT value FROM meta WHERE key = ?`, "history_read_failures:"+sessionID).Scan(&count)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return count, err
+}
+
+func (l *Ledger) recordHistoryReadFailure(sessionID string) (int, error) {
+	var count int
+	err := l.db.QueryRow(`INSERT INTO meta (key, value) VALUES (?, '1')
+		ON CONFLICT(key) DO UPDATE SET value = MIN(CAST(meta.value AS INTEGER) + 1, ?)
+		RETURNING value`, "history_read_failures:"+sessionID, historyReadFailureLimit).Scan(&count)
+	return count, err
+}
+
+func (l *Ledger) clearHistoryReadFailures(sessionID string) error {
+	_, err := l.db.Exec(`DELETE FROM meta WHERE key = ?`, "history_read_failures:"+sessionID)
+	return err
+}
+
 func (l *Ledger) TaskForSession(sessionID string) (string, string, bool, error) {
 	var taskID, executionID string
 	err := l.db.QueryRow(`SELECT task_id, execution_id FROM receipts WHERE session_id = ?`, sessionID).Scan(&taskID, &executionID)
