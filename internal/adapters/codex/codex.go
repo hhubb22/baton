@@ -261,7 +261,8 @@ func (a *Adapter) Attach(ctx context.Context) error {
 	if err := a.call(ctx, "thread/read", map[string]any{"threadId": s.ThreadID}, &read); err != nil {
 		return err
 	}
-	if read.Thread.ID != s.ThreadID || filepath.Clean(read.Thread.Cwd) != filepath.Clean(a.config.Directory) {
+	directory, err := filepath.EvalSymlinks(read.Thread.Cwd)
+	if err != nil || !filepath.IsAbs(read.Thread.Cwd) || read.Thread.ID != s.ThreadID || filepath.Clean(directory) != a.config.Directory {
 		return ErrHistoryMissing
 	}
 	var original *turn

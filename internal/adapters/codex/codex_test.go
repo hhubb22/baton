@@ -322,6 +322,11 @@ func TestCanonicalDirectoryRecovery(t *testing.T) {
 		t.Skip("directory symlink unavailable")
 	}
 	c.Directory = link
+	for i, env := range c.Env {
+		if strings.HasPrefix(env, "FIXTURE_CWD=") {
+			c.Env[i] = "FIXTURE_CWD=" + link
+		}
+	}
 	a := New(c)
 	ctx := context.Background()
 	if err := a.CreateSession(ctx); err != nil {
