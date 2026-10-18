@@ -1,5 +1,11 @@
 # Baton 技术设计
 
+当前已实现补充（PS-119 / T15）：沿用已合并 T14 的唯一 `internal/agent.Adapter`，Codex 位于 `internal/agent/codex`，旧 internal/adapters 接口已删除。统一接口为 Start / SubmitInput / DeliverResult / HistoryContains / ReadHistory / Drain / Abort / Close；Output 保留等待子任务、进度、最终结果、settled 与 uncertain，扩展仅限节点本地的 Raw 事件；StopObserver 持续观察中止 ACK 后的停止事实。Worker 唯一选择点为 `internal/session/adapter.go:configureAdapter`，按 agent_type 从 registeredAdapters 注册表选择 Pi/Codex，新增类型只增加注册项。两者共用许可、输入意图、输入代次、中止、outbox、恢复与认证本地历史 IPC；Pi 同步增加校验本地 JSONL 的有限分页，不再引入 Codex 专用 Worker 生命周期。启动前将非凭据配置绑定账本，恢复沿用原 Session/Execution、cwd/model/home，不保存 Env、不发送恢复输入。
+
+Codex CLI **0.162.1** 使用 stdio app-server，实现 initialize/initialized、thread/start/read/resume、turn/start/steer/interrupt、turn/completed 及 thread/turns/list、thread/items/list 分页；版本不匹配、实验方法不兼容、原生身份/cwd/Session 映射不符、历史缺失或输入发送窗口不明均拒绝自动重放，不创建替代 thread。clientUserMessageId 仅作关联，steer ACK 不证明历史落盘；原生 userMessage 或成功查询工具输出中的精确 delivery_id 才确认注入。Agent 经受限 BATON_CONTEXT_FILE 使用既有委托 CLI，完整原始历史不上传中心；本地已认证 IPC 提供分页历史，尚无中心原文查询 API。只注入 Agent 必要环境，使用禁止审批的 workspace-write sandbox（为本地委托开启网络），拒绝服务端审批、认证刷新和交互工具请求。
+
+验证分工：CLI 官方固定 Schema、人工协议回放、真实 stdio 子进程与 Worker 账本回归不证明真实模型任务通过。用户已在 macOS、Codex 0.162.1 / gpt-6-luna 上报告启动、输入、结构化结果、turn 完成、中止、恢复、历史支持；委托链路成功，但子任务违反“不要再委托”导致原断言失败，委托整项仍未通过。TestRealCodex 的显式环境变量、隔离目录及全部断言不变，本轮只适配包路径和类型。云端不登录模型账号，不把此次接口重构回放视为重做真实模型验收；其他模型/平台不外推，确切实测命令见 README。无新增中心迁移。
+
 Status: approved
 Owner: 待指定
 Date: 2026-10-17
@@ -131,7 +137,7 @@ internal/relay/             连接和路由
 internal/control/           身份、任务状态、调度和 HTTP API
 internal/node/              注册、能力、节点 RPC 和同步
 internal/session/           Worker、输入账本和历史索引
-internal/adapters/          各 Agent 协议适配
+internal/agent/             统一 Adapter、Pi/Codex 原生协议适配
 internal/protocol/          信封、事件、错误和版本
 internal/plane/             Plane 触发、映射和回写
 migrations/                 PostgreSQL migration

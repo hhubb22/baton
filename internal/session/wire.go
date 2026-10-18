@@ -17,6 +17,8 @@ var (
 )
 
 type ipcMessage struct {
+	History           json.RawMessage         `json:"history,omitempty"`
+	HistoryCursor     string                  `json:"history_cursor,omitempty"`
 	ChildDelivery     *protocol.ChildDelivery `json:"child_delivery,omitempty"`
 	ChildReceipts     []protocol.ChildReceipt `json:"child_receipts,omitempty"`
 	Queried           bool                    `json:"queried,omitempty"`
@@ -63,6 +65,8 @@ type ipcReport struct {
 
 // Status 是 Worker 对一次状态查询的回答。准备阶段的执行器计数必须保持为 0。
 type Status struct {
+	History         json.RawMessage
+	HistoryCursor   string
 	ChildReceipts   []protocol.ChildReceipt
 	Cancelled       bool
 	InputDueAt      time.Time

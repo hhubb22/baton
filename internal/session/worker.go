@@ -79,6 +79,10 @@ func RunWorker(ctx context.Context, dataDir, sessionID string) error {
 	}
 	db.dataDir = dataDir
 	configureAdapter(db, dataDir, sessionID)
+	if err := db.restoreAdapter(sessionID); err != nil {
+		_ = db.Close()
+		return errors.New("无法恢复原生历史")
+	}
 	if err := db.recover(sessionID); err != nil {
 		return errors.New("无法恢复 Session 历史")
 	}
@@ -240,6 +244,12 @@ func handleWorker(db *workerDB, sessionID string, msg ipcMessage) ipcMessage {
 		reply := statusMessage(db, sessionID, 0)
 		reply.Reports = reports
 		return reply
+	case "native_history":
+		page, err := db.readNativeHistory(msg.Payload)
+		if err != nil {
+			return ipcMessage{Type: "result", Code: "history_unavailable", Message: "原生历史不可用"}
+		}
+		return ipcMessage{Type: "result", OK: true, History: page.Data, HistoryCursor: page.NextCursor}
 	case "pending":
 		reports, err := db.Pending()
 		if err != nil {

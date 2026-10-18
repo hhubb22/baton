@@ -54,6 +54,9 @@ type Adapter struct {
 	model      string
 }
 
+var _ agent.Adapter = (*Adapter)(nil)
+var _ agent.StopObserver = (*Adapter)(nil)
+
 func New(config agent.Config, options ...Option) *Adapter {
 	a := &Adapter{config: config, pending: make(map[string]chan response)}
 	for _, option := range options {
@@ -69,7 +72,7 @@ func (a *Adapter) Start(ctx context.Context) error {
 	if a.config.Binary == "" {
 		a.config.Binary = "pi"
 	}
-	if a.config.Model == "" {
+	if a.config.Model == "" && !a.config.Restore {
 		a.config.Model = os.Getenv("BATON_PI_MODEL")
 	}
 	var err error
@@ -220,6 +223,9 @@ func (a *Adapter) Model() string { a.mu.Lock(); defer a.mu.Unlock(); return a.mo
 
 func (a *Adapter) environment() []string {
 	env := a.config.Env
+	if env == nil && a.config.Home != "" {
+		env = IsolatedEnv(a.config.Home)
+	}
 	if env == nil {
 		env = os.Environ()
 	}

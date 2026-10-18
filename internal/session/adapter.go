@@ -1,6 +1,8 @@
 package session
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"os"
@@ -8,8 +10,20 @@ import (
 	"time"
 
 	"baton/internal/agent"
+	"baton/internal/agent/codex"
 	"baton/internal/agent/pi"
+	"baton/internal/task"
 )
+
+type adapterRegistration struct {
+	new                          func(agent.Config) agent.Adapter
+	modelEnv, binaryEnv, homeEnv string
+}
+
+var registeredAdapters = map[string]adapterRegistration{
+	"pi":    {func(c agent.Config) agent.Adapter { return pi.New(c) }, "BATON_PI_MODEL", "BATON_PI_BIN", "BATON_PI_HOME"},
+	"codex": {func(c agent.Config) agent.Adapter { return codex.New(c) }, "BATON_CODEX_MODEL", "BATON_CODEX_BINARY", "BATON_CODEX_HOME"},
+}
 
 // configureAdapter is the only Worker selection point. Other native Agents can
 // implement agent.Adapter without changing the Worker lifecycle or its ledger.
@@ -18,6 +32,26 @@ func configureAdapter(w *workerDB, dataDir, sessionID string) {
 		return
 	}
 	w.adapterFactory = func(agentType, payload string) (agent.Adapter, error) {
+		registration, ok := registeredAdapters[agentType]
+		if !ok {
+			return nil, errors.New("尚未实现的 Agent 适配器")
+		}
+		var saved string
+		var config agent.Config
+		err := w.db.QueryRow(`SELECT value FROM meta WHERE key = 'adapter_config'`).Scan(&saved)
+		if err == nil {
+			if json.Unmarshal([]byte(saved), &config) != nil || config.SessionID != sessionID || config.ExecutionID != w.execution {
+				return nil, agent.ErrHistoryMissing
+			}
+			config.Restore = true
+			return registration.new(config), nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+		if payload == "" {
+			return nil, agent.ErrHistoryMissing
+		}
 		var input struct {
 			WorkingDirectory string `json:"working_directory"`
 		}
@@ -38,23 +72,63 @@ func configureAdapter(w *workerDB, dataDir, sessionID string) {
 		if err != nil {
 			return nil, err
 		}
-		config := agent.Config{Directory: input.WorkingDirectory, SessionDir: filepath.Join(dir, "native"), SessionID: sessionID, ContextFile: contextFile}
+		config = agent.Config{Directory: input.WorkingDirectory, SessionDir: filepath.Join(dir, "native"), SessionID: sessionID, ExecutionID: w.execution, ContextFile: contextFile}
+		config.StatePath = filepath.Join(config.SessionDir, "state.json")
 		if _, err := os.Lstat(config.SessionDir); err == nil {
 			config.Restore = true
 		} else if !os.IsNotExist(err) {
 			return nil, err
 		}
-		switch agentType {
-		case "pi":
-			config.Model, config.Binary = os.Getenv("BATON_PI_MODEL"), os.Getenv("BATON_PI_BIN")
-			if home := os.Getenv("BATON_PI_HOME"); home != "" {
-				config.Env = pi.IsolatedEnv(home)
-			}
-			return pi.New(config), nil
-		default:
-			return nil, errors.New("尚未实现的 Agent 适配器")
+		config.Model, config.Binary, config.Home = os.Getenv(registration.modelEnv), os.Getenv(registration.binaryEnv), os.Getenv(registration.homeEnv)
+		raw, err := json.Marshal(config)
+		if err != nil {
+			return nil, err
 		}
+		if _, err := w.db.Exec(`INSERT INTO meta (key,value) VALUES ('adapter_config',?)`, string(raw)); err != nil {
+			return nil, err
+		}
+		return registration.new(config), nil
 	}
+}
+
+func (w *workerDB) restoreAdapter(sessionID string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.adapterFactory == nil || !w.inputSubmitted {
+		return nil
+	}
+	var agentType string
+	err := w.db.QueryRow(`SELECT value FROM meta WHERE key = 'agent_type'`).Scan(&agentType)
+	if err == nil {
+		w.adapter, err = w.adapterFactory(agentType, "")
+	}
+	if err == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		err = w.adapter.Start(ctx)
+	}
+	if err != nil {
+		if w.adapter != nil {
+			_ = w.adapter.Close()
+			w.adapter = nil
+		}
+		if !w.hasResultLocked() && !w.resultDelivered {
+			w.recoveredUncertain, w.uncertainCode = true, task.CodeUncertainHistory
+		}
+		return nil
+	}
+	return w.pollAdapterLocked(sessionID)
+}
+
+func (w *workerDB) readNativeHistory(cursor string) (agent.HistoryPage, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.adapter == nil {
+		return agent.HistoryPage{}, agent.ErrHistoryMissing
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return w.adapter.ReadHistory(ctx, cursor)
 }
 
 func (w *workerDB) pollAdapterLocked(sessionID string) error {
@@ -65,7 +139,15 @@ func (w *workerDB) pollAdapterLocked(sessionID string) error {
 		return err
 	}
 	for _, out := range w.adapter.Drain() {
-		if w.cancelled || w.recoveredUncertain {
+		if len(out.Raw) > 0 {
+			if _, err := w.db.Exec(`INSERT INTO execution_log(kind,body,created_at) VALUES('native_event',?,?)`, string(out.Raw), time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+				return err
+			}
+		}
+		if w.cancelled || w.hasResultLocked() || w.resultDelivered {
+			continue
+		}
+		if out.Final == "" && !out.Exited && !out.Uncertain && !out.WaitingForChildren && len(out.Progress) == 0 {
 			continue
 		}
 		if uncertain, err := w.finishNativeChecksLocked(); err != nil {
@@ -75,6 +157,9 @@ func (w *workerDB) pollAdapterLocked(sessionID string) error {
 		}
 		if _, err := w.recordExecution(sessionID, "", out); err != nil {
 			return err
+		}
+		if !out.Uncertain && (out.Exited || out.WaitingForChildren) {
+			w.recoveredUncertain = false
 		}
 	}
 	if w.cancelled && w.stopReason != "" {
