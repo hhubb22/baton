@@ -1,9 +1,12 @@
 package pi
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"baton/internal/agent"
@@ -19,6 +22,7 @@ type mapping struct {
 }
 
 type message struct {
+	Raw        json.RawMessage `json:"-"`
 	Role       string          `json:"role"`
 	Content    json.RawMessage `json:"content"`
 	StopReason string          `json:"stopReason"`
@@ -72,6 +76,13 @@ func (a *Adapter) saveMapping(file string) error {
 
 // walkHistory streams the local file; get_entries is never forwarded to Relay.
 func (a *Adapter) walkHistory(visit func(message)) error {
+	return a.walkHistoryContext(context.Background(), visit)
+}
+
+func (a *Adapter) walkHistoryContext(ctx context.Context, visit func(message)) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	rel, err := filepath.Rel(a.config.SessionDir, a.history.File)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || filepath.IsAbs(rel) {
 		return ErrHistoryMissing
@@ -92,6 +103,9 @@ func (a *Adapter) walkHistory(visit func(message)) error {
 	}
 	first := true
 	err = readFrames(f, func(raw []byte) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if first {
 			first = false
 			var h struct {
@@ -113,14 +127,54 @@ func (a *Adapter) walkHistory(visit func(message)) error {
 			return ErrHistoryMissing
 		}
 		if entry.Type == "message" && visit != nil {
+			entry.Message.Raw = append(json.RawMessage(nil), raw...)
 			visit(entry.Message)
 		}
 		return nil
 	})
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	if first || err != nil {
 		return ErrHistoryMissing
 	}
 	return nil
+}
+
+func (a *Adapter) ReadHistory(ctx context.Context, cursor string) (agent.HistoryPage, error) {
+	start := 0
+	var err error
+	if cursor != "" {
+		start, err = strconv.Atoi(cursor)
+		if err != nil || start < 0 {
+			return agent.HistoryPage{}, errors.New("invalid Pi history cursor")
+		}
+	}
+	items := []json.RawMessage{}
+	index, size, next := 0, 0, ""
+	err = a.walkHistoryContext(ctx, func(m message) {
+		defer func() { index++ }()
+		if index < start || next != "" || ctx.Err() != nil {
+			return
+		}
+		if len(items) >= 16 || size+len(m.Raw) > 256*1024 {
+			next = strconv.Itoa(index)
+			return
+		}
+		items = append(items, m.Raw)
+		size += len(m.Raw)
+	})
+	if err == nil {
+		err = ctx.Err()
+	}
+	if err != nil {
+		return agent.HistoryPage{}, err
+	}
+	if next != "" && len(items) == 0 {
+		return agent.HistoryPage{}, errors.New("Pi history item too large")
+	}
+	raw, err := json.Marshal(items)
+	return agent.HistoryPage{Data: raw, NextCursor: next}, err
 }
 
 func (a *Adapter) HistoryContains(deliveryID string, queried bool) (bool, error) {

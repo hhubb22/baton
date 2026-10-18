@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"baton/internal/adapters"
 	"baton/internal/privatefile"
 	"baton/internal/task"
 	"github.com/santhosh-tekuri/jsonschema/v5"
@@ -121,6 +120,9 @@ func replayServer() int {
 			}
 			_ = json.Unmarshal(tape["turn/completed"], &done)
 			result, _ = json.Marshal(map[string]any{"data": []any{map[string]any{"turnId": "turn-fixture", "item": done.Turn.Items[0]}}})
+			if items, err := os.ReadFile(filepath.Join(fixtureValue("FIXTURE_CWD"), "history-items.json")); err == nil {
+				result = items
+			}
 			if mode == "missing-items" {
 				result = json.RawMessage(`{"data":[]}`)
 			}
@@ -264,7 +266,7 @@ func fixtureConfig(t *testing.T, mode string) Config {
 	return Config{Binary: binary, Directory: dir, Home: dir, StatePath: filepath.Join(dir, "state.json"), SessionID: "session-fixture", Model: "fixture-model", Env: env}
 }
 
-func settled(t *testing.T, a *Adapter) adapters.Event {
+func settled(t *testing.T, a *Adapter) Event {
 	t.Helper()
 	timer := time.NewTimer(5 * time.Second)
 	defer timer.Stop()
@@ -276,7 +278,7 @@ func settled(t *testing.T, a *Adapter) adapters.Event {
 			}
 		case <-timer.C:
 			t.Fatal("no terminal event")
-			return adapters.Event{}
+			return Event{}
 		}
 	}
 }

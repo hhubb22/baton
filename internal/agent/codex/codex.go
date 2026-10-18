@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"baton/internal/adapters"
+	"baton/internal/agent"
 	"baton/internal/privatefile"
 	"github.com/sourcegraph/jsonrpc2"
 )
@@ -22,16 +22,25 @@ const Version = "0.162.1"
 
 var (
 	ErrIncompatible   = errors.New("Codex experimental protocol incompatible; require CLI 0.162.1")
-	ErrHistoryMissing = errors.New("Codex original thread/history missing; refusing replacement")
+	ErrHistoryMissing = agent.ErrHistoryMissing
 	ErrUncertain      = errors.New("Codex input outcome unknown; refusing replay")
 	ErrBusy           = errors.New("Codex turn is active")
 )
 
-type Config struct {
-	Binary, Model, Directory, Home, StatePath, ContextFile string
-	SessionID                                              string
-	// Env is an explicit Agent-only environment, never the daemon environment.
-	Env []string
+type Config = agent.Config
+
+type Capabilities struct {
+	Version                                            string
+	Start, Input, Interrupt, Resume, History, Delegate bool
+}
+
+// Event is the pinned native protocol evidence used by contract/real probes.
+// Worker lifecycle consumers use agent.Adapter.Drain instead.
+type Event struct {
+	ThreadID, TurnID            string
+	Raw                         json.RawMessage
+	Final, ConfirmedInput       string
+	Stopped, Settled, Uncertain bool
 }
 
 type State struct {
@@ -60,7 +69,8 @@ type Adapter struct {
 	final       string
 	conn        *jsonrpc2.Conn
 	processDone chan struct{}
-	events      chan adapters.Event
+	events      chan Event
+	stopped     bool
 	closed      chan struct{}
 	closeOnce   sync.Once
 	inbox       chan notification
@@ -71,7 +81,8 @@ type notification struct {
 	raw    json.RawMessage
 }
 
-var _ adapters.Adapter = (*Adapter)(nil)
+var _ agent.Adapter = (*Adapter)(nil)
+var _ agent.StopObserver = (*Adapter)(nil)
 
 func New(c Config) *Adapter {
 	if directory, err := filepath.EvalSymlinks(c.Directory); err == nil {
@@ -80,10 +91,10 @@ func New(c Config) *Adapter {
 	if c.Binary == "" {
 		c.Binary = "codex"
 	}
-	if c.Model == "" {
+	if c.Model == "" && !c.Restore {
 		c.Model = os.Getenv("BATON_CODEX_MODEL")
 	}
-	a := &Adapter{config: c, events: make(chan adapters.Event, 128), closed: make(chan struct{}), inbox: make(chan notification, 128)}
+	a := &Adapter{config: c, events: make(chan Event, 128), closed: make(chan struct{}), inbox: make(chan notification, 128)}
 	go func() {
 		for {
 			select {
@@ -115,18 +126,18 @@ func (a *Adapter) environment() []string {
 	return env
 }
 
-func (a *Adapter) Probe(ctx context.Context) (adapters.Capabilities, error) {
+func (a *Adapter) Probe(ctx context.Context) (Capabilities, error) {
 	cmd := exec.CommandContext(ctx, a.config.Binary, "--version")
 	cmd.Dir = a.config.Directory
 	cmd.Env = a.environment()
 	raw, err := cmd.Output()
 	if err != nil {
-		return adapters.Capabilities{}, errors.New("Codex executable unavailable")
+		return Capabilities{}, errors.New("Codex executable unavailable")
 	}
 	if strings.TrimSpace(string(raw)) != "codex-cli "+Version {
-		return adapters.Capabilities{}, ErrIncompatible
+		return Capabilities{}, ErrIncompatible
 	}
-	return adapters.Capabilities{Version: Version, Start: true, Input: true, Interrupt: true, Resume: true, History: true, Delegate: true}, nil
+	return Capabilities{Version: Version, Start: true, Input: true, Interrupt: true, Resume: true, History: true, Delegate: true}, nil
 }
 
 func (a *Adapter) connect(ctx context.Context) error {
@@ -164,7 +175,7 @@ func (a *Adapter) connect(ctx context.Context) error {
 			return
 		default:
 		}
-		a.emit(adapters.Event{Uncertain: true})
+		a.emit(Event{Uncertain: true})
 	}()
 	var result struct {
 		UserAgent string `json:"userAgent"`
@@ -421,7 +432,7 @@ func (a *Adapter) StartTask(ctx context.Context, operationID, text string) error
 	if result.Turn.ID == "" || (result.Turn.Status != "inProgress" && result.Turn.Status != "completed" && result.Turn.Status != "interrupted" && result.Turn.Status != "failed") {
 		return ErrIncompatible
 	}
-	a.state.TurnID, a.active, a.final = result.Turn.ID, true, ""
+	a.state.TurnID, a.active, a.final, a.stopped = result.Turn.ID, true, "", false
 	if err := a.saveLocked(); err != nil {
 		return err
 	}
@@ -484,24 +495,24 @@ func (a *Adapter) Interrupt(ctx context.Context) (bool, bool, error) {
 	return false, false, err
 }
 
-func (a *Adapter) ReadHistory(ctx context.Context, cursor string) (adapters.HistoryPage, error) {
+func (a *Adapter) ReadHistory(ctx context.Context, cursor string) (agent.HistoryPage, error) {
 	a.mu.Lock()
 	id := a.state.ThreadID
 	a.mu.Unlock()
 	if id == "" {
-		return adapters.HistoryPage{}, ErrHistoryMissing
+		return agent.HistoryPage{}, ErrHistoryMissing
 	}
 	var result struct {
 		Data       json.RawMessage `json:"data"`
 		NextCursor string          `json:"nextCursor"`
 	}
 	if err := a.call(ctx, "thread/items/list", map[string]any{"threadId": id, "cursor": cursorOrNil(cursor), "limit": 16, "sortDirection": "asc"}, &result); err != nil {
-		return adapters.HistoryPage{}, err
+		return agent.HistoryPage{}, err
 	}
 	if len(result.Data) == 0 {
-		return adapters.HistoryPage{}, ErrIncompatible
+		return agent.HistoryPage{}, ErrIncompatible
 	}
-	return adapters.HistoryPage{Data: result.Data, NextCursor: result.NextCursor}, nil
+	return agent.HistoryPage{Data: result.Data, NextCursor: result.NextCursor}, nil
 }
 
 func cursorOrNil(s string) any {
@@ -510,10 +521,10 @@ func cursorOrNil(s string) any {
 	}
 	return s
 }
-func (a *Adapter) Events() <-chan adapters.Event { return a.events }
-func (a *Adapter) Snapshot() State               { a.mu.Lock(); defer a.mu.Unlock(); return a.state }
+func (a *Adapter) Events() <-chan Event { return a.events }
+func (a *Adapter) Snapshot() State      { a.mu.Lock(); defer a.mu.Unlock(); return a.state }
 
-func (a *Adapter) emit(e adapters.Event) {
+func (a *Adapter) emit(e Event) {
 	select {
 	case a.events <- e:
 	default:
@@ -522,7 +533,7 @@ func (a *Adapter) emit(e adapters.Event) {
 		default:
 		}
 		select {
-		case a.events <- adapters.Event{Uncertain: true}:
+		case a.events <- Event{Uncertain: true}:
 		default:
 		}
 		go a.Close()
@@ -544,7 +555,7 @@ func (a *Adapter) handle(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2
 	select {
 	case a.inbox <- notification{req.Method, params}:
 	default:
-		a.emit(adapters.Event{Uncertain: true})
+		a.emit(Event{Uncertain: true})
 		go a.Close()
 	}
 	return nil, nil
@@ -568,7 +579,7 @@ func (a *Adapter) notification(method string, raw json.RawMessage) {
 	if method == "item/completed" && p.TurnID != a.state.TurnID {
 		return
 	}
-	e := adapters.Event{ThreadID: p.ThreadID, TurnID: p.TurnID, Raw: raw}
+	e := Event{ThreadID: p.ThreadID, TurnID: p.TurnID, Raw: raw}
 	if method == "item/completed" && p.TurnID == a.state.TurnID && p.Item.Type == "userMessage" && p.Item.ClientID != "" && (p.Item.ClientID == a.state.SteerID || a.usedLocked(p.Item.ClientID)) {
 		e.ConfirmedInput = p.Item.ClientID
 		if p.Item.ClientID == a.state.SteerID {
@@ -590,6 +601,7 @@ func (a *Adapter) notification(method string, raw json.RawMessage) {
 			e.Uncertain = true
 		} else {
 			a.active = false
+			a.stopped = true
 			e.Stopped = true
 			a.state.Pending = false
 			if err := a.saveLocked(); err != nil {
@@ -602,7 +614,7 @@ func (a *Adapter) notification(method string, raw json.RawMessage) {
 		for _, rawItem := range p.Turn.Items {
 			var item struct{ Type, Text, Phase, ClientID string }
 			if json.Unmarshal(rawItem, &item) == nil && item.Type == "userMessage" && item.ClientID != "" && (item.ClientID == a.state.SteerID || a.usedLocked(item.ClientID)) {
-				a.emit(adapters.Event{ThreadID: p.ThreadID, TurnID: p.Turn.ID, ConfirmedInput: item.ClientID})
+				a.emit(Event{ThreadID: p.ThreadID, TurnID: p.Turn.ID, ConfirmedInput: item.ClientID})
 				if item.ClientID == a.state.SteerID {
 					a.state.SteerID = ""
 				}

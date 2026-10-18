@@ -8,6 +8,12 @@ import (
 	"time"
 )
 
+// NativeHistory is local-only; raw tool output is never an ExecutionReport.
+func (c *Client) NativeHistory(cursor string) (json.RawMessage, string, error) {
+	st, err := c.roundTrip(ipcMessage{Type: "native_history", Payload: cursor})
+	return st.History, st.HistoryCursor, err
+}
+
 // StartError 是 Worker 在写入 start_intent 之前拒绝启动。
 type StartError struct {
 	Code    string

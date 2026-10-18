@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"baton/internal/adapters/codex"
+	"baton/internal/agent/codex"
 	"baton/internal/protocol"
 	"baton/internal/startpermit"
 	"baton/internal/task"
@@ -22,14 +22,14 @@ import (
 func TestCodexWorkerInputHistoryAndRecovery(t *testing.T) {
 	dir := t.TempDir()
 	binary := filepath.Join(dir, "codex-fixture.exe")
-	cmd := exec.Command("go", "test", "-c", "-o", binary, "../adapters/codex")
+	cmd := exec.Command("go", "test", "-c", "-o", binary, "../agent/codex")
 	if raw, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build fixture: %v %s", err, raw)
 	}
 	for _, mode := range []string{"complete", "running"} {
 		t.Run(mode, func(t *testing.T) {
 			work := t.TempDir()
-			raw, err := os.ReadFile("../adapters/codex/testdata/replay.json")
+			raw, err := os.ReadFile("../agent/codex/testdata/replay.json")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -85,7 +85,7 @@ func TestCodexWorkerInputHistoryAndRecovery(t *testing.T) {
 			if _, err := c.Authorize(tid, eid, permit, base64.RawURLEncoding.EncodeToString(pub), generation, queue.Format(time.RFC3339Nano)); err != nil {
 				t.Fatal(err)
 			}
-			payload, _ := task.MarshalExecutorInput("fixture task", nil, nil, &work, nil, 1)
+			payload, _ := task.MarshalExecutorInput("fixture task", nil, nil, &work, nil, 1, nil)
 			if _, err := c.SubmitInput(string(payload)); err != nil {
 				t.Fatal(err)
 			}
@@ -123,6 +123,8 @@ func TestCodexWorkerInputHistoryAndRecovery(t *testing.T) {
 				}
 				if r := waitReport(c, task.EventStopReport); r.AgentStopped || r.OutcomeKnown {
 					t.Fatal("interrupt ACK marked as stopped")
+				} else if _, err := c.Ack(r.EventID); err != nil {
+					t.Fatal(err)
 				}
 			}
 			if history, _, err := c.NativeHistory(""); err != nil || !json.Valid(history) {
@@ -134,7 +136,9 @@ func TestCodexWorkerInputHistoryAndRecovery(t *testing.T) {
 			if mode == "complete" {
 				waitReport(c, protocol.ReportResult)
 			} else {
-				waitReport(c, protocol.ReportNeedsVerification)
+				if r := waitReport(c, task.EventStopReport); !r.AgentStopped || r.OutcomeKnown || r.Status != task.StatusNeedsVerification {
+					t.Fatal("lost late stop fact or assumed side effects undone", r)
+				}
 			}
 			requests, err := os.ReadFile(filepath.Join(work, "requests.jsonl"))
 			if err != nil {
@@ -146,7 +150,7 @@ func TestCodexWorkerInputHistoryAndRecovery(t *testing.T) {
 				}
 			}
 			stateDir, _ := SessionDir(data, sid)
-			stateRaw, err := os.ReadFile(filepath.Join(stateDir, "codex.json"))
+			stateRaw, err := os.ReadFile(filepath.Join(stateDir, "native", "state.json"))
 			if err != nil {
 				t.Fatal(err)
 			}

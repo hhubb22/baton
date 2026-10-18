@@ -6,10 +6,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"baton/internal/agent"
+	"baton/internal/agent/codex"
+	"baton/internal/agent/pi"
 	"baton/internal/protocol"
 	"baton/internal/task"
 )
@@ -39,6 +42,9 @@ func (a *nativeStub) HistoryContains(_ string, queried bool) (bool, error) {
 func (a *nativeStub) Drain() []Output            { out := a.outputs; a.outputs = nil; return out }
 func (a *nativeStub) Abort() (bool, bool, error) { a.aborts++; return true, false, nil }
 func (*nativeStub) Close() error                 { return nil }
+func (*nativeStub) ReadHistory(context.Context, string) (agent.HistoryPage, error) {
+	return agent.HistoryPage{Data: json.RawMessage(`[]`)}, nil
+}
 
 type delayedStopStub struct {
 	*nativeStub
@@ -388,7 +394,75 @@ func TestAdapterSelectionRejectsMissingNativeHistory(t *testing.T) {
 		a.Close()
 		t.Fatal("empty native directory restored as a new session")
 	}
-	if _, err := w.adapterFactory("codex", `{}`); err == nil {
+	if _, err := w.adapterFactory("shell", `{}`); err == nil {
 		t.Fatal("unimplemented agent used observer")
+	}
+}
+
+func TestSharedAdapterRegistration(t *testing.T) {
+	t.Setenv("BATON_TEST_EXECUTOR_LOG", "")
+	for _, name := range []string{"pi", "codex"} {
+		t.Run(name, func(t *testing.T) {
+			w, _, sid := clockWorker(t, 60)
+			configureAdapter(w, t.TempDir(), sid)
+			a, err := w.adapterFactory(name, `{}`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer a.Close()
+			switch name {
+			case "pi":
+				if _, ok := a.(*pi.Adapter); !ok {
+					t.Fatal("Pi not registered")
+				}
+			case "codex":
+				if _, ok := a.(*codex.Adapter); !ok {
+					t.Fatal("Codex not registered")
+				}
+			}
+			var saved string
+			if err := w.db.QueryRow(`SELECT value FROM meta WHERE key='adapter_config'`).Scan(&saved); err != nil {
+				t.Fatal(err)
+			}
+			var config agent.Config
+			if json.Unmarshal([]byte(saved), &config) != nil || config.SessionID != sid || config.ExecutionID != w.execution || config.Restore {
+				t.Fatal("invalid native binding")
+			}
+		})
+	}
+	t.Run("new-registration", func(t *testing.T) {
+		stub := &nativeStub{}
+		registeredAdapters["shell-fixture"] = adapterRegistration{new: func(agent.Config) agent.Adapter { return stub }}
+		defer delete(registeredAdapters, "shell-fixture")
+		w, _, sid := clockWorker(t, 60)
+		if _, err := w.db.Exec(`UPDATE meta SET value='shell-fixture' WHERE key='agent_type'`); err != nil {
+			t.Fatal(err)
+		}
+		configureAdapter(w, t.TempDir(), sid)
+		if _, err := w.SubmitInput(sid, nativeTestInput); err != nil {
+			t.Fatal(err)
+		}
+		if stub.starts != 1 || stub.inputs != 1 {
+			t.Fatal("registration bypassed common lifecycle")
+		}
+		if _, err := w.SubmitInput(sid, nativeTestInput); err != nil {
+			t.Fatal(err)
+		}
+		if stub.inputs != 1 {
+			t.Fatal("duplicate input replayed")
+		}
+		if _, err := w.readNativeHistory(""); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Stop(sid, task.StatusCancelled); err != nil || stub.aborts != 1 {
+			t.Fatal("registration bypassed abort", err)
+		}
+	})
+}
+
+func TestAdapterConfigExcludesEnvironment(t *testing.T) {
+	raw, err := json.Marshal(agent.Config{Env: []string{"TEST_SECRET=fixture-secret-not-to-persist"}, Model: "fixture-model"})
+	if err != nil || strings.Contains(string(raw), "fixture-secret") || strings.Contains(string(raw), "TEST_SECRET") {
+		t.Fatal("Agent environment leaked into persisted config", err)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -263,6 +264,73 @@ func TestPiReplaySettledAndNativeHistory(t *testing.T) {
 	}
 	if out := a.Drain(); len(out) > 0 {
 		t.Fatal("duplicate delivery started a new turn")
+	}
+}
+
+func TestPiUnifiedHistoryPagination(t *testing.T) {
+	a := replayAdapter(t)
+	var adapter agent.Adapter = a
+	f, err := os.OpenFile(a.history.File, os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.NewEncoder(f).Encode(map[string]any{"type": "session", "version": 3, "id": a.config.SessionID, "cwd": a.config.Directory}); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	for i := 0; i < 33; i++ {
+		entry := map[string]any{"type": "message", "id": strconv.Itoa(i), "extra": "preserved", "message": map[string]any{"role": "user", "content": "message"}}
+		if err := json.NewEncoder(f).Encode(entry); err != nil {
+			f.Close()
+			t.Fatal(err)
+		}
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	count, cursor := 0, ""
+	for {
+		page, err := adapter.ReadHistory(context.Background(), cursor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var entries []struct{ ID, Extra string }
+		if err := json.Unmarshal(page.Data, &entries); err != nil {
+			t.Fatal(err)
+		}
+		if len(entries) > 16 {
+			t.Fatal("unbounded history page")
+		}
+		for _, entry := range entries {
+			if entry.ID != strconv.Itoa(count) || entry.Extra != "preserved" {
+				t.Fatal("native entry changed", entry)
+			}
+			count++
+		}
+		if page.NextCursor == "" {
+			break
+		}
+		if page.NextCursor == cursor {
+			t.Fatal("cursor did not advance")
+		}
+		cursor = page.NextCursor
+	}
+	if count != 33 {
+		t.Fatalf("lost history entries: %d", count)
+	}
+	if _, err := adapter.ReadHistory(context.Background(), "-1"); err == nil {
+		t.Fatal("negative cursor accepted")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := adapter.ReadHistory(ctx, ""); err == nil {
+		t.Fatal("ignored cancellation")
+	}
+	if err := os.Remove(a.history.File); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adapter.ReadHistory(context.Background(), ""); err == nil {
+		t.Fatal("missing history silently replaced")
 	}
 }
 

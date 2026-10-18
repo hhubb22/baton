@@ -2,7 +2,7 @@
 
 员工使用部署管理员分配的本地账号登录 Coordinator，退出，查询本人身份，领取一次性节点注册凭据，设置默认 PC，吊销本人节点的连接凭据，并提交任务。初始口令只能使用到员工完成更换为止。`batond register` 用这张凭据注册节点，把身份保存在本机。`batond run` 用这份身份主动连接 Relay，断线后重连，并在同步完成前不会显示为可执行。吊销生效后，同一连接凭据不能再接入。任务被接受后，Coordinator 把准备命令送到节点；节点先把执行映射写入本地账本，再绑定一个独立的 Session Worker。
 
-本目录目前包含这条路径的构建、迁移、HTTP 接口、Coordinator、Relay、batond、Session Worker、Agent 本地 CLI、受限文件浏览、员工 Web UI 和测试。准备阶段不启动 Agent。启动许可通过后，Worker 可选择 Pi 1.3.0 原生 RPC 适配器，任务输入只提交一次；结构化结果在中心保存之后才算交付。测试执行器仍供故障注入使用。其他真实 Agent 适配和管理员网页不在这里；Pi 真实模型与跨平台能力仍待本机实测，不能用回放通过代替。
+本目录目前包含这条路径的构建、迁移、HTTP 接口、Coordinator、Relay、batond、Session Worker、Agent 本地 CLI、受限文件浏览、员工 Web UI 和测试。准备阶段不启动 Agent。启动许可通过后，Worker 按 agent_type 选择 Pi 1.3.0 RPC 或 Codex CLI 0.162.1 thread/turn 适配器，任务输入只提交一次；结构化结果在中心保存之后才算交付。两者共用 internal/agent.Adapter 与 Worker 生命周期，测试执行器仍供故障注入使用。其他真实 Agent 适配和管理员网页不在这里；支持范围以明确版本和本机实测报告为准，不能用回放通过代替。
 
 中心事务同时锁定任务与执行记录时，统一先锁 `tasks`，再锁 `executions`。准备成功或失败落库、启动许可、执行报告、取消和到期处理均按此顺序串行，避免准备落库与启动许可相互等待而死锁。
 
@@ -14,6 +14,51 @@ Relay 进程测试的存活探测按平台实现：Unix 使用 `os.FindProcess` 
 
 - Go 1.27
 - PostgreSQL 17
+
+## 统一 Agent 接入（PS-118 / PS-119）
+
+执行边界只有 `internal/agent.Adapter`：`Start`、`SubmitInput`、`DeliverResult`、`HistoryContains`、`ReadHistory`、`Drain`、`Abort`、`Close`。`Drain` 非阻塞返回统一 `Output`，区分等待子任务、进度、最终结果、已 settled 与不确定；`Raw` 只写节点本地日志，不进入中心执行报告。`Abort` 的控制响应不是停止证据，`agent.StopObserver` 保留晚到的停止事实，Pi 的 agent_settled 和 Codex 的匹配 turn/completed 都经同一 Worker 路径补报，副作用不明仍待核实。
+
+唯一选择点是 `internal/session/adapter.go:configureAdapter`，从同文件 `registeredAdapters` 按 `agent_type` 选择 `internal/agent/pi` 或 `internal/agent/codex`。新增执行类型只需实现统一接口并增加注册项，不再新增 Worker 分支。共同配置在原生启动前绑定到本地账本，恢复仍使用原 cwd、model、home、Session/Execution；Env 不入账本。恢复只加载原生历史，不重新发送任务输入或子结果，缺失映射不会创建替代会话。`Client.NativeHistory(cursor)` 经同一认证本地 IPC 返回分页历史；Pi 读取并校验本地 JSONL，Codex 查询 thread/items/list，不提供中心原文历史 API。
+
+### Codex thread/turn
+
+任务指定 `agent_type: "codex"`，推荐显式指定节点上已存在的绝对 `working_directory`；省略时使用该 Session 的隔离 workspace。节点安装 **Codex CLI 0.162.1**，认证由节点管理员在 Agent 环境内配置，Baton 不替用户登录。运行 batond 前可设置：
+
+| 变量 | 作用 |
+| --- | --- |
+| `BATON_CODEX_BINARY` | 可执行文件，默认 codex；参数数组启动，不经过 shell |
+| `BATON_CODEX_MODEL` | 模型名称，支持选择低价模型；恢复沿用账本绑定 |
+| `BATON_CODEX_HOME` | 可选独立 CODEX_HOME，恢复不切换到新 home/thread |
+
+Session 映射 thread，执行输入映射 turn；活动子结果输入用 turn/steer，中止用 turn/interrupt。clientUserMessageId 仅关联本地输入标识，不作为幂等保证。发送前持久化意图，发送窗口不明或恢复身份不符时不重放；只有原生 userMessage 或成功查询工具输出中的精确 delivery_id 才确认子结果 delivered。完成必须核对匹配 thread/turn 的 turn/completed 和结构化 JSON，不能由初始化、普通文本或进程退出推断成功。
+
+只传递基本进程环境、指定 CODEX_HOME 和受限 BATON_CONTEXT_FILE 路径，不继承中心 token、数据库 URL、签名密钥或 1Password 凭据。Agent 通过 PATH 中的 baton CLI 委托和查询子任务。使用 approvalPolicy=never、workspace-write sandbox，允许 sandbox 网络访问本地委托入口；不能把提示中的授权范围当作 OS 隔离。服务端审批、登录刷新、交互工具请求均明确拒绝。中止 ACK 不证明外部 shell 或副作用已结束。
+
+### Codex 验证边界与真实任务入口
+
+CI 默认运行固定 Schema、独立 app-server 回放、Pi/Codex 共用 Worker 回归和 race。固定版本无模型握手可显式运行：
+
+```sh
+BATON_CODEX_PROBE=1 go test -v ./internal/agent/codex -run TestCodexInitializeWithoutModel
+```
+
+用户已在 macOS、Codex 0.162.1 / gpt-6-luna 上报告：启动、输入、结构化结果、turn 完成、中止、恢复、历史支持；委托链路成功，但子任务违反“不要再委托”而使原断言失败，不能将委托整项标为通过。本轮仅适配包路径与类型，保留真实测试入口和全部断言；云端不登录、不重跑真实模型，不将回放或交叉编译外推到其他模型/平台。
+
+真实入口默认跳过，只使用临时工作目录和独立、显式认证的临时 CODEX_HOME，不复制常用 ~/.codex 认证，不打印凭据。委托使用 BATON_TEST_DATABASE_URL 的临时 schema（PostgreSQL 17，禁止生产库），输出版本、平台、模型及逐项“支持/不支持/未验证”。以下命令仅在本机执行：
+
+```sh
+npm install -g @openai/codex@0.162.1
+bash .cursor/start.sh
+# 按本机测试库配置导出 BATON_TEST_DATABASE_URL。
+export BATON_REAL_CODEX_HOME="$(mktemp -d "${TMPDIR:-/tmp}/baton-codex-real.XXXXXX")"
+CODEX_HOME="$BATON_REAL_CODEX_HOME" codex login
+BATON_REAL_CODEX=1 BATON_CODEX_MODEL='gpt-6-luna' \
+  go test -v -count=1 ./... -run RealCodex -timeout 15m
+# 检查输出后删除临时 CODEX_HOME（含本次认证），不要归档或上传它。
+```
+
+无新增中心迁移；依赖 sourcegraph/jsonrpc2 v0.2.1，固定 Schema 测试使用 santhosh-tekuri/jsonschema/v5 v5.3.1。
 
 ## 配置
 

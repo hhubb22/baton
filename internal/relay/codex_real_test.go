@@ -13,8 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"baton/internal/adapters"
-	"baton/internal/adapters/codex"
+	"baton/internal/agent/codex"
 	"baton/internal/session"
 	"baton/internal/task"
 )
@@ -110,7 +109,7 @@ func TestRealCodex(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(work, "continue.txt"), nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	nextTerminal := func(a *codex.Adapter) adapters.Event {
+	nextTerminal := func(a *codex.Adapter) codex.Event {
 		t.Helper()
 		for {
 			select {
@@ -120,7 +119,7 @@ func TestRealCodex(t *testing.T) {
 				}
 			case <-ctx.Done():
 				t.Fatal("no real terminal event")
-				return adapters.Event{}
+				return codex.Event{}
 			}
 		}
 	}
