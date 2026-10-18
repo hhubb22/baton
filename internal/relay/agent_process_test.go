@@ -20,14 +20,33 @@ import (
 )
 
 func TestAgentCLIDelegatesBetweenTwoNodes(t *testing.T) {
-	st := startPrepareStack(t, map[string]string{"BATON_TEST_HOLD_START": "0", "BATON_TEST_EXECUTOR_SCRIPT": "running"})
+	gate := t.TempDir()
+	st := startPrepareStack(t, map[string]string{"BATON_TEST_HOLD_START": "0", "BATON_TEST_EXECUTOR_SCRIPT": "running", "BATON_TEST_START_GATE": gate})
 	ctx := context.Background()
+	releasePrepared := func(taskID string) {
+		t.Helper()
+		executionID := waitGateFile(t, gate)
+		deadline := time.Now().Add(20 * time.Second)
+		for time.Now().Before(deadline) {
+			var prepared bool
+			if err := st.pool.QueryRow(ctx, `SELECT prepared_at IS NOT NULL FROM executions WHERE id = $1::uuid AND task_id = $2::uuid`, executionID, taskID).Scan(&prepared); err != nil {
+				t.Fatal(err)
+			}
+			if prepared {
+				releaseGate(t, gate, executionID)
+				return
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		t.Fatal("中心尚未保存准备事实")
+	}
 	var source task.Record
 	if code := postJSON(t, st.client, st.base+"/api/v1/tasks", map[string]any{
 		"request_id": "agent-source", "description": "委托来源", "authorization_scope": "只读现场信息",
 	}, st.csrf, &source); code != http.StatusOK {
 		t.Fatalf("来源任务接受失败: %d", code)
 	}
+	releasePrepared(source.TaskID)
 	waitTaskStatus(t, st, source.TaskID, task.StatusRunning)
 	var sourceSession, sourceExecution string
 	if err := st.pool.QueryRow(ctx, `SELECT t.target_session_id::text, e.id::text FROM tasks t JOIN executions e ON e.task_id = t.id WHERE t.id = $1::uuid`, source.TaskID).Scan(&sourceSession, &sourceExecution); err != nil {
@@ -152,6 +171,7 @@ func TestAgentCLIDelegatesBetweenTwoNodes(t *testing.T) {
 	// 原凭据不随 batond 重连更换，存活来源 Worker 也不重启。
 	st.batond.stop()
 	st.batond = startCmd(t, st.batondBin, st.batondArgs, st.batondEnv)
+	waitLog(t, st.batond, "event=synced")
 	waitNode(t, st.client, st.base, st.ident.NodeID, true, true, true)
 	invoke(contextFile, true, "task", "get", child.TaskID, "--json")
 	if status := workerStatus(t, st.dataDir, sourceSession); status.PID != firstWorker.PID || status.ExecutorInputs != 1 {
@@ -162,9 +182,10 @@ func TestAgentCLIDelegatesBetweenTwoNodes(t *testing.T) {
 		t.Fatal(err)
 	}
 	targetProc := startCmd(t, st.batondBin, []string{"run", "--relay", "wss://" + st.nodeAddr + "/v1/node", "--data-dir", targetDir}, childEnv(map[string]string{
-		"BATON_TLS_CA_FILE": st.certFile, "BATON_HEARTBEAT_INTERVAL": "200ms", "BATON_TEST_EXECUTOR_SCRIPT": "success", "BATON_TEST_EXECUTOR_LOG": filepath.Join(targetDir, "executor.log"),
+		"BATON_TLS_CA_FILE": st.certFile, "BATON_HEARTBEAT_INTERVAL": "200ms", "BATON_TEST_EXECUTOR_SCRIPT": "success", "BATON_TEST_EXECUTOR_LOG": filepath.Join(targetDir, "executor.log"), "BATON_TEST_START_GATE": gate,
 	}))
 	_ = targetProc
+	releasePrepared(child.TaskID)
 	waitTaskStatus(t, st, child.TaskID, task.StatusCompleted)
 	var result store.AgentResultView
 	if err := json.Unmarshal(invoke(contextFile, true, "task", "result", child.TaskID, "--json"), &result); err != nil {
