@@ -25,6 +25,7 @@ type Actor struct {
 }
 
 type Config struct {
+	BatonURL        string  `json:"baton_url,omitempty"`
 	URL             string  `json:"-"`
 	APIKey          string  `json:"-"`
 	Secret          string  `json:"-"`
@@ -59,6 +60,12 @@ func Load(getenv func(string) string) (*Config, error) {
 }
 
 func (c Config) validate() error {
+	if c.BatonURL != "" {
+		u, err := url.Parse(c.BatonURL)
+		if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
+			return errors.New("baton_url 需要是 Baton HTTPS Origin")
+		}
+	}
 	u, err := url.Parse(c.URL)
 	if err != nil || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
 		return errors.New("BATON_PLANE_URL 需要是 Plane 实例 Origin")
