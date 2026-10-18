@@ -35,9 +35,9 @@ func invalid(message string) error {
 	return &ValidationError{Message: message}
 }
 
-// Validate 检查注册时提交的显示名、系统、角色和能力。
+// Validate 检查注册时提交的显示名、系统和能力；旧版 role 参数被忽略。
 // 能力列表可以为空。nil 与空列表同样表示没有能力。
-func Validate(displayName, system, role string, capabilities []string) error {
+func Validate(displayName, system, _ string, capabilities []string) error {
 	if displayName != strings.TrimSpace(displayName) {
 		return invalid("显示名不能包含首尾空格")
 	}
@@ -54,11 +54,6 @@ func Validate(displayName, system, role string, capabilities []string) error {
 	case SystemWindows, SystemMacOS, SystemLinux:
 	default:
 		return invalid("系统需要是 windows、macos 或 linux")
-	}
-	switch role {
-	case RolePC, RoleUbuntu:
-	default:
-		return invalid("角色需要是 pc 或 ubuntu")
 	}
 	if len(capabilities) > maxCapabilities {
 		return invalid("能力数量不能超过 32 个")

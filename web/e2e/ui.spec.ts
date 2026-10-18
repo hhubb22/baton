@@ -59,7 +59,7 @@ test('员工可以登录、管理节点并看到真实的吊销结果', async ({
 
   const laptopDir = `${state.workDir}/laptop`
   const laptopToken = await issueToken(page, secrets)
-  await registerNode(state, laptopToken, 'Laptop', ['start'], laptopDir)
+  await registerNode(state, laptopToken, 'Laptop', ['start'], laptopDir, 'ubuntu')
   await rememberCredential(laptopDir, secrets)
   await page.getByTestId('enrollment-dismiss').click()
   await expect(page.locator('body')).not.toContainText(laptopToken)
@@ -132,12 +132,12 @@ test('员工可以登录、管理节点并看到真实的吊销结果', async ({
   }, laptopId)
   expect(offline).toEqual({ status: 409, code: 'node_offline' })
 
-  await page.getByTestId('default-pc-select').selectOption(laptopId ?? '')
-  await expect(page.getByTestId('default-pc-offline')).toBeVisible()
-  await page.getByTestId('default-pc-save').click()
-  await expect(page.getByTestId('default-pc-saved')).toContainText('Laptop')
-  await expect(page.getByTestId('default-pc-saved')).toContainText(laptopId ?? '')
-  await expect(page.getByTestId('default-pc-current')).toContainText(laptopId ?? '')
+  await page.getByTestId('default-device-select').selectOption(laptopId ?? '')
+  await expect(page.getByTestId('default-device-offline')).toBeVisible()
+  await page.getByTestId('default-device-save').click()
+  await expect(page.getByTestId('default-device-saved')).toContainText('Laptop')
+  await expect(page.getByTestId('default-device-saved')).toContainText(laptopId ?? '')
+  await expect(page.getByTestId('default-device-current')).toContainText(laptopId ?? '')
 
   await stopPid(state.relayPid)
   await waitForPortClosed(state.nodePort)
@@ -149,18 +149,18 @@ test('员工可以登录、管理节点并看到真实的吊销结果', async ({
   await expect(revokeStatus).toContainText('尚未生效')
   await expect(revokeStatus).toContainText('不会停止')
   await expect(revokeStatus).not.toContainText('已生效')
-  await expect(page.getByTestId('default-pc-invalid')).toContainText('重新选择')
-  await expect(page.getByTestId('default-pc-current')).toContainText(laptopId ?? '')
-  await expect(page.getByTestId('default-pc-current')).not.toContainText(deskId ?? '')
-  await expect(page.getByTestId('default-pc-select')).toHaveValue('')
+  await expect(page.getByTestId('default-device-invalid')).toContainText('重新选择')
+  await expect(page.getByTestId('default-device-current')).toContainText(laptopId ?? '')
+  await expect(page.getByTestId('default-device-current')).not.toContainText(deskId ?? '')
+  await expect(page.getByTestId('default-device-select')).toHaveValue('')
 
   const restored = await restartRelay(state)
   await expect(revokeStatus).toHaveAttribute('data-status', 'effective')
   await expect(revokeStatus).toContainText('已生效')
   await expect(revokeStatus).toContainText('不会停止')
-  await expect(page.getByTestId('default-pc-invalid')).toBeVisible()
-  await expect(page.getByTestId('default-pc-current')).toContainText(laptopId ?? '')
-  await expect(page.getByTestId('default-pc-select')).toHaveValue('')
+  await expect(page.getByTestId('default-device-invalid')).toBeVisible()
+  await expect(page.getByTestId('default-device-current')).toContainText(laptopId ?? '')
+  await expect(page.getByTestId('default-device-select')).toHaveValue('')
 
   const csrfRejected = await page.evaluate(async () => {
     const response = await fetch('/api/v1/node-enrollments', {

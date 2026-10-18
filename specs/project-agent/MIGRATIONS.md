@@ -13,7 +13,7 @@ main 上已合并到 `0014_required_artifacts.sql`。活动 PR #21（Codex）和
 
 | 文件 | 所属工作 | 内容 |
 |---|---|---|
-| `0015_equal_nodes.sql` | PA-W01 | 去掉节点角色，默认 PC 改为默认设备，新增节点能力报告 |
+| `0015_equal_nodes.sql` | PA-W01（PS-153） | 去掉节点角色，默认 PC 改为默认设备，新增节点能力报告 |
 | `0016_projects.sql` | PA-W03 | Project、Project Agent、主对话、对话事件、项目记忆 |
 | `0017_project_agent_runs.sql` | PA-W04 | 输入队列、运行记录、`tasks` 的来源列 |
 
@@ -33,6 +33,15 @@ CREATE INDEX nodes_employee_seq
 
 ALTER TABLE employee_settings RENAME COLUMN default_pc_node_id TO default_device_node_id;
 
+INSERT INTO employee_settings (employee_id, default_device_node_id, updated_at)
+SELECT DISTINCT ON (employee_id) employee_id, id, now()
+FROM nodes
+WHERE revoked_at IS NULL
+ORDER BY employee_id, registration_seq
+ON CONFLICT (employee_id) DO UPDATE
+SET default_device_node_id = EXCLUDED.default_device_node_id, updated_at = now()
+WHERE employee_settings.default_device_node_id IS NULL;
+
 CREATE TABLE node_runtime_reports (
     node_id uuid PRIMARY KEY,
     employee_id uuid NOT NULL,
@@ -48,13 +57,13 @@ CREATE TABLE node_runtime_reports (
 
 同一个 PR 里需要修改的代码：
 
-- `internal/store/node.go` 的默认设备初选（第 175 行附近）去掉 `role = 'pc'` 条件，改为选最早注册的有效节点；`SetDefaultPC`（第 259 行附近）不再拒绝非 PC 节点。
+- `internal/store/node.go` 的默认设备初选（第 175 行附近）去掉 `role = 'pc'` 条件，改为选最早注册的有效节点；`SetDefaultDevice` 允许选择任一本人有效节点。
 - `internal/store/task.go` 的 `resolveDefaultPC` 改名为 `resolveDefaultDevice`，读取新列名。
-- 节点注册接口（`internal/httpapi/nodes.go`）继续接受旧版 batond 发来的 `role` 字段，但不保存、不使用；节点列表响应不再返回 `role`。
+- 节点注册接口（`internal/httpapi/nodes.go`）继续接受旧版 batond 发来的 `role` 字段，但不保存、不使用；节点列表和详情响应不返回 `role`。注册响应保留固定的 `role: "pc"`，兼容旧版 batond 的身份校验。
 - 新增 `PUT /me/default-device`，`PUT /me/default-pc` 作为别名保留；响应里的 `default_pc` 字段同时以 `default_device` 返回，Web 改用新字段。
 - `nodes.capabilities` 保留，执行 Agent 的支持判断照旧使用它。`node_runtime_reports` 只用于 Project Agent 的放置和 `devices.list`。
 
-已有员工的默认 PC 原样成为默认设备，包括指向已吊销节点的失效引用。迁移不重新计算默认值。
+已有员工的默认 PC 原样成为默认设备，包括指向已吊销节点的失效引用。迁移仅为默认值为空或没有设置行的员工，按注册序号补选最早的有效节点；没有有效节点时保持未设置。重复执行迁移命令不重新计算默认值。
 
 ## 0016_projects.sql
 

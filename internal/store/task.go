@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	"baton/internal/identity"
-	"baton/internal/node"
 	"baton/internal/redact"
 	"baton/internal/task"
 
@@ -76,7 +75,7 @@ func (s *Store) runCancelHook(ctx context.Context) error {
 	return fn(ctx)
 }
 
-// AcceptTask 保存一次任务接受。已有的相同请求直接返回原记录，不重新解析默认 PC 或默认 Agent。
+// AcceptTask 保存一次任务接受。已有的相同请求直接返回原记录，不重新解析默认设备或默认 Agent。
 // 任务、execution、初始事件、outbox 和去重墓碑在同一个事务里提交；提交失败时调用方得不到接受记录。
 func (s *Store) AcceptTask(ctx context.Context, employeeID string, in task.Input) (task.Record, error) {
 	return s.acceptTask(ctx, employeeID, in, nil)
@@ -314,14 +313,13 @@ func (s *Store) ListTaskEvents(ctx context.Context, employeeID, taskID string) (
 type ownedNode struct {
 	id           string
 	revoked      bool
-	role         string
 	caps         []string
 	defaultAgent *string
 }
 
 func resolveTarget(ctx context.Context, tx pgx.Tx, employeeID string, explicit *string) (ownedNode, error) {
 	if explicit == nil {
-		return resolveDefaultPC(ctx, tx, employeeID)
+		return resolveDefaultDevice(ctx, tx, employeeID)
 	}
 	target, err := loadOwnedNode(ctx, tx, employeeID, *explicit)
 	if err != nil {
@@ -337,20 +335,20 @@ func resolveTarget(ctx context.Context, tx pgx.Tx, employeeID string, explicit *
 	return target, nil
 }
 
-func resolveDefaultPC(ctx context.Context, tx pgx.Tx, employeeID string) (ownedNode, error) {
+func resolveDefaultDevice(ctx context.Context, tx pgx.Tx, employeeID string) (ownedNode, error) {
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO employee_settings (employee_id, default_pc_node_id, updated_at)
+		INSERT INTO employee_settings (employee_id, default_device_node_id, updated_at)
 		VALUES ($1::uuid, NULL, now())
 		ON CONFLICT (employee_id) DO NOTHING`, employeeID); err != nil {
-		return ownedNode{}, fmt.Errorf("读取默认 PC 失败: %s", redact.Scrub(err.Error()))
+		return ownedNode{}, fmt.Errorf("读取默认设备失败: %s", redact.Scrub(err.Error()))
 	}
 	var nodeID string
 	if err := tx.QueryRow(ctx, `
-		SELECT COALESCE(default_pc_node_id::text, '')
+		SELECT COALESCE(default_device_node_id::text, '')
 		FROM employee_settings
 		WHERE employee_id = $1::uuid
 		FOR UPDATE`, employeeID).Scan(&nodeID); err != nil {
-		return ownedNode{}, fmt.Errorf("读取默认 PC 失败: %s", redact.Scrub(err.Error()))
+		return ownedNode{}, fmt.Errorf("读取默认设备失败: %s", redact.Scrub(err.Error()))
 	}
 	if nodeID == "" {
 		return ownedNode{}, &task.Rejection{
@@ -363,10 +361,10 @@ func resolveDefaultPC(ctx context.Context, tx pgx.Tx, employeeID string) (ownedN
 	if err != nil {
 		return ownedNode{}, err
 	}
-	if target.revoked || target.role != node.RolePC {
+	if target.revoked {
 		return ownedNode{}, &task.Rejection{
 			Code:    task.CodeInvalidTarget,
-			Message: "默认 PC 已失效，请先重新选择目标节点",
+			Message: "默认设备已失效，请先重新选择目标节点",
 			Fields:  []string{"target_node_id"},
 		}
 	}
@@ -377,10 +375,10 @@ func loadOwnedNode(ctx context.Context, tx pgx.Tx, employeeID, nodeID string) (o
 	var target ownedNode
 	target.id = nodeID
 	err := tx.QueryRow(ctx, `
-		SELECT revoked_at IS NOT NULL, role, capabilities, default_agent_type
+		SELECT revoked_at IS NOT NULL, capabilities, default_agent_type
 		FROM nodes
 		WHERE id = $1::uuid AND employee_id = $2::uuid
-		FOR UPDATE`, nodeID, employeeID).Scan(&target.revoked, &target.role, &target.caps, &target.defaultAgent)
+		FOR UPDATE`, nodeID, employeeID).Scan(&target.revoked, &target.caps, &target.defaultAgent)
 	if errors.Is(err, pgx.ErrNoRows) {
 		var other bool
 		if err := tx.QueryRow(ctx, `

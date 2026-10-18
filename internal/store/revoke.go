@@ -35,14 +35,14 @@ type RevocationView struct {
 	AppliedAt     *time.Time
 }
 
-// DefaultPCState 是员工当前保存的默认 PC。吊销后 NodeID 保持原值。
-type DefaultPCState struct {
+// DefaultDeviceState 是员工当前保存的默认设备。吊销后 NodeID 保持原值。
+type DefaultDeviceState struct {
 	NodeID string
 	Status string
 }
 
 // RevokeNode 先保存吊销决定。已保存的节点保持原操作者和时间；新出现的未吊销凭据会补记一条记录。
-// 不修改 employee_settings，因此默认 PC 不会自动改到其他节点。
+// 不修改 employee_settings，因此默认设备不会自动改到其他节点。
 func (s *Store) RevokeNode(ctx context.Context, actorID, nodeID string) (RevocationView, error) {
 	var err error
 	actorID, err = identity.ParseUUID(actorID)
@@ -165,33 +165,33 @@ func (s *Store) NodeRevocation(ctx context.Context, employeeID, nodeID string) (
 	return out, nil
 }
 
-// DefaultPCState 读取保存的默认 PC，不因吊销而改写它。
-func (s *Store) DefaultPCState(ctx context.Context, employeeID string) (DefaultPCState, error) {
+// DefaultDeviceState 读取保存的默认设备，不因吊销而改写它。
+func (s *Store) DefaultDeviceState(ctx context.Context, employeeID string) (DefaultDeviceState, error) {
 	var err error
 	employeeID, err = identity.ParseUUID(employeeID)
 	if err != nil {
-		return DefaultPCState{}, ErrRevokeRejected
+		return DefaultDeviceState{}, ErrRevokeRejected
 	}
 	var nodeID string
 	err = s.pool.QueryRow(ctx, `
-		SELECT COALESCE(default_pc_node_id::text, '')
+		SELECT COALESCE(default_device_node_id::text, '')
 		FROM employee_settings
 		WHERE employee_id = $1::uuid`, employeeID).Scan(&nodeID)
 	if errors.Is(err, pgx.ErrNoRows) || nodeID == "" {
-		return DefaultPCState{Status: RevocationNone}, nil
+		return DefaultDeviceState{Status: RevocationNone}, nil
 	}
 	if err != nil {
-		return DefaultPCState{}, fmt.Errorf("读取默认 PC 失败: %s", redact.Scrub(err.Error()))
+		return DefaultDeviceState{}, fmt.Errorf("读取默认设备失败: %s", redact.Scrub(err.Error()))
 	}
 	view, err := s.OwnNode(ctx, employeeID, nodeID)
 	if err != nil {
-		return DefaultPCState{}, err
+		return DefaultDeviceState{}, err
 	}
 	status := view.RevocationStatus
 	if status == "" {
 		status = RevocationNone
 	}
-	return DefaultPCState{NodeID: nodeID, Status: status}, nil
+	return DefaultDeviceState{NodeID: nodeID, Status: status}, nil
 }
 
 // PendingRevocationSet 是尚未被 Relay 确认的吊销，用于快照之后的补发。

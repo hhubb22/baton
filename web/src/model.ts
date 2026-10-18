@@ -1,4 +1,4 @@
-import type { DefaultPC, NodeList, NodeStatus, RevokeResult, SavedDefault } from './types.ts'
+import type { DefaultDevice, NodeList, NodeStatus, RevokeResult, SavedDefault } from './types.ts'
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -22,12 +22,6 @@ export function formatReportTime(value: string | null): string {
   }).format(date)
 }
 
-export function roleLabel(role: string): string {
-  if (role === 'pc') return 'PC 执行'
-  if (role === 'ubuntu') return 'Ubuntu 开发'
-  return role
-}
-
 export function revocationLabel(status: string): string {
   if (status === 'pending') return '处理中'
   if (status === 'effective') return '已生效'
@@ -35,11 +29,11 @@ export function revocationLabel(status: string): string {
 }
 
 export function eligibleDefaultNodes(nodes: NodeStatus[]): NodeStatus[] {
-  return nodes.filter((node) => node.role === 'pc' && node.revocation_status === 'none')
+  return nodes.filter((node) => node.revocation_status === 'none')
 }
 
 export function currentDefaultText(list: NodeList): string {
-  const id = list.default_pc.node_id
+  const id = list.default_device.node_id
   if (!id) return '尚未设置'
   const node = list.nodes.find((item) => item.id === id)
   if (!node) return id
@@ -47,7 +41,7 @@ export function currentDefaultText(list: NodeList): string {
 }
 
 export function savedDefaultSummary(saved: SavedDefault): string {
-  return `${saved.display_name}（${saved.system}，序号 ${saved.registration_seq}，${saved.default_pc_node_id}）`
+  return `${saved.display_name}（${saved.system}，序号 ${saved.registration_seq}，${saved.default_device_node_id}）`
 }
 
 export function registerUsage(origin: string): string {
@@ -55,7 +49,7 @@ export function registerUsage(origin: string): string {
   return [
     '把凭据放在环境变量 BATON_ENROLLMENT_TOKEN 中，或写入仅当前用户可读的文件并用 --enrollment-file 指定。',
     '不要把凭据写进命令行参数、URL、localStorage 或日志。',
-    `batond register --coordinator ${base} --display-name "名称" --system linux --role pc --capability start`,
+    `batond register --coordinator ${base} --display-name "名称" --system linux --capability start`,
   ].join('\n')
 }
 
@@ -73,18 +67,18 @@ export function commandOrigin(origin: string): string {
 }
 
 export function applySavedDefault(list: NodeList, saved: SavedDefault): NodeList {
-  const defaultPC: DefaultPC = {
-    node_id: saved.default_pc_node_id,
+  const defaultDevice: DefaultDevice = {
+    node_id: saved.default_device_node_id,
     invalid: false,
     needs_reselection: false,
   }
-  return { ...list, default_pc: defaultPC }
+  return { ...list, default_device: defaultDevice }
 }
 
 export function applyRevoke(list: NodeList, result: RevokeResult): NodeList {
   return {
     ...list,
-    default_pc: result.default_pc,
+    default_device: result.default_device,
     local_process_notice: result.local_process_notice,
     nodes: list.nodes.map((node) => {
       if (node.id !== result.node_id) return node

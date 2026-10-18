@@ -18,7 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func TestEarliestPCStaysDefault(t *testing.T) {
+func TestEarliestNodeStaysDefault(t *testing.T) {
 	pool := dbtest.Open(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -26,16 +26,16 @@ func TestEarliestPCStaysDefault(t *testing.T) {
 	emp := mustEmployee(t, ctx, pool, "alice", "Alice")
 
 	ubuntu := mustRegister(t, ctx, pool, repo, emp.ID, "Build", node.RoleUbuntu, []string{"start"})
-	if got := defaultPC(t, ctx, pool, emp.ID); got != "" {
-		t.Fatalf("Ubuntu 节点被选成默认 PC: %s", got)
+	if got := defaultPC(t, ctx, pool, emp.ID); got != ubuntu.NodeID {
+		t.Fatalf("首个节点没有成为默认设备: %s", got)
 	}
 	early := mustRegister(t, ctx, pool, repo, emp.ID, "Early", node.RolePC, []string{"start", "input"})
-	if got := defaultPC(t, ctx, pool, emp.ID); got != early.NodeID {
-		t.Fatalf("最早的 PC 没有成为默认值: %s", got)
+	if got := defaultPC(t, ctx, pool, emp.ID); got != ubuntu.NodeID {
+		t.Fatalf("最早的节点没有保留为默认值: %s", got)
 	}
 	later := mustRegister(t, ctx, pool, repo, emp.ID, "Later", node.RolePC, nil)
-	if got := defaultPC(t, ctx, pool, emp.ID); got != early.NodeID {
-		t.Fatalf("新增节点改变了默认 PC: %s", got)
+	if got := defaultPC(t, ctx, pool, emp.ID); got != ubuntu.NodeID {
+		t.Fatalf("新增节点改变了默认设备: %s", got)
 	}
 	if early.RegistrationSeq >= later.RegistrationSeq || ubuntu.RegistrationSeq >= early.RegistrationSeq {
 		t.Fatalf("注册序号没有按提交顺序增长: %d %d %d", ubuntu.RegistrationSeq, early.RegistrationSeq, later.RegistrationSeq)
@@ -45,7 +45,7 @@ func TestEarliestPCStaysDefault(t *testing.T) {
 	}
 }
 
-func TestConcurrentRegistrationChoosesEarliestPC(t *testing.T) {
+func TestConcurrentRegistrationChoosesEarliestNode(t *testing.T) {
 	pool := dbtest.Open(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -109,20 +109,20 @@ func TestConcurrentRegistrationChoosesEarliestPC(t *testing.T) {
 		got := defaultPC(t, ctx, pool, emp.ID)
 		want := earliestPC(t, ctx, pool, emp.ID)
 		if got == "" || got != want {
-			t.Fatalf("%s 的默认 PC 是 %s，最早有效 PC 是 %s", emp.Username, got, want)
+			t.Fatalf("%s 的默认设备是 %s，最早有效节点是 %s", emp.Username, got, want)
 		}
 		var owner string
 		if err := pool.QueryRow(ctx, `SELECT employee_id::text FROM nodes WHERE id = $1::uuid`, got).Scan(&owner); err != nil {
 			t.Fatal(err)
 		}
 		if owner != emp.ID {
-			t.Fatalf("%s 的默认 PC 属于 %s", emp.Username, owner)
+			t.Fatalf("%s 的默认设备属于 %s", emp.Username, owner)
 		}
 	}
 	before := defaultPC(t, ctx, pool, alice.ID)
 	mustRegister(t, ctx, pool, repo, alice.ID, "After", node.RolePC, nil)
 	if got := defaultPC(t, ctx, pool, alice.ID); got != before {
-		t.Fatalf("并发选定后的新节点改变了默认 PC: %s", got)
+		t.Fatalf("并发选定后的新节点改变了默认设备: %s", got)
 	}
 }
 
@@ -243,7 +243,7 @@ func mustRegister(t *testing.T, ctx context.Context, pool *pgxpool.Pool, repo *s
 	}
 	err = pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM nodes
-		WHERE display_name = $1 OR system_name = $1 OR role = $1`, ident.Credential.Token).Scan(&n)
+		WHERE display_name = $1 OR system_name = $1`, ident.Credential.Token).Scan(&n)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +263,7 @@ func defaultPC(t *testing.T, ctx context.Context, pool *pgxpool.Pool, employeeID
 	t.Helper()
 	var id string
 	err := pool.QueryRow(ctx, `
-		SELECT COALESCE(default_pc_node_id::text, '')
+		SELECT COALESCE(default_device_node_id::text, '')
 		FROM employee_settings
 		WHERE employee_id = $1::uuid`, employeeID).Scan(&id)
 	if err != nil {
@@ -278,7 +278,7 @@ func earliestPC(t *testing.T, ctx context.Context, pool *pgxpool.Pool, employeeI
 	err := pool.QueryRow(ctx, `
 		SELECT id::text
 		FROM nodes
-		WHERE employee_id = $1::uuid AND role = 'pc' AND revoked_at IS NULL
+		WHERE employee_id = $1::uuid AND revoked_at IS NULL
 		ORDER BY registration_seq ASC
 		LIMIT 1`, employeeID).Scan(&id)
 	if err != nil {

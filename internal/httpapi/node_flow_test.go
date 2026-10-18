@@ -66,15 +66,15 @@ func TestNodeEnrollmentRegisterAndDefaultPC(t *testing.T) {
 	status, body, _ = postJSON(t, aliceClient, srv.URL+"/api/v1/nodes/register", "", "", map[string]any{
 		"enrollment_token": enrollment.EnrollmentToken,
 		"display_name":     "Desk",
-		"system":           "linux",
+		"system":           "invalid",
 		"role":             "root",
 		"capabilities":     []string{},
 	})
 	if status != http.StatusBadRequest || !strings.Contains(body, `"code":"invalid_node"`) {
-		t.Fatalf("非法角色状态 %d", status)
+		t.Fatalf("非法系统状态 %d", status)
 	}
 	if countNodes(t, pool, alice.ID) != 0 {
-		t.Fatal("非法角色消耗了注册凭据")
+		t.Fatal("非法系统消耗了注册凭据")
 	}
 
 	queryToken := "query-secret-token-should-not-log"
@@ -157,7 +157,7 @@ func TestNodeEnrollmentRegisterAndDefaultPC(t *testing.T) {
 		t.Fatal("第二台 PC 没有得到新的身份和更晚的序号")
 	}
 	if defaultPC(t, pool, alice.ID) != early.NodeID {
-		t.Fatal("新增节点改变了默认 PC")
+		t.Fatal("新增节点改变了默认设备")
 	}
 
 	bobEnroll := issueEnrollment(t, bobClient, srv.URL, bobCSRF)
@@ -172,39 +172,39 @@ func TestNodeEnrollmentRegisterAndDefaultPC(t *testing.T) {
 	}
 	secrets = append(secrets, bobNode.Credential.Token)
 	if bobNode.EmployeeID != bob.ID || defaultPC(t, pool, bob.ID) != bobNode.NodeID {
-		t.Fatal("Bob 的节点归属或默认 PC 不正确")
+		t.Fatal("Bob 的节点归属或默认设备不正确")
 	}
 
 	status, body = putJSON(t, aliceClient, srv.URL+"/api/v1/me/default-pc", origin, aliceCSRF, map[string]string{"node_id": bobNode.NodeID})
 	if status != http.StatusForbidden || !strings.Contains(body, `"code":"forbidden"`) {
-		t.Fatalf("跨员工修改默认 PC 状态 %d", status)
+		t.Fatalf("跨员工修改默认设备状态 %d", status)
 	}
 	assertNoSecrets(t, "跨员工响应", body, secrets...)
 	if defaultPC(t, pool, alice.ID) != early.NodeID || defaultPC(t, pool, bob.ID) != bobNode.NodeID {
-		t.Fatal("被拒绝的跨员工修改改变了默认 PC")
+		t.Fatal("被拒绝的跨员工修改改变了默认设备")
 	}
 
 	status, body = putJSON(t, aliceClient, srv.URL+"/api/v1/me/default-pc", origin, "", map[string]string{"node_id": later.NodeID})
 	if status != http.StatusForbidden {
-		t.Fatalf("缺少 CSRF 的默认 PC 修改状态 %d", status)
+		t.Fatalf("缺少 CSRF 的默认设备修改状态 %d", status)
 	}
 	if defaultPC(t, pool, alice.ID) != early.NodeID {
-		t.Fatal("缺少 CSRF 时默认 PC 被修改")
+		t.Fatal("缺少 CSRF 时默认设备被修改")
 	}
 
 	status, body = putJSON(t, aliceClient, srv.URL+"/api/v1/me/default-pc", origin, aliceCSRF, map[string]string{"node_id": later.NodeID})
 	if status != http.StatusOK {
-		t.Fatalf("修改默认 PC 状态 %d", status)
+		t.Fatalf("修改默认设备状态 %d", status)
 	}
 	var saved node.SavedDefault
 	if err := json.Unmarshal([]byte(body), &saved); err != nil {
 		t.Fatal(err)
 	}
-	if saved.NodeID != later.NodeID || saved.DisplayName != "Alice Later" || saved.RegistrationSeq != later.RegistrationSeq || saved.Role != "pc" {
+	if saved.NodeID != later.NodeID || saved.DisplayName != "Alice Later" || saved.RegistrationSeq != later.RegistrationSeq || saved.LegacyNodeID != saved.NodeID {
 		t.Fatalf("响应没有返回实际保存的节点: %+v", saved)
 	}
 	if defaultPC(t, pool, alice.ID) != saved.NodeID || savedDisplay(t, pool, alice.ID) != saved.DisplayName {
-		t.Fatal("数据库中的默认 PC 与响应不一致")
+		t.Fatal("数据库中的默认设备与响应不一致")
 	}
 
 	ubuntuEnroll := issueEnrollment(t, aliceClient, srv.URL, aliceCSRF)
@@ -219,14 +219,14 @@ func TestNodeEnrollmentRegisterAndDefaultPC(t *testing.T) {
 	}
 	secrets = append(secrets, ubuntu.Credential.Token)
 	if defaultPC(t, pool, alice.ID) != later.NodeID {
-		t.Fatal("Ubuntu 节点改变了默认 PC")
+		t.Fatal("Ubuntu 节点改变了默认设备")
 	}
-	status, body = putJSON(t, aliceClient, srv.URL+"/api/v1/me/default-pc", origin, aliceCSRF, map[string]string{"node_id": ubuntu.NodeID})
-	if status != http.StatusBadRequest || !strings.Contains(body, `"code":"invalid_node"`) {
-		t.Fatalf("把 Ubuntu 设为默认 PC 的状态 %d", status)
+	status, body = putJSON(t, aliceClient, srv.URL+"/api/v1/me/default-device", origin, aliceCSRF, map[string]string{"node_id": ubuntu.NodeID})
+	if status != http.StatusOK {
+		t.Fatalf("把 Ubuntu 设为默认设备的状态 %d", status)
 	}
-	if defaultPC(t, pool, alice.ID) != later.NodeID {
-		t.Fatal("Ubuntu 节点被保存为默认 PC")
+	if defaultPC(t, pool, alice.ID) != ubuntu.NodeID {
+		t.Fatal("Ubuntu 节点没有保存为默认设备")
 	}
 
 	thirdEnroll := issueEnrollment(t, aliceClient, srv.URL, aliceCSRF)
@@ -240,8 +240,8 @@ func TestNodeEnrollmentRegisterAndDefaultPC(t *testing.T) {
 		t.Fatal(err)
 	}
 	secrets = append(secrets, third.Credential.Token)
-	if defaultPC(t, pool, alice.ID) != later.NodeID {
-		t.Fatal("手动选择后的新节点改变了默认 PC")
+	if defaultPC(t, pool, alice.ID) != ubuntu.NodeID {
+		t.Fatal("手动选择后的新节点改变了默认设备")
 	}
 
 	unknown := strings.Repeat("a", 43)
@@ -359,7 +359,7 @@ func defaultPC(t *testing.T, pool *pgxpool.Pool, employeeID string) string {
 	defer cancel()
 	var id string
 	if err := pool.QueryRow(ctx, `
-		SELECT COALESCE(default_pc_node_id::text, '')
+		SELECT COALESCE(default_device_node_id::text, '')
 		FROM employee_settings WHERE employee_id = $1::uuid`, employeeID).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
@@ -374,7 +374,7 @@ func savedDisplay(t *testing.T, pool *pgxpool.Pool, employeeID string) string {
 	if err := pool.QueryRow(ctx, `
 		SELECT n.display_name
 		FROM employee_settings es
-		JOIN nodes n ON n.id = es.default_pc_node_id
+		JOIN nodes n ON n.id = es.default_device_node_id
 		WHERE es.employee_id = $1::uuid`, employeeID).Scan(&name); err != nil {
 		t.Fatal(err)
 	}
@@ -482,4 +482,87 @@ func getText(t *testing.T, client *browser, rawURL string) (int, string) {
 		t.Fatal(err)
 	}
 	return resp.StatusCode, string(body)
+}
+
+func TestEqualNodesDefaultDeviceCompatibilityAndRouting(t *testing.T) {
+	pool := dbtest.Open(t)
+	api := newAPI(t, pool, &bytes.Buffer{})
+	srv := httptest.NewTLSServer(api)
+	t.Cleanup(srv.Close)
+	client := tlsClient(t, srv)
+	const password = "equal-nodes-password-001"
+	alice := createEmployee(t, pool, "alice", "Alice", password)
+	csrf := loginFor(t, client, srv.URL, "alice", password)
+	var nodes []node.Identity
+	for _, role := range []string{"ubuntu", "pc", "", "unused-value"} {
+		enrollment := issueEnrollment(t, client, srv.URL, csrf)
+		request := registerBody(enrollment.EnrollmentToken, "设备", role, []string{"pi", "start"})
+		if role == "" {
+			delete(request, "role")
+		}
+		status, body, _ := postJSON(t, client, srv.URL+"/api/v1/nodes/register", "", "", request)
+		if status != http.StatusOK {
+			t.Fatalf("role=%q 注册失败: %d %s", role, status, body)
+		}
+		var ident node.Identity
+		if err := json.Unmarshal([]byte(body), &ident); err != nil {
+			t.Fatal(err)
+		}
+		// 旧版 batond 要求注册响应中有 pc 或 ubuntu，随后仍会发送 node.sync.role。
+		if ident.Role != "pc" {
+			t.Fatalf("缺少旧版注册兼容值: %q", ident.Role)
+		}
+		nodes = append(nodes, ident)
+	}
+	if defaultPC(t, pool, alice.ID) != nodes[0].NodeID {
+		t.Fatal("首个 Ubuntu 节点没有成为默认设备")
+	}
+	for i, endpoint := range []string{"default-device", "default-pc"} {
+		status, body := putJSON(t, client, srv.URL+"/api/v1/me/"+endpoint, origin, csrf, map[string]string{"node_id": nodes[i+1].NodeID})
+		var saved node.SavedDefault
+		if err := json.Unmarshal([]byte(body), &saved); err != nil {
+			t.Fatal(err)
+		}
+		if status != http.StatusOK || saved.NodeID != nodes[i+1].NodeID || saved.LegacyNodeID != saved.NodeID {
+			t.Fatalf("%s 保存或兼容响应失败: %d %s", endpoint, status, body)
+		}
+	}
+	resp, err := client.http.Get(srv.URL + "/api/v1/nodes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var list struct {
+		Nodes         []map[string]any `json:"nodes"`
+		DefaultPC     json.RawMessage  `json:"default_pc"`
+		DefaultDevice json.RawMessage  `json:"default_device"`
+	}
+	if err := json.Unmarshal(raw, &list); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK || len(list.Nodes) != len(nodes) || len(list.DefaultDevice) == 0 || !bytes.Equal(list.DefaultDevice, list.DefaultPC) {
+		t.Fatalf("列表兼容响应不一致: %s", raw)
+	}
+	for _, view := range list.Nodes {
+		if _, ok := view["role"]; ok {
+			t.Fatal("列表仍然包含 role")
+		}
+	}
+	status, body, _ := postJSON(t, client, srv.URL+"/api/v1/tasks", origin, "", map[string]any{"request_id": "default-device-routing", "description": "检查节点", "agent_type": "pi"}, csrf)
+	if status != http.StatusOK {
+		t.Fatalf("默认设备任务失败: %d %s", status, body)
+	}
+	var accepted struct {
+		Target string `json:"target_node_id"`
+	}
+	if err := json.Unmarshal([]byte(body), &accepted); err != nil {
+		t.Fatal(err)
+	}
+	if accepted.Target != nodes[2].NodeID {
+		t.Fatalf("任务没有发往无 role 的默认设备: %s", body)
+	}
 }

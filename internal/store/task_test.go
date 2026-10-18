@@ -63,7 +63,7 @@ func TestAcceptReplayAndDefaults(t *testing.T) {
 	assertAcceptedShape(t, ctx, pool, alice.ID, first)
 	execID := executionID(t, ctx, pool, first.TaskID)
 
-	if _, err := repo.SetDefaultPC(ctx, alice.ID, later.NodeID); err != nil {
+	if _, err := repo.SetDefaultDevice(ctx, alice.ID, later.NodeID); err != nil {
 		t.Fatal(err)
 	}
 	setDefaultAgent(t, ctx, pool, early.NodeID, "codex")
@@ -163,6 +163,9 @@ func TestAcceptRejectsBeforeStart(t *testing.T) {
 	pc := mustRegister(t, ctx, pool, repo, alice.ID, "Desk", node.RolePC, []string{"pi", "start"})
 	bobNode := mustRegister(t, ctx, pool, repo, bob.ID, "Other", node.RolePC, []string{"pi", "start"})
 	_ = mustRegister(t, ctx, pool, repo, carol.ID, "Build", node.RoleUbuntu, []string{"pi", "start"})
+	if _, err := pool.Exec(ctx, `UPDATE employee_settings SET default_device_node_id = NULL WHERE employee_id = $1::uuid`, carol.ID); err != nil {
+		t.Fatal(err)
+	}
 	setDefaultAgent(t, ctx, pool, bobNode.NodeID, "pi")
 
 	_, err := repo.AcceptTask(ctx, alice.ID, task.Input{RequestID: "no-agent", Description: "调查"})

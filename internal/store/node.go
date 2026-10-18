@@ -27,7 +27,6 @@ var (
 	ErrEnrollmentExpired = errors.New("enrollment expired")
 	ErrEnrollmentUsed    = errors.New("enrollment used")
 	ErrDefaultRejected   = errors.New("default rejected")
-	ErrNotPCNode         = errors.New("not pc node")
 	ErrNodeInactive      = errors.New("node inactive")
 )
 
@@ -36,7 +35,7 @@ type RegisterInput struct {
 	Token         string
 	DisplayName   string
 	System        string
-	Role          string
+	Role          string // 兼容旧调用方，注册不读取此字段。
 	Capabilities  []string
 	CredentialTTL time.Duration
 }
@@ -69,10 +68,10 @@ func (s *Store) IssueEnrollment(ctx context.Context, employeeID string, ttl time
 	return id, token, expires.UTC(), nil
 }
 
-// Register 消费一次性注册凭据，写入节点和可吊销的 credential_id，并在尚无默认 PC 时按注册序号选择最早的有效 PC。
+// Register 消费一次性注册凭据，写入节点和可吊销的 credential_id，并在尚无默认设备时按注册序号选择最早的有效节点。
 // 连接凭据是签名后的 JWT，只在返回值里出现一次，不写入数据库。
 func (s *Store) Register(ctx context.Context, in RegisterInput, signer node.TokenSigner) (node.Identity, error) {
-	if err := node.Validate(in.DisplayName, in.System, in.Role, normalizeCaps(in.Capabilities)); err != nil {
+	if err := node.Validate(in.DisplayName, in.System, "", normalizeCaps(in.Capabilities)); err != nil {
 		return node.Identity{}, err
 	}
 	if !node.ValidSecret(in.Token) {
@@ -104,20 +103,20 @@ func (s *Store) Register(ctx context.Context, in RegisterInput, signer node.Toke
 		return node.Identity{}, fmt.Errorf("核销注册凭据失败: %s", redact.Scrub(err.Error()))
 	}
 
-	// 锁住该员工的设置行，使注册序号和初始默认 PC 按同一顺序确定。
+	// 锁住该员工的设置行，使注册序号和初始默认设备按同一顺序确定。
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO employee_settings (employee_id, default_pc_node_id, updated_at)
+		INSERT INTO employee_settings (employee_id, default_device_node_id, updated_at)
 		VALUES ($1::uuid, NULL, now())
 		ON CONFLICT (employee_id) DO NOTHING`, employeeID); err != nil {
 		return node.Identity{}, fmt.Errorf("保存节点设置失败: %s", redact.Scrub(err.Error()))
 	}
 	var currentDefault string
 	if err := tx.QueryRow(ctx, `
-		SELECT COALESCE(default_pc_node_id::text, '')
+		SELECT COALESCE(default_device_node_id::text, '')
 		FROM employee_settings
 		WHERE employee_id = $1::uuid
 		FOR UPDATE`, employeeID).Scan(&currentDefault); err != nil {
-		return node.Identity{}, fmt.Errorf("读取默认 PC 失败: %s", redact.Scrub(err.Error()))
+		return node.Identity{}, fmt.Errorf("读取默认设备失败: %s", redact.Scrub(err.Error()))
 	}
 
 	nodeID, err := identity.NewUUID()
@@ -138,14 +137,14 @@ func (s *Store) Register(ctx context.Context, in RegisterInput, signer node.Toke
 	var registered time.Time
 	err = tx.QueryRow(ctx, `
 		INSERT INTO nodes (
-			id, employee_id, display_name, system_name, role, capabilities,
+			id, employee_id, display_name, system_name, capabilities,
 			registration_seq, registered_at, credential_version
 		) VALUES (
-			$1::uuid, $2::uuid, $3, $4, $5, $6,
+			$1::uuid, $2::uuid, $3, $4, $5,
 			nextval('node_registration_seq'), now(), 1
 		)
 		RETURNING registration_seq, registered_at`,
-		nodeID, employeeID, in.DisplayName, in.System, in.Role, caps,
+		nodeID, employeeID, in.DisplayName, in.System, caps,
 	).Scan(&seq, &registered)
 	if err != nil {
 		return node.Identity{}, fmt.Errorf("保存节点失败: %s", redact.Scrub(err.Error()))
@@ -164,22 +163,22 @@ func (s *Store) Register(ctx context.Context, in RegisterInput, signer node.Toke
 		return node.Identity{}, fmt.Errorf("保存节点凭据失败: %s", redact.Scrub(err.Error()))
 	}
 
-	if in.Role == node.RolePC && currentDefault == "" {
+	if currentDefault == "" {
 		var picked string
 		err = tx.QueryRow(ctx, `
 			UPDATE employee_settings AS es
-			SET default_pc_node_id = picked.id, updated_at = now()
+			SET default_device_node_id = picked.id, updated_at = now()
 			FROM (
 				SELECT id
 				FROM nodes
-				WHERE employee_id = $1::uuid AND role = 'pc' AND revoked_at IS NULL
+				WHERE employee_id = $1::uuid AND revoked_at IS NULL
 				ORDER BY registration_seq ASC
 				LIMIT 1
 			) AS picked
-			WHERE es.employee_id = $1::uuid AND es.default_pc_node_id IS NULL
+			WHERE es.employee_id = $1::uuid AND es.default_device_node_id IS NULL
 			RETURNING picked.id::text`, employeeID).Scan(&picked)
 		if err != nil {
-			return node.Identity{}, fmt.Errorf("保存默认 PC 失败: %s", redact.Scrub(err.Error()))
+			return node.Identity{}, fmt.Errorf("保存默认设备失败: %s", redact.Scrub(err.Error()))
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -190,11 +189,12 @@ func (s *Store) Register(ctx context.Context, in RegisterInput, signer node.Toke
 		return node.Identity{}, err
 	}
 	return node.Identity{
-		NodeID:          nodeID,
-		EmployeeID:      employeeID,
-		DisplayName:     in.DisplayName,
-		System:          in.System,
-		Role:            in.Role,
+		NodeID:      nodeID,
+		EmployeeID:  employeeID,
+		DisplayName: in.DisplayName,
+		System:      in.System,
+		// 旧版 batond 校验注册响应中的 role，固定兼容值不参与中心决策。
+		Role:            node.RolePC,
 		Capabilities:    caps,
 		RegistrationSeq: seq,
 		RegisteredAt:    registered.UTC(),
@@ -208,8 +208,8 @@ func (s *Store) Register(ctx context.Context, in RegisterInput, signer node.Toke
 	}, nil
 }
 
-// SetDefaultPC 把默认 PC 改成该员工自己的另一个有效 PC，并返回数据库中的实际结果。
-func (s *Store) SetDefaultPC(ctx context.Context, employeeID, nodeID string) (node.SavedDefault, error) {
+// SetDefaultDevice 把默认设备改成该员工自己的另一个有效节点，并返回数据库中的实际结果。
+func (s *Store) SetDefaultDevice(ctx context.Context, employeeID, nodeID string) (node.SavedDefault, error) {
 	var err error
 	employeeID, err = identity.ParseUUID(employeeID)
 	if err != nil {
@@ -226,7 +226,7 @@ func (s *Store) SetDefaultPC(ctx context.Context, employeeID, nodeID string) (no
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO employee_settings (employee_id, default_pc_node_id, updated_at)
+		INSERT INTO employee_settings (employee_id, default_device_node_id, updated_at)
 		VALUES ($1::uuid, NULL, now())
 		ON CONFLICT (employee_id) DO NOTHING`, employeeID); err != nil {
 		return node.SavedDefault{}, fmt.Errorf("保存节点设置失败: %s", redact.Scrub(err.Error()))
@@ -237,16 +237,15 @@ func (s *Store) SetDefaultPC(ctx context.Context, employeeID, nodeID string) (no
 		FROM employee_settings
 		WHERE employee_id = $1::uuid
 		FOR UPDATE`, employeeID).Scan(&locked); err != nil {
-		return node.SavedDefault{}, fmt.Errorf("读取默认 PC 失败: %s", redact.Scrub(err.Error()))
+		return node.SavedDefault{}, fmt.Errorf("读取默认设备失败: %s", redact.Scrub(err.Error()))
 	}
 
-	var role string
 	var inactive bool
 	err = tx.QueryRow(ctx, `
-		SELECT role, revoked_at IS NOT NULL
+		SELECT revoked_at IS NOT NULL
 		FROM nodes
 		WHERE id = $1::uuid AND employee_id = $2::uuid
-		FOR UPDATE`, nodeID, employeeID).Scan(&role, &inactive)
+		FOR UPDATE`, nodeID, employeeID).Scan(&inactive)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return node.SavedDefault{}, ErrDefaultRejected
 	}
@@ -256,39 +255,38 @@ func (s *Store) SetDefaultPC(ctx context.Context, employeeID, nodeID string) (no
 	if inactive {
 		return node.SavedDefault{}, ErrNodeInactive
 	}
-	if role != node.RolePC {
-		return node.SavedDefault{}, ErrNotPCNode
-	}
 	tag, err := tx.Exec(ctx, `
 		UPDATE employee_settings
-		SET default_pc_node_id = $2::uuid, updated_at = now()
+		SET default_device_node_id = $2::uuid, updated_at = now()
 		WHERE employee_id = $1::uuid`, employeeID, nodeID)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
 			return node.SavedDefault{}, ErrDefaultRejected
 		}
-		return node.SavedDefault{}, fmt.Errorf("保存默认 PC 失败: %s", redact.Scrub(err.Error()))
+		return node.SavedDefault{}, fmt.Errorf("保存默认设备失败: %s", redact.Scrub(err.Error()))
 	}
 	if tag.RowsAffected() != 1 {
-		return node.SavedDefault{}, fmt.Errorf("保存默认 PC 失败")
+		return node.SavedDefault{}, fmt.Errorf("保存默认设备失败")
 	}
 	var saved node.SavedDefault
 	err = tx.QueryRow(ctx, `
-		SELECT n.id::text, n.display_name, n.system_name, n.role, n.registration_seq
+		SELECT n.id::text, n.display_name, n.system_name, n.registration_seq
 		FROM employee_settings es
-		JOIN nodes n ON n.id = es.default_pc_node_id AND n.employee_id = es.employee_id
+		JOIN nodes n ON n.id = es.default_device_node_id AND n.employee_id = es.employee_id
 		WHERE es.employee_id = $1::uuid`, employeeID).Scan(
-		&saved.NodeID, &saved.DisplayName, &saved.System, &saved.Role, &saved.RegistrationSeq)
+		&saved.NodeID, &saved.DisplayName, &saved.System, &saved.RegistrationSeq)
 	if err != nil {
-		return node.SavedDefault{}, fmt.Errorf("读取默认 PC 失败: %s", redact.Scrub(err.Error()))
+		return node.SavedDefault{}, fmt.Errorf("读取默认设备失败: %s", redact.Scrub(err.Error()))
 	}
 	if saved.NodeID != nodeID {
-		return node.SavedDefault{}, fmt.Errorf("读取默认 PC 失败")
+		return node.SavedDefault{}, fmt.Errorf("读取默认设备失败")
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return node.SavedDefault{}, fmt.Errorf("提交默认 PC 失败: %s", redact.Scrub(err.Error()))
+		return node.SavedDefault{}, fmt.Errorf("提交默认设备失败: %s", redact.Scrub(err.Error()))
 	}
+	saved.LegacyNodeID = saved.NodeID
+	saved.Role = node.RolePC
 	return saved, nil
 }
 

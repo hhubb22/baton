@@ -65,9 +65,9 @@ func TestDataDirFollowsPlatformConvention(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsRoleAndDuplicateCapability(t *testing.T) {
-	if err := Validate("Desk", SystemLinux, "root", nil); err == nil {
-		t.Fatal("未知角色被接受")
+func TestValidateIgnoresRoleAndRejectsDuplicateCapability(t *testing.T) {
+	if err := Validate("Desk", SystemLinux, "root", nil); err != nil {
+		t.Fatal("旧版 role 影响了字段校验")
 	}
 	if err := Validate("Desk", SystemLinux, RolePC, []string{"start", "start"}); err == nil {
 		t.Fatal("重复能力被接受")

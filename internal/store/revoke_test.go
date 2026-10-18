@@ -43,7 +43,7 @@ func TestRevokeKeepsHistoryAndInvalidDefault(t *testing.T) {
 		t.Fatalf("不存在的节点得到 %v", err)
 	}
 	if countRows(t, ctx, pool, `SELECT COUNT(*) FROM node_revocations`) != 0 || defaultPC(t, ctx, pool, alice.ID) != desk.NodeID {
-		t.Fatal("被拒绝的吊销写入了记录或改了默认 PC")
+		t.Fatal("被拒绝的吊销写入了记录或改了默认设备")
 	}
 
 	decision, err := repo.RevokeNode(ctx, alice.ID, desk.NodeID)
@@ -67,8 +67,8 @@ func TestRevokeKeepsHistoryAndInvalidDefault(t *testing.T) {
 	if err := repo.SyncNode(ctx, alice.ID, desk.NodeID, conn, "Desk", node.SystemLinux, node.RolePC, []string{"start"}); !errors.Is(err, store.ErrSyncRejected) {
 		t.Fatalf("吊销决定保存后仍接受同步: %v", err)
 	}
-	if _, err := repo.SetDefaultPC(ctx, alice.ID, desk.NodeID); !errors.Is(err, store.ErrNodeInactive) {
-		t.Fatalf("被吊销节点仍可设为默认 PC: %v", err)
+	if _, err := repo.SetDefaultDevice(ctx, alice.ID, desk.NodeID); !errors.Is(err, store.ErrNodeInactive) {
+		t.Fatalf("被吊销节点仍可设为默认设备: %v", err)
 	}
 
 	again, err := repo.RevokeNode(ctx, alice.ID, desk.NodeID)
@@ -81,11 +81,11 @@ func TestRevokeKeepsHistoryAndInvalidDefault(t *testing.T) {
 
 	later := mustRegister(t, ctx, pool, repo, alice.ID, "Later", node.RolePC, []string{"start"})
 	if defaultPC(t, ctx, pool, alice.ID) != desk.NodeID || later.NodeID == desk.NodeID {
-		t.Fatal("吊销后的新节点被自动选成了默认 PC")
+		t.Fatal("吊销后的新节点被自动选成了默认设备")
 	}
-	state, err := repo.DefaultPCState(ctx, alice.ID)
+	state, err := repo.DefaultDeviceState(ctx, alice.ID)
 	if err != nil || state.NodeID != desk.NodeID || state.Status != store.RevocationPending {
-		t.Fatalf("默认 PC 引用没有保留: %+v %v", state, err)
+		t.Fatalf("默认设备引用没有保留: %+v %v", state, err)
 	}
 
 	if err := repo.MarkRevocationsApplied(ctx, decision.CredentialIDs); err != nil {
@@ -105,7 +105,7 @@ func TestRevokeKeepsHistoryAndInvalidDefault(t *testing.T) {
 		t.Fatal("凭据行没有保留吊销时间")
 	}
 	if defaultPC(t, ctx, pool, alice.ID) != desk.NodeID {
-		t.Fatal("回执后默认 PC 被改掉了")
+		t.Fatal("回执后默认设备被改掉了")
 	}
 }
 

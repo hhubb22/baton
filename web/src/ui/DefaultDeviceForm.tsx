@@ -10,12 +10,12 @@ type Props = {
   onSave: (nodeId: string) => void
 }
 
-export function DefaultPCForm({ list, saved, canWrite, busy, onSave }: Props) {
+export function DefaultDeviceForm({ list, saved, canWrite, busy, onSave }: Props) {
   const [choice, setChoice] = useState('')
   const options = eligibleDefaultNodes(list.nodes)
   const selected = options.some((node) => node.id === choice) ? choice : ''
   const chosen = options.find((node) => node.id === selected)
-  const invalid = list.default_pc.invalid || list.default_pc.needs_reselection
+  const invalid = list.default_device.invalid || list.default_device.needs_reselection
 
   function submit(event: FormEvent) {
     event.preventDefault()
@@ -25,17 +25,17 @@ export function DefaultPCForm({ list, saved, canWrite, busy, onSave }: Props) {
 
   return (
     <section className="card">
-      <h2>默认 PC</h2>
-      <p data-testid="default-pc-current">当前默认 PC：{currentDefaultText(list)}</p>
+      <h2>默认设备</h2>
+      <p data-testid="default-device-current">当前默认设备：{currentDefaultText(list)}</p>
       {invalid ? (
-        <p className="error" role="alert" data-testid="default-pc-invalid">{list.default_pc.message}</p>
+        <p className="error" role="alert" data-testid="default-device-invalid">{list.default_device.message}</p>
       ) : null}
-      {saved ? <p data-testid="default-pc-saved">这次保存的结果：{savedDefaultSummary(saved)}</p> : null}
+      {saved ? <p data-testid="default-device-saved">这次保存的结果：{savedDefaultSummary(saved)}</p> : null}
       <form onSubmit={submit}>
         <label>
-          改成其他 PC
+          改成其他设备
           <select
-            data-testid="default-pc-select"
+            data-testid="default-device-select"
             value={selected}
             onChange={(event) => setChoice(event.target.value)}
           >
@@ -48,10 +48,10 @@ export function DefaultPCForm({ list, saved, canWrite, busy, onSave }: Props) {
           </select>
         </label>
         {chosen && !chosen.online ? (
-          <p data-testid="default-pc-offline">该节点当前离线，仍可以保存为默认 PC。</p>
+          <p data-testid="default-device-offline">该节点当前离线，仍可以保存为默认设备。</p>
         ) : null}
-        <button data-testid="default-pc-save" type="submit" disabled={!canWrite || busy || selected === ''}>
-          {busy ? '正在保存' : '保存默认 PC'}
+        <button data-testid="default-device-save" type="submit" disabled={!canWrite || busy || selected === ''}>
+          {busy ? '正在保存' : '保存默认设备'}
         </button>
       </form>
     </section>

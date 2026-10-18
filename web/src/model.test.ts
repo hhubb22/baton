@@ -19,7 +19,7 @@ describe('节点展示', () => {
     expect(formatReportTime('2026-10-17T12:00:00Z')).toContain('2026')
   })
 
-  it('失效的默认 PC 仍指向原节点', () => {
+  it('失效的默认设备仍指向原节点', () => {
     const desk = node({ id: deskId, display_name: 'Desk', registration_seq: 1, revocation_status: 'effective' })
     const laptop = node({ id: laptopId, display_name: 'Laptop', registration_seq: 2 })
     const list = listOf([desk, laptop], deskId, true)
@@ -29,13 +29,13 @@ describe('节点展示', () => {
     expect(eligibleDefaultNodes(list.nodes).map((item) => item.id)).toEqual([laptopId])
   })
 
-  it('只把未吊销的 PC 当作可选项', () => {
+  it('所有未吊销节点都可以选为默认设备', () => {
     const nodes = [
       node({ id: deskId, display_name: 'Desk', revocation_status: 'pending' }),
       node({ id: laptopId, display_name: 'Laptop', online: false }),
-      node({ id: '33333333-3333-4333-8333-333333333333', display_name: 'Ubuntu', role: 'ubuntu' }),
+      node({ id: '33333333-3333-4333-8333-333333333333', display_name: 'Ubuntu' }),
     ]
-    expect(eligibleDefaultNodes(nodes).map((item) => item.display_name)).toEqual(['Laptop'])
+    expect(eligibleDefaultNodes(nodes).map((item) => item.display_name)).toEqual(['Laptop', 'Ubuntu'])
   })
 
   it('保存结果使用响应里的节点，而不是请求里选中的节点', () => {
@@ -44,7 +44,7 @@ describe('节点展示', () => {
       node({ id: laptopId, display_name: 'Laptop' }),
     ], laptopId)
     const actual = saved(deskId, 'Desk', 4)
-    expect(applySavedDefault(list, actual).default_pc.node_id).toBe(deskId)
+    expect(applySavedDefault(list, actual).default_device.node_id).toBe(deskId)
     expect(savedDefaultSummary(actual)).toContain('Desk')
     expect(savedDefaultSummary(actual)).not.toContain('Laptop')
   })
@@ -60,12 +60,12 @@ describe('节点展示', () => {
       applied_at: null,
       message: '吊销正在处理，尚未生效。',
       local_process_notice: '不会停止离线进程',
-      default_pc: { node_id: deskId, invalid: true, needs_reselection: true, message: '需要重新选择' },
+      default_device: { node_id: deskId, invalid: true, needs_reselection: true, message: '需要重新选择' },
     })
     expect(pending.nodes[0]?.revocation_status).toBe('pending')
     expect(pending.nodes[0]?.executable).toBe(false)
-    expect(pending.default_pc.node_id).toBe(deskId)
-    expect(pending.default_pc.needs_reselection).toBe(true)
+    expect(pending.default_device.node_id).toBe(deskId)
+    expect(pending.default_device.needs_reselection).toBe(true)
     expect(revocationLabel('pending')).toBe('处理中')
     expect(revocationLabel('effective')).toBe('已生效')
     expect(revocationLabel('pending')).not.toContain('已生效')
