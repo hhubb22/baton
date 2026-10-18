@@ -305,7 +305,7 @@ pnpm check:dist
 | Windows（`windows-latest`） | 原生构建、vet、完整测试，不以交叉编译代替运行 |
 | Web（`ubuntu-latest`） | 锁定依赖安装、lint、typecheck、单元测试、Chromium E2E、嵌入产物一致性 |
 
-CI 的 Linux 和 Web 各使用独立的 PostgreSQL 17 service container；macOS 和 Windows 使用 `ikalnytskyi/action-setup-postgres@v8` 安装 PostgreSQL 17。`BATON_TEST_DATABASE_URL` 连接 runner 本机端口 `55432` 的 `baton_test`，口令仅用于一次性 CI 测试库，不读取仓库 Secret。停库恢复测试会另建临时 PostgreSQL 集群，不停止共用测试库。第三方 action 固定到发布标签（PostgreSQL action 仅提供 `v8` 这样的版本标签）。
+CI 的 Linux 和 Web 各使用独立的 PostgreSQL 17 service container；macOS 和 Windows 使用 `ikalnytskyi/action-setup-postgres@v8` 安装 PostgreSQL 17。`BATON_TEST_DATABASE_URL` 连接 runner 本机端口 `55432` 的 `baton_test`，口令仅用于一次性 CI 测试库，不读取仓库 Secret。停库恢复测试会另建临时 PostgreSQL 集群，不停止共用测试库；Linux CI 另装主机 PostgreSQL 17 工具并设置 `BATON_TEST_POSTGRES_BINDIR`，避免误用 runner 预装的旧版。其他环境默认用 `pg_config --bindir` 定位工具，也可用该变量显式指定 PostgreSQL 17 的 `bin` 目录。第三方 action 固定到发布标签（PostgreSQL action 仅提供 `v8` 这样的版本标签）。
 
 本地先准备可创建临时 schema 的 PostgreSQL 17 测试库并设置 `BATON_TEST_DATABASE_URL`（POSIX shell 示例，端口按本机实例调整）：
 
