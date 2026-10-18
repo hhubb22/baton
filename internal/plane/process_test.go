@@ -34,12 +34,8 @@ func coordinatorEnv(t *testing.T, f *fixture) (string, []string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := signer.MarshalPKCS8PEM()
-	if err != nil {
-		t.Fatal(err)
-	}
 	key := filepath.Join(dir, "signer.pem")
-	if err := os.WriteFile(key, raw, 0o600); err != nil {
+	if err := signer.WriteFile(key); err != nil {
 		t.Fatal(err)
 	}
 	var schema string
