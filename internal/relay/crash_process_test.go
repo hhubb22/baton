@@ -471,7 +471,7 @@ func TestDatabaseStopReplaysLocalResultOnce(t *testing.T) {
 		"BATON_TEST_RESULT_GATE":     gate,
 	})
 	created := acceptTask(t, st, "db-stop")
-	releaseID := waitGateFile(t, gate)
+	releaseID := waitGateFile(t, gate, st)
 	waitTaskStatus(t, st, created.TaskID, task.StatusRunning)
 	sessionID := sessionOf(t, st, created.TaskID)
 	pg.stop(t)

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -61,6 +62,9 @@ func TestAgentCLIDelegatesBetweenTwoNodes(t *testing.T) {
 	}
 	privatefiletest.AssertPrivate(t, contextFile)
 	cli := filepath.Join(t.TempDir(), "baton")
+	if runtime.GOOS == "windows" {
+		cli += ".exe"
+	}
 	build := exec.Command("go", "build", "-o", cli, "./cmd/baton")
 	build.Dir = filepath.Join("..", "..")
 	if out, err := build.CombinedOutput(); err != nil {

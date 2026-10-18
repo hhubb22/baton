@@ -249,7 +249,7 @@ func waitTaskStatus(t *testing.T, st *prepareStack, taskID, want string) {
 	t.Fatalf("任务状态是 %s，想要 %s\ncoord %s\nnode %s", status, want, st.coord.out.String(), st.batond.out.String())
 }
 
-func waitGateFile(t *testing.T, gate string) string {
+func waitGateFile(t *testing.T, gate string, stacks ...*prepareStack) string {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
@@ -263,7 +263,10 @@ func waitGateFile(t *testing.T, gate string) string {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	t.Fatal("没有等到启动许可门闩")
+	for _, st := range stacks {
+		t.Logf("coord %s\nnode %s\nrelay %s", st.coord.out.String(), st.batond.out.String(), st.relay.out.String())
+	}
+	t.Fatal("没有等到测试门闩")
 	return ""
 }
 
