@@ -290,6 +290,50 @@ func TestPiReplayAgentEndIsNotSettledAndAbortClearsQueue(t *testing.T) {
 	}
 }
 
+func TestPiReplayLateAbortSettlement(t *testing.T) {
+	t.Setenv("BATON_PI_REPLAY_ABORT_UNSETTLED", "1")
+	a := replayAdapter(t)
+	if _, err := a.SubmitInput(context.Background(), "hold"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.consume([]byte(`{"type":"tool_execution_start"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if stopped, known, err := a.Abort(); err == nil || stopped || known {
+		t.Fatalf("abort response invented settlement: %v %v %v", stopped, known, err)
+	}
+	if stopped, known := a.StopStatus(); stopped || known {
+		t.Fatal("timeout confirmed stop")
+	}
+	if err := a.consume([]byte(`{"type":"agent_settled","aborted":true}`)); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if stopped, known := a.StopStatus(); !stopped || known {
+			t.Fatalf("late settlement lost unknown tool outcome: %v %v", stopped, known)
+		}
+	}
+	if out := a.Drain(); len(out) != 0 {
+		t.Fatal("cancelled turn produced a normal task result")
+	}
+}
+
+func TestPiStopStatusDoesNotInferSettlementFromExit(t *testing.T) {
+	a := New(agent.Config{})
+	a.aborting, a.active = true, false
+	a.settled = make(chan struct{})
+	if stopped, known := a.StopStatus(); stopped || known {
+		t.Fatal("inactive process was mistaken for settled")
+	}
+	a.active = true
+	if err := a.consume([]byte(`{"type":"agent_settled","aborted":true}`)); err != nil {
+		t.Fatal(err)
+	}
+	if stopped, known := a.StopStatus(); !stopped || !known {
+		t.Fatal("no-tool settled stop evidence missing")
+	}
+}
+
 func TestPiReplayExitIsUncertainAndRestoreNeverPrompts(t *testing.T) {
 	a := replayAdapter(t)
 	if _, err := a.SubmitInput(context.Background(), "exit"); err != nil {

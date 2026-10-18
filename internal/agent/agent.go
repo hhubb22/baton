@@ -38,3 +38,9 @@ type Adapter interface {
 	Abort() (stopped, outcomeKnown bool, err error)
 	Close() error
 }
+
+// StopObserver retains stop evidence after Abort returns, including on timeout.
+// Process exit alone is not settlement; observation must not retry task input.
+type StopObserver interface {
+	StopStatus() (stopped, outcomeKnown bool)
+}

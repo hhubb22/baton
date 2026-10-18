@@ -113,6 +113,9 @@ func applyStopReport(ctx context.Context, tx pgx.Tx, in ExecutionReport, head ex
 	if code == task.StatusCancelled {
 		code = ""
 	}
+	if in.AgentStopped && !in.OutcomeKnown {
+		message = "已确认 Agent 停止，操作结果仍待核实；中止请求后仍可能产生副作用，停止不回滚外部副作用"
+	}
 	if in.AgentStopped && in.OutcomeKnown {
 		if in.StopReason == task.StatusCancelled {
 			status = task.StatusCancelled

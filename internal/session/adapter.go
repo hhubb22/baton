@@ -77,6 +77,14 @@ func (w *workerDB) pollAdapterLocked(sessionID string) error {
 			return err
 		}
 	}
+	if w.cancelled && w.stopReason != "" {
+		if observer, ok := w.adapter.(agent.StopObserver); ok {
+			if stopped, known := observer.StopStatus(); stopped {
+				_, err := w.recordStopReportLocked(sessionID, true, known, false)
+				return err
+			}
+		}
+	}
 	return nil
 }
 

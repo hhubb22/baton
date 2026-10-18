@@ -248,40 +248,50 @@ func TestRealPi(t *testing.T) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	abortWindow := time.Now().Add(17 * time.Second)
+	if _, err := os.Stat(filepath.Join(work, "abort-finished")); !os.IsNotExist(err) {
+		t.Fatal("abort test tool already finished before cancellation")
+	}
+	abortRequested := time.Now()
 	if code := postJSON(t, st.client, st.base+"/api/v1/tasks/"+abortTask.TaskID+"/cancel", map[string]any{}, st.csrf, nil); code != http.StatusOK {
 		t.Fatal("cancel request failed")
 	}
-	deadline = time.Now().Add(20 * time.Second)
+	// Pi 1.3.0 may finish its current tool before settling. Allow the tool's
+	// remaining 15 seconds plus settlement and central report delivery.
+	deadline = time.Now().Add(90 * time.Second)
+	var status string
+	var acknowledged, confirmed, outcomeKnown bool
 	for {
-		var confirmed bool
-		_ = st.pool.QueryRow(context.Background(), `SELECT stop_confirmed_at IS NOT NULL FROM tasks WHERE id = $1::uuid`, abortTask.TaskID).Scan(&confirmed)
+		if err := st.pool.QueryRow(context.Background(), `SELECT status, stop_acknowledged_at IS NOT NULL,
+		 stop_confirmed_at IS NOT NULL, stop_outcome_known FROM tasks WHERE id = $1::uuid`, abortTask.TaskID).
+			Scan(&status, &acknowledged, &confirmed, &outcomeKnown); err != nil {
+			t.Fatal("abort status unavailable")
+		}
 		if confirmed {
 			break
 		}
 		if time.Now().After(deadline) {
 			capabilities["中止"] = "不支持"
-			t.Fatal("abort did not settle")
+			t.Fatalf("abort did not settle within 90s: status=%q acknowledged=%t confirmed=%t outcome_known=%t", status, acknowledged, confirmed, outcomeKnown)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 	abortSID := sessionOf(t, st, abortTask.TaskID)
 	abortWorker := workerStatus(t, st.dataDir, abortSID)
 	t.Cleanup(func() { stopWorker(abortWorker.PID) })
-	var outcomeKnown bool
-	if err := st.pool.QueryRow(context.Background(), `SELECT stop_outcome_known FROM tasks WHERE id=$1::uuid`, abortTask.TaskID).Scan(&outcomeKnown); err != nil || outcomeKnown {
+	if status != task.StatusNeedsVerification || !acknowledged || outcomeKnown {
 		t.Fatal("tool side effects were incorrectly declared known")
 	}
-	// Observe beyond the original command's completion, before cleanup can kill
-	// the process group and hide a failed abort.
-	if remaining := time.Until(abortWindow); remaining > 0 {
-		time.Sleep(remaining)
+	if info, err := os.Stat(filepath.Join(work, "abort-finished")); err == nil {
+		if !info.ModTime().After(abortRequested) {
+			t.Fatal("trailing write predates the cancellation request")
+		}
+		t.Log("中止请求后仍观察到工具写入；Agent 已停止，操作结果未知，任务保持待核实")
+	} else if os.IsNotExist(err) {
+		t.Log("本次未观察到后续写入；不据此推断工具可被打断或外部副作用已知")
+	} else {
+		t.Fatal("abort side-effect fixture unavailable")
 	}
-	if _, err := os.Stat(filepath.Join(work, "abort-finished")); !os.IsNotExist(err) {
-		capabilities["中止"] = "不支持"
-		t.Fatal("aborted command reached the forbidden trailing write")
-	}
-	capabilities["中止"] = "支持"
+	capabilities["中止"] = "支持（等当前工具结束后生效，不能中断运行中的工具）"
 }
 
 func waitRealPiStatus(t *testing.T, st *prepareStack, id, want string, capabilities map[string]string) {

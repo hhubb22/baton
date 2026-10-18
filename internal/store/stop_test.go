@@ -108,6 +108,48 @@ func TestUnauthorizedStopEvidenceRequiresCancelledNotStartedExecution(t *testing
 	}
 }
 
+func TestLateStopConfirmationIsIdempotentAndKeepsUnknownOutcome(t *testing.T) {
+	ctx, repo, pool, in, _ := preparedStart(t)
+	if d, err := repo.AuthorizeStart(ctx, in); err != nil || !d.Issue {
+		t.Fatalf("authorize: %+v %v", d, err)
+	}
+	if _, err := repo.RequestCancel(ctx, in.EmployeeID, in.TaskID); err != nil {
+		t.Fatal(err)
+	}
+	report := store.ExecutionReport{EmployeeID: in.EmployeeID, NodeID: in.NodeID, TaskID: in.TaskID, ExecutionID: in.ExecutionID, SessionID: in.SessionID,
+		EventID: mustUUID(t), Kind: task.EventStopReport, Status: task.StatusNeedsVerification, StopReason: task.StatusCancelled,
+		OccurredAt: time.Now().UTC().Truncate(time.Microsecond), WorkerSequence: 1}
+	if ack, code, err := repo.ApplyExecutionReport(ctx, report); err != nil || !ack || code != "" {
+		t.Fatalf("unsettled report: %v %s %v", ack, code, err)
+	}
+	before, err := repo.GetTask(ctx, in.EmployeeID, in.TaskID)
+	if err != nil || before.StopConfirmedAt != nil {
+		t.Fatalf("unsettled report confirmed stop: %+v %v", before, err)
+	}
+	report.EventID, report.WorkerSequence, report.AgentStopped = mustUUID(t), 2, true
+	report.OccurredAt = report.OccurredAt.Add(15 * time.Second)
+	for i := 0; i < 3; i++ {
+		if ack, code, err := repo.ApplyExecutionReport(ctx, report); err != nil || !ack || code != "" {
+			t.Fatalf("late settled report: %v %s %v", ack, code, err)
+		}
+	}
+	after, err := repo.GetTask(ctx, in.EmployeeID, in.TaskID)
+	if err != nil || after.Status != task.StatusNeedsVerification || after.StopConfirmedAt == nil || !after.StopConfirmedAt.Equal(report.OccurredAt) || after.StopOutcomeKnown || after.Version != before.Version+1 {
+		t.Fatalf("late settlement lost unknown outcome or duplicated report: %+v %v", after, err)
+	}
+	if after.Summary == nil || !strings.Contains(*after.Summary, "操作结果仍待核实") || !strings.Contains(*after.Summary, "中止请求后仍可能产生副作用") {
+		t.Fatalf("missing post-stop side-effect boundary: %v", after.Summary)
+	}
+	var count int
+	var bound bool
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM task_events WHERE task_id=$1::uuid AND kind='stop_report'`, in.TaskID).Scan(&count); err != nil || count != 2 {
+		t.Fatalf("duplicate stop facts: %d %v", count, err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT bound_execution_id IS NOT NULL FROM sessions WHERE id=$1::uuid`, in.SessionID).Scan(&bound); err != nil || !bound {
+		t.Fatalf("unknown outcome released execution binding: %t %v", bound, err)
+	}
+}
+
 func TestCancelStopFactsAndIdempotency(t *testing.T) {
 	for _, tc := range []struct {
 		name                       string

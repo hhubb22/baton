@@ -3,9 +3,11 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"baton/internal/agent"
 	"baton/internal/protocol"
@@ -37,6 +39,136 @@ func (a *nativeStub) HistoryContains(_ string, queried bool) (bool, error) {
 func (a *nativeStub) Drain() []Output            { out := a.outputs; a.outputs = nil; return out }
 func (a *nativeStub) Abort() (bool, bool, error) { a.aborts++; return true, false, nil }
 func (*nativeStub) Close() error                 { return nil }
+
+type delayedStopStub struct {
+	*nativeStub
+	settled, known bool
+}
+
+func (a *delayedStopStub) Abort() (bool, bool, error) {
+	a.aborts++
+	return false, false, errors.New("abort not settled")
+}
+
+func (a *delayedStopStub) StopStatus() (bool, bool) { return a.settled, a.settled && a.known }
+
+func TestNativeWorkerConfirmsDelayedStop(t *testing.T) {
+	for _, reason := range []string{task.StatusCancelled, task.CodeExecutionTimeout} {
+		t.Run(reason, func(t *testing.T) {
+			w, clock, sid := clockWorker(t, 60)
+			a := &delayedStopStub{nativeStub: &nativeStub{}}
+			w.adapterFactory = func(string, string) (agent.Adapter, error) { return a, nil }
+			if _, err := w.SubmitInput(sid, nativeTestInput); err != nil {
+				t.Fatal(err)
+			}
+			reports, err := w.Stop(sid, reason)
+			if err != nil {
+				t.Fatal(err)
+			}
+			first := findStop(t, reports)
+			if first.AgentStopped || first.OutcomeKnown || first.NotStarted {
+				t.Fatalf("request invented stop evidence: %+v", first)
+			}
+			if err := w.Ack(first.EventID); err != nil {
+				t.Fatal(err)
+			}
+			clock.Advance(15 * time.Second)
+			a.settled = true
+			if err := w.checkDeadline(sid); err != nil {
+				t.Fatal(err)
+			}
+			reports, err = w.Pending()
+			if err != nil {
+				t.Fatal(err)
+			}
+			confirmed := findStop(t, reports)
+			if !confirmed.AgentStopped || confirmed.OutcomeKnown || confirmed.NotStarted || confirmed.Status != task.StatusNeedsVerification || confirmed.StopReason != reason || confirmed.EventID == first.EventID || confirmed.WorkerSequence <= first.WorkerSequence || !confirmed.OccurredAt.After(first.OccurredAt) {
+				t.Fatalf("late settlement lost stop/unknown outcome: %+v", confirmed)
+			}
+			for i := 0; i < 3; i++ {
+				if err := w.checkDeadline(sid); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := w.Stop(sid, reason); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var count int
+			if err := w.db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE kind = ?`, task.EventStopReport).Scan(&count); err != nil || count != 2 || a.aborts != 1 {
+				t.Fatalf("duplicate stop reports/control calls: %d %d %v", count, a.aborts, err)
+			}
+			if err := w.Ack(confirmed.EventID); err != nil {
+				t.Fatal(err)
+			}
+			var seq int
+			var name, path string
+			if err := w.db.QueryRow(`PRAGMA database_list`).Scan(&seq, &name, &path); err != nil {
+				t.Fatal(err)
+			}
+			if err := w.Close(); err != nil {
+				t.Fatal(err)
+			}
+			reopened, err := openWorkerDB(path, NewObserver(""))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer reopened.Close()
+			if err := reopened.checkDeadline(sid); err != nil {
+				t.Fatal(err)
+			}
+			reports, err = reopened.Stop(sid, reason)
+			if err != nil {
+				t.Fatalf("acknowledged stop replayed after reopen: %+v %v", reports, err)
+			}
+			for _, r := range reports {
+				if r.Kind == task.EventStopReport || r.Kind == protocol.ReportResult {
+					t.Fatalf("stop/result replayed after reopen: %+v", r)
+				}
+			}
+			if err := reopened.db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE kind = ?`, task.EventStopReport).Scan(&count); err != nil || count != 2 {
+				t.Fatalf("reopen duplicated stop reports: %d %v", count, err)
+			}
+		})
+	}
+}
+
+func TestNativeWorkerRetriesStopConfirmationAfterLedgerFailure(t *testing.T) {
+	w, _, sid := clockWorker(t, 60)
+	a := &delayedStopStub{nativeStub: &nativeStub{}, known: true}
+	w.adapterFactory = func(string, string) (agent.Adapter, error) { return a, nil }
+	if _, err := w.SubmitInput(sid, nativeTestInput); err != nil {
+		t.Fatal(err)
+	}
+	reports, err := w.Stop(sid, task.StatusCancelled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Ack(findStop(t, reports).EventID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.db.Exec(`CREATE TRIGGER fail_stop BEFORE INSERT ON outbox WHEN NEW.kind = 'stop_report'
+	 BEGIN SELECT RAISE(ABORT, 'fixture ledger failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	a.settled = true
+	if err := w.checkDeadline(sid); err == nil {
+		t.Fatal("ledger failure was swallowed")
+	}
+	if _, err := w.db.Exec(`DROP TRIGGER fail_stop`); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.checkDeadline(sid); err != nil {
+		t.Fatal(err)
+	}
+	reports, err = w.Pending()
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirmed := findStop(t, reports)
+	if !confirmed.AgentStopped || !confirmed.OutcomeKnown || confirmed.NotStarted || a.aborts != 1 {
+		t.Fatalf("retry lost no-tool stop evidence: %+v, aborts=%d", confirmed, a.aborts)
+	}
+}
 
 func TestNativeWorkerUsesAsyncSettlementAndHistoryConfirmation(t *testing.T) {
 	for _, queried := range []bool{false, true} {

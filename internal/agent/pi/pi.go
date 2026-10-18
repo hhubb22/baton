@@ -379,6 +379,19 @@ func (a *Adapter) Drain() []agent.Output {
 	return out
 }
 
+func (a *Adapter) StopStatus() (bool, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.aborting {
+		select {
+		case <-a.settled:
+			return true, !a.usedTools
+		default:
+		}
+	}
+	return false, false
+}
+
 func (a *Adapter) Abort() (bool, bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

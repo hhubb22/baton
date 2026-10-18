@@ -111,6 +111,15 @@ Pi 使用 `--mode rpc`，禁用自动任务重试、启动联网、扩展/MCP/sk
 
 明确等待子结果用 `{"baton_waiting_for_children":true}`；自动继续只注入一次带 `delivery_id` 的结果。忙碌回合可用 `baton task result` 查询：Worker 等原生历史的 user 输入或成功 bash toolResult 中出现**精确** delivery_id 后，才记录 delivered。确认前不发送 delivered 回执；settled 时仍无法确认、或 Worker 崩溃，保留 uncertain，不重注入。batond 重启只重连原 Worker；Worker 丢失后保持待核实，不自动重启 Pi 或重发输入。适配器显式 Restore 校验映射、原生文件、v3 header、ID 与工作目录，再用 `--session <file>` 加载；文件缺失、截断或越界不会创建空会话。恢复本身不发送 prompt。
 
+用户在 fa125f9、Darwin 27.2 arm64、Pi 1.3.0 / `google-vertex/gemini-3.1-flash-lite` 的隔离目录实测反馈如下，不扩展到其他模型或系统：
+
+| 能力 | 实测结论 | 边界 |
+|---|---|---|
+| 启动、输入、结构化结果、委托、原生历史确认、恢复、缺失历史拒绝、目录隔离 | 支持 | 来自用户真实模型实测，不是云端回放结论 |
+| 中止 | 等当前工具结束后生效，不能中断运行中的工具 | 中止后仍观察到工具写入；停止不等于操作结果已知。本轮 Worker 延迟停止补报闭环仍待用户复跑 |
+
+Worker 在首次中止报告后继续只读观察适配器的停止证据；即使 `Abort` 等待超时，后来观察到 `agent_settled` 仍会持久化并补报确认停止。两份报告使用不同且稳定的事件 ID，重复轮询、ACK 丢失或账本重开不重复创建确认事件；中心沿用已有事件去重记录 `stop_confirmed_at`。Pi 使用过工具时仍上报 `OutcomeKnown=false`，任务保持待核实与执行绑定，不把稍后的 assistant error 当普通失败结果覆盖。是否在超时后强制结束 Pi 进程树尚未决定，本轮不实现，见 TECH 的 Q6。
+
 无模型检查（不登录、不执行任务）：
 
 ```sh
@@ -302,7 +311,7 @@ Worker 无法应答时，账本的权限、IO、打开失败和锁忙统一作�
 
 授权前已取消的同一次执行，Worker 在后续心跳领取中止要求后仍可补报 `stop_report`。中心只对身份匹配、取消原因且 `not_started=true`（同时已停止、结果已知）的未授权执行接收这类补充证据，持久化后 ACK；保留 `cancelled` 终态、原摘要和错误，不补授权。同一事件重复上报只确认一次。Worker 收到 ACK 后清空待交付项，退出后不再因该回执被 batond 重启或重连拉起；其他未授权的启动、结果及中止报告仍拒绝。
 
-中心把单任务中止请求持久保存在 `execution_stops`。节点在心跳和补发输入前通过 `execution.control` 领取，离线请求不会被丢弃。Worker 在 Session 互斥区先落盘中止标记再调用适配器的中止接口；接口返回不等于确认停止。Pi 先 `clear_queue` 再 `abort`，活动回合必须等到 `agent_settled`。只有未发送输入、或确认停止且操作结果可说明时才变成 `cancelled`；停止或副作用仍未知就保留 `needs_verification` 和执行绑定。Pi 一旦执行过工具，中止不声称外部副作用已知；停止不会回滚外部副作用，也不保证任意后台子进程退出。
+中心把单任务中止请求持久保存在 `execution_stops`。节点在心跳和补发输入前通过 `execution.control` 领取，离线请求不会被丢弃。Worker 在 Session 互斥区先落盘中止标记再调用适配器的中止接口；接口返回不等于确认停止。Pi 先 `clear_queue` 再 `abort`，活动回合必须等到 `agent_settled`，等待超时后仍继续观察并在真实 settled 时幂等补报。Pi 1.3.0 的中止等当前工具结束后生效，不能中断运行中的工具。只有未发送输入、或确认停止且操作结果可说明时才变成 `cancelled`；停止或副作用仍未知就保留 `needs_verification` 和执行绑定。Pi 一旦执行过工具，中止不声称外部副作用已知；停止不会回滚外部副作用，也不保证任意后台子进程退出。
 
 排队到期时，包含未准备任务在内，能确认未启动的任务失败，原因是 `queue_timeout`，此后不能再授权。已授权而没有未启动证据的任务先待核实，Worker 的未启动回执再收敛为超时失败；期限前已发送输入的事实优先于延迟的排队超时请求，不会中断已执行任务。节点被吊销时仍按原规则处理：还没授权就失败，原因是 `revoked`；已经授权就进入待核实。
 
