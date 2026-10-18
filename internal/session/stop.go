@@ -1,6 +1,7 @@
 package session
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"time"
@@ -31,6 +32,9 @@ func (w *workerDB) deadlineReasonLocked() (string, error) {
 func (w *workerDB) checkDeadline(sessionID string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if err := w.pollAdapterLocked(sessionID); err != nil {
+		return err
+	}
 	if w.cancelled && w.stopReason != "" && !w.stopReported {
 		_, err := w.stopLocked(sessionID, w.stopReason)
 		return err
@@ -90,6 +94,9 @@ func (w *workerDB) stopLocked(sessionID, reason string) ([]ipcReport, error) {
 		return nil, err
 	}
 	w.cancelled, w.stopReason = true, reason
+	if _, err := w.finishNativeChecksLocked(); err != nil {
+		return nil, err
+	}
 	notStarted := !w.inputSubmitted && !w.recoveredUncertain
 	stopped, known := notStarted, notStarted
 	if w.hasResultLocked() {
@@ -104,10 +111,33 @@ func (w *workerDB) stopLocked(sessionID, reason string) ([]ipcReport, error) {
 		stopped = result.AgentStopped
 		known = stopped && (result.Status == task.StatusCompleted || result.Status == task.StatusFailed)
 		notStarted = false
-	} else if !notStarted && !w.recoveredUncertain {
-		stopped, known, err = w.observer.Abort()
+	} else if !notStarted && (w.adapter != nil || !w.recoveredUncertain) {
+		if w.adapter != nil {
+			stopped, known, err = w.adapter.Abort()
+		} else if w.adapterFactory == nil {
+			stopped, known, err = w.observer.Abort()
+		}
 		if err != nil {
 			stopped, known = false, false
+		}
+	}
+	return w.recordStopReportLocked(sessionID, stopped, known, notStarted)
+}
+
+func (w *workerDB) recordStopReportLocked(sessionID string, stopped, known, notStarted bool) ([]ipcReport, error) {
+	var previous string
+	err := w.db.QueryRow(`SELECT payload FROM outbox WHERE kind = ? ORDER BY rowid DESC LIMIT 1`, task.EventStopReport).Scan(&previous)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	if previous != "" {
+		var report protocol.ExecutionReport
+		if err := json.Unmarshal([]byte(previous), &report); err != nil {
+			return nil, err
+		}
+		if !stopped || report.AgentStopped {
+			w.stopReported = true
+			return w.pendingLocked()
 		}
 	}
 	eventID, err := identity.NewUUID()
@@ -118,18 +148,27 @@ func (w *workerDB) stopLocked(sessionID, reason string) ([]ipcReport, error) {
 		Type: protocol.BodyExecutionReport, EventID: eventID, TaskID: w.task, ExecutionID: w.execution,
 		SessionID: sessionID, Kind: task.EventStopReport, InputGeneration: w.generation,
 		Status: task.StatusNeedsVerification, OccurredAt: w.executionClock.Wall().UTC(),
-		StopReason: reason, AgentStopped: stopped, OutcomeKnown: known, NotStarted: notStarted,
+		StopReason: w.stopReason, AgentStopped: stopped, OutcomeKnown: known, NotStarted: notStarted,
 	})
 	if err != nil {
 		return nil, err
 	}
-	tx, err = w.db.Begin()
+	tx, err := w.db.Begin()
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	if err := insertLog(tx, "stop", "已请求中止；停止不回滚外部副作用", time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+	kind, message := "stop", "已请求中止；停止不回滚外部副作用"
+	if previous != "" {
+		kind, message = "stop_confirmed", "已观察到 Agent 停止；停止不回滚外部副作用"
+	}
+	if err := insertLog(tx, kind, message, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		return nil, err
+	}
+	if stopped {
+		if err := putMeta(tx, "agent_stopped", "1"); err != nil {
+			return nil, err
+		}
 	}
 	if err := insertOutbox(tx, eventID, task.EventStopReport, body); err != nil {
 		return nil, err

@@ -182,13 +182,23 @@ func TestPrepareDoesNotAckWhenPersistFails(t *testing.T) {
 func startPrepareStack(t *testing.T, extra map[string]string) *prepareStack {
 	t.Helper()
 	coordBin, relayBin, batondBin := buildBins(t)
+	return startPrepareStackWithBins(t, extra, coordBin, relayBin, batondBin)
+}
+
+func startPrepareStackWithBins(t *testing.T, extra map[string]string, coordBin, relayBin, batondBin string, dataRoot ...string) *prepareStack {
+	t.Helper()
 	pool := dbtest.Open(t)
 	ctx := context.Background()
 	var schema string
 	if err := pool.QueryRow(ctx, "SELECT current_schema()").Scan(&schema); err != nil {
 		t.Fatal(err)
 	}
-	dir := t.TempDir()
+	var dir string
+	if len(dataRoot) != 0 && dataRoot[0] != "" {
+		dir = dataRoot[0]
+	} else {
+		dir = t.TempDir()
+	}
 	certFile, keyFile, cert := writeServerCert(t, dir)
 	signer, err := node.GenerateSigner()
 	if err != nil {

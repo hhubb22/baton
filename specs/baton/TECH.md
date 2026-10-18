@@ -32,7 +32,23 @@ CI 已配置为在 pull request 与推送 `main` 时运行 Linux、macOS、Windo
 
 当前已实现补充（PS-116 / T12）：新增中心迁移 `0011_child_deliveries.sql`，以稳定 `delivery_id` 保存子结果到来源执行的交付状态；batond 心跳领取通知，来源 Worker 先写本地 SQLite 交付账本。忙碌来源只保留供当前工具查询的结果，明确等待子结果的存活来源才串行提交一次带交付标识的新输入，不重发原始任务。来源已停止或恢复后无法证明原 Agent 存活时不自动启动 Agent；结果仍可查询。交付意图与来源输入代次先同步提交，历史确认后记录 delivered；意图后崩溃保留 uncertain，不自动重注入。CLI 的子任务状态和结果查询区分交付状态与执行结果；来源自身的 delivery_status 仍表示结果已存中心。候选结果在本地绑定 input_generation，存活时提交候选不完成；新输入使旧候选失效，中心拒绝旧代次，并拒绝存在未结束或未处理交付子委托的父任务完成。父取消递归保存独立的子任务取消/中止请求，父停止回执不代替子停止回执。新增两节点、两 Worker 的重复通知、来源停止、意图前后/发送后/确认后崩溃与重连进程测试，以及代次、权限和独立取消回归。原生历史确认目前仅由测试执行器建模，真实 Agent 适配、环境注入、result submit 和人工核实接口不在本次范围；无新增依赖。
 
+当前已实现补充（PS-118 / T14）：新增 `internal/agent.Adapter` 与独立 `internal/agent/pi`，Worker 仅以一个选择点接入 Pi 1.3.0，不包含其他 Agent 适配。Pi 启动注入每次执行的 `BATON_CONTEXT_FILE`，可配置 Binary/Model/Env；启动关闭任务级自动重试，JSONL 仅按 LF 分帧并持续消费 stdout，prompt response、agent_end、进程退出都不是成功证据，等 agent_settled 后才沿已有 outbox 回报结构化结果。中止先 clear_queue 后 abort，活动回合等待 settled；使用过工具时保留副作用未知，不承诺进程树均已停止。委托复用 Agent 本地 CLI 与 T12 delivery ledger：持久化意图和代次后注入一次结果，只有原生 user 输入/成功 bash toolResult 中的精确 delivery_id 才确认 delivered，确认前不提前回执；未确认或崩溃保留 uncertain、不重注入。原生映射和 v3 header 校验 ID、工作目录、文件存在与目录边界，显式恢复只加载历史，不自动发送 prompt；batond 重连原 Worker，Worker 丢失仍待核实，不以恢复为理由重放输入。
+
+T14 的固定版本 testdata 是文档转录的协议契约样本，不是模型录制。回放覆盖 LF/CRLF、跨读取边界、大帧、Unicode 分隔符、settled/控制响应、中止顺序、错误和进程异常、等待子任务、原生历史缺失/不匹配/越界；Worker 测试覆盖异步结果、原生交付确认、代次、重复通知和崩溃 uncertain 回执。云端仅做 Pi 1.3.0 版本/帮助与隔离无模型初始化。`BATON_REAL_PI=1 go test -v -count=1 -timeout=30m ./... -run '^TestRealPi$'` 为默认跳过的 macOS 真实入口，使用独立临时 HOME/配置/业务目录及 sandbox-exec，需显式模型与环境凭据，不读用户登录文件，输出版本/平台/实际模型与能力结论。真实模型结论以本节下方用户 macOS 实测反馈为准，不能据回放或交叉构建宣称支持。生产 Pi 适配不提供 OS 沙箱；外部隔离责任及实测前提见 README。无新增 Go 依赖或中心迁移（仅 Worker SQLite 增加内部确认表），不占用 0015；未改动以下批准设计条款。
+
 当前已实现补充（PS-132 / T28）：任务与 Agent 委托请求支持 `required_artifacts`（节点、已登记 `root_id`、根内资源路径），纳入幂等摘要、输入大小校验并由迁移 `0014` 持久化。文件浏览的实现提取到内部共享 `fileaccess` 包，节点首次 prepare 绑定 Worker 前以及 Worker 实际提交输入前复用同一套 `os.Root`、授权目录与实际打开检查；不另建路径安全边界。只接受可读普通文件；缺失、权限错误、未授权根、越界/符号链接及另一节点本地引用以 `artifact_unavailable` 明确失败，不提交依赖输入。prepare 后变化的失败保留各引用访问状态与原因；重复 prepare 保留原映射，Worker 失败结果按原 outbox 补报。检查只证明当时可打开，不锁定文件或保证后续内容不变。Linux 双节点进程使用真实授权目录、64 MiB 文件及权限夹具验证可用路径、误用其他节点路径、缺失、越权和 prepare 后删除；超限引用、消息大小与路径替换另有测试。引用不携带正文，不增加 Relay 文件传输、下载或制品服务；已有通道的真实网络传输与规模仍留给 T33。本地 Windows/macOS 仅交叉编译；原生访问与进程行为以对应平台 CI 实测为准，不以 Linux 结果推断。
+
+T14 实测入口修正：macOS 沙箱在 deny default 后导入系统 bsd.sb，保留进程启动所需权限后重新限制文件读写；先证明隔离目录内可读写，再确认外部哨兵读写和符号链接逃逸被拒绝，不把启动崩溃当隔离成功。自检失败输出退出码、信号错误与 stderr，仍不降级。新增无模型、无数据库的 TestPiSandbox，macOS CI 连跑 10 次并记录 Darwin 版本；这不证明其他系统版本或真实模型能力。真实入口的凭据检查和 Pi 隔离环境均支持 GOOGLE_CLOUD_API_KEY，可配置 google-vertex/gemini-3.1-flash-lite；环境透传另有回归，Vertex 真实任务仍待本机执行。
+
+T14 初始化诊断补充：用户在 Darwin 27.2 arm64 反馈沙箱目录隔离自检通过，Pi RPC 初始化仍失败，根因待诊断，不据此认定真实能力支持。入口对初始化探针和原生恢复显式启用 pi.WithDiagnostics()，t.Fatal 保留 Start 错误、握手阶段、进程退出码/信号与 stderr 最后 20 行；内存尾部上限 8 KiB，截断首段不完整行不输出。所有诊断先屏蔽实际敏感环境值、常见凭据字段/Bearer/JWT 和疑似 key 长串；不输出 stdout、RPC 状态或原生历史，不写原始 stderr 文件，生产默认仍丢弃 stderr。sandbox-exec/Pi 的 stderr 拒绝原因随诊断输出；stdout 关闭后短暂等待自然退出，仍未退出则记录 cleanup_kill_requested 并终止，不能仅凭 -1 判断系统拒绝。
+
+T14 cwd 修正：后续本机诊断定位为 version 子进程继承仓库 cwd，Node process.cwd 被沙箱拒绝，而非模型返回失败。版本检查现与 RPC（含恢复）一致，显式使用已校验的配置 Directory，不修改调用方 cwd；原生历史仍由 Go 直接读取，无额外 Pi 子进程。跨平台回放检查版本及 RPC cwd；macOS 无模型回归先证明调用方 cwd 在子进程沙箱内不可读、Node 返回 EPERM，再从该调用方验证新建与恢复的四个子进程均使用授权工作目录。CI 要求 Node.js 并重复沙箱回归 10 轮；真实 Pi/Vertex 任务仍待用户本机复跑，不以夹具替代模型验收。
+
+T14 真实模型验证进展：用户在 fa125f9、Darwin 27.2 arm64、Pi 1.3.0 / google-vertex/gemini-3.1-flash-lite 上确认启动、输入、结构化结果、委托、原生历史确认、恢复、缺失历史拒绝及目录隔离均支持。中止实测为“等当前工具结束后生效，不能中断运行中的工具”：bash 在中止请求后继续执行并写入，之后 assistant error 与 agent_settled 到达；此前 Worker 只报未停止，丢失后续确认。本轮补充可复用的只读 agent.StopObserver，Worker 在 Abort 返回或等待超时后持续观察停止证据；Pi 仅以对应回合的 settled 通道关闭为确认，不把进程退出或 active=false 当证明。确认后在同一账本事务保存停止事实与新 stop_report，保留稳定事件 ID，重复观察或 ACK/重开不重复创建；写账本失败后仍可重新观察补报，不重发中止或任务输入。使用过工具时 OutcomeKnown=false，中心沿已有幂等报告路径填 stop_confirmed_at，任务仍为 needs_verification 并保留执行绑定，晚到的普通结果不覆盖中止事实。本轮 Worker 补报闭环尚待用户本机真实模型复跑，不以回放代替。超时后是否强杀进程树列为 Q6，本轮不实现。
+
+T14 真实入口继续只输出脱敏中心字段，不读取或打印原生历史；result_format 仍只说明本次模型未通过结构要求。显式 BATON_REAL_PI_KEEP=1 保留业务/探针与节点/Worker 的兄弟文件树，Pi 沙箱仍仅可读会话子目录；保留目录含敏感材料，仅本机检查、排查后删除，默认及测试 schema 清理不变。中止入口给当前 15 秒工具、settled 与报告交付留出 90 秒窗口，确认中心已停止且副作用未知、任务仍待核实；允许并记录请求后的写入，不再把缺少尾部写入当中止成功条件。
+
+T14 中止状态读取修正：用户复跑 edd1e33 时，其余八项仍支持，但入口错将 stop_acknowledged_at、stop_confirmed_at、stop_outcome_known 当作 tasks 列，触发 SQLSTATE 42703，尚未完成真实中止闭环。入口现复用 store.GetTask/taskSelect 派生 execution_stops 字段；读取失败输出经过凭据脱敏的实际错误。默认无模型 TestRealPiStopStatusRead 使用真实 PostgreSQL 与计数执行器，在有/无 execution_stops 记录时调用和真实入口相同的读取辅助函数，校验确认时间、待核实状态和副作用未知，并覆盖读取错误传播；不作为真实模型中止能力证明。
 
 ## 现状与设计约束
 
@@ -42,7 +58,7 @@ CI 已配置为在 pull request 与推送 `main` 时运行 Linux、macOS、Windo
 
 | 对象 | 实际证据 | 可以据此设计的部分 | 尚不能承诺的部分 |
 |---|---|---|---|
-| Pi 1.3.0 | 已安装包的 RPC、事件、Session、配置与安全文档；get_state、clear_queue、abort、关闭自动重试及 U+2028 请求 ID 往返通过 | JSONL 双向控制；区分 prompt 接受与 agent_settled；使用本地历史 | 真实任务、执行中取消、恢复与三系统支持仍需验证 |
+| Pi 1.3.0 | RPC/事件/Session 文档及无模型控制往返；用户 fa125f9、Darwin 27.2 arm64 / gemini-3.1-flash-lite 真实实测 | 启动、输入、结构化结果、委托、原生历史确认、恢复、缺失历史拒绝与目录隔离支持 | 中止：等当前工具结束后生效，不能中断运行中的工具；Worker 延迟确认修复待本机复跑，其他模型与三系统组合不外推 |
 | Codex CLI 0.162.1 | 本机帮助、官方命令导出的协议 Schema；app-server initialize 通过 | thread/turn 映射、结构化输出与分页查询的候选接口 | app-server 标为 experimental；该协议路径的任务执行、审批、中止和恢复仍需验证 |
 | Cursor Agent 2026.10.16-e3cb207，macOS arm64 | 真实 print、stream-json、显式 resume、SIGINT 与 ACP 样本；2026.10.01-e373342 仍只有帮助证据 | 单轮 result 完成事件、原生会话标识、带新模型回合的续跑；本次只读续跑没有重跑夹具 | print 活动输入未被接受；SIGINT 后独立 shell 可存活；ACP 的 xhigh fast 选择未跑通，high 变体不能替代；未覆盖其他系统 |
 | Kiro CLI 2.32.0，macOS 27.2 arm64 | ACP V3 创建、输出、空闲输入、前台取消与存在会话加载的真实事件和夹具计数 | 显式选择 V3；等待 prompt 响应；原生标识、回放与本轮无重放证据 | 活动 prompt 会打断前回合；缺失 ID 的 load 会新建会话；前台取消样本不覆盖已结束回合的后台进程；无跨系统支持证明 |
@@ -468,5 +484,6 @@ Agent 版本按验证过的范围登记，发现未知版本时标为未验证�
 | Q3 | Agent 和系统实证 | Cursor/Kiro 本机接口调查已完成；Pi/Codex 的 Baton 全流程、Cursor 输入与停止缺口、Kiro 忙碌和恢复边界，以及跨系统组合仍需适配验证 | 实施者与目标环境提供者 | 对应适配器与发布支持矩阵，不能因此缩小批准范围 |
 | Q4 | 外部系统事实 | Plane 社区版 1.4.2 的 Webhook 验证、投递标识、可读字段和回写标记已实测，见 [PLANE.md](PLANE.md)。版本、审批字段、员工映射和回写摘要已于 2026-10-18 批准，见「Plane 接入」。已有文件通道与固件规模仍未调查 | 项目及环境负责人 | Plane 集成与真实文件、刷机验收 |
 | Q5 | 性能验收阈值 | 本设计给出初始传输预算；API 延迟、恢复时限和可接受积压需在代表性负载后定值 | 实施者与项目负责人 | 容量达标声明，不阻塞基本协议与状态机实现 |
+| Q6 | Pi 中止超时后的强制终止策略（待决定） | Pi 1.3.0 abort 不能打断运行中的工具；本轮只持续观察 settled 并补报，不加入等待超时后的强杀。是否强制结束 Pi 进程树、等待多久、如何界定三系统进程树及后台子进程的停止证据需另行决定；即使强杀也不能推定外部副作用已知 | 用户与实施者 | 不阻塞延迟停止确认修复；阻塞任何“超时必然终止整个进程树”的保证 |
 
 实施任务按节点与身份、执行账本、跨节点委托、Agent 适配、Web UI、Plane、可靠性与跨系统验收组织，任务清单和进度由 Linear 工单管理。这个顺序用于分配实施和验证依赖，首版行为仍以 PRODUCT 为准。

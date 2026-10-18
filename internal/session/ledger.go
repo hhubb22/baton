@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"baton/internal/agent"
 	"baton/internal/fileaccess"
 	"baton/internal/identity"
 	"baton/internal/protocol"
@@ -55,6 +56,8 @@ type workerDB struct {
 	generation         int
 	attaches           int
 	observer           *Observer
+	adapter            agent.Adapter
+	adapterFactory     func(string, string) (agent.Adapter, error)
 	clock              *startpermit.Clock
 	executionClock     startpermit.Timer
 	startedMono        time.Duration
@@ -114,6 +117,9 @@ func (w *workerDB) Close() error {
 	if w == nil || w.db == nil {
 		return nil
 	}
+	if w.adapter != nil {
+		_ = w.adapter.Close()
+	}
 	return w.db.Close()
 }
 
@@ -169,6 +175,10 @@ func (w *workerDB) load() error {
 		return err
 	}
 	w.deliveryUncertain = uncertainDeliveries > 0
+	// A crashed Worker cannot finish a native history check or retry injection.
+	if _, err := w.db.Exec(`DELETE FROM native_delivery_checks`); err != nil {
+		return err
+	}
 	if w.hasResultLocked() {
 		w.inputResolved = true
 	} else if w.cancelled {
@@ -322,7 +332,7 @@ func (w *workerDB) Authorize(taskID, executionID, permit, publicKey, generation 
 	w.queueBudget = claims.QueueExpiresAt.Sub(claims.IssuedAt) - rtt - startpermit.SafetyMargin
 	CrashAfter("start_intent")
 	// 意图已经落盘。此后即使执行器失败，也不能再报告“尚未启动”。
-	if w.observer != nil {
+	if w.observer != nil && w.adapterFactory == nil {
 		_ = w.observer.Start(context.Background())
 	}
 	return true, false, "", nil
@@ -462,7 +472,7 @@ func (w *workerDB) SubmitInput(sessionID, payload string) ([]ipcReport, error) {
 	if w.inputSubmitted || w.inputResolved {
 		return w.pendingLocked()
 	}
-	if payload == "" || w.observer == nil {
+	if payload == "" || (w.observer == nil && w.adapterFactory == nil) {
 		return nil, errors.New("任务输入无效")
 	}
 	if len(payload) > task.ExecutorInputLimit {
@@ -507,10 +517,32 @@ func (w *workerDB) SubmitInput(sessionID, payload string) ([]ipcReport, error) {
 	w.inputDelay = mono - w.startedMono
 	slog.Info("event=input_dispatch", "task_id", w.task, "execution_id", w.execution,
 		"input_due_at", w.inputDueAt, "input_sent_at", w.inputSentAt, "delay_ms", w.inputDelay.Milliseconds())
-	out, err := w.observer.SubmitInput(context.Background(), payload)
+	var out Output
+	if w.adapterFactory != nil {
+		var agentType string
+		if err = w.db.QueryRow(`SELECT value FROM meta WHERE key = 'agent_type'`).Scan(&agentType); err == nil {
+			w.adapter, err = w.adapterFactory(agentType, payload)
+		}
+		if err == nil {
+			err = w.adapter.Start(context.Background())
+		}
+		if err == nil {
+			if reason, deadlineErr := w.deadlineReasonLocked(); deadlineErr != nil {
+				return nil, deadlineErr
+			} else if reason != "" {
+				return w.stopLocked(sessionID, reason)
+			}
+			out, err = w.adapter.SubmitInput(context.Background(), payload)
+		}
+	} else {
+		out, err = w.observer.SubmitInput(context.Background(), payload)
+	}
 	if err != nil {
 		w.recoveredUncertain = true
 		w.uncertainCode = task.CodeUncertainInput
+		if errors.Is(err, agent.ErrHistoryMissing) {
+			w.uncertainCode = task.CodeUncertainHistory
+		}
 		return w.ensureVerificationLocked(sessionID)
 	}
 	CrashAfter("input_send")
@@ -590,8 +622,10 @@ func (w *workerDB) recordExecution(sessionID, payload string, out Output) ([]ipc
 	if err := insertLog(tx, "input_dispatch", string(delay), now); err != nil {
 		return nil, err
 	}
-	if err := insertLog(tx, "input", payload, now); err != nil {
-		return nil, err
+	if payload != "" {
+		if err := insertLog(tx, "input", payload, now); err != nil {
+			return nil, err
+		}
 	}
 	for _, line := range out.Progress {
 		if err := insertLog(tx, "progress", line, now); err != nil {
@@ -657,7 +691,7 @@ func (w *workerDB) recordExecution(sessionID, payload string, out Output) ([]ipc
 			if err != nil {
 				return nil, err
 			}
-			body, err := json.Marshal(reportFromCandidate(resultID, w.task, w.execution, sessionID, w.generation, candidate, out.Exited || out.Uncertain))
+			body, err := json.Marshal(reportFromCandidate(resultID, w.task, w.execution, sessionID, w.generation, candidate, out.Exited || (out.Uncertain && w.adapter == nil)))
 			if err != nil {
 				return nil, err
 			}
@@ -677,7 +711,7 @@ func (w *workerDB) recordExecution(sessionID, payload string, out Output) ([]ipc
 		return nil, err
 	}
 	stopped := "0"
-	if out.Exited || out.Uncertain {
+	if out.Exited || (out.Uncertain && w.adapter == nil) {
 		stopped = "1"
 	}
 	if err := putMeta(tx, "agent_stopped", stopped); err != nil {

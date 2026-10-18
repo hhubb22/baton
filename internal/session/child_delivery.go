@@ -16,6 +16,10 @@ func ensureChildSchema(w *workerDB) error {
 	_, err := w.db.Exec(`CREATE TABLE IF NOT EXISTS child_deliveries (
       delivery_id TEXT PRIMARY KEY, child_task_id TEXT NOT NULL, payload TEXT NOT NULL,
       status TEXT NOT NULL, input_generation INTEGER NOT NULL DEFAULT 0)`)
+	if err != nil {
+		return err
+	}
+	_, err = w.db.Exec(`CREATE TABLE IF NOT EXISTS native_delivery_checks (delivery_id TEXT PRIMARY KEY, queried INTEGER NOT NULL)`)
 	return err
 }
 
@@ -97,6 +101,11 @@ func (w *workerDB) ReceiveChild(sessionID string, delivery protocol.ChildDeliver
 	if err := insertLog(tx, "delivery_intent", delivery.DeliveryID, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		return err
 	}
+	if w.adapter != nil {
+		if _, err := tx.Exec(`INSERT INTO native_delivery_checks (delivery_id, queried) VALUES (?, ?)`, delivery.DeliveryID, queried); err != nil {
+			return err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
@@ -109,7 +118,12 @@ func (w *workerDB) ReceiveChild(sessionID string, delivery protocol.ChildDeliver
 		if err != nil {
 			return err
 		}
-		out, err := w.observer.DeliverResult(context.Background(), delivery.DeliveryID, string(input))
+		var out Output
+		if w.adapter != nil {
+			out, err = w.adapter.DeliverResult(context.Background(), delivery.DeliveryID, string(input))
+		} else {
+			out, err = w.observer.DeliverResult(context.Background(), delivery.DeliveryID, string(input))
+		}
 		if err != nil {
 			return nil
 		}
@@ -118,7 +132,9 @@ func (w *workerDB) ReceiveChild(sessionID string, delivery protocol.ChildDeliver
 			return err
 		}
 	}
-	// 测试适配器返回已写入原生历史；真实适配器必须提供同样的确认。
+	if w.adapter != nil {
+		return w.confirmNativeDeliveriesLocked()
+	}
 	confirmed, err := w.db.Begin()
 	if err != nil {
 		return err
@@ -144,7 +160,8 @@ func (w *workerDB) ReceiveChild(sessionID string, delivery protocol.ChildDeliver
 func (w *workerDB) ChildReceipts() ([]protocol.ChildReceipt, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	rows, err := w.db.Query(`SELECT delivery_id, status, input_generation FROM child_deliveries ORDER BY input_generation, rowid`)
+	rows, err := w.db.Query(`SELECT delivery_id, status, input_generation FROM child_deliveries
+ WHERE NOT EXISTS (SELECT 1 FROM native_delivery_checks n WHERE n.delivery_id = child_deliveries.delivery_id) ORDER BY input_generation, rowid`)
 	if err != nil {
 		return nil, err
 	}

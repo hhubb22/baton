@@ -2,7 +2,7 @@
 
 员工使用部署管理员分配的本地账号登录 Coordinator，退出，查询本人身份，领取一次性节点注册凭据，设置默认 PC，吊销本人节点的连接凭据，并提交任务。初始口令只能使用到员工完成更换为止。`batond register` 用这张凭据注册节点，把身份保存在本机。`batond run` 用这份身份主动连接 Relay，断线后重连，并在同步完成前不会显示为可执行。吊销生效后，同一连接凭据不能再接入。任务被接受后，Coordinator 把准备命令送到节点；节点先把执行映射写入本地账本，再绑定一个独立的 Session Worker。
 
-本目录目前包含这条路径的构建、迁移、HTTP 接口、Coordinator、Relay、batond、Session Worker、Agent 本地 CLI、受限文件浏览、员工 Web UI 和测试。准备阶段不启动 Agent。启动许可通过后，测试执行器先进入启动，再只接收一次任务输入；结构化结果在中心保存之后才算交付。真实 Agent 适配和管理员网页不在这里。
+本目录目前包含这条路径的构建、迁移、HTTP 接口、Coordinator、Relay、batond、Session Worker、Agent 本地 CLI、受限文件浏览、员工 Web UI 和测试。准备阶段不启动 Agent。启动许可通过后，Worker 可选择 Pi 1.3.0 原生 RPC 适配器，任务输入只提交一次；结构化结果在中心保存之后才算交付。测试执行器仍供故障注入使用。其他真实 Agent 适配和管理员网页不在这里；Pi 真实模型与跨平台能力仍待本机实测，不能用回放通过代替。
 
 中心事务同时锁定任务与执行记录时，统一先锁 `tasks`，再锁 `executions`。准备成功或失败落库、启动许可、执行报告、取消和到期处理均按此顺序串行，避免准备落库与启动许可相互等待而死锁。
 
@@ -103,9 +103,56 @@ batond run --relay wss://baton.example/v1/node
 
 `run` 读取同一份身份，主动建立 TLS WebSocket。断线后按 1 到 30 秒、带抖动的指数退避重连。认证失效时进程退出并说明需要重新认证，不会重新注册。每次启动生成一个 incarnation；已有另一个 incarnation 在线时，后启动的进程不能接管该节点。
 
+## Pi 1.3.0 原生适配与真实验证
+
+节点安装固定版本 `npm install -g @earendil-works/pi-coding-agent@1.3.0`，并将 `pi`、`node`、`baton` 放入 batond 的 `PATH`。`agent_type=pi` 走独立适配器；设置 `BATON_PI_BIN` 可指定可执行文件，`BATON_PI_MODEL` 可指定 `provider/model-id`（也支持 `agent.Config` 的 Binary/Model/Env 配置）。不匹配 1.3.0 会拒绝启动，不自动升级。`BATON_TEST_EXECUTOR_LOG` 仅用于现有测试执行器，显式 `BATON_AGENT_DRIVER=native` 可在测试中覆盖选择。
+
+Pi 使用 `--mode rpc`，禁用自动任务重试、启动联网、扩展/MCP/skills/外部上下文自动加载。工作目录取任务 `working_directory`，未指定时为 Session 独立的 `workspace`。原生 v3 历史与映射保存在 `sessions/<session_id>/native`，只按 LF 消费 RPC 帧，CRLF 兼容、U+2028/U+2029 保留为内容。`prompt` 接受与 `agent_end` 都不算完成，只有 `agent_settled` 后才提交结构化候选结果；异常退出报告待核实，不伪造停止事实。
+
+明确等待子结果用 `{"baton_waiting_for_children":true}`；自动继续只注入一次带 `delivery_id` 的结果。忙碌回合可用 `baton task result` 查询：Worker 等原生历史的 user 输入或成功 bash toolResult 中出现**精确** delivery_id 后，才记录 delivered。确认前不发送 delivered 回执；settled 时仍无法确认、或 Worker 崩溃，保留 uncertain，不重注入。batond 重启只重连原 Worker；Worker 丢失后保持待核实，不自动重启 Pi 或重发输入。适配器显式 Restore 校验映射、原生文件、v3 header、ID 与工作目录，再用 `--session <file>` 加载；文件缺失、截断或越界不会创建空会话。恢复本身不发送 prompt。
+
+用户在 fa125f9、Darwin 27.2 arm64、Pi 1.3.0 / `google-vertex/gemini-3.1-flash-lite` 的隔离目录实测反馈如下，不扩展到其他模型或系统：
+
+| 能力 | 实测结论 | 边界 |
+|---|---|---|
+| 启动、输入、结构化结果、委托、原生历史确认、恢复、缺失历史拒绝、目录隔离 | 支持 | 来自用户真实模型实测，不是云端回放结论 |
+| 中止 | 等当前工具结束后生效，不能中断运行中的工具 | 中止后仍观察到工具写入；停止不等于操作结果已知。本轮 Worker 延迟停止补报闭环仍待用户复跑 |
+
+Worker 在首次中止报告后继续只读观察适配器的停止证据；即使 `Abort` 等待超时，后来观察到 `agent_settled` 仍会持久化并补报确认停止。两份报告使用不同且稳定的事件 ID，重复轮询、ACK 丢失或账本重开不重复创建确认事件；中心沿用已有事件去重记录 `stop_confirmed_at`。Pi 使用过工具时仍上报 `OutcomeKnown=false`，任务保持待核实与执行绑定，不把稍后的 assistant error 当普通失败结果覆盖。是否在超时后强制结束 Pi 进程树尚未决定，本轮不实现，见 TECH 的 Q6。
+
+真实入口的中止轮询通过 `store.GetTask` 读取状态与从 `execution_stops` 派生的停止字段，不直接把它们当作 `tasks` 的列；读取失败保留脱敏后的实际错误。无模型回归 `go test -v -count=1 ./internal/relay -run '^TestRealPiStopStatusRead$'` 使用测试 PostgreSQL、真实 Baton 进程及计数执行器，覆盖无停止记录和已有停止确认但结果未知的读取，不启动 Pi 或调用模型。
+
+无模型检查（不登录、不执行任务）：
+
+```sh
+BATON_PI_PROBE=1 go test -v -count=1 ./internal/agent/pi -run '^TestPiNoModelProbe$'
+```
+
+真实入口默认跳过、CI 不启用。**在 macOS 开发机**准备 Go、PostgreSQL 17 测试库、上述 Pi/Node 版本，设置 `BATON_TEST_DATABASE_URL`、`BATON_PI_MODEL` 与所选 provider 的 API key 环境变量（例如 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY` 或 Vertex 的 `GOOGLE_CLOUD_API_KEY`）。`GOOGLE_CLOUD_API_KEY` 会保留在隔离进程环境中，Vertex 可选择 `BATON_PI_MODEL=google-vertex/gemini-3.1-flash-lite`。不要把 key 值写进命令、文件或输出；入口不会读取已登录用户的 auth.json、HOME 或真实工作区，因此只有 OAuth 登录、没有独立环境凭据时需先准备所选入口的环境凭据。已有测试库需允许创建临时 schema，禁止指向业务库。运行：
+
+```sh
+BATON_REAL_PI=1 go test -v -count=1 -timeout=30m ./... -run '^TestRealPi$'
+```
+
+若需要在本机检查失败时的原生历史，可在同一命令前增加 `BATON_REAL_PI_KEEP=1`。入口会提前打印独立隔离目录的绝对路径，结束后不自动删除其中的 `isolated`（HOME、工作区、探针）与 `stack/node/sessions`（Worker 原生历史）；两者为兄弟目录，沙箱仍只允许 Pi 读取指定的会话目录，而非 `stack` 中的节点密钥。默认不设置时两处目录照常由 `go test` 清理。保留目录还包含测试用密钥、节点身份、上下文令牌和会话原文：**仅在自己的开发机检查，不上传/粘贴原始文件或目录清单；排查完成后自行删除整个隔离目录。** 临时测试数据库 schema 仍按原有清理流程处理，不在保留目录内。
+
+此入口在临时目录构建 Baton 二进制，创建独立 HOME/Pi 配置/工作区、测试 schema 与真实 Coordinator/Relay/batond/Worker，透传允许的 provider 环境变量，不复制或打印凭据。macOS `sandbox-exec` 在 `deny default` 后导入系统 `bsd.sb` 提供进程启动权限，再收紧文件读写，只额外允许系统/运行时只读路径与测试 IPC。先验证目录内可写可读，再检查目录外测试哨兵不可读写、符号链接不能越界；沙箱启动崩溃不能冒充隔离成功。失败输出退出码、错误（含信号）和 stderr，不退回无沙箱模式；Go 的退出码 `-1` 表示没有普通退出码，例如进程被信号终止。使用模型验证一次输入/结构化结果、CLI 委托与子结果原生历史确认、执行中中止、batond 重连，以及原生 Session 加载后新回合的上下文回忆与夹具未重放；另检查缺失历史拒绝。输出工具版本、平台、请求/实际模型及各能力“支持/不支持/未验证”；任务失败/待核实时先脱敏，再只输出中心记录的 `status`、`error_code`、`error_message`、`summary` 和 `evidence_empty_reason`，不打印原生历史。若中心为 `result_format`，本次模型的结构化结果标为“不支持”（可换更强模型复验），不能推断其他模型均不支持。任务提示给出完整有效 JSON 示例，但真实模型是否遵循仍待实测。默认退出清理临时目录与测试进程；模型不遵循协议或环境问题会使其他对应能力保留未验证，不能据此宣称跨平台支持。
+
+Pi 初始化探针及历史恢复失败时，入口输出 `Start` 错误与阶段（`version` / `rpc`、具体握手步骤）、子进程退出码和错误/信号、stderr 最后 20 行（至多保留 8 KiB 原始尾部，截断时丢弃首段不完整行）。诊断仅通过 `pi.WithDiagnostics()` 显式启用，保存在内存、不写原始日志文件；输出前屏蔽实际敏感环境值、常见凭据字段/Bearer/JWT 和疑似 key 的长串，不输出 stdout、RPC 状态或原生历史。`sandbox-exec` 或 Pi 写到 stderr 的拒绝原因也保留；`exit_code=unavailable` 表示没有取得进程退出状态，`-1` 需结合信号错误判断，`cleanup_kill_requested=true` 表示 Baton 曾请求强制清理。生产默认继续丢弃 stderr。
+
+适配器启动的版本检查与 RPC 子进程（含恢复）均显式使用配置 `Directory` 的规范路径作为 cwd，不依赖 batond/Worker/调用方当前目录，不放宽沙箱。原生历史直接由 Go 文件 API 在已校验的目录内读取，不另启动 Pi。macOS 沙箱回归使用 Node.js 无模型夹具：先确认继承调用方目录会触发 cwd 的 EPERM，再验证从同一调用方完成版本检查、新建握手和历史恢复；这不代表真实 Pi 模型验收。该回归需要 Node.js，macOS CI 检查其存在并重复运行 10 轮。
+
+沙箱自检和初始化拒绝诊断可不带模型或数据库单独运行；macOS CI 重复执行 10 次并记录 Darwin 版本，不能据此推断其他 macOS 版本兼容性：
+
+```sh
+go test -v -count=10 ./internal/relay -run '^TestPiSandbox'
+```
+
+生产适配器**不是 OS 沙箱**：工作目录与系统提示不能限制工具访问。需按部署环境提供外部沙箱和最小权限；`BATON_PI_HOME` 可选择隔离 HOME/配置与有限环境变量，但它本身不限制文件或网络权限。真实入口的沙箱也只证明本地文件隔离，不是网络隔离或抵御恶意模型泄露凭据的安全证明。Linux/Windows 真实模型入口尚未验证；不能把 Go 交叉编译、原生 CI 的 fake RPC 子进程回放或无模型握手当成真实模型通过。
+
 ## Agent 本地 CLI
 
-batond 在准备执行时创建 `sessions/<session_id>/agent-<execution_id>.json`（相对于节点数据目录；Unix 文件权限 `0600`，Windows 使用上述受保护 DACL）。执行环境用 `BATON_CONTEXT_FILE` 指向**该次执行**的文件；不要把文件内容、令牌或节点连接凭据放进命令行、任务说明或日志。当前测试执行器不启动真实 Agent，真实适配器仍需负责传入这个环境变量。
+batond 在准备执行时创建 `sessions/<session_id>/agent-<execution_id>.json`（相对于节点数据目录；Unix 文件权限 `0600`，Windows 使用上述受保护 DACL）。执行环境用 `BATON_CONTEXT_FILE` 指向**该次执行**的文件；不要把文件内容、令牌或节点连接凭据放进命令行、任务说明或日志。Pi 适配器已在进程启动时注入此变量；测试执行器不启动真实 Agent。
 
 ```text
 baton delegate --request-file request.json --json
@@ -124,7 +171,7 @@ baton task cancel TASK_ID --json
 
 `task wait` 默认 30 秒，允许大于 0、最多 5 分钟；只轮询中心已保存事实，在任务结束、进入待核实或版本变化时返回。到期返回 `waiting:true`、`timed_out:true` 和最后读到的任务（尚未读到时为 null），退出码为 0；Ctrl-C 或传输错误返回非零，不取消任务。其他成功命令输出 JSON、退出码为 0，业务拒绝输出结构化错误、退出码非零。
 
-`result submit`、真实 Agent 适配与环境注入尚未实现。子结果交付使用迁移 `0011`，无新增依赖；当前由测试执行器验证下面的账本和继续输入边界，不能据此宣称真实 Agent 的原生历史接口已通过。
+`result submit` 和其他真实 Agent 适配尚未实现。子结果交付使用迁移 `0011`，无新增依赖；Pi 已接入下面的账本和继续输入边界，并通过本地原生历史确认交付，真实模型行为仍需运行显式开启的验证入口。
 
 ### 子结果交付与父子取消
 
@@ -266,7 +313,7 @@ Worker 无法应答时，账本的权限、IO、打开失败和锁忙统一作�
 
 授权前已取消的同一次执行，Worker 在后续心跳领取中止要求后仍可补报 `stop_report`。中心只对身份匹配、取消原因且 `not_started=true`（同时已停止、结果已知）的未授权执行接收这类补充证据，持久化后 ACK；保留 `cancelled` 终态、原摘要和错误，不补授权。同一事件重复上报只确认一次。Worker 收到 ACK 后清空待交付项，退出后不再因该回执被 batond 重启或重连拉起；其他未授权的启动、结果及中止报告仍拒绝。
 
-中心把单任务中止请求持久保存在 `execution_stops`。节点在心跳和补发输入前通过 `execution.control` 领取，离线请求不会被丢弃。Worker 在 Session 互斥区先落盘中止标记再调用测试执行器的中止接口；接口返回不等于确认停止。只有未发送输入、或确认停止且操作结果可说明时才变成 `cancelled`；停止或副作用仍未知就保留 `needs_verification` 和执行绑定。停止不会回滚已发生的外部副作用。真实 Agent 适配仍不在本实现内。
+中心把单任务中止请求持久保存在 `execution_stops`。节点在心跳和补发输入前通过 `execution.control` 领取，离线请求不会被丢弃。Worker 在 Session 互斥区先落盘中止标记再调用适配器的中止接口；接口返回不等于确认停止。Pi 先 `clear_queue` 再 `abort`，活动回合必须等到 `agent_settled`，等待超时后仍继续观察并在真实 settled 时幂等补报。Pi 1.3.0 的中止等当前工具结束后生效，不能中断运行中的工具。只有未发送输入、或确认停止且操作结果可说明时才变成 `cancelled`；停止或副作用仍未知就保留 `needs_verification` 和执行绑定。Pi 一旦执行过工具，中止不声称外部副作用已知；停止不会回滚外部副作用，也不保证任意后台子进程退出。
 
 排队到期时，包含未准备任务在内，能确认未启动的任务失败，原因是 `queue_timeout`，此后不能再授权。已授权而没有未启动证据的任务先待核实，Worker 的未启动回执再收敛为超时失败；期限前已发送输入的事实优先于延迟的排队超时请求，不会中断已执行任务。节点被吊销时仍按原规则处理：还没授权就失败，原因是 `revoked`；已经授权就进入待核实。
 
