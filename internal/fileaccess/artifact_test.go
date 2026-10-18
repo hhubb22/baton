@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"baton/internal/privatefiletest"
 	"baton/internal/task"
 )
 
@@ -25,6 +26,7 @@ func TestArtifactsUseAuthorizedOpenWithoutReadingContent(t *testing.T) {
 	if err := AddBrowseRoot(dir, "build", root); err != nil {
 		t.Fatal(err)
 	}
+	privatefiletest.AssertPrivate(t, dir)
 	base := task.ArtifactRef{NodeID: nodeID, RootID: "build", Path: "firmware.bin"}
 	absoluteReason := "path_escaped"
 	if runtime.GOOS == "windows" {
