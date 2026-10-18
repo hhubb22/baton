@@ -16,6 +16,10 @@ Basis: 已批准的 [行为规格](PRODUCT.md)，R-01 至 R-39。
 
 CI 已配置为在 pull request 与推送 `main` 时运行 Linux、macOS、Windows 原生构建、vet 和完整测试；Linux 另做 Windows/macOS 交叉编译及 session、node、store、relay、control 包的 race 测试，Web 在 Linux 上运行 lint、typecheck、单元测试、Chromium E2E 与嵌入产物一致性检查。测试使用 CI 内的 PostgreSQL 17，不依赖仓库 Secret。平台通过情况以对应 CI 运行结果为准，不把工作流覆盖范围视为兼容性已验证；命令和覆盖限制见 README「CI 与本地等价命令」。
 
+当前已实现补充（PS-117 / T13）：员工 `POST /tasks/{id}/resolve` 接受 `expected_version`、终态 `status`、`summary`、`reason` 与 `evidence`（为空时提供 `evidence_empty_reason`），在同一事务核实本人待核实或已结束任务，保存人工结论、原记录快照、操作者与时间，不新建 execution 或投递。`POST /tasks/{id}/rerun` 接受新的 `request_id`、`expected_version`、`reason` 与 `confirm_side_effects`；待核实任务必须明确确认副作用风险。新任务复制原任务的目标、Agent、描述、授权与期限长度，使用独立任务、执行、Session 和 outbox 身份，不复用原委托来源，以 `task_relations.rerun_of_task_id` 关联原任务；原任务仅增加版本与重做审计。相同重做请求幂等，人工并发冲突返回最新版本与状态。迁移仅新增 `0012`，扩展事件约束时保留先行迁移的事件种类；审计通过任务事件 API 返回。迟到结果和中止报告沿用已有终态保护及补充事实路径，未修改 `ApplyExecutionReport` 或 Worker。无新增依赖，未包含 Web 核实界面与真实 Agent 适配；API 字段及边界见 README 的「人工核实与显式重做」。
+
+本次在 Linux / PostgreSQL 17 验证 API 认证、归属、版本冲突、核实与重做事务回滚、并发核实及重做幂等、迟到报告不覆盖人工结论；真实 Coordinator、Relay、batond 与计数执行器的进程测试连续 10 次通过：查询和核实保留 1 次输入，显式重做后共 2 次输入，重试不增加执行。Linux 构建、vet、全量测试及相关包 race 检查通过；Windows/macOS 仅交叉编译，未验证目标系统进程与真实 Agent 行为。
+
 ## 现状与设计约束
 
 任务需要从 Ubuntu Agent 发到员工 PC，经过北京中转，但北京不能主动访问节点。任务被接受后，中心需要留下可查询记录；完整 Session 历史仍在节点。PC 断线或操作回执丢失时，系统必须核实原执行，不能靠重启 Agent 来恢复任务。

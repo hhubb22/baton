@@ -575,11 +575,13 @@ type errorDetails struct {
 }
 
 type errorBody struct {
-	Code      string        `json:"code"`
-	Message   string        `json:"message"`
-	RequestID string        `json:"request_id"`
-	TaskID    string        `json:"task_id,omitempty"`
-	Details   *errorDetails `json:"details,omitempty"`
+	CurrentVersion int           `json:"current_version,omitempty"`
+	CurrentStatus  string        `json:"current_status,omitempty"`
+	Code           string        `json:"code"`
+	Message        string        `json:"message"`
+	RequestID      string        `json:"request_id"`
+	TaskID         string        `json:"task_id,omitempty"`
+	Details        *errorDetails `json:"details,omitempty"`
 }
 
 func (s *Server) writeError(w http.ResponseWriter, r *http.Request, status int, code, message string) {
@@ -609,6 +611,14 @@ func safePath(path string) string {
 	const taskPrefix = "/api/v1/tasks/"
 	if strings.HasPrefix(path, taskPrefix) {
 		rest := strings.TrimPrefix(path, taskPrefix)
+		for _, action := range []string{"resolve", "rerun"} {
+			if strings.HasSuffix(rest, "/"+action) {
+				id := strings.TrimSuffix(rest, "/"+action)
+				if id != "" && !strings.Contains(id, "/") {
+					return "/api/v1/tasks/:id/" + action
+				}
+			}
+		}
 		if strings.HasSuffix(rest, "/events") {
 			id := strings.TrimSuffix(rest, "/events")
 			if id != "" && !strings.Contains(id, "/") {
