@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"baton/internal/agent"
 	"baton/internal/agent/pi"
 )
 
@@ -177,6 +178,32 @@ func TestPiSandbox(t *testing.T) {
 		t.Logf("platform=%s/%s Darwin=%s", runtime.GOOS, runtime.GOARCH, strings.TrimSpace(string(release)))
 	}
 	checkPiSandbox(t, profile, root)
+}
+
+func TestPiSandboxStartupDiagnostics(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("requires macOS sandbox-exec; no model or database needed")
+	}
+	root := t.TempDir()
+	profile, wrapper := filepath.Join(root, "invalid.sb"), filepath.Join(root, "pi-wrapper")
+	if err := os.WriteFile(profile, []byte("("), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	quote := "'" + strings.ReplaceAll(profile, "'", "'\"'\"'") + "'"
+	script := "#!/bin/sh\nif [ \"$1\" = --version ]; then printf '%s\\n' " + pi.Version + "; exit 0; fi\nexec /usr/bin/sandbox-exec -f " + quote + " /usr/bin/true\n"
+	if err := os.WriteFile(wrapper, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	a := pi.New(agent.Config{Binary: wrapper, Directory: root, SessionDir: filepath.Join(root, "native"), SessionID: "diagnostic-fixture", Env: pi.IsolatedEnv(root)}, pi.WithDiagnostics())
+	t.Cleanup(func() { _ = a.Close() })
+	err := a.Start(context.Background())
+	if err == nil {
+		t.Fatal("invalid sandbox profile unexpectedly started")
+	}
+	d := a.Diagnostics(err)
+	if !strings.Contains(d, "phase=rpc") || !strings.Contains(d, "exited=true") || !strings.Contains(d, "sandbox-exec:") || !strings.Contains(d, "syntax error") || strings.Contains(d, "exit_code=0 ") {
+		t.Fatal(d)
+	}
 }
 
 func TestPiSandboxDiagnostic(t *testing.T) {

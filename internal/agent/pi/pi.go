@@ -33,6 +33,7 @@ type response struct {
 
 type Adapter struct {
 	config     agent.Config
+	diagnostic *startupDiagnostics
 	history    mapping
 	mu         sync.Mutex
 	writeMu    sync.Mutex
@@ -53,11 +54,18 @@ type Adapter struct {
 	model      string
 }
 
-func New(config agent.Config) *Adapter {
-	return &Adapter{config: config, pending: make(map[string]chan response)}
+func New(config agent.Config, options ...Option) *Adapter {
+	a := &Adapter{config: config, pending: make(map[string]chan response)}
+	for _, option := range options {
+		option(a)
+	}
+	return a
 }
 
 func (a *Adapter) Start(ctx context.Context) error {
+	if a.diagnostic != nil {
+		a.diagnostic.configure(a.environment())
+	}
 	if a.config.Binary == "" {
 		a.config.Binary = "pi"
 	}
@@ -104,8 +112,13 @@ func (a *Adapter) Start(ctx context.Context) error {
 	defer cancel()
 	version := exec.CommandContext(checkCtx, a.config.Binary, "--version")
 	version.Env = a.environment()
+	a.captureStderr(version, "version")
 	raw, err := version.Output()
-	if err != nil || strings.TrimSpace(string(raw)) != Version {
+	a.recordExit(version, err)
+	if err != nil {
+		return fmt.Errorf("Pi 1.3.0 version check failed: %w", err)
+	}
+	if strings.TrimSpace(string(raw)) != Version {
 		return errors.New("Pi 1.3.0 required; installed CLI version could not be verified")
 	}
 	args := []string{"--mode", "rpc", "--offline", "--no-extensions", "--no-mcp", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-approve", "--session-dir", a.config.SessionDir, "--append-system-prompt", instructions}
@@ -119,7 +132,7 @@ func (a *Adapter) Start(ctx context.Context) error {
 	}
 	cmd := exec.Command(a.config.Binary, args...)
 	cmd.Dir, cmd.Env = a.config.Directory, a.environment()
-	cmd.Stderr = io.Discard // Provider diagnostics can contain credentials.
+	a.captureStderr(cmd, "rpc")
 	a.in, err = cmd.StdinPipe()
 	if err != nil {
 		return errors.New("Pi stdin unavailable")
@@ -129,13 +142,32 @@ func (a *Adapter) Start(ctx context.Context) error {
 		return errors.New("Pi stdout unavailable")
 	}
 	if err := cmd.Start(); err != nil {
-		return errors.New("Pi process could not start")
+		a.recordExit(cmd, err)
+		return fmt.Errorf("Pi process could not start: %w", err)
 	}
 	a.cmd, a.done = cmd, make(chan struct{})
 	go func() {
-		_ = readFrames(out, a.consume)
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
+		readErr := readFrames(out, a.consume)
+		var waitErr error
+		if a.diagnostic != nil && readErr == nil {
+			// Let a naturally exiting diagnostic probe report its real status.
+			waited := make(chan error, 1)
+			go func() { waited <- cmd.Wait() }()
+			select {
+			case waitErr = <-waited:
+			case <-time.After(250 * time.Millisecond):
+				a.diagnostic.markCleanupKill()
+				_ = cmd.Process.Kill()
+				waitErr = <-waited
+			}
+		} else {
+			if a.diagnostic != nil {
+				a.diagnostic.markCleanupKill()
+			}
+			_ = cmd.Process.Kill()
+			waitErr = cmd.Wait()
+		}
+		a.recordExit(cmd, waitErr)
 		a.mu.Lock()
 		if !a.closed && !a.aborting && (a.active || a.waiting) {
 			a.outputs = append(a.outputs, agent.Output{Uncertain: true})
@@ -144,13 +176,16 @@ func (a *Adapter) Start(ctx context.Context) error {
 		a.mu.Unlock()
 		close(a.done)
 	}()
-	fail := func() error { _ = a.Close(); return errors.New("Pi initialization failed") }
+	fail := func(stage string, cause error) error {
+		_ = a.Close()
+		return fmt.Errorf("Pi initialization failed (%s): %w", stage, cause)
+	}
 	if _, err := a.call(checkCtx, "set_auto_retry", map[string]any{"enabled": false}); err != nil {
-		return fail()
+		return fail("set_auto_retry", err)
 	}
 	state, err := a.call(checkCtx, "get_state", nil)
 	if err != nil {
-		return fail()
+		return fail("get_state", err)
 	}
 	var s struct {
 		SessionID   string `json:"sessionId"`
@@ -160,14 +195,17 @@ func (a *Adapter) Start(ctx context.Context) error {
 			ID       string `json:"id"`
 		} `json:"model"`
 	}
-	if json.Unmarshal(state.Data, &s) != nil || s.SessionID != a.config.SessionID || s.SessionFile == "" {
-		return fail()
+	if err := json.Unmarshal(state.Data, &s); err != nil {
+		return fail("get_state decode", err)
+	}
+	if s.SessionID != a.config.SessionID || s.SessionFile == "" {
+		return fail("get_state validation", errors.New("Pi session ID mismatched or session file missing"))
 	}
 	if a.config.Restore && filepath.Clean(s.SessionFile) != filepath.Clean(a.history.File) {
-		return fail()
+		return fail("get_state validation", ErrHistoryMissing)
 	}
 	if err := a.saveMapping(s.SessionFile); err != nil {
-		return fail()
+		return fail("save native mapping", err)
 	}
 	a.mu.Lock()
 	if s.Model.ID != "" {
@@ -220,6 +258,9 @@ func (a *Adapter) call(ctx context.Context, command string, fields map[string]an
 	select {
 	case err = <-written:
 	case <-ctx.Done():
+		if a.diagnostic != nil {
+			a.diagnostic.markCleanupKill()
+		}
 		_ = a.cmd.Process.Kill()
 		return response{}, errors.New("Pi command write timed out; outcome uncertain")
 	}
@@ -378,6 +419,9 @@ func (a *Adapter) Close() error {
 	select {
 	case <-a.done:
 	case <-time.After(2 * time.Second):
+		if a.diagnostic != nil {
+			a.diagnostic.markCleanupKill()
+		}
 		_ = a.cmd.Process.Kill()
 		<-a.done
 	}

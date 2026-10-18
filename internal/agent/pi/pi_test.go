@@ -18,6 +18,10 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	if mode := os.Getenv("BATON_PI_DIAGNOSTIC_CHILD"); mode != "" {
+		diagnosticChild(mode)
+		os.Exit(0)
+	}
 	if os.Getenv("BATON_PI_REPLAY_CHILD") == "1" {
 		replayChild()
 		os.Exit(0)

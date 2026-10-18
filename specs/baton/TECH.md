@@ -40,6 +40,8 @@ T14 的固定版本 testdata 是文档转录的协议契约样本，不是模型
 
 T14 实测入口修正：macOS 沙箱在 deny default 后导入系统 bsd.sb，保留进程启动所需权限后重新限制文件读写；先证明隔离目录内可读写，再确认外部哨兵读写和符号链接逃逸被拒绝，不把启动崩溃当隔离成功。自检失败输出退出码、信号错误与 stderr，仍不降级。新增无模型、无数据库的 TestPiSandbox，macOS CI 连跑 10 次并记录 Darwin 版本；这不证明其他系统版本或真实模型能力。真实入口的凭据检查和 Pi 隔离环境均支持 GOOGLE_CLOUD_API_KEY，可配置 google-vertex/gemini-3.1-flash-lite；环境透传另有回归，Vertex 真实任务仍待本机执行。
 
+T14 初始化诊断补充：用户在 Darwin 27.2 arm64 反馈沙箱目录隔离自检通过，Pi RPC 初始化仍失败，根因待诊断，不据此认定真实能力支持。入口对初始化探针和原生恢复显式启用 pi.WithDiagnostics()，t.Fatal 保留 Start 错误、握手阶段、进程退出码/信号与 stderr 最后 20 行；内存尾部上限 8 KiB，截断首段不完整行不输出。所有诊断先屏蔽实际敏感环境值、常见凭据字段/Bearer/JWT 和疑似 key 长串；不输出 stdout、RPC 状态或原生历史，不写原始 stderr 文件，生产默认仍丢弃 stderr。sandbox-exec/Pi 的 stderr 拒绝原因随诊断输出；stdout 关闭后短暂等待自然退出，仍未退出则记录 cleanup_kill_requested 并终止，不能仅凭 -1 判断系统拒绝。
+
 ## 现状与设计约束
 
 任务需要从 Ubuntu Agent 发到员工 PC，经过北京中转，但北京不能主动访问节点。任务被接受后，中心需要留下可查询记录；完整 Session 历史仍在节点。PC 断线或操作回执丢失时，系统必须核实原执行，不能靠重启 Agent 来恢复任务。

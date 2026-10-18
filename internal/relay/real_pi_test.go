@@ -147,9 +147,9 @@ func TestRealPi(t *testing.T) {
 	checkPiSandbox(t, profile, root)
 	capabilities["目录隔离"] = "支持"
 	probeID, _ := identity.NewUUID()
-	probe := pi.New(agent.Config{Binary: wrapper, Model: model, Directory: filepath.Join(root, "probe"), SessionDir: filepath.Join(root, "probe", "native"), SessionID: probeID, Env: pi.IsolatedEnv(filepath.Join(root, "home"))})
+	probe := pi.New(agent.Config{Binary: wrapper, Model: model, Directory: filepath.Join(root, "probe"), SessionDir: filepath.Join(root, "probe", "native"), SessionID: probeID, Env: pi.IsolatedEnv(filepath.Join(root, "home"))}, pi.WithDiagnostics())
 	if err := probe.Start(context.Background()); err != nil {
-		t.Fatal("Pi initialization failed")
+		t.Fatal(probe.Diagnostics(err))
 	}
 	actualModel = probe.Model()
 	actualVersion = pi.Version
@@ -182,11 +182,11 @@ func TestRealPi(t *testing.T) {
 		t.Fatal("daemon restart replaced the original Worker")
 	}
 	config := agent.Config{Binary: wrapper, Model: model, Directory: work, SessionDir: filepath.Join(st.dataDir, "sessions", sid, "native"), SessionID: sid, Restore: true, Env: pi.IsolatedEnv(filepath.Join(root, "home"))}
-	restored := pi.New(config)
+	restored := pi.New(config, pi.WithDiagnostics())
 	t.Cleanup(func() { _ = restored.Close() })
 	if err := restored.Start(context.Background()); err != nil {
 		capabilities["恢复"] = "不支持"
-		t.Fatal("native history restore failed")
+		t.Fatal(restored.Diagnostics(err))
 	}
 	if out := restored.Drain(); len(out) != 0 {
 		t.Fatal("restore unexpectedly replayed a model turn")
