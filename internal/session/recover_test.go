@@ -240,9 +240,121 @@ func TestLedgerPermissionErrorsAreUnread(t *testing.T) {
 }
 
 func TestLedgerIOErrorIsUnread(t *testing.T) {
-	err := &os.PathError{Op: "read", Path: "ledger.db", Err: syscall.EIO}
-	if got := classifyLedgerErr(err); !errors.Is(got, ErrHistoryUnread) || errors.Is(got, ErrHistoryIncompatible) {
-		t.Fatalf("IO 错误被当成历史损坏: %v", got)
+	for _, err := range []error{
+		&os.PathError{Op: "read", Path: "ledger.db", Err: syscall.EIO},
+		&os.PathError{Op: "open", Path: "malformed/ledger.db", Err: os.ErrPermission},
+		&os.PathError{Op: "open", Path: "not a database/ledger.db", Err: os.ErrPermission},
+		errors.New("malformed file URI"),
+	} {
+		if got := classifyLedgerErr(err); !errors.Is(got, ErrHistoryUnread) || errors.Is(got, ErrHistoryIncompatible) {
+			t.Fatalf("打开错误 %v 被当成历史损坏: %v", err, got)
+		} else if !errors.Is(got, err) {
+			t.Fatalf("打开错误的底层原因丢失: %v", got)
+		}
+	}
+}
+
+func TestCreateLedgerOpenFailureIsUnread(t *testing.T) {
+	parent := filepath.Join(t.TempDir(), "not a directory")
+	if err := os.WriteFile(parent, []byte("blocked"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := CreateLedger(filepath.Join(parent, "ledger.db")); !errors.Is(err, ErrHistoryUnread) {
+		t.Fatalf("路径错误被当成历史损坏: %v", err)
+	}
+}
+
+func TestLedgerSQLiteOpenErrorIsUnread(t *testing.T) {
+	db, err := sql.Open("sqlite", "file://invalid/ledger.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	err = db.Ping()
+	if err == nil {
+		t.Fatal("无效 URI 意外打开成功")
+	}
+	if got := classifyLedgerErr(err); !errors.Is(got, ErrHistoryUnread) || !errors.Is(got, err) {
+		t.Fatalf("URI 打开错误没有保留原因并标为暂时读不了: %v", got)
+	}
+}
+
+func TestCreateLedgerSchemaWriteFailureIsUnread(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(`PRAGMA query_only=ON`); err != nil {
+		t.Fatal(err)
+	}
+	if err := createWorkerSchema(db); !errors.Is(err, ErrHistoryUnread) {
+		t.Fatalf("写入错误被当成历史损坏: %v", err)
+	}
+}
+
+func TestChmodDBRequiresLedgerButNotSidecars(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ledger.db")
+	if err := chmodDB(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("主账本不存在时没有报错: %v", err)
+	}
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := chmodDB(path); err != nil {
+		t.Fatalf("临时文件不存在时无法设置账本权限: %v", err)
+	}
+}
+
+func TestLedgerPathRoundTrip(t *testing.T) {
+	for _, name := range []string{"absolute", "relative"} {
+		t.Run(name, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			path := filepath.Join("Session data 中文 %23 # &+", "ledger.db")
+			if name == "absolute" {
+				var err error
+				path, err = filepath.Abs(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := CreateLedger(path); err != nil {
+				t.Fatal(err)
+			}
+			w, err := openWorkerDB(path, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := w.db.Exec(`INSERT INTO meta (key, value) VALUES ('path_test', 'preserved')`); err != nil {
+				w.Close()
+				t.Fatal(err)
+			}
+			if err := w.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := CreateLedger(path); err != nil {
+				t.Fatal(err)
+			}
+			if err := InspectLedger(path); err != nil {
+				t.Fatal(err)
+			}
+			w, err = openWorkerDB(path, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer w.Close()
+			var value string
+			if err := w.db.QueryRow(`SELECT value FROM meta WHERE key = 'path_test'`).Scan(&value); err != nil || value != "preserved" {
+				t.Fatalf("重开账本丢失已有记录: value=%q err=%v", value, err)
+			}
+			if needed, err := LedgerNeedsWorker(path); err != nil || needed {
+				t.Fatalf("恢复筛选错误: needed=%v err=%v", needed, err)
+			}
+			if _, err := os.Stat(path); err != nil {
+				t.Fatalf("账本没有保存在指定路径: %v", err)
+			}
+		})
 	}
 }
 

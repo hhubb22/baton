@@ -3,6 +3,7 @@ package node
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -66,13 +67,13 @@ func OpenLedger(dir string) (*Ledger, error) {
 	path := filepath.Join(dir, "node.db")
 	db, err := sql.Open("sqlite", sqliteDSN(path))
 	if err != nil {
-		return nil, errors.New("无法打开节点账本")
+		return nil, fmt.Errorf("无法打开节点账本: %w", err)
 	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 	if err := db.Ping(); err != nil {
 		db.Close()
-		return nil, errors.New("无法打开节点账本")
+		return nil, fmt.Errorf("无法打开节点账本: %w", err)
 	}
 	if err := checkSQLite(db); err != nil {
 		db.Close()
@@ -449,7 +450,10 @@ func checkSQLite(db *sql.DB) error {
 }
 
 func sqliteDSN(path string) string {
-	u := url.URL{Scheme: "file", Path: filepath.ToSlash(path)}
+	u := url.URL{Scheme: "file", Path: filepath.ToSlash(path), OmitHost: !filepath.IsAbs(path)}
+	if filepath.IsAbs(path) && !strings.HasPrefix(u.Path, "/") {
+		u.Path = "/" + u.Path
+	}
 	u.RawQuery = "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)&_txlock=immediate"
 	return u.String()
 }
