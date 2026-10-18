@@ -156,12 +156,22 @@ func (s *startLoop) onResult(env protocol.Envelope) bool {
 			return true
 		}
 		s.finish(job)
-		s.log.Info("event=start_rejected", "task_id", job.taskID, "code", result.Code)
+		go s.reject(job, result.Code)
 		return true
 	}
 	s.finish(job)
 	go s.authorize(job, result.Permit)
 	return true
+}
+
+func (s *startLoop) reject(job *startJob, code string) {
+	ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
+	defer cancel()
+	if err := s.host.RejectStart(ctx, job.sessionID, job.taskID, job.executionID, code); err != nil {
+		s.log.Info("event=start_rejection_record_failed", "task_id", job.taskID, "code", code)
+		return
+	}
+	s.log.Info("event=start_rejected", "task_id", job.taskID, "code", code)
 }
 
 func (s *startLoop) authorize(job *startJob, permit string) {

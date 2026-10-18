@@ -289,6 +289,7 @@ func TestMissingHistoryFromRunningIsReported(t *testing.T) {
 	st.batond.waitExit(t, 20*time.Second)
 	sessionID := sessionOf(t, st, created.TaskID)
 	worker := workerStatus(t, st.dataDir, sessionID)
+	st.batond.stop()
 	stopWorker(worker.PID)
 	waitWorkerSocketDown(t, st.dataDir, sessionID)
 	path, err := session.LedgerPath(st.dataDir, sessionID)

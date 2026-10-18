@@ -188,16 +188,25 @@ func handleWorker(db *workerDB, sessionID string, msg ipcMessage) ipcMessage {
 			return ipcMessage{Type: "result", Refused: true, Code: "invalid_target", Message: "排队期限无效"}
 		}
 		started, refused, code, err := db.Authorize(msg.TaskID, msg.ExecutionID, msg.Permit, msg.PublicKey, msg.StorageGeneration, expires)
+		if refused {
+			message := "启动许可被拒绝"
+			if err != nil {
+				message = "启动许可被拒绝，拒绝记录写入失败"
+			}
+			return ipcMessage{Type: "result", Refused: true, Code: code, Message: message}
+		}
 		if err != nil {
 			return ipcMessage{Type: "result", Code: "unavailable", Message: "无法记录启动意图"}
-		}
-		if refused {
-			return ipcMessage{Type: "result", Refused: true, Code: code, Message: "启动许可被拒绝"}
 		}
 		reply := statusMessage(db, sessionID, 0)
 		reply.Started = started
 		reply.StartIntent = started
 		return reply
+	case "reject_start":
+		if err := db.RejectStart(msg.TaskID, msg.ExecutionID, msg.Code); err != nil {
+			return ipcMessage{Type: "result", Code: "unavailable", Message: "无法记录中心拒绝"}
+		}
+		return statusMessage(db, sessionID, 0)
 	case "cancel_local":
 		started, err := db.CancelLocal()
 		if err != nil {

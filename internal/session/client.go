@@ -82,6 +82,11 @@ func (c *Client) Authorize(taskID, executionID, permit, publicKey, generation, q
 	})
 }
 
+// RejectStart 让 Worker 为当前执行保存中心的许可拒绝。
+func (c *Client) RejectStart(taskID, executionID, code string) (Status, error) {
+	return c.roundTrip(ipcMessage{Type: "reject_start", TaskID: taskID, ExecutionID: executionID, Code: code})
+}
+
 // CancelLocal 在 Session 互斥区内记录取消。已经写入 start_intent 时不会把它改成未启动。
 func (c *Client) CancelLocal() (Status, error) {
 	return c.roundTrip(ipcMessage{Type: "cancel_local"})
