@@ -12,6 +12,8 @@ Date: 2026-10-17
 Approved: 2026-10-17，用户在当前需求会话批准
 Basis: 已批准的 [行为规格](PRODUCT.md)，R-01 至 R-39。
 
+**2026-10-18 修订（已批准）**：加入 Project Agent，节点不再区分 PC 与 Ubuntu 角色。改动的段落标注「2026-10-18 修订」，其余内容维持已批准版本。Project Agent 的完整设计见 [Project Agent 技术设计](../project-agent/TECH.md)，本文只记录它对现有进程、数据和接口的影响。
+
 当前已实现 Windows SQLite 账本打开修复（PS-149）：节点与 Session 的 `file:` URI 将盘符放在路径而非 authority 中，相对路径省略 authority，并保留路径字符的 URI 转义。原生 Windows 回归覆盖含空格、中文、`%`、`#` 的目录，创建、打开、重开后保留节点代次、准备映射与 Session 记录。创建、打开及权限设置的失败统一走历史错误分类；仅 SQLite `SQLITE_CORRUPT` / `SQLITE_NOTADB` 作为损坏证据，不以错误文本中的路径片段判定损坏，分类错误保留底层原因。账本格式、WAL、FULL 同步和权限约定不变，无新增迁移或依赖；这不表示 Windows 凭据 ACL、进程或单调时钟已通过验收。
 
 当前已实现 Windows 秘密文件的等价访问控制：节点身份、Coordinator 签名私钥和 Agent CLI 上下文在创建时使用仅当前用户 SID 的受保护 DACL，禁止继承；读取时在同一文件句柄上校验所有者和 DACL，拒绝其他主体访问以及符号链接、junction 等 reparse point。Windows 原生测试覆盖宽松与继承 ACL、符号链接和目录联接；Unix 继续使用文件 `0600`、节点数据目录 `0700`。这是对既有“仅当前用户可读写”要求的补充实现，无新增迁移。
@@ -78,6 +80,7 @@ Pi 的一手资料来自已安装包 `@earendil-works/pi-coding-agent` 的 `docs
 | 位置 | 选用技术 | 理由与代价 |
 |---|---|---|
 | Relay、Coordinator、batond、Session Worker、CLI | Go；初始工具链基线为 Go 1.27 | 可发布原生可执行文件，节点不需要额外 Node.js 来运行 Baton；代价是需要实现和维护各 Agent 的进程协议适配 |
+| Project Agent Runtime | Node.js 程序 `baton-project-runtime`，基于 `@earendil-works/pi-agent-core` 与 `pi-ai` | 由 batond 作为独立进程启动；只有承载 Project Agent 的节点需要安装 Node.js（2026-10-18 修订） |
 | 中心记录 | PostgreSQL 17，pgx，版本化 SQL migration | 延用原始需求的 PostgreSQL；任务、事件和 outbox 可在一次事务提交，不先引入消息队列 |
 | 节点执行账本 | SQLite，WAL 与 FULL 同步，拟用纯 Go 驱动 | 支持断电后的去重和待补报记录，便于跨系统发布；需要验证驱动、锁与磁盘故障行为 |
 | Web UI | TypeScript、React、Vite | 静态页面由 Coordinator 提供；无独立 Node.js Web 服务，开发时仍需要前端构建工具 |
@@ -85,6 +88,8 @@ Pi 的一手资料来自已安装包 `@earendil-works/pi-coding-agent` 的 `docs
 | 浏览器实时通知 | 同源 WebSocket；普通操作用 HTTP JSON API | 统一账号会话与权限检查；需要处理输出限流、断流和浏览器重连 |
 
 不嵌入 Agent SDK，也不解析终端 ANSI 画面来判断任务完成。Pi 和 Codex 优先使用结构化双向接口；只有存在证据且经过验证的能力才进入支持矩阵。这样减少对 Agent 内部代码的绑定，但不能消除外部协议升级风险。
+
+Project Agent Runtime 使用 pi-agent-core 的 SDK，但它运行在独立的 Node.js 进程里，Go 进程仍不嵌入任何 Agent SDK。选型理由见 Project Agent TECH 第 1 节（2026-10-18 修订）。
 
 ## 进程与职责
 
@@ -113,14 +118,17 @@ Pi 的一手资料来自已安装包 `@earendil-works/pi-coding-agent` 的 `docs
 | 进程 | 拥有的状态与职责 | 不负责的内容 | 对应行为 |
 |---|---|---|---|
 | Relay | 活动连接、认证与吊销快照、路由、心跳、受限转发队列 | 任务队列、Session 解析、业务持久化、执行重试 | R-03、R-04、R-24 |
-| Coordinator | 员工、节点归属、默认节点、任务状态、委托关系、执行记录、调度、API、Plane 集成 | 原始 Session 历史、模型调用、设备 SSH | R-01、R-05～R-06、R-12～R-25、R-27、R-33～R-38 |
-| batond | 节点身份、本机注册、中心连接、能力汇总、本地 RPC、Worker 发现与启动 | 不依靠自身内存保存唯一执行事实 | R-02～R-03、R-07～R-11、R-26 |
+| Coordinator | 员工、节点归属、默认节点、任务状态、委托关系、执行记录、调度、API、Plane 集成；Project、主对话、输入队列、项目记忆、Project Agent 的放置与租约、事项与浏览器通知（2026-10-18 修订） | 原始 Session 历史、模型调用、设备 SSH | R-01、R-05～R-06、R-12～R-25、R-27、R-33～R-38 |
+| batond | 节点身份、本机注册、中心连接、能力汇总、本地 RPC、Worker 发现与启动；Project Runtime 的启动、停止和续租（2026-10-18 修订） | 不依靠自身内存保存唯一执行事实 | R-02～R-03、R-07～R-11、R-26 |
 | Session Worker | 一个 Session 的 Agent 进程、输入顺序、启动和交付账本、结果、事件及本地历史访问 | 无权签发中心身份、改派任务或创建第二次同任务执行 | R-09～R-11、R-14、R-21～R-23、R-26、R-28～R-29 |
 | baton CLI | 员工操作入口、Agent 提交委托与查询结果、提交结构化任务结果 | 不持有中心管理员或签名密钥 | R-12～R-15、R-19 |
+| Project Runtime | 一次 Project Agent 运行：模型推理、对话事件上报、压缩（2026-10-18 修订） | 自身不执行命令或访问文件；不直接连接 Coordinator 或数据库；不持有订阅以外的凭据 | PA-01～PA-22 |
 
 Session Worker 由 batond 使用同一可执行文件的内部子命令启动，不是另一个对外部署产品。Worker 与 batond 分开存活，batond 重启时可重新连接原 Worker。系统关机、Worker 崩溃或 Agent 自身退出仍可能中断执行，按 R-22 核实，不保证进程永远存活。
 
 Worker 使用带认证的 Unix domain socket 或 Windows named pipe 与 batond 通信，不向局域网开放无认证控制端口。节点级文件锁防止两个 batond 同时使用同一数据目录；Session 级锁防止两个 Worker 同时接管一个 Session。
+
+Project Runtime 由 batond 按 Coordinator 的 `project_run_start` 启动，经本地 IPC 与 batond 通信，请求再沿 Relay 送达 Coordinator，和 Agent CLI 的委托请求走同一条路径。Runtime 进程不需要像 Worker 那样跨 batond 重启存活：它的状态全部在 Coordinator，batond 重启导致 Runtime 退出时，下一次运行会接着处理（2026-10-18 修订）。
 
 POSIX 下 Worker 使用独立进程组；Windows 下由 Worker 持有 Agent 进程的 Job Object，避免 batond 退出连带结束 Worker。进程组、Job Object 和真实工具子进程的退出行为都需要目标系统验证，不能仅靠 detached 标志认定已经独立。
 
@@ -140,6 +148,8 @@ internal/session/           Worker、输入账本和历史索引
 internal/agent/             统一 Adapter、Pi/Codex 原生协议适配
 internal/protocol/          信封、事件、错误和版本
 internal/plane/             Plane 触发、映射和回写
+internal/projectagent/      Project、主对话、输入队列、放置与租约、Project Agent 工具（2026-10-18 修订）
+runtimes/project-agent/     baton-project-runtime 的 TypeScript 源码（2026-10-18 修订）
 migrations/                 PostgreSQL migration
 web/                        Web UI
 ```
@@ -150,14 +160,14 @@ web/                        Web UI
 
 ### 中心数据
 
-PostgreSQL 不保存完整 Session 消息。应用层对可持久化事件采用字段白名单，不能直接把节点上报正文存为通用 JSON 日志。
+PostgreSQL 不保存完整 Session 消息。应用层对可持久化事件采用字段白名单，不能直接把节点上报正文存为通用 JSON 日志。Project Agent 的主对话是例外：它的消息按 pi-ai 的消息格式保存在专用的 `conversation_events` 表，不进入 `task_events`（2026-10-18 修订）。
 
 | 拟建表 | 关键字段或约束 | 用途 |
 |---|---|---|
 | employees、login_sessions | 员工 ID、认证来源、登录状态；浏览器会话只存 token 摘要 | 员工登录与隔离 |
-| nodes、node_credentials | 员工、角色、注册序号、系统、能力、凭据版本和吊销状态；连接凭据是 JWT，库中只存 credential_id | 节点身份和稳定初选 |
+| nodes、node_credentials | 员工、注册序号、系统、能力、凭据版本和吊销状态；连接凭据是 JWT，库中只存 credential_id。`role` 列由迁移 0015 删除，注册接口忽略旧版 batond 发来的该字段（2026-10-18 修订） | 节点身份和稳定初选 |
 | node_presence | 节点、员工、在线、已同步、incarnation、conn_id、最后联系时间、状态更新时间 | 在线状态与同步门槛 |
-| employee_settings | 员工唯一行、默认 PC 节点 ID | 默认值保持稳定，吊销后仍可显示失效引用 |
+| employee_settings | 员工唯一行、默认设备节点 ID（由默认 PC 列改名，2026-10-18 修订） | 默认值保持稳定，吊销后仍可显示失效引用 |
 | sessions | Session ID、节点、Agent 类型、本地父 Session、原生会话标识、最后状态和时间 | Session 树的元数据索引 |
 | tasks | 员工、request_id、任务说明与 R-12 请求字段、request_hash、解析后的目标与 Agent、状态、版本、期限、结果摘要 | 任务权威记录 |
 | task_relations | 来源任务、来源 Session、目标 Session、重新执行关系 | 委托链与追溯 |
@@ -167,6 +177,9 @@ PostgreSQL 不保存完整 Session 消息。应用层对可持久化事件采用
 | delivery_records | 委托结果 ID、来源 Session、交付状态 | 区分执行结束与结果交付 |
 | request_tombstones | 员工与 request_id 唯一、请求摘要、原 task_id | 明细清理后仍不能把重复提交当新执行 |
 | plane_links、plane_events、plane_outbox | 工单映射、事件标识、执行轮次、回写记录 | Webhook 去重和可恢复回写 |
+| projects、project_agents、conversations、conversation_events、project_agent_input_queue、agent_runs、project_memory_entries、project_memory_revisions、node_runtime_reports | 见 Project Agent TECH 第 3 节 | Project Agent 的身份、对话、输入、运行、记忆和节点能力（2026-10-18 修订） |
+
+`tasks` 新增可空列 `project_id`、`origin_conversation_id`、`origin_tool_call_id`，标记由 Project Agent 发起的任务；现有任务这些列为空，行为不变（2026-10-18 修订）。
 
 request_id 去重使用调用方提交的原始字段计算摘要，缺省字段保留“未指定”的语义。重试时先找旧请求，再解析默认节点和 Agent，避免修改默认值后把同一提交误判为不同请求。
 
@@ -188,6 +201,9 @@ request_id 去重使用调用方提交的原始字段计算摘要，缺省字段
 | 原生 Agent Session 历史 | Agent | 保留原生标识和路径，不搬到北京 |
 | 规范化输出与历史索引 | Worker | 节点本地分段文件及索引，供分页、断流补取和缺口标记 |
 | 未确认送达的事件与结果 | 事件拥有者 | 本地 outbox；中心持久化 ACK 后才能清理 |
+| Project Agent 的 `run_id` 去重记录 | batond | 节点 SQLite；同一 run 不启动第二个 Runtime 进程（2026-10-18 修订） |
+| Project Runtime 的订阅凭据 | pi-ai | Runtime 自己的数据目录，按秘密文件处理；不上传（2026-10-18 修订） |
+| 「允许 Project Agent 执行命令」开关和 shell | 员工，经 batond 配置 | 默认关闭；Worker 执行 `shell` 任务前再读一次（2026-10-18 修订） |
 
 Worker 直接向自己的账本提交执行事实，batond 只转发并代收中心 ACK。这样 batond 崩溃不会丢掉唯一的“是否已向 Agent 发送输入”记录。磁盘写失败时不能报告持久化成功，也不能在缺少启动账本时继续提交新任务。
 
@@ -261,7 +277,7 @@ Pi 中止先 clear_queue，再 abort，并观察是否真的 settled。Codex 使
 
 内部适配器至少定义 Probe、CreateSession、Attach、StartTask、SendInput、Interrupt、ReadHistory、Events、Close。每个实现分别声明能力，不能用空实现假装支持。
 
-会话级互斥由 Worker 控制。启动命令使用参数数组与明确的工作目录，不拼接含员工输入的 shell 命令。模型认证由原 Agent 管理，节点连接凭据与中心签名密钥不传给 Agent。
+会话级互斥由 Worker 控制。启动命令使用参数数组与明确的工作目录，不拼接含员工输入的 shell 命令。`shell` 执行器是唯一的例外：它的用途就是执行一条命令，命令文本作为单个参数交给 shell（例如 `zsh -lc <command>`），不再拼接其他内容（2026-10-18 修订）。模型认证由原 Agent 管理，节点连接凭据与中心签名密钥不传给 Agent。
 
 | Agent | 拟采用路径 | 完成判据与风险 |
 |---|---|---|
@@ -269,6 +285,7 @@ Pi 中止先 clear_queue，再 abort，并观察是否真的 settled。Codex 使
 | Codex | app-server stdio；Session 对应 thread，执行输入对应 turn | 用 turn/completed 及结构化输出核对结果；clientUserMessageId 只作关联，未验证前不作为幂等保障。固定并检查协议版本 |
 | Cursor Agent | 基于 print + stream-json + 显式 resume 的已观测单轮路径评估适配 | 以 result 事件结束单轮；resume 是新模型回合，不能自动重发不确定输入。活动输入、停止独立 shell 和指定模型 ACP 仍有缺口，不按完整双向适配宣传 |
 | Kiro | 基于 kiro-cli acp --agent-engine=v3 的已观测接口评估适配 | 未完成 prompt 由 Worker 串行；恢复前核对 ID 已存在；取消结合 prompt 响应与本次前台进程证据，保留后台进程未知，不降低首版目标 |
+| shell | Worker 内置执行器，不启动 Agent；用节点上报的 shell 执行 Project Agent 的一条命令（2026-10-18 修订） | 退出码 0 为完成，否则失败；输出保留开头和结尾各 16 KiB；取消和超时终止整个进程组；细节见 Project Agent TECH 第 10 节 |
 
 Pi 与 Codex 的 Baton 无设备全流程验证仍待实施。Cursor 和 Kiro 已有本机接口调查作为适配输入；调查顺序不改变四类 Agent 和三类 PC 的首版范围。
 
@@ -299,6 +316,8 @@ delegate 成功返回 task_id。Skill 指导调用者用有限 wait 查询，避
 
 自动结果输入使用 delivery_id：发送前同步提交 delivery_intent，确认进入原生历史后记录 delivered。Worker 在意图与实际发送之间崩溃时，显示交付待核实，不自动再次注入。任务执行结果状态不因此改变。
 
+Project Agent 不使用 baton CLI。它的派发通过 `tasks.dispatch` 工具，由 Coordinator 在同一个事务里接受任务并写入工具结果；任务结束时结果进入它的输入队列，不经过上面的来源 Worker 交付账本（2026-10-18 修订，见 Project Agent TECH 第 7、9 节）。
+
 ### 结构化结果
 
 优先使用已验证的原生 output schema 能力。没有该能力时，Agent 可以调用 baton result submit，或按约定在最终回复中交付 JSON。Worker 校验结构，并由自身填入可信 task_id、execution_id、node_id 和 Session 关联。
@@ -318,6 +337,8 @@ delegate 成功返回 task_id。Skill 指导调用者用有限 wait 查询，避
 节点连接的来源身份由 Relay 根据认证结果附加，Coordinator 不信任客户端自报的来源。节点上行默认只允许发到控制服务；只有经过认证的 Coordinator 控制连接可以选择目标节点。Relay 无须理解 task_id 或授权范围，也能阻止节点绕过 Coordinator 任意投递。
 
 持久化命令只有在中心或节点保存后才得到业务 ACK。Relay 的“已转发”仅表示运输结果，不能作为任务已接受、输入已发送或结果已保存的证明。
+
+新增消息类型（2026-10-18 修订）：节点上行的 `ProjectRuntimeRequest`，携带 `run_id` 和 `lease_epoch`，处理方式与 `AgentRequest` 相同；中心下行的 `project_run_start`、`project_run_wake`、`project_run_stop`。旧版本 batond 不认识这些类型时明确拒绝，Coordinator 不会把 Project Agent 放到这样的节点上。
 
 ### 节点凭据与吊销
 
@@ -343,6 +364,7 @@ Relay 启动后先取得有效的安全快照，才能开放节点认证；无�
 | 每个中心进程的输出缓存总量 | 32 MiB | 拒绝新订阅或让慢订阅重连，不影响任务控制 |
 | 心跳间隔与离线判断 | 10 秒；30 秒未联系判离线 | 只更新连接状态，不直接宣布任务失败或取消 |
 | 连接恢复等待 | 带抖动的指数退避，1 至 30 秒 | 认证失效不无限重试注册，显示需重新认证 |
+| Project Agent 单条对话事件 | 192 KiB；单个工具输出 32 KiB | 事件超限拒绝写入；工具输出截断并说明如何继续读取（2026-10-18 修订） |
 | Worker 账本连续读取失败上限 | 每个 Session 连续 3 次心跳补报检查；计数保存在节点账本，跨重连和重启保留 | `os.Stat` 权限错误与 SQLite 打开、IO、锁忙失败统一计数，阈值前读成或连回原 Worker 后清零；达到上限即上报 `uncertain_history`，停止离线账本读取与 Worker 自动重建，未获中心确认时按同一事件补报；仍接收原 Worker 的有效证据，不新开执行 |
 
 这些限制不能证明 4 核 8 GB 足够。容量测试需加入真实订阅数与输出速率；200 条控制消息/秒不能代替输出流负载。
@@ -365,7 +387,7 @@ Agent 协议帧与传输消息使用不同上限。Pi 可能一次返回大量 g
 | POST /node-enrollments | 本人签发一次性注册凭据 |
 | POST /nodes/register | 以注册凭据换取节点身份；不接受正文任意绑定员工 |
 | GET /nodes、POST /nodes/{id}/revoke | 查询本人节点；吊销返回处理状态 |
-| PUT /me/default-pc | 修改本人默认 PC，返回实际保存值 |
+| PUT /me/default-device | 修改本人默认设备，返回实际保存值；`PUT /me/default-pc` 保留为别名（2026-10-18 修订） |
 | POST /tasks | R-12 提交；request_id 唯一；事务提交后返回接受记录 |
 | GET /tasks、GET /tasks/{id}、GET /tasks/{id}/events | 本人执行记录、版本与变更，不包含全量 Session 历史 |
 | POST /tasks/{id}/cancel、POST /tasks/{id}/resolve | 取消或人工核实，记录操作者及版本 |
@@ -373,7 +395,14 @@ Agent 协议帧与传输消息使用不同上限。Pi 可能一次返回大量 g
 | GET /sessions、POST /sessions/{id}/input、POST /sessions/{id}/resume | 本人 Session 操作，受 Agent 能力及原任务状态约束 |
 | GET /sessions/{id}/history | 按游标查询节点本地历史，节点离线与历史缺失分别返回 |
 | GET /nodes/{id}/files | 受限列目录或文本预览，不能传入任意绝对路径 |
-| /events | 浏览器同源 WebSocket，订阅本人任务与 Session 的通知或受限输出 |
+| POST /projects、GET /projects、GET /projects/{id}、PATCH /projects/{id} | 创建、列出、查看、修改 Project 的标题、目标、状态（active / paused / archived），以及 Project Agent 使用的订阅和模型；拒绝设备或目录字段（2026-10-18 修订） |
+| POST /projects/{id}/stop | 停止 Project Agent 当前的运行，不取消已派出的任务（2026-10-18 修订） |
+| POST /projects/{id}/messages | 发送消息，带客户端 `client_message_id`，正文超过 64 KiB 时返回 413；所有节点离线时也接受（2026-10-18 修订） |
+| GET /projects/{id}/events | 按 `after_seq` 分页读取主对话，返回最后保存的序号（2026-10-18 修订） |
+| GET /projects/{id}/runs、GET /projects/{id}/input-queue | 运行记录（节点、开始结束时间、结束原因）、待处理输入和等待原因（2026-10-18 修订） |
+| POST /projects/{id}/retry | 对话处于需要处理状态时，确认重试（2026-10-18 修订） |
+| GET /projects/{id}/memory、PUT /projects/{id}/memory/{entry_id} | 查看和修改项目记忆，修改带 `expected_revision`（2026-10-18 修订） |
+| /events | 浏览器同源 WebSocket，订阅本人任务与 Session 的通知或受限输出；也推送 Project Agent 的流式片段和已保存事件（2026-10-18 修订） |
 
 URL 均相对于 /api/v1。错误对象包含 code、message、request_id、可选 task_id 和 details，details 不回传凭据或任意完整工具输出。错误 code 区分 PRODUCT R-13 的类别；查询状态的客户端失败不能隐式调用 rerun。
 
@@ -381,7 +410,7 @@ URL 均相对于 /api/v1。错误对象包含 code、message、request_id、可�
 
 ### Web UI
 
-页面至少包括节点列表与默认 PC 设置、Session 树、Session 内容与输入、任务及委托详情、受限文件浏览。
+页面至少包括节点列表与默认设备设置、Session 树、Session 内容与输入、任务及委托详情、受限文件浏览，以及 Project 列表、主对话、项目记忆和 Project Agent 的运行状态（2026-10-18 修订）。主对话的消息按 pi-ai 消息结构渲染：文本、思考摘要和工具调用分别显示。
 
 节点在线、Session 状态、任务状态和结果交付状态分别显示。显示“最后报告于”与离线标记，避免把中心旧快照展示为当前事实。取消按钮提交后显示请求中，收到事实后才显示取消。
 
@@ -394,6 +423,8 @@ URL 均相对于 /api/v1。错误对象包含 code、message、request_id、可�
 大文件引用只描述位置和访问状态。Coordinator 不代取任意用户 URL，避免形成公网或内网任意代理。实际传输通道由项目配置，下载与刷机前在目标节点核对权限、存在性及可用性。
 
 本设计不提供制品服务。完整 Session 文件导出、固件、抓包和原始日志下载不能通过把它们包装成输出片段绕过 R-32。
+
+Baton 不实现 worktree、clone 等目录准备逻辑。Project Agent 需要新目录时，先用 `nodes.exec` 在目标节点上创建，再把它作为 `working_directory` 派发任务。`nodes.exec` 的工作目录必须位于该节点登记的目录内（2026-10-18 修订）。
 
 ## Plane、账号与保留策略
 
@@ -435,6 +466,8 @@ Session 原生历史不由 Baton 默认自动删除，员工在节点本地管�
 
 180 天、凭据期限与空间预算是 PRODUCT D2、D4、D6 采用的初始值，允许配置；实际交付需展示生效值，不代表当前已在部署中配置。
 
+Project Agent 的对话事件和项目记忆修订不随 180 天明细清理删除，也没有业务删除接口。中心空间不足时拒绝新消息并显示原因，已保存的事件不删除。Project Agent 派发的任务仍按上面的规则清理明细，但被对话引用的任务 ID 在查询时如实显示「明细已清理」（2026-10-18 修订）。
+
 ## 部署、兼容与变更
 
 北京拟以独立服务运行 Relay、Coordinator 和 PostgreSQL。静态 Web UI 由 Coordinator 提供，入口代理终止外部 TLS；Relay 路径启用 WebSocket。内部控制连接使用独立凭据或 mTLS，不暴露给员工节点。
@@ -442,6 +475,8 @@ Session 原生历史不由 Baton 默认自动删除，员工在节点本地管�
 Windows 节点拟使用当前员工身份的登录启动任务，macOS 使用 LaunchAgent，Linux 使用 systemd --user 或显式前台运行。默认不以 LocalSystem 或 root 运行。员工退出、系统睡眠及虚拟机暂停按离线处理，不将其当作无人值守执行承诺。
 
 协议含主版本和能力协商。未知主版本拒绝连接；兼容新增字段可忽略，但未知执行动作不能当成功。数据库 migration 先检查版本，破坏性迁移需要单独计划；升级时已有 Worker 继续持有自己的执行身份，不通过升级重跑任务。
+
+承载 Project Agent 的节点另外安装 Node.js 与 `baton-project-runtime`，并在节点上执行 `baton-project-runtime login <provider>` 登录订阅。batond 通过 `baton-project-runtime probe` 读取版本和登录状态写进能力报告，probe 不发送推理请求（2026-10-18 修订）。
 
 Agent 版本按验证过的范围登记，发现未知版本时标为未验证并限制有风险能力。不能自动升级 Agent 后仍沿用旧版本支持结论。发布包包含 Baton、前端资源和协议版本，模型凭据与设备配置不打进包中。
 
@@ -472,7 +507,8 @@ Agent 版本按验证过的范围登记，发现未知版本时标为未验证�
 | R-17～R-18、R-20～R-22 | start_intent 同步前后、写 pipe 前后、取消与完成竞态；记录实际外部调用次数 | 无法确认时重发输入、把中止请求当停止、丢核实事实 | Worker 子进程故障注入 | planned |
 | R-14、R-23 | 子结果重复、来源停止、交付意图保存后崩溃 | 重复注入来源、自动复活已停止 Session | 两 Worker 集成 | planned |
 | R-24～R-26 | 分别重启 Relay、Coordinator、batond、Worker，短时停止 PostgreSQL | 重复执行、唯一执行事实丢失、未落库却 ACK | 容器与本地进程 | partial |
-| R-27～R-30 | 从 Web UI 查看委托树并干预任务，执行后断开节点；搜索数据库、日志及输出缓存；慢浏览器与历史补取 | UI 状态或操作反馈不实、中心有完整历史归档、缺口被隐藏、内存无界增长 | Web UI 集成与隐私检查 | planned |
+| R-27～R-30 | 从 Web UI 查看委托树并干预任务，执行后断开节点；搜索数据库、日志及输出缓存；慢浏览器与历史补取 | UI 状态或操作反馈不实、中心出现执行 Session 的完整历史、缺口被隐藏、内存无界增长 | Web UI 集成与隐私检查 | planned |
+| PA-01～PA-22 | 见 Project Agent TECH 的验证表 | 同左 | 进程测试、真实 Runtime 与订阅、三系统 | planned（2026-10-18 修订） |
 | R-31～R-32 | 路径替换、符号链接、junction、越界路径、缺失固件、超大日志 | 越界读取、绕过文件通道、产物不可用仍刷机 | 三系统与文件通道 | planned |
 | R-33～R-36 | 实际 Plane 项目，重复乱序 Webhook、审批未通过、回写 ACK 丢失、人工验收 | 多次执行、绕过门槛、回写循环、Agent 自动验收 | Plane 测试项目 | planned |
 | R-38～R-39 | 约定负载下运行 24 小时并故障注入，观测队列、延迟与恢复 | 超过评审确认的预算或发生重复执行与隐私违规 | 压测环境 | planned |
@@ -491,5 +527,6 @@ Agent 版本按验证过的范围登记，发现未知版本时标为未验证�
 | Q4 | 外部系统事实 | Plane 社区版 1.4.2 的 Webhook 验证、投递标识、可读字段和回写标记已实测，见 [PLANE.md](PLANE.md)。版本、审批字段、员工映射和回写摘要已于 2026-10-18 批准，见「Plane 接入」。已有文件通道与固件规模仍未调查 | 项目及环境负责人 | Plane 集成与真实文件、刷机验收 |
 | Q5 | 性能验收阈值 | 本设计给出初始传输预算；API 延迟、恢复时限和可接受积压需在代表性负载后定值 | 实施者与项目负责人 | 容量达标声明，不阻塞基本协议与状态机实现 |
 | Q6 | Pi 中止超时后的强制终止策略（待决定） | Pi 1.3.0 abort 不能打断运行中的工具；本轮只持续观察 settled 并补报，不加入等待超时后的强杀。是否强制结束 Pi 进程树、等待多久、如何界定三系统进程树及后台子进程的停止证据需另行决定；即使强杀也不能推定外部副作用已知 | 用户与实施者 | 不阻塞延迟停止确认修复；阻塞任何“超时必然终止整个进程树”的保证 |
+| Q7 | Project Agent 的未定参数 | Runtime 的发布方式（npm 全局安装或单文件可执行）与压缩阈值，见 Project Agent TECH 的 Open questions | 实施者与用户 | 安装说明和压缩调优，不阻塞其余实现（2026-10-18 修订） |
 
 实施任务按节点与身份、执行账本、跨节点委托、Agent 适配、Web UI、Plane、可靠性与跨系统验收组织，任务清单和进度由 Linear 工单管理。这个顺序用于分配实施和验证依赖，首版行为仍以 PRODUCT 为准。
