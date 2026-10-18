@@ -26,8 +26,9 @@
 - 提示词由工单要求、当前 `origin/main` 的提交号和 `.agents/devin-cloud-brief.md` 组成。同时派发的工单如需新迁移，在派发时分配不同编号。
 - 创建后在工单评论写会话链接和会话 ID，并把会话链接加为工单链接。
 - 状态用 v3 API 的 `GET /v3/organizations/{org_id}/sessions/{id}` 查，看 `status`、`status_detail` 和 `pull_requests`。后续指令在该会话的 CLI 面板里发。
-- 审查时把分支取到独立 worktree，变基到 `main` 后在本机复跑验证；需要修改时在同一会话的 CLI 里跟进。
-- 审查通过后以 squash 方式合并 PR，提交信息符合下方约定，然后按「代码交付」写提交链接并关闭工单。PR 是 draft 时合并前先 `gh pr ready`；本地变基后推回 PR 分支用 `--force-with-lease`。
+- 合并条件是 PR 上 GitHub Actions 的 Linux、macOS、Web 检查通过（`main` 的分支保护强制要求）；Windows 检查在 Windows 修复工单完成后加入必需项，在此之前只要求不新增 Windows 失败。审查读代码与 CI 结果，本机复跑只在 CI 覆盖不到或需要排查时做；需要修改时在同一会话的 CLI 里跟进。
+- 平台相关的工单（Windows、macOS 原生行为）用 `/platform` 把会话开在对应系统上。
+- 审查通过后以 squash 方式合并 PR，提交信息符合下方约定，然后按「代码交付」写提交链接并关闭工单。PR 是 draft 时合并前先 `gh pr ready`。PR 分支需要变基时交给原会话做：Devin 的提交作者邮箱在 GitHub 上是私密的，本机推送会被邮箱隐私保护拒绝。
 
 ## 凭据
 
