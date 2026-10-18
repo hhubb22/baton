@@ -53,16 +53,17 @@ type turn struct {
 }
 
 type Adapter struct {
-	config    Config
-	mu        sync.Mutex
-	state     State
-	active    bool
-	final     string
-	conn      *jsonrpc2.Conn
-	events    chan adapters.Event
-	closed    chan struct{}
-	closeOnce sync.Once
-	inbox     chan notification
+	config      Config
+	mu          sync.Mutex
+	state       State
+	active      bool
+	final       string
+	conn        *jsonrpc2.Conn
+	processDone chan struct{}
+	events      chan adapters.Event
+	closed      chan struct{}
+	closeOnce   sync.Once
+	inbox       chan notification
 }
 
 type notification struct {
@@ -133,6 +134,7 @@ func (a *Adapter) connect(ctx context.Context) error {
 		return err
 	}
 	cmd := exec.Command(a.config.Binary, "app-server", "--stdio")
+	cmd.WaitDelay = 2 * time.Second
 	cmd.Dir, cmd.Env, cmd.Stderr = a.config.Directory, a.environment(), io.Discard
 	out, err := cmd.StdoutPipe()
 	if err != nil {
@@ -148,9 +150,10 @@ func (a *Adapter) connect(ctx context.Context) error {
 		_ = in.Close()
 		return errors.New("Codex app-server could not start")
 	}
+	a.processDone = make(chan struct{})
 	p := &processIO{ReadCloser: out, WriteCloser: in, cmd: cmd}
 	a.conn = jsonrpc2.NewConn(context.Background(), jsonrpc2.NewBufferedStream(p, lineCodec{}), jsonrpc2.HandlerWithError(a.handle), jsonrpc2.SetLogger(discardLogger{}))
-	go func() { _ = cmd.Wait(); _ = a.conn.Close() }()
+	go func() { _ = cmd.Wait(); close(a.processDone); _ = a.conn.Close() }()
 	go func() {
 		<-a.conn.DisconnectNotify()
 		select {
@@ -631,6 +634,9 @@ func (a *Adapter) Close() error {
 		close(a.closed)
 		if a.conn != nil {
 			_ = a.conn.Close()
+		}
+		if a.processDone != nil {
+			<-a.processDone
 		}
 	})
 	return nil
