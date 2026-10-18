@@ -81,6 +81,24 @@ func RunWorker(ctx context.Context, dataDir, sessionID string) error {
 		return errors.New("无法恢复 Session 历史")
 	}
 	defer db.Close()
+	monitorCtx, stopMonitor := context.WithCancel(ctx)
+	monitorDone := make(chan struct{})
+	defer func() { stopMonitor(); <-monitorDone }()
+	go func() {
+		defer close(monitorDone)
+		ticker := time.NewTicker(50 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-monitorCtx.Done():
+				return
+			case <-ticker.C:
+				if err := db.checkDeadline(sessionID); err != nil {
+					logger.Error("event=execution_deadline_failed", "session_id", sessionID)
+				}
+			}
+		}
+	}()
 	endpoint, err := Endpoint(dataDir, sessionID)
 	if err != nil {
 		return err
@@ -138,6 +156,14 @@ func serveConn(conn net.Conn, token, sessionID string, db *workerDB, logger *slo
 
 func handleWorker(db *workerDB, sessionID string, msg ipcMessage) ipcMessage {
 	switch msg.Type {
+	case "stop":
+		reports, err := db.Stop(sessionID, msg.StopReason)
+		if err != nil {
+			return ipcMessage{Type: "result", Code: "unavailable", Message: "无法保存中止事实"}
+		}
+		reply := statusMessage(db, sessionID, 0)
+		reply.Reports = reports
+		return reply
 	case "bind":
 		// 绑定只写本地账本。这里不能调用执行器，也不能运行启动钩子。
 		if err := db.Bind(msg.TaskID, msg.ExecutionID, msg.AgentType); err != nil {
@@ -234,6 +260,8 @@ func statusMessage(db *workerDB, sessionID string, seq int64) ipcMessage {
 		Attaches:        snap.attaches,
 		Seq:             seq,
 		StartIntent:     snap.intent,
+		Cancelled:       snap.cancelled,
+		InputDueAt:      snap.inputDueAt,
 	}
 }
 

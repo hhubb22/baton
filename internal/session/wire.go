@@ -3,6 +3,7 @@ package session
 import (
 	"encoding/json"
 	"errors"
+	"time"
 )
 
 var (
@@ -14,6 +15,9 @@ var (
 )
 
 type ipcMessage struct {
+	StopReason        string      `json:"stop_reason,omitempty"`
+	Cancelled         bool        `json:"cancelled,omitempty"`
+	InputDueAt        time.Time   `json:"input_due_at,omitempty"`
 	Type              string      `json:"type"`
 	Token             string      `json:"token,omitempty"`
 	TaskID            string      `json:"task_id,omitempty"`
@@ -54,6 +58,8 @@ type ipcReport struct {
 
 // Status 是 Worker 对一次状态查询的回答。准备阶段的执行器计数必须保持为 0。
 type Status struct {
+	Cancelled       bool
+	InputDueAt      time.Time
 	PID             int
 	SessionID       string
 	ExecutorStarts  int64

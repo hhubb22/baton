@@ -64,6 +64,10 @@ func (s *Server) onExecutionReport(ctx context.Context, ws *websocket.Conn, env 
 		}
 	}
 	ack, code, err := s.store.ApplyExecutionReport(ctx, store.ExecutionReport{
+		WorkerSequence:     report.WorkerSequence,
+		QueueDeadlineMet:   report.QueueDeadlineMet,
+		ExecutionElapsedMS: report.ExecutionElapsedMS,
+		OccurredAt:         report.OccurredAt, NotStarted: report.NotStarted, OutcomeKnown: report.OutcomeKnown, StopReason: report.StopReason,
 		EmployeeID: env.Source.EmployeeID, NodeID: env.Source.NodeID,
 		EventID: report.EventID, TaskID: report.TaskID, ExecutionID: report.ExecutionID, SessionID: report.SessionID,
 		Kind: report.Kind, InputGeneration: report.InputGeneration, Status: report.Status,
@@ -83,6 +87,29 @@ func (s *Server) onExecutionReport(ctx context.Context, ws *websocket.Conn, env 
 	}
 	s.log.Info("event=execution_report_stored", "task_id", report.TaskID, "event_id", report.EventID, "kind", report.Kind, "status", report.Status)
 	s.replyReport(ctx, ws, env, protocol.ReportAck{OK: true, EventID: report.EventID})
+}
+
+func (s *Server) onExecutionControl(ctx context.Context, ws *websocket.Conn, env protocol.Envelope) {
+	if env.Source == nil || env.Source.Kind != protocol.SourceNode {
+		return
+	}
+	var req protocol.InputRequest
+	dec := json.NewDecoder(bytes.NewReader(rawBody(env.Body)))
+	dec.DisallowUnknownFields()
+	result := protocol.ExecutionControl{Type: protocol.BodyExecutionControlResult}
+	if err := dec.Decode(&req); err != nil || req.Type != protocol.BodyExecutionControl {
+		result.Code = protocol.CodeInvalidMessage
+	} else {
+		reason, seconds, err := s.store.ExecutionControl(ctx, env.Source.EmployeeID, env.Source.NodeID, req.TaskID, req.ExecutionID, req.SessionID)
+		if err != nil {
+			result.Code = task.CodeUnavailable
+		} else {
+			result.OK = true
+			result.StopReason = reason
+			result.ExecutionTimeoutSeconds = seconds
+		}
+	}
+	s.replyExecution(ctx, ws, env, result)
 }
 
 func (s *Server) replyInput(ctx context.Context, ws *websocket.Conn, req protocol.Envelope, result protocol.InputResult) {

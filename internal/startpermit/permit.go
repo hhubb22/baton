@@ -33,19 +33,21 @@ const (
 
 // Claims 是启动许可里可以信任的内容。业务正文不在其中。
 type Claims struct {
-	NodeID            string
-	EmployeeID        string
-	TaskID            string
-	ExecutionID       string
-	StorageGeneration string
-	Nonce             string
-	RequestHash       []byte
-	QueueExpiresAt    time.Time
-	IssuedAt          time.Time
-	ExpiresAt         time.Time
+	ExecutionTimeoutSeconds int
+	NodeID                  string
+	EmployeeID              string
+	TaskID                  string
+	ExecutionID             string
+	StorageGeneration       string
+	Nonce                   string
+	RequestHash             []byte
+	QueueExpiresAt          time.Time
+	IssuedAt                time.Time
+	ExpiresAt               time.Time
 }
 
 type permitJWT struct {
+	ExecutionTimeoutSeconds int `json:"execution_timeout_seconds,omitempty"`
 	jwt.RegisteredClaims
 	NodeID            string `json:"node_id"`
 	EmployeeID        string `json:"employee_id"`
@@ -73,6 +75,7 @@ func Sign(key ed25519.PrivateKey, c Claims) (string, error) {
 		return "", errors.New("启动许可有效期无效")
 	}
 	claims := permitJWT{
+		ExecutionTimeoutSeconds: c.ExecutionTimeoutSeconds,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    Issuer,
 			Subject:   c.ExecutionID,
@@ -148,16 +151,17 @@ func Verify(pub ed25519.PublicKey, token string) (Claims, error) {
 	issued := time.UnixMilli(claims.IssuedMS).UTC()
 	expires := time.UnixMilli(claims.ExpiresMS).UTC()
 	out := Claims{
-		NodeID:            claims.NodeID,
-		EmployeeID:        claims.EmployeeID,
-		TaskID:            claims.TaskID,
-		ExecutionID:       claims.ExecutionID,
-		StorageGeneration: claims.StorageGeneration,
-		Nonce:             claims.Nonce,
-		RequestHash:       sum,
-		QueueExpiresAt:    queueAt.UTC(),
-		IssuedAt:          issued,
-		ExpiresAt:         expires,
+		ExecutionTimeoutSeconds: claims.ExecutionTimeoutSeconds,
+		NodeID:                  claims.NodeID,
+		EmployeeID:              claims.EmployeeID,
+		TaskID:                  claims.TaskID,
+		ExecutionID:             claims.ExecutionID,
+		StorageGeneration:       claims.StorageGeneration,
+		Nonce:                   claims.Nonce,
+		RequestHash:             sum,
+		QueueExpiresAt:          queueAt.UTC(),
+		IssuedAt:                issued,
+		ExpiresAt:               expires,
 	}
 	if err := validateShape(out); err != nil {
 		return Claims{}, errors.New("启动许可无效")

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"baton/internal/identity"
 	"baton/internal/redact"
@@ -15,6 +16,13 @@ import (
 
 // ExecutionReport 是节点上报、准备写入中心的执行事实。
 type ExecutionReport struct {
+	ExecutionElapsedMS   int64
+	QueueDeadlineMet     bool
+	WorkerSequence       int64
+	OccurredAt           time.Time
+	NotStarted           bool
+	OutcomeKnown         bool
+	StopReason           string
 	EmployeeID           string
 	NodeID               string
 	EventID              string
@@ -69,17 +77,21 @@ func (s *Store) LoadTaskInput(ctx context.Context, employeeID, nodeID, taskID, e
 	var out TaskInput
 	var status string
 	var authorized, refused bool
+	var blocked bool
 	err := s.pool.QueryRow(ctx, `
 		SELECT t.description, t.authorization_scope, t.expected_outputs, t.working_directory,
 		       t.device_names, t.status,
-		       e.start_authorized_at IS NOT NULL, e.start_refused_at IS NOT NULL
+		       e.start_authorized_at IS NOT NULL, e.start_refused_at IS NOT NULL,
+		       t.cancel_requested_at IS NOT NULL OR COALESCE(t.execution_expires_at <= now(), false)
+		       OR (e.started_at IS NULL AND t.queue_expires_at <= now())
+		       OR EXISTS (SELECT 1 FROM execution_stops x WHERE x.execution_id = e.id)
 		FROM tasks t
 		JOIN executions e ON e.task_id = t.id AND e.employee_id = t.employee_id
 		WHERE t.employee_id = $1::uuid AND t.id = $2::uuid AND e.id = $3::uuid
 		  AND t.target_node_id = $4::uuid AND t.target_session_id = $5::uuid`,
 		employeeID, taskID, executionID, nodeID, sessionID).Scan(
 		&out.Description, &out.AuthorizationScope, &out.ExpectedOutputs, &out.WorkingDirectory,
-		&out.DeviceNames, &status, &authorized, &refused,
+		&out.DeviceNames, &status, &authorized, &refused, &blocked,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return TaskInput{}, task.CodeInvalidTarget, nil
@@ -95,6 +107,9 @@ func (s *Store) LoadTaskInput(ctx context.Context, employeeID, nodeID, taskID, e
 	if !authorized || refused || strings.TrimSpace(out.Description) == "" {
 		return TaskInput{}, task.CodeInvalidTarget, nil
 	}
+	if blocked {
+		return TaskInput{}, task.CodeConflict, nil
+	}
 	out.Generation = 1
 	if out.DeviceNames == nil {
 		out.DeviceNames = []string{}
@@ -108,7 +123,11 @@ func (s *Store) ApplyExecutionReport(ctx context.Context, in ExecutionReport) (b
 	if err := normalizeReport(&in); err != nil {
 		return false, task.CodeInvalidTarget, nil
 	}
-	if in.Kind == task.EventResult {
+	if in.Kind == task.EventStopReport {
+		if !validStopReport(in) {
+			return false, task.CodeInvalidTarget, nil
+		}
+	} else if in.Kind == task.EventResult {
 		if err := task.ValidateCandidate(task.Candidate{
 			Summary:              in.Summary,
 			Evidence:             in.Evidence,
@@ -166,24 +185,12 @@ func (s *Store) ApplyExecutionReport(ctx context.Context, in ExecutionReport) (b
 	if !head.authorized || head.refused || head.sessionID != in.SessionID || head.nodeID != in.NodeID {
 		return false, task.CodeInvalidTarget, nil
 	}
-	if in.Kind != task.EventNeedsVerification && head.generation != nil && *head.generation != in.InputGeneration {
+	if in.Kind != task.EventNeedsVerification && in.Kind != task.EventStopReport && head.generation != nil && *head.generation != in.InputGeneration {
 		return false, task.CodeConflict, nil
 	}
-	switch head.status {
-	case task.StatusCancelled:
-		if in.Kind != task.EventNeedsVerification {
-			return false, task.CodeConflict, nil
-		}
-		err = retainLateUncertain(ctx, tx, in, head)
-		if err != nil {
-			return false, "", err
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return false, "", fmt.Errorf("保存执行记录失败: %s", redact.Scrub(err.Error()))
-		}
-		return true, "", nil
-	}
-	if in.Kind == task.EventNeedsVerification {
+	if in.Kind == task.EventStopReport {
+		err = applyStopReport(ctx, tx, in, head)
+	} else if in.Kind == task.EventNeedsVerification {
 		err = applyUncertain(ctx, tx, in, head)
 	} else if in.Kind == task.EventStarted {
 		err = applyStarted(ctx, tx, in, head)
@@ -248,6 +255,31 @@ func applyUncertain(ctx context.Context, tx pgx.Tx, in ExecutionReport, head exe
 }
 
 func applyStarted(ctx context.Context, tx pgx.Tx, in ExecutionReport, head executionHead) error {
+	if in.ExecutionElapsedMS < 0 || in.ExecutionElapsedMS > int64(1<<31-1)*1000 {
+		return errors.New("执行计时证据无效")
+	}
+	if _, err := tx.Exec(ctx, `UPDATE tasks SET execution_expires_at = COALESCE(execution_expires_at,
+ now() + GREATEST(execution_timeout_seconds * 1000::bigint - $2::bigint, 0) * interval '1 millisecond') WHERE id = $1::uuid`, in.TaskID, in.ExecutionElapsedMS); err != nil {
+		return err
+	}
+	if in.QueueDeadlineMet {
+		if _, err := tx.Exec(ctx, `DELETE FROM execution_stops WHERE execution_id = $1::uuid AND reason = 'queue_timeout' AND acknowledged_at IS NULL`, in.ExecutionID); err != nil {
+			return err
+		}
+	}
+	var stopping bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM execution_stops WHERE execution_id = $1::uuid)`, in.ExecutionID).Scan(&stopping); err != nil {
+		return err
+	}
+	if stopping {
+		if _, err := tx.Exec(ctx, `UPDATE executions SET started_at = COALESCE(started_at, $2::timestamptz, now()), input_generation = COALESCE(input_generation, $3) WHERE id = $1::uuid`, in.ExecutionID, reportTime(in.OccurredAt), in.InputGeneration); err != nil {
+			return err
+		}
+		if err := bumpVersion(ctx, tx, in.EmployeeID, in.TaskID, head.version); err != nil {
+			return err
+		}
+		return insertReportEvent(ctx, tx, in, head, head.version+1, task.EventStarted, head.status, "")
+	}
 	if head.status == task.StatusNeedsVerification && task.IsUncertainCode(head.errorCode) {
 		tag, err := tx.Exec(ctx, `
 			UPDATE executions
@@ -390,7 +422,7 @@ func retainLateResult(ctx context.Context, tx pgx.Tx, in ExecutionReport, head e
 	if err := bumpVersion(ctx, tx, in.EmployeeID, in.TaskID, head.version); err != nil {
 		return err
 	}
-	if err := insertReportEvent(ctx, tx, in, head, head.version+1, task.EventResult, head.status, ""); err != nil {
+	if err := insertReportEvent(ctx, tx, in, head, head.version+1, task.EventResult, in.Status, in.ErrorCode); err != nil {
 		return err
 	}
 	if err := appendRefs(ctx, tx, in); err != nil {
@@ -446,12 +478,12 @@ func insertReportEvent(ctx context.Context, tx pgx.Tx, in ExecutionReport, head 
 		INSERT INTO task_events (
 			id, task_id, employee_id, version, actor_employee_id, kind,
 			status, target_node_id, agent_type, queue_expires_at,
-			execution_timeout_seconds, reason_code, execution_id, created_at
+			execution_timeout_seconds, reason_code, execution_id, created_at, occurred_at, agent_stopped, outcome_known, not_started, stop_reason, worker_sequence
 		) VALUES (
 			$1::uuid, $2::uuid, $3::uuid, $4, $3::uuid, $5,
-			$6, $7::uuid, $8, $9, $10, $11, $12::uuid, now()
+			$6, $7::uuid, $8, $9, $10, $11, $12::uuid, now(), $13, $14, $15, $16, $17, $18
 		)`, in.EventID, in.TaskID, in.EmployeeID, version, kind, status, head.nodeID, head.agent,
-		head.queueExpires, head.execSeconds, nullText(reason), in.ExecutionID)
+		head.queueExpires, head.execSeconds, nullText(reason), in.ExecutionID, reportTime(in.OccurredAt), in.AgentStopped, in.OutcomeKnown, in.NotStarted, nullText(in.StopReason), in.WorkerSequence)
 	if err != nil {
 		return fmt.Errorf("保存执行记录失败: %s", redact.Scrub(err.Error()))
 	}
@@ -551,6 +583,11 @@ func normalizeReport(in *ExecutionReport) error {
 		}
 	}
 	switch in.Kind {
+	case task.EventStopReport:
+		if !validStopReport(*in) {
+			return errors.New("中止事实无效")
+		}
+		return nil
 	case task.EventNeedsVerification:
 		if in.Status != task.StatusNeedsVerification {
 			return errors.New("报告类型无效")

@@ -142,6 +142,10 @@ func (h *Host) Pending(ctx context.Context, sessionID string) (Status, error) {
 	})
 }
 
+func (h *Host) Stop(ctx context.Context, sessionID, reason string) (Status, error) {
+	return h.call(ctx, sessionID, func(c *Client) (Status, error) { return c.Stop(reason) })
+}
+
 // Ack 在中心确认持久化之后通知 Worker。
 func (h *Host) Ack(ctx context.Context, sessionID, eventID string) (Status, error) {
 	return h.call(ctx, sessionID, func(c *Client) (Status, error) {

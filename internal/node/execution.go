@@ -16,6 +16,12 @@ import (
 )
 
 func (s *startLoop) followInput(job *startJob) {
+	if err := waitExecutionGate(s.ctx, job.executionID, "BATON_TEST_INPUT_GATE", "event=input_gated", s.log); err != nil {
+		return
+	}
+	if !s.checkControl(s.ctx, job) {
+		return
+	}
 	var payload string
 	var err error
 	for attempt := 1; attempt <= 5; attempt++ {
@@ -65,10 +71,15 @@ func (s *startLoop) resendPending(ctx context.Context) {
 			if len(st.Reports) > 0 {
 				s.deliver(ctx, id, st.Reports)
 			}
-			if st.Uncertain || st.InputSubmitted || !st.StartIntent || st.TaskID == "" || st.ExecutionID == "" {
+			if st.TaskID != "" && st.ExecutionID != "" && !st.Cancelled {
+				if !s.checkControl(ctx, &startJob{taskID: st.TaskID, executionID: st.ExecutionID, sessionID: id}) {
+					continue
+				}
+			}
+			if st.Cancelled || st.Uncertain || st.InputSubmitted || !st.StartIntent || st.TaskID == "" || st.ExecutionID == "" {
 				continue
 			}
-			// 这里补发的是尚未送出的同一次输入。取消标记和执行期限留到 T10 再拦。
+			s.log.Info("event=input_resend", "task_id", st.TaskID, "execution_id", st.ExecutionID, "input_due_at", st.InputDueAt)
 			s.followInput(&startJob{
 				taskID: st.TaskID, executionID: st.ExecutionID, sessionID: id,
 			})
@@ -298,7 +309,7 @@ func (s *startLoop) onReply(env protocol.Envelope) bool {
 		return false
 	}
 	switch kind.Type {
-	case protocol.BodyExecutionInputResult, protocol.BodyExecutionReportResult:
+	case protocol.BodyExecutionInputResult, protocol.BodyExecutionReportResult, protocol.BodyExecutionControlResult:
 	default:
 		return false
 	}

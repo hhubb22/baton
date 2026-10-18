@@ -52,13 +52,15 @@ func TestStartPermitCancelRacePreservesPossibleStart(t *testing.T) {
 	if code := postJSON(t, st.client, st.base+"/api/v1/tasks/"+created.TaskID+"/cancel", map[string]any{}, st.csrf, &view); code != 200 || view.Status != task.StatusNeedsVerification || !view.PossibleStart {
 		t.Fatalf("竞态取消得到 %d %+v", code, view)
 	}
-	waitExecutor(t, st, "start\ninput\n")
-	waitTaskStatus(t, st, created.TaskID, task.StatusRunning)
-	var running, cancelRequested bool
+	waitTaskStatus(t, st, created.TaskID, task.StatusCancelled)
+	var cancelled, cancelRequested bool
 	if err := st.pool.QueryRow(context.Background(), `
-		SELECT status = 'running', cancel_requested_at IS NOT NULL
-		FROM tasks WHERE id = $1::uuid`, created.TaskID).Scan(&running, &cancelRequested); err != nil || !running || !cancelRequested {
-		t.Fatalf("确认启动后的取消被当成未执行: %v running %v cancel %v", err, running, cancelRequested)
+		SELECT status = 'cancelled', cancel_requested_at IS NOT NULL
+		FROM tasks WHERE id = $1::uuid`, created.TaskID).Scan(&cancelled, &cancelRequested); err != nil || !cancelled || !cancelRequested {
+		t.Fatalf("取消未按 Worker 确认收敛: %v cancelled %v cancel %v", err, cancelled, cancelRequested)
+	}
+	if n := executorCount(t, st, "input"); n != 0 {
+		t.Fatalf("取消标记后仍补发了 %d 次输入", n)
 	}
 }
 

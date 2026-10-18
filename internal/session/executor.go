@@ -128,6 +128,21 @@ func (o *Observer) RunStartupHooks(context.Context) error {
 	return o.record("hook")
 }
 
+// Abort 的接口返回不等于停止事实；测试样本分别提供停止和结果可说明证据。
+func (o *Observer) Abort() (stopped, outcomeKnown bool, err error) {
+	if err := o.record("abort"); err != nil {
+		return false, false, err
+	}
+	switch os.Getenv("BATON_TEST_ABORT_SCRIPT") {
+	case "unconfirmed":
+		return false, false, nil
+	case "unknown":
+		return true, false, nil
+	default:
+		return true, true, nil
+	}
+}
+
 func (o *Observer) record(line string) error {
 	if o.path == "" {
 		return nil

@@ -29,6 +29,9 @@ func (s *Server) DeliverPrepares(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if err := s.store.ExpireExecutionsAt(ctx, time.Now()); err != nil {
+				s.log.Error("event=execution_expire_failed")
+			}
 			if err := s.store.FailUnsentPrepares(ctx); err != nil {
 				s.log.Error("event=prepare_expire_failed")
 			}

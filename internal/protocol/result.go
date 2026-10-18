@@ -1,6 +1,9 @@
 package protocol
 
-import "baton/internal/task"
+import (
+	"baton/internal/task"
+	"time"
+)
 
 const (
 	// BodyExecutionInput 是节点在写入 start_intent 之后领取任务输入。
@@ -10,7 +13,9 @@ const (
 	// BodyExecutionReport 是节点上报的启动事实或结构化结果。
 	BodyExecutionReport = "execution.report"
 	// BodyExecutionReportResult 是中心在持久化之后返回的确认。
-	BodyExecutionReportResult = "execution.report_result"
+	BodyExecutionReportResult  = "execution.report_result"
+	BodyExecutionControl       = "execution.control"
+	BodyExecutionControlResult = "execution.control_result"
 
 	ReportStarted           = task.EventStarted
 	ReportResult            = task.EventResult
@@ -43,6 +48,13 @@ type InputResult struct {
 
 // ExecutionReport 是允许进入中心的执行事实。它不包含会话原文。
 type ExecutionReport struct {
+	ExecutionElapsedMS   int64            `json:"execution_elapsed_ms,omitempty"`
+	QueueDeadlineMet     bool             `json:"queue_deadline_met,omitempty"`
+	WorkerSequence       int64            `json:"worker_sequence,omitempty"`
+	OccurredAt           time.Time        `json:"occurred_at,omitempty"`
+	NotStarted           bool             `json:"not_started,omitempty"`
+	OutcomeKnown         bool             `json:"outcome_known,omitempty"`
+	StopReason           string           `json:"stop_reason,omitempty"`
 	Type                 string           `json:"type"`
 	EventID              string           `json:"event_id"`
 	TaskID               string           `json:"task_id"`
@@ -59,6 +71,15 @@ type ExecutionReport struct {
 	ErrorCode            string           `json:"error_code,omitempty"`
 	ErrorMessage         string           `json:"error_message,omitempty"`
 	AgentStopped         bool             `json:"agent_stopped,omitempty"`
+}
+
+// ExecutionControl 不携带任务输入；断线期间保留在中心的中止命令不会丢失。
+type ExecutionControl struct {
+	Type                    string `json:"type"`
+	OK                      bool   `json:"ok"`
+	Code                    string `json:"code,omitempty"`
+	StopReason              string `json:"stop_reason,omitempty"`
+	ExecutionTimeoutSeconds int    `json:"execution_timeout_seconds,omitempty"`
 }
 
 // ReportAck 只有在中心事务提交成功之后才表示结果已交付。

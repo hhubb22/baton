@@ -214,6 +214,9 @@ func (s *Server) onEnvelope(ctx context.Context, ws *websocket.Conn, raw json.Ra
 		return
 	}
 	switch kind.Type {
+	case protocol.BodyExecutionControl:
+		s.onExecutionControl(ctx, ws, env)
+		return
 	case protocol.BodyPrepareResult:
 		s.notePrepareResult(env)
 		return
