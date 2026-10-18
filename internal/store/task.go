@@ -493,6 +493,7 @@ func insertAccepted(ctx context.Context, tx pgx.Tx, employeeID string, prepared 
 		execSeconds = *in.ExecutionTimeoutSeconds
 	}
 	rec := task.Record{
+		RequiredArtifacts:       in.RequiredArtifacts,
 		TaskID:                  taskID,
 		RequestID:               in.RequestID,
 		Description:             in.Description,
@@ -520,7 +521,7 @@ func insertAccepted(ctx context.Context, tx pgx.Tx, employeeID string, prepared 
 			requested_queue_timeout_seconds, requested_execution_timeout_seconds,
 			target_node_id, agent_type,
 			queue_timeout_seconds, execution_timeout_seconds,
-			queue_expires_at, status, version, created_at, updated_at
+			queue_expires_at, status, version, created_at, updated_at, required_artifacts
 		) VALUES (
 			$1::uuid, $2::uuid, $3, $4, $5,
 			$6::uuid, $7::uuid, $8::uuid,
@@ -529,7 +530,7 @@ func insertAccepted(ctx context.Context, tx pgx.Tx, employeeID string, prepared 
 			$15, $16,
 			$17::uuid, $18,
 			$19, $20,
-			now() + ($19::int * interval '1 second'), 'queued', 1, now(), now()
+			now() + ($19::int * interval '1 second'), 'queued', 1, now(), now(), $21
 		)
 		RETURNING created_at, queue_expires_at`,
 		taskID, employeeID, in.RequestID, prepared.Hash, in.Description,
@@ -537,7 +538,7 @@ func insertAccepted(ctx context.Context, tx pgx.Tx, employeeID string, prepared 
 		nullString(in.WorkingDirectory), nullDevices(in.DeviceNames), nullString(in.AuthorizationScope), nullString(in.ExpectedOutputs),
 		nullString(in.TargetNodeID), nullString(in.AgentType),
 		nullInt(in.QueueTimeoutSeconds), nullInt(in.ExecutionTimeoutSeconds),
-		targetID, agent, queueSeconds, execSeconds,
+		targetID, agent, queueSeconds, execSeconds, nonNilArtifacts(in.RequiredArtifacts),
 	).Scan(&rec.AcceptedAt, &rec.QueueExpiresAt)
 	if err != nil {
 		if uniqueRequest(err) {
@@ -637,7 +638,7 @@ const taskSelect = `
 	       (SELECT stopped_at FROM execution_stops x JOIN executions e ON e.id = x.execution_id WHERE e.task_id = tasks.id),
 	       (SELECT reason FROM execution_stops x JOIN executions e ON e.id = x.execution_id WHERE e.task_id = tasks.id),
 	       COALESCE((SELECT outcome_known FROM execution_stops x JOIN executions e ON e.id = x.execution_id WHERE e.task_id = tasks.id), false),
-	       (SELECT rerun_of_task_id::text FROM task_relations r WHERE r.task_id = tasks.id AND r.employee_id = tasks.employee_id)
+	       (SELECT rerun_of_task_id::text FROM task_relations r WHERE r.task_id = tasks.id AND r.employee_id = tasks.employee_id), required_artifacts
 	FROM tasks`
 
 type queryer interface {
@@ -677,6 +678,7 @@ func scanTask(row pgx.Row) (task.Record, []byte, error) {
 		&rec.Summary, &rec.EvidenceEmptyReason, &rec.ArtifactsEmptyReason,
 		&rec.CancelRequestedAt, &rec.ExecutionExpiresAt, &rec.StopRequestedAt,
 		&rec.StopAcknowledgedAt, &rec.StopConfirmedAt, &rec.StopReason, &rec.StopOutcomeKnown, &rec.RerunOfTaskID,
+		&rec.RequiredArtifacts,
 	); err != nil {
 		return task.Record{}, nil, fmt.Errorf("读取任务失败: %s", redact.Scrub(err.Error()))
 	}

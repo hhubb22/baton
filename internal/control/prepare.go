@@ -62,6 +62,7 @@ func (s *Server) deliverOne(ctx context.Context) {
 	ch, cancel := s.armPrepare(intent.MessageID)
 	defer cancel()
 	body, err := json.Marshal(protocol.PrepareCommand{
+		RequiredArtifacts: intent.RequiredArtifacts,
 		Type:              protocol.BodyPrepare,
 		TaskID:            intent.TaskID,
 		ExecutionID:       intent.ExecutionID,

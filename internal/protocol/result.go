@@ -32,18 +32,19 @@ type InputRequest struct {
 
 // InputResult 把这一次执行的任务输入交回节点。失败时不带说明正文。
 type InputResult struct {
-	Type               string   `json:"type"`
-	OK                 bool     `json:"ok"`
-	Code               string   `json:"code,omitempty"`
-	Message            string   `json:"message,omitempty"`
-	TaskID             string   `json:"task_id,omitempty"`
-	ExecutionID        string   `json:"execution_id,omitempty"`
-	Generation         int      `json:"generation,omitempty"`
-	Description        string   `json:"description,omitempty"`
-	AuthorizationScope *string  `json:"authorization_scope,omitempty"`
-	ExpectedOutputs    *string  `json:"expected_outputs,omitempty"`
-	WorkingDirectory   *string  `json:"working_directory,omitempty"`
-	DeviceNames        []string `json:"device_names,omitempty"`
+	RequiredArtifacts  []task.ArtifactRef `json:"required_artifacts,omitempty"`
+	Type               string             `json:"type"`
+	OK                 bool               `json:"ok"`
+	Code               string             `json:"code,omitempty"`
+	Message            string             `json:"message,omitempty"`
+	TaskID             string             `json:"task_id,omitempty"`
+	ExecutionID        string             `json:"execution_id,omitempty"`
+	Generation         int                `json:"generation,omitempty"`
+	Description        string             `json:"description,omitempty"`
+	AuthorizationScope *string            `json:"authorization_scope,omitempty"`
+	ExpectedOutputs    *string            `json:"expected_outputs,omitempty"`
+	WorkingDirectory   *string            `json:"working_directory,omitempty"`
+	DeviceNames        []string           `json:"device_names,omitempty"`
 }
 
 // ExecutionReport 是允许进入中心的执行事实。它不包含会话原文。

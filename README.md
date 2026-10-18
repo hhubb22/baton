@@ -314,6 +314,27 @@ batond files remove --id notes [--data-dir 目录]
 
 首版没有远程编辑，也没有完整文件下载。`POST`、`PUT` 和 `DELETE` 都不会修改节点上的文件。
 
+## 必需产物引用
+
+创建任务或 `baton delegate` 的请求可以填写 `required_artifacts`，最多 32 项；字段缺省时沿用不依赖文件的任务流程。例如：
+
+```json
+{
+  "request_id": "flash-build-42",
+  "description": "使用已交付的固件执行测试",
+  "target_node_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  "required_artifacts": [
+    {"node_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "root_id": "build", "path": "firmware.bin"}
+  ]
+}
+```
+
+`node_id` 表示文件实际所属的节点，不是传输目标；`root_id` 必须先通过目标节点本机的 `batond files add` 登记，`path` 是根内资源路径（最多 200 字符）。引用纳入请求幂等摘要和 256 KiB 输入大小限制。节点在首次 prepare 绑定 Worker 前、Worker 提交执行器输入前各核对一次，复用文件浏览的授权目录、`os.Root` 和实际打开边界；只接受可读的普通文件，不读取正文。检查不等同于传输、锁定文件或保证执行器之后读取时内容不变。
+
+不存在、无权限、未授权目录、越界/符号链接或只属于另一节点的引用都会使任务以 `artifact_unavailable` 失败，不向执行器提交依赖输入。错误消息包含首个引用索引及 `not_found`、`unavailable`、`root_forbidden`、`path_escaped`、`unsupported_type` 或 `other_node` 原因。prepare 后文件变化导致的失败还会上报每个引用的 `access_status` 和原因；prepare 重发仍返回原执行映射，不创建新执行。
+
+引用只携带定位信息。另一节点有同名文件也不能把原节点的本地路径当作已交付；必须先使用已有通道交付，再引用目标节点的授权目录。大文件不经 Relay，不新增下载接口、任意 URL 代理或制品服务；真实跨机器通道与传输规模留给 T33 验证。
+
 ## Web UI
 
 员工页面在 `web/`。Coordinator 用 `go:embed` 提供 `internal/webui/dist` 里的构建结果，不另起 Node.js 服务，页面也不从第三方 CDN 加载脚本或样式。仓库保留这次构建结果，所以没有 pnpm 时 `go build ./...` 和 `go test ./...` 仍能编译。页面改动后需要重新构建，再编译 Coordinator，二进制里才是新页面。

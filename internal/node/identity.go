@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"baton/internal/fileaccess"
 	"baton/internal/identity"
 	"baton/internal/privatefile"
 )
@@ -91,26 +92,7 @@ func (id Identity) complete() error {
 
 // PrepareDataDir 创建仅当前用户可进入的数据目录。
 func PrepareDataDir(dir string) error {
-	if strings.TrimSpace(dir) == "" || dir == "." {
-		return errors.New("节点数据目录无效")
-	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return errors.New("无法创建节点数据目录")
-	}
-	if err := privatefile.ProtectDir(dir); err != nil {
-		return errors.New("无法限制节点数据目录的权限")
-	}
-	info, err := os.Lstat(dir)
-	if err != nil {
-		return errors.New("无法读取节点数据目录")
-	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return errors.New("节点数据目录无效")
-	}
-	if err := privatefile.CheckDir(dir); err != nil {
-		return errors.New("节点数据目录允许其他用户进入")
-	}
-	return nil
+	return fileaccess.PrepareDataDir(dir)
 }
 
 // WriteIdentity 原子写入身份文件，并限制为仅当前用户可读写。

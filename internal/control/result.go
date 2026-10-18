@@ -43,7 +43,7 @@ func (s *Server) onExecutionInput(ctx context.Context, ws *websocket.Conn, env p
 		OK: true, TaskID: req.TaskID, ExecutionID: req.ExecutionID, Generation: input.Generation,
 		Description: input.Description, AuthorizationScope: input.AuthorizationScope,
 		ExpectedOutputs: input.ExpectedOutputs, WorkingDirectory: input.WorkingDirectory,
-		DeviceNames: input.DeviceNames,
+		DeviceNames: input.DeviceNames, RequiredArtifacts: input.RequiredArtifacts,
 	})
 }
 

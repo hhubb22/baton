@@ -55,6 +55,37 @@ func TestPrepareIsIdempotentAndRejectsBusySession(t *testing.T) {
 	}
 }
 
+func TestPrepareChecksArtifactsBeforeBindingButKeepsExistingReceipt(t *testing.T) {
+	led := openTestLedger(t)
+	root := t.TempDir()
+	if err := AddBrowseRoot(led.dir, "build", root); err != nil {
+		t.Fatal(err)
+	}
+	in := samplePrepare(t)
+	in.NodeID = mustID(t)
+	in.RequiredArtifacts = []task.ArtifactRef{{NodeID: in.NodeID, RootID: "build", Path: "firmware.bin"}}
+	binds := 0
+	bind := func(string) error { binds++; return nil }
+	if got := led.Prepare(in, bind); got.OK || got.Code != task.CodeArtifactUnavailable || binds != 0 || receipts(t, led) != 0 {
+		t.Fatalf("缺失产物仍绑定 Worker: %+v binds=%d", got, binds)
+	}
+	file := filepath.Join(root, "firmware.bin")
+	if err := os.WriteFile(file, []byte("FIRMWARE"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	first := led.Prepare(in, bind)
+	if !first.OK || binds != 1 {
+		t.Fatalf("可用产物没有绑定: %+v", first)
+	}
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	again := led.Prepare(in, bind)
+	if !again.OK || again.SessionID != first.SessionID || receipts(t, led) != 1 {
+		t.Fatalf("文件变化使重发丢失原执行映射: %+v", again)
+	}
+}
+
 func TestPrepareRejectsBeforeWriting(t *testing.T) {
 	led := openTestLedger(t)
 	expired := samplePrepare(t)

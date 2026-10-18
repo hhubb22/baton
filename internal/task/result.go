@@ -170,7 +170,7 @@ func validateRefs(refs []ResultRef, emptyReason string) error {
 
 func validResultError(code, message string) bool {
 	switch code {
-	case CodeResultFormat, CodeExecutionFailed:
+	case CodeResultFormat, CodeExecutionFailed, CodeArtifactUnavailable:
 	default:
 		return false
 	}
@@ -183,6 +183,8 @@ func normalizeResultCode(code string) string {
 		return CodeResultFormat
 	case CodeExecutionFailed:
 		return CodeExecutionFailed
+	case CodeArtifactUnavailable:
+		return CodeArtifactUnavailable
 	default:
 		if strings.TrimSpace(code) == "" {
 			return ""

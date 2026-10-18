@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"baton/internal/fileaccess"
 	"baton/internal/identity"
 	"baton/internal/task"
 
@@ -30,6 +31,8 @@ type Ledger struct {
 }
 
 type PrepareInput struct {
+	NodeID            string
+	RequiredArtifacts []task.ArtifactRef
 	MessageID         string
 	TaskID            string
 	ExecutionID       string
@@ -223,6 +226,9 @@ func (l *Ledger) Prepare(in PrepareInput, bind func(sessionID string) error) Pre
 	}
 	if message, ok := checkDirectory(in.WorkingDirectory); !ok {
 		return rejected(task.CodeInvalidTarget, message)
+	}
+	if _, reason := fileaccess.CheckArtifacts(l.dir, in.NodeID, in.RequiredArtifacts); reason != "" {
+		return rejected(task.CodeArtifactUnavailable, reason)
 	}
 	sessionID := in.TargetSessionID
 	if sessionID == "" {
