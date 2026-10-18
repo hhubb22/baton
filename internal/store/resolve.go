@@ -139,7 +139,8 @@ func (s *Store) rerunOnce(ctx context.Context, employeeID, taskID string, in tas
 		return task.Record{}, err
 	}
 	input := task.Input{RequestID: in.RequestID, Description: previous.Description,
-		TargetNodeID: &previous.TargetNodeID, AgentType: &previous.AgentType,
+		RequiredArtifacts: previous.RequiredArtifacts,
+		TargetNodeID:      &previous.TargetNodeID, AgentType: &previous.AgentType,
 		WorkingDirectory: previous.WorkingDirectory, AuthorizationScope: previous.AuthorizationScope,
 		ExpectedOutputs: previous.ExpectedOutputs, QueueTimeoutSeconds: &queueSeconds,
 		ExecutionTimeoutSeconds: &previous.ExecutionTimeoutSeconds}
