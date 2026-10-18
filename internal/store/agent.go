@@ -101,11 +101,16 @@ func (s *Store) AgentTask(ctx context.Context, source AgentSource, taskID string
 
 type AgentTaskView struct {
 	task.Record
-	ExecutionID    string `json:"execution_id"`
-	DeliveryStatus string `json:"delivery_status"`
+	ExecutionID     string  `json:"execution_id"`
+	DeliveryStatus  string  `json:"delivery_status"`
+	DeliveryID      *string `json:"delivery_id,omitempty"`
+	InputGeneration *int    `json:"input_generation,omitempty"`
 }
 
 type AgentResultView struct {
+	InputGeneration      *int              `json:"input_generation,omitempty"`
+	DeliveryStatus       string            `json:"delivery_status,omitempty"`
+	DeliveryID           *string           `json:"delivery_id,omitempty"`
 	TaskID               string            `json:"task_id"`
 	TargetNodeID         string            `json:"target_node_id"`
 	SessionID            *string           `json:"session_id"`
@@ -131,6 +136,7 @@ func (s *Store) AgentResult(ctx context.Context, source AgentSource, id string) 
 		return AgentResultView{}, err
 	}
 	out := AgentResultView{TaskID: id, TargetNodeID: view.TargetNodeID, SessionID: view.TargetSessionID,
+		DeliveryStatus: view.DeliveryStatus, DeliveryID: view.DeliveryID, InputGeneration: view.InputGeneration,
 		ExecutionID: view.ExecutionID, Status: view.Status, Ready: view.Summary != nil,
 		Summary: view.Summary, Evidence: view.Evidence, Artifacts: view.Artifacts,
 		EvidenceEmptyReason: view.EvidenceEmptyReason, ArtifactsEmptyReason: view.ArtifactsEmptyReason}
@@ -165,8 +171,10 @@ func (s *Store) AgentTaskView(ctx context.Context, source AgentSource, id string
 	}
 	out := AgentTaskView{Record: rec}
 	err = s.pool.QueryRow(ctx, `SELECT e.id::text,
-	 CASE WHEN EXISTS (SELECT 1 FROM delivery_records d WHERE d.execution_id = e.id) THEN 'delivered' ELSE 'not_delivered' END
-	 FROM executions e WHERE e.employee_id = $1::uuid AND e.task_id = $2::uuid`, source.EmployeeID, id).Scan(&out.ExecutionID, &out.DeliveryStatus)
+	 COALESCE(cd.status, CASE WHEN $2::uuid <> $3::uuid THEN 'pending'
+       WHEN EXISTS (SELECT 1 FROM delivery_records d WHERE d.execution_id = e.id) THEN 'delivered' ELSE 'not_delivered' END), cd.id::text, e.input_generation
+	 FROM executions e LEFT JOIN child_deliveries cd ON cd.child_execution_id = e.id AND cd.source_execution_id = $4::uuid
+     WHERE e.employee_id = $1::uuid AND e.task_id = $2::uuid`, source.EmployeeID, id, source.TaskID, source.ExecutionID).Scan(&out.ExecutionID, &out.DeliveryStatus, &out.DeliveryID, &out.InputGeneration)
 	return out, err
 }
 

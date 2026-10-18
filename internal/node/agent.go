@@ -125,6 +125,21 @@ func (b *agentBridge) call(ctx context.Context, req protocol.AgentRequest) proto
 	if agentcli.Decode(raw, &result) != nil || result.Type != protocol.BodyAgentResult {
 		return agentFailure(task.CodeUnavailable)
 	}
+	if result.OK && req.Operation == "result" && req.TaskID != req.SourceTaskID {
+		var view struct {
+			Ready  bool   `json:"ready"`
+			Status string `json:"status"`
+		}
+		if json.Unmarshal(result.Data, &view) == nil && (view.Ready || view.Status == task.StatusCancelled || view.Status == task.StatusFailed || view.Status == task.StatusCompleted) {
+			if err := loop.receiveChildren(ctx, &startJob{taskID: req.SourceTaskID, executionID: req.SourceExecutionID, sessionID: req.SourceSessionID}, req.TaskID, true); err != nil {
+				return agentFailure(task.CodeUnavailable)
+			}
+			raw, err = loop.roundTrip(ctx, body)
+			if err != nil || agentcli.Decode(raw, &result) != nil || result.Type != protocol.BodyAgentResult {
+				return agentFailure(task.CodeUnavailable)
+			}
+		}
+	}
 	return result
 }
 

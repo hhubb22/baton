@@ -48,6 +48,7 @@ type workerDB struct {
 	resultDelivered    bool
 	recoveredUncertain bool
 	uncertainCode      string
+	deliveryUncertain  bool
 	generation         int
 	attaches           int
 	observer           *Observer
@@ -95,6 +96,10 @@ func openWorkerDB(path string, observer *Observer) (*workerDB, error) {
 		return nil, err
 	}
 	w := &workerDB{db: db, observer: observer, clock: startpermit.NewClock(), executionClock: startpermit.NewClock()}
+	if err := ensureChildSchema(w); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err := w.load(); err != nil {
 		db.Close()
 		return nil, err
@@ -155,6 +160,11 @@ func (w *workerDB) load() error {
 	if attaches != "" {
 		fmt.Sscan(attaches, &w.attaches)
 	}
+	var uncertainDeliveries int
+	if err := w.db.QueryRow(`SELECT COUNT(*) FROM child_deliveries WHERE status = 'uncertain'`).Scan(&uncertainDeliveries); err != nil {
+		return err
+	}
+	w.deliveryUncertain = uncertainDeliveries > 0
 	if w.hasResultLocked() {
 		w.inputResolved = true
 	} else if w.cancelled {
@@ -172,7 +182,7 @@ func (w *workerDB) load() error {
 
 func (w *workerDB) hasResultLocked() bool {
 	var n int
-	if err := w.db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE kind = ?`, protocol.ReportResult).Scan(&n); err != nil {
+	if err := w.db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE kind = ? AND json_extract(payload, '$.input_generation') = ?`, protocol.ReportResult, w.generation).Scan(&n); err != nil {
 		return false
 	}
 	return n > 0
@@ -567,22 +577,28 @@ func (w *workerDB) recordExecution(sessionID, payload string, out Output) ([]ipc
 			return nil, err
 		}
 	}
-	startedID, err := identity.NewUUID()
-	if err != nil {
+	var startedRecorded bool
+	if err := tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM outbox WHERE kind = ?)`, protocol.ReportStarted).Scan(&startedRecorded); err != nil {
 		return nil, err
 	}
-	started, err := json.Marshal(protocol.ExecutionReport{
-		ExecutionElapsedMS: w.inputDelay.Milliseconds(),
-		QueueDeadlineMet:   true,
-		OccurredAt:         w.inputDueAt,
-		Type:               protocol.BodyExecutionReport, EventID: startedID, TaskID: w.task, ExecutionID: w.execution,
-		SessionID: sessionID, Kind: protocol.ReportStarted, InputGeneration: w.generation, Status: task.StatusRunning,
-	})
-	if err != nil {
-		return nil, err
-	}
-	if err := insertOutbox(tx, startedID, protocol.ReportStarted, started); err != nil {
-		return nil, err
+	if w.generation == 1 && !startedRecorded {
+		startedID, err := identity.NewUUID()
+		if err != nil {
+			return nil, err
+		}
+		started, err := json.Marshal(protocol.ExecutionReport{
+			ExecutionElapsedMS: w.inputDelay.Milliseconds(),
+			QueueDeadlineMet:   true,
+			OccurredAt:         w.inputDueAt,
+			Type:               protocol.BodyExecutionReport, EventID: startedID, TaskID: w.task, ExecutionID: w.execution,
+			SessionID: sessionID, Kind: protocol.ReportStarted, InputGeneration: w.generation, Status: task.StatusRunning,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if err := insertOutbox(tx, startedID, protocol.ReportStarted, started); err != nil {
+			return nil, err
+		}
 	}
 	if out.Final != "" {
 		if err := insertLog(tx, "output", out.Final, now); err != nil {
@@ -591,8 +607,29 @@ func (w *workerDB) recordExecution(sessionID, payload string, out Output) ([]ipc
 	}
 	if out.Exited || out.Uncertain || out.Final != "" {
 		candidate := terminalCandidate(out)
-		if candidate.Status == task.StatusCompleted && !out.Exited {
-			candidate = task.Candidate{}
+		if parsed, err := task.ParseCandidate(out.Final); err == nil {
+			raw, err := json.Marshal(parsed)
+			if err != nil {
+				return nil, err
+			}
+			if err := putMeta(tx, "candidate_generation", fmt.Sprint(w.generation)); err != nil {
+				return nil, err
+			}
+			if err := putMeta(tx, "candidate", string(raw)); err != nil {
+				return nil, err
+			}
+			if parsed.Status == task.StatusCompleted && !out.Exited && !out.Uncertain {
+				candidate = task.Candidate{}
+			}
+		} else if out.Exited && out.Final == "" && !out.Uncertain {
+			var saved, generation string
+			if err := tx.QueryRow(`SELECT value FROM meta WHERE key = 'candidate_generation'`).Scan(&generation); err == nil && generation == fmt.Sprint(w.generation) {
+				if err := tx.QueryRow(`SELECT value FROM meta WHERE key = 'candidate'`).Scan(&saved); err == nil {
+					if err := json.Unmarshal([]byte(saved), &candidate); err != nil {
+						return nil, err
+					}
+				}
+			}
 		}
 		if candidate.Status != "" {
 			resultID, err := identity.NewUUID()
@@ -609,6 +646,20 @@ func (w *workerDB) recordExecution(sessionID, payload string, out Output) ([]ipc
 		}
 	}
 	if err := putMeta(tx, "input_resolved", "1"); err != nil {
+		return nil, err
+	}
+	waiting := "0"
+	if out.WaitingForChildren {
+		waiting = "1"
+	}
+	if err := putMeta(tx, "waiting_children", waiting); err != nil {
+		return nil, err
+	}
+	stopped := "0"
+	if out.Exited || out.Uncertain {
+		stopped = "1"
+	}
+	if err := putMeta(tx, "agent_stopped", stopped); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
