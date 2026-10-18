@@ -262,7 +262,7 @@ func (s *Store) ListTaskEvents(ctx context.Context, employeeID, taskID string) (
 	rows, err := s.pool.Query(ctx, `
 		SELECT id::text, task_id::text, version, kind, actor_employee_id::text,
 		       status, target_node_id::text, agent_type, queue_expires_at,
-		       execution_timeout_seconds, reason_code, created_at
+		       execution_timeout_seconds, reason_code, created_at, occurred_at, agent_stopped, outcome_known, not_started, stop_reason, worker_sequence, execution_id::text
 		FROM task_events
 		WHERE employee_id = $1::uuid AND task_id = $2::uuid
 		ORDER BY version ASC`, employeeID, taskID)
@@ -277,6 +277,9 @@ func (s *Store) ListTaskEvents(ctx context.Context, employeeID, taskID string) (
 			&ev.EventID, &ev.TaskID, &ev.Version, &ev.Kind, &ev.ActorEmployeeID,
 			&ev.Status, &ev.TargetNodeID, &ev.AgentType, &ev.QueueExpiresAt,
 			&ev.ExecutionTimeoutSeconds, &ev.ReasonCode, &ev.CreatedAt,
+			&ev.OccurredAt, &ev.AgentStopped,
+			&ev.OutcomeKnown, &ev.NotStarted, &ev.StopReason,
+			&ev.WorkerSequence, &ev.ExecutionID,
 		); err != nil {
 			return nil, fmt.Errorf("读取任务事件失败: %s", redact.Scrub(err.Error()))
 		}
@@ -612,7 +615,13 @@ const taskSelect = `
 	       working_directory, device_names, authorization_scope, expected_outputs,
 	       target_node_id::text, agent_type, execution_timeout_seconds,
 	       queue_expires_at, status, version, created_at, error_code, error_message,
-	       summary, evidence_empty_reason, artifacts_empty_reason
+	       summary, evidence_empty_reason, artifacts_empty_reason,
+	       cancel_requested_at, execution_expires_at,
+	       (SELECT requested_at FROM execution_stops x JOIN executions e ON e.id = x.execution_id WHERE e.task_id = tasks.id),
+	       (SELECT acknowledged_at FROM execution_stops x JOIN executions e ON e.id = x.execution_id WHERE e.task_id = tasks.id),
+	       (SELECT stopped_at FROM execution_stops x JOIN executions e ON e.id = x.execution_id WHERE e.task_id = tasks.id),
+	       (SELECT reason FROM execution_stops x JOIN executions e ON e.id = x.execution_id WHERE e.task_id = tasks.id),
+	       COALESCE((SELECT outcome_known FROM execution_stops x JOIN executions e ON e.id = x.execution_id WHERE e.task_id = tasks.id), false)
 	FROM tasks`
 
 type queryer interface {
@@ -650,6 +659,8 @@ func scanTask(row pgx.Row) (task.Record, []byte, error) {
 		&rec.QueueExpiresAt, &rec.Status, &rec.Version, &rec.AcceptedAt,
 		&rec.ErrorCode, &rec.ErrorMessage,
 		&rec.Summary, &rec.EvidenceEmptyReason, &rec.ArtifactsEmptyReason,
+		&rec.CancelRequestedAt, &rec.ExecutionExpiresAt, &rec.StopRequestedAt,
+		&rec.StopAcknowledgedAt, &rec.StopConfirmedAt, &rec.StopReason, &rec.StopOutcomeKnown,
 	); err != nil {
 		return task.Record{}, nil, fmt.Errorf("读取任务失败: %s", redact.Scrub(err.Error()))
 	}

@@ -128,6 +128,23 @@ func (s *Store) RequestCancel(ctx context.Context, employeeID, taskID string) (C
 	if row.status == "" {
 		return CancelDecision{}, ErrNotVisible
 	}
+	if row.cancelAt == nil {
+		if _, err := tx.Exec(ctx, `UPDATE tasks SET cancel_requested_at = now() WHERE id = $1::uuid`, taskID); err != nil {
+			return CancelDecision{}, err
+		}
+		if err := bumpVersion(ctx, tx, employeeID, taskID, row.version); err != nil {
+			return CancelDecision{}, err
+		}
+		if err := insertStartEvent(ctx, tx, employeeID, taskID, row, "cancel_requested", row.status, ""); err != nil {
+			return CancelDecision{}, err
+		}
+		row.version++
+	}
+	if possibleStart(row, exec) {
+		if err := requestStop(ctx, tx, exec.id, task.StatusCancelled); err != nil {
+			return CancelDecision{}, err
+		}
+	}
 	decision, write, err := applyCancel(ctx, tx, employeeID, taskID, row, exec)
 	if err != nil {
 		return CancelDecision{}, err
@@ -172,9 +189,19 @@ func (s *Store) RecordStartRefusal(ctx context.Context, employeeID, nodeID, task
 		if err != nil {
 			return fmt.Errorf("保存启动拒绝失败: %s", redact.Scrub(err.Error()))
 		}
-		if tag.RowsAffected() == 1 && row.cancelAt != nil && row.status == task.StatusNeedsVerification {
-			if err := finishNotStarted(ctx, tx, employeeID, taskID, executionID, row, task.StatusCancelled, "", ""); err != nil {
+		if tag.RowsAffected() == 1 && row.status == task.StatusNeedsVerification {
+			var reason string
+			if err := tx.QueryRow(ctx, `SELECT COALESCE((SELECT reason FROM execution_stops WHERE execution_id = $1::uuid), '')`, executionID).Scan(&reason); err != nil {
 				return err
+			}
+			if reason == task.CodeQueueTimeout {
+				if err := finishNotStarted(ctx, tx, employeeID, taskID, executionID, row, task.StatusFailed, reason, "排队等待已到期，Worker 已确认未启动"); err != nil {
+					return err
+				}
+			} else if row.cancelAt != nil {
+				if err := finishNotStarted(ctx, tx, employeeID, taskID, executionID, row, task.StatusCancelled, "", ""); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -190,7 +217,7 @@ func (s *Store) ExpireQueuedTasks(ctx context.Context) error {
 		JOIN executions e ON e.task_id = t.id AND e.employee_id = t.employee_id
 		WHERE t.status = 'queued'
 		  AND t.queue_expires_at <= now()
-		  AND e.prepared_at IS NOT NULL
+		  AND NOT EXISTS (SELECT 1 FROM execution_stops x WHERE x.execution_id = e.id)
 		LIMIT 8`)
 	if err != nil {
 		return fmt.Errorf("检查排队期限失败: %s", redact.Scrub(err.Error()))
@@ -238,10 +265,13 @@ func (s *Store) expireOne(ctx context.Context, taskID string) error {
 	if err := tx.QueryRow(ctx, `SELECT queue_expires_at <= now() FROM tasks WHERE id = $1::uuid`, taskID).Scan(&expired); err != nil {
 		return fmt.Errorf("检查排队期限失败: %s", redact.Scrub(err.Error()))
 	}
-	if row.status != task.StatusQueued || !expired || exec.preparedAt == nil {
+	if row.status != task.StatusQueued || !expired {
 		return tx.Commit(ctx)
 	}
 	if exec.authorizedAt != nil && exec.refusedAt == nil {
+		if err := requestStop(ctx, tx, exec.id, task.CodeQueueTimeout); err != nil {
+			return err
+		}
 		if err := markUncertain(ctx, tx, employeeID, taskID, row); err != nil {
 			return err
 		}
@@ -302,6 +332,9 @@ func decideStart(ctx context.Context, tx pgx.Tx, in StartRequest, row lockedTask
 	queueExpires := rawQueue.Truncate(time.Millisecond)
 	if !queueExpires.After(now) {
 		if possible {
+			if err := requestStop(ctx, tx, exec.id, task.CodeQueueTimeout); err != nil {
+				return StartDecision{}, false, err
+			}
 			if err := markUncertain(ctx, tx, in.EmployeeID, in.TaskID, row); err != nil {
 				return StartDecision{}, false, err
 			}
@@ -315,7 +348,8 @@ func decideStart(ctx context.Context, tx pgx.Tx, in StartRequest, row lockedTask
 	if exec.authorizedAt != nil {
 		if exec.nonce != nil && *exec.nonce == in.Nonce && exec.refusedAt == nil && exec.permitExpires != nil && exec.permitExpires.After(now) {
 			claims := startpermit.Claims{
-				NodeID: in.NodeID, EmployeeID: in.EmployeeID, TaskID: in.TaskID, ExecutionID: in.ExecutionID,
+				ExecutionTimeoutSeconds: row.execSeconds,
+				NodeID:                  in.NodeID, EmployeeID: in.EmployeeID, TaskID: in.TaskID, ExecutionID: in.ExecutionID,
 				StorageGeneration: in.StorageGeneration, Nonce: in.Nonce, RequestHash: append([]byte(nil), row.requestHash...),
 				QueueExpiresAt: rawQueue, IssuedAt: exec.authorizedAt.UTC().Truncate(time.Millisecond),
 				ExpiresAt: exec.permitExpires.UTC().Truncate(time.Millisecond),
@@ -353,7 +387,8 @@ func decideStart(ctx context.Context, tx pgx.Tx, in StartRequest, row lockedTask
 		return StartDecision{}, false, err
 	}
 	claims := startpermit.Claims{
-		NodeID: in.NodeID, EmployeeID: in.EmployeeID, TaskID: in.TaskID, ExecutionID: in.ExecutionID,
+		ExecutionTimeoutSeconds: row.execSeconds,
+		NodeID:                  in.NodeID, EmployeeID: in.EmployeeID, TaskID: in.TaskID, ExecutionID: in.ExecutionID,
 		StorageGeneration: in.StorageGeneration, Nonce: in.Nonce, RequestHash: append([]byte(nil), row.requestHash...),
 		QueueExpiresAt: rawQueue, IssuedAt: now, ExpiresAt: expires,
 	}
@@ -444,6 +479,9 @@ func finishNotStarted(ctx context.Context, tx pgx.Tx, employeeID, taskID, execut
 		return errors.New("任务结束状态无效")
 	}
 	if err := bumpTask(ctx, tx, employeeID, taskID, row.version, status, code, message); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE execution_stops SET acknowledged_at = COALESCE(acknowledged_at, now()), stopped_at = COALESCE(stopped_at, now()), outcome_known = true, not_started = true WHERE execution_id = $1::uuid`, executionID); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `

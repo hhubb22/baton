@@ -199,12 +199,12 @@ func TestQueueExpiryConfirmsOnlyWhenNotAuthorized(t *testing.T) {
 		t.Fatal(err)
 	}
 	var mid string
-	if err := pool.QueryRow(ctx, `SELECT status FROM tasks WHERE id = $1::uuid`, in.TaskID).Scan(&mid); err != nil || mid != task.StatusNeedsVerification {
-		t.Fatalf("只有未启动回执时被提前标成已取消: %v %s", err, mid)
+	if err := pool.QueryRow(ctx, `SELECT status FROM tasks WHERE id = $1::uuid`, in.TaskID).Scan(&mid); err != nil || mid != task.StatusFailed {
+		t.Fatalf("排队到期的未启动回执没有收敛为失败: %v %s", err, mid)
 	}
 	final, err := repo.RequestCancel(ctx, in.EmployeeID, in.TaskID)
-	if err != nil || final.Status != task.StatusCancelled || final.PossibleStart {
-		t.Fatalf("未启动回执之后的取消不正确: %v %+v", err, final)
+	if err != nil || final.Status != task.StatusFailed || final.PossibleStart {
+		t.Fatalf("后到的取消改写了排队超时终态: %v %+v", err, final)
 	}
 }
 

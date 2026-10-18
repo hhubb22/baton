@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -51,6 +52,16 @@ type workerDB struct {
 	attaches           int
 	observer           *Observer
 	clock              *startpermit.Clock
+	executionClock     startpermit.Timer
+	startedMono        time.Duration
+	executionBudget    time.Duration
+	queueBudget        time.Duration
+	inputDueAt         time.Time
+	stopReason         string
+	stopReported       bool
+	sessionID          string
+	inputSentAt        time.Time
+	inputDelay         time.Duration
 }
 
 func openWorkerDB(path string, observer *Observer) (*workerDB, error) {
@@ -83,7 +94,7 @@ func openWorkerDB(path string, observer *Observer) (*workerDB, error) {
 		db.Close()
 		return nil, err
 	}
-	w := &workerDB{db: db, observer: observer, clock: startpermit.NewClock()}
+	w := &workerDB{db: db, observer: observer, clock: startpermit.NewClock(), executionClock: startpermit.NewClock()}
 	if err := w.load(); err != nil {
 		db.Close()
 		return nil, err
@@ -119,6 +130,10 @@ func (w *workerDB) load() error {
 	w.intent = intent == "1"
 	_ = w.db.QueryRow(`SELECT value FROM meta WHERE key = 'start_cancelled'`).Scan(&cancelled)
 	w.cancelled = cancelled == "1"
+	_ = w.db.QueryRow(`SELECT value FROM meta WHERE key = 'stop_reason'`).Scan(&w.stopReason)
+	var due string
+	_ = w.db.QueryRow(`SELECT value FROM meta WHERE key = 'input_due_at'`).Scan(&due)
+	w.inputDueAt, _ = time.Parse(time.RFC3339Nano, due)
 	var submitted, resolved, delivered, generation string
 	_ = w.db.QueryRow(`SELECT value FROM meta WHERE key = 'input_submitted'`).Scan(&submitted)
 	w.inputSubmitted = submitted == "1"
@@ -142,6 +157,9 @@ func (w *workerDB) load() error {
 	}
 	if w.hasResultLocked() {
 		w.inputResolved = true
+	} else if w.cancelled {
+		w.inputResolved = true
+		w.recoveredUncertain = w.inputSubmitted
 	} else if w.intent && !w.inputResolved {
 		w.recoveredUncertain = true
 		w.uncertainCode = task.CodeUncertainInput
@@ -250,6 +268,14 @@ func (w *workerDB) Authorize(taskID, executionID, permit, publicKey, generation 
 	if queueExpires.IsZero() || !claims.QueueExpiresAt.Equal(queueExpires.UTC()) {
 		return w.refuse("invalid_target")
 	}
+	startedMono, clockErr := w.executionClock.Mono()
+	if clockErr != nil {
+		return false, true, "unavailable", nil
+	}
+	budget := time.Duration(claims.ExecutionTimeoutSeconds) * time.Second
+	if budget <= 0 {
+		budget = time.Duration(task.DefaultExecutionTimeoutSeconds) * time.Second
+	}
 	nowMono, monoErr := w.clock.Mono()
 	if monoErr != nil || w.armedMono <= 0 {
 		return false, true, "unavailable", nil
@@ -266,10 +292,16 @@ func (w *workerDB) Authorize(taskID, executionID, permit, publicKey, generation 
 	if err := putMeta(tx, "start_intent", "1"); err != nil {
 		return false, false, "", err
 	}
+	w.inputDueAt = w.executionClock.Wall().UTC()
+	if err := putMeta(tx, "input_due_at", w.inputDueAt.Format(time.RFC3339Nano)); err != nil {
+		return false, false, "", err
+	}
 	if err := tx.Commit(); err != nil {
 		return false, false, "", err
 	}
 	w.intent = true
+	w.startedMono, w.executionBudget = startedMono, budget
+	w.queueBudget = claims.QueueExpiresAt.Sub(claims.IssuedAt) - rtt - startpermit.SafetyMargin
 	CrashAfter("start_intent")
 	// 意图已经落盘。此后即使执行器失败，也不能再报告“尚未启动”。
 	if w.observer != nil {
@@ -283,7 +315,8 @@ func (w *workerDB) CancelLocal() (started bool, err error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.intent {
-		return true, nil
+		_, err := w.stopLocked("", task.StatusCancelled)
+		return true, err
 	}
 	tx, err := w.db.Begin()
 	if err != nil {
@@ -348,6 +381,8 @@ func (w *workerDB) Attaches() int {
 }
 
 type workerSnap struct {
+	cancelled       bool
+	inputDueAt      time.Time
 	attaches        int
 	intent          bool
 	inputs          int64
@@ -366,6 +401,7 @@ func (w *workerDB) snapshot() workerSnap {
 		inputs = w.observer.Inputs()
 	}
 	return workerSnap{
+		cancelled: w.cancelled, inputDueAt: w.inputDueAt,
 		attaches: w.attaches, intent: w.intent, inputs: inputs,
 		inputSubmitted: w.inputSubmitted, resultDelivered: w.resultDelivered,
 		uncertain: w.recoveredUncertain, taskID: w.task, executionID: w.execution,
@@ -379,6 +415,14 @@ func (w *workerDB) SubmitInput(sessionID, payload string) ([]ipcReport, error) {
 	defer w.mu.Unlock()
 	if !w.intent || w.execution == "" || w.task == "" {
 		return nil, errors.New("还没有启动意图")
+	}
+	if w.cancelled {
+		return w.pendingLocked()
+	}
+	if reason, err := w.deadlineReasonLocked(); err != nil {
+		return nil, err
+	} else if reason != "" {
+		return w.stopLocked(sessionID, reason)
 	}
 	if w.recoveredUncertain || (w.inputSubmitted && !w.inputResolved) {
 		return w.ensureVerificationLocked(sessionID)
@@ -409,6 +453,14 @@ func (w *workerDB) SubmitInput(sessionID, payload string) ([]ipcReport, error) {
 	w.inputSubmitted = true
 	w.generation = 1
 	CrashAfter("input_intent")
+	mono, err := w.executionClock.Mono()
+	if err != nil {
+		return nil, err
+	}
+	w.inputSentAt = w.executionClock.Wall().UTC()
+	w.inputDelay = mono - w.startedMono
+	slog.Info("event=input_dispatch", "task_id", w.task, "execution_id", w.execution,
+		"input_due_at", w.inputDueAt, "input_sent_at", w.inputSentAt, "delay_ms", w.inputDelay.Milliseconds())
 	out, err := w.observer.SubmitInput(context.Background(), payload)
 	if err != nil {
 		w.recoveredUncertain = true
@@ -482,6 +534,17 @@ func (w *workerDB) recordExecution(sessionID, payload string, out Output) ([]ipc
 	}
 	defer func() { _ = tx.Rollback() }()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	delay, err := json.Marshal(struct {
+		DueAt   time.Time `json:"due_at"`
+		SentAt  time.Time `json:"sent_at"`
+		DelayMS int64     `json:"delay_ms"`
+	}{w.inputDueAt, w.inputSentAt, w.inputDelay.Milliseconds()})
+	if err != nil {
+		return nil, err
+	}
+	if err := insertLog(tx, "input_dispatch", string(delay), now); err != nil {
+		return nil, err
+	}
 	if err := insertLog(tx, "input", payload, now); err != nil {
 		return nil, err
 	}
@@ -495,7 +558,10 @@ func (w *workerDB) recordExecution(sessionID, payload string, out Output) ([]ipc
 		return nil, err
 	}
 	started, err := json.Marshal(protocol.ExecutionReport{
-		Type: protocol.BodyExecutionReport, EventID: startedID, TaskID: w.task, ExecutionID: w.execution,
+		ExecutionElapsedMS: w.inputDelay.Milliseconds(),
+		QueueDeadlineMet:   true,
+		OccurredAt:         w.inputDueAt,
+		Type:               protocol.BodyExecutionReport, EventID: startedID, TaskID: w.task, ExecutionID: w.execution,
 		SessionID: sessionID, Kind: protocol.ReportStarted, InputGeneration: w.generation, Status: task.StatusRunning,
 	})
 	if err != nil {
@@ -557,7 +623,8 @@ func terminalCandidate(out Output) task.Candidate {
 
 func reportFromCandidate(eventID, taskID, executionID, sessionID string, generation int, candidate task.Candidate, stopped bool) protocol.ExecutionReport {
 	return protocol.ExecutionReport{
-		Type: protocol.BodyExecutionReport, EventID: eventID, TaskID: taskID, ExecutionID: executionID,
+		OccurredAt: time.Now().UTC(),
+		Type:       protocol.BodyExecutionReport, EventID: eventID, TaskID: taskID, ExecutionID: executionID,
 		SessionID: sessionID, Kind: protocol.ReportResult, InputGeneration: generation, Status: candidate.Status,
 		Summary: candidate.Summary, Evidence: candidate.Evidence, Artifacts: candidate.Artifacts,
 		EvidenceEmptyReason: candidate.EvidenceEmptyReason, ArtifactsEmptyReason: candidate.ArtifactsEmptyReason,
@@ -640,13 +707,34 @@ func insertLog(tx *sql.Tx, kind, body, now string) error {
 }
 
 func insertOutbox(tx *sql.Tx, eventID, kind string, payload []byte) error {
-	_, err := tx.Exec(`INSERT INTO outbox (event_id, kind, payload, delivered) VALUES (?, ?, ?, 0)`, eventID, kind, string(payload))
+	var seq int64
+	if err := tx.QueryRow(`SELECT COALESCE(MAX(rowid), 0) + 1 FROM outbox`).Scan(&seq); err != nil {
+		return err
+	}
+	var report protocol.ExecutionReport
+	if err := json.Unmarshal(payload, &report); err != nil {
+		return err
+	}
+	report.WorkerSequence = seq
+	payload, err := json.Marshal(report)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(`INSERT INTO outbox (event_id, kind, payload, delivered) VALUES (?, ?, ?, 0)`, eventID, kind, string(payload))
 	return err
 }
 
 func (w *workerDB) recover(sessionID string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	w.sessionID = sessionID
+	if w.cancelled && w.intent {
+		if w.stopReason == "" {
+			w.stopReason = task.StatusCancelled
+		}
+		_, err := w.stopLocked(sessionID, w.stopReason)
+		return err
+	}
 	if !w.recoveredUncertain {
 		return nil
 	}

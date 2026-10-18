@@ -255,7 +255,11 @@ func (s *startLoop) finish(job *startJob) {
 }
 
 func waitGate(ctx context.Context, executionID string, log *slog.Logger) error {
-	dir := strings.TrimSpace(os.Getenv("BATON_TEST_START_GATE"))
+	return waitExecutionGate(ctx, executionID, "BATON_TEST_START_GATE", "event=start_gated", log)
+}
+
+func waitExecutionGate(ctx context.Context, executionID, variable, event string, log *slog.Logger) error {
+	dir := strings.TrimSpace(os.Getenv(variable))
 	if dir == "" {
 		return nil
 	}
@@ -267,7 +271,7 @@ func waitGate(ctx context.Context, executionID string, log *slog.Logger) error {
 		return err
 	}
 	if log != nil {
-		log.Info("event=start_gated", "execution_id", executionID)
+		log.Info(event, "execution_id", executionID)
 	}
 	release := filepath.Join(dir, "release-"+executionID)
 	for {

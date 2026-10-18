@@ -117,6 +117,7 @@ func (c *Client) roundTrip(msg ipcMessage) (Status, error) {
 		return Status{}, errors.New("Worker 拒绝了命令")
 	}
 	return Status{
+		Cancelled: reply.Cancelled, InputDueAt: reply.InputDueAt,
 		PID:             reply.PID,
 		SessionID:       reply.SessionID,
 		ExecutorStarts:  reply.ExecutorStarts,
@@ -136,6 +137,10 @@ func (c *Client) roundTrip(msg ipcMessage) (Status, error) {
 		Code:            reply.Code,
 		Reports:         copyReports(reply.Reports),
 	}, nil
+}
+
+func (c *Client) Stop(reason string) (Status, error) {
+	return c.roundTrip(ipcMessage{Type: "stop", StopReason: reason})
 }
 
 // SubmitInput 把任务输入交给 Worker。Worker 保证执行器最多收到一次。

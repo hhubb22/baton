@@ -275,7 +275,7 @@ func startBoundWorker(t *testing.T) (*Client, ed25519.PublicKey, ed25519.Private
 		if _, err := os.Stat(logPath); err == nil {
 			raw, _ := os.ReadFile(logPath)
 			for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
-				if line != "" && line != "start" && line != "input" {
+				if line != "" && line != "start" && line != "input" && line != "abort" {
 					t.Errorf("执行器日志是 %q", raw)
 				}
 			}

@@ -15,17 +15,18 @@ import (
 )
 
 const (
-	CodeInvalidRequest  = "invalid_request"
-	CodeForbidden       = "forbidden"
-	CodeInvalidTarget   = "invalid_target"
-	CodeUnsupported     = "unsupported"
-	CodeConflict        = "conflict"
-	CodeSessionBusy     = "session_busy"
-	CodeQueueTimeout    = "queue_timeout"
-	CodeUnavailable     = "unavailable"
-	CodeRevoked         = "revoked"
-	CodeResultFormat    = "result_format"
-	CodeExecutionFailed = "execution_failed"
+	CodeInvalidRequest   = "invalid_request"
+	CodeForbidden        = "forbidden"
+	CodeInvalidTarget    = "invalid_target"
+	CodeUnsupported      = "unsupported"
+	CodeConflict         = "conflict"
+	CodeSessionBusy      = "session_busy"
+	CodeQueueTimeout     = "queue_timeout"
+	CodeUnavailable      = "unavailable"
+	CodeRevoked          = "revoked"
+	CodeResultFormat     = "result_format"
+	CodeExecutionFailed  = "execution_failed"
+	CodeExecutionTimeout = "execution_timeout"
 	// CodeUncertainInput 表示启动意图已经落盘，但不能证明输入是否送出。
 	CodeUncertainInput = "uncertain_input"
 	// CodeUncertainWorker 表示原 Worker 已退出，进程号不能证明同一次执行仍在运行。
@@ -47,6 +48,7 @@ const (
 	EventCancelled          = "cancelled"
 	EventStarted            = "started"
 	EventResult             = "result"
+	EventStopReport         = "stop_report"
 	ActionPrepare           = "prepare"
 
 	// UncertainInputMessage 表示启动意图已经落盘，但不能证明输入是否送出。
@@ -122,6 +124,13 @@ type Prepared struct {
 
 // Record 是已经提交的任务记录。
 type Record struct {
+	CancelRequestedAt       *time.Time  `json:"cancel_requested_at,omitempty"`
+	ExecutionExpiresAt      *time.Time  `json:"execution_expires_at,omitempty"`
+	StopRequestedAt         *time.Time  `json:"stop_requested_at,omitempty"`
+	StopAcknowledgedAt      *time.Time  `json:"stop_acknowledged_at,omitempty"`
+	StopConfirmedAt         *time.Time  `json:"stop_confirmed_at,omitempty"`
+	StopReason              *string     `json:"stop_reason,omitempty"`
+	StopOutcomeKnown        bool        `json:"stop_outcome_known"`
 	TaskID                  string      `json:"task_id"`
 	RequestID               string      `json:"request_id"`
 	Description             string      `json:"description"`
@@ -150,18 +159,25 @@ type Record struct {
 
 // Event 是允许保存的一条任务变更，不包含 Session 原文。
 type Event struct {
-	EventID                 string    `json:"event_id"`
-	TaskID                  string    `json:"task_id"`
-	Version                 int       `json:"version"`
-	Kind                    string    `json:"kind"`
-	ActorEmployeeID         string    `json:"actor_employee_id"`
-	Status                  string    `json:"status"`
-	TargetNodeID            string    `json:"target_node_id"`
-	AgentType               string    `json:"agent_type"`
-	QueueExpiresAt          time.Time `json:"queue_expires_at"`
-	ExecutionTimeoutSeconds int       `json:"execution_timeout_seconds"`
-	ReasonCode              *string   `json:"reason_code,omitempty"`
-	CreatedAt               time.Time `json:"created_at"`
+	WorkerSequence          int64      `json:"worker_sequence,omitempty"`
+	ExecutionID             *string    `json:"execution_id,omitempty"`
+	OutcomeKnown            *bool      `json:"outcome_known,omitempty"`
+	NotStarted              *bool      `json:"not_started,omitempty"`
+	StopReason              *string    `json:"stop_reason,omitempty"`
+	OccurredAt              *time.Time `json:"occurred_at,omitempty"`
+	AgentStopped            *bool      `json:"agent_stopped,omitempty"`
+	EventID                 string     `json:"event_id"`
+	TaskID                  string     `json:"task_id"`
+	Version                 int        `json:"version"`
+	Kind                    string     `json:"kind"`
+	ActorEmployeeID         string     `json:"actor_employee_id"`
+	Status                  string     `json:"status"`
+	TargetNodeID            string     `json:"target_node_id"`
+	AgentType               string     `json:"agent_type"`
+	QueueExpiresAt          time.Time  `json:"queue_expires_at"`
+	ExecutionTimeoutSeconds int        `json:"execution_timeout_seconds"`
+	ReasonCode              *string    `json:"reason_code,omitempty"`
+	CreatedAt               time.Time  `json:"created_at"`
 }
 
 // Rejection 是可以返回给调用方的拒绝，不包含其他员工的数据。
