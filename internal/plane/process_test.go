@@ -94,7 +94,7 @@ func TestCoordinatorProcessReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	delivery := uuid.NewString()
-	send := func() Result {
+	send := func(status int) Result {
 		r, _ := http.NewRequest(http.MethodPost, "http://"+address+Path, bytes.NewReader(raw))
 		r.Header.Set("X-Plane-Delivery", delivery)
 		r.Header.Set("X-Plane-Event", "issue")
@@ -105,12 +105,38 @@ func TestCoordinatorProcessReplay(t *testing.T) {
 		}
 		defer resp.Body.Close()
 		var result Result
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil || resp.StatusCode != http.StatusOK {
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil || resp.StatusCode != status {
 			t.Fatalf("webhook status %d: %v", resp.StatusCode, err)
 		}
 		return result
 	}
-	first := send()
+	f.mu.Lock()
+	f.apiCode = http.StatusServiceUnavailable
+	f.mu.Unlock()
+	if got := send(http.StatusServiceUnavailable); got.Outcome != "pending" {
+		t.Fatalf("temporary failure: %+v", got)
+	}
+	f.assertTasks(0)
+	_ = cmd.Process.Kill()
+	_ = cmd.Wait()
+	f.mu.Lock()
+	f.apiCode = 0
+	f.mu.Unlock()
+	f.makeDue()
+	cmd = start()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		var accepted int
+		err := f.pool.QueryRow(context.Background(), `SELECT count(*) FROM plane_deliveries WHERE outcome='accepted'`).Scan(&accepted)
+		if err == nil && accepted == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("background retry did not persist acceptance: count=%d err=%v", accepted, err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	first := send(http.StatusOK)
 	if first.Outcome != "accepted" || first.TaskID == "" {
 		t.Fatalf("first delivery: %+v", first)
 	}
@@ -120,7 +146,7 @@ func TestCoordinatorProcessReplay(t *testing.T) {
 	_ = cmd.Wait()
 	start()
 	delivery = uuid.NewString()
-	if got := send(); got.TaskID != first.TaskID {
+	if got := send(http.StatusOK); got.TaskID != first.TaskID {
 		t.Fatalf("restart replay changed task: %+v", got)
 	}
 	f.assertTasks(1)

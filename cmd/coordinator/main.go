@@ -194,12 +194,14 @@ func cmdServe(ctx context.Context, stderr io.Writer, getenv func(string) string)
 		}
 		mux := http.NewServeMux()
 		mux.Handle("/", api)
+		var planeHook *plane.Service
 		if planeConfig != nil {
-			hook, err := plane.New(pool, *planeConfig, store.New(pool), nil)
+			hook, err := plane.New(pool, *planeConfig, store.New(pool), nil, logger)
 			if err != nil {
 				return err
 			}
 			mux.Handle(plane.Path, hook)
+			planeHook = hook
 		}
 		apiSrv := &http.Server{
 			Handler:           webui.Handler(mux),
@@ -244,6 +246,18 @@ func cmdServe(ctx context.Context, stderr io.Writer, getenv func(string) string)
 			errCh <- controlSrv.Serve(controlLn)
 		}()
 		go ctrl.DeliverPrepares(ctx)
+		if planeHook != nil {
+			retryCtx, cancel := context.WithCancel(ctx)
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				planeHook.Run(retryCtx)
+			}()
+			defer func() {
+				cancel()
+				<-done
+			}()
+		}
 		shutdown := func() {
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()

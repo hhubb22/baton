@@ -2,10 +2,10 @@ package plane
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -27,6 +27,7 @@ type Service struct {
 	client *client
 	accept Acceptor
 	gate   chan struct{}
+	logger *slog.Logger
 }
 
 type Result struct {
@@ -37,14 +38,17 @@ type Result struct {
 	TaskID    string   `json:"task_id,omitempty"`
 }
 
-func New(pool *pgxpool.Pool, cfg Config, accept Acceptor, transport http.RoundTripper) (*Service, error) {
+func New(pool *pgxpool.Pool, cfg Config, accept Acceptor, transport http.RoundTripper, logger *slog.Logger) (*Service, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
 	if pool == nil || accept == nil {
 		return nil, errors.New("Plane store is required")
 	}
-	return &Service{cfg: cfg, pool: pool, client: newClient(cfg, transport), accept: accept, gate: make(chan struct{}, 1)}, nil
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &Service{cfg: cfg, pool: pool, client: newClient(cfg, transport), accept: accept, gate: make(chan struct{}, 1), logger: logger}, nil
 }
 
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -85,23 +89,33 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
 	defer cancel()
-	select {
-	case s.gate <- struct{}{}:
-		defer func() { <-s.gate }()
-	case <-ctx.Done():
+	id, conflict, err := s.receive(ctx, delivery, raw, e)
+	if err != nil {
+		s.logger.Error("event=plane_inbox_write_failed", "delivery_id", delivery)
 		write(http.StatusServiceUnavailable, Result{Outcome: "pending", Code: "unavailable"})
 		return
 	}
-	result, err := s.process(ctx, delivery, raw, e)
+	if conflict {
+		write(http.StatusOK, Result{Outcome: "rejected", Code: "delivery_conflict"})
+		return
+	}
+	result, err := s.process(ctx, id, false)
 	if err != nil {
-		// The inbox stays pending on infrastructure failure; replay uses the same intent.
 		write(http.StatusServiceUnavailable, Result{Outcome: "pending", Code: "unavailable"})
 		return
 	}
 	write(http.StatusOK, result)
 }
 
-func (s *Service) process(ctx context.Context, delivery string, raw []byte, e event) (Result, error) {
+func (s *Service) process(ctx context.Context, delivery string, dueOnly bool) (Result, error) {
+	ctx, cancel := context.WithTimeout(ctx, attemptTimeout)
+	defer cancel()
+	select {
+	case s.gate <- struct{}{}:
+		defer func() { <-s.gate }()
+	case <-ctx.Done():
+		return Result{}, ctx.Err()
+	}
 	conn, err := s.pool.Acquire(ctx)
 	if err != nil {
 		return Result{}, err
@@ -118,44 +132,65 @@ func (s *Service) process(ctx context.Context, delivery string, raw []byte, e ev
 			_ = conn.Hijack().Close(cleanup)
 		}
 	}()
-	hash := sha256.Sum256(raw)
-	var savedHash []byte
+	var hash, input []byte
 	var result Result
-	var processed bool
-	err = conn.QueryRow(ctx, `SELECT body_hash, outcome, block_code, block_fields, COALESCE(trigger_id,''), processed_at IS NOT NULL
-		FROM plane_deliveries WHERE webhook_id=$1 AND project_id=$2 AND (delivery_id=$3 OR body_hash=$4)
-		ORDER BY delivery_id=$3 DESC LIMIT 1`, s.cfg.WebhookID, s.cfg.ProjectID, delivery, hash[:]).Scan(
-		&savedHash, &result.Outcome, &result.Code, &result.Fields, &result.TriggerID, &processed)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return Result{}, err
-	}
-	if err == nil {
-		if !equalHash(savedHash, hash[:]) {
-			return Result{Outcome: "rejected", Code: "delivery_conflict"}, nil
-		}
-		if processed {
-			if result.TriggerID != "" {
-				if err := conn.QueryRow(ctx, `SELECT COALESCE(task_id::text,'') FROM plane_triggers WHERE trigger_id=$1`, result.TriggerID).Scan(&result.TaskID); err != nil {
-					return Result{}, err
-				}
-			}
-			return result, nil
-		}
-	}
-	if _, err := conn.Exec(ctx, `INSERT INTO plane_issues(webhook_id,project_id,issue_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, s.cfg.WebhookID, s.cfg.ProjectID, e.issueID()); err != nil {
-		return Result{}, err
-	}
-	if _, err := conn.Exec(ctx, `INSERT INTO plane_deliveries(webhook_id,project_id,delivery_id,body_hash,issue_id) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, s.cfg.WebhookID, s.cfg.ProjectID, delivery, hash[:], e.issueID()); err != nil {
-		return Result{}, err
-	}
-	result, err = s.decide(ctx, conn, e, result.TriggerID, hash[:])
+	var processed, due bool
+	var attempts int
+	err = conn.QueryRow(ctx, `SELECT body_hash,event_input,outcome,block_code,block_fields,COALESCE(trigger_id,''),
+		processed_at IS NOT NULL,attempts,next_attempt_at <= now() FROM plane_deliveries
+		WHERE webhook_id=$1 AND project_id=$2 AND delivery_id=$3`, s.cfg.WebhookID, s.cfg.ProjectID, delivery).Scan(
+		&hash, &input, &result.Outcome, &result.Code, &result.Fields, &result.TriggerID, &processed, &attempts, &due)
 	if err != nil {
 		return Result{}, err
 	}
-	_, err = conn.Exec(ctx, `UPDATE plane_deliveries SET outcome=$5,block_code=$6,block_fields=$7,trigger_id=NULLIF($8,''),processed_at=now()
-		WHERE webhook_id=$1 AND project_id=$2 AND body_hash=$3 AND issue_id=$4`,
-		s.cfg.WebhookID, s.cfg.ProjectID, hash[:], e.issueID(), result.Outcome, result.Code, nonNil(result.Fields), result.TriggerID)
-	return result, err
+	if processed {
+		if result.TriggerID != "" {
+			if err := conn.QueryRow(ctx, `SELECT COALESCE(task_id::text,'') FROM plane_triggers WHERE trigger_id=$1`, result.TriggerID).Scan(&result.TaskID); err != nil {
+				return Result{}, err
+			}
+		}
+		return result, nil
+	}
+	if dueOnly && !due {
+		return result, nil
+	}
+	if attempts >= maxAttempts {
+		if result.TriggerID != "" {
+			recovered, found, err := s.recoverAccepted(ctx, conn, result.TriggerID)
+			if err != nil {
+				return Result{}, err
+			}
+			if found {
+				return recovered, s.finish(ctx, conn, delivery, recovered)
+			}
+		}
+		result.Outcome, result.Code = "blocked", "retry_exhausted"
+		result.Fields = nil
+		return result, s.finish(ctx, conn, delivery, result)
+	}
+	var saved savedEvent
+	if err := json.Unmarshal(input, &saved); err != nil {
+		return Result{}, err
+	}
+	attempts++
+	if _, err := conn.Exec(ctx, `UPDATE plane_deliveries SET attempts=$4,next_attempt_at=now()+$5 * interval '1 millisecond'
+		WHERE webhook_id=$1 AND project_id=$2 AND delivery_id=$3`, s.cfg.WebhookID, s.cfg.ProjectID, delivery,
+		attempts, (attemptTimeout + retryDelay(attempts)).Milliseconds()); err != nil {
+		return Result{}, err
+	}
+	result, err = s.decide(ctx, conn, saved.event(), result.TriggerID, hash)
+	if err != nil {
+		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		delay := retryDelay(attempts)
+		if attempts >= maxAttempts {
+			delay = 0
+		}
+		_, _ = conn.Exec(cleanup, `UPDATE plane_deliveries SET last_error_code='unavailable',next_attempt_at=now()+$4 * interval '1 millisecond'
+			WHERE webhook_id=$1 AND project_id=$2 AND delivery_id=$3`, s.cfg.WebhookID, s.cfg.ProjectID, delivery, delay.Milliseconds())
+		return Result{}, err
+	}
+	return result, s.finish(ctx, conn, delivery, result)
 }
 
 func equalHash(a, b []byte) bool {

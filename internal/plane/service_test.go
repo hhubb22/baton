@@ -112,7 +112,7 @@ func newFixture(t *testing.T) *fixture {
 func (f *fixture) restart(a Acceptor) {
 	f.t.Helper()
 	var err error
-	f.svc, err = New(f.pool, f.cfg, a, nil)
+	f.svc, err = New(f.pool, f.cfg, a, nil, nil)
 	if err != nil {
 		f.t.Fatal(err)
 	}

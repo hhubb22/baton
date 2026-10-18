@@ -168,7 +168,7 @@ try:
                 status, result = resp.status, json.load(resp)
         except urllib.error.HTTPError as err:
             status, result = err.code, json.load(err)
-        assert status == (401 if forge else 200), f"webhook HTTP {status}"
+        assert status == (401 if forge else 503 if expected == "pending" else 200), f"webhook HTTP {status}"
         assert result["outcome"] == expected, f"unexpected outcome: {result.get('outcome')}/{result.get('code')}"
         if code:
             assert result.get("code") == code, "unexpected block reason"
@@ -183,6 +183,25 @@ try:
     replay(state_event, "blocked", "design_not_approved")
     plane(f"issues/{issue}/", "PATCH", {"labels": [label_id]})
     approved = logs(issue, "updated", "labels")
+    schema = os.environ["BATON_DB_SCHEMA"]
+    sql(f'''CREATE FUNCTION "{schema}".fail_plane_decision() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN RAISE EXCEPTION 'temporary replay database fault'; END $$;
+            CREATE TRIGGER fail_plane_decision BEFORE INSERT ON "{schema}".plane_triggers
+            FOR EACH ROW EXECUTE FUNCTION "{schema}".fail_plane_decision()''')
+    replay(approved, "pending", "unavailable")
+    assert sql(f'SELECT count(*) FROM "{schema}".tasks') == "0", "failed decision created a task"
+    sql(f'DROP TRIGGER fail_plane_decision ON "{schema}".plane_triggers')
+    proc.kill()
+    proc.wait()
+    proc = start()
+    delivery = str(uuid.UUID(approved[2]["X-Plane-Delivery"]))
+    deadline = time.monotonic() + 25
+    while time.monotonic() < deadline:
+        if sql(f'''SELECT outcome FROM "{schema}".plane_deliveries WHERE delivery_id='{delivery}' ''') == "accepted":
+            break
+        time.sleep(0.1)
+    else:
+        raise AssertionError("persisted event was not completed by background retry after restart")
     first = replay(approved, "accepted")
     replay(approved, "accepted")
     replay(approved, "accepted", fresh_delivery=True)
@@ -195,14 +214,13 @@ try:
     stale = json.loads(json.dumps(state_event[0]))
     stale["data"]["updated_at"] = "2020-01-01T00:00:00Z"
     replay((stale, b"", state_event[2]), "blocked", "stale_event", mutate=lambda e: None)
-    schema = os.environ["BATON_DB_SCHEMA"]
     assert sql(f'SELECT count(*) FROM "{schema}".tasks') == "1", "duplicate task"
     assert sql(f'SELECT count(*) FROM "{schema}".executions') == "1", "duplicate execution"
     proc.kill()
     proc.wait()
     proc = start()
     assert replay(approved, "accepted", fresh_delivery=True)["task_id"] == first["task_id"], "restart changed task"
-    print("PASS: real Plane 1.4.2 signed events + real Coordinator; create-only, approval/identity/missing-field gates, forgery, reorder, duplicate/body replay, restart and self-write suppression; 1 task / 1 execution")
+    print("PASS: real Plane 1.4.2 signed events + real Coordinator; create-only, approval/identity/missing-field gates, forgery, reorder, duplicate/body replay, background retry after database fault and restart without redelivery, self-write suppression; 1 task / 1 execution")
 finally:
     if proc is not None:
         proc.kill()
