@@ -294,9 +294,49 @@ pnpm check:dist
 
 集成测试读取 `BATON_TEST_DATABASE_URL`，只连接这个 PostgreSQL，并在其中创建临时 schema。未设置该变量或连接失败时，测试失败，不会改用模拟数据库。
 
-```text
-go test ./...
+### CI 与本地等价命令
+
+[GitHub Actions CI](https://github.com/hhubb22/baton/actions/workflows/ci.yml) 在每个 pull request 和推送 `main` 时运行四类检查。同一 PR／分支的新推送会取消旧运行，macOS 和 Windows 不会因另一平台失败而取消；失败不会被忽略。Go 版本从 `go.mod` 读取，并缓存模块与构建结果。测试加 `-v` 以记录每个测试的通过、失败和已有的条件跳过，加 `-count=1` 避免测试结果缓存。
+
+| 检查 | 覆盖范围 |
+|---|---|
+| Linux（`ubuntu-latest`） | 原生构建、Windows/macOS 交叉编译、vet、完整测试、五个并发相关包的 race 测试 |
+| macOS（`macos-latest`） | 原生构建、vet、完整测试 |
+| Windows（`windows-latest`） | 原生构建、vet、完整测试，不以交叉编译代替运行 |
+| Web（`ubuntu-latest`） | 锁定依赖安装、lint、typecheck、单元测试、Chromium E2E、嵌入产物一致性 |
+
+CI 的 Linux 和 Web 各使用独立的 PostgreSQL 17 service container；macOS 和 Windows 使用 `ikalnytskyi/action-setup-postgres@v8` 安装 PostgreSQL 17。`BATON_TEST_DATABASE_URL` 连接 runner 本机端口 `55432` 的 `baton_test`，口令仅用于一次性 CI 测试库，不读取仓库 Secret。停库恢复测试会另建临时 PostgreSQL 集群，不停止共用测试库。第三方 action 固定到发布标签（PostgreSQL action 仅提供 `v8` 这样的版本标签）。
+
+本地先准备可创建临时 schema 的 PostgreSQL 17 测试库并设置 `BATON_TEST_DATABASE_URL`（POSIX shell 示例，端口按本机实例调整）：
+
+```sh
+export BATON_TEST_DATABASE_URL='postgres://postgres:baton@127.0.0.1:5432/baton_test?sslmode=disable'
+go build ./...
 go vet ./...
+go test -v -count=1 ./...
+```
+
+Windows PowerShell 用 `$env:BATON_TEST_DATABASE_URL = 'postgres://postgres:baton@127.0.0.1:5432/baton_test?sslmode=disable'` 设置变量，再运行同样的三个 Go 命令。Linux 另跑：
+
+```sh
+GOOS=windows go build ./...
+GOOS=darwin go build ./...
+go test -race -v -count=1 ./internal/session ./internal/node ./internal/store ./internal/relay ./internal/control
+```
+
+这里的 `-race` 覆盖测试包；进程测试内部通过普通 `go build` 启动的子进程不自动带 race instrumentation。需要同时检查子进程时可另跑 `GOFLAGS=-race go test -race -count=1 ./internal/relay`。
+
+Web 使用 Node.js 24、pnpm 12.11.2（与 `.cursor/Dockerfile` 一致），保留上面的数据库变量，从仓库根目录运行：
+
+```sh
+cd web
+pnpm install --frozen-lockfile
+pnpm exec playwright install --with-deps chromium
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm test:e2e
+pnpm check:dist
 ```
 
 登录、退出、身份查询、CSRF 和 Origin 的通过路径使用本地 TLS 服务，并把测试证书放进客户端信任池。明文 HTTP 测试确认响应仍带 `Secure` Cookie：按正式 Cookie 规则、不把环回地址当作安全来源的客户端不会在明文请求里带回它。CSRF 和 Origin 检查在两条路径上都生效。节点注册的通过路径同样使用该 TLS 服务；`batond register` 通过 `BATON_TLS_CA_FILE` 信任测试证书。节点连接测试使用真实的 Coordinator、Relay 和 batond 进程，以及 TLS WebSocket，并注入断线、Coordinator 重启和 Relay 重启。准备测试另外启动真实的 Session Worker 和本地 SQLite，覆盖重复投递、batond 重启后连回原 Worker、同一 Session 的并发写入，以及本地持久化失败。启动许可测试覆盖中心事务和节点校验，并注入延迟、取消、吊销、墙上时钟跳变和暂停后唤醒。测试进程可以设置 `BATON_TEST_DROP_PREPARE_ACKS`、`BATON_TEST_FAIL_PERSIST`、`BATON_TEST_EXECUTOR_LOG`、`BATON_TEST_EXECUTOR_SCRIPT`、`BATON_TEST_SLOW_WRITE`、`BATON_TEST_ABORT_SCRIPT`（`unconfirmed`/`unknown`/默认确认）、`BATON_TEST_INPUT_GATE`、`BATON_TEST_HOLD_START`、`BATON_TEST_START_DELAY`、`BATON_TEST_START_GATE`、`BATON_TEST_RESULT_GATE`、`BATON_TEST_DUPLICATE_REPORT`、`BATON_TEST_WALL_OFFSET`、`BATON_TEST_SUSPEND_AFTER_ARM` 和 `BATON_TEST_PERMIT_FILE`。未设置时这些变量没有作用，它们不是操作者配置。
