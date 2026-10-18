@@ -15,7 +15,7 @@ main 上已合并到 `0014_required_artifacts.sql`。活动 PR #21（Codex）和
 |---|---|---|
 | `0015_equal_nodes.sql` | PA-W01 | 去掉节点角色，默认 PC 改为默认设备，新增节点能力报告 |
 | `0016_projects.sql` | PA-W03 | Project、Project Agent、主对话、对话事件、项目记忆 |
-| `0017_project_agent_runs.sql` | PA-W04 | Inbox、运行记录、`tasks` 的来源列 |
+| `0017_project_agent_runs.sql` | PA-W04 | 输入队列、运行记录、`tasks` 的来源列 |
 
 派发 PA-W01 时一次登记 0015～0017。如果届时其他工作已经占用了其中的编号，三个编号整体顺延。已合并的迁移不修改。
 
@@ -63,7 +63,7 @@ CREATE TABLE node_runtime_reports (
 | `projects` | `UNIQUE (employee_id, id)`；`status IN ('active', 'paused', 'archived')`；`title` 1～200 字符且不含控制字符；没有任何节点或目录列 |
 | `project_agents` | `UNIQUE (project_id)`，一个 Project 一个 Agent；外键 `(employee_id, project_id)`；`lease_epoch bigint NOT NULL DEFAULT 0`；`lease_run_id`、`lease_until` 同时为空或同时非空 |
 | `conversations` | `UNIQUE (agent_id, kind)`，本期 `kind` 只允许 `primary`；`state IN ('active', 'needs_attention')`；`next_seq bigint NOT NULL` |
-| `conversation_events` | 主键 `(conversation_id, seq)`；`UNIQUE (conversation_id, client_event_id)`；部分唯一索引 `(conversation_id, tool_call_id) WHERE kind = 'tool_result'`；`kind IN ('input', 'assistant', 'tool_result', 'compaction')`；`octet_length(payload::text) <= 196608` |
+| `conversation_events` | 主键 `(conversation_id, seq)`；`UNIQUE (conversation_id, client_event_id)`；部分唯一索引 `(conversation_id, tool_call_id) WHERE kind = 'tool_result'`；`kind IN ('input', 'assistant', 'tool_result', 'compaction')`；`octet_length(payload::text) <= 163840` |
 | `project_memory_entries` | 外键 `(employee_id, project_id)`；`current_revision > 0` |
 | `project_memory_revisions` | 主键 `(entry_id, revision)`；`author IN ('agent', 'user')` |
 
@@ -76,13 +76,13 @@ CREATE TABLE node_runtime_reports (
 | 表或列 | 关键约束 |
 |---|---|
 | `agent_runs` | 外键 `(employee_id, node_id)` 指向 `nodes`；`state IN ('starting', 'running', 'finished', 'lost', 'failed')`；`UNIQUE (agent_id, lease_epoch)`，同一代次只有一次运行；索引 `(state) WHERE state = 'starting'`，供重发循环使用 |
-| `agent_inbox` | `UNIQUE (agent_id, source_key)`；`source_type IN ('user_message', 'task_result')`；`payload_hash` 32 字节；索引 `(agent_id, id) WHERE delivered_seq IS NULL`，供领取和放置扫描使用 |
+| `project_agent_input_queue` | `UNIQUE (agent_id, source_key)`；`source_type IN ('user_message', 'task_result', 'memory_updated', 'project_updated')`；`payload_hash` 32 字节；`octet_length(payload::text) <= 73728`，各类型更细的上限由应用检查（TECH 第 3 节）；索引 `(agent_id, id) WHERE delivered_seq IS NULL`，供领取和放置扫描使用 |
 | `tasks.project_id` | 可空；外键 `(employee_id, project_id)` |
 | `tasks.origin_conversation_id`、`tasks.origin_tool_call_id` | 可空，两列同时为空或同时非空；部分唯一索引 `(origin_conversation_id, origin_tool_call_id) WHERE origin_conversation_id IS NOT NULL` |
 
 `tasks.agent_type` 现有的约束是格式检查（`^[a-z][a-z0-9._-]{0,63}$`），`shell` 已经满足，不需要修改。
 
-放置扫描的条件是「有待处理 Inbox、租约为空或过期」。待处理 Inbox 的部分索引已经覆盖前半部分；Agent 数量在百级，租约条件直接在 `project_agents` 上过滤即可，不另建索引。
+放置扫描的条件是「有待处理的主动输入（`user_message`、`task_result`）、租约为空或过期」。待处理输入的部分索引已经覆盖前半部分，`source_type` 在索引结果上过滤；Agent 数量在百级，租约条件直接在 `project_agents` 上过滤即可，不另建索引。
 
 ## 验证
 

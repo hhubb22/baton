@@ -13,10 +13,10 @@ Approval: 尚未批准。表中的工作项和工单调整是提案，规格批�
 | PA-W01 | 平等节点与默认设备 | 去掉 `pc`/`ubuntu` 角色；默认 PC 改为默认设备，新旧 API 并存；Web 文案和字段改为默认设备 | 无 | 0015 |
 | PA-W02 | 节点能力报告 | batond 上报 `node_runtime_reports`：登记目录及真实路径、目录内的 Git 仓库、命令执行开关与 shell、Runtime 版本和订阅登录状态（通过 `probe`） | PA-W01 | 无 |
 | PA-W03 | Project 与主对话 | 建表；Project、消息、事件分页、记忆的 API；`client_message_id` 去重；对话事件只追加 | PA-W01 | 0016 |
-| PA-W04 | Inbox、放置与租约 | Inbox 与运行记录建表；放置扫描、取得租约、`project_run_start` 投递与重发、batond 启停 Runtime 和续租、唤醒、`finish`、失败计数与 `needs_attention`；Relay 新消息类型。用一个测试用的假 Runtime 验收 | PA-W02、PA-W03 | 0017 |
-| PA-W05 | Project Agent 工具 | `call_tool` 事务（校验租约和 `tool_call_id`、执行、写 `tool_result`）；记忆、历史、设备、任务工具；把 `acceptOnce` 拆出可接受外部事务的版本；任务终态写 Inbox | PA-W04 | 无 |
+| PA-W04 | 输入队列、放置与租约 | 输入队列与运行记录建表；各类输入的写入限长；用户修改记忆和 Project 标题、目标时写被动通知；`bootstrap` 与 `read_events` 分页；`claim_inputs` 的批量上限和记忆通知合并；放置扫描（只看主动输入）、取得租约、`project_run_start` 投递与重发、batond 启停 Runtime 和续租、唤醒、`finish`、失败计数与 `needs_attention`；Relay 新消息类型。用一个测试用的假 Runtime 验收 | PA-W02、PA-W03 | 0017 |
+| PA-W05 | Project Agent 工具 | `call_tool` 事务（校验租约和 `tool_call_id`、执行、写 `tool_result`）；记忆、历史、设备、任务工具；把 `acceptOnce` 拆出可接受外部事务的版本；任务终态写输入队列 | PA-W04 | 无 |
 | PA-W06 | Runtime | `runtimes/project-agent`：pi-agent-core 主循环、事件写入、崩溃恢复、`login` / `probe` 命令、发布方式。用 pi-ai 的 faux provider 做无模型测试 | 协议在 PA-W04 确定后可并行开始 | 无 |
-| PA-W07 | 主对话界面 | Project 列表、主对话（含流式片段）、记忆、运行状态与等待原因、需要处理时的重试按钮 | PA-W03、PA-W04 | 无 |
+| PA-W07 | 主对话界面 | Project 列表、主对话（含流式片段）、记忆、运行状态与等待原因、需要处理时的重试按钮；Project Agent 执行的命令在主对话和 Project 任务里显示，全局任务列表默认隐藏并提供筛选 | PA-W03、PA-W04 | 无 |
 | PA-W08 | 首个端到端验收 | 三台设备、真实订阅跑 PA-A01、PA-A02、PA-A06 | PA-W05～W07 | 无 |
 | PA-W09 | 压缩与历史工具 | 第 6 节的清除、复用前缀的摘要、`compaction` 事件校验；`history.search` / `history.read` 在 PA-W05 已有，这里补被清除内容的占位与范围说明 | PA-W06 | 无 |
 | PA-W10 | 命令执行 | Worker 内置 `shell` 执行器；`nodes.exec` 与 `wait_tool`；节点本地开关与二次检查；Windows Job Object | PA-W05；#21、#22 合并之后 | 无 |
@@ -47,7 +47,7 @@ PA-W02 和 PA-W03 可以并行。PA-W06 的 TypeScript 部分只依赖 PA-W04 �
 | PS-133 T29 凭据轮换、保留与空间不足 | Backlog | 验收增加一条：Project Agent 的对话事件不被 180 天清理删除；空间不足时拒绝新消息 |
 | PS-134～PS-136 T30～T32 macOS、Windows、Linux 安装验收 | Backlog | 验收增加可选项：安装 `baton-project-runtime`、`login`、`probe` 能正确上报；可以等 PA-W11 一起做 |
 | PS-137 T33 真实网络委托验收 | Backlog | 不受影响 |
-| PS-138～PS-140 T34～T36 容量与长稳 | Backlog | 负载加入 Project Agent 唤醒、对话写入和 Inbox 积压（Baton R-39 修订） |
+| PS-138～PS-140 T34～T36 容量与长稳 | Backlog | 负载加入 Project Agent 唤醒、对话写入和输入队列积压（Baton R-39 修订） |
 | PS-141 T37 首版交付审查 | Backlog | 审查范围加入 Project Agent |
 | PS-152 Windows 单调时钟 panic | Backlog | 不受影响，继续 |
 

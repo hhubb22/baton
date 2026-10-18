@@ -14,7 +14,7 @@ Related: [Project Agent 行为规格](../project-agent/PRODUCT.md)、[技术设�
 2. **Project 不绑定仓库或设备。** Project 是员工的一件长期的事；工作目录在每次派发任务时由 Project Agent 决定。
 3. **Project Agent 只做协调和环境管理。** 它派任务给执行 Agent，自己不写代码。员工在某台设备上开启后，它可以在该设备上执行命令，例如创建 worktree。
 4. **推理在员工设备上，使用设备上已登录的订阅。** 北京不做推理，不保存订阅凭据。
-5. **Project Agent 的状态全部在北京。** 主对话、记忆和 Inbox 由 Coordinator 保存。Runtime 按事件启动，处理完就退出；换设备就是下一次在另一台设备上启动，不迁移运行中的进程。
+5. **Project Agent 的状态全部在北京。** 主对话、记忆和输入队列由 Coordinator 保存。Runtime 按事件启动，处理完就退出；换设备就是下一次在另一台设备上启动，不迁移运行中的进程。
 6. **执行 Session 的历史仍留在节点。** 只有 Project Agent 的主对话保存在北京，原 R-28、R-29 对执行 Session 的约定不变。
 7. **Runtime 使用 pi-agent-core，在独立的 Node.js 进程里运行。** 模型消息按 pi-ai 的格式逐条保存为对话事件，发给模型的上下文每次都从这些事件推导出来，不另存会话文件或检查点。Go 进程仍不嵌入 Agent SDK。
 8. **每个工具调用最多执行一次。** assistant 消息在工具执行前保存；工具的副作用和工具结果在同一个数据库事务里提交。命令执行的副作用在另一台设备上，因此每条命令实现为一个 Task，靠现有的任务唯一性和待核实机制保证。

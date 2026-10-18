@@ -118,7 +118,7 @@ Project Agent Runtime 使用 pi-agent-core 的 SDK，但它运行在独立的 No
 | 进程 | 拥有的状态与职责 | 不负责的内容 | 对应行为 |
 |---|---|---|---|
 | Relay | 活动连接、认证与吊销快照、路由、心跳、受限转发队列 | 任务队列、Session 解析、业务持久化、执行重试 | R-03、R-04、R-24 |
-| Coordinator | 员工、节点归属、默认节点、任务状态、委托关系、执行记录、调度、API、Plane 集成；Project、主对话、Inbox、项目记忆、Project Agent 的放置与租约（修订草案） | 原始 Session 历史、模型调用、设备 SSH | R-01、R-05～R-06、R-12～R-25、R-27、R-33～R-38 |
+| Coordinator | 员工、节点归属、默认节点、任务状态、委托关系、执行记录、调度、API、Plane 集成；Project、主对话、输入队列、项目记忆、Project Agent 的放置与租约（修订草案） | 原始 Session 历史、模型调用、设备 SSH | R-01、R-05～R-06、R-12～R-25、R-27、R-33～R-38 |
 | batond | 节点身份、本机注册、中心连接、能力汇总、本地 RPC、Worker 发现与启动；Project Runtime 的启动、停止和续租（修订草案） | 不依靠自身内存保存唯一执行事实 | R-02～R-03、R-07～R-11、R-26 |
 | Session Worker | 一个 Session 的 Agent 进程、输入顺序、启动和交付账本、结果、事件及本地历史访问 | 无权签发中心身份、改派任务或创建第二次同任务执行 | R-09～R-11、R-14、R-21～R-23、R-26、R-28～R-29 |
 | baton CLI | 员工操作入口、Agent 提交委托与查询结果、提交结构化任务结果 | 不持有中心管理员或签名密钥 | R-12～R-15、R-19 |
@@ -148,7 +148,7 @@ internal/session/           Worker、输入账本和历史索引
 internal/agent/             统一 Adapter、Pi/Codex 原生协议适配
 internal/protocol/          信封、事件、错误和版本
 internal/plane/             Plane 触发、映射和回写
-internal/projectagent/      Project、主对话、Inbox、放置与租约、Project Agent 工具（修订草案）
+internal/projectagent/      Project、主对话、输入队列、放置与租约、Project Agent 工具（修订草案）
 runtimes/project-agent/     baton-project-runtime 的 TypeScript 源码（修订草案）
 migrations/                 PostgreSQL migration
 web/                        Web UI
@@ -177,7 +177,7 @@ PostgreSQL 不保存完整 Session 消息。应用层对可持久化事件采用
 | delivery_records | 委托结果 ID、来源 Session、交付状态 | 区分执行结束与结果交付 |
 | request_tombstones | 员工与 request_id 唯一、请求摘要、原 task_id | 明细清理后仍不能把重复提交当新执行 |
 | plane_links、plane_events、plane_outbox | 工单映射、事件标识、执行轮次、回写记录 | Webhook 去重和可恢复回写 |
-| projects、project_agents、conversations、conversation_events、agent_inbox、agent_runs、project_memory_entries、project_memory_revisions、node_runtime_reports | 见 Project Agent TECH 第 3 节 | Project Agent 的身份、对话、输入、运行、记忆和节点能力（修订草案） |
+| projects、project_agents、conversations、conversation_events、project_agent_input_queue、agent_runs、project_memory_entries、project_memory_revisions、node_runtime_reports | 见 Project Agent TECH 第 3 节 | Project Agent 的身份、对话、输入、运行、记忆和节点能力（修订草案） |
 
 `tasks` 新增可空列 `project_id`、`origin_conversation_id`、`origin_tool_call_id`，标记由 Project Agent 发起的任务；现有任务这些列为空，行为不变（修订草案）。
 
@@ -316,7 +316,7 @@ delegate 成功返回 task_id。Skill 指导调用者用有限 wait 查询，避
 
 自动结果输入使用 delivery_id：发送前同步提交 delivery_intent，确认进入原生历史后记录 delivered。Worker 在意图与实际发送之间崩溃时，显示交付待核实，不自动再次注入。任务执行结果状态不因此改变。
 
-Project Agent 不使用 baton CLI。它的派发通过 `tasks.dispatch` 工具，由 Coordinator 在同一个事务里接受任务并写入工具结果；任务结束时结果进入它的 Inbox，不经过上面的来源 Worker 交付账本（修订草案，见 Project Agent TECH 第 7、9 节）。
+Project Agent 不使用 baton CLI。它的派发通过 `tasks.dispatch` 工具，由 Coordinator 在同一个事务里接受任务并写入工具结果；任务结束时结果进入它的输入队列，不经过上面的来源 Worker 交付账本（修订草案，见 Project Agent TECH 第 7、9 节）。
 
 ### 结构化结果
 
@@ -397,9 +397,9 @@ Agent 协议帧与传输消息使用不同上限。Pi 可能一次返回大量 g
 | GET /nodes/{id}/files | 受限列目录或文本预览，不能传入任意绝对路径 |
 | POST /projects、GET /projects、GET /projects/{id}、PATCH /projects/{id} | 创建、列出、查看、修改 Project 的标题、目标、状态（active / paused / archived），以及 Project Agent 使用的订阅和模型；拒绝设备或目录字段（修订草案） |
 | POST /projects/{id}/stop | 停止 Project Agent 当前的运行，不取消已派出的任务（修订草案） |
-| POST /projects/{id}/messages | 发送消息，带客户端 `client_message_id`；所有节点离线时也接受（修订草案） |
+| POST /projects/{id}/messages | 发送消息，带客户端 `client_message_id`，正文超过 64 KiB 时返回 413；所有节点离线时也接受（修订草案） |
 | GET /projects/{id}/events | 按 `after_seq` 分页读取主对话，返回最后保存的序号（修订草案） |
-| GET /projects/{id}/runs、GET /projects/{id}/inbox | 运行记录（节点、开始结束时间、结束原因）、待处理输入和等待原因（修订草案） |
+| GET /projects/{id}/runs、GET /projects/{id}/input-queue | 运行记录（节点、开始结束时间、结束原因）、待处理输入和等待原因（修订草案） |
 | POST /projects/{id}/retry | 对话处于需要处理状态时，确认重试（修订草案） |
 | GET /projects/{id}/memory、PUT /projects/{id}/memory/{entry_id} | 查看和修改项目记忆，修改带 `expected_revision`（修订草案） |
 | /events | 浏览器同源 WebSocket，订阅本人任务与 Session 的通知或受限输出；也推送 Project Agent 的流式片段和已保存事件（修订草案） |
