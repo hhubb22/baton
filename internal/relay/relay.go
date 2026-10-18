@@ -48,6 +48,7 @@ type Relay struct {
 	nodes       map[string]*nodeConn
 	pending     map[string]protocol.Presence
 	business    *protocol.Queue
+	outputs     *protocol.Queue
 	haveControl bool
 	listener    net.Listener
 	httpSrv     *http.Server
@@ -185,6 +186,7 @@ func (r *Relay) serveControl(ctx context.Context) (bool, error) {
 
 	r.mu.Lock()
 	r.business = protocol.NewQueue(protocol.MaxQueueMessages, protocol.MaxQueueBytes)
+	r.outputs = protocol.NewQueue(128, 32*1024*1024)
 	r.haveControl = true
 	r.pending = map[string]protocol.Presence{}
 	sessions := r.sessionsLocked()
@@ -219,6 +221,7 @@ func (r *Relay) dropControl() {
 	r.mu.Lock()
 	r.haveControl = false
 	r.business = nil
+	r.outputs = nil
 	r.mu.Unlock()
 }
 
@@ -523,7 +526,15 @@ func (r *Relay) readNode(ctx context.Context, nc *nodeConn) {
 				r.localError(nc, protocol.CodeMessageTooLarge, "")
 				continue
 			}
-			if err := r.enqueueControl(out); err != nil {
+			var head struct {
+				Priority string `json:"priority"`
+			}
+			_ = json.Unmarshal(prepared, &head)
+			enqueue := r.enqueueControl
+			if head.Priority == protocol.PriorityOutput {
+				enqueue = r.enqueueOutput
+			}
+			if err := enqueue(out); err != nil {
 				code := protocol.CodeControlUnavailable
 				if errors.Is(err, protocol.ErrQueueFull) || errors.Is(err, protocol.ErrTooLarge) {
 					code = protocol.CodeOf(err)
@@ -648,6 +659,7 @@ func (r *Relay) flush(ctx context.Context, ws *websocket.Conn) error {
 	pending := r.pending
 	r.pending = map[string]protocol.Presence{}
 	q := r.business
+	output := r.outputs
 	r.mu.Unlock()
 	for _, item := range pending {
 		copied := item
@@ -662,10 +674,15 @@ func (r *Relay) flush(ctx context.Context, ws *websocket.Conn) error {
 	for i := 0; i < 8; i++ {
 		raw, ok := q.TryPop()
 		if !ok {
-			return nil
+			break
 		}
 		if err := r.writeControlRaw(ctx, ws, raw); err != nil {
 			return err
+		}
+	}
+	if output != nil {
+		if raw, ok := output.TryPop(); ok {
+			return r.writeControlRaw(ctx, ws, raw)
 		}
 	}
 	return nil
@@ -876,4 +893,19 @@ func errKind(err error) string {
 		text = text[:120]
 	}
 	return text
+}
+
+// enqueueOutput 使用独立预算，输出超限不占用任务控制队列。
+func (r *Relay) enqueueOutput(raw []byte) error {
+	r.mu.Lock()
+	q, up := r.outputs, r.haveControl
+	r.mu.Unlock()
+	if !up || q == nil {
+		return errControlDown
+	}
+	if err := q.Push(raw); err != nil {
+		return err
+	}
+	r.wakeLocked()
+	return nil
 }

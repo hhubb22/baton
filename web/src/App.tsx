@@ -17,6 +17,7 @@ import { clearCSRF, readCSRF, writeCSRF } from './session.ts'
 import type { Employee, Enrollment, NodeList, SavedDefault } from './types.ts'
 import { LoginForm } from './ui/LoginForm.tsx'
 import { NodesPage } from './ui/NodesPage.tsx'
+import { SessionsPage } from './ui/SessionsPage.tsx'
 import { PasswordForm } from './ui/PasswordForm.tsx'
 
 type Phase =
@@ -26,6 +27,7 @@ type Phase =
   | { kind: 'nodes'; employee: Employee; csrf: string }
 
 export default function App() {
+  const [page, setPage] = useState<'nodes' | 'sessions'>('nodes')
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' })
   const [list, setList] = useState<NodeList | null>(null)
   const [saved, setSaved] = useState<SavedDefault | null>(null)
@@ -230,7 +232,9 @@ export default function App() {
         </>
       ) : null}
       {phase.kind === 'nodes' ? (
-        <NodesPage
+        <>
+        <nav aria-label="页面"><button type="button" onClick={() => setPage('nodes')}>节点</button><button type="button" onClick={() => setPage('sessions')}>Session</button></nav>
+        {page === 'sessions' ? <SessionsPage csrf={phase.csrf} nodes={list} employeeID={phase.employee.id} /> : <NodesPage
           employee={phase.employee}
           csrf={phase.csrf}
           list={list}
@@ -247,7 +251,8 @@ export default function App() {
           onSaveDefault={(nodeId) => void onSaveDefault(nodeId)}
           onRevoke={(nodeId) => void onRevoke(nodeId)}
           loadFiles={(nodeId, query) => getNodeFiles(nodeId, query)}
-        />
+        />}
+        </>
       ) : null}
     </main>
   )

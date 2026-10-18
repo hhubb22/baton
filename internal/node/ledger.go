@@ -534,3 +534,11 @@ func consumeDrop() bool {
 		}
 	}
 }
+
+func (l *Ledger) releaseSession(sessionID, executionID string) error {
+	if _, err := identity.ParseUUID(executionID); err != nil {
+		return err
+	}
+	_, err := l.db.Exec(`UPDATE sessions SET bound_execution_id=NULL WHERE session_id=? AND bound_execution_id=?`, sessionID, executionID)
+	return err
+}

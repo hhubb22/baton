@@ -135,6 +135,10 @@ func (w *workerDB) pollAdapterLocked(sessionID string) error {
 	if w.adapter == nil {
 		return nil
 	}
+	if live, ok := w.adapter.(agent.LiveAdapter); ok {
+		text, gap := live.DrainLive()
+		w.appendLiveLocked(text, gap)
+	}
 	if err := w.confirmNativeDeliveriesLocked(); err != nil {
 		return err
 	}

@@ -265,6 +265,9 @@ func readRelay(ctx context.Context, w *wsWriter, acked *atomic.Bool, expect *ato
 			if handleNodeEnvelope(ctx, raw, w, ledger, host, ident.Capabilities, log, loop) {
 				continue
 			}
+			if handleSessionEnvelope(ctx, raw, w, host, ledger) {
+				continue
+			}
 			if handleFileEnvelope(ctx, raw, w, dataDir, log) {
 				continue
 			}

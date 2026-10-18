@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -221,7 +222,7 @@ func startPrepareStackWithBins(t *testing.T, extra map[string]string, coordBin, 
 		"BATON_CONTROL_ADDR":       controlAddr,
 		"BATON_CONTROL_TOKEN":      "prepare-control-token-01",
 		"BATON_NODE_SIGNING_KEY":   signingFile,
-		"BATON_ALLOWED_ORIGINS":    "https://baton.example",
+		"BATON_ALLOWED_ORIGINS":    "https://baton.example,https://" + apiAddr,
 		"BATON_TLS_CERT_FILE":      certFile,
 		"BATON_TLS_KEY_FILE":       keyFile,
 		"BATON_HEARTBEAT_INTERVAL": "200ms",
@@ -499,6 +500,16 @@ func stopWorker(pid int) {
 	}
 	defer process.Release()
 	_ = process.Kill()
+	if runtime.GOOS != "windows" {
+		return
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if processAlive(pid) != nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func restartBatond(t *testing.T, st *prepareStack) {

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"baton/internal/agentcli"
 	"baton/internal/identity"
 	"baton/internal/node"
+	"baton/internal/privatefiletest"
 	"baton/internal/session"
 	"baton/internal/store"
 	"baton/internal/task"
@@ -58,11 +60,11 @@ func TestAgentCLIDelegatesBetweenTwoNodes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	info, err := os.Stat(contextFile)
-	if err != nil || info.Mode().Perm() != 0o600 {
-		t.Fatal("上下文文件未受限")
-	}
+	privatefiletest.AssertPrivate(t, contextFile)
 	cli := filepath.Join(t.TempDir(), "baton")
+	if runtime.GOOS == "windows" {
+		cli += ".exe"
+	}
 	build := exec.Command("go", "build", "-o", cli, "./cmd/baton")
 	build.Dir = filepath.Join("..", "..")
 	if out, err := build.CombinedOutput(); err != nil {

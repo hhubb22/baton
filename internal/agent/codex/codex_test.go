@@ -579,3 +579,37 @@ func TestCodexInitializeWithoutModel(t *testing.T) {
 	}
 	t.Logf("CLI=%s initialize=passed; model tasks not run", Version)
 }
+
+func TestBrowserDeltaUsesSeparateBoundedQueue(t *testing.T) {
+	a := New(Config{})
+	defer a.Close()
+	a.mu.Lock()
+	a.state.ThreadID, a.state.TurnID = "thread", "turn"
+	raw := json.RawMessage(`{"threadId":"thread","turnId":"turn","delta":"输出"}`)
+	for i := 0; i < 1000; i++ {
+		if _, err := a.handle(context.Background(), nil, &jsonrpc2.Request{Method: "item/agentMessage/delta", Params: &raw, Notif: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.mu.Unlock()
+	deadline := time.Now().Add(time.Second)
+	var text string
+	var gap bool
+	for time.Now().Before(deadline) {
+		got, missed := a.DrainLive()
+		text += got
+		gap = gap || missed
+		if text != "" && gap {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if text == "" || !gap {
+		t.Fatal("增量没有进入有界输出缓存")
+	}
+	select {
+	case <-a.closed:
+		t.Fatal("慢输出订阅关闭了 Agent")
+	default:
+	}
+}

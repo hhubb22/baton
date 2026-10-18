@@ -384,3 +384,9 @@ export async function assertLogsClean(state: E2EState, secrets: string[]): Promi
     if (text.includes('postgres://')) throw new Error(`${name} 包含数据库连接串`)
   }
 }
+
+export async function createSessionEmployee(state: E2EState): Promise<{ username: string; password: string }> {
+ const username = 'sessions'
+ const password = await issuedPassword(state.coordBin, childEnv({ BATON_DATABASE_URL: state.databaseURL, BATON_DB_SCHEMA: state.schema }), username, 'Session 测试', [state.databaseURL])
+ return { username, password }
+}

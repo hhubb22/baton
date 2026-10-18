@@ -233,3 +233,18 @@ func (s *Store) GetSession(ctx context.Context, employeeID, sessionID string) (W
 	}
 	return item, nil
 }
+
+// NotificationStamps 只读取版本摘要，不把任务说明读入浏览器通知缓存。
+func (s *Store) NotificationStamps(ctx context.Context, employeeID string) (string, string, error) {
+	var sessions, tasks string
+	err := s.pool.QueryRow(ctx, `SELECT
+ COALESCE((SELECT md5(string_agg(id::text || ':' || updated_at::text, ',' ORDER BY id)) FROM sessions WHERE employee_id=$1::uuid),''),
+ COALESCE((SELECT md5(string_agg(id::text || ':' || version::text, ',' ORDER BY id)) FROM tasks WHERE employee_id=$1::uuid),'')`, employeeID).Scan(&sessions, &tasks)
+	return sessions, tasks, err
+}
+
+// MarkSessionResumed 只把已结束且没有新执行绑定的本人 Session 标记为空闲。
+func (s *Store) MarkSessionResumed(ctx context.Context, employeeID, sessionID string) error {
+	_, err := s.pool.Exec(ctx, `UPDATE sessions SET status='idle',updated_at=now() WHERE employee_id=$1::uuid AND id=$2::uuid AND status='stopped' AND bound_execution_id IS NULL`, employeeID, sessionID)
+	return err
+}
