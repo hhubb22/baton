@@ -248,11 +248,11 @@ func (w *workerDB) Arm(taskID, executionID string) (string, error) {
 func (w *workerDB) Authorize(taskID, executionID, permit, publicKey, generation string, queueExpires time.Time) (started bool, refused bool, code string, err error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if w.execution == "" || w.execution != executionID || w.task != taskID {
+		return false, true, "invalid_target", nil
+	}
 	if w.intent {
 		return true, false, "", nil
-	}
-	if w.execution == "" || w.execution != executionID || w.task != taskID {
-		return w.refuse("invalid_target")
 	}
 	if w.cancelled {
 		return w.refuse("cancelled")
@@ -278,7 +278,7 @@ func (w *workerDB) Authorize(taskID, executionID, permit, publicKey, generation 
 	}
 	nowMono, monoErr := w.clock.Mono()
 	if monoErr != nil || w.armedMono <= 0 {
-		return false, true, "unavailable", nil
+		return w.refuse("unavailable")
 	}
 	rtt := nowMono - time.Duration(w.armedMono)
 	if _, ok := startpermit.Remaining(claims.ExpiresAt.Sub(claims.IssuedAt), rtt); !ok {
@@ -333,20 +333,34 @@ func (w *workerDB) CancelLocal() (started bool, err error) {
 	return false, nil
 }
 
-// refuse 记下启动前的拒绝。这样的 Session 没有 start_intent，重启时不再拉起 Worker。
+// RejectStart 只为当前执行保存中心的拒绝，不覆盖已经落盘的启动意图。
+func (w *workerDB) RejectStart(taskID, executionID, code string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.execution == "" || w.execution != executionID || w.task != taskID || code == "" {
+		return errors.New("拒绝不属于当前执行")
+	}
+	if w.intent {
+		return nil
+	}
+	return w.recordRefusal(code)
+}
+
+// refuse 的调用方已核对执行身份。写库失败不改变尚未启动的拒绝事实。
 func (w *workerDB) refuse(code string) (bool, bool, string, error) {
+	return false, true, code, w.recordRefusal(code)
+}
+
+func (w *workerDB) recordRefusal(code string) error {
 	tx, err := w.db.Begin()
 	if err != nil {
-		return false, false, "", err
+		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := putMeta(tx, "start_refused", code); err != nil {
-		return false, false, "", err
+		return err
 	}
-	if err := tx.Commit(); err != nil {
-		return false, false, "", err
-	}
-	return false, true, code, nil
+	return tx.Commit()
 }
 
 func (w *workerDB) Append(note string) (int64, error) {
@@ -898,7 +912,7 @@ func CreateLedger(path string) error {
 	return chmodDB(path)
 }
 
-// LedgerNeedsWorker 判断这个账本是否还要有一个常驻 Worker。已经交付或已经上报待核实的 Session 不再拉起。
+// LedgerNeedsWorker 优先恢复待交付和已启动事实；启动前只恢复已申请许可且未拒绝的 Session。
 func LedgerNeedsWorker(path string) (bool, error) {
 	if err := InspectLedger(path); err != nil {
 		return false, err
@@ -938,8 +952,8 @@ func LedgerNeedsWorker(path string) (bool, error) {
 	if meta["result_delivered"] == "1" || verification > 0 {
 		return false, nil
 	}
-	if meta["start_intent"] != "1" && (meta["start_cancelled"] == "1" || meta["start_refused"] != "") {
-		return false, nil
+	if meta["start_intent"] != "1" {
+		return meta["start_nonce"] != "" && meta["start_cancelled"] != "1" && meta["start_refused"] == "", nil
 	}
 	return true, nil
 }

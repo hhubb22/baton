@@ -276,8 +276,8 @@ func TestDeliveredLedgerDoesNotNeedAWorker(t *testing.T) {
 		t.Fatal(err)
 	}
 	needs, err := LedgerNeedsWorker(path)
-	if err != nil || !needs {
-		t.Fatalf("新建账本应该还能启动 Worker: %v %v", needs, err)
+	if err != nil || needs {
+		t.Fatalf("尚未申请许可的账本不应恢复 Worker: %v %v", needs, err)
 	}
 	db, err := sql.Open("sqlite", sqliteDSN(path))
 	if err != nil {

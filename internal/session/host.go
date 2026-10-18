@@ -128,6 +128,22 @@ func (h *Host) Authorize(ctx context.Context, sessionID, taskID, executionID, pe
 	})
 }
 
+// RejectStart 把中心拒绝交给原 Session，不产生新的执行身份或任务输入。
+func (h *Host) RejectStart(ctx context.Context, sessionID, taskID, executionID, code string) error {
+	call := func(c *Client) (Status, error) {
+		return c.RejectStart(taskID, executionID, code)
+	}
+	if _, err := h.call(ctx, sessionID, call); err == nil {
+		return nil
+	}
+	// 结果可能晚于 Worker 退出到达。仍由 Worker 写自己的账本。
+	if err := h.Reconcile(ctx, sessionID); err != nil {
+		return err
+	}
+	_, err := h.call(ctx, sessionID, call)
+	return err
+}
+
 // SubmitInput 把任务输入交给 Worker。重复调用不会让执行器再收到一次。
 func (h *Host) SubmitInput(ctx context.Context, sessionID, payload string) (Status, error) {
 	return h.call(ctx, sessionID, func(c *Client) (Status, error) {
