@@ -250,11 +250,37 @@ Worker 无法应答时，账本的权限、IO、打开失败和锁忙统一作�
 
 `POST /tasks/{id}/cancel` 需要登录会话、Origin 和 CSRF，正文是 `{}`。尚未发出启动许可、或者节点已经明确拒绝启动时，任务变为 `cancelled`。许可已经发出但还没有这张未启动回执时，任务变为 `needs_verification`，响应里的 `possible_start` 为 true。缺少启动回执不会被当成“没有执行”。重复取消不发起新的执行。取消父任务时还不会级联子委托。
 
+授权前已取消的同一次执行，Worker 在后续心跳领取中止要求后仍可补报 `stop_report`。中心只对身份匹配、取消原因且 `not_started=true`（同时已停止、结果已知）的未授权执行接收这类补充证据，持久化后 ACK；保留 `cancelled` 终态、原摘要和错误，不补授权。同一事件重复上报只确认一次。Worker 收到 ACK 后清空待交付项，退出后不再因该回执被 batond 重启或重连拉起；其他未授权的启动、结果及中止报告仍拒绝。
+
 中心把单任务中止请求持久保存在 `execution_stops`。节点在心跳和补发输入前通过 `execution.control` 领取，离线请求不会被丢弃。Worker 在 Session 互斥区先落盘中止标记再调用测试执行器的中止接口；接口返回不等于确认停止。只有未发送输入、或确认停止且操作结果可说明时才变成 `cancelled`；停止或副作用仍未知就保留 `needs_verification` 和执行绑定。停止不会回滚已发生的外部副作用。真实 Agent 适配仍不在本实现内。
 
 排队到期时，包含未准备任务在内，能确认未启动的任务失败，原因是 `queue_timeout`，此后不能再授权。已授权而没有未启动证据的任务先待核实，Worker 的未启动回执再收敛为超时失败；期限前已发送输入的事实优先于延迟的排队超时请求，不会中断已执行任务。节点被吊销时仍按原规则处理：还没授权就失败，原因是 `revoked`；已经授权就进入待核实。
 
 执行期限通过签名许可传给 Worker，从本地 `start_intent` 起用包含休眠的单调时钟计时，墙钟跳变不会增加预算，节点离线也会中止。中心首次收到启动事实时以剩余执行预算估算 `execution_expires_at` 并扫描；传输延迟可能使中心扫描略晚，本地计时不依赖中心。超时先中止、待核实，只有停止且结果已知才按 `execution_timeout` 失败。中心输入读取与 Worker 提交均检查取消/期限，不会补发已取消或已超期输入。实际输入发送的原定时间、发送时间和单调 `delay_ms` 存在本地 `execution_log` 的 `input_dispatch` 条目及同名日志中，不只记录重试尝试。
+
+## 人工核实与显式重做
+
+员工可通过 `POST /api/v1/tasks/{id}/resolve` 核实本人待核实或已结束的任务；排队、运行中的任务先查询或请求取消。接口沿用登录、Origin 与 CSRF 校验，不启动 Agent、不重发输入，也不宣称节点进程已经停止。
+
+```json
+{
+  "expected_version": 5,
+  "status": "completed",
+  "summary": "现场核对后确认已完成",
+  "reason": "已检查设备状态及执行记录",
+  "evidence": [{"storage_ref": "inspection", "resource_id": "check-42", "access_status": "available"}]
+}
+```
+
+结论只接受 `completed`、`failed`、`cancelled`。证据为空时提供 `evidence_empty_reason`。任务版本、结论、摘要与人工证据在同一事务保存；原状态、摘要、错误、证据、取消事实保存在 `resolved` 事件的 `resolution.previous`，同时记录理由、操作者与时间。原产物引用和节点停止事实不变。迟到报告仍按同一执行补充事实，不覆盖人工终态。通过任务查询及 `/events` 读取当前记录和审计。
+
+`POST /api/v1/tasks/{id}/rerun` 才会创建新的任务和执行：
+
+```json
+{"request_id":"redo-42","expected_version":6,"reason":"明确要求重新执行","confirm_side_effects":true}
+```
+
+原任务仍为 `needs_verification` 时必须明确确认重复副作用风险；未确认返回 `409 conflict`。重做沿用原任务的目标节点、Agent、描述、授权和期限长度（排队期限重新起算），不自动改派，不复用原 Session、execution 或委托来源；新任务的 `rerun_of_task_id` 关联原任务。原任务只增加版本及 `rerun_requested` 审计。相同员工、相同 `request_id` 与请求内容返回同一新任务，内容变化返回冲突。并发核实或重做使用 `expected_version`，版本不符时返回 `409 conflict`、`current_version` 与 `current_status`，须先查询最新事实。核实的网络重试也遵守版本检查，不会重新执行。此处仅提供 API，Web 核实界面不在本次实现内。
 
 ## 文件浏览
 

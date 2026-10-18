@@ -182,7 +182,12 @@ func (s *Store) ApplyExecutionReport(ctx context.Context, in ExecutionReport) (b
 	if !ok {
 		return false, task.CodeInvalidTarget, nil
 	}
-	if !head.authorized || head.refused || head.sessionID != in.SessionID || head.nodeID != in.NodeID {
+	if head.sessionID != in.SessionID || head.nodeID != in.NodeID {
+		return false, task.CodeInvalidTarget, nil
+	}
+	notStartedCancellation := !head.authorized && head.status == task.StatusCancelled &&
+		in.Kind == task.EventStopReport && in.StopReason == task.StatusCancelled && in.NotStarted
+	if (!head.authorized || head.refused) && !notStartedCancellation {
 		return false, task.CodeInvalidTarget, nil
 	}
 	if in.Kind != task.EventNeedsVerification && in.Kind != task.EventStopReport && head.generation != nil && *head.generation != in.InputGeneration {

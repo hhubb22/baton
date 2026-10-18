@@ -4,12 +4,112 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
 	"baton/internal/session"
 	"baton/internal/task"
 )
+
+func TestCancelBeforePermitDrainsStopReportAcrossBatondRestarts(t *testing.T) {
+	gate := t.TempDir()
+	st := startPrepareStack(t, map[string]string{"BATON_TEST_HOLD_START": "0", "BATON_TEST_START_GATE": gate})
+	created := acceptTask(t, st, "cancel-before-permit-stop")
+	waitGateFile(t, gate)
+	sid := taskWorker(t, st, created.TaskID)
+	if code := postJSON(t, st.client, st.base+"/api/v1/tasks/"+created.TaskID+"/cancel", map[string]any{}, st.csrf, nil); code != 200 {
+		t.Fatalf("授权前取消: %d", code)
+	}
+	waitTaskStatus(t, st, created.TaskID, task.StatusCancelled)
+	waitStopEvidence(t, st, created.TaskID)
+	path, err := session.LedgerPath(st.dataDir, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var pending int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE delivered = 0`).Scan(&pending); err != nil {
+			t.Fatal(err)
+		}
+		if pending == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("中止回执未清空: %d\n%s", pending, st.batond.out.String())
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	assertDrained := func() {
+		t.Helper()
+		var status string
+		var authorized bool
+		var reports int
+		if err := st.pool.QueryRow(context.Background(), `SELECT t.status, e.start_authorized_at IS NOT NULL,
+ (SELECT COUNT(*) FROM task_events WHERE task_id = t.id AND kind = 'stop_report' AND not_started)
+ FROM tasks t JOIN executions e ON e.task_id = t.id WHERE t.id = $1::uuid`, created.TaskID).Scan(&status, &authorized, &reports); err != nil || status != task.StatusCancelled || authorized || reports != 1 {
+			t.Fatalf("中心终态或补充证据错误: %s authorized %v reports %d %v", status, authorized, reports, err)
+		}
+		var pending, total int
+		if err := db.QueryRow(`SELECT COUNT(*) FILTER (WHERE delivered = 0), COUNT(*) FROM outbox`).Scan(&pending, &total); err != nil || pending != 0 || total != 1 {
+			t.Fatalf("心跳产生未交付或重复回执: pending %d total %d %v", pending, total, err)
+		}
+		if needs, err := session.LedgerNeedsWorker(path); err != nil || needs {
+			t.Fatalf("已交付取消账本仍需 Worker: %v %v", needs, err)
+		}
+		for _, kind := range []string{"start", "input"} {
+			if n := executorCount(t, st, kind); n != 0 {
+				t.Fatalf("授权前取消后执行器 %s %d 次", kind, n)
+			}
+		}
+	}
+	waitHeartbeats := func() {
+		t.Helper()
+		var last time.Time
+		if err := st.pool.QueryRow(context.Background(), `SELECT last_contact_at FROM node_presence WHERE node_id = $1::uuid`, st.ident.NodeID).Scan(&last); err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < 3; i++ {
+			deadline := time.Now().Add(10 * time.Second)
+			for {
+				var next time.Time
+				if err := st.pool.QueryRow(context.Background(), `SELECT last_contact_at FROM node_presence WHERE node_id = $1::uuid`, st.ident.NodeID).Scan(&next); err != nil {
+					t.Fatal(err)
+				}
+				if next.After(last) {
+					last = next
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("未观察到新心跳")
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+			assertDrained()
+		}
+	}
+	waitHeartbeats()
+	pid := workerStatus(t, st.dataDir, sid).PID
+	st.batond.stop()
+	stopWorker(pid)
+	waitWorkerSocketDown(t, st.dataDir, sid)
+	for i := 0; i < 2; i++ {
+		restartBatond(t, st)
+		waitLog(t, st.batond, "event=connected")
+		waitLog(t, st.batond, "event=synced")
+		waitHeartbeats()
+		host := session.Host{DataDir: st.dataDir}
+		if host.Reachable(context.Background(), sid) || strings.Contains(st.batond.out.String(), "event=worker_started") {
+			t.Fatalf("重启后重新拉起已交付的 Worker\n%s", st.batond.out.String())
+		}
+	}
+}
 
 func TestRunningCancelNeedsWorkerStopAndOutcomeEvidence(t *testing.T) {
 	for _, script := range []string{"unconfirmed", "unknown", "confirmed"} {
@@ -204,11 +304,19 @@ func waitStopEvidence(t *testing.T, st *prepareStack, taskID string) task.Record
 
 func taskWorker(t *testing.T, st *prepareStack, taskID string) string {
 	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
 	var sid string
-	if err := st.pool.QueryRow(context.Background(), `SELECT target_session_id::text FROM tasks WHERE id = $1::uuid`, taskID).Scan(&sid); err != nil {
-		t.Fatal(err)
+	for time.Now().Before(deadline) {
+		if err := st.pool.QueryRow(context.Background(), `SELECT COALESCE(target_session_id::text, '') FROM tasks WHERE id = $1::uuid`, taskID).Scan(&sid); err != nil {
+			t.Fatal(err)
+		}
+		if sid != "" {
+			status := workerStatus(t, st.dataDir, sid)
+			t.Cleanup(func() { stopWorker(status.PID) })
+			return sid
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
-	status := workerStatus(t, st.dataDir, sid)
-	t.Cleanup(func() { stopWorker(status.PID) })
-	return sid
+	t.Fatalf("中心没有保存目标 Session\ncoord %s\nnode %s", st.coord.out.String(), st.batond.out.String())
+	return ""
 }

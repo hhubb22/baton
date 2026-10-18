@@ -1,4 +1,4 @@
-# Devin 云端会话的 Baton 环境，用 `devin cloud drs blueprint-write` 同步到 Devin。
+# Devin 云端会话的 Baton 环境，用 `devin cloud drs blueprint-write` 同步到 Devin。每个平台一段。
 runs-on: linux
 
 initialize:
@@ -22,3 +22,45 @@ knowledge:
       go vet ./...
       go test -count=1 ./...
       改动 web/ 时在 web/ 下运行 pnpm lint、pnpm typecheck、pnpm test、pnpm test:e2e、pnpm check:dist。
+---
+runs-on: macos
+
+initialize:
+  - name: 系统依赖
+    run: bash .devin/setup-macos.sh
+
+maintenance:
+  - name: Go 模块
+    run: . /etc/profile.d/baton.sh && go mod download
+
+knowledge:
+  - name: 环境
+    contents: |
+      环境变量在 /etc/profile.d/baton.sh。会话开始时先执行 `bash .cursor/start.sh`，它在 $HOME/.baton-postgres 启动 PostgreSQL 17 并建好 baton_test。
+      Web 端到端测试只在 Linux 上运行。
+  - name: 验证
+    contents: |
+      go build ./...
+      go vet ./...
+      go test -count=1 ./...
+---
+runs-on: windows
+
+initialize:
+  - name: 系统依赖
+    run: bash .devin/setup-windows.sh
+
+maintenance:
+  - name: Go 模块
+    run: . "$HOME/.baton-env.sh" && go mod download
+
+knowledge:
+  - name: 环境
+    contents: |
+      用 Git Bash。环境变量在 ~/.baton-env.sh，已由 ~/.bashrc 加载。PostgreSQL 17 是 Windows 服务 postgresql-x64-17，会话开始时执行 `bash .cursor/start.sh` 确认服务运行并建好 baton_test。
+      Web 端到端测试只在 Linux 上运行。
+  - name: 验证
+    contents: |
+      go build ./...
+      go vet ./...
+      go test -count=1 ./...
