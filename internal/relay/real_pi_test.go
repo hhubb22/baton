@@ -261,7 +261,7 @@ func TestRealPi(t *testing.T) {
 	capabilities["委托"], capabilities["原生历史确认"] = "支持", "支持"
 	// Wait for a deterministic tool-start fixture before cancellation, not just
 	// a running row that can precede the model's first tool call.
-	abortTask := accept("real-pi-abort", "Use bash to execute exactly: printf started > abort-started; sleep 90; printf late > abort-finished. Do not finish early. Return a structured result only after this command finishes.")
+	abortTask := accept("real-pi-abort", "Use bash to execute exactly: printf started > abort-started; sleep 15; printf late > abort-finished. Do not finish early. Return a structured result only after this command finishes.")
 	deadline := time.Now().Add(3 * time.Minute)
 	for {
 		if _, err := os.Stat(filepath.Join(work, "abort-started")); err == nil {
@@ -272,6 +272,7 @@ func TestRealPi(t *testing.T) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+	abortWindow := time.Now().Add(17 * time.Second)
 	if code := postJSON(t, st.client, st.base+"/api/v1/tasks/"+abortTask.TaskID+"/cancel", map[string]any{}, st.csrf, nil); code != http.StatusOK {
 		t.Fatal("cancel request failed")
 	}
@@ -291,7 +292,17 @@ func TestRealPi(t *testing.T) {
 	abortSID := sessionOf(t, st, abortTask.TaskID)
 	abortWorker := workerStatus(t, st.dataDir, abortSID)
 	t.Cleanup(func() { stopWorker(abortWorker.PID) })
+	var outcomeKnown bool
+	if err := st.pool.QueryRow(context.Background(), `SELECT stop_outcome_known FROM tasks WHERE id=$1::uuid`, abortTask.TaskID).Scan(&outcomeKnown); err != nil || outcomeKnown {
+		t.Fatal("tool side effects were incorrectly declared known")
+	}
+	// Observe beyond the original command's completion, before cleanup can kill
+	// the process group and hide a failed abort.
+	if remaining := time.Until(abortWindow); remaining > 0 {
+		time.Sleep(remaining)
+	}
 	if _, err := os.Stat(filepath.Join(work, "abort-finished")); !os.IsNotExist(err) {
+		capabilities["中止"] = "不支持"
 		t.Fatal("aborted command reached the forbidden trailing write")
 	}
 	capabilities["中止"] = "支持"
