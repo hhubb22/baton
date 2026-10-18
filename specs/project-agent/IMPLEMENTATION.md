@@ -26,6 +26,8 @@ PA-W08 是第一个里程碑。它不需要压缩和命令执行：对话短时�
 
 PA-W10 依赖 #21、#22（T14、T15，均已合并）。这两个 PR 把 Worker 的适配接口统一成 `internal/agent.Adapter`，Worker 只在 `internal/session/adapter.go` 的 `configureAdapter` 一处按 `agent_type` 从 `registeredAdapters` 选择适配器。`shell` 执行器实现这个接口并注册一项，不改 Worker 的生命周期和账本。
 
+[Agent Inbox](../agent-inbox/PRODUCT.md) 的工作项在它的技术设计完成后另列，依赖 PA-W08。0017 已经包含它的输入类型 `attention_answer`，事项表和通知订阅表使用后续迁移。PA-W05 不实现 `inbox.*` 工具。
+
 PA-W02 和 PA-W03 可以并行。PA-W06 的 TypeScript 部分只依赖 PA-W04 确定的 `ProjectRuntimeRequest` 协议，可以和 PA-W05 并行。
 
 按项目约定，工作项派给 Devin 云端会话。PA-W06 需要 Node.js 环境，`.devin/blueprint.yaml` 里已有为 `web/` 准备的 Node.js 和 pnpm，派发前确认版本满足 pi-agent-core 的要求。PA-W08 和 PA-W11 需要真实设备和订阅，按 `lab-request` 准备，实测使用各订阅里最便宜的模型。

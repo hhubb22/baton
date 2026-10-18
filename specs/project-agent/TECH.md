@@ -5,7 +5,7 @@ Owner: Asa
 Date: 2026-10-18
 Baseline: `hhubb22/baton@6da5ebef0d4d129fad4776de3dafd8b2e681f958`；Pi `earendil-works/pi@482c138`（2026-10-18，各包 1.3.0）；DSH `deepseek-ai/deepseek-harness@687f282`（2026-10-17）
 Approval: 尚未批准
-Basis: [PRODUCT.md](PRODUCT.md) PA-01～PA-22；[Baton TECH](../baton/TECH.md)
+Basis: [PRODUCT.md](PRODUCT.md) PA-01～PA-22；[Agent Inbox 行为规格](../agent-inbox/PRODUCT.md) IB-01～IB-27 中与 Project Agent 相关的部分；[Baton TECH](../baton/TECH.md)
 
 ## Context
 
@@ -78,12 +78,13 @@ Runtime 进程的工作目录是一个空的控制目录。pi-agent-core 本身�
 
 `tasks` 新增可空列 `project_id`、`origin_conversation_id`、`origin_tool_call_id`，并对后两列建唯一索引。用户手工创建和执行 Agent 派生的任务这三列为空，现有行为不变。
 
-输入队列是 Coordinator 内部的数据，用户界面上的待办事项不用这张表。`source_type` 有四种，分成两类：
+输入队列是 Coordinator 内部的数据，用户界面上的待办事项不用这张表。事项表和浏览器通知的订阅表由 Agent Inbox 的技术设计定义。`source_type` 有五种，分成两类：
 
 | source_type | 类别 | 来源 | payload 上限 |
 |---|---|---|---|
 | `user_message` | 主动 | 用户在主对话发送的消息，API 拒绝超过 64 KiB 的消息 | 64 KiB 正文加元数据 |
 | `task_result` | 主动 | Project Agent 派发的任务进入终态（第 9 节） | 40 KiB |
+| `attention_answer` | 主动 | 用户回答或关闭一个事项（Agent Inbox IB-12），内容是事项 ID、标题、选中的选项和最多 4 KiB 的文字 | 8 KiB |
 | `memory_updated` | 被动 | 用户在界面上新建或修改记忆（第 6.4 节） | 1 KiB |
 | `project_updated` | 被动 | 用户修改 Project 标题或目标（第 6.1 节） | 4 KiB |
 
@@ -217,6 +218,10 @@ Project 标题或目标被修改后，新的系统提示词从下一次压缩起
 | `tasks.get` | 只读 | 读取一个任务的状态、结果和证据 | 自身 |
 | `tasks.cancel` | 写入 | 请求取消本 Project 的一个任务 | `tasks.get` |
 | `nodes.exec` | 写入 | 在开启了命令执行的节点上执行一条命令，参数见第 10 节 | `tasks.get` |
+| `inbox.ask` | 写入 | 创建一个请用户处理的事项（Agent Inbox IB-01） | `inbox.list`、`inbox.get` |
+| `inbox.list` | 只读 | 列出本 Project 的事项及其状态 | 自身 |
+| `inbox.get` | 只读 | 读取一个事项的完整内容和处理结果 | 自身 |
+| `inbox.withdraw` | 写入 | 撤回一个待处理事项，必须写明原因 | `inbox.get` |
 
 单个工具输出不超过 32 KiB，超出时返回截断标记和继续读取的方式。
 
@@ -225,6 +230,10 @@ Project 标题或目标被修改后，新的系统提示词从下一次压缩起
 「`tool_call_id` 必须出现在已保存的 assistant 消息里」这条检查，保证每个工具调用在执行前都已经落盘。崩溃恢复时，Runtime 看到的工具调用和 Coordinator 执行过的工具调用总是一致的。
 
 工具执行时，用户、Project 和运行身份都取自运行记录，参数里的同名字段不参与授权。
+
+`inbox.ask` 的展示内容是 OpenUI Lang 程序（Agent Inbox IB-14）。它的写法说明由 `@openuidev/lang-core` 从 Baton 组件库生成，开场白换成适合工具参数的说明，其余原样放进 `inbox.ask` 的工具说明，约 1000～1600 token。工具定义的顺序和内容固定，所以这段说明在可缓存的前缀里；组件库版本变化时 `prompt_version` 随之变化。
+
+Coordinator 是 Go 程序，没有 OpenUI 解析器，所以展示内容由 Runtime 在发出 `call_tool` 之前用 lang-core 检查（IB-18）。检查不通过时，Runtime 仍然发出 `call_tool`，并附上解析器给出的错误；Coordinator 不创建事项，把这些错误写成一条 `is_error` 的结果。这样每个工具调用的结果仍然只由 Coordinator 写入，第 5 节的恢复规则不变。Coordinator 自己检查不依赖解析器的部分：长度、选项声明、关联任务归属和待处理事项上限。Runtime 漏检时，浏览器只用 Baton 组件库渲染，未知组件显示为无法显示（IB-19），不会执行展示内容里的代码。
 
 ### 8. 节点能力报告
 
@@ -321,6 +330,7 @@ Worker 收到 `shell` 任务时，会再检查一次本地的开关，开关关�
 | PA-22 | 用 `sleep` 命令让执行时间长于 `wait_seconds`；让命令恰好在等待截止时结束 | 命令被中断；结果既没有以 `tool_result` 返回也没有进入输入队列；同一结果出现两次 | 进程测试 | planned |
 | PA-22 | 在等待期间杀掉 Runtime；在命令执行中杀掉 Worker | 命令执行了两次；Worker 被杀后任务没有进入待核实 | 进程测试，故障注入 | planned |
 | PA-22 | Windows 上执行 PowerShell 命令并在执行中取消 | 子进程在取消后仍然存活 | Windows 原生测试 | planned |
+| PA-03 | 模型替身调用 `inbox.ask`，展示内容使用未知组件；Runtime 崩溃后重发同一个调用 | 创建了事项；没有 `is_error` 结果；重发后出现第二个事项 | 进程测试，模型替身 | planned |
 | PA-A01 | 三台设备、真实 Runtime、真实订阅跑完整场景 | 见 PRODUCT 验收表 | 实机 | planned |
 
 ## Open questions

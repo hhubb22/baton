@@ -120,11 +120,13 @@ IB-A01 和 IB-A03 使用真实 Runtime 和最便宜的订阅模型；IB-A14、IB
 
 ## 对其他规格的影响
 
-- Project Agent PRODUCT：PA-05 增加一种会触发运行的输入「事项处理结果」；PA-03 的工具列表增加 `inbox.ask`、`inbox.list`、`inbox.get`、`inbox.withdraw`；范围说明里的「另写规格」指向本文件。
-- Project Agent TECH：输入队列的 `source_type` 增加一种主动输入；新增事项表；`inbox.ask` 和 `inbox.withdraw` 与 `tool_result` 在同一事务提交（TECH 第 7 节）。OpenUI 的写法说明由 `@openuidev/lang-core` 从 Baton 组件库生成，开场白换成适合工具参数的说明，约 1000～1600 token，放在 `inbox.ask` 的工具说明里，跟着工具定义一起进入可缓存的前缀；组件库版本变化时 `prompt_version` 随之变化。展示内容由 Runtime 用 `@openuidev/lang-core` 检查，因为 Coordinator 是 Go 程序，没有 OpenUI 解析器。
-- Baton PRODUCT：R-30 的 Web UI 增加 Agent Inbox、任务结果上的「问 Project Agent」和浏览器通知设置。
+以下修改已经写进对应规格，同样是草案：
 
-这些修改等本规格批准后再做。
+- Project Agent PRODUCT：PA-05 增加会触发运行的输入「用户对事项的回答或关闭」；PA-03 的能力里增加创建和撤回事项；范围说明指向本文件。
+- Project Agent TECH：输入队列增加主动输入 `attention_answer`；工具表增加 `inbox.ask`、`inbox.list`、`inbox.get`、`inbox.withdraw`；第 7 节说明 OpenUI 写法说明放在 `inbox.ask` 的工具说明里，以及 Runtime 检查展示内容、Coordinator 写入错误结果的方式。0017 迁移的 `source_type` 约束包含 `attention_answer`。
+- Baton PRODUCT：范围表、术语表、R-30 和审计关联加入 Agent Inbox、事项和浏览器通知；Baton TECH 的 Coordinator 职责加入事项与浏览器通知。
+
+事项表、通知订阅表、Web Push 的发送和 API 由本特性的技术设计定义。
 
 ## Open questions
 
