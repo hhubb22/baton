@@ -30,7 +30,7 @@ go vet ./...
 go test -count=1 ./...
 ```
 
-并发相关的包再跑 `go test -race`。改动 `web/` 时，在 `web/` 下运行 `pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm test:e2e` 和 `pnpm check:dist`，并提交更新后的 `internal/webui/dist`。Windows、macOS 只能交叉编译的部分，在回复里列出。
+并发相关的包再跑 `go test -race`。合并前会在 macOS 上复跑，时序和 Linux 不同：进程测试里，节点日志、门闩文件或 batond 重启之后不要立即读取中心记录或调用 CLI，要等待对应的中心事实（字段非空、状态变化、新进程的 `event=synced`）。新增的进程测试至少用 `-count=10` 跑一遍。改动 `web/` 时，在 `web/` 下运行 `pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm test:e2e` 和 `pnpm check:dist`，并提交更新后的 `internal/webui/dist`。Windows、macOS 只能交叉编译的部分，在回复里列出。
 
 ## 提交
 
