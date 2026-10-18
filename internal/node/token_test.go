@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"baton/internal/identity"
+	"baton/internal/privatefiletest"
 	"baton/internal/startpermit"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -116,13 +117,15 @@ func TestLoadSignerRejectsLooseFileAndSymlink(t *testing.T) {
 	if err := os.WriteFile(loose, pemBytes, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	privatefiletest.MakePublic(t, loose)
 	if _, err := LoadSigner(loose); err == nil {
 		t.Fatal("其他用户可读的密钥被接受")
 	}
 	tight := filepath.Join(dir, "tight.pem")
-	if err := os.WriteFile(tight, pemBytes, 0o600); err != nil {
+	if err := signer.WriteFile(tight); err != nil {
 		t.Fatal(err)
 	}
+	privatefiletest.AssertPrivate(t, tight)
 	loaded, err := LoadSigner(tight)
 	if err != nil {
 		t.Fatal(err)

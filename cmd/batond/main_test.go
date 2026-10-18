@@ -24,6 +24,7 @@ import (
 	"baton/internal/dbtest"
 	"baton/internal/httpapi"
 	"baton/internal/node"
+	"baton/internal/privatefiletest"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -82,9 +83,7 @@ func TestRegisterKeepsIdentityAcrossRestart(t *testing.T) {
 	if err := os.WriteFile(looseFile, []byte(enrollment+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(looseFile, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	privatefiletest.MakePublic(t, looseFile)
 	var stdout, stderr bytes.Buffer
 	err = run(ctx, registerArgs(srv.URL, looseDir, looseFile), &stdout, &stderr, func(string) string { return "" })
 	if err == nil || strings.Contains(err.Error(), enrollment) || strings.Contains(stderr.String(), enrollment) || strings.Contains(stdout.String(), enrollment) {
@@ -150,13 +149,7 @@ func TestRegisterKeepsIdentityAcrossRestart(t *testing.T) {
 	if ident.NodeID != nodeID || strings.Contains(combined, ident.Credential.Token) {
 		t.Fatal("重启前的输出包含连接凭据，或节点 ID 不一致")
 	}
-	info, err := os.Stat(filepath.Join(dir, node.IdentityFileName))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("身份文件权限是 %o", info.Mode().Perm())
-	}
+	privatefiletest.AssertPrivate(t, filepath.Join(dir, node.IdentityFileName))
 	if count(t, pool, `SELECT COUNT(*) FROM node_credentials WHERE id = $1::uuid AND node_id = $2::uuid AND revoked_at IS NULL`, ident.Credential.ID, ident.NodeID) != 1 {
 		t.Fatal("数据库没有保存可吊销的 credential_id")
 	}
