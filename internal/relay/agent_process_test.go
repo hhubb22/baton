@@ -200,15 +200,4 @@ func TestAgentCLIDelegatesBetweenTwoNodes(t *testing.T) {
 	if status := workerStatus(t, targetDir, *result.SessionID); status.ExecutorInputs != 1 || status.ExecutorStarts != 1 {
 		t.Fatalf("查询重跑执行: %+v", status)
 	}
-	// 任务结果提交同样固定到当前执行；候选身份字段不会进入中心。
-	candidate := filepath.Join(t.TempDir(), "result.json")
-	if err := os.WriteFile(candidate, []byte(`{"status":"completed","summary":"来源完成","evidence":[],"artifacts":[],"evidence_empty_reason":"无","artifacts_empty_reason":"无","error":null,"task_id":"11111111-1111-4111-8111-111111111111"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	invoke(contextFile, true, "result", "submit", "--file", candidate, "--json")
-	invoke(contextFile, true, "result", "submit", "--file", candidate, "--json")
-	waitTaskStatus(t, st, source.TaskID, task.StatusCompleted)
-	if err := json.Unmarshal(invoke(contextFile, true, "task", "result", source.TaskID, "--json"), &result); err != nil || result.TaskID != source.TaskID || result.Summary == nil || *result.Summary != "来源完成" {
-		t.Fatalf("提交结果来源错误: %+v %v", result, err)
-	}
 }

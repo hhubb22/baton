@@ -96,7 +96,6 @@ baton task wait TASK_ID --timeout 30s --json
 baton task result TASK_ID --json
 baton task relations TASK_ID --json
 baton task cancel TASK_ID --json
-baton result submit --file result.json --json
 ```
 
 委托文件最小内容为 `{"request_id":"stable-request-id","description":"读取目标现场信息"}`。调用方自行保存稳定的 `request_id`；重试必须沿用原 ID 和原内容。CLI 不生成 ID，也不因等待到期或响应丢失重新委托。相同内容返回原任务，不同内容返回 `conflict`，即使默认 PC 后来改变也不改派原任务。未指定目标时使用中心保存的本人默认 PC；目标离线仍保留这个目标。
@@ -107,7 +106,7 @@ baton result submit --file result.json --json
 
 `task wait` 默认 30 秒，允许大于 0、最多 5 分钟；只轮询中心已保存事实，在任务结束、进入待核实或版本变化时返回。到期返回 `waiting:true`、`timed_out:true` 和最后读到的任务（尚未读到时为 null），退出码为 0；Ctrl-C 或传输错误返回非零，不取消任务。其他成功命令输出 JSON、退出码为 0，业务拒绝输出结构化错误、退出码非零。
 
-`result submit` 由当前绑定 Worker 校验候选结构，忽略候选自报的身份字段。Worker 确认测试执行器停止后，以持久化事件上报；重复相同候选不生成新事件，内容不同则拒绝。中心提交并经 Worker 确认后才返回 `saved:true`；断线时保留本地待报记录，重试不能替换结果。真实 Agent、自动子结果通知/再次输入和父子级联取消尚未接入。本次复用已有中心表，无新增 PostgreSQL 迁移或依赖。
+`result submit` 尚未实现。真实 Agent、自动子结果通知/再次输入和父子级联取消尚未接入。本次复用已有中心表，无新增 PostgreSQL 迁移或依赖。
 
 ## 会话
 

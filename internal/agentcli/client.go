@@ -29,7 +29,6 @@ type Request struct {
 	Operation string      `json:"operation"`
 	TaskID    string      `json:"task_id,omitempty"`
 	Input     *task.Input `json:"input,omitempty"`
-	Candidate string      `json:"candidate,omitempty"`
 }
 
 func Decode(raw []byte, out any) error {

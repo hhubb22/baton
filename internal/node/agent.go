@@ -190,9 +190,7 @@ func serveAgentConn(ctx context.Context, conn net.Conn, ledger *Ledger, bridge *
 		binding, err := ledger.agentBinding(local.Token)
 		if err != nil {
 			result = agentFailure(task.CodeForbidden)
-		} else if local.Operation == "submit_result" && local.Input == nil && local.TaskID == "" {
-			result = bridge.submitResult(ctx, binding, local.Candidate)
-		} else if local.Candidate == "" {
+		} else {
 			binding.Type, binding.Operation, binding.TaskID, binding.Input = protocol.BodyAgentRequest, local.Operation, local.TaskID, local.Input
 			callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			_ = conn.SetDeadline(time.Now().Add(32 * time.Second))
@@ -201,29 +199,4 @@ func serveAgentConn(ctx context.Context, conn net.Conn, ledger *Ledger, bridge *
 		}
 	}
 	_ = json.NewEncoder(conn).Encode(result)
-}
-
-func (b *agentBridge) submitResult(ctx context.Context, binding protocol.AgentRequest, candidate string) protocol.AgentResult {
-	b.mu.Lock()
-	loop := b.loop
-	b.mu.Unlock()
-	if loop == nil {
-		return agentFailure(task.CodeUnavailable)
-	}
-	callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	st, err := loop.host.SubmitResult(callCtx, binding.SourceSessionID, binding.SourceTaskID, binding.SourceExecutionID, candidate)
-	if err != nil {
-		return agentFailure(task.CodeConflict)
-	}
-	loop.deliver(callCtx, binding.SourceSessionID, st.Reports)
-	st, err = loop.host.Pending(callCtx, binding.SourceSessionID)
-	if err != nil || !st.ResultDelivered {
-		return agentFailure(task.CodeUnavailable)
-	}
-	data, _ := json.Marshal(struct {
-		TaskID string `json:"task_id"`
-		Saved  bool   `json:"saved"`
-	}{binding.SourceTaskID, true})
-	return protocol.AgentResult{Type: protocol.BodyAgentResult, OK: true, Data: data}
 }

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"flag"
 	"io"
-	"os"
 	"time"
 
 	"baton/internal/identity"
@@ -14,7 +13,7 @@ import (
 	"baton/internal/task"
 )
 
-const usage = "baton delegate --request-file FILE --json | baton task get|wait|result|relations|cancel TASK_ID [--timeout 30s] --json | baton result submit --file FILE --json"
+const usage = "baton delegate --request-file FILE --json | baton task get|wait|result|relations|cancel TASK_ID [--timeout 30s] --json"
 
 func Run(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	req, timeout, err := parse(args)
@@ -37,8 +36,6 @@ func parse(args []string) (Request, time.Duration, error) {
 	var rest []string
 	if len(args) > 0 && args[0] == "delegate" {
 		req.Operation, rest = "delegate", args[1:]
-	} else if len(args) >= 2 && args[0] == "result" && args[1] == "submit" {
-		req.Operation, rest = "submit_result", args[2:]
 	} else if len(args) >= 3 && args[0] == "task" {
 		req.Operation, req.TaskID, rest = args[1], args[2], args[3:]
 		id, err := identity.ParseUUID(req.TaskID)
@@ -62,9 +59,6 @@ func parse(args []string) (Request, time.Duration, error) {
 	if req.Operation == "delegate" {
 		fs.StringVar(&file, "request-file", "", "")
 	}
-	if req.Operation == "submit_result" {
-		fs.StringVar(&file, "file", "", "")
-	}
 	if req.Operation == "wait" {
 		fs.DurationVar(&timeout, "timeout", 30*time.Second, "")
 	}
@@ -83,21 +77,6 @@ func parse(args []string) (Request, time.Duration, error) {
 	}
 	if req.Operation == "wait" && (timeout <= 0 || timeout > 5*time.Minute) {
 		return req, 0, errors.New("等待期限必须大于 0 且不超过 5m")
-	}
-	if req.Operation == "submit_result" {
-		f, err := os.Open(file)
-		if err != nil {
-			return req, 0, errors.New("候选结果文件无效")
-		}
-		defer f.Close()
-		raw, err := io.ReadAll(io.LimitReader(f, protocol.MaxMessageBytes+1))
-		if err != nil || len(raw) > protocol.MaxMessageBytes {
-			return req, 0, errors.New("候选结果文件超过上限")
-		}
-		if _, err := task.ParseCandidate(string(raw)); err != nil {
-			return req, 0, err
-		}
-		req.Candidate = string(raw)
 	}
 	return req, timeout, nil
 }
