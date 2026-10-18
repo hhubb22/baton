@@ -28,14 +28,14 @@ func piSandboxPolicy(readDirs, writeDirs []string, endpoint string) string {
 	}
 	physicalEndpoint := strings.Replace(endpoint, "/tmp/", "/private/tmp/", 1)
 	fmt.Fprintf(&policy, "(allow file-read* file-write* (literal %s) (literal %s) (literal \"/dev/null\"))\n", strconv.Quote(endpoint), strconv.Quote(physicalEndpoint))
-	// Unconditional deny does not remove bsd.sb's filtered file exceptions.
+	// Imported leaf rules need filtered denials of the same operation.
 	for _, rule := range []struct {
 		operations string
 		dirs       []string
 		literals   []string
 	}{
 		{"file-read-data file-read-xattr", readDirs, []string{"/", endpoint, physicalEndpoint, "/dev/null"}},
-		{"file-write*", writeDirs, []string{endpoint, physicalEndpoint, "/dev/null"}},
+		{"file-write* file-write-data", writeDirs, []string{endpoint, physicalEndpoint, "/dev/null"}},
 	} {
 		fmt.Fprintf(&policy, "(deny %s (require-not (require-any\n", rule.operations)
 		for _, dir := range rule.dirs {
@@ -124,7 +124,7 @@ func TestPiSandboxPolicy(t *testing.T) {
 		`(allow file-write* (subpath "/isolated/work"))`,
 		`(literal "/tmp/pi.sock") (literal "/private/tmp/pi.sock")`,
 		"(deny file-read-data file-read-xattr (require-not (require-any\n",
-		"(deny file-write* (require-not (require-any\n",
+		"(deny file-write* file-write-data (require-not (require-any\n",
 	} {
 		if !strings.Contains(policy, rule) {
 			t.Fatalf("missing sandbox rule %s", rule)
