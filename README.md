@@ -2,7 +2,7 @@
 
 员工使用部署管理员分配的本地账号登录 Coordinator，退出，查询本人身份，领取一次性节点注册凭据，设置默认 PC，吊销本人节点的连接凭据，并提交任务。初始口令只能使用到员工完成更换为止。`batond register` 用这张凭据注册节点，把身份保存在本机。`batond run` 用这份身份主动连接 Relay，断线后重连，并在同步完成前不会显示为可执行。吊销生效后，同一连接凭据不能再接入。任务被接受后，Coordinator 把准备命令送到节点；节点先把执行映射写入本地账本，再绑定一个独立的 Session Worker。
 
-本目录目前包含这条路径的构建、迁移、HTTP 接口、Coordinator、Relay、batond、Session Worker、受限文件浏览、员工 Web UI 和测试。准备阶段不启动 Agent。启动许可通过后，测试执行器先进入启动，再只接收一次任务输入；结构化结果在中心保存之后才算交付。Agent 适配和管理员网页不在这里。
+本目录目前包含这条路径的构建、迁移、HTTP 接口、Coordinator、Relay、batond、Session Worker、Agent 本地 CLI、受限文件浏览、员工 Web UI 和测试。准备阶段不启动 Agent。启动许可通过后，测试执行器先进入启动，再只接收一次任务输入；结构化结果在中心保存之后才算交付。真实 Agent 适配和管理员网页不在这里。
 
 中心事务同时锁定任务与执行记录时，统一先锁 `tasks`，再锁 `executions`。准备成功或失败落库、启动许可、执行报告、取消和到期处理均按此顺序串行，避免准备落库与启动许可相互等待而死锁。
 
@@ -44,6 +44,7 @@
 go build -o bin/coordinator ./cmd/coordinator
 go build -o bin/relay ./cmd/relay
 go build -o bin/batond ./cmd/batond
+go build -o bin/baton ./cmd/baton
 ```
 
 ```text
@@ -85,6 +86,29 @@ batond run --relay wss://baton.example/v1/node
 ```
 
 `run` 读取同一份身份，主动建立 TLS WebSocket。断线后按 1 到 30 秒、带抖动的指数退避重连。认证失效时进程退出并说明需要重新认证，不会重新注册。每次启动生成一个 incarnation；已有另一个 incarnation 在线时，后启动的进程不能接管该节点。
+
+## Agent 本地 CLI
+
+batond 在准备执行时创建 `sessions/<session_id>/agent-<execution_id>.json`（相对于节点数据目录，文件权限 `0600`）。执行环境用 `BATON_CONTEXT_FILE` 指向**该次执行**的文件；不要把文件内容、令牌或节点连接凭据放进命令行、任务说明或日志。当前测试执行器不启动真实 Agent，真实适配器仍需负责传入这个环境变量。
+
+```text
+baton delegate --request-file request.json --json
+baton task get TASK_ID --json
+baton task wait TASK_ID --timeout 30s --json
+baton task result TASK_ID --json
+baton task relations TASK_ID --json
+baton task cancel TASK_ID --json
+```
+
+委托文件最小内容为 `{"request_id":"stable-request-id","description":"读取目标现场信息"}`。调用方自行保存稳定的 `request_id`；重试必须沿用原 ID 和原内容。CLI 不生成 ID，也不因等待到期或响应丢失重新委托。相同内容返回原任务，不同内容返回 `conflict`，即使默认 PC 后来改变也不改派原任务。未指定目标时使用中心保存的本人默认 PC；目标离线仍保留这个目标。
+
+所有命令走当前用户限定的 Unix socket / Windows named pipe，再经已有认证 Relay 通道访问中心。文件只含 IPC 地址和随机凭据，来源三元组由 batond 的 SQLite 绑定解析；员工、节点由 Relay 认证决定。中心重新核对来源任务、Session、Execution 和节点。新委托只允许从尚在执行、未取消且未到期的当前绑定发起；已接受任务在来源结束后仍可查询。请求不能指定其他员工或替换来源；授权文本完全继承来源，显式指定时必须逐字相同，不推断自由文本权限包含关系。查询和取消仅限来源任务及其直接委托，不开放同员工的其他任务。
+
+`task get` 返回中心状态、Execution 和 `delivery_status`；这里的 `delivered` 指现有执行结果交付记录已在中心保存，不表示结果已经自动注入来源 Agent。`task result` 返回可信 `task_id`、`target_node_id`、`session_id`、`execution_id`、状态、摘要、证据、产物和错误；未保存候选结果时 `ready` 为 false。`task relations` 返回该任务的来源与执行边，以及从当前来源 Session 发出的直接子委托，单次上限 100 条，超出明确报错，不静默截断。
+
+`task wait` 默认 30 秒，允许大于 0、最多 5 分钟；只轮询中心已保存事实，在任务结束、进入待核实或版本变化时返回。到期返回 `waiting:true`、`timed_out:true` 和最后读到的任务（尚未读到时为 null），退出码为 0；Ctrl-C 或传输错误返回非零，不取消任务。其他成功命令输出 JSON、退出码为 0，业务拒绝输出结构化错误、退出码非零。
+
+`result submit` 尚未实现。真实 Agent、自动子结果通知/再次输入和父子级联取消尚未接入。本次复用已有中心表，无新增 PostgreSQL 迁移或依赖。
 
 ## 会话
 

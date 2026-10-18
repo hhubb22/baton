@@ -35,6 +35,7 @@ type RunOptions struct {
 	RootCAs   *x509.CertPool
 	Logger    *slog.Logger
 	DataDir   string
+	agent     *agentBridge
 }
 
 // Maintain 保持到 Relay 的出站连接。同一进程的重连沿用启动时生成的 incarnation。
@@ -69,6 +70,12 @@ func Maintain(ctx context.Context, opts RunOptions) error {
 		}
 		defer ledger.Close()
 		host = &session.Host{DataDir: opts.DataDir, Logger: opts.Logger}
+		opts.agent = &agentBridge{}
+		closeIPC, err := serveAgentIPC(ctx, ledger, opts.agent)
+		if err != nil {
+			return err
+		}
+		defer closeIPC()
 		sessions, err := ledger.WorkerSessions()
 		if err != nil {
 			return err
@@ -163,6 +170,10 @@ func runOnce(ctx context.Context, opts RunOptions, incarnation string, ledger *L
 	expect.Store("")
 	writer := newWSWriter(ws)
 	loop := newStartLoop(ctx, opts.Identity, ledger, host, writer, opts.Logger)
+	if opts.agent != nil {
+		opts.agent.set(loop)
+		defer opts.agent.set(nil)
+	}
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- readRelay(ctx, writer, &acked, &expect, opts.Logger, opts.Identity, ledger, host, loop, opts.DataDir)
