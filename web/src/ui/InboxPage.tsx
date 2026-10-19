@@ -5,17 +5,30 @@ import { AttentionCard } from './AttentionCard.tsx'
 
 type Props = { id: string; csrf: string; askProject: AskProject }
 export function InboxPage(props: Props) {
-  return props.id ? <AttentionDetail key={props.id} {...props} /> : <section className="inbox" aria-label="Inbox"><h1>Inbox</h1><div className="inbox-columns">
-    <InboxColumn state="open" title="待处理" {...props} /><InboxColumn state="done" title="已处理" {...props} />
+  return props.id ? <AttentionDetail key={props.id} {...props} /> : <InboxList {...props} />
+}
+function InboxList(props: Props) {
+  const [openPages, setOpenPages] = useState(1)
+  const [donePages, setDonePages] = useState(1)
+  const open = useAttentionList('open', {}, openPages)
+  const done = useAttentionList('done', {}, donePages)
+  // 两栏可能先后读到处理前后的版本；同一 ID 只显示较新的记录。
+  const records = new Map<string, AttentionRequest>()
+  for (const item of [...open.requests, ...done.requests]) {
+    const previous = records.get(item.id)
+    if (!previous || item.version >= previous.version) records.set(item.id, item)
+  }
+  const items = [...records.values()].sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id))
+  return <section className="inbox" aria-label="Inbox"><h1>Inbox</h1><div className="inbox-columns">
+    <InboxColumn title="待处理" items={items.filter((item) => item.state === 'open')} error={open.error} more={!!open.next_cursor} loadMore={() => setOpenPages((v) => v + 1)} {...props} />
+    <InboxColumn title="已处理" items={items.filter((item) => item.state !== 'open')} error={done.error} more={!!done.next_cursor} loadMore={() => setDonePages((v) => v + 1)} {...props} />
   </div></section>
 }
-function InboxColumn({ state, title, csrf, askProject }: Props & { state: string; title: string }) {
-  const [pages, setPages] = useState(1)
-  const list = useAttentionList(state, {}, pages)
-  return <section aria-label={title}><h2>{title}</h2>{list.error && <p role="alert">{list.error}</p>}
-    {list.requests.map((item) => <AttentionCard key={item.id} item={item} csrf={csrf} compact askProject={askProject} />)}
-    {!list.requests.length && <p>暂无{title}事项。</p>}
-    {list.next_cursor && <button onClick={() => setPages((v) => v + 1)}>更多{title}事项</button>}
+function InboxColumn({ title, items, error, more, loadMore, csrf, askProject }: Props & { title: string; items: AttentionRequest[]; error: string; more: boolean; loadMore: () => void }) {
+  return <section aria-label={title}><h2>{title}</h2>{error && <p role="alert">{error}</p>}
+    {items.map((item) => <AttentionCard key={item.id} item={item} csrf={csrf} compact askProject={askProject} />)}
+    {!items.length && <p>暂无{title}事项。</p>}
+    {more && <button onClick={loadMore}>更多{title}事项</button>}
   </section>
 }
 function AttentionDetail({ id, csrf, askProject }: Props) {

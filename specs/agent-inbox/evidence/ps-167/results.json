@@ -2,15 +2,15 @@
   "sync": [
     {
       "source": "Inbox",
-      "elapsed_ms": 4863
+      "elapsed_ms": 4858
     },
     {
       "source": "Project",
-      "elapsed_ms": 4578
+      "elapsed_ms": 4596
     },
     {
       "source": "任务详情",
-      "elapsed_ms": 4659
+      "elapsed_ms": 4604
     }
   ],
   "input_count": 3,

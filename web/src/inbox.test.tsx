@@ -127,3 +127,26 @@ it('预览中节点离线立即移除旧内容；commit SHA 仍可复制', async
   await userEvent.click(screen.getByRole('button', { name: '复制 SHA' }))
   expect(writeText).toHaveBeenCalledWith(sha)
 })
+
+it('已处理栏先收到新版本、待处理栏迟到时，同一事项只显示一次且不回退', async () => {
+  vi.useFakeTimers()
+  let updated = false
+  let releaseOpen!: (response: Response) => void
+  const staleOpen = new Promise<Response>((resolve) => { releaseOpen = resolve })
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    const open = new URL(url, 'https://baton.test').searchParams.get('state') === 'open'
+    if (!updated) return json({ requests: open ? [item] : [], open_count: 1 })
+    return open ? staleOpen : json({ requests: [{ ...item, state: 'answered', version: 2, resolution: { employee_id: 'alice', option_label: '继续调查' } }], open_count: 0 })
+  }))
+  render(<InboxPage id="" csrf="csrf" askProject={vi.fn()} />)
+  await act(async () => {})
+  expect(screen.getAllByRole('article', { name: '事项：是否继续' })).toHaveLength(1)
+  updated = true
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+  expect(screen.getAllByRole('article', { name: '事项：是否继续' })).toHaveLength(1)
+  expect(within(screen.getByRole('region', { name: /^待处理$/ })).queryByRole('article')).toBeNull()
+  expect(within(screen.getByRole('region', { name: /^已处理$/ })).getByRole('article')).toHaveTextContent('已回答：继续调查')
+  await act(async () => { releaseOpen(json({ requests: [item], open_count: 1 })); await staleOpen })
+  expect(screen.getAllByRole('article', { name: '事项：是否继续' })).toHaveLength(1)
+  expect(within(screen.getByRole('region', { name: /^待处理$/ })).queryByRole('article')).toBeNull()
+})

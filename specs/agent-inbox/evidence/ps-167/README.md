@@ -4,7 +4,7 @@
 
 ## 验收对应
 
-1. 同一事项三处显示、处理与同步：`web/e2e/inbox.spec.ts` 创建三个事项，分别在 Inbox、Project 主对话和任务详情提交回答，观察其他打开的页面。浏览器 MutationObserver 记录实际显示时间，均要求不超过 5 秒；输入队列中只有三条回答，真实 Runtime 收到回答输入。计时见 [results.json](results.json)，截图见 [Inbox](inbox.png) 和 [主对话卡片](project-card.png)。
+1. 同一事项三处显示、处理与同步：`web/e2e/inbox.spec.ts` 创建三个事项，分别在 Inbox、Project 主对话和任务详情提交回答，观察其他打开的页面。浏览器 MutationObserver 记录实际显示时间，均要求不超过 5 秒；输入队列中只有三条回答，真实 Runtime 收到回答输入。两栏先后返回不同版本、旧查询迟到的回归测试见 `web/src/inbox.test.tsx`，验证同一事项只显示一次且不回退。计时见 [results.json](results.json)，截图见 [Inbox](inbox.png) 和 [主对话卡片](project-card.png)。
 2. Markdown：`web/src/inbox.test.tsx` 检查表格、代码、加粗、斜体、列表及 HTTPS 链接，断言 HTML、图片、HTTP、相对路径和脚本链接没有可执行元素。E2E 同时检查 HTML 未执行、没有图片、HTTPS 链接在新窗口打开。
 3. 系统事项：E2E 通过真实任务结果生成「任务需要核实」，断言只有关闭按钮和处理位置链接。人工核实任务后，它显示已解决并离开待处理栏。单元测试覆盖系统事项操作区与已解决状态。
 4. 任务结果版本：E2E 人工修正任务，事项仍显示原结果和修正时间；切换到最新版本再切回，原结果保持不变。见 [事项与结果版本](attention-version.png)。
@@ -24,7 +24,7 @@ pnpm test:e2e
 pnpm check:dist
 ```
 
-Web 单元测试 65 项、完整 E2E 6 项通过。截图与计时可用 `BATON_CAPTURE_INBOX_EVIDENCE=1 pnpm test:e2e --grep 'Inbox：'` 重新生成；它使用隔离测试数据库，数据库地址通过 `BATON_TEST_DATABASE_URL` 提供。
+Web 单元测试 66 项、完整 E2E 6 项通过。截图与计时可用 `BATON_CAPTURE_INBOX_EVIDENCE=1 pnpm test:e2e --grep 'Inbox：'` 重新生成；它使用隔离测试数据库，数据库地址通过 `BATON_TEST_DATABASE_URL` 提供。
 
 仓库根目录的 `go build ./...`、`go vet ./...` 以及 `go test ./internal/store ./internal/httpapi ./internal/inbox ./internal/webui` 通过。Runtime 的 `pnpm check` 通过。
 
