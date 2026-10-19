@@ -11,10 +11,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -56,9 +54,6 @@ func TestPrepareReconnectsWorkerAndRejectsBusySession(t *testing.T) {
 		"BATON_TEST_DROP_PREPARE_ACKS": "1",
 		"BATON_TEST_SLOW_WRITE":        "1",
 	})
-	var workerPID atomic.Int64
-	t.Cleanup(func() { stopWorker(int(workerPID.Load())) })
-
 	var created task.Record
 	if code := postJSON(t, st.client, st.base+"/api/v1/tasks", map[string]any{
 		"request_id": "prep-1", "description": "准备天线",
@@ -87,7 +82,6 @@ func TestPrepareReconnectsWorkerAndRejectsBusySession(t *testing.T) {
 	if first.ExecutorStarts != 0 || first.HookRuns != 0 || first.PID <= 0 {
 		t.Fatalf("准备启动了执行器: %+v", first)
 	}
-	workerPID.Store(int64(first.PID))
 	if elapsed, seqs := appendSlow(t, st.dataDir, sessionID); elapsed < 350*time.Millisecond || len(seqs) != 2 {
 		t.Fatalf("并发写入没有互斥: %s %v", elapsed, seqs)
 	}
@@ -472,28 +466,6 @@ func postRaw(t *testing.T, client *http.Client, rawURL string, payload any, csrf
 		t.Fatal(err)
 	}
 	return resp.StatusCode, raw
-}
-
-func stopWorker(pid int) {
-	if pid <= 0 {
-		return
-	}
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return
-	}
-	defer process.Release()
-	_ = process.Kill()
-	if runtime.GOOS != "windows" {
-		return
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if processAlive(pid) != nil {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
 }
 
 func restartBatond(t *testing.T, st *prepareStack) {

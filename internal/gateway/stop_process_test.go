@@ -311,8 +311,8 @@ func taskWorker(t *testing.T, st *prepareStack, taskID string) string {
 			t.Fatal(err)
 		}
 		if sid != "" {
-			status := workerStatus(t, st.dataDir, sid)
-			t.Cleanup(func() { stopWorker(status.PID) })
+			_ = workerStatus(t, st.dataDir, sid)
+
 			return sid
 		}
 		time.Sleep(100 * time.Millisecond)

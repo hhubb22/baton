@@ -27,7 +27,7 @@ func TestChildDeliveryAcrossWorkersAndCrashWindows(t *testing.T) {
 			waitTaskStatus(t, st, parent.TaskID, task.StatusRunning)
 			sid := sessionOf(t, st, parent.TaskID)
 			first := workerStatus(t, st.dataDir, sid)
-			t.Cleanup(func() { stopWorker(first.PID) })
+
 			repo := store.New(st.pool)
 			source := store.AgentSource{EmployeeID: st.employeeID, NodeID: st.ident.NodeID, TaskID: parent.TaskID, SessionID: sid, ExecutionID: first.ExecutionID}
 			target := registerAgent(t, st.client, st.base, st.csrf, "Child", []string{"pi"})
@@ -49,7 +49,7 @@ func TestChildDeliveryAcrossWorkersAndCrashWindows(t *testing.T) {
 			execID := waitGateFile(t, gate)
 			childSID := waitChildPreparedSession(t, st, child.TaskID)
 			second := workerStatus(t, targetDir, childSID)
-			t.Cleanup(func() { stopWorker(second.PID) })
+
 			if second.PID == first.PID {
 				t.Fatal("没有独立 Worker")
 			}
@@ -73,7 +73,7 @@ func TestChildDeliveryAcrossWorkersAndCrashWindows(t *testing.T) {
 			}
 			waitTaskStatus(t, st, parent.TaskID, parentStatus)
 			before := workerStatus(t, st.dataDir, sid)
-			t.Cleanup(func() { stopWorker(before.PID) })
+
 			// 即使中心/节点重复通知，按 delivery_id 返回同一张账本，不能再注入。
 			deliveries, err := repo.ChildDeliveries(context.Background(), source, child.TaskID)
 			if err != nil || len(deliveries) != 1 || deliveries[0].DeliveryID != deliveryID {

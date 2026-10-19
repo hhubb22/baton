@@ -39,6 +39,7 @@ if ($LASTEXITCODE -ne 0) { throw 'initdb 失败' }
 @('host all all 127.0.0.1/32 trust', 'host all all ::1/128 trust') | Set-Content "$data/pg_hba.conf"
 & "$bin/pg_ctl.exe" -D $data -l "$data/server.log" -w -o '-h 127.0.0.1 -p 55432' start
 if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL 启动失败' }
+"BATON_TEST_POSTGRES_LOG=$data/server.log" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
 & "$bin/createdb.exe" -h 127.0.0.1 -p 55432 -U postgres baton_test
 if ($LASTEXITCODE -ne 0) { throw '创建测试库失败' }
 $actual = & "$bin/psql.exe" -h 127.0.0.1 -p 55432 -U postgres -d baton_test -Atc 'SHOW server_version'

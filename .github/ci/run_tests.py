@@ -65,6 +65,17 @@ class EventLog:
             if text:
                 self.emit({'Package': item[0], 'Test': item[1], 'Action': 'output', 'Output': text})
 
+def collect_postgres_log(destination):
+    path = os.getenv('BATON_TEST_POSTGRES_LOG')
+    if not path:
+        return
+    try:
+        text = Path(path).read_text(encoding='utf-8', errors='replace')
+    except OSError as error:
+        text = 'PostgreSQL 日志读取失败: ' + str(error)
+    (destination / 'postgres.log').write_text(scrub(text), encoding='utf-8')
+
+
 def partition(names, weights, count):
     groups, totals = [[] for _ in range(count)], [0.0] * count
     for name in sorted(names, key=lambda n: (-weights.get(n, 3.0), n)):
@@ -229,6 +240,7 @@ def main():
             results = [f.result() for f in futures]
     except Exception as error:
         results.append({'group': 'preparation', 'exit_code': 1, 'failures': [scrub(str(error))]})
+    collect_postgres_log(out)
     failed = any(r['exit_code'] for r in results) or not results
     summary = {'failed': failed, 'seconds': round(time.monotonic() - started, 2), 'groups': results}
     (out / 'summary.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding='utf-8')

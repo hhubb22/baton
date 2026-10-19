@@ -89,7 +89,7 @@ func TestArtifactsAcrossTwoNodesBlockUnavailableInputs(t *testing.T) {
 		waitTaskStatus(t, st, created.TaskID, task.StatusCompleted)
 		dir := []string{st.dataDir, otherDir}[i]
 		status := workerStatus(t, dir, session)
-		t.Cleanup(func() { stopWorker(status.PID) })
+
 		if status.ExecutorInputs != 1 {
 			t.Fatalf("本机产物未执行: %+v", status)
 		}
@@ -128,7 +128,7 @@ func TestArtifactsAcrossTwoNodesBlockUnavailableInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	status := workerStatus(t, otherDir, session)
-	t.Cleanup(func() { stopWorker(status.PID) })
+
 	if view.ErrorCode == nil || *view.ErrorCode != task.CodeArtifactUnavailable || len(view.Artifacts) != 1 || view.Artifacts[0].AccessStatus != task.AccessUnavailable || status.ExecutorInputs != 0 || status.InputSubmitted {
 		t.Fatalf("准备后删除未阻止输入: task=%+v worker=%+v", view, status)
 	}
