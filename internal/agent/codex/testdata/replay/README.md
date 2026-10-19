@@ -26,7 +26,7 @@
 
 ## CI 回放
 
-`TestRecordedCodexScenarios` 和 `TestRecordedCodexWorkerScenarios` 分别回放上述 10 份转录（含补录的 delegation）。`interrupt_before_turn_started` 的录制随 PS-178 提交；文件尚未合入时，两层测试都显式跳过，合入后纳入同一场景遍历。`delegation` 通过成功查询工具输出中的精确 delivery_id 确认，回放只包含父会话，不启动真实子 Agent。
+`TestRecordedCodexScenarios` 和 `TestRecordedCodexWorkerScenarios` 分别回放上述 11 份转录（含补录的 delegation 和 PS-178 的 interrupt_before_turn_started）。早到中止另外保留 PS-178 的补发失败、通知先到及回合身份等派生回放。`delegation` 通过成功查询工具输出中的精确 delivery_id 确认，回放只包含父会话，不启动真实子 Agent。
 
 测试用独立临时目录绑定 `transcript_start.bindings`，`symlinked_workspace` 额外创建符号链接；不支持创建符号链接的平台显式跳过该项。测试只保留与 app-server 配对的版本探测；录制驱动的额外探测、被筛除子会话留下的探测在测试准备时去掉，进程连续编号。录制响应、方法、thread/turn 身份和原有捕获保留。每个 app-server 末尾设门，检查已经消费全部所选请求，并检查 `failure.json`。
 
@@ -37,7 +37,7 @@
 - `deliver_active`、`restore_load_only` 的活动交付先准备账本中已有的 `waiting_children` 事实。录制驱动直接调用 DeliverResult；Worker 自动续接要求已有等待子结果的事实。
 - `deliver_idle` 将第一回合的最终消息派生为 `baton_waiting_for_children`，以满足 Worker 自动续接条件；第二回合和交付历史保留录制内容。
 
-交付后的历史响应前设门：即使 steer ACK 和 settled 已到，Worker 仍保存 uncertain，放行含精确 ID 的历史后才产生 delivered 回执。`delivery_wrong_id` 将该历史里的 ID 改为相似值并 CutAfter，检查保留 uncertain、结果待核实。`delegation` 由 Worker 的 queried 子结果通知触发：wait 的嵌套 JSON 输出没有顶层 delivery_id，保持 uncertain；result 的成功工具输出含精确 ID，放行后才确认 delivered，不向 Agent 注入新输入。重复通知不再注入；`restore_load_only` 重启 Worker 后补报同一条 outbox 结果，保持原 thread/turn，不再提交任务。
+交付后的历史响应前设门：即使 steer ACK 和 settled 已到，Worker 仍保存 uncertain，放行含精确 ID 的历史后才产生 delivered 回执。`delivery_wrong_id` 将两次已有历史查询里的 ID 改为相似值，检查保留 uncertain、结果待核实。`delegation` 由 Worker 的 queried 子结果通知触发：wait 的嵌套 JSON 输出没有顶层 delivery_id，保持 uncertain；result 的成功工具输出含精确 ID，放行后才确认 delivered，不向 Agent 注入新输入。重复通知不再注入；`restore_load_only` 重启 Worker 后补报同一条 outbox 结果，保持原 thread/turn，不再提交任务。
 
 `interrupt_mid_tool` 的录制没有 commandExecution 开始事件。回放在录制的 `turn/moderationMetadata` 处设门，然后发 Abort，并在 `turn/completed` 前另设门，分别验证 ACK 与迟到的 StopObserver 停止事实；outcomeKnown 保持 false。该回放不能证明工具开始事件的门控能力。
 
@@ -63,4 +63,4 @@
 | 浏览器历史与大帧 | `TestBrowserHistoryReadableAfterExit`、`TestBrowserHistoryFallbackReplayIsolation`、`TestCodexLFFramingLimits`；原生文件只读、协议查询连接隔离与 limit=1、截断、缺失映射、跨读取边界与 8 MiB 上限 |
 | 通知身份、审批拒绝与有界输出 | `TestNotificationsAreBoundAndApprovalsRefused`、`TestBrowserDeltaUsesSeparateBoundedQueue`、`TestDrainIgnoresPreviousTurnAfterSessionReuse` |
 
-`exit_mid_turn` 从 simple.CutAfter(response:turn/start) 派生，两层均拒绝成功，Worker 进入待核实。配额错误无法稳定按需录制，适配器层用 Replace 派生 failed 回合。Codex 固定 outputSchema，`free_text` 用 Replace 派生最终消息：适配器层校验拒绝该候选，Worker 记录 failed。
+`exit_mid_turn` 从 simple.CutAfter(response:turn/start) 派生，两层均拒绝成功，Worker 进入待核实。强制退出前设门，等 SubmitInput 返回后放行，明确模拟“响应已消费、回合尚未结算”的崩溃窗口；badsteer 的响应错误同样先被调用方消费。此前立即退出的变体在 CI 暴露 jsonrpc2 v0.2.1 的 send-on-closed-channel 竞态，产品连接关闭问题留在本工单范围外。配额错误无法稳定按需录制，适配器层用 Replace 派生 failed 回合。Codex 固定 outputSchema，`free_text` 用 Replace 派生最终消息：适配器层校验拒绝该候选，Worker 记录 failed。

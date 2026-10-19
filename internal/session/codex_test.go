@@ -138,12 +138,15 @@ func (w *codexWorkerRun) db(t *testing.T) *sql.DB {
 }
 
 // WorkerTape 使用录制响应，选择 Worker 实际调用的只读查询，并将测试驱动的精简交付信封换成完整 Worker 信封。
-func workerCodexTape(t *testing.T, tape replay.Transcript, delivery protocol.ChildDelivery) replay.Transcript {
+func workerCodexTape(t *testing.T, tape replay.Transcript, delivery protocol.ChildDelivery, variant string) replay.Transcript {
 	t.Helper()
 	tape = replaytest.AdapterTape(tape)
 	keep := map[string]bool{"request:thread/items/list:2": true, "request:thread/items/list:3": true, "request:thread/items/list:5": true}
 	if tape.Header.Scenario == "delegation" {
 		keep["request:thread/items/list"] = true
+	}
+	if variant == "delivery_wrong_id" {
+		keep["request:thread/items/list:4"] = true
 	}
 	tape = replaytest.SelectReads(tape, keep)
 	payload, _ := json.Marshal(delivery)
@@ -196,7 +199,7 @@ func runRecordedCodexWorker(t *testing.T, binary, path, variant string) {
 	if source.Header.Scenario == "delegation" {
 		delivery.DeliveryID = replaytest.QueriedDelivery(t, source)
 	}
-	tape := workerCodexTape(t, source, delivery)
+	tape := workerCodexTape(t, source, delivery, variant)
 	scenario := tape.Header.Scenario
 	hasDelivery := scenario == "deliver_active" || scenario == "deliver_idle" || scenario == "restore_load_only"
 	if scenario == "deliver_idle" {
@@ -230,24 +233,33 @@ func runRecordedCodexWorker(t *testing.T, binary, path, variant string) {
 		}
 		tape = replaytest.Replace(t, tape, "event:turn/completed", f)
 	case "delivery_wrong_id":
-		// 相似 ID 必须不被确认，结构和事件顺序沿用录制值。
-		f := replaytest.Frame(t, tape, "response:thread/items/list:3")
-		var raw []byte
-		for _, e := range tape.Entries {
-			if e.Label == "response:thread/items/list:3" {
-				raw = append([]byte(nil), e.Frame...)
+		// 两次录制历史查询都只返回相似 ID，保持交付未确认。
+		for _, label := range []string{"response:thread/items/list:3", "response:thread/items/list:4"} {
+			for _, e := range tape.Entries {
+				if e.Label != label {
+					continue
+				}
+				var f map[string]any
+				raw := strings.ReplaceAll(string(e.Frame), "<$delivery_id_1>", "wrong-<$delivery_id_1>")
+				if err := json.Unmarshal([]byte(raw), &f); err != nil {
+					t.Fatal(err)
+				}
+				tape = replaytest.Replace(t, tape, label, f)
 			}
 		}
-		raw = []byte(strings.ReplaceAll(string(raw), "<$delivery_id_1>", "wrong-<$delivery_id_1>"))
-		_ = json.Unmarshal(raw, &f)
-		tape = replaytest.Replace(t, tape, "response:thread/items/list:3", f)
-		tape, err = tape.CutAfter("response:thread/items/list:3")
 	}
 	if err != nil {
 		t.Fatal(err)
 	}
+	crash := ""
+	if variant == "exit_mid_turn" {
+		tape, crash = replaytest.CrashGate(tape)
+	}
 	tape, ends := replaytest.EndGates(tape)
 	gates := append([]string{}, ends...)
+	if crash != "" {
+		gates = append(gates, crash)
+	}
 	if variant != "exit_mid_turn" && variant != "disconnect" && variant != "drop_settled" && scenario != "restore_missing" {
 		gates = append(gates, "event:turn/completed")
 	}
@@ -305,6 +317,10 @@ func runRecordedCodexWorker(t *testing.T, binary, path, variant string) {
 	}
 	if _, err := w.c.SubmitInput(string(payload)); err != nil {
 		t.Fatal(err)
+	}
+	if variant == "exit_mid_turn" {
+		r.Wait(t, crash)
+		r.Release(t, crash)
 	}
 	if variant == "disconnect" || variant == "exit_mid_turn" {
 		w.report(t, protocol.ReportResult, func(r protocol.ExecutionReport) bool { return r.Status == task.StatusNeedsVerification })
@@ -406,6 +422,7 @@ func runRecordedCodexWorker(t *testing.T, binary, path, variant string) {
 			t.Fatal("交付未返回")
 		}
 		if variant == "delivery_wrong_id" {
+			r.Wait(t, ends[0])
 			w.report(t, protocol.ReportResult, func(r protocol.ExecutionReport) bool { return r.Status == task.StatusNeedsVerification })
 			if err := db.QueryRow(`SELECT status FROM child_deliveries WHERE delivery_id=?`, delivery.DeliveryID).Scan(&status); err != nil || status == "delivered" {
 				t.Fatal("错误 ID 被确认", status, err)

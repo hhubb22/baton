@@ -201,6 +201,11 @@ func TestRecordedCodexScenarios(t *testing.T) {
 			if _, err := a.SubmitInput(ctx, `{"description":"重复任务","generation":1}`); !errors.Is(err, ErrUncertain) {
 				t.Fatalf("任务被重发: %v", err)
 			}
+			if scenario == "interrupt_before_turn_started" {
+				if page, err := a.ReadHistory(ctx, ""); err != nil || !json.Valid(page.Data) {
+					t.Fatal("中止历史不可读", err)
+				}
+			}
 			r.Wait(t, ends[0])
 			if scenario == "restore_load_only" {
 				before := a.Snapshot()
@@ -305,8 +310,15 @@ func TestRecordedCodexFaults(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			crash := ""
+			if name != "disconnect" {
+				tape, crash = replaytest.CrashGate(tape)
+			}
 			tape, ends := replaytest.EndGates(tape)
 			gates := append([]string{}, ends...)
+			if crash != "" {
+				gates = append(gates, crash)
+			}
 			if name == "drop_settled" {
 				gates = append(gates, ends[0])
 			}
@@ -334,6 +346,10 @@ func TestRecordedCodexFaults(t *testing.T) {
 			if inputErr != nil {
 				t.Fatal(inputErr)
 			}
+			if name == "exit_mid_turn" {
+				r.Wait(t, crash)
+				r.Release(t, crash)
+			}
 			if name == "badsteer" {
 				_, _ = a.HistoryContains("delivery-runtime", false)
 				f := replaytest.Frame(t, tape, "request:turn/steer")
@@ -342,6 +358,8 @@ func TestRecordedCodexFaults(t *testing.T) {
 				if _, err := a.DeliverResult(context.Background(), "delivery-runtime", text); !errors.Is(err, ErrIncompatible) {
 					t.Fatal(err)
 				}
+				r.Wait(t, crash)
+				r.Release(t, crash)
 				if err := a.SendInput(context.Background(), "delivery-runtime", "重试"); !errors.Is(err, ErrUncertain) {
 					t.Fatal(err)
 				}

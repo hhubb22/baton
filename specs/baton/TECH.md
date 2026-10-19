@@ -10,7 +10,7 @@ Coordinator 内置 Gateway 的实现与验收由 [PS-171](https://linear.app/kak
 
 ## 已实现基线
 
-当前已实现 Codex 录制回放迁移（PS-177 / AR-06）：适配器层与 RunWorker 层回放 PS-175 的 10 份 Codex 0.162.1 真实转录，验证一次任务输入、settled、迟到停止证据、精确 delivery_id 历史确认、恢复身份与 outbox 补报。CutAfter / Drop / Replace 派生断线、崩溃、缺少 settled、自由文本和无效标识；Worker 崩溃进入待核实。旧手写假 Agent、replay.json 和 synthetic_simple.ndjson 已删除，官方 Schema 及分页、历史匹配、分帧等单元测试保留。Worker 的交付前置状态和信封派生见 [场景与覆盖对应表](../../internal/agent/codex/testdata/replay/README.md#ci-回放)。回放使用转录声明的绑定，不运行真实模型，无新增依赖或迁移。早到中止转录随 PS-178 合入后覆盖。
+当前已实现 Codex 录制回放迁移（PS-177 / AR-06）：适配器层与 RunWorker 层回放 PS-175、PS-178 的 11 份 Codex 0.162.1 真实转录，验证一次任务输入、settled、迟到停止证据、精确 delivery_id 历史确认、恢复身份与 outbox 补报。CutAfter / Drop / Replace 派生断线、崩溃、缺少 settled、自由文本和无效标识；Worker 崩溃进入待核实。旧手写假 Agent、replay.json 和 synthetic_simple.ndjson 已删除，官方 Schema 及分页、历史匹配、分帧等单元测试保留。Worker 的交付前置状态和信封派生见 [场景与覆盖对应表](../../internal/agent/codex/testdata/replay/README.md#ci-回放)。回放使用转录声明的绑定，不运行真实模型，无新增依赖或迁移。PS-178 的早到中止转录与补发变体均已覆盖；崩溃派生在响应被消费后放行 Kill，避免把第三方 jsonrpc2 的响应关闭竞态混入回合崩溃断言。
 
 当前已实现补充（PS-178 / AR-07）：Codex 对同一 thread/turn 的早到中止保留内存意图；首次 `turn/interrupt` 精确返回 `-32600 no active turn to interrupt` 后，在匹配的 `turn/started` 或已知 startedAt 后补发一次。重复中止与重复开始通知不增加补发次数，完成后清除待补发意图；其他错误、超时和断线不触发自动重试。Abort 的 ACK 仍为 false/false，StopObserver 仅以匹配回合的 turn/completed 确认停止，副作用保留未知。适配器和真实 Worker 的派生进程回放覆盖早到拒绝、通知先到、补发失败、其他 thread/turn 与晚到开始通知，Worker 保留 needs_verification，不将取消后的完成帧交付为 completed。无新增依赖。
 

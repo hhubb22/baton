@@ -258,3 +258,15 @@ func SelectReads(tape replay.Transcript, keep map[string]bool) replay.Transcript
 	tape.Entries = out
 	return tape
 }
+
+// CrashGate 在 CutAfter 的强制退出前设门，允许测试确认此前的响应已经被消费。
+func CrashGate(tape replay.Transcript) (replay.Transcript, string) {
+	for i, e := range tape.Entries {
+		if e.Type == "runtime_exit" && e.Signal == "SIGKILL" {
+			label := "test:crash:" + strconv.Itoa(e.Process)
+			tape.Entries[i].Label = label
+			return tape, label
+		}
+	}
+	return tape, ""
+}

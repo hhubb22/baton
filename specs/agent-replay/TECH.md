@@ -179,19 +179,20 @@ Agent 版本升级的流程：用新版本把全部场景重录一遍，规范�
 | R-06 | 对 Pi 1.3.0 和 Codex 0.162.1 分别带录制器和不带录制器跑 `simple` | 带录制器时能力矩阵结果不同 | 本机真实测试 | planned |
 | R-07 | 在原始录制里放入测试密钥、`/Users/<name>` 路径、主机名，运行规范化 | 规范化没有拒绝写出，或输出里还有这些内容 | 单元测试 | planned |
 | R-08 | 设置 `BATON_RECORD_DIR` 跑 `TestRealPi`、`TestRealCodex` 全部子测试 | 某个场景没有产出原始录制；不设置该变量时行为与现在不同 | 本机真实测试 | planned |
-| R-09 | 每个适配器的 `testdata/replay/` 与第 8 节清单逐项对照 | 缺少场景，且 README 里没有写原因 | 审查 | passed：PS-176、PS-177；两份 README 记录适用场景、派生条件与缺口；Codex 早到中止等待 PS-178 |
-| R-10 | 第 8 节每个场景通过 `RunWorker` 回放；`deliver_*` 由 Worker 子结果通知触发 | 出现第二次任务输入；未在历史中看到 `delivery_id` 就记为 delivered；崩溃变体没有进入待核实 | Worker 层回放 | passed：PS-176、PS-177 的适用录制场景；`TestRecordedCodexWorkerScenarios` 本机 10 次、race 及 CI 39238860155 通过；早到中止按 PS-178 跳过 |
+| R-09 | 每个适配器的 `testdata/replay/` 与第 8 节清单逐项对照 | 缺少场景，且 README 里没有写原因 | 审查 | passed：PS-176、PS-177；两份 README 记录适用场景、派生条件与缺口；PS-178 的 Codex 早到中止录制已纳入 |
+| R-10 | 第 8 节每个场景通过 `RunWorker` 回放；`deliver_*` 由 Worker 子结果通知触发 | 出现第二次任务输入；未在历史中看到 `delivery_id` 就记为 delivered；崩溃变体没有进入待核实 | Worker 层回放 | passed：PS-176、PS-177 的适用录制场景；`TestRecordedCodexWorkerScenarios` 本机 10 次、race 及 CI 39238860155 通过；PS-178 早到中止另由两层录制与派生回放覆盖 |
 | R-11 | 首批转录提交后，用同一版本再录一次 `simple` 并规范化 | 两次转录除模型文本外存在差异，说明规范化不稳定 | 本机真实测试 | planned |
 
 PS-177 的 Codex 执行记录（2026-10-19；Pi 项由对应工单维护）：
 
 | Requirement | Setup and observation | Failure condition | Where | Status |
 |---|---|---|---|---|
-| R-03 | 10 份 macOS 录制绑定本机临时目录；symlinked_workspace 绑定符号链接 | 路径或 JSON 转义失配 | `TestRecordedCodexScenarios`、`TestRecordedCodexWorkerScenarios` | passed：本机 macOS 两层 `-count=10`；代码 607a823 在 CI 39238860155 的 Linux、macOS、Windows 全部通过 |
+| R-03 | 11 份 macOS 录制绑定本机临时目录；symlinked_workspace 绑定符号链接 | 路径或 JSON 转义失配 | `TestRecordedCodexScenarios`、`TestRecordedCodexWorkerScenarios` | passed：本机 macOS 两层 `-count=10`；此前 10 份在代码 607a823 的 CI 39238860155 三平台全部通过；PS-178 的第 11 份本机执行记录见对应两层测试 |
 | R-05 | interrupt_mid_tool 在录制的 turn/moderationMetadata 与 turn/completed 前设门，分别检查 ACK 与迟到停止 | ACK 成为停止事实；放行后没有 StopObserver 证据 | `TestRecordedCodexScenarios/interrupt_mid_tool` | passed：本机 `-count=10`；转录缺少工具开始事件，未验证该事件的门控 |
 | R-05 | simple.CutAfter(request:turn/start / response:turn/start)、Drop(turn/completed) | 崩溃成为成功；没有 settled 却报告停止 | `TestRecordedCodexFaults`、`TestRecordedCodexWorkerScenarios` 的 disconnect / exit_mid_turn / drop_settled | passed：本机两层 `-count=10`，Worker 崩溃进入待核实 |
-| R-09 | 对照 §8 检查 10 份转录及不适用/缺失说明 | 缺项未说明 | Codex `testdata/replay/README.md`；PS-175、PS-178 | passed：10 份已逐项回放；result_free_text 由派生与单测覆盖；早到中止等待 PS-178 |
-| R-10 | 10 份场景通过 RunWorker；重复任务/子结果通知，交付历史响应前设门，派生相似 delivery_id | 重发任务；历史确认前 delivered；错误 ID 被确认；恢复替换原身份或 outbox 结果 | `TestRecordedCodexWorkerScenarios` | passed：本机 `-count=10`；交付信封、等待状态和只读查询选择见 Codex 场景 README |
+| R-09 | 对照 §8 检查 11 份转录及不适用/缺失说明 | 缺项未说明 | Codex `testdata/replay/README.md`；PS-175、PS-178 | passed：11 份已逐项回放；result_free_text 由派生与单测覆盖；PS-178 早到中止已覆盖 |
+| R-10 | 11 份场景通过 RunWorker；重复任务/子结果通知，交付历史响应前设门，派生相似 delivery_id | 重发任务；历史确认前 delivered；错误 ID 被确认；恢复替换原身份或 outbox 结果 | `TestRecordedCodexWorkerScenarios` | passed：本机 `-count=10`；交付信封、等待状态和只读查询选择见 Codex 场景 README |
+| R-05 | 立即 CutAfter(response) 的旧派生窗口，在调用方消费响应前终止进程 | 回放进程退出导致测试进程 panic | [CI 39239464332](https://github.com/hhubb22/baton/actions/runs/39239464332) 的 Linux race / macOS 测试 | failed：aba1197；jsonrpc2 v0.2.1 在缓冲响应与连接关闭并发时 send on closed channel。当前崩溃变体设门等待响应被消费；第三方连接关闭竞态未在本工单修复 |
 
 真实测试和录制只在本机运行，使用最便宜的模型。回放测试通过只说明适配器能正确处理录到的帧序列，不能代替对应版本的真实测试结论。
 
