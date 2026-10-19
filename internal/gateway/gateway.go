@@ -364,6 +364,8 @@ func incomingPriority(body json.RawMessage) (string, error) {
 		return "", protocol.ErrInvalidMessage
 	}
 	switch head.Type {
+	case protocol.BodyRuntimeReport:
+		return protocol.PriorityControl, nil
 	case "node.sync", protocol.BodyAgentRequest, protocol.BodyExecutionControl, protocol.BodyChildDeliveries, protocol.BodyChildDeliveryAck, protocol.BodyPrepareResult, protocol.BodyStartPermit, protocol.BodyStartReport, protocol.BodyExecutionInput, protocol.BodyExecutionReport, protocol.BodyFileResult:
 		return protocol.PriorityControl, nil
 	case protocol.BodySessionResult:
