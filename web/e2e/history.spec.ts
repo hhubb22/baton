@@ -104,6 +104,31 @@ test('节点历史分页、断线补取、缺失反馈与中心隐私', async ({
   await history.getByRole('button', { name: '补取节点历史' }).click()
   await expect(history.getByText(/内容超出单条显示上限/)).toBeVisible()
   await expect(history.getByText(/历史存在截断/)).toBeVisible()
+  // 丢弃一次真实历史响应，手动重试必须使用同一游标并显示该页。
+  let failedCursor: string | undefined, retryCursor: string | undefined, nextReference = ''
+  const historyURL = `**/api/v1/sessions/${sid}/history?**`
+  await page.route(historyURL, async (route) => {
+    const requested = new URL(route.request().url()).searchParams.get('cursor') ?? ''
+    if (failedCursor === undefined) {
+      failedCursor = requested
+      const upstream = await route.fetch()
+      expect(upstream.ok()).toBe(true)
+      const result = await upstream.json() as HistoryResult
+      expect(result.ok).toBe(true)
+      nextReference = result.history!.entries[0]!.reference
+      await route.abort('connectionreset')
+    } else {
+      retryCursor = requested
+      await route.continue()
+    }
+  })
+  await history.getByRole('button', { name: '下一页历史' }).click()
+  await expect(history.getByRole('alert')).toBeVisible()
+  expect(failedCursor).toBeTruthy()
+  await history.getByRole('button', { name: '补取节点历史' }).click()
+  await expect(history.getByText(nextReference, { exact: true })).toBeVisible()
+  expect(retryCursor).toBe(failedCursor)
+  await page.unroute(historyURL)
   // 对所有中心业务表和诊断日志检查仅存在于工具输出的随机标记。
   const db = new Client({ connectionString: state.databaseURL })
   await db.connect()
