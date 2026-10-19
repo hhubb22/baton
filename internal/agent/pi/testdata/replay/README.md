@@ -1,6 +1,6 @@
 # Pi 场景录制
 
-入口为 `TestRealPi/<scenario>`，固定 Pi 1.3.0，在 macOS 沙箱中运行。设置 `BATON_RECORD_DIR` 后写入其 `pi/` 子目录；首批真实转录由 PS-175 在本机生成。录制、规范化与删除命令见 [主 README](../../../../../README.md#本机录制与规范化)。当前目录尚无真实模型转录，旧的协议契约样本继续保留。
+入口为 `TestRealPi/<scenario>`，固定 Pi 1.3.0，在 macOS 沙箱中运行。设置 `BATON_RECORD_DIR` 后写入其 `pi/` 子目录；首批真实转录由 PS-175 在本机生成。录制、规范化与删除命令见 [主 README](../../../../../README.md#本机录制与规范化)。本目录的 `*.ndjson` 是 2026-10-19 在 Baton 9c11002 上录制的首批真实转录：Pi 1.3.0，darwin/arm64，模型 `google-vertex/gemini-3.1-flash-lite`。除跳过的 `deliver_active` 外，`TestRealPi` 的 12 个子测试全部通过并各有一份转录，单份 2.6～71 KB。上一级的照文档转录样本和手写假 Agent 继续保留，迁移由 PS-176 负责。
 
 场景与断言：
 
