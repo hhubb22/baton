@@ -1,5 +1,5 @@
-// Package protocol 描述节点与 Relay、Relay 与 Coordinator 之间的版本 1 帧。
-// Relay 不解释业务 body；来源身份只由认证结果附加。
+// Package protocol 描述节点与 Coordinator 之间的版本 1 帧。
+// 来源身份只由认证结果附加。
 package protocol
 
 import (
@@ -18,8 +18,7 @@ const (
 	SourceNode      = "node"
 	SourceControl   = "control"
 
-	NodePath    = "/v1/node"
-	ControlPath = "/internal/v1/relay"
+	NodePath = "/v1/node"
 
 	// MaxMessageBytes 是单条传输消息的上限。超限必须拒绝，不能靠分片搬大文件。
 	MaxMessageBytes = 256 * 1024
@@ -32,12 +31,6 @@ const (
 	KindHeartbeat  = "heartbeat"
 	KindEnvelope   = "envelope"
 	KindError      = "error"
-	KindSnapshot   = "snapshot"
-	KindSnapshotOK = "snapshot_ok"
-	KindRevoke     = "revoke"
-	KindRevokeOK   = "revoke_ok"
-	KindSessions   = "sessions"
-	KindPresence   = "presence"
 
 	CodeInvalidCredential   = "invalid_credential"
 	CodeIncarnationConflict = "incarnation_conflict"
@@ -63,7 +56,7 @@ var (
 	ErrPriority       = errors.New("priority rejected")
 )
 
-// Envelope 是版本 1 的业务信封。body 对 Relay 保持不透明。
+// Envelope 是版本 1 的业务信封。业务正文由对应处理器验证。
 type Envelope struct {
 	Version       int             `json:"version"`
 	MessageID     string          `json:"message_id"`
@@ -79,7 +72,7 @@ type Route struct {
 	To string `json:"to"`
 }
 
-// Source 是 Relay 根据认证结果附加的来源，不接受节点自报。
+// Source 是 Gateway 根据认证结果附加的来源，不接受节点自报。
 type Source struct {
 	Kind         string `json:"kind"`
 	NodeID       string `json:"node_id,omitempty"`
@@ -87,28 +80,6 @@ type Source struct {
 	CredentialID string `json:"credential_id,omitempty"`
 	Incarnation  string `json:"incarnation,omitempty"`
 	ConnID       string `json:"conn_id,omitempty"`
-}
-
-// Snapshot 是 Relay 开放节点认证前必须拿到的安全快照。
-// 应用快照时拒绝其中的凭据和节点，并断开已经建立的对应连接。
-type Snapshot struct {
-	ID                 string       `json:"id,omitempty"`
-	Version            int          `json:"version"`
-	IssuedAt           time.Time    `json:"issued_at"`
-	PublicKey          string       `json:"public_key"`
-	Issuer             string       `json:"issuer"`
-	Audience           string       `json:"audience"`
-	HeartbeatMS        int64        `json:"heartbeat_ms"`
-	OfflineMS          int64        `json:"offline_ms"`
-	RevokedCredentials []Revocation `json:"revoked_credentials"`
-	RevokedNodes       []Revocation `json:"revoked_nodes"`
-}
-
-// RevokeNotice 是发给已连接 Relay 的吊销补发。Relay 合并进当前快照、断开连接后再回执。
-type RevokeNotice struct {
-	ID          string       `json:"id"`
-	Credentials []Revocation `json:"credentials"`
-	Nodes       []Revocation `json:"nodes"`
 }
 
 // Revocation 是一条可吊销对象。kind 为 credential 或 node。
@@ -139,25 +110,11 @@ type Frame struct {
 	Token         string          `json:"token,omitempty"`
 	Incarnation   string          `json:"incarnation,omitempty"`
 	CorrelationID string          `json:"correlation_id,omitempty"`
-	Snapshot      *Snapshot       `json:"snapshot,omitempty"`
-	Revoke        *RevokeNotice   `json:"revoke,omitempty"`
-	Sessions      []Presence      `json:"sessions,omitempty"`
-	Presence      *Presence       `json:"presence,omitempty"`
 	Envelope      json.RawMessage `json:"envelope,omitempty"`
-	Metrics       *Metrics        `json:"metrics,omitempty"`
-}
-
-// Metrics 是 Relay 向控制连接报告的计数。
-type Metrics struct {
-	OnlineNodes int64 `json:"online_nodes"`
-	Connects    int64 `json:"connects"`
-	Disconnects int64 `json:"disconnects"`
-	Forwards    int64 `json:"forwards"`
-	Rejects     int64 `json:"rejects"`
 }
 
 // PrepareNodeEnvelope 检查节点发来的信封，拒绝自报来源和非控制目标，并附上认证来源。
-// 未知字段会保留，Relay 不解释 body。
+// 未知字段会保留，Gateway 不解释 body。
 func PrepareNodeEnvelope(raw []byte, src Source) ([]byte, error) {
 	if len(raw) > MaxMessageBytes {
 		return nil, ErrTooLarge
@@ -320,19 +277,19 @@ func MessageOf(code string) string {
 	case CodeForgedSource:
 		return "不能自报来源身份"
 	case CodeRouteForbidden:
-		return "节点只能把消息发给控制服务"
+		return "节点只能把消息发给 Coordinator"
 	case CodeMessageTooLarge:
 		return "消息超过 256 KiB 上限"
 	case CodeQueueFull:
 		return "控制队列已满"
 	case CodeControlUnavailable:
-		return "控制连接不可用"
+		return "节点通道暂时不可用"
 	case CodeNodeUnavailable:
 		return "目标节点不在线"
 	case CodeVersionRejected:
 		return "协议版本不受支持"
 	case CodePriorityRejected:
-		return "当前只接受控制优先级"
+		return "消息优先级无效"
 	case CodeSyncRejected:
 		return "节点状态同步被拒绝"
 	default:

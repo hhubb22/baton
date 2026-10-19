@@ -12,5 +12,5 @@ Lifecycle, waiting-for-children and provider-error settlement are separate sampl
 `BATON_PI_PROBE=1 go test -v ./internal/agent/pi -run '^TestPiNoModelProbe$'`
 checks the actual installed CLI version and initialization with an isolated home,
 no model input, no extensions/MCP and startup networking disabled. This is input
-evidence only. Real-task verification lives in `internal/relay`, is explicitly
+evidence only. Real-task verification lives in `internal/gateway`, is explicitly
 opt-in and is never substituted by these fixtures.

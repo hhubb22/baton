@@ -7,11 +7,10 @@ import {
   childEnv,
   readState,
   registerNode,
-  restartRelay,
+  restartCoordinator,
+  holdRevocationApplication,
   startBatond,
-  stopPid,
   trackPid,
-  waitForPortClosed,
 } from './harness.ts'
 
 const aliceNext = 'alice-replaced-secret'
@@ -19,7 +18,7 @@ const bobNext = 'bob-replaced-secret'
 
 test('员工可以登录、管理节点并看到真实的吊销结果', async ({ page, browser }) => {
   const state = await readState()
-  const secrets = [state.alice.password, state.bob.password, aliceNext, bobNext, state.controlToken, state.databaseURL]
+  const secrets = [state.alice.password, state.bob.password, aliceNext, bobNext, state.databaseURL]
   const consoleText: string[] = []
   page.on('console', (msg) => consoleText.push(msg.text()))
   page.on('request', (req) => {
@@ -139,22 +138,22 @@ test('员工可以登录、管理节点并看到真实的吊销结果', async ({
   await expect(page.getByTestId('default-device-saved')).toContainText(laptopId ?? '')
   await expect(page.getByTestId('default-device-current')).toContainText(laptopId ?? '')
 
-  await stopPid(state.relayPid)
-  await waitForPortClosed(state.nodePort)
-  await laptop.getByTestId('revoke-open').click()
-  await laptop.getByTestId('revoke-confirm').click()
   const revokeStatus = laptop.getByTestId('revoke-status')
-  await expect(revokeStatus).toHaveAttribute('data-status', 'pending')
-  await expect(revokeStatus).toContainText('处理中')
-  await expect(revokeStatus).toContainText('尚未生效')
-  await expect(revokeStatus).toContainText('不会停止')
-  await expect(revokeStatus).not.toContainText('已生效')
-  await expect(page.getByTestId('default-device-invalid')).toContainText('重新选择')
-  await expect(page.getByTestId('default-device-current')).toContainText(laptopId ?? '')
-  await expect(page.getByTestId('default-device-current')).not.toContainText(deskId ?? '')
-  await expect(page.getByTestId('default-device-select')).toHaveValue('')
-
-  const restored = await restartRelay(state)
+  const releaseRevocation = await holdRevocationApplication(state)
+  try {
+    await laptop.getByTestId('revoke-open').click()
+    await laptop.getByTestId('revoke-confirm').click()
+    await expect(revokeStatus).toHaveAttribute('data-status', 'pending')
+    await expect(revokeStatus).toContainText('处理中')
+    await expect(revokeStatus).toContainText('尚未生效')
+    await expect(revokeStatus).toContainText('不会停止')
+    await expect(revokeStatus).not.toContainText('已生效')
+    await expect(page.getByTestId('default-device-invalid')).toContainText('重新选择')
+    await expect(page.getByTestId('default-device-current')).toContainText(laptopId ?? '')
+    await expect(page.getByTestId('default-device-current')).not.toContainText(deskId ?? '')
+    await expect(page.getByTestId('default-device-select')).toHaveValue('')
+  } finally { await releaseRevocation() }
+  const restored = await restartCoordinator(state)
   await expect(revokeStatus).toHaveAttribute('data-status', 'effective')
   await expect(revokeStatus).toContainText('已生效')
   await expect(revokeStatus).toContainText('不会停止')

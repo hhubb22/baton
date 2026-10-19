@@ -2,7 +2,7 @@ import { expect, test, type WebSocketRoute } from '@playwright/test'
 import { mkdir, readFile } from 'node:fs/promises'
 import { childEnv, createSessionEmployee, readState, registerNode, spawnDetached, stopPid, trackPid } from './harness.ts'
 
-test('浏览器通过真实 Relay 和 Worker 读取受限文本，断线可见', async ({ page }) => {
+test('浏览器通过 Coordinator Gateway 和 Worker 读取受限文本，断线可见', async ({ page }) => {
   let activeSocket: WebSocketRoute | undefined
   await page.routeWebSocket('**/api/v1/events', (socket) => { activeSocket = socket; socket.connectToServer() })
   const state = await readState()
@@ -48,10 +48,30 @@ test('浏览器通过真实 Relay 和 Worker 读取受限文本，断线可见',
   await expect(sessionButton).toHaveCount(1)
   await sessionButton.click()
   if (native) {
+    let inputPosts = 0
+    let operation = ''
+    let queriedOperation = ''
+    await page.route('**/api/v1/sessions/*/input*', async (route) => {
+      const request = route.request()
+      if (request.method() === 'POST') {
+        inputPosts++
+        operation = (request.postDataJSON() as { operation_id: string }).operation_id
+        await route.fetch()
+        await route.abort('failed')
+      } else {
+        queriedOperation = new URL(request.url()).searchParams.get('operation_id') ?? ''
+        await route.continue()
+      }
+    })
     await page.getByLabel('补充当前任务').fill('补充标记：INPUT_ACK_PS125。请把这个标记写入最终 summary。')
     await expect(page.getByRole('button', { name: '发送输入', exact: true })).toBeEnabled()
     await page.getByRole('button', { name: '发送输入', exact: true }).click()
+    await expect(page.getByText('输入结果待确认，请查询原操作。', { exact: false })).toBeVisible()
+    await activeSocket?.close({ code: 1012, reason: '输入确认丢失后的断线' })
+    await page.getByRole('button', { name: '查询输入结果', exact: true }).click()
     await expect(page.getByText('节点已确认接收输入。', { exact: true })).toBeVisible()
+    expect(inputPosts).toBe(1)
+    expect(queriedOperation).toBe(operation)
   }
   await expect(page.getByLabel('实时输出')).toContainText('<script>window.pwned=true</script>')
   if (native) await expect(page.getByLabel('实时输出')).toContainText('INPUT_ACK_PS125')

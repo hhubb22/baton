@@ -14,7 +14,7 @@ Basis: 《Baton 需求描述》（2026-10-17，7 页）及同日需求对齐讨�
 
 ## 概述
 
-Coordinator 内置 Gateway 的行为已于 2026-10-19 获批，实施与验收由 [PS-171](https://linear.app/kakenhe/issue/PS-171) 跟踪，当前尚未实现。中心只部署 Coordinator 与 PostgreSQL；节点直接连接 Coordinator。R-03、R-04、R-24、R-29、R-38～R-40 规定接入、重启、吊销、流量隔离和升级行为。
+Coordinator 内置 Gateway 的行为已于 2026-10-19 获批，实施与验收由 [PS-171](https://linear.app/kakenhe/issue/PS-171) 跟踪。中心只部署 Coordinator 与 PostgreSQL；节点直接连接 Coordinator。R-03、R-04、R-24、R-29、R-38～R-40 规定接入、重启、吊销、流量隔离和升级行为。
 
 员工通过 Baton 查看和管理分布在 Ubuntu 开发服务器、个人 PC 上的 Agent 与 Session。Ubuntu Agent 需要现场信息、设备验收或公网资料时，委托同一员工的 PC Agent，并根据返回的结果继续工作。
 

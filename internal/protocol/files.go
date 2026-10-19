@@ -1,7 +1,7 @@
 package protocol
 
 const (
-	// BodyFileBrowse 是发给节点的临时文件浏览请求。Relay 不解释 body，中心也不把它写入业务 outbox。
+	// BodyFileBrowse 是发给节点的临时文件浏览请求。Gateway 不解释 body，中心也不把它写入业务 outbox。
 	BodyFileBrowse = "files.browse"
 	// BodyFileResult 是节点对一次浏览请求的结果。
 	BodyFileResult = "files.browse_result"

@@ -6,7 +6,7 @@ Date: 2026-10-19
 Approved: 2026-10-17 首版；2026-10-19 用户批准 Coordinator 内置 Gateway
 Basis: [行为规格](PRODUCT.md)，R-01 至 R-40。
 
-Coordinator 内置 Gateway 的设计已批准，实施与验收由 [PS-171](https://linear.app/kakenhe/issue/PS-171) 跟踪，当前尚未实现。下列已实现记录对应独立 Relay 的代码基线；「进程与职责」「通信、认证与输出隔离」「部署、兼容与变更」及 Gateway 验证计划描述本次目标。
+Coordinator 内置 Gateway 的实现与验收由 [PS-171](https://linear.app/kakenhe/issue/PS-171) 跟踪。实施基线为 PS-170 的合并提交 `daaaa19effc47bfb6fd74a6299a1de1781a6918e`；已在原路径兼容验证后移除独立 Relay 及跨进程控制协议。历史实现记录保留原验证环境与版本，最新路径的实际证据见本工单。
 
 ## 已实现基线
 
@@ -38,7 +38,7 @@ Codex CLI **0.162.1** 使用 stdio app-server，实现 initialize/initialized、
 
 当前已实现补充（PS-115 / T11）：新增 `baton delegate`、`task get/wait/result/relations/cancel`；`result submit` 尚未实现。batond 在 prepare ACK 前生成每次执行独立的受限上下文文件；CLI 经本地 IPC 使用不透明凭据，员工与节点取自 Relay 认证，来源任务、Session、Execution 由节点账本绑定并在中心复核。新委托继承来源授权，不能通过请求正文扩大授权或替换来源；查询和取消限当前来源任务及其直接委托。沿用稳定 request_id 的中心幂等和默认目标解析；离线目标不自动改派。有限等待只读取中心事实，默认 30 秒、上限 5 分钟，超时不取消、不重建；结果和关系查询不会重跑执行，结构化结果及身份关联仅读取中心已保存事实。已用两节点、两个 Worker 与真实 CLI 验证等待超时、重试、越权拒绝、关系、证据和 batond 重启；Linux 构建、全量测试及相关包 race 检查通过，Windows/macOS 仅交叉编译。无新增中心迁移或依赖。真实 Agent 的环境注入、自动子结果通知/再次输入与父子级联取消仍未实现；`delivery_status=delivered` 仅表示现有执行结果交付事实已存中心，不代表已注入来源 Agent。使用方法与返回边界见 README 的「Agent 本地 CLI」。
 
-CI 已配置为在 pull request 与推送 `main` 时运行 Linux、macOS、Windows 原生构建、vet 和完整测试；Linux 另做 Windows/macOS 交叉编译及 session、node、store、relay、control 包的 race 测试，Web 在 Linux 上运行 lint、typecheck、单元测试、Chromium E2E 与嵌入产物一致性检查。测试使用 CI 内的 PostgreSQL 17，不依赖仓库 Secret。平台通过情况以对应 CI 运行结果为准，不把工作流覆盖范围视为兼容性已验证；命令和覆盖限制见 README「CI 与本地等价命令」。
+CI 已配置为在 pull request 与推送 `main` 时运行 Linux、macOS、Windows 原生构建、vet 和完整测试；Linux 另做 Windows/macOS 交叉编译及 session、node、store、gateway、control 包的 race 测试，Web 在 Linux 上运行 lint、typecheck、单元测试、Chromium E2E 与嵌入产物一致性检查。测试使用 CI 内的 PostgreSQL 17，不依赖仓库 Secret。平台通过情况以对应 CI 运行结果为准，不把工作流覆盖范围视为兼容性已验证；命令和覆盖限制见 README「CI 与本地等价命令」。
 
 当前已实现补充（PS-131 / T27）：迁移 `0019` 新增 `plane_outbox` 和 `task_acceptances`。数据库延迟触发器在任务及关联事务结束时保存当前版本的结构化结果快照，包含同事务保存的证据位置，不保存 Session 原文或额外执行输入。独立回写消费者按稳定 UUID、租约和每任务版本顺序发送 INTERNAL 评论；每次先逐页核对标记，无匹配才创建，201/409 后 GET 核对范围与可见性，失败保留原意图持续退避，不重跑 Agent。`BATON_PLANE_CONFIG.baton_url` 指定 Baton HTTPS Origin；缺失时保留队列并报告配置缺失。评论只含固定前缀、受本人权限保护的任务 API 链接、版本、状态、最多 500 字且经过敏感内容过滤和 HTML 转义的摘要，以及证据入口；原存储路径和工具输出不复制。员工 POST/GET `/api/v1/tasks/{id}/acceptance` 单独提交/读取验收，POST 以登录身份、CSRF、当前版本和确定的执行结论为条件；验收保留执行状态，增加版本并记录员工、时间和意见，不自动修改 Plane 状态或生成执行。验收记录保留所依据的版本；人工核实修正后要求重新验收，迟到证据或原任务重做审计保留已有验收，历史保留。真实 Plane 1.4.2 测试覆盖已成功写入但丢失响应、短时 503、成功待验收和员工单独验收；本机 Coordinator 重启测试覆盖后台恢复。真实模型和完整 Plane 页面人工操作流程尚未覆盖。
 
@@ -359,6 +359,8 @@ Gateway 根据认证结果构造 `employee_id`、`node_id`、`credential_id`，�
 | NodeSender.Send | 目标节点、可选的期望 conn_id、信封 | 回复必须绑定原连接；主动投递选择当前有效连接；离线或满队列返回明确错误 |
 | DisconnectCredential / Close | 凭据或进程生命周期 | 关闭连接、取消等待与释放队列，不能修改任务执行结论 |
 
+本次固定保护上限：握手并发 32、业务并发 16、活动连接槽位 128。每节点控制入站每秒 64 条，输出每秒 128 条，突发额度相同；输出优先级由服务端允许类型和已登记的 Session RPC 动作决定。输入确认和原 operation_id 查询走控制队列，未知关联的 Session 响应走输出队列。同步另有 2 条队列，未同步节点的旧报告等到同步完成再分派；心跳合并为一个待处理标志。业务处理最长 5 秒，临时数据库失败通过断线触发兼容客户端退避。吊销后台每 200ms 恢复，认证和来源授权查询数据库权威事实。
+
 上述接口不暴露 WebSocket。socket 读循环只做有界读取、校验和入队，数据库操作由有并发上限的业务分派执行；回复和主动投递统一使用 NodeSender。Gateway 不注册任意业务路由，不为消息提供通用数据库操作入口。
 
 `Send` 成功只表示进入有界发送队列。持久化命令仍由中心或节点保存后返回业务 ACK；数据库事务、dispatch_outbox、稳定 message_id/event_id、节点与 Worker 账本及终态保护均保留。消息入队、网络发送、节点接收和实际执行分别处理。临时历史、输出和输入 RPC 不进入持久业务 outbox；补充输入确认丢失时查询原 operation_id，不自动补发正文。
@@ -524,7 +526,7 @@ Agent 版本按验证过的范围登记，发现未知版本时标为未验证�
 
 ### 已执行调查
 
-2026-10-19 在 d1bf7f95b32f6c7ab3e675e515a6c8033646cb86 核查了 internal/relay/relay.go 的控制重连、认证、来源注入和队列，internal/control 的业务分派、outbox 与临时 RPC，以及 internal/node/session.go 的重连同步与未确认报告补报。当前上行是共享控制/输出队列，尚无完整的每节点公平调度。以上是源码调查；内置 Gateway 的运行证据尚未取得。
+2026-10-19 在 d1bf7f95b32f6c7ab3e675e515a6c8033646cb86 核查了 internal/relay/relay.go 的控制重连、认证、来源注入和队列，internal/control 的业务分派、outbox 与临时 RPC，以及 internal/node/session.go 的重连同步与未确认报告补报。当前上行是共享控制/输出队列，尚无完整的每节点公平调度。这段记录对应原独立 Relay 的调查；Gateway 的新路径验证见 PS-171。
 
 | 项目 | 设置与观察 | 结果 | 证据范围 |
 |---|---|---|---|
@@ -561,7 +563,9 @@ Agent 版本按验证过的范围登记，发现未知版本时标为未验证�
 
 ### Gateway 重构验收
 
-以下均为计划验证，独立 Relay 的既有通过记录不代替新路径证据。
+本机 macOS / PostgreSQL 17.11 验证：原版 batond 来自 PS-170 合并基线，只改连接地址；全量分组和相关 race 通过。Gateway 的数据库恢复、认证/吊销竞争、旧 conn_id、重复结果和两节点输出洪泛均有新路径证据。真实 Pi 1.3.0 / `openai/gpt-6.1-sol` / Chromium 验证了补充输入确认响应丢失后查询原操作、恶意文本、浏览器断线、Worker 退出后的原生 Session 恢复与第二个任务。Linux/Windows 原生结果以本工单同一 PR 的 CI 为准；24 小时容量验证仍由独立工单承担。
+
+验收证据记录在 PS-171 与同一 PR；独立 Relay 的既有通过记录只用于覆盖映射。
 
 | 要求 | 设置与观察 | 失败条件 |
 |---|---|---|

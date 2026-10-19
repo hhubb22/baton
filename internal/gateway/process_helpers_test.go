@@ -1,4 +1,4 @@
-package relay_test
+package gateway_test
 
 import (
 	"fmt"
@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-func TestRelayProcessHelper(t *testing.T) {
+func TestGatewayProcessHelper(t *testing.T) {
 	if len(os.Args) < 3 || os.Args[len(os.Args)-2] != "baton-idle-process" {
 		return
 	}
@@ -38,7 +38,7 @@ func startIdleProcess(t *testing.T, exitCode int) (*running, io.WriteCloser) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(exe, "-test.run=^TestRelayProcessHelper$", "--", "baton-idle-process", strconv.Itoa(exitCode))
+	cmd := exec.Command(exe, "-test.run=^TestGatewayProcessHelper$", "--", "baton-idle-process", strconv.Itoa(exitCode))
 	input, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)

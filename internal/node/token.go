@@ -21,7 +21,7 @@ const (
 	Issuer = "baton-coordinator"
 	// NodeAudience 是节点连接凭据的受众，不能当作启动许可使用。
 	NodeAudience = "baton-node"
-	// StartAudience 预留给启动许可，Relay 不接受这个受众的连接凭据。
+	// StartAudience 预留给启动许可，Gateway 不接受这个受众的连接凭据。
 	StartAudience = "baton-start"
 )
 
@@ -120,7 +120,7 @@ func (id Identity) StartPublicKey() (ed25519.PublicKey, error) {
 	return ed25519.PublicKey(decoded), nil
 }
 
-// PublicKey 返回 Relay 用来验签的公钥。
+// PublicKey 返回 Gateway 用来验签的公钥。
 func (s Signer) PublicKey() (ed25519.PublicKey, error) {
 	if len(s.key) == 0 {
 		return nil, errors.New("没有节点签名密钥")

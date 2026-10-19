@@ -19,7 +19,6 @@ export type E2EState = {
   schema: string
   databaseURL: string
   apiPort: number
-  controlPort: number
   nodePort: number
   certFile: string
   keyFile: string
@@ -27,13 +26,10 @@ export type E2EState = {
   workDir: string
   logDir: string
   coordBin: string
-  relayBin: string
   batondBin: string
-  controlToken: string
+  coordEnv: Record<string, string>
   coordPid: number
-  relayPid: number
   extraPids: number[]
-  relayEnv: Record<string, string>
   alice: { username: string; password: string }
   bob: { username: string; password: string }
 }
@@ -175,7 +171,6 @@ export async function cleanup(): Promise<void> {
   } catch {
     return
   }
-  await stopPid(state.relayPid)
   await stopPid(state.coordPid)
   for (const pid of state.extraPids) await stopPid(pid)
   await dropSchema(state.databaseURL, state.schema)
@@ -243,15 +238,25 @@ export async function trackPid(pid: number): Promise<E2EState> {
   return state
 }
 
-export async function restartRelay(state: E2EState): Promise<E2EState> {
-  await stopPid(state.relayPid)
-  await waitForPortClosed(state.nodePort)
+export async function restartCoordinator(state: E2EState): Promise<E2EState> {
   const current = await readState()
-  const relayPid = spawnDetached(current.relayBin, [], current.relayEnv, path.join(current.logDir, 'relay.log'))
-  const next = { ...current, relayPid }
+  await stopPid(current.coordPid)
+  await waitForPortClosed(state.nodePort)
+  const coordPid = spawnDetached(current.coordBin, ['serve'], current.coordEnv, path.join(current.logDir, 'coordinator.log'))
+  const next = { ...current, coordPid }
   await writeState(next)
   await waitForPort(current.nodePort)
   return next
+}
+
+// 数据库门闩使 applied_at 持久化暂时失败，浏览器可观察真实 pending 和后台恢复。
+export async function holdRevocationApplication(state: E2EState): Promise<() => Promise<void>> {
+  const client = new Client({ connectionString: state.databaseURL })
+  await client.connect()
+  await client.query(`CREATE FUNCTION "${state.schema}".gate_revocation() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_advisory_xact_lock(hashtext(TG_TABLE_SCHEMA)); RETURN NEW; END $$`)
+  await client.query(`CREATE TRIGGER gate_revocation BEFORE UPDATE OF applied_at ON "${state.schema}".node_revocations FOR EACH ROW EXECUTE FUNCTION "${state.schema}".gate_revocation()`)
+  await client.query('SELECT pg_advisory_lock(hashtext($1))', [state.schema])
+  return async () => { await client.query('SELECT pg_advisory_unlock(hashtext($1))', [state.schema]); await client.end() }
 }
 
 export async function setup(): Promise<void> {
@@ -265,7 +270,7 @@ export async function setup(): Promise<void> {
   await mkdirAsync(binDir, { recursive: true })
   const secrets = [databaseURL]
 
-  for (const name of ['coordinator', 'relay', 'batond']) {
+  for (const name of ['coordinator', 'batond']) {
     await runLogged('go', ['build', '-o', path.join(binDir, name), `./cmd/${name}`], process.env, secrets, repoRoot)
   }
 
@@ -283,16 +288,12 @@ export async function setup(): Promise<void> {
   await chmodAsync(signingFile, 0o600)
 
   const apiPort = await freePort()
-  const controlPort = await freePort()
-  const nodePort = await freePort()
-  const controlToken = randomBytes(24).toString('hex')
+  const nodePort = apiPort
   const baseURL = `https://127.0.0.1:${apiPort}`
   const coordEnv = childEnv({
     BATON_DATABASE_URL: databaseURL,
     BATON_DB_SCHEMA: schema,
     BATON_HTTP_ADDR: `127.0.0.1:${apiPort}`,
-    BATON_CONTROL_ADDR: `127.0.0.1:${controlPort}`,
-    BATON_CONTROL_TOKEN: controlToken,
     BATON_NODE_SIGNING_KEY: signingFile,
     BATON_ALLOWED_ORIGINS: baseURL,
     BATON_TLS_CERT_FILE: certFile,
@@ -300,20 +301,11 @@ export async function setup(): Promise<void> {
     BATON_HEARTBEAT_INTERVAL: '200ms',
     BATON_OFFLINE_AFTER: '8s',
   })
-  const relayEnv = childEnv({
-    BATON_LISTEN_ADDR: `127.0.0.1:${nodePort}`,
-    BATON_COORDINATOR_URL: `https://127.0.0.1:${controlPort}`,
-    BATON_CONTROL_TOKEN: controlToken,
-    BATON_TLS_CERT_FILE: certFile,
-    BATON_TLS_KEY_FILE: keyFile,
-    BATON_TLS_CA_FILE: certFile,
-  })
   const state: E2EState = {
     baseURL,
     schema,
     databaseURL,
     apiPort,
-    controlPort,
     nodePort,
     certFile,
     keyFile,
@@ -321,13 +313,10 @@ export async function setup(): Promise<void> {
     workDir,
     logDir,
     coordBin: path.join(binDir, 'coordinator'),
-    relayBin: path.join(binDir, 'relay'),
     batondBin: path.join(binDir, 'batond'),
-    controlToken,
+    coordEnv: coordEnv as Record<string, string>,
     coordPid: 0,
-    relayPid: 0,
     extraPids: [],
-    relayEnv: relayEnv as Record<string, string>,
     alice: { username: 'alice', password: '' },
     bob: { username: 'bob', password: '' },
   }
@@ -335,10 +324,6 @@ export async function setup(): Promise<void> {
   try {
     await access(path.join(repoRoot, 'internal', 'webui', 'dist', 'index.html'))
     await runLogged(state.coordBin, ['migrate'], coordEnv, secrets)
-    state.relayPid = spawnDetached(state.relayBin, [], relayEnv, path.join(logDir, 'relay.log'))
-    await writeState(state)
-    await delay(400)
-    if (await portOpen(nodePort)) throw new Error('Relay 在拿到安全快照之前接受了节点连接')
     state.coordPid = spawnDetached(state.coordBin, ['serve'], coordEnv, path.join(logDir, 'coordinator.log'))
     await writeState(state)
     try {
@@ -346,9 +331,8 @@ export async function setup(): Promise<void> {
       await waitForPort(nodePort)
     } catch (err) {
       const detail = await tail(path.join(logDir, 'coordinator.log'), secrets)
-      const relayDetail = await tail(path.join(logDir, 'relay.log'), secrets)
       const reason = err instanceof Error ? err.message : '服务没有启动'
-      throw new Error(`${reason}\n${detail}\n${relayDetail}`)
+      throw new Error(`${reason}\n${detail}`)
     }
     state.alice.password = await issuedPassword(state.coordBin, coordEnv, 'alice', 'Alice', secrets)
     state.bob.password = await issuedPassword(state.coordBin, coordEnv, 'bob', 'Bob', secrets)
@@ -369,7 +353,7 @@ async function issuedPassword(bin: string, env: NodeJS.ProcessEnv, username: str
 }
 
 export async function assertLogsClean(state: E2EState, secrets: string[]): Promise<void> {
-  for (const name of ['coordinator.log', 'relay.log', 'batond.log']) {
+  for (const name of ['coordinator.log', 'batond.log']) {
     let text = ''
     try {
       text = await readFileAsync(path.join(state.logDir, name), 'utf8')

@@ -1,4 +1,4 @@
-package relay_test
+package gateway_test
 
 import (
 	"bytes"
@@ -18,17 +18,17 @@ import (
 	"baton/internal/dbtest"
 	"baton/internal/node"
 	"baton/internal/protocol"
+	"baton/internal/store"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func TestProcessRevokeDisconnectsAndSurvivesRelayRestart(t *testing.T) {
-	coordBin, relayBin, batondBin := buildBins(t)
+func TestProcessRevokeDisconnectsAndSurvivesCoordinatorRestart(t *testing.T) {
+	coordBin, batondBin := buildBins(t)
 	pool := dbtest.Open(t)
 	ctx := context.Background()
 	schema := currentSchema(t, pool)
 	env := revokeProcessEnv(t, schema)
-	startCmd(t, relayBin, nil, env.relay)
 	time.Sleep(300 * time.Millisecond)
 	coordProc := startCmd(t, coordBin, []string{"serve"}, env.coord)
 	waitListen(t, env.apiAddr)
@@ -92,29 +92,28 @@ func TestProcessRevokeDisconnectsAndSurvivesRelayRestart(t *testing.T) {
 		t.Fatal("吊销改写了默认设备")
 	}
 
-	relayProc := latestProc(t, relayBin)
-	relayProc.stop()
-	relayProc = startCmd(t, relayBin, nil, env.relay)
+	coordProc.stop()
+	coordProc = startCmd(t, coordBin, []string{"serve"}, env.coord)
 	waitListen(t, env.nodeAddr)
 	if result := authProcess(t, env.nodeAddr, desk.Credential.Token, newProcessID(t), env.roots); result.OK || result.Code != protocol.CodeInvalidCredential {
-		t.Fatalf("Relay 重启后放行了同一凭据: %+v", result)
+		t.Fatalf("Coordinator 重启后放行了同一凭据: %+v", result)
 	}
 	if result := authProcess(t, env.nodeAddr, other.Credential.Token, newProcessID(t), env.roots); !result.OK {
-		t.Fatalf("Relay 重启后其他节点不能连接: %+v", result)
+		t.Fatalf("Coordinator 重启后其他节点不能连接: %+v", result)
 	}
 	third := registerThrough(t, client, base, csrf, "Third")
 	if defaultQuery(t, pool, alice.ID) != desk.NodeID || third.NodeID == desk.NodeID {
 		t.Fatal("新节点被自动选成了默认设备")
 	}
 	waitRevocationHTTP(t, client, base, desk.NodeID, "effective")
-	logs := coordProc.out.String() + relayProc.out.String() + batondProc.out.String()
-	if strings.Contains(logs, desk.Credential.Token) || strings.Contains(logs, other.Credential.Token) || strings.Contains(logs, env.controlToken) {
+	logs := coordProc.out.String() + batondProc.out.String()
+	if strings.Contains(logs, desk.Credential.Token) || strings.Contains(logs, other.Credential.Token) {
 		t.Fatal("运行日志包含凭据")
 	}
 }
 
-func TestProcessRevokeStaysPendingWhileRelayIsDown(t *testing.T) {
-	coordBin, relayBin, batondBin := buildBins(t)
+func TestProcessRevokeStaysPendingWhileCoordinatorIsDown(t *testing.T) {
+	coordBin, batondBin := buildBins(t)
 	pool := dbtest.Open(t)
 	ctx := context.Background()
 	schema := currentSchema(t, pool)
@@ -140,23 +139,19 @@ func TestProcessRevokeStaysPendingWhileRelayIsDown(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	status, body := postText(t, client, base+"/api/v1/nodes/"+desk.NodeID+"/revoke", csrf, map[string]any{})
-	if status != http.StatusOK || !strings.Contains(body, `"status":"pending"`) || strings.Contains(body, `"status":"effective"`) || strings.Contains(body, "已生效") || strings.Contains(body, "已经停止") {
-		t.Fatalf("Relay 不可达时声称吊销已生效: %d %s", status, body)
-	}
-	if !strings.Contains(body, "尚未生效") || !strings.Contains(body, "不会停止") || !strings.Contains(body, "需要重新选择") {
-		t.Fatalf("处理中的说明不完整: %s", body)
-	}
-	if countQuery(t, pool, `SELECT COUNT(*) FROM node_revocations WHERE node_id = $1::uuid AND applied_at IS NULL AND actor_employee_id = $2::uuid`, desk.NodeID, alice.ID) != 1 {
-		t.Fatal("不可达时没有保存未确认的吊销")
+	latestProc(t, coordBin).stop()
+	repo := store.New(pool)
+	decision, err := repo.RevokeNode(ctx, alice.ID, desk.NodeID)
+	if err != nil || decision.Status != store.RevocationPending {
+		t.Fatalf("吊销决定未保持 pending: %+v %v", decision, err)
 	}
 	if defaultQuery(t, pool, alice.ID) != desk.NodeID {
-		t.Fatal("不可达时改写了默认设备")
+		t.Fatal("吊销改写了默认设备")
 	}
-
-	startCmd(t, relayBin, nil, env.relay)
+	startCmd(t, coordBin, []string{"serve"}, env.coord)
 	waitListen(t, env.nodeAddr)
 	waitRevocationHTTP(t, client, base, desk.NodeID, "effective")
+
 	batondProc := startCmd(t, batondBin, []string{"run", "--relay", "wss://" + env.nodeAddr + "/v1/node", "--data-dir", dataDir}, childEnv(map[string]string{
 		"BATON_TLS_CA_FILE":        env.certFile,
 		"BATON_HEARTBEAT_INTERVAL": "200ms",
@@ -169,15 +164,15 @@ func TestProcessRevokeStaysPendingWhileRelayIsDown(t *testing.T) {
 	if !strings.Contains(batondProc.out.String(), "需要重新认证") {
 		t.Fatalf("节点没有说明需要重新认证: %s", batondProc.out.String())
 	}
-	latestProc(t, relayBin).stop()
-	startCmd(t, relayBin, nil, env.relay)
+	latestProc(t, coordBin).stop()
+	startCmd(t, coordBin, []string{"serve"}, env.coord)
 	waitListen(t, env.nodeAddr)
 	if result := authProcess(t, env.nodeAddr, desk.Credential.Token, newProcessID(t), env.roots); result.OK || result.Code != protocol.CodeInvalidCredential {
-		t.Fatalf("Relay 重启后放行了同一凭据: %+v", result)
+		t.Fatalf("Coordinator 重启后放行了同一凭据: %+v", result)
 	}
 	other := registerThrough(t, client, base, csrf, "Other")
 	if defaultQuery(t, pool, alice.ID) != desk.NodeID {
-		t.Fatal("Relay 恢复后自动改选了默认设备")
+		t.Fatal("Coordinator 恢复后自动改选了默认设备")
 	}
 	if result := authProcess(t, env.nodeAddr, other.Credential.Token, newProcessID(t), env.roots); !result.OK {
 		t.Fatalf("未吊销节点不能连接: %+v", result)
@@ -188,14 +183,12 @@ func TestProcessRevokeStaysPendingWhileRelayIsDown(t *testing.T) {
 }
 
 type revokeEnv struct {
-	dir          string
-	certFile     string
-	apiAddr      string
-	nodeAddr     string
-	controlToken string
-	roots        *x509.CertPool
-	coord        []string
-	relay        []string
+	dir      string
+	certFile string
+	apiAddr  string
+	nodeAddr string
+	roots    *x509.CertPool
+	coord    []string
 }
 
 func revokeProcessEnv(t *testing.T, schema string) revokeEnv {
@@ -213,32 +206,20 @@ func revokeProcessEnv(t *testing.T, schema string) revokeEnv {
 	roots := x509.NewCertPool()
 	roots.AddCert(cert)
 	apiAddr := freeAddr(t)
-	controlAddr := freeAddr(t)
-	nodeAddr := freeAddr(t)
-	const controlToken = "revoke-process-token-01"
+	nodeAddr := apiAddr
 	dbURL := strings.TrimSpace(os.Getenv("BATON_TEST_DATABASE_URL"))
 	return revokeEnv{
-		dir: dir, certFile: certFile, apiAddr: apiAddr, nodeAddr: nodeAddr, controlToken: controlToken, roots: roots,
+		dir: dir, certFile: certFile, apiAddr: apiAddr, nodeAddr: nodeAddr, roots: roots,
 		coord: childEnv(map[string]string{
 			"BATON_DATABASE_URL":       dbURL,
 			"BATON_DB_SCHEMA":          schema,
 			"BATON_HTTP_ADDR":          apiAddr,
-			"BATON_CONTROL_ADDR":       controlAddr,
-			"BATON_CONTROL_TOKEN":      controlToken,
 			"BATON_NODE_SIGNING_KEY":   signingFile,
 			"BATON_ALLOWED_ORIGINS":    "https://baton.example",
 			"BATON_TLS_CERT_FILE":      certFile,
 			"BATON_TLS_KEY_FILE":       keyFile,
 			"BATON_HEARTBEAT_INTERVAL": "200ms",
 			"BATON_OFFLINE_AFTER":      "8s",
-		}),
-		relay: childEnv(map[string]string{
-			"BATON_LISTEN_ADDR":     nodeAddr,
-			"BATON_COORDINATOR_URL": "https://" + controlAddr,
-			"BATON_CONTROL_TOKEN":   controlToken,
-			"BATON_TLS_CERT_FILE":   certFile,
-			"BATON_TLS_KEY_FILE":    keyFile,
-			"BATON_TLS_CA_FILE":     certFile,
 		}),
 	}
 }

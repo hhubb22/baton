@@ -1,4 +1,4 @@
-package relay_test
+package gateway_test
 
 import (
 	"context"
@@ -132,7 +132,7 @@ func TestCIDiagnosticFailure(t *testing.T) {
 	acceptTask(t, st, "ci-diagnostic-failure")
 	waitGateFile(t, gate, st)
 	t.Log("token=ci-redaction-fixture password=ci-password-fixture")
-	t.Fatal("受控失败：验证 Coordinator、Relay、Worker 日志及失败摘要")
+	t.Fatal("受控失败：验证 Coordinator、batond、Worker 日志及失败摘要")
 }
 
 func TestMain(m *testing.M) {
@@ -160,7 +160,7 @@ func TestCIDiagnosticScrubsSplitOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writer := &scrubWriter{file: file, env: []string{"BATON_CONTROL_TOKEN=private-example"}}
+	writer := &scrubWriter{file: file, env: []string{"BATON_TEST_TOKEN=private-example"}}
 	for _, part := range []string{"token=private-", "example\n", "password=secret-tail"} {
 		if _, err := writer.Write([]byte(part)); err != nil {
 			t.Fatal(err)

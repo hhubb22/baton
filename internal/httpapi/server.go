@@ -35,6 +35,7 @@ type requestIDKey struct{}
 
 // Settings 是 API 进程使用的来源和有效期。有效期与 config 的允许范围一致。
 type Settings struct {
+	OutputBudget      *protocol.Budget
 	Origins           []string
 	SessionTTL        time.Duration
 	EnrollmentTTL     time.Duration
@@ -46,7 +47,7 @@ type Settings struct {
 	Logger            *slog.Logger
 }
 
-// RevocationDispatcher 把已保存的吊销交给当前 Relay。没有控制连接时应尽快返回。
+// RevocationDispatcher 把已保存的吊销交给当前 Gateway。尚未应用时保持 pending。
 type RevocationDispatcher interface {
 	DispatchRevocations(ctx context.Context) error
 }
@@ -58,6 +59,7 @@ type FileBrowser interface {
 
 // Server 是 /api/v1 的登录与节点接口。会话 Cookie 始终带 Secure、HttpOnly 和 SameSite=Strict。
 type Server struct {
+	outputBudget      *protocol.Budget
 	store             *store.Store
 	origins           map[string]struct{}
 	ttl               time.Duration
@@ -93,6 +95,9 @@ func New(pool *pgxpool.Pool, settings Settings) (*Server, error) {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
+	if settings.OutputBudget == nil {
+		settings.OutputBudget = protocol.NewBudget(protocol.MaxOutputCacheBytes)
+	}
 	return &Server{
 		store:             store.New(pool),
 		origins:           set,
@@ -104,6 +109,7 @@ func New(pool *pgxpool.Pool, settings Settings) (*Server, error) {
 		files:             settings.Files,
 		sessions:          settings.Sessions,
 		browserSlots:      make(chan struct{}, 128),
+		outputBudget:      settings.OutputBudget,
 		eventInterval:     time.Second,
 		log:               slog.New(redact.NewHandler(logger.Handler())),
 	}, nil

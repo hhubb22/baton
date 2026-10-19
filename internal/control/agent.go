@@ -9,17 +9,15 @@ import (
 	"baton/internal/protocol"
 	"baton/internal/store"
 	"baton/internal/task"
-
-	"github.com/coder/websocket"
 )
 
-func (s *Server) onAgentRequest(ctx context.Context, ws *websocket.Conn, env protocol.Envelope) {
+func (s *Server) onAgentRequest(ctx context.Context, connID string, env protocol.Envelope) {
 	result := protocol.AgentResult{Type: protocol.BodyAgentResult, Code: task.CodeInvalidRequest}
 	var req protocol.AgentRequest
 	dec := json.NewDecoder(bytes.NewReader(rawBody(env.Body)))
 	dec.DisallowUnknownFields()
 	if dec.Decode(&req) != nil || req.Type != protocol.BodyAgentRequest {
-		s.replyExecution(ctx, ws, env, result)
+		s.replyExecution(ctx, connID, env, result)
 		return
 	}
 	source := store.AgentSource{EmployeeID: env.Source.EmployeeID, NodeID: env.Source.NodeID,
@@ -70,5 +68,5 @@ func (s *Server) onAgentRequest(ctx context.Context, ws *websocket.Conn, env pro
 	if raw, err := json.Marshal(result); err != nil || len(raw) > protocol.MaxMessageBytes-2048 {
 		result = protocol.AgentResult{Type: protocol.BodyAgentResult, Code: task.CodeUnavailable, Message: "结果超过单条消息上限"}
 	}
-	s.replyExecution(ctx, ws, env, result)
+	s.replyExecution(ctx, connID, env, result)
 }

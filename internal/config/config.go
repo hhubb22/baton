@@ -17,7 +17,6 @@ const (
 	DefaultTTL               = 12 * time.Hour
 	DefaultEnrollmentTTL     = 10 * time.Minute
 	DefaultNodeCredentialTTL = 30 * 24 * time.Hour
-	DefaultControlAddr       = "127.0.0.1:9443"
 	DefaultHeartbeat         = 10 * time.Second
 	DefaultOfflineAfter      = 30 * time.Second
 	minSessionTTL            = 5 * time.Minute
@@ -43,8 +42,6 @@ type Config struct {
 	NodeCredentialTTL time.Duration
 	TLSCertFile       string
 	TLSKeyFile        string
-	ControlAddr       string
-	ControlToken      string
 	SigningKeyFile    string
 	Heartbeat         time.Duration
 	OfflineAfter      time.Duration
@@ -117,20 +114,6 @@ func Load(getenv func(string) string, serve bool) (Config, error) {
 		return Config{}, err
 	}
 	cfg.AllowedOrigins = origins
-	cfg.ControlAddr = strings.TrimSpace(getenv("BATON_CONTROL_ADDR"))
-	if cfg.ControlAddr == "" {
-		cfg.ControlAddr = DefaultControlAddr
-	}
-	if _, _, err := net.SplitHostPort(cfg.ControlAddr); err != nil {
-		return Config{}, errors.New("BATON_CONTROL_ADDR 需要是 host:port")
-	}
-	if cfg.ControlAddr == cfg.HTTPAddr {
-		return Config{}, errors.New("控制监听不能与 API 监听使用同一地址")
-	}
-	cfg.ControlToken = strings.TrimSpace(getenv("BATON_CONTROL_TOKEN"))
-	if !validControlToken(cfg.ControlToken) {
-		return Config{}, errors.New("BATON_CONTROL_TOKEN 无效")
-	}
 	cfg.SigningKeyFile = strings.TrimSpace(getenv("BATON_NODE_SIGNING_KEY"))
 	if cfg.SigningKeyFile == "" {
 		return Config{}, errors.New("需要设置 BATON_NODE_SIGNING_KEY")
@@ -149,20 +132,6 @@ func Load(getenv func(string) string, serve bool) (Config, error) {
 	cfg.Heartbeat = heartbeat
 	cfg.OfflineAfter = offline
 	return cfg, nil
-}
-
-func validControlToken(token string) bool {
-	if len(token) < 20 || len(token) > 200 {
-		return false
-	}
-	for _, r := range token {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
-		default:
-			return false
-		}
-	}
-	return true
 }
 
 func quoteSchema(name string) (string, error) {
@@ -256,8 +225,8 @@ func OriginSet(origins []string) (map[string]struct{}, error) {
 
 // Redacted 返回可以记录的配置摘要，不包含数据库连接串。
 func (c Config) Redacted() string {
-	return fmt.Sprintf("schema=%s addr=%s control_addr=%s origins=%d ttl=%s enrollment_ttl=%s node_credential_ttl=%s heartbeat=%s offline=%s tls=%t signing_key=%t",
-		c.Schema, c.HTTPAddr, c.ControlAddr, len(c.AllowedOrigins), c.SessionTTL, c.EnrollmentTTL, c.NodeCredentialTTL, c.Heartbeat, c.OfflineAfter, c.TLS(), c.SigningKeyFile != "")
+	return fmt.Sprintf("schema=%s addr=%s origins=%d ttl=%s enrollment_ttl=%s node_credential_ttl=%s heartbeat=%s offline=%s tls=%t signing_key=%t",
+		c.Schema, c.HTTPAddr, len(c.AllowedOrigins), c.SessionTTL, c.EnrollmentTTL, c.NodeCredentialTTL, c.Heartbeat, c.OfflineAfter, c.TLS(), c.SigningKeyFile != "")
 }
 
 func parseBoundedDuration(raw, name string, fallback, min, max time.Duration) (time.Duration, error) {

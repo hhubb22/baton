@@ -144,11 +144,11 @@ func runOnce(ctx context.Context, opts RunOptions, incarnation string, ledger *L
 		return errors.New("无法编码认证请求")
 	}
 	if err := ws.Write(ctx, websocket.MessageText, authFrame); err != nil {
-		return errors.New("无法连接 Relay")
+		return errors.New("无法连接 Coordinator")
 	}
 	_, raw, err := ws.Read(ctx)
 	if err != nil {
-		return errors.New("无法连接 Relay")
+		return errors.New("无法连接 Coordinator")
 	}
 	var result struct {
 		Kind string `json:"kind"`
@@ -156,7 +156,7 @@ func runOnce(ctx context.Context, opts RunOptions, incarnation string, ledger *L
 		Code string `json:"code"`
 	}
 	if err := json.Unmarshal(raw, &result); err != nil || result.Kind != protocol.KindAuthResult {
-		return errors.New("无法连接 Relay")
+		return errors.New("无法连接 Coordinator")
 	}
 	if !result.OK {
 		if result.Code == protocol.CodeIncarnationConflict {
@@ -203,7 +203,7 @@ func runOnce(ctx context.Context, opts RunOptions, incarnation string, ledger *L
 			if errors.Is(err, ErrNeedsReauth) || errors.Is(err, ErrIncarnationConflict) {
 				return err
 			}
-			return errors.New("与 Relay 的连接已断开")
+			return errors.New("与 Coordinator 的连接已断开")
 		case <-ticker.C:
 			go replay()
 			if !acked.Load() {
@@ -229,7 +229,7 @@ func dialRelay(ctx context.Context, opts RunOptions) (*websocket.Conn, error) {
 	}}}
 	ws, _, err := websocket.Dial(ctx, endpoint, &websocket.DialOptions{HTTPClient: client})
 	if err != nil {
-		return nil, errors.New("无法连接 Relay")
+		return nil, errors.New("无法连接 Coordinator")
 	}
 	return ws, nil
 }
@@ -329,7 +329,7 @@ func writeSync(ctx context.Context, w *wsWriter, opts RunOptions, expect *atomic
 	}
 	expect.Store(messageID)
 	if err := w.write(ctx, frame); err != nil {
-		return errors.New("与 Relay 的连接已断开")
+		return errors.New("与 Coordinator 的连接已断开")
 	}
 	return nil
 }
@@ -342,7 +342,7 @@ func writeHeartbeat(ctx context.Context, w *wsWriter) error {
 		return errors.New("无法发送心跳")
 	}
 	if err := w.write(ctx, frame); err != nil {
-		return errors.New("与 Relay 的连接已断开")
+		return errors.New("与 Coordinator 的连接已断开")
 	}
 	return nil
 }

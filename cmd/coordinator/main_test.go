@@ -70,8 +70,6 @@ func TestCLIMigrateCreateResetAndServeGuard(t *testing.T) {
 			return "https://baton.example"
 		case "BATON_HTTP_ADDR":
 			return "127.0.0.1:0"
-		case "BATON_CONTROL_TOKEN":
-			return "control-token-value-0001"
 		case "BATON_NODE_SIGNING_KEY":
 			return "node-signing.key"
 		default:

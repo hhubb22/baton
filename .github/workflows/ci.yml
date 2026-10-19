@@ -176,7 +176,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           node --version
-          go test -v -count=10 ./internal/relay -run '^TestPiSandbox'
+          go test -v -count=10 ./internal/gateway -run '^TestPiSandbox'
       - name: 上传诊断材料
         if: always()
         uses: actions/upload-artifact@v4

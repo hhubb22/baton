@@ -92,7 +92,7 @@ func (s *Store) MarkOffline(ctx context.Context, nodeID, connID string, at time.
 	return nil
 }
 
-// ApplySessions 用 Relay 的当前连接替换在线集合。不在列表中的在线节点改为离线。
+// ApplySessions 用 Gateway 的当前连接替换在线集合。不在列表中的在线节点改为离线。
 func (s *Store) ApplySessions(ctx context.Context, sessions []protocol.Presence) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {

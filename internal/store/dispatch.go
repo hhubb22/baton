@@ -41,7 +41,7 @@ type PreparedFact struct {
 }
 
 // ClaimPrepare 领取一条可以发送的 prepare，并写上租约。没有可投递的记录时 ok 为 false。
-// 尚未交给 Relay 的消息只在 send_deadline 之前领取。已经交出但还没有确定结果的消息，过期后仍按租约重发。
+// 尚未交给 Gateway 的消息只在 send_deadline 之前领取。已经交出但还没有确定结果的消息，过期后仍按租约重发。
 func (s *Store) ClaimPrepare(ctx context.Context, lease time.Duration) (PrepareIntent, bool, error) {
 	if lease <= 0 {
 		return PrepareIntent{}, false, errors.New("租约无效")
@@ -125,7 +125,7 @@ func (s *Store) ReleasePrepare(ctx context.Context, messageID string) error {
 	return nil
 }
 
-// MarkPrepareSent 记录这条消息至少交给过 Relay 一次。之后不能再把它当成从未投递。
+// MarkPrepareSent 记录这条消息至少交给过 Gateway 一次。之后不能再把它当成从未投递。
 func (s *Store) MarkPrepareSent(ctx context.Context, messageID string) error {
 	if _, err := identity.ParseUUID(messageID); err != nil {
 		return nil
@@ -381,7 +381,7 @@ func (s *Store) FailPrepare(ctx context.Context, fact PreparedFact, code, messag
 	return tx.Commit(ctx)
 }
 
-// FailUnsentPrepares 把从未交给 Relay、并且排队期限已到的任务标为等待超时。
+// FailUnsentPrepares 把从未交给 Gateway、并且排队期限已到的任务标为等待超时。
 func (s *Store) FailUnsentPrepares(ctx context.Context) error {
 	rows, err := s.pool.Query(ctx, `
 		SELECT o.id::text

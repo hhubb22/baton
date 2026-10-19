@@ -10,9 +10,17 @@ import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
-RELAY = 'baton/internal/relay'
+GATEWAY = 'baton/internal/gateway'
 RACE = ['./internal/agent/...', './internal/session', './internal/node',
-        './internal/store', './internal/control']
+        './internal/store', './internal/control', './internal/gateway']
+
+
+def validate_migration(names):
+    mapping = json.loads((ROOT / '.github/ci/gateway-migration.json').read_text())['tests']
+    missing = {old: [name for name in targets if name not in names] for old, targets in mapping.items()}
+    missing = {old: targets for old, targets in missing.items() if targets}
+    if missing:
+        raise RuntimeError('Gateway 测试迁移缺少用例: ' + json.dumps(missing, ensure_ascii=False))
 
 
 def scrub(text):
@@ -187,7 +195,7 @@ def main():
         bins = out / 'bin'
         bins.mkdir()
         suffix = '.exe' if os.name == 'nt' else ''
-        for name in ['coordinator', 'relay', 'batond']:
+        for name in ['coordinator', 'batond']:
             subprocess.run(['go', 'build', '-o', str(bins / (name + suffix)), './cmd/' + name], cwd=ROOT, check=True)
         os.environ['BATON_TEST_BIN_DIR'] = str(bins)
         common = ['go', 'test', '-json', '-timeout=12m', f'-count={args.count}']
@@ -206,14 +214,15 @@ def main():
             groups.append(('diagnostic', common + ['-run=' + args.run, args.package], names, ranges[0]))
         else:
             packages = output(['go', 'list'] + (RACE if args.race else ['./...'])).splitlines()
-            others = [p for p in packages if p != RELAY]
+            others = [p for p in packages if p != GATEWAY]
             groups.append(('packages', common + others, None, None))
-            names = [n for n in output(list_common + [RELAY]).splitlines() if re.match(r'^(Test|Example|Fuzz)\w*$', n)]
-            weights = json.loads((ROOT / '.github/ci/relay-times.json').read_text())
+            names = [n for n in output(list_common + [GATEWAY]).splitlines() if re.match(r'^(Test|Example|Fuzz)\w*$', n)]
+            validate_migration(names)
+            weights = json.loads((ROOT / '.github/ci/gateway-times.json').read_text())
             shards = partition(names, weights, args.shards)
-            (out / 'coverage.json').write_text(json.dumps({'package': RELAY, 'all': names, 'shards': shards}, indent=2))
+            (out / 'coverage.json').write_text(json.dumps({'package': GATEWAY, 'all': names, 'shards': shards}, indent=2))
             for i, tests in enumerate(shards):
-                groups.append((f'relay-{i + 1}', common + ['-run=^(' + '|'.join(tests) + ')$', RELAY], tests, ranges[i]))
+                groups.append((f'gateway-{i + 1}', common + ['-run=^(' + '|'.join(tests) + ')$', GATEWAY], tests, ranges[i]))
         with ThreadPoolExecutor(max_workers=len(groups)) as executor:
             futures = [executor.submit(run_group, name, command, out, args.count, expected, bool(args.package), ports)
                        for name, command, expected, ports in groups]

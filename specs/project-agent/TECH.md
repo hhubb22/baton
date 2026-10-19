@@ -9,7 +9,7 @@ Basis: [PRODUCT.md](PRODUCT.md) PA-01～PA-22；[Agent Inbox 行为规格](../ag
 
 ## Context
 
-现有 Baton 的协调单位是 Task。用户或执行 Agent 提交一个 Task，Coordinator 在一个事务里保存 Task、Execution、事件和 `dispatch_outbox`（`internal/store/task.go` 的 `acceptOnce`），节点上的 Session Worker 执行并回报结果。执行 Agent 通过 `baton delegate` 派生子任务：CLI 经本地 IPC 交给 batond，batond 经 Relay 把 `AgentRequest` 送到 Coordinator 的 `onAgentRequest`（`internal/control/agent.go`），来源身份由 Relay 认证和节点账本绑定。节点只主动连接 Relay，不直接访问 Coordinator，单条控制消息上限 256 KiB。
+现有 Baton 的协调单位是 Task。用户或执行 Agent 提交一个 Task，Coordinator 在一个事务里保存 Task、Execution、事件和 `dispatch_outbox`（`internal/store/task.go` 的 `acceptOnce`），节点上的 Session Worker 执行并回报结果。执行 Agent 通过 `baton delegate` 派生子任务：CLI 经本地 IPC 交给 batond，batond 经 Gateway 把 `AgentRequest` 送到 Coordinator 的 `onAgentRequest`（`internal/control/agent.go`），来源身份由 Gateway 认证和节点账本绑定。节点只主动连接 Gateway，不直接访问 Coordinator，单条控制消息上限 256 KiB。
 
 Project Agent 引入的是一个比 Task 存在更久的协调者。它没有对应的 Task，运行位置每次都可能不同，派出的任务返回结果时它可能不在运行。现有模型里有三处装不下它：`sessions` 表把会话固定在一个 `node_id` 上；子结果交付（`0011_child_deliveries.sql`）以「来源 Worker 仍在」为前提；完整会话历史只存在节点上。
 
@@ -32,16 +32,16 @@ pi-agent-core 只包含 Agent Loop、工具执行和事件流（`packages/agent/
 ```text
 浏览器 ── Coordinator ── PostgreSQL
               │
-            Relay
+            Gateway
               │
            batond ── 本地 IPC ── baton-project-runtime（Node.js，pi-agent-core + pi-ai）
               │
         Session Worker（执行 Agent，现有）
 ```
 
-`baton-project-runtime` 是一个独立的 Node.js 程序，和 Go 二进制分开发布。设备需要安装 Node.js 和这个程序，才能承载 Project Agent；只运行执行 Agent 的设备不需要。batond 负责发现它、上报能力、启动和停止进程、代为续租。Runtime 不直接连 Coordinator，所有请求经本地 IPC 交给 batond，再沿现有 Relay 通道送到 Coordinator，复用 Relay 的节点认证。这样不需要为节点新开一条访问 Coordinator 的数据通道。
+`baton-project-runtime` 是一个独立的 Node.js 程序，和 Go 二进制分开发布。设备需要安装 Node.js 和这个程序，才能承载 Project Agent；只运行执行 Agent 的设备不需要。batond 负责发现它、上报能力、启动和停止进程、代为续租。Runtime 不直接连 Coordinator，所有请求经本地 IPC 交给 batond，再沿现有 Gateway 通道送到 Coordinator，复用 Gateway 的节点认证。这样不需要为节点新开一条访问 Coordinator 的数据通道。
 
-新增 Relay 消息类型 `ProjectRuntimeRequest` / `ProjectRuntimeResult`，处理方式和现有 `AgentRequest` 一致：batond 附上运行身份 `(run_id, lease_epoch)`，Coordinator 校验节点与运行记录一致、租约有效。每个请求和响应不超过 192 KiB，留出信封余量；每条对话事件写入时不超过 160 KiB（第 3 节），所以分页读取每页至少能取到一条。Runtime 经这条通道发出的请求只有下面几种：
+新增 Gateway 消息类型 `ProjectRuntimeRequest` / `ProjectRuntimeResult`，处理方式和现有 `AgentRequest` 一致：batond 附上运行身份 `(run_id, lease_epoch)`，Coordinator 校验节点与运行记录一致、租约有效。每个请求和响应不超过 192 KiB，留出信封余量；每条对话事件写入时不超过 160 KiB（第 3 节），所以分页读取每页至少能取到一条。Runtime 经这条通道发出的请求只有下面几种：
 
 | 请求 | 作用 | 说明 |
 |---|---|---|
@@ -301,7 +301,7 @@ Worker 收到 `shell` 任务时，会再检查一次本地的开关，开关关�
 - Project Agent 的对话保存在 Coordinator；执行 Session 的历史仍在节点（Baton R-28、R-29 的修订）。
 - 任务沿用现有的 `working_directory`，目录必须已经存在；新目录由 `nodes.exec` 创建（Baton R-15、R-31 的修订）。
 - Go 进程仍不嵌入 Agent SDK；`baton-project-runtime` 是独立进程（Baton TECH「技术选择」）。
-- 不需要节点直接访问 Coordinator 的数据通道，也不需要会话文件归档：Project Agent 的消息就是普通的对话事件，经现有 Relay 通道传输。
+- 不需要节点直接访问 Coordinator 的数据通道，也不需要会话文件归档：Project Agent 的消息就是普通的对话事件，经现有 Gateway 通道传输。
 
 ## Testing and validation
 

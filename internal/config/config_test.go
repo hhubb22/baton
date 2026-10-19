@@ -36,10 +36,6 @@ func TestLoadServeRequiresDatabaseAndOrigins(t *testing.T) {
 	}
 	env["BATON_ALLOWED_ORIGINS"] = "https://baton.example"
 	if _, err := Load(getenv, true); err == nil {
-		t.Fatal("缺少控制凭据时仍通过")
-	}
-	env["BATON_CONTROL_TOKEN"] = "control-token-value-0001"
-	if _, err := Load(getenv, true); err == nil {
 		t.Fatal("缺少签名密钥时仍通过")
 	}
 	env["BATON_NODE_SIGNING_KEY"] = "node-signing.key"
@@ -47,10 +43,10 @@ func TestLoadServeRequiresDatabaseAndOrigins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.HTTPAddr != DefaultAddr || cfg.Schema != DefaultSchema || cfg.SessionTTL != DefaultTTL || cfg.EnrollmentTTL != DefaultEnrollmentTTL || cfg.NodeCredentialTTL != DefaultNodeCredentialTTL || cfg.Heartbeat != DefaultHeartbeat || cfg.OfflineAfter != DefaultOfflineAfter || cfg.ControlAddr != DefaultControlAddr {
+	if cfg.HTTPAddr != DefaultAddr || cfg.Schema != DefaultSchema || cfg.SessionTTL != DefaultTTL || cfg.EnrollmentTTL != DefaultEnrollmentTTL || cfg.NodeCredentialTTL != DefaultNodeCredentialTTL || cfg.Heartbeat != DefaultHeartbeat || cfg.OfflineAfter != DefaultOfflineAfter {
 		t.Fatalf("默认配置不正确: %+v", cfg.Redacted())
 	}
-	if strings.Contains(cfg.Redacted(), cfg.DatabaseURL) || strings.Contains(cfg.Redacted(), env["BATON_CONTROL_TOKEN"]) {
+	if strings.Contains(cfg.Redacted(), cfg.DatabaseURL) {
 		t.Fatal("配置摘要包含数据库连接串或控制凭据")
 	}
 }

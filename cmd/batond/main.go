@@ -51,7 +51,7 @@ func usage() string {
 注册凭据从环境变量 BATON_ENROLLMENT_TOKEN 或 --enrollment-file 读取，不能作为命令行参数，也不能放进地址。
 可选环境变量 BATON_TLS_CA_FILE 指向额外的 CA 证书。
 未指定 --data-dir 时使用当前用户的应用数据目录。
-batond run 使用已保存的身份连接 Relay。BATON_HEARTBEAT_INTERVAL 默认 10s，允许 100ms 到 2m。
+batond run 使用已保存的身份连接 Coordinator。BATON_HEARTBEAT_INTERVAL 默认 10s，允许 100ms 到 2m。
 认证失效时退出并说明需要重新认证，不会重新注册。
 batond files 只在本机登记可浏览目录。浏览器提交目录标识和相对路径，不能提交绝对路径。
 `

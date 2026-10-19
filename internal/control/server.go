@@ -1,218 +1,115 @@
-// Package control 实现 Coordinator 与 Relay 之间的认证控制连接。
+// Package control 实现 Coordinator 的节点业务处理与授权。
 package control
 
 import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
-	"crypto/sha256"
-	"crypto/subtle"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"net/http"
 	"sync"
 	"time"
 
+	"baton/internal/gateway"
 	"baton/internal/identity"
 	"baton/internal/node"
 	"baton/internal/protocol"
 	"baton/internal/store"
-
-	"github.com/coder/websocket"
 )
 
-// Server 在独立监听器上接受 Relay。节点凭据不能打开这条连接。
 type Server struct {
-	store     *store.Store
-	signer    node.Signer
-	public    ed25519.PublicKey
-	tokenHash [32]byte
-	heartbeat time.Duration
-	offline   time.Duration
-	log       *slog.Logger
-
-	writeMu        sync.Mutex
+	store          *store.Store
+	signer         node.Signer
+	public         ed25519.PublicKey
+	log            *slog.Logger
+	sender         gateway.Sender
 	mu             sync.Mutex
-	link           *controlLink
 	pending        map[string]chan prepareNotice
 	fileWait       map[string]chan fileNotice
 	sessionWaiters map[string]chan sessionNotice
+	budget         *protocol.Budget
 }
 
-func New(st *store.Store, signer node.Signer, token string, heartbeat, offline time.Duration, log *slog.Logger) (*Server, error) {
+func New(st *store.Store, signer node.Signer, log *slog.Logger, budgets ...*protocol.Budget) (*Server, error) {
+	budget := protocol.NewBudget(protocol.MaxOutputCacheBytes)
+	if len(budgets) > 0 && budgets[0] != nil {
+		budget = budgets[0]
+	}
 	pub, err := signer.PublicKey()
 	if err != nil {
 		return nil, err
 	}
-	if len(token) < 20 || heartbeat <= 0 || offline <= heartbeat {
-		return nil, errors.New("控制连接配置无效")
-	}
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &Server{
-		store:     st,
-		signer:    signer,
-		public:    pub,
-		tokenHash: sha256.Sum256([]byte(token)),
-		heartbeat: heartbeat,
-		offline:   offline,
-		log:       log,
-		pending:   map[string]chan prepareNotice{},
-		fileWait:  map[string]chan fileNotice{},
-	}, nil
+	return &Server{budget: budget, store: st, signer: signer, public: pub, log: log, pending: map[string]chan prepareNotice{}, fileWait: map[string]chan fileNotice{}}, nil
 }
 
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != protocol.ControlPath {
-		http.NotFound(w, r)
-		return
-	}
-	if !s.authorized(r.Header.Get("Authorization")) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte("unauthorized\n"))
-		return
-	}
-	// 控制连接由内部凭据认证，不是浏览器页面，不检查 Origin。
-	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
-	if err != nil {
-		return
-	}
-	ws.SetReadLimit(protocol.MaxMessageBytes)
-	link := s.bind(ws)
-	s.log.Info("event=control_connected")
-	defer func() {
-		s.unbind(link)
-		ws.Close(websocket.StatusNormalClosure, "")
-		s.log.Info("event=control_disconnected")
-	}()
-	if err := s.writeSnapshot(r.Context(), link); err != nil {
-		s.log.Info("event=snapshot_failed")
-		return
-	}
-	s.markReady(link)
-	s.read(r.Context(), link)
-}
+// SetSender 在开放监听前设置一次，业务层不持有传输连接。
+func (s *Server) SetSender(sender gateway.Sender) { s.sender = sender }
 
-func (s *Server) authorized(header string) bool {
-	const prefix = "Bearer "
-	if len(header) <= len(prefix) || header[:len(prefix)] != prefix {
-		return false
-	}
-	sum := sha256.Sum256([]byte(header[len(prefix):]))
-	return subtle.ConstantTimeCompare(sum[:], s.tokenHash[:]) == 1
-}
-
-func (s *Server) writeSnapshot(ctx context.Context, link *controlLink) error {
-	creds, nodes, err := s.store.Revocations(ctx)
+func (s *Server) Authenticate(ctx context.Context, token string) (protocol.Source, error) {
+	claims, err := node.VerifyNodeToken(s.public, token, time.Now())
 	if err != nil {
-		return err
+		return protocol.Source{}, gateway.ErrInvalidCredential
 	}
-	snapID, err := identity.NewUUID()
-	if err != nil {
-		return err
-	}
-	credIDs := make([]string, 0, len(creds))
-	for _, item := range creds {
-		if item.ID != "" {
-			credIDs = append(credIDs, item.ID)
+	src := protocol.Source{Kind: protocol.SourceNode, EmployeeID: claims.EmployeeID, NodeID: claims.NodeID, CredentialID: claims.CredentialID}
+	if err = s.store.CheckNodeConnection(ctx, src, false, false); err != nil {
+		if errors.Is(err, store.ErrSyncRejected) {
+			return protocol.Source{}, gateway.ErrInvalidCredential
 		}
+		return protocol.Source{}, err
 	}
-	s.mu.Lock()
-	link.acks[snapID] = credIDs
-	s.mu.Unlock()
-	snap := protocol.Snapshot{
-		ID:                 snapID,
-		Version:            protocol.Version,
-		IssuedAt:           time.Now().UTC(),
-		PublicKey:          base64.RawURLEncoding.EncodeToString(s.public),
-		Issuer:             node.Issuer,
-		Audience:           node.NodeAudience,
-		HeartbeatMS:        s.heartbeat.Milliseconds(),
-		OfflineMS:          s.offline.Milliseconds(),
-		RevokedCredentials: creds,
-		RevokedNodes:       nodes,
+	return src, nil
+}
+
+func (s *Server) Connected(ctx context.Context, src protocol.Source) error {
+	err := s.store.ConnectNode(ctx, src)
+	if errors.Is(err, store.ErrSyncRejected) {
+		return gateway.ErrInvalidCredential
 	}
-	if err := s.send(ctx, link.ws, protocol.Frame{Kind: protocol.KindSnapshot, Snapshot: &snap}); err != nil {
-		s.dropAck(link, snapID)
+	return err
+}
+func (s *Server) Disconnected(ctx context.Context, src protocol.Source) {
+	if err := s.store.MarkOffline(ctx, src.NodeID, src.ConnID, time.Now()); err != nil {
+		s.log.Info("event=presence_failed", "node_id", src.NodeID)
+	}
+}
+func (s *Server) Heartbeat(ctx context.Context, src protocol.Source) error {
+	return s.store.TouchNode(ctx, src)
+}
+
+func (s *Server) Handle(ctx context.Context, src protocol.Source, env protocol.Envelope) error {
+	var head struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(env.Body, &head) != nil {
+		return protocol.ErrInvalidMessage
+	}
+	if err := s.store.CheckNodeConnection(ctx, src, true, head.Type != "node.sync"); err != nil {
 		return err
 	}
+	env.Source = &src
+	raw, err := json.Marshal(env)
+	if err != nil {
+		return err
+	}
+	s.onEnvelope(ctx, src.ConnID, raw)
 	return nil
 }
 
-func (s *Server) read(ctx context.Context, link *controlLink) {
-	ws := link.ws
-	for {
-		_, raw, err := ws.Read(ctx)
-		if err != nil {
-			return
-		}
-		var frame protocol.Frame
-		if err := json.Unmarshal(raw, &frame); err != nil {
-			continue
-		}
-		switch frame.Kind {
-		case protocol.KindSnapshotOK:
-			s.completeAck(ctx, link, frame.CorrelationID)
-			s.log.Info("event=snapshot_applied")
-			if _, _, err := s.pushPending(ctx); err != nil {
-				s.log.Error("event=revocation_dispatch_failed")
-			}
-		case protocol.KindSessions:
-			if err := s.store.ApplySessions(ctx, frame.Sessions); err != nil {
-				s.log.Error("event=sessions_failed")
-				continue
-			}
-			if frame.Metrics != nil {
-				s.log.Info("event=relay_metrics",
-					"online_nodes", frame.Metrics.OnlineNodes,
-					"connects", frame.Metrics.Connects,
-					"disconnects", frame.Metrics.Disconnects,
-					"forwards", frame.Metrics.Forwards,
-					"rejects", frame.Metrics.Rejects,
-				)
-			}
-		case protocol.KindPresence:
-			if frame.Presence == nil {
-				continue
-			}
-			if frame.Presence.Online {
-				if err := s.store.UpsertPresence(ctx, *frame.Presence); err != nil {
-					s.log.Error("event=presence_failed", "node_id", frame.Presence.NodeID)
-				}
-				continue
-			}
-			if err := s.store.MarkOffline(ctx, frame.Presence.NodeID, frame.Presence.ConnID, time.Now()); err != nil {
-				s.log.Error("event=presence_failed", "node_id", frame.Presence.NodeID)
-			}
-		case protocol.KindEnvelope:
-			s.onEnvelope(ctx, ws, frame.Envelope)
-		case protocol.KindRevokeOK:
-			s.completeAck(ctx, link, frame.CorrelationID)
-			s.log.Info("event=revocation_acked", "revocation_id", frame.CorrelationID)
-		case protocol.KindError:
-			s.notePrepareTransport(frame.CorrelationID, frame.Code)
-			s.noteFileTransport(frame.CorrelationID, frame.Code)
-			s.noteSessionTransport(frame.CorrelationID, frame.Code)
-			s.log.Info("event=relay_error", "code", frame.Code)
-		}
-	}
-}
-
-func (s *Server) onEnvelope(ctx context.Context, ws *websocket.Conn, raw json.RawMessage) {
+func (s *Server) onEnvelope(ctx context.Context, connID string, raw json.RawMessage) {
 	var env protocol.Envelope
 	if err := json.Unmarshal(raw, &env); err != nil || env.Source == nil || env.Source.Kind != protocol.SourceNode {
-		_ = s.writeControlError(ctx, ws, protocol.CodeInvalidMessage, "")
+		_ = s.writeControlError(ctx, connID, protocol.CodeInvalidMessage, "")
 		return
 	}
 	var kind struct {
 		Type string `json:"type"`
 	}
 	if err := json.Unmarshal(env.Body, &kind); err != nil {
-		s.reply(ctx, ws, env, false, protocol.CodeInvalidMessage)
+		s.reply(ctx, connID, env, false, protocol.CodeInvalidMessage)
 		return
 	}
 	switch kind.Type {
@@ -220,27 +117,28 @@ func (s *Server) onEnvelope(ctx context.Context, ws *websocket.Conn, raw json.Ra
 		s.noteSessionResult(env)
 		return
 	case protocol.BodyAgentRequest:
-		s.onAgentRequest(ctx, ws, env)
+		s.onAgentRequest(ctx, connID, env)
 		return
 	case protocol.BodyExecutionControl:
-		s.onExecutionControl(ctx, ws, env)
+		s.onExecutionControl(ctx, connID, env)
+		return
 	case protocol.BodyChildDeliveries, protocol.BodyChildDeliveryAck:
-		s.onChildDelivery(ctx, ws, env)
+		s.onChildDelivery(ctx, connID, env)
 		return
 	case protocol.BodyPrepareResult:
 		s.notePrepareResult(env)
 		return
 	case protocol.BodyStartPermit:
-		s.onStartPermit(ctx, ws, env)
+		s.onStartPermit(ctx, connID, env)
 		return
 	case protocol.BodyStartReport:
-		s.onStartReport(ctx, ws, env)
+		s.onStartReport(ctx, connID, env)
 		return
 	case protocol.BodyExecutionInput:
-		s.onExecutionInput(ctx, ws, env)
+		s.onExecutionInput(ctx, connID, env)
 		return
 	case protocol.BodyExecutionReport:
-		s.onExecutionReport(ctx, ws, env)
+		s.onExecutionReport(ctx, connID, env)
 		return
 	}
 	if kind.Type == protocol.BodyFileResult {
@@ -248,7 +146,7 @@ func (s *Server) onEnvelope(ctx context.Context, ws *websocket.Conn, raw json.Ra
 		return
 	}
 	if kind.Type != "node.sync" {
-		s.reply(ctx, ws, env, false, protocol.CodeInvalidMessage)
+		s.reply(ctx, connID, env, false, protocol.CodeInvalidMessage)
 		return
 	}
 	var body struct {
@@ -261,21 +159,21 @@ func (s *Server) onEnvelope(ctx context.Context, ws *websocket.Conn, raw json.Ra
 	dec := json.NewDecoder(bytes.NewReader(rawBody(env.Body)))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&body); err != nil || body.Type != "node.sync" {
-		s.reply(ctx, ws, env, false, protocol.CodeInvalidMessage)
+		s.reply(ctx, connID, env, false, protocol.CodeInvalidMessage)
 		return
 	}
 	err := s.store.SyncNode(ctx, env.Source.EmployeeID, env.Source.NodeID, env.Source.ConnID, body.DisplayName, body.System, body.Role, body.Capabilities)
 	if err != nil {
 		code := protocol.CodeSyncRejected
 		s.log.Info("event=sync_rejected", "node_id", env.Source.NodeID, "code", code)
-		s.reply(ctx, ws, env, false, code)
+		s.reply(ctx, connID, env, false, code)
 		return
 	}
 	s.log.Info("event=synced", "node_id", env.Source.NodeID, "employee_id", env.Source.EmployeeID)
-	s.reply(ctx, ws, env, true, "")
+	s.reply(ctx, connID, env, true, "")
 }
 
-func (s *Server) reply(ctx context.Context, ws *websocket.Conn, req protocol.Envelope, ok bool, code string) {
+func (s *Server) reply(ctx context.Context, connID string, req protocol.Envelope, ok bool, code string) {
 	messageID, err := identity.NewUUID()
 	if err != nil {
 		return
@@ -299,28 +197,16 @@ func (s *Server) reply(ctx context.Context, ws *websocket.Conn, req protocol.Env
 	if err != nil {
 		return
 	}
-	_ = s.send(ctx, ws, protocol.Frame{Kind: protocol.KindEnvelope, Envelope: env})
+	_ = s.send(ctx, connID, protocol.Frame{Kind: protocol.KindEnvelope, Envelope: env})
 }
 
-func (s *Server) writeControlError(ctx context.Context, ws *websocket.Conn, code, correlation string) error {
-	return s.send(ctx, ws, protocol.Frame{
+func (s *Server) writeControlError(ctx context.Context, connID string, code, correlation string) error {
+	return s.send(ctx, connID, protocol.Frame{
 		Kind:          protocol.KindError,
 		Code:          code,
 		Message:       protocol.MessageOf(code),
 		CorrelationID: correlation,
 	})
-}
-
-func writeFrame(ctx context.Context, ws *websocket.Conn, frame protocol.Frame) error {
-	raw, err := json.Marshal(frame)
-	if err != nil || len(raw) > protocol.MaxMessageBytes {
-		return protocol.ErrTooLarge
-	}
-	timer := time.AfterFunc(10*time.Second, func() {
-		ws.Close(websocket.StatusGoingAway, "")
-	})
-	defer timer.Stop()
-	return ws.Write(ctx, websocket.MessageText, raw)
 }
 
 func rawBody(body json.RawMessage) []byte {
