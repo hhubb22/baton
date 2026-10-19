@@ -269,6 +269,9 @@ func runRecordedCodexWorker(t *testing.T, binary, path, variant string) {
 	if hasDelivery {
 		gates = append(gates, "response:thread/items/list:3")
 	}
+	if scenario == "restore_missing" {
+		gates = nil
+	}
 	r := replaytest.Prepare(t, binary, tape, gates...)
 	w.replay = r
 	t.Setenv("BATON_CODEX_BINARY", r.Binary)
@@ -305,8 +308,21 @@ func runRecordedCodexWorker(t *testing.T, binary, path, variant string) {
 		}
 		db.Close()
 		w.launch(t)
-		w.report(t, protocol.ReportNeedsVerification, func(r protocol.ExecutionReport) bool { return r.Status == task.StatusNeedsVerification })
-		r.Wait(t, ends[0])
+		w.report(t, protocol.ReportNeedsVerification, func(r protocol.ExecutionReport) bool {
+			return r.Status == task.StatusNeedsVerification && r.ErrorCode == task.CodeUncertainHistory
+		})
+		// Worker 在恢复错误后立即关闭 Agent，以最后一个请求的持久捕获证明转录已被消费。
+		raw, err = os.ReadFile(filepath.Join(r.State, "state.json"))
+		var replayState struct{ Captures map[string]any }
+		request := replaytest.Frame(t, tape, "request:thread/read")["id"].(string)
+		if err != nil || json.Unmarshal(raw, &replayState) != nil || replayState.Captures[request] == nil {
+			t.Fatal("恢复没有读取录制历史", string(raw), err)
+		}
+		saved, err := privatefile.ReadFile(c.StatePath)
+		var after codex.State
+		if err != nil || json.Unmarshal(saved, &after) != nil || after.ThreadID != s.ThreadID {
+			t.Fatal("缺失历史替换了会话映射", err)
+		}
 		return
 	}
 	w.launch(t)
