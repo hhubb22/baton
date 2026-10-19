@@ -164,7 +164,7 @@ def run_group(name, command, out, count, expected=None, strict=False, ports=None
     result = {'group': name, 'exit_code': code, 'seconds': round(time.monotonic() - started, 2),
               'failures': failures, 'outcomes': outcomes}
     (directory / 'result.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
-    print(json.dumps({k: v for k, v in result.items() if k != 'outcomes'}, ensure_ascii=False), flush=True)
+    print(json.dumps({k: v for k, v in result.items() if k != 'outcomes'}, ensure_ascii=True), flush=True)
     return result
 
 

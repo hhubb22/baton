@@ -54,7 +54,9 @@ class ContractTests(unittest.TestCase):
         event = json.dumps({'Action': 'skip', 'Test': 'TestTarget'})
         with tempfile.TemporaryDirectory() as directory:
             command = [sys.executable, '-c', f'print({event!r})']
-            result = run_group('diagnostic', command, Path(directory), 1, ['TestTarget'], True)
+            console = io.TextIOWrapper(io.BytesIO(), encoding='ascii')
+            with patch('sys.stdout', console):
+                result = run_group('diagnostic', command, Path(directory), 1, ['TestTarget'], True)
         self.assertNotEqual(result['exit_code'], 0)
 
     def test_port_ranges(self):
