@@ -10,7 +10,9 @@ Coordinator 内置 Gateway 的实现与验收由 [PS-171](https://linear.app/kak
 
 ## 已实现基线
 
-当前已实现补充（PS-173 / AR-02）：`agent-replay record` 读取旁置配置和场景元数据，在仓库外系统临时目录记录原始字节、单调时间及原生历史追加；Unix 转发 SIGTERM、SIGINT，Windows 保留退出码。`normalize` 按协议替换路径、Baton 标识和构造文本，筛选首个原生会话并统计删除条目，扫描残留后原子写出统一转录。合成原始录制经工具驱动真实 `codex.Adapter` 完成 simple；真实测试接入录制由 PS-174 实施。无新增 Go 依赖，使用方式及过滤规则见 [工具说明](../../tools/agent-replay/README.md)。
+当前已实现补充（PS-174 / AR-03）：Pi/Codex 真实测试按 Agent 回放设计 §8 拆成独立会话子测试，保留能力矩阵和原有断言。`BATON_RECORD_DIR` 启用按 Agent、场景隔离的录制，Pi 沙箱位于录制器内层；旁置配置中的 `raw_temp_dir` 记录调用测试的系统临时根目录，兼容 Pi 隔离的 TMPDIR。Pi 的活动回合交付、Codex 的自由文本结果录制按现有适配器约束跳过，依据见各自 `testdata/replay/README.md`。默认跳过真实模型调用，首次真实录制与清理验证由 PS-175 完成。本机凭据准备、录制、规范化与删除流程见 [README](../../README.md#本机录制与规范化)，无新增依赖。
+
+当前已实现补充（PS-173 / AR-02）：`agent-replay record` 读取旁置配置和场景元数据，在仓库外系统临时目录记录原始字节、单调时间及原生历史追加；Unix 转发 SIGTERM、SIGINT，Windows 保留退出码。`normalize` 按协议替换路径、Baton 标识和构造文本，筛选首个原生会话并统计删除条目，扫描残留后原子写出统一转录。合成原始录制经工具驱动真实 `codex.Adapter` 完成 simple；真实测试接入见上方 PS-174 记录。无新增 Go 依赖，使用方式及过滤规则见 [工具说明](../../tools/agent-replay/README.md)。
 
 当前已实现补充（PS-172 / AR-01）：`internal/agent/replay` 与测试工具 `tools/agent-replay` 提供统一 NDJSON 转录读写、严格结构化比较、绑定与跨进程捕获、原生历史追加、文件门控及 CutAfter / Drop / Replace 派生变体。工具读取可执行文件旁的配置，以持久计数选择进程，失配保存 failure.json 并非零退出。Codex 新增从现有手写样本转写的 simple 转录，通过真实适配器验证启动、一次输入和完成后的结构化结果；来源明确写入转录头部。现有手写假 Agent 与测试保留。格式与后续工作见 [Agent 回放设计](../agent-replay/TECH.md)，当前工具行为见 [使用说明](../../tools/agent-replay/README.md)。其他场景与 Worker 测试迁移由后续工单实施。
 
@@ -24,7 +26,7 @@ PS-155 提供 Project、主对话事件读取和项目记忆 API。迁移 `0016_
 
 Codex CLI **0.162.1** 使用 stdio app-server，实现 initialize/initialized、thread/start/read/resume、turn/start/steer/interrupt、turn/completed 及 thread/turns/list、thread/items/list 分页；版本不匹配、实验方法不兼容、原生身份/cwd/Session 映射不符、历史缺失或输入发送窗口不明均拒绝自动重放，不创建替代 thread。clientUserMessageId 仅作关联，steer ACK 不证明历史落盘；原生 userMessage 或成功查询工具输出中的精确 delivery_id 才确认注入。Agent 经受限 BATON_CONTEXT_FILE 使用既有委托 CLI，完整原始历史不上传中心；本地已认证 IPC 提供分页历史；浏览器的临时历史 API 见下文 PS-127。只注入 Agent 必要环境，使用禁止审批的 workspace-write sandbox（为本地委托开启网络），拒绝服务端审批、认证刷新和交互工具请求。
 
-验证分工：CLI 官方固定 Schema、人工协议回放、真实 stdio 子进程与 Worker 账本回归不证明真实模型任务通过。用户已在 macOS、Codex 0.162.1 / gpt-6-luna 上报告启动、输入、结构化结果、turn 完成、中止、恢复、历史支持；委托链路成功，但子任务违反“不要再委托”导致原断言失败，委托整项仍未通过。TestRealCodex 的显式环境变量、隔离目录及全部断言不变，本轮只适配包路径和类型。云端不登录模型账号，不把此次接口重构回放视为重做真实模型验收；其他模型/平台不外推，确切实测命令见 README。无新增中心迁移。
+验证分工：CLI 官方固定 Schema、人工协议回放、真实 stdio 子进程与 Worker 账本回归不证明真实模型任务通过。用户已在 macOS、Codex 0.162.1 / gpt-6-luna 上报告启动、输入、结构化结果、turn 完成、中止、恢复、历史支持；委托链路成功，但子任务违反“不要再委托”导致原断言失败，委托整项仍未通过。TestRealCodex 的显式开关、隔离目录及能力断言继续保留，场景拆分与录制接入见上方 PS-174 记录。云端不登录模型账号，不把此次接口重构回放视为重做真实模型验收；其他模型/平台不外推，确切实测命令见 README。无新增中心迁移。
 
 **2026-10-18 修订（已批准）**：加入 Project Agent，节点不再区分 PC 与 Ubuntu 角色。改动的段落标注「2026-10-18 修订」，其余内容维持已批准版本。Project Agent 的完整设计见 [Project Agent 技术设计](../project-agent/TECH.md)，本文只记录它对现有进程、数据和接口的影响。
 

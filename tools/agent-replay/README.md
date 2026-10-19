@@ -44,6 +44,7 @@ Windows 构建时使用 `agent-replay.exe`。测试将可执行文件复制到�
 {
   "agent_binary": "real-agent",
   "raw_dir": "raw",
+  "raw_temp_dir": "/recording/system-temp",
   "scenario_file": "scenario.json",
   "bindings": {
     "<workspace>": "/recording/workspace",
@@ -55,7 +56,7 @@ Windows 构建时使用 `agent-replay.exe`。测试将可执行文件复制到�
 }
 ```
 
-`agent_binary` 指向真实 Agent 或其沙箱包装程序。相对路径以录制器的目录为基准，绑定值由调用测试写入实际路径。原始录制目录必须在系统临时目录的子目录内，且位于 Git 仓库外；临时根目录取 `os.TempDir()`。目录名和场景名应由调用测试隔离，已有场景文件会继续追加进程。
+`agent_binary` 指向真实 Agent 或其沙箱包装程序。相对路径以录制器的目录为基准，绑定值由调用测试写入实际路径。原始录制目录必须在系统临时目录的子目录内，且位于 Git 仓库外；临时根目录默认取录制器进程的 `os.TempDir()`；调用方重设 Agent 的 `TMPDIR` 时，在可选的 `raw_temp_dir` 中传入调用测试的系统临时根目录绝对路径。此字段只用于原始目录检查，不修改真实 Agent 的环境。目录名和场景名应由调用测试隔离，已有场景文件会继续追加进程。
 
 `scenario_file` 是包含转录元数据的单个 JSON 对象，例如：
 
@@ -93,4 +94,4 @@ Pi 依据 `--session-id`，或 `--session` 对应的历史头部/已知会话文
 
 最终扫描整个转录的键和字符串值，包括嵌套 JSON 文本，检查常见密钥格式、用户目录路径、录制机器的主机名和用户名。发现残留时只列出行号、JSON 字段位置和残留类别，拒绝写出。扫描通过也需要人工检查转录中模型或工具输出的内容。
 
-当前端到端测试使用合成的原始录制，经规范化生成 NDJSON，再通过 `serve` 驱动真实 `codex.Adapter` 完成 `simple`。真实测试接入录制由 PS-174 实施。
+当前端到端测试使用合成的原始录制，经规范化生成 NDJSON，再通过 `serve` 驱动真实 `codex.Adapter` 完成 `simple`。Pi/Codex 真实测试已接入场景录制，凭据准备、运行、规范化与删除命令见 [主 README](../../README.md#本机录制与规范化)。首批真实转录由 PS-175 在用户本机生成。

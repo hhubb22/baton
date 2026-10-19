@@ -45,15 +45,15 @@ Session 映射 thread，执行输入映射 turn；活动子结果输入用 turn/
 
 ### Codex 验证边界与真实任务入口
 
-CI 默认运行固定 Schema、独立 app-server 回放、Pi/Codex 共用 Worker 回归和 race。[Agent 转录回放工具](tools/agent-replay/README.md) 已提供 NDJSON 读写、严格出站比较、跨进程占位符、历史写入、门控和派生变体；Codex 的 [simple 转录](internal/agent/codex/testdata/replay/README.md) 来自现有手写样本转写，新增真实适配器完成流程测试，现有假 Agent 与测试保留。录制器已支持字节透传、历史追加采集和退出/信号记录，规范化工具支持路径与 ID 替换、会话筛选和残留拒绝；合成录制已通过真实 Codex 适配器的 simple 回放，真实测试接入录制由 PS-174 实施。固定版本无模型握手可显式运行：
+CI 默认运行固定 Schema、独立 app-server 回放、Pi/Codex 共用 Worker 回归和 race。[Agent 转录回放工具](tools/agent-replay/README.md) 已提供 NDJSON 读写、严格出站比较、跨进程占位符、历史写入、门控和派生变体；Codex 的 [simple 转录](internal/agent/codex/testdata/replay/README.md) 来自现有手写样本转写，新增真实适配器完成流程测试，现有假 Agent 与测试保留。录制器已支持字节透传、历史追加采集和退出/信号记录，规范化工具支持路径与 ID 替换、会话筛选和残留拒绝；合成录制已通过真实 Codex 适配器的 simple 回放，真实测试已按场景拆分，设置 `BATON_RECORD_DIR` 可录制每个场景；首批真实转录由 PS-175 在本机生成。固定版本无模型握手可显式运行：
 
 ```sh
 BATON_CODEX_PROBE=1 go test -v ./internal/agent/codex -run TestCodexInitializeWithoutModel
 ```
 
-用户已在 macOS、Codex 0.162.1 / gpt-6-luna 上报告：启动、输入、结构化结果、turn 完成、中止、恢复、历史支持；委托链路成功，但子任务违反“不要再委托”而使原断言失败，不能将委托整项标为通过。本轮仅适配包路径与类型，保留真实测试入口和全部断言；云端不登录、不重跑真实模型，不将回放或交叉编译外推到其他模型/平台。
+用户已在 macOS、Codex 0.162.1 / gpt-6-luna 上报告：启动、输入、结构化结果、turn 完成、中止、恢复、历史支持；委托链路成功，但子任务违反“不要再委托”而使原断言失败，不能将委托整项标为通过。真实测试保留这些能力断言，并将场景分成独立会话；新的真实模型结论以 PS-175 的本机录制为准。
 
-真实入口默认跳过，只使用临时工作目录和独立、显式认证的临时 CODEX_HOME，不复制常用 ~/.codex 认证，不打印凭据。委托使用 BATON_TEST_DATABASE_URL 的临时 schema（PostgreSQL 17，禁止生产库），输出版本、平台、模型及逐项“支持/不支持/未验证”。以下命令仅在本机执行：
+真实入口默认跳过，只使用临时工作目录和独立、显式认证的临时 CODEX_HOME，不复制常用 ~/.codex 认证，不打印凭据。委托使用 BATON_TEST_DATABASE_URL 的临时 schema（PostgreSQL 17，禁止生产库），输出版本、平台、模型及逐项“支持/不支持/未验证”。真实测试和录制一律只用账号当前可用的最便宜模型；示例模型 ID 需按当前价格与可用性选择。这些命令在本机执行：
 
 ```sh
 npm install -g @openai/codex@0.162.1
@@ -62,8 +62,9 @@ bash .cursor/start.sh
 export BATON_REAL_CODEX_HOME="$(mktemp -d "${TMPDIR:-/tmp}/baton-codex-real.XXXXXX")"
 CODEX_HOME="$BATON_REAL_CODEX_HOME" codex login
 BATON_REAL_CODEX=1 BATON_CODEX_MODEL='gpt-6-luna' \
-  go test -v -count=1 ./... -run RealCodex -timeout 15m
-# 检查输出后删除临时 CODEX_HOME（含本次认证），不要归档或上传它。
+  go test -v -count=1 ./internal/gateway -run '^TestRealCodex$' -timeout 60m
+# 检查输出后删除临时 CODEX_HOME（含本次认证）。
+rm -rf -- "$BATON_REAL_CODEX_HOME"
 ```
 
 无新增中心迁移；依赖 sourcegraph/jsonrpc2 v0.2.1，固定 Schema 测试使用 santhosh-tekuri/jsonschema/v5 v5.3.1。
@@ -191,12 +192,75 @@ BATON_PI_PROBE=1 go test -v -count=1 ./internal/agent/pi -run '^TestPiNoModelPro
 真实入口默认跳过、CI 不启用。**在 macOS 开发机**准备 Go、PostgreSQL 17 测试库、上述 Pi/Node 版本，设置 `BATON_TEST_DATABASE_URL`、`BATON_PI_MODEL`（默认 `openai/gpt-6.1-sol`）与所选 provider 的 API key 环境变量（例如 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY` 或 Vertex 的 `GOOGLE_CLOUD_API_KEY`）。`GOOGLE_CLOUD_API_KEY` 会保留在隔离进程环境中，Vertex 可选择 `BATON_PI_MODEL=google-vertex/gemini-3.1-flash-lite`。不要把 key 值写进命令、文件或输出；入口不会读取已登录用户的 auth.json、HOME 或真实工作区，因此只有 OAuth 登录、没有独立环境凭据时需先准备所选入口的环境凭据。已有测试库需允许创建临时 schema，禁止指向业务库。运行：
 
 ```sh
-BATON_REAL_PI=1 go test -v -count=1 -timeout=30m ./... -run '^TestRealPi$'
+BATON_REAL_PI=1 go test -v -count=1 -timeout=60m ./internal/gateway -run '^TestRealPi$'
 ```
+
+两个真实入口支持 `-run '^TestRealPi$/^simple$'` 或 `-run '^TestRealCodex$/^deliver_active$'` 单独运行场景。每个子测试使用独立的工作目录和会话，能力矩阵在全部子测试清理后输出。Pi 的 `deliver_active`、Codex 的 `result_free_text` 会明确跳过，原因见各自的 [Pi 场景说明](internal/agent/pi/testdata/replay/README.md) 和 [Codex 场景说明](internal/agent/codex/testdata/replay/README.md)。Pi 还保留 `startup`、`restore_recall`，Codex 保留 `delegation`，用于覆盖原有探针、上下文回忆及完整 CLI 委托断言。
+
+### 本机录制与规范化
+
+PS-175 在有模型凭据的 macOS 上执行。在仓库根目录打开 Bash，准备固定版本 Pi 1.3.0、Codex 0.162.1、Node.js 和测试数据库。所有真实调用只用最便宜模型；下面 Pi 的 Vertex 与 Codex 模型仅为示例，运行前按账号当前可用模型的价格选择。`provider_error` 故意使用不存在的模型名，不会升级到其他模型。
+
+```sh
+bash
+source ~/.baton-env.sh
+bash .cursor/start.sh
+: "${BATON_TEST_DATABASE_URL:?需要允许创建临时 schema 的测试库}"
+npm install -g @earendil-works/pi-coding-agent@1.3.0 @openai/codex@0.162.1
+
+# 从凭据管理器取得所选 provider 的 key，用静默输入避免写进命令历史。
+read -r -s -p 'Google Cloud API key: ' GOOGLE_CLOUD_API_KEY
+printf '\n'
+export GOOGLE_CLOUD_API_KEY
+export BATON_PI_MODEL='google-vertex/gemini-3.1-flash-lite'
+# 其他 provider 使用对应环境变量；Pi 不读取常用 HOME 的登录文件。
+
+# Codex 在一次性的 HOME 中独立认证，保留常用登录目录。
+export BATON_REAL_CODEX_HOME="$(mktemp -d "${TMPDIR:-/tmp}/baton-codex-real.XXXXXX")"
+CODEX_HOME="$BATON_REAL_CODEX_HOME" codex login
+export BATON_CODEX_MODEL='gpt-6-luna'
+
+# 系统临时目录中的新目录，位于仓库外；每次运行使用新目录。
+export BATON_RECORD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/baton-agent-record.XXXXXX")"
+go build -o "$BATON_RECORD_DIR/agent-replay" ./tools/agent-replay
+BATON_REAL_PI=1 go test -v -count=1 -timeout=60m ./internal/gateway -run '^TestRealPi$'
+BATON_REAL_CODEX=1 go test -v -count=1 -timeout=60m ./internal/gateway -run '^TestRealCodex$'
+```
+
+录制器使用旁置的 `.record.json` 和场景 JSON 文件；原始文件分别写入 `$BATON_RECORD_DIR/pi/<scenario>.raw.ndjson` 和 `$BATON_RECORD_DIR/codex/<scenario>.raw.ndjson`。恢复进程继续追加同一场景文件。Pi 的进程层次为 Worker → 录制器 → `pi-isolated` → `sandbox-exec` → Pi，沙箱策略、真实 Agent 的参数和环境保持原有配置。录制配置保存调用测试的系统临时根目录，因此 Pi 隔离 HOME 的 `TMPDIR` 不会改变原始目录检查范围。未设置 `BATON_RECORD_DIR` 时直接使用原 Agent 路径。
+
+先检查每个子测试结果及能力矩阵；失败场景的录制只留在本机排查。确认需要保存的场景通过后，在同一个 Bash 中规范化：
+
+```sh
+# CLI 成功规范化后会自动删除对应 .raw.ndjson；失败时保留输入供本机检查。
+for agent in pi codex; do
+  mkdir -p "internal/agent/$agent/testdata/replay"
+  for raw in "$BATON_RECORD_DIR/$agent/"*.raw.ndjson; do
+    [ -f "$raw" ] || continue
+    scenario="$(basename "$raw" .raw.ndjson)"
+    "$BATON_RECORD_DIR/agent-replay" normalize \
+      --input "$raw" \
+      --output "internal/agent/$agent/testdata/replay/$scenario.ndjson" || break
+  done
+done
+
+git diff -- internal/agent/pi/testdata/replay internal/agent/codex/testdata/replay
+git status --short internal/agent/pi/testdata/replay internal/agent/codex/testdata/replay
+# 用本地编辑器逐个检查新增和修改的 NDJSON：模型/工具输出、路径占位符、
+# delivery_id、恢复帧和 dropped_frames，确认无凭据、机器名或个人信息。
+# 同版本再录一次 simple，比较规范化结果；第二轮使用新的 BATON_RECORD_DIR。
+
+# 检查完毕后删除全部原始录制、锁文件、录制工具和本次认证。
+# 删除前先确认这些变量仍指向刚创建的临时目录。
+rm -rf -- "$BATON_RECORD_DIR" "$BATON_REAL_CODEX_HOME"
+unset BATON_RECORD_DIR BATON_REAL_CODEX_HOME GOOGLE_CLOUD_API_KEY
+```
+
+规范化残留扫描失败时先修正路径绑定或检查敏感输出，再重录或重试；只提交人工检查通过的 NDJSON。规范化会保留首个原生会话，委托子会话被删除并计入 `dropped_frames`。`restore_missing` 的 Pi 拒绝发生在本地历史预检，转录包含本场景的建会话过程，回放测试需同时构造缺失历史目录；Codex 使用指向不存在 thread 的映射，录下 `thread/read` 失败，不新建 thread。`interrupt_before_turn_started` 在提交返回后立即中止，具体原生事件先后顺序以录制为准。首次录制还需确认关闭 Worker/录制器后 Pi、Codex 与工具子进程均已退出；录制器被 SIGKILL 后的子进程清理仍是设计中的待验证项。
 
 若需要在本机检查失败时的原生历史，可在同一命令前增加 `BATON_REAL_PI_KEEP=1`。入口会提前打印独立隔离目录的绝对路径，结束后不自动删除其中的 `isolated`（HOME、工作区、探针）与 `stack/node/sessions`（Worker 原生历史）；两者为兄弟目录，沙箱仍只允许 Pi 读取指定的会话目录，而非 `stack` 中的节点密钥。默认不设置时两处目录照常由 `go test` 清理。保留目录还包含测试用密钥、节点身份、上下文令牌和会话原文：**仅在自己的开发机检查，不上传/粘贴原始文件或目录清单；排查完成后自行删除整个隔离目录。** 临时测试数据库 schema 仍按原有清理流程处理，不在保留目录内。
 
-此入口在临时目录构建 Baton 二进制，创建独立 HOME/Pi 配置/工作区、测试 schema 与真实 Coordinator/batond/Worker，透传允许的 provider 环境变量，不复制或打印凭据。macOS `sandbox-exec` 在 `deny default` 后导入系统 `bsd.sb` 提供进程启动权限，再收紧文件读写，只额外允许系统/运行时只读路径与测试 IPC。先验证目录内可写可读，再检查目录外测试哨兵不可读写、符号链接不能越界；沙箱启动崩溃不能冒充隔离成功。失败输出退出码、错误（含信号）和 stderr，不退回无沙箱模式；Go 的退出码 `-1` 表示没有普通退出码，例如进程被信号终止。使用模型验证一次输入/结构化结果、CLI 委托与子结果原生历史确认、执行中中止、batond 重连，以及原生 Session 加载后新回合的上下文回忆与夹具未重放；另检查缺失历史拒绝。输出工具版本、平台、请求/实际模型及各能力“支持/不支持/未验证”；任务失败/待核实时先脱敏，再只输出中心记录的 `status`、`error_code`、`error_message`、`summary` 和 `evidence_empty_reason`，不打印原生历史。若中心为 `result_format`，本次模型的结构化结果标为“不支持”（可换更强模型复验），不能推断其他模型均不支持。任务提示给出完整有效 JSON 示例，但真实模型是否遵循仍待实测。默认退出清理临时目录与测试进程；模型不遵循协议或环境问题会使其他对应能力保留未验证，不能据此宣称跨平台支持。
+此入口在临时目录构建 Baton 二进制，创建独立 HOME/Pi 配置/工作区、测试 schema 与真实 Coordinator/batond/Worker，透传允许的 provider 环境变量，不复制或打印凭据。macOS `sandbox-exec` 在 `deny default` 后导入系统 `bsd.sb` 提供进程启动权限，再收紧文件读写，只额外允许系统/运行时只读路径与测试 IPC。先验证目录内可写可读，再检查目录外测试哨兵不可读写、符号链接不能越界；沙箱启动崩溃不能冒充隔离成功。失败输出退出码、错误（含信号）和 stderr，不退回无沙箱模式；Go 的退出码 `-1` 表示没有普通退出码，例如进程被信号终止。使用模型验证一次输入/结构化结果、CLI 委托与子结果原生历史确认、执行中中止、batond 重连，以及原生 Session 加载后新回合的上下文回忆与夹具未重放；另检查缺失历史拒绝。输出工具版本、平台、请求/实际模型及各能力“支持/不支持/未验证”；任务失败/待核实时先脱敏，再只输出中心记录的 `status`、`error_code`、`error_message`、`summary` 和 `evidence_empty_reason`，不打印原生历史。若中心为 `result_format`，本次模型的结构化结果标为“不支持”（检查所选廉价模型的输出），不能推断其他模型均不支持。任务提示给出完整有效 JSON 示例，但真实模型是否遵循仍待实测。默认退出清理临时目录与测试进程；模型不遵循协议或环境问题会使其他对应能力保留未验证，不能据此宣称跨平台支持。
 
 Pi 初始化探针及历史恢复失败时，入口输出 `Start` 错误与阶段（`version` / `rpc`、具体握手步骤）、子进程退出码和错误/信号、stderr 最后 20 行（至多保留 8 KiB 原始尾部，截断时丢弃首段不完整行）。诊断仅通过 `pi.WithDiagnostics()` 显式启用，保存在内存、不写原始日志文件；输出前屏蔽实际敏感环境值、常见凭据字段/Bearer/JWT 和疑似 key 的长串，不输出 stdout、RPC 状态或原生历史。`sandbox-exec` 或 Pi 写到 stderr 的拒绝原因也保留；`exit_code=unavailable` 表示没有取得进程退出状态，`-1` 需结合信号错误判断，`cleanup_kill_requested=true` 表示 Baton 曾请求强制清理。生产默认继续丢弃 stderr。
 
