@@ -71,6 +71,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, getenv fu
 		return cmdFiles(args[1:], stdout, getenv)
 	case "project-exec":
 		return cmdProjectExec(args[1:], stdout, getenv)
+	case "sidecar-file":
+		return cmdSidecarFile(args[1:], stdout)
 	case "worker":
 		return cmdWorker(ctx, args[1:])
 	default:

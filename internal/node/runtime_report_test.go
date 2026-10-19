@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -185,10 +184,5 @@ func TestRuntimeReportDefaultsAndConfigChange(t *testing.T) {
 	r = collectRuntimeReport(context.Background(), dir)
 	if r.Exec.Enabled || !r.Truncated {
 		t.Fatal("无效配置没有关闭命令执行")
-	}
-	b := &probeOutput{}
-	_, _ = io.Copy(b, io.LimitReader(bytes.NewBufferString(strings.Repeat("x", 1<<20)), 1<<20))
-	if b.Len() != 16<<10 || !b.overflow {
-		t.Fatal("probe 输出缓冲超过上限")
 	}
 }

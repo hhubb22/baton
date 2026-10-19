@@ -39,7 +39,7 @@ pi-agent-core 只包含 Agent Loop、工具执行和事件流（`packages/agent/
         Session Worker（执行 Agent，现有）
 ```
 
-`baton-project-runtime` 是一个独立的 Node.js 程序，和 Go 二进制分开发布。设备需要安装 Node.js 和这个程序，才能承载 Project Agent；只运行执行 Agent 的设备不需要。batond 负责发现它、上报能力、启动和停止进程、代为续租。Runtime 不直接连 Coordinator，所有请求经本地 IPC 交给 batond，再沿现有 Gateway 通道送到 Coordinator，复用 Gateway 的节点认证。这样不需要为节点新开一条访问 Coordinator 的数据通道。
+`baton-project-runtime` 是一个独立的 Node.js 程序，采用固定版本 Node bundle，随 batond 的安装包分发。设备需要安装 Node.js 22.19.0 或更高版本，才能承载 Project Agent；只运行执行 Agent 的设备不需要 Node.js。batond 负责发现它、上报能力、启动和停止进程、代为续租。Runtime 不直接连 Coordinator，所有请求经本地 IPC 交给 batond，再沿现有 Gateway 通道送到 Coordinator，复用 Gateway 的节点认证。这样不需要为节点新开一条访问 Coordinator 的数据通道。
 
 新增 Gateway 消息类型 `ProjectRuntimeRequest` / `ProjectRuntimeResult`，处理方式和现有 `AgentRequest` 一致：batond 附上运行身份 `(run_id, lease_epoch)`，Coordinator 校验节点与运行记录一致、租约有效。每个请求和响应不超过 192 KiB，留出信封余量；每条对话事件写入时不超过 160 KiB（第 3 节），所以分页读取每页至少能取到一条。Runtime 经这条通道发出的请求只有下面几种：
 
@@ -64,6 +64,16 @@ batond 启动命令为 `baton-project-runtime run`，工作目录是私有空目
 
 控制帧 JSON 采用 UTF-8 编码，容量不包含 HTML 页面转义。每批同时检查数据库规范文本、消息拼接后的传输字节及事件上限，因此含引号、反斜线等字符时可能提前结束一批。任务结果文本按 UTF-8 边界保留首尾，并注明原字节数；元数据与 JSON 编码后的条目仍限制为 40 KiB。长 Project 目标的通知在 4 KiB 内保留首尾并标明截断，完整目标由 Project API 返回。
 
+
+#### 2.1 Node sidecar 分发与 stdio
+
+PS-158 的发布方式是带生产依赖与锁文件的 Node bundle，位置为 batond 同目录的 `sidecars/project-agent/`。通用打包工具、manifest 校验、stdio 容量、进程树回收和崩溃后重新启动的职责见 [Node sidecar 约定](../../runtimes/README.md)。`node tools/package-batond.mjs` 构建可分发目录；登录命令见 [Runtime 安装说明](../../runtimes/project-agent/README.md)。
+
+batond 优先使用 bundle，通过 Node 直接运行 manifest 中的入口，要求 Runtime 版本 `0.1.0`、stdio 协议版本 1。没有 bundle 时仍可通过 PATH 发现 `baton-project-runtime`。启动前 `probe` 的版本须匹配。bundle 存在但版本不兼容时拒绝启动。
+
+batond 设置 `BATON_SIDECAR_TRANSPORT=stdio` 后，Runtime 在 stdout 发送 `{id, request}`，在 stdin 接收 `{id, result}`，每个对象占一行 UTF-8 JSON，单帧最多 192 KiB，最多 8 个请求在途。运行身份由专用管道绑定，batond 继续覆盖请求身份。带 token 的本地 IPC 继续兼容。`poll_wake` 可在 payload 中指定 `wait_ms`（1～25000），使 180 秒闲置和 15 分钟上限在最后一次等待时准确结束。
+
+`call_tool` 的请求字段为 `tool_call_id`、`tool_name`、`arguments` 和 `last_seq`，成功返回保存的 `tool_result` Event。Runtime 的固定工具定义与 PS-157 的字段一致；`nodes.exec` 和 `inbox.*` 在后续工单启用。工具状态不存于本地控制目录。
 
 Runtime 的登录由用户在设备上执行 `baton-project-runtime login <provider>` 完成，走 pi-ai 的 OAuth 流程。凭据存在 Runtime 自己的数据目录，文件权限沿用 batond 的私有文件约定。`baton-project-runtime probe` 只读取凭据状态并返回各 provider 是否已登录，不发送推理请求；batond 用它生成能力报告。
 
@@ -172,7 +182,7 @@ PS-155 通过 0016 交付 Project、Agent、主对话、事件、记忆和输入
 
 Runtime 按以下顺序构造请求：
 
-1. 系统提示词，由 `prompt_version` 决定。内容包括角色说明、Project 标题和目标、工具使用规则。不包含时间、设备名或其他每次会变的信息。
+1. 系统提示词，由 `prompt_version` 决定。内容包括角色说明、Project 标题和目标、工具使用规则。不包含时间、设备名或其他每次会变的信息。Runtime 将 `{version,title,goal}` 快照保存在 assistant payload 的 `prompt` 字段，恢复时复用最早保留的快照；压缩生成器将新快照保存到 compaction payload 的 `prompt` 字段。该元数据不进入 pi-ai 消息正文。
 2. 工具定义，顺序固定。
 3. 最新 `compaction` 事件生成的开头消息（如果有）。
 4. `compaction.through_seq` 之后的全部事件，按 `seq` 排列；被清除的工具结果替换为占位文字。
@@ -385,7 +395,7 @@ Worker 收到 `shell` 任务时，会再检查一次本地的开关，开关关�
 
 ## Open questions
 
-- **Runtime 的发布方式。** 设备需要 Node.js。可以是 npm 全局安装，也可以把 Node.js 和程序打成单个可执行文件。会影响安装说明和能力探测，不影响本设计的其他部分。
+- Runtime 使用固定版本 Node bundle 随 batond 分发，见第 2.1 节。
 - **压缩阈值。** 50% / 80% / 40% 以及保留最近 2 轮、清除 3 轮以前的工具结果，都是初始值，需要用真实对话调整。
 - **大小上限。** 用户消息 64 KiB、任务结果条目 40 KiB（文本 32 KiB）、每批 20 条或 128 KiB、事件 160 KiB、`maxTokens` 32000 都是初始值，压测后调整。调整时保持「单条输入上限 ≤ 每批上限 < 事件上限 < 请求上限」。
 - **闲置时间。** 180 秒是初始值。闲置期间不调用模型，但进程占内存并占用节点的 Runtime 名额；有了启动耗时、连续输入间隔和内存占用的实测数据后再调整。

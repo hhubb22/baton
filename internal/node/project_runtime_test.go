@@ -224,6 +224,8 @@ func TestProjectRuntimeBindingWakeAndPersistentDedup(t *testing.T) {
 
 func TestProjectRuntimeLeaseDeadlineAcrossDisconnect(t *testing.T) {
 	m, requests, _ := projectRuntimeFixture(t)
+	clock := startpermit.NewManual(time.Time{})
+	m.clock = clock
 	m.renewInterval = 50 * time.Millisecond
 	m.leaseDeadline = 300 * time.Millisecond
 	command := projectCommand()
@@ -233,6 +235,7 @@ func TestProjectRuntimeLeaseDeadlineAcrossDisconnect(t *testing.T) {
 	p := m.runs[command.RunID]
 	m.mu.Unlock()
 	m.setLoop(nil)
+	clock.Advance(m.leaseDeadline)
 	select {
 	case <-p.done:
 	case <-time.After(2 * time.Second):
@@ -434,5 +437,21 @@ func TestProjectRuntimeCreatesPrivateControlDirectories(t *testing.T) {
 	contents, err := os.ReadDir(control)
 	if err != nil || len(contents) != 0 {
 		t.Fatalf("Runtime控制目录非空: %v", err)
+	}
+}
+
+func TestProjectRuntimeStdioBindingAndToolForwarding(t *testing.T) {
+	t.Setenv("BATON_TEST_PROJECT_STDIO", "1")
+	m, requests, _ := projectRuntimeFixture(t)
+	command := projectCommand()
+	sendProjectCommand(m, command)
+	for _, operation := range []string{"bootstrap", "call_tool", "finish", "exited"} {
+		request := waitProjectRequest(t, requests, operation)
+		if request.RunID != command.RunID || request.LeaseEpoch != command.LeaseEpoch {
+			t.Fatalf("stdio 信任伪造身份: %+v", request)
+		}
+		if operation == "call_tool" && (request.ToolCallID != "call-1" || request.ToolName != "devices.list") {
+			t.Fatal("工具字段丢失")
+		}
 	}
 }

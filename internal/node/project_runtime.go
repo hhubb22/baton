@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
@@ -9,7 +10,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"sync"
@@ -20,6 +20,7 @@ import (
 	"baton/internal/privatefile"
 	"baton/internal/protocol"
 	"baton/internal/session"
+	"baton/internal/sidecar"
 	"baton/internal/startpermit"
 )
 
@@ -310,13 +311,28 @@ func (m *projectRuntimeManager) run(p *projectRuntimeProcess) error {
 	}
 	defer ln.Close()
 	defer os.Remove(endpoint)
-	binary, err := exec.LookPath("baton-project-runtime")
+	cmd, err := sidecar.Command(p.ctx, "project-agent", projectRuntimeVersion, "baton-project-runtime", "run")
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(binary, "run")
 	cmd.Dir = control
-	cmd.Env = append(os.Environ(), "BATON_PROJECT_RUNTIME_ENDPOINT="+endpoint, "BATON_PROJECT_RUNTIME_TOKEN="+p.token, "BATON_PROJECT_RUN_ID="+p.command.RunID, "BATON_PROJECT_LEASE_EPOCH="+strconv.FormatInt(p.command.LeaseEpoch, 10))
+	host, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	cmd.Env = append(os.Environ(), "BATON_SIDECAR_HOST="+host, "BATON_SIDECAR_TRANSPORT=stdio", "BATON_PROJECT_RUNTIME_ENDPOINT="+endpoint, "BATON_PROJECT_RUNTIME_TOKEN="+p.token, "BATON_PROJECT_RUN_ID="+p.command.RunID, "BATON_PROJECT_LEASE_EPOCH="+strconv.FormatInt(p.command.LeaseEpoch, 10))
+
+	input, err := cmd.StdinPipe()
+	if err != nil {
+		return err
+	}
+	defer input.Close()
+	output, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	defer output.Close()
+
 	m.mu.Lock()
 	if _, err := m.leaseTime(p); err != nil {
 		m.mu.Unlock()
@@ -326,19 +342,39 @@ func (m *projectRuntimeManager) run(p *projectRuntimeProcess) error {
 		m.mu.Unlock()
 		return context.Canceled
 	}
-	processStop, err := startProjectRuntimeProcess(cmd)
+	process, err := sidecar.Start(cmd)
 	if err != nil {
 		m.mu.Unlock()
 		return err
 	}
-	var stopOnce sync.Once
-	stop := func() { stopOnce.Do(processStop) }
+	stop := process.Stop
 	p.stop = stop
 	p.started = true
 	m.mu.Unlock()
 	defer stop()
 	_, _ = m.ledger.db.Exec(`UPDATE project_runtime_runs SET state='running' WHERE run_id=?`, p.command.RunID)
-	go func() { _ = cmd.Wait(); p.cancel(); close(p.done); _ = ln.Close() }()
+	stdioDone := make(chan struct{})
+	go func() {
+		defer close(stdioDone)
+		err := sidecar.Serve(p.ctx, output, input, func(ctx context.Context, raw json.RawMessage) any {
+			var req protocol.ProjectRuntimeRequest
+			dec := json.NewDecoder(bytes.NewReader(raw))
+			dec.DisallowUnknownFields()
+			if dec.Decode(&req) != nil || dec.Decode(new(any)) != io.EOF {
+				return projectRuntimeFailure("invalid_request")
+			}
+			result, terminate := m.runtimeRequest(ctx, p, req)
+			if terminate {
+				time.AfterFunc(100*time.Millisecond, p.stop)
+			}
+			return result
+		})
+		if err != nil {
+			p.stop()
+		}
+	}()
+	go func() { _ = process.Wait(); p.cancel(); close(p.done); _ = ln.Close() }()
+	defer func() { stop(); _ = output.Close(); _ = input.Close(); <-stdioDone }()
 	ipcDone := make(chan struct{})
 	go func() { defer close(ipcDone); m.serve(ln, p) }()
 	defer func() { _ = ln.Close(); <-ipcDone }()
@@ -496,43 +532,7 @@ func (m *projectRuntimeManager) serveConn(conn net.Conn, p *projectRuntimeProces
 					_ = json.NewEncoder(conn).Encode(projectRuntimeFailure("lease_lost"))
 					return
 				}
-				req := local.Request
-				req.Type = protocol.BodyProjectRuntimeRequest
-				req.RunID = p.command.RunID
-				req.LeaseEpoch = p.command.LeaseEpoch
-				switch req.Operation {
-				case "poll_wake":
-					timer := time.NewTimer(25 * time.Second)
-					defer timer.Stop()
-					wake := false
-					select {
-					case <-p.wake:
-						wake = true
-					case <-timer.C:
-					case <-p.done:
-					case <-m.ctx.Done():
-					}
-					data, _ := protocol.MarshalJSON(struct {
-						Wake bool `json:"wake"`
-					}{wake})
-					if _, err := m.leaseTime(p); err != nil {
-						p.stop()
-						result = projectRuntimeFailure("lease_lost")
-						break
-					}
-					result = protocol.ProjectRuntimeResult{Type: protocol.BodyProjectRuntimeResult, OK: true, Data: data}
-				case "bootstrap", "read_events", "claim_inputs", "append_event", "call_tool", "report_failure", "finish":
-					ctx, cancel := context.WithTimeout(p.ctx, 30*time.Second)
-					result = m.call(ctx, req)
-					cancel()
-					if _, err := m.leaseTime(p); err != nil {
-						result = projectRuntimeFailure("lease_lost")
-						p.stop()
-					}
-					terminate = result.Code == "lease_lost" || result.OK && (req.Operation == "finish" || req.Operation == "report_failure")
-				default:
-					result = projectRuntimeFailure("invalid_request")
-				}
+				result, terminate = m.runtimeRequest(p.ctx, p, local.Request)
 			}
 		}
 	}
@@ -542,4 +542,51 @@ func (m *projectRuntimeManager) serveConn(conn net.Conn, p *projectRuntimeProces
 	if terminate {
 		time.AfterFunc(100*time.Millisecond, p.stop)
 	}
+}
+
+func (m *projectRuntimeManager) runtimeRequest(ctx context.Context, p *projectRuntimeProcess, req protocol.ProjectRuntimeRequest) (protocol.ProjectRuntimeResult, bool) {
+	if _, err := m.leaseTime(p); err != nil {
+		p.stop()
+		return projectRuntimeFailure("lease_lost"), true
+	}
+	req.Type = protocol.BodyProjectRuntimeRequest
+	req.RunID = p.command.RunID
+	req.LeaseEpoch = p.command.LeaseEpoch
+	result := projectRuntimeFailure("invalid_request")
+	switch req.Operation {
+	case "poll_wake":
+		wait := 25 * time.Second
+		var options struct {
+			WaitMS int `json:"wait_ms"`
+		}
+		if len(req.Payload) > 0 {
+			if json.Unmarshal(req.Payload, &options) != nil || options.WaitMS < 1 || options.WaitMS > 25000 {
+				return result, false
+			}
+			wait = time.Duration(options.WaitMS) * time.Millisecond
+		}
+		timer := time.NewTimer(wait)
+		defer timer.Stop()
+		wake := false
+		select {
+		case <-p.wake:
+			wake = true
+		case <-timer.C:
+		case <-p.done:
+		case <-ctx.Done():
+		}
+		data, _ := protocol.MarshalJSON(struct {
+			Wake bool `json:"wake"`
+		}{wake})
+		result = protocol.ProjectRuntimeResult{Type: protocol.BodyProjectRuntimeResult, OK: true, Data: data}
+	case "bootstrap", "read_events", "claim_inputs", "append_event", "call_tool", "report_failure", "finish":
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		result = m.call(ctx, req)
+		cancel()
+	}
+	if _, err := m.leaseTime(p); err != nil {
+		result = projectRuntimeFailure("lease_lost")
+		p.stop()
+	}
+	return result, result.Code == "lease_lost" || result.OK && (req.Operation == "finish" || req.Operation == "report_failure")
 }
