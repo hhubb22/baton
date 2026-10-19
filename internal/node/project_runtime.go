@@ -521,7 +521,7 @@ func (m *projectRuntimeManager) serveConn(conn net.Conn, p *projectRuntimeProces
 						break
 					}
 					result = protocol.ProjectRuntimeResult{Type: protocol.BodyProjectRuntimeResult, OK: true, Data: data}
-				case "bootstrap", "read_events", "claim_inputs", "append_event", "report_failure", "finish":
+				case "bootstrap", "read_events", "claim_inputs", "append_event", "call_tool", "report_failure", "finish":
 					ctx, cancel := context.WithTimeout(p.ctx, 30*time.Second)
 					result = m.call(ctx, req)
 					cancel()

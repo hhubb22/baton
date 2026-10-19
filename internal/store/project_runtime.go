@@ -128,6 +128,8 @@ func (s *Store) ProjectRuntime(ctx context.Context, src protocol.Source, req pro
 			return nil, projectagent.ErrConflict
 		}
 		data, err = claimProjectInputs(ctx, tx, b, req)
+	case "call_tool":
+		data, err = s.callProjectTool(ctx, tx, b, req)
 	case "append_event":
 		data, err = appendProjectAssistant(ctx, tx, b, req)
 	case "finish", "exited", "start_failed", "report_failure":
@@ -295,6 +297,28 @@ func appendProjectAssistant(ctx context.Context, tx pgx.Tx, b projectRunBinding,
 	}
 	if req.LastSeq != b.nextSeq-1 {
 		return out, projectagent.ErrConflict
+	}
+	var blocks []savedToolCall
+	if json.Unmarshal(payload.Message.Content, &blocks) != nil {
+		return out, projectagent.ErrInvalid
+	}
+	ids := map[string]bool{}
+	for _, block := range blocks {
+		if block.Type != "toolCall" {
+			continue
+		}
+		if block.ID == "" || len(block.ID) > 128 || len(block.Name) > 128 || ids[block.ID] {
+			return out, projectagent.ErrInvalid
+		}
+		ids[block.ID] = true
+		var exists bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_events WHERE conversation_id=$1 AND
+  (tool_call_id=$2 OR (kind='assistant' AND EXISTS(SELECT 1 FROM jsonb_array_elements(payload->'message'->'content') c WHERE c->>'type'='toolCall' AND c->>'id'=$2))))`, b.conversationID, block.ID).Scan(&exists); err != nil {
+			return out, err
+		}
+		if exists {
+			return out, projectagent.ErrConflict
+		}
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO conversation_events(conversation_id,seq,employee_id,kind,client_event_id,run_id,lease_epoch,payload)
  VALUES($1,$2,$3,'assistant',$4,$5,$6,$7)`, b.conversationID, b.nextSeq, b.owner, req.ClientEventID, req.RunID, req.LeaseEpoch, req.Payload); err != nil {

@@ -71,6 +71,22 @@ func (s *Store) WriteProjectMemory(ctx context.Context, employeeID, projectID, e
 		return out, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	out, err = writeProjectMemoryTx(ctx, tx, employeeID, projectID, entryID, p, in)
+	if err != nil {
+		return out, err
+	}
+	return out, tx.Commit(ctx)
+}
+
+func writeProjectMemoryTx(ctx context.Context, tx pgx.Tx, employeeID, projectID, entryID string, p projectagent.Project, in projectagent.MemoryWrite) (projectagent.Memory, error) {
+	var out projectagent.Memory
+	var err error
+	if err = in.Validate(); err != nil {
+		return out, err
+	}
+	if in.ExpectedRevision == math.MaxInt64 {
+		return out, projectagent.ErrInvalid
+	}
 	if in.SourceSeq != nil {
 		var exists bool
 		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_events WHERE employee_id=$1 AND conversation_id=$2 AND seq=$3)`,
@@ -136,5 +152,5 @@ func (s *Store) WriteProjectMemory(ctx context.Context, employeeID, projectID, e
 			return out, err
 		}
 	}
-	return out, tx.Commit(ctx)
+	return out, nil
 }

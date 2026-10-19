@@ -246,6 +246,32 @@ Project 标题或目标被修改后，新的系统提示词从下一次压缩起
 
 工具执行时，用户、Project 和运行身份都取自运行记录，参数里的同名字段不参与授权。
 
+#### 工具调用协议
+
+`call_tool` 使用 `tool_call_id`、`tool_name`、`arguments`、`last_seq`，成功返回已保存的 `Event`，其中 `kind=tool_result`，`payload.message` 是 pi-ai `toolResult`（`toolCallId`、`toolName`、`content`、`isError`、`timestamp`）。名称和参数必须与已保存的 assistant `toolCall` 一致。同一消息内按调用顺序执行；工具 ID 在整个对话内唯一。已有结果优先返回，调用方可以在响应丢失后使用原 ID 重试。参数和业务拒绝以 `isError=true` 保存，数据库等内部异常回滚整个事务。
+
+本期工具参数如下，未列出的字段会被拒绝。员工、Project、运行身份与 `source_seq` 由中心填写。
+
+| 工具 | 参数 |
+|---|---|
+| `memory.search` | 可选 `query`、`after_id` |
+| `memory.read` | `entry_id`；可选 `revision`，省略时读取当前版本 |
+| `memory.write` | `title`、`content`、`expected_revision`；可选 `entry_id`，新建时可由中心生成 |
+| `history.search` | 可选 `query`、`after_seq`、`through_seq` |
+| `history.read` | 可选 `after_seq`、`through_seq`，读取 `(after_seq, through_seq]` |
+| `devices.list` | 可选 `after_id` |
+| `tasks.dispatch` | 第 9 节的五个必需字段；可选 `queue_timeout_seconds`、`execution_timeout_seconds`、`retry_of_task_id` |
+| `tasks.list` | 可选 `status`、`after_id` |
+| `tasks.get` | `task_id`；可选 `version`，变化时拒绝旧版本续读 |
+| `tasks.cancel` | `task_id` |
+
+只读工具还接受 `offset`、`max_bytes`。结果采用 `{encoding:"json", text, offset, total_bytes, truncated, next_offset?}`：先把完整业务结果编码为 JSON，再按 UTF-8 字节取片段。调用方在 `truncated=true` 时以同样的业务参数和 `next_offset` 继续读取，拼接 `text` 后解析 JSON。`max_bytes` 默认 16 KiB、最大 32 KiB；中心按实际 JSON 编码后的容量进一步缩短片段，整个工具结果 payload 不超过 32 KiB。记忆续读可固定 `revision`，任务续读可固定 `version`。
+
+搜索和列表每页最多 20 条，业务 JSON 中用 `next_after_id` 或 `next_after_seq` 继续取得下一组；空列表表示结束。`history` 返回 `through_seq`，默认固定为本次工具调用的 assistant 序号，后续读取应保持该值，避免把续读过程新产生的事件加入范围。`history.read` 保留原事件 JSON，包括已压缩的原文。`memory.search` 返回标题、版本和正文片段，全文由 `memory.read` 取得；`tasks.list` 返回任务标识、状态、版本与描述片段，完整记录由 `tasks.get` 取得。
+
+写工具返回资源 ID、版本或状态及 `read_tool`。记忆冲突返回当前版本和内容，超限时返回截断标记及 `memory.read` 入口。`tasks.dispatch` 的重派关联保存在现有的 `task_relations.rerun_of_task_id` 中。
+
+
 `inbox.ask` 的展示内容是 OpenUI Lang 程序（Agent Inbox IB-14）。它的写法说明由 `@openuidev/lang-core` 从 Baton 组件库生成，开场白换成适合工具参数的说明，其余原样放进 `inbox.ask` 的工具说明，约 1000～1600 token。工具定义的顺序和内容固定，所以这段说明在可缓存的前缀里；组件库版本变化时 `prompt_version` 随之变化。
 
 Coordinator 是 Go 程序，没有 OpenUI 解析器，所以展示内容由 Runtime 在发出 `call_tool` 之前用 lang-core 检查（IB-18）。检查不通过时，Runtime 仍然发出 `call_tool`，并附上解析器给出的错误；Coordinator 不创建事项，把这些错误写成一条 `is_error` 的结果。这样每个工具调用的结果仍然只由 Coordinator 写入，第 5 节的恢复规则不变。Coordinator 自己检查不依赖解析器的部分：长度、选项声明、关联任务归属和待处理事项上限。Runtime 漏检时，浏览器只用 Baton 组件库渲染，未知组件显示为无法显示（IB-19），不会执行展示内容里的代码。
