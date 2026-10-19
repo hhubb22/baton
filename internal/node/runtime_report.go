@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"os/exec"
+	"os"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -13,7 +13,10 @@ import (
 	"baton/internal/fileaccess"
 	"baton/internal/identity"
 	"baton/internal/protocol"
+	"baton/internal/sidecar"
 )
+
+const projectRuntimeVersion = "0.1.0"
 
 const runtimeReportInterval = 5 * time.Second
 const runtimeCollectTimeout = 2 * time.Second
@@ -79,42 +82,27 @@ func collectRuntimeReport(ctx context.Context, dir string) protocol.RuntimeRepor
 
 // probeProjectRuntime 仅调用无推理请求的 probe；失败或未知字段不会进入中心报告。
 func probeProjectRuntime(ctx context.Context) *protocol.ProjectRuntime {
-	binary, err := exec.LookPath("baton-project-runtime")
+	probeCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	cmd, err := sidecar.Command(probeCtx, "project-agent", projectRuntimeVersion, "baton-project-runtime", "probe")
 	if err != nil {
 		return nil
 	}
-	probeCtx, cancel := context.WithTimeout(ctx, time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(probeCtx, binary, "probe")
-	cmd.WaitDelay = 100 * time.Millisecond
-	var out probeOutput
-	cmd.Stdout = &out
-	if cmd.Run() != nil || out.overflow {
+	host, err := os.Executable()
+	if err != nil {
+		return nil
+	}
+	cmd.Env = append(os.Environ(), "BATON_SIDECAR_HOST="+host)
+	out, err := sidecar.Capture(probeCtx, cmd, 16<<10)
+	if err != nil {
 		return nil
 	}
 	var p protocol.ProjectRuntime
-	if protocol.DecodeRuntimeJSON(out.Bytes(), &p) != nil || protocol.ValidateProjectRuntime(&p) != nil {
+	if protocol.DecodeRuntimeJSON(out, &p) != nil || protocol.ValidateProjectRuntime(&p) != nil || p.Version != projectRuntimeVersion {
 		return nil
 	}
 	sort.Slice(p.Providers, func(i, j int) bool { return p.Providers[i].Provider < p.Providers[j].Provider })
 	return &p
-}
-
-type probeOutput struct {
-	buffer   bytes.Buffer
-	overflow bool
-}
-
-func (b *probeOutput) Len() int      { return b.buffer.Len() }
-func (b *probeOutput) Bytes() []byte { return b.buffer.Bytes() }
-
-func (b *probeOutput) Write(p []byte) (int, error) {
-	n := len(p)
-	if b.Len()+n > 16<<10 {
-		b.overflow = true
-	}
-	b.buffer.Write(p[:min(n, (16<<10)-b.Len())])
-	return n, nil
 }
 
 type runtimeReportSender struct {

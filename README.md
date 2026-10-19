@@ -170,6 +170,8 @@ batond run --relay wss://baton.example/v1/node
 
 ## Pi 1.3.0 原生适配与真实验证
 
+Project Agent Runtime 随 batond 的 Node bundle 分发。运行 `node tools/package-batond.mjs` 构建安装目录，目标设备需要 Node.js 22.19.0 或更高版本。安装、OAuth 登录和 probe 见 [Runtime 说明](runtimes/project-agent/README.md)，共用的 sidecar 分发与进程约定见 [Node sidecar 约定](runtimes/README.md)。
+
 节点安装固定版本 `npm install -g @earendil-works/pi-coding-agent@1.3.0`，并将 `pi`、`node`、`baton` 放入 batond 的 `PATH`。`agent_type=pi` 走独立适配器；设置 `BATON_PI_BIN` 可指定可执行文件，`BATON_PI_MODEL` 可指定 `provider/model-id`（也支持 `agent.Config` 的 Binary/Model/Env 配置）。不匹配 1.3.0 会拒绝启动，不自动升级。`BATON_TEST_EXECUTOR_LOG` 仅用于现有测试执行器，显式 `BATON_AGENT_DRIVER=native` 可在测试中覆盖选择。
 
 Pi 使用 `--mode rpc`，禁用自动任务重试、启动联网、扩展/MCP/skills/外部上下文自动加载。工作目录取任务 `working_directory`，未指定时为 Session 独立的 `workspace`。原生 v3 历史与映射保存在 `sessions/<session_id>/native`，只按 LF 消费 RPC 帧，CRLF 兼容、U+2028/U+2029 保留为内容。`prompt` 接受与 `agent_end` 都不算完成，只有 `agent_settled` 后才提交结构化候选结果；异常退出报告待核实，不伪造停止事实。

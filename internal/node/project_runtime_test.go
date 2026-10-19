@@ -436,3 +436,19 @@ func TestProjectRuntimeCreatesPrivateControlDirectories(t *testing.T) {
 		t.Fatalf("Runtime控制目录非空: %v", err)
 	}
 }
+
+func TestProjectRuntimeStdioBindingAndToolForwarding(t *testing.T) {
+	t.Setenv("BATON_TEST_PROJECT_STDIO", "1")
+	m, requests, _ := projectRuntimeFixture(t)
+	command := projectCommand()
+	sendProjectCommand(m, command)
+	for _, operation := range []string{"bootstrap", "call_tool", "finish", "exited"} {
+		request := waitProjectRequest(t, requests, operation)
+		if request.RunID != command.RunID || request.LeaseEpoch != command.LeaseEpoch {
+			t.Fatalf("stdio 信任伪造身份: %+v", request)
+		}
+		if operation == "call_tool" && (request.ToolCallID != "call-1" || request.ToolName != "devices.list") {
+			t.Fatal("工具字段丢失")
+		}
+	}
+}

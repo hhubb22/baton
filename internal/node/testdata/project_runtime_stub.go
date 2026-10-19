@@ -18,7 +18,7 @@ func main() {
 		if os.Getenv("BATON_TEST_PROJECT_LOGIN_REQUIRED") == "1" {
 			status = "login_required"
 		}
-		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"version": "test-1", "providers": []any{map[string]string{"provider": "test", "status": status}}})
+		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"version": "0.1.0", "providers": []any{map[string]string{"provider": "test", "status": status}}})
 		return
 	}
 	files, _ := os.ReadDir(".")
@@ -27,6 +27,32 @@ func main() {
 		_ = json.NewEncoder(log).Encode(map[string]any{"pid": os.Getpid(), "files": len(files)})
 		log.Close()
 	}
+	if os.Getenv("BATON_TEST_PROJECT_STDIO") == "1" {
+		decoder := json.NewDecoder(os.Stdin)
+		for id, operation := range []string{"bootstrap", "call_tool", "renew", "finish"} {
+			req := map[string]any{"operation": operation, "run_id": "forged", "lease_epoch": 999}
+			if operation == "call_tool" {
+				req["tool_call_id"] = "call-1"
+				req["tool_name"] = "devices.list"
+				req["arguments"] = map[string]any{}
+			}
+			_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"id": id + 1, "request": req})
+			var response struct {
+				Result struct {
+					OK   bool   `json:"ok"`
+					Code string `json:"code"`
+				} `json:"result"`
+			}
+			if decoder.Decode(&response) != nil {
+				os.Exit(3)
+			}
+			if operation == "renew" && response.Result.Code != "invalid_request" {
+				os.Exit(4)
+			}
+		}
+		return
+	}
+
 	if runtime.GOOS != "windows" {
 		conn, err := net.Dial("unix", os.Getenv("BATON_PROJECT_RUNTIME_ENDPOINT"))
 		if err == nil {

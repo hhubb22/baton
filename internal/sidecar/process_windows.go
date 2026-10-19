@@ -1,6 +1,6 @@
 //go:build windows
 
-package node
+package sidecar
 
 import (
 	"errors"
@@ -11,7 +11,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func startProjectRuntimeProcess(cmd *exec.Cmd) (func(), error) {
+func StartTree(cmd *exec.Cmd) (func(), error) {
 	job, err := windows.CreateJobObject(nil, nil)
 	if err != nil {
 		return nil, err
@@ -32,7 +32,7 @@ func startProjectRuntimeProcess(cmd *exec.Cmd) (func(), error) {
 		windows.CloseHandle(process)
 	}
 	if err == nil {
-		err = resumeProjectRuntimeThread(uint32(cmd.Process.Pid))
+		err = resumeThread(uint32(cmd.Process.Pid))
 	}
 	if err != nil {
 		cmd.Process.Kill()
@@ -44,7 +44,7 @@ func startProjectRuntimeProcess(cmd *exec.Cmd) (func(), error) {
 }
 
 // Runtime 加入 Job 后才恢复主线程，避免它先派生未受管理的子进程。
-func resumeProjectRuntimeThread(pid uint32) error {
+func resumeThread(pid uint32) error {
 	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPTHREAD, 0)
 	if err != nil {
 		return err

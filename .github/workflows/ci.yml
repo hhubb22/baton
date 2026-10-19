@@ -114,9 +114,21 @@ jobs:
       - name: Vet
         if: matrix.mode == 'test'
         run: go vet ./...
+      - uses: pnpm/action-setup@v4.2.0
+        if: matrix.mode == 'test'
+        with:
+          version: '12.11.2'
+      - uses: actions/setup-node@v6.0.0
+        if: matrix.mode == 'test'
+        with:
+          node-version: '24'
+      - name: 真实 Runtime 集成依赖
+        if: matrix.mode == 'test'
+        run: pnpm --dir runtimes/project-agent install --frozen-lockfile
       - name: Test
         env:
           MODE: ${{ matrix.mode }}
+          BATON_TEST_NODE_PROJECT_RUNTIME: ${{ matrix.mode == 'test' && '1' || '0' }}
         run: |
           if [ "$MODE" = race ]; then
             python3 .github/ci/run_tests.py --race --out "$RUNNER_TEMP/results"
@@ -313,9 +325,68 @@ jobs:
       - name: Check embedded dist
         run: pnpm check:dist
 
+  runtime-tests:
+    name: Runtime ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.scope == 'full'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: actions/setup-go@v6.1.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: pnpm/action-setup@v4.2.0
+        with:
+          version: '12.11.2'
+      - uses: actions/setup-node@v6.0.0
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: runtimes/project-agent/pnpm-lock.yaml
+      - name: Runtime 依赖
+        run: pnpm --dir runtimes/project-agent install --frozen-lockfile
+      - name: 构建原生凭据工具
+        run: go build -o baton-credential-host.exe ./cmd/batond
+      - name: Runtime 类型与 faux 验收
+        env:
+          BATON_REQUEST_ARTIFACT: request.json
+          BATON_SIDECAR_HOST: ${{ github.workspace }}/baton-credential-host.exe
+        run: pnpm --dir runtimes/project-agent test
+      - name: 构建 batond 分发包
+        run: node tools/package-batond.mjs
+      - name: 分发包搬迁与私有文件
+        run: node tools/check-sidecar-package.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runtime-request-${{ matrix.os }}
+          path: runtimes/project-agent/request.json
+          retention-days: 7
+
+  runtime-consistency:
+    name: Runtime 跨系统请求一致性
+    needs: [changes, runtime-tests]
+    if: needs.changes.outputs.scope == 'full'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: runtime-request-*
+          path: requests
+      - name: 比较 Linux、macOS 和 Windows 的实际 faux 请求
+        shell: bash
+        run: |
+          cmp requests/runtime-request-ubuntu-latest/request.json requests/runtime-request-macos-latest/request.json
+          cmp requests/runtime-request-ubuntu-latest/request.json requests/runtime-request-windows-latest/request.json
+
   linux:
     name: Linux
-    needs: [changes, linux-tests]
+    needs: [changes, linux-tests, runtime-consistency]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -325,7 +396,10 @@ jobs:
           SCOPE: ${{ needs.changes.outputs.scope }}
           CHANGES: ${{ needs.changes.result }}
           RESULT: ${{ needs.linux-tests.result }}
-        run: python3 .github/ci/gate.py "$SCOPE" "$CHANGES" "$RESULT"
+          RUNTIME: ${{ needs.runtime-consistency.result }}
+        run: |
+          python3 .github/ci/gate.py "$SCOPE" "$CHANGES" "$RESULT"
+          python3 .github/ci/gate.py "$SCOPE" "$CHANGES" "$RUNTIME"
 
   macos:
     name: macOS
