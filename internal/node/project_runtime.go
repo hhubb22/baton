@@ -283,6 +283,9 @@ func (m *projectRuntimeManager) run(p *projectRuntimeProcess) error {
 	if err := os.MkdirAll(root, 0700); err != nil {
 		return err
 	}
+	if err := privatefile.ProtectDir(root); err != nil {
+		return err
+	}
 	if err := privatefile.CheckDir(root); err != nil {
 		return err
 	}
@@ -291,6 +294,12 @@ func (m *projectRuntimeManager) run(p *projectRuntimeProcess) error {
 		return err
 	}
 	defer os.RemoveAll(control)
+	if err := privatefile.ProtectDir(control); err != nil {
+		return err
+	}
+	if err := privatefile.CheckDir(control); err != nil {
+		return err
+	}
 	endpoint, err := session.Endpoint(m.ledger.dir, p.command.RunID)
 	if err != nil {
 		return err

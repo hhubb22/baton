@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"baton/internal/identity"
+	"baton/internal/privatefile"
 	"baton/internal/protocol"
 	"baton/internal/startpermit"
 
@@ -401,5 +402,37 @@ func TestProjectRuntimeRejectsLateRenewalAfterSuspend(t *testing.T) {
 	}
 	if got := time.Duration(p.lastRenew.Load()); got != 0 {
 		t.Fatalf("迟到续租修改了起点: %s", got)
+	}
+}
+
+func TestProjectRuntimeCreatesPrivateControlDirectories(t *testing.T) {
+	m, requests, _ := projectRuntimeFixture(t)
+	root := filepath.Join(m.ledger.dir, "project-runtimes")
+	if err := os.MkdirAll(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS == "windows" && privatefile.CheckDir(root) == nil {
+		t.Fatal("Windows夹具未构造出未经保护的继承目录")
+	}
+	command := projectCommand()
+	sendProjectCommand(m, command)
+	waitProjectRequest(t, requests, "started")
+	if err := privatefile.CheckDir(root); err != nil {
+		t.Fatalf("Runtime根目录权限不正确: %v", err)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || !entries[0].IsDir() {
+		t.Fatalf("Runtime控制目录数量不正确: %d", len(entries))
+	}
+	control := filepath.Join(root, entries[0].Name())
+	if err = privatefile.CheckDir(control); err != nil {
+		t.Fatalf("Runtime控制目录权限不正确: %v", err)
+	}
+	contents, err := os.ReadDir(control)
+	if err != nil || len(contents) != 0 {
+		t.Fatalf("Runtime控制目录非空: %v", err)
 	}
 }
