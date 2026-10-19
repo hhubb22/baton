@@ -189,31 +189,115 @@ web/                        Web UI
 
 内部代码可以按实施规模调整，进程职责与持久化所有权的变化需要修订本设计。
 
+## 核心数据结构
+
+本节记录 `3193890` 的迁移与生产代码现状：`migrations/0001`～`0017`、`0019` 共 18 个 SQL 文件、33 张业务表。以后新增核心表或改变关联时，同步更新本节。迁移号有空缺；当前没有 `0018`，也没有 `plane_links`、`plane_events` 表。
+
+### PostgreSQL 关系
+
+图画出账号、节点、执行与 Project 的主要外键；认证、投递和 Plane 等配套表逐张列在下表。连线标签是子表的外键列，同一对表的多列外键合并标注；联合外键中的 `employee_id` 省略，员工归属仍由表定义和入口检查保证。基数按数据库约束表示，业务上任务接受时会同时创建 Execution。
+
+```mermaid
+erDiagram
+    employees ||--o{ nodes : employee_id
+    employees ||--o{ tasks : employee_id
+    employees ||--o{ sessions : employee_id
+    employees ||--o{ projects : employee_id
+    nodes ||--o{ tasks : target_node_id
+    nodes o|--o{ tasks : requested_target_node_id
+    nodes ||--o{ executions : target_node_id
+    nodes ||--o{ sessions : node_id
+    tasks o|--o{ tasks : parent_task_id
+    tasks ||--o| executions : task_id
+    tasks ||--o{ task_events : task_id
+    employees ||--o{ task_events : actor_employee_id
+    tasks ||--o| task_relations : task_id
+    tasks o|--o{ task_relations : "source_task_id / rerun_of_task_id"
+    sessions o|--o{ tasks : "source_session_id / target_session_id"
+    sessions o|--o{ task_relations : "source_session_id / target_session_id"
+    sessions o|--o{ sessions : parent_session_id
+    executions o|--o{ sessions : bound_execution_id
+    executions ||--o| execution_stops : execution_id
+    tasks ||--o{ task_result_refs : task_id
+    executions ||--o{ task_result_refs : execution_id
+    executions ||--o{ child_deliveries : source_execution_id
+    executions ||--o| child_deliveries : child_execution_id
+    projects ||--o| project_agents : project_id
+    project_agents ||--o| conversations : agent_id
+    conversations ||--o{ conversation_events : conversation_id
+    project_agents ||--o{ project_agent_input_queue : agent_id
+    project_agents ||--o{ agent_runs : agent_id
+    nodes ||--o{ agent_runs : node_id
+    projects o|--o{ tasks : project_id
+    conversations o|--o{ tasks : origin_conversation_id
+    projects ||--o{ project_memory_entries : project_id
+    project_memory_entries ||--o{ project_memory_revisions : entry_id
+    project_memory_revisions ||--o| project_memory_entries : "id + current_revision"
+```
+
+`project_agents` 的 `lease_run_id`、`lease_epoch`、`lease_until` 保存当前租约，`agent_runs` 保存历次运行；`lease_run_id` 没有外键，运行绑定由 `internal/store/project_runtime.go` 的 `validateProjectRun` 检查。`conversation_events.run_id`、输入队列的 `delivered_seq`、记忆修订的 `source_seq`、`task_events.execution_id`、`task_result_refs.node_id` 和 `request_tombstones.task_id` 也没有数据库外键，图不为这些列画外键线。记忆条目的当前修订外键延迟到事务提交时检查，事件与记忆修订由触发器限制为只追加。
+
+表中 `store/` 指 `internal/store/`，其中的写入由 Coordinator 执行；`plane/` 指 `internal/plane/`，也是 Coordinator 内的组件。迁移列标出建表文件的编号，事实栏采用后续迁移完成后的结构。
+
+| 表 | 迁移 | 记录的事实与关联 | 写入组件及入口 | 主要读取组件及入口 |
+|---|---|---|---|---|
+| `employees` | 0001 | 员工身份、认证来源和密码摘要 | 账号：`store/store.go` 的 `InsertLocalEmployee`、`SetLocalPassword` | 认证：同文件 `FindLocalCredential`、`LookupSession` |
+| `login_sessions` | 0001 | 员工的浏览器登录、Token/CSRF 摘要、到期和撤销 | 认证：`store/store.go` 的 `InsertSession`、`RevokeSession` | 认证：同文件 `LookupSession` |
+| `nodes` | 0002 | 员工设备身份、注册序号、能力、默认 Agent；0015 删除 `role` | 注册/同步：`store/node.go` 的 `Register`、`store/presence.go` 的 `SyncNode` | 节点 API：`store/presence.go` 的 `ListNodes`；任务目标解析：`store/task.go` 的 `loadOwnedNode` |
+| `node_credentials` | 0002 | 节点凭据 ID、版本、有效期与吊销；0003 删除 Token 摘要列 | 注册/吊销：`store/node.go` 的 `Register`、`store/revoke.go` 的 `RevokeNode` | Gateway：`store/connection.go` 的 `CheckNodeConnection` |
+| `node_enrollments` | 0002 | 员工的一次性注册凭据摘要及使用时间 | 注册：`store/node.go` 的 `IssueEnrollment`、`Register` | 注册：同文件 `Register`、`explainEnrollment` |
+| `employee_settings` | 0002 | 员工默认设备；0015 改为 `default_device_node_id`，联合外键指向本人节点 | 注册/设置：`store/node.go` 的 `Register`、`SetDefaultDevice` | 任务：`store/task.go` 的 `resolveDefaultDevice`；运行调度：`store/project_placement.go` 的 `scheduleProjectRun` |
+| `node_presence` | 0003 | 节点当前连接、在线与同步状态、最后联系时间 | Gateway：`store/connection.go` 的 `ConnectNode`、`TouchNode`；`store/presence.go` 的 `UpsertPresence`、`MarkOffline` | 节点 API：`store/presence.go` 的 `ListNodes`；Gateway：`CheckNodeConnection` |
+| `node_revocations` | 0004 | 节点、凭据、操作者及吊销请求/生效时间，分别引用节点、凭据、员工 | 吊销：`store/revoke.go` 的 `RevokeNode`、`MarkRevocationsApplied` | 吊销补发/查询：同文件 `PendingRevocationSet`、`NodeRevocation` |
+| `tasks` | 0005 | 请求与解析后的目标、父任务、来源/目标 Session、状态和当前结果；0014 加产物要求，0017 加 Project/对话来源 | 任务：`store/task.go` 的 `insertAccepted`；结果：`store/result.go` 的 `applyResult` | API：`store/task_view.go` 的 `GetTaskView`；Agent：`store/agent.go` 的 `AgentTask` |
+| `executions` | 0005 | `task_id` 唯一的执行身份、节点、存储代次、准备、许可、输入代次与开始时间 | 任务/控制：`store/task.go` 的 `insertAccepted`、`store/dispatch.go` 的 `SavePrepared`、`store/start.go` 的 `decideStart` | 控制/上报：`store/start.go` 的 `lockExec`、`store/result.go` 的 `lockExecution` |
+| `task_events` | 0005 | 按任务版本保存状态变化；0009～0010 加执行和停止事实，0012 加人工核实与重新执行内容 | 任务/结果：`store/task.go` 的 `insertAccepted`、`store/result.go` 的 `insertReportEvent`；核实：`store/resolve.go` | API：`store/task.go` 的 `ListTaskEvents`；上报去重：`store/result.go` 的 `ApplyExecutionReport` |
+| `dispatch_outbox` | 0005 | Task、Execution、节点的 prepare 投递意图、租约、次数与 ACK | 接受/分派：`store/task.go` 的 `insertAccepted`、`store/dispatch.go` 的 `ClaimPrepare`、`ackOutbox` | 分派循环：`store/dispatch.go` 的 `ClaimPrepare` |
+| `request_tombstones` | 0005 | 员工与 request_id 唯一的请求摘要、原 task_id；保留去重身份 | 任务：`store/task.go` 的 `insertAccepted` | 重试：同文件 `loadTombstone` |
+| `sessions` | 0006 | 员工节点上的执行 Session、原生 ID、父 Session、状态和当前绑定执行 | 准备/结果：`store/dispatch.go` 的 `upsertPreparedSession`、`store/result.go` 的 `applyResult` | API：`store/session.go` 的 `ListSessions`、`GetSession`；Agent：`store/agent.go` 的 `validateAgentSource` |
+| `task_relations` | 0006 | 每个任务的来源任务/Session、目标 Session；0012 加 `rerun_of_task_id` | 任务/准备：`store/task.go` 的 `insertAccepted`、`store/dispatch.go` 的 `SavePrepared`；重跑：`store/resolve.go` 的 `RerunTask` | Agent：`store/agent.go` 的 `AgentTask`、`AgentRelations`；任务：`store/task.go` 的 `loadTask` |
+| `task_result_refs` | 0008 | Task/Execution 的证据与产物位置、可访问状态；按任务、种类、位置唯一 | 结果：`store/result.go` 的 `replaceRefs`、`appendRefs` | 结果/API：同文件 `attachResults`；Plane：0019 的 `plane_snapshot_task` |
+| `delivery_records` | 0008 | 结果事件已被中心收妥，引用 Task、Execution、来源 Session；状态固定 `delivered` | 结果：`store/result.go` 的 `insertDelivery` | Agent：`store/agent.go` 的 `AgentTaskView`；子结果领取：`store/child_delivery.go` 的 `ChildDeliveries` |
+| `execution_stops` | 0010 | 每个 Execution 的停止请求、ACK、停止事实、副作用是否已知与未启动证据 | 控制：`store/stop.go` 的 `requestStop`、`applyStopReport` | Worker 心跳：同文件 `ExecutionControl`；任务展示：`store/task.go` 的 `loadTask` |
+| `child_deliveries` | 0011 | 来源与子 Execution 之间的子结果交付，子执行唯一；含输入代次和交付状态 | 委托：`store/child_delivery.go` 的 `ChildDeliveries`、`RecordChildReceipt` | 委托：同文件 `ChildDeliveries`；API：`store/task_view.go` 的 `taskViews` |
+| `plane_issues` | 0013 | 外部 Webhook、Plane Project、Issue 的联合身份 | Plane 接收：`plane/inbox.go` 的 `receive` | Plane 入站：同函数的插入冲突处理及 `plane_deliveries`、`plane_triggers` 的联合外键检查 |
+| `plane_triggers` | 0013 | 外部工单执行轮次、操作者、员工、接受时输入及关联 Task；外键到 `plane_issues`、`employees`、`tasks` | Plane：`plane/service.go` 的 `decide`、`recoverAccepted` | Plane 恢复：同文件 `process`、`recoverAccepted`；回写：`plane/writeback.go` 的 `claimWriteback` |
+| `plane_deliveries` | 0013 | Webhook 投递去重、白名单事件、处理/重试状态；外键到 `plane_issues`、`plane_triggers` | Plane：`plane/inbox.go` 的 `receive`、`finish`；`plane/service.go` 的 `process` | Plane：`plane/inbox.go` 的 `retryPending`、`plane/service.go` 的 `process` |
+| `node_runtime_reports` | 0015 | 节点运行能力与订阅登录状态报告、报告版本和时间 | 节点上报：`store/runtime_report.go` 的 `SaveRuntimeReport` | Project 调度：`store/project_placement.go` 的 `scheduleProjectRun` |
+| `projects` | 0016 | 员工的项目目标、状态与版本 | Project API：`store/project.go` 的 `CreateProject`、`PatchProject` | API/Runtime：同文件 `Project`、`ListProjects`；`store/project_runtime.go` 的 `bootstrapProjectRun` |
+| `project_agents` | 0016 | 每项目唯一的 Agent、模型配置及当前运行租约 | 创建/配置：`store/project.go` 的 `CreateProject`、`PatchProject`；调度：`store/project_placement.go` 的 `scheduleProjectRun` | Runtime：`store/project_runtime.go` 的 `validateProjectRun`；调度：`scheduleProjectRun` |
+| `conversations` | 0016 | 每个 Agent 唯一的主对话、事件序号、压缩位置、失败与重试状态 | 创建：`store/project.go` 的 `CreateProject`；输入/响应：`store/project_runtime.go` 的 `claimProjectInputs`、`appendProjectAssistant` | API：`store/project.go` 的 `Project`；Runtime：`store/project_runtime.go` 的 `validateProjectRun` |
+| `conversation_events` | 0016 | 主对话中只追加的输入、助手响应与工具结果；主键为对话 ID 与 seq | Runtime：`store/project_runtime.go` 的 `claimProjectInputs`、`appendProjectAssistant`；`store/project_tools.go` 的 `callProjectTool` | API：`store/project.go` 的 `ProjectEvents`；Runtime：`store/project_runtime.go` 的 `readProjectRunEvents` |
+| `project_agent_input_queue` | 0016 | Agent 的离线输入、通知、来源去重键与领取后事件序号 | 用户：`store/project.go` 的 `AcceptProjectMessage`；通知：`store/project_inputs.go` 的 `insertProjectInput` | Runtime：`store/project_runtime.go` 的 `claimProjectInputs`；调度：`store/project_placement.go` 的 `scheduleProjectRun` |
+| `project_memory_entries` | 0016 | Project 的记忆条目标题与当前修订指针 | API/工具：`store/project_memory.go` 的 `writeProjectMemoryTx` | API：同文件 `ProjectMemory`、`ListProjectMemory`；工具：`store/project_tools.go` 的 `executeProjectTool` |
+| `project_memory_revisions` | 0016 | 只追加的记忆正文修订、作者及来源事件序号 | API/工具：`store/project_memory.go` 的 `writeProjectMemoryTx` | API：同文件 `ProjectMemory`、`ListProjectMemory`；历史修订：`store/project_tools.go` 的 `executeProjectTool` |
+| `agent_runs` | 0017 | Agent 在节点上的一次 Runtime 运行、租约代次、模型快照和结束原因 | 调度：`store/project_placement.go` 的 `scheduleProjectRun`、`releaseProjectRun`；Runtime：`store/project_runtime.go` 的 `ProjectRuntime` | 调度：`store/project_placement.go` 的 `ProjectRunCommands`；Runtime：`store/project_runtime.go` 的 `validateProjectRun` |
+| `task_acceptances` | 0019 | 员工对 Task 某版本的通过/拒绝和评论 | 验收 API：`store/acceptance.go` 的 `AcceptResult` | API：同文件 `ListAcceptances`；Plane 快照：0019 的 `plane_snapshot_task` |
+| `plane_outbox` | 0019 | 外键关联触发轮次与 Task，保存任务版本快照、重试、领取和外部评论确认 | 数据库：0019 的 `plane_snapshot_task`，由 `plane_task_changed`、`plane_task_linked` 触发；Plane：`plane/writeback.go` 的 `retryWritebacks` | Plane：同文件 `claimWriteback`、`writeComment` |
+
+0007、0009、0012、0014 只改列、约束或索引，变更分别归入 Execution 许可、任务/事件、重新执行关系和产物要求。0003、0006、0008、0010、0015、0017、0019 的改表部分也包含在上表对应事实中。`internal/migrate/migrate.go` 创建的 `schema_migrations` 记录已应用文件名，由 `upFS`/`Check` 写读，属于迁移设施，排除在业务 ER 图之外。`node_registration_seq` 是序列。
+
+### 节点本地 SQLite
+
+batond 独占写节点 `node.db`：`internal/node/ledger.go` 的 `nodeSchema` 创建 `meta`（存储代次等）、`receipts`（Task/Execution 到 Session 的 prepare 接收映射）、`sessions`（本地绑定）、`workers`（进程索引）；`internal/node/agent.go` 的 `ensureAgentSchema` 创建 `agent_contexts`（本地委托凭据摘要与执行绑定）；`internal/node/project_runtime.go` 的 `newProjectRuntimeManager` 创建 `project_runtime_runs`（run_id 与 lease_epoch 的启动去重）。这些 ID 分别对应中心 Task、Execution、Session 和 `agent_runs`，跨库关联由协议检查，中心收到准备事实后通过 `SavePrepared` 记录存储代次与 Session。
+
+每个 Session 的 Worker 独占写另一份 SQLite：`internal/session/ledger.go` 的 `createWorkerSchema` 创建 `meta`（执行、许可、输入意图和代次）、`writes`（追加记录）、`execution_log`（本地输入/结果记录）、`outbox`（待中心确认的事件）；`internal/session/child_delivery.go` 的 `ensureChildSchema` 创建 `child_deliveries`（子结果与本地交付状态）、`native_delivery_checks`（原生历史核查标记）；`internal/session/browser.go` 的 `browserInputLocked` 按需创建 `browser_inputs`（补充输入操作 ID、摘要和状态）。`outbox.event_id` 对应中心 `task_events.id`，结果上报还生成同 ID 的 `delivery_records`；中心提交 ACK 后，`workerDB.Ack` 才确认本地交付。两端 `child_deliveries` 通过 delivery_id 对应，中心 `RecordChildReceipt` 接收本地交付事实。`sqlite_sequence` 是 SQLite 为自增列维护的内部表。完整原生 Agent 历史仍由 Agent 保存在节点文件中。
+
+### 问题清单
+
+以下是现有结构的职责或使用情况，供后续改动时核对；本节不提出删表或迁移方案。
+
+1. 任务关系在 `tasks` 与 `task_relations` 双份保存。`tasks.parent_task_id/source_session_id/target_session_id` 对应关系表的 `source_task_id/source_session_id/target_session_id`。写入依据：`internal/store/task.go` 的 `insertAccepted` 同事务写两处，`internal/store/dispatch.go` 的 `SavePrepared` 同事务更新两处目标 Session。读取依据：`internal/store/task.go` 的 `loadTask` 和 `internal/store/child_delivery.go` 的 `ChildDeliveries` 读任务列；`internal/store/agent.go` 的 `AgentTask`、`AgentRelations` 读关系表。两套读取都在使用，后续变更关系时需同时维护；`rerun_of_task_id` 另有独立用途。
+2. 两张交付表使用了相近的状态名，记录的交付阶段不同。写入依据：`internal/store/result.go` 的 `applyResult`、`retainLateResult` 调 `insertDelivery`，在中心接受结果时写 `delivery_records.status='delivered'`；`internal/store/child_delivery.go` 的 `RecordChildReceipt` 根据来源 Worker 的回执更新 `child_deliveries.status`。读取依据：`internal/store/agent.go` 的 `AgentTaskView` 对来源任务检查前者，对子结果优先返回后者；`internal/store/task_view.go` 的 `taskViews` 展示子结果交付状态。`delivery_records` 的 `delivered` 只表示中心收妥结果，来源 Agent 的注入确认由 `child_deliveries` 保存。
+3. `project_agent_input_queue.payload_hash` 有写入，生产代码尚未读取。写入依据：`internal/store/project.go` 的 `AcceptProjectMessage` 保存正文 SHA-256，`internal/store/project_inputs.go` 的 `insertProjectInput` 保存序列化 payload 的 SHA-256。读取依据：前者遇到去重冲突时直接读取 `payload->>'content'` 比较正文；`internal/store/project_runtime.go` 的 `claimProjectInputs` 读取 payload、大小和来源键。对 `internal/` 生产 Go 文件检索 `payload_hash` 只命中这两处 INSERT，未找到摘要校验或查询用途；两条写入路径计算摘要的对象也不同。
+
 ## 状态与持久化所有权
 
 ### 中心数据
 
 PostgreSQL 不保存完整 Session 消息。应用层对可持久化事件采用字段白名单，不能直接把节点上报正文存为通用 JSON 日志。Project Agent 的主对话是例外：它的消息按 pi-ai 的消息格式保存在专用的 `conversation_events` 表，不进入 `task_events`（2026-10-18 修订）。
 
-| 拟建表 | 关键字段或约束 | 用途 |
-|---|---|---|
-| employees、login_sessions | 员工 ID、认证来源、登录状态；浏览器会话只存 token 摘要 | 员工登录与隔离 |
-| nodes、node_credentials | 员工、注册序号、系统、能力、凭据版本和吊销状态；连接凭据是 JWT，库中只存 credential_id。`role` 列由迁移 0015 删除，注册接口忽略旧版 batond 发来的该字段（2026-10-18 修订） | 节点身份和稳定初选 |
-| node_runtime_reports | 节点与员工的联合外键、正数 report_version、reported_at、最多 64 KiB 的 JSONB 报告 | PA-W02 写入的节点运行能力报告，表由迁移 0015 创建 |
-| node_presence | 节点、员工、在线、已同步、incarnation、conn_id、最后联系时间、状态更新时间 | 在线状态与同步门槛 |
-| employee_settings | 员工唯一行、默认设备节点 ID（由默认 PC 列改名，2026-10-18 修订） | 默认值保持稳定，吊销后仍可显示失效引用 |
-| sessions | Session ID、节点、Agent 类型、本地父 Session、原生会话标识、最后状态和时间 | Session 树的元数据索引 |
-| tasks | 员工、request_id、任务说明与 R-12 请求字段、request_hash、解析后的目标与 Agent、状态、版本、期限、结果摘要 | 任务权威记录 |
-| task_relations | 来源任务、来源 Session、目标 Session、重新执行关系 | 委托链与追溯 |
-| task_events | 任务 ID、版本、事件 ID、操作者、允许保存的变更字段 | 状态历史与人工核实记录 |
-| executions | task_id 唯一、execution_id 唯一、节点存储代次、准备与启动授权状态 | 一次任务最多一份执行身份 |
-| dispatch_outbox | 稳定消息 ID、任务 ID、目标、动作、发送期限、租约 | 可重发投递意图，Gateway 只持有有界的临时发送队列 |
-| delivery_records | 委托结果 ID、来源 Session、交付状态 | 区分执行结束与结果交付 |
-| request_tombstones | 员工与 request_id 唯一、请求摘要、原 task_id | 明细清理后仍不能把重复提交当新执行 |
-| plane_links、plane_events、plane_outbox | 工单映射、事件标识、执行轮次、回写记录 | Webhook 去重和可恢复回写 |
-| projects、project_agents、conversations、conversation_events、project_agent_input_queue、agent_runs、project_memory_entries、project_memory_revisions、node_runtime_reports | 见 Project Agent TECH 第 3 节 | Project Agent 的身份、对话、输入、运行、记忆和节点能力（2026-10-18 修订） |
-
-`tasks` 新增可空列 `project_id`、`origin_conversation_id`、`origin_tool_call_id`，标记由 Project Agent 发起的任务；现有任务这些列为空，行为不变（2026-10-18 修订）。
+现有表、外键及读写组件见「核心数据结构」。
 
 request_id 去重使用调用方提交的原始字段计算摘要，缺省字段保留“未指定”的语义。重试时先找旧请求，再解析默认节点和 Agent，避免修改默认值后把同一提交误判为不同请求。
 
