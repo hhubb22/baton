@@ -18,7 +18,7 @@ export type TaskEvent = {
 }
 export type TaskPage = { tasks: TaskRecord[]; next_cursor?: string }
 export type TaskInput = {
-  request_id: string; description: string; target_node_id?: string; agent_type?: string; target_session_id?: string
+  project_id?: string; request_id: string; description: string; target_node_id?: string; agent_type?: string; target_session_id?: string
   working_directory?: string; device_names?: string[]; authorization_scope?: string; expected_outputs?: string
   queue_timeout_seconds: number; execution_timeout_seconds: number
 }
@@ -43,13 +43,13 @@ export function previewQuery(ref: ResultRef): { root_id: string; path: string } 
 export const timeLabel = (value?: string | null) => value ? new Date(value).toLocaleString('zh-CN') : '暂无记录'
 
 // 标签页只保存操作标识；任务说明、授权文本和证据不写入浏览器存储。
-export type PendingTask = { requestID: string; originalTaskID?: string }
+export type PendingTask = { requestID: string; originalTaskID?: string; projectID?: string }
 const pendingKey = (employee: string) => `baton_pending_task:${employee}`
 export function readPendingTask(employee: string): PendingTask | null {
   try {
     const value = JSON.parse(sessionStorage.getItem(pendingKey(employee)) ?? 'null') as PendingTask | null
-    if (!value || typeof value.requestID !== 'string' || (value.originalTaskID !== undefined && typeof value.originalTaskID !== 'string')) return null
-    return { requestID: value.requestID, originalTaskID: value.originalTaskID }
+    if (!value || typeof value.requestID !== 'string' || (value.originalTaskID !== undefined && typeof value.originalTaskID !== 'string') || (value.projectID !== undefined && typeof value.projectID !== 'string')) return null
+    return { requestID: value.requestID, originalTaskID: value.originalTaskID, projectID: value.projectID }
   } catch { return null }
 }
 export function savePendingTask(employee: string, value: PendingTask | null) {

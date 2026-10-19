@@ -108,6 +108,18 @@ func (s *Store) AuthorizeStart(ctx context.Context, in StartRequest) (StartDecis
 // RequestCancel 保存取消请求。尚未发出启动许可时可以直接取消；
 // 许可已经发出且没有明确的未启动证据时，只记录可能已启动，不把任务标成未执行。
 func (s *Store) RequestCancel(ctx context.Context, employeeID, taskID string) (CancelDecision, error) {
+	return s.requestCancel(ctx, employeeID, taskID, true)
+}
+
+// RequestAgentCancel 沿用执行 Agent 的任务可见范围，并保留真实操作来源。
+func (s *Store) RequestAgentCancel(ctx context.Context, source AgentSource, taskID string) (CancelDecision, error) {
+	if _, err := s.AgentTask(ctx, source, taskID); err != nil {
+		return CancelDecision{}, err
+	}
+	return s.requestCancel(ctx, source.EmployeeID, taskID, false)
+}
+
+func (s *Store) requestCancel(ctx context.Context, employeeID, taskID string, user bool) (CancelDecision, error) {
 	var err error
 	employeeID, err = identity.ParseUUID(employeeID)
 	if err != nil {
@@ -122,7 +134,7 @@ func (s *Store) RequestCancel(ctx context.Context, employeeID, taskID string) (C
 		return CancelDecision{}, fmt.Errorf("保存取消失败: %s", redact.Scrub(err.Error()))
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	decision, err := s.cancelTree(ctx, tx, employeeID, taskID)
+	decision, err := s.cancelTree(ctx, tx, employeeID, taskID, user)
 	if err != nil {
 		return CancelDecision{}, err
 	}
@@ -132,7 +144,7 @@ func (s *Store) RequestCancel(ctx context.Context, employeeID, taskID string) (C
 	return decision, nil
 }
 
-func (s *Store) cancelTree(ctx context.Context, tx pgx.Tx, employeeID, taskID string) (CancelDecision, error) {
+func (s *Store) cancelTree(ctx context.Context, tx pgx.Tx, employeeID, taskID string, user bool) (CancelDecision, error) {
 	row, exec, err := lockCancel(ctx, tx, employeeID, taskID)
 	if err != nil {
 		return CancelDecision{}, err
@@ -141,6 +153,11 @@ func (s *Store) cancelTree(ctx context.Context, tx pgx.Tx, employeeID, taskID st
 		return CancelDecision{}, ErrNotVisible
 	}
 	if row.cancelAt == nil {
+		if user {
+			if err := recordUserTaskOperation(ctx, tx, employeeID, taskID, "cancel", ""); err != nil {
+				return CancelDecision{}, err
+			}
+		}
 		if _, err := tx.Exec(ctx, `UPDATE tasks SET cancel_requested_at = now() WHERE id = $1::uuid`, taskID); err != nil {
 			return CancelDecision{}, err
 		}
@@ -186,7 +203,7 @@ func (s *Store) cancelTree(ctx context.Context, tx pgx.Tx, employeeID, taskID st
 		return CancelDecision{}, err
 	}
 	for _, id := range children {
-		child, err := s.cancelTree(ctx, tx, employeeID, id)
+		child, err := s.cancelTree(ctx, tx, employeeID, id, user)
 		if err != nil {
 			return CancelDecision{}, err
 		}

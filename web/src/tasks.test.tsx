@@ -181,3 +181,18 @@ it('恢复新执行遭遇版本冲突时保留标识，刷新后可以重新补�
   await user.click(screen.getByRole('button', { name: '补全原新执行请求' }))
   expect(screen.getByText(/版本 5/)).toBeInTheDocument()
 })
+
+it.each([undefined, 'original-project'])('跨 Project 补全待确认请求保留原归属 %s', async (projectID) => {
+  savePendingTask('alice', { requestID: 'recover-project-task', projectID })
+  let body: Record<string, unknown> = {}
+  vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
+    body = JSON.parse(String(init.body)) as Record<string, unknown>
+    return json(task)
+  }))
+  render(<TaskComposer csrf="csrf" employeeID="alice" nodes={listOf([])} projectID="current-project" onAccepted={vi.fn()} />)
+  await userEvent.click(screen.getByRole('button', { name: '补全原请求后重发' }))
+  await userEvent.type(screen.getByLabelText('任务说明'), '原来的任务说明')
+  await userEvent.click(screen.getByRole('button', { name: '提交原请求' }))
+  expect(body.request_id).toBe('recover-project-task')
+  expect(body.project_id).toBe(projectID)
+})

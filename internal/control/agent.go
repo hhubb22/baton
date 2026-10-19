@@ -48,9 +48,7 @@ func (s *Server) onAgentRequest(ctx context.Context, connID string, env protocol
 		if req.Input != nil {
 			break
 		}
-		if _, err = s.store.AgentTask(ctx, source, req.TaskID); err == nil {
-			data, err = s.store.RequestCancel(ctx, source.EmployeeID, req.TaskID)
-		}
+		data, err = s.store.RequestAgentCancel(ctx, source, req.TaskID)
 	}
 	if err != nil {
 		result.Code = task.CodeUnavailable

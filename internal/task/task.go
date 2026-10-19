@@ -101,6 +101,7 @@ var agentTypePattern = regexp.MustCompile(`^[a-z][a-z0-9._-]{0,63}$`)
 
 // Input 是调用方提交的原始字段。nil 表示未指定，不代表已经填上默认值。
 type Input struct {
+	ProjectID               *string       `json:"project_id,omitempty"`
 	RequiredArtifacts       []ArtifactRef `json:"required_artifacts,omitempty"`
 	RequestID               string        `json:"request_id"`
 	Description             string        `json:"description"`
@@ -125,6 +126,8 @@ type Prepared struct {
 
 // Record 是已经提交的任务记录。
 type Record struct {
+	ProjectID               *string       `json:"project_id,omitempty"`
+	OriginConversationID    *string       `json:"origin_conversation_id,omitempty"`
 	RequiredArtifacts       []ArtifactRef `json:"required_artifacts,omitempty"`
 	RerunOfTaskID           *string       `json:"rerun_of_task_id,omitempty"`
 	CancelRequestedAt       *time.Time    `json:"cancel_requested_at,omitempty"`
@@ -211,6 +214,7 @@ func reject(code, message, field string) *Rejection {
 }
 
 type canon struct {
+	ProjectID               *string       `json:"project_id,omitempty"`
 	Schema                  int           `json:"schema"`
 	RequestID               string        `json:"request_id"`
 	Description             string        `json:"description"`
@@ -232,6 +236,7 @@ type canon struct {
 // 修改 canon 的字段或顺序后，已保存的 request_hash 将无法与重试对齐。
 func Prepare(in Input) (Prepared, error) {
 	norm := Input{
+		ProjectID:               foldUUID(in.ProjectID),
 		RequiredArtifacts:       copyArtifacts(in.RequiredArtifacts),
 		RequestID:               in.RequestID,
 		Description:             in.Description,
@@ -248,6 +253,7 @@ func Prepare(in Input) (Prepared, error) {
 		ExecutionTimeoutSeconds: copyInt(in.ExecutionTimeoutSeconds),
 	}
 	body, err := json.Marshal(canon{
+		ProjectID:               norm.ProjectID,
 		RequiredArtifacts:       norm.RequiredArtifacts,
 		Schema:                  hashSchema,
 		RequestID:               norm.RequestID,
@@ -298,6 +304,9 @@ func Validate(in Input) error {
 	}
 	if utf8.RuneCountInString(in.Description) > maxMultilineRunes || hasDisallowedControl(in.Description) {
 		return reject(CodeInvalidRequest, "任务说明无效", "description")
+	}
+	if err := validateUUID(in.ProjectID, "Project 标识不正确", "project_id"); err != nil {
+		return err
 	}
 	if err := validateUUID(in.SourceSessionID, "来源 Session 标识不正确", "source_session_id"); err != nil {
 		return err

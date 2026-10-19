@@ -188,6 +188,18 @@ func (s *Store) acceptOnceTx(ctx context.Context, tx pgx.Tx, employeeID string, 
 	if source != nil && !active {
 		return task.Record{}, false, agentDenied()
 	}
+	if prepared.Input.ProjectID != nil {
+		if source != nil || prepared.Input.SourceSessionID != nil || prepared.Input.ParentTaskID != nil {
+			return task.Record{}, false, &task.Rejection{Code: task.CodeInvalidRequest, Message: "Project 只能由用户直接指定", Fields: []string{"project_id"}}
+		}
+		var owned bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM projects WHERE employee_id=$1 AND id=$2)`, employeeID, *prepared.Input.ProjectID).Scan(&owned); err != nil {
+			return task.Record{}, false, err
+		}
+		if !owned {
+			return task.Record{}, false, ErrNotVisible
+		}
+	}
 	// 旧请求已经在上面返回。这里才解析默认值，并按员工核对 Session 归属。
 	if err := checkParent(ctx, tx, employeeID, prepared.Input.ParentTaskID); err != nil {
 		return task.Record{}, false, err
@@ -500,6 +512,7 @@ func insertAccepted(ctx context.Context, tx pgx.Tx, employeeID string, prepared 
 		execSeconds = *in.ExecutionTimeoutSeconds
 	}
 	rec := task.Record{
+		ProjectID:               in.ProjectID,
 		RequiredArtifacts:       in.RequiredArtifacts,
 		TaskID:                  taskID,
 		RequestID:               in.RequestID,
@@ -528,7 +541,7 @@ func insertAccepted(ctx context.Context, tx pgx.Tx, employeeID string, prepared 
 			requested_queue_timeout_seconds, requested_execution_timeout_seconds,
 			target_node_id, agent_type,
 			queue_timeout_seconds, execution_timeout_seconds,
-			queue_expires_at, status, version, created_at, updated_at, required_artifacts
+			queue_expires_at, status, version, created_at, updated_at, required_artifacts, project_id
 		) VALUES (
 			$1::uuid, $2::uuid, $3, $4, $5,
 			$6::uuid, $7::uuid, $8::uuid,
@@ -537,7 +550,7 @@ func insertAccepted(ctx context.Context, tx pgx.Tx, employeeID string, prepared 
 			$15, $16,
 			$17::uuid, $18,
 			$19, $20,
-			now() + ($19::int * interval '1 second'), 'queued', 1, now(), now(), $21
+			now() + ($19::int * interval '1 second'), 'queued', 1, now(), now(), $21, $22::uuid
 		)
 		RETURNING created_at, queue_expires_at`,
 		taskID, employeeID, in.RequestID, prepared.Hash, in.Description,
@@ -545,7 +558,7 @@ func insertAccepted(ctx context.Context, tx pgx.Tx, employeeID string, prepared 
 		nullString(in.WorkingDirectory), nullDevices(in.DeviceNames), nullString(in.AuthorizationScope), nullString(in.ExpectedOutputs),
 		nullString(in.TargetNodeID), nullString(in.AgentType),
 		nullInt(in.QueueTimeoutSeconds), nullInt(in.ExecutionTimeoutSeconds),
-		targetID, agent, queueSeconds, execSeconds, nonNilArtifacts(in.RequiredArtifacts),
+		targetID, agent, queueSeconds, execSeconds, nonNilArtifacts(in.RequiredArtifacts), nullString(in.ProjectID),
 	).Scan(&rec.AcceptedAt, &rec.QueueExpiresAt)
 	if err != nil {
 		if uniqueRequest(err) {
@@ -645,7 +658,7 @@ const taskSelect = `
 	       (SELECT stopped_at FROM execution_stops x JOIN executions e ON e.id = x.execution_id WHERE e.task_id = tasks.id),
 	       (SELECT reason FROM execution_stops x JOIN executions e ON e.id = x.execution_id WHERE e.task_id = tasks.id),
 	       COALESCE((SELECT outcome_known FROM execution_stops x JOIN executions e ON e.id = x.execution_id WHERE e.task_id = tasks.id), false),
-	       (SELECT rerun_of_task_id::text FROM task_relations r WHERE r.task_id = tasks.id AND r.employee_id = tasks.employee_id), required_artifacts
+	       (SELECT rerun_of_task_id::text FROM task_relations r WHERE r.task_id = tasks.id AND r.employee_id = tasks.employee_id), required_artifacts, project_id::text, origin_conversation_id::text
 	FROM tasks`
 
 type queryer interface {
@@ -685,7 +698,7 @@ func scanTask(row pgx.Row) (task.Record, []byte, error) {
 		&rec.Summary, &rec.EvidenceEmptyReason, &rec.ArtifactsEmptyReason,
 		&rec.CancelRequestedAt, &rec.ExecutionExpiresAt, &rec.StopRequestedAt,
 		&rec.StopAcknowledgedAt, &rec.StopConfirmedAt, &rec.StopReason, &rec.StopOutcomeKnown, &rec.RerunOfTaskID,
-		&rec.RequiredArtifacts,
+		&rec.RequiredArtifacts, &rec.ProjectID, &rec.OriginConversationID,
 	); err != nil {
 		return task.Record{}, nil, fmt.Errorf("读取任务失败: %s", redact.Scrub(err.Error()))
 	}

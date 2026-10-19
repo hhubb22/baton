@@ -438,7 +438,7 @@ func (s *Store) executeProjectTool(ctx context.Context, tx pgx.Tx, b projectRunB
 			return nil, ErrNotFound
 		}
 		if name == "tasks.cancel" {
-			if _, err = s.cancelTree(ctx, tx, b.owner, a.TaskID); err != nil {
+			if _, err = s.cancelTree(ctx, tx, b.owner, a.TaskID, false); err != nil {
 				return nil, err
 			}
 			return map[string]any{"task_id": a.TaskID, "read_tool": "tasks.get"}, nil

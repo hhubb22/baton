@@ -18,6 +18,7 @@ function backend(options: { state?: ProjectStatus; fail?: boolean; revision?: nu
       if (url.includes('/memory/') && options.conflict) return json({ code: 'revision_conflict', message: '记忆版本已变化' }, 409)
       return json({ ok: true })
     }
+    if (url === '/api/v1/nodes') return json({ nodes: [], default_device: {} })
     if (url.includes('/status')) return json(options.state ?? { state: 'waiting', waiting_reason: 'all_devices_offline', pending_inputs: 1, last_seq: 0 })
     if (url.includes('/events')) return json({ events: [], has_more: false, next_after_seq: 0 })
     if (url.includes('/messages')) return json({ messages: [] })
@@ -137,4 +138,20 @@ it('按事件序号继续读取分页，保存后的回复取代同序号预览'
   await screen.findByText('正式回复2')
   expect(screen.getAllByText('正式回复1')).toHaveLength(1)
   expect(screen.queryByText('旧预览')).not.toBeInTheDocument()
+})
+
+
+it('暂停的 Project 复用任务表单，默认设备和验证方式可选', async () => {
+  const writes = backend({ state: { state: 'paused', pending_inputs: 0, last_seq: 0 } })
+  render(<ProjectsPage {...props} />)
+  await screen.findByRole('heading', { name: p.title })
+  await userEvent.click(screen.getByText('直接派发任务', { exact: true }))
+  await userEvent.type(screen.getByLabelText('任务说明'), '用户直接控制任务')
+  await userEvent.type(screen.getByLabelText('期望产物与验证方式'), '运行集成测试并检查结果')
+  await userEvent.click(screen.getByRole('button', { name: '提交任务' }))
+  expect(writes[0]?.url).toBe('/api/v1/tasks')
+  expect(writes[0]?.body).toMatchObject({ project_id: p.id, description: '用户直接控制任务', expected_outputs: '运行集成测试并检查结果' })
+  expect(writes[0]?.body.target_node_id).toBeUndefined()
+  expect(writes[0]?.body.agent_type).toBeUndefined()
+  expect(writes[0]?.body.working_directory).toBeUndefined()
 })

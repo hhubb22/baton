@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, messageOf, request } from '../api.ts'
 import { conversationItems, getProject, getProjectEvents, getProjectStatus, pendingMessageID, placementReasons, projectAPI, projectStates, projectURL, saveMessageID, waitingReasons, type Project, type ProjectEvent, type ProjectMemory, type ProjectMessage, type ProjectStatus } from '../projects.ts'
 import { listTasks, taskStates, taskURL, timeLabel, type TaskPage } from '../tasks.ts'
+import { TaskComposer } from './TaskComposer.tsx'
+import type { NodeList } from '../types.ts'
 import { TaskOrigin } from './TaskOrigin.tsx'
 
 type Props = { id: string; csrf: string; employeeID: string; navigate: (id: string) => void; navigateTask: (id: string) => void }
@@ -44,6 +46,7 @@ function ProjectDetail({ id, csrf, employeeID, navigate, navigateTask }: Props) 
   const [events, setEvents] = useState<ProjectEvent[]>([])
   const [messages, setMessages] = useState<ProjectMessage[]>([])
   const [memory, setMemory] = useState<ProjectMemory[]>([])
+  const [nodes, setNodes] = useState<NodeList | null>(null)
   const [tasks, setTasks] = useState<TaskPage>({ tasks: [] })
   const [taskCursor, setTaskCursor] = useState('')
   const [error, setError] = useState('')
@@ -64,13 +67,13 @@ function ProjectDetail({ id, csrf, employeeID, navigate, navigateTask }: Props) 
     const gen = generation.current
     try {
       const p = await getProject(id)
-      const [state, page, queued, memories, taskPage] = await Promise.all([
+      const [state, page, queued, memories, taskPage, nodePage] = await Promise.all([
         getProjectStatus(id), getProjectEvents(id, afterSeq.current),
         readAll<ProjectMessage>(`${projectAPI(id)}/messages`, 'messages'), readAll<ProjectMemory>(`${projectAPI(id)}/memory`, 'entries'),
-        listTasks({ project_id: id, ...(taskCursor ? { cursor: taskCursor } : {}) }),
+        listTasks({ project_id: id, ...(taskCursor ? { cursor: taskCursor } : {}) }), request<NodeList>('/api/v1/nodes'),
       ])
       if (!alive.current || gen !== generation.current) return
-      setProject(p); setStatus(state); setMessages(queued); setMemory(memories); setTasks(taskPage); setError('')
+      setProject(p); setStatus(state); setMessages(queued); setMemory(memories); setTasks(taskPage); setNodes(nodePage); setError('')
       setEvents((current) => [...current.filter((event) => !page.events.some((v) => v.seq === event.seq)), ...page.events].sort((a, b) => a.seq - b.seq))
       afterSeq.current = page.next_after_seq; setVisibleSeq(page.next_after_seq); setHasMore(page.has_more)
     } catch (err) {
@@ -149,6 +152,7 @@ function ProjectDetail({ id, csrf, employeeID, navigate, navigateTask }: Props) 
         <details><summary>添加记忆</summary><MemoryEditor key="new" projectID={id} csrf={csrf} refresh={refresh} /></details>
       </section>
       <section className="card" aria-label="Project 任务"><h2>Project 的任务</h2>
+        <details><summary>直接派发任务</summary><TaskComposer csrf={csrf} employeeID={employeeID} nodes={nodes} projectID={id} onAccepted={() => { setTaskCursor(''); void refresh() }} /></details>
         {tasks.tasks.map((task) => <article key={task.task_id}><h3><a href={taskURL(task.task_id)} onClick={(e) => { e.preventDefault(); navigateTask(task.task_id) }}>{task.description}</a></h3><TaskOrigin task={task} /><p>{taskStates[task.status] ?? task.status}</p><p className="task-text">{task.summary}</p>{task.error_message && <p className="error">{task.error_message}</p>}</article>)}
         {!tasks.tasks.length && <p>暂无任务。</p>}
         {taskCursor && <button onClick={() => setTaskCursor('')}>回到首批任务</button>}
@@ -202,10 +206,12 @@ function MemoryEditor({ projectID, entry, csrf, refresh }: { projectID: string; 
 function ProjectSettings({ project, csrf, save, busy }: { project: Project; csrf: string; save: (body: unknown) => void; busy: boolean }) {
   const [title, setTitle] = useState(project.title)
   const [goal, setGoal] = useState(project.goal)
+  const [status, setStatus] = useState(project.status)
   const [provider, setProvider] = useState(project.agent.provider)
   const [model, setModel] = useState(project.agent.model)
-  return <form onSubmit={(e) => { e.preventDefault(); save({ title, goal, provider, model }) }}>
+  return <form onSubmit={(e) => { e.preventDefault(); save({ title, goal, provider, model, status }) }}>
     <label>标题<input value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={200} /></label>
+    <label>Project 状态<select value={status} onChange={(e) => setStatus(e.target.value)}><option value="active">启用</option><option value="paused">暂停</option><option value="archived">归档</option></select></label>
     <label>目标<textarea value={goal} onChange={(e) => setGoal(e.target.value)} /></label>
     <label>模型订阅<input value={provider} onChange={(e) => setProvider(e.target.value)} placeholder="openai-codex" /></label>
     <label>模型<input value={model} onChange={(e) => setModel(e.target.value)} /></label>
