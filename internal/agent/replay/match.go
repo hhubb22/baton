@@ -143,9 +143,10 @@ func matchString(pattern, actual string, bindings map[string]string, captures ma
 		} else if token == "<any>" {
 			expression.WriteString(regexp.QuoteMeta(token))
 		} else {
+			// 未声明的 <name> 是录制内容本身，例如 Pi 系统提示里的 <tools>。
 			v, ok := bindings[token]
 			if !ok {
-				return fmt.Errorf("%s: 未绑定 %s", path, token)
+				v = token
 			}
 			expression.WriteString(regexp.QuoteMeta(v))
 		}
@@ -241,11 +242,10 @@ func expandString(s string, bindings map[string]string, captures map[string]any)
 			}
 			return text
 		}
-		v, ok := bindings[token]
-		if !ok {
-			failure = fmt.Errorf("未绑定 %s", token)
+		if v, ok := bindings[token]; ok {
+			return v
 		}
-		return v
+		return token
 	})
 	return out, failure
 }

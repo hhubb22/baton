@@ -475,6 +475,11 @@ func Normalize(raw RawRecording) (Transcript, error) {
 	t.Header.Type = "transcript_start"
 	t.Header.Normalization = "v1"
 	t.Header.DroppedFrames = 0
+	t.Header.Bindings = make([]string, 0, len(raw.Header.Bindings))
+	for token := range raw.Header.Bindings {
+		t.Header.Bindings = append(t.Header.Bindings, token)
+	}
+	sort.Strings(t.Header.Bindings)
 	// 先登记保留会话的标识，确保历史中早于协议声明的引用也能替换。
 	for i, e := range raw.Entries {
 		if owners[i] != "" && owners[i] != first {
