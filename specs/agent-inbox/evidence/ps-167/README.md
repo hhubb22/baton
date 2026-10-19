@@ -1,6 +1,6 @@
 # PS-167 验收证据
 
-日期：2026-10-20。基线：`d124e58`。环境：macOS、隔离 PostgreSQL 17、真实 Coordinator、batond、Worker 和 Project Runtime，模型由 `pi-ai` 的 faux provider 提供。
+日期：2026-10-20。初始基线：`d124e58`；已在包含 PS-184、PS-185 的 `7704d3b` 上重新验证。环境：macOS、隔离 PostgreSQL 17、真实 Coordinator、batond、Worker 和 Project Runtime，模型由 `pi-ai` 的 faux provider 提供。
 
 ## 验收对应
 
@@ -24,7 +24,7 @@ pnpm test:e2e
 pnpm check:dist
 ```
 
-Web 单元测试 66 项、完整 E2E 6 项通过。截图与计时可用 `BATON_CAPTURE_INBOX_EVIDENCE=1 pnpm test:e2e --grep 'Inbox：'` 重新生成；它使用隔离测试数据库，数据库地址通过 `BATON_TEST_DATABASE_URL` 提供。
+Web 单元测试 69 项、完整 E2E 7 项通过，包含 PS-184 的直接派发、运行中取消及暂停恢复。截图与计时可用 `BATON_CAPTURE_INBOX_EVIDENCE=1 pnpm test:e2e --grep 'Inbox：'` 重新生成；它使用隔离测试数据库，数据库地址通过 `BATON_TEST_DATABASE_URL` 提供。
 
 仓库根目录的 `go build ./...`、`go vet ./...` 以及 `go test ./internal/store ./internal/httpapi ./internal/inbox ./internal/webui` 通过。Runtime 的 `pnpm check` 通过。
 
