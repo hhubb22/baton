@@ -58,6 +58,17 @@ func compare(e, a any, bindings map[string]string, captures map[string]any, path
 		if !ok {
 			return bad()
 		}
+		// 交付信封作为 JSON 字符串发送，内部按同一结构规则比较。
+		if tokenPattern.MatchString(v) {
+			expectedJSON, eerr := decode([]byte(v))
+			actualJSON, aerr := decode([]byte(actual))
+			if eerr == nil && aerr == nil {
+				switch expectedJSON.(type) {
+				case map[string]any, []any:
+					return compare(expectedJSON, actualJSON, bindings, captures, path+"(JSON)")
+				}
+			}
+		}
 		return matchString(v, actual, bindings, captures, path)
 	case map[string]any:
 		actual, ok := a.(map[string]any)
@@ -199,6 +210,20 @@ func expand(v any, bindings map[string]string, captures map[string]any) (any, er
 }
 
 func expandString(s string, bindings map[string]string, captures map[string]any) (string, error) {
+	if tokenPattern.MatchString(s) {
+		if v, err := decode([]byte(s)); err == nil {
+			switch v.(type) {
+			case map[string]any, []any:
+				expanded, err := expand(v, bindings, captures)
+				if err != nil {
+					return "", err
+				}
+				b, err := marshalUnescaped(expanded)
+				return string(b), err
+			}
+		}
+	}
+
 	var failure error
 	out := tokenPattern.ReplaceAllStringFunc(s, func(token string) string {
 		if token == "<any>" {
