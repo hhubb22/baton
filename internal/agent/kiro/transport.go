@@ -57,11 +57,12 @@ func (p *processIO) Write(data []byte) (int, error) {
 
 func (p *processIO) Close() error {
 	p.once.Do(func() {
-		_ = p.WriteCloser.Close()
-		_ = p.ReadCloser.Close()
+		// Windows 同步管道的关闭会等待读写结束，先终止进程以释放这些操作。
 		if p.cmd != nil && p.cmd.Process != nil {
 			_ = p.cmd.Process.Kill()
 		}
+		_ = p.WriteCloser.Close()
+		_ = p.ReadCloser.Close()
 	})
 	return nil
 }
