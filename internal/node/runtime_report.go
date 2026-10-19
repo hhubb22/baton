@@ -98,7 +98,7 @@ func probeProjectRuntime(ctx context.Context) *protocol.ProjectRuntime {
 		return nil
 	}
 	var p protocol.ProjectRuntime
-	if protocol.DecodeRuntimeJSON(out, &p) != nil || protocol.ValidateProjectRuntime(&p) != nil || p.Version != projectRuntimeVersion {
+	if protocol.DecodeRuntimeMessage(out, &p) != nil || protocol.ValidateProjectRuntime(&p) != nil || p.Version != projectRuntimeVersion {
 		return nil
 	}
 	sort.Slice(p.Providers, func(i, j int) bool { return p.Providers[i].Provider < p.Providers[j].Provider })

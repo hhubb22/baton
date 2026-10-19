@@ -74,6 +74,18 @@ func DecodeRuntimeJSON(raw []byte, out any) error {
 	return nil
 }
 
+// DecodeRuntimeMessage 忽略跨进程报告的未知字段，保留大小、编码和单文档限制。
+func DecodeRuntimeMessage(raw []byte, out any) error {
+	if len(raw) > MaxRuntimeReportBytes || !utf8.Valid(raw) {
+		return ErrRuntimeReport
+	}
+	d := json.NewDecoder(bytes.NewReader(raw))
+	if d.Decode(out) != nil || d.Decode(new(any)) != io.EOF {
+		return ErrRuntimeReport
+	}
+	return nil
+}
+
 func ValidateProjectRuntime(p *ProjectRuntime) error {
 	if p == nil {
 		return nil

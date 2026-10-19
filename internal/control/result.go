@@ -19,7 +19,6 @@ func (s *Server) onExecutionInput(ctx context.Context, connID string, env protoc
 		return
 	}
 	dec := json.NewDecoder(bytes.NewReader(rawBody(env.Body)))
-	dec.DisallowUnknownFields()
 	var req protocol.InputRequest
 	if err := dec.Decode(&req); err != nil || req.Type != protocol.BodyExecutionInput {
 		s.replyInput(ctx, connID, env, protocol.InputResult{OK: false, Code: protocol.CodeInvalidMessage, Message: "任务输入请求无效"})
@@ -50,7 +49,6 @@ func (s *Server) onExecutionReport(ctx context.Context, connID string, env proto
 		return
 	}
 	dec := json.NewDecoder(bytes.NewReader(rawBody(env.Body)))
-	dec.DisallowUnknownFields()
 	var report protocol.ExecutionReport
 	if err := dec.Decode(&report); err != nil || report.Type != protocol.BodyExecutionReport {
 		s.replyReport(ctx, connID, env, protocol.ReportAck{OK: false, Code: protocol.CodeInvalidMessage})
@@ -93,7 +91,6 @@ func (s *Server) onExecutionControl(ctx context.Context, connID string, env prot
 	}
 	var req protocol.InputRequest
 	dec := json.NewDecoder(bytes.NewReader(rawBody(env.Body)))
-	dec.DisallowUnknownFields()
 	result := protocol.ExecutionControl{Type: protocol.BodyExecutionControlResult}
 	if err := dec.Decode(&req); err != nil || req.Type != protocol.BodyExecutionControl {
 		result.Code = protocol.CodeInvalidMessage

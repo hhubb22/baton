@@ -477,6 +477,20 @@ Gateway 根据认证结果构造 `employee_id`、`node_id`、`credential_id`，�
 
 新增消息类型（2026-10-18 修订）：节点上行的 `ProjectRuntimeRequest`，携带 `run_id` 和 `lease_epoch`，处理方式与 `AgentRequest` 相同；中心下行的 `project_run_start`、`project_run_wake`、`project_run_stop`。旧版本 batond 不认识这些类型时明确拒绝，Coordinator 不会把 Project Agent 放到这样的节点上。
 
+### 跨版本消息字段（R-41）
+
+Coordinator、batond 和 Project Runtime 之间的消息允许新增可选字段；已有字段不删除、不改类型、不改含义。接收方忽略未知字段，包括已知对象中的未知字段，并继续验证必填字段、字段类型、取值、身份、关联标识和容量限制。未知消息类型沿用各入口现有的处理方式。版本上报、拒绝旧版本和本地数据迁移规则留到第一个版本之后。
+
+| 输入 | 未知字段规则 |
+|---|---|
+| 节点与 Coordinator 的控制消息、准备与启动、任务输入与报告、文件与 Session RPC、Agent 委托、子任务交付和 Project Runtime 请求/回复 | 忽略 |
+| 节点能力报告、Project Runtime 能力探测回复 | 忽略；持久化报告仍只序列化已知字段 |
+| batond 与 Project Runtime 的本地 IPC、stdio 帧及请求/回复 | 忽略；保留认证、运行身份绑定、并发和单帧限制 |
+| 浏览器 HTTP API、执行 Agent 结果候选、模型工具参数、回放工具、Plane 配置 | 保持严格检查 |
+| 本地节点配置、目录授权配置、`project-exec.json`、Agent CLI 本地请求及上下文文件 | 保持原有检查 |
+
+`runtimes/project-agent/src/tools.ts` 定义模型工具参数，继续限制额外参数。Runtime 接收对端消息的入口是 `src/protocol.ts` 与 `runtimes/shared/stdio.ts`。能力报告使用 `DecodeRuntimeMessage`，本地命令配置继续使用严格的 `DecodeRuntimeJSON`。
+
 ### 节点凭据与吊销
 
 保留 Ed25519 签名 JWT，绑定节点、员工、credential_id、签发方、受众与有效期。Authenticator 取得所需验证能力，签名私钥由 Coordinator 的签发服务持有。节点连接凭据继续使用 baton-node 受众，启动许可使用 baton-start，两者不能互相代用。升级保留签名身份与有效凭据，不强制节点重新注册（R-04、R-40）。

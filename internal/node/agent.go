@@ -107,7 +107,7 @@ func (b *agentBridge) call(ctx context.Context, req protocol.AgentRequest) proto
 		return agentFailure(task.CodeUnavailable)
 	}
 	var result protocol.AgentResult
-	if agentcli.Decode(raw, &result) != nil || result.Type != protocol.BodyAgentResult {
+	if json.Unmarshal(raw, &result) != nil || result.Type != protocol.BodyAgentResult {
 		return agentFailure(task.CodeUnavailable)
 	}
 	if result.OK && req.Operation == "result" && req.TaskID != req.SourceTaskID {
@@ -120,7 +120,8 @@ func (b *agentBridge) call(ctx context.Context, req protocol.AgentRequest) proto
 				return agentFailure(task.CodeUnavailable)
 			}
 			raw, err = loop.roundTrip(ctx, body)
-			if err != nil || agentcli.Decode(raw, &result) != nil || result.Type != protocol.BodyAgentResult {
+			result = protocol.AgentResult{}
+			if err != nil || json.Unmarshal(raw, &result) != nil || result.Type != protocol.BodyAgentResult {
 				return agentFailure(task.CodeUnavailable)
 			}
 		}

@@ -116,7 +116,6 @@ func (s *Server) noteFileResult(env protocol.Envelope) {
 		return
 	}
 	dec := json.NewDecoder(bytes.NewReader(rawBody(env.Body)))
-	dec.DisallowUnknownFields()
 	var result protocol.FileResult
 	if err := dec.Decode(&result); err != nil || result.Type != protocol.BodyFileResult {
 		s.deliverFile(env.CorrelationID, fileNotice{bad: true})

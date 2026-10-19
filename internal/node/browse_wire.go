@@ -29,7 +29,6 @@ func handleFileEnvelope(ctx context.Context, raw []byte, w *wsWriter, dataDir st
 		return true
 	}
 	dec := json.NewDecoder(bytes.NewReader(wrap.Envelope.Body))
-	dec.DisallowUnknownFields()
 	var req protocol.FileRequest
 	if err := dec.Decode(&req); err != nil || req.Type != protocol.BodyFileBrowse {
 		writeFileResult(ctx, w, wrap.Envelope.MessageID, protocol.FileResult{

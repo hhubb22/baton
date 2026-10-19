@@ -38,7 +38,9 @@ func TestRuntimeProbeContractAndBounds(t *testing.T) {
 	}{
 		{`{"version":"0.1.0","providers":[{"provider":"openai-codex","status":"available"}]}`, true},
 		{`{"version":"0.1.0","providers":[{"provider":"openai-codex","status":"login_required"}]}`, true},
-		{`{"version":"0.1.0","providers":[],"token":"secret"}`, false},
+		{`{"version":"0.1.0","providers":[],"future":true}`, true},
+		{`{"providers":[]}`, false},
+		{`{"version":42,"providers":[]}`, false},
 		{"slow", false}, {"flood", false}, {"error", false},
 	} {
 		if err := os.WriteFile(probeFile, []byte(test.raw), 0o600); err != nil {

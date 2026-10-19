@@ -137,7 +137,6 @@ func (s *Server) noteSessionResult(env protocol.Envelope) {
 		return
 	}
 	dec := json.NewDecoder(bytes.NewReader(rawBody(env.Body)))
-	dec.DisallowUnknownFields()
 	var result protocol.SessionResult
 	if err := dec.Decode(&result); err != nil || result.Type != protocol.BodySessionResult {
 		s.deliverSession(env.CorrelationID, sessionNotice{bad: true})

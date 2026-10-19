@@ -37,9 +37,10 @@ func TestProjectRuntimeRejectsMalformedBodies(t *testing.T) {
 	for _, tc := range []struct {
 		body, code string
 	}{
-		{`{"type":"project_runtime.request","extra":true}`, "invalid_request"},
+		{`{"operation":"bootstrap","extra":true}`, "invalid_request"},
 		{`{"type":"project_runtime.request"} {}`, "invalid_request"},
 		{`{"type":"project_runtime.result"}`, "invalid_request"},
+		{`{"type":42}`, "invalid_request"},
 		{`{"type":"project_runtime.request","reason":"` + string([]byte{0xff}) + `"}`, "invalid_request"},
 		{strings.Repeat(" ", protocol.MaxProjectRuntimeBytes+1), "too_large"},
 	} {
@@ -122,6 +123,7 @@ func TestProjectRunDeliveryAndAuthenticatedRequests(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		body = compatibilityBody(t, json.RawMessage(body), "extra")
 		if err := s.Handle(ctx, source, protocol.Envelope{Version: protocol.Version, MessageID: newID(), Source: &protocol.Source{EmployeeID: "forged"}, Body: body}); err != nil {
 			t.Fatal(err)
 		}

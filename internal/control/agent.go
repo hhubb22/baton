@@ -15,7 +15,6 @@ func (s *Server) onAgentRequest(ctx context.Context, connID string, env protocol
 	result := protocol.AgentResult{Type: protocol.BodyAgentResult, Code: task.CodeInvalidRequest}
 	var req protocol.AgentRequest
 	dec := json.NewDecoder(bytes.NewReader(rawBody(env.Body)))
-	dec.DisallowUnknownFields()
 	if dec.Decode(&req) != nil || req.Type != protocol.BodyAgentRequest {
 		s.replyExecution(ctx, connID, env, result)
 		return

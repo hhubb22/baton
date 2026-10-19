@@ -55,6 +55,11 @@ export class StdioClient {
     let error = new Error("sidecar_closed");
     try {
       for await (const value of frames(this.input)) {
+        if (
+          !value || typeof value !== "object" ||
+          !Number.isSafeInteger((value as any).id) || (value as any).id <= 0 ||
+          !Object.hasOwn(value, "result")
+        ) throw new Error("sidecar_invalid_response");
         const frame = value as { id: number; result: unknown };
         const waiter = this.pending.get(frame.id);
         if (!waiter) throw new Error("sidecar_unknown_response");

@@ -27,3 +27,21 @@ test("stdio 响应按编号匹配，EOF 拒绝尚未完成的调用", async () =
   input.end();
   await assert.rejects(pending, /sidecar_closed/);
 });
+
+test("stdio 忽略未知字段并保留回复内容", async () => {
+  const input = new PassThrough(), output = new PassThrough();
+  const client = new StdioClient(input, output);
+  const pending = client.call({ operation: "probe" });
+  input.write('{"id":1,"result":{"known":42},"future":{"enabled":true}}\n');
+  assert.deepEqual(await pending, { known: 42 });
+  input.end();
+});
+test("stdio 拒绝缺少必填字段和错误编号类型", async () => {
+  for (const frame of [{result: {}}, {id: 1}, {id: "1", result: {}}]) {
+    const input = new PassThrough(), output = new PassThrough();
+    const client = new StdioClient(input, output);
+    const pending = client.call({ operation: "probe" });
+    input.write(JSON.stringify(frame) + "\n");
+    await assert.rejects(pending, /sidecar_invalid_response/);
+  }
+});

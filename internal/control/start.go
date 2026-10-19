@@ -17,7 +17,6 @@ func (s *Server) onStartPermit(ctx context.Context, connID string, env protocol.
 		return
 	}
 	dec := json.NewDecoder(bytes.NewReader(rawBody(env.Body)))
-	dec.DisallowUnknownFields()
 	var req protocol.StartPermitRequest
 	if err := dec.Decode(&req); err != nil || req.Type != protocol.BodyStartPermit {
 		s.replyStart(ctx, connID, env, protocol.StartPermitResult{
@@ -83,7 +82,6 @@ func (s *Server) onStartReport(ctx context.Context, connID string, env protocol.
 		return
 	}
 	dec := json.NewDecoder(bytes.NewReader(rawBody(env.Body)))
-	dec.DisallowUnknownFields()
 	var report protocol.StartReport
 	if err := dec.Decode(&report); err != nil || report.Type != protocol.BodyStartReport || report.Started {
 		s.reply(ctx, connID, env, false, protocol.CodeInvalidMessage)
@@ -105,6 +103,12 @@ func (s *Server) replyStart(ctx context.Context, connID string, req protocol.Env
 	}
 	result.Type = protocol.BodyStartPermitResult
 	body, err := json.Marshal(result)
+	if os.Getenv("BATON_TEST_START_PERMIT_EXTRA_FIELD") == "1" {
+		body, err = json.Marshal(struct {
+			protocol.StartPermitResult
+			FutureField string `json:"future_field"`
+		}{result, "compatibility-test"})
+	}
 	if err != nil {
 		return
 	}
