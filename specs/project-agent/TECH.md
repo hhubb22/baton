@@ -97,13 +97,14 @@ PS-155 通过 0016 交付 Project、Agent、主对话、事件、记忆和输入
 | `project_memory_revisions` | entry_id, employee_id, revision, content, author, source_seq, created_at | 只追加；`author` 为 agent 或 user |
 | `node_runtime_reports` | node_id, employee_id, report_version, reported_at, report | 节点能力的结构化报告（第 8 节）；现有 `nodes.capabilities` 是最多 32 项的字符串数组，装不下目录和仓库信息 |
 
-`tasks` 新增可空列 `project_id`、`origin_conversation_id`、`origin_tool_call_id`，并对后两列建唯一索引。用户手工创建和执行 Agent 派生的任务这三列为空，现有行为不变。
+`tasks` 新增可空列 `project_id`、`origin_conversation_id`、`origin_tool_call_id`，并对后两列建唯一索引。用户在 Project 手工创建的任务只填写 `project_id`；全局手工任务和执行 Agent 派生的任务这三列为空。
 
-输入队列是 Coordinator 内部的数据，用户界面上的待办事项不用这张表。事项表和浏览器通知的订阅表由 Agent Inbox 的技术设计定义。`source_type` 有五种，分成两类：
+输入队列是 Coordinator 内部的数据，用户界面上的待办事项不用这张表。事项表和浏览器通知的订阅表由 Agent Inbox 的技术设计定义。`source_type` 有六种，分成两类：
 
 | source_type | 类别 | 来源 | payload 上限 |
 |---|---|---|---|
 | `user_message` | 主动 | 用户在主对话发送的消息，API 拒绝超过 64 KiB 的消息 | 64 KiB 正文加元数据 |
+| `user_task_result` | 被动 | 用户在 Project 直接派发的任务进入终态 | 40 KiB |
 | `task_result` | 主动 | Project Agent 派发的任务进入终态（第 9 节） | 40 KiB |
 | `attention_answer` | 主动 | 用户回答或关闭一个事项（Agent Inbox IB-12），内容是事项 ID、标题、选中的选项和最多 4 KiB 的文字；上限包含 JSON 转义 | 32 KiB |
 | `memory_updated` | 被动 | 用户在界面上新建或修改记忆（第 6.4 节） | 1 KiB |
@@ -377,6 +378,22 @@ Runtime 的 `preview` 操作通过现有 RPC 发送 `{last_seq,payload:{text,tru
 
 验收测试、截图和命令结果见 [PS-159 验证记录](evidence/ps-159/README.md)。
 
+
+### 12. 用户在 Project 里直接控制任务（PS-184）
+
+`POST /api/v1/tasks` 在现有任务请求中增加可选的 `project_id`。接受任务的同一事务检查 Project 属于当前员工；暂停状态仍接受任务。请求摘要包含显式 Project，未填写时保持原摘要。复用默认设备、默认 Agent、工作目录和任务幂等规则。`tasks.project_id` 记录归属；`origin_conversation_id` 非空表示 Project Agent 派发，为空且没有来源 Session 表示用户派发，列表和详情沿用这些字段显示派发者。
+
+迁移 `0020` 给既有输入队列增加 `user_task_result` 来源类型，沿用 PA-17 的被动通知领取机制、40 KiB 任务结果上限和 `task:{task_id}:result:{version}` 去重键。用户任务终态和人工修订的结果写入这个队列，不触发放置或唤醒；下一条主动输入到达时一起领取。Project Agent 派发的任务继续使用主动 `task_result`。执行 Agent 的子任务仍按父子关系交付。
+
+迁移同时增加任务的 `user_operation` JSON 字段，保存最近一次用户操作的员工 ID、操作（cancel、resolve、rerun）及新执行的任务 ID。取消在原有任务锁内记录，等待节点停止回执后，结果通知带回这个操作；核实和新执行在各自事务里记录操作并入队。新执行复用原任务的 Project，作为用户派发的新任务；原任务增加版本后的输入注明新任务 ID。操作和结果输入同事务提交，重试沿用原来的版本和请求标识规则。
+
+暂停仍通过现有 Project 状态作废运行租约，不停止执行任务。期间的用户消息、主动结果和被动通知均保留。恢复后按既有主动输入和批量领取规则处理，不重复领取。
+
+Project 页面复用 `TaskComposer`，只要求任务说明，设备、Agent、目录和期望产物及验证方式可选。任务详情继续使用现有取消、人工核实和新执行操作。表单保留原请求标识恢复逻辑；待确认请求同时保留 Project 标识，避免跨页面补全请求时改变归属。
+
+Runtime 系统提示词和 `tasks.dispatch` 说明要求在 `expected_outputs` 写明验证方式，无法确定时写明原因；系统提示词要求不撤销用户操作，除非用户在对话中要求。后端按既有权限和状态规则接受操作。
+
+验证覆盖 PostgreSQL 的归属、幂等、主动与被动领取、取消回执、暂停恢复及新执行；真实 Runtime 进程使用模型替身检查请求中的提示词、工具说明和输入；Web E2E 通过真实后端及执行进程覆盖 Project 派发、人工操作和来源展示。验收测试和截图见 [PS-184 验证记录](evidence/ps-184/README.md)。
 
 ## Testing and validation
 

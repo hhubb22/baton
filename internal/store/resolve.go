@@ -52,6 +52,9 @@ func (s *Store) ResolveTask(ctx context.Context, employeeID, taskID string, in t
 	if err := insertRefKind(ctx, tx, ExecutionReport{EmployeeID: employeeID, TaskID: taskID, ExecutionID: executionID}, "evidence", in.Evidence, 0); err != nil {
 		return task.Record{}, err
 	}
+	if err := recordUserTaskOperation(ctx, tx, employeeID, taskID, "resolve", ""); err != nil {
+		return task.Record{}, err
+	}
 	if err := enqueueTaskTerminal(ctx, tx, employeeID, taskID); err != nil {
 		return task.Record{}, err
 	}
@@ -144,7 +147,7 @@ func (s *Store) rerunOnce(ctx context.Context, employeeID, taskID string, in tas
 	if err := tx.QueryRow(ctx, `SELECT queue_timeout_seconds FROM tasks WHERE id = $1::uuid`, taskID).Scan(&queueSeconds); err != nil {
 		return task.Record{}, err
 	}
-	input := task.Input{RequestID: in.RequestID, Description: previous.Description,
+	input := task.Input{ProjectID: previous.ProjectID, RequestID: in.RequestID, Description: previous.Description,
 		RequiredArtifacts: previous.RequiredArtifacts,
 		TargetNodeID:      &previous.TargetNodeID, AgentType: &previous.AgentType,
 		WorkingDirectory: previous.WorkingDirectory, AuthorizationScope: previous.AuthorizationScope,
@@ -177,6 +180,12 @@ func (s *Store) rerunOnce(ctx context.Context, employeeID, taskID string, in tas
 	}
 	audit := task.Rerun{RerunInput: in, TaskID: rec.TaskID, PreviousStatus: previous.Status}
 	if err := insertManualEvent(ctx, tx, employeeID, previous, task.EventRerunRequested, previous.Status, nil, &audit); err != nil {
+		return task.Record{}, err
+	}
+	if err := recordUserTaskOperation(ctx, tx, employeeID, taskID, "rerun", rec.TaskID); err != nil {
+		return task.Record{}, err
+	}
+	if err := enqueueProjectTaskUpdate(ctx, tx, employeeID, taskID, true); err != nil {
 		return task.Record{}, err
 	}
 	if err := s.runBeforeCommit(ctx); err != nil {
@@ -239,5 +248,10 @@ func insertManualEvent(ctx context.Context, tx pgx.Tx, employeeID string, previo
 	 (SELECT id FROM executions WHERE task_id = $3::uuid AND employee_id = $2::uuid), $11, $12, now())`,
 		id, employeeID, previous.TaskID, previous.Version+1, kind, status, previous.TargetNodeID, previous.AgentType,
 		previous.QueueExpiresAt, previous.ExecutionTimeoutSeconds, resolution, rerun)
+	return err
+}
+
+func recordUserTaskOperation(ctx context.Context, tx pgx.Tx, owner, taskID, action, newTaskID string) error {
+	_, err := tx.Exec(ctx, `UPDATE tasks SET user_operation=jsonb_strip_nulls(jsonb_build_object('actor', 'user', 'employee_id', $1::text, 'action', $3::text, 'new_task_id', NULLIF($4::text,''))) WHERE employee_id=$1::uuid AND id=$2::uuid AND project_id IS NOT NULL AND ($3 <> 'cancel' OR (cancel_requested_at IS NULL AND status NOT IN ('completed','failed','cancelled')))`, owner, taskID, action, newTaskID)
 	return err
 }

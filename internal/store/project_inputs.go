@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 
 	"baton/internal/task"
 	"errors"
@@ -26,7 +27,7 @@ func insertProjectInput(ctx context.Context, tx pgx.Tx, employeeID, agentID, kin
 	case "user_message":
 	case "attention_answer":
 		maxBytes = 32 << 10
-	case "task_result":
+	case "task_result", "user_task_result":
 		maxBytes = 40 << 10
 	case "memory_updated":
 		maxBytes = 1 << 10
@@ -53,14 +54,16 @@ func insertProjectInput(ctx context.Context, tx pgx.Tx, employeeID, agentID, kin
 
 // ProjectTaskResultInput 保存任务终态的限长通知。
 type ProjectTaskResultInput struct {
-	TaskID        string `json:"task_id"`
-	Version       int64  `json:"version"`
-	Status        string `json:"status"`
-	ExitCode      *int   `json:"exit_code,omitempty"`
-	Text          string `json:"text"`
-	OriginalBytes int    `json:"original_bytes"`
-	Truncated     bool   `json:"truncated"`
-	FullContent   string `json:"full_content,omitempty"`
+	UserOperation    json.RawMessage `json:"user_operation,omitempty"`
+	NotificationOnly bool            `json:"notification_only,omitempty"`
+	TaskID           string          `json:"task_id"`
+	Version          int64           `json:"version"`
+	Status           string          `json:"status"`
+	ExitCode         *int            `json:"exit_code,omitempty"`
+	Text             string          `json:"text"`
+	OriginalBytes    int             `json:"original_bytes"`
+	Truncated        bool            `json:"truncated"`
+	FullContent      string          `json:"full_content,omitempty"`
 }
 
 func boundedText(s string, limit int) string {
@@ -108,7 +111,11 @@ func EnqueueProjectTaskResult(ctx context.Context, tx pgx.Tx, employeeID, agentI
 		}
 		limit = limit * 3 / 4
 	}
-	return insertProjectInput(ctx, tx, employeeID, agentID, "task_result", fmt.Sprintf("task:%s:result:%d", in.TaskID, in.Version), in)
+	kind := "task_result"
+	if in.NotificationOnly {
+		kind = "user_task_result"
+	}
+	return insertProjectInput(ctx, tx, employeeID, agentID, kind, fmt.Sprintf("task:%s:result:%d", in.TaskID, in.Version), in)
 }
 
 func projectUpdatedPayload(p projectagent.Project) any {
@@ -131,13 +138,18 @@ func projectUpdatedPayload(p projectagent.Project) any {
 
 // enqueueTaskTerminal 只读取任务与 Agent 归属，不取得 Agent 行锁。
 func enqueueTaskTerminal(ctx context.Context, tx pgx.Tx, employeeID, taskID string) error {
+	return enqueueProjectTaskUpdate(ctx, tx, employeeID, taskID, false)
+}
+
+func enqueueProjectTaskUpdate(ctx context.Context, tx pgx.Tx, employeeID, taskID string, includeNonterminal bool) error {
 	var agentID, status string
+	var passive bool
+	var operation json.RawMessage
 	var version int64
 	var summary, message *string
-	err := tx.QueryRow(ctx, `SELECT a.id::text,t.status,t.version,t.summary,t.error_message
- FROM tasks t JOIN conversations c ON c.id=t.origin_conversation_id AND c.employee_id=t.employee_id
- JOIN project_agents a ON a.id=c.agent_id AND a.project_id=t.project_id
- WHERE t.employee_id=$1 AND t.id=$2 AND t.status IN ('completed','failed','cancelled')`, employeeID, taskID).Scan(&agentID, &status, &version, &summary, &message)
+	err := tx.QueryRow(ctx, `SELECT a.id::text,t.status,t.version,t.summary,t.error_message,t.origin_conversation_id IS NULL,t.user_operation
+ FROM tasks t JOIN project_agents a ON a.project_id=t.project_id AND a.employee_id=t.employee_id
+ WHERE t.employee_id=$1 AND t.id=$2 AND (t.status IN ('completed','failed','cancelled') OR $3)`, employeeID, taskID, includeNonterminal).Scan(&agentID, &status, &version, &summary, &message, &passive, &operation)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
@@ -161,5 +173,5 @@ func enqueueTaskTerminal(ctx context.Context, tx pgx.Tx, employeeID, taskID stri
 		text.WriteString("\n")
 		text.Write(raw)
 	}
-	return EnqueueProjectTaskResult(ctx, tx, employeeID, agentID, ProjectTaskResultInput{TaskID: taskID, Version: version, Status: status, Text: text.String()})
+	return EnqueueProjectTaskResult(ctx, tx, employeeID, agentID, ProjectTaskResultInput{TaskID: taskID, Version: version, Status: status, Text: text.String(), NotificationOnly: passive, UserOperation: operation})
 }

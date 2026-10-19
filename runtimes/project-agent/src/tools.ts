@@ -60,7 +60,7 @@ export const toolDefinitions = [
   {
     name: "tasks.dispatch",
     description:
-      "把开发任务交给执行 Agent；工作目录必须已存在。结果可用 tasks.get 查询。",
+      "把开发任务交给执行 Agent；工作目录必须已存在。在 expected_outputs 写明验证方式，找不到验证方式时写明原因。结果可用 tasks.get 查询。",
     parameters: obj({
       target_node_id: str(),
       agent_type: str(),

@@ -12,8 +12,6 @@ import (
 
 // TaskView 分别提供执行事实与交付事实，不从节点在线状态推断任务结果。
 type TaskView struct {
-	ProjectID            *string `json:"project_id,omitempty"`
-	OriginConversationID *string `json:"origin_conversation_id,omitempty"`
 	task.Record
 	UpdatedAt         time.Time  `json:"updated_at"`
 	DeliveryStatus    string     `json:"delivery_status"`
