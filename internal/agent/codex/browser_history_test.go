@@ -12,70 +12,45 @@ import (
 	"time"
 
 	"baton/internal/agent"
+	"baton/internal/agent/codex/replaytest"
+	"baton/internal/agent/replay"
+	"baton/internal/privatefile"
 	"baton/internal/protocol"
 )
 
-func TestBrowserHistoryIsolatedFromExecutionAndReadableAfterExit(t *testing.T) {
-	config := fixtureConfig(t, "running")
-	a := New(config)
-	defer a.Close()
-	ctx := context.Background()
-	if err := a.Start(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if err := a.StartTask(ctx, "history-test", "任务输入"); err != nil {
-		t.Fatal(err)
-	}
-	file := filepath.Join(config.Directory, "history-items.json")
-	write := func(text string) {
-		raw, _ := json.Marshal(map[string]any{"data": []any{map[string]any{"turnId": "turn-fixture", "item": map[string]string{"id": "item", "type": "agentMessage", "text": text}}}})
-		if err := os.WriteFile(file, raw, 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write(strings.Repeat("x", 9*1024*1024))
-	if _, err := a.ReadBrowserHistory(ctx, "", 16); !errors.Is(err, agent.ErrHistoryUnread) {
-		t.Fatal("超限原生协议没有报告不可读", err)
-	}
-	var read map[string]any
-	if err := a.call(ctx, "thread/read", map[string]string{"threadId": "thread-fixture"}, &read); err != nil {
-		t.Fatal("历史查询关闭了执行连接", err)
-	}
-	write(strings.Repeat("中文", 10000))
-	page, err := a.ReadBrowserHistory(ctx, "", 16)
-	if err != nil || !protocol.ValidHistoryPage(&page) || len(page.Entries) != 1 || !page.Entries[0].Truncated || !page.Gap {
-		t.Fatal("超大条目没有受限引用", err)
-	}
-	if err := a.Close(); err != nil {
-		t.Fatal(err)
-	}
-	cold := New(config)
-	defer cold.Close()
-	page, err = cold.ReadBrowserHistory(ctx, "", 16)
-	if err != nil || len(page.Entries) != 1 {
-		t.Fatal("执行连接退出后无法只读历史", err)
-	}
-	log, err := os.ReadFile(filepath.Join(config.Directory, "requests.jsonl"))
+func TestBrowserHistoryReadableAfterExit(t *testing.T) {
+	dir, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(string(log), `"method":"thread/start"`) != 1 || strings.Count(string(log), `"method":"turn/start"`) != 1 || strings.Contains(string(log), `"method":"thread/resume"`) {
-		t.Fatal("历史查询启动或恢复了执行")
-	}
-	if !strings.Contains(string(log), `"limit":1`) {
-		t.Fatal("浏览器没有限制原生分页条数")
-	}
-	if err := os.WriteFile(file, []byte(`{"data":[]}`), 0600); err != nil {
+	config := Config{Directory: dir, SessionID: "history-unit", StatePath: filepath.Join(dir, "state.json")}
+	state := State{Version: Version, SessionID: config.SessionID, ThreadID: "thread-1", TurnID: "turn-1", Directory: dir, HistoryRoot: dir, HistoryPath: filepath.Join(dir, "history.jsonl")}
+	raw, _ := json.Marshal(state)
+	if err := privatefile.WriteFile(config.StatePath, raw); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cold.ReadBrowserHistory(ctx, "", 16); !errors.Is(err, agent.ErrHistoryMissing) {
-		t.Fatal("已执行 Session 的空历史被视为完整", err)
+	header, _ := json.Marshal(map[string]any{"type": "session_meta", "payload": map[string]string{"id": state.ThreadID, "cwd": dir, "cli_version": Version}})
+	body, _ := json.Marshal(map[string]any{"type": "response_item", "payload": map[string]string{"text": strings.Repeat("中文", 10000)}})
+	if err := os.WriteFile(state.HistoryPath, append(append(header, '\n'), append(body, '\n')...), 0600); err != nil {
+		t.Fatal(err)
+	}
+	a := New(config)
+	a.Close()
+	page, err := a.ReadBrowserHistory(context.Background(), "", 16)
+	if err != nil || !protocol.ValidHistoryPage(&page) || len(page.Entries) != 2 || !page.Entries[1].Truncated || !page.Gap {
+		t.Fatalf("退出后受限历史: %+v %v", page, err)
+	}
+	if err := os.Remove(state.HistoryPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.ReadBrowserHistory(context.Background(), "", 16); !errors.Is(err, agent.ErrHistoryMissing) {
+		t.Fatal("缺失历史", err)
 	}
 	if err := os.Remove(config.StatePath); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cold.ReadBrowserHistory(ctx, "", 16); !errors.Is(err, agent.ErrHistoryMissing) {
-		t.Fatal("映射删除后未报告缺失", err)
+	if _, err := a.ReadBrowserHistory(context.Background(), "", 16); !errors.Is(err, agent.ErrHistoryMissing) {
+		t.Fatal("缺失映射", err)
 	}
 }
 
@@ -162,4 +137,69 @@ func TestCodexHistoryNoModelProbe(t *testing.T) {
 		t.Fatal("原生历史删除未报告缺失", err)
 	}
 	t.Logf("Codex %s：无模型输入；原生文件 %d 条/%d 页，包含 12 MiB 条目，读取耗时 %s；删除被准确识别", Version, count, pages, time.Since(started))
+}
+
+// 旧映射的协议查询使用独立 app-server；录制片段只派生只读参数与大条目。
+func TestBrowserHistoryFallbackReplayIsolation(t *testing.T) {
+	binary := replaytest.Build(t, "../../../tools/agent-replay")
+	tape := replaytest.AdapterTape(replaytest.Load(t, "testdata/replay/simple.ndjson"))
+	tape, ends := replaytest.EndGates(tape)
+	original := append([]replay.Entry(nil), tape.Entries...)
+	for _, e := range original {
+		if e.Process == 1 {
+			e.Process = 3
+			if e.Label != "" {
+				e.Label += ":browser"
+			}
+			tape.Entries = append(tape.Entries, e)
+		}
+	}
+	history := replaytest.Load(t, "testdata/replay/restore_load_only.ndjson")
+	tape.Entries = append(tape.Entries, replay.Entry{Type: "process_start", Process: 4, Args: []string{"app-server", "--stdio"}})
+	for _, label := range []string{"request:initialize", "response:initialize", "notification:initialized", "request:thread/read", "response:thread/read", "request:thread/items/list", "response:thread/items/list"} {
+		for _, e := range history.Entries {
+			if e.Label != label {
+				continue
+			}
+			e.Process = 4
+			e.Label += ":browser"
+			var f map[string]any
+			if err := json.Unmarshal(e.Frame, &f); err != nil {
+				t.Fatal(err)
+			}
+			switch label {
+			case "request:thread/read":
+				f["params"].(map[string]any)["includeTurns"] = false
+			case "response:thread/read":
+				f["result"].(map[string]any)["thread"].(map[string]any)["path"] = ""
+			case "request:thread/items/list":
+				f["params"].(map[string]any)["limit"] = 1
+			case "response:thread/items/list":
+				f["result"] = map[string]any{"data": []any{map[string]any{"turnId": "turn-1", "item": map[string]string{"id": "item-browser", "type": "agentMessage", "text": strings.Repeat("中文", 10000)}}}}
+			}
+			e.Frame, _ = json.Marshal(f)
+			tape.Entries = append(tape.Entries, e)
+		}
+	}
+	r := replaytest.Prepare(t, binary, tape, append(ends, "event:turn/completed")...)
+	config := replayConfig(r)
+	a := New(config)
+	defer a.Close()
+	mustStart(t, a)
+	mustInput(t, a)
+	r.Wait(t, "event:turn/completed")
+	saved := a.Snapshot()
+	saved.HistoryPath = ""
+	saved.HistoryRoot = ""
+	raw, _ := json.Marshal(saved)
+	if err := privatefile.WriteFile(config.StatePath, raw); err != nil {
+		t.Fatal(err)
+	}
+	page, err := a.ReadBrowserHistory(context.Background(), "", 16)
+	if err != nil || !protocol.ValidHistoryPage(&page) || len(page.Entries) != 1 || !page.Entries[0].Truncated {
+		t.Fatal("独立协议历史查询", page, err)
+	}
+	r.Release(t, "event:turn/completed")
+	successful(t, awaitOutput(t, a))
+	r.Wait(t, ends[0])
 }

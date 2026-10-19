@@ -1,326 +1,372 @@
 package codex
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"baton/internal/agent/codex/codexreplaytest"
-	"baton/internal/agent/replay"
+	"baton/internal/agent"
+	"baton/internal/agent/codex/replaytest"
+	"baton/internal/privatefile"
+	"baton/internal/task"
 )
 
-func TestTranscriptReplayRecordedEarlyInterrupt(t *testing.T) {
-	binary := codexreplaytest.Build(t, "../../../tools/agent-replay")
-	tape := codexreplaytest.RecordedEarlyInterrupt(t, "testdata/replay")
-	work, err := filepath.EvalSymlinks(t.TempDir())
+func replayConfig(r *replaytest.Run) Config {
+	return Config{Binary: r.Binary, Directory: r.Alias, Home: r.Home, SessionDir: r.Home, SessionID: "session-runtime", ExecutionID: "execution-runtime", StatePath: filepath.Join(r.Home, "native-state.json"), Model: r.Tape.Header.Model}
+}
+func awaitOutput(t *testing.T, a *Adapter) agent.Output {
+	t.Helper()
+	var found agent.Output
+	await(t, func() bool {
+		for _, out := range a.Drain() {
+			if out.Exited || out.Uncertain {
+				found = out
+				return true
+			}
+		}
+		return false
+	})
+	return found
+}
+func await(t *testing.T, f func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if f() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("等待事实超时")
+}
+func mustStart(t *testing.T, a *Adapter) {
+	t.Helper()
+	if err := a.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+func mustInput(t *testing.T, a *Adapter) {
+	t.Helper()
+	if out, err := a.SubmitInput(context.Background(), `{"description":"回放任务","generation":1}`); err != nil || out.Final != "" {
+		t.Fatalf("提交任务: %+v %v", out, err)
+	}
+}
+func successful(t *testing.T, out agent.Output) {
+	t.Helper()
+	if !out.Exited || out.Uncertain {
+		t.Fatalf("完成状态: %+v", out)
+	}
+	if _, err := task.ParseCandidate(out.Final); err != nil {
+		t.Fatalf("结构化结果: %s %v", out.Final, err)
+	}
+}
+
+func TestRecordedCodexScenarios(t *testing.T) {
+	binary := replaytest.Build(t, "../../../tools/agent-replay")
+	paths, err := filepath.Glob("testdata/replay/*.ndjson")
 	if err != nil {
 		t.Fatal(err)
 	}
-	home := t.TempDir()
-	f := codexreplaytest.New(t, binary, work, home, tape, "event:turn/started", "event:turn/completed", "process:done")
-	a := New(Config{Directory: work, Home: home, SessionID: "session", ExecutionID: "execution", StatePath: filepath.Join(home, "state.json"), Model: tape.Header.Model, Binary: f.Binary})
-	defer a.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	if err := a.Start(ctx); err != nil {
-		f.Check(t)
-		t.Fatal(err)
-	}
-	if _, err := a.SubmitInput(ctx, `{"description":"early interrupt","generation":1}`); err != nil {
-		f.Check(t)
-		t.Fatal(err)
-	}
-	if stopped, known, err := a.Abort(); stopped || known || err != nil {
-		t.Fatalf("早到中止: %v %v %v", stopped, known, err)
-	}
-	f.Wait(t, "event:turn/started")
-	f.Release(t, "event:turn/started")
-	f.Wait(t, "event:turn/completed")
-	if stopped, known := a.StopStatus(); stopped || known {
-		t.Fatal("补发 ACK 成为停止证据")
-	}
-	f.Release(t, "event:turn/completed")
-	for {
-		if stopped, known := a.StopStatus(); stopped {
-			if known {
-				t.Fatal("副作用被推定已知")
+	for _, path := range paths {
+		t.Run(strings.TrimSuffix(filepath.Base(path), ".ndjson"), func(t *testing.T) {
+			tape := replaytest.AdapterTape(replaytest.Load(t, path))
+			tape, ends := replaytest.EndGates(tape)
+			scenario := tape.Header.Scenario
+			gates := append([]string{}, ends...)
+			if scenario == "interrupt_mid_tool" {
+				gates = append(gates, "event:turn/moderationMetadata")
 			}
-			break
-		}
-		select {
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		case <-time.After(time.Millisecond):
-		}
-	}
-	if page, err := a.ReadHistory(ctx, ""); err != nil || !json.Valid(page.Data) {
-		f.Check(t)
-		t.Fatalf("中止后的原生历史: %v", err)
-	}
-	f.Wait(t, "process:done")
-	for _, out := range a.Drain() {
-		if out.Final != "" {
-			t.Fatal("中止回合交付了最终结果")
-		}
-	}
-	f.Check(t)
-}
-
-func TestTranscriptReplayEarlyInterrupt(t *testing.T) {
-	binary := codexreplaytest.Build(t, "../../../tools/agent-replay")
-	for _, variant := range []string{"after_error", "started_before_error", "retry_error", "other_error", "completed_before_started"} {
-		t.Run(variant, func(t *testing.T) {
-			tape := codexreplaytest.EarlyInterrupt(t, "testdata/replay", variant)
-			work, err := filepath.EvalSymlinks(t.TempDir())
-			if err != nil {
-				t.Fatal(err)
+			if scenario != "restore_missing" {
+				gates = append(gates, "event:turn/completed")
 			}
-			home := t.TempDir()
-			f := codexreplaytest.New(t, binary, work, home, tape, "event:other_completed", "event:turn/completed", "process:done")
-			a := New(Config{Directory: work, Home: home, SessionID: "session", ExecutionID: "execution", StatePath: filepath.Join(home, "state.json"), Model: tape.Header.Model, Binary: f.Binary})
+			r := replaytest.Prepare(t, binary, tape, gates...)
+			c := replayConfig(r)
+			a := New(c)
 			defer a.Close()
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-			defer cancel()
-			if err := a.Start(ctx); err != nil {
-				t.Fatal(err)
+			ctx := context.Background()
+			if scenario == "restore_missing" {
+				// 录制的恢复目标从未存在，不允许创建替代 thread。
+				f := replaytest.Frame(t, tape, "request:thread/read")
+				id := f["params"].(map[string]any)["threadId"].(string)
+				state := State{Version: Version, ThreadID: id, SessionID: c.SessionID, Directory: r.Work}
+				raw, _ := json.Marshal(state)
+				if err := privatefile.WriteFile(c.StatePath, raw); err != nil {
+					t.Fatal(err)
+				}
+				c.Restore = true
+				a.Close()
+				a = New(c)
+				defer a.Close()
+				if err := a.Start(ctx); err == nil {
+					t.Fatal("缺失历史被恢复")
+				}
+				r.Wait(t, ends[0])
+				return
 			}
-			if _, err := a.SubmitInput(ctx, `{"description":"early interrupt","generation":1}`); err != nil {
-				t.Fatal(err)
+			mustStart(t, a)
+			mustInput(t, a)
+			if scenario == "interrupt_mid_tool" || scenario == "interrupt_before_turn_started" {
+				// 转录在工具开始后等待 interrupt；完成事件另设门，分开 ACK 与停止证据。
+				if scenario == "interrupt_mid_tool" {
+					r.Wait(t, "event:turn/moderationMetadata")
+					r.Release(t, "event:turn/moderationMetadata")
+				}
+				stopped, known, err := a.Abort()
+				if err != nil || stopped || known {
+					t.Fatalf("中止 ACK: %v %v %v", stopped, known, err)
+				}
+				if stopped, _ := a.StopStatus(); stopped {
+					t.Fatal("ACK 被作为停止证据")
+				}
 			}
-			stopped, known, err := a.Abort()
-			if stopped || known || (err != nil) != (variant == "other_error") {
-				t.Fatalf("早到中止: %v %v %v", stopped, known, err)
+			if scenario == "deliver_active" || scenario == "restore_load_only" || scenario == "deliver_idle" {
+				if scenario == "deliver_idle" {
+					r.Wait(t, "event:turn/completed")
+					r.Release(t, "event:turn/completed")
+					successful(t, awaitOutput(t, a))
+				}
+				if found, err := a.HistoryContains("delivery-runtime", false); err != nil || found {
+					t.Fatalf("交付前历史: %v %v", found, err)
+				}
+				method := "request:turn/steer"
+				if scenario == "deliver_idle" {
+					method = "request:turn/start:2"
+				}
+				f := replaytest.Frame(t, tape, method)
+				text := f["params"].(map[string]any)["input"].([]any)[0].(map[string]any)["text"].(string)
+				text = strings.ReplaceAll(text, "<$delivery_id_1>", "delivery-runtime")
+				if _, err := a.DeliverResult(ctx, "delivery-runtime", `{"delivery_id":"wrong"}`); err == nil {
+					t.Fatal("接受错误交付身份")
+				}
+				if _, err := a.DeliverResult(ctx, "delivery-runtime", text); err != nil {
+					t.Fatal(err)
+				}
 			}
-			f.Wait(t, "event:other_completed")
-			if stopped, known := a.StopStatus(); stopped || known {
-				t.Fatal("ACK/其他回合成为停止证据")
+			if scenario == "delegation" {
+				id := replaytest.QueriedDelivery(t, tape)
+				if found, err := a.HistoryContains(id, true); err != nil || found {
+					t.Fatalf("wait 嵌套输出提前确认: %v %v", found, err)
+				}
+				if found, err := a.HistoryContains(id, true); err != nil || !found {
+					t.Fatalf("result 输出未确认: %v %v", found, err)
+				}
 			}
-			// 重复 Abort 不能再发送第一次请求，也不能消耗补发额度。
-			if stopped, known, err := a.Abort(); stopped || known || (err != nil) != (variant == "other_error") {
-				t.Fatalf("重复中止: %v %v %v", stopped, known, err)
-			}
-			f.Release(t, "event:other_completed")
-			f.Wait(t, "event:turn/completed")
-			if stopped, known := a.StopStatus(); stopped || known {
-				t.Fatal("完成事件前确认停止")
-			}
-			f.Release(t, "event:turn/completed")
-			for {
-				if stopped, known := a.StopStatus(); stopped {
-					if known {
-						t.Fatal("推定副作用已知")
+
+			if scenario != "deliver_idle" {
+				r.Wait(t, "event:turn/completed")
+				if scenario != "interrupt_mid_tool" && scenario != "interrupt_before_turn_started" && scenario != "provider_error" {
+					await(t, func() bool { a.mu.Lock(); defer a.mu.Unlock(); return a.final != "" })
+				}
+				for _, out := range a.Drain() {
+					if out.Final != "" || out.Exited {
+						t.Fatalf("结算前输出最终结果: %+v", out)
 					}
-					break
 				}
-				select {
-				case <-ctx.Done():
-					t.Fatal(ctx.Err())
-				case <-time.After(time.Millisecond):
+				r.Release(t, "event:turn/completed")
+			}
+			out := awaitOutput(t, a)
+			switch scenario {
+			case "interrupt_mid_tool", "interrupt_before_turn_started":
+				if !out.Uncertain || !out.Exited {
+					t.Fatalf("中止结果: %+v", out)
+				}
+				if stopped, known := a.StopStatus(); !stopped || known {
+					t.Fatalf("迟到停止证据: %v %v", stopped, known)
+				}
+			case "provider_error":
+				if !out.Uncertain || out.Final != "" {
+					t.Fatalf("供应商错误被判成功: %+v", out)
+				}
+			default:
+				successful(t, out)
+			}
+			if scenario == "interrupt_idle" {
+				if stopped, known, err := a.Abort(); err != nil || !stopped || known {
+					t.Fatalf("空闲中止: %v %v %v", stopped, known, err)
 				}
 			}
-			if s := a.Snapshot(); s.ThreadID != "thread-1" || s.TurnID != "turn-1" {
-				t.Fatalf("回合身份变化: %+v", s)
+			if scenario == "deliver_active" || scenario == "restore_load_only" || scenario == "deliver_idle" {
+				if found, err := a.HistoryContains("delivery-runtime", false); err != nil || !found {
+					t.Fatalf("缺少精确交付历史: %v %v", found, err)
+				}
+				if page, err := a.ReadHistory(ctx, ""); err != nil || !json.Valid(page.Data) {
+					t.Fatal("历史不可读", err)
+				}
 			}
-			// 历史请求排在重复开始通知之后；多发中止帧会与该请求失配。
-			if _, err := a.ReadHistory(ctx, ""); err != nil {
-				f.Check(t)
-				t.Fatal(err)
+			if _, err := a.SubmitInput(ctx, `{"description":"重复任务","generation":1}`); !errors.Is(err, ErrUncertain) {
+				t.Fatalf("任务被重发: %v", err)
 			}
-			f.Wait(t, "process:done")
-			f.Check(t)
+			r.Wait(t, ends[0])
+			if scenario == "restore_load_only" {
+				before := a.Snapshot()
+				a.Close()
+				c.Restore = true
+				a = New(c)
+				defer a.Close()
+				mustStart(t, a)
+				successful(t, awaitOutput(t, a))
+				if after := a.Snapshot(); after.ThreadID != before.ThreadID || after.TurnID != before.TurnID {
+					t.Fatal("恢复改变原生身份")
+				}
+				if page, err := a.ReadHistory(ctx, ""); err != nil || !json.Valid(page.Data) {
+					t.Fatal("恢复历史不可读", err)
+				}
+				r.Wait(t, ends[1])
+			}
+			if scenario == "symlinked_workspace" {
+				a.Close()
+				if err := os.Remove(r.Alias); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(t.TempDir(), r.Alias); err != nil {
+					t.Fatal(err)
+				}
+				c.Restore = true
+				b := New(c)
+				defer b.Close()
+				if err := b.Start(ctx); !errors.Is(err, ErrHistoryMissing) {
+					t.Fatal("符号链接重定向被接受", err)
+				}
+			}
 		})
 	}
+	if _, err := os.Stat("testdata/replay/interrupt_before_turn_started.ndjson"); os.IsNotExist(err) {
+		t.Run("interrupt_before_turn_started", func(t *testing.T) { t.Skip("PS-178 尚未合入真实转录") })
+	}
+	t.Run("result_free_text", func(t *testing.T) {
+		t.Skip("Codex 固定 outputSchema；自由文本由派生回放与结果校验覆盖")
+	})
 }
 
-func TestTranscriptReplaySimple(t *testing.T) {
-	tape, err := filepath.Abs("testdata/replay/synthetic_simple.ndjson")
-	if err != nil {
-		t.Fatal(err)
-	}
-	runTranscriptReplaySimple(t, tape, "process:done", "<$operation_id>", "execution-runtime:1")
-}
-
-func runTranscriptReplaySimple(t *testing.T, tape, doneLabel, captureKey string, captureValue any) {
-	t.Helper()
-	dir := t.TempDir()
-	binary := filepath.Join(dir, "codex-replay.exe")
-	build := exec.Command("go", "build", "-o", binary, "../../../tools/agent-replay")
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("编译回放 Agent: %v\n%s", err, output)
-	}
-	work := t.TempDir()
-	// macOS 的临时目录可能经过符号链接，绑定适配器实际使用的目录。
-	work, err := filepath.EvalSymlinks(work)
-	if err != nil {
-		t.Fatal(err)
-	}
-	c := replay.Config{Transcript: tape, StateDir: filepath.Join(dir, "replay-state"), Bindings: map[string]string{"<workspace>": work, "<home>": dir}, Gates: []string{"event:turn/completed", doneLabel}}
-	raw, err := json.Marshal(c)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(binary+".replay.json", raw, 0600); err != nil {
-		t.Fatal(err)
-	}
-	a := New(Config{Directory: work, SessionDir: dir, SessionID: "session-runtime", ExecutionID: "execution-runtime", StatePath: filepath.Join(dir, "native-state.json"), Home: dir, Model: "fixture-model", Binary: binary})
-	defer a.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	checkFailure := func() {
-		t.Helper()
-		if raw, err := os.ReadFile(filepath.Join(c.StateDir, "failure.json")); err == nil {
-			t.Fatalf("转录失配: %s", raw)
-		} else if !os.IsNotExist(err) {
-			t.Fatal(err)
-		}
-	}
-	if err := a.Start(ctx); err != nil {
-		checkFailure()
-		t.Fatal(err)
-	}
-	if snapshot := a.Snapshot(); snapshot.ThreadID != "thread-1" || snapshot.SessionID != "session-runtime" {
-		t.Fatalf("会话绑定: %+v", snapshot)
-	}
-	if out, err := a.SubmitInput(ctx, `{"description":"fixture task","generation":1}`); err != nil || out.Final != "" {
-		checkFailure()
-		t.Fatalf("输入: %+v %v", out, err)
-	}
-	if err := replay.WaitReached(ctx, c.StateDir, "event:turn/completed"); err != nil {
-		checkFailure()
-		t.Fatal(err)
-	}
-	for _, out := range a.Drain() {
-		if out.Final != "" || out.Exited {
-			t.Fatalf("完成通知前报告了结果: %+v", out)
-		}
-	}
-	if err := replay.Release(c.StateDir, "event:turn/completed"); err != nil {
-		t.Fatal(err)
-	}
-	if err := replay.WaitReached(ctx, c.StateDir, doneLabel); err != nil {
-		checkFailure()
-		t.Fatal(err)
-	}
-	var final string
-	for final == "" {
-		for _, out := range a.Drain() {
-			if out.Uncertain {
-				t.Fatalf("完成结果不确定: %+v", out)
+func TestRecordedCodexFaults(t *testing.T) {
+	binary := replaytest.Build(t, "../../../tools/agent-replay")
+	for _, name := range []string{"exit_mid_turn", "disconnect", "drop_settled", "quota", "free_text", "wrongversion", "badturn", "badsteer"} {
+		t.Run(name, func(t *testing.T) {
+			source := "simple"
+			if name == "badsteer" {
+				source = "deliver_active"
 			}
-			if out.Final != "" {
-				if !out.Exited {
-					t.Fatal("未结算的结果")
+			tape := replaytest.AdapterTape(replaytest.Load(t, "testdata/replay/"+source+".ndjson"))
+			var err error
+			switch name {
+			case "exit_mid_turn":
+				tape, err = tape.CutAfter("response:turn/start")
+			case "disconnect":
+				tape, err = tape.CutAfter("request:turn/start")
+			case "drop_settled":
+				tape, err = tape.Drop("event:turn/completed")
+			case "wrongversion":
+				tape = replaytest.Replace(t, tape, "event:frame:2", map[string]string{"text": "codex-cli 0.0.0"})
+			case "badturn":
+				f := replaytest.Frame(t, tape, "response:turn/start")
+				f["result"].(map[string]any)["turn"].(map[string]any)["id"] = ""
+				tape = replaytest.Replace(t, tape, "response:turn/start", f)
+			case "badsteer":
+				f := replaytest.Frame(t, tape, "response:turn/steer")
+				f["result"].(map[string]any)["turnId"] = "another-turn"
+				tape = replaytest.Replace(t, tape, "response:turn/steer", f)
+				tape, err = tape.CutAfter("response:turn/steer")
+			case "quota":
+				// 配额故障无法稳定按需录制，沿用真实 failed 回合的形状替换完成事件。
+				f := replaytest.Frame(t, tape, "event:turn/completed")
+				turn := f["params"].(map[string]any)["turn"].(map[string]any)
+				turn["status"] = "failed"
+				turn["items"] = []any{}
+				turn["error"] = map[string]any{"message": "quota exceeded"}
+				tape = replaytest.Replace(t, tape, "event:turn/completed", f)
+			case "free_text":
+				// outputSchema 不能关闭，以派生最终消息验证 Worker 的自由文本拒绝。
+				for _, e := range tape.Entries {
+					if e.Type != "emit_inbound" {
+						continue
+					}
+					f := replaytest.Frame(t, tape, e.Label)
+					if p, ok := f["params"].(map[string]any); ok {
+						if item, ok := p["item"].(map[string]any); ok && item["type"] == "agentMessage" {
+							item["text"] = "自由文本"
+						}
+						if turn, ok := p["turn"].(map[string]any); ok {
+							for _, v := range turn["items"].([]any) {
+								item := v.(map[string]any)
+								if item["type"] == "agentMessage" {
+									item["text"] = "自由文本"
+								}
+							}
+						}
+						tape = replaytest.Replace(t, tape, e.Label, f)
+					}
 				}
-				final = out.Final
 			}
-		}
-		if final != "" {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			checkFailure()
-			t.Fatal(ctx.Err())
-		case <-time.After(5 * time.Millisecond):
-		}
-	}
-	var result struct {
-		Status, Summary     string
-		Evidence, Artifacts []any
-		Error               any
-	}
-	if err := json.Unmarshal([]byte(final), &result); err != nil || result.Status != "completed" || result.Summary != "fixture" || result.Error != nil || result.Evidence == nil || result.Artifacts == nil {
-		t.Fatalf("结构化结果: %s %v", final, err)
-	}
-	stateRaw, err := os.ReadFile(filepath.Join(c.StateDir, "state.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var state struct {
-		Process  int
-		Captures map[string]any
-	}
-	if err := json.Unmarshal(stateRaw, &state); err != nil || state.Process != 2 || state.Captures[captureKey] != captureValue {
-		t.Fatalf("进程/输入次数: %s %v", stateRaw, err)
-	}
-	checkFailure()
-}
-
-// 合成原始录制覆盖 normalize -> NDJSON -> serve -> 真实 Adapter，期间不调用模型。
-func TestNormalizeTranscriptReplaySimple(t *testing.T) {
-	f, err := os.Open("testdata/replay/synthetic_simple.ndjson")
-	if err != nil {
-		t.Fatal(err)
-	}
-	fixture, err := replay.Read(f)
-	f.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
-	header := fixture.Header
-	header.Normalization = ""
-	header.Source = "synthetic raw recording"
-	bindings := map[string]string{"<workspace>": "/synthetic/workspace", "<home>": "/synthetic/home"}
-	raw := replay.RawRecording{Header: replay.RawHeader{Type: "raw_start", Version: 1, Transcript: header, Bindings: bindings, Hostname: "synthetic-host", Username: "synthetic-user"}}
-	captures := map[string]any{"<$initialize_id>": json.Number("41"), "<$thread_start_id>": json.Number("42"), "<$turn_start_id>": json.Number("43"), "<$operation_id>": "record-execution:1"}
-	for i, e := range fixture.Entries {
-		r := replay.RawEntry{Type: e.Type, Process: e.Process, ElapsedNS: int64(i), Args: e.Args, Code: e.Code, Signal: e.Signal}
-		switch e.Type {
-		case "expect_outbound", "emit_inbound":
-			frame, err := replay.Expand(e.Frame, bindings, captures)
 			if err != nil {
 				t.Fatal(err)
 			}
-			// 原始录制中的 Baton 文本具有实际值，规范化必须自行识别这些位置。
-			frame = bytes.ReplaceAll(frame, []byte("<any>"), []byte("synthetic Baton text"))
-			var plain map[string]string
-			if json.Unmarshal(frame, &plain) == nil && len(plain) == 1 && plain["text"] != "" {
-				r.Data = []byte(plain["text"] + "\n")
-			} else {
-				r.Data = append(frame, '\n')
+			tape, ends := replaytest.EndGates(tape)
+			gates := append([]string{}, ends...)
+			if name == "drop_settled" {
+				gates = append(gates, ends[0])
 			}
-			r.Type = map[string]string{"expect_outbound": "stdin", "emit_inbound": "stdout"}[e.Type]
-		}
-		raw.Entries = append(raw.Entries, r)
+			r := replaytest.Prepare(t, binary, tape, gates...)
+			c := replayConfig(r)
+			a := New(c)
+			defer a.Close()
+			if name == "wrongversion" {
+				if err := a.Start(context.Background()); !errors.Is(err, ErrIncompatible) {
+					t.Fatal(err)
+				}
+				return
+			}
+			mustStart(t, a)
+			_, inputErr := a.SubmitInput(context.Background(), `{"description":"任务","generation":1}`)
+			if name == "disconnect" || name == "badturn" {
+				if inputErr == nil {
+					t.Fatal("无效输入响应被接受")
+				}
+				if err := a.StartTask(context.Background(), "execution-runtime:1", "重试"); !errors.Is(err, ErrUncertain) {
+					t.Fatal(err)
+				}
+				return
+			}
+			if inputErr != nil {
+				t.Fatal(inputErr)
+			}
+			if name == "badsteer" {
+				_, _ = a.HistoryContains("delivery-runtime", false)
+				f := replaytest.Frame(t, tape, "request:turn/steer")
+				text := f["params"].(map[string]any)["input"].([]any)[0].(map[string]any)["text"].(string)
+				text = strings.ReplaceAll(text, "<$delivery_id_1>", "delivery-runtime")
+				if _, err := a.DeliverResult(context.Background(), "delivery-runtime", text); !errors.Is(err, ErrIncompatible) {
+					t.Fatal(err)
+				}
+				if err := a.SendInput(context.Background(), "delivery-runtime", "重试"); !errors.Is(err, ErrUncertain) {
+					t.Fatal(err)
+				}
+				return
+			}
+			if name == "drop_settled" {
+				r.Wait(t, ends[0])
+				for _, out := range a.Drain() {
+					if out.Exited || out.Final != "" {
+						t.Fatalf("缺少 settled 被判停止: %+v", out)
+					}
+				}
+				if stopped, _ := a.StopStatus(); stopped {
+					t.Fatal("缺少 settled 的停止证据")
+				}
+				return
+			}
+			out := awaitOutput(t, a)
+			if name == "free_text" {
+				if _, err := task.ParseCandidate(out.Final); err == nil {
+					t.Fatal("自由文本成为成功结果")
+				}
+			} else if !out.Uncertain {
+				t.Fatalf("故障成为成功结果: %+v", out)
+			}
+		})
 	}
-	dir := t.TempDir()
-	input, output := filepath.Join(dir, "raw.ndjson"), filepath.Join(dir, "simple.ndjson")
-	var b bytes.Buffer
-	enc := json.NewEncoder(&b)
-	if err := enc.Encode(raw.Header); err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range raw.Entries {
-		if err := enc.Encode(e); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.WriteFile(input, b.Bytes(), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := replay.NormalizeFile(input, output); err != nil {
-		t.Fatal(err)
-	}
-	normalized, err := os.ReadFile(output)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(normalized), "synthetic Baton text") {
-		t.Fatal("Baton 文本未变成通配符")
-	}
-	tape, err := replay.Read(bytes.NewReader(normalized))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if tape.Header.Normalization != "v1" || tape.Header.DroppedFrames != 0 {
-		t.Fatal(fmt.Sprint(tape.Header))
-	}
-	runTranscriptReplaySimple(t, output, "process:done:2", "<$execution_id_1>", "execution-runtime")
 }

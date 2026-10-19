@@ -10,7 +10,7 @@ Basis: 2026-10-19 用户确认的测试方案；[Baton TECH](../baton/TECH.md) �
 
 Baton 的适配器测试分三层。纯逻辑单测覆盖分帧和 Schema 形状。CI 中，测试进程以子进程模式冒充 Agent，适配器通过真实的 stdin/stdout 与它通信。门控的真实测试只在本机运行，使用真实 Agent 和模型。这一分层与 t3code 相同，差别在回放数据的来源。
 
-Pi 的 `internal/agent/pi/testdata/1.3.0-*.jsonl` 照 Pi 文档转录，它的 README 写明 “not a recording of a model run”。Codex 的 `internal/agent/codex/testdata/replay.json` 是人工构造的样本，只按官方 Schema 检查形状。两个假 Agent 都是手写的协议实现。`pi_test.go` 的 `replayChild` 根据 prompt 里是否含 `hold`、`exit` 决定行为，故障靠 `BATON_PI_REPLAY_ABORT_UNSETTLED` 等环境变量注入。`codex_test.go` 的 `replayServer` 用十多种 `FIXTURE_MODE` 改写响应。每接一个新 Agent，就要再写一个这样的进程，而且它演出的帧序列是开发者推测的。
+迁移前，Pi 的 `internal/agent/pi/testdata/1.3.0-*.jsonl` 照 Pi 文档转录，它的 README 写明 “not a recording of a model run”。Codex 的 `internal/agent/codex/testdata/replay.json` 是人工构造的样本，只按官方 Schema 检查形状。两个假 Agent 都是手写的协议实现。`pi_test.go` 的 `replayChild` 根据 prompt 里是否含 `hold`、`exit` 决定行为，故障靠 `BATON_PI_REPLAY_ABORT_UNSETTLED` 等环境变量注入。`codex_test.go` 的 `replayServer` 用十多种 `FIXTURE_MODE` 改写响应。每接一个新 Agent，就要再写一个这样的进程，而且它演出的帧序列是开发者推测的。
 
 真实测试的发现没有进入 CI。`TestRealPi` 发现 Pi 1.3.0 的中止要等当前工具结束才生效，这个时序后来靠手写的 `BATON_PI_REPLAY_ABORT_UNSETTLED` 近似出来。真实测试结束后只在日志里留下「支持 / 不支持 / 未验证」，没有可以重放的产物。`TestRealPi`（`internal/gateway/real_pi_test.go`）走完整的 Coordinator（已内置节点连接）和 batond 链路，在一个长流程里依次检查九项能力。`TestRealCodex`（`internal/gateway/codex_real_test.go`）大部分直接驱动 `codex.Adapter`，委托部分走完整链路。
 
@@ -182,6 +182,16 @@ Agent 版本升级的流程：用新版本把全部场景重录一遍，规范�
 | R-09 | 每个适配器的 `testdata/replay/` 与第 8 节清单逐项对照 | 缺少场景，且 README 里没有写原因 | 审查 | planned |
 | R-10 | 第 8 节每个场景通过 `RunWorker` 回放；`deliver_*` 由 Worker 子结果通知触发 | 出现第二次任务输入；未在历史中看到 `delivery_id` 就记为 delivered；崩溃变体没有进入待核实 | Worker 层回放 | planned |
 | R-11 | 首批转录提交后，用同一版本再录一次 `simple` 并规范化 | 两次转录除模型文本外存在差异，说明规范化不稳定 | 本机真实测试 | planned |
+
+PS-177 的 Codex 执行记录（2026-10-19；Pi 项由对应工单维护）：
+
+| Requirement | Setup and observation | Failure condition | Where | Status |
+|---|---|---|---|---|
+| R-03 | 10 份 macOS 录制绑定本机临时目录；symlinked_workspace 绑定符号链接 | 路径或 JSON 转义失配 | `TestRecordedCodexScenarios`、`TestRecordedCodexWorkerScenarios` | passed：本机 macOS，两层 `-count=10`；其他平台等待本 PR CI |
+| R-05 | interrupt_mid_tool 在录制的 turn/moderationMetadata 与 turn/completed 前设门，分别检查 ACK 与迟到停止 | ACK 成为停止事实；放行后没有 StopObserver 证据 | `TestRecordedCodexScenarios/interrupt_mid_tool` | passed：本机 `-count=10`；转录缺少工具开始事件，未验证该事件的门控 |
+| R-05 | simple.CutAfter(request:turn/start / response:turn/start)、Drop(turn/completed) | 崩溃成为成功；没有 settled 却报告停止 | `TestRecordedCodexFaults`、`TestRecordedCodexWorkerScenarios` 的 disconnect / exit_mid_turn / drop_settled | passed：本机两层 `-count=10`，Worker 崩溃进入待核实 |
+| R-09 | 对照 §8 检查 10 份转录及不适用/缺失说明 | 缺项未说明 | Codex `testdata/replay/README.md`；PS-175、PS-178 | passed：10 份已逐项回放；result_free_text 由派生与单测覆盖；早到中止等待 PS-178 |
+| R-10 | 10 份场景通过 RunWorker；重复任务/子结果通知，交付历史响应前设门，派生相似 delivery_id | 重发任务；历史确认前 delivered；错误 ID 被确认；恢复替换原身份或 outbox 结果 | `TestRecordedCodexWorkerScenarios` | passed：本机 `-count=10`；交付信封、等待状态和只读查询选择见 Codex 场景 README |
 
 真实测试和录制只在本机运行，使用最便宜的模型。回放测试通过只说明适配器能正确处理录到的帧序列，不能代替对应版本的真实测试结论。
 

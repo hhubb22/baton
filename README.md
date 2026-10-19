@@ -45,7 +45,7 @@ Session 映射 thread，执行输入映射 turn；活动子结果输入用 turn/
 
 ### Codex 验证边界与真实任务入口
 
-CI 默认运行固定 Schema、独立 app-server 回放、Pi/Codex 共用 Worker 回归和 race。[Agent 转录回放工具](tools/agent-replay/README.md) 已提供 NDJSON 读写、严格出站比较、跨进程占位符、历史写入、门控和派生变体；Codex 的 [synthetic_simple 转录](internal/agent/codex/testdata/replay/README.md) 来自现有手写样本转写，新增真实适配器完成流程测试，现有假 Agent 与测试保留。录制器已支持字节透传、历史追加采集和退出/信号记录，规范化工具支持路径与 ID 替换、会话筛选和残留拒绝；合成录制已通过真实 Codex 适配器的 simple 回放，真实测试已按场景拆分，设置 `BATON_RECORD_DIR` 可录制每个场景；首批真实转录已由 PS-175 提交到 `internal/agent/pi/testdata/replay/` 和 `internal/agent/codex/testdata/replay/`，Pi 已由 PS-176 迁移为录制转录，适配器层回放全部 12 份，Worker 层覆盖适用场景与故障变体，旧 Pi 假 Agent 和文档转录样本已删除，详见 [Pi 回放说明](internal/agent/pi/testdata/replay/README.md)。Codex 其余回放迁移由 PS-177 负责。固定版本无模型握手可显式运行：
+CI 默认运行固定 Schema、录制转录回放、Pi/Codex 共用 Worker 回归和 race。[Agent 转录回放工具](tools/agent-replay/README.md) 提供 NDJSON 读写、严格出站比较、跨进程捕获、历史写入、门控和派生变体。Pi 的适配器层回放 PS-175 的全部 12 份真实转录，Worker 层覆盖适用场景与故障变体；Codex 两层回放已提交的 10 份真实转录。旧假 Agent 与人工样本已删除。来源、适用范围和旧覆盖点对应表见 [Pi 场景说明](internal/agent/pi/testdata/replay/README.md) 与 [Codex 场景说明](internal/agent/codex/testdata/replay/README.md)；协议分帧和边界条件保留单元测试。录制器支持字节透传、历史追加采集和退出/信号记录，规范化工具支持路径与 ID 替换、会话筛选和残留拒绝；真实测试按场景拆分，设置 `BATON_RECORD_DIR` 可录制各场景。固定版本无模型握手可显式运行：
 
 ```sh
 BATON_CODEX_PROBE=1 go test -v ./internal/agent/codex -run TestCodexInitializeWithoutModel
