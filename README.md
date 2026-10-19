@@ -475,16 +475,24 @@ pnpm check:dist
 
 ### CI 与本地等价命令
 
-[GitHub Actions CI](https://github.com/hhubb22/baton/actions/workflows/ci.yml) 在每个 pull request 和推送 `main` 时运行四类检查。同一 PR／分支的新推送会取消旧运行，macOS 和 Windows 不会因另一平台失败而取消；失败不会被忽略。Go 版本从 `go.mod` 读取，并缓存模块与构建结果。测试加 `-v` 以记录每个测试的通过、失败和已有的条件跳过，加 `-count=1` 避免测试结果缓存。
+[GitHub Actions CI](https://github.com/hhubb22/baton/actions/workflows/ci.yml) 在每个 pull request 和推送 `main` 时判断改动范围。PR 验证合并结果，main push 验证实际提交；两者均保留全部平台与 race 覆盖。同一 PR 的新提交取消旧运行，手动诊断与 PR 分开管理。平台或分组失败不会取消其他分组。测试使用 `-json -count=1`，保存逐用例结果，禁用测试结果缓存。
+
+纯说明改动限于 `README.md`、根目录 `AGENTS.md`、`.agents/PROJECT.md`，以及 `specs/`、`.agents/` 下的 Markdown。工作流始终创建 Linux、macOS、Windows、Web 汇总检查；说明改动只有在范围判断成功、重检查按规则跳过时通过汇总。空差异、未知路径、代码、依赖、工作流和混合改动执行全部检查。`web/`、`internal/webui/dist/` 和迁移目录中的 Markdown 也执行全部检查。
 
 | 检查 | 覆盖范围 |
 |---|---|
-| Linux（`ubuntu-latest`） | 原生构建、Windows/macOS 交叉编译、vet、完整测试、五个并发相关包的 race 测试 |
-| macOS（`macos-latest`） | 原生构建、vet、完整测试 |
-| Windows（`windows-latest`） | 原生构建、vet、完整测试，不以交叉编译代替运行 |
+| Linux（`ubuntu-latest`） | 原生构建、Windows/macOS 交叉编译、vet、完整测试；独立 runner 并行运行 agent、session、node、store、relay、control 的 race |
+| macOS（`macos-latest`） | 原生构建、vet、完整测试、10 轮 Pi 无模型沙箱回归 |
+| Windows（`windows-latest`） | 原生构建、vet、完整测试，支持按包和用例重复诊断 |
 | Web（`ubuntu-latest`） | 锁定依赖安装、lint、typecheck、单元测试、Chromium E2E、嵌入产物一致性 |
 
-CI 的 Linux 和 Web 各使用独立的 PostgreSQL 17 service container；macOS 和 Windows 使用 `ikalnytskyi/action-setup-postgres@v8` 安装 PostgreSQL 17。`BATON_TEST_DATABASE_URL` 连接 runner 本机端口 `55432` 的 `baton_test`，口令仅用于一次性 CI 测试库，不读取仓库 Secret。停库恢复测试会另建临时 PostgreSQL 集群，不停止共用测试库；Linux CI 另装主机 PostgreSQL 17 工具并设置 `BATON_TEST_POSTGRES_BINDIR`，避免误用 runner 预装的旧版。其他环境默认用 `pg_config --bindir` 定位工具，也可用该变量显式指定 PostgreSQL 17 的 `bin` 目录。第三方 action 固定到发布标签（PostgreSQL action 仅提供 `v8` 这样的版本标签）。
+Go 测试入口 `.github/ci/run_tests.py` 将 relay 测试按三组并行执行，同时执行其余包；race 使用相同分组方式。每轮从 Go 的原生测试清单分组，检查并集完整且无重复，保存 `coverage.json`，再核对每组实际完成的顶层用例。初始权重来自 main 运行 `39147750715` 的 Windows 用例耗时，新用例使用默认权重。子进程共用本轮预先构建的只读程序，各测试使用独立临时目录和临时 schema；各 relay 分组使用互不重叠的监听候选端口区间，先核对其低于系统动态出站端口起点，再探测并选择空闲端口，同一测试进程内不重复分配。停库测试也使用该分组区间。普通本地测试未指定 `BATON_TEST_BIN_DIR` 时，在独立临时目录构建并在测试进程结束后删除程序。
+
+Linux、race 和 Web 各有独立 PostgreSQL 17 service container。Linux 与 race 安装主机 PostgreSQL 17 工具供独立停库测试使用；macOS 使用 `ikalnytskyi/action-setup-postgres@v8`。Windows 缓存 EDB PostgreSQL **17.6-1** 的 `bin/lib/share`，下载时校验固定 SHA256，命中时仍校验程序和实际服务器版本；每轮在缓存目录外新建数据目录并在结束时停库。缓存内不含测试数据库。`BATON_TEST_DATABASE_URL` 指向 runner 本机 `55432` 的一次性 `baton_test`，不读取仓库 Secret；Windows 仅允许回环 TCP 的临时信任认证。停库恢复测试另建临时集群，不停止共用测试库。Go 模块和构建缓存由 `setup-go` 管理；Linux 普通测试与 race 使用不同缓存键，每轮在摘要中记录命中状态。
+
+Actions 手动运行 CI 时，可填 `diagnostic=./internal/relay`、`test=^TestDatabaseStopReplaysLocalResultOnce$`、`count=20`。Windows 运行所选用例，其他平台保持完整验证。重复运行保留每次结果，任何一次失败或意外跳过都使诊断失败。门闩超时的历史根因仍待原生重复运行确认，通过次数不能证明根因已经修复。
+
+每个 Go 测试任务上传七天有效的诊断材料：JSON 测试事件、失败摘要、完整分组清单、Coordinator/Relay 日志、Worker 日志、进程状态及 TCP 连接状态。进程日志持续脱敏写入，Worker 日志定期采样，测试超时仍保留已有材料；清理前后的进程列表不含命令行和环境变量。不上传身份文件、令牌文件、数据库或原生历史。材料入口见任务摘要中的运行链接。受控失败使用 `test=^TestCIDiagnosticFailure$`、`count=1` 并勾选 `controlled_failure`，在实际 Worker 到达门闩后失败；该运行应保持失败，用于验证下载材料及脱敏。
 
 本地先准备可创建临时 schema 的 PostgreSQL 17 测试库并设置 `BATON_TEST_DATABASE_URL`（POSIX shell 示例，端口按本机实例调整）：
 
@@ -500,7 +508,7 @@ Windows PowerShell 用 `$env:BATON_TEST_DATABASE_URL = 'postgres://postgres:bato
 ```sh
 GOOS=windows go build ./...
 GOOS=darwin go build ./...
-go test -race -v -count=1 ./internal/session ./internal/node ./internal/store ./internal/relay ./internal/control
+go test -race -v -count=1 ./internal/agent/... ./internal/session ./internal/node ./internal/store ./internal/relay ./internal/control
 ```
 
 这里的 `-race` 覆盖测试包；进程测试内部通过普通 `go build` 启动的子进程不自动带 race instrumentation。需要同时检查子进程时可另跑 `GOFLAGS=-race go test -race -count=1 ./internal/relay`。

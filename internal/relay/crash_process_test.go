@@ -650,12 +650,14 @@ func startPrivatePostgres(t *testing.T) *privatePostgres {
 	if err := os.WriteFile(filepath.Join(dir, "pg_hba.conf"), []byte(hba), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	_, rawPort, err := net.SplitHostPort(freeAddr(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	ln.Close()
+	port, err := strconv.Atoi(rawPort)
+	if err != nil {
+		t.Fatal(err)
+	}
 	role := postgresRole(user)
 	hbaPath := filepath.Join(dir, "pg_hba.conf")
 	if user != "" {

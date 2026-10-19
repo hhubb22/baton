@@ -3,10 +3,12 @@ package relay_test
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/cookiejar"
@@ -14,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -225,6 +228,7 @@ type processAuth struct {
 }
 
 var (
+	buildDir       string
 	buildOnce      sync.Once
 	buildErr       error
 	builtCoord     string
@@ -232,6 +236,7 @@ var (
 	builtBatond    string
 	processMu      sync.Mutex
 	processHandles []*running
+	allocatedPorts = map[int]bool{}
 )
 
 func buildBins(t *testing.T) (string, string, string) {
@@ -242,7 +247,16 @@ func buildBins(t *testing.T) (string, string, string) {
 			buildErr = err
 			return
 		}
-		out := filepath.Join(root, "bin")
+		out := os.Getenv("BATON_TEST_BIN_DIR")
+		prebuilt := out != ""
+		if !prebuilt {
+			out, err = os.MkdirTemp("", "baton-relay-bins-*")
+			buildDir = out
+			if err != nil {
+				buildErr = err
+				return
+			}
+		}
 		suffix := ""
 		if runtime.GOOS == "windows" {
 			suffix = ".exe"
@@ -252,6 +266,13 @@ func buildBins(t *testing.T) (string, string, string) {
 			return
 		}
 		for _, name := range []string{"coordinator", "relay", "batond"} {
+			if prebuilt {
+				if _, err := os.Stat(filepath.Join(out, name+suffix)); err != nil {
+					buildErr = err
+					return
+				}
+				continue
+			}
 			cmd := exec.Command("go", "build", "-o", filepath.Join(out, name+suffix), "./cmd/"+name)
 			cmd.Dir = root
 			if raw, err := cmd.CombinedOutput(); err != nil {
@@ -316,8 +337,9 @@ func startCmd(t *testing.T, bin string, args, env []string) *running {
 	buf := &lockedBuf{}
 	cmd := exec.Command(bin, args...)
 	cmd.Env = env
-	cmd.Stdout = buf
-	cmd.Stderr = buf
+	writer := diagnosticWriter(t, bin, args, env, buf)
+	cmd.Stdout = writer
+	cmd.Stderr = writer
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -325,6 +347,7 @@ func startCmd(t *testing.T, bin string, args, env []string) *running {
 	processMu.Lock()
 	processHandles = append(processHandles, proc)
 	processMu.Unlock()
+	trackDiagnosticProcess(t, proc, args, env)
 	t.Cleanup(func() {
 		proc.stop()
 		if len(args) > 0 && args[0] == "run" {
@@ -372,6 +395,37 @@ func (p *running) stop() {
 
 func freeAddr(t *testing.T) string {
 	t.Helper()
+	if low := os.Getenv("BATON_TEST_PORT_MIN"); low != "" {
+		min, err := strconv.Atoi(low)
+		if err != nil {
+			t.Fatal(err)
+		}
+		max, err := strconv.Atoi(os.Getenv("BATON_TEST_PORT_MAX"))
+		if err != nil || min < 1024 || max < min || max >= 30000 {
+			t.Fatal("测试端口范围无效")
+		}
+		offset, err := rand.Int(rand.Reader, big.NewInt(int64(max-min+1)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		processMu.Lock()
+		defer processMu.Unlock()
+		for i := 0; i <= max-min; i++ {
+			port := min + (int(offset.Int64())+i)%(max-min+1)
+			if allocatedPorts[port] {
+				continue
+			}
+			addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+			listener, err := net.Listen("tcp", addr)
+			if err != nil {
+				continue
+			}
+			_ = listener.Close()
+			allocatedPorts[port] = true
+			return addr
+		}
+		t.Fatal("当前分组没有可用测试端口")
+	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
