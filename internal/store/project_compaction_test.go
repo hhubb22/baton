@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"baton/internal/projectagent"
+	"baton/internal/task"
 )
 
 func compactionHistory(t *testing.T) *toolHarness {
@@ -146,6 +148,24 @@ func TestProjectCompactionEveryToolResultRecoverable(t *testing.T) {
 			t.Fatalf("%s: %s", call.name, raw)
 		}
 	}
+	enableExec(t, h)
+	exec := h.save(t, "nodes.exec", execArgs(h, 600))
+	accepted, err := h.repo.ProjectRuntime(h.ctx, h.src, exec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandID := pendingTask(t, accepted)
+	output := base64.StdEncoding.EncodeToString([]byte("命令输出原文\x00\xff"))
+	command := task.CommandResult{Encoding: "base64", Output: output, TotalBytes: int64(len("命令输出原文\x00\xff"))}
+	if _, err = h.pool.Exec(h.ctx, `UPDATE tasks SET status='completed',version=version+1,summary='完成',command_result=$2 WHERE id=$1`, commandID, command); err != nil {
+		t.Fatal(err)
+	}
+	exec.Operation = "wait_tool"
+	result, err := h.repo.ProjectRuntime(h.ctx, h.src, exec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.seq = result.(projectagent.Event).Seq
 	rows, err := h.pool.Query(h.ctx, `SELECT seq,payload FROM conversation_events WHERE conversation_id=$1 AND kind='tool_result' ORDER BY seq`, h.project.Conversation.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -166,7 +186,7 @@ func TestProjectCompactionEveryToolResultRecoverable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(originals) != 14 {
+	if len(originals) != 15 {
 		t.Fatalf("工具种类 %d", len(originals))
 	}
 	for i := 0; i < 3; i++ {
@@ -216,5 +236,14 @@ func TestProjectCompactionEveryToolResultRecoverable(t *testing.T) {
 			t.Fatalf("第 %d 条输出恢复不完整 %v", seq, err)
 		}
 	}
-	t.Log("14 类工具输出全部经 history.read 按原序号完整恢复，副作用未重放")
+	rawTask, bad := h.call(t, "tasks.get", map[string]any{"task_id": commandID})
+	text, _ := readToolPage(t, rawTask)
+	if bad || !strings.Contains(text, output) {
+		t.Fatal("命令结果未通过 tasks.get 恢复")
+	}
+	var commands int
+	if err = h.pool.QueryRow(h.ctx, `SELECT count(*) FROM tasks WHERE project_id=$1 AND agent_type='shell'`, h.project.ID).Scan(&commands); err != nil || commands != 1 {
+		t.Fatal("命令被重复接受", commands, err)
+	}
+	t.Log("15 类工具输出全部经 history.read 按原序号完整恢复，命令输出也可通过 tasks.get 读取，副作用未重放")
 }

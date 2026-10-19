@@ -41,4 +41,4 @@ faux 恢复测试的 Coordinator 替身负责持久化和事务去重。真实 N
 BATON_TEST_NODE_PROJECT_RUNTIME=1 go test -v -count=1 ./internal/gateway -run 'TestProjectRuntimePiFauxRealCoordinator|TestProjectCompactionRealProcesses'
 ```
 
-这些测试通过实际 Runtime 验证 assistant 保存、工具事务和正常收尾。压缩进程测试使用八轮约 400 KiB 的历史和接近 32 KiB 的工具结果，检查摘要与只读原文恢复。压缩提交前后的子进程故障注入和 14 类工具输出的恢复另由 Runtime 与 Store 测试覆盖。三设备端到端场景由 PA-W08 验证。
+这些测试通过实际 Runtime 验证 assistant 保存、工具事务和正常收尾。压缩进程测试使用八轮约 400 KiB 的历史和接近 32 KiB 的工具结果，检查摘要与只读原文恢复。压缩提交前后的子进程故障注入和 15 类工具输出的恢复另由 Runtime 与 Store 测试覆盖，包含 nodes.exec 命令输出的原文与 tasks.get 读取。三设备端到端场景由 PA-W08 验证。
