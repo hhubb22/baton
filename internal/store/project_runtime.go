@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"baton/internal/identity"
+	"baton/internal/inbox"
 	"baton/internal/projectagent"
 	"baton/internal/protocol"
 	"github.com/jackc/pgx/v5"
@@ -150,6 +151,13 @@ func (s *Store) ProjectRuntime(ctx context.Context, src protocol.Source, req pro
 			_, err = tx.Exec(ctx, `UPDATE conversations SET failure_count=failure_count+1,
     next_attempt_at=clock_timestamp()+CASE WHEN failure_count=0 THEN interval '1 minute' WHEN failure_count=1 THEN interval '5 minutes' ELSE interval '15 minutes' END,
     state=CASE WHEN failure_count>=2 THEN 'needs_attention' ELSE 'active' END,attention_reason=$2 WHERE id=$1`, b.conversationID, reason)
+			if err == nil {
+				var state string
+				err = tx.QueryRow(ctx, `SELECT state FROM conversations WHERE id=$1`, b.conversationID).Scan(&state)
+				if err == nil && state == "needs_attention" {
+					err = inbox.CreateSystem(ctx, tx, inboxBinding(b), inbox.ProjectNeedsAttention, b.projectID, "Project 需要处理", reason, "", nil, nil)
+				}
+			}
 		} else if req.Operation == "exited" {
 			state = "lost"
 		} else if req.Operation == "start_failed" {

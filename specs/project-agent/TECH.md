@@ -105,7 +105,7 @@ PS-155 通过 0016 交付 Project、Agent、主对话、事件、记忆和输入
 |---|---|---|---|
 | `user_message` | 主动 | 用户在主对话发送的消息，API 拒绝超过 64 KiB 的消息 | 64 KiB 正文加元数据 |
 | `task_result` | 主动 | Project Agent 派发的任务进入终态（第 9 节） | 40 KiB |
-| `attention_answer` | 主动 | 用户回答或关闭一个事项（Agent Inbox IB-12），内容是事项 ID、标题、选中的选项和最多 4 KiB 的文字 | 8 KiB |
+| `attention_answer` | 主动 | 用户回答或关闭一个事项（Agent Inbox IB-12），内容是事项 ID、标题、选中的选项和最多 4 KiB 的文字；上限包含 JSON 转义 | 32 KiB |
 | `memory_updated` | 被动 | 用户在界面上新建或修改记忆（第 6.4 节） | 1 KiB |
 | `project_updated` | 被动 | 用户修改 Project 标题或目标（第 6.1 节） | 4 KiB |
 
@@ -282,9 +282,7 @@ Project 标题或目标被修改后，新的系统提示词从下一次压缩起
 写工具返回资源 ID、版本或状态及 `read_tool`。记忆冲突返回当前版本和内容，超限时返回截断标记及 `memory.read` 入口。`tasks.dispatch` 的重派关联保存在现有的 `task_relations.rerun_of_task_id` 中。
 
 
-`inbox.ask` 的展示内容是 OpenUI Lang 程序（Agent Inbox IB-14）。它的写法说明由 `@openuidev/lang-core` 从 Baton 组件库生成，开场白换成适合工具参数的说明，其余原样放进 `inbox.ask` 的工具说明，约 1000～1600 token。工具定义的顺序和内容固定，所以这段说明在可缓存的前缀里；组件库版本变化时 `prompt_version` 随之变化。
-
-Coordinator 是 Go 程序，没有 OpenUI 解析器，所以展示内容由 Runtime 在发出 `call_tool` 之前用 lang-core 检查（IB-18）。检查不通过时，Runtime 仍然发出 `call_tool`，并附上解析器给出的错误；Coordinator 不创建事项，把这些错误写成一条 `is_error` 的结果。这样每个工具调用的结果仍然只由 Coordinator 写入，第 5 节的恢复规则不变。Coordinator 自己检查不依赖解析器的部分：长度、选项声明、关联任务归属和待处理事项上限。Runtime 漏检时，浏览器只用 Baton 组件库渲染，未知组件显示为无法显示（IB-19），不会执行展示内容里的代码。
+`inbox.ask` 的展示内容是最多 32 KiB 的 Markdown，链接只允许 `https`；Coordinator 在工具事务内检查长度、链接、选项声明、关联任务归属及 10 个待处理提案上限，不合规时保存 `is_error` 结果。工具参数和事项事务见 [Agent Inbox TECH](../agent-inbox/TECH.md) 第 3、4 节。OpenUI Lang、组件库和 Runtime 解析推迟到第一个版本之后。
 
 ### 8. 节点能力报告
 

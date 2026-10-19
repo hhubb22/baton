@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"baton/internal/inbox"
 	"baton/internal/projectagent"
 	"baton/internal/protocol"
 )
@@ -436,7 +437,25 @@ func TestProjectRuntimeRealProcessesFailureAndRetry(t *testing.T) {
 	if err := st.pool.QueryRow(context.Background(), `SELECT count(*) FROM agent_runs WHERE agent_id=$1`, project.Agent.ID).Scan(&runs); err != nil || runs != 3 {
 		t.Fatalf("needs_attention 仍自动启动：%d %v", runs, err)
 	}
+	var attention inbox.Page
+	runtimeProjectHTTP(t, st, "GET", "/api/v1/inbox", nil, &attention, 200)
+	if len(attention.Requests) != 1 || attention.Requests[0].Source != "system" || attention.Requests[0].ConditionType != inbox.ProjectNeedsAttention || attention.Requests[0].ActionURL != "/projects/"+project.ID {
+		t.Fatalf("重试上限系统事项：%+v", attention)
+	}
+	attentionID := attention.Requests[0].ID
+	var systemInputs int
+	if err := st.pool.QueryRow(context.Background(), `SELECT count(*) FROM project_agent_input_queue WHERE agent_id=$1 AND source_type='attention_answer'`, project.Agent.ID).Scan(&systemInputs); err != nil || systemInputs != 0 {
+		t.Fatal("系统事项生成输入", systemInputs, err)
+	}
 	runtimeProjectHTTP(t, st, "POST", "/api/v1/projects/"+project.ID+"/retry", map[string]any{}, nil, 200)
+	var resolved inbox.Request
+	runtimeProjectHTTP(t, st, "GET", "/api/v1/attention-requests/"+attentionID, nil, &resolved, 200)
+	if resolved.State != "resolved" {
+		t.Fatal("确认重试未解决系统事项", resolved.State)
+	}
+	if err := st.pool.QueryRow(context.Background(), `SELECT count(*) FROM project_agent_input_queue WHERE agent_id=$1 AND source_type='attention_answer'`, project.Agent.ID).Scan(&systemInputs); err != nil || systemInputs != 0 {
+		t.Fatal("系统解决生成输入", systemInputs, err)
+	}
 	recovered, _ := waitProjectRun(t, p, project, runID)
 	var count int
 	var state string
@@ -449,7 +468,7 @@ func TestProjectRuntimeRealProcessesFailureAndRetry(t *testing.T) {
 	}
 	p.send(t, recovered, "finish-retry", protocol.ProjectRuntimeRequest{Operation: "finish", Reason: "idle"})
 	waitProjectRunEnded(t, p, recovered)
-	t.Log("真实进程三次失败退避、needs_attention 停止放置、用户重试清零和保留输入通过")
+	t.Log("真实进程三次模型失败后仅一系统事项、确认重试已解决、无 attention_answer；退避及保留原输入通过")
 }
 
 func TestProjectRuntimeRealProcessesDisconnectDeadline(t *testing.T) {

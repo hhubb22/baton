@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"baton/internal/identity"
+	"baton/internal/inbox"
 	"baton/internal/projectagent"
 	"baton/internal/protocol"
 	"baton/internal/task"
@@ -27,31 +28,40 @@ type savedToolCall struct {
 }
 
 type toolArguments struct {
-	EntryID                 string `json:"entry_id"`
-	Title                   string `json:"title"`
-	Content                 string `json:"content"`
-	ExpectedRevision        int64  `json:"expected_revision"`
-	Revision                int64  `json:"revision"`
-	Query                   string `json:"query"`
-	AfterID                 string `json:"after_id"`
-	AfterSeq                int64  `json:"after_seq"`
-	ThroughSeq              int64  `json:"through_seq"`
-	TaskID                  string `json:"task_id"`
-	Status                  string `json:"status"`
-	Version                 int    `json:"version"`
-	TargetNodeID            string `json:"target_node_id"`
-	AgentType               string `json:"agent_type"`
-	WorkingDirectory        string `json:"working_directory"`
-	Description             string `json:"description"`
-	ExpectedOutputs         string `json:"expected_outputs"`
-	QueueTimeoutSeconds     *int   `json:"queue_timeout_seconds"`
-	ExecutionTimeoutSeconds *int   `json:"execution_timeout_seconds"`
-	RetryOfTaskID           string `json:"retry_of_task_id"`
-	Offset                  int    `json:"offset"`
-	MaxBytes                int    `json:"max_bytes"`
+	Summary                 string         `json:"summary"`
+	Options                 []inbox.Option `json:"options"`
+	AllowText               bool           `json:"allow_text"`
+	RequestID               string         `json:"request_id"`
+	Reason                  string         `json:"reason"`
+	EntryID                 string         `json:"entry_id"`
+	Title                   string         `json:"title"`
+	Content                 string         `json:"content"`
+	ExpectedRevision        int64          `json:"expected_revision"`
+	Revision                int64          `json:"revision"`
+	Query                   string         `json:"query"`
+	AfterID                 string         `json:"after_id"`
+	AfterSeq                int64          `json:"after_seq"`
+	ThroughSeq              int64          `json:"through_seq"`
+	TaskID                  string         `json:"task_id"`
+	Status                  string         `json:"status"`
+	Version                 int            `json:"version"`
+	TargetNodeID            string         `json:"target_node_id"`
+	AgentType               string         `json:"agent_type"`
+	WorkingDirectory        string         `json:"working_directory"`
+	Description             string         `json:"description"`
+	ExpectedOutputs         string         `json:"expected_outputs"`
+	QueueTimeoutSeconds     *int           `json:"queue_timeout_seconds"`
+	ExecutionTimeoutSeconds *int           `json:"execution_timeout_seconds"`
+	RetryOfTaskID           string         `json:"retry_of_task_id"`
+	Offset                  int            `json:"offset"`
+	MaxBytes                int            `json:"max_bytes"`
 }
 
 var projectToolFields = map[string]string{
+	"inbox.ask":      "title summary content options allow_text task_id",
+	"inbox.list":     "after_id offset max_bytes",
+	"inbox.get":      "request_id offset max_bytes",
+	"inbox.withdraw": "request_id reason",
 	"memory.search":  "query after_id offset max_bytes",
 	"memory.read":    "entry_id revision offset max_bytes",
 	"memory.write":   "entry_id title content expected_revision",
@@ -87,7 +97,7 @@ func decodeToolArguments(name string, raw json.RawMessage) (toolArguments, error
 	if a.Offset < 0 || a.MaxBytes < 0 || a.MaxBytes > maxProjectToolBytes || a.Revision < 0 || a.AfterSeq < 0 || a.ThroughSeq < 0 || a.Version < 0 {
 		return a, projectagent.ErrInvalid
 	}
-	for _, id := range []string{a.EntryID, a.TaskID, a.AfterID, a.TargetNodeID, a.RetryOfTaskID} {
+	for _, id := range []string{a.EntryID, a.TaskID, a.AfterID, a.TargetNodeID, a.RetryOfTaskID, a.RequestID} {
 		if id != "" {
 			if _, err := identity.ParseUUID(id); err != nil {
 				return a, projectagent.ErrInvalid
@@ -209,6 +219,8 @@ func (s *Store) callProjectTool(ctx context.Context, tx pgx.Tx, b projectRunBind
 			}
 		case errors.As(businessErr, &rejection):
 			output = map[string]any{"error": rejection.Message, "code": rejection.Code}
+		case errors.Is(businessErr, inbox.ErrInvalid), errors.Is(businessErr, inbox.ErrNotFound), errors.Is(businessErr, inbox.ErrLimit):
+			output = map[string]any{"error": businessErr.Error()}
 		case errors.Is(businessErr, projectagent.ErrInvalid), errors.Is(businessErr, projectagent.ErrTooLarge), errors.Is(businessErr, projectagent.ErrConflict), errors.Is(businessErr, ErrNotFound), errors.Is(businessErr, ErrNotVisible):
 			output = map[string]any{"error": "工具名称、参数、资源归属或版本无效"}
 		default:
@@ -282,6 +294,8 @@ func toolJSONPage(value any, a toolArguments) (any, error) {
 
 func (s *Store) executeProjectTool(ctx context.Context, tx pgx.Tx, b projectRunBinding, sourceSeq int64, callID string, name string, a toolArguments) (any, error) {
 	switch name {
+	case "inbox.ask", "inbox.get", "inbox.list", "inbox.withdraw":
+		return s.executeInboxTool(ctx, tx, b, callID, name, a)
 	case "memory.write":
 		if a.EntryID == "" {
 			if a.ExpectedRevision != 0 {

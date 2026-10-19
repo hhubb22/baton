@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"baton/internal/identity"
+	"baton/internal/inbox"
 	"baton/internal/projectagent"
 	"baton/internal/protocol"
 	"github.com/jackc/pgx/v5"
@@ -241,6 +242,9 @@ func (s *Store) RetryProject(ctx context.Context, owner, projectID string) error
 		return err
 	}
 	if _, err = tx.Exec(ctx, `UPDATE conversations SET state='active',failure_count=0,next_attempt_at=NULL,attention_reason=NULL WHERE agent_id=$1`, id); err != nil {
+		return err
+	}
+	if err = inbox.ResolveSystem(ctx, tx, inbox.ProjectNeedsAttention, projectID); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
