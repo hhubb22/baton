@@ -4,12 +4,14 @@ import { conversationItems, getProject, getProjectEvents, getProjectStatus, pend
 import { listTasks, taskStates, taskURL, timeLabel, type TaskPage } from '../tasks.ts'
 import { TaskComposer } from './TaskComposer.tsx'
 import type { NodeList } from '../types.ts'
+import { useAttentionList, type AskProject } from '../inbox.ts'
+import { AttentionCard } from './AttentionCard.tsx'
 import { TaskOrigin } from './TaskOrigin.tsx'
 
-type Props = { id: string; csrf: string; employeeID: string; navigate: (id: string) => void; navigateTask: (id: string) => void }
+type Props = { id: string; csrf: string; employeeID: string; navigate: (id: string) => void; navigateTask: (id: string) => void; draft?: { text: string; key: number } }
 
 export function ProjectsPage(props: Props) {
-  return props.id ? <ProjectDetail key={props.id} {...props} /> : <ProjectList csrf={props.csrf} navigate={props.navigate} />
+  return props.id ? <ProjectDetail key={`${props.id}:${props.draft?.key ?? ''}`} {...props} /> : <ProjectList csrf={props.csrf} navigate={props.navigate} />
 }
 
 function ProjectList({ csrf, navigate }: { csrf: string; navigate: (id: string) => void }) {
@@ -40,7 +42,9 @@ function ProjectList({ csrf, navigate }: { csrf: string; navigate: (id: string) 
   </section>
 }
 
-function ProjectDetail({ id, csrf, employeeID, navigate, navigateTask }: Props) {
+function ProjectDetail({ id, csrf, employeeID, navigate, navigateTask, draft }: Props) {
+  const attention = useAttentionList('all', { project_id: id }, Infinity)
+  const composer = useRef<HTMLTextAreaElement>(null)
   const [project, setProject] = useState<Project | null>(null)
   const [status, setStatus] = useState<ProjectStatus | null>(null)
   const [events, setEvents] = useState<ProjectEvent[]>([])
@@ -53,7 +57,7 @@ function ProjectDetail({ id, csrf, employeeID, navigate, navigateTask }: Props) 
   const [actionError, setActionError] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
-  const [content, setContent] = useState('')
+  const [content, setContent] = useState(draft?.text ?? '')
   const [messageID, setMessageID] = useState(() => pendingMessageID(employeeID, id))
   const [visibleSeq, setVisibleSeq] = useState(0)
   const [hasMore, setHasMore] = useState(false)
@@ -61,6 +65,7 @@ function ProjectDetail({ id, csrf, employeeID, navigate, navigateTask }: Props) 
   const loading = useRef(false)
   const generation = useRef(0)
   const afterSeq = useRef(0)
+  const askProject: AskProject = (_, text) => { setContent(text); composer.current?.focus(); composer.current?.scrollIntoView({ block: 'center' }) }
   const refresh = useCallback(async () => {
     if (loading.current) return
     loading.current = true
@@ -134,13 +139,13 @@ function ProjectDetail({ id, csrf, employeeID, navigate, navigateTask }: Props) 
         {status?.run?.effective && <button disabled={busy || !csrf} onClick={() => void action(() => request(`${projectAPI(id)}/stop`, { method: 'POST', csrf, body: {} }), '已停止这次运行，已派出的任务继续执行。待处理输入可能启动下一次运行。')}>停止当前运行</button>}
         {status?.state === 'needs_attention' && <button disabled={busy || !csrf} onClick={() => void action(() => request(`${projectAPI(id)}/retry`, { method: 'POST', csrf, body: {} }), '已请求从原位置重试。')}>重试 Project Agent</button>}
       </section>
-      <section className="card" aria-label="主对话"><h2>主对话</h2>
-        {events.map((event) => <article key={event.seq} data-seq={event.seq}>{conversationItems(event).map((item, i) => <div key={i}><h3>{item.label}</h3><p className="task-text">{item.text}</p></div>)}<small>#{event.seq} · {timeLabel(event.created_at)}</small></article>)}
+      <section className="card" aria-label="主对话"><h2>主对话</h2>{attention.error && <p role="alert">{attention.error}</p>}
+        {events.map((event) => <article key={event.seq} data-seq={event.seq}>{conversationItems(event).map((item, i) => <div key={i}><h3>{item.label}</h3>{item.attentionCallID && attention.requests.some((a) => a.origin_tool_call_id === item.attentionCallID) ? attention.requests.filter((a) => a.origin_tool_call_id === item.attentionCallID).map((a) => <AttentionCard key={a.id} item={a} csrf={csrf} askProject={askProject} />) : <p className="task-text">{item.text}</p>}</div>)}<small>#{event.seq} · {timeLabel(event.created_at)}</small></article>)}
         {hasMore && <button onClick={() => void refresh()}>继续读取对话</button>}
         {!hasMore && status?.preview?.text && status.run?.effective && status.preview.after_seq === visibleSeq && <article aria-label="流式回复"><h3>Project Agent 正在回复（尚未保存）</h3><p className="task-text">{status.preview.text}</p>{status.preview.truncated && <p>预览已截短，完整回复保存后显示。</p>}</article>}
         {messages.map((message) => <article key={message.id}><h3>你 · 已入队</h3><p className="task-text">{message.content}</p><small>{timeLabel(message.created_at)}</small></article>)}
         {!events.length && !messages.length && <p>暂无对话。</p>}
-        <form onSubmit={(e) => { e.preventDefault(); void send() }}><label>发给 Project Agent 的消息<textarea value={content} disabled={busy} onChange={(e) => setContent(e.target.value)} required /></label>
+        <form onSubmit={(e) => { e.preventDefault(); void send() }}><label>发给 Project Agent 的消息<textarea ref={composer} value={content} disabled={busy} onChange={(e) => setContent(e.target.value)} required /></label>
           <p className="hint">消息最多 64 KiB。所有设备离线时也会保存。</p>
           {messageID && <><p>上次消息的结果尚未确认。查询或重发使用同一消息标识。</p><button type="button" disabled={busy} onClick={() => void recover()}>查询原消息</button></>}
           <button disabled={busy || !csrf || !content.trim() || new TextEncoder().encode(content).length > 64 * 1024}>{messageID ? '重发原消息' : '发送消息'}</button>

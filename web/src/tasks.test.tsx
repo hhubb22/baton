@@ -83,6 +83,7 @@ it('离线、执行结果与交付待核实分别显示，查询失败保留记�
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
     expect(init.method).toBe('GET')
     if (fail) throw new Error('断网')
+    if (url.startsWith('/api/v1/inbox')) return json({ requests: [], open_count: 0 })
     if (url.includes('/events')) return json({ events: [] })
     if (url.includes('?')) return json({ tasks: [] })
     return json({ ...task, status: 'completed', summary: '<script>bad()</script>' })

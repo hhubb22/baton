@@ -20,6 +20,9 @@ import { NodesPage } from './ui/NodesPage.tsx'
 import { SessionsPage } from './ui/SessionsPage.tsx'
 import { ProjectsPage } from './ui/ProjectsPage.tsx'
 import { TasksPage } from './ui/TasksPage.tsx'
+import { attentionURL, useAttentionList } from './inbox.ts'
+import { InboxPage } from './ui/InboxPage.tsx'
+import { NodeAvailability } from './node-availability.ts'
 import { taskURL } from './tasks.ts'
 import { PasswordForm } from './ui/PasswordForm.tsx'
 
@@ -30,12 +33,16 @@ type Phase =
   | { kind: 'nodes'; employee: Employee; csrf: string }
 
 export default function App() {
-  const [page, setPage] = useState<'nodes' | 'sessions' | 'tasks' | 'projects'>(() => routePage())
+  const [page, setPage] = useState<'nodes' | 'sessions' | 'tasks' | 'projects' | 'inbox'>(() => routePage())
   const [taskID, setTaskID] = useState(() => window.location.pathname.split('/')[2] ?? '')
   const [projectID, setProjectID] = useState(() => window.location.pathname.split('/')[2] ?? '')
+  const [inboxID, setInboxID] = useState(() => window.location.pathname.split('/')[2] ?? '')
+  const [draft, setDraft] = useState<{ text: string; key: number }>()
+  function askProject(id: string, text: string) { navigateProject(id); setDraft({ text, key: Date.now() }) }
+  function navigateInbox(id: string) { window.history.pushState(null, '', id ? attentionURL(id) : '/inbox'); setInboxID(id); setPage('inbox') }
   function navigateProject(id: string) {
     window.history.pushState(null, '', id ? `/projects/${encodeURIComponent(id)}` : '/projects')
-    setProjectID(id); setPage('projects')
+    setProjectID(id); setPage('projects'); setDraft(undefined)
   }
   function navigateTask(id: string) {
     window.history.pushState(null, '', id ? taskURL(id) : '/tasks')
@@ -45,7 +52,7 @@ export default function App() {
     window.history.pushState(null, '', '/'); setPage(next)
   }
   useEffect(() => {
-    const change = () => { setTaskID(window.location.pathname.split('/')[2] ?? ''); setProjectID(window.location.pathname.split('/')[2] ?? ''); setPage(routePage()) }
+    const change = () => { setDraft(undefined); setInboxID(window.location.pathname.split('/')[2] ?? ''); setTaskID(window.location.pathname.split('/')[2] ?? ''); setProjectID(window.location.pathname.split('/')[2] ?? ''); setPage(routePage()) }
     window.addEventListener('popstate', change)
     return () => window.removeEventListener('popstate', change)
   }, [])
@@ -105,6 +112,7 @@ export default function App() {
   }, [phase])
 
   function enterLogin(notice?: string) {
+    setDraft(undefined)
     clearCSRF()
     setEnrollment(null)
     setSaved(null)
@@ -254,8 +262,9 @@ export default function App() {
       ) : null}
       {phase.kind === 'nodes' ? (
         <>
+        <NodeAvailability value={list}><InboxNav key={phase.employee.id} navigate={() => navigateInbox('')} />
         <nav aria-label="页面"><button type="button" onClick={() => navigateProject('')}>Project</button><button type="button" onClick={() => navigatePage('nodes')}>节点</button><button type="button" onClick={() => navigatePage('sessions')}>Session</button><button type="button" onClick={() => navigateTask('')}>任务</button></nav>
-        {page === 'projects' ? <ProjectsPage key={phase.employee.id} id={projectID} csrf={phase.csrf} employeeID={phase.employee.id} navigate={navigateProject} navigateTask={navigateTask} /> : page === 'tasks' ? <TasksPage key={phase.employee.id} id={taskID} csrf={phase.csrf} employeeID={phase.employee.id} nodes={list} navigate={navigateTask} /> : page === 'sessions' ? <SessionsPage csrf={phase.csrf} nodes={list} employeeID={phase.employee.id} /> : <NodesPage
+        {page === 'inbox' ? <InboxPage key={`${phase.employee.id}:${inboxID}`} id={inboxID} csrf={phase.csrf} askProject={askProject} /> : page === 'projects' ? <ProjectsPage key={phase.employee.id} id={projectID} csrf={phase.csrf} employeeID={phase.employee.id} navigate={navigateProject} navigateTask={navigateTask} draft={draft} /> : page === 'tasks' ? <TasksPage key={phase.employee.id} id={taskID} csrf={phase.csrf} employeeID={phase.employee.id} nodes={list} navigate={navigateTask} askProject={askProject} /> : page === 'sessions' ? <SessionsPage csrf={phase.csrf} nodes={list} employeeID={phase.employee.id} /> : <NodesPage
           employee={phase.employee}
           csrf={phase.csrf}
           list={list}
@@ -272,13 +281,19 @@ export default function App() {
           onSaveDefault={(nodeId) => void onSaveDefault(nodeId)}
           onRevoke={(nodeId) => void onRevoke(nodeId)}
           loadFiles={(nodeId, query) => getNodeFiles(nodeId, query)}
-        />}
+        />}</NodeAvailability>
         </>
       ) : null}
     </main>
   )
 }
 
-function routePage(): 'nodes' | 'tasks' | 'projects' {
-  return window.location.pathname.startsWith('/projects') ? 'projects' : window.location.pathname.startsWith('/tasks') ? 'tasks' : 'nodes'
+function routePage(): 'nodes' | 'tasks' | 'projects' | 'inbox' {
+  return window.location.pathname.startsWith('/inbox') ? 'inbox' : window.location.pathname.startsWith('/projects') ? 'projects' : window.location.pathname.startsWith('/tasks') ? 'tasks' : 'nodes'
+}
+
+function InboxNav({ navigate }: { navigate: () => void }) {
+  const { open_count, error } = useAttentionList('open')
+  useEffect(() => { document.title = error ? 'Baton · Inbox 数量暂不可用' : open_count ? `(${open_count}) Baton` : 'Baton'; return () => { document.title = 'Baton' } }, [open_count, error])
+  return <button className="inbox-nav" type="button" onClick={navigate}>Inbox（{error ? '暂不可用' : open_count}）</button>
 }

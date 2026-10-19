@@ -2,16 +2,19 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, messageOf, request } from '../api.ts'
 import { taskEventLabels, deliveryStates, getTask, getTaskEvents, listTasks, taskStates, taskURL, timeLabel, type TaskEvent, type TaskPage, type TaskRecord } from '../tasks.ts'
 import type { NodeList } from '../types.ts'
+import { useAttentionList, type AskProject } from '../inbox.ts'
+import { AttentionCard } from './AttentionCard.tsx'
+import { ProjectQuote } from './ProjectQuote.tsx'
 import { TaskOrigin } from './TaskOrigin.tsx'
 import { TaskComposer } from './TaskComposer.tsx'
 import { TaskActions } from './TaskActions.tsx'
 import { TaskReferences } from './TaskReferences.tsx'
 import type { WorkSession } from './SessionsPage.tsx'
 
-export function TasksPage({ id, csrf, employeeID, nodes, navigate }: {
-  id: string; csrf: string; employeeID: string; nodes: NodeList | null; navigate: (id: string) => void
+export function TasksPage({ id, csrf, employeeID, nodes, navigate, askProject }: {
+  id: string; csrf: string; employeeID: string; nodes: NodeList | null; navigate: (id: string) => void; askProject?: AskProject
 }) {
-  return id ? <TaskDetail key={id} id={id} csrf={csrf} employeeID={employeeID} nodes={nodes} navigate={navigate} /> : <TaskList csrf={csrf} employeeID={employeeID} nodes={nodes} navigate={navigate} />
+  return id ? <TaskDetail key={id} id={id} csrf={csrf} employeeID={employeeID} nodes={nodes} navigate={navigate} askProject={askProject} /> : <TaskList csrf={csrf} employeeID={employeeID} nodes={nodes} navigate={navigate} />
 }
 
 function TaskList({ csrf, employeeID, nodes, navigate }: Omit<Parameters<typeof TasksPage>[0], 'id'>) {
@@ -60,7 +63,8 @@ function TaskList({ csrf, employeeID, nodes, navigate }: Omit<Parameters<typeof 
   </section>
 }
 
-function TaskDetail({ id, csrf, employeeID, nodes, navigate }: Parameters<typeof TasksPage>[0]) {
+function TaskDetail({ id, csrf, employeeID, nodes, navigate, askProject }: Parameters<typeof TasksPage>[0]) {
+  const related = useAttentionList('all', { task_id: id }, Infinity)
   const [task, setTask] = useState<TaskRecord | null>(null)
   const [events, setEvents] = useState<TaskEvent[]>([])
   const [children, setChildren] = useState<TaskPage>({ tasks: [] })
@@ -113,9 +117,9 @@ function TaskDetail({ id, csrf, employeeID, nodes, navigate }: Parameters<typeof
         <section className="card" aria-label="执行状态"><h3>执行状态</h3><p>{taskStates[task.status] ?? task.status}</p><small>记录更新：{timeLabel(task.updated_at)} · 版本 {task.version}</small></section>
         <section className="card" aria-label="结果交付"><h3>结果交付</h3><p>{deliveryStates[task.delivery_status ?? ''] ?? '暂未取得交付状态'}</p>{task.delivery_updated_at && <small>交付记录：{timeLabel(task.delivery_updated_at)}</small>}</section>
       </div>
-      <section className="card" aria-label="结果摘要"><h3>结果摘要和错误</h3><p className="task-text">{task.summary ?? '尚无结果摘要。'}</p>{task.error_code && <p className="error">{task.error_message}（{task.error_code}）</p>}</section>
-      <TaskReferences title="证据与预览" refs={task.evidence} empty={task.evidence_empty_reason} />
-      <TaskReferences title="产物" refs={task.artifacts} empty={task.artifacts_empty_reason} />
+      <section className="card" aria-label="结果摘要"><h3>结果摘要和错误</h3><ProjectQuote projectID={task.project_id} source={{ taskID: id, field: 'summary' }} askProject={askProject}><p className="task-text">{task.summary ?? '尚无结果摘要。'}</p></ProjectQuote>{task.error_code && <ProjectQuote projectID={task.project_id} source={{ taskID: id, field: 'error' }} askProject={askProject}><p className="error">{task.error_message}（{task.error_code}）</p></ProjectQuote>}</section>
+      <TaskReferences title="证据与预览" refs={task.evidence} empty={task.evidence_empty_reason} projectID={task.project_id} taskID={id} askProject={askProject} />
+      <TaskReferences title="产物" refs={task.artifacts} empty={task.artifacts_empty_reason} projectID={task.project_id} taskID={id} askProject={askProject} />
       <section className="card" aria-label="委托关系"><h3>委托链与新执行</h3>
         {task.parent_task_id && <p>来源任务：{link(task.parent_task_id, task.parent_task_id)}</p>}
         {task.source_session_id && <p>来源 Session：{task.source_session_id}</p>}
@@ -127,7 +131,7 @@ function TaskDetail({ id, csrf, employeeID, nodes, navigate }: Parameters<typeof
         <div className="actions">{childCursor && <button onClick={() => setChildCursor('')}>回到首批子委托</button>}{children.next_cursor && <button onClick={() => setChildCursor(children.next_cursor ?? '')}>下一批子委托</button>}</div>
         {events.filter((event) => event.rerun).map((event) => <p key={event.event_id}>新执行：{link(event.rerun!.task_id, event.rerun!.task_id)} · {event.rerun!.reason}</p>)}
       </section>
-      <section className="card" aria-label="相关事项"><h3>相关事项</h3><p>相关事项暂不可用。</p></section>
+      <section className="card" aria-label="相关事项"><h3>相关事项</h3>{related.error && <p role="alert">{related.error}</p>}{related.requests.map((item) => <AttentionCard key={item.id} item={item} csrf={csrf} askProject={askProject} />)}{!related.requests.length && !related.error && <p>暂无相关事项。</p>}</section>
       <TaskActions task={task} csrf={csrf} employeeID={employeeID} refresh={refresh} navigate={navigate} />
       <section className="card" aria-label="任务信息"><h3>任务信息</h3><dl className="task-info">
         <dt>请求标识</dt><dd>{task.request_id}</dd><dt>Agent</dt><dd>{task.agent_type}</dd>

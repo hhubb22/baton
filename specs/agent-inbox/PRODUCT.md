@@ -31,7 +31,7 @@ Basis: 2026-10-18 关于 Agent Inbox、可操作成果和 Generative UI 的讨�
 | 事项 | Project Agent 请用户处理的一件事，有稳定 ID 和状态。英文标识 `attention_request` |
 | Agent Inbox | 列出本人所有待处理事项的界面 |
 | 输入队列 | Coordinator 内部等待 Project Agent 处理的输入（Project Agent 规格 PA-05）。和 Agent Inbox 是两回事 |
-| 展示内容 | 事项里由 Project Agent 写的一段 OpenUI Lang 程序，由浏览器渲染 |
+| 展示内容 | 事项里由 Project Agent 写的一段 Markdown，由浏览器渲染；OpenUI Lang 推迟到第一个版本之后 |
 | Baton 组件库 | Baton 为展示内容注册的 OpenUI 组件和动作（IB-14、IB-15），带版本号 |
 
 ## Behavior

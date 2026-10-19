@@ -1,0 +1,29 @@
+{
+  "sync": [
+    {
+      "source": "Inbox",
+      "elapsed_ms": 4850
+    },
+    {
+      "source": "Project",
+      "elapsed_ms": 4575
+    },
+    {
+      "source": "任务详情",
+      "elapsed_ms": 4655
+    }
+  ],
+  "input_count": 3,
+  "quote_original_bytes": 10240,
+  "quote_saved_bytes": 8192,
+  "viewport": 1024,
+  "assertions": [
+    "system_resolved",
+    "original_and_latest",
+    "root_preview",
+    "offline_no_stale",
+    "commit_copy",
+    "draft_edit_send_exact",
+    "no_html_or_images"
+  ]
+}

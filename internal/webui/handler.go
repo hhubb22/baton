@@ -60,7 +60,7 @@ func staticName(raw string) string {
 	case "/", "/index.html":
 		return "index.html"
 	}
-	if cleaned == "/projects" || strings.HasPrefix(cleaned, "/projects/") || cleaned == "/tasks" || strings.HasPrefix(cleaned, "/tasks/") {
+	if cleaned == "/inbox" || strings.HasPrefix(cleaned, "/inbox/") || cleaned == "/projects" || strings.HasPrefix(cleaned, "/projects/") || cleaned == "/tasks" || strings.HasPrefix(cleaned, "/tasks/") {
 		return "index.html"
 	}
 	if !strings.HasPrefix(cleaned, "/") || strings.Contains(cleaned, "\\") {
