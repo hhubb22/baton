@@ -9,12 +9,12 @@ PS-172 交付此合成完成场景。首批真实录制由 PS-175 在用户本�
 
 ## 真实场景入口
 
-`TestRealCodex/<scenario>` 为每个场景创建独立的 app-server、工作目录和原生 thread，使用一次性、独立认证的 CODEX_HOME。设置 `BATON_RECORD_DIR` 后写入其 `codex/` 子目录；本机流程见 [主 README](../../../../../README.md#本机录制与规范化)。本目录其余 `*.ndjson` 是 2026-10-19 在 Baton 9c11002 上录制的首批真实转录：Codex 0.162.1，darwin/arm64，模型 `gpt-6-luna`，单份 1.7～61 KB。提交的是通过的 9 个场景：`simple`、`interrupt_idle`、`interrupt_mid_tool`、`deliver_active`、`deliver_idle`、`restore_load_only`、`restore_missing`、`provider_error`、`symlinked_workspace`。
+`TestRealCodex/<scenario>` 为每个场景创建独立的 app-server、工作目录和原生 thread，使用一次性、独立认证的 CODEX_HOME。设置 `BATON_RECORD_DIR` 后写入其 `codex/` 子目录；本机流程见 [主 README](../../../../../README.md#本机录制与规范化)。本目录其余 `*.ndjson` 是 2026-10-19 在 Baton 9c11002 上录制的首批真实转录：Codex 0.162.1，darwin/arm64，模型 `gpt-6-luna`，单份 1.7～61 KB。首轮提交了通过的 9 个场景：`simple`、`interrupt_idle`、`interrupt_mid_tool`、`deliver_active`、`deliver_idle`、`restore_load_only`、`restore_missing`、`provider_error`、`symlinked_workspace`。
 
-两个失败场景没有提交转录：
+首轮有两个失败场景：
 
 - `interrupt_before_turn_started`：`turn/start` 返回后约 1 毫秒发出 `turn/interrupt`，此时回合的 `startedAt` 还是 null，Codex 返回 `-32600 no active turn to interrupt`。适配器把这个错误直接返回，回合开始后不会再中止，早到的取消因此丢失。这是适配器缺陷，修复后重录。
-- `delegation`：子任务描述要求不运行工具、不再委托，`gpt-6-luna` 的子 Agent 仍然继续委托，后几层请求文件无效，失败一路传回父任务。属于模型不遵守指令，和 Baton 无关；换模型或调整提示之前，这个场景不提交转录。
+- `delegation`：首轮用 `gpt-6-luna` 录制时，子任务描述要求不运行工具、不再委托，子 Agent 仍然继续委托，后几层请求文件无效，失败一路传回父任务，属于模型不遵守指令。同日改用 `gpt-6.1-sol` 重录后通过，`delegation.ndjson` 头部记录的模型是 `gpt-6.1-sol`。规范化只保留父会话，子会话的 80 帧计入 `dropped_frames`。
 
 - `simple`：版本探测、创建 thread、一次输入、settled、结构化结果及摘要检查。
 - `interrupt_idle`：完成后调用 Abort，使用已保存的停止事实，保持 `outcomeKnown=false`。
