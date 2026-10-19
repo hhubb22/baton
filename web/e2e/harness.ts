@@ -369,8 +369,7 @@ export async function assertLogsClean(state: E2EState, secrets: string[]): Promi
   }
 }
 
-export async function createSessionEmployee(state: E2EState): Promise<{ username: string; password: string }> {
- const username = 'sessions'
+export async function createSessionEmployee(state: E2EState, username = 'sessions'): Promise<{ username: string; password: string }> {
  const password = await issuedPassword(state.coordBin, childEnv({ BATON_DATABASE_URL: state.databaseURL, BATON_DB_SCHEMA: state.schema }), username, 'Session 测试', [state.databaseURL])
  return { username, password }
 }

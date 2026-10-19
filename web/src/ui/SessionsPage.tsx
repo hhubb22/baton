@@ -1,6 +1,7 @@
 import { readPendingInput, savePendingInput, type PendingInput } from '../pending-input.ts'
 import { appendOutput, orderedSessions, sessionDepth } from '../sessions-model.ts'
 import { useEffect, useRef, useState } from 'react'
+import { SessionHistory } from './SessionHistory.tsx'
 import { ApiError, messageOf, request } from '../api.ts'
 import type { NodeList } from '../types.ts'
 
@@ -19,6 +20,7 @@ export function SessionsPage({ csrf, nodes, employeeID }: { csrf: string; nodes:
   const [output, setOutput] = useState('')
   const [gap, setGap] = useState('')
   const [connected, setConnected] = useState(false)
+  const [historyRecovery, setHistoryRecovery] = useState(0)
   const [status, setStatus] = useState<Result | null>(null)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -33,6 +35,7 @@ export function SessionsPage({ csrf, nodes, employeeID }: { csrf: string; nodes:
   const socket = useRef<WebSocket | null>(null)
   const selection = useRef('')
   const cursor = useRef('')
+  const outputGap = useRef(false)
 
   useEffect(() => {
     let stopped = false
@@ -57,6 +60,7 @@ export function SessionsPage({ csrf, nodes, employeeID }: { csrf: string; nodes:
       const ws = new WebSocket(url)
       socket.current = ws
       ws.onopen = () => {
+        if (attempt > 0 && selection.current) setHistoryRecovery((n) => n + 1)
         attempt = 0; setConnected(true); void refresh()
         ws.send(JSON.stringify({ session_id: selection.current, cursor: cursor.current }))
       }
@@ -66,8 +70,12 @@ export function SessionsPage({ csrf, nodes, employeeID }: { csrf: string; nodes:
         if (event.type === 'session.changed' || event.type === 'task.changed') void refresh()
         if (event.type !== 'session.output' || event.session_id !== selection.current) return
         setStatus(event)
-        if (!event.ok) { setGap(`输出暂不可用：${event.code ?? 'unavailable'}`); return }
-        if (event.gap) setGap('输出存在缺口。完整历史保存在执行节点。')
+        if (!event.ok) { setGap((current) => current || `输出暂不可用：${event.code ?? 'unavailable'}`); return }
+        if (event.gap) {
+          setGap('输出存在缺口，已请求补取节点历史。无法补齐的部分继续保留。')
+          if (!outputGap.current) setHistoryRecovery((n) => n + 1)
+        }
+        outputGap.current = event.gap
         cursor.current = event.cursor
         setOutput((current) => appendOutput(current, event.text ?? ''))
       }
@@ -84,6 +92,7 @@ export function SessionsPage({ csrf, nodes, employeeID }: { csrf: string; nodes:
   }, [])
 
   function select(id: string) {
+    outputGap.current = false
     selection.current = id; cursor.current = ''; setSelected(id); setOutput(''); setGap(''); setStatus(null); setNotice('')
     if (socket.current?.readyState === WebSocket.OPEN) socket.current.send(JSON.stringify({ session_id: id }))
   }
@@ -164,6 +173,7 @@ export function SessionsPage({ csrf, nodes, employeeID }: { csrf: string; nodes:
     </div><div>
       {item && <><h3>{item.session_id}</h3><p>{node?.online ? states[status?.state ?? item.status] ?? '状态未知' : '状态未知'} · 节点{node?.online ? '在线' : '离线'}</p>
         {gap && <p role="status">{gap}</p>}<pre aria-label="实时输出" className="session-output">{output || '等待输出。'}</pre>
+        <SessionHistory key={item.session_id} sessionID={item.session_id} recovery={historyRecovery} />
         <form onSubmit={(e) => { e.preventDefault(); void input() }}><label>补充当前任务<textarea value={text} onChange={(e) => setText(e.target.value)} maxLength={4000} /></label>
           <button disabled={busy || !csrf || !status?.input_supported || !status.ok || !text || !!pending || !['running', 'waiting_input'].includes(status.state)}>发送输入</button>
         </form>

@@ -16,6 +16,16 @@ func ReadFile(path string) ([]byte, error) {
 	return io.ReadAll(f)
 }
 
+// ReadSnapshot 读取已打开的文件版本，允许其他进程原子替换路径。
+func ReadSnapshot(path string) ([]byte, error) {
+	f, err := OpenSnapshot(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(f)
+}
+
 // WriteFile 在受限临时文件中写入，再原子替换目标。
 func WriteFile(path string, data []byte) error {
 	if err := checkPath(path); err != nil && !os.IsNotExist(err) {

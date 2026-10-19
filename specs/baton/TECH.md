@@ -14,11 +14,11 @@ PS-155 提供 Project、主对话事件读取和项目记忆 API。迁移 `0016_
 
 当前已实现补充（PS-125 / T21）：Web 提供按节点分组的 Session 树，分别显示本机父子关系与跨节点委托，可提交新任务、补充当前任务、查询原输入操作及显式恢复。`/api/v1/events` 使用同源 Cookie 鉴权，连接期间复核登录，退出、改密与到期关闭旧连接；`session.changed`、`task.changed` 提醒页面重新读取，`session.output` 返回受限纯文本、游标和缺口。通知按本人元数据版本每秒检查，重连及窗口获得焦点重新读取。历史、输出和补充输入使用临时 Relay RPC，不进入中心 outbox 或 task_events。每次输出最多 16 KiB，Worker 和适配器各保留最近 256 KiB，页面保留最近 128 KiB；中心最多 128 个浏览器连接及 128 个临时 RPC，节点最多 16 个并发 Session RPC，浏览器写超时为 2 秒。Relay 的输出使用独立队列，最多 128 条且最多 32 MiB，控制队列优先发送，输出超限不会占满任务控制队列。慢订阅丢失的片段以 gap 显示，完整原生历史仍留在节点。
 
-补充输入在 Worker 串行区内先保存操作 ID、正文摘要和不确定状态，再调用适配器；确认丢失后只查询原操作，不自动补发。页面按员工保存待确认的操作 ID 和 Session，不保存正文。旧结果已确认且全部旧报告已交付后，显式恢复将原 Session 标记为空闲；后续新目标创建独立任务和执行，重新申请许可，保留原生 Session 与固定工作目录，清除旧执行的活动回执，拒绝变更目录。恢复不创建缺失历史，不重放旧任务。Pi/Codex 提供实际补充输入和有界文本增量；Pi 没有独立的员工等待事件，页面保留中心 `waiting_input` 的显示能力。Inbox、Project Agent、完整历史分页与任务干预页面分别由其后续工单扩展。无新增中心迁移或依赖。
+补充输入在 Worker 串行区内先保存操作 ID、正文摘要和不确定状态，再调用适配器；确认丢失后只查询原操作，不自动补发。页面按员工保存待确认的操作 ID 和 Session，不保存正文。旧结果已确认且全部旧报告已交付后，显式恢复将原 Session 标记为空闲；后续新目标创建独立任务和执行，重新申请许可，保留原生 Session 与固定工作目录，清除旧执行的活动回执，拒绝变更目录。恢复不创建缺失历史，不重放旧任务。Pi/Codex 提供实际补充输入和有界文本增量；Pi 没有独立的员工等待事件，页面保留中心 `waiting_input` 的显示能力。Inbox、Project Agent 与任务干预页面分别由其后续工单扩展。无新增中心迁移或依赖。
 
 当前已实现补充（PS-119 / T15）：沿用已合并 T14 的唯一 `internal/agent.Adapter`，Codex 位于 `internal/agent/codex`，旧 internal/adapters 接口已删除。统一接口为 Start / SubmitInput / DeliverResult / HistoryContains / ReadHistory / Drain / Abort / Close；Output 保留等待子任务、进度、最终结果、settled 与 uncertain，扩展仅限节点本地的 Raw 事件；StopObserver 持续观察中止 ACK 后的停止事实。Worker 唯一选择点为 `internal/session/adapter.go:configureAdapter`，按 agent_type 从 registeredAdapters 注册表选择 Pi/Codex，新增类型只增加注册项。两者共用许可、输入意图、输入代次、中止、outbox、恢复与认证本地历史 IPC；Pi 同步增加校验本地 JSONL 的有限分页，不再引入 Codex 专用 Worker 生命周期。启动前将非凭据配置绑定账本，恢复沿用原 Session/Execution、cwd/model/home，不保存 Env、不发送恢复输入。
 
-Codex CLI **0.162.1** 使用 stdio app-server，实现 initialize/initialized、thread/start/read/resume、turn/start/steer/interrupt、turn/completed 及 thread/turns/list、thread/items/list 分页；版本不匹配、实验方法不兼容、原生身份/cwd/Session 映射不符、历史缺失或输入发送窗口不明均拒绝自动重放，不创建替代 thread。clientUserMessageId 仅作关联，steer ACK 不证明历史落盘；原生 userMessage 或成功查询工具输出中的精确 delivery_id 才确认注入。Agent 经受限 BATON_CONTEXT_FILE 使用既有委托 CLI，完整原始历史不上传中心；本地已认证 IPC 提供分页历史，尚无中心原文查询 API。只注入 Agent 必要环境，使用禁止审批的 workspace-write sandbox（为本地委托开启网络），拒绝服务端审批、认证刷新和交互工具请求。
+Codex CLI **0.162.1** 使用 stdio app-server，实现 initialize/initialized、thread/start/read/resume、turn/start/steer/interrupt、turn/completed 及 thread/turns/list、thread/items/list 分页；版本不匹配、实验方法不兼容、原生身份/cwd/Session 映射不符、历史缺失或输入发送窗口不明均拒绝自动重放，不创建替代 thread。clientUserMessageId 仅作关联，steer ACK 不证明历史落盘；原生 userMessage 或成功查询工具输出中的精确 delivery_id 才确认注入。Agent 经受限 BATON_CONTEXT_FILE 使用既有委托 CLI，完整原始历史不上传中心；本地已认证 IPC 提供分页历史；浏览器的临时历史 API 见下文 PS-127。只注入 Agent 必要环境，使用禁止审批的 workspace-write sandbox（为本地委托开启网络），拒绝服务端审批、认证刷新和交互工具请求。
 
 验证分工：CLI 官方固定 Schema、人工协议回放、真实 stdio 子进程与 Worker 账本回归不证明真实模型任务通过。用户已在 macOS、Codex 0.162.1 / gpt-6-luna 上报告启动、输入、结构化结果、turn 完成、中止、恢复、历史支持；委托链路成功，但子任务违反“不要再委托”导致原断言失败，委托整项仍未通过。TestRealCodex 的显式环境变量、隔离目录及全部断言不变，本轮只适配包路径和类型。云端不登录模型账号，不把此次接口重构回放视为重做真实模型验收；其他模型/平台不外推，确切实测命令见 README。无新增中心迁移。
 
@@ -603,3 +603,20 @@ Agent 版本按验证过的范围登记，发现未知版本时标为未验证�
 | Q7 | Project Agent 的未定参数 | Runtime 的发布方式（npm 全局安装或单文件可执行）与压缩阈值，见 Project Agent TECH 的 Open questions | 实施者与用户 | 安装说明和压缩调优，不阻塞其余实现（2026-10-18 修订） |
 
 实施任务按节点与身份、执行账本、跨节点委托、Agent 适配、Web UI、Plane、可靠性与跨系统验收组织，任务清单和进度由 Linear 工单管理。这个顺序用于分配实施和验证依赖，首版行为仍以 PRODUCT 为准。
+
+
+## Session 历史读取（PS-127）
+
+`GET /api/v1/sessions/{id}/history?cursor=...&limit=16` 校验员工归属、节点状态与登录，再通过 Coordinator Gateway 发起临时 `session.request`。查询完成后再次检查登录和节点吊销。响应设置 `Cache-Control: no-store`；正文不进入 PostgreSQL、业务 outbox、task_events 或诊断日志。成功响应的 `history` 包含 `entries`、`cursor`、`has_more`、`gap` 和可选 `code`。每页最多 16 条，序列化历史页最多 14 KiB，单条显示最多 4 KiB（含 JSON 转义和元数据）；超过上限的条目保留截断标记、原始字节数与 `pi:<Session ID>:<字节偏移>` 或 `codex:<原生 thread ID>:<字节偏移>` 的节点引用。引用通过节点保存的原生映射定位文件，不作为下载链接。
+
+Pi 只读 `baton-pi.json` 指向的原生 JSONL；Codex 保存固定 CLI 0.162.1 返回的原生文件路径及根目录，读取时核对原生头部的 thread ID、cwd 和 CLI 版本。两者都用 `os.OpenRoot` 限制文件边界。文件读取固定本次长度，每行只保留 8 KiB 前缀，头部校验最多读取 256 KiB；完整行以流式方式参与摘要，超大正文不会整体载入内存。Pi 保留消息、分支摘要及其他原生条目，父条目 ID 单独展示。Codex 保留 session_meta 与原生事件，超大头部同样显示引用和截断。
+
+历史读取只接受实际句柄指向的普通文件；Unix 非阻塞打开避免 FIFO 占住查询额度。原生映射使用受限快照读取，Windows 允许路径被原子替换并保留句柄的 DACL 校验，查询不阻碍 Worker 保存执行状态。
+
+游标包含已读条目数和 SHA-256 前缀摘要，并绑定原生 Session 与头部。每次查询从头流式校验前缀，成本随已读字节数增加；新增内容可以继续补取，前缀删除、改写或重排返回 `history_changed`。空页仍返回末尾游标。未写完的末行不推进游标，返回 `history_incomplete`；损坏记录返回 `history_invalid` 并保留已读取页。离线返回 `node_offline`，文件或映射缺失返回 `history_missing`；磁盘、协议或超时错误返回不可用，不推断为删除。单节点同时最多处理 2 次历史查询，超额返回 `history_busy`；历史响应使用输出队列，不占任务控制消息队列。
+
+历史查询不依赖 Worker 存活，不创建任务、恢复 Session 或重发输入。旧 Codex 映射未保存文件位置时，独立 app-server 只调用 initialize、thread/read 定位文件；源版本不提供路径时才在该独立连接上按单条调用 thread/items/list。独立查询失败不会关闭执行连接。该兼容路径仍受原生 8 MiB 帧上限限制；超限时保留不可读缺口。对没有文件位置且无法读取元数据的旧记录，无法确定删除与读取失败时返回不可用。
+
+浏览器使用独立历史组件，只保留当前页和最多 64 个返回游标。选择 Session、实时通道重连或首次收到输出缺口时读取一页原生历史，后续页由员工继续读取。原生历史与实时增量分别显示；输出游标与历史游标不互换。截断、查询失败和历史变化的缺口保持可见；读到本次文件末尾不声明整个 Session 已完整。切换 Session 或新请求到达后，迟到响应不能覆盖当前页面；所有内容都通过文本节点显示。
+
+验证记录：Pi 的 1,000 条分支样本含一条超过 32 MiB 的内容，共 63 页；固定 Codex 0.162.1 的隔离无模型探针创建原生历史，再追加 1,000 条样本（含 12 MiB 单条），验证 64 页、原连接退出后读取和删除反馈。真实 Pi 1.3.0、Worker、浏览器验证断流补取、Worker 退出后的只读访问、截断引用、文件删除和离线反馈；仅出现在原生输出中的随机标记在全部中心业务表和中心/节点/Worker 诊断日志中均未检出。Codex 探针验证原生持久化与读取，不代表模型任务验收；其他平台的真实模型行为沿用各自适配器验收范围。

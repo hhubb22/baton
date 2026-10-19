@@ -8,13 +8,15 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"sync/atomic"
 	"time"
 )
 
 // Host 由 batond 用来启动或重新连接 Session Worker。
 type Host struct {
-	DataDir string
-	Logger  *slog.Logger
+	DataDir        string
+	Logger         *slog.Logger
+	historyQueries atomic.Int32
 }
 
 // Reconnect 在 batond 启动时连回仍然存活的 Worker，不新开执行。

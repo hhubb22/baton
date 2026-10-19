@@ -44,6 +44,8 @@ type Event struct {
 }
 
 type State struct {
+	HistoryPath string   `json:"history_path,omitempty"`
+	HistoryRoot string   `json:"history_root,omitempty"`
 	Version     string   `json:"version"`
 	ThreadID    string   `json:"thread_id"`
 	TurnID      string   `json:"turn_id"`
@@ -62,6 +64,7 @@ type turn struct {
 }
 
 type Adapter struct {
+	nativeHome  string
 	live        agent.LiveBuffer
 	config      Config
 	mu          sync.Mutex
@@ -183,11 +186,13 @@ func (a *Adapter) connect(ctx context.Context) error {
 	}()
 	var result struct {
 		UserAgent string `json:"userAgent"`
+		CodexHome string `json:"codexHome"`
 	}
 	if err := a.call(ctx, "initialize", map[string]any{"clientInfo": map[string]string{"name": "baton", "version": "1"}, "capabilities": map[string]bool{"experimentalApi": true}}, &result); err != nil {
 		_ = a.Close()
 		return err
 	}
+	a.nativeHome = result.CodexHome
 	if result.UserAgent == "" {
 		_ = a.Close()
 		return ErrIncompatible
@@ -232,7 +237,8 @@ func (a *Adapter) CreateSession(ctx context.Context) error {
 	}
 	var response struct {
 		Thread struct {
-			ID string `json:"id"`
+			ID   string `json:"id"`
+			Path string `json:"path"`
 		} `json:"thread"`
 	}
 	p := map[string]any{"cwd": a.config.Directory, "approvalPolicy": "never", "sandbox": "workspace-write", "historyMode": "paginated", "ephemeral": false, "developerInstructions": Instructions}
@@ -248,7 +254,7 @@ func (a *Adapter) CreateSession(ctx context.Context) error {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.state = State{Version: Version, ThreadID: response.Thread.ID, SessionID: a.config.SessionID, Directory: a.config.Directory}
+	a.state = State{HistoryPath: response.Thread.Path, HistoryRoot: a.nativeHome, Version: Version, ThreadID: response.Thread.ID, SessionID: a.config.SessionID, Directory: a.config.Directory}
 	return a.saveLocked()
 }
 
@@ -269,8 +275,9 @@ func (a *Adapter) Attach(ctx context.Context) error {
 	}
 	var read struct {
 		Thread struct {
-			ID  string `json:"id"`
-			Cwd string `json:"cwd"`
+			ID   string `json:"id"`
+			Cwd  string `json:"cwd"`
+			Path string `json:"path"`
 		} `json:"thread"`
 	}
 	if err := a.call(ctx, "thread/read", map[string]any{"threadId": s.ThreadID}, &read); err != nil {
@@ -280,6 +287,7 @@ func (a *Adapter) Attach(ctx context.Context) error {
 	if err != nil || !filepath.IsAbs(read.Thread.Cwd) || read.Thread.ID != s.ThreadID || filepath.Clean(directory) != a.config.Directory {
 		return ErrHistoryMissing
 	}
+	s.HistoryPath, s.HistoryRoot = read.Thread.Path, a.nativeHome
 	var original *turn
 	if s.TurnID != "" {
 		cursor := ""
@@ -500,6 +508,10 @@ func (a *Adapter) Interrupt(ctx context.Context) (bool, bool, error) {
 }
 
 func (a *Adapter) ReadHistory(ctx context.Context, cursor string) (agent.HistoryPage, error) {
+	return a.readHistory(ctx, cursor, 16)
+}
+
+func (a *Adapter) readHistory(ctx context.Context, cursor string, limit int) (agent.HistoryPage, error) {
 	a.mu.Lock()
 	id := a.state.ThreadID
 	a.mu.Unlock()
@@ -510,7 +522,7 @@ func (a *Adapter) ReadHistory(ctx context.Context, cursor string) (agent.History
 		Data       json.RawMessage `json:"data"`
 		NextCursor string          `json:"nextCursor"`
 	}
-	if err := a.call(ctx, "thread/items/list", map[string]any{"threadId": id, "cursor": cursorOrNil(cursor), "limit": 16, "sortDirection": "asc"}, &result); err != nil {
+	if err := a.call(ctx, "thread/items/list", map[string]any{"threadId": id, "cursor": cursorOrNil(cursor), "limit": limit, "sortDirection": "asc"}, &result); err != nil {
 		return agent.HistoryPage{}, err
 	}
 	if len(result.Data) == 0 {

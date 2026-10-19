@@ -50,7 +50,7 @@ func handleSessionEnvelope(ctx context.Context, raw []byte, w *wsWriter, host *s
 		}
 		body, _ := json.Marshal(result)
 		priority := protocol.PriorityControl
-		if req.Action == "output" {
+		if req.Action == "output" || req.Action == "history" {
 			priority = protocol.PriorityOutput
 		}
 		env, _ := json.Marshal(protocol.Envelope{Version: protocol.Version, MessageID: id, CorrelationID: frame.Envelope.MessageID, Route: protocol.Route{To: protocol.ToControl}, Priority: priority, Body: body})

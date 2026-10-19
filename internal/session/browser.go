@@ -34,6 +34,11 @@ func (w *workerDB) appendLiveLocked(text string, gap bool) {
 }
 
 func (w *workerDB) sessionRequest(sessionID string, req protocol.SessionRequest) protocol.SessionResult {
+	if req.Action == "history" && req.SessionID == sessionID {
+		if _, err := identity.ParseUUID(req.OperationID); err == nil {
+			return w.browserHistory(req)
+		}
+	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	result := protocol.SessionResult{Type: protocol.BodySessionResult, OperationID: req.OperationID, SessionID: sessionID, ExecutionID: w.execution}
@@ -229,6 +234,19 @@ func (w *workerDB) browserInputLocked(sessionID string, req protocol.SessionRequ
 
 // BrowserRequest 仅访问已存在的 Session。显式恢复也不创建账本或提交任务输入。
 func (h *Host) BrowserRequest(ctx context.Context, req protocol.SessionRequest) (protocol.SessionResult, error) {
+	if req.Action == "history" {
+		if h.historyQueries.Add(1) > 2 {
+			h.historyQueries.Add(-1)
+			return protocol.SessionResult{Type: protocol.BodySessionResult, OperationID: req.OperationID, SessionID: req.SessionID, Code: "history_busy"}, nil
+		}
+		defer h.historyQueries.Add(-1)
+		if _, err := identity.ParseUUID(req.OperationID); err != nil {
+			return protocol.SessionResult{}, err
+		}
+		if result, handled := h.storedHistory(ctx, req); handled {
+			return result, nil
+		}
+	}
 	call := func(c *Client) (Status, error) { return c.SessionRequest(req) }
 	st, err := h.call(ctx, req.SessionID, call)
 	if err != nil && req.Action == "resume" {

@@ -14,20 +14,22 @@ type SessionRequest struct {
 	SessionID   string `json:"session_id"`
 	Action      string `json:"action"`
 	Cursor      string `json:"cursor,omitempty"`
+	Limit       int    `json:"limit,omitempty"`
 	Text        string `json:"text,omitempty"`
 }
 
 // SessionResult 只包含本次受限输出和操作回执，完整历史保留在节点。
 type SessionResult struct {
-	ExecutionID    string `json:"execution_id,omitempty"`
-	Type           string `json:"type"`
-	OperationID    string `json:"operation_id"`
-	SessionID      string `json:"session_id"`
-	OK             bool   `json:"ok"`
-	Code           string `json:"code,omitempty"`
-	State          string `json:"state,omitempty"`
-	InputSupported bool   `json:"input_supported"`
-	Text           string `json:"text,omitempty"`
-	Cursor         string `json:"cursor,omitempty"`
-	Gap            bool   `json:"gap"`
+	History        *SessionHistoryPage `json:"history,omitempty"`
+	ExecutionID    string              `json:"execution_id,omitempty"`
+	Type           string              `json:"type"`
+	OperationID    string              `json:"operation_id"`
+	SessionID      string              `json:"session_id"`
+	OK             bool                `json:"ok"`
+	Code           string              `json:"code,omitempty"`
+	State          string              `json:"state,omitempty"`
+	InputSupported bool                `json:"input_supported"`
+	Text           string              `json:"text,omitempty"`
+	Cursor         string              `json:"cursor,omitempty"`
+	Gap            bool                `json:"gap"`
 }

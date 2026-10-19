@@ -38,6 +38,11 @@ func Open(path string) (*os.File, error) {
 	return f, nil
 }
 
+// OpenSnapshot 保留当前文件描述符，路径可被原子替换。
+func OpenSnapshot(path string) (*os.File, error) {
+	return Open(path)
+}
+
 func CreateTemp(dir, prefix string) (*os.File, error) {
 	return os.CreateTemp(dir, prefix+"*")
 }
