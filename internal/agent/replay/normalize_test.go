@@ -29,6 +29,7 @@ func TestNormalizeCodexRulesAndDirections(t *testing.T) {
 		rawEntry("stdin", 1, `{"id":2,"method":"account/read","params":{}}`),
 		rawEntry("stdout", 1, `{"id":2,"result":{"account":{"email":"private"}}}`),
 		rawEntry("stdout", 1, `{"method":"account/updated","params":{"account":"private"}}`),
+		rawEntry("stdout", 1, `{"method":"remoteControl/status/changed","params":{"status":"disabled","serverName":"recording-host","installationId":"install-secret"}}`),
 		rawEntry("stdin", 1, `{"id":3,"method":"thread/start","params":{"cwd":"/test/work","developerInstructions":"system-secret","config":{"private":"init-secret"}}}`),
 		rawEntry("stdout", 1, `{"id":3,"result":{"thread":{"id":"native-thread","sessionId":"native-session"}}}`),
 		rawEntry("stdin", 1, `{"id":4,"method":"turn/start","params":{"threadId":"native-thread","clientUserMessageId":"execution-random:1","input":[{"type":"text","text":"task-secret"}],"outputSchema":{"secret":"schema"}}}`),
@@ -41,11 +42,11 @@ func TestNormalizeCodexRulesAndDirections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if t1.Header.DroppedFrames != 3 || t1.Header.Normalization != "v1" {
+	if t1.Header.DroppedFrames != 4 || t1.Header.Normalization != "v1" {
 		t.Fatal(t1.Header)
 	}
 	all := jsonText(t1)
-	for _, secret := range []string{"secret-init", "system-secret", "init-secret", "task-secret", "native-thread", "native-turn", "native-item", "recording-host", "recording-user"} {
+	for _, secret := range []string{"secret-init", "system-secret", "init-secret", "task-secret", "native-thread", "native-turn", "native-item", "recording-host", "recording-user", "install-secret"} {
 		if strings.Contains(all, secret) {
 			t.Fatalf("未规范化 %s", secret)
 		}

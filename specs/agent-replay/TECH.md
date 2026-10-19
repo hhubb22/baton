@@ -67,7 +67,7 @@ Cursor sidecar 内部的 SDK 调用不经过 stdio，不在本设计范围内。
 
 占位符分两种，都只在 JSON 字符串值内部替换，也就是先解码再替换，所以 Windows 路径的反斜杠转义不受影响。
 
-- 绑定占位符，例如 `<workspace>`、`<home>`、`<session_dir>`、`<context_file>`，取值来自 `.replay.json`，由测试在运行时提供。录制时的工作目录是 macOS 路径，在 Windows CI 上回放时会换成 Windows 临时目录。
+- 绑定占位符，例如 `<workspace>`、`<home>`、`<session_dir>`、`<context_file>`，取值来自 `.replay.json`，由测试在运行时提供。录制时的工作目录是 macOS 路径，在 Windows CI 上回放时会换成 Windows 临时目录。规范化工具把用到的绑定名写进 `transcript_start.bindings`，回放只替换这些名字，配置缺少其中任何一个就在启动时失败。录制内容里本来就有的尖括号文本，例如 Pi 系统提示里的 `<tools>`、`<rules>`，不在声明里，按原文比较和输出。
 - 捕获占位符，形如 `<$session_id>`、`<$delivery_id>`、`<$request_id>`，表示 Baton 运行时生成的值。它第一次出现在 `expect_outbound` 中时，记下实际值；之后在 `emit_inbound` 和 `native_history` 中出现时，替换成记下的值。Pi 的 `--session-id`、交付输入里的 `delivery_id` 都属于这一类。捕获结果写入状态目录，同一场景的后续进程也能使用。
 
 Agent 自己生成的标识，例如 Codex 的 thread ID 和 turn ID，规范化为固定值（`thread-1`、`turn-1`），按普通值严格比较。JSON-RPC 的 `id` 由发起方决定：适配器发起的请求，`id` 当作捕获占位符处理；Agent 发起的请求（审批、交互工具）保留录制值，适配器的应答必须带回同一个值。

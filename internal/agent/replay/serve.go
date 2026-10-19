@@ -180,6 +180,9 @@ func Serve(ctx context.Context, c Config, args []string, stdin io.Reader, stdout
 	if err != nil {
 		return Exit{}, err
 	}
+	if c.Bindings, err = declaredBindings(t.Header, c.Bindings); err != nil {
+		return Exit{}, err
+	}
 	gates := map[string]bool{}
 	for _, name := range c.Gates {
 		if _, err := t.index(name, false); err != nil {
@@ -348,4 +351,20 @@ func expandHistory(text string, bindings map[string]string, captures map[string]
 		}
 	}
 	return strings.Join(lines, "\n"), nil
+}
+
+// declaredBindings 只保留转录声明的绑定；未声明时沿用配置，兼容旧转录。
+func declaredBindings(h Header, configured map[string]string) (map[string]string, error) {
+	if len(h.Bindings) == 0 {
+		return configured, nil
+	}
+	out := make(map[string]string, len(h.Bindings))
+	for _, token := range h.Bindings {
+		v, ok := configured[token]
+		if !ok {
+			return nil, fmt.Errorf("配置缺少转录声明的绑定 %s", token)
+		}
+		out[token] = v
+	}
+	return out, nil
 }

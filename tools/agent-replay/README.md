@@ -24,7 +24,7 @@ Windows 构建时使用 `agent-replay.exe`。测试将可执行文件复制到�
 
 `internal/agent/replay.Read` / `Write` 读取和写出 NDJSON。进程从 1 连续编号；每个进程以 `process_start` 开始，按该进程在转录中的顺序执行。帧可以是 JSON 值；单字段 `{"text":"..."}` 表示一行原始文本。对象键集合严格一致，数组有序，整个期望值 `"<any>"` 匹配任意值。
 
-绑定的键包含尖括号，例如 `<workspace>`。替换在解码后的 JSON 字符串值中执行，不替换对象键，也不递归替换绑定内容。完整捕获 `<$request_id>` 保留实际 JSON 类型，因而数字请求 id 在应答中仍是数字；字符串内的捕获可以保留前后文。`process_start.args` 也支持捕获，供 Pi 的 `--session-id` 使用。JSON-RPC 转录的 `protocol` 包含 `jsonrpc` 或 `json-rpc`：适配器请求及 Agent 应答的 id 必须为完整捕获；Agent 请求和适配器应答保留固定 id。
+绑定的键包含尖括号，例如 `<workspace>`。转录在 `transcript_start.bindings` 声明需要的绑定时，回放只替换这些名字，配置缺少声明的绑定会在启动时失败；其他形如 `<name>` 的文本（例如 Pi 系统提示里的 `<tools>`）按原文处理。没有声明的旧转录沿用配置里的全部绑定。替换在解码后的 JSON 字符串值中执行，不替换对象键，也不递归替换绑定内容。完整捕获 `<$request_id>` 保留实际 JSON 类型，因而数字请求 id 在应答中仍是数字；字符串内的捕获可以保留前后文。`process_start.args` 也支持捕获，供 Pi 的 `--session-id` 使用。JSON-RPC 转录的 `protocol` 包含 `jsonrpc` 或 `json-rpc`：适配器请求及 Agent 应答的 id 必须为完整捕获；Agent 请求和适配器应答保留固定 id。
 
 进程计数器和捕获值保存在 `state.json`，用现有跨平台文件锁与原子替换保护。失配写入 `failure.json`，包含从 1 开始的转录行号、进程、label、期望、实际与原因，并以非零码退出。测试应读取该文件，避免只看到适配器的握手失败。配置尚无法读取或状态目录无法创建时，错误只能写到 stderr。
 

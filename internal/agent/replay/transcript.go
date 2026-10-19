@@ -26,6 +26,8 @@ type Header struct {
 	Normalization string `json:"normalization"`
 	DroppedFrames int    `json:"dropped_frames"`
 	Source        string `json:"source,omitempty"`
+	// Bindings 列出回放时必须提供的绑定占位符；其他形如 <name> 的文本按原样比较。
+	Bindings []string `json:"bindings,omitempty"`
 }
 
 type Entry struct {

@@ -83,9 +83,6 @@ func TestStructuralComparisonAndExpansion(t *testing.T) {
 	if _, err := Expand(raw(`"<$missing>"`), nil, captures); err == nil {
 		t.Fatal("未拒绝未知捕获")
 	}
-	if _, err := Expand(raw(`"<missing>"`), nil, captures); err == nil {
-		t.Fatal("未拒绝未知绑定")
-	}
 }
 
 func TestJSONRPCIDOwnership(t *testing.T) {
@@ -271,5 +268,30 @@ func TestLFFraming(t *testing.T) {
 	}
 	if err := Match(raw(value), output.Bytes(), nil, nil); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestUndeclaredTagsStayLiteral(t *testing.T) {
+	bindings := map[string]string{"<workspace>": `C:\w`}
+	raw, err := Expand([]byte(`{"text":"<tools>\n- read</tools> in <workspace>"}`), bindings, map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]string
+	if err := json.Unmarshal(raw, &got); err != nil || got["text"] != "<tools>\n- read</tools> in C:\\w" {
+		t.Fatalf("got %s, %v", raw, err)
+	}
+	if err := Match([]byte(`"<rules> at <workspace>"`), []byte(`"<rules> at C:\\w"`), bindings, map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Match([]byte(`"<rules>"`), []byte(`"other"`), bindings, map[string]any{}); err == nil {
+		t.Fatal("未声明的标签应按原文比较")
+	}
+	if _, err := declaredBindings(Header{Bindings: []string{"<home>"}}, bindings); err == nil {
+		t.Fatal("缺少声明的绑定时应失败")
+	}
+	got2, err := declaredBindings(Header{Bindings: []string{"<workspace>"}}, map[string]string{"<workspace>": "/w", "<tools>": "x"})
+	if err != nil || len(got2) != 1 {
+		t.Fatalf("只应保留声明的绑定: %v %v", got2, err)
 	}
 }

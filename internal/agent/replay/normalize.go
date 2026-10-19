@@ -49,8 +49,10 @@ var normalizationPolicies = map[string]normalizationPolicy{
 			"account/rateLimits/updated",
 			"mcpServer/oauth/login",
 			"mcpServer/oauthLogin/completed",
+			// 带主机名 serverName 和安装标识；适配器不处理这条通知。
+			"remoteControl/status/changed",
 		),
-		privateFields: stringSet("account", "authMode", "authStatus", "requiresOpenaiAuth", "accessToken", "refreshToken", "apiKey", "machineId", "deviceId", "hostname", "username"),
+		privateFields: stringSet("account", "authMode", "authStatus", "requiresOpenaiAuth", "accessToken", "refreshToken", "apiKey", "machineId", "deviceId", "hostname", "username", "serverName", "installationId"),
 	},
 	"pi": {
 		dropMethods:   stringSet("get_available_models", "get_commands"),
@@ -475,6 +477,11 @@ func Normalize(raw RawRecording) (Transcript, error) {
 	t.Header.Type = "transcript_start"
 	t.Header.Normalization = "v1"
 	t.Header.DroppedFrames = 0
+	t.Header.Bindings = make([]string, 0, len(raw.Header.Bindings))
+	for token := range raw.Header.Bindings {
+		t.Header.Bindings = append(t.Header.Bindings, token)
+	}
+	sort.Strings(t.Header.Bindings)
 	// 先登记保留会话的标识，确保历史中早于协议声明的引用也能替换。
 	for i, e := range raw.Entries {
 		if owners[i] != "" && owners[i] != first {
