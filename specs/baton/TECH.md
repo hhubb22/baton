@@ -16,7 +16,7 @@ Coordinator 内置 Gateway 的实现与验收由 [PS-171](https://linear.app/kak
 
 当前已实现补充（PS-173 / AR-02）：`agent-replay record` 读取旁置配置和场景元数据，在仓库外系统临时目录记录原始字节、单调时间及原生历史追加；Unix 转发 SIGTERM、SIGINT，Windows 保留退出码。`normalize` 按协议替换路径、Baton 标识和构造文本，筛选首个原生会话并统计删除条目，扫描残留后原子写出统一转录。合成原始录制经工具驱动真实 `codex.Adapter` 完成 simple；真实测试接入见上方 PS-174 记录。无新增 Go 依赖，使用方式及过滤规则见 [工具说明](../../tools/agent-replay/README.md)。
 
-当前已实现 Pi 录制回放迁移（PS-176 / AR-05）：适配器层回放 PS-175 的全部 12 份 Pi 1.3.0 真实转录，Worker 层用 RunWorker、真实 Pi 适配器与 SQLite 账本覆盖适用场景，检查一次任务输入、settled、原生交付确认、恢复和 outbox 补报。CutAfter / Drop / Replace 派生崩溃、缺失 settled 与配额错误；交付历史丢失保留 uncertain。独立 startup 探针只在适配器层执行，Worker 的空闲中止与恢复回忆按其生命周期截取录制片段，详见 [场景与覆盖对应表](../../internal/agent/pi/testdata/replay/README.md#ci-回放)。原 Pi 手写假 Agent 和文档转录样本已删除，分帧、超大帧、Unicode、历史校验与分页保留单元测试。路径只使用转录声明的绑定；绑定绝对路径的分隔符随回放系统比较。无新增依赖、迁移或模型调用。
+当前已实现 Pi 录制回放迁移（PS-176 / AR-05）：适配器层回放 PS-175 的全部 12 份 Pi 1.3.0 真实转录，Worker 层用 RunWorker、真实 Pi 适配器与 SQLite 账本覆盖适用场景，检查一次任务输入、settled、原生交付确认、恢复和 outbox 补报。CutAfter / Drop / Replace 派生崩溃、缺失 settled 与配额错误；交付历史丢失保留 uncertain。独立 startup 探针只在适配器层执行，Worker 的空闲中止与恢复回忆按其生命周期截取录制片段，详见 [场景与覆盖对应表](../../internal/agent/pi/testdata/replay/README.md#ci-回放)。Gateway 慢订阅与 Web 历史测试也使用统一回放器及录制派生输出。原 Pi 手写假 Agent 和文档转录样本已删除，分帧、超大帧、Unicode、历史校验与分页保留单元测试。路径只使用转录声明的绑定；绑定绝对路径的分隔符随回放系统比较。无新增依赖、迁移或模型调用。
 
 当前已实现补充（PS-172 / AR-01）：`internal/agent/replay` 与测试工具 `tools/agent-replay` 提供统一 NDJSON 转录读写、严格结构化比较、绑定与跨进程捕获、原生历史追加、文件门控及 CutAfter / Drop / Replace 派生变体。工具读取可执行文件旁的配置，以持久计数选择进程，失配保存 failure.json 并非零退出。Codex 新增从现有手写样本转写的 simple 转录，通过真实适配器验证启动、一次输入和完成后的结构化结果；来源明确写入转录头部。Codex 手写假 Agent 与测试保留；Pi 迁移见 PS-176。格式与后续工作见 [Agent 回放设计](../agent-replay/TECH.md)，当前工具行为见 [使用说明](../../tools/agent-replay/README.md)。其他场景与 Worker 测试迁移由后续工单实施。
 

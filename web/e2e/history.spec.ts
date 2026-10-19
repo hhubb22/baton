@@ -1,5 +1,5 @@
 import { expect, test, type WebSocketRoute } from '@playwright/test'
-import { appendFile, mkdir, readFile, readdir, unlink, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, readFile, readdir, realpath, unlink, writeFile } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import path from 'node:path'
@@ -35,20 +35,28 @@ test('节点历史分页、断线补取、缺失反馈与中心隐私', async ({
   const marker = `LOCAL_HISTORY_${crypto.randomUUID()}`
   await writeFile(path.join(workspace, 'history-probe.txt'), marker)
   const native = process.env.BATON_REAL_PI_BROWSER === '1'
-  const fixture = path.join(state.workDir, 'pi-history-replay')
-  const tape = path.join(state.workDir, 'history-events.jsonl')
-  const final = JSON.stringify({ status: 'completed', summary: '历史测试完成', evidence: [], evidence_empty_reason: '历史分页验证', artifacts: [], artifacts_empty_reason: '无产物', error: null })
+  const fixture = path.join(state.workDir, `pi-history-replay${process.platform === 'win32' ? '.exe' : ''}`)
+  const tape = path.join(state.workDir, 'history-replay.ndjson')
+  const replayState = path.join(state.workDir, 'history-replay-state')
   if (!native) {
-    await promisify(execFile)('go', ['test', '-c', '-o', fixture, './internal/agent/pi'], { cwd: repoRoot })
-    await writeFile(tape, [
-      { type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: `${marker}<script>window.historyPwned=true</script>` }], stopReason: 'stop' } },
-      { type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: final }], stopReason: 'stop' } },
-      { type: 'agent_settled', aborted: false },
-    ].map((e) => JSON.stringify(e)).join('\n') + '\n')
+    await promisify(execFile)('go', ['build', '-o', fixture, './tools/agent-replay'], { cwd: repoRoot })
+    type Entry = { type: string; label?: string; frame?: { assistantMessageEvent?: { delta?: string } } }
+    const entries = (await readFile(path.join(repoRoot, 'internal/agent/pi/testdata/replay/simple.ndjson'), 'utf8'))
+      .trim().split('\n').map((line) => JSON.parse(line) as Entry)
+    // 以合法文本取值派生恶意输出；录制帧顺序和最终结构化结果保持原样。
+    const output = entries.find((entry) => entry.label === 'event:message_update:8')
+    expect(output?.frame?.assistantMessageEvent).toBeDefined()
+    output!.frame!.assistantMessageEvent!.delta = `${marker}<script>window.historyPwned=true</script>`
+    await writeFile(tape, entries.map((entry) => JSON.stringify(entry)).join('\n') + '\n')
+    const nodeData = await realpath(dataDir), work = await realpath(workspace), home = await realpath(state.workDir)
+    await writeFile(fixture + '.replay.json', JSON.stringify({
+      transcript: tape, state_dir: replayState,
+      bindings: { '<fixture>': home, '<home>': home, '<node_data>': nodeData, '<node_data_alias>': nodeData, '<workspace>': work },
+    }))
   }
   const nodePID = spawnDetached(state.batondBin, ['run', '--relay', `wss://127.0.0.1:${state.nodePort}/v1/node`, '--data-dir', dataDir], childEnv({
     BATON_TLS_CA_FILE: state.certFile, BATON_HEARTBEAT_INTERVAL: '200ms', BATON_AGENT_DRIVER: 'native',
-    ...(native ? { BATON_PI_MODEL: process.env.BATON_PI_MODEL ?? 'openai/gpt-6.1-sol' } : { BATON_PI_BIN: fixture, BATON_PI_REPLAY_CHILD: '1', BATON_PI_REPLAY_FIXTURE: tape }),
+    ...(native ? { BATON_PI_MODEL: process.env.BATON_PI_MODEL ?? 'openai/gpt-6.1-sol' } : { BATON_PI_BIN: fixture, BATON_PI_MODEL: 'google-vertex/gemini-3.1-flash-lite' }),
   }), path.join(state.logDir, 'history-node.log'))
   await trackPid(nodePID)
   await expect(page.locator('[data-display-name="History Node"]').getByTestId('node-presence')).toHaveText('在线')
@@ -63,18 +71,21 @@ test('节点历史分页、断线补取、缺失反馈与中心隐私', async ({
   }).toBe('completed')
   const sessions = await (await page.request.get(`${state.baseURL}/api/v1/sessions`)).json() as { sessions: { session_id: string }[] }
   const sid = sessions.sessions[0]!.session_id
+  const sessionDir = path.join(dataDir, 'sessions', sid)
+  const mapping = JSON.parse(await readFile(path.join(sessionDir, 'native', 'baton-pi.json'), 'utf8')) as { file: string }
+  // 历史渲染的恶意条目在节点文件中构造，完整转录仍保留原始 native_history。
+  if (!native) await appendFile(mapping.file, JSON.stringify({ type: 'message', id: 'privacy-marker', message: { role: 'assistant', content: `${marker}<script>window.historyPwned=true</script>` } }) + '\n')
   await page.getByRole('button', { name: `pi · ${sid}`, exact: true }).click()
   const history = page.getByRole('region', { name: '节点历史', exact: true })
   await expect(history.getByLabel('历史条目').filter({ hasText: marker })).toHaveCount(1)
   expect(await page.evaluate(() => 'historyPwned' in window)).toBe(false)
   await expect(history.locator('script,img')).toHaveCount(0)
-  const sessionDir = path.join(dataDir, 'sessions', sid)
-  const mapping = JSON.parse(await readFile(path.join(sessionDir, 'native', 'baton-pi.json'), 'utf8')) as { file: string }
   const workerLog = await readFile(path.join(sessionDir, 'worker.log'), 'utf8')
   const workerPID = Number(workerLog.match(/event=worker_listening[^\n]*pid=(\d+)/)?.[1])
   expect(workerPID).toBeGreaterThan(0)
   await trackPid(workerPID)
   await stopPid(workerPID)
+  if (!native) expect(await readFile(path.join(replayState, 'failure.json'), 'utf8').catch(() => null)).toBeNull()
   // 已结束 Worker 的原生文件加入分支样本，历史查询必须保持只读且不重启 Worker。
   await appendFile(mapping.file, JSON.stringify({ type: 'branch_summary', id: 'branch-a', parentId: 'root', summary: '断流补取标记' }) + '\n')
   expect(socket).toBeDefined()
@@ -156,5 +167,5 @@ test('节点历史分页、断线补取、缺失反馈与中心隐私', async ({
   }).toBe('node_offline')
   await history.getByRole('button', { name: '补取节点历史' }).click()
   await expect(history.getByText('节点离线，历史暂不可取回。')).toBeVisible()
-  console.log(`历史验证：${native ? '真实 Pi' : '协议子进程'}，${count} 条，HTTP 响应最大 ${maxBytes} 字节，中心表和诊断日志均无原生标记`)
+  console.log(`历史验证：${native ? '真实 Pi' : '录制转录回放'}，${count} 条，HTTP 响应最大 ${maxBytes} 字节，中心表和诊断日志均无原生标记`)
 })

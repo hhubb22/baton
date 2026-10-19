@@ -57,3 +57,5 @@
 | 历史身份/版本/cwd/截断/越界/符号链接校验 | `TestPiHistoryRejectsMismatchedOrEscapedFile` |
 | 分页上限、顺序、原字段保留、游标、取消与缺失 | `TestPiUnifiedHistoryPagination`；原浏览器历史单测继续保留 |
 | LF/CRLF、UTF-8 跨读取边界、U+2028/U+2029、未终止帧、超大帧 | `TestPiLFFraming`、`TestPiFrameLimit` |
+
+Gateway 的 `TestBrowserSlowSubscriberDoesNotBlockNativeWorker` 使用同一 `simple` 转录，通过 `Replace` 把一条合法文本增量放大到 6 MiB，验证慢订阅者不阻塞 Worker、节点缓存有上限且中心不保存原生输出。Web `history.spec.ts` 也使用该转录，替换一条文本增量以带入随机恶意标记，并在节点历史文件构造渲染样本，继续检查脚本不执行、分页、断线补取、Worker 退出后的只读查询、缺失/离线反馈和中心隐私。两处都使用统一回放可执行文件及路径绑定，不再依赖 Pi 测试二进制的环境开关。
