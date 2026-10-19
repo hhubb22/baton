@@ -48,6 +48,24 @@ func TestInboxAPIConcurrencyRetriesVersionsAndSecurity(t *testing.T) {
 		return r
 	}
 	r := create("api-first")
+	for _, query := range []string{"?state=all&project_id=" + p.ID, "?project_id=" + p.ID} {
+		code, body := projectRequest(t, alice, "GET", srv.URL+"/api/v1/inbox"+query, aCSRF, nil)
+		if code != 200 || !strings.Contains(body, `"origin_tool_call_id":"api-first"`) || !strings.Contains(body, r.ID) {
+			t.Fatal(code, body)
+		}
+		code, body = projectRequest(t, bob, "GET", srv.URL+"/api/v1/inbox"+query, bCSRF, nil)
+		if code != 200 || !strings.Contains(body, `"requests":[]`) {
+			t.Fatal(code, body)
+		}
+	}
+	if code, body := projectRequest(t, alice, "GET", srv.URL+"/api/v1/inbox?state=all&task_id="+p.ID, aCSRF, nil); code != 200 || !strings.Contains(body, `"requests":[]`) {
+		t.Fatal(code, body)
+	}
+	for _, query := range []string{"?project_id=invalid", "?task_id=invalid", "?state=all&state=open", "?unknown=yes"} {
+		if code, _ := projectRequest(t, alice, "GET", srv.URL+"/api/v1/inbox"+query, aCSRF, nil); code != 400 {
+			t.Fatal(query, code)
+		}
+	}
 	base := srv.URL + "/api/v1/attention-requests/" + r.ID
 	for _, path := range []string{"/api/v1/inbox", "/api/v1/attention-requests/" + r.ID} {
 		if code, _ := projectRequest(t, anonymous, "GET", srv.URL+path, "", nil); code != 401 {

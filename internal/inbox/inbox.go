@@ -52,6 +52,7 @@ type Request struct {
 	EmployeeID        string `json:"-"`
 	ProjectID         string `json:"project_id"`
 	ProjectTitle      string `json:"project_title"`
+	OriginToolCallID  string `json:"origin_tool_call_id,omitempty"`
 	AgentID           string `json:"-"`
 	ConversationID    string `json:"conversation_id"`
 	Source            string `json:"source"`

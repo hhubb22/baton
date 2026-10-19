@@ -19,7 +19,7 @@ type Queryer interface {
 type Binding struct{ EmployeeID, ProjectID, AgentID, ConversationID string }
 
 const requestSelect = `SELECT r.id::text,r.employee_id::text,r.project_id::text,p.title,r.agent_id::text,r.conversation_id::text,
- r.source,COALESCE(r.condition_type,''),COALESCE(r.condition_object_id::text,''),COALESCE(r.task_id::text,''),
+ COALESCE(r.origin_tool_call_id,''),r.source,COALESCE(r.condition_type,''),COALESCE(r.condition_object_id::text,''),COALESCE(r.task_id::text,''),
  r.title,r.summary,r.content,r.options,r.allow_text,r.task_result_version,r.task_result,t.version,t.updated_at,
  r.action_url,r.state,r.version,r.resolution,r.resolved_at,r.withdraw_reason,r.created_at,r.updated_at
  FROM attention_requests r JOIN projects p ON p.id=r.project_id
@@ -27,7 +27,7 @@ const requestSelect = `SELECT r.id::text,r.employee_id::text,r.project_id::text,
 
 func scan(row pgx.Row) (Request, error) {
 	var r Request
-	err := row.Scan(&r.ID, &r.EmployeeID, &r.ProjectID, &r.ProjectTitle, &r.AgentID, &r.ConversationID, &r.Source, &r.ConditionType, &r.ConditionObjectID, &r.TaskID,
+	err := row.Scan(&r.ID, &r.EmployeeID, &r.ProjectID, &r.ProjectTitle, &r.AgentID, &r.ConversationID, &r.OriginToolCallID, &r.Source, &r.ConditionType, &r.ConditionObjectID, &r.TaskID,
 		&r.Title, &r.Summary, &r.Content, &r.Options, &r.AllowText, &r.TaskResultVersion, &r.TaskResult, &r.LatestTaskResultVersion, &r.LatestTaskResultUpdatedAt,
 		&r.ActionURL, &r.State, &r.Version, &r.Resolution, &r.ResolvedAt, &r.WithdrawReason, &r.CreatedAt, &r.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -195,11 +195,23 @@ type cursor struct {
 }
 
 func List(ctx context.Context, q Queryer, owner, state, encoded string) (Page, error) {
+	return ListFiltered(ctx, q, owner, state, encoded, "", "")
+}
+
+// ListFiltered 按归属筛选页面中的相关事项，员工边界始终由 owner 限定。
+func ListFiltered(ctx context.Context, q Queryer, owner, state, encoded, projectID, taskID string) (Page, error) {
 	out := Page{Requests: []Request{}}
+	for _, id := range []string{projectID, taskID} {
+		if id != "" {
+			if _, err := identity.ParseUUID(id); err != nil {
+				return out, ErrInvalid
+			}
+		}
+	}
 	if state == "" {
 		state = "open"
 	}
-	if state != "open" && state != "done" {
+	if state != "open" && state != "done" && state != "all" {
 		return out, ErrInvalid
 	}
 	var c cursor
@@ -215,7 +227,7 @@ func List(ctx context.Context, q Queryer, owner, state, encoded string) (Page, e
 	if err := q.QueryRow(ctx, `SELECT count(*) FROM attention_requests WHERE employee_id=$1 AND state='open'`, owner).Scan(&out.OpenCount); err != nil {
 		return out, err
 	}
-	rows, err := q.Query(ctx, requestSelect+` WHERE r.employee_id=$1 AND (($2='open' AND r.state='open') OR ($2='done' AND r.state<>'open')) AND ($3::uuid IS NULL OR (r.created_at,r.id)<($4,$3)) ORDER BY r.created_at DESC,r.id DESC LIMIT 51`, owner, state, nullable(c.ID), c.CreatedAt)
+	rows, err := q.Query(ctx, requestSelect+` WHERE r.employee_id=$1 AND (($2='all') OR ($2='open' AND r.state='open') OR ($2='done' AND r.state<>'open')) AND ($3::uuid IS NULL OR (r.created_at,r.id)<($4,$3)) AND ($5::uuid IS NULL OR r.project_id=$5) AND ($6::uuid IS NULL OR r.task_id=$6) ORDER BY r.created_at DESC,r.id DESC LIMIT 51`, owner, state, nullable(c.ID), c.CreatedAt, nullable(projectID), nullable(taskID))
 	if err != nil {
 		return out, err
 	}

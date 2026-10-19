@@ -30,7 +30,7 @@ export const placementReasons: Record<string, string> = { default_device: '使�
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 }
-export type ConversationItem = { label: string; text: string }
+export type ConversationItem = { label: string; text: string; attentionCallID?: string }
 // 输入事件的文本封装了队列条目；浏览器只提取正文，未知结构保留为文本。
 export function conversationItems(event: ProjectEvent): ConversationItem[] {
   const payload = record(event.payload)
@@ -56,7 +56,7 @@ export function conversationItems(event: ProjectEvent): ConversationItem[] {
   const items = blocks.flatMap((value) => {
     const block = record(value)
     if (block.type === 'text' && typeof block.text === 'string') return [{ label, text: block.text }]
-    if (block.type === 'toolCall') return [{ label: '工具调用', text: `${String(block.name ?? '')}\n${JSON.stringify(block.arguments, null, 2)}` }]
+    if (block.type === 'toolCall') return [{ label: '工具调用', text: `${String(block.name ?? '')}\n${JSON.stringify(block.arguments, null, 2)}`, ...(block.name === 'inbox.ask' && typeof block.id === 'string' ? { attentionCallID: block.id } : {}) }]
     return []
   })
   return items.length ? items : [{ label, text: JSON.stringify(event.payload, null, 2) }]

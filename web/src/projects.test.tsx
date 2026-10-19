@@ -20,6 +20,7 @@ function backend(options: { state?: ProjectStatus; fail?: boolean; revision?: nu
     }
     if (url === '/api/v1/nodes') return json({ nodes: [], default_device: {} })
     if (url.includes('/status')) return json(options.state ?? { state: 'waiting', waiting_reason: 'all_devices_offline', pending_inputs: 1, last_seq: 0 })
+    if (url.startsWith('/api/v1/inbox')) return json({ requests: [], open_count: 0 })
     if (url.includes('/events')) return json({ events: [], has_more: false, next_after_seq: 0 })
     if (url.includes('/messages')) return json({ messages: [] })
     if (url.includes('/memory')) return json({ entries: [{ id: 'memory', title: '约定', content: '旧内容', revision: options.revision ?? 1, author: 'user' }] })
@@ -123,6 +124,7 @@ it('按事件序号继续读取分页，保存后的回复取代同序号预览'
   const originalFetch = globalThis.fetch
   let complete = false
   vi.stubGlobal('fetch', vi.fn((url: string, init: RequestInit) => {
+    if (url.startsWith('/api/v1/inbox')) return json({ requests: [], open_count: 0 })
     if (url.includes('/events')) {
       const seq = url.includes('after_seq=0') ? 1 : 2
       return Promise.resolve(json({ events: [{ seq, kind: 'assistant', created_at: '', payload: { message: { content: [{ type: 'text', text: `正式回复${seq}` }] } } }], next_after_seq: seq, has_more: seq === 1 }))

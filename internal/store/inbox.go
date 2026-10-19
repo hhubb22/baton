@@ -17,6 +17,9 @@ func inboxBinding(b projectRunBinding) inbox.Binding {
 func (s *Store) Inbox(ctx context.Context, owner, state, cursor string) (inbox.Page, error) {
 	return inbox.List(ctx, s.pool, owner, state, cursor)
 }
+func (s *Store) RelatedAttentionRequests(ctx context.Context, owner, state, cursor, projectID, taskID string) (inbox.Page, error) {
+	return inbox.ListFiltered(ctx, s.pool, owner, state, cursor, projectID, taskID)
+}
 func (s *Store) AttentionRequest(ctx context.Context, owner, id string) (inbox.Request, error) {
 	return inbox.Get(ctx, s.pool, owner, id)
 }
