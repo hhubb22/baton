@@ -78,8 +78,10 @@ func TestRecordedCodexScenarios(t *testing.T) {
 			tape, ends := replaytest.EndGates(tape)
 			scenario := tape.Header.Scenario
 			gates := append([]string{}, ends...)
+			commandStart := ""
 			if scenario == "interrupt_mid_tool" {
-				gates = append(gates, "event:turn/moderationMetadata")
+				commandStart = replaytest.CommandStartLabel(t, tape)
+				gates = append(gates, commandStart, "request:turn/interrupt")
 			}
 			if scenario != "restore_missing" {
 				gates = append(gates, "event:turn/completed")
@@ -112,12 +114,17 @@ func TestRecordedCodexScenarios(t *testing.T) {
 				return
 			}
 			mustStart(t, a)
+			if a.Snapshot().Version != tape.Header.AgentVersion {
+				t.Fatal("新会话没有保存实际 CLI 版本")
+			}
 			mustInput(t, a)
 			if scenario == "interrupt_mid_tool" || scenario == "interrupt_before_turn_started" {
-				// 转录在工具开始后等待 interrupt；完成事件另设门，分开 ACK 与停止证据。
+				// 工具开始帧发出后再发送 interrupt；完成事件另设门，分开 ACK 与停止证据。
 				if scenario == "interrupt_mid_tool" {
-					r.Wait(t, "event:turn/moderationMetadata")
-					r.Release(t, "event:turn/moderationMetadata")
+					r.Wait(t, commandStart)
+					r.Release(t, commandStart)
+					r.Wait(t, "request:turn/interrupt")
+					r.Release(t, "request:turn/interrupt")
 				}
 				stopped, known, err := a.Abort()
 				if err != nil || stopped || known {

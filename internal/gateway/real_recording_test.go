@@ -102,6 +102,55 @@ func (r *realRecording) bind(t *testing.T, key, value string) {
 	writeRealJSON(t, r.binary+".record.json", r.config)
 }
 
+// 录制开启时，要求工具开始帧已经落入原始记录，避免只凭工作目录里的文件就提前中止。
+func (r *realRecording) waitCodexCommandStarted(t *testing.T, ctx context.Context, threadID, turnID string) {
+	t.Helper()
+	if r.config == nil {
+		return
+	}
+	path := filepath.Join(r.config.RawDir, filepath.Base(t.Name())+".raw.ndjson")
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	for {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal("无法读取工具开始的录制证据", err)
+		}
+		if recordedCodexCommandStarted(raw, threadID, turnID) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("录制中没有匹配回合的 commandExecution 开始事件")
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+}
+
+func recordedCodexCommandStarted(raw []byte, threadID, turnID string) bool {
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	for {
+		var entry replay.RawEntry
+		// 录制仍在追加，末尾不完整的 JSON 留到下一次读取。
+		if decoder.Decode(&entry) != nil {
+			return false
+		}
+		if entry.Type != "stdout" {
+			continue
+		}
+		var frame struct {
+			Method string
+			Params struct {
+				ThreadID, TurnID string
+				Item             struct{ Type, Status string }
+			}
+		}
+		if json.Unmarshal(entry.Data, &frame) == nil && frame.Method == "item/started" && frame.Params.ThreadID == threadID && frame.Params.TurnID == turnID && frame.Params.Item.Type == "commandExecution" && frame.Params.Item.Status == "inProgress" {
+			return true
+		}
+	}
+}
+
 func writeRealJSON(t *testing.T, path string, value any) {
 	t.Helper()
 	raw, err := json.Marshal(value)

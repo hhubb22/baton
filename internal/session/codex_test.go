@@ -257,6 +257,11 @@ func runRecordedCodexWorker(t *testing.T, binary, path, variant string) {
 	}
 	tape, ends := replaytest.EndGates(tape)
 	gates := append([]string{}, ends...)
+	commandStart := ""
+	if scenario == "interrupt_mid_tool" {
+		commandStart = replaytest.CommandStartLabel(t, tape)
+		gates = append(gates, commandStart, "request:turn/interrupt")
+	}
 	if crash != "" {
 		gates = append(gates, crash)
 	}
@@ -352,6 +357,12 @@ func runRecordedCodexWorker(t *testing.T, binary, path, variant string) {
 		return
 	}
 	if scenario == "interrupt_mid_tool" || scenario == "interrupt_before_turn_started" {
+		if scenario == "interrupt_mid_tool" {
+			r.Wait(t, commandStart)
+			r.Release(t, commandStart)
+			r.Wait(t, "request:turn/interrupt")
+			r.Release(t, "request:turn/interrupt")
+		}
 		st, err := w.c.Stop(task.StatusCancelled)
 		if err != nil {
 			t.Fatal(err)

@@ -98,6 +98,36 @@ func TestRealRecordingHarness(t *testing.T) {
 	})
 }
 
+func TestRecordedCodexCommandStartEvidence(t *testing.T) {
+	for _, name := range []string{"matching", "other-thread", "other-turn", "completed", "message", "stderr", "partial"} {
+		t.Run(name, func(t *testing.T) {
+			item := map[string]string{"type": "commandExecution", "status": "inProgress"}
+			params := map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": item}
+			method, kind := "item/started", "stdout"
+			switch name {
+			case "other-thread":
+				params["threadId"] = "other-thread"
+			case "other-turn":
+				params["turnId"] = "other-turn"
+			case "completed":
+				method, item["status"] = "item/completed", "completed"
+			case "message":
+				item["type"] = "agentMessage"
+			case "stderr":
+				kind = "stderr"
+			}
+			frame, _ := json.Marshal(map[string]any{"method": method, "params": params})
+			raw, _ := json.Marshal(replay.RawEntry{Type: kind, Process: 1, Data: frame})
+			if name == "partial" {
+				raw = raw[:len(raw)/2]
+			}
+			if got := recordedCodexCommandStarted(raw, "thread-1", "turn-1"); got != (name == "matching") {
+				t.Fatalf("工具开始证据: %v", got)
+			}
+		})
+	}
+}
+
 func TestRealRecordingPiSandbox(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("需要 macOS sandbox-exec；不需要模型或数据库")

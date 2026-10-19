@@ -37,6 +37,25 @@ func Load(t *testing.T, path string) replay.Transcript {
 	return tape
 }
 
+// CommandStartLabel 返回真实录制中运行态命令的开始事件，不用模型评论代替工具事实。
+func CommandStartLabel(t *testing.T, tape replay.Transcript) string {
+	t.Helper()
+	for _, e := range tape.Entries {
+		if e.Type != "emit_inbound" {
+			continue
+		}
+		var f struct {
+			Method string
+			Params struct{ Item struct{ Type, Status string } }
+		}
+		if json.Unmarshal(e.Frame, &f) == nil && f.Method == "item/started" && f.Params.Item.Type == "commandExecution" && f.Params.Item.Status == "inProgress" {
+			return e.Label
+		}
+	}
+	t.Fatal("真实录制缺少运行态 commandExecution 开始事件")
+	return ""
+}
+
 // AdapterTape 只保留与 app-server 成对的版本探测，去掉录制驱动及被筛除子会话的独立探测。
 func AdapterTape(tape replay.Transcript) replay.Transcript {
 	var starts []replay.Entry

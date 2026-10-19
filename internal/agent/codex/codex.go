@@ -1,4 +1,4 @@
-// Package codex implements the pinned Codex app-server thread/turn protocol.
+// Package codex 实现经过契约和回放验证的 Codex app-server thread/turn 协议。
 package codex
 
 import (
@@ -18,10 +18,13 @@ import (
 	"github.com/sourcegraph/jsonrpc2"
 )
 
-const Version = "0.162.1"
+const Version = "0.163.0"
+
+// 已有录制与原生历史保留创建时的版本；兼容性仅限核对过官方契约的版本。
+func supportedVersion(version string) bool { return version == Version || version == "0.162.1" }
 
 var (
-	ErrIncompatible   = errors.New("Codex experimental protocol incompatible; require CLI 0.162.1")
+	ErrIncompatible   = errors.New("Codex 实验协议不兼容；支持 CLI 0.163.0 / 0.162.1")
 	ErrHistoryMissing = agent.ErrHistoryMissing
 	ErrUncertain      = errors.New("Codex input outcome unknown; refusing replay")
 	ErrBusy           = errors.New("Codex turn is active")
@@ -67,6 +70,7 @@ type turn struct {
 
 type Adapter struct {
 	nativeHome         string
+	cliVersion         string
 	live               agent.LiveBuffer
 	config             Config
 	mu                 sync.Mutex
@@ -105,7 +109,7 @@ func New(c Config) *Adapter {
 	if c.Model == "" && !c.Restore {
 		c.Model = os.Getenv("BATON_CODEX_MODEL")
 	}
-	a := &Adapter{config: c, events: make(chan Event, 128), closed: make(chan struct{}), inbox: make(chan notification, 128), liveInbox: make(chan notification, 32)}
+	a := &Adapter{config: c, cliVersion: Version, events: make(chan Event, 128), closed: make(chan struct{}), inbox: make(chan notification, 128), liveInbox: make(chan notification, 32)}
 	go func() {
 		for {
 			select {
@@ -147,19 +151,22 @@ func (a *Adapter) Probe(ctx context.Context) (Capabilities, error) {
 	if err != nil {
 		return Capabilities{}, errors.New("Codex executable unavailable")
 	}
-	if strings.TrimSpace(string(raw)) != "codex-cli "+Version {
+	version, found := strings.CutPrefix(strings.TrimSpace(string(raw)), "codex-cli ")
+	if !found || !supportedVersion(version) {
 		return Capabilities{}, ErrIncompatible
 	}
-	return Capabilities{Version: Version, Start: true, Input: true, Interrupt: true, Resume: true, History: true, Delegate: true}, nil
+	return Capabilities{Version: version, Start: true, Input: true, Interrupt: true, Resume: true, History: true, Delegate: true}, nil
 }
 
 func (a *Adapter) connect(ctx context.Context) error {
 	if a.conn != nil {
 		return nil
 	}
-	if _, err := a.Probe(ctx); err != nil {
+	capabilities, err := a.Probe(ctx)
+	if err != nil {
 		return err
 	}
+	a.cliVersion = capabilities.Version
 	cmd := exec.Command(a.config.Binary, "app-server", "--stdio")
 	cmd.WaitDelay = 2 * time.Second
 	cmd.Dir, cmd.Env, cmd.Stderr = a.config.Directory, a.environment(), io.Discard
@@ -263,7 +270,7 @@ func (a *Adapter) CreateSession(ctx context.Context) error {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.state = State{HistoryPath: response.Thread.Path, HistoryRoot: a.nativeHome, Version: Version, ThreadID: response.Thread.ID, SessionID: a.config.SessionID, Directory: a.config.Directory}
+	a.state = State{HistoryPath: response.Thread.Path, HistoryRoot: a.nativeHome, Version: a.cliVersion, ThreadID: response.Thread.ID, SessionID: a.config.SessionID, Directory: a.config.Directory}
 	return a.saveLocked()
 }
 
@@ -273,7 +280,7 @@ func (a *Adapter) Attach(ctx context.Context) error {
 		return ErrHistoryMissing
 	}
 	var s State
-	if json.Unmarshal(raw, &s) != nil || s.Version != Version || s.ThreadID == "" {
+	if json.Unmarshal(raw, &s) != nil || !supportedVersion(s.Version) || s.ThreadID == "" {
 		return ErrIncompatible
 	}
 	if s.SessionID != a.config.SessionID || s.Directory != a.config.Directory {

@@ -31,11 +31,14 @@ func unitRPC(t *testing.T, a *Adapter, handle func(string, json.RawMessage) (any
 }
 func TestRecoveryPaginationAndGuards(t *testing.T) {
 	tape := replaytest.Load(t, "testdata/replay/restore_load_only.ndjson")
-	for _, name := range []string{"paged", "absentturn", "cycle", "missing-items", "incompatible", "wrong-thread"} {
+	for _, name := range []string{"paged", "previous-version", "absentturn", "cycle", "missing-items", "incompatible", "wrong-thread"} {
 		t.Run(name, func(t *testing.T) {
 			c := Config{Directory: t.TempDir(), SessionID: "unit", StatePath: filepath.Join(t.TempDir(), "state.json"), Restore: true}
 			c.Directory, _ = filepath.EvalSymlinks(c.Directory)
 			s := State{Version: Version, ThreadID: "thread-1", TurnID: "turn-1", Directory: c.Directory, SessionID: c.SessionID}
+			if name == "previous-version" {
+				s.Version = "0.162.1"
+			}
 			raw, _ := json.Marshal(s)
 			if err := privatefile.WriteFile(c.StatePath, raw); err != nil {
 				t.Fatal(err)
@@ -84,13 +87,16 @@ func TestRecoveryPaginationAndGuards(t *testing.T) {
 			})
 			err := a.Attach(context.Background())
 			switch name {
-			case "paged":
+			case "paged", "previous-version":
 				if err != nil {
 					t.Fatal(err)
 				}
 				successful(t, awaitOutput(t, a))
-				if turnCalls != 2 || itemCalls != 2 {
+				if name == "paged" && (turnCalls != 2 || itemCalls != 2) {
 					t.Fatal("分页未执行")
+				}
+				if a.Snapshot().Version != s.Version {
+					t.Fatal("恢复改写了原生映射的创建版本")
 				}
 			case "cycle", "incompatible":
 				if !errors.Is(err, ErrIncompatible) {
@@ -177,6 +183,41 @@ func TestRecordedPinnedContracts(t *testing.T) {
 		t.Fatal(err)
 	}
 
+}
+
+func TestRecordedToolInterruptFacts(t *testing.T) {
+	tape := replaytest.Load(t, "testdata/replay/interrupt_mid_tool.ndjson")
+	start := replaytest.CommandStartLabel(t, tape)
+	positions := map[string]int{}
+	for i, e := range tape.Entries {
+		positions[e.Label] = i
+	}
+	if !(positions[start] < positions["request:turn/interrupt"] && positions["request:turn/interrupt"] < positions["response:turn/interrupt"] && positions["response:turn/interrupt"] < positions["event:turn/completed"]) {
+		t.Fatal("录制没有按工具开始、中止请求、ACK、停止事实排序")
+	}
+	command := replaytest.Frame(t, tape, start)["params"].(map[string]any)
+	request := replaytest.Frame(t, tape, "request:turn/interrupt")["params"].(map[string]any)
+	completed := replaytest.Frame(t, tape, "event:turn/completed")["params"].(map[string]any)
+	turn := completed["turn"].(map[string]any)
+	if command["threadId"] != request["threadId"] || command["turnId"] != request["turnId"] || completed["threadId"] != request["threadId"] || turn["id"] != request["turnId"] || turn["status"] != "interrupted" {
+		t.Fatal("工具开始与中止停止事实没有绑定同一回合")
+	}
+	commandID := command["item"].(map[string]any)["id"]
+	for _, e := range tape.Entries[positions[start]+1 : positions["request:turn/interrupt"]] {
+		var f struct {
+			Method string
+			Params struct{ Item struct{ ID string } }
+		}
+		if json.Unmarshal(e.Frame, &f) == nil && f.Method == "item/completed" && f.Params.Item.ID == commandID {
+			t.Fatal("工具已经完成后才请求中止")
+		}
+	}
+	if tape.Header.AgentVersion != Version {
+		t.Fatal("工具中止录制不是当前 CLI 版本")
+	}
+	if err := pinnedSchema(t, "v2/ItemStartedNotification").Validate(command); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestPendingInputRecoveryNeverResubmits(t *testing.T) {

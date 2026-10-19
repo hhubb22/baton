@@ -4,6 +4,8 @@
 
 `TestRealCodex/<scenario>` 为每个场景创建独立的 app-server、工作目录和原生 thread，使用一次性、独立认证的 CODEX_HOME。设置 `BATON_RECORD_DIR` 后写入其 `codex/` 子目录；本机流程见 [主 README](../../../../../README.md#本机录制与规范化)。首轮 9 份真实转录于 2026-10-19 在 Baton 9c11002 上录制：Codex 0.162.1，darwin/arm64，模型 `gpt-6-luna`，单份 1.7～61 KB。首轮提交了通过的 9 个场景：`simple`、`interrupt_idle`、`interrupt_mid_tool`、`deliver_active`、`deliver_idle`、`restore_load_only`、`restore_missing`、`provider_error`、`symlinked_workspace`。
 
+PS-181 于同日使用本机 Codex 0.163.0 / `gpt-6.1-sol` 替换 `interrupt_mid_tool.ndjson`，基线为 `8024319` 加本工单工作区改动。真实子测试通过：原始记录第 46 行为同一回合的 `commandExecution` / `inProgress` 开始帧，第 47 行才发送中止请求，第 52 行收到 interrupted 完成。新转录为 14,241 字节，SHA-256 为 `f3a30e7978e2788be500a126af21ff4bf66e20a0f591fc24b6bf36a9092d0b88`，删除 3 帧账号与机器通知，绑定只含 `<home>`、`<workspace>`。其余录制保留各自原始版本，不改写头部。
+
 首轮失败场景的补录结果：
 
 - `interrupt_before_turn_started`：PS-178 修复后于同日在 `845e1b5` 基线加本工单工作区改动上补录，Codex 0.162.1 / `gpt-6.1-sol`，真实子测试通过。`turn/start` 响应的 `startedAt` 为 null，首次中止被 `-32600 no active turn to interrupt` 拒绝；收到匹配的 `turn/started` 后补发一次，ACK 后收到 `status=interrupted` 的 `turn/completed`，原 thread 历史可读。规范化转录 8,062 字节，删除 2 帧机器信息；残留扫描及用户名、主机名、邮箱、临时路径检查通过。适配器和 Worker 均回放此转录；从真实 `simple` 派生的手写拒绝/开始窗口另覆盖重复通知、其他 thread/turn、开始通知先到、补发失败及完成后晚到的开始通知。ACK 保持 false/false，仅匹配的完成通知确认停止，Worker 保留 needs_verification。
@@ -11,7 +13,7 @@
 
 - `simple`：版本探测、创建 thread、一次输入、settled、结构化结果及摘要检查。
 - `interrupt_idle`：完成后调用 Abort，使用已保存的停止事实，保持 `outcomeKnown=false`。
-- `interrupt_mid_tool`：工具写入门控文件后中止；ACK 必须仍是 `false/false`，终止事件保留 Stopped/Uncertain 检查，并检查 StopObserver。
+- `interrupt_mid_tool`：工具写入门控文件，并且录制中已有匹配回合的运行态命令开始帧后才中止；ACK 必须仍是 `false/false`，终止事件保留 Stopped/Uncertain 检查，并检查 StopObserver。
 - `interrupt_before_turn_started`：SubmitInput 返回后立即 Abort，观察停止，核对原 thread/turn 身份和历史可读。
 - `deliver_active`：保留原工具等待文件、补充输入摘要 token 检查；通过 DeliverResult 调用 `turn/steer`，并额外核对原生历史中的精确 delivery_id。
 - `deliver_idle`：独立回合完成后用 DeliverResult 启动交付回合，核对精确 delivery_id，保留原任务输入的一次提交。
@@ -39,7 +41,7 @@
 
 交付后的历史响应前设门：即使 steer ACK 和 settled 已到，Worker 仍保存 uncertain，放行含精确 ID 的历史后才产生 delivered 回执。`delivery_wrong_id` 将两次已有历史查询里的 ID 改为相似值，检查保留 uncertain、结果待核实。`delegation` 由 Worker 的 queried 子结果通知触发：wait 的嵌套 JSON 输出没有顶层 delivery_id，保持 uncertain；result 的成功工具输出含精确 ID，放行后才确认 delivered，不向 Agent 注入新输入。重复通知不再注入；`restore_load_only` 重启 Worker 后补报同一条 outbox 结果，保持原 thread/turn，不再提交任务。
 
-`interrupt_mid_tool` 的录制没有 commandExecution 开始事件。回放在录制的 `turn/moderationMetadata` 处设门，然后发 Abort，并在 `turn/completed` 前另设门，分别验证 ACK 与迟到的 StopObserver 停止事实；outcomeKnown 保持 false。该回放不能证明工具开始事件的门控能力。
+`interrupt_mid_tool` 在真实 `commandExecution` 开始帧处设门。两层均先放行开始事件，等回放进程走到后续中止请求处，再调用 Abort 或 Worker.Stop；另在 `turn/completed` 前设门，分别验证 ACK 与迟到的 StopObserver 停止事实，outcomeKnown 保持 false。`TestRecordedToolInterruptFacts` 检查工具开始、中止请求、ACK 和停止的顺序及同一 thread/turn 身份。
 
 ## 覆盖对应表
 

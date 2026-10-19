@@ -10,6 +10,8 @@ Coordinator 内置 Gateway 的实现与验收由 [PS-171](https://linear.app/kak
 
 ## 已实现基线
 
+当前已实现 Codex 0.163.0 升级与工具中止补录（PS-181）：导出并提交官方 Schema，核对新增的可选字段和方法；默认基线更新为 0.163.0，兼容已有 0.162.1 录制与历史映射，未知版本仍拒绝。新建映射记录实际 CLI 版本，原生历史头部与保存的映射版本一致才可读取。使用本机 0.163.0 / gpt-6.1-sol 补录 interrupt_mid_tool，真实驱动等待文件门控和匹配回合的 commandExecution 开始帧，再发中止。新转录在两层分别门控工具开始、中止请求和结算，ACK 保持 false/false，迟到 interrupted 结算提供停止证据，副作用未知仍待核实。本机 0.163.0 / gpt-6.1-sol 的 TestRealCodex 全部 11 个适用场景通过，自由文本按约束跳过；新版本无模型握手和原生历史探针也通过。录制来源与扫描结果见 [Codex 场景说明](../../internal/agent/codex/testdata/replay/README.md)。
+
 当前已实现 Codex 连接关闭修复（PS-180）：jsonrpc2 从 v0.2.1 升级到包含上游 [#104](https://github.com/sourcegraph/jsonrpc2/pull/104) 修复的 v0.2.3，关闭时移除待决调用并拒绝关闭后的新调用，缓冲响应不会再命中已经关闭的等待通道。确定性回归固定响应读出与分发之间的关闭时序，另验证并发重复关闭释放待决 RPC 和协议 IO。适配器与 RunWorker 均回放响应后立即退出、响应被调用方消费后退出两个窗口，原任务不重发，未结算的退出保持待核实，不提供成功或停止证据。无新增协议实现、数据库迁移或真实模型调用。
 
 当前已实现 Codex 录制回放迁移（PS-177 / AR-06）：适配器层与 RunWorker 层回放 PS-175、PS-178 的 11 份 Codex 0.162.1 真实转录，验证一次任务输入、settled、迟到停止证据、精确 delivery_id 历史确认、恢复身份与 outbox 补报。CutAfter / Drop / Replace 派生断线、崩溃、缺少 settled、自由文本和无效标识；Worker 崩溃进入待核实。旧手写假 Agent、replay.json 和 synthetic_simple.ndjson 已删除，官方 Schema 及分页、历史匹配、分帧等单元测试保留。Worker 的交付前置状态和信封派生见 [场景与覆盖对应表](../../internal/agent/codex/testdata/replay/README.md#ci-回放)。回放使用转录声明的绑定，不运行真实模型，无新增依赖或迁移。PS-178 的早到中止转录与补发变体均已覆盖；崩溃派生同时覆盖立即退出和响应被消费后放行 Kill，连接关闭的确定性回归见 PS-180。
@@ -36,7 +38,7 @@ PS-155 提供 Project、主对话事件读取和项目记忆 API。迁移 `0016_
 
 当前已实现补充（PS-119 / T15）：沿用已合并 T14 的唯一 `internal/agent.Adapter`，Codex 位于 `internal/agent/codex`，旧 internal/adapters 接口已删除。统一接口为 Start / SubmitInput / DeliverResult / HistoryContains / ReadHistory / Drain / Abort / Close；Output 保留等待子任务、进度、最终结果、settled 与 uncertain，扩展仅限节点本地的 Raw 事件；StopObserver 持续观察中止 ACK 后的停止事实。Worker 唯一选择点为 `internal/session/adapter.go:configureAdapter`，按 agent_type 从 registeredAdapters 注册表选择 Pi/Codex，新增类型只增加注册项。两者共用许可、输入意图、输入代次、中止、outbox、恢复与认证本地历史 IPC；Pi 同步增加校验本地 JSONL 的有限分页，不再引入 Codex 专用 Worker 生命周期。启动前将非凭据配置绑定账本，恢复沿用原 Session/Execution、cwd/model/home，不保存 Env、不发送恢复输入。
 
-Codex CLI **0.162.1** 使用 stdio app-server，实现 initialize/initialized、thread/start/read/resume、turn/start/steer/interrupt、turn/completed 及 thread/turns/list、thread/items/list 分页；版本不匹配、实验方法不兼容、原生身份/cwd/Session 映射不符、历史缺失或输入发送窗口不明均拒绝自动重放，不创建替代 thread。clientUserMessageId 仅作关联，steer ACK 不证明历史落盘；原生 userMessage 或成功查询工具输出中的精确 delivery_id 才确认注入。Agent 经受限 BATON_CONTEXT_FILE 使用既有委托 CLI，完整原始历史不上传中心；本地已认证 IPC 提供分页历史；浏览器的临时历史 API 见下文 PS-127。只注入 Agent 必要环境，使用禁止审批的 workspace-write sandbox（为本地委托开启网络），拒绝服务端审批、认证刷新和交互工具请求。
+Codex CLI **0.163.0**（保留已验证的 0.162.1 兼容）使用 stdio app-server，实现 initialize/initialized、thread/start/read/resume、turn/start/steer/interrupt、turn/completed 及 thread/turns/list、thread/items/list 分页；版本不匹配、实验方法不兼容、原生身份/cwd/Session 映射不符、历史缺失或输入发送窗口不明均拒绝自动重放，不创建替代 thread。clientUserMessageId 仅作关联，steer ACK 不证明历史落盘；原生 userMessage 或成功查询工具输出中的精确 delivery_id 才确认注入。Agent 经受限 BATON_CONTEXT_FILE 使用既有委托 CLI，完整原始历史不上传中心；本地已认证 IPC 提供分页历史；浏览器的临时历史 API 见下文 PS-127。只注入 Agent 必要环境，使用禁止审批的 workspace-write sandbox（为本地委托开启网络），拒绝服务端审批、认证刷新和交互工具请求。
 
 验证分工：CLI 官方固定 Schema、录制转录回放、真实 stdio 子进程与 Worker 账本回归不证明真实模型任务通过。用户已在 macOS、Codex 0.162.1 / gpt-6-luna 上报告启动、输入、结构化结果、turn 完成、中止、恢复、历史支持；委托链路成功，但子任务违反“不要再委托”导致原断言失败，委托整项仍未通过。TestRealCodex 的显式开关、隔离目录及能力断言继续保留，场景拆分与录制接入见上方 PS-174 记录。云端不登录模型账号，不把此次接口重构回放视为重做真实模型验收；其他模型/平台不外推，确切实测命令见 README。无新增中心迁移。
 
