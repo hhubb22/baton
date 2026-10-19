@@ -94,3 +94,23 @@ func TestEmbeddedUIHasNoThirdPartyHosts(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestTaskDeepLinksKeepAPISeparate(t *testing.T) {
+	h := Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNotFound) }))
+	for _, target := range []string{"/tasks", "/tasks/ef874c79-bf16-4533-b326-c1f22c413dfa"} {
+		for _, method := range []string{http.MethodGet, http.MethodHead} {
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(method, target, nil))
+			if rec.Code != http.StatusOK || rec.Header().Get("Cache-Control") != "no-store" {
+				t.Fatalf("深链接: %s %s %d", method, target, rec.Code)
+			}
+		}
+	}
+	for _, target := range []string{"/api/v1/tasks", "/tasks-other", "/future-api"} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("未知接口被首页吞掉: %s", target)
+		}
+	}
+}

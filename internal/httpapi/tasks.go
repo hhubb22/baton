@@ -110,21 +110,33 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
-	if s.rejectQuery(w, r) {
+	query := r.URL.Query()
+	for key, values := range query {
+		if (key != "include_shell" && key != "request_id" && key != "parent_task_id" && key != "cursor") || len(values) != 1 || values[0] == "" {
+			s.writeError(w, r, http.StatusBadRequest, "invalid_request", "任务查询参数无效")
+			return
+		}
+	}
+	if value := query.Get("include_shell"); value != "" && value != "true" && value != "false" {
+		s.writeError(w, r, http.StatusBadRequest, "invalid_request", "命令筛选值无效")
 		return
+	}
+	if value := query.Get("request_id"); value != "" {
+		if err := task.ValidateRequestID(value); err != nil {
+			s.writeError(w, r, http.StatusBadRequest, "invalid_request", "请求标识无效")
+			return
+		}
 	}
 	sess, ok := s.requireSession(w, r)
 	if !ok {
 		return
 	}
-	tasks, err := s.store.ListTasks(r.Context(), sess.Employee.ID)
+	page, err := s.store.ListTaskViews(r.Context(), sess.Employee.ID, store.TaskFilter{IncludeShell: query.Get("include_shell") == "true", RequestID: query.Get("request_id"), ParentTaskID: query.Get("parent_task_id"), Cursor: query.Get("cursor")})
 	if err != nil {
 		s.writeTaskError(w, r, sess.Employee.ID, err)
 		return
 	}
-	s.writeJSON(w, http.StatusOK, struct {
-		Tasks []task.Record `json:"tasks"`
-	}{Tasks: tasks})
+	s.writeJSON(w, http.StatusOK, page)
 }
 
 func (s *Server) getTask(w http.ResponseWriter, r *http.Request, rawID string) {
@@ -139,7 +151,7 @@ func (s *Server) getTask(w http.ResponseWriter, r *http.Request, rawID string) {
 		s.writeError(w, r, http.StatusBadRequest, "invalid_id", "任务标识不正确")
 		return
 	}
-	rec, err := s.store.GetTask(r.Context(), sess.Employee.ID, rawID)
+	rec, err := s.store.GetTaskView(r.Context(), sess.Employee.ID, rawID)
 	if err != nil {
 		s.writeTaskError(w, r, sess.Employee.ID, err)
 		return
