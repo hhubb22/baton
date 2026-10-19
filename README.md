@@ -229,6 +229,8 @@ BATON_REAL_CODEX=1 go test -v -count=1 -timeout=60m ./internal/gateway -run '^Te
 
 录制器使用旁置的 `.record.json` 和场景 JSON 文件；原始文件分别写入 `$BATON_RECORD_DIR/pi/<scenario>.raw.ndjson` 和 `$BATON_RECORD_DIR/codex/<scenario>.raw.ndjson`。恢复进程继续追加同一场景文件。Pi 的进程层次为 Worker → 录制器 → `pi-isolated` → `sandbox-exec` → Pi，沙箱策略、真实 Agent 的参数和环境保持原有配置。录制配置保存调用测试的系统临时根目录，因此 Pi 隔离 HOME 的 `TMPDIR` 不会改变原始目录检查范围。未设置 `BATON_RECORD_DIR` 时直接使用原 Agent 路径。
 
+历史顺序回归测试 `TestRecordHistoryBeforeStdout` 使用完整 stdin 帧，分别检查 stdout 透传时的历史条目顺序和最终追加内容；失败时输出每次 observe 的状态和实际原始条目。Linux race 压测命令为 `go test -race -count=200 -run '^TestRecordHistoryBeforeStdout$' ./internal/agent/replay`。
+
 先检查每个子测试结果及能力矩阵；失败场景的录制只留在本机排查。确认需要保存的场景通过后，在同一个 Bash 中规范化：
 
 ```sh
