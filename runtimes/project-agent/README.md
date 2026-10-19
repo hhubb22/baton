@@ -24,7 +24,7 @@ batond 检查版本 `0.1.0`、登录状态和租约后，在空控制目录启�
 
 assistant 的 `message_end` 监听器先等待 `append_event` 提交，再按消息内的顺序发出 `call_tool`。每个工具结果由 Coordinator 保存；后续模型请求使用中心保存的结果。Runtime 的工具执行模式为 `sequential`。恢复时读取已有结果，只为缺少结果的工具调用发送原 ID；对话结尾为 input 或 tool_result 时调用 `continue()`，结尾为无工具 assistant 或 compaction 时领取下一批输入。
 
-闲置 180 秒后调用 `finish`。运行满 15 分钟时处理完当前输入触发的整轮回复和工具调用，再调用 `finish`。收尾只释放 Project Agent 租约，已派出的 Task 继续执行。压缩生成由 PS-161 实施，本单支持读取已有摘要与清除占位。
+闲置 180 秒后调用 `finish`。运行满 15 分钟时处理完当前输入触发的整轮回复和工具调用，再调用 `finish`。收尾只释放 Project Agent 租约，已派出的 Task 继续执行。收尾时上下文超过 50%、请求前超过 80% 时压缩。先把三轮以前的工具结果替换为带原序号的占位；仍达到 40% 时，把较早对话生成摘要，保留最近两轮和至少 15% 窗口。阈值和轮数是常量。摘要沿用正常请求的模型、系统提示词、工具定义与消息前缀，追加压缩指令，设置 `toolChoice: "none"`。通过 `append_compaction` 保存后才切换视图；原始事件可由 `history.read/search` 读取。
 
 ## 验收证据
 
@@ -38,7 +38,7 @@ node tools/package-batond.mjs
 faux 恢复测试的 Coordinator 替身负责持久化和事务去重。真实 Node Runtime、batond、Gateway、Coordinator 与 PostgreSQL 的连接由以下集成测试覆盖，需先设置项目约定的 `BATON_TEST_DATABASE_URL`：
 
 ```sh
-BATON_TEST_NODE_PROJECT_RUNTIME=1 go test -v -count=1 ./internal/gateway -run '^TestProjectRuntimePiFauxRealCoordinator$'
+BATON_TEST_NODE_PROJECT_RUNTIME=1 go test -v -count=1 ./internal/gateway -run 'TestProjectRuntimePiFauxRealCoordinator|TestProjectCompactionRealProcesses'
 ```
 
-该测试通过实际 Runtime 保存 assistant，调用 `memory.write`，检查一条工具结果、一条记忆和正常结束的运行。PS-157 的事务故障注入测试继续验证服务端去重。真实订阅及三设备端到端场景由 PA-W08 验证。
+这些测试通过实际 Runtime 验证 assistant 保存、工具事务和正常收尾。压缩进程测试使用八轮约 400 KiB 的历史和接近 32 KiB 的工具结果，检查摘要与只读原文恢复。压缩提交前后的子进程故障注入和 14 类工具输出的恢复另由 Runtime 与 Store 测试覆盖。三设备端到端场景由 PA-W08 验证。

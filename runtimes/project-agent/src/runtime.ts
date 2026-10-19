@@ -17,6 +17,7 @@ import {
   type Event,
   type RPC,
 } from "./protocol.js";
+import { FINISH_THRESHOLD, REQUEST_THRESHOLD, CLEAR_TARGET, contextTokens, clearedResults, summaryThrough, summaryContext } from "./compaction.js";
 import { toolDefinitions } from "./tools.js";
 
 export const IDLE_MS = 180_000;
@@ -60,7 +61,7 @@ export function modelMessages(boot: Bootstrap, events: Event[]): Message[] {
       timestamp: 0,
     },
   ];
-  if (compact)
+  if (compact?.through_seq > 0)
     messages.push({
       role: "user",
       content: `[程序说明] 以下摘要替换了第 1～${compact.through_seq} 条对话。原文可用 history.read 按序号读取，history.search 按关键字搜索。\n<项目记忆索引>${compact.memory_index ?? ""}</项目记忆索引>\n<对话摘要>${compact.summary ?? ""}</对话摘要>`,
@@ -211,6 +212,61 @@ export class ProjectRuntime {
         ))
     );
   }
+  private model() {
+    const model = this.models.getModel(this.boot.project.agent.provider, this.boot.project.agent.model);
+    if (!model) throw new RuntimeError("model_not_found");
+    return model;
+  }
+  private async compact(threshold: number) {
+    const model = this.model();
+    const used = contextTokens(this.boot, this.events);
+    if (used <= model.contextWindow * threshold) return;
+    const previous = this.boot.compaction?.payload;
+    const cleared = clearedResults(this.boot, this.events);
+    const draft: Event = {
+      seq: this.seq + 1,
+      kind: "compaction",
+      payload: { ...previous, through_seq: previous?.through_seq ?? 0, summary: previous?.summary ?? "", cleared_tool_result_seqs: cleared },
+    };
+    const view = { ...this.boot, compaction: draft };
+    const savedTokens = Math.max(0, (JSON.stringify(modelMessages(this.boot, this.events)).length - JSON.stringify(modelMessages(view, this.events)).length) / 4);
+    let through = previous?.through_seq ?? 0;
+    let summary = previous?.summary ?? "";
+    if (used - savedTokens >= model.contextWindow * CLEAR_TARGET) {
+      const candidate = summaryThrough(view, this.events, model.contextWindow);
+      if (candidate > through) {
+        const context = summaryContext(this.boot, this.events, candidate);
+        let result: AssistantMessage | undefined;
+        for (let attempt = 0; ; attempt++) {
+          try {
+            const stream = this.models.streamSimple(model, context, {
+              sessionId: this.boot.project.conversation.id, maxTokens: 32000, maxRetries: 0, toolChoice: "none",
+            });
+            for await (const _ of stream) { /* 摘要只在完整生成并保存后进入上下文。 */ }
+            result = await stream.result();
+            if (result.stopReason !== "stop" || result.content.some((c) => c.type === "toolCall")) throw new Error("summary_failed");
+            summary = result.content.filter((c) => c.type === "text").map((c) => c.text).join("\n");
+            if (!summary.trim() || Buffer.byteLength(summary) > 96 * 1024) throw new Error("summary_failed");
+            break;
+          } catch {
+            if (attempt === RETRIES.length) throw new RuntimeError("model_request_failed");
+            await this.timer.sleep(RETRIES[attempt]);
+          }
+        }
+        through = candidate;
+      }
+    }
+    const remaining = cleared.filter((seq) => seq > through);
+    if (through === (previous?.through_seq ?? 0) && JSON.stringify(remaining) === JSON.stringify(previous?.cleared_tool_result_seqs ?? [])) return;
+    const event: Event = await this.rpc.call({
+      operation: "append_compaction", last_seq: this.seq, client_event_id: randomUUID(),
+      payload: { through_seq: through, summary, cleared_tool_result_seqs: remaining },
+    });
+    if (event.kind !== "compaction" || event.seq <= this.seq) throw new RuntimeError("invalid_compaction");
+    this.events.push(event);
+    this.seq = event.seq;
+    this.boot.compaction = event;
+  }
   private async respond() {
     for (const call of this.pendingCalls()) {
       await this.execute(call);
@@ -304,12 +360,10 @@ export class ProjectRuntime {
       streamFn,
       sessionId: this.boot.project.conversation.id,
       toolExecution: "sequential",
-      prepareRequest: async ({ context }) => ({
-        context: {
-          ...context,
-          messages: modelMessages(this.boot, this.events),
-        },
-      }),
+      prepareRequest: async ({ context }) => {
+        await this.compact(REQUEST_THRESHOLD);
+        return { context: { ...context, messages: modelMessages(this.boot, this.events) } };
+      },
     });
     agent.subscribe(async (event) => {
       if (event.type !== "message_end" || event.message.role !== "assistant")
@@ -396,6 +450,7 @@ export class ProjectRuntime {
         },
       });
     }
+    await this.compact(FINISH_THRESHOLD);
     await this.rpc.call({
       operation: "finish",
       last_seq: this.seq,

@@ -58,7 +58,8 @@ export class Backend implements RPC {
         conversation: { id: "conversation-stable" },
       },
       prompt_version: "1",
-      after_seq: 0,
+      compaction: this.events.findLast((e) => e.kind === "compaction"),
+      after_seq: this.events.findLast((e) => e.kind === "compaction")?.payload.through_seq ?? 0,
       last_seq: this.events.length,
     };
   }
@@ -89,12 +90,13 @@ export class Backend implements RPC {
         this.events.push(event);
         return { event: structuredClone(event) };
       }
+      case "append_compaction":
       case "append_event": {
         if (req.last_seq !== this.events.length)
           throw new RuntimeError("conflict");
         const event: Event = {
           seq: this.events.length + 1,
-          kind: "assistant",
+          kind: req.operation === "append_compaction" ? "compaction" : "assistant",
           payload: structuredClone(req.payload),
         };
         this.events.push(event);
@@ -150,10 +152,10 @@ export class Backend implements RPC {
     };
   }
 }
-export function setup(backend: Backend, responses?: any[]) {
+export function setup(backend: Backend, responses?: any[], window = 2_000_000) {
   const faux = fauxProvider({
     provider: "faux",
-    models: [{ id: "faux-model", maxTokens: 32000 }],
+    models: [{ id: "faux-model", maxTokens: 32000, contextWindow: window }],
   });
   const models = createModels();
   models.setProvider(faux.provider);
@@ -169,9 +171,11 @@ export function setup(backend: Backend, responses?: any[]) {
         requests.push(
           structuredClone({
             context,
+            model: { provider: model.provider, id: model.id },
             maxTokens: options.maxTokens,
             sessionId: options.sessionId,
             maxRetries: options.maxRetries,
+            ...(options.toolChoice ? { toolChoice: options.toolChoice } : {}),
           }),
         );
         return typeof step === "function"

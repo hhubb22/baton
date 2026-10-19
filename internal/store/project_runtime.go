@@ -143,6 +143,8 @@ func (s *Store) ProjectRuntime(ctx context.Context, src protocol.Source, req pro
 		data, err = s.waitProjectTool(ctx, tx, b, req)
 	case "call_tool":
 		data, err = s.callProjectTool(ctx, tx, b, req)
+	case "append_compaction":
+		data, err = appendProjectCompaction(ctx, tx, b, req)
 	case "append_event":
 		data, err = appendProjectAssistant(ctx, tx, b, req)
 	case "finish", "exited", "start_failed", "report_failure":
