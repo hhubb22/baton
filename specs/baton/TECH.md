@@ -10,6 +10,8 @@ Coordinator 内置 Gateway 的实现与验收由 [PS-171](https://linear.app/kak
 
 ## 已实现基线
 
+当前已实现补充（PS-172 / AR-01）：`internal/agent/replay` 与测试工具 `tools/agent-replay` 提供统一 NDJSON 转录读写、严格结构化比较、绑定与跨进程捕获、原生历史追加、文件门控及 CutAfter / Drop / Replace 派生变体。工具读取可执行文件旁的配置，以持久计数选择进程，失配保存 failure.json 并非零退出。Codex 新增从现有手写样本转写的 simple 转录，通过真实适配器验证启动、一次输入和完成后的结构化结果；来源明确写入转录头部。现有手写假 Agent 与测试保留。格式与后续工作见 [Agent 回放设计](../agent-replay/TECH.md)，当前工具行为见 [使用说明](../../tools/agent-replay/README.md)。录制、规范化、其他场景与 Worker 测试迁移由后续工单实施；本次不增加依赖或修改批准设计条款。
+
 PS-155 提供 Project、主对话事件读取和项目记忆 API。迁移 `0016_projects.sql` 在中心创建七张表，包含输入队列。用户消息在所有设备离线时仍可入队，相同消息 ID 与正文返回原记录。事件与记忆修订由数据库触发器限制为只追加，记忆修改检查 `expected_revision`。PS-156 通过 `0017_project_agent_runs.sql` 提供运行记录、任务来源列、输入领取、被动通知、运行放置和租约。每批最多 20 条或 128 KiB，单条事件不超过 160 KiB，Runtime 请求与响应不超过 192 KiB。Coordinator 每秒调度，默认设备不合格时记录原因并选择其他节点。batond 按 run_id 持久去重，20 秒续租，58 秒未成功续租就停止进程；中心在 Agent 行锁内检查当前运行与数据库时间，拒绝过期或已撤销的租约。失败依次推迟 1、5、15 分钟，第三次进入 needs_attention，员工重试保留原对话位置。详细协议见 [Project Agent TECH](../project-agent/TECH.md)。
 
 当前已实现补充（PS-125 / T21）：Web 提供按节点分组的 Session 树，分别显示本机父子关系与跨节点委托，可提交新任务、补充当前任务、查询原输入操作及显式恢复。`/api/v1/events` 使用同源 Cookie 鉴权，连接期间复核登录，退出、改密与到期关闭旧连接；`session.changed`、`task.changed` 提醒页面重新读取，`session.output` 返回受限纯文本、游标和缺口。通知按本人元数据版本每秒检查，重连及窗口获得焦点重新读取。历史、输出和补充输入使用临时 Relay RPC，不进入中心 outbox 或 task_events。每次输出最多 16 KiB，Worker 和适配器各保留最近 256 KiB，页面保留最近 128 KiB；中心最多 128 个浏览器连接及 128 个临时 RPC，节点最多 16 个并发 Session RPC，浏览器写超时为 2 秒。Relay 的输出使用独立队列，最多 128 条且最多 32 MiB，控制队列优先发送，输出超限不会占满任务控制队列。慢订阅丢失的片段以 gap 显示，完整原生历史仍留在节点。

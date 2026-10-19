@@ -45,7 +45,7 @@ Session 映射 thread，执行输入映射 turn；活动子结果输入用 turn/
 
 ### Codex 验证边界与真实任务入口
 
-CI 默认运行固定 Schema、独立 app-server 回放、Pi/Codex 共用 Worker 回归和 race。固定版本无模型握手可显式运行：
+CI 默认运行固定 Schema、独立 app-server 回放、Pi/Codex 共用 Worker 回归和 race。[Agent 转录回放工具](tools/agent-replay/README.md) 已提供 NDJSON 读写、严格出站比较、跨进程占位符、历史写入、门控和派生变体；Codex 的 [simple 转录](internal/agent/codex/testdata/replay/README.md) 来自现有手写样本转写，新增真实适配器完成流程测试，现有假 Agent 与测试保留。录制与规范化工具尚未实现。固定版本无模型握手可显式运行：
 
 ```sh
 BATON_CODEX_PROBE=1 go test -v ./internal/agent/codex -run TestCodexInitializeWithoutModel
