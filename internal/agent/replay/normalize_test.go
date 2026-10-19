@@ -21,6 +21,51 @@ func start(process int, args ...string) RawEntry {
 func finish(process int) RawEntry { return RawEntry{Type: "runtime_exit", Process: process} }
 func jsonText(v any) string       { b, _ := marshalUnescaped(v); return string(b) }
 
+func TestNormalizeKiroACP(t *testing.T) {
+	raw := synthetic("kiro", start(1, "acp", "--agent-engine=v3"),
+		rawEntry("stdin", 1, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}`),
+		rawEntry("stdout", 1, `{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"authMethods":[{"id":"private"}],"agentCapabilities":{"loadSession":true,"_meta":{"kiro":{"logging":{"logDir":"/Users/recording-user/logs"},"extensionMethods":["_kiro/session/history"]}}}}}`),
+		rawEntry("stdin", 1, `{"id":2,"method":"session/new","params":{"cwd":"/test/work","mcpServers":[]}}`),
+		rawEntry("stdout", 1, `{"id":2,"result":{"sessionId":"native-parent"}}`),
+		rawEntry("stdin", 1, `{"id":3,"method":"session/prompt","params":{"sessionId":"native-parent","prompt":[{"type":"text","text":"task-private"}]}}`),
+		rawEntry("stdout", 1, `{"method":"session/update","params":{"sessionId":"native-parent","update":{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"general-task-execution"}]}}}`),
+		rawEntry("stdout", 1, `{"id":9,"method":"session/request_permission","params":{"sessionId":"native-parent","options":[{"optionId":"allow","kind":"allow_once"}]}}`),
+		rawEntry("stdin", 1, `{"id":9,"result":{"outcome":{"outcome":"selected","optionId":"allow"}}}`),
+		rawEntry("stdout", 1, `{"method":"session/update","params":{"sessionId":"native-parent","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"model output"}}}}`),
+		rawEntry("stdout", 1, `{"id":3,"result":{"stopReason":"end_turn"}}`),
+		start(2, "acp", "--agent-engine=v3"),
+		rawEntry("stdin", 2, `{"id":1,"method":"session/new","params":{"cwd":"/test/work"}}`),
+		rawEntry("stdout", 2, `{"id":1,"result":{"sessionId":"native-child"}}`),
+		rawEntry("stdout", 2, `{"method":"session/update","params":{"sessionId":"native-child","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"discard child"}}}}`), finish(2), finish(1))
+	raw.Header.Transcript.Protocol = "acp-jsonrpc"
+	tape, err := Normalize(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := jsonText(tape)
+	for _, private := range []string{"native-parent", "native-child", "task-private", "recording-user", "discard child", "general-task-execution"} {
+		if strings.Contains(all, private) {
+			t.Fatalf("未处理 %s", private)
+		}
+	}
+	if !strings.Contains(all, "native-session-1") || !strings.Contains(all, "model output") {
+		t.Fatal(all)
+	}
+	found := false
+	for _, e := range tape.Entries {
+		if e.Type == "expect_outbound" && strings.Contains(string(e.Frame), "selected") {
+			v, _ := decode(e.Frame)
+			if child(v, "id") != json.Number("9") {
+				t.Fatal("服务器请求 ID 被改写")
+			}
+			found = true
+		}
+	}
+	if !found || tape.Header.DroppedFrames < 3 {
+		t.Fatal("过滤计数或双向请求缺失")
+	}
+}
+
 func TestNormalizeCodexRulesAndDirections(t *testing.T) {
 	raw := synthetic("codex",
 		start(1, "app-server", "--stdio"),

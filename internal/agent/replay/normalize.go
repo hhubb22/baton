@@ -58,7 +58,10 @@ var normalizationPolicies = map[string]normalizationPolicy{
 		dropMethods:   stringSet("get_available_models", "get_commands"),
 		privateFields: stringSet("account", "auth", "authStatus", "apiKey", "accessToken", "refreshToken", "machineId", "hostname", "username"),
 	},
-	// ACP 在 Kiro 接入时增加独立策略和会话识别，不套用 Codex 规则。
+	"kiro": {
+		dropMethods:   stringSet("authenticate", "_kiro/auth/getAccessToken", "_kiro/mcp/status", "_kiro/steering/items_changed", "_kiro/progressive_context/items_changed", "_kiro/powers/items_changed", "_kiro/tools/didChange", "_kiro/sessions/changed", "_kiro/knowledge/items_changed"),
+		privateFields: stringSet("authMethods", "accessToken", "refreshToken", "apiKey", "account", "authStatus", "machineId", "hostname", "username"),
+	},
 }
 
 func stringSet(values ...string) map[string]bool {
@@ -182,11 +185,16 @@ func sessions(raw RawRecording, frames []rawFrame) ([]string, string, error) {
 			}
 			remember(i, id)
 		}
-		if agent == "codex" {
+		if agent == "codex" || agent == "kiro" {
 			if e.Type == "stdin" && f.request {
 				requests[requestKey(e.Process, f.id)] = i
 			}
 			params := child(f.value, "params")
+			if agent == "kiro" {
+				if id := str(child(params, "sessionId")); id != "" {
+					remember(i, id)
+				}
+			}
 			if id := str(child(params, "thread", "id")); id != "" {
 				remember(i, id)
 			}
@@ -195,13 +203,30 @@ func sessions(raw RawRecording, frames []rawFrame) ([]string, string, error) {
 			}
 			if e.Type == "stdout" && f.response {
 				if req, ok := requests[requestKey(e.Process, f.id)]; ok {
-					if id := str(child(f.value, "result", "thread", "id")); id != "" {
+					id := str(child(f.value, "result", "thread", "id"))
+					if agent == "kiro" {
+						id = str(child(f.value, "result", "sessionId"))
+					}
+					if id != "" {
 						remember(i, id)
 						remember(req, id)
 					} else {
 						owners[i] = owners[req]
 					}
 				}
+			}
+		}
+	}
+	if agent == "kiro" {
+		var starts []RawEntry
+		for _, e := range raw.Entries {
+			if e.Type == "process_start" {
+				starts = append(starts, e)
+			}
+		}
+		for i, e := range starts {
+			if len(e.Args) == 1 && e.Args[0] == "--version" && i+1 < len(starts) && len(starts[i+1].Args) > 0 && starts[i+1].Args[0] == "acp" {
+				processOwner[e.Process] = processOwner[starts[i+1].Process]
 			}
 		}
 	}
@@ -212,7 +237,7 @@ func sessions(raw RawRecording, frames []rawFrame) ([]string, string, error) {
 	}
 	// 对没有 thread 字段的应答，继承对应请求的归属（一个进程可创建多个 thread）。
 	for i, e := range raw.Entries {
-		if agent == "codex" && e.Type == "stdout" && frames[i].response {
+		if (agent == "codex" || agent == "kiro") && e.Type == "stdout" && frames[i].response {
 			if req, ok := requests[requestKey(e.Process, frames[i].id)]; ok {
 				owners[i] = owners[req]
 			}
@@ -320,7 +345,7 @@ func (n *normalizer) discoverIDs(v any, context string) {
 			case "itemId", "toolCallId", "tool_use_id":
 				kind = "item"
 			case "sessionId":
-				if n.agent == "codex" {
+				if n.agent == "codex" || n.agent == "kiro" {
 					kind = "native-session"
 				} else {
 					n.numbered("session_id", s, true)
@@ -336,6 +361,10 @@ func (n *normalizer) discoverIDs(v any, context string) {
 					n.numbered("execution_id", s[:pos], true)
 				} else {
 					n.numbered("operation_id", s, true)
+				}
+			case "messageId", "replayId", "userMessageId", "userMessageTag":
+				if n.agent == "kiro" {
+					kind = "message"
 				}
 			case "parentId":
 				kind = "entry"
@@ -404,6 +433,16 @@ func (n *normalizer) outbound(v any, method string) {
 			inputs, _ := p["input"].([]any)
 			for _, input := range inputs {
 				item := object(input)
+				if text, ok := item["text"].(string); ok && !n.delivery(text) {
+					item["text"] = "<any>"
+				}
+			}
+		}
+	} else if n.agent == "kiro" {
+		p := object(m["params"])
+		if method == "session/prompt" {
+			for _, block := range array(p["prompt"]) {
+				item := object(block)
 				if text, ok := item["text"].(string); ok && !n.delivery(text) {
 					item["text"] = "<any>"
 				}
@@ -531,7 +570,7 @@ func Normalize(raw RawRecording) (Transcript, error) {
 		f := frames[i]
 		key := requestKey(e.Process, f.id)
 		method := f.method
-		if f.response && agent == "codex" {
+		if f.response && (agent == "codex" || agent == "kiro") {
 			if e.Type == "stdout" {
 				method = n.methods[key]
 			} else {
@@ -544,7 +583,11 @@ func Normalize(raw RawRecording) (Transcript, error) {
 		if e.Type == "stdout" && f.request {
 			n.agentMethods[key] = method
 		}
-		if policy.dropMethods[method] && (e.Type == "stdin" || e.Type == "stdout") {
+		drop := policy.dropMethods[method]
+		if agent == "kiro" && method == "session/update" && str(child(f.value, "params", "update", "sessionUpdate")) == "available_commands_update" {
+			drop = true
+		}
+		if drop && (e.Type == "stdin" || e.Type == "stdout") {
 			t.Header.DroppedFrames++
 			continue
 		}
@@ -590,6 +633,9 @@ func Normalize(raw RawRecording) (Transcript, error) {
 			}
 			n.normalizeUserMessages(f.value)
 			n.strip(f.value)
+			if agent == "kiro" {
+				stripKiroPrivate(f.value)
+			}
 			if agent == "codex" && method == "initialize" && e.Type == "stdout" {
 				if result := object(m["result"]); result != nil {
 					if _, ok := result["userAgent"]; ok {
@@ -602,7 +648,7 @@ func Normalize(raw RawRecording) (Transcript, error) {
 			}
 			fixedID := m["id"]
 			value := n.replaceValues(f.value)
-			if agent == "codex" && ((e.Type == "stdout" && f.request) || (e.Type == "stdin" && f.response)) {
+			if (agent == "codex" || agent == "kiro") && ((e.Type == "stdout" && f.request) || (e.Type == "stdin" && f.response)) {
 				object(value)["id"] = fixedID
 			}
 			entry.Frame, err = marshalUnescaped(value)
@@ -767,9 +813,14 @@ func marshalUnescaped(v any) ([]byte, error) {
 func (n *normalizer) normalizeUserMessages(v any) {
 	switch m := v.(type) {
 	case map[string]any:
-		if m["role"] == "user" || m["type"] == "userMessage" {
+		if m["role"] == "user" || m["type"] == "userMessage" || m["sessionUpdate"] == "user_message_chunk" {
 			if text, ok := m["content"].(string); ok && !n.delivery(text) {
 				m["content"] = "<any>"
+			}
+			if content := object(m["content"]); content != nil {
+				if text, ok := content["text"].(string); ok && !n.delivery(text) {
+					content["text"] = "<any>"
+				}
 			}
 			if blocks, ok := m["content"].([]any); ok {
 				for _, b := range blocks {
@@ -789,5 +840,23 @@ func (n *normalizer) normalizeUserMessages(v any) {
 		for _, c := range m {
 			n.normalizeUserMessages(c)
 		}
+	}
+}
+
+func array(v any) []any { a, _ := v.([]any); return a }
+
+// 只过滤协议元数据中的日志与认证信息，模型和工具输出保留供扫描拒绝。
+func stripKiroPrivate(v any) {
+	m := object(v)
+	if m == nil {
+		return
+	}
+	if meta := object(m["_meta"]); meta != nil {
+		if kiro := object(meta["kiro"]); kiro != nil {
+			delete(kiro, "logging")
+		}
+	}
+	for _, key := range []string{"result", "params", "agentCapabilities", "update"} {
+		stripKiroPrivate(m[key])
 	}
 }

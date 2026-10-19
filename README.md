@@ -2,7 +2,7 @@
 
 员工使用部署管理员分配的本地账号登录 Coordinator，退出，查询本人身份，领取一次性节点注册凭据，设置默认设备，吊销本人节点的连接凭据，并提交任务。初始口令只能使用到员工完成更换为止。`batond register` 用这张凭据注册节点，把身份保存在本机。`batond run` 用这份身份主动连接 Coordinator，断线后重连，并在同步完成前不会显示为可执行。吊销生效后，同一连接凭据不能再接入。任务被接受后，Coordinator 把准备命令送到节点；节点先把执行映射写入本地账本，再绑定一个独立的 Session Worker。
 
-本目录目前包含这条路径的构建、迁移、HTTP 接口、Coordinator、batond、Session Worker、Agent 本地 CLI、受限文件浏览、员工 Web UI 和测试。准备阶段不启动 Agent。启动许可通过后，Worker 按 agent_type 选择 Pi 1.3.0 RPC 或 Codex CLI 0.163.0 thread/turn 适配器，任务输入只提交一次；结构化结果在中心保存之后才算交付。两者共用 internal/agent.Adapter 与 Worker 生命周期，测试执行器仍供故障注入使用。其他真实 Agent 适配和管理员网页不在这里；支持范围以明确版本和本机实测报告为准，不能用回放通过代替。
+本目录目前包含这条路径的构建、迁移、HTTP 接口、Coordinator、batond、Session Worker、Agent 本地 CLI、受限文件浏览、员工 Web UI 和测试。准备阶段不启动 Agent。启动许可通过后，Worker 按 agent_type 选择 Pi 1.3.0 RPC、Codex CLI 0.163.0 thread/turn 或 Kiro CLI 2.32.0 ACP V3 适配器，任务输入只提交一次；结构化结果在中心保存之后才算交付。三者共用 internal/agent.Adapter 与 Worker 生命周期，测试执行器仍供故障注入使用。其他真实 Agent 适配和管理员网页不在这里；支持范围以明确版本和本机实测报告为准，不能用回放通过代替。
 
 中心事务同时锁定任务与执行记录时，统一先锁 `tasks`，再锁 `executions`。准备成功或失败落库、启动许可、执行报告、取消和到期处理均按此顺序串行，避免准备落库与启动许可相互等待而死锁。
 
@@ -27,7 +27,26 @@ PS-156 提供输入领取、历史分页和 60 秒租约。batond 每 20 秒续�
 
 执行边界只有 `internal/agent.Adapter`：`Start`、`SubmitInput`、`DeliverResult`、`HistoryContains`、`ReadHistory`、`Drain`、`Abort`、`Close`。`Drain` 非阻塞返回统一 `Output`，区分等待子任务、进度、最终结果、已 settled 与不确定；`Raw` 只写节点本地日志，不进入中心执行报告。`Abort` 的控制响应不是停止证据，`agent.StopObserver` 保留晚到的停止事实，Pi 的 agent_settled 和 Codex 的匹配 turn/completed 都经同一 Worker 路径补报，副作用不明仍待核实。
 
-唯一选择点是 `internal/session/adapter.go:configureAdapter`，从同文件 `registeredAdapters` 按 `agent_type` 选择 `internal/agent/pi` 或 `internal/agent/codex`。新增执行类型只需实现统一接口并增加注册项，不再新增 Worker 分支。共同配置在原生启动前绑定到本地账本，恢复仍使用原 cwd、model、home、Session/Execution；Env 不入账本。恢复只加载原生历史，不重新发送任务输入或子结果，缺失映射不会创建替代会话。`Client.NativeHistory(cursor)` 经同一认证本地 IPC 返回分页历史；Pi 读取并校验本地 JSONL，Codex 查询 thread/items/list，不提供中心原文历史 API。
+唯一选择点是 `internal/session/adapter.go:configureAdapter`，从同文件 `registeredAdapters` 按 `agent_type` 选择 `internal/agent/pi`、`internal/agent/codex` 或 `internal/agent/kiro`。新增执行类型只需实现统一接口并增加注册项，不再新增 Worker 分支。共同配置在原生启动前绑定到本地账本，恢复仍使用原 cwd、model、home、Session/Execution；Env 不入账本。恢复只加载原生历史，不重新发送任务输入或子结果，缺失映射不会创建替代会话。`Client.NativeHistory(cursor)` 经同一认证本地 IPC 返回分页历史；Pi 读取并校验本地 JSONL，Codex 查询 thread/items/list，不提供中心原文历史 API。
+
+### Kiro ACP V3
+
+任务指定 `agent_type: "kiro"`。节点安装 Kiro CLI 2.32.0，并在节点登录；Baton 使用 `kiro-cli acp --agent-engine=v3` 和已有 Go JSON-RPC 库，不安装 Node sidecar。可用 `BATON_KIRO_BINARY`、`BATON_KIRO_MODEL`、`BATON_KIRO_HOME` 指定程序、模型和原生登录环境。Agent 环境按白名单构造，只额外注入当前执行的 `BATON_CONTEXT_FILE`；Env 不进入账本。
+
+任务输入先保存原生映射和操作意图，再写一次 `session/prompt`。最终 JSON 只在该 prompt 响应后交给 Worker 校验。活动补充输入保留 Kiro 的打断行为：发送 `session/cancel`，等待原 prompt 响应，再提交一次补充输入；旧回合的结果不进入新的输入代次。控制写入最多等待 5 秒，超时关闭管道并保留输入不确定性。
+
+`session/cancel` 本身不确认停止，原 prompt 返回后由 StopObserver 补报停止；使用过工具时保留副作用未知。空闲子结果只在来源明确等待时注入一次。忙碌来源通过已有 `baton task result` 查询取得结果；交付确认需要原生 user 输入中的精确 `delivery_id`，或同一 execute 工具、退出码 0 的 shell 输出。活动查询先让 CLI 返回，随后异步检查持久历史；最终结算等待该检查，无法确认时保持待核实。
+
+恢复先校验受限映射，再按 `session/list` 核对原生 ID 和 cwd，最后调用 `session/load`，不发送 prompt。缺少映射或会话直接返回历史缺失。历史通过独立 ACP 连接读取，查询不使用执行连接；浏览器沿用有摘要的分页游标和 14 KiB 页限制。加载快照最多保留 8 MiB，超过上限返回不可读，原文仍在节点。
+
+真实入口默认跳过。模型可通过 `BATON_REAL_KIRO_MODEL` 选择；首批普通场景使用 qwen3-coder-next，用户授权后的委托和活动补充输入使用 gpt-5.6-sol。委托需要隔离 PostgreSQL 17，版本、模型、场景和派生回放说明见 [Kiro 转录](internal/agent/kiro/testdata/replay/README.md)。
+
+```sh
+BATON_REAL_KIRO=1 BATON_REAL_KIRO_MODEL=gpt-5.6-sol \
+  go test -v -count=1 ./internal/gateway -run '^TestRealKiro$' -timeout 30m
+```
+
+设置 `BATON_RECORD_DIR` 时，目录须位于系统临时目录内且在仓库外；规范化、残留扫描和原始录制删除流程沿用 [Agent 回放工具](tools/agent-replay/README.md)。真实 Kiro 验证范围为 macOS arm64；其他系统只登记 CI 实际覆盖的构建和回放结果。
 
 ### Codex thread/turn
 

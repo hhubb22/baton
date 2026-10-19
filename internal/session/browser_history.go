@@ -10,6 +10,7 @@ import (
 
 	"baton/internal/agent"
 	"baton/internal/agent/codex"
+	"baton/internal/agent/kiro"
 	"baton/internal/agent/pi"
 	"baton/internal/protocol"
 )
@@ -70,7 +71,7 @@ func (h *Host) storedHistory(ctx context.Context, req protocol.SessionRequest) (
 	if err := db.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='agent_type'`).Scan(&kind); err != nil {
 		return fail(err)
 	}
-	if kind != "pi" && kind != "codex" {
+	if kind != "pi" && kind != "codex" && kind != "kiro" {
 		return protocol.SessionResult{}, false
 	}
 	if err := db.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='adapter_config'`).Scan(&raw); err != nil {
@@ -83,6 +84,10 @@ func (h *Host) storedHistory(ctx context.Context, req protocol.SessionRequest) (
 	var adapter agent.BrowserHistoryAdapter
 	if kind == "pi" {
 		adapter = pi.New(config)
+	} else if kind == "kiro" {
+		c := kiro.New(config)
+		defer c.Close()
+		adapter = c
 	} else {
 		c := codex.New(config)
 		defer c.Close()

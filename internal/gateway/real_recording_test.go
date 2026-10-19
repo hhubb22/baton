@@ -81,6 +81,9 @@ func newRealRecording(t *testing.T, tool, kind, version, model, binary string, b
 		t.Fatal(err)
 	}
 	protocol := "pi-rpc-jsonl"
+	if kind == "kiro" {
+		protocol = "acp-jsonrpc"
+	}
 	if kind == "codex" {
 		protocol = "codex-app-server-jsonrpc"
 	}
