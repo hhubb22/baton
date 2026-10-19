@@ -10,6 +10,8 @@ Coordinator 内置 Gateway 的实现与验收由 [PS-171](https://linear.app/kak
 
 ## 已实现基线
 
+当前已实现 Kiro ACP V3 接入（PS-123 / T19）：`internal/agent/kiro` 使用 Go 和已有 jsonrpc2 库，实现全部 8 个 Adapter 方法及 StopObserver、活动补充输入和浏览器历史。固定 Kiro CLI 2.32.0，并协商协议 1、loadSession 和 session/list；操作意图先持久化，输入只写一次，prompt 响应才提供结算证据。活动补充先取消旧回合并等待响应，再提交新输入；排队旧结果在新输入前失效。中止通知不证明停止，用过工具时副作用未知；写入超过 5 秒会关闭管道，保持待核实。恢复先校验映射和 session/list 的原生 ID/cwd，再 load，不重放输入。独立 ACP 连接加载原生历史，浏览器沿用有界分页与前缀摘要；8 MiB 快照超限返回不可读。查询交付确认绑定 execute 工具和成功退出码，读取持久历史后才确认精确 delivery_id；最终结果等待尚未完成的交付核查。录制规范化使用独立 Kiro 策略、原生会话筛选、双向请求 ID 和隐私过滤；两层回放及真实证据见 [Kiro 场景说明](../../internal/agent/kiro/testdata/replay/README.md)。无新增依赖或数据库迁移。
+
 当前已实现 Codex 0.163.0 升级与工具中止补录（PS-181）：导出并提交官方 Schema，核对新增的可选字段和方法；默认基线更新为 0.163.0，兼容已有 0.162.1 录制与历史映射，未知版本仍拒绝。新建映射记录实际 CLI 版本，原生历史头部与保存的映射版本一致才可读取。使用本机 0.163.0 / gpt-6.1-sol 补录 interrupt_mid_tool，真实驱动等待文件门控和匹配回合的 commandExecution 开始帧，再发中止。新转录在两层分别门控工具开始、中止请求和结算，ACK 保持 false/false，迟到 interrupted 结算提供停止证据，副作用未知仍待核实。本机 0.163.0 / gpt-6.1-sol 的 TestRealCodex 全部 11 个适用场景通过，自由文本按约束跳过；新版本无模型握手和原生历史探针也通过。录制来源与扫描结果见 [Codex 场景说明](../../internal/agent/codex/testdata/replay/README.md)。
 
 当前已实现 Codex 连接关闭修复（PS-180）：jsonrpc2 从 v0.2.1 升级到包含上游 [#104](https://github.com/sourcegraph/jsonrpc2/pull/104) 修复的 v0.2.3，关闭时移除待决调用并拒绝关闭后的新调用，缓冲响应不会再命中已经关闭的等待通道。确定性回归固定响应读出与分发之间的关闭时序，另验证并发重复关闭释放待决 RPC 和协议 IO。适配器与 RunWorker 均回放响应后立即退出、响应被调用方消费后退出两个窗口，原任务不重发，未结算的退出保持待核实，不提供成功或停止证据。无新增协议实现、数据库迁移或真实模型调用。
@@ -176,7 +178,7 @@ internal/httpapi/           员工 HTTP API、会话与权限入口
 internal/store/             业务事务与持久化
 internal/node/              注册、能力、节点 RPC 和同步
 internal/session/           Worker、输入账本和历史索引
-internal/agent/             统一 Adapter、Pi/Codex 原生协议适配
+internal/agent/             统一 Adapter、Pi/Codex/Kiro 原生协议适配
 internal/protocol/          信封、事件、错误和版本
 internal/plane/             Plane 触发、映射和回写
 internal/projectagent/      Project、主对话、输入队列、放置与租约、Project Agent 工具（2026-10-18 修订）

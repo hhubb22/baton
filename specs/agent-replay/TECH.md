@@ -6,6 +6,8 @@ Date: 2026-10-19
 Baseline: `hhubb22/baton@79f2f7d09940656a6eccecee9ebd95e3dfac63f8`；t3code `1451e7cb23034d29774338608368a15d8845df36`（`docs/internals/adding-a-provider.md`、`docs/orchestration-v2/testing-strategy.md`、`packages/provider-testing`、`apps/server/scripts/acp-replay-agent.ts`）
 Basis: 2026-10-19 用户确认的测试方案；[Baton TECH](../baton/TECH.md) 中 Pi（PS-118 / T14）、Codex（PS-119 / T15）、子结果交付（PS-116 / T12）的适配器语义
 
+当前已实现 Kiro ACP V3 规范化与回放（PS-123）：独立策略处理路径、原生 Session、双向 JSON-RPC ID、加载回放的 user 输入及隐私字段，版本探测随对应会话筛选。13 份真实 Kiro 2.32.0 转录覆盖适配器与 Worker；丢失 prompt 响应、崩溃和 Worker 前置状态从真实录制派生，来源及适用边界见 [Kiro 场景说明](../../internal/agent/kiro/testdata/replay/README.md)。
+
 ## Context
 
 Baton 的适配器测试分三层。纯逻辑单测覆盖分帧和 Schema 形状。CI 中，测试进程以子进程模式冒充 Agent，适配器通过真实的 stdin/stdout 与它通信。门控的真实测试只在本机运行，使用真实 Agent 和模型。这一分层与 t3code 相同，差别在回放数据的来源。

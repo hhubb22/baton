@@ -11,6 +11,7 @@ import (
 
 	"baton/internal/agent"
 	"baton/internal/agent/codex"
+	"baton/internal/agent/kiro"
 	"baton/internal/agent/pi"
 	"baton/internal/task"
 )
@@ -21,6 +22,7 @@ type adapterRegistration struct {
 }
 
 var registeredAdapters = map[string]adapterRegistration{
+	"kiro":  {func(c agent.Config) agent.Adapter { return kiro.New(c) }, "BATON_KIRO_MODEL", "BATON_KIRO_BINARY", "BATON_KIRO_HOME"},
 	"pi":    {func(c agent.Config) agent.Adapter { return pi.New(c) }, "BATON_PI_MODEL", "BATON_PI_BIN", "BATON_PI_HOME"},
 	"codex": {func(c agent.Config) agent.Adapter { return codex.New(c) }, "BATON_CODEX_MODEL", "BATON_CODEX_BINARY", "BATON_CODEX_HOME"},
 }
