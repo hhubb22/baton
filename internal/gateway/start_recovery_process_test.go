@@ -158,9 +158,8 @@ func TestStartRefusalPersistenceFailureStillReportsToCenter(t *testing.T) {
 
 func assertWorkerStaysDownAfterRestart(t *testing.T, st *prepareStack, sessionID, taskID string) {
 	t.Helper()
-	before := workerStatus(t, st.dataDir, sessionID)
 	st.batond.stop()
-	stopWorker(before.PID)
+	cleanupSessionWorkers(st.dataDir)
 	waitWorkerSocketDown(t, st.dataDir, sessionID)
 	host := &session.Host{DataDir: st.dataDir}
 	for range 2 {
