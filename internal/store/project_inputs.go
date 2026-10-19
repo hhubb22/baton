@@ -1,0 +1,128 @@
+package store
+
+import (
+	"context"
+	"crypto/sha256"
+
+	"fmt"
+	"strings"
+	"unicode/utf8"
+
+	"baton/internal/projectagent"
+	"baton/internal/protocol"
+	"github.com/jackc/pgx/v5"
+)
+
+// insertProjectInput 同一事务保存业务变化和通知，不锁 Agent，避免与任务终态路径形成反向锁。
+func insertProjectInput(ctx context.Context, tx pgx.Tx, employeeID, agentID, kind, key string, payload any) error {
+	raw, err := protocol.MarshalJSON(payload)
+	if err != nil {
+		return err
+	}
+	maxBytes := 72 << 10
+	switch kind {
+	case "user_message":
+	case "attention_answer":
+		maxBytes = 8 << 10
+	case "task_result":
+		maxBytes = 40 << 10
+	case "memory_updated":
+		maxBytes = 1 << 10
+	case "project_updated":
+		maxBytes = 4 << 10
+	default:
+		return projectagent.ErrInvalid
+	}
+	if len(raw) > maxBytes {
+		return projectagent.ErrTooLarge
+	}
+	var fits bool
+	if err = tx.QueryRow(ctx, `SELECT octet_length($1::jsonb::text)<=$2`, raw, maxBytes).Scan(&fits); err != nil {
+		return err
+	}
+	if !fits {
+		return projectagent.ErrTooLarge
+	}
+	hash := sha256.Sum256(raw)
+	_, err = tx.Exec(ctx, `INSERT INTO project_agent_input_queue(employee_id,agent_id,source_type,source_key,payload,payload_hash)
+ VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(agent_id,source_key) DO NOTHING`, employeeID, agentID, kind, key, raw, hash[:])
+	return err
+}
+
+// ProjectTaskResultInput 为任务终态事务提供限长入口；终态集成由 PS-157 完成。
+type ProjectTaskResultInput struct {
+	TaskID        string `json:"task_id"`
+	Version       int64  `json:"version"`
+	Status        string `json:"status"`
+	ExitCode      *int   `json:"exit_code,omitempty"`
+	Text          string `json:"text"`
+	OriginalBytes int    `json:"original_bytes"`
+	Truncated     bool   `json:"truncated"`
+	FullContent   string `json:"full_content,omitempty"`
+}
+
+func boundedText(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	head, tail := limit/2, limit-limit/2
+	for head > 0 && !utf8.RuneStart(s[head]) {
+		head--
+	}
+	start := len(s) - tail
+	for start < len(s) && !utf8.RuneStart(s[start]) {
+		start++
+	}
+	return s[:head] + s[start:]
+}
+
+// EnqueueProjectTaskResult 可在现有任务事务内调用，重发同一任务版本只入队一次。
+func EnqueueProjectTaskResult(ctx context.Context, tx pgx.Tx, employeeID, agentID string, in ProjectTaskResultInput) error {
+	if in.TaskID == "" || in.Version < 1 || len(in.Status) > 64 || !utf8.ValidString(in.Text) || strings.ContainsRune(in.Text, 0) {
+		return projectagent.ErrInvalid
+	}
+	in.OriginalBytes = len(in.Text)
+	original := in.Text
+	limit := min(len(original), 32<<10)
+	for {
+		in.Text = boundedText(original, limit)
+		in.Truncated = len(in.Text) < len(original)
+		if in.Truncated {
+			in.FullContent = "完整内容用 tasks.get 读取"
+		}
+		raw, err := protocol.MarshalJSON(in)
+		if err != nil {
+			return err
+		}
+		var size int
+		if err = tx.QueryRow(ctx, `SELECT octet_length($1::jsonb::text)`, raw).Scan(&size); err != nil {
+			return err
+		}
+		if len(raw) <= 40<<10 && size <= 40<<10 {
+			break
+		}
+		if limit == 0 {
+			return projectagent.ErrTooLarge
+		}
+		limit = limit * 3 / 4
+	}
+	return insertProjectInput(ctx, tx, employeeID, agentID, "task_result", fmt.Sprintf("task:%s:result:%d", in.TaskID, in.Version), in)
+}
+
+func projectUpdatedPayload(p projectagent.Project) any {
+	// 通知容量固定为 4 KiB；超长目标保留首尾，完整目标仍由 Project API 返回。
+	goal := p.Goal
+	for limit := min(len(goal), 3<<10); ; limit = limit * 3 / 4 {
+		out := struct {
+			Title         string `json:"title"`
+			Goal          string `json:"goal"`
+			Version       int64  `json:"version"`
+			OriginalBytes int    `json:"original_goal_bytes"`
+			Truncated     bool   `json:"truncated"`
+		}{p.Title, boundedText(goal, limit), p.Version, len(goal), limit < len(goal)}
+		raw, _ := protocol.MarshalJSON(out)
+		if len(raw)+64 <= 4<<10 {
+			return out
+		}
+	}
+}

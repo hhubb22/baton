@@ -131,11 +131,11 @@ func (s *Server) replyExecution(ctx context.Context, connID string, req protocol
 	if err != nil || req.Source == nil {
 		return
 	}
-	body, err := json.Marshal(result)
+	body, err := protocol.MarshalJSON(result)
 	if err != nil {
 		return
 	}
-	env, err := json.Marshal(protocol.Envelope{
+	env, err := protocol.MarshalJSON(protocol.Envelope{
 		Version: protocol.Version, MessageID: messageID,
 		Route: protocol.Route{To: req.Source.NodeID}, Priority: protocol.PriorityControl,
 		CorrelationID: req.MessageID, Body: body,
@@ -144,7 +144,7 @@ func (s *Server) replyExecution(ctx context.Context, connID string, req protocol
 		return
 	}
 	frame := protocol.Frame{Kind: protocol.KindEnvelope, Envelope: env}
-	raw, err := json.Marshal(frame)
+	raw, err := protocol.MarshalJSON(frame)
 	if err != nil || len(raw) > protocol.MaxMessageBytes {
 		s.log.Info("event=execution_message_too_large", "message_id", req.MessageID)
 		return

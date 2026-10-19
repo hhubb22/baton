@@ -10,7 +10,7 @@ Coordinator 内置 Gateway 的实现与验收由 [PS-171](https://linear.app/kak
 
 ## 已实现基线
 
-PS-155 提供 Project、主对话事件读取和项目记忆 API。迁移 `0016_projects.sql` 在中心创建七张表，包含输入队列。用户消息在所有设备离线时仍可入队，相同消息 ID 与正文返回原记录。事件与记忆修订由数据库触发器限制为只追加，记忆修改检查 `expected_revision`。输入领取、通知、运行放置和租约由 PS-156 实现。
+PS-155 提供 Project、主对话事件读取和项目记忆 API。迁移 `0016_projects.sql` 在中心创建七张表，包含输入队列。用户消息在所有设备离线时仍可入队，相同消息 ID 与正文返回原记录。事件与记忆修订由数据库触发器限制为只追加，记忆修改检查 `expected_revision`。PS-156 通过 `0017_project_agent_runs.sql` 提供运行记录、任务来源列、输入领取、被动通知、运行放置和租约。每批最多 20 条或 128 KiB，单条事件不超过 160 KiB，Runtime 请求与响应不超过 192 KiB。Coordinator 每秒调度，默认设备不合格时记录原因并选择其他节点。batond 按 run_id 持久去重，20 秒续租，58 秒未成功续租就停止进程；中心在 Agent 行锁内检查当前运行与数据库时间，拒绝过期或已撤销的租约。失败依次推迟 1、5、15 分钟，第三次进入 needs_attention，员工重试保留原对话位置。详细协议见 [Project Agent TECH](../project-agent/TECH.md)。
 
 当前已实现补充（PS-125 / T21）：Web 提供按节点分组的 Session 树，分别显示本机父子关系与跨节点委托，可提交新任务、补充当前任务、查询原输入操作及显式恢复。`/api/v1/events` 使用同源 Cookie 鉴权，连接期间复核登录，退出、改密与到期关闭旧连接；`session.changed`、`task.changed` 提醒页面重新读取，`session.output` 返回受限纯文本、游标和缺口。通知按本人元数据版本每秒检查，重连及窗口获得焦点重新读取。历史、输出和补充输入使用临时 Relay RPC，不进入中心 outbox 或 task_events。每次输出最多 16 KiB，Worker 和适配器各保留最近 256 KiB，页面保留最近 128 KiB；中心最多 128 个浏览器连接及 128 个临时 RPC，节点最多 16 个并发 Session RPC，浏览器写超时为 2 秒。Relay 的输出使用独立队列，最多 128 条且最多 32 MiB，控制队列优先发送，输出超限不会占满任务控制队列。慢订阅丢失的片段以 gap 显示，完整原生历史仍留在节点。
 

@@ -18,7 +18,7 @@ func TestProjectsUpgradeExistingDatabaseAndRepeat(t *testing.T) {
 	}
 	// 现行主干已经应用 0019；0016 必须能补入编号间隙。
 	for _, name := range names {
-		if name == "0016_projects.sql" {
+		if name >= "0016" && name != "0019_plane_writeback.sql" {
 			continue
 		}
 		body, err := fs.ReadFile(migrations.Files, name)
@@ -60,7 +60,7 @@ func TestProjectsUpgradeExistingDatabaseAndRepeat(t *testing.T) {
 	if fingerprint != schemaFingerprint(t, ctx, pool) {
 		t.Fatal("重复迁移改变结构或版本")
 	}
-	for _, table := range []string{"projects", "project_agents", "conversations", "conversation_events", "project_agent_input_queue", "project_memory_entries", "project_memory_revisions"} {
+	for _, table := range []string{"projects", "project_agents", "conversations", "conversation_events", "project_agent_input_queue", "project_memory_entries", "project_memory_revisions", "agent_runs"} {
 		if !tableExists(t, ctx, pool, table) {
 			t.Fatalf("缺少 %s", table)
 		}

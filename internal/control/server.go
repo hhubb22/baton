@@ -91,7 +91,7 @@ func (s *Server) Handle(ctx context.Context, src protocol.Source, env protocol.E
 		return err
 	}
 	env.Source = &src
-	raw, err := json.Marshal(env)
+	raw, err := protocol.MarshalJSON(env)
 	if err != nil {
 		return err
 	}
@@ -113,6 +113,9 @@ func (s *Server) onEnvelope(ctx context.Context, connID string, raw json.RawMess
 		return
 	}
 	switch kind.Type {
+	case protocol.BodyProjectRuntimeRequest:
+		s.onProjectRuntimeRequest(ctx, connID, env)
+		return
 	case protocol.BodyRuntimeReport:
 		s.onRuntimeReport(ctx, connID, env)
 		return

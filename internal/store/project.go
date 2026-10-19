@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"baton/internal/identity"
 	"baton/internal/projectagent"
@@ -106,7 +107,7 @@ func (s *Store) PatchProject(ctx context.Context, employeeID, projectID string, 
 	defer func() { _ = tx.Rollback(ctx) }()
 	// Project 写入先锁 Agent，与后续运行路径的锁顺序一致。
 	var agentID string
-	err = tx.QueryRow(ctx, `SELECT id::text FROM project_agents WHERE employee_id=$1 AND project_id=$2 FOR UPDATE`, employeeID, projectID).Scan(&agentID)
+	err = tx.QueryRow(ctx, `SELECT id::text FROM project_agents WHERE employee_id=$1 AND project_id=$2 FOR NO KEY UPDATE`, employeeID, projectID).Scan(&agentID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return projectagent.Project{}, ErrNotFound
 	}
@@ -117,6 +118,7 @@ func (s *Store) PatchProject(ctx context.Context, employeeID, projectID string, 
 	if err != nil {
 		return p, err
 	}
+	oldTitle, oldGoal := p.Title, p.Goal
 	if patch.Title != nil {
 		p.Title = *patch.Title
 	}
@@ -145,6 +147,16 @@ func (s *Store) PatchProject(ctx context.Context, employeeID, projectID string, 
 	p, err = scanProject(tx.QueryRow(ctx, projectSelect+` WHERE p.employee_id=$1 AND p.id=$2`, employeeID, projectID))
 	if err != nil {
 		return p, err
+	}
+	if p.Title != oldTitle || p.Goal != oldGoal {
+		if err = insertProjectInput(ctx, tx, employeeID, agentID, "project_updated", fmt.Sprintf("project:%s:version:%d", projectID, p.Version), projectUpdatedPayload(p)); err != nil {
+			return p, err
+		}
+	}
+	if p.Status != "active" {
+		if err = releaseProjectRun(ctx, tx, agentID, "finished", "project_"+p.Status); err != nil {
+			return p, err
+		}
 	}
 	return p, tx.Commit(ctx)
 }

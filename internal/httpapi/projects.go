@@ -26,7 +26,7 @@ func (s *Server) routeProject(w http.ResponseWriter, r *http.Request) {
 		allowed = r.Method == http.MethodGet || r.Method == http.MethodPost
 	case len(parts) == 1:
 		allowed = r.Method == http.MethodGet || r.Method == http.MethodPatch
-	case len(parts) == 2 && parts[1] == "messages":
+	case len(parts) == 2 && (parts[1] == "messages" || parts[1] == "retry" || parts[1] == "stop"):
 		allowed = r.Method == http.MethodPost
 	case len(parts) == 2 && (parts[1] == "events" || parts[1] == "memory"):
 		allowed = r.Method == http.MethodGet
@@ -125,6 +125,28 @@ func (s *Server) routeProject(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.writeJSON(w, 200, p)
+	case parts[1] == "retry" || parts[1] == "stop":
+		var body *struct{}
+		if !s.readJSON(w, r, &body) {
+			return
+		}
+		if body == nil {
+			s.writeProjectError(w, r, projectagent.ErrInvalid)
+			return
+		}
+		var err error
+		if parts[1] == "retry" {
+			err = s.store.RetryProject(r.Context(), employeeID, parts[0])
+		} else {
+			err = s.store.StopProjectRun(r.Context(), employeeID, parts[0])
+		}
+		if err != nil {
+			s.writeProjectError(w, r, err)
+			return
+		}
+		s.writeJSON(w, http.StatusOK, struct {
+			OK bool `json:"ok"`
+		}{true})
 	case parts[1] == "messages":
 		var in projectagent.MessageInput
 		if !s.readJSONLimit(w, r, &in, maxProjectJSONBytes) {

@@ -56,13 +56,22 @@ pi-agent-core 只包含 Agent Loop、工具执行和事件流（`packages/agent/
 
 续租、启动和停止由 batond 处理，不经 Runtime。
 
+当前控制消息正文的 `type` 为 `project_runtime.request` / `project_runtime.result`。请求含 `run_id`、`lease_epoch`、`operation`；分页使用 `after_seq` / `max_bytes`，写入使用 `last_seq`，assistant 另带 `client_event_id` 和 `payload`。响应为 `{type, ok, code?, data?}`。`bootstrap` 返回 `{project, prompt_version, compaction?, after_seq, last_seq}`；`read_events` 返回 `{events, last_seq, next_after_seq, has_more}`，默认每页 128 KiB，单条大事件可单独返回，响应仍不超过 192 KiB。`claim_inputs` 返回 `{event?, payload_bytes, input_count}`，要求 `last_seq` 等于当前最后序号；事件 payload 为 `{format:"pi-ai/1", message, input_ids}`，消息的文本块保存输入条目 JSON。调用方收到序号冲突或丢失领取响应时，重新读取中心事件后继续。
+
+batond 启动命令为 `baton-project-runtime run`，工作目录是私有空目录。环境中的 `BATON_PROJECT_RUNTIME_ENDPOINT`、`BATON_PROJECT_RUNTIME_TOKEN`、`BATON_PROJECT_RUN_ID`、`BATON_PROJECT_LEASE_EPOCH` 只用于本次运行。本地 IPC 每个连接发送一条 `{token, request}` JSON，响应为 `ProjectRuntimeResult`；batond 校验 token 后覆盖请求的运行身份，Runtime 不能自行发送续租或启动回执。`poll_wake` 最长等待 25 秒，返回 `{wake:true|false}`；Runtime 闲置时可重复调用。
+
+节点管理请求为 `started`、`renew`、`start_failed`、`exited`、`stopped`。`started` / `renew` 成功返回 `{lease_seconds:60}`。`stopped` 只确认已结束运行的进程清理，重复回执幂等；它不能恢复租约或修改对话。启动前先检查 provider，再向中心确认租约；启动意图先写入 SQLite，同一 run 在 batond 重启后不会重启进程。Unix 使用随 batond 管道关闭而停止进程组的守护，Windows 使用关闭时终止整个组的 Job Object。连接重建保留当前 Runtime，续租仍受 58 秒期限限制。
+
+控制帧 JSON 采用 UTF-8 编码，容量不包含 HTML 页面转义。每批同时检查数据库规范文本、消息拼接后的传输字节及事件上限，因此含引号、反斜线等字符时可能提前结束一批。任务结果文本按 UTF-8 边界保留首尾，并注明原字节数；元数据与 JSON 编码后的条目仍限制为 40 KiB。长 Project 目标的通知在 4 KiB 内保留首尾并标明截断，完整目标由 Project API 返回。
+
+
 Runtime 的登录由用户在设备上执行 `baton-project-runtime login <provider>` 完成，走 pi-ai 的 OAuth 流程。凭据存在 Runtime 自己的数据目录，文件权限沿用 batond 的私有文件约定。`baton-project-runtime probe` 只读取凭据状态并返回各 provider 是否已登录，不发送推理请求；batond 用它生成能力报告。
 
 Runtime 进程的工作目录是一个空的控制目录。pi-agent-core 本身不加载 AGENTS.md、skills、扩展或 MCP，Runtime 也不启用这些功能，工具只有第 7 节列出的那些。
 
 ### 3. 数据模型
 
-PS-155 通过 0016 交付 Project、Agent、主对话、事件、记忆和输入队列的中心存储，以及 Project、用户消息、事件读取、记忆 API。输入领取、被动通知、放置和租约由 PS-156 实现。运行身份校验、模型输出写入和工具执行仍按后续工单实施。
+PS-155 通过 0016 交付 Project、Agent、主对话、事件、记忆和输入队列的中心存储，以及 Project、用户消息、事件读取、记忆 API。输入领取、被动通知、放置和租约由 PS-156 实现。PS-156 同时提供运行身份校验和带序号、事件标识的 assistant 写入。工具执行由 PS-157 实施。
 
 新增表都带 `employee_id`，跨表引用使用包含 `employee_id` 的复合外键，沿用现有归属检查方式。
 
@@ -111,7 +120,7 @@ PS-155 通过 0016 交付 Project、Agent、主对话、事件、记忆和输入
 
 ### 4. 运行流程
 
-**放置。** Coordinator 每秒扫描一次：Project 为 active、对话为 active 且已过 `next_attempt_at`、有待处理的主动输入、租约为空或已过期的 Agent。只有被动输入时不放置。对每个这样的 Agent 选一台节点：属于同一用户、在线且已同步、报告里有 Runtime、Agent 配置的 provider 处于已登录状态、该节点正在运行的 Runtime 少于上限（默认 4）。默认设备满足条件时选默认设备，否则按注册顺序选第一台。
+**放置。** Coordinator 每秒扫描一次：Project 为 active、对话为 active 且已过 `next_attempt_at`、有待处理的主动输入、租约为空或已过期的 Agent。只有被动输入时不放置。上次运行已领取输入但对话结尾仍为 input、tool_result 或带工具调用的 assistant 时，同样视为尚未完成的主动轮次，租约过期或失败退避结束后可从中心历史恢复。对每个这样的 Agent 选一台节点：属于同一用户、在线且已同步、报告里有 Runtime、Agent 配置的 provider 处于已登录状态、该节点正在运行的 Runtime 少于上限（默认 4）。默认设备满足条件时选默认设备，否则按注册顺序选第一台。
 
 **取得租约。** 一个事务里锁定 `project_agents` 行，确认租约为空或已过期，`lease_epoch` 加一，写 `lease_run_id` 和 `lease_until = now() + 60s`，插入 `agent_runs`（`state = starting`）。`dispatch_outbox` 的每一行都绑定 `task_id` 和 `execution_id`，不能直接复用；`agent_runs` 自己记录投递状态，发送循环对处于 `starting` 的运行按 `run_id` 作为稳定消息 ID 重发 `project_run_start`，直到 batond 回执。batond 在本地 SQLite 里按 `run_id` 去重，同一 run 不会启动两个进程。启动前 batond 先执行一次 `probe`：所需 provider 已经不是登录状态时，拒绝启动并更新能力报告，Coordinator 以 `login_required` 结束这次运行，不计入失败次数，扫描会在下一轮选择其他节点。
 
@@ -153,7 +162,7 @@ PS-155 通过 0016 交付 Project、Agent、主对话、事件、记忆和输入
 
 重新发出的 `call_tool` 不会重复产生副作用：如果该 `tool_call_id` 已有 `tool_result`，Coordinator 直接返回已保存的结果；如果没有，说明原来的事务没有提交，副作用也没有发生，这次正常执行。这依赖第 7 节的规则：除 `nodes.exec` 外，所有工具的副作用和 `tool_result` 在同一个事务里提交。`nodes.exec` 的副作用发生在另一台设备上，它靠任务的唯一性保证只执行一次（第 10 节）。
 
-模型请求失败时，Runtime 在本次运行内重试 3 次，间隔 5、15、45 秒。仍然失败就调用 `report_failure`，Coordinator 把 `failure_count` 加一，设置 `next_attempt_at`（依次推迟 1、5、15 分钟），本次运行结束。`failure_count` 达到 3 时，对话进入 `needs_attention`，扫描不再放置它，界面显示最后的错误。用户确认重试后清零，对话回到 active。任何一次 assistant 消息保存成功都会把 `failure_count` 清零。失败的模型输出不写入对话，避免把错误内容带进后续上下文。
+模型请求失败时，Runtime 在本次运行内重试 3 次，间隔 5、15、45 秒。仍然失败就调用 `report_failure`，Coordinator 把 `failure_count` 加一，设置 `next_attempt_at`（依次推迟 1、5、15 分钟），本次运行结束。`failure_count` 达到 3 时，对话进入 `needs_attention`，扫描不再放置它，界面显示最后的错误。用户通过 `POST /api/v1/projects/{id}/retry` 确认重试后清零，对话回到 active。`POST /api/v1/projects/{id}/stop` 作废当前租约并结束这次运行；未领取的主动输入仍可在后续扫描时触发新的运行。这两个接口沿用员工会话、同源和 CSRF 校验，正文为 JSON `{}`，拒绝未知字段和查询参数，成功返回 `200 {"ok":true}`，其他员工的 Project 返回 404。任何一次 assistant 消息保存成功都会把 `failure_count` 清零。失败的模型输出不写入对话，避免把错误内容带进后续上下文。
 
 订阅需要重新登录、设备全部离线这类情况不算失败，不增加 `failure_count`。它们体现为放置时找不到合格节点，界面显示等待原因。
 

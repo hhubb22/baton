@@ -10,6 +10,14 @@
 
 Gateway 进程测试的存活探测按平台实现：Unix 使用 `os.FindProcess` 与零信号，Windows 使用 `x/sys/windows` 打开进程句柄并查询等待状态，不把已退出但句柄尚存的进程判为存活。Worker 故障清理统一使用 `os.Process.Kill`；测试服务在 Unix 先发送 SIGTERM，在不支持该信号的 Windows 直接终止。诱饵进程由 Go 测试二进制启动，不依赖 `sleep`；Windows 子进程构建使用 `.exe`。独立停库测试按平台查找 PostgreSQL 可执行文件，Windows 使用 TCP 与固定测试角色，不依赖 Unix socket 或域用户名。产品恢复仍通过认证本地 IPC 确认原 Worker，不把 PID 存在当成同一执行的证据。
 
+## Project Agent 输入与运行
+
+中心保存 Project、主对话和记忆。用户消息先入队，所有设备离线时仍接受；用户修改记忆、标题或目标时，在同一事务里写被动通知。有主动输入或尚未完成的主动轮次时，Coordinator 选择已同步且对应 provider 已登录的 Runtime 节点，优先使用默认设备。每节点最多运行 4 个 Project Runtime，选用其他设备的原因记在运行记录里。
+
+PS-156 提供输入领取、历史分页和 60 秒租约。batond 每 20 秒续租，58 秒未续租成功就停止 Runtime；旧运行的请求返回 `lease_lost`。Runtime 接口与本地 IPC 契约见 [Project Agent 技术设计](specs/project-agent/TECH.md#2-进程与通信)。生产 Runtime 安装、登录和 Agent 循环由 PS-158 提供；任务工具和终态结果入队由 PS-157 提供。本工单使用测试 Runtime 验证真实进程链路。
+
+`POST /api/v1/projects/{id}/retry` 和 `/stop` 使用员工会话、CSRF 令牌与 JSON `{}`，分别重置模型失败状态和停止当前运行。待领取输入仍会触发后续运行，持续暂停使用 Project 的 `status=paused`。
+
 ## 运行要求
 
 - Go 1.27
