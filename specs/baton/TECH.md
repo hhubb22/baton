@@ -10,6 +10,8 @@ Coordinator 内置 Gateway 的实现与验收由 [PS-171](https://linear.app/kak
 
 ## 已实现基线
 
+当前已实现补充（PS-175 / AR-04）：首批真实转录在 macOS arm64、Baton 9c11002 上录制并规范化后提交。Pi 1.3.0 / `google-vertex/gemini-3.1-flash-lite` 的 12 个子测试全部通过；Codex 0.162.1 / `gpt-6-luna` 提交 9 个通过场景，`interrupt_before_turn_started` 暴露早到中止被拒绝后不再补发的适配器缺陷，`delegation` 因模型不遵守「不再委托」失败，两者未提交转录。带与不带录制器的能力矩阵一致；两轮录制结束后没有残留的 Agent、沙箱或录制器进程；同版本重录 `simple`，Baton 发出的帧完全相同，差异只来自模型一侧的条目数量。录制中发现的回放占位符和 Codex 主机名问题已在 179d839 修复。
+
 当前已实现补充（PS-174 / AR-03）：Pi/Codex 真实测试按 Agent 回放设计 §8 拆成独立会话子测试，保留能力矩阵和原有断言。`BATON_RECORD_DIR` 启用按 Agent、场景隔离的录制，Pi 沙箱位于录制器内层；旁置配置中的 `raw_temp_dir` 记录调用测试的系统临时根目录，兼容 Pi 隔离的 TMPDIR。Pi 的活动回合交付、Codex 的自由文本结果录制按现有适配器约束跳过，依据见各自 `testdata/replay/README.md`。默认跳过真实模型调用，首次真实录制与清理验证由 PS-175 完成。本机凭据准备、录制、规范化与删除流程见 [README](../../README.md#本机录制与规范化)，无新增依赖。
 
 当前已实现补充（PS-173 / AR-02）：`agent-replay record` 读取旁置配置和场景元数据，在仓库外系统临时目录记录原始字节、单调时间及原生历史追加；Unix 转发 SIGTERM、SIGINT，Windows 保留退出码。`normalize` 按协议替换路径、Baton 标识和构造文本，筛选首个原生会话并统计删除条目，扫描残留后原子写出统一转录。合成原始录制经工具驱动真实 `codex.Adapter` 完成 simple；真实测试接入见上方 PS-174 记录。无新增 Go 依赖，使用方式及过滤规则见 [工具说明](../../tools/agent-replay/README.md)。

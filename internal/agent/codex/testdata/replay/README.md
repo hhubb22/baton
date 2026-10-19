@@ -1,6 +1,6 @@
 # Codex 转录
 
-`simple.ndjson` 由上一级人工样本 `replay.json` 的完成流程转写，包含版本探测、initialize、thread/start、turn/start 和 turn/completed。头部 `source` 明确标记为手写样本转写，`platform` 为 synthetic，`recorded_at` 为空。模型输出沿用原样本，Agent 标识固定为 thread-1、turn-1；适配器请求 id 和输入操作标识通过捕获保存，目录通过运行时绑定提供。
+`synthetic_simple.ndjson` 由上一级人工样本 `replay.json` 的完成流程转写，包含版本探测、initialize、thread/start、turn/start 和 turn/completed。头部 `source` 明确标记为手写样本转写，`platform` 为 synthetic，`recorded_at` 为空。模型输出沿用原样本，Agent 标识固定为 thread-1、turn-1；适配器请求 id 和输入操作标识通过捕获保存，目录通过运行时绑定提供。
 
 该转录用于验证转录工具链和真实 Codex 适配器的进程边界。`TestTranscriptReplaySimple` 在完成事件之前设门，检查尚未得到最终结果，放行后检查结构化结果。它不调用模型。
 
@@ -9,7 +9,12 @@ PS-172 交付此合成完成场景。首批真实录制由 PS-175 在用户本�
 
 ## 真实场景入口
 
-`TestRealCodex/<scenario>` 为每个场景创建独立的 app-server、工作目录和原生 thread，使用一次性、独立认证的 CODEX_HOME。设置 `BATON_RECORD_DIR` 后写入其 `codex/` 子目录；本机流程见 [主 README](../../../../../README.md#本机录制与规范化)。当前 `simple.ndjson` 仍是上述合成样本，尚未被真实模型录制替换。
+`TestRealCodex/<scenario>` 为每个场景创建独立的 app-server、工作目录和原生 thread，使用一次性、独立认证的 CODEX_HOME。设置 `BATON_RECORD_DIR` 后写入其 `codex/` 子目录；本机流程见 [主 README](../../../../../README.md#本机录制与规范化)。本目录其余 `*.ndjson` 是 2026-10-19 在 Baton 9c11002 上录制的首批真实转录：Codex 0.162.1，darwin/arm64，模型 `gpt-6-luna`，单份 1.7～61 KB。提交的是通过的 9 个场景：`simple`、`interrupt_idle`、`interrupt_mid_tool`、`deliver_active`、`deliver_idle`、`restore_load_only`、`restore_missing`、`provider_error`、`symlinked_workspace`。
+
+两个失败场景没有提交转录：
+
+- `interrupt_before_turn_started`：`turn/start` 返回后约 1 毫秒发出 `turn/interrupt`，此时回合的 `startedAt` 还是 null，Codex 返回 `-32600 no active turn to interrupt`。适配器把这个错误直接返回，回合开始后不会再中止，早到的取消因此丢失。这是适配器缺陷，修复后重录。
+- `delegation`：子任务描述要求不运行工具、不再委托，`gpt-6-luna` 的子 Agent 仍然继续委托，后几层请求文件无效，失败一路传回父任务。属于模型不遵守指令，和 Baton 无关；换模型或调整提示之前，这个场景不提交转录。
 
 - `simple`：版本探测、创建 thread、一次输入、settled、结构化结果及摘要检查。
 - `interrupt_idle`：完成后调用 Abort，使用已保存的停止事实，保持 `outcomeKnown=false`。

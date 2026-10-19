@@ -16,7 +16,7 @@ import (
 )
 
 func TestTranscriptReplaySimple(t *testing.T) {
-	tape, err := filepath.Abs("testdata/replay/simple.ndjson")
+	tape, err := filepath.Abs("testdata/replay/synthetic_simple.ndjson")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func runTranscriptReplaySimple(t *testing.T, tape, doneLabel, captureKey string,
 
 // 合成原始录制覆盖 normalize -> NDJSON -> serve -> 真实 Adapter，期间不调用模型。
 func TestNormalizeTranscriptReplaySimple(t *testing.T) {
-	f, err := os.Open("testdata/replay/simple.ndjson")
+	f, err := os.Open("testdata/replay/synthetic_simple.ndjson")
 	if err != nil {
 		t.Fatal(err)
 	}
