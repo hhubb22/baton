@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -76,6 +77,9 @@ process.stdin.once('data',data=>{const r=JSON.parse(data);process.exit(r.id===1&
 		t.Fatal(err)
 	}
 	cmd := exec.Command(node, script)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	var requests atomic.Int32
 	input, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -96,6 +100,7 @@ process.stdin.once('data',data=>{const r=JSON.parse(data);process.exit(r.id===1&
 	done := make(chan error, 1)
 	go func() {
 		done <- Serve(ctx, output, input, func(_ context.Context, r json.RawMessage) any {
+			requests.Add(1)
 			return map[string]bool{"ok": bytes.Contains(r, []byte("hello"))}
 		})
 	}()
@@ -108,7 +113,8 @@ process.stdin.once('data',data=>{const r=JSON.parse(data);process.exit(r.id===1&
 		}
 	case <-ctx.Done():
 		stop()
-		t.Fatal("Node stdio 未退出")
+		waitErr := <-exited
+		t.Fatalf("Node stdio 未退出: requests=%d node=%s wait=%v stderr=%s", requests.Load(), node, waitErr, stderr.String())
 	}
 	<-done
 }

@@ -43,7 +43,7 @@ func StartTree(cmd *exec.Cmd) (func(), error) {
 	return func() { _ = windows.TerminateJobObject(job, 1); _ = windows.CloseHandle(job) }, nil
 }
 
-// Runtime 加入 Job 后才恢复主线程，避免它先派生未受管理的子进程。
+// Runtime 加入 Job 后才恢复挂起线程；快照中的第一个线程可能已经在运行。
 func resumeThread(pid uint32) error {
 	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPTHREAD, 0)
 	if err != nil {
@@ -54,19 +54,41 @@ func resumeThread(pid uint32) error {
 	if err = windows.Thread32First(snapshot, &entry); err != nil {
 		return err
 	}
+	var ids []uint32
 	for {
 		if entry.OwnerProcessID == pid {
-			thread, err := windows.OpenThread(windows.THREAD_SUSPEND_RESUME, false, entry.ThreadID)
-			if err != nil {
+			ids = append(ids, entry.ThreadID)
+		}
+		if err = windows.Thread32Next(snapshot, &entry); err != nil {
+			if !errors.Is(err, windows.ERROR_NO_MORE_FILES) {
 				return err
 			}
-			defer windows.CloseHandle(thread)
-			_, err = windows.ResumeThread(thread)
-			return err
-		}
-		if windows.Thread32Next(snapshot, &entry) != nil {
 			break
 		}
 	}
-	return errors.New("找不到 Runtime 主线程")
+	return resumeSuspendedThread(ids)
+}
+
+func resumeSuspendedThread(ids []uint32) error {
+	for _, id := range ids {
+		thread, err := windows.OpenThread(windows.THREAD_SUSPEND_RESUME, false, id)
+		if errors.Is(err, windows.ERROR_INVALID_PARAMETER) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		count, err := windows.ResumeThread(thread)
+		windows.CloseHandle(thread)
+		if err != nil {
+			return err
+		}
+		if count == 1 {
+			return nil
+		}
+		if count > 1 {
+			return errors.New("sidecar 启动线程仍被挂起")
+		}
+	}
+	return errors.New("找不到 sidecar 的挂起启动线程")
 }

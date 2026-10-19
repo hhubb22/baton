@@ -252,6 +252,10 @@ jobs:
             python3 .github/ci/run_tests.py --out "$RUNNER_TEMP/results"
           fi
 
+      - name: Sidecar Windows 原生重复验证
+        if: ${{ !cancelled() && steps.go.outcome == 'success' && steps.pg-windows.outcome == 'success' }}
+        run: go test -v -count=20 ./internal/sidecar -run 'TestNodeStdioUsesManagedProcessTree|TestResumeSkipsRunningThreadBeforeSuspendedChild'
+
       - name: 停止 Windows PostgreSQL
         if: always()
         shell: pwsh
