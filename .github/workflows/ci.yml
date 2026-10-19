@@ -1,6 +1,24 @@
 name: CI
 
 on:
+  workflow_dispatch:
+    inputs:
+      diagnostic:
+        description: 'Windows 诊断包（留空运行完整 CI）'
+        type: string
+        default: ''
+      test:
+        description: 'Go 用例正则'
+        type: string
+        default: '^TestDatabaseStopReplaysLocalResultOnce$'
+      count:
+        description: '重复次数（1..100）'
+        type: string
+        default: '20'
+      controlled_failure:
+        description: '启用 Windows 受控失败'
+        type: boolean
+        default: false
   pull_request:
   push:
     branches: [main]
@@ -9,15 +27,44 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
   BATON_TEST_DATABASE_URL: postgres://postgres:baton@127.0.0.1:55432/baton_test?sslmode=disable
 
 jobs:
-  linux:
-    name: Linux
+  changes:
+    name: 改动范围
+    runs-on: ubuntu-latest
+    outputs:
+      scope: ${{ steps.paths.outputs.scope }}
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
+      - name: CI 脚本契约
+        run: python3 -m unittest discover -s .github/ci -v
+      - id: paths
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.sha }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" = workflow_dispatch ] || [ -z "$BASE" ] || [[ "$BASE" =~ ^0+$ ]]; then
+            echo 'scope=full' >> "$GITHUB_OUTPUT"
+          else
+            python3 .github/ci/changes.py "$BASE" "$HEAD"
+          fi
+
+  linux-tests:
+    name: Linux ${{ matrix.mode }}
+    needs: changes
+    if: needs.changes.outputs.scope == 'full'
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [test, race]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -37,9 +84,15 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
       - uses: actions/setup-go@v6.1.0
+        id: go
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: |
+            go.sum
+            .github/ci/cache-${{ matrix.mode }}
+      - name: Go 缓存
+        run: echo "Go 缓存命中：${{ steps.go.outputs.cache-hit }}" >> "$GITHUB_STEP_SUMMARY"
       - name: Install PostgreSQL 17 tools for private database tests
         run: |
           sudo install -d /usr/share/postgresql-common/pgdg
@@ -50,31 +103,46 @@ jobs:
           /usr/lib/postgresql/17/bin/initdb --version
           echo "BATON_TEST_POSTGRES_BINDIR=/usr/lib/postgresql/17/bin" >> "$GITHUB_ENV"
       - name: Build
+        if: matrix.mode == 'test'
         run: go build ./...
       - name: Cross-build Windows
+        if: matrix.mode == 'test'
         run: GOOS=windows go build ./...
       - name: Cross-build macOS
+        if: matrix.mode == 'test'
         run: GOOS=darwin go build ./...
       - name: Vet
+        if: matrix.mode == 'test'
         run: go vet ./...
       - name: Test
-        id: test
-        run: go test -v -count=1 ./...
-      - name: Race test
-        if: ${{ !cancelled() && steps.test.outcome != 'skipped' }}
-        run: go test -race -v -count=1 ./internal/agent/... ./internal/session ./internal/node ./internal/store ./internal/relay ./internal/control
+        env:
+          MODE: ${{ matrix.mode }}
+        run: |
+          if [ "$MODE" = race ]; then
+            python3 .github/ci/run_tests.py --race --out "$RUNNER_TEMP/results"
+          else
+            python3 .github/ci/run_tests.py --out "$RUNNER_TEMP/results"
+          fi
+      - name: 上传诊断材料
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.mode }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/results/**/*.json
+            ${{ runner.temp }}/results/**/*.jsonl
+            ${{ runner.temp }}/results/**/*.log
+            ${{ runner.temp }}/results/**/*.md
+          retention-days: 7
+      - name: 材料链接
+        if: always()
+        run: echo "[运行与诊断材料](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> "$GITHUB_STEP_SUMMARY"
 
-  native:
-    name: ${{ matrix.name }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: macOS
-            os: macos-latest
-          - name: Windows
-            os: windows-latest
-    runs-on: ${{ matrix.os }}
+  macos-tests:
+    needs: changes
+    if: needs.changes.outputs.scope == 'full'
+    name: macOS 测试
+    runs-on: macos-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6.0.2
@@ -91,6 +159,9 @@ jobs:
           password: baton
           database: baton_test
           port: '55432'
+      - name: Go 缓存
+        shell: bash
+        run: echo "Go 缓存命中：${{ steps.go.outputs.cache-hit }}" >> "$GITHUB_STEP_SUMMARY"
       - name: Build
         run: go build ./...
       - name: Vet
@@ -98,16 +169,101 @@ jobs:
         run: go vet ./...
       - name: Test
         if: ${{ !cancelled() && steps.go.outcome == 'success' && steps.postgres.outcome == 'success' }}
-        run: go test -v -count=1 ./...
+        shell: bash
+        run: python3 .github/ci/run_tests.py --out "$RUNNER_TEMP/results"
 
       - name: Pi sandbox smoke test (no model)
-        if: ${{ !cancelled() && matrix.name == 'macOS' }}
+        if: ${{ !cancelled() }}
         run: |
           node --version
           go test -v -count=10 ./internal/relay -run '^TestPiSandbox'
+      - name: 上传诊断材料
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macOS 测试-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/results/**/*.json
+            ${{ runner.temp }}/results/**/*.jsonl
+            ${{ runner.temp }}/results/**/*.log
+            ${{ runner.temp }}/results/**/*.md
+          retention-days: 7
+      - name: 材料链接
+        if: always()
+        shell: bash
+        run: echo "[运行与诊断材料](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> "$GITHUB_STEP_SUMMARY"
 
-  web:
-    name: Web
+  windows-tests:
+    needs: changes
+    if: needs.changes.outputs.scope == 'full'
+    name: Windows 测试
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: actions/setup-go@v6.1.0
+        id: go
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/cache@v4
+        id: pg-cache
+        with:
+          path: ${{ runner.temp }}/postgres-17.6-1
+          key: windows-postgres-17.6-1-d378882a-v1
+      - name: 准备 Windows PostgreSQL
+        id: pg-windows
+        shell: pwsh
+        env:
+          PG_CACHE_HIT: ${{ steps.pg-cache.outputs.cache-hit }}
+        run: .github/ci/postgres-windows.ps1
+      - name: Go 缓存
+        shell: bash
+        run: echo "Go 缓存命中：${{ steps.go.outputs.cache-hit }}" >> "$GITHUB_STEP_SUMMARY"
+      - name: Build
+        run: go build ./...
+      - name: Vet
+        if: ${{ !cancelled() && steps.go.outcome == 'success' && steps.pg-windows.outcome == 'success' }}
+        run: go vet ./...
+      - name: Test
+        if: ${{ !cancelled() && steps.go.outcome == 'success' && steps.pg-windows.outcome == 'success' }}
+        shell: bash
+        env:
+          PACKAGE: ${{ inputs.diagnostic }}
+          TEST: ${{ inputs.test }}
+          COUNT: ${{ inputs.count }}
+          BATON_CI_DIAGNOSTIC_FAILURE: ${{ inputs.controlled_failure && '1' || '0' }}
+        run: |
+          if [ -n "$PACKAGE" ]; then
+            python3 .github/ci/run_tests.py --package "$PACKAGE" --run "$TEST" --count "$COUNT" --out "$RUNNER_TEMP/results"
+          else
+            python3 .github/ci/run_tests.py --out "$RUNNER_TEMP/results"
+          fi
+
+      - name: 停止 Windows PostgreSQL
+        if: always()
+        shell: pwsh
+        run: .github/ci/postgres-windows.ps1 -Stop
+      - name: 上传诊断材料
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Windows 测试-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/results/**/*.json
+            ${{ runner.temp }}/results/**/*.jsonl
+            ${{ runner.temp }}/results/**/*.log
+            ${{ runner.temp }}/results/**/*.md
+          retention-days: 7
+      - name: 材料链接
+        if: always()
+        shell: bash
+        run: echo "[运行与诊断材料](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> "$GITHUB_STEP_SUMMARY"
+
+  web-tests:
+    name: Web 测试
+    needs: changes
+    if: needs.changes.outputs.scope == 'full'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
@@ -130,6 +286,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
       - uses: actions/setup-go@v6.1.0
+        id: go
         with:
           go-version-file: go.mod
           cache: true
@@ -155,3 +312,59 @@ jobs:
         run: pnpm test:e2e
       - name: Check embedded dist
         run: pnpm check:dist
+
+  linux:
+    name: Linux
+    needs: [changes, linux-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - name: 核对检查结果
+        env:
+          SCOPE: ${{ needs.changes.outputs.scope }}
+          CHANGES: ${{ needs.changes.result }}
+          RESULT: ${{ needs.linux-tests.result }}
+        run: python3 .github/ci/gate.py "$SCOPE" "$CHANGES" "$RESULT"
+
+  macos:
+    name: macOS
+    needs: [changes, macos-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - name: 核对检查结果
+        env:
+          SCOPE: ${{ needs.changes.outputs.scope }}
+          CHANGES: ${{ needs.changes.result }}
+          RESULT: ${{ needs.macos-tests.result }}
+        run: python3 .github/ci/gate.py "$SCOPE" "$CHANGES" "$RESULT"
+
+  windows:
+    name: Windows
+    needs: [changes, windows-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - name: 核对检查结果
+        env:
+          SCOPE: ${{ needs.changes.outputs.scope }}
+          CHANGES: ${{ needs.changes.result }}
+          RESULT: ${{ needs.windows-tests.result }}
+        run: python3 .github/ci/gate.py "$SCOPE" "$CHANGES" "$RESULT"
+
+  web:
+    name: Web
+    needs: [changes, web-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - name: 核对检查结果
+        env:
+          SCOPE: ${{ needs.changes.outputs.scope }}
+          CHANGES: ${{ needs.changes.result }}
+          RESULT: ${{ needs.web-tests.result }}
+        run: python3 .github/ci/gate.py "$SCOPE" "$CHANGES" "$RESULT"

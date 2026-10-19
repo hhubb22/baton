@@ -225,6 +225,7 @@ type processAuth struct {
 }
 
 var (
+	buildDir       string
 	buildOnce      sync.Once
 	buildErr       error
 	builtCoord     string
@@ -242,7 +243,16 @@ func buildBins(t *testing.T) (string, string, string) {
 			buildErr = err
 			return
 		}
-		out := filepath.Join(root, "bin")
+		out := os.Getenv("BATON_TEST_BIN_DIR")
+		prebuilt := out != ""
+		if !prebuilt {
+			out, err = os.MkdirTemp("", "baton-relay-bins-*")
+			buildDir = out
+			if err != nil {
+				buildErr = err
+				return
+			}
+		}
 		suffix := ""
 		if runtime.GOOS == "windows" {
 			suffix = ".exe"
@@ -252,6 +262,13 @@ func buildBins(t *testing.T) (string, string, string) {
 			return
 		}
 		for _, name := range []string{"coordinator", "relay", "batond"} {
+			if prebuilt {
+				if _, err := os.Stat(filepath.Join(out, name+suffix)); err != nil {
+					buildErr = err
+					return
+				}
+				continue
+			}
 			cmd := exec.Command("go", "build", "-o", filepath.Join(out, name+suffix), "./cmd/"+name)
 			cmd.Dir = root
 			if raw, err := cmd.CombinedOutput(); err != nil {
@@ -316,8 +333,9 @@ func startCmd(t *testing.T, bin string, args, env []string) *running {
 	buf := &lockedBuf{}
 	cmd := exec.Command(bin, args...)
 	cmd.Env = env
-	cmd.Stdout = buf
-	cmd.Stderr = buf
+	writer := diagnosticWriter(t, bin, args, env, buf)
+	cmd.Stdout = writer
+	cmd.Stderr = writer
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -325,6 +343,7 @@ func startCmd(t *testing.T, bin string, args, env []string) *running {
 	processMu.Lock()
 	processHandles = append(processHandles, proc)
 	processMu.Unlock()
+	trackDiagnosticProcess(t, proc, args, env)
 	t.Cleanup(func() {
 		proc.stop()
 		if len(args) > 0 && args[0] == "run" {
