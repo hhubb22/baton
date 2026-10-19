@@ -16,7 +16,7 @@ RACE = ['./internal/agent/...', './internal/session', './internal/node',
 
 
 def validate_migration(names):
-    mapping = json.loads((ROOT / '.github/ci/gateway-migration.json').read_text())['tests']
+    mapping = json.loads((ROOT / '.github/ci/gateway-migration.json').read_text(encoding='utf-8'))['tests']
     missing = {old: [name for name in targets if name not in names] for old, targets in mapping.items()}
     missing = {old: targets for old, targets in missing.items() if targets}
     if missing:
@@ -218,7 +218,7 @@ def main():
             groups.append(('packages', common + others, None, None))
             names = [n for n in output(list_common + [GATEWAY]).splitlines() if re.match(r'^(Test|Example|Fuzz)\w*$', n)]
             validate_migration(names)
-            weights = json.loads((ROOT / '.github/ci/gateway-times.json').read_text())
+            weights = json.loads((ROOT / '.github/ci/gateway-times.json').read_text(encoding='utf-8'))
             shards = partition(names, weights, args.shards)
             (out / 'coverage.json').write_text(json.dumps({'package': GATEWAY, 'all': names, 'shards': shards}, indent=2))
             for i, tests in enumerate(shards):

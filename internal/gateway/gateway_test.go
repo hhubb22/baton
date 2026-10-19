@@ -134,6 +134,10 @@ func TestGatewayAuthSyncAndIsolation(t *testing.T) {
 	if result := dialResult(t, addr, desk.Credential.Token, newID(t), nodeRoots); result.Code != protocol.CodeIncarnationConflict {
 		t.Fatalf("不同 incarnation 被接受: %+v", result)
 	}
+	var oldConnID string
+	if err := pool.QueryRow(ctx, `SELECT conn_id FROM node_presence WHERE node_id=$1::uuid`, desk.NodeID).Scan(&oldConnID); err != nil {
+		t.Fatal(err)
+	}
 	replaced := make(chan struct{}, 1)
 	go func() {
 		if _, ok := <-deskPeer.frames; !ok {
@@ -150,6 +154,21 @@ func TestGatewayAuthSyncAndIsolation(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("同一 incarnation 没有替换旧连接")
 	}
+	waitStatus(t, repo, alice.ID, desk.NodeID, func(v store.NodeView) bool { return v.Online && !v.Synced })
+	oldSource := protocol.Source{Kind: protocol.SourceNode, NodeID: desk.NodeID, EmployeeID: alice.ID, CredentialID: desk.Credential.ID, ConnID: oldConnID, Incarnation: inc}
+	if err := ctrl.Handle(ctx, oldSource, protocol.Envelope{Body: json.RawMessage(`{"type":"node.sync"}`)}); err == nil {
+		t.Fatal("旧连接的迟到消息通过了业务分派")
+	}
+	sendEnvelope(t, newPeer.ws, map[string]any{"version": 1, "message_id": newID(t), "body": map[string]string{"type": "arbitrary.route"}})
+	if got := newPeer.next(t); got.Code != protocol.CodeInvalidMessage {
+		t.Fatalf("未知业务类型未拒绝: %+v", got)
+	}
+	oversizedRaw := []byte(`{"kind":"heartbeat","extra":"` + strings.Repeat("x", protocol.MaxMessageBytes) + `"}`)
+	timed, stop := context.WithTimeout(context.Background(), 3*time.Second)
+	defer stop()
+	_ = newPeer.ws.Write(timed, websocket.MessageText, oversizedRaw)
+	newPeer.waitClosed(t)
+
 }
 
 type peer struct {
