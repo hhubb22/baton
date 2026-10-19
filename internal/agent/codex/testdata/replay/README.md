@@ -11,9 +11,9 @@ PS-172 交付此合成完成场景。首批真实录制由 PS-175 在用户本�
 
 `TestRealCodex/<scenario>` 为每个场景创建独立的 app-server、工作目录和原生 thread，使用一次性、独立认证的 CODEX_HOME。设置 `BATON_RECORD_DIR` 后写入其 `codex/` 子目录；本机流程见 [主 README](../../../../../README.md#本机录制与规范化)。本目录其余 `*.ndjson` 是 2026-10-19 在 Baton 9c11002 上录制的首批真实转录：Codex 0.162.1，darwin/arm64，模型 `gpt-6-luna`，单份 1.7～61 KB。首轮提交了通过的 9 个场景：`simple`、`interrupt_idle`、`interrupt_mid_tool`、`deliver_active`、`deliver_idle`、`restore_load_only`、`restore_missing`、`provider_error`、`symlinked_workspace`。
 
-首轮有两个失败场景：
+首轮失败场景的补录结果：
 
-- `interrupt_before_turn_started`：`turn/start` 返回后约 1 毫秒发出 `turn/interrupt`，此时回合的 `startedAt` 还是 null，Codex 返回 `-32600 no active turn to interrupt`。适配器把这个错误直接返回，回合开始后不会再中止，早到的取消因此丢失。这是适配器缺陷，修复后重录。
+- `interrupt_before_turn_started`：PS-178 修复后于同日在 `845e1b5` 基线加本工单工作区改动上补录，Codex 0.162.1 / `gpt-6.1-sol`，真实子测试通过。`turn/start` 响应的 `startedAt` 为 null，首次中止被 `-32600 no active turn to interrupt` 拒绝；收到匹配的 `turn/started` 后补发一次，ACK 后收到 `status=interrupted` 的 `turn/completed`，原 thread 历史可读。规范化转录 8,062 字节，删除 2 帧机器信息；残留扫描及用户名、主机名、邮箱、临时路径检查通过。适配器和 Worker 均回放此转录；从真实 `simple` 派生的手写拒绝/开始窗口另覆盖重复通知、其他 thread/turn、开始通知先到、补发失败及完成后晚到的开始通知。ACK 保持 false/false，仅匹配的完成通知确认停止，Worker 保留 needs_verification。
 - `delegation`：首轮用 `gpt-6-luna` 录制时，子任务描述要求不运行工具、不再委托，子 Agent 仍然继续委托，后几层请求文件无效，失败一路传回父任务，属于模型不遵守指令。同日改用 `gpt-6.1-sol` 重录后通过，`delegation.ndjson` 头部记录的模型是 `gpt-6.1-sol`。规范化只保留父会话，子会话的 80 帧计入 `dropped_frames`。
 
 - `simple`：版本探测、创建 thread、一次输入、settled、结构化结果及摘要检查。

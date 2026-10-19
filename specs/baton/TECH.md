@@ -10,6 +10,8 @@ Coordinator 内置 Gateway 的实现与验收由 [PS-171](https://linear.app/kak
 
 ## 已实现基线
 
+当前已实现补充（PS-178 / AR-07）：Codex 对同一 thread/turn 的早到中止保留内存意图；首次 `turn/interrupt` 精确返回 `-32600 no active turn to interrupt` 后，在匹配的 `turn/started` 或已知 startedAt 后补发一次。重复中止与重复开始通知不增加补发次数，完成后清除待补发意图；其他错误、超时和断线不触发自动重试。Abort 的 ACK 仍为 false/false，StopObserver 仅以匹配回合的 turn/completed 确认停止，副作用保留未知。适配器和真实 Worker 的派生进程回放覆盖早到拒绝、通知先到、补发失败、其他 thread/turn 与晚到开始通知，Worker 保留 needs_verification，不将取消后的完成帧交付为 completed。无新增依赖。
+
 当前已实现补充（PS-179 / AR-08）：`TestRecordHistoryBeforeStdout` 使用带 LF 的完整 stdin 帧，输入在转发给辅助进程前完成记录，关闭输入管道时没有待追加的 EOF 尾帧；observe 保留「末尾依次为 native_history、stdout」的断言，最终历史顺序及追加内容的断言保持不变。失败诊断包含每次 observe 收到的 stdout、读取状态及实际原始条目。录制器实现、跨进程锁、cursor/offset 和 [Agent 回放设计 §5](../agent-replay/TECH.md#5-录制器r-06) 的录制顺序保证保持不变，无新增依赖。
 
 当前已实现补充（PS-175 / AR-04）：首批真实转录在 macOS arm64、Baton 9c11002 上录制并规范化后提交。Pi 1.3.0 / `google-vertex/gemini-3.1-flash-lite` 的 12 个子测试全部通过；Codex 0.162.1 / `gpt-6-luna` 提交 9 个通过场景，`interrupt_before_turn_started` 暴露早到中止被拒绝后不再补发的适配器缺陷，`delegation` 因模型不遵守「不再委托」失败，两者未提交转录。带与不带录制器的能力矩阵一致；两轮录制结束后没有残留的 Agent、沙箱或录制器进程；同版本重录 `simple`，Baton 发出的帧完全相同，差异只来自模型一侧的条目数量。录制中发现的回放占位符和 Codex 主机名问题已在 179d839 修复。
