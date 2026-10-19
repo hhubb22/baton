@@ -47,6 +47,7 @@ func usage() string {
   batond files add --id 标识 --path 绝对路径 [--data-dir 目录]
   batond files remove --id 标识 [--data-dir 目录]
   batond files list [--data-dir 目录]
+  batond project-exec --enabled=true|false [--shell 路径] [--data-dir 目录]
 
 注册凭据从环境变量 BATON_ENROLLMENT_TOKEN 或 --enrollment-file 读取，不能作为命令行参数，也不能放进地址。
 可选环境变量 BATON_TLS_CA_FILE 指向额外的 CA 证书。
@@ -68,6 +69,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, getenv fu
 		return cmdRun(ctx, args[1:], stderr, getenv)
 	case "files":
 		return cmdFiles(args[1:], stdout, getenv)
+	case "project-exec":
+		return cmdProjectExec(args[1:], stdout, getenv)
 	case "worker":
 		return cmdWorker(ctx, args[1:])
 	default:

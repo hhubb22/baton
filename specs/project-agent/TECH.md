@@ -245,7 +245,6 @@ batond 在连接时和能力变化时上报 `node_runtime_reports.report`，结�
     "version": "0.1.0",
     "providers": [{ "provider": "openai-codex", "status": "available" }]
   },
-  "agents": [{ "type": "codex", "version": "0.162.1" }],
   "exec": { "enabled": true, "shell": "zsh" },
   "roots": [{ "root_id": "dev", "path": "/Users/asa/src" }],
   "repos": [{ "path": "/Users/asa/src/baton", "origin": "github.com/hhubb22/baton" }]
@@ -255,6 +254,16 @@ batond 在连接时和能力变化时上报 `node_runtime_reports.report`，结�
 `exec.enabled` 来自 batond 本地配置里的「允许 Project Agent 执行命令」开关，默认关闭；`exec.shell` 是该节点执行命令使用的 shell。`roots` 来自用户在节点上授权的目录，沿用现有 `batond files` 的登记。`roots` 上报真实路径，因为任务的 `working_directory` 本来就是目标节点上的路径；Web 文件浏览仍只用 `root_id` 和相对路径。`repos` 是在授权目录内有限深度扫描得到的 Git 仓库，上报路径和去掉凭据的 origin，不上传文件内容。`provider.status` 为 available / login_required / unknown，凭据不离开设备。
 
 `devices.list` 把这些报告交给 Project Agent，它据此选择工作目录。
+
+PA-W02 通过现有 Gateway 的控制队列传送 `node.runtime_report`，正文为 `{ "type": "node.runtime_report", "report": { ... } }`。Coordinator 返回 `node.runtime_report_result`，含 `ok`、成功时的 `report_version` 或失败时的 `code`，信封 `correlation_id` 对应请求的 `message_id`。节点在 `node.sync` 成功后发送报告；未收到成功回执时沿用同一消息标识重发，重连后重新发送。中心只接受当前已同步、未吊销连接的报告，并在事务内再次检查员工、节点、凭据和连接。`report_version` 从 1 开始，报告内容变化时加一；相同内容的重发只刷新 `reported_at`。这些写入不修改 `nodes.capabilities`。
+
+节点每轮采集完成后等待 5 秒再采集，连接建立时也请求刷新。采集在独立循环中串行运行，连接、心跳和 Worker 消息不等待扫描。每轮预算 2 秒；文件系统调用返回后检查期限，无法被操作系统取消的文件系统等待最多占用一个采集协程，重连不另起扫描。扫描只保存登记目录、仓库路径及 origin；目录文件内容不进入报告。
+
+扫描最多向下 4 层（登记根为第 0 层）、读取 4096 个目录条目、记录 128 个仓库。每批读取至多 64 个条目，不跟随遍历中的符号链接，不进入 `.git`。Git 配置最多读取 16 KiB，通过 `git config --no-includes --file - --get remote.origin.url` 解析，每次最多 200 ms，不读取 include 或全局配置。worktree 的 `.git` 和 `commondir` 只允许指向同一登记根内的元数据；指向根外时仍登记仓库路径，省略 origin。origin 仅保留主机和仓库路径，去掉用户信息、端口、查询和片段，忽略本地路径及不支持的传输格式。扫描、读取或容量受限时报告带 `truncated: true`；超出报告容量时先移除末尾仓库，再移除末尾目录。发送前采用带缩进的 JSON 计量，给 PostgreSQL `jsonb::text` 的空格留出余量，报告和数据库文本均不超过 64 KiB。
+
+`batond project-exec --enabled=true|false [--shell 路径] [--data-dir 目录]` 原子保存本机 `project-exec.json`。必须显式给出开关，初始值为关闭；默认 shell 在 Windows 为 `pwsh`，其他系统采用 `SHELL`，未设置时为 `/bin/sh`。配置损坏或权限检查失败时上报关闭。该命令只维护配置，执行命令的 Worker 由后续工单实现。
+
+`baton-project-runtime probe` 的 stdout 契约是一个 JSON 对象：`{ "version": "0.1.0", "providers": [{ "provider": "openai-codex", "status": "available" }] }`。状态只接受 `available`、`login_required`、`unknown`，最多 32 个 provider，名称和版本不超过 128 个 ASCII 字符（字母、数字、点、下划线、加号、连字符）。batond 每轮调用一次 `probe`，时限 1 秒，stdout 缓冲最多 16 KiB，丢弃 stderr；拒绝未知字段、尾随数据和超限输出。Runtime 未安装、probe 失败或输出无效时省略 `project_runtime`，不复用旧登录状态。PS-154 使用契约测试程序验证调用边界，Runtime、登录及真实 provider 验证由 PS-158 完成。
 
 ### 9. 派发任务与结果回收
 
