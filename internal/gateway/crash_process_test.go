@@ -392,7 +392,14 @@ func TestLivingWorkerResultSurvivesMissingLedger(t *testing.T) {
 		t.Fatal("结果还在 Worker 里，进程却不在")
 	}
 	client := dialWorker(t, st.dataDir, sessionID)
-	defer client.Close()
+	defer func() {
+		// 停止节点后，通过已有认证连接确认 Worker，再等待其退出以释放账本。
+		st.batond.stop()
+		if current, err := client.Status(); err == nil {
+			stopWorker(current.PID)
+		}
+		_ = client.Close()
+	}()
 	resultSaved := false
 	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline) && !resultSaved; {
 		pending, err := client.Pending()
