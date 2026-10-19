@@ -25,6 +25,7 @@ var (
 	ErrHistoryMissing = agent.ErrHistoryMissing
 	ErrUncertain      = errors.New("Codex input outcome unknown; refusing replay")
 	ErrBusy           = errors.New("Codex turn is active")
+	errNoActiveTurn   = errors.New("Codex turn has not started")
 )
 
 type Config = agent.Config
@@ -58,27 +59,32 @@ type State struct {
 }
 
 type turn struct {
-	ID     string            `json:"id"`
-	Status string            `json:"status"`
-	Items  []json.RawMessage `json:"items"`
+	ID        string            `json:"id"`
+	Status    string            `json:"status"`
+	Items     []json.RawMessage `json:"items"`
+	StartedAt *int64            `json:"startedAt,omitempty"`
 }
 
 type Adapter struct {
-	nativeHome  string
-	live        agent.LiveBuffer
-	config      Config
-	mu          sync.Mutex
-	state       State
-	active      bool
-	final       string
-	conn        *jsonrpc2.Conn
-	processDone chan struct{}
-	events      chan Event
-	stopped     bool
-	closed      chan struct{}
-	closeOnce   sync.Once
-	inbox       chan notification
-	liveInbox   chan notification
+	nativeHome         string
+	live               agent.LiveBuffer
+	config             Config
+	mu                 sync.Mutex
+	state              State
+	active             bool
+	turnStarted        bool
+	interruptRequested bool
+	interruptPending   bool
+	interruptErr       error
+	final              string
+	conn               *jsonrpc2.Conn
+	processDone        chan struct{}
+	events             chan Event
+	stopped            bool
+	closed             chan struct{}
+	closeOnce          sync.Once
+	inbox              chan notification
+	liveInbox          chan notification
 }
 
 type notification struct {
@@ -209,6 +215,9 @@ func (a *Adapter) call(ctx context.Context, method string, params, result any) e
 	defer cancel()
 	if err := a.conn.Call(ctx, method, params, result); err != nil {
 		var rpc *jsonrpc2.Error
+		if method == "turn/interrupt" && errors.As(err, &rpc) && rpc.Code == jsonrpc2.CodeInvalidRequest && rpc.Message == "no active turn to interrupt" {
+			return errNoActiveTurn
+		}
 		if errors.As(err, &rpc) && (rpc.Code == jsonrpc2.CodeMethodNotFound || rpc.Code == jsonrpc2.CodeInvalidParams) {
 			return ErrIncompatible
 		}
@@ -445,6 +454,9 @@ func (a *Adapter) StartTask(ctx context.Context, operationID, text string) error
 		return ErrIncompatible
 	}
 	a.state.TurnID, a.active, a.final, a.stopped = result.Turn.ID, true, "", false
+	a.turnStarted = result.Turn.StartedAt != nil
+	a.interruptRequested, a.interruptPending = false, false
+	a.interruptErr = nil
 	if err := a.saveLocked(); err != nil {
 		return err
 	}
@@ -497,14 +509,56 @@ func (a *Adapter) usedLocked(id string) bool {
 func (a *Adapter) Interrupt(ctx context.Context) (bool, bool, error) {
 	a.mu.Lock()
 	id, tid, active := a.state.ThreadID, a.state.TurnID, a.active
-	a.mu.Unlock()
 	if !active {
+		a.mu.Unlock()
 		return false, false, ErrBusy
 	}
+	if a.interruptRequested {
+		err := a.interruptErr
+		a.mu.Unlock()
+		return false, false, err
+	}
+	a.interruptRequested = true
+	a.mu.Unlock()
 	var result map[string]any
 	err := a.call(ctx, "turn/interrupt", map[string]any{"threadId": id, "turnId": tid}, &result)
-	// The ACK is not evidence of stopped shells or a known operation outcome.
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err == errNoActiveTurn {
+		if a.active && a.state.ThreadID == id && a.state.TurnID == tid {
+			a.interruptPending = true
+			a.retryInterruptLocked()
+		}
+		return false, false, nil
+	}
+	if a.state.ThreadID == id && a.state.TurnID == tid {
+		a.interruptErr = err
+	}
+	// ACK 和排队中的补发都不证明停止，也不证明副作用已知。
 	return false, false, err
+}
+
+// retryInterruptLocked 只消费一次当前回合的补发意图，不重发任务输入。
+func (a *Adapter) retryInterruptLocked() {
+	if !a.active || !a.turnStarted || !a.interruptPending {
+		return
+	}
+	a.interruptPending = false
+	id, tid := a.state.ThreadID, a.state.TurnID
+	go func() {
+		var result map[string]any
+		if err := a.call(context.Background(), "turn/interrupt", map[string]any{"threadId": id, "turnId": tid}, &result); err != nil {
+			a.mu.Lock()
+			matched := a.active && a.state.ThreadID == id && a.state.TurnID == tid
+			if matched {
+				a.interruptErr = err
+			}
+			a.mu.Unlock()
+			if matched {
+				a.emit(Event{ThreadID: id, TurnID: tid, Uncertain: true})
+			}
+		}
+	}()
 }
 
 func (a *Adapter) ReadHistory(ctx context.Context, cursor string) (agent.HistoryPage, error) {
@@ -573,7 +627,7 @@ func (a *Adapter) handle(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2
 		}
 		return nil, nil
 	}
-	if req.Method != "item/completed" && req.Method != "turn/completed" {
+	if req.Method != "item/completed" && req.Method != "turn/completed" && req.Method != "turn/started" {
 		return nil, nil
 	}
 	if req.Params == nil {
@@ -604,7 +658,7 @@ func (a *Adapter) notification(method string, raw json.RawMessage) {
 		}
 		return
 	}
-	if method != "item/completed" && method != "turn/completed" {
+	if method != "item/completed" && method != "turn/completed" && method != "turn/started" {
 		return
 	}
 	a.mu.Lock()
@@ -616,6 +670,13 @@ func (a *Adapter) notification(method string, raw json.RawMessage) {
 		Item     struct{ Type, Text, Phase, ClientID string } `json:"item"`
 	}
 	if json.Unmarshal(raw, &p) != nil || a.state.ThreadID == "" || p.ThreadID != a.state.ThreadID {
+		return
+	}
+	if method == "turn/started" {
+		if a.active && p.Turn.ID == a.state.TurnID && p.Turn.Status == "inProgress" {
+			a.turnStarted = true
+			a.retryInterruptLocked()
+		}
 		return
 	}
 	if method == "item/completed" && p.TurnID != a.state.TurnID {
@@ -643,6 +704,7 @@ func (a *Adapter) notification(method string, raw json.RawMessage) {
 			e.Uncertain = true
 		} else {
 			a.active = false
+			a.interruptPending = false
 			a.stopped = true
 			e.Stopped = true
 			a.state.Pending = false

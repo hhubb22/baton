@@ -53,7 +53,7 @@ BATON_CODEX_PROBE=1 go test -v ./internal/agent/codex -run TestCodexInitializeWi
 
 用户已在 macOS、Codex 0.162.1 / gpt-6-luna 上报告：启动、输入、结构化结果、turn 完成、中止、恢复、历史支持；委托链路成功，但子任务违反“不要再委托”而使原断言失败，不能将委托整项标为通过。真实测试保留这些能力断言，并将场景分成独立会话；新的真实模型结论以 PS-175 的本机录制为准。
 
-真实入口默认跳过，只使用临时工作目录和独立、显式认证的临时 CODEX_HOME，不复制常用 ~/.codex 认证，不打印凭据。委托使用 BATON_TEST_DATABASE_URL 的临时 schema（PostgreSQL 17，禁止生产库），输出版本、平台、模型及逐项“支持/不支持/未验证”。真实测试和录制一律只用账号当前可用的最便宜模型；示例模型 ID 需按当前价格与可用性选择。这些命令在本机执行：
+真实入口默认跳过，只使用临时工作目录和独立、显式认证的临时 CODEX_HOME，不复制常用 ~/.codex 认证，不打印凭据。委托使用 BATON_TEST_DATABASE_URL 的临时 schema（PostgreSQL 17，禁止生产库），输出版本、平台、模型及逐项“支持/不支持/未验证”。Codex 和 Pi 的真实测试与录制默认使用 `gpt-6.1-sol`（Pi 为 `openai/gpt-6.1-sol`），Cursor、Kiro 仍使用账号当前可用的最便宜模型。这些命令在本机执行：
 
 ```sh
 npm install -g @openai/codex@0.162.1
@@ -61,7 +61,7 @@ bash .cursor/start.sh
 # 按本机测试库配置导出 BATON_TEST_DATABASE_URL。
 export BATON_REAL_CODEX_HOME="$(mktemp -d "${TMPDIR:-/tmp}/baton-codex-real.XXXXXX")"
 CODEX_HOME="$BATON_REAL_CODEX_HOME" codex login
-BATON_REAL_CODEX=1 BATON_CODEX_MODEL='gpt-6-luna' \
+BATON_REAL_CODEX=1 BATON_CODEX_MODEL='gpt-6.1-sol' \
   go test -v -count=1 ./internal/gateway -run '^TestRealCodex$' -timeout 60m
 # 检查输出后删除临时 CODEX_HOME（含本次认证）。
 rm -rf -- "$BATON_REAL_CODEX_HOME"
@@ -199,7 +199,7 @@ BATON_REAL_PI=1 go test -v -count=1 -timeout=60m ./internal/gateway -run '^TestR
 
 ### 本机录制与规范化
 
-PS-175 在有模型凭据的 macOS 上执行。在仓库根目录打开 Bash，准备固定版本 Pi 1.3.0、Codex 0.162.1、Node.js 和测试数据库。所有真实调用只用最便宜模型；下面 Pi 的 Vertex 与 Codex 模型仅为示例，运行前按账号当前可用模型的价格选择。`provider_error` 故意使用不存在的模型名，不会升级到其他模型。
+PS-175 在有模型凭据的 macOS 上执行。在仓库根目录打开 Bash，准备固定版本 Pi 1.3.0、Codex 0.162.1、Node.js 和测试数据库。Codex 和 Pi 默认使用 `gpt-6.1-sol`（Pi 为 `openai/gpt-6.1-sol`），Cursor、Kiro 仍使用账号当前可用的最便宜模型。`provider_error` 故意使用不存在的模型名，不会升级到其他模型。
 
 ```sh
 bash
@@ -209,16 +209,17 @@ bash .cursor/start.sh
 npm install -g @earendil-works/pi-coding-agent@1.3.0 @openai/codex@0.162.1
 
 # 从凭据管理器取得所选 provider 的 key，用静默输入避免写进命令历史。
-read -r -s -p 'Google Cloud API key: ' GOOGLE_CLOUD_API_KEY
+read -r -s -p 'OpenAI API key: ' OPENAI_API_KEY
 printf '\n'
-export GOOGLE_CLOUD_API_KEY
-export BATON_PI_MODEL='google-vertex/gemini-3.1-flash-lite'
-# 其他 provider 使用对应环境变量；Pi 不读取常用 HOME 的登录文件。
+export OPENAI_API_KEY
+export BATON_PI_MODEL='openai/gpt-6.1-sol'
+# 默认模型需提供 OPENAI_API_KEY；选择其他 provider 时使用对应模型和环境变量。
+# Pi 不读取常用 HOME 的登录文件。
 
 # Codex 在一次性的 HOME 中独立认证，保留常用登录目录。
 export BATON_REAL_CODEX_HOME="$(mktemp -d "${TMPDIR:-/tmp}/baton-codex-real.XXXXXX")"
 CODEX_HOME="$BATON_REAL_CODEX_HOME" codex login
-export BATON_CODEX_MODEL='gpt-6-luna'
+export BATON_CODEX_MODEL='gpt-6.1-sol'
 
 # 系统临时目录中的新目录，位于仓库外；每次运行使用新目录。
 export BATON_RECORD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/baton-agent-record.XXXXXX")"
@@ -255,7 +256,7 @@ git status --short internal/agent/pi/testdata/replay internal/agent/codex/testda
 # 检查完毕后删除全部原始录制、锁文件、录制工具和本次认证。
 # 删除前先确认这些变量仍指向刚创建的临时目录。
 rm -rf -- "$BATON_RECORD_DIR" "$BATON_REAL_CODEX_HOME"
-unset BATON_RECORD_DIR BATON_REAL_CODEX_HOME GOOGLE_CLOUD_API_KEY
+unset BATON_RECORD_DIR BATON_REAL_CODEX_HOME OPENAI_API_KEY
 ```
 
 规范化残留扫描失败时先修正路径绑定或检查敏感输出，再重录或重试；只提交人工检查通过的 NDJSON。规范化会保留首个原生会话，委托子会话被删除并计入 `dropped_frames`。`restore_missing` 的 Pi 拒绝发生在本地历史预检，转录包含本场景的建会话过程，回放测试需同时构造缺失历史目录；Codex 使用指向不存在 thread 的映射，录下 `thread/read` 失败，不新建 thread。`interrupt_before_turn_started` 在提交返回后立即中止，具体原生事件先后顺序以录制为准。首次录制还需确认关闭 Worker/录制器后 Pi、Codex 与工具子进程均已退出；录制器被 SIGKILL 后的子进程清理仍是设计中的待验证项。
