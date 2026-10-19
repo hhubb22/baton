@@ -450,6 +450,9 @@ func failLocked(ctx context.Context, tx pgx.Tx, fact PreparedFact, version int, 
 		)`, eventID, fact.TaskID, fact.EmployeeID, version+1, nodeID, agent, queueExpires, execSeconds, code); err != nil {
 		return fmt.Errorf("保存准备失败: %s", redact.Scrub(err.Error()))
 	}
+	if err := enqueueTaskTerminal(ctx, tx, fact.EmployeeID, fact.TaskID); err != nil {
+		return err
+	}
 	return ackOutbox(ctx, tx, fact.MessageID)
 }
 

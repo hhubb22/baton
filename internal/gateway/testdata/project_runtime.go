@@ -17,6 +17,7 @@ type command struct {
 	ID      string         `json:"id"`
 	RunID   string         `json:"run_id"`
 	Request map[string]any `json:"request"`
+	Fault   string         `json:"fault,omitempty"`
 }
 
 type record struct {
@@ -77,6 +78,10 @@ func main() {
 
 func execute(c command, runID string) {
 	r := record{ID: c.ID, RunID: runID, PID: os.Getpid()}
+	if c.Fault == "before_request" {
+		writeRecord(record{ID: c.ID + "-boundary", RunID: runID, PID: os.Getpid()})
+		select {}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
 	defer cancel()
 	conn, err := session.DialLocal(ctx, os.Getenv("BATON_PROJECT_RUNTIME_ENDPOINT"))
@@ -91,5 +96,13 @@ func execute(c command, runID string) {
 	if err != nil {
 		r.Error = err.Error()
 	}
+	if c.Fault == "before_result" {
+		writeRecord(record{ID: c.ID + "-boundary", RunID: runID, PID: os.Getpid()})
+		select {}
+	}
 	writeRecord(r)
+	if c.Fault == "after_result" {
+		writeRecord(record{ID: c.ID + "-boundary", RunID: runID, PID: os.Getpid()})
+		select {}
+	}
 }

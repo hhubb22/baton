@@ -114,6 +114,21 @@ func (s *Store) acceptOnce(ctx context.Context, employeeID string, prepared task
 		return task.Record{}, false, fmt.Errorf("开始事务失败: %s", redact.Scrub(err.Error()))
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	rec, retry, err := s.acceptOnceTx(ctx, tx, employeeID, prepared, source)
+	if err != nil {
+		return rec, retry, err
+	}
+	if err := s.runBeforeCommit(ctx); err != nil {
+		return task.Record{}, false, fmt.Errorf("提交任务失败: %s", redact.Scrub(err.Error()))
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return task.Record{}, false, fmt.Errorf("提交任务失败: %s", redact.Scrub(err.Error()))
+	}
+	return rec, false, nil
+}
+
+// acceptOnceTx 在调用方事务内接受任务，提交与回滚由调用方负责。
+func (s *Store) acceptOnceTx(ctx context.Context, tx pgx.Tx, employeeID string, prepared task.Prepared, source *AgentSource) (task.Record, bool, error) {
 	var active bool
 	if source != nil {
 		var err error
@@ -191,12 +206,6 @@ func (s *Store) acceptOnce(ctx context.Context, employeeID string, prepared task
 	}
 	if err != nil {
 		return task.Record{}, false, err
-	}
-	if err := s.runBeforeCommit(ctx); err != nil {
-		return task.Record{}, false, fmt.Errorf("提交任务失败: %s", redact.Scrub(err.Error()))
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return task.Record{}, false, fmt.Errorf("提交任务失败: %s", redact.Scrub(err.Error()))
 	}
 	return rec, false, nil
 }

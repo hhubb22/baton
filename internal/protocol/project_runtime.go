@@ -32,6 +32,9 @@ type ProjectRuntimeRequest struct {
 	ClientEventID string          `json:"client_event_id,omitempty"`
 	LastSeq       int64           `json:"last_seq,omitempty"`
 	Payload       json.RawMessage `json:"payload,omitempty"`
+	ToolCallID    string          `json:"tool_call_id,omitempty"`
+	ToolName      string          `json:"tool_name,omitempty"`
+	Arguments     json.RawMessage `json:"arguments,omitempty"`
 	Reason        string          `json:"reason,omitempty"`
 }
 
