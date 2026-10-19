@@ -30,7 +30,7 @@ const (
 
 var rootIDPattern = regexp.MustCompile(`^[a-z][a-z0-9._-]{0,63}$`)
 
-// BrowseRoot 是节点本地保存的一个可浏览目录。绝对路径只留在节点上。
+// BrowseRoot 是节点本地保存的一个可浏览目录。Web 浏览使用目录标识，能力报告使用真实路径。
 type BrowseRoot struct {
 	ID   string `json:"id"`
 	Path string `json:"path"`

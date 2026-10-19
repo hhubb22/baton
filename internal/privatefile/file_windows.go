@@ -141,6 +141,17 @@ func OpenSnapshot(path string) (*os.File, error) {
 	return openFile(path, windows.FILE_SHARE_READ|windows.FILE_SHARE_DELETE)
 }
 
+// replaceFile 使用目录内重命名的 POSIX 语义，旧快照句柄保持可读。
+// 源文件由 WriteFile 在同一目录创建并关闭。
+func replaceFile(source, target string) error {
+	root, err := os.OpenRoot(filepath.Dir(target))
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	return root.Rename(filepath.Base(source), filepath.Base(target))
+}
+
 func openFile(path string, share uint32) (*os.File, error) {
 	h, err := openSharedHandle(path, windows.GENERIC_READ|windows.READ_CONTROL, share)
 	if err != nil {

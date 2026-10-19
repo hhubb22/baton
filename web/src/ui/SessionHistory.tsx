@@ -13,10 +13,12 @@ export function SessionHistory({ sessionID, recovery }: { sessionID: string; rec
   const [backfill, setBackfill] = useState(false)
   const current = useRef({ cursor: '', position: '', back: [] as string[], busy: false })
   const sequence = useRef(0)
+  const retry = useRef<{ cursor: string; back: string[] } | null>(null)
   const loadRef = useRef<(cursor: string, back: string[], backfill: boolean) => Promise<void>>(async () => {})
 
   async function load(cursor: string, previous: string[], isBackfill: boolean) {
     const version = ++sequence.current
+    retry.current = { cursor, back: previous }
     current.current.busy = true
     setBusy(true); setError('')
     try {
@@ -28,6 +30,7 @@ export function SessionHistory({ sessionID, recovery }: { sessionID: string; rec
       }
       const next = result.history
       if (next.has_more && next.cursor === cursor) { setGap(true); setError('历史游标没有前进，缺口保留。'); return }
+      retry.current = null
       // 空的刷新页保留当前正文和导航位置；只更新可继续补取的游标。
       if (next.entries.length || !cursor) {
         setPage(next); setPosition(cursor); setBack(previous)
@@ -49,7 +52,7 @@ export function SessionHistory({ sessionID, recovery }: { sessionID: string; rec
   useEffect(() => { loadRef.current = load })
   useEffect(() => {
     const prior = current.current
-    void loadRef.current(prior.cursor, prior.cursor ? [...prior.back, prior.position].slice(-64) : [], recovery > 0)
+    void loadRef.current(retry.current?.cursor ?? prior.cursor, retry.current?.back ?? (prior.cursor ? [...prior.back, prior.position].slice(-64) : []), recovery > 0)
     const requests = sequence
     return () => { requests.current++ }
   }, [sessionID, recovery])
@@ -64,7 +67,7 @@ export function SessionHistory({ sessionID, recovery }: { sessionID: string; rec
       <button type="button" disabled={busy} onClick={() => void load('', [], false)}>从头读取历史</button>
       <button type="button" disabled={busy || !back.length} onClick={() => void load(back.at(-1) ?? '', back.slice(0, -1), false)}>上一页历史</button>
       <button type="button" disabled={busy || !page?.has_more} onClick={() => void load(current.current.cursor, [...back, position].slice(-64), backfill)}>下一页历史</button>
-      <button type="button" disabled={busy} onClick={() => void load(error ? position : current.current.cursor, error ? back : [...back, position].slice(-64), true)}>补取节点历史</button>
+      <button type="button" disabled={busy} onClick={() => void load(retry.current?.cursor ?? current.current.cursor, retry.current?.back ?? [...back, position].slice(-64), true)}>补取节点历史</button>
     </div>
     {busy && <p role="status">正在读取节点历史。</p>}
     {page && <>

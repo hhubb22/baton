@@ -113,6 +113,9 @@ func (s *Server) onEnvelope(ctx context.Context, connID string, raw json.RawMess
 		return
 	}
 	switch kind.Type {
+	case protocol.BodyRuntimeReport:
+		s.onRuntimeReport(ctx, connID, env)
+		return
 	case protocol.BodySessionResult:
 		s.noteSessionResult(env)
 		return

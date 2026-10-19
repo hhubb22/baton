@@ -29,17 +29,21 @@ var (
 
 // RunOptions 是一次常驻连接使用的本地身份和 Relay 地址。
 type RunOptions struct {
-	RelayURL  string
-	Identity  Identity
-	Heartbeat time.Duration
-	RootCAs   *x509.CertPool
-	Logger    *slog.Logger
-	DataDir   string
-	agent     *agentBridge
+	RelayURL     string
+	Identity     Identity
+	Heartbeat    time.Duration
+	RootCAs      *x509.CertPool
+	Logger       *slog.Logger
+	DataDir      string
+	agent        *agentBridge
+	reports      *runtimeReports
+	reportSender *runtimeReportSender
 }
 
 // Maintain 保持到 Relay 的出站连接。同一进程的重连沿用启动时生成的 incarnation。
 func Maintain(ctx context.Context, opts RunOptions) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	if _, err := ParseRelayURL(opts.RelayURL); err != nil {
 		return err
 	}
@@ -95,6 +99,10 @@ func Maintain(ctx context.Context, opts RunOptions) error {
 		cancel()
 	}
 	attempt := 0
+	opts.reportSender = &runtimeReportSender{}
+	if opts.DataDir != "" {
+		opts.reports = collectRuntimeReports(ctx, opts.DataDir)
+	}
 	for {
 		if ctx.Err() != nil {
 			return nil
@@ -129,6 +137,8 @@ func Maintain(ctx context.Context, opts RunOptions) error {
 }
 
 func runOnce(ctx context.Context, opts RunOptions, incarnation string, ledger *Ledger, host *session.Host) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	ws, err := dialRelay(ctx, opts)
 	if err != nil {
 		return err
@@ -175,8 +185,18 @@ func runOnce(ctx context.Context, opts RunOptions, incarnation string, ledger *L
 		defer opts.agent.set(nil)
 	}
 	errCh := make(chan error, 1)
+	reportSender := opts.reportSender.connect()
+	defer reportSender.close()
+	var reportChanged <-chan struct{}
+	if opts.reports != nil {
+		reportChanged = opts.reports.changed
+		select {
+		case opts.reports.refresh <- struct{}{}:
+		default:
+		}
+	}
 	go func() {
-		errCh <- readRelay(ctx, writer, &acked, &expect, opts.Logger, opts.Identity, ledger, host, loop, opts.DataDir)
+		errCh <- readRelay(ctx, writer, &acked, &expect, opts.Logger, opts.Identity, ledger, host, loop, opts.DataDir, reportSender)
 	}()
 	var replayBusy atomic.Bool
 	replay := func() {
@@ -197,6 +217,16 @@ func runOnce(ctx context.Context, opts RunOptions, incarnation string, ledger *L
 	}
 	for {
 		select {
+		case <-reportChanged:
+			if acked.Load() {
+				if err := reportSender.send(ctx, writer, opts.reports); err != nil {
+					return err
+				}
+			}
+		case <-reportSender.ready:
+			if err := reportSender.send(ctx, writer, opts.reports); err != nil {
+				return err
+			}
 		case <-ctx.Done():
 			return nil
 		case err := <-errCh:
@@ -205,6 +235,11 @@ func runOnce(ctx context.Context, opts RunOptions, incarnation string, ledger *L
 			}
 			return errors.New("与 Coordinator 的连接已断开")
 		case <-ticker.C:
+			if acked.Load() {
+				if err := reportSender.send(ctx, writer, opts.reports); err != nil {
+					return err
+				}
+			}
 			go replay()
 			if !acked.Load() {
 				if err := writeSync(ctx, writer, opts, &expect, &acked); err != nil {
@@ -234,7 +269,7 @@ func dialRelay(ctx context.Context, opts RunOptions) (*websocket.Conn, error) {
 	return ws, nil
 }
 
-func readRelay(ctx context.Context, w *wsWriter, acked *atomic.Bool, expect *atomic.Value, log *slog.Logger, ident Identity, ledger *Ledger, host *session.Host, loop *startLoop, dataDir string) error {
+func readRelay(ctx context.Context, w *wsWriter, acked *atomic.Bool, expect *atomic.Value, log *slog.Logger, ident Identity, ledger *Ledger, host *session.Host, loop *startLoop, dataDir string, reports *runtimeReportConnection) error {
 	for {
 		_, raw, err := w.ws.Read(ctx)
 		if err != nil {
@@ -262,6 +297,7 @@ func readRelay(ctx context.Context, w *wsWriter, acked *atomic.Bool, expect *ato
 			if err := json.Unmarshal(raw, &wrap); err != nil {
 				continue
 			}
+			reports.note(wrap.Envelope)
 			if handleNodeEnvelope(ctx, raw, w, ledger, host, ident.Capabilities, log, loop) {
 				continue
 			}
@@ -280,6 +316,10 @@ func readRelay(ctx context.Context, w *wsWriter, acked *atomic.Bool, expect *ato
 			if body.Type == "node.sync_result" && body.OK && wrap.Envelope.CorrelationID == want && want != "" {
 				if acked.CompareAndSwap(false, true) {
 					log.Info("event=synced", "node_id", ident.NodeID)
+					select {
+					case reports.ready <- struct{}{}:
+					default:
+					}
 				}
 			}
 		}

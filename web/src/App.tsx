@@ -18,6 +18,8 @@ import type { Employee, Enrollment, NodeList, SavedDefault } from './types.ts'
 import { LoginForm } from './ui/LoginForm.tsx'
 import { NodesPage } from './ui/NodesPage.tsx'
 import { SessionsPage } from './ui/SessionsPage.tsx'
+import { TasksPage } from './ui/TasksPage.tsx'
+import { taskURL } from './tasks.ts'
 import { PasswordForm } from './ui/PasswordForm.tsx'
 
 type Phase =
@@ -27,7 +29,20 @@ type Phase =
   | { kind: 'nodes'; employee: Employee; csrf: string }
 
 export default function App() {
-  const [page, setPage] = useState<'nodes' | 'sessions'>('nodes')
+  const [page, setPage] = useState<'nodes' | 'sessions' | 'tasks'>(() => window.location.pathname.startsWith('/tasks') ? 'tasks' : 'nodes')
+  const [taskID, setTaskID] = useState(() => window.location.pathname.split('/')[2] ?? '')
+  function navigateTask(id: string) {
+    window.history.pushState(null, '', id ? taskURL(id) : '/tasks')
+    setTaskID(id); setPage('tasks')
+  }
+  function navigatePage(next: 'nodes' | 'sessions') {
+    window.history.pushState(null, '', '/'); setPage(next)
+  }
+  useEffect(() => {
+    const change = () => { setTaskID(window.location.pathname.split('/')[2] ?? ''); setPage(window.location.pathname.startsWith('/tasks') ? 'tasks' : 'nodes') }
+    window.addEventListener('popstate', change)
+    return () => window.removeEventListener('popstate', change)
+  }, [])
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' })
   const [list, setList] = useState<NodeList | null>(null)
   const [saved, setSaved] = useState<SavedDefault | null>(null)
@@ -233,8 +248,8 @@ export default function App() {
       ) : null}
       {phase.kind === 'nodes' ? (
         <>
-        <nav aria-label="页面"><button type="button" onClick={() => setPage('nodes')}>节点</button><button type="button" onClick={() => setPage('sessions')}>Session</button></nav>
-        {page === 'sessions' ? <SessionsPage csrf={phase.csrf} nodes={list} employeeID={phase.employee.id} /> : <NodesPage
+        <nav aria-label="页面"><button type="button" onClick={() => navigatePage('nodes')}>节点</button><button type="button" onClick={() => navigatePage('sessions')}>Session</button><button type="button" onClick={() => navigateTask('')}>任务</button></nav>
+        {page === 'tasks' ? <TasksPage key={phase.employee.id} id={taskID} csrf={phase.csrf} employeeID={phase.employee.id} nodes={list} navigate={navigateTask} /> : page === 'sessions' ? <SessionsPage csrf={phase.csrf} nodes={list} employeeID={phase.employee.id} /> : <NodesPage
           employee={phase.employee}
           csrf={phase.csrf}
           list={list}

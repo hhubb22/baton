@@ -5,13 +5,17 @@ export class ApiError extends Error {
   readonly status: number
   readonly code: string
   readonly requestId: string
+  readonly taskId: string
+  readonly currentVersion?: number
 
-  constructor(status: number, code: string, message: string, requestId: string) {
+  constructor(status: number, code: string, message: string, requestId: string, taskId = '', currentVersion?: number) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.code = code
     this.requestId = requestId
+    this.taskId = taskId
+    this.currentVersion = currentVersion
   }
 }
 
@@ -44,7 +48,8 @@ export async function request<T>(path: string, options: Options = {}): Promise<T
     throw new ApiError(0, 'unavailable', '无法连接服务', '')
   }
   if (response.status === 204) return undefined as T
-  const text = await response.text()
+  let text: string
+  try { text = await response.text() } catch { throw new ApiError(0, 'unavailable', '响应中断，请查询原操作', '') }
   let payload: unknown = null
   if (text) {
     try {
@@ -55,7 +60,7 @@ export async function request<T>(path: string, options: Options = {}): Promise<T
   }
   if (!response.ok) {
     const parsed = asError(payload)
-    throw new ApiError(response.status, parsed.code, parsed.message, parsed.requestId)
+    throw new ApiError(response.status, parsed.code, parsed.message, parsed.requestId, parsed.taskId, parsed.currentVersion)
   }
   if (payload === null) throw new ApiError(response.status, 'invalid_response', '响应格式不正确', '')
   return payload as T
@@ -124,14 +129,16 @@ export async function revokeNode(csrf: string, nodeId: string): Promise<RevokeRe
   })
 }
 
-function asError(payload: unknown): { code: string; message: string; requestId: string } {
+function asError(payload: unknown): { code: string; message: string; requestId: string; taskId: string; currentVersion?: number } {
   if (!payload || typeof payload !== 'object') {
-    return { code: 'invalid_response', message: '请求失败', requestId: '' }
+    return { code: 'invalid_response', message: '请求失败', requestId: '', taskId: '' }
   }
   const body = payload as Record<string, unknown>
   return {
     code: typeof body.code === 'string' ? body.code : 'invalid_response',
     message: typeof body.message === 'string' ? body.message : '请求失败',
     requestId: typeof body.request_id === 'string' ? body.request_id : '',
+    taskId: typeof body.task_id === 'string' ? body.task_id : '',
+    currentVersion: typeof body.current_version === 'number' ? body.current_version : undefined,
   }
 }

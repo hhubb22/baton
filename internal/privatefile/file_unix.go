@@ -43,6 +43,10 @@ func OpenSnapshot(path string) (*os.File, error) {
 	return Open(path)
 }
 
+func replaceFile(source, target string) error {
+	return os.Rename(source, target)
+}
+
 func CreateTemp(dir, prefix string) (*os.File, error) {
 	return os.CreateTemp(dir, prefix+"*")
 }
