@@ -118,7 +118,26 @@ test('真实任务提交、响应丢失、取消、核实冲突及显式新执�
   await expect(page.getByRole('status')).toContainText('核实结论已保存')
   await page.getByRole('button', { name: '预览', exact: true }).click()
   await expect(page.getByText('PS126 真实证据内容', { exact: true })).toBeVisible()
-  await page.getByRole('button', { name: '关闭预览', exact: true }).click()
+  await writeFile(`${workspace}/proof-b.txt`, 'PS126 替换后的证据内容', { mode: 0o600 })
+  const replaceEvidence = async (resourceID?: string) => {
+    const current = await readTask(newID)
+    const response = await page.request.post(`${state.baseURL}/api/v1/tasks/${newID}/resolve`, { headers, data: {
+      expected_version: current.version, status: 'completed', summary: malicious, reason: '验证证据引用更新',
+      evidence: resourceID ? [{ node_id: completed.target_node_id, storage_ref: 'root:proof', resource_id: resourceID, access_status: 'available' }] : [],
+      evidence_empty_reason: resourceID ? '' : '已清空证据引用',
+    } })
+    expect(response.status()).toBe(200)
+    await page.getByRole('button', { name: '刷新任务记录' }).click()
+    await expect(page.getByRole('region', { name: '证据与预览', exact: true })).toContainText(resourceID || '已清空证据引用')
+  }
+  await replaceEvidence('proof-b.txt')
+  await expect(page.getByText('PS126 真实证据内容', { exact: true })).toHaveCount(0)
+  await page.getByRole('button', { name: '预览', exact: true }).click()
+  await expect(page.getByText('PS126 替换后的证据内容', { exact: true })).toBeVisible()
+  await replaceEvidence()
+  await expect(page.getByText('PS126 替换后的证据内容', { exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '预览', exact: true })).toHaveCount(0)
+  await replaceEvidence('proof.txt')
   const count = async () => (await readFile(native ? `${workspace}/task-count.txt` : `${dataDir}/executor.log`, 'utf8')).split('\n').filter((line) => line === (native ? 'executed' : 'input')).length
   expect(await count()).toBe(1)
   let unexpectedWrites = 0

@@ -3,7 +3,15 @@ import { ApiError, getNodeFiles, messageOf } from '../api.ts'
 import { previewQuery, type ResultRef } from '../tasks.ts'
 import type { FileView } from '../types.ts'
 
-export function TaskReferences({ title, refs, empty }: { title: string; refs?: ResultRef[]; empty?: string }) {
+type Props = { title: string; refs?: ResultRef[]; empty?: string }
+
+export function TaskReferences(props: Props) {
+  const identity = JSON.stringify(props.refs?.map((ref) => [ref.node_id, ref.storage_ref, ref.resource_id, ref.access_status, ref.note]) ?? [])
+  // 引用内容变化时重建预览状态，旧请求只能更新已卸载的组件；相同内容的轮询保留预览。
+  return <ReferencePreview key={identity} {...props} />
+}
+
+function ReferencePreview({ title, refs, empty }: Props) {
   const [preview, setPreview] = useState<FileView | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
