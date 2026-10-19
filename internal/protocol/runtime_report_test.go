@@ -44,3 +44,44 @@ func TestRuntimeReportRejectsSecretsAndOversize(t *testing.T) {
 		t.Fatal("接受了超过 64 KiB 的报告")
 	}
 }
+
+func TestRuntimeMessageCompatibility(t *testing.T) {
+	for _, tc := range []struct {
+		raw string
+		ok  bool
+	}{
+		{`{"version":"0.1.0","providers":[{"provider":"test","status":"available","future":true}],"future":{"enabled":true}}`, true},
+		{`{"providers":[]}`, false},
+		{`{"version":42,"providers":[]}`, false},
+		{`{"version":"0.1.0","providers":[{"provider":"test","status":"invalid"}]}`, false},
+		{`{"version":"0.1.0","providers":[]} {}`, false},
+		{strings.Repeat(" ", MaxRuntimeReportBytes+1), false},
+		{"{\"version\":\"\xff\"}", false},
+	} {
+		var p ProjectRuntime
+		ok := DecodeRuntimeMessage([]byte(tc.raw), &p) == nil && ValidateProjectRuntime(&p) == nil
+		if ok != tc.ok {
+			t.Fatalf("能力探测兼容结果不符: %+v", p)
+		}
+		if ok && (p.Version != "0.1.0" || len(p.Providers) != 1 || p.Providers[0].Status != "available") {
+			t.Fatal("已知字段改变")
+		}
+	}
+	raw := []byte(`{"exec":{"enabled":true,"shell":"sh","future":true},"roots":[{"root_id":"repo","path":"/repo","future":true}],"repos":[],"future":true}`)
+	var report RuntimeReport
+	if DecodeRuntimeMessage(raw, &report) != nil {
+		t.Fatal("能力报告未忽略嵌套未知字段")
+	}
+	saved, err := RuntimeReportJSON(report)
+	if err != nil || strings.Contains(string(saved), "future") || !report.Exec.Enabled || report.Roots[0].RootID != "repo" {
+		t.Fatalf("报告已知字段改变或保存未知字段: %s %v", saved, err)
+	}
+	for _, raw := range []string{`{"roots":[]}`, `{"exec":{"shell":42}}`} {
+		var report RuntimeReport
+		if DecodeRuntimeMessage([]byte(raw), &report) == nil {
+			if _, err := RuntimeReportJSON(report); err == nil {
+				t.Fatal("接受了缺少必填字段或类型错误的报告")
+			}
+		}
+	}
+}

@@ -15,7 +15,6 @@ func (s *Server) onChildDelivery(ctx context.Context, connID string, env protoco
 	}
 	var req protocol.ChildDeliveryRequest
 	dec := json.NewDecoder(bytes.NewReader(rawBody(env.Body)))
-	dec.DisallowUnknownFields()
 	result := protocol.ChildDeliveriesResult{Type: protocol.BodyChildDeliveriesResult}
 	if dec.Decode(&req) == nil {
 		source := store.AgentSource{EmployeeID: env.Source.EmployeeID, NodeID: env.Source.NodeID,

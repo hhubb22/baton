@@ -163,7 +163,6 @@ func (s *Server) onEnvelope(ctx context.Context, connID string, raw json.RawMess
 		Capabilities []string `json:"capabilities"`
 	}
 	dec := json.NewDecoder(bytes.NewReader(rawBody(env.Body)))
-	dec.DisallowUnknownFields()
 	if err := dec.Decode(&body); err != nil || body.Type != "node.sync" {
 		s.reply(ctx, connID, env, false, protocol.CodeInvalidMessage)
 		return

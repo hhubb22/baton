@@ -43,7 +43,6 @@ func Serve(ctx context.Context, input io.Reader, output io.Writer, handle func(c
 			Request json.RawMessage `json:"request"`
 		}
 		d := json.NewDecoder(bytes.NewReader(raw))
-		d.DisallowUnknownFields()
 		if d.Decode(&frame) != nil || frame.ID <= 0 || len(frame.Request) == 0 || d.Decode(new(any)) != io.EOF {
 			return errors.New("sidecar 帧无效")
 		}

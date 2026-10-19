@@ -269,3 +269,21 @@ func releaseGate(t *testing.T, gate, executionID string) {
 		t.Fatal(err)
 	}
 }
+
+func TestStartPermitUnknownFieldCompletesTask(t *testing.T) {
+	st := startPrepareStack(t, map[string]string{
+		"BATON_TEST_HOLD_START": "0",
+		"BATON_TEST_EXECUTOR_SCRIPT": "success",
+		"BATON_TEST_START_PERMIT_EXTRA_FIELD": "1",
+	})
+	created := acceptTask(t, st, "start-permit-extra-field")
+	waitTaskStatus(t, st, created.TaskID, task.StatusCompleted)
+	if executorCount(t, st, "start") != 1 || executorCount(t, st, "input") != 1 {
+		t.Fatal("未知字段影响了一次启动和输入")
+	}
+	var summary string
+	var deliveries int
+	if err := st.pool.QueryRow(t.Context(), `SELECT summary, (SELECT COUNT(*) FROM delivery_records WHERE task_id=t.id) FROM tasks t WHERE id=$1::uuid`, created.TaskID).Scan(&summary, &deliveries); err != nil || summary == "" || deliveries != 1 {
+		t.Fatalf("结果没有完成交付: %q %d %v", summary, deliveries, err)
+	}
+}

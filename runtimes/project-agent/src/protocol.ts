@@ -42,8 +42,12 @@ export function checkedRPC(call: (request: Request) => Promise<any>): RPC {
   return {
     async call(request) {
       const result = await call(request);
-      if (result.type !== "project_runtime.result" || !result.ok)
-        throw new RuntimeError(result.code ?? "invalid_response");
+      if (
+        !result || typeof result !== "object" ||
+        result.type !== "project_runtime.result" || typeof result.ok !== "boolean" ||
+        (result.code !== undefined && typeof result.code !== "string") || !result.ok
+      )
+        throw new RuntimeError(result?.code ?? "invalid_response");
       return result.data;
     },
   };

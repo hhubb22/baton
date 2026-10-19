@@ -21,7 +21,6 @@ func (s *Server) onProjectRuntimeRequest(ctx context.Context, connID string, env
 	} else {
 		var req protocol.ProjectRuntimeRequest
 		dec := json.NewDecoder(bytes.NewReader(env.Body))
-		dec.DisallowUnknownFields()
 		if utf8.Valid(env.Body) && dec.Decode(&req) == nil && req.Type == protocol.BodyProjectRuntimeRequest && errors.Is(dec.Decode(&struct{}{}), io.EOF) {
 			data, err := s.store.ProjectRuntime(ctx, *env.Source, req)
 			switch {

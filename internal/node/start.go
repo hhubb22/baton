@@ -140,7 +140,6 @@ func (s *startLoop) onResult(env protocol.Envelope) bool {
 	}
 	var result protocol.StartPermitResult
 	dec := json.NewDecoder(bytes.NewReader(env.Body))
-	dec.DisallowUnknownFields()
 	if err := dec.Decode(&result); err != nil || result.Type != protocol.BodyStartPermitResult {
 		return false
 	}

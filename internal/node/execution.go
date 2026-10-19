@@ -217,7 +217,6 @@ func (s *startLoop) fetchInput(ctx context.Context, job *startJob) (string, erro
 		return "", err
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
 	var result protocol.InputResult
 	if err := dec.Decode(&result); err != nil || result.Type != protocol.BodyExecutionInputResult || !result.OK {
 		if result.Code != "" {
@@ -275,7 +274,6 @@ func (s *startLoop) pushReport(ctx context.Context, body json.RawMessage) error 
 		return err
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
 	var ack protocol.ReportAck
 	if err := dec.Decode(&ack); err != nil || ack.Type != protocol.BodyExecutionReportResult || !ack.OK {
 		if ack.Code != "" {

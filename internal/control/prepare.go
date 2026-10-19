@@ -170,7 +170,6 @@ func (s *Server) notePrepareResult(env protocol.Envelope) {
 		return
 	}
 	dec := json.NewDecoder(bytes.NewReader(rawBody(env.Body)))
-	dec.DisallowUnknownFields()
 	var result protocol.PrepareResult
 	if err := dec.Decode(&result); err != nil || result.Type != protocol.BodyPrepareResult {
 		return

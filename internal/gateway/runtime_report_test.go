@@ -68,7 +68,7 @@ func (s *dropFirstRuntimeAck) Send(ctx context.Context, nodeID, connID string, e
 	return s.Sender.Send(ctx, nodeID, connID, env)
 }
 
-func TestRuntimeReportLostAckReconnectsAndRejectsUnknownFields(t *testing.T) {
+func TestRuntimeReportLostAckReconnectsAndIgnoresUnknownFields(t *testing.T) {
 	pool := dbtest.Open(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -144,8 +144,23 @@ func TestRuntimeReportLostAckReconnectsAndRejectsUnknownFields(t *testing.T) {
 	defer peer.ws.CloseNow()
 	sendEnvelope(t, peer.ws, map[string]any{"version": 1, "message_id": newID(t), "body": map[string]any{"type": "node.sync", "display_name": "Other", "system": "linux", "capabilities": []string{"start"}}})
 	peer.next(t)
+	sendEnvelope(t, peer.ws, map[string]any{"version": 1, "message_id": newID(t), "body": map[string]any{
+		"type": protocol.BodyRuntimeReport, "future_field": true,
+		"report": map[string]any{"exec": map[string]any{"enabled": false, "shell": "sh", "future_field": true}, "roots": []any{}, "repos": []any{}, "future_field": true},
+	}})
+	frame := peer.next(t)
+	var env protocol.Envelope
+	var ack protocol.RuntimeReportResult
+	if json.Unmarshal(frame.Envelope, &env) != nil || json.Unmarshal(env.Body, &ack) != nil || !ack.OK || ack.ReportVersion != 1 {
+		t.Fatal("新增字段影响了能力报告")
+	}
+	var saved string
+	if err := pool.QueryRow(ctx, `SELECT report::text FROM node_runtime_reports WHERE node_id=$1::uuid`, other.NodeID).Scan(&saved); err != nil || strings.Contains(saved, "future_field") || !strings.Contains(saved, `"shell": "sh"`) {
+		t.Fatalf("报告未保留已知字段或未过滤未知字段: %v", err)
+	}
 	for _, report := range []any{
-		map[string]any{"exec": map[string]any{"enabled": false, "shell": "sh"}, "roots": []any{}, "repos": []any{}, "token": "secret"},
+		map[string]any{"exec": map[string]any{"enabled": false}, "roots": []any{}, "repos": []any{}},
+		map[string]any{"exec": map[string]any{"enabled": false, "shell": 42}, "roots": []any{}, "repos": []any{}},
 		map[string]any{"exec": map[string]any{"enabled": false, "shell": "sh"}, "roots": []any{}, "repos": []any{map[string]any{"path": "/repo", "origin": "https://user:secret@git.example/repo"}}},
 	} {
 		sendEnvelope(t, peer.ws, map[string]any{"version": 1, "message_id": newID(t), "body": map[string]any{"type": protocol.BodyRuntimeReport, "report": report}})
@@ -156,8 +171,8 @@ func TestRuntimeReportLostAckReconnectsAndRejectsUnknownFields(t *testing.T) {
 			t.Fatalf("不安全报告未被拒绝：%s", env.Body)
 		}
 	}
-	var count int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM node_runtime_reports WHERE node_id=$1::uuid`, other.NodeID).Scan(&count); err != nil || count != 0 {
-		t.Fatal("拒绝的报告仍写入数据库")
+	var unchanged string
+	if err := pool.QueryRow(ctx, `SELECT report::text FROM node_runtime_reports WHERE node_id=$1::uuid`, other.NodeID).Scan(&unchanged); err != nil || unchanged != saved {
+		t.Fatal("拒绝的报告覆盖了已接受的报告")
 	}
 }

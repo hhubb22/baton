@@ -359,7 +359,6 @@ func (m *projectRuntimeManager) run(p *projectRuntimeProcess) error {
 		err := sidecar.Serve(p.ctx, output, input, func(ctx context.Context, raw json.RawMessage) any {
 			var req protocol.ProjectRuntimeRequest
 			dec := json.NewDecoder(bytes.NewReader(raw))
-			dec.DisallowUnknownFields()
 			if dec.Decode(&req) != nil || dec.Decode(new(any)) != io.EOF {
 				return projectRuntimeFailure("invalid_request")
 			}
@@ -516,7 +515,6 @@ func (m *projectRuntimeManager) serveConn(conn net.Conn, p *projectRuntimeProces
 		Request protocol.ProjectRuntimeRequest `json:"request"`
 	}
 	dec := json.NewDecoder(io.LimitReader(conn, projectRuntimeMaxBytes+1))
-	dec.DisallowUnknownFields()
 	result := projectRuntimeFailure("invalid_request")
 	terminate := false
 	if dec.Decode(&local) == nil && dec.InputOffset() <= projectRuntimeMaxBytes {

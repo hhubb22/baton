@@ -63,7 +63,6 @@ func handleNodeEnvelope(ctx context.Context, raw []byte, w *wsWriter, ledger *Le
 		return true
 	}
 	dec := json.NewDecoder(bytes.NewReader(wrap.Envelope.Body))
-	dec.DisallowUnknownFields()
 	var cmd protocol.PrepareCommand
 	if err := dec.Decode(&cmd); err != nil || cmd.Type != protocol.BodyPrepare {
 		writePrepareResult(ctx, w, wrap.Envelope.MessageID, PrepareReport{

@@ -29,14 +29,20 @@ func main() {
 	}
 	if os.Getenv("BATON_TEST_PROJECT_STDIO") == "1" {
 		decoder := json.NewDecoder(os.Stdin)
-		for id, operation := range []string{"bootstrap", "call_tool", "renew", "finish"} {
-			req := map[string]any{"operation": operation, "run_id": "forged", "lease_epoch": 999}
+		for id, operation := range []string{"", "wrong_type", "bootstrap", "call_tool", "renew", "finish"} {
+			req := map[string]any{"operation": operation, "run_id": "forged", "lease_epoch": 999, "future_field": true}
+			if operation == "" {
+				delete(req, "operation")
+			}
+			if operation == "wrong_type" {
+				req["operation"] = 42
+			}
 			if operation == "call_tool" {
 				req["tool_call_id"] = "call-1"
 				req["tool_name"] = "devices.list"
 				req["arguments"] = map[string]any{}
 			}
-			_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"id": id + 1, "request": req})
+			_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"id": id + 1, "request": req, "future_field": true})
 			var response struct {
 				Result struct {
 					OK   bool   `json:"ok"`
@@ -46,7 +52,7 @@ func main() {
 			if decoder.Decode(&response) != nil {
 				os.Exit(3)
 			}
-			if operation == "renew" && response.Result.Code != "invalid_request" {
+			if (operation == "renew" || operation == "" || operation == "wrong_type") && response.Result.Code != "invalid_request" {
 				os.Exit(4)
 			}
 		}

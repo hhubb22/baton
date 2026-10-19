@@ -11,7 +11,7 @@ import (
 func (s *Server) onRuntimeReport(ctx context.Context, connID string, env protocol.Envelope) {
 	result := protocol.RuntimeReportResult{Type: protocol.BodyRuntimeReportResult}
 	var req protocol.RuntimeReportRequest
-	if protocol.DecodeRuntimeJSON(env.Body, &req) != nil || req.Type != protocol.BodyRuntimeReport {
+	if protocol.DecodeRuntimeMessage(env.Body, &req) != nil || req.Type != protocol.BodyRuntimeReport {
 		result.Code = protocol.CodeInvalidMessage
 	} else {
 		version, err := s.store.SaveRuntimeReport(ctx, *env.Source, req.Report)

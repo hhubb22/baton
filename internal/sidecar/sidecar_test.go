@@ -19,6 +19,10 @@ func TestStdioFramingAndLimits(t *testing.T) {
 		ok    bool
 	}{
 		{`{"id":1,"request":{"operation":"probe"}}` + "\n", true},
+		{`{"id":1,"request":{"operation":"probe"},"future":true}` + "\n", true},
+		{`{"request":{}}` + "\n", false},
+		{`{"id":1}` + "\n", false},
+		{`{"id":"1","request":{}}` + "\n", false},
 		{`{"id":1,"request":{}} {}` + "\n", false},
 		{`{"id":0,"request":{}}` + "\n", false},
 		{strings.Repeat("x", MaxFrame+1) + "\n", false},
