@@ -1,4 +1,0 @@
-{"type":"agent_start"}
-{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"{\"baton_waiting_for_children\":true}"}],"stopReason":"stop"}}
-{"type":"agent_end","willRetry":false,"messages":[]}
-{"type":"agent_settled","aborted":false}

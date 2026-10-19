@@ -1,4 +1,0 @@
-{"type":"agent_start"}
-{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error"}}
-{"type":"agent_end","willRetry":false,"messages":[]}
-{"type":"agent_settled","aborted":false}

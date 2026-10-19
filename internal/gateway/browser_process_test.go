@@ -7,13 +7,13 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
 
+	"baton/internal/agent/pi/pireplaytest"
+	"baton/internal/agent/replay"
 	"baton/internal/identity"
 	"baton/internal/protocol"
 	"baton/internal/session"
@@ -22,31 +22,45 @@ import (
 )
 
 func TestBrowserSlowSubscriberDoesNotBlockNativeWorker(t *testing.T) {
-	dir := t.TempDir()
-	fixture := filepath.Join(dir, "pi-replay")
-	if runtime.GOOS == "windows" {
-		fixture += ".exe"
+	dir := pireplaytest.Canonical(t, t.TempDir())
+	fixture := pireplaytest.Build(t, "../../tools/agent-replay")
+	tape := pireplaytest.Tape(t, "../agent/pi/testdata/replay", "simple")
+	// 单帧大输出用于验证缓冲上限和慢订阅者隔离；保留录制的帧顺序与最终结果。
+	for _, e := range tape.Entries {
+		if e.Label == "event:message_update:8" {
+			var frame map[string]any
+			if err := json.Unmarshal(e.Frame, &frame); err != nil {
+				t.Fatal(err)
+			}
+			frame["assistantMessageEvent"].(map[string]any)["delta"] = strings.Repeat("输出", 1024*1024)
+			raw, _ := json.Marshal(frame)
+			var err error
+			tape, err = tape.Replace(e.Label, raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
-	build := exec.Command("go", "test", "-c", "-o", fixture, "./internal/agent/pi")
-	build.Dir = filepath.Join("..", "..")
-	if raw, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("构建 Pi 协议执行器: %v %s", err, raw)
-	}
-	tape := filepath.Join(dir, "events.jsonl")
-	f, err := os.Create(tape)
+	tapePath := filepath.Join(dir, "stress.ndjson")
+	f, err := os.Create(tapePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	enc := json.NewEncoder(f)
-	for i := 0; i < 2048; i++ {
-		_ = enc.Encode(map[string]any{"type": "message_update", "assistantMessageEvent": map[string]string{"type": "text_delta", "delta": strings.Repeat("输出", 512)}})
+	if err := replay.Write(f, tape); err != nil {
+		t.Fatal(err)
 	}
-	final := `{"status":"completed","summary":"输出已完成","evidence":[],"evidence_empty_reason":"协议压力测试","artifacts":[],"artifacts_empty_reason":"无产物","error":null}`
-	_ = enc.Encode(map[string]any{"type": "message_end", "message": map[string]any{"role": "assistant", "content": []map[string]string{{"type": "text", "text": final}}, "stopReason": "stop"}})
-	_ = enc.Encode(map[string]any{"type": "agent_settled", "aborted": false})
-	_ = f.Close()
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	stateDir := filepath.Join(dir, "replay-state")
 	gate := t.TempDir()
-	st := startPrepareStack(t, map[string]string{"BATON_TEST_HOLD_START": "0", "BATON_TEST_START_GATE": gate, "BATON_AGENT_DRIVER": "native", "BATON_PI_BIN": fixture, "BATON_PI_REPLAY_CHILD": "1", "BATON_PI_REPLAY_FIXTURE": tape})
+	st := startPrepareStack(t, map[string]string{"BATON_TEST_HOLD_START": "0", "BATON_TEST_START_GATE": gate, "BATON_AGENT_DRIVER": "native", "BATON_PI_BIN": fixture, "BATON_PI_MODEL": pireplaytest.Model})
+	t.Cleanup(func() {
+		if raw, err := os.ReadFile(filepath.Join(stateDir, "failure.json")); err == nil {
+			t.Errorf("转录失配: %s", raw)
+		}
+	})
+
 	if _, err := st.pool.Exec(context.Background(), `UPDATE employees SET must_change_password=false WHERE id=$1`, st.employeeID); err != nil {
 		t.Fatal(err)
 	}
@@ -68,6 +82,13 @@ func TestBrowserSlowSubscriberDoesNotBlockNativeWorker(t *testing.T) {
 		t.Fatal("没有保存准备事实")
 	}
 	before := workerStatus(t, st.dataDir, sid)
+	data := pireplaytest.Canonical(t, st.dataDir)
+	work := pireplaytest.Canonical(t, filepath.Join(data, "sessions", sid, "workspace"))
+	config := replay.Config{Transcript: tapePath, StateDir: stateDir, Bindings: map[string]string{"<fixture>": dir, "<home>": dir, "<node_data>": data, "<node_data_alias>": data, "<workspace>": work}}
+	rawConfig, _ := json.Marshal(config)
+	if err := os.WriteFile(fixture+".replay.json", rawConfig, 0600); err != nil {
+		t.Fatal(err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
