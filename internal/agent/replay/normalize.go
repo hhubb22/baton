@@ -49,8 +49,10 @@ var normalizationPolicies = map[string]normalizationPolicy{
 			"account/rateLimits/updated",
 			"mcpServer/oauth/login",
 			"mcpServer/oauthLogin/completed",
+			// 带主机名 serverName 和安装标识；适配器不处理这条通知。
+			"remoteControl/status/changed",
 		),
-		privateFields: stringSet("account", "authMode", "authStatus", "requiresOpenaiAuth", "accessToken", "refreshToken", "apiKey", "machineId", "deviceId", "hostname", "username"),
+		privateFields: stringSet("account", "authMode", "authStatus", "requiresOpenaiAuth", "accessToken", "refreshToken", "apiKey", "machineId", "deviceId", "hostname", "username", "serverName", "installationId"),
 	},
 	"pi": {
 		dropMethods:   stringSet("get_available_models", "get_commands"),
