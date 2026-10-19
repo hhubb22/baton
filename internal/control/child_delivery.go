@@ -7,10 +7,9 @@ import (
 
 	"baton/internal/protocol"
 	"baton/internal/store"
-	"github.com/coder/websocket"
 )
 
-func (s *Server) onChildDelivery(ctx context.Context, ws *websocket.Conn, env protocol.Envelope) {
+func (s *Server) onChildDelivery(ctx context.Context, connID string, env protocol.Envelope) {
 	if env.Source == nil || env.Source.Kind != protocol.SourceNode {
 		return
 	}
@@ -32,5 +31,5 @@ func (s *Server) onChildDelivery(ctx context.Context, ws *websocket.Conn, env pr
 	if raw, err := json.Marshal(result); err != nil || len(raw) > protocol.MaxMessageBytes-2048 {
 		result = protocol.ChildDeliveriesResult{Type: protocol.BodyChildDeliveriesResult}
 	}
-	s.replyExecution(ctx, ws, env, result)
+	s.replyExecution(ctx, connID, env, result)
 }

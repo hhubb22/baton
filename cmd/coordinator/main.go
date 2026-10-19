@@ -20,10 +20,12 @@ import (
 	"baton/internal/config"
 	"baton/internal/control"
 	"baton/internal/db"
+	"baton/internal/gateway"
 	"baton/internal/httpapi"
 	"baton/internal/migrate"
 	"baton/internal/node"
 	"baton/internal/plane"
+	"baton/internal/protocol"
 	"baton/internal/redact"
 	"baton/internal/store"
 	"baton/internal/webui"
@@ -171,11 +173,25 @@ func cmdServe(ctx context.Context, stderr io.Writer, getenv func(string) string)
 			return err
 		}
 		logger := slog.New(slog.NewTextHandler(stderr, nil))
-		ctrl, err := control.New(store.New(pool), signer, cfg.ControlToken, cfg.Heartbeat, cfg.OfflineAfter, logger)
+		repo := store.New(pool)
+		if err := repo.ResetConnections(ctx); err != nil {
+			return err
+		}
+		outputBudget := protocol.NewBudget(protocol.MaxOutputCacheBytes)
+		ctrl, err := control.New(repo, signer, logger, outputBudget)
 		if err != nil {
 			return err
 		}
+		gw := gateway.New(ctrl, ctrl, cfg.OfflineAfter, logger, outputBudget)
+		ctrl.SetSender(gw)
+		defer gw.Close()
+		if err := ctrl.DispatchRevocations(ctx); err != nil {
+			return err
+		}
+		go gw.Run(ctx)
+
 		api, err := httpapi.New(pool, httpapi.Settings{
+			OutputBudget:      outputBudget,
 			Origins:           cfg.AllowedOrigins,
 			SessionTTL:        cfg.SessionTTL,
 			EnrollmentTTL:     cfg.EnrollmentTTL,
@@ -195,6 +211,7 @@ func cmdServe(ctx context.Context, stderr io.Writer, getenv func(string) string)
 		}
 		mux := http.NewServeMux()
 		mux.Handle("/", api)
+		mux.Handle(protocol.NodePath, gw)
 		var planeHook *plane.Service
 		if planeConfig != nil {
 			hook, err := plane.New(pool, *planeConfig, store.New(pool), nil, logger)
@@ -205,18 +222,11 @@ func cmdServe(ctx context.Context, stderr io.Writer, getenv func(string) string)
 			planeHook = hook
 		}
 		apiSrv := &http.Server{
-			Handler:           webui.Handler(mux),
-			ReadHeaderTimeout: 5 * time.Second,
+			Handler:           longConnections(webui.Handler(mux)),
 			ReadTimeout:       20 * time.Second,
 			WriteTimeout:      60 * time.Second,
-			IdleTimeout:       60 * time.Second,
-			MaxHeaderBytes:    1 << 16,
-			ErrorLog:          log.New(scrubWriter{stderr}, "", 0),
-		}
-		// 控制连接是长生命周期 WebSocket，不能套用 API 的读写超时。
-		controlSrv := &http.Server{
-			Handler:           ctrl,
 			ReadHeaderTimeout: 5 * time.Second,
+			IdleTimeout:       60 * time.Second,
 			MaxHeaderBytes:    1 << 16,
 			ErrorLog:          log.New(scrubWriter{stderr}, "", 0),
 		}
@@ -224,12 +234,7 @@ func cmdServe(ctx context.Context, stderr io.Writer, getenv func(string) string)
 		if err != nil {
 			return fmt.Errorf("监听失败: %s", redact.Scrub(err.Error()))
 		}
-		controlLn, err := net.Listen("tcp", cfg.ControlAddr)
-		if err != nil {
-			_ = apiLn.Close()
-			return fmt.Errorf("控制监听失败: %s", redact.Scrub(err.Error()))
-		}
-		errCh := make(chan error, 2)
+		errCh := make(chan error, 1)
 		go func() {
 			logger.Info("event=listening", "kind", "http", "addr", apiLn.Addr().String())
 			if cfg.TLS() {
@@ -237,14 +242,6 @@ func cmdServe(ctx context.Context, stderr io.Writer, getenv func(string) string)
 				return
 			}
 			errCh <- apiSrv.Serve(apiLn)
-		}()
-		go func() {
-			logger.Info("event=listening", "kind", "control", "addr", controlLn.Addr().String())
-			if cfg.TLS() {
-				errCh <- controlSrv.ServeTLS(controlLn, cfg.TLSCertFile, cfg.TLSKeyFile)
-				return
-			}
-			errCh <- controlSrv.Serve(controlLn)
 		}()
 		go ctrl.DeliverPrepares(ctx)
 		if planeHook != nil {
@@ -263,7 +260,7 @@ func cmdServe(ctx context.Context, stderr io.Writer, getenv func(string) string)
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			_ = apiSrv.Shutdown(shutdownCtx)
-			_ = controlSrv.Shutdown(shutdownCtx)
+			gw.Close()
 		}
 		select {
 		case <-ctx.Done():
@@ -302,4 +299,16 @@ func (s scrubWriter) Write(p []byte) (int, error) {
 		return 0, err
 	}
 	return len(p), nil
+}
+
+// longConnections 清除长连接路由的请求期限，普通 API 继续使用服务器超时。
+func longConnections(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == protocol.NodePath || r.URL.Path == "/api/v1/events" {
+			rc := http.NewResponseController(w)
+			_ = rc.SetReadDeadline(time.Time{})
+			_ = rc.SetWriteDeadline(time.Time{})
+		}
+		next.ServeHTTP(w, r)
+	})
 }

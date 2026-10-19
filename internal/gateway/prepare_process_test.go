@@ -1,4 +1,4 @@
-package relay_test
+package gateway_test
 
 import (
 	"bytes"
@@ -41,14 +41,11 @@ type prepareStack struct {
 	nodeAddr    string
 	apiAddr     string
 	batondBin   string
-	relayBin    string
 	coordBin    string
 	signingFile string
-	relayEnv    []string
 	coordEnv    []string
 	batondArgs  []string
 	batondEnv   []string
-	relay       *running
 	coord       *running
 	batond      *running
 	roots       *x509.CertPool
@@ -182,11 +179,11 @@ func TestPrepareDoesNotAckWhenPersistFails(t *testing.T) {
 
 func startPrepareStack(t *testing.T, extra map[string]string) *prepareStack {
 	t.Helper()
-	coordBin, relayBin, batondBin := buildBins(t)
-	return startPrepareStackWithBins(t, extra, coordBin, relayBin, batondBin)
+	coordBin, batondBin := buildBins(t)
+	return startPrepareStackWithBins(t, extra, coordBin, batondBin)
 }
 
-func startPrepareStackWithBins(t *testing.T, extra map[string]string, coordBin, relayBin, batondBin string, dataRoot ...string) *prepareStack {
+func startPrepareStackWithBins(t *testing.T, extra map[string]string, coordBin, batondBin string, dataRoot ...string) *prepareStack {
 	t.Helper()
 	pool := dbtest.Open(t)
 	ctx := context.Background()
@@ -212,15 +209,12 @@ func startPrepareStackWithBins(t *testing.T, extra map[string]string, coordBin, 
 	roots := x509.NewCertPool()
 	roots.AddCert(cert)
 	apiAddr := freeAddr(t)
-	controlAddr := freeAddr(t)
-	nodeAddr := freeAddr(t)
+	nodeAddr := apiAddr
 	dbURL := strings.TrimSpace(os.Getenv("BATON_TEST_DATABASE_URL"))
 	coordValues := map[string]string{
 		"BATON_DATABASE_URL":       dbURL,
 		"BATON_DB_SCHEMA":          schema,
 		"BATON_HTTP_ADDR":          apiAddr,
-		"BATON_CONTROL_ADDR":       controlAddr,
-		"BATON_CONTROL_TOKEN":      "prepare-control-token-01",
 		"BATON_NODE_SIGNING_KEY":   signingFile,
 		"BATON_ALLOWED_ORIGINS":    "https://baton.example,https://" + apiAddr,
 		"BATON_TLS_CERT_FILE":      certFile,
@@ -234,16 +228,6 @@ func startPrepareStackWithBins(t *testing.T, extra map[string]string, coordBin, 
 		}
 	}
 	coordEnv := childEnv(coordValues)
-	relayEnv := childEnv(map[string]string{
-		"BATON_LISTEN_ADDR":     nodeAddr,
-		"BATON_COORDINATOR_URL": "https://" + controlAddr,
-		"BATON_CONTROL_TOKEN":   "prepare-control-token-01",
-		"BATON_TLS_CERT_FILE":   certFile,
-		"BATON_TLS_KEY_FILE":    keyFile,
-		"BATON_TLS_CA_FILE":     certFile,
-	})
-	relay := startCmd(t, relayBin, nil, relayEnv)
-	time.Sleep(400 * time.Millisecond)
 	coord := startCmd(t, coordBin, []string{"serve"}, coordEnv)
 	waitListen(t, apiAddr)
 	waitListen(t, nodeAddr)
@@ -279,9 +263,9 @@ func startPrepareStackWithBins(t *testing.T, extra map[string]string, coordBin, 
 	return &prepareStack{
 		pool: pool, client: client, base: base, csrf: csrf, ident: ident, employeeID: emp.ID,
 		dataDir: dataDir, certFile: certFile, nodeAddr: nodeAddr, apiAddr: apiAddr,
-		batondBin: batondBin, relayBin: relayBin, coordBin: coordBin, signingFile: signingFile,
-		relayEnv: relayEnv, coordEnv: coordEnv, batondArgs: batondArgs, batondEnv: batondEnv,
-		relay: relay, coord: coord, batond: batond, roots: roots,
+		batondBin: batondBin, coordBin: coordBin, signingFile: signingFile,
+		coordEnv: coordEnv, batondArgs: batondArgs, batondEnv: batondEnv,
+		coord: coord, batond: batond, roots: roots,
 	}
 }
 
@@ -521,9 +505,9 @@ func restartBatond(t *testing.T, st *prepareStack) {
 
 func restartRelay(t *testing.T, st *prepareStack) {
 	t.Helper()
-	st.relay.stop()
+	st.coord.stop()
 	time.Sleep(300 * time.Millisecond)
-	st.relay = startCmd(t, st.relayBin, nil, st.relayEnv)
+	st.coord = startCmd(t, st.coordBin, []string{"serve"}, st.coordEnv)
 	waitListen(t, st.nodeAddr)
 	waitNode(t, st.client, st.base, st.ident.NodeID, true, true, true)
 }

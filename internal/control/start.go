@@ -10,11 +10,9 @@ import (
 	"baton/internal/identity"
 	"baton/internal/protocol"
 	"baton/internal/store"
-
-	"github.com/coder/websocket"
 )
 
-func (s *Server) onStartPermit(ctx context.Context, ws *websocket.Conn, env protocol.Envelope) {
+func (s *Server) onStartPermit(ctx context.Context, connID string, env protocol.Envelope) {
 	if env.Source == nil || env.Source.Kind != protocol.SourceNode {
 		return
 	}
@@ -22,7 +20,7 @@ func (s *Server) onStartPermit(ctx context.Context, ws *websocket.Conn, env prot
 	dec.DisallowUnknownFields()
 	var req protocol.StartPermitRequest
 	if err := dec.Decode(&req); err != nil || req.Type != protocol.BodyStartPermit {
-		s.replyStart(ctx, ws, env, protocol.StartPermitResult{
+		s.replyStart(ctx, connID, env, protocol.StartPermitResult{
 			OK: false, Code: protocol.CodeInvalidMessage, Message: "启动许可请求无效",
 		})
 		return
@@ -49,7 +47,7 @@ func (s *Server) onStartPermit(ctx context.Context, ws *websocket.Conn, env prot
 		} else {
 			s.log.Info("event=start_permit_rejected", "task_id", req.TaskID, "node_id", env.Source.NodeID, "code", code)
 		}
-		s.replyStart(ctx, ws, env, protocol.StartPermitResult{
+		s.replyStart(ctx, connID, env, protocol.StartPermitResult{
 			OK: false, Code: code, Message: message, TaskID: req.TaskID, ExecutionID: req.ExecutionID,
 		})
 		return
@@ -68,19 +66,19 @@ func (s *Server) onStartPermit(ctx context.Context, ws *websocket.Conn, env prot
 	if err != nil {
 		// 授权已经提交。不能因为签名失败就把它说成未执行，节点可以用同一 nonce 再取一次。
 		s.log.Error("event=start_permit_sign_failed", "task_id", req.TaskID, "node_id", env.Source.NodeID)
-		s.replyStart(ctx, ws, env, protocol.StartPermitResult{
+		s.replyStart(ctx, connID, env, protocol.StartPermitResult{
 			OK: false, Code: "unavailable", Message: "暂时无法签发启动许可",
 			TaskID: req.TaskID, ExecutionID: req.ExecutionID,
 		})
 		return
 	}
 	s.log.Info("event=start_permit_sent", "task_id", req.TaskID, "execution_id", req.ExecutionID, "node_id", env.Source.NodeID)
-	s.replyStart(ctx, ws, env, protocol.StartPermitResult{
+	s.replyStart(ctx, connID, env, protocol.StartPermitResult{
 		OK: true, TaskID: req.TaskID, ExecutionID: req.ExecutionID, Permit: token,
 	})
 }
 
-func (s *Server) onStartReport(ctx context.Context, ws *websocket.Conn, env protocol.Envelope) {
+func (s *Server) onStartReport(ctx context.Context, connID string, env protocol.Envelope) {
 	if env.Source == nil {
 		return
 	}
@@ -88,19 +86,19 @@ func (s *Server) onStartReport(ctx context.Context, ws *websocket.Conn, env prot
 	dec.DisallowUnknownFields()
 	var report protocol.StartReport
 	if err := dec.Decode(&report); err != nil || report.Type != protocol.BodyStartReport || report.Started {
-		s.reply(ctx, ws, env, false, protocol.CodeInvalidMessage)
+		s.reply(ctx, connID, env, false, protocol.CodeInvalidMessage)
 		return
 	}
 	if err := s.store.RecordStartRefusal(ctx, env.Source.EmployeeID, env.Source.NodeID, report.TaskID, report.ExecutionID); err != nil {
 		s.log.Error("event=start_report_failed", "task_id", report.TaskID, "node_id", env.Source.NodeID)
-		s.reply(ctx, ws, env, false, "unavailable")
+		s.reply(ctx, connID, env, false, "unavailable")
 		return
 	}
 	s.log.Info("event=start_refused", "task_id", report.TaskID, "execution_id", report.ExecutionID, "node_id", env.Source.NodeID, "code", report.Code)
-	s.reply(ctx, ws, env, true, "")
+	s.reply(ctx, connID, env, true, "")
 }
 
-func (s *Server) replyStart(ctx context.Context, ws *websocket.Conn, req protocol.Envelope, result protocol.StartPermitResult) {
+func (s *Server) replyStart(ctx context.Context, connID string, req protocol.Envelope, result protocol.StartPermitResult) {
 	messageID, err := identity.NewUUID()
 	if err != nil || req.Source == nil {
 		return
@@ -121,7 +119,7 @@ func (s *Server) replyStart(ctx context.Context, ws *websocket.Conn, req protoco
 	if err != nil {
 		return
 	}
-	_ = s.send(ctx, ws, protocol.Frame{Kind: protocol.KindEnvelope, Envelope: env})
+	_ = s.send(ctx, connID, protocol.Frame{Kind: protocol.KindEnvelope, Envelope: env})
 }
 
 func startDelay() time.Duration {

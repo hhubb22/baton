@@ -1,5 +1,15 @@
 # Baton 技术设计
 
+Status: approved
+Owner: 待指定
+Date: 2026-10-19
+Approved: 2026-10-17 首版；2026-10-19 用户批准 Coordinator 内置 Gateway
+Basis: [行为规格](PRODUCT.md)，R-01 至 R-40。
+
+Coordinator 内置 Gateway 的实现与验收由 [PS-171](https://linear.app/kakenhe/issue/PS-171) 跟踪。实施基线为 PS-170 的合并提交 `daaaa19effc47bfb6fd74a6299a1de1781a6918e`；已在原路径兼容验证后移除独立 Relay 及跨进程控制协议。历史实现记录保留原验证环境与版本，最新路径的实际证据见本工单。
+
+## 已实现基线
+
 当前已实现补充（PS-125 / T21）：Web 提供按节点分组的 Session 树，分别显示本机父子关系与跨节点委托，可提交新任务、补充当前任务、查询原输入操作及显式恢复。`/api/v1/events` 使用同源 Cookie 鉴权，连接期间复核登录，退出、改密与到期关闭旧连接；`session.changed`、`task.changed` 提醒页面重新读取，`session.output` 返回受限纯文本、游标和缺口。通知按本人元数据版本每秒检查，重连及窗口获得焦点重新读取。历史、输出和补充输入使用临时 Relay RPC，不进入中心 outbox 或 task_events。每次输出最多 16 KiB，Worker 和适配器各保留最近 256 KiB，页面保留最近 128 KiB；中心最多 128 个浏览器连接及 128 个临时 RPC，节点最多 16 个并发 Session RPC，浏览器写超时为 2 秒。Relay 的输出使用独立队列，最多 128 条且最多 32 MiB，控制队列优先发送，输出超限不会占满任务控制队列。慢订阅丢失的片段以 gap 显示，完整原生历史仍留在节点。
 
 补充输入在 Worker 串行区内先保存操作 ID、正文摘要和不确定状态，再调用适配器；确认丢失后只查询原操作，不自动补发。页面按员工保存待确认的操作 ID 和 Session，不保存正文。旧结果已确认且全部旧报告已交付后，显式恢复将原 Session 标记为空闲；后续新目标创建独立任务和执行，重新申请许可，保留原生 Session 与固定工作目录，清除旧执行的活动回执，拒绝变更目录。恢复不创建缺失历史，不重放旧任务。Pi/Codex 提供实际补充输入和有界文本增量；Pi 没有独立的员工等待事件，页面保留中心 `waiting_input` 的显示能力。Inbox、Project Agent、完整历史分页与任务干预页面分别由其后续工单扩展。无新增中心迁移或依赖。
@@ -9,12 +19,6 @@
 Codex CLI **0.162.1** 使用 stdio app-server，实现 initialize/initialized、thread/start/read/resume、turn/start/steer/interrupt、turn/completed 及 thread/turns/list、thread/items/list 分页；版本不匹配、实验方法不兼容、原生身份/cwd/Session 映射不符、历史缺失或输入发送窗口不明均拒绝自动重放，不创建替代 thread。clientUserMessageId 仅作关联，steer ACK 不证明历史落盘；原生 userMessage 或成功查询工具输出中的精确 delivery_id 才确认注入。Agent 经受限 BATON_CONTEXT_FILE 使用既有委托 CLI，完整原始历史不上传中心；本地已认证 IPC 提供分页历史，尚无中心原文查询 API。只注入 Agent 必要环境，使用禁止审批的 workspace-write sandbox（为本地委托开启网络），拒绝服务端审批、认证刷新和交互工具请求。
 
 验证分工：CLI 官方固定 Schema、人工协议回放、真实 stdio 子进程与 Worker 账本回归不证明真实模型任务通过。用户已在 macOS、Codex 0.162.1 / gpt-6-luna 上报告启动、输入、结构化结果、turn 完成、中止、恢复、历史支持；委托链路成功，但子任务违反“不要再委托”导致原断言失败，委托整项仍未通过。TestRealCodex 的显式环境变量、隔离目录及全部断言不变，本轮只适配包路径和类型。云端不登录模型账号，不把此次接口重构回放视为重做真实模型验收；其他模型/平台不外推，确切实测命令见 README。无新增中心迁移。
-
-Status: approved
-Owner: 待指定
-Date: 2026-10-17
-Approved: 2026-10-17，用户在当前需求会话批准
-Basis: 已批准的 [行为规格](PRODUCT.md)，R-01 至 R-39。
 
 **2026-10-18 修订（已批准）**：加入 Project Agent，节点不再区分 PC 与 Ubuntu 角色。改动的段落标注「2026-10-18 修订」，其余内容维持已批准版本。Project Agent 的完整设计见 [Project Agent 技术设计](../project-agent/TECH.md)，本文只记录它对现有进程、数据和接口的影响。
 
@@ -34,7 +38,7 @@ Basis: 已批准的 [行为规格](PRODUCT.md)，R-01 至 R-39。
 
 当前已实现补充（PS-115 / T11）：新增 `baton delegate`、`task get/wait/result/relations/cancel`；`result submit` 尚未实现。batond 在 prepare ACK 前生成每次执行独立的受限上下文文件；CLI 经本地 IPC 使用不透明凭据，员工与节点取自 Relay 认证，来源任务、Session、Execution 由节点账本绑定并在中心复核。新委托继承来源授权，不能通过请求正文扩大授权或替换来源；查询和取消限当前来源任务及其直接委托。沿用稳定 request_id 的中心幂等和默认目标解析；离线目标不自动改派。有限等待只读取中心事实，默认 30 秒、上限 5 分钟，超时不取消、不重建；结果和关系查询不会重跑执行，结构化结果及身份关联仅读取中心已保存事实。已用两节点、两个 Worker 与真实 CLI 验证等待超时、重试、越权拒绝、关系、证据和 batond 重启；Linux 构建、全量测试及相关包 race 检查通过，Windows/macOS 仅交叉编译。无新增中心迁移或依赖。真实 Agent 的环境注入、自动子结果通知/再次输入与父子级联取消仍未实现；`delivery_status=delivered` 仅表示现有执行结果交付事实已存中心，不代表已注入来源 Agent。使用方法与返回边界见 README 的「Agent 本地 CLI」。
 
-CI 已配置为在 pull request 与推送 `main` 时运行 Linux、macOS、Windows 原生构建、vet 和完整测试；Linux 另做 Windows/macOS 交叉编译及 session、node、store、relay、control 包的 race 测试，Web 在 Linux 上运行 lint、typecheck、单元测试、Chromium E2E 与嵌入产物一致性检查。测试使用 CI 内的 PostgreSQL 17，不依赖仓库 Secret。平台通过情况以对应 CI 运行结果为准，不把工作流覆盖范围视为兼容性已验证；命令和覆盖限制见 README「CI 与本地等价命令」。
+CI 已配置为在 pull request 与推送 `main` 时运行 Linux、macOS、Windows 原生构建、vet 和完整测试；Linux 另做 Windows/macOS 交叉编译及 session、node、store、gateway、control 包的 race 测试，Web 在 Linux 上运行 lint、typecheck、单元测试、Chromium E2E 与嵌入产物一致性检查。测试使用 CI 内的 PostgreSQL 17，不依赖仓库 Secret。平台通过情况以对应 CI 运行结果为准，不把工作流覆盖范围视为兼容性已验证；命令和覆盖限制见 README「CI 与本地等价命令」。
 
 当前已实现补充（PS-131 / T27）：迁移 `0019` 新增 `plane_outbox` 和 `task_acceptances`。数据库延迟触发器在任务及关联事务结束时保存当前版本的结构化结果快照，包含同事务保存的证据位置，不保存 Session 原文或额外执行输入。独立回写消费者按稳定 UUID、租约和每任务版本顺序发送 INTERNAL 评论；每次先逐页核对标记，无匹配才创建，201/409 后 GET 核对范围与可见性，失败保留原意图持续退避，不重跑 Agent。`BATON_PLANE_CONFIG.baton_url` 指定 Baton HTTPS Origin；缺失时保留队列并报告配置缺失。评论只含固定前缀、受本人权限保护的任务 API 链接、版本、状态、最多 500 字且经过敏感内容过滤和 HTML 转义的摘要，以及证据入口；原存储路径和工具输出不复制。员工 POST/GET `/api/v1/tasks/{id}/acceptance` 单独提交/读取验收，POST 以登录身份、CSRF、当前版本和确定的执行结论为条件；验收保留执行状态，增加版本并记录员工、时间和意见，不自动修改 Plane 状态或生成执行。验收记录保留所依据的版本；人工核实修正后要求重新验收，迟到证据或原任务重做审计保留已有验收，历史保留。真实 Plane 1.4.2 测试覆盖已成功写入但丢失响应、短时 503、成功待验收和员工单独验收；本机 Coordinator 重启测试覆盖后台恢复。真实模型和完整 Plane 页面人工操作流程尚未覆盖。
 
@@ -85,12 +89,12 @@ Pi 的一手资料来自已安装包 `@earendil-works/pi-coding-agent` 的 `docs
 
 | 位置 | 选用技术 | 理由与代价 |
 |---|---|---|
-| Relay、Coordinator、batond、Session Worker、CLI | Go；初始工具链基线为 Go 1.27 | 可发布原生可执行文件，节点不需要额外 Node.js 来运行 Baton；代价是需要实现和维护各 Agent 的进程协议适配 |
+| Coordinator（含 Gateway）、batond、Session Worker、CLI | Go；初始工具链基线为 Go 1.27 | 可发布原生可执行文件，节点不需要额外 Node.js 来运行 Baton；代价是需要实现和维护各 Agent 的进程协议适配 |
 | Project Agent Runtime | Node.js 程序 `baton-project-runtime`，基于 `@earendil-works/pi-agent-core` 与 `pi-ai` | 由 batond 作为独立进程启动；只有承载 Project Agent 的节点需要安装 Node.js（2026-10-18 修订） |
 | 中心记录 | PostgreSQL 17，pgx，版本化 SQL migration | 延用原始需求的 PostgreSQL；任务、事件和 outbox 可在一次事务提交，不先引入消息队列 |
 | 节点执行账本 | SQLite，WAL 与 FULL 同步，拟用纯 Go 驱动 | 支持断电后的去重和待补报记录，便于跨系统发布；需要验证驱动、锁与磁盘故障行为 |
 | Web UI | TypeScript、React、Vite | 静态页面由 Coordinator 提供；无独立 Node.js Web 服务，开发时仍需要前端构建工具 |
-| 节点与中转通信 | TLS WebSocket，版本化 JSON 信封 | 适应节点主动连接；控制、查询和受限输出分开排队，业务正文对 Relay 保持不透明 |
+| 节点与中心通信 | TLS WebSocket，版本化 JSON 信封 | batond 主动连接内置 Gateway；按消息类型限制路由，业务权限和持久化由 Coordinator 业务处理器负责 |
 | 浏览器实时通知 | 同源 WebSocket；普通操作用 HTTP JSON API | 统一账号会话与权限检查；需要处理输出限流、断流和浏览器重连 |
 
 不嵌入 Agent SDK，也不解析终端 ANSI 画面来判断任务完成。Pi 和 Codex 优先使用结构化双向接口；只有存在证据且经过验证的能力才进入支持矩阵。这样减少对 Agent 内部代码的绑定，但不能消除外部协议升级风险。
@@ -102,28 +106,26 @@ Project Agent Runtime 使用 pi-agent-core 的 SDK，但它运行在独立的 No
 ### 控制与执行路径
 
 ```text
-浏览器 ── HTTPS / WebSocket ── Coordinator ── PostgreSQL
-                                    │
-                          内网认证控制连接
-                                    │
-                                  Relay
+浏览器 ── HTTPS / WebSocket ── Coordinator API
+                                      │
+                                业务处理器 ── PostgreSQL
+                                      │
+                              Gateway（进程内）
+                                ╱           ╲
+                         出站 WSS         出站 WSS
                             ╱               ╲
-                     出站 WSS             出站 WSS
-                         ╱                   ╲
-                 Ubuntu batond           PC batond
-                       │                     │
-                 Session Worker        Session Worker
-                       │                     │
-                  本地 Agent             本地 Agent
-                                             │
-                                      工具、设备、公网
+                       batond             batond
+                          │                  │
+                    Session Worker     Session Worker
+                          │                  │
+                     本地 Agent         本地 Agent
 ```
 
-这是部署关系示意，完整任务的业务请求仍由 Coordinator 验证和记录。节点不能让 Relay 直接把任意正文发给另一员工节点。
+API、Gateway 与业务处理器运行在一个 Coordinator 进程内。节点消息经过认证身份注入与明确类型分派，再由业务处理器验证和记录；节点不能直接向其他节点转发任意正文。Gateway 的 Go 包边界限制依赖关系，进程故障和内存耗尽仍会影响整个 Coordinator（R-03、R-40）。
 
 | 进程 | 拥有的状态与职责 | 不负责的内容 | 对应行为 |
 |---|---|---|---|
-| Relay | 活动连接、认证与吊销快照、路由、心跳、受限转发队列 | 任务队列、Session 解析、业务持久化、执行重试 | R-03、R-04、R-24 |
+| Gateway（Coordinator 内部模块） | 活动连接、认证入口、连接代次、心跳、限流、有界队列、消息收发 | 任务队列、Session 语义、业务持久化、执行重试、签名私钥 | R-03、R-04、R-24、R-29、R-40 |
 | Coordinator | 员工、节点归属、默认节点、任务状态、委托关系、执行记录、调度、API、Plane 集成；Project、主对话、输入队列、项目记忆、Project Agent 的放置与租约、事项与浏览器通知（2026-10-18 修订） | 原始 Session 历史、模型调用、设备 SSH | R-01、R-05～R-06、R-12～R-25、R-27、R-33～R-38 |
 | batond | 节点身份、本机注册、中心连接、能力汇总、本地 RPC、Worker 发现与启动；Project Runtime 的启动、停止和续租（2026-10-18 修订） | 不依靠自身内存保存唯一执行事实 | R-02～R-03、R-07～R-11、R-26 |
 | Session Worker | 一个 Session 的 Agent 进程、输入顺序、启动和交付账本、结果、事件及本地历史访问 | 无权签发中心身份、改派任务或创建第二次同任务执行 | R-09～R-11、R-14、R-21～R-23、R-26、R-28～R-29 |
@@ -134,7 +136,7 @@ Session Worker 由 batond 使用同一可执行文件的内部子命令启动，
 
 Worker 使用带认证的 Unix domain socket 或 Windows named pipe 与 batond 通信，不向局域网开放无认证控制端口。节点级文件锁防止两个 batond 同时使用同一数据目录；Session 级锁防止两个 Worker 同时接管一个 Session。
 
-Project Runtime 由 batond 按 Coordinator 的 `project_run_start` 启动，经本地 IPC 与 batond 通信，请求再沿 Relay 送达 Coordinator，和 Agent CLI 的委托请求走同一条路径。Runtime 进程不需要像 Worker 那样跨 batond 重启存活：它的状态全部在 Coordinator，batond 重启导致 Runtime 退出时，下一次运行会接着处理（2026-10-18 修订）。
+Project Runtime 由 batond 按 Coordinator 的 `project_run_start` 启动，经本地 IPC 与 batond 通信，请求经 Gateway 进入 Coordinator 业务处理器，和 Agent CLI 的委托请求走同一条路径。Runtime 进程不需要像 Worker 那样跨 batond 重启存活：它的状态全部在 Coordinator，batond 重启导致 Runtime 退出时，下一次运行会接着处理。中心不可用时继续遵守原有续租与停止规则。
 
 POSIX 下 Worker 使用独立进程组；Windows 下由 Worker 持有 Agent 进程的 Job Object，避免 batond 退出连带结束 Worker。进程组、Job Object 和真实工具子进程的退出行为都需要目标系统验证，不能仅靠 detached 标志认定已经独立。
 
@@ -143,12 +145,13 @@ POSIX 下 Worker 使用独立进程组；Windows 下由 Worker 持有 Agent 进�
 ### 拟建仓库结构
 
 ```text
-cmd/relay/                  Relay 入口
 cmd/coordinator/            Coordinator 与管理命令
 cmd/batond/                 节点守护进程与内部 Worker 子命令
 cmd/baton/                  员工与 Agent CLI
-internal/relay/             连接和路由
-internal/control/           身份、任务状态、调度和 HTTP API
+internal/gateway/           节点连接、认证入口、流量控制与收发
+internal/control/           节点业务处理、任务分派与临时 RPC
+internal/httpapi/           员工 HTTP API、会话与权限入口
+internal/store/             业务事务与持久化
 internal/node/              注册、能力、节点 RPC 和同步
 internal/session/           Worker、输入账本和历史索引
 internal/agent/             统一 Adapter、Pi/Codex 原生协议适配
@@ -180,7 +183,7 @@ PostgreSQL 不保存完整 Session 消息。应用层对可持久化事件采用
 | task_relations | 来源任务、来源 Session、目标 Session、重新执行关系 | 委托链与追溯 |
 | task_events | 任务 ID、版本、事件 ID、操作者、允许保存的变更字段 | 状态历史与人工核实记录 |
 | executions | task_id 唯一、execution_id 唯一、节点存储代次、准备与启动授权状态 | 一次任务最多一份执行身份 |
-| dispatch_outbox | 稳定消息 ID、任务 ID、目标、动作、发送期限、租约 | 可重发投递意图，不在 Relay 排队 |
+| dispatch_outbox | 稳定消息 ID、任务 ID、目标、动作、发送期限、租约 | 可重发投递意图，Gateway 只持有有界的临时发送队列 |
 | delivery_records | 委托结果 ID、来源 Session、交付状态 | 区分执行结束与结果交付 |
 | request_tombstones | 员工与 request_id 唯一、请求摘要、原 task_id | 明细清理后仍不能把重复提交当新执行 |
 | plane_links、plane_events、plane_outbox | 工单映射、事件标识、执行轮次、回写记录 | Webhook 去重和可恢复回写 |
@@ -230,7 +233,7 @@ Worker 直接向自己的账本提交执行事实，batond 只转发并代收中
 ### 启动流程
 
 1. Coordinator 在事务中接受任务并保存 outbox，返回已接受。
-2. 调度器经 Relay 发送 prepare。prepare 只能绑定目标 Worker、被动检查能力与工作目录，不能把任务输入交给模型，也不能启动可能执行扩展或启动钩子的 Agent。已有空闲 Agent 可以保持原进程。
+2. 调度器经 Gateway 发送 prepare。prepare 只能绑定目标 Worker、被动检查能力与工作目录，不能把任务输入交给模型，也不能启动可能执行扩展或启动钩子的 Agent。已有空闲 Agent 可以保持原进程。
 3. 节点保存 prepared，返回对应 execution_id、Session 和存储代次；Coordinator 保存准备事实。
 4. Worker 准备实际提交输入时，请求短时启动许可。Coordinator 在事务中重新检查任务状态、取消标记、目标身份、排队期限和执行身份。
 5. 事务保存 start_authorized 后，Coordinator 签发绑定 execution_id、请求摘要与有效期的许可。数据库提交失败则不签发。
@@ -340,29 +343,49 @@ Project Agent 不使用 baton CLI。它的派发通过 `tasks.dispatch` 工具�
 
 ## 通信、认证与输出隔离
 
-### Relay 信封
+### Gateway 与业务接口
 
-拟定协议版本为 1，信封包含 version、message_id、route、priority、correlation_id 和 body。body 是不被 Relay 解释的业务内容。
+沿用节点协议版本 1，信封包含 version、message_id、route、priority、correlation_id 和 body。Gateway 验证协议、消息类型、大小和路由，业务正文的语义与权限由对应处理器验证（R-01、R-03、R-23、R-40）。
 
-节点连接的来源身份由 Relay 根据认证结果附加，Coordinator 不信任客户端自报的来源。节点上行默认只允许发到控制服务；只有经过认证的 Coordinator 控制连接可以选择目标节点。Relay 无须理解 task_id 或授权范围，也能阻止节点绕过 Coordinator 任意投递。
+Gateway 根据认证结果构造 `employee_id`、`node_id`、`credential_id`，附加 `incarnation` 与 `conn_id`。客户端自报来源、节点到节点路由、未知协议版本和未允许的消息类型均拒绝。优先级由已校验的消息类型确定，节点不能把普通输出声明为任务控制来绕过限流。业务处理器继续核对员工、任务、Execution、Session 与来源的关联。
 
-持久化命令只有在中心或节点保存后才得到业务 ACK。Relay 的“已转发”仅表示运输结果，不能作为任务已接受、输入已发送或结果已保存的证明。
+`internal/control` 中的 prepare、start、result、agent、session、files 等业务处理器保留，移除其 `*websocket.Conn` 参数和控制链路状态依赖。接口的最小职责如下，具体 Go 名称可随实现统一。
+
+| 接口 | 输入与结果 | 约束 |
+|---|---|---|
+| Authenticator | 连接凭据 → 已验证节点身份 | 验签、受众、有效期与吊销状态；Gateway 不持有完整 Store 或签名私钥 |
+| NodeHandler.Connected / Disconnected | 已认证身份、incarnation、conn_id | 保存上下线事实；以 conn_id 条件更新，旧连接退出不能覆盖新连接 |
+| NodeHandler.Handle | 已认证连接上下文、受限信封 | 身份不从 body 读取；类型白名单与业务授权；分派前复核连接和吊销状态 |
+| NodeSender.Send | 目标节点、可选的期望 conn_id、信封 | 回复必须绑定原连接；主动投递选择当前有效连接；离线或满队列返回明确错误 |
+| DisconnectCredential / Close | 凭据或进程生命周期 | 关闭连接、取消等待与释放队列，不能修改任务执行结论 |
+
+本次固定保护上限：握手并发 32、业务并发 16、活动连接槽位 128。每节点控制入站每秒 64 条，输出每秒 128 条，突发额度相同；输出优先级由服务端允许类型和已登记的 Session RPC 动作决定。输入确认和原 operation_id 查询走控制队列，未知关联的 Session 响应走输出队列。同步另有 2 条队列，未同步节点的旧报告等到同步完成再分派；心跳合并为一个待处理标志。业务处理最长 5 秒，临时数据库失败通过断线触发兼容客户端退避。吊销后台每 200ms 恢复，认证和来源授权查询数据库权威事实。
+
+上述接口不暴露 WebSocket。socket 读循环只做有界读取、校验和入队，数据库操作由有并发上限的业务分派执行；回复和主动投递统一使用 NodeSender。Gateway 不注册任意业务路由，不为消息提供通用数据库操作入口。
+
+`Send` 成功只表示进入有界发送队列。持久化命令仍由中心或节点保存后返回业务 ACK；数据库事务、dispatch_outbox、稳定 message_id/event_id、节点与 Worker 账本及终态保护均保留。消息入队、网络发送、节点接收和实际执行分别处理。临时历史、输出和输入 RPC 不进入持久业务 outbox；补充输入确认丢失时查询原 operation_id，不自动补发正文。
+
+删除 Relay 与 Coordinator 之间的控制拨号、控制 Token、快照传输与 ACK、在线会话快照传输及对应重连。进程内连接事件替代这些同步协议；启动清理旧 presence、加载吊销状态和业务 ACK 仍然保留。删除范围以跨进程用途为准，不能整删 internal/control 或所有确认消息。
 
 新增消息类型（2026-10-18 修订）：节点上行的 `ProjectRuntimeRequest`，携带 `run_id` 和 `lease_epoch`，处理方式与 `AgentRequest` 相同；中心下行的 `project_run_start`、`project_run_wake`、`project_run_stop`。旧版本 batond 不认识这些类型时明确拒绝，Coordinator 不会把 Project Agent 放到这样的节点上。
 
 ### 节点凭据与吊销
 
-拟采用成熟库实现的 Ed25519 签名 JWT，绑定节点、员工、credential_id、签发方、受众与有效期。签名私钥仅在 Coordinator；Relay 持有验证公钥与吊销快照。业务正文不在 JWT 中。节点连接凭据与启动许可使用不同受众和用途，不能互相代用。
+保留 Ed25519 签名 JWT，绑定节点、员工、credential_id、签发方、受众与有效期。Authenticator 取得所需验证能力，签名私钥由 Coordinator 的签发服务持有。节点连接凭据继续使用 baton-node 受众，启动许可使用 baton-start，两者不能互相代用。升级保留签名身份与有效凭据，不强制节点重新注册（R-04、R-40）。
 
-Relay 启动后先取得有效的安全快照，才能开放节点认证；无法取得快照时不允许凭过期内存状态放行。Coordinator 短时重启不清除 Relay 现有连接与已知吊销信息。
+Coordinator 启动时先检查数据库版本、清理前一进程遗留的在线状态并恢复权威吊销状态，再开放节点认证。状态无法取得时保持未就绪并拒绝新连接；运行中数据库不可用时拒绝需要持久化或新授权的操作，不伪造业务 ACK。已启动 Worker 沿用 R-25 的本地执行与补报规则。
 
-吊销在 PostgreSQL 保存，并发送给 Relay。Relay 应用后断开对应连接并 ACK，API 才表示吊销已生效。未确认时返回处理中；不能先显示已吊销再继续允许同一凭据连入。Coordinator 从保存吊销起即拒绝该节点的新业务操作。
+吊销顺序为：PostgreSQL 提交决定 → 本地认证与分派拒绝该凭据 → 关闭活动连接 → 保存已应用事实。API 保留 pending/effective 区分，只有完成本地禁止接入与断开后才返回 effective；保存已应用事实失败时保持 pending 并恢复处理。认证完成到注册连接之间再次检查吊销，排队消息在业务授权前再次检查。业务事务继续以数据库吊销事实为准，不能仅靠关闭 socket 或缓存拒绝集合；已经取得授权的执行按原有取消规则处理。
 
 节点上线附带每次 batond 启动生成的 incarnation。已有不同 incarnation 活动时拒绝身份接管；相同进程的重连可替换其旧连接。节点重装或本地账本丢失必须经过重新注册或显式身份恢复，不能只恢复旧 token 就继续接收旧执行。
+
+每次连接生成独立 conn_id。新连接认证并保存上线事实后仍须完成 node.sync，才能标为 executable。上下线、同步、迟到回复和队列分派都核对当前连接代次；旧连接退出与迟到操作不能污染新连接状态。
 
 ### 有界队列与消息限制
 
 首组配置如下，作为待验证预算。控制消息和输出各有队列，控制消息优先，历史与预览按小段发送。
+
+上行和下行均按节点设置独立的有界控制、输出队列，跨节点轮转调度，控制优先但为输出保留有限处理机会。单节点的队列、并发或输出限额耗尽时只限制该节点，不挤占其他节点的控制额度。另设全局消息处理与握手并发上限；具体初值、可配置范围与过载错误在实现中登记并通过负载测试验证。输出缓存总量包含排队、分派中及待写片段，不能靠复制到下一层绕过上限。
 
 | 配置 | 初始值 | 超限处理 |
 |---|---|---|
@@ -370,6 +393,7 @@ Relay 启动后先取得有效的安全快照，才能开放节点认证；无�
 | 输出片段与历史页的目标大小 | 16 KiB | 分段并携带游标；超大单条内容给出截断和本地引用 |
 | 单次文本文件预览 | 64 KiB | 返回截断标志与剩余内容引用 |
 | 单连接控制队列 | 最多 32 条且最多 1 MiB | 转发失败，由业务 outbox 稍后重试；不丢失已持久化意图 |
+| 单节点输出待发送量 | 256 KiB | 输出超限返回缺口或限流原因，不占控制队列 |
 | 单输出订阅待发送量 | 256 KiB | 断开该订阅或丢弃输出并发送 gap，不阻塞 Agent |
 | 每个中心进程的输出缓存总量 | 32 MiB | 拒绝新订阅或让慢订阅重连，不影响任务控制 |
 | 心跳间隔与离线判断 | 10 秒；30 秒未联系判离线 | 只更新连接状态，不直接宣布任务失败或取消 |
@@ -480,7 +504,15 @@ Project Agent 的对话事件和项目记忆修订不随 180 天明细清理删�
 
 ## 部署、兼容与变更
 
-北京拟以独立服务运行 Relay、Coordinator 和 PostgreSQL。静态 Web UI 由 Coordinator 提供，入口代理终止外部 TLS；Relay 路径启用 WebSocket。内部控制连接使用独立凭据或 mTLS，不暴露给员工节点。
+北京或 Railway 部署 Coordinator 与 PostgreSQL。静态 Web UI、HTTP API、浏览器事件和节点 WSS 入口均由 Coordinator 提供；部署入口终止外部 TLS，并将 WebSocket 升级转发到相应路径。节点沿用现有协议入口路径，长连接不继承普通 API 请求的总读写超时。Gateway 不单独监听 Relay 控制端口，不需要控制 Token。
+
+Coordinator 保持单个活动实例，升级顺序为停止旧实例、按需迁移、启动新实例。重启会断开节点，batond 退避重连并同步后恢复业务；不承诺跨 Coordinator 重启保持 socket。停机时先停止接入与新分派，再有界清理活动连接和临时 RPC。持久 outbox 与节点账本负责恢复，关闭连接不能改变已保存的执行事实。多副本连接归属、leader fencing 与无中断滚动升级另行设计。
+
+兼容验证使用调查基线的原版 batond 二进制、原有身份和账本，只调整连接地址。节点凭据、incarnation/conn_id、消息字段、业务 ACK、Session 操作 ID 及能力拒绝行为保持兼容。部署可将原节点域名转发到 Coordinator，也可更新节点地址；不得依赖 WSS 重定向承载认证。保留现有签名密钥与节点数据，升级不重建任务或 Session。
+
+先接通内置 Gateway 并验证兼容，再删除 cmd/relay、独立 Relay 部署、控制连接配置和专用协议。原 internal/relay 中的业务进程测试按能力迁移，保留恢复与故障注入覆盖；相应调整 CI 分组、诊断采集、README 和关联规格的路径说明。业务模型不因进程合并改变，不预设数据库迁移；需要迁移时只增加版本，不修改已应用迁移。
+
+本次不实现 iroh。认证后的连接上下文与发送接口独立于 WebSocket，为后续传输适配保留边界。iroh 的端点身份绑定、消息分帧和授权需要届时验证；节点之间直接派发任务属于新的业务设计，不能绕过中心记账。
 
 Windows 节点拟使用当前员工身份的登录启动任务，macOS 使用 LaunchAgent，Linux 使用 systemd --user 或显式前台运行。默认不以 LocalSystem 或 root 运行。员工退出、系统睡眠及虚拟机暂停按离线处理，不将其当作无人值守执行承诺。
 
@@ -493,6 +525,8 @@ Agent 版本按验证过的范围登记，发现未知版本时标为未验证�
 ## 验证计划
 
 ### 已执行调查
+
+2026-10-19 在 d1bf7f95b32f6c7ab3e675e515a6c8033646cb86 核查了 internal/relay/relay.go 的控制重连、认证、来源注入和队列，internal/control 的业务分派、outbox 与临时 RPC，以及 internal/node/session.go 的重连同步与未确认报告补报。当前上行是共享控制/输出队列，尚无完整的每节点公平调度。这段记录对应原独立 Relay 的调查；Gateway 的新路径验证见 PS-171。
 
 | 项目 | 设置与观察 | 结果 | 证据范围 |
 |---|---|---|---|
@@ -516,7 +550,7 @@ Agent 版本按验证过的范围登记，发现未知版本时标为未验证�
 | R-13、R-16、R-23 | 接受与 prepare 各边界断网，重投 100 次，排队过期后延迟送达 | 同一任务多次提交 Agent、过期启动、重复产生任务 | 状态机与集成故障注入 | planned |
 | R-17～R-18、R-20～R-22 | start_intent 同步前后、写 pipe 前后、取消与完成竞态；记录实际外部调用次数 | 无法确认时重发输入、把中止请求当停止、丢核实事实 | Worker 子进程故障注入 | planned |
 | R-14、R-23 | 子结果重复、来源停止、交付意图保存后崩溃 | 重复注入来源、自动复活已停止 Session | 两 Worker 集成 | planned |
-| R-24～R-26 | 分别重启 Relay、Coordinator、batond、Worker，短时停止 PostgreSQL | 重复执行、唯一执行事实丢失、未落库却 ACK | 容器与本地进程 | partial |
+| R-24～R-26 | 分别重启 Coordinator、batond、Worker，短时停止 PostgreSQL | 重复执行、唯一执行事实丢失、未落库却 ACK、未同步节点被标可执行 | 容器与本地进程 | planned（Gateway 路径） |
 | R-27～R-30 | 从 Web UI 查看委托树并干预任务，执行后断开节点；搜索数据库、日志及输出缓存；慢浏览器与历史补取 | UI 状态或操作反馈不实、中心出现执行 Session 的完整历史、缺口被隐藏、内存无界增长 | Web UI 集成与隐私检查 | planned |
 | PA-01～PA-22 | 见 Project Agent TECH 的验证表 | 同左 | 进程测试、真实 Runtime 与订阅、三系统 | planned（2026-10-18 修订） |
 | R-31～R-32 | 路径替换、符号链接、junction、越界路径、缺失固件、超大日志 | 越界读取、绕过文件通道、产物不可用仍刷机 | 三系统与文件通道 | planned |
@@ -526,6 +560,23 @@ Agent 版本按验证过的范围登记，发现未知版本时标为未验证�
 故障注入需要一个记录调用次数的无副作用执行器，逐个覆盖意图提交和实际输入之间的崩溃窗口。模型执行、设备操作和真实网络路径再分层验证；模拟通过不能代替真实 Agent、交换机或跨系统结果。
 
 当前本机只能直接覆盖 macOS arm64。Windows、Linux、实际北京网络和 Plane 测试项目需要对应环境，缺少环境时明确保留未验证状态，不使用交叉编译结果代替。
+
+### Gateway 重构验收
+
+本机 macOS / PostgreSQL 17.11 验证：原版 batond 来自 PS-170 合并基线，只改连接地址；全量分组和相关 race 通过。Gateway 的数据库恢复、认证/吊销竞争、旧 conn_id、重复结果和两节点输出洪泛均有新路径证据。真实 Pi 1.3.0 / `openai/gpt-6.1-sol` / Chromium 验证了补充输入确认响应丢失后查询原操作、恶意文本、浏览器断线、Worker 退出后的原生 Session 恢复与第二个任务。Linux/Windows 原生结果以本工单同一 PR 的 CI 为准；24 小时容量验证仍由独立工单承担。
+
+验收证据记录在 PS-171 与同一 PR；独立 Relay 的既有通过记录只用于覆盖映射。
+
+| 要求 | 设置与观察 | 失败条件 |
+|---|---|---|
+| R-03、R-40 | Coordinator + 隔离 PostgreSQL 17，原版 batond 仅调整地址；验证同步、任务、文件、Session 历史/输出/输入/恢复 | 仍需 Relay/control Token、要求重建身份/账本、原协议失败或长连接被 API 超时关闭 |
+| R-01、R-03、R-04 | 两员工、伪造 Source、任意目标、未知类型/版本、超大消息与伪装控制优先级；吊销与握手/入队/连接替换并发 | 越权、吊销提交后仍取得新业务授权、旧连接退出误标新连接、重启放行已吊销凭据 |
+| R-23～R-26 | 真实 Coordinator/batond/Worker，控制执行器计数；执行中重启中心，丢 ACK、重复 prepare/report、短停数据库 | 第二次任务输入或结果记账、连接成功即标可执行、无持久化即 ACK、旧执行身份被替换 |
+| R-29、R-38 | A 持续超额输出并配慢浏览器，B 接收 prepare、取消与结果 ACK；观测所有队列、并发、内存、处理延迟与缺口 | B 因 A 的输出占额被拒绝或饿死、超过配置上限、静默丢控制消息、Worker 输出读取被阻塞 |
+| R-22、R-28～R-30 | 真实 Pi/Worker/浏览器运行一次任务；补充输入响应丢失后查询原 operation_id，断线后补历史与恢复 | 重发输入、隐瞒缺口、中心保存完整执行历史、恢复创建替代执行 |
+| R-40 | 映射并迁移原 Relay 进程测试；Linux/macOS/Windows 原生全量及相关 race，检查 CI 分组与失败材料 | 漏测、只有交叉编译证据、失去 PS-170 的分组或 Coordinator/Worker/PostgreSQL 诊断 |
+
+跨节点背压测试记录配置值、负载与基线对照，并断言控制处理在有界时间内持续取得进展。具体延迟阈值随测试环境固定并公开；本项通过不等于 R-39 的 24 小时容量验收通过。
 
 ## 评审决定与验证缺口
 

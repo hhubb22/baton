@@ -1,14 +1,14 @@
 # Baton
 
-员工使用部署管理员分配的本地账号登录 Coordinator，退出，查询本人身份，领取一次性节点注册凭据，设置默认设备，吊销本人节点的连接凭据，并提交任务。初始口令只能使用到员工完成更换为止。`batond register` 用这张凭据注册节点，把身份保存在本机。`batond run` 用这份身份主动连接 Relay，断线后重连，并在同步完成前不会显示为可执行。吊销生效后，同一连接凭据不能再接入。任务被接受后，Coordinator 把准备命令送到节点；节点先把执行映射写入本地账本，再绑定一个独立的 Session Worker。
+员工使用部署管理员分配的本地账号登录 Coordinator，退出，查询本人身份，领取一次性节点注册凭据，设置默认设备，吊销本人节点的连接凭据，并提交任务。初始口令只能使用到员工完成更换为止。`batond register` 用这张凭据注册节点，把身份保存在本机。`batond run` 用这份身份主动连接 Coordinator，断线后重连，并在同步完成前不会显示为可执行。吊销生效后，同一连接凭据不能再接入。任务被接受后，Coordinator 把准备命令送到节点；节点先把执行映射写入本地账本，再绑定一个独立的 Session Worker。
 
-本目录目前包含这条路径的构建、迁移、HTTP 接口、Coordinator、Relay、batond、Session Worker、Agent 本地 CLI、受限文件浏览、员工 Web UI 和测试。准备阶段不启动 Agent。启动许可通过后，Worker 按 agent_type 选择 Pi 1.3.0 RPC 或 Codex CLI 0.162.1 thread/turn 适配器，任务输入只提交一次；结构化结果在中心保存之后才算交付。两者共用 internal/agent.Adapter 与 Worker 生命周期，测试执行器仍供故障注入使用。其他真实 Agent 适配和管理员网页不在这里；支持范围以明确版本和本机实测报告为准，不能用回放通过代替。
+本目录目前包含这条路径的构建、迁移、HTTP 接口、Coordinator、batond、Session Worker、Agent 本地 CLI、受限文件浏览、员工 Web UI 和测试。准备阶段不启动 Agent。启动许可通过后，Worker 按 agent_type 选择 Pi 1.3.0 RPC 或 Codex CLI 0.162.1 thread/turn 适配器，任务输入只提交一次；结构化结果在中心保存之后才算交付。两者共用 internal/agent.Adapter 与 Worker 生命周期，测试执行器仍供故障注入使用。其他真实 Agent 适配和管理员网页不在这里；支持范围以明确版本和本机实测报告为准，不能用回放通过代替。
 
 中心事务同时锁定任务与执行记录时，统一先锁 `tasks`，再锁 `executions`。准备成功或失败落库、启动许可、执行报告、取消和到期处理均按此顺序串行，避免准备落库与启动许可相互等待而死锁。
 
 节点与 Session 的 SQLite 账本支持 Windows 盘符路径，以及含空格、中文、`%`、`#` 的数据目录；相对路径按进程工作目录解析。账本格式、WAL 与 FULL 同步设置不变。历史损坏按 SQLite 错误码识别，权限、锁、IO 和路径/URI 错误归为暂时读不了（`ErrHistoryUnread`），保留底层原因，不把打开失败当成损坏或新建空历史。
 
-Relay 进程测试的存活探测按平台实现：Unix 使用 `os.FindProcess` 与零信号，Windows 使用 `x/sys/windows` 打开进程句柄并查询等待状态，不把已退出但句柄尚存的进程判为存活。Worker 故障清理统一使用 `os.Process.Kill`；测试服务在 Unix 先发送 SIGTERM，在不支持该信号的 Windows 直接终止。诱饵进程由 Go 测试二进制启动，不依赖 `sleep`；Windows 子进程构建使用 `.exe`。独立停库测试按平台查找 PostgreSQL 可执行文件，Windows 使用 TCP 与固定测试角色，不依赖 Unix socket 或域用户名。产品恢复仍通过认证本地 IPC 确认原 Worker，不把 PID 存在当成同一执行的证据。
+Gateway 进程测试的存活探测按平台实现：Unix 使用 `os.FindProcess` 与零信号，Windows 使用 `x/sys/windows` 打开进程句柄并查询等待状态，不把已退出但句柄尚存的进程判为存活。Worker 故障清理统一使用 `os.Process.Kill`；测试服务在 Unix 先发送 SIGTERM，在不支持该信号的 Windows 直接终止。诱饵进程由 Go 测试二进制启动，不依赖 `sleep`；Windows 子进程构建使用 `.exe`。独立停库测试按平台查找 PostgreSQL 可执行文件，Windows 使用 TCP 与固定测试角色，不依赖 Unix socket 或域用户名。产品恢复仍通过认证本地 IPC 确认原 Worker，不把 PID 存在当成同一执行的证据。
 
 ## 运行要求
 
@@ -60,6 +60,14 @@ BATON_REAL_CODEX=1 BATON_CODEX_MODEL='gpt-6-luna' \
 
 无新增中心迁移；依赖 sourcegraph/jsonrpc2 v0.2.1，固定 Schema 测试使用 santhosh-tekuri/jsonschema/v5 v5.3.1。
 
+## 中心部署与升级
+
+中心运行一个 Coordinator 与 PostgreSQL。将 `/v1/node` 和 `/api/v1/events` 的 WebSocket 升级转发给同一 Coordinator 端口，入口提供 TLS；直接监听 HTTPS 时设置现有证书和密钥变量。普通 API 保留 20 秒读取、60 秒写入期限，节点和浏览器长连接单独清除请求期限。保留单活动 Coordinator，不支持多个进程共同调度同一数据库。
+
+原版 batond 继续使用原身份、签名密钥、凭据和节点/Worker 账本，只把 `batond run --relay` 的地址改为 `wss://baton.example/v1/node`。`--relay` 保留为客户端兼容参数。Coordinator 重启会断开节点；节点重新认证、完成 `node.sync` 后才可执行，旧 Worker 按原许可和期限继续，结果按原事件标识补报，中心不重新发送原任务输入。
+
+每节点上/下行各有 32 条、1 MiB 的控制队列和 16 条、256 KiB 的输出队列；另有 2 条同步队列。队列计入在途处理/写入，断开释放剩余消息。中心最多同时认证 32 个节点、处理 16 个业务调用和保留 128 个连接槽位。控制/输出入站速率分别为每秒 64/128 条，突发额度相同；超限返回 `queue_full`，只限制来源节点。节点轮转调度，每处理最多 8 条控制消息为输出留一次机会。Gateway、待返回的 Session 输出及浏览器写入共用 32 MiB 输出预算，输入与原操作查询不占输出额度。这些值是当前固定保护上限，容量验证另见相应工单。
+
 ## 配置
 
 | 变量 | 作用 |
@@ -73,15 +81,11 @@ BATON_REAL_CODEX=1 BATON_CODEX_MODEL='gpt-6-luna' \
 | `BATON_NODE_CREDENTIAL_TTL` | 节点连接凭据有效期，默认 `720h`，允许 `1h` 到 `2160h` |
 | `BATON_TLS_CERT_FILE` | 与 `BATON_TLS_KEY_FILE` 同时设置时，进程直接提供 TLS |
 | `BATON_TLS_KEY_FILE` | TLS 私钥文件 |
-| `BATON_CONTROL_ADDR` | Coordinator 控制连接监听地址，默认 `127.0.0.1:9443`，不能与 API 地址相同 |
-| `BATON_CONTROL_TOKEN` | Coordinator 与 Relay 共用的控制凭据，20 到 200 个字符。不要写入日志 |
 | `BATON_NODE_SIGNING_KEY` | Coordinator 的 Ed25519 PKCS#8 私钥文件，权限必须是仅当前用户可读 |
 | `BATON_HEARTBEAT_INTERVAL` | 心跳间隔，默认 `10s`，允许 `100ms` 到 `2m` |
 | `BATON_OFFLINE_AFTER` | 未联系超过该时间判离线，默认 `30s`，允许 `200ms` 到 `10m`，并且必须晚于心跳 |
-| `BATON_LISTEN_ADDR` | Relay 接受节点连接的地址 |
-| `BATON_COORDINATOR_URL` | Relay 连接的 Coordinator 控制入口，必须是不带路径和凭据的 `https` 地址 |
 | `BATON_ENROLLMENT_TOKEN` | `batond register` 读取的一次性注册凭据。不要写入命令行 |
-| `BATON_TLS_CA_FILE` | `batond` 和 Relay 额外信任的 CA 证书文件。地址仍必须是 https 或 wss |
+| `BATON_TLS_CA_FILE` | `batond` 额外信任的 CA 证书文件。地址仍必须是 https 或 wss |
 
 会话 Cookie 名为 `baton_session`，固定带 `Secure`、`HttpOnly` 和 `SameSite=Strict`。进程监听 HTTP 时也保持这些属性。浏览器只在 HTTPS 请求里送回该 Cookie；入口代理终止 TLS 时，浏览器看到的来源仍是 HTTPS。
 
@@ -93,7 +97,6 @@ BATON_REAL_CODEX=1 BATON_CODEX_MODEL='gpt-6-luna' \
 
 ```text
 go build -o bin/coordinator ./cmd/coordinator
-go build -o bin/relay ./cmd/relay
 go build -o bin/batond ./cmd/batond
 go build -o bin/baton ./cmd/baton
 ```
@@ -111,12 +114,10 @@ BATON_DATABASE_URL=postgres://127.0.0.1:5432/baton ./bin/coordinator admin emplo
 ```
 
 ```text
-BATON_DATABASE_URL=postgres://127.0.0.1:5432/baton BATON_ALLOWED_ORIGINS=https://baton.example BATON_CONTROL_TOKEN=change-this-control-token BATON_NODE_SIGNING_KEY=./node-signing.pem ./bin/coordinator serve
+BATON_DATABASE_URL=postgres://127.0.0.1:5432/baton BATON_ALLOWED_ORIGINS=https://baton.example BATON_NODE_SIGNING_KEY=./node-signing.pem ./bin/coordinator serve
 ```
 
-```text
-BATON_LISTEN_ADDR=127.0.0.1:9444 BATON_COORDINATOR_URL=https://127.0.0.1:9443 BATON_CONTROL_TOKEN=change-this-control-token BATON_TLS_CERT_FILE=./tls.pem BATON_TLS_KEY_FILE=./tls.key ./bin/relay
-```
+
 
 创建和重置把一次性口令写到标准输出，只显示这一次。数据库保存 Argon2id 摘要。标准错误和 HTTP 日志不记录口令、会话令牌、CSRF 令牌、注册凭据或节点连接凭据。不要把标准输出并进普通运行日志。
 
@@ -171,7 +172,7 @@ Pi 使用 `--mode rpc`，禁用自动任务重试、启动联网、扩展/MCP/sk
 
 Worker 在首次中止报告后继续只读观察适配器的停止证据；即使 `Abort` 等待超时，后来观察到 `agent_settled` 仍会持久化并补报确认停止。两份报告使用不同且稳定的事件 ID，重复轮询、ACK 丢失或账本重开不重复创建确认事件；中心沿用已有事件去重记录 `stop_confirmed_at`。Pi 使用过工具时仍上报 `OutcomeKnown=false`，任务保持待核实与执行绑定，不把稍后的 assistant error 当普通失败结果覆盖。是否在超时后强制结束 Pi 进程树尚未决定，本轮不实现，见 TECH 的 Q6。
 
-真实入口的中止轮询通过 `store.GetTask` 读取状态与从 `execution_stops` 派生的停止字段，不直接把它们当作 `tasks` 的列；读取失败保留脱敏后的实际错误。无模型回归 `go test -v -count=1 ./internal/relay -run '^TestRealPiStopStatusRead$'` 使用测试 PostgreSQL、真实 Baton 进程及计数执行器，覆盖无停止记录和已有停止确认但结果未知的读取，不启动 Pi 或调用模型。
+真实入口的中止轮询通过 `store.GetTask` 读取状态与从 `execution_stops` 派生的停止字段，不直接把它们当作 `tasks` 的列；读取失败保留脱敏后的实际错误。无模型回归 `go test -v -count=1 ./internal/gateway -run '^TestRealPiStopStatusRead$'` 使用测试 PostgreSQL、真实 Baton 进程及计数执行器，覆盖无停止记录和已有停止确认但结果未知的读取，不启动 Pi 或调用模型。
 
 无模型检查（不登录、不执行任务）：
 
@@ -179,7 +180,7 @@ Worker 在首次中止报告后继续只读观察适配器的停止证据；即�
 BATON_PI_PROBE=1 go test -v -count=1 ./internal/agent/pi -run '^TestPiNoModelProbe$'
 ```
 
-真实入口默认跳过、CI 不启用。**在 macOS 开发机**准备 Go、PostgreSQL 17 测试库、上述 Pi/Node 版本，设置 `BATON_TEST_DATABASE_URL`、`BATON_PI_MODEL` 与所选 provider 的 API key 环境变量（例如 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY` 或 Vertex 的 `GOOGLE_CLOUD_API_KEY`）。`GOOGLE_CLOUD_API_KEY` 会保留在隔离进程环境中，Vertex 可选择 `BATON_PI_MODEL=google-vertex/gemini-3.1-flash-lite`。不要把 key 值写进命令、文件或输出；入口不会读取已登录用户的 auth.json、HOME 或真实工作区，因此只有 OAuth 登录、没有独立环境凭据时需先准备所选入口的环境凭据。已有测试库需允许创建临时 schema，禁止指向业务库。运行：
+真实入口默认跳过、CI 不启用。**在 macOS 开发机**准备 Go、PostgreSQL 17 测试库、上述 Pi/Node 版本，设置 `BATON_TEST_DATABASE_URL`、`BATON_PI_MODEL`（默认 `openai/gpt-6.1-sol`）与所选 provider 的 API key 环境变量（例如 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY` 或 Vertex 的 `GOOGLE_CLOUD_API_KEY`）。`GOOGLE_CLOUD_API_KEY` 会保留在隔离进程环境中，Vertex 可选择 `BATON_PI_MODEL=google-vertex/gemini-3.1-flash-lite`。不要把 key 值写进命令、文件或输出；入口不会读取已登录用户的 auth.json、HOME 或真实工作区，因此只有 OAuth 登录、没有独立环境凭据时需先准备所选入口的环境凭据。已有测试库需允许创建临时 schema，禁止指向业务库。运行：
 
 ```sh
 BATON_REAL_PI=1 go test -v -count=1 -timeout=30m ./... -run '^TestRealPi$'
@@ -187,7 +188,7 @@ BATON_REAL_PI=1 go test -v -count=1 -timeout=30m ./... -run '^TestRealPi$'
 
 若需要在本机检查失败时的原生历史，可在同一命令前增加 `BATON_REAL_PI_KEEP=1`。入口会提前打印独立隔离目录的绝对路径，结束后不自动删除其中的 `isolated`（HOME、工作区、探针）与 `stack/node/sessions`（Worker 原生历史）；两者为兄弟目录，沙箱仍只允许 Pi 读取指定的会话目录，而非 `stack` 中的节点密钥。默认不设置时两处目录照常由 `go test` 清理。保留目录还包含测试用密钥、节点身份、上下文令牌和会话原文：**仅在自己的开发机检查，不上传/粘贴原始文件或目录清单；排查完成后自行删除整个隔离目录。** 临时测试数据库 schema 仍按原有清理流程处理，不在保留目录内。
 
-此入口在临时目录构建 Baton 二进制，创建独立 HOME/Pi 配置/工作区、测试 schema 与真实 Coordinator/Relay/batond/Worker，透传允许的 provider 环境变量，不复制或打印凭据。macOS `sandbox-exec` 在 `deny default` 后导入系统 `bsd.sb` 提供进程启动权限，再收紧文件读写，只额外允许系统/运行时只读路径与测试 IPC。先验证目录内可写可读，再检查目录外测试哨兵不可读写、符号链接不能越界；沙箱启动崩溃不能冒充隔离成功。失败输出退出码、错误（含信号）和 stderr，不退回无沙箱模式；Go 的退出码 `-1` 表示没有普通退出码，例如进程被信号终止。使用模型验证一次输入/结构化结果、CLI 委托与子结果原生历史确认、执行中中止、batond 重连，以及原生 Session 加载后新回合的上下文回忆与夹具未重放；另检查缺失历史拒绝。输出工具版本、平台、请求/实际模型及各能力“支持/不支持/未验证”；任务失败/待核实时先脱敏，再只输出中心记录的 `status`、`error_code`、`error_message`、`summary` 和 `evidence_empty_reason`，不打印原生历史。若中心为 `result_format`，本次模型的结构化结果标为“不支持”（可换更强模型复验），不能推断其他模型均不支持。任务提示给出完整有效 JSON 示例，但真实模型是否遵循仍待实测。默认退出清理临时目录与测试进程；模型不遵循协议或环境问题会使其他对应能力保留未验证，不能据此宣称跨平台支持。
+此入口在临时目录构建 Baton 二进制，创建独立 HOME/Pi 配置/工作区、测试 schema 与真实 Coordinator/batond/Worker，透传允许的 provider 环境变量，不复制或打印凭据。macOS `sandbox-exec` 在 `deny default` 后导入系统 `bsd.sb` 提供进程启动权限，再收紧文件读写，只额外允许系统/运行时只读路径与测试 IPC。先验证目录内可写可读，再检查目录外测试哨兵不可读写、符号链接不能越界；沙箱启动崩溃不能冒充隔离成功。失败输出退出码、错误（含信号）和 stderr，不退回无沙箱模式；Go 的退出码 `-1` 表示没有普通退出码，例如进程被信号终止。使用模型验证一次输入/结构化结果、CLI 委托与子结果原生历史确认、执行中中止、batond 重连，以及原生 Session 加载后新回合的上下文回忆与夹具未重放；另检查缺失历史拒绝。输出工具版本、平台、请求/实际模型及各能力“支持/不支持/未验证”；任务失败/待核实时先脱敏，再只输出中心记录的 `status`、`error_code`、`error_message`、`summary` 和 `evidence_empty_reason`，不打印原生历史。若中心为 `result_format`，本次模型的结构化结果标为“不支持”（可换更强模型复验），不能推断其他模型均不支持。任务提示给出完整有效 JSON 示例，但真实模型是否遵循仍待实测。默认退出清理临时目录与测试进程；模型不遵循协议或环境问题会使其他对应能力保留未验证，不能据此宣称跨平台支持。
 
 Pi 初始化探针及历史恢复失败时，入口输出 `Start` 错误与阶段（`version` / `rpc`、具体握手步骤）、子进程退出码和错误/信号、stderr 最后 20 行（至多保留 8 KiB 原始尾部，截断时丢弃首段不完整行）。诊断仅通过 `pi.WithDiagnostics()` 显式启用，保存在内存、不写原始日志文件；输出前屏蔽实际敏感环境值、常见凭据字段/Bearer/JWT 和疑似 key 的长串，不输出 stdout、RPC 状态或原生历史。`sandbox-exec` 或 Pi 写到 stderr 的拒绝原因也保留；`exit_code=unavailable` 表示没有取得进程退出状态，`-1` 需结合信号错误判断，`cleanup_kill_requested=true` 表示 Baton 曾请求强制清理。生产默认继续丢弃 stderr。
 
@@ -196,7 +197,7 @@ Pi 初始化探针及历史恢复失败时，入口输出 `Start` 错误与阶�
 沙箱自检和初始化拒绝诊断可不带模型或数据库单独运行；macOS CI 重复执行 10 次并记录 Darwin 版本，不能据此推断其他 macOS 版本兼容性：
 
 ```sh
-go test -v -count=10 ./internal/relay -run '^TestPiSandbox'
+go test -v -count=10 ./internal/gateway -run '^TestPiSandbox'
 ```
 
 生产适配器**不是 OS 沙箱**：工作目录与系统提示不能限制工具访问。需按部署环境提供外部沙箱和最小权限；`BATON_PI_HOME` 可选择隔离 HOME/配置与有限环境变量，但它本身不限制文件或网络权限。真实入口的沙箱也只证明本地文件隔离，不是网络隔离或抵御恶意模型泄露凭据的安全证明。Linux/Windows 真实模型入口尚未验证；不能把 Go 交叉编译、原生 CI 的 fake RPC 子进程回放或无模型握手当成真实模型通过。
@@ -216,7 +217,7 @@ baton task cancel TASK_ID --json
 
 委托文件最小内容为 `{"request_id":"stable-request-id","description":"读取目标现场信息"}`。调用方自行保存稳定的 `request_id`；重试必须沿用原 ID 和原内容。CLI 不生成 ID，也不因等待到期或响应丢失重新委托。相同内容返回原任务，不同内容返回 `conflict`，即使默认设备后来改变也不改派原任务。未指定目标时使用中心保存的本人默认设备；目标离线仍保留这个目标。
 
-所有命令走当前用户限定的 Unix socket / Windows named pipe，再经已有认证 Relay 通道访问中心。文件只含 IPC 地址和随机凭据，来源三元组由 batond 的 SQLite 绑定解析；员工、节点由 Relay 认证决定。中心重新核对来源任务、Session、Execution 和节点。新委托只允许从尚在执行、未取消且未到期的当前绑定发起；已接受任务在来源结束后仍可查询。请求不能指定其他员工或替换来源；授权文本完全继承来源，显式指定时必须逐字相同，不推断自由文本权限包含关系。查询和取消仅限来源任务及其直接委托，不开放同员工的其他任务。
+所有命令走当前用户限定的 Unix socket / Windows named pipe，再经已有认证 Gateway 通道访问中心。文件只含 IPC 地址和随机凭据，来源三元组由 batond 的 SQLite 绑定解析；员工、节点由 Gateway 认证决定。中心重新核对来源任务、Session、Execution 和节点。新委托只允许从尚在执行、未取消且未到期的当前绑定发起；已接受任务在来源结束后仍可查询。请求不能指定其他员工或替换来源；授权文本完全继承来源，显式指定时必须逐字相同，不推断自由文本权限包含关系。查询和取消仅限来源任务及其直接委托，不开放同员工的其他任务。
 
 `task get` 返回中心状态、Execution 和 `input_generation`。查询子委托时，`delivery_status` 表示子结果交给来源 Worker 的状态，`delivery_id` 是稳定交付标识；查询来源任务自身时，`delivery_status` 仍表示该执行结果是否已存中心。`task result` 同时返回可信 `task_id`、`target_node_id`、`session_id`、`execution_id`、状态、摘要、证据、产物和错误；未保存候选结果时 `ready` 为 false。`task relations` 返回该任务的来源与执行边，以及从当前来源 Session 发出的直接子委托，单次上限 100 条，超出明确报错，不静默截断。
 
@@ -288,7 +289,7 @@ batond 在心跳补报周期领取中心已保存的子结果，先写入来源 
 
 可以改成本人的任一有效节点，包括离线节点。其他员工的节点返回 403，不说明该节点是否存在。成功响应里的 `default_device_node_id`、显示名、系统和注册序号是数据库里实际保存的值；`default_pc_node_id` 保留并返回相同 ID。
 
-`GET /nodes` 和 `GET /nodes/{id}` 凭登录会话返回本人节点。响应包含在线状态、最后联系时间、状态更新时间、是否已同步、`executable` 和 `revocation_status`。尚未同步或已有吊销决定的节点 `executable` 为 false。`revocation_status` 为 `none`、`pending` 或 `effective`。只有 Relay 确认应用后才是 `effective`；决定已保存但还没有回执时是 `pending`。查询其他员工的节点或不存在的节点都返回 403，响应相同。非法节点标识返回 400。这两个读取接口不要求 CSRF。
+`GET /nodes` 和 `GET /nodes/{id}` 凭登录会话返回本人节点。响应包含在线状态、最后联系时间、状态更新时间、是否已同步、`executable` 和 `revocation_status`。尚未同步或已有吊销决定的节点 `executable` 为 false。`revocation_status` 为 `none`、`pending` 或 `effective`。只有本地禁止接入、关闭连接并保存应用事实后才是 `effective`；决定已保存但尚未完成这些步骤时是 `pending`。查询其他员工的节点或不存在的节点都返回 403，响应相同。非法节点标识返回 400。这两个读取接口不要求 CSRF。
 
 `GET /nodes` 和吊销响应同时返回当前 `default_device` 及内容相同的 `default_pc`。Web 使用 `default_device` 和新设置接口。节点列表和详情不包含 `role`。节点被吊销后，这里仍返回原来的 `node_id`，并把 `invalid` 和 `needs_reselection` 设为 true，提示需要重新选择。系统不会自动改选其他节点。
 
@@ -300,9 +301,9 @@ batond 在心跳补报周期领取中心已保存的子结果，先写入来源 
 
 成功时中心先把吊销决定写入数据库，记录操作者、时间和关联的节点与 `credential_id`。从这时起，该节点不能再同步，也不能被选为新的默认设备。历史节点和凭据记录保留，不删除。
 
-响应里的 `status` 表示处理状态。Relay 已把吊销应用到内存、断开对应连接并回执时为 `effective`，同时给出 `applied_at`。Relay 当时不可达，或回执还没到，则为 `pending`，`applied_at` 为 null。不能把 `pending` 理解成凭据已经不能连接，也不能理解成离线节点上的本地进程已经停止。
+响应里的 `status` 表示处理状态。Coordinator 已禁止该凭据接入和业务分派、断开对应连接并保存已应用事实后为 `effective`，同时给出 `applied_at`。保存失败时为 `pending`，后台每 200ms 重试未完成的吊销，启动时也恢复这项处理。`pending` 表示尚未确认全部本地步骤，数据库中的吊销决定始终参与认证与业务授权。
 
-Relay 重新连上 Coordinator 时会取得包含该吊销的安全快照；已经连着时，Coordinator 会补发吊销。两种路径都会拒绝同一 `credential_id`，避免 Relay 用过期的内存状态放行。`batond` 收到认证失败后退出并说明需要重新认证，不会用失效凭据重新注册。
+Gateway 复核认证到登记之间的吊销，并在排队消息进入业务处理前再次检查凭据和连接代次。旧连接的断开或迟到结果不更新新连接；已吊销节点的未授权任务继续受排队期限约束。`batond` 收到确定的凭据失效后退出并说明需要重新认证；数据库短暂故障、容量耗尽和中心关闭通过断线触发原客户端的退避重连。
 
 ## 任务接受
 
@@ -324,7 +325,7 @@ Relay 重新连上 Coordinator 时会取得包含该吊销的安全快照；已�
 
 `GET /tasks` 返回本人最近 100 条任务。`GET /tasks/{id}` 和 `GET /tasks/{id}/events` 只返回本人的记录和变更，不返回 Session 原文。其他员工的任务和不存在的任务都返回 403，响应相同。非法任务标识返回 400。这三个读取接口不要求 CSRF。
 
-`dispatch_outbox` 保存 `prepare` 投递意图。Coordinator 在节点在线且已同步时按租约领取，经 Relay 投递，并用同一条消息 ID 重发。从未交给 Relay 的过期消息记为 `queue_timeout`。已经交给 Relay 但还没有确定结果的消息，过期后仍按租约重发，直到节点返回已准备的原映射或 `queue_timeout`。接受响应里的 `target_session_id` 在准备完成前可能是 null。准备成功后任务仍是 `queued`，`GET /tasks/{id}` 能看到节点返回的 Session。
+`dispatch_outbox` 保存 `prepare` 投递意图。Coordinator 在节点在线且已同步时按租约领取，经 Gateway 投递，并用同一条消息 ID 重发。从未交给 Gateway 的过期消息记为 `queue_timeout`。已经交给 Gateway 但还没有确定结果的消息，过期后仍按租约重发，直到节点返回已准备的原映射或 `queue_timeout`。接受响应里的 `target_session_id` 在准备完成前可能是 null。准备成功后任务仍是 `queued`，`GET /tasks/{id}` 能看到节点返回的 Session。
 
 ## 准备与 Session
 
@@ -412,7 +413,7 @@ batond files remove --id notes [--data-dir 目录]
 
 节点离线返回 `node_offline`，已吊销返回 `revoked`。其他员工的节点和不存在的节点都返回 `forbidden`，响应相同。路径越界和符号链接逃逸返回 `path_escaped`。未登记的 `root_id` 返回 `root_forbidden`。
 
-这次请求经 Relay 发给节点并等待同一次响应。它不写入 `dispatch_outbox`，失败后也不会自动重发。节点在实际打开目标时确认它仍在授权目录内；只检查路径字符串不算通过。
+这次请求经 Gateway 发给节点并等待同一次响应。它不写入 `dispatch_outbox`，失败后也不会自动重发。节点在实际打开目标时确认它仍在授权目录内；只检查路径字符串不算通过。
 
 首版没有远程编辑，也没有完整文件下载。`POST`、`PUT` 和 `DELETE` 都不会修改节点上的文件。
 
@@ -435,7 +436,7 @@ batond files remove --id notes [--data-dir 目录]
 
 不存在、无权限、未授权目录、越界/符号链接或只属于另一节点的引用都会使任务以 `artifact_unavailable` 失败，不向执行器提交依赖输入。错误消息包含首个引用索引及 `not_found`、`unavailable`、`root_forbidden`、`path_escaped`、`unsupported_type` 或 `other_node` 原因。prepare 后文件变化导致的失败还会上报每个引用的 `access_status` 和原因；prepare 重发仍返回原执行映射，不创建新执行。
 
-引用只携带定位信息。另一节点有同名文件也不能把原节点的本地路径当作已交付；必须先使用已有通道交付，再引用目标节点的授权目录。大文件不经 Relay，不新增下载接口、任意 URL 代理或制品服务；真实跨机器通道与传输规模留给 T33 验证。
+引用只携带定位信息。另一节点有同名文件也不能把原节点的本地路径当作已交付；必须先使用已有通道交付，再引用目标节点的授权目录。大文件不经 Gateway，不新增下载接口、任意 URL 代理或制品服务；真实跨机器通道与传输规模留给 T33 验证。
 
 ## Web UI
 
@@ -467,7 +468,7 @@ pnpm check:dist
 
 `pnpm dev` 在 `https://localhost:5173` 启动，并把 `/api` 代理到 `BATON_DEV_API`（默认 `https://127.0.0.1:8080`）。Coordinator 的 `BATON_ALLOWED_ORIGINS` 需要包含 `https://localhost:5173`。
 
-`pnpm test:e2e` 会先构建页面，再用 Playwright 驱动本机 Chromium，对真实的 Coordinator、PostgreSQL、Relay 和 batond 覆盖登录、注册节点、修改默认设备、吊销从处理中到已生效，以及跨员工和无效会话被拒绝。运行前设置 `BATON_TEST_DATABASE_URL`。Session 用例另外覆盖真实 Worker 输出、恶意文本、断流和缓存边界；设置 `BATON_REAL_PI_BROWSER=1` 可使用本机已授权的 Pi 登录验证模型、补充输入、Worker 退出后的恢复和同一 Session 的第二个任务，可用 `BATON_PI_MODEL` 显式选择模型。
+`pnpm test:e2e` 会先构建页面，再用 Playwright 驱动本机 Chromium，对真实的 Coordinator、PostgreSQL 和 batond 覆盖登录、注册节点、修改默认设备、吊销从处理中到已生效，以及跨员工和无效会话被拒绝。运行前设置 `BATON_TEST_DATABASE_URL`。Session 用例另外覆盖真实 Worker 输出、恶意文本、断流和缓存边界；设置 `BATON_REAL_PI_BROWSER=1` 可使用本机已授权的 Pi 登录验证模型、补充输入、Worker 退出后的恢复和同一 Session 的第二个任务，可用 `BATON_PI_MODEL` 显式选择模型。
 
 ## 测试
 
@@ -481,18 +482,18 @@ pnpm check:dist
 
 | 检查 | 覆盖范围 |
 |---|---|
-| Linux（`ubuntu-latest`） | 原生构建、Windows/macOS 交叉编译、vet、完整测试；独立 runner 并行运行 agent、session、node、store、relay、control 的 race |
+| Linux（`ubuntu-latest`） | 原生构建、Windows/macOS 交叉编译、vet、完整测试；独立 runner 并行运行 agent、session、node、store、gateway、control 的 race |
 | macOS（`macos-latest`） | 原生构建、vet、完整测试、10 轮 Pi 无模型沙箱回归 |
 | Windows（`windows-latest`） | 原生构建、vet、完整测试，支持按包和用例重复诊断 |
 | Web（`ubuntu-latest`） | 锁定依赖安装、lint、typecheck、单元测试、Chromium E2E、嵌入产物一致性 |
 
-Go 测试入口 `.github/ci/run_tests.py` 将 relay 测试按三组并行执行，同时执行其余包；race 使用相同分组方式。每轮从 Go 的原生测试清单分组，检查并集完整且无重复，保存 `coverage.json`，再核对每组实际完成的顶层用例。初始权重来自 main 运行 `39147750715` 的 Windows 用例耗时，新用例使用默认权重。子进程共用本轮预先构建的只读程序，各测试使用独立临时目录和临时 schema；各 relay 分组使用互不重叠的监听候选端口区间，先核对其低于系统动态出站端口起点，再探测并选择空闲端口，同一测试进程内不重复分配。停库测试也使用该分组区间。普通本地测试未指定 `BATON_TEST_BIN_DIR` 时，在独立临时目录构建并在测试进程结束后删除程序。
+Go 测试入口 `.github/ci/run_tests.py` 将 gateway 测试按三组并行执行，同时执行其余包；race 使用相同分组方式。每轮从 Go 的原生测试清单分组，检查并集完整且无重复，保存 `coverage.json`，再核对每组实际完成的顶层用例。初始权重来自 main 运行 `39147750715` 的 Windows 用例耗时，新用例使用默认权重。子进程共用本轮预先构建的只读程序，各测试使用独立临时目录和临时 schema；各 gateway 分组使用互不重叠的监听候选端口区间，先核对其低于系统动态出站端口起点，再探测并选择空闲端口，同一测试进程内不重复分配。停库测试也使用该分组区间。普通本地测试未指定 `BATON_TEST_BIN_DIR` 时，在独立临时目录构建并在测试进程结束后删除程序。
 
 Linux、race 和 Web 各有独立 PostgreSQL 17 service container。Linux 与 race 安装主机 PostgreSQL 17 工具供独立停库测试使用；macOS 使用 `ikalnytskyi/action-setup-postgres@v8`。Windows 缓存 EDB PostgreSQL **17.6-1** 的 `bin/lib/share`，下载时校验固定 SHA256，命中时仍校验程序和实际服务器版本；每轮在缓存目录外新建数据目录并在结束时停库。缓存内不含测试数据库。`BATON_TEST_DATABASE_URL` 指向 runner 本机 `55432` 的一次性 `baton_test`，不读取仓库 Secret；Windows 仅允许回环 TCP 的临时信任认证。停库恢复测试另建临时集群，不停止共用测试库。Go 模块和构建缓存由 `setup-go` 管理；Linux 普通测试与 race 使用不同缓存键，每轮在摘要中记录命中状态。
 
-Actions 手动运行 CI 时，可填 `diagnostic=./internal/relay`、`test=^TestDatabaseStopReplaysLocalResultOnce$`、`count=20`。Windows 运行所选用例，其他平台保持完整验证。重复运行保留每次结果，任何一次失败或意外跳过都使诊断失败。门闩超时的历史根因仍待原生重复运行确认，通过次数不能证明根因已经修复。
+Actions 手动运行 CI 时，可填 `diagnostic=./internal/gateway`、`test=^TestDatabaseStopReplaysLocalResultOnce$`、`count=20`。Windows 运行所选用例，其他平台保持完整验证。重复运行保留每次结果，任何一次失败或意外跳过都使诊断失败。门闩超时的历史根因仍待原生重复运行确认，通过次数不能证明根因已经修复。
 
-每个 Go 测试任务上传七天有效的诊断材料：JSON 测试事件、失败摘要、完整分组清单、Coordinator/Relay 日志、Worker 日志、进程状态及 TCP 连接状态。进程日志持续脱敏写入，Worker 日志定期采样，测试超时仍保留已有材料；清理前后的进程列表不含命令行和环境变量。不上传身份文件、令牌文件、数据库或原生历史。材料入口见任务摘要中的运行链接。受控失败使用 `test=^TestCIDiagnosticFailure$`、`count=1` 并勾选 `controlled_failure`，在实际 Worker 到达门闩后失败；该运行应保持失败，用于验证下载材料及脱敏。
+每个 Go 测试任务上传七天有效的诊断材料：JSON 测试事件、失败摘要、完整分组清单、Coordinator/Gateway 日志、Worker 日志、进程状态及 TCP 连接状态。进程日志持续脱敏写入，Worker 日志定期采样，测试超时仍保留已有材料；清理前后的进程列表不含命令行和环境变量。不上传身份文件、令牌文件、数据库或原生历史。材料入口见任务摘要中的运行链接。受控失败使用 `test=^TestCIDiagnosticFailure$`、`count=1` 并勾选 `controlled_failure`，在实际 Worker 到达门闩后失败；该运行应保持失败，用于验证下载材料及脱敏。
 
 本地先准备可创建临时 schema 的 PostgreSQL 17 测试库并设置 `BATON_TEST_DATABASE_URL`（POSIX shell 示例，端口按本机实例调整）：
 
@@ -508,10 +509,10 @@ Windows PowerShell 用 `$env:BATON_TEST_DATABASE_URL = 'postgres://postgres:bato
 ```sh
 GOOS=windows go build ./...
 GOOS=darwin go build ./...
-go test -race -v -count=1 ./internal/agent/... ./internal/session ./internal/node ./internal/store ./internal/relay ./internal/control
+go test -race -v -count=1 ./internal/agent/... ./internal/session ./internal/node ./internal/store ./internal/gateway ./internal/control
 ```
 
-这里的 `-race` 覆盖测试包；进程测试内部通过普通 `go build` 启动的子进程不自动带 race instrumentation。需要同时检查子进程时可另跑 `GOFLAGS=-race go test -race -count=1 ./internal/relay`。
+这里的 `-race` 覆盖测试包；进程测试内部通过普通 `go build` 启动的子进程不自动带 race instrumentation。需要同时检查子进程时可另跑 `GOFLAGS=-race go test -race -count=1 ./internal/gateway`。
 
 Web 使用 Node.js 24、pnpm 12.11.2（与 `.cursor/Dockerfile` 一致），保留上面的数据库变量，从仓库根目录运行：
 
@@ -526,4 +527,4 @@ pnpm test:e2e
 pnpm check:dist
 ```
 
-登录、退出、身份查询、CSRF 和 Origin 的通过路径使用本地 TLS 服务，并把测试证书放进客户端信任池。明文 HTTP 测试确认响应仍带 `Secure` Cookie：按正式 Cookie 规则、不把环回地址当作安全来源的客户端不会在明文请求里带回它。CSRF 和 Origin 检查在两条路径上都生效。节点注册的通过路径同样使用该 TLS 服务；`batond register` 通过 `BATON_TLS_CA_FILE` 信任测试证书。节点连接测试使用真实的 Coordinator、Relay 和 batond 进程，以及 TLS WebSocket，并注入断线、Coordinator 重启和 Relay 重启。准备测试另外启动真实的 Session Worker 和本地 SQLite，覆盖重复投递、batond 重启后连回原 Worker、同一 Session 的并发写入，以及本地持久化失败。启动许可测试覆盖中心事务和节点校验，并注入延迟、取消、吊销、墙上时钟跳变和暂停后唤醒。测试进程可以设置 `BATON_TEST_DROP_PREPARE_ACKS`、`BATON_TEST_FAIL_PERSIST`、`BATON_TEST_EXECUTOR_LOG`、`BATON_TEST_EXECUTOR_SCRIPT`、`BATON_TEST_SLOW_WRITE`、`BATON_TEST_ABORT_SCRIPT`（`unconfirmed`/`unknown`/默认确认）、`BATON_TEST_INPUT_GATE`、`BATON_TEST_HOLD_START`、`BATON_TEST_START_DELAY`、`BATON_TEST_START_GATE`、`BATON_TEST_RESULT_GATE`、`BATON_TEST_DUPLICATE_REPORT`、`BATON_TEST_WALL_OFFSET`、`BATON_TEST_SUSPEND_AFTER_ARM` 和 `BATON_TEST_PERMIT_FILE`。未设置时这些变量没有作用，它们不是操作者配置。
+登录、退出、身份查询、CSRF 和 Origin 的通过路径使用本地 TLS 服务，并把测试证书放进客户端信任池。明文 HTTP 测试确认响应仍带 `Secure` Cookie：按正式 Cookie 规则、不把环回地址当作安全来源的客户端不会在明文请求里带回它。CSRF 和 Origin 检查在两条路径上都生效。节点注册的通过路径同样使用该 TLS 服务；`batond register` 通过 `BATON_TLS_CA_FILE` 信任测试证书。节点连接测试使用真实的 Coordinator、Gateway 和 batond 进程，以及 TLS WebSocket，并注入断线、Coordinator 重启和 Gateway 重启。准备测试另外启动真实的 Session Worker 和本地 SQLite，覆盖重复投递、batond 重启后连回原 Worker、同一 Session 的并发写入，以及本地持久化失败。启动许可测试覆盖中心事务和节点校验，并注入延迟、取消、吊销、墙上时钟跳变和暂停后唤醒。测试进程可以设置 `BATON_TEST_DROP_PREPARE_ACKS`、`BATON_TEST_FAIL_PERSIST`、`BATON_TEST_EXECUTOR_LOG`、`BATON_TEST_EXECUTOR_SCRIPT`、`BATON_TEST_SLOW_WRITE`、`BATON_TEST_ABORT_SCRIPT`（`unconfirmed`/`unknown`/默认确认）、`BATON_TEST_INPUT_GATE`、`BATON_TEST_HOLD_START`、`BATON_TEST_START_DELAY`、`BATON_TEST_START_GATE`、`BATON_TEST_RESULT_GATE`、`BATON_TEST_DUPLICATE_REPORT`、`BATON_TEST_WALL_OFFSET`、`BATON_TEST_SUSPEND_AFTER_ARM` 和 `BATON_TEST_PERMIT_FILE`。未设置时这些变量没有作用，它们不是操作者配置。

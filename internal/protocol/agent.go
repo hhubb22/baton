@@ -11,7 +11,7 @@ const (
 	BodyAgentResult  = "agent.result"
 )
 
-// AgentRequest 的来源只由 batond 从本地凭据绑定中填入。员工和节点来自 Relay。
+// AgentRequest 的来源只由 batond 从本地凭据绑定中填入。员工和节点来自 Gateway。
 type AgentRequest struct {
 	Type              string      `json:"type"`
 	Operation         string      `json:"operation"`

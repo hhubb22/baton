@@ -12,11 +12,9 @@ import (
 	"baton/internal/protocol"
 	"baton/internal/store"
 	"baton/internal/task"
-
-	"github.com/coder/websocket"
 )
 
-func (s *Server) onExecutionInput(ctx context.Context, ws *websocket.Conn, env protocol.Envelope) {
+func (s *Server) onExecutionInput(ctx context.Context, connID string, env protocol.Envelope) {
 	if env.Source == nil || env.Source.Kind != protocol.SourceNode {
 		return
 	}
@@ -24,22 +22,22 @@ func (s *Server) onExecutionInput(ctx context.Context, ws *websocket.Conn, env p
 	dec.DisallowUnknownFields()
 	var req protocol.InputRequest
 	if err := dec.Decode(&req); err != nil || req.Type != protocol.BodyExecutionInput {
-		s.replyInput(ctx, ws, env, protocol.InputResult{OK: false, Code: protocol.CodeInvalidMessage, Message: "任务输入请求无效"})
+		s.replyInput(ctx, connID, env, protocol.InputResult{OK: false, Code: protocol.CodeInvalidMessage, Message: "任务输入请求无效"})
 		return
 	}
 	input, code, err := s.store.LoadTaskInput(ctx, env.Source.EmployeeID, env.Source.NodeID, req.TaskID, req.ExecutionID, req.SessionID)
 	if err != nil {
 		s.log.Error("event=execution_input_failed", "task_id", req.TaskID, "node_id", env.Source.NodeID)
-		s.replyInput(ctx, ws, env, protocol.InputResult{OK: false, Code: task.CodeUnavailable, Message: "暂时不能读取任务输入"})
+		s.replyInput(ctx, connID, env, protocol.InputResult{OK: false, Code: task.CodeUnavailable, Message: "暂时不能读取任务输入"})
 		return
 	}
 	if code != "" {
 		s.log.Info("event=execution_input_rejected", "task_id", req.TaskID, "node_id", env.Source.NodeID, "code", code)
-		s.replyInput(ctx, ws, env, protocol.InputResult{OK: false, Code: code, Message: "现在不能提交任务输入", TaskID: req.TaskID, ExecutionID: req.ExecutionID})
+		s.replyInput(ctx, connID, env, protocol.InputResult{OK: false, Code: code, Message: "现在不能提交任务输入", TaskID: req.TaskID, ExecutionID: req.ExecutionID})
 		return
 	}
 	s.log.Info("event=execution_input", "task_id", req.TaskID, "execution_id", req.ExecutionID, "node_id", env.Source.NodeID)
-	s.replyInput(ctx, ws, env, protocol.InputResult{
+	s.replyInput(ctx, connID, env, protocol.InputResult{
 		OK: true, TaskID: req.TaskID, ExecutionID: req.ExecutionID, Generation: input.Generation,
 		Description: input.Description, AuthorizationScope: input.AuthorizationScope,
 		ExpectedOutputs: input.ExpectedOutputs, WorkingDirectory: input.WorkingDirectory,
@@ -47,7 +45,7 @@ func (s *Server) onExecutionInput(ctx context.Context, ws *websocket.Conn, env p
 	})
 }
 
-func (s *Server) onExecutionReport(ctx context.Context, ws *websocket.Conn, env protocol.Envelope) {
+func (s *Server) onExecutionReport(ctx context.Context, connID string, env protocol.Envelope) {
 	if env.Source == nil || env.Source.Kind != protocol.SourceNode {
 		return
 	}
@@ -55,7 +53,7 @@ func (s *Server) onExecutionReport(ctx context.Context, ws *websocket.Conn, env 
 	dec.DisallowUnknownFields()
 	var report protocol.ExecutionReport
 	if err := dec.Decode(&report); err != nil || report.Type != protocol.BodyExecutionReport {
-		s.replyReport(ctx, ws, env, protocol.ReportAck{OK: false, Code: protocol.CodeInvalidMessage})
+		s.replyReport(ctx, connID, env, protocol.ReportAck{OK: false, Code: protocol.CodeInvalidMessage})
 		return
 	}
 	if report.Kind == protocol.ReportResult {
@@ -77,19 +75,19 @@ func (s *Server) onExecutionReport(ctx context.Context, ws *websocket.Conn, env 
 	})
 	if err != nil {
 		s.log.Error("event=execution_report_failed", "task_id", report.TaskID, "event_id", report.EventID, "node_id", env.Source.NodeID)
-		s.replyReport(ctx, ws, env, protocol.ReportAck{OK: false, Code: task.CodeUnavailable, EventID: report.EventID})
+		s.replyReport(ctx, connID, env, protocol.ReportAck{OK: false, Code: task.CodeUnavailable, EventID: report.EventID})
 		return
 	}
 	if !ack {
 		s.log.Info("event=execution_report_rejected", "task_id", report.TaskID, "event_id", report.EventID, "code", code)
-		s.replyReport(ctx, ws, env, protocol.ReportAck{OK: false, Code: code, EventID: report.EventID})
+		s.replyReport(ctx, connID, env, protocol.ReportAck{OK: false, Code: code, EventID: report.EventID})
 		return
 	}
 	s.log.Info("event=execution_report_stored", "task_id", report.TaskID, "event_id", report.EventID, "kind", report.Kind, "status", report.Status)
-	s.replyReport(ctx, ws, env, protocol.ReportAck{OK: true, EventID: report.EventID})
+	s.replyReport(ctx, connID, env, protocol.ReportAck{OK: true, EventID: report.EventID})
 }
 
-func (s *Server) onExecutionControl(ctx context.Context, ws *websocket.Conn, env protocol.Envelope) {
+func (s *Server) onExecutionControl(ctx context.Context, connID string, env protocol.Envelope) {
 	if env.Source == nil || env.Source.Kind != protocol.SourceNode {
 		return
 	}
@@ -109,10 +107,10 @@ func (s *Server) onExecutionControl(ctx context.Context, ws *websocket.Conn, env
 			result.ExecutionTimeoutSeconds = seconds
 		}
 	}
-	s.replyExecution(ctx, ws, env, result)
+	s.replyExecution(ctx, connID, env, result)
 }
 
-func (s *Server) replyInput(ctx context.Context, ws *websocket.Conn, req protocol.Envelope, result protocol.InputResult) {
+func (s *Server) replyInput(ctx context.Context, connID string, req protocol.Envelope, result protocol.InputResult) {
 	result.Type = protocol.BodyExecutionInputResult
 	if body, err := json.Marshal(result); err != nil || len(body) > protocol.MaxMessageBytes-512 {
 		result = protocol.InputResult{
@@ -120,15 +118,15 @@ func (s *Server) replyInput(ctx context.Context, ws *websocket.Conn, req protoco
 			Message: "任务输入超过传输上限", TaskID: result.TaskID, ExecutionID: result.ExecutionID,
 		}
 	}
-	s.replyExecution(ctx, ws, req, result)
+	s.replyExecution(ctx, connID, req, result)
 }
 
-func (s *Server) replyReport(ctx context.Context, ws *websocket.Conn, req protocol.Envelope, result protocol.ReportAck) {
+func (s *Server) replyReport(ctx context.Context, connID string, req protocol.Envelope, result protocol.ReportAck) {
 	result.Type = protocol.BodyExecutionReportResult
-	s.replyExecution(ctx, ws, req, result)
+	s.replyExecution(ctx, connID, req, result)
 }
 
-func (s *Server) replyExecution(ctx context.Context, ws *websocket.Conn, req protocol.Envelope, result any) {
+func (s *Server) replyExecution(ctx context.Context, connID string, req protocol.Envelope, result any) {
 	messageID, err := identity.NewUUID()
 	if err != nil || req.Source == nil {
 		return
@@ -151,7 +149,7 @@ func (s *Server) replyExecution(ctx context.Context, ws *websocket.Conn, req pro
 		s.log.Info("event=execution_message_too_large", "message_id", req.MessageID)
 		return
 	}
-	_ = s.send(ctx, ws, frame)
+	_ = s.send(ctx, connID, frame)
 }
 
 func waitResultGate(ctx context.Context, eventID string, s *Server) error {

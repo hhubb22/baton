@@ -1,6 +1,6 @@
 //go:build !windows
 
-package relay_test
+package gateway_test
 
 import (
 	"os"

@@ -43,7 +43,7 @@ func coordinatorEnv(t *testing.T, f *fixture) (string, []string) {
 		t.Fatal(err)
 	}
 	env := append(os.Environ(), "BATON_DATABASE_URL="+os.Getenv("BATON_TEST_DATABASE_URL"), "BATON_DB_SCHEMA="+schema,
-		"BATON_CONTROL_ADDR=127.0.0.1:0", "BATON_CONTROL_TOKEN=plane-process-test-token-1234", "BATON_NODE_SIGNING_KEY="+key,
+		"BATON_NODE_SIGNING_KEY="+key,
 		"BATON_ALLOWED_ORIGINS=https://plane-process.test")
 	return binary, env
 }

@@ -1,4 +1,4 @@
-package relay_test
+package gateway_test
 
 import (
 	"bytes"
@@ -34,7 +34,7 @@ import (
 )
 
 func TestProcessReconnectsAfterDisconnectAndRestart(t *testing.T) {
-	coordBin, relayBin, batondBin := buildBins(t)
+	coordBin, batondBin := buildBins(t)
 	pool := dbtest.Open(t)
 	ctx := context.Background()
 	var schema string
@@ -54,16 +54,12 @@ func TestProcessReconnectsAfterDisconnectAndRestart(t *testing.T) {
 	roots := x509.NewCertPool()
 	roots.AddCert(cert)
 	apiAddr := freeAddr(t)
-	controlAddr := freeAddr(t)
-	nodeAddr := freeAddr(t)
-	const controlToken = "process-control-token-01"
+	nodeAddr := apiAddr
 	dbURL := strings.TrimSpace(os.Getenv("BATON_TEST_DATABASE_URL"))
 	coordEnv := childEnv(map[string]string{
 		"BATON_DATABASE_URL":       dbURL,
 		"BATON_DB_SCHEMA":          schema,
 		"BATON_HTTP_ADDR":          apiAddr,
-		"BATON_CONTROL_ADDR":       controlAddr,
-		"BATON_CONTROL_TOKEN":      controlToken,
 		"BATON_NODE_SIGNING_KEY":   signingFile,
 		"BATON_ALLOWED_ORIGINS":    "https://baton.example",
 		"BATON_TLS_CERT_FILE":      certFile,
@@ -71,21 +67,7 @@ func TestProcessReconnectsAfterDisconnectAndRestart(t *testing.T) {
 		"BATON_HEARTBEAT_INTERVAL": "200ms",
 		"BATON_OFFLINE_AFTER":      "8s",
 	})
-	relayEnv := childEnv(map[string]string{
-		"BATON_LISTEN_ADDR":     nodeAddr,
-		"BATON_COORDINATOR_URL": "https://" + controlAddr,
-		"BATON_CONTROL_TOKEN":   controlToken,
-		"BATON_TLS_CERT_FILE":   certFile,
-		"BATON_TLS_KEY_FILE":    keyFile,
-		"BATON_TLS_CA_FILE":     certFile,
-	})
-
-	relayProc := startCmd(t, relayBin, nil, relayEnv)
-	time.Sleep(400 * time.Millisecond)
-	if !portClosed(nodeAddr) {
-		t.Fatal("Relay 在拿到安全快照之前接受了节点连接")
-	}
-	startCmd(t, coordBin, []string{"serve"}, coordEnv)
+	coordProc := startCmd(t, coordBin, []string{"serve"}, coordEnv)
 	waitListen(t, apiAddr)
 	waitListen(t, nodeAddr)
 
@@ -162,44 +144,30 @@ func TestProcessReconnectsAfterDisconnectAndRestart(t *testing.T) {
 		t.Fatal("incarnation 冲突后原节点不再可执行")
 	}
 
-	connected := strings.Count(relayProc.out.String(), "event=node_connected")
+	connected := strings.Count(coordProc.out.String(), "event=node_connected")
 	proxy.drop()
-	waitCount(t, relayProc, "event=node_connected", connected+1)
+	waitCount(t, coordProc, "event=node_connected", connected+1)
 	again := waitNode(t, client, base, desk.NodeID, true, true, true)
 	if again.ID != desk.NodeID {
 		t.Fatal("断线重连后节点身份变了")
 	}
 
-	statusAt := again.StatusUpdated
-	connected = strings.Count(relayProc.out.String(), "event=node_connected")
-	controls := strings.Count(relayProc.out.String(), "event=control_connected")
-	latestProc(t, coordBin).stop()
-	time.Sleep(2 * time.Second)
-	if strings.Count(relayProc.out.String(), "event=node_connected") != connected {
-		t.Fatal("Coordinator 停止期间节点到 Relay 的连接被拆掉了")
-	}
-	startCmd(t, coordBin, []string{"serve"}, coordEnv)
+	oldCoord := coordProc
+	oldUpdated := again.StatusUpdated
+	coordProc.stop()
+	coordProc = startCmd(t, coordBin, []string{"serve"}, coordEnv)
 	waitListen(t, apiAddr)
-	waitCount(t, relayProc, "event=control_connected", controls+1)
-	kept := waitNode(t, client, base, desk.NodeID, true, true, true)
-	if !kept.StatusUpdated.Equal(statusAt) || strings.Count(relayProc.out.String(), "event=node_connected") != connected {
-		t.Fatal("Coordinator 重启后节点连接被替换")
+	restored := waitNode(t, client, base, desk.NodeID, true, true, true)
+	if !restored.StatusUpdated.After(oldUpdated) {
+		t.Fatal("Coordinator 重启后没有重新认证与同步")
 	}
 
-	firstRelay := relayProc
-	relayProc.stop()
-	if !portClosed(nodeAddr) {
-		time.Sleep(200 * time.Millisecond)
-	}
-	relayProc = startCmd(t, relayBin, nil, relayEnv)
-	waitListen(t, nodeAddr)
-	restored := waitNode(t, client, base, desk.NodeID, true, true, true)
 	after, err := os.ReadFile(filepath.Join(dataDir, node.IdentityFileName))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(before, after) || restored.ID != desk.NodeID {
-		t.Fatal("Relay 重启后节点身份没有保留")
+		t.Fatal("Coordinator 重启后节点身份没有保留")
 	}
 	var listed struct {
 		Nodes []processNode `json:"nodes"`
@@ -207,8 +175,8 @@ func TestProcessReconnectsAfterDisconnectAndRestart(t *testing.T) {
 	if err := getJSON(t, client, base+"/api/v1/nodes", &listed); err != nil || len(listed.Nodes) != 2 {
 		t.Fatalf("节点数量不正确: %+v %v", listed.Nodes, err)
 	}
-	logs := allLogs() + firstRelay.out.String()
-	if strings.Contains(logs, desk.Credential.Token) || strings.Contains(logs, controlToken) || strings.Contains(logs, "postgres:") {
+	logs := allLogs() + oldCoord.out.String()
+	if strings.Contains(logs, desk.Credential.Token) || strings.Contains(logs, "postgres:") {
 		t.Fatal("运行日志包含凭据或数据库连接串")
 	}
 }
@@ -232,14 +200,13 @@ var (
 	buildOnce      sync.Once
 	buildErr       error
 	builtCoord     string
-	builtRelay     string
 	builtBatond    string
 	processMu      sync.Mutex
 	processHandles []*running
 	allocatedPorts = map[int]bool{}
 )
 
-func buildBins(t *testing.T) (string, string, string) {
+func buildBins(t *testing.T) (string, string) {
 	t.Helper()
 	buildOnce.Do(func() {
 		root, err := filepath.Abs(filepath.Join("..", ".."))
@@ -265,7 +232,7 @@ func buildBins(t *testing.T) (string, string, string) {
 			buildErr = err
 			return
 		}
-		for _, name := range []string{"coordinator", "relay", "batond"} {
+		for _, name := range []string{"coordinator", "batond"} {
 			if prebuilt {
 				if _, err := os.Stat(filepath.Join(out, name+suffix)); err != nil {
 					buildErr = err
@@ -281,13 +248,15 @@ func buildBins(t *testing.T) (string, string, string) {
 			}
 		}
 		builtCoord = filepath.Join(out, "coordinator"+suffix)
-		builtRelay = filepath.Join(out, "relay"+suffix)
 		builtBatond = filepath.Join(out, "batond"+suffix)
+		if legacy := os.Getenv("BATON_TEST_LEGACY_BATOND"); legacy != "" {
+			builtBatond = legacy
+		}
 	})
 	if buildErr != nil {
 		t.Fatal(buildErr)
 	}
-	return builtCoord, builtRelay, builtBatond
+	return builtCoord, builtBatond
 }
 
 type errString string

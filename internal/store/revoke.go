@@ -16,16 +16,16 @@ import (
 const (
 	// RevocationNone 表示还没有吊销决定。
 	RevocationNone = "none"
-	// RevocationPending 表示决定已保存，Relay 尚未确认应用。
+	// RevocationPending 表示决定已保存，Gateway 尚未确认应用。
 	RevocationPending = "pending"
-	// RevocationEffective 表示 Relay 已确认断开并拒绝该凭据。
+	// RevocationEffective 表示 Gateway 已确认断开并拒绝该凭据。
 	RevocationEffective = "effective"
 )
 
 // ErrRevokeRejected 表示节点不存在或不属于该员工。两种情况使用同一个错误。
 var ErrRevokeRejected = errors.New("revoke rejected")
 
-// RevocationView 是一次节点吊销的处理状态。AppliedAt 只在 Relay 确认后才有值。
+// RevocationView 是一次节点吊销的处理状态。AppliedAt 只在 Gateway 确认后才有值。
 type RevocationView struct {
 	NodeID        string
 	Status        string
@@ -194,7 +194,7 @@ func (s *Store) DefaultDeviceState(ctx context.Context, employeeID string) (Defa
 	return DefaultDeviceState{NodeID: nodeID, Status: status}, nil
 }
 
-// PendingRevocationSet 是尚未被 Relay 确认的吊销，用于快照之后的补发。
+// PendingRevocationSet 是尚未被 Gateway 确认的吊销，用于进程内应用和启动恢复。
 func (s *Store) PendingRevocationSet(ctx context.Context) (creds, nodes []protocol.Revocation, credentialIDs []string, err error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT credential_id::text, node_id::text, requested_at
@@ -246,7 +246,7 @@ func (s *Store) MarkRevocationsApplied(ctx context.Context, credentialIDs []stri
 	return nil
 }
 
-// RevocationsApplied 报告这批凭据是否都已经有 Relay 回执。
+// RevocationsApplied 报告这批凭据是否都已经有 Gateway 回执。
 func (s *Store) RevocationsApplied(ctx context.Context, credentialIDs []string) (bool, error) {
 	if len(credentialIDs) == 0 {
 		return true, nil

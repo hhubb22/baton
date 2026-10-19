@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	// BodyPrepare 是发给节点的准备命令。Relay 不解释 body。
+	// BodyPrepare 是发给节点的准备命令。Gateway 不解释 body。
 	BodyPrepare = "execution.prepare"
 	// BodyPrepareResult 是节点在本地保存之后返回的准备结果。
 	BodyPrepareResult = "execution.prepare_result"

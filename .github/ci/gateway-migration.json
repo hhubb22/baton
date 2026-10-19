@@ -1,0 +1,211 @@
+{
+  "baseline": "daaaa19effc47bfb6fd74a6299a1de1781a6918e",
+  "source_package": "baton/internal/relay",
+  "target_package": "baton/internal/gateway",
+  "tests": {
+    "TestAgentCLIDelegatesBetweenTwoNodes": [
+      "TestAgentCLIDelegatesBetweenTwoNodes"
+    ],
+    "TestArtifactsAcrossTwoNodesBlockUnavailableInputs": [
+      "TestArtifactsAcrossTwoNodesBlockUnavailableInputs"
+    ],
+    "TestBatondRestartKeepsLivingWorker": [
+      "TestBatondRestartKeepsLivingWorker"
+    ],
+    "TestBrowserSlowSubscriberDoesNotBlockNativeWorker": [
+      "TestBrowserSlowSubscriberDoesNotBlockNativeWorker"
+    ],
+    "TestCIDiagnosticFailure": [
+      "TestCIDiagnosticFailure"
+    ],
+    "TestCIDiagnosticScrubsSplitOutput": [
+      "TestCIDiagnosticScrubsSplitOutput"
+    ],
+    "TestCIPortAllocatorAvoidsReservedAndAssigned": [
+      "TestCIPortAllocatorAvoidsReservedAndAssigned"
+    ],
+    "TestCancelBeforePermitDrainsStopReportAcrossBatondRestarts": [
+      "TestCancelBeforePermitDrainsStopReportAcrossBatondRestarts"
+    ],
+    "TestCentralStartRejectionDoesNotRespawnWorker": [
+      "TestCentralStartRejectionDoesNotRespawnWorker"
+    ],
+    "TestChildDeliveryAcrossWorkersAndCrashWindows": [
+      "TestChildDeliveryAcrossWorkersAndCrashWindows"
+    ],
+    "TestCompletedWorkerResultRacingCancelRetainsCompletion": [
+      "TestCompletedWorkerResultRacingCancelRetainsCompletion"
+    ],
+    "TestCorruptHistoryDoesNotLookLikeRecovery": [
+      "TestCorruptHistoryDoesNotLookLikeRecovery"
+    ],
+    "TestCrashAfterInputIntentDoesNotSendInput": [
+      "TestCrashAfterInputIntentDoesNotSendInput"
+    ],
+    "TestCrashAfterInputSendDoesNotResend": [
+      "TestCrashAfterInputSendDoesNotResend"
+    ],
+    "TestCrashAfterResultAckReplaysWithoutSecondExecution": [
+      "TestCrashAfterResultAckReplaysWithoutSecondExecution"
+    ],
+    "TestCrashAfterResultSaveReplaysOnce": [
+      "TestCrashAfterResultSaveReplaysOnce"
+    ],
+    "TestCrashAfterStartIntentDoesNotSendInput": [
+      "TestCrashAfterStartIntentDoesNotSendInput"
+    ],
+    "TestDatabaseStopReplaysLocalResultOnce": [
+      "TestDatabaseStopReplaysLocalResultOnce"
+    ],
+    "TestDefaultDeviceRoutesToLegacyUbuntuNode": [
+      "TestDefaultDeviceRoutesToLegacyUbuntuNode"
+    ],
+    "TestExecutionDeliveryWaitsForCenterCommit": [
+      "TestExecutionDeliveryWaitsForCenterCommit"
+    ],
+    "TestExecutionFreeTextAndExitAreNotSuccess": [
+      "TestExecutionFreeTextAndExitAreNotSuccess"
+    ],
+    "TestExecutionPersistsStructuredResultOnce": [
+      "TestExecutionPersistsStructuredResultOnce"
+    ],
+    "TestHeartbeatResendChecksPersistedCancellationAndDeadline": [
+      "TestHeartbeatResendChecksPersistedCancellationAndDeadline"
+    ],
+    "TestHeartbeatResendRecordsActualDelayWithoutReplay": [
+      "TestHeartbeatResendRecordsActualDelayWithoutReplay"
+    ],
+    "TestLivingWorkerResultSurvivesMissingLedger": [
+      "TestLivingWorkerResultSurvivesMissingLedger"
+    ],
+    "TestManualResolveAndRerunHaveExplicitExecutionCounts": [
+      "TestManualResolveAndRerunHaveExplicitExecutionCounts"
+    ],
+    "TestMissingHistoryFromRunningIsReported": [
+      "TestMissingHistoryFromRunningIsReported"
+    ],
+    "TestNodePortStaysClosedWithoutSnapshot": [
+      "TestLegacyClientRetriesTemporaryDatabaseAuthenticationFailure"
+    ],
+    "TestOfflineWorkerEnforcesExecutionDeadline": [
+      "TestOfflineWorkerEnforcesExecutionDeadline"
+    ],
+    "TestOutputQueueLeavesControlCapacity": [
+      "TestOutputBudgetIncludesInFlightAndLeavesControlCapacity"
+    ],
+    "TestPersistentHistoryPermissionFailureIsReported": [
+      "TestPersistentHistoryPermissionFailureIsReported"
+    ],
+    "TestPiSandbox": [
+      "TestPiSandbox"
+    ],
+    "TestPiSandboxDiagnostic": [
+      "TestPiSandboxDiagnostic"
+    ],
+    "TestPiSandboxDiagnosticChild": [
+      "TestPiSandboxDiagnosticChild"
+    ],
+    "TestPiSandboxPolicy": [
+      "TestPiSandboxPolicy"
+    ],
+    "TestPiSandboxRuntimeDir": [
+      "TestPiSandboxRuntimeDir"
+    ],
+    "TestPiSandboxStartupDiagnostics": [
+      "TestPiSandboxStartupDiagnostics"
+    ],
+    "TestPiSandboxUnreadableCallerCwd": [
+      "TestPiSandboxUnreadableCallerCwd"
+    ],
+    "TestPrepareDoesNotAckWhenPersistFails": [
+      "TestPrepareDoesNotAckWhenPersistFails"
+    ],
+    "TestPrepareReconnectsWorkerAndRejectsBusySession": [
+      "TestPrepareReconnectsWorkerAndRejectsBusySession"
+    ],
+    "TestPreparedWorkerRecoveryDependsOnStartRequest": [
+      "TestPreparedWorkerRecoveryDependsOnStartRequest"
+    ],
+    "TestPrivatePostgresProcessLifecycle": [
+      "TestPrivatePostgresProcessLifecycle"
+    ],
+    "TestProcessAliveAndCleanup": [
+      "TestProcessAliveAndCleanup"
+    ],
+    "TestProcessReconnectsAfterDisconnectAndRestart": [
+      "TestProcessReconnectsAfterDisconnectAndRestart"
+    ],
+    "TestProcessRevokeDisconnectsAndSurvivesRelayRestart": [
+      "TestProcessRevokeDisconnectsAndSurvivesCoordinatorRestart"
+    ],
+    "TestProcessRevokeStaysPendingWhileRelayIsDown": [
+      "TestProcessRevokeStaysPendingWhileCoordinatorIsDown"
+    ],
+    "TestRealCodex": [
+      "TestRealCodex"
+    ],
+    "TestRealPi": [
+      "TestRealPi"
+    ],
+    "TestRealPiDirectoryRetention": [
+      "TestRealPiDirectoryRetention"
+    ],
+    "TestRealPiResultDiagnostics": [
+      "TestRealPiResultDiagnostics"
+    ],
+    "TestRealPiStopStatusRead": [
+      "TestRealPiStopStatusRead"
+    ],
+    "TestRelayAndCoordinatorRestartDoNotRerun": [
+      "TestRelayAndCoordinatorRestartDoNotRerun"
+    ],
+    "TestRelayAuthSyncAndIsolation": [
+      "TestGatewayAuthSyncAndIsolation"
+    ],
+    "TestRelayProcessHelper": [
+      "TestGatewayProcessHelper"
+    ],
+    "TestRevokeStaysPendingUntilRelayApplies": [
+      "TestPendingRevocationRecoversWithoutRestart"
+    ],
+    "TestRunningCancelNeedsWorkerStopAndOutcomeEvidence": [
+      "TestRunningCancelNeedsWorkerStopAndOutcomeEvidence"
+    ],
+    "TestSnapshotReconnectDropsStaleCredential": [
+      "TestProcessRevokeDisconnectsAndSurvivesCoordinatorRestart"
+    ],
+    "TestStaleCentralStateDoesNotRerun": [
+      "TestStaleCentralStateDoesNotRerun"
+    ],
+    "TestStalePIDDoesNotRerun": [
+      "TestStalePIDDoesNotRerun"
+    ],
+    "TestStartPermitCancelAndRevokeBeforeIssue": [
+      "TestStartPermitCancelAndRevokeBeforeIssue"
+    ],
+    "TestStartPermitCancelRacePreservesPossibleStart": [
+      "TestStartPermitCancelRacePreservesPossibleStart"
+    ],
+    "TestStartPermitEntersObservableExecutor": [
+      "TestStartPermitEntersObservableExecutor"
+    ],
+    "TestStartPermitSuspendAndWrongGenerationDoNotStart": [
+      "TestStartPermitSuspendAndWrongGenerationDoNotStart"
+    ],
+    "TestStartRefusalPersistenceFailureStillReportsToCenter": [
+      "TestStartRefusalPersistenceFailureStillReportsToCenter"
+    ],
+    "TestStopWorkerWaitsForFileRelease": [
+      "TestStopWorkerWaitsForFileRelease"
+    ],
+    "TestSuspendAloneRefusesStart": [
+      "TestSuspendAloneRefusesStart"
+    ]
+  },
+  "notes": {
+    "TestNodePortStaysClosedWithoutSnapshot": "控制快照协议已删除；数据库就绪前不开放认证，暂态数据库错误使旧客户端重试。",
+    "TestRevokeStaysPendingUntilRelayApplies": "改为本地应用与后台恢复，浏览器数据库门闩另验证 pending/effective。",
+    "TestStartPermitCancelAndRevokeBeforeIssue": "已吊销消息在业务入口拒绝；未授权任务保持 queued 并继续受原排队期限约束。",
+    "TestProcessReconnectsAfterDisconnectAndRestart": "中心重启断开节点，必须重新认证和 node.sync，身份与账本保持。"
+  }
+}

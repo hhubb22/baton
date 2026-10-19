@@ -1,4 +1,4 @@
-package relay_test
+package gateway_test
 
 import (
 	"context"
@@ -99,19 +99,12 @@ func TestStartPermitCancelAndRevokeBeforeIssue(t *testing.T) {
 		t.Fatal(err)
 	}
 	releaseGate(t, gate, revExec)
-	deadline := time.Now().Add(15 * time.Second)
-	var taskStatus, code string
-	for time.Now().Before(deadline) {
-		err := st.pool.QueryRow(context.Background(), `
-			SELECT status, COALESCE(error_code, '') FROM tasks WHERE id = $1::uuid`, revoked.TaskID).Scan(&taskStatus, &code)
-		if err == nil && taskStatus == task.StatusFailed && code == task.CodeRevoked {
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
+	time.Sleep(700 * time.Millisecond)
+	var status string
+	if err := st.pool.QueryRow(context.Background(), `SELECT t.status,e.start_authorized_at IS NOT NULL FROM tasks t JOIN executions e ON e.task_id=t.id WHERE t.id=$1::uuid`, revoked.TaskID).Scan(&status, &authorized); err != nil || authorized || status != task.StatusQueued {
+		t.Fatalf("已吊销消息被分派: %s %v %v", status, authorized, err)
 	}
-	if taskStatus != task.StatusFailed || code != task.CodeRevoked {
-		t.Fatalf("吊销后的未授权任务是 %s %s\n%s", taskStatus, code, st.batond.out.String())
-	}
+
 	if raw, err := os.ReadFile(filepath.Join(st.dataDir, "executor.log")); err == nil && strings.Contains(string(raw), "start") {
 		t.Fatal("吊销后进入了启动")
 	}
@@ -264,7 +257,7 @@ func waitGateFile(t *testing.T, gate string, stacks ...*prepareStack) string {
 		time.Sleep(50 * time.Millisecond)
 	}
 	for _, st := range stacks {
-		t.Logf("coord %s\nnode %s\nrelay %s", st.coord.out.String(), st.batond.out.String(), st.relay.out.String())
+		t.Logf("coord %s\nnode %s\nrelay %s", st.coord.out.String(), st.batond.out.String(), st.coord.out.String())
 	}
 	t.Fatal("没有等到测试门闩")
 	return ""

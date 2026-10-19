@@ -1,4 +1,4 @@
-package relay_test
+package gateway_test
 
 import (
 	"context"
@@ -29,6 +29,9 @@ func TestRealPi(t *testing.T) {
 	}
 	capabilities := map[string]string{"启动": "未验证", "输入": "未验证", "结构化结果": "未验证", "委托": "未验证", "原生历史确认": "未验证", "中止": "未验证", "恢复": "未验证", "缺失历史拒绝": "未验证", "目录隔离": "未验证"}
 	model := os.Getenv("BATON_PI_MODEL")
+	if model == "" {
+		model = "openai/gpt-6.1-sol"
+	}
 	for _, c := range model {
 		if !strings.ContainsRune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:/+-", c) {
 			t.Fatal("BATON_PI_MODEL must be a provider/model identifier")
@@ -44,9 +47,6 @@ func TestRealPi(t *testing.T) {
 	})
 	if runtime.GOOS != "darwin" {
 		t.Skip("real harness currently requires macOS sandbox-exec; no unsandboxed fallback")
-	}
-	if model == "" {
-		t.Fatal("BATON_PI_MODEL is required; select an inexpensive provider/model")
 	}
 	keyPresent := false
 	for _, key := range []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_CLOUD_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY", "XAI_API_KEY", "OPENROUTER_API_KEY", "MISTRAL_API_KEY", "ZAI_API_KEY"} {
@@ -95,7 +95,7 @@ func TestRealPi(t *testing.T) {
 		}
 		return out
 	}
-	coord, relay, batond := build("coordinator"), build("relay"), build("batond")
+	coord, batond := build("coordinator"), build("batond")
 	cli := build("baton")
 	profile := filepath.Join(root, "pi.sb")
 	wrapper := filepath.Join(root, "bin", "pi-isolated")
@@ -103,7 +103,7 @@ func TestRealPi(t *testing.T) {
 	if err := os.WriteFile(wrapper, []byte("#!/bin/sh\nexec /usr/bin/sandbox-exec -f "+quote(profile)+" "+quote(bin)+" \"$@\"\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	st := startPrepareStackWithBins(t, map[string]string{"BATON_AGENT_DRIVER": "native", "BATON_TEST_HOLD_START": "0", "BATON_PI_BIN": wrapper, "BATON_PI_MODEL": model, "BATON_PI_HOME": filepath.Join(root, "home"), "PATH": filepath.Join(root, "bin") + string(os.PathListSeparator) + os.Getenv("PATH")}, coord, relay, batond, dataRoot)
+	st := startPrepareStackWithBins(t, map[string]string{"BATON_AGENT_DRIVER": "native", "BATON_TEST_HOLD_START": "0", "BATON_PI_BIN": wrapper, "BATON_PI_MODEL": model, "BATON_PI_HOME": filepath.Join(root, "home"), "PATH": filepath.Join(root, "bin") + string(os.PathListSeparator) + os.Getenv("PATH")}, coord, batond, dataRoot)
 	t.Cleanup(func() {
 		st.batond.stop()
 		entries, _ := os.ReadDir(filepath.Join(st.dataDir, "sessions"))

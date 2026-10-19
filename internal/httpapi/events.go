@@ -87,6 +87,10 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	write := func(v any) bool {
+		if !s.outputBudget.Reserve(128 * 1024) {
+			return false
+		}
+		defer s.outputBudget.Release(128 * 1024)
 		raw, err := json.Marshal(v)
 		if err != nil || len(raw) > 128*1024 {
 			return false
@@ -145,26 +149,36 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		operation, _ := identity.NewUUID()
-		result := s.sessionRPC(ctx, login.Employee.ID, item, protocol.SessionRequest{OperationID: operation, SessionID: item.SessionID, Action: "output", Cursor: selected.Cursor})
-		cookie, err = r.Cookie(auth.SessionCookieName)
-		if err != nil {
+		if !func() bool {
+			if !s.outputBudget.Reserve(protocol.SessionOutputBytes) {
+				return false
+			}
+			defer s.outputBudget.Release(protocol.SessionOutputBytes)
+
+			result := s.sessionRPC(ctx, login.Employee.ID, item, protocol.SessionRequest{OperationID: operation, SessionID: item.SessionID, Action: "output", Cursor: selected.Cursor})
+			cookie, err = r.Cookie(auth.SessionCookieName)
+			if err != nil {
+				return false
+			}
+			if _, err := s.store.LookupSession(ctx, cookie.Value); err != nil {
+				return false
+			}
+			result.Text = boundedSessionText(result.Text)
+			if !write(struct {
+				Type string `json:"type"`
+				protocol.SessionResult
+			}{Type: "session.output", SessionResult: result}) {
+				return false
+			}
+			mu.Lock()
+			if sub == selected && result.OK {
+				sub.Cursor = result.Cursor
+			}
+			mu.Unlock()
+			return true
+		}() {
 			return
 		}
-		if _, err := s.store.LookupSession(ctx, cookie.Value); err != nil {
-			return
-		}
-		result.Text = boundedSessionText(result.Text)
-		if !write(struct {
-			Type string `json:"type"`
-			protocol.SessionResult
-		}{Type: "session.output", SessionResult: result}) {
-			return
-		}
-		mu.Lock()
-		if sub == selected && result.OK {
-			sub.Cursor = result.Cursor
-		}
-		mu.Unlock()
 	}
 }
 

@@ -20,7 +20,7 @@ type prepareNotice struct {
 	code   string
 }
 
-// DeliverPrepares 消费 dispatch_outbox，经当前 Relay 投递 prepare，并按租约重发同一消息。
+// DeliverPrepares 消费 dispatch_outbox，经 Gateway 投递 prepare，并按租约重发同一消息。
 func (s *Server) DeliverPrepares(ctx context.Context) {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
@@ -38,19 +38,16 @@ func (s *Server) DeliverPrepares(ctx context.Context) {
 			if err := s.store.ExpireQueuedTasks(ctx); err != nil {
 				s.log.Error("event=queue_expire_failed")
 			}
+			if err := s.DispatchRevocations(ctx); err != nil {
+				s.log.Info("event=revocation_apply_failed")
+			}
 			s.deliverOne(ctx)
 		}
 	}
 }
 
 func (s *Server) deliverOne(ctx context.Context) {
-	s.mu.Lock()
-	ready := s.link != nil && s.link.ready
-	link := s.link
-	s.mu.Unlock()
-	if !ready || link == nil {
-		return
-	}
+
 	intent, ok, err := s.store.ClaimPrepare(ctx, prepareLease)
 	if err != nil {
 		s.log.Error("event=prepare_claim_failed")
@@ -88,14 +85,8 @@ func (s *Server) deliverOne(ctx context.Context) {
 		_ = s.store.ReleasePrepare(ctx, intent.MessageID)
 		return
 	}
-	s.mu.Lock()
-	current := s.link == link && link.ready
-	s.mu.Unlock()
-	if !current {
-		_ = s.store.ReleasePrepare(ctx, intent.MessageID)
-		return
-	}
-	if err := s.send(ctx, link.ws, protocol.Frame{Kind: protocol.KindEnvelope, Envelope: env}); err != nil {
+
+	if err := s.send(ctx, "", protocol.Frame{Kind: protocol.KindEnvelope, Envelope: env}); err != nil {
 		_ = s.store.ReleasePrepare(ctx, intent.MessageID)
 		s.log.Info("event=prepare_send_failed", "task_id", intent.TaskID, "node_id", intent.NodeID)
 		return

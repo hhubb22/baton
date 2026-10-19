@@ -378,7 +378,7 @@ func loadOwnedNode(ctx context.Context, tx pgx.Tx, employeeID, nodeID string) (o
 		SELECT revoked_at IS NOT NULL, capabilities, default_agent_type
 		FROM nodes
 		WHERE id = $1::uuid AND employee_id = $2::uuid
-		FOR UPDATE`, nodeID, employeeID).Scan(&target.revoked, &target.caps, &target.defaultAgent)
+		FOR SHARE`, nodeID, employeeID).Scan(&target.revoked, &target.caps, &target.defaultAgent)
 	if errors.Is(err, pgx.ErrNoRows) {
 		var other bool
 		if err := tx.QueryRow(ctx, `

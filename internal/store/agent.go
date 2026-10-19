@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// AgentSource 的员工、节点来自 Relay，任务三元组来自 batond 的持久化凭据绑定。
+// AgentSource 的员工、节点来自 Gateway，任务三元组来自 batond 的持久化凭据绑定。
 type AgentSource struct {
 	EmployeeID, NodeID, TaskID, SessionID, ExecutionID string
 }
@@ -34,9 +34,18 @@ func validateAgentSource(ctx context.Context, tx pgx.Tx, source AgentSource) (bo
 	 JOIN sessions s ON s.id = t.target_session_id AND s.employee_id = t.employee_id
 	 JOIN nodes n ON n.id = t.target_node_id AND n.employee_id = t.employee_id
 	 WHERE t.employee_id = $1::uuid AND t.id = $2::uuid AND e.id = $3::uuid
-	   AND t.target_node_id = $4::uuid AND t.target_session_id = $5::uuid AND n.revoked_at IS NULL
+	   AND t.target_node_id = $4::uuid AND t.target_session_id = $5::uuid
 	 FOR UPDATE OF t`, source.EmployeeID, source.TaskID, source.ExecutionID, source.NodeID, source.SessionID).Scan(&active)
 	if errors.Is(err, pgx.ErrNoRows) {
+		return false, agentDenied()
+	}
+	if err != nil {
+		return active, err
+	}
+	// 先锁来源任务，再以新的语句快照锁节点，覆盖等待任务锁期间发生的吊销。
+	var revoked bool
+	err = tx.QueryRow(ctx, `SELECT revoked_at IS NOT NULL FROM nodes WHERE id=$1::uuid AND employee_id=$2::uuid FOR SHARE`, source.NodeID, source.EmployeeID).Scan(&revoked)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && revoked) {
 		return false, agentDenied()
 	}
 	return active, err

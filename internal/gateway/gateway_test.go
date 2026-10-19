@@ -1,56 +1,29 @@
-package relay_test
+package gateway_test
 
 import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
-	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"baton/internal/admin"
 	"baton/internal/control"
 	"baton/internal/dbtest"
+	"baton/internal/gateway"
 	"baton/internal/identity"
 	"baton/internal/node"
 	"baton/internal/protocol"
-	"baton/internal/relay"
 	"baton/internal/store"
 
 	"github.com/coder/websocket"
 )
 
-func TestNodePortStaysClosedWithoutSnapshot(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	addr := ln.Addr().String()
-	ln.Close()
-	certFile, keyFile, _ := writeServerCert(t, t.TempDir())
-	server, err := relay.New(relay.Options{
-		ListenAddr:     "127.0.0.1:0",
-		CoordinatorURL: "https://" + addr,
-		ControlToken:   "relay-control-token-0001",
-		CertFile:       certFile,
-		KeyFile:        keyFile,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go server.Run(ctx)
-	time.Sleep(400 * time.Millisecond)
-	if server.NodeAddr() != "" {
-		t.Fatal("没有安全快照就开放了节点认证")
-	}
-}
-
-func TestRelayAuthSyncAndIsolation(t *testing.T) {
+func TestGatewayAuthSyncAndIsolation(t *testing.T) {
 	pool := dbtest.Open(t)
 	ctx := context.Background()
 	repo := store.New(pool)
@@ -68,34 +41,21 @@ func TestRelayAuthSyncAndIsolation(t *testing.T) {
 	if _, err := pool.Exec(ctx, `UPDATE node_credentials SET revoked_at = now() WHERE id = $1::uuid`, revoked.Credential.ID); err != nil {
 		t.Fatal(err)
 	}
-	ctrl, err := control.New(repo, signer, "relay-control-token-0001", 10*time.Second, 30*time.Second, nil)
+	ctrl, err := control.New(repo, signer, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewUnstartedServer(ctrl)
-	srv.StartTLS()
+	server := gateway.New(ctrl, ctrl, 30*time.Second, nil)
+	ctrl.SetSender(server)
+	srv := httptest.NewTLSServer(server)
 	t.Cleanup(srv.Close)
-
-	certFile, keyFile, cert := writeServerCert(t, t.TempDir())
-	controlRoots := x509.NewCertPool()
-	controlRoots.AddCert(srv.Certificate())
 	nodeRoots := x509.NewCertPool()
-	nodeRoots.AddCert(cert)
-	server, err := relay.New(relay.Options{
-		ListenAddr:     "127.0.0.1:0",
-		CoordinatorURL: srv.URL,
-		ControlToken:   "relay-control-token-0001",
-		CertFile:       certFile,
-		KeyFile:        keyFile,
-		RootCAs:        controlRoots,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	nodeRoots.AddCert(srv.Certificate())
 	runCtx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
+	t.Cleanup(server.Close)
 	go server.Run(runCtx)
-	addr := waitAddr(t, server)
+	addr := strings.TrimPrefix(srv.URL, "https://")
 
 	badSigner, err := node.GenerateSigner()
 	if err != nil {
@@ -174,6 +134,10 @@ func TestRelayAuthSyncAndIsolation(t *testing.T) {
 	if result := dialResult(t, addr, desk.Credential.Token, newID(t), nodeRoots); result.Code != protocol.CodeIncarnationConflict {
 		t.Fatalf("不同 incarnation 被接受: %+v", result)
 	}
+	var oldConnID string
+	if err := pool.QueryRow(ctx, `SELECT conn_id FROM node_presence WHERE node_id=$1::uuid`, desk.NodeID).Scan(&oldConnID); err != nil {
+		t.Fatal(err)
+	}
 	replaced := make(chan struct{}, 1)
 	go func() {
 		if _, ok := <-deskPeer.frames; !ok {
@@ -190,6 +154,21 @@ func TestRelayAuthSyncAndIsolation(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("同一 incarnation 没有替换旧连接")
 	}
+	waitStatus(t, repo, alice.ID, desk.NodeID, func(v store.NodeView) bool { return v.Online && !v.Synced })
+	oldSource := protocol.Source{Kind: protocol.SourceNode, NodeID: desk.NodeID, EmployeeID: alice.ID, CredentialID: desk.Credential.ID, ConnID: oldConnID, Incarnation: inc}
+	if err := ctrl.Handle(ctx, oldSource, protocol.Envelope{Body: json.RawMessage(`{"type":"node.sync"}`)}); err == nil {
+		t.Fatal("旧连接的迟到消息通过了业务分派")
+	}
+	sendEnvelope(t, newPeer.ws, map[string]any{"version": 1, "message_id": newID(t), "body": map[string]string{"type": "arbitrary.route"}})
+	if got := newPeer.next(t); got.Code != protocol.CodeInvalidMessage {
+		t.Fatalf("未知业务类型未拒绝: %+v", got)
+	}
+	oversizedRaw := []byte(`{"kind":"heartbeat","extra":"` + strings.Repeat("x", protocol.MaxMessageBytes) + `"}`)
+	timed, stop := context.WithTimeout(context.Background(), 3*time.Second)
+	defer stop()
+	_ = newPeer.ws.Write(timed, websocket.MessageText, oversizedRaw)
+	newPeer.waitClosed(t)
+
 }
 
 type peer struct {
@@ -302,19 +281,6 @@ func sendEnvelope(t *testing.T, ws *websocket.Conn, env any) {
 	if err := ws.Write(context.Background(), websocket.MessageText, raw); err != nil {
 		t.Fatal(err)
 	}
-}
-
-func waitAddr(t *testing.T, server *relay.Relay) string {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if addr := server.NodeAddr(); addr != "" {
-			return addr
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatal("节点监听没有开放")
-	return ""
 }
 
 func waitStatus(t *testing.T, repo *store.Store, employeeID, nodeID string, match func(store.NodeView) bool) store.NodeView {

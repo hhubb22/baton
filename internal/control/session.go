@@ -36,14 +36,14 @@ func (s *Server) SessionRequest(ctx context.Context, employeeID, nodeID string, 
 		}
 		req.OperationID = operationID
 	}
-	req.Type = protocol.BodySessionRequest
-	s.mu.Lock()
-	link := s.link
-	ready := link != nil && link.ready
-	s.mu.Unlock()
-	if !ready || link == nil {
-		return protocol.SessionResult{}, errors.New("节点暂时不可达")
+	if req.Action == "output" || req.Action == "history" {
+		if !s.budget.Reserve(protocol.SessionOutputBytes) {
+			return protocol.SessionResult{}, errors.New("输出缓存已达上限")
+		}
+		defer s.budget.Release(protocol.SessionOutputBytes)
 	}
+	req.Type = protocol.BodySessionRequest
+
 	messageID, err := identity.NewUUID()
 	if err != nil {
 		return protocol.SessionResult{}, errors.New("节点暂时不可达")
@@ -69,13 +69,8 @@ func (s *Server) SessionRequest(ctx context.Context, employeeID, nodeID string, 
 		return protocol.SessionResult{}, errors.New("临时 Session 请求已达上限")
 	default:
 	}
-	s.mu.Lock()
-	current := s.link == link && link.ready
-	s.mu.Unlock()
-	if !current {
-		return protocol.SessionResult{}, errors.New("节点暂时不可达")
-	}
-	if err := s.send(ctx, link.ws, protocol.Frame{Kind: protocol.KindEnvelope, Envelope: env}); err != nil {
+
+	if err := s.send(ctx, "", protocol.Frame{Kind: protocol.KindEnvelope, Envelope: env}); err != nil {
 		s.log.Info("event=session_rpc_send_failed", "node_id", nodeID, "operation_id", req.OperationID)
 		return protocol.SessionResult{}, errors.New("节点暂时不可达")
 	}

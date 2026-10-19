@@ -37,13 +37,7 @@ func (s *Server) BrowseFiles(ctx context.Context, employeeID, nodeID string, req
 		req.OperationID = operationID
 	}
 	req.Type = protocol.BodyFileBrowse
-	s.mu.Lock()
-	link := s.link
-	ready := link != nil && link.ready
-	s.mu.Unlock()
-	if !ready || link == nil {
-		return protocol.FileResult{}, errors.New("节点暂时不可达")
-	}
+
 	messageID, err := identity.NewUUID()
 	if err != nil {
 		return protocol.FileResult{}, errors.New("节点暂时不可达")
@@ -64,13 +58,8 @@ func (s *Server) BrowseFiles(ctx context.Context, employeeID, nodeID string, req
 	}
 	wait, cancel := s.armFile(messageID)
 	defer cancel()
-	s.mu.Lock()
-	current := s.link == link && link.ready
-	s.mu.Unlock()
-	if !current {
-		return protocol.FileResult{}, errors.New("节点暂时不可达")
-	}
-	if err := s.send(ctx, link.ws, protocol.Frame{Kind: protocol.KindEnvelope, Envelope: env}); err != nil {
+
+	if err := s.send(ctx, "", protocol.Frame{Kind: protocol.KindEnvelope, Envelope: env}); err != nil {
 		s.log.Info("event=file_browse_send_failed", "node_id", nodeID, "operation_id", req.OperationID)
 		return protocol.FileResult{}, errors.New("节点暂时不可达")
 	}

@@ -1,9 +1,11 @@
 package store_test
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"baton/internal/node"
 	"baton/internal/store"
@@ -127,3 +129,70 @@ func TestDelegationSourceIsolationAndReplay(t *testing.T) {
 }
 
 func strptr(value string) *string { return &value }
+
+func TestAgentAuthorizationWaitingForTaskLockRechecksRevocation(t *testing.T) {
+	ctx, repo, pool, in, _ := preparedStart(t)
+	if d, err := repo.AuthorizeStart(ctx, in); err != nil || !d.Issue {
+		t.Fatalf("启动授权: %+v %v", d, err)
+	}
+	if ok, code, err := repo.ApplyExecutionReport(ctx, startedReport(in, mustUUID(t))); !ok || err != nil {
+		t.Fatalf("启动事实: %s %v", code, err)
+	}
+	gate, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gate.Rollback(ctx)
+	var pid int
+	if err = gate.QueryRow(ctx, `SELECT pg_backend_pid() FROM tasks WHERE id=$1::uuid FOR UPDATE`, in.TaskID).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan error, 1)
+	go func() {
+		_, err := repo.AgentTask(ctx, store.AgentSource{EmployeeID: in.EmployeeID, NodeID: in.NodeID, TaskID: in.TaskID, SessionID: in.SessionID, ExecutionID: in.ExecutionID}, in.TaskID)
+		result <- err
+	}()
+	timed, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	waitForBlockedBy(t, timed, pool, pid)
+	if _, err = repo.RevokeNode(ctx, in.EmployeeID, in.NodeID); err != nil {
+		t.Fatal(err)
+	}
+	if err = gate.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err = <-result:
+		if err == nil {
+			t.Fatal("等待来源任务锁时已吊销，仍通过业务授权")
+		}
+	case <-timed.Done():
+		t.Fatal("授权未完成")
+	}
+}
+
+func TestDelegationDoesNotUpgradeSharedNodeAuthorizationLocks(t *testing.T) {
+	ctx, repo, pool, in, _ := preparedStart(t)
+	if d, err := repo.AuthorizeStart(ctx, in); err != nil || !d.Issue {
+		t.Fatalf("启动授权: %+v %v", d, err)
+	}
+	if ok, code, err := repo.ApplyExecutionReport(ctx, startedReport(in, mustUUID(t))); !ok || err != nil {
+		t.Fatalf("启动事实: %s %v", code, err)
+	}
+	target := mustRegister(t, ctx, pool, repo, in.EmployeeID, "Other", node.RolePC, []string{"pi", "start"})
+	setDefaultAgent(t, ctx, pool, target.NodeID, "pi")
+	gate, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gate.Rollback(ctx)
+	if _, err = gate.Exec(ctx, `SELECT id FROM nodes WHERE employee_id=$1::uuid FOR SHARE`, in.EmployeeID); err != nil {
+		t.Fatal(err)
+	}
+	timed, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	source := store.AgentSource{EmployeeID: in.EmployeeID, NodeID: in.NodeID, TaskID: in.TaskID, SessionID: in.SessionID, ExecutionID: in.ExecutionID}
+	if _, err = repo.AcceptDelegation(timed, source, task.Input{RequestID: "shared-node-authorization", Description: "相互委托使用共享节点授权锁", TargetNodeID: &target.NodeID}); err != nil {
+		t.Fatal(err)
+	}
+}
