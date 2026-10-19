@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 
+	"baton/internal/task"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode/utf8"
@@ -49,7 +51,7 @@ func insertProjectInput(ctx context.Context, tx pgx.Tx, employeeID, agentID, kin
 	return err
 }
 
-// ProjectTaskResultInput 为任务终态事务提供限长入口；终态集成由 PS-157 完成。
+// ProjectTaskResultInput 保存任务终态的限长通知。
 type ProjectTaskResultInput struct {
 	TaskID        string `json:"task_id"`
 	Version       int64  `json:"version"`
@@ -125,4 +127,39 @@ func projectUpdatedPayload(p projectagent.Project) any {
 			return out
 		}
 	}
+}
+
+// enqueueTaskTerminal 只读取任务与 Agent 归属，不取得 Agent 行锁。
+func enqueueTaskTerminal(ctx context.Context, tx pgx.Tx, employeeID, taskID string) error {
+	var agentID, status string
+	var version int64
+	var summary, message *string
+	err := tx.QueryRow(ctx, `SELECT a.id::text,t.status,t.version,t.summary,t.error_message
+ FROM tasks t JOIN conversations c ON c.id=t.origin_conversation_id AND c.employee_id=t.employee_id
+ JOIN project_agents a ON a.id=c.agent_id AND a.project_id=t.project_id
+ WHERE t.employee_id=$1 AND t.id=$2 AND t.status IN ('completed','failed','cancelled')`, employeeID, taskID).Scan(&agentID, &status, &version, &summary, &message)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	loaded := []task.Record{{TaskID: taskID}}
+	if err = attachResults(ctx, tx, employeeID, loaded); err != nil {
+		return err
+	}
+	var text strings.Builder
+	if summary != nil {
+		text.WriteString(*summary)
+	}
+	if message != nil {
+		text.WriteString("\n")
+		text.WriteString(*message)
+	}
+	for _, ref := range loaded[0].Evidence {
+		raw, _ := protocol.MarshalJSON(ref)
+		text.WriteString("\n")
+		text.Write(raw)
+	}
+	return EnqueueProjectTaskResult(ctx, tx, employeeID, agentID, ProjectTaskResultInput{TaskID: taskID, Version: version, Status: status, Text: text.String()})
 }
