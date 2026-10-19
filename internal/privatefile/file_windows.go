@@ -61,6 +61,10 @@ func checkPath(path string) error {
 }
 
 func openHandle(path string, access uint32) (windows.Handle, error) {
+	return openSharedHandle(path, access, windows.FILE_SHARE_READ)
+}
+
+func openSharedHandle(path string, access, share uint32) (windows.Handle, error) {
 	if err := checkPath(path); err != nil {
 		return windows.InvalidHandle, err
 	}
@@ -68,7 +72,7 @@ func openHandle(path string, access uint32) (windows.Handle, error) {
 	if err != nil {
 		return windows.InvalidHandle, err
 	}
-	h, err := windows.CreateFile(name, access|windows.FILE_READ_ATTRIBUTES, windows.FILE_SHARE_READ, nil, windows.OPEN_EXISTING,
+	h, err := windows.CreateFile(name, access|windows.FILE_READ_ATTRIBUTES, share, nil, windows.OPEN_EXISTING,
 		windows.FILE_FLAG_OPEN_REPARSE_POINT|windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
 	if err != nil {
 		return h, err
@@ -129,7 +133,27 @@ func checkACL(h windows.Handle) error {
 
 // Open 对实际读取的句柄检查 DACL，检查期间禁止写入和替换文件。
 func Open(path string) (*os.File, error) {
-	h, err := openHandle(path, windows.GENERIC_READ|windows.READ_CONTROL)
+	return openFile(path, windows.FILE_SHARE_READ)
+}
+
+// OpenSnapshot 检查实际句柄的 DACL，并允许路径原子替换；句柄仍指向原版本。
+func OpenSnapshot(path string) (*os.File, error) {
+	return openFile(path, windows.FILE_SHARE_READ|windows.FILE_SHARE_DELETE)
+}
+
+// replaceFile 使用目录内重命名的 POSIX 语义，旧快照句柄保持可读。
+// 源文件由 WriteFile 在同一目录创建并关闭。
+func replaceFile(source, target string) error {
+	root, err := os.OpenRoot(filepath.Dir(target))
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	return root.Rename(filepath.Base(source), filepath.Base(target))
+}
+
+func openFile(path string, share uint32) (*os.File, error) {
+	h, err := openSharedHandle(path, windows.GENERIC_READ|windows.READ_CONTROL, share)
 	if err != nil {
 		return nil, err
 	}

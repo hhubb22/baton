@@ -21,6 +21,10 @@ func (s *Server) routeSession(w http.ResponseWriter, r *http.Request) {
 	}
 	rest := strings.TrimPrefix(r.URL.Path, "/api/v1/sessions/")
 	parts := strings.Split(rest, "/")
+	if len(parts) == 2 && parts[1] == "history" {
+		s.sessionHistory(w, r, parts[0])
+		return
+	}
 	if len(parts) == 2 && (parts[1] == "input" || parts[1] == "resume") {
 		s.sessionAction(w, r, parts[0], parts[1])
 		return

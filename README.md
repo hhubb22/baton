@@ -528,3 +528,16 @@ pnpm check:dist
 ```
 
 登录、退出、身份查询、CSRF 和 Origin 的通过路径使用本地 TLS 服务，并把测试证书放进客户端信任池。明文 HTTP 测试确认响应仍带 `Secure` Cookie：按正式 Cookie 规则、不把环回地址当作安全来源的客户端不会在明文请求里带回它。CSRF 和 Origin 检查在两条路径上都生效。节点注册的通过路径同样使用该 TLS 服务；`batond register` 通过 `BATON_TLS_CA_FILE` 信任测试证书。节点连接测试使用真实的 Coordinator、Gateway 和 batond 进程，以及 TLS WebSocket，并注入断线、Coordinator 重启和 Gateway 重启。准备测试另外启动真实的 Session Worker 和本地 SQLite，覆盖重复投递、batond 重启后连回原 Worker、同一 Session 的并发写入，以及本地持久化失败。启动许可测试覆盖中心事务和节点校验，并注入延迟、取消、吊销、墙上时钟跳变和暂停后唤醒。测试进程可以设置 `BATON_TEST_DROP_PREPARE_ACKS`、`BATON_TEST_FAIL_PERSIST`、`BATON_TEST_EXECUTOR_LOG`、`BATON_TEST_EXECUTOR_SCRIPT`、`BATON_TEST_SLOW_WRITE`、`BATON_TEST_ABORT_SCRIPT`（`unconfirmed`/`unknown`/默认确认）、`BATON_TEST_INPUT_GATE`、`BATON_TEST_HOLD_START`、`BATON_TEST_START_DELAY`、`BATON_TEST_START_GATE`、`BATON_TEST_RESULT_GATE`、`BATON_TEST_DUPLICATE_REPORT`、`BATON_TEST_WALL_OFFSET`、`BATON_TEST_SUSPEND_AFTER_ARM` 和 `BATON_TEST_PERMIT_FILE`。未设置时这些变量没有作用，它们不是操作者配置。
+
+
+### 历史分页验证
+
+Session 页面提供节点原生历史分页和断流补取。历史页只经临时 Gateway 通道返回，中心不保存原文。`GET /api/v1/sessions/{id}/history` 支持 `cursor` 和 `limit`（1～16），具体字段与失败语义见 `specs/baton/TECH.md` 的 PS-127 段落。
+
+`web/e2e/history.spec.ts` 使用独立数据库 schema、Coordinator、节点和 Worker 验证分页、断流、文件删除、离线及中心隐私。设置 `BATON_REAL_PI_BROWSER=1` 后使用真实 Pi；未设置时使用实际子进程协议执行器，不能据此声称模型任务通过。
+
+固定 Codex 0.162.1 的原生文件探针使用临时 HOME，不读账号凭据、不发模型输入；创建原生历史后追加大历史样本，验证退出后读取、分页与删除：
+
+```sh
+BATON_CODEX_HISTORY_PROBE=1 BATON_CODEX_BINARY=/path/to/codex-0.162.1 go test -v -count=1 ./internal/agent/codex -run '^TestCodexHistoryNoModelProbe$'
+```

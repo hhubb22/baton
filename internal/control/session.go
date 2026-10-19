@@ -98,6 +98,13 @@ func (s *Server) SessionRequest(ctx context.Context, employeeID, nodeID string, 
 		}
 		if !notice.result.OK {
 			notice.result.Text = ""
+			notice.result.History = nil
+		}
+		if req.Action != "history" && notice.result.History != nil {
+			return protocol.SessionResult{}, errors.New("Session 响应类型不正确")
+		}
+		if req.Action == "history" && notice.result.OK && !protocol.ValidHistoryPage(notice.result.History) {
+			return protocol.SessionResult{}, errors.New("历史响应超限或格式不正确")
 		}
 		return notice.result, nil
 	}
@@ -137,6 +144,10 @@ func (s *Server) noteSessionResult(env protocol.Envelope) {
 		return
 	}
 	if len(result.Text) > protocol.SessionOutputBytes || len(result.Cursor) > 100 || len(result.Code) > 64 || len(result.State) > 32 {
+		s.deliverSession(env.CorrelationID, sessionNotice{bad: true})
+		return
+	}
+	if result.History != nil && !protocol.ValidHistoryPage(result.History) {
 		s.deliverSession(env.CorrelationID, sessionNotice{bad: true})
 		return
 	}

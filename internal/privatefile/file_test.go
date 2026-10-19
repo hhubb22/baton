@@ -1,6 +1,7 @@
 package privatefile_test
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -8,6 +9,34 @@ import (
 	"baton/internal/privatefile"
 	"baton/internal/privatefiletest"
 )
+
+func TestSnapshotAllowsAtomicReplacement(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	if err := privatefile.WriteFile(path, []byte("old")); err != nil {
+		t.Fatal(err)
+	}
+	f, err := privatefile.OpenSnapshot(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := privatefile.WriteFile(path, []byte("new")); err != nil {
+		t.Fatalf("历史读句柄妨碍原子保存: %v", err)
+	}
+	before, err := io.ReadAll(f)
+	if err != nil || string(before) != "old" {
+		t.Fatalf("已打开的快照被改变: %q, %v", before, err)
+	}
+	after, err := privatefile.ReadSnapshot(path)
+	if err != nil || string(after) != "new" {
+		t.Fatalf("未读到原子保存的新状态: %q, %v", after, err)
+	}
+	privatefiletest.MakePublic(t, path)
+	if _, err := privatefile.ReadSnapshot(path); err == nil {
+		t.Fatal("快照接受了其他用户可读的秘密文件")
+	}
+}
 
 func TestPrivateFileRoundTrip(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "private")
@@ -58,6 +87,9 @@ func TestPrivateFileRejectsSymlink(t *testing.T) {
 	}
 	if _, err := privatefile.ReadFile(link); err == nil {
 		t.Fatal("读取了符号链接")
+	}
+	if _, err := privatefile.ReadSnapshot(link); err == nil {
+		t.Fatal("快照读取了符号链接")
 	}
 	if err := privatefile.WriteFile(link, []byte("replacement")); err == nil {
 		t.Fatal("覆盖了符号链接")
