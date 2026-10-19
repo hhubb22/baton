@@ -1,15 +1,8 @@
 # Codex 转录
 
-`synthetic_simple.ndjson` 由上一级人工样本 `replay.json` 的完成流程转写，包含版本探测、initialize、thread/start、turn/start 和 turn/completed。头部 `source` 明确标记为手写样本转写，`platform` 为 synthetic，`recorded_at` 为空。模型输出沿用原样本，Agent 标识固定为 thread-1、turn-1；适配器请求 id 和输入操作标识通过捕获保存，目录通过运行时绑定提供。
-
-该转录用于验证转录工具链和真实 Codex 适配器的进程边界。`TestTranscriptReplaySimple` 在完成事件之前设门，检查尚未得到最终结果，放行后检查结构化结果。它不调用模型。
-
-PS-172 交付此合成完成场景。首批真实录制由 PS-175 在用户本机生成；现有手写假 Agent 和测试保持原样，迁移由 PS-176、PS-177 负责。格式、状态文件、门控与派生变体的使用方法见 [工具说明](../../../../../tools/agent-replay/README.md)。
-
-
 ## 真实场景入口
 
-`TestRealCodex/<scenario>` 为每个场景创建独立的 app-server、工作目录和原生 thread，使用一次性、独立认证的 CODEX_HOME。设置 `BATON_RECORD_DIR` 后写入其 `codex/` 子目录；本机流程见 [主 README](../../../../../README.md#本机录制与规范化)。本目录其余 `*.ndjson` 是 2026-10-19 在 Baton 9c11002 上录制的首批真实转录：Codex 0.162.1，darwin/arm64，模型 `gpt-6-luna`，单份 1.7～61 KB。首轮提交了通过的 9 个场景：`simple`、`interrupt_idle`、`interrupt_mid_tool`、`deliver_active`、`deliver_idle`、`restore_load_only`、`restore_missing`、`provider_error`、`symlinked_workspace`。
+`TestRealCodex/<scenario>` 为每个场景创建独立的 app-server、工作目录和原生 thread，使用一次性、独立认证的 CODEX_HOME。设置 `BATON_RECORD_DIR` 后写入其 `codex/` 子目录；本机流程见 [主 README](../../../../../README.md#本机录制与规范化)。首轮 9 份真实转录于 2026-10-19 在 Baton 9c11002 上录制：Codex 0.162.1，darwin/arm64，模型 `gpt-6-luna`，单份 1.7～61 KB。首轮提交了通过的 9 个场景：`simple`、`interrupt_idle`、`interrupt_mid_tool`、`deliver_active`、`deliver_idle`、`restore_load_only`、`restore_missing`、`provider_error`、`symlinked_workspace`。
 
 首轮失败场景的补录结果：
 
@@ -30,3 +23,44 @@ PS-172 交付此合成完成场景。首批真实录制由 PS-175 在用户本�
 `result_free_text` 不适用，保留同名跳过子测试。`internal/agent/codex/codex.go` 的 `StartTask` 每次 `turn/start` 都携带 `outputSchema: ResultSchema()`，`internal/agent/codex/result.go` 要求包含 status、summary 等字段的对象；[Baton TECH](../../../../../specs/baton/TECH.md)「结构化结果」优先使用原生 output schema。当前适配器无法通过任务提示关闭该约束，要求模型自由文本不能稳定产生对应转录。自由文本拒绝继续由既有结果校验测试覆盖，真实错误帧的派生回放由后续迁移工单处理。
 
 额外子测试 `delegation` 保留完整 Coordinator/batond/Worker 委托链路及原 CLI 的 delegate、wait、result 流程，检查父摘要、恰好一个完成且摘要正确的子任务、父任务完成。它包含真实子 Agent 会话，规范化只保留父会话，丢弃条目计入 dropped_frames。该流程还覆盖活动工具查询子结果，独立于 `deliver_active` 的 steer 注入。
+
+## CI 回放
+
+`TestRecordedCodexScenarios` 和 `TestRecordedCodexWorkerScenarios` 分别回放上述 11 份转录（含补录的 delegation 和 PS-178 的 interrupt_before_turn_started）。早到中止另外保留 PS-178 的补发失败、通知先到及回合身份等派生回放。`delegation` 通过成功查询工具输出中的精确 delivery_id 确认，回放只包含父会话，不启动真实子 Agent。
+
+测试用独立临时目录绑定 `transcript_start.bindings`，`symlinked_workspace` 额外创建符号链接；不支持创建符号链接的平台显式跳过该项。测试只保留与 app-server 配对的版本探测；录制驱动的额外探测、被筛除子会话留下的探测在测试准备时去掉，进程连续编号。录制响应、方法、thread/turn 身份和原有捕获保留。正常 app-server 在末尾设门，检查已经消费全部所选请求，并检查 `failure.json`。适配器层对 deliver_idle 的两轮结算分别设门；逐帧持久化会执行同步写入与平台权限检查，事实与门闩等待上限为 30 秒。Worker 的 restore_missing 在恢复错误后立即关闭 Agent，改用最后一次 thread/read 的持久捕获、原映射不变与 uncertain_history 报告证明实际执行。
+
+适配器层交付按录制时的精简信封执行。Worker 层使用以下派生前置条件，原始转录文件保持不变：
+
+- 选择 Worker 会调用的历史查询，去掉录制测试额外的前后观察查询；所选查询与响应保持录制内容。
+- 出站交付文本按 Worker 的完整 `ChildDelivery` 信封生成，保留同一 delivery_id 捕获；原生历史继续使用录制响应。确认只检查精确 delivery_id。
+- `deliver_active`、`restore_load_only` 的活动交付先准备账本中已有的 `waiting_children` 事实。录制驱动直接调用 DeliverResult；Worker 自动续接要求已有等待子结果的事实。
+- `deliver_idle` 将第一回合的最终消息派生为 `baton_waiting_for_children`，以满足 Worker 自动续接条件；第二回合和交付历史保留录制内容。
+
+交付后的历史响应前设门：即使 steer ACK 和 settled 已到，Worker 仍保存 uncertain，放行含精确 ID 的历史后才产生 delivered 回执。`delivery_wrong_id` 将两次已有历史查询里的 ID 改为相似值，检查保留 uncertain、结果待核实。`delegation` 由 Worker 的 queried 子结果通知触发：wait 的嵌套 JSON 输出没有顶层 delivery_id，保持 uncertain；result 的成功工具输出含精确 ID，放行后才确认 delivered，不向 Agent 注入新输入。重复通知不再注入；`restore_load_only` 重启 Worker 后补报同一条 outbox 结果，保持原 thread/turn，不再提交任务。
+
+`interrupt_mid_tool` 的录制没有 commandExecution 开始事件。回放在录制的 `turn/moderationMetadata` 处设门，然后发 Abort，并在 `turn/completed` 前另设门，分别验证 ACK 与迟到的 StopObserver 停止事实；outcomeKnown 保持 false。该回放不能证明工具开始事件的门控能力。
+
+## 覆盖对应表
+
+| 原 FIXTURE_MODE / 覆盖点 | 当前证据 |
+|---|---|
+| `complete` | 两层 `simple`、`restore_load_only`；结构化结果在 settled 后输出、重复任务拒绝、恢复身份与 outbox 补报 |
+| `running` | 两层 `interrupt_mid_tool`、`deliver_active`、`deliver_idle`；StopObserver、交付路由、精确历史确认；`TestUnifiedWaitingOutput` 保留等待标记单测 |
+| `disconnect` | 两层 `disconnect`：simple.CutAfter(request:turn/start)；`TestPendingInputRecoveryNeverResubmits` 覆盖未确认输入的恢复拒绝 |
+| `missing` | 两层 `restore_missing`；`TestRecoveryPaginationAndGuards/wrong-thread` 覆盖返回错误 thread 身份 |
+| `incompatible` | `TestRecoveryPaginationAndGuards/incompatible`，恢复返回 -32601 时拒绝，不新建会话 |
+| `paged` | `TestRecoveryPaginationAndGuards/paged`，turn 与 item 均跨页；`TestHistoryContainsExactIdentity` 的交付查询跨页 |
+| `absentturn` | `TestRecoveryPaginationAndGuards/absentturn` |
+| `cycle` | `TestRecoveryPaginationAndGuards/cycle` |
+| `missing-items` | `TestRecoveryPaginationAndGuards/missing-items` |
+| `wrongversion` | `TestRecordedCodexFaults/wrongversion`，Replace 版本响应 |
+| `badturn` | `TestRecordedCodexFaults/badturn`，Replace 空 turn ID，输入保持不可重试 |
+| `badsteer` | `TestRecordedCodexFaults/badsteer`，Replace 错误 turn ID，交付保持不可重试 |
+| 默认无完成事件 | 两层 `drop_settled`，Drop(turn/completed) 后没有成功或停止证据 |
+| 符号链接目录与重定向 | 两层 `symlinked_workspace`；适配器层重定向后拒绝恢复 |
+| 历史角色、查询成功与精确 ID | `TestHistoryContainsExactIdentity`；Worker `delivery_wrong_id` |
+| 浏览器历史与大帧 | `TestBrowserHistoryReadableAfterExit`、`TestBrowserHistoryFallbackReplayIsolation`、`TestCodexLFFramingLimits`；原生文件只读、协议查询连接隔离与 limit=1、截断、缺失映射、跨读取边界与 8 MiB 上限 |
+| 通知身份、审批拒绝与有界输出 | `TestNotificationsAreBoundAndApprovalsRefused`、`TestBrowserDeltaUsesSeparateBoundedQueue`、`TestDrainIgnoresPreviousTurnAfterSessionReuse` |
+
+`exit_mid_turn` 从 simple.CutAfter(response:turn/start) 派生，两层均拒绝成功，Worker 进入待核实。强制退出前设门，等 SubmitInput 返回后放行，明确模拟“响应已消费、回合尚未结算”的崩溃窗口；badsteer 的响应错误同样先被调用方消费。此前立即退出的变体在 CI 暴露 jsonrpc2 v0.2.1 的 send-on-closed-channel 竞态，产品连接关闭问题留在本工单范围外。配额错误无法稳定按需录制，适配器层用 Replace 派生 failed 回合。Codex 固定 outputSchema，`free_text` 用 Replace 派生最终消息：适配器层校验拒绝该候选，Worker 记录 failed。

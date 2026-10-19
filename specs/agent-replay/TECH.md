@@ -10,7 +10,7 @@ Basis: 2026-10-19 用户确认的测试方案；[Baton TECH](../baton/TECH.md) �
 
 Baton 的适配器测试分三层。纯逻辑单测覆盖分帧和 Schema 形状。CI 中，测试进程以子进程模式冒充 Agent，适配器通过真实的 stdin/stdout 与它通信。门控的真实测试只在本机运行，使用真实 Agent 和模型。这一分层与 t3code 相同，差别在回放数据的来源。
 
-Pi 的 `internal/agent/pi/testdata/1.3.0-*.jsonl` 照 Pi 文档转录，它的 README 写明 “not a recording of a model run”。Codex 的 `internal/agent/codex/testdata/replay.json` 是人工构造的样本，只按官方 Schema 检查形状。两个假 Agent 都是手写的协议实现。`pi_test.go` 的 `replayChild` 根据 prompt 里是否含 `hold`、`exit` 决定行为，故障靠 `BATON_PI_REPLAY_ABORT_UNSETTLED` 等环境变量注入。`codex_test.go` 的 `replayServer` 用十多种 `FIXTURE_MODE` 改写响应。每接一个新 Agent，就要再写一个这样的进程，而且它演出的帧序列是开发者推测的。
+迁移前，Pi 的 `internal/agent/pi/testdata/1.3.0-*.jsonl` 照 Pi 文档转录，它的 README 写明 “not a recording of a model run”。Codex 的 `internal/agent/codex/testdata/replay.json` 是人工构造的样本，只按官方 Schema 检查形状。两个假 Agent 都是手写的协议实现。`pi_test.go` 的 `replayChild` 根据 prompt 里是否含 `hold`、`exit` 决定行为，故障靠 `BATON_PI_REPLAY_ABORT_UNSETTLED` 等环境变量注入。`codex_test.go` 的 `replayServer` 用十多种 `FIXTURE_MODE` 改写响应。每接一个新 Agent，就要再写一个这样的进程，而且它演出的帧序列是开发者推测的。
 
 真实测试的发现没有进入 CI。`TestRealPi` 发现 Pi 1.3.0 的中止要等当前工具结束才生效，这个时序后来靠手写的 `BATON_PI_REPLAY_ABORT_UNSETTLED` 近似出来。真实测试结束后只在日志里留下「支持 / 不支持 / 未验证」，没有可以重放的产物。`TestRealPi`（`internal/gateway/real_pi_test.go`）走完整的 Coordinator（已内置节点连接）和 batond 链路，在一个长流程里依次检查九项能力。`TestRealCodex`（`internal/gateway/codex_real_test.go`）大部分直接驱动 `codex.Adapter`，委托部分走完整链路。
 
@@ -170,18 +170,30 @@ Agent 版本升级的流程：用新版本把全部场景重录一遍，规范�
 |---|---|---|---|---|
 | R-01 | 用手写的最小转录做格式往返：读入、写出、再读入 | 两次读入的结果不一致；缺少 `transcript_start` 时没有报错 | 单元测试 | planned |
 | R-02 | 回放 Agent 配合一个故意多发帧、少发帧、改字段的测试客户端 | 任何一种情况没有写出 `failure.json`，或以零退出码退出 | 单元测试 | planned |
-| R-03 | 在 macOS 录制的转录分别在 Linux、macOS、Windows CI 回放，工作目录绑定到本机临时目录 | 任一平台路径比较或 JSON 转义出错 | CI 三平台 | planned |
+| R-03 | 在 macOS 录制的转录分别在 Linux、macOS、Windows CI 回放，工作目录绑定到本机临时目录 | 任一平台路径比较或 JSON 转义出错 | CI 三平台 | passed：PS-177 / PR #45，代码 607a823，[CI 39238860155](https://github.com/hhubb22/baton/actions/runs/39238860155)，Linux、macOS、Windows 原生测试通过 |
 | R-03 | 捕获占位符跨两个进程使用（Pi 启动后恢复） | 第二个进程中的值与第一次捕获的值不同 | 适配器层回放 | planned |
 | R-04 | Pi `simple` 场景回放，在每条 `emit_inbound` 之前检查历史文件内容 | 适配器看到事件时，历史文件尚未包含对应的行 | 适配器层回放 | planned |
 | R-05 | `interrupt_mid_tool` 在工具开始的 label 设门，测试在 reached 后调用 `Abort` | 回放没有在门前停住；放行后帧顺序与转录不同 | 适配器层回放 | planned |
-| R-05 | 对 `simple` 做 `CutAfter`、`Drop(settled)` | 适配器把崩溃判为成功；settled 缺失时报告停止 | 适配器层和 Worker 层回放 | planned |
+| R-05 | 对 `simple` 做 `CutAfter`、`Drop(settled)` | 适配器把崩溃判为成功；settled 缺失时报告停止 | 适配器层和 Worker 层回放 | passed：PS-177，`TestRecordedCodexFaults`、`TestRecordedCodexWorkerScenarios`；本机两层各 10 次及 CI 39238860155 通过 |
 | R-06 | 用 `cat` 类回显程序和一个按退出码退出的程序做录制器透传测试 | 转发的字节与输入不同；退出码不一致；三个方向的记录顺序错乱 | 单元测试 | planned |
 | R-06 | 对 Pi 1.3.0 和 Codex 0.162.1 分别带录制器和不带录制器跑 `simple` | 带录制器时能力矩阵结果不同 | 本机真实测试 | planned |
 | R-07 | 在原始录制里放入测试密钥、`/Users/<name>` 路径、主机名，运行规范化 | 规范化没有拒绝写出，或输出里还有这些内容 | 单元测试 | planned |
 | R-08 | 设置 `BATON_RECORD_DIR` 跑 `TestRealPi`、`TestRealCodex` 全部子测试 | 某个场景没有产出原始录制；不设置该变量时行为与现在不同 | 本机真实测试 | planned |
-| R-09 | 每个适配器的 `testdata/replay/` 与第 8 节清单逐项对照 | 缺少场景，且 README 里没有写原因 | 审查 | planned |
-| R-10 | 第 8 节每个场景通过 `RunWorker` 回放；`deliver_*` 由 Worker 子结果通知触发 | 出现第二次任务输入；未在历史中看到 `delivery_id` 就记为 delivered；崩溃变体没有进入待核实 | Worker 层回放 | planned |
+| R-09 | 每个适配器的 `testdata/replay/` 与第 8 节清单逐项对照 | 缺少场景，且 README 里没有写原因 | 审查 | passed：PS-176、PS-177；两份 README 记录适用场景、派生条件与缺口；PS-178 的 Codex 早到中止录制已纳入 |
+| R-10 | 第 8 节每个场景通过 `RunWorker` 回放；`deliver_*` 由 Worker 子结果通知触发 | 出现第二次任务输入；未在历史中看到 `delivery_id` 就记为 delivered；崩溃变体没有进入待核实 | Worker 层回放 | passed：PS-176、PS-177 的适用录制场景；`TestRecordedCodexWorkerScenarios` 本机 10 次、race 及 CI 39238860155 通过；PS-178 早到中止另由两层录制与派生回放覆盖 |
 | R-11 | 首批转录提交后，用同一版本再录一次 `simple` 并规范化 | 两次转录除模型文本外存在差异，说明规范化不稳定 | 本机真实测试 | planned |
+
+PS-177 的 Codex 执行记录（2026-10-19；Pi 项由对应工单维护）：
+
+| Requirement | Setup and observation | Failure condition | Where | Status |
+|---|---|---|---|---|
+| R-03 | 11 份 macOS 录制绑定本机临时目录；symlinked_workspace 绑定符号链接 | 路径或 JSON 转义失配 | `TestRecordedCodexScenarios`、`TestRecordedCodexWorkerScenarios` | passed：本机 macOS 两层 `-count=10`；此前 10 份在代码 607a823 的 CI 39238860155 三平台全部通过；PS-178 的第 11 份本机执行记录见对应两层测试 |
+| R-05 | interrupt_mid_tool 在录制的 turn/moderationMetadata 与 turn/completed 前设门，分别检查 ACK 与迟到停止 | ACK 成为停止事实；放行后没有 StopObserver 证据 | `TestRecordedCodexScenarios/interrupt_mid_tool` | passed：本机 `-count=10`；转录缺少工具开始事件，未验证该事件的门控 |
+| R-05 | simple.CutAfter(request:turn/start / response:turn/start)、Drop(turn/completed) | 崩溃成为成功；没有 settled 却报告停止 | `TestRecordedCodexFaults`、`TestRecordedCodexWorkerScenarios` 的 disconnect / exit_mid_turn / drop_settled | passed：本机两层 `-count=10`，Worker 崩溃进入待核实 |
+| R-09 | 对照 §8 检查 11 份转录及不适用/缺失说明 | 缺项未说明 | Codex `testdata/replay/README.md`；PS-175、PS-178 | passed：11 份已逐项回放；result_free_text 由派生与单测覆盖；PS-178 早到中止已覆盖 |
+| R-10 | 11 份场景通过 RunWorker；重复任务/子结果通知，交付历史响应前设门，派生相似 delivery_id | 重发任务；历史确认前 delivered；错误 ID 被确认；恢复替换原身份或 outbox 结果 | `TestRecordedCodexWorkerScenarios` | passed：本机 `-count=10`；交付信封、等待状态和只读查询选择见 Codex 场景 README |
+| R-05 | 立即 CutAfter(response) 的旧派生窗口，在调用方消费响应前终止进程 | 回放进程退出导致测试进程 panic | [CI 39239464332](https://github.com/hhubb22/baton/actions/runs/39239464332) 的 Linux race / macOS 测试 | failed：aba1197；jsonrpc2 v0.2.1 在缓冲响应与连接关闭并发时 send on closed channel。当前崩溃变体设门等待响应被消费；第三方连接关闭竞态未在本工单修复 |
+| R-03 | Windows deliver_idle 第二轮的长转录等待结算 | 结算事实超过测试等待上限 | [CI 39240721769](https://github.com/hhubb22/baton/actions/runs/39240721769) Windows 测试 | failed：e91457d；第二轮在原 10 秒等待上限超时，无转录失配报告。当前改为 30 秒并对第二轮结算另设门；原生 CI 结果另行记录 |
 
 真实测试和录制只在本机运行，使用最便宜的模型。回放测试通过只说明适配器能正确处理录到的帧序列，不能代替对应版本的真实测试结论。
 
