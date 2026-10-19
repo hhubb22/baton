@@ -28,7 +28,7 @@
 
 `TestRecordedCodexScenarios` 和 `TestRecordedCodexWorkerScenarios` 分别回放上述 11 份转录（含补录的 delegation 和 PS-178 的 interrupt_before_turn_started）。早到中止另外保留 PS-178 的补发失败、通知先到及回合身份等派生回放。`delegation` 通过成功查询工具输出中的精确 delivery_id 确认，回放只包含父会话，不启动真实子 Agent。
 
-测试用独立临时目录绑定 `transcript_start.bindings`，`symlinked_workspace` 额外创建符号链接；不支持创建符号链接的平台显式跳过该项。测试只保留与 app-server 配对的版本探测；录制驱动的额外探测、被筛除子会话留下的探测在测试准备时去掉，进程连续编号。录制响应、方法、thread/turn 身份和原有捕获保留。正常 app-server 在末尾设门，检查已经消费全部所选请求，并检查 `failure.json`。Worker 的 restore_missing 在恢复错误后立即关闭 Agent，改用最后一次 thread/read 的持久捕获、原映射不变与 uncertain_history 报告证明实际执行。
+测试用独立临时目录绑定 `transcript_start.bindings`，`symlinked_workspace` 额外创建符号链接；不支持创建符号链接的平台显式跳过该项。测试只保留与 app-server 配对的版本探测；录制驱动的额外探测、被筛除子会话留下的探测在测试准备时去掉，进程连续编号。录制响应、方法、thread/turn 身份和原有捕获保留。正常 app-server 在末尾设门，检查已经消费全部所选请求，并检查 `failure.json`。适配器层对 deliver_idle 的两轮结算分别设门；逐帧持久化会执行同步写入与平台权限检查，事实与门闩等待上限为 30 秒。Worker 的 restore_missing 在恢复错误后立即关闭 Agent，改用最后一次 thread/read 的持久捕获、原映射不变与 uncertain_history 报告证明实际执行。
 
 适配器层交付按录制时的精简信封执行。Worker 层使用以下派生前置条件，原始转录文件保持不变：
 

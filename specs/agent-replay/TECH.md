@@ -193,6 +193,7 @@ PS-177 的 Codex 执行记录（2026-10-19；Pi 项由对应工单维护）：
 | R-09 | 对照 §8 检查 11 份转录及不适用/缺失说明 | 缺项未说明 | Codex `testdata/replay/README.md`；PS-175、PS-178 | passed：11 份已逐项回放；result_free_text 由派生与单测覆盖；PS-178 早到中止已覆盖 |
 | R-10 | 11 份场景通过 RunWorker；重复任务/子结果通知，交付历史响应前设门，派生相似 delivery_id | 重发任务；历史确认前 delivered；错误 ID 被确认；恢复替换原身份或 outbox 结果 | `TestRecordedCodexWorkerScenarios` | passed：本机 `-count=10`；交付信封、等待状态和只读查询选择见 Codex 场景 README |
 | R-05 | 立即 CutAfter(response) 的旧派生窗口，在调用方消费响应前终止进程 | 回放进程退出导致测试进程 panic | [CI 39239464332](https://github.com/hhubb22/baton/actions/runs/39239464332) 的 Linux race / macOS 测试 | failed：aba1197；jsonrpc2 v0.2.1 在缓冲响应与连接关闭并发时 send on closed channel。当前崩溃变体设门等待响应被消费；第三方连接关闭竞态未在本工单修复 |
+| R-03 | Windows deliver_idle 第二轮的长转录等待结算 | 结算事实超过测试等待上限 | [CI 39240721769](https://github.com/hhubb22/baton/actions/runs/39240721769) Windows 测试 | failed：e91457d；第二轮在原 10 秒等待上限超时，无转录失配报告。当前改为 30 秒并对第二轮结算另设门；原生 CI 结果另行记录 |
 
 真实测试和录制只在本机运行，使用最便宜的模型。回放测试通过只说明适配器能正确处理录到的帧序列，不能代替对应版本的真实测试结论。
 

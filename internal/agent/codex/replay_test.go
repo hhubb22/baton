@@ -35,7 +35,7 @@ func awaitOutput(t *testing.T, a *Adapter) agent.Output {
 }
 func await(t *testing.T, f func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		if f() {
 			return
@@ -83,6 +83,9 @@ func TestRecordedCodexScenarios(t *testing.T) {
 			}
 			if scenario != "restore_missing" {
 				gates = append(gates, "event:turn/completed")
+			}
+			if scenario == "deliver_idle" {
+				gates = append(gates, "event:turn/completed:2")
 			}
 			r := replaytest.Prepare(t, binary, tape, gates...)
 			c := replayConfig(r)
@@ -157,18 +160,20 @@ func TestRecordedCodexScenarios(t *testing.T) {
 				}
 			}
 
-			if scenario != "deliver_idle" {
-				r.Wait(t, "event:turn/completed")
-				if scenario != "interrupt_mid_tool" && scenario != "interrupt_before_turn_started" && scenario != "provider_error" {
-					await(t, func() bool { a.mu.Lock(); defer a.mu.Unlock(); return a.final != "" })
-				}
-				for _, out := range a.Drain() {
-					if out.Final != "" || out.Exited {
-						t.Fatalf("结算前输出最终结果: %+v", out)
-					}
-				}
-				r.Release(t, "event:turn/completed")
+			settled := "event:turn/completed"
+			if scenario == "deliver_idle" {
+				settled = "event:turn/completed:2"
 			}
+			r.Wait(t, settled)
+			if scenario != "interrupt_mid_tool" && scenario != "interrupt_before_turn_started" && scenario != "provider_error" {
+				await(t, func() bool { a.mu.Lock(); defer a.mu.Unlock(); return a.final != "" })
+			}
+			for _, out := range a.Drain() {
+				if out.Final != "" || out.Exited {
+					t.Fatalf("结算前输出最终结果: %+v", out)
+				}
+			}
+			r.Release(t, settled)
 			out := awaitOutput(t, a)
 			switch scenario {
 			case "interrupt_mid_tool", "interrupt_before_turn_started":

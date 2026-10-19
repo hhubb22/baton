@@ -163,7 +163,8 @@ func (r *Run) Check(t *testing.T) {
 }
 func (r *Run) Wait(t *testing.T, label string) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// 长转录逐帧持久化状态，Windows 原生 CI 需要容纳文件权限检查与同步写入。
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := replay.WaitReached(ctx, r.State, label); err != nil {
 		r.Check(t)
