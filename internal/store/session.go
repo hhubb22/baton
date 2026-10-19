@@ -42,6 +42,15 @@ func resolveSession(ctx context.Context, tx pgx.Tx, employeeID string, in task.I
 			return "", err
 		}
 	}
+	if in.AgentType != nil && *in.AgentType == "shell" {
+		if in.TargetSessionID != nil {
+			return "", &task.Rejection{Code: task.CodeInvalidTarget, Message: "命令必须使用新的 Session"}
+		}
+		if err := projectExecEnabled(ctx, tx, employeeID, target.id); err != nil {
+			return "", err
+		}
+		return "shell", nil
+	}
 	if in.TargetSessionID == nil {
 		return chooseAgent(in.AgentType, target.defaultAgent, target.caps)
 	}

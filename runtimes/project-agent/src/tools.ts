@@ -58,6 +58,22 @@ export const toolDefinitions = [
     parameters: obj({ after_id: opt(), ...page }),
   },
   {
+    name: "nodes.exec",
+    description:
+      "在已开启命令执行的节点上管理环境，例如创建 worktree、检查仓库或安装依赖。开发工作优先派发给执行 Agent。Baton 不检查命令内容，也不提供沙箱；命令以节点用户身份运行。工作目录必须已存在并位于节点登记目录内。等待结束后命令继续运行，结果可用 tasks.get 查询。",
+    parameters: obj({
+      node_id: str(),
+      command: str(),
+      working_directory: str(),
+      wait_seconds: Type.Optional(
+        Type.Integer({ minimum: 0, maximum: 600, default: 30 }),
+      ),
+      timeout_seconds: Type.Optional(
+        Type.Integer({ minimum: 1, default: 7200 }),
+      ),
+    }),
+  },
+  {
     name: "tasks.dispatch",
     description:
       "把开发任务交给执行 Agent；工作目录必须已存在。在 expected_outputs 写明验证方式，找不到验证方式时写明原因。结果可用 tasks.get 查询。",

@@ -19,6 +19,7 @@ type Output struct {
 }
 
 type Config struct {
+	DataDir     string
 	Directory   string
 	SessionDir  string
 	SessionID   string

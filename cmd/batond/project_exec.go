@@ -37,6 +37,11 @@ func cmdProjectExec(args []string, stdout io.Writer, getenv func(string) string)
 	if err != nil {
 		return err
 	}
+	if enabled {
+		if _, err := fmt.Fprintln(stdout, "开启后，Project Agent 可以执行任意命令，以本设备用户身份运行。Baton 不提供沙箱；登记目录只限制启动位置，命令仍可访问目录之外的文件。任务结果或仓库内容中的恶意指令可能诱导执行任意命令。每条命令和输出都会保存到对话。只在信任 Project Agent 的设备上开启。"); err != nil {
+			return err
+		}
+	}
 	if err := node.WriteProjectExec(dir, protocol.RuntimeExec{Enabled: enabled, Shell: shell}); err != nil {
 		return err
 	}

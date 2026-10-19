@@ -9,6 +9,132 @@ import { frames, writeFrame } from "../../shared/stdio.js";
 import { modelMessages, IDLE_MS, RUN_MS, RETRIES } from "../src/runtime.js";
 import { canonical } from "../src/protocol.js";
 import { Backend, setup, assistant, input } from "./fixture.js";
+import { toolDefinitions } from "../src/tools.js";
+
+const execCall = () => fauxToolCall("nodes.exec", {
+  node_id: "node-b", command: "echo test", working_directory: "/repo",
+}, { id: "exec-1" });
+
+class ExecBackend extends Backend {
+  accepted = false;
+  waits: any[] = [];
+  pendingCount = 2;
+  async call(req: any): Promise<any> {
+    if (req.operation === "call_tool" && req.tool_name === "nodes.exec" && !this.events.some((event) => event.kind === "tool_result" && event.payload.message.toolCallId === req.tool_call_id)) {
+      assert.equal(req.last_seq, this.events.length);
+      assert.ok(this.events.some((event) => event.kind === "assistant"));
+      this.calls.push(req.operation);
+      if (!this.accepted) { this.accepted = true; this.effects++; }
+      return { pending: true, task_id: "exec-task-1" };
+    }
+    if (req.operation === "wait_tool") {
+      this.calls.push(req.operation);
+      this.waits.push(structuredClone(req));
+      assert.equal(req.tool_call_id, "exec-1");
+      assert.equal(req.last_seq, this.events.length);
+      if (!req.payload?.finish_wait && this.waits.length <= this.pendingCount)
+        return { pending: true, task_id: "exec-task-1" };
+      const event = {
+        seq: this.events.length + 1,
+        kind: "tool_result" as const,
+        payload: { format: "pi-ai/1", message: {
+          role: "toolResult", toolCallId: "exec-1", toolName: "nodes.exec",
+          content: [{ type: "text", text: JSON.stringify({ task_id: "exec-task-1", status: req.payload?.finish_wait ? "running" : "completed" }) }],
+          isError: false, timestamp: 0,
+        } },
+      };
+      this.events.push(event);
+      return structuredClone(event);
+    }
+    return super.call(req);
+  }
+}
+
+test("nodes.exec 工具声明等待范围、默认时限和执行权限", () => {
+  const definition = toolDefinitions.find((tool) => tool.name === "nodes.exec")!;
+  const properties = definition.parameters.properties;
+  assert.equal(properties.wait_seconds.minimum, 0);
+  assert.equal(properties.wait_seconds.maximum, 600);
+  assert.equal(properties.wait_seconds.default, 30);
+  assert.equal(properties.timeout_seconds.default, 7200);
+  assert.match(definition.description, /开发工作优先派发给执行 Agent/);
+  assert.match(definition.description, /不检查命令内容，也不提供沙箱/);
+  const messages = modelMessages(new Backend().boot(), []);
+  assert.match(String(messages[0].content), /通过 nodes.exec 管理环境/);
+});
+
+test("nodes.exec pending 期间轮询，结果保存后继续模型", async () => {
+  const backend = new ExecBackend();
+  const fixture = setup(backend, [() => fauxAssistantMessage([execCall()]), () => assistant()]);
+  await fixture.runtime.start();
+  assert.equal(backend.effects, 1);
+  assert.equal(backend.waits.length, 3);
+  assert.equal(backend.events.filter((event) => event.kind === "tool_result").length, 1);
+  assert.equal(fixture.faux.state.callCount, 2);
+  assert.equal(backend.now, 500 + IDLE_MS);
+  assert.ok(backend.waits.every((request) => request.last_seq === 2 && !request.payload));
+});
+
+test("等待时到达运行上限立即保存仍在执行结果，不再调用模型", async () => {
+  for (const recovery of [false, true]) {
+    const backend = new ExecBackend();
+    backend.pendingCount = Infinity;
+    if (recovery) {
+      backend.queue = false;
+      backend.events.push(input(), { seq: 2, kind: "assistant", payload: { format: "pi-ai/1", message: fauxAssistantMessage([execCall(), fauxToolCall("devices.list", {}, { id: "later-tool" })]) } });
+      const original = backend.call.bind(backend);
+      backend.call = async (request) => {
+        const result = await original(request);
+        if (request.operation === "call_tool") backend.now = RUN_MS - 100;
+        return result;
+      };
+    }
+    const fixture = setup(backend, [() => {
+      backend.now = RUN_MS - 100;
+      return fauxAssistantMessage([execCall(), fauxToolCall("devices.list", {}, { id: "later-tool" })]);
+    }]);
+    await fixture.runtime.start();
+    assert.equal(backend.now, RUN_MS);
+    assert.equal(backend.effects, 1);
+    assert.equal(fixture.faux.state.callCount, recovery ? 0 : 1);
+    assert.equal(backend.waits.length, 2);
+    assert.deepEqual(backend.waits[1].payload, { finish_wait: true });
+    assert.equal(backend.events.at(-1)?.kind, "tool_result");
+    assert.match(backend.events.at(-1)?.payload.message.content[0].text, /running/);
+    assert.equal(backend.calls.at(-1), "finish");
+    assert.ok(!backend.calls.includes("tasks.cancel"));
+  }
+});
+
+test("等待期间实际 Runtime 进程被杀，恢复使用原调用 ID 和任务", async () => {
+  const backend = new ExecBackend();
+  backend.pendingCount = 1;
+  for (const crash of [true, false]) {
+    const child = spawn(process.execPath, ["--import", "tsx", "test/worker.ts"], {
+      stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, BATON_TEST_PROJECT_EXEC: "1" },
+    });
+    let stderr = "";
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    const exited = once(child, "exit");
+    for await (const raw of frames(child.stdout)) {
+      const frame = raw as any;
+      const data = await backend.call(frame.request);
+      await writeFrame(child.stdin, { id: frame.id, result: { type: "project_runtime.result", ok: true, data } });
+      if (crash && frame.request.operation === "wait_tool") {
+        child.kill("SIGKILL");
+        break;
+      }
+    }
+    child.stdin.end();
+    const [code] = await exited;
+    if (!crash) assert.equal(code, 0, stderr);
+  }
+  assert.equal(backend.effects, 1);
+  assert.equal(backend.calls.filter((operation) => operation === "call_tool").length, 2);
+  assert.equal(backend.events.filter((event) => event.kind === "tool_result").length, 1);
+  assert.deepEqual(backend.waits.map((request) => request.tool_call_id), ["exec-1", "exec-1"]);
+  assert.equal(backend.events.at(-1)?.kind, "assistant");
+});
 
 test("faux 恢复结尾表的四种情况和部分工具结果", async () => {
   for (const ending of [

@@ -104,8 +104,8 @@ PS-155 通过 0016 交付 Project、Agent、主对话、事件、记忆和输入
 | source_type | 类别 | 来源 | payload 上限 |
 |---|---|---|---|
 | `user_message` | 主动 | 用户在主对话发送的消息，API 拒绝超过 64 KiB 的消息 | 64 KiB 正文加元数据 |
-| `user_task_result` | 被动 | 用户在 Project 直接派发的任务进入终态 | 40 KiB |
-| `task_result` | 主动 | Project Agent 派发的任务进入终态（第 9 节） | 40 KiB |
+| `user_task_result` | 被动 | 用户在 Project 直接派发的任务进入终态 | 40 KiB；含命令输出时 72 KiB |
+| `task_result` | 主动 | Project Agent 派发的任务进入终态（第 9 节） | 40 KiB；含命令输出时 72 KiB |
 | `attention_answer` | 主动 | 用户回答或关闭一个事项（Agent Inbox IB-12），内容是事项 ID、标题、选中的选项和最多 4 KiB 的文字；上限包含 JSON 转义 | 32 KiB |
 | `memory_updated` | 被动 | 用户在界面上新建或修改记忆（第 6.4 节） | 1 KiB |
 | `project_updated` | 被动 | 用户修改 Project 标题或目标（第 6.1 节） | 4 KiB |
@@ -311,7 +311,7 @@ PA-W02 通过现有 Gateway 的控制队列传送 `node.runtime_report`，正文
 
 扫描最多向下 4 层（登记根为第 0 层）、读取 4096 个目录条目、记录 128 个仓库。每批读取至多 64 个条目，不跟随遍历中的符号链接，不进入 `.git`。Git 配置最多读取 16 KiB，通过 `git config --no-includes --file - --get remote.origin.url` 解析，每次最多 200 ms，不读取 include 或全局配置。worktree 的 `.git` 和 `commondir` 只允许指向同一登记根内的元数据；指向根外时仍登记仓库路径，省略 origin。origin 仅保留主机和仓库路径，去掉用户信息、端口、查询和片段，忽略本地路径及不支持的传输格式。扫描、读取或容量受限时报告带 `truncated: true`；超出报告容量时先移除末尾仓库，再移除末尾目录。发送前采用带缩进的 JSON 计量，给 PostgreSQL `jsonb::text` 的空格留出余量，报告和数据库文本均不超过 64 KiB。
 
-`batond project-exec --enabled=true|false [--shell 路径] [--data-dir 目录]` 原子保存本机 `project-exec.json`。必须显式给出开关，初始值为关闭；默认 shell 在 Windows 为 `pwsh`，其他系统采用 `SHELL`，未设置时为 `/bin/sh`。配置损坏或权限检查失败时上报关闭。该命令只维护配置，执行命令的 Worker 由后续工单实现。
+`batond project-exec --enabled=true|false [--shell 路径] [--data-dir 目录]` 原子保存本机 `project-exec.json`。必须显式给出开关，初始值为关闭；默认 shell 在 Windows 为 `pwsh`，其他系统采用 `SHELL`，未设置时为 `/bin/sh`。配置损坏或权限检查失败时上报关闭。该命令维护配置；Session Worker 在启动命令前重新读取开关。CLI 和节点页面在开启前说明当前用户权限、任意命令、没有沙箱和注入风险。
 
 `baton-project-runtime probe` 的 stdout 契约是一个 JSON 对象：`{ "version": "0.1.0", "providers": [{ "provider": "openai-codex", "status": "available" }] }`。状态只接受 `available`、`login_required`、`unknown`，最多 32 个 provider，名称和版本不超过 128 个 ASCII 字符（字母、数字、点、下划线、加号、连字符）。batond 每轮调用一次 `probe`，时限 1 秒，stdout 缓冲最多 16 KiB，丢弃 stderr；拒绝未知字段、尾随数据和超限输出。Runtime 未安装、probe 失败或输出无效时省略 `project_runtime`，不复用旧登录状态。PS-154 使用契约测试程序验证调用边界，Runtime、登录及真实 provider 验证由 PS-158 完成。
 
@@ -337,18 +337,20 @@ Coordinator 在 `call_tool` 的同一个事务里调用任务接受逻辑，`req
 
 **实现为一个 Task。** 命令在另一台设备上执行，副作用不可能和 `tool_result` 放进同一个事务。所以 `nodes.exec` 复用现有的任务机制：Coordinator 在 `call_tool` 的事务里接受一个 `agent_type = shell` 的任务，`request_id` 为 `pa:{conversation_id}:{tool_call_id}`，填写 `origin_*` 列；任务和 Execution 的唯一性保证同一个工具调用最多执行一次命令。这一步不写 `tool_result`。目标节点的 `exec.enabled` 为假时，直接写一条 `is_error` 的结果。
 
-**等待。** `call_tool` 返回 `pending` 和任务 ID 后，Runtime 反复调用 `wait_tool(tool_call_id)`，每次最长等 30 秒，直到任务结束或达到 `wait_seconds`。然后 Coordinator 在一个事务里写入 `tool_result`：
+**等待。** `call_tool` 返回 `pending` 和任务 ID 后，Runtime 反复调用 `wait_tool(tool_call_id)`，每次最长等 30 秒，直到任务结束或达到 `wait_seconds`。当前实现立即查询，两次查询之间由 Runtime 等待 250 ms，数据库事务不持锁等待进程。截止时间保存在任务的 `exec_wait_until`，Runtime 重启不会延长它。然后 Coordinator 在一个事务里写入 `tool_result`：
 
 - 任务已结束：结果包含退出码、状态和输出。任务进入终态的事务已经按第 9 节插入了输入队列条目，这里把它标记为已投递，`delivered_seq` 指向这条 `tool_result`，避免同一结果出现两次。
 - 任务未结束：结果为「仍在执行，任务 ID 为 …，结束后结果会作为新输入送回」。命令继续执行，结束时按第 9 节进入输入队列。
 
-等待结束不终止命令。单次运行的时长上限到达时，Runtime 立即结束等待，按「未结束」写入结果，然后正常收尾。锁顺序为 `project_agents` → `conversations` → `tasks` → `project_agent_input_queue`；终态处理是 `tasks` → `executions` → `project_agent_input_queue`。两者都最后锁输入队列，不会形成环。
+等待结束不终止命令。单次运行的时长上限到达时，Runtime 用 `wait_tool` 的 `payload.finish_wait=true` 立即结束等待，按当前任务状态写入结果，然后正常结束运行。锁顺序为 `project_agents` → `conversations` → `tasks` → `project_agent_input_queue`；终态处理是 `tasks` → `executions` → `project_agent_input_queue`。两者都最后锁输入队列，不会形成环。
 
 **恢复。** Runtime 在等待期间崩溃时，对话结尾是一个没有结果的 `nodes.exec` 调用。恢复时再次 `call_tool`，Coordinator 按 `(origin_conversation_id, origin_tool_call_id)` 找到已有的任务，返回 `pending`，Runtime 继续等待。命令不会再执行一次。
 
 **节点上的执行。** Session Worker 新增一个内置的 `shell` 执行器，不启动 Agent 进程。它沿用启动许可和 `start_intent`：写入 `start_intent` 之后，用上报的 shell 执行命令（例如 `zsh -lc <command>`、`pwsh -NoProfile -Command <command>`），在 POSIX 上使用独立进程组，在 Windows 上使用 Job Object。stdout 和 stderr 合并后保留开头 16 KiB 和结尾 16 KiB，并记录总字节数和退出码。退出码为 0 时任务完成，否则失败，输出都放进结果。取消和超时时终止整个进程组。Worker 在命令执行中崩溃、无法确认进程状态时，任务进入待核实，沿用 Baton R-22。
 
-`shell` 执行器实现 `internal/agent.Adapter`，在 `registeredAdapters` 里注册为 `shell`。`SubmitInput` 执行命令并在结束后返回结果；`DeliverResult` 返回错误，因为命令不会委托子任务；`HistoryContains` 恒为 false，`ReadHistory` 只返回本地保存的输出记录；`Abort` 终止进程组，返回已停止且副作用未知。Worker 恢复时（`Config.Restore`）适配器返回 `agent.ErrHistoryMissing`，命令不会重跑，任务按上一段进入待核实。
+`shell` 执行器实现 `internal/agent.Adapter`，在 `registeredAdapters` 里注册为 `shell`。`SubmitInput` 启动命令，结束后由 `Drain` 返回结果，沿用 Worker 的异步轮询；`DeliverResult` 返回错误，因为命令不会委托子任务；`HistoryContains` 恒为 false，`ReadHistory` 只返回本地保存的输出记录；`Abort` 终止进程组，返回已停止且副作用未知。Worker 恢复时（`Config.Restore`）适配器返回 `agent.ErrHistoryMissing`，命令不会重跑，任务按上一段进入待核实。
+
+命令结果通过统一候选结果的可选 `command_result` 字段传送和保存：`output`、`total_bytes`、`exit_code`、`truncated`。文本使用 UTF-8；包含无效 UTF-8、不可展示控制字节或 JSON 转义过多时，整个保留的首尾字节用 base64 保存，`encoding` 为 `base64`。原始输出固定保留 32 KiB。`nodes.exec` 的工具结果采用对话事件上限 160 KiB，含命令结果的输入采用既有队列上限 72 KiB，以容纳 JSON 转义或 base64；命令输出不再按摘要限长裁剪。取消或超时后的停止报告也携带已取得的命令输出，进入对话；进程已停止但副作用未知时仍为待核实。迁移 `0022_project_exec.sql` 增加等待截止时间、命令结果列，并调整含命令结果的输入容量约束。
 
 Worker 收到 `shell` 任务时，会再检查一次本地的开关，开关关闭就拒绝执行。所以即使 Coordinator 的能力报告过期，未开启的节点也不会执行命令。
 
@@ -383,9 +385,9 @@ Runtime 的 `preview` 操作通过现有 RPC 发送 `{last_seq,payload:{text,tru
 
 `POST /api/v1/tasks` 在现有任务请求中增加可选的 `project_id`。接受任务的同一事务检查 Project 属于当前员工；暂停状态仍接受任务。请求摘要包含显式 Project，未填写时保持原摘要。复用默认设备、默认 Agent、工作目录和任务幂等规则。`tasks.project_id` 记录归属；`origin_conversation_id` 非空表示 Project Agent 派发，为空且没有来源 Session 表示用户派发，列表和详情沿用这些字段显示派发者。
 
-迁移 `0020` 给既有输入队列增加 `user_task_result` 来源类型，沿用 PA-17 的被动通知领取机制、40 KiB 任务结果上限和 `task:{task_id}:result:{version}` 去重键。用户任务终态和人工修订的结果写入这个队列，不触发放置或唤醒；下一条主动输入到达时一起领取。Project Agent 派发的任务继续使用主动 `task_result`。执行 Agent 的子任务仍按父子关系交付。
+迁移 `0020` 给既有输入队列增加 `user_task_result` 来源类型，沿用 PA-17 的被动通知领取机制、40 KiB 任务结果上限和 `task:{task_id}:result:{version}` 去重键。用户任务终态和人工修订的结果写入这个队列，不触发放置或唤醒；下一条主动输入到达时一起领取。Project Agent 派发的任务继续使用主动 `task_result`。执行 Agent 的子任务仍按父子关系交付。用户对命令任务发起新执行时，结果也保留被动通知语义；迁移 `0022` 将含命令输出的主动和被动结果容量统一为 72 KiB，以保存固定的 32 KiB 原始输出及其编码。
 
-迁移同时增加任务的 `user_operation` JSON 字段，保存最近一次用户操作的员工 ID、操作（cancel、resolve、rerun）及新执行的任务 ID。取消在原有任务锁内记录，等待节点停止回执后，结果通知带回这个操作；核实和新执行在各自事务里记录操作并入队。新执行复用原任务的 Project，作为用户派发的新任务；原任务增加版本后的输入注明新任务 ID。操作和结果输入同事务提交，重试沿用原来的版本和请求标识规则。
+迁移同时增加任务的 `user_operation` JSON 字段，保存最近一次用户操作的员工 ID、操作（cancel、resolve、rerun）及新执行的任务 ID。取消在原有任务锁内记录，等待节点停止回执后，结果通知带回这个操作；核实和新执行在各自事务里记录操作并入队。新执行复用原任务的 Project，作为用户派发的新任务；原任务增加版本后的输入注明新任务 ID。操作和结果输入同事务提交，重试沿用原来的版本和请求标识规则。命令通过 `wait_tool` 同步返回结果时，也附带同一版本的 `user_operation`，并将对应结果通知标记为已投递。
 
 暂停仍通过现有 Project 状态作废运行租约，不停止执行任务。期间的用户消息、主动结果和被动通知均保留。恢复后按既有主动输入和批量领取规则处理，不重复领取。
 

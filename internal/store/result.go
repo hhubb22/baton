@@ -16,6 +16,7 @@ import (
 
 // ExecutionReport 是节点上报、准备写入中心的执行事实。
 type ExecutionReport struct {
+	CommandResult        *task.CommandResult
 	ExecutionElapsedMS   int64
 	QueueDeadlineMet     bool
 	WorkerSequence       int64
@@ -125,11 +126,12 @@ func (s *Store) ApplyExecutionReport(ctx context.Context, in ExecutionReport) (b
 		return false, task.CodeInvalidTarget, nil
 	}
 	if in.Kind == task.EventStopReport {
-		if !validStopReport(in) {
+		if !validStopReport(in) || task.ValidateCommandResult(in.CommandResult) != nil {
 			return false, task.CodeInvalidTarget, nil
 		}
 	} else if in.Kind == task.EventResult {
 		if err := task.ValidateCandidate(task.Candidate{
+			CommandResult:        in.CommandResult,
 			Summary:              in.Summary,
 			Evidence:             in.Evidence,
 			Artifacts:            in.Artifacts,
@@ -376,6 +378,7 @@ func applyResult(ctx context.Context, tx pgx.Tx, in ExecutionReport, head execut
 		UPDATE tasks
 		SET status = $3,
 		    summary = $4,
+ command_result = $10,
 		    evidence_empty_reason = $5,
 		    artifacts_empty_reason = $6,
 		    error_code = $7,
@@ -384,7 +387,7 @@ func applyResult(ctx context.Context, tx pgx.Tx, in ExecutionReport, head execut
 		    updated_at = now()
 		WHERE id = $1::uuid AND employee_id = $2::uuid AND version = $9`,
 		in.TaskID, in.EmployeeID, in.Status, nullText(in.Summary), nullText(in.EvidenceEmptyReason),
-		nullText(in.ArtifactsEmptyReason), nullText(in.ErrorCode), nullText(in.ErrorMessage), head.version)
+		nullText(in.ArtifactsEmptyReason), nullText(in.ErrorCode), nullText(in.ErrorMessage), head.version, in.CommandResult)
 	if err != nil {
 		return fmt.Errorf("保存执行记录失败: %s", redact.Scrub(err.Error()))
 	}
@@ -425,6 +428,11 @@ func applyResult(ctx context.Context, tx pgx.Tx, in ExecutionReport, head execut
 }
 
 func retainLateResult(ctx context.Context, tx pgx.Tx, in ExecutionReport, head executionHead) error {
+	if in.CommandResult != nil {
+		if _, err := tx.Exec(ctx, `UPDATE tasks SET command_result=$2 WHERE id=$1`, in.TaskID, in.CommandResult); err != nil {
+			return err
+		}
+	}
 	if err := bumpVersion(ctx, tx, in.EmployeeID, in.TaskID, head.version); err != nil {
 		return err
 	}

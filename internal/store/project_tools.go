@@ -28,6 +28,10 @@ type savedToolCall struct {
 }
 
 type toolArguments struct {
+	NodeID                  string         `json:"node_id"`
+	Command                 string         `json:"command"`
+	WaitSeconds             *int           `json:"wait_seconds"`
+	TimeoutSeconds          *int           `json:"timeout_seconds"`
 	Summary                 string         `json:"summary"`
 	Options                 []inbox.Option `json:"options"`
 	AllowText               bool           `json:"allow_text"`
@@ -58,6 +62,7 @@ type toolArguments struct {
 }
 
 var projectToolFields = map[string]string{
+	"nodes.exec":     "node_id command working_directory wait_seconds timeout_seconds",
 	"inbox.ask":      "title summary content options allow_text task_id",
 	"inbox.list":     "after_id offset max_bytes",
 	"inbox.get":      "request_id offset max_bytes",
@@ -97,7 +102,7 @@ func decodeToolArguments(name string, raw json.RawMessage) (toolArguments, error
 	if a.Offset < 0 || a.MaxBytes < 0 || a.MaxBytes > maxProjectToolBytes || a.Revision < 0 || a.AfterSeq < 0 || a.ThroughSeq < 0 || a.Version < 0 {
 		return a, projectagent.ErrInvalid
 	}
-	for _, id := range []string{a.EntryID, a.TaskID, a.AfterID, a.TargetNodeID, a.RetryOfTaskID, a.RequestID} {
+	for _, id := range []string{a.EntryID, a.TaskID, a.AfterID, a.TargetNodeID, a.NodeID, a.RetryOfTaskID, a.RequestID} {
 		if id != "" {
 			if _, err := identity.ParseUUID(id); err != nil {
 				return a, projectagent.ErrInvalid
@@ -111,7 +116,7 @@ func decodeToolArguments(name string, raw json.RawMessage) (toolArguments, error
 }
 
 // callProjectTool 把工具业务和唯一结果写入同一事务；保存点用于撤销被拒绝的业务变更。
-func (s *Store) callProjectTool(ctx context.Context, tx pgx.Tx, b projectRunBinding, req protocol.ProjectRuntimeRequest) (projectagent.Event, error) {
+func (s *Store) callProjectTool(ctx context.Context, tx pgx.Tx, b projectRunBinding, req protocol.ProjectRuntimeRequest) (any, error) {
 	var empty projectagent.Event
 	if req.ToolCallID == "" || len(req.ToolCallID) > 128 || len(req.ToolName) > 128 {
 		return empty, projectagent.ErrInvalid
@@ -199,6 +204,15 @@ func (s *Store) callProjectTool(ctx context.Context, tx pgx.Tx, b projectRunBind
 	if businessErr == nil {
 		output, businessErr = s.executeProjectTool(ctx, business, b, assistantSeq, call.ID, call.Name, a)
 	}
+	if pending, ok := output.(projectToolPending); businessErr == nil && ok {
+		if err = business.Commit(ctx); err != nil {
+			return nil, err
+		}
+		if err = s.runBeforeCommit(ctx); err != nil {
+			return nil, err
+		}
+		return pending, nil
+	}
 	isError := businessErr != nil
 	if businessErr != nil {
 		if err = business.Rollback(ctx); err != nil {
@@ -229,28 +243,35 @@ func (s *Store) callProjectTool(ctx context.Context, tx pgx.Tx, b projectRunBind
 	} else if err = business.Commit(ctx); err != nil {
 		return empty, err
 	}
+	e, err := saveProjectToolResult(ctx, tx, b, req, call.ID, call.Name, output, isError)
+	if err == nil {
+		err = s.runBeforeCommit(ctx)
+	}
+	return e, err
+}
+
+func saveProjectToolResult(ctx context.Context, tx pgx.Tx, b projectRunBinding, req protocol.ProjectRuntimeRequest, callID, name string, output any, isError bool) (projectagent.Event, error) {
+	var empty projectagent.Event
 	text, err := protocol.MarshalJSON(output)
 	if err != nil {
 		return empty, err
 	}
-	if len(text) > 12<<10 {
-		return empty, projectagent.ErrTooLarge
-	}
-	result := map[string]any{"format": "pi-ai/1", "message": map[string]any{"role": "toolResult", "toolCallId": call.ID, "toolName": call.Name, "content": []any{map[string]any{"type": "text", "text": string(text)}}, "isError": isError, "timestamp": 0}}
+	result := map[string]any{"format": "pi-ai/1", "message": map[string]any{"role": "toolResult", "toolCallId": callID, "toolName": name, "content": []any{map[string]any{"type": "text", "text": string(text)}}, "isError": isError, "timestamp": 0}}
 	encoded, err := protocol.MarshalJSON(result)
-	if len(encoded) > maxProjectToolBytes {
-		return empty, projectagent.ErrTooLarge
-	}
 	if err != nil {
 		return empty, err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO conversation_events(conversation_id,seq,employee_id,kind,tool_call_id,run_id,lease_epoch,payload) VALUES($1,$2,$3,'tool_result',$4,$5,$6,$7)`, b.conversationID, b.nextSeq, b.owner, call.ID, req.RunID, req.LeaseEpoch, encoded); err != nil {
+	limit := maxProjectToolBytes
+	if name == "nodes.exec" {
+		limit = projectagent.MaxEventBytes
+	}
+	if len(encoded) > limit {
+		return empty, projectagent.ErrTooLarge
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO conversation_events(conversation_id,seq,employee_id,kind,tool_call_id,run_id,lease_epoch,payload) VALUES($1,$2,$3,'tool_result',$4,$5,$6,$7)`, b.conversationID, b.nextSeq, b.owner, callID, req.RunID, req.LeaseEpoch, encoded); err != nil {
 		return empty, err
 	}
 	if _, err = tx.Exec(ctx, `UPDATE conversations SET next_seq=next_seq+1 WHERE id=$1`, b.conversationID); err != nil {
-		return empty, err
-	}
-	if err = s.runBeforeCommit(ctx); err != nil {
 		return empty, err
 	}
 	return scanProjectEvent(tx.QueryRow(ctx, projectEventSelect+` WHERE conversation_id=$1 AND seq=$2`, b.conversationID, b.nextSeq))
@@ -294,6 +315,8 @@ func toolJSONPage(value any, a toolArguments) (any, error) {
 
 func (s *Store) executeProjectTool(ctx context.Context, tx pgx.Tx, b projectRunBinding, sourceSeq int64, callID string, name string, a toolArguments) (any, error) {
 	switch name {
+	case "nodes.exec":
+		return s.dispatchProjectExec(ctx, tx, b, callID, a)
 	case "inbox.ask", "inbox.get", "inbox.list", "inbox.withdraw":
 		return s.executeInboxTool(ctx, tx, b, callID, name, a)
 	case "memory.write":

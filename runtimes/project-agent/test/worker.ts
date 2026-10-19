@@ -1,6 +1,6 @@
 import { StdioClient } from "../../shared/stdio.js";
 import { checkedRPC } from "../src/protocol.js";
-import { createModels, fauxProvider } from "@earendil-works/pi-ai";
+import { createModels, fauxProvider, fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { assistant } from "./fixture.js";
 import { ProjectRuntime } from "../src/runtime.js";
 const client = new StdioClient(process.stdin, process.stdout);
@@ -19,7 +19,9 @@ faux.setResponses(
     () => (context: any) =>
       context.messages.at(-1)?.role === "toolResult"
         ? assistant()
-        : assistant(true),
+        : process.env.BATON_TEST_PROJECT_EXEC
+          ? fauxAssistantMessage([fauxToolCall("nodes.exec", { node_id: "node-b", command: "echo test", working_directory: "/repo" }, { id: "exec-1" })])
+          : assistant(true),
   ),
 );
 try {

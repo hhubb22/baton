@@ -47,31 +47,32 @@ type InputResult struct {
 	DeviceNames        []string           `json:"device_names,omitempty"`
 }
 
-// ExecutionReport 是允许进入中心的执行事实。它不包含会话原文。
+// ExecutionReport 是允许进入中心的执行事实，命令结果带有固定大小的输出。
 type ExecutionReport struct {
-	ExecutionElapsedMS   int64            `json:"execution_elapsed_ms,omitempty"`
-	QueueDeadlineMet     bool             `json:"queue_deadline_met,omitempty"`
-	WorkerSequence       int64            `json:"worker_sequence,omitempty"`
-	OccurredAt           time.Time        `json:"occurred_at,omitempty"`
-	NotStarted           bool             `json:"not_started,omitempty"`
-	OutcomeKnown         bool             `json:"outcome_known,omitempty"`
-	StopReason           string           `json:"stop_reason,omitempty"`
-	Type                 string           `json:"type"`
-	EventID              string           `json:"event_id"`
-	TaskID               string           `json:"task_id"`
-	ExecutionID          string           `json:"execution_id"`
-	SessionID            string           `json:"session_id"`
-	Kind                 string           `json:"kind"`
-	InputGeneration      int              `json:"input_generation"`
-	Status               string           `json:"status"`
-	Summary              string           `json:"summary,omitempty"`
-	Evidence             []task.ResultRef `json:"evidence,omitempty"`
-	Artifacts            []task.ResultRef `json:"artifacts,omitempty"`
-	EvidenceEmptyReason  string           `json:"evidence_empty_reason,omitempty"`
-	ArtifactsEmptyReason string           `json:"artifacts_empty_reason,omitempty"`
-	ErrorCode            string           `json:"error_code,omitempty"`
-	ErrorMessage         string           `json:"error_message,omitempty"`
-	AgentStopped         bool             `json:"agent_stopped,omitempty"`
+	CommandResult        *task.CommandResult `json:"command_result,omitempty"`
+	ExecutionElapsedMS   int64               `json:"execution_elapsed_ms,omitempty"`
+	QueueDeadlineMet     bool                `json:"queue_deadline_met,omitempty"`
+	WorkerSequence       int64               `json:"worker_sequence,omitempty"`
+	OccurredAt           time.Time           `json:"occurred_at,omitempty"`
+	NotStarted           bool                `json:"not_started,omitempty"`
+	OutcomeKnown         bool                `json:"outcome_known,omitempty"`
+	StopReason           string              `json:"stop_reason,omitempty"`
+	Type                 string              `json:"type"`
+	EventID              string              `json:"event_id"`
+	TaskID               string              `json:"task_id"`
+	ExecutionID          string              `json:"execution_id"`
+	SessionID            string              `json:"session_id"`
+	Kind                 string              `json:"kind"`
+	InputGeneration      int                 `json:"input_generation"`
+	Status               string              `json:"status"`
+	Summary              string              `json:"summary,omitempty"`
+	Evidence             []task.ResultRef    `json:"evidence,omitempty"`
+	Artifacts            []task.ResultRef    `json:"artifacts,omitempty"`
+	EvidenceEmptyReason  string              `json:"evidence_empty_reason,omitempty"`
+	ArtifactsEmptyReason string              `json:"artifacts_empty_reason,omitempty"`
+	ErrorCode            string              `json:"error_code,omitempty"`
+	ErrorMessage         string              `json:"error_message,omitempty"`
+	AgentStopped         bool                `json:"agent_stopped,omitempty"`
 }
 
 // ExecutionControl 不携带任务输入；断线期间保留在中心的中止命令不会丢失。

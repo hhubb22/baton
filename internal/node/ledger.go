@@ -221,7 +221,8 @@ func (l *Ledger) Prepare(in PrepareInput, bind func(sessionID string) error) Pre
 	if in.StorageGeneration != "" && in.StorageGeneration != l.generation {
 		return rejected(task.CodeInvalidTarget, "存储代次不匹配")
 	}
-	if !containsCap(in.Capabilities, in.AgentType) {
+	// shell 是内置执行器，启动前由 Worker 检查本地命令开关。
+	if in.AgentType != "shell" && !containsCap(in.Capabilities, in.AgentType) {
 		return rejected(task.CodeUnsupported, "节点不支持该 Agent")
 	}
 	if message, ok := checkDirectory(in.WorkingDirectory); !ok {
