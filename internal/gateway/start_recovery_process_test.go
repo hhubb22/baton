@@ -29,7 +29,7 @@ func TestCentralStartRejectionDoesNotRespawnWorker(t *testing.T) {
 			waitLog(t, st.coord, "event=prepare_saved")
 			sessionID := sessionOf(t, st, created.TaskID)
 			before := workerStatus(t, st.dataDir, sessionID)
-			t.Cleanup(func() { stopWorker(before.PID) })
+
 			// 中心已有另一 nonce 的许可；隔离 conflict 拒绝，不触发中止回执恢复。
 			if _, err := st.pool.Exec(context.Background(), `UPDATE executions
 				SET start_authorized_at = now(), start_permit_expires_at = now() + interval '5 seconds', permit_nonce = $2
@@ -107,7 +107,7 @@ func TestPreparedWorkerRecoveryDependsOnStartRequest(t *testing.T) {
 			restartBatond(t, st)
 			waitLog(t, st.batond, "event=synced")
 			after := workerStatus(t, st.dataDir, sessionID)
-			t.Cleanup(func() { stopWorker(after.PID) })
+
 			if after.PID == before.PID || after.StartIntent || after.ExecutorStarts != 0 || after.ExecutorInputs != 0 {
 				t.Fatalf("等待许可的 Worker 没有安全恢复: before %+v after %+v", before, after)
 			}
@@ -126,8 +126,8 @@ func TestStartRefusalPersistenceFailureStillReportsToCenter(t *testing.T) {
 	created := acceptTask(t, st, "refusal-write-failure")
 	waitLog(t, st.batond, "event=start_permit_held")
 	sessionID := sessionOf(t, st, created.TaskID)
-	worker := workerStatus(t, st.dataDir, sessionID)
-	t.Cleanup(func() { stopWorker(worker.PID) })
+	_ = workerStatus(t, st.dataDir, sessionID)
+
 	path, err := session.LedgerPath(st.dataDir, sessionID)
 	if err != nil {
 		t.Fatal(err)

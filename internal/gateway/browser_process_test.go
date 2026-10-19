@@ -68,7 +68,7 @@ func TestBrowserSlowSubscriberDoesNotBlockNativeWorker(t *testing.T) {
 		t.Fatal("没有保存准备事实")
 	}
 	before := workerStatus(t, st.dataDir, sid)
-	defer stopWorker(before.PID)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: st.roots, MinVersion: tls.VersionTLS12}, DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {

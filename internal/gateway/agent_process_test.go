@@ -55,7 +55,7 @@ func TestAgentCLIDelegatesBetweenTwoNodes(t *testing.T) {
 		t.Fatal(err)
 	}
 	firstWorker := workerStatus(t, st.dataDir, sourceSession)
-	t.Cleanup(func() { stopWorker(firstWorker.PID) })
+
 	contextFile, err := session.AgentContextPath(st.dataDir, sourceSession, sourceExecution)
 	if err != nil {
 		t.Fatal(err)
@@ -197,7 +197,7 @@ func TestAgentCLIDelegatesBetweenTwoNodes(t *testing.T) {
 		t.Fatalf("结构化结果错误: %+v", result)
 	}
 	secondWorker := workerStatus(t, targetDir, *result.SessionID)
-	t.Cleanup(func() { stopWorker(secondWorker.PID) })
+
 	if firstWorker.PID == secondWorker.PID || secondWorker.ExecutorInputs != 1 {
 		t.Fatal("没有两个独立 Worker")
 	}

@@ -6,7 +6,7 @@ import tempfile
 import sys
 from pathlib import Path
 from changes import aggregate, classify
-from run_tests import EventLog, partition, scrub, run_group, port_floor, port_ranges
+from run_tests import EventLog, partition, scrub, run_group, port_floor, port_ranges, collect_postgres_log
 
 
 class ContractTests(unittest.TestCase):
@@ -49,6 +49,24 @@ class ContractTests(unittest.TestCase):
         self.assertNotIn('abcdef012345', result)
         for line in result.splitlines():
             json.loads(line)
+
+    def test_postgres_log_is_scrubbed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / 'server.log'
+            source.write_text('PANIC postgres://user:secret@localhost/db token=abc', encoding='utf-8')
+            with patch.dict('os.environ', {'BATON_TEST_POSTGRES_LOG': str(source)}):
+                collect_postgres_log(root)
+            result = (root / 'postgres.log').read_text(encoding='utf-8')
+            self.assertIn('PANIC', result)
+            for secret in ['secret', 'abc']:
+                self.assertNotIn(secret, result)
+
+    def test_postgres_log_without_configuration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict('os.environ', {}, clear=True):
+                collect_postgres_log(Path(directory))
+            self.assertEqual(list(Path(directory).iterdir()), [])
 
     def test_diagnostic_skip_fails(self):
         event = json.dumps({'Action': 'skip', 'Test': 'TestTarget'})

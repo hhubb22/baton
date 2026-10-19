@@ -173,7 +173,7 @@ func TestRealPi(t *testing.T) {
 	capabilities["输入"], capabilities["结构化结果"] = "支持", "支持"
 	sid := sessionOf(t, st, finished.TaskID)
 	worker := workerStatus(t, st.dataDir, sid)
-	t.Cleanup(func() { stopWorker(worker.PID) })
+
 	// A surviving Worker reconnect must not replay the input on daemon restart.
 	st.batond.stop()
 	st.batond = startCmd(t, st.batondBin, st.batondArgs, st.batondEnv)
@@ -227,14 +227,14 @@ func TestRealPi(t *testing.T) {
 	waitRealPiStatus(t, st, parent.TaskID, task.StatusCompleted, capabilities)
 	parentSID := sessionOf(t, st, parent.TaskID)
 	parentWorker := workerStatus(t, st.dataDir, parentSID)
-	t.Cleanup(func() { stopWorker(parentWorker.PID) })
+
 	var childID, deliveryStatus string
 	if err := st.pool.QueryRow(context.Background(), `SELECT e.task_id::text, c.status FROM child_deliveries c JOIN executions e ON e.id=c.child_execution_id WHERE c.source_execution_id = $1::uuid`, parentWorker.ExecutionID).Scan(&childID, &deliveryStatus); err != nil || deliveryStatus != "delivered" {
 		t.Fatal("child result missing native-history confirmation")
 	}
 	childSID := sessionOf(t, st, childID)
-	childWorker := workerStatus(t, st.dataDir, childSID)
-	t.Cleanup(func() { stopWorker(childWorker.PID) })
+	_ = workerStatus(t, st.dataDir, childSID)
+
 	capabilities["委托"], capabilities["原生历史确认"] = "支持", "支持"
 	// Wait for a deterministic tool-start fixture before cancellation, not just
 	// a running row that can precede the model's first tool call.
@@ -275,8 +275,8 @@ func TestRealPi(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	abortSID := sessionOf(t, st, abortTask.TaskID)
-	abortWorker := workerStatus(t, st.dataDir, abortSID)
-	t.Cleanup(func() { stopWorker(abortWorker.PID) })
+	_ = workerStatus(t, st.dataDir, abortSID)
+
 	if aborted.Status != task.StatusNeedsVerification || aborted.StopAcknowledgedAt == nil || aborted.StopOutcomeKnown {
 		t.Fatal("tool side effects were incorrectly declared known")
 	}

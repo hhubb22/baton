@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/sys/windows"
@@ -40,6 +41,57 @@ func terminateProcess(process *os.Process) error {
 	return process.Kill()
 }
 
+func stopWorker(pid int) {
+	if pid <= 0 {
+		return
+	}
+	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.PROCESS_TERMINATE|windows.SYNCHRONIZE, false, uint32(pid))
+	if err != nil {
+		return
+	}
+	defer windows.CloseHandle(handle)
+	name := make([]uint16, 32768)
+	size := uint32(len(name))
+	if err := windows.QueryFullProcessImageName(handle, 0, &name[0], &size); err != nil {
+		return
+	}
+	image := windows.UTF16ToString(name[:size])
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	allowed := sameExecutable(image, exe)
+	processMu.Lock()
+	for _, p := range processHandles {
+		if len(p.cmd.Args) > 1 && p.cmd.Args[1] == "run" && sameExecutable(image, p.bin) {
+			allowed = true
+			break
+		}
+	}
+	processMu.Unlock()
+	fmt.Fprintf(os.Stderr, "event=test_worker_stop pid=%d image=%q allowed=%t\n", pid, image, allowed)
+	if !allowed {
+		return
+	}
+	// 校验、终止和等待共用句柄，PID 在此期间被复用也不会指向另一个进程。
+	err = windows.TerminateProcess(handle, 1)
+	fmt.Fprintf(os.Stderr, "event=test_worker_terminated pid=%d error=%v\n", pid, err)
+	if err != nil {
+		return
+	}
+	status, err := windows.WaitForSingleObject(handle, 5000)
+	fmt.Fprintf(os.Stderr, "event=test_worker_wait pid=%d status=%d error=%v\n", pid, status, err)
+}
+
+func sameExecutable(a, b string) bool {
+	a, err := filepath.Abs(a)
+	if err != nil {
+		return false
+	}
+	b, err = filepath.Abs(b)
+	return err == nil && strings.EqualFold(a, b)
+}
+
 func TestStopWorkerRejectsUnrelatedExecutable(t *testing.T) {
 	exe, err := os.Executable()
 	if err != nil {
@@ -49,7 +101,7 @@ func TestStopWorkerRejectsUnrelatedExecutable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	other := filepath.Join(t.TempDir(), "unrelated.exe")
+	other := filepath.Join(t.TempDir(), "batond.exe")
 	if err := os.WriteFile(other, raw, 0o700); err != nil {
 		t.Fatal(err)
 	}

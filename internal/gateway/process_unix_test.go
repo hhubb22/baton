@@ -22,3 +22,15 @@ func processAlive(pid int) error {
 func terminateProcess(process *os.Process) error {
 	return process.Signal(syscall.SIGTERM)
 }
+
+func stopWorker(pid int) {
+	if pid <= 0 {
+		return
+	}
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return
+	}
+	defer process.Release()
+	_ = process.Kill()
+}
