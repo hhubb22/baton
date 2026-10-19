@@ -131,14 +131,14 @@ func checkACL(h windows.Handle) error {
 	return nil
 }
 
-// Open 对实际读取的句柄检查 DACL，检查期间禁止写入和替换文件。
+// Open 对实际读取的句柄检查 DACL，允许路径原子替换，禁止原地写入。
 func Open(path string) (*os.File, error) {
-	return openFile(path, windows.FILE_SHARE_READ)
+	return openFile(path, windows.FILE_SHARE_READ|windows.FILE_SHARE_DELETE)
 }
 
 // OpenSnapshot 检查实际句柄的 DACL，并允许路径原子替换；句柄仍指向原版本。
 func OpenSnapshot(path string) (*os.File, error) {
-	return openFile(path, windows.FILE_SHARE_READ|windows.FILE_SHARE_DELETE)
+	return Open(path)
 }
 
 // replaceFile 使用目录内重命名的 POSIX 语义，旧快照句柄保持可读。
