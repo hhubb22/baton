@@ -10,7 +10,9 @@ Coordinator 内置 Gateway 的实现与验收由 [PS-171](https://linear.app/kak
 
 ## 已实现基线
 
-当前已实现补充（PS-172 / AR-01）：`internal/agent/replay` 与测试工具 `tools/agent-replay` 提供统一 NDJSON 转录读写、严格结构化比较、绑定与跨进程捕获、原生历史追加、文件门控及 CutAfter / Drop / Replace 派生变体。工具读取可执行文件旁的配置，以持久计数选择进程，失配保存 failure.json 并非零退出。Codex 新增从现有手写样本转写的 simple 转录，通过真实适配器验证启动、一次输入和完成后的结构化结果；来源明确写入转录头部。现有手写假 Agent 与测试保留。格式与后续工作见 [Agent 回放设计](../agent-replay/TECH.md)，当前工具行为见 [使用说明](../../tools/agent-replay/README.md)。录制、规范化、其他场景与 Worker 测试迁移由后续工单实施；本次不增加依赖或修改批准设计条款。
+当前已实现补充（PS-173 / AR-02）：`agent-replay record` 读取旁置配置和场景元数据，在仓库外系统临时目录记录原始字节、单调时间及原生历史追加；Unix 转发 SIGTERM、SIGINT，Windows 保留退出码。`normalize` 按协议替换路径、Baton 标识和构造文本，筛选首个原生会话并统计删除条目，扫描残留后原子写出统一转录。合成原始录制经工具驱动真实 `codex.Adapter` 完成 simple；真实测试接入录制由 PS-174 实施。无新增 Go 依赖，使用方式及过滤规则见 [工具说明](../../tools/agent-replay/README.md)。
+
+当前已实现补充（PS-172 / AR-01）：`internal/agent/replay` 与测试工具 `tools/agent-replay` 提供统一 NDJSON 转录读写、严格结构化比较、绑定与跨进程捕获、原生历史追加、文件门控及 CutAfter / Drop / Replace 派生变体。工具读取可执行文件旁的配置，以持久计数选择进程，失配保存 failure.json 并非零退出。Codex 新增从现有手写样本转写的 simple 转录，通过真实适配器验证启动、一次输入和完成后的结构化结果；来源明确写入转录头部。现有手写假 Agent 与测试保留。格式与后续工作见 [Agent 回放设计](../agent-replay/TECH.md)，当前工具行为见 [使用说明](../../tools/agent-replay/README.md)。其他场景与 Worker 测试迁移由后续工单实施。
 
 PS-155 提供 Project、主对话事件读取和项目记忆 API。迁移 `0016_projects.sql` 在中心创建七张表，包含输入队列。用户消息在所有设备离线时仍可入队，相同消息 ID 与正文返回原记录。事件与记忆修订由数据库触发器限制为只追加，记忆修改检查 `expected_revision`。PS-156 通过 `0017_project_agent_runs.sql` 提供运行记录、任务来源列、输入领取、被动通知、运行放置和租约。每批最多 20 条或 128 KiB，单条事件不超过 160 KiB，Runtime 请求与响应不超过 192 KiB。Coordinator 每秒调度，默认设备不合格时记录原因并选择其他节点。batond 按 run_id 持久去重，20 秒续租，58 秒未成功续租就停止进程；中心在 Agent 行锁内检查当前运行与数据库时间，拒绝过期或已撤销的租约。失败依次推迟 1、5、15 分钟，第三次进入 needs_attention，员工重试保留原对话位置。详细协议见 [Project Agent TECH](../project-agent/TECH.md)。
 

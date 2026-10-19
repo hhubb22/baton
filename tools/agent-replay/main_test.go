@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -216,4 +218,65 @@ func TestServeProcess(t *testing.T) {
 			t.Fatal("预期退出产生 failure.json")
 		}
 	})
+}
+
+func TestRecordCommandHelper(t *testing.T) {
+	if len(os.Args) < 2 || os.Args[len(os.Args)-1] != "record-helper" {
+		return
+	}
+	io.Copy(os.Stdout, os.Stdin)
+	fmt.Fprint(os.Stderr, "diagnostic\n")
+	os.Exit(17)
+}
+
+func TestRecordAndNormalizeCommands(t *testing.T) {
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "agent-replay.exe")
+	if output, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
+		t.Fatalf("构建: %s %v", output, err)
+	}
+	helper, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := replay.RecordConfig{AgentBinary: helper, RawDir: filepath.Join(dir, "raw"), ScenarioFile: filepath.Join(dir, "scenario.json"), Bindings: map[string]string{"<workspace>": dir}}
+	data, _ := json.Marshal(c)
+	os.WriteFile(binary+".record.json", data, 0600)
+	data, _ = json.Marshal(replay.Header{Agent: "pi", Protocol: "pi-rpc-jsonl", Scenario: "simple", Source: "synthetic"})
+	os.WriteFile(c.ScenarioFile, data, 0600)
+	// 直接充当 Agent 和显式 record 均透传参数，两个进程合入同一场景。
+	for _, prefix := range [][]string{nil, {"record"}} {
+		args := append(append([]string(nil), prefix...), "-test.run=^TestRecordCommandHelper$", "--", "record-helper")
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		cmd := exec.CommandContext(ctx, binary, args...)
+		cmd.Stdin = strings.NewReader("version\n")
+		var out, diagnostic bytes.Buffer
+		cmd.Stdout = &out
+		cmd.Stderr = &diagnostic
+		err := cmd.Run()
+		cancel()
+		if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 17 {
+			t.Fatalf("退出: %v %s", err, diagnostic.String())
+		}
+		if out.String() != "version\n" || diagnostic.String() != "diagnostic\n" {
+			t.Fatalf("字节: %q %q", out.String(), diagnostic.String())
+		}
+	}
+	input, output := filepath.Join(c.RawDir, "simple.raw.ndjson"), filepath.Join(dir, "transcript.ndjson")
+	cmd := exec.Command(binary, "normalize", "--input", input, "--output", output)
+	if result, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("规范化: %v %s", err, result)
+	}
+	if _, err := os.Stat(input); !os.IsNotExist(err) {
+		t.Fatal("规范化成功后原始录制未删除")
+	}
+	f, err := os.Open(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	tape, err := replay.Read(f)
+	if err != nil || len(tape.Entries) == 0 {
+		t.Fatalf("转录: %v", err)
+	}
 }
