@@ -29,15 +29,16 @@ var (
 
 // RunOptions 是一次常驻连接使用的本地身份和 Relay 地址。
 type RunOptions struct {
-	RelayURL     string
-	Identity     Identity
-	Heartbeat    time.Duration
-	RootCAs      *x509.CertPool
-	Logger       *slog.Logger
-	DataDir      string
-	agent        *agentBridge
-	reports      *runtimeReports
-	reportSender *runtimeReportSender
+	RelayURL       string
+	Identity       Identity
+	Heartbeat      time.Duration
+	RootCAs        *x509.CertPool
+	Logger         *slog.Logger
+	DataDir        string
+	agent          *agentBridge
+	reports        *runtimeReports
+	reportSender   *runtimeReportSender
+	projectRuntime *projectRuntimeManager
 }
 
 // Maintain 保持到 Relay 的出站连接。同一进程的重连沿用启动时生成的 incarnation。
@@ -73,6 +74,11 @@ func Maintain(ctx context.Context, opts RunOptions) error {
 			return err
 		}
 		defer ledger.Close()
+		opts.projectRuntime, err = newProjectRuntimeManager(ctx, ledger)
+		if err != nil {
+			return err
+		}
+		defer opts.projectRuntime.close()
 		host = &session.Host{DataDir: opts.DataDir, Logger: opts.Logger}
 		opts.agent = &agentBridge{}
 		closeIPC, err := serveAgentIPC(ctx, ledger, opts.agent)
@@ -102,6 +108,7 @@ func Maintain(ctx context.Context, opts RunOptions) error {
 	opts.reportSender = &runtimeReportSender{}
 	if opts.DataDir != "" {
 		opts.reports = collectRuntimeReports(ctx, opts.DataDir)
+		opts.projectRuntime.reports = opts.reports
 	}
 	for {
 		if ctx.Err() != nil {
@@ -180,6 +187,10 @@ func runOnce(ctx context.Context, opts RunOptions, incarnation string, ledger *L
 	expect.Store("")
 	writer := newWSWriter(ws)
 	loop := newStartLoop(ctx, opts.Identity, ledger, host, writer, opts.Logger)
+	if opts.projectRuntime != nil {
+		opts.projectRuntime.setLoop(loop)
+		defer opts.projectRuntime.setLoop(nil)
+	}
 	if opts.agent != nil {
 		opts.agent.set(loop)
 		defer opts.agent.set(nil)
@@ -196,7 +207,7 @@ func runOnce(ctx context.Context, opts RunOptions, incarnation string, ledger *L
 		}
 	}
 	go func() {
-		errCh <- readRelay(ctx, writer, &acked, &expect, opts.Logger, opts.Identity, ledger, host, loop, opts.DataDir, reportSender)
+		errCh <- readRelay(ctx, writer, &acked, &expect, opts.Logger, opts.Identity, ledger, host, loop, opts.DataDir, reportSender, opts.projectRuntime)
 	}()
 	var replayBusy atomic.Bool
 	replay := func() {
@@ -269,7 +280,7 @@ func dialRelay(ctx context.Context, opts RunOptions) (*websocket.Conn, error) {
 	return ws, nil
 }
 
-func readRelay(ctx context.Context, w *wsWriter, acked *atomic.Bool, expect *atomic.Value, log *slog.Logger, ident Identity, ledger *Ledger, host *session.Host, loop *startLoop, dataDir string, reports *runtimeReportConnection) error {
+func readRelay(ctx context.Context, w *wsWriter, acked *atomic.Bool, expect *atomic.Value, log *slog.Logger, ident Identity, ledger *Ledger, host *session.Host, loop *startLoop, dataDir string, reports *runtimeReportConnection, runtimes ...*projectRuntimeManager) error {
 	for {
 		_, raw, err := w.ws.Read(ctx)
 		if err != nil {
@@ -298,6 +309,9 @@ func readRelay(ctx context.Context, w *wsWriter, acked *atomic.Bool, expect *ato
 				continue
 			}
 			reports.note(wrap.Envelope)
+			if len(runtimes) > 0 && runtimes[0] != nil && runtimes[0].handle(wrap.Envelope) {
+				continue
+			}
 			if handleNodeEnvelope(ctx, raw, w, ledger, host, ident.Capabilities, log, loop) {
 				continue
 			}

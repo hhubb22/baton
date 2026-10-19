@@ -244,6 +244,7 @@ func cmdServe(ctx context.Context, stderr io.Writer, getenv func(string) string)
 			errCh <- apiSrv.Serve(apiLn)
 		}()
 		go ctrl.DeliverPrepares(ctx)
+		go ctrl.DeliverProjectRuns(ctx)
 		if planeHook != nil {
 			retryCtx, cancel := context.WithCancel(ctx)
 			done := make(chan struct{})

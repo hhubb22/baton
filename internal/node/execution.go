@@ -291,14 +291,14 @@ func (s *startLoop) roundTrip(ctx context.Context, body []byte) (json.RawMessage
 	if err != nil {
 		return nil, err
 	}
-	env, err := json.Marshal(protocol.Envelope{
+	env, err := protocol.MarshalJSON(protocol.Envelope{
 		Version: protocol.Version, MessageID: messageID,
 		Route: protocol.Route{To: protocol.ToControl}, Priority: protocol.PriorityControl, Body: body,
 	})
 	if err != nil || len(env) > protocol.MaxMessageBytes {
 		return nil, errors.New("消息超过上限")
 	}
-	frame, err := json.Marshal(struct {
+	frame, err := protocol.MarshalJSON(struct {
 		Kind     string          `json:"kind"`
 		Envelope json.RawMessage `json:"envelope"`
 	}{Kind: protocol.KindEnvelope, Envelope: env})
@@ -345,7 +345,7 @@ func (s *startLoop) onReply(env protocol.Envelope) bool {
 		return false
 	}
 	switch kind.Type {
-	case protocol.BodyExecutionInputResult, protocol.BodyExecutionReportResult, protocol.BodyExecutionControlResult, protocol.BodyAgentResult, protocol.BodyChildDeliveriesResult:
+	case protocol.BodyProjectRuntimeResult, protocol.BodyExecutionInputResult, protocol.BodyExecutionReportResult, protocol.BodyExecutionControlResult, protocol.BodyAgentResult, protocol.BodyChildDeliveriesResult:
 	default:
 		return false
 	}

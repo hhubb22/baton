@@ -146,7 +146,7 @@ func PrepareNodeEnvelope(raw []byte, src Source) ([]byte, error) {
 		return nil, ErrInvalidMessage
 	}
 	src.Kind = SourceNode
-	sourceRaw, err := json.Marshal(src)
+	sourceRaw, err := MarshalJSON(src)
 	if err != nil {
 		return nil, ErrInvalidMessage
 	}
@@ -157,12 +157,12 @@ func PrepareNodeEnvelope(raw []byte, src Source) ([]byte, error) {
 	fields["source"] = sourceRaw
 	fields["route"] = route
 	if _, ok := fields["priority"]; !ok || env.Priority == "" {
-		fields["priority"], err = json.Marshal(PriorityControl)
+		fields["priority"], err = MarshalJSON(PriorityControl)
 		if err != nil {
 			return nil, ErrInvalidMessage
 		}
 	}
-	out, err := json.Marshal(fields)
+	out, err := MarshalJSON(fields)
 	if err != nil {
 		return nil, ErrInvalidMessage
 	}
@@ -199,7 +199,7 @@ func PrepareControlEnvelope(raw []byte) (string, []byte, error) {
 		return "", nil, ErrRouteForbidden
 	}
 	delete(fields, "source")
-	controlSrc, err := json.Marshal(Source{Kind: SourceControl})
+	controlSrc, err := MarshalJSON(Source{Kind: SourceControl})
 	if err != nil {
 		return "", nil, ErrInvalidMessage
 	}
@@ -209,7 +209,7 @@ func PrepareControlEnvelope(raw []byte) (string, []byte, error) {
 		return "", nil, err
 	}
 	fields["route"] = route
-	out, err := json.Marshal(fields)
+	out, err := MarshalJSON(fields)
 	if err != nil {
 		return "", nil, ErrInvalidMessage
 	}
@@ -226,12 +226,12 @@ func rewriteRoute(raw json.RawMessage, to string) (json.RawMessage, error) {
 			return nil, ErrInvalidMessage
 		}
 	}
-	toRaw, err := json.Marshal(to)
+	toRaw, err := MarshalJSON(to)
 	if err != nil {
 		return nil, ErrInvalidMessage
 	}
 	fields["to"] = toRaw
-	out, err := json.Marshal(fields)
+	out, err := MarshalJSON(fields)
 	if err != nil {
 		return nil, ErrInvalidMessage
 	}

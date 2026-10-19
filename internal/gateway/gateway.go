@@ -313,7 +313,7 @@ func (g *Gateway) readNode(nc *connection) {
 		}
 		g.mu.Unlock()
 		env.Priority = priority
-		raw, err = json.Marshal(env)
+		raw, err = protocol.MarshalJSON(env)
 		if err != nil {
 			continue
 		}
@@ -364,7 +364,7 @@ func incomingPriority(body json.RawMessage) (string, error) {
 		return "", protocol.ErrInvalidMessage
 	}
 	switch head.Type {
-	case protocol.BodyRuntimeReport:
+	case protocol.BodyRuntimeReport, protocol.BodyProjectRuntimeRequest:
 		return protocol.PriorityControl, nil
 	case "node.sync", protocol.BodyAgentRequest, protocol.BodyExecutionControl, protocol.BodyChildDeliveries, protocol.BodyChildDeliveryAck, protocol.BodyPrepareResult, protocol.BodyStartPermit, protocol.BodyStartReport, protocol.BodyExecutionInput, protocol.BodyExecutionReport, protocol.BodyFileResult:
 		return protocol.PriorityControl, nil
@@ -487,7 +487,7 @@ func (g *Gateway) Send(ctx context.Context, nodeID, connID string, env protocol.
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	raw, err := json.Marshal(env)
+	raw, err := protocol.MarshalJSON(env)
 	if err != nil {
 		return err
 	}
@@ -495,7 +495,7 @@ func (g *Gateway) Send(ctx context.Context, nodeID, connID string, env protocol.
 	if err != nil {
 		return err
 	}
-	raw, err = json.Marshal(protocol.Frame{Kind: protocol.KindEnvelope, Envelope: raw})
+	raw, err = protocol.MarshalJSON(protocol.Frame{Kind: protocol.KindEnvelope, Envelope: raw})
 	if err != nil || len(raw) > protocol.MaxMessageBytes {
 		return protocol.ErrTooLarge
 	}
@@ -617,7 +617,7 @@ func (g *Gateway) wakeUp() {
 	}
 }
 func (g *Gateway) localError(nc *connection, code, id string) {
-	raw, _ := json.Marshal(protocol.Frame{Kind: protocol.KindError, Code: code, Message: protocol.MessageOf(code), CorrelationID: id})
+	raw, _ := protocol.MarshalJSON(protocol.Frame{Kind: protocol.KindError, Code: code, Message: protocol.MessageOf(code), CorrelationID: id})
 	select {
 	case nc.local <- raw:
 	default:
@@ -627,7 +627,7 @@ func (g *Gateway) reject(ws *websocket.Conn, code string) {
 	_ = writeFrame(context.Background(), ws, protocol.Frame{Kind: protocol.KindAuthResult, Code: code, Message: protocol.MessageOf(code)})
 }
 func writeFrame(ctx context.Context, ws *websocket.Conn, f protocol.Frame) error {
-	raw, err := json.Marshal(f)
+	raw, err := protocol.MarshalJSON(f)
 	if err != nil {
 		return err
 	}

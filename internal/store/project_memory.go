@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 
 	"baton/internal/projectagent"
@@ -123,6 +124,17 @@ func (s *Store) WriteProjectMemory(ctx context.Context, employeeID, projectID, e
 	out, err = scanMemory(tx.QueryRow(ctx, memorySelect+` WHERE e.employee_id=$1 AND e.project_id=$2 AND e.id=$3`, employeeID, projectID, entryID))
 	if err != nil {
 		return out, err
+	}
+	if in.Author == "user" {
+		notification := struct {
+			EntryID  string `json:"entry_id"`
+			Title    string `json:"title"`
+			Revision int64  `json:"revision"`
+			Author   string `json:"author"`
+		}{entryID, in.Title, revision, "user"}
+		if err = insertProjectInput(ctx, tx, employeeID, p.Agent.ID, "memory_updated", fmt.Sprintf("memory:%s:rev:%d", entryID, revision), notification); err != nil {
+			return out, err
+		}
 	}
 	return out, tx.Commit(ctx)
 }
