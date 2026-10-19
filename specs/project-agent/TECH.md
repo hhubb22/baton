@@ -363,6 +363,23 @@ Worker 收到 `shell` 任务时，会再检查一次本地的开关，开关关�
 - Go 进程仍不嵌入 Agent SDK；`baton-project-runtime` 是独立进程（Baton TECH「技术选择」）。
 - 不需要节点直接访问 Coordinator 的数据通道，也不需要会话文件归档：Project Agent 的消息就是普通的对话事件，经现有 Gateway 通道传输。
 
+### 10. 桌面 Web 主对话（PS-159）
+
+`/projects` 提供 Project 列表和创建入口，`/projects/{id}` 展示主对话、记忆、运行状态与任务，支持直接打开、刷新和浏览器前进后退。页面复用现有 React 组件与 `/tasks/{id}` 任务详情，每 2 秒查询中心记录。用户消息在设备离线时仍可提交；尚未领取的消息显示「已入队」。消息响应丢失时，标签页仅保存客户端消息标识，用户可以查询原消息，或补全相同正文后用原标识重发。
+
+界面使用的只读接口：
+
+- `GET /api/v1/projects/{id}/status`：返回 `state`、`waiting_reason`、`pending_inputs`、`last_error`、`next_attempt_at`、`last_seq` 和最近运行的设备、放置原因、有效资格与停止回执。运行、队列和设备事实来自同一只读快照；设备离线或租约失效时不显示有效运行。已失去资格与进程确认退出分别展示。
+- `GET /api/v1/projects/{id}/messages`：返回尚未领取的用户消息，按数字 `after_id` 和 `limit` 分页。指定 `client_message_id` 时返回该消息，无论是否已领取，用于恢复发送响应。响应为 `{messages,next_after_id?}`。
+- `GET /api/v1/tasks?project_id={id}`：先按员工和 Project 筛选，再分页。任务列表和详情增加 `project_id`、`origin_conversation_id`，供页面标明 Project Agent 来源。任务操作沿用原有接口。
+
+这些接口使用员工会话，只能读取本人员工的 Project；跨员工对象返回 404。消息、记忆和历史按现有分页接口读取。记忆编辑保留打开时的 `expected_revision`，冲突后保留草稿并要求查看最新版本再编辑。
+
+Runtime 的 `preview` 操作通过现有 RPC 发送 `{last_seq,payload:{text,truncated}}` 文本快照，Coordinator 校验运行身份、有效租约和当前序号。文本最多 32 KiB，每秒至多发送一次。Coordinator 内存中每个运行保留最新快照，最多 128 份，30 秒后过期；不保存到对话历史。`status` 只附带当前有效运行、且 `after_seq` 等于当前历史尾部的预览。正式事件保存、运行失效或进程切换后，旧预览不再显示。浏览器将预览、回复与工具内容作为文本渲染，标明预览尚未保存；工具执行仍在完整 assistant 事件保存成功之后进行。
+
+验收测试、截图和命令结果见 [PS-159 验证记录](evidence/ps-159/README.md)。
+
+
 ## Testing and validation
 
 | Requirement | Setup and observation | Failure condition | Where | Status |

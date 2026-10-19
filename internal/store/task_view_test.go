@@ -125,3 +125,33 @@ func TestTaskViewDeliveryDoesNotChangeExecution(t *testing.T) {
 		t.Fatalf("委托关系: %+v %v", page, err)
 	}
 }
+
+func TestTaskProjectFilterAndOrigin(t *testing.T) {
+	ctx, pool, repo, owner, p := projectFixture(t)
+	n := mustRegister(t, ctx, pool, repo, owner, "设备", node.RolePC, []string{"pi", "start"})
+	setDefaultAgent(t, ctx, pool, n.NodeID, "pi")
+	a, err := repo.AcceptTask(ctx, owner, task.Input{RequestID: "project-task", Description: "项目任务"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = repo.AcceptTask(ctx, owner, task.Input{RequestID: "outside-task", Description: "其他任务"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, `UPDATE tasks SET project_id=$2,origin_conversation_id=$3,origin_tool_call_id='tool-1' WHERE id=$1`, a.TaskID, p.ID, p.Conversation.ID); err != nil {
+		t.Fatal(err)
+	}
+	page, err := repo.ListTaskViews(ctx, owner, store.TaskFilter{ProjectID: p.ID})
+	if err != nil || len(page.Tasks) != 1 || page.Tasks[0].TaskID != a.TaskID || page.Tasks[0].OriginConversationID == nil || *page.Tasks[0].OriginConversationID != p.Conversation.ID {
+		t.Fatalf("项目列表: %+v %v", page, err)
+	}
+	detail, err := repo.GetTaskView(ctx, owner, a.TaskID)
+	if err != nil || detail.ProjectID == nil || *detail.ProjectID != p.ID || detail.OriginConversationID == nil {
+		t.Fatalf("任务来源: %+v %v", detail, err)
+	}
+	other := mustEmployee(t, ctx, pool, "other", "其他员工")
+	for _, filter := range []store.TaskFilter{{ProjectID: p.ID}, {ProjectID: "not-an-id"}} {
+		if _, err = repo.ListTaskViews(ctx, other.ID, filter); !errors.Is(err, store.ErrNotVisible) {
+			t.Fatalf("跨员工 Project: %v", err)
+		}
+	}
+}

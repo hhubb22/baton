@@ -204,8 +204,24 @@ export class ProjectRuntime {
             maxTokens: 32000,
             maxRetries: 0,
           });
-          for await (const _event of stream) {
-            /* 消费流，避免事件队列累积。 */
+          let preview = "";
+          let lastPreview = -Infinity;
+          const publishPreview = async (text: string) => {
+            // 预览通过现有 RPC 发送完整快照，正式保存与工具执行仍等待完整回复。
+            const bytes = Buffer.from(text);
+            const truncated = bytes.length > 32 * 1024;
+            let end = Math.min(bytes.length, 32 * 1024);
+            while (end < bytes.length && (bytes[end] & 0xc0) === 0x80) end--;
+            await this.rpc.call({ operation: "preview", last_seq: this.seq, payload: { text: bytes.subarray(0, end).toString("utf8"), truncated } }).catch(() => {});
+          };
+          for await (const event of stream) {
+            if (event.type === "text_delta") {
+              if (Buffer.byteLength(preview) < 32 * 1024 + 4) preview = (preview + event.delta).slice(0, 32 * 1024 + 4);
+              if (this.timer.now() - lastPreview >= 1000) {
+                lastPreview = this.timer.now();
+                await publishPreview(preview);
+              }
+            }
           }
           message = await stream.result();
           if (
@@ -229,6 +245,7 @@ export class ProjectRuntime {
           output.end(message);
           return output;
         } catch {
+          await this.rpc.call({ operation: "preview", last_seq: this.seq, payload: { text: "", truncated: false } }).catch(() => {});
           if (options?.signal?.aborted) throw new RuntimeError("aborted");
           if (attempt === RETRIES.length)
             throw new RuntimeError("model_request_failed");

@@ -200,6 +200,7 @@ func cmdServe(ctx context.Context, stderr io.Writer, getenv func(string) string)
 			Revocations:       ctrl,
 			Files:             ctrl,
 			Sessions:          ctrl,
+			ProjectPreviews:   ctrl,
 			Logger:            logger,
 		})
 		if err != nil {

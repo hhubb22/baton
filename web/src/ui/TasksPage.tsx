@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, messageOf, request } from '../api.ts'
 import { taskEventLabels, deliveryStates, getTask, getTaskEvents, listTasks, taskStates, taskURL, timeLabel, type TaskEvent, type TaskPage, type TaskRecord } from '../tasks.ts'
 import type { NodeList } from '../types.ts'
+import { TaskOrigin } from './TaskOrigin.tsx'
 import { TaskComposer } from './TaskComposer.tsx'
 import { TaskActions } from './TaskActions.tsx'
 import { TaskReferences } from './TaskReferences.tsx'
@@ -52,7 +53,7 @@ function TaskList({ csrf, employeeID, nodes, navigate }: Omit<Parameters<typeof 
     {page.tasks.map((task) => <article className="card" key={task.task_id}>
       <h2><a href={taskURL(task.task_id)} onClick={(e) => { e.preventDefault(); navigate(task.task_id) }}>{task.description}</a></h2>
       <p>{taskStates[task.status] ?? task.status} · {task.agent_type} · {nodes?.nodes.find((node) => node.id === task.target_node_id)?.display_name ?? task.target_node_id}</p>
-      <small>{timeLabel(task.updated_at)} · {task.task_id}</small>
+      <TaskOrigin task={task} /><small>{timeLabel(task.updated_at)} · {task.task_id}</small>
     </article>)}
     <div className="actions"><button disabled={busy || !previous.length} onClick={() => { setCursor(previous.at(-1) ?? ''); setPrevious(previous.slice(0, -1)); setPage({ tasks: [] }) }}>上一页</button>
       <button disabled={busy || !page.next_cursor} onClick={() => { setPrevious([...previous, cursor]); setCursor(page.next_cursor ?? ''); setPage({ tasks: [] }) }}>下一页</button></div>
@@ -106,7 +107,7 @@ function TaskDetail({ id, csrf, employeeID, nodes, navigate }: Parameters<typeof
     {auxError && <p role="alert" className="error">{auxError}</p>}
     {!task && !error && <p>正在读取任务。</p>}
     {task && <>
-      <h2>{task.description}</h2><p className="meta">{task.task_id}</p>
+      <h2>{task.description}</h2><TaskOrigin task={task} /><p className="meta">{task.task_id}</p>
       <div className="task-statuses">
         <section className="card" aria-label="节点连接"><h3>节点连接</h3><p>{node ? node.online ? node.synced ? '在线，已同步' : '在线，等待同步' : '离线' : '暂未取得节点连接状态'}</p><small>最后联系：{timeLabel(node?.last_contact_at)}</small></section>
         <section className="card" aria-label="执行状态"><h3>执行状态</h3><p>{taskStates[task.status] ?? task.status}</p><small>记录更新：{timeLabel(task.updated_at)} · 版本 {task.version}</small></section>

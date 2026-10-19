@@ -18,6 +18,8 @@ PS-156 提供输入领取、历史分页和 60 秒租约。batond 每 20 秒续�
 
 `POST /api/v1/projects/{id}/retry` 和 `/stop` 使用员工会话、CSRF 令牌与 JSON `{}`，分别重置模型失败状态和停止当前运行。待领取输入仍会触发后续运行，持续暂停使用 Project 的 `status=paused`。
 
+桌面浏览器从 `/projects` 进入 Project 列表，可创建 Project、设置订阅和模型、发送消息、修改项目记忆、查看运行状态、停止或重试运行，并跳转已有任务详情。页面每 2 秒查询中心记录；待领取消息与临时流式预览分别显示。接口和恢复规则见 [Project Agent Web 主对话](specs/project-agent/TECH.md#10-桌面-web-主对话ps-159)。
+
 ## 运行要求
 
 - Go 1.27

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"unicode/utf8"
 
 	"baton/internal/identity"
 	"baton/internal/projectagent"
@@ -109,6 +110,15 @@ func (s *Store) ProjectRuntime(ctx context.Context, src protocol.Source, req pro
 	var data any
 	released := false
 	switch req.Operation {
+	case "preview":
+		var p projectagent.Preview
+		if json.Unmarshal(req.Payload, &p) != nil || !utf8.ValidString(p.Text) || strings.ContainsRune(p.Text, 0) || len(p.Text) > 32<<10 {
+			return nil, projectagent.ErrInvalid
+		}
+		if req.LastSeq != b.nextSeq-1 {
+			return nil, projectagent.ErrConflict
+		}
+		data = struct{}{}
 	case "renew", "started":
 		if req.Operation == "started" {
 			_, err = tx.Exec(ctx, `UPDATE agent_runs SET state='running' WHERE id=$1 AND state='starting'`, req.RunID)

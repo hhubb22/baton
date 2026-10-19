@@ -18,6 +18,7 @@ import (
 	"baton/internal/config"
 	"baton/internal/identity"
 	"baton/internal/node"
+	"baton/internal/projectagent"
 	"baton/internal/protocol"
 	"baton/internal/redact"
 	"baton/internal/store"
@@ -35,6 +36,7 @@ type requestIDKey struct{}
 
 // Settings 是 API 进程使用的来源和有效期。有效期与 config 的允许范围一致。
 type Settings struct {
+	ProjectPreviews   ProjectPreviews
 	OutputBudget      *protocol.Budget
 	Origins           []string
 	SessionTTL        time.Duration
@@ -57,8 +59,14 @@ type FileBrowser interface {
 	BrowseFiles(ctx context.Context, employeeID, nodeID string, req protocol.FileRequest) (protocol.FileResult, error)
 }
 
+// ProjectPreviews 提供已验证运行的临时文本快照。
+type ProjectPreviews interface {
+	ProjectPreview(string, int64) *projectagent.Preview
+}
+
 // Server 是 /api/v1 的登录与节点接口。会话 Cookie 始终带 Secure、HttpOnly 和 SameSite=Strict。
 type Server struct {
+	projectPreviews   ProjectPreviews
 	outputBudget      *protocol.Budget
 	store             *store.Store
 	origins           map[string]struct{}
@@ -100,6 +108,7 @@ func New(pool *pgxpool.Pool, settings Settings) (*Server, error) {
 	}
 	return &Server{
 		store:             store.New(pool),
+		projectPreviews:   settings.ProjectPreviews,
 		origins:           set,
 		ttl:               settings.SessionTTL,
 		enrollmentTTL:     settings.EnrollmentTTL,

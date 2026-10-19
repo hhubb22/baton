@@ -577,7 +577,7 @@ func (m *projectRuntimeManager) runtimeRequest(ctx context.Context, p *projectRu
 			Wake bool `json:"wake"`
 		}{wake})
 		result = protocol.ProjectRuntimeResult{Type: protocol.BodyProjectRuntimeResult, OK: true, Data: data}
-	case "bootstrap", "read_events", "claim_inputs", "append_event", "call_tool", "report_failure", "finish":
+	case "bootstrap", "read_events", "claim_inputs", "append_event", "preview", "call_tool", "report_failure", "finish":
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		result = m.call(ctx, req)
 		cancel()
