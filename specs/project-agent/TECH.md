@@ -62,6 +62,8 @@ Runtime 进程的工作目录是一个空的控制目录。pi-agent-core 本身�
 
 ### 3. 数据模型
 
+PS-155 通过 0016 交付 Project、Agent、主对话、事件、记忆和输入队列的中心存储，以及 Project、用户消息、事件读取、记忆 API。输入领取、被动通知、放置和租约由 PS-156 实现。运行身份校验、模型输出写入和工具执行仍按后续工单实施。
+
 新增表都带 `employee_id`，跨表引用使用包含 `employee_id` 的复合外键，沿用现有归属检查方式。
 
 | 表 | 主要字段 | 说明 |
@@ -73,7 +75,7 @@ Runtime 进程的工作目录是一个空的控制目录。pi-agent-core 本身�
 | `project_agent_input_queue` | id, employee_id, agent_id, source_type, source_key, payload, payload_hash, delivered_seq, created_at | 输入队列；`(agent_id, source_key)` 唯一；`delivered_seq` 为空表示待处理；领取后保留 |
 | `agent_runs` | id, employee_id, agent_id, node_id, lease_epoch, state, placement_reason, started_at, ended_at, end_reason | 每次运行一行；运行位置只记在这里 |
 | `project_memory_entries` | id, employee_id, project_id, title, current_revision, updated_at | 记忆条目 |
-| `project_memory_revisions` | entry_id, revision, content, author, source_seq, created_at | 只追加；`author` 为 agent 或 user |
+| `project_memory_revisions` | entry_id, employee_id, revision, content, author, source_seq, created_at | 只追加；`author` 为 agent 或 user |
 | `node_runtime_reports` | node_id, employee_id, report_version, reported_at, report | 节点能力的结构化报告（第 8 节）；现有 `nodes.capabilities` 是最多 32 项的字符串数组，装不下目录和仓库信息 |
 
 `tasks` 新增可空列 `project_id`、`origin_conversation_id`、`origin_tool_call_id`，并对后两列建唯一索引。用户手工创建和执行 Agent 派生的任务这三列为空，现有行为不变。
@@ -101,7 +103,11 @@ Runtime 进程的工作目录是一个空的控制目录。pi-agent-core 本身�
 
 每条事件的 payload 不超过 160 KiB。`input` 由领取规则保证；`tool_result` 受单个工具输出 32 KiB 的限制；`assistant` 和 `compaction` 由 Runtime 把每次请求的 `maxTokens` 设为 32000 来控制，仍然超出时按模型请求失败处理（第 5 节），这条输出不保存，也没有执行其中的工具调用。
 
-消息 payload 采用 pi-ai 的消息 JSON，并标注 `format: "pi-ai/1"`。这是为了让 assistant 消息原样往返：Anthropic 的 thinking 签名、OpenAI Responses 的 reasoning 内容都要原样发回，Baton 自己的中立格式很难保证不丢字段。代价是 Web 端渲染和 `history.search` 需要理解 pi-ai 的消息结构（text、thinking、toolCall 几种内容块）。将来更换 Runtime 时，需要一个从 `pi-ai/1` 转换的适配器，本期不做。
+用户消息队列的 payload 为 `{"content":"正文"}`，来源键为 `user:{client_message_id}`，摘要为正文 UTF-8 字节的 SHA-256。同一来源键与相同正文返回原始队列 ID 和创建时间，不同正文返回冲突。正文上限为 64 KiB，另检查数据库中 jsonb 规范文本的 72 KiB 上限，超限返回 413。接收消息不检查设备在线状态，也不生成 `input` 事件；PS-156 的领取事务负责生成事件。
+
+记忆修改先锁条目，再读取当前修订。`expected_revision=0` 用于创建；已有条目的版本不匹配时返回 409、`current_revision` 和当前记忆全文。新修订与条目当前版本在同一事务内提交，修订不可更新或删除。员工 API 固定写 `author=user`；Agent 工具必须先校验运行身份，再以 `author=agent` 调用同一存储入口，`source_seq` 必须属于本 Project 主对话。
+
+对话事件 payload 采用 pi-ai 的消息 JSON，并标注 `format: "pi-ai/1"`。这是为了让 assistant 消息原样往返：Anthropic 的 thinking 签名、OpenAI Responses 的 reasoning 内容都要原样发回，Baton 自己的中立格式很难保证不丢字段。代价是 Web 端渲染和 `history.search` 需要理解 pi-ai 的消息结构（text、thinking、toolCall 几种内容块）。将来更换 Runtime 时，需要一个从 `pi-ai/1` 转换的适配器，本期不做。
 
 ### 4. 运行流程
 

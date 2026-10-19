@@ -10,6 +10,8 @@ Coordinator 内置 Gateway 的实现与验收由 [PS-171](https://linear.app/kak
 
 ## 已实现基线
 
+PS-155 提供 Project、主对话事件读取和项目记忆 API。迁移 `0016_projects.sql` 在中心创建七张表，包含输入队列。用户消息在所有设备离线时仍可入队，相同消息 ID 与正文返回原记录。事件与记忆修订由数据库触发器限制为只追加，记忆修改检查 `expected_revision`。输入领取、通知、运行放置和租约由 PS-156 实现。
+
 当前已实现补充（PS-125 / T21）：Web 提供按节点分组的 Session 树，分别显示本机父子关系与跨节点委托，可提交新任务、补充当前任务、查询原输入操作及显式恢复。`/api/v1/events` 使用同源 Cookie 鉴权，连接期间复核登录，退出、改密与到期关闭旧连接；`session.changed`、`task.changed` 提醒页面重新读取，`session.output` 返回受限纯文本、游标和缺口。通知按本人元数据版本每秒检查，重连及窗口获得焦点重新读取。历史、输出和补充输入使用临时 Relay RPC，不进入中心 outbox 或 task_events。每次输出最多 16 KiB，Worker 和适配器各保留最近 256 KiB，页面保留最近 128 KiB；中心最多 128 个浏览器连接及 128 个临时 RPC，节点最多 16 个并发 Session RPC，浏览器写超时为 2 秒。Relay 的输出使用独立队列，最多 128 条且最多 32 MiB，控制队列优先发送，输出超限不会占满任务控制队列。慢订阅丢失的片段以 gap 显示，完整原生历史仍留在节点。
 
 补充输入在 Worker 串行区内先保存操作 ID、正文摘要和不确定状态，再调用适配器；确认丢失后只查询原操作，不自动补发。页面按员工保存待确认的操作 ID 和 Session，不保存正文。旧结果已确认且全部旧报告已交付后，显式恢复将原 Session 标记为空闲；后续新目标创建独立任务和执行，重新申请许可，保留原生 Session 与固定工作目录，清除旧执行的活动回执，拒绝变更目录。恢复不创建缺失历史，不重放旧任务。Pi/Codex 提供实际补充输入和有界文本增量；Pi 没有独立的员工等待事件，页面保留中心 `waiting_input` 的显示能力。Inbox、Project Agent、完整历史分页与任务干预页面分别由其后续工单扩展。无新增中心迁移或依赖。
@@ -439,6 +441,16 @@ Agent 协议帧与传输消息使用不同上限。Pi 可能一次返回大量 g
 | /events | 浏览器同源 WebSocket，订阅本人任务与 Session 的通知或受限输出；也推送 Project Agent 的流式片段和已保存事件（2026-10-18 修订） |
 
 URL 均相对于 /api/v1。错误对象包含 code、message、request_id、可选 task_id 和 details，details 不回传凭据或任意完整工具输出。错误 code 区分 PRODUCT R-13 的类别；查询状态的客户端失败不能隐式调用 rerun。
+
+Project API 的请求和响应约定：
+
+- `POST /projects` 接受 `title`、可选的 `goal`、`provider` 和 `model`；只提供标题即可创建。返回 201，包含 Project 属性、`agent: {id, provider, model}` 和 `conversation: {id, state, last_seq}`。`PATCH` 接受同名字段及 `status`，省略的字段保持原值。标题 1～200 字符且不含控制字符，目标最多 64 KiB。所有未知字段均拒绝，因此设备、目录、仓库与员工身份无法通过请求注入。
+- `GET /projects` 与 `GET /projects/{id}/memory` 使用 `after_id`、`limit`（默认 50，上限 100）按稳定 ID 分页，分别返回 `projects` 或 `entries`；满页时提供 `next_after_id`，客户端读到空页或无游标时结束。
+- `POST /projects/{id}/messages` 接受 `client_message_id`（1～128 个可见 ASCII 字符）和 `content`。首次接受与相同内容重试均返回 202 及原始 `{id, client_message_id, content, created_at}`；正文不同返回 `409 message_conflict`。正文按 UTF-8 字节计数，超过 64 KiB 返回 413；转义后 jsonb 规范文本超过队列 72 KiB 容量时也返回 413。消息在队列中等待，领取前不出现在事件页。
+- `GET /projects/{id}/events` 接受非负 `after_seq` 与 `limit`（默认 50，上限 100）。返回 `events`、本次读取开始时已保存的 `last_seq`、本页 `next_after_seq` 和 `has_more`。事件按序号递增、保留原始 payload；每页编码后的事件合计以 192 KiB 为预算，至少返回一条合法事件，单条因 HTML 转义超过预算时单独返回。后续请求使用 `next_after_seq`。
+- `PUT /projects/{id}/memory/{entry_id}` 接受 `title`、`content`、必填 `expected_revision`；客户端生成 UUID，版本 0 创建记忆，之后每次写入提供已读版本。正文最多 64 KiB。返回当前记忆 `{id, title, content, revision, author, source_seq, updated_at}`；冲突返回 `409 revision_conflict`、`current_revision` 与 `current`，尚不存在时为版本 0 和 null。`GET /projects/{id}/memory/{entry_id}` 可重新读取单条记忆。来源作者由服务端决定。
+
+这些接口复用员工 Cookie 登录、写请求 Origin 与 CSRF 检查；跨员工访问与读取不存在的记录统一返回 404。记忆写入时，已读版本对应的条目不存在按上述版本冲突处理。日志只记录请求标识、受控路径和结果，不记录消息、目标或记忆正文。
 
 历史、实时输出和当前任务补充输入使用临时节点 RPC，不进入中心持久化业务 outbox。需要中心留下审计时只保存操作 ID、对象、时间和交付情况；初始任务说明与授权变化按 R-27 保存。临时 RPC 失败后，通过相同 operation_id 向 Worker 查询，不能盲目重发输入。
 
