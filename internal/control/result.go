@@ -67,7 +67,7 @@ func (s *Server) onExecutionReport(ctx context.Context, connID string, env proto
 		EmployeeID: env.Source.EmployeeID, NodeID: env.Source.NodeID,
 		EventID: report.EventID, TaskID: report.TaskID, ExecutionID: report.ExecutionID, SessionID: report.SessionID,
 		Kind: report.Kind, InputGeneration: report.InputGeneration, Status: report.Status,
-		Summary: report.Summary, Evidence: report.Evidence, Artifacts: report.Artifacts,
+		CommandResult: report.CommandResult, Summary: report.Summary, Evidence: report.Evidence, Artifacts: report.Artifacts,
 		EvidenceEmptyReason: report.EvidenceEmptyReason, ArtifactsEmptyReason: report.ArtifactsEmptyReason,
 		ErrorCode: report.ErrorCode, ErrorMessage: report.ErrorMessage, AgentStopped: report.AgentStopped,
 	})

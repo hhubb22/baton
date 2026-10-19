@@ -74,7 +74,7 @@ func (w *workerDB) stopLocked(sessionID, reason string) ([]ipcReport, error) {
 	}
 	if count > 0 {
 		w.stopReported = true
-		return w.pendingLocked()
+		return w.recordStopReportLocked(sessionID, false, false, false)
 	}
 	if w.stopReason != "" {
 		reason = w.stopReason
@@ -121,12 +121,70 @@ func (w *workerDB) stopLocked(sessionID, reason string) ([]ipcReport, error) {
 			stopped, known = false, false
 		}
 	}
+	if err := w.pollAdapterLocked(sessionID); err != nil {
+		return nil, err
+	}
 	return w.recordStopReportLocked(sessionID, stopped, known, notStarted)
 }
 
+// flushStopOutputLocked 在停止报告之前保存已经读取的命令输出；写入失败时保留内存副本供下次轮询重试。
+func (w *workerDB) flushStopOutputLocked() error {
+	if w.pendingStopOutput == "" {
+		return nil
+	}
+	tx, err := w.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := putMeta(tx, "stop_output", w.pendingStopOutput); err != nil {
+		return err
+	}
+	if err := insertLog(tx, "output", w.pendingStopOutput, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	w.pendingStopOutput = ""
+	return nil
+}
+
+func (w *workerDB) stoppedCommandResultLocked() (*task.CommandResult, error) {
+	var output string
+	err := w.db.QueryRow(`SELECT value FROM meta WHERE key='stop_output'`).Scan(&output)
+	if err == nil {
+		candidate, err := task.ParseCandidate(output)
+		if err != nil {
+			return nil, err
+		}
+		return candidate.CommandResult, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	// 已有终态结果也可以用于审计；它不改变当前停止报告的语义。
+	err = w.db.QueryRow(`SELECT payload FROM outbox WHERE kind=? ORDER BY rowid DESC LIMIT 1`, protocol.ReportResult).Scan(&output)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var report protocol.ExecutionReport
+	if err := json.Unmarshal([]byte(output), &report); err != nil {
+		return nil, err
+	}
+	return report.CommandResult, nil
+}
+
 func (w *workerDB) recordStopReportLocked(sessionID string, stopped, known, notStarted bool) ([]ipcReport, error) {
+	commandResult, err := w.stoppedCommandResultLocked()
+	if err != nil {
+		return nil, err
+	}
 	var previous string
-	err := w.db.QueryRow(`SELECT payload FROM outbox WHERE kind = ? ORDER BY rowid DESC LIMIT 1`, task.EventStopReport).Scan(&previous)
+	err = w.db.QueryRow(`SELECT payload FROM outbox WHERE kind = ? ORDER BY rowid DESC LIMIT 1`, task.EventStopReport).Scan(&previous)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
@@ -135,10 +193,15 @@ func (w *workerDB) recordStopReportLocked(sessionID string, stopped, known, notS
 		if err := json.Unmarshal([]byte(previous), &report); err != nil {
 			return nil, err
 		}
-		if !stopped || report.AgentStopped {
+		if commandResult == nil {
+			commandResult = report.CommandResult
+		}
+		sameOutput := commandResult == nil && report.CommandResult == nil || commandResult != nil && report.CommandResult != nil && *commandResult == *report.CommandResult
+		if (!stopped || report.AgentStopped) && (!known || report.OutcomeKnown) && (!notStarted || report.NotStarted) && sameOutput {
 			w.stopReported = true
 			return w.pendingLocked()
 		}
+		stopped, known, notStarted = stopped || report.AgentStopped, known || report.OutcomeKnown, notStarted || report.NotStarted
 	}
 	eventID, err := identity.NewUUID()
 	if err != nil {
@@ -148,7 +211,7 @@ func (w *workerDB) recordStopReportLocked(sessionID string, stopped, known, notS
 		Type: protocol.BodyExecutionReport, EventID: eventID, TaskID: w.task, ExecutionID: w.execution,
 		SessionID: sessionID, Kind: task.EventStopReport, InputGeneration: w.generation,
 		Status: task.StatusNeedsVerification, OccurredAt: w.executionClock.Wall().UTC(),
-		StopReason: w.stopReason, AgentStopped: stopped, OutcomeKnown: known, NotStarted: notStarted,
+		CommandResult: commandResult, StopReason: w.stopReason, AgentStopped: stopped, OutcomeKnown: known, NotStarted: notStarted,
 	})
 	if err != nil {
 		return nil, err
@@ -159,7 +222,7 @@ func (w *workerDB) recordStopReportLocked(sessionID string, stopped, known, notS
 	}
 	defer tx.Rollback()
 	kind, message := "stop", "已请求中止；停止不回滚外部副作用"
-	if previous != "" {
+	if previous != "" && stopped {
 		kind, message = "stop_confirmed", "已观察到 Agent 停止；停止不回滚外部副作用"
 	}
 	if err := insertLog(tx, kind, message, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {

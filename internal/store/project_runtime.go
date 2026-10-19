@@ -139,6 +139,8 @@ func (s *Store) ProjectRuntime(ctx context.Context, src protocol.Source, req pro
 			return nil, projectagent.ErrConflict
 		}
 		data, err = claimProjectInputs(ctx, tx, b, req)
+	case "wait_tool":
+		data, err = s.waitProjectTool(ctx, tx, b, req)
 	case "call_tool":
 		data, err = s.callProjectTool(ctx, tx, b, req)
 	case "append_event":

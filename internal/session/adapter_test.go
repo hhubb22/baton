@@ -13,6 +13,7 @@ import (
 	"baton/internal/agent"
 	"baton/internal/agent/codex"
 	"baton/internal/agent/pi"
+	"baton/internal/agent/shell"
 	"baton/internal/protocol"
 	"baton/internal/task"
 )
@@ -394,14 +395,14 @@ func TestAdapterSelectionRejectsMissingNativeHistory(t *testing.T) {
 		a.Close()
 		t.Fatal("empty native directory restored as a new session")
 	}
-	if _, err := w.adapterFactory("shell", `{}`); err == nil {
+	if _, err := w.adapterFactory("unknown", `{}`); err == nil {
 		t.Fatal("unimplemented agent used observer")
 	}
 }
 
 func TestSharedAdapterRegistration(t *testing.T) {
 	t.Setenv("BATON_TEST_EXECUTOR_LOG", "")
-	for _, name := range []string{"pi", "codex"} {
+	for _, name := range []string{"pi", "codex", "shell"} {
 		t.Run(name, func(t *testing.T) {
 			w, _, sid := clockWorker(t, 60)
 			configureAdapter(w, t.TempDir(), sid)
@@ -411,6 +412,10 @@ func TestSharedAdapterRegistration(t *testing.T) {
 			}
 			defer a.Close()
 			switch name {
+			case "shell":
+				if _, ok := a.(*shell.Adapter); !ok {
+					t.Fatal("shell 未注册")
+				}
 			case "pi":
 				if _, ok := a.(*pi.Adapter); !ok {
 					t.Fatal("Pi not registered")
@@ -464,5 +469,251 @@ func TestAdapterConfigExcludesEnvironment(t *testing.T) {
 	raw, err := json.Marshal(agent.Config{Env: []string{"TEST_SECRET=fixture-secret-not-to-persist"}, Model: "fixture-model"})
 	if err != nil || strings.Contains(string(raw), "fixture-secret") || strings.Contains(string(raw), "TEST_SECRET") {
 		t.Fatal("Agent environment leaked into persisted config", err)
+	}
+}
+
+type stopOutputStub struct {
+	*nativeStub
+	output    Output
+	settled   bool
+	immediate bool
+}
+
+func (a *stopOutputStub) Abort() (bool, bool, error) {
+	a.aborts++
+	if a.immediate {
+		a.settled = true
+		a.outputs = append(a.outputs, a.output)
+	}
+	return a.settled, false, nil
+}
+func (a *stopOutputStub) StopStatus() (bool, bool) { return a.settled, false }
+func commandStopOutput(t *testing.T) Output {
+	t.Helper()
+	raw, err := json.Marshal(map[string]any{
+		"summary": "命令已停止", "status": task.StatusFailed,
+		"evidence_empty_reason": "输出记录在命令结果中", "artifacts_empty_reason": "没有声明产物",
+		"error":          map[string]string{"code": task.CodeExecutionFailed, "message": "进程已停止"},
+		"command_result": task.CommandResult{Output: "partial\n", TotalBytes: 8, ExitCode: -1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Output{Final: string(raw), Exited: true}
+}
+func assertStoppedCommandOutput(t *testing.T, w *workerDB, sid, reason string) protocol.ExecutionReport {
+	t.Helper()
+	reports, err := w.Pending()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stop protocol.ExecutionReport
+	for _, r := range reports {
+		if r.Kind == task.EventStopReport {
+			if err := json.Unmarshal(r.Body, &stop); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if stop.Status != task.StatusNeedsVerification || stop.StopReason != reason || !stop.AgentStopped || stop.OutcomeKnown || stop.CommandResult == nil || stop.CommandResult.Output != "partial\n" || stop.CommandResult.TotalBytes != 8 || stop.CommandResult.ExitCode != -1 {
+		t.Fatalf("停止报告丢失输出或改变停止事实: %+v", stop)
+	}
+	var resultCount, outputCount int
+	if err := w.db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE kind=?`, protocol.ReportResult).Scan(&resultCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.db.QueryRow(`SELECT COUNT(*) FROM execution_log WHERE kind='output'`).Scan(&outputCount); err != nil {
+		t.Fatal(err)
+	}
+	if resultCount != 0 || outputCount != 1 {
+		t.Fatalf("停止后输出没有只审计一次: results=%d outputs=%d", resultCount, outputCount)
+	}
+	return stop
+}
+func TestWorkerStopIncludesCommandOutputWithoutFinalResult(t *testing.T) {
+	for _, reason := range []string{task.StatusCancelled, task.CodeExecutionTimeout} {
+		t.Run(reason, func(t *testing.T) {
+			w, clock, sid := clockWorker(t, 1)
+			a := &stopOutputStub{nativeStub: &nativeStub{}, output: commandStopOutput(t), immediate: true}
+			w.adapterFactory = func(string, string) (agent.Adapter, error) { return a, nil }
+			if _, err := w.SubmitInput(sid, nativeTestInput); err != nil {
+				t.Fatal(err)
+			}
+			if reason == task.CodeExecutionTimeout {
+				clock.Advance(time.Second)
+				if err := w.checkDeadline(sid); err != nil {
+					t.Fatal(err)
+				}
+			} else if _, err := w.Stop(sid, reason); err != nil {
+				t.Fatal(err)
+			}
+			stop := assertStoppedCommandOutput(t, w, sid, reason)
+			if err := w.checkDeadline(sid); err != nil {
+				t.Fatal(err)
+			}
+			after := assertStoppedCommandOutput(t, w, sid, reason)
+			if stop.EventID != after.EventID || a.aborts != 1 {
+				t.Fatal("重复轮询产生了第二次停止或报告")
+			}
+			var seq int
+			var name, path string
+			if err := w.db.QueryRow(`PRAGMA database_list`).Scan(&seq, &name, &path); err != nil {
+				t.Fatal(err)
+			}
+			if err := w.Close(); err != nil {
+				t.Fatal(err)
+			}
+			reopened, err := openWorkerDB(path, NewObserver(""))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer reopened.Close()
+			if _, err := reopened.Stop(sid, reason); err != nil {
+				t.Fatal(err)
+			}
+			assertStoppedCommandOutput(t, reopened, sid, reason)
+		})
+	}
+}
+func TestWorkerStopRetainsLateCommandOutput(t *testing.T) {
+	for _, initialStopped := range []bool{false, true} {
+		name := "停止事实与输出同时到达"
+		if initialStopped {
+			name = "输出在停止事实之后到达"
+		}
+		t.Run(name, func(t *testing.T) {
+			w, _, sid := clockWorker(t, 60)
+			a := &stopOutputStub{nativeStub: &nativeStub{}, output: commandStopOutput(t), settled: initialStopped}
+			w.adapterFactory = func(string, string) (agent.Adapter, error) { return a, nil }
+			if _, err := w.SubmitInput(sid, nativeTestInput); err != nil {
+				t.Fatal(err)
+			}
+			initial, err := w.Stop(sid, task.StatusCancelled)
+			if err != nil {
+				t.Fatal(err)
+			}
+			first := findStop(t, initial)
+			if first.AgentStopped != initialStopped || first.CommandResult != nil {
+				t.Fatal("首次停止请求凭空生成了停止事实或输出")
+			}
+			if err := w.Ack(first.EventID); err != nil {
+				t.Fatal(err)
+			}
+			a.outputs = append(a.outputs, a.output)
+			a.settled = true
+			if err := w.checkDeadline(sid); err != nil {
+				t.Fatal(err)
+			}
+			stop := assertStoppedCommandOutput(t, w, sid, task.StatusCancelled)
+			if stop.EventID == first.EventID || stop.WorkerSequence <= first.WorkerSequence {
+				t.Fatal("延迟输出没有生成可重放的新报告")
+			}
+		})
+	}
+}
+
+func TestWorkerRetriesStoppedCommandOutputAfterLedgerFailure(t *testing.T) {
+	w, _, sid := clockWorker(t, 60)
+	a := &stopOutputStub{nativeStub: &nativeStub{}, output: commandStopOutput(t), immediate: true}
+	w.adapterFactory = func(string, string) (agent.Adapter, error) { return a, nil }
+	if _, err := w.SubmitInput(sid, nativeTestInput); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.db.Exec(`CREATE TRIGGER fail_stop_output BEFORE INSERT ON meta WHEN NEW.key='stop_output' BEGIN SELECT RAISE(ABORT,'fixture output write failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Stop(sid, task.StatusCancelled); err == nil {
+		t.Fatal("输出账本失败被吞掉")
+	}
+	if len(a.outputs) != 0 || w.pendingStopOutput == "" {
+		t.Fatal("已读取的输出没有保留供重试")
+	}
+	if _, err := w.db.Exec(`DROP TRIGGER fail_stop_output`); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.checkDeadline(sid); err != nil {
+		t.Fatal(err)
+	}
+	assertStoppedCommandOutput(t, w, sid, task.StatusCancelled)
+	if a.aborts != 1 || w.pendingStopOutput != "" {
+		t.Fatal("恢复输出时重复中止或未清理内存副本")
+	}
+}
+
+func TestStopReportPreservesOutputAndAddsKnownOutcome(t *testing.T) {
+	w, _, sid := clockWorker(t, 60)
+	w.stopReason = task.StatusCancelled
+	w.pendingStopOutput = commandStopOutput(t).Final
+	if err := w.flushStopOutputLocked(); err != nil {
+		t.Fatal(err)
+	}
+	initial, err := w.recordStopReportLocked(sid, true, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := findStop(t, initial)
+	if first.CommandResult == nil || first.OutcomeKnown {
+		t.Fatal("初始停止报告没有保存预期事实")
+	}
+	if err := w.Ack(first.EventID); err != nil {
+		t.Fatal(err)
+	}
+	// 输出已经在报告里，后续状态来源即使没有再次提供输出也应保留它。
+	if _, err := w.db.Exec(`DELETE FROM meta WHERE key='stop_output'`); err != nil {
+		t.Fatal(err)
+	}
+	reports, err := w.recordStopReportLocked(sid, true, true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop := findStop(t, reports)
+	if !stop.OutcomeKnown || stop.CommandResult == nil || *stop.CommandResult != *first.CommandResult || stop.WorkerSequence <= first.WorkerSequence {
+		t.Fatalf("新增停止证据或原有输出被丢弃: %+v", stop)
+	}
+}
+
+func TestWorkerRecoversPersistedOutputBeforeStopReportUpdate(t *testing.T) {
+	w, _, sid := clockWorker(t, 60)
+	a := &stopOutputStub{nativeStub: &nativeStub{}}
+	w.adapterFactory = func(string, string) (agent.Adapter, error) { return a, nil }
+	if _, err := w.SubmitInput(sid, nativeTestInput); err != nil {
+		t.Fatal(err)
+	}
+	initial, err := w.Stop(sid, task.StatusCancelled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := findStop(t, initial)
+	if err := w.Ack(first.EventID); err != nil {
+		t.Fatal(err)
+	}
+	// 模拟输出保存后、更新停止报告前发生 Worker 崩溃。
+	w.pendingStopOutput = commandStopOutput(t).Final
+	if err := w.flushStopOutputLocked(); err != nil {
+		t.Fatal(err)
+	}
+	var seq int
+	var name, path string
+	if err := w.db.QueryRow(`PRAGMA database_list`).Scan(&seq, &name, &path); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := openWorkerDB(path, NewObserver(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if err := reopened.recover(sid); err != nil {
+		t.Fatal(err)
+	}
+	reports, err := reopened.Pending()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop := findStop(t, reports)
+	if stop.CommandResult == nil || stop.CommandResult.Output != "partial\n" || stop.EventID == first.EventID || stop.OutcomeKnown || stop.Status != task.StatusNeedsVerification {
+		t.Fatalf("恢复时丢失了已保存的停止输出: %+v", stop)
 	}
 }

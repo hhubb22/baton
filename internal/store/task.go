@@ -82,6 +82,9 @@ func (s *Store) AcceptTask(ctx context.Context, employeeID string, in task.Input
 }
 
 func (s *Store) acceptTask(ctx context.Context, employeeID string, in task.Input, source *AgentSource) (task.Record, error) {
+	if in.AgentType != nil && *in.AgentType == "shell" {
+		return task.Record{}, &task.Rejection{Code: task.CodeUnsupported, Message: "命令请通过 Project Agent 的 nodes.exec 派发", Fields: []string{"agent_type"}}
+	}
 	var err error
 	employeeID, err = identity.ParseUUID(employeeID)
 	if err != nil {
@@ -444,6 +447,9 @@ func chooseAgent(explicit, fallback *string, caps []string) (string, error) {
 			Fields:  []string{"agent_type"},
 		}
 	}
+	if chosen == "shell" {
+		return "", &task.Rejection{Code: task.CodeUnsupported, Message: "命令请通过 Project Agent 的 nodes.exec 派发", Fields: []string{"agent_type"}}
+	}
 	for _, cap := range caps {
 		if cap == chosen {
 			return chosen, nil
@@ -658,7 +664,7 @@ const taskSelect = `
 	       (SELECT stopped_at FROM execution_stops x JOIN executions e ON e.id = x.execution_id WHERE e.task_id = tasks.id),
 	       (SELECT reason FROM execution_stops x JOIN executions e ON e.id = x.execution_id WHERE e.task_id = tasks.id),
 	       COALESCE((SELECT outcome_known FROM execution_stops x JOIN executions e ON e.id = x.execution_id WHERE e.task_id = tasks.id), false),
-	       (SELECT rerun_of_task_id::text FROM task_relations r WHERE r.task_id = tasks.id AND r.employee_id = tasks.employee_id), required_artifacts, project_id::text, origin_conversation_id::text
+	       (SELECT rerun_of_task_id::text FROM task_relations r WHERE r.task_id = tasks.id AND r.employee_id = tasks.employee_id), required_artifacts, project_id::text, origin_conversation_id::text, command_result
 	FROM tasks`
 
 type queryer interface {
@@ -698,7 +704,7 @@ func scanTask(row pgx.Row) (task.Record, []byte, error) {
 		&rec.Summary, &rec.EvidenceEmptyReason, &rec.ArtifactsEmptyReason,
 		&rec.CancelRequestedAt, &rec.ExecutionExpiresAt, &rec.StopRequestedAt,
 		&rec.StopAcknowledgedAt, &rec.StopConfirmedAt, &rec.StopReason, &rec.StopOutcomeKnown, &rec.RerunOfTaskID,
-		&rec.RequiredArtifacts, &rec.ProjectID, &rec.OriginConversationID,
+		&rec.RequiredArtifacts, &rec.ProjectID, &rec.OriginConversationID, &rec.CommandResult,
 	); err != nil {
 		return task.Record{}, nil, fmt.Errorf("读取任务失败: %s", redact.Scrub(err.Error()))
 	}

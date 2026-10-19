@@ -72,6 +72,11 @@ export function NodesPage({
           <button data-testid="refresh-nodes" type="button" onClick={onRefresh} disabled={busy}>刷新</button>
         </div>
         {list ? <p data-testid="local-process-notice">{list.local_process_notice}</p> : <p>正在读取节点。</p>}
+        <details>
+          <summary>允许 Project Agent 执行命令</summary>
+          <p>此功能默认关闭，需在每台设备上单独开启。开启后，命令以设备上的用户身份运行，Baton 不提供沙箱。登记目录只限制启动位置，命令仍可访问目录之外的文件。任务结果或仓库内容中的恶意指令可能诱导执行任意命令。每条命令和输出都会保存到对话。</p>
+          <p>在目标设备上运行 <code>batond project-exec --enabled=true</code> 开启，运行 <code>batond project-exec --enabled=false</code> 关闭。</p>
+        </details>
         <div data-testid="node-list">
           {list && list.nodes.length === 0 ? <p>还没有节点。</p> : null}
           {list?.nodes.map((node) => (

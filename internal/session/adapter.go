@@ -13,6 +13,7 @@ import (
 	"baton/internal/agent/codex"
 	"baton/internal/agent/kiro"
 	"baton/internal/agent/pi"
+	"baton/internal/agent/shell"
 	"baton/internal/task"
 )
 
@@ -22,6 +23,7 @@ type adapterRegistration struct {
 }
 
 var registeredAdapters = map[string]adapterRegistration{
+	"shell": {func(c agent.Config) agent.Adapter { return shell.New(c) }, "", "", ""},
 	"kiro":  {func(c agent.Config) agent.Adapter { return kiro.New(c) }, "BATON_KIRO_MODEL", "BATON_KIRO_BINARY", "BATON_KIRO_HOME"},
 	"pi":    {func(c agent.Config) agent.Adapter { return pi.New(c) }, "BATON_PI_MODEL", "BATON_PI_BIN", "BATON_PI_HOME"},
 	"codex": {func(c agent.Config) agent.Adapter { return codex.New(c) }, "BATON_CODEX_MODEL", "BATON_CODEX_BINARY", "BATON_CODEX_HOME"},
@@ -64,7 +66,7 @@ func configureAdapter(w *workerDB, dataDir, sessionID string) {
 		if err != nil {
 			return nil, err
 		}
-		if input.WorkingDirectory == "" {
+		if input.WorkingDirectory == "" && agentType != "shell" {
 			input.WorkingDirectory = filepath.Join(dir, "workspace")
 			if err := os.MkdirAll(input.WorkingDirectory, 0o700); err != nil {
 				return nil, err
@@ -74,7 +76,7 @@ func configureAdapter(w *workerDB, dataDir, sessionID string) {
 		if err != nil {
 			return nil, err
 		}
-		config = agent.Config{Directory: input.WorkingDirectory, SessionDir: filepath.Join(dir, "native"), SessionID: sessionID, ExecutionID: w.execution, ContextFile: contextFile}
+		config = agent.Config{DataDir: dataDir, Directory: input.WorkingDirectory, SessionDir: filepath.Join(dir, "native"), SessionID: sessionID, ExecutionID: w.execution, ContextFile: contextFile}
 		config.StatePath = filepath.Join(config.SessionDir, "state.json")
 		if _, err := os.Lstat(config.SessionDir); err == nil {
 			config.Restore = true
@@ -134,6 +136,9 @@ func (w *workerDB) readNativeHistory(cursor string) (agent.HistoryPage, error) {
 }
 
 func (w *workerDB) pollAdapterLocked(sessionID string) error {
+	if err := w.flushStopOutputLocked(); err != nil {
+		return err
+	}
 	if w.adapter == nil {
 		return nil
 	}
@@ -150,7 +155,16 @@ func (w *workerDB) pollAdapterLocked(sessionID string) error {
 				return err
 			}
 		}
-		if w.cancelled || w.hasResultLocked() || w.resultDelivered {
+		if w.cancelled {
+			if candidate, err := task.ParseCandidate(out.Final); err == nil && candidate.CommandResult != nil {
+				w.pendingStopOutput = out.Final
+				if err := w.flushStopOutputLocked(); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+		if w.hasResultLocked() || w.resultDelivered {
 			continue
 		}
 		if out.Final == "" && !out.Exited && !out.Uncertain && !out.WaitingForChildren && len(out.Progress) == 0 {
@@ -174,6 +188,10 @@ func (w *workerDB) pollAdapterLocked(sessionID string) error {
 				_, err := w.recordStopReportLocked(sessionID, true, known, false)
 				return err
 			}
+		}
+		if w.stopReported {
+			_, err := w.recordStopReportLocked(sessionID, false, false, false)
+			return err
 		}
 	}
 	return nil

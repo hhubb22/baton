@@ -445,7 +445,7 @@ func TestProjectRuntimeStdioBindingAndToolForwarding(t *testing.T) {
 	m, requests, _ := projectRuntimeFixture(t)
 	command := projectCommand()
 	sendProjectCommand(m, command)
-	for _, operation := range []string{"bootstrap", "preview", "call_tool", "finish", "exited"} {
+	for _, operation := range []string{"bootstrap", "preview", "call_tool", "wait_tool", "finish", "exited"} {
 		request := waitProjectRequest(t, requests, operation)
 		if request.RunID != command.RunID || request.LeaseEpoch != command.LeaseEpoch {
 			t.Fatalf("stdio 信任伪造身份: %+v", request)
@@ -455,6 +455,9 @@ func TestProjectRuntimeStdioBindingAndToolForwarding(t *testing.T) {
 		}
 		if operation == "call_tool" && (request.ToolCallID != "call-1" || request.ToolName != "devices.list") {
 			t.Fatal("工具字段丢失")
+		}
+		if operation == "wait_tool" && (request.ToolCallID != "exec-1" || request.LastSeq != 4 || !strings.Contains(string(request.Payload), `"finish_wait":true`)) {
+			t.Fatal("工具等待字段丢失")
 		}
 	}
 }

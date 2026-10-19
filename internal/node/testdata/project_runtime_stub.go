@@ -29,7 +29,7 @@ func main() {
 	}
 	if os.Getenv("BATON_TEST_PROJECT_STDIO") == "1" {
 		decoder := json.NewDecoder(os.Stdin)
-		for id, operation := range []string{"", "wrong_type", "bootstrap", "preview", "call_tool", "renew", "finish"} {
+		for id, operation := range []string{"", "wrong_type", "bootstrap", "preview", "call_tool", "wait_tool", "renew", "finish"} {
 			req := map[string]any{"operation": operation, "run_id": "forged", "lease_epoch": 999, "future_field": true}
 			if operation == "" {
 				delete(req, "operation")
@@ -45,6 +45,11 @@ func main() {
 				req["tool_call_id"] = "call-1"
 				req["tool_name"] = "devices.list"
 				req["arguments"] = map[string]any{}
+			}
+			if operation == "wait_tool" {
+				req["tool_call_id"] = "exec-1"
+				req["last_seq"] = 4
+				req["payload"] = map[string]any{"finish_wait": true}
 			}
 			_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"id": id + 1, "request": req, "future_field": true})
 			var response struct {

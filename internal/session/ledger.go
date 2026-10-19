@@ -71,6 +71,7 @@ type workerDB struct {
 	inputDueAt         time.Time
 	stopReason         string
 	stopReported       bool
+	pendingStopOutput  string
 	sessionID          string
 	inputSentAt        time.Time
 	inputDelay         time.Duration
@@ -757,7 +758,7 @@ func reportFromCandidate(eventID, taskID, executionID, sessionID string, generat
 		OccurredAt: time.Now().UTC(),
 		Type:       protocol.BodyExecutionReport, EventID: eventID, TaskID: taskID, ExecutionID: executionID,
 		SessionID: sessionID, Kind: protocol.ReportResult, InputGeneration: generation, Status: candidate.Status,
-		Summary: candidate.Summary, Evidence: candidate.Evidence, Artifacts: candidate.Artifacts,
+		CommandResult: candidate.CommandResult, Summary: candidate.Summary, Evidence: candidate.Evidence, Artifacts: candidate.Artifacts,
 		EvidenceEmptyReason: candidate.EvidenceEmptyReason, ArtifactsEmptyReason: candidate.ArtifactsEmptyReason,
 		ErrorCode: candidate.ErrorCode, ErrorMessage: candidate.ErrorMessage, AgentStopped: stopped,
 	}

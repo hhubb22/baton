@@ -28,7 +28,7 @@ func insertProjectInput(ctx context.Context, tx pgx.Tx, employeeID, agentID, kin
 	case "attention_answer":
 		maxBytes = 32 << 10
 	case "task_result", "user_task_result":
-		maxBytes = 40 << 10
+		maxBytes = 72 << 10
 	case "memory_updated":
 		maxBytes = 1 << 10
 	case "project_updated":
@@ -54,16 +54,17 @@ func insertProjectInput(ctx context.Context, tx pgx.Tx, employeeID, agentID, kin
 
 // ProjectTaskResultInput 保存任务终态的限长通知。
 type ProjectTaskResultInput struct {
-	UserOperation    json.RawMessage `json:"user_operation,omitempty"`
-	NotificationOnly bool            `json:"notification_only,omitempty"`
-	TaskID           string          `json:"task_id"`
-	Version          int64           `json:"version"`
-	Status           string          `json:"status"`
-	ExitCode         *int            `json:"exit_code,omitempty"`
-	Text             string          `json:"text"`
-	OriginalBytes    int             `json:"original_bytes"`
-	Truncated        bool            `json:"truncated"`
-	FullContent      string          `json:"full_content,omitempty"`
+	CommandResult    *task.CommandResult `json:"command_result,omitempty"`
+	UserOperation    json.RawMessage     `json:"user_operation,omitempty"`
+	NotificationOnly bool                `json:"notification_only,omitempty"`
+	TaskID           string              `json:"task_id"`
+	Version          int64               `json:"version"`
+	Status           string              `json:"status"`
+	ExitCode         *int                `json:"exit_code,omitempty"`
+	Text             string              `json:"text"`
+	OriginalBytes    int                 `json:"original_bytes"`
+	Truncated        bool                `json:"truncated"`
+	FullContent      string              `json:"full_content,omitempty"`
 }
 
 func boundedText(s string, limit int) string {
@@ -103,7 +104,11 @@ func EnqueueProjectTaskResult(ctx context.Context, tx pgx.Tx, employeeID, agentI
 		if err = tx.QueryRow(ctx, `SELECT octet_length($1::jsonb::text)`, raw).Scan(&size); err != nil {
 			return err
 		}
-		if len(raw) <= 40<<10 && size <= 40<<10 {
+		maxBytes := 40 << 10
+		if in.CommandResult != nil {
+			maxBytes = 72 << 10
+		}
+		if len(raw) <= maxBytes && size <= maxBytes {
 			break
 		}
 		if limit == 0 {
@@ -147,9 +152,10 @@ func enqueueProjectTaskUpdate(ctx context.Context, tx pgx.Tx, employeeID, taskID
 	var operation json.RawMessage
 	var version int64
 	var summary, message *string
-	err := tx.QueryRow(ctx, `SELECT a.id::text,t.status,t.version,t.summary,t.error_message,t.origin_conversation_id IS NULL,t.user_operation
+	var command *task.CommandResult
+	err := tx.QueryRow(ctx, `SELECT a.id::text,t.status,t.version,t.summary,t.error_message,t.origin_conversation_id IS NULL,t.user_operation,t.command_result
  FROM tasks t JOIN project_agents a ON a.project_id=t.project_id AND a.employee_id=t.employee_id
- WHERE t.employee_id=$1 AND t.id=$2 AND (t.status IN ('completed','failed','cancelled') OR $3)`, employeeID, taskID, includeNonterminal).Scan(&agentID, &status, &version, &summary, &message, &passive, &operation)
+ WHERE t.employee_id=$1 AND t.id=$2 AND (t.status IN ('completed','failed','cancelled') OR $3 OR (t.status='needs_verification' AND t.command_result IS NOT NULL))`, employeeID, taskID, includeNonterminal).Scan(&agentID, &status, &version, &summary, &message, &passive, &operation, &command)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
@@ -173,5 +179,5 @@ func enqueueProjectTaskUpdate(ctx context.Context, tx pgx.Tx, employeeID, taskID
 		text.WriteString("\n")
 		text.Write(raw)
 	}
-	return EnqueueProjectTaskResult(ctx, tx, employeeID, agentID, ProjectTaskResultInput{TaskID: taskID, Version: version, Status: status, Text: text.String(), NotificationOnly: passive, UserOperation: operation})
+	return EnqueueProjectTaskResult(ctx, tx, employeeID, agentID, ProjectTaskResultInput{TaskID: taskID, Version: version, Status: status, Text: text.String(), NotificationOnly: passive, UserOperation: operation, CommandResult: command})
 }

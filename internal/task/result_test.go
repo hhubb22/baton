@@ -49,3 +49,33 @@ func TestParseCandidateRejectsFreeTextAndIncompleteResults(t *testing.T) {
 		t.Fatalf("不确定的格式错误不正确: %+v %v", uncertain, err)
 	}
 }
+
+func TestCommandResultValidation(t *testing.T) {
+	base := Candidate{Status: StatusCompleted, Summary: "命令已完成", EvidenceEmptyReason: "输出保存在命令结果中", ArtifactsEmptyReason: "没有声明产物"}
+	samples := []struct {
+		name   string
+		result CommandResult
+		valid  bool
+	}{
+		{"empty", CommandResult{}, true},
+		{"text", CommandResult{Output: "hello", TotalBytes: 5}, true},
+		{"binary", CommandResult{Encoding: "base64", Output: "AP8=", TotalBytes: 2}, true},
+		{"invalid_base64", CommandResult{Encoding: "base64", Output: "%%%", TotalBytes: 2}, false},
+		{"raw_nul", CommandResult{Output: "\x00", TotalBytes: 1}, false},
+		{"unsupported_encoding", CommandResult{Encoding: "hex", Output: "00", TotalBytes: 1}, false},
+		{"wrong_size", CommandResult{Output: "hello", TotalBytes: 6}, false},
+		{"negative_size", CommandResult{TotalBytes: -1}, false},
+		{"incorrect_truncation", CommandResult{Truncated: true}, false},
+		{"nonzero_success", CommandResult{ExitCode: 1}, false},
+	}
+	for _, sample := range samples {
+		t.Run(sample.name, func(t *testing.T) {
+			candidate := base
+			candidate.CommandResult = &sample.result
+			err := ValidateCandidate(candidate)
+			if (err == nil) != sample.valid {
+				t.Fatalf("校验结果=%v valid=%v", err, sample.valid)
+			}
+		})
+	}
+}

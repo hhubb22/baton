@@ -99,6 +99,11 @@ func (s *Store) expireExecution(ctx context.Context, employeeID, taskID string, 
 }
 
 func applyStopReport(ctx context.Context, tx pgx.Tx, in ExecutionReport, head executionHead) error {
+	if in.CommandResult != nil {
+		if _, err := tx.Exec(ctx, `UPDATE tasks SET command_result=$2 WHERE id=$1`, in.TaskID, in.CommandResult); err != nil {
+			return err
+		}
+	}
 	if err := requestStop(ctx, tx, in.ExecutionID, in.StopReason); err != nil {
 		return err
 	}
