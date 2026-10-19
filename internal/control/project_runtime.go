@@ -25,6 +25,12 @@ func (s *Server) onProjectRuntimeRequest(ctx context.Context, connID string, env
 			data, err := s.store.ProjectRuntime(ctx, *env.Source, req)
 			switch {
 			case err == nil:
+				if req.Operation == "preview" {
+					var p projectagent.Preview
+					_ = json.Unmarshal(req.Payload, &p)
+					p.AfterSeq = req.LastSeq
+					s.saveProjectPreview(req.RunID, p)
+				}
 				result.Data, err = protocol.MarshalJSON(data)
 				if err == nil {
 					result.OK, result.Code = true, ""

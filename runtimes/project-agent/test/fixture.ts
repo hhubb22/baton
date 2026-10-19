@@ -66,6 +66,8 @@ export class Backend implements RPC {
     this.calls.push(req.operation);
     if (req.operation === this.failAt) throw new RuntimeError("unavailable");
     switch (req.operation) {
+      case "preview":
+        return {};
       case "bootstrap":
         return structuredClone(this.boot());
       case "read_events": {

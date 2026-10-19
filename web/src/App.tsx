@@ -18,6 +18,7 @@ import type { Employee, Enrollment, NodeList, SavedDefault } from './types.ts'
 import { LoginForm } from './ui/LoginForm.tsx'
 import { NodesPage } from './ui/NodesPage.tsx'
 import { SessionsPage } from './ui/SessionsPage.tsx'
+import { ProjectsPage } from './ui/ProjectsPage.tsx'
 import { TasksPage } from './ui/TasksPage.tsx'
 import { taskURL } from './tasks.ts'
 import { PasswordForm } from './ui/PasswordForm.tsx'
@@ -29,8 +30,13 @@ type Phase =
   | { kind: 'nodes'; employee: Employee; csrf: string }
 
 export default function App() {
-  const [page, setPage] = useState<'nodes' | 'sessions' | 'tasks'>(() => window.location.pathname.startsWith('/tasks') ? 'tasks' : 'nodes')
+  const [page, setPage] = useState<'nodes' | 'sessions' | 'tasks' | 'projects'>(() => routePage())
   const [taskID, setTaskID] = useState(() => window.location.pathname.split('/')[2] ?? '')
+  const [projectID, setProjectID] = useState(() => window.location.pathname.split('/')[2] ?? '')
+  function navigateProject(id: string) {
+    window.history.pushState(null, '', id ? `/projects/${encodeURIComponent(id)}` : '/projects')
+    setProjectID(id); setPage('projects')
+  }
   function navigateTask(id: string) {
     window.history.pushState(null, '', id ? taskURL(id) : '/tasks')
     setTaskID(id); setPage('tasks')
@@ -39,7 +45,7 @@ export default function App() {
     window.history.pushState(null, '', '/'); setPage(next)
   }
   useEffect(() => {
-    const change = () => { setTaskID(window.location.pathname.split('/')[2] ?? ''); setPage(window.location.pathname.startsWith('/tasks') ? 'tasks' : 'nodes') }
+    const change = () => { setTaskID(window.location.pathname.split('/')[2] ?? ''); setProjectID(window.location.pathname.split('/')[2] ?? ''); setPage(routePage()) }
     window.addEventListener('popstate', change)
     return () => window.removeEventListener('popstate', change)
   }, [])
@@ -248,8 +254,8 @@ export default function App() {
       ) : null}
       {phase.kind === 'nodes' ? (
         <>
-        <nav aria-label="页面"><button type="button" onClick={() => navigatePage('nodes')}>节点</button><button type="button" onClick={() => navigatePage('sessions')}>Session</button><button type="button" onClick={() => navigateTask('')}>任务</button></nav>
-        {page === 'tasks' ? <TasksPage key={phase.employee.id} id={taskID} csrf={phase.csrf} employeeID={phase.employee.id} nodes={list} navigate={navigateTask} /> : page === 'sessions' ? <SessionsPage csrf={phase.csrf} nodes={list} employeeID={phase.employee.id} /> : <NodesPage
+        <nav aria-label="页面"><button type="button" onClick={() => navigateProject('')}>Project</button><button type="button" onClick={() => navigatePage('nodes')}>节点</button><button type="button" onClick={() => navigatePage('sessions')}>Session</button><button type="button" onClick={() => navigateTask('')}>任务</button></nav>
+        {page === 'projects' ? <ProjectsPage key={phase.employee.id} id={projectID} csrf={phase.csrf} employeeID={phase.employee.id} navigate={navigateProject} navigateTask={navigateTask} /> : page === 'tasks' ? <TasksPage key={phase.employee.id} id={taskID} csrf={phase.csrf} employeeID={phase.employee.id} nodes={list} navigate={navigateTask} /> : page === 'sessions' ? <SessionsPage csrf={phase.csrf} nodes={list} employeeID={phase.employee.id} /> : <NodesPage
           employee={phase.employee}
           csrf={phase.csrf}
           list={list}
@@ -271,4 +277,8 @@ export default function App() {
       ) : null}
     </main>
   )
+}
+
+function routePage(): 'nodes' | 'tasks' | 'projects' {
+  return window.location.pathname.startsWith('/projects') ? 'projects' : window.location.pathname.startsWith('/tasks') ? 'tasks' : 'nodes'
 }

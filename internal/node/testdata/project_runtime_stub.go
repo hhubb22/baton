@@ -29,13 +29,17 @@ func main() {
 	}
 	if os.Getenv("BATON_TEST_PROJECT_STDIO") == "1" {
 		decoder := json.NewDecoder(os.Stdin)
-		for id, operation := range []string{"", "wrong_type", "bootstrap", "call_tool", "renew", "finish"} {
+		for id, operation := range []string{"", "wrong_type", "bootstrap", "preview", "call_tool", "renew", "finish"} {
 			req := map[string]any{"operation": operation, "run_id": "forged", "lease_epoch": 999, "future_field": true}
 			if operation == "" {
 				delete(req, "operation")
 			}
 			if operation == "wrong_type" {
 				req["operation"] = 42
+			}
+			if operation == "preview" {
+				req["last_seq"] = 3
+				req["payload"] = map[string]any{"text": "临时回复"}
 			}
 			if operation == "call_tool" {
 				req["tool_call_id"] = "call-1"

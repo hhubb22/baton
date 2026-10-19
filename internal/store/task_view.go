@@ -12,6 +12,8 @@ import (
 
 // TaskView 分别提供执行事实与交付事实，不从节点在线状态推断任务结果。
 type TaskView struct {
+	ProjectID            *string `json:"project_id,omitempty"`
+	OriginConversationID *string `json:"origin_conversation_id,omitempty"`
 	task.Record
 	UpdatedAt         time.Time  `json:"updated_at"`
 	DeliveryStatus    string     `json:"delivery_status"`
@@ -19,6 +21,7 @@ type TaskView struct {
 }
 
 type TaskFilter struct {
+	ProjectID    string
 	IncludeShell bool
 	RequestID    string
 	ParentTaskID string
@@ -39,6 +42,18 @@ func (s *Store) ListTaskViews(ctx context.Context, employeeID string, filter Tas
 		return TaskPage{}, err
 	}
 	defer tx.Rollback(ctx)
+	if filter.ProjectID != "" {
+		if _, err := identity.ParseUUID(filter.ProjectID); err != nil {
+			return TaskPage{}, ErrNotVisible
+		}
+		var found bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM projects WHERE employee_id=$1 AND id=$2)`, employeeID, filter.ProjectID).Scan(&found); err != nil {
+			return TaskPage{}, err
+		}
+		if !found {
+			return TaskPage{}, ErrNotVisible
+		}
+	}
 	// 游标与来源任务必须属于当前员工，不能用其他员工的对象探测排序位置。
 	for _, id := range []string{filter.ParentTaskID, filter.Cursor} {
 		if id == "" {
@@ -61,7 +76,8 @@ func (s *Store) ListTaskViews(ctx context.Context, employeeID string, filter Tas
  AND ($3 = '' OR request_id = $3)
  AND ($4 = '' OR parent_task_id = NULLIF($4, '')::uuid)
  AND ($5 = '' OR (created_at, id) < (SELECT created_at, id FROM tasks WHERE employee_id = $1::uuid AND id = NULLIF($5, '')::uuid))
- ORDER BY created_at DESC, id DESC LIMIT $6`, employeeID, filter.IncludeShell || filter.RequestID != "" || filter.ParentTaskID != "", filter.RequestID, filter.ParentTaskID, filter.Cursor, taskListLimit+1)
+ AND ($7 = '' OR project_id = NULLIF($7, '')::uuid)
+ ORDER BY created_at DESC, id DESC LIMIT $6`, employeeID, filter.IncludeShell || filter.RequestID != "" || filter.ParentTaskID != "", filter.RequestID, filter.ParentTaskID, filter.Cursor, taskListLimit+1, filter.ProjectID)
 	if err != nil {
 		return TaskPage{}, err
 	}
@@ -134,7 +150,7 @@ func taskViews(ctx context.Context, tx pgx.Tx, employeeID string, records []task
  CASE WHEN t.parent_task_id IS NOT NULL AND t.source_session_id IS NOT NULL THEN
    COALESCE(cd.status, CASE WHEN t.summary IS NOT NULL OR t.status IN ('completed','failed','cancelled') THEN 'pending' ELSE 'not_ready' END)
  ELSE CASE WHEN t.summary IS NOT NULL OR t.status IN ('completed','failed','cancelled') THEN 'stored' ELSE 'not_ready' END END,
- cd.updated_at
+ cd.updated_at,t.project_id::text,t.origin_conversation_id::text
  FROM tasks t JOIN executions e ON e.task_id = t.id AND e.employee_id = t.employee_id
  LEFT JOIN child_deliveries cd ON cd.child_execution_id = e.id AND cd.employee_id = t.employee_id
  WHERE t.employee_id = $1::uuid AND t.id = ANY($2::uuid[])`, employeeID, ids)
@@ -146,10 +162,12 @@ func taskViews(ctx context.Context, tx pgx.Tx, employeeID string, records []task
 		var id, status string
 		var updated time.Time
 		var deliveryUpdated *time.Time
-		if err := rows.Scan(&id, &updated, &status, &deliveryUpdated); err != nil {
+		var projectID, origin *string
+		if err := rows.Scan(&id, &updated, &status, &deliveryUpdated, &projectID, &origin); err != nil {
 			return nil, err
 		}
 		i := indices[id]
+		views[i].ProjectID, views[i].OriginConversationID = projectID, origin
 		views[i].UpdatedAt, views[i].DeliveryStatus, views[i].DeliveryUpdatedAt = updated, status, deliveryUpdated
 	}
 	return views, rows.Err()

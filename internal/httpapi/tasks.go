@@ -112,7 +112,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	for key, values := range query {
-		if (key != "include_shell" && key != "request_id" && key != "parent_task_id" && key != "cursor") || len(values) != 1 || values[0] == "" {
+		if (key != "project_id" && key != "include_shell" && key != "request_id" && key != "parent_task_id" && key != "cursor") || len(values) != 1 || values[0] == "" {
 			s.writeError(w, r, http.StatusBadRequest, "invalid_request", "任务查询参数无效")
 			return
 		}
@@ -131,7 +131,7 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	page, err := s.store.ListTaskViews(r.Context(), sess.Employee.ID, store.TaskFilter{IncludeShell: query.Get("include_shell") == "true", RequestID: query.Get("request_id"), ParentTaskID: query.Get("parent_task_id"), Cursor: query.Get("cursor")})
+	page, err := s.store.ListTaskViews(r.Context(), sess.Employee.ID, store.TaskFilter{ProjectID: query.Get("project_id"), IncludeShell: query.Get("include_shell") == "true", RequestID: query.Get("request_id"), ParentTaskID: query.Get("parent_task_id"), Cursor: query.Get("cursor")})
 	if err != nil {
 		s.writeTaskError(w, r, sess.Employee.ID, err)
 		return

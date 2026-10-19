@@ -14,21 +14,23 @@ import (
 	"baton/internal/gateway"
 	"baton/internal/identity"
 	"baton/internal/node"
+	"baton/internal/projectagent"
 	"baton/internal/protocol"
 	"baton/internal/store"
 )
 
 type Server struct {
-	store          *store.Store
-	signer         node.Signer
-	public         ed25519.PublicKey
-	log            *slog.Logger
-	sender         gateway.Sender
-	mu             sync.Mutex
-	pending        map[string]chan prepareNotice
-	fileWait       map[string]chan fileNotice
-	sessionWaiters map[string]chan sessionNotice
-	budget         *protocol.Budget
+	projectPreviews map[string]projectagent.Preview
+	store           *store.Store
+	signer          node.Signer
+	public          ed25519.PublicKey
+	log             *slog.Logger
+	sender          gateway.Sender
+	mu              sync.Mutex
+	pending         map[string]chan prepareNotice
+	fileWait        map[string]chan fileNotice
+	sessionWaiters  map[string]chan sessionNotice
+	budget          *protocol.Budget
 }
 
 func New(st *store.Store, signer node.Signer, log *slog.Logger, budgets ...*protocol.Budget) (*Server, error) {

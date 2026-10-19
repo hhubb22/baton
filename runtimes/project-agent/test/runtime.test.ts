@@ -303,3 +303,22 @@ test("已保存的提示词快照跨标题变更保持稳定，未知版本拒�
   boot.prompt_version = "99";
   assert.throws(() => modelMessages(boot, []));
 });
+
+test("模型文本先形成临时预览，完整回复保存后才进入历史", async () => {
+  const b = new Backend();
+  const previews: any[] = [];
+  const call = b.call.bind(b);
+  b.call = async (req: any) => {
+    if (req.operation === 'preview') {
+      previews.push(structuredClone(req));
+      assert.equal(b.events.at(-1)?.kind, 'input');
+    }
+    return call(req);
+  };
+  await setup(b, [() => fauxAssistantMessage('临时文本与完整回复')]).runtime.start();
+  assert.ok(previews.some((p) => p.payload.text.length > 0));
+  assert.equal(previews[0].last_seq, 1);
+  assert.equal(b.events.length, 2);
+  assert.equal(b.events[1].kind, 'assistant');
+  assert.equal(b.effects, 0);
+});

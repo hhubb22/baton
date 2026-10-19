@@ -2,7 +2,7 @@ import { request } from './api.ts'
 
 export type ResultRef = { node_id?: string; storage_ref?: string; resource_id: string; access_status: string; note?: string }
 export type TaskRecord = {
-  task_id: string; request_id: string; description: string; target_node_id: string; agent_type: string
+  project_id?: string; origin_conversation_id?: string; task_id: string; request_id: string; description: string; target_node_id: string; agent_type: string
   status: string; version: number; accepted_at: string; updated_at?: string; queue_expires_at: string; execution_timeout_seconds: number
   delivery_status?: string; delivery_updated_at?: string; source_session_id?: string | null; parent_task_id?: string | null
   target_session_id?: string | null; rerun_of_task_id?: string; working_directory?: string | null; device_names: string[]

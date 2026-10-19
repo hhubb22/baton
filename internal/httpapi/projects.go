@@ -27,8 +27,8 @@ func (s *Server) routeProject(w http.ResponseWriter, r *http.Request) {
 	case len(parts) == 1:
 		allowed = r.Method == http.MethodGet || r.Method == http.MethodPatch
 	case len(parts) == 2 && (parts[1] == "messages" || parts[1] == "retry" || parts[1] == "stop"):
-		allowed = r.Method == http.MethodPost
-	case len(parts) == 2 && (parts[1] == "events" || parts[1] == "memory"):
+		allowed = r.Method == http.MethodPost || (parts[1] == "messages" && r.Method == http.MethodGet)
+	case len(parts) == 2 && (parts[1] == "status" || parts[1] == "events" || parts[1] == "memory"):
 		allowed = r.Method == http.MethodGet
 	case len(parts) == 3 && parts[1] == "memory":
 		allowed = r.Method == http.MethodPut || r.Method == http.MethodGet
@@ -147,6 +147,40 @@ func (s *Server) routeProject(w http.ResponseWriter, r *http.Request) {
 		s.writeJSON(w, http.StatusOK, struct {
 			OK bool `json:"ok"`
 		}{true})
+	case parts[1] == "status":
+		if s.rejectQuery(w, r) {
+			return
+		}
+		view, err := s.store.ProjectStatusView(r.Context(), employeeID, parts[0])
+		if err != nil {
+			s.writeProjectError(w, r, err)
+			return
+		}
+		if view.Run != nil && view.Run.Effective && s.projectPreviews != nil {
+			view.Preview = s.projectPreviews.ProjectPreview(view.Run.ID, view.LastSeq)
+		}
+		s.writeJSON(w, 200, view)
+	case parts[1] == "messages" && r.Method == http.MethodGet:
+		q, ok := s.projectQuery(w, r, "client_message_id", "after_id", "limit")
+		if !ok {
+			return
+		}
+		after, err := projectQueryInt(q, "after_id", 0, 0, 1<<63-1)
+		if err != nil {
+			s.writeProjectError(w, r, err)
+			return
+		}
+		limit, err := projectQueryInt(q, "limit", 50, 1, 100)
+		if err != nil {
+			s.writeProjectError(w, r, err)
+			return
+		}
+		page, err := s.store.ProjectMessages(r.Context(), employeeID, parts[0], q.Get("client_message_id"), after, int(limit))
+		if err != nil {
+			s.writeProjectError(w, r, err)
+			return
+		}
+		s.writeJSON(w, 200, page)
 	case parts[1] == "messages":
 		var in projectagent.MessageInput
 		if !s.readJSONLimit(w, r, &in, maxProjectJSONBytes) {

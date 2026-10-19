@@ -96,7 +96,7 @@ func TestProjectAPIIdentitySecurityAndMemory(t *testing.T) {
 	if changed.ID != p.ID || changed.Agent.ID != p.Agent.ID || changed.Conversation.ID != p.Conversation.ID || changed.Title != "新项目名" || changed.Version != 2 || changed.Agent.Model != "chosen-model" {
 		t.Fatalf("修改结果: %+v", changed)
 	}
-	for _, path := range []string{"", "/events", "/memory"} {
+	for _, path := range []string{"", "/events", "/memory", "/status", "/messages"} {
 		if status, _ := projectRequest(t, bob, "GET", projectURL+path, bCSRF, nil); status != 404 {
 			t.Fatalf("跨员工读取 %s: %d", path, status)
 		}
@@ -107,6 +107,17 @@ func TestProjectAPIIdentitySecurityAndMemory(t *testing.T) {
 	status, body = projectRequest(t, bob, "GET", base, bCSRF, nil)
 	if status != 200 || !strings.Contains(body, `"projects":[]`) {
 		t.Fatalf("项目列表泄漏: %s", body)
+	}
+	for _, endpoint := range []string{"/status", "/messages"} {
+		if status, _ := projectRequest(t, anonymous, "GET", projectURL+endpoint, "", nil); status != 401 {
+			t.Fatalf("匿名查询 %s: %d", endpoint, status)
+		}
+		if status, _ := projectRequest(t, alice, "GET", projectURL+endpoint+"?employee_id=other", aCSRF, nil); status != 400 {
+			t.Fatalf("非法查询 %s: %d", endpoint, status)
+		}
+		if status, _ := projectRequest(t, alice, "PATCH", projectURL+endpoint, aCSRF, map[string]any{}); status != 405 {
+			t.Fatalf("写只读接口 %s: %d", endpoint, status)
+		}
 	}
 	const entry = "10000000-0000-4000-8000-000000000001"
 	memoryURL := projectURL + "/memory/" + entry
