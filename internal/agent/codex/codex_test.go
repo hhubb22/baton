@@ -60,12 +60,12 @@ func TestEnvironmentExcludesDaemonCredentials(t *testing.T) {
 
 func pinnedSchema(t *testing.T, definition string) *jsonschema.Schema {
 	t.Helper()
-	raw, err := os.ReadFile("testdata/schema-0.162.1.json")
+	raw, err := os.ReadFile("testdata/schema-" + Version + ".json")
 	if err != nil {
 		t.Fatal(err)
 	}
 	compiler := jsonschema.NewCompiler()
-	const source = "https://baton.invalid/codex-0.162.1.json"
+	const source = "https://baton.invalid/codex-" + Version + ".json"
 	if err := compiler.AddResource(source, bytes.NewReader(raw)); err != nil {
 		t.Fatal(err)
 	}

@@ -24,7 +24,7 @@ func (a *Adapter) ReadBrowserHistory(ctx context.Context, cursor string, limit i
 		}
 		return protocol.SessionHistoryPage{}, agent.ErrHistoryUnread
 	}
-	if json.Unmarshal(raw, &saved) != nil || saved.Version != Version || saved.SessionID != a.config.SessionID || saved.Directory != a.config.Directory || saved.ThreadID == "" {
+	if json.Unmarshal(raw, &saved) != nil || !supportedVersion(saved.Version) || saved.SessionID != a.config.SessionID || saved.Directory != a.config.Directory || saved.ThreadID == "" {
 		return protocol.SessionHistoryPage{}, agent.ErrHistoryMissing
 	}
 	if saved.HistoryPath != "" && saved.HistoryRoot != "" {
@@ -121,7 +121,7 @@ func readHistoryFile(ctx context.Context, config Config, saved State, cursor str
 				Version string `json:"cli_version"`
 			}
 		}
-		if json.Unmarshal(raw, &header) != nil || header.Type != "session_meta" || header.Payload.ID != saved.ThreadID || header.Payload.Cwd != config.Directory || header.Payload.Version != Version {
+		if json.Unmarshal(raw, &header) != nil || header.Type != "session_meta" || header.Payload.ID != saved.ThreadID || header.Payload.Cwd != config.Directory || header.Payload.Version != saved.Version {
 			return agent.ErrHistoryMissing
 		}
 		return nil

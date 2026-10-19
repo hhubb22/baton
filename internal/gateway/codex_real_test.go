@@ -128,7 +128,7 @@ func TestRealCodex(t *testing.T) {
 			case "deliver_active":
 				realCodexDeliverActive(t, ctx, a, work, results)
 			case "interrupt_mid_tool":
-				realCodexInterruptTool(t, ctx, a, work, results)
+				realCodexInterruptTool(t, ctx, a, work, recording, results)
 			case "interrupt_before_turn_started":
 				payload, _ := json.Marshal(map[string]any{"description": "Use no tools. Return a completed result with summary early-abort.", "generation": 1})
 				if _, err := a.SubmitInput(ctx, string(payload)); err != nil {
@@ -250,12 +250,14 @@ func realCodexRestore(t *testing.T, ctx context.Context, a *codex.Adapter, c cod
 	results["历史"] = "支持"
 }
 
-func realCodexInterruptTool(t *testing.T, ctx context.Context, a *codex.Adapter, work string, results map[string]string) {
+func realCodexInterruptTool(t *testing.T, ctx context.Context, a *codex.Adapter, work string, recording *realRecording, results map[string]string) {
 	t.Helper()
 	if err := a.StartTask(ctx, "real-interrupt", `Only work here. Run a shell command that creates interrupt-started.txt then sleeps for 90 seconds. Do not complete before the command ends.`); err != nil {
 		t.Fatal(err)
 	}
 	waitRealFile(t, ctx, filepath.Join(work, "interrupt-started.txt"))
+	state := a.Snapshot()
+	recording.waitCodexCommandStarted(t, ctx, state.ThreadID, state.TurnID)
 	stopped, known, err := a.Abort()
 	if err != nil || stopped || known {
 		results["中止"] = "不支持"

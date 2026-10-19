@@ -19,17 +19,23 @@ import (
 )
 
 func TestBrowserHistoryReadableAfterExit(t *testing.T) {
+	for _, version := range []string{Version, "0.162.1"} {
+		t.Run(version, func(t *testing.T) { testBrowserHistoryVersion(t, version) })
+	}
+}
+
+func testBrowserHistoryVersion(t *testing.T, version string) {
 	dir, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	config := Config{Directory: dir, SessionID: "history-unit", StatePath: filepath.Join(dir, "state.json")}
-	state := State{Version: Version, SessionID: config.SessionID, ThreadID: "thread-1", TurnID: "turn-1", Directory: dir, HistoryRoot: dir, HistoryPath: filepath.Join(dir, "history.jsonl")}
+	state := State{Version: version, SessionID: config.SessionID, ThreadID: "thread-1", TurnID: "turn-1", Directory: dir, HistoryRoot: dir, HistoryPath: filepath.Join(dir, "history.jsonl")}
 	raw, _ := json.Marshal(state)
 	if err := privatefile.WriteFile(config.StatePath, raw); err != nil {
 		t.Fatal(err)
 	}
-	header, _ := json.Marshal(map[string]any{"type": "session_meta", "payload": map[string]string{"id": state.ThreadID, "cwd": dir, "cli_version": Version}})
+	header, _ := json.Marshal(map[string]any{"type": "session_meta", "payload": map[string]string{"id": state.ThreadID, "cwd": dir, "cli_version": version}})
 	body, _ := json.Marshal(map[string]any{"type": "response_item", "payload": map[string]string{"text": strings.Repeat("中文", 10000)}})
 	if err := os.WriteFile(state.HistoryPath, append(append(header, '\n'), append(body, '\n')...), 0600); err != nil {
 		t.Fatal(err)
@@ -39,6 +45,17 @@ func TestBrowserHistoryReadableAfterExit(t *testing.T) {
 	page, err := a.ReadBrowserHistory(context.Background(), "", 16)
 	if err != nil || !protocol.ValidHistoryPage(&page) || len(page.Entries) != 2 || !page.Entries[1].Truncated || !page.Gap {
 		t.Fatalf("退出后受限历史: %+v %v", page, err)
+	}
+	other := Version
+	if version == Version {
+		other = "0.162.1"
+	}
+	mismatch, _ := json.Marshal(map[string]any{"type": "session_meta", "payload": map[string]string{"id": state.ThreadID, "cwd": dir, "cli_version": other}})
+	if err := os.WriteFile(state.HistoryPath, append(mismatch, '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.ReadBrowserHistory(context.Background(), "", 16); !errors.Is(err, agent.ErrHistoryMissing) {
+		t.Fatal("原生历史版本与映射不一致却被接受", err)
 	}
 	if err := os.Remove(state.HistoryPath); err != nil {
 		t.Fatal(err)

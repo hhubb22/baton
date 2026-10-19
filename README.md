@@ -2,7 +2,7 @@
 
 员工使用部署管理员分配的本地账号登录 Coordinator，退出，查询本人身份，领取一次性节点注册凭据，设置默认设备，吊销本人节点的连接凭据，并提交任务。初始口令只能使用到员工完成更换为止。`batond register` 用这张凭据注册节点，把身份保存在本机。`batond run` 用这份身份主动连接 Coordinator，断线后重连，并在同步完成前不会显示为可执行。吊销生效后，同一连接凭据不能再接入。任务被接受后，Coordinator 把准备命令送到节点；节点先把执行映射写入本地账本，再绑定一个独立的 Session Worker。
 
-本目录目前包含这条路径的构建、迁移、HTTP 接口、Coordinator、batond、Session Worker、Agent 本地 CLI、受限文件浏览、员工 Web UI 和测试。准备阶段不启动 Agent。启动许可通过后，Worker 按 agent_type 选择 Pi 1.3.0 RPC 或 Codex CLI 0.162.1 thread/turn 适配器，任务输入只提交一次；结构化结果在中心保存之后才算交付。两者共用 internal/agent.Adapter 与 Worker 生命周期，测试执行器仍供故障注入使用。其他真实 Agent 适配和管理员网页不在这里；支持范围以明确版本和本机实测报告为准，不能用回放通过代替。
+本目录目前包含这条路径的构建、迁移、HTTP 接口、Coordinator、batond、Session Worker、Agent 本地 CLI、受限文件浏览、员工 Web UI 和测试。准备阶段不启动 Agent。启动许可通过后，Worker 按 agent_type 选择 Pi 1.3.0 RPC 或 Codex CLI 0.163.0 thread/turn 适配器，任务输入只提交一次；结构化结果在中心保存之后才算交付。两者共用 internal/agent.Adapter 与 Worker 生命周期，测试执行器仍供故障注入使用。其他真实 Agent 适配和管理员网页不在这里；支持范围以明确版本和本机实测报告为准，不能用回放通过代替。
 
 中心事务同时锁定任务与执行记录时，统一先锁 `tasks`，再锁 `executions`。准备成功或失败落库、启动许可、执行报告、取消和到期处理均按此顺序串行，避免准备落库与启动许可相互等待而死锁。
 
@@ -31,7 +31,7 @@ PS-156 提供输入领取、历史分页和 60 秒租约。batond 每 20 秒续�
 
 ### Codex thread/turn
 
-任务指定 `agent_type: "codex"`，推荐显式指定节点上已存在的绝对 `working_directory`；省略时使用该 Session 的隔离 workspace。节点安装 **Codex CLI 0.162.1**，认证由节点管理员在 Agent 环境内配置，Baton 不替用户登录。运行 batond 前可设置：
+任务指定 `agent_type: "codex"`，推荐显式指定节点上已存在的绝对 `working_directory`；省略时使用该 Session 的隔离 workspace。节点安装 **Codex CLI 0.163.0**，认证由节点管理员在 Agent 环境内配置，Baton 不替用户登录。运行 batond 前可设置：
 
 | 变量 | 作用 |
 | --- | --- |
@@ -45,6 +45,8 @@ Session 映射 thread，执行输入映射 turn；活动子结果输入用 turn/
 
 ### Codex 验证边界与真实任务入口
 
+当前适配基线为 Codex 0.163.0，官方 Schema 已更新；0.162.1 的已有录制与历史映射继续按原版本校验。PS-181 用本机客户端补录工具执行中的中止，真实驱动先核对工具开始帧，再发中止；两层回放分别门控工具开始、ACK 与停止事实。
+
 Codex 通信使用 jsonrpc2 v0.2.3 的连接关闭修复；回归固定缓冲响应与关闭并发的顺序，并检查并发关闭释放待决调用。录制派生同时覆盖响应后立即退出和响应消费后退出，Worker 保持待核实、原任务不重发（PS-180）。
 
 CI 默认运行固定 Schema、录制转录回放、Pi/Codex 共用 Worker 回归和 race。[Agent 转录回放工具](tools/agent-replay/README.md) 提供 NDJSON 读写、严格出站比较、跨进程捕获、历史写入、门控和派生变体。Pi 的适配器层回放 PS-175 的全部 12 份真实转录，Worker 层覆盖适用场景与故障变体；Codex 两层回放已提交的 11 份真实转录。旧假 Agent 与人工样本已删除。来源、适用范围和旧覆盖点对应表见 [Pi 场景说明](internal/agent/pi/testdata/replay/README.md) 与 [Codex 场景说明](internal/agent/codex/testdata/replay/README.md)；协议分帧和边界条件保留单元测试。录制器支持字节透传、历史追加采集和退出/信号记录，规范化工具支持路径与 ID 替换、会话筛选和残留拒绝；真实测试按场景拆分，设置 `BATON_RECORD_DIR` 可录制各场景。固定版本无模型握手可显式运行：
@@ -53,12 +55,12 @@ CI 默认运行固定 Schema、录制转录回放、Pi/Codex 共用 Worker 回�
 BATON_CODEX_PROBE=1 go test -v ./internal/agent/codex -run TestCodexInitializeWithoutModel
 ```
 
-用户已在 macOS、Codex 0.162.1 / gpt-6-luna 上报告：启动、输入、结构化结果、turn 完成、中止、恢复、历史支持；委托链路成功，但子任务违反“不要再委托”而使原断言失败，不能将委托整项标为通过。真实测试保留这些能力断言，并将场景分成独立会话；新的真实模型结论以 PS-175 的本机录制为准。
+用户已在 macOS、Codex 0.162.1 / gpt-6-luna 上报告：启动、输入、结构化结果、turn 完成、中止、恢复、历史支持；委托链路成功，但子任务违反“不要再委托”而使原断言失败，不能将委托整项标为通过。真实测试保留这些能力断言，并将场景分成独立会话；首批录制见 PS-175；PS-181 在 macOS arm64、Codex 0.163.0 / gpt-6.1-sol 上重跑全部 11 个适用真实场景通过，包含父子委托，自由文本按约束跳过。
 
 真实入口默认跳过，只使用临时工作目录和独立、显式认证的临时 CODEX_HOME，不复制常用 ~/.codex 认证，不打印凭据。委托使用 BATON_TEST_DATABASE_URL 的临时 schema（PostgreSQL 17，禁止生产库），输出版本、平台、模型及逐项“支持/不支持/未验证”。Codex 和 Pi 的真实测试与录制默认使用 `gpt-6.1-sol`（Pi 为 `openai/gpt-6.1-sol`），Cursor、Kiro 仍使用账号当前可用的最便宜模型。这些命令在本机执行：
 
 ```sh
-npm install -g @openai/codex@0.162.1
+npm install -g @openai/codex@0.163.0
 bash .cursor/start.sh
 # 按本机测试库配置导出 BATON_TEST_DATABASE_URL。
 export BATON_REAL_CODEX_HOME="$(mktemp -d "${TMPDIR:-/tmp}/baton-codex-real.XXXXXX")"
@@ -201,14 +203,14 @@ BATON_REAL_PI=1 go test -v -count=1 -timeout=60m ./internal/gateway -run '^TestR
 
 ### 本机录制与规范化
 
-PS-175 在有模型凭据的 macOS 上执行。在仓库根目录打开 Bash，准备固定版本 Pi 1.3.0、Codex 0.162.1、Node.js 和测试数据库。Codex 和 Pi 默认使用 `gpt-6.1-sol`（Pi 为 `openai/gpt-6.1-sol`），Cursor、Kiro 仍使用账号当前可用的最便宜模型。`provider_error` 故意使用不存在的模型名，不会升级到其他模型。
+PS-175 的首轮录制使用 Codex 0.162.1，PS-181 升级适配器并使用本机 0.163.0 补录。在仓库根目录打开 Bash，准备 Pi 1.3.0、Codex 0.163.0、Node.js 和测试数据库。Codex 和 Pi 默认使用 `gpt-6.1-sol`（Pi 为 `openai/gpt-6.1-sol`），Cursor、Kiro 仍使用账号当前可用的最便宜模型。`provider_error` 故意使用不存在的模型名，不会升级到其他模型。
 
 ```sh
 bash
 source ~/.baton-env.sh
 bash .cursor/start.sh
 : "${BATON_TEST_DATABASE_URL:?需要允许创建临时 schema 的测试库}"
-npm install -g @earendil-works/pi-coding-agent@1.3.0 @openai/codex@0.162.1
+npm install -g @earendil-works/pi-coding-agent@1.3.0 @openai/codex@0.163.0
 
 # 从凭据管理器取得所选 provider 的 key，用静默输入避免写进命令历史。
 read -r -s -p 'OpenAI API key: ' OPENAI_API_KEY
@@ -613,8 +615,8 @@ Session 页面提供节点原生历史分页和断流补取。历史页只经临
 
 `web/e2e/history.spec.ts` 使用独立数据库 schema、Coordinator、节点和 Worker 验证分页、断流、文件删除、离线及中心隐私。设置 `BATON_REAL_PI_BROWSER=1` 后使用真实 Pi；未设置时使用实际子进程协议执行器，不能据此声称模型任务通过。
 
-固定 Codex 0.162.1 的原生文件探针使用临时 HOME，不读账号凭据、不发模型输入；创建原生历史后追加大历史样本，验证退出后读取、分页与删除：
+当前 Codex 0.163.0 的原生文件探针使用临时 HOME，不读账号凭据、不发模型输入；创建原生历史后追加大历史样本，验证退出后读取、分页与删除：
 
 ```sh
-BATON_CODEX_HISTORY_PROBE=1 BATON_CODEX_BINARY=/path/to/codex-0.162.1 go test -v -count=1 ./internal/agent/codex -run '^TestCodexHistoryNoModelProbe$'
+BATON_CODEX_HISTORY_PROBE=1 BATON_CODEX_BINARY=/path/to/codex-0.163.0 go test -v -count=1 ./internal/agent/codex -run '^TestCodexHistoryNoModelProbe$'
 ```
