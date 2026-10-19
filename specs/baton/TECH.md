@@ -440,6 +440,14 @@ Agent 协议帧与传输消息使用不同上限。Pi 可能一次返回大量 g
 
 URL 均相对于 /api/v1。错误对象包含 code、message、request_id、可选 task_id 和 details，details 不回传凭据或任意完整工具输出。错误 code 区分 PRODUCT R-13 的类别；查询状态的客户端失败不能隐式调用 rerun。
 
+任务 Web 查询（PS-126）：`GET /tasks` 支持 `include_shell=true`、`request_id`、`parent_task_id` 和 `cursor`；未知、重复或空参数被拒绝。按创建时间及 ID 倒序，每页最多 100 条，响应包含 `tasks` 与可选 `next_cursor`。shell 筛选先于分页；按请求标识或来源任务查询包含命令任务。请求查询严格限定员工，游标和来源任务也需归属本人。
+
+Web 任务视图在同一只读快照中读取任务、结果引用、`updated_at` 及 `delivery_status`。直接任务的交付显示 `not_ready` 或 `stored`；子委托采用 `child_deliveries` 的 `pending/available/delivered/uncertain/source_stopped`，没有交付记录时根据已有结果显示等待状态。交付待核实不改变执行结论。
+
+任务页面每 5 秒刷新可见页面；列表和子委托按页替换，查询错误保留最近读取的记录。浏览器标签页按员工保存未确认操作的请求标识与原任务 ID，任务正文只在内存中保留。重发遭遇登录失效仍保留原标识。核实表单固定打开时的版本，409 后关闭旧表单并读取最新记录。`root:` 证据及产物通过现有文件接口预览，正文按文本渲染，其他存储引用只展示字段。
+
+`TaskComposer`、`TasksPage`、`TaskActions` 与 `TaskReferences` 提供共用的任务页面；Session 页面复用任务提交表单。Agent Inbox 后续在同一详情页补充相关事项，Project Agent 发起来源随 PA-W07 的真实字段接入；本工单不产生这些字段或运行逻辑。
+
 历史、实时输出和当前任务补充输入使用临时节点 RPC，不进入中心持久化业务 outbox。需要中心留下审计时只保存操作 ID、对象、时间和交付情况；初始任务说明与授权变化按 R-27 保存。临时 RPC 失败后，通过相同 operation_id 向 Worker 查询，不能盲目重发输入。
 
 ### Web UI

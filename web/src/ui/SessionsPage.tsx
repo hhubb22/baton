@@ -1,7 +1,8 @@
+import { TaskComposer } from './TaskComposer.tsx'
 import { readPendingInput, savePendingInput, type PendingInput } from '../pending-input.ts'
 import { appendOutput, orderedSessions, sessionDepth } from '../sessions-model.ts'
 import { useEffect, useRef, useState } from 'react'
-import { ApiError, messageOf, request } from '../api.ts'
+import { messageOf, request } from '../api.ts'
 import type { NodeList } from '../types.ts'
 
 export type WorkSession = {
@@ -24,7 +25,6 @@ export function SessionsPage({ csrf, nodes, employeeID }: { csrf: string; nodes:
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const [text, setText] = useState('')
-  const [pendingTask, setPendingTask] = useState<Record<string, unknown> | null>(null)
   const [pending, updatePending] = useState<PendingInput | null>(() => readPendingInput(employeeID))
   function setPending(value: PendingInput | null) {
     savePendingInput(employeeID, value)
@@ -118,24 +118,6 @@ export function SessionsPage({ csrf, nodes, employeeID }: { csrf: string; nodes:
     } catch (e) { setError(messageOf(e)) }
     finally { setBusy(false) }
   }
-  async function start(form: HTMLFormElement) {
-    const data = new FormData(form)
-    const input = pendingTask ?? {
-      request_id: crypto.randomUUID(), target_node_id: data.get('node'), agent_type: data.get('agent'),
-      working_directory: data.get('directory') || null, description: data.get('description'),
-      target_session_id: data.get('session') || null,
-    }
-    setPendingTask(input); setBusy(true); setError('')
-    try {
-      const task = await request<{ task_id: string }>('/api/v1/tasks', { method: 'POST', csrf, body: input })
-      setPendingTask(null)
-      setNotice(`任务已接受：${task.task_id}。节点建立 Session 后显示。`)
-    } catch (e) {
-      if (e instanceof ApiError && e.status >= 400 && e.status < 500) setPendingTask(null)
-      setError(`${messageOf(e)}。重试时继续查询同一个任务请求。`)
-    }
-    finally { setBusy(false) }
-  }
   const item = sessions.find((s) => s.session_id === selected)
   const node = nodes?.nodes.find((n) => n.id === item?.node_id)
   return <section aria-label="Session" className="sessions">
@@ -144,13 +126,7 @@ export function SessionsPage({ csrf, nodes, employeeID }: { csrf: string; nodes:
     {error && <p role="alert" className="error">{error}</p>}
     {notice && <p role="status">{notice}</p>}
     {pending && <><p>待确认操作：{pending.id} · Session {pending.session}</p><button type="button" disabled={busy} onClick={() => void queryInput()}>查询输入结果</button></>}
-    <details><summary>启动任务</summary><form onSubmit={(e) => { e.preventDefault(); void start(e.currentTarget) }}>
-      <label>节点<select name="node" required>{nodes?.nodes.filter((n) => n.executable).map((n) => <option value={n.id} key={n.id}>{n.display_name}</option>)}</select></label>
-      <label>Agent<select name="agent"><option value="pi">Pi</option><option value="codex">Codex</option></select></label>
-      <label>已有 Session<select name="session"><option value="">新建 Session</option>{sessions.filter((s) => s.status === 'idle' && !s.busy).map((s) => <option key={s.session_id} value={s.session_id}>{s.session_id}</option>)}</select></label>
-      <label>工作目录<input name="directory" /></label><label>任务说明<textarea name="description" required maxLength={16000} /></label>
-      <button disabled={busy || !csrf}>{pendingTask ? '重试原任务请求' : '提交任务'}</button>
-    </form></details>
+    <details><summary>启动任务</summary><TaskComposer csrf={csrf} employeeID={employeeID} nodes={nodes} sessions={sessions} onAccepted={(task) => setNotice(`任务已接受：${task.task_id}。节点建立 Session 后显示。`)} /></details>
     <div className="session-layout"><div aria-label="Session 树">
       {nodes?.nodes.map((n) => <section key={n.id}><h3>{n.display_name} · {n.online ? '在线' : '离线'}</h3>
         {orderedSessions(sessions, n.id).map((s) => <div key={s.session_id} style={{ paddingLeft: `${sessionDepth(s, sessions) * 16}px` }}>
@@ -172,6 +148,6 @@ export function SessionsPage({ csrf, nodes, employeeID }: { csrf: string; nodes:
       </>}
     </div></div>
     <h3>任务委托</h3>
-    {tasks.filter((t) => t.source_session_id).map((t) => <p key={t.task_id}>{sessions.find((s) => s.session_id === t.source_session_id)?.node_id === t.target_node_id ? '同一节点委托' : '跨节点委托'}：{t.source_session_id} → {t.target_session_id ?? '等待目标 Session'} · 任务 {t.task_id} · {t.status}</p>)}
+    {tasks.filter((t) => t.source_session_id).map((t) => <p key={t.task_id}>{sessions.find((s) => s.session_id === t.source_session_id)?.node_id === t.target_node_id ? '同一节点委托' : '跨节点委托'}：{t.source_session_id} → {t.target_session_id ?? '等待目标 Session'} · 任务 <a href={`/tasks/${t.task_id}`}>{t.task_id}</a> · {t.status}</p>)}
   </section>
 }
