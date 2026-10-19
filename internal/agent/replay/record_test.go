@@ -184,18 +184,35 @@ func TestRecordHistoryBeforeStdout(t *testing.T) {
 	c := recordConfig(t)
 	history := t.TempDir()
 	input, writer := io.Pipe()
+	defer writer.Close()
 	out := &observedWriter{ready: make(chan struct{})}
 	var observationErr error
+	var observations []string
+	t.Cleanup(func() {
+		out.mu.Lock()
+		defer out.mu.Unlock()
+		if t.Failed() {
+			t.Logf("observe 状态: %v", observations)
+			data, err := os.ReadFile(filepath.Join(c.RawDir, "simple.raw.ndjson"))
+			t.Logf("实际条目序列: %s (read_error=%v)", data, err)
+		}
+	})
 	out.observe = func(p []byte) {
 		file, err := os.Open(filepath.Join(c.RawDir, "simple.raw.ndjson"))
 		if err != nil {
+			observations = append(observations, fmt.Sprintf("stdout=%q open_error=%v", p, err))
 			observationErr = err
 			return
 		}
 		raw, err := ReadRaw(file)
 		file.Close()
+		observations = append(observations, fmt.Sprintf("stdout=%q entries=%+v read_error=%v", p, raw.Entries, err))
 		if err != nil {
 			observationErr = err
+			return
+		}
+		if len(raw.Entries) == 0 {
+			observationErr = fmt.Errorf("转发 stdout 前没有录制条目")
 			return
 		}
 		last := raw.Entries[len(raw.Entries)-1]
@@ -216,7 +233,10 @@ func TestRecordHistoryBeforeStdout(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	writer.Write([]byte("x"))
+	// 完整 stdin 帧在转发前已记录，关闭管道不会在 observe 期间追加尾帧。
+	if _, err := writer.Write([]byte("x\n")); err != nil {
+		t.Fatal(err)
+	}
 	writer.Close()
 	if err := <-done; err != nil {
 		t.Fatal(err)
