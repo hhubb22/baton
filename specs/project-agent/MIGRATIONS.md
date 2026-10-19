@@ -2,22 +2,22 @@
 
 Status: approved
 Owner: Asa
-Date: 2026-10-18
+Date: 2026-10-19
 Baseline: `hhubb22/baton@6da5ebef0d4d129fad4776de3dafd8b2e681f958`
-Approval: 2026-10-18 用户确认，合并进 main
+Approval: 2026-10-18 用户确认；2026-10-19 用户确认输入队列表及消息入库前移到 0016
 Basis: [TECH.md](TECH.md) 第 3 节；[Baton TECH](../baton/TECH.md)「中心数据」
 
 ## 编号
 
-main 上已合并到 `0014_required_artifacts.sql`。活动 PR #21（Codex）和 #22（Pi）都没有新增迁移。本方案使用三个编号：
+实施基线 `88e2f00` 已包含 `0015_equal_nodes.sql` 和 `0019_plane_writeback.sql`。0016、0017 留给 Project Agent，0018 留给 Inbox。迁移按未执行的文件逐个应用，可以在已应用 0019 的库上补入 0016。
 
 | 文件 | 所属工作 | 内容 |
 |---|---|---|
 | `0015_equal_nodes.sql` | PA-W01（PS-153） | 去掉节点角色，默认 PC 改为默认设备，新增节点能力报告 |
-| `0016_projects.sql` | PA-W03 | Project、Project Agent、主对话、对话事件、项目记忆 |
-| `0017_project_agent_runs.sql` | PA-W04 | 输入队列、运行记录、`tasks` 的来源列 |
+| `0016_projects.sql` | PA-W03（PS-155） | Project、Project Agent、主对话、对话事件、项目记忆、输入队列及用户消息入库 |
+| `0017_project_agent_runs.sql` | PA-W04（PS-156） | 运行记录、`tasks` 的来源列 |
 
-派发 PA-W01 时一次登记 0015～0017。如果届时其他工作已经占用了其中的编号，三个编号整体顺延。已合并的迁移不修改。
+已合并的迁移不修改。PA-W04 负责输入领取、被动通知、放置与租约，复用 0016 的输入队列表。
 
 迁移只向前执行。Baton 只有一个活动的 Coordinator，升级时停止旧 Coordinator、执行迁移、启动新 Coordinator，不存在新旧 Coordinator 同时写库的阶段，所以不需要先扩展再收缩的两步迁移。batond 不访问数据库，旧版 batond 在升级期间不受迁移影响。
 
@@ -75,8 +75,13 @@ CREATE TABLE node_runtime_reports (
 | `conversation_events` | 主键 `(conversation_id, seq)`；`UNIQUE (conversation_id, client_event_id)`；部分唯一索引 `(conversation_id, tool_call_id) WHERE kind = 'tool_result'`；`kind IN ('input', 'assistant', 'tool_result', 'compaction')`；`octet_length(payload::text) <= 163840` |
 | `project_memory_entries` | 外键 `(employee_id, project_id)`；`current_revision > 0` |
 | `project_memory_revisions` | 主键 `(entry_id, revision)`；`author IN ('agent', 'user')` |
+| `project_agent_input_queue` | `UNIQUE (agent_id, source_key)`；`source_type IN ('user_message', 'task_result', 'attention_answer', 'memory_updated', 'project_updated')`；`payload_hash` 32 字节；`octet_length(payload::text) <= 73728`；索引 `(agent_id, id) WHERE delivered_seq IS NULL` |
 
 `conversation_events` 和 `project_memory_revisions` 只允许插入。迁移为两张表各建一个 `BEFORE UPDATE OR DELETE` 触发器，直接抛错。这样即使应用代码出错，也不会改写原始事件。
+
+新表使用包含 `employee_id` 的复合外键检查归属。`project_memory_entries` 的当前版本外键延迟到事务提交时检查，条目与修订必须一起提交。创建 Project 时标题必填，订阅和模型可以暂时为空，配置保存于其唯一 Agent。
+
+用户消息的 `source_key` 为 `user:{client_message_id}`，payload 为 `{"content":"正文"}`，`payload_hash` 是正文 UTF-8 字节的 SHA-256。同一 Agent 的重复消息在唯一约束上等待，已提交后比较原正文；相同内容返回原记录，不同内容返回 409。正文最多 64 KiB，jsonb 规范文本最多 72 KiB；大量转义字符导致后者超限时同样返回 413。领取前 `delivered_seq` 为空，主对话不新增事件。
 
 `history.search` 第一版对 `payload` 做 `ILIKE` 查询，按 `conversation_id` 过滤，不建全文索引；对话规模变大后再加。
 
@@ -85,7 +90,6 @@ CREATE TABLE node_runtime_reports (
 | 表或列 | 关键约束 |
 |---|---|
 | `agent_runs` | 外键 `(employee_id, node_id)` 指向 `nodes`；`state IN ('starting', 'running', 'finished', 'lost', 'failed')`；`UNIQUE (agent_id, lease_epoch)`，同一代次只有一次运行；索引 `(state) WHERE state = 'starting'`，供重发循环使用 |
-| `project_agent_input_queue` | `UNIQUE (agent_id, source_key)`；`source_type IN ('user_message', 'task_result', 'attention_answer', 'memory_updated', 'project_updated')`；`payload_hash` 32 字节；`octet_length(payload::text) <= 73728`，各类型更细的上限由应用检查（TECH 第 3 节）；索引 `(agent_id, id) WHERE delivered_seq IS NULL`，供领取和放置扫描使用 |
 | `tasks.project_id` | 可空；外键 `(employee_id, project_id)` |
 | `tasks.origin_conversation_id`、`tasks.origin_tool_call_id` | 可空，两列同时为空或同时非空；部分唯一索引 `(origin_conversation_id, origin_tool_call_id) WHERE origin_conversation_id IS NOT NULL` |
 
@@ -98,4 +102,4 @@ CREATE TABLE node_runtime_reports (
 每个迁移都在 PostgreSQL 17 上用三种库验证：空库、带有现有数据的库（包含指向已吊销节点的默认 PC），以及重复执行迁移命令（应当识别为已执行）。另外两项检查：
 
 - 0015 之后，原来只有 Ubuntu 节点、因此没有默认 PC 的员工，会自动得到默认设备，也能手动改选；未指定目标的任务发往该设备。
-- 0016 之后，对 `conversation_events` 执行 `UPDATE` 或 `DELETE` 时失败。
+- 0016 之后，对 `conversation_events` 和 `project_memory_revisions` 执行 `UPDATE` 或 `DELETE` 时失败；在已应用 0019 且含已有员工与吊销默认设备的库上补入 0016 后，旧数据保持不变。
