@@ -30,7 +30,12 @@ function native(
     },
   );
   if (result.status === 3 && operation === "read") return undefined;
-  if (result.status !== 0) throw new Error("credential_private_file_failed");
+  if (result.status !== 0) {
+    // 只报告进程状态；stdout、stderr 和输入可能包含凭据。
+    const reason = (result.error as NodeJS.ErrnoException | undefined)?.code
+      ?? (result.signal ? `signal_${result.signal}` : `exit_${result.status}`);
+    throw new Error(`credential_private_file_failed:${operation}:${reason}`);
+  }
   return result.stdout;
 }
 
