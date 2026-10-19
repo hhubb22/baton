@@ -24,6 +24,7 @@ import (
 type RecordConfig struct {
 	AgentBinary  string            `json:"agent_binary"`
 	RawDir       string            `json:"raw_dir"`
+	RawTempDir   string            `json:"raw_temp_dir,omitempty"`
 	ScenarioFile string            `json:"scenario_file"`
 	Bindings     map[string]string `json:"bindings"`
 	HistoryDirs  []string          `json:"history_dirs,omitempty"`
@@ -134,6 +135,9 @@ func LoadRecordConfig(executable string) (RecordConfig, error) {
 			*p = filepath.Join(filepath.Dir(executable), *p)
 		}
 	}
+	if c.RawTempDir != "" && !filepath.IsAbs(c.RawTempDir) {
+		return c, errors.New("raw_temp_dir 必须是调用方系统临时目录的绝对路径")
+	}
 	for i, p := range c.HistoryDirs {
 		if !filepath.IsAbs(p) {
 			c.HistoryDirs[i] = filepath.Join(filepath.Dir(executable), p)
@@ -149,6 +153,10 @@ func LoadRecordConfig(executable string) (RecordConfig, error) {
 }
 
 func temporaryRawDir(dir string) error {
+	return temporaryRawDirUnder(dir, os.TempDir())
+}
+
+func temporaryRawDirUnder(dir, tempDir string) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
@@ -156,7 +164,7 @@ func temporaryRawDir(dir string) error {
 	if err != nil {
 		return err
 	}
-	temp, err := filepath.EvalSymlinks(os.TempDir())
+	temp, err := filepath.EvalSymlinks(tempDir)
 	if err != nil {
 		return err
 	}
@@ -325,7 +333,12 @@ var scenarioName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // Record 消耗并关闭 stdin；调用方应提供可被 Close 中断的读取器。
 func Record(ctx context.Context, c RecordConfig, args []string, stdin io.ReadCloser, stdout, stderr io.Writer) (Exit, error) {
-	if err := temporaryRawDir(c.RawDir); err != nil {
+	// Pi 的隔离环境会重设 TMPDIR；录制路径仍按调用测试的系统临时根目录检查。
+	tempDir := c.RawTempDir
+	if tempDir == "" {
+		tempDir = os.TempDir()
+	}
+	if err := temporaryRawDirUnder(c.RawDir, tempDir); err != nil {
 		return Exit{Code: 1}, err
 	}
 	scenario, err := os.ReadFile(c.ScenarioFile)

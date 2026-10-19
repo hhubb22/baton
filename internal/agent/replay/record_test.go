@@ -327,3 +327,34 @@ func TestRecordSharedHistoryOffsets(t *testing.T) {
 		t.Fatal(appends)
 	}
 }
+
+func TestRecordCallerTempRootWithIsolatedEnvironment(t *testing.T) {
+	c := recordConfig(t)
+	c.RawTempDir = os.TempDir()
+	isolated := t.TempDir()
+	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+		t.Setenv(key, isolated)
+	}
+	var out, diagnostic bytes.Buffer
+	exit, err := Record(context.Background(), c, helperArgs("echo"), io.NopCloser(bytes.NewReader([]byte("isolated\n"))), &out, &diagnostic)
+	if err != nil || exit.Code != 23 || out.String() != "isolated\n" {
+		t.Fatalf("隔离 TMPDIR 下录制失败: %+v %v", exit, err)
+	}
+	if _, err := os.Stat(filepath.Join(c.RawDir, "simple.raw.ndjson")); err != nil {
+		t.Fatal(err)
+	}
+	// 显式根目录仍拒绝根目录本身、其他目录以及仓库内路径。
+	if err := temporaryRawDirUnder(c.RawTempDir, c.RawTempDir); err == nil {
+		t.Fatal("允许写临时根目录")
+	}
+	if err := temporaryRawDirUnder(c.RawDir, isolated); err == nil {
+		t.Fatal("允许写配置根目录之外")
+	}
+	repo := filepath.Join(isolated, "repository")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := temporaryRawDirUnder(filepath.Join(repo, "raw"), isolated); err == nil {
+		t.Fatal("允许写仓库内录制")
+	}
+}
