@@ -29,14 +29,15 @@ var (
 
 // RunOptions 是一次常驻连接使用的本地身份和 Relay 地址。
 type RunOptions struct {
-	RelayURL  string
-	Identity  Identity
-	Heartbeat time.Duration
-	RootCAs   *x509.CertPool
-	Logger    *slog.Logger
-	DataDir   string
-	agent     *agentBridge
-	reports   *runtimeReports
+	RelayURL     string
+	Identity     Identity
+	Heartbeat    time.Duration
+	RootCAs      *x509.CertPool
+	Logger       *slog.Logger
+	DataDir      string
+	agent        *agentBridge
+	reports      *runtimeReports
+	reportSender *runtimeReportSender
 }
 
 // Maintain 保持到 Relay 的出站连接。同一进程的重连沿用启动时生成的 incarnation。
@@ -98,6 +99,7 @@ func Maintain(ctx context.Context, opts RunOptions) error {
 		cancel()
 	}
 	attempt := 0
+	opts.reportSender = &runtimeReportSender{}
 	if opts.DataDir != "" {
 		opts.reports = collectRuntimeReports(ctx, opts.DataDir)
 	}
@@ -183,7 +185,8 @@ func runOnce(ctx context.Context, opts RunOptions, incarnation string, ledger *L
 		defer opts.agent.set(nil)
 	}
 	errCh := make(chan error, 1)
-	reportSender := &runtimeReportSender{ready: make(chan struct{}, 1)}
+	reportSender := opts.reportSender.connect()
+	defer reportSender.close()
 	var reportChanged <-chan struct{}
 	if opts.reports != nil {
 		reportChanged = opts.reports.changed
@@ -266,7 +269,7 @@ func dialRelay(ctx context.Context, opts RunOptions) (*websocket.Conn, error) {
 	return ws, nil
 }
 
-func readRelay(ctx context.Context, w *wsWriter, acked *atomic.Bool, expect *atomic.Value, log *slog.Logger, ident Identity, ledger *Ledger, host *session.Host, loop *startLoop, dataDir string, reports *runtimeReportSender) error {
+func readRelay(ctx context.Context, w *wsWriter, acked *atomic.Bool, expect *atomic.Value, log *slog.Logger, ident Identity, ledger *Ledger, host *session.Host, loop *startLoop, dataDir string, reports *runtimeReportConnection) error {
 	for {
 		_, raw, err := w.ws.Read(ctx)
 		if err != nil {

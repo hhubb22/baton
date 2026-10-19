@@ -118,26 +118,58 @@ func (b *probeOutput) Write(p []byte) (int, error) {
 }
 
 type runtimeReportSender struct {
-	ready     chan struct{}
 	mu        sync.Mutex
+	current   *runtimeReportConnection
 	messageID string
 	raw       []byte
 	acked     bool
 }
 
-func (s *runtimeReportSender) note(env protocol.Envelope) {
+type runtimeReportConnection struct {
+	sender *runtimeReportSender
+	ready  chan struct{}
+	sent   bool
+}
+
+func (s *runtimeReportSender) connect() *runtimeReportConnection {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// 已确认的报告在新连接上重新发送；未确认的报告保留原消息标识和内容。
+	if s.acked {
+		s.messageID, s.raw, s.acked = "", nil, false
+	}
+	c := &runtimeReportConnection{sender: s, ready: make(chan struct{}, 1)}
+	s.current = c
+	return c
+}
+
+func (c *runtimeReportConnection) close() {
+	s := c.sender
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.current == c {
+		s.current = nil
+	}
+}
+
+func (c *runtimeReportConnection) note(env protocol.Envelope) {
 	var result protocol.RuntimeReportResult
 	if json.Unmarshal(env.Body, &result) != nil || result.Type != protocol.BodyRuntimeReportResult || !result.OK {
 		return
 	}
+	s := c.sender
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.messageID == env.CorrelationID {
+	if s.current == c && c.sent && s.messageID == env.CorrelationID && !s.acked {
 		s.acked = true
+		select {
+		case c.ready <- struct{}{}:
+		default:
+		}
 	}
 }
 
-func (s *runtimeReportSender) send(ctx context.Context, w *wsWriter, reports *runtimeReports) error {
+func (c *runtimeReportConnection) send(ctx context.Context, w *wsWriter, reports *runtimeReports) error {
 	if reports == nil {
 		return nil
 	}
@@ -149,20 +181,31 @@ func (s *runtimeReportSender) send(ctx context.Context, w *wsWriter, reports *ru
 	if err != nil {
 		return nil
 	}
+	s := c.sender
 	s.mu.Lock()
-	if !bytes.Equal(s.raw, raw) {
-		s.raw, s.acked = raw, false
-		s.messageID, err = identity.NewUUID()
-	}
-	messageID, acked := s.messageID, s.acked
-	s.mu.Unlock()
-	if err != nil {
-		return err
-	}
-	if acked {
+	if s.current != c || ctx.Err() != nil {
+		s.mu.Unlock()
 		return nil
 	}
-	body, err := json.Marshal(protocol.RuntimeReportRequest{Type: protocol.BodyRuntimeReport, Report: *r})
+	if s.messageID == "" || (s.acked && !bytes.Equal(s.raw, raw)) {
+		messageID, err := identity.NewUUID()
+		if err != nil {
+			s.mu.Unlock()
+			return err
+		}
+		s.messageID, s.raw, s.acked = messageID, raw, false
+	}
+	if s.acked {
+		s.mu.Unlock()
+		return nil
+	}
+	messageID, pending := s.messageID, s.raw
+	c.sent = true
+	s.mu.Unlock()
+	body, err := json.Marshal(struct {
+		Type   string          `json:"type"`
+		Report json.RawMessage `json:"report"`
+	}{Type: protocol.BodyRuntimeReport, Report: pending})
 	if err != nil {
 		return err
 	}
