@@ -1,18 +1,9 @@
-# Pi 1.3.0 RPC contract fixtures
+# Pi 回放数据
 
-`1.3.0-*.jsonl` are deterministic, model-free contract samples transcribed
-from the installed `@earendil-works/pi-coding-agent@1.3.0` documentation:
-`docs/rpc.md`, `rpc-commands.md`, `json.md`, and `session-format.md`.
-It is **not a recording of a model run**. The assistant result is test data.
-The embedded U+2028/U+2029 are literal Unicode characters, not record separators.
-The Go subprocess fixture supplies correlated command responses and persists v3
-native history; it can deliberately omit settlement or history confirmation.
-Lifecycle, waiting-for-children and provider-error settlement are separate samples.
+`replay/*.ndjson` 来自 2026-10-19 在 macOS 上对 Pi 1.3.0 / `google-vertex/gemini-3.1-flash-lite` 的真实录制，包含出站请求、入站事件、原生历史追加与退出记录。来源、场景和限制见 [场景说明](replay/README.md)。CI 用这些转录驱动真实 Pi 适配器和 `RunWorker`，不访问模型。
 
-`BATON_PI_PROBE=1 go test -v ./internal/agent/pi -run '^TestPiNoModelProbe$'`
-checks the actual installed CLI version and initialization with an isolated home,
-no model input, no extensions/MCP and startup networking disabled. This is input
-evidence only. Real-task verification lives in `internal/gateway`, is explicitly
-opt-in and is never substituted by these fixtures.
+规范化保留模型和工具输出；任务文本与系统提示按规则使用 `<any>`，路径使用 `transcript_start.bindings` 声明的绑定，运行时标识使用捕获占位符。只替换声明的绑定名，Pi 系统提示中的 `<tools>`、`<rules>` 等文本保持原样。Linux、macOS、Windows 使用各自的临时目录；绑定绝对路径的分隔符按当前系统比较。
 
-录制与规范化工具见 [使用说明](../../../../tools/agent-replay/README.md) 和 [回放设计](../../../../specs/agent-replay/TECH.md)。当前上述夹具仍来自文档转录；PS-173 的工具测试使用合成原始录制，真实 Pi 测试接入录制由 PS-174 实施。
+进程崩溃、缺失 settled 和配额错误由测试中的 `CutAfter`、`Drop`、`Replace` 派生，不另存伪造场景。分帧、超大帧、Unicode 分隔符、历史校验与分页保留为纯单元测试。回放通过只证明适配器能处理这些已录制的序列；真实 Agent 的版本、平台和模型结论以录制说明为准。
+
+录制与规范化工具见 [使用说明](../../../../tools/agent-replay/README.md) 和 [回放设计](../../../../specs/agent-replay/TECH.md)。Agent 升级或出站请求变化后应重录并审查转录差异；原始录制仅在仓库外临时保存，规范化和残留扫描后删除。

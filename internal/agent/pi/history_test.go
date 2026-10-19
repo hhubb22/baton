@@ -11,12 +11,7 @@ import (
 func TestPiHistoryRejectsMismatchedOrEscapedFile(t *testing.T) {
 	for _, broken := range []string{"id", "version", "cwd", "truncated", "escape", "symlink"} {
 		t.Run(broken, func(t *testing.T) {
-			a := replayAdapter(t)
-			if _, err := a.SubmitInput(context.Background(), "task"); err != nil {
-				t.Fatal(err)
-			}
-			_ = waitOutput(t, a)
-			_ = a.Close()
+			a := historyAdapter(t)
 			header := map[string]any{"type": "session", "id": a.config.SessionID, "version": 3, "cwd": a.config.Directory}
 			switch broken {
 			case "id":
@@ -61,11 +56,7 @@ func TestPiHistoryRejectsMismatchedOrEscapedFile(t *testing.T) {
 }
 
 func TestPiHistoryConfirmationRequiresExactEnvelopeAndToolRole(t *testing.T) {
-	a := replayAdapter(t)
-	if _, err := a.SubmitInput(context.Background(), "task"); err != nil {
-		t.Fatal(err)
-	}
-	_ = waitOutput(t, a)
+	a := historyAdapter(t)
 	appendEntry := func(role, tool string, isError bool, payload string) {
 		f, err := os.OpenFile(a.history.File, os.O_APPEND|os.O_WRONLY, 0o600)
 		if err != nil {

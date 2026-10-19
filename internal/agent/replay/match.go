@@ -3,6 +3,7 @@ package replay
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"sort"
@@ -121,6 +122,16 @@ func textValue(v any) (string, error) {
 }
 
 func matchString(pattern, actual string, bindings map[string]string, captures map[string]any, path string) error {
+	// 录制中的绝对路径由绑定开头；后续分隔符随回放系统转换，普通文本仍逐字比较。
+	if filepath.IsAbs(actual) {
+		for token, value := range bindings {
+			if filepath.IsAbs(value) && strings.HasPrefix(pattern, token+"/") {
+				pattern = filepath.FromSlash(pattern)
+				actual = filepath.FromSlash(actual)
+				break
+			}
+		}
+	}
 	var expression strings.Builder
 	// 固定片段先转义，绑定内容不会被当成新的占位符或正则表达式。
 	expression.WriteString("(?s)^")
