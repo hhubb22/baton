@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -11,16 +12,18 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"baton/internal/identity"
 	"baton/internal/protocol"
+	"baton/internal/startpermit"
 
 	"github.com/coder/websocket"
 )
 
-func projectRuntimeFixture(t *testing.T) (*projectRuntimeManager, chan protocol.ProjectRuntimeRequest, string) {
+func projectRuntimeFixture(t *testing.T, beforeReply ...func(protocol.ProjectRuntimeRequest)) (*projectRuntimeManager, chan protocol.ProjectRuntimeRequest, string) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -71,6 +74,9 @@ func projectRuntimeFixture(t *testing.T) (*projectRuntimeManager, chan protocol.
 			case requests <- request:
 			case <-ctx.Done():
 				return
+			}
+			for _, hook := range beforeReply {
+				hook(request)
 			}
 			body, _ := json.Marshal(protocol.ProjectRuntimeResult{Type: protocol.BodyProjectRuntimeResult, OK: true, Data: json.RawMessage(`{"lease_seconds":60}`)})
 			reply, _ := json.Marshal(protocol.Envelope{CorrelationID: frame.Envelope.MessageID, Body: body})
@@ -270,5 +276,130 @@ func TestProjectRuntimeCapacityAndStopAck(t *testing.T) {
 	m.mu.Unlock()
 	if exists {
 		t.Fatal("进程退出清理前确认了stop")
+	}
+}
+
+func TestProjectRuntimeStopsAfterSystemSuspend(t *testing.T) {
+	m, requests, _ := projectRuntimeFixture(t)
+	clock := startpermit.NewManual(time.Time{})
+	m.clock = clock
+	m.renewInterval = 50 * time.Millisecond
+	command := projectCommand()
+	sendProjectCommand(m, command)
+	waitProjectRequest(t, requests, "started")
+	m.mu.Lock()
+	p := m.runs[command.RunID]
+	m.mu.Unlock()
+	resumed := time.Now()
+	clock.Suspend(59 * time.Second)
+	select {
+	case <-p.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("休眠耗尽租约后未在周期检查中停止Runtime")
+	}
+	if time.Since(resumed) >= projectRuntimeLeaseDeadline {
+		t.Fatal("测试没有隔离Go计时器与包含休眠的单调时钟")
+	}
+	// 启动已完成的续租已经由waitProjectRequest读走，恢复后不得再发送续租。
+	for {
+		select {
+		case request := <-requests:
+			if request.Operation == "renew" {
+				t.Fatal("本地租约过期后仍向中心发送续租")
+			}
+		default:
+			return
+		}
+	}
+}
+
+func TestProjectRuntimeCountsRenewalRoundTripFromRequestStart(t *testing.T) {
+	clock := startpermit.NewManual(time.Time{})
+	var renewals atomic.Int32
+	m, requests, _ := projectRuntimeFixture(t, func(request protocol.ProjectRuntimeRequest) {
+		if request.Operation == "renew" && renewals.Add(1) == 1 {
+			clock.Advance(15 * time.Second)
+		}
+	})
+	m.clock = clock
+	command := projectCommand()
+	sendProjectCommand(m, command)
+	waitProjectRequest(t, requests, "started")
+	m.mu.Lock()
+	p := m.runs[command.RunID]
+	m.mu.Unlock()
+	clock.Suspend(44 * time.Second)
+	select {
+	case <-p.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("续租往返耗时未计入58秒本地期限")
+	}
+}
+
+type failingProjectRuntimeClock struct {
+	*startpermit.Manual
+	failed atomic.Bool
+}
+
+func (c *failingProjectRuntimeClock) Mono() (time.Duration, error) {
+	if c.failed.Load() {
+		return 0, errors.New("单调时钟读取失败")
+	}
+	return c.Manual.Mono()
+}
+
+func TestProjectRuntimeStopsWhenMonotonicClockFails(t *testing.T) {
+	m, requests, _ := projectRuntimeFixture(t)
+	clock := &failingProjectRuntimeClock{Manual: startpermit.NewManual(time.Time{})}
+	m.clock = clock
+	command := projectCommand()
+	sendProjectCommand(m, command)
+	waitProjectRequest(t, requests, "started")
+	m.mu.Lock()
+	p := m.runs[command.RunID]
+	m.mu.Unlock()
+	clock.failed.Store(true)
+	select {
+	case <-p.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("单调时钟失效后仍保持Runtime")
+	}
+}
+
+func TestProjectRuntimeRejectsLateRenewalAfterSuspend(t *testing.T) {
+	clock := startpermit.NewManual(time.Time{})
+	var renewals atomic.Int32
+	pending := make(chan struct{})
+	release := make(chan struct{})
+	m, requests, _ := projectRuntimeFixture(t, func(request protocol.ProjectRuntimeRequest) {
+		if request.Operation == "renew" && renewals.Add(1) == 2 {
+			close(pending)
+			<-release
+		}
+	})
+	m.clock = clock
+	m.renewInterval = 50 * time.Millisecond
+	command := projectCommand()
+	sendProjectCommand(m, command)
+	waitProjectRequest(t, requests, "started")
+	m.mu.Lock()
+	p := m.runs[command.RunID]
+	m.mu.Unlock()
+	select {
+	case <-pending:
+	case <-time.After(2 * time.Second):
+		close(release)
+		t.Fatal("未收到第二次续租")
+	}
+	clock.Suspend(59 * time.Second)
+	// 回复在恢复之后到达，不能据此延长已耗尽的本地租期。
+	close(release)
+	select {
+	case <-p.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("休眠后迟到的成功续租恢复了旧Runtime")
+	}
+	if got := time.Duration(p.lastRenew.Load()); got != 0 {
+		t.Fatalf("迟到续租修改了起点: %s", got)
 	}
 }

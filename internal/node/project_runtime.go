@@ -13,12 +13,14 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"baton/internal/identity"
 	"baton/internal/privatefile"
 	"baton/internal/protocol"
 	"baton/internal/session"
+	"baton/internal/startpermit"
 )
 
 const projectRuntimeMaxBytes = 192 << 10
@@ -37,6 +39,7 @@ type projectRuntimeManager struct {
 	wg            sync.WaitGroup
 	renewInterval time.Duration
 	leaseDeadline time.Duration
+	clock         startpermit.Timer
 }
 
 type projectRuntimeProcess struct {
@@ -46,7 +49,7 @@ type projectRuntimeProcess struct {
 	done      chan struct{}
 	finished  chan struct{}
 	stop      func()
-	lastRenew time.Time
+	lastRenew atomic.Int64
 	ctx       context.Context
 	cancel    context.CancelFunc
 	stopped   bool
@@ -62,7 +65,7 @@ func newProjectRuntimeManager(ctx context.Context, ledger *Ledger) (*projectRunt
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	return &projectRuntimeManager{ctx: ctx, cancel: cancel, ledger: ledger, runs: map[string]*projectRuntimeProcess{}, renewInterval: projectRuntimeRenewInterval, leaseDeadline: projectRuntimeLeaseDeadline}, nil
+	return &projectRuntimeManager{ctx: ctx, cancel: cancel, ledger: ledger, runs: map[string]*projectRuntimeProcess{}, renewInterval: projectRuntimeRenewInterval, leaseDeadline: projectRuntimeLeaseDeadline, clock: startpermit.NewClock()}, nil
 }
 
 func (m *projectRuntimeManager) setLoop(loop *startLoop) {
@@ -146,6 +149,13 @@ func (m *projectRuntimeManager) command(command protocol.ProjectRunCommand) {
 			m.mu.Unlock()
 			return
 		}
+		if p.started && command.Type != "project_run_stop" {
+			if _, err := m.leaseTime(p); err != nil {
+				p.stop()
+				m.mu.Unlock()
+				return
+			}
+		}
 		switch command.Type {
 		case "project_run_stop":
 			p.stopped = true
@@ -204,7 +214,7 @@ func (m *projectRuntimeManager) command(command protocol.ProjectRunCommand) {
 		m.failed(command, "unavailable")
 		return
 	}
-	p := &projectRuntimeProcess{command: command, token: hex.EncodeToString(token), wake: make(chan struct{}, 1), done: make(chan struct{}), finished: make(chan struct{}), lastRenew: time.Now(), stop: func() {}}
+	p := &projectRuntimeProcess{command: command, token: hex.EncodeToString(token), wake: make(chan struct{}, 1), done: make(chan struct{}), finished: make(chan struct{}), stop: func() {}}
 	p.ctx, p.cancel = context.WithCancel(m.ctx)
 	m.runs[command.RunID] = p
 	m.mu.Unlock()
@@ -234,7 +244,12 @@ func (m *projectRuntimeManager) command(command protocol.ProjectRunCommand) {
 		m.failed(command, "unavailable")
 		return
 	}
-	p.lastRenew = time.Now()
+	started, err := m.clock.Mono()
+	if err != nil {
+		m.failed(command, "unavailable")
+		return
+	}
+	p.lastRenew.Store(int64(started))
 	initial := m.report(command, "renew", "")
 	if !initial.OK {
 		m.failed(command, initial.Code)
@@ -248,6 +263,19 @@ func (m *projectRuntimeManager) command(command protocol.ProjectRunCommand) {
 func (m *projectRuntimeManager) failed(command protocol.ProjectRunCommand, reason string) {
 	_, _ = m.ledger.db.Exec(`UPDATE project_runtime_runs SET state='failed',reason=? WHERE run_id=?`, reason, command.RunID)
 	m.report(command, "start_failed", reason)
+}
+
+// leaseTime 使用包含系统休眠的单调时钟；请求开始时刻作为最近续租起点。
+func (m *projectRuntimeManager) leaseTime(p *projectRuntimeProcess) (time.Duration, error) {
+	now, err := m.clock.Mono()
+	if err != nil {
+		return 0, err
+	}
+	last := time.Duration(p.lastRenew.Load())
+	if now < last || now-last >= m.leaseDeadline {
+		return now, context.DeadlineExceeded
+	}
+	return now, nil
 }
 
 func (m *projectRuntimeManager) run(p *projectRuntimeProcess) error {
@@ -281,6 +309,10 @@ func (m *projectRuntimeManager) run(p *projectRuntimeProcess) error {
 	cmd.Dir = control
 	cmd.Env = append(os.Environ(), "BATON_PROJECT_RUNTIME_ENDPOINT="+endpoint, "BATON_PROJECT_RUNTIME_TOKEN="+p.token, "BATON_PROJECT_RUN_ID="+p.command.RunID, "BATON_PROJECT_LEASE_EPOCH="+strconv.FormatInt(p.command.LeaseEpoch, 10))
 	m.mu.Lock()
+	if _, err := m.leaseTime(p); err != nil {
+		m.mu.Unlock()
+		return err
+	}
 	if p.stopped || m.ctx.Err() != nil {
 		m.mu.Unlock()
 		return context.Canceled
@@ -301,21 +333,58 @@ func (m *projectRuntimeManager) run(p *projectRuntimeProcess) error {
 	ipcDone := make(chan struct{})
 	go func() { defer close(ipcDone); m.serve(ln, p) }()
 	defer func() { _ = ln.Close(); <-ipcDone }()
-	initial := m.report(p.command, "started", "")
-	if !initial.OK && initial.Code != "unavailable" {
-		stop()
-	}
+	startedResult := make(chan protocol.ProjectRuntimeResult, 1)
+	go func(result chan<- protocol.ProjectRuntimeResult) {
+		if _, err := m.leaseTime(p); err != nil {
+			result <- projectRuntimeFailure("lease_lost")
+			return
+		}
+		result <- m.report(p.command, "started", "")
+	}(startedResult)
 	renew := time.NewTicker(m.renewInterval)
 	defer renew.Stop()
-	deadline := time.NewTimer(time.Until(p.lastRenew.Add(m.leaseDeadline)))
+	// Go 计时器只唤醒检查，租约判断始终读取包含休眠的 Mono。
+	checkTicker := time.NewTicker(min(time.Second, m.leaseDeadline))
+	defer checkTicker.Stop()
+	deadline := time.NewTimer(m.leaseDeadline)
 	defer deadline.Stop()
+	leaseLost := false
+	checkLease := func() bool {
+		if leaseLost {
+			return false
+		}
+		if _, err := m.leaseTime(p); err != nil {
+			leaseLost = true
+			stop()
+			return false
+		}
+		return true
+	}
+	resetDeadline := func() {
+		now, err := m.leaseTime(p)
+		if err != nil {
+			leaseLost = true
+			stop()
+			return
+		}
+		if !deadline.Stop() {
+			select {
+			case <-deadline.C:
+			default:
+			}
+		}
+		deadline.Reset(m.leaseDeadline - (now - time.Duration(p.lastRenew.Load())))
+	}
+	resetDeadline()
 	type renewal struct {
-		result  protocol.ProjectRuntimeResult
-		started time.Time
+		result   protocol.ProjectRuntimeResult
+		started  time.Duration
+		clockErr error
 	}
 	renewResult := make(chan renewal, 1)
 	renewBusy := false
 	for {
+		checkLease()
 		select {
 		case <-m.ctx.Done():
 			stop()
@@ -325,26 +394,48 @@ func (m *projectRuntimeManager) run(p *projectRuntimeProcess) error {
 			_, _ = m.ledger.db.Exec(`UPDATE project_runtime_runs SET state='exited',reason='runtime_exited' WHERE run_id=?`, p.command.RunID)
 			m.report(p.command, "exited", "runtime_exited")
 			return nil
+		case initial := <-startedResult:
+			startedResult = nil
+			if !initial.OK && initial.Code != "unavailable" {
+				leaseLost = true
+				stop()
+			}
+		case <-checkTicker.C:
 		case <-deadline.C:
-			stop()
+			if checkLease() {
+				resetDeadline()
+			}
 		case <-renew.C:
+			if !checkLease() {
+				continue
+			}
 			if !renewBusy {
 				renewBusy = true
-				go func() { started := time.Now(); renewResult <- renewal{m.report(p.command, "renew", ""), started} }()
+				go func() {
+					// 协程恢复执行时也须先核对期限，不能在休眠后先发送续租。
+					started, err := m.leaseTime(p)
+					if err != nil {
+						renewResult <- renewal{clockErr: err}
+						return
+					}
+					renewResult <- renewal{result: m.report(p.command, "renew", ""), started: started}
+				}()
 			}
 		case renewed := <-renewResult:
-			result := renewed.result
 			renewBusy = false
-			if result.OK {
-				p.lastRenew = renewed.started
-				if !deadline.Stop() {
-					select {
-					case <-deadline.C:
-					default:
-					}
-				}
-				deadline.Reset(time.Until(p.lastRenew.Add(m.leaseDeadline)))
-			} else if result.Code == "lease_lost" {
+			if !checkLease() {
+				continue
+			}
+			if renewed.clockErr != nil {
+				leaseLost = true
+				stop()
+				continue
+			}
+			if renewed.result.OK {
+				p.lastRenew.Store(int64(renewed.started))
+				resetDeadline()
+			} else if renewed.result.Code == "lease_lost" {
+				leaseLost = true
 				stop()
 			}
 		}
@@ -391,6 +482,11 @@ func (m *projectRuntimeManager) serveConn(conn net.Conn, p *projectRuntimeProces
 			case <-p.done:
 				result = projectRuntimeFailure("lease_lost")
 			default:
+				if _, err := m.leaseTime(p); err != nil {
+					p.stop()
+					_ = json.NewEncoder(conn).Encode(projectRuntimeFailure("lease_lost"))
+					return
+				}
 				req := local.Request
 				req.Type = protocol.BodyProjectRuntimeRequest
 				req.RunID = p.command.RunID
@@ -410,11 +506,20 @@ func (m *projectRuntimeManager) serveConn(conn net.Conn, p *projectRuntimeProces
 					data, _ := protocol.MarshalJSON(struct {
 						Wake bool `json:"wake"`
 					}{wake})
+					if _, err := m.leaseTime(p); err != nil {
+						p.stop()
+						result = projectRuntimeFailure("lease_lost")
+						break
+					}
 					result = protocol.ProjectRuntimeResult{Type: protocol.BodyProjectRuntimeResult, OK: true, Data: data}
 				case "bootstrap", "read_events", "claim_inputs", "append_event", "report_failure", "finish":
-					ctx, cancel := context.WithTimeout(m.ctx, 30*time.Second)
+					ctx, cancel := context.WithTimeout(p.ctx, 30*time.Second)
 					result = m.call(ctx, req)
 					cancel()
+					if _, err := m.leaseTime(p); err != nil {
+						result = projectRuntimeFailure("lease_lost")
+						p.stop()
+					}
 					terminate = result.Code == "lease_lost" || result.OK && (req.Operation == "finish" || req.Operation == "report_failure")
 				default:
 					result = projectRuntimeFailure("invalid_request")

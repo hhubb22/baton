@@ -1,9 +1,10 @@
 package projectagent
 
 import (
-	"baton/internal/protocol"
 	"encoding/json"
 	"errors"
+
+	"baton/internal/protocol"
 )
 
 const MaxEventBytes = 160 << 10
@@ -27,11 +28,13 @@ type QueuedInput struct {
 }
 
 type Bootstrap struct {
-	Project       Project `json:"project"`
-	PromptVersion string  `json:"prompt_version"`
-	Compaction    *Event  `json:"compaction,omitempty"`
-	AfterSeq      int64   `json:"after_seq"`
-	LastSeq       int64   `json:"last_seq"`
+	Project        Project `json:"project"`
+	PromptVersion  string  `json:"prompt_version"`
+	Compaction     *Event  `json:"compaction,omitempty"`
+	CompactionSeq  int64   `json:"compaction_seq,omitempty"`
+	GoalUTF8Base64 string  `json:"goal_utf8_base64,omitempty"`
+	AfterSeq       int64   `json:"after_seq"`
+	LastSeq        int64   `json:"last_seq"`
 }
 
 type Claim struct {

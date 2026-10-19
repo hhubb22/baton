@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -188,11 +189,23 @@ func (s *Store) bootstrapProjectRun(ctx context.Context, tx pgx.Tx, b projectRun
 			return out, projectagent.ErrInvalid
 		}
 		out.Compaction = &e
+		out.CompactionSeq = e.Seq
 		out.AfterSeq = payload.ThroughSeq
 	}
 	raw, _ := protocol.MarshalJSON(out)
 	if len(raw) > protocol.MaxProjectRuntimeBytes-1024 {
-		return out, projectagent.ErrTooLarge
+		// 配置与摘要之和可能超过单帧；摘要仍在后续事件分页中，返回明确的序号。
+		out.Compaction = nil
+		raw, _ = protocol.MarshalJSON(out)
+		if len(raw) > protocol.MaxProjectRuntimeBytes-1024 {
+			// 非 NUL 控制字符的 JSON 转义可达原文的六倍，UTF-8 base64 保留完整目标且长度有界。
+			out.GoalUTF8Base64 = base64.StdEncoding.EncodeToString([]byte(out.Project.Goal))
+			out.Project.Goal = ""
+			raw, _ = protocol.MarshalJSON(out)
+			if len(raw) > protocol.MaxProjectRuntimeBytes-1024 {
+				return out, projectagent.ErrTooLarge
+			}
+		}
 	}
 	return out, nil
 }

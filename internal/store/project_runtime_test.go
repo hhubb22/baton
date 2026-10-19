@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -347,5 +348,74 @@ func TestProjectRunFailureBackoffAndRecoveryWithoutQueuedInput(t *testing.T) {
 	}
 	if data.(projectagent.Bootstrap).LastSeq != inputSeq {
 		t.Fatal("重试没有从原输入位置恢复")
+	}
+}
+
+func TestProjectRunBootstrapPagesLargeCompactionAndConfiguration(t *testing.T) {
+	ctx, pool, repo, owner, p, src := projectRunFixture(t)
+	goal := strings.Repeat("g", 64<<10)
+	if _, err := repo.PatchProject(ctx, owner, p.ID, projectagent.Patch{Goal: &goal}); err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := protocol.MarshalJSON(map[string]any{"through_seq": 0, "summary": strings.Repeat("s", 150<<10)})
+	if _, err := pool.Exec(ctx, `INSERT INTO conversation_events(conversation_id,seq,employee_id,kind,payload) VALUES($1,1,$2,'compaction',$3)`, p.Conversation.ID, owner, payload); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE conversations SET next_seq=2,compaction_seq=1 WHERE id=$1`, p.Conversation.ID); err != nil {
+		t.Fatal(err)
+	}
+	acceptProjectInput(t, ctx, repo, owner, p.ID, "resume", "继续")
+	if err := repo.ScheduleProjectRuns(ctx); err != nil {
+		t.Fatal(err)
+	}
+	req := runtimeRequest(t, ctx, pool, p.Agent.ID, "bootstrap")
+	data, err := repo.ProjectRuntime(ctx, src, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	boot := data.(projectagent.Bootstrap)
+	raw, _ := protocol.MarshalJSON(boot)
+	if boot.Compaction != nil || boot.CompactionSeq != 1 || boot.Project.Goal != goal || len(raw) > protocol.MaxProjectRuntimeBytes {
+		t.Fatal("bootstrap未分离超长摘要或丢失配置")
+	}
+	req.Operation = "read_events"
+	req.AfterSeq = boot.AfterSeq
+	data, err = repo.ProjectRuntime(ctx, src, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := data.(projectagent.EventPage)
+	if len(page.Events) != 1 || page.Events[0].Seq != boot.CompactionSeq || page.Events[0].Kind != "compaction" {
+		t.Fatal("分页未返回原摘要")
+	}
+	raw, _ = protocol.MarshalJSON(page)
+	if len(raw) > protocol.MaxProjectRuntimeBytes {
+		t.Fatal("单事件分页响应超限")
+	}
+}
+
+func TestProjectRunBootstrapPreservesControlCharactersInGoal(t *testing.T) {
+	ctx, pool, repo, owner, p, src := projectRunFixture(t)
+	goal := strings.Repeat("\x01", 64<<10)
+	if _, err := repo.PatchProject(ctx, owner, p.ID, projectagent.Patch{Goal: &goal}); err != nil {
+		t.Fatal(err)
+	}
+	acceptProjectInput(t, ctx, repo, owner, p.ID, "start-control-goal", "继续")
+	if err := repo.ScheduleProjectRuns(ctx); err != nil {
+		t.Fatal(err)
+	}
+	req := runtimeRequest(t, ctx, pool, p.Agent.ID, "bootstrap")
+	data, err := repo.ProjectRuntime(ctx, src, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	boot := data.(projectagent.Bootstrap)
+	decoded, err := base64.StdEncoding.DecodeString(boot.GoalUTF8Base64)
+	if err != nil || string(decoded) != goal {
+		t.Fatal("bootstrap改变合法目标")
+	}
+	raw, _ := protocol.MarshalJSON(boot)
+	if len(raw) > protocol.MaxProjectRuntimeBytes {
+		t.Fatal("bootstrap目标编码超出单帧")
 	}
 }
