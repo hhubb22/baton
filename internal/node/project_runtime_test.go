@@ -224,6 +224,8 @@ func TestProjectRuntimeBindingWakeAndPersistentDedup(t *testing.T) {
 
 func TestProjectRuntimeLeaseDeadlineAcrossDisconnect(t *testing.T) {
 	m, requests, _ := projectRuntimeFixture(t)
+	clock := startpermit.NewManual(time.Time{})
+	m.clock = clock
 	m.renewInterval = 50 * time.Millisecond
 	m.leaseDeadline = 300 * time.Millisecond
 	command := projectCommand()
@@ -233,6 +235,7 @@ func TestProjectRuntimeLeaseDeadlineAcrossDisconnect(t *testing.T) {
 	p := m.runs[command.RunID]
 	m.mu.Unlock()
 	m.setLoop(nil)
+	clock.Advance(m.leaseDeadline)
 	select {
 	case <-p.done:
 	case <-time.After(2 * time.Second):

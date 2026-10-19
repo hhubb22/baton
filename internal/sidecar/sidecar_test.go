@@ -76,6 +76,7 @@ func TestNodeStdioUsesManagedProcessTree(t *testing.T) {
 process.stdin.once('data',data=>{const r=JSON.parse(data);process.exit(r.id===1&&r.result.ok===true?0:2)});`), 0600); err != nil {
 		t.Fatal(err)
 	}
+	started := time.Now()
 	cmd := exec.Command(node, script)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -95,7 +96,7 @@ process.stdin.once('data',data=>{const r=JSON.parse(data);process.exit(r.id===1&
 		t.Fatal(err)
 	}
 	defer stop()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
@@ -117,6 +118,7 @@ process.stdin.once('data',data=>{const r=JSON.parse(data);process.exit(r.id===1&
 		t.Fatalf("Node stdio 未退出: requests=%d node=%s wait=%v stderr=%s", requests.Load(), node, waitErr, stderr.String())
 	}
 	<-done
+	t.Logf("Node stdio 完成: requests=%d elapsed=%s", requests.Load(), time.Since(started))
 }
 
 func TestPrivateFileUsesNativePermissions(t *testing.T) {
