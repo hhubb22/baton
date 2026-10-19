@@ -3,10 +3,12 @@ package relay_test
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/cookiejar"
@@ -14,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -233,6 +236,7 @@ var (
 	builtBatond    string
 	processMu      sync.Mutex
 	processHandles []*running
+	allocatedPorts = map[int]bool{}
 )
 
 func buildBins(t *testing.T) (string, string, string) {
@@ -391,6 +395,37 @@ func (p *running) stop() {
 
 func freeAddr(t *testing.T) string {
 	t.Helper()
+	if low := os.Getenv("BATON_TEST_PORT_MIN"); low != "" {
+		min, err := strconv.Atoi(low)
+		if err != nil {
+			t.Fatal(err)
+		}
+		max, err := strconv.Atoi(os.Getenv("BATON_TEST_PORT_MAX"))
+		if err != nil || min < 1024 || max < min || max >= 30000 {
+			t.Fatal("测试端口范围无效")
+		}
+		offset, err := rand.Int(rand.Reader, big.NewInt(int64(max-min+1)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		processMu.Lock()
+		defer processMu.Unlock()
+		for i := 0; i <= max-min; i++ {
+			port := min + (int(offset.Int64())+i)%(max-min+1)
+			if allocatedPorts[port] {
+				continue
+			}
+			addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+			listener, err := net.Listen("tcp", addr)
+			if err != nil {
+				continue
+			}
+			_ = listener.Close()
+			allocatedPorts[port] = true
+			return addr
+		}
+		t.Fatal("当前分组没有可用测试端口")
+	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

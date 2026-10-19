@@ -1,11 +1,12 @@
 import unittest
+from unittest.mock import patch
 import io
 import json
 import tempfile
 import sys
 from pathlib import Path
 from changes import aggregate, classify
-from run_tests import EventLog, partition, scrub, run_group
+from run_tests import EventLog, partition, scrub, run_group, port_floor, port_ranges
 
 
 class ContractTests(unittest.TestCase):
@@ -55,6 +56,26 @@ class ContractTests(unittest.TestCase):
             command = [sys.executable, '-c', f'print({event!r})']
             result = run_group('diagnostic', command, Path(directory), 1, ['TestTarget'], True)
         self.assertNotEqual(result['exit_code'], 0)
+
+    def test_port_ranges(self):
+        ranges = port_ranges(8, 32768)
+        ports = [port for low, high in ranges for port in range(low, high + 1)]
+        self.assertEqual(len(ports), len(set(ports)))
+        self.assertLess(max(ports), 30000)
+        for count, floor in [(0, 32768), (9, 32768), (3, 20000)]:
+            with self.assertRaises(RuntimeError):
+                port_ranges(count, floor)
+
+    def test_native_port_floor(self):
+        with patch('run_tests.sys.platform', 'linux'), patch('run_tests.Path.read_text', return_value='32768 60999'):
+            self.assertEqual(port_floor(), 32768)
+        with patch('run_tests.sys.platform', 'darwin'), patch('run_tests.output', return_value='49152'):
+            self.assertEqual(port_floor(), 49152)
+        with patch('run_tests.sys.platform', 'win32'), patch('run_tests.output', return_value='Start Port : 49152\nNumber of Ports : 16384'):
+            self.assertEqual(port_floor(), 49152)
+        with patch('run_tests.sys.platform', 'win32'), patch('run_tests.output', return_value='invalid'):
+            with self.assertRaises(RuntimeError):
+                port_floor()
 
 
 if __name__ == '__main__':

@@ -85,13 +85,43 @@ def snapshot(destination):
         destination.write_text(scrub(str(error)), encoding='utf-8')
 
 
-def run_group(name, command, out, count, expected=None, strict=False):
+
+def port_floor():
+    if sys.platform == 'linux':
+        return int(Path('/proc/sys/net/ipv4/ip_local_port_range').read_text().split()[0])
+    if sys.platform == 'darwin':
+        return int(output(['sysctl', '-n', 'net.inet.ip.portrange.first']).strip())
+    text = output(['netsh', 'int', 'ipv4', 'show', 'dynamicport', 'tcp'])
+    match = re.search(r'Start Port\s*:\s*(\d+)', text)
+    if not match:
+        raise RuntimeError('无法读取 Windows TCP 动态端口范围')
+    return int(match.group(1))
+
+
+
+def port_ranges(count, floor):
+    if count < 1 or count > 8 or floor < 30000:
+        raise RuntimeError(f'无法隔离测试监听端口：分组数 {count}，动态端口起点 {floor}')
+    return [(10000 + i * 2000, 11999 + i * 2000) for i in range(count)]
+
+def socket_snapshot(destination):
+    command = (['netstat', '-ano'] if os.name == 'nt' else
+               ['lsof', '-nP', '-iTCP'] if sys.platform == 'darwin' else ['ss', '-tanp'])
+    try:
+        destination.write_text(scrub(output(command)), encoding='utf-8')
+    except Exception as error:
+        destination.write_text(scrub(str(error)), encoding='utf-8')
+
+def run_group(name, command, out, count, expected=None, strict=False, ports=None):
     started = time.monotonic()
     directory = out / name
     directory.mkdir()
     env = dict(os.environ, BATON_TEST_DIAGNOSTICS_DIR=str(directory / 'processes'))
+    if ports:
+        env['BATON_TEST_PORT_MIN'], env['BATON_TEST_PORT_MAX'] = map(str, ports)
     failures, outcomes = [], {}
     code = 1
+    failure_captured = False
     snapshot(directory / 'processes-before.json')
     try:
         with (directory / 'tests.jsonl').open('w', encoding='utf-8') as log:
@@ -105,6 +135,10 @@ def run_group(name, command, out, count, expected=None, strict=False):
                     events.write({'Output': line})
                     continue
                 events.write(event)
+                if event.get('Action') == 'fail' and not failure_captured:
+                    failure_captured = True
+                    snapshot(directory / 'processes-failure.json')
+                    socket_snapshot(directory / 'sockets-failure.log')
                 action, test = event.get('Action'), event.get('Test')
                 if action in ('pass', 'skip', 'fail') and test:
                     key = test.split('/')[0]
@@ -126,6 +160,7 @@ def run_group(name, command, out, count, expected=None, strict=False):
         failures.append(scrub(str(error)))
     finally:
         snapshot(directory / 'processes-after.json')
+        socket_snapshot(directory / 'sockets-after.log')
     result = {'group': name, 'exit_code': code, 'seconds': round(time.monotonic() - started, 2),
               'failures': failures, 'outcomes': outcomes}
     (directory / 'result.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -159,26 +194,29 @@ def main():
         if args.race:
             common.append('-race')
         list_common = ['go', 'test', '-list=.'] + (['-race'] if args.race else [])
+        floor = port_floor()
+        ranges = port_ranges(args.shards, floor)
+        (out / 'ports.json').write_text(json.dumps({'dynamic_start': floor, 'test_min': 10000, 'width': 2000}))
         groups = []
         if args.package:
             names = [n for n in output(['go', 'test', '-list=' + args.run] + (['-race'] if args.race else []) + [args.package]).splitlines()
                      if re.match(r'^(Test|Example|Fuzz)\w*$', n)]
             if not names:
                 raise RuntimeError('诊断选择没有匹配测试')
-            groups.append(('diagnostic', common + ['-run=' + args.run, args.package], names))
+            groups.append(('diagnostic', common + ['-run=' + args.run, args.package], names, ranges[0]))
         else:
             packages = output(['go', 'list'] + (RACE if args.race else ['./...'])).splitlines()
             others = [p for p in packages if p != RELAY]
-            groups.append(('packages', common + others, None))
+            groups.append(('packages', common + others, None, None))
             names = [n for n in output(list_common + [RELAY]).splitlines() if re.match(r'^(Test|Example|Fuzz)\w*$', n)]
             weights = json.loads((ROOT / '.github/ci/relay-times.json').read_text())
             shards = partition(names, weights, args.shards)
             (out / 'coverage.json').write_text(json.dumps({'package': RELAY, 'all': names, 'shards': shards}, indent=2))
             for i, tests in enumerate(shards):
-                groups.append((f'relay-{i + 1}', common + ['-run=^(' + '|'.join(tests) + ')$', RELAY], tests))
+                groups.append((f'relay-{i + 1}', common + ['-run=^(' + '|'.join(tests) + ')$', RELAY], tests, ranges[i]))
         with ThreadPoolExecutor(max_workers=len(groups)) as executor:
-            futures = [executor.submit(run_group, name, command, out, args.count, expected, bool(args.package))
-                       for name, command, expected in groups]
+            futures = [executor.submit(run_group, name, command, out, args.count, expected, bool(args.package), ports)
+                       for name, command, expected, ports in groups]
             results = [f.result() for f in futures]
     except Exception as error:
         results.append({'group': 'preparation', 'exit_code': 1, 'failures': [scrub(str(error))]})

@@ -1,11 +1,16 @@
 package relay_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -39,10 +44,11 @@ func diagnosticWriter(t *testing.T, bin string, args, env []string, memory io.Wr
 }
 
 type scrubWriter struct {
-	mu      sync.Mutex
-	file    *os.File
-	env     []string
-	pending string
+	mu       sync.Mutex
+	file     *os.File
+	env      []string
+	pending  string
+	captured bool
 }
 
 func (w *scrubWriter) Write(p []byte) (int, error) {
@@ -57,6 +63,11 @@ func (w *scrubWriter) Write(p []byte) (int, error) {
 		}
 		if _, err := io.WriteString(w.file, pi.ScrubDiagnosticText(line, w.env)+"\n"); err != nil {
 			return 0, err
+		}
+
+		if !w.captured && strings.Contains(line, "bind:") {
+			w.captured = true
+			captureBindFailure(filepath.Dir(w.file.Name()), w.env)
 		}
 		w.pending = rest
 	}
@@ -165,4 +176,67 @@ func TestCIDiagnosticScrubsSplitOutput(t *testing.T) {
 	if strings.Contains(string(raw), "private-example") || strings.Contains(string(raw), "secret-tail") {
 		t.Fatalf("诊断输出包含凭据")
 	}
+}
+
+func TestCIPortAllocatorAvoidsReservedAndAssigned(t *testing.T) {
+	var listener net.Listener
+	var first int
+	for port := 27000; port < 28000; port++ {
+		var err error
+		listener, err = net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+		if err == nil {
+			first = port
+			break
+		}
+	}
+	if listener == nil {
+		t.Fatal("没有可用的端口分配验证区间")
+	}
+	defer listener.Close()
+	t.Setenv("BATON_TEST_PORT_MIN", strconv.Itoa(first))
+	t.Setenv("BATON_TEST_PORT_MAX", strconv.Itoa(first+20))
+	selected := map[int]bool{}
+	defer func() {
+		processMu.Lock()
+		defer processMu.Unlock()
+		for port := range selected {
+			delete(allocatedPorts, port)
+		}
+	}()
+	for range 5 {
+		_, raw, err := net.SplitHostPort(freeAddr(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+		port, err := strconv.Atoi(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if port <= first || port > first+20 || selected[port] {
+			t.Fatalf("分配端口无效或重复：%d", port)
+		}
+		selected[port] = true
+	}
+}
+
+func captureBindFailure(dir string, env []string) {
+	command := []string{"ss", "-tanp"}
+	if runtime.GOOS == "windows" {
+		command = []string{"netstat", "-ano"}
+	}
+	if runtime.GOOS == "darwin" {
+		command = []string{"lsof", "-nP", "-iTCP"}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	raw, err := exec.CommandContext(ctx, command[0], command[1:]...).CombinedOutput()
+	if err != nil {
+		raw = append(raw, []byte(err.Error())...)
+	}
+	file, err := os.CreateTemp(dir, "bind-sockets-*.log")
+	if err != nil {
+		return
+	}
+	defer file.Close()
+	_, _ = file.WriteString(pi.ScrubDiagnosticText(string(raw), env))
 }
