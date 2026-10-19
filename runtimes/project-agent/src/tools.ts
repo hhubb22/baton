@@ -91,4 +91,39 @@ export const toolDefinitions = [
     description: "请求取消本 Project 的任务。",
     parameters: obj({ task_id: str() }),
   },
+  {
+    name: "inbox.ask",
+    description: "创建请用户处理的事项，立即返回 ID。展示内容为不超过 32 KiB 的 Markdown，链接只允许 https，HTML 和图片不渲染。每个 Project 最多 10 个待处理提案；没有选项时必须允许文字回复。",
+    parameters: obj({
+      title: str(),
+      summary: str(),
+      content: str(),
+      options: Type.Array(
+        obj({
+          id: str(),
+          label: str(),
+          description: opt(),
+          recommended: Type.Optional(Type.Boolean()),
+        }),
+        { maxItems: 5 },
+      ),
+      allow_text: Type.Boolean(),
+      task_id: opt(),
+    }),
+  },
+  {
+    name: "inbox.list",
+    description: "列出本 Project 的提案及系统事项。",
+    parameters: obj({ after_id: opt(), ...page }),
+  },
+  {
+    name: "inbox.get",
+    description: "读取本 Project 的事项、处理结果、引用的原任务结果和最新版本。",
+    parameters: obj({ request_id: str(), ...page }),
+  },
+  {
+    name: "inbox.withdraw",
+    description: "撤回本 Project 的待处理提案，必须说明原因。系统事项不能撤回。",
+    parameters: obj({ request_id: str(), reason: str() }),
+  },
 ];

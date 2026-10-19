@@ -25,7 +25,7 @@ func insertProjectInput(ctx context.Context, tx pgx.Tx, employeeID, agentID, kin
 	switch kind {
 	case "user_message":
 	case "attention_answer":
-		maxBytes = 8 << 10
+		maxBytes = 32 << 10
 	case "task_result":
 		maxBytes = 40 << 10
 	case "memory_updated":

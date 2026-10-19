@@ -322,3 +322,24 @@ test("模型文本先形成临时预览，完整回复保存后才进入历史",
   assert.equal(b.events[1].kind, 'assistant');
   assert.equal(b.effects, 0);
 });
+
+test("模型创建事项后继续调用 Inbox 工具，参数和结果经中心保存", async () => {
+  const backend = new Backend();
+  const calls = [
+    fauxToolCall("inbox.ask", {
+      title: "请决定", summary: "测试结果", content: "[证据](https://example.org)",
+      options: [{ id: "go", label: "继续" }], allow_text: true,
+    }, { id: "ask" }),
+    fauxToolCall("inbox.list", {}, { id: "list" }),
+    fauxToolCall("inbox.get", { request_id: "request-1" }, { id: "get" }),
+    fauxToolCall("inbox.withdraw", { request_id: "request-1", reason: "情况变化" }, { id: "withdraw" }),
+  ];
+  const fixture = setup(backend, [() => fauxAssistantMessage(calls), () => assistant()]);
+  await fixture.runtime.start();
+  const saved = backend.events.find((event) => event.kind === "assistant");
+  assert.deepEqual(saved?.payload.message.content, calls);
+  assert.deepEqual(backend.events.filter((event) => event.kind === "tool_result").map((event) => event.payload.message.toolName),
+    ["inbox.ask", "inbox.list", "inbox.get", "inbox.withdraw"]);
+  assert.equal(backend.effects, 4);
+  assert.equal(fixture.faux.state.callCount, 2);
+});

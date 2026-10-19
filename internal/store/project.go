@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"baton/internal/identity"
+	"baton/internal/inbox"
 	"baton/internal/projectagent"
 
 	"github.com/jackc/pgx/v5"
@@ -150,6 +151,11 @@ func (s *Store) PatchProject(ctx context.Context, employeeID, projectID string, 
 	}
 	if p.Title != oldTitle || p.Goal != oldGoal {
 		if err = insertProjectInput(ctx, tx, employeeID, agentID, "project_updated", fmt.Sprintf("project:%s:version:%d", projectID, p.Version), projectUpdatedPayload(p)); err != nil {
+			return p, err
+		}
+	}
+	if p.Status == "archived" {
+		if err = inbox.Archive(ctx, tx, projectID); err != nil {
 			return p, err
 		}
 	}

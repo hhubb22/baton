@@ -499,6 +499,9 @@ func insertReportEvent(ctx context.Context, tx pgx.Tx, in ExecutionReport, head 
 	if err != nil {
 		return fmt.Errorf("保存执行记录失败: %s", redact.Scrub(err.Error()))
 	}
+	if err := syncTaskAttention(ctx, tx, in.EmployeeID, in.TaskID, head.status); err != nil {
+		return err
+	}
 	if kind == task.EventResult || kind == task.EventStopReport {
 		return enqueueTaskTerminal(ctx, tx, in.EmployeeID, in.TaskID)
 	}

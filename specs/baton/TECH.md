@@ -191,7 +191,7 @@ web/                        Web UI
 
 ## 核心数据结构
 
-本节记录 `3193890` 的迁移与生产代码现状：`migrations/0001`～`0017`、`0019` 共 18 个 SQL 文件、33 张业务表。以后新增核心表或改变关联时，同步更新本节。迁移号有空缺；当前没有 `0018`，也没有 `plane_links`、`plane_events` 表。
+本节记录当前迁移与生产代码现状：`migrations/0001`～`0019` 共 19 个 SQL 文件、34 张业务表。以后新增核心表或改变关联时，同步更新本节。当前没有 `plane_links`、`plane_events` 表。
 
 ### PostgreSQL 关系
 
@@ -230,6 +230,10 @@ erDiagram
     nodes ||--o{ agent_runs : node_id
     projects o|--o{ tasks : project_id
     conversations o|--o{ tasks : origin_conversation_id
+    projects ||--o{ attention_requests : project_id
+    project_agents ||--o{ attention_requests : agent_id
+    conversations ||--o{ attention_requests : conversation_id
+    tasks o|--o{ attention_requests : task_id
     projects ||--o{ project_memory_entries : project_id
     project_memory_entries ||--o{ project_memory_revisions : entry_id
     project_memory_revisions ||--o| project_memory_entries : "id + current_revision"
@@ -237,7 +241,7 @@ erDiagram
 
 `project_agents` 的 `lease_run_id`、`lease_epoch`、`lease_until` 保存当前租约，`agent_runs` 保存历次运行；`lease_run_id` 没有外键，运行绑定由 `internal/store/project_runtime.go` 的 `validateProjectRun` 检查。`conversation_events.run_id`、输入队列的 `delivered_seq`、记忆修订的 `source_seq`、`task_events.execution_id`、`task_result_refs.node_id` 和 `request_tombstones.task_id` 也没有数据库外键，图不为这些列画外键线。记忆条目的当前修订外键延迟到事务提交时检查，事件与记忆修订由触发器限制为只追加。
 
-表中 `store/` 指 `internal/store/`，其中的写入由 Coordinator 执行；`plane/` 指 `internal/plane/`，也是 Coordinator 内的组件。迁移列标出建表文件的编号，事实栏采用后续迁移完成后的结构。
+表中 `store/` 指 `internal/store/`，其中的写入由 Coordinator 执行；`plane/` 指 `internal/plane/`，也是 Coordinator 内的组件；`inbox/` 指 `internal/inbox/`。迁移列标出建表文件的编号，事实栏采用后续迁移完成后的结构。
 
 | 表 | 迁移 | 记录的事实与关联 | 写入组件及入口 | 主要读取组件及入口 |
 |---|---|---|---|---|
@@ -272,10 +276,11 @@ erDiagram
 | `project_memory_entries` | 0016 | Project 的记忆条目标题与当前修订指针 | API/工具：`store/project_memory.go` 的 `writeProjectMemoryTx` | API：同文件 `ProjectMemory`、`ListProjectMemory`；工具：`store/project_tools.go` 的 `executeProjectTool` |
 | `project_memory_revisions` | 0016 | 只追加的记忆正文修订、作者及来源事件序号 | API/工具：`store/project_memory.go` 的 `writeProjectMemoryTx` | API：同文件 `ProjectMemory`、`ListProjectMemory`；历史修订：`store/project_tools.go` 的 `executeProjectTool` |
 | `agent_runs` | 0017 | Agent 在节点上的一次 Runtime 运行、租约代次、模型快照和结束原因 | 调度：`store/project_placement.go` 的 `scheduleProjectRun`、`releaseProjectRun`；Runtime：`store/project_runtime.go` 的 `ProjectRuntime` | 调度：`store/project_placement.go` 的 `ProjectRunCommands`；Runtime：`store/project_runtime.go` 的 `validateProjectRun` |
+| `attention_requests` | 0018 | Project 的 Agent 提案或两种系统事项、状态和处理版本；可选任务引用保存原结果版本与快照 | 工具/系统状态：`inbox/requests.go` 的 `CreateAgent`、`CreateSystem`、`ResolveSystem`；处理/撤回/归档：同文件 `Process`、`Withdraw`、`Archive` | API：`store/inbox.go` 的 `Inbox`、`AttentionRequest`；工具：同文件 `executeInboxTool` |
 | `task_acceptances` | 0019 | 员工对 Task 某版本的通过/拒绝和评论 | 验收 API：`store/acceptance.go` 的 `AcceptResult` | API：同文件 `ListAcceptances`；Plane 快照：0019 的 `plane_snapshot_task` |
 | `plane_outbox` | 0019 | 外键关联触发轮次与 Task，保存任务版本快照、重试、领取和外部评论确认 | 数据库：0019 的 `plane_snapshot_task`，由 `plane_task_changed`、`plane_task_linked` 触发；Plane：`plane/writeback.go` 的 `retryWritebacks` | Plane：同文件 `claimWriteback`、`writeComment` |
 
-0007、0009、0012、0014 只改列、约束或索引，变更分别归入 Execution 许可、任务/事件、重新执行关系和产物要求。0003、0006、0008、0010、0015、0017、0019 的改表部分也包含在上表对应事实中。`internal/migrate/migrate.go` 创建的 `schema_migrations` 记录已应用文件名，由 `upFS`/`Check` 写读，属于迁移设施，排除在业务 ER 图之外。`node_registration_seq` 是序列。
+0007、0009、0012、0014 只改列、约束或索引，变更分别归入 Execution 许可、任务/事件、重新执行关系和产物要求。0003、0006、0008、0010、0015、0017、0018、0019 的改表部分也包含在上表对应事实中。`internal/migrate/migrate.go` 创建的 `schema_migrations` 记录已应用文件名，由 `upFS`/`Check` 写读，属于迁移设施，排除在业务 ER 图之外。`node_registration_seq` 是序列。
 
 ### 节点本地 SQLite
 

@@ -11,6 +11,7 @@ require (
 	github.com/jackc/pgx/v5 v5.7.6
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	github.com/sourcegraph/jsonrpc2 v0.2.3
+	github.com/yuin/goldmark v1.8.6
 	golang.org/x/crypto v0.41.0
 	golang.org/x/net v0.43.0
 	golang.org/x/sys v0.35.0
