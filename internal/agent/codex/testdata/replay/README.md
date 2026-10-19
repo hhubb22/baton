@@ -63,4 +63,6 @@
 | 浏览器历史与大帧 | `TestBrowserHistoryReadableAfterExit`、`TestBrowserHistoryFallbackReplayIsolation`、`TestCodexLFFramingLimits`；原生文件只读、协议查询连接隔离与 limit=1、截断、缺失映射、跨读取边界与 8 MiB 上限 |
 | 通知身份、审批拒绝与有界输出 | `TestNotificationsAreBoundAndApprovalsRefused`、`TestBrowserDeltaUsesSeparateBoundedQueue`、`TestDrainIgnoresPreviousTurnAfterSessionReuse` |
 
-`exit_mid_turn` 从 simple.CutAfter(response:turn/start) 派生，两层均拒绝成功，Worker 进入待核实。强制退出前设门，等 SubmitInput 返回后放行，明确模拟“响应已消费、回合尚未结算”的崩溃窗口；badsteer 的响应错误同样先被调用方消费。此前立即退出的变体在 CI 暴露 jsonrpc2 v0.2.1 的 send-on-closed-channel 竞态，产品连接关闭问题留在本工单范围外。配额错误无法稳定按需录制，适配器层用 Replace 派生 failed 回合。Codex 固定 outputSchema，`free_text` 用 Replace 派生最终消息：适配器层校验拒绝该候选，Worker 记录 failed。
+`exit_after_response` 与 `exit_mid_turn` 均从 simple.CutAfter(response:turn/start) 派生。前者写出响应后立即强制退出，不等待调用方消费响应；后者在退出前设门，等 SubmitInput 返回后放行，覆盖“响应已消费、回合尚未结算”的窗口。两层均拒绝成功和停止确认，Worker 进入待核实，原任务不重发；badsteer 的响应错误仍先被调用方消费。PS-180 将 jsonrpc2 升级为包含上游 [#104](https://github.com/sourcegraph/jsonrpc2/pull/104) 修复的 v0.2.3：关闭时移除待决调用，迟到响应不再路由到已经关闭的等待通道。`TestCodexCloseBeforeBufferedResponseDispatch` 在完整响应已读出、尚未分发时关闭适配器，固定旧版 panic 的时序；`TestCodexConcurrentCloseReleasesPendingCalls` 验证并发重复关闭释放全部待决调用和协议 IO。
+
+配额错误无法稳定按需录制，适配器层用 Replace 派生 failed 回合。Codex 固定 outputSchema，`free_text` 用 Replace 派生最终消息：适配器层校验拒绝该候选，Worker 记录 failed。

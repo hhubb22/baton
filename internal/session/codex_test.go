@@ -179,7 +179,7 @@ func TestRecordedCodexWorkerScenarios(t *testing.T) {
 	for _, path := range paths {
 		t.Run(strings.TrimSuffix(filepath.Base(path), ".ndjson"), func(t *testing.T) { runRecordedCodexWorker(t, binary, path, "") })
 	}
-	for _, variant := range []string{"exit_mid_turn", "disconnect", "drop_settled", "free_text", "delivery_wrong_id"} {
+	for _, variant := range []string{"exit_after_response", "exit_mid_turn", "disconnect", "drop_settled", "free_text", "delivery_wrong_id"} {
 		t.Run(variant, func(t *testing.T) {
 			source := "simple"
 			if variant == "delivery_wrong_id" {
@@ -216,7 +216,7 @@ func runRecordedCodexWorker(t *testing.T, binary, path, variant string) {
 	}
 	var err error
 	switch variant {
-	case "exit_mid_turn":
+	case "exit_after_response", "exit_mid_turn":
 		tape, err = tape.CutAfter("response:turn/start")
 	case "disconnect":
 		tape, err = tape.CutAfter("request:turn/start")
@@ -260,7 +260,7 @@ func runRecordedCodexWorker(t *testing.T, binary, path, variant string) {
 	if crash != "" {
 		gates = append(gates, crash)
 	}
-	if variant != "exit_mid_turn" && variant != "disconnect" && variant != "drop_settled" && scenario != "restore_missing" {
+	if variant != "exit_mid_turn" && variant != "exit_after_response" && variant != "disconnect" && variant != "drop_settled" && scenario != "restore_missing" {
 		gates = append(gates, "event:turn/completed")
 	}
 	if scenario == "delegation" {
@@ -338,8 +338,16 @@ func runRecordedCodexWorker(t *testing.T, binary, path, variant string) {
 		r.Wait(t, crash)
 		r.Release(t, crash)
 	}
-	if variant == "disconnect" || variant == "exit_mid_turn" {
+	if variant == "disconnect" || variant == "exit_mid_turn" || variant == "exit_after_response" {
 		w.report(t, protocol.ReportResult, func(r protocol.ExecutionReport) bool { return r.Status == task.StatusNeedsVerification })
+		st, err := w.c.Stop(task.StatusCancelled)
+		if err != nil {
+			t.Fatal(err)
+		}
+		report := findStopReports(t, st.Reports)
+		if report.AgentStopped || report.OutcomeKnown {
+			t.Fatal("崩溃成为停止或结果已知证据", report)
+		}
 		assertCodexOneInput(t, w)
 		return
 	}

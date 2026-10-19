@@ -14,4 +14,6 @@ SHA-256：`e4e7f0c7d3fd77c48cd8619cad2bf2b315d860ab006ad5a7ebe44f6e32e666c1`。
 
 `TestRecordedCodexScenarios` 用统一回放 Agent 驱动真实 `codex.Adapter`；`TestRecordedCodexWorkerScenarios` 通过 `RunWorker`、真实适配器和 SQLite 账本验证相同场景。`TestRecordedCodexFaults` 使用 CutAfter、Drop、Replace 派生断线、崩溃、缺少 settled、配额错误、自由文本和无效标识。分页、历史匹配、审批拒绝、分帧与超限保留局部单元测试。官方 Schema 校验使用录制响应，规范化时删除隐私字段的 initialize 不作为完整 Schema 响应校验。
 
+连接关闭回归固定“完整响应已读出、尚未分发时关闭”的时序，并验证并发关闭释放待决 RPC。两层录制派生分别覆盖响应后立即退出、响应已被调用方消费后退出；依赖 jsonrpc2 v0.2.3 的关闭修复，退出均不作为成功或停止证据。
+
 场景、Worker 派生条件及旧测试对应表见 [转录说明](replay/README.md)。回放不运行真实模型；真实版本能力仍以显式启用的 `TestRealCodex` 为准。

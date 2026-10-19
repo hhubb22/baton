@@ -255,7 +255,7 @@ func TestRecordedCodexScenarios(t *testing.T) {
 
 func TestRecordedCodexFaults(t *testing.T) {
 	binary := replaytest.Build(t, "../../../tools/agent-replay")
-	for _, name := range []string{"exit_mid_turn", "disconnect", "drop_settled", "quota", "free_text", "wrongversion", "badturn", "badsteer"} {
+	for _, name := range []string{"exit_after_response", "exit_mid_turn", "disconnect", "drop_settled", "quota", "free_text", "wrongversion", "badturn", "badsteer"} {
 		t.Run(name, func(t *testing.T) {
 			source := "simple"
 			if name == "badsteer" {
@@ -264,7 +264,7 @@ func TestRecordedCodexFaults(t *testing.T) {
 			tape := replaytest.AdapterTape(replaytest.Load(t, "testdata/replay/"+source+".ndjson"))
 			var err error
 			switch name {
-			case "exit_mid_turn":
+			case "exit_after_response", "exit_mid_turn":
 				tape, err = tape.CutAfter("response:turn/start")
 			case "disconnect":
 				tape, err = tape.CutAfter("request:turn/start")
@@ -316,7 +316,7 @@ func TestRecordedCodexFaults(t *testing.T) {
 				t.Fatal(err)
 			}
 			crash := ""
-			if name != "disconnect" {
+			if name == "exit_mid_turn" || name == "badsteer" {
 				tape, crash = replaytest.CrashGate(tape)
 			}
 			tape, ends := replaytest.EndGates(tape)
@@ -348,7 +348,8 @@ func TestRecordedCodexFaults(t *testing.T) {
 				}
 				return
 			}
-			if inputErr != nil {
+			// 立即退出时响应可能还在管道里，输入结果允许未知，原输入始终不得重发。
+			if inputErr != nil && name != "exit_after_response" {
 				t.Fatal(inputErr)
 			}
 			if name == "exit_mid_turn" {
@@ -389,6 +390,17 @@ func TestRecordedCodexFaults(t *testing.T) {
 				}
 			} else if !out.Uncertain {
 				t.Fatalf("故障成为成功结果: %+v", out)
+			}
+			if name == "exit_after_response" || name == "exit_mid_turn" {
+				if out.Exited || out.Final != "" || !a.Snapshot().Pending {
+					t.Fatalf("未结算的退出成为完成证据: %+v", out)
+				}
+				if stopped, _ := a.StopStatus(); stopped {
+					t.Fatal("进程退出成为停止证据")
+				}
+				if _, err := a.SubmitInput(context.Background(), `{"description":"重复任务","generation":1}`); err == nil {
+					t.Fatal("退出后重发原任务")
+				}
 			}
 		})
 	}
