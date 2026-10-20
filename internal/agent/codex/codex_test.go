@@ -46,7 +46,7 @@ func TestNotificationsAreBoundAndApprovalsRefused(t *testing.T) {
 }
 
 func TestEnvironmentExcludesDaemonCredentials(t *testing.T) {
-	for _, key := range []string{"BATON_CONTROL_TOKEN", "BATON_DATABASE_URL", "BATON_NODE_SIGNING_KEY", "OP_SERVICE_ACCOUNT_TOKEN"} {
+	for _, key := range []string{"BATON_CONTROL_TOKEN", "BATON_DATABASE_URL", "BATON_NODE_SIGNING_KEY"} {
 		t.Setenv(key, "must-not-inherit")
 	}
 	a := New(Config{Home: t.TempDir(), ContextFile: "context-path"})

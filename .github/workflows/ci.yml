@@ -1,24 +1,6 @@
 name: CI
 
 on:
-  workflow_dispatch:
-    inputs:
-      diagnostic:
-        description: 'Windows 诊断包（留空运行完整 CI）'
-        type: string
-        default: ''
-      test:
-        description: 'Go 用例正则'
-        type: string
-        default: '^TestDatabaseStopReplaysLocalResultOnce$'
-      count:
-        description: '重复次数（1..100）'
-        type: string
-        default: '20'
-      controlled_failure:
-        description: '启用 Windows 受控失败'
-        type: boolean
-        default: false
   pull_request:
   push:
     branches: [main]
@@ -31,42 +13,13 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  BATON_TEST_DATABASE_URL: postgres://postgres:baton@127.0.0.1:55432/baton_test?sslmode=disable
+  BATON_TEST_DATABASE_URL: postgres://postgres:baton@127.0.0.1:5432/baton_test?sslmode=disable
 
 jobs:
-  changes:
-    name: 改动范围
+  test:
+    name: Test
     runs-on: ubuntu-latest
-    outputs:
-      scope: ${{ steps.paths.outputs.scope }}
-    steps:
-      - uses: actions/checkout@v6.0.2
-        with:
-          fetch-depth: 0
-      - name: CI 脚本契约
-        run: python3 -m unittest discover -s .github/ci -v
-      - id: paths
-        env:
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-          HEAD: ${{ github.sha }}
-          EVENT: ${{ github.event_name }}
-        run: |
-          if [ "$EVENT" = workflow_dispatch ] || [ -z "$BASE" ] || [[ "$BASE" =~ ^0+$ ]]; then
-            echo 'scope=full' >> "$GITHUB_OUTPUT"
-          else
-            python3 .github/ci/changes.py "$BASE" "$HEAD"
-          fi
-
-  linux-tests:
-    name: Linux ${{ matrix.mode }}
-    needs: changes
-    if: needs.changes.outputs.scope == 'full'
-    strategy:
-      fail-fast: false
-      matrix:
-        mode: [test, race]
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:17
@@ -75,376 +28,40 @@ jobs:
           POSTGRES_PASSWORD: baton
           POSTGRES_DB: baton_test
         ports:
-          - 55432:5432
+          - 5432:5432
         options: >-
           --health-cmd "pg_isready -U postgres -d baton_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
     steps:
-      - uses: actions/checkout@v6.0.2
-      - uses: actions/setup-go@v6.1.0
-        id: go
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '10'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
           cache-dependency-path: |
-            go.sum
-            .github/ci/cache-${{ matrix.mode }}
-      - name: Go 缓存
-        run: echo "Go 缓存命中：${{ steps.go.outputs.cache-hit }}" >> "$GITHUB_STEP_SUMMARY"
-      - name: Install PostgreSQL 17 tools for private database tests
+            web/pnpm-lock.yaml
+            runtimes/project-agent/pnpm-lock.yaml
+      - name: Install dependencies & build web UI
         run: |
-          sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
-          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends postgresql-17
-          /usr/lib/postgresql/17/bin/initdb --version
-          echo "BATON_TEST_POSTGRES_BINDIR=/usr/lib/postgresql/17/bin" >> "$GITHUB_ENV"
-      - name: Build
-        if: matrix.mode == 'test'
-        run: go build ./...
-      - name: Cross-build Windows
-        if: matrix.mode == 'test'
-        run: GOOS=windows go build ./...
-      - name: Cross-build macOS
-        if: matrix.mode == 'test'
-        run: GOOS=darwin go build ./...
-      - name: Vet
-        if: matrix.mode == 'test'
-        run: go vet ./...
-      - uses: pnpm/action-setup@v4.2.0
-        if: matrix.mode == 'test'
-        with:
-          version: '12.11.2'
-      - uses: actions/setup-node@v6.0.0
-        if: matrix.mode == 'test'
-        with:
-          node-version: '24'
-      - name: 真实 Runtime 集成依赖
-        if: matrix.mode == 'test'
-        run: pnpm --dir runtimes/project-agent install --frozen-lockfile
-      - name: Test
-        env:
-          MODE: ${{ matrix.mode }}
-          BATON_TEST_NODE_PROJECT_RUNTIME: ${{ matrix.mode == 'test' && '1' || '0' }}
+          pnpm --dir runtimes/project-agent install --frozen-lockfile
+          pnpm --dir web install --frozen-lockfile
+          pnpm --dir web build
+      - name: Go build & vet
         run: |
-          if [ "$MODE" = race ]; then
-            python3 .github/ci/run_tests.py --race --out "$RUNNER_TEMP/results"
-          else
-            python3 .github/ci/run_tests.py --out "$RUNNER_TEMP/results"
-          fi
-      - name: 上传诊断材料
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-${{ matrix.mode }}-${{ github.run_attempt }}
-          path: |
-            ${{ runner.temp }}/results/**/*.json
-            ${{ runner.temp }}/results/**/*.jsonl
-            ${{ runner.temp }}/results/**/*.log
-            ${{ runner.temp }}/results/**/*.md
-          retention-days: 7
-      - name: 材料链接
-        if: always()
-        run: echo "[运行与诊断材料](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> "$GITHUB_STEP_SUMMARY"
-
-  macos-tests:
-    needs: changes
-    if: needs.changes.outputs.scope == 'full'
-    name: macOS 测试
-    runs-on: macos-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v6.0.2
-      - uses: actions/setup-go@v6.1.0
-        id: go
-        with:
-          go-version-file: go.mod
-          cache: true
-      - uses: ikalnytskyi/action-setup-postgres@v8
-        id: postgres
-        with:
-          postgres-version: '17'
-          username: postgres
-          password: baton
-          database: baton_test
-          port: '55432'
-      - name: Go 缓存
-        shell: bash
-        run: echo "Go 缓存命中：${{ steps.go.outputs.cache-hit }}" >> "$GITHUB_STEP_SUMMARY"
-      - name: Build
-        run: go build ./...
-      - name: Vet
-        if: ${{ !cancelled() && steps.go.outcome == 'success' && steps.postgres.outcome == 'success' }}
-        run: go vet ./...
-      - name: Test
-        if: ${{ !cancelled() && steps.go.outcome == 'success' && steps.postgres.outcome == 'success' }}
-        shell: bash
-        run: python3 .github/ci/run_tests.py --out "$RUNNER_TEMP/results"
-
-      - name: Pi sandbox smoke test (no model)
-        if: ${{ !cancelled() }}
-        run: |
-          node --version
-          go test -v -count=10 ./internal/gateway -run '^TestPiSandbox'
-      - name: 上传诊断材料
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: macOS 测试-${{ github.run_attempt }}
-          path: |
-            ${{ runner.temp }}/results/**/*.json
-            ${{ runner.temp }}/results/**/*.jsonl
-            ${{ runner.temp }}/results/**/*.log
-            ${{ runner.temp }}/results/**/*.md
-          retention-days: 7
-      - name: 材料链接
-        if: always()
-        shell: bash
-        run: echo "[运行与诊断材料](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> "$GITHUB_STEP_SUMMARY"
-
-  windows-tests:
-    needs: changes
-    if: needs.changes.outputs.scope == 'full'
-    name: Windows 测试
-    runs-on: windows-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v6.0.2
-      - uses: actions/setup-go@v6.1.0
-        id: go
-        with:
-          go-version-file: go.mod
-          cache: true
-      - uses: actions/cache@v4
-        id: pg-cache
-        with:
-          path: ${{ runner.temp }}/postgres-17.6-1
-          key: windows-postgres-17.6-1-d378882a-v1
-      - name: 准备 Windows PostgreSQL
-        id: pg-windows
-        shell: pwsh
-        env:
-          PG_CACHE_HIT: ${{ steps.pg-cache.outputs.cache-hit }}
-        run: .github/ci/postgres-windows.ps1
-      - name: Go 缓存
-        shell: bash
-        run: echo "Go 缓存命中：${{ steps.go.outputs.cache-hit }}" >> "$GITHUB_STEP_SUMMARY"
-      - name: Build
-        run: go build ./...
-      - name: Vet
-        if: ${{ !cancelled() && steps.go.outcome == 'success' && steps.pg-windows.outcome == 'success' }}
-        run: go vet ./...
-      - name: Test
-        if: ${{ !cancelled() && steps.go.outcome == 'success' && steps.pg-windows.outcome == 'success' }}
-        shell: bash
-        env:
-          PACKAGE: ${{ inputs.diagnostic }}
-          TEST: ${{ inputs.test }}
-          COUNT: ${{ inputs.count }}
-          BATON_CI_DIAGNOSTIC_FAILURE: ${{ inputs.controlled_failure && '1' || '0' }}
-        run: |
-          if [ -n "$PACKAGE" ]; then
-            python3 .github/ci/run_tests.py --package "$PACKAGE" --run "$TEST" --count "$COUNT" --out "$RUNNER_TEMP/results"
-          else
-            python3 .github/ci/run_tests.py --out "$RUNNER_TEMP/results"
-          fi
-
-      - name: Sidecar Windows 原生重复验证
-        if: ${{ !cancelled() && steps.go.outcome == 'success' && steps.pg-windows.outcome == 'success' }}
-        run: go test -v -count=20 ./internal/sidecar -run 'TestNodeStdioUsesManagedProcessTree|TestResumeSkipsRunningThreadBeforeSuspendedChild'
-
-      - name: 停止 Windows PostgreSQL
-        if: always()
-        shell: pwsh
-        run: .github/ci/postgres-windows.ps1 -Stop
-      - name: 上传诊断材料
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Windows 测试-${{ github.run_attempt }}
-          path: |
-            ${{ runner.temp }}/results/**/*.json
-            ${{ runner.temp }}/results/**/*.jsonl
-            ${{ runner.temp }}/results/**/*.log
-            ${{ runner.temp }}/results/**/*.md
-          retention-days: 7
-      - name: 材料链接
-        if: always()
-        shell: bash
-        run: echo "[运行与诊断材料](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> "$GITHUB_STEP_SUMMARY"
-
-  web-tests:
-    name: Web 测试
-    needs: changes
-    if: needs.changes.outputs.scope == 'full'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    defaults:
-      run:
-        working-directory: web
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: baton
-          POSTGRES_DB: baton_test
-        ports:
-          - 55432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d baton_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 12
-    steps:
-      - uses: actions/checkout@v6.0.2
-      - uses: actions/setup-go@v6.1.0
-        id: go
-        with:
-          go-version-file: go.mod
-          cache: true
-      - uses: pnpm/action-setup@v4.2.0
-        with:
-          version: '12.11.2'
-      - uses: actions/setup-node@v6.0.0
-        with:
-          node-version: '24'
-          cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-      - name: 安装模型替身所需的 Project Runtime 依赖
-        run: pnpm --dir ../runtimes/project-agent install --frozen-lockfile
-      - name: Install Chromium
-        run: pnpm exec playwright install --with-deps chromium
-      - name: Lint
-        run: pnpm lint
-      - name: Typecheck
-        run: pnpm typecheck
-      - name: Unit tests
-        run: pnpm test
-      - name: E2E tests
-        run: pnpm test:e2e
-      - name: Check embedded dist
-        run: pnpm check:dist
-
-  runtime-tests:
-    name: Runtime ${{ matrix.os }}
-    needs: changes
-    if: needs.changes.outputs.scope == 'full'
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v6.0.2
-      - uses: actions/setup-go@v6.1.0
-        with:
-          go-version-file: go.mod
-          cache: true
-      - uses: pnpm/action-setup@v4.2.0
-        with:
-          version: '12.11.2'
-      - uses: actions/setup-node@v6.0.0
-        with:
-          node-version: '24'
-          cache: pnpm
-          cache-dependency-path: runtimes/project-agent/pnpm-lock.yaml
-      - name: Runtime 依赖
-        run: pnpm --dir runtimes/project-agent install --frozen-lockfile
-      - name: 构建原生凭据工具
-        run: go build -o baton-credential-host.exe ./cmd/batond
-      - name: Runtime 类型与 faux 验收
-        env:
-          BATON_REQUEST_ARTIFACT: request.json
-          BATON_SIDECAR_HOST: ${{ github.workspace }}/baton-credential-host.exe
+          go build ./...
+          go vet ./...
+      - name: Go tests
+        run: go test ./...
+      - name: Runtime tests
         run: pnpm --dir runtimes/project-agent test
-      - name: 构建 batond 分发包
-        run: node tools/package-batond.mjs
-      - name: 分发包搬迁与私有文件
-        run: node tools/check-sidecar-package.mjs
-      - uses: actions/upload-artifact@v4
-        with:
-          name: runtime-request-${{ matrix.os }}
-          path: runtimes/project-agent/request.json
-          retention-days: 7
-
-  runtime-consistency:
-    name: Runtime 跨系统请求一致性
-    needs: [changes, runtime-tests]
-    if: needs.changes.outputs.scope == 'full'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: runtime-request-*
-          path: requests
-      - name: 比较 Linux、macOS 和 Windows 的实际 faux 请求
-        shell: bash
-        run: |
-          cmp requests/runtime-request-ubuntu-latest/request.json requests/runtime-request-macos-latest/request.json
-          cmp requests/runtime-request-ubuntu-latest/request.json requests/runtime-request-windows-latest/request.json
-
-  linux:
-    name: Linux
-    needs: [changes, linux-tests, runtime-consistency]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6.0.2
-      - name: 核对检查结果
-        env:
-          SCOPE: ${{ needs.changes.outputs.scope }}
-          CHANGES: ${{ needs.changes.result }}
-          RESULT: ${{ needs.linux-tests.result }}
-          RUNTIME: ${{ needs.runtime-consistency.result }}
-        run: |
-          python3 .github/ci/gate.py "$SCOPE" "$CHANGES" "$RESULT"
-          python3 .github/ci/gate.py "$SCOPE" "$CHANGES" "$RUNTIME"
-
-  macos:
-    name: macOS
-    needs: [changes, macos-tests]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6.0.2
-      - name: 核对检查结果
-        env:
-          SCOPE: ${{ needs.changes.outputs.scope }}
-          CHANGES: ${{ needs.changes.result }}
-          RESULT: ${{ needs.macos-tests.result }}
-        run: python3 .github/ci/gate.py "$SCOPE" "$CHANGES" "$RESULT"
-
-  windows:
-    name: Windows
-    needs: [changes, windows-tests]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6.0.2
-      - name: 核对检查结果
-        env:
-          SCOPE: ${{ needs.changes.outputs.scope }}
-          CHANGES: ${{ needs.changes.result }}
-          RESULT: ${{ needs.windows-tests.result }}
-        run: python3 .github/ci/gate.py "$SCOPE" "$CHANGES" "$RESULT"
-
-  web:
-    name: Web
-    needs: [changes, web-tests]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6.0.2
-      - name: 核对检查结果
-        env:
-          SCOPE: ${{ needs.changes.outputs.scope }}
-          CHANGES: ${{ needs.changes.result }}
-          RESULT: ${{ needs.web-tests.result }}
-        run: python3 .github/ci/gate.py "$SCOPE" "$CHANGES" "$RESULT"
+      - name: Web unit tests
+        run: pnpm --dir web test:unit

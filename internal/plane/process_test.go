@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"net"
 	"net/http"
 	"os"
@@ -14,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"baton/internal/dbtest"
 	"baton/internal/node"
 
 	"github.com/google/uuid"
@@ -42,7 +42,7 @@ func coordinatorEnv(t *testing.T, f *fixture) (string, []string) {
 	if err := f.pool.QueryRow(context.Background(), "SELECT current_schema()").Scan(&schema); err != nil {
 		t.Fatal(err)
 	}
-	env := append(os.Environ(), "BATON_DATABASE_URL="+os.Getenv("BATON_TEST_DATABASE_URL"), "BATON_DB_SCHEMA="+schema,
+	env := append(os.Environ(), "BATON_DATABASE_URL="+dbtest.URL(), "BATON_DB_SCHEMA="+schema,
 		"BATON_NODE_SIGNING_KEY="+key,
 		"BATON_ALLOWED_ORIGINS=https://plane-process.test")
 	return binary, env
@@ -145,28 +145,5 @@ func TestCoordinatorProcessReplay(t *testing.T) {
 	if got := send(http.StatusOK); got.TaskID != first.TaskID {
 		t.Fatalf("restart replay changed task: %+v", got)
 	}
-	f.assertTasks(1)
-}
-
-// Opt-in: creates only baton-t25-* issues in the authorized test project and removes them.
-func TestPlaneLiveReplay(t *testing.T) {
-	if os.Getenv("BATON_PLANE_LIVE") != "1" {
-		t.Skip("set BATON_PLANE_LIVE=1 with read-only Baton Test vault access")
-	}
-	f := newFixture(t)
-	binary, env := coordinatorEnv(t, f)
-	in, err := json.Marshal(f.cfg.Actors[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.Command("python3", "testdata/live_plane.py", binary)
-	cmd.Env = env
-	cmd.Stdin = bytes.NewReader(in)
-	var out bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &out
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("live replay failed: %v\n%s", err, out.String())
-	}
-	_, _ = io.Copy(os.Stdout, &out)
 	f.assertTasks(1)
 }

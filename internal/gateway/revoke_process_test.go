@@ -207,7 +207,7 @@ func revokeProcessEnv(t *testing.T, schema string) revokeEnv {
 	roots.AddCert(cert)
 	apiAddr := freeAddr(t)
 	nodeAddr := apiAddr
-	dbURL := strings.TrimSpace(os.Getenv("BATON_TEST_DATABASE_URL"))
+	dbURL := dbtest.URL()
 	return revokeEnv{
 		dir: dir, certFile: certFile, apiAddr: apiAddr, nodeAddr: nodeAddr, roots: roots,
 		coord: childEnv(map[string]string{

@@ -204,7 +204,7 @@ func startPrepareStackWithBins(t *testing.T, extra map[string]string, coordBin, 
 	roots.AddCert(cert)
 	apiAddr := freeAddr(t)
 	nodeAddr := apiAddr
-	dbURL := strings.TrimSpace(os.Getenv("BATON_TEST_DATABASE_URL"))
+	dbURL := dbtest.URL()
 	coordValues := map[string]string{
 		"BATON_DATABASE_URL":       dbURL,
 		"BATON_DB_SCHEMA":          schema,

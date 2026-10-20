@@ -39,7 +39,7 @@ test('Inbox：真实 Runtime 创建事项，三处处理与轮询、系统解决
   expect((await page.request.patch(projectAPI, { headers, data: { provider: 'openai-codex', model: 'fake-model' } })).ok()).toBe(true)
   const db = new Client({ connectionString: state.databaseURL })
   await db.connect(); await db.query(`SET search_path TO "${state.schema}"`)
-  const proof = process.env.BATON_CAPTURE_INBOX_EVIDENCE === '1' ? path.join(repoRoot, 'specs/agent-inbox/evidence/ps-167') : test.info().outputPath('evidence')
+  const proof = test.info().outputPath('evidence')
   await mkdir(proof, { recursive: true })
   const binDir = path.join(state.workDir, 'inbox-bin')
   const dataDir = path.join(state.workDir, 'inbox-node')

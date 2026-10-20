@@ -13,6 +13,7 @@ const exec = promisify(execFile)
 export const webDir = path.resolve(fileURLToPath(new URL('..', import.meta.url)))
 export const repoRoot = path.resolve(webDir, '..')
 export const statePath = path.join(webDir, '.e2e', 'state.json')
+export const defaultDatabaseURL = 'postgres://postgres:baton@127.0.0.1:5432/baton_test?sslmode=disable'
 
 export type E2EState = {
   baseURL: string
@@ -260,8 +261,7 @@ export async function holdRevocationApplication(state: E2EState): Promise<() => 
 }
 
 export async function setup(): Promise<void> {
-  const databaseURL = process.env.BATON_TEST_DATABASE_URL?.trim() ?? ''
-  if (!databaseURL) throw new Error('BATON_TEST_DATABASE_URL 未设置，端到端测试不能改用模拟数据库')
+  const databaseURL = process.env.BATON_TEST_DATABASE_URL?.trim() || defaultDatabaseURL
   const schema = `e2e${randomBytes(8).toString('hex')}`
   const workDir = path.join(webDir, '.e2e', schema)
   const logDir = path.join(workDir, 'logs')

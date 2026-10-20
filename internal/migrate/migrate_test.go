@@ -16,6 +16,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+const defaultTestDatabaseURL = "postgres://postgres:baton@127.0.0.1:5432/baton_test?sslmode=disable"
+
 func TestScriptKeepsFunctionTriggerDoAndComments(t *testing.T) {
 	pool := openTestDB(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -176,7 +178,7 @@ func openTestDB(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	raw := strings.TrimSpace(os.Getenv("BATON_TEST_DATABASE_URL"))
 	if raw == "" {
-		t.Fatal("BATON_TEST_DATABASE_URL 未设置，集成测试不能改用模拟数据库")
+		raw = defaultTestDatabaseURL
 	}
 	var rawID [8]byte
 	if _, err := rand.Read(rawID[:]); err != nil {

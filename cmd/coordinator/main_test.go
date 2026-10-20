@@ -11,13 +11,13 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"baton/internal/auth"
 	"baton/internal/db"
+	"baton/internal/dbtest"
 	"baton/internal/httpapi"
 	"baton/internal/node"
 	"baton/internal/redact"
@@ -55,10 +55,7 @@ func TestServeRejectsHTTPOriginBeforeDial(t *testing.T) {
 }
 
 func TestCLIMigrateCreateResetAndServeGuard(t *testing.T) {
-	raw := strings.TrimSpace(os.Getenv("BATON_TEST_DATABASE_URL"))
-	if raw == "" {
-		t.Fatal("BATON_TEST_DATABASE_URL 未设置，集成测试不能改用模拟数据库")
-	}
+	raw := dbtest.URL()
 	schema := "cli" + strings.ToLower(strings.ReplaceAll(time.Now().UTC().Format("150405.000000"), ".", ""))
 	getenv := func(key string) string {
 		switch key {

@@ -42,7 +42,7 @@ test('Project 主对话：离线排队、模型失败与恢复、流式预览、
   const db = new Client({ connectionString: state.databaseURL })
   await db.connect()
   await db.query(`SET search_path TO "${state.schema}"`)
-  const proof = process.env.BATON_CAPTURE_PROJECT_EVIDENCE === '1' ? path.join(repoRoot, 'specs/project-agent/evidence/ps-159') : test.info().outputPath('evidence')
+  const proof = test.info().outputPath('evidence')
   await mkdir(proof, { recursive: true })
   try {
     let sent = 0

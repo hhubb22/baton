@@ -4,8 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"net"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,14 +20,47 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Open 使用 BATON_TEST_DATABASE_URL 建立独立 schema 并完成迁移。
-// 未设置该变量或连接失败时测试失败，不改用模拟数据库。
+const DefaultURL = "postgres://postgres:baton@127.0.0.1:5432/baton_test?sslmode=disable"
+
+var ensureLocalOnce sync.Once
+
+// URL 返回测试数据库连接串；未设置 BATON_TEST_DATABASE_URL 时默认使用本地 PostgreSQL。
+func URL() string {
+	if raw := strings.TrimSpace(os.Getenv("BATON_TEST_DATABASE_URL")); raw != "" {
+		return raw
+	}
+	ensureLocalPostgres()
+	return DefaultURL
+}
+
+func ensureLocalPostgres() {
+	ensureLocalOnce.Do(func() {
+		conn, err := net.DialTimeout("tcp", "127.0.0.1:5432", 300*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			return
+		}
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return
+		}
+		pgdata := filepath.Join(home, ".baton-postgres")
+		if _, err := os.Stat(pgdata); err != nil {
+			return
+		}
+		for _, bin := range []string{"pg_ctl", "/opt/homebrew/opt/postgresql@17/bin/pg_ctl", "/usr/local/opt/postgresql@17/bin/pg_ctl"} {
+			if path, err := exec.LookPath(bin); err == nil {
+				_ = exec.Command(path, "-D", pgdata, "-l", filepath.Join(pgdata, "postgres.log"), "start").Run()
+				return
+			}
+		}
+	})
+}
+
+// Open 建立独立 schema 并完成迁移。
 func Open(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	raw := strings.TrimSpace(os.Getenv("BATON_TEST_DATABASE_URL"))
-	if raw == "" {
-		t.Fatal("BATON_TEST_DATABASE_URL 未设置，集成测试不能改用模拟数据库")
-	}
+	raw := URL()
 	schema, err := randomSchema()
 	if err != nil {
 		t.Fatal(err)

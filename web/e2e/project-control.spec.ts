@@ -71,7 +71,7 @@ test('Project 用户派发、运行中取消、暂停恢复及真实 Runtime 的
     await page.getByText('直接派发任务', { exact: true }).click()
     return (await tasks()).find((task) => task.description === description)!
   }
-  const proof = process.env.BATON_CAPTURE_PROJECT_CONTROL_EVIDENCE === '1' ? path.join(repoRoot, 'specs/project-agent/evidence/ps-184') : test.info().outputPath('evidence')
+  const proof = test.info().outputPath('evidence')
   await mkdir(proof, { recursive: true })
   try {
     await settings('active')
