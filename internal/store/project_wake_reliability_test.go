@@ -47,6 +47,7 @@ func TestProjectRunWakeTaskVersionsRotateAndReplayCommittedInputs(t *testing.T) 
 		t.Fatal(err)
 	}
 	seen := make(map[string]int)
+	versions := make(map[string]int64)
 	scan := func() []protocol.ProjectTaskUpdate {
 		t.Helper()
 		commands, err := h.repo.ProjectRunCommands(h.ctx)
@@ -57,7 +58,7 @@ func TestProjectRunWakeTaskVersionsRotateAndReplayCommittedInputs(t *testing.T) 
 			t.Fatalf("缺少 wake: %+v", commands)
 		}
 		c := commands[0].Command
-		if len(c.TaskUpdates) > 32 {
+		if len(c.InputIDs) == 0 || len(c.InputIDs) > 32 || len(c.TaskUpdates) > 32 {
 			t.Fatalf("任务提示超过32: %d", len(c.TaskUpdates))
 		}
 		raw, err := protocol.MarshalJSON(c)
@@ -66,30 +67,38 @@ func TestProjectRunWakeTaskVersionsRotateAndReplayCommittedInputs(t *testing.T) 
 		}
 		unique := map[string]bool{}
 		for _, u := range c.TaskUpdates {
-			if unique[u.TaskID] || expected[u.TaskID] != u.Version {
+			if unique[u.TaskID] || u.Version < 1 || expected[u.TaskID] < u.Version {
 				t.Fatalf("版本或任务去重错误: %+v", u)
 			}
 			unique[u.TaskID] = true
 			seen[u.TaskID]++
+			versions[u.TaskID] = max(versions[u.TaskID], u.Version)
 		}
 		return c.TaskUpdates
 	}
 	first := scan()
-	if len(first) != 32 || seen[lateID] != 0 {
+	if len(first) != 16 || seen[lateID] != 0 {
 		t.Fatal("读取未提交输入或未填充有界批次")
 	}
 	if err = late.Commit(h.ctx); err != nil {
 		t.Fatal(err)
 	}
 	expected[lateID] = 8
-	for range 7 {
+	// 先让每个仍到期的输入获得机会，再推进数据库中的重试时间。
+	for range 4 {
+		scan()
+	}
+	if _, err = h.pool.Exec(h.ctx, "UPDATE project_agent_input_queue SET wake_next_at=clock_timestamp()-interval '1 second' WHERE agent_id=$1", h.project.Agent.ID); err != nil {
+		t.Fatal(err)
+	}
+	for range 5 {
 		scan()
 	}
 	if len(seen) != len(expected) {
 		t.Fatalf("后页任务或晚提交输入饥饿: seen=%d want=%d", len(seen), len(expected))
 	}
 	for id, n := range seen {
-		if n < 2 {
+		if n < 2 || versions[id] != expected[id] {
 			t.Fatalf("未交付输入没有安全重发: %s count=%d", id, n)
 		}
 	}

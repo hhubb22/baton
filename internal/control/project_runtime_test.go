@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -22,10 +23,16 @@ type projectSent struct {
 	env            protocol.Envelope
 }
 
-type projectSender struct{ sent []projectSent }
+type projectSender struct {
+	sent   []projectSent
+	onSend func(protocol.Envelope) error
+}
 
 func (s *projectSender) Send(_ context.Context, nodeID, connID string, env protocol.Envelope) error {
 	s.sent = append(s.sent, projectSent{nodeID, connID, env})
+	if s.onSend != nil {
+		return s.onSend(env)
+	}
 	return nil
 }
 func (*projectSender) DisconnectCredential(string) {}
@@ -106,8 +113,12 @@ func TestProjectRunDeliveryAndAuthenticatedRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.SetSender(sender)
+	s.scheduleProjectRunsPage(ctx, "")
 	for range 2 {
 		s.deliverProjectRuns(ctx)
+		if _, err := pool.Exec(ctx, "UPDATE agent_runs SET command_next_at=clock_timestamp()-interval '1 second'"); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if len(sender.sent) != 2 {
 		t.Fatalf("启动命令数: %d", len(sender.sent))
@@ -144,6 +155,9 @@ func TestProjectRunDeliveryAndAuthenticatedRequests(t *testing.T) {
 	}
 	before := len(sender.sent)
 	s.deliverProjectRuns(ctx)
+	if _, err := pool.Exec(ctx, "UPDATE project_agent_input_queue SET wake_next_at=clock_timestamp()-interval '1 second'"); err != nil {
+		t.Fatal(err)
+	}
 	s.deliverProjectRuns(ctx)
 	wakeIDs := map[string]bool{}
 	for _, sent := range sender.sent[before:] {
@@ -201,6 +215,57 @@ func TestProjectRunDeliveryAndAuthenticatedRequests(t *testing.T) {
 			t.Fatal("停止回执后仍重发停止命令")
 		}
 	}
+	t.Run("receipt_before_send_error", func(t *testing.T) {
+		s.scheduleProjectRunsPage(ctx, "")
+		counts := map[string]int{}
+		sender.onSend = func(env protocol.Envelope) error {
+			if len(s.background) != 0 {
+				t.Fatal("发送时仍占用数据库并发门")
+			}
+			var c protocol.ProjectRunCommand
+			if err := json.Unmarshal(env.Body, &c); err != nil {
+				t.Fatal(err)
+			}
+			counts[c.Type]++
+			req := protocol.ProjectRuntimeRequest{RunID: c.RunID, LeaseEpoch: c.LeaseEpoch}
+			switch c.Type {
+			case protocol.BodyProjectRunStart:
+				var persisted bool
+				if err := pool.QueryRow(ctx, "SELECT command_attempts>0 AND command_next_at>clock_timestamp() FROM agent_runs WHERE id=$1", c.RunID).Scan(&persisted); err != nil || !persisted {
+					t.Fatal("发送前没有保存启动尝试", persisted, err)
+				}
+				req.Operation = "started"
+			case protocol.BodyProjectRunWake:
+				req.Operation = "wake_received"
+				req.Payload, _ = json.Marshal(map[string]any{"input_ids": c.InputIDs})
+			case protocol.BodyProjectRunStop:
+				req.Operation = "stopped"
+			default:
+				t.Fatal("意外的发送类型", c.Type)
+			}
+			if _, err := repo.ProjectRuntime(ctx, src, req); err != nil {
+				t.Fatal("发送返回前的回执失败", err)
+			}
+			return errors.New("injected late send error")
+		}
+		defer func() { sender.onSend = nil }()
+		s.deliverProjectRuns(ctx)
+		s.deliverProjectRuns(ctx)
+		if counts[protocol.BodyProjectRunStart] != 1 || counts[protocol.BodyProjectRunWake] != 1 {
+			t.Fatal("迟到发送错误重开已确认记录", counts)
+		}
+		if err := repo.StopProjectRun(ctx, employee.ID, p.ID); err != nil {
+			t.Fatal(err)
+		}
+		s.deliverProjectRuns(ctx)
+		if _, err := pool.Exec(ctx, "UPDATE agent_runs SET command_next_at=clock_timestamp()-interval '1 second'"); err != nil {
+			t.Fatal(err)
+		}
+		s.deliverProjectRuns(ctx)
+		if counts[protocol.BodyProjectRunStop] != 1 {
+			t.Fatal("迟到发送错误重开停止确认", counts)
+		}
+	})
 	old := src
 	old.ConnID = newID()
 	if err := s.Handle(ctx, old, protocol.Envelope{Body: json.RawMessage(`{"type":"project_runtime.request"}`)}); err == nil {

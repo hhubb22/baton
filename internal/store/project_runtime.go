@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"baton/internal/identity"
@@ -72,6 +73,55 @@ func checkProjectLeaseTime(ctx context.Context, tx pgx.Tx, agentID string, req p
 	return nil
 }
 
+func acknowledgeProjectStop(ctx context.Context, tx pgx.Tx, src protocol.Source, req protocol.ProjectRuntimeRequest) error {
+	if _, err := identity.ParseUUID(req.RunID); err != nil || req.LeaseEpoch < 1 {
+		return projectagent.ErrLeaseLost
+	}
+	// 认证行按 Node → Credential → Presence 锁定，与吊销和节点同步顺序一致。
+	// 持锁期间连接和吊销不能改变；历史 Run 不要求仍持有 Agent 租约。
+	checks := []struct {
+		query string
+		args  []any
+	}{
+		{
+			`SELECT id::text FROM nodes WHERE id=$1 AND employee_id=$2 AND revoked_at IS NULL FOR SHARE`,
+			[]any{src.NodeID, src.EmployeeID},
+		},
+		{
+			`SELECT id::text FROM node_credentials WHERE id=$1 AND node_id=$2 AND employee_id=$3
+ AND revoked_at IS NULL AND expires_at>clock_timestamp() FOR SHARE`,
+			[]any{src.CredentialID, src.NodeID, src.EmployeeID},
+		},
+		{
+			`SELECT node_id::text FROM node_presence WHERE node_id=$1 AND employee_id=$2 AND conn_id=$3 AND online AND synced FOR SHARE`,
+			[]any{src.NodeID, src.EmployeeID, src.ConnID},
+		},
+		{
+			`SELECT id::text FROM agent_runs WHERE id=$1 AND employee_id=$2 AND node_id=$3 AND lease_epoch=$4
+ AND state IN ('finished','lost','failed') FOR UPDATE`,
+			[]any{req.RunID, src.EmployeeID, src.NodeID, req.LeaseEpoch},
+		},
+	}
+	for _, check := range checks {
+		var id string
+		if err := tx.QueryRow(ctx, check.query, check.args...).Scan(&id); errors.Is(err, pgx.ErrNoRows) {
+			return projectagent.ErrLeaseLost
+		} else if err != nil {
+			return err
+		}
+	}
+	// Run 锁等待可能跨过凭据期限，必须在全部锁取得后用数据库时钟再次判断。
+	tag, err := tx.Exec(ctx, `UPDATE agent_runs SET stop_acked_at=COALESCE(stop_acked_at,clock_timestamp())
+ WHERE id=$1 AND EXISTS(SELECT 1 FROM node_credentials WHERE id=$2 AND expires_at>clock_timestamp())`, req.RunID, src.CredentialID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return projectagent.ErrLeaseLost
+	}
+	return nil
+}
+
 func (s *Store) ProjectRuntime(ctx context.Context, src protocol.Source, req protocol.ProjectRuntimeRequest) (any, error) {
 	if req.Operation == "wait_tool" {
 		if data, done, err := s.readProjectToolWait(ctx, src, req); done {
@@ -84,25 +134,8 @@ func (s *Store) ProjectRuntime(ctx context.Context, src protocol.Source, req pro
 	}
 	defer tx.Rollback(ctx)
 	if req.Operation == "stopped" {
-		if _, err = identity.ParseUUID(req.RunID); err != nil {
-			return nil, projectagent.ErrLeaseLost
-		}
-		// 停止回执只确认节点已清理；不能恢复租约或写入对话。
-		var current bool
-		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nodes n JOIN node_credentials c ON c.node_id=n.id JOIN node_presence p ON p.node_id=n.id
-        WHERE n.id=$1 AND n.employee_id=$2 AND c.id=$3 AND c.revoked_at IS NULL AND c.expires_at>clock_timestamp() AND n.revoked_at IS NULL
-        AND p.conn_id=$4 AND p.online AND p.synced)`, src.NodeID, src.EmployeeID, src.CredentialID, src.ConnID).Scan(&current); err != nil {
+		if err = acknowledgeProjectStop(ctx, tx, src, req); err != nil {
 			return nil, err
-		}
-		if !current {
-			return nil, projectagent.ErrLeaseLost
-		}
-		tag, err := tx.Exec(ctx, `UPDATE agent_runs SET stop_acked_at=clock_timestamp() WHERE id=$1 AND employee_id=$2 AND node_id=$3 AND lease_epoch=$4 AND state IN ('finished','lost','failed')`, req.RunID, src.EmployeeID, src.NodeID, req.LeaseEpoch)
-		if err != nil {
-			return nil, err
-		}
-		if tag.RowsAffected() != 1 {
-			return nil, projectagent.ErrLeaseLost
 		}
 		return struct{}{}, tx.Commit(ctx)
 	}
@@ -116,6 +149,9 @@ func (s *Store) ProjectRuntime(ctx context.Context, src protocol.Source, req pro
 	var data any
 	released := false
 	switch req.Operation {
+	case "wake_received":
+		err = acknowledgeProjectWake(ctx, tx, b.agentID, req.Payload)
+		data = struct{}{}
 	case "preview":
 		var p projectagent.Preview
 		if json.Unmarshal(req.Payload, &p) != nil || !utf8.ValidString(p.Text) || strings.ContainsRune(p.Text, 0) || len(p.Text) > 32<<10 {
@@ -133,8 +169,9 @@ func (s *Store) ProjectRuntime(ctx context.Context, src protocol.Source, req pro
 			_, err = tx.Exec(ctx, `UPDATE project_agents SET lease_until=clock_timestamp()+interval '60 seconds' WHERE id=$1 AND lease_until>clock_timestamp()`, b.agentID)
 		}
 		data = struct {
-			LeaseSeconds int `json:"lease_seconds"`
-		}{60}
+			LeaseSeconds    int `json:"lease_seconds"`
+			ControlReceipts int `json:"control_receipts"`
+		}{60, 1}
 	case "bootstrap":
 		data, err = s.bootstrapProjectRun(ctx, tx, b)
 	case "read_events":
@@ -176,7 +213,11 @@ func (s *Store) ProjectRuntime(ctx context.Context, src protocol.Source, req pro
 			err = checkProjectLeaseTime(ctx, tx, b.agentID, req)
 		}
 		if err == nil {
-			err = releaseProjectRun(ctx, tx, b.agentID, state, reason)
+			var grace time.Duration
+			if req.Operation == "finish" || req.Operation == "report_failure" {
+				grace = 2 * time.Second
+			}
+			err = releaseProjectRunAfter(ctx, tx, b.agentID, state, reason, grace)
 			released = true
 		}
 		data = struct{}{}

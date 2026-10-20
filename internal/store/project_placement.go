@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"baton/internal/identity"
 	"baton/internal/inbox"
-	"baton/internal/projectagent"
 	"baton/internal/protocol"
 	"github.com/jackc/pgx/v5"
 )
@@ -17,9 +17,21 @@ const recoveryWork = `(EXISTS(SELECT 1 FROM project_agent_input_queue q WHERE q.
  OR EXISTS(SELECT 1 FROM conversation_events e WHERE e.conversation_id=c.id AND e.seq=(SELECT max(t.seq) FROM conversation_events t WHERE t.conversation_id=c.id AND t.kind<>'compaction')
  AND (e.kind IN ('input','tool_result') OR (e.kind='assistant' AND jsonb_path_exists(e.payload,'$.message.content[*] ? (@.type == "toolCall")')))))`
 
+// 健康租约不占用放置扫描的页额度；断线本身不撤销租约。
+const projectPlacementCandidate = `((a.lease_run_id IS NOT NULL AND
+ (a.lease_until<=clock_timestamp() OR p.status<>'active' OR EXISTS
+ (SELECT 1 FROM agent_runs r JOIN nodes n ON n.id=r.node_id WHERE r.id=a.lease_run_id AND n.revoked_at IS NOT NULL))) OR
+ (a.lease_run_id IS NULL AND p.status='active' AND c.state='active'
+ AND (c.next_attempt_at IS NULL OR c.next_attempt_at<=clock_timestamp()) AND ` + recoveryWork + `))`
+
 func releaseProjectRun(ctx context.Context, tx pgx.Tx, agentID, state, reason string) error {
-	if _, err := tx.Exec(ctx, `UPDATE agent_runs r SET state=$2,ended_at=clock_timestamp(),end_reason=$3
- FROM project_agents a WHERE a.id=$1 AND r.id=a.lease_run_id AND r.state IN ('starting','running')`, agentID, state, reason); err != nil {
+	return releaseProjectRunAfter(ctx, tx, agentID, state, reason, 0)
+}
+
+func releaseProjectRunAfter(ctx context.Context, tx pgx.Tx, agentID, state, reason string, grace time.Duration) error {
+	if _, err := tx.Exec(ctx, `UPDATE agent_runs r SET state=$2,ended_at=clock_timestamp(),end_reason=$3,
+ stop_requested_at=clock_timestamp(),command_next_at=clock_timestamp()+$4::bigint*interval '1 microsecond',command_attempts=0
+ FROM project_agents a WHERE a.id=$1 AND r.id=a.lease_run_id AND r.state IN ('starting','running')`, agentID, state, reason, grace.Microseconds()); err != nil {
 		return err
 	}
 	_, err := tx.Exec(ctx, `UPDATE project_agents SET lease_run_id=NULL,lease_until=NULL WHERE id=$1`, agentID)
@@ -28,8 +40,7 @@ func releaseProjectRun(ctx context.Context, tx pgx.Tx, agentID, state, reason st
 
 func (s *Store) ScheduleProjectRuns(ctx context.Context) error {
 	rows, err := s.pool.Query(ctx, `SELECT a.id::text FROM project_agents a JOIN projects p ON p.id=a.project_id
- JOIN conversations c ON c.agent_id=a.id WHERE a.lease_run_id IS NOT NULL OR
- (p.status='active' AND c.state='active' AND (c.next_attempt_at IS NULL OR c.next_attempt_at<=clock_timestamp()) AND `+recoveryWork+`) ORDER BY a.id`)
+ JOIN conversations c ON c.agent_id=a.id WHERE `+projectPlacementCandidate+` ORDER BY a.id`)
 	if err != nil {
 		return err
 	}
@@ -200,72 +211,11 @@ func (s *Store) scheduleProjectRun(ctx context.Context, agentID string) error {
  VALUES($1,$2,$3,$4,$5,'starting',$6,$7,$8)`, newRun, owner, agentID, chosen, epoch+1, provider, model, reason); err != nil {
 		return err
 	}
+	if _, err = tx.Exec(ctx, `UPDATE project_agent_input_queue SET wake_required=true,wake_next_at=clock_timestamp(),wake_attempts=0
+ WHERE agent_id=$1 AND delivered_seq IS NULL AND source_type IN ('user_message','task_result','attention_answer')`, agentID); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
-}
-
-func (s *Store) ProjectRunCommands(ctx context.Context) ([]projectagent.RunCommand, error) {
-	// 游标只用于轮换提示，不确认交付；重启后仍从全部未交付输入生成提示。
-	s.projectWakeMu.Lock()
-	defer s.projectWakeMu.Unlock()
-	after, err := protocol.MarshalJSON(s.projectWakeAfter)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := s.pool.Query(ctx, `SELECT r.id::text,r.node_id::text,p.conn_id,r.lease_epoch,r.provider,r.model,a.project_id::text,c.id::text,
- CASE WHEN a.lease_run_id IS DISTINCT FROM r.id OR a.lease_until<=clock_timestamp() OR pr.status<>'active' THEN 'project_run_stop'
- WHEN r.state='starting' THEN 'project_run_start' ELSE 'project_run_wake' END,
- COALESCE((SELECT jsonb_agg(u) FROM (
- SELECT q.payload->>'task_id' AS task_id,max((q.payload->>'version')::bigint) AS version
- FROM project_agent_input_queue q WHERE q.agent_id=a.id AND q.delivered_seq IS NULL
- AND q.source_type IN ('task_result','user_task_result')
- GROUP BY q.payload->>'task_id'
- ORDER BY (q.payload->>'task_id'<=COALESCE($1::jsonb->>r.id::text,'')),q.payload->>'task_id' LIMIT 32
- ) u),'[]'::jsonb)
- FROM agent_runs r JOIN project_agents a ON a.id=r.agent_id JOIN projects pr ON pr.id=a.project_id JOIN conversations c ON c.agent_id=a.id
- JOIN node_presence p ON p.node_id=r.node_id WHERE p.online AND p.synced AND
- ((r.stop_acked_at IS NULL AND (a.lease_run_id IS DISTINCT FROM r.id OR a.lease_until<=clock_timestamp() OR pr.status<>'active')) OR
- (a.lease_run_id=r.id AND a.lease_until>clock_timestamp() AND (r.state='starting' OR EXISTS
- (SELECT 1 FROM project_agent_input_queue q WHERE q.agent_id=a.id AND delivered_seq IS NULL AND source_type IN ('user_message','task_result','attention_answer'))))) ORDER BY r.started_at LIMIT 100`, after)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []projectagent.RunCommand{}
-	next := make(map[string]string)
-	for rows.Next() {
-		var c projectagent.RunCommand
-		var updates []byte
-		if err = rows.Scan(&c.Command.RunID, &c.NodeID, &c.ConnID, &c.Command.LeaseEpoch, &c.Command.Provider, &c.Command.Model, &c.Command.ProjectID, &c.Command.ConversationID, &c.Command.Type, &updates); err != nil {
-			return nil, err
-		}
-		if c.Command.Type == protocol.BodyProjectRunWake {
-			if err = json.Unmarshal(updates, &c.Command.TaskUpdates); err != nil {
-				return nil, err
-			}
-			for {
-				raw, err := protocol.MarshalJSON(c.Command)
-				if err != nil {
-					return nil, err
-				}
-				if len(raw) <= protocol.MaxProjectRuntimeBytes-1024 {
-					break
-				}
-				if len(c.Command.TaskUpdates) == 0 {
-					return nil, projectagent.ErrTooLarge
-				}
-				c.Command.TaskUpdates = c.Command.TaskUpdates[:len(c.Command.TaskUpdates)-1]
-			}
-			if n := len(c.Command.TaskUpdates); n > 0 {
-				next[c.Command.RunID] = c.Command.TaskUpdates[n-1].TaskID
-			}
-		}
-		out = append(out, c)
-	}
-	if err = rows.Err(); err != nil {
-		return nil, err
-	}
-	s.projectWakeAfter = next
-	return out, nil
 }
 
 func (s *Store) RetryProject(ctx context.Context, owner, projectID string) error {

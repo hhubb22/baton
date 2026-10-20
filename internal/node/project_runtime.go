@@ -5,8 +5,10 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"os"
@@ -29,63 +31,80 @@ const projectRuntimeRenewInterval = 20 * time.Second
 const projectRuntimeLeaseDeadline = 58 * time.Second
 
 type projectRuntimeManager struct {
-	ctx           context.Context
-	cancel        context.CancelFunc
-	ledger        *Ledger
-	reports       *runtimeReports
-	mu            sync.Mutex
-	closed        bool
-	loop          *startLoop
-	runs          map[string]*projectRuntimeProcess
-	wg            sync.WaitGroup
-	renewInterval time.Duration
-	leaseDeadline time.Duration
-	clock         startpermit.Timer
+	ctx             context.Context
+	cancel          context.CancelFunc
+	ledger          *Ledger
+	reports         *runtimeReports
+	mu              sync.Mutex
+	closed          bool
+	loop            *startLoop
+	runs            map[string]*projectRuntimeProcess
+	wg              sync.WaitGroup
+	renewInterval   time.Duration
+	leaseDeadline   time.Duration
+	clock           startpermit.Timer
+	controlReceipts bool
+	wakeReceipts    chan projectWakeReceipt
+	cleanupReady    chan struct{}
 }
 
 type projectRuntimeProcess struct {
-	command   protocol.ProjectRunCommand
-	token     string
-	wake      chan struct{}
-	done      chan struct{}
-	finished  chan struct{}
-	stop      func()
-	lastRenew atomic.Int64
-	ctx       context.Context
-	cancel    context.CancelFunc
-	stopped   bool
-	started   bool
-	taskMu    sync.Mutex
-	taskWaits map[string]*projectTaskWait
-	taskCalls map[string]*projectTaskCall
+	command        protocol.ProjectRunCommand
+	token          string
+	wake           chan struct{}
+	done           chan struct{}
+	finished       chan struct{}
+	stop           func()
+	lastRenew      atomic.Int64
+	ctx            context.Context
+	cancel         context.CancelFunc
+	stopped        bool
+	started        bool
+	cleanupFailed  bool
+	cleanupPending bool
+	taskMu         sync.Mutex
+	taskWaits      map[string]*projectTaskWait
+	taskCalls      map[string]*projectTaskCall
 }
 
 func newProjectRuntimeManager(ctx context.Context, ledger *Ledger) (*projectRuntimeManager, error) {
-	if _, err := ledger.db.Exec(`CREATE TABLE IF NOT EXISTS project_runtime_runs (run_id TEXT PRIMARY KEY, lease_epoch INTEGER NOT NULL, state TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '')`); err != nil {
+	if _, err := execProjectRuntime(ctx, ledger.db, `CREATE TABLE IF NOT EXISTS project_runtime_runs (run_id TEXT PRIMARY KEY, lease_epoch INTEGER NOT NULL, state TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '')`); err != nil {
 		return nil, err
 	}
-	// 启动意图在创建进程前提交；崩溃后不重复启动同一 run。进程守护随 batond 管道关闭终止遗留进程。
-	if _, err := ledger.db.Exec(`UPDATE project_runtime_runs SET state='exited', reason='batond_restarted' WHERE state IN ('starting','running')`); err != nil {
+	if err := ensureProjectRuntimeCleanup(ledger.db); err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	return &projectRuntimeManager{ctx: ctx, cancel: cancel, ledger: ledger, runs: map[string]*projectRuntimeProcess{}, renewInterval: projectRuntimeRenewInterval, leaseDeadline: projectRuntimeLeaseDeadline, clock: startpermit.NewClock()}, nil
+	m := &projectRuntimeManager{ctx: ctx, cancel: cancel, ledger: ledger, runs: map[string]*projectRuntimeProcess{}, renewInterval: projectRuntimeRenewInterval, leaseDeadline: projectRuntimeLeaseDeadline, clock: startpermit.NewClock(), wakeReceipts: make(chan projectWakeReceipt, 64), cleanupReady: make(chan struct{}, 1)}
+	m.wg.Add(2)
+	go func() { defer m.wg.Done(); m.wakeReceiptLoop() }()
+	go func() { defer m.wg.Done(); m.cleanupReceiptLoop() }()
+	return m, nil
 }
 
 func (m *projectRuntimeManager) setLoop(loop *startLoop) {
 	m.mu.Lock()
+	if m.loop != loop {
+		m.controlReceipts = false
+	}
 	m.loop = loop
 	m.mu.Unlock()
+	m.signalCleanup()
 }
 
 func (m *projectRuntimeManager) close() {
 	m.mu.Lock()
 	m.closed = true
 	m.cancel()
+	var stops []func()
 	for _, p := range m.runs {
-		p.stop()
+		p.stopped = true
+		stops = append(stops, p.stop)
 	}
 	m.mu.Unlock()
+	for _, stop := range stops {
+		stop()
+	}
 	m.wg.Wait()
 }
 
@@ -97,6 +116,10 @@ func (m *projectRuntimeManager) call(ctx context.Context, req protocol.ProjectRu
 	m.mu.Lock()
 	loop := m.loop
 	m.mu.Unlock()
+	return m.callOnLoop(ctx, req, loop)
+}
+
+func (m *projectRuntimeManager) callOnLoop(ctx context.Context, req protocol.ProjectRuntimeRequest, loop *startLoop) protocol.ProjectRuntimeResult {
 	if loop == nil {
 		return projectRuntimeFailure("unavailable")
 	}
@@ -113,11 +136,26 @@ func (m *projectRuntimeManager) call(ctx context.Context, req protocol.ProjectRu
 	if json.Unmarshal(raw, &result) != nil || result.Type != protocol.BodyProjectRuntimeResult {
 		return projectRuntimeFailure("unavailable")
 	}
+	if result.OK && (req.Operation == "started" || req.Operation == "renew") {
+		var data struct {
+			ControlReceipts int `json:"control_receipts"`
+		}
+		_ = json.Unmarshal(result.Data, &data)
+		m.mu.Lock()
+		if m.loop == loop {
+			m.controlReceipts = data.ControlReceipts == 1
+		}
+		m.mu.Unlock()
+	}
 	return result
 }
 
 func (m *projectRuntimeManager) report(command protocol.ProjectRunCommand, operation, reason string) protocol.ProjectRuntimeResult {
-	ctx, cancel := context.WithTimeout(m.ctx, 5*time.Second)
+	return m.reportContext(m.ctx, command, operation, reason)
+}
+
+func (m *projectRuntimeManager) reportContext(parent context.Context, command protocol.ProjectRunCommand, operation, reason string) protocol.ProjectRuntimeResult {
+	ctx, cancel := context.WithTimeout(parent, projectReceiptTimeout)
 	defer cancel()
 	return m.call(ctx, protocol.ProjectRuntimeRequest{RunID: command.RunID, LeaseEpoch: command.LeaseEpoch, Operation: operation, Reason: reason})
 }
@@ -135,6 +173,10 @@ func (m *projectRuntimeManager) handle(env protocol.Envelope) bool {
 	if _, err := identity.ParseUUID(command.RunID); err != nil || command.LeaseEpoch <= 0 {
 		return true
 	}
+	if command.Type == protocol.BodyProjectRunWake {
+		m.receiveWake(command)
+		return true
+	}
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()
@@ -147,9 +189,13 @@ func (m *projectRuntimeManager) handle(env protocol.Envelope) bool {
 }
 
 func (m *projectRuntimeManager) command(command protocol.ProjectRunCommand) {
+	if command.Type == protocol.BodyProjectRunWake {
+		m.receiveWake(command)
+		return
+	}
 	m.mu.Lock()
 	if p := m.runs[command.RunID]; p != nil {
-		if p.command.LeaseEpoch != command.LeaseEpoch {
+		if p.command.LeaseEpoch != command.LeaseEpoch || p.stopped && command.Type != protocol.BodyProjectRunStop {
 			m.mu.Unlock()
 			return
 		}
@@ -164,19 +210,13 @@ func (m *projectRuntimeManager) command(command protocol.ProjectRunCommand) {
 		case "project_run_stop":
 			p.stopped = true
 			p.stop()
-		case "project_run_wake":
-			p.notifyTaskWaits(command.TaskUpdates)
-			select {
-			case p.wake <- struct{}{}:
-			default:
-			}
 		}
 		started := p.started
 		finished := p.finished
 		m.mu.Unlock()
 		if command.Type == "project_run_stop" {
 			<-finished
-			m.report(command, "stopped", "")
+			m.signalCleanup()
 		}
 		if command.Type == "project_run_start" && started {
 			m.report(command, "started", "")
@@ -184,15 +224,21 @@ func (m *projectRuntimeManager) command(command protocol.ProjectRunCommand) {
 		return
 	}
 	if command.Type != "project_run_start" {
+		if command.Type == "project_run_stop" {
+			// 只有全新身份可以保存未启动证明；旧行缺少证据时保持未知。
+			_, _ = execProjectRuntime(m.ctx, m.ledger.db, `INSERT INTO project_runtime_runs(run_id,lease_epoch,state,reason,cleanup_complete) VALUES(?,?,'exited','stopped_before_start',1) ON CONFLICT(run_id) DO NOTHING`, command.RunID, command.LeaseEpoch)
+		}
 		m.mu.Unlock()
 		if command.Type == "project_run_stop" {
-			m.report(command, "stopped", "")
+			m.signalCleanup()
 		}
 		return
 	}
 	var epoch int64
 	var state, reason string
-	err := m.ledger.db.QueryRow(`SELECT lease_epoch,state,reason FROM project_runtime_runs WHERE run_id=?`, command.RunID).Scan(&epoch, &state, &reason)
+	ctx, cancel := context.WithTimeout(m.ctx, time.Second)
+	err := m.ledger.db.QueryRowContext(ctx, `SELECT lease_epoch,state,reason FROM project_runtime_runs WHERE run_id=?`, command.RunID).Scan(&epoch, &state, &reason)
+	cancel()
 	if err == nil {
 		m.mu.Unlock()
 		if epoch == command.LeaseEpoch {
@@ -204,28 +250,43 @@ func (m *projectRuntimeManager) command(command protocol.ProjectRunCommand) {
 		}
 		return
 	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		m.mu.Unlock()
+		return
+	}
 	if len(m.runs) >= 4 {
 		m.mu.Unlock()
 		m.report(command, "start_failed", "capacity_exceeded")
 		return
 	}
-	if _, err = m.ledger.db.Exec(`INSERT INTO project_runtime_runs(run_id,lease_epoch,state) VALUES(?,?,'starting')`, command.RunID, command.LeaseEpoch); err != nil {
+	if _, err = execProjectRuntime(m.ctx, m.ledger.db, `INSERT INTO project_runtime_runs(run_id,lease_epoch,state) VALUES(?,?,'starting')`, command.RunID, command.LeaseEpoch); err != nil {
 		m.mu.Unlock()
 		return
 	}
-	token := make([]byte, 32)
-	if _, err = rand.Read(token); err != nil {
-		m.mu.Unlock()
-		m.failed(command, "unavailable")
-		return
-	}
-	p := &projectRuntimeProcess{command: command, token: hex.EncodeToString(token), wake: make(chan struct{}, 1), done: make(chan struct{}), finished: make(chan struct{}), stop: func() {}}
+	p := &projectRuntimeProcess{command: command, wake: make(chan struct{}, 1), done: make(chan struct{}), finished: make(chan struct{}), stop: func() {}}
 	p.ctx, p.cancel = context.WithCancel(m.ctx)
 	m.runs[command.RunID] = p
 	m.mu.Unlock()
-	defer p.cancel()
 	defer close(p.finished)
-	defer func() { m.mu.Lock(); delete(m.runs, command.RunID); m.mu.Unlock() }()
+	defer func() {
+		p.cancel()
+		m.mu.Lock()
+		p.stopped = true
+		p.cleanupPending = !p.cleanupFailed
+		if p.cleanupFailed {
+			delete(m.runs, command.RunID)
+		}
+		m.mu.Unlock()
+		if !p.cleanupFailed {
+			m.persistCleanup(context.WithoutCancel(m.ctx), p)
+		}
+	}()
+	token := make([]byte, 32)
+	if _, err = rand.Read(token); err != nil {
+		m.failed(command, "unavailable")
+		return
+	}
+	p.token = hex.EncodeToString(token)
 	probe := probeProjectRuntime(m.ctx)
 	available := false
 	if probe != nil {
@@ -266,7 +327,7 @@ func (m *projectRuntimeManager) command(command protocol.ProjectRunCommand) {
 }
 
 func (m *projectRuntimeManager) failed(command protocol.ProjectRunCommand, reason string) {
-	_, _ = m.ledger.db.Exec(`UPDATE project_runtime_runs SET state='failed',reason=? WHERE run_id=?`, reason, command.RunID)
+	_, _ = execProjectRuntime(m.ctx, m.ledger.db, `UPDATE project_runtime_runs SET state='failed',reason=? WHERE run_id=?`, reason, command.RunID)
 	m.report(command, "start_failed", reason)
 }
 
@@ -298,7 +359,11 @@ func (m *projectRuntimeManager) run(p *projectRuntimeProcess) error {
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(control)
+	defer func() {
+		if os.RemoveAll(control) != nil {
+			p.cleanupFailed = true
+		}
+	}()
 	if err := privatefile.ProtectDir(control); err != nil {
 		return err
 	}
@@ -314,7 +379,11 @@ func (m *projectRuntimeManager) run(p *projectRuntimeProcess) error {
 		return err
 	}
 	defer ln.Close()
-	defer os.Remove(endpoint)
+	defer func() {
+		if err := os.Remove(endpoint); err != nil && !os.IsNotExist(err) {
+			p.cleanupFailed = true
+		}
+	}()
 	cmd, err := sidecar.Command(p.ctx, "project-agent", projectRuntimeVersion, "baton-project-runtime", "run")
 	if err != nil {
 		return err
@@ -356,7 +425,7 @@ func (m *projectRuntimeManager) run(p *projectRuntimeProcess) error {
 	p.started = true
 	m.mu.Unlock()
 	defer stop()
-	_, _ = m.ledger.db.Exec(`UPDATE project_runtime_runs SET state='running' WHERE run_id=?`, p.command.RunID)
+	_, _ = execProjectRuntime(m.ctx, m.ledger.db, `UPDATE project_runtime_runs SET state='running' WHERE run_id=?`, p.command.RunID)
 	stdioDone := make(chan struct{})
 	go func() {
 		defer close(stdioDone)
@@ -381,13 +450,17 @@ func (m *projectRuntimeManager) run(p *projectRuntimeProcess) error {
 	ipcDone := make(chan struct{})
 	go func() { defer close(ipcDone); m.serve(ln, p) }()
 	defer func() { _ = ln.Close(); <-ipcDone }()
+	var reports sync.WaitGroup
+	defer reports.Wait()
 	startedResult := make(chan protocol.ProjectRuntimeResult, 1)
+	reports.Add(1)
 	go func(result chan<- protocol.ProjectRuntimeResult) {
+		defer reports.Done()
 		if _, err := m.leaseTime(p); err != nil {
 			result <- projectRuntimeFailure("lease_lost")
 			return
 		}
-		result <- m.report(p.command, "started", "")
+		result <- m.reportContext(p.ctx, p.command, "started", "")
 	}(startedResult)
 	renew := time.NewTicker(m.renewInterval)
 	defer renew.Stop()
@@ -439,8 +512,7 @@ func (m *projectRuntimeManager) run(p *projectRuntimeProcess) error {
 			<-p.done
 			return nil
 		case <-p.done:
-			_, _ = m.ledger.db.Exec(`UPDATE project_runtime_runs SET state='exited',reason='runtime_exited' WHERE run_id=?`, p.command.RunID)
-			m.report(p.command, "exited", "runtime_exited")
+			_, _ = execProjectRuntime(m.ctx, m.ledger.db, `UPDATE project_runtime_runs SET state='exited',reason='runtime_exited' WHERE run_id=?`, p.command.RunID)
 			return nil
 		case initial := <-startedResult:
 			startedResult = nil
@@ -459,14 +531,16 @@ func (m *projectRuntimeManager) run(p *projectRuntimeProcess) error {
 			}
 			if !renewBusy {
 				renewBusy = true
+				reports.Add(1)
 				go func() {
+					defer reports.Done()
 					// 协程恢复执行时也须先核对期限，不能在休眠后先发送续租。
 					started, err := m.leaseTime(p)
 					if err != nil {
 						renewResult <- renewal{clockErr: err}
 						return
 					}
-					renewResult <- renewal{result: m.report(p.command, "renew", ""), started: started}
+					renewResult <- renewal{result: m.reportContext(p.ctx, p.command, "renew", ""), started: started}
 				}()
 			}
 		case renewed := <-renewResult:

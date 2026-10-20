@@ -27,7 +27,8 @@ type Server struct {
 	log             *slog.Logger
 	sender          gateway.Sender
 	mu              sync.Mutex
-	pending         map[string]chan prepareNotice
+	backgroundOnce  sync.Once
+	background      chan struct{}
 	fileWait        map[string]chan fileNotice
 	sessionWaiters  map[string]chan sessionNotice
 	budget          *protocol.Budget
@@ -45,7 +46,7 @@ func New(st *store.Store, signer node.Signer, log *slog.Logger, budgets ...*prot
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &Server{budget: budget, store: st, signer: signer, public: pub, log: log, pending: map[string]chan prepareNotice{}, fileWait: map[string]chan fileNotice{}}, nil
+	return &Server{budget: budget, store: st, signer: signer, public: pub, log: log, fileWait: map[string]chan fileNotice{}}, nil
 }
 
 // SetSender 在开放监听前设置一次，业务层不持有传输连接。
@@ -134,7 +135,7 @@ func (s *Server) onEnvelope(ctx context.Context, connID string, raw json.RawMess
 		s.onChildDelivery(ctx, connID, env)
 		return
 	case protocol.BodyPrepareResult:
-		s.notePrepareResult(env)
+		s.notePrepareResult(ctx, env)
 		return
 	case protocol.BodyStartPermit:
 		s.onStartPermit(ctx, connID, env)

@@ -206,20 +206,21 @@ func TestCoordinatorReplyCompatibility(t *testing.T) {
 	for _, name := range []string{"prepare", "file", "session"} {
 		for _, variant := range []string{"extra", "missing", "wrong_type"} {
 			t.Run(name+"/"+variant, func(t *testing.T) {
-				s := &Server{pending: map[string]chan prepareNotice{}, log: slog.New(slog.DiscardHandler)}
+				s := &Server{log: slog.New(slog.DiscardHandler)}
 				env := protocol.Envelope{CorrelationID: "request", Source: &protocol.Source{Kind: protocol.SourceNode, NodeID: "node"}}
 				accepted := false
 				switch name {
 				case "prepare":
-					ch, cancel := s.armPrepare("request")
-					defer cancel()
-					want := protocol.PrepareResult{Type: protocol.BodyPrepareResult, OK: true, TaskID: "task", SessionID: "session"}
-					env.Body = compatibilityBody(t, want, variant)
-					s.notePrepareResult(env)
-					select {
-					case got := <-ch:
-						accepted = got.result == want
-					default:
+					h := newPrepareControl(t)
+					src := h.addNode("compatibility")
+					intent := h.accept(src, "compatibility")
+					want := protocol.PrepareResult{Type: protocol.BodyPrepareResult, OK: true,
+						TaskID: intent.TaskID, ExecutionID: intent.ExecutionID,
+						SessionID: compatibilityID(t), StorageGeneration: compatibilityID(t)}
+					env = protocol.Envelope{CorrelationID: intent.MessageID, Source: &src, Body: compatibilityBody(t, want, variant)}
+					h.server.notePrepareResult(t.Context(), env)
+					if err := h.pool.QueryRow(t.Context(), `SELECT prepared_at IS NOT NULL FROM executions WHERE id = $1::uuid`, intent.ExecutionID).Scan(&accepted); err != nil {
+						t.Fatal(err)
 					}
 				case "file":
 					ch, cancel := s.armFile("request")

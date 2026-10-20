@@ -313,7 +313,7 @@ func markHandedOff(t *testing.T, ctx context.Context, pool *pgxpool.Pool, taskID
 	}
 	tag, err := pool.Exec(ctx, `
 		UPDATE dispatch_outbox
-		SET attempts = 1, send_deadline = now() - interval '1 second', lease_until = NULL
+		SET attempts = 1, may_have_been_sent = true, next_attempt_at = now(), send_deadline = now() - interval '1 second', lease_until = NULL
 		WHERE task_id = $1::uuid AND acked_at IS NULL`, taskID)
 	if err != nil || tag.RowsAffected() != 1 {
 		t.Fatalf("标记已交给 Relay 失败: %v", err)

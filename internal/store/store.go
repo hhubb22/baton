@@ -44,8 +44,6 @@ type Store struct {
 	beforeCommit       func(context.Context) error
 	beforeStartCommit  func(context.Context) error
 	beforeCancelCommit func(context.Context) error
-	projectWakeMu      sync.Mutex
-	projectWakeAfter   map[string]string
 }
 
 var _ identity.Directory = (*Store)(nil)

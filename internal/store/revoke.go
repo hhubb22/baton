@@ -196,11 +196,20 @@ func (s *Store) DefaultDeviceState(ctx context.Context, employeeID string) (Defa
 
 // PendingRevocationSet 是尚未被 Gateway 确认的吊销，用于进程内应用和启动恢复。
 func (s *Store) PendingRevocationSet(ctx context.Context) (creds, nodes []protocol.Revocation, credentialIDs []string, err error) {
+	return s.pendingRevocationSet(ctx, 0)
+}
+
+// PendingRevocationBatch 限制周期维护每次处理的记录数。
+func (s *Store) PendingRevocationBatch(ctx context.Context) (creds, nodes []protocol.Revocation, credentialIDs []string, err error) {
+	return s.pendingRevocationSet(ctx, 32)
+}
+
+func (s *Store) pendingRevocationSet(ctx context.Context, limit int) (creds, nodes []protocol.Revocation, credentialIDs []string, err error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT credential_id::text, node_id::text, requested_at
 		FROM node_revocations
 		WHERE applied_at IS NULL
-		ORDER BY requested_at, credential_id`)
+		ORDER BY requested_at, credential_id LIMIT NULLIF($1::integer, 0)`, limit)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("读取吊销记录失败: %s", redact.Scrub(err.Error()))
 	}

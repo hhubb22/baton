@@ -198,8 +198,8 @@ func (s *Store) AcceptProjectMessage(ctx context.Context, employeeID, projectID 
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	sourceKey := "user:" + in.ClientMessageID
-	err = tx.QueryRow(ctx, `INSERT INTO project_agent_input_queue(employee_id, agent_id, source_type, source_key, payload, payload_hash)
-        VALUES($1,$2,'user_message',$3,$4,$5) ON CONFLICT(agent_id, source_key) DO NOTHING
+	err = tx.QueryRow(ctx, `INSERT INTO project_agent_input_queue(employee_id, agent_id, source_type, source_key, payload, payload_hash, wake_required)
+        VALUES($1,$2,'user_message',$3,$4,$5,true) ON CONFLICT(agent_id, source_key) DO NOTHING
         RETURNING id, payload->>'content', created_at`, employeeID, p.Agent.ID, sourceKey, payload, digest[:]).Scan(&out.ID, &out.Content, &out.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		err = tx.QueryRow(ctx, `SELECT id, payload->>'content', created_at FROM project_agent_input_queue

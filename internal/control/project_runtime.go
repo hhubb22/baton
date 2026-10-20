@@ -56,51 +56,110 @@ func (s *Server) onProjectRuntimeRequest(ctx context.Context, connID string, env
 	s.replyExecution(ctx, connID, env, result)
 }
 
-// DeliverProjectRuns 每秒取得租约并重发启动、停止和唤醒命令，投递事实由节点回执保存。
-func (s *Server) DeliverProjectRuns(ctx context.Context) {
+// ScheduleProjectRunsLoop 独立执行放置与租约回收，每次数据库操作共用后台并发门。
+func (s *Server) ScheduleProjectRunsLoop(ctx context.Context) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
+	after := ""
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.deliverProjectRuns(ctx)
+			after = s.scheduleProjectRunsPage(ctx, after)
+		}
+	}
+}
+
+func (s *Server) scheduleProjectRunsPage(ctx context.Context, after string) string {
+	var ids []string
+	if err := s.backgroundDB(ctx, func(dbctx context.Context) (err error) {
+		ids, err = s.store.ListProjectRunCandidates(dbctx, after, 32)
+		return err
+	}); err != nil {
+		s.log.Error("event=project_run_scan_failed")
+		return after
+	}
+	for _, id := range ids {
+		if ctx.Err() != nil {
+			return after
+		}
+		if err := s.backgroundDB(ctx, func(dbctx context.Context) error {
+			return s.store.ScheduleProjectRun(dbctx, id)
+		}); err != nil {
+			s.log.Error("event=project_run_schedule_failed", "agent_id", id)
+		}
+		after = id
+	}
+	if len(ids) < 32 {
+		return ""
+	}
+	return after
+}
+
+// DeliverProjectRuns 每秒独立领取三类命令，持久化重试进度后立即入队。
+func (s *Server) DeliverProjectRuns(ctx context.Context) {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	order := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.deliverProjectRunsInOrder(ctx, order)
+			order = (order + 1) % 3
 		}
 	}
 }
 
 func (s *Server) deliverProjectRuns(ctx context.Context) {
-	if err := s.store.ScheduleProjectRuns(ctx); err != nil {
-		s.log.Error("event=project_run_schedule_failed")
+	s.deliverProjectRunsInOrder(ctx, 0)
+}
+
+func (s *Server) deliverProjectRunsInOrder(ctx context.Context, order int) {
+	kinds := []string{protocol.BodyProjectRunStart, protocol.BodyProjectRunStop, protocol.BodyProjectRunWake}
+	for i := range kinds {
+		if ctx.Err() != nil {
+			return
+		}
+		var commands []projectagent.RunCommand
+		if err := s.backgroundDB(ctx, func(dbctx context.Context) (err error) {
+			commands, err = s.store.ClaimProjectRunCommands(dbctx, kinds[(order+i)%len(kinds)])
+			return err
+		}); err != nil {
+			s.log.Error("event=project_run_commands_failed", "kind", kinds[(order+i)%len(kinds)])
+			continue
+		}
+		// 数据库并发门已经释放；入队错误由持久化的下一次尝试时间处理。
+		for _, command := range commands {
+			s.sendProjectRunCommand(ctx, command)
+		}
 	}
-	commands, err := s.store.ProjectRunCommands(ctx)
-	if err != nil {
-		s.log.Error("event=project_run_commands_failed")
+}
+
+func (s *Server) sendProjectRunCommand(ctx context.Context, command projectagent.RunCommand) {
+	messageID := command.Command.RunID
+	if command.Command.Type != protocol.BodyProjectRunStart {
+		var err error
+		messageID, err = identity.NewUUID()
+		if err != nil {
+			return
+		}
+	}
+	body, err := protocol.MarshalJSON(command.Command)
+	if err != nil || len(body) > protocol.MaxProjectRuntimeBytes {
+		s.log.Error("event=project_run_command_invalid", "run_id", command.Command.RunID)
 		return
 	}
-	for _, command := range commands {
-		messageID := command.Command.RunID
-		if command.Command.Type != protocol.BodyProjectRunStart {
-			messageID, err = identity.NewUUID()
-			if err != nil {
-				return
-			}
-		}
-		body, err := protocol.MarshalJSON(command.Command)
-		if err != nil || len(body) > protocol.MaxProjectRuntimeBytes {
-			s.log.Error("event=project_run_command_invalid", "run_id", command.Command.RunID)
-			continue
-		}
-		env, err := protocol.MarshalJSON(protocol.Envelope{
-			Version: protocol.Version, MessageID: messageID,
-			Route: protocol.Route{To: command.NodeID}, Priority: protocol.PriorityControl, Body: body,
-		})
-		if err != nil {
-			continue
-		}
-		if err := s.send(ctx, command.ConnID, protocol.Frame{Kind: protocol.KindEnvelope, Envelope: env}); err != nil {
-			s.log.Info("event=project_run_send_failed", "node_id", command.NodeID, "run_id", command.Command.RunID)
-		}
+	env, err := protocol.MarshalJSON(protocol.Envelope{
+		Version: protocol.Version, MessageID: messageID,
+		Route: protocol.Route{To: command.NodeID}, Priority: protocol.PriorityControl, Body: body,
+	})
+	if err != nil {
+		return
+	}
+	if err := s.send(ctx, command.ConnID, protocol.Frame{Kind: protocol.KindEnvelope, Envelope: env}); err != nil {
+		s.log.Info("event=project_run_send_failed", "node_id", command.NodeID, "run_id", command.Command.RunID)
 	}
 }

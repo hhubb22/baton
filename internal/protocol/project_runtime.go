@@ -25,6 +25,7 @@ type ProjectRunCommand struct {
 	ProjectID      string              `json:"project_id,omitempty"`
 	ConversationID string              `json:"conversation_id,omitempty"`
 	TaskUpdates    []ProjectTaskUpdate `json:"task_updates,omitempty"`
+	InputIDs       []int64             `json:"input_ids,omitempty"`
 }
 
 // ProjectRuntimeRequest 的运行身份由 batond 根据私有 IPC 绑定填写。

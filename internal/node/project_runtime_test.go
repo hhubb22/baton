@@ -213,6 +213,7 @@ func TestProjectRuntimeBindingWakeAndPersistentDedup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(second.close)
 	second.setLoop(m.loop)
 	second.command(command)
 	waitProjectRequest(t, requests, "exited")

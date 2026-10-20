@@ -60,7 +60,9 @@ pi-agent-core 只包含 Agent Loop、工具执行和事件流（`packages/agent/
 
 batond 启动命令为 `baton-project-runtime run`，工作目录是私有空目录。环境中的 `BATON_PROJECT_RUNTIME_ENDPOINT`、`BATON_PROJECT_RUNTIME_TOKEN`、`BATON_PROJECT_RUN_ID`、`BATON_PROJECT_LEASE_EPOCH` 只用于本次运行。本地 IPC 每个连接发送一条 `{token, request}` JSON，响应为 `ProjectRuntimeResult`；batond 校验 token 后覆盖请求的运行身份，Runtime 不能自行发送续租或启动回执。`poll_wake` 最长等待 25 秒，返回 `{wake:true|false}`；Runtime 闲置时可重复调用。
 
-节点管理请求为 `started`、`renew`、`start_failed`、`exited`、`stopped`。`started` / `renew` 成功返回 `{lease_seconds:60}`。`stopped` 只确认已结束运行的进程清理，重复回执幂等；它不能恢复租约或修改对话。启动前先检查 provider，再向中心确认租约；启动意图先写入 SQLite，同一 run 在 batond 重启后不会重启进程。Unix 使用随 batond 管道关闭而停止进程组的守护，Windows 使用关闭时终止整个组的 Job Object。连接重建保留当前 Runtime，续租仍受 58 秒期限限制。期限使用包含系统休眠的单调时钟，最多每秒检查一次；机器唤醒后先核对旧期限，再发送或接受续租。读取时钟失败时停止进程。
+节点管理请求为 `started`、`renew`、`start_failed`、`exited`、`stopped`、`wake_received`，Runtime IPC 不能调用这些操作。`started` / `renew` 成功返回 `{lease_seconds:60,control_receipts:1}`；能力字段缺失时，batond 沿用旧中心通知方式。`stopped` 只确认已结束运行的进程清理，重复回执幂等；它不能恢复租约或修改对话。进程树回收、本地 IPC 和目录收尾结束后，batond 在 SQLite 保存清理事实，再主动补送 `exited` / `stopped`，失败保留到期重试。暂时写入失败时保留有界本机清理事实继续补写；重启或旧账本缺少清理证据时保持未确认。
+
+启动前先检查 provider，再向中心确认租约；启动意图先写入 SQLite，同一 run 在 batond 重启后不会重启进程。Unix 使用随 batond 管道关闭而停止进程组的守护，Windows 使用关闭时终止整个组的 Job Object。连接重建保留当前 Runtime，续租仍受 58 秒期限限制。期限使用包含系统休眠的单调时钟，最多每秒检查一次；机器唤醒后先核对旧期限，再发送或接受续租。读取时钟失败时停止进程。
 
 控制帧 JSON 采用 UTF-8 编码，容量不包含 HTML 页面转义。每批同时检查数据库规范文本、消息拼接后的传输字节及事件上限，因此含引号、反斜线等字符时可能提前结束一批。任务结果文本按 UTF-8 边界保留首尾，并注明原字节数；元数据与 JSON 编码后的条目仍限制为 40 KiB。长 Project 目标的通知在 4 KiB 内保留首尾并标明截断，完整目标由 Project API 返回。
 
@@ -133,15 +135,17 @@ PS-155 通过 0016 交付 Project、Agent、主对话、事件、记忆和输入
 
 ### 4. 运行流程
 
-**放置。** Coordinator 每秒扫描一次：Project 为 active、对话为 active 且已过 `next_attempt_at`、有待处理的主动输入、租约为空或已过期的 Agent。只有被动输入时不放置。上次运行已领取输入但对话结尾仍为 input、tool_result 或带工具调用的 assistant 时，同样视为尚未完成的主动轮次，租约过期或失败退避结束后可从中心历史恢复。对每个这样的 Agent 选一台节点：属于同一用户、在线且已同步、报告里有 Runtime、Agent 配置的 provider 处于已登录状态、该节点正在运行的 Runtime 少于上限（默认 4）。默认设备满足条件时选默认设备，否则按注册顺序选第一台。
+**放置。** Coordinator 每秒分页选择需要回收或放置的 Agent，每次最多 32 个；健康且租约有效的运行不占候选额度。待放置 Project 为 active、对话为 active 且已过 `next_attempt_at`、有待处理的主动输入、租约为空或已过期。只有被动输入时不放置。上次运行已领取输入但对话结尾仍为 input、tool_result 或带工具调用的 assistant 时，同样视为尚未完成的主动轮次，租约过期或失败退避结束后可从中心历史恢复。对每个这样的 Agent 选一台节点：属于同一用户、在线且已同步、报告里有 Runtime、Agent 配置的 provider 处于已登录状态、该节点正在运行的 Runtime 少于上限（默认 4）。默认设备满足条件时选默认设备，否则按注册顺序选第一台。
 
-**取得租约。** 一个事务里锁定 `project_agents` 行，确认租约为空或已过期，`lease_epoch` 加一，写 `lease_run_id` 和 `lease_until = now() + 60s`，插入 `agent_runs`（`state = starting`）。`dispatch_outbox` 的每一行都绑定 `task_id` 和 `execution_id`，不能直接复用；`agent_runs` 自己记录投递状态，发送循环对处于 `starting` 的运行按 `run_id` 作为稳定消息 ID 重发 `project_run_start`，直到 batond 回执。batond 在本地 SQLite 里按 `run_id` 去重，同一 run 不会启动两个进程。启动前 batond 先执行一次 `probe`：所需 provider 已经不是登录状态时，拒绝启动并更新能力报告，Coordinator 以 `login_required` 结束这次运行，不计入失败次数，扫描会在下一轮选择其他节点。
+**取得租约。** 一个事务里锁定 `project_agents` 行，确认租约为空或已过期，`lease_epoch` 加一，写 `lease_run_id` 和 `lease_until = now() + 60s`，插入 `agent_runs`（`state = starting`）。`dispatch_outbox` 的每一行都绑定 `task_id` 和 `execution_id`，不能直接复用；`agent_runs` 自己记录投递进度。start、stop、wake 分别领取，每类每秒最多 32 条、每节点最多两条，节点额度在全局 LIMIT 前应用。领取先保存下一次尝试时间，再向 Gateway 入队，按最多 30 秒的抖动退避重试；发送循环不等待回包。处于 `starting` 的运行以 `run_id` 为稳定消息 ID 重发 `project_run_start`，直到 batond 回执。batond 在本地 SQLite 里按 `run_id` 去重，同一 run 不会启动两个进程。启动前 batond 先执行一次 `probe`：所需 provider 已经不是登录状态时，拒绝启动并更新能力报告，Coordinator 以 `login_required` 结束这次运行，不计入失败次数，扫描会在下一轮选择其他节点。
 
 **续租。** Runtime 进程存活期间，batond 每 20 秒发送一次续租。Coordinator 只在 `(run_id, lease_epoch)` 仍是当前值且未过期时，把 `lease_until` 延长到 `now() + 60s`。batond 按单调时钟计时：从最后一次续租成功起超过 58 秒仍未续上，就停止 Runtime 进程。租约过期后，旧实例的任何请求都返回 `lease_lost`，Runtime 收到后立即退出。
 
-**停止。** Project 被暂停或归档、运行所在节点被吊销、员工在界面上停止运行时，Coordinator 作废租约（`lease_epoch` 不变，清空 `lease_run_id`），并向节点发送 `project_run_stop`。batond 收到后停止 Runtime。即使停止消息没有送达，旧实例的下一次请求也会因租约失效被拒绝。
+**停止。** Project 被暂停或归档、运行所在节点被吊销、员工在界面上停止运行时，Coordinator 在同一事务作废租约（`lease_epoch` 不变，清空 `lease_run_id`）并保存停止意图，独立发送 `project_run_stop`。batond 收到后停止 Runtime，已结束的运行补送原清理确认。自然 `finish` / `report_failure` 给节点 2 秒主动清理确认宽限；其他停止立即到期。只有 `stopped` 回执确认清理，业务终态和新运行租约保持不变。停止重试只查询待确认索引，不与 start / wake 共用批次。即使停止消息没有送达，旧实例的下一次请求也会因租约失效被拒绝。
 
-**唤醒。** 新的主动输入写入后，如果该 Agent 有有效运行，Coordinator 向其节点发送 `project_run_wake`，batond 转给 Runtime。通知可能丢失；Runtime 在每轮结束时都会主动领取一次，所以丢失通知最多延迟到下一轮或闲置期结束。
+**唤醒。** 主动输入与业务变化同事务保存 `wake_required` 和到期时间，来源去重不重新打开通知。有效 running run 的每条 `project_run_wake` 最多包含 32 个 `input_ids`，并从这些输入构造原有 `task_updates`。batond 合并通用唤醒和任务版本后，通过容量 64 的异步回执队列发送 `wake_received`；队列满或回执丢失时由中心退避重发。接收确认只按本条消息的输入 ID 清除通知需求，不设置 `delivered_seq`，不追加对话事件，也不续租。同一轮执行期间，新消息可以保持未认领且已停止重复通知。
+
+新 run 在 Agent 锁下重新提示全部未认领主动输入，旧 run 的迟到回执不能清除新 run 的通知。通知确认不使用 sequence 最大值作为提交水位。只有被动输入时不发送 wake。Runtime 每轮结束主动领取，任务等待仍有最多 25 秒本地等待后的持久状态补读；通知不代替业务结果。完整字段和故障恢复规则见[控制面调度设计](../control-dispatch-reliability/TECH.md)。
 
 **Runtime 主循环。**
 

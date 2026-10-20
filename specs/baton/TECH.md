@@ -172,7 +172,7 @@ erDiagram
 | `tasks` | 0005 | 请求与解析后的目标、父任务、来源/目标 Session、状态和当前结果；0014 加产物要求，0017 加 Project/对话来源 | 任务：`store/task.go` 的 `insertAccepted`；结果：`store/result.go` 的 `applyResult` | API：`store/task_view.go` 的 `GetTaskView`；Agent：`store/agent.go` 的 `AgentTask` |
 | `executions` | 0005 | `task_id` 唯一的执行身份、节点、存储代次、准备、许可、输入代次与开始时间 | 任务/控制：`store/task.go` 的 `insertAccepted`、`store/dispatch.go` 的 `SavePrepared`、`store/start.go` 的 `decideStart` | 控制/上报：`store/start.go` 的 `lockExec`、`store/result.go` 的 `lockExecution` |
 | `task_events` | 0005 | 按任务版本保存状态变化；0009～0010 加执行和停止事实，0012 加人工核实与重新执行内容 | 任务/结果：`store/task.go` 的 `insertAccepted`、`store/result.go` 的 `insertReportEvent`；核实：`store/resolve.go` | API：`store/task.go` 的 `ListTaskEvents`；上报去重：`store/result.go` 的 `ApplyExecutionReport` |
-| `dispatch_outbox` | 0005 | Task、Execution、节点的 prepare 投递意图、租约、次数与 ACK | 接受/分派：`store/task.go` 的 `insertAccepted`、`store/dispatch.go` 的 `ClaimPrepare`、`ackOutbox` | 分派循环：`store/dispatch.go` 的 `ClaimPrepare` |
+| `dispatch_outbox` | 0005、0023 | Task、Execution、节点的 prepare 意图、投递租约、下一次尝试时间、可能发送事实与 ACK | 接受：`store/task.go` 的 `insertAccepted`；领取与回执：`store/dispatch.go` 的 `ClaimPrepares`、`SavePrepared`、`ackOutbox` | 非阻塞分派：`control/prepare.go`；无效意图退役：`RetirePrepares` |
 | `request_tombstones` | 0005 | 员工与 request_id 唯一的请求摘要、原 task_id；保留去重身份 | 任务：`store/task.go` 的 `insertAccepted` | 重试：同文件 `loadTombstone` |
 | `sessions` | 0006 | 员工节点上的执行 Session、原生 ID、父 Session、状态和当前绑定执行 | 准备/结果：`store/dispatch.go` 的 `upsertPreparedSession`、`store/result.go` 的 `applyResult` | API：`store/session.go` 的 `ListSessions`、`GetSession`；Agent：`store/agent.go` 的 `validateAgentSource` |
 | `task_relations` | 0006 | 每个任务的来源任务/Session、目标 Session；0012 加 `rerun_of_task_id` | 任务/准备：`store/task.go` 的 `insertAccepted`、`store/dispatch.go` 的 `SavePrepared`；重跑：`store/resolve.go` 的 `RerunTask` | Agent：`store/agent.go` 的 `AgentTask`、`AgentRelations`；任务：`store/task.go` 的 `loadTask` |
@@ -188,10 +188,10 @@ erDiagram
 | `project_agents` | 0016 | 每项目唯一的 Agent、模型配置及当前运行租约 | 创建/配置：`store/project.go` 的 `CreateProject`、`PatchProject`；调度：`store/project_placement.go` 的 `scheduleProjectRun` | Runtime：`store/project_runtime.go` 的 `validateProjectRun`；调度：`scheduleProjectRun` |
 | `conversations` | 0016 | 每个 Agent 唯一的主对话、事件序号、压缩位置、失败与重试状态 | 创建：`store/project.go` 的 `CreateProject`；输入/响应：`store/project_runtime.go` 的 `claimProjectInputs`、`appendProjectAssistant` | API：`store/project.go` 的 `Project`；Runtime：`store/project_runtime.go` 的 `validateProjectRun` |
 | `conversation_events` | 0016 | 主对话中只追加的输入、助手响应与工具结果；主键为对话 ID 与 seq | Runtime：`store/project_runtime.go` 的 `claimProjectInputs`、`appendProjectAssistant`；`store/project_tools.go` 的 `callProjectTool` | API：`store/project.go` 的 `ProjectEvents`；Runtime：`store/project_runtime.go` 的 `readProjectRunEvents` |
-| `project_agent_input_queue` | 0016 | Agent 的离线输入、通知、来源去重键与领取后事件序号 | 用户：`store/project.go` 的 `AcceptProjectMessage`；通知：`store/project_inputs.go` 的 `insertProjectInput` | Runtime：`store/project_runtime.go` 的 `claimProjectInputs`；调度：`store/project_placement.go` 的 `scheduleProjectRun` |
+| `project_agent_input_queue` | 0016、0024 | 输入、来源去重键、领取事件序号及逐条通知接收进度 | 用户：`store/project.go` 的 `AcceptProjectMessage`；通知：`store/project_inputs.go` 的 `insertProjectInput` | 领取：`claimProjectInputs`；提示与确认：`store/project_delivery.go` |
 | `project_memory_entries` | 0016 | Project 的记忆条目标题与当前修订指针 | API/工具：`store/project_memory.go` 的 `writeProjectMemoryTx` | API：同文件 `ProjectMemory`、`ListProjectMemory`；工具：`store/project_tools.go` 的 `executeProjectTool` |
 | `project_memory_revisions` | 0016 | 只追加的记忆正文修订、作者及来源事件序号 | API/工具：`store/project_memory.go` 的 `writeProjectMemoryTx` | API：同文件 `ProjectMemory`、`ListProjectMemory`；历史修订：`store/project_tools.go` 的 `executeProjectTool` |
-| `agent_runs` | 0017 | Agent 在节点上的一次 Runtime 运行、租约代次、模型快照和结束原因 | 调度：`store/project_placement.go` 的 `scheduleProjectRun`、`releaseProjectRun`；Runtime：`store/project_runtime.go` 的 `ProjectRuntime` | 调度：`store/project_placement.go` 的 `ProjectRunCommands`；Runtime：`store/project_runtime.go` 的 `validateProjectRun` |
+| `agent_runs` | 0017、0024 | Runtime 运行、租约代次、模型快照、结束原因、停止意图和命令重试时间 | 放置：`store/project_placement.go`；命令领取：`store/project_delivery.go`；回执：`store/project_runtime.go` | 启动/停止独立到期索引；Runtime 请求继续验证有效租约 |
 | `attention_requests` | 0018 | Project 的 Agent 提案或两种系统事项、状态和处理版本；可选任务引用保存原结果版本与快照 | 工具/系统状态：`inbox/requests.go` 的 `CreateAgent`、`CreateSystem`、`ResolveSystem`；处理/撤回/归档：同文件 `Process`、`Withdraw`、`Archive` | API：`store/inbox.go` 的 `Inbox`、`AttentionRequest`；工具：同文件 `executeInboxTool` |
 | `task_acceptances` | 0019 | 员工对 Task 某版本的通过/拒绝和评论 | 验收 API：`store/acceptance.go` 的 `AcceptResult` | API：同文件 `ListAcceptances`；Plane 快照：0019 的 `plane_snapshot_task` |
 | `plane_outbox` | 0019 | 外键关联触发轮次与 Task，保存任务版本快照、重试、领取和外部评论确认 | 数据库：0019 的 `plane_snapshot_task`，由 `plane_task_changed`、`plane_task_linked` 触发；Plane：`plane/writeback.go` 的 `retryWritebacks` | Plane：同文件 `claimWriteback`、`writeComment` |
@@ -200,7 +200,11 @@ erDiagram
 
 ### 节点本地 SQLite
 
-batond 独占写节点 `node.db`：`internal/node/ledger.go` 的 `nodeSchema` 创建 `meta`（存储代次等）、`receipts`（Task/Execution 到 Session 的 prepare 接收映射）、`sessions`（本地绑定）、`workers`（进程索引）；`internal/node/agent.go` 的 `ensureAgentSchema` 创建 `agent_contexts`（本地委托凭据摘要与执行绑定）；`internal/node/project_runtime.go` 的 `newProjectRuntimeManager` 创建 `project_runtime_runs`（run_id 与 lease_epoch 的启动去重）。这些 ID 分别对应中心 Task、Execution、Session 和 `agent_runs`，跨库关联由协议检查，中心收到准备事实后通过 `SavePrepared` 记录存储代次与 Session。
+batond 独占写节点 `node.db`：`internal/node/ledger.go` 的 `nodeSchema` 创建 `meta`（存储代次等）、`receipts`（Task/Execution 到 Session 的 prepare 接收映射）、`sessions`（本地绑定）、`workers`（进程索引）；`internal/node/agent.go` 的 `ensureAgentSchema` 创建 `agent_contexts`（本地委托凭据摘要与执行绑定）；`internal/node/project_runtime.go` 的 `newProjectRuntimeManager` 创建 `project_runtime_runs`（run_id 与 lease_epoch 的启动去重）。
+
+`project_runtime_runs` 同时保存进程清理完成、中心确认及补送退避。进程树回收和本地收尾结束后，节点先保存事实再主动补送 `exited` / `stopped`；暂时写入失败时保留本机清理事实继续补写，发送失败则按账本到期时间重试。旧账本或重启后缺少清理证据的运行保持未确认，内存中没有运行实例不能单独证明已经清理。
+
+这些 ID 分别对应中心 Task、Execution、Session 和 `agent_runs`，跨库关联由协议检查，中心收到准备事实后通过 `SavePrepared` 记录存储代次与 Session。
 
 每个 Session 的 Worker 独占写另一份 SQLite：`internal/session/ledger.go` 的 `createWorkerSchema` 创建 `meta`（执行、许可、输入意图和代次）、`writes`（追加记录）、`execution_log`（本地输入/结果记录）、`outbox`（待中心确认的事件）；`internal/session/child_delivery.go` 的 `ensureChildSchema` 创建 `child_deliveries`（子结果与本地交付状态）、`native_delivery_checks`（原生历史核查标记）；`internal/session/browser.go` 的 `browserInputLocked` 按需创建 `browser_inputs`（补充输入操作 ID、摘要和状态）。`outbox.event_id` 对应中心 `task_events.id`，结果上报还生成同 ID 的 `delivery_records`；中心提交 ACK 后，`workerDB.Ack` 才确认本地交付。两端 `child_deliveries` 通过 delivery_id 对应，中心 `RecordChildReceipt` 接收本地交付事实。`sqlite_sequence` 是 SQLite 为自增列维护的内部表。完整原生 Agent 历史仍由 Agent 保存在节点文件中。
 
@@ -395,6 +399,8 @@ Gateway 根据认证结果构造 `employee_id`、`node_id`、`credential_id`，�
 `Send` 成功只表示进入有界发送队列。持久化命令仍由中心或节点保存后返回业务 ACK；数据库事务、dispatch_outbox、稳定 message_id/event_id、节点与 Worker 账本及终态保护均保留。消息入队、网络发送、节点接收和实际执行分别处理。临时历史、输出和输入 RPC 不进入持久业务 outbox；补充输入确认丢失时查询原 operation_id，不自动补发正文。
 
 删除 Relay 与 Coordinator 之间的控制拨号、控制 Token、快照传输与 ACK、在线会话快照传输及对应重连。进程内连接事件替代这些同步协议；启动清理旧 presence、加载吊销状态和业务 ACK 仍然保留。删除范围以跨进程用途为准，不能整删 internal/control 或所有确认消息。
+
+持久化派发、期限维护和 Project 放置分别运行。prepare 每 200ms 最多领取 32 条，每节点一个未过期投递租约；start、stop、wake 每秒分别领取，每类最多 32 条、每节点最多两条。节点额度在全局 LIMIT 前应用，旧停止记录不会占用新启动或其他节点的全部额度。领取事务先保存下一次尝试时间，提交后入队，不等待回包；prepare 回包按持久化关联 ID 保存，迟到回包也能幂等处理。后台数据库调用默认最多 1 秒，并发最多 4 个且不超过连接池的一半（最小 1）；发送不占数据库名额。各期限扫描独立且不重叠，Coordinator 退出时取消并等待循环结束。字段、退避和故障不变量见[控制面调度设计](../control-dispatch-reliability/TECH.md)。
 
 新增消息类型（2026-10-18 修订）：节点上行的 `ProjectRuntimeRequest`，携带 `run_id` 和 `lease_epoch`，处理方式与 `AgentRequest` 相同；中心下行的 `project_run_start`、`project_run_wake`、`project_run_stop`。旧版本 batond 不认识这些类型时明确拒绝，Coordinator 不会把 Project Agent 放到这样的节点上。
 

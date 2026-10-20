@@ -9,7 +9,24 @@ import (
 
 // DispatchRevocations 在持久化决定后禁止本地接入并关闭连接，再记录生效事实。
 func (s *Server) DispatchRevocations(ctx context.Context) error {
-	creds, _, ids, err := s.store.PendingRevocationSet(ctx)
+	return s.dispatchRevocations(ctx, false)
+}
+
+func (s *Server) dispatchRevocations(ctx context.Context, background bool) error {
+	run := func(fn func(context.Context) error) error { return fn(ctx) }
+	if background {
+		run = func(fn func(context.Context) error) error { return s.backgroundDB(ctx, fn) }
+	}
+	var creds []protocol.Revocation
+	var ids []string
+	err := run(func(ctx context.Context) (err error) {
+		if background {
+			creds, _, ids, err = s.store.PendingRevocationBatch(ctx)
+		} else {
+			creds, _, ids, err = s.store.PendingRevocationSet(ctx)
+		}
+		return err
+	})
 	if err != nil || len(ids) == 0 {
 		return err
 	}
@@ -19,7 +36,7 @@ func (s *Server) DispatchRevocations(ctx context.Context) error {
 	for _, cred := range creds {
 		s.sender.DisconnectCredential(cred.ID)
 	}
-	return s.store.MarkRevocationsApplied(ctx, ids)
+	return run(func(ctx context.Context) error { return s.store.MarkRevocationsApplied(ctx, ids) })
 }
 
 func (s *Server) send(ctx context.Context, connID string, frame protocol.Frame) error {

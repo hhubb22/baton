@@ -296,6 +296,30 @@ func TestProjectRuntimeRealProcessesPlacementPagingAndWake(t *testing.T) {
 	if !wakeResult.OK || !strings.Contains(string(wakeResult.Data), `"wake":true`) {
 		t.Fatalf("未唤醒原 Runtime：%s %s", wake.Response, wake.Error)
 	}
+	// 节点接收确认先于模型领取，确认不会生成输入事件。
+	receiptDeadline := time.Now().Add(8 * time.Second)
+	received := false
+	for time.Now().Before(receiptDeadline) {
+		var required bool
+		var deliveredSeq *int64
+		if err := st.pool.QueryRow(context.Background(), `SELECT wake_required,delivered_seq FROM project_agent_input_queue WHERE agent_id=$1 AND source_key='user:second'`, project.Agent.ID).Scan(&required, &deliveredSeq); err != nil {
+			t.Fatal(err)
+		}
+		if deliveredSeq != nil {
+			t.Fatal("wake 接收确认提前认领了输入")
+		}
+		if !required {
+			received = true
+			break
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	if !received {
+		t.Fatal("节点未独立确认 wake 接收")
+	}
+	if result := p.call(t, runID, "forged-wake-receipt", protocol.ProjectRuntimeRequest{Operation: "wake_received", Payload: json.RawMessage(`{"input_ids":[1]}`)}, nil); result.OK || result.Code != "invalid_request" {
+		t.Fatalf("Runtime 越过节点管理边界确认通知：%+v", result)
+	}
 	if r := p.call(t, runID, "claim-second", protocol.ProjectRuntimeRequest{Operation: "claim_inputs", LastSeq: claim.Event.Seq}, &claim); !r.OK || claim.Event == nil || claim.InputCount != 1 {
 		t.Fatalf("新输入未领取：%+v %+v", r, claim)
 	}
@@ -342,6 +366,24 @@ func TestProjectRuntimeRealProcessesPlacementPagingAndWake(t *testing.T) {
 	}
 	if processAlive(started.PID) == nil {
 		t.Fatal("finish 后 Runtime 仍然存活")
+	}
+	cleanupDeadline := time.Now().Add(8 * time.Second)
+	cleaned := false
+	for time.Now().Before(cleanupDeadline) {
+		var state, reason string
+		if err := st.pool.QueryRow(context.Background(), `SELECT stop_acked_at IS NOT NULL,state,end_reason FROM agent_runs WHERE id=$1`, runID).Scan(&cleaned, &state, &reason); err != nil {
+			t.Fatal(err)
+		}
+		if state != "finished" || reason != "idle" {
+			t.Fatalf("清理确认修改业务终态：%s/%s", state, reason)
+		}
+		if cleaned {
+			break
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	if !cleaned {
+		t.Fatal("节点清理完成未补送停止确认")
 	}
 	t.Logf("真实 Coordinator/Gateway/batond 和 Runtime 契约进程：epoch=%d，历史 %d 字节、%d 页；被动放置、主动领取、唤醒、重连去重和 finish 通过", epoch, bytesRead, pages)
 }

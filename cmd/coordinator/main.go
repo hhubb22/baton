@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -188,8 +189,6 @@ func cmdServe(ctx context.Context, stderr io.Writer, getenv func(string) string)
 		if err := ctrl.DispatchRevocations(ctx); err != nil {
 			return err
 		}
-		go gw.Run(ctx)
-
 		api, err := httpapi.New(pool, httpapi.Settings{
 			OutputBudget:      outputBudget,
 			Origins:           cfg.AllowedOrigins,
@@ -244,8 +243,19 @@ func cmdServe(ctx context.Context, stderr io.Writer, getenv func(string) string)
 			}
 			errCh <- apiSrv.Serve(apiLn)
 		}()
-		go ctrl.DeliverPrepares(ctx)
-		go ctrl.DeliverProjectRuns(ctx)
+		loopCtx, cancelLoops := context.WithCancel(ctx)
+		var loops sync.WaitGroup
+		for _, runLoop := range []func(context.Context){gw.Run, ctrl.DeliverMaintenance, ctrl.DeliverPrepares, ctrl.ScheduleProjectRunsLoop, ctrl.DeliverProjectRuns} {
+			loops.Add(1)
+			go func() {
+				defer loops.Done()
+				runLoop(loopCtx)
+			}()
+		}
+		defer func() {
+			cancelLoops()
+			loops.Wait()
+		}()
 		if planeHook != nil {
 			retryCtx, cancel := context.WithCancel(ctx)
 			done := make(chan struct{})

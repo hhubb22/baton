@@ -284,7 +284,7 @@ func TestProjectCommandCompatibility(t *testing.T) {
 		t.Run(variant, func(t *testing.T) {
 			command := projectCommand()
 			command.Type = protocol.BodyProjectRunWake
-			p := &projectRuntimeProcess{command: command, wake: make(chan struct{}, 1)}
+			p := &projectRuntimeProcess{command: command, ctx: t.Context(), wake: make(chan struct{}, 1)}
 			m := &projectRuntimeManager{runs: map[string]*projectRuntimeProcess{command.RunID: p}}
 			m.handle(protocol.Envelope{Body: nodeCompatibilityBody(t, command, variant, "run_id")})
 			m.wg.Wait()
