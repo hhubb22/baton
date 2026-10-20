@@ -225,6 +225,8 @@ Runtime 使用 `append_compaction` 提交 `{last_seq,client_event_id,payload:{th
 
 视图构造负责让消息角色顺序符合各 provider 的要求，例如开头消息和保留部分的第一条 `input` 相邻时合并成一条 user 消息。
 
+模型接口边界把固定工具名中的点号映射为下划线，例如 `memory.search` 发出为 `memory_search`；工具定义、历史调用和结果使用同一映射。模型返回的工具名在保存 assistant 和执行工具之前还原，Coordinator 的协议和原始事件继续使用点号名称。正文与工具参数不参与名称替换。正常请求和摘要请求共用这一转换。
+
 #### 6.4 项目记忆不放进前缀
 
 项目记忆可能在一轮中被修改。如果把它放进系统提示词，每次修改都会让缓存失效。所以系统提示词只告诉模型有哪些记忆工具；记忆索引在每次压缩时写进开头消息，平时通过 `memory.search` 和 `memory.read` 获取。

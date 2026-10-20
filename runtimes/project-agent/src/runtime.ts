@@ -19,6 +19,7 @@ import {
 } from "./protocol.js";
 import { FINISH_THRESHOLD, REQUEST_THRESHOLD, CLEAR_TARGET, contextTokens, clearedResults, summaryThrough, summaryContext } from "./compaction.js";
 import { toolDefinitions } from "./tools.js";
+import { requestContext, responseMessage } from "./model-tools.js";
 
 export const IDLE_MS = 180_000;
 export const RUN_MS = 900_000;
@@ -239,7 +240,7 @@ export class ProjectRuntime {
         let result: AssistantMessage | undefined;
         for (let attempt = 0; ; attempt++) {
           try {
-            const stream = this.models.streamSimple(model, context, {
+            const stream = this.models.streamSimple(model, requestContext(context), {
               sessionId: this.boot.project.conversation.id, maxTokens: 32000, maxRetries: 0, toolChoice: "none",
             });
             for await (const _ of stream) { /* 摘要只在完整生成并保存后进入上下文。 */ }
@@ -285,7 +286,7 @@ export class ProjectRuntime {
       for (let attempt = 0; ; attempt++) {
         let message: AssistantMessage | undefined;
         try {
-          const stream = this.models.streamSimple(requestModel, context, {
+          const stream = this.models.streamSimple(requestModel, requestContext(context), {
             ...options,
             maxTokens: 32000,
             maxRetries: 0,
@@ -309,7 +310,7 @@ export class ProjectRuntime {
               }
             }
           }
-          message = await stream.result();
+          message = responseMessage(await stream.result());
           if (
             message.stopReason === "error" ||
             message.stopReason === "aborted"

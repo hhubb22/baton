@@ -1,0 +1,36 @@
+{
+  "model": "openai/gpt-6.1-sol",
+  "normalPrefixSHA256": "8085d7b983bdf85ee6f51103612039814fdb991a4cf2aba557f6d08cebe7d9b5",
+  "summaryPrefixSHA256": "8085d7b983bdf85ee6f51103612039814fdb991a4cf2aba557f6d08cebe7d9b5",
+  "prefixEqual": true,
+  "normalUsage": {
+    "input": 18732,
+    "output": 6,
+    "cacheRead": 0,
+    "cacheWrite": 0,
+    "reasoning": 0,
+    "totalTokens": 18738,
+    "cost": {
+      "input": 0.037464,
+      "output": 6.000000000000001e-05,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "total": 0.037523999999999995
+    }
+  },
+  "summaryUsage": {
+    "input": 284,
+    "output": 434,
+    "cacheRead": 18560,
+    "cacheWrite": 0,
+    "reasoning": 46,
+    "totalTokens": 19278,
+    "cost": {
+      "input": 0.0005679999999999999,
+      "output": 0.00434,
+      "cacheRead": 0.0018560000000000002,
+      "cacheWrite": 0,
+      "total": 0.006764
+    }
+  }
+}

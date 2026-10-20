@@ -20,7 +20,7 @@ batond 检查版本 `0.1.0`、登录状态和租约后，在空控制目录启�
 
 `prompt_version=1` 选择固定的角色提示词，标题和目标来自当前对话的提示词快照。快照随 assistant 的 `pi-ai/1` payload 一起保存；恢复时复用最早保留的快照。后续压缩写入新快照时才采用新的标题和目标。未知版本拒绝运行。
 
-每次模型请求都根据 Coordinator 的事件重建历史，保留 provider 的签名、reasoning 和扩展字段，递归排序对象键。`sessionId` 为主对话 ID，`maxTokens=32000`，关闭 provider 内部重试。错误或超过 160 KiB 的回复不保存，分别等待 5、15、45 秒重试，仍失败时调用 `report_failure`。
+每次模型请求都根据 Coordinator 的事件重建历史，保留 provider 的签名、reasoning 和扩展字段，递归排序对象键。模型接口中的工具名使用下划线，例如 `memory_search`；返回的调用在保存和执行前还原为中心使用的 `memory.search`，正文与参数保持原样。`sessionId` 为主对话 ID，`maxTokens=32000`，关闭 provider 内部重试。错误或超过 160 KiB 的回复不保存，分别等待 5、15、45 秒重试，仍失败时调用 `report_failure`。
 
 assistant 的 `message_end` 监听器先等待 `append_event` 提交，再按消息内的顺序发出 `call_tool`。每个工具结果由 Coordinator 保存；后续模型请求使用中心保存的结果。Runtime 的工具执行模式为 `sequential`。恢复时读取已有结果，只为缺少结果的工具调用发送原 ID；对话结尾为 input 或 tool_result 时调用 `continue()`，结尾为无工具 assistant 或 compaction 时领取下一批输入。
 
@@ -42,3 +42,5 @@ BATON_TEST_NODE_PROJECT_RUNTIME=1 go test -v -count=1 ./internal/gateway -run 'T
 ```
 
 这些测试通过实际 Runtime 验证 assistant 保存、工具事务和正常收尾。压缩进程测试使用八轮约 400 KiB 的历史和接近 32 KiB 的工具结果，检查摘要与只读原文恢复。压缩提交前后的子进程故障注入和 15 类工具输出的恢复另由 Runtime 与 Store 测试覆盖，包含 nodes.exec 命令输出的原文与 tasks.get 读取。三设备端到端场景由 PA-W08 验证。
+
+真实订阅缓存观察见 [PS-161 验证记录](../../specs/project-agent/evidence/ps-161/README.md)：`openai/gpt-6.1-sol` 摘要请求读取 18,560 个缓存 token，实际请求前缀比较通过。

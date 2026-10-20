@@ -1,6 +1,6 @@
 # PS-161 验证记录
 
-初始验证基线：`badc7c8`。当前已 rebase 到 `42228d8`，保留 PS-184 提示词及 PS-162 的 nodes.exec、wait_tool，按合并后的提示词和工具定义重新生成请求快照。Runtime 32 项测试及类型检查通过。验证使用独立 PostgreSQL 17，测试自行创建并清理 schema。
+初始验证基线：`badc7c8`。当前已 rebase 到 `42228d8`，保留 PS-184 提示词及 PS-162 的 nodes.exec、wait_tool，按合并后的提示词和工具定义重新生成请求快照。Runtime 34 项测试及类型检查通过。验证使用独立 PostgreSQL 17，测试自行创建并清理 schema。
 
 ## 验收对应证据
 
@@ -25,6 +25,20 @@ BATON_TEST_NODE_PROJECT_RUNTIME=1 go test -v -count=1 ./internal/store ./interna
 BATON_TEST_PROJECT_CACHE=1 pnpm exec tsx test/cache-live.ts
 ```
 
-脚本使用 Runtime 的凭据存储接口和 Pi 的 `openai/gpt-6.1-sol` 订阅，复用生产代码的摘要请求构造。正常请求与摘要请求使用相同模型、提示词、工具定义、消息前缀和会话 ID；摘要追加指令并禁用工具。仅输出前缀 SHA-256 和 usage，要求 `summaryUsage.cacheRead > 0`。测试数据为脚本生成的对话；此命令不执行 Baton 工具。
+脚本使用 Runtime 的凭据存储接口和 Pi 的 `openai/gpt-6.1-sol` 订阅，复用生产代码的摘要请求构造。正常请求与摘要请求使用相同模型、提示词、工具定义、消息前缀和会话 ID；摘要追加指令并禁用工具。观察函数比较 Pi 序列化后的实际请求体，包含模型、系统提示词、工具、input 前缀和会话缓存键，检查摘要 tool_choice 为 none。仅输出前缀 SHA-256 和 usage，要求 `summaryUsage.cacheRead > 0`。测试数据为脚本生成的对话；此命令不执行 Baton 工具。
 
-真实订阅观察尚未运行：等待测试订阅的 1Password 引用或已登录 Runtime 订阅的使用说明。
+2026-10-20 使用本地 Pi 已登录的 openai / ChatGPT 订阅完成观察。通过 Pi 原生 AuthStorage 注入 `observeCache(models)`，刷新由原生存储加锁保存；凭据没有复制到临时文件或仓库。测试只使用脚本生成的对话，不执行 Baton 工具。
+
+[脱敏 usage 证据](cache-usage.json)：正常请求 input=18,732、output=6、cacheRead=0；摘要请求 input=284、output=434、cacheRead=18,560。两次实际请求前缀的 SHA-256 均为 `8085d7b983bdf85ee6f51103612039814fdb991a4cf2aba557f6d08cebe7d9b5`，断言通过。
+
+模型接口使用 `memory_search` 等下划线名称，保存和执行时还原中心的点号名称。`model-tools.test.ts` 使用实际 OpenAI provider 的 HTTP 序列化验证所有工具名合法，并验证别名调用还原后只执行一次，正文与参数不改写。请求摘要快照按该边界转换重新生成；PS-184 提示词和 PS-162 的工具定义保持完整。
+
+Windows 浏览目录初始化失败由独立 Windows 排查继续处理；本次缓存验收不对该失败作根因结论。
+
+工具名兼容修复后的验证：在 `runtimes/project-agent` 运行 `pnpm test`，34 项通过；`pnpm check` 通过。`go build ./...`、`go vet ./...` 通过。使用独立 PostgreSQL 17.11，以下真实进程测试通过：
+
+```sh
+BATON_TEST_NODE_PROJECT_RUNTIME=1 go test -v -count=1 ./internal/gateway -run 'TestProjectRuntimePiFauxRealCoordinator|TestProjectCompactionRealProcesses'
+```
+
+上述 Go 命令需设置 `BATON_TEST_DATABASE_URL`。两项测试验证 API 边界转换后，中心保存、工具执行、压缩和历史原文恢复仍通过。
