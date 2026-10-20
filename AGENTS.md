@@ -13,6 +13,7 @@ Baton 是跨设备 AI Agent 协同与任务派发系统，由中心服务（`coo
 | `internal/agent/{pi,codex,kiro,replay}` | 统一 `agent.Adapter` 接口实现（Pi RPC、Codex app-server、Kiro ACP V3）与确定性录制回放 |
 | `runtimes/project-agent` | 基于 Node.js / TypeScript 的 Project Agent 进程（通过 stdio JSON-RPC 与 `batond` 通信） |
 | `web` | React + TypeScript + Vite 前端，构建产物生成到 `internal/webui/dist` 后嵌入 Coordinator，不提交到 Git |
+| `design` | Web UI 的 Elyx 设计稿（`.elyx`），前端按它实现；修改前先读 `design/AGENTS.md` |
 | `specs/` | 持久产品规格（`PRODUCT.md`）与技术设计（`TECH.md`） |
 
 ## 常用构建与验证命令

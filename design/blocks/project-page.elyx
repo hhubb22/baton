@@ -1,0 +1,109 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "blocks/sidebar.elyx" as sidebars
+import "blocks/project-header.elyx" as headers
+import "blocks/conversation.elyx" as conv
+import "blocks/task-card.elyx" as cards
+import "blocks/composer.elyx" as composers
+import "blocks/overview.elyx" as overviews
+
+// Project 页：侧栏、主对话、概览栏。screens/ 里的各个状态都是它的实例。
+// 主对话从底部对齐，较早的内容在上方被裁掉，相当于滚动到最新位置。
+export projectPage = frame {
+  title: "Project 页",
+  width: s.size.screenWidth,
+  height: s.size.screenHeight,
+  layout: {direction: .row},
+  fill: c.colors.canvas,
+  children: [sidebar, main, overview],
+
+  sidebar = frame : sidebars.sidebar {}
+
+  main = frame {
+    width: 100%,
+    height: 100%,
+    layout: {direction: .column},
+    children: [header, transcript, dock],
+
+    header = frame : headers.projectHeader {
+      width: 100%
+    }
+
+    transcript = frame {
+      width: 100%,
+      height: 100%,
+      layout: {
+        direction: .column,
+        justify-content: .end,
+        align-items: .center,
+        item-gap: 20px
+      },
+      slot: .true,
+      padding: [s.space.xl, 0px, s.space.lg],
+      children: [
+        day,
+        user1,
+        agent1,
+        command1,
+        memory1,
+        task1,
+        user2,
+        agent2,
+        task2,
+        typing
+      ],
+
+      day = frame : conv.dayDivider {}
+
+      user1 = frame : conv.userMessage {}
+
+      agent1 = frame : conv.agentTurn {}
+
+      command1 = frame : conv.commandRow {}
+
+      memory1 = frame : conv.memoryNote {}
+
+      task1 = frame : cards.taskCard {}
+
+      user2 = frame : conv.userMessage {
+        bubble {
+          content {
+            contents: "Ubuntu 上也顺便跑一遍单元测试。"
+          }
+        }
+      }
+
+      agent2 = frame : conv.agentTurn {
+        head {
+          time {
+            contents: "14:05 · Ubuntu 开发机"
+          }
+        }
+
+        content {
+          contents: "已派给 Ubuntu 开发机，两边的结果回来后一起汇报。"
+        }
+      }
+
+      task2 = frame : cards.taskSucceeded {}
+
+      typing = frame : conv.typing {
+        label {
+          contents: "正在处理 1 条输入：Ubuntu 测试结果"
+        }
+      }
+    }
+
+    dock = frame {
+      width: 100%,
+      layout: {direction: .column, align-items: .center, item-gap: s.space.sm},
+      slot: .true,
+      padding: [0px, 0px, 20px],
+      children: composer,
+
+      composer = frame : composers.composer {}
+    }
+  }
+
+  overview = frame : overviews.overview {}
+}

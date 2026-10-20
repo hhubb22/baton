@@ -1,0 +1,34 @@
+import "foundations/typography.elyx" as t
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+
+// 字段标签，可选项在后面加灰色「（可选）」
+export label = frame {
+  title: "字段标签",
+  layout: {align-items: .center, item-gap: s.space.xxs},
+  children: [labelText, hint],
+
+  labelText = text : t.label {
+    contents: "标题"
+  }
+
+  hint = text : t.small {
+    display: .none,
+    contents: "（可选）",
+    fill[0].color: c.colors.faint
+  }
+}
+
+@variant
+export optional = frame : label {
+  title: "字段标签 / 可选",
+  top: 40px,
+
+  labelText {
+    contents: "目标"
+  }
+
+  hint {
+    display: .visible
+  }
+}

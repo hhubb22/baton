@@ -1,0 +1,437 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+import "controls/icons.elyx" as icons
+import "controls/button.elyx" as buttons
+import "controls/avatar.elyx" as avatars
+import "controls/badge.elyx" as badges
+import "controls/status.elyx" as status
+
+// 导航行：图标、名称、右侧数量或说明
+export navRow = frame {
+  title: "导航行",
+  width: 232px,
+  height: s.size.row,
+  layout: {
+    justify-content: .space-between,
+    align-items: .center,
+    item-gap: s.space.sm
+  },
+  corner-radius: s.radius.sm,
+  padding: [0px, s.space.sm],
+  children: [lead, trail],
+
+  lead = frame {
+    layout: {align-items: .center, item-gap: s.space.sm},
+    children: [glyph, label],
+
+    glyph = asset : icons.inbox {
+      width: 16px,
+      height: 16px,
+      fill[0].color: c.colors.muted
+    }
+
+    label = text : t.small {
+      contents: "待处理"
+    }
+  }
+
+  trail = frame {
+    layout: {align-items: .center},
+    children: [count, note],
+
+    count = frame : badges.count {
+      value {
+        contents: "3"
+      }
+    }
+
+    note = text : t.caption {
+      display: .none,
+      contents: "2/3 在线",
+      fill[0].color: c.colors.faint
+    }
+  }
+}
+
+@variant
+export navRowActive = frame : navRow {
+  title: "导航行 / 当前",
+  top: 40px,
+  fill[0].color: c.colors.selected,
+
+  lead {
+    glyph {
+      fill[0].color: c.colors.text
+    }
+
+    label {
+      font-style: "Medium"
+    }
+  }
+}
+
+// Project 行：头像、标题、右侧状态。只在需要用户注意时显示状态。
+export projectRow = frame {
+  title: "Project 行 / 空闲",
+  top: 96px,
+  width: 232px,
+  height: 30px,
+  layout: {
+    justify-content: .space-between,
+    align-items: .center,
+    item-gap: s.space.sm
+  },
+  corner-radius: s.radius.sm,
+  padding: [0px, s.space.sm, 0px, 6px],
+  children: [lead, trail],
+
+  lead = frame {
+    layout: {align-items: .center, item-gap: s.space.sm},
+    children: [avatar, name],
+
+    avatar = frame : avatars.avatar {}
+
+    name = text : t.small {
+      contents: "文档整理"
+    }
+  }
+
+  trail = frame {
+    layout: {align-items: .center, item-gap: 6px},
+    children: [live, count, paused, note],
+
+    live = shape : status.dotAgent {
+      display: .none
+    }
+
+    count = frame : badges.count {
+      display: .none
+    }
+
+    paused = asset : icons.pause {
+      width: 14px,
+      height: 14px,
+      display: .none,
+      fill[0].color: c.colors.faint
+    }
+
+    note = text : t.caption {
+      display: .none,
+      contents: "等待设备",
+      fill[0].color: c.colors.faint
+    }
+  }
+}
+
+@variant
+export projectRowActive = frame : projectRow {
+  title: "Project 行 / 当前",
+  top: 136px,
+  fill[0].color: c.colors.selected,
+
+  lead {
+    name {
+      font-style: "Medium"
+    }
+  }
+}
+
+@variant
+export projectRowLive = frame : projectRow {
+  title: "Project 行 / 运行中",
+  top: 176px,
+
+  trail {
+    live {
+      display: .visible
+    }
+  }
+}
+
+@variant
+export projectRowAttention = frame : projectRow {
+  title: "Project 行 / 等你处理",
+  top: 216px,
+
+  trail {
+    count {
+      display: .visible
+    }
+  }
+}
+
+@variant
+export projectRowPaused = frame : projectRow {
+  title: "Project 行 / 已暂停",
+  top: 256px,
+
+  lead {
+    name {
+      fill[0].color: c.colors.muted
+    }
+  }
+
+  trail {
+    paused {
+      display: .visible
+    }
+  }
+}
+
+@variant
+export projectRowWaiting = frame : projectRow {
+  title: "Project 行 / 等待设备",
+  top: 296px,
+
+  trail {
+    note {
+      display: .visible
+    }
+  }
+}
+
+// 侧栏：全局导航 + Project 列表 + 账户
+export sidebar = frame {
+  title: "侧栏",
+  caption: "248px。上方是跨 Project 的入口，下方是 Project 列表。",
+  left: 320px,
+  width: s.size.sidebar,
+  height: s.size.screenHeight,
+  layout: {direction: .column, justify-content: .space-between},
+  fill: c.colors.panel,
+  border: {color: c.colors.borderSoft, sides: .right},
+  padding: [0px, s.space.sm, s.space.sm],
+  children: [top, footer],
+
+  top = frame {
+    width: 100%,
+    layout: {direction: .column, item-gap: s.space.xxs},
+    children: [brand, nav, sectionHead, projects],
+
+    brand = frame {
+      width: 100%,
+      height: s.size.header,
+      layout: {justify-content: .space-between, align-items: .center},
+      padding: [0px, s.space.xs, 0px, s.space.sm],
+      children: [brandLead, newProject],
+
+      brandLead = frame {
+        layout: {align-items: .center, item-gap: s.space.sm},
+        children: [mark, wordmark],
+
+        mark = frame {
+          width: 20px,
+          height: 20px,
+          layout: {justify-content: .center, align-items: .center},
+          fill: c.colors.accent,
+          corner-radius: 5px,
+          children: markLetter,
+
+          markLetter = text : t.caption {
+            contents: "B",
+            font-size: 11,
+            font-style: "Semibold",
+            line-height: 1,
+            fill[0].color: c.colors.onAccent
+          }
+        }
+
+        wordmark = text : t.label {
+          contents: "Baton",
+          font-size: 14,
+          font-style: "Semibold"
+        }
+      }
+
+      newProject = frame : buttons.iconButton {
+        @with-variant(icons.pen)
+        glyph {}
+      }
+    }
+
+    nav = frame {
+      width: 100%,
+      layout: {direction: .column, item-gap: s.space.xxs},
+      children: [navInbox, navTasks, navDevices, navSessions],
+
+      navInbox = frame : navRow {
+        width: 100%
+      }
+
+      navTasks = frame : navRow {
+        width: 100%,
+
+        trail {
+          count {
+            display: .none
+          }
+        }
+
+        lead {
+          label {
+            contents: "任务"
+          }
+
+          @with-variant(icons.tasks)
+          glyph {}
+        }
+      }
+
+      navDevices = frame : navRow {
+        width: 100%,
+
+        trail {
+          count {
+            display: .none
+          }
+
+          note {
+            display: .visible
+          }
+        }
+
+        lead {
+          label {
+            contents: "设备"
+          }
+
+          @with-variant(icons.device)
+          glyph {}
+        }
+      }
+
+      navSessions = frame : navRow {
+        width: 100%,
+
+        trail {
+          count {
+            display: .none
+          }
+        }
+
+        lead {
+          label {
+            contents: "Session"
+          }
+
+          @with-variant(icons.terminal)
+          glyph {}
+        }
+      }
+    }
+
+    sectionHead = frame {
+      width: 100%,
+      height: 36px,
+      layout: {justify-content: .space-between, align-items: .end},
+      padding: [0px, s.space.sm, 6px],
+      children: [sectionLabel, sectionAdd],
+
+      sectionLabel = text : t.captionMedium {
+        contents: "Project",
+        fill[0].color: c.colors.faint
+      }
+
+      sectionAdd = asset : icons.plus {
+        width: 14px,
+        height: 14px,
+        fill[0].color: c.colors.faint
+      }
+    }
+
+    projects = frame {
+      width: 100%,
+      layout: {direction: .column, item-gap: s.space.xxs},
+      children: [projBaton, projCompat, projDocs, projSwitch],
+
+      projBaton = frame : projectRowActive {
+        width: 100%,
+
+        lead {
+          name {
+            contents: "Baton 开发"
+          }
+
+          avatar {
+            initial {
+              contents: "B"
+            }
+          }
+        }
+
+        trail {
+          live {
+            display: .visible
+          }
+        }
+      }
+
+      projCompat = frame : projectRowAttention {
+        width: 100%,
+
+        lead {
+          name {
+            contents: "兼容性测试"
+          }
+
+          @with-variant(avatars.amber)
+          avatar {
+            left: .nil
+          }
+        }
+      }
+
+      projDocs = frame : projectRow {
+        width: 100%,
+
+        lead {
+          @with-variant(avatars.violet)
+          avatar {
+            left: .nil
+          }
+        }
+      }
+
+      projSwitch = frame : projectRowPaused {
+        width: 100%,
+
+        lead {
+          name {
+            contents: "交换机巡检"
+          }
+
+          @with-variant(avatars.green)
+          avatar {
+            left: .nil
+          }
+        }
+      }
+    }
+  }
+
+  footer = frame {
+    width: 100%,
+    height: 40px,
+    layout: {justify-content: .space-between, align-items: .center},
+    border: {color: c.colors.borderSoft, sides: .top},
+    padding: [s.space.sm, s.space.xs, 0px, s.space.sm],
+    children: [account, settings],
+
+    account = frame {
+      layout: {align-items: .center, item-gap: s.space.sm},
+      children: [person, personName],
+
+      person = frame : avatars.person {}
+
+      personName = text : t.small {
+        contents: "何家健"
+      }
+    }
+
+    settings = frame : buttons.iconButton {
+      @with-variant(icons.settings)
+      glyph {}
+    }
+  }
+}

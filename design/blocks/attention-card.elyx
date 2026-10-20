@@ -1,0 +1,325 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+import "controls/icons.elyx" as icons
+import "controls/button.elyx" as buttons
+import "controls/status.elyx" as status
+import "controls/badge.elyx" as badges
+import "controls/avatar.elyx" as avatars
+
+// 选项行：Project Agent 给出的一个选择，建议项带标签
+export option = frame {
+  title: "事项选项",
+  width: 480px,
+  height: 36px,
+  layout: {
+    justify-content: .space-between,
+    align-items: .center,
+    item-gap: s.space.sm
+  },
+  fill: c.colors.surface,
+  border: c.colors.border,
+  corner-radius: s.radius.md,
+  padding: [0px, s.space.md],
+  children: [label, suggested],
+
+  label = text : t.small {
+    contents: "调查原因并修复"
+  }
+
+  suggested = frame : badges.tagAgent {
+    display: .none
+  }
+}
+
+@variant
+export optionSuggested = frame : option {
+  title: "事项选项 / 建议",
+  top: 48px,
+
+  suggested {
+    display: .visible
+  }
+}
+
+// 事项卡片：Project Agent 请用户做的决定。主对话、任务详情和待处理页显示同一个事项。
+export attentionCard = frame {
+  title: "事项 / 待处理",
+  top: 120px,
+  width: s.size.measure,
+  layout: {direction: .column, item-gap: 10px},
+  fill: c.colors.surface,
+  border: c.colors.border,
+  corner-radius: 10px,
+  padding: [14px, 16px],
+  children: [head, heading, summary, taskRef, options, footer, answer],
+
+  head = frame {
+    width: 100%,
+    layout: {justify-content: .space-between, align-items: .center},
+    children: [kind, time],
+
+    kind = frame {
+      layout: {align-items: .center, item-gap: s.space.sm},
+      children: [project, mark, kindLabel, system],
+
+      project = frame {
+        display: .none,
+        layout: {align-items: .center, item-gap: 6px},
+        padding: [0px, 6px, 0px, 0px],
+        children: [projectAvatar, projectName],
+
+        projectAvatar = frame : avatars.amber {}
+
+        projectName = text : t.label {
+          contents: "兼容性测试"
+        }
+      }
+
+      mark = shape : status.dotAttention {}
+
+      kindLabel = text : t.captionMedium {
+        contents: "等你决定",
+        fill[0].color: c.colors.attentionText
+      }
+
+      system = frame : badges.tag {
+        display: .none,
+
+        value {
+          contents: "Baton 创建"
+        }
+      }
+    }
+
+    time = text : t.caption {
+      contents: "14:33",
+      fill[0].color: c.colors.faint
+    }
+  }
+
+  heading = text : t.heading {
+    width: 100%,
+    contents: "重连测试有 1 项失败，下一步怎么处理？"
+  }
+
+  summary = text : t.small {
+    width: 100%,
+    contents: "TestReconnectAfterSleep 在 Windows 睡眠唤醒后 30 秒内没有重新连上，另外 47 项通过。日志显示唤醒后第一次 TLS 握手超时。",
+    fill[0].color: c.colors.muted
+  }
+
+  taskRef = frame {
+    height: 26px,
+    layout: {align-items: .center, item-gap: 6px},
+    fill: c.colors.subtle,
+    corner-radius: s.radius.sm,
+    padding: [0px, s.space.sm],
+    children: [taskDot, taskName, taskState],
+
+    taskDot = shape : status.dotFailed {}
+
+    taskName = text : t.caption {
+      contents: "在 Windows 上运行重连测试",
+      fill[0].color: c.colors.text
+    }
+
+    taskState = text : t.caption {
+      contents: "失败",
+      fill[0].color: c.colors.faint
+    }
+  }
+
+  options = frame {
+    width: 100%,
+    layout: {direction: .column, item-gap: 6px},
+    padding: [s.space.xxs, 0px, 0px],
+    children: [first, second, third],
+
+    first = frame : optionSuggested {
+      width: 100%
+    }
+
+    second = frame : option {
+      width: 100%,
+
+      label {
+        contents: "先跳过，继续 Ubuntu 和 macOS 的验收"
+      }
+    }
+
+    third = frame : option {
+      width: 100%,
+
+      label {
+        contents: "在 Windows 上重跑一次，排除偶发"
+      }
+    }
+  }
+
+  footer = frame {
+    width: 100%,
+    layout: {justify-content: .space-between, align-items: .center},
+    children: [reply, close],
+
+    reply = frame : buttons.smallGhost {
+      padding-left: 6px,
+      padding-right: 6px,
+
+      label {
+        fill[0].color: c.colors.muted,
+        contents: "附加说明或直接回复"
+      }
+
+      @with-variant(icons.message)
+      lead {
+        width: 14px,
+        height: 14px,
+        display: .visible
+      }
+    }
+
+    close = frame : buttons.smallGhost {
+      padding-top: 0px,
+      padding-left: 6px,
+      padding-bottom: 0px,
+      padding-right: 6px,
+
+      label {
+        fill[0].color: c.colors.muted,
+        contents: "关闭事项"
+      }
+    }
+  }
+
+  answer = frame {
+    width: 100%,
+    display: .none,
+    layout: {align-items: .center, item-gap: 6px},
+    children: [answerGlyph, answerText],
+
+    answerGlyph = asset : icons.check {
+      width: 14px,
+      height: 14px,
+      fill[0].color: c.colors.success
+    }
+
+    answerText = text : t.small {
+      contents: "调查原因并修复 · 何家健 14:51",
+      fill[0].color: c.colors.muted
+    }
+  }
+}
+
+// 已处理：收起选项，保留标题和处理结果
+@variant
+export attentionAnswered = frame : attentionCard {
+  title: "事项 / 已回答",
+  top: 560px,
+
+  head {
+    kind {
+      kindLabel {
+        fill[0].color: c.colors.muted,
+        contents: "已回答"
+      }
+
+      @with-variant(status.dotSucceeded)
+      mark {}
+    }
+  }
+
+  footer {
+    display: .none
+  }
+
+  options {
+    display: .none
+  }
+
+  summary {
+    display: .none
+  }
+
+  answer {
+    display: .visible
+  }
+}
+
+// 待处理页里的事项：开头显示所属 Project
+@variant
+export inboxItem = frame : attentionCard {
+  title: "事项 / 待处理页",
+  top: 720px,
+
+  head {
+    kind {
+      project {
+        display: .visible
+      }
+    }
+  }
+}
+
+// 系统事项：Baton 直接创建，没有选项，只能去处理位置或关闭
+@variant
+export systemItem = frame : attentionCard {
+  title: "事项 / 系统",
+  top: 1160px,
+
+  footer {
+    reply {
+      label {
+        fill[0].color: c.colors.link,
+        contents: "打开 Project 重试"
+      }
+
+      lead {
+        display: .none
+      }
+    }
+  }
+
+  options {
+    display: .none
+  }
+
+  taskRef {
+    display: .none
+  }
+
+  summary {
+    contents: "Ubuntu 开发机上的 ChatGPT 订阅返回 401，需要重新登录。之后的消息和任务结果都已保存，重试后从原位置继续。"
+  }
+
+  heading {
+    contents: "Project Agent 暂停：模型请求连续失败 5 次"
+  }
+
+  head {
+    time {
+      contents: "15:20"
+    }
+
+    kind {
+      kindLabel {
+        contents: "需要处理"
+      }
+
+      project {
+        projectName {
+          contents: "Baton 开发"
+        }
+
+        display: .visible,
+
+        @with-variant(avatars.avatar)
+        projectAvatar {}
+      }
+
+      system {
+        display: .visible
+      }
+    }
+  }
+}

@@ -1,0 +1,84 @@
+import "tokens/colors.elyx" as c
+import "blocks/project-page.elyx" as page
+import "blocks/project-header.elyx" as headers
+import "blocks/conversation.elyx" as conv
+import "blocks/task-card.elyx" as cards
+import "blocks/attention-card.elyx" as attention
+import "blocks/task-detail.elyx" as details
+
+taskOpen = frame : page.projectPage {
+  title: "Project · 任务详情",
+  caption: "点任务卡片或概览里的任务行，详情在右侧打开，替换概览栏，主对话不跳走。事项同时显示在主对话和任务详情里，在任何一处处理都会同步。",
+  left: 0px,
+  top: 0px,
+  overrides: [
+    insert(detail, after = page.projectPage.main),
+    remove(page.projectPage.overview)
+  ],
+
+  main {
+    transcript {
+      overrides: [
+        insert(report, after = page.projectPage.main.transcript.task1),
+        insert(decision, after = report),
+        remove(page.projectPage.main.transcript.task2),
+        remove(page.projectPage.main.transcript.agent2),
+        remove(page.projectPage.main.transcript.user2),
+        remove(page.projectPage.main.transcript.typing),
+        remove(page.projectPage.main.transcript.user1),
+        remove(page.projectPage.main.transcript.day)
+      ],
+
+      @with-variant(cards.taskFailed)
+      task1 {
+        border[0].color: c.colors.focus,
+        top: .nil
+      }
+    }
+
+    @with-variant(headers.headerIdle)
+    header {
+      trail {
+        overview {
+          fill[0].color: c.colors.transparent,
+
+          glyph {
+            fill[0].color: c.colors.muted
+          }
+        }
+      }
+
+      top: .nil
+    }
+  }
+
+  sidebar {
+    top {
+      projects {
+        projBaton {
+          trail {
+            live {
+              display: .none
+            }
+          }
+        }
+      }
+    }
+  }
+
+  detail = frame : details.taskDetail {}
+
+  report = frame : conv.agentTurn {
+    head {
+      time {
+        contents: "14:33 · Ubuntu 开发机"
+      }
+    }
+
+    content {
+      contents: "重连测试 48 项里有 1 项失败，日志显示唤醒后第一次 TLS 握手超时。我没有重跑，先请你决定下一步。"
+    }
+  }
+
+  decision = frame : attention.attentionCard {}
+}

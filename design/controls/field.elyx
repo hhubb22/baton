@@ -1,0 +1,60 @@
+import "controls/label.elyx" as labels
+import "foundations/typography.elyx" as t
+import "tokens/colors.elyx" as c
+import "controls/input.elyx" as inputs
+
+// 字段：标签、输入、说明。说明写这个值会影响什么。
+export field = frame {
+  title: "字段",
+  width: 320px,
+  layout: {direction: .column, item-gap: 6px},
+  children: [label, input, helper],
+
+  label = frame : labels.label {}
+
+  input = frame : inputs.input {
+    width: 100%
+  }
+
+  helper = text : t.caption {
+    width: 100%,
+    contents: "Project 的标题可以随时修改，不影响对话和记忆。",
+    fill[0].color: c.colors.muted
+  }
+}
+
+@variant
+export error = frame : field {
+  title: "字段 / 错误",
+  top: 120px,
+
+  helper {
+    fill[0].color: c.colors.danger,
+    contents: "请填写标题。"
+  }
+
+  @with-variant(inputs.error)
+  input {
+    top: .nil
+  }
+}
+
+@variant
+export optionalText = frame : field {
+  title: "字段 / 可选多行",
+  top: 240px,
+
+  helper {
+    contents: "Project Agent 每次运行都会读到这段目标。"
+  }
+
+  @with-variant(inputs.textarea)
+  input {
+    top: .nil
+  }
+
+  @with-variant(labels.optional)
+  label {
+    top: .nil
+  }
+}

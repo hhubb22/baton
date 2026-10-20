@@ -1,0 +1,184 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+import "controls/icons.elyx" as icons
+import "controls/status.elyx" as status
+import "controls/badge.elyx" as badges
+
+// 设备行：名称与系统、连接状态、已装的 Agent。离线时写最后联系时间。
+export deviceRow = frame {
+  title: "设备行 / 在线",
+  width: 800px,
+  height: 60px,
+  layout: {align-items: .center, item-gap: s.space.lg},
+  padding: [0px, s.space.lg],
+  children: [identity, state, agents, chevron],
+
+  identity = frame {
+    width: 100%,
+    layout: {align-items: .center, item-gap: s.space.md},
+    children: [tile, copy],
+
+    tile = frame {
+      width: 32px,
+      height: 32px,
+      layout: {justify-content: .center, align-items: .center},
+      fill: c.colors.subtle,
+      corner-radius: s.radius.md,
+      children: glyph,
+
+      glyph = asset : icons.device {
+        width: 16px,
+        height: 16px,
+        fill[0].color: c.colors.muted
+      }
+    }
+
+    copy = frame {
+      layout: {direction: .column, item-gap: 1px},
+      children: [nameLine, system],
+
+      nameLine = frame {
+        layout: {align-items: .center, item-gap: s.space.sm},
+        children: [name, defaultTag],
+
+        name = text : t.label {
+          contents: "Windows 台式机"
+        }
+
+        defaultTag = frame : badges.tag {
+          display: .none
+        }
+      }
+
+      system = text : t.caption {
+        contents: "Windows 11 24H2 · batond 0.9.2",
+        fill[0].color: c.colors.faint
+      }
+    }
+  }
+
+  state = frame {
+    width: 200px,
+    layout: {align-items: .center, item-gap: 6px},
+    children: [mark, stateText],
+
+    mark = shape : status.dotSucceeded {}
+
+    stateText = text : t.small {
+      contents: "在线"
+    }
+  }
+
+  agents = text : t.small {
+    width: 160px,
+    contents: "Codex",
+    fill[0].color: c.colors.muted
+  }
+
+  chevron = asset : icons.chevronRight {
+    width: 14px,
+    height: 14px,
+    fill[0].color: c.colors.faint
+  }
+}
+
+@variant
+export deviceOffline = frame : deviceRow {
+  title: "设备行 / 离线",
+  top: 80px,
+
+  state {
+    stateText {
+      fill[0].color: c.colors.muted,
+      contents: "离线 · 最后联系 13:52"
+    }
+
+    @with-variant(status.dotIdle)
+    mark {}
+  }
+
+  agents {
+    contents: "Codex · Pi · Kiro"
+  }
+
+  identity {
+    copy {
+      system {
+        contents: "macOS 15.0.1 · batond 0.9.2"
+      }
+
+      nameLine {
+        name {
+          contents: "MacBook Pro"
+        }
+
+        defaultTag {
+          display: .visible
+        }
+      }
+    }
+  }
+}
+
+// 运行着 Project Agent 的设备
+@variant
+export deviceRuntime = frame : deviceRow {
+  title: "设备行 / 运行 Project Agent",
+  top: 160px,
+
+  @with-variant(icons.chevronDown)
+  chevron {}
+
+  state {
+    stateText {
+      fill[0].color: c.colors.agentText,
+      contents: "在线 · 运行 Baton 开发"
+    }
+
+    @with-variant(status.dotAgent)
+    mark {}
+  }
+
+  agents {
+    contents: "Codex · Pi"
+  }
+
+  identity {
+    copy {
+      system {
+        contents: "Ubuntu 24.04 · batond 0.9.2"
+      }
+
+      nameLine {
+        name {
+          contents: "Ubuntu 开发机"
+        }
+      }
+    }
+  }
+}
+
+// 能力行：设备上的 Agent、Runtime 和订阅
+export capabilityLine = frame {
+  title: "能力行",
+  top: 240px,
+  width: 320px,
+  layout: {align-items: .center, item-gap: s.space.sm},
+  children: [check, name, note],
+
+  check = asset : icons.check {
+    width: 13px,
+    height: 13px,
+    fill[0].color: c.colors.success
+  }
+
+  name = text : t.small {
+    contents: "Codex"
+  }
+
+  note = text : t.caption {
+    contents: "已安装 · 已登录",
+    fill[0].color: c.colors.faint
+  }
+}

@@ -1,0 +1,253 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+import "blocks/sidebar.elyx" as sidebars
+import "controls/icons.elyx" as icons
+import "controls/button.elyx" as buttons
+import "blocks/device-row.elyx" as rows
+import "controls/toggle.elyx" as toggles
+
+devices = frame {
+  title: "设备",
+  caption: "每台设备的连接状态、Agent、订阅和已登记目录。展开的设备上可以单独开启「允许 Project Agent 执行命令」，开启前写明没有沙箱。",
+  left: 0px,
+  top: 0px,
+  width: s.size.screenWidth,
+  height: s.size.screenHeight,
+  layout: {direction: .row},
+  fill: c.colors.canvas,
+  children: [sidebar, main],
+
+  sidebar = frame : sidebars.sidebar {
+    top {
+      projects {
+        @with-variant(sidebars.projectRowLive)
+        projBaton {}
+      }
+
+      nav {
+        @with-variant(sidebars.navRowActive)
+        navDevices {
+          top: .nil
+        }
+      }
+    }
+  }
+
+  main = frame {
+    width: 100%,
+    height: 100%,
+    layout: {direction: .column, align-items: .center},
+    children: [head, content],
+
+    head = frame {
+      width: 100%,
+      height: s.size.header,
+      layout: {align-items: .center},
+      border: {color: c.colors.borderSoft, sides: .bottom},
+      padding: [0px, 20px],
+      children: headTitle,
+
+      headTitle = text : t.label {
+        contents: "设备",
+        font-size: 14,
+        font-style: "Semibold"
+      }
+    }
+
+    content = frame {
+      width: 800px,
+      layout: {direction: .column, item-gap: s.space.lg},
+      padding: [s.space.xxl, 0px],
+      children: [intro, list],
+
+      intro = frame {
+        width: 100%,
+        layout: {justify-content: .space-between, item-gap: s.space.xl},
+        children: [introCopy, enroll],
+
+        introCopy = frame {
+          width: 100%,
+          layout: {direction: .column, item-gap: s.space.xs},
+          children: [introTitle, introText],
+
+          introTitle = text : t.title {
+            contents: "3 台设备，2 台在线"
+          }
+
+          introText = text : t.small {
+            width: 100%,
+            contents: "Project Agent 在满足条件的设备上运行：在线、已同步、装有 Runtime、所需订阅可用。默认设备满足条件时优先使用。",
+            fill[0].color: c.colors.muted
+          }
+        }
+
+        enroll = frame : buttons.secondary {
+          label {
+            contents: "接入设备"
+          }
+
+          lead {
+            display: .visible
+          }
+        }
+      }
+
+      list = frame {
+        width: 100%,
+        layout: {direction: .column},
+        fill: c.colors.surface,
+        border: c.colors.border,
+        corner-radius: 10px,
+        children: [mac, windows, ubuntu, ubuntuDetail],
+
+        mac = frame : rows.deviceOffline {
+          width: 100%,
+          border[0].color: c.colors.borderSoft,
+          border[0].sides: .bottom
+        }
+
+        windows = frame : rows.deviceRow {
+          width: 100%,
+          border[0].color: c.colors.borderSoft,
+          border[0].sides: .bottom
+        }
+
+        ubuntu = frame : rows.deviceRuntime {
+          width: 100%,
+          fill[0].color: c.colors.panel
+        }
+
+        ubuntuDetail = frame {
+          width: 100%,
+          layout: {direction: .column, item-gap: 20px},
+          fill: c.colors.panel,
+          padding: [s.space.xs, s.space.lg, 20px, 60px],
+          children: [columns, exec, detailActions],
+
+          columns = frame {
+            width: 100%,
+            layout: {item-gap: s.space.xxl},
+            children: [agentsCol, dirsCol],
+
+            agentsCol = frame {
+              width: 100%,
+              layout: {direction: .column, item-gap: s.space.sm},
+              children: [agentsLabel, agentLine1, agentLine2, agentLine3],
+
+              agentsLabel = text : t.captionMedium {
+                contents: "Agent 与订阅",
+                fill[0].color: c.colors.faint
+              }
+
+              agentLine1 = frame : rows.capabilityLine {}
+
+              agentLine2 = frame : rows.capabilityLine {
+                name {
+                  contents: "Pi"
+                }
+
+                note {
+                  contents: "已安装"
+                }
+              }
+
+              agentLine3 = frame : rows.capabilityLine {
+                name {
+                  contents: "Project Agent Runtime"
+                }
+
+                note {
+                  contents: "0.3.1 · ChatGPT 订阅可用"
+                }
+              }
+            }
+
+            dirsCol = frame {
+              width: 100%,
+              layout: {direction: .column, item-gap: s.space.sm},
+              children: [dirsLabel, dir1, dir2, dirsNote],
+
+              dirsLabel = text : t.captionMedium {
+                contents: "已登记目录",
+                fill[0].color: c.colors.faint
+              }
+
+              dir1 = text : t.mono {
+                contents: "~/work/baton"
+              }
+
+              dir2 = text : t.mono {
+                contents: "~/work/docs"
+              }
+
+              dirsNote = text : t.caption {
+                contents: "在这台设备的 batond 配置里修改。",
+                fill[0].color: c.colors.faint
+              }
+            }
+          }
+
+          exec = frame {
+            width: 100%,
+            layout: {direction: .column, item-gap: 10px},
+            fill: c.colors.surface,
+            border: c.colors.borderSoft,
+            corner-radius: s.radius.md,
+            padding: [14px, s.space.lg],
+            children: [execToggle, warning],
+
+            execToggle = frame : toggles.on {
+              width: 100%,
+
+              copy {
+                helper {
+                  contents: "Project Agent 可以在已登记目录下执行任意命令，以 hejiajian 身份用 zsh 运行。单条命令最长 2 小时，等待超时不会终止命令。"
+                }
+              }
+            }
+
+            warning = frame {
+              width: 100%,
+              layout: {item-gap: s.space.sm},
+              fill: c.colors.attentionSoft,
+              corner-radius: s.radius.sm,
+              padding: [s.space.sm, 10px],
+              children: [warnGlyph, warnText],
+
+              warnGlyph = asset : icons.shield {
+                width: 14px,
+                height: 14px,
+                fill[0].color: c.colors.attentionText
+              }
+
+              warnText = text : t.caption {
+                width: 100%,
+                contents: "Baton 不为这些命令提供沙箱，也不检查命令内容。命令能读写这些目录里的任何文件。",
+                fill[0].color: c.colors.attentionText
+              }
+            }
+          }
+
+          detailActions = frame {
+            layout: {align-items: .center, item-gap: s.space.sm},
+            children: [makeDefault, revoke],
+
+            makeDefault = frame : buttons.smallSecondary {
+              label {
+                contents: "设为默认设备"
+              }
+            }
+
+            revoke = frame : buttons.smallGhost {
+              label {
+                fill[0].color: c.colors.danger,
+                contents: "吊销这台设备"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

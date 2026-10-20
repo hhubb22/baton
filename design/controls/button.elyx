@@ -1,0 +1,189 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+import "controls/icons.elyx" as icons
+
+// 一屏最多一个实心主按钮，其余用 secondary 或 ghost。
+// 前置图标默认隐藏，实例里设 lead.display 并用 @with-variant 选图标。
+export button = frame {
+  title: "按钮 / 主要",
+  width: .auto,
+  height: s.size.control,
+  layout: {justify-content: .center, align-items: .center, item-gap: 6px},
+  fill: c.colors.accent,
+  corner-radius: s.radius.sm,
+  padding: [0px, s.space.md],
+  children: [lead, label],
+
+  lead = asset : icons.plus {
+    width: 15px,
+    height: 15px,
+    display: .none,
+    fill[0].color: c.colors.onAccent
+  }
+
+  label = text : t.label {
+    contents: "创建",
+    fill[0].color: c.colors.onAccent
+  }
+}
+
+@variant
+export secondary = frame : button {
+  title: "按钮 / 次要",
+  left: 160px,
+  border[0].color: c.colors.border,
+  fill[0].color: c.colors.surface,
+
+  label {
+    fill[0].color: c.colors.text,
+    contents: "取消"
+  }
+
+  lead {
+    fill[0].color: c.colors.muted
+  }
+}
+
+@variant
+export ghost = frame : button {
+  title: "按钮 / 轻量",
+  left: 320px,
+  fill[0].color: c.colors.transparent,
+
+  lead {
+    fill[0].color: c.colors.muted
+  }
+
+  label {
+    fill[0].color: c.colors.text,
+    contents: "查看详情"
+  }
+}
+
+@variant
+export danger = frame : button {
+  title: "按钮 / 危险",
+  left: 480px,
+  border[0].color: c.colors.border,
+  fill[0].color: c.colors.surface,
+
+  label {
+    fill[0].color: c.colors.danger,
+    contents: "归档"
+  }
+
+  lead {
+    fill[0].color: c.colors.danger
+  }
+}
+
+@variant
+export hover = frame : button {
+  title: "按钮 / 主要悬停",
+  top: 64px,
+  fill[0].color: c.colors.accentHover
+}
+
+@variant
+export pressed = frame : button {
+  title: "按钮 / 主要按下",
+  left: 160px,
+  top: 64px,
+  fill[0].color: c.colors.accentPressed
+}
+
+@variant
+export focus = frame : button {
+  title: "按钮 / 焦点",
+  left: 320px,
+  top: 64px,
+  border[0].color: c.colors.focus,
+  border[0].position: .outside,
+  border[0].width: 2px
+}
+
+@variant
+export secondaryHover = frame : secondary {
+  title: "按钮 / 次要悬停",
+  left: 480px,
+  top: 64px,
+  fill[0].color: c.colors.subtle
+}
+
+@variant
+export small = frame : button {
+  title: "按钮 / 主要小号",
+  top: 128px,
+  height: s.size.compact,
+  padding-top: 0px,
+  padding-left: 10px,
+  padding-bottom: 0px,
+  padding-right: 10px,
+
+  label {
+    font-size: 12
+  }
+}
+
+@variant
+export smallSecondary = frame : secondary {
+  title: "按钮 / 次要小号",
+  left: 160px,
+  top: 128px,
+  height: s.size.compact,
+  padding-top: 0px,
+  padding-left: 10px,
+  padding-bottom: 0px,
+  padding-right: 10px,
+
+  label {
+    font-size: 12
+  }
+}
+
+@variant
+export smallGhost = frame : ghost {
+  title: "按钮 / 轻量小号",
+  left: 320px,
+  top: 128px,
+  height: s.size.compact,
+  padding-top: 0px,
+  padding-left: s.space.sm,
+  padding-bottom: 0px,
+  padding-right: s.space.sm,
+
+  label {
+    font-size: 12
+  }
+}
+
+// 只有图标的按钮，用于标题栏和工具栏
+export iconButton = frame {
+  title: "图标按钮",
+  left: 480px,
+  top: 128px,
+  width: s.size.compact,
+  height: s.size.compact,
+  layout: {justify-content: .center, align-items: .center},
+  corner-radius: s.radius.sm,
+  children: glyph,
+
+  glyph = asset : icons.dots {
+    width: 16px,
+    height: 16px,
+    fill[0].color: c.colors.muted
+  }
+}
+
+@variant
+export iconButtonOn = frame : iconButton {
+  title: "图标按钮 / 开启",
+  left: 528px,
+  top: 128px,
+  fill[0].color: c.colors.selected,
+
+  glyph {
+    fill[0].color: c.colors.text
+  }
+}

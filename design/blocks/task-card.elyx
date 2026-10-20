@@ -1,0 +1,329 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+import "controls/icons.elyx" as icons
+import "controls/button.elyx" as buttons
+import "controls/status.elyx" as status
+import "controls/badge.elyx" as badges
+
+// 任务卡片：出现在主对话里派发它的位置。标题、执行位置、状态、结果摘要和可做的操作。
+export taskCard = frame {
+  title: "任务卡片 / 执行中",
+  width: s.size.measure,
+  layout: {direction: .column, item-gap: 6px},
+  fill: c.colors.surface,
+  border: c.colors.border,
+  corner-radius: 10px,
+  padding: [s.space.md, 14px, s.space.sm],
+  children: [top, meta, summary, actions],
+
+  top = frame {
+    width: 100%,
+    layout: {
+      justify-content: .space-between,
+      align-items: .center,
+      item-gap: s.space.md
+    },
+    children: [heading, state],
+
+    heading = frame {
+      layout: {align-items: .center, item-gap: s.space.sm},
+      children: [name, byUser],
+
+      name = text : t.bodyMedium {
+        contents: "在 Windows 上运行重连测试"
+      }
+
+      byUser = frame : badges.tag {
+        display: .none,
+
+        value {
+          contents: "我派发"
+        }
+      }
+    }
+
+    state = frame : status.pill {}
+  }
+
+  meta = frame {
+    width: 100%,
+    layout: {
+      justify-content: .space-between,
+      align-items: .center,
+      item-gap: s.space.md
+    },
+    children: [place, elapsed],
+
+    place = frame {
+      layout: {align-items: .center, item-gap: 6px},
+      children: [glyph, where-text, path],
+
+      glyph = asset : icons.device {
+        width: 13px,
+        height: 13px,
+        fill[0].color: c.colors.faint
+      }
+
+      where-text = text : t.caption {
+        contents: "Windows 台式机 · Codex ·"
+      }
+
+      path = text : t.mono {
+        contents: "D:\\src\\baton-ps160",
+        font-size: 11,
+        fill[0].color: c.colors.muted
+      }
+    }
+
+    elapsed = text : t.caption {
+      contents: "已执行 12 分钟",
+      fill[0].color: c.colors.faint
+    }
+  }
+
+  summary = text : t.small {
+    width: 100%,
+    display: .none,
+    contents: "412 个测试全部通过，用时 3 分 12 秒。",
+    fill[0].color: c.colors.muted
+  }
+
+  actions = frame {
+    width: 100%,
+    layout: {align-items: .center, item-gap: s.space.xxs},
+    padding: [s.space.xxs, 0px, 0px],
+    children: [open, second, third],
+
+    open = frame : buttons.smallGhost {
+      padding-top: 0px,
+      padding-left: 6px,
+      padding-bottom: 0px,
+      padding-right: 6px,
+
+      label {
+        contents: "查看详情"
+      }
+    }
+
+    second = frame : buttons.smallGhost {
+      padding-top: 0px,
+      padding-left: 6px,
+      padding-bottom: 0px,
+      padding-right: 6px,
+
+      label {
+        fill[0].color: c.colors.muted,
+        contents: "取消"
+      }
+    }
+
+    third = frame : buttons.smallGhost {
+      display: .none,
+      padding-top: 0px,
+      padding-left: 6px,
+      padding-bottom: 0px,
+      padding-right: 6px,
+
+      label {
+        fill[0].color: c.colors.muted,
+        contents: "重新执行"
+      }
+    }
+  }
+}
+
+@variant
+export taskQueued = frame : taskCard {
+  title: "任务卡片 / 等待设备",
+  top: 160px,
+
+  summary {
+    contents: "MacBook Pro 离线，设备上线后开始。",
+    display: .visible
+  }
+
+  meta {
+    elapsed {
+      contents: "14:42 前没有开始则不再执行"
+    }
+
+    place {
+      path {
+        contents: "~/src/baton"
+      }
+
+      where-text {
+        contents: "MacBook Pro · Codex ·"
+      }
+    }
+  }
+
+  top {
+    @with-variant(status.pillQueued)
+    state {
+      left: .nil
+    }
+
+    heading {
+      name {
+        contents: "在 MacBook 上推送 PS-160 分支"
+      }
+    }
+  }
+}
+
+@variant
+export taskSucceeded = frame : taskCard {
+  title: "任务卡片 / 已完成",
+  top: 320px,
+
+  actions {
+    second {
+      label {
+        contents: "问 Project Agent"
+      }
+    }
+  }
+
+  meta {
+    elapsed {
+      contents: "14:09 完成"
+    }
+
+    place {
+      path {
+        contents: "~/work/baton"
+      }
+
+      where-text {
+        contents: "Ubuntu 开发机 · Codex ·"
+      }
+    }
+  }
+
+  summary {
+    display: .visible
+  }
+
+  top {
+    @with-variant(status.pillSucceeded)
+    state {
+      left: .nil
+    }
+
+    heading {
+      name {
+        contents: "在 Ubuntu 上跑单元测试"
+      }
+    }
+  }
+}
+
+@variant
+export taskFailed = frame : taskCard {
+  title: "任务卡片 / 失败",
+  top: 480px,
+
+  actions {
+    second {
+      label {
+        contents: "问 Project Agent"
+      }
+    }
+
+    third {
+      display: .visible
+    }
+  }
+
+  summary {
+    contents: "1 项失败：TestReconnectAfterSleep 在 30 秒内没有重新连上。",
+    display: .visible
+  }
+
+  meta {
+    elapsed {
+      contents: "14:31 结束"
+    }
+  }
+
+  top {
+    @with-variant(status.pillFailed)
+    state {
+      left: .nil
+    }
+  }
+}
+
+@variant
+export taskUnverified = frame : taskCard {
+  title: "任务卡片 / 待核实",
+  top: 640px,
+
+  actions {
+    second {
+      label {
+        fill[0].color: c.colors.text,
+        contents: "人工核实"
+      }
+    }
+
+    third {
+      display: .visible
+    }
+  }
+
+  summary {
+    contents: "Windows 台式机在交付结果前离线，Baton 无法确认测试是否跑完。不会自动重试。",
+    display: .visible
+  }
+
+  meta {
+    elapsed {
+      contents: "14:26 失去联系"
+    }
+  }
+
+  top {
+    @with-variant(status.pillUnverified)
+    state {
+      left: .nil
+    }
+  }
+}
+
+// 用户在 Project 里直接派发的任务
+@variant
+export taskByUser = frame : taskCard {
+  title: "任务卡片 / 用户派发",
+  top: 800px,
+
+  top {
+    heading {
+      name {
+        contents: "整理 PS-160 验收记录"
+      }
+
+      byUser {
+        display: .visible
+      }
+    }
+  }
+
+  meta {
+    place {
+      where-text {
+        contents: "Ubuntu 开发机 · Pi ·"
+      }
+
+      path {
+        contents: "~/work/baton"
+      }
+    }
+
+    elapsed {
+      contents: "已执行 2 分钟"
+    }
+  }
+}

@@ -1,0 +1,596 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+import "controls/icons.elyx" as icons
+import "controls/button.elyx" as buttons
+import "controls/status.elyx" as status
+import "controls/badge.elyx" as badges
+import "controls/tabs.elyx" as tabs
+
+// 概览里的任务行：状态点、标题、时间；第二行写执行位置
+export taskRow = frame {
+  title: "任务行 / 执行中",
+  width: 288px,
+  layout: {direction: .column, item-gap: 1px},
+  corner-radius: s.radius.sm,
+  padding: [6px, s.space.sm],
+  children: [line, sub],
+
+  line = frame {
+    width: 100%,
+    layout: {
+      justify-content: .space-between,
+      align-items: .center,
+      item-gap: s.space.sm
+    },
+    children: [lead, time],
+
+    lead = frame {
+      layout: {align-items: .center, item-gap: s.space.sm},
+      children: [mark, name],
+
+      mark = shape : status.dot {}
+
+      name = text : t.small {
+        contents: "在 Windows 上运行重连测试"
+      }
+    }
+
+    time = text : t.caption {
+      contents: "12 分钟",
+      fill[0].color: c.colors.faint
+    }
+  }
+
+  sub = frame {
+    width: 100%,
+    layout: {align-items: .center, item-gap: 6px},
+    padding: [0px, 0px, 0px, 14px],
+    children: [place, byUser],
+
+    place = text : t.caption {
+      contents: "Windows 台式机 · Codex",
+      fill[0].color: c.colors.faint
+    }
+
+    byUser = frame : badges.tag {
+      height: 16px,
+      display: .none,
+      padding-top: 0px,
+      padding-left: 4px,
+      padding-bottom: 0px,
+      padding-right: 4px,
+
+      value {
+        contents: "我派发",
+        font-size: 10
+      }
+    }
+  }
+}
+
+@variant
+export taskRowSelected = frame : taskRow {
+  title: "任务行 / 选中",
+  top: 64px,
+  fill[0].color: c.colors.selected
+}
+
+// 记忆条目：内容、版本、修改者和时间
+export memoryRow = frame {
+  title: "记忆条目",
+  top: 128px,
+  width: 288px,
+  layout: {direction: .column, item-gap: s.space.xxs},
+  border: {color: c.colors.borderSoft, sides: .bottom},
+  padding: [10px, s.space.sm],
+  children: [content, meta],
+
+  content = text : t.small {
+    width: 100%,
+    contents: "Baton 仓库在 MacBook 上的路径是 ~/src/baton，在 Ubuntu 上是 ~/work/baton。"
+  }
+
+  meta = text : t.caption {
+    contents: "v2 · Project Agent · 今天 14:05",
+    fill[0].color: c.colors.faint
+  }
+}
+
+// 分组标题
+export groupHead = frame {
+  title: "分组标题",
+  top: 224px,
+  width: 288px,
+  height: 28px,
+  layout: {justify-content: .space-between, align-items: .center},
+  padding: [0px, s.space.sm],
+  children: [lead, extra],
+
+  lead = frame {
+    layout: {align-items: .center, item-gap: 6px},
+    children: [label, count],
+
+    label = text : t.captionMedium {
+      contents: "执行中",
+      fill[0].color: c.colors.muted
+    }
+
+    count = text : t.caption {
+      contents: "2",
+      fill[0].color: c.colors.faint
+    }
+  }
+
+  extra = asset : icons.chevronDown {
+    width: 13px,
+    height: 13px,
+    fill[0].color: c.colors.faint
+  }
+}
+
+// 概览栏：目标、运行实例、任务和记忆
+export overview = frame {
+  title: "概览栏 / 任务",
+  caption: "320px。任务按状态分组；等你处理的事项排在最前。",
+  left: 360px,
+  width: s.size.overview,
+  height: s.size.screenHeight,
+  layout: {direction: .column},
+  fill: c.colors.panel,
+  border: {color: c.colors.borderSoft, sides: .left},
+  children: [head, summary, tabBar, body],
+
+  head = frame {
+    width: 100%,
+    height: s.size.header,
+    layout: {justify-content: .space-between, align-items: .center},
+    padding: [0px, s.space.sm, 0px, s.space.lg],
+    children: [headLabel, headMore],
+
+    headLabel = text : t.label {
+      contents: "概览"
+    }
+
+    headMore = frame : buttons.iconButton {}
+  }
+
+  summary = frame {
+    width: 100%,
+    layout: {direction: .column, item-gap: s.space.lg},
+    padding: [s.space.xs, s.space.lg, s.space.lg],
+    children: [goal, runtime],
+
+    goal = frame {
+      width: 100%,
+      layout: {direction: .column, item-gap: s.space.xs},
+      children: [goalHead, goalText],
+
+      goalHead = frame {
+        width: 100%,
+        layout: {justify-content: .space-between, align-items: .center},
+        children: [goalLabel, goalEdit],
+
+        goalLabel = text : t.captionMedium {
+          contents: "目标",
+          fill[0].color: c.colors.faint
+        }
+
+        goalEdit = asset : icons.pen {
+          width: 13px,
+          height: 13px,
+          fill[0].color: c.colors.faint
+        }
+      }
+
+      goalText = text : t.small {
+        width: 100%,
+        contents: "第一个里程碑：一件真实工作跨设备走通全程，结果带证据回来。"
+      }
+    }
+
+    runtime = frame {
+      width: 100%,
+      layout: {direction: .column, item-gap: 6px},
+      children: [runtimeLabel, runtimeCard],
+
+      runtimeLabel = text : t.captionMedium {
+        contents: "Project Agent",
+        fill[0].color: c.colors.faint
+      }
+
+      runtimeCard = frame {
+        width: 100%,
+        layout: {direction: .column, item-gap: s.space.xxs},
+        fill: c.colors.surface,
+        border: c.colors.borderSoft,
+        corner-radius: s.radius.md,
+        padding: [10px, s.space.md],
+        children: [runtimeLine, runtimeNote],
+
+        runtimeLine = frame {
+          width: 100%,
+          layout: {justify-content: .space-between, align-items: .center},
+          children: [runtimeDevice, runtimeState],
+
+          runtimeDevice = frame {
+            layout: {align-items: .center, item-gap: s.space.sm},
+            children: [runtimeGlyph, runtimeName],
+
+            runtimeGlyph = asset : icons.device {
+              width: 14px,
+              height: 14px,
+              fill[0].color: c.colors.muted
+            }
+
+            runtimeName = text : t.label {
+              contents: "Ubuntu 开发机"
+            }
+          }
+
+          runtimeState = frame {
+            layout: {align-items: .center, item-gap: 6px},
+            children: [runtimeDot, runtimeStateText],
+
+            runtimeDot = shape : status.dotAgent {}
+
+            runtimeStateText = text : t.caption {
+              contents: "运行中",
+              fill[0].color: c.colors.agentText
+            }
+          }
+        }
+
+        runtimeNote = text : t.caption {
+          width: 100%,
+          contents: "ChatGPT 订阅 · gpt-5.1。默认设备 MacBook Pro 离线，改在这台运行。",
+          fill[0].color: c.colors.muted
+        }
+      }
+    }
+  }
+
+  tabBar = frame {
+    width: 100%,
+    layout: {align-items: .end, item-gap: s.space.lg},
+    border: {color: c.colors.borderSoft, sides: .bottom},
+    padding: [0px, s.space.lg],
+    children: [tasksTab, memoryTab],
+
+    tasksTab = frame : tabs.tab {}
+
+    memoryTab = frame : tabs.tabIdle {}
+  }
+
+  body = frame {
+    width: 100%,
+    layout: {direction: .column, item-gap: s.space.xxs},
+    slot: .true,
+    padding: [s.space.sm, s.space.md],
+    children: [
+      needsHead,
+      needsRow,
+      activeHead,
+      activeRow1,
+      activeRow2,
+      queuedHead,
+      queuedRow,
+      doneHead,
+      doneRow1,
+      doneRow2,
+      doneMore
+    ],
+
+    needsHead = frame : groupHead {
+      width: 100%,
+
+      lead {
+        label {
+          contents: "等你处理"
+        }
+
+        count {
+          contents: "1"
+        }
+      }
+    }
+
+    needsRow = frame : taskRow {
+      width: 100%,
+
+      sub {
+        place {
+          contents: "事项 · 检查 PS-158 迁移脚本"
+        }
+      }
+
+      line {
+        time {
+          contents: "14:33"
+        }
+
+        lead {
+          name {
+            contents: "迁移 031 要不要先在副本上跑？"
+          }
+
+          @with-variant(status.dotAttention)
+          mark {
+            left: .nil
+          }
+        }
+      }
+    }
+
+    activeHead = frame : groupHead {
+      width: 100%,
+      padding-top: 6px,
+      padding-left: s.space.sm,
+      padding-bottom: 0px,
+      padding-right: s.space.sm
+    }
+
+    activeRow1 = frame : taskRow {
+      width: 100%
+    }
+
+    activeRow2 = frame : taskRow {
+      width: 100%,
+
+      line {
+        lead {
+          name {
+            contents: "整理 PS-160 验收记录"
+          }
+        }
+
+        time {
+          contents: "2 分钟"
+        }
+      }
+
+      sub {
+        place {
+          contents: "Ubuntu 开发机 · Pi"
+        }
+
+        byUser {
+          display: .visible
+        }
+      }
+    }
+
+    queuedHead = frame : groupHead {
+      width: 100%,
+      padding-top: 6px,
+      padding-left: s.space.sm,
+      padding-bottom: 0px,
+      padding-right: s.space.sm,
+
+      lead {
+        label {
+          contents: "等待设备"
+        }
+
+        count {
+          contents: "1"
+        }
+      }
+    }
+
+    queuedRow = frame : taskRow {
+      width: 100%,
+
+      sub {
+        place {
+          contents: "MacBook Pro · Codex"
+        }
+      }
+
+      line {
+        time {
+          contents: "14:42 到期"
+        }
+
+        lead {
+          name {
+            contents: "推送 PS-160 分支"
+          }
+
+          @with-variant(status.dotQueued)
+          mark {
+            left: .nil
+          }
+        }
+      }
+    }
+
+    doneHead = frame : groupHead {
+      width: 100%,
+      padding-top: 6px,
+      padding-left: s.space.sm,
+      padding-bottom: 0px,
+      padding-right: s.space.sm,
+
+      lead {
+        label {
+          contents: "已结束"
+        }
+
+        count {
+          contents: "12"
+        }
+      }
+    }
+
+    doneRow1 = frame : taskRow {
+      width: 100%,
+
+      sub {
+        place {
+          contents: "Ubuntu 开发机 · Codex"
+        }
+      }
+
+      line {
+        time {
+          contents: "14:09"
+        }
+
+        lead {
+          name {
+            contents: "在 Ubuntu 上跑单元测试"
+          }
+
+          @with-variant(status.dotSucceeded)
+          mark {
+            left: .nil
+          }
+        }
+      }
+    }
+
+    doneRow2 = frame : taskRow {
+      width: 100%,
+
+      sub {
+        place {
+          contents: "Windows 台式机 · 命令"
+        }
+      }
+
+      line {
+        time {
+          contents: "14:03"
+        }
+
+        lead {
+          name {
+            contents: "git worktree add",
+            font-size: 12,
+            font-family: "Paper Mono"
+          }
+
+          @with-variant(status.dotSucceeded)
+          mark {
+            left: .nil
+          }
+        }
+      }
+    }
+
+    doneMore = frame : buttons.smallGhost {
+      label {
+        fill[0].color: c.colors.muted,
+        contents: "显示其余 10 个"
+      }
+    }
+  }
+}
+
+// 记忆标签页
+@variant
+export overviewMemory = frame : overview {
+  title: "概览栏 / 记忆",
+  left: 760px,
+
+  body {
+    overrides: [
+      insert(mem1, after = .nil),
+      insert(mem2, after = mem1),
+      insert(mem3, after = mem2),
+      insert(mem4, after = mem3),
+      insert(addMemory, after = mem4),
+      remove(overview.body.doneMore),
+      remove(overview.body.doneRow2),
+      remove(overview.body.doneRow1),
+      remove(overview.body.doneHead),
+      remove(overview.body.queuedHead),
+      remove(overview.body.activeHead),
+      remove(overview.body.activeRow1),
+      remove(overview.body.activeRow2),
+      remove(overview.body.needsRow),
+      remove(overview.body.queuedRow),
+      remove(overview.body.needsHead)
+    ]
+  }
+
+  tabBar {
+    @with-variant(tabs.tab)
+    memoryTab {
+      count {
+        contents: "4"
+      }
+
+      label {
+        contents: "记忆"
+      }
+    }
+
+    @with-variant(tabs.tabIdle)
+    tasksTab {
+      count {
+        contents: "7"
+      }
+
+      label {
+        contents: "任务"
+      }
+
+      left: .nil
+    }
+  }
+
+  mem1 = frame : memoryRow {
+    width: 100%
+  }
+
+  mem2 = frame : memoryRow {
+    width: 100%,
+
+    content {
+      contents: "Windows 上的 PS-160 worktree 在 D:\\src\\baton-ps160。"
+    }
+
+    meta {
+      contents: "v1 · Project Agent · 今天 14:03"
+    }
+  }
+
+  mem3 = frame : memoryRow {
+    width: 100%,
+
+    content {
+      contents: "验收必须用真实订阅，替身测试不算。"
+    }
+
+    meta {
+      contents: "v3 · 我 · 昨天 21:40"
+    }
+  }
+
+  mem4 = frame : memoryRow {
+    width: 100%,
+
+    content {
+      contents: "跑测试前先 node tools/build.mjs，前端产物不提交。"
+    }
+
+    meta {
+      contents: "v1 · Project Agent · 10月18日"
+    }
+  }
+
+  addMemory = frame : buttons.smallGhost {
+    label {
+      fill[0].color: c.colors.muted,
+      contents: "添加记忆"
+    }
+
+    lead {
+      width: 13px,
+      height: 13px,
+      display: .visible
+    }
+  }
+}

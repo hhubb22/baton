@@ -1,0 +1,30 @@
+{
+  "git": {
+    "flow": "relaxed"
+  },
+  "files": {
+    "exclude": [
+      ".pnpm-store"
+    ]
+  },
+  "assets": {
+    "include": [
+      "resources/assets"
+    ]
+  },
+  "fonts": {
+    "include": [
+      "resources/fonts"
+    ]
+  },
+  "defaults": {
+    "text": {
+      "font": {
+        "family": "PingFang SC",
+        "style": "Regular"
+      },
+      "fontSize": 14,
+      "fontWeight": 400
+    }
+  }
+}

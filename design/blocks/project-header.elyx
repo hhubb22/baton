@@ -1,0 +1,170 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+import "controls/icons.elyx" as icons
+import "controls/button.elyx" as buttons
+import "controls/avatar.elyx" as avatars
+import "controls/status.elyx" as status
+
+// Project 标题栏：标题和 Project Agent 当前状态。状态文字说明它在哪台设备上运行，或者为什么没有运行。
+export projectHeader = frame {
+  title: "Project 标题栏 / 运行中",
+  width: 872px,
+  height: s.size.header,
+  layout: {
+    justify-content: .space-between,
+    align-items: .center,
+    item-gap: s.space.lg
+  },
+  border: {color: c.colors.borderSoft, sides: .bottom},
+  padding: [0px, s.space.md, 0px, 20px],
+  children: [lead, trail],
+
+  lead = frame {
+    layout: {align-items: .center, item-gap: s.space.md},
+    children: [identity, state],
+
+    identity = frame {
+      layout: {align-items: .center, item-gap: s.space.sm},
+      children: [avatar, name],
+
+      avatar = frame : avatars.avatar {}
+
+      name = text : t.label {
+        contents: "Baton 开发",
+        font-size: 14,
+        font-style: "Semibold"
+      }
+    }
+
+    state = frame {
+      layout: {align-items: .center, item-gap: 6px},
+      children: [mark, stateText, stop],
+
+      mark = shape : status.dotAgent {}
+
+      stateText = text : t.caption {
+        contents: "Project Agent 在 Ubuntu 开发机上运行",
+        fill[0].color: c.colors.agentText
+      }
+
+      stop = frame : buttons.smallGhost {
+        height: 24px,
+        padding-left: 6px,
+        padding-right: 6px,
+
+        label {
+          fill[0].color: c.colors.muted,
+          contents: "停止这次运行"
+        }
+
+        @with-variant(icons.stop)
+        lead {
+          width: 12px,
+          height: 12px,
+          display: .visible
+        }
+      }
+    }
+  }
+
+  trail = frame {
+    layout: {align-items: .center, item-gap: s.space.xxs},
+    children: [overview, more],
+
+    overview = frame : buttons.iconButtonOn {
+      @with-variant(icons.panelRight)
+      glyph {}
+    }
+
+    more = frame : buttons.iconButton {}
+  }
+}
+
+@variant
+export headerIdle = frame : projectHeader {
+  title: "Project 标题栏 / 空闲",
+  top: 80px,
+
+  lead {
+    state {
+      stateText {
+        fill[0].color: c.colors.muted,
+        contents: "空闲 · 14:12 在 Ubuntu 开发机上运行过"
+      }
+
+      stop {
+        display: .none
+      }
+
+      @with-variant(status.dotIdle)
+      mark {}
+    }
+  }
+}
+
+@variant
+export headerWaiting = frame : projectHeader {
+  title: "Project 标题栏 / 等待设备",
+  top: 160px,
+
+  lead {
+    state {
+      stateText {
+        fill[0].color: c.colors.muted,
+        contents: "等待设备：3 台设备都离线，1 条消息未处理"
+      }
+
+      stop {
+        display: .none
+      }
+
+      @with-variant(status.dotQueued)
+      mark {}
+    }
+  }
+}
+
+@variant
+export headerAttention = frame : projectHeader {
+  title: "Project 标题栏 / 需要处理",
+  top: 240px,
+
+  lead {
+    state {
+      stateText {
+        fill[0].color: c.colors.attentionText,
+        contents: "需要处理：模型请求连续失败，已暂停"
+      }
+
+      stop {
+        display: .none
+      }
+
+      @with-variant(status.dotAttention)
+      mark {}
+    }
+  }
+}
+
+@variant
+export headerPaused = frame : projectHeader {
+  title: "Project 标题栏 / 已暂停",
+  top: 320px,
+
+  lead {
+    state {
+      stateText {
+        fill[0].color: c.colors.muted,
+        contents: "已暂停 · 已派出的任务继续执行"
+      }
+
+      stop {
+        display: .none
+      }
+
+      @with-variant(status.dotIdle)
+      mark {}
+    }
+  }
+}

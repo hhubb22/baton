@@ -1,0 +1,47 @@
+import "./colors.elyx" as base
+
+@context(theme="dark")
+file {}
+
+export colors = tokens : base.colors {
+  canvas: rgb(8.6%, 8.6%, 9%),
+  panel: rgb(6.6%, 6.6%, 7%),
+  surface: rgb(11.6%, 11.6%, 12%),
+  subtle: rgb(14%, 14%, 14.5%),
+  hover: rgb(100%, 100%, 100%, 6%),
+  selected: rgb(100%, 100%, 100%, 9%),
+  borderSoft: rgb(100%, 100%, 100%, 8%),
+  border: rgb(100%, 100%, 100%, 12%),
+  borderStrong: rgb(100%, 100%, 100%, 16%),
+  text: rgb(96%, 96%, 96.2%),
+  muted: rgb(68%, 68%, 69.5%),
+  faint: rgb(50%, 50%, 51.5%),
+  accent: rgb(96%, 96%, 96.2%),
+  accentHover: .white,
+  accentPressed: rgb(83%, 83%, 83.6%),
+  accentSoft: rgb(100%, 100%, 100%, 8%),
+  accentSoftHover: rgb(100%, 100%, 100%, 12%),
+  onAccent: rgb(8.6%, 8.6%, 9%),
+  agent: rgb(32.72%, 75%, 71.06%),
+  agentText: rgb(45%, 82%, 78%),
+  agentSoft: rgb(4.85%, 18.51%, 17.29%),
+  onAgent: rgb(4%, 10%, 10%),
+  link: rgb(49%, 69%, 95%),
+  focus: rgb(40%, 64.6%, 100%),
+  info: rgb(44%, 70%, 96.8%),
+  infoSoft: rgb(8%, 15%, 25%),
+  success: rgb(45%, 80.8%, 58.6%),
+  successSoft: rgb(7%, 17%, 10%),
+  attention: rgb(100%, 58.6%, 38%),
+  attentionText: rgb(100%, 68%, 50%),
+  attentionSoft: rgb(26%, 14%, 7%),
+  danger: rgb(96.4%, 42.3%, 42.8%),
+  dangerSoft: rgb(28%, 12.6%, 13%),
+  code: rgb(7.5%, 7.5%, 8%),
+  codeBorder: rgb(100%, 100%, 100%, 8%),
+  disabled: rgb(15%, 15%, 15.5%),
+  disabledText: rgb(42%, 42%, 43%),
+  selection: rgb(11.9%, 22.9%, 39%),
+  overlay: rgb(0%, 0%, 0%, 55%),
+  transparent: .transparent
+}

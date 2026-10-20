@@ -1,0 +1,406 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+import "controls/icons.elyx" as icons
+import "controls/button.elyx" as buttons
+import "controls/status.elyx" as status
+
+// 详情里的一行属性：左侧名称，右侧值
+export metaRow = frame {
+  title: "属性行",
+  width: 392px,
+  layout: {item-gap: s.space.md},
+  children: [key, value],
+
+  key = text : t.small {
+    width: 72px,
+    contents: "设备",
+    fill[0].color: c.colors.faint
+  }
+
+  value = text : t.small {
+    contents: "Windows 台式机"
+  }
+}
+
+// 证据或产物引用：所在设备、路径、能否查看
+export evidenceRow = frame {
+  title: "证据引用 / 可查看",
+  top: 48px,
+  width: 392px,
+  layout: {align-items: .center, item-gap: 10px},
+  border: c.colors.borderSoft,
+  corner-radius: s.radius.md,
+  padding: [s.space.sm, s.space.md],
+  children: [glyph, copy, action],
+
+  glyph = asset : icons.file {
+    width: 15px,
+    height: 15px,
+    fill[0].color: c.colors.muted
+  }
+
+  copy = frame {
+    width: 100%,
+    layout: {direction: .column, item-gap: 1px},
+    children: [path, note],
+
+    path = text : t.mono {
+      contents: "D:\\src\\baton-ps160\\out\\reconnect.log"
+    }
+
+    note = text : t.caption {
+      contents: "Windows 台式机 · 测试日志，48 KiB",
+      fill[0].color: c.colors.faint
+    }
+  }
+
+  action = text : t.caption {
+    contents: "预览",
+    fill[0].color: c.colors.link
+  }
+}
+
+@variant
+export evidenceOffline = frame : evidenceRow {
+  title: "证据引用 / 设备离线",
+  top: 120px,
+
+  copy {
+    path {
+      fill[0].color: c.colors.muted,
+      contents: "~/src/baton/out/macos-reconnect.log"
+    }
+
+    note {
+      contents: "MacBook Pro · 设备离线，暂不可查看"
+    }
+  }
+
+  action {
+    display: .none
+  }
+}
+
+// 代码提交产物：不需要设备在线
+@variant
+export commitRow = frame : evidenceRow {
+  title: "产物 / 代码提交",
+  top: 192px,
+
+  action {
+    contents: "复制"
+  }
+
+  copy {
+    note {
+      contents: "hhubb22/baton · fix(gateway): 唤醒后重建 TLS 连接"
+    }
+
+    path {
+      contents: "4c1e9a2f0b7d63e18a5c2f9e4d1b0a7c6e3f2d19"
+    }
+  }
+
+  @with-variant(icons.commit)
+  glyph {}
+}
+
+// 区块：小标题 + 内容
+export section = frame {
+  title: "详情区块",
+  top: 280px,
+  width: 392px,
+  layout: {direction: .column, item-gap: s.space.sm},
+  slot: .true,
+  children: [label, content],
+
+  label = text : t.captionMedium {
+    contents: "验证方式",
+    fill[0].color: c.colors.faint
+  }
+
+  content = text : t.small {
+    width: 100%,
+    contents: "go test ./internal/gateway -run Reconnect -count=1 全部通过；日志里能看到睡眠唤醒后重新连上。"
+  }
+}
+
+// 任务详情面板：在 Project 页右侧打开，主对话保持不动
+export taskDetail = frame {
+  title: "任务详情面板",
+  caption: "440px。替换概览栏显示；返回后回到概览。",
+  left: 480px,
+  width: s.size.detail,
+  height: s.size.screenHeight,
+  layout: {direction: .column},
+  fill: c.colors.surface,
+  border: {color: c.colors.borderSoft, sides: .left},
+  children: [head, body, footer],
+
+  head = frame {
+    width: 100%,
+    height: s.size.header,
+    layout: {justify-content: .space-between, align-items: .center},
+    padding: [0px, s.space.sm],
+    children: [back, tools],
+
+    back = frame : buttons.smallGhost {
+      label {
+        fill[0].color: c.colors.muted,
+        contents: "概览"
+      }
+
+      @with-variant(icons.chevronLeft)
+      lead {
+        width: 14px,
+        height: 14px,
+        display: .visible
+      }
+    }
+
+    tools = frame {
+      layout: {align-items: .center, item-gap: s.space.xxs},
+      children: [external, close],
+
+      external = frame : buttons.iconButton {
+        @with-variant(icons.external)
+        glyph {}
+      }
+
+      close = frame : buttons.iconButton {
+        @with-variant(icons.close)
+        glyph {}
+      }
+    }
+  }
+
+  body = frame {
+    width: 100%,
+    height: 100%,
+    layout: {direction: .column, item-gap: 22px},
+    padding: [s.space.xs, s.space.xl, s.space.xl],
+    children: [intro, meta, verify, result, evidence, artifacts, related],
+
+    intro = frame {
+      width: 100%,
+      layout: {direction: .column, item-gap: s.space.sm},
+      children: [name, line],
+
+      name = text : t.heading {
+        width: 100%,
+        contents: "在 Windows 上运行重连测试",
+        font-size: 17
+      }
+
+      line = frame {
+        layout: {align-items: .center, item-gap: s.space.sm},
+        children: [state, origin],
+
+        state = frame : status.pillFailed {}
+
+        origin = text : t.caption {
+          contents: "Project Agent 14:03 派发 · 结果 v1",
+          fill[0].color: c.colors.faint
+        }
+      }
+    }
+
+    meta = frame {
+      width: 100%,
+      layout: {direction: .column, item-gap: 6px},
+      children: [rowDevice, rowAgent, rowDir, rowTime, rowSession],
+
+      rowDevice = frame : metaRow {
+        width: 100%
+      }
+
+      rowAgent = frame : metaRow {
+        width: 100%,
+
+        key {
+          contents: "Agent"
+        }
+
+        value {
+          contents: "Codex"
+        }
+      }
+
+      rowDir = frame : metaRow {
+        width: 100%,
+
+        key {
+          contents: "工作目录"
+        }
+
+        value {
+          contents: "D:\\src\\baton-ps160",
+          font-size: 12,
+          font-family: "Paper Mono"
+        }
+      }
+
+      rowTime = frame : metaRow {
+        width: 100%,
+
+        key {
+          contents: "时间"
+        }
+
+        value {
+          contents: "14:03 开始，执行 28 分钟，期限 2 小时"
+        }
+      }
+
+      rowSession = frame : metaRow {
+        width: 100%,
+
+        value {
+          fill[0].color: c.colors.link,
+          contents: "Codex · 已停止 · 查看输出"
+        }
+
+        key {
+          contents: "Session"
+        }
+      }
+    }
+
+    verify = frame : section {
+      width: 100%
+    }
+
+    result = frame : section {
+      width: 100%,
+      overrides: [insert(errorBox, after = section.content)],
+
+      label {
+        contents: "结果"
+      }
+
+      content {
+        contents: "48 项中 47 项通过。TestReconnectAfterSleep 在睡眠唤醒后 30 秒内没有重新连上。"
+      }
+
+      errorBox = frame {
+        width: 100%,
+        layout: {direction: .row},
+        fill: c.colors.code,
+        border: c.colors.codeBorder,
+        corner-radius: s.radius.sm,
+        padding: [s.space.sm, 10px],
+        children: errorText,
+
+        errorText = text : t.mono {
+          width: 100%,
+          contents: "--- FAIL: TestReconnectAfterSleep (30.02s)\n    reconnect_test.go:88: node did not come back online",
+          fill[0].color: c.colors.danger
+        }
+      }
+    }
+
+    evidence = frame : section {
+      width: 100%,
+      overrides: [
+        insert(evidenceA, after = section.label),
+        insert(evidenceB, after = evidenceA),
+        remove(section.content)
+      ],
+
+      label {
+        contents: "证据"
+      }
+
+      evidenceA = frame : evidenceRow {
+        width: 100%
+      }
+
+      evidenceB = frame : evidenceOffline {
+        width: 100%
+      }
+    }
+
+    artifacts = frame : section {
+      width: 100%,
+
+      content {
+        fill[0].color: c.colors.faint,
+        contents: "没有登记产物。"
+      }
+
+      label {
+        contents: "产物"
+      }
+    }
+
+    related = frame : section {
+      width: 100%,
+      overrides: [insert(item, after = section.label), remove(section.content)],
+
+      label {
+        contents: "关联事项"
+      }
+
+      item = frame {
+        width: 100%,
+        height: 32px,
+        layout: {justify-content: .space-between, align-items: .center},
+        fill: c.colors.attentionSoft,
+        corner-radius: s.radius.md,
+        padding: [0px, s.space.md],
+        children: [itemLead, itemState],
+
+        itemLead = frame {
+          layout: {align-items: .center, item-gap: s.space.sm},
+          children: [itemDot, itemTitle],
+
+          itemDot = shape : status.dotAttention {}
+
+          itemTitle = text : t.small {
+            contents: "重连测试有 1 项失败，下一步怎么处理？"
+          }
+        }
+
+        itemState = text : t.caption {
+          contents: "等你决定",
+          fill[0].color: c.colors.attentionText
+        }
+      }
+    }
+  }
+
+  footer = frame {
+    width: 100%,
+    layout: {align-items: .center, item-gap: s.space.sm},
+    border: {color: c.colors.borderSoft, sides: .top},
+    padding: [s.space.md, s.space.xl],
+    children: [ask, rerun],
+
+    ask = frame : buttons.smallSecondary {
+      label {
+        contents: "问 Project Agent"
+      }
+
+      @with-variant(icons.reply)
+      lead {
+        width: 14px,
+        height: 14px,
+        display: .visible
+      }
+    }
+
+    rerun = frame : buttons.smallSecondary {
+      label {
+        contents: "重新执行"
+      }
+
+      @with-variant(icons.refresh)
+      lead {
+        width: 14px,
+        height: 14px,
+        display: .visible
+      }
+    }
+  }
+}

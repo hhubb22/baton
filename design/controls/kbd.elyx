@@ -1,0 +1,31 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+
+export kbd = frame {
+  title: "键盘提示",
+  width: .auto,
+  height: 18px,
+  layout: {justify-content: .center, align-items: .center},
+  fill: c.colors.surface,
+  border: c.colors.borderSoft,
+  corner-radius: s.radius.inner,
+  padding: [0px, 5px],
+  children: keyLabel,
+
+  keyLabel = text : t.caption {
+    contents: "⌘↵",
+    font-size: 11,
+    line-height: 1,
+    fill[0].color: c.colors.faint
+  }
+}
+
+@variant
+export esc = frame : kbd {
+  left: 48px,
+
+  keyLabel {
+    contents: "Esc"
+  }
+}

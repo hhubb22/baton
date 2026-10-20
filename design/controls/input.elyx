@@ -1,0 +1,123 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+import "resources/assets/chevron-down.svg" as chevronAsset
+
+export input = frame {
+  title: "输入框 / 占位",
+  width: 320px,
+  height: s.size.control,
+  layout: {align-items: .center},
+  fill: c.colors.surface,
+  border: c.colors.border,
+  corner-radius: s.radius.sm,
+  padding: [0px, 10px],
+  children: value,
+
+  value = text : t.small {
+    contents: "例如 Baton 开发",
+    fill[0].color: c.colors.faint
+  }
+}
+
+@variant
+export filled = frame : input {
+  title: "输入框 / 已填写",
+  top: 56px,
+
+  value {
+    fill[0].color: c.colors.text,
+    contents: "Baton 开发"
+  }
+}
+
+@variant
+export focus = frame : input {
+  title: "输入框 / 焦点",
+  top: 112px,
+  border[0].color: c.colors.focus,
+  border[0].width: 1.5px,
+
+  value {
+    fill[0].color: c.colors.text,
+    contents: "Baton 开发"
+  }
+}
+
+@variant
+export error = frame : input {
+  title: "输入框 / 错误",
+  top: 168px,
+  border[0].color: c.colors.danger,
+
+  value {
+    contents: ""
+  }
+}
+
+// 多行文本
+@variant
+export textarea = frame : input {
+  title: "多行输入",
+  top: 224px,
+  height: 80px,
+  padding-top: 8px,
+  padding-left: 10px,
+  padding-bottom: 8px,
+  padding-right: 10px,
+  layout.align-items: .start,
+  layout.direction: .row,
+
+  value {
+    width: 100%,
+    contents: "这件事做到什么程度算完成"
+  }
+}
+
+// 下拉选择：值 + 右侧箭头
+export select = frame {
+  title: "下拉选择",
+  left: 360px,
+  width: 240px,
+  height: s.size.control,
+  layout: {
+    justify-content: .space-between,
+    align-items: .center,
+    item-gap: s.space.sm
+  },
+  fill: c.colors.surface,
+  border: c.colors.border,
+  corner-radius: s.radius.sm,
+  padding: [0px, 8px, 0px, 10px],
+  children: [value, chevron],
+
+  value = text : t.small {
+    contents: "MacBook Pro"
+  }
+
+  chevron = asset {
+    width: 14px,
+    height: 14px,
+    fill: c.colors.faint,
+    contents: chevronAsset
+  }
+}
+
+@variant
+export selectCompact = frame : select {
+  title: "下拉选择 / 紧凑",
+  left: 360px,
+  top: 56px,
+  width: .auto,
+  height: s.size.compact,
+  padding-left: 8px,
+  padding-right: 6px,
+  border[0].color: c.colors.transparent,
+  border[0].width: 0px,
+  fill[0].color: c.colors.subtle,
+
+  value {
+    contents: "Codex",
+    font-size: 12
+  }
+}

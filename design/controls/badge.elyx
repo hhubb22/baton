@@ -1,0 +1,92 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+
+// 等你处理的数量：橙色实心，超过 9 显示 9+
+export count = frame {
+  title: "数量 / 等你处理",
+  width: .auto,
+  height: 16px,
+  min-width: 16px,
+  layout: {justify-content: .center, align-items: .center},
+  fill: c.colors.attention,
+  corner-radius: s.radius.pill,
+  padding: [0px, 5px],
+  children: value,
+
+  value = text : t.caption {
+    contents: "2",
+    font-size: 11,
+    font-style: "Medium",
+    line-height: 1,
+    fill[0].color: c.primary.white
+  }
+}
+
+// 普通数量：灰色文字，用在标签页和分组标题
+@variant
+export countQuiet = frame : count {
+  title: "数量 / 普通",
+  left: 40px,
+  fill[0].color: c.colors.subtle,
+
+  value {
+    fill[0].color: c.colors.muted,
+    contents: "7"
+  }
+}
+
+// 标签：说明来源或属性，例如「默认设备」「我派发」「Baton 创建」
+export tag = frame {
+  title: "标签",
+  left: 88px,
+  width: .auto,
+  height: 18px,
+  layout: {justify-content: .center, align-items: .center},
+  fill: c.colors.subtle,
+  corner-radius: s.radius.inner,
+  padding: [0px, 6px],
+  children: value,
+
+  value = text : t.caption {
+    contents: "默认设备",
+    font-size: 11,
+    line-height: 1,
+    fill[0].color: c.colors.muted
+  }
+}
+
+@variant
+export tagAgent = frame : tag {
+  title: "标签 / Project Agent",
+  left: 168px,
+  fill[0].color: c.colors.agentSoft,
+
+  value {
+    fill[0].color: c.colors.agentText,
+    contents: "建议"
+  }
+}
+
+@variant
+export tagAttention = frame : tag {
+  title: "标签 / 需要处理",
+  left: 216px,
+  fill[0].color: c.colors.attentionSoft,
+
+  value {
+    fill[0].color: c.colors.attentionText,
+    contents: "需要处理"
+  }
+}
+
+// 未读圆点
+export unread = shape {
+  title: "未读",
+  left: 296px,
+  top: 5px,
+  width: 6px,
+  height: 6px,
+  fill: c.colors.link,
+  type: .ellipse
+}

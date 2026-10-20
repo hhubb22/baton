@@ -1,0 +1,99 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+import "controls/icons.elyx" as icons
+import "controls/button.elyx" as buttons
+
+// 输入区上方的状态横幅：一句标题、一句说明、一个动作
+export banner = frame {
+  title: "横幅 / 等待设备",
+  width: s.size.measure,
+  layout: {align-items: .center, item-gap: s.space.md},
+  fill: c.colors.panel,
+  border: c.colors.borderSoft,
+  corner-radius: 10px,
+  padding: [10px, s.space.md, 10px, 14px],
+  children: [glyph, copy, action],
+
+  glyph = asset : icons.offline {
+    width: 16px,
+    height: 16px,
+    fill[0].color: c.colors.muted
+  }
+
+  copy = frame {
+    width: 100%,
+    layout: {direction: .column, item-gap: s.space.xxs},
+    children: [heading, detail],
+
+    heading = text : t.label {
+      contents: "等待设备上线"
+    }
+
+    detail = text : t.caption {
+      width: 100%,
+      contents: "3 台设备都离线。消息已保存，有设备满足条件后 Project Agent 接着处理。",
+      fill[0].color: c.colors.muted
+    }
+  }
+
+  action = frame : buttons.smallSecondary {
+    label {
+      contents: "查看设备"
+    }
+  }
+}
+
+@variant
+export bannerPaused = frame : banner {
+  title: "横幅 / 已暂停",
+  top: 96px,
+
+  action {
+    label {
+      contents: "恢复"
+    }
+  }
+
+  copy {
+    detail {
+      contents: "Project Agent 不会启动，已派出的任务继续执行。期间的消息和结果都会保存，恢复后一起处理。"
+    }
+
+    heading {
+      contents: "Project 已暂停"
+    }
+  }
+
+  @with-variant(icons.pause)
+  glyph {}
+}
+
+@variant
+export bannerAttention = frame : banner {
+  title: "横幅 / 需要处理",
+  top: 192px,
+  border[0].color: rgb(91%, 41%, 12%, 18%),
+  fill[0].color: c.colors.attentionSoft,
+
+  action {
+    label {
+      contents: "重试"
+    }
+  }
+
+  copy {
+    detail {
+      contents: "Ubuntu 开发机上的 ChatGPT 订阅需要重新登录。之后的消息继续保存，重试后从原位置继续。"
+    }
+
+    heading {
+      contents: "Project Agent 暂停：模型请求连续失败 5 次"
+    }
+  }
+
+  @with-variant(icons.alert)
+  glyph {
+    fill[0].color: c.colors.attention
+  }
+}

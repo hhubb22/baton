@@ -1,0 +1,109 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+
+// 标签页：选中项文字加深并有底线，计数用灰色
+export tab = frame {
+  title: "标签页 / 选中",
+  height: 36px,
+  layout: {align-items: .center, item-gap: 6px},
+  border: {color: c.colors.text, width: 1.5px, sides: .bottom},
+  children: [label, count],
+
+  label = text : t.label {
+    contents: "任务"
+  }
+
+  count = text : t.caption {
+    contents: "7",
+    fill[0].color: c.colors.faint
+  }
+}
+
+@variant
+export tabIdle = frame : tab {
+  title: "标签页 / 未选中",
+  left: 80px,
+  border[0].color: c.colors.transparent,
+
+  label {
+    fill[0].color: c.colors.muted,
+    contents: "记忆"
+  }
+
+  count {
+    contents: "4"
+  }
+}
+
+// 分段切换：输入区在「发消息」和「派发任务」之间切换
+export segmented = frame {
+  title: "分段切换",
+  top: 64px,
+  height: 26px,
+  layout: {align-items: .center, item-gap: 2px},
+  fill: c.colors.subtle,
+  corner-radius: s.radius.sm,
+  padding: 2px,
+  children: [first, second],
+
+  first = frame {
+    height: 100%,
+    layout: {align-items: .center},
+    fill: c.colors.surface,
+    border: c.colors.borderSoft,
+    corner-radius: s.radius.inner,
+    padding: [0px, 10px],
+    children: firstLabel,
+
+    firstLabel = text : t.label {
+      contents: "发消息",
+      font-size: 12,
+      line-height: 1
+    }
+  }
+
+  second = frame {
+    height: 100%,
+    layout: {align-items: .center},
+    corner-radius: s.radius.inner,
+    padding: [0px, 10px],
+    children: secondLabel,
+
+    secondLabel = text : t.small {
+      contents: "派发任务",
+      font-size: 12,
+      line-height: 1,
+      fill[0].color: c.colors.muted
+    }
+  }
+}
+
+@variant
+export segmentedSecond = frame : segmented {
+  title: "分段切换 / 派发任务",
+  left: 160px,
+  top: 64px,
+
+  second {
+    border[0].color: c.colors.borderSoft,
+    fill[0].color: c.colors.surface,
+
+    secondLabel {
+      fill[0].color: c.colors.text,
+      font-style: "Medium"
+    }
+  }
+
+  first {
+    border[0].color: c.colors.transparent,
+    fill[0].color: c.colors.transparent,
+
+    firstLabel {
+      fill[0].color: c.colors.muted,
+      font-style: "Regular"
+    }
+
+    border[0].width: 0px
+  }
+}

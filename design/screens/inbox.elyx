@@ -1,0 +1,220 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+import "blocks/sidebar.elyx" as sidebars
+import "controls/icons.elyx" as icons
+import "controls/button.elyx" as buttons
+import "controls/status.elyx" as status
+import "blocks/attention-card.elyx" as attention
+
+inbox = frame {
+  title: "待处理",
+  caption: "所有 Project 里等你处理的事项，最新的在前。Baton 不发通知，用户自己回来看；处理后事项离开这里，在主对话和任务详情里仍能看到结果。",
+  left: 0px,
+  top: 0px,
+  width: s.size.screenWidth,
+  height: s.size.screenHeight,
+  layout: {direction: .row},
+  fill: c.colors.canvas,
+  children: [sidebar, main],
+
+  sidebar = frame : sidebars.sidebar {
+    top {
+      projects {
+        @with-variant(sidebars.projectRowAttention)
+        projBaton {
+          trail {
+            count {
+              value {
+                contents: "1"
+              }
+            }
+          }
+        }
+      }
+
+      nav {
+        @with-variant(sidebars.navRowActive)
+        navInbox {
+          top: .nil
+        }
+      }
+    }
+  }
+
+  main = frame {
+    width: 100%,
+    height: 100%,
+    layout: {direction: .column, align-items: .center},
+    children: [head, content],
+
+    head = frame {
+      width: 100%,
+      height: s.size.header,
+      layout: {align-items: .center},
+      border: {color: c.colors.borderSoft, sides: .bottom},
+      padding: [0px, 20px],
+      children: headTitle,
+
+      headTitle = text : t.label {
+        contents: "待处理",
+        font-size: 14,
+        font-style: "Semibold"
+      }
+    }
+
+    content = frame {
+      width: s.size.measure,
+      layout: {direction: .column, item-gap: s.space.lg},
+      padding: [s.space.xxl, 0px],
+      children: [intro, item1, item2, item3, handled],
+
+      intro = frame {
+        width: 100%,
+        layout: {justify-content: .space-between, align-items: .end},
+        padding: [0px, 0px, s.space.xs],
+        children: [introText, introCount],
+
+        introText = text : t.title {
+          contents: "3 件事等你处理"
+        }
+
+        introCount = text : t.caption {
+          contents: "最新的在前",
+          fill[0].color: c.colors.faint
+        }
+      }
+
+      item1 = frame : attention.inboxItem {
+        head {
+          time {
+            contents: "15:41"
+          }
+        }
+
+        heading {
+          contents: "Windows 11 24H2 上安装包签名校验失败，要怎么处理？"
+        }
+
+        summary {
+          contents: "安装器在 24H2 上提示发布者未知，另外两台设备通过。原因是签名证书链缺少中间证书。"
+        }
+
+        taskRef {
+          taskName {
+            contents: "在 Windows 11 上验证安装包"
+          }
+        }
+
+        options {
+          first {
+            label {
+              contents: "补上中间证书，重新签名后再测"
+            }
+          }
+
+          second {
+            label {
+              contents: "先记为已知问题，继续其他平台"
+            }
+          }
+
+          third {
+            label {
+              contents: "这次发版跳过 24H2"
+            }
+          }
+        }
+      }
+
+      item2 = frame : attention.systemItem {
+        footer {
+          reply {
+            label {
+              contents: "打开任务详情核实"
+            }
+          }
+        }
+
+        taskRef {
+          taskState {
+            contents: "待核实"
+          }
+
+          taskName {
+            contents: "在 MacBook 上推送 PS-160 分支"
+          }
+
+          display: .visible,
+
+          @with-variant(status.dotAttention)
+          taskDot {}
+        }
+
+        summary {
+          contents: "MacBook Pro 在交付结果前离线，Baton 无法确认分支是否已经推送，不会自动重试。核实后这个事项自动解决。"
+        }
+
+        heading {
+          contents: "任务待核实：在 MacBook 上推送 PS-160 分支"
+        }
+
+        head {
+          time {
+            contents: "15:26"
+          }
+        }
+      }
+
+      item3 = frame : attention.inboxItem {
+        options {
+          overrides: [remove(attention.attentionCard.options.third)],
+
+          second {
+            label {
+              contents: "保持 15.0.1，下次发版再升"
+            }
+          }
+
+          first {
+            label {
+              contents: "先升级，按 15.1 跑"
+            }
+          }
+        }
+
+        taskRef {
+          display: .none
+        }
+
+        summary {
+          contents: "15.1 改了本地网络权限的提示方式，可能影响 batond 首次连接。现在测试机是 15.0.1。"
+        }
+
+        heading {
+          contents: "macOS 测试机要不要先升到 15.1 再跑？"
+        }
+
+        head {
+          time {
+            contents: "昨天 22:10"
+          }
+        }
+      }
+
+      handled = frame : buttons.smallGhost {
+        label {
+          fill[0].color: c.colors.muted,
+          contents: "查看已处理的事项"
+        }
+
+        @with-variant(icons.check)
+        lead {
+          width: 14px,
+          height: 14px,
+          display: .visible
+        }
+      }
+    }
+  }
+}

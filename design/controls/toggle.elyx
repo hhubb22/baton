@@ -1,0 +1,65 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+
+// 开关：右侧说明写开启后会发生什么
+export toggle = frame {
+  title: "开关 / 关闭",
+  width: 360px,
+  layout: {justify-content: .space-between, item-gap: s.space.lg},
+  children: [copy, track],
+
+  copy = frame {
+    width: 100%,
+    layout: {direction: .column, item-gap: s.space.xxs},
+    children: [label, helper],
+
+    label = text : t.label {
+      contents: "允许 Project Agent 执行命令"
+    }
+
+    helper = text : t.caption {
+      width: 100%,
+      contents: "默认关闭。",
+      fill[0].color: c.colors.muted
+    }
+  }
+
+  track = frame {
+    width: 30px,
+    height: 18px,
+    fill: c.colors.borderStrong,
+    corner-radius: s.radius.pill,
+    children: thumb,
+
+    thumb = frame {
+      left: 2px,
+      top: 2px,
+      width: 14px,
+      height: 14px,
+      fill: c.primary.white,
+      corner-radius: s.radius.pill
+    }
+  }
+}
+
+@variant
+export on = frame : toggle {
+  title: "开关 / 开启",
+  top: 72px,
+
+  track {
+    fill[0].color: c.colors.accent,
+
+    thumb {
+      fill[0].color: c.colors.onAccent,
+      left: 14px
+    }
+  }
+
+  copy {
+    helper {
+      contents: "已开启。"
+    }
+  }
+}

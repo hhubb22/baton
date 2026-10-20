@@ -1,0 +1,163 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+
+// 状态点只有六种颜色，具体含义由旁边的文字和分组标题说明。
+// 蓝：执行中；灰：等待设备或已取消；绿：已完成；红：失败；橙：待核实或等你处理；青：Project Agent 运行中。
+export dot = shape {
+  title: "状态点 / 执行中",
+  width: s.size.dot,
+  height: s.size.dot,
+  fill: c.colors.info,
+  type: .ellipse
+}
+
+@variant
+export dotQueued = shape : dot {
+  title: "状态点 / 等待设备",
+  left: 24px,
+  border[0].color: c.colors.faint,
+  border[0].width: 1.2px,
+  fill[0].color: c.colors.transparent
+}
+
+@variant
+export dotSucceeded = shape : dot {
+  title: "状态点 / 已完成",
+  left: 48px,
+  fill[0].color: c.colors.success
+}
+
+@variant
+export dotFailed = shape : dot {
+  title: "状态点 / 失败",
+  left: 72px,
+  fill[0].color: c.colors.danger
+}
+
+@variant
+export dotAttention = shape : dot {
+  title: "状态点 / 待核实、等你处理",
+  left: 96px,
+  fill[0].color: c.colors.attention
+}
+
+@variant
+export dotIdle = shape : dot {
+  title: "状态点 / 已取消、空闲",
+  left: 120px,
+  fill[0].color: c.colors.faint
+}
+
+@variant
+export dotAgent = shape : dot {
+  title: "状态点 / Project Agent 运行中",
+  left: 144px,
+  fill[0].color: c.colors.agent
+}
+
+// 任务状态标签：用在任务卡片和详情里
+export pill = frame {
+  title: "任务状态 / 执行中",
+  top: 40px,
+  width: .auto,
+  height: s.size.micro,
+  layout: {align-items: .center, item-gap: 6px},
+  fill: c.colors.infoSoft,
+  corner-radius: s.radius.pill,
+  padding: [0px, s.space.sm],
+  children: [mark, label],
+
+  mark = shape : dot {}
+
+  label = text : t.caption {
+    contents: "执行中",
+    fill[0].color: c.colors.text
+  }
+}
+
+@variant
+export pillQueued = frame : pill {
+  title: "任务状态 / 等待设备",
+  left: 96px,
+  top: 40px,
+  fill[0].color: c.colors.subtle,
+
+  label {
+    contents: "等待设备"
+  }
+
+  @with-variant(dotQueued)
+  mark {
+    left: .nil
+  }
+}
+
+@variant
+export pillSucceeded = frame : pill {
+  title: "任务状态 / 已完成",
+  left: 208px,
+  top: 40px,
+  fill[0].color: c.colors.successSoft,
+
+  label {
+    contents: "已完成"
+  }
+
+  @with-variant(dotSucceeded)
+  mark {
+    left: .nil
+  }
+}
+
+@variant
+export pillFailed = frame : pill {
+  title: "任务状态 / 失败",
+  left: 304px,
+  top: 40px,
+  fill[0].color: c.colors.dangerSoft,
+
+  label {
+    contents: "失败"
+  }
+
+  @with-variant(dotFailed)
+  mark {
+    left: .nil
+  }
+}
+
+@variant
+export pillUnverified = frame : pill {
+  title: "任务状态 / 待核实",
+  left: 384px,
+  top: 40px,
+  fill[0].color: c.colors.attentionSoft,
+
+  label {
+    contents: "待核实"
+  }
+
+  @with-variant(dotAttention)
+  mark {
+    left: .nil
+  }
+}
+
+@variant
+export pillCancelled = frame : pill {
+  title: "任务状态 / 已取消",
+  left: 480px,
+  top: 40px,
+  fill[0].color: c.colors.subtle,
+
+  label {
+    fill[0].color: c.colors.muted,
+    contents: "已取消"
+  }
+
+  @with-variant(dotIdle)
+  mark {
+    left: .nil
+  }
+}

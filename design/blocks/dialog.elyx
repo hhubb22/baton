@@ -1,0 +1,119 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+import "controls/button.elyx" as buttons
+import "controls/icons.elyx" as icons
+
+// 弹窗：标题、内容、底部说明和操作。内容和操作区是插槽。
+// 浮层最多两层；弹窗里可以再打开下拉菜单，不再叠弹窗。
+export dialog = frame {
+  title: "弹窗",
+  width: 480px,
+  layout: {direction: .column, item-gap: 20px},
+  fill: c.colors.surface,
+  border: c.colors.border,
+  shadow: [
+    {
+      drop-shadow: {
+        color: rgb(0%, 0%, 0%, 12%),
+        offset: point(0px, 12px),
+        blur-radius: 32px
+      }
+    },
+    {
+      drop-shadow: {
+        color: rgb(0%, 0%, 0%, 6%),
+        offset: point(0px, 2px),
+        blur-radius: 6px
+      }
+    }
+  ],
+  corner-radius: 14px,
+  padding: s.space.xl,
+  children: [heading, content, footer],
+
+  heading = text : t.heading {
+    contents: "归档「交换机巡检」？"
+  }
+
+  content = frame {
+    width: 100%,
+    layout: {direction: .column, item-gap: s.space.lg},
+    slot: .true,
+    children: message,
+
+    message = text : t.small {
+      width: 100%,
+      contents: "Project Agent 停止运行，3 个待处理事项会被撤回。对话、记忆和任务记录都会保留。",
+      fill[0].color: c.colors.muted
+    }
+  }
+
+  footer = frame {
+    width: 100%,
+    layout: {
+      justify-content: .space-between,
+      align-items: .center,
+      item-gap: s.space.lg
+    },
+    children: [note, actions],
+
+    note = text : t.caption {
+      width: 100%,
+      contents: "",
+      fill[0].color: c.colors.faint
+    }
+
+    actions = frame {
+      layout: {align-items: .center, item-gap: s.space.sm},
+      slot: .true,
+      children: [cancel, confirm],
+
+      cancel = frame : buttons.secondary {}
+
+      confirm = frame : buttons.danger {}
+    }
+  }
+}
+
+// 设置里的一行操作：标题、说明、按钮
+export settingRow = frame {
+  title: "设置操作行",
+  top: 400px,
+  width: 512px,
+  layout: {
+    justify-content: .space-between,
+    align-items: .center,
+    item-gap: s.space.xl
+  },
+  children: [copy, action],
+
+  copy = frame {
+    width: 100%,
+    layout: {direction: .column, item-gap: s.space.xxs},
+    children: [rowTitle, rowText],
+
+    rowTitle = text : t.label {
+      contents: "暂停 Project"
+    }
+
+    rowText = text : t.caption {
+      width: 100%,
+      contents: "Project Agent 不再启动，已派出的任务继续执行。暂停期间你仍可以直接派发和处理任务，产生的输入都会保存。",
+      fill[0].color: c.colors.muted
+    }
+  }
+
+  action = frame : buttons.smallSecondary {
+    label {
+      contents: "暂停"
+    }
+
+    @with-variant(icons.pause)
+    lead {
+      width: 13px,
+      height: 13px,
+      display: .visible
+    }
+  }
+}

@@ -1,0 +1,217 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+import "blocks/project-page.elyx" as page
+import "controls/icons.elyx" as icons
+import "controls/button.elyx" as buttons
+import "controls/input.elyx" as inputs
+import "blocks/dialog.elyx" as dialogs
+import "controls/field.elyx" as fields
+import "controls/label.elyx" as labels
+
+settings = frame : page.projectPage {
+  title: "Project 设置",
+  caption: "标题、目标和模型改完即保存。模型从下一次运行起生效。暂停和归档写明对 Project Agent、任务和事项的影响；没有删除。",
+  left: 0px,
+  top: 0px,
+  overrides: [insert(scrim, after = page.projectPage.overview)],
+
+  scrim = frame {
+    left: 0px,
+    top: 0px,
+    width: 100%,
+    height: 100%,
+    ignore-stack: .true,
+    layout: {justify-content: .center, align-items: .center},
+    fill: c.colors.overlay,
+    children: form,
+
+    form = frame : dialogs.dialog {
+      width: 560px,
+
+      footer {
+        actions {
+          overrides: [remove(dialogs.dialog.footer.actions.cancel)],
+
+          @with-variant(buttons.secondary)
+          confirm {
+            label {
+              contents: "完成"
+            }
+          }
+        }
+
+        note {
+          contents: "改动自动保存。"
+        }
+      }
+
+      content {
+        overrides: [
+          insert(general, after = .nil),
+          insert(agent, after = general),
+          insert(lifecycle, after = agent),
+          remove(dialogs.dialog.content.message)
+        ],
+        layout.item-gap: s.space.xl
+      }
+
+      heading {
+        contents: "Baton 开发 · 设置"
+      }
+
+      general = frame {
+        width: 100%,
+        layout: {direction: .column, item-gap: s.space.lg},
+        children: [titleField, goalField],
+
+        titleField = frame : fields.field {
+          width: 100%,
+
+          helper {
+            display: .none
+          }
+
+          @with-variant(inputs.filled)
+          input {
+            top: .nil
+          }
+        }
+
+        goalField = frame : fields.optionalText {
+          width: 100%,
+
+          input {
+            value {
+              fill[0].color: c.colors.text,
+              contents: "第一个里程碑：一件真实工作跨设备走通全程，结果带证据回来。"
+            }
+
+            height: 64px
+          }
+
+          helper {
+            contents: "修改后 Project Agent 在下一次处理消息时收到通知。"
+          }
+        }
+      }
+
+      agent = frame {
+        width: 100%,
+        layout: {direction: .column, item-gap: 6px},
+        border: {color: c.colors.borderSoft, sides: .top},
+        padding: [s.space.lg, 0px, 0px],
+        children: [agentLabel, agentRow, agentHelp],
+
+        agentLabel = frame : labels.label {
+          labelText {
+            contents: "Project Agent 使用的模型"
+          }
+        }
+
+        agentRow = frame {
+          width: 100%,
+          layout: {item-gap: s.space.sm},
+          children: [subscription, model],
+
+          subscription = frame : inputs.select {
+            width: 100%,
+
+            value {
+              contents: "ChatGPT 订阅"
+            }
+          }
+
+          model = frame : inputs.select {
+            width: 100%,
+
+            value {
+              contents: "gpt-5.1"
+            }
+          }
+        }
+
+        agentHelp = text : t.caption {
+          width: 100%,
+          contents: "从下一次运行起生效，Ubuntu 开发机上正在进行的这次运行不受影响。",
+          fill[0].color: c.colors.muted
+        }
+      }
+
+      lifecycle = frame {
+        width: 100%,
+        layout: {direction: .column, item-gap: s.space.md},
+        border: {color: c.colors.borderSoft, sides: .top},
+        padding: [s.space.lg, 0px, 0px],
+        children: [pauseRow, archiveRow],
+
+        pauseRow = frame : dialogs.settingRow {}
+
+        archiveRow = frame : dialogs.settingRow {
+          action {
+            label {
+              fill[0].color: c.colors.danger,
+              contents: "归档"
+            }
+
+            @with-variant(icons.archive)
+            lead {
+              fill[0].color: c.colors.danger
+            }
+          }
+
+          copy {
+            rowText {
+              contents: "Project Agent 停止运行，待处理事项撤回并注明原因。对话、记忆和任务记录保留。"
+            }
+
+            rowTitle {
+              contents: "归档 Project"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+archiveConfirm = frame : page.projectPage {
+  title: "归档确认",
+  caption: "归档用单独的弹窗确认，替换设置弹窗，不叠第二层。正文写明会停止什么、保留什么。",
+  left: 1728px,
+  top: 0px,
+  overrides: [insert(scrim, after = page.projectPage.overview)],
+
+  scrim = frame {
+    left: 0px,
+    top: 0px,
+    width: 100%,
+    height: 100%,
+    ignore-stack: .true,
+    layout: {justify-content: .center, align-items: .center},
+    fill: c.colors.overlay,
+    children: form,
+
+    form = frame : dialogs.dialog {
+      heading {
+        contents: "归档「Baton 开发」？"
+      }
+
+      content {
+        message {
+          contents: "Project Agent 停止这次运行，之后不再启动。1 个待处理事项会被撤回，原因写为 Project 已归档。对话、记忆和任务记录都会保留。"
+        }
+      }
+
+      footer {
+        actions {
+          confirm {
+            label {
+              contents: "归档"
+            }
+          }
+        }
+      }
+    }
+  }
+}

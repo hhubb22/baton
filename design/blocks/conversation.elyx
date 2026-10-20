@@ -1,0 +1,268 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+import "controls/icons.elyx" as icons
+import "controls/avatar.elyx" as avatars
+
+// 主对话里的条目。宽度跟随对话列（720px）。
+// 用户消息：右对齐，浅灰底
+export userMessage = frame {
+  title: "用户消息",
+  width: s.size.measure,
+  layout: {direction: .column, align-items: .end, item-gap: s.space.xs},
+  children: [bubble, meta],
+
+  bubble = frame {
+    width: .auto,
+    max-width: 560px,
+    layout: {direction: .row},
+    fill: c.colors.subtle,
+    corner-radius: s.radius.lg,
+    padding: [s.space.sm, 14px],
+    children: content,
+
+    content = text : t.body {
+      contents: "PS-160 的验收要在三台设备上跑。先在 Windows 上跑重连测试，结果出来告诉我。"
+    }
+  }
+
+  meta = frame {
+    display: .none,
+    layout: {align-items: .center, item-gap: s.space.xs},
+    children: [metaIcon, metaText],
+
+    metaIcon = asset : icons.clock {
+      width: 13px,
+      height: 13px,
+      fill[0].color: c.colors.faint
+    }
+
+    metaText = text : t.caption {
+      contents: "已保存，等设备上线后处理",
+      fill[0].color: c.colors.faint
+    }
+  }
+}
+
+// 所有设备离线时发出的消息
+@variant
+export userMessagePending = frame : userMessage {
+  title: "用户消息 / 等待设备",
+  top: 96px,
+
+  bubble {
+    content {
+      contents: "MacBook 上线后先把 PS-160 的分支推上去。"
+    }
+  }
+
+  meta {
+    display: .visible
+  }
+}
+
+// Project Agent 的一段回复：开头是青色标识、名称和时间
+export agentTurn = frame {
+  title: "Project Agent 回复",
+  top: 200px,
+  width: s.size.measure,
+  layout: {direction: .column, item-gap: 6px},
+  children: [head, content],
+
+  head = frame {
+    layout: {align-items: .center, item-gap: s.space.sm},
+    children: [mark, name, time],
+
+    mark = frame : avatars.agentMark {}
+
+    name = text : t.label {
+      contents: "Project Agent",
+      fill[0].color: c.colors.agentText
+    }
+
+    time = text : t.caption {
+      contents: "14:02 · Ubuntu 开发机",
+      fill[0].color: c.colors.faint
+    }
+  }
+
+  content = text : t.body {
+    width: 100%,
+    contents: "Windows 台式机在线。我先在 D:\\src 下建一个 worktree，再派 Codex 跑重连测试。"
+  }
+}
+
+// 运行中：Project Agent 正在处理这一轮
+export typing = frame {
+  title: "Project Agent 正在处理",
+  top: 300px,
+  width: s.size.measure,
+  layout: {align-items: .center, item-gap: s.space.sm},
+  children: [mark, label],
+
+  mark = frame : avatars.agentMark {}
+
+  label = text : t.small {
+    contents: "正在处理 2 条输入…",
+    fill[0].color: c.colors.agentText
+  }
+}
+
+// 日期分隔
+export dayDivider = frame {
+  title: "日期分隔",
+  top: 344px,
+  width: s.size.measure,
+  layout: {justify-content: .center, align-items: .center},
+  children: label,
+
+  label = text : t.caption {
+    contents: "今天",
+    fill[0].color: c.colors.faint
+  }
+}
+
+// 系统记录：运行实例换设备、Project 暂停或恢复等
+export systemNote = frame {
+  title: "系统记录",
+  top: 384px,
+  width: s.size.measure,
+  layout: {justify-content: .center, align-items: .center, item-gap: 6px},
+  children: [glyph, label],
+
+  glyph = asset : icons.device {
+    width: 13px,
+    height: 13px,
+    fill[0].color: c.colors.faint
+  }
+
+  label = text : t.caption {
+    contents: "Project Agent 在 Ubuntu 开发机上启动：默认设备 MacBook Pro 离线",
+    fill[0].color: c.colors.faint
+  }
+}
+
+// Project Agent 执行的命令：一行摘要，可以展开看输出
+export commandRow = frame {
+  title: "命令执行",
+  top: 424px,
+  width: s.size.measure,
+  layout: {direction: .column},
+  fill: c.colors.surface,
+  border: c.colors.borderSoft,
+  corner-radius: s.radius.md,
+  children: [summary, output],
+
+  summary = frame {
+    width: 100%,
+    height: 36px,
+    layout: {
+      justify-content: .space-between,
+      align-items: .center,
+      item-gap: s.space.md
+    },
+    padding: [0px, s.space.md],
+    children: [lead, trail],
+
+    lead = frame {
+      layout: {align-items: .center, item-gap: s.space.sm},
+      children: [glyph, cmdText],
+
+      glyph = asset : icons.terminal {
+        width: 15px,
+        height: 15px,
+        fill[0].color: c.colors.muted
+      }
+
+      cmdText = text : t.mono {
+        contents: "git worktree add D:\\src\\baton-ps160 origin/main"
+      }
+    }
+
+    trail = frame {
+      layout: {align-items: .center, item-gap: 6px},
+      children: [place, result],
+
+      place = text : t.caption {
+        contents: "Windows 台式机 · 3.8 秒",
+        fill[0].color: c.colors.faint
+      }
+
+      result = asset : icons.check {
+        width: 14px,
+        height: 14px,
+        fill[0].color: c.colors.success
+      }
+    }
+  }
+
+  output = frame {
+    width: 100%,
+    display: .none,
+    layout: {direction: .column},
+    fill: c.colors.code,
+    border: {color: c.colors.borderSoft, sides: .top},
+    padding: [10px, s.space.md],
+    children: outputText,
+
+    outputText = text : t.monoCN {
+      width: 100%,
+      contents: "Preparing worktree (detached HEAD 4c1e9a2)\nUpdating files: 100% (1284/1284), done.\nHEAD is now at 4c1e9a2 build: 统一前后端构建",
+      fill[0].color: c.colors.muted
+    }
+  }
+}
+
+@variant
+export commandRowOpen = frame : commandRow {
+  title: "命令执行 / 展开",
+  top: 480px,
+
+  output {
+    display: .visible
+  }
+}
+
+// 命令仍在执行：等待时间已到，结果稍后作为输入送回
+@variant
+export commandRowRunning = frame : commandRow {
+  title: "命令执行 / 仍在执行",
+  top: 600px,
+
+  summary {
+    trail {
+      result {
+        display: .none
+      }
+
+      place {
+        contents: "Windows 台式机 · 仍在执行，完成后送回结果"
+      }
+    }
+  }
+}
+
+// Project Agent 修改了项目记忆
+export memoryNote = frame {
+  title: "记忆修改",
+  top: 656px,
+  width: s.size.measure,
+  layout: {align-items: .center, item-gap: s.space.sm},
+  children: [glyph, label, version],
+
+  glyph = asset : icons.memory {
+    width: 14px,
+    height: 14px,
+    fill[0].color: c.colors.faint
+  }
+
+  label = text : t.small {
+    contents: "记下：Windows 上的 worktree 在 D:\\src\\baton-ps160",
+    fill[0].color: c.colors.muted
+  }
+
+  version = text : t.caption {
+    contents: "v1",
+    fill[0].color: c.colors.faint
+  }
+}

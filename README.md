@@ -137,6 +137,7 @@ pnpm --dir web test:e2e
 
 ## 规格与设计文档
 
+- Elyx 界面设计项目：[design/README.md](design/README.md)
 - 全局产品规格：[specs/baton/PRODUCT.md](specs/baton/PRODUCT.md)
 - 全局技术设计：[specs/baton/TECH.md](specs/baton/TECH.md)
 - Project Agent 规格与设计：[specs/project-agent/PRODUCT.md](specs/project-agent/PRODUCT.md)、[specs/project-agent/TECH.md](specs/project-agent/TECH.md)

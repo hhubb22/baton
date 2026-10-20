@@ -1,0 +1,155 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+import "controls/icons.elyx" as icons
+import "controls/button.elyx" as buttons
+import "controls/input.elyx" as inputs
+import "controls/tabs.elyx" as tabs
+import "controls/kbd.elyx" as kbd
+
+// 输入区：给 Project Agent 发消息，或者绕过它直接派发任务。
+// 所有设备离线或 Project 暂停时仍然可以发消息和派发任务。
+export composer = frame {
+  title: "输入区 / 发消息",
+  width: s.size.measure,
+  layout: {direction: .column, item-gap: s.space.md},
+  fill: c.colors.surface,
+  border: c.colors.border,
+  shadow: {
+    drop-shadow: {
+      color: rgb(0%, 0%, 0%, 5%),
+      offset: point(0px, 4px),
+      blur-radius: 16px
+    }
+  },
+  corner-radius: s.radius.lg,
+  padding: [14px, s.space.md, 10px, 14px],
+  children: [prompt, fields, toolbar],
+
+  prompt = text : t.body {
+    width: 100%,
+    contents: "给 Project Agent 发消息",
+    fill[0].color: c.colors.faint
+  }
+
+  fields = frame {
+    width: 100%,
+    display: .none,
+    layout: {direction: .column, item-gap: s.space.sm},
+    children: [target, expected],
+
+    target = frame {
+      width: 100%,
+      layout: {align-items: .center, item-gap: 6px},
+      children: [device, agent, dir],
+
+      device = frame : inputs.selectCompact {
+        value {
+          contents: "MacBook Pro（默认设备）"
+        }
+      }
+
+      agent = frame : inputs.selectCompact {}
+
+      dir = frame : inputs.selectCompact {
+        value {
+          contents: "~/src/baton",
+          font-family: "Paper Mono"
+        }
+      }
+    }
+
+    expected = frame : inputs.input {
+      width: 100%,
+      height: s.size.compact,
+      border[0].color: c.colors.borderSoft,
+      fill[0].color: c.colors.canvas,
+
+      value {
+        contents: "怎样算完成（可选），例如：go test ./... 全部通过",
+        font-size: 12
+      }
+    }
+  }
+
+  toolbar = frame {
+    width: 100%,
+    layout: {justify-content: .space-between, align-items: .center},
+    children: [mode, actions],
+
+    mode = frame : tabs.segmented {}
+
+    actions = frame {
+      layout: {align-items: .center, item-gap: s.space.sm},
+      children: [shortcut, send, dispatch],
+
+      shortcut = frame : kbd.kbd {}
+
+      send = frame {
+        width: 28px,
+        height: 28px,
+        layout: {justify-content: .center, align-items: .center},
+        fill: c.colors.accent,
+        corner-radius: s.radius.pill,
+        children: sendGlyph,
+
+        sendGlyph = asset : icons.arrowUp {
+          width: 15px,
+          height: 15px,
+          fill[0].color: c.colors.onAccent
+        }
+      }
+
+      dispatch = frame : buttons.small {
+        display: .none,
+
+        label {
+          contents: "派发"
+        }
+      }
+    }
+  }
+}
+
+@variant
+export composerFilled = frame : composer {
+  title: "输入区 / 已输入",
+  top: 160px,
+
+  prompt {
+    fill[0].color: c.colors.text,
+    contents: "Ubuntu 上也顺便跑一遍单元测试。"
+  }
+}
+
+// 直接派发任务：选设备、Agent 和目录，可以写验证方式
+@variant
+export composerDispatch = frame : composer {
+  title: "输入区 / 派发任务",
+  top: 320px,
+
+  toolbar {
+    actions {
+      send {
+        display: .none
+      }
+
+      dispatch {
+        display: .visible
+      }
+    }
+
+    @with-variant(tabs.segmentedSecond)
+    mode {
+      left: .nil
+    }
+  }
+
+  prompt {
+    contents: "说明任务要做什么，派发后不经过 Project Agent"
+  }
+
+  fields {
+    display: .visible
+  }
+}

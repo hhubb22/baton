@@ -1,0 +1,319 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+import "blocks/project-page.elyx" as page
+import "blocks/sidebar.elyx" as sidebars
+import "controls/avatar.elyx" as avatars
+import "blocks/project-header.elyx" as headers
+import "controls/input.elyx" as inputs
+import "blocks/overview.elyx" as overviews
+import "blocks/dialog.elyx" as dialogs
+import "controls/field.elyx" as fields
+import "controls/label.elyx" as labels
+
+create = frame : page.projectPage {
+  title: "新建 Project",
+  caption: "只有标题必填。模型来自设备上已登录的订阅，不需要 API key。Project 不绑定设备或仓库。",
+  left: 0px,
+  top: 0px,
+  overrides: [insert(scrim, after = page.projectPage.overview)],
+
+  scrim = frame {
+    left: 0px,
+    top: 0px,
+    width: 100%,
+    height: 100%,
+    ignore-stack: .true,
+    layout: {justify-content: .center, align-items: .center},
+    fill: c.colors.overlay,
+    children: form,
+
+    form = frame : dialogs.dialog {
+      footer {
+        actions {
+          confirm {
+            border[0].color: c.colors.transparent,
+            fill[0].color: c.colors.accent,
+
+            label {
+              fill[0].color: c.colors.onAccent,
+              contents: "创建"
+            }
+
+            border[0].width: 0px
+          }
+        }
+
+        note {
+          contents: "创建后可以暂停或归档，不能删除。"
+        }
+      }
+
+      content {
+        overrides: [
+          insert(titleField, after = .nil),
+          insert(goalField, after = titleField),
+          insert(modelField, after = goalField),
+          remove(dialogs.dialog.content.message)
+        ]
+      }
+
+      heading {
+        contents: "新建 Project"
+      }
+
+      titleField = frame : fields.field {
+        width: 100%,
+
+        helper {
+          contents: "标题可以随时修改。"
+        }
+
+        @with-variant(inputs.focus)
+        input {
+          value {
+            contents: "发版检查"
+          }
+
+          top: .nil
+        }
+      }
+
+      goalField = frame : fields.optionalText {
+        width: 100%,
+
+        input {
+          value {
+            fill[0].color: c.colors.text,
+            contents: "每次发版前在三种系统上跑完整测试，结果带证据回来"
+          }
+        }
+
+        helper {
+          contents: "Project Agent 每次运行都会读到目标。"
+        }
+      }
+
+      modelField = frame {
+        width: 100%,
+        layout: {direction: .column, item-gap: 6px},
+        children: [modelLabel, modelRow, modelHelp],
+
+        modelLabel = frame : labels.label {
+          labelText {
+            contents: "Project Agent 使用的模型"
+          }
+        }
+
+        modelRow = frame {
+          width: 100%,
+          layout: {item-gap: s.space.sm},
+          children: [subscription, model],
+
+          subscription = frame : inputs.select {
+            width: 100%,
+
+            value {
+              contents: "ChatGPT 订阅"
+            }
+          }
+
+          model = frame : inputs.select {
+            width: 100%,
+
+            value {
+              contents: "gpt-5.1"
+            }
+          }
+        }
+
+        modelHelp = text : t.caption {
+          width: 100%,
+          contents: "使用设备上已登录的订阅。2 台在线设备可用这个订阅。以后修改从下一次运行起生效。",
+          fill[0].color: c.colors.muted
+        }
+      }
+    }
+  }
+}
+
+created = frame : page.projectPage {
+  title: "新 Project 的空对话",
+  caption: "创建后直接进入主对话。发出第一条消息时，Coordinator 选一台满足条件的设备启动 Project Agent。",
+  left: 1728px,
+  top: 0px,
+
+  overview {
+    body {
+      overrides: [
+        insert(noTasks, after = .nil),
+        remove(overviews.overview.body.doneRow2),
+        remove(overviews.overview.body.doneRow1),
+        remove(overviews.overview.body.queuedHead),
+        remove(overviews.overview.body.queuedRow),
+        remove(overviews.overview.body.activeRow2),
+        remove(overviews.overview.body.activeRow1),
+        remove(overviews.overview.body.doneHead),
+        remove(overviews.overview.body.needsHead),
+        remove(overviews.overview.body.activeHead),
+        remove(overviews.overview.body.doneMore),
+        remove(overviews.overview.body.needsRow)
+      ]
+    }
+
+    summary {
+      runtime {
+        runtimeCard {
+          runtimeLine {
+            runtimeState {
+              display: .none
+            }
+
+            runtimeDevice {
+              runtimeName {
+                contents: "还没有运行过"
+              }
+            }
+          }
+
+          runtimeNote {
+            contents: "ChatGPT 订阅 · gpt-5.1。发出第一条消息后启动，优先使用默认设备。"
+          }
+        }
+      }
+
+      goal {
+        goalText {
+          contents: "每次发版前在三种系统上跑完整测试，结果带证据回来"
+        }
+      }
+    }
+
+    tabBar {
+      memoryTab {
+        count {
+          contents: "0"
+        }
+      }
+
+      tasksTab {
+        count {
+          contents: "0"
+        }
+      }
+    }
+  }
+
+  main {
+    transcript {
+      overrides: [
+        insert(empty, after = .nil),
+        remove(page.projectPage.main.transcript.task2),
+        remove(page.projectPage.main.transcript.agent2),
+        remove(page.projectPage.main.transcript.user2),
+        remove(page.projectPage.main.transcript.command1),
+        remove(page.projectPage.main.transcript.typing),
+        remove(page.projectPage.main.transcript.task1),
+        remove(page.projectPage.main.transcript.agent1),
+        remove(page.projectPage.main.transcript.memory1),
+        remove(page.projectPage.main.transcript.user1),
+        remove(page.projectPage.main.transcript.day)
+      ],
+      layout.justify-content: .center
+    }
+
+    @with-variant(headers.headerIdle)
+    header {
+      lead {
+        identity {
+          avatar {
+            fill[0].color: c.hues.blue,
+
+            initial {
+              contents: "发"
+            }
+          }
+
+          name {
+            contents: "发版检查"
+          }
+        }
+
+        state {
+          stateText {
+            contents: "还没有运行过"
+          }
+        }
+      }
+
+      top: .nil
+    }
+  }
+
+  sidebar {
+    top {
+      projects {
+        overrides: [insert(projRelease, after = .nil)],
+
+        @with-variant(sidebars.projectRowLive)
+        projBaton {}
+      }
+    }
+  }
+
+  projRelease = frame : sidebars.projectRowActive {
+    width: 100%,
+
+    lead {
+      avatar {
+        fill[0].color: c.hues.blue,
+
+        initial {
+          contents: "发"
+        }
+      }
+
+      name {
+        contents: "发版检查"
+      }
+    }
+  }
+
+  empty = frame {
+    width: 440px,
+    layout: {direction: .column, align-items: .center, item-gap: s.space.md},
+    children: [emptyAvatar, emptyTitle, emptyGoal, emptyHint],
+
+    emptyAvatar = frame : avatars.large {
+      fill[0].color: c.hues.blue,
+
+      initial {
+        contents: "发"
+      }
+    }
+
+    emptyTitle = text : t.title {
+      contents: "发版检查"
+    }
+
+    emptyGoal = text : t.small {
+      width: 100%,
+      contents: "每次发版前在三种系统上跑完整测试，结果带证据回来",
+      align: .center,
+      fill[0].color: c.colors.muted
+    }
+
+    emptyHint = text : t.caption {
+      width: 100%,
+      contents: "对话、记忆和任务都保存在 Coordinator。Project Agent 这次在 Mac 上运行，下次换到 Windows 也接得上。",
+      align: .center,
+      fill[0].color: c.colors.faint
+    }
+  }
+
+  noTasks = text : t.small {
+    width: 100%,
+    contents: "还没有任务。Project Agent 派出的任务和你直接派发的任务都会列在这里。",
+    fill[0].color: c.colors.faint
+  }
+}

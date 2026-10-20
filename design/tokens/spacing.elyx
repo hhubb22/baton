@@ -1,0 +1,36 @@
+export space = tokens {
+  xxs: 2,
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 24,
+  xxl: 32,
+  section: 48,
+  canvas: 64
+}
+
+export radius = tokens {
+  inner: 4,
+  sm: 6,
+  md: 8,
+  lg: 12,
+  pill: 999
+}
+
+// 控件高度与界面骨架尺寸
+export size = tokens {
+  micro: 20,
+  row: 28,
+  compact: 28,
+  control: 32,
+  comfortable: 40,
+  header: 48,
+  sidebar: 248,
+  overview: 320,
+  detail: 440,
+  measure: 720,
+  dot: 6,
+  screenWidth: 1440,
+  screenHeight: 900
+}
