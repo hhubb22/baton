@@ -145,6 +145,8 @@ func (s *Store) ProjectRuntime(ctx context.Context, src protocol.Source, req pro
 		data, err = s.callProjectTool(ctx, tx, b, req)
 	case "append_event":
 		data, err = appendProjectAssistant(ctx, tx, b, req)
+	case "commit_compaction":
+		data, err = commitProjectCompaction(ctx, tx, b, req)
 	case "finish", "exited", "start_failed", "report_failure":
 		reason := boundedText(req.Reason, 1024)
 		state := "finished"
@@ -195,6 +197,10 @@ func (s *Store) bootstrapProjectRun(ctx context.Context, tx pgx.Tx, b projectRun
 	}
 	p.Agent.Provider, p.Agent.Model = b.provider, b.model
 	out.Project = p
+	out.MemoryIndex, err = projectMemoryIndex(ctx, tx, b.projectID)
+	if err != nil {
+		return out, err
+	}
 	var compact *int64
 	if err = tx.QueryRow(ctx, `SELECT compaction_seq FROM conversations WHERE id=$1`, b.conversationID).Scan(&compact); err != nil {
 		return out, err

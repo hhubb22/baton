@@ -44,19 +44,29 @@ func TestProjectRuntimePiFauxRealCoordinator(t *testing.T) {
 	messageRuntimeProject(t, p, project, "pi-faux-input")
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
-		var assistants, results, memories, finished int
+		var assistants, results, memories, finished, compactions int
 		err = st.pool.QueryRow(context.Background(), `SELECT
    (SELECT count(*) FROM conversation_events WHERE conversation_id=$1 AND kind='assistant'),
    (SELECT count(*) FROM conversation_events WHERE conversation_id=$1 AND kind='tool_result'),
    (SELECT count(*) FROM project_memory_entries WHERE project_id=$2),
-   (SELECT count(*) FROM agent_runs WHERE agent_id=$3 AND state='finished')`, project.Conversation.ID, project.ID, project.Agent.ID).Scan(&assistants, &results, &memories, &finished)
+   (SELECT count(*) FROM agent_runs WHERE agent_id=$3 AND state='finished'),
+   (SELECT count(*) FROM conversation_events WHERE conversation_id=$1 AND kind='compaction')`, project.Conversation.ID, project.ID, project.Agent.ID).Scan(&assistants, &results, &memories, &finished, &compactions)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if assistants == 2 && results == 1 && memories == 1 && finished == 1 {
+		if assistants == 2 && results == 1 && memories == 1 && finished == 1 && compactions == 1 {
+			var through, pointer, originalBytes int64
+			if err = st.pool.QueryRow(context.Background(), `SELECT c.compaction_seq,(e.payload->>'through_seq')::bigint,
+ (SELECT octet_length(payload::text) FROM conversation_events WHERE conversation_id=c.id AND seq=2)
+ FROM conversations c JOIN conversation_events e ON e.conversation_id=c.id AND e.seq=c.compaction_seq WHERE c.id=$1`, project.Conversation.ID).Scan(&pointer, &through, &originalBytes); err != nil {
+				t.Fatal(err)
+			}
+			if pointer != 5 || through != 3 || originalBytes < 50000 {
+				t.Fatalf("压缩位置或原文无效: %d %d %d", pointer, through, originalBytes)
+			}
 			return
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	t.Fatalf("真实 Runtime 未完成写入屏障、工具事务与 finish：Coordinator=%s batond=%s", st.coord.out.String(), st.batond.out.String())
+	t.Fatalf("真实 Runtime 未完成写入屏障、工具事务、压缩与 finish：Coordinator=%s batond=%s", st.coord.out.String(), st.batond.out.String())
 }

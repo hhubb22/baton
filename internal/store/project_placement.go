@@ -14,7 +14,7 @@ import (
 
 // recoveryWork 只把尚未完成的主动轮次视作恢复工作，被动通知不参与放置。
 const recoveryWork = `(EXISTS(SELECT 1 FROM project_agent_input_queue q WHERE q.agent_id=a.id AND delivered_seq IS NULL AND source_type IN ('user_message','task_result','attention_answer'))
- OR EXISTS(SELECT 1 FROM conversation_events e WHERE e.conversation_id=c.id AND e.seq=c.next_seq-1
+ OR EXISTS(SELECT 1 FROM conversation_events e WHERE e.conversation_id=c.id AND e.seq=(SELECT max(t.seq) FROM conversation_events t WHERE t.conversation_id=c.id AND t.kind<>'compaction')
  AND (e.kind IN ('input','tool_result') OR (e.kind='assistant' AND jsonb_path_exists(e.payload,'$.message.content[*] ? (@.type == "toolCall")')))))`
 
 func releaseProjectRun(ctx context.Context, tx pgx.Tx, agentID, state, reason string) error {

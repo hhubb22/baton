@@ -445,13 +445,16 @@ func TestProjectRuntimeStdioBindingAndToolForwarding(t *testing.T) {
 	m, requests, _ := projectRuntimeFixture(t)
 	command := projectCommand()
 	sendProjectCommand(m, command)
-	for _, operation := range []string{"bootstrap", "preview", "call_tool", "wait_tool", "finish", "exited"} {
+	for _, operation := range []string{"bootstrap", "preview", "call_tool", "wait_tool", "commit_compaction", "finish", "exited"} {
 		request := waitProjectRequest(t, requests, operation)
 		if request.RunID != command.RunID || request.LeaseEpoch != command.LeaseEpoch {
 			t.Fatalf("stdio 信任伪造身份: %+v", request)
 		}
 		if operation == "preview" && (request.LastSeq != 3 || !strings.Contains(string(request.Payload), "临时回复")) {
 			t.Fatal("预览字段丢失")
+		}
+		if operation == "commit_compaction" && (request.LastSeq != 5 || request.ClientEventID != "compact-1" || !strings.Contains(string(request.Payload), "历史摘要")) {
+			t.Fatal("压缩提交字段丢失")
 		}
 		if operation == "call_tool" && (request.ToolCallID != "call-1" || request.ToolName != "devices.list") {
 			t.Fatal("工具字段丢失")

@@ -12,6 +12,7 @@ export interface Bootstrap {
     conversation: { id: string };
   };
   prompt_version: string;
+  memory_index?: string;
   compaction?: Event;
   compaction_seq?: number;
   goal_utf8_base64?: string;

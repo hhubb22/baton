@@ -56,7 +56,7 @@ pi-agent-core 只包含 Agent Loop、工具执行和事件流（`packages/agent/
 
 续租、启动和停止由 batond 处理，不经 Runtime。
 
-当前控制消息正文的 `type` 为 `project_runtime.request` / `project_runtime.result`。请求含 `run_id`、`lease_epoch`、`operation`；分页使用 `after_seq` / `max_bytes`，写入使用 `last_seq`，assistant 另带 `client_event_id` 和 `payload`。响应为 `{type, ok, code?, data?}`。`bootstrap` 返回 `{project, prompt_version, compaction?, compaction_seq?, goal_utf8_base64?, after_seq, last_seq}`；配置与最新 compaction 合计超过单帧时，bootstrap 返回 compaction_seq，完整 compaction 随后由 read_events 取回。目标含大量控制字符导致 JSON 转义超过单帧时，bootstrap 的 project.goal 留空，完整目标通过 goal_utf8_base64 以 UTF-8 base64 返回，Runtime 解码后构造配置；Project API 中的原目标保持完整。`read_events` 返回 `{events, last_seq, next_after_seq, has_more}`，默认每页 128 KiB，单条大事件可单独返回，响应仍不超过 192 KiB。`claim_inputs` 返回 `{event?, payload_bytes, input_count}`，要求 `last_seq` 等于当前最后序号；事件 payload 为 `{format:"pi-ai/1", message, input_ids}`，消息的文本块保存输入条目 JSON。调用方收到序号冲突或丢失领取响应时，重新读取中心事件后继续。
+当前控制消息正文的 `type` 为 `project_runtime.request` / `project_runtime.result`。请求含 `run_id`、`lease_epoch`、`operation`；分页使用 `after_seq` / `max_bytes`，写入使用 `last_seq`，assistant 另带 `client_event_id` 和 `payload`。响应为 `{type, ok, code?, data?}`。`bootstrap` 返回 `{project, prompt_version, memory_index?, compaction?, compaction_seq?, goal_utf8_base64?, after_seq, last_seq}`；配置与最新 compaction 合计超过单帧时，bootstrap 返回 compaction_seq，完整 compaction 随后由 read_events 取回。目标含大量控制字符导致 JSON 转义超过单帧时，bootstrap 的 project.goal 留空，完整目标通过 goal_utf8_base64 以 UTF-8 base64 返回，Runtime 解码后构造配置；Project API 中的原目标保持完整。`read_events` 返回 `{events, last_seq, next_after_seq, has_more}`，默认每页 128 KiB，单条大事件可单独返回，响应仍不超过 192 KiB。`claim_inputs` 返回 `{event?, payload_bytes, input_count}`，要求 `last_seq` 等于当前最后序号；事件 payload 为 `{format:"pi-ai/1", message, input_ids}`，消息的文本块保存输入条目 JSON。调用方收到序号冲突或丢失领取响应时，重新读取中心事件后继续。
 
 batond 启动命令为 `baton-project-runtime run`，工作目录是私有空目录。环境中的 `BATON_PROJECT_RUNTIME_ENDPOINT`、`BATON_PROJECT_RUNTIME_TOKEN`、`BATON_PROJECT_RUN_ID`、`BATON_PROJECT_LEASE_EPOCH` 只用于本次运行。本地 IPC 每个连接发送一条 `{token, request}` JSON，响应为 `ProjectRuntimeResult`；batond 校验 token 后覆盖请求的运行身份，Runtime 不能自行发送续租或启动回执。`poll_wake` 最长等待 25 秒，返回 `{wake:true|false}`；Runtime 闲置时可重复调用。
 
@@ -169,7 +169,7 @@ PS-155 通过 0016 交付 Project、Agent、主对话、事件、记忆和输入
 | `assistant`，没有工具调用 | 上一轮已完成 | 正常领取输入 |
 | `assistant`，有工具调用但缺少部分 `tool_result` | 在执行工具时崩溃 | 对缺少结果的每个调用重新发 `call_tool`，使用原 `tool_call_id`；再调用 `continue()` |
 | `input` 或 `tool_result` | 模型回复还没保存就崩溃 | 调用 `continue()`，重新请求模型 |
-| `compaction` | 压缩后退出 | 正常领取输入 |
+| `compaction` | 轮内或收尾压缩后退出 | 查看最后一条非压缩事件，仍为未完成轮次时继续恢复，否则领取输入 |
 
 重新发出的 `call_tool` 不会重复产生副作用：如果该 `tool_call_id` 已有 `tool_result`，Coordinator 直接返回已保存的结果；如果没有，说明原来的事务没有提交，副作用也没有发生，这次正常执行。这依赖第 7 节的规则：除 `nodes.exec` 外，所有工具的副作用和 `tool_result` 在同一个事务里提交。`nodes.exec` 的副作用发生在另一台设备上，它靠任务的唯一性保证只执行一次（第 10 节）。
 
@@ -196,18 +196,18 @@ Project 标题或目标被修改后，新的系统提示词从下一次压缩起
 
 | 时机 | 条件 | 说明 |
 |---|---|---|
-| 运行收尾 | 上下文用量超过窗口的 50% | 最常见的情况。此时缓存刚用过，压缩请求能命中缓存 |
+| 运行收尾 | 上下文用量超过窗口的 50% | 利用本次运行的历史生成摘要；相同请求前缀有机会复用尚有效的缓存 |
 | 每次请求前（`prepareRequest`） | 上下文用量超过窗口的 80% | 单轮里工具调用很多时的保护 |
 
-上下文用量取最近一次 assistant 消息 usage 里的输入 token 总数，加上之后新增内容的估算值（按 4 个字符约 1 个 token）。阈值是初始值，可以配置。
+上下文用量取最近一次有效 assistant 的 `totalTokens`，缺少时累加 `input`、`output`、`cacheRead`、`cacheWrite`，再加之后新增内容的估算值（按 4 个字符约 1 个 token，并计入消息开销和工具定义）。模型不一致、没有有效 usage 或最近一次 usage 早于最新压缩时，按当前完整视图重新估算。请求前和收尾阈值还受「窗口减去回答预算」限制，回答预算为模型输出上限与 32000 的较小值。阈值和保留预算由 Runtime 的 `CompactionSettings` 定义，可通过构造参数覆盖；CLI 使用默认值。
 
 #### 6.3 压缩过程
 
-1. **清除旧工具结果。** 最近 3 轮以前的 `tool_result` 内容替换成占位文字：`[工具结果已清除，原文为第 123 条。需要时用 history.read 读取，或重新调用工具获取最新状态]`。这一步不调用模型。按 PA-18，清除后的信息都能重新拿到。清除后用量降到窗口的 40% 以下，就到此为止。
-2. **生成摘要。** 把最早的一段对话换成摘要。范围从上一次压缩的 `through_seq` 之后开始，到保留部分之前结束；保留部分是最近 2 轮，并且至少占窗口的 15%。切点不会把一条 assistant 消息和它的工具结果分开。摘要请求和上一次正常请求使用同样的模型、系统提示词、工具定义和消息前缀，只在最后追加一条 user 消息作为压缩指令，并设置 `toolChoice: "none"`。这样前缀能命中缓存，只有指令和摘要输出需要全价计算。这是 DSH `compaction-basic` 的做法；Pi 默认的 `generateSummary()` 使用单独的系统提示词，命中不了缓存，所以不采用。
-3. **写入。** 把 `through_seq`、摘要、被清除的工具结果序号和当时的记忆索引（记忆条目标题列表，最多 2 KiB）一起写成一条 `compaction` 事件。
+1. **清除旧工具结果。** 默认只选择最近 3 批输入以前、已有后续 assistant 分析、内容估算超过 8192 字符的 `tool_result`，替换成占位文字：`[工具结果已清除，原文为第 123 条。需要时用 history.read 读取，或重新调用工具获取最新状态]`。最近尚未分析的结果保留。这一步不调用模型，清除集合立即通过 `commit_compaction` 保存；没有摘要时 `through_seq=0`、`summary=""`，视图不添加空摘要消息。后续清除沿用旧摘要和提示词快照。按 PA-18，清除后的信息都能重新拿到。清除后用量降到窗口的 40% 以下（且满足回答预算），就到此为止。
+2. **生成摘要。** 把最早的一段对话换成摘要。优先保留最近 2 批输入对应的对话，并保留至少占窗口 15% 的最近内容；单轮或最近几轮过长、没有可用切点时，允许在已完成的工具批次之间切分。切点不会把一条 assistant 消息和它的工具结果分开，也不会吞掉最后一个保留单元。摘要请求沿用原模型、系统提示词、工具定义、消息格式、provider 签名与 `sessionId`，重放待压缩的消息前缀及旧摘要，在最后追加一条 user 压缩指令，并设置 `toolChoice: "none"`。这参考 DSH 的前缀复用方式；Pi 的默认摘要器把旧对话序列化成文本，使用独立系统提示词，无法沿用原对话的整段缓存前缀。实际命中取决于 provider、路由和缓存有效期，工具结果清除也会影响前缀。恢复的历史已超过窗口时，先选择一次摘要请求能容纳的较短前缀，并为输出留出容量；一次检查最多执行 3 次有效缩减。
+3. **验证并写入。** Runtime 拒绝空白、被截断、含工具调用或非文本输出的摘要，检查完整模型视图的估算用量确实下降，并检查事件 JSON 容量。`commit_compaction` 带 `last_seq` 和稳定的 `client_event_id`；Coordinator 在运行租约与对话锁保护下检查序号未变化、范围单调前进、工具配对、清除集合没有丢失和被替换内容确实缩短，再在同一事务里追加事件并更新 `compaction_seq`。清除集合为有序、无重复的保留区工具结果序号。事件保存 `through_seq`、`summary`、`cleared_tool_result_seqs`、`memory_index`、`prompt`、`tokens_before`、`tokens_after`、`provider`、`model` 和可选 `usage`；前后用量为同一字符估算单位，记忆索引来自 bootstrap 的标题快照，最多 2 KiB，不含记忆正文。只清除工具结果时使用旧索引，生成新摘要时记录当前索引和最新标题、目标快照。相同标识和相同内容的重发返回原事件；不同内容复用标识返回冲突。序号或配置冲突时丢弃摘要，重新读取中心状态，最多重试 2 次；提交失败不应用本地替换。
 
-压缩指令针对协调角色编写，要求摘要保留：用户的目标和偏好、做过的决定及理由、派出的任务（任务 ID、目标设备、当前状态）、尚未完成的事项。上一次的摘要也在被压缩的范围里，指令要求把它和新内容合并成一份，不逐字照抄。
+压缩指令针对协调角色编写，要求摘要保留：用户的目标和偏好、纠正与明确指令、做过的决定及理由、派出的任务（准确任务 ID、目标设备、已知状态与证据入口）、尚未完成的事项及下一步。上一次的摘要也在被压缩的范围里，指令要求合并有效事实并更新状态，不编造标识符或执行结果。摘要请求失败按 5、15、45 秒重试，耗尽后走模型请求失败流程；已提交的工具清除仍然有效。普通请求出现明确上下文超限时，仅在压缩确实推进后重试一次，失败回复不进入历史。轮内压缩后的崩溃恢复和调度都查看最后一条非压缩事件，压缩记录不会遮蔽待执行工具或待分析的结果。
 
 压缩后，第 6.1 节第 3 项的开头消息内容如下，第一行由程序生成：
 
@@ -413,7 +413,7 @@ Runtime 系统提示词和 `tasks.dispatch` 说明要求在 `expected_outputs` �
 | PA-09 | 模型替身快速回复后不再写入输入；另一组持续写入输入超过 15 分钟 | 闲置 180 秒后没有退出；超过时长上限仍在领取新输入；退出时取消了已派出的任务 | 进程测试 | planned |
 | PA-13 | 模型替身持续返回错误 | 重试次数或推迟时间不符；未进入 `needs_attention`；用户重试后不从原位置继续 | 进程测试 | planned |
 | PA-14 | 同一对话在 macOS 和 Windows 上各运行一次，记录实际发出的请求 | 两次请求的系统提示词、工具定义或历史消息部分不一致 | 真实 Runtime 和订阅 | planned |
-| PA-15、PA-16 | 用超长工具输出和多轮对话越过 50% 阈值 | 收尾时没有压缩；摘要请求的前缀与上次请求不一致；`history.read` 读不到被压缩的原文 | 进程测试；缓存命中用真实订阅观察 usage | planned |
+| PA-15、PA-16 | 用大工具输出、长单轮及多轮对话越过阈值 | 收尾或请求前没有压缩；前缀、工具配对或恢复位置改变；无效摘要提交；原文丢失 | Runtime 确定性测试、Store 事务与并发测试、节点转发测试；缓存命中用真实订阅观察 usage | 自动化覆盖；真实缓存命中待验证 |
 | PA-17 | 模型替身和员工同时修改同一条记忆 | 后写入的一方覆盖了前者而没有收到冲突；修订记录缺失 | 集成测试 | planned |
 | PA-17 | Agent 没有运行时用户连续修改同一条记忆 3 次，再修改 Project 标题，然后发一条消息；另一组由模型替身调用 `memory.write` | 只有通知时启动了运行；收到消息的那一轮里缺少通知，或同一条记忆出现多条通知；`memory.write` 产生了通知 | 集成测试，模型替身 | planned |
 | PA-21 | 所有节点离线时在浏览器发送消息并查看对话 | 消息未保存；界面显示 Project Agent 正在运行 | Web E2E | planned |

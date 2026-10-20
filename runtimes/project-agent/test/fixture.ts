@@ -9,6 +9,7 @@ import {
 import type { Bootstrap, Event, RPC } from "../src/protocol.js";
 import { RuntimeError } from "../src/protocol.js";
 import { ProjectRuntime, type Clock } from "../src/runtime.js";
+import type { CompactionSettings } from "../src/compaction.js";
 
 export const assistant = (tools = false) =>
   fauxAssistantMessage(
@@ -49,8 +50,12 @@ export class Backend implements RPC {
   now = 0;
   failAt = "";
   pageSize = 2;
+  compactions = new Map<string, Event>();
   boot(): Bootstrap {
+    const compaction = this.events.findLast((e) => e.kind === "compaction");
     return {
+      compaction: compaction ? structuredClone(compaction) : undefined,
+      compaction_seq: compaction?.seq,
       project: {
         title: "Baton",
         goal: "跨设备接续 🐈",
@@ -58,7 +63,7 @@ export class Backend implements RPC {
         conversation: { id: "conversation-stable" },
       },
       prompt_version: "1",
-      after_seq: 0,
+      after_seq: compaction?.payload.through_seq ?? 0,
       last_seq: this.events.length,
     };
   }
@@ -88,6 +93,20 @@ export class Backend implements RPC {
         event.seq = this.events.length + 1;
         this.events.push(event);
         return { event: structuredClone(event) };
+      }
+      case "commit_compaction": {
+        const saved = this.compactions.get(req.client_event_id);
+        if (saved) return structuredClone(saved);
+        if (req.last_seq !== this.events.length)
+          throw new RuntimeError("conflict");
+        const event: Event = {
+          seq: this.events.length + 1,
+          kind: "compaction",
+          payload: structuredClone(req.payload),
+        };
+        this.events.push(event);
+        this.compactions.set(req.client_event_id, event);
+        return structuredClone(event);
       }
       case "append_event": {
         if (req.last_seq !== this.events.length)
@@ -150,10 +169,23 @@ export class Backend implements RPC {
     };
   }
 }
-export function setup(backend: Backend, responses?: any[]) {
+export function setup(
+  backend: Backend,
+  responses?: any[],
+  options: {
+    contextWindow?: number;
+    compaction?: Partial<CompactionSettings>;
+  } = {},
+) {
   const faux = fauxProvider({
     provider: "faux",
-    models: [{ id: "faux-model", maxTokens: 32000 }],
+    models: [
+      {
+        id: "faux-model",
+        maxTokens: 32000,
+        contextWindow: options.contextWindow ?? 1_000_000,
+      },
+    ],
   });
   const models = createModels();
   models.setProvider(faux.provider);
@@ -172,6 +204,7 @@ export function setup(backend: Backend, responses?: any[]) {
             maxTokens: options.maxTokens,
             sessionId: options.sessionId,
             maxRetries: options.maxRetries,
+            ...(options.toolChoice ? { toolChoice: options.toolChoice } : {}),
           }),
         );
         return typeof step === "function"
@@ -181,7 +214,12 @@ export function setup(backend: Backend, responses?: any[]) {
     ),
   );
   return {
-    runtime: new ProjectRuntime(backend, models, backend.timer()),
+    runtime: new ProjectRuntime(
+      backend,
+      models,
+      backend.timer(),
+      options.compaction,
+    ),
     faux,
     requests,
   };

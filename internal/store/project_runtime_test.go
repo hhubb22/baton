@@ -92,7 +92,7 @@ func TestProjectRunConcurrentSchedulingAndLeaseFence(t *testing.T) {
 	if _, err := pool.Exec(ctx, `UPDATE project_agents SET lease_until=clock_timestamp()-interval '1 second' WHERE id=$1`, p.Agent.ID); err != nil {
 		t.Fatal(err)
 	}
-	for _, op := range []string{"bootstrap", "read_events", "claim_inputs", "append_event", "preview", "renew", "started", "report_failure", "finish", "start_failed", "exited"} {
+	for _, op := range []string{"bootstrap", "read_events", "claim_inputs", "append_event", "commit_compaction", "preview", "renew", "started", "report_failure", "finish", "start_failed", "exited"} {
 		old.Operation = op
 		if _, err := repo.ProjectRuntime(ctx, src, old); !errors.Is(err, projectagent.ErrLeaseLost) {
 			t.Fatalf("过期 %s: %v", op, err)

@@ -30,6 +30,7 @@ type QueuedInput struct {
 type Bootstrap struct {
 	Project        Project `json:"project"`
 	PromptVersion  string  `json:"prompt_version"`
+	MemoryIndex    string  `json:"memory_index,omitempty"`
 	Compaction     *Event  `json:"compaction,omitempty"`
 	CompactionSeq  int64   `json:"compaction_seq,omitempty"`
 	GoalUTF8Base64 string  `json:"goal_utf8_base64,omitempty"`
