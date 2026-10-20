@@ -73,6 +73,11 @@ func checkProjectLeaseTime(ctx context.Context, tx pgx.Tx, agentID string, req p
 }
 
 func (s *Store) ProjectRuntime(ctx context.Context, src protocol.Source, req protocol.ProjectRuntimeRequest) (any, error) {
+	if req.Operation == "wait_tool" {
+		if data, done, err := s.readProjectToolWait(ctx, src, req); done {
+			return data, err
+		}
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, err

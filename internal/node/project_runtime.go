@@ -55,6 +55,9 @@ type projectRuntimeProcess struct {
 	cancel    context.CancelFunc
 	stopped   bool
 	started   bool
+	taskMu    sync.Mutex
+	taskWaits map[string]*projectTaskWait
+	taskCalls map[string]*projectTaskCall
 }
 
 func newProjectRuntimeManager(ctx context.Context, ledger *Ledger) (*projectRuntimeManager, error) {
@@ -162,6 +165,7 @@ func (m *projectRuntimeManager) command(command protocol.ProjectRunCommand) {
 			p.stopped = true
 			p.stop()
 		case "project_run_wake":
+			p.notifyTaskWaits(command.TaskUpdates)
 			select {
 			case p.wake <- struct{}{}:
 			default:
@@ -543,7 +547,8 @@ func (m *projectRuntimeManager) serveConn(conn net.Conn, p *projectRuntimeProces
 }
 
 func (m *projectRuntimeManager) runtimeRequest(ctx context.Context, p *projectRuntimeProcess, req protocol.ProjectRuntimeRequest) (protocol.ProjectRuntimeResult, bool) {
-	if _, err := m.leaseTime(p); err != nil {
+	started, err := m.leaseTime(p)
+	if err != nil {
 		p.stop()
 		return projectRuntimeFailure("lease_lost"), true
 	}
@@ -555,13 +560,25 @@ func (m *projectRuntimeManager) runtimeRequest(ctx context.Context, p *projectRu
 	case "poll_wake":
 		wait := 25 * time.Second
 		var options struct {
-			WaitMS int `json:"wait_ms"`
+			WaitMS       int    `json:"wait_ms"`
+			TaskID       string `json:"task_id"`
+			AfterVersion *int64 `json:"after_version"`
 		}
 		if len(req.Payload) > 0 {
 			if json.Unmarshal(req.Payload, &options) != nil || options.WaitMS < 1 || options.WaitMS > 25000 {
 				return result, false
 			}
 			wait = time.Duration(options.WaitMS) * time.Millisecond
+		}
+		if options.TaskID != "" {
+			if options.AfterVersion == nil {
+				return result, false
+			}
+			result = m.pollTaskWake(ctx, p, options.TaskID, *options.AfterVersion, wait)
+			break
+		}
+		if options.AfterVersion != nil {
+			return result, false
 		}
 		timer := time.NewTimer(wait)
 		defer timer.Stop()
@@ -578,9 +595,19 @@ func (m *projectRuntimeManager) runtimeRequest(ctx context.Context, p *projectRu
 		}{wake})
 		result = protocol.ProjectRuntimeResult{Type: protocol.BodyProjectRuntimeResult, OK: true, Data: data}
 	case "bootstrap", "read_events", "claim_inputs", "append_event", "commit_compaction", "preview", "call_tool", "wait_tool", "report_failure", "finish":
+		var call *projectTaskCall
+		if req.Operation == "call_tool" || req.Operation == "wait_tool" {
+			call = p.beginTaskCall(req.ToolCallID)
+		}
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		result = m.call(ctx, req)
 		cancel()
+		if call != nil {
+			result = p.finishTaskCall(call, req, result, started)
+		}
+		if result.OK && req.Operation == "bootstrap" {
+			result = localWaitCapability(result)
+		}
 	}
 	if _, err := m.leaseTime(p); err != nil {
 		result = projectRuntimeFailure("lease_lost")

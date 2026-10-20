@@ -601,7 +601,7 @@ func insertStartEvent(ctx context.Context, tx pgx.Tx, employeeID, taskID string,
 	if err := syncTaskAttention(ctx, tx, employeeID, taskID, row.status); err != nil {
 		return err
 	}
-	if kind == task.EventCancelled || kind == task.EventFailed {
+	if kind == task.EventCancelled || kind == task.EventFailed || status == task.StatusNeedsVerification {
 		return enqueueTaskTerminal(ctx, tx, employeeID, taskID)
 	}
 	return nil

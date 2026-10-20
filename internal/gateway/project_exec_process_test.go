@@ -177,6 +177,46 @@ func (e *projectExecProbe) assertOneExecution(t *testing.T, taskID string) {
 	}
 }
 
+func TestProjectExecRealProcessesVersionWake(t *testing.T) {
+	e := startProjectExecStack(t)
+	taskID, _ := e.start(t, "version-wake", execGatedCommand(), 600)
+	e.waitCommandStarted(t)
+	var pending struct {
+		Pending  bool   `json:"pending"`
+		TaskID   string `json:"task_id"`
+		Version  int64  `json:"task_version"`
+		Protocol int    `json:"wait_protocol"`
+	}
+	request := protocol.ProjectRuntimeRequest{Operation: "wait_tool", ToolCallID: "version-wake", LastSeq: e.seq}
+	if result := e.call(t, e.runID, "wake-snapshot", request, &pending); !result.OK || !pending.Pending || pending.TaskID != taskID || pending.Protocol != 1 {
+		t.Fatalf("任务等待快照无效: %+v %+v", result, pending)
+	}
+	payload, _ := json.Marshal(map[string]any{"task_id": taskID, "after_version": pending.Version, "wait_ms": 15000})
+	e.send(t, e.runID, "task-local-poll", protocol.ProjectRuntimeRequest{Operation: "poll_wake", Payload: payload})
+	// 同节点上的本机等待期间，其他请求仍可经过 Gateway 完成。
+	if result := e.call(t, e.runID, "read-during-task-wait", protocol.ProjectRuntimeRequest{Operation: "read_events"}, nil); !result.OK {
+		t.Fatal("本机等待阻塞中心流量", result)
+	}
+	e.release(t)
+	record := e.waitRecord(t, e.runID, "task-local-poll")
+	var result protocol.ProjectRuntimeResult
+	if record.Error != "" || json.Unmarshal(record.Response, &result) != nil || !result.OK {
+		t.Fatalf("任务通知等待失败: %+v", record)
+	}
+	var wake struct {
+		Reason  string `json:"reason"`
+		Version int64  `json:"version"`
+	}
+	if json.Unmarshal(result.Data, &wake) != nil || wake.Reason != "task_changed" || wake.Version <= pending.Version {
+		t.Fatalf("未由持久化任务的新版本唤醒: %s", result.Data)
+	}
+	final := e.wait(t, "version-wake", false)
+	if !strings.Contains(string(final.Payload), "shell-result") {
+		t.Fatal("通知后未能取得原命令输出", string(final.Payload))
+	}
+	e.assertOneExecution(t, taskID)
+}
+
 func TestProjectExecRealProcessesExitAndOutput(t *testing.T) {
 	for _, code := range []int{0, 7} {
 		t.Run(fmt.Sprintf("exit_%d", code), func(t *testing.T) {
@@ -308,6 +348,23 @@ func TestProjectExecRealProcessesBinaryOutputAndAsyncInput(t *testing.T) {
 	e.assertOneExecution(t, taskID)
 }
 
+func waitStoppedCommandOutput(t *testing.T, e *projectExecProbe, taskID string) task.Record {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	var view task.Record
+	for time.Now().Before(deadline) {
+		if err := getJSON(t, e.stack.client, e.stack.base+"/api/v1/tasks/"+taskID, &view); err != nil {
+			t.Fatal(err)
+		}
+		if view.StopAcknowledgedAt != nil && view.CommandResult != nil {
+			return view
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("停止后的命令输出未补送: %+v", view)
+	return view
+}
+
 func TestProjectExecRealProcessesCancelAndTimeoutKeepPartialOutput(t *testing.T) {
 	for _, reason := range []string{task.StatusCancelled, task.CodeExecutionTimeout} {
 		t.Run(reason, func(t *testing.T) {
@@ -336,7 +393,7 @@ func TestProjectExecRealProcessesCancelAndTimeoutKeepPartialOutput(t *testing.T)
 					t.Fatalf("取消命令返回 %d", code)
 				}
 			}
-			view := waitStopEvidence(t, e.stack, taskID)
+			view := waitStoppedCommandOutput(t, e, taskID)
 			if view.Status != task.StatusNeedsVerification || view.StopConfirmedAt == nil || view.StopOutcomeKnown || view.StopReason == nil || *view.StopReason != reason {
 				t.Fatalf("命令停止事实错误：status=%s confirmed=%t known=%t reason=%v", view.Status, view.StopConfirmedAt != nil, view.StopOutcomeKnown, view.StopReason)
 			}
@@ -350,10 +407,42 @@ func TestProjectExecRealProcessesCancelAndTimeoutKeepPartialOutput(t *testing.T)
 				t.Fatalf("停止丢失已输出内容：%s %v", raw, err)
 			}
 			var claim projectagent.Claim
-			if r := e.call(t, e.runID, "stop-claim", protocol.ProjectRuntimeRequest{Operation: "claim_inputs", LastSeq: e.seq}, &claim); !r.OK || claim.Event == nil || claim.InputCount != 1 {
-				t.Fatal("停止命令未送回唯一结果输入", r, claim.InputCount)
+			if r := e.call(t, e.runID, "stop-claim", protocol.ProjectRuntimeRequest{Operation: "claim_inputs", LastSeq: e.seq}, &claim); !r.OK || claim.Event == nil || claim.InputCount < 1 {
+				t.Fatal("停止命令未送回结果输入", r, claim.InputCount)
 			}
-			if !strings.Contains(string(claim.Event.Payload), "partial-before-stop") || !strings.Contains(string(claim.Event.Payload), taskID) || !strings.Contains(string(claim.Event.Payload), "command_result") {
+			var payload struct {
+				Message struct {
+					Content []struct {
+						Text string `json:"text"`
+					} `json:"content"`
+				} `json:"message"`
+			}
+			if err := json.Unmarshal(claim.Event.Payload, &payload); err != nil || len(payload.Message.Content) != 1 {
+				t.Fatal("停止输入格式错误", err)
+			}
+			var inputs []projectagent.QueuedInput
+			if err := json.Unmarshal([]byte(payload.Message.Content[0].Text), &inputs); err != nil || len(inputs) != claim.InputCount {
+				t.Fatal("停止输入数量错误", err)
+			}
+			seen := map[int64]bool{}
+			withOutput := false
+			for _, input := range inputs {
+				var notification store.ProjectTaskResultInput
+				if err := json.Unmarshal(input.Payload, &notification); err != nil || notification.TaskID != taskID || notification.Status != task.StatusNeedsVerification || notification.Version < 1 || seen[notification.Version] {
+					t.Fatalf("停止输入重复版本或丢失任务状态: %s %v", input.Payload, err)
+				}
+				seen[notification.Version] = true
+				if input.SourceKey != fmt.Sprintf("task:%s:result:%d", taskID, notification.Version) {
+					t.Fatal("停止输入没有按任务版本标识", input.SourceKey)
+				}
+				if notification.CommandResult != nil {
+					if *notification.CommandResult != saved {
+						t.Fatal("停止通知的输出与任务记录不一致")
+					}
+					withOutput = true
+				}
+			}
+			if !withOutput {
 				t.Fatal("停止通知缺少命令输出", string(claim.Event.Payload))
 			}
 			var duplicate projectagent.Claim

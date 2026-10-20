@@ -183,10 +183,13 @@ func TestProjectUserCancelRunningTaskCarriesActor(t *testing.T) {
 			}
 			var count int
 			var actor, action, kind string
-			if err = pool.QueryRow(ctx, `SELECT count(*) FROM project_agent_input_queue WHERE agent_id=$1`, p.Agent.ID).Scan(&count); err != nil || count != 1 {
+			if err = pool.QueryRow(ctx, `SELECT count(*) FROM project_agent_input_queue WHERE agent_id=$1 AND payload->>'status'='needs_verification'`, p.Agent.ID).Scan(&count); err != nil || count != 1 {
+				t.Fatalf("待核实状态输入数量 %d %v", count, err)
+			}
+			if err = pool.QueryRow(ctx, `SELECT count(*) FROM project_agent_input_queue WHERE agent_id=$1 AND payload->>'status'='cancelled'`, p.Agent.ID).Scan(&count); err != nil || count != 1 {
 				t.Fatalf("终态重复 %d %v", count, err)
 			}
-			if err = pool.QueryRow(ctx, `SELECT source_type,COALESCE(payload->'user_operation'->>'employee_id',''),COALESCE(payload->'user_operation'->>'action','') FROM project_agent_input_queue WHERE agent_id=$1`, p.Agent.ID).Scan(&kind, &actor, &action); err != nil || kind != "task_result" || (user && (actor != in.EmployeeID || action != "cancel")) || (!user && (actor != "" || action != "")) {
+			if err = pool.QueryRow(ctx, `SELECT source_type,COALESCE(payload->'user_operation'->>'employee_id',''),COALESCE(payload->'user_operation'->>'action','') FROM project_agent_input_queue WHERE agent_id=$1 AND payload->>'status'='cancelled'`, p.Agent.ID).Scan(&kind, &actor, &action); err != nil || kind != "task_result" || (user && (actor != in.EmployeeID || action != "cancel")) || (!user && (actor != "" || action != "")) {
 				t.Fatalf("操作来源 %s %s %s %v", kind, actor, action, err)
 			}
 			rec, err := repo.GetTask(ctx, in.EmployeeID, in.TaskID)

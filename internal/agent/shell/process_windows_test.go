@@ -22,7 +22,7 @@ func TestPowerShellCancellationStopsJobObjectProcessTree(t *testing.T) {
 	}
 	pidPath := filepath.Join(root, "child.pid")
 	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
-	command := "$child = Start-Process -FilePath " + quote(binary) + " -ArgumentList '-NoProfile', '-Command', 'Start-Sleep -Seconds 300' -PassThru; [IO.File]::WriteAllText(" + quote(pidPath) + ", $child.Id.ToString()); Wait-Process -Id $child.Id"
+	command := "[Console]::Out.Write('before-stop'); $child = Start-Process -FilePath " + quote(binary) + " -ArgumentList '-NoProfile', '-Command', 'Start-Sleep -Seconds 300' -PassThru; [IO.File]::WriteAllText(" + quote(pidPath) + ", $child.Id.ToString()); Wait-Process -Id $child.Id"
 	submit(t, a, command)
 	var child uint64
 	deadline := time.Now().Add(15 * time.Second)
@@ -49,6 +49,7 @@ func TestPowerShellCancellationStopsJobObjectProcessTree(t *testing.T) {
 	if err != nil || !stopped || known {
 		t.Fatalf("取消结果: stopped=%v known=%v err=%v", stopped, known, err)
 	}
+	assertStoppedRecovery(t, a)
 	if state, err := windows.WaitForSingleObject(handle, 5000); err != nil || state != windows.WAIT_OBJECT_0 {
 		t.Fatalf("Job Object 关闭后子进程仍运行: %d %v", state, err)
 	}

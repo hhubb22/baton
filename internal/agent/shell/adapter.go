@@ -31,18 +31,52 @@ type Adapter struct {
 	process                             *sidecar.Process
 	done                                chan struct{}
 	outputs                             []agent.Output
+	aborted                             bool
+	pending                             *completionRecord
+	restorePending, maintaining         bool
+	retryAt                             time.Time
+	failures                            int
+	diagnostic                          *agent.Output
+	lastError                           string
+	readFile                            func(string) ([]byte, error)
+	writeFile                           func(string, []byte) error
+	now                                 func() time.Time
 }
 
-func New(config agent.Config) *Adapter { return &Adapter{config: config} }
+func New(config agent.Config) *Adapter {
+	return &Adapter{config: config, readFile: readCompletionFile, writeFile: privatefile.WriteFile, now: time.Now}
+}
 
-func (a *Adapter) Start(context.Context) error {
+func (a *Adapter) Start(ctx context.Context) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.config.Restore {
-		return agent.ErrHistoryMissing
+	if a.closed || a.started {
+		return errors.New("命令执行器状态无效")
 	}
-	if a.closed {
-		return errors.New("命令执行器已关闭")
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if a.config.Restore {
+		// 即使恢复失败，也不能把同一执行当成首次输入。
+		a.submitted = true
+		if err := a.validateIdentity(); err != nil {
+			return fmt.Errorf("%w: %v", agent.ErrHistoryMissing, err)
+		}
+		record, err := a.loadCompletion(true)
+		if err != nil {
+			a.noteFailureLocked("read", err)
+			if definitiveHistoryError(err) {
+				return fmt.Errorf("%w: %v", agent.ErrHistoryMissing, err)
+			}
+			a.restorePending = true
+		} else {
+			a.restoreLocked(record)
+		}
+		a.started = true
+		return nil
+	}
+	if err := a.validateIdentity(); err != nil {
+		return err
 	}
 	if err := fileaccess.PrepareDataDir(a.config.SessionDir); err != nil {
 		return err
@@ -55,7 +89,7 @@ func (a *Adapter) Start(context.Context) error {
 func (a *Adapter) SubmitInput(ctx context.Context, payload string) (agent.Output, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if !a.started || a.closed || a.submitted {
+	if !a.started || a.closed || a.submitted || a.stopped {
 		return agent.Output{}, errors.New("命令执行器状态无效")
 	}
 	a.submitted = true
@@ -115,9 +149,12 @@ func (a *Adapter) SubmitInput(ctx context.Context, payload string) (agent.Output
 		result := output.result(code)
 		out := formatResult(result, "")
 		a.mu.Lock()
-		a.outputs = append(a.outputs, out)
+		kind := "exited"
+		if a.aborted {
+			kind = "stopped"
+		}
 		a.stopped = true
-		_ = privatefile.WriteFile(a.historyPath(), []byte(out.Final))
+		a.queueCompletionLocked(out, kind)
 		close(a.done)
 		a.mu.Unlock()
 	}()
@@ -159,9 +196,8 @@ func authorizedDirectory(dataDir, directory string) (string, error) {
 
 func (a *Adapter) failureLocked(reason string) agent.Output {
 	a.stopped = true
-	out := formatResult(task.CommandResult{ExitCode: -1}, reason)
-	_ = privatefile.WriteFile(a.historyPath(), []byte(out.Final))
-	return out
+	a.queueCompletionLocked(formatResult(task.CommandResult{ExitCode: -1}, reason), "launch_failed")
+	return agent.Output{}
 }
 
 func formatResult(result task.CommandResult, reason string) agent.Output {
@@ -202,23 +238,23 @@ func (a *Adapter) ReadHistory(ctx context.Context, cursor string) (agent.History
 	if err := ctx.Err(); err != nil {
 		return agent.HistoryPage{}, err
 	}
-	f, err := privatefile.Open(a.historyPath())
+	record, err := a.loadCompletion(false)
 	if err != nil {
-		return agent.HistoryPage{}, agent.ErrHistoryMissing
+		return agent.HistoryPage{}, fmt.Errorf("%w: %v", agent.ErrHistoryMissing, err)
 	}
-	defer f.Close()
-	var raw json.RawMessage
-	if json.NewDecoder(f).Decode(&raw) != nil {
-		return agent.HistoryPage{}, agent.ErrHistoryMissing
-	}
-	page, _ := json.Marshal([]json.RawMessage{raw})
+	page, _ := json.Marshal([]json.RawMessage{record.Result})
 	return agent.HistoryPage{Data: page}, nil
 }
 func (a *Adapter) Drain() []agent.Output {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.maintainLocked()
 	out := a.outputs
 	a.outputs = nil
+	if a.diagnostic != nil {
+		out = append(out, *a.diagnostic)
+		a.diagnostic = nil
+	}
 	return out
 }
 func (a *Adapter) StopStatus() (bool, bool) {
@@ -229,12 +265,16 @@ func (a *Adapter) StopStatus() (bool, bool) {
 func (a *Adapter) Abort() (bool, bool, error) {
 	a.mu.Lock()
 	p, done, submitted := a.process, a.done, a.submitted
-	if p == nil {
+	if p != nil && !a.stopped {
+		a.aborted = true
+	}
+	if p == nil && !a.restorePending && !a.config.Restore {
 		a.stopped = true
 	}
+	stopped := a.stopped
 	a.mu.Unlock()
 	if p == nil {
-		return true, !submitted, nil
+		return stopped, !submitted, nil
 	}
 	p.Stop()
 	select {

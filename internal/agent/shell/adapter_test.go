@@ -14,6 +14,7 @@ import (
 
 	"baton/internal/agent"
 	"baton/internal/fileaccess"
+	"baton/internal/identity"
 	"baton/internal/projectexec"
 	"baton/internal/protocol"
 	"baton/internal/task"
@@ -32,7 +33,15 @@ func configured(t *testing.T) (*Adapter, string) {
 	if err := fileaccess.AddBrowseRoot(data, "workspace", root); err != nil {
 		t.Fatal(err)
 	}
-	a := New(agent.Config{DataDir: data, Directory: root, SessionDir: filepath.Join(data, "native")})
+	sessionID, err := identity.NewUUID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	executionID, err := identity.NewUUID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := New(agent.Config{DataDir: data, Directory: root, SessionDir: filepath.Join(data, "sessions", sessionID, "native"), SessionID: sessionID, ExecutionID: executionID})
 	if err := a.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -56,10 +65,11 @@ func result(t *testing.T, a *Adapter, out agent.Output) task.Candidate {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for !out.Exited && time.Now().Before(deadline) {
-		outputs := a.Drain()
-		if len(outputs) > 0 {
-			out = outputs[0]
-			break
+		for _, next := range a.Drain() {
+			if next.Exited {
+				out = next
+				break
+			}
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -166,9 +176,14 @@ func TestExecutionRechecksLocalAuthorization(t *testing.T) {
 }
 func TestRestoreNeverRestartsCommand(t *testing.T) {
 	a, _ := configured(t)
-	restored := New(agent.Config{Restore: true, SessionDir: a.config.SessionDir})
+	config := a.config
+	config.Restore = true
+	restored := New(config)
 	if err := restored.Start(context.Background()); !errors.Is(err, agent.ErrHistoryMissing) {
 		t.Fatalf("恢复结果: %v", err)
+	}
+	if _, err := restored.SubmitInput(context.Background(), `{"description":"exit 0","generation":1}`); err == nil {
+		t.Fatal("恢复缺少完成记录的执行时重新接受了输入")
 	}
 }
 func TestBoundedOutputRetainsExactHeadTailAndRawByteCount(t *testing.T) {

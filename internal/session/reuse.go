@@ -9,6 +9,9 @@ import (
 
 // reuseLocked 仅在员工显式恢复且原结果已确认交付后准备下一份执行。
 func (w *workerDB) reuseLocked(taskID, executionID, agentType string) error {
+	if len(w.pendingOutputs) > 0 || w.pendingStopOutput != "" {
+		return ErrSessionBusy
+	}
 	var resumed, oldAgent string
 	if err := w.db.QueryRow(`SELECT COALESCE((SELECT value FROM meta WHERE key='browser_resumed'),'0')`).Scan(&resumed); err != nil {
 		return err
@@ -82,6 +85,9 @@ func (w *workerDB) reuseLocked(taskID, executionID, agentType string) error {
 	w.armedMono, w.generation = 0, 0
 	w.intent, w.cancelled, w.inputSubmitted, w.inputResolved, w.resultDelivered, w.recoveredUncertain, w.deliveryUncertain, w.stopReported = false, false, false, false, false, false, false, false
 	w.uncertainCode = ""
+	w.pendingOutputID = ""
+	w.pendingOutputs = nil
+	w.pendingStopOutput = ""
 	w.startedMono, w.executionBudget, w.queueBudget, w.inputDelay = 0, 0, 0, 0
 	w.inputDueAt, w.inputSentAt = time.Time{}, time.Time{}
 	return nil

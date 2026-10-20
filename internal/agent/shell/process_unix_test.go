@@ -16,7 +16,7 @@ import (
 func TestCancelStopsWholeProcessGroup(t *testing.T) {
 	a, root := configured(t)
 	pidPath := filepath.Join(root, "child.pid")
-	command := "sleep 300 & child=$!; printf '%s' \"$child\" > '" + strings.ReplaceAll(pidPath, "'", "'\\''") + "'; wait \"$child\""
+	command := "printf before-stop; sleep 300 & child=$!; printf '%s' \"$child\" > '" + strings.ReplaceAll(pidPath, "'", "'\\''") + "'; wait \"$child\""
 	submit(t, a, command)
 	var child int
 	deadline := time.Now().Add(10 * time.Second)
@@ -35,6 +35,7 @@ func TestCancelStopsWholeProcessGroup(t *testing.T) {
 	if err != nil || !stopped || known {
 		t.Fatalf("取消结果: stopped=%v known=%v err=%v", stopped, known, err)
 	}
+	assertStoppedRecovery(t, a)
 	for time.Now().Before(deadline) {
 		if err := syscall.Kill(child, 0); err != nil {
 			return

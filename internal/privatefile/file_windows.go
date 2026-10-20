@@ -152,6 +152,9 @@ func replaceFile(source, target string) error {
 	return root.Rename(filepath.Base(source), filepath.Base(target))
 }
 
+// Windows 保留文件 Sync 和原子替换；目录刷盘语义需要在 Windows 文件系统上验证。
+func syncParent(string) error { return nil }
+
 func openFile(path string, share uint32) (*os.File, error) {
 	h, err := openSharedHandle(path, windows.GENERIC_READ|windows.READ_CONTROL, share)
 	if err != nil {

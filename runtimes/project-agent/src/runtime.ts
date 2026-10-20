@@ -308,6 +308,7 @@ export class ProjectRuntime {
     const saved = this.results.get(call.id);
     if (saved) return saved;
     // Coordinator 持久化工具调用；恢复时使用原调用 ID 获取已保存的任务或结果。
+    let requestStarted = this.timer.now();
     let response = await this.rpc.call({
       operation: "call_tool",
       last_seq: this.seq,
@@ -315,6 +316,8 @@ export class ProjectRuntime {
       tool_name: call.name,
       arguments: call.arguments,
     });
+    let waitUntil = Infinity;
+    let initialCheck = true;
     while (response?.pending === true) {
       if (
         call.name !== "nodes.exec" ||
@@ -322,8 +325,47 @@ export class ProjectRuntime {
         !response.task_id
       )
         throw new RuntimeError("invalid_tool_result");
+      const versioned = response.wait_protocol === 1;
+      if (versioned) {
+        if (
+          !Number.isSafeInteger(response.task_version) ||
+          response.task_version < 0 ||
+          !Number.isSafeInteger(response.wait_remaining_ms) ||
+          response.wait_remaining_ms < 0
+        )
+          throw new RuntimeError("invalid_tool_result");
+        // 中心期限保持不变；每次响应重新估计，扣除该次请求的往返耗时。
+        waitUntil = requestStarted + response.wait_remaining_ms;
+      }
+      const runRemaining = RUN_MS - (this.timer.now() - this.started);
+      if (!initialCheck && runRemaining > 0) {
+        const waitMs = Math.min(
+          25_000,
+          waitUntil - this.timer.now(),
+          runRemaining,
+        );
+        if (
+          versioned &&
+          this.boot.local_wait_protocol === 1 &&
+          waitMs > 0
+        ) {
+          await this.rpc.call({
+            operation: "poll_wake",
+            payload: {
+              task_id: response.task_id,
+              after_version: response.task_version,
+              wait_ms: Math.max(1, Math.floor(waitMs)),
+            },
+          });
+        } else {
+          // 旧协议或本地预算耗尽时，短暂退避后再查询中心。
+          await this.timer.sleep(Math.min(250, runRemaining));
+        }
+      }
+      initialCheck = false;
       const finishWait = this.timer.now() - this.started >= RUN_MS;
       if (finishWait) this.stopAfterWait = true;
+      requestStarted = this.timer.now();
       response = await this.rpc.call({
         operation: "wait_tool",
         tool_call_id: call.id,
@@ -331,15 +373,8 @@ export class ProjectRuntime {
         ...(finishWait ? { payload: { finish_wait: true } } : {}),
       });
       if (this.timer.now() - this.started >= RUN_MS) this.stopAfterWait = true;
-      if (response?.pending === true) {
-        if (finishWait) throw new RuntimeError("invalid_tool_result");
-        await this.timer.sleep(
-          Math.max(
-            0,
-            Math.min(250, RUN_MS - (this.timer.now() - this.started)),
-          ),
-        );
-      }
+      if (response?.pending === true && finishWait)
+        throw new RuntimeError("invalid_tool_result");
     }
     const event = response as Event;
     if (!event || event.kind !== "tool_result" || event.seq <= this.seq)

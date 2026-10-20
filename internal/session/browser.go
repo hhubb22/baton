@@ -54,6 +54,11 @@ func (w *workerDB) sessionRequest(sessionID string, req protocol.SessionRequest)
 		result.Code = "unavailable"
 		return result
 	}
+	savedResult, err := w.resultLocked(w.db)
+	if err != nil {
+		result.Code = "unavailable"
+		return result
+	}
 	_, result.InputSupported = w.adapter.(agent.InputAdapter)
 	var stopped string
 	_ = w.db.QueryRow(`SELECT COALESCE((SELECT value FROM meta WHERE key='agent_stopped'),'0')`).Scan(&stopped)
@@ -62,7 +67,7 @@ func (w *workerDB) sessionRequest(sessionID string, req protocol.SessionRequest)
 		result.State = "stopped"
 	} else if w.recoveredUncertain || w.adapter == nil {
 		result.State = "unknown"
-	} else if !w.resultDelivered && !w.hasResultLocked() {
+	} else if !w.resultDelivered && savedResult == nil {
 		result.State = "running"
 	}
 	if req.Action == "validate_directory" {
@@ -108,7 +113,7 @@ func (w *workerDB) sessionRequest(sessionID string, req protocol.SessionRequest)
 			result.Code = "history_unavailable"
 			return result
 		}
-		if w.hasResultLocked() && !w.resultDelivered {
+		if savedResult != nil && !w.resultDelivered {
 			result.Code = "result_pending"
 			return result
 		}
@@ -198,7 +203,12 @@ func (w *workerDB) browserInputLocked(sessionID string, req protocol.SessionRequ
 		result.Code = "unsupported"
 		return result
 	}
-	if w.cancelled || w.resultDelivered || w.hasResultLocked() || w.recoveredUncertain || w.deliveryUncertain {
+	savedResult, err := w.resultLocked(w.db)
+	if err != nil {
+		result.Code = "unavailable"
+		return result
+	}
+	if w.cancelled || w.resultDelivered || savedResult != nil || w.recoveredUncertain || w.deliveryUncertain {
 		result.Code = "session_not_active"
 		return result
 	}

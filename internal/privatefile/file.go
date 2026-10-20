@@ -26,8 +26,12 @@ func ReadSnapshot(path string) ([]byte, error) {
 	return io.ReadAll(f)
 }
 
-// WriteFile 在受限临时文件中写入，再原子替换目标。
+// WriteFile 在受限临时文件中写入、同步，再原子替换目标；POSIX 同时同步父目录。
 func WriteFile(path string, data []byte) error {
+	return writeFile(path, data, syncParent)
+}
+
+func writeFile(path string, data []byte, syncDirectory func(string) error) error {
 	if err := checkPath(path); err != nil && !os.IsNotExist(err) {
 		return err
 	}
@@ -46,5 +50,8 @@ func WriteFile(path string, data []byte) error {
 	if err := f.Close(); err != nil {
 		return err
 	}
-	return replaceFile(f.Name(), path)
+	if err := replaceFile(f.Name(), path); err != nil {
+		return err
+	}
+	return syncDirectory(path)
 }

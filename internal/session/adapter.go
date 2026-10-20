@@ -14,6 +14,7 @@ import (
 	"baton/internal/agent/kiro"
 	"baton/internal/agent/pi"
 	"baton/internal/agent/shell"
+	"baton/internal/identity"
 	"baton/internal/task"
 )
 
@@ -101,8 +102,16 @@ func (w *workerDB) restoreAdapter(sessionID string) error {
 	if w.adapterFactory == nil || !w.inputSubmitted {
 		return nil
 	}
+	result, err := w.resultLocked(w.db)
+	if err != nil {
+		return err
+	}
+	savedResult := result != nil || w.resultDelivered
+	if savedResult {
+		w.recoveredUncertain, w.uncertainCode = false, ""
+	}
 	var agentType string
-	err := w.db.QueryRow(`SELECT value FROM meta WHERE key = 'agent_type'`).Scan(&agentType)
+	err = w.db.QueryRow(`SELECT value FROM meta WHERE key = 'agent_type'`).Scan(&agentType)
 	if err == nil {
 		w.adapter, err = w.adapterFactory(agentType, "")
 	}
@@ -116,9 +125,12 @@ func (w *workerDB) restoreAdapter(sessionID string) error {
 			_ = w.adapter.Close()
 			w.adapter = nil
 		}
-		if !w.hasResultLocked() && !w.resultDelivered {
+		if !savedResult {
 			w.recoveredUncertain, w.uncertainCode = true, task.CodeUncertainHistory
 		}
+		return nil
+	}
+	if savedResult {
 		return nil
 	}
 	return w.pollAdapterLocked(sessionID)
@@ -136,8 +148,10 @@ func (w *workerDB) readNativeHistory(cursor string) (agent.HistoryPage, error) {
 }
 
 func (w *workerDB) pollAdapterLocked(sessionID string) error {
-	if err := w.flushStopOutputLocked(); err != nil {
-		return err
+	if len(w.pendingOutputs) == 0 {
+		if err := w.flushStopOutputLocked(); err != nil {
+			return err
+		}
 	}
 	if w.adapter == nil {
 		return nil
@@ -149,39 +163,25 @@ func (w *workerDB) pollAdapterLocked(sessionID string) error {
 	if err := w.confirmNativeDeliveriesLocked(); err != nil {
 		return err
 	}
-	for _, out := range w.adapter.Drain() {
-		if len(out.Raw) > 0 {
-			if _, err := w.db.Exec(`INSERT INTO execution_log(kind,body,created_at) VALUES('native_event',?,?)`, string(out.Raw), time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+	if len(w.pendingOutputs) == 0 {
+		w.pendingOutputs = w.adapter.Drain()
+	}
+	for len(w.pendingOutputs) > 0 {
+		if w.pendingOutputID == "" {
+			id, err := identity.NewUUID()
+			if err != nil {
 				return err
 			}
+			w.pendingOutputID = id
 		}
-		if w.cancelled {
-			if candidate, err := task.ParseCandidate(out.Final); err == nil && candidate.CommandResult != nil {
-				w.pendingStopOutput = out.Final
-				if err := w.flushStopOutputLocked(); err != nil {
-					return err
-				}
-			}
-			continue
-		}
-		if w.hasResultLocked() || w.resultDelivered {
-			continue
-		}
-		if out.Final == "" && !out.Exited && !out.Uncertain && !out.WaitingForChildren && len(out.Progress) == 0 {
-			continue
-		}
-		if uncertain, err := w.finishNativeChecksLocked(); err != nil {
-			return err
-		} else if uncertain {
-			out = Output{Uncertain: true, Exited: out.Exited}
-		}
-		if _, err := w.recordExecution(sessionID, "", out); err != nil {
+		if err := w.saveOutputLocked(sessionID, "", w.pendingOutputs[0], w.pendingOutputID, true); err != nil {
 			return err
 		}
-		if !out.Uncertain && (out.Exited || out.WaitingForChildren) {
-			w.recoveredUncertain = false
-		}
+		w.pendingOutputs[0] = Output{}
+		w.pendingOutputs = w.pendingOutputs[1:]
+		w.pendingOutputID = ""
 	}
+	w.pendingOutputs = nil
 	if w.cancelled && w.stopReason != "" {
 		if observer, ok := w.adapter.(agent.StopObserver); ok {
 			if stopped, known := observer.StopStatus(); stopped {

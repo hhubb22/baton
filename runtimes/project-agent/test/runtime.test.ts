@@ -7,7 +7,7 @@ import { once } from "node:events";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { frames, writeFrame } from "../../shared/stdio.js";
 import { modelMessages, IDLE_MS, RUN_MS, RETRIES } from "../src/runtime.js";
-import { canonical } from "../src/protocol.js";
+import { canonical, RuntimeError } from "../src/protocol.js";
 import { Backend, setup, assistant, input } from "./fixture.js";
 import { toolDefinitions } from "../src/tools.js";
 
@@ -19,6 +19,7 @@ class ExecBackend extends Backend {
   accepted = false;
   waits: any[] = [];
   pendingCount = 2;
+  resultStatus = "completed";
   async call(req: any): Promise<any> {
     if (req.operation === "call_tool" && req.tool_name === "nodes.exec" && !this.events.some((event) => event.kind === "tool_result" && event.payload.message.toolCallId === req.tool_call_id)) {
       assert.equal(req.last_seq, this.events.length);
@@ -39,7 +40,7 @@ class ExecBackend extends Backend {
         kind: "tool_result" as const,
         payload: { format: "pi-ai/1", message: {
           role: "toolResult", toolCallId: "exec-1", toolName: "nodes.exec",
-          content: [{ type: "text", text: JSON.stringify({ task_id: "exec-task-1", status: req.payload?.finish_wait ? "running" : "completed" }) }],
+          content: [{ type: "text", text: JSON.stringify({ task_id: "exec-task-1", status: req.payload?.finish_wait ? "running" : this.resultStatus }) }],
           isError: false, timestamp: 0,
         } },
       };
@@ -49,6 +50,319 @@ class ExecBackend extends Backend {
     return super.call(req);
   }
 }
+
+class LocalWaitBackend extends ExecBackend {
+  localProtocol: number | undefined = 1;
+  centerProtocol: number | undefined = 1;
+  pendingCount = Infinity;
+  taskVersion = 7;
+  waitUntil = 30_000;
+  completeAt = 30_000;
+  requests: { request: any; at: number }[] = [];
+  sleeps: number[] = [];
+  onPoll?: (request: any) => Promise<any>;
+  remaining = () => Math.max(0, this.waitUntil - this.now);
+  boot() {
+    return { ...super.boot(), local_wait_protocol: this.localProtocol };
+  }
+  timer() {
+    return {
+      now: () => this.now,
+      sleep: async (ms: number) => {
+        this.sleeps.push(ms);
+        this.now += ms;
+      },
+    };
+  }
+  async call(req: any): Promise<any> {
+    this.requests.push({ request: structuredClone(req), at: this.now });
+    if (req.operation === "poll_wake" && req.payload.task_id) {
+      this.calls.push(req.operation);
+      assert.equal(req.payload.task_id, "exec-task-1");
+      assert.ok(Number.isInteger(req.payload.wait_ms));
+      assert.ok(req.payload.wait_ms >= 1 && req.payload.wait_ms <= 25_000);
+      if (this.onPoll) return this.onPoll(req);
+      this.now += req.payload.wait_ms;
+      return { reason: "timeout" };
+    }
+    if (req.operation === "wait_tool" && this.now >= this.completeAt)
+      this.pendingCount = 0;
+    const response = await super.call(req);
+    return response?.pending && this.centerProtocol === 1
+      ? { ...response, task_version: this.taskVersion,
+          wait_remaining_ms: this.remaining(), wait_protocol: 1 }
+      : response;
+  }
+  taskPolls() {
+    return this.requests.filter(({ request }) =>
+      request.operation === "poll_wake" && request.payload.task_id);
+  }
+  waitTimes() {
+    return this.requests.filter(({ request }) => request.operation === "wait_tool")
+      .map(({ at }) => at);
+  }
+}
+
+const execResponses = () => [() => fauxAssistantMessage([execCall()]), () => assistant()];
+
+test("本地等待丢失全部通知，30 秒 pending 仅做初始、周期和截止三次状态查询", async () => {
+  const backend = new LocalWaitBackend();
+  backend.resultStatus = "running";
+  const fixture = setup(backend, execResponses());
+  await fixture.runtime.start();
+  assert.equal(backend.effects, 1);
+  assert.deepEqual(backend.waitTimes(), [0, 25_000, 30_000]);
+  assert.deepEqual(backend.taskPolls().map(({ request }) => request.payload), [
+    { task_id: "exec-task-1", after_version: 7, wait_ms: 25_000 },
+    { task_id: "exec-task-1", after_version: 7, wait_ms: 5_000 },
+  ]);
+  assert.deepEqual(backend.sleeps, []);
+  assert.ok(backend.waits.every((request) => !request.payload));
+  assert.equal(fixture.faux.state.callCount, 2);
+  assert.equal(backend.events.filter((event) => event.kind === "tool_result").length, 1);
+  assert.match(backend.events.find((event) => event.kind === "tool_result")!.payload.message.content[0].text, /running/);
+  const idlePolls = backend.requests.filter(({ request }) =>
+    request.operation === "poll_wake" && !request.payload.task_id);
+  assert.ok(idlePolls.length > 0);
+  assert.ok(idlePolls.every(({ request }) => Object.keys(request.payload).join() === "wait_ms"));
+});
+
+test("中心或节点未声明新协议时沿用 250ms 查询，任务等待不消费通用 wake", async () => {
+  for (const [local, center] of [[undefined, undefined], [undefined, 1], [1, undefined], [2, 1]]) {
+    const backend = new LocalWaitBackend();
+    backend.localProtocol = local;
+    backend.centerProtocol = center;
+    const fixture = setup(backend, execResponses());
+    await fixture.runtime.start();
+    assert.equal(backend.taskPolls().length, 0);
+    assert.equal(backend.waits.length, 121);
+    assert.equal(backend.sleeps.length, 120);
+    assert.ok(backend.sleeps.every((ms) => ms === 250));
+    const lastWait = backend.requests.findLastIndex(({ request }) => request.operation === "wait_tool");
+    assert.ok(backend.requests.slice(0, lastWait).every(({ request }) => request.operation !== "poll_wake"));
+  }
+});
+
+test("初始短查询发现已完成任务时跳过本地等待", async () => {
+  const backend = new LocalWaitBackend();
+  backend.completeAt = 0;
+  await setup(backend, execResponses()).runtime.start();
+  assert.deepEqual(backend.waitTimes(), [0]);
+  assert.equal(backend.taskPolls().length, 0);
+  assert.deepEqual(backend.sleeps, []);
+});
+
+test("节点过滤重复和无关通知后，任务变化仍须查询中心并可继续 pending", async () => {
+  const backend = new LocalWaitBackend();
+  backend.waitUntil = 60_000;
+  backend.completeAt = 28_000;
+  const notifications = [
+    { at: 1_000, task_id: "other-task", version: 99 },
+    { at: 2_000, task_id: "exec-task-1", version: 7 },
+    { at: 3_000, task_id: "exec-task-1", version: 8 },
+    { at: 4_000, task_id: "exec-task-1", version: 8 },
+    { at: 5_000, task_id: "exec-task-1", version: 6 },
+    { at: 6_000, task_id: "other-task", version: 100 },
+  ];
+  backend.onPoll = async ({ payload }) => {
+    // 模拟节点过滤通知后的 IPC 边界，Runtime 只收到目标任务的新版本。
+    const until = backend.now + payload.wait_ms;
+    while (notifications.length && notifications[0].at <= until) {
+      const notification = notifications.shift()!;
+      backend.now = notification.at;
+      if (notification.task_id === payload.task_id && notification.version > payload.after_version) {
+        backend.taskVersion = notification.version;
+        return { reason: "task_changed", version: notification.version };
+      }
+    }
+    backend.now = until;
+    return { reason: "timeout" };
+  };
+  await setup(backend, execResponses()).runtime.start();
+  assert.deepEqual(backend.waitTimes(), [0, 3_000, 28_000]);
+  assert.deepEqual(backend.taskPolls().map(({ request }) => request.payload.after_version), [7, 8]);
+  assert.equal(backend.events.filter((event) => event.kind === "tool_result").length, 1);
+  assert.deepEqual(backend.sleeps, []);
+});
+
+test("丢失完成通知后在下个 25 秒周期补读终态", async () => {
+  const backend = new LocalWaitBackend();
+  backend.waitUntil = 60_000;
+  backend.completeAt = 26_000;
+  await setup(backend, execResponses()).runtime.start();
+  assert.deepEqual(backend.waitTimes(), [0, 25_000, 50_000]);
+  assert.equal(backend.taskPolls().length, 2);
+});
+
+test("首次请求延迟 1 秒、后续查询耗时 1ms 时重新同步预算并限制 30 秒等待的请求数", async () => {
+  for (const [local, center] of [[1, 1], [undefined, 1], [1, undefined]]) {
+    const backend = new LocalWaitBackend();
+    backend.localProtocol = local;
+    backend.centerProtocol = center;
+    // 中心在首次请求到达时建立 30 秒期限，此后保持不变。
+    backend.waitUntil = backend.completeAt = 31_000;
+    let nodeDeadline = Infinity;
+    backend.onPoll = async ({ payload }) => {
+      backend.now += Math.max(0, Math.min(payload.wait_ms, nodeDeadline - backend.now));
+      return { reason: "timeout" };
+    };
+    const call = backend.call.bind(backend);
+    backend.call = async (request) => {
+      const started = backend.now;
+      if (request.operation === "call_tool") backend.now += 1_000;
+      if (request.operation === "wait_tool") backend.now += 1;
+      const response = await call(request);
+      if (response?.pending && response.wait_protocol === 1)
+        nodeDeadline = started + response.wait_remaining_ms;
+      return response;
+    };
+    await setup(backend, execResponses()).runtime.start();
+    assert.ok(backend.waitTimes().at(-1)! >= backend.waitUntil);
+    assert.ok(backend.waits.every((request) => !request.payload));
+    assert.equal(backend.effects, 1);
+    if (local === 1 && center === 1) {
+      assert.ok(backend.waits.length <= 6, `状态查询次数过多: ${backend.waits.length}`);
+      assert.deepEqual(backend.taskPolls().map(({ request }) => request.payload.wait_ms), [25_000, 4_997]);
+      assert.deepEqual(backend.sleeps, []);
+    } else {
+      assert.equal(backend.taskPolls().length, 0);
+      assert.equal(backend.waits.length, 121);
+      assert.equal(backend.sleeps.length, 120);
+      assert.ok(backend.sleeps.every((ms) => ms === 250));
+    }
+  }
+});
+
+test("本地预算已耗尽而中心仍 pending 时每次退避 250ms，由中心裁决结果", async () => {
+  for (const local of [1, undefined]) {
+    const backend = new LocalWaitBackend();
+    backend.localProtocol = local;
+    backend.remaining = () => 0;
+    backend.completeAt = 500;
+    await setup(backend, execResponses()).runtime.start();
+    assert.deepEqual(backend.waitTimes(), [0, 250, 500]);
+    assert.equal(backend.taskPolls().length, 0);
+    assert.deepEqual(backend.sleeps, [250, 250]);
+    assert.ok(backend.waits.every((request) => !request.payload));
+  }
+});
+
+test("预算耗尽后的退避受剩余运行预算限制，到期使用 finish_wait", async () => {
+  const backend = new LocalWaitBackend();
+  backend.remaining = () => 0;
+  backend.completeAt = Infinity;
+  const call = backend.call.bind(backend);
+  backend.call = async (request) => {
+    const response = await call(request);
+    if (request.operation === "call_tool") backend.now = RUN_MS - 100;
+    return response;
+  };
+  const fixture = setup(backend, execResponses());
+  await fixture.runtime.start();
+  assert.equal(backend.now, RUN_MS);
+  assert.deepEqual(backend.sleeps, [100]);
+  assert.equal(backend.taskPolls().length, 0);
+  assert.deepEqual(backend.waits.map((request) => request.payload), [undefined, { finish_wait: true }]);
+  assert.equal(fixture.faux.state.callCount, 1);
+  assert.deepEqual(backend.requests.at(-1)?.request, { operation: "finish", last_seq: 3, reason: "run_limit" });
+});
+
+test("新 pending 协议拒绝非法版本和剩余预算", async () => {
+  for (const fields of [
+    { task_version: -1 }, { task_version: 0.5 }, { task_version: "7" },
+    { wait_remaining_ms: -1 }, { wait_remaining_ms: 0.5 },
+    { wait_remaining_ms: undefined }, { wait_remaining_ms: Infinity },
+  ]) {
+    const backend = new LocalWaitBackend();
+    const call = backend.call.bind(backend);
+    backend.call = async (request) => {
+      const response = await call(request);
+      return response?.pending ? { ...response, ...fields } : response;
+    };
+    await assert.rejects(setup(backend, execResponses()).runtime.start(), { code: "invalid_tool_result" });
+    assert.equal(backend.waits.length, 0);
+    assert.equal(backend.taskPolls().length, 0);
+    assert.equal(backend.events.at(-1)?.kind, "assistant");
+  }
+});
+
+test("本地新协议在运行期限保存当前状态，恢复和普通执行均停止后续工具与模型", async () => {
+  for (const recovery of [false, true]) {
+    const backend = new LocalWaitBackend();
+    backend.completeAt = Infinity;
+    backend.waitUntil = RUN_MS + 60_000;
+    const message = fauxAssistantMessage([execCall(), fauxToolCall("devices.list", {}, { id: "later-tool" })]);
+    if (recovery) {
+      backend.queue = false;
+      backend.events.push(input(), { seq: 2, kind: "assistant", payload: { format: "pi-ai/1", message } });
+    }
+    const call = backend.call.bind(backend);
+    backend.call = async (request) => {
+      const result = await call(request);
+      if (request.operation === "call_tool") backend.now = RUN_MS - 100;
+      return result;
+    };
+    const fixture = setup(backend, [() => message]);
+    await fixture.runtime.start();
+    assert.equal(backend.now, RUN_MS);
+    assert.deepEqual(backend.taskPolls().map(({ request }) => request.payload.wait_ms), [100]);
+    assert.deepEqual(backend.waits.map((request) => request.payload), [undefined, { finish_wait: true }]);
+    assert.equal(backend.effects, 1);
+    assert.equal(fixture.faux.state.callCount, recovery ? 0 : 1);
+    assert.deepEqual(backend.requests.at(-1)?.request, { operation: "finish", last_seq: 3, reason: "run_limit" });
+    assert.ok(!backend.calls.includes("tasks.cancel"));
+  }
+});
+
+test("运行期限已到或状态请求跨过期限时跳过本地等待并保留 finish_wait", async () => {
+  for (const phase of ["call_tool", "wait_tool"]) {
+    const backend = new LocalWaitBackend();
+    backend.completeAt = Infinity;
+    const call = backend.call.bind(backend);
+    backend.call = async (request) => {
+      const result = await call(request);
+      if (request.operation === phase) backend.now = RUN_MS;
+      return result;
+    };
+    const fixture = setup(backend, execResponses());
+    await fixture.runtime.start();
+    assert.equal(backend.taskPolls().length, 0);
+    assert.deepEqual(backend.waits.at(-1).payload, { finish_wait: true });
+    assert.equal(fixture.faux.state.callCount, 1);
+  }
+});
+
+test("任务变化通知可无 version，取消结果由中心保存后返回模型", async () => {
+  const backend = new LocalWaitBackend();
+  backend.completeAt = 1_000;
+  backend.resultStatus = "cancelled";
+  backend.onPoll = async () => {
+    backend.now += 1_000;
+    return { reason: "task_changed" };
+  };
+  const fixture = setup(backend, execResponses());
+  await fixture.runtime.start();
+  assert.deepEqual(backend.waitTimes(), [0, 1_000]);
+  assert.match(backend.events.find((event) => event.kind === "tool_result")!.payload.message.content[0].text, /cancelled/);
+  assert.equal(fixture.faux.state.callCount, 2);
+});
+
+test("等待被停止或租约丢失时直接退出，不写工具结果或 finish", async () => {
+  for (const phase of ["poll_wake", "wait_tool"]) {
+    const backend = new LocalWaitBackend();
+    const call = backend.call.bind(backend);
+    backend.call = async (request) => {
+      if (request.operation === phase && (phase === "poll_wake" || backend.taskPolls().length > 0))
+        throw new RuntimeError(phase === "poll_wake" ? "aborted" : "lease_lost");
+      return call(request);
+    };
+    await assert.rejects(setup(backend, execResponses()).runtime.start(),
+      { code: phase === "poll_wake" ? "aborted" : "lease_lost" });
+    assert.equal(backend.events.at(-1)?.kind, "assistant");
+    assert.ok(!backend.calls.includes("finish"));
+    assert.ok(!backend.calls.includes("tasks.cancel"));
+  }
+});
 
 test("nodes.exec 工具声明等待范围、默认时限和执行权限", () => {
   const definition = toolDefinitions.find((tool) => tool.name === "nodes.exec")!;

@@ -11,14 +11,20 @@ const (
 	MaxProjectRuntimeBytes    = 192 << 10
 )
 
+type ProjectTaskUpdate struct {
+	TaskID  string `json:"task_id"`
+	Version int64  `json:"version"`
+}
+
 type ProjectRunCommand struct {
-	Type           string `json:"type"`
-	RunID          string `json:"run_id"`
-	LeaseEpoch     int64  `json:"lease_epoch"`
-	Provider       string `json:"provider,omitempty"`
-	Model          string `json:"model,omitempty"`
-	ProjectID      string `json:"project_id,omitempty"`
-	ConversationID string `json:"conversation_id,omitempty"`
+	Type           string              `json:"type"`
+	RunID          string              `json:"run_id"`
+	LeaseEpoch     int64               `json:"lease_epoch"`
+	Provider       string              `json:"provider,omitempty"`
+	Model          string              `json:"model,omitempty"`
+	ProjectID      string              `json:"project_id,omitempty"`
+	ConversationID string              `json:"conversation_id,omitempty"`
+	TaskUpdates    []ProjectTaskUpdate `json:"task_updates,omitempty"`
 }
 
 // ProjectRuntimeRequest 的运行身份由 batond 根据私有 IPC 绑定填写。

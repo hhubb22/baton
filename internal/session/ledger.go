@@ -72,6 +72,8 @@ type workerDB struct {
 	stopReason         string
 	stopReported       bool
 	pendingStopOutput  string
+	pendingOutputs     []Output
+	pendingOutputID    string
 	sessionID          string
 	inputSentAt        time.Time
 	inputDelay         time.Duration
@@ -111,6 +113,10 @@ func openWorkerDB(path string, observer *Observer) (*workerDB, error) {
 	if err := ensureChildSchema(w); err != nil {
 		db.Close()
 		return nil, err
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS execution_log_output_commit ON execution_log(body) WHERE kind='output_commit'`); err != nil {
+		db.Close()
+		return nil, classifyLedgerErr(err)
 	}
 	if err := w.load(); err != nil {
 		db.Close()
@@ -185,7 +191,11 @@ func (w *workerDB) load() error {
 	if _, err := w.db.Exec(`DELETE FROM native_delivery_checks`); err != nil {
 		return err
 	}
-	if w.hasResultLocked() {
+	hasResult, err := w.resultLocked(w.db)
+	if err != nil {
+		return err
+	}
+	if hasResult != nil {
 		w.inputResolved = true
 	} else if w.cancelled {
 		w.inputResolved = true
@@ -200,12 +210,28 @@ func (w *workerDB) load() error {
 	return nil
 }
 
-func (w *workerDB) hasResultLocked() bool {
-	var n int
-	if err := w.db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE kind = ? AND json_extract(payload, '$.input_generation') = ?`, protocol.ReportResult, w.generation).Scan(&n); err != nil {
-		return false
+type resultReader interface {
+	QueryRow(string, ...any) *sql.Row
+}
+
+// resultLocked reads the original report, including reports already acknowledged.
+func (w *workerDB) resultLocked(db resultReader) (*protocol.ExecutionReport, error) {
+	var body string
+	err := db.QueryRow(`SELECT payload FROM outbox WHERE kind = ?
+		AND json_extract(payload, '$.execution_id') = ?
+		AND json_extract(payload, '$.input_generation') = ? ORDER BY rowid LIMIT 1`,
+		protocol.ReportResult, w.execution, w.generation).Scan(&body)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
 	}
-	return n > 0
+	if err != nil {
+		return nil, err
+	}
+	var report protocol.ExecutionReport
+	if err := json.Unmarshal([]byte(body), &report); err != nil {
+		return nil, err
+	}
+	return &report, nil
 }
 
 func (w *workerDB) Bind(taskID, executionID, agentType string) error {
@@ -467,6 +493,16 @@ func (w *workerDB) SubmitInput(sessionID, payload string) ([]ipcReport, error) {
 	if w.cancelled {
 		return w.pendingLocked()
 	}
+	result, err := w.resultLocked(w.db)
+	if err != nil {
+		return nil, err
+	}
+	if result != nil || w.resultDelivered {
+		if err := w.refreshOutputStateLocked(""); err != nil {
+			return nil, err
+		}
+		return w.pendingLocked()
+	}
 	if reason, err := w.deadlineReasonLocked(); err != nil {
 		return nil, err
 	} else if reason != "" {
@@ -611,17 +647,24 @@ func (w *workerDB) failInputLocked(sessionID string, candidate task.Candidate) (
 }
 
 func (w *workerDB) recordExecution(sessionID, payload string, out Output) ([]ipcReport, error) {
-	if w.adapter == nil {
-		for _, text := range out.Progress {
-			w.appendLiveLocked(text+"\n", false)
-		}
-		w.appendLiveLocked(out.Final, false)
-	}
-	tx, err := w.db.Begin()
+	id, err := identity.NewUUID()
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = tx.Rollback() }()
+	if err := w.saveOutputLocked(sessionID, payload, out, id, false); err != nil {
+		return nil, err
+	}
+	return w.pendingLocked()
+}
+
+func (w *workerDB) recordExecutionTx(tx *sql.Tx, sessionID, payload string, out Output) error {
+	result, err := w.resultLocked(tx)
+	if err != nil {
+		return err
+	}
+	if result != nil || w.resultDelivered {
+		return nil
+	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	delay, err := json.Marshal(struct {
 		DueAt   time.Time `json:"due_at"`
@@ -629,29 +672,29 @@ func (w *workerDB) recordExecution(sessionID, payload string, out Output) ([]ipc
 		DelayMS int64     `json:"delay_ms"`
 	}{w.inputDueAt, w.inputSentAt, w.inputDelay.Milliseconds()})
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if err := insertLog(tx, "input_dispatch", string(delay), now); err != nil {
-		return nil, err
+		return err
 	}
 	if payload != "" {
 		if err := insertLog(tx, "input", payload, now); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	for _, line := range out.Progress {
 		if err := insertLog(tx, "progress", line, now); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	var startedRecorded bool
 	if err := tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM outbox WHERE kind = ?)`, protocol.ReportStarted).Scan(&startedRecorded); err != nil {
-		return nil, err
+		return err
 	}
 	if w.generation == 1 && !startedRecorded {
 		startedID, err := identity.NewUUID()
 		if err != nil {
-			return nil, err
+			return err
 		}
 		started, err := json.Marshal(protocol.ExecutionReport{
 			ExecutionElapsedMS: w.inputDelay.Milliseconds(),
@@ -661,15 +704,15 @@ func (w *workerDB) recordExecution(sessionID, payload string, out Output) ([]ipc
 			SessionID: sessionID, Kind: protocol.ReportStarted, InputGeneration: w.generation, Status: task.StatusRunning,
 		})
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if err := insertOutbox(tx, startedID, protocol.ReportStarted, started); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	if out.Final != "" {
 		if err := insertLog(tx, "output", out.Final, now); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	if out.Exited || out.Uncertain || out.Final != "" {
@@ -677,68 +720,73 @@ func (w *workerDB) recordExecution(sessionID, payload string, out Output) ([]ipc
 		if parsed, err := task.ParseCandidate(out.Final); err == nil {
 			raw, err := json.Marshal(parsed)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			if err := putMeta(tx, "candidate_generation", fmt.Sprint(w.generation)); err != nil {
-				return nil, err
+				return err
 			}
 			if err := putMeta(tx, "candidate", string(raw)); err != nil {
-				return nil, err
+				return err
 			}
 			if parsed.Status == task.StatusCompleted && !out.Exited && !out.Uncertain {
 				candidate = task.Candidate{}
 			}
 		} else if out.Exited && out.Final == "" && !out.Uncertain {
 			var saved, generation string
-			if err := tx.QueryRow(`SELECT value FROM meta WHERE key = 'candidate_generation'`).Scan(&generation); err == nil && generation == fmt.Sprint(w.generation) {
-				if err := tx.QueryRow(`SELECT value FROM meta WHERE key = 'candidate'`).Scan(&saved); err == nil {
-					if err := json.Unmarshal([]byte(saved), &candidate); err != nil {
-						return nil, err
-					}
+			err := tx.QueryRow(`SELECT value FROM meta WHERE key = 'candidate_generation'`).Scan(&generation)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			if err == nil && generation == fmt.Sprint(w.generation) {
+				if err := tx.QueryRow(`SELECT value FROM meta WHERE key = 'candidate'`).Scan(&saved); err != nil {
+					return err
+				}
+				if err := json.Unmarshal([]byte(saved), &candidate); err != nil {
+					return err
 				}
 			}
 		}
 		if candidate.Status != "" {
 			resultID, err := identity.NewUUID()
 			if err != nil {
-				return nil, err
+				return err
 			}
 			body, err := json.Marshal(reportFromCandidate(resultID, w.task, w.execution, sessionID, w.generation, candidate, out.Exited || (out.Uncertain && w.adapter == nil)))
 			if err != nil {
-				return nil, err
+				return err
 			}
 			if err := insertOutbox(tx, resultID, protocol.ReportResult, body); err != nil {
-				return nil, err
+				return err
 			}
 		}
 	}
 	if err := putMeta(tx, "input_resolved", "1"); err != nil {
-		return nil, err
+		return err
 	}
 	waiting := "0"
 	if out.WaitingForChildren {
 		waiting = "1"
 	}
 	if err := putMeta(tx, "waiting_children", waiting); err != nil {
-		return nil, err
+		return err
 	}
 	stopped := "0"
 	if out.Exited || (out.Uncertain && w.adapter == nil) {
 		stopped = "1"
 	}
 	if err := putMeta(tx, "agent_stopped", stopped); err != nil {
-		return nil, err
+		return err
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	w.inputResolved = true
-	return w.pendingLocked()
+	return nil
 }
 
 func terminalCandidate(out Output) task.Candidate {
 	if out.Uncertain {
-		return task.FormatFailure(true)
+		candidate := task.FormatFailure(true)
+		if parsed, err := task.ParseCandidate(out.Final); err == nil {
+			candidate.CommandResult = parsed.CommandResult
+		}
+		return candidate
 	}
 	if !out.Exited && out.Final == "" {
 		return task.Candidate{}

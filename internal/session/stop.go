@@ -12,8 +12,12 @@ import (
 )
 
 func (w *workerDB) deadlineReasonLocked() (string, error) {
-	if !w.intent || w.executionBudget <= 0 || w.cancelled || w.hasResultLocked() {
+	if !w.intent || w.executionBudget <= 0 || w.cancelled {
 		return "", nil
+	}
+	result, err := w.resultLocked(w.db)
+	if err != nil || result != nil {
+		return "", err
 	}
 	mono, err := w.executionClock.Mono()
 	if err != nil {
@@ -99,15 +103,11 @@ func (w *workerDB) stopLocked(sessionID, reason string) ([]ipcReport, error) {
 	}
 	notStarted := !w.inputSubmitted && !w.recoveredUncertain
 	stopped, known := notStarted, notStarted
-	if w.hasResultLocked() {
-		var payload string
-		if err := w.db.QueryRow(`SELECT payload FROM outbox WHERE kind = ? ORDER BY rowid DESC LIMIT 1`, protocol.ReportResult).Scan(&payload); err != nil {
-			return nil, err
-		}
-		var result protocol.ExecutionReport
-		if err := json.Unmarshal([]byte(payload), &result); err != nil {
-			return nil, err
-		}
+	result, err := w.resultLocked(w.db)
+	if err != nil {
+		return nil, err
+	}
+	if result != nil {
 		stopped = result.AgentStopped
 		known = stopped && (result.Status == task.StatusCompleted || result.Status == task.StatusFailed)
 		notStarted = false
@@ -132,22 +132,42 @@ func (w *workerDB) flushStopOutputLocked() error {
 	if w.pendingStopOutput == "" {
 		return nil
 	}
-	tx, err := w.db.Begin()
+	conn, tx, err := w.beginOutputTx()
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
-	if err := putMeta(tx, "stop_output", w.pendingStopOutput); err != nil {
+	defer rollbackOutputTx(conn, tx)
+	output := w.pendingStopOutput
+	if err := w.writeStopOutputTx(tx); err != nil {
 		return err
 	}
-	if err := insertLog(tx, "output", w.pendingStopOutput, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
+	if err := commitOutputTx(conn, tx, func() (bool, error) {
+		var saved string
+		err := w.db.QueryRow(`SELECT value FROM meta WHERE key='stop_output'`).Scan(&saved)
+		return saved == output, err
+	}); err != nil {
 		return err
 	}
 	w.pendingStopOutput = ""
 	return nil
+}
+
+func (w *workerDB) writeStopOutputTx(tx *sql.Tx) error {
+	if w.pendingStopOutput == "" {
+		return nil
+	}
+	var saved string
+	err := tx.QueryRow(`SELECT value FROM meta WHERE key='stop_output'`).Scan(&saved)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if saved == w.pendingStopOutput {
+		return nil
+	}
+	if err := putMeta(tx, "stop_output", w.pendingStopOutput); err != nil {
+		return err
+	}
+	return insertLog(tx, "output", w.pendingStopOutput, time.Now().UTC().Format(time.RFC3339Nano))
 }
 
 func (w *workerDB) stoppedCommandResultLocked() (*task.CommandResult, error) {

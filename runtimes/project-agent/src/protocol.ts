@@ -16,6 +16,7 @@ export interface Bootstrap {
   compaction?: Event;
   compaction_seq?: number;
   goal_utf8_base64?: string;
+  local_wait_protocol?: number;
   after_seq: number;
   last_seq: number;
 }

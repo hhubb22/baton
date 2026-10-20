@@ -5,6 +5,7 @@ package privatefile
 import (
 	"errors"
 	"os"
+	"path/filepath"
 
 	"golang.org/x/sys/unix"
 )
@@ -45,6 +46,15 @@ func OpenSnapshot(path string) (*os.File, error) {
 
 func replaceFile(source, target string) error {
 	return os.Rename(source, target)
+}
+
+func syncParent(path string) error {
+	dir, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
 }
 
 func CreateTemp(dir, prefix string) (*os.File, error) {

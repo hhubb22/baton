@@ -327,7 +327,7 @@ Pi 中止先 clear_queue，再 abort，并观察是否真的 settled。Codex 使
 | Codex | app-server stdio；Session 对应 thread，执行输入对应 turn | 用 turn/completed 及结构化输出核对结果；clientUserMessageId 只作关联，未验证前不作为幂等保障。固定并检查协议版本 |
 | Cursor Agent | 基于 print + stream-json + 显式 resume 的已观测单轮路径评估适配 | 以 result 事件结束单轮；resume 是新模型回合，不能自动重发不确定输入。活动输入、停止独立 shell 和指定模型 ACP 仍有缺口，不按完整双向适配宣传 |
 | Kiro | 基于 kiro-cli acp --agent-engine=v3 的已观测接口评估适配 | 未完成 prompt 由 Worker 串行；恢复前核对 ID 已存在；取消结合 prompt 响应与本次前台进程证据，保留后台进程未知，不降低首版目标 |
-| shell | Worker 内置执行器，不启动 Agent；用节点上报的 shell 执行 Project Agent 的一条命令（2026-10-18 修订） | 退出码 0 为完成，否则失败；输出保留开头和结尾各 16 KiB；取消和超时终止整个进程组；细节见 Project Agent TECH 第 10 节 |
+| shell | Worker 内置执行器，用节点上报的 shell 执行 Project Agent 的一条命令 | 退出码 0 为完成，否则失败；输出保留开头和结尾各 16 KiB；取消和超时终止整个进程组；完成记录可恢复并补送，缺少可靠证据时待核实；细节见 Project Agent TECH 第 10 节 |
 
 Pi 与 Codex 的 Baton 无设备全流程验证仍待实施。Cursor 和 Kiro 已有本机接口调查作为适配输入；调查顺序不改变四类 Agent 和三类 PC 的首版范围。
 

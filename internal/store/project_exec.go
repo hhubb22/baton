@@ -15,8 +15,19 @@ import (
 )
 
 type projectToolPending struct {
-	Pending bool   `json:"pending"`
-	TaskID  string `json:"task_id"`
+	Pending         bool   `json:"pending"`
+	TaskID          string `json:"task_id"`
+	TaskVersion     int64  `json:"task_version"`
+	WaitRemainingMS int64  `json:"wait_remaining_ms"`
+	WaitProtocol    int    `json:"wait_protocol"`
+}
+
+const projectWaitRemainingSQL = `GREATEST(0,FLOOR(EXTRACT(EPOCH FROM (exec_wait_until-clock_timestamp()))*1000))::bigint`
+
+func readProjectToolPending(ctx context.Context, tx pgx.Tx, id string) (projectToolPending, error) {
+	p := projectToolPending{Pending: true, TaskID: id, WaitProtocol: 1}
+	err := tx.QueryRow(ctx, `SELECT version,`+projectWaitRemainingSQL+` FROM tasks WHERE id=$1`, id).Scan(&p.TaskVersion, &p.WaitRemainingMS)
+	return p, err
 }
 
 func (s *Store) dispatchProjectExec(ctx context.Context, tx pgx.Tx, b projectRunBinding, callID string, a toolArguments) (any, error) {
@@ -37,7 +48,7 @@ func (s *Store) dispatchProjectExec(ctx context.Context, tx pgx.Tx, b projectRun
 	var id string
 	err := tx.QueryRow(ctx, `SELECT id::text FROM tasks WHERE employee_id=$1 AND origin_conversation_id=$2 AND origin_tool_call_id=$3 FOR UPDATE`, b.owner, b.conversationID, callID).Scan(&id)
 	if err == nil {
-		return projectToolPending{true, id}, nil
+		return readProjectToolPending(ctx, tx, id)
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
@@ -53,7 +64,10 @@ func (s *Store) dispatchProjectExec(ctx context.Context, tx pgx.Tx, b projectRun
 		return nil, err
 	}
 	_, err = tx.Exec(ctx, `UPDATE tasks SET project_id=$2,origin_conversation_id=$3,origin_tool_call_id=$4,exec_wait_until=clock_timestamp()+$5*interval '1 second' WHERE id=$1`, rec.TaskID, b.projectID, b.conversationID, callID, wait)
-	return projectToolPending{true, rec.TaskID}, err
+	if err != nil {
+		return nil, err
+	}
+	return readProjectToolPending(ctx, tx, rec.TaskID)
 }
 
 // shell 能力独立于执行 Agent 列表，按本节点最新的显式开启报告判断。
@@ -92,6 +106,9 @@ func (s *Store) waitProjectTool(ctx context.Context, tx pgx.Tx, b projectRunBind
 	if len(req.Payload) > 0 && protocol.DecodeRuntimeJSON(req.Payload, &force) != nil {
 		return nil, projectagent.ErrInvalid
 	}
+	if err = validateProjectExecCall(ctx, tx, b, req.ToolCallID); err != nil {
+		return nil, err
+	}
 	// 与终态写入共用任务行锁；输入队列只在这之后加锁。
 	var id, status string
 	var version int64
@@ -108,12 +125,13 @@ func (s *Store) waitProjectTool(ctx context.Context, tx pgx.Tx, b projectRunBind
 	}
 	terminal := status == task.StatusCompleted || status == task.StatusFailed || status == task.StatusCancelled
 	var expired bool
-	if err = tx.QueryRow(ctx, `SELECT clock_timestamp()>=$1`, deadline).Scan(&expired); err != nil {
+	var remaining int64
+	if err = tx.QueryRow(ctx, `SELECT clock_timestamp()>=$1,GREATEST(0,FLOOR(EXTRACT(EPOCH FROM ($1::timestamptz-clock_timestamp()))*1000))::bigint`, deadline).Scan(&expired, &remaining); err != nil {
 		return nil, err
 	}
 	uncertain := status == task.StatusNeedsVerification
 	if !terminal && !uncertain && !expired && !force.Finish {
-		return projectToolPending{true, id}, nil
+		return projectToolPending{Pending: true, TaskID: id, TaskVersion: version, WaitRemainingMS: remaining, WaitProtocol: 1}, nil
 	}
 	output := map[string]any{"task_id": id, "status": status, "read_tool": "tasks.get"}
 	if len(operation) > 0 {

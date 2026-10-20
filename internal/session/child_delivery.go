@@ -35,6 +35,11 @@ func (w *workerDB) ReceiveChild(sessionID string, delivery protocol.ChildDeliver
 	if delivery.TaskID != w.task || delivery.ExecutionID != w.execution || delivery.SessionID != sessionID || !json.Valid(delivery.Result) || len(delivery.Result) > task.ExecutorInputLimit {
 		return errors.New("交付上下文不匹配")
 	}
+	if len(w.pendingOutputs) > 0 {
+		if err := w.pollAdapterLocked(sessionID); err != nil {
+			return err
+		}
+	}
 	inserted, err := w.db.Exec(`INSERT INTO child_deliveries (delivery_id, child_task_id, payload, status)
       VALUES (?, ?, ?, 'available') ON CONFLICT (delivery_id) DO NOTHING`, delivery.DeliveryID, delivery.ChildTaskID, string(delivery.Result))
 	if err != nil {

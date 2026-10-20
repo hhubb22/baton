@@ -510,7 +510,7 @@ func insertReportEvent(ctx context.Context, tx pgx.Tx, in ExecutionReport, head 
 	if err := syncTaskAttention(ctx, tx, in.EmployeeID, in.TaskID, head.status); err != nil {
 		return err
 	}
-	if kind == task.EventResult || kind == task.EventStopReport {
+	if kind == task.EventResult || kind == task.EventStopReport || kind == task.EventNeedsVerification {
 		return enqueueTaskTerminal(ctx, tx, in.EmployeeID, in.TaskID)
 	}
 	return nil

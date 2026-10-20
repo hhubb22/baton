@@ -52,7 +52,7 @@ func insertProjectInput(ctx context.Context, tx pgx.Tx, employeeID, agentID, kin
 	return err
 }
 
-// ProjectTaskResultInput 保存任务终态的限长通知。
+// ProjectTaskResultInput 保存任务结果或待核实状态的限长通知。
 type ProjectTaskResultInput struct {
 	CommandResult    *task.CommandResult `json:"command_result,omitempty"`
 	UserOperation    json.RawMessage     `json:"user_operation,omitempty"`
@@ -155,7 +155,7 @@ func enqueueProjectTaskUpdate(ctx context.Context, tx pgx.Tx, employeeID, taskID
 	var command *task.CommandResult
 	err := tx.QueryRow(ctx, `SELECT a.id::text,t.status,t.version,t.summary,t.error_message,t.origin_conversation_id IS NULL,t.user_operation,t.command_result
  FROM tasks t JOIN project_agents a ON a.project_id=t.project_id AND a.employee_id=t.employee_id
- WHERE t.employee_id=$1 AND t.id=$2 AND (t.status IN ('completed','failed','cancelled') OR $3 OR (t.status='needs_verification' AND t.command_result IS NOT NULL))`, employeeID, taskID, includeNonterminal).Scan(&agentID, &status, &version, &summary, &message, &passive, &operation, &command)
+ WHERE t.employee_id=$1 AND t.id=$2 AND (t.status IN ('completed','failed','cancelled','needs_verification') OR $3)`, employeeID, taskID, includeNonterminal).Scan(&agentID, &status, &version, &summary, &message, &passive, &operation, &command)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}

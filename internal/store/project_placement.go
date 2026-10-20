@@ -204,27 +204,68 @@ func (s *Store) scheduleProjectRun(ctx context.Context, agentID string) error {
 }
 
 func (s *Store) ProjectRunCommands(ctx context.Context) ([]projectagent.RunCommand, error) {
+	// 游标只用于轮换提示，不确认交付；重启后仍从全部未交付输入生成提示。
+	s.projectWakeMu.Lock()
+	defer s.projectWakeMu.Unlock()
+	after, err := protocol.MarshalJSON(s.projectWakeAfter)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.pool.Query(ctx, `SELECT r.id::text,r.node_id::text,p.conn_id,r.lease_epoch,r.provider,r.model,a.project_id::text,c.id::text,
  CASE WHEN a.lease_run_id IS DISTINCT FROM r.id OR a.lease_until<=clock_timestamp() OR pr.status<>'active' THEN 'project_run_stop'
- WHEN r.state='starting' THEN 'project_run_start' ELSE 'project_run_wake' END
+ WHEN r.state='starting' THEN 'project_run_start' ELSE 'project_run_wake' END,
+ COALESCE((SELECT jsonb_agg(u) FROM (
+ SELECT q.payload->>'task_id' AS task_id,max((q.payload->>'version')::bigint) AS version
+ FROM project_agent_input_queue q WHERE q.agent_id=a.id AND q.delivered_seq IS NULL
+ AND q.source_type IN ('task_result','user_task_result')
+ GROUP BY q.payload->>'task_id'
+ ORDER BY (q.payload->>'task_id'<=COALESCE($1::jsonb->>r.id::text,'')),q.payload->>'task_id' LIMIT 32
+ ) u),'[]'::jsonb)
  FROM agent_runs r JOIN project_agents a ON a.id=r.agent_id JOIN projects pr ON pr.id=a.project_id JOIN conversations c ON c.agent_id=a.id
  JOIN node_presence p ON p.node_id=r.node_id WHERE p.online AND p.synced AND
  ((r.stop_acked_at IS NULL AND (a.lease_run_id IS DISTINCT FROM r.id OR a.lease_until<=clock_timestamp() OR pr.status<>'active')) OR
  (a.lease_run_id=r.id AND a.lease_until>clock_timestamp() AND (r.state='starting' OR EXISTS
- (SELECT 1 FROM project_agent_input_queue q WHERE q.agent_id=a.id AND delivered_seq IS NULL AND source_type IN ('user_message','task_result','attention_answer'))))) ORDER BY r.started_at LIMIT 100`)
+ (SELECT 1 FROM project_agent_input_queue q WHERE q.agent_id=a.id AND delivered_seq IS NULL AND source_type IN ('user_message','task_result','attention_answer'))))) ORDER BY r.started_at LIMIT 100`, after)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []projectagent.RunCommand{}
+	next := make(map[string]string)
 	for rows.Next() {
 		var c projectagent.RunCommand
-		if err = rows.Scan(&c.Command.RunID, &c.NodeID, &c.ConnID, &c.Command.LeaseEpoch, &c.Command.Provider, &c.Command.Model, &c.Command.ProjectID, &c.Command.ConversationID, &c.Command.Type); err != nil {
+		var updates []byte
+		if err = rows.Scan(&c.Command.RunID, &c.NodeID, &c.ConnID, &c.Command.LeaseEpoch, &c.Command.Provider, &c.Command.Model, &c.Command.ProjectID, &c.Command.ConversationID, &c.Command.Type, &updates); err != nil {
 			return nil, err
+		}
+		if c.Command.Type == protocol.BodyProjectRunWake {
+			if err = json.Unmarshal(updates, &c.Command.TaskUpdates); err != nil {
+				return nil, err
+			}
+			for {
+				raw, err := protocol.MarshalJSON(c.Command)
+				if err != nil {
+					return nil, err
+				}
+				if len(raw) <= protocol.MaxProjectRuntimeBytes-1024 {
+					break
+				}
+				if len(c.Command.TaskUpdates) == 0 {
+					return nil, projectagent.ErrTooLarge
+				}
+				c.Command.TaskUpdates = c.Command.TaskUpdates[:len(c.Command.TaskUpdates)-1]
+			}
+			if n := len(c.Command.TaskUpdates); n > 0 {
+				next[c.Command.RunID] = c.Command.TaskUpdates[n-1].TaskID
+			}
 		}
 		out = append(out, c)
 	}
-	return out, rows.Err()
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	s.projectWakeAfter = next
+	return out, nil
 }
 
 func (s *Store) RetryProject(ctx context.Context, owner, projectID string) error {

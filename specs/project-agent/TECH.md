@@ -73,6 +73,8 @@ batond 优先使用 bundle，通过 Node 直接运行 manifest 中的入口，�
 
 batond 设置 `BATON_SIDECAR_TRANSPORT=stdio` 后，Runtime 在 stdout 发送 `{id, request}`，在 stdin 接收 `{id, result}`，每个对象占一行 UTF-8 JSON，单帧最多 192 KiB，最多 8 个请求在途。运行身份由专用管道绑定，batond 继续覆盖请求身份。带 token 的本地 IPC 继续兼容。`poll_wake` 可在 payload 中指定 `wait_ms`（1～25000），使 180 秒闲置和 15 分钟上限在最后一次等待时准确结束。
 
+bootstrap 顶层的 `local_wait_protocol:1` 表示 batond 支持按任务版本等待。任务等待的 payload 为 `{task_id,after_version,wait_ms}`，仅允许该 run 已从中心响应绑定的任务；返回 `{reason:"task_changed"|"timeout",version}`。任务版本提示通过 `project_run_wake.task_updates` 传送，相同版本、旧 epoch 和无关输入不唤醒任务等待者。版本缓存与广播通道由同一互斥区保护，每个 run 最多保留 64 个任务绑定，工具结果返回后释放。普通闲置 `poll_wake` 继续使用原有通用通知。
+
 `call_tool` 的请求字段为 `tool_call_id`、`tool_name`、`arguments` 和 `last_seq`，成功返回保存的 `tool_result` Event。Runtime 的固定工具定义与 PS-157 的字段一致；`nodes.exec` 和 `inbox.*` 在后续工单启用。工具状态不存于本地控制目录。
 
 Runtime 的登录由用户在设备上执行 `baton-project-runtime login <provider>` 完成，走 pi-ai 的 OAuth 流程。凭据存在 Runtime 自己的数据目录，文件权限沿用 batond 的私有文件约定。`baton-project-runtime probe` 只读取凭据状态并返回各 provider 是否已登录，不发送推理请求；batond 用它生成能力报告。
@@ -337,18 +339,26 @@ Coordinator 在 `call_tool` 的同一个事务里调用任务接受逻辑，`req
 
 **实现为一个 Task。** 命令在另一台设备上执行，副作用不可能和 `tool_result` 放进同一个事务。所以 `nodes.exec` 复用现有的任务机制：Coordinator 在 `call_tool` 的事务里接受一个 `agent_type = shell` 的任务，`request_id` 为 `pa:{conversation_id}:{tool_call_id}`，填写 `origin_*` 列；任务和 Execution 的唯一性保证同一个工具调用最多执行一次命令。这一步不写 `tool_result`。目标节点的 `exec.enabled` 为假时，直接写一条 `is_error` 的结果。
 
-**等待。** `call_tool` 返回 `pending` 和任务 ID 后，Runtime 反复调用 `wait_tool(tool_call_id)`，每次最长等 30 秒，直到任务结束或达到 `wait_seconds`。当前实现立即查询，两次查询之间由 Runtime 等待 250 ms，数据库事务不持锁等待进程。截止时间保存在任务的 `exec_wait_until`，Runtime 重启不会延长它。然后 Coordinator 在一个事务里写入 `tool_result`：
+**等待。** `call_tool` 返回 `{pending:true,task_id,task_version,wait_remaining_ms,wait_protocol:1}`，等待截止时间保存在任务的 `exec_wait_until`，Runtime 重启不会延长它。Runtime 先调用一次短 `wait_tool` 核对状态；中心仍返回 pending 时，通过 batond 本机的任务 `poll_wake` 等待更高版本提示或最多 25 秒，再调用短 `wait_tool` 查询。剩余等待预算和运行预算都限制本地等待，节点按包含系统休眠的单调时钟扣除往返和经过时间。通知丢失后由本地等待到期触发核对。只有中心和 batond 都支持有版本的等待协议才启用该流程；旧节点沿用短查询兼容路径。
 
-- 任务已结束：结果包含退出码、状态和输出。任务进入终态的事务已经按第 9 节插入了输入队列条目，这里把它标记为已投递，`delivered_seq` 指向这条 `tool_result`，避免同一结果出现两次。
+`wait_tool` 的 pending 路径在短只读事务中校验来源、租约、对话、原工具调用和任务，不取得显式行锁。需要结束等待时，退出读取事务，按现有锁顺序重新校验后写入 `tool_result`。本地等待不持有数据库事务或 Gateway 节点串行槽位：
+
+- 任务已结束或进入待核实：结果包含当前版本、状态以及已有输出。任务状态事务已插入输入队列，这里把对应版本标记为已投递，`delivered_seq` 指向这条 `tool_result`，避免同一结果出现两次。待核实即使没有命令输出也进入队列。
 - 任务未结束：结果为「仍在执行，任务 ID 为 …，结束后结果会作为新输入送回」。命令继续执行，结束时按第 9 节进入输入队列。
 
 等待结束不终止命令。单次运行的时长上限到达时，Runtime 用 `wait_tool` 的 `payload.finish_wait=true` 立即结束等待，按当前任务状态写入结果，然后正常结束运行。锁顺序为 `project_agents` → `conversations` → `tasks` → `project_agent_input_queue`；终态处理是 `tasks` → `executions` → `project_agent_input_queue`。两者都最后锁输入队列，不会形成环。
 
 **恢复。** Runtime 在等待期间崩溃时，对话结尾是一个没有结果的 `nodes.exec` 调用。恢复时再次 `call_tool`，Coordinator 按 `(origin_conversation_id, origin_tool_call_id)` 找到已有的任务，返回 `pending`，Runtime 继续等待。命令不会再执行一次。
 
-**节点上的执行。** Session Worker 新增一个内置的 `shell` 执行器，不启动 Agent 进程。它沿用启动许可和 `start_intent`：写入 `start_intent` 之后，用上报的 shell 执行命令（例如 `zsh -lc <command>`、`pwsh -NoProfile -Command <command>`），在 POSIX 上使用独立进程组，在 Windows 上使用 Job Object。stdout 和 stderr 合并后保留开头 16 KiB 和结尾 16 KiB，并记录总字节数和退出码。退出码为 0 时任务完成，否则失败，输出都放进结果。取消和超时时终止整个进程组。Worker 在命令执行中崩溃、无法确认进程状态时，任务进入待核实，沿用 Baton R-22。
+**节点上的执行。** Session Worker 使用内置的 `shell` 执行器，不启动 Agent 进程。它沿用启动许可和 `start_intent`：写入 `start_intent` 之后，用上报的 shell 执行命令（例如 `zsh -lc <command>`、`pwsh -NoProfile -Command <command>`），在 POSIX 上使用独立进程组，在 Windows 上使用 Job Object。stdout 和 stderr 合并后保留开头 16 KiB 和结尾 16 KiB，并记录总字节数和退出码。退出码为 0 时任务完成，否则失败，输出都放进结果。取消和超时时终止整个进程组。Worker 在命令执行中崩溃、无法确认进程状态时，任务进入待核实，沿用 Baton R-22。
 
-`shell` 执行器实现 `internal/agent.Adapter`，在 `registeredAdapters` 里注册为 `shell`。`SubmitInput` 启动命令，结束后由 `Drain` 返回结果，沿用 Worker 的异步轮询；`DeliverResult` 返回错误，因为命令不会委托子任务；`HistoryContains` 恒为 false，`ReadHistory` 只返回本地保存的输出记录；`Abort` 终止进程组，返回已停止且副作用未知。Worker 恢复时（`Config.Restore`）适配器返回 `agent.ErrHistoryMissing`，命令不会重跑，任务按上一段进入待核实。
+`shell` 执行器实现 `internal/agent.Adapter`，在 `registeredAdapters` 里注册为 `shell`。`SubmitInput` 启动命令，结束后先保存完成记录，再由 `Drain` 返回结果，沿用 Worker 的异步轮询；`DeliverResult` 返回错误，因为命令不会委托子任务；`HistoryContains` 恒为 false；`ReadHistory` 返回候选结果，保持历史输出形状。`Abort` 终止进程组，返回已停止且副作用未知。
+
+私有 `output.json` 保存 schema 版本、Session、Execution、输入代次、完成类型、进程停止事实和候选结果，读取上限为 192 KiB。写入采用同目录私有临时文件、文件刷盘和原子替换，POSIX 还同步父目录。保存失败保留结果、产生本地诊断并退避重试，不阻塞 Worker 锁，也不重新启动命令。
+
+Worker 恢复时先使用账本中已有的结果和 outbox；尚无结果时，shell 从身份匹配且合法的完成记录恢复只读执行器，禁止再次输入，结果经原 Worker 路径补送。旧裸候选记录只有在原 Session 路径和持久化配置能够证明归属时才导入。取消或超时后的输出进入停止报告。缺少有效完成证据时返回历史缺失或待核实；命令退出与完成记录保存之间崩溃仍可能进入待核实。
+
+统一 Worker 保留一次 `Drain` 的待提交批次，逐项在账本事务中保存原始事件和输出；事务提交成功或读回确认后才移除该项。账本错误不会丢弃当前项或后续项，也不会继续 Drain。结果按 execution 和 generation 去重，已保存结果继续使用原 event_id。完成文件保留到 Session 回收，未确认 outbox 按既有规则继续补送。协议和故障边界见[执行可靠性设计](../project-exec-reliability/TECH.md)。
 
 命令结果通过统一候选结果的可选 `command_result` 字段传送和保存：`output`、`total_bytes`、`exit_code`、`truncated`。文本使用 UTF-8；包含无效 UTF-8、不可展示控制字节或 JSON 转义过多时，整个保留的首尾字节用 base64 保存，`encoding` 为 `base64`。原始输出固定保留 32 KiB。`nodes.exec` 的工具结果采用对话事件上限 160 KiB，含命令结果的输入采用既有队列上限 72 KiB，以容纳 JSON 转义或 base64；命令输出不再按摘要限长裁剪。取消或超时后的停止报告也携带已取得的命令输出，进入对话；进程已停止但副作用未知时仍为待核实。迁移 `0022_project_exec.sql` 增加等待截止时间、命令结果列，并调整含命令结果的输入容量约束。
 
@@ -420,9 +430,11 @@ Runtime 系统提示词和 `tasks.dispatch` 说明要求在 `expected_outputs` �
 | PA-03、PA-18 | 让模型替身调用不存在的工具，或在任务结果里注入指令 | 调用被执行；工具列表之外出现可用工具 | 单元测试 | planned |
 | PA-19 | 派发到不存在的目录，再带 `retry_of_task_id` 派到另一台设备 | 原任务没有明确失败；新任务没有关联原任务；待核实任务被重派 | 进程测试 | planned |
 | PA-20 | 执行 Agent 派生子任务；人工修正 Project Agent 任务的结果 | 子任务结果进入 Project Agent 的输入队列；修正后没有新输入 | 集成测试 | planned |
-| PA-22 | 对未开启的节点调用 `nodes.exec`；Coordinator 报告显示已开启但节点本地已关闭 | 命令被执行 | 进程测试 | planned |
-| PA-22 | 用 `sleep` 命令让执行时间长于 `wait_seconds`；让命令恰好在等待截止时结束 | 命令被中断；结果既没有以 `tool_result` 返回也没有进入输入队列；同一结果出现两次 | 进程测试 | planned |
-| PA-22 | 在等待期间杀掉 Runtime；在命令执行中杀掉 Worker | 命令执行了两次；Worker 被杀后任务没有进入待核实 | 进程测试，故障注入 | planned |
+| PA-22 | 对未开启的节点调用 `nodes.exec`；Coordinator 报告显示已开启但节点本地已关闭 | 命令被执行 | 真实进程测试 | macOS 通过 |
+| PA-22 | 执行长于等待期限；完成与等待截止竞争；丢弃全部版本通知；首次请求延迟 1 秒 | 命令因等待结束被中断；结果丢失或同版本重复；恢复高频查询 | Store 并发测试、Runtime 注入时钟、真实进程测试 | 本机通过 |
+| PA-22 | 等待期间杀掉 Runtime；命令执行中杀掉 Worker，缺少可靠完成记录 | 命令执行两次；无证据的结果被当成已完成 | 真实进程故障测试 | macOS 通过 |
+| PA-22 | 完成文件已保存但尚未写入 outbox 时恢复；Drain 后注入账本写入或提交失败 | 原命令重跑；有效结果变待核实；缓冲丢失；未提交数据被确认 | Shell / Session 单元测试、SQLite 约束及驱动故障注入 | 本机通过 |
+| PA-22 | 同节点本地等待时读取中心事件，再完成命令 | 本地等待阻塞中心流量；没有收到任务高版本通知或输出 | 真实进程主链路 | macOS 通过 |
 | PA-22 | Windows 上执行 PowerShell 命令并在执行中取消 | 子进程在取消后仍然存活 | Windows 原生测试 | planned |
 | PA-03 | 模型替身调用 `inbox.ask`，展示内容使用未知组件；Runtime 崩溃后重发同一个调用 | 创建了事项；没有 `is_error` 结果；重发后出现第二个事项 | 进程测试，模型替身 | planned |
 | PA-A01 | 三台设备、真实 Runtime、真实订阅跑完整场景 | 见 PRODUCT 验收表 | 实机 | planned |
