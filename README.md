@@ -22,7 +22,7 @@ Baton 是跨设备 AI Agent 协同与任务派发系统。员工使用部署管�
 ## 环境要求
 
 - Go 1.27+
-- PostgreSQL 17+
+- PostgreSQL 16+
 - Node.js 24+ 与 pnpm 10+（用于 `web/` 与 `runtimes/project-agent/`）
 
 ## 构建与常用命令
@@ -104,7 +104,7 @@ go vet ./...
 go test ./...
 ```
 
-如需指定其他测试库实例，可显式设置 `BATON_TEST_DATABASE_URL`。
+如需指定其他测试库实例，可显式设置 `BATON_TEST_DATABASE_URL`。CI 分别使用 PostgreSQL 16、17 运行测试。数据库停机/恢复测试通过本机 `pg_config --bindir` 寻找 PostgreSQL 16+ 程序，也可用 `BATON_TEST_POSTGRES_BINDIR` 指定程序目录。
 
 ### Project Agent Runtime 测试
 

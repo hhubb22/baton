@@ -37,4 +37,4 @@ BATON_REAL_KIRO=1 BATON_REAL_KIRO_MODEL=gpt-5.6-sol \
   go test -v ./internal/gateway -run '^TestRealKiro$' -count=1 -timeout 30m
 ```
 
-真实委托需要 `BATON_TEST_DATABASE_URL` 指向可创建临时 schema 的隔离 PostgreSQL 17。登录由 Kiro 自身管理，测试不复制或打印凭据。回放不调用模型；Linux、Windows 的回放结果只证明协议与 Worker 处理，真实模型支持范围以目标系统实测为准。
+真实委托需要 `BATON_TEST_DATABASE_URL` 指向可创建临时 schema 的隔离 PostgreSQL 16+。登录由 Kiro 自身管理，测试不复制或打印凭据。回放不调用模型；Linux、Windows 的回放结果只证明协议与 Worker 处理，真实模型支持范围以目标系统实测为准。

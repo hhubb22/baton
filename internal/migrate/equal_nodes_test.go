@@ -16,10 +16,6 @@ func TestEqualNodesUpgradePreservesDefaultsAndFillsMissing(t *testing.T) {
 	pool := openTestDB(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	var version int
-	if err := pool.QueryRow(ctx, `SELECT current_setting('server_version_num')::int`).Scan(&version); err != nil || version < 170000 || version >= 180000 {
-		t.Fatalf("需要 PostgreSQL 17，版本 %d: %v", version, err)
-	}
 	// 用真实的前十四个迁移构造升级前的库。
 	before := fstest.MapFS{}
 	names, err := Versions()

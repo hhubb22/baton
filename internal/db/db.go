@@ -71,21 +71,25 @@ func Open(ctx context.Context, databaseURL, schema string) (*pgxpool.Pool, error
 		pool.Close()
 		return nil, fmt.Errorf("连接数据库失败: %s", redact.Scrub(err.Error()))
 	}
-	if err := requirePostgreSQL17(ctx, pool); err != nil {
+	if err := requirePostgreSQL(ctx, pool); err != nil {
 		pool.Close()
 		return nil, err
 	}
 	return pool, nil
 }
 
-func requirePostgreSQL17(ctx context.Context, pool *pgxpool.Pool) error {
+func requirePostgreSQL(ctx context.Context, pool *pgxpool.Pool) error {
 	var versionNum int
 	var version string
 	if err := pool.QueryRow(ctx, "SELECT current_setting('server_version_num')::int, current_setting('server_version')").Scan(&versionNum, &version); err != nil {
 		return fmt.Errorf("读取数据库版本失败: %s", redact.Scrub(err.Error()))
 	}
-	if versionNum < 170000 || versionNum >= 180000 {
-		return fmt.Errorf("需要 PostgreSQL 17，当前为 %s", version)
+	return validatePostgreSQLVersion(versionNum, version)
+}
+
+func validatePostgreSQLVersion(versionNum int, version string) error {
+	if versionNum < 160000 {
+		return fmt.Errorf("需要 PostgreSQL 16 或更高版本，当前为 %s", version)
 	}
 	return nil
 }
