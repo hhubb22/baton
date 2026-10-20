@@ -11,8 +11,8 @@ const faux = fauxProvider({ provider: 'openai-codex', models: [{ id: 'fake-model
 models.setProvider(faux.provider);
 const response = async (context: any) => {
   const called = (name: string) => context.messages.some((m: any) => m.role === 'assistant' && Array.isArray(m.content) && m.content.some((b: any) => b.type === 'toolCall' && b.name === name));
-  if (called('inbox.ask')) return fauxAssistantMessage('已收到输入并保留事项处理记录。');
-  if (!called('tasks.dispatch')) return fauxAssistantMessage([fauxToolCall('tasks.dispatch', {
+  if (called('inbox_ask')) return fauxAssistantMessage('已收到输入并保留事项处理记录。');
+  if (!called('tasks_dispatch')) return fauxAssistantMessage([fauxToolCall('tasks_dispatch', {
     target_node_id: process.env.BATON_TEST_WEB_TARGET!, agent_type: 'pi', working_directory: process.env.BATON_TEST_WEB_WORKSPACE!, description: 'Inbox 验证任务', expected_outputs: '保存结果和文件证据',
   }, { id: 'inbox-web-dispatch' })]);
   const deadline = Date.now() + 60_000;
@@ -21,7 +21,7 @@ const response = async (context: any) => {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   const taskID = readFileSync(process.env.BATON_TEST_INBOX_READY!, 'utf8').trim();
-  return fauxAssistantMessage([1, 2, 3].map((index) => fauxToolCall('inbox.ask', {
+  return fauxAssistantMessage([1, 2, 3].map((index) => fauxToolCall('inbox_ask', {
     title: `重连检查 ${index}`, summary: '请决定下一步', task_id: taskID,
     content: '**重连检查**\n\n| 检查 | 结果 |\n| - | - |\n| 日志 | 待核实 |\n\n```text\n检查日志\n```\n\n[详情](https://example.org/proof)\n\n<img src="https://example.org/x" onerror="window.inboxPwned=true">\n\n' + 'q'.repeat(10 * 1024),
     options: [{ id: 'fix', label: '调查并修复', recommended: true }, { id: 'wait', label: '稍后处理' }], allow_text: true,

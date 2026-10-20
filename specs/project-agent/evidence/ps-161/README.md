@@ -42,3 +42,7 @@ BATON_TEST_NODE_PROJECT_RUNTIME=1 go test -v -count=1 ./internal/gateway -run 'T
 ```
 
 上述 Go 命令需设置 `BATON_TEST_DATABASE_URL`。两项测试验证 API 边界转换后，中心保存、工具执行、压缩和历史原文恢复仍通过。
+
+## Web 模型替身回归
+
+工具名转换后，Inbox 与用户任务控制的 Web 模型替身仍按点号名称查找请求，分别导致未创建事项和未记录模型请求。先在独立 PostgreSQL 上运行 `pnpm --dir web test:e2e e2e/inbox.spec.ts e2e/project-control.spec.ts`，复现 CI 的两处失败；将这两个替身的模型侧识别与返回名称同步为下划线形式后，运行 `pnpm --dir web test:e2e`，全部 7 项通过（1.5 分钟）。业务断言保持完整，前端构建产物没有差异。上述命令设置项目约定的 `BATON_TEST_DATABASE_URL`。
