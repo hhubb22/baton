@@ -8,6 +8,21 @@ import (
 	"syscall"
 )
 
+// StartDetached 在独立进程组中启动命令，由调用方负责等待退出。
+func StartDetached(newCmd func() *exec.Cmd) (*exec.Cmd, error) {
+	cmd := newCmd()
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	return cmd, nil
+}
+
+// HoldProcessGroupJob 在 Unix 无需额外持有 Job，返回空清理函数。
+func HoldProcessGroupJob() (func(), error) {
+	return func() {}, nil
+}
+
 // 守护进程读取独立管道；batond 崩溃时写端由内核关闭，整个运行进程组随即停止。
 func StartTree(cmd *exec.Cmd) (func(), error) {
 	reader, writer, err := os.Pipe()

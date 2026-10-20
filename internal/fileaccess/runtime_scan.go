@@ -77,7 +77,7 @@ func ScanRuntimeRoots(ctx context.Context, dir string) ([]protocol.RuntimeRoot, 
 				truncated = true
 				return
 			}
-			f, err := openInRoot(root, rel)
+			f, err := OpenInRoot(root, rel)
 			if err != nil {
 				truncated = true
 				return
@@ -120,7 +120,7 @@ func runtimeMetadata(root *os.Root, path string, max int) ([]byte, bool) {
 	if err != nil || !info.Mode().IsRegular() || info.Size() > int64(max) {
 		return nil, false
 	}
-	f, err := openInRoot(root, path)
+	f, err := OpenInRoot(root, path)
 	if err != nil {
 		return nil, false
 	}

@@ -23,7 +23,7 @@ func openAuthorized(roots []BrowseRoot, rootID, rel string) (*os.File, error) {
 		}
 		defer opened.Close()
 		normalized, _ := normalizeRelative(rel)
-		return openInRoot(opened, normalized)
+		return OpenInRoot(opened, normalized)
 	}
 	return nil, &BrowseError{Code: protocol.FileCodeRootForbidden, Message: "未授权的目录"}
 }

@@ -1,6 +1,6 @@
 //go:build !windows
 
-package node
+package sidecar
 
 import (
 	"os"
@@ -12,13 +12,13 @@ import (
 	"time"
 )
 
-func TestProjectRuntimeGuardianHelper(t *testing.T) {
-	path := os.Getenv("BATON_TEST_GUARDIAN_PATH")
+func TestProcessTreeGuardianHelper(t *testing.T) {
+	path := os.Getenv("BATON_TEST_PROCESS_GUARDIAN_PATH")
 	if path == "" {
 		return
 	}
 	cmd := exec.Command("/bin/sh", "-c", `while :; do echo live >> "$1"; sleep 0.02; done`, "runtime", path)
-	stop, err := startProjectRuntimeProcess(cmd)
+	stop, err := StartTree(cmd)
 	if err != nil {
 		os.Exit(2)
 	}
@@ -31,10 +31,10 @@ func TestProjectRuntimeGuardianHelper(t *testing.T) {
 	}
 }
 
-func TestProjectRuntimeGuardianStopsOrphanAfterDaemonCrash(t *testing.T) {
+func TestProcessTreeGuardianStopsOrphanAfterDaemonCrash(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "progress")
-	helper := exec.Command(os.Args[0], "-test.run=^TestProjectRuntimeGuardianHelper$")
-	helper.Env = append(os.Environ(), "BATON_TEST_GUARDIAN_PATH="+path)
+	helper := exec.Command(os.Args[0], "-test.run=^TestProcessTreeGuardianHelper$")
+	helper.Env = append(os.Environ(), "BATON_TEST_PROCESS_GUARDIAN_PATH="+path)
 	if err := helper.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestProjectRuntimeGuardianStopsOrphanAfterDaemonCrash(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("Runtime未运行")
+			t.Fatal("进程树未运行")
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -78,6 +78,6 @@ func TestProjectRuntimeGuardianStopsOrphanAfterDaemonCrash(t *testing.T) {
 		t.Fatal(err)
 	}
 	if before.Size() != after.Size() {
-		t.Fatal("batond崩溃后Runtime仍在运行")
+		t.Fatal("父进程崩溃后进程树仍在运行")
 	}
 }

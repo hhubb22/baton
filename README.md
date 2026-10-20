@@ -132,7 +132,6 @@ pnpm --dir web lint
 pnpm --dir web typecheck
 pnpm --dir web test
 pnpm --dir web build
-pnpm --dir web test:e2e
 ```
 
 ## 规格与设计文档

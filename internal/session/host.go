@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"sync/atomic"
 	"time"
+
+	"baton/internal/sidecar"
 )
 
 // Host 由 batond 用来启动或重新连接 Session Worker。
@@ -197,7 +199,7 @@ func (h *Host) spawn(ctx context.Context, sessionID string) error {
 		return errors.New("无法启动 Worker")
 	}
 	defer null.Close()
-	cmd, err := startWorkerProcess(func() *exec.Cmd {
+	cmd, err := sidecar.StartDetached(func() *exec.Cmd {
 		exe, execErr := os.Executable()
 		if execErr != nil {
 			exe = os.Args[0]

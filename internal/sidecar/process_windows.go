@@ -11,14 +11,49 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func StartTree(cmd *exec.Cmd) (func(), error) {
-	job, err := windows.CreateJobObject(nil, nil)
+// StartDetached 在独立进程组中启动命令，并尝试脱离父进程的 Job。
+// 父 Job 禁止脱离时，用工厂创建新命令重试；调用方负责等待退出。
+func StartDetached(newCmd func() *exec.Cmd) (*exec.Cmd, error) {
+	cmd := newCmd()
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | windows.CREATE_BREAKAWAY_FROM_JOB,
+	}
+	if err := cmd.Start(); err == nil {
+		return cmd, nil
+	}
+	cmd = newCmd()
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	return cmd, nil
+}
+
+// HoldProcessGroupJob 持有一个关闭时终止成员进程的 Job，由调用方管理 Job 生命周期。
+func HoldProcessGroupJob() (func(), error) {
+	job, err := createKillOnCloseJob()
 	if err != nil {
 		return nil, err
+	}
+	return func() { _ = windows.CloseHandle(job) }, nil
+}
+
+func createKillOnCloseJob() (windows.Handle, error) {
+	job, err := windows.CreateJobObject(nil, nil)
+	if err != nil {
+		return 0, err
 	}
 	info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{BasicLimitInformation: windows.JOBOBJECT_BASIC_LIMIT_INFORMATION{LimitFlags: windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE}}
 	if _, err = windows.SetInformationJobObject(job, windows.JobObjectExtendedLimitInformation, uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info))); err != nil {
 		windows.CloseHandle(job)
+		return 0, err
+	}
+	return job, nil
+}
+
+func StartTree(cmd *exec.Cmd) (func(), error) {
+	job, err := createKillOnCloseJob()
+	if err != nil {
 		return nil, err
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | windows.CREATE_SUSPENDED}

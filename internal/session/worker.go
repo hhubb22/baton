@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"baton/internal/sidecar"
+
 	"github.com/gofrs/flock"
 )
 
@@ -39,7 +41,7 @@ func RunWorker(ctx context.Context, dataDir, sessionID string) error {
 		return ErrSessionOwned
 	}
 	defer lock.Unlock()
-	release, err := holdAgentJob()
+	release, err := sidecar.HoldProcessGroupJob()
 	if err != nil {
 		return errors.New("无法创建 Agent Job")
 	}

@@ -1,6 +1,6 @@
 //go:build windows
 
-package node
+package sidecar
 
 import (
 	"fmt"
@@ -16,27 +16,27 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const projectRuntimeWindowsHelperMode = "BATON_TEST_PROJECT_RUNTIME_WINDOWS_MODE"
-const projectRuntimeWindowsHelperPath = "BATON_TEST_PROJECT_RUNTIME_WINDOWS_PATH"
+const processTreeWindowsHelperMode = "BATON_TEST_PROCESS_TREE_WINDOWS_MODE"
+const processTreeWindowsHelperPath = "BATON_TEST_PROCESS_TREE_WINDOWS_PATH"
 
 // 辅助进程只记录自己的PID；parent持有Job，tree再派生一个leaf以验证整组清理。
-func TestProjectRuntimeWindowsNativeHelper(t *testing.T) {
-	mode := os.Getenv(projectRuntimeWindowsHelperMode)
+func TestProcessTreeWindowsNativeHelper(t *testing.T) {
+	mode := os.Getenv(processTreeWindowsHelperMode)
 	if mode == "" {
 		return
 	}
-	path := os.Getenv(projectRuntimeWindowsHelperPath)
+	path := os.Getenv(processTreeWindowsHelperPath)
 	recordError := func(err error) { _ = os.WriteFile(path+".error", []byte(err.Error()), 0600); os.Exit(2) }
 	switch mode {
 	case "parent":
-		cmd := projectRuntimeWindowsCommand(path, "tree")
-		stop, err := startProjectRuntimeProcess(cmd)
+		cmd := processTreeWindowsCommand(path, "tree")
+		stop, err := StartTree(cmd)
 		if err != nil {
 			recordError(err)
 		}
 		defer stop()
 	case "tree":
-		cmd := projectRuntimeWindowsCommand(path, "leaf")
+		cmd := processTreeWindowsCommand(path, "leaf")
 		if err := cmd.Start(); err != nil {
 			recordError(err)
 		}
@@ -55,13 +55,13 @@ func TestProjectRuntimeWindowsNativeHelper(t *testing.T) {
 	}
 }
 
-func projectRuntimeWindowsCommand(path, mode string) *exec.Cmd {
-	cmd := exec.Command(os.Args[0], "-test.run=^TestProjectRuntimeWindowsNativeHelper$")
-	cmd.Env = append(os.Environ(), projectRuntimeWindowsHelperMode+"="+mode, projectRuntimeWindowsHelperPath+"="+path)
+func processTreeWindowsCommand(path, mode string) *exec.Cmd {
+	cmd := exec.Command(os.Args[0], "-test.run=^TestProcessTreeWindowsNativeHelper$")
+	cmd.Env = append(os.Environ(), processTreeWindowsHelperMode+"="+mode, processTreeWindowsHelperPath+"="+path)
 	return cmd
 }
 
-func projectRuntimeWindowsProcess(t *testing.T, path, suffix string) windows.Handle {
+func processTreeWindowsProcess(t *testing.T, path, suffix string) windows.Handle {
 	t.Helper()
 	timer := time.NewTimer(5 * time.Second)
 	defer timer.Stop()
@@ -90,7 +90,7 @@ func projectRuntimeWindowsProcess(t *testing.T, path, suffix string) windows.Han
 	}
 }
 
-func projectRuntimeWindowsExited(t *testing.T, handle windows.Handle, name string) {
+func processTreeWindowsExited(t *testing.T, handle windows.Handle, name string) {
 	t.Helper()
 	status, err := windows.WaitForSingleObject(handle, 5000)
 	if err != nil || status != windows.WAIT_OBJECT_0 {
@@ -98,48 +98,48 @@ func projectRuntimeWindowsExited(t *testing.T, handle windows.Handle, name strin
 	}
 }
 
-func TestProjectRuntimeWindowsNativeJobStartsAndStopsProcessTree(t *testing.T) {
+func TestProcessTreeWindowsNativeJobStartsAndStopsProcessTree(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "process")
-	cmd := projectRuntimeWindowsCommand(path, "tree")
-	stop, err := startProjectRuntimeProcess(cmd)
+	cmd := processTreeWindowsCommand(path, "tree")
+	stop, err := StartTree(cmd)
 	if err != nil {
-		t.Fatalf("Windows原生Runtime启动失败: %v", err)
+		t.Fatalf("Windows原生进程树启动失败: %v", err)
 	}
 	stop = sync.OnceFunc(stop)
 	defer stop()
 	done := make(chan struct{})
 	go func() { _ = cmd.Wait(); close(done) }()
-	tree := projectRuntimeWindowsProcess(t, path, ".tree")
-	leaf := projectRuntimeWindowsProcess(t, path, ".leaf")
+	tree := processTreeWindowsProcess(t, path, ".tree")
+	leaf := processTreeWindowsProcess(t, path, ".leaf")
 	stop()
-	projectRuntimeWindowsExited(t, tree, "Runtime")
-	projectRuntimeWindowsExited(t, leaf, "Runtime子进程")
+	processTreeWindowsExited(t, tree, "进程树")
+	processTreeWindowsExited(t, leaf, "进程树子进程")
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("Runtime停止后Wait未返回")
+		t.Fatal("进程树停止后Wait未返回")
 	}
 }
 
-func TestProjectRuntimeWindowsJobStopsProcessTreeAfterDaemonCrash(t *testing.T) {
+func TestProcessTreeWindowsJobStopsProcessTreeAfterDaemonCrash(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "process")
-	daemon := projectRuntimeWindowsCommand(path, "parent")
+	daemon := processTreeWindowsCommand(path, "parent")
 	if err := daemon.Start(); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan struct{})
 	go func() { _ = daemon.Wait(); close(done) }()
 	defer daemon.Process.Kill()
-	tree := projectRuntimeWindowsProcess(t, path, ".tree")
-	leaf := projectRuntimeWindowsProcess(t, path, ".leaf")
+	tree := processTreeWindowsProcess(t, path, ".tree")
+	leaf := processTreeWindowsProcess(t, path, ".leaf")
 	if err := daemon.Process.Kill(); err != nil {
-		t.Fatalf("停止batond替身: %v", err)
+		t.Fatalf("停止父进程替身: %v", err)
 	}
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("batond替身被杀后Wait未返回")
+		t.Fatal("父进程替身被杀后Wait未返回")
 	}
-	projectRuntimeWindowsExited(t, tree, "Runtime")
-	projectRuntimeWindowsExited(t, leaf, "Runtime子进程")
+	processTreeWindowsExited(t, tree, "进程树")
+	processTreeWindowsExited(t, leaf, "进程树子进程")
 }
