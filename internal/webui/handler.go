@@ -1,5 +1,5 @@
 // Package webui 提供 Coordinator 嵌入的员工页面。
-// 构建结果来自 web 目录的 pnpm build；没有 Node.js 时，已有的 dist 仍可编译。
+// 静态文件由 node tools/build.mjs 在 Go 编译前生成，随 Coordinator 二进制发布。
 package webui
 
 import (

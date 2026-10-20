@@ -33,7 +33,7 @@ Pi 的一手资料来自已安装包 `@earendil-works/pi-coding-agent` 的 `docs
 | Project Agent Runtime | Node.js 程序 `baton-project-runtime`，基于 `@earendil-works/pi-agent-core` 与 `pi-ai` | 由 batond 作为独立进程启动；只有承载 Project Agent 的节点需要安装 Node.js（2026-10-18 修订） |
 | 中心记录 | PostgreSQL 16+，pgx，版本化 SQL migration | 延用原始需求的 PostgreSQL；任务、事件和 outbox 可在一次事务提交，不先引入消息队列 |
 | 节点执行账本 | SQLite，WAL 与 FULL 同步，拟用纯 Go 驱动 | 支持断电后的去重和待补报记录，便于跨系统发布；需要验证驱动、锁与磁盘故障行为 |
-| Web UI | TypeScript、React、Vite | 静态页面由 Coordinator 提供；无独立 Node.js Web 服务，开发时仍需要前端构建工具 |
+| Web UI | TypeScript、React、Vite | `node tools/build.mjs` 按锁文件安装依赖、生成前端静态文件后编译 Go；`internal/webui/dist` 不提交到 Git，页面嵌入 Coordinator 二进制，部署时无需独立前端服务 |
 | 节点与中心通信 | TLS WebSocket，版本化 JSON 信封 | batond 主动连接内置 Gateway；按消息类型限制路由，业务权限和持久化由 Coordinator 业务处理器负责 |
 | 浏览器实时通知 | 同源 WebSocket；普通操作用 HTTP JSON API | 统一账号会话与权限检查；需要处理输出限流、断流和浏览器重连 |
 

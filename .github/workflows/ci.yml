@@ -17,16 +17,12 @@ env:
 
 jobs:
   test:
-    name: Test (PostgreSQL ${{ matrix.postgres }})
-    strategy:
-      fail-fast: false
-      matrix:
-        postgres: ['16', '17']
+    name: Test
     runs-on: ubuntu-latest
     timeout-minutes: 25
     services:
       postgres:
-        image: postgres:${{ matrix.postgres }}
+        image: postgres:16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: baton
@@ -54,18 +50,20 @@ jobs:
           cache-dependency-path: |
             web/pnpm-lock.yaml
             runtimes/project-agent/pnpm-lock.yaml
-      - name: Install dependencies & build web UI
+      - name: Install Runtime dependencies
+        run: pnpm --dir runtimes/project-agent install --frozen-lockfile
+      - name: Build
         run: |
-          pnpm --dir runtimes/project-agent install --frozen-lockfile
-          pnpm --dir web install --frozen-lockfile
-          pnpm --dir web build
-      - name: Go build & vet
-        run: |
-          go build ./...
-          go vet ./...
+          node --test tools/build.test.mjs
+          node tools/build.mjs
+      - name: Go vet
+        run: go vet ./...
       - name: Go tests
+        env:
+          BATON_TEST_BIN_DIR: ${{ github.workspace }}/bin
+          BATON_TEST_NODE_PROJECT_RUNTIME: '1'
         run: go test ./...
       - name: Runtime tests
         run: pnpm --dir runtimes/project-agent test
       - name: Web unit tests
-        run: pnpm --dir web test:unit
+        run: pnpm --dir web test

@@ -12,17 +12,17 @@ Baton 是跨设备 AI Agent 协同与任务派发系统，由中心服务（`coo
 | `internal/session` | Session Worker 生命周期、本地认证 IPC 与幂等执行账本 |
 | `internal/agent/{pi,codex,kiro,replay}` | 统一 `agent.Adapter` 接口实现（Pi RPC、Codex app-server、Kiro ACP V3）与确定性录制回放 |
 | `runtimes/project-agent` | 基于 Node.js / TypeScript 的 Project Agent 进程（通过 stdio JSON-RPC 与 `batond` 通信） |
-| `web` | React + TypeScript + Vite 前端，构建产物嵌入 `internal/webui/dist` |
+| `web` | React + TypeScript + Vite 前端，构建产物生成到 `internal/webui/dist` 后嵌入 Coordinator，不提交到 Git |
 | `specs/` | 持久产品规格（`PRODUCT.md`）与技术设计（`TECH.md`） |
 
-## 常用验证命令（零配置开箱即用）
+## 常用构建与验证命令
 
-- **Go 编译与静态检查**：
+- **构建与静态检查**（首次检出或修改前端后先构建；脚本安装前端依赖、生成静态文件，再编译三个 Go 二进制到 `bin/`）：
   ```sh
-  go build ./...
+  node tools/build.mjs
   go vet ./...
   ```
-- **Go 单元与集成测试**（默认连接本机 `postgres://postgres:baton@127.0.0.1:5432/baton_test?sslmode=disable`，若未启动会自动尝试通过 `pg_ctl` 拉起 `~/.baton-postgres`，可通过 `BATON_TEST_DATABASE_URL` 覆盖）：
+- **Go 单元与集成测试**（先完成上述构建；默认连接本机 `postgres://postgres:baton@127.0.0.1:5432/baton_test?sslmode=disable`，若未启动会自动尝试通过 `pg_ctl` 拉起 `~/.baton-postgres`，可通过 `BATON_TEST_DATABASE_URL` 覆盖）：
   ```sh
   go test ./...
   ```
@@ -34,8 +34,8 @@ Baton 是跨设备 AI Agent 协同与任务派发系统，由中心服务（`coo
   ```sh
   pnpm --dir web lint
   pnpm --dir web typecheck
-  pnpm --dir web test:unit
-  pnpm --dir web check:dist
+  pnpm --dir web test
+  pnpm --dir web build
   ```
 
 ## 开发与演进约束（防熵增守则）

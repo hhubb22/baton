@@ -10,7 +10,6 @@
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",
     "test:e2e": "pnpm build && playwright test",
-    "check:dist": "pnpm build && git diff --exit-code --stat -- ../internal/webui/dist && test -z \"$(git status --porcelain -- ../internal/webui/dist)\"",
     "preview": "vite preview"
   },
   "dependencies": {

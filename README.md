@@ -30,10 +30,10 @@ Baton 是跨设备 AI Agent 协同与任务派发系统。员工使用部署管�
 ### 1. 构建二进制
 
 ```sh
-go build -o bin/coordinator ./cmd/coordinator
-go build -o bin/batond ./cmd/batond
-go build -o bin/baton ./cmd/baton
+node tools/build.mjs
 ```
+
+该命令按锁文件安装前端依赖、构建 Web UI，再将 `coordinator`、`batond`、`baton` 编译到 `bin/`（Windows 下带 `.exe` 后缀）。前端构建产物保存在 `internal/webui/dist`，不提交到 Git。Coordinator 在编译时嵌入这些文件，部署时无需 Node.js、pnpm 或独立前端服务。Project Agent Runtime 的安装另见 [Runtime 文档](runtimes/project-agent/README.md)。
 
 ### 2. 数据库迁移与员工账号管理
 
@@ -94,17 +94,19 @@ BATON_ENROLLMENT_TOKEN='<one-time-enrollment-token>' \
 
 ## 本地开发与测试
 
-### Go 测试（零配置）
+### Go 单元与集成测试
 
 集成测试使用真实 PostgreSQL 并在独立临时 schema 中执行迁移与清理。未设置 `BATON_TEST_DATABASE_URL` 时，默认连接本机 `postgres://postgres:baton@127.0.0.1:5432/baton_test?sslmode=disable`（若 `~/.baton-postgres` 存在且未启动，测试辅助库会自动尝试通过 `pg_ctl` 拉起）：
 
+首次检出或修改前端源码后，先运行统一构建命令，生成 Go 嵌入所需的静态文件：
+
 ```sh
-go build ./...
+node tools/build.mjs
 go vet ./...
 go test ./...
 ```
 
-如需指定其他测试库实例，可显式设置 `BATON_TEST_DATABASE_URL`。CI 分别使用 PostgreSQL 16、17 运行测试。数据库停机/恢复测试通过本机 `pg_config --bindir` 寻找 PostgreSQL 16+ 程序，也可用 `BATON_TEST_POSTGRES_BINDIR` 指定程序目录。
+如需指定其他测试库实例，可显式设置 `BATON_TEST_DATABASE_URL`。CI 使用 PostgreSQL 16 运行测试，并在 Go 测试中启用真实 Node Runtime 与 Coordinator 的模型替身集成测试。数据库停机/恢复测试通过本机 `pg_config --bindir` 寻找 PostgreSQL 16+ 程序，也可用 `BATON_TEST_POSTGRES_BINDIR` 指定程序目录。
 
 ### Project Agent Runtime 测试
 
@@ -115,15 +117,21 @@ pnpm --dir runtimes/project-agent test
 
 ### Web 前端开发与验证
 
-`web/` 构建结果直接输出到 `internal/webui/dist` 并由 `internal/webui` 嵌入：
+开发时使用 Vite 提供热更新页面，通过代理访问 Go API：
+
+```sh
+pnpm --dir web install --frozen-lockfile
+pnpm --dir web dev
+```
+
+前端检查命令如下。`pnpm --dir web build` 会生成被 Go 嵌入的静态文件；发布构建统一使用 `node tools/build.mjs`。
 
 ```sh
 pnpm --dir web install
 pnpm --dir web lint
 pnpm --dir web typecheck
-pnpm --dir web test:unit
+pnpm --dir web test
 pnpm --dir web build
-pnpm --dir web check:dist
 pnpm --dir web test:e2e
 ```
 
