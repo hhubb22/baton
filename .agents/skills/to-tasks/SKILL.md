@@ -25,7 +25,7 @@ license: MIT
 ## Guardrails
 
 - 默认先在对话中输出 3～5 个切片的精简草案（或写入本地 [TASKS.template.md](assets/TASKS.template.md)）。
-- 仅在用户明确要求同步到 Linear 时，才调用 `issue-tracking` 创建工单。
+- 仅在用户明确要求同步到外部工单系统时，才调用 `issue-tracking` 创建工单。
 
 ## Stop Rules
 

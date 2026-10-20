@@ -29,7 +29,7 @@
       "source": "hhubb22/asa-skills",
       "sourceType": "github",
       "skillPath": "skills/issue-tracking/SKILL.md",
-      "computedHash": "d3305a1406ff361d79f4251b9c381f5076386d115a36d31c836cdb824939eb37"
+      "computedHash": "bacd221e90662abf325571852c8911722cb29f3865da84e94d5bdc012019f001"
     },
     "skill-doctor": {
       "source": "hhubb22/asa-skills",
@@ -41,13 +41,13 @@
       "source": "hhubb22/asa-skills",
       "sourceType": "github",
       "skillPath": "skills/to-tasks/SKILL.md",
-      "computedHash": "99d11568f9708934e828befd7d3ecc676d3412a61e17de6ae700968fefcdec03"
+      "computedHash": "f826758f97d32da346a2d49642b35f00fa749367df799375b8e9aef872b703ea"
     },
     "work": {
       "source": "hhubb22/asa-skills",
       "sourceType": "github",
       "skillPath": "skills/work/SKILL.md",
-      "computedHash": "a1e74748ecd2563ff8855fa4117a93c5b2312074dc0754b76e1f69ca8978efe0"
+      "computedHash": "00f127fb6f4bb2e597c1e29e8c91c0525c8946debec67c28cfce3db67af6b7ba"
     },
     "write-pr": {
       "source": "hhubb22/asa-skills",

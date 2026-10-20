@@ -25,12 +25,12 @@ license: MIT
 - `align`：复述需求目标、边界与假设，提出阻塞问题供用户确认。
 - `write-product-spec`：编写或原地更新 `PRODUCT.md`（外部可观察行为与验收标准）。
 - `write-tech-spec`：编写或原地更新 `TECH.md`（架构、数据模型、接口与关键机制）。
-- `to-tasks`：将已批准的设计拆分为可独立验证的垂直切片任务（本地清单或 Linear Issue）。
+- `to-tasks`：将已批准的跨天大特性拆分为 3～5 个粗粒度垂直切片任务。
 - `implement-specs`：实现代码、编写自动化测试并同步更新长期文档现状。
 - `diagnose-bugs`：建立可复现反馈回路，定位根因并补充回归测试。
 - `code-review`：审查代码差异的正确性、架构卫生与需求符合性。
 - `write-pr`：基于真实 diff 与验证证据生成 PR 描述。
-- `issue-tracking`：在声明 `issue` 模式时通过 Linear MCP 同步工单。
+- `issue-tracking`：仅在用户指定工单或要求建卡/关单时同步外部工单系统。
 
 ## Guardrails
 
