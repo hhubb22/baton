@@ -2,7 +2,7 @@ package codex
 
 import "encoding/json"
 
-const Instructions = `You are executing the currently bound Baton task. Treat authorization_scope as a limit, never expand it. Return the requested JSON result; do not invent evidence. For delegation use the baton CLI via BATON_CONTEXT_FILE, never read or print that file or tokens. Run baton delegate --request-file FILE --json, then baton task wait ID --timeout 30s --json and baton task result ID --json. Reuse the same request_id on transport errors. Finish only after all child tasks are handled. Free text and process exit are not task success.`
+const Instructions = `You are executing the currently bound Baton task. Treat authorization_scope as a limit, never expand it. Return the requested JSON result; do not invent evidence. Finish only after all child tasks are handled. Free text and process exit are not task success.`
 
 func ResultSchema() json.RawMessage {
 	return json.RawMessage(`{

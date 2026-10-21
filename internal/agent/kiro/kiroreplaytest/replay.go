@@ -68,40 +68,6 @@ func Cases(t *testing.T, dir string) []replay.Transcript {
 	return tapes
 }
 
-// QueriedDelivery 来自录制中成功 shell 的结果输出，不从模型复述取标识。
-func QueriedDelivery(t *testing.T, tape replay.Transcript) string {
-	t.Helper()
-	for _, e := range tape.Entries {
-		var f struct {
-			Params struct {
-				Update struct {
-					Kind      string `json:"sessionUpdate"`
-					Status    string
-					RawOutput struct {
-						Output   string
-						ExitCode *int
-					} `json:"rawOutput"`
-				}
-			}
-		}
-		if json.Unmarshal(e.Frame, &f) != nil || f.Params.Update.Kind != "tool_call_update" || f.Params.Update.Status != "completed" {
-			continue
-		}
-		o := f.Params.Update.RawOutput
-		if o.ExitCode == nil || *o.ExitCode != 0 {
-			continue
-		}
-		var result struct {
-			ID string `json:"delivery_id"`
-		}
-		if json.Unmarshal([]byte(o.Output), &result) == nil && result.ID != "" {
-			return result.ID
-		}
-	}
-	t.Fatal("真实转录缺少成功子结果查询")
-	return ""
-}
-
 type Run struct {
 	Binary, Work, Alias, Home, State string
 	Tape                             replay.Transcript

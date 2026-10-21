@@ -48,9 +48,6 @@ func TestKiroWorkerRecorded(t *testing.T) {
 			if name == "simple" {
 				gates = append(gates, "response:session/prompt")
 			}
-			if name == "delegation" {
-				gates = append(gates, "response:session/prompt", "response:session/load")
-			}
 			if name == "interrupt_mid_tool" || name == "supplement_active" {
 				gates = append(gates, "notification:session/cancel")
 			}
@@ -137,34 +134,6 @@ func TestKiroWorkerRecorded(t *testing.T) {
 				r.Wait(t, "response:session/prompt")
 				r.Release(t, "response:session/prompt")
 				_ = w.report(task.EventStopReport, func(r protocol.ExecutionReport) bool { return r.AgentStopped })
-			} else if name == "delegation" {
-				r.Wait(t, "response:session/prompt")
-				d.DeliveryID = kiroreplaytest.QueriedDelivery(t, tape)
-				if _, err := w.client.ReceiveChild(d, true); err != nil {
-					t.Fatal(err)
-				}
-				r.Wait(t, "response:session/load")
-				r.Release(t, "response:session/prompt")
-				for _, report := range w.pending().Reports {
-					if report.Kind == protocol.ReportResult {
-						t.Fatal("持久历史响应前完成任务")
-					}
-				}
-				r.Release(t, "response:session/load")
-				_ = w.report(protocol.ReportResult, func(r protocol.ExecutionReport) bool {
-					return r.Status == task.StatusCompleted && r.InputGeneration == 2
-				})
-				waitKiroWorker(t, func() bool {
-					for _, receipt := range w.pending().ChildReceipts {
-						if receipt.DeliveryID == d.DeliveryID && receipt.Status == "delivered" {
-							return true
-						}
-					}
-					return false
-				})
-				if _, err := w.client.ReceiveChild(d, true); err != nil {
-					t.Fatal(err)
-				}
 			} else if name == "deliver_idle" {
 				waitKiroWorker(t, func() bool {
 					db, err := openReadLedger(w.path)

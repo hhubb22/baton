@@ -175,9 +175,9 @@ func TestPiFrameLimit(t *testing.T) {
 }
 
 func TestPiConfiguredEnvironment(t *testing.T) {
-	a := New(agent.Config{ContextFile: "bound-context", Env: []string{"BATON_CONTEXT_FILE=old", "PI_OFFLINE=0", "PI_TELEMETRY=1", "CUSTOM=value"}})
+	a := New(agent.Config{Env: []string{"PI_OFFLINE=0", "PI_TELEMETRY=1", "CUSTOM=value"}})
 	env := strings.Join(a.environment(), "\n")
-	if env != "CUSTOM=value\nBATON_CONTEXT_FILE=bound-context\nPI_OFFLINE=1\nPI_TELEMETRY=0" {
+	if env != "CUSTOM=value\nPI_OFFLINE=1\nPI_TELEMETRY=0" {
 		t.Fatal(env)
 	}
 }

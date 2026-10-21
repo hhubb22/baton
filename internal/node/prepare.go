@@ -146,10 +146,6 @@ func handleNodeEnvelope(ctx context.Context, raw []byte, w *wsWriter, ledger *Le
 		log.Info("event=prepare_not_acked", "task_id", cmd.TaskID)
 		return true
 	}
-	if report.OK && ledger.ensureAgentContext(report) != nil {
-		log.Info("event=agent_context_failed", "task_id", report.TaskID)
-		return true
-	}
 	if report.OK {
 		log.Info("event=prepare_acked", "task_id", report.TaskID, "session_id", report.SessionID)
 	} else {

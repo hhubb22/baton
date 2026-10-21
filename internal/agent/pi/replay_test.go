@@ -63,9 +63,6 @@ func TestPiRecordedTranscripts(t *testing.T) {
 			if a.cmd.Dir != f.Replay.Bindings["<workspace>"] {
 				t.Fatalf("RPC 工作目录: %s", a.cmd.Dir)
 			}
-			if !strings.Contains(strings.Join(a.cmd.Env, "\n"), "BATON_CONTEXT_FILE="+f.Agent.ContextFile) {
-				t.Fatal("上下文路径没有传给 Pi")
-			}
 
 			if a.Model() == "" {
 				t.Fatal("初始化没有报告模型")

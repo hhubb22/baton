@@ -24,9 +24,6 @@ func TestRecordedKiro(t *testing.T) {
 			if tape.Header.Scenario == "simple" {
 				gates = append(gates, "response:session/prompt")
 			}
-			if tape.Header.Scenario == "delegation" {
-				gates = append(gates, "response:session/prompt", "response:session/load")
-			}
 			if tape.Header.Scenario == "interrupt_mid_tool" || tape.Header.Scenario == "supplement_active" {
 				gates = append(gates, "notification:session/cancel")
 			}
@@ -77,48 +74,6 @@ func TestRecordedKiro(t *testing.T) {
 				}
 				if _, _, err := a.Abort(); err != nil {
 					t.Fatal(err)
-				}
-			}
-			if tape.Header.Scenario == "delegation" {
-				r.Wait(t, "response:session/prompt")
-				id := kiroreplaytest.QueriedDelivery(t, tape)
-				if _, err := a.HistoryContains(id, true); err != nil {
-					t.Fatal(err)
-				}
-				r.Wait(t, "response:session/load")
-				r.Release(t, "response:session/prompt")
-				time.Sleep(20 * time.Millisecond)
-				if outputs := a.Drain(); len(outputs) > 0 {
-					t.Fatal("持久交付核查前发布最终结果", outputs)
-				}
-				r.Release(t, "response:session/load")
-				for {
-					stopped, _ := a.StopStatus()
-					if stopped {
-						break
-					}
-					select {
-					case <-ctx.Done():
-						t.Fatal("原 prompt 未结束")
-					case <-time.After(time.Millisecond):
-					}
-				}
-				if outputs := a.Drain(); len(outputs) > 0 {
-					t.Fatal("调用方读取确认前发布终态")
-				}
-				for {
-					found, err := a.HistoryContains(id, true)
-					if err != nil {
-						t.Fatal(err)
-					}
-					if found {
-						break
-					}
-					select {
-					case <-ctx.Done():
-						t.Fatal("持久交付未确认")
-					case <-time.After(5 * time.Millisecond):
-					}
 				}
 			}
 			if tape.Header.Scenario == "simple" {

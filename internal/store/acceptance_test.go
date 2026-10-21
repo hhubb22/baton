@@ -10,16 +10,8 @@ import (
 	"baton/internal/task"
 )
 
-func TestPlaneResultAndEmployeeAcceptanceAreSeparate(t *testing.T) {
+func TestEmployeeAcceptancePreservesExecutionResult(t *testing.T) {
 	ctx, repo, pool, in, _ := preparedStart(t)
-	webhook, project, issue := mustUUID(t), mustUUID(t), mustUUID(t)
-	if _, err := pool.Exec(ctx, `INSERT INTO plane_issues(webhook_id,project_id,issue_id) VALUES($1,$2,$3)`, webhook, project, issue); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, `INSERT INTO plane_triggers(trigger_id,webhook_id,project_id,issue_id,round_at,state_activity_id,actor_id,employee_id,task_id)
-	 VALUES('result-round',$1,$2,$3,now(),$4,$5,$6,$7)`, webhook, project, issue, mustUUID(t), mustUUID(t), in.EmployeeID, in.TaskID); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := repo.AuthorizeStart(ctx, in); err != nil {
 		t.Fatal(err)
 	}
@@ -33,18 +25,6 @@ func TestPlaneResultAndEmployeeAcceptanceAreSeparate(t *testing.T) {
 	rec, err := repo.GetTask(ctx, in.EmployeeID, in.TaskID)
 	if err != nil {
 		t.Fatal(err)
-	}
-	var snapshot struct {
-		Status     string `json:"status"`
-		Summary    string `json:"summary"`
-		Evidence   []any  `json:"evidence"`
-		Acceptance any    `json:"acceptance"`
-	}
-	if err := pool.QueryRow(ctx, `SELECT snapshot FROM plane_outbox WHERE task_id=$1 AND task_version=$2`, in.TaskID, rec.Version).Scan(&snapshot); err != nil {
-		t.Fatal(err)
-	}
-	if snapshot.Status != "completed" || snapshot.Summary != report.Summary || len(snapshot.Evidence) != 1 || snapshot.Acceptance != nil {
-		t.Fatalf("成功快照：%+v", snapshot)
 	}
 	inReview := task.AcceptanceInput{ExpectedVersion: rec.Version, Decision: "passed", Comment: "员工核查证据后通过"}
 	repo.SetTaskCommitHook(func(context.Context) error { return errors.New("提交失败") })
@@ -70,9 +50,6 @@ func TestPlaneResultAndEmployeeAcceptanceAreSeparate(t *testing.T) {
 	if err != nil || after.Status != task.StatusCompleted || (after.Summary == nil || *after.Summary != report.Summary) {
 		t.Fatalf("验收改变执行：%+v %v", after, err)
 	}
-	if err := pool.QueryRow(ctx, `SELECT snapshot FROM plane_outbox WHERE task_id=$1 AND task_version=$2`, in.TaskID, a.TaskVersion).Scan(&snapshot); err != nil || snapshot.Acceptance == nil {
-		t.Fatalf("验收未回写：%v", err)
-	}
 
 	late := completedReport(in, mustUUID(t))
 	if ack, code, err := repo.ApplyExecutionReport(ctx, late); err != nil || !ack || code != "" {
@@ -82,19 +59,12 @@ func TestPlaneResultAndEmployeeAcceptanceAreSeparate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := pool.QueryRow(ctx, `SELECT snapshot FROM plane_outbox WHERE task_id=$1 AND task_version=$2`, in.TaskID, after.Version).Scan(&snapshot); err != nil || snapshot.Acceptance == nil {
-		t.Fatalf("迟到证据清除了验收 %v", err)
-	}
 	if _, err := repo.ResolveTask(ctx, in.EmployeeID, in.TaskID, task.ResolveInput{ExpectedVersion: after.Version, Status: task.StatusCompleted, Summary: "修正核实结论", Reason: "人工重新核查", EvidenceEmptyReason: "无文件"}); err != nil {
 		t.Fatal(err)
 	}
 	after, err = repo.GetTask(ctx, in.EmployeeID, in.TaskID)
 	if err != nil {
 		t.Fatal(err)
-	}
-	snapshot.Acceptance = nil
-	if err := pool.QueryRow(ctx, `SELECT snapshot FROM plane_outbox WHERE task_id=$1 AND task_version=$2`, in.TaskID, after.Version).Scan(&snapshot); err != nil || snapshot.Acceptance != nil {
-		t.Fatalf("人工修正未要求重验 %v", err)
 	}
 	var executions, dispatches int
 	if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM executions),(SELECT count(*) FROM dispatch_outbox)`).Scan(&executions, &dispatches); err != nil || executions != 1 || dispatches != 1 {

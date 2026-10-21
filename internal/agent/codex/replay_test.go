@@ -157,15 +157,6 @@ func TestRecordedCodexScenarios(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if scenario == "delegation" {
-				id := replaytest.QueriedDelivery(t, tape)
-				if found, err := a.HistoryContains(id, true); err != nil || found {
-					t.Fatalf("wait 嵌套输出提前确认: %v %v", found, err)
-				}
-				if found, err := a.HistoryContains(id, true); err != nil || !found {
-					t.Fatalf("result 输出未确认: %v %v", found, err)
-				}
-			}
 
 			settled := "event:turn/completed"
 			if scenario == "deliver_idle" {

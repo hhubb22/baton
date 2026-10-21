@@ -35,7 +35,6 @@ type RunOptions struct {
 	RootCAs        *x509.CertPool
 	Logger         *slog.Logger
 	DataDir        string
-	agent          *agentBridge
 	reports        *runtimeReports
 	reportSender   *runtimeReportSender
 	projectRuntime *projectRuntimeManager
@@ -80,12 +79,6 @@ func Maintain(ctx context.Context, opts RunOptions) error {
 		}
 		defer opts.projectRuntime.close()
 		host = &session.Host{DataDir: opts.DataDir, Logger: opts.Logger}
-		opts.agent = &agentBridge{}
-		closeIPC, err := serveAgentIPC(ctx, ledger, opts.agent)
-		if err != nil {
-			return err
-		}
-		defer closeIPC()
 		sessions, err := ledger.WorkerSessions()
 		if err != nil {
 			return err
@@ -190,10 +183,6 @@ func runOnce(ctx context.Context, opts RunOptions, incarnation string, ledger *L
 	if opts.projectRuntime != nil {
 		opts.projectRuntime.setLoop(loop)
 		defer opts.projectRuntime.setLoop(nil)
-	}
-	if opts.agent != nil {
-		opts.agent.set(loop)
-		defer opts.agent.set(nil)
 	}
 	errCh := make(chan error, 1)
 	reportSender := opts.reportSender.connect()

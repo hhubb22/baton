@@ -34,8 +34,8 @@ var (
 type Config = agent.Config
 
 type Capabilities struct {
-	Version                                            string
-	Start, Input, Interrupt, Resume, History, Delegate bool
+	Version                                  string
+	Start, Input, Interrupt, Resume, History bool
 }
 
 // Event is the pinned native protocol evidence used by contract/real probes.
@@ -137,9 +137,6 @@ func (a *Adapter) environment() []string {
 	if a.config.Home != "" {
 		env = append(env, "CODEX_HOME="+a.config.Home)
 	}
-	if a.config.ContextFile != "" {
-		env = append(env, "BATON_CONTEXT_FILE="+a.config.ContextFile)
-	}
 	return env
 }
 
@@ -155,7 +152,7 @@ func (a *Adapter) Probe(ctx context.Context) (Capabilities, error) {
 	if !found || !supportedVersion(version) {
 		return Capabilities{}, ErrIncompatible
 	}
-	return Capabilities{Version: version, Start: true, Input: true, Interrupt: true, Resume: true, History: true, Delegate: true}, nil
+	return Capabilities{Version: version, Start: true, Input: true, Interrupt: true, Resume: true, History: true}, nil
 }
 
 func (a *Adapter) connect(ctx context.Context) error {

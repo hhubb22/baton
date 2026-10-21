@@ -142,9 +142,6 @@ func workerCodexTape(t *testing.T, tape replay.Transcript, delivery protocol.Chi
 	t.Helper()
 	tape = replaytest.AdapterTape(tape)
 	keep := map[string]bool{"request:thread/items/list:2": true, "request:thread/items/list:3": true, "request:thread/items/list:5": true}
-	if tape.Header.Scenario == "delegation" {
-		keep["request:thread/items/list"] = true
-	}
 	if variant == "delivery_wrong_id" {
 		keep["request:thread/items/list:4"] = true
 	}
@@ -196,9 +193,6 @@ func runRecordedCodexWorker(t *testing.T, binary, path, variant string) {
 	w := newCodexWorkerRun(t)
 	delivery := protocol.ChildDelivery{DeliveryID: mustSessionID(t), TaskID: w.tid, ExecutionID: w.eid, SessionID: w.sid, ChildTaskID: mustSessionID(t), Result: json.RawMessage(`{"status":"completed","summary":"子结果"}`)}
 	source := replaytest.Load(t, path)
-	if source.Header.Scenario == "delegation" {
-		delivery.DeliveryID = replaytest.QueriedDelivery(t, source)
-	}
 	tape := workerCodexTape(t, source, delivery, variant)
 	scenario := tape.Header.Scenario
 	hasDelivery := scenario == "deliver_active" || scenario == "deliver_idle" || scenario == "restore_load_only"
@@ -267,9 +261,6 @@ func runRecordedCodexWorker(t *testing.T, binary, path, variant string) {
 	}
 	if variant != "exit_mid_turn" && variant != "exit_after_response" && variant != "disconnect" && variant != "drop_settled" && scenario != "restore_missing" {
 		gates = append(gates, "event:turn/completed")
-	}
-	if scenario == "delegation" {
-		gates = append(gates, "response:thread/items/list:2")
 	}
 	if hasDelivery {
 		gates = append(gates, "response:thread/items/list:3")
@@ -399,25 +390,6 @@ func runRecordedCodexWorker(t *testing.T, binary, path, variant string) {
 		assertCodexOneInput(t, w)
 		return
 	}
-	if scenario == "delegation" {
-		received := make(chan error, 1)
-		go func() { _, err := w.c.ReceiveChild(delivery, true); received <- err }()
-		r.Wait(t, "response:thread/items/list:2")
-		db := w.db(t)
-		var status string
-		if err := db.QueryRow(`SELECT status FROM child_deliveries WHERE delivery_id=?`, delivery.DeliveryID).Scan(&status); err != nil || status != "uncertain" {
-			t.Fatal("result 历史前提前确认", status, err)
-		}
-		r.Release(t, "response:thread/items/list:2")
-		select {
-		case err := <-received:
-			if err != nil {
-				t.Fatal(err)
-			}
-		case <-time.After(12 * time.Second):
-			t.Fatal("查询交付未返回")
-		}
-	}
 
 	if hasDelivery {
 		db := w.db(t)
@@ -511,12 +483,6 @@ func runRecordedCodexWorker(t *testing.T, binary, path, variant string) {
 		}
 	}
 	r.Wait(t, ends[0])
-	if scenario == "delegation" {
-		st, err := w.c.ReceiveChild(delivery, true)
-		if err != nil || len(st.ChildReceipts) != 1 || st.ChildReceipts[0].Status != "delivered" {
-			t.Fatal("查询交付确认", st, err)
-		}
-	}
 	assertCodexOneInput(t, w)
 	if scenario == "restore_load_only" {
 		before := w.report(t, protocol.ReportResult, func(r protocol.ExecutionReport) bool { return r.Status == task.StatusCompleted })

@@ -9,7 +9,6 @@ PS-181 于同日使用本机 Codex 0.163.0 / `gpt-6.1-sol` 替换 `interrupt_mid
 首轮失败场景的补录结果：
 
 - `interrupt_before_turn_started`：PS-178 修复后于同日在 `845e1b5` 基线加本工单工作区改动上补录，Codex 0.162.1 / `gpt-6.1-sol`，真实子测试通过。`turn/start` 响应的 `startedAt` 为 null，首次中止被 `-32600 no active turn to interrupt` 拒绝；收到匹配的 `turn/started` 后补发一次，ACK 后收到 `status=interrupted` 的 `turn/completed`，原 thread 历史可读。规范化转录 8,062 字节，删除 2 帧机器信息；残留扫描及用户名、主机名、邮箱、临时路径检查通过。适配器和 Worker 均回放此转录；从真实 `simple` 派生的手写拒绝/开始窗口另覆盖重复通知、其他 thread/turn、开始通知先到、补发失败及完成后晚到的开始通知。ACK 保持 false/false，仅匹配的完成通知确认停止，Worker 保留 needs_verification。
-- `delegation`：首轮用 `gpt-6-luna` 录制时，子任务描述要求不运行工具、不再委托，子 Agent 仍然继续委托，后几层请求文件无效，失败一路传回父任务，属于模型不遵守指令。同日改用 `gpt-6.1-sol` 重录后通过，`delegation.ndjson` 头部记录的模型是 `gpt-6.1-sol`。规范化只保留父会话，子会话的 80 帧计入 `dropped_frames`。
 
 - `simple`：版本探测、创建 thread、一次输入、settled、结构化结果及摘要检查。
 - `interrupt_idle`：完成后调用 Abort，使用已保存的停止事实，保持 `outcomeKnown=false`。
@@ -24,11 +23,9 @@ PS-181 于同日使用本机 Codex 0.163.0 / `gpt-6.1-sol` 替换 `interrupt_mid
 
 `result_free_text` 不适用，保留同名跳过子测试。`internal/agent/codex/codex.go` 的 `StartTask` 每次 `turn/start` 都携带 `outputSchema: ResultSchema()`，`internal/agent/codex/result.go` 要求包含 status、summary 等字段的对象；[Baton TECH](../../../../../specs/baton/TECH.md)「结构化结果」优先使用原生 output schema。当前适配器无法通过任务提示关闭该约束，要求模型自由文本不能稳定产生对应转录。自由文本拒绝继续由既有结果校验测试覆盖，真实错误帧的派生回放由后续迁移工单处理。
 
-额外子测试 `delegation` 保留完整 Coordinator/batond/Worker 委托链路及原 CLI 的 delegate、wait、result 流程，检查父摘要、恰好一个完成且摘要正确的子任务、父任务完成。它包含真实子 Agent 会话，规范化只保留父会话，丢弃条目计入 dropped_frames。该流程还覆盖活动工具查询子结果，独立于 `deliver_active` 的 steer 注入。
-
 ## CI 回放
 
-`TestRecordedCodexScenarios` 和 `TestRecordedCodexWorkerScenarios` 分别回放上述 11 份转录（含补录的 delegation 和 PS-178 的 interrupt_before_turn_started）。早到中止另外保留 PS-178 的补发失败、通知先到及回合身份等派生回放。`delegation` 通过成功查询工具输出中的精确 delivery_id 确认，回放只包含父会话，不启动真实子 Agent。
+`TestRecordedCodexScenarios` 和 `TestRecordedCodexWorkerScenarios` 分别回放上述 10 份转录（含 interrupt_before_turn_started）。早到中止另有补发失败、通知先到及回合身份等派生回放。
 
 测试用独立临时目录绑定 `transcript_start.bindings`，`symlinked_workspace` 额外创建符号链接；不支持创建符号链接的平台显式跳过该项。测试只保留与 app-server 配对的版本探测；录制驱动的额外探测、被筛除子会话留下的探测在测试准备时去掉，进程连续编号。录制响应、方法、thread/turn 身份和原有捕获保留。正常 app-server 在末尾设门，检查已经消费全部所选请求，并检查 `failure.json`。适配器层对 deliver_idle 的两轮结算分别设门；逐帧持久化会执行同步写入与平台权限检查，事实与门闩等待上限为 30 秒。Worker 的 restore_missing 在恢复错误后立即关闭 Agent，改用最后一次 thread/read 的持久捕获、原映射不变与 uncertain_history 报告证明实际执行。
 
@@ -39,7 +36,7 @@ PS-181 于同日使用本机 Codex 0.163.0 / `gpt-6.1-sol` 替换 `interrupt_mid
 - `deliver_active`、`restore_load_only` 的活动交付先准备账本中已有的 `waiting_children` 事实。录制驱动直接调用 DeliverResult；Worker 自动续接要求已有等待子结果的事实。
 - `deliver_idle` 将第一回合的最终消息派生为 `baton_waiting_for_children`，以满足 Worker 自动续接条件；第二回合和交付历史保留录制内容。
 
-交付后的历史响应前设门：即使 steer ACK 和 settled 已到，Worker 仍保存 uncertain，放行含精确 ID 的历史后才产生 delivered 回执。`delivery_wrong_id` 将两次已有历史查询里的 ID 改为相似值，检查保留 uncertain、结果待核实。`delegation` 由 Worker 的 queried 子结果通知触发：wait 的嵌套 JSON 输出没有顶层 delivery_id，保持 uncertain；result 的成功工具输出含精确 ID，放行后才确认 delivered，不向 Agent 注入新输入。重复通知不再注入；`restore_load_only` 重启 Worker 后补报同一条 outbox 结果，保持原 thread/turn，不再提交任务。
+交付后的历史响应前设门：即使 steer ACK 和 settled 已到，Worker 仍保存 uncertain，放行含精确 ID 的历史后才产生 delivered 回执。`delivery_wrong_id` 将两次已有历史查询里的 ID 改为相似值，检查保留 uncertain、结果待核实。`restore_load_only` 重启 Worker 后补报同一条 outbox 结果，保持原 thread/turn，不再提交任务。
 
 `interrupt_mid_tool` 在真实 `commandExecution` 开始帧处设门。两层均先放行开始事件，等回放进程走到后续中止请求处，再调用 Abort 或 Worker.Stop；另在 `turn/completed` 前设门，分别验证 ACK 与迟到的 StopObserver 停止事实，outcomeKnown 保持 false。`TestRecordedToolInterruptFacts` 检查工具开始、中止请求、ACK 和停止的顺序及同一 thread/turn 身份。
 

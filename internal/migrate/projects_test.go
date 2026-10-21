@@ -16,9 +16,8 @@ func TestProjectsUpgradeExistingDatabaseAndRepeat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 现行主干已经应用 0019；0016 必须能补入编号间隙。
 	for _, name := range names {
-		if name >= "0016" && name != "0019_plane_writeback.sql" {
+		if name >= "0016" {
 			continue
 		}
 		body, err := fs.ReadFile(migrations.Files, name)

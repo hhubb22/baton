@@ -49,7 +49,7 @@ func TestEnvironmentExcludesDaemonCredentials(t *testing.T) {
 	for _, key := range []string{"BATON_CONTROL_TOKEN", "BATON_DATABASE_URL", "BATON_NODE_SIGNING_KEY"} {
 		t.Setenv(key, "must-not-inherit")
 	}
-	a := New(Config{Home: t.TempDir(), ContextFile: "context-path"})
+	a := New(Config{Home: t.TempDir()})
 	defer a.Close()
 	for _, value := range a.environment() {
 		if strings.Contains(value, "must-not-inherit") {

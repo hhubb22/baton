@@ -1,6 +1,6 @@
 # Kiro ACP V3 录制转录
 
-13 份转录来自 2026-10-19 的真实 Kiro CLI 2.32.0、ACP V3、macOS arm64。录制基线是 Baton b40e64a 与本 PR 的适配器工作区。普通场景使用账号最低倍率模型 qwen3-coder-next（0.05 Credit）；用户授权后，delegation 和 supplement_active 使用 gpt-5.6-sol（4.4 Credit）。provider_error 指定不存在的模型，验证配置错误路径。
+12 份转录来自 2026-10-19 的真实 Kiro CLI 2.32.0、ACP V3、macOS arm64。录制基线是 Baton b40e64a 与本 PR 的适配器工作区。普通场景使用账号最低倍率模型 qwen3-coder-next（0.05 Credit）；用户授权后，supplement_active 使用 gpt-5.6-sol（4.4 Credit）。provider_error 指定不存在的模型，验证配置错误路径。
 
 规范化保留模型和工具输出，替换目录及运行标识，按原生 Session 筛选父会话。握手里的认证方法、日志位置，以及账号、MCP、steering、工具与命令目录通知按 Kiro 策略过滤，删除数量写入各转录头。Agent 发起的权限请求保留原始 ID，客户端响应严格匹配。主机名、用户名、邮箱、密钥和临时目录扫描未发现残留；提交前已逐场景检查模型文本、工具命令和路径占位符。原始录制只留本机临时目录，成功规范化时删除。
 
@@ -19,10 +19,9 @@
 | restore_recall | 加载后记住原消息标记，计数保持一次 | 适配器显式发送新的回忆输入；Worker 只回放加载段，恢复本身不发回忆输入 |
 | provider_error | 不存在的模型被拒绝 | 配置错误不生成成功结果 |
 | symlinked_workspace | 工作目录使用符号链接别名 | 原生 cwd 与保存映射使用规范目录 |
-| delegation | 真实 Coordinator、batond、父子 Worker 与 baton CLI 完成一份子任务 | 只保留父会话；Worker 通知模拟中心的已保存子结果。成功 execute 输出的精确 delivery_id 经独立原生历史确认；门控持久历史响应，验证最终结果等待核查，重复查询不重发输入 |
 | supplement_active | Sol 在前台工具运行中接受补充输入 | cancel 后等待旧 prompt，再发一次补充；Worker 重复 operation_id 只查询原回执，旧结果不能完成新输入 |
 
-`deliver_active` 不录制第二个活动 prompt：Kiro 的第二个 prompt 会打断原工具，Worker 忙碌来源按批准的统一路径通过 `baton task result` 查询，真实 delegation 覆盖这一条路径。活动员工补充输入的打断行为由 supplement_active 单独验证。
+`deliver_active` 不录制第二个活动 prompt：Kiro 的第二个 prompt 会打断原工具。活动员工补充输入的打断行为由 supplement_active 单独验证。
 
 Sol 可能按任务协议坚持返回 JSON，使 result_free_text 无法产生反例；真实入口在这种情况下跳过该次反例录制。已提交的 Qwen 自由文本转录继续提供两层负向覆盖。
 
@@ -37,4 +36,4 @@ BATON_REAL_KIRO=1 BATON_REAL_KIRO_MODEL=gpt-5.6-sol \
   go test -v ./internal/gateway -run '^TestRealKiro$' -count=1 -timeout 30m
 ```
 
-真实委托需要 `BATON_TEST_DATABASE_URL` 指向可创建临时 schema 的隔离 PostgreSQL 16+。登录由 Kiro 自身管理，测试不复制或打印凭据。回放不调用模型；Linux、Windows 的回放结果只证明协议与 Worker 处理，真实模型支持范围以目标系统实测为准。
+登录由 Kiro 自身管理，测试不复制或打印凭据。回放不调用模型；Linux、Windows 的回放结果只证明协议与 Worker 处理，真实模型支持范围以目标系统实测为准。

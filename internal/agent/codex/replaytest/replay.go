@@ -82,35 +82,6 @@ func AdapterTape(tape replay.Transcript) replay.Transcript {
 	return tape
 }
 
-// QueriedDelivery 读取录制中成功 result 工具输出的精确交付 ID。
-func QueriedDelivery(t *testing.T, tape replay.Transcript) string {
-	t.Helper()
-	for _, e := range tape.Entries {
-		if e.Type != "emit_inbound" {
-			continue
-		}
-		var f struct {
-			Params struct {
-				Item struct {
-					Type, AggregatedOutput string
-					ExitCode               *int
-				}
-			}
-		}
-		if json.Unmarshal(e.Frame, &f) != nil || f.Params.Item.Type != "commandExecution" || f.Params.Item.ExitCode == nil || *f.Params.Item.ExitCode != 0 {
-			continue
-		}
-		var result struct {
-			DeliveryID string `json:"delivery_id"`
-		}
-		if json.Unmarshal([]byte(f.Params.Item.AggregatedOutput), &result) == nil && result.DeliveryID != "" {
-			return result.DeliveryID
-		}
-	}
-	t.Fatal("录制缺少成功 result 工具的 delivery_id")
-	return ""
-}
-
 type Run struct {
 	Binary, Work, Alias, Home, State string
 	Tape                             replay.Transcript

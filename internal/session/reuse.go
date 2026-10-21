@@ -41,11 +41,6 @@ func (w *workerDB) reuseLocked(taskID, executionID, agentType string) error {
 		return errors.New("原生 Session 配置无效")
 	}
 	config.ExecutionID = executionID
-	contextFile, err := AgentContextPath(w.dataDir, config.SessionID, executionID)
-	if err != nil {
-		return err
-	}
-	config.ContextFile = contextFile
 	config.Restore = true
 	raw, err := json.Marshal(config)
 	if err != nil {

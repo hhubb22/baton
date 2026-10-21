@@ -25,7 +25,6 @@ import (
 	"baton/internal/httpapi"
 	"baton/internal/migrate"
 	"baton/internal/node"
-	"baton/internal/plane"
 	"baton/internal/protocol"
 	"baton/internal/redact"
 	"baton/internal/store"
@@ -205,22 +204,9 @@ func cmdServe(ctx context.Context, stderr io.Writer, getenv func(string) string)
 		if err != nil {
 			return err
 		}
-		planeConfig, err := plane.Load(getenv)
-		if err != nil {
-			return err
-		}
 		mux := http.NewServeMux()
 		mux.Handle("/", api)
 		mux.Handle(protocol.NodePath, gw)
-		var planeHook *plane.Service
-		if planeConfig != nil {
-			hook, err := plane.New(pool, *planeConfig, store.New(pool), nil, logger)
-			if err != nil {
-				return err
-			}
-			mux.Handle(plane.Path, hook)
-			planeHook = hook
-		}
 		apiSrv := &http.Server{
 			Handler:           longConnections(webui.Handler(mux)),
 			ReadTimeout:       20 * time.Second,
@@ -256,18 +242,6 @@ func cmdServe(ctx context.Context, stderr io.Writer, getenv func(string) string)
 			cancelLoops()
 			loops.Wait()
 		}()
-		if planeHook != nil {
-			retryCtx, cancel := context.WithCancel(ctx)
-			done := make(chan struct{})
-			go func() {
-				defer close(done)
-				planeHook.Run(retryCtx)
-			}()
-			defer func() {
-				cancel()
-				<-done
-			}()
-		}
 		shutdown := func() {
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()

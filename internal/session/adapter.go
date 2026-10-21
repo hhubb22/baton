@@ -73,11 +73,7 @@ func configureAdapter(w *workerDB, dataDir, sessionID string) {
 				return nil, err
 			}
 		}
-		contextFile, err := AgentContextPath(dataDir, sessionID, w.execution)
-		if err != nil {
-			return nil, err
-		}
-		config = agent.Config{DataDir: dataDir, Directory: input.WorkingDirectory, SessionDir: filepath.Join(dir, "native"), SessionID: sessionID, ExecutionID: w.execution, ContextFile: contextFile}
+		config = agent.Config{DataDir: dataDir, Directory: input.WorkingDirectory, SessionDir: filepath.Join(dir, "native"), SessionID: sessionID, ExecutionID: w.execution}
 		config.StatePath = filepath.Join(config.SessionDir, "state.json")
 		if _, err := os.Lstat(config.SessionDir); err == nil {
 			config.Restore = true

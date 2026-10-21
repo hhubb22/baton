@@ -7,7 +7,7 @@ import (
 	"baton/internal/task"
 )
 
-// AcceptResult 保存员工验收与回写意图，保留任务的执行结论。
+// AcceptResult 保存员工验收，保留任务的执行结论。
 func (s *Store) AcceptResult(ctx context.Context, employeeID, taskID string, in task.AcceptanceInput) (task.Acceptance, error) {
 	if err := task.ValidateAcceptance(in); err != nil {
 		return task.Acceptance{}, err

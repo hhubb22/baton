@@ -134,7 +134,7 @@ func New(t *testing.T, binary string, tape replay.Transcript, data, sid, workspa
 			}
 		}
 	}
-	fixture := &Fixture{Tape: tape, Replay: c, Binary: binary, Agent: agent.Config{Binary: binary, Directory: workspace, SessionDir: filepath.FromSlash(sessionDir), SessionID: sid, Model: model, Home: dir, ContextFile: filepath.Join(dir, "context.json")}}
+	fixture := &Fixture{Tape: tape, Replay: c, Binary: binary, Agent: agent.Config{Binary: binary, Directory: workspace, SessionDir: filepath.FromSlash(sessionDir), SessionID: sid, Model: model, Home: dir}}
 	t.Cleanup(func() { fixture.Check(t) })
 	return fixture
 }

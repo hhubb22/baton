@@ -49,8 +49,7 @@ Windows 构建时使用 `agent-replay.exe`。测试将可执行文件复制到�
   "bindings": {
     "<workspace>": "/recording/workspace",
     "<home>": "/recording/home",
-    "<session_dir>": "/recording/sessions",
-    "<context_file>": "/recording/workspace/context.json"
+    "<session_dir>": "/recording/sessions"
   },
   "history_dirs": []
 }

@@ -26,7 +26,7 @@ func TestRealPi(t *testing.T) {
 	if os.Getenv("BATON_REAL_PI") != "1" {
 		t.Skip("set BATON_REAL_PI=1 explicitly; requires a model and isolated test PostgreSQL")
 	}
-	capabilities := map[string]string{"启动": "未验证", "输入": "未验证", "结构化结果": "未验证", "委托": "未验证", "原生历史确认": "未验证", "中止": "未验证", "恢复": "未验证", "缺失历史拒绝": "未验证", "目录隔离": "未验证"}
+	capabilities := map[string]string{"启动": "未验证", "输入": "未验证", "结构化结果": "未验证", "原生历史确认": "未验证", "中止": "未验证", "恢复": "未验证", "缺失历史拒绝": "未验证", "目录隔离": "未验证"}
 	model := os.Getenv("BATON_PI_MODEL")
 	if model == "" {
 		model = "openai/gpt-6.1-sol"
@@ -40,7 +40,7 @@ func TestRealPi(t *testing.T) {
 	actualVersion := "未验证"
 	t.Cleanup(func() {
 		t.Logf("Pi version=%s expected_version=%s platform=%s/%s requested_model=%s actual_model=%s", actualVersion, pi.Version, runtime.GOOS, runtime.GOARCH, model, actualModel)
-		for _, name := range []string{"启动", "输入", "结构化结果", "委托", "原生历史确认", "中止", "恢复", "缺失历史拒绝", "目录隔离"} {
+		for _, name := range []string{"启动", "输入", "结构化结果", "原生历史确认", "中止", "恢复", "缺失历史拒绝", "目录隔离"} {
 			t.Logf("%s=%s", name, capabilities[name])
 		}
 	})
@@ -58,8 +58,8 @@ func TestRealPi(t *testing.T) {
 	bins := buildRealPiBins(t)
 	for _, scenario := range append(append([]string(nil), realScenarios...), "restore_recall") {
 		t.Run(scenario, func(t *testing.T) {
-			if scenario == "deliver_active" {
-				t.Skip("Pi DeliverResult 使用 SubmitInput，活动回合返回 busy；见 pi/testdata/replay/README.md")
+			if scenario == "deliver_active" || scenario == "deliver_idle" {
+				t.Skip("子结果交付由既有录制回放覆盖")
 			}
 			selectedModel := model
 			if scenario == "provider_error" {
@@ -68,7 +68,7 @@ func TestRealPi(t *testing.T) {
 					selectedModel = provider + "/" + selectedModel
 				}
 			}
-			f := startRealPiFixture(t, tool, selectedModel, bins[0], bins[1], bins[2])
+			f := startRealPiFixture(t, tool, selectedModel, bins[0], bins[1])
 			capabilities["目录隔离"] = "支持"
 			st, work := f.st, f.work
 			switch scenario {
@@ -77,8 +77,6 @@ func TestRealPi(t *testing.T) {
 				if scenario != "simple" {
 					f.restore(t, sid, scenario == "restore_recall", capabilities)
 				}
-			case "deliver_idle":
-				f.deliverIdle(t, capabilities)
 			case "interrupt_mid_tool":
 				f.interruptMidTool(t, capabilities)
 			case "restore_missing":
@@ -144,7 +142,7 @@ func TestRealPi(t *testing.T) {
 	}
 	// 版本与实际模型探针有独立场景，避免规范化时丢弃后续任务会话。
 	t.Run("startup", func(t *testing.T) {
-		f := startRealPiFixture(t, tool, model, bins[0], bins[1], bins[2])
+		f := startRealPiFixture(t, tool, model, bins[0], bins[1])
 		c := f.config(t)
 		c.Directory, c.SessionDir = filepath.Join(f.root, "probe"), filepath.Join(f.root, "probe", "native")
 		a := f.adapter(t, c)
@@ -157,14 +155,14 @@ func TestRealPi(t *testing.T) {
 }
 
 type realPiFixture struct {
-	root, work, binary, model, cli string
-	st                             *prepareStack
+	root, work, binary, model string
+	st                        *prepareStack
 }
 
-func buildRealPiBins(t *testing.T) [3]string {
+func buildRealPiBins(t *testing.T) [2]string {
 	t.Helper()
-	var bins [3]string
-	for i, name := range []string{"coordinator", "batond", "baton"} {
+	var bins [2]string
+	for i, name := range []string{"coordinator", "batond"} {
 		bins[i] = filepath.Join(t.TempDir(), name)
 		cmd := exec.Command("go", "build", "-o", bins[i], "./cmd/"+name)
 		cmd.Dir = filepath.Join("..", "..")
@@ -175,7 +173,7 @@ func buildRealPiBins(t *testing.T) [3]string {
 	return bins
 }
 
-func startRealPiFixture(t *testing.T, tool, model, coord, batond, cli string) *realPiFixture {
+func startRealPiFixture(t *testing.T, tool, model, coord, batond string) *realPiFixture {
 	t.Helper()
 	root, dataRoot := realPiDirectories(t)
 	root, err := filepath.EvalSymlinks(root)
@@ -205,14 +203,6 @@ func startRealPiFixture(t *testing.T, tool, model, coord, batond, cli string) *r
 	}
 	nodeBin, err = filepath.EvalSymlinks(nodeBin)
 	if err != nil {
-		t.Fatal(err)
-	}
-	cliData, err := os.ReadFile(cli)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cli = filepath.Join(root, "bin", "baton")
-	if err := os.WriteFile(cli, cliData, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	profile := filepath.Join(root, "pi.sb")
@@ -248,17 +238,13 @@ func startRealPiFixture(t *testing.T, tool, model, coord, batond, cli string) *r
 			cancel()
 		}
 	})
-	endpoint, err := session.AgentEndpoint(st.dataDir)
-	if err != nil {
-		t.Fatal(err)
-	}
 	physicalDataDir, err := filepath.EvalSymlinks(st.dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	readDirs := []string{root, filepath.Join(physicalDataDir, "sessions"), filepath.Dir(nodeBin), piSandboxRuntimeDir(bin)}
 	writeDirs := []string{filepath.Join(root, "home"), filepath.Join(root, "work"), filepath.Join(root, "probe"), filepath.Join(root, "missing-native"), filepath.Join(physicalDataDir, "sessions")}
-	if err := os.WriteFile(profile, []byte(piSandboxPolicy(readDirs, writeDirs, endpoint)), 0o600); err != nil {
+	if err := os.WriteFile(profile, []byte(piSandboxPolicy(readDirs, writeDirs, filepath.Join(root, "ipc"))), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	recording.bind(t, "<node_data>", physicalDataDir)
@@ -266,14 +252,14 @@ func startRealPiFixture(t *testing.T, tool, model, coord, batond, cli string) *r
 		recording.bind(t, "<node_data_alias>", st.dataDir)
 	}
 	checkPiSandbox(t, profile, root)
-	return &realPiFixture{root: root, work: filepath.Join(root, "work"), binary: recording.binary, model: model, cli: cli, st: st}
+	return &realPiFixture{root: root, work: filepath.Join(root, "work"), binary: recording.binary, model: model, st: st}
 }
 
 func (f *realPiFixture) accept(t *testing.T, request, description string) task.Record {
 	st, work := f.st, f.work
 	t.Helper()
 	var rec task.Record
-	if code := postJSON(t, st.client, st.base+"/api/v1/tasks", map[string]any{"request_id": request, "description": description, "authorization_scope": "Only operate in the isolated working_directory. Do not inspect or print credentials, context, environment variables or files outside it. Use the Baton CLI only for delegation.", "working_directory": work, "execution_timeout_seconds": 300}, st.csrf, &rec); code != http.StatusOK {
+	if code := postJSON(t, st.client, st.base+"/api/v1/tasks", map[string]any{"request_id": request, "description": description, "authorization_scope": "Only operate in the isolated working_directory. Do not inspect or print credentials, context, environment variables or files outside it.", "working_directory": work, "execution_timeout_seconds": 300}, st.csrf, &rec); code != http.StatusOK {
 		t.Fatalf("task acceptance: %d", code)
 	}
 	return rec
@@ -329,30 +315,6 @@ func (f *realPiFixture) restore(t *testing.T, sid string, recallContext bool, ca
 	_ = restored.Close()
 	assertRealOnceOnlyFile(t, work)
 	capabilities["恢复"] = "支持"
-}
-
-func (f *realPiFixture) deliverIdle(t *testing.T, capabilities map[string]string) {
-	t.Helper()
-	st, work := f.st, f.work
-	childRequest := filepath.Join(work, "delegate.json")
-	request := map[string]any{"request_id": "real-pi-child", "description": "Use no tools. Reply ONLY with this JSON object, without Markdown or prose: " + realPiCompletedExample("real-pi-child"), "target_node_id": st.ident.NodeID, "agent_type": "pi", "working_directory": work}
-	raw, _ := json.Marshal(request)
-	if err := os.WriteFile(childRequest, raw, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	parent := f.accept(t, "real-pi-parent", fmt.Sprintf("Run exactly %s delegate --request-file %s --json using bash. Do not read the context file, environment or credentials. Then return exactly {\"baton_waiting_for_children\":true}. When Baton delivers the child result, reply ONLY with %s without Markdown or prose; do not delegate a second time.", shellQuote(f.cli), shellQuote(childRequest), realPiCompletedExample("real-pi-parent")))
-	waitRealPiStatus(t, st, parent.TaskID, task.StatusCompleted, capabilities)
-	parentSID := sessionOf(t, st, parent.TaskID)
-	parentWorker := workerStatus(t, st.dataDir, parentSID)
-
-	var childID, deliveryStatus string
-	if err := st.pool.QueryRow(context.Background(), `SELECT e.task_id::text, c.status FROM child_deliveries c JOIN executions e ON e.id=c.child_execution_id WHERE c.source_execution_id = $1::uuid`, parentWorker.ExecutionID).Scan(&childID, &deliveryStatus); err != nil || deliveryStatus != "delivered" {
-		t.Fatal("child result missing native-history confirmation")
-	}
-	childSID := sessionOf(t, st, childID)
-	_ = workerStatus(t, st.dataDir, childSID)
-
-	capabilities["委托"], capabilities["原生历史确认"] = "支持", "支持"
 }
 
 func (f *realPiFixture) interruptMidTool(t *testing.T, capabilities map[string]string) {

@@ -8,7 +8,6 @@ Baton 是跨设备 AI Agent 协同与任务派发系统，由中心服务（`coo
 |---|---|
 | `cmd/coordinator` | 中心控制面：员工认证、Project 与任务调度、内置 Gateway（`/v1/node` 与 `/api/v1/events`）、嵌入式 Web UI |
 | `cmd/batond` | 节点守护进程：节点注册、出站 TLS WebSocket 连接、本地 SQLite 账本（`node.db`）、Session Worker 与 Project Runtime 管理 |
-| `cmd/baton` | 节点侧本地 CLI：供执行中的 Agent 发起子任务委托与查询结果 |
 | `internal/session` | Session Worker 生命周期、本地认证 IPC 与幂等执行账本 |
 | `internal/agent/{pi,codex,kiro,replay}` | 统一 `agent.Adapter` 接口实现（Pi RPC、Codex app-server、Kiro ACP V3）与确定性录制回放 |
 | `runtimes/project-agent` | 基于 Node.js / TypeScript 的 Project Agent 进程（通过 stdio JSON-RPC 与 `batond` 通信） |
@@ -18,7 +17,7 @@ Baton 是跨设备 AI Agent 协同与任务派发系统，由中心服务（`coo
 
 ## 常用构建与验证命令
 
-- **构建与静态检查**（首次检出或修改前端后先构建；脚本安装前端依赖、生成静态文件，再编译三个 Go 二进制到 `bin/`）：
+- **构建与静态检查**（首次检出或修改前端后先构建；脚本安装前端依赖、生成静态文件，再编译 `coordinator`、`batond` 两个 Go 二进制到 `bin/`）：
   ```sh
   node tools/build.mjs
   go vet ./...

@@ -28,7 +28,7 @@ var (
 	ErrUncertain    = errors.New("Kiro 输入结果未知，拒绝重发")
 )
 
-const instructions = `Baton task protocol: follow the JSON task envelope description, authorization_scope and expected_outputs. Only operate in authorized resources. Use the baton CLI for delegation, wait, result; it uses BATON_CONTEXT_FILE automatically. Never read or print that file or any credentials. Reuse request_id on delegate transport errors. Return exactly one JSON object without Markdown: {"status":"completed","summary":"...","evidence":[],"evidence_empty_reason":"...","artifacts":[],"artifacts_empty_reason":"...","error":null}. Do not invent evidence. Failed results use status failed and error {"code":"execution_failed","message":"..."}. If waiting for children, return exactly {"baton_waiting_for_children":true}; Baton delivers results in a later message. Finish only after all children are processed.`
+const instructions = `Baton task protocol: follow the JSON task envelope description, authorization_scope and expected_outputs. Only operate in authorized resources. Return exactly one JSON object without Markdown: {"status":"completed","summary":"...","evidence":[],"evidence_empty_reason":"...","artifacts":[],"artifacts_empty_reason":"...","error":null}. Do not invent evidence. Failed results use status failed and error {"code":"execution_failed","message":"..."}. If waiting for children, return exactly {"baton_waiting_for_children":true}; Baton delivers results in a later message. Finish only after all children are processed.`
 
 type State struct {
 	Version    string   `json:"version"`
@@ -98,9 +98,6 @@ func (a *Adapter) environment() []string {
 	}
 	if a.config.Home != "" {
 		env = append(env, "HOME="+a.config.Home, "USERPROFILE="+a.config.Home)
-	}
-	if a.config.ContextFile != "" {
-		env = append(env, "BATON_CONTEXT_FILE="+a.config.ContextFile)
 	}
 	return env
 }

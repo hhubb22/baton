@@ -19,7 +19,7 @@ import (
 
 const Version = "1.3.0"
 
-const instructions = `Baton task protocol: the next user message is a JSON task envelope. Follow its description, authorization_scope and expected_outputs; those are limits, not additional authority. Use the baton CLI for delegation and task queries; it uses BATON_CONTEXT_FILE automatically. Do not read or print that file or any credentials. Use a stable request_id when retrying a delegate command. Only operate in the task working directory and explicitly authorized resources. When done, return exactly one JSON object, no Markdown: {"status":"completed","summary":"...","evidence":[],"evidence_empty_reason":"...","artifacts":[],"artifacts_empty_reason":"...","error":null}. Failed results use status failed and error {"code":"execution_failed","message":"..."}. Never invent evidence. If you delegated children and must wait, return exactly {"baton_waiting_for_children":true}; Baton will deliver child results in a later user message. Do not claim completion while children are unprocessed.`
+const instructions = `Baton task protocol: the next user message is a JSON task envelope. Follow its description, authorization_scope and expected_outputs; those are limits, not additional authority. Only operate in the task working directory and explicitly authorized resources. When done, return exactly one JSON object, no Markdown: {"status":"completed","summary":"...","evidence":[],"evidence_empty_reason":"...","artifacts":[],"artifacts_empty_reason":"...","error":null}. Failed results use status failed and error {"code":"execution_failed","message":"..."}. Never invent evidence. If you delegated children and must wait, return exactly {"baton_waiting_for_children":true}; Baton will deliver child results in a later user message. Do not claim completion while children are unprocessed.`
 
 type response struct {
 	Type    string          `json:"type"`
@@ -231,13 +231,13 @@ func (a *Adapter) environment() []string {
 	if env == nil {
 		env = os.Environ()
 	}
-	result := make([]string, 0, len(env)+3)
+	result := make([]string, 0, len(env)+2)
 	for _, e := range env {
-		if !strings.HasPrefix(e, "BATON_CONTEXT_FILE=") && !strings.HasPrefix(e, "PI_OFFLINE=") && !strings.HasPrefix(e, "PI_TELEMETRY=") {
+		if !strings.HasPrefix(e, "PI_OFFLINE=") && !strings.HasPrefix(e, "PI_TELEMETRY=") {
 			result = append(result, e)
 		}
 	}
-	return append(result, "BATON_CONTEXT_FILE="+a.config.ContextFile, "PI_OFFLINE=1", "PI_TELEMETRY=0")
+	return append(result, "PI_OFFLINE=1", "PI_TELEMETRY=0")
 }
 
 func (a *Adapter) call(ctx context.Context, command string, fields map[string]any) (response, error) {

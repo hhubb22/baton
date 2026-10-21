@@ -9,13 +9,13 @@
 - `interrupt_idle`：无工具回合结束后中止，确认停止且结果已知。
 - `interrupt_mid_tool`：工具写入启动文件后取消，保留原测试的 ACK、迟到停止确认、待核实状态、`outcomeKnown=false` 与后续写入时序断言。
 - `interrupt_before_turn_started`：提交返回后立即中止，通过 StopObserver 等待停止并确认原生历史可读。
-- `deliver_idle`：完整父子委托，父回合空闲后交付，中心 `child_deliveries.status=delivered` 证明原生历史确认；保留子 Worker 存在检查。
+- `deliver_idle`：既有父子任务录制用于两层回放，验证空闲父回合的子结果交付与原生历史确认。真实入口跳过此场景。
 - `restore_load_only`：独立完成一次任务，重启 batond 后仍为原 Worker，再恢复相同 Pi 会话；恢复后无输出，`count.txt` 仍只有一次写入。
 - `restore_missing`：建立独立会话后，用同一 Session ID 和不存在的历史目录恢复，必须返回 `ErrHistoryMissing`。拒绝发生在启动 Pi 之前；转录保留初始化过程，回放还需构造缺失历史。
 - `provider_error`：使用不存在的模型名，启动或输入失败，或以 uncertain 结束；不得输出成功结果。
 - `symlinked_workspace`：通过 macOS `/tmp` 下的符号链接工作目录启动并完成结构化结果。
 
-`deliver_active` 不适用，保留同名跳过子测试。`internal/agent/pi/pi.go` 的 `DeliverResult` 校验交付 ID 后调用 `SubmitInput`，后者在 `active=true` 时返回 busy，没有 steer 分支。[Baton TECH](../../../../../specs/baton/TECH.md)「Agent 发起委托」中的子结果通知规则规定活动工具通过 CLI 查询结果，空闲且等待该委托时才提交结果输入；活动工具查询在 Pi 原生历史中由 `HistoryContains(deliveryID, true)` 检查。因此该场景无法录成活动回合注入，也不能把 prompt ACK 视为交付确认。
+`deliver_active` 不适用，保留同名跳过子测试。`internal/agent/pi/pi.go` 的 `DeliverResult` 校验交付 ID 后调用 `SubmitInput`，后者在 `active=true` 时返回 busy，没有 steer 分支。交付确认仍由原生历史中的精确 delivery_id 提供。
 
 额外保留 `startup`，独立检查实际模型非空和版本，避免它的探针会话成为其他场景的首个会话；`restore_recall` 保留恢复后显式新回合回忆原上下文及 once-only 文件断言。所有场景都执行原沙箱的内部读写、外部读写拒绝、符号链接逃逸拒绝检查，对应目录隔离能力。
 
@@ -46,7 +46,7 @@
 
 | 原覆盖点 | 当前测试或场景 |
 |---|---|
-| 初始化关闭自动重试、命令顺序、上下文路径 | 全部录制的严格出站比较；`TestPiConfiguredEnvironment` |
+| 初始化关闭自动重试、命令顺序与环境设置 | 全部录制的严格出站比较；`TestPiConfiguredEnvironment` |
 | 版本/RPC 使用授权 cwd、新建与恢复 | `symlinked_workspace` 的 RPC cwd；`TestPiSandboxUnreadableCallerCwd` 检查四次进程 cwd |
 | settled 后结果、agent_end 不结算、Unicode 保留 | `simple`、`missing_settled`、`TestPiLFFraming`、`TestPiTextContentUnicode` |
 | 等待子任务、provider 错误 | `deliver_idle`、`provider_error`、`quota_error` |

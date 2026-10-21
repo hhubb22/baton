@@ -1,18 +1,12 @@
 package gateway_test
 
 import (
-	"baton/internal/node"
-	"baton/internal/session"
-	"baton/internal/task"
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -35,7 +29,7 @@ func TestRealKiro(t *testing.T) {
 	}
 	t.Logf("Kiro=%s model=%s", kiro.Version, model)
 	tool := realRecordingTool(t)
-	for _, name := range append(append([]string{}, realScenarios...), "restore_recall", "delegation", "supplement_active") {
+	for _, name := range append(append([]string{}, realScenarios...), "restore_recall", "supplement_active") {
 		t.Run(name, func(t *testing.T) {
 			if name == "deliver_active" {
 				t.Skip("Kiro 活动第二 prompt 会打断原回合；Worker 忙碌交付通过原工具查询，见场景 README")
@@ -55,10 +49,6 @@ func TestRealKiro(t *testing.T) {
 				selected = "baton-nonexistent-model"
 			}
 			recording := newRealRecording(t, tool, "kiro", kiro.Version, selected, binary, map[string]string{"<workspace>": work, "<home>": home})
-			if name == "delegation" {
-				runRealKiroDelegation(t, ctx, recording, home, model, map[string]string{})
-				return
-			}
 			c := agent.Config{Binary: recording.binary, Model: selected, Directory: work, SessionID: "baton-kiro-real", ExecutionID: "kiro-real-execution", SessionDir: filepath.Join(work, "native"), StatePath: filepath.Join(work, "native", "state.json")}
 			if name == "symlinked_workspace" {
 				c.Directory = realSymlinkedWorkspace(t, work)
@@ -202,110 +192,4 @@ func nextRealKiro(t *testing.T, ctx context.Context, a *kiro.Adapter) agent.Outp
 		case <-time.After(20 * time.Millisecond):
 		}
 	}
-}
-
-func runRealKiroDelegation(t *testing.T, ctx context.Context, recording *realRecording, home, model string, results map[string]string) {
-	t.Helper()
-	binary := recording.binary
-
-	buildBins(t)
-	binDir := t.TempDir()
-	cli := filepath.Join(binDir, "baton")
-	if runtime.GOOS == "windows" {
-		cli += ".exe"
-	}
-	build := exec.CommandContext(ctx, "go", "build", "-o", cli, "./cmd/baton")
-	build.Dir = filepath.Join("..", "..")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build CLI: %v %s", err, out)
-	}
-	st := startPrepareStack(t, map[string]string{"BATON_TEST_EXECUTOR_LOG": "", "BATON_TEST_HOLD_START": "0", "BATON_KIRO_BINARY": binary, "BATON_KIRO_HOME": home, "BATON_KIRO_MODEL": model, "HOME": home, "USERPROFILE": home, "PATH": binDir + string(os.PathListSeparator) + os.Getenv("PATH")})
-	st.batond.stop()
-	st.ident.Capabilities = append(st.ident.Capabilities, "kiro")
-	if err := os.Remove(filepath.Join(st.dataDir, node.IdentityFileName)); err != nil {
-		t.Fatal(err)
-	}
-	if err := node.WriteIdentity(st.dataDir, st.ident); err != nil {
-		t.Fatal(err)
-	}
-	st.batond = startCmd(t, st.batondBin, st.batondArgs, st.batondEnv)
-	if _, err := st.pool.Exec(ctx, `UPDATE nodes SET capabilities=ARRAY['pi','codex','kiro','start'], default_agent_type='kiro' WHERE id=$1::uuid`, st.ident.NodeID); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		st.batond.stop()
-		dirs, _ := os.ReadDir(filepath.Join(st.dataDir, "sessions"))
-		for _, d := range dirs {
-			ep, err := session.Endpoint(st.dataDir, d.Name())
-			if err != nil {
-				continue
-			}
-			tokenPath, err := session.TokenPath(st.dataDir, d.Name())
-			if err != nil {
-				continue
-			}
-			token, err := os.ReadFile(tokenPath)
-			if err != nil {
-				continue
-			}
-			c, err := session.Dial(context.Background(), ep, strings.TrimSpace(string(token)))
-			if err != nil {
-				continue
-			}
-			if status, err := c.Status(); err == nil {
-				stopWorker(status.PID)
-			}
-			_ = c.Close()
-		}
-	})
-	parentDir, childDir := t.TempDir(), t.TempDir()
-	parentDir, _ = filepath.EvalSymlinks(parentDir)
-	childDir, _ = filepath.EvalSymlinks(childDir)
-	recording.bind(t, "<workspace>", parentDir)
-	recording.bind(t, "<child_workspace>", childDir)
-	recording.bind(t, "<node_data>", st.dataDir)
-	recording.bind(t, "<cli_bin>", binDir)
-	request, _ := json.Marshal(map[string]any{"request_id": "real-child", "description": `Do not run tools or delegate. Your final response must be ONLY this exact JSON, with no Markdown or explanation: {"status":"completed","summary":"baton-real-child-ok","evidence":[],"evidence_empty_reason":"fixture","artifacts":[],"artifacts_empty_reason":"fixture","error":null}`, "working_directory": childDir, "agent_type": "kiro", "target_node_id": st.ident.NodeID})
-	if err := os.WriteFile(filepath.Join(parentDir, "child.json"), request, 0600); err != nil {
-		t.Fatal(err)
-	}
-	var source task.Record
-	prompt := `Only operate in the two temporary working directories. Run baton delegate --request-file child.json --json once (reuse the same request on transport failure), extract task_id, run baton task wait ID --timeout 30s --json until terminal, then baton task result ID --json. Do not read BATON_CONTEXT_FILE yourself. After the child completes, return a completed Baton JSON result whose summary is exactly baton-real-parent-ok, empty evidence/artifacts with honest empty reasons, and null error. Never delegate again or claim success before querying the child result. Do NOT return a waiting marker. Stay in the tool loop until the child is terminal. Your final reply must be ONLY this exact JSON without commentary or Markdown: {"status":"completed","summary":"baton-real-parent-ok","evidence":[],"evidence_empty_reason":"fixture","artifacts":[],"artifacts_empty_reason":"fixture","error":null}.`
-	if code := postJSON(t, st.client, st.base+"/api/v1/tasks", map[string]any{"request_id": "real-parent", "description": prompt, "authorization_scope": fmt.Sprintf("Only temporary fixture directories %s and %s; delegate exactly one fixture task and query it using baton CLI.", parentDir, childDir), "working_directory": parentDir, "agent_type": "kiro", "execution_timeout_seconds": 300}, st.csrf, &source); code != http.StatusOK {
-		t.Fatal("real parent rejected", code)
-	}
-	deadline := time.Now().Add(5 * time.Minute)
-	for time.Now().Before(deadline) {
-		var status, summary string
-		if err := st.pool.QueryRow(ctx, `SELECT status,COALESCE(summary,'') FROM tasks WHERE id=$1::uuid`, source.TaskID).Scan(&status, &summary); err != nil {
-			t.Fatal(err)
-		}
-		if status == task.StatusCompleted {
-			if summary != "baton-real-parent-ok" {
-				t.Fatal("parent result mismatch")
-			}
-			break
-		}
-		if status == task.StatusFailed || status == task.StatusNeedsVerification || status == task.StatusCancelled {
-			results["委托"] = "不支持"
-			var code, message string
-			_ = st.pool.QueryRow(ctx, `SELECT COALESCE(error_code,''),COALESCE(error_message,'') FROM tasks WHERE id=$1::uuid`, source.TaskID).Scan(&code, &message)
-			t.Fatal("real delegated flow did not complete", status, code, message)
-		}
-		select {
-		case <-ctx.Done():
-			t.Fatal("real delegate timeout")
-		case <-time.After(300 * time.Millisecond):
-		}
-	}
-	var children, completed int
-	if err := st.pool.QueryRow(ctx, `SELECT count(*),count(*) FILTER(WHERE status='completed' AND summary='baton-real-child-ok') FROM tasks WHERE parent_task_id=$1::uuid`, source.TaskID).Scan(&children, &completed); err != nil || children != 1 || completed != 1 {
-		results["委托"] = "不支持"
-		t.Fatal("expected exactly one completed child", err)
-	}
-	var parentDone bool
-	if err := st.pool.QueryRow(ctx, `SELECT status='completed' FROM tasks WHERE id=$1::uuid`, source.TaskID).Scan(&parentDone); err != nil || !parentDone {
-		t.Fatal("parent not complete", err)
-	}
-	results["委托"] = "支持"
 }

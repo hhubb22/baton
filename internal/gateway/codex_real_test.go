@@ -3,8 +3,6 @@ package gateway_test
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,7 +13,6 @@ import (
 
 	"baton/internal/agent/codex"
 	"baton/internal/identity"
-	"baton/internal/session"
 	"baton/internal/task"
 )
 
@@ -25,11 +22,11 @@ func TestRealCodex(t *testing.T) {
 		t.Skip("requires explicit real-model opt-in; replay is not a substitute")
 	}
 	results := map[string]string{}
-	for _, name := range []string{"启动", "输入", "结构化结果", "turn完成", "中止", "恢复", "历史", "委托"} {
+	for _, name := range []string{"启动", "输入", "结构化结果", "turn完成", "中止", "恢复", "历史"} {
 		results[name] = "未验证"
 	}
 	t.Cleanup(func() {
-		for _, name := range []string{"启动", "输入", "结构化结果", "turn完成", "中止", "恢复", "历史", "委托"} {
+		for _, name := range []string{"启动", "输入", "结构化结果", "turn完成", "中止", "恢复", "历史"} {
 			t.Logf("%s=%s", name, results[name])
 		}
 	})
@@ -63,7 +60,7 @@ func TestRealCodex(t *testing.T) {
 	}
 	t.Logf("CLI=%s platform=%s/%s model=%s; real model calls enabled", codex.Version, runtime.GOOS, runtime.GOARCH, model)
 	tool := realRecordingTool(t)
-	for _, scenario := range append(append([]string(nil), realScenarios...), "delegation") {
+	for _, scenario := range realScenarios {
 		t.Run(scenario, func(t *testing.T) {
 			if scenario == "result_free_text" {
 				t.Skip("Codex StartTask 强制 outputSchema，无法按需录制自由文本；见 codex/testdata/replay/README.md")
@@ -81,10 +78,6 @@ func TestRealCodex(t *testing.T) {
 			}
 			recording := newRealRecording(t, tool, "codex", codex.Version, selectedModel, binary,
 				map[string]string{"<workspace>": work, "<home>": home})
-			if scenario == "delegation" {
-				runRealCodexDelegation(t, ctx, recording, home, model, results)
-				return
-			}
 			c := realCodexConfig(t, home, work, recording.binary, selectedModel)
 			if scenario == "symlinked_workspace" {
 				c.Directory = realSymlinkedWorkspace(t, work)
@@ -324,101 +317,6 @@ func realCodexDeliverActive(t *testing.T, ctx context.Context, a *codex.Adapter,
 	checkRealCodexResult(t, nextRealCodexTerminal(t, ctx, a), "baton-real-steer-ok", results)
 	checkRealCodexDeliveryHistory(t, a, "real-steer")
 	results["输入"] = "支持"
-}
-
-func runRealCodexDelegation(t *testing.T, ctx context.Context, recording *realRecording, home, model string, results map[string]string) {
-	t.Helper()
-	binary := recording.binary
-
-	buildBins(t)
-	binDir := t.TempDir()
-	cli := filepath.Join(binDir, "baton")
-	if runtime.GOOS == "windows" {
-		cli += ".exe"
-	}
-	build := exec.CommandContext(ctx, "go", "build", "-o", cli, "./cmd/baton")
-	build.Dir = filepath.Join("..", "..")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build CLI: %v %s", err, out)
-	}
-	st := startPrepareStack(t, map[string]string{"BATON_TEST_EXECUTOR_LOG": "", "BATON_TEST_HOLD_START": "0", "BATON_CODEX_BINARY": binary, "BATON_CODEX_HOME": home, "BATON_CODEX_MODEL": model, "HOME": home, "USERPROFILE": home, "PATH": binDir + string(os.PathListSeparator) + os.Getenv("PATH")})
-	if _, err := st.pool.Exec(ctx, `UPDATE nodes SET default_agent_type='codex' WHERE id=$1::uuid`, st.ident.NodeID); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		st.batond.stop()
-		dirs, _ := os.ReadDir(filepath.Join(st.dataDir, "sessions"))
-		for _, d := range dirs {
-			ep, err := session.Endpoint(st.dataDir, d.Name())
-			if err != nil {
-				continue
-			}
-			tokenPath, err := session.TokenPath(st.dataDir, d.Name())
-			if err != nil {
-				continue
-			}
-			token, err := os.ReadFile(tokenPath)
-			if err != nil {
-				continue
-			}
-			c, err := session.Dial(context.Background(), ep, strings.TrimSpace(string(token)))
-			if err != nil {
-				continue
-			}
-			if status, err := c.Status(); err == nil {
-				stopWorker(status.PID)
-			}
-			_ = c.Close()
-		}
-	})
-	parentDir, childDir := t.TempDir(), t.TempDir()
-	parentDir, _ = filepath.EvalSymlinks(parentDir)
-	childDir, _ = filepath.EvalSymlinks(childDir)
-	recording.bind(t, "<workspace>", parentDir)
-	recording.bind(t, "<child_workspace>", childDir)
-	recording.bind(t, "<node_data>", st.dataDir)
-	recording.bind(t, "<cli_bin>", binDir)
-	request, _ := json.Marshal(map[string]any{"request_id": "real-child", "description": "Return a completed Baton JSON result with summary baton-real-child-ok; do not run tools or delegate.", "working_directory": childDir, "agent_type": "codex", "target_node_id": st.ident.NodeID})
-	if err := os.WriteFile(filepath.Join(parentDir, "child.json"), request, 0600); err != nil {
-		t.Fatal(err)
-	}
-	var source task.Record
-	prompt := `Only operate in the two temporary working directories. Run baton delegate --request-file child.json --json once (reuse the same request on transport failure), extract task_id, run baton task wait ID --timeout 30s --json until terminal, then baton task result ID --json. Do not read BATON_CONTEXT_FILE yourself. After the child completes, return a completed Baton JSON result whose summary is exactly baton-real-parent-ok, empty evidence/artifacts with honest empty reasons, and null error. Never delegate again or claim success before querying the child result.`
-	if code := postJSON(t, st.client, st.base+"/api/v1/tasks", map[string]any{"request_id": "real-parent", "description": prompt, "authorization_scope": fmt.Sprintf("Only temporary fixture directories %s and %s; delegate exactly one fixture task and query it using baton CLI.", parentDir, childDir), "working_directory": parentDir, "agent_type": "codex", "execution_timeout_seconds": 300}, st.csrf, &source); code != http.StatusOK {
-		t.Fatal("real parent rejected", code)
-	}
-	deadline := time.Now().Add(5 * time.Minute)
-	for time.Now().Before(deadline) {
-		var status, summary string
-		if err := st.pool.QueryRow(ctx, `SELECT status,COALESCE(summary,'') FROM tasks WHERE id=$1::uuid`, source.TaskID).Scan(&status, &summary); err != nil {
-			t.Fatal(err)
-		}
-		if status == task.StatusCompleted {
-			if summary != "baton-real-parent-ok" {
-				t.Fatal("parent result mismatch")
-			}
-			break
-		}
-		if status == task.StatusFailed || status == task.StatusNeedsVerification || status == task.StatusCancelled {
-			results["委托"] = "不支持"
-			t.Fatal("real delegated flow did not complete", status)
-		}
-		select {
-		case <-ctx.Done():
-			t.Fatal("real delegate timeout")
-		case <-time.After(300 * time.Millisecond):
-		}
-	}
-	var children, completed int
-	if err := st.pool.QueryRow(ctx, `SELECT count(*),count(*) FILTER(WHERE status='completed' AND summary='baton-real-child-ok') FROM tasks WHERE parent_task_id=$1::uuid`, source.TaskID).Scan(&children, &completed); err != nil || children != 1 || completed != 1 {
-		results["委托"] = "不支持"
-		t.Fatal("expected exactly one completed child", err)
-	}
-	var parentDone bool
-	if err := st.pool.QueryRow(ctx, `SELECT status='completed' FROM tasks WHERE id=$1::uuid`, source.TaskID).Scan(&parentDone); err != nil || !parentDone {
-		t.Fatal("parent not complete", err)
-	}
-	results["委托"] = "支持"
 }
 
 func realCodexRestoreMissing(t *testing.T, ctx context.Context, a *codex.Adapter, c codex.Config) {

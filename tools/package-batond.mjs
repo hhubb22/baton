@@ -3,7 +3,7 @@ import { resolve, join } from "node:path";
 import { spawnSync } from "node:child_process";
 const output = resolve(process.argv[2] ?? "bin");
 await mkdir(output, { recursive: true });
-for (const name of ["batond", "baton"]) {
+for (const name of ["batond"]) {
   const result = spawnSync(
     "go",
     [

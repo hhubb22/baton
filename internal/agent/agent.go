@@ -24,7 +24,6 @@ type Config struct {
 	SessionDir  string
 	SessionID   string
 	ExecutionID string
-	ContextFile string
 	StatePath   string
 	Home        string
 	Model       string

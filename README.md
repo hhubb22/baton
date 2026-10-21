@@ -8,7 +8,6 @@ Baton 是跨设备 AI Agent 协同与任务派发系统。员工使用部署管�
 |---|---|---|
 | `coordinator` | `cmd/coordinator` | 中心控制面：员工认证、节点注册与凭据吊销、Project / Task / Inbox 状态机、内置 Gateway（`/v1/node` 与 `/api/v1/events`）、嵌入式 Web UI |
 | `batond` | `cmd/batond` | 节点守护进程：主动经 TLS WebSocket 连接 `coordinator`，维护本地 SQLite 账本（`node.db`），管理 Session Worker、Project Agent Runtime 及受限文件浏览根目录 |
-| `baton` | `cmd/baton` | 节点本地 CLI：供执行中的 Agent 通过 `BATON_CONTEXT_FILE` 委托子任务、查询子任务状态与结果 |
 | `baton-project-runtime` | `runtimes/project-agent` | 基于 Node.js / TypeScript 的 Project Agent 进程，通过本地 stdio JSON-RPC 与 `batond` 交互 |
 | Web UI | `web/` (`internal/webui/dist`) | React + TypeScript + Vite 前端，编译产物由 `coordinator` 直接内嵌提供 |
 
@@ -33,7 +32,7 @@ Baton 是跨设备 AI Agent 协同与任务派发系统。员工使用部署管�
 node tools/build.mjs
 ```
 
-该命令按锁文件安装前端依赖、构建 Web UI，再将 `coordinator`、`batond`、`baton` 编译到 `bin/`（Windows 下带 `.exe` 后缀）。前端构建产物保存在 `internal/webui/dist`，不提交到 Git。Coordinator 在编译时嵌入这些文件，部署时无需 Node.js、pnpm 或独立前端服务。Project Agent Runtime 的安装另见 [Runtime 文档](runtimes/project-agent/README.md)。
+该命令按锁文件安装前端依赖、构建 Web UI，再将 `coordinator`、`batond` 编译到 `bin/`（Windows 下带 `.exe` 后缀）。前端构建产物保存在 `internal/webui/dist`，不提交到 Git。Coordinator 在编译时嵌入这些文件，部署时无需 Node.js、pnpm 或独立前端服务。Project Agent Runtime 的安装另见 [Runtime 文档](runtimes/project-agent/README.md)。
 
 ### 2. 数据库迁移与员工账号管理
 
@@ -88,7 +87,6 @@ BATON_ENROLLMENT_TOKEN='<one-time-enrollment-token>' \
 | `BATON_NODE_CREDENTIAL_TTL` | `coordinator` | 节点连接凭据有效期，默认 `720h`（`1h`～`2160h`） |
 | `BATON_HEARTBEAT_INTERVAL` | `coordinator` / `batond` | 心跳间隔，默认 `10s`（`100ms`～`2m`） |
 | `BATON_OFFLINE_AFTER` | `coordinator` | 超过该时间未联系判定节点离线，默认 `30s`（须大于心跳间隔） |
-| `BATON_PLANE_URL` / `BATON_PLANE_API_KEY` / `BATON_PLANE_WEBHOOK_SECRET` / `BATON_PLANE_CONFIG` | `coordinator` | 可选 Plane Webhook 接入与回写配置 |
 | `BATON_ENROLLMENT_TOKEN` | `batond register` | 一次性节点注册凭据（也可通过 `--enrollment-token-file` 提供） |
 | `BATON_TLS_CA_FILE` | `batond` | 额外信任的根证书文件路径 |
 

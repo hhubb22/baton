@@ -87,7 +87,7 @@ func compatibilityLoop(t *testing.T, responses ...json.RawMessage) *startLoop {
 }
 
 func TestNodeReplyCompatibility(t *testing.T) {
-	for _, name := range []string{"start_permit", "input", "report_ack", "agent", "agent_second_reply", "project_runtime", "control", "children"} {
+	for _, name := range []string{"start_permit", "input", "report_ack", "project_runtime", "control", "children"} {
 		for _, variant := range []string{"extra", "missing", "wrong_type"} {
 			t.Run(name+"/"+variant, func(t *testing.T) {
 				var value any
@@ -98,8 +98,6 @@ func TestNodeReplyCompatibility(t *testing.T) {
 					value = protocol.InputResult{Type: protocol.BodyExecutionInputResult, OK: true, Description: "已知任务说明", Generation: 1}
 				case "report_ack":
 					value = protocol.ReportAck{Type: protocol.BodyExecutionReportResult, OK: true, EventID: "known"}
-				case "agent", "agent_second_reply":
-					value = protocol.AgentResult{Type: protocol.BodyAgentResult, OK: true, Data: json.RawMessage(`{"ready":true,"known":42}`)}
 				case "project_runtime":
 					value = protocol.ProjectRuntimeResult{Type: protocol.BodyProjectRuntimeResult, OK: true, Data: json.RawMessage(`{"known":42}`)}
 				case "control":
@@ -109,9 +107,6 @@ func TestNodeReplyCompatibility(t *testing.T) {
 				}
 				raw := nodeCompatibilityBody(t, value, variant, "type")
 				responses := []json.RawMessage{raw}
-				if name == "agent_second_reply" {
-					responses = []json.RawMessage{nodeCompatibilityBody(t, value, "extra", "type"), raw}
-				}
 				loop := compatibilityLoop(t, responses...)
 				success := false
 				switch name {
@@ -125,25 +120,6 @@ func TestNodeReplyCompatibility(t *testing.T) {
 					}
 				case "report_ack":
 					success = loop.pushReport(t.Context(), json.RawMessage(`{}`)) == nil
-				case "agent", "agent_second_reply":
-					req := protocol.AgentRequest{Operation: "get"}
-					if name == "agent_second_reply" {
-						req.Operation = "result"
-						req.TaskID = "child"
-						req.SourceTaskID = "parent"
-						req.SourceSessionID = mustID(t)
-					}
-					got := (&agentBridge{loop: loop}).call(t.Context(), req)
-					success = got.OK
-					if success {
-						var data struct {
-							Ready bool
-							Known int
-						}
-						if json.Unmarshal(got.Data, &data) != nil || !data.Ready || data.Known != 42 {
-							t.Fatal("Agent 回复内容改变")
-						}
-					}
 				case "project_runtime":
 					got := (&projectRuntimeManager{loop: loop}).call(t.Context(), protocol.ProjectRuntimeRequest{Operation: "bootstrap"})
 					success = got.OK
