@@ -268,7 +268,19 @@ export taskDetail = frame {
     }
 
     verify = frame : section {
-      width: 100%
+      width: 100%,
+      overrides: [insert(steps, after = section.label), remove(section.content)],
+
+      steps = text {
+        width: 100%,
+        fill: c.colors.text,
+        subrange: {range: [0, 50], font-size: 12, font-family: "Paper Mono"},
+        contents: "go test ./internal/gateway -run Reconnect -count=1 全部通过；日志里能看到睡眠唤醒后重新连上。",
+        font-size: 13,
+        font-family: "PingFang SC",
+        font-style: "Regular",
+        line-height: 1.5
+      }
     }
 
     result = frame : section {

@@ -327,3 +327,94 @@ export taskByUser = frame : taskCard {
     }
   }
 }
+
+// 任务记录：主对话里只说明给哪台设备派了任务。执行中显示计时，结束后只显示状态；其余信息点开在右侧详情里看。
+export taskLine = frame {
+  title: "任务记录 / 执行中",
+  top: 960px,
+  width: s.size.measure,
+  height: s.size.compact,
+  layout: {
+    justify-content: .space-between,
+    align-items: .center,
+    item-gap: s.space.md
+  },
+  corner-radius: s.radius.sm,
+  padding: [0px, s.space.sm],
+  children: [lineLead, lineTrail],
+
+  lineLead = frame {
+    layout: {align-items: .center, item-gap: 10px},
+    children: [lineGlyph, lineName],
+
+    lineGlyph = asset : icons.tasks {
+      width: 15px,
+      height: 15px,
+      fill[0].color: c.colors.faint
+    }
+
+    lineName = text : t.small {
+      contents: "给 Windows 台式机派发了一个任务",
+      fill[0].color: c.colors.muted
+    }
+  }
+
+  lineTrail = frame {
+    layout: {align-items: .center, item-gap: 6px},
+    children: [lineDot, lineState],
+
+    lineDot = shape : status.dot {}
+
+    lineState = text : t.caption {
+      contents: "12:04",
+      font-family: "Paper Mono",
+      fill[0].color: c.colors.muted
+    }
+  }
+}
+
+@variant
+export taskLineFailed = frame : taskLine {
+  title: "任务记录 / 失败",
+  top: 1008px,
+
+  lineTrail {
+    @with-variant(status.dotFailed)
+    lineDot {}
+
+    lineState {
+      contents: "失败",
+      font-family: "PingFang SC"
+    }
+  }
+}
+
+@variant
+export taskLineSucceeded = frame : taskLine {
+  title: "任务记录 / 已完成",
+  top: 1056px,
+
+  lineLead {
+    lineName {
+      contents: "给 Ubuntu 开发机派发了一个任务"
+    }
+  }
+
+  lineTrail {
+    @with-variant(status.dotSucceeded)
+    lineDot {}
+
+    lineState {
+      contents: "完成",
+      font-family: "PingFang SC"
+    }
+  }
+}
+
+// 详情已在右侧打开
+@variant
+export taskLineSelected = frame : taskLineFailed {
+  title: "任务记录 / 已打开",
+  top: 1104px,
+  fill: c.colors.selected
+}

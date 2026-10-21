@@ -9,6 +9,9 @@ import "blocks/composer.elyx" as composers
 import "blocks/overview.elyx" as overviews
 import "blocks/banner.elyx" as banners
 
+@with-context()
+file {}
+
 running = frame : page.projectPage {
   title: "Project · 运行中",
   caption: "Project Agent 在 Ubuntu 开发机上处理刚回来的测试结果。标题栏写明运行位置，可以停止这次运行；已派出的任务不受影响。",

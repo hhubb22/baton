@@ -266,3 +266,181 @@ export memoryNote = frame {
     fill[0].color: c.colors.faint
   }
 }
+
+// 过程记录里的一步：图标、名称、右侧说明。展开后下方显示命令输出。
+export activityStep = frame {
+  title: "过程步骤",
+  top: 720px,
+  width: s.size.measure,
+  layout: {direction: .column},
+  children: [stepRow, stepOutput],
+
+  stepRow = frame {
+    width: 100%,
+    height: s.size.row,
+    layout: {
+      justify-content: .space-between,
+      align-items: .center,
+      item-gap: s.space.md
+    },
+    children: [stepLead, stepNote],
+
+    stepLead = frame {
+      layout: {align-items: .center, item-gap: 10px},
+      children: [stepGlyph, stepLabel],
+
+      stepGlyph = asset : icons.terminal {
+        width: 15px,
+        height: 15px,
+        fill[0].color: c.colors.faint
+      }
+
+      stepLabel = text : t.small {
+        contents: "git worktree add",
+        fill[0].color: c.colors.muted
+      }
+    }
+
+    stepNote = text : t.caption {
+      contents: "3.8 秒",
+      fill[0].color: c.colors.faint
+    }
+  }
+
+  stepOutput = frame {
+    width: 100%,
+    display: .none,
+    layout: {direction: .column, item-gap: 6px},
+    fill: c.colors.code,
+    border: c.colors.codeBorder,
+    corner-radius: s.radius.md,
+    padding: [10px, s.space.md],
+    children: [stepCommand, stepResult],
+
+    stepCommand = text : t.mono {
+      width: 100%,
+      contents: "$ git worktree add D:\\src\\baton-ps160 origin/main"
+    }
+
+    stepResult = text : t.monoCN {
+      width: 100%,
+      contents: "Preparing worktree (detached HEAD 4c1e9a2)\nHEAD is now at 4c1e9a2 build: 统一前后端构建",
+      fill[0].color: c.colors.muted
+    }
+  }
+}
+
+// 展开的命令步骤：显示命令和输出
+@variant
+export activityStepOpen = frame : activityStep {
+  title: "过程步骤 / 展开",
+  top: 768px,
+
+  stepOutput {
+    display: .visible
+  }
+}
+
+// 记忆修改步骤
+@variant
+export activityStepMemory = frame : activityStep {
+  title: "过程步骤 / 记忆",
+  top: 896px,
+
+  stepRow {
+    stepNote {
+      contents: "项目记忆"
+    }
+
+    stepLead {
+      stepLabel {
+        contents: "记下了 Windows 上的工作目录"
+      }
+
+      @with-variant(icons.memory)
+      stepGlyph {}
+    }
+  }
+}
+
+// 过程记录：Project Agent 一轮里执行的命令、修改的记忆等。默认收起成一行，点开在原位逐条查看。
+export activityLog = frame {
+  title: "过程记录 / 收起",
+  top: 960px,
+  width: s.size.measure,
+  layout: {direction: .column, item-gap: s.space.xxs},
+  children: [logHead, logBody],
+
+  logHead = frame {
+    width: 100%,
+    height: s.size.compact,
+    layout: {
+      justify-content: .space-between,
+      align-items: .center,
+      item-gap: s.space.md
+    },
+    corner-radius: s.radius.sm,
+    padding: [0px, s.space.sm],
+    children: logLead,
+
+    logLead = frame {
+      layout: {align-items: .center, item-gap: 10px},
+      children: [logGlyph, logLabel, logChevron],
+
+      logGlyph = asset : icons.terminal {
+        width: 15px,
+        height: 15px,
+        fill[0].color: c.colors.faint
+      }
+
+      logLabel = text : t.small {
+        contents: "执行了 1 条命令",
+        fill[0].color: c.colors.muted
+      }
+
+      logChevron = asset : icons.chevronRight {
+        width: 13px,
+        height: 13px,
+        fill[0].color: c.colors.faint
+      }
+    }
+  }
+
+  logBody = frame {
+    width: 100%,
+    display: .none,
+    layout: {direction: .column},
+    padding: [0px, 0px, 0px, 15px],
+    children: logSteps,
+
+    logSteps = frame {
+      width: 100%,
+      layout: {direction: .column, item-gap: s.space.xxs},
+      border: {color: c.colors.borderSoft, sides: .left},
+      padding: [0px, 0px, 0px, 14px],
+      children: stepCommand,
+
+      stepCommand = frame : activityStepOpen {
+        width: 100%
+      }
+    }
+  }
+}
+
+// 展开：逐条列出步骤，命令可以继续展开看输出
+@variant
+export activityLogOpen = frame : activityLog {
+  title: "过程记录 / 展开",
+  top: 1008px,
+
+  logBody {
+    display: .visible
+  }
+
+  logHead {
+    logLead {
+      @with-variant(icons.chevronDown)
+      logChevron {}
+    }
+  }
+}
