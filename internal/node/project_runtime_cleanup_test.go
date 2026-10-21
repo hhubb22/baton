@@ -292,12 +292,12 @@ func TestProjectCleanupActiveStopBarrierAndConcurrentClose(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("IPC call did not reach center")
 	}
-	// IPC 调用的返回路径仍需更新任务缓存；持锁可在 Process.Wait 后暂停本地收尾。
-	p.taskMu.Lock()
+	// IPC 调用的返回路径仍需更新 Thread 缓存；持锁可在 Process.Wait 后暂停本地收尾。
+	p.threadMu.Lock()
 	locked := true
 	defer func() {
 		if locked {
-			p.taskMu.Unlock()
+			p.threadMu.Unlock()
 		}
 	}()
 	command.Type = protocol.BodyProjectRunStop
@@ -323,7 +323,7 @@ func TestProjectCleanupActiveStopBarrierAndConcurrentClose(t *testing.T) {
 		t.Fatal("close returned with unfinished local cleanup")
 	default:
 	}
-	p.taskMu.Unlock()
+	p.threadMu.Unlock()
 	locked = false
 	select {
 	case <-closed:

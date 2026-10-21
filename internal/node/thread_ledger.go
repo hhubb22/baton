@@ -316,19 +316,25 @@ func validateThreadDirectory(dir, path string) error {
 		return errors.New("无法读取已登记目录")
 	}
 	for _, root := range roots {
-		rel, err := filepath.Rel(root.Path, path)
-		if err != nil || !filepath.IsLocal(rel) {
-			continue
+		candidates := []string{root.Path}
+		if real, err := filepath.EvalSymlinks(root.Path); err == nil && real != root.Path {
+			candidates = append(candidates, real)
 		}
-		opened, err := os.OpenRoot(root.Path)
-		if err != nil {
-			continue
-		}
-		child, err := opened.OpenRoot(rel)
-		opened.Close()
-		if err == nil {
-			child.Close()
-			return nil
+		for _, base := range candidates {
+			rel, err := filepath.Rel(base, path)
+			if err != nil || !filepath.IsLocal(rel) {
+				continue
+			}
+			opened, err := os.OpenRoot(root.Path)
+			if err != nil {
+				continue
+			}
+			child, err := opened.OpenRoot(rel)
+			opened.Close()
+			if err == nil {
+				child.Close()
+				return nil
+			}
 		}
 	}
 	return errors.New("工作目录不存在或位于已登记目录之外")

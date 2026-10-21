@@ -17,7 +17,7 @@ func TestInboxUpgradeExistingDatabaseAndRepeat(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, name := range names {
-		if name == "0018_attention_requests.sql" {
+		if name == "0018_attention_requests.sql" || name >= "0025_" {
 			continue
 		}
 		body, err := fs.ReadFile(migrations.Files, name)

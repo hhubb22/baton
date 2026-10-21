@@ -16,8 +16,8 @@ import (
 
 type projectToolPending struct {
 	Pending         bool   `json:"pending"`
-	TaskID          string `json:"task_id"`
-	TaskVersion     int64  `json:"task_version"`
+	ThreadID        string `json:"thread_id"`
+	Version         int64  `json:"version"`
 	WaitRemainingMS int64  `json:"wait_remaining_ms"`
 	WaitProtocol    int    `json:"wait_protocol"`
 }
@@ -25,8 +25,8 @@ type projectToolPending struct {
 const projectWaitRemainingSQL = `GREATEST(0,FLOOR(EXTRACT(EPOCH FROM (exec_wait_until-clock_timestamp()))*1000))::bigint`
 
 func readProjectToolPending(ctx context.Context, tx pgx.Tx, id string) (projectToolPending, error) {
-	p := projectToolPending{Pending: true, TaskID: id, WaitProtocol: 1}
-	err := tx.QueryRow(ctx, `SELECT version,`+projectWaitRemainingSQL+` FROM tasks WHERE id=$1`, id).Scan(&p.TaskVersion, &p.WaitRemainingMS)
+	p := projectToolPending{Pending: true, ThreadID: id, WaitProtocol: 1}
+	err := tx.QueryRow(ctx, `SELECT version,`+projectWaitRemainingSQL+` FROM threads WHERE id=$1`, id).Scan(&p.Version, &p.WaitRemainingMS)
 	return p, err
 }
 
@@ -41,33 +41,29 @@ func (s *Store) dispatchProjectExec(ctx context.Context, tx pgx.Tx, b projectRun
 	if a.TimeoutSeconds != nil {
 		timeout = *a.TimeoutSeconds
 	}
-	if wait < 0 || wait > 600 || timeout < 1 {
+	if wait < 0 || wait > 600 || timeout < 1 || timeout > 2147483647 {
 		return nil, projectagent.ErrInvalid
 	}
-	// 已接受的调用先返回原任务，能力变化不触发新执行或改写等待期限。
+	// 已保存的命令保持原来的 Thread 和等待期限。
 	var id string
-	err := tx.QueryRow(ctx, `SELECT id::text FROM tasks WHERE employee_id=$1 AND origin_conversation_id=$2 AND origin_tool_call_id=$3 FOR UPDATE`, b.owner, b.conversationID, callID).Scan(&id)
+	err := tx.QueryRow(ctx, `SELECT id::text FROM threads WHERE employee_id=$1 AND project_id=$2 AND origin_conversation_id=$3 AND origin_tool_call_id=$4 AND agent_type='shell' FOR UPDATE`, b.owner, b.projectID, b.conversationID, callID).Scan(&id)
 	if err == nil {
 		return readProjectToolPending(ctx, tx, id)
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
-	agentType := "shell"
-	input := task.Input{RequestID: fmt.Sprintf("pa:%s:%s", b.conversationID, callID), TargetNodeID: &a.NodeID, AgentType: &agentType, WorkingDirectory: &a.WorkingDirectory, Description: a.Command, ExecutionTimeoutSeconds: &timeout}
-	prepared, err := task.Prepare(input)
+	if err = projectExecEnabled(ctx, tx, b.owner, a.NodeID); err != nil {
+		return nil, err
+	}
+	t, _, err := createThreadTx(ctx, tx, b.owner, projectThreadInput(b, callID, a.NodeID, "shell", a.WorkingDirectory, a.Command, timeout))
 	if err != nil {
 		return nil, err
 	}
-	rec, _, err := s.acceptOnceTx(ctx, tx, b.owner, prepared, nil)
-	if err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE threads SET exec_wait_until=clock_timestamp()+$2*interval '1 second' WHERE id=$1`, t.ID, wait); err != nil {
 		return nil, err
 	}
-	_, err = tx.Exec(ctx, `UPDATE tasks SET project_id=$2,origin_conversation_id=$3,origin_tool_call_id=$4,exec_wait_until=clock_timestamp()+$5*interval '1 second' WHERE id=$1`, rec.TaskID, b.projectID, b.conversationID, callID, wait)
-	if err != nil {
-		return nil, err
-	}
-	return readProjectToolPending(ctx, tx, rec.TaskID)
+	return readProjectToolPending(ctx, tx, t.ID)
 }
 
 // shell 能力独立于执行 Agent 列表，按本节点最新的显式开启报告判断。
@@ -78,7 +74,7 @@ func projectExecEnabled(ctx context.Context, tx pgx.Tx, employeeID, nodeID strin
 		return err
 	}
 	if !enabled {
-		return &task.Rejection{Code: task.CodeUnsupported, Message: "目标节点未开启 Project Agent 命令执行", Fields: []string{"target_node_id"}}
+		return &task.Rejection{Code: task.CodeUnsupported, Message: "目标节点未开启 Project Agent 命令执行", Fields: []string{"node_id"}}
 	}
 	return nil
 }
@@ -109,53 +105,120 @@ func (s *Store) waitProjectTool(ctx context.Context, tx pgx.Tx, b projectRunBind
 	if err = validateProjectExecCall(ctx, tx, b, req.ToolCallID); err != nil {
 		return nil, err
 	}
-	// 与终态写入共用任务行锁；输入队列只在这之后加锁。
+	// 先锁 Thread，再读取终态；报告事务也持有同一个 Thread 锁。
 	var id, status string
 	var version int64
 	var deadline time.Time
-	var summary *string
-	var command json.RawMessage
-	var operation json.RawMessage
-	err = tx.QueryRow(ctx, `SELECT id::text,status,version,exec_wait_until,summary,command_result,user_operation FROM tasks WHERE employee_id=$1 AND project_id=$2 AND origin_conversation_id=$3 AND origin_tool_call_id=$4 AND agent_type='shell' FOR UPDATE`, b.owner, b.projectID, b.conversationID, req.ToolCallID).Scan(&id, &status, &version, &deadline, &summary, &command, &operation)
+	err = tx.QueryRow(ctx, `SELECT id::text,status,version,exec_wait_until FROM threads WHERE employee_id=$1 AND project_id=$2 AND origin_conversation_id=$3 AND origin_tool_call_id=$4 AND agent_type='shell' FOR UPDATE`, b.owner, b.projectID, b.conversationID, req.ToolCallID).Scan(&id, &status, &version, &deadline)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, projectagent.ErrInvalid
 	}
 	if err != nil {
 		return nil, err
 	}
-	terminal := status == task.StatusCompleted || status == task.StatusFailed || status == task.StatusCancelled
-	var expired bool
+	var ended, expired bool
 	var remaining int64
-	if err = tx.QueryRow(ctx, `SELECT clock_timestamp()>=$1,GREATEST(0,FLOOR(EXTRACT(EPOCH FROM ($1::timestamptz-clock_timestamp()))*1000))::bigint`, deadline).Scan(&expired, &remaining); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM thread_turns WHERE thread_id=$1 AND ended_at IS NOT NULL),clock_timestamp()>=$2,GREATEST(0,FLOOR(EXTRACT(EPOCH FROM ($2::timestamptz-clock_timestamp()))*1000))::bigint`, id, deadline).Scan(&ended, &expired, &remaining); err != nil {
 		return nil, err
 	}
-	uncertain := status == task.StatusNeedsVerification
-	if !terminal && !uncertain && !expired && !force.Finish {
-		return projectToolPending{Pending: true, TaskID: id, TaskVersion: version, WaitRemainingMS: remaining, WaitProtocol: 1}, nil
+	terminal := ended || status == "stopped" || status == "unknown" || status == "archived"
+	if !terminal && !expired && !force.Finish {
+		return projectToolPending{Pending: true, ThreadID: id, Version: version, WaitRemainingMS: remaining, WaitProtocol: 1}, nil
 	}
-	output := map[string]any{"task_id": id, "status": status, "read_tool": "tasks.get"}
-	if len(operation) > 0 {
-		output["user_operation"] = operation
-	}
-	if terminal || uncertain {
-		output["version"] = version
-		output["summary"] = summary
-		if len(command) > 0 {
-			output["command_result"] = command
+	output := map[string]any{"thread_id": id, "status": status, "version": version, "read_tool": "threads.read"}
+	if terminal {
+		command, err := shellThreadCommandResult(ctx, tx, b.owner, id)
+		if err != nil {
+			return nil, err
 		}
+		output["command_result"] = command
+	} else {
+		output["message"] = fmt.Sprintf("仍在执行，Thread ID 为 %s，结束后输出会作为新输入送回", id)
 	}
-	if !terminal {
-		output["message"] = "仍在执行，结束后结果会作为新输入送回"
-		if uncertain {
-			output["message"] = "任务待核实，不会自动重试"
-		}
+	if status == "unknown" {
+		output["message"] = "命令状态不确定，不会自动重试；请查看 Thread " + id
+	}
+	// 工具结果有 32 KiB 上限；原始回复可通过 threads.read 分页读取。
+	if err = boundShellToolResult(output, req.ToolCallID); err != nil {
+		return nil, err
 	}
 	e, err := saveProjectToolResult(ctx, tx, b, req, req.ToolCallID, "nodes.exec", output, false)
 	if err != nil {
 		return nil, err
 	}
-	if terminal || uncertain {
-		_, err = tx.Exec(ctx, `UPDATE project_agent_input_queue SET delivered_seq=$3 WHERE agent_id=$1 AND source_key=$2 AND delivered_seq IS NULL`, b.agentID, fmt.Sprintf("task:%s:result:%d", id, version), e.Seq)
+	if terminal {
+		_, err = tx.Exec(ctx, `UPDATE project_agent_input_queue SET delivered_seq=$3,wake_required=false WHERE agent_id=$1 AND delivered_seq IS NULL AND payload->>'thread_id'=$2 AND ((source_type='turn_ended' AND source_key=$4) OR (source_type='thread_reply' AND payload->>'worker_turn_seq'='1'))`, b.agentID, id, e.Seq, fmt.Sprintf("thread:%s:turn:1", id))
 	}
 	return e, err
+}
+
+func shellThreadCommandResult(ctx context.Context, tx pgx.Tx, owner, id string) (map[string]any, error) {
+	rows, err := tx.Query(ctx, `SELECT content,truncated,original_bytes,metadata FROM thread_replies WHERE employee_id=$1 AND thread_id=$2 AND worker_turn_seq=1 ORDER BY worker_seq`, owner, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]any{"output": "", "total_bytes": int64(0), "truncated": false}
+	var output strings.Builder
+	var total int64
+	var truncated bool
+	for rows.Next() {
+		var content string
+		var cut bool
+		var size int64
+		var raw []byte
+		if err = rows.Scan(&content, &cut, &size, &raw); err != nil {
+			return nil, err
+		}
+		var metadata map[string]any
+		if err = json.Unmarshal(raw, &metadata); err != nil {
+			return nil, err
+		}
+		for _, key := range []string{"exit_code", "encoding"} {
+			if v, ok := metadata[key]; ok {
+				out[key] = v
+			}
+		}
+		output.WriteString(content)
+		total += size
+		truncated = truncated || cut
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	out["output"] = output.String()
+	out["total_bytes"] = total
+	out["truncated"] = truncated
+	return out, nil
+}
+
+func boundShellToolResult(output map[string]any, callID string) error {
+	command, ok := output["command_result"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	original, _ := command["output"].(string)
+	for limit := len(original); ; limit = limit * 3 / 4 {
+		if command["encoding"] == "base64" && limit < len(original) {
+			limit = limit / 8 * 8
+		}
+		command["output"] = boundedText(original, limit)
+		if limit < len(original) {
+			command["truncated"] = true
+		}
+		text, err := protocol.MarshalJSON(output)
+		if err != nil {
+			return err
+		}
+		raw, err := protocol.MarshalJSON(map[string]any{"format": "pi-ai/1", "message": map[string]any{"role": "toolResult", "toolCallId": callID, "toolName": "nodes.exec", "content": []any{map[string]any{"type": "text", "text": string(text)}}, "isError": false, "timestamp": 0}})
+		if err != nil {
+			return err
+		}
+		if len(raw) <= maxProjectToolBytes {
+			return nil
+		}
+		if limit == 0 {
+			return projectagent.ErrTooLarge
+		}
+	}
 }

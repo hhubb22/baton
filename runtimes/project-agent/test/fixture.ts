@@ -11,20 +11,24 @@ import { RuntimeError } from "../src/protocol.js";
 import { ProjectRuntime, type Clock } from "../src/runtime.js";
 import type { CompactionSettings } from "../src/compaction.js";
 
-export const assistant = (tools = false) =>
+export const assistant = (
+  tools = false,
+  threadTool: "threads.create" | "threads.send" = "threads.create",
+) =>
   fauxAssistantMessage(
     tools
       ? [
           fauxToolCall(
-            "tasks.dispatch",
-            {
-              target_node_id: "node-b",
-              agent_type: "codex",
-              working_directory: "/repo",
-              description: "验证",
-              expected_outputs: "结果",
-            },
-            { id: "dispatch-1" },
+            threadTool,
+            threadTool === "threads.create"
+              ? {
+                  node_id: "node-b",
+                  agent_type: "codex",
+                  working_directory: "/repo",
+                  message: "验证并检查结果",
+                }
+              : { thread_id: "thread-1", message: "继续验证并检查结果" },
+            { id: threadTool === "threads.create" ? "create-1" : "send-1" },
           ),
         ]
       : fauxText("完成"),
@@ -37,7 +41,7 @@ export const input = (): Event => ({
     format: "pi-ai/1",
     message: {
       role: "user",
-      content: [{ type: "text", text: "请执行任务" }],
+      content: [{ type: "text", text: "请开启 Thread 并验证结果" }],
       timestamp: 0,
     },
   },
@@ -141,7 +145,7 @@ export class Backend implements RPC {
               role: "toolResult",
               toolCallId: req.tool_call_id,
               toolName: req.tool_name,
-              content: [{ type: "text", text: '{"task_id":"task-1"}' }],
+              content: [{ type: "text", text: '{"thread_id":"thread-1"}' }],
               isError: false,
               timestamp: 0,
             },

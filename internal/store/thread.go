@@ -101,6 +101,12 @@ func threadNode(ctx context.Context, tx pgx.Tx, employeeID, nodeID, agentType, d
 	if !ThreadDirectoryAllowed(system, directory, report.Roots) {
 		return threadError(422, "directory_not_allowed", "工作目录必须位于设备登记的目录内")
 	}
+	if agentType == "shell" {
+		if steer {
+			return threadError(422, "steer_unsupported", "命令 Thread 不支持插入消息")
+		}
+		return projectExecEnabled(ctx, tx, employeeID, nodeID)
+	}
 	available := false
 	canSteer := false
 	if len(report.Agents) > 0 {
@@ -158,6 +164,19 @@ func threadDefaultNode(ctx context.Context, tx pgx.Tx, employeeID string) (strin
 
 // CreateThread 在同一事务保存 Thread、第一条消息及两条投递意图。
 func (s *Store) CreateThread(ctx context.Context, employeeID string, in CreateThreadInput) (Thread, bool, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Thread{}, false, err
+	}
+	defer tx.Rollback(ctx)
+	t, created, err := createThreadTx(ctx, tx, employeeID, in)
+	if err != nil {
+		return t, false, err
+	}
+	return t, created, tx.Commit(ctx)
+}
+
+func createThreadTx(ctx context.Context, tx pgx.Tx, employeeID string, in CreateThreadInput) (Thread, bool, error) {
 	var empty Thread
 	if in.ExecutionTimeoutSeconds == 0 {
 		in.ExecutionTimeoutSeconds = 7200
@@ -170,7 +189,7 @@ func (s *Store) CreateThread(ctx context.Context, employeeID string, in CreateTh
 	if !threadID(employeeID) || !threadKey(in.ClientThreadID) || !threadText(in.WorkingDirectory, 4096) || in.ExecutionTimeoutSeconds < 1 || in.ExecutionTimeoutSeconds > 2147483647 || (in.CreatedBy != "employee" && in.CreatedBy != "project_agent") || (in.NodeID != "" && !threadID(in.NodeID)) || (in.ProjectID != "" && !threadID(in.ProjectID)) {
 		return empty, false, threadInvalid()
 	}
-	if in.AgentType != "pi" && in.AgentType != "codex" && in.AgentType != "kiro" && in.AgentType != "cursor" {
+	if in.AgentType != "pi" && in.AgentType != "codex" && in.AgentType != "kiro" && in.AgentType != "cursor" && !(in.AgentType == "shell" && in.CreatedBy == "project_agent") {
 		return empty, false, threadInvalid()
 	}
 	if err := normalizeThreadMessage(&in.Message); err != nil {
@@ -190,11 +209,6 @@ func (s *Store) CreateThread(ctx context.Context, employeeID string, in CreateTh
 		Actor, Conversation, Tool string
 	}{in, in.CreatedBy, in.OriginConversationID, in.OriginToolCallID})
 	hash := sha256.Sum256(raw)
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return empty, false, err
-	}
-	defer tx.Rollback(ctx)
 	lookup := func() (Thread, bool, error) {
 		var id string
 		var old []byte
@@ -214,6 +228,7 @@ func (s *Store) CreateThread(ctx context.Context, employeeID string, in CreateTh
 	if t, found, err := lookup(); found || err != nil {
 		return t, false, err
 	}
+	var err error
 	if in.NodeID == "" {
 		in.NodeID, err = threadDefaultNode(ctx, tx, employeeID)
 		if err != nil {
@@ -267,7 +282,7 @@ func (s *Store) CreateThread(ctx context.Context, employeeID string, in CreateTh
 	if err != nil {
 		return empty, false, err
 	}
-	return t, true, tx.Commit(ctx)
+	return t, true, nil
 }
 
 func insertThreadMessage(ctx context.Context, tx pgx.Tx, t Thread, in ThreadMessageInput) (ThreadMessage, bool, error) {
@@ -285,6 +300,15 @@ func insertThreadMessage(ctx context.Context, tx pgx.Tx, t Thread, in ThreadMess
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return m, false, err
+	}
+	if t.AgentType == "shell" {
+		var exists bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM thread_messages WHERE thread_id=$1)`, t.ID).Scan(&exists); err != nil {
+			return m, false, err
+		}
+		if exists {
+			return m, false, threadError(422, "shell_single_turn", "命令 Thread 只接受一条消息")
+		}
 	}
 	if t.Status == "archived" || t.ArchiveRequestedAt != nil {
 		return m, false, threadError(409, "thread_archived", "Thread 已归档或正在归档")
@@ -355,6 +379,15 @@ func (s *Store) RequestThreadAction(ctx context.Context, employeeID, id, action,
 		return empty, err
 	}
 	defer tx.Rollback(ctx)
+	t, err := requestThreadActionTx(ctx, tx, employeeID, id, action, messageID, "employee", employeeID)
+	if err != nil {
+		return empty, err
+	}
+	return t, tx.Commit(ctx)
+}
+
+func requestThreadActionTx(ctx context.Context, tx pgx.Tx, employeeID, id, action, messageID, actor, actorID string) (Thread, error) {
+	var empty Thread
 	t, err := readThread(ctx, tx, employeeID, id, true)
 	if err != nil {
 		return empty, err
@@ -394,7 +427,7 @@ func (s *Store) RequestThreadAction(ctx context.Context, employeeID, id, action,
 		if action == "archive" && !active && (t.Status == "idle" || t.Status == "stopped") {
 			_, err = tx.Exec(ctx, `UPDATE threads SET status='archived',archived_at=clock_timestamp(),archive_requested_at=clock_timestamp() WHERE id=$1`, id)
 			if err == nil {
-				err = threadAudit(ctx, tx, t, "thread.archived", "employee", employeeID, map[string]any{})
+				err = threadAudit(ctx, tx, t, "thread.archived", actor, actorID, map[string]any{})
 			}
 		} else if action == "stop" && !active && t.Status == "stopped" && t.OpenedAt == nil {
 			_, err = tx.Exec(ctx, `UPDATE threads SET stop_requested_at=clock_timestamp(),stop_confirmed_at=clock_timestamp() WHERE id=$1`, id)
@@ -413,7 +446,7 @@ func (s *Store) RequestThreadAction(ctx context.Context, employeeID, id, action,
 	if err != nil {
 		return empty, err
 	}
-	if err = threadAudit(ctx, tx, t, action+".requested", "employee", employeeID, map[string]string{"client_message_id": messageID}); err != nil {
+	if err = threadAudit(ctx, tx, t, action+".requested", actor, actorID, map[string]string{"client_message_id": messageID}); err != nil {
 		return empty, err
 	}
 	if err = touchThread(ctx, tx, id); err != nil {
@@ -423,5 +456,5 @@ func (s *Store) RequestThreadAction(ctx context.Context, employeeID, id, action,
 	if err != nil {
 		return empty, err
 	}
-	return t, tx.Commit(ctx)
+	return t, nil
 }

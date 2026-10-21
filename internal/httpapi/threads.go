@@ -69,10 +69,6 @@ func (s *Server) routeThread(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if login.Employee.MustChangePassword {
-		s.writeError(w, r, 403, "password_change_required", "请先更换初始口令")
-		return
-	}
 	employeeID := login.Employee.ID
 	if want == http.MethodPost {
 		if s.rejectQuery(w, r) {

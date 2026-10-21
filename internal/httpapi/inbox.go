@@ -40,7 +40,7 @@ func (s *Server) routeInbox(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		var err error
 		for key, values := range q {
-			if (key != "state" && key != "cursor" && key != "project_id" && key != "task_id") || len(values) != 1 {
+			if (key != "state" && key != "cursor" && key != "project_id" && key != "thread_id") || len(values) != 1 {
 				err = inbox.ErrInvalid
 			}
 		}
@@ -48,7 +48,7 @@ func (s *Server) routeInbox(w http.ResponseWriter, r *http.Request) {
 			s.writeInboxError(w, r, err)
 			return
 		}
-		out, err := s.store.RelatedAttentionRequests(r.Context(), sess.Employee.ID, q.Get("state"), q.Get("cursor"), q.Get("project_id"), q.Get("task_id"))
+		out, err := s.store.RelatedAttentionRequests(r.Context(), sess.Employee.ID, q.Get("state"), q.Get("cursor"), q.Get("project_id"), q.Get("thread_id"))
 		if err != nil {
 			s.writeInboxError(w, r, err)
 			return

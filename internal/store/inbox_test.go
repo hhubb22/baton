@@ -12,11 +12,11 @@ import (
 	"baton/internal/inbox"
 	"baton/internal/projectagent"
 	"baton/internal/store"
-	"baton/internal/task"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func inboxArgs() map[string]any {
-	return map[string]any{"title": "需要用户决定", "summary": "检查失败", "content": "[证据](https://example.org/result)", "options": []inbox.Option{{ID: "continue", Label: "继续", Recommended: true}, {ID: "stop", Label: "停止"}}, "allow_text": true}
+	return map[string]any{"title": "需要用户决定", "content": "[证据](https://example.org/result)", "options": []inbox.Option{{ID: "continue", Label: "继续", Recommended: true}, {ID: "stop", Label: "停止"}}, "allow_text": true}
 }
 func askInbox(t *testing.T, h *toolHarness) inbox.Request {
 	t.Helper()
@@ -64,7 +64,7 @@ func TestInboxToolsIdempotencyLimitAndScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := inbox.Binding{EmployeeID: h.owner, ProjectID: h.project.ID, AgentID: h.project.Agent.ID, ConversationID: h.project.Conversation.ID}
-	if err = inbox.CreateSystem(h.ctx, tx, b, inbox.ProjectNeedsAttention, h.project.ID, "Project 需要处理", "模型失败", "", nil, nil); err != nil {
+	if err = inbox.CreateSystem(h.ctx, tx, b, inbox.ProjectNeedsAttention, h.project.ID, "Project 需要处理", "模型失败"); err != nil {
 		t.Fatal(err)
 	}
 	if err = tx.Commit(h.ctx); err != nil {
@@ -84,7 +84,7 @@ func TestInboxToolsIdempotencyLimitAndScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = inbox.CreateAgent(h.ctx, tx, inbox.Binding{EmployeeID: h.owner, ProjectID: other.ID, AgentID: other.Agent.ID, ConversationID: other.Conversation.ID}, "other", inbox.Ask{Title: "其他 Project", AllowText: true}, nil, nil)
+	_, err = inbox.CreateAgent(h.ctx, tx, inbox.Binding{EmployeeID: h.owner, ProjectID: other.ID, AgentID: other.Agent.ID, ConversationID: other.Conversation.ID}, "other", inbox.Ask{Title: "其他 Project", AllowText: true})
 	if err != nil {
 		t.Fatal("上限算到其他 Project", err)
 	}
@@ -281,71 +281,11 @@ func TestInboxOfflinePauseArchiveAndRollback(t *testing.T) {
 	}
 	t.Log("离线与暂停回答成功；暂停不放置，恢复领取 attention_answer；归档 3 个事项均撤回")
 }
-func TestInboxTaskSnapshotAndSystemLifecycle(t *testing.T) {
+func TestInboxThreadAssociationAndTaskIsolation(t *testing.T) {
 	h := newToolHarness(t)
-	id := h.dispatch(t)
-	// 使用真实接受/启动/报告路径；输入许可使用项目工具创建的任务。
-	var in store.StartRequest
-	var messageID string
-	if err := h.pool.QueryRow(h.ctx, `SELECT e.id::text,o.id::text FROM executions e JOIN dispatch_outbox o ON o.execution_id=e.id WHERE e.task_id=$1`, id).Scan(&in.ExecutionID, &messageID); err != nil {
-		t.Fatal(err)
-	}
-	in.EmployeeID = h.owner
-	in.NodeID = h.src.NodeID
-	in.TaskID = id
-	in.SessionID = mustUUID(t)
-	in.StorageGeneration = mustUUID(t)
-	in.Nonce = mustUUID(t)
-	in.CredentialID = h.src.CredentialID
-	if err := h.repo.SavePrepared(h.ctx, store.PreparedFact{MessageID: messageID, EmployeeID: h.owner, NodeID: h.src.NodeID, TaskID: id, ExecutionID: in.ExecutionID, SessionID: in.SessionID, StorageGeneration: in.StorageGeneration}); err != nil {
-		t.Fatal(err)
-	}
-	if decision, err := h.repo.AuthorizeStart(h.ctx, in); err != nil || !decision.Issue {
-		t.Fatal(decision, err)
-	}
-	// 执行报告沿用已保存的启动身份。
-	uncertain := store.ExecutionReport{EmployeeID: h.owner, NodeID: h.src.NodeID, TaskID: id, ExecutionID: in.ExecutionID, SessionID: in.SessionID, EventID: mustUUID(t), Kind: task.EventNeedsVerification, Status: task.StatusNeedsVerification, ErrorCode: task.CodeUncertainWorker}
-	if _, err := h.pool.Exec(h.ctx, `CREATE FUNCTION reject_attention_insert() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected attention failure'; END $$; CREATE TRIGGER reject_attention_insert BEFORE INSERT ON attention_requests FOR EACH ROW EXECUTE FUNCTION reject_attention_insert()`); err != nil {
-		t.Fatal(err)
-	}
-	if ack, _, err := h.repo.ApplyExecutionReport(h.ctx, uncertain); err == nil || ack {
-		t.Fatal("系统事项失败时任务仍提交")
-	}
-	if current, err := h.repo.GetTask(h.ctx, h.owner, id); err != nil || current.Status != task.StatusQueued {
-		t.Fatal("系统事项和状态未一起回滚", err)
-	}
-	if _, err := h.pool.Exec(h.ctx, `DROP TRIGGER reject_attention_insert ON attention_requests; DROP FUNCTION reject_attention_insert()`); err != nil {
-		t.Fatal(err)
-	}
-	if ack, _, err := h.repo.ApplyExecutionReport(h.ctx, uncertain); err != nil || !ack {
-		t.Fatal(err)
-	}
-	page, err := h.repo.Inbox(h.ctx, h.owner, "open", "")
-	if err != nil || len(page.Requests) != 1 {
-		t.Fatal(page, err)
-	}
-	sys := page.Requests[0]
-	if sys.Source != "system" || sys.ConditionType != inbox.TaskNeedsVerification || sys.ActionURL != "/tasks/"+id {
-		t.Fatal(sys)
-	}
-	if _, err = h.repo.HandleAttentionRequest(h.ctx, h.owner, sys.ID, answerInbox("invalid-system"), false); !errors.Is(err, inbox.ErrInvalid) {
-		t.Fatal("系统接受回答", err)
-	}
-	if _, bad := h.call(t, "inbox.withdraw", map[string]any{"request_id": sys.ID, "reason": "模型撤回"}); !bad {
-		t.Fatal("模型撤回系统事项")
-	}
-	if _, err = h.repo.HandleAttentionRequest(h.ctx, h.owner, sys.ID, inbox.Handle{ExpectedVersion: 1, ClientRequestID: "system-close"}, true); err != nil {
-		t.Fatal(err)
-	}
-	uncertain.EventID = mustUUID(t)
-	if ack, _, err := h.repo.ApplyExecutionReport(h.ctx, uncertain); err != nil || !ack {
-		t.Fatal(err)
-	}
-	if n := countRows(t, h.ctx, h.pool, `SELECT count(*) FROM attention_requests`); n != 1 {
-		t.Fatal("关闭后重复创建", n)
-	}
+	id := createProjectThread(t, h)
 	args := inboxArgs()
-	args["task_id"] = id
+	args["thread_id"] = id
 	raw, bad := h.call(t, "inbox.ask", args)
 	if bad {
 		t.Fatal(string(raw))
@@ -354,69 +294,49 @@ func TestInboxTaskSnapshotAndSystemLifecycle(t *testing.T) {
 		ID string `json:"request_id"`
 	}
 	_ = json.Unmarshal(raw, &created)
-	original, err := h.repo.AttentionRequest(h.ctx, h.owner, created.ID)
+	r, err := h.repo.AttentionRequest(h.ctx, h.owner, created.ID)
+	if err != nil || r.ThreadID != id {
+		t.Fatal(r, err)
+	}
+	encoded, _ := json.Marshal(r)
+	if strings.Contains(string(encoded), "task_result") {
+		t.Fatal(string(encoded))
+	}
+	page, err := h.repo.RelatedAttentionRequests(h.ctx, h.owner, "all", "", h.project.ID, id)
+	if err != nil || len(page.Requests) != 1 || page.Requests[0].ID != r.ID {
+		t.Fatal(page, err)
+	}
+	other, err := h.repo.CreateProject(h.ctx, h.owner, projectagent.CreateInput{Title: "其他"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec, err := h.repo.GetTask(h.ctx, h.owner, id)
-	if err != nil {
+	if _, err = h.pool.Exec(h.ctx, `UPDATE threads SET project_id=$2,origin_conversation_id=$3 WHERE id=$1`, id, other.ID, other.Conversation.ID); err != nil {
 		t.Fatal(err)
 	}
-	resolved, err := h.repo.ResolveTask(h.ctx, h.owner, id, resolutionInput(rec.Version, task.StatusCompleted))
-	if err != nil {
+	if _, bad = h.call(t, "inbox.ask", args); !bad {
+		t.Fatal("接受跨 Project Thread")
+	}
+	taskID := h.dispatch(t)
+	if _, err = h.repo.RequestCancel(h.ctx, h.owner, taskID); err != nil {
 		t.Fatal(err)
 	}
-	current, err := h.repo.AttentionRequest(h.ctx, h.owner, created.ID)
-	if err != nil || *current.TaskResultVersion != *original.TaskResultVersion || *current.LatestTaskResultVersion != resolved.Version || string(current.TaskResult) != string(original.TaskResult) {
-		t.Fatal("引用原结果变化", err)
+	if n := countRows(t, h.ctx, h.pool, `SELECT count(*) FROM attention_requests WHERE source='system'`); n != 0 {
+		t.Fatal("旧任务生成系统事项", n)
 	}
-	// 已核实之后构造同一执行再次运行的夹具，再通过真实报告路径进入待核实。
-	if _, err = h.pool.Exec(h.ctx, `UPDATE tasks SET status='running',version=version+1 WHERE id=$1`, id); err != nil {
-		t.Fatal(err)
-	}
-	uncertain.EventID = mustUUID(t)
-	if ack, _, err := h.repo.ApplyExecutionReport(h.ctx, uncertain); err != nil || !ack {
-		t.Fatal(err)
-	}
-	if n := countRows(t, h.ctx, h.pool, `SELECT count(*) FROM attention_requests WHERE source='system'`); n != 2 {
-		t.Fatal("重入未创建新事项", n)
-	}
-	rec, err = h.repo.GetTask(h.ctx, h.owner, id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	h.repo.SetTaskCommitHook(func(context.Context) error { return errors.New("核实回滚") })
-	if _, err = h.repo.ResolveTask(h.ctx, h.owner, id, resolutionInput(rec.Version, task.StatusCompleted)); err == nil {
-		t.Fatal("核实未回滚")
-	}
-	if n := countRows(t, h.ctx, h.pool, `SELECT count(*) FROM attention_requests WHERE source='system' AND state='open'`); n != 1 {
-		t.Fatal("系统解决未回滚")
-	}
-	h.repo.SetTaskCommitHook(nil)
-	if _, err = h.repo.ResolveTask(h.ctx, h.owner, id, resolutionInput(rec.Version, task.StatusCompleted)); err != nil {
-		t.Fatal(err)
-	}
-	if n := countRows(t, h.ctx, h.pool, `SELECT count(*) FROM attention_requests WHERE source='system' AND state='resolved'`); n != 1 {
-		t.Fatal("核实未解决", n)
-	}
-	if n := countRows(t, h.ctx, h.pool, `SELECT count(*) FROM project_agent_input_queue WHERE source_type='attention_answer'`); n != 0 {
-		t.Fatal("系统生成输入", n)
-	}
-	t.Log("待核实创建、关闭不重建、条件重入新事项、核实解决同事务；人工修正保留原引用并返回最新版本")
 }
 
-func TestInboxContentPagingTaskOwnershipAndEscapedReply(t *testing.T) {
+func TestInboxContentPagingThreadOwnershipAndEscapedReply(t *testing.T) {
 	h := newToolHarness(t)
-	id := h.dispatch(t)
+	id := createProjectThread(t, h)
 	other, err := h.repo.CreateProject(h.ctx, h.owner, projectagent.CreateInput{Title: "其他 Project"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = h.pool.Exec(h.ctx, `UPDATE tasks SET project_id=$2,origin_conversation_id=$3 WHERE id=$1`, id, other.ID, other.Conversation.ID); err != nil {
+	if _, err = h.pool.Exec(h.ctx, `UPDATE threads SET project_id=$2,origin_conversation_id=$3 WHERE id=$1`, id, other.ID, other.Conversation.ID); err != nil {
 		t.Fatal(err)
 	}
 	args := inboxArgs()
-	args["task_id"] = id
+	args["thread_id"] = id
 	if _, bad := h.call(t, "inbox.ask", args); !bad {
 		t.Fatal("接受其他 Project 的任务引用")
 	}
@@ -461,5 +381,86 @@ func TestInboxContentPagingTaskOwnershipAndEscapedReply(t *testing.T) {
 	}
 	if raw, bad = h.call(t, "inbox.withdraw", map[string]any{"request_id": out.ID, "reason": "已经回答"}); bad || !strings.Contains(string(raw), `"state":"answered"`) || !strings.Contains(string(raw), `"truncated":true`) {
 		t.Fatal("已回答内容超出工具容量", string(raw))
+	}
+}
+
+func TestInboxSystemDatabaseConstraints(t *testing.T) {
+	h := newToolHarness(t)
+	id := createProjectThread(t, h)
+	for _, tc := range []struct {
+		condition any
+		object    any
+		thread    any
+	}{
+		{nil, h.project.ID, nil},
+		{inbox.ProjectNeedsAttention, nil, nil},
+		{"task_needs_verification", h.project.ID, nil},
+		{inbox.ProjectNeedsAttention, h.project.ID, id},
+	} {
+		_, err := h.pool.Exec(h.ctx, `INSERT INTO attention_requests(id,employee_id,project_id,agent_id,conversation_id,source,condition_type,condition_object_id,thread_id,title) VALUES($1,$2,$3,$4,$5,'system',$6,$7,$8,'系统事项')`, mustUUID(t), h.owner, h.project.ID, h.project.Agent.ID, h.project.Conversation.ID, tc.condition, tc.object, tc.thread)
+		var rejected *pgconn.PgError
+		if !errors.As(err, &rejected) || rejected.Code != "23514" {
+			t.Fatal(tc, err)
+		}
+	}
+}
+
+func TestInboxProjectSystemLifecycle(t *testing.T) {
+	h := newToolHarness(t)
+	for i := 0; i < 3; i++ {
+		if i > 0 {
+			acceptProjectInput(t, h.ctx, h.repo, h.owner, h.project.ID, fmt.Sprintf("system-%d", i), "重试")
+			if err := h.repo.ScheduleProjectRuns(h.ctx); err != nil {
+				t.Fatal(err)
+			}
+			h.req = runtimeRequest(t, h.ctx, h.pool, h.project.Agent.ID, "bootstrap")
+		}
+		if _, err := h.pool.Exec(h.ctx, `UPDATE conversations SET failure_count=2 WHERE id=$1`, h.project.Conversation.ID); err != nil {
+			t.Fatal(err)
+		}
+		req := h.req
+		req.Operation = "report_failure"
+		req.Reason = "持续模型失败"
+		if _, err := h.repo.ProjectRuntime(h.ctx, h.src, req); err != nil {
+			t.Fatal(err)
+		}
+		page, err := h.repo.Inbox(h.ctx, h.owner, "open", "")
+		if err != nil || len(page.Requests) != 1 || page.Requests[0].ConditionType != inbox.ProjectNeedsAttention || page.Requests[0].ThreadID != "" {
+			t.Fatal(page, err)
+		}
+		r := page.Requests[0]
+		if _, err = h.repo.HandleAttentionRequest(h.ctx, h.owner, r.ID, answerInbox("system-answer"), false); !errors.Is(err, inbox.ErrInvalid) {
+			t.Fatal(err)
+		}
+		if _, err = h.pool.Exec(h.ctx, `UPDATE conversations SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE id=$1`, h.project.Conversation.ID); err != nil {
+			t.Fatal(err)
+		}
+		if i == 1 {
+			if _, err = h.repo.HandleAttentionRequest(h.ctx, h.owner, r.ID, inbox.Handle{ExpectedVersion: 1, ClientRequestID: "close-system"}, true); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for range 2 {
+			if err = h.repo.ScheduleProjectRuns(h.ctx); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if n := countRows(t, h.ctx, h.pool, `SELECT count(*) FROM attention_requests WHERE source='system'`); n != i+1 {
+			t.Fatal("状态未变化时重复创建", n)
+		}
+		if err = h.repo.RetryProject(h.ctx, h.owner, h.project.ID); err != nil {
+			t.Fatal(err)
+		}
+		current, err := h.repo.AttentionRequest(h.ctx, h.owner, r.ID)
+		want := "resolved"
+		if i == 1 {
+			want = "closed"
+		}
+		if err != nil || current.State != want {
+			t.Fatal(current, err)
+		}
+	}
+	if n := countRows(t, h.ctx, h.pool, `SELECT count(*) FROM project_agent_input_queue WHERE source_type='attention_answer'`); n != 0 {
+		t.Fatal("系统事项产生输入", n)
 	}
 }

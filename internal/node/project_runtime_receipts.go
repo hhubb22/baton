@@ -32,7 +32,7 @@ func (m *projectRuntimeManager) receiveWake(command protocol.ProjectRunCommand) 
 			return
 		}
 	}
-	p.notifyTaskWaits(command.TaskUpdates)
+	p.notifyThreadWaits(command.ThreadUpdates)
 	select {
 	case p.wake <- struct{}{}:
 	default:

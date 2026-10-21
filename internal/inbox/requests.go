@@ -19,16 +19,15 @@ type Queryer interface {
 type Binding struct{ EmployeeID, ProjectID, AgentID, ConversationID string }
 
 const requestSelect = `SELECT r.id::text,r.employee_id::text,r.project_id::text,p.title,r.agent_id::text,r.conversation_id::text,
- COALESCE(r.origin_tool_call_id,''),r.source,COALESCE(r.condition_type,''),COALESCE(r.condition_object_id::text,''),COALESCE(r.task_id::text,''),
- r.title,r.summary,r.content,r.options,r.allow_text,r.task_result_version,r.task_result,t.version,t.updated_at,
+ COALESCE(r.origin_tool_call_id,''),r.source,COALESCE(r.condition_type,''),COALESCE(r.condition_object_id::text,''),COALESCE(r.thread_id::text,''),
+ r.title,r.content,r.options,r.allow_text,
  r.action_url,r.state,r.version,r.resolution,r.resolved_at,r.withdraw_reason,r.created_at,r.updated_at
- FROM attention_requests r JOIN projects p ON p.id=r.project_id
- LEFT JOIN tasks t ON t.id=r.task_id AND t.employee_id=r.employee_id`
+ FROM attention_requests r JOIN projects p ON p.id=r.project_id`
 
 func scan(row pgx.Row) (Request, error) {
 	var r Request
-	err := row.Scan(&r.ID, &r.EmployeeID, &r.ProjectID, &r.ProjectTitle, &r.AgentID, &r.ConversationID, &r.OriginToolCallID, &r.Source, &r.ConditionType, &r.ConditionObjectID, &r.TaskID,
-		&r.Title, &r.Summary, &r.Content, &r.Options, &r.AllowText, &r.TaskResultVersion, &r.TaskResult, &r.LatestTaskResultVersion, &r.LatestTaskResultUpdatedAt,
+	err := row.Scan(&r.ID, &r.EmployeeID, &r.ProjectID, &r.ProjectTitle, &r.AgentID, &r.ConversationID, &r.OriginToolCallID, &r.Source, &r.ConditionType, &r.ConditionObjectID, &r.ThreadID,
+		&r.Title, &r.Content, &r.Options, &r.AllowText,
 		&r.ActionURL, &r.State, &r.Version, &r.Resolution, &r.ResolvedAt, &r.WithdrawReason, &r.CreatedAt, &r.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		err = ErrNotFound
@@ -39,10 +38,19 @@ func Get(ctx context.Context, q Queryer, owner, id string) (Request, error) {
 	return scan(q.QueryRow(ctx, requestSelect+` WHERE r.employee_id=$1 AND r.id=$2`, owner, id))
 }
 
-// CreateAgent 的调用方持有 Agent 行锁，并已锁定关联任务和取得结果快照。
-func CreateAgent(ctx context.Context, tx pgx.Tx, b Binding, callID string, a Ask, version *int, snapshot json.RawMessage) (Request, error) {
+// CreateAgent 的调用方持有 Agent 行锁；关联 Thread 只读校验归属。
+func CreateAgent(ctx context.Context, tx pgx.Tx, b Binding, callID string, a Ask) (Request, error) {
 	if err := a.Validate(); err != nil {
 		return Request{}, err
+	}
+	if a.ThreadID != "" {
+		var valid bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM threads WHERE employee_id=$1 AND project_id=$2 AND id=$3)`, b.EmployeeID, b.ProjectID, a.ThreadID).Scan(&valid); err != nil {
+			return Request{}, err
+		}
+		if !valid {
+			return Request{}, ErrNotFound
+		}
 	}
 	var count int
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM attention_requests WHERE project_id=$1 AND source='agent' AND state='open'`, b.ProjectID).Scan(&count); err != nil {
@@ -58,8 +66,8 @@ func CreateAgent(ctx context.Context, tx pgx.Tx, b Binding, callID string, a Ask
 	if a.Options == nil {
 		a.Options = []Option{}
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO attention_requests(id,employee_id,project_id,agent_id,conversation_id,origin_tool_call_id,source,task_id,task_result_version,task_result,title,summary,content,options,allow_text)
- VALUES($1,$2,$3,$4,$5,$6,'agent',$7,$8,$9,$10,$11,$12,$13,$14)`, id, b.EmployeeID, b.ProjectID, b.AgentID, b.ConversationID, callID, nullable(a.TaskID), version, snapshot, a.Title, a.Summary, a.Content, a.Options, a.AllowText)
+	_, err = tx.Exec(ctx, `INSERT INTO attention_requests(id,employee_id,project_id,agent_id,conversation_id,origin_tool_call_id,source,thread_id,title,content,options,allow_text)
+ VALUES($1,$2,$3,$4,$5,$6,'agent',$7,$8,$9,$10,$11)`, id, b.EmployeeID, b.ProjectID, b.AgentID, b.ConversationID, callID, nullable(a.ThreadID), a.Title, a.Content, a.Options, a.AllowText)
 	if err != nil {
 		return Request{}, err
 	}
@@ -154,29 +162,19 @@ func Archive(ctx context.Context, tx pgx.Tx, project string) error {
 }
 
 const ProjectNeedsAttention = "project_needs_attention"
-const TaskNeedsVerification = "task_needs_verification"
 
-// CreateSystem 只由进入两种系统条件的状态变化调用；关闭后继续处于该状态不会调用这里。
-func CreateSystem(ctx context.Context, tx pgx.Tx, b Binding, condition, object, title, reason, taskID string, version *int, snapshot json.RawMessage) error {
-	if condition != ProjectNeedsAttention && condition != TaskNeedsVerification {
+// CreateSystem 由主对话进入 needs_attention 的状态变化调用。
+func CreateSystem(ctx context.Context, tx pgx.Tx, b Binding, condition, object, title, reason string) error {
+	if condition != ProjectNeedsAttention || object != b.ProjectID {
 		return ErrInvalid
 	}
 	id, err := identity.NewUUID()
 	if err != nil {
 		return err
 	}
-	path := "/projects/" + b.ProjectID
-	if taskID != "" {
-		path = "/tasks/" + taskID
-	}
-	// 详情保留完整原因，摘要仅用于列表显示。
-	summary := []rune(reason)
-	if len(summary) > 280 {
-		summary = summary[:280]
-	}
-	_, err = tx.Exec(ctx, `INSERT INTO attention_requests(id,employee_id,project_id,agent_id,conversation_id,source,condition_type,condition_object_id,task_id,task_result_version,task_result,title,summary,content,action_url)
- VALUES($1,$2,$3,$4,$5,'system',$6,$7,$8,$9,$10,$11,$12,$13,$14)
- ON CONFLICT(condition_type,condition_object_id) WHERE source='system' AND state='open' DO NOTHING`, id, b.EmployeeID, b.ProjectID, b.AgentID, b.ConversationID, condition, object, nullable(taskID), version, snapshot, title, string(summary), reason, path)
+	_, err = tx.Exec(ctx, `INSERT INTO attention_requests(id,employee_id,project_id,agent_id,conversation_id,source,condition_type,condition_object_id,title,content,action_url)
+ VALUES($1,$2,$3,$4,$5,'system',$6,$7,$8,$9,$10)
+ ON CONFLICT(project_id) WHERE source='system' AND state='open' DO NOTHING`, id, b.EmployeeID, b.ProjectID, b.AgentID, b.ConversationID, condition, object, title, reason, "/projects/"+b.ProjectID)
 	return err
 }
 func ResolveSystem(ctx context.Context, tx pgx.Tx, condition, object string) error {
@@ -199,9 +197,9 @@ func List(ctx context.Context, q Queryer, owner, state, encoded string) (Page, e
 }
 
 // ListFiltered 按归属筛选页面中的相关事项，员工边界始终由 owner 限定。
-func ListFiltered(ctx context.Context, q Queryer, owner, state, encoded, projectID, taskID string) (Page, error) {
+func ListFiltered(ctx context.Context, q Queryer, owner, state, encoded, projectID, threadID string) (Page, error) {
 	out := Page{Requests: []Request{}}
-	for _, id := range []string{projectID, taskID} {
+	for _, id := range []string{projectID, threadID} {
 		if id != "" {
 			if _, err := identity.ParseUUID(id); err != nil {
 				return out, ErrInvalid
@@ -227,7 +225,7 @@ func ListFiltered(ctx context.Context, q Queryer, owner, state, encoded, project
 	if err := q.QueryRow(ctx, `SELECT count(*) FROM attention_requests WHERE employee_id=$1 AND state='open'`, owner).Scan(&out.OpenCount); err != nil {
 		return out, err
 	}
-	rows, err := q.Query(ctx, requestSelect+` WHERE r.employee_id=$1 AND (($2='all') OR ($2='open' AND r.state='open') OR ($2='done' AND r.state<>'open')) AND ($3::uuid IS NULL OR (r.created_at,r.id)<($4,$3)) AND ($5::uuid IS NULL OR r.project_id=$5) AND ($6::uuid IS NULL OR r.task_id=$6) ORDER BY r.created_at DESC,r.id DESC LIMIT 51`, owner, state, nullable(c.ID), c.CreatedAt, nullable(projectID), nullable(taskID))
+	rows, err := q.Query(ctx, requestSelect+` WHERE r.employee_id=$1 AND (($2='all') OR ($2='open' AND r.state='open') OR ($2='done' AND r.state<>'open')) AND ($3::uuid IS NULL OR (r.created_at,r.id)<($4,$3)) AND ($5::uuid IS NULL OR r.project_id=$5) AND ($6::uuid IS NULL OR r.thread_id=$6) ORDER BY r.created_at DESC,r.id DESC LIMIT 51`, owner, state, nullable(c.ID), c.CreatedAt, nullable(projectID), nullable(threadID))
 	if err != nil {
 		return out, err
 	}

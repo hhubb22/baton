@@ -35,14 +35,14 @@ func TestAskValidation(t *testing.T) {
 	}
 	for _, change := range []func(*inbox.Ask){
 		func(a *inbox.Ask) { a.Title = "" }, func(a *inbox.Ask) { a.Title = strings.Repeat("中", 121) },
-		func(a *inbox.Ask) { a.Summary = strings.Repeat("中", 281) }, func(a *inbox.Ask) { a.Options = nil },
+		func(a *inbox.Ask) { a.Options = nil },
 		func(a *inbox.Ask) { a.Options = append(a.Options, a.Options[0]) },
 		func(a *inbox.Ask) {
 			a.Options = append(a.Options, inbox.Option{ID: "stop", Label: "停止", Recommended: true})
 		},
 		func(a *inbox.Ask) { a.Options[0].ID = "Bad" }, func(a *inbox.Ask) { a.Options[0].Label = "" },
 
-		func(a *inbox.Ask) { a.TaskID = "invalid" },
+		func(a *inbox.Ask) { a.ThreadID = "invalid" },
 	} {
 		a := valid()
 		change(&a)

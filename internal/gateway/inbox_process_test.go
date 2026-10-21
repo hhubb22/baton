@@ -47,7 +47,7 @@ func TestInboxRealProcessesToolsValidationAndRecovery(t *testing.T) {
 	if err := st.pool.QueryRow(ctx, `SELECT count(*) FROM attention_requests WHERE project_id=$1`, project.ID).Scan(&count); err != nil || count != 0 {
 		t.Fatal("错误调用生成事项", count, err)
 	}
-	args := map[string]any{"title": "检查结果", "summary": "模型替身创建事项", "content": "[证据](https://example.org)", "options": []inbox.Option{{ID: "investigate", Label: "调查"}}, "allow_text": true}
+	args := map[string]any{"title": "检查结果", "content": "[证据](https://example.org)", "options": []inbox.Option{{ID: "investigate", Label: "调查"}}, "allow_text": true}
 	var saved projectagent.Event
 	if r := p.call(t, runID, "ask-save", assistantToolRequest("ask-once", "inbox.ask", args, seq), &saved); !r.OK {
 		t.Fatal(r)

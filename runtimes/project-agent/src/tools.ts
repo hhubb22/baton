@@ -58,9 +58,63 @@ export const toolDefinitions = [
     parameters: obj({ after_id: opt(), ...page }),
   },
   {
+    name: "threads.create",
+    description:
+      "在目标设备上新建 Thread 并向执行 Agent 发出第一条消息，立即返回 Thread ID 和状态。工作目录必须已存在；agent_type 不能为 shell，命令通过 nodes.exec 执行。在 message 中写明工作目标和验证方式，找不到验证方式时写明原因。结果可用 threads.read 查询。",
+    parameters: obj({
+      node_id: str(),
+      agent_type: str(),
+      working_directory: str(),
+      message: str(),
+      execution_timeout_seconds: Type.Optional(Type.Integer({ minimum: 1 })),
+    }),
+  },
+  {
+    name: "threads.send",
+    description:
+      "向本 Project 的 Thread 发送消息，包括用户新建的 Thread。mode 默认为 queue；steer 插入当前一轮，不支持时返回错误。",
+    parameters: obj({
+      thread_id: str(),
+      message: str(),
+      mode: Type.Optional(
+        Type.Union([Type.Literal("queue"), Type.Literal("steer")]),
+      ),
+    }),
+  },
+  {
+    name: "threads.stop",
+    description: "停止本 Project 的 Thread 当前一轮。",
+    parameters: obj({ thread_id: str() }),
+  },
+  {
+    name: "threads.archive",
+    description: "归档本 Project 的 Thread。",
+    parameters: obj({ thread_id: str() }),
+  },
+  {
+    name: "threads.list",
+    description: "列出本 Project 的 Thread，可按状态筛选。",
+    parameters: obj({ status: opt(), after_id: opt(), ...page }),
+  },
+  {
+    name: "threads.get",
+    description: "读取本 Project 的 Thread 状态、当前 Turn 和待发消息。",
+    parameters: obj({ thread_id: str(), ...page }),
+  },
+  {
+    name: "threads.read",
+    description: "按 Turn 读取本 Project 的 Thread 消息和回复正文；续读时固定 through_turn。",
+    parameters: obj({
+      thread_id: str(),
+      after_turn: Type.Optional(Type.Integer({ minimum: 0 })),
+      through_turn: Type.Optional(Type.Integer({ minimum: 1 })),
+      ...page,
+    }),
+  },
+  {
     name: "nodes.exec",
     description:
-      "在已开启命令执行的节点上管理环境，例如创建 worktree、检查仓库或安装依赖。开发工作优先派发给执行 Agent。Baton 不检查命令内容，也不提供沙箱；命令以节点用户身份运行。工作目录必须已存在并位于节点登记目录内。等待结束后命令继续运行，结果可用 tasks.get 查询。",
+      "在已开启命令执行的节点上管理环境，例如创建 worktree、检查仓库或安装依赖。开发工作优先派发给执行 Agent。Baton 不检查命令内容，也不提供沙箱；命令以节点用户身份运行。工作目录必须已存在并位于节点登记目录内。等待结束后命令继续运行，结果可用 threads.read 查询。",
     parameters: obj({
       node_id: str(),
       command: str(),
@@ -74,45 +128,10 @@ export const toolDefinitions = [
     }),
   },
   {
-    name: "tasks.dispatch",
-    description:
-      "把开发任务交给执行 Agent；工作目录必须已存在。在 expected_outputs 写明验证方式，找不到验证方式时写明原因。结果可用 tasks.get 查询。",
-    parameters: obj({
-      target_node_id: str(),
-      agent_type: str(),
-      working_directory: str(),
-      description: str(),
-      expected_outputs: str(),
-      queue_timeout_seconds: Type.Optional(Type.Integer({ minimum: 1 })),
-      execution_timeout_seconds: Type.Optional(Type.Integer({ minimum: 1 })),
-      retry_of_task_id: opt(),
-    }),
-  },
-  {
-    name: "tasks.list",
-    description: "列出本 Project 的任务。",
-    parameters: obj({ status: opt(), after_id: opt(), ...page }),
-  },
-  {
-    name: "tasks.get",
-    description: "读取本 Project 的任务状态、结果和证据。",
-    parameters: obj({
-      task_id: str(),
-      version: Type.Optional(Type.Integer({ minimum: 1 })),
-      ...page,
-    }),
-  },
-  {
-    name: "tasks.cancel",
-    description: "请求取消本 Project 的任务。",
-    parameters: obj({ task_id: str() }),
-  },
-  {
     name: "inbox.ask",
-    description: "创建请用户处理的事项，立即返回 ID。展示内容为不超过 32 KiB 的 Markdown，链接只允许 https，HTML 和图片不渲染。每个 Project 最多 10 个待处理提案；没有选项时必须允许文字回复。",
+    description: "创建请用户处理的事项，可通过 thread_id 关联本 Project 的 Thread，立即返回事项 ID。展示内容为不超过 32 KiB 的 Markdown，链接只允许 https，HTML 和图片不渲染。每个 Project 最多 10 个待处理事项；没有选项时必须允许文字回复。",
     parameters: obj({
       title: str(),
-      summary: str(),
       content: str(),
       options: Type.Array(
         obj({
@@ -124,22 +143,22 @@ export const toolDefinitions = [
         { maxItems: 5 },
       ),
       allow_text: Type.Boolean(),
-      task_id: opt(),
+      thread_id: opt(),
     }),
   },
   {
     name: "inbox.list",
-    description: "列出本 Project 的提案及系统事项。",
+    description: "列出本 Project 的事项及其状态。",
     parameters: obj({ after_id: opt(), ...page }),
   },
   {
     name: "inbox.get",
-    description: "读取本 Project 的事项、处理结果、引用的原任务结果和最新版本。",
+    description: "读取本 Project 的完整事项、关联 Thread ID 和处理结果。",
     parameters: obj({ request_id: str(), ...page }),
   },
   {
     name: "inbox.withdraw",
-    description: "撤回本 Project 的待处理提案，必须说明原因。系统事项不能撤回。",
+    description: "撤回本 Project 的待处理 Agent 事项，必须说明原因；已处理时返回当前状态和处理结果。系统事项不能撤回。",
     parameters: obj({ request_id: str(), reason: str() }),
   },
 ];

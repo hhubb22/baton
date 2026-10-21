@@ -26,7 +26,7 @@ class ExecBackend extends Backend {
       assert.ok(this.events.some((event) => event.kind === "assistant"));
       this.calls.push(req.operation);
       if (!this.accepted) { this.accepted = true; this.effects++; }
-      return { pending: true, task_id: "exec-task-1" };
+      return { pending: true, thread_id: "exec-thread-1" };
     }
     if (req.operation === "wait_tool") {
       this.calls.push(req.operation);
@@ -34,13 +34,13 @@ class ExecBackend extends Backend {
       assert.equal(req.tool_call_id, "exec-1");
       assert.equal(req.last_seq, this.events.length);
       if (!req.payload?.finish_wait && this.waits.length <= this.pendingCount)
-        return { pending: true, task_id: "exec-task-1" };
+        return { pending: true, thread_id: "exec-thread-1" };
       const event = {
         seq: this.events.length + 1,
         kind: "tool_result" as const,
         payload: { format: "pi-ai/1", message: {
           role: "toolResult", toolCallId: "exec-1", toolName: "nodes.exec",
-          content: [{ type: "text", text: JSON.stringify({ task_id: "exec-task-1", status: req.payload?.finish_wait ? "running" : this.resultStatus }) }],
+          content: [{ type: "text", text: JSON.stringify({ thread_id: "exec-thread-1", status: req.payload?.finish_wait ? "running" : this.resultStatus }) }],
           isError: false, timestamp: 0,
         } },
       };
@@ -55,7 +55,7 @@ class LocalWaitBackend extends ExecBackend {
   localProtocol: number | undefined = 1;
   centerProtocol: number | undefined = 1;
   pendingCount = Infinity;
-  taskVersion = 7;
+  threadVersion = 7;
   waitUntil = 30_000;
   completeAt = 30_000;
   requests: { request: any; at: number }[] = [];
@@ -76,9 +76,9 @@ class LocalWaitBackend extends ExecBackend {
   }
   async call(req: any): Promise<any> {
     this.requests.push({ request: structuredClone(req), at: this.now });
-    if (req.operation === "poll_wake" && req.payload.task_id) {
+    if (req.operation === "poll_wake" && req.payload.thread_id) {
       this.calls.push(req.operation);
-      assert.equal(req.payload.task_id, "exec-task-1");
+      assert.equal(req.payload.thread_id, "exec-thread-1");
       assert.ok(Number.isInteger(req.payload.wait_ms));
       assert.ok(req.payload.wait_ms >= 1 && req.payload.wait_ms <= 25_000);
       if (this.onPoll) return this.onPoll(req);
@@ -89,13 +89,13 @@ class LocalWaitBackend extends ExecBackend {
       this.pendingCount = 0;
     const response = await super.call(req);
     return response?.pending && this.centerProtocol === 1
-      ? { ...response, task_version: this.taskVersion,
+      ? { ...response, version: this.threadVersion,
           wait_remaining_ms: this.remaining(), wait_protocol: 1 }
       : response;
   }
-  taskPolls() {
+  threadPolls() {
     return this.requests.filter(({ request }) =>
-      request.operation === "poll_wake" && request.payload.task_id);
+      request.operation === "poll_wake" && request.payload.thread_id);
   }
   waitTimes() {
     return this.requests.filter(({ request }) => request.operation === "wait_tool")
@@ -112,9 +112,9 @@ test("本地等待丢失全部通知，30 秒 pending 仅做初始、周期和�
   await fixture.runtime.start();
   assert.equal(backend.effects, 1);
   assert.deepEqual(backend.waitTimes(), [0, 25_000, 30_000]);
-  assert.deepEqual(backend.taskPolls().map(({ request }) => request.payload), [
-    { task_id: "exec-task-1", after_version: 7, wait_ms: 25_000 },
-    { task_id: "exec-task-1", after_version: 7, wait_ms: 5_000 },
+  assert.deepEqual(backend.threadPolls().map(({ request }) => request.payload), [
+    { thread_id: "exec-thread-1", after_version: 7, wait_ms: 25_000 },
+    { thread_id: "exec-thread-1", after_version: 7, wait_ms: 5_000 },
   ]);
   assert.deepEqual(backend.sleeps, []);
   assert.ok(backend.waits.every((request) => !request.payload));
@@ -122,19 +122,19 @@ test("本地等待丢失全部通知，30 秒 pending 仅做初始、周期和�
   assert.equal(backend.events.filter((event) => event.kind === "tool_result").length, 1);
   assert.match(backend.events.find((event) => event.kind === "tool_result")!.payload.message.content[0].text, /running/);
   const idlePolls = backend.requests.filter(({ request }) =>
-    request.operation === "poll_wake" && !request.payload.task_id);
+    request.operation === "poll_wake" && !request.payload.thread_id);
   assert.ok(idlePolls.length > 0);
   assert.ok(idlePolls.every(({ request }) => Object.keys(request.payload).join() === "wait_ms"));
 });
 
-test("中心或节点未声明新协议时沿用 250ms 查询，任务等待不消费通用 wake", async () => {
+test("中心或节点未声明新协议时沿用 250ms 查询，Thread 等待不消费通用 wake", async () => {
   for (const [local, center] of [[undefined, undefined], [undefined, 1], [1, undefined], [2, 1]]) {
     const backend = new LocalWaitBackend();
     backend.localProtocol = local;
     backend.centerProtocol = center;
     const fixture = setup(backend, execResponses());
     await fixture.runtime.start();
-    assert.equal(backend.taskPolls().length, 0);
+    assert.equal(backend.threadPolls().length, 0);
     assert.equal(backend.waits.length, 121);
     assert.equal(backend.sleeps.length, 120);
     assert.ok(backend.sleeps.every((ms) => ms === 250));
@@ -143,36 +143,36 @@ test("中心或节点未声明新协议时沿用 250ms 查询，任务等待不�
   }
 });
 
-test("初始短查询发现已完成任务时跳过本地等待", async () => {
+test("初始短查询发现已结束 Thread 时跳过本地等待", async () => {
   const backend = new LocalWaitBackend();
   backend.completeAt = 0;
   await setup(backend, execResponses()).runtime.start();
   assert.deepEqual(backend.waitTimes(), [0]);
-  assert.equal(backend.taskPolls().length, 0);
+  assert.equal(backend.threadPolls().length, 0);
   assert.deepEqual(backend.sleeps, []);
 });
 
-test("节点过滤重复和无关通知后，任务变化仍须查询中心并可继续 pending", async () => {
+test("节点过滤重复和无关通知后，Thread 变化仍须查询中心并可继续 pending", async () => {
   const backend = new LocalWaitBackend();
   backend.waitUntil = 60_000;
   backend.completeAt = 28_000;
   const notifications = [
-    { at: 1_000, task_id: "other-task", version: 99 },
-    { at: 2_000, task_id: "exec-task-1", version: 7 },
-    { at: 3_000, task_id: "exec-task-1", version: 8 },
-    { at: 4_000, task_id: "exec-task-1", version: 8 },
-    { at: 5_000, task_id: "exec-task-1", version: 6 },
-    { at: 6_000, task_id: "other-task", version: 100 },
+    { at: 1_000, thread_id: "other-thread", version: 99 },
+    { at: 2_000, thread_id: "exec-thread-1", version: 7 },
+    { at: 3_000, thread_id: "exec-thread-1", version: 8 },
+    { at: 4_000, thread_id: "exec-thread-1", version: 8 },
+    { at: 5_000, thread_id: "exec-thread-1", version: 6 },
+    { at: 6_000, thread_id: "other-thread", version: 100 },
   ];
   backend.onPoll = async ({ payload }) => {
-    // 模拟节点过滤通知后的 IPC 边界，Runtime 只收到目标任务的新版本。
+    // 模拟节点过滤通知后的 IPC 边界，Runtime 只收到目标 Thread 的新版本。
     const until = backend.now + payload.wait_ms;
     while (notifications.length && notifications[0].at <= until) {
       const notification = notifications.shift()!;
       backend.now = notification.at;
-      if (notification.task_id === payload.task_id && notification.version > payload.after_version) {
-        backend.taskVersion = notification.version;
-        return { reason: "task_changed", version: notification.version };
+      if (notification.thread_id === payload.thread_id && notification.version > payload.after_version) {
+        backend.threadVersion = notification.version;
+        return { reason: "thread_changed", version: notification.version };
       }
     }
     backend.now = until;
@@ -180,7 +180,7 @@ test("节点过滤重复和无关通知后，任务变化仍须查询中心并�
   };
   await setup(backend, execResponses()).runtime.start();
   assert.deepEqual(backend.waitTimes(), [0, 3_000, 28_000]);
-  assert.deepEqual(backend.taskPolls().map(({ request }) => request.payload.after_version), [7, 8]);
+  assert.deepEqual(backend.threadPolls().map(({ request }) => request.payload.after_version), [7, 8]);
   assert.equal(backend.events.filter((event) => event.kind === "tool_result").length, 1);
   assert.deepEqual(backend.sleeps, []);
 });
@@ -191,7 +191,7 @@ test("丢失完成通知后在下个 25 秒周期补读终态", async () => {
   backend.completeAt = 26_000;
   await setup(backend, execResponses()).runtime.start();
   assert.deepEqual(backend.waitTimes(), [0, 25_000, 50_000]);
-  assert.equal(backend.taskPolls().length, 2);
+  assert.equal(backend.threadPolls().length, 2);
 });
 
 test("首次请求延迟 1 秒、后续查询耗时 1ms 时重新同步预算并限制 30 秒等待的请求数", async () => {
@@ -222,10 +222,10 @@ test("首次请求延迟 1 秒、后续查询耗时 1ms 时重新同步预算并
     assert.equal(backend.effects, 1);
     if (local === 1 && center === 1) {
       assert.ok(backend.waits.length <= 6, `状态查询次数过多: ${backend.waits.length}`);
-      assert.deepEqual(backend.taskPolls().map(({ request }) => request.payload.wait_ms), [25_000, 4_997]);
+      assert.deepEqual(backend.threadPolls().map(({ request }) => request.payload.wait_ms), [25_000, 4_997]);
       assert.deepEqual(backend.sleeps, []);
     } else {
-      assert.equal(backend.taskPolls().length, 0);
+      assert.equal(backend.threadPolls().length, 0);
       assert.equal(backend.waits.length, 121);
       assert.equal(backend.sleeps.length, 120);
       assert.ok(backend.sleeps.every((ms) => ms === 250));
@@ -241,7 +241,7 @@ test("本地预算已耗尽而中心仍 pending 时每次退避 250ms，由中�
     backend.completeAt = 500;
     await setup(backend, execResponses()).runtime.start();
     assert.deepEqual(backend.waitTimes(), [0, 250, 500]);
-    assert.equal(backend.taskPolls().length, 0);
+    assert.equal(backend.threadPolls().length, 0);
     assert.deepEqual(backend.sleeps, [250, 250]);
     assert.ok(backend.waits.every((request) => !request.payload));
   }
@@ -261,29 +261,79 @@ test("预算耗尽后的退避受剩余运行预算限制，到期使用 finish_
   await fixture.runtime.start();
   assert.equal(backend.now, RUN_MS);
   assert.deepEqual(backend.sleeps, [100]);
-  assert.equal(backend.taskPolls().length, 0);
+  assert.equal(backend.threadPolls().length, 0);
   assert.deepEqual(backend.waits.map((request) => request.payload), [undefined, { finish_wait: true }]);
   assert.equal(fixture.faux.state.callCount, 1);
   assert.deepEqual(backend.requests.at(-1)?.request, { operation: "finish", last_seq: 3, reason: "run_limit" });
 });
 
-test("新 pending 协议拒绝非法版本和剩余预算", async () => {
-  for (const fields of [
-    { task_version: -1 }, { task_version: 0.5 }, { task_version: "7" },
-    { wait_remaining_ms: -1 }, { wait_remaining_ms: 0.5 },
-    { wait_remaining_ms: undefined }, { wait_remaining_ms: Infinity },
-  ]) {
-    const backend = new LocalWaitBackend();
+test("pending 响应在调用和后续查询时均校验 Thread、版本和剩余预算", async () => {
+  for (const phase of ["call_tool", "wait_tool"]) {
+    for (const fields of [
+      { thread_id: undefined }, { thread_id: "" }, { thread_id: 1 },
+      { version: undefined }, { version: -1 }, { version: 0.5 },
+      { version: "7" }, { version: Infinity }, { version: NaN },
+      { version: Number.MAX_SAFE_INTEGER + 1 },
+      { wait_remaining_ms: -1 }, { wait_remaining_ms: 0.5 },
+      { wait_remaining_ms: undefined }, { wait_remaining_ms: Infinity },
+      { wait_remaining_ms: NaN }, { wait_remaining_ms: "30" },
+      { wait_remaining_ms: Number.MAX_SAFE_INTEGER + 1 },
+    ]) {
+      const backend = new LocalWaitBackend();
+      const call = backend.call.bind(backend);
+      backend.call = async (request) => {
+        const response = await call(request);
+        return request.operation === phase && response?.pending
+          ? { ...response, ...fields } : response;
+      };
+      await assert.rejects(setup(backend, execResponses()).runtime.start(), { code: "invalid_tool_result" });
+      assert.equal(backend.waits.length, phase === "call_tool" ? 0 : 1);
+      assert.equal(backend.threadPolls().length, 0);
+      assert.equal(backend.events.at(-1)?.kind, "assistant");
+    }
+  }
+});
+
+test("未声明等待协议的 pending 仍要求非空 Thread ID", async () => {
+  for (const thread_id of [undefined, "", 1]) {
+    const backend = new ExecBackend();
     const call = backend.call.bind(backend);
     backend.call = async (request) => {
       const response = await call(request);
-      return response?.pending ? { ...response, ...fields } : response;
+      return response?.pending ? { ...response, thread_id } : response;
     };
     await assert.rejects(setup(backend, execResponses()).runtime.start(), { code: "invalid_tool_result" });
     assert.equal(backend.waits.length, 0);
-    assert.equal(backend.taskPolls().length, 0);
-    assert.equal(backend.events.at(-1)?.kind, "assistant");
   }
+});
+
+test("只有 nodes.exec 可以返回 pending", async () => {
+  const backend = new Backend();
+  const call = backend.call.bind(backend);
+  backend.call = async (request) => request.operation === "call_tool"
+    ? { pending: true, thread_id: "thread-1", version: 0, wait_remaining_ms: 30_000, wait_protocol: 1 }
+    : call(request);
+  await assert.rejects(setup(backend).runtime.start(), { code: "invalid_tool_result" });
+  assert.equal(backend.events.at(-1)?.kind, "assistant");
+});
+
+test("Thread 版本允许为零，亚毫秒运行预算将本地等待取整为 1ms", async () => {
+  const backend = new LocalWaitBackend();
+  backend.threadVersion = 0;
+  backend.remaining = () => 60_000;
+  backend.completeAt = Infinity;
+  backend.waitUntil = RUN_MS + 60_000;
+  const call = backend.call.bind(backend);
+  backend.call = async (request) => {
+    const response = await call(request);
+    if (request.operation === "call_tool") backend.now = RUN_MS - 0.5;
+    return response;
+  };
+  await setup(backend, execResponses()).runtime.start();
+  assert.deepEqual(backend.threadPolls().map(({ request }) => request.payload), [
+    { thread_id: "exec-thread-1", after_version: 0, wait_ms: 1 },
+  ]);
+  assert.deepEqual(backend.waits.at(-1).payload, { finish_wait: true });
 });
 
 test("本地新协议在运行期限保存当前状态，恢复和普通执行均停止后续工具与模型", async () => {
@@ -305,12 +355,12 @@ test("本地新协议在运行期限保存当前状态，恢复和普通执行�
     const fixture = setup(backend, [() => message]);
     await fixture.runtime.start();
     assert.equal(backend.now, RUN_MS);
-    assert.deepEqual(backend.taskPolls().map(({ request }) => request.payload.wait_ms), [100]);
+    assert.deepEqual(backend.threadPolls().map(({ request }) => request.payload.wait_ms), [100]);
     assert.deepEqual(backend.waits.map((request) => request.payload), [undefined, { finish_wait: true }]);
     assert.equal(backend.effects, 1);
     assert.equal(fixture.faux.state.callCount, recovery ? 0 : 1);
     assert.deepEqual(backend.requests.at(-1)?.request, { operation: "finish", last_seq: 3, reason: "run_limit" });
-    assert.ok(!backend.calls.includes("tasks.cancel"));
+    assert.ok(!backend.calls.includes("threads.stop"));
   }
 });
 
@@ -326,24 +376,24 @@ test("运行期限已到或状态请求跨过期限时跳过本地等待并保�
     };
     const fixture = setup(backend, execResponses());
     await fixture.runtime.start();
-    assert.equal(backend.taskPolls().length, 0);
+    assert.equal(backend.threadPolls().length, 0);
     assert.deepEqual(backend.waits.at(-1).payload, { finish_wait: true });
     assert.equal(fixture.faux.state.callCount, 1);
   }
 });
 
-test("任务变化通知可无 version，取消结果由中心保存后返回模型", async () => {
+test("Thread 变化通知可无 version，停止结果由中心保存后返回模型", async () => {
   const backend = new LocalWaitBackend();
   backend.completeAt = 1_000;
-  backend.resultStatus = "cancelled";
+  backend.resultStatus = "stopped";
   backend.onPoll = async () => {
     backend.now += 1_000;
-    return { reason: "task_changed" };
+    return { reason: "thread_changed" };
   };
   const fixture = setup(backend, execResponses());
   await fixture.runtime.start();
   assert.deepEqual(backend.waitTimes(), [0, 1_000]);
-  assert.match(backend.events.find((event) => event.kind === "tool_result")!.payload.message.content[0].text, /cancelled/);
+  assert.match(backend.events.find((event) => event.kind === "tool_result")!.payload.message.content[0].text, /stopped/);
   assert.equal(fixture.faux.state.callCount, 2);
 });
 
@@ -352,7 +402,7 @@ test("等待被停止或租约丢失时直接退出，不写工具结果或 fini
     const backend = new LocalWaitBackend();
     const call = backend.call.bind(backend);
     backend.call = async (request) => {
-      if (request.operation === phase && (phase === "poll_wake" || backend.taskPolls().length > 0))
+      if (request.operation === phase && (phase === "poll_wake" || backend.threadPolls().length > 0))
         throw new RuntimeError(phase === "poll_wake" ? "aborted" : "lease_lost");
       return call(request);
     };
@@ -360,7 +410,7 @@ test("等待被停止或租约丢失时直接退出，不写工具结果或 fini
       { code: phase === "poll_wake" ? "aborted" : "lease_lost" });
     assert.equal(backend.events.at(-1)?.kind, "assistant");
     assert.ok(!backend.calls.includes("finish"));
-    assert.ok(!backend.calls.includes("tasks.cancel"));
+    assert.ok(!backend.calls.includes("threads.stop"));
   }
 });
 
@@ -375,6 +425,9 @@ test("nodes.exec 工具声明等待范围、默认时限和执行权限", () => 
   assert.match(definition.description, /不检查命令内容，也不提供沙箱/);
   const messages = modelMessages(new Backend().boot(), []);
   assert.match(String(messages[0].content), /通过 nodes.exec 管理环境/);
+  assert.match(String(messages[0].content), /退出 Runtime 不停止已开启的 Thread/);
+  assert.match(String(messages[0].content), /不向用户已停止或归档的 Thread 继续发消息，除非用户在对话里要求/);
+  assert.match(definition.description, /结果可用 threads.read 查询/);
 });
 
 test("nodes.exec pending 期间轮询，结果保存后继续模型", async () => {
@@ -416,13 +469,15 @@ test("等待时到达运行上限立即保存仍在执行结果，不再调用�
     assert.equal(backend.events.at(-1)?.kind, "tool_result");
     assert.match(backend.events.at(-1)?.payload.message.content[0].text, /running/);
     assert.equal(backend.calls.at(-1), "finish");
-    assert.ok(!backend.calls.includes("tasks.cancel"));
+    assert.ok(!backend.calls.includes("threads.stop"));
   }
 });
 
-test("等待期间实际 Runtime 进程被杀，恢复使用原调用 ID 和任务", async () => {
-  const backend = new ExecBackend();
-  backend.pendingCount = 1;
+for (const crashPoint of ["wait_tool", "poll_wake"]) {
+test(`等待期间在 ${crashPoint} 杀掉实际 Runtime 进程，恢复使用原调用 ID 和 Thread`, async () => {
+  const backend = new LocalWaitBackend();
+  backend.pendingCount = 2;
+  backend.completeAt = Infinity;
   for (const crash of [true, false]) {
     const child = spawn(process.execPath, ["--import", "tsx", "test/worker.ts"], {
       stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, BATON_TEST_PROJECT_EXEC: "1" },
@@ -434,7 +489,7 @@ test("等待期间实际 Runtime 进程被杀，恢复使用原调用 ID 和任�
       const frame = raw as any;
       const data = await backend.call(frame.request);
       await writeFrame(child.stdin, { id: frame.id, result: { type: "project_runtime.result", ok: true, data } });
-      if (crash && frame.request.operation === "wait_tool") {
+      if (crash && frame.request.operation === crashPoint) {
         child.kill("SIGKILL");
         break;
       }
@@ -446,9 +501,11 @@ test("等待期间实际 Runtime 进程被杀，恢复使用原调用 ID 和任�
   assert.equal(backend.effects, 1);
   assert.equal(backend.calls.filter((operation) => operation === "call_tool").length, 2);
   assert.equal(backend.events.filter((event) => event.kind === "tool_result").length, 1);
-  assert.deepEqual(backend.waits.map((request) => request.tool_call_id), ["exec-1", "exec-1"]);
+  assert.deepEqual(backend.waits.map((request) => request.tool_call_id), ["exec-1", "exec-1", "exec-1"]);
+  assert.ok(backend.threadPolls().length > 0);
   assert.equal(backend.events.at(-1)?.kind, "assistant");
 });
+}
 
 test("faux 恢复结尾表的四种情况和部分工具结果", async () => {
   for (const ending of [
@@ -475,8 +532,8 @@ test("faux 恢复结尾表的四种情况和部分工具结果", async () => {
       await b.call({
         operation: "call_tool",
         last_seq: 2,
-        tool_call_id: "dispatch-1",
-        tool_name: "tasks.dispatch",
+        tool_call_id: "create-1",
+        tool_name: "threads.create",
       });
       if (ending === "partial")
         b.events[1].payload.message.content.push(
@@ -521,7 +578,8 @@ test("faux 恢复结尾表的四种情况和部分工具结果", async () => {
   }
 });
 
-test("实际子进程在写入和工具事务前后被杀，恢复不重复执行副作用", async () => {
+for (const threadTool of ["threads.create", "threads.send"]) {
+test(`${threadTool} 在写入和工具事务前后杀掉实际子进程，恢复不重复执行副作用`, async () => {
   for (const point of [
     "append-before",
     "append-after",
@@ -535,7 +593,10 @@ test("实际子进程在写入和工具事务前后被杀，恢复不重复执�
       const child = spawn(
         process.execPath,
         ["--import", "tsx", "test/worker.ts"],
-        { stdio: ["pipe", "pipe", "pipe"] },
+        {
+          stdio: ["pipe", "pipe", "pipe"],
+          env: { ...process.env, BATON_TEST_PROJECT_THREAD_TOOL: threadTool },
+        },
       );
       let stderr = "";
       child.stderr.on("data", (value) => {
@@ -586,6 +647,7 @@ test("实际子进程在写入和工具事务前后被杀，恢复不重复执�
     assert.equal(killed, true, point);
     await run(false);
     assert.equal(b.effects, 1, point);
+    assert.equal(b.events.find((event) => event.kind === "tool_result")?.payload.message.toolName, threadTool);
     assert.equal(
       b.events.filter((e) => e.kind === "tool_result").length,
       1,
@@ -598,6 +660,7 @@ test("实际子进程在写入和工具事务前后被杀，恢复不重复执�
     );
   }
 });
+}
 
 test("写入屏障失败后停止，不调用工具", async () => {
   const b = new Backend();
@@ -636,7 +699,7 @@ test("超限输出按请求失败处理，工具不执行", async () => {
   assert.equal(b.calls.at(-1), "report_failure");
 });
 
-test("15 分钟上限处理完当前轮次，不领取下一轮也不取消任务", async () => {
+test("15 分钟上限处理完当前轮次，不领取下一轮也不停止 Thread", async () => {
   const b = new Backend();
   const s = setup(b, [
     () => {
@@ -653,7 +716,7 @@ test("15 分钟上限处理完当前轮次，不领取下一轮也不取消任�
   assert.equal(b.calls.filter((c) => c === "claim_inputs").length, 1);
   assert.equal(b.calls.at(-1), "finish");
   assert.equal(b.events.at(-1)?.kind, "assistant");
-  assert.ok(!b.calls.includes("tasks.cancel"));
+  assert.ok(!b.calls.includes("threads.stop"));
 });
 
 test("分页历史、jsonb 键顺序、进程切换保持实际模型请求一致", async () => {
@@ -763,11 +826,46 @@ test("模型文本先形成临时预览，完整回复保存后才进入历史",
   assert.equal(b.effects, 0);
 });
 
+test("Thread 工具按 assistant 中的顺序保存参数和结果，再继续模型", async () => {
+  const backend = new Backend();
+  const calls = [
+    fauxToolCall("threads.create", {
+      node_id: "node-b", agent_type: "pi", working_directory: "/repo",
+      message: "修复登录并运行测试", execution_timeout_seconds: 600,
+    }, { id: "create" }),
+    fauxToolCall("threads.send", { thread_id: "thread-1", message: "继续" }, { id: "send" }),
+    fauxToolCall("threads.send", { thread_id: "thread-1", message: "调整目标", mode: "steer" }, { id: "steer" }),
+    fauxToolCall("threads.stop", { thread_id: "thread-1" }, { id: "stop" }),
+    fauxToolCall("threads.archive", { thread_id: "thread-1" }, { id: "archive" }),
+    fauxToolCall("threads.list", { status: "archived", after_id: "thread-0", max_bytes: 1024 }, { id: "list" }),
+    fauxToolCall("threads.get", { thread_id: "thread-1", offset: 0 }, { id: "get" }),
+    fauxToolCall("threads.read", { thread_id: "thread-1", after_turn: 0, through_turn: 2, offset: 0, max_bytes: 1024 }, { id: "read" }),
+  ];
+  const requests: any[] = [];
+  const call = backend.call.bind(backend);
+  backend.call = async (request) => {
+    if (request.operation === "call_tool") requests.push(structuredClone(request));
+    return call(request);
+  };
+  const fixture = setup(backend, [() => fauxAssistantMessage(calls), (context: any) => {
+    const results = context.messages.filter((message: any) => message.role === "toolResult");
+    assert.deepEqual(results.map((message: any) => message.toolCallId), calls.map((call) => call.id));
+    return assistant();
+  }]);
+  await fixture.runtime.start();
+  assert.deepEqual(requests.map((request) => ({
+    id: request.tool_call_id, name: request.tool_name, arguments: request.arguments,
+  })), calls.map(({ id, name, arguments: args }) => ({ id, name, arguments: args })));
+  assert.deepEqual(requests.map((request) => request.last_seq), calls.map((_, i) => i + 2));
+  assert.equal(backend.effects, calls.length);
+  assert.equal(fixture.faux.state.callCount, 2);
+});
+
 test("模型创建事项后继续调用 Inbox 工具，参数和结果经中心保存", async () => {
   const backend = new Backend();
   const calls = [
     fauxToolCall("inbox.ask", {
-      title: "请决定", summary: "测试结果", content: "[证据](https://example.org)",
+      title: "请决定", thread_id: "thread-1", content: "[证据](https://example.org)",
       options: [{ id: "go", label: "继续" }], allow_text: true,
     }, { id: "ask" }),
     fauxToolCall("inbox.list", {}, { id: "list" }),

@@ -215,9 +215,20 @@ func claimProjectWakes(ctx context.Context, tx pgx.Tx) ([]projectagent.RunComman
 		for len(chosen) > 0 {
 			w.command.Command.InputIDs = nil
 			w.command.Command.TaskUpdates = nil
+			w.command.Command.ThreadUpdates = nil
+			threadIDs := map[string]bool{}
 			updates := map[string]int64{}
 			for _, i := range chosen {
 				w.command.Command.InputIDs = append(w.command.Command.InputIDs, i.id)
+				var thread struct {
+					ThreadID string `json:"thread_id"`
+				}
+				if err = json.Unmarshal(i.payload, &thread); err != nil {
+					return nil, err
+				}
+				if threadID(thread.ThreadID) {
+					threadIDs[thread.ThreadID] = true
+				}
 				if i.kind == "task_result" || i.kind == "user_task_result" {
 					var u protocol.ProjectTaskUpdate
 					if err = json.Unmarshal(i.payload, &u); err != nil {
@@ -226,6 +237,30 @@ func claimProjectWakes(ctx context.Context, tx pgx.Tx) ([]projectagent.RunComman
 					if u.TaskID != "" && u.Version > updates[u.TaskID] {
 						updates[u.TaskID] = u.Version
 					}
+				}
+			}
+			ids := make([]string, 0, len(threadIDs))
+			for id := range threadIDs {
+				ids = append(ids, id)
+			}
+			sort.Strings(ids)
+			if len(ids) > 0 {
+				rows, err := tx.Query(ctx, `SELECT t.id::text,t.version FROM threads t JOIN project_agents a ON a.employee_id=t.employee_id AND a.project_id=t.project_id WHERE a.id=$1 AND t.id=ANY($2::uuid[]) ORDER BY t.id LIMIT 32`, w.agentID, ids)
+				if err != nil {
+					return nil, err
+				}
+				for rows.Next() {
+					var u protocol.ProjectThreadUpdate
+					if err = rows.Scan(&u.ThreadID, &u.Version); err != nil {
+						rows.Close()
+						return nil, err
+					}
+					w.command.Command.ThreadUpdates = append(w.command.Command.ThreadUpdates, u)
+				}
+				err = rows.Err()
+				rows.Close()
+				if err != nil {
+					return nil, err
 				}
 			}
 			for id, version := range updates {

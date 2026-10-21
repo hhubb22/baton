@@ -125,28 +125,28 @@ func TestProjectWakeReceiptBoundedQueueAndIdempotentNotifications(t *testing.T) 
 	m := &projectRuntimeManager{ctx: ctx, clock: startpermit.NewClock(), leaseDeadline: time.Minute, runs: map[string]*projectRuntimeProcess{}, wakeReceipts: make(chan projectWakeReceipt, 64), loop: &startLoop{}}
 	command := projectCommand()
 	p := syntheticProjectProcess(m, command)
-	task := projectCommand().RunID
+	thread := projectCommand().RunID
 	changed := make(chan struct{})
-	p.taskWaits = map[string]*projectTaskWait{task: {version: 1, observed: 1, changed: changed}}
+	p.threadWaits = map[string]*projectThreadWait{thread: {version: 1, observed: 1, changed: changed}}
 	command.Type = protocol.BodyProjectRunWake
 	command.InputIDs = []int64{1}
-	command.TaskUpdates = []protocol.ProjectTaskUpdate{{TaskID: task, Version: 2}}
+	command.ThreadUpdates = []protocol.ProjectThreadUpdate{{ThreadID: thread, Version: 2}}
 	m.command(command)
-	if len(m.wakeReceipts) != 0 || len(p.wake) != 1 || p.taskWaits[task].version != 2 {
+	if len(m.wakeReceipts) != 0 || len(p.wake) != 1 || p.threadWaits[thread].version != 2 {
 		t.Fatal("old center must still notify locally without a receipt")
 	}
 	select {
 	case <-changed:
 	default:
-		t.Fatal("task waiter was not notified")
+		t.Fatal("thread waiter was not notified")
 	}
-	changed = p.taskWaits[task].changed
+	changed = p.threadWaits[thread].changed
 	m.controlReceipts = true
 	for i := range 65 {
 		command.InputIDs = []int64{int64(i + 1)}
 		m.command(command)
 	}
-	if len(m.wakeReceipts) != 64 || len(p.wake) != 1 || p.taskWaits[task].changed != changed {
+	if len(m.wakeReceipts) != 64 || len(p.wake) != 1 || p.threadWaits[thread].changed != changed {
 		t.Fatal("duplicate notifications must coalesce and receipt queue must be bounded")
 	}
 	<-m.wakeReceipts
@@ -158,6 +158,7 @@ func TestProjectWakeReceiptBoundedQueueAndIdempotentNotifications(t *testing.T) 
 	if got := <-m.wakeReceipts; len(got.command.InputIDs) != 1 || got.command.InputIDs[0] != 65 {
 		t.Fatalf("dropped receipt could not be retried: %+v", got)
 	}
+	command.ThreadUpdates = []protocol.ProjectThreadUpdate{{ThreadID: thread, Version: 3}}
 	for _, ids := range [][]int64{{0}, {-1}, make([]int64, 33)} {
 		command.InputIDs = ids
 		m.command(command)
@@ -168,8 +169,8 @@ func TestProjectWakeReceiptBoundedQueueAndIdempotentNotifications(t *testing.T) 
 	command.LeaseEpoch--
 	command.RunID = projectCommand().RunID
 	m.command(command)
-	if len(m.wakeReceipts) != 0 {
-		t.Fatal("invalid inputs or stale run/epoch were acknowledged")
+	if len(m.wakeReceipts) != 0 || p.threadWaits[thread].version != 2 || p.threadWaits[thread].changed != changed {
+		t.Fatal("invalid inputs or stale run/epoch changed the thread wait or were acknowledged")
 	}
 }
 

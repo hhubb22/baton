@@ -58,9 +58,6 @@ func (s *Store) ResolveTask(ctx context.Context, employeeID, taskID string, in t
 	if err := enqueueTaskTerminal(ctx, tx, employeeID, taskID); err != nil {
 		return task.Record{}, err
 	}
-	if err := syncTaskAttention(ctx, tx, employeeID, taskID, previous.Status); err != nil {
-		return task.Record{}, err
-	}
 	audit := task.Resolution{ResolveInput: in, Previous: previous}
 	if err := insertManualEvent(ctx, tx, employeeID, previous, task.EventResolved, in.Status, &audit, nil); err != nil {
 		return task.Record{}, err

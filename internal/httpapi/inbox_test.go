@@ -38,7 +38,7 @@ func TestInboxAPIConcurrencyRetriesVersionsAndSecurity(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer tx.Rollback(ctx)
-		r, err := inbox.CreateAgent(ctx, tx, b, call, inbox.Ask{Title: "请决定", Content: "Markdown", Options: []inbox.Option{{ID: "go", Label: "继续"}}, AllowText: true}, nil, nil)
+		r, err := inbox.CreateAgent(ctx, tx, b, call, inbox.Ask{Title: "请决定", Content: "Markdown", Options: []inbox.Option{{ID: "go", Label: "继续"}}, AllowText: true})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -58,10 +58,10 @@ func TestInboxAPIConcurrencyRetriesVersionsAndSecurity(t *testing.T) {
 			t.Fatal(code, body)
 		}
 	}
-	if code, body := projectRequest(t, alice, "GET", srv.URL+"/api/v1/inbox?state=all&task_id="+p.ID, aCSRF, nil); code != 200 || !strings.Contains(body, `"requests":[]`) {
+	if code, body := projectRequest(t, alice, "GET", srv.URL+"/api/v1/inbox?state=all&thread_id="+p.ID, aCSRF, nil); code != 200 || !strings.Contains(body, `"requests":[]`) {
 		t.Fatal(code, body)
 	}
-	for _, query := range []string{"?project_id=invalid", "?task_id=invalid", "?state=all&state=open", "?unknown=yes"} {
+	for _, query := range []string{"?project_id=invalid", "?thread_id=invalid", "?state=all&state=open", "?unknown=yes"} {
 		if code, _ := projectRequest(t, alice, "GET", srv.URL+"/api/v1/inbox"+query, aCSRF, nil); code != 400 {
 			t.Fatal(query, code)
 		}
@@ -149,7 +149,7 @@ func TestInboxAPIConcurrencyRetriesVersionsAndSecurity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = inbox.CreateSystem(ctx, tx, b, inbox.ProjectNeedsAttention, p.ID, "需要处理", "原因", "", nil, nil); err != nil {
+	if err = inbox.CreateSystem(ctx, tx, b, inbox.ProjectNeedsAttention, p.ID, "需要处理", "原因"); err != nil {
 		t.Fatal(err)
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -178,4 +178,48 @@ func TestInboxAPIConcurrencyRetriesVersionsAndSecurity(t *testing.T) {
 		t.Fatal(done, err)
 	}
 	t.Log("HTTP 双连接回答 200/409、请求重试 200、版本冲突含 current、身份和 CSRF、系统只能关闭且无输入")
+}
+
+func TestInboxHTTPThreadFilter(t *testing.T) {
+	h := newThreadHTTP(t)
+	ctx := t.Context()
+	p, err := h.repo.CreateProject(ctx, h.owner, projectagent.CreateInput{Title: "Thread 事项"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, _, err := h.repo.CreateThread(ctx, h.owner, store.CreateThreadInput{ClientThreadID: "inbox-thread", NodeID: h.src.NodeID, AgentType: "pi", WorkingDirectory: "/src/repo", ProjectID: p.ID, Message: store.ThreadMessageInput{ClientMessageID: "inbox-first", Content: "检查"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := h.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	b := inbox.Binding{EmployeeID: h.owner, ProjectID: p.ID, AgentID: p.Agent.ID, ConversationID: p.Conversation.ID}
+	r, err := inbox.CreateAgent(ctx, tx, b, "thread-question", inbox.Ask{Title: "请决定", Content: "依据", AllowText: true, ThreadID: v.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = inbox.CreateAgent(ctx, tx, b, "other-question", inbox.Ask{Title: "另一事项", AllowText: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range []string{"?thread_id=" + v.ID, "?state=all&project_id=" + p.ID + "&thread_id=" + v.ID} {
+		code, body := projectRequest(t, h.browser, "GET", h.srv.URL+"/api/v1/inbox"+query, h.csrf, nil)
+		var page inbox.Page
+		if code != 200 || json.Unmarshal([]byte(body), &page) != nil || len(page.Requests) != 1 || page.Requests[0].ID != r.ID || page.Requests[0].ThreadID != v.ID {
+			t.Fatal(code, body)
+		}
+		if strings.Contains(body, "task_result") {
+			t.Fatal(body)
+		}
+	}
+	for _, query := range []string{"?task_id=" + v.ID, "?thread_id=" + v.ID + "&thread_id=" + v.ID} {
+		if code, _ := projectRequest(t, h.browser, "GET", h.srv.URL+"/api/v1/inbox"+query, h.csrf, nil); code != 400 {
+			t.Fatal(query, code)
+		}
+	}
 }

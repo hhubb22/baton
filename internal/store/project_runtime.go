@@ -201,7 +201,7 @@ func (s *Store) ProjectRuntime(ctx context.Context, src protocol.Source, req pro
 				var state string
 				err = tx.QueryRow(ctx, `SELECT state FROM conversations WHERE id=$1`, b.conversationID).Scan(&state)
 				if err == nil && state == "needs_attention" {
-					err = inbox.CreateSystem(ctx, tx, inboxBinding(b), inbox.ProjectNeedsAttention, b.projectID, "Project 需要处理", reason, "", nil, nil)
+					err = inbox.CreateSystem(ctx, tx, inboxBinding(b), inbox.ProjectNeedsAttention, b.projectID, "Project 需要处理", reason)
 				}
 			}
 		} else if req.Operation == "exited" {

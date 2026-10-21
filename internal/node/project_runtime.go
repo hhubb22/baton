@@ -62,9 +62,9 @@ type projectRuntimeProcess struct {
 	started        bool
 	cleanupFailed  bool
 	cleanupPending bool
-	taskMu         sync.Mutex
-	taskWaits      map[string]*projectTaskWait
-	taskCalls      map[string]*projectTaskCall
+	threadMu       sync.Mutex
+	threadWaits    map[string]*projectThreadWait
+	threadCalls    map[string]*projectThreadCall
 }
 
 func newProjectRuntimeManager(ctx context.Context, ledger *Ledger) (*projectRuntimeManager, error) {
@@ -635,7 +635,7 @@ func (m *projectRuntimeManager) runtimeRequest(ctx context.Context, p *projectRu
 		wait := 25 * time.Second
 		var options struct {
 			WaitMS       int    `json:"wait_ms"`
-			TaskID       string `json:"task_id"`
+			ThreadID     string `json:"thread_id"`
 			AfterVersion *int64 `json:"after_version"`
 		}
 		if len(req.Payload) > 0 {
@@ -644,11 +644,11 @@ func (m *projectRuntimeManager) runtimeRequest(ctx context.Context, p *projectRu
 			}
 			wait = time.Duration(options.WaitMS) * time.Millisecond
 		}
-		if options.TaskID != "" {
+		if options.ThreadID != "" {
 			if options.AfterVersion == nil {
 				return result, false
 			}
-			result = m.pollTaskWake(ctx, p, options.TaskID, *options.AfterVersion, wait)
+			result = m.pollThreadWake(ctx, p, options.ThreadID, *options.AfterVersion, wait)
 			break
 		}
 		if options.AfterVersion != nil {
@@ -669,15 +669,15 @@ func (m *projectRuntimeManager) runtimeRequest(ctx context.Context, p *projectRu
 		}{wake})
 		result = protocol.ProjectRuntimeResult{Type: protocol.BodyProjectRuntimeResult, OK: true, Data: data}
 	case "bootstrap", "read_events", "claim_inputs", "append_event", "commit_compaction", "preview", "call_tool", "wait_tool", "report_failure", "finish":
-		var call *projectTaskCall
+		var call *projectThreadCall
 		if req.Operation == "call_tool" || req.Operation == "wait_tool" {
-			call = p.beginTaskCall(req.ToolCallID)
+			call = p.beginThreadCall(req.ToolCallID)
 		}
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		result = m.call(ctx, req)
 		cancel()
 		if call != nil {
-			result = p.finishTaskCall(call, req, result, started)
+			result = p.finishThreadCall(call, req, result, started)
 		}
 		if result.OK && req.Operation == "bootstrap" {
 			result = localWaitCapability(result)

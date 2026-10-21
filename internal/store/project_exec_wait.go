@@ -9,7 +9,6 @@ import (
 	"baton/internal/identity"
 	"baton/internal/projectagent"
 	"baton/internal/protocol"
-	"baton/internal/task"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -18,7 +17,7 @@ func (s *Store) readProjectToolWait(ctx context.Context, src protocol.Source, re
 	if _, err := identity.ParseUUID(req.RunID); err != nil || req.LeaseEpoch < 1 {
 		return nil, true, projectagent.ErrLeaseLost
 	}
-	// 身份、对话与任务的所有读取共享快照，且不取得显式行锁。
+	// 身份、对话与 Thread 的所有读取共享快照，且不取得显式行锁。
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return nil, true, err
@@ -64,17 +63,18 @@ func (s *Store) readProjectToolWait(ctx context.Context, src protocol.Source, re
 	}
 	p := projectToolPending{Pending: true, WaitProtocol: 1}
 	var status string
+	var ended bool
 	var unexpired bool
-	err = tx.QueryRow(ctx, `SELECT id::text,status,version,`+projectWaitRemainingSQL+`,exec_wait_until>clock_timestamp()
- FROM tasks WHERE employee_id=$1 AND project_id=$2 AND origin_conversation_id=$3 AND origin_tool_call_id=$4 AND agent_type='shell'`, b.owner, b.projectID, b.conversationID, req.ToolCallID).
-		Scan(&p.TaskID, &status, &p.TaskVersion, &p.WaitRemainingMS, &unexpired)
+	err = tx.QueryRow(ctx, `SELECT id::text,status,version,`+projectWaitRemainingSQL+`,exec_wait_until>clock_timestamp(),EXISTS(SELECT 1 FROM thread_turns v WHERE v.thread_id=threads.id AND v.ended_at IS NOT NULL)
+ FROM threads WHERE employee_id=$1 AND project_id=$2 AND origin_conversation_id=$3 AND origin_tool_call_id=$4 AND agent_type='shell'`, b.owner, b.projectID, b.conversationID, req.ToolCallID).
+		Scan(&p.ThreadID, &status, &p.Version, &p.WaitRemainingMS, &unexpired, &ended)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, true, projectagent.ErrInvalid
 	}
 	if err != nil {
 		return nil, true, err
 	}
-	if status != task.StatusCompleted && status != task.StatusFailed && status != task.StatusCancelled && status != task.StatusNeedsVerification && unexpired && !force.Finish {
+	if !ended && status != "stopped" && status != "unknown" && status != "archived" && unexpired && !force.Finish {
 		return p, true, nil
 	}
 	return nil, false, nil

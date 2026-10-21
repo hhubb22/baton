@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -142,7 +143,7 @@ func noActiveThreadTurn(ctx context.Context, tx pgx.Tx, id string) error {
 func applyThreadReport(ctx context.Context, tx pgx.Tx, t *Thread, r *protocol.ThreadReport) error {
 	switch r.Kind {
 	case "thread.opened":
-		if t.OpenedAt != nil || t.Status != "waiting_device" || !threadKey(r.StorageGeneration) || !threadText(r.NativeSessionID, 4096) {
+		if t.OpenedAt != nil || t.Status != "waiting_device" || !threadKey(r.StorageGeneration) || (r.NativeSessionID != "" && !threadText(r.NativeSessionID, 4096)) {
 			return threadConflict()
 		}
 		_, err := tx.Exec(ctx, `UPDATE threads SET storage_generation=$2,native_session_id=$3,opened_at=clock_timestamp() WHERE id=$1`, t.ID, r.StorageGeneration, r.NativeSessionID)
@@ -216,7 +217,7 @@ func applyThreadReport(ctx context.Context, tx pgx.Tx, t *Thread, r *protocol.Th
 		if err = tx.QueryRow(ctx, `SELECT COALESCE(max(worker_turn_seq),0)+1 FROM thread_turns WHERE thread_id=$1`, t.ID).Scan(&expected); err != nil {
 			return err
 		}
-		if r.WorkerTurnSeq != expected {
+		if r.WorkerTurnSeq != expected || (t.AgentType == "shell" && expected != 1) {
 			return threadConflict()
 		}
 		id, err := identity.NewUUID()
@@ -262,6 +263,9 @@ func applyThreadReport(ctx context.Context, tx pgx.Tx, t *Thread, r *protocol.Th
 		if r.QueueEmpty {
 			status = "idle"
 		}
+		if t.AgentType == "shell" {
+			status = "stopped"
+		}
 		return setThreadStatus(ctx, tx, t, status, "")
 	case "thread.stopped", "thread.unknown":
 		if err := noActiveThreadTurn(ctx, tx, t.ID); err != nil {
@@ -278,12 +282,6 @@ func applyThreadReport(ctx context.Context, tx pgx.Tx, t *Thread, r *protocol.Th
 }
 
 func saveThreadReply(ctx context.Context, tx pgx.Tx, t Thread, turn ThreadTurn, r *protocol.ThreadReport) error {
-	original := int64(len(r.Content))
-	if r.OriginalBytes < original {
-		r.OriginalBytes = original
-	}
-	r.Content = boundedText(r.Content, 32<<10)
-	r.Truncated = r.Truncated || r.OriginalBytes > int64(len(r.Content))
 	if len(r.Attachments) == 0 {
 		r.Attachments = json.RawMessage(`[]`)
 	}
@@ -293,6 +291,27 @@ func saveThreadReply(ctx context.Context, tx pgx.Tx, t Thread, turn ThreadTurn, 
 	var valid bool
 	if !json.Valid(r.Attachments) || !json.Valid(r.Metadata) {
 		return threadInvalid()
+	}
+	var meta struct {
+		Encoding string `json:"encoding"`
+	}
+	_ = json.Unmarshal(r.Metadata, &meta)
+	if meta.Encoding == "base64" {
+		decoded, err := base64.StdEncoding.DecodeString(r.Content)
+		if err != nil || len(decoded) > 32<<10 {
+			return threadInvalid()
+		}
+		if r.OriginalBytes < int64(len(decoded)) {
+			r.OriginalBytes = int64(len(decoded))
+		}
+		r.Truncated = r.Truncated || r.OriginalBytes > int64(len(decoded))
+	} else {
+		original := int64(len(r.Content))
+		if r.OriginalBytes < original {
+			r.OriginalBytes = original
+		}
+		r.Content = boundedText(r.Content, 32<<10)
+		r.Truncated = r.Truncated || r.OriginalBytes > int64(len(r.Content))
 	}
 	err := tx.QueryRow(ctx, `SELECT jsonb_typeof($1::jsonb)='array' AND octet_length($1::jsonb::text)<=4096 AND jsonb_typeof($2::jsonb)='object' AND octet_length($2::jsonb::text)<=4096`, r.Attachments, r.Metadata).Scan(&valid)
 	if err != nil {
@@ -323,7 +342,18 @@ func enqueueThreadTurnEnded(ctx context.Context, tx pgx.Tx, t Thread, turn Threa
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM thread_replies WHERE thread_id=$1 AND turn_id=$2`, t.ID, turn.ID).Scan(&count); err != nil {
 		return err
 	}
-	return insertThreadProjectInput(ctx, tx, t, "turn_ended", fmt.Sprintf("thread:%s:turn:%d", t.ID, turn.WorkerTurnSeq), map[string]any{"thread_id": t.ID, "worker_turn_seq": turn.WorkerTurnSeq, "reason": reason, "reply_count": count}, 4<<10)
+	payload := map[string]any{"thread_id": t.ID, "worker_turn_seq": turn.WorkerTurnSeq, "reason": reason, "reply_count": count}
+	limit := 4 << 10
+	if t.AgentType == "shell" {
+		command, err := shellThreadCommandResult(ctx, tx, t.EmployeeID, t.ID)
+		if err != nil {
+			return err
+		}
+		payload["command_result"] = command
+		payload["read_tool"] = "threads.read"
+		limit = 72 << 10
+	}
+	return insertThreadProjectInput(ctx, tx, t, "turn_ended", fmt.Sprintf("thread:%s:turn:%d", t.ID, turn.WorkerTurnSeq), payload, limit)
 }
 func insertThreadProjectInput(ctx context.Context, tx pgx.Tx, t Thread, kind, key string, payload map[string]any, maxBytes int) error {
 	var agentID string
@@ -332,6 +362,10 @@ func insertThreadProjectInput(ctx context.Context, tx pgx.Tx, t Thread, kind, ke
 	}
 	// JSON 转义和 jsonb 排版也占容量，必要时进一步缩短正文。
 	original, _ := payload["content"].(string)
+	command, hasCommand := payload["command_result"].(map[string]any)
+	if hasCommand {
+		original, _ = command["output"].(string)
+	}
 	limit := len(original)
 	for {
 		raw, err := protocol.MarshalJSON(payload)
@@ -349,8 +383,16 @@ func insertThreadProjectInput(ctx context.Context, tx pgx.Tx, t Thread, kind, ke
 			return threadInvalid()
 		}
 		limit = max(0, limit-1024)
-		payload["content"] = boundedText(original, limit)
-		payload["truncated"] = true
+		if hasCommand {
+			if command["encoding"] == "base64" {
+				limit = limit / 8 * 8
+			}
+			command["output"] = boundedText(original, limit)
+			command["truncated"] = true
+		} else {
+			payload["content"] = boundedText(original, limit)
+			payload["truncated"] = true
+		}
 	}
 }
 func finishThreadArchive(ctx context.Context, tx pgx.Tx, t *Thread) error {
@@ -365,5 +407,10 @@ func finishThreadArchive(ctx context.Context, tx pgx.Tx, t *Thread) error {
 		return err
 	}
 	t.Status = "archived"
-	return threadAudit(ctx, tx, *t, "thread.archived", "employee", t.EmployeeID, map[string]any{})
+	actor, actorID := "employee", t.EmployeeID
+	err = tx.QueryRow(ctx, `SELECT actor,actor_id FROM thread_events WHERE thread_id=$1 AND kind='archive.requested' ORDER BY id DESC LIMIT 1`, t.ID).Scan(&actor, &actorID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	return threadAudit(ctx, tx, *t, "thread.archived", actor, actorID, map[string]any{})
 }

@@ -286,6 +286,13 @@ func (w *ThreadWorker) open(ctx context.Context) error {
 		kind, state := "thread.stopped", "stopped"
 		if status == "opening" || status == "starting" {
 			kind = "thread.open_failed"
+		} else {
+			turn, _ := w.active()
+			var intents int
+			_ = w.db.QueryRow(`SELECT count(*) FROM thread_messages WHERE status='intent'`).Scan(&intents)
+			if turn != 0 || intents > 0 || status == "unknown" {
+				kind, state = "thread.unknown", "unknown"
+			}
 		}
 		return w.transaction(func(tx *sql.Tx) error {
 			if status != "opening" {
@@ -303,6 +310,9 @@ func (w *ThreadWorker) open(ctx context.Context) error {
 		native := ""
 		if provider, ok := w.adapter.(agent.SessionIDProvider); ok {
 			native = provider.NativeSessionID()
+		}
+		if native == "" {
+			native = w.options.ThreadID
 		}
 		return w.transaction(func(tx *sql.Tx) error {
 			if _, err := tx.Exec(`UPDATE thread_meta SET status='idle',native_session_id=?`, native); err != nil {
@@ -684,12 +694,23 @@ func (w *ThreadWorker) saveEvent(event agent.Event) error {
 		if turn == 0 {
 			return errors.New("没有活动 Turn 的回复")
 		}
-		content, truncated, original := truncateThreadReply(event.Content)
-		if event.Truncated {
-			truncated = true
+		var meta struct {
+			Encoding string `json:"encoding"`
 		}
-		if event.OriginalBytes > original {
-			original = event.OriginalBytes
+		_ = json.Unmarshal(event.Metadata, &meta)
+		var content string
+		var truncated bool
+		var original int64
+		if meta.Encoding == "base64" {
+			content, truncated, original = event.Content, event.Truncated, event.OriginalBytes
+		} else {
+			content, truncated, original = truncateThreadReply(event.Content)
+			if event.Truncated {
+				truncated = true
+			}
+			if event.OriginalBytes > original {
+				original = event.OriginalBytes
+			}
 		}
 		// 配置读取失败时保留事件，下次轮询重试，回复不会脱离其附件事务。
 		attachments, err := fileaccess.ParseThreadAttachments(w.dataDir, w.options.NodeID, w.options.WorkingDirectory, event.Content)

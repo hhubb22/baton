@@ -50,7 +50,7 @@ func defaultAgentProbe() agentRuntimeProbe {
 			return "", errors.New("无法识别版本")
 		}
 		return match[1], nil
-	}, verified: func(string, string) bool { return false }}
+	}, verified: func(_ string, version string) bool { return version != "" && version != "unknown" }}
 }
 
 func runtimeReportWireJSON(r protocol.RuntimeReport, agents *[]agentRuntimeReport) ([]byte, error) {

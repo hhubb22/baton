@@ -17,7 +17,7 @@ import { Backend, setup, input, assistant } from "./fixture.js";
 
 const summary = () =>
   fauxAssistantMessage(
-    "用户要求修复登录，任务 task-123 已派到设备 node-b，状态 running。等待测试结果，不要重新派发。用户要求保留现有配置。",
+    "用户要求修复登录，Thread thread-123 已在设备 node-b 的 /repo 开启，状态 running。等待测试结果，不要重复新建。用户要求保留现有配置。",
   );
 function completedHistory(rounds = 5, chars = 90_000): Event[] {
   const events: Event[] = [];
@@ -31,7 +31,7 @@ function completedHistory(rounds = 5, chars = 90_000): Event[] {
         message: fauxAssistantMessage([
           {
             type: "thinking",
-            thinking: "检查任务",
+            thinking: "检查 Thread",
             thinkingSignature: "opaque-provider-signature",
           },
           { type: "text", text: "a".repeat(chars) },
@@ -192,6 +192,8 @@ test("50% 收尾生成摘要，复用原前缀及签名，新提示词与记忆�
   assert.equal(request.toolChoice, "none");
   assert.equal(request.sessionId, "conversation-stable");
   assert.equal(request.context.messages.at(-1).content, COMPACTION_INSTRUCTION);
+  assert.match(request.context.messages.at(-1).content, /准确 Thread ID、设备、目录、当前状态和最后的结论/);
+  assert.match(request.context.messages.at(-1).content, /不向用户已停止或归档的 Thread 继续发消息，除非用户在对话里要求/);
   assert.deepEqual(
     request.context.messages.slice(0, -1),
     modelMessages(
@@ -201,7 +203,7 @@ test("50% 收尾生成摘要，复用原前缀及签名，新提示词与记忆�
   );
   const next = modelMessages(b.boot(), b.events);
   assert.match(String(next[0].content), /项目标题：Baton/);
-  assert.match(JSON.stringify(next), /task-123/);
+  assert.match(JSON.stringify(next), /thread-123/);
   assert.equal(b.calls.at(-1), "finish");
   const recovered = setup(b, [], { contextWindow: 200000 });
   await recovered.runtime.start();
@@ -277,7 +279,7 @@ test("空、截断、工具调用和未缩短的摘要不替换历史，耗尽�
     () => fauxAssistantMessage("  "),
     () => fauxAssistantMessage("未完成", { stopReason: "length" }),
     () =>
-      fauxAssistantMessage([fauxToolCall("tasks.dispatch", {}, { id: "bad" })]),
+      fauxAssistantMessage([fauxToolCall("threads.create", {}, { id: "bad" })]),
     () => fauxAssistantMessage("x".repeat(500_000)),
   ];
   for (const response of invalid) {
@@ -368,7 +370,7 @@ test("超过窗口的恢复历史分批生成摘要，每次请求均留出输�
   );
   assert.match(
     JSON.stringify(fixture.requests[1].context.messages),
-    /task-123/,
+    /thread-123/,
   );
 });
 

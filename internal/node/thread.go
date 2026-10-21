@@ -160,6 +160,18 @@ func (s *threadService) run(ctx context.Context) {
 	}
 }
 
+func validThreadClientID(s string) bool {
+	if len(s) == 0 || len(s) > 256 || !utf8.ValidString(s) {
+		return false
+	}
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
 func validThreadCommand(id string, cmd protocol.ThreadCommand) bool {
 	if _, err := identity.ParseUUID(id); err != nil {
 		return false
@@ -174,13 +186,12 @@ func validThreadCommand(id string, cmd protocol.ThreadCommand) bool {
 	case "open":
 		return agentName.MatchString(cmd.AgentType) && cmd.WorkingDirectory != "" && cmd.ExecutionTimeoutSeconds >= 0
 	case "message":
-		if _, err := identity.ParseUUID(cmd.ClientMessageID); err != nil {
+		if !validThreadClientID(cmd.ClientMessageID) {
 			return false
 		}
 		return cmd.Content != "" && len(cmd.Content) <= 64<<10 && utf8.ValidString(cmd.Content) && (cmd.Mode == "" || cmd.Mode == "queue" || cmd.Mode == "steer")
 	case "withdraw":
-		_, err := identity.ParseUUID(cmd.ClientMessageID)
-		return err == nil
+		return validThreadClientID(cmd.ClientMessageID)
 	case "stop":
 		return true
 	}

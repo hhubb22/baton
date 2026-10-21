@@ -21,7 +21,8 @@ faux.setResponses(
         ? assistant()
         : process.env.BATON_TEST_PROJECT_EXEC
           ? fauxAssistantMessage([fauxToolCall("nodes.exec", { node_id: "node-b", command: "echo test", working_directory: "/repo" }, { id: "exec-1" })])
-          : assistant(true),
+          : assistant(true, process.env.BATON_TEST_PROJECT_THREAD_TOOL === "threads.send"
+            ? "threads.send" : "threads.create"),
   ),
 );
 try {

@@ -21,6 +21,16 @@ func (s *Store) GetThread(ctx context.Context, employeeID, id string) (ThreadVie
 		return view, err
 	}
 	defer tx.Rollback(ctx)
+	view, err = threadDetailTx(ctx, tx, employeeID, id)
+	if err != nil {
+		return view, err
+	}
+	return view, tx.Commit(ctx)
+}
+
+func threadDetailTx(ctx context.Context, tx pgx.Tx, employeeID, id string) (ThreadView, error) {
+	view := ThreadView{PendingMessages: []ThreadMessage{}}
+	var err error
 	view.Thread, err = readThread(ctx, tx, employeeID, id, false)
 	if err != nil {
 		return view, err
@@ -67,7 +77,7 @@ func (s *Store) GetThread(ctx context.Context, employeeID, id string) (ThreadVie
 	if err != nil {
 		return view, err
 	}
-	return view, tx.Commit(ctx)
+	return view, nil
 }
 
 type threadListCursor struct {

@@ -2,7 +2,6 @@
 package inbox
 
 import (
-	"encoding/json"
 	"errors"
 	"net/url"
 	"regexp"
@@ -34,11 +33,10 @@ type Option struct {
 }
 type Ask struct {
 	Title     string   `json:"title"`
-	Summary   string   `json:"summary"`
 	Content   string   `json:"content"`
 	Options   []Option `json:"options"`
 	AllowText bool     `json:"allow_text"`
-	TaskID    string   `json:"task_id,omitempty"`
+	ThreadID  string   `json:"thread_id,omitempty"`
 }
 type Resolution struct {
 	ClientRequestID string `json:"client_request_id"`
@@ -59,18 +57,14 @@ type Request struct {
 	ConditionType     string `json:"condition_type,omitempty"`
 	ConditionObjectID string `json:"condition_object_id,omitempty"`
 	Ask
-	TaskResultVersion         *int            `json:"task_result_version,omitempty"`
-	TaskResult                json.RawMessage `json:"task_result,omitempty"`
-	LatestTaskResultVersion   *int            `json:"latest_task_result_version,omitempty"`
-	LatestTaskResultUpdatedAt *time.Time      `json:"latest_task_result_updated_at,omitempty"`
-	ActionURL                 string          `json:"action_url,omitempty"`
-	State                     string          `json:"state"`
-	Version                   int             `json:"version"`
-	Resolution                *Resolution     `json:"resolution,omitempty"`
-	ResolvedAt                *time.Time      `json:"resolved_at,omitempty"`
-	WithdrawReason            string          `json:"withdraw_reason,omitempty"`
-	CreatedAt                 time.Time       `json:"created_at"`
-	UpdatedAt                 time.Time       `json:"updated_at"`
+	ActionURL      string      `json:"action_url,omitempty"`
+	State          string      `json:"state"`
+	Version        int         `json:"version"`
+	Resolution     *Resolution `json:"resolution,omitempty"`
+	ResolvedAt     *time.Time  `json:"resolved_at,omitempty"`
+	WithdrawReason string      `json:"withdraw_reason,omitempty"`
+	CreatedAt      time.Time   `json:"created_at"`
+	UpdatedAt      time.Time   `json:"updated_at"`
 }
 type Handle struct {
 	ExpectedVersion int    `json:"expected_version"`
@@ -95,11 +89,11 @@ func validText(s string, min, max int) bool {
 	return utf8.ValidString(s) && !strings.ContainsRune(s, 0) && utf8.RuneCountInString(s) >= min && utf8.RuneCountInString(s) <= max && (min == 0 || strings.TrimSpace(s) != "")
 }
 func (a Ask) Validate() error {
-	if !validText(a.Title, 1, 120) || !validText(a.Summary, 0, 280) || len(a.Options) > 5 || (len(a.Options) == 0 && !a.AllowText) {
+	if !validText(a.Title, 1, 120) || len(a.Options) > 5 || (len(a.Options) == 0 && !a.AllowText) {
 		return ErrInvalid
 	}
-	if a.TaskID != "" {
-		if _, err := identity.ParseUUID(a.TaskID); err != nil {
+	if a.ThreadID != "" {
+		if _, err := identity.ParseUUID(a.ThreadID); err != nil {
 			return ErrInvalid
 		}
 	}

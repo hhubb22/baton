@@ -12,34 +12,34 @@ import (
 	"baton/internal/startpermit"
 )
 
-func taskWaitFixture(t *testing.T) (*projectRuntimeManager, *projectRuntimeProcess, *startpermit.Manual, string) {
+func threadWaitFixture(t *testing.T) (*projectRuntimeManager, *projectRuntimeProcess, *startpermit.Manual, string) {
 	t.Helper()
 	clock := startpermit.NewManual(time.Time{})
 	p := &projectRuntimeProcess{command: projectCommand(), ctx: t.Context(), done: make(chan struct{}), wake: make(chan struct{}, 1), stop: func() {}, started: true}
 	m := &projectRuntimeManager{ctx: t.Context(), clock: clock, leaseDeadline: time.Minute, runs: map[string]*projectRuntimeProcess{p.command.RunID: p}}
 	id, _ := identity.NewUUID()
-	rememberTask(t, p, "call-1", id, 7, 30_000, 0)
+	rememberThread(t, p, "call-1", id, 7, 30_000, 0)
 	return m, p, clock, id
 }
 
-func rememberTask(t *testing.T, p *projectRuntimeProcess, call, task string, version, remaining int64, started time.Duration) {
+func rememberThread(t *testing.T, p *projectRuntimeProcess, call, thread string, version, remaining int64, started time.Duration) {
 	t.Helper()
-	data, err := json.Marshal(map[string]any{"pending": true, "task_id": task, "task_version": version, "wait_remaining_ms": remaining, "wait_protocol": 1})
+	data, err := json.Marshal(map[string]any{"pending": true, "thread_id": thread, "version": version, "wait_remaining_ms": remaining, "wait_protocol": 1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code := p.rememberTaskWait(protocol.ProjectRuntimeRequest{ToolCallID: call}, data, started); code != "" {
+	if code := p.rememberThreadWait(protocol.ProjectRuntimeRequest{ToolCallID: call}, data, started); code != "" {
 		t.Fatal(code)
 	}
 }
 
-func pollTaskRequest(m *projectRuntimeManager, p *projectRuntimeProcess, id string, version int64, waitMS int) protocol.ProjectRuntimeResult {
-	payload, _ := json.Marshal(map[string]any{"task_id": id, "after_version": version, "wait_ms": waitMS})
+func pollThreadRequest(m *projectRuntimeManager, p *projectRuntimeProcess, id string, version int64, waitMS int) protocol.ProjectRuntimeResult {
+	payload, _ := json.Marshal(map[string]any{"thread_id": id, "after_version": version, "wait_ms": waitMS})
 	result, _ := m.runtimeRequest(p.ctx, p, protocol.ProjectRuntimeRequest{Operation: "poll_wake", Payload: payload})
 	return result
 }
 
-func assertTaskWake(t *testing.T, result protocol.ProjectRuntimeResult, reason string, version int64) {
+func assertThreadWake(t *testing.T, result protocol.ProjectRuntimeResult, reason string, version int64) {
 	t.Helper()
 	var data struct {
 		Reason  string `json:"reason"`
@@ -50,99 +50,103 @@ func assertTaskWake(t *testing.T, result protocol.ProjectRuntimeResult, reason s
 	}
 }
 
-func taskNotification(m *projectRuntimeManager, p *projectRuntimeProcess, id string, version int64) {
+func threadNotification(m *projectRuntimeManager, p *projectRuntimeProcess, id string, version int64) {
 	command := p.command
 	command.Type = protocol.BodyProjectRunWake
-	command.TaskUpdates = []protocol.ProjectTaskUpdate{{TaskID: id, Version: version}}
-	m.command(command)
+	command.ThreadUpdates = []protocol.ProjectThreadUpdate{{ThreadID: id, Version: version}}
+	sendProjectCommand(m, command)
 }
 
-func TestTaskWaitCachesNotificationBeforeSubscribe(t *testing.T) {
-	m, p, _, id := taskWaitFixture(t)
-	taskNotification(m, p, id, 8)
-	assertTaskWake(t, pollTaskRequest(m, p, id, 7, 25000), "task_changed", 8)
+func TestThreadWaitCachesNotificationBeforeSubscribe(t *testing.T) {
+	m, p, _, id := threadWaitFixture(t)
+	threadNotification(m, p, id, 8)
+	assertThreadWake(t, pollThreadRequest(m, p, id, 7, 25000), "thread_changed", 8)
 }
 
-func TestTaskWaitAcceptsOutOfOrderStateResponses(t *testing.T) {
-	m, p, _, id := taskWaitFixture(t)
-	rememberTask(t, p, "call-1", id, 8, 20_000, 0)
-	rememberTask(t, p, "call-1", id, 7, 19_000, 0)
-	assertTaskWake(t, pollTaskRequest(m, p, id, 8, 1), "timeout", 8)
+func TestThreadWaitAcceptsOutOfOrderStateResponses(t *testing.T) {
+	m, p, _, id := threadWaitFixture(t)
+	rememberThread(t, p, "call-1", id, 8, 20_000, 0)
+	rememberThread(t, p, "call-1", id, 7, 19_000, 0)
+	assertThreadWake(t, pollThreadRequest(m, p, id, 8, 1), "timeout", 8)
 	other, _ := identity.NewUUID()
-	raw, _ := json.Marshal(map[string]any{"pending": true, "task_id": other, "task_version": 1, "wait_remaining_ms": 1000, "wait_protocol": 1})
-	if code := p.rememberTaskWait(protocol.ProjectRuntimeRequest{ToolCallID: "call-1"}, raw, 0); code != "unavailable" {
-		t.Fatalf("同一工具调用被重新绑定到其他任务: %s", code)
+	raw, _ := json.Marshal(map[string]any{"pending": true, "thread_id": other, "version": 1, "wait_remaining_ms": 1000, "wait_protocol": 1})
+	if code := p.rememberThreadWait(protocol.ProjectRuntimeRequest{ToolCallID: "call-1"}, raw, 0); code != "unavailable" {
+		t.Fatalf("同一工具调用被重新绑定到其他 Thread: %s", code)
 	}
 }
 
-func TestTaskWaitLatePendingCannotRestoreCompletedBinding(t *testing.T) {
-	_, p, _, id := taskWaitFixture(t)
+func TestThreadWaitLatePendingCannotRestoreCompletedBinding(t *testing.T) {
+	_, p, _, id := threadWaitFixture(t)
 	req := protocol.ProjectRuntimeRequest{Operation: "wait_tool", ToolCallID: "call-1"}
-	slow := p.beginTaskCall(req.ToolCallID)
-	fast := p.beginTaskCall(req.ToolCallID)
+	slow := p.beginThreadCall(req.ToolCallID)
+	fast := p.beginThreadCall(req.ToolCallID)
 	final := protocol.ProjectRuntimeResult{Type: protocol.BodyProjectRuntimeResult, OK: true, Data: json.RawMessage(`{"kind":"tool_result","seq":2}`)}
-	if got := p.finishTaskCall(fast, req, final, 0); !got.OK {
+	if got := p.finishThreadCall(fast, req, final, 0); !got.OK {
 		t.Fatal(got)
 	}
-	pending, _ := json.Marshal(map[string]any{"pending": true, "task_id": id, "task_version": 7, "wait_remaining_ms": 30000, "wait_protocol": 1})
-	got := p.finishTaskCall(slow, req, protocol.ProjectRuntimeResult{OK: true, Data: pending}, 0)
-	if !got.OK || string(got.Data) != string(final.Data) || len(p.taskWaits) != 0 || len(p.taskCalls) != 0 {
-		t.Fatalf("迟到 pending 重建绑定或没有释放在途记录: %+v waits=%d calls=%d", got, len(p.taskWaits), len(p.taskCalls))
+	pending, _ := json.Marshal(map[string]any{"pending": true, "thread_id": id, "version": 7, "wait_remaining_ms": 30000, "wait_protocol": 1})
+	got := p.finishThreadCall(slow, req, protocol.ProjectRuntimeResult{OK: true, Data: pending}, 0)
+	if !got.OK || string(got.Data) != string(final.Data) || len(p.threadWaits) != 0 || len(p.threadCalls) != 0 {
+		t.Fatalf("迟到 pending 重建绑定或没有释放在途记录: %+v waits=%d calls=%d", got, len(p.threadWaits), len(p.threadCalls))
 	}
 	// 新的查询不复用已清理的响应缓存，失效来源仍然返回错误。
-	late := p.beginTaskCall(req.ToolCallID)
+	late := p.beginThreadCall(req.ToolCallID)
 	revoked := projectRuntimeFailure("lease_lost")
-	if got := p.finishTaskCall(late, req, revoked, 0); got.Code != "lease_lost" || len(p.taskCalls) != 0 {
+	if got := p.finishThreadCall(late, req, revoked, 0); got.Code != "lease_lost" || len(p.threadCalls) != 0 {
 		t.Fatalf("完成缓存掩盖了来源失效: %+v", got)
 	}
 }
 
-func TestTaskWaitBroadcastsToConcurrentSubscribers(t *testing.T) {
-	m, p, _, id := taskWaitFixture(t)
+func TestThreadWaitBroadcastsToConcurrentSubscribers(t *testing.T) {
+	m, p, _, id := threadWaitFixture(t)
 	results := make(chan protocol.ProjectRuntimeResult, 2)
 	for range 2 {
-		go func() { results <- pollTaskRequest(m, p, id, 7, 25000) }()
+		go func() { results <- pollThreadRequest(m, p, id, 7, 25000) }()
 	}
-	taskNotification(m, p, id, 8)
+	threadNotification(m, p, id, 8)
 	for range 2 {
 		select {
 		case result := <-results:
-			assertTaskWake(t, result, "task_changed", 8)
+			assertThreadWake(t, result, "thread_changed", 8)
 		case <-time.After(time.Second):
-			t.Fatal("任务更新未广播到全部等待者")
+			t.Fatal("Thread 更新未广播到全部等待者")
 		}
 	}
 }
 
-func TestTaskWaitFiltersGenericDuplicateAndStaleNotifications(t *testing.T) {
-	m, p, _, id := taskWaitFixture(t)
+func TestThreadWaitFiltersGenericDuplicateAndStaleNotifications(t *testing.T) {
+	m, p, _, id := threadWaitFixture(t)
 	other, _ := identity.NewUUID()
-	taskNotification(m, p, other, 100)
-	taskNotification(m, p, id, 7)
-	taskNotification(m, p, id, 6)
+	threadNotification(m, p, other, 100)
+	threadNotification(m, p, id, 7)
+	threadNotification(m, p, id, 6)
 	command := p.command
-	command.Type, command.LeaseEpoch = protocol.BodyProjectRunWake, command.LeaseEpoch-1
+	command.Type = protocol.BodyProjectRunWake
+	command.InputIDs = []int64{1}
 	command.TaskUpdates = []protocol.ProjectTaskUpdate{{TaskID: id, Version: 100}}
-	m.command(command)
-	assertTaskWake(t, pollTaskRequest(m, p, id, 7, 10), "timeout", 7)
+	sendProjectCommand(m, command)
+	command.LeaseEpoch--
+	command.ThreadUpdates = []protocol.ProjectThreadUpdate{{ThreadID: id, Version: 100}}
+	sendProjectCommand(m, command)
+	assertThreadWake(t, pollThreadRequest(m, p, id, 7, 10), "timeout", 7)
 	// 普通闲置通知仍可由原有协议消费。
 	result, _ := m.runtimeRequest(t.Context(), p, protocol.ProjectRuntimeRequest{Operation: "poll_wake", Payload: json.RawMessage(`{"wait_ms":1}`)})
 	if !result.OK || string(result.Data) != `{"wake":true}` {
-		t.Fatalf("普通通知被任务等待消耗: %+v", result)
+		t.Fatalf("普通通知被 Thread 等待消耗: %+v", result)
 	}
 }
 
-func TestTaskWaitValidatesBoundTaskAndVersion(t *testing.T) {
-	m, p, _, id := taskWaitFixture(t)
+func TestThreadWaitValidatesBoundThreadAndVersion(t *testing.T) {
+	m, p, _, id := threadWaitFixture(t)
 	unbound, _ := identity.NewUUID()
 	for _, payload := range []string{
-		fmt.Sprintf(`{"task_id":%q,"after_version":8,"wait_ms":1}`, id),
-		fmt.Sprintf(`{"task_id":%q,"after_version":-1,"wait_ms":1}`, id),
-		fmt.Sprintf(`{"task_id":%q,"wait_ms":1}`, id),
-		fmt.Sprintf(`{"task_id":%q,"after_version":0,"wait_ms":1}`, unbound),
-		`{"task_id":"invalid","after_version":0,"wait_ms":1}`,
+		fmt.Sprintf(`{"thread_id":%q,"after_version":8,"wait_ms":1}`, id),
+		fmt.Sprintf(`{"thread_id":%q,"after_version":-1,"wait_ms":1}`, id),
+		fmt.Sprintf(`{"thread_id":%q,"wait_ms":1}`, id),
+		fmt.Sprintf(`{"thread_id":%q,"after_version":0,"wait_ms":1}`, unbound),
+		`{"thread_id":"invalid","after_version":0,"wait_ms":1}`,
 		`{"after_version":0,"wait_ms":1}`,
-		fmt.Sprintf(`{"task_id":%q,"after_version":7,"wait_ms":25001}`, id),
+		fmt.Sprintf(`{"thread_id":%q,"after_version":7,"wait_ms":25001}`, id),
 	} {
 		result, _ := m.runtimeRequest(t.Context(), p, protocol.ProjectRuntimeRequest{Operation: "poll_wake", Payload: json.RawMessage(payload)})
 		if result.OK || result.Code != "invalid_request" {
@@ -151,33 +155,33 @@ func TestTaskWaitValidatesBoundTaskAndVersion(t *testing.T) {
 	}
 }
 
-func TestTaskWaitCountsRoundTripAndSuspendAgainstBudget(t *testing.T) {
-	m, p, clock, id := taskWaitFixture(t)
+func TestThreadWaitCountsRoundTripAndSuspendAgainstBudget(t *testing.T) {
+	m, p, clock, id := threadWaitFixture(t)
 	// 中心返回 5 秒剩余预算；请求始于 0，响应耗时 2 秒。
 	clock.Advance(2 * time.Second)
-	rememberTask(t, p, "call-1", id, 7, 5_000, 0)
+	rememberThread(t, p, "call-1", id, 7, 5_000, 0)
 	clock.Suspend(4 * time.Second)
-	assertTaskWake(t, pollTaskRequest(m, p, id, 7, 25000), "timeout", 7)
+	assertThreadWake(t, pollThreadRequest(m, p, id, 7, 25000), "timeout", 7)
 }
 
-func TestTaskWaitRechecksSuspendWhileWaiting(t *testing.T) {
-	m, p, clock, id := taskWaitFixture(t)
-	rememberTask(t, p, "call-1", id, 7, 5_000, 0)
+func TestThreadWaitRechecksSuspendWhileWaiting(t *testing.T) {
+	m, p, clock, id := threadWaitFixture(t)
+	rememberThread(t, p, "call-1", id, 7, 5_000, 0)
 	result := make(chan protocol.ProjectRuntimeResult, 1)
-	go func() { result <- pollTaskRequest(m, p, id, 7, 25000) }()
+	go func() { result <- pollThreadRequest(m, p, id, 7, 25000) }()
 	clock.Suspend(6 * time.Second)
 	select {
 	case got := <-result:
-		assertTaskWake(t, got, "timeout", 7)
+		assertThreadWake(t, got, "timeout", 7)
 	case <-time.After(2 * time.Second):
 		t.Fatal("休眠后没有按包含休眠的预算结束等待")
 	}
 }
 
-func TestTaskWaitStopsOnLeaseLossAndClockFailure(t *testing.T) {
+func TestThreadWaitStopsOnLeaseLossAndClockFailure(t *testing.T) {
 	for _, failure := range []string{"lease", "clock"} {
 		t.Run(failure, func(t *testing.T) {
-			m, p, clock, id := taskWaitFixture(t)
+			m, p, clock, id := threadWaitFixture(t)
 			if failure == "lease" {
 				clock.Suspend(time.Minute)
 			} else {
@@ -185,7 +189,7 @@ func TestTaskWaitStopsOnLeaseLossAndClockFailure(t *testing.T) {
 				bad.failed.Store(true)
 				m.clock = bad
 			}
-			result := pollTaskRequest(m, p, id, 7, 25000)
+			result := pollThreadRequest(m, p, id, 7, 25000)
 			if result.OK || result.Code != "lease_lost" {
 				t.Fatalf("失效后仍然等待: %+v", result)
 			}
@@ -193,40 +197,40 @@ func TestTaskWaitStopsOnLeaseLossAndClockFailure(t *testing.T) {
 	}
 }
 
-func TestTaskWaitCancellationReleasesSubscriber(t *testing.T) {
-	m, p, _, id := taskWaitFixture(t)
+func TestThreadWaitCancellationReleasesSubscriber(t *testing.T) {
+	m, p, _, id := threadWaitFixture(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	result := m.pollTaskWake(ctx, p, id, 7, 25*time.Second)
+	result := m.pollThreadWake(ctx, p, id, 7, 25*time.Second)
 	if result.OK || result.Code != "unavailable" {
 		t.Fatalf("取消后未结束: %+v", result)
 	}
 	// 后续订阅仍可收到通知，没有遗留的消费者取走信号。
-	taskNotification(m, p, id, 8)
-	assertTaskWake(t, pollTaskRequest(m, p, id, 7, 25000), "task_changed", 8)
+	threadNotification(m, p, id, 8)
+	assertThreadWake(t, pollThreadRequest(m, p, id, 7, 25000), "thread_changed", 8)
 }
 
-func TestTaskBindingsBoundedAndReleasedAfterToolResult(t *testing.T) {
-	_, p, _, id := taskWaitFixture(t)
-	for i := 1; i < maxProjectTaskBindings; i++ {
+func TestThreadBindingsBoundedAndReleasedAfterToolResult(t *testing.T) {
+	_, p, _, id := threadWaitFixture(t)
+	for i := 1; i < maxProjectThreadBindings; i++ {
 		next, _ := identity.NewUUID()
-		rememberTask(t, p, fmt.Sprint(i), next, 1, 1000, 0)
+		rememberThread(t, p, fmt.Sprint(i), next, 1, 1000, 0)
 	}
 	extra, _ := identity.NewUUID()
-	data, _ := json.Marshal(map[string]any{"pending": true, "task_id": extra, "task_version": 1, "wait_remaining_ms": 1000, "wait_protocol": 1})
-	if code := p.rememberTaskWait(protocol.ProjectRuntimeRequest{ToolCallID: "extra"}, data, 0); code != "capacity_exceeded" {
+	data, _ := json.Marshal(map[string]any{"pending": true, "thread_id": extra, "version": 1, "wait_remaining_ms": 1000, "wait_protocol": 1})
+	if code := p.rememberThreadWait(protocol.ProjectRuntimeRequest{ToolCallID: "extra"}, data, 0); code != "capacity_exceeded" {
 		t.Fatalf("未限制绑定: %s", code)
 	}
-	if code := p.rememberTaskWait(protocol.ProjectRuntimeRequest{ToolCallID: "call-1"}, json.RawMessage(`{"kind":"tool_result"}`), 0); code != "" {
+	if code := p.rememberThreadWait(protocol.ProjectRuntimeRequest{ToolCallID: "call-1"}, json.RawMessage(`{"kind":"tool_result"}`), 0); code != "" {
 		t.Fatal(code)
 	}
-	if _, exists := p.taskWaits[id]; exists {
+	if _, exists := p.threadWaits[id]; exists {
 		t.Fatal("工具结束后未清理绑定")
 	}
-	rememberTask(t, p, "extra", extra, 1, 1000, 0)
+	rememberThread(t, p, "extra", extra, 1, 1000, 0)
 }
 
-func TestTaskWaitAllowsConcurrentCoordinatorTraffic(t *testing.T) {
+func TestThreadWaitAllowsConcurrentCoordinatorTraffic(t *testing.T) {
 	m, requests, _ := projectRuntimeFixture(t)
 	command := projectCommand()
 	sendProjectCommand(m, command)
@@ -239,9 +243,9 @@ func TestTaskWaitAllowsConcurrentCoordinatorTraffic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rememberTask(t, p, "call-1", id, 7, 30_000, started)
+	rememberThread(t, p, "call-1", id, 7, 30_000, started)
 	result := make(chan protocol.ProjectRuntimeResult, 1)
-	go func() { result <- pollTaskRequest(m, p, id, 7, 25000) }()
+	go func() { result <- pollThreadRequest(m, p, id, 7, 25000) }()
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
 	preview, terminate := m.runtimeRequest(ctx, p, protocol.ProjectRuntimeRequest{Operation: "preview", Payload: json.RawMessage(`{"text":"waiting"}`)})
@@ -249,12 +253,72 @@ func TestTaskWaitAllowsConcurrentCoordinatorTraffic(t *testing.T) {
 		t.Fatalf("本机等待阻塞了其他中心请求: %+v", preview)
 	}
 	waitProjectRequest(t, requests, "preview")
-	taskNotification(m, p, id, 8)
+	threadNotification(m, p, id, 8)
 	select {
 	case got := <-result:
-		assertTaskWake(t, got, "task_changed", 8)
+		assertThreadWake(t, got, "thread_changed", 8)
 	case <-ctx.Done():
-		t.Fatal("任务通知未结束本机等待")
+		t.Fatal("Thread 通知未结束本机等待")
+	}
+}
+
+func TestThreadWaitBindsCoordinatorResponsesAndReleasesResult(t *testing.T) {
+	for _, operation := range []string{"call_tool", "wait_tool"} {
+		t.Run(operation, func(t *testing.T) {
+			m := receiptManager(t, "")
+			id, _ := identity.NewUUID()
+			pending, _ := json.Marshal(map[string]any{"pending": true, "thread_id": id, "version": 7, "wait_remaining_ms": 30000, "wait_protocol": 1})
+			final := json.RawMessage(`{"kind":"tool_result","seq":2,"payload":{"message":{"role":"toolResult","toolCallId":"exec-1"}}}`)
+			receiptConnection(t, m, func(_ context.Context, req protocol.ProjectRuntimeRequest) (protocol.ProjectRuntimeResult, bool) {
+				if req.LastSeq == 99 {
+					return protocol.ProjectRuntimeResult{Code: "seq_conflict", Data: pending}, true
+				}
+				if string(req.Payload) == `{"finish_wait":true}` {
+					return protocol.ProjectRuntimeResult{OK: true, Data: final}, true
+				}
+				return protocol.ProjectRuntimeResult{OK: true, Data: pending}, true
+			})
+			p := syntheticProjectProcess(m, projectCommand())
+			req := protocol.ProjectRuntimeRequest{Operation: operation, ToolCallID: "exec-1", ToolName: "nodes.exec", LastSeq: 99}
+			result, terminate := m.runtimeRequest(t.Context(), p, req)
+			if result.OK || result.Code != "seq_conflict" || terminate {
+				t.Fatalf("中心拒绝未返回给 Runtime: %+v", result)
+			}
+			threadNotification(m, p, id, 100)
+			if got := pollThreadRequest(m, p, id, 0, 1); got.Code != "invalid_request" {
+				t.Fatalf("失败响应或通知建立了等待绑定: %+v", got)
+			}
+
+			req.LastSeq = 1
+			result, terminate = m.runtimeRequest(t.Context(), p, req)
+			if !result.OK || terminate || string(result.Data) != string(pending) {
+				t.Fatalf("pending 响应被修改: %+v", result)
+			}
+			assertThreadWake(t, pollThreadRequest(m, p, id, 7, 1), "timeout", 7)
+			other := syntheticProjectProcess(m, projectCommand())
+			if got := pollThreadRequest(m, other, id, 7, 1); got.Code != "invalid_request" {
+				t.Fatalf("其他 run 使用了等待绑定: %+v", got)
+			}
+			threadNotification(m, p, id, 8)
+			assertThreadWake(t, pollThreadRequest(m, p, id, 7, 25000), "thread_changed", 8)
+
+			req.Operation = "wait_tool"
+			req.Payload = json.RawMessage(`{"finish_wait":true}`)
+			result, terminate = m.runtimeRequest(t.Context(), p, req)
+			if !result.OK || terminate || string(result.Data) != string(final) {
+				t.Fatalf("工具结果被修改: %+v", result)
+			}
+			threadNotification(m, p, id, 9)
+			if got := pollThreadRequest(m, p, id, 7, 1); got.Code != "invalid_request" {
+				t.Fatalf("工具结束后仍可等待 Thread: %+v", got)
+			}
+			p.threadMu.Lock()
+			waits, calls := len(p.threadWaits), len(p.threadCalls)
+			p.threadMu.Unlock()
+			if waits != 0 || calls != 0 {
+				t.Fatalf("工具结束后未释放记录: waits=%d calls=%d", waits, calls)
+			}
+		})
 	}
 }
 

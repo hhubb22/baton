@@ -471,7 +471,7 @@ func TestThreadCommandValidation(t *testing.T) {
 			c.Content = "x"
 			c.Mode = "other"
 		},
-		func(c *protocol.ThreadCommand) { c.Action = "withdraw"; c.ClientMessageID = "invalid" },
+		func(c *protocol.ThreadCommand) { c.Action = "withdraw"; c.ClientMessageID = "" },
 		func(c *protocol.ThreadCommand) { c.ExecutionTimeoutSeconds = -1 },
 	} {
 		cmd := open

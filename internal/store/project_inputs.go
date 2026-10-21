@@ -33,6 +33,10 @@ func insertProjectInput(ctx context.Context, tx pgx.Tx, employeeID, agentID, kin
 		maxBytes = 40 << 10
 	case "turn_ended":
 		maxBytes = 4 << 10
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(raw, &fields) == nil && fields["command_result"] != nil {
+			maxBytes = 72 << 10
+		}
 	case "memory_updated":
 		maxBytes = 1 << 10
 	case "project_updated":

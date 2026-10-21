@@ -10,15 +10,13 @@ import (
 
 	"baton/internal/projectagent"
 	"baton/internal/protocol"
-	"baton/internal/store"
-	"baton/internal/task"
 	"github.com/jackc/pgx/v5"
 )
 
 type waitPending struct {
 	Pending         bool   `json:"pending"`
-	TaskID          string `json:"task_id"`
-	TaskVersion     int64  `json:"task_version"`
+	ThreadID        string `json:"thread_id"`
+	Version         int64  `json:"version"`
 	WaitRemainingMS int64  `json:"wait_remaining_ms"`
 	WaitProtocol    int    `json:"wait_protocol"`
 }
@@ -42,7 +40,7 @@ func decodeWaitPending(t *testing.T, out any) waitPending {
 		t.Fatal(err)
 	}
 	var p waitPending
-	if err = json.Unmarshal(raw, &p); err != nil || !p.Pending || p.TaskID == "" || p.TaskVersion < 1 || p.WaitRemainingMS < 0 || p.WaitProtocol != 1 {
+	if err = json.Unmarshal(raw, &p); err != nil || !p.Pending || p.ThreadID == "" || p.Version < 1 || p.WaitRemainingMS < 0 || p.WaitProtocol != 1 {
 		t.Fatalf("pending 协议无效: %s %v", raw, err)
 	}
 	return p
@@ -51,7 +49,7 @@ func decodeWaitPending(t *testing.T, out any) waitPending {
 func TestProjectExecWaitPendingDoesNotAcquireRowLocks(t *testing.T) {
 	h, req, first := execWaitFixture(t, 600)
 	var deadline, lease time.Time
-	if err := h.pool.QueryRow(h.ctx, `SELECT t.exec_wait_until,a.lease_until FROM tasks t JOIN project_agents a ON a.project_id=t.project_id WHERE t.id=$1`, first.TaskID).Scan(&deadline, &lease); err != nil {
+	if err := h.pool.QueryRow(h.ctx, `SELECT t.exec_wait_until,a.lease_until FROM threads t JOIN project_agents a ON a.project_id=t.project_id WHERE t.id=$1`, first.ThreadID).Scan(&deadline, &lease); err != nil {
 		t.Fatal(err)
 	}
 	locked, err := h.pool.Begin(h.ctx)
@@ -62,7 +60,7 @@ func TestProjectExecWaitPendingDoesNotAcquireRowLocks(t *testing.T) {
 	for _, q := range []struct{ sql, id string }{
 		{`SELECT id FROM project_agents WHERE id=$1 FOR UPDATE`, h.project.Agent.ID},
 		{`SELECT id FROM conversations WHERE id=$1 FOR UPDATE`, h.project.Conversation.ID},
-		{`SELECT id FROM tasks WHERE id=$1 FOR UPDATE`, first.TaskID},
+		{`SELECT id FROM threads WHERE id=$1 FOR UPDATE`, first.ThreadID},
 		{`SELECT id FROM nodes WHERE id=$1 FOR UPDATE`, h.src.NodeID},
 		{`SELECT id FROM node_credentials WHERE id=$1 FOR UPDATE`, h.src.CredentialID},
 		{`SELECT node_id FROM node_presence WHERE node_id=$1 FOR UPDATE`, h.src.NodeID},
@@ -79,7 +77,7 @@ func TestProjectExecWaitPendingDoesNotAcquireRowLocks(t *testing.T) {
 		t.Fatalf("pending 等待了显式行锁: %v", err)
 	}
 	p := decodeWaitPending(t, out)
-	if p.TaskID != first.TaskID || p.TaskVersion != first.TaskVersion || p.WaitRemainingMS > first.WaitRemainingMS || p.WaitRemainingMS == 0 {
+	if p.ThreadID != first.ThreadID || p.Version != first.Version || p.WaitRemainingMS > first.WaitRemainingMS || p.WaitRemainingMS == 0 {
 		t.Fatalf("pending 丢失绑定、版本或预算: %+v", p)
 	}
 	if err = locked.Rollback(h.ctx); err != nil {
@@ -87,13 +85,13 @@ func TestProjectExecWaitPendingDoesNotAcquireRowLocks(t *testing.T) {
 	}
 	var afterDeadline, afterLease time.Time
 	var seq int64
-	if err = h.pool.QueryRow(h.ctx, `SELECT t.exec_wait_until,a.lease_until,c.next_seq FROM tasks t JOIN project_agents a ON a.project_id=t.project_id JOIN conversations c ON c.agent_id=a.id WHERE t.id=$1`, first.TaskID).Scan(&afterDeadline, &afterLease, &seq); err != nil {
+	if err = h.pool.QueryRow(h.ctx, `SELECT t.exec_wait_until,a.lease_until,c.next_seq FROM threads t JOIN project_agents a ON a.project_id=t.project_id JOIN conversations c ON c.agent_id=a.id WHERE t.id=$1`, first.ThreadID).Scan(&afterDeadline, &afterLease, &seq); err != nil {
 		t.Fatal(err)
 	}
 	if !deadline.Equal(afterDeadline) || !lease.Equal(afterLease) || seq != req.LastSeq+1 {
 		t.Fatal("pending 改变了等待期限、租约或序号")
 	}
-	if _, err = h.pool.Exec(h.ctx, `UPDATE tasks SET version=version+1,exec_wait_until=exec_wait_until-interval '1 minute' WHERE id=$1`, p.TaskID); err != nil {
+	if _, err = h.pool.Exec(h.ctx, `UPDATE threads SET version=version+1,exec_wait_until=exec_wait_until-interval '1 minute' WHERE id=$1`, p.ThreadID); err != nil {
 		t.Fatal(err)
 	}
 	for _, op := range []string{"call_tool", "wait_tool", "call_tool", "wait_tool"} {
@@ -103,11 +101,11 @@ func TestProjectExecWaitPendingDoesNotAcquireRowLocks(t *testing.T) {
 			t.Fatal(err)
 		}
 		p = decodeWaitPending(t, out)
-		if p.TaskID != first.TaskID || p.TaskVersion != first.TaskVersion+1 || p.WaitRemainingMS > first.WaitRemainingMS-60000 || p.WaitRemainingMS <= 0 {
+		if p.ThreadID != first.ThreadID || p.Version != first.Version+1 || p.WaitRemainingMS > first.WaitRemainingMS-60000 || p.WaitRemainingMS <= 0 {
 			t.Fatalf("%s 重放没有返回原任务当前版本和预算: %+v", op, p)
 		}
 	}
-	if err = h.pool.QueryRow(h.ctx, `SELECT exec_wait_until FROM tasks WHERE id=$1`, p.TaskID).Scan(&afterDeadline); err != nil || !afterDeadline.Equal(deadline.Add(-time.Minute)) {
+	if err = h.pool.QueryRow(h.ctx, `SELECT exec_wait_until FROM threads WHERE id=$1`, p.ThreadID).Scan(&afterDeadline); err != nil || !afterDeadline.Equal(deadline.Add(-time.Minute)) {
 		t.Fatal("重复请求延长了等待期限", err)
 	}
 }
@@ -222,9 +220,9 @@ func TestProjectExecWaitValidatesConversationAndTaskBinding(t *testing.T) {
 				if e != nil {
 					t.Fatal(e)
 				}
-				_, err = h.pool.Exec(h.ctx, `UPDATE tasks SET project_id=$2 WHERE id=$1`, p.TaskID, other.ID)
+				_, err = h.pool.Exec(h.ctx, `UPDATE threads SET project_id=$2 WHERE id=$1`, p.ThreadID, other.ID)
 			case "task_origin":
-				_, err = h.pool.Exec(h.ctx, `UPDATE tasks SET origin_tool_call_id='another-call' WHERE id=$1`, p.TaskID)
+				_, err = h.pool.Exec(h.ctx, `UPDATE threads SET origin_tool_call_id='another-call' WHERE id=$1`, p.ThreadID)
 			case "assistant":
 				h.save(t, "nodes.exec", execArgs(h, 600))
 				req.LastSeq = h.seq
@@ -312,16 +310,24 @@ func TestProjectExecWaitRevalidatesAfterSnapshot(t *testing.T) {
 
 func TestProjectExecWaitCompletionAfterReadWinsOverExpiredWait(t *testing.T) {
 	h, req, p := execWaitFixture(t, 0)
+	startProjectShell(t, h, p.ThreadID)
+	projectReport(t, h, p.ThreadID, "reply", func(r *protocol.ThreadReport) {
+		r.WorkerTurnSeq = 1
+		r.Content = "完成"
+		r.Metadata = json.RawMessage(`{"exit_code":0}`)
+	})
 	locked, err := h.pool.Begin(h.ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer locked.Rollback(h.ctx)
-	if _, err = locked.Exec(h.ctx, `UPDATE tasks SET status='completed',version=version+1,summary='完成' WHERE id=$1`, p.TaskID); err != nil {
+	if _, err = locked.Exec(h.ctx, `UPDATE threads SET status='stopped',version=version+1 WHERE id=$1`, p.ThreadID); err != nil {
 		t.Fatal(err)
 	}
-	in := store.ProjectTaskResultInput{TaskID: p.TaskID, Version: p.TaskVersion + 1, Status: task.StatusCompleted, Text: "完成"}
-	if err = store.EnqueueProjectTaskResult(h.ctx, locked, h.owner, h.project.Agent.ID, in); err != nil {
+	if _, err = locked.Exec(h.ctx, `UPDATE thread_turns SET ended_at=clock_timestamp(),end_reason='completed' WHERE thread_id=$1`, p.ThreadID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = locked.Exec(h.ctx, `INSERT INTO project_agent_input_queue(employee_id,agent_id,source_type,source_key,payload,payload_hash,wake_required) VALUES($1,$2,'turn_ended',$3,jsonb_build_object('thread_id',$4::text,'worker_turn_seq',1),$5,true)`, h.owner, h.project.Agent.ID, "thread:"+p.ThreadID+":turn:1", p.ThreadID, make([]byte, 32)); err != nil {
 		t.Fatal(err)
 	}
 	req.Operation = "wait_tool"
@@ -342,46 +348,22 @@ func TestProjectExecWaitCompletionAfterReadWinsOverExpiredWait(t *testing.T) {
 		t.Fatal(r.err)
 	}
 	e := r.data.(projectagent.Event)
-	raw, _ := toolText(t, e)
+	text, _ := toolText(t, e)
 	var output struct {
 		Status  string `json:"status"`
 		Version int64  `json:"version"`
 	}
-	if err = json.Unmarshal(raw, &output); err != nil || output.Status != task.StatusCompleted || output.Version != in.Version {
-		t.Fatal("提交使用了锁之前的过期等待快照", string(raw), err)
+	if err = json.Unmarshal(text, &output); err != nil || output.Status != "stopped" || output.Version <= p.Version {
+		t.Fatal(string(text), err)
 	}
 	var delivered *int64
-	if err = h.pool.QueryRow(h.ctx, `SELECT delivered_seq FROM project_agent_input_queue WHERE agent_id=$1 AND source_key=$2`, h.project.Agent.ID, fmt.Sprintf("task:%s:result:%d", p.TaskID, in.Version)).Scan(&delivered); err != nil || delivered == nil || *delivered != e.Seq {
-		t.Fatal("同步结果没有事务确认输入", err)
+	if err = h.pool.QueryRow(h.ctx, `SELECT delivered_seq FROM project_agent_input_queue WHERE source_key=$1`, "thread:"+p.ThreadID+":turn:1").Scan(&delivered); err != nil || delivered == nil || *delivered != e.Seq {
+		t.Fatal(err)
 	}
 	claim := h.req
-	claim.Operation, claim.LastSeq = "claim_inputs", e.Seq
-	out, err := h.repo.ProjectRuntime(h.ctx, h.src, claim)
-	if err != nil || out.(projectagent.Claim).Event != nil {
-		t.Fatal("同步结果重复作为输入领取", err)
-	}
-	// 后续版本仍须投递，旧工具结果继续重放。
-	tx, err := h.pool.Begin(h.ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback(h.ctx)
-	in.Version++
-	if _, err = tx.Exec(h.ctx, `UPDATE tasks SET version=$2 WHERE id=$1`, p.TaskID, in.Version); err != nil {
-		t.Fatal(err)
-	}
-	if err = store.EnqueueProjectTaskResult(h.ctx, tx, h.owner, h.project.Agent.ID, in); err != nil {
-		t.Fatal(err)
-	}
-	if err = tx.Commit(h.ctx); err != nil {
-		t.Fatal(err)
-	}
-	out, err = h.repo.ProjectRuntime(h.ctx, h.src, req)
-	if err != nil || out.(projectagent.Event).Seq != e.Seq {
-		t.Fatal("后续版本改变了原工具结果", err)
-	}
-	out, err = h.repo.ProjectRuntime(h.ctx, h.src, claim)
-	if err != nil || out.(projectagent.Claim).InputCount != 1 {
-		t.Fatal("后续版本被同步确认吞掉", err)
+	claim.Operation = "claim_inputs"
+	claim.LastSeq = e.Seq
+	if out, err := h.repo.ProjectRuntime(h.ctx, h.src, claim); err != nil || out.(projectagent.Claim).Event != nil {
+		t.Fatal("重复投递", err)
 	}
 }

@@ -307,7 +307,7 @@ export class ProjectRuntime {
   private async execute(call: ToolCall): Promise<ToolResultMessage> {
     const saved = this.results.get(call.id);
     if (saved) return saved;
-    // Coordinator 持久化工具调用；恢复时使用原调用 ID 获取已保存的任务或结果。
+    // Coordinator 持久化工具调用；恢复时使用原调用 ID 获取已保存的 Thread 或结果。
     let requestStarted = this.timer.now();
     let response = await this.rpc.call({
       operation: "call_tool",
@@ -321,15 +321,15 @@ export class ProjectRuntime {
     while (response?.pending === true) {
       if (
         call.name !== "nodes.exec" ||
-        typeof response.task_id !== "string" ||
-        !response.task_id
+        typeof response.thread_id !== "string" ||
+        response.thread_id.length === 0
       )
         throw new RuntimeError("invalid_tool_result");
       const versioned = response.wait_protocol === 1;
       if (versioned) {
         if (
-          !Number.isSafeInteger(response.task_version) ||
-          response.task_version < 0 ||
+          !Number.isSafeInteger(response.version) ||
+          response.version < 0 ||
           !Number.isSafeInteger(response.wait_remaining_ms) ||
           response.wait_remaining_ms < 0
         )
@@ -352,8 +352,8 @@ export class ProjectRuntime {
           await this.rpc.call({
             operation: "poll_wake",
             payload: {
-              task_id: response.task_id,
-              after_version: response.task_version,
+              thread_id: response.thread_id,
+              after_version: response.version,
               wait_ms: Math.max(1, Math.floor(waitMs)),
             },
           });

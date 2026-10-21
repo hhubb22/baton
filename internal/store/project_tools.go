@@ -28,6 +28,11 @@ type savedToolCall struct {
 }
 
 type toolArguments struct {
+	ThreadID                string         `json:"thread_id"`
+	Message                 string         `json:"message"`
+	Mode                    string         `json:"mode"`
+	AfterTurn               int64          `json:"after_turn"`
+	ThroughTurn             int64          `json:"through_turn"`
 	NodeID                  string         `json:"node_id"`
 	Command                 string         `json:"command"`
 	WaitSeconds             *int           `json:"wait_seconds"`
@@ -62,21 +67,28 @@ type toolArguments struct {
 }
 
 var projectToolFields = map[string]string{
-	"nodes.exec":     "node_id command working_directory wait_seconds timeout_seconds",
-	"inbox.ask":      "title summary content options allow_text task_id",
-	"inbox.list":     "after_id offset max_bytes",
-	"inbox.get":      "request_id offset max_bytes",
-	"inbox.withdraw": "request_id reason",
-	"memory.search":  "query after_id offset max_bytes",
-	"memory.read":    "entry_id revision offset max_bytes",
-	"memory.write":   "entry_id title content expected_revision",
-	"history.search": "query after_seq through_seq offset max_bytes",
-	"history.read":   "after_seq through_seq offset max_bytes",
-	"devices.list":   "after_id offset max_bytes",
-	"tasks.dispatch": "target_node_id agent_type working_directory description expected_outputs queue_timeout_seconds execution_timeout_seconds retry_of_task_id",
-	"tasks.list":     "status after_id offset max_bytes",
-	"tasks.get":      "task_id version offset max_bytes",
-	"tasks.cancel":   "task_id",
+	"threads.create":  "node_id agent_type working_directory message execution_timeout_seconds",
+	"threads.send":    "thread_id message mode",
+	"threads.stop":    "thread_id",
+	"threads.archive": "thread_id",
+	"threads.list":    "status after_id offset max_bytes",
+	"threads.get":     "thread_id offset max_bytes",
+	"threads.read":    "thread_id after_turn through_turn offset max_bytes",
+	"nodes.exec":      "node_id command working_directory wait_seconds timeout_seconds",
+	"inbox.ask":       "title content options allow_text thread_id",
+	"inbox.list":      "after_id offset max_bytes",
+	"inbox.get":       "request_id offset max_bytes",
+	"inbox.withdraw":  "request_id reason",
+	"memory.search":   "query after_id offset max_bytes",
+	"memory.read":     "entry_id revision offset max_bytes",
+	"memory.write":    "entry_id title content expected_revision",
+	"history.search":  "query after_seq through_seq offset max_bytes",
+	"history.read":    "after_seq through_seq offset max_bytes",
+	"devices.list":    "after_id offset max_bytes",
+	"tasks.dispatch":  "target_node_id agent_type working_directory description expected_outputs queue_timeout_seconds execution_timeout_seconds retry_of_task_id",
+	"tasks.list":      "status after_id offset max_bytes",
+	"tasks.get":       "task_id version offset max_bytes",
+	"tasks.cancel":    "task_id",
 }
 
 func decodeToolArguments(name string, raw json.RawMessage) (toolArguments, error) {
@@ -99,10 +111,10 @@ func decodeToolArguments(name string, raw json.RawMessage) (toolArguments, error
 	if d.Decode(&a) != nil || d.Decode(new(any)) != io.EOF {
 		return a, projectagent.ErrInvalid
 	}
-	if a.Offset < 0 || a.MaxBytes < 0 || a.MaxBytes > maxProjectToolBytes || a.Revision < 0 || a.AfterSeq < 0 || a.ThroughSeq < 0 || a.Version < 0 {
+	if a.Offset < 0 || a.MaxBytes < 0 || a.MaxBytes > maxProjectToolBytes || a.Revision < 0 || a.AfterSeq < 0 || a.ThroughSeq < 0 || a.Version < 0 || a.AfterTurn < 0 || a.ThroughTurn < 0 {
 		return a, projectagent.ErrInvalid
 	}
-	for _, id := range []string{a.EntryID, a.TaskID, a.AfterID, a.TargetNodeID, a.NodeID, a.RetryOfTaskID, a.RequestID} {
+	for _, id := range []string{a.ThreadID, a.EntryID, a.TaskID, a.AfterID, a.TargetNodeID, a.NodeID, a.RetryOfTaskID, a.RequestID} {
 		if id != "" {
 			if _, err := identity.ParseUUID(id); err != nil {
 				return a, projectagent.ErrInvalid
@@ -218,6 +230,7 @@ func (s *Store) callProjectTool(ctx context.Context, tx pgx.Tx, b projectRunBind
 		if err = business.Rollback(ctx); err != nil {
 			return empty, err
 		}
+		var threadErr *ThreadError
 		var rejection *task.Rejection
 		var conflict *projectagent.MemoryConflict
 		switch {
@@ -231,6 +244,8 @@ func (s *Store) callProjectTool(ctx context.Context, tx pgx.Tx, b projectRunBind
 				}
 				output = map[string]any{"error": conflict.Error(), "current_revision": revision, "entry_id": a.EntryID, "read_tool": "memory.read", "truncated": true}
 			}
+		case errors.As(businessErr, &threadErr):
+			output = map[string]any{"error": threadErr.Message, "code": threadErr.Code}
 		case errors.As(businessErr, &rejection):
 			output = map[string]any{"error": rejection.Message, "code": rejection.Code}
 		case errors.Is(businessErr, inbox.ErrInvalid), errors.Is(businessErr, inbox.ErrNotFound), errors.Is(businessErr, inbox.ErrLimit):
@@ -261,11 +276,7 @@ func saveProjectToolResult(ctx context.Context, tx pgx.Tx, b projectRunBinding, 
 	if err != nil {
 		return empty, err
 	}
-	limit := maxProjectToolBytes
-	if name == "nodes.exec" {
-		limit = projectagent.MaxEventBytes
-	}
-	if len(encoded) > limit {
+	if len(encoded) > maxProjectToolBytes {
 		return empty, projectagent.ErrTooLarge
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO conversation_events(conversation_id,seq,employee_id,kind,tool_call_id,run_id,lease_epoch,payload) VALUES($1,$2,$3,'tool_result',$4,$5,$6,$7)`, b.conversationID, b.nextSeq, b.owner, callID, req.RunID, req.LeaseEpoch, encoded); err != nil {
@@ -315,6 +326,8 @@ func toolJSONPage(value any, a toolArguments) (any, error) {
 
 func (s *Store) executeProjectTool(ctx context.Context, tx pgx.Tx, b projectRunBinding, sourceSeq int64, callID string, name string, a toolArguments) (any, error) {
 	switch name {
+	case "threads.create", "threads.send", "threads.stop", "threads.archive", "threads.list", "threads.get", "threads.read":
+		return s.executeProjectThreadTool(ctx, tx, b, callID, name, a)
 	case "nodes.exec":
 		return s.dispatchProjectExec(ctx, tx, b, callID, a)
 	case "inbox.ask", "inbox.get", "inbox.list", "inbox.withdraw":
