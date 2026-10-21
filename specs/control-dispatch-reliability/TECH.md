@@ -2,7 +2,7 @@
 
 Status: approved
 Owner: Baton
-Basis: [Baton R-14、R-16、R-19、R-24、R-25](../baton/PRODUCT.md)；[Project Agent PA-05、PA-08～PA-10](../project-agent/PRODUCT.md)；[Baton TECH](../baton/TECH.md)「下行投递」。start、stop、wake 部分已实现；Thread 命令部分随 Baton TECH 实施步骤 2 落地。
+Basis: [Baton R-14、R-16、R-19、R-24、R-25](../baton/PRODUCT.md)；[Project Agent PA-05、PA-08～PA-10](../project-agent/PRODUCT.md)；[Baton TECH](../baton/TECH.md)「下行投递」。Thread 与旧任务路径并存，start、stop、wake 保留各自投递进度。
 
 ## 1. 方案
 
@@ -82,7 +82,7 @@ Thread 命令派发（`internal/control/thread.go`）只执行有界派发，`in
 | `attempts`、`next_attempt_at` | 已持久化的尝试次数、下一次可领取时刻 |
 | `acked_at` | 设备持久化回执的时间 |
 
-未确认记录建 `(node_id, next_attempt_at, id)` 节点到期索引和 `(thread_id, id)` 顺序索引。领取时每个 Thread 只取 `id` 最小的未确认行，节点内按 Outbox → Thread 跳过被锁定的记录。
+未确认记录建 `(node_id, next_attempt_at, id)` 节点到期索引和 `(thread_id, id)` 顺序索引。领取时每个 Thread 只取 `id` 最小且仍需发送的未确认行，节点内按 Outbox → Thread 跳过被锁定的记录。message、withdraw 等待 `thread.opened` 保存存储代次，stop 的候选检查允许存储代次尚未保存。Thread 归档后，过时的 open、message 不再参与领取或阻塞 stop、withdraw，原回执事实保持不变。
 
 ### 4.2 发送和回包
 
@@ -219,11 +219,11 @@ started / renew 返回的数据带 `control_receipts:1`，batond 看到后才发
 
 | 依据 | 设置与观察 | 失败条件 | 位置 | 状态 |
 |---|---|---|---|---|
-| 慢节点隔离，R-16 | A 不回 Thread 命令，B 同轮获得投递 | 派发等待 A 的回包；B 被延迟 | `control/thread_reliability_test.go` | planned |
-| 同 Thread 顺序，R-08 | 同一 Thread 连续 open、3 条 message、withdraw，第 2 条回包丢失 | 第 3 条先于第 2 条送达；重发产生第二条消息 | Store / Control 回归 | planned |
-| 跳锁公平性 | 同节点和跨节点分别锁住 Outbox、Thread | 后续可用记录无法领取 | `store/thread_outbox_test.go` | planned |
-| 模糊发送，R-19 | 领取失败全部回滚；确认后发送报错 | 确认被撤销；未保存进度就入队 | Store / Control 回归 | planned |
-| 晚到回包 | 无 waiter 的合法回包；错误节点、员工、连接和过期凭据 | 合法回包丢失；非法回包写入 | `control/thread_reliability_test.go` | planned |
+| 慢节点隔离，R-16 | A 不确认 Thread 命令，B 同轮获得投递 | 派发等待 A 的回包；B 被延迟 | `control/thread_reliability_test.go` | passed |
+| 同 Thread 顺序，R-08 | 同一 Thread 连续 open、3 条 message、withdraw，每条命令丢失首次回包 | 后一条命令越过未确认的前一条；重发身份改变 | `store/thread_outbox_test.go` | passed |
+| 跳锁公平性 | 同节点分别锁住 Outbox、Thread，另一节点有到期命令 | 后续可用记录或另一节点无法领取 | `store/thread_test.go` | passed |
+| 模糊发送，R-19 | 更新重试进度时注入事务失败；发送失败后收到迟到确认 | 领取失败仍返回命令；合法确认丢失 | Store / Control Thread 回归 | passed |
+| 晚到回包 | 无 waiter 的合法回包；错误节点、员工、连接和锁等待后过期的凭据 | 合法回包丢失；非法回包写入 | Control / Store Thread 认证回归 | passed |
 | 维护隔离 | 慢维护项运行期间派发继续；取消释放数据库名额 | 维护挡住派发 | `control/background_test.go` | passed |
 | 分类和节点额度，PA-08 | 单节点 1000 条旧 stop，其他节点及新 start / wake 仍可领取 | 其他工作被饿死；已确认记录重开 | `store/project_delivery_test.go` | passed |
 | 跳锁与锁数量 | 三类命令跳过节点队首锁；Run / Agent 行锁不超过 32 个 | 超过额度或锁数 | `store/project_delivery_concurrency_test.go` | passed |

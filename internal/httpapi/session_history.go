@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"baton/internal/store"
 	"net/http"
 	"strconv"
 
@@ -11,6 +12,12 @@ import (
 )
 
 func (s *Server) sessionHistory(w http.ResponseWriter, r *http.Request, id string) {
+	s.history(w, r, id, false)
+}
+func (s *Server) threadHistory(w http.ResponseWriter, r *http.Request, id string) {
+	s.history(w, r, id, true)
+}
+func (s *Server) history(w http.ResponseWriter, r *http.Request, id string, thread bool) {
 	if r.Method != http.MethodGet {
 		s.writeError(w, r, 405, "method_not_allowed", "不支持该请求方法")
 		return
@@ -51,9 +58,20 @@ func (s *Server) sessionHistory(w http.ResponseWriter, r *http.Request, id strin
 		s.writeError(w, r, 400, "invalid_cursor", "历史游标无效")
 		return
 	}
-	item, err := s.store.GetSession(r.Context(), login.Employee.ID, id)
+	var item store.WorkSession
+	if thread {
+		var view store.ThreadView
+		view, err = s.store.GetThread(r.Context(), login.Employee.ID, id)
+		item = store.WorkSession{SessionID: id, NodeID: view.NodeID, Status: view.Status}
+	} else {
+		item, err = s.store.GetSession(r.Context(), login.Employee.ID, id)
+	}
 	if err != nil {
-		s.writeSessionError(w, r, err)
+		if thread {
+			s.writeThreadError(w, r, err)
+		} else {
+			s.writeSessionError(w, r, err)
+		}
 		return
 	}
 	if !s.outputBudget.Reserve(protocol.SessionOutputBytes) {

@@ -23,6 +23,7 @@ type SessionGateway interface {
 }
 
 type browserSubscription struct {
+	ThreadID  string `json:"thread_id,omitempty"`
 	SessionID string `json:"session_id"`
 	Cursor    string `json:"cursor,omitempty"`
 }
@@ -76,6 +77,11 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 			if json.Unmarshal(raw, &next) != nil || len(next.Cursor) > 100 {
 				return
 			}
+			if next.ThreadID != "" {
+				if _, err := identity.ParseUUID(next.ThreadID); err != nil || next.SessionID != "" {
+					return
+				}
+			}
 			if next.SessionID != "" {
 				if _, err := identity.ParseUUID(next.SessionID); err != nil {
 					return
@@ -104,7 +110,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	}
 	ticker := time.NewTicker(s.eventInterval)
 	defer ticker.Stop()
-	var lastSessions, lastTasks string
+	var lastSessions, lastTasks, lastThreads string
 	for {
 		select {
 		case <-ctx.Done():
@@ -137,15 +143,32 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 			}
 			lastTasks = taskStamp
 		}
+		threadStamp, err := s.store.ThreadNotificationStamp(ctx, login.Employee.ID)
+		if err != nil {
+			return
+		}
+		if threadStamp != lastThreads {
+			if !write(map[string]string{"type": "thread.changed"}) {
+				return
+			}
+			lastThreads = threadStamp
+		}
 		mu.Lock()
 		selected := sub
 		mu.Unlock()
-		if selected.SessionID == "" {
+		if selected.SessionID == "" && selected.ThreadID == "" {
 			continue
 		}
-		item, err := s.store.GetSession(ctx, login.Employee.ID, selected.SessionID)
+		var item store.WorkSession
+		if selected.ThreadID != "" {
+			var view store.ThreadView
+			view, err = s.store.GetThread(ctx, login.Employee.ID, selected.ThreadID)
+			item = store.WorkSession{SessionID: selected.ThreadID, NodeID: view.NodeID, Status: view.Status}
+		} else {
+			item, err = s.store.GetSession(ctx, login.Employee.ID, selected.SessionID)
+		}
 		if err != nil {
-			_ = ws.Close(websocket.StatusPolicyViolation, "不能查看该 Session")
+			_ = ws.Close(websocket.StatusPolicyViolation, "不能查看该会话")
 			return
 		}
 		operation, _ := identity.NewUUID()
@@ -164,10 +187,15 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 				return false
 			}
 			result.Text = boundedSessionText(result.Text)
+			outputType := "session.output"
+			if selected.ThreadID != "" {
+				outputType = "thread.output"
+			}
 			if !write(struct {
-				Type string `json:"type"`
+				Type     string `json:"type"`
+				ThreadID string `json:"thread_id,omitempty"`
 				protocol.SessionResult
-			}{Type: "session.output", SessionResult: result}) {
+			}{Type: outputType, ThreadID: selected.ThreadID, SessionResult: result}) {
 				return false
 			}
 			mu.Lock()

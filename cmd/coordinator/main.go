@@ -231,7 +231,7 @@ func cmdServe(ctx context.Context, stderr io.Writer, getenv func(string) string)
 		}()
 		loopCtx, cancelLoops := context.WithCancel(ctx)
 		var loops sync.WaitGroup
-		for _, runLoop := range []func(context.Context){gw.Run, ctrl.DeliverMaintenance, ctrl.DeliverPrepares, ctrl.ScheduleProjectRunsLoop, ctrl.DeliverProjectRuns} {
+		for _, runLoop := range []func(context.Context){gw.Run, ctrl.DeliverMaintenance, ctrl.DeliverPrepares, ctrl.DeliverThreads, ctrl.ScheduleProjectRunsLoop, ctrl.DeliverProjectRuns} {
 			loops.Add(1)
 			go func() {
 				defer loops.Done()

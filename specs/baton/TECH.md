@@ -80,6 +80,8 @@ Worker 由 batond 用同一可执行文件的内部子命令启动，与 batond 
 4. 发送前 Worker 同步提交 `send_intent`，再调用适配器；适配器确认后记为 `sent`，并把消息归入当前 Turn。意图已提交但确认丢失时，用 `client_message_id` 查询原生历史；查不到也无法排除已发送时，消息和 Thread 都进入 `unknown`，不重发（R-13）。
 5. 撤回只对 Worker 队列里尚未提交 `send_intent` 的消息生效；中心记录撤回请求，设备回执后标为 `withdrawn`。停止一轮时，Worker 在同一事务里撤回全部未发出的消息（R-11）。
 
+接收消息时同时检查 64 KiB 正文上限和 JSON 编码后的 256 KiB 传输上限，并为存储代次、来源和外层帧预留容量。正文因控制字符转义而超过传输上限时返回 413，不写入消息或 outbox。
+
 Worker 的队列对所有 Agent 统一实现，不使用 Agent 自带的 follow-up 队列。这样排队消息在 Worker 重启后仍按顺序各发一次，撤回语义也一致。Pi 的原生 follow-up 不使用。
 
 ### Turn 边界
@@ -143,22 +145,11 @@ Turn 由 Worker 定义：从一条消息被 Agent 接受开始，到适配器报
 
 ### 迁移
 
-项目未发布，迁移直接改写，不保留旧任务模型。本地测试库重建。
+中心 Thread 模型使用增量迁移，与现有任务路径并存。`0001`～`0024` 保持原样；`0025_threads.sql` 新建 `threads`、`thread_messages`、`thread_turns`、`thread_replies`、`thread_events`、`thread_outbox` 和 `thread_reports`，并扩充 Project 输入类型。任务、Session 和 Execution 的表及接口在切换 Project Agent 之前继续使用；删除和收敛旧迁移在实施步骤 5 进行。
 
-| 文件 | 处理 |
-|---|---|
-| 0001～0004 | 保留 |
-| 0005 | 改写为 `threads`、`thread_events`、`thread_outbox`，去掉 `tasks`、`executions`、`task_events`、`dispatch_outbox`、`request_tombstones`；保留 `nodes.default_agent_type` |
-| 0006 | 改写为 `thread_messages`、`thread_turns`；删除 `sessions`、`task_relations` |
-| 0007 | 删除（启动许可列） |
-| 0008 | 改写为 `thread_replies` |
-| 0009～0014 | 删除（不确定原因、任务停止、子任务交付、人工核实、Plane 触发、产物要求） |
-| 0015～0016 | 保留 |
-| 0017 | 去掉对 `tasks` 的改动，保留 `agent_runs`；`threads` 的来源列在 0005 中直接定义 |
-| 0018 | 事项的关联对象改为 `thread_id`，删除结果快照列，系统条件只保留 `project_needs_attention` |
-| 0019、0020、0022 | 删除（Plane 回写、用户任务结果、命令等待列） |
-| 0023 | 删除；`thread_outbox` 在 0005 中带全部投递字段 |
-| 0024 | 保留，输入类型检查改为新的类型集合 |
+`thread_reports` 保存 `(thread_id, event_id)`、连续 Worker 序号、报告内容摘要及原 ACK，不保存完整报告正文。`thread_events` 只追加审计与时间线事件，回复事件保存限长正文。`threads.request_hash` 用于比较规范化的新建请求，读取接口不返回它。Turn 的 ID 与 Worker Turn 序号使用同一个含员工身份的复合外键，避免消息或回复关联到两个不同的 Turn。
+
+`project_agent_input_queue` 同时接受原有的 `task_result`、`user_task_result` 和新的 `thread_reply`、`turn_ended`。`thread_reply` 为被动输入，`turn_ended` 为主动输入，参与放置、领取和重启后的通知重置。
 
 迁移文件编号之间允许空缺，`internal/migrate` 按文件名排序执行。
 
@@ -166,7 +157,7 @@ Turn 由 Worker 定义：从一条消息被 Agent 接受开始，到适配器报
 
 `thread_outbox` 沿用[控制面调度设计](../control-dispatch-reliability/TECH.md)的规则：短事务领取并保存下一次尝试时间，提交后入队，不等待回包；每节点额度在全局 LIMIT 前应用；回包按 `message_id` 独立幂等保存。设备离线时意图一直保留，没有排队期限（R-14）。
 
-同一 Thread 的命令按 outbox `id` 顺序投递，前一条未确认时不发下一条，保证 `thread.open` 先于第一条消息、消息之间顺序不变。
+同一 Thread 的命令按 outbox `id` 顺序投递，前一条未确认时不发下一条，保证 `thread.open` 先于第一条消息、消息之间顺序不变。message 和 withdraw 还要等 `thread.opened` 保存存储代次，后续命令携带该代次。归档后只领取仍需发送的 stop、withdraw，过时的 open、message 保留原记录，不再阻塞清理命令。首次启动失败时，尚未尝试投递的消息撤回，Thread 保留停止原因并允许归档；员工另开 Thread 重试。
 
 ### 上行报告
 
@@ -265,7 +256,7 @@ Kiro 只提供排队。需要打断时，员工先停止这一轮再发消息。
 
 ### 能力上报
 
-batond 在 `node_runtime_reports.report.agents` 上报每种 Agent 的版本和 `{create, queue, steer, stop, resume}`。`queue` 和 `stop` 对已接入的 Agent 恒为真；`steer`、`resume` 来自 `Capabilities()`。未验证的版本标为 `unverified`，界面不显示为已支持（D1）。
+batond 在 `node_runtime_reports.report.agents` 上报每种 Agent 的 `{agent_type, version, status, capabilities:{create, queue, steer, stop, resume}}`。`status` 为 `available`、`unverified` 或 `unavailable`；只有 `available` 且支持 `create` 的 Agent 可新建 Thread。`queue` 和 `stop` 对已接入的 Agent 恒为真；`steer`、`resume` 来自 `Capabilities()`。未验证的版本标为 `unverified`，界面不显示为已支持（D1）。旧设备未上报 `agents` 时，中心沿用 `nodes.capabilities` 验证 Agent 类型，插入能力缺省关闭。中心按目标系统的路径规则检查工作目录位于上报的 `roots` 内，设备在执行前核实目录存在及解析后的边界。
 
 ## 接口
 
@@ -275,18 +266,20 @@ URL 相对 `/api/v1`。员工会话、CSRF、Origin 检查沿用现状。
 
 | 接口 | 行为 |
 |---|---|
-| `POST /threads` | `client_thread_id`、可选 `node_id`（缺省为默认设备）、`agent_type`、`working_directory`、可选 `project_id`、`execution_timeout_seconds`、第一条消息 `{client_message_id, content}`。201 返回 Thread |
-| `GET /threads` | 可按 `project_id`、`node_id`、`status` 筛选，按最后活动时间倒序分页 |
+| `POST /threads` | `client_thread_id`、可选 `node_id`（缺省为默认设备）、`agent_type`、`working_directory`、可选 `project_id`、`execution_timeout_seconds`、第一条消息 `message:{client_message_id, content}`。新建返回 201，幂等重发返回 200，内容冲突返回 409 |
+| `GET /threads` | 可按 `project_id`、`node_id`、`status` 筛选，按 `(last_activity_at, id)` 倒序分页；`limit` 默认 50、最多 100，续页使用 `next_cursor` |
 | `GET /threads/{id}` | Thread、状态、当前 Turn、待发消息 |
-| `GET /threads/{id}/timeline` | 按时间顺序的消息、Turn 边界和回复，游标分页 |
-| `POST /threads/{id}/messages` | `{client_message_id, content, mode}`；`mode` 缺省为 `queue`，`steer` 在 Agent 不支持时返回 422 |
+| `GET /threads/{id}/timeline` | 按审计事件 ID 顺序返回消息、Turn 边界、回复和操作；`limit` 默认 20、最多 100，续页使用 `next_cursor` |
+| `POST /threads/{id}/messages` | `{client_message_id, content, mode}`，返回 202；`mode` 缺省为 `queue`，`steer` 在 Agent 不支持时返回 422 |
 | `POST /threads/{id}/messages/{mid}/withdraw` | 撤回排队消息；已发出返回 409 和当前状态 |
-| `POST /threads/{id}/stop` | 停止当前 Turn 并撤回排队消息 |
-| `POST /threads/{id}/archive` | 有进行中的 Turn 时先发停止，设备确认后归档 |
+| `POST /threads/{id}/stop` | 返回 202，保存停止及撤回排队消息的意图，状态等待设备报告确认 |
+| `POST /threads/{id}/archive` | 返回 202；有进行中的 Turn、待发消息或不确定状态时先发停止，设备确认后归档；空闲或已停止且无待发消息时直接归档 |
 | `GET /threads/{id}/history` | 从设备分页读取原生历史，见「历史读取」 |
 | `/events` | 浏览器 WebSocket，订阅 Thread 的实时输出与状态变化 |
 
-节点、登录、默认设备、文件浏览、Project、Inbox 接口保持现状。删除 `/tasks*`、`/sessions*`、`/acceptances`、`/plane/*`。
+节点、登录、默认设备、文件浏览、Project、Inbox 接口保持现状。旧 `/tasks*`、`/sessions*`、`/acceptances` 接口保留到任务模型删除；Thread 路径使用独立 Store 和协议。
+
+浏览器 WebSocket 接受 `{thread_id, cursor?}` 订阅，发送 `thread.changed` 和 `thread.output`，保留原 Session 订阅格式。Thread 的历史与输出复用 `session.request`，其中 `session_id` 为 Thread ID；正文不持久化，历史响应为 `Cache-Control: no-store`。
 
 错误对象为 `{code, message, request_id, details?}`；`details` 不回传凭据和完整工具输出。
 
@@ -299,7 +292,11 @@ URL 相对 `/api/v1`。员工会话、CSRF、Origin 检查沿用现状。
 | 上行 | `thread.report` | Worker 报告（上表），中心持久化后回 `thread.report_result` |
 | 双向 | `session.request` / `session.result` | 临时 RPC：实时输出、原生历史；正文不进中心持久化 |
 
-删除 `execution.*`、`agent.request`、`execution.children*`、启动许可。启动许可原本防止过期任务在设备上启动；Thread 没有排队期限，消息由员工明确发出，设备收到即可执行，不再需要中心二次授权。
+Thread 命令以信封 `message_id` 作为稳定身份，`thread.command_result` 用信封 `correlation_id` 引用它，正文含 `{type, thread_id, ok, code?}`。报告正文含 `{type:"thread.report", thread_id, event_id, worker_seq, kind, ...}`，其中 `kind` 为「上行报告」表中的类型，`worker_turn_seq` 标识 Turn，`client_message_id` 标识消息。`turn.ended` 的 `queue_empty` 表示 Worker 是否还有排队消息。回执含 `{type:"thread.report_result", thread_id, event_id, worker_seq, ok, code?, expected_worker_seq?}`；序号不连续时返回 `worker_sequence_gap` 和下一条期望序号，不保存该报告。
+
+Thread 回包事务按 Node → Credential → Presence 锁定认证记录，再锁目标 Outbox 或 Thread；全部锁取得后用数据库当前时刻复核凭据期限。凭据吊销、连接替换和锁等待跨越有效期都不能写入执行事实。
+
+旧 `execution.*`、`agent.request`、`execution.children*` 和启动许可在任务路径继续使用，随实施步骤 5 删除。Thread 没有排队期限，消息由员工明确发出，设备收到即可执行。
 
 ### 跨版本字段
 
@@ -397,10 +394,10 @@ Coordinator 与 PostgreSQL 部署在一处，Coordinator 提供静态页面、AP
 每一步结束时 `go vet ./...`、`go test ./...` 和前端测试通过。
 
 1. **删除不再需要的入口。** 删除 `internal/plane`、`internal/agentcli`、`cmd/baton`、迁移 0013 与 0019 及对应测试和配置。行为不变的部分照常运行。
-2. **中心 Thread 模型。** 改写迁移，新建 `threads`、`thread_messages`、`thread_turns`、`thread_replies`、`thread_events`、`thread_outbox` 和 Store；浏览器 Thread API；`thread.command` 派发与 `thread.report` 处理。用 Go 测试里的假节点验证新建、消息去重、离线等待、报告去重和序号检查。旧任务路径与新路径并存到第 4 步。
+2. **中心 Thread 模型。** 新增迁移，新建 `threads`、`thread_messages`、`thread_turns`、`thread_replies`、`thread_events`、`thread_outbox` 和报告去重账本及 Store；浏览器 Thread API；`thread.command` 派发与 `thread.report` 处理。用 Go 测试里的假节点验证新建、消息去重、离线等待、报告去重和序号检查。旧任务路径与新路径并存到第 4 步。
 3. **Worker 与适配器。** Worker 账本改为消息队列、Turn 与回复；适配器改为新接口，Pi、Codex、Kiro、shell 逐个迁移，回放测试覆盖排队、插入、停止、执行时限、崩溃恢复和 `Sent` 查询。batond 接收 `thread.command`。
 4. **切换 Project Agent。** `tasks.*` 工具换成 `threads.*`，Turn 结束与回复进入输入队列，`nodes.exec` 改为 shell Thread；Inbox 关联 Thread。见 Project Agent TECH 第 9、10 节。
-5. **删除任务模型。** 删除 `tasks` 相关表、Store、协议、`internal/task`、`internal/startpermit`、启动许可和子任务交付代码。
+5. **删除任务模型。** 删除 `tasks` 相关表、Store、协议、`internal/task`、`internal/startpermit`、启动许可和子任务交付代码，收敛旧迁移。
 6. **Web。** Thread 列表与 Thread 页、Project 页的 Thread 区域按 `design/` 实现；删除任务页与 Session 页。
 7. **端到端。** 真实 Codex、Kiro、Pi 各跑一遍 PRODUCT 验收表的多轮、排队可靠性和恢复场景。
 

@@ -19,11 +19,26 @@ const (
 )
 
 type RuntimeReport struct {
+	Agents         []RuntimeAgent  `json:"agents,omitempty"`
 	ProjectRuntime *ProjectRuntime `json:"project_runtime,omitempty"`
 	Exec           RuntimeExec     `json:"exec"`
 	Roots          []RuntimeRoot   `json:"roots"`
 	Repos          []RuntimeRepo   `json:"repos"`
 	Truncated      bool            `json:"truncated,omitempty"`
+}
+
+type RuntimeAgent struct {
+	AgentType    string             `json:"agent_type"`
+	Version      string             `json:"version"`
+	Status       string             `json:"status"`
+	Capabilities ThreadCapabilities `json:"capabilities"`
+}
+type ThreadCapabilities struct {
+	Create bool `json:"create"`
+	Queue  bool `json:"queue"`
+	Steer  bool `json:"steer"`
+	Stop   bool `json:"stop"`
+	Resume bool `json:"resume"`
 }
 
 type ProjectRuntime struct {
@@ -114,6 +129,16 @@ func runtimeText(s string, max int) bool {
 func RuntimeReportJSON(r RuntimeReport) ([]byte, error) {
 	if ValidateProjectRuntime(r.ProjectRuntime) != nil || !runtimeText(r.Exec.Shell, 4096) || len(r.Roots) > 32 || len(r.Repos) > 128 {
 		return nil, ErrRuntimeReport
+	}
+	if len(r.Agents) > 32 {
+		return nil, ErrRuntimeReport
+	}
+	agents := map[string]bool{}
+	for _, a := range r.Agents {
+		if !runtimeName.MatchString(a.AgentType) || !runtimeName.MatchString(a.Version) || agents[a.AgentType] || (a.Status != "available" && a.Status != "unverified" && a.Status != "unavailable") {
+			return nil, ErrRuntimeReport
+		}
+		agents[a.AgentType] = true
 	}
 	seen := map[string]bool{}
 	for _, root := range r.Roots {

@@ -116,6 +116,12 @@ func (s *Server) onEnvelope(ctx context.Context, connID string, raw json.RawMess
 		return
 	}
 	switch kind.Type {
+	case protocol.BodyThreadCommandResult:
+		s.onThreadCommandResult(ctx, env)
+		return
+	case protocol.BodyThreadReport:
+		s.onThreadReport(ctx, connID, env)
+		return
 	case protocol.BodyProjectRuntimeRequest:
 		s.onProjectRuntimeRequest(ctx, connID, env)
 		return

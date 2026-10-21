@@ -96,7 +96,7 @@ Runtime 进程的工作目录是一个空的控制目录。pi-agent-core 本身�
 
 `threads` 带可空列 `project_id`、`origin_conversation_id`、`origin_tool_call_id`，后两列唯一。员工在 Project 里新建的 Thread 只填写 `project_id`；Project Agent 新建的三列都填写。`thread_turns.initiator` 记录这一轮由员工还是 Project Agent 开启，Project Agent 开启时另记 `origin_tool_call_id`。
 
-输入队列是 Coordinator 内部的数据，用户界面上的待办事项不用这张表。事项表由 Agent Inbox 的技术设计定义。`source_type` 有六种，分成两类：
+输入队列是 Coordinator 内部的数据，用户界面上的待办事项不用这张表。事项表由 Agent Inbox 的技术设计定义。Thread 路径的 `source_type` 有六种，分成两类。与旧任务路径并存期间，队列还保留主动的 `task_result` 和被动的 `user_task_result`；现有任务工具继续使用它们。
 
 | source_type | 类别 | 来源 | payload 上限 |
 |---|---|---|---|

@@ -29,6 +29,10 @@ func insertProjectInput(ctx context.Context, tx pgx.Tx, employeeID, agentID, kin
 		maxBytes = 32 << 10
 	case "task_result", "user_task_result":
 		maxBytes = 72 << 10
+	case "thread_reply":
+		maxBytes = 40 << 10
+	case "turn_ended":
+		maxBytes = 4 << 10
 	case "memory_updated":
 		maxBytes = 1 << 10
 	case "project_updated":
@@ -48,7 +52,7 @@ func insertProjectInput(ctx context.Context, tx pgx.Tx, employeeID, agentID, kin
 	}
 	hash := sha256.Sum256(raw)
 	_, err = tx.Exec(ctx, `INSERT INTO project_agent_input_queue(employee_id,agent_id,source_type,source_key,payload,payload_hash,wake_required)
- VALUES($1,$2,$3,$4,$5,$6,$3 IN ('user_message','task_result','attention_answer')) ON CONFLICT(agent_id,source_key) DO NOTHING`, employeeID, agentID, kind, key, raw, hash[:])
+ VALUES($1,$2,$3,$4,$5,$6,$3 IN ('user_message','task_result','attention_answer','turn_ended')) ON CONFLICT(agent_id,source_key) DO NOTHING`, employeeID, agentID, kind, key, raw, hash[:])
 	return err
 }
 

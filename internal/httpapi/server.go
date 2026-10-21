@@ -215,6 +215,10 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 			s.writeError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "不支持该请求方法")
 		}
 	default:
+		if r.URL.Path == "/api/v1/threads" || strings.HasPrefix(r.URL.Path, "/api/v1/threads/") {
+			s.routeThread(w, r)
+			return
+		}
 		if r.URL.Path == "/api/v1/inbox" || strings.HasPrefix(r.URL.Path, "/api/v1/attention-requests/") {
 			s.routeInbox(w, r)
 			return
