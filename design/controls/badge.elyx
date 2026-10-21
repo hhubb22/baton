@@ -36,7 +36,7 @@ export countQuiet = frame : count {
   }
 }
 
-// 标签：说明来源或属性，例如「默认设备」「我开的」「Baton 创建」
+// 标签：说明来源或属性，例如「默认设备」「Baton 创建」
 export tag = frame {
   title: "标签",
   left: 88px,

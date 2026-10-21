@@ -4,9 +4,10 @@ import "foundations/typography.elyx" as t
 import "controls/icons.elyx" as icons
 import "controls/status.elyx" as status
 
-// 选择片：输入区工具栏里的设备、Agent 和目录选择，平时无底色，悬停时出现浅底
+// 选择片：输入区工具栏里的位置和模型选择，平时无底色，悬停时出现浅底。
+// 位置是目录加设备，例如「baton · MacBook Pro」
 export chip = frame {
-  title: "选择片 / 设备",
+  title: "选择片 / 位置",
   width: .auto,
   height: s.size.compact,
   layout: {align-items: .center, item-gap: 6px},
@@ -14,14 +15,14 @@ export chip = frame {
   padding: [0px, 8px],
   children: [glyph, label, caret],
 
-  glyph = asset : icons.laptop {
+  glyph = asset : icons.folder {
     width: 15px,
     height: 15px,
     fill[0].color: c.colors.muted
   }
 
   label = text : t.small {
-    contents: "MacBook Pro",
+    contents: "baton · MacBook Pro",
     line-height: 1
   }
 
@@ -33,12 +34,12 @@ export chip = frame {
 }
 
 @variant
-export chipAgent = frame : chip {
-  title: "选择片 / Agent",
-  left: 160px,
+export chipModel = frame : chip {
+  title: "选择片 / 模型",
+  left: 200px,
 
   label {
-    contents: "Codex"
+    contents: "gpt-6.1-sol"
   }
 
   @with-variant(icons.sparkle)
@@ -46,24 +47,9 @@ export chipAgent = frame : chip {
 }
 
 @variant
-export chipDir = frame : chip {
-  title: "选择片 / 目录",
-  left: 280px,
-
-  label {
-    contents: "~/src/baton",
-    font-size: 12,
-    font-family: "Paper Mono"
-  }
-
-  @with-variant(icons.folder)
-  glyph {}
-}
-
-@variant
 export chipHover = frame : chip {
   title: "选择片 / 悬停",
-  left: 440px,
+  left: 360px,
   fill[0].color: c.colors.hover
 }
 

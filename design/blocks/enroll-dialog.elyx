@@ -1,0 +1,420 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+import "controls/icons.elyx" as icons
+import "controls/button.elyx" as buttons
+import "controls/status.elyx" as status
+import "controls/input.elyx" as inputs
+import "controls/label.elyx" as labels
+import "blocks/dialog.elyx" as dialogs
+
+// 系统切换里的一项
+export systemTab = frame {
+  title: "系统切换项",
+  left: 0px,
+  top: 0px,
+  width: 80px,
+  height: 28px,
+  layout: {justify-content: .center, align-items: .center},
+  corner-radius: s.radius.pill,
+  children: tabLabel,
+
+  tabLabel = text : t.label {
+    contents: "Windows",
+    font-size: 12,
+    line-height: 1,
+    fill[0].color: c.colors.muted
+  }
+}
+
+@variant
+export systemTabOn = frame : systemTab {
+  title: "系统切换项 / 选中",
+  top: 40px,
+  fill[0].color: c.colors.surface,
+  shadow[0].drop-shadow.blur-radius: 2px,
+  shadow[0].drop-shadow.color: rgb(0%, 0%, 0%, 8%),
+  shadow[0].drop-shadow.offset: [0px, 1px],
+  shadow[1].drop-shadow.blur-radius: 6px,
+  shadow[1].drop-shadow.color: rgb(0%, 0%, 0%, 4%),
+  shadow[1].drop-shadow.offset: [0px, 1px],
+
+  tabLabel {
+    fill[0].color: c.colors.text
+  }
+}
+
+// 带复制按钮的等宽块：注册凭据和注册命令
+export copyBlock = frame {
+  title: "可复制的等宽块",
+  left: 0px,
+  top: 96px,
+  width: 512px,
+  layout: {item-gap: s.space.sm},
+  fill: c.colors.subtle,
+  corner-radius: s.radius.md,
+  padding: [10px, 6px, 10px, s.space.md],
+  children: [code, copy],
+
+  code = text : t.mono {
+    width: 100%,
+    contents: "7Q2mX4kP-9vRa-Lw3e-H8tN",
+    font-size: 12,
+    line-height: 1.7
+  }
+
+  copy = frame : buttons.iconButton {
+    width: 24px,
+    height: 24px,
+
+    @with-variant(icons.copy)
+    glyph {
+      width: 14px,
+      height: 14px
+    }
+  }
+}
+
+// 接入设备：员工登录后领一张 10 分钟内有效、只能用一次的注册凭据，在设备上用它注册 batond。
+// 凭据经环境变量或文件交给 batond，不写进命令行参数。弹窗一直等到设备连上或凭据过期
+export enrollDialog = frame : dialogs.dialog {
+  title: "接入设备 / 等待连接",
+  left: 0px,
+  top: 200px,
+  width: 600px,
+
+  footer {
+    overrides: [
+      insert(waiting, after = .nil),
+      remove(dialogs.dialog.footer.note)
+    ],
+
+    actions {
+      overrides: [remove(dialogs.dialog.footer.actions.confirm)],
+
+      cancel {
+        label {
+          contents: "关闭"
+        }
+      }
+    }
+  }
+
+  content {
+    overrides: [
+      insert(nameRow, after = .nil),
+      insert(tokenField, after = nameRow),
+      insert(commandField, after = tokenField),
+      remove(dialogs.dialog.content.message)
+    ]
+  }
+
+  heading {
+    contents: "接入设备"
+  }
+
+  waiting = frame {
+    width: 100%,
+    layout: {align-items: .center, item-gap: s.space.sm},
+    children: [waitDot, waitText, waitTime],
+
+    waitDot = shape : status.dotQueued {}
+
+    waitText = text : t.caption {
+      contents: "等待设备连接",
+      fill[0].color: c.colors.muted
+    }
+
+    waitTime = text : t.caption {
+      contents: "凭据还剩 9:41",
+      fill[0].color: c.colors.faint
+    }
+  }
+
+  nameRow = frame {
+    width: 100%,
+    layout: {align-items: .end, item-gap: s.space.md},
+    children: [nameField, systems],
+
+    nameField = frame {
+      width: 100%,
+      layout: {direction: .column, item-gap: 6px},
+      children: [nameLabel, nameInput],
+
+      nameLabel = frame : labels.label {
+        labelText {
+          contents: "设备名称"
+        }
+      }
+
+      nameInput = frame : inputs.filled {
+        width: 100%,
+
+        value {
+          contents: "MacBook Pro"
+        }
+      }
+    }
+
+    systems = frame {
+      width: 240px,
+      height: s.size.control,
+      layout: {align-items: .center, item-gap: 2px},
+      fill: c.colors.subtle,
+      corner-radius: s.radius.pill,
+      padding: 2px,
+      children: [windows, macos, linux],
+
+      windows = frame : systemTab {
+        width: 100%,
+        height: 100%
+      }
+
+      macos = frame : systemTabOn {
+        width: 100%,
+        height: 100%,
+
+        tabLabel {
+          contents: "macOS"
+        }
+      }
+
+      linux = frame : systemTab {
+        width: 100%,
+        height: 100%,
+
+        tabLabel {
+          contents: "Linux"
+        }
+      }
+    }
+  }
+
+  tokenField = frame {
+    width: 100%,
+    layout: {direction: .column, item-gap: 6px},
+    children: [tokenLabel, token, tokenNote],
+
+    tokenLabel = frame : labels.label {
+      labelText {
+        contents: "注册凭据"
+      }
+    }
+
+    token = frame : copyBlock {
+      width: 100%
+    }
+
+    tokenNote = text : t.caption {
+      width: 100%,
+      contents: "10 分钟内有效，只能用一次。",
+      fill[0].color: c.colors.muted
+    }
+  }
+
+  commandField = frame {
+    width: 100%,
+    layout: {direction: .column, item-gap: 6px},
+    children: [commandLabel, command, commandNote],
+
+    commandLabel = frame : labels.label {
+      labelText {
+        contents: "在设备上运行"
+      }
+    }
+
+    command = frame : copyBlock {
+      width: 100%,
+
+      code {
+        contents: "read -rs BATON_ENROLLMENT_TOKEN && export BATON_ENROLLMENT_TOKEN\nbatond register --coordinator https://baton.example.com \\\n  --display-name \"MacBook Pro\" --system macos"
+      }
+    }
+
+    commandNote = text : t.caption {
+      width: 100%,
+      contents: "运行后粘贴注册凭据，输入不会显示。",
+      fill[0].color: c.colors.muted
+    }
+  }
+}
+
+// Windows 用 PowerShell 读入凭据
+@variant
+export enrollWindows = frame : enrollDialog {
+  title: "接入设备 / Windows",
+  left: 720px,
+  top: 200px,
+
+  content {
+    commandField {
+      command {
+        code {
+          contents: "$env:BATON_ENROLLMENT_TOKEN = Read-Host -MaskInput\nbatond register --coordinator https://baton.example.com `\n  --display-name \"Windows 台式机\" --system windows",
+          font-family: "Maple Mono CN"
+        }
+      }
+    }
+
+    tokenField {
+      token {
+        code {
+          contents: "Lw3e-H8tN-7Q2mX4kP-9vRa"
+        }
+      }
+    }
+
+    nameRow {
+      systems {
+        @with-variant(systemTab)
+        macos {
+          left: .nil
+        }
+
+        @with-variant(systemTabOn)
+        windows {}
+      }
+
+      nameField {
+        nameInput {
+          value {
+            contents: "Windows 台式机"
+          }
+        }
+      }
+    }
+  }
+}
+
+// 设备连上后凭据作废，弹窗换成结果
+@variant
+export enrollConnected = frame : enrollDialog {
+  title: "接入设备 / 已连接",
+  left: 1440px,
+  top: 200px,
+
+  footer {
+    actions {
+      @with-variant(buttons.button)
+      cancel {
+        label {
+          contents: "完成"
+        }
+      }
+    }
+
+    waiting {
+      waitText {
+        fill[0].color: c.colors.text,
+        contents: "已连接"
+      }
+
+      waitTime {
+        display: .none
+      }
+
+      @with-variant(status.dotOnline)
+      waitDot {}
+    }
+  }
+
+  content {
+    overrides: [insert(done, after = .nil)],
+
+    commandField {
+      display: .none
+    }
+
+    tokenField {
+      display: .none
+    }
+
+    nameRow {
+      display: .none
+    }
+  }
+
+  done = frame {
+    width: 100%,
+    layout: {align-items: .center, item-gap: s.space.md},
+    fill: c.colors.panel,
+    border: c.colors.borderSoft,
+    corner-radius: 10px,
+    padding: [s.space.md, s.space.lg],
+    children: [doneGlyph, doneCopy],
+
+    doneGlyph = asset : icons.laptop {
+      width: 20px,
+      height: 20px,
+      fill[0].color: c.colors.muted
+    }
+
+    doneCopy = frame {
+      width: 100%,
+      layout: {direction: .column, item-gap: s.space.xxs},
+      children: [doneName, doneMeta],
+
+      doneName = text : t.label {
+        contents: "MacBook Pro"
+      }
+
+      doneMeta = text : t.caption {
+        width: 100%,
+        contents: "macOS · 已同步 · Codex、Pi 可用",
+        fill[0].color: c.colors.muted
+      }
+    }
+  }
+}
+
+// 凭据过期或已被用过：命令里的凭据不能再用，重新生成一张
+@variant
+export enrollExpired = frame : enrollDialog {
+  title: "接入设备 / 凭据过期",
+  left: 2160px,
+  top: 200px,
+
+  footer {
+    actions {
+      overrides: [insert(regen, after = dialogs.dialog.footer.actions.cancel)]
+    }
+
+    waiting {
+      waitTime {
+        display: .none
+      }
+
+      waitText {
+        contents: "设备没有在 10 分钟内连上"
+      }
+
+      @with-variant(status.dotStopped)
+      waitDot {}
+    }
+  }
+
+  content {
+    tokenField {
+      tokenNote {
+        fill[0].color: rgb(74.1%, 25.8%, 22.9%),
+        contents: "已过期，用这张凭据注册会被拒绝。"
+      }
+
+      token {
+        code {
+          fill[0].color: rgb(56%, 56%, 57%)
+        }
+
+        copy {
+          display: .none
+        }
+      }
+    }
+  }
+
+  regen = frame : buttons.button {
+    label {
+      contents: "重新生成"
+    }
+  }
+}

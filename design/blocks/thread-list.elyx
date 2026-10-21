@@ -1,0 +1,754 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+import "controls/status.elyx" as status
+import "controls/avatar.elyx" as avatars
+import "controls/input.elyx" as inputs
+import "blocks/sidebar.elyx" as sidebars
+import "blocks/overview.elyx" as overviews
+import "blocks/thread-detail.elyx" as details
+import "blocks/composer.elyx" as composers
+
+// Thread 列表行：状态点、名称、所属 Project、设备 · Agent、工作目录、状态和最后活动时间。
+// 状态列和 Thread 行一致：执行中显示这一轮的计时，其余只显示状态名。不属于 Project 的 Thread 留空
+export threadListRow = frame {
+  title: "Thread 列表行 / 执行中",
+  width: 1192px,
+  height: 40px,
+  layout: {align-items: .center, item-gap: s.space.md},
+  padding: [0px, 20px],
+  children: [lead, project, place, dir, state, time],
+
+  lead = frame {
+    width: 100%,
+    layout: {align-items: .center, item-gap: 10px},
+    children: [mark, name],
+
+    mark = frame {
+      width: 16px,
+      height: 16px,
+      layout: {justify-content: .center, align-items: .center},
+      children: dot,
+
+      dot = shape : status.dot {}
+    }
+
+    name = text : t.small {
+      contents: "在 Windows 上跑重连测试",
+      line-height: 1
+    }
+  }
+
+  project = frame {
+    width: 144px,
+    layout: {align-items: .center, item-gap: 6px},
+    children: [projectMark, projectName],
+
+    projectMark = frame : avatars.avatar {
+      width: 16px,
+      height: 16px,
+      corner-radius: 4px,
+
+      initial {
+        font-size: 9
+      }
+    }
+
+    projectName = text : t.caption {
+      contents: "Baton 开发",
+      line-height: 1,
+      fill[0].color: c.colors.muted
+    }
+  }
+
+  place = text : t.caption {
+    width: 168px,
+    contents: "Windows 台式机 · Codex",
+    line-height: 1,
+    fill[0].color: c.colors.muted
+  }
+
+  dir = text : t.mono {
+    width: 168px,
+    contents: "D:\\src\\baton-ps160",
+    line-height: 1,
+    fill[0].color: c.colors.faint
+  }
+
+  state = text : t.caption {
+    width: 64px,
+    contents: "03:12",
+    font-family: "Paper Mono",
+    line-height: 1,
+    fill[0].color: c.colors.info
+  }
+
+  time = text : t.caption {
+    width: 56px,
+    contents: "刚刚",
+    line-height: 1,
+    align: .right,
+    fill[0].color: c.colors.faint
+  }
+}
+
+@variant
+export threadListRowIdle = frame : threadListRow {
+  title: "Thread 列表行 / 空闲",
+  top: 64px,
+
+  state {
+    fill[0].color: c.colors.muted,
+    contents: "空闲",
+    font-family: "PingFang SC"
+  }
+
+  time {
+    contents: "2 小时前"
+  }
+
+  lead {
+    mark {
+      @with-variant(status.dotIdle)
+      dot {
+        left: .nil
+      }
+    }
+  }
+}
+
+@variant
+export threadListRowWaiting = frame : threadListRow {
+  title: "Thread 列表行 / 等待设备",
+  top: 128px,
+
+  state {
+    fill[0].color: c.colors.muted,
+    contents: "等待设备",
+    font-family: "PingFang SC"
+  }
+
+  time {
+    contents: "5 分钟前"
+  }
+
+  lead {
+    mark {
+      @with-variant(status.dotQueued)
+      dot {
+        left: .nil
+      }
+    }
+  }
+}
+
+@variant
+export threadListRowStopped = frame : threadListRow {
+  title: "Thread 列表行 / 已停止",
+  top: 192px,
+
+  state {
+    fill[0].color: c.colors.danger,
+    contents: "已停止",
+    font-family: "PingFang SC"
+  }
+
+  time {
+    contents: "20 分钟前"
+  }
+
+  lead {
+    mark {
+      @with-variant(status.dotStopped)
+      dot {
+        left: .nil
+      }
+    }
+  }
+}
+
+@variant
+export threadListRowUnknown = frame : threadListRow {
+  title: "Thread 列表行 / 状态未知",
+  top: 256px,
+
+  state {
+    fill[0].color: c.colors.attentionText,
+    contents: "状态未知",
+    font-family: "PingFang SC"
+  }
+
+  time {
+    contents: "8 分钟前"
+  }
+
+  lead {
+    mark {
+      @with-variant(status.dotAttention)
+      dot {
+        left: .nil
+      }
+    }
+  }
+}
+
+@variant
+export threadListRowArchived = frame : threadListRowIdle {
+  title: "Thread 列表行 / 已归档",
+  top: 320px,
+
+  lead {
+    name {
+      fill[0].color: c.colors.muted
+    }
+  }
+
+  state {
+    contents: "已归档"
+  }
+
+  time {
+    contents: "上周"
+  }
+}
+
+// 选中：右侧打开着这个 Thread 的详情
+@variant
+export threadListRowSelected = frame : threadListRow {
+  title: "Thread 列表行 / 选中",
+  top: 384px,
+  fill[0].color: c.colors.selected
+}
+
+// Thread 页：按设备、Project 和状态筛选。需要处理的排在最前，然后是执行中、等待设备，其余按最后活动时间排列；
+// 已归档的默认不显示，在状态筛选里选出。点一行在右侧打开详情
+export threadsPage = frame {
+  title: "Thread 页",
+  left: 0px,
+  top: 520px,
+  width: s.size.screenWidth,
+  height: s.size.screenHeight,
+  layout: {direction: .row},
+  fill: c.colors.canvas,
+  children: [sidebar, main],
+
+  sidebar = frame : sidebars.sidebar {
+    top {
+      projects {
+        @with-variant(sidebars.projectRowLive)
+        projBaton {}
+      }
+
+      nav {
+        @with-variant(sidebars.navRowActive)
+        navThreads {
+          top: .nil
+        }
+      }
+    }
+  }
+
+  main = frame {
+    width: 100%,
+    height: 100%,
+    layout: {direction: .column},
+    children: [head, compose, filters, list],
+
+    head = frame {
+      width: 100%,
+      height: s.size.header,
+      layout: {justify-content: .space-between, align-items: .center},
+      border: {color: c.colors.borderSoft, sides: .bottom},
+      padding: [0px, s.space.md, 0px, 20px],
+      children: headTitle,
+
+      headTitle = text : t.label {
+        contents: "Thread",
+        font-size: 14,
+        font-style: "Semibold"
+      }
+    }
+
+    // 新建 Thread 的输入区：选位置和模型，发出第一条消息即新建
+    compose = frame {
+      width: 100%,
+      layout: {direction: .column},
+      padding: [20px, 20px, s.space.xs],
+      children: composer,
+
+      composer = frame : composers.composerNewThread {
+        width: 100%
+      }
+    }
+
+    filters = frame {
+      width: 100%,
+      height: 44px,
+      layout: {justify-content: .space-between, align-items: .center},
+      padding: [0px, 20px, 0px, 14px],
+      children: [pickers, total],
+
+      pickers = frame {
+        layout: {align-items: .center, item-gap: s.space.xs},
+        children: [byDevice, byProject, byState],
+
+        byDevice = frame : inputs.selectCompact {
+          value {
+            contents: "全部设备"
+          }
+        }
+
+        byProject = frame : inputs.selectCompact {
+          value {
+            contents: "全部 Project"
+          }
+        }
+
+        byState = frame : inputs.selectCompact {
+          value {
+            contents: "未归档"
+          }
+        }
+      }
+
+      total = text : t.caption {
+        contents: "9 个 Thread",
+        fill[0].color: c.colors.faint
+      }
+    }
+
+    list = frame {
+      width: 100%,
+      height: 100%,
+      layout: {direction: .column},
+      padding: [0px, 0px, s.space.xl],
+      children: [
+        needsHead,
+        unknownRow,
+        stoppedRow,
+        runningHead,
+        runningRow,
+        kiroRow,
+        waitingHead,
+        waitingRow,
+        idleHead,
+        idleRow1,
+        idleRow2,
+        idleRow3,
+        idleRow4
+      ],
+
+      needsHead = frame : overviews.groupHead {
+        width: 100%,
+        height: 36px,
+        padding-top: s.space.sm,
+        padding-left: 20px,
+        padding-bottom: 0px,
+        padding-right: 20px,
+
+        extra {
+          display: .none
+        }
+
+        lead {
+          label {
+            contents: "需要处理"
+          }
+        }
+      }
+
+      unknownRow = frame : threadListRowUnknown {
+        width: 100%,
+
+        lead {
+          name {
+            contents: "升级 Windows 上的 batond"
+          }
+        }
+
+        dir {
+          contents: "D:\\src\\baton"
+        }
+      }
+
+      stoppedRow = frame : threadListRowStopped {
+        width: 100%,
+
+        project {
+          projectMark {
+            display: .none
+          }
+
+          projectName {
+            display: .none
+          }
+        }
+
+        place {
+          contents: "Ubuntu 开发机 · Codex"
+        }
+
+        lead {
+          name {
+            contents: "在 Ubuntu 上跑单元测试"
+          }
+        }
+
+        dir {
+          contents: "~/src/baton-old"
+        }
+      }
+
+      runningHead = frame : overviews.groupHead {
+        width: 100%,
+        height: 44px,
+        padding-top: 16px,
+        padding-left: 20px,
+        padding-bottom: 0px,
+        padding-right: 20px,
+
+        extra {
+          display: .none
+        }
+      }
+
+      runningRow = frame : threadListRow {
+        width: 100%
+      }
+
+      kiroRow = frame : threadListRow {
+        width: 100%,
+
+        project {
+          projectMark {
+            fill[0].color: c.hues.green,
+
+            initial {
+              contents: "交"
+            }
+          }
+
+          projectName {
+            contents: "交换机巡检"
+          }
+        }
+
+        state {
+          contents: "18:40"
+        }
+
+        place {
+          contents: "Ubuntu 开发机 · Kiro"
+        }
+
+        lead {
+          name {
+            contents: "整理交换机巡检脚本"
+          }
+        }
+
+        dir {
+          contents: "~/src/netops"
+        }
+
+        time {
+          contents: "1 分钟前"
+        }
+      }
+
+      waitingHead = frame : overviews.groupHead {
+        width: 100%,
+        height: 44px,
+        padding-top: 16px,
+        padding-left: 20px,
+        padding-bottom: 0px,
+        padding-right: 20px,
+
+        extra {
+          display: .none
+        }
+
+        lead {
+          label {
+            contents: "等待设备"
+          }
+
+          count {
+            contents: "1"
+          }
+        }
+      }
+
+      waitingRow = frame : threadListRowWaiting {
+        width: 100%,
+
+        place {
+          contents: "MacBook Pro · Codex"
+        }
+
+        lead {
+          name {
+            contents: "在 MacBook 上跑重连测试"
+          }
+        }
+
+        dir {
+          contents: "~/src/baton"
+        }
+      }
+
+      idleHead = frame : overviews.groupHead {
+        width: 100%,
+        height: 44px,
+        padding-top: 16px,
+        padding-left: 20px,
+        padding-bottom: 0px,
+        padding-right: 20px,
+
+        extra {
+          display: .none
+        }
+
+        lead {
+          label {
+            contents: "空闲"
+          }
+
+          count {
+            contents: "4"
+          }
+        }
+      }
+
+      idleRow1 = frame : threadListRowIdle {
+        width: 100%,
+
+        project {
+          projectMark {
+            display: .none
+          }
+
+          projectName {
+            display: .none
+          }
+        }
+
+        place {
+          contents: "MacBook Pro · Codex"
+        }
+
+        lead {
+          name {
+            contents: "修 Web 构建告警"
+          }
+        }
+
+        dir {
+          contents: "~/src/baton"
+        }
+      }
+
+      idleRow2 = frame : threadListRowIdle {
+        width: 100%,
+
+        lead {
+          name {
+            contents: "给 gateway 补重连日志"
+          }
+        }
+
+        dir {
+          contents: "D:\\src\\baton"
+        }
+
+        time {
+          contents: "昨天"
+        }
+      }
+
+      idleRow3 = frame : threadListRowIdle {
+        width: 100%,
+
+        project {
+          projectMark {
+            fill[0].color: c.hues.green,
+
+            initial {
+              contents: "交"
+            }
+          }
+
+          projectName {
+            contents: "交换机巡检"
+          }
+        }
+
+        place {
+          contents: "Ubuntu 开发机 · Kiro"
+        }
+
+        lead {
+          name {
+            contents: "核对 PICOS 版本"
+          }
+        }
+
+        dir {
+          contents: "~/src/netops"
+        }
+
+        time {
+          contents: "昨天"
+        }
+      }
+
+      idleRow4 = frame : threadListRowIdle {
+        width: 100%,
+
+        project {
+          projectMark {
+            display: .none
+          }
+
+          projectName {
+            display: .none
+          }
+        }
+
+        place {
+          contents: "MacBook Pro · Pi"
+        }
+
+        lead {
+          name {
+            contents: "写 batond 安装说明"
+          }
+        }
+
+        dir {
+          contents: "~/src/baton"
+        }
+
+        time {
+          contents: "3 天前"
+        }
+      }
+    }
+  }
+}
+
+// 打开详情：右侧是 Thread 详情面板，列表收起 Project 和目录两列
+@variant
+export threadsPageSplit = frame : threadsPage {
+  title: "Thread 页 / 打开详情",
+  left: 0px,
+  top: 1520px,
+  overrides: [insert(detail, after = threadsPage.main)],
+
+  main {
+    list {
+      runningRow {
+        fill[0].color: c.colors.selected,
+
+        project {
+          display: .none
+        }
+
+        dir {
+          display: .none
+        }
+      }
+
+      unknownRow {
+        project {
+          display: .none
+        }
+
+        dir {
+          display: .none
+        }
+      }
+
+      stoppedRow {
+        project {
+          display: .none
+        }
+
+        dir {
+          display: .none
+        }
+      }
+
+      kiroRow {
+        project {
+          display: .none
+        }
+
+        dir {
+          display: .none
+        }
+      }
+
+      waitingRow {
+        project {
+          display: .none
+        }
+
+        dir {
+          display: .none
+        }
+      }
+
+      idleRow1 {
+        project {
+          display: .none
+        }
+
+        dir {
+          display: .none
+        }
+      }
+
+      idleRow2 {
+        project {
+          display: .none
+        }
+
+        dir {
+          display: .none
+        }
+      }
+
+      idleRow3 {
+        project {
+          display: .none
+        }
+
+        dir {
+          display: .none
+        }
+      }
+
+      idleRow4 {
+        project {
+          display: .none
+        }
+
+        dir {
+          display: .none
+        }
+      }
+    }
+  }
+
+  // Thread 页没有可返回的概览，详情不显示返回
+  detail = frame : details.threadDetailRunning {
+    head {
+      lead {
+        back {
+          display: .none
+        }
+      }
+    }
+  }
+}

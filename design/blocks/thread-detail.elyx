@@ -8,6 +8,7 @@ import "controls/avatar.elyx" as avatars
 import "blocks/composer.elyx" as composers
 import "blocks/conversation.elyx" as conv
 import "blocks/attention-card.elyx" as attention
+import "blocks/banner.elyx" as banners
 
 // 附件：所在设备、路径、能否查看。附件指向登记目录里的文件时可以直接预览
 export attachmentRow = frame {
@@ -343,11 +344,26 @@ export threadTraceOffline = frame : threadTraceOpen {
   }
 }
 
+// 设备上的会话记录已删除：过程记录读不到，中心保存的回复和附件不受影响
+@variant
+export threadTraceMissing = frame : threadTraceOffline {
+  title: "Thread 过程记录 / 历史缺失",
+  top: 1180px,
+
+  logBody {
+    logSteps {
+      unavailable {
+        contents: "设备上的会话记录已删除"
+      }
+    }
+  }
+}
+
 // 执行中的一轮：过程记录展开显示，开头是已过的时间，下面是从设备推送的实时输出。实时输出只做展示，不保存到中心；
 // 断开后从设备补取，补不齐的地方标出缺口。这一轮结束后收起，换成从设备读取的过程记录
 export liveOutput = frame {
   title: "执行中",
-  top: 1190px,
+  top: 1260px,
   width: 392px,
   layout: {direction: .column, item-gap: 6px},
   children: [note, stream],
@@ -393,13 +409,104 @@ export liveOutput = frame {
         border: c.colors.codeBorder,
         corner-radius: 10px,
         padding: [10px, s.space.md],
-        children: output,
+        children: [output, gap, tail],
 
         output = text : t.mono {
           width: 100%,
           contents: "$ go test ./internal/gateway -run Reconnect -count=1\n=== RUN   TestReconnectAfterSleep\n    sleeping host for 180s…"
         }
+
+        gap = frame {
+          width: 100%,
+          display: .none,
+          layout: {align-items: .center, item-gap: 6px},
+          padding: [6px, 0px, 2px],
+          children: [gapGlyph, gapText],
+
+          gapGlyph = asset : icons.offline {
+            width: 13px,
+            height: 13px,
+            fill[0].color: c.colors.faint
+          }
+
+          gapText = text : t.caption {
+            contents: "连接中断，重连后从设备补取",
+            line-height: 1,
+            fill[0].color: c.colors.faint
+          }
+        }
+
+        tail = text : t.mono {
+          width: 100%,
+          display: .none,
+          contents: "    reconnected after 41.2s\n--- PASS: TestReconnectAfterSleep (221.07s)"
+        }
       }
+    }
+  }
+}
+
+// 实时输出中断：设备离线或连接断开。计时停在最后一次报告，不把过去的执行中当成当前事实
+@variant
+export liveOutputInterrupted = frame : liveOutput {
+  title: "执行中 / 输出中断",
+  top: 1440px,
+
+  note {
+    label {
+      fill[0].color: c.colors.muted,
+      contents: "14:32 后没有上报"
+    }
+
+    mark {
+      @with-variant(status.dotIdle)
+      dot {
+        left: .nil
+      }
+    }
+  }
+
+  stream {
+    rail {
+      lines {
+        gap {
+          display: .visible
+        }
+      }
+    }
+  }
+}
+
+// 重连后补不齐：设备只保留最近一段输出，缺掉的地方标出缺口
+@variant
+export liveOutputGap = frame : liveOutput {
+  title: "执行中 / 输出缺口",
+  top: 1630px,
+
+  stream {
+    rail {
+      lines {
+        gap {
+          gapText {
+            contents: "缺一段输出，设备上已不再保留"
+          }
+
+          display: .visible,
+
+          @with-variant(icons.dots)
+          gapGlyph {}
+        }
+
+        tail {
+          display: .visible
+        }
+      }
+    }
+  }
+
+  note {
+    label {
+      contents: "执行中 · 06:41"
     }
   }
 }
@@ -407,7 +514,7 @@ export liveOutput = frame {
 // 选中回复、文件预览或事项里的文字后出现，把文字和来源预填到主对话输入框
 export selectionMenu = frame {
   title: "选中文字后的菜单",
-  top: 1400px,
+  top: 1860px,
   layout: {align-items: .center},
   fill: c.colors.surface,
   border: c.colors.border,
@@ -589,7 +696,12 @@ export threadDetail = frame {
     width: 100%,
     layout: {direction: .column, item-gap: 10px},
     padding: [s.space.sm, s.space.xl, 14px],
-    children: [composer, context],
+    children: [notice, composer, context],
+
+    notice = frame : banners.banner {
+      width: 100%,
+      display: .none
+    }
 
     composer = frame : composers.threadComposer {
       width: 100%
@@ -687,6 +799,499 @@ export threadDetailRunning = frame : threadDetail {
 
     message2 {
       display: .visible
+    }
+  }
+}
+
+// 已请求停止：等设备确认，确认前状态仍是执行中。排队中的消息随停止一起撤回
+@variant
+export threadDetailStopping = frame : threadDetailRunning {
+  title: "Thread 详情面板 / 正在停止",
+  left: 1520px,
+  top: 0px,
+
+  footer {
+    @with-variant(composers.threadComposerStopping)
+    composer {}
+  }
+
+  body {
+    queued {
+      meta {
+        withdraw {
+          display: .none
+        }
+
+        metaText {
+          contents: "已随停止撤回"
+        }
+      }
+    }
+
+    live {
+      note {
+        label {
+          contents: "停止中 · 03:40"
+        }
+      }
+    }
+  }
+}
+
+// 执行中设备离线：标题栏写离线前的状态，实时输出停在最后一次报告，重连后补取
+@variant
+export threadDetailOffline = frame : threadDetailRunning {
+  title: "Thread 详情面板 / 执行中设备离线",
+  left: 2040px,
+  top: 0px,
+
+  body {
+    queued {
+      display: .none
+    }
+
+    @with-variant(liveOutputInterrupted)
+    live {}
+  }
+
+  footer {
+    notice {
+      copy {
+        detail {
+          contents: "这一轮可能仍在设备上执行，重连后补取输出。"
+        }
+
+        heading {
+          contents: "Windows 台式机离线"
+        }
+      }
+
+      display: .visible
+    }
+  }
+
+  head {
+    lead {
+      state {
+        stateText {
+          fill[0].color: c.colors.muted,
+          contents: "离线前执行中"
+        }
+
+        @with-variant(status.dotIdle)
+        mark {
+          left: .nil
+        }
+      }
+    }
+  }
+}
+
+// 已归档：不再接收消息，消息、回复和附件都保留
+@variant
+export threadDetailArchived = frame : threadDetail {
+  title: "Thread 详情面板 / 已归档",
+  left: 2560px,
+  top: 0px,
+
+  footer {
+    composer {
+      display: .none
+    }
+
+    notice {
+      action {
+        display: .none
+      }
+
+      copy {
+        detail {
+          contents: "不再接收消息，记录和附件都保留。"
+        }
+
+        heading {
+          contents: "已归档"
+        }
+      }
+
+      display: .visible,
+
+      @with-variant(icons.archive)
+      glyph {}
+    }
+  }
+
+  body {
+    item {
+      display: .none
+    }
+  }
+
+  head {
+    lead {
+      state {
+        stateText {
+          contents: "已归档"
+        }
+      }
+    }
+  }
+}
+
+// 等待设备：Thread 已保存，设备上线并同步后开始，没有期限
+@variant
+export threadDetailWaiting = frame : threadDetail {
+  title: "Thread 详情面板 / 等待设备",
+  left: 480px,
+  top: 1060px,
+
+  body {
+    item {
+      display: .none
+    }
+
+    reply1 {
+      display: .none
+    }
+
+    message1 {
+      line {
+        from {
+          display: .none
+        }
+
+        bubble {
+          content {
+            contents: "在 ~/src/baton 跑 go test ./internal/gateway -run Reconnect，让机器睡眠 1 分钟后唤醒，看能不能重新连上。"
+          }
+        }
+      }
+
+      meta {
+        metaText {
+          contents: "等待设备"
+        }
+
+        display: .visible
+      }
+    }
+  }
+
+  footer {
+    context {
+      dir {
+        dirName {
+          contents: "~/src/baton"
+        }
+      }
+
+      device {
+        deviceName {
+          contents: "MacBook Pro"
+        }
+      }
+    }
+
+    notice {
+      copy {
+        detail {
+          contents: "设备上线后开始，不会改派到其他设备。"
+        }
+
+        heading {
+          contents: "等待 MacBook Pro 上线"
+        }
+      }
+
+      display: .visible
+    }
+  }
+
+  head {
+    lead {
+      state {
+        stateText {
+          contents: "等待设备"
+        }
+
+        @with-variant(status.dotQueued)
+        mark {}
+      }
+
+      name {
+        contents: "在 MacBook 上跑重连测试"
+      }
+    }
+  }
+}
+
+// 状态未知：没能确认 Agent 是否收到最后一条消息。Baton 不自动重发，看过情况后可以继续发
+@variant
+export threadDetailUnknown = frame : threadDetail {
+  title: "Thread 详情面板 / 状态未知",
+  left: 1000px,
+  top: 1060px,
+
+  footer {
+    @with-variant(banners.bannerAttention)
+    notice {
+      action {
+        label {
+          contents: "查看过程"
+        }
+      }
+
+      copy {
+        detail {
+          contents: "设备上的 Worker 重启过，没能确认。Baton 不会自动重发。"
+        }
+
+        heading {
+          contents: "不确定 Codex 是否收到这条消息"
+        }
+      }
+
+      top: .nil,
+      display: .visible
+    }
+  }
+
+  body {
+    message2 {
+      meta {
+        metaText {
+          contents: "不确定是否收到"
+        }
+
+        display: .visible,
+
+        @with-variant(icons.alert)
+        metaIcon {}
+      }
+
+      display: .visible
+    }
+
+    item {
+      display: .none
+    }
+
+    reply1 {
+      attachments {
+        second {
+          display: .none
+        }
+      }
+    }
+  }
+
+  head {
+    lead {
+      state {
+        stateText {
+          fill[0].color: c.colors.attentionText,
+          contents: "状态未知"
+        }
+
+        @with-variant(status.dotAttention)
+        mark {}
+      }
+    }
+  }
+}
+
+// 已停止且可以恢复：写明原因，下一条消息恢复原会话，Thread ID 不变
+@variant
+export threadDetailStopped = frame : threadDetail {
+  title: "Thread 详情面板 / 已停止",
+  left: 1520px,
+  top: 1060px,
+
+  footer {
+    notice {
+      action {
+        display: .none
+      }
+
+      copy {
+        detail {
+          contents: "已发生的修改不会回滚。"
+        }
+
+        heading {
+          contents: "超过 2 小时，已停止"
+        }
+      }
+
+      display: .visible,
+
+      @with-variant(icons.stop)
+      glyph {}
+    }
+
+    composer {
+      prompt {
+        contents: "发消息恢复原会话"
+      }
+    }
+  }
+
+  head {
+    lead {
+      state {
+        stateText {
+          fill[0].color: c.colors.danger,
+          contents: "已停止"
+        }
+
+        @with-variant(status.dotStopped)
+        mark {}
+      }
+    }
+  }
+
+  body {
+    item {
+      display: .none
+    }
+
+    reply1 {
+      attachments {
+        second {
+          display: .none
+        }
+      }
+    }
+
+    message2 {
+      display: .visible
+    }
+  }
+}
+
+// 无法恢复：写明原因，例如设备上的会话记录已删除或 Agent 不支持恢复。不伪装成原会话，横幅没有动作
+@variant
+export threadDetailUnresumable = frame : threadDetailStopped {
+  title: "Thread 详情面板 / 无法恢复",
+  left: 2040px,
+  top: 1060px,
+
+  footer {
+    composer {
+      display: .none
+    }
+
+    notice {
+      copy {
+        detail {
+          contents: "设备上的会话记录已删除。"
+        }
+
+        heading {
+          contents: "无法恢复原会话"
+        }
+      }
+
+      @with-variant(icons.alert)
+      glyph {}
+    }
+  }
+
+  body {
+    message2 {
+      display: .none
+    }
+
+    reply1 {
+      @with-variant(threadTraceMissing)
+      trace {}
+    }
+  }
+}
+
+// 没能启动：目录不存在或 Agent 不可用。写明原因，不改派到其他设备
+@variant
+export threadDetailFailed = frame : threadDetail {
+  title: "Thread 详情面板 / 没能启动",
+  left: 2560px,
+  top: 1060px,
+
+  footer {
+    composer {
+      display: .none
+    }
+
+    context {
+      dir {
+        dirName {
+          contents: "~/src/baton-old"
+        }
+      }
+
+      device {
+        deviceName {
+          contents: "Ubuntu 开发机"
+        }
+      }
+    }
+
+    notice {
+      copy {
+        detail {
+          contents: "目录 ~/src/baton-old 不存在。"
+        }
+
+        heading {
+          contents: "没能启动 Codex"
+        }
+      }
+
+      display: .visible,
+
+      @with-variant(icons.alert)
+      glyph {}
+    }
+  }
+
+  head {
+    lead {
+      state {
+        stateText {
+          fill[0].color: c.colors.danger,
+          contents: "已停止"
+        }
+
+        @with-variant(status.dotStopped)
+        mark {}
+      }
+
+      name {
+        contents: "在 Ubuntu 上跑单元测试"
+      }
+    }
+  }
+
+  body {
+    item {
+      display: .none
+    }
+
+    reply1 {
+      display: .none
+    }
+
+    message1 {
+      line {
+        from {
+          display: .none
+        }
+
+        bubble {
+          content {
+            contents: "在 ~/src/baton-old 跑一遍单元测试。"
+          }
+        }
+      }
     }
   }
 }

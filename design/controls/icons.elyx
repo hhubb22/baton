@@ -9,12 +9,14 @@ import "resources/assets/chevron-right.svg" as chevronRightAsset
 import "resources/assets/clock.svg" as clockAsset
 import "resources/assets/close.svg" as closeAsset
 import "resources/assets/commit.svg" as commitAsset
+import "resources/assets/copy.svg" as copyAsset
 import "resources/assets/device.svg" as deviceAsset
 import "resources/assets/dots.svg" as dotsAsset
 import "resources/assets/external.svg" as externalAsset
 import "resources/assets/file.svg" as fileAsset
 import "resources/assets/folder.svg" as folderAsset
 import "resources/assets/inbox.svg" as inboxAsset
+import "resources/assets/lock.svg" as lockAsset
 import "resources/assets/laptop.svg" as laptopAsset
 import "resources/assets/memory.svg" as memoryAsset
 import "resources/assets/message.svg" as messageAsset
@@ -296,4 +298,20 @@ export sparkle = asset : glyph {
   left: 112px,
   top: 280px,
   contents: sparkleAsset
+}
+
+@variant
+export copy = asset : glyph {
+  title: "copy",
+  left: 168px,
+  top: 280px,
+  contents: copyAsset
+}
+
+@variant
+export lock = asset : glyph {
+  title: "lock",
+  left: 224px,
+  top: 280px,
+  contents: lockAsset
 }

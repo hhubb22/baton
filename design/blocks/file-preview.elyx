@@ -1,0 +1,538 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+import "controls/icons.elyx" as icons
+import "controls/button.elyx" as buttons
+
+// 目录里的一项：图标、名称，右侧是大小
+export entryRow = frame {
+  title: "目录项 / 文件",
+  left: 0px,
+  top: 0px,
+  width: 232px,
+  height: s.size.compact,
+  layout: {align-items: .center, item-gap: s.space.sm},
+  corner-radius: s.radius.sm,
+  padding: [0px, s.space.sm],
+  children: [glyph, name, size],
+
+  glyph = asset : icons.file {
+    width: 14px,
+    height: 14px,
+    fill[0].color: c.colors.faint
+  }
+
+  name = text : t.mono {
+    width: 100%,
+    contents: "gateway.go",
+    line-height: 1
+  }
+
+  size = text : t.caption {
+    contents: "6.1 KB",
+    line-height: 1,
+    fill[0].color: c.colors.faint
+  }
+}
+
+@variant
+export entryFolder = frame : entryRow {
+  title: "目录项 / 目录",
+  left: 0px,
+  top: 40px,
+
+  size {
+    display: .none
+  }
+
+  name {
+    contents: "testdata"
+  }
+
+  @with-variant(icons.folder)
+  glyph {}
+}
+
+@variant
+export entrySelected = frame : entryRow {
+  title: "目录项 / 当前文件",
+  left: 0px,
+  top: 80px,
+  fill[0].color: c.colors.selected,
+
+  name {
+    contents: "reconnect_test.go"
+  }
+
+  size {
+    contents: "18.2 KB"
+  }
+}
+
+// 文件预览：只能浏览设备上登记的目录，左边是当前目录，右边是文本预览。
+// 预览从设备实时读取，设备离线时不显示旧内容
+export filePreview = frame {
+  title: "文件预览",
+  left: 0px,
+  top: 160px,
+  width: 960px,
+  layout: {direction: .column},
+  fill: c.colors.surface,
+  border: c.colors.border,
+  shadow: [
+    {
+      drop-shadow: {
+        color: rgb(0%, 0%, 0%, 12%),
+        offset: point(0px, 12px),
+        blur-radius: 32px
+      }
+    },
+    {
+      drop-shadow: {
+        color: rgb(0%, 0%, 0%, 6%),
+        offset: point(0px, 2px),
+        blur-radius: 6px
+      }
+    }
+  ],
+  corner-radius: 14px,
+  children: [head, rule, body],
+
+  head = frame {
+    width: 100%,
+    height: 60px,
+    layout: {align-items: .center, item-gap: s.space.sm},
+    padding: [0px, s.space.md, 0px, s.space.xl],
+    children: [location, copy, close],
+
+    location = frame {
+      width: 100%,
+      layout: {direction: .column, item-gap: s.space.xxs},
+      children: [path, meta],
+
+      path = text : t.mono {
+        contents: "internal/gateway/reconnect_test.go",
+        font-size: 13,
+        fill[0].color: c.colors.text
+      }
+
+      meta = text : t.caption {
+        contents: "Windows 台式机 · D:\\src\\baton-ps160 · 18.2 KB",
+        fill[0].color: c.colors.faint
+      }
+    }
+
+    copy = frame : buttons.iconButton {
+      @with-variant(icons.copy)
+      glyph {}
+    }
+
+    close = frame : buttons.iconButton {
+      @with-variant(icons.close)
+      glyph {}
+    }
+  }
+
+  rule = frame {
+    width: 100%,
+    height: 1px,
+    fill: c.colors.borderSoft
+  }
+
+  body = frame {
+    width: 100%,
+    height: 520px,
+    layout: {direction: .row},
+    children: [tree, divider, preview, empty],
+
+    tree = frame {
+      width: 248px,
+      height: 100%,
+      layout: {direction: .column, item-gap: 1px},
+      fill: c.colors.panel,
+      padding: s.space.sm,
+      children: [
+        crumb,
+        up,
+        testdata,
+        client,
+        gateway,
+        reconnect,
+        current,
+        session
+      ],
+
+      crumb = frame {
+        width: 100%,
+        height: s.size.compact,
+        layout: {align-items: .center, item-gap: s.space.xs},
+        padding: [0px, s.space.sm],
+        children: [root, slash, folder],
+
+        root = text : t.caption {
+          contents: "baton-ps160",
+          line-height: 1,
+          fill[0].color: c.colors.faint
+        }
+
+        slash = text : t.caption {
+          contents: "/",
+          line-height: 1,
+          fill[0].color: c.colors.faint
+        }
+
+        folder = text : t.captionMedium {
+          contents: "internal/gateway",
+          line-height: 1,
+          fill[0].color: c.colors.muted
+        }
+      }
+
+      up = frame : entryFolder {
+        width: 100%,
+
+        name {
+          contents: ".."
+        }
+
+        @with-variant(icons.chevronLeft)
+        glyph {}
+      }
+
+      testdata = frame : entryFolder {
+        width: 100%
+      }
+
+      client = frame : entryRow {
+        width: 100%,
+
+        name {
+          contents: "client.go"
+        }
+
+        size {
+          contents: "4.8 KB"
+        }
+      }
+
+      gateway = frame : entryRow {
+        width: 100%
+      }
+
+      reconnect = frame : entryRow {
+        width: 100%,
+
+        name {
+          contents: "reconnect.go"
+        }
+
+        size {
+          contents: "9.3 KB"
+        }
+      }
+
+      current = frame : entrySelected {
+        width: 100%
+      }
+
+      session = frame : entryRow {
+        width: 100%,
+
+        name {
+          contents: "session.go"
+        }
+
+        size {
+          contents: "7.4 KB"
+        }
+      }
+    }
+
+    divider = frame {
+      width: 1px,
+      height: 100%,
+      fill: c.colors.borderSoft
+    }
+
+    preview = frame {
+      width: 100%,
+      height: 100%,
+      layout: {direction: .column, item-gap: s.space.md},
+      padding: [s.space.lg, s.space.xl],
+      children: [code, cut],
+
+      code = frame {
+        width: 100%,
+        layout: {item-gap: s.space.lg},
+        children: [gutter, source],
+
+        gutter = text : t.mono {
+          contents: "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21",
+          line-height: 1.7,
+          align: .right,
+          fill[0].color: c.colors.faint
+        }
+
+        source = text : t.mono {
+          width: 100%,
+          contents: "package gateway\n\nimport (\n    \"context\"\n    \"testing\"\n    \"time\"\n)\n\n// The node must reconnect within a minute after waking up.\nfunc TestReconnectAfterSleep(t *testing.T) {\n    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)\n    defer cancel()\n\n    node := startTestNode(t, ctx)\n    node.Suspend(60 * time.Second)\n\n    if err := node.WaitConnected(ctx, time.Minute); err != nil {\n        t.Fatalf(\"reconnect: %v\", err)\n    }\n    t.Logf(\"reconnected after %s\", node.Downtime())\n}",
+          line-height: 1.7,
+          fill[0].color: c.colors.text
+        }
+      }
+
+      cut = frame {
+        width: 100%,
+        display: .none,
+        layout: {align-items: .center, item-gap: s.space.md},
+        children: [lineLeft, cutText, lineRight],
+
+        lineLeft = frame {
+          width: 100%,
+          height: 1px,
+          fill: c.colors.border
+        }
+
+        cutText = text : t.caption {
+          contents: "只显示前 64 KiB",
+          fill[0].color: c.colors.muted
+        }
+
+        lineRight = frame {
+          width: 100%,
+          height: 1px,
+          fill: c.colors.border
+        }
+      }
+    }
+
+    empty = frame {
+      width: 100%,
+      height: 100%,
+      display: .none,
+      layout: {
+        direction: .column,
+        justify-content: .center,
+        align-items: .center,
+        item-gap: s.space.sm
+      },
+      children: [emptyGlyph, emptyHeading, emptyDetail, emptyAction],
+
+      emptyGlyph = asset : icons.offline {
+        width: 20px,
+        height: 20px,
+        fill[0].color: c.colors.faint
+      }
+
+      emptyHeading = text : t.label {
+        contents: "Windows 台式机离线，暂不可查看"
+      }
+
+      emptyDetail = text : t.caption {
+        contents: "设备上线后重新读取。",
+        fill[0].color: c.colors.muted
+      }
+
+      emptyAction = frame : buttons.smallSecondary {
+        label {
+          contents: "重试"
+        }
+      }
+    }
+  }
+}
+
+// 文件超过 64 KiB 时只取开头，末尾标出截断
+@variant
+export filePreviewTruncated = frame : filePreview {
+  title: "文件预览 / 已截断",
+  left: 1200px,
+  top: 160px,
+
+  body {
+    tree {
+      gateway {
+        fill[0].color: c.colors.selected,
+
+        name {
+          contents: "gateway-soak.log"
+        }
+
+        size {
+          contents: "2.4 MB"
+        }
+      }
+
+      testdata {
+        display: .none
+      }
+
+      current {
+        display: .none
+      }
+
+      crumb {
+        folder {
+          contents: "logs"
+        }
+      }
+
+      client {
+        name {
+          contents: "gateway-smoke.log"
+        }
+
+        size {
+          contents: "38 KB"
+        }
+      }
+
+      reconnect {
+        name {
+          contents: "node-a.log"
+        }
+
+        size {
+          contents: "412 KB"
+        }
+      }
+
+      session {
+        name {
+          contents: "node-b.log"
+        }
+
+        size {
+          contents: "398 KB"
+        }
+      }
+    }
+
+    preview {
+      code {
+        gutter {
+          contents: "1806\n1807\n1808\n1809\n1810\n1811\n1812\n1813\n1814\n1815\n1816\n1817\n1818\n1819\n1820\n1821\n1822\n1823\n1824\n1825"
+        }
+
+        source {
+          contents: "14:31:02.118 node=win-desktop conn=open seq=4810\n14:31:12.120 node=win-desktop heartbeat ok rtt=18ms\n14:31:22.121 node=win-desktop heartbeat ok rtt=17ms\n14:31:32.125 node=win-desktop heartbeat ok rtt=21ms\n14:31:41.904 node=win-desktop conn=closed reason=eof\n14:31:42.410 node=win-desktop reconnect attempt=1 backoff=0.5s\n14:31:43.415 node=win-desktop reconnect attempt=2 backoff=1s\n14:31:45.420 node=win-desktop reconnect attempt=3 backoff=2s\n14:31:49.428 node=win-desktop reconnect attempt=4 backoff=4s\n14:31:57.433 node=win-desktop reconnect attempt=5 backoff=8s\n14:32:13.441 node=win-desktop reconnect attempt=6 backoff=16s\n14:32:23.102 node=win-desktop conn=open seq=4811\n14:32:23.140 node=win-desktop sync start pending=3\n14:32:23.388 node=win-desktop sync done replayed=3\n14:32:33.105 node=win-desktop heartbeat ok rtt=19ms\n14:32:43.107 node=win-desktop heartbeat ok rtt=18ms\n14:32:53.110 node=win-desktop heartbeat ok rtt=20ms\n14:33:03.112 node=win-desktop heartbeat ok rtt=18ms\n14:33:13.115 node=win-desktop heartbeat ok rtt=22ms\n14:33:23.117 node=win-desktop heartbeat ok rtt=19ms"
+        }
+      }
+
+      cut {
+        display: .visible
+      }
+    }
+  }
+
+  head {
+    location {
+      path {
+        contents: "logs/gateway-soak.log"
+      }
+
+      meta {
+        contents: "Windows 台式机 · D:\\src\\baton-ps160 · 2.4 MB"
+      }
+    }
+  }
+}
+
+// 设备离线：目录和内容都不显示，不用缓存
+@variant
+export filePreviewOffline = frame : filePreview {
+  title: "文件预览 / 设备离线",
+  left: 0px,
+  top: 900px,
+
+  head {
+    copy {
+      display: .none
+    }
+
+    location {
+      meta {
+        contents: "Windows 台式机 · D:\\src\\baton-ps160"
+      }
+    }
+  }
+
+  body {
+    tree {
+      display: .none
+    }
+
+    divider {
+      display: .none
+    }
+
+    preview {
+      display: .none
+    }
+
+    empty {
+      display: .visible
+    }
+  }
+}
+
+// 越界：路径或链接解析后落在登记目录之外，拒绝读取
+@variant
+export filePreviewDenied = frame : filePreview {
+  title: "文件预览 / 不在登记目录内",
+  left: 1200px,
+  top: 900px,
+
+  body {
+    empty {
+      emptyAction {
+        label {
+          contents: "返回上一级"
+        }
+      }
+
+      emptyDetail {
+        contents: "这个链接指向 C:\\Users\\dev\\certs，只能浏览设备上登记的目录。"
+      }
+
+      emptyHeading {
+        contents: "不在登记的目录内"
+      }
+
+      display: .visible,
+
+      @with-variant(icons.lock)
+      emptyGlyph {}
+    }
+
+    tree {
+      current {
+        fill[0].color: c.colors.transparent
+      }
+
+      testdata {
+        fill[0].color: c.colors.selected
+      }
+    }
+
+    preview {
+      display: .none
+    }
+  }
+
+  head {
+    copy {
+      display: .none
+    }
+
+    location {
+      meta {
+        contents: "Windows 台式机 · D:\\src\\baton-ps160"
+      }
+
+      path {
+        contents: "internal/gateway/testdata/certs"
+      }
+    }
+  }
+}

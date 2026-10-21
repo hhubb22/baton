@@ -4,7 +4,6 @@ import "foundations/typography.elyx" as t
 import "controls/icons.elyx" as icons
 import "controls/button.elyx" as buttons
 import "controls/status.elyx" as status
-import "controls/badge.elyx" as badges
 import "controls/tabs.elyx" as tabs
 
 // 概览里的 Thread 行：状态点、标题（第一条消息的开头）、最后活动时间；第二行写设备、Agent 和目录名
@@ -46,7 +45,7 @@ export threadRow = frame {
     width: 100%,
     layout: {align-items: .center, item-gap: 6px},
     padding: [0px, 0px, 0px, 14px],
-    children: [place, dir, byMe],
+    children: [place, dir],
 
     place = text : t.caption {
       contents: "Windows 台式机 · Codex ·",
@@ -58,20 +57,6 @@ export threadRow = frame {
       font-size: 11,
       font-family: "Paper Mono",
       fill[0].color: c.colors.faint
-    }
-
-    byMe = frame : badges.tag {
-      height: 16px,
-      display: .none,
-      padding-top: 0px,
-      padding-left: 4px,
-      padding-bottom: 0px,
-      padding-right: 4px,
-
-      value {
-        contents: "我开的",
-        font-size: 10
-      }
     }
   }
 }
@@ -368,10 +353,6 @@ export overview = frame {
         dir {
           contents: "baton"
         }
-
-        byMe {
-          display: .visible
-        }
       }
     }
 
@@ -528,10 +509,10 @@ export overviewMemory = frame : overview {
       insert(mem3, after = mem2),
       insert(mem4, after = mem3),
       insert(addMemory, after = mem4),
-      remove(overview.body.recentHead),
-      remove(overview.body.queuedHead),
       remove(overview.body.recentMore),
       remove(overview.body.recentRow1),
+      remove(overview.body.recentHead),
+      remove(overview.body.queuedHead),
       remove(overview.body.activeHead),
       remove(overview.body.activeRow1),
       remove(overview.body.activeRow2),

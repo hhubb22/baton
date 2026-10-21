@@ -36,7 +36,7 @@ export tabIdle = frame : tab {
   }
 }
 
-// 分段切换：胶囊底，选中项白底浮起。输入区用它切「发消息」和「新建 Thread」，Thread 输入区用它切「排队」和「插入」
+// 分段切换：胶囊底，选中项白底浮起。Thread 输入区用它切「排队」和「插入」
 export segmented = frame {
   title: "分段切换",
   top: 64px,
@@ -72,7 +72,7 @@ export segmented = frame {
     children: firstLabel,
 
     firstLabel = text : t.label {
-      contents: "发消息",
+      contents: "排队",
       font-size: 12,
       line-height: 1
     }
@@ -86,7 +86,7 @@ export segmented = frame {
     children: secondLabel,
 
     secondLabel = text : t.label {
-      contents: "新建 Thread",
+      contents: "插入",
       font-size: 12,
       line-height: 1,
       fill[0].color: c.colors.muted
@@ -116,8 +116,8 @@ export segmentedSecond = frame : segmented {
   }
 
   first {
-    shadow[0]: .nil,
     shadow[1]: .nil,
+    shadow[0]: .nil,
     fill[0]: .nil,
 
     firstLabel {

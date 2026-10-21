@@ -5,7 +5,6 @@ import "controls/icons.elyx" as icons
 import "controls/status.elyx" as status
 import "blocks/project-header.elyx" as headers
 import "blocks/conversation.elyx" as conv
-import "blocks/composer.elyx" as composers
 import "blocks/overview.elyx" as overviews
 import "blocks/banner.elyx" as banners
 
@@ -342,7 +341,7 @@ attention = frame : page.projectPage {
 
 paused = frame : page.projectPage {
   title: "Project · 已暂停",
-  caption: "暂停后 Project Agent 不再启动，Thread 照常可用。用户仍可以新建 Thread 或直接给 Thread 发消息；自己开的 Thread 不进主对话，只在概览里标「我开的」。",
+  caption: "暂停后 Project Agent 不再启动，Thread 照常可用。用户仍可以直接给 Thread 发消息；主对话里的消息先保存，恢复后再处理。",
   left: 5184px,
   top: 0px,
 
@@ -378,12 +377,7 @@ paused = frame : page.projectPage {
 
   main {
     dock {
-      overrides: [insert(pauseBanner, after = .nil)],
-
-      @with-variant(composers.composerNewThread)
-      composer {
-        top: .nil
-      }
+      overrides: [insert(pauseBanner, after = .nil)]
     }
 
     transcript {

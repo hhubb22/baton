@@ -1,0 +1,495 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+import "controls/icons.elyx" as icons
+import "controls/status.elyx" as status
+
+// 菜单里的一项：可选的状态点、名称、右侧浅色说明和当前选中
+export menuOption = frame {
+  title: "菜单项",
+  left: 0px,
+  top: 0px,
+  width: 288px,
+  height: s.size.control,
+  layout: {align-items: .center, item-gap: s.space.sm},
+  corner-radius: s.radius.sm,
+  padding: [0px, s.space.sm],
+  children: [mark, name, note, picked],
+
+  mark = shape : status.dotOnline {
+    display: .none
+  }
+
+  name = text : t.small {
+    width: 100%,
+    contents: "baton",
+    line-height: 1
+  }
+
+  note = text : t.caption {
+    contents: "MacBook Pro",
+    line-height: 1,
+    fill[0].color: c.colors.faint
+  }
+
+  picked = asset : icons.check {
+    width: 14px,
+    height: 14px,
+    display: .none,
+    fill[0].color: c.colors.text
+  }
+}
+
+// 设备上发现的仓库：右侧是路径
+@variant
+export menuOptionRepo = frame : menuOption {
+  title: "菜单项 / 仓库",
+  left: 0px,
+  top: 48px,
+
+  note {
+    contents: "~/src/elyx",
+    font-size: 11,
+    font-family: "Paper Mono"
+  }
+
+  name {
+    contents: "elyx"
+  }
+}
+
+// 菜单分组的标题：最近、设备名或 Agent 名。设备分组带连接状态，离线时写明
+export menuHeading = frame {
+  title: "菜单分组标题",
+  left: 0px,
+  top: 96px,
+  width: 288px,
+  height: 28px,
+  layout: {align-items: .center, item-gap: s.space.sm},
+  padding: [6px, s.space.sm, 0px],
+  children: [mark, label, note],
+
+  mark = shape : status.dotOnline {
+    display: .none
+  }
+
+  label = text : t.captionMedium {
+    width: 100%,
+    contents: "最近",
+    line-height: 1,
+    fill[0].color: c.colors.faint
+  }
+
+  note = text : t.caption {
+    display: .none,
+    contents: "离线",
+    line-height: 1,
+    fill[0].color: c.colors.faint
+  }
+}
+
+// 菜单面板：白底、外框和浅阴影
+export menu = frame {
+  title: "菜单",
+  left: 0px,
+  top: 144px,
+  width: 304px,
+  layout: {direction: .column, item-gap: 1px},
+  fill: c.colors.surface,
+  border: c.colors.border,
+  shadow: {
+    drop-shadow: {
+      color: rgb(0%, 0%, 0%, 10%),
+      offset: point(0px, 8px),
+      blur-radius: 24px
+    }
+  },
+  corner-radius: s.radius.md,
+  padding: s.space.xs
+}
+
+// 分组之间的细线
+export menuRule = frame {
+  title: "菜单分隔线",
+  left: 0px,
+  top: 216px,
+  width: 288px,
+  layout: {direction: .column},
+  padding: [s.space.xs, 0px],
+  children: line,
+
+  line = frame {
+    width: 100%,
+    height: 1px,
+    fill: c.colors.borderSoft
+  }
+}
+
+// 位置菜单：先列最近用过的位置，再按设备列出发现的仓库，最后可以在登记目录里选其他目录。
+// 离线设备照样可选，选中后 Thread 等它上线再开始
+export locationMenu = frame : menu {
+  title: "位置菜单",
+  left: 0px,
+  top: 280px,
+  overrides: [
+    insert(recentHead, after = .nil),
+    insert(recent1, after = recentHead),
+    insert(recent2, after = recent1),
+    insert(rule1, after = recent2),
+    insert(macHead, after = rule1),
+    insert(mac1, after = macHead),
+    insert(mac2, after = mac1),
+    insert(windowsHead, after = mac2),
+    insert(windows1, after = windowsHead),
+    insert(ubuntuHead, after = windows1),
+    insert(ubuntu1, after = ubuntuHead),
+    insert(rule2, after = ubuntu1),
+    insert(other, after = rule2)
+  ],
+
+  recentHead = frame : menuHeading {
+    width: 100%
+  }
+
+  recent1 = frame : menuOption {
+    width: 100%,
+    fill[0].color: c.colors.hover,
+
+    mark {
+      display: .visible
+    }
+
+    picked {
+      display: .visible
+    }
+  }
+
+  recent2 = frame : menuOption {
+    width: 100%,
+
+    note {
+      contents: "Windows 台式机"
+    }
+
+    name {
+      contents: "baton-ps160"
+    }
+
+    mark {
+      display: .visible
+    }
+  }
+
+  rule1 = frame : menuRule {
+    width: 100%
+  }
+
+  macHead = frame : menuHeading {
+    width: 100%,
+
+    label {
+      contents: "MacBook Pro"
+    }
+
+    mark {
+      display: .visible
+    }
+  }
+
+  mac1 = frame : menuOptionRepo {
+    width: 100%
+  }
+
+  mac2 = frame : menuOptionRepo {
+    width: 100%,
+
+    name {
+      contents: "dotfiles"
+    }
+
+    note {
+      contents: "~/dotfiles"
+    }
+  }
+
+  windowsHead = frame : menuHeading {
+    width: 100%,
+
+    label {
+      contents: "Windows 台式机"
+    }
+
+    mark {
+      display: .visible
+    }
+  }
+
+  windows1 = frame : menuOptionRepo {
+    width: 100%,
+
+    name {
+      contents: "baton"
+    }
+
+    note {
+      contents: "D:\\src\\baton"
+    }
+  }
+
+  ubuntuHead = frame : menuHeading {
+    width: 100%,
+
+    label {
+      contents: "Ubuntu 开发机"
+    }
+
+    note {
+      display: .visible
+    }
+
+    @with-variant(status.dotIdle)
+    mark {
+      display: .visible
+    }
+  }
+
+  ubuntu1 = frame : menuOptionRepo {
+    width: 100%,
+
+    name {
+      contents: "baton"
+    }
+
+    note {
+      contents: "~/work/baton"
+    }
+  }
+
+  rule2 = frame : menuRule {
+    width: 100%
+  }
+
+  other = frame : menuOption {
+    width: 100%,
+
+    name {
+      fill[0].color: c.colors.muted,
+      contents: "其他目录…"
+    }
+
+    note {
+      display: .none
+    }
+  }
+}
+
+// 模型菜单：按 Agent 分组，只列这个位置的设备上已接入的 Agent。选模型就选定了 Agent
+export modelMenu = frame : menu {
+  title: "模型菜单",
+  left: 400px,
+  top: 280px,
+  width: 240px,
+  overrides: [
+    insert(codexHead, after = .nil),
+    insert(codex1, after = codexHead),
+    insert(codex2, after = codex1),
+    insert(kiroHead, after = codex2),
+    insert(kiro1, after = kiroHead),
+    insert(kiro2, after = kiro1),
+    insert(piHead, after = kiro2),
+    insert(pi1, after = piHead),
+    insert(pi2, after = pi1)
+  ],
+
+  codexHead = frame : menuHeading {
+    width: 100%,
+
+    label {
+      contents: "Codex"
+    }
+  }
+
+  codex1 = frame : menuOption {
+    width: 100%,
+    fill[0].color: c.colors.hover,
+
+    note {
+      display: .none
+    }
+
+    name {
+      contents: "gpt-6.1-sol"
+    }
+
+    picked {
+      display: .visible
+    }
+  }
+
+  codex2 = frame : menuOption {
+    width: 100%,
+
+    note {
+      display: .none
+    }
+
+    name {
+      contents: "gpt-6.1-mini"
+    }
+  }
+
+  kiroHead = frame : menuHeading {
+    width: 100%,
+
+    label {
+      contents: "Kiro"
+    }
+  }
+
+  kiro1 = frame : menuOption {
+    width: 100%,
+
+    note {
+      display: .none
+    }
+
+    name {
+      contents: "auto"
+    }
+  }
+
+  kiro2 = frame : menuOption {
+    width: 100%,
+
+    note {
+      display: .none
+    }
+
+    name {
+      contents: "claude-sonnet-5.5"
+    }
+  }
+
+  piHead = frame : menuHeading {
+    width: 100%,
+
+    label {
+      contents: "Pi"
+    }
+  }
+
+  pi1 = frame : menuOption {
+    width: 100%,
+
+    note {
+      display: .none
+    }
+
+    name {
+      contents: "claude-opus-5.5"
+    }
+  }
+
+  pi2 = frame : menuOption {
+    width: 100%,
+
+    note {
+      display: .none
+    }
+
+    name {
+      contents: "gpt-6.1-sol"
+    }
+  }
+}
+
+// Thread 里的模型菜单：只列这个 Thread 的 Agent 的模型，不分组。新的一轮从选中的模型开始
+export threadModelMenu = frame : menu {
+  title: "Thread 模型菜单",
+  left: 720px,
+  top: 280px,
+  width: 240px,
+  overrides: [
+    insert(option1, after = .nil),
+    insert(option2, after = option1),
+    insert(option3, after = option2)
+  ],
+
+  option1 = frame : menuOption {
+    width: 100%,
+    fill[0].color: c.colors.hover,
+
+    note {
+      display: .none
+    }
+
+    name {
+      contents: "gpt-6.1-sol"
+    }
+
+    picked {
+      display: .visible
+    }
+  }
+
+  option2 = frame : menuOption {
+    width: 100%,
+
+    note {
+      display: .none
+    }
+
+    name {
+      contents: "gpt-6.1-mini"
+    }
+  }
+
+  option3 = frame : menuOption {
+    width: 100%,
+
+    note {
+      display: .none
+    }
+
+    name {
+      contents: "gpt-6.1"
+    }
+  }
+}
+
+// Agent 不支持中途换模型：只显示当前模型，下面写原因
+export threadModelMenuFixed = frame : menu {
+  title: "Thread 模型菜单 / 不能换",
+  left: 1040px,
+  top: 280px,
+  width: 240px,
+  overrides: [insert(current, after = .nil), insert(reason, after = current)],
+
+  current = frame : menuOption {
+    width: 100%,
+
+    note {
+      display: .none
+    }
+
+    name {
+      contents: "claude-sonnet-5.5"
+    }
+
+    picked {
+      display: .visible
+    }
+  }
+
+  reason = frame {
+    width: 100%,
+    padding: [6px, s.space.sm, s.space.xs],
+    children: reasonText,
+
+    reasonText = text : t.caption {
+      width: 100%,
+      contents: "Kiro 不支持中途换模型",
+      fill[0].color: c.colors.faint
+    }
+  }
+}

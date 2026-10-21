@@ -99,7 +99,7 @@ export settingRow = frame {
 
     rowText = text : t.caption {
       width: 100%,
-      contents: "Project Agent 不再启动，Thread 照常可用。暂停期间你仍可以新建 Thread、给 Thread 发消息和处理事项，产生的输入都会保存。",
+      contents: "Project Agent 不再启动，Thread 照常可用。暂停期间你仍可以给 Thread 发消息和处理事项，产生的输入都会保存。",
       fill[0].color: c.colors.muted
     }
   }

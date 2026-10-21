@@ -148,13 +148,13 @@ created = frame : page.projectPage {
       overrides: [
         insert(noTasks, after = .nil),
         remove(overviews.overview.body.recentHead),
-        remove(overviews.overview.body.recentRow2),
-        remove(overviews.overview.body.queuedRow),
         remove(overviews.overview.body.queuedHead),
         remove(overviews.overview.body.activeRow2),
         remove(overviews.overview.body.recentMore),
-        remove(overviews.overview.body.activeHead),
         remove(overviews.overview.body.activeRow1),
+        remove(overviews.overview.body.recentRow2),
+        remove(overviews.overview.body.queuedRow),
+        remove(overviews.overview.body.activeHead),
         remove(overviews.overview.body.recentRow1),
         remove(overviews.overview.body.needsRow),
         remove(overviews.overview.body.needsHead)
@@ -209,11 +209,11 @@ created = frame : page.projectPage {
       overrides: [
         insert(empty, after = .nil),
         remove(page.projectPage.main.transcript.typing),
+        remove(page.projectPage.main.transcript.user1),
         remove(page.projectPage.main.transcript.agent0),
-        remove(page.projectPage.main.transcript.day),
         remove(page.projectPage.main.transcript.user0),
         remove(page.projectPage.main.transcript.agent1),
-        remove(page.projectPage.main.transcript.user1)
+        remove(page.projectPage.main.transcript.day)
       ],
       layout.justify-content: .center
     }
@@ -309,7 +309,7 @@ created = frame : page.projectPage {
 
   noTasks = text : t.small {
     width: 100%,
-    contents: "还没有 Thread。Project Agent 开的和你自己开的 Thread 都会列在这里。",
+    contents: "还没有 Thread。Project Agent 开的 Thread 会列在这里。",
     fill[0].color: c.colors.faint
   }
 }

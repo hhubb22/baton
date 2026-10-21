@@ -601,13 +601,11 @@ controlSection = frame : section {
 
     pickerChips = frame {
       layout: {align-items: .center, item-gap: s.space.xxs},
-      children: [chDevice, chAgent, chDir, chHover],
+      children: [chLocation, chModel, chHover],
 
-      chDevice = frame : chips.chip {}
+      chLocation = frame : chips.chip {}
 
-      chAgent = frame : chips.chipAgent {}
-
-      chDir = frame : chips.chipDir {}
+      chModel = frame : chips.chipModel {}
 
       chHover = frame : chips.chipHover {}
     }
@@ -784,7 +782,7 @@ inputSection = frame : section {
   }
 
   note {
-    contents: "主对话输入区在「发消息」和「新建 Thread」之间切换。Thread 输入区直接发给 Agent：执行中默认排队，Agent 支持时可以插入，也可以停止这一轮。横幅放在输入区上方，说明 Project Agent 为什么没有运行。"
+    contents: "主对话输入区只给 Project Agent 发消息。Thread 页顶部的输入区用来新建 Thread，选位置和模型，Agent 跟着模型走，写在提示文字里。Thread 输入区直接发给 Agent：可以换模型，执行中默认排队，Agent 支持时可以插入，也可以停止这一轮。横幅放在输入区上方，说明为什么没有运行或不能继续。"
   }
 
   inputColumns = frame {

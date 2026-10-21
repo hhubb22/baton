@@ -5,8 +5,8 @@ import "controls/icons.elyx" as icons
 import "controls/tabs.elyx" as tabs
 import "controls/chip.elyx" as chips
 
-// 输入区：给 Project Agent 发消息，或者不经过它直接新建 Thread。
-// 和对话列同宽，白底、发丝线外框、两层浅阴影。所有设备离线或 Project 暂停时仍然可以发消息和新建 Thread。
+// 输入区：给 Project Agent 发消息。
+// 和对话列同宽，白底、发丝线外框、两层浅阴影。所有设备离线或 Project 暂停时仍然可以发消息。
 export composer = frame {
   title: "输入区 / 发消息",
   width: s.size.measure,
@@ -45,22 +45,21 @@ export composer = frame {
     children: [lead, send],
 
     lead = frame {
-      layout: {align-items: .center, item-gap: s.space.xs},
-      children: [mode, pickers],
+      layout: {align-items: .center, item-gap: s.space.xxs},
+      children: [location, model, hint],
 
-      mode = frame : tabs.segmented {}
+      location = frame : chips.chip {
+        display: .none
+      }
 
-      pickers = frame {
+      model = frame : chips.chipModel {
+        display: .none
+      }
+
+      hint = text : t.caption {
         display: .none,
-        layout: {align-items: .center, item-gap: s.space.xxs},
-        padding-left: s.space.xs,
-        children: [device, agent, dir],
-
-        device = frame : chips.chip {}
-
-        agent = frame : chips.chipAgent {}
-
-        dir = frame : chips.chipDir {}
+        contents: "离线，上线后开始",
+        fill[0].color: c.colors.faint
       }
     }
 
@@ -92,36 +91,68 @@ export composerFilled = frame : composer {
   }
 }
 
-// 新建 Thread：在工具栏里选设备、Agent 和目录，第一条消息直接发给这个 Agent
+// 新建 Thread：Thread 页顶部的输入区。位置预填默认设备上次用的目录，模型预填这个位置上次用的 Agent 和模型；
+// Agent 跟着模型走，只写在提示文字里。发出第一条消息即新建
 @variant
 export composerNewThread = frame : composer {
   title: "输入区 / 新建 Thread",
   top: 320px,
 
+  prompt {
+    contents: "给 Codex 发消息"
+  }
+
   toolbar {
     lead {
-      pickers {
+      location {
         display: .visible
       }
 
-      @with-variant(tabs.segmentedSecond)
-      mode {
-        left: .nil
+      model {
+        display: .visible
+      }
+    }
+  }
+}
+
+// 选了离线设备上的位置：照样可以发，Thread 等设备上线后开始
+@variant
+export composerNewThreadOffline = frame : composerNewThread {
+  title: "输入区 / 新建 Thread / 设备离线",
+  top: 440px,
+
+  toolbar {
+    lead {
+      location {
+        label {
+          contents: "baton · Ubuntu 开发机"
+        }
+      }
+
+      model {
+        label {
+          contents: "claude-opus-5.5"
+        }
+      }
+
+      hint {
+        display: .visible
       }
     }
   }
 
   prompt {
-    contents: "第一条消息，直接发给新 Thread 里的 Agent"
+    contents: "给 Pi 发消息"
   }
 }
 
-// Thread 输入区：消息直接发给这个 Thread 的 Agent。
+// Thread 输入区：消息直接发给这个 Thread 的 Agent，Agent 写在提示文字里，新建后不能换。
+// 模型选择片只列这个 Agent 的模型，新的一轮从选中的模型开始。
 // Agent 执行中时消息默认排队，发出前可以撤回；只有 Agent 支持时才能选「插入」。
 export threadComposer = frame {
   title: "Thread 输入区 / 空闲",
-  top: 480px,
-  width: 400px,
+  top: 600px,
+  width: 480px,
   layout: {direction: .column, item-gap: 14px},
   fill: c.colors.surface,
   border: c.colors.hairline,
@@ -157,23 +188,13 @@ export threadComposer = frame {
     children: [delivery, actions],
 
     delivery = frame {
-      layout: {align-items: .center},
-      children: [mode, hint],
+      layout: {align-items: .center, item-gap: s.space.xs},
+      children: [model, mode, hint],
+
+      model = frame : chips.chipModel {}
 
       mode = frame : tabs.segmented {
-        display: .none,
-
-        first {
-          firstLabel {
-            contents: "排队"
-          }
-        }
-
-        second {
-          secondLabel {
-            contents: "插入"
-          }
-        }
+        display: .none
       }
 
       hint = text : t.caption {
@@ -225,7 +246,7 @@ export threadComposer = frame {
 @variant
 export threadComposerRunning = frame : threadComposer {
   title: "Thread 输入区 / 执行中",
-  top: 600px,
+  top: 720px,
 
   toolbar {
     delivery {
@@ -246,7 +267,7 @@ export threadComposerRunning = frame : threadComposer {
 @variant
 export threadComposerQueueOnly = frame : threadComposer {
   title: "Thread 输入区 / 只能排队",
-  top: 720px,
+  top: 840px,
 
   prompt {
     contents: "给 Kiro 发消息"
@@ -254,6 +275,12 @@ export threadComposerQueueOnly = frame : threadComposer {
 
   toolbar {
     delivery {
+      model {
+        label {
+          contents: "claude-sonnet-5.5"
+        }
+      }
+
       hint {
         display: .visible
       }
@@ -271,7 +298,7 @@ export threadComposerQueueOnly = frame : threadComposer {
 @variant
 export threadComposerStopping = frame : threadComposer {
   title: "Thread 输入区 / 正在停止",
-  top: 840px,
+  top: 960px,
 
   toolbar {
     actions {

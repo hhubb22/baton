@@ -6,6 +6,7 @@ import "controls/icons.elyx" as icons
 import "controls/button.elyx" as buttons
 import "blocks/device-row.elyx" as rows
 import "controls/toggle.elyx" as toggles
+import "blocks/enroll-dialog.elyx" as enroll
 
 devices = frame {
   title: "设备",
@@ -264,5 +265,26 @@ devices = frame {
         }
       }
     }
+  }
+}
+
+devicesEnroll = frame : devices {
+  title: "设备 · 接入设备",
+  caption: "点「接入设备」领一张 10 分钟内有效、只能用一次的注册凭据，在设备上运行注册命令。凭据由命令读入，不写进命令行参数。弹窗等到设备连上或凭据过期。",
+  left: 1728px,
+  top: 0px,
+  overrides: [insert(scrim, after = devices.main)],
+
+  scrim = frame {
+    left: 0px,
+    top: 0px,
+    width: 100%,
+    height: 100%,
+    ignore-stack: .true,
+    layout: {justify-content: .center, align-items: .center},
+    fill: c.colors.overlay,
+    children: form,
+
+    form = frame : enroll.enrollDialog {}
   }
 }

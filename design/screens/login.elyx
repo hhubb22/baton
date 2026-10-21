@@ -1,0 +1,207 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+import "controls/button.elyx" as buttons
+import "controls/input.elyx" as inputs
+import "controls/field.elyx" as fields
+
+login = frame {
+  title: "登录",
+  caption: "账号由管理员创建，没有自助注册和找回口令。管理员修改或重置口令后，已登录的会话全部退出。",
+  left: 0px,
+  top: 0px,
+  width: s.size.screenWidth,
+  height: s.size.screenHeight,
+  layout: {justify-content: .center, align-items: .center},
+  fill: c.colors.canvas,
+  children: column,
+
+  column = frame {
+    width: 360px,
+    layout: {direction: .column, align-items: .center, item-gap: s.space.xl},
+    children: [brand, notice, card, note],
+
+    brand = frame {
+      layout: {direction: .column, align-items: .center, item-gap: s.space.md},
+      children: [mark, heading],
+
+      mark = frame {
+        width: 36px,
+        height: 36px,
+        layout: {justify-content: .center, align-items: .center},
+        fill: c.colors.text,
+        corner-radius: 9px,
+        children: markLetter,
+
+        markLetter = text : t.heading {
+          contents: "B",
+          font-size: 18,
+          font-style: "Semibold",
+          line-height: 1,
+          fill[0].color: c.colors.surface
+        }
+      }
+
+      heading = text : t.title {
+        contents: "登录 Baton"
+      }
+    }
+
+    notice = frame {
+      width: 100%,
+      display: .none,
+      layout: {direction: .column, item-gap: s.space.xxs},
+      fill: c.colors.panel,
+      border: c.colors.borderSoft,
+      corner-radius: 10px,
+      padding: [10px, 14px],
+      children: [noticeHeading, noticeDetail],
+
+      noticeHeading = text : t.label {
+        contents: "口令已被管理员重置"
+      }
+
+      noticeDetail = text : t.caption {
+        width: 100%,
+        contents: "之前的登录都已退出，用新口令重新登录。",
+        fill[0].color: c.colors.muted
+      }
+    }
+
+    card = frame {
+      width: 100%,
+      layout: {direction: .column, item-gap: s.space.lg},
+      fill: c.colors.surface,
+      border: c.colors.hairline,
+      shadow: [
+        {
+          drop-shadow: {
+            color: rgb(0%, 0%, 0%, 4%),
+            offset: point(0px, 1px),
+            blur-radius: 2px
+          }
+        },
+        {
+          drop-shadow: {
+            color: rgb(0%, 0%, 0%, 4%),
+            offset: point(0px, 8px),
+            blur-radius: 24px
+          }
+        }
+      ],
+      corner-radius: 14px,
+      padding: s.space.xl,
+      children: [account, secret, submit],
+
+      account = frame : fields.field {
+        width: 100%,
+
+        helper {
+          display: .none
+        }
+
+        @with-variant(inputs.filled)
+        input {
+          value {
+            contents: "chen.lin"
+          }
+
+          top: .nil
+        }
+
+        label {
+          labelText {
+            contents: "账号"
+          }
+        }
+      }
+
+      secret = frame : fields.field {
+        width: 100%,
+
+        helper {
+          display: .none
+        }
+
+        @with-variant(inputs.filled)
+        input {
+          value {
+            contents: "••••••••••••"
+          }
+
+          top: .nil
+        }
+
+        label {
+          labelText {
+            contents: "口令"
+          }
+        }
+      }
+
+      submit = frame : buttons.button {
+        width: 100%,
+
+        label {
+          contents: "登录"
+        }
+      }
+    }
+
+    note = text : t.caption {
+      contents: "没有账号或忘记口令，请联系管理员。",
+      fill[0].color: c.colors.faint
+    }
+  }
+}
+
+loginError = frame : login {
+  title: "登录 / 账号或口令不对",
+  caption: "不区分是账号不存在还是口令不对。",
+  left: 1728px,
+  top: 0px,
+
+  column {
+    card {
+      secret {
+        helper {
+          fill[0].color: c.colors.danger,
+          display: .visible,
+          contents: "账号或口令不对。"
+        }
+
+        @with-variant(inputs.error)
+        input {
+          value {
+            fill[0].color: c.colors.text,
+            contents: "••••••••"
+          }
+        }
+      }
+    }
+  }
+}
+
+loginReset = frame : login {
+  title: "登录 / 口令被重置",
+  caption: "管理员重置口令后，原来的会话打开任何页面都回到这里，并说明原因。",
+  left: 3456px,
+  top: 0px,
+
+  column {
+    card {
+      secret {
+        input {
+          value {
+            fill[0].color: c.colors.faint,
+            contents: "新口令"
+          }
+        }
+      }
+    }
+
+    notice {
+      display: .visible
+    }
+  }
+}
