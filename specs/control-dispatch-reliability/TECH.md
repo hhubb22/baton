@@ -1,19 +1,19 @@
 # 控制面调度与可靠通知
 
-Status: implemented
+Status: approved
 Owner: Baton
-Basis: 当前工作区；HEAD `b51ac3d8a9cb883c453998dbb25bc8a8fbddea3f`，包含已实施的任务版本等待。需求依据为 [Baton R-16、R-17、R-24、R-39～R-41](../baton/PRODUCT.md) 与 [Project Agent PA-05、PA-08～PA-10、PA-20](../project-agent/PRODUCT.md)。
+Basis: [Baton R-14、R-16、R-19、R-24、R-25](../baton/PRODUCT.md)；[Project Agent PA-05、PA-08～PA-10](../project-agent/PRODUCT.md)；[Baton TECH](../baton/TECH.md)「下行投递」。start、stop、wake 部分已实现；Thread 命令部分随 Baton TECH 实施步骤 2 落地。
 
 ## 1. 方案
 
-Coordinator 使用短事务领取待发送工作，保存下一次重试时间，提交后调用 Gateway 入队，随即处理下一项。节点回包独立保存，不在派发循环内等待。维护扫描、任务 prepare、Project 放置分别运行；Project 的 start、stop、wake 使用独立发送额度。
+Coordinator 使用短事务领取待发送工作，保存下一次重试时间，提交后调用 Gateway 入队，随即处理下一项。节点回包独立保存，不在派发循环内等待。维护扫描、Thread 命令派发、Project 放置分别运行；Project 的 start、stop、wake 使用独立发送额度。
 
-prepare 复用 dispatch_outbox；start 和 stop 的投递进度保存在 agent_runs；wake 的接收进度保存在输入队列原行。统一重试函数、批次限制和幂等规则，保留这些表各自的业务约束。系统继续按 R-40 只运行一个活动 Coordinator，不增加外部消息服务或通用 Workflow 引擎。
+Thread 命令保存在 thread_outbox；start 和 stop 的投递进度保存在 agent_runs；wake 的接收进度保存在输入队列原行。统一重试函数、批次限制和幂等规则，保留这些表各自的业务约束。系统只运行一个活动 Coordinator，不增加外部消息服务或通用 Workflow 引擎。
 
 ```mermaid
 flowchart LR
     T[维护扫描] --> DB[(PostgreSQL)]
-    P[prepare 派发] --> DB
+    P[Thread 命令派发] --> DB
     R[Project 放置] --> DB
     C[start / stop / wake 派发] --> DB
     P --> G[Gateway 有界节点队列]
@@ -27,7 +27,7 @@ flowchart LR
 
 ## 2. 现有依据与借鉴
 
-[DeliverPrepares](../../internal/control/prepare.go) 只执行有界派发，[ClaimPrepares](../../internal/store/dispatch.go) 从各节点到期候选中领取记录。执行期限、未发送 prepare、排队期限和吊销补偿各自运行；回包按持久化关联 ID 独立保存。
+Thread 命令派发（`internal/control/thread.go`）只执行有界派发，`internal/store/thread_outbox.go` 从各节点到期候选中领取记录；回包按持久化关联 ID 独立保存。吊销补偿独立运行。
 
 [Project 命令领取](../../internal/store/project_delivery.go) 分别处理 start、stop 和 wake，按节点应用额度并跳过被锁定的候选。业务结束保存停止意图，进程清理完成由节点确认。输入的通知接收进度与业务认领进度分别保存。
 
@@ -44,8 +44,8 @@ flowchart LR
 
 | 工作 | 默认节奏与上限 | 隔离边界 |
 |---|---|---|
-| 执行超时、未发送 prepare、排队超时、吊销补偿 | 各自固定循环，每 200ms；每项最多一个调用在途 | 任一项变慢不挡住其他维护项或派发 |
-| prepare | 每 200ms；每轮最多 32 次尝试，轮内单节点最多 1 次 | 不等待回包；每节点最多一个未过期 prepare 投递租约 |
+| 吊销补偿 | 固定循环，每 200ms；最多一个调用在途 | 变慢不挡住派发 |
+| Thread 命令 | 每 200ms；每轮最多 32 条，轮内单节点最多 4 条，同一 Thread 最多 1 条 | 不等待回包；同一 Thread 前一条未确认时不发下一条 |
 | Project 放置与租约回收 | 每秒最多 32 个候选，每个 Agent 独立有界事务；健康有效租约不占候选额度 | 不执行命令发送，忙碌 Agent 跳过，分页继续前进 |
 | start / stop / wake | 每秒分别领取，每类每轮最多 32 条，每节点每类最多 2 条 | 三类独立额度，轮换处理次序 |
 | batond 清理确认补送 | 一个固定循环，按本地到期记录领取 | 不持有 Runtime 管理锁，不阻塞续租和启动 |
@@ -60,43 +60,38 @@ flowchart LR
 
 ### 3.1 统一重试
 
-下一次尝试时间在发送前持久化。prepare 的首次确认期限为 5 秒，后续退避采用 10、20、30 秒级别；start、stop、wake 从 1 秒开始，依次采用 2、4、8、16、30 秒级别。使用有界抖动，prepare 不早于其 5 秒投递租约重发，中心重试间隔封顶 30 秒。节点清理补送另为 RPC 预留 5 秒，再加同一退避，下一次尝试最晚为 35 秒后。
+下一次尝试时间在发送前持久化。Thread 命令、start、stop、wake 都从 1 秒开始，依次采用 2、4、8、16、30 秒级别。使用有界抖动，中心重试间隔封顶 30 秒。节点清理补送另为 RPC 预留 5 秒，再加同一退避，下一次尝试最晚为 35 秒后。
 
 发送前保存进度覆盖“入队后立刻崩溃”的窗口。发送后不通过普通 UPDATE 重新打开对象或覆盖重试时间，迟到的发送错误不能撤销已经保存的确认。明确业务拒绝按现有规则终结，传输超时、断线或队列满只触发重试。
 
-时间由数据库时钟计算，随机源通过接口注入测试。重试不延长任务排队期限、执行期限或 Project 租约。命令的执行与恢复继续遵循 [执行可靠性设计](../project-exec-reliability/TECH.md)。
+时间由数据库时钟计算，随机源通过接口注入测试。重试不延长 Turn 的执行时限或 Project 租约。设备离线时 Thread 命令一直保留，没有排队期限。
 
-## 4. prepare：领取后即返回
+## 4. Thread 命令：领取后即返回
 
 ### 4.1 持久化字段
 
-在 dispatch_outbox 增加：
+`thread_outbox` 每行一条命令：
 
 | 字段 | 含义 |
 |---|---|
-| `next_attempt_at timestamptz NOT NULL` | 下一次可领取的时刻，初始为创建时间 |
-| `may_have_been_sent boolean NOT NULL DEFAULT false` | 已经进入可能发送的阶段；只能由 false 变为 true |
+| `id bigserial` | 投递顺序；同一 Thread 内按它发送 |
+| `employee_id`、`thread_id`、`node_id` | 归属与目标 |
+| `message_id uuid` | 稳定消息 ID，重试不变 |
+| `action` | open / message / withdraw / stop |
+| `payload jsonb` | 命令内容；message 只带 `client_message_id`，正文在发送时从 `thread_messages` 读取 |
+| `attempts`、`next_attempt_at` | 已持久化的尝试次数、下一次可领取时刻 |
+| `acked_at` | 设备持久化回执的时间 |
 
-复用现有 `attempts`、`lease_until` 和 `acked_at`。attempts 表示已持久化的投递尝试次数。保留 MessageID、TaskID、ExecutionID 和准备参数，重试不创建新意图。
-
-为未确认记录建立 `(target_node_id, next_attempt_at, id)` 节点到期索引，以及 `(target_node_id, lease_until)` 节点租约索引。领取时跳过有未过期 prepare 租约的节点；节点内按 Outbox → Task → Execution 跳过被锁定的记录，再取一条到期候选。单活动 Coordinator 下由唯一 prepare 派发循环领取，不增加多副本调度假设。
-
-prepare 为候选加锁后按全局到期顺序返回最多 32 条。全局排序前的节点候选、以及跳锁前已取得的前置行锁可能保持到事务提交，因此 32 是实际投递尝试上限；数据库操作仍受 1 秒期限限制。
+未确认记录建 `(node_id, next_attempt_at, id)` 节点到期索引和 `(thread_id, id)` 顺序索引。领取时每个 Thread 只取 `id` 最小的未确认行，节点内按 Outbox → Thread 跳过被锁定的记录。
 
 ### 4.2 发送和回包
 
-1. 构造并检查消息编码上限，事务内确认任务仍允许 prepare、节点在线且同步、该节点没有其他未过期投递租约。
-2. 保存 attempts、5 秒租约、next_attempt_at 和 may_have_been_sent，提交事务。
-3. 调用 Gateway 入队，无论成功、满队列还是断线都结束本次尝试，不等待节点。已保存的时间驱动下一次尝试。
-4. prepare_result 由现有入站处理直接根据 CorrelationID 查找 outbox，校验节点、员工及任务/执行绑定，再调用幂等的 SavePrepared 或 FailPrepare。未知关联和错误来源不能写业务事实。
+1. 事务内确认 Thread 未归档或命令仍需要（stop、withdraw 在归档后仍发送）、节点在线且同步，构造消息并检查编码上限。
+2. 保存 attempts 和 next_attempt_at，提交事务。
+3. 调用 Gateway 入队，无论成功、满队列还是断线都结束本次尝试，不等待节点。
+4. `thread.command_result` 由入站处理根据 `message_id` 查找 outbox，校验节点、员工和 Thread 绑定后保存 `acked_at`。未知关联和错误来源不能写业务事实。
 
-回包处理保留 Gateway 当前凭据和连接校验，以及 Store 对 Session 归属和任务状态的验证。成功响应要求完整身份匹配；失败响应沿用当前协议允许的字段，以 outbox 的绑定验证归属。过期、重复或晚到的确认无需内存 waiter 仍可处理；已有成功准备事实不能被后来的失败响应覆盖。
-
-`pending` prepare channel 和等待 select 已移除；文件、Session 等其他请求的 waiter 保持原职责。
-
-may_have_been_sent 在发送前设置，因此崩溃后可能保守地认为“可能发送过”。FailUnsentPrepares 只处理这个字段为 false 的记录；其他排队到期工作仍由现有启动许可和未启动证据裁决。不能把缺少发送确认当作未执行证据。
-
-任务取消或过期后，独立的小批次退役处理停止无效 prepare 的重发。它先锁 outbox，再读取已提交任务状态；不在持有 Task 锁的路径反向取得 Outbox 锁。终态不会恢复为 queued，新的执行遵循既有新任务规则。
+设备对每条命令按 `message_id` 和 `client_message_id` 幂等处理，重复投递只返回原回执。确认先提交、旧发送路径随后报错时，确认保持有效。
 
 ## 5. start / stop：业务结束与清理完成分别确认
 
@@ -134,11 +129,11 @@ batond 在 Runtime 进程树回收及本地收尾完成后，先在现有 projec
 
 清理事实写入失败时，已结束实例保留在管理器中，与活动实例共用 4-run 上限，由固定循环继续补写。持久化成功后才释放名额；本地账本操作限时 1 秒。再次崩溃且未落盘时，仍按缺少清理证据处理。
 
-这样，自然结束通常在宽限期内收到清理确认，不需要 Coordinator 额外发送 stop。确认丢失后，中心 stop 与节点主动补送共同兜底；两条路径最终确认同一份事实。
+这样，自然结束通常在宽限期内收到清理确认，不需要 Coordinator 额外发送 stop。确认丢失后，中心重发 stop，节点也主动补送；两条路径最终确认同一份事实。
 
 未启动的 run 收到 stop 时，节点保存不可再次启动该 run 的本地终止记录，再确认；有运行实例时，完成现有进程树停止后确认。重复 start / stop 不创建第二个进程，也不改变既有终态。
 
-确认边界沿用 sidecar.Process.Wait 所代表的进程树回收完成，不能只根据模型 finish、根进程退出或修改本地 state 字段判断。batond 重启后的旧记录没有清理证据时，不能仅因为内存 map 为空就自动确认；保持清理未确认，按现有平台进程管理机制核实。无法核实的记录保留低频重试和可见状态，不阻塞新任务派发。该平台边界必须由恢复测试验证，方案不额外建立进程守护服务。
+确认边界沿用 sidecar.Process.Wait 所代表的进程树回收完成，不能只根据模型 finish、根进程退出或修改本地 state 字段判断。batond 重启后的旧记录没有清理证据时，不能仅因为内存 map 为空就自动确认；保持清理未确认，按现有平台进程管理机制核实。无法核实的记录保留低频重试和可见状态，不阻塞新的 Thread 命令。该平台边界必须由恢复测试验证，方案不额外建立进程守护服务。
 
 stopped 继续只确认指定 run 的清理事实，要求其原节点、员工、epoch 和当前认证连接有效；允许确认历史终态，不要求该 run 仍持有 Agent 租约。认证行按 Node → Credential → Presence 加共享锁，再锁目标 Run，全部锁取得后重新核对数据库当前时刻下的凭据期限。吊销和连接替换不能穿过这段确认事务，等待 Run 锁跨过凭据期限则拒绝确认。不得修改新 run、恢复旧租约或改变已经保存的 finished / failed / lost 及结束原因。
 
@@ -154,17 +149,17 @@ project_agent_input_queue 增加：
 | `wake_next_at timestamptz NOT NULL` | 下一次可发送时刻 |
 | `wake_attempts integer NOT NULL DEFAULT 0` | 通知尝试次数 |
 
-新的主动输入与业务变化同事务插入，设置 wake_required=true；同一来源键去重不重新打开通知。被动输入不单独触发 wake。插入路径继续不锁 Agent，保留任务终态路径的锁顺序。
+新的主动输入与业务变化同事务插入，设置 wake_required=true；同一来源键去重不重新打开通知。被动输入不单独触发 wake。插入路径不锁 Agent，保留 Thread 报告路径的锁顺序。
 
 新 run 创建时，在已有 Agent 锁下，把尚未认领的主动输入重新设为需要提示，重置通知退避。并发稍晚提交的输入自己携带 wake_required=true，因此不会遗漏。旧 run 的迟到确认必须被 run / epoch 校验拒绝。
 
-为 `delivered_seq IS NULL AND wake_required` 建立 `(agent_id, wake_next_at, id)` 部分索引。wake 只面向有效 running run。每条命令最多携带 32 个输入 ID，从这些输入构造已有 task_updates，继续限制编码容量。发送前在短事务内保存这些行的重试进度。
+为 `delivered_seq IS NULL AND wake_required` 建立 `(agent_id, wake_next_at, id)` 部分索引。wake 只面向有效 running run。每条命令最多携带 32 个输入 ID，从这些输入构造 thread_updates，继续限制编码容量。发送前在短事务内保存这些行的重试进度。
 
 ### 6.2 协议
 
-project_run_wake 增加可选 `input_ids: int64[]`，每条最多 32 个正数 ID。同一个任务的 task_updates 仍按版本合并，任务绑定及每 run 64 项限制保持原约束。
+project_run_wake 增加可选 `input_ids: int64[]`，每条最多 32 个正数 ID。同一个 Thread 的 thread_updates 按版本合并，每 run 最多 64 个绑定。
 
-batond 确认 run 和 epoch 后，将通用 wake 合并到已有容量为 1 的通道，并把任务版本交给现有等待缓存。确认消息放入固定容量 64 的发送队列，由一个固定协程执行以下节点管理请求；队列满时不确认，等待中心重发。WebSocket 读循环和 Runtime 管理锁内不等待确认 RPC。
+batond 确认 run 和 epoch 后，将通用 wake 合并到已有容量为 1 的通道，并把 Thread 版本交给等待缓存。确认消息放入固定容量 64 的发送队列，由一个固定协程执行以下节点管理请求；队列满时不确认，等待中心重发。WebSocket 读循环和 Runtime 管理锁内不等待确认 RPC。
 
 ```json
 {
@@ -181,11 +176,11 @@ wake_received 是节点管理操作，Runtime IPC 白名单不允许 Agent 调�
 
 只确认本条消息携带的输入 ID，不能把 `MAX(id)` 当成“此前均已通知”的水位。PostgreSQL sequence 分配顺序与事务提交顺序不同，较小 ID 的输入可能稍后才提交。待确认行自己的到期时间保证后页输入获得机会，通知领取不使用内存轮转游标。
 
-Runtime 照常在轮次结束时领取输入、闲置时有界等待；nodes.exec 的任务通知丢失后仍由最多 25 秒的本地等待补读。通知不能直接生成工具结果，也不能代替输入认领事务。
+Runtime 照常在轮次结束时领取输入、闲置时有界等待；nodes.exec 的 Thread 通知丢失后仍由最多 25 秒的本地等待补读。通知不能直接生成工具结果，也不能代替输入认领事务。
 
 ### 6.3 重启与丢失
 
-wake 不需要在 batond 再复制一份输入持久队列。batond 存活时通道和任务缓存保存提示；batond 或 Runtime 退出后，旧 run 不会重启，新 run 会重新提示全部未认领主动输入。普通重连保留当前 Runtime 及内存通知。
+wake 不需要在 batond 再复制一份输入持久队列。batond 存活时通道和版本缓存保存提示；batond 或 Runtime 退出后，旧 run 不会重启，新 run 会重新提示全部未认领主动输入。普通重连保留当前 Runtime 及内存通知。
 
 接收确认丢失时，中心重发，节点继续合并；中心重启时，未确认输入按持久化到期时间继续发送。输入已认领后，不再需要任何提示。被动结果仍随下一批主动输入交付。
 
@@ -196,7 +191,7 @@ wake 不需要在 batond 再复制一份输入持久队列。batond 存活时通
 | 领取提交后、Gateway 入队前 Coordinator 崩溃 | 下次到期重发同一业务对象；不当作明确未发送 |
 | 入队成功、回包丢失或晚到 | 重试保持身份，回包无内存 waiter 也能幂等保存 |
 | 确认先提交、旧发送路径随后报错 | 无发送后重新打开记录的更新，确认保持有效 |
-| 任务已取消，旧 prepare 回来 | 业务状态和启动许可裁决，不恢复旧任务，不重跑输入 |
+| Thread 已归档，旧 message 命令回来 | 设备按 `client_message_id` 去重；归档后不再领取新的 message 命令 |
 | 100 条旧 stop 未确认 | stop 自己退避；start 和 wake 仍各有独立额度 |
 | 同节点积压大量旧命令 | 每节点配额在候选领取阶段生效，其他节点仍能进入批次 |
 | 新 run 与旧 wake 确认竞争 | Agent 锁串行化；旧 run 不能清除新 run 的通知需求 |
@@ -204,53 +199,41 @@ wake 不需要在 batond 再复制一份输入持久队列。batond 存活时通
 | 进程已清理，但 stopped 回复丢失 | 本地清理记录继续补送，中心确认幂等 |
 | 进程清理无法核实 | 保留未确认状态，降频重试，不占满新工作批次 |
 
-Project 状态迁移、输入领取和 wake_received 按 Agent → Conversation（如需）→ Run / Input Queue 的方向取得锁；只处理回执或领取命令的事务不得反向加锁。现有 Task → Input Queue 写入不新增 Agent 锁。prepare 保留 Outbox → Task → Execution → Session 的顺序，退役处理不引入 Task → Outbox 的反向路径。
+Project 状态迁移、输入领取和 wake_received 按 Agent → Conversation（如需）→ Run / Input Queue 的方向取得锁；只处理回执或领取命令的事务不得反向加锁。Thread 报告 → Input Queue 写入不取 Agent 锁。Thread 命令领取按 Outbox → Thread 的顺序，Thread 状态变化先锁 Thread 再插入 Outbox，两者只在 Thread 锁上相遇，不形成环。
 
-## 8. 兼容与模块范围
-
-started / renew 返回的数据增加 `control_receipts:1`。新 batond 只有看到该能力才发送 wake_received；旧中心不认识新操作时不应持续试探。新中心向旧 batond 发送的 input_ids 是可忽略字段，收不到接收确认时按有界退避重发；旧节点仍靠既有输入认领停止通知。升级沿用既有任务执行和停止协议，减少通知流量需要节点配套升级。
-
-迁移只增加上述投递字段、约束和索引，不改变 Task / Run 的业务状态枚举。既有未确认 prepare 保守标记 may_have_been_sent；既有未确认终态 run 建立 stop 意图并错开首次重试时间；未认领主动输入重新需要提示。迁移与新 Coordinator 启动按单活动实例执行，先停止旧投递循环。
+## 8. 模块范围
 
 | 模块 | 职责 |
 |---|---|
-| internal/control/prepare.go、background.go | 非阻塞发送、直接回包处理、独立维护循环及数据库并发门 |
-| internal/store/dispatch.go | prepare 到期领取、节点租约、退役与幂等保存 |
-| internal/control/project_runtime.go | 三类发送额度、无回包等待 |
+| internal/control/thread.go、background.go | Thread 命令的非阻塞发送、直接回包处理、独立维护循环及数据库并发门 |
+| internal/store/thread_outbox.go | Thread 命令到期领取、同 Thread 顺序、幂等确认 |
+| internal/control/project_runtime.go | start、stop、wake 三类发送额度，不等待回包 |
 | internal/store/project_placement.go、project_delivery.go | 放置、停止意图、三类独立到期领取及通知确认 |
 | internal/store/project_runtime.go | stopped 和 wake_received 的身份校验、确认事务 |
 | internal/store/project_inputs.go、project.go | 原子设置主动通知需求，保留去重与锁方向 |
 | internal/node/project_runtime.go | 接收通知确认、主动清理补送、本地幂等记录 |
-| internal/protocol | 增量字段与能力标记 |
-| migrations 与 node.db 兼容升级 | 新字段、索引、旧数据保守初始化 |
 
-Baton TECH 的派发、期限扫描及本地账本，以及 Project Agent TECH 的停止和通知接收契约同步描述上述行为。
+started / renew 返回的数据带 `control_receipts:1`，batond 看到后才发送 wake_received。
 
 ## 9. 验证
 
-以下验证已在本机完成。真实数据库测试使用 PostgreSQL 17.11，进程测试使用 Coordinator、Gateway、batond 与不访问模型的 Runtime 契约程序。
+| 依据 | 设置与观察 | 失败条件 | 位置 | 状态 |
+|---|---|---|---|---|
+| 慢节点隔离，R-16 | A 不回 Thread 命令，B 同轮获得投递 | 派发等待 A 的回包；B 被延迟 | `control/thread_reliability_test.go` | planned |
+| 同 Thread 顺序，R-08 | 同一 Thread 连续 open、3 条 message、withdraw，第 2 条回包丢失 | 第 3 条先于第 2 条送达；重发产生第二条消息 | Store / Control 回归 | planned |
+| 跳锁公平性 | 同节点和跨节点分别锁住 Outbox、Thread | 后续可用记录无法领取 | `store/thread_outbox_test.go` | planned |
+| 模糊发送，R-19 | 领取失败全部回滚；确认后发送报错 | 确认被撤销；未保存进度就入队 | Store / Control 回归 | planned |
+| 晚到回包 | 无 waiter 的合法回包；错误节点、员工、连接和过期凭据 | 合法回包丢失；非法回包写入 | `control/thread_reliability_test.go` | planned |
+| 维护隔离 | 慢维护项运行期间派发继续；取消释放数据库名额 | 维护挡住派发 | `control/background_test.go` | passed |
+| 分类和节点额度，PA-08 | 单节点 1000 条旧 stop，其他节点及新 start / wake 仍可领取 | 其他工作被饿死；已确认记录重开 | `store/project_delivery_test.go` | passed |
+| 跳锁与锁数量 | 三类命令跳过节点队首锁；Run / Agent 行锁不超过 32 个 | 超过额度或锁数 | `store/project_delivery_concurrency_test.go` | passed |
+| 清理确认，PA-08 | 自然退出、stop、未启动终止记录、回执丢失、重启 | 重复启动；伪造清理证据 | Node cleanup / receipt replay 回归 | passed |
+| 本地存储故障 | SQLite 拒绝保存清理事实，之后恢复 | 名额泄漏；恢复后未补送 | `node/project_runtime_cleanup_test.go` | passed |
+| wake 接收与认领 | 接收确认清除通知需求，`delivered_seq` 仍为空；新输入再次提示 | 确认被当作认领；重复来源重新打开 | Store / Node wake receipt 回归 | passed |
+| 提交顺序 | 低 ID 输入晚于高 ID 提交并确认 | 低 ID 输入不再提示 | `TestProjectWakeReceiptDoesNotCoverLowerIDCommittedLater` | passed |
+| 运行更换，PA-12 | 旧 run 确认与新 run 竞争 | 旧 run 清除新 run 的通知 | Store / Node 并发回归 | passed |
+| 停止确认身份 | 吊销和连接替换与确认并发 | 已吊销凭据确认成功 | `store/project_delivery_concurrency_test.go` | passed |
+| 协议兼容，R-25 | 未知字段、缺失能力标记、连接切换 | 未知字段导致拒绝；能力未重置 | 协议与兼容夹具 | passed |
+| 核心主链路 | 真实进程验证 wake 确认先于认领、重连不重启、finish 后主动清理确认 | 任一顺序被破坏 | `TestProjectRuntimeRealProcessesPlacementPagingAndWake` | passed |
 
-| 依据 | 设置与观察 | 验证位置 | 状态 |
-|---|---|---|---|
-| 慢节点隔离，R-39 | A 不回 prepare，B 同轮获得投递；派发不等待 5 秒确认期限 | `control/prepare_reliability_test.go` | passed |
-| 维护隔离，R-16/17 | 慢维护项运行期间其他项继续；调用不重叠，取消释放数据库名额 | `control/background_test.go` | passed |
-| prepare 公平性 | 同节点和跨节点分别锁住 Outbox、Task、Execution；后续可用记录仍能领取 | `store/prepare_reliability_test.go` | passed |
-| 模糊发送，R-24 | 领取失败全部回滚；已保存可能发送事实不按未发送失败；确认后发送报错不撤销确认 | Store / Control prepare 回归 | passed |
-| 晚到回包 | 无 waiter 的合法回包保存，重复幂等；错误节点、员工、连接和过期凭据拒绝 | `control/prepare_reliability_test.go` | passed |
-| 分类和节点额度，PA-08、R-39 | 单节点 1000 条旧 stop，其他节点及新 start / wake 仍可领取；已确认记录不重开 | `store/project_delivery_test.go` | passed |
-| 跳锁与锁数量 | 三类命令跳过节点队首锁；全局和节点额度生效；Run / Agent 行锁不超过 32 个 | `store/project_delivery_concurrency_test.go` | passed |
-| 清理确认，PA-08 | 自然退出、stop、未启动终止记录、回执丢失、账本迁移与重启；不重复启动、不伪造证据 | Node cleanup / receipt replay 回归 | passed |
-| 本地存储故障 | SQLite trigger 拒绝保存清理事实；保留有界实例，恢复后保存、补送并释放名额 | `node/project_runtime_cleanup_test.go` | passed |
-| 回执期限和关闭 | writer 被占用时 RPC 等待可取消；两个回执 worker 能随 manager 关闭退出 | Node writer / runtime writer 回归 | passed |
-| wake 接收与认领 | 接收确认清除通知需求，同时 delivered_seq 仍为空；新输入再次提示，重复来源不重新打开 | Store / Node wake receipt 回归 | passed |
-| 多批提示 | 超过 32 条、任务多版本及编码容量边界；未发送行保持立即到期 | Store delivery / 版本等待回归 | passed |
-| 提交顺序 | 低 ID 输入晚于高 ID 提交并确认，仍独立需要提示 | `TestProjectWakeReceiptDoesNotCoverLowerIDCommittedLater` | passed |
-| 运行更换，PA-12 | 旧 run 确认与新 run 竞争，不能清除新通知；新 run 重置未认领输入 | Store / Node 并发回归 | passed |
-| 停止确认身份 | 吊销和连接替换受共享锁保护；等待 Run 锁跨过凭据期限后拒绝确认 | `store/project_delivery_concurrency_test.go` | passed |
-| 协议兼容，R-41 | 未知字段、缺失能力标记、旧中心回执模式、连接切换重置能力 | 协议与兼容夹具 | passed |
-| 历史查询 | 同节点 20000 条已确认历史及 1 条待停止，捕获实际领取 SQL 执行 EXPLAIN ANALYZE | `TestProjectStopDeliveryUsesPendingIndexWithConfirmedHistory` | passed |
-| 核心主链路 | 真实进程验证 wake 确认先于认领、Runtime 无权代发确认、重连不重启、finish 后主动清理确认且保持终态 | `TestProjectRuntimeRealProcessesPlacementPagingAndWake` | passed |
-
-完整构建、`go vet ./...`、`go test ./...`、Runtime 50 项测试，以及 Control / Store 投递相关 race 和 Node / Protocol / Delivery 全包 race 均通过。Windows 与 Linux amd64 的 `go build ./...` 通过。历史查询使用 `agent_runs_stop_due`，本机单次观测返回 1 行、命中 19 块、执行 0.068ms；此观测只验证该数据布局下的索引访问。
-
-R-39 的 500 在线节点、100 并发委托、100 API 请求/秒、200 节点消息/秒及持续故障负载仍待容量验证，需要先约定硬件、消息大小和延迟/恢复阈值。Windows / Linux 的原生进程树和崩溃恢复测试未在本机执行；交叉编译不替代原生验证。外部副作用继续遵循既有启动许可、执行身份与无法确认时的保守状态。
+R-24 的容量负载仍待压测；Windows / Linux 的原生进程树和崩溃恢复测试需要在对应系统上运行。

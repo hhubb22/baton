@@ -2,18 +2,13 @@
 
 Status: approved
 Owner: Asa
-Date: 2026-10-18
-Baseline: `hhubb22/baton@6da5ebef0d4d129fad4776de3dafd8b2e681f958`；Pi `earendil-works/pi@482c138`（2026-10-18，各包 1.3.0）；DSH `deepseek-ai/deepseek-harness@687f282`（2026-10-17）
-Approval: 2026-10-18 用户确认，合并进 main
-Basis: [PRODUCT.md](PRODUCT.md) PA-01～PA-22；[Agent Inbox 行为规格](../agent-inbox/PRODUCT.md) IB-01～IB-27 中与 Project Agent 相关的部分；[Baton TECH](../baton/TECH.md)
+Basis: [PRODUCT.md](PRODUCT.md) PA-01～PA-23；[Agent Inbox 行为规格](../agent-inbox/PRODUCT.md)；[Baton TECH](../baton/TECH.md)。外部依赖版本：Pi `earendil-works/pi@482c138`（各包 1.3.0）、DSH `deepseek-ai/deepseek-harness@687f282`。
 
 ## Context
 
-现有 Baton 的协调单位是 Task。用户或执行 Agent 提交一个 Task，Coordinator 在一个事务里保存 Task、Execution、事件和 `dispatch_outbox`（`internal/store/task.go` 的 `acceptOnce`），节点上的 Session Worker 执行并回报结果。执行 Agent 通过 `baton delegate` 派生子任务：CLI 经本地 IPC 交给 batond，batond 经 Gateway 把 `AgentRequest` 送到 Coordinator 的 `onAgentRequest`（`internal/control/agent.go`），来源身份由 Gateway 认证和节点账本绑定。节点只主动连接 Gateway，不直接访问 Coordinator，单条控制消息上限 256 KiB。
+Baton 的执行单位是 Thread：设备上的一个原生 Agent 会话，由 Session Worker 维护消息队列、Turn 边界和回复账本，中心保存 Thread 记录和每条回复（[Baton TECH](../baton/TECH.md)「Thread 与 Turn」）。节点只主动连接 Gateway，单条控制消息上限 256 KiB。
 
-Project Agent 引入的是一个比 Task 存在更久的协调者。它没有对应的 Task，运行位置每次都可能不同，派出的任务返回结果时它可能不在运行。现有模型里有三处装不下它：`sessions` 表把会话固定在一个 `node_id` 上；子结果交付（`0011_child_deliveries.sql`）以「来源 Worker 仍在」为前提；完整会话历史只存在节点上。
-
-本设计在 Coordinator 里新增 Project Agent 服务，并在节点上新增一个由 batond 启动的 Runtime 进程。现有的 Task、Execution、启动许可、执行账本和父子委托都保持不变，Project Agent 派出的任务走同一条接受路径。
+Project Agent 是比 Thread 存在更久的协调者。它的运行位置每次都可能不同，它开的 Thread 结束一轮时它可能不在运行。所以它的对话、记忆和待处理输入都放在 Coordinator，运行时只是一个按需启动的 Runtime 进程。它对 Thread 的操作走和员工相同的 Store 入口，只是操作者记为 Project Agent。
 
 ## Proposed changes
 
@@ -39,9 +34,9 @@ pi-agent-core 只包含 Agent Loop、工具执行和事件流（`packages/agent/
         Session Worker（执行 Agent，现有）
 ```
 
-`baton-project-runtime` 是一个独立的 Node.js 程序，采用固定版本 Node bundle，随 batond 的安装包分发。设备需要安装 Node.js 22.19.0 或更高版本，才能承载 Project Agent；只运行执行 Agent 的设备不需要 Node.js。batond 负责发现它、上报能力、启动和停止进程、代为续租。Runtime 不直接连 Coordinator，所有请求经本地 IPC 交给 batond，再沿现有 Gateway 通道送到 Coordinator，复用 Gateway 的节点认证。这样不需要为节点新开一条访问 Coordinator 的数据通道。
+`baton-project-runtime` 是一个独立的 Node.js 程序，采用固定版本 Node bundle，随 batond 的安装包分发。设备需要安装 Node.js 22.19.0 或更高版本，才能承载 Project Agent；只运行执行 Agent 的设备不需要 Node.js。batond 负责发现它、上报能力、启动和停止进程、代为续租。Runtime 不直接连 Coordinator，所有请求经本地 IPC 交给 batond，再沿 Gateway 通道送到 Coordinator，复用节点认证。这样不需要为节点新开一条访问 Coordinator 的数据通道。
 
-新增 Gateway 消息类型 `ProjectRuntimeRequest` / `ProjectRuntimeResult`，处理方式和现有 `AgentRequest` 一致：batond 附上运行身份 `(run_id, lease_epoch)`，Coordinator 校验节点与运行记录一致、租约有效。每个请求和响应不超过 192 KiB，留出信封余量；每条对话事件写入时不超过 160 KiB（第 3 节），所以分页读取每页至少能取到一条。Runtime 经这条通道发出的请求只有下面几种：
+Gateway 消息类型 `ProjectRuntimeRequest` / `ProjectRuntimeResult`：batond 附上运行身份 `(run_id, lease_epoch)`，Coordinator 校验节点与运行记录一致、租约有效。每个请求和响应不超过 192 KiB，留出信封余量；每条对话事件写入时不超过 160 KiB（第 3 节），所以分页读取每页至少能取到一条。Runtime 经这条通道发出的请求只有下面几种：
 
 | 请求 | 作用 | 说明 |
 |---|---|---|
@@ -64,20 +59,20 @@ batond 启动命令为 `baton-project-runtime run`，工作目录是私有空目
 
 启动前先检查 provider，再向中心确认租约；启动意图先写入 SQLite，同一 run 在 batond 重启后不会重启进程。Unix 使用随 batond 管道关闭而停止进程组的守护，Windows 使用关闭时终止整个组的 Job Object。连接重建保留当前 Runtime，续租仍受 58 秒期限限制。期限使用包含系统休眠的单调时钟，最多每秒检查一次；机器唤醒后先核对旧期限，再发送或接受续租。读取时钟失败时停止进程。
 
-控制帧 JSON 采用 UTF-8 编码，容量不包含 HTML 页面转义。每批同时检查数据库规范文本、消息拼接后的传输字节及事件上限，因此含引号、反斜线等字符时可能提前结束一批。任务结果文本按 UTF-8 边界保留首尾，并注明原字节数；元数据与 JSON 编码后的条目仍限制为 40 KiB。长 Project 目标的通知在 4 KiB 内保留首尾并标明截断，完整目标由 Project API 返回。
+控制帧 JSON 采用 UTF-8 编码，容量不包含 HTML 页面转义。每批同时检查数据库规范文本、消息拼接后的传输字节及事件上限，因此含引号、反斜线等字符时可能提前结束一批。Thread 回复文本按 UTF-8 边界保留首尾，并注明原字节数；元数据与 JSON 编码后的条目限制为 40 KiB。长 Project 目标的通知在 4 KiB 内保留首尾并标明截断，完整目标由 Project API 返回。
 
 
 #### 2.1 Node sidecar 分发与 stdio
 
-PS-158 的发布方式是带生产依赖与锁文件的 Node bundle，位置为 batond 同目录的 `sidecars/project-agent/`。通用打包工具、manifest 校验、stdio 容量、进程树回收和崩溃后重新启动的职责见 [Node sidecar 约定](../../runtimes/README.md)。`node tools/package-batond.mjs` 构建可分发目录；登录命令见 [Runtime 安装说明](../../runtimes/project-agent/README.md)。
+Runtime 以带生产依赖与锁文件的 Node bundle 发布，位置为 batond 同目录的 `sidecars/project-agent/`。通用打包工具、manifest 校验、stdio 容量、进程树回收和崩溃后重新启动的职责见 [Node sidecar 约定](../../runtimes/README.md)。`node tools/package-batond.mjs` 构建可分发目录；登录命令见 [Runtime 安装说明](../../runtimes/project-agent/README.md)。
 
 batond 优先使用 bundle，通过 Node 直接运行 manifest 中的入口，要求 Runtime 版本 `0.1.0`、stdio 协议版本 1。没有 bundle 时仍可通过 PATH 发现 `baton-project-runtime`。启动前 `probe` 的版本须匹配。bundle 存在但版本不兼容时拒绝启动。
 
 batond 设置 `BATON_SIDECAR_TRANSPORT=stdio` 后，Runtime 在 stdout 发送 `{id, request}`，在 stdin 接收 `{id, result}`，每个对象占一行 UTF-8 JSON，单帧最多 192 KiB，最多 8 个请求在途。运行身份由专用管道绑定，batond 继续覆盖请求身份。带 token 的本地 IPC 继续兼容。`poll_wake` 可在 payload 中指定 `wait_ms`（1～25000），使 180 秒闲置和 15 分钟上限在最后一次等待时准确结束。
 
-bootstrap 顶层的 `local_wait_protocol:1` 表示 batond 支持按任务版本等待。任务等待的 payload 为 `{task_id,after_version,wait_ms}`，仅允许该 run 已从中心响应绑定的任务；返回 `{reason:"task_changed"|"timeout",version}`。任务版本提示通过 `project_run_wake.task_updates` 传送，相同版本、旧 epoch 和无关输入不唤醒任务等待者。版本缓存与广播通道由同一互斥区保护，每个 run 最多保留 64 个任务绑定，工具结果返回后释放。普通闲置 `poll_wake` 继续使用原有通用通知。
+bootstrap 顶层的 `local_wait_protocol:1` 表示 batond 支持按 Thread 版本等待。等待的 payload 为 `{thread_id,after_version,wait_ms}`，仅允许该 run 已从中心响应绑定的 Thread；返回 `{reason:"thread_changed"|"timeout",version}`。版本提示通过 `project_run_wake.thread_updates` 传送，相同版本、旧 epoch 和无关输入不唤醒等待者。版本缓存与广播通道由同一互斥区保护，每个 run 最多保留 64 个绑定，工具结果返回后释放。普通闲置 `poll_wake` 继续使用原有通用通知。
 
-`call_tool` 的请求字段为 `tool_call_id`、`tool_name`、`arguments` 和 `last_seq`，成功返回保存的 `tool_result` Event。Runtime 的固定工具定义与 PS-157 的字段一致；`nodes.exec` 和 `inbox.*` 在后续工单启用。工具状态不存于本地控制目录。
+`call_tool` 的请求字段为 `tool_call_id`、`tool_name`、`arguments` 和 `last_seq`，成功返回保存的 `tool_result` Event。工具定义见第 7 节，工具状态不存于本地控制目录。
 
 Runtime 的登录由用户在设备上执行 `baton-project-runtime login <provider>` 完成，走 pi-ai 的 OAuth 流程。凭据存在 Runtime 自己的数据目录，文件权限沿用 batond 的私有文件约定。`baton-project-runtime probe` 只读取凭据状态并返回各 provider 是否已登录，不发送推理请求；batond 用它生成能力报告。
 
@@ -85,9 +80,7 @@ Runtime 进程的工作目录是一个空的控制目录。pi-agent-core 本身�
 
 ### 3. 数据模型
 
-PS-155 通过 0016 交付 Project、Agent、主对话、事件、记忆和输入队列的中心存储，以及 Project、用户消息、事件读取、记忆 API。输入领取、被动通知、放置和租约由 PS-156 实现。PS-156 同时提供运行身份校验和带序号、事件标识的 assistant 写入。工具执行由 PS-157 实施。
-
-新增表都带 `employee_id`，跨表引用使用包含 `employee_id` 的复合外键，沿用现有归属检查方式。
+表都带 `employee_id`，跨表引用使用包含 `employee_id` 的复合外键，沿用现有归属检查方式。
 
 | 表 | 主要字段 | 说明 |
 |---|---|---|
@@ -101,20 +94,20 @@ PS-155 通过 0016 交付 Project、Agent、主对话、事件、记忆和输入
 | `project_memory_revisions` | entry_id, employee_id, revision, content, author, source_seq, created_at | 只追加；`author` 为 agent 或 user |
 | `node_runtime_reports` | node_id, employee_id, report_version, reported_at, report | 节点能力的结构化报告（第 8 节）；现有 `nodes.capabilities` 是最多 32 项的字符串数组，装不下目录和仓库信息 |
 
-`tasks` 新增可空列 `project_id`、`origin_conversation_id`、`origin_tool_call_id`，并对后两列建唯一索引。用户在 Project 手工创建的任务只填写 `project_id`；全局手工任务和执行 Agent 派生的任务这三列为空。
+`threads` 带可空列 `project_id`、`origin_conversation_id`、`origin_tool_call_id`，后两列唯一。员工在 Project 里新建的 Thread 只填写 `project_id`；Project Agent 新建的三列都填写。`thread_turns.initiator` 记录这一轮由员工还是 Project Agent 开启，Project Agent 开启时另记 `origin_tool_call_id`。
 
-输入队列是 Coordinator 内部的数据，用户界面上的待办事项不用这张表。事项表和浏览器通知的订阅表由 Agent Inbox 的技术设计定义。`source_type` 有六种，分成两类：
+输入队列是 Coordinator 内部的数据，用户界面上的待办事项不用这张表。事项表由 Agent Inbox 的技术设计定义。`source_type` 有六种，分成两类：
 
 | source_type | 类别 | 来源 | payload 上限 |
 |---|---|---|---|
 | `user_message` | 主动 | 用户在主对话发送的消息，API 拒绝超过 64 KiB 的消息 | 64 KiB 正文加元数据 |
-| `user_task_result` | 被动 | 用户在 Project 直接派发的任务进入终态 | 40 KiB；含命令输出时 72 KiB |
-| `task_result` | 主动 | Project Agent 派发的任务进入终态（第 9 节） | 40 KiB；含命令输出时 72 KiB |
+| `thread_reply` | 被动 | Project Agent 开启的一轮里，Agent 的一条回复（第 9 节） | 40 KiB |
+| `turn_ended` | 主动 | Project Agent 开启的一轮结束；shell Thread 的这一条带命令输出（第 9、10 节） | 4 KiB；带命令输出时 72 KiB |
 | `attention_answer` | 主动 | 用户回答或关闭一个事项（Agent Inbox IB-12），内容是事项 ID、标题、选中的选项和最多 4 KiB 的文字；上限包含 JSON 转义 | 32 KiB |
 | `memory_updated` | 被动 | 用户在界面上新建或修改记忆（第 6.4 节） | 1 KiB |
 | `project_updated` | 被动 | 用户修改 Project 标题或目标（第 6.1 节） | 4 KiB |
 
-主动输入会触发放置和唤醒；被动输入只记录变化，等下一批主动输入一起交给模型（第 4 节）。`task_result` 条目包含任务 ID、状态、退出码和结果的文本字段（`summary`、`evidence`、`error`、命令输出），文本合计超过 32 KiB 时保留开头和结尾，并注明原长度和「完整内容用 `tasks.get` 读取」。这些上限在写入时检查，所以每一条都能放进一次领取。
+主动输入会触发放置和唤醒；被动输入只记录变化，等下一批主动输入一起交给模型（第 4 节）。`thread_reply` 条目包含 Thread ID、Turn 序号、回复序号、正文和附件，正文超过 32 KiB 时保留开头和结尾，并注明原长度和「完整内容用 `threads.read` 读取」。这些上限在写入时检查，所以每一条都能放进一次领取。
 
 `conversation_events.kind` 有四种：
 
@@ -127,7 +120,7 @@ PS-155 通过 0016 交付 Project、Agent、主对话、事件、记忆和输入
 
 每条事件的 payload 不超过 160 KiB。`input` 由领取规则保证；`tool_result` 受单个工具输出 32 KiB 的限制；`assistant` 和 `compaction` 由 Runtime 把每次请求的 `maxTokens` 设为 32000 来控制，仍然超出时按模型请求失败处理（第 5 节），这条输出不保存，也没有执行其中的工具调用。
 
-用户消息队列的 payload 为 `{"content":"正文"}`，来源键为 `user:{client_message_id}`，摘要为正文 UTF-8 字节的 SHA-256。同一来源键与相同正文返回原始队列 ID 和创建时间，不同正文返回冲突。正文上限为 64 KiB，另检查数据库中 jsonb 规范文本的 72 KiB 上限，超限返回 413。接收消息不检查设备在线状态，也不生成 `input` 事件；PS-156 的领取事务负责生成事件。
+用户消息队列的 payload 为 `{"content":"正文"}`，来源键为 `user:{client_message_id}`，摘要为正文 UTF-8 字节的 SHA-256。同一来源键与相同正文返回原始队列 ID 和创建时间，不同正文返回冲突。正文上限为 64 KiB，另检查数据库中 jsonb 规范文本的 72 KiB 上限，超限返回 413。接收消息不检查设备在线状态，也不生成 `input` 事件；领取事务负责生成事件。
 
 记忆修改先锁条目，再读取当前修订。`expected_revision=0` 用于创建；已有条目的版本不匹配时返回 409、`current_revision` 和当前记忆全文。新修订与条目当前版本在同一事务内提交，修订不可更新或删除。员工 API 固定写 `author=user`；Agent 工具必须先校验运行身份，再以 `author=agent` 调用同一存储入口，`source_seq` 必须属于本 Project 主对话。
 
@@ -137,15 +130,15 @@ PS-155 通过 0016 交付 Project、Agent、主对话、事件、记忆和输入
 
 **放置。** Coordinator 每秒分页选择需要回收或放置的 Agent，每次最多 32 个；健康且租约有效的运行不占候选额度。待放置 Project 为 active、对话为 active 且已过 `next_attempt_at`、有待处理的主动输入、租约为空或已过期。只有被动输入时不放置。上次运行已领取输入但对话结尾仍为 input、tool_result 或带工具调用的 assistant 时，同样视为尚未完成的主动轮次，租约过期或失败退避结束后可从中心历史恢复。对每个这样的 Agent 选一台节点：属于同一用户、在线且已同步、报告里有 Runtime、Agent 配置的 provider 处于已登录状态、该节点正在运行的 Runtime 少于上限（默认 4）。默认设备满足条件时选默认设备，否则按注册顺序选第一台。
 
-**取得租约。** 一个事务里锁定 `project_agents` 行，确认租约为空或已过期，`lease_epoch` 加一，写 `lease_run_id` 和 `lease_until = now() + 60s`，插入 `agent_runs`（`state = starting`）。`dispatch_outbox` 的每一行都绑定 `task_id` 和 `execution_id`，不能直接复用；`agent_runs` 自己记录投递进度。start、stop、wake 分别领取，每类每秒最多 32 条、每节点最多两条，节点额度在全局 LIMIT 前应用。领取先保存下一次尝试时间，再向 Gateway 入队，按最多 30 秒的抖动退避重试；发送循环不等待回包。处于 `starting` 的运行以 `run_id` 为稳定消息 ID 重发 `project_run_start`，直到 batond 回执。batond 在本地 SQLite 里按 `run_id` 去重，同一 run 不会启动两个进程。启动前 batond 先执行一次 `probe`：所需 provider 已经不是登录状态时，拒绝启动并更新能力报告，Coordinator 以 `login_required` 结束这次运行，不计入失败次数，扫描会在下一轮选择其他节点。
+**取得租约。** 一个事务里锁定 `project_agents` 行，确认租约为空或已过期，`lease_epoch` 加一，写 `lease_run_id` 和 `lease_until = now() + 60s`，插入 `agent_runs`（`state = starting`）。`agent_runs` 自己记录启动和停止命令的投递进度。start、stop、wake 分别领取，每类每秒最多 32 条、每节点最多两条，节点额度在全局 LIMIT 前应用。领取先保存下一次尝试时间，再向 Gateway 入队，按最多 30 秒的抖动退避重试；发送循环不等待回包。处于 `starting` 的运行以 `run_id` 为稳定消息 ID 重发 `project_run_start`，直到 batond 回执。batond 在本地 SQLite 里按 `run_id` 去重，同一 run 不会启动两个进程。启动前 batond 先执行一次 `probe`：所需 provider 已经不是登录状态时，拒绝启动并更新能力报告，Coordinator 以 `login_required` 结束这次运行，不计入失败次数，扫描会在下一轮选择其他节点。
 
 **续租。** Runtime 进程存活期间，batond 每 20 秒发送一次续租。Coordinator 只在 `(run_id, lease_epoch)` 仍是当前值且未过期时，把 `lease_until` 延长到 `now() + 60s`。batond 按单调时钟计时：从最后一次续租成功起超过 58 秒仍未续上，就停止 Runtime 进程。租约过期后，旧实例的任何请求都返回 `lease_lost`，Runtime 收到后立即退出。
 
 **停止。** Project 被暂停或归档、运行所在节点被吊销、员工在界面上停止运行时，Coordinator 在同一事务作废租约（`lease_epoch` 不变，清空 `lease_run_id`）并保存停止意图，独立发送 `project_run_stop`。batond 收到后停止 Runtime，已结束的运行补送原清理确认。自然 `finish` / `report_failure` 给节点 2 秒主动清理确认宽限；其他停止立即到期。只有 `stopped` 回执确认清理，业务终态和新运行租约保持不变。停止重试只查询待确认索引，不与 start / wake 共用批次。即使停止消息没有送达，旧实例的下一次请求也会因租约失效被拒绝。
 
-**唤醒。** 主动输入与业务变化同事务保存 `wake_required` 和到期时间，来源去重不重新打开通知。有效 running run 的每条 `project_run_wake` 最多包含 32 个 `input_ids`，并从这些输入构造原有 `task_updates`。batond 合并通用唤醒和任务版本后，通过容量 64 的异步回执队列发送 `wake_received`；队列满或回执丢失时由中心退避重发。接收确认只按本条消息的输入 ID 清除通知需求，不设置 `delivered_seq`，不追加对话事件，也不续租。同一轮执行期间，新消息可以保持未认领且已停止重复通知。
+**唤醒。** 主动输入与业务变化同事务保存 `wake_required` 和到期时间，来源去重不重新打开通知。有效 running run 的每条 `project_run_wake` 最多包含 32 个 `input_ids`，并从这些输入构造 `thread_updates`。batond 合并通用唤醒和 Thread 版本后，通过容量 64 的异步回执队列发送 `wake_received`；队列满或回执丢失时由中心退避重发。接收确认只按本条消息的输入 ID 清除通知需求，不设置 `delivered_seq`，不追加对话事件，也不续租。同一轮执行期间，新消息可以保持未认领且已停止重复通知。
 
-新 run 在 Agent 锁下重新提示全部未认领主动输入，旧 run 的迟到回执不能清除新 run 的通知。通知确认不使用 sequence 最大值作为提交水位。只有被动输入时不发送 wake。Runtime 每轮结束主动领取，任务等待仍有最多 25 秒本地等待后的持久状态补读；通知不代替业务结果。完整字段和故障恢复规则见[控制面调度设计](../control-dispatch-reliability/TECH.md)。
+新 run 在 Agent 锁下重新提示全部未认领主动输入，旧 run 的迟到回执不能清除新 run 的通知。通知确认不使用 sequence 最大值作为提交水位。只有被动输入时不发送 wake。Runtime 每轮结束主动领取，`nodes.exec` 的等待仍有最多 25 秒本地等待后的持久状态补读；通知不代替业务结果。完整字段和故障恢复规则见[控制面调度设计](../control-dispatch-reliability/TECH.md)。
 
 **Runtime 主循环。**
 
@@ -177,7 +170,7 @@ PS-155 通过 0016 交付 Project、Agent、主对话、事件、记忆和输入
 | `input` 或 `tool_result` | 模型回复还没保存就崩溃 | 调用 `continue()`，重新请求模型 |
 | `compaction` | 轮内或收尾压缩后退出 | 查看最后一条非压缩事件，仍为未完成轮次时继续恢复，否则领取输入 |
 
-重新发出的 `call_tool` 不会重复产生副作用：如果该 `tool_call_id` 已有 `tool_result`，Coordinator 直接返回已保存的结果；如果没有，说明原来的事务没有提交，副作用也没有发生，这次正常执行。这依赖第 7 节的规则：除 `nodes.exec` 外，所有工具的副作用和 `tool_result` 在同一个事务里提交。`nodes.exec` 的副作用发生在另一台设备上，它靠任务的唯一性保证只执行一次（第 10 节）。
+重新发出的 `call_tool` 不会重复产生副作用：如果该 `tool_call_id` 已有 `tool_result`，Coordinator 直接返回已保存的结果；如果没有，说明原来的事务没有提交，副作用也没有发生，这次正常执行。这依赖第 7 节的规则：所有工具的中心状态变化和 `tool_result` 在同一个事务里提交，`nodes.exec` 的等待结果除外。`threads.create`、`threads.send` 和 `nodes.exec` 的副作用发生在设备上，事务里只保存 Thread 和消息意图，靠 `client_message_id` 的唯一性保证只发出一次（第 9、10 节）。
 
 模型请求失败时，Runtime 在本次运行内重试 3 次，间隔 5、15、45 秒。仍然失败就调用 `report_failure`，Coordinator 把 `failure_count` 加一，设置 `next_attempt_at`（依次推迟 1、5、15 分钟），本次运行结束。`failure_count` 达到 3 时，对话进入 `needs_attention`，扫描不再放置它，界面显示最后的错误。用户通过 `POST /api/v1/projects/{id}/retry` 确认重试后清零，对话回到 active。`POST /api/v1/projects/{id}/stop` 作废当前租约并结束这次运行；未领取的主动输入仍可在后续扫描时触发新的运行。这两个接口沿用员工会话、同源和 CSRF 校验，正文为 JSON `{}`，拒绝未知字段和查询参数，成功返回 `200 {"ok":true}`，其他员工的 Project 返回 404。任何一次 assistant 消息保存成功都会把 `failure_count` 清零。失败的模型输出不写入对话，避免把错误内容带进后续上下文。
 
@@ -209,11 +202,11 @@ Project 标题或目标被修改后，新的系统提示词从下一次压缩起
 
 #### 6.3 压缩过程
 
-1. **清除旧工具结果。** 默认只选择最近 3 批输入以前、已有后续 assistant 分析、内容估算超过 8192 字符的 `tool_result`，替换成占位文字：`[工具结果已清除，原文为第 123 条。需要时用 history.read 读取，或重新调用工具获取最新状态]`。最近尚未分析的结果保留。这一步不调用模型，清除集合立即通过 `commit_compaction` 保存；没有摘要时 `through_seq=0`、`summary=""`，视图不添加空摘要消息。后续清除沿用旧摘要和提示词快照。按 PA-18，清除后的信息都能重新拿到。清除后用量降到窗口的 40% 以下（且满足回答预算），就到此为止。
+1. **清除旧工具结果。** 默认只选择最近 3 批输入以前、已有后续 assistant 分析、内容估算超过 8192 字符的 `tool_result`，替换成占位文字：`[工具结果已清除，原文为第 123 条。需要时用 history.read 读取，或重新调用工具获取最新状态]`。最近尚未分析的结果保留。这一步不调用模型，清除集合立即通过 `commit_compaction` 保存；没有摘要时 `through_seq=0`、`summary=""`，视图不添加空摘要消息。后续清除沿用旧摘要和提示词快照。按 PA-16，清除后的信息都能重新拿到。清除后用量降到窗口的 40% 以下（且满足回答预算），就到此为止。
 2. **生成摘要。** 把最早的一段对话换成摘要。优先保留最近 2 批输入对应的对话，并保留至少占窗口 15% 的最近内容；单轮或最近几轮过长、没有可用切点时，允许在已完成的工具批次之间切分。切点不会把一条 assistant 消息和它的工具结果分开，也不会吞掉最后一个保留单元。摘要请求沿用原模型、系统提示词、工具定义、消息格式、provider 签名与 `sessionId`，重放待压缩的消息前缀及旧摘要，在最后追加一条 user 压缩指令，并设置 `toolChoice: "none"`。这参考 DSH 的前缀复用方式；Pi 的默认摘要器把旧对话序列化成文本，使用独立系统提示词，无法沿用原对话的整段缓存前缀。实际命中取决于 provider、路由和缓存有效期，工具结果清除也会影响前缀。恢复的历史已超过窗口时，先选择一次摘要请求能容纳的较短前缀，并为输出留出容量；一次检查最多执行 3 次有效缩减。
 3. **验证并写入。** Runtime 拒绝空白、被截断、含工具调用或非文本输出的摘要，检查完整模型视图的估算用量确实下降，并检查事件 JSON 容量。`commit_compaction` 带 `last_seq` 和稳定的 `client_event_id`；Coordinator 在运行租约与对话锁保护下检查序号未变化、范围单调前进、工具配对、清除集合没有丢失和被替换内容确实缩短，再在同一事务里追加事件并更新 `compaction_seq`。清除集合为有序、无重复的保留区工具结果序号。事件保存 `through_seq`、`summary`、`cleared_tool_result_seqs`、`memory_index`、`prompt`、`tokens_before`、`tokens_after`、`provider`、`model` 和可选 `usage`；前后用量为同一字符估算单位，记忆索引来自 bootstrap 的标题快照，最多 2 KiB，不含记忆正文。只清除工具结果时使用旧索引，生成新摘要时记录当前索引和最新标题、目标快照。相同标识和相同内容的重发返回原事件；不同内容复用标识返回冲突。序号或配置冲突时丢弃摘要，重新读取中心状态，最多重试 2 次；提交失败不应用本地替换。
 
-压缩指令针对协调角色编写，要求摘要保留：用户的目标和偏好、纠正与明确指令、做过的决定及理由、派出的任务（准确任务 ID、目标设备、已知状态与证据入口）、尚未完成的事项及下一步。上一次的摘要也在被压缩的范围里，指令要求合并有效事实并更新状态，不编造标识符或执行结果。摘要请求失败按 5、15、45 秒重试，耗尽后走模型请求失败流程；已提交的工具清除仍然有效。普通请求出现明确上下文超限时，仅在压缩确实推进后重试一次，失败回复不进入历史。轮内压缩后的崩溃恢复和调度都查看最后一条非压缩事件，压缩记录不会遮蔽待执行工具或待分析的结果。
+压缩指令针对协调角色编写，要求摘要保留：用户的目标和偏好、纠正与明确指令、做过的决定及理由、开过的 Thread（准确 Thread ID、设备、目录、当前状态和最后的结论）、尚未完成的事项及下一步。上一次的摘要也在被压缩的范围里，指令要求合并有效事实并更新状态，不编造标识符或执行结果。摘要请求失败按 5、15、45 秒重试，耗尽后走模型请求失败流程；已提交的工具清除仍然有效。普通请求出现明确上下文超限时，仅在压缩确实推进后重试一次，失败回复不进入历史。轮内压缩后的崩溃恢复和调度都查看最后一条非压缩事件，压缩记录不会遮蔽待执行工具或待分析的结果。
 
 压缩后，第 6.1 节第 3 项的开头消息内容如下，第一行由程序生成：
 
@@ -233,7 +226,7 @@ Project 标题或目标被修改后，新的系统提示词从下一次压缩起
 
 两次压缩之间的记忆修改有两种来源。Project Agent 自己用 `memory.write` 修改时，结果已经以工具结果的形式出现在对话里，不再发通知。用户在界面上新建或修改记忆时，Coordinator 在保存新版本的同一个事务里写一条 `memory_updated` 被动输入，`source_key = memory:{entry_id}:rev:{revision}`，内容是记忆 ID、标题、版本号和「由用户修改」。正文不放进通知，Project Agent 需要时用 `memory.read` 读取。
 
-这条通知不触发运行：用户改一条记忆，不值得为此启动 Runtime、花一次模型调用。它随下一批主动输入交给模型，所以 Project Agent 在处理用户下一条消息或下一个任务结果时，一定已经知道记忆变了。Project Agent 正在运行时，通知同样等到下一轮。本期没有删除记忆的功能；以后增加时，删除也走这条通知。
+这条通知不触发运行：用户改一条记忆，不值得为此启动 Runtime、花一次模型调用。它随下一批主动输入交给模型，所以 Project Agent 在处理用户下一条消息或下一轮 Thread 结束时，一定已经知道记忆变了。Project Agent 正在运行时，通知同样等到下一轮。本期没有删除记忆的功能；以后增加时，删除也走这条通知。
 
 ### 7. 工具
 
@@ -245,11 +238,14 @@ Project 标题或目标被修改后，新的系统提示词从下一次压缩起
 | `history.search` | 只读 | 在主对话原文里按关键字搜索，返回序号和片段 | 自身 |
 | `history.read` | 只读 | 按序号范围读取原文 | 自身 |
 | `devices.list` | 只读 | 列出本人设备、在线状态和能力报告 | 自身 |
-| `tasks.dispatch` | 写入 | 派发一个任务，参数见第 9 节 | `tasks.list`、`tasks.get` |
-| `tasks.list` | 只读 | 列出本 Project 的任务，可按状态筛选 | 自身 |
-| `tasks.get` | 只读 | 读取一个任务的状态、结果和证据 | 自身 |
-| `tasks.cancel` | 写入 | 请求取消本 Project 的一个任务 | `tasks.get` |
-| `nodes.exec` | 写入 | 在开启了命令执行的节点上执行一条命令，参数见第 10 节 | `tasks.get` |
+| `threads.create` | 写入 | 新建一个 Thread 并发出第一条消息，参数见第 9 节 | `threads.list`、`threads.get` |
+| `threads.send` | 写入 | 向本 Project 的一个 Thread 发消息，选择排队或插入 | `threads.get` |
+| `threads.stop` | 写入 | 停止一个 Thread 当前的一轮 | `threads.get` |
+| `threads.archive` | 写入 | 归档一个 Thread | `threads.get` |
+| `threads.list` | 只读 | 列出本 Project 的 Thread，可按状态筛选 | 自身 |
+| `threads.get` | 只读 | 读取一个 Thread 的状态、当前 Turn 和待发消息 | 自身 |
+| `threads.read` | 只读 | 按 Turn 读取消息和回复正文 | 自身 |
+| `nodes.exec` | 写入 | 在开启了命令执行的节点上执行一条命令，参数见第 10 节 | `threads.read` |
 | `inbox.ask` | 写入 | 创建一个请用户处理的事项（Agent Inbox IB-01） | `inbox.list`、`inbox.get` |
 | `inbox.list` | 只读 | 列出本 Project 的事项及其状态 | 自身 |
 | `inbox.get` | 只读 | 读取一个事项的完整内容和处理结果 | 自身 |
@@ -257,7 +253,7 @@ Project 标题或目标被修改后，新的系统提示词从下一次压缩起
 
 单个工具输出不超过 32 KiB，超出时返回截断标记和继续读取的方式。
 
-每个 `call_tool` 请求包含 `tool_call_id`、工具名和参数。Coordinator 在一个事务里依次：校验租约；确认这个 `tool_call_id` 出现在对话最后一条 assistant 消息里，且还没有对应的 `tool_result`；执行工具，包括写入类工具的业务变更；把结果写成 `tool_result` 事件。参数不合法或业务拒绝时，也写一条 `is_error` 的结果，同一个调用不会被反复尝试。`nodes.exec` 是唯一的例外：事务里只接受任务，`tool_result` 在等待结束后写入（第 10 节）。
+每个 `call_tool` 请求包含 `tool_call_id`、工具名和参数。Coordinator 在一个事务里依次：校验租约；确认这个 `tool_call_id` 出现在对话最后一条 assistant 消息里，且还没有对应的 `tool_result`；执行工具，包括写入类工具的业务变更；把结果写成 `tool_result` 事件。参数不合法或业务拒绝时，也写一条 `is_error` 的结果，同一个调用不会被反复尝试。`nodes.exec` 是唯一的例外：事务里只新建 shell Thread，`tool_result` 在等待结束后写入（第 10 节）。
 
 「`tool_call_id` 必须出现在已保存的 assistant 消息里」这条检查，保证每个工具调用在执行前都已经落盘。崩溃恢复时，Runtime 看到的工具调用和 Coordinator 执行过的工具调用总是一致的。
 
@@ -277,19 +273,22 @@ Project 标题或目标被修改后，新的系统提示词从下一次压缩起
 | `history.search` | 可选 `query`、`after_seq`、`through_seq` |
 | `history.read` | 可选 `after_seq`、`through_seq`，读取 `(after_seq, through_seq]` |
 | `devices.list` | 可选 `after_id` |
-| `tasks.dispatch` | 第 9 节的五个必需字段；可选 `queue_timeout_seconds`、`execution_timeout_seconds`、`retry_of_task_id` |
-| `tasks.list` | 可选 `status`、`after_id` |
-| `tasks.get` | `task_id`；可选 `version`，变化时拒绝旧版本续读 |
-| `tasks.cancel` | `task_id` |
+| `threads.create` | `node_id`、`agent_type`、`working_directory`、`message`；可选 `execution_timeout_seconds` |
+| `threads.send` | `thread_id`、`message`；可选 `mode`（`queue` / `steer`，默认 `queue`） |
+| `threads.stop`、`threads.archive`、`threads.get` | `thread_id` |
+| `threads.list` | 可选 `status`、`after_id` |
+| `threads.read` | `thread_id`；可选 `after_turn`、`through_turn` |
+| `nodes.exec` | 第 10 节 |
+| `inbox.*` | 见 Agent Inbox TECH 第 3 节 |
 
-只读工具还接受 `offset`、`max_bytes`。结果采用 `{encoding:"json", text, offset, total_bytes, truncated, next_offset?}`：先把完整业务结果编码为 JSON，再按 UTF-8 字节取片段。调用方在 `truncated=true` 时以同样的业务参数和 `next_offset` 继续读取，拼接 `text` 后解析 JSON。`max_bytes` 默认 16 KiB、最大 32 KiB；中心按实际 JSON 编码后的容量进一步缩短片段，整个工具结果 payload 不超过 32 KiB。记忆续读可固定 `revision`，任务续读可固定 `version`。
+只读工具还接受 `offset`、`max_bytes`。结果采用 `{encoding:"json", text, offset, total_bytes, truncated, next_offset?}`：先把完整业务结果编码为 JSON，再按 UTF-8 字节取片段。调用方在 `truncated=true` 时以同样的业务参数和 `next_offset` 继续读取，拼接 `text` 后解析 JSON。`max_bytes` 默认 16 KiB、最大 32 KiB；中心按实际 JSON 编码后的容量进一步缩短片段，整个工具结果 payload 不超过 32 KiB。记忆续读可固定 `revision`，`threads.read` 续读固定 `through_turn`。
 
-搜索和列表每页最多 20 条，业务 JSON 中用 `next_after_id` 或 `next_after_seq` 继续取得下一组；空列表表示结束。`history` 返回 `through_seq`，默认固定为本次工具调用的 assistant 序号，后续读取应保持该值，避免把续读过程新产生的事件加入范围。`history.read` 保留原事件 JSON，包括已压缩的原文。`memory.search` 返回标题、版本和正文片段，全文由 `memory.read` 取得；`tasks.list` 返回任务标识、状态、版本与描述片段，完整记录由 `tasks.get` 取得。
+搜索和列表每页最多 20 条，业务 JSON 中用 `next_after_id` 或 `next_after_seq` 继续取得下一组；空列表表示结束。`history` 返回 `through_seq`，默认固定为本次工具调用的 assistant 序号，后续读取应保持该值，避免把续读过程新产生的事件加入范围。`history.read` 保留原事件 JSON，包括已压缩的原文。`memory.search` 返回标题、版本和正文片段，全文由 `memory.read` 取得；`threads.list` 返回 Thread 标识、设备、目录、Agent、状态和最后活动时间，内容由 `threads.read` 取得。
 
-写工具返回资源 ID、版本或状态及 `read_tool`。记忆冲突返回当前版本和内容，超限时返回截断标记及 `memory.read` 入口。`tasks.dispatch` 的重派关联保存在现有的 `task_relations.rerun_of_task_id` 中。
+写工具返回资源 ID、版本或状态及 `read_tool`。记忆冲突返回当前版本和内容，超限时返回截断标记及 `memory.read` 入口。
 
 
-`inbox.ask` 的展示内容是最多 32 KiB 的 Markdown，链接只允许 `https`；Coordinator 在工具事务内检查长度、链接、选项声明、关联任务归属及 10 个待处理提案上限，不合规时保存 `is_error` 结果。工具参数和事项事务见 [Agent Inbox TECH](../agent-inbox/TECH.md) 第 3、4 节。OpenUI Lang、组件库和 Runtime 解析推迟到第一个版本之后。
+`inbox.ask` 的展示内容是最多 32 KiB 的 Markdown，链接只允许 `https`；Coordinator 在工具事务内检查长度、链接、选项声明、关联 Thread 归属及 10 个待处理提案上限，不合规时保存 `is_error` 结果。工具参数和事项事务见 [Agent Inbox TECH](../agent-inbox/TECH.md) 第 3、4 节。
 
 ### 8. 节点能力报告
 
@@ -307,11 +306,11 @@ batond 在连接时和能力变化时上报 `node_runtime_reports.report`，结�
 }
 ```
 
-`exec.enabled` 来自 batond 本地配置里的「允许 Project Agent 执行命令」开关，默认关闭；`exec.shell` 是该节点执行命令使用的 shell。`roots` 来自用户在节点上授权的目录，沿用现有 `batond files` 的登记。`roots` 上报真实路径，因为任务的 `working_directory` 本来就是目标节点上的路径；Web 文件浏览仍只用 `root_id` 和相对路径。`repos` 是在授权目录内有限深度扫描得到的 Git 仓库，上报路径和去掉凭据的 origin，不上传文件内容。`provider.status` 为 available / login_required / unknown，凭据不离开设备。
+`exec.enabled` 来自 batond 本地配置里的「允许 Project Agent 执行命令」开关，默认关闭；`exec.shell` 是该节点执行命令使用的 shell。`roots` 来自用户在节点上授权的目录，沿用现有 `batond files` 的登记。`roots` 上报真实路径，因为 Thread 的 `working_directory` 本来就是目标节点上的路径；Web 文件浏览仍只用 `root_id` 和相对路径。`repos` 是在授权目录内有限深度扫描得到的 Git 仓库，上报路径和去掉凭据的 origin，不上传文件内容。`provider.status` 为 available / login_required / unknown，凭据不离开设备。
 
 `devices.list` 把这些报告交给 Project Agent，它据此选择工作目录。
 
-PA-W02 通过现有 Gateway 的控制队列传送 `node.runtime_report`，正文为 `{ "type": "node.runtime_report", "report": { ... } }`。Coordinator 返回 `node.runtime_report_result`，含 `ok`、成功时的 `report_version` 或失败时的 `code`，信封 `correlation_id` 对应请求的 `message_id`。节点在 `node.sync` 成功后发送报告；未收到成功回执时，在同一进程的连接重试中保留原消息标识和报告内容；采集到的新内容在待确认报告成功后发送。重连后重新发送报告，已确认的报告使用新消息标识。回执只作用于发送该报告的当前连接，旧连接迟到的回执不能确认新连接上的报告。中心只接受当前已同步、未吊销连接的报告，并在事务内再次检查员工、节点、凭据和连接。`report_version` 从 1 开始，报告内容变化时加一；相同内容的重发只刷新 `reported_at`。这些写入不修改 `nodes.capabilities`。
+batond 通过 Gateway 的控制队列传送 `node.runtime_report`，正文为 `{ "type": "node.runtime_report", "report": { ... } }`。Coordinator 返回 `node.runtime_report_result`，含 `ok`、成功时的 `report_version` 或失败时的 `code`，信封 `correlation_id` 对应请求的 `message_id`。节点在 `node.sync` 成功后发送报告；未收到成功回执时，在同一进程的连接重试中保留原消息标识和报告内容；采集到的新内容在待确认报告成功后发送。重连后重新发送报告，已确认的报告使用新消息标识。回执只作用于发送该报告的当前连接，旧连接迟到的回执不能确认新连接上的报告。中心只接受当前已同步、未吊销连接的报告，并在事务内再次检查员工、节点、凭据和连接。`report_version` 从 1 开始，报告内容变化时加一；相同内容的重发只刷新 `reported_at`。这些写入不修改 `nodes.capabilities`。
 
 节点每轮采集完成后等待 5 秒再采集，连接建立时也请求刷新。采集在独立循环中串行运行，连接、心跳和 Worker 消息不等待扫描。每轮预算 2 秒；文件系统调用返回后检查期限，无法被操作系统取消的文件系统等待最多占用一个采集协程，重连不另起扫描。扫描只保存登记目录、仓库路径及 origin；目录文件内容不进入报告。
 
@@ -319,133 +318,101 @@ PA-W02 通过现有 Gateway 的控制队列传送 `node.runtime_report`，正文
 
 `batond project-exec --enabled=true|false [--shell 路径] [--data-dir 目录]` 原子保存本机 `project-exec.json`。必须显式给出开关，初始值为关闭；默认 shell 在 Windows 为 `pwsh`，其他系统采用 `SHELL`，未设置时为 `/bin/sh`。配置损坏或权限检查失败时上报关闭。该命令维护配置；Session Worker 在启动命令前重新读取开关。CLI 和节点页面在开启前说明当前用户权限、任意命令、没有沙箱和注入风险。
 
-`baton-project-runtime probe` 的 stdout 契约是一个 JSON 对象：`{ "version": "0.1.0", "providers": [{ "provider": "openai-codex", "status": "available" }] }`。状态只接受 `available`、`login_required`、`unknown`，最多 32 个 provider，名称和版本不超过 128 个 ASCII 字符（字母、数字、点、下划线、加号、连字符）。batond 每轮调用一次 `probe`，时限 1 秒，stdout 缓冲最多 16 KiB，丢弃 stderr；拒绝未知字段、尾随数据和超限输出。Runtime 未安装、probe 失败或输出无效时省略 `project_runtime`，不复用旧登录状态。PS-154 使用契约测试程序验证调用边界，Runtime、登录及真实 provider 验证由 PS-158 完成。
+`baton-project-runtime probe` 的 stdout 契约是一个 JSON 对象：`{ "version": "0.1.0", "providers": [{ "provider": "openai-codex", "status": "available" }] }`。状态只接受 `available`、`login_required`、`unknown`，最多 32 个 provider，名称和版本不超过 128 个 ASCII 字符（字母、数字、点、下划线、加号、连字符）。batond 每轮调用一次 `probe`，时限 1 秒，stdout 缓冲最多 16 KiB，丢弃 stderr；拒绝未知字段、尾随数据和超限输出。Runtime 未安装、probe 失败或输出无效时省略 `project_runtime`，不复用旧登录状态。
 
-### 9. 派发任务与结果回收
+### 9. Thread 操作与回复回收
 
-`tasks.dispatch` 的参数：`target_node_id`、`agent_type`、`working_directory`（目标节点上的路径，沿用现有任务字段，目录必须已经存在）、`description`、`expected_outputs`、可选的期限，以及可选的 `retry_of_task_id`。`agent_type` 不能是 `shell`，命令只能通过 `nodes.exec` 执行。
+**新建。** `threads.create` 在 `call_tool` 的事务里调用与员工 API 相同的 Store 入口：`client_thread_id` 为 `pa:{conversation_id}:{tool_call_id}`，第一条消息的 `client_message_id` 为 `pa:{conversation_id}:{tool_call_id}:0`，并写入 `project_id`、`origin_conversation_id`、`origin_tool_call_id`。目标节点、目录和 Agent 的校验与员工新建相同（Baton R-07）；`agent_type` 不能是 `shell`，命令只能通过 `nodes.exec` 执行。事务只保存 Thread、消息意图和 outbox，设备收到后才开始执行；工具结果返回 Thread ID 和状态，不等待回复。
 
-Coordinator 在 `call_tool` 的同一个事务里调用任务接受逻辑，`request_id` 固定为 `pa:{conversation_id}:{tool_call_id}`，并写入 `project_id`、`origin_conversation_id`、`origin_tool_call_id`。现有 `acceptOnce` 自己开启事务，需要拆出一个接受外部事务的版本，原有调用方式保持不变。锁顺序为：`project_agents` 行 → `conversations` 行 → `tasks` → `executions`。现有路径不锁前两者，所以不会与现有的「先 tasks 后 executions」形成环。
+**发消息、停止、归档。** `threads.send` 的 `client_message_id` 为 `pa:{conversation_id}:{tool_call_id}`。目标 Thread 必须属于本 Project，可以是员工自己开的（PA-19）。`mode=steer` 在 Agent 不支持时返回 `is_error`。`threads.stop`、`threads.archive` 与员工操作走同一入口，操作者记为 Project Agent。
 
-带 `retry_of_task_id` 时，原任务必须属于同一 Project，并且状态是已确认失败或已取消；处于待核实状态的任务不能这样重派，仍需用户按 Baton R-20 确认。新旧任务的关系写进 `task_relations`。
+锁顺序为 `project_agents` → `conversations` → `threads` → `thread_outbox`。员工 API 只锁 `threads` → `thread_outbox`，不形成环。
 
-任务进入终态的那个事务（执行报告、到期处理、人工核实）里，如果任务的 `origin_conversation_id` 不为空，就向输入队列插入一条 `task_result`：`source_key = task:{task_id}:result:{task_version}`，冲突时忽略，内容按第 3 节限长。人工修正结果会提高任务版本，因此形成一条新的输入。这一步只写 `project_agent_input_queue`，不锁 `project_agents`，不改变现有终态处理的锁顺序。
+**Turn 的归属。** Worker 开启一轮时，在 `turn.started` 里带上第一条消息的 `client_message_id`。中心按这条消息的发送方写 `thread_turns.initiator`：Project Agent 发出的，这一轮归它；员工发出的，归员工。员工在 Project Agent 的一轮里插入消息或停止这一轮，不改变归属。
 
-执行 Agent 派生的子任务没有 `origin_conversation_id`，仍按现有父子交付把结果交给父任务（Baton R-14）。
+**回复进入输入队列。** Thread 报告的事务里（Baton TECH「上行报告」），如果当前 Turn 归 Project Agent：
+
+| 报告 | 输入 | `source_key` |
+|---|---|---|
+| `reply` | 被动 `thread_reply` | `thread:{thread_id}:reply:{worker_seq}` |
+| `turn.ended` | 主动 `turn_ended`，内容为 Thread ID、Turn 序号、结束原因、这一轮的回复条数 | `thread:{thread_id}:turn:{worker_turn_seq}` |
+
+来源键冲突时忽略，重复报告不会形成第二条输入。这一步只写 `project_agent_input_queue`，不锁 `project_agents`。被动的回复按 `id` 顺序排在主动的 `turn_ended` 之前，同一批领取时 Project Agent 先读到回复再读到结束（PA-A14）。回复条数超过一批上限时，剩下的在后续轮次领取，`turn_ended` 仍在它们之后。
+
+员工开启的一轮不写输入队列（PA-19）。Thread 由员工新建、归属 Project 时也一样。
+
+**执行时限与停止。** Worker 保证每个开始的 Turn 都有一次 `turn.ended`（Baton TECH「Turn 边界」），所以 Project Agent 不需要自己设置等待期限。Thread 进入 `unknown` 时，这一轮以 `agent_exited` 结束，同样形成 `turn_ended` 输入。
 
 ### 10. 在节点上执行命令
 
-`nodes.exec` 用于管理环境，例如创建 worktree、检查仓库状态、安装依赖。Baton 因此不需要实现 worktree、clone 等目录准备逻辑，任务的工作目录只有「已有目录」一种。
+`nodes.exec` 用于管理环境，例如创建 worktree、检查仓库状态、安装依赖。Baton 不实现 worktree、clone 等目录准备逻辑，Thread 的工作目录只有「已有目录」一种。开发工作优先交给 Thread 里的执行 Agent，这条分工写在系统提示词和工具说明里，由模型遵守（PA-03）。
 
-开发工作优先交给执行 Agent，这条分工写在系统提示词和 `nodes.exec` 的工具说明里，由模型遵守（PA-03）。Coordinator 和 Worker 不检查命令内容，也不拦截写文件；必要时 Project Agent 可以自己改配置、跑脚本。
+**参数。** `node_id`；`command`，交给节点上报的 shell 执行；`working_directory`，必须已经存在并位于该节点登记的目录内；`wait_seconds`，0～600，默认 30；`timeout_seconds`，默认 7200。
 
-**参数。** `node_id`；`command`，一个字符串，交给节点上报的 shell 执行；`working_directory`，命令的工作目录，必须已经存在并位于该节点登记的目录内；`wait_seconds`，Project Agent 最多等待多久，0～600，默认 30；`timeout_seconds`，命令的执行时限，默认 7200。
+**实现为一个 shell Thread。** `call_tool` 的事务里新建一个 `agent_type = shell` 的 Thread，第一条消息就是命令，`client_thread_id` 为 `pa:{conversation_id}:{tool_call_id}`，同一个工具调用最多新建一个 Thread、执行一次命令。目标节点的 `exec.enabled` 为假时直接写 `is_error` 结果。shell Thread 只有一个 Turn，命令退出后 Worker 报告一条回复（合并输出，开头和结尾各保留 16 KiB，附退出码和总字节数）和 `turn.ended`，然后 Thread 进入 `stopped`。它不接受第二条消息，界面上和普通 Thread 一样显示。
 
-**实现为一个 Task。** 命令在另一台设备上执行，副作用不可能和 `tool_result` 放进同一个事务。所以 `nodes.exec` 复用现有的任务机制：Coordinator 在 `call_tool` 的事务里接受一个 `agent_type = shell` 的任务，`request_id` 为 `pa:{conversation_id}:{tool_call_id}`，填写 `origin_*` 列；任务和 Execution 的唯一性保证同一个工具调用最多执行一次命令。这一步不写 `tool_result`。目标节点的 `exec.enabled` 为假时，直接写一条 `is_error` 的结果。
+**等待。** `call_tool` 返回 `{pending:true, thread_id, version, wait_remaining_ms, wait_protocol:1}`，等待截止时间保存在 `threads.exec_wait_until`，Runtime 重启不会延长它。Runtime 通过 batond 本机的 `poll_wake` 等待 Thread 版本变化或最多 25 秒，再调用短 `wait_tool` 查询。`wait_tool` 的 pending 路径用只读快照校验来源、租约、对话、工具调用和 Thread；需要写结果时按锁顺序重新校验：
 
-**等待。** `call_tool` 返回 `{pending:true,task_id,task_version,wait_remaining_ms,wait_protocol:1}`，等待截止时间保存在任务的 `exec_wait_until`，Runtime 重启不会延长它。Runtime 先调用一次短 `wait_tool` 核对状态；中心仍返回 pending 时，通过 batond 本机的任务 `poll_wake` 等待更高版本提示或最多 25 秒，再调用短 `wait_tool` 查询。剩余等待预算和运行预算都限制本地等待，节点按包含系统休眠的单调时钟扣除往返和经过时间。通知丢失后由本地等待到期触发核对。只有中心和 batond 都支持有版本的等待协议才启用该流程；旧节点沿用短查询兼容路径。
+- 这一轮已结束：工具结果包含退出码和输出。对应的 `turn_ended` 输入在同一事务标为已投递，`delivered_seq` 指向这条 `tool_result`，避免同一结果出现两次。
+- 仍在执行：工具结果为「仍在执行，Thread ID 为 …，结束后输出会作为新输入送回」。命令继续执行，结束时按第 9 节进入输入队列。
 
-`wait_tool` 的 pending 路径在短只读事务中校验来源、租约、对话、原工具调用和任务，不取得显式行锁。需要结束等待时，退出读取事务，按现有锁顺序重新校验后写入 `tool_result`。本地等待不持有数据库事务或 Gateway 节点串行槽位：
+单次运行的时长上限到达时，Runtime 以 `finish_wait=true` 立即结束等待并写入当前状态。
 
-- 任务已结束或进入待核实：结果包含当前版本、状态以及已有输出。任务状态事务已插入输入队列，这里把对应版本标记为已投递，`delivered_seq` 指向这条 `tool_result`，避免同一结果出现两次。待核实即使没有命令输出也进入队列。
-- 任务未结束：结果为「仍在执行，任务 ID 为 …，结束后结果会作为新输入送回」。命令继续执行，结束时按第 9 节进入输入队列。
+**恢复。** Runtime 在等待期间崩溃时，对话结尾是一个没有结果的 `nodes.exec` 调用。恢复时再次 `call_tool`，Coordinator 按 `(origin_conversation_id, origin_tool_call_id)` 找到已有的 Thread，返回 `pending`。命令不会再执行一次。
 
-等待结束不终止命令。单次运行的时长上限到达时，Runtime 用 `wait_tool` 的 `payload.finish_wait=true` 立即结束等待，按当前任务状态写入结果，然后正常结束运行。锁顺序为 `project_agents` → `conversations` → `tasks` → `project_agent_input_queue`；终态处理是 `tasks` → `executions` → `project_agent_input_queue`。两者都最后锁输入队列，不会形成环。
+**节点上的执行。** shell 适配器实现 Baton TECH 的 `Adapter`：`Send` 在提交 `intent` 之后启动命令（例如 `zsh -lc <command>`、`pwsh -NoProfile -Command <command>`），POSIX 上使用独立进程组，Windows 上使用 Job Object；`Abort` 终止整个进程组，返回已停止且副作用未知。Worker 收到 shell Thread 时再读一次本地开关，关闭就以 `thread.open_failed` 拒绝，所以 Coordinator 的能力报告过期也不会执行。
 
-**恢复。** Runtime 在等待期间崩溃时，对话结尾是一个没有结果的 `nodes.exec` 调用。恢复时再次 `call_tool`，Coordinator 按 `(origin_conversation_id, origin_tool_call_id)` 找到已有的任务，返回 `pending`，Runtime 继续等待。命令不会再执行一次。
+命令退出后，适配器先把完成记录写入私有 `output.json`（Thread、Turn、退出码、输出，原子替换，读取上限 192 KiB），再交出回复。Worker 崩溃后恢复时，有身份匹配的完成记录就补报回复和 `turn.ended`；没有则 Thread 进入 `unknown`，这一轮以 `agent_exited` 结束。命令退出与完成记录保存之间崩溃仍会落到 `unknown`。完成记录保留到 Session 目录回收。
 
-**节点上的执行。** Session Worker 使用内置的 `shell` 执行器，不启动 Agent 进程。它沿用启动许可和 `start_intent`：写入 `start_intent` 之后，用上报的 shell 执行命令（例如 `zsh -lc <command>`、`pwsh -NoProfile -Command <command>`），在 POSIX 上使用独立进程组，在 Windows 上使用 Job Object。stdout 和 stderr 合并后保留开头 16 KiB 和结尾 16 KiB，并记录总字节数和退出码。退出码为 0 时任务完成，否则失败，输出都放进结果。取消和超时时终止整个进程组。Worker 在命令执行中崩溃、无法确认进程状态时，任务进入待核实，沿用 Baton R-22。
+输出含无效 UTF-8 或不可展示控制字节时，整段保留的首尾字节用 base64 保存，回复元数据标 `encoding: base64`。
 
-`shell` 执行器实现 `internal/agent.Adapter`，在 `registeredAdapters` 里注册为 `shell`。`SubmitInput` 启动命令，结束后先保存完成记录，再由 `Drain` 返回结果，沿用 Worker 的异步轮询；`DeliverResult` 返回错误，因为命令不会委托子任务；`HistoryContains` 恒为 false；`ReadHistory` 返回候选结果，保持历史输出形状。`Abort` 终止进程组，返回已停止且副作用未知。
+**安全。** 命令以设备上的用户身份运行，Baton 不提供沙箱，限定工作目录也挡不住命令访问目录之外的内容。Thread 回复和仓库内容都可能包含注入的指令，一旦 Project Agent 被诱导，开启了命令执行的设备上可能被执行任意命令。措施只能限制范围：开关默认关闭、按设备单独开启；每条命令和输出都记录在对话里；命令只能在登记目录下启动。开启开关时，界面说明这些风险。
 
-私有 `output.json` 保存 schema 版本、Session、Execution、输入代次、完成类型、进程停止事实和候选结果，读取上限为 192 KiB。写入采用同目录私有临时文件、文件刷盘和原子替换，POSIX 还同步父目录。保存失败保留结果、产生本地诊断并退避重试，不阻塞 Worker 锁，也不重新启动命令。
+### 11. Web
 
-Worker 恢复时先使用账本中已有的结果和 outbox；尚无结果时，shell 从身份匹配且合法的完成记录恢复只读执行器，禁止再次输入，结果经原 Worker 路径补送。旧裸候选记录只有在原 Session 路径和持久化配置能够证明归属时才导入。取消或超时后的输出进入停止报告。缺少有效完成证据时返回历史缺失或待核实；命令退出与完成记录保存之间崩溃仍可能进入待核实。
-
-统一 Worker 保留一次 `Drain` 的待提交批次，逐项在账本事务中保存原始事件和输出；事务提交成功或读回确认后才移除该项。账本错误不会丢弃当前项或后续项，也不会继续 Drain。结果按 execution 和 generation 去重，已保存结果继续使用原 event_id。完成文件保留到 Session 回收，未确认 outbox 按既有规则继续补送。协议和故障边界见[执行可靠性设计](../project-exec-reliability/TECH.md)。
-
-命令结果通过统一候选结果的可选 `command_result` 字段传送和保存：`output`、`total_bytes`、`exit_code`、`truncated`。文本使用 UTF-8；包含无效 UTF-8、不可展示控制字节或 JSON 转义过多时，整个保留的首尾字节用 base64 保存，`encoding` 为 `base64`。原始输出固定保留 32 KiB。`nodes.exec` 的工具结果采用对话事件上限 160 KiB，含命令结果的输入采用既有队列上限 72 KiB，以容纳 JSON 转义或 base64；命令输出不再按摘要限长裁剪。取消或超时后的停止报告也携带已取得的命令输出，进入对话；进程已停止但副作用未知时仍为待核实。迁移 `0022_project_exec.sql` 增加等待截止时间、命令结果列，并调整含命令结果的输入容量约束。
-
-Worker 收到 `shell` 任务时，会再检查一次本地的开关，开关关闭就拒绝执行。所以即使 Coordinator 的能力报告过期，未开启的节点也不会执行命令。
-
-**安全。** 命令以设备上的用户身份运行，Baton 不提供沙箱，限定工作目录也挡不住命令访问目录之外的内容。任务结果和仓库内容都可能包含注入的指令，一旦 Project Agent 被诱导，开启了命令执行的设备上可能被执行任意命令。目前的措施只能限制范围：开关默认关闭、按设备单独开启；每条命令和输出都完整记录在对话里；命令只能在已登记的目录下启动。开启开关时，界面要明确说明这些风险。
-
-### 11. 对 Baton 现有规格的影响
-
-- 节点去掉 `pc` / `ubuntu` 角色，默认 PC 改为默认设备。默认设备仍是未指定目标的委托的目标，同时是 Project Agent 优先运行的节点（Baton R-02、R-05、R-06）。
-- Project Agent 的对话保存在 Coordinator；执行 Session 的历史仍在节点（Baton R-28、R-29 的修订）。
-- 任务沿用现有的 `working_directory`，目录必须已经存在；新目录由 `nodes.exec` 创建（Baton R-15、R-31 的修订）。
-- Go 进程仍不嵌入 Agent SDK；`baton-project-runtime` 是独立进程（Baton TECH「技术选择」）。
-- 不需要节点直接访问 Coordinator 的数据通道，也不需要会话文件归档：Project Agent 的消息就是普通的对话事件，经现有 Gateway 通道传输。
-
-### 10. 桌面 Web 主对话（PS-159）
-
-`/projects` 提供 Project 列表和创建入口，`/projects/{id}` 展示主对话、记忆、运行状态与任务，支持直接打开、刷新和浏览器前进后退。页面复用现有 React 组件与 `/tasks/{id}` 任务详情，每 2 秒查询中心记录。用户消息在设备离线时仍可提交；尚未领取的消息显示「已入队」。消息响应丢失时，标签页仅保存客户端消息标识，用户可以查询原消息，或补全相同正文后用原标识重发。
+`/projects/{id}` 展示主对话、Project 的 Thread 列表、记忆和运行状态。主对话里，`threads.create`、`threads.send`、`nodes.exec` 的工具调用各显示为一行，例如「给 Windows 台式机派发了一个任务」「执行了 1 条命令」，点开进入 Thread。页面按 `design/` 实现，每 2 秒查询中心记录。
 
 界面使用的只读接口：
 
-- `GET /api/v1/projects/{id}/status`：返回 `state`、`waiting_reason`、`pending_inputs`、`last_error`、`next_attempt_at`、`last_seq` 和最近运行的设备、放置原因、有效资格与停止回执。运行、队列和设备事实来自同一只读快照；设备离线或租约失效时不显示有效运行。已失去资格与进程确认退出分别展示。
-- `GET /api/v1/projects/{id}/messages`：返回尚未领取的用户消息，按数字 `after_id` 和 `limit` 分页。指定 `client_message_id` 时返回该消息，无论是否已领取，用于恢复发送响应。响应为 `{messages,next_after_id?}`。
-- `GET /api/v1/tasks?project_id={id}`：先按员工和 Project 筛选，再分页。任务列表和详情增加 `project_id`、`origin_conversation_id`，供页面标明 Project Agent 来源。任务操作沿用原有接口。
+- `GET /api/v1/projects/{id}/status`：`state`、`waiting_reason`、`pending_inputs`、`last_error`、`next_attempt_at`、`last_seq`，以及最近一次运行的设备、放置原因、是否仍有效和停止回执。
+- `GET /api/v1/projects/{id}/messages`：尚未领取的用户消息，按 `after_id` 分页；指定 `client_message_id` 时返回该消息，用于恢复发送响应。
+- `GET /api/v1/threads?project_id={id}`：本 Project 的 Thread，带 `origin_conversation_id` 以标明由 Project Agent 新建。
 
-这些接口使用员工会话，只能读取本人员工的 Project；跨员工对象返回 404。消息、记忆和历史按现有分页接口读取。记忆编辑保留打开时的 `expected_revision`，冲突后保留草稿并要求查看最新版本再编辑。
+Runtime 的 `preview` 操作发送 `{last_seq, payload:{text, truncated}}` 文本快照，最多 32 KiB、每秒一次。Coordinator 在内存里为每个运行保留最新快照，30 秒过期，不保存到对话历史；`status` 只在 `after_seq` 等于当前历史尾部时附带它。
 
-Runtime 的 `preview` 操作通过现有 RPC 发送 `{last_seq,payload:{text,truncated}}` 文本快照，Coordinator 校验运行身份、有效租约和当前序号。文本最多 32 KiB，每秒至多发送一次。Coordinator 内存中每个运行保留最新快照，最多 128 份，30 秒后过期；不保存到对话历史。`status` 只附带当前有效运行、且 `after_seq` 等于当前历史尾部的预览。正式事件保存、运行失效或进程切换后，旧预览不再显示。浏览器将预览、回复与工具内容作为文本渲染，标明预览尚未保存；工具执行仍在完整 assistant 事件保存成功之后进行。
-
-验收测试、截图和命令结果见 [PS-159 验证记录](evidence/ps-159/README.md)。
-
-
-### 12. 用户在 Project 里直接控制任务（PS-184）
-
-`POST /api/v1/tasks` 在现有任务请求中增加可选的 `project_id`。接受任务的同一事务检查 Project 属于当前员工；暂停状态仍接受任务。请求摘要包含显式 Project，未填写时保持原摘要。复用默认设备、默认 Agent、工作目录和任务幂等规则。`tasks.project_id` 记录归属；`origin_conversation_id` 非空表示 Project Agent 派发，为空且没有来源 Session 表示用户派发，列表和详情沿用这些字段显示派发者。
-
-迁移 `0020` 给既有输入队列增加 `user_task_result` 来源类型，沿用 PA-17 的被动通知领取机制、40 KiB 任务结果上限和 `task:{task_id}:result:{version}` 去重键。用户任务终态和人工修订的结果写入这个队列，不触发放置或唤醒；下一条主动输入到达时一起领取。Project Agent 派发的任务继续使用主动 `task_result`。执行 Agent 的子任务仍按父子关系交付。用户对命令任务发起新执行时，结果也保留被动通知语义；迁移 `0022` 将含命令输出的主动和被动结果容量统一为 72 KiB，以保存固定的 32 KiB 原始输出及其编码。
-
-迁移同时增加任务的 `user_operation` JSON 字段，保存最近一次用户操作的员工 ID、操作（cancel、resolve、rerun）及新执行的任务 ID。取消在原有任务锁内记录，等待节点停止回执后，结果通知带回这个操作；核实和新执行在各自事务里记录操作并入队。新执行复用原任务的 Project，作为用户派发的新任务；原任务增加版本后的输入注明新任务 ID。操作和结果输入同事务提交，重试沿用原来的版本和请求标识规则。命令通过 `wait_tool` 同步返回结果时，也附带同一版本的 `user_operation`，并将对应结果通知标记为已投递。
-
-暂停仍通过现有 Project 状态作废运行租约，不停止执行任务。期间的用户消息、主动结果和被动通知均保留。恢复后按既有主动输入和批量领取规则处理，不重复领取。
-
-Project 页面复用 `TaskComposer`，只要求任务说明，设备、Agent、目录和期望产物及验证方式可选。任务详情继续使用现有取消、人工核实和新执行操作。表单保留原请求标识恢复逻辑；待确认请求同时保留 Project 标识，避免跨页面补全请求时改变归属。
-
-Runtime 系统提示词和 `tasks.dispatch` 说明要求在 `expected_outputs` 写明验证方式，无法确定时写明原因；系统提示词要求不撤销用户操作，除非用户在对话中要求。后端按既有权限和状态规则接受操作。
-
-验证覆盖 PostgreSQL 的归属、幂等、主动与被动领取、取消回执、暂停恢复及新执行；真实 Runtime 进程使用模型替身检查请求中的提示词、工具说明和输入；Web E2E 通过真实后端及执行进程覆盖 Project 派发、人工操作和来源展示。验收测试和截图见 [PS-184 验证记录](evidence/ps-184/README.md)。
+暂停 Project 通过 Project 状态作废运行租约，不停止 Thread（PA-23）。
 
 ## Testing and validation
 
-| Requirement | Setup and observation | Failure condition | Where | Status |
-|---|---|---|---|---|
-| PA-01、PA-02 | 通过 API 创建 Project，检查表结构和响应 | `projects` 或 `project_agents` 出现设备、目录字段 | 单元测试 | planned |
-| PA-05 | 重复提交同一 `client_message_id`；同一任务版本重复触发终态处理 | 产生第二条输入 | PostgreSQL 集成测试 | planned |
-| PA-05 | 提交 65 KiB 的用户消息；让一个任务的 `summary` 为 300 KiB | 消息被接受；输入队列条目超过 40 KiB；`tasks.get` 读不到全文 | PostgreSQL 集成测试 | planned |
-| PA-10 | 20 条任务结果同时待处理，每条 32 KiB | 一次领取超过 128 KiB；出现超过 160 KiB 的事件；有条目没有在后续几轮里领取 | 进程测试，模型替身 | planned |
-| PA-12 | 对话在上次压缩后累计 1 MiB 事件，然后重启 Runtime | `bootstrap` 或某页响应超过 192 KiB；分页构造出的消息列表与一次性读取的不一致 | 进程测试 | planned |
-| PA-06、PA-07 | 默认设备离线、provider 未登录、全部设备离线三种夹具 | 放置到不合格节点；默认设备被改写；输入过期 | 集成测试，模型替身 | planned |
-| PA-08 | 两个调度并发取得租约；暂停 batond 续租使租约过期后恢复 | 出现两个有效运行；旧 epoch 的写入被接受 | 进程测试 | planned |
-| PA-10 | 一轮进行中连续写入 5 条输入 | 这 5 条没有在下一轮里一起出现 | 进程测试，模型替身 | planned |
-| PA-11、PA-12 | 在 assistant 保存前后、`call_tool` 事务前后、`tool_result` 返回前后杀掉 Runtime | Task 数大于 1；同一 `tool_call_id` 有两条结果；恢复后对话分叉 | 进程测试，故障注入 | planned |
-| PA-09 | 模型替身快速回复后不再写入输入；另一组持续写入输入超过 15 分钟 | 闲置 180 秒后没有退出；超过时长上限仍在领取新输入；退出时取消了已派出的任务 | 进程测试 | planned |
-| PA-13 | 模型替身持续返回错误 | 重试次数或推迟时间不符；未进入 `needs_attention`；用户重试后不从原位置继续 | 进程测试 | planned |
-| PA-14 | 同一对话在 macOS 和 Windows 上各运行一次，记录实际发出的请求 | 两次请求的系统提示词、工具定义或历史消息部分不一致 | 真实 Runtime 和订阅 | planned |
-| PA-15、PA-16 | 用大工具输出、长单轮及多轮对话越过阈值 | 收尾或请求前没有压缩；前缀、工具配对或恢复位置改变；无效摘要提交；原文丢失 | Runtime 确定性测试、Store 事务与并发测试、节点转发测试；缓存命中用真实订阅观察 usage | 自动化覆盖；真实缓存命中待验证 |
-| PA-17 | 模型替身和员工同时修改同一条记忆 | 后写入的一方覆盖了前者而没有收到冲突；修订记录缺失 | 集成测试 | planned |
-| PA-17 | Agent 没有运行时用户连续修改同一条记忆 3 次，再修改 Project 标题，然后发一条消息；另一组由模型替身调用 `memory.write` | 只有通知时启动了运行；收到消息的那一轮里缺少通知，或同一条记忆出现多条通知；`memory.write` 产生了通知 | 集成测试，模型替身 | planned |
-| PA-21 | 所有节点离线时在浏览器发送消息并查看对话 | 消息未保存；界面显示 Project Agent 正在运行 | Web E2E | planned |
-| PA-03、PA-18 | 让模型替身调用不存在的工具，或在任务结果里注入指令 | 调用被执行；工具列表之外出现可用工具 | 单元测试 | planned |
-| PA-19 | 派发到不存在的目录，再带 `retry_of_task_id` 派到另一台设备 | 原任务没有明确失败；新任务没有关联原任务；待核实任务被重派 | 进程测试 | planned |
-| PA-20 | 执行 Agent 派生子任务；人工修正 Project Agent 任务的结果 | 子任务结果进入 Project Agent 的输入队列；修正后没有新输入 | 集成测试 | planned |
-| PA-22 | 对未开启的节点调用 `nodes.exec`；Coordinator 报告显示已开启但节点本地已关闭 | 命令被执行 | 真实进程测试 | macOS 通过 |
-| PA-22 | 执行长于等待期限；完成与等待截止竞争；丢弃全部版本通知；首次请求延迟 1 秒 | 命令因等待结束被中断；结果丢失或同版本重复；恢复高频查询 | Store 并发测试、Runtime 注入时钟、真实进程测试 | 本机通过 |
-| PA-22 | 等待期间杀掉 Runtime；命令执行中杀掉 Worker，缺少可靠完成记录 | 命令执行两次；无证据的结果被当成已完成 | 真实进程故障测试 | macOS 通过 |
-| PA-22 | 完成文件已保存但尚未写入 outbox 时恢复；Drain 后注入账本写入或提交失败 | 原命令重跑；有效结果变待核实；缓冲丢失；未提交数据被确认 | Shell / Session 单元测试、SQLite 约束及驱动故障注入 | 本机通过 |
-| PA-22 | 同节点本地等待时读取中心事件，再完成命令 | 本地等待阻塞中心流量；没有收到任务高版本通知或输出 | 真实进程主链路 | macOS 通过 |
-| PA-22 | Windows 上执行 PowerShell 命令并在执行中取消 | 子进程在取消后仍然存活 | Windows 原生测试 | planned |
-| PA-03 | 模型替身调用 `inbox.ask`，展示内容使用未知组件；Runtime 崩溃后重发同一个调用 | 创建了事项；没有 `is_error` 结果；重发后出现第二个事项 | 进程测试，模型替身 | planned |
-| PA-A01 | 三台设备、真实 Runtime、真实订阅跑完整场景 | 见 PRODUCT 验收表 | 实机 | planned |
+| Requirement | Setup and observation | Failure condition | Where |
+|---|---|---|---|
+| PA-01、PA-02 | 通过 API 创建 Project，检查表结构和响应 | `projects` 或 `project_agents` 出现设备、目录字段 | 单元测试 |
+| PA-05 | 重复提交同一 `client_message_id`；同一回复、同一 `turn.ended` 重复报告 | 产生第二条输入 | PostgreSQL 集成 |
+| PA-05 | 65 KiB 的用户消息；300 KiB 的 Thread 回复 | 消息被接受；输入条目超过 40 KiB；`threads.read` 读不到全文 | PostgreSQL 集成 |
+| PA-06、PA-07 | 默认设备离线、provider 未登录、全部设备离线 | 放置到不合格节点；默认设备被改写；输入过期 | 集成，模型替身 |
+| PA-08 | 两个调度并发取得租约；暂停 batond 续租使租约过期后恢复 | 出现两个有效运行；旧 epoch 的写入被接受 | 进程测试 |
+| PA-10、PA-A13 | 20 个 Thread 的一轮同时结束，每条回复 32 KiB | 一次领取超过 128 KiB；出现超过 160 KiB 的事件；有回复没有在后续轮次领取 | 进程测试，模型替身 |
+| PA-11、PA-12、PA-A05 | 在 assistant 保存前后、`threads.create` / `threads.send` 事务前后、`tool_result` 返回前后杀掉 Runtime | Thread 数大于 1；消息发出两次；同一 `tool_call_id` 有两条结果 | 进程测试，故障注入 |
+| PA-12 | 对话在上次压缩后累计 1 MiB 事件，然后重启 Runtime | `bootstrap` 或某页响应超过 192 KiB；分页构造出的消息列表与一次性读取的不一致 | 进程测试 |
+| PA-09 | 模型替身快速回复后不再写入输入；另一组持续写入超过 15 分钟 | 闲置 180 秒后没有退出；超过上限仍在领取；退出时停止了 Thread | 进程测试 |
+| PA-13 | 模型替身持续返回错误 | 重试次数或推迟时间不符；未进入 `needs_attention`；重试后不从原位置继续 | 进程测试 |
+| PA-14、PA-A06 | 同一对话在 macOS 和 Windows 上各运行一次，记录实际请求 | 系统提示词、工具定义或历史消息不一致 | 真实 Runtime 和订阅 |
+| PA-15、PA-16 | 大工具输出、长单轮及多轮对话越过阈值 | 没有压缩；工具配对或恢复位置改变；原文丢失 | Runtime 确定性测试、Store 事务测试 |
+| PA-17 | 模型替身和员工同时修改同一条记忆；员工连续修改 3 次后发消息 | 后写入覆盖前者而没有冲突；只有通知时启动了运行；同一条记忆出现多条通知 | 集成，模型替身 |
+| PA-03、PA-A08 | 模型替身调用不存在的工具；对未开启命令执行的设备调用 `nodes.exec`；回复里注入指令 | 调用被执行；出现工具列表之外的工具 | 单元测试 |
+| PA-18、PA-A09 | 在不存在的目录新建 Thread，再换目录重试 | 第一次没有返回原因；第二次产生多于一个 Thread | 进程测试 |
+| PA-19、PA-A14 | Project Agent 开启的一轮里执行 Agent 回复 3 条后结束 | 前 2 条触发了运行；结束时没有按顺序收到 3 条 | Store + 假节点 |
+| PA-19、PA-A15 | Project Agent 开启的一轮中员工插入消息并停止；员工随后开启新一轮 | 前一轮的回复或结束没有进入输入队列；员工的新一轮进入了输入队列 | Store + 假节点 |
+| PA-19、PA-A16 | Project Agent 向员工自己开的 Thread 发消息 | 这一轮的回复没有进入输入队列 | Store + 假节点 |
+| PA-19 | Project Agent 对 Kiro Thread 使用 `mode=steer` | 没有返回 `is_error` | 单元测试 |
+| PA-21、PA-A11 | 等待时间短于命令耗时；完成与等待截止竞争；丢弃全部版本通知 | 命令因等待结束被中断；结果丢失或重复 | Store 并发测试、真实进程 |
+| PA-21、PA-A12 | 等待期间杀掉 Runtime；命令执行中杀掉 Worker；完成记录保存后、报告前杀掉 Worker | 命令执行两次；有完成记录时没有补回输出；没有记录时不是 unknown | 真实进程故障测试 |
+| PA-21 | Windows 上执行 PowerShell 命令并在执行中停止 | 子进程在停止后仍然存活 | Windows 原生测试 |
+| PA-23、PA-A17 | 暂停期间员工在 Thread 里发消息，再在主对话发消息，然后恢复 | 暂停期间出现运行实例；恢复后主对话消息重复或丢失 | 集成 |
+| PA-A01 | 三台设备、真实 Runtime、真实订阅跑完整场景 | 见 PRODUCT 验收表 | 实机 |
 
 ## Open questions
 
-- Runtime 使用固定版本 Node bundle 随 batond 分发，见第 2.1 节。
 - **压缩阈值。** 50% / 80% / 40% 以及保留最近 2 轮、清除 3 轮以前的工具结果，都是初始值，需要用真实对话调整。
-- **大小上限。** 用户消息 64 KiB、任务结果条目 40 KiB（文本 32 KiB）、每批 20 条或 128 KiB、事件 160 KiB、`maxTokens` 32000 都是初始值，压测后调整。调整时保持「单条输入上限 ≤ 每批上限 < 事件上限 < 请求上限」。
+- **大小上限。** 用户消息 64 KiB、回复条目 40 KiB（正文 32 KiB）、每批 20 条或 128 KiB、事件 160 KiB、`maxTokens` 32000 都是初始值，压测后调整。调整时保持「单条输入上限 ≤ 每批上限 < 事件上限 < 请求上限」。
 - **闲置时间。** 180 秒是初始值。闲置期间不调用模型，但进程占内存并占用节点的 Runtime 名额；有了启动耗时、连续输入间隔和内存占用的实测数据后再调整。
