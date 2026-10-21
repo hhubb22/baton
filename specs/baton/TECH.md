@@ -133,9 +133,9 @@ Turn 由 Worker 定义：从一条消息被 Agent 接受开始，到适配器报
 |---|---|
 | `employees`、`login_sessions` | 员工与登录会话（0001） |
 | `nodes`、`node_credentials`、`node_enrollments`、`employee_settings`、`node_presence`、`node_revocations`、`node_runtime_reports` | 设备身份、凭据、默认设备、在线状态、吊销、能力报告（0002～0004、0015） |
-| `threads` | 一个 Thread：员工、可选 Project、设备、Agent 类型、工作目录、执行时限、状态与原因、创建者（员工或 Project Agent 及工具调用）、`client_thread_id`、`opened_at`、`archived_at`、版本 |
-| `thread_messages` | 消息：Thread、`client_message_id`、发送方、方式、正文（≤ 64 KiB）、状态（accepted / queued / sent / withdrawn / unknown）、所属 Turn |
-| `thread_turns` | Turn：Thread、`worker_turn_seq`、发起方（员工或 Project Agent）、开始与结束时间、结束原因 |
+| `threads` | 一个 Thread：员工、可选 Project、设备、Agent 类型、当前模型、工作目录、执行时限、状态与原因、创建者（员工或 Project Agent 及工具调用）、`client_thread_id`、`opened_at`、`archived_at`、版本 |
+| `thread_messages` | 消息：Thread、`client_message_id`、发送方、方式、可选模型、正文（≤ 64 KiB）、状态（accepted / queued / sent / withdrawn / unknown）、所属 Turn |
+| `thread_turns` | Turn：Thread、`worker_turn_seq`、发起方（员工或 Project Agent）、使用的模型、开始与结束时间、结束原因 |
 | `thread_replies` | 回复：Thread、Turn、`worker_seq`、正文、截断标记与原字节数、附件 JSON、元数据（shell 的退出码） |
 | `thread_events` | 只追加的审计事件：新建、消息接受、停止请求、归档、状态变化，附操作者与时间（R-23） |
 | `thread_outbox` | 下行命令意图：`thread.open`、`thread.message`、`thread.withdraw`、`thread.stop`；下一次尝试时间、尝试次数、确认时间 |
@@ -194,8 +194,8 @@ Worker 的报告类型：
 
 | 表 | 内容 |
 |---|---|
-| `meta` | Thread ID、Agent 类型、适配器配置、原生会话标识、当前 Turn 序号与状态 |
-| `messages` | `client_message_id`（唯一）、seq、方式、正文、状态（queued / intent / sent / withdrawn / unknown）、所属 Turn |
+| `meta` | Thread ID、Agent 类型、当前模型、适配器配置、原生会话标识、当前 Turn 序号与状态 |
+| `messages` | `client_message_id`（唯一）、seq、方式、可选模型、正文、状态（queued / intent / sent / withdrawn / unknown）、所属 Turn |
 | `turns` | Turn 序号、开始与结束时间、结束原因 |
 | `replies` | 回复序号、Turn、正文、附件、元数据 |
 | `outbox` | 待中心确认的报告 |
@@ -227,28 +227,28 @@ Worker 崩溃后 Agent 进程随进程组或 Job Object 一起退出，所以「
 
 ```go
 type Adapter interface {
-    Start(ctx context.Context) error                  // 新建或恢复原生会话
-    Send(ctx context.Context, id, text string) error  // 开启新 Turn；Agent 忙时返回 ErrBusy
-    Steer(ctx context.Context, id, text string) error // 加入当前 Turn；不支持时返回 ErrUnsupported
-    Abort() (stopped, outcomeKnown bool, err error)   // 停止当前 Turn
-    Drain() []Event                                   // 非阻塞取回 TurnStarted、Reply、TurnEnded、Exited、Uncertain
-    Sent(id string) (bool, error)                     // 在原生历史里查找这条消息
+    Start(ctx context.Context) error                         // 新建或恢复原生会话，使用配置里的模型
+    Send(ctx context.Context, id, text, model string) error  // 开启新 Turn；model 为空时沿用当前模型；Agent 忙时返回 ErrBusy
+    Steer(ctx context.Context, id, text string) error        // 加入当前 Turn，沿用当前模型；不支持时返回 ErrUnsupported
+    Abort() (stopped, outcomeKnown bool, err error)          // 停止当前 Turn
+    Drain() []Event                                          // 非阻塞取回 TurnStarted、Reply、TurnEnded、Exited、Uncertain
+    Sent(id string) (bool, error)                            // 在原生历史里查找这条消息
     ReadHistory(ctx context.Context, cursor string) (HistoryPage, error)
-    Capabilities() Capabilities                       // steer、resume
+    Capabilities() Capabilities                              // steer、resume、switch_model
     Close() error
 }
 ```
 
-`id` 是 `client_message_id`。`Sent` 判断消息是否已被 Agent 接收：Codex 把 `id` 作为 `clientUserMessageId` 写进原生历史并按它查找；Pi 和 Kiro 没有这个字段，Worker 在 `intent` 里记下发送前原生历史中 user 消息的数量，`Sent` 检查这个位置之后是否有正文相同的 user 消息。现有 `SubmitInput`、`DeliverResult`、`HistoryContains`、`Supplement` 合并进这组方法，`WaitingForChildren` 删除。
+`id` 是 `client_message_id`。`Send` 收到与当前不同的 `model` 时，先切换模型再开启这一轮，切换失败时不发出消息，返回原因；Worker 只在 Turn 开始前切换，Steer 不改变模型。`Sent` 判断消息是否已被 Agent 接收：Codex 把 `id` 作为 `clientUserMessageId` 写进原生历史并按它查找；Pi 和 Kiro 没有这个字段，Worker 在 `intent` 里记下发送前原生历史中 user 消息的数量，`Sent` 检查这个位置之后是否有正文相同的 user 消息。现有 `SubmitInput`、`DeliverResult`、`HistoryContains`、`Supplement` 合并进这组方法，`WaitingForChildren` 删除。
 
 ### 各 Agent
 
-| Agent | Steer | 恢复 | 备注 |
-|---|---|---|---|
-| Pi | 原生 `steer` RPC | `--session` 指向原 JSONL | `Abort` 先 `clear_queue` 再 `abort`；abort 要等当前工具结束才生效，工具超过 60 秒时由 Worker 结束进程树 |
-| Codex | `turn/steer`，带 `expectedTurnId` | `thread/resume` | `approvalPolicy: never`，`sandbox: workspace-write` |
-| Kiro | 不支持。执行中再发 prompt 会打断当前这一轮 | `session/load`，先核对 ID 存在 | 能力上报为不支持 steer；界面在执行中只提供排队 |
-| shell | 不支持 | 不支持 | 只供 Project Agent 的命令执行使用，一个 Thread 只有一个 Turn，见 Project Agent TECH 第 10 节 |
+| Agent | Steer | 恢复 | 模型 | 备注 |
+|---|---|---|---|---|
+| Pi | 原生 `steer` RPC | `--session` 指向原 JSONL | 启动参数 `--model`；中途用 `set_model` RPC 切换 | `Abort` 先 `clear_queue` 再 `abort`；abort 要等当前工具结束才生效，工具超过 60 秒时由 Worker 结束进程树 |
+| Codex | `turn/steer`，带 `expectedTurnId` | `thread/resume` | `thread/start` 和每次 `turn/start` 的 `model` | `approvalPolicy: never`，`sandbox: workspace-write` |
+| Kiro | 不支持。执行中再发 prompt 会打断当前这一轮 | `session/load`，先核对 ID 存在 | 新建时用 `_meta.kiro.modelId`；中途切换未验证，上报为不支持 | 能力上报为不支持 steer；界面在执行中只提供排队 |
+| shell | 不支持 | 不支持 | 不适用 | 只供 Project Agent 的命令执行使用，一个 Thread 只有一个 Turn，见 Project Agent TECH 第 10 节 |
 
 Kiro 只提供排队。需要打断时，员工先停止这一轮再发消息。
 
@@ -256,7 +256,7 @@ Kiro 只提供排队。需要打断时，员工先停止这一轮再发消息。
 
 ### 能力上报
 
-batond 在 `node_runtime_reports.report.agents` 上报每种 Agent 的 `{agent_type, version, status, capabilities:{create, queue, steer, stop, resume}}`。`status` 为 `available`、`unverified` 或 `unavailable`；只有 `available` 且支持 `create` 的 Agent 可新建 Thread。`queue` 和 `stop` 对已接入的 Agent 恒为真；`steer`、`resume` 来自 `Capabilities()`。未验证的版本标为 `unverified`，界面不显示为已支持（D1）。旧设备未上报 `agents` 时，中心沿用 `nodes.capabilities` 验证 Agent 类型，插入能力缺省关闭。中心按目标系统的路径规则检查工作目录位于上报的 `roots` 内，设备在执行前核实目录存在及解析后的边界。
+batond 在 `node_runtime_reports.report.agents` 上报每种 Agent 的 `{agent_type, version, status, models:[{id, name}], default_model, capabilities:{create, queue, steer, stop, resume, switch_model}}`。模型列表来自 Agent 自己的接口：Codex 用 `model/list`，Pi 用 `get_available_models`，Kiro 取 `session/new` 返回的 `models`；取不到时 `models` 为空，只能使用默认模型。`status` 为 `available`、`unverified` 或 `unavailable`；只有 `available` 且支持 `create` 的 Agent 可新建 Thread。`queue` 和 `stop` 对已接入的 Agent 恒为真；`steer`、`resume`、`switch_model` 来自 `Capabilities()`。未验证的版本标为 `unverified`，界面不显示为已支持（D1）。旧设备未上报 `agents` 时，中心沿用 `nodes.capabilities` 验证 Agent 类型，插入能力缺省关闭。中心检查指定的模型在上报的 `models` 内，按目标系统的路径规则检查工作目录位于上报的 `roots` 内，设备在执行前核实目录存在及解析后的边界。
 
 ## 接口
 
@@ -266,11 +266,11 @@ URL 相对 `/api/v1`。员工会话、CSRF、Origin 检查沿用现状。
 
 | 接口 | 行为 |
 |---|---|
-| `POST /threads` | `client_thread_id`、可选 `node_id`（缺省为默认设备）、`agent_type`、`working_directory`、可选 `project_id`、`execution_timeout_seconds`、第一条消息 `message:{client_message_id, content}`。新建返回 201，幂等重发返回 200，内容冲突返回 409 |
+| `POST /threads` | `client_thread_id`、可选 `node_id`（缺省为默认设备）、`agent_type`、可选 `model`（缺省为该 Agent 的 `default_model`）、`working_directory`、第一条消息 `message:{client_message_id, content}`。浏览器新建的 Thread 不属于 Project，执行时限取默认 2 小时。新建返回 201，幂等重发返回 200，内容冲突返回 409 |
 | `GET /threads` | 可按 `project_id`、`node_id`、`status` 筛选，按 `(last_activity_at, id)` 倒序分页；`limit` 默认 50、最多 100，续页使用 `next_cursor` |
 | `GET /threads/{id}` | Thread、状态、当前 Turn、待发消息 |
 | `GET /threads/{id}/timeline` | 按审计事件 ID 顺序返回消息、Turn 边界、回复和操作；`limit` 默认 20、最多 100，续页使用 `next_cursor` |
-| `POST /threads/{id}/messages` | `{client_message_id, content, mode}`，返回 202；`mode` 缺省为 `queue`，`steer` 在 Agent 不支持时返回 422 |
+| `POST /threads/{id}/messages` | `{client_message_id, content, mode, model?}`，返回 202；`mode` 缺省为 `queue`，`steer` 在 Agent 不支持时返回 422；`model` 不在上报列表内、Agent 不支持换模型或与 `steer` 同时出现时返回 422 |
 | `POST /threads/{id}/messages/{mid}/withdraw` | 撤回排队消息；已发出返回 409 和当前状态 |
 | `POST /threads/{id}/stop` | 返回 202，保存停止及撤回排队消息的意图，状态等待设备报告确认 |
 | `POST /threads/{id}/archive` | 返回 202；有进行中的 Turn、待发消息或不确定状态时先发停止，设备确认后归档；空闲或已停止且无待发消息时直接归档 |

@@ -94,7 +94,7 @@ Runtime 进程的工作目录是一个空的控制目录。pi-agent-core 本身�
 | `project_memory_revisions` | entry_id, employee_id, revision, content, author, source_seq, created_at | 只追加；`author` 为 agent 或 user |
 | `node_runtime_reports` | node_id, employee_id, report_version, reported_at, report | 节点能力的结构化报告（第 8 节）；现有 `nodes.capabilities` 是最多 32 项的字符串数组，装不下目录和仓库信息 |
 
-`threads` 带可空列 `project_id`、`origin_conversation_id`、`origin_tool_call_id`，后两列唯一。员工在 Project 里新建的 Thread 只填写 `project_id`；Project Agent 新建的三列都填写。`thread_turns.initiator` 记录这一轮由员工还是 Project Agent 开启，Project Agent 开启时另记 `origin_tool_call_id`。
+`threads` 带可空列 `project_id`、`origin_conversation_id`、`origin_tool_call_id`，后两列唯一。只有 Project Agent 新建的 Thread 填写这三列；员工新建的 Thread 三列都为空。`thread_turns.initiator` 记录这一轮由员工还是 Project Agent 开启，Project Agent 开启时另记 `origin_tool_call_id`。
 
 输入队列是 Coordinator 内部的数据，用户界面上的待办事项不用这张表。事项表由 Agent Inbox 的技术设计定义。Thread 路径的 `source_type` 有六种，分成两类。与旧任务路径并存期间，队列还保留主动的 `task_result` 和被动的 `user_task_result`；现有任务工具继续使用它们。
 
@@ -273,8 +273,8 @@ Project 标题或目标被修改后，新的系统提示词从下一次压缩起
 | `history.search` | 可选 `query`、`after_seq`、`through_seq` |
 | `history.read` | 可选 `after_seq`、`through_seq`，读取 `(after_seq, through_seq]` |
 | `devices.list` | 可选 `after_id` |
-| `threads.create` | `node_id`、`agent_type`、`working_directory`、`message`；可选 `execution_timeout_seconds` |
-| `threads.send` | `thread_id`、`message`；可选 `mode`（`queue` / `steer`，默认 `queue`） |
+| `threads.create` | `node_id`、`agent_type`、`working_directory`、`message`；可选 `model`、`execution_timeout_seconds` |
+| `threads.send` | `thread_id`、`message`；可选 `mode`（`queue` / `steer`，默认 `queue`）、`model` |
 | `threads.stop`、`threads.archive`、`threads.get` | `thread_id` |
 | `threads.list` | 可选 `status`、`after_id` |
 | `threads.read` | `thread_id`；可选 `after_turn`、`through_turn` |
@@ -322,9 +322,9 @@ batond 通过 Gateway 的控制队列传送 `node.runtime_report`，正文为 `{
 
 ### 9. Thread 操作与回复回收
 
-**新建。** `threads.create` 在 `call_tool` 的事务里调用与员工 API 相同的 Store 入口：`client_thread_id` 为 `pa:{conversation_id}:{tool_call_id}`，第一条消息的 `client_message_id` 为 `pa:{conversation_id}:{tool_call_id}:0`，并写入 `project_id`、`origin_conversation_id`、`origin_tool_call_id`。目标节点、目录和 Agent 的校验与员工新建相同（Baton R-07）；`agent_type` 不能是 `shell`，命令只能通过 `nodes.exec` 执行。事务只保存 Thread、消息意图和 outbox，设备收到后才开始执行；工具结果返回 Thread ID 和状态，不等待回复。
+**新建。** `threads.create` 在 `call_tool` 的事务里调用与员工 API 相同的 Store 入口：`client_thread_id` 为 `pa:{conversation_id}:{tool_call_id}`，第一条消息的 `client_message_id` 为 `pa:{conversation_id}:{tool_call_id}:0`，并写入 `project_id`、`origin_conversation_id`、`origin_tool_call_id`。目标节点、目录、Agent 和模型的校验与员工新建相同（Baton R-07）；`agent_type` 不能是 `shell`，命令只能通过 `nodes.exec` 执行。事务只保存 Thread、消息意图和 outbox，设备收到后才开始执行；工具结果返回 Thread ID 和状态，不等待回复。
 
-**发消息、停止、归档。** `threads.send` 的 `client_message_id` 为 `pa:{conversation_id}:{tool_call_id}`。目标 Thread 必须属于本 Project，可以是员工自己开的（PA-19）。`mode=steer` 在 Agent 不支持时返回 `is_error`。`threads.stop`、`threads.archive` 与员工操作走同一入口，操作者记为 Project Agent。
+**发消息、停止、归档。** `threads.send` 的 `client_message_id` 为 `pa:{conversation_id}:{tool_call_id}`。目标 Thread 必须属于本 Project。`mode=steer` 在 Agent 不支持时返回 `is_error`。`threads.stop`、`threads.archive` 与员工操作走同一入口，操作者记为 Project Agent。
 
 锁顺序为 `project_agents` → `conversations` → `threads` → `thread_outbox`。员工 API 只锁 `threads` → `thread_outbox`，不形成环。
 
@@ -339,7 +339,7 @@ batond 通过 Gateway 的控制队列传送 `node.runtime_report`，正文为 `{
 
 来源键冲突时忽略，重复报告不会形成第二条输入。这一步只写 `project_agent_input_queue`，不锁 `project_agents`。被动的回复按 `id` 顺序排在主动的 `turn_ended` 之前，同一批领取时 Project Agent 先读到回复再读到结束（PA-A14）。回复条数超过一批上限时，剩下的在后续轮次领取，`turn_ended` 仍在它们之后。
 
-员工开启的一轮不写输入队列（PA-19）。Thread 由员工新建、归属 Project 时也一样。
+员工开启的一轮不写输入队列（PA-19）。
 
 **执行时限与停止。** Worker 保证每个开始的 Turn 都有一次 `turn.ended`（Baton TECH「Turn 边界」），所以 Project Agent 不需要自己设置等待期限。Thread 进入 `unknown` 时，这一轮以 `agent_exited` 结束，同样形成 `turn_ended` 输入。
 
@@ -376,7 +376,7 @@ batond 通过 Gateway 的控制队列传送 `node.runtime_report`，正文为 `{
 
 - `GET /api/v1/projects/{id}/status`：`state`、`waiting_reason`、`pending_inputs`、`last_error`、`next_attempt_at`、`last_seq`，以及最近一次运行的设备、放置原因、是否仍有效和停止回执。
 - `GET /api/v1/projects/{id}/messages`：尚未领取的用户消息，按 `after_id` 分页；指定 `client_message_id` 时返回该消息，用于恢复发送响应。
-- `GET /api/v1/threads?project_id={id}`：本 Project 的 Thread，带 `origin_conversation_id` 以标明由 Project Agent 新建。
+- `GET /api/v1/threads?project_id={id}`：本 Project 的 Thread，都由 Project Agent 新建。
 
 Runtime 的 `preview` 操作发送 `{last_seq, payload:{text, truncated}}` 文本快照，最多 32 KiB、每秒一次。Coordinator 在内存里为每个运行保留最新快照，30 秒过期，不保存到对话历史；`status` 只在 `after_seq` 等于当前历史尾部时附带它。
 
@@ -403,7 +403,7 @@ Runtime 的 `preview` 操作发送 `{last_seq, payload:{text, truncated}}` 文�
 | PA-18、PA-A09 | 在不存在的目录新建 Thread，再换目录重试 | 第一次没有返回原因；第二次产生多于一个 Thread | 进程测试 |
 | PA-19、PA-A14 | Project Agent 开启的一轮里执行 Agent 回复 3 条后结束 | 前 2 条触发了运行；结束时没有按顺序收到 3 条 | Store + 假节点 |
 | PA-19、PA-A15 | Project Agent 开启的一轮中员工插入消息并停止；员工随后开启新一轮 | 前一轮的回复或结束没有进入输入队列；员工的新一轮进入了输入队列 | Store + 假节点 |
-| PA-19、PA-A16 | Project Agent 向员工自己开的 Thread 发消息 | 这一轮的回复没有进入输入队列 | Store + 假节点 |
+| PA-19、PA-A16 | 员工开启的一轮结束后，Project Agent 在同一个 Thread 发消息 | 员工那一轮的回复进入了输入队列，或 Project Agent 那一轮的回复没有进入 | Store + 假节点 |
 | PA-19 | Project Agent 对 Kiro Thread 使用 `mode=steer` | 没有返回 `is_error` | 单元测试 |
 | PA-21、PA-A11 | 等待时间短于命令耗时；完成与等待截止竞争；丢弃全部版本通知 | 命令因等待结束被中断；结果丢失或重复 | Store 并发测试、真实进程 |
 | PA-21、PA-A12 | 等待期间杀掉 Runtime；命令执行中杀掉 Worker；完成记录保存后、报告前杀掉 Worker | 命令执行两次；有完成记录时没有补回输出；没有记录时不是 unknown | 真实进程故障测试 |

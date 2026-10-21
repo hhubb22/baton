@@ -59,8 +59,8 @@ Project Agent 请用户做决定的事项见 [Agent Inbox 行为规格](../agent
 
 ### Thread
 
-- PA-18：Project Agent 新建 Thread 时自己选择设备、工作目录和 Agent 类型，依据是设备上报的能力（登记的目录、发现的仓库、已安装的 Agent）和项目记忆。工作目录必须已经存在；需要新目录时，Project Agent 先用 PA-21 的命令执行创建它。条件不满足时新建失败并返回原因。同一次工具调用最多新建一个 Thread。
-- PA-19：Project Agent 可以向本 Project 的任何 Thread 发消息，包括用户自己开的；Agent 正在处理时，它和用户一样选择排队或插入（Baton R-08）。一轮 Turn 属于发出第一条消息的一方：Project Agent 开启的，Agent 的每条回复都进入它的输入队列（PA-05），用户中途补充消息或停止这一轮，回复和结束仍然交给 Project Agent；用户开启的，不通知 Project Agent。用户想让 Project Agent 接着处理时，直接在主对话里说，Project Agent 可以读取本 Project 的所有 Thread。
+- PA-18：Project Agent 新建 Thread 时自己选择设备、工作目录、Agent 类型和模型，依据是设备上报的能力（登记的目录、发现的仓库、已安装的 Agent 及其模型）、用户在主对话里的要求和项目记忆。工作目录必须已经存在；需要新目录时，Project Agent 先用 PA-21 的命令执行创建它。条件不满足时新建失败并返回原因。同一次工具调用最多新建一个 Thread。
+- PA-19：Project Agent 可以向本 Project 的任何 Thread 发消息；Agent 正在处理时，它和用户一样选择排队或插入（Baton R-08）。一轮 Turn 属于发出第一条消息的一方：Project Agent 开启的，Agent 的每条回复都进入它的输入队列（PA-05），用户中途补充消息或停止这一轮，回复和结束仍然交给 Project Agent；用户开启的，不通知 Project Agent。用户想让 Project Agent 接着处理时，直接在主对话里说，Project Agent 可以读取本 Project 的所有 Thread。
 - PA-20：Project Agent 可以停止 Thread 当前的一轮、归档 Thread，规则与用户的操作相同。
 
 ### 命令执行
@@ -91,7 +91,7 @@ Project Agent 请用户做决定的事项见 [Agent Inbox 行为规格](../agent
 | PA-A13 | Project Agent 开了 20 个 Thread，它们的一轮同时结束，每个回复都很长 | 回复分几轮全部处理，没有丢失；超长回复被截短并注明读取方式 |
 | PA-A14 | Project Agent 发起的一轮里，执行 Agent 先后回复 3 条，最后一条结束这一轮 | 前 2 条回复没有触发运行；这一轮结束时 Project Agent 被启动，按顺序收到全部 3 条 |
 | PA-A15 | Project Agent 开的一轮进行中，用户补充一条消息，再停止这一轮；之后用户在同一个 Thread 里开启新的一轮 | 前一轮的回复和停止都交给 Project Agent；用户开启的新一轮没有启动 Project Agent，输入队列里没有它的回复 |
-| PA-A16 | Project Agent 向用户自己开的 Thread 发消息 | 这一轮的回复进入 Project Agent 的输入队列 |
+| PA-A16 | 用户在 Project Agent 开的 Thread 里开启一轮，结束后 Project Agent 在同一个 Thread 发消息 | 用户那一轮的回复不进入输入队列；Project Agent 开启的这一轮的回复进入输入队列 |
 | PA-A17 | Project 暂停期间，用户在 Thread 里发消息，再在主对话发消息，然后恢复 | 暂停期间 Thread 正常回复，没有 Project Agent 运行实例；恢复后 Project Agent 收到主对话里的消息，没有重复 |
 
 PA-A01 和 PA-A06 必须使用真实 Runtime 和真实订阅；其他场景可以用模型替身。
