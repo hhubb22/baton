@@ -5,8 +5,8 @@ import "blocks/project-page.elyx" as page
 import "blocks/sidebar.elyx" as sidebars
 import "controls/avatar.elyx" as avatars
 import "blocks/project-header.elyx" as headers
-import "controls/input.elyx" as inputs
 import "blocks/overview.elyx" as overviews
+import "controls/input.elyx" as inputs
 import "blocks/dialog.elyx" as dialogs
 import "controls/field.elyx" as fields
 import "controls/label.elyx" as labels
@@ -85,7 +85,7 @@ create = frame : page.projectPage {
         input {
           value {
             fill[0].color: c.colors.text,
-            contents: "每次发版前在三种系统上跑完整测试，结果带证据回来"
+            contents: "每次发版前在三种系统上跑完整测试，回复带附件回来"
           }
         }
 
@@ -147,17 +147,17 @@ created = frame : page.projectPage {
     body {
       overrides: [
         insert(noTasks, after = .nil),
-        remove(overviews.overview.body.doneRow2),
-        remove(overviews.overview.body.doneRow1),
-        remove(overviews.overview.body.queuedHead),
+        remove(overviews.overview.body.recentHead),
+        remove(overviews.overview.body.recentRow2),
         remove(overviews.overview.body.queuedRow),
+        remove(overviews.overview.body.queuedHead),
         remove(overviews.overview.body.activeRow2),
-        remove(overviews.overview.body.activeRow1),
-        remove(overviews.overview.body.doneHead),
-        remove(overviews.overview.body.needsHead),
+        remove(overviews.overview.body.recentMore),
         remove(overviews.overview.body.activeHead),
-        remove(overviews.overview.body.doneMore),
-        remove(overviews.overview.body.needsRow)
+        remove(overviews.overview.body.activeRow1),
+        remove(overviews.overview.body.recentRow1),
+        remove(overviews.overview.body.needsRow),
+        remove(overviews.overview.body.needsHead)
       ]
     }
 
@@ -184,7 +184,7 @@ created = frame : page.projectPage {
 
       goal {
         goalText {
-          contents: "每次发版前在三种系统上跑完整测试，结果带证据回来"
+          contents: "每次发版前在三种系统上跑完整测试，回复带附件回来"
         }
       }
     }
@@ -196,7 +196,7 @@ created = frame : page.projectPage {
         }
       }
 
-      tasksTab {
+      threadsTab {
         count {
           contents: "0"
         }
@@ -208,16 +208,12 @@ created = frame : page.projectPage {
     transcript {
       overrides: [
         insert(empty, after = .nil),
-        remove(page.projectPage.main.transcript.task2),
-        remove(page.projectPage.main.transcript.agent2),
-        remove(page.projectPage.main.transcript.user2),
-        remove(page.projectPage.main.transcript.command1),
         remove(page.projectPage.main.transcript.typing),
-        remove(page.projectPage.main.transcript.task1),
+        remove(page.projectPage.main.transcript.agent0),
+        remove(page.projectPage.main.transcript.day),
+        remove(page.projectPage.main.transcript.user0),
         remove(page.projectPage.main.transcript.agent1),
-        remove(page.projectPage.main.transcript.memory1),
-        remove(page.projectPage.main.transcript.user1),
-        remove(page.projectPage.main.transcript.day)
+        remove(page.projectPage.main.transcript.user1)
       ],
       layout.justify-content: .center
     }
@@ -298,14 +294,14 @@ created = frame : page.projectPage {
 
     emptyGoal = text : t.small {
       width: 100%,
-      contents: "每次发版前在三种系统上跑完整测试，结果带证据回来",
+      contents: "每次发版前在三种系统上跑完整测试，回复带附件回来",
       align: .center,
       fill[0].color: c.colors.muted
     }
 
     emptyHint = text : t.caption {
       width: 100%,
-      contents: "对话、记忆和任务都保存在 Coordinator。Project Agent 这次在 Mac 上运行，下次换到 Windows 也接得上。",
+      contents: "对话、记忆和 Thread 记录都保存在 Coordinator。Project Agent 这次在 Mac 上运行，下次换到 Windows 也接得上。",
       align: .center,
       fill[0].color: c.colors.faint
     }
@@ -313,7 +309,7 @@ created = frame : page.projectPage {
 
   noTasks = text : t.small {
     width: 100%,
-    contents: "还没有任务。Project Agent 派出的任务和你直接派发的任务都会列在这里。",
+    contents: "还没有 Thread。Project Agent 开的和你自己开的 Thread 都会列在这里。",
     fill[0].color: c.colors.faint
   }
 }

@@ -3,13 +3,15 @@ import "tokens/spacing.elyx" as s
 import "foundations/typography.elyx" as t
 import "controls/icons.elyx" as icons
 import "controls/avatar.elyx" as avatars
+import "blocks/thread-line.elyx" as lines
 
-// 主对话里的条目。宽度跟随对话列（720px）。
-// 用户消息：右对齐，浅灰底
+// 主对话里的条目。组件默认宽 720px，放进对话列时改成 100%，和输入区左右对齐。
+// 用户消息：右对齐，浅灰圆角气泡，最宽 560px。设计稿里超过一行的消息要给正文写明宽度
 export userMessage = frame {
   title: "用户消息",
+  top: 0px,
   width: s.size.measure,
-  layout: {direction: .column, align-items: .end, item-gap: s.space.xs},
+  layout: {direction: .column, align-items: .end, item-gap: 6px},
   children: [bubble, meta],
 
   bubble = frame {
@@ -17,8 +19,15 @@ export userMessage = frame {
     max-width: 560px,
     layout: {direction: .row},
     fill: c.colors.subtle,
-    corner-radius: s.radius.lg,
-    padding: [s.space.sm, 14px],
+    shadow: {
+      drop-shadow: {
+        color: rgb(0%, 0%, 0%, 4%),
+        offset: point(0px, 1px),
+        blur-radius: 2px
+      }
+    },
+    corner-radius: 18px,
+    padding: [10px, 16px],
     children: content,
 
     content = text : t.body {
@@ -29,6 +38,7 @@ export userMessage = frame {
   meta = frame {
     display: .none,
     layout: {align-items: .center, item-gap: s.space.xs},
+    padding: [0px, s.space.xs],
     children: [metaIcon, metaText],
 
     metaIcon = asset : icons.clock {
@@ -48,7 +58,7 @@ export userMessage = frame {
 @variant
 export userMessagePending = frame : userMessage {
   title: "用户消息 / 等待设备",
-  top: 96px,
+  top: 72px,
 
   bubble {
     content {
@@ -61,41 +71,50 @@ export userMessagePending = frame : userMessage {
   }
 }
 
-// Project Agent 的一段回复：开头是青色标识、名称和时间
+// Project Agent 的一段回复：没有头像和名字，靠左对齐的正文就是它说的话。
+// 这一轮执行过命令或改过记忆时，开头是一行可展开的过程记录；开过或发过消息的 Thread 收在正文前的卡片里。
 export agentTurn = frame {
   title: "Project Agent 回复",
-  top: 200px,
+  top: 168px,
   width: s.size.measure,
-  layout: {direction: .column, item-gap: 6px},
-  children: [head, content],
+  layout: {direction: .column, item-gap: s.space.md},
+  children: [log, work, content],
 
-  head = frame {
-    layout: {align-items: .center, item-gap: s.space.sm},
-    children: [mark, name, time],
+  log = frame : activityLog {
+    width: 100%,
+    display: .none
+  }
 
-    mark = frame : avatars.agentMark {}
-
-    name = text : t.label {
-      contents: "Project Agent",
-      fill[0].color: c.colors.agentText
-    }
-
-    time = text : t.caption {
-      contents: "14:02 · Ubuntu 开发机",
-      fill[0].color: c.colors.faint
-    }
+  work = frame : lines.threadCard {
+    width: 100%,
+    display: .none
   }
 
   content = text : t.body {
     width: 100%,
-    contents: "Windows 台式机在线。我先在 D:\\src 下建一个 worktree，再派 Codex 跑重连测试。"
+    contents: "Windows 台式机在线，worktree 建在 D:\\src\\baton-ps160，重连测试已经在跑，结果出来告诉你。"
+  }
+}
+
+// 带过程记录和 Thread 卡片的回复
+@variant
+export agentTurnWork = frame : agentTurn {
+  title: "Project Agent 回复 / 开了 Thread",
+  top: 240px,
+
+  log {
+    display: .visible
+  }
+
+  work {
+    display: .visible
   }
 }
 
 // 运行中：Project Agent 正在处理这一轮
 export typing = frame {
   title: "Project Agent 正在处理",
-  top: 300px,
+  top: 600px,
   width: s.size.measure,
   layout: {align-items: .center, item-gap: s.space.sm},
   children: [mark, label],
@@ -111,7 +130,7 @@ export typing = frame {
 // 日期分隔
 export dayDivider = frame {
   title: "日期分隔",
-  top: 344px,
+  top: 648px,
   width: s.size.measure,
   layout: {justify-content: .center, align-items: .center},
   children: label,
@@ -125,7 +144,7 @@ export dayDivider = frame {
 // 系统记录：运行实例换设备、Project 暂停或恢复等
 export systemNote = frame {
   title: "系统记录",
-  top: 384px,
+  top: 688px,
   width: s.size.measure,
   layout: {justify-content: .center, align-items: .center, item-gap: 6px},
   children: [glyph, label],
@@ -142,137 +161,12 @@ export systemNote = frame {
   }
 }
 
-// Project Agent 执行的命令：一行摘要，可以展开看输出
-export commandRow = frame {
-  title: "命令执行",
-  top: 424px,
-  width: s.size.measure,
-  layout: {direction: .column},
-  fill: c.colors.surface,
-  border: c.colors.borderSoft,
-  corner-radius: s.radius.md,
-  children: [summary, output],
-
-  summary = frame {
-    width: 100%,
-    height: 36px,
-    layout: {
-      justify-content: .space-between,
-      align-items: .center,
-      item-gap: s.space.md
-    },
-    padding: [0px, s.space.md],
-    children: [lead, trail],
-
-    lead = frame {
-      layout: {align-items: .center, item-gap: s.space.sm},
-      children: [glyph, cmdText],
-
-      glyph = asset : icons.terminal {
-        width: 15px,
-        height: 15px,
-        fill[0].color: c.colors.muted
-      }
-
-      cmdText = text : t.mono {
-        contents: "git worktree add D:\\src\\baton-ps160 origin/main"
-      }
-    }
-
-    trail = frame {
-      layout: {align-items: .center, item-gap: 6px},
-      children: [place, result],
-
-      place = text : t.caption {
-        contents: "Windows 台式机 · 3.8 秒",
-        fill[0].color: c.colors.faint
-      }
-
-      result = asset : icons.check {
-        width: 14px,
-        height: 14px,
-        fill[0].color: c.colors.success
-      }
-    }
-  }
-
-  output = frame {
-    width: 100%,
-    display: .none,
-    layout: {direction: .column},
-    fill: c.colors.code,
-    border: {color: c.colors.borderSoft, sides: .top},
-    padding: [10px, s.space.md],
-    children: outputText,
-
-    outputText = text : t.monoCN {
-      width: 100%,
-      contents: "Preparing worktree (detached HEAD 4c1e9a2)\nUpdating files: 100% (1284/1284), done.\nHEAD is now at 4c1e9a2 build: 统一前后端构建",
-      fill[0].color: c.colors.muted
-    }
-  }
-}
-
-@variant
-export commandRowOpen = frame : commandRow {
-  title: "命令执行 / 展开",
-  top: 480px,
-
-  output {
-    display: .visible
-  }
-}
-
-// 命令仍在执行：等待时间已到，结果稍后作为输入送回
-@variant
-export commandRowRunning = frame : commandRow {
-  title: "命令执行 / 仍在执行",
-  top: 600px,
-
-  summary {
-    trail {
-      result {
-        display: .none
-      }
-
-      place {
-        contents: "Windows 台式机 · 仍在执行，完成后送回结果"
-      }
-    }
-  }
-}
-
-// Project Agent 修改了项目记忆
-export memoryNote = frame {
-  title: "记忆修改",
-  top: 656px,
-  width: s.size.measure,
-  layout: {align-items: .center, item-gap: s.space.sm},
-  children: [glyph, label, version],
-
-  glyph = asset : icons.memory {
-    width: 14px,
-    height: 14px,
-    fill[0].color: c.colors.faint
-  }
-
-  label = text : t.small {
-    contents: "记下：Windows 上的 worktree 在 D:\\src\\baton-ps160",
-    fill[0].color: c.colors.muted
-  }
-
-  version = text : t.caption {
-    contents: "v1",
-    fill[0].color: c.colors.faint
-  }
-}
-
-// 过程记录里的一步：图标、名称、右侧说明。展开后下方显示命令输出。
+// 过程记录里的一步：图标、内容、右侧说明。命令点开后在下方显示输出。
 export activityStep = frame {
-  title: "过程步骤",
-  top: 720px,
+  title: "过程步骤 / 命令",
+  top: 736px,
   width: s.size.measure,
-  layout: {direction: .column},
+  layout: {direction: .column, item-gap: s.space.xs},
   children: [stepRow, stepOutput],
 
   stepRow = frame {
@@ -286,23 +180,24 @@ export activityStep = frame {
     children: [stepLead, stepNote],
 
     stepLead = frame {
-      layout: {align-items: .center, item-gap: 10px},
+      layout: {align-items: .center, item-gap: s.space.sm},
       children: [stepGlyph, stepLabel],
 
       stepGlyph = asset : icons.terminal {
-        width: 15px,
-        height: 15px,
+        width: 14px,
+        height: 14px,
         fill[0].color: c.colors.faint
       }
 
-      stepLabel = text : t.small {
-        contents: "git worktree add",
-        fill[0].color: c.colors.muted
+      stepLabel = text : t.mono {
+        contents: "git worktree add D:\\src\\baton-ps160 origin/main",
+        line-height: 1
       }
     }
 
-    stepNote = text : t.caption {
-      contents: "3.8 秒",
+    stepNote = text : t.small {
+      contents: "Windows 台式机 · 3.8 秒",
+      line-height: 1,
       fill[0].color: c.colors.faint
     }
   }
@@ -310,17 +205,12 @@ export activityStep = frame {
   stepOutput = frame {
     width: 100%,
     display: .none,
-    layout: {direction: .column, item-gap: 6px},
+    layout: {direction: .column},
     fill: c.colors.code,
     border: c.colors.codeBorder,
-    corner-radius: s.radius.md,
+    corner-radius: 10px,
     padding: [10px, s.space.md],
-    children: [stepCommand, stepResult],
-
-    stepCommand = text : t.mono {
-      width: 100%,
-      contents: "$ git worktree add D:\\src\\baton-ps160 origin/main"
-    }
+    children: stepResult,
 
     stepResult = text : t.monoCN {
       width: 100%,
@@ -330,18 +220,18 @@ export activityStep = frame {
   }
 }
 
-// 展开的命令步骤：显示命令和输出
+// 展开的命令步骤：显示输出
 @variant
 export activityStepOpen = frame : activityStep {
-  title: "过程步骤 / 展开",
-  top: 768px,
+  title: "过程步骤 / 命令展开",
+  top: 784px,
 
   stepOutput {
     display: .visible
   }
 }
 
-// 记忆修改步骤
+// 记忆修改步骤：点开在原位显示修改前后
 @variant
 export activityStepMemory = frame : activityStep {
   title: "过程步骤 / 记忆",
@@ -349,12 +239,14 @@ export activityStepMemory = frame : activityStep {
 
   stepRow {
     stepNote {
-      contents: "项目记忆"
+      contents: "项目记忆 v1"
     }
 
     stepLead {
       stepLabel {
-        contents: "记下了 Windows 上的工作目录"
+        contents: "记下：Windows 上的 worktree 在 D:\\src\\baton-ps160",
+        font-size: 13,
+        font-family: "PingFang SC"
       }
 
       @with-variant(icons.memory)
@@ -363,46 +255,30 @@ export activityStepMemory = frame : activityStep {
   }
 }
 
-// 过程记录：Project Agent 一轮里执行的命令、修改的记忆等。默认收起成一行，点开在原位逐条查看。
+// 过程记录：Project Agent 一轮里执行的命令和修改的记忆。默认收起成一行，点开在原位逐条查看，每条命令或记忆占一行。
+// 时间在悬停时显示；命令在哪台设备上执行写在展开后的每一步里。
 export activityLog = frame {
   title: "过程记录 / 收起",
-  top: 960px,
+  top: 944px,
   width: s.size.measure,
-  layout: {direction: .column, item-gap: s.space.xxs},
+  layout: {direction: .column, item-gap: 6px},
   children: [logHead, logBody],
 
   logHead = frame {
-    width: 100%,
-    height: s.size.compact,
-    layout: {
-      justify-content: .space-between,
-      align-items: .center,
-      item-gap: s.space.md
-    },
-    corner-radius: s.radius.sm,
-    padding: [0px, s.space.sm],
-    children: logLead,
+    height: 24px,
+    layout: {align-items: .center, item-gap: s.space.sm},
+    children: [logChevron, logLabel],
 
-    logLead = frame {
-      layout: {align-items: .center, item-gap: 10px},
-      children: [logGlyph, logLabel, logChevron],
+    logChevron = asset : icons.chevronRight {
+      width: 13px,
+      height: 13px,
+      fill[0].color: c.colors.faint
+    }
 
-      logGlyph = asset : icons.terminal {
-        width: 15px,
-        height: 15px,
-        fill[0].color: c.colors.faint
-      }
-
-      logLabel = text : t.small {
-        contents: "执行了 1 条命令",
-        fill[0].color: c.colors.muted
-      }
-
-      logChevron = asset : icons.chevronRight {
-        width: 13px,
-        height: 13px,
-        fill[0].color: c.colors.faint
-      }
+    logLabel = text : t.small {
+      contents: "执行了 1 条命令，改了 1 处记忆",
+      line-height: 1,
+      fill[0].color: c.colors.muted
     }
   }
 
@@ -410,17 +286,21 @@ export activityLog = frame {
     width: 100%,
     display: .none,
     layout: {direction: .column},
-    padding: [0px, 0px, 0px, 15px],
+    padding: [0px, 0px, 0px, 6px],
     children: logSteps,
 
     logSteps = frame {
       width: 100%,
       layout: {direction: .column, item-gap: s.space.xxs},
-      border: {color: c.colors.borderSoft, sides: .left},
-      padding: [0px, 0px, 0px, 14px],
-      children: stepCommand,
+      border: {color: c.colors.borderSoft, width: 1.5px, sides: .left},
+      padding: [0px, 0px, 0px, 15px],
+      children: [stepCommand, stepMemory],
 
       stepCommand = frame : activityStepOpen {
+        width: 100%
+      }
+
+      stepMemory = frame : activityStepMemory {
         width: 100%
       }
     }
@@ -431,16 +311,14 @@ export activityLog = frame {
 @variant
 export activityLogOpen = frame : activityLog {
   title: "过程记录 / 展开",
-  top: 1008px,
+  top: 992px,
 
   logBody {
     display: .visible
   }
 
   logHead {
-    logLead {
-      @with-variant(icons.chevronDown)
-      logChevron {}
-    }
+    @with-variant(icons.chevronDown)
+    logChevron {}
   }
 }

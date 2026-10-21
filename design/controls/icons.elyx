@@ -13,7 +13,9 @@ import "resources/assets/device.svg" as deviceAsset
 import "resources/assets/dots.svg" as dotsAsset
 import "resources/assets/external.svg" as externalAsset
 import "resources/assets/file.svg" as fileAsset
+import "resources/assets/folder.svg" as folderAsset
 import "resources/assets/inbox.svg" as inboxAsset
+import "resources/assets/laptop.svg" as laptopAsset
 import "resources/assets/memory.svg" as memoryAsset
 import "resources/assets/message.svg" as messageAsset
 import "resources/assets/offline.svg" as offlineAsset
@@ -25,6 +27,7 @@ import "resources/assets/refresh.svg" as refreshAsset
 import "resources/assets/reply.svg" as replyAsset
 import "resources/assets/settings.svg" as settingsAsset
 import "resources/assets/shield.svg" as shieldAsset
+import "resources/assets/sparkle.svg" as sparkleAsset
 import "resources/assets/stop.svg" as stopAsset
 import "resources/assets/tasks.svg" as tasksAsset
 import "resources/assets/terminal.svg" as terminalAsset
@@ -269,4 +272,28 @@ export terminal = asset : glyph {
   left: 224px,
   top: 224px,
   contents: terminalAsset
+}
+
+@variant
+export folder = asset : glyph {
+  title: "folder",
+  left: 0px,
+  top: 280px,
+  contents: folderAsset
+}
+
+@variant
+export laptop = asset : glyph {
+  title: "laptop",
+  left: 56px,
+  top: 280px,
+  contents: laptopAsset
+}
+
+@variant
+export sparkle = asset : glyph {
+  title: "sparkle",
+  left: 112px,
+  top: 280px,
+  contents: sparkleAsset
 }

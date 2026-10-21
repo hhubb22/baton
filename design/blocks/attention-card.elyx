@@ -7,24 +7,27 @@ import "controls/status.elyx" as status
 import "controls/badge.elyx" as badges
 import "controls/avatar.elyx" as avatars
 
-// 选项行：Project Agent 给出的一个选择，建议项带标签
+// 选项行：Project Agent 给出的一个选择。浅灰底、无边框，前面是序号，建议项带标签
 export option = frame {
   title: "事项选项",
   width: 480px,
   height: 36px,
-  layout: {
-    justify-content: .space-between,
-    align-items: .center,
-    item-gap: s.space.sm
-  },
-  fill: c.colors.surface,
-  border: c.colors.border,
-  corner-radius: s.radius.md,
+  layout: {align-items: .center, item-gap: 10px},
+  fill: c.colors.subtle,
+  corner-radius: 10px,
   padding: [0px, s.space.md],
-  children: [label, suggested],
+  children: [index, label, suggested],
+
+  index = text : t.mono {
+    contents: "1",
+    line-height: 1,
+    fill[0].color: c.colors.faint
+  }
 
   label = text : t.small {
-    contents: "调查原因并修复"
+    width: 100%,
+    contents: "调查原因并修复",
+    line-height: 1
   }
 
   suggested = frame : badges.tagAgent {
@@ -42,17 +45,34 @@ export optionSuggested = frame : option {
   }
 }
 
-// 事项卡片：Project Agent 请用户做的决定。主对话、任务详情和待处理页显示同一个事项。
+// 事项卡片：Project Agent 请用户做的决定。主对话、关联的 Thread 和待处理页显示同一个事项。
+// 外观和 Thread 卡片一致：发丝线外框、14px 圆角、两层浅阴影。
 export attentionCard = frame {
   title: "事项 / 待处理",
   top: 120px,
   width: s.size.measure,
   layout: {direction: .column, item-gap: 10px},
   fill: c.colors.surface,
-  border: c.colors.border,
-  corner-radius: 10px,
-  padding: [14px, 16px],
-  children: [head, heading, summary, taskRef, options, footer, answer],
+  border: c.colors.hairline,
+  shadow: [
+    {
+      drop-shadow: {
+        color: rgb(0%, 0%, 0%, 3%),
+        offset: point(0px, 1px),
+        blur-radius: 2px
+      }
+    },
+    {
+      drop-shadow: {
+        color: rgb(0%, 0%, 0%, 4%),
+        offset: point(0px, 4px),
+        blur-radius: 16px
+      }
+    }
+  ],
+  corner-radius: 14px,
+  padding: [s.space.lg, s.space.lg, s.space.md],
+  children: [head, heading, summary, threadRef, options, footer, answer],
 
   head = frame {
     width: 100%,
@@ -109,30 +129,30 @@ export attentionCard = frame {
     fill[0].color: c.colors.muted
   }
 
-  taskRef = frame {
+  threadRef = frame {
     height: 26px,
     layout: {align-items: .center, item-gap: 6px},
-    fill: c.colors.subtle,
-    corner-radius: s.radius.sm,
-    padding: [0px, s.space.sm],
-    children: [taskDot, taskName, taskState],
+    border: c.colors.hairline,
+    corner-radius: s.radius.pill,
+    padding: [0px, 10px],
+    children: [threadDot, threadName, threadState],
 
-    taskDot = shape : status.dotFailed {}
+    threadDot = shape : status.dotIdle {}
 
-    taskName = text : t.caption {
-      contents: "在 Windows 上运行重连测试",
+    threadName = text : t.caption {
+      contents: "在 Windows 上跑重连测试",
       fill[0].color: c.colors.text
     }
 
-    taskState = text : t.caption {
-      contents: "失败",
+    threadState = text : t.caption {
+      contents: "空闲",
       fill[0].color: c.colors.faint
     }
   }
 
   options = frame {
     width: 100%,
-    layout: {direction: .column, item-gap: 6px},
+    layout: {direction: .column, item-gap: s.space.xxs},
     padding: [s.space.xxs, 0px, 0px],
     children: [first, second, third],
 
@@ -143,6 +163,10 @@ export attentionCard = frame {
     second = frame : option {
       width: 100%,
 
+      index {
+        contents: "2"
+      }
+
       label {
         contents: "先跳过，继续 Ubuntu 和 macOS 的验收"
       }
@@ -150,6 +174,10 @@ export attentionCard = frame {
 
     third = frame : option {
       width: 100%,
+
+      index {
+        contents: "3"
+      }
 
       label {
         contents: "在 Windows 上重跑一次，排除偶发"
@@ -224,7 +252,7 @@ export attentionAnswered = frame : attentionCard {
         contents: "已回答"
       }
 
-      @with-variant(status.dotSucceeded)
+      @with-variant(status.dotIdle)
       mark {}
     }
   }
@@ -284,12 +312,12 @@ export systemItem = frame : attentionCard {
     display: .none
   }
 
-  taskRef {
+  threadRef {
     display: .none
   }
 
   summary {
-    contents: "Ubuntu 开发机上的 ChatGPT 订阅返回 401，需要重新登录。之后的消息和任务结果都已保存，重试后从原位置继续。"
+    contents: "Ubuntu 开发机上的 ChatGPT 订阅返回 401，需要重新登录。之后的消息和 Thread 回复都已保存，重试后从原位置继续。"
   }
 
   heading {

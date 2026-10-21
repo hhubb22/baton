@@ -9,7 +9,7 @@ import "controls/toggle.elyx" as toggles
 
 devices = frame {
   title: "设备",
-  caption: "每台设备的连接状态、Agent、订阅和已登记目录。展开的设备上可以单独开启「允许 Project Agent 执行命令」，开启前写明没有沙箱。",
+  caption: "每台设备的连接状态、Agent 及其支持的操作、订阅、已登记目录和其中发现的仓库。展开的设备上可以单独开启「允许 Project Agent 执行命令」，开启前写明没有沙箱。吊销旁边写明不会停止离线设备上的 Agent。",
   left: 0px,
   top: 0px,
   width: s.size.screenWidth,
@@ -140,7 +140,11 @@ devices = frame {
                 fill[0].color: c.colors.faint
               }
 
-              agentLine1 = frame : rows.capabilityLine {}
+              agentLine1 = frame : rows.capabilityLine {
+                note {
+                  contents: "已登录 · 可插入、可恢复"
+                }
+              }
 
               agentLine2 = frame : rows.capabilityLine {
                 name {
@@ -148,7 +152,7 @@ devices = frame {
                 }
 
                 note {
-                  contents: "已安装"
+                  contents: "已安装 · 可插入、可恢复"
                 }
               }
 
@@ -166,7 +170,7 @@ devices = frame {
             dirsCol = frame {
               width: 100%,
               layout: {direction: .column, item-gap: s.space.sm},
-              children: [dirsLabel, dir1, dir2, dirsNote],
+              children: [dirsLabel, dir1, dir2, repos, dirsNote],
 
               dirsLabel = text : t.captionMedium {
                 contents: "已登记目录",
@@ -179,6 +183,12 @@ devices = frame {
 
               dir2 = text : t.mono {
                 contents: "~/work/docs"
+              }
+
+              repos = text : t.caption {
+                width: 100%,
+                contents: "发现 2 个仓库：baton、baton-docs",
+                fill[0].color: c.colors.muted
               }
 
               dirsNote = text : t.caption {
@@ -231,7 +241,7 @@ devices = frame {
 
           detailActions = frame {
             layout: {align-items: .center, item-gap: s.space.sm},
-            children: [makeDefault, revoke],
+            children: [makeDefault, revoke, revokeNote],
 
             makeDefault = frame : buttons.smallSecondary {
               label {
@@ -244,6 +254,11 @@ devices = frame {
                 fill[0].color: c.colors.danger,
                 contents: "吊销这台设备"
               }
+            }
+
+            revokeNote = text : t.caption {
+              contents: "吊销后立即断开；设备离线时，上面正在运行的 Agent 不会因此停止。",
+              fill[0].color: c.colors.faint
             }
           }
         }

@@ -12,7 +12,8 @@ export colors = tokens {
   subtle: rgb(94.2%, 94.2%, 94%),
   hover: rgb(0%, 0%, 0%, 4%),
   selected: rgb(0%, 0%, 0%, 6%),
-  // 发丝线
+  // 发丝线：hairline 用于卡片和输入区外框，配合浅阴影
+  hairline: rgb(0%, 0%, 0%, 6%),
   borderSoft: rgb(0%, 0%, 0%, 8%),
   border: rgb(0%, 0%, 0%, 11%),
   borderStrong: rgb(0%, 0%, 0%, 16%),
@@ -20,12 +21,12 @@ export colors = tokens {
   text: rgb(11.6%, 11.6%, 12%),
   muted: rgb(40%, 40%, 41%),
   faint: rgb(56%, 56%, 57%),
-  // 用户主操作
-  accent: rgb(11.6%, 11.6%, 12%),
-  accentHover: rgb(6%, 6%, 6.4%),
-  accentPressed: rgb(19.8%, 19.8%, 20.3%),
-  accentSoft: rgb(0%, 0%, 0%, 4%),
-  accentSoftHover: rgb(0%, 0%, 0%, 7%),
+  // 用户主操作：实心蓝用于发送和主按钮，accentSoft 配 link 文字用于卡片里的动作
+  accent: rgb(17%, 42%, 93%),
+  accentHover: rgb(13%, 36%, 85%),
+  accentPressed: rgb(11%, 31%, 76%),
+  accentSoft: rgb(92%, 95%, 100%),
+  accentSoftHover: rgb(86.5%, 91.5%, 100%),
   onAccent: .white,
   // Project Agent：只用于 Project Agent 的身份、运行中状态和它发起的动作
   agent: rgb(4.34%, 62.32%, 58.42%),

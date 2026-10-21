@@ -11,7 +11,7 @@ import "controls/label.elyx" as labels
 
 settings = frame : page.projectPage {
   title: "Project 设置",
-  caption: "标题、目标和模型改完即保存。模型从下一次运行起生效。暂停和归档写明对 Project Agent、任务和事项的影响；没有删除。",
+  caption: "标题、目标和模型改完即保存。模型从下一次运行起生效。暂停和归档写明对 Project Agent、Thread 和事项的影响；没有删除。",
   left: 0px,
   top: 0px,
   overrides: [insert(scrim, after = page.projectPage.overview)],
@@ -84,7 +84,7 @@ settings = frame : page.projectPage {
           input {
             value {
               fill[0].color: c.colors.text,
-              contents: "第一个里程碑：一件真实工作跨设备走通全程，结果带证据回来。"
+              contents: "第一个里程碑：一件真实工作跨设备走通全程，回复带附件回来。"
             }
 
             height: 64px
@@ -162,7 +162,7 @@ settings = frame : page.projectPage {
 
           copy {
             rowText {
-              contents: "Project Agent 停止运行，待处理事项撤回并注明原因。对话、记忆和任务记录保留。"
+              contents: "Project Agent 停止运行，待处理事项撤回并注明原因。对话、记忆和 Thread 保留。"
             }
 
             rowTitle {
@@ -199,7 +199,7 @@ archiveConfirm = frame : page.projectPage {
 
       content {
         message {
-          contents: "Project Agent 停止这次运行，之后不再启动。1 个待处理事项会被撤回，原因写为 Project 已归档。对话、记忆和任务记录都会保留。"
+          contents: "Project Agent 停止这次运行，之后不再启动。1 个待处理事项会被撤回，原因写为 Project 已归档。对话、记忆和 Thread 都会保留。"
         }
       }
 

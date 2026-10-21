@@ -2,29 +2,36 @@ import "tokens/colors.elyx" as c
 import "tokens/spacing.elyx" as s
 import "foundations/typography.elyx" as t
 import "controls/icons.elyx" as icons
-import "controls/button.elyx" as buttons
-import "controls/input.elyx" as inputs
 import "controls/tabs.elyx" as tabs
-import "controls/kbd.elyx" as kbd
+import "controls/chip.elyx" as chips
 
-// 输入区：给 Project Agent 发消息，或者绕过它直接派发任务。
-// 所有设备离线或 Project 暂停时仍然可以发消息和派发任务。
+// 输入区：给 Project Agent 发消息，或者不经过它直接新建 Thread。
+// 和对话列同宽，白底、发丝线外框、两层浅阴影。所有设备离线或 Project 暂停时仍然可以发消息和新建 Thread。
 export composer = frame {
   title: "输入区 / 发消息",
   width: s.size.measure,
-  layout: {direction: .column, item-gap: s.space.md},
+  layout: {direction: .column, item-gap: 18px},
   fill: c.colors.surface,
-  border: c.colors.border,
-  shadow: {
-    drop-shadow: {
-      color: rgb(0%, 0%, 0%, 5%),
-      offset: point(0px, 4px),
-      blur-radius: 16px
+  border: c.colors.hairline,
+  shadow: [
+    {
+      drop-shadow: {
+        color: rgb(0%, 0%, 0%, 3%),
+        offset: point(0px, 1px),
+        blur-radius: 2px
+      }
+    },
+    {
+      drop-shadow: {
+        color: rgb(0%, 0%, 0%, 6%),
+        offset: point(0px, 8px),
+        blur-radius: 24px
+      }
     }
-  },
-  corner-radius: s.radius.lg,
-  padding: [14px, s.space.md, 10px, 14px],
-  children: [prompt, fields, toolbar],
+  ],
+  corner-radius: 20px,
+  padding: [16px, 12px, 12px, 18px],
+  children: [prompt, toolbar],
 
   prompt = text : t.body {
     width: 100%,
@@ -32,80 +39,43 @@ export composer = frame {
     fill[0].color: c.colors.faint
   }
 
-  fields = frame {
-    width: 100%,
-    display: .none,
-    layout: {direction: .column, item-gap: s.space.sm},
-    children: [target, expected],
-
-    target = frame {
-      width: 100%,
-      layout: {align-items: .center, item-gap: 6px},
-      children: [device, agent, dir],
-
-      device = frame : inputs.selectCompact {
-        value {
-          contents: "MacBook Pro（默认设备）"
-        }
-      }
-
-      agent = frame : inputs.selectCompact {}
-
-      dir = frame : inputs.selectCompact {
-        value {
-          contents: "~/src/baton",
-          font-family: "Paper Mono"
-        }
-      }
-    }
-
-    expected = frame : inputs.input {
-      width: 100%,
-      height: s.size.compact,
-      border[0].color: c.colors.borderSoft,
-      fill[0].color: c.colors.canvas,
-
-      value {
-        contents: "怎样算完成（可选），例如：go test ./... 全部通过",
-        font-size: 12
-      }
-    }
-  }
-
   toolbar = frame {
     width: 100%,
     layout: {justify-content: .space-between, align-items: .center},
-    children: [mode, actions],
+    children: [lead, send],
 
-    mode = frame : tabs.segmented {}
+    lead = frame {
+      layout: {align-items: .center, item-gap: s.space.xs},
+      children: [mode, pickers],
 
-    actions = frame {
-      layout: {align-items: .center, item-gap: s.space.sm},
-      children: [shortcut, send, dispatch],
+      mode = frame : tabs.segmented {}
 
-      shortcut = frame : kbd.kbd {}
-
-      send = frame {
-        width: 28px,
-        height: 28px,
-        layout: {justify-content: .center, align-items: .center},
-        fill: c.colors.accent,
-        corner-radius: s.radius.pill,
-        children: sendGlyph,
-
-        sendGlyph = asset : icons.arrowUp {
-          width: 15px,
-          height: 15px,
-          fill[0].color: c.colors.onAccent
-        }
-      }
-
-      dispatch = frame : buttons.small {
+      pickers = frame {
         display: .none,
+        layout: {align-items: .center, item-gap: s.space.xxs},
+        padding-left: s.space.xs,
+        children: [device, agent, dir],
 
-        label {
-          contents: "派发"
-        }
+        device = frame : chips.chip {}
+
+        agent = frame : chips.chipAgent {}
+
+        dir = frame : chips.chipDir {}
+      }
+    }
+
+    send = frame {
+      width: s.size.control,
+      height: s.size.control,
+      layout: {justify-content: .center, align-items: .center},
+      fill: c.colors.accent,
+      corner-radius: s.radius.pill,
+      children: sendGlyph,
+
+      sendGlyph = asset : icons.arrowUp {
+        width: 16px,
+        height: 16px,
+        fill[0].color: c.colors.onAccent
       }
     }
   }
@@ -122,34 +92,205 @@ export composerFilled = frame : composer {
   }
 }
 
-// 直接派发任务：选设备、Agent 和目录，可以写验证方式
+// 新建 Thread：在工具栏里选设备、Agent 和目录，第一条消息直接发给这个 Agent
 @variant
-export composerDispatch = frame : composer {
-  title: "输入区 / 派发任务",
+export composerNewThread = frame : composer {
+  title: "输入区 / 新建 Thread",
   top: 320px,
 
   toolbar {
-    actions {
-      send {
-        display: .none
-      }
-
-      dispatch {
+    lead {
+      pickers {
         display: .visible
       }
-    }
 
-    @with-variant(tabs.segmentedSecond)
-    mode {
-      left: .nil
+      @with-variant(tabs.segmentedSecond)
+      mode {
+        left: .nil
+      }
     }
   }
 
   prompt {
-    contents: "说明任务要做什么，派发后不经过 Project Agent"
+    contents: "第一条消息，直接发给新 Thread 里的 Agent"
+  }
+}
+
+// Thread 输入区：消息直接发给这个 Thread 的 Agent。
+// Agent 执行中时消息默认排队，发出前可以撤回；只有 Agent 支持时才能选「插入」。
+export threadComposer = frame {
+  title: "Thread 输入区 / 空闲",
+  top: 480px,
+  width: 400px,
+  layout: {direction: .column, item-gap: 14px},
+  fill: c.colors.surface,
+  border: c.colors.hairline,
+  shadow: [
+    {
+      drop-shadow: {
+        color: rgb(0%, 0%, 0%, 3%),
+        offset: point(0px, 1px),
+        blur-radius: 2px
+      }
+    },
+    {
+      drop-shadow: {
+        color: rgb(0%, 0%, 0%, 6%),
+        offset: point(0px, 8px),
+        blur-radius: 24px
+      }
+    }
+  ],
+  corner-radius: 18px,
+  padding: [14px, 10px, 10px, 16px],
+  children: [prompt, toolbar],
+
+  prompt = text : t.body {
+    width: 100%,
+    contents: "给 Codex 发消息",
+    fill[0].color: c.colors.faint
   }
 
-  fields {
-    display: .visible
+  toolbar = frame {
+    width: 100%,
+    layout: {justify-content: .space-between, align-items: .center},
+    children: [delivery, actions],
+
+    delivery = frame {
+      layout: {align-items: .center},
+      children: [mode, hint],
+
+      mode = frame : tabs.segmented {
+        display: .none,
+
+        first {
+          firstLabel {
+            contents: "排队"
+          }
+        }
+
+        second {
+          secondLabel {
+            contents: "插入"
+          }
+        }
+      }
+
+      hint = text : t.caption {
+        display: .none,
+        contents: "Kiro 不支持插入，消息会排队",
+        fill[0].color: c.colors.faint
+      }
+    }
+
+    actions = frame {
+      layout: {align-items: .center, item-gap: s.space.sm},
+      children: [stop, send],
+
+      stop = frame {
+        width: s.size.control,
+        height: s.size.control,
+        display: .none,
+        layout: {justify-content: .center, align-items: .center},
+        fill: c.colors.subtle,
+        corner-radius: s.radius.pill,
+        children: stopGlyph,
+
+        stopGlyph = asset : icons.stop {
+          width: 14px,
+          height: 14px,
+          fill[0].color: c.colors.text
+        }
+      }
+
+      send = frame {
+        width: s.size.control,
+        height: s.size.control,
+        layout: {justify-content: .center, align-items: .center},
+        fill: c.colors.accent,
+        corner-radius: s.radius.pill,
+        children: sendGlyph,
+
+        sendGlyph = asset : icons.arrowUp {
+          width: 16px,
+          height: 16px,
+          fill[0].color: c.colors.onAccent
+        }
+      }
+    }
+  }
+}
+
+// Agent 执行中：可以选排队或插入，也可以停止这一轮
+@variant
+export threadComposerRunning = frame : threadComposer {
+  title: "Thread 输入区 / 执行中",
+  top: 600px,
+
+  toolbar {
+    delivery {
+      mode {
+        display: .visible
+      }
+    }
+
+    actions {
+      stop {
+        display: .visible
+      }
+    }
+  }
+}
+
+// Kiro 不支持插入，执行中只提供排队
+@variant
+export threadComposerQueueOnly = frame : threadComposer {
+  title: "Thread 输入区 / 只能排队",
+  top: 720px,
+
+  prompt {
+    contents: "给 Kiro 发消息"
+  }
+
+  toolbar {
+    delivery {
+      hint {
+        display: .visible
+      }
+    }
+
+    actions {
+      stop {
+        display: .visible
+      }
+    }
+  }
+}
+
+// 停止请求已发出：Agent 1 分钟内没停下，设备会结束它的进程
+@variant
+export threadComposerStopping = frame : threadComposer {
+  title: "Thread 输入区 / 正在停止",
+  top: 840px,
+
+  toolbar {
+    actions {
+      stop {
+        fill[0].color: c.colors.selected,
+
+        stopGlyph {
+          fill[0].color: c.colors.muted
+        }
+
+        display: .visible
+      }
+    }
+
+    delivery {
+      hint {
+        contents: "已请求停止，1 分钟内没停下会结束进程",
+        display: .visible
+      }
+    }
   }
 }

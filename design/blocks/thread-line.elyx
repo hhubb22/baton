@@ -1,0 +1,359 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+import "controls/status.elyx" as status
+
+// Thread 行：Project Agent 开的或发过消息的一个 Thread 在主对话里占一行，点开在右侧看详情。
+// 状态点、名称、目录标签，右侧是设备和 Agent，最后是状态：执行中显示这一轮的计时，其余只显示状态名。
+export threadLine = frame {
+  title: "Thread 行 / 执行中",
+  width: s.size.measure,
+  height: 36px,
+  layout: {
+    justify-content: .space-between,
+    align-items: .center,
+    item-gap: s.space.lg
+  },
+  corner-radius: s.radius.md,
+  padding: [0px, s.space.sm],
+  children: [lineLead, lineTrail],
+
+  lineLead = frame {
+    layout: {align-items: .center, item-gap: 10px},
+    children: [lineMark, lineName, lineTag],
+
+    lineMark = frame {
+      width: 16px,
+      height: 16px,
+      layout: {justify-content: .center, align-items: .center},
+      children: lineDot,
+
+      lineDot = shape : status.dot {
+        width: 7px,
+        height: 7px
+      }
+    }
+
+    lineName = text : t.body {
+      contents: "在 Windows 上跑重连测试",
+      line-height: 1
+    }
+
+    lineTag = frame {
+      height: 20px,
+      layout: {align-items: .center},
+      fill: c.colors.accentSoft,
+      corner-radius: s.radius.inner,
+      padding: [0px, 6px],
+      children: lineTagText,
+
+      lineTagText = text : t.mono {
+        contents: "baton-ps160",
+        line-height: 1,
+        fill[0].color: c.colors.link
+      }
+    }
+  }
+
+  lineTrail = frame {
+    layout: {align-items: .center, item-gap: s.space.md},
+    children: [lineMeta, lineState],
+
+    lineMeta = text : t.small {
+      contents: "Windows 台式机 · Codex",
+      line-height: 1,
+      fill[0].color: c.colors.faint
+    }
+
+    lineState = text : t.mono {
+      width: 56px,
+      contents: "03:12",
+      line-height: 1,
+      align: .right,
+      fill[0].color: c.colors.info
+    }
+  }
+}
+
+@variant
+export threadLineIdle = frame : threadLine {
+  title: "Thread 行 / 空闲",
+  top: 56px,
+
+  lineTrail {
+    lineState {
+      fill[0].color: c.colors.muted,
+      contents: "空闲",
+      font-size: 13,
+      font-family: "PingFang SC"
+    }
+
+    lineMeta {
+      contents: "Ubuntu 开发机 · Codex"
+    }
+  }
+
+  lineLead {
+    lineTag {
+      fill[0].color: c.colors.subtle,
+
+      lineTagText {
+        fill[0].color: c.colors.muted,
+        contents: "baton"
+      }
+    }
+
+    lineName {
+      contents: "在 Ubuntu 上跑单元测试"
+    }
+
+    lineMark {
+      @with-variant(status.dotIdle)
+      lineDot {
+        left: .nil
+      }
+    }
+  }
+}
+
+@variant
+export threadLineQueued = frame : threadLine {
+  title: "Thread 行 / 等待设备",
+  top: 112px,
+
+  lineTrail {
+    lineState {
+      fill[0].color: c.colors.muted,
+      contents: "等待设备",
+      font-size: 13,
+      font-family: "PingFang SC"
+    }
+
+    lineMeta {
+      contents: "MacBook Pro · Codex"
+    }
+  }
+
+  lineLead {
+    lineTag {
+      fill[0].color: c.colors.subtle,
+
+      lineTagText {
+        fill[0].color: c.colors.muted,
+        contents: "baton"
+      }
+    }
+
+    lineName {
+      contents: "推送 PS-160 分支"
+    }
+
+    lineMark {
+      @with-variant(status.dotQueued)
+      lineDot {
+        left: .nil
+      }
+    }
+  }
+}
+
+@variant
+export threadLineStopped = frame : threadLine {
+  title: "Thread 行 / 已停止",
+  top: 168px,
+
+  lineTrail {
+    lineState {
+      fill[0].color: c.colors.muted,
+      contents: "已停止",
+      font-size: 13,
+      font-family: "PingFang SC"
+    }
+  }
+
+  lineLead {
+    lineTag {
+      fill[0].color: c.colors.subtle,
+
+      lineTagText {
+        fill[0].color: c.colors.muted
+      }
+    }
+
+    lineMark {
+      @with-variant(status.dotStopped)
+      lineDot {
+        left: .nil
+      }
+    }
+  }
+}
+
+// 详情已在右侧打开
+@variant
+export threadLineSelected = frame : threadLineIdle {
+  title: "Thread 行 / 已打开",
+  top: 224px,
+  fill[0].color: c.colors.selected,
+
+  lineLead {
+    lineTag {
+      fill[0].color: c.colors.surface,
+
+      lineTagText {
+        contents: "baton-ps160"
+      }
+    }
+
+    lineName {
+      contents: "在 Windows 上跑重连测试"
+    }
+  }
+
+  lineTrail {
+    lineMeta {
+      contents: "Windows 台式机 · Codex"
+    }
+  }
+}
+
+// Thread 卡片：Project Agent 一轮里开的 Thread 或发过消息的 Thread 收在一张卡片里，每个 Thread 一行。
+// 标题说这一轮做了什么，右上角是其中最需要留意的状态。
+export threadCard = frame {
+  title: "Thread 卡片 / 执行中",
+  top: 320px,
+  width: s.size.measure,
+  layout: {direction: .column, item-gap: s.space.xs},
+  fill: c.colors.surface,
+  border: c.colors.hairline,
+  shadow: [
+    {
+      drop-shadow: {
+        color: rgb(0%, 0%, 0%, 3%),
+        offset: point(0px, 1px),
+        blur-radius: 2px
+      }
+    },
+    {
+      drop-shadow: {
+        color: rgb(0%, 0%, 0%, 4%),
+        offset: point(0px, 4px),
+        blur-radius: 16px
+      }
+    }
+  ],
+  corner-radius: 14px,
+  padding: [s.space.md, s.space.sm, s.space.sm],
+  children: [cardHead, cardRows],
+
+  cardHead = frame {
+    width: 100%,
+    height: 28px,
+    layout: {justify-content: .space-between, align-items: .center},
+    padding: [0px, s.space.sm],
+    children: [cardTitle, cardState],
+
+    cardTitle = frame {
+      layout: {align-items: .center, item-gap: 6px},
+      children: cardName,
+
+      cardName = text : t.heading {
+        contents: "开了 2 个 Thread",
+        font-size: 14,
+        line-height: 1
+      }
+    }
+
+    cardState = frame {
+      layout: {align-items: .center, item-gap: 6px},
+      children: [cardDot, cardStateText],
+
+      cardDot = shape : status.dot {}
+
+      cardStateText = text : t.label {
+        contents: "1 个执行中",
+        line-height: 1,
+        fill[0].color: c.colors.info
+      }
+    }
+  }
+
+  cardRows = frame {
+    width: 100%,
+    layout: {direction: .column},
+    children: [row1, row2],
+
+    row1 = frame : threadLine {
+      width: 100%
+    }
+
+    row2 = frame : threadLineIdle {
+      width: 100%
+    }
+  }
+}
+
+// 这一轮的 Thread 都已回复
+@variant
+export threadCardIdle = frame : threadCard {
+  title: "Thread 卡片 / 都已回复",
+  top: 480px,
+
+  cardRows {
+    @with-variant(threadLineIdle)
+    row1 {
+      lineTrail {
+        lineMeta {
+          contents: "Windows 台式机 · Codex"
+        }
+      }
+
+      lineLead {
+        lineTag {
+          lineTagText {
+            contents: "baton-ps160"
+          }
+        }
+
+        lineName {
+          contents: "在 Windows 上跑重连测试"
+        }
+      }
+
+      top: .nil
+    }
+  }
+
+  cardHead {
+    cardState {
+      cardStateText {
+        fill[0].color: c.colors.muted,
+        contents: "都已回复"
+      }
+
+      @with-variant(status.dotIdle)
+      cardDot {
+        left: .nil
+      }
+    }
+  }
+}
+
+// 给已有的 Thread 发了消息
+@variant
+export threadCardSent = frame : threadCard {
+  title: "Thread 卡片 / 发了消息",
+  top: 640px,
+
+  cardRows {
+    overrides: [remove(threadCard.cardRows.row2)]
+  }
+
+  cardHead {
+    cardTitle {
+      cardName {
+        contents: "给 1 个 Thread 发了消息"
+      }
+    }
+  }
+}

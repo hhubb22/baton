@@ -11,7 +11,7 @@ export tab = frame {
   children: [label, count],
 
   label = text : t.label {
-    contents: "任务"
+    contents: "Thread"
   }
 
   count = text : t.caption {
@@ -36,14 +36,14 @@ export tabIdle = frame : tab {
   }
 }
 
-// 分段切换：输入区在「发消息」和「派发任务」之间切换
+// 分段切换：胶囊底，选中项白底浮起。输入区用它切「发消息」和「新建 Thread」，Thread 输入区用它切「排队」和「插入」
 export segmented = frame {
   title: "分段切换",
   top: 64px,
-  height: 26px,
+  height: 28px,
   layout: {align-items: .center, item-gap: 2px},
   fill: c.colors.subtle,
-  corner-radius: s.radius.sm,
+  corner-radius: s.radius.pill,
   padding: 2px,
   children: [first, second],
 
@@ -51,8 +51,23 @@ export segmented = frame {
     height: 100%,
     layout: {align-items: .center},
     fill: c.colors.surface,
-    border: c.colors.borderSoft,
-    corner-radius: s.radius.inner,
+    shadow: [
+      {
+        drop-shadow: {
+          color: rgb(0%, 0%, 0%, 8%),
+          offset: point(0px, 1px),
+          blur-radius: 2px
+        }
+      },
+      {
+        drop-shadow: {
+          color: rgb(0%, 0%, 0%, 4%),
+          offset: point(0px, 1px),
+          blur-radius: 6px
+        }
+      }
+    ],
+    corner-radius: s.radius.pill,
     padding: [0px, 10px],
     children: firstLabel,
 
@@ -66,12 +81,12 @@ export segmented = frame {
   second = frame {
     height: 100%,
     layout: {align-items: .center},
-    corner-radius: s.radius.inner,
+    corner-radius: s.radius.pill,
     padding: [0px, 10px],
     children: secondLabel,
 
-    secondLabel = text : t.small {
-      contents: "派发任务",
+    secondLabel = text : t.label {
+      contents: "新建 Thread",
       font-size: 12,
       line-height: 1,
       fill[0].color: c.colors.muted
@@ -81,29 +96,32 @@ export segmented = frame {
 
 @variant
 export segmentedSecond = frame : segmented {
-  title: "分段切换 / 派发任务",
+  title: "分段切换 / 选中第二项",
   left: 160px,
   top: 64px,
 
   second {
-    border[0].color: c.colors.borderSoft,
+    shadow[0].drop-shadow.color: rgb(0%, 0%, 0%, 8%),
+    shadow[1].drop-shadow.color: rgb(0%, 0%, 0%, 4%),
     fill[0].color: c.colors.surface,
 
     secondLabel {
-      fill[0].color: c.colors.text,
-      font-style: "Medium"
+      fill[0].color: c.colors.text
     }
+
+    shadow[0].drop-shadow.offset: [0px, 1px],
+    shadow[1].drop-shadow.offset: [0px, 1px],
+    shadow[0].drop-shadow.blur-radius: 2px,
+    shadow[1].drop-shadow.blur-radius: 6px
   }
 
   first {
-    border[0].color: c.colors.transparent,
-    fill[0].color: c.colors.transparent,
+    shadow[0]: .nil,
+    shadow[1]: .nil,
+    fill[0]: .nil,
 
     firstLabel {
-      fill[0].color: c.colors.muted,
-      font-style: "Regular"
+      fill[0].color: c.colors.muted
     }
-
-    border[0].width: 0px
   }
 }

@@ -224,7 +224,7 @@ export sidebar = frame {
           width: 20px,
           height: 20px,
           layout: {justify-content: .center, align-items: .center},
-          fill: c.colors.accent,
+          fill: c.colors.text,
           corner-radius: 5px,
           children: markLetter,
 
@@ -233,7 +233,7 @@ export sidebar = frame {
             font-size: 11,
             font-style: "Semibold",
             line-height: 1,
-            fill[0].color: c.colors.onAccent
+            fill[0].color: c.colors.surface
           }
         }
 
@@ -253,13 +253,13 @@ export sidebar = frame {
     nav = frame {
       width: 100%,
       layout: {direction: .column, item-gap: s.space.xxs},
-      children: [navInbox, navTasks, navDevices, navSessions],
+      children: [navInbox, navThreads, navDevices],
 
       navInbox = frame : navRow {
         width: 100%
       }
 
-      navTasks = frame : navRow {
+      navThreads = frame : navRow {
         width: 100%,
 
         trail {
@@ -270,10 +270,10 @@ export sidebar = frame {
 
         lead {
           label {
-            contents: "任务"
+            contents: "Thread"
           }
 
-          @with-variant(icons.tasks)
+          @with-variant(icons.terminal)
           glyph {}
         }
       }
@@ -297,25 +297,6 @@ export sidebar = frame {
           }
 
           @with-variant(icons.device)
-          glyph {}
-        }
-      }
-
-      navSessions = frame : navRow {
-        width: 100%,
-
-        trail {
-          count {
-            display: .none
-          }
-        }
-
-        lead {
-          label {
-            contents: "Session"
-          }
-
-          @with-variant(icons.terminal)
           glyph {}
         }
       }

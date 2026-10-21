@@ -3,12 +3,13 @@ import "tokens/spacing.elyx" as s
 import "blocks/sidebar.elyx" as sidebars
 import "blocks/project-header.elyx" as headers
 import "blocks/conversation.elyx" as conv
-import "blocks/task-card.elyx" as cards
+import "controls/chip.elyx" as chips
 import "blocks/composer.elyx" as composers
 import "blocks/overview.elyx" as overviews
 
 // Project 页：侧栏、主对话、概览栏。screens/ 里的各个状态都是它的实例。
 // 主对话从底部对齐，较早的内容在上方被裁掉，相当于滚动到最新位置。
+// 对话条目和输入区放在同一列里，最宽 720px，左右边缘对齐。概览栏被 Thread 详情替换时，输入区上方显示状态片。
 export projectPage = frame {
   title: "Project 页",
   width: s.size.screenWidth,
@@ -36,72 +37,93 @@ export projectPage = frame {
         direction: .column,
         justify-content: .end,
         align-items: .center,
-        item-gap: 20px
+        item-gap: s.space.xl
       },
       slot: .true,
-      padding: [s.space.xl, 0px, s.space.lg],
-      children: [
-        day,
-        user1,
-        agent1,
-        command1,
-        memory1,
-        task1,
-        user2,
-        agent2,
-        task2,
-        typing
-      ],
+      padding: [s.space.xl, s.space.xxl, s.space.lg],
+      children: [day, user0, agent0, user1, agent1, typing],
 
-      day = frame : conv.dayDivider {}
+      day = frame : conv.dayDivider {
+        width: 100%,
+        max-width: s.size.measure
+      }
 
-      user1 = frame : conv.userMessage {}
+      user0 = frame : conv.userMessage {
+        width: 100%,
+        max-width: s.size.measure,
 
-      agent1 = frame : conv.agentTurn {}
-
-      command1 = frame : conv.commandRow {}
-
-      memory1 = frame : conv.memoryNote {}
-
-      task1 = frame : cards.taskCard {}
-
-      user2 = frame : conv.userMessage {
         bubble {
           content {
-            contents: "Ubuntu 上也顺便跑一遍单元测试。"
+            contents: "PS-160 合进 main 了吗？"
           }
         }
       }
 
-      agent2 = frame : conv.agentTurn {
-        head {
-          time {
-            contents: "14:05 · Ubuntu 开发机"
-          }
-        }
+      agent0 = frame : conv.agentTurn {
+        width: 100%,
+        max-width: s.size.measure,
 
         content {
-          contents: "已派给 Ubuntu 开发机，两边的结果回来后一起汇报。"
+          contents: "合进去了，main 现在在 4c1e9a2。可以开始验收。"
         }
       }
 
-      task2 = frame : cards.taskSucceeded {}
+      user1 = frame : conv.userMessage {
+        width: 100%,
+        max-width: s.size.measure,
+
+        bubble {
+          content {
+            width: 420px,
+            contents: "验收先在 Windows 和 Ubuntu 上跑：Windows 跑重连测试，Ubuntu 跑单元测试。结果出来告诉我。"
+          }
+        }
+      }
+
+      agent1 = frame : conv.agentTurnWork {
+        width: 100%,
+        max-width: s.size.measure,
+
+        content {
+          contents: "两个 Thread 都开好了。Windows 上的 worktree 在 D:\\src\\baton-ps160，已经记进项目记忆。两边都回复后一起汇报。"
+        }
+      }
 
       typing = frame : conv.typing {
+        width: 100%,
+        max-width: s.size.measure,
+
         label {
-          contents: "正在处理 1 条输入：Ubuntu 测试结果"
+          contents: "正在处理 1 条输入：Ubuntu 上 Codex 的回复"
         }
       }
     }
 
     dock = frame {
       width: 100%,
-      layout: {direction: .column, align-items: .center, item-gap: s.space.sm},
+      layout: {direction: .column, align-items: .center, item-gap: 10px},
       slot: .true,
-      padding: [0px, 0px, 20px],
-      children: composer,
+      padding: [0px, s.space.xxl, 20px],
+      children: [signals, composer],
 
-      composer = frame : composers.composer {}
+      signals = frame {
+        width: 100%,
+        max-width: s.size.measure,
+        display: .none,
+        layout: {align-items: .center, item-gap: 6px},
+        children: [running, queued, attention],
+
+        running = frame : chips.statusChip {}
+
+        queued = frame : chips.statusChipQueued {}
+
+        attention = frame : chips.statusChipAttention {}
+      }
+
+      composer = frame : composers.composer {
+        width: 100%,
+        max-width: s.size.measure
+      }
     }
   }
 

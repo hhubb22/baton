@@ -70,7 +70,7 @@ export textarea = frame : input {
 
   value {
     width: 100%,
-    contents: "这件事做到什么程度算完成"
+    contents: "补充说明"
   }
 }
 

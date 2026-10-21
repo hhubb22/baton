@@ -1,7 +1,7 @@
 import "tokens/colors.elyx" as c
 
 // 界面字体：设计稿用 PingFang SC，Web 端用系统 UI 字体栈。字重只用 Regular / Medium / Semibold。
-// 代码字体：Paper Mono；含中文的等宽内容用 Maple Mono CN（族名 Maple Mono Normal NF CN）。
+// 代码字体：Paper Mono；含中文的等宽内容用 Maple Mono CN。
 export body = text {
   top: 120px,
   fill: c.colors.text,
@@ -75,5 +75,5 @@ export mono = text : body {
 export monoCN = text : mono {
   top: 388px,
   contents: "测试结果：1 项失败",
-  font-family: "Maple Mono Normal NF CN"
+  font-family: "Maple Mono CN"
 }

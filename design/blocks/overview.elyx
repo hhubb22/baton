@@ -7,9 +7,9 @@ import "controls/status.elyx" as status
 import "controls/badge.elyx" as badges
 import "controls/tabs.elyx" as tabs
 
-// 概览里的任务行：状态点、标题、时间；第二行写执行位置
-export taskRow = frame {
-  title: "任务行 / 执行中",
+// 概览里的 Thread 行：状态点、标题（第一条消息的开头）、最后活动时间；第二行写设备、Agent 和目录名
+export threadRow = frame {
+  title: "Thread 行 / 执行中",
   width: 288px,
   layout: {direction: .column, item-gap: 1px},
   corner-radius: s.radius.sm,
@@ -32,7 +32,7 @@ export taskRow = frame {
       mark = shape : status.dot {}
 
       name = text : t.small {
-        contents: "在 Windows 上运行重连测试"
+        contents: "在 Windows 上跑重连测试"
       }
     }
 
@@ -46,14 +46,21 @@ export taskRow = frame {
     width: 100%,
     layout: {align-items: .center, item-gap: 6px},
     padding: [0px, 0px, 0px, 14px],
-    children: [place, byUser],
+    children: [place, dir, byMe],
 
     place = text : t.caption {
-      contents: "Windows 台式机 · Codex",
+      contents: "Windows 台式机 · Codex ·",
       fill[0].color: c.colors.faint
     }
 
-    byUser = frame : badges.tag {
+    dir = text : t.caption {
+      contents: "baton-ps160",
+      font-size: 11,
+      font-family: "Paper Mono",
+      fill[0].color: c.colors.faint
+    }
+
+    byMe = frame : badges.tag {
       height: 16px,
       display: .none,
       padding-top: 0px,
@@ -62,7 +69,7 @@ export taskRow = frame {
       padding-right: 4px,
 
       value {
-        contents: "我派发",
+        contents: "我开的",
         font-size: 10
       }
     }
@@ -70,8 +77,8 @@ export taskRow = frame {
 }
 
 @variant
-export taskRowSelected = frame : taskRow {
-  title: "任务行 / 选中",
+export threadRowSelected = frame : threadRow {
+  title: "Thread 行 / 选中",
   top: 64px,
   fill[0].color: c.colors.selected
 }
@@ -129,10 +136,10 @@ export groupHead = frame {
   }
 }
 
-// 概览栏：目标、运行实例、任务和记忆
+// 概览栏：目标、运行实例、Thread 和记忆
 export overview = frame {
-  title: "概览栏 / 任务",
-  caption: "320px。任务按状态分组；等你处理的事项排在最前。",
+  title: "概览栏 / Thread",
+  caption: "320px。等你处理的事项排在最前，然后是执行中和等待设备的 Thread，其余按最后活动时间排列；已归档的不显示。目录只显示最后一段，完整路径在详情里；Project Agent 执行的命令结束后显示退出码。",
   left: 360px,
   width: s.size.overview,
   height: s.size.screenHeight,
@@ -185,7 +192,7 @@ export overview = frame {
 
       goalText = text : t.small {
         width: 100%,
-        contents: "第一个里程碑：一件真实工作跨设备走通全程，结果带证据回来。"
+        contents: "第一个里程碑：一件真实工作跨设备走通全程，回复带附件回来。"
       }
     }
 
@@ -255,9 +262,9 @@ export overview = frame {
     layout: {align-items: .end, item-gap: s.space.lg},
     border: {color: c.colors.borderSoft, sides: .bottom},
     padding: [0px, s.space.lg],
-    children: [tasksTab, memoryTab],
+    children: [threadsTab, memoryTab],
 
-    tasksTab = frame : tabs.tab {}
+    threadsTab = frame : tabs.tab {}
 
     memoryTab = frame : tabs.tabIdle {}
   }
@@ -275,10 +282,10 @@ export overview = frame {
       activeRow2,
       queuedHead,
       queuedRow,
-      doneHead,
-      doneRow1,
-      doneRow2,
-      doneMore
+      recentHead,
+      recentRow1,
+      recentRow2,
+      recentMore
     ],
 
     needsHead = frame : groupHead {
@@ -295,10 +302,14 @@ export overview = frame {
       }
     }
 
-    needsRow = frame : taskRow {
+    needsRow = frame : threadRow {
       width: 100%,
 
       sub {
+        dir {
+          display: .none
+        }
+
         place {
           contents: "事项 · 检查 PS-158 迁移脚本"
         }
@@ -330,11 +341,11 @@ export overview = frame {
       padding-right: s.space.sm
     }
 
-    activeRow1 = frame : taskRow {
+    activeRow1 = frame : threadRow {
       width: 100%
     }
 
-    activeRow2 = frame : taskRow {
+    activeRow2 = frame : threadRow {
       width: 100%,
 
       line {
@@ -351,10 +362,14 @@ export overview = frame {
 
       sub {
         place {
-          contents: "Ubuntu 开发机 · Pi"
+          contents: "Ubuntu 开发机 · Pi ·"
         }
 
-        byUser {
+        dir {
+          contents: "baton"
+        }
+
+        byMe {
           display: .visible
         }
       }
@@ -378,18 +393,22 @@ export overview = frame {
       }
     }
 
-    queuedRow = frame : taskRow {
+    queuedRow = frame : threadRow {
       width: 100%,
 
       sub {
+        dir {
+          contents: "baton"
+        }
+
         place {
-          contents: "MacBook Pro · Codex"
+          contents: "MacBook Pro · Codex ·"
         }
       }
 
       line {
         time {
-          contents: "14:42 到期"
+          contents: "14:20"
         }
 
         lead {
@@ -405,7 +424,7 @@ export overview = frame {
       }
     }
 
-    doneHead = frame : groupHead {
+    recentHead = frame : groupHead {
       width: 100%,
       padding-top: 6px,
       padding-left: s.space.sm,
@@ -414,7 +433,7 @@ export overview = frame {
 
       lead {
         label {
-          contents: "已结束"
+          contents: "最近"
         }
 
         count {
@@ -423,12 +442,16 @@ export overview = frame {
       }
     }
 
-    doneRow1 = frame : taskRow {
+    recentRow1 = frame : threadRow {
       width: 100%,
 
       sub {
+        dir {
+          contents: "baton"
+        }
+
         place {
-          contents: "Ubuntu 开发机 · Codex"
+          contents: "Ubuntu 开发机 · Codex ·"
         }
       }
 
@@ -442,7 +465,7 @@ export overview = frame {
             contents: "在 Ubuntu 上跑单元测试"
           }
 
-          @with-variant(status.dotSucceeded)
+          @with-variant(status.dotIdle)
           mark {
             left: .nil
           }
@@ -450,12 +473,16 @@ export overview = frame {
       }
     }
 
-    doneRow2 = frame : taskRow {
+    recentRow2 = frame : threadRow {
       width: 100%,
 
       sub {
+        dir {
+          display: .none
+        }
+
         place {
-          contents: "Windows 台式机 · 命令"
+          contents: "Windows 台式机 · 命令 · 退出码 0"
         }
       }
 
@@ -471,7 +498,7 @@ export overview = frame {
             font-family: "Paper Mono"
           }
 
-          @with-variant(status.dotSucceeded)
+          @with-variant(status.dotIdle)
           mark {
             left: .nil
           }
@@ -479,7 +506,7 @@ export overview = frame {
       }
     }
 
-    doneMore = frame : buttons.smallGhost {
+    recentMore = frame : buttons.smallGhost {
       label {
         fill[0].color: c.colors.muted,
         contents: "显示其余 10 个"
@@ -501,15 +528,15 @@ export overviewMemory = frame : overview {
       insert(mem3, after = mem2),
       insert(mem4, after = mem3),
       insert(addMemory, after = mem4),
-      remove(overview.body.doneMore),
-      remove(overview.body.doneRow2),
-      remove(overview.body.doneRow1),
-      remove(overview.body.doneHead),
+      remove(overview.body.recentHead),
       remove(overview.body.queuedHead),
+      remove(overview.body.recentMore),
+      remove(overview.body.recentRow1),
       remove(overview.body.activeHead),
       remove(overview.body.activeRow1),
       remove(overview.body.activeRow2),
       remove(overview.body.needsRow),
+      remove(overview.body.recentRow2),
       remove(overview.body.queuedRow),
       remove(overview.body.needsHead)
     ]
@@ -528,13 +555,13 @@ export overviewMemory = frame : overview {
     }
 
     @with-variant(tabs.tabIdle)
-    tasksTab {
+    threadsTab {
       count {
         contents: "7"
       }
 
       label {
-        contents: "任务"
+        contents: "Thread"
       }
 
       left: .nil

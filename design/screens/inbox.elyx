@@ -4,12 +4,11 @@ import "foundations/typography.elyx" as t
 import "blocks/sidebar.elyx" as sidebars
 import "controls/icons.elyx" as icons
 import "controls/button.elyx" as buttons
-import "controls/status.elyx" as status
 import "blocks/attention-card.elyx" as attention
 
 inbox = frame {
   title: "待处理",
-  caption: "所有 Project 里等你处理的事项，最新的在前。Baton 不发通知，用户自己回来看；处理后事项离开这里，在主对话和任务详情里仍能看到结果。",
+  caption: "所有 Project 里等你处理的事项，最新的在前。Baton 不发通知，用户自己回来看；处理后事项离开这里，在主对话和关联的 Thread 里仍能看到处理结果。系统事项只有一种：Project Agent 重试达到上限后暂停。",
   left: 0px,
   top: 0px,
   width: s.size.screenWidth,
@@ -100,8 +99,8 @@ inbox = frame {
           contents: "安装器在 24H2 上提示发布者未知，另外两台设备通过。原因是签名证书链缺少中间证书。"
         }
 
-        taskRef {
-          taskName {
+        threadRef {
+          threadName {
             contents: "在 Windows 11 上验证安装包"
           }
         }
@@ -127,44 +126,7 @@ inbox = frame {
         }
       }
 
-      item2 = frame : attention.systemItem {
-        footer {
-          reply {
-            label {
-              contents: "打开任务详情核实"
-            }
-          }
-        }
-
-        taskRef {
-          taskState {
-            contents: "待核实"
-          }
-
-          taskName {
-            contents: "在 MacBook 上推送 PS-160 分支"
-          }
-
-          display: .visible,
-
-          @with-variant(status.dotAttention)
-          taskDot {}
-        }
-
-        summary {
-          contents: "MacBook Pro 在交付结果前离线，Baton 无法确认分支是否已经推送，不会自动重试。核实后这个事项自动解决。"
-        }
-
-        heading {
-          contents: "任务待核实：在 MacBook 上推送 PS-160 分支"
-        }
-
-        head {
-          time {
-            contents: "15:26"
-          }
-        }
-      }
+      item2 = frame : attention.systemItem {}
 
       item3 = frame : attention.inboxItem {
         options {
@@ -183,7 +145,7 @@ inbox = frame {
           }
         }
 
-        taskRef {
+        threadRef {
           display: .none
         }
 

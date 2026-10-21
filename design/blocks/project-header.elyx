@@ -156,7 +156,7 @@ export headerPaused = frame : projectHeader {
     state {
       stateText {
         fill[0].color: c.colors.muted,
-        contents: "已暂停 · 已派出的任务继续执行"
+        contents: "已暂停 · Thread 照常可用"
       }
 
       stop {

@@ -1,10 +1,10 @@
 import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
 import "blocks/project-page.elyx" as page
 import "controls/icons.elyx" as icons
 import "controls/status.elyx" as status
 import "blocks/project-header.elyx" as headers
 import "blocks/conversation.elyx" as conv
-import "blocks/task-card.elyx" as cards
 import "blocks/composer.elyx" as composers
 import "blocks/overview.elyx" as overviews
 import "blocks/banner.elyx" as banners
@@ -14,14 +14,14 @@ file {}
 
 running = frame : page.projectPage {
   title: "Project · 运行中",
-  caption: "Project Agent 在 Ubuntu 开发机上处理刚回来的测试结果。标题栏写明运行位置，可以停止这次运行；已派出的任务不受影响。",
+  caption: "Project Agent 在 Ubuntu 开发机上处理 Thread 刚发回的回复。标题栏写明运行位置，可以停止这次运行；它开的 Thread 不受影响。",
   left: 0px,
   top: 0px
 }
 
 offline = frame : page.projectPage {
   title: "Project · 所有设备离线",
-  caption: "消息照常保存，不显示「正在运行」。横幅说明在等什么；执行中的任务显示最后一次报告的时间。",
+  caption: "消息照常保存，不显示「正在运行」。横幅说明在等什么；设备离线时，执行中的 Thread 显示最后一次报告的时间，不当成仍在执行。",
   left: 1728px,
   top: 0px,
 
@@ -80,17 +80,49 @@ offline = frame : page.projectPage {
 
     transcript {
       overrides: [
-        insert(offlineNote, after = page.projectPage.main.transcript.task2),
+        insert(offlineNote, after = page.projectPage.main.transcript.agent1),
         insert(pendingMessage, after = offlineNote),
         remove(page.projectPage.main.transcript.typing),
-        remove(page.projectPage.main.transcript.user1),
         remove(page.projectPage.main.transcript.day)
       ],
 
-      task1 {
-        meta {
-          elapsed {
-            contents: "14:18 后无报告"
+      agent1 {
+        work {
+          cardRows {
+            row1 {
+              lineTrail {
+                lineState {
+                  fill[0].color: c.colors.faint,
+                  width: .auto,
+                  contents: "14:18 后无报告",
+                  font-size: 13,
+                  font-family: "PingFang SC"
+                }
+              }
+
+              lineLead {
+                lineMark {
+                  @with-variant(status.dotQueued)
+                  lineDot {
+                    left: .nil
+                  }
+                }
+              }
+            }
+          }
+
+          cardHead {
+            cardState {
+              cardStateText {
+                fill[0].color: c.colors.muted,
+                contents: "设备离线"
+              }
+
+              @with-variant(status.dotQueued)
+              cardDot {
+                left: .nil
+              }
+            }
           }
         }
       }
@@ -131,6 +163,9 @@ offline = frame : page.projectPage {
   }
 
   offlineNote = frame : conv.systemNote {
+    width: 100%,
+    max-width: s.size.measure,
+
     label {
       contents: "14:20 Ubuntu 开发机离线，Project Agent 这一轮已处理完，没有新的运行实例"
     }
@@ -139,7 +174,10 @@ offline = frame : page.projectPage {
     glyph {}
   }
 
-  pendingMessage = frame : conv.userMessagePending {}
+  pendingMessage = frame : conv.userMessagePending {
+    width: 100%,
+    max-width: s.size.measure
+  }
 
   waitBanner = frame : banners.banner {}
 }
@@ -193,10 +231,9 @@ attention = frame : page.projectPage {
 
     transcript {
       overrides: [
-        insert(failNote, after = page.projectPage.main.transcript.task2),
+        insert(failNote, after = page.projectPage.main.transcript.agent1),
         insert(laterMessage, after = failNote),
         remove(page.projectPage.main.transcript.typing),
-        remove(page.projectPage.main.transcript.user1),
         remove(page.projectPage.main.transcript.day)
       ]
     }
@@ -242,6 +279,9 @@ attention = frame : page.projectPage {
   }
 
   failNote = frame : conv.systemNote {
+    width: 100%,
+    max-width: s.size.measure,
+
     label {
       fill[0].color: c.colors.attentionText,
       contents: "15:20 模型请求连续失败 5 次，主对话暂停。最后一次错误：401 Unauthorized"
@@ -254,6 +294,9 @@ attention = frame : page.projectPage {
   }
 
   laterMessage = frame : conv.userMessagePending {
+    width: 100%,
+    max-width: s.size.measure,
+
     bubble {
       content {
         contents: "先把 Windows 上的测试日志贴给我。"
@@ -269,7 +312,7 @@ attention = frame : page.projectPage {
 
   failBanner = frame : banners.bannerAttention {}
 
-  systemRow = frame : overviews.taskRow {
+  systemRow = frame : overviews.threadRow {
     width: 100%,
 
     sub {
@@ -299,7 +342,7 @@ attention = frame : page.projectPage {
 
 paused = frame : page.projectPage {
   title: "Project · 已暂停",
-  caption: "暂停后 Project Agent 不再启动，已派出的任务继续执行。用户仍可以直接派发任务；输入区切到「派发任务」，任务结果作为通知留给 Project Agent。",
+  caption: "暂停后 Project Agent 不再启动，Thread 照常可用。用户仍可以新建 Thread 或直接给 Thread 发消息；自己开的 Thread 不进主对话，只在概览里标「我开的」。",
   left: 5184px,
   top: 0px,
 
@@ -337,7 +380,7 @@ paused = frame : page.projectPage {
     dock {
       overrides: [insert(pauseBanner, after = .nil)],
 
-      @with-variant(composers.composerDispatch)
+      @with-variant(composers.composerNewThread)
       composer {
         top: .nil
       }
@@ -345,11 +388,8 @@ paused = frame : page.projectPage {
 
     transcript {
       overrides: [
-        insert(pauseNote, after = page.projectPage.main.transcript.task2),
-        insert(userTask, after = pauseNote),
+        insert(pauseNote, after = page.projectPage.main.transcript.agent1),
         remove(page.projectPage.main.transcript.typing),
-        remove(page.projectPage.main.transcript.agent1),
-        remove(page.projectPage.main.transcript.user1),
         remove(page.projectPage.main.transcript.day)
       ]
     }
@@ -385,6 +425,9 @@ paused = frame : page.projectPage {
   }
 
   pauseNote = frame : conv.systemNote {
+    width: 100%,
+    max-width: s.size.measure,
+
     label {
       contents: "15:02 何家健暂停了 Project"
     }
@@ -392,8 +435,6 @@ paused = frame : page.projectPage {
     @with-variant(icons.pause)
     glyph {}
   }
-
-  userTask = frame : cards.taskByUser {}
 
   pauseBanner = frame : banners.bannerPaused {}
 }

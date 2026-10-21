@@ -1,0 +1,144 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+import "controls/icons.elyx" as icons
+import "controls/status.elyx" as status
+
+// 选择片：输入区工具栏里的设备、Agent 和目录选择，平时无底色，悬停时出现浅底
+export chip = frame {
+  title: "选择片 / 设备",
+  width: .auto,
+  height: s.size.compact,
+  layout: {align-items: .center, item-gap: 6px},
+  corner-radius: s.radius.pill,
+  padding: [0px, 8px],
+  children: [glyph, label, caret],
+
+  glyph = asset : icons.laptop {
+    width: 15px,
+    height: 15px,
+    fill[0].color: c.colors.muted
+  }
+
+  label = text : t.small {
+    contents: "MacBook Pro",
+    line-height: 1
+  }
+
+  caret = asset : icons.chevronDown {
+    width: 12px,
+    height: 12px,
+    fill[0].color: c.colors.faint
+  }
+}
+
+@variant
+export chipAgent = frame : chip {
+  title: "选择片 / Agent",
+  left: 160px,
+
+  label {
+    contents: "Codex"
+  }
+
+  @with-variant(icons.sparkle)
+  glyph {}
+}
+
+@variant
+export chipDir = frame : chip {
+  title: "选择片 / 目录",
+  left: 280px,
+
+  label {
+    contents: "~/src/baton",
+    font-size: 12,
+    font-family: "Paper Mono"
+  }
+
+  @with-variant(icons.folder)
+  glyph {}
+}
+
+@variant
+export chipHover = frame : chip {
+  title: "选择片 / 悬停",
+  left: 440px,
+  fill[0].color: c.colors.hover
+}
+
+// 状态片：浮在输入区上方，汇总这个 Project 里需要留意的 Thread 和事项，点开定位到概览
+export statusChip = frame {
+  title: "状态片 / 执行中",
+  top: 56px,
+  width: .auto,
+  height: s.size.compact,
+  layout: {align-items: .center, item-gap: 6px},
+  fill: c.colors.surface,
+  border: c.colors.hairline,
+  shadow: {
+    drop-shadow: {
+      color: rgb(0%, 0%, 0%, 4%),
+      offset: point(0px, 1px),
+      blur-radius: 3px
+    }
+  },
+  corner-radius: s.radius.pill,
+  padding: [0px, 10px],
+  children: [mark, label, count],
+
+  mark = shape : status.dot {}
+
+  label = text : t.small {
+    contents: "执行中",
+    line-height: 1
+  }
+
+  count = text : t.small {
+    contents: "2",
+    font-size: 12,
+    font-family: "Paper Mono",
+    line-height: 1,
+    fill[0].color: c.colors.faint
+  }
+}
+
+@variant
+export statusChipQueued = frame : statusChip {
+  title: "状态片 / 等待设备",
+  left: 120px,
+  top: 56px,
+
+  count {
+    contents: "1"
+  }
+
+  label {
+    contents: "等待设备"
+  }
+
+  @with-variant(status.dotQueued)
+  mark {
+    left: .nil
+  }
+}
+
+@variant
+export statusChipAttention = frame : statusChip {
+  title: "状态片 / 等你决定",
+  left: 256px,
+  top: 56px,
+
+  count {
+    contents: "1"
+  }
+
+  label {
+    contents: "等你决定"
+  }
+
+  @with-variant(status.dotAttention)
+  mark {
+    left: .nil
+  }
+}

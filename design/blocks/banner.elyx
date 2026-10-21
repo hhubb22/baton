@@ -57,7 +57,7 @@ export bannerPaused = frame : banner {
 
   copy {
     detail {
-      contents: "Project Agent 不会启动，已派出的任务继续执行。期间的消息和结果都会保存，恢复后一起处理。"
+      contents: "Project Agent 不会启动，Thread 照常可用。期间的消息和 Thread 回复都会保存，恢复后一起处理。"
     }
 
     heading {

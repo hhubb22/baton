@@ -10,12 +10,13 @@ import "controls/badge.elyx" as badges
 import "controls/avatar.elyx" as avatars
 import "controls/tabs.elyx" as tabs
 import "controls/kbd.elyx" as kbd
+import "controls/chip.elyx" as chips
 import "blocks/conversation.elyx" as conv
-import "blocks/task-card.elyx" as cards
+import "blocks/thread-line.elyx" as lines
 import "blocks/attention-card.elyx" as attention
 import "blocks/composer.elyx" as composers
 import "blocks/banner.elyx" as banners
-import "blocks/task-detail.elyx" as details
+import "blocks/thread-detail.elyx" as details
 
 overview = frame {
   title: "Baton 设计系统",
@@ -49,7 +50,7 @@ intro = frame {
 
   introText = text : t.body {
     width: 760px,
-    contents: "Baton 的界面围绕 Project 主对话组织：用户和 Project Agent 对话，任务派到各台设备执行，需要判断的事进入待处理。界面要让人随时看清三件事：Project Agent 在哪台设备上运行或者为什么没运行，每个任务在哪里、处于什么状态，哪些事在等自己。",
+    contents: "Baton 的界面围绕 Project 主对话组织：用户和 Project Agent 对话，Project Agent 在各台设备上开 Thread 交给 Agent 执行，需要判断的事进入待处理。界面要让人随时看清三件事：Project Agent 在哪台设备上运行或者为什么没运行，每个 Thread 在哪台设备、处于什么状态、最后一次报告是什么时候，哪些事在等自己。",
     fill[0].color: c.colors.muted
   }
 
@@ -60,7 +61,7 @@ intro = frame {
     children: [rule1, rule2, rule3, rule4, rule5, rule6],
 
     rule1 = text : t.small {
-      contents: "青色只属于 Project Agent：它的标识、运行中状态和它给出的建议。用户主操作用近黑色。"
+      contents: "青色只属于 Project Agent：它的标识、运行中状态和它给出的建议。用户主操作用实心蓝，一屏只有一个。"
     }
 
     rule2 = text : t.small {
@@ -76,7 +77,7 @@ intro = frame {
     }
 
     rule5 = text : t.small {
-      contents: "列表用发丝线分隔的行；卡片只用于主对话里的任务和事项。"
+      contents: "对话条目、卡片和输入区共用一列，左右对齐。卡片用发丝线外框、14px 圆角和两层浅阴影，行之间不加分隔线。"
     }
 
     rule6 = text : t.small {
@@ -298,7 +299,7 @@ colorSection = frame : section {
       }
 
       purpose {
-        contents: "等你处理、待核实"
+        contents: "等你处理、状态未知"
       }
     }
 
@@ -312,7 +313,7 @@ colorSection = frame : section {
       }
 
       purpose {
-        contents: "失败、归档、吊销"
+        contents: "已停止、归档、吊销"
       }
     }
   }
@@ -320,14 +321,7 @@ colorSection = frame : section {
   stateRow = frame {
     width: 100%,
     layout: {item-gap: s.space.lg},
-    children: [
-      stInfo,
-      stSuccess,
-      stInfoSoft,
-      stSuccessSoft,
-      stAttentionSoft,
-      stDangerSoft
-    ],
+    children: [stInfo, stSuccess, stInfoSoft, stAttentionSoft, stDangerSoft],
 
     stInfo = frame : swatch {
       chip {
@@ -339,7 +333,7 @@ colorSection = frame : section {
       }
 
       purpose {
-        contents: "任务执行中"
+        contents: "Thread 执行中"
       }
     }
 
@@ -353,7 +347,7 @@ colorSection = frame : section {
       }
 
       purpose {
-        contents: "已完成、在线"
+        contents: "设备在线、命令退出码 0"
       }
     }
 
@@ -364,20 +358,6 @@ colorSection = frame : section {
 
       name {
         contents: "infoSoft"
-      }
-
-      purpose {
-        contents: "状态标签底色"
-      }
-    }
-
-    stSuccessSoft = frame : swatch {
-      chip {
-        fill[0].color: c.colors.successSoft
-      }
-
-      name {
-        contents: "successSoft"
       }
 
       purpose {
@@ -409,7 +389,7 @@ colorSection = frame : section {
       }
 
       purpose {
-        contents: "失败标签底色"
+        contents: "已停止标签底色"
       }
     }
   }
@@ -480,7 +460,8 @@ controlSection = frame : section {
   overrides: [
     insert(buttonRow, after = section.note),
     insert(formRow, after = buttonRow),
-    insert(miscRow, after = formRow)
+    insert(miscRow, after = formRow),
+    insert(chipRow, after = miscRow)
   ],
 
   heading {
@@ -488,7 +469,7 @@ controlSection = frame : section {
   }
 
   note {
-    contents: "控件高度 20 / 28 / 32，圆角 4 / 6 / 8 / 12。不可用的操作保持可点，点击后说明原因。"
+    contents: "控件高度 20 / 28 / 32，圆角 4 / 6 / 8 / 12；卡片 14，气泡 18，输入区 20，分段切换、工具栏选择片和状态片用全圆角。不可用的操作保持可点，点击后说明原因。"
   }
 
   buttonRow = frame {
@@ -515,7 +496,7 @@ controlSection = frame : section {
 
     bSmall = frame : buttons.small {
       label {
-        contents: "派发"
+        contents: "新建"
       }
     }
 
@@ -612,6 +593,36 @@ controlSection = frame : section {
       aPerson = frame : avatars.person {}
     }
   }
+
+  chipRow = frame {
+    width: 100%,
+    layout: {align-items: .center, item-gap: s.space.xl},
+    children: [pickerChips, statusChips],
+
+    pickerChips = frame {
+      layout: {align-items: .center, item-gap: s.space.xxs},
+      children: [chDevice, chAgent, chDir, chHover],
+
+      chDevice = frame : chips.chip {}
+
+      chAgent = frame : chips.chipAgent {}
+
+      chDir = frame : chips.chipDir {}
+
+      chHover = frame : chips.chipHover {}
+    }
+
+    statusChips = frame {
+      layout: {align-items: .center, item-gap: 6px},
+      children: [scRunning, scQueued, scAttention],
+
+      scRunning = frame : chips.statusChip {}
+
+      scQueued = frame : chips.statusChipQueued {}
+
+      scAttention = frame : chips.statusChipAttention {}
+    }
+  }
 }
 
 statusSection = frame : section {
@@ -626,25 +637,25 @@ statusSection = frame : section {
   }
 
   note {
-    contents: "状态点只用六种颜色，含义由旁边的文字说明。等你处理用橙色实心数量，未读用蓝点，两者分开。"
+    contents: "Thread 有六种状态，Baton 不判断一轮是成功还是失败。状态点只用六种颜色，含义由旁边的文字说明。等你处理用橙色实心数量，未读用蓝点，两者分开。"
   }
 
   pillRow = frame {
     width: 100%,
     layout: {align-items: .center, item-gap: s.space.sm},
-    children: [pRun, pQueued, pDone, pFail, pVerify, pCancel],
+    children: [pRun, pQueued, pIdle, pStopped, pUnknown, pArchived],
 
     pRun = frame : status.pill {}
 
     pQueued = frame : status.pillQueued {}
 
-    pDone = frame : status.pillSucceeded {}
+    pIdle = frame : status.pillIdle {}
 
-    pFail = frame : status.pillFailed {}
+    pStopped = frame : status.pillStopped {}
 
-    pVerify = frame : status.pillUnverified {}
+    pUnknown = frame : status.pillUnknown {}
 
-    pCancel = frame : status.pillCancelled {}
+    pArchived = frame : status.pillArchived {}
   }
 
   badgeRow = frame {
@@ -685,7 +696,7 @@ conversationSection = frame : section {
   }
 
   note {
-    contents: "用户消息右对齐。Project Agent 的回复以青色标识开头。任务和事项用卡片，命令、记忆修改和系统记录用单行。"
+    contents: "用户消息是右对齐的浅灰气泡，Project Agent 的回复是靠左的正文。一轮里执行的命令和记忆修改收在一行可展开的过程记录里；开过或发过消息的 Thread 收进一张卡片，每个 Thread 一行。等你决定的事项也是卡片，选项是带序号的浅灰行。Thread 回复的附件写明所在设备，设备离线时暂不可查看。"
   }
 
   convColumns = frame {
@@ -699,27 +710,27 @@ conversationSection = frame : section {
       children: [
         eUser,
         eAgent,
-        eCommand,
-        eMemory,
+        eCardSent,
+        eLog,
         eNote,
-        eTask,
-        eTaskQueued,
-        eTaskVerify
+        eThread,
+        eThreadQueued,
+        eThreadStopped
       ],
 
       eUser = frame : conv.userMessage {
         width: 100%
       }
 
-      eAgent = frame : conv.agentTurn {
+      eAgent = frame : conv.agentTurnWork {
         width: 100%
       }
 
-      eCommand = frame : conv.commandRowOpen {
+      eCardSent = frame : lines.threadCardSent {
         width: 100%
       }
 
-      eMemory = frame : conv.memoryNote {
+      eLog = frame : conv.activityLogOpen {
         width: 100%
       }
 
@@ -727,15 +738,15 @@ conversationSection = frame : section {
         width: 100%
       }
 
-      eTask = frame : cards.taskSucceeded {
+      eThread = frame : lines.threadLineIdle {
         width: 100%
       }
 
-      eTaskQueued = frame : cards.taskQueued {
+      eThreadQueued = frame : lines.threadLineQueued {
         width: 100%
       }
 
-      eTaskVerify = frame : cards.taskUnverified {
+      eThreadStopped = frame : lines.threadLineStopped {
         width: 100%
       }
     }
@@ -743,7 +754,7 @@ conversationSection = frame : section {
     convRight = frame {
       width: 100%,
       layout: {direction: .column, item-gap: s.space.lg},
-      children: [eDecision, eAnswered, eEvidence, eCommit],
+      children: [eDecision, eAnswered, eAttachment, eCommit],
 
       eDecision = frame : attention.attentionCard {
         width: 100%
@@ -753,7 +764,7 @@ conversationSection = frame : section {
         width: 100%
       }
 
-      eEvidence = frame : details.evidenceOffline {
+      eAttachment = frame : details.attachmentOffline {
         width: 100%
       }
 
@@ -773,7 +784,7 @@ inputSection = frame : section {
   }
 
   note {
-    contents: "输入区在「发消息」和「派发任务」之间切换。横幅放在输入区上方，说明 Project Agent 为什么没有运行。"
+    contents: "主对话输入区在「发消息」和「新建 Thread」之间切换。Thread 输入区直接发给 Agent：执行中默认排队，Agent 支持时可以插入，也可以停止这一轮。横幅放在输入区上方，说明 Project Agent 为什么没有运行。"
   }
 
   inputColumns = frame {
@@ -784,15 +795,27 @@ inputSection = frame : section {
     inputLeft = frame {
       width: 100%,
       layout: {direction: .column, item-gap: s.space.lg},
-      children: [iMessage, iDispatch],
+      children: [
+        iMessage,
+        iNewThread,
+        iThreadRunning,
+        iThreadQueueOnly,
+        iThreadStopping
+      ],
 
       iMessage = frame : composers.composerFilled {
         width: 100%
       }
 
-      iDispatch = frame : composers.composerDispatch {
+      iNewThread = frame : composers.composerNewThread {
         width: 100%
       }
+
+      iThreadRunning = frame : composers.threadComposerRunning {}
+
+      iThreadQueueOnly = frame : composers.threadComposerQueueOnly {}
+
+      iThreadStopping = frame : composers.threadComposerStopping {}
     }
 
     inputRight = frame {

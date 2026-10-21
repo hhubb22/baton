@@ -3,7 +3,7 @@ import "tokens/spacing.elyx" as s
 import "foundations/typography.elyx" as t
 
 // 状态点只有六种颜色，具体含义由旁边的文字和分组标题说明。
-// 蓝：执行中；灰：等待设备或已取消；绿：已完成；红：失败；橙：待核实或等你处理；青：Project Agent 运行中。
+// 蓝：执行中；灰：等待设备、空闲、已归档或离线；绿：设备在线；红：已停止；橙：状态未知或等你处理；青：Project Agent 运行中。
 export dot = shape {
   title: "状态点 / 执行中",
   width: s.size.dot,
@@ -22,29 +22,29 @@ export dotQueued = shape : dot {
 }
 
 @variant
-export dotSucceeded = shape : dot {
-  title: "状态点 / 已完成",
+export dotOnline = shape : dot {
+  title: "状态点 / 设备在线",
   left: 48px,
   fill[0].color: c.colors.success
 }
 
 @variant
-export dotFailed = shape : dot {
-  title: "状态点 / 失败",
+export dotStopped = shape : dot {
+  title: "状态点 / 已停止",
   left: 72px,
   fill[0].color: c.colors.danger
 }
 
 @variant
 export dotAttention = shape : dot {
-  title: "状态点 / 待核实、等你处理",
+  title: "状态点 / 状态未知、等你处理",
   left: 96px,
   fill[0].color: c.colors.attention
 }
 
 @variant
 export dotIdle = shape : dot {
-  title: "状态点 / 已取消、空闲",
+  title: "状态点 / 空闲、已归档、离线",
   left: 120px,
   fill[0].color: c.colors.faint
 }
@@ -56,9 +56,10 @@ export dotAgent = shape : dot {
   fill[0].color: c.colors.agent
 }
 
-// 任务状态标签：用在任务卡片和详情里
+// Thread 状态标签：用在 Thread 行、Thread 详情和事项的关联 Thread 上。
+// 状态只来自设备报告；Baton 不判断一轮对话做得好不好，所以没有成功和失败。
 export pill = frame {
-  title: "任务状态 / 执行中",
+  title: "Thread 状态 / 执行中",
   top: 40px,
   width: .auto,
   height: s.size.micro,
@@ -78,7 +79,7 @@ export pill = frame {
 
 @variant
 export pillQueued = frame : pill {
-  title: "任务状态 / 等待设备",
+  title: "Thread 状态 / 等待设备",
   left: 96px,
   top: 40px,
   fill[0].color: c.colors.subtle,
@@ -94,48 +95,48 @@ export pillQueued = frame : pill {
 }
 
 @variant
-export pillSucceeded = frame : pill {
-  title: "任务状态 / 已完成",
+export pillIdle = frame : pill {
+  title: "Thread 状态 / 空闲",
   left: 208px,
   top: 40px,
-  fill[0].color: c.colors.successSoft,
+  fill[0].color: c.colors.subtle,
 
   label {
-    contents: "已完成"
+    contents: "空闲"
   }
 
-  @with-variant(dotSucceeded)
+  @with-variant(dotIdle)
   mark {
     left: .nil
   }
 }
 
 @variant
-export pillFailed = frame : pill {
-  title: "任务状态 / 失败",
-  left: 304px,
+export pillStopped = frame : pill {
+  title: "Thread 状态 / 已停止",
+  left: 288px,
   top: 40px,
   fill[0].color: c.colors.dangerSoft,
 
   label {
-    contents: "失败"
+    contents: "已停止"
   }
 
-  @with-variant(dotFailed)
+  @with-variant(dotStopped)
   mark {
     left: .nil
   }
 }
 
 @variant
-export pillUnverified = frame : pill {
-  title: "任务状态 / 待核实",
+export pillUnknown = frame : pill {
+  title: "Thread 状态 / 状态未知",
   left: 384px,
   top: 40px,
   fill[0].color: c.colors.attentionSoft,
 
   label {
-    contents: "待核实"
+    contents: "状态未知"
   }
 
   @with-variant(dotAttention)
@@ -145,15 +146,15 @@ export pillUnverified = frame : pill {
 }
 
 @variant
-export pillCancelled = frame : pill {
-  title: "任务状态 / 已取消",
-  left: 480px,
+export pillArchived = frame : pill {
+  title: "Thread 状态 / 已归档",
+  left: 496px,
   top: 40px,
   fill[0].color: c.colors.subtle,
 
   label {
     fill[0].color: c.colors.muted,
-    contents: "已取消"
+    contents: "已归档"
   }
 
   @with-variant(dotIdle)

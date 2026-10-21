@@ -63,7 +63,7 @@ export deviceRow = frame {
     layout: {align-items: .center, item-gap: 6px},
     children: [mark, stateText],
 
-    mark = shape : status.dotSucceeded {}
+    mark = shape : status.dotOnline {}
 
     stateText = text : t.small {
       contents: "在线"
