@@ -55,6 +55,16 @@ func (h *Host) storedHistory(ctx context.Context, req protocol.SessionRequest) (
 	if err != nil {
 		return fail(err)
 	}
+	threadPath, err := ThreadLedgerPath(h.DataDir, req.SessionID)
+	if err != nil {
+		return fail(err)
+	}
+	thread := false
+	if _, err := os.Stat(threadPath); err == nil {
+		path, thread = threadPath, true
+	} else if !os.IsNotExist(err) {
+		return fail(err)
+	}
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
 			return fail(ErrHistoryMissing)
@@ -68,13 +78,17 @@ func (h *Host) storedHistory(ctx context.Context, req protocol.SessionRequest) (
 	defer db.Close()
 	db.SetMaxOpenConns(1)
 	var raw, kind string
-	if err := db.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='agent_type'`).Scan(&kind); err != nil {
+	kindQuery, configQuery := `SELECT value FROM meta WHERE key='agent_type'`, `SELECT value FROM meta WHERE key='adapter_config'`
+	if thread {
+		kindQuery, configQuery = `SELECT agent_type FROM thread_meta`, `SELECT adapter_config FROM thread_meta`
+	}
+	if err := db.QueryRowContext(ctx, kindQuery).Scan(&kind); err != nil {
 		return fail(err)
 	}
 	if kind != "pi" && kind != "codex" && kind != "kiro" {
 		return protocol.SessionResult{}, false
 	}
-	if err := db.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='adapter_config'`).Scan(&raw); err != nil {
+	if err := db.QueryRowContext(ctx, configQuery).Scan(&raw); err != nil {
 		return fail(err)
 	}
 	var config agent.Config

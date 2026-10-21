@@ -64,6 +64,11 @@ type Adapter struct {
 	queryCancel                          context.CancelFunc
 	queryWG                              sync.WaitGroup
 	collecting                           bool
+	threadMode                           bool
+	threadMessageID                      string
+	threadReply                          replyBuffer
+	threadEvents                         []agent.Event
+	intents                              map[string]sendIntent
 	history                              []json.RawMessage
 	historyBytes                         int
 	historyOverflow                      bool
@@ -150,6 +155,13 @@ func (a *Adapter) connect(ctx context.Context) error {
 		<-conn.DisconnectNotify()
 		a.mu.Lock()
 		defer a.mu.Unlock()
+		if !a.closed && a.threadMode {
+			if a.active {
+				a.flushReplyLocked()
+				a.threadEventLocked(agent.Event{Kind: agent.EventUncertain})
+			}
+			a.threadEventLocked(agent.Event{Kind: agent.EventExited})
+		}
 		if !a.closed && a.active {
 			a.emitLocked(agent.Output{Uncertain: true})
 		}
@@ -564,6 +576,20 @@ func (a *Adapter) handle(ctx context.Context, c *jsonrpc2.Conn, r *jsonrpc2.Requ
 		}
 	}
 	if !a.active {
+		return nil, nil
+	}
+	if a.threadMode {
+		switch p.Update.Kind {
+		case "agent_message_chunk":
+			var content struct{ Type, Text string }
+			if json.Unmarshal(p.Update.Content, &content) == nil && content.Type == "text" {
+				a.live.Append(content.Text)
+				a.threadReply.append(content.Text)
+			}
+		case "tool_call", "tool_call_update":
+			a.flushReplyLocked()
+			a.usedTools = true
+		}
 		return nil, nil
 	}
 	switch p.Update.Kind {

@@ -24,6 +24,7 @@ const completionLimit = 192 * 1024
 var errCompletion = errors.New("命令完成记录无效")
 
 type completionRecord struct {
+	MessageID       string          `json:"message_id,omitempty"`
 	SchemaVersion   int             `json:"schema_version"`
 	SessionID       string          `json:"session_id"`
 	ExecutionID     string          `json:"execution_id"`
@@ -37,8 +38,10 @@ func (a *Adapter) validateIdentity() error {
 	if _, err := identity.ParseUUID(a.config.SessionID); err != nil {
 		return fmt.Errorf("%w: session_id", errCompletion)
 	}
-	if _, err := identity.ParseUUID(a.config.ExecutionID); err != nil {
-		return fmt.Errorf("%w: execution_id", errCompletion)
+	if a.config.ExecutionID != "" {
+		if _, err := identity.ParseUUID(a.config.ExecutionID); err != nil {
+			return fmt.Errorf("%w: execution_id", errCompletion)
+		}
 	}
 	return nil
 }
@@ -136,7 +139,12 @@ func (a *Adapter) loadCompletion(restore bool) (*completionRecord, error) {
 	}
 	record := &completionRecord{}
 	if _, envelope := fields["schema_version"]; envelope {
-		if len(fields) != 7 || requireFields(fields, "schema_version", "session_id", "execution_id", "input_generation", "completion_kind", "process_stopped", "result") != nil {
+		_, threadRecord := fields["message_id"]
+		fieldCount := 7
+		if threadRecord {
+			fieldCount++
+		}
+		if len(fields) != fieldCount || requireFields(fields, "schema_version", "session_id", "execution_id", "input_generation", "completion_kind", "process_stopped", "result") != nil {
 			return nil, fmt.Errorf("%w: 完成信封字段不完整", errCompletion)
 		}
 		dec := json.NewDecoder(bytes.NewReader(raw))
@@ -147,7 +155,11 @@ func (a *Adapter) loadCompletion(restore bool) (*completionRecord, error) {
 		if err := a.validateIdentity(); err != nil {
 			return nil, err
 		}
-		if record.SchemaVersion != 1 || record.SessionID != a.config.SessionID || record.ExecutionID != a.config.ExecutionID || record.InputGeneration != 1 || !record.ProcessStopped {
+		validSchema := record.SchemaVersion == 1 && !threadRecord && a.config.ExecutionID != ""
+		if threadRecord {
+			validSchema = record.SchemaVersion == 2 && record.MessageID != ""
+		}
+		if !validSchema || record.SessionID != a.config.SessionID || record.ExecutionID != a.config.ExecutionID || record.InputGeneration != 1 || !record.ProcessStopped {
 			return nil, fmt.Errorf("%w: 版本、执行身份、代次或停止事实不匹配", errCompletion)
 		}
 	} else {
@@ -231,10 +243,14 @@ func (a *Adapter) restoreLocked(record *completionRecord) {
 	a.restorePending = false
 	a.stopped = record.ProcessStopped
 	a.outputs = append(a.outputs, completionOutput(record))
+	a.completionEventsLocked(record)
 }
 
 func (a *Adapter) queueCompletionLocked(out agent.Output, kind string) {
 	a.pending = &completionRecord{SchemaVersion: 1, SessionID: a.config.SessionID, ExecutionID: a.config.ExecutionID, InputGeneration: 1, CompletionKind: kind, ProcessStopped: true, Result: json.RawMessage(out.Final)}
+	if a.threadMode {
+		a.pending.SchemaVersion, a.pending.MessageID = 2, a.messageID
+	}
 	a.maintainLocked()
 }
 
@@ -276,6 +292,7 @@ func (a *Adapter) maintainLocked() {
 		a.failures, a.lastError, a.retryAt = 0, "", time.Time{}
 		if pending != nil {
 			a.outputs = append(a.outputs, completionOutput(pending))
+			a.completionEventsLocked(pending)
 			a.pending = nil
 		} else {
 			a.restoreLocked(record)

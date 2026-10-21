@@ -19,12 +19,13 @@ import (
 
 // startLoop 在准备完成之后向中心申请启动许可，并只在 Worker 接受许可后进入启动。
 type startLoop struct {
-	ctx    context.Context
-	ident  Identity
-	ledger *Ledger
-	host   *session.Host
-	writer *wsWriter
-	log    *slog.Logger
+	ctx     context.Context
+	ident   Identity
+	ledger  *Ledger
+	host    *session.Host
+	writer  *wsWriter
+	log     *slog.Logger
+	threads *threadService
 
 	mu         sync.Mutex
 	deliveryMu sync.Mutex

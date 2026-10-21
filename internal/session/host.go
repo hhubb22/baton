@@ -54,6 +54,15 @@ func (h *Host) Reconcile(ctx context.Context, sessionID string) error {
 	}); err == nil {
 		return nil
 	}
+	threadPath, err := ThreadLedgerPath(h.DataDir, sessionID)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(threadPath); err == nil {
+		return h.spawn(ctx, sessionID)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	path, err := LedgerPath(h.DataDir, sessionID)
 	if err != nil {
 		return err

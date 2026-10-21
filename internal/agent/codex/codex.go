@@ -27,7 +27,7 @@ var (
 	ErrIncompatible   = errors.New("Codex 实验协议不兼容；支持 CLI 0.163.0 / 0.162.1")
 	ErrHistoryMissing = agent.ErrHistoryMissing
 	ErrUncertain      = errors.New("Codex input outcome unknown; refusing replay")
-	ErrBusy           = errors.New("Codex turn is active")
+	ErrBusy           = agent.ErrBusy
 	errNoActiveTurn   = errors.New("Codex turn has not started")
 )
 
@@ -59,6 +59,7 @@ type State struct {
 	OperationID string   `json:"operation_id"`
 	SteerID     string   `json:"steer_id"`
 	Operations  []string `json:"operations"`
+	ThreadMode  bool     `json:"thread_mode,omitempty"`
 }
 
 type turn struct {
@@ -89,6 +90,12 @@ type Adapter struct {
 	closeOnce          sync.Once
 	inbox              chan notification
 	liveInbox          chan notification
+	threadEventsMu     sync.Mutex
+	threadEvents       []agent.Event
+	threadEventsFailed bool
+	threadStarted      bool
+	threadEnded        bool
+	replyItems         map[string]bool
 }
 
 type notification struct {
@@ -97,6 +104,8 @@ type notification struct {
 }
 
 var _ agent.Adapter = (*Adapter)(nil)
+var _ agent.ThreadAdapter = (*Adapter)(nil)
+var _ agent.SessionIDProvider = (*Adapter)(nil)
 var _ agent.StopObserver = (*Adapter)(nil)
 
 func New(c Config) *Adapter {
@@ -184,7 +193,16 @@ func (a *Adapter) connect(ctx context.Context) error {
 	a.processDone = make(chan struct{})
 	p := &processIO{ReadCloser: out, WriteCloser: in, cmd: cmd}
 	a.conn = jsonrpc2.NewConn(context.Background(), jsonrpc2.NewBufferedStream(p, lineCodec{}), jsonrpc2.HandlerWithError(a.handle), jsonrpc2.SetLogger(discardLogger{}))
-	go func() { _ = cmd.Wait(); close(a.processDone); _ = a.conn.Close() }()
+	go func() {
+		_ = cmd.Wait()
+		close(a.processDone)
+		select {
+		case <-a.closed:
+		default:
+			a.emitThread(agent.Event{Kind: agent.EventExited, Reason: agent.EndAgentExited})
+		}
+		_ = a.conn.Close()
+	}()
 	go func() {
 		<-a.conn.DisconnectNotify()
 		select {
@@ -254,7 +272,7 @@ func (a *Adapter) CreateSession(ctx context.Context) error {
 			Path string `json:"path"`
 		} `json:"thread"`
 	}
-	p := map[string]any{"cwd": a.config.Directory, "approvalPolicy": "never", "sandbox": "workspace-write", "historyMode": "paginated", "ephemeral": false, "developerInstructions": Instructions}
+	p := map[string]any{"cwd": a.config.Directory, "approvalPolicy": "never", "sandbox": "workspace-write", "historyMode": "paginated", "ephemeral": false, "developerInstructions": threadInstructions(a.config.Directory)}
 	p["config"] = map[string]any{"sandbox_workspace_write.network_access": true, "shell_environment_policy.inherit": "all"}
 	if a.config.Model != "" {
 		p["model"] = a.config.Model
@@ -345,6 +363,9 @@ func (a *Adapter) Attach(ctx context.Context) error {
 	if a.config.Model != "" {
 		p["model"] = a.config.Model
 	}
+	if s.ThreadMode {
+		p["developerInstructions"] = threadInstructions(a.config.Directory)
+	}
 	if err := a.call(ctx, "thread/resume", p, &resumed); err != nil {
 		return err
 	}
@@ -355,6 +376,7 @@ func (a *Adapter) Attach(ctx context.Context) error {
 	a.state = s
 	if original != nil {
 		a.active = original.Status == "inProgress"
+		a.turnStarted = a.active && original.StartedAt != nil
 	}
 	a.mu.Unlock()
 	if original != nil && original.Status != "inProgress" {
@@ -401,7 +423,7 @@ func (a *Adapter) Attach(ctx context.Context) error {
 				return ErrUncertain
 			}
 		}
-		if original.Status == "completed" {
+		if original.Status == "completed" && !s.ThreadMode {
 			found := false
 			for _, raw := range original.Items {
 				var item struct{ Type, Text, Phase string }
@@ -424,6 +446,10 @@ func textInput(text string) []map[string]any {
 }
 
 func (a *Adapter) StartTask(ctx context.Context, operationID, text string) error {
+	return a.startTurn(ctx, operationID, text, false)
+}
+
+func (a *Adapter) startTurn(ctx context.Context, operationID, text string, threadMode bool) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.active {
@@ -439,6 +465,9 @@ func (a *Adapter) StartTask(ctx context.Context, operationID, text string) error
 		return ErrHistoryMissing
 	}
 	a.state.Pending = true
+	a.state.ThreadMode = threadMode
+	a.threadStarted, a.threadEnded = false, false
+	a.replyItems = nil
 	a.state.OperationID, a.state.TurnID = operationID, ""
 	a.state.Operations = append(a.state.Operations, operationID)
 	if err := a.saveLocked(); err != nil {
@@ -447,14 +476,23 @@ func (a *Adapter) StartTask(ctx context.Context, operationID, text string) error
 	var result struct {
 		Turn turn `json:"turn"`
 	}
-	p := map[string]any{"threadId": a.state.ThreadID, "input": textInput(text), "clientUserMessageId": operationID, "outputSchema": ResultSchema()}
+	p := map[string]any{"threadId": a.state.ThreadID, "input": textInput(text), "clientUserMessageId": operationID}
+	if !threadMode {
+		p["outputSchema"] = ResultSchema()
+	}
 	if a.config.Model != "" {
 		p["model"] = a.config.Model
 	}
 	if err := a.call(ctx, "turn/start", p, &result); err != nil {
+		if threadMode {
+			a.emitThread(agent.Event{Kind: agent.EventUncertain, NativeSessionID: a.state.ThreadID})
+		}
 		return err
 	}
 	if result.Turn.ID == "" || (result.Turn.Status != "inProgress" && result.Turn.Status != "completed" && result.Turn.Status != "interrupted" && result.Turn.Status != "failed") {
+		if threadMode {
+			a.emitThread(agent.Event{Kind: agent.EventUncertain, NativeSessionID: a.state.ThreadID})
+		}
 		return ErrIncompatible
 	}
 	a.state.TurnID, a.active, a.final, a.stopped = result.Turn.ID, true, "", false
@@ -493,10 +531,21 @@ func (a *Adapter) SendInput(ctx context.Context, operationID, text string) error
 		TurnID string `json:"turnId"`
 	}
 	if err := a.call(ctx, "turn/steer", map[string]any{"threadId": a.state.ThreadID, "expectedTurnId": a.state.TurnID, "input": textInput(text), "clientUserMessageId": operationID}, &result); err != nil {
+		if a.state.ThreadMode {
+			a.emitThread(agent.Event{Kind: agent.EventUncertain, NativeSessionID: a.state.ThreadID})
+		}
 		return err
 	}
 	if result.TurnID != a.state.TurnID {
+		if a.state.ThreadMode {
+			a.emitThread(agent.Event{Kind: agent.EventUncertain, NativeSessionID: a.state.ThreadID})
+		}
 		return ErrIncompatible
+	}
+	if a.state.ThreadMode {
+		// A successful steer response confirms acceptance; the Worker owns its send ledger.
+		a.state.SteerID = ""
+		return a.saveLocked()
 	}
 	return nil
 }
@@ -599,6 +648,9 @@ func (a *Adapter) Events() <-chan Event { return a.events }
 func (a *Adapter) Snapshot() State      { a.mu.Lock(); defer a.mu.Unlock(); return a.state }
 
 func (a *Adapter) emit(e Event) {
+	if e.Uncertain {
+		a.emitThread(agent.Event{Kind: agent.EventUncertain, Raw: e.Raw})
+	}
 	select {
 	case a.events <- e:
 	default:
@@ -674,6 +726,10 @@ func (a *Adapter) notification(method string, raw json.RawMessage) {
 		Item     struct{ Type, Text, Phase, ClientID string } `json:"item"`
 	}
 	if json.Unmarshal(raw, &p) != nil || a.state.ThreadID == "" || p.ThreadID != a.state.ThreadID {
+		return
+	}
+	if a.state.ThreadMode {
+		a.threadNotificationLocked(method, raw)
 		return
 	}
 	if method == "turn/started" {

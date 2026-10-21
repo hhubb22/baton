@@ -68,6 +68,15 @@ func RunWorker(ctx context.Context, dataDir, sessionID string) error {
 	}
 	defer logFile.Close()
 	logger := slog.New(slog.NewTextHandler(logFile, nil))
+	threadPath, err := ThreadLedgerPath(dataDir, sessionID)
+	if err != nil {
+		return err
+	}
+	if _, statErr := os.Stat(threadPath); statErr == nil {
+		return runThreadWorker(ctx, dataDir, sessionID, tokenText, logger)
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return statErr
+	}
 	ledgerPath, err := LedgerPath(dataDir, sessionID)
 	if err != nil {
 		return err

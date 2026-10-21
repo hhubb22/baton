@@ -16,7 +16,17 @@ var (
 	errEndpointBusy = errors.New("Session Worker 已在监听")
 )
 
+// ThreadCommandError 表示 Worker 已收到命令并明确拒绝，Host 不因此重启进程。
+type ThreadCommandError struct{ Message string }
+
+func (e *ThreadCommandError) Error() string { return e.Message }
+
 type ipcMessage struct {
+	ClientMessageID   string                   `json:"client_message_id,omitempty"`
+	Mode              string                   `json:"mode,omitempty"`
+	AfterWorkerSeq    int64                    `json:"after_worker_seq,omitempty"`
+	WorkerSeq         int64                    `json:"worker_seq,omitempty"`
+	ThreadReports     []protocol.ThreadReport  `json:"thread_reports,omitempty"`
 	SessionRequest    *protocol.SessionRequest `json:"session_request,omitempty"`
 	SessionResult     *protocol.SessionResult  `json:"session_result,omitempty"`
 	History           json.RawMessage          `json:"history,omitempty"`
@@ -67,6 +77,7 @@ type ipcReport struct {
 
 // Status 是 Worker 对一次状态查询的回答。准备阶段的执行器计数必须保持为 0。
 type Status struct {
+	ThreadReports   []protocol.ThreadReport
 	SessionResult   *protocol.SessionResult
 	History         json.RawMessage
 	HistoryCursor   string

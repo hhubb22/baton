@@ -117,6 +117,9 @@ func (c *Client) roundTrip(msg ipcMessage) (Status, error) {
 		return Status{}, errors.New("无法读取 Worker")
 	}
 	if !reply.OK {
+		if reply.Code == "thread_rejected" {
+			return Status{}, &ThreadCommandError{Message: reply.Message}
+		}
 		if reply.Code == "session_busy" {
 			return Status{}, ErrSessionBusy
 		}
@@ -129,6 +132,7 @@ func (c *Client) roundTrip(msg ipcMessage) (Status, error) {
 		return Status{}, errors.New("Worker 拒绝了命令")
 	}
 	return Status{
+		ThreadReports: reply.ThreadReports,
 		SessionResult: reply.SessionResult,
 		History:       reply.History, HistoryCursor: reply.HistoryCursor,
 		ChildReceipts: reply.ChildReceipts,

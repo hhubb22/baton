@@ -32,31 +32,42 @@ type response struct {
 }
 
 type Adapter struct {
-	streamed   bool
-	live       agent.LiveBuffer
-	config     agent.Config
-	diagnostic *startupDiagnostics
-	history    mapping
-	mu         sync.Mutex
-	writeMu    sync.Mutex
-	cmd        *exec.Cmd
-	in         io.WriteCloser
-	done       chan struct{}
-	pending    map[string]chan response
-	sequence   uint64
-	active     bool
-	waiting    bool
-	settled    chan struct{}
-	aborting   bool
-	usedTools  bool
-	final      string
-	stopReason string
-	outputs    []agent.Output
-	closed     bool
-	model      string
+	streamed          bool
+	live              agent.LiveBuffer
+	config            agent.Config
+	diagnostic        *startupDiagnostics
+	history           mapping
+	mu                sync.Mutex
+	writeMu           sync.Mutex
+	cmd               *exec.Cmd
+	in                io.WriteCloser
+	done              chan struct{}
+	pending           map[string]chan response
+	sequence          uint64
+	active            bool
+	waiting           bool
+	settled           chan struct{}
+	aborting          bool
+	usedTools         bool
+	final             string
+	stopReason        string
+	outputs           []agent.Output
+	closed            bool
+	model             string
+	threadTurn        bool
+	threadStarted     bool
+	threadMessageID   string
+	threadPromptRPCID string
+	events            []agent.Event
+	intents           map[string]sendIntent
+	inputMu           sync.Mutex
+	freshHistory      bool
 }
 
 var _ agent.Adapter = (*Adapter)(nil)
+var _ agent.ThreadAdapter = (*Adapter)(nil)
+var _ agent.IntentRestorer = (*Adapter)(nil)
+var _ agent.SessionIDProvider = (*Adapter)(nil)
 var _ agent.StopObserver = (*Adapter)(nil)
 
 func New(config agent.Config, options ...Option) *Adapter {
@@ -126,7 +137,12 @@ func (a *Adapter) Start(ctx context.Context) error {
 	if strings.TrimSpace(string(raw)) != Version {
 		return errors.New("Pi 1.3.0 required; installed CLI version could not be verified")
 	}
-	args := []string{"--mode", "rpc", "--offline", "--no-extensions", "--no-mcp", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-approve", "--session-dir", a.config.SessionDir, "--append-system-prompt", instructions}
+	prompt := instructions
+	// Legacy task sessions carry an ExecutionID; Thread sessions use SessionID.
+	if a.config.ExecutionID == "" {
+		prompt = fmt.Sprintf(threadInstructions, a.config.Directory)
+	}
+	args := []string{"--mode", "rpc", "--offline", "--no-extensions", "--no-mcp", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-approve", "--session-dir", a.config.SessionDir, "--append-system-prompt", prompt}
 	if a.config.Restore {
 		args = append(args, "--session", a.history.File)
 	} else {
@@ -177,6 +193,7 @@ func (a *Adapter) Start(ctx context.Context) error {
 		if !a.closed && !a.aborting && (a.active || a.waiting) {
 			a.outputs = append(a.outputs, agent.Output{Uncertain: true})
 		}
+		a.processExitedLocked(readErr)
 		a.active = false
 		a.mu.Unlock()
 		close(a.done)
@@ -213,6 +230,7 @@ func (a *Adapter) Start(ctx context.Context) error {
 		return fail("save native mapping", err)
 	}
 	a.mu.Lock()
+	a.freshHistory = !a.config.Restore
 	if s.Model.ID != "" {
 		a.model = s.Model.Provider + "/" + s.Model.ID
 	}
@@ -246,6 +264,9 @@ func (a *Adapter) call(ctx context.Context, command string, fields map[string]an
 	id := fmt.Sprintf("baton-%d", a.sequence)
 	reply := make(chan response, 1)
 	a.pending[id] = reply
+	if command == "prompt" && a.threadTurn && !a.threadStarted {
+		a.threadPromptRPCID = id
+	}
 	a.mu.Unlock()
 	defer func() { a.mu.Lock(); delete(a.pending, id); a.mu.Unlock() }()
 	if fields == nil {
@@ -296,6 +317,7 @@ func (a *Adapter) consume(raw []byte) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if r.Type == "response" {
+		a.acceptThreadPromptLocked(r)
 		if ch := a.pending[r.ID]; ch != nil {
 			select {
 			case ch <- r:
@@ -328,6 +350,9 @@ func (a *Adapter) consume(raw []byte) error {
 		if r.Message.Role == "assistant" {
 			a.stopReason = r.Message.StopReason
 			a.final = textContent(r.Message.Content)
+			if a.threadTurn && a.final != "" {
+				a.events = append(a.events, agent.Event{Kind: agent.EventReply, Content: a.final})
+			}
 			if !a.streamed {
 				a.live.Append(a.final)
 			}
@@ -336,9 +361,11 @@ func (a *Adapter) consume(raw []byte) error {
 			}
 		}
 	case "agent_settled":
+		threadTurn := a.threadTurn
+		a.endThreadTurnLocked(r)
 		a.active = false
 		close(a.settled)
-		if !a.aborting {
+		if !a.aborting && !threadTurn {
 			var wait struct {
 				Waiting bool `json:"baton_waiting_for_children"`
 			}
@@ -363,6 +390,8 @@ func (a *Adapter) SubmitInput(ctx context.Context, payload string) (agent.Output
 		a.mu.Unlock()
 		return agent.Output{}, errors.New("Pi Session busy or closed")
 	}
+	a.threadTurn, a.threadStarted = false, false
+	a.freshHistory = false
 	a.active, a.aborting, a.final, a.stopReason, a.waiting = true, false, "", "", false
 	a.settled = make(chan struct{})
 	a.mu.Unlock()

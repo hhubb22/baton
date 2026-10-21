@@ -29,15 +29,17 @@ var (
 
 // RunOptions 是一次常驻连接使用的本地身份和 Relay 地址。
 type RunOptions struct {
-	RelayURL       string
-	Identity       Identity
-	Heartbeat      time.Duration
-	RootCAs        *x509.CertPool
-	Logger         *slog.Logger
-	DataDir        string
-	reports        *runtimeReports
-	reportSender   *runtimeReportSender
-	projectRuntime *projectRuntimeManager
+	RelayURL          string
+	Identity          Identity
+	Heartbeat         time.Duration
+	RootCAs           *x509.CertPool
+	Logger            *slog.Logger
+	DataDir           string
+	ThreadHost        ThreadHost
+	ThreadBudgetBytes int64
+	reports           *runtimeReports
+	reportSender      *runtimeReportSender
+	projectRuntime    *projectRuntimeManager
 }
 
 // Maintain 保持到 Relay 的出站连接。同一进程的重连沿用启动时生成的 incarnation。
@@ -180,6 +182,16 @@ func runOnce(ctx context.Context, opts RunOptions, incarnation string, ledger *L
 	expect.Store("")
 	writer := newWSWriter(ws)
 	loop := newStartLoop(ctx, opts.Identity, ledger, host, writer, opts.Logger)
+	threadHost := opts.ThreadHost
+	if threadHost == nil && host != nil {
+		threadHost = newSessionThreadHost(host, ledger, opts.Identity.NodeID)
+	}
+	loop.threads = newThreadService(ledger, threadHost, opts.ThreadBudgetBytes, opts.Identity.Capabilities, func(ctx context.Context, correlation string, value any) error {
+		return writeThreadEnvelope(ctx, writer, correlation, value)
+	})
+	threadDone := make(chan struct{})
+	go func() { defer close(threadDone); loop.threads.run(ctx) }()
+	defer func() { cancel(); <-threadDone }()
 	if opts.projectRuntime != nil {
 		opts.projectRuntime.setLoop(loop)
 		defer opts.projectRuntime.setLoop(nil)
@@ -298,6 +310,9 @@ func readRelay(ctx context.Context, w *wsWriter, acked *atomic.Bool, expect *ato
 				continue
 			}
 			reports.note(wrap.Envelope)
+			if loop != nil && loop.threads != nil && loop.threads.handle(wrap.Envelope) {
+				continue
+			}
 			if len(runtimes) > 0 && runtimes[0] != nil && runtimes[0].handle(wrap.Envelope) {
 				continue
 			}
@@ -319,6 +334,9 @@ func readRelay(ctx context.Context, w *wsWriter, acked *atomic.Bool, expect *ato
 			if body.Type == "node.sync_result" && body.OK && wrap.Envelope.CorrelationID == want && want != "" {
 				if acked.CompareAndSwap(false, true) {
 					log.Info("event=synced", "node_id", ident.NodeID)
+					if loop != nil && loop.threads != nil {
+						loop.threads.syncReady()
+					}
 					select {
 					case reports.ready <- struct{}{}:
 					default:

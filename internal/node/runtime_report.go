@@ -23,6 +23,7 @@ const runtimeCollectTimeout = 2 * time.Second
 
 type runtimeReports struct {
 	latest  atomic.Pointer[protocol.RuntimeReport]
+	agents  atomic.Pointer[[]agentRuntimeReport]
 	changed chan struct{}
 	refresh chan struct{}
 }
@@ -33,8 +34,9 @@ func collectRuntimeReports(ctx context.Context, dir string) *runtimeReports {
 	go func() {
 		for ctx.Err() == nil {
 			collectCtx, cancel := context.WithTimeout(ctx, runtimeCollectTimeout)
-			report := collectRuntimeReport(collectCtx, dir)
+			report, agents := collectRuntimeReportWithAgents(collectCtx, dir)
 			cancel()
+			r.agents.Store(&agents)
 			r.latest.Store(&report)
 			select {
 			case r.changed <- struct{}{}:
@@ -55,17 +57,26 @@ func collectRuntimeReports(ctx context.Context, dir string) *runtimeReports {
 }
 
 func collectRuntimeReport(ctx context.Context, dir string) protocol.RuntimeReport {
+	r, _ := collectRuntimeReportWithAgents(ctx, dir)
+	return r
+}
+
+func collectRuntimeReportWithAgents(ctx context.Context, dir string) (protocol.RuntimeReport, []agentRuntimeReport) {
 	cfg, err := ReadProjectExec(dir)
 	if err != nil {
 		cfg = protocol.RuntimeExec{Shell: DefaultProjectShell()}
 	}
 	r := protocol.RuntimeReport{Exec: cfg, Truncated: err != nil}
+	agents := collectAgentRuntimeReports(ctx, cfg, defaultAgentProbe())
+	for _, a := range agents {
+		r.Agents = append(r.Agents, a.RuntimeAgent)
+	}
 	r.ProjectRuntime = probeProjectRuntime(ctx)
 	roots, repos, truncated := fileaccess.ScanRuntimeRoots(ctx, dir)
 	r.Roots, r.Repos, r.Truncated = roots, repos, r.Truncated || truncated
 	for {
-		if _, err := protocol.RuntimeReportJSON(r); err == nil {
-			return r
+		if _, err := runtimeReportWireJSON(r, &agents); err == nil {
+			return r, agents
 		}
 		r.Truncated = true
 		if len(r.Repos) > 0 {
@@ -165,7 +176,7 @@ func (c *runtimeReportConnection) send(ctx context.Context, w *wsWriter, reports
 	if r == nil {
 		return nil
 	}
-	raw, err := protocol.RuntimeReportJSON(*r)
+	raw, err := runtimeReportWireJSON(*r, reports.agents.Load())
 	if err != nil {
 		return nil
 	}

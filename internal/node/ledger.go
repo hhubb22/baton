@@ -82,7 +82,7 @@ func OpenLedger(dir string) (*Ledger, error) {
 		db.Close()
 		return nil, err
 	}
-	if _, err := db.Exec(nodeSchema); err != nil {
+	if _, err := db.Exec(nodeSchema + threadSchema); err != nil {
 		db.Close()
 		return nil, errors.New("无法创建节点账本")
 	}

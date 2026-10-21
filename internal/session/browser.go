@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -264,7 +265,15 @@ func (h *Host) BrowserRequest(ctx context.Context, req protocol.SessionRequest) 
 		if pathErr != nil {
 			return protocol.SessionResult{}, pathErr
 		}
-		if err := InspectLedger(path); err != nil {
+		threadPath, threadErr := ThreadLedgerPath(h.DataDir, req.SessionID)
+		if threadErr != nil {
+			return protocol.SessionResult{}, threadErr
+		}
+		if _, err := os.Stat(threadPath); errors.Is(err, os.ErrNotExist) {
+			if err := InspectLedger(path); err != nil {
+				return protocol.SessionResult{}, err
+			}
+		} else if err != nil {
 			return protocol.SessionResult{}, err
 		}
 		if err := h.spawn(ctx, req.SessionID); err != nil {

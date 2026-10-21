@@ -25,6 +25,9 @@ import (
 )
 
 type Adapter struct {
+	messageID                           string
+	threadMode                          bool
+	events                              []agent.Event
 	config                              agent.Config
 	mu                                  sync.Mutex
 	started, submitted, closed, stopped bool
@@ -100,25 +103,32 @@ func (a *Adapter) SubmitInput(ctx context.Context, payload string) (agent.Output
 	if len(payload) > task.ExecutorInputLimit || json.Unmarshal([]byte(payload), &input) != nil || input.Description == "" || input.Generation != 1 {
 		return a.failureLocked("命令任务输入无效"), nil
 	}
+	if err := a.launchLocked(ctx, input.Description); err != nil {
+		return a.failureLocked(err.Error()), nil
+	}
+	return agent.Output{}, nil
+}
+
+func (a *Adapter) launchLocked(ctx context.Context, command string) error {
 	if ctx.Err() != nil {
-		return a.failureLocked("命令启动已取消"), nil
+		return errors.New("命令启动已取消")
 	}
 	// 每次启动前读取本机配置和登记目录，能力报告不能代替节点上的授权。
 	cfg, err := projectexec.ReadProjectExec(a.config.DataDir)
 	if err != nil || !cfg.Enabled {
-		return a.failureLocked("此节点未开启 Project Agent 命令执行"), nil
+		return errors.New("此节点未开启 Project Agent 命令执行")
 	}
 	directory, err := authorizedDirectory(a.config.DataDir, a.config.Directory)
 	if err != nil {
-		return a.failureLocked("命令工作目录不存在或未登记"), nil
+		return errors.New("命令工作目录不存在或未登记")
 	}
-	args := []string{"-lc", input.Description}
+	args := []string{"-lc", command}
 	if runtime.GOOS == "windows" {
-		args = []string{"-NoProfile", "-Command", input.Description}
+		args = []string{"-NoProfile", "-Command", command}
 	}
 	binary, err := exec.LookPath(cfg.Shell)
 	if err != nil {
-		return a.failureLocked("无法启动命令使用的 shell"), nil
+		return errors.New("无法启动命令使用的 shell")
 	}
 	cmd := exec.Command(binary, args...)
 	cmd.Dir = directory
@@ -131,9 +141,12 @@ func (a *Adapter) SubmitInput(ctx context.Context, payload string) (agent.Output
 	cmd.WaitDelay = time.Second
 	process, err := sidecar.Start(cmd)
 	if err != nil {
-		return a.failureLocked("无法启动命令使用的 shell"), nil
+		return errors.New("无法启动命令使用的 shell")
 	}
 	a.process, a.done = process, make(chan struct{})
+	if a.threadMode {
+		a.events = append(a.events, agent.Event{Kind: agent.EventTurnStarted, ClientMessageID: a.messageID, NativeSessionID: a.config.SessionID})
+	}
 	go func() {
 		err := process.Wait()
 		code := 0
@@ -158,7 +171,7 @@ func (a *Adapter) SubmitInput(ctx context.Context, payload string) (agent.Output
 		close(a.done)
 		a.mu.Unlock()
 	}()
-	return agent.Output{}, nil
+	return nil
 }
 
 func authorizedDirectory(dataDir, directory string) (string, error) {
