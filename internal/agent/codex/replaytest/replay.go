@@ -75,6 +75,20 @@ func AdapterTape(tape replay.Transcript) replay.Transcript {
 	for _, e := range tape.Entries {
 		if p, ok := mapping[e.Process]; ok {
 			e.Process = p
+			if e.Type == "expect_outbound" {
+				var frame map[string]any
+				if json.Unmarshal(e.Frame, &frame) == nil {
+					if params, ok := frame["params"].(map[string]any); ok {
+						switch frame["method"] {
+						case "turn/start":
+							delete(params, "outputSchema")
+						case "thread/resume":
+							params["developerInstructions"] = "<any>"
+						}
+						e.Frame, _ = json.Marshal(frame)
+					}
+				}
+			}
 			entries = append(entries, e)
 		}
 	}

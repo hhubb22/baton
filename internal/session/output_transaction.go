@@ -1,24 +1,10 @@
 package session
 
 import (
-	"context"
 	"database/sql"
 	"database/sql/driver"
 	"errors"
 )
-
-func (w *workerDB) beginOutputTx() (*sql.Conn, *sql.Tx, error) {
-	conn, err := w.db.Conn(context.Background())
-	if err != nil {
-		return nil, nil, err
-	}
-	tx, err := conn.BeginTx(context.Background(), nil)
-	if err != nil {
-		_ = conn.Close()
-		return nil, nil, err
-	}
-	return conn, tx, nil
-}
 
 // commitOutputTx releases the pinned connection before checking durable state.
 // A failed SQLite COMMIT can leave its transaction active after sql.Tx is done;

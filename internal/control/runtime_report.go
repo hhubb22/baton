@@ -28,5 +28,5 @@ func (s *Server) onRuntimeReport(ctx context.Context, connID string, env protoco
 	}
 	// 日志只记录节点和结果，不写路径、origin 或 probe 输出。
 	s.log.Info("event=runtime_report", "node_id", env.Source.NodeID, "ok", result.OK, "code", result.Code, "report_version", result.ReportVersion)
-	s.replyExecution(ctx, connID, env, result)
+	s.replyNode(ctx, connID, env, result)
 }

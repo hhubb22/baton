@@ -63,10 +63,16 @@ CREATE TABLE IF NOT EXISTS threads (
  created_at TEXT NOT NULL,
  updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS thread_worker_reports (
+ thread_id TEXT NOT NULL,
+ event_id TEXT NOT NULL UNIQUE,
+ worker_seq INTEGER NOT NULL,
+ report BLOB NOT NULL,
+ PRIMARY KEY(thread_id, worker_seq)
+);
 CREATE TABLE IF NOT EXISTS thread_command_receipts (
  message_id TEXT PRIMARY KEY,
  request_hash TEXT NOT NULL,
- request_hash_version INTEGER NOT NULL DEFAULT 1 CHECK(request_hash_version IN (1,2)),
  result BLOB NOT NULL
 );
 CREATE TABLE IF NOT EXISTS thread_node_reports (
@@ -83,27 +89,6 @@ CREATE TABLE IF NOT EXISTS thread_report_progress (
  worker_seq INTEGER NOT NULL
 );
 `
-
-func ensureThreadColumns(db *sql.DB) error {
-	for _, column := range []struct{ table, name, definition string }{
-		{"threads", "model", "TEXT NOT NULL DEFAULT ''"},
-		{"thread_command_receipts", "request_hash_version", "INTEGER NOT NULL DEFAULT 1 CHECK(request_hash_version IN (1,2))"},
-	} {
-		var count int
-		if err := db.QueryRow(`SELECT count(*) FROM pragma_table_info(?) WHERE name=?`, column.table, column.name).Scan(&count); err != nil {
-			return err
-		}
-		if count > 0 {
-			continue
-		}
-		if _, err := db.Exec(`ALTER TABLE ` + column.table + ` ADD COLUMN ` + column.name + ` ` + column.definition); err != nil {
-			if checkErr := db.QueryRow(`SELECT count(*) FROM pragma_table_info(?) WHERE name=?`, column.table, column.name).Scan(&count); checkErr != nil || count == 0 {
-				return err
-			}
-		}
-	}
-	return nil
-}
 
 func (l *Ledger) Thread(ctx context.Context, id string) (ThreadRecord, error) {
 	var r ThreadRecord
@@ -166,17 +151,13 @@ func threadRequestHash(cmd protocol.ThreadCommand) string {
 
 func (l *Ledger) threadReceipt(ctx context.Context, id string, cmd protocol.ThreadCommand) (protocol.ThreadCommandResult, bool, error) {
 	var hash string
-	var version int
 	var raw []byte
-	err := l.db.QueryRowContext(ctx, `SELECT request_hash,request_hash_version,result FROM thread_command_receipts WHERE message_id=?`, id).Scan(&hash, &version, &raw)
+	err := l.db.QueryRowContext(ctx, `SELECT request_hash,result FROM thread_command_receipts WHERE message_id=?`, id).Scan(&hash, &raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return protocol.ThreadCommandResult{}, false, nil
 	}
 	if err != nil {
 		return protocol.ThreadCommandResult{}, false, err
-	}
-	if version == 1 {
-		cmd.Model = ""
 	}
 	if hash != threadRequestHash(cmd) {
 		return protocol.ThreadCommandResult{}, false, errors.New("命令身份冲突")
@@ -191,7 +172,7 @@ func (l *Ledger) saveThreadReceipt(ctx context.Context, id string, cmd protocol.
 	if err != nil {
 		return err
 	}
-	_, err = l.db.ExecContext(ctx, `INSERT INTO thread_command_receipts(message_id,request_hash,request_hash_version,result) VALUES(?,?,2,?)`, id, threadRequestHash(cmd), raw)
+	_, err = l.db.ExecContext(ctx, `INSERT INTO thread_command_receipts(message_id,request_hash,result) VALUES(?,?,?)`, id, threadRequestHash(cmd), raw)
 	return err
 }
 
@@ -215,6 +196,13 @@ func (l *Ledger) nodeThreadFailure(ctx context.Context, commandID, threadID, kin
 		return err
 	}
 	defer tx.Rollback()
+	if err := l.nodeThreadFailureTx(ctx, tx, commandID, threadID, kind, reason, kind == "thread.stopped"); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (l *Ledger) nodeThreadFailureTx(ctx context.Context, tx *sql.Tx, commandID, threadID, kind, reason string, historyUnavailable bool) error {
 	var exists int
 	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM thread_node_reports WHERE command_id=?`, commandID).Scan(&exists); err != nil {
 		return err
@@ -225,14 +213,15 @@ func (l *Ledger) nodeThreadFailure(ctx context.Context, commandID, threadID, kin
 	var seq int64
 	if err := tx.QueryRowContext(ctx, `SELECT MAX(seq) FROM (
  SELECT COALESCE(MAX(worker_seq),0) AS seq FROM thread_node_reports WHERE thread_id=?
- UNION ALL SELECT COALESCE(MAX(worker_seq),0) FROM thread_report_progress WHERE thread_id=?)`, threadID, threadID).Scan(&seq); err != nil {
+ UNION ALL SELECT COALESCE(MAX(worker_seq),0) FROM thread_report_progress WHERE thread_id=?
+ UNION ALL SELECT COALESCE(MAX(worker_seq),0) FROM thread_worker_reports WHERE thread_id=?)`, threadID, threadID, threadID).Scan(&seq); err != nil {
 		return err
 	}
 	eventID, err := identity.NewUUID()
 	if err != nil {
 		return err
 	}
-	r := protocol.ThreadReport{Type: protocol.BodyThreadReport, ThreadID: threadID, EventID: eventID, WorkerSeq: seq + 1, Kind: kind, Reason: reason}
+	r := protocol.ThreadReport{Type: protocol.BodyThreadReport, ThreadID: threadID, EventID: eventID, WorkerSeq: seq + 1, Kind: kind, Reason: reason, HistoryUnavailable: historyUnavailable}
 	raw, err := json.Marshal(r)
 	if err != nil {
 		return err
@@ -245,7 +234,7 @@ func (l *Ledger) nodeThreadFailure(ctx context.Context, commandID, threadID, kin
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 func (l *Ledger) nodeThreadPending(ctx context.Context, id string, from int64) ([]protocol.ThreadReport, error) {
@@ -270,18 +259,27 @@ func (l *Ledger) nodeThreadPending(ctx context.Context, id string, from int64) (
 }
 
 func (l *Ledger) alignMissingThreadReports(ctx context.Context, id string, expected int64) error {
-	// node.db 丢失时没有旧序号；中心明确拒绝报告后，以它要求的序号补报终止事实。
-	// 有 Worker 映射时始终使用 Worker 原来的序号。
+	// 只有原 Worker 已隔离或映射缺失，才按中心要求调整节点恢复报告的序号。
+	// 未确认的 Worker 报告始终保留原序号。
 	tx, err := l.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	var mapped int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM threads WHERE thread_id=?`, id).Scan(&mapped); err != nil {
+	var status string
+	err = tx.QueryRowContext(ctx, `SELECT status FROM threads WHERE thread_id=?`, id).Scan(&status)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	if mapped != 0 {
+	isolated := status == "history_missing"
+	if err == nil && !isolated {
+		return nil
+	}
+	var cached int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM thread_worker_reports WHERE thread_id=?`, id).Scan(&cached); err != nil {
+		return err
+	}
+	if cached > 0 {
 		return nil
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT event_id,worker_seq,report FROM thread_node_reports WHERE thread_id=? AND acked=0 ORDER BY worker_seq`, id)
@@ -312,12 +310,16 @@ func (l *Ledger) alignMissingThreadReports(ctx context.Context, id string, expec
 	if err != nil {
 		return err
 	}
-	if len(pending) == 0 || pending[0].seq >= expected {
+	if len(pending) == 0 || pending[0].seq == expected || (!isolated && pending[0].seq > expected) {
 		return nil
 	}
 	delta := expected - pending[0].seq
-	for i := len(pending) - 1; i >= 0; i-- {
-		r := pending[i]
+	for i := range pending {
+		index := i
+		if delta > 0 {
+			index = len(pending) - 1 - i
+		}
+		r := pending[index]
 		r.report.WorkerSeq += delta
 		raw, err := json.Marshal(r.report)
 		if err != nil {

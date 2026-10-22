@@ -16,7 +16,7 @@ import (
 )
 
 func TestThreadRequestsAndLifecycle(t *testing.T) {
-	c := Config{Directory: t.TempDir(), StatePath: filepath.Join(t.TempDir(), "state.json"), ExecutionID: "legacy-config"}
+	c := Config{Directory: t.TempDir(), StatePath: filepath.Join(t.TempDir(), "state.json")}
 	a := New(c)
 	requests := make(chan string, 8)
 	turnCount := 0
@@ -100,14 +100,11 @@ func TestThreadRequestsAndLifecycle(t *testing.T) {
 	if stopped, _ := a.StopStatus(); !stopped {
 		t.Fatal("Missing stop observation")
 	}
-	if outputs := a.Drain(); len(outputs) != 0 {
-		t.Fatal("Thread notifications entered legacy output queue", outputs)
-	}
-	events := a.DrainEvents()
+	events := a.Drain()
 	if len(events) != 4 || events[0].Kind != agent.EventTurnStarted || events[0].ClientMessageID != "message-1" || events[0].NativeSessionID != "native-thread" || events[1].Content != "first reply" || events[2].Content != "second reply" || events[3].Kind != agent.EventTurnEnded || events[3].Reason != agent.EndStopped {
 		t.Fatalf("Thread events: %+v", events)
 	}
-	if events := a.DrainEvents(); len(events) != 0 {
+	if events := a.Drain(); len(events) != 0 {
 		t.Fatal(events)
 	}
 	if err := a.Send(ctx, "message-2", "next turn", ""); err != nil {
@@ -128,15 +125,15 @@ func TestThreadCompletionReasonsAndIdentity(t *testing.T) {
 		t.Run(status, func(t *testing.T) {
 			a := New(Config{StatePath: filepath.Join(t.TempDir(), "state.json")})
 			defer a.Close()
-			a.state = State{ThreadID: "thread", TurnID: "turn", ThreadMode: true, Pending: true, OperationID: "message"}
+			a.state = State{ThreadID: "thread", TurnID: "turn", Pending: true, OperationID: "message"}
 			a.active = true
 			a.notification("turn/completed", json.RawMessage(`{"threadId":"other","turn":{"id":"turn","status":"completed"}}`))
 			a.notification("turn/completed", json.RawMessage(`{"threadId":"thread","turn":{"id":"other","status":"completed"}}`))
-			if events := a.DrainEvents(); len(events) != 0 {
+			if events := a.Drain(); len(events) != 0 {
 				t.Fatal(events)
 			}
 			a.notification("turn/completed", json.RawMessage(`{"threadId":"thread","turn":{"id":"turn","status":"`+status+`","items":[]}}`))
-			events := a.DrainEvents()
+			events := a.Drain()
 			if len(events) != 2 || events[0].Kind != agent.EventTurnStarted || events[1].Kind != agent.EventTurnEnded || events[1].Reason != reason {
 				t.Fatal(events)
 			}
@@ -180,7 +177,7 @@ func nativeSentFixture(t *testing.T, body string) (Config, State) {
 		t.Fatal(err)
 	}
 	c := Config{Directory: dir, SessionID: "baton-thread", StatePath: filepath.Join(dir, "state.json")}
-	s := State{ThreadID: "native-thread", SessionID: c.SessionID, Directory: dir, Version: Version, HistoryRoot: dir, HistoryPath: filepath.Join(dir, "history.jsonl"), ThreadMode: true}
+	s := State{ThreadID: "native-thread", SessionID: c.SessionID, Directory: dir, Version: Version, HistoryRoot: dir, HistoryPath: filepath.Join(dir, "history.jsonl")}
 	header, _ := json.Marshal(map[string]any{"type": "session_meta", "payload": map[string]string{"id": s.ThreadID, "cwd": dir, "cli_version": s.Version}})
 	if err := os.WriteFile(s.HistoryPath, append(append(header, '\n'), []byte(body)...), 0600); err != nil {
 		t.Fatal(err)
@@ -256,7 +253,7 @@ func TestThreadEventOverflowReportsUncertainty(t *testing.T) {
 	for range 200 {
 		a.emitThread(agent.Event{Kind: agent.EventReply, Content: "reply"})
 	}
-	events := a.DrainEvents()
+	events := a.Drain()
 	if len(events) != 128 || events[len(events)-1].Kind != agent.EventUncertain {
 		t.Fatal("Missing bounded overflow signal", len(events))
 	}

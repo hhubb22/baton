@@ -7,7 +7,7 @@ const (
 	SessionBufferBytes = 256 * 1024
 )
 
-// SessionRequest 是临时查询或有稳定操作标识的输入，不进入中心 outbox。
+// SessionRequest 查询 Thread 的本地历史或实时输出，不进入中心 outbox。
 type SessionRequest struct {
 	Type        string `json:"type"`
 	OperationID string `json:"operation_id"`
@@ -15,21 +15,18 @@ type SessionRequest struct {
 	Action      string `json:"action"`
 	Cursor      string `json:"cursor,omitempty"`
 	Limit       int    `json:"limit,omitempty"`
-	Text        string `json:"text,omitempty"`
 }
 
-// SessionResult 只包含本次受限输出和操作回执，完整历史保留在节点。
+// SessionResult 只包含本次受限查询的结果，完整历史保留在节点。
 type SessionResult struct {
-	History        *SessionHistoryPage `json:"history,omitempty"`
-	ExecutionID    string              `json:"execution_id,omitempty"`
-	Type           string              `json:"type"`
-	OperationID    string              `json:"operation_id"`
-	SessionID      string              `json:"session_id"`
-	OK             bool                `json:"ok"`
-	Code           string              `json:"code,omitempty"`
-	State          string              `json:"state,omitempty"`
-	InputSupported bool                `json:"input_supported"`
-	Text           string              `json:"text,omitempty"`
-	Cursor         string              `json:"cursor,omitempty"`
-	Gap            bool                `json:"gap"`
+	History     *SessionHistoryPage `json:"history,omitempty"`
+	Type        string              `json:"type"`
+	OperationID string              `json:"operation_id"`
+	SessionID   string              `json:"session_id"`
+	OK          bool                `json:"ok"`
+	Code        string              `json:"code,omitempty"`
+	State       string              `json:"state,omitempty"`
+	Text        string              `json:"text,omitempty"`
+	Cursor      string              `json:"cursor,omitempty"`
+	Gap         bool                `json:"gap"`
 }

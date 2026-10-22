@@ -11,11 +11,6 @@ const (
 	MaxProjectRuntimeBytes    = 192 << 10
 )
 
-type ProjectTaskUpdate struct {
-	TaskID  string `json:"task_id"`
-	Version int64  `json:"version"`
-}
-
 type ProjectThreadUpdate struct {
 	ThreadID string `json:"thread_id"`
 	Version  int64  `json:"version"`
@@ -29,7 +24,6 @@ type ProjectRunCommand struct {
 	Model          string                `json:"model,omitempty"`
 	ProjectID      string                `json:"project_id,omitempty"`
 	ConversationID string                `json:"conversation_id,omitempty"`
-	TaskUpdates    []ProjectTaskUpdate   `json:"task_updates,omitempty"`
 	ThreadUpdates  []ProjectThreadUpdate `json:"thread_updates,omitempty"`
 	InputIDs       []int64               `json:"input_ids,omitempty"`
 }

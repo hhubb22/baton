@@ -22,18 +22,13 @@ import (
 	"baton/internal/protocol"
 )
 
-func nativeThreadAdapter(kind string, config agent.Config) (agent.ThreadAdapter, error) {
+func nativeThreadAdapter(kind string, config agent.Config) (agent.Adapter, error) {
 	registration, ok := registeredAdapters[kind]
 	if !ok {
 		return nil, errors.New("尚未实现的 Thread 适配器")
 	}
 	adapter := registration.new(config)
-	thread, ok := adapter.(agent.ThreadAdapter)
-	if !ok {
-		_ = adapter.Close()
-		return nil, agent.ErrUnsupported
-	}
-	return thread, nil
+	return adapter, nil
 }
 
 // OpenThread 创建持久配置并连接或启动对应 Worker。重复调用核对原配置。
@@ -47,7 +42,7 @@ func (h *Host) OpenThread(ctx context.Context, options ThreadOptions) error {
 	}
 	// 本地配置中的执行身份始终由 Host 填写。
 	config := options.AdapterConfig
-	config.DataDir, config.Directory, config.SessionID, config.ExecutionID = h.DataDir, options.WorkingDirectory, options.ThreadID, options.ThreadID
+	config.DataDir, config.Directory, config.SessionID = h.DataDir, options.WorkingDirectory, options.ThreadID
 	config.SessionDir = filepath.Join(dir, "native")
 	config.StatePath = filepath.Join(config.SessionDir, "state.json")
 	if options.Model != "" {
@@ -65,13 +60,7 @@ func (h *Host) OpenThread(ctx context.Context, options ThreadOptions) error {
 		}
 	}
 	options.AdapterConfig = config
-	// 同一 Session 目录不能同时交给旧任务 Worker 和 Thread Worker。
-	legacy, _ := LedgerPath(h.DataDir, options.ThreadID)
-	if _, err := os.Stat(legacy); err == nil {
-		return ErrSessionBusy
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
+
 	db, _, err := openThreadDB(h.DataDir, options, true)
 	if err != nil {
 		return err
@@ -88,12 +77,15 @@ func (h *Host) threadCall(ctx context.Context, threadID string, msg ipcMessage) 
 	if err == nil || errors.As(err, &rejected) {
 		return st, err
 	}
-	path, pathErr := ThreadLedgerPath(h.DataDir, threadID)
-	if pathErr != nil {
-		return Status{}, pathErr
+	if err := ctx.Err(); err != nil {
+		return Status{}, err
 	}
-	if _, statErr := os.Stat(path); statErr != nil {
-		return Status{}, statErr
+	db, _, inspectErr := openThreadDB(h.DataDir, ThreadOptions{ThreadID: threadID}, false)
+	if inspectErr != nil {
+		return Status{}, inspectErr
+	}
+	if err := db.Close(); err != nil {
+		return Status{}, classifyLedgerErr(err)
 	}
 	if err := h.spawn(ctx, threadID); err != nil {
 		return Status{}, err
@@ -312,17 +304,6 @@ func (w *ThreadWorker) SessionRequest(ctx context.Context, req protocol.SessionR
 		return result
 	}
 	result.State, _ = w.status()
-	if req.Action == "validate_directory" {
-		result.OK = filepath.Clean(req.Text) == filepath.Clean(w.options.WorkingDirectory)
-		if !result.OK {
-			result.Code = "invalid_directory"
-		}
-		return result
-	}
-	if req.Action == "resume" {
-		result.OK = true
-		return result
-	}
 	if req.Action != "output" {
 		result.Code = "unsupported"
 		return result

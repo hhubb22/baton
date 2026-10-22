@@ -11,7 +11,7 @@ import (
 	"baton/internal/store"
 )
 
-// DeliverThreads 与维护和旧任务派发分别运行，发送后由入站路径独立保存回执。
+// DeliverThreads 独立派发 Thread 命令，发送后由入站路径保存回执。
 func (s *Server) DeliverThreads(ctx context.Context) {
 	s.periodic(ctx, 200*time.Millisecond, "thread_delivery", s.deliverThreadBatch)
 }

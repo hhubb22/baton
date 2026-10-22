@@ -204,8 +204,8 @@ func TestProjectExecWaitValidatesSourceBeforePendingAndReplay(t *testing.T) {
 	}
 }
 
-func TestProjectExecWaitValidatesConversationAndTaskBinding(t *testing.T) {
-	for _, change := range []string{"last_seq", "tool_call", "task_project", "task_origin", "assistant", "intervening_input"} {
+func TestProjectExecWaitValidatesConversationAndThreadBinding(t *testing.T) {
+	for _, change := range []string{"last_seq", "tool_call", "thread_project", "thread_origin", "assistant", "intervening_input"} {
 		t.Run(change, func(t *testing.T) {
 			h, req, p := execWaitFixture(t, 600)
 			req.Operation = "wait_tool"
@@ -215,13 +215,13 @@ func TestProjectExecWaitValidatesConversationAndTaskBinding(t *testing.T) {
 				req.LastSeq--
 			case "tool_call":
 				req.ToolCallID = "another-call"
-			case "task_project":
+			case "thread_project":
 				other, e := h.repo.CreateProject(h.ctx, h.owner, projectagent.CreateInput{Title: "其他项目"})
 				if e != nil {
 					t.Fatal(e)
 				}
 				_, err = h.pool.Exec(h.ctx, `UPDATE threads SET project_id=$2 WHERE id=$1`, p.ThreadID, other.ID)
-			case "task_origin":
+			case "thread_origin":
 				_, err = h.pool.Exec(h.ctx, `UPDATE threads SET origin_tool_call_id='another-call' WHERE id=$1`, p.ThreadID)
 			case "assistant":
 				h.save(t, "nodes.exec", execArgs(h, 600))

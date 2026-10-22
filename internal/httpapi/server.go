@@ -1,4 +1,4 @@
-// Package httpapi 提供员工登录、退出、本人身份、初始口令更换、节点注册、默认设备、本人节点状态、凭据吊销、任务接受和受限文件浏览。
+// Package httpapi 提供身份登录、设备管理、Thread、Project、Inbox 和受限文件浏览接口。
 package httpapi
 
 import (
@@ -27,10 +27,6 @@ import (
 )
 
 const maxJSONBytes = 64 << 10
-
-// maxTaskJSONBytes 要盖住字段长度合法、但执行器输入超过 256 KiB 的任务请求。
-// 这样 POST /tasks 能返回 invalid_request，而不是在读正文时被截断。
-const maxTaskJSONBytes = 1 << 20
 
 type requestIDKey struct{}
 
@@ -205,15 +201,6 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.putDefaultDevice(w, r)
-	case "/api/v1/tasks":
-		switch r.Method {
-		case http.MethodPost:
-			s.createTask(w, r)
-		case http.MethodGet:
-			s.listTasks(w, r)
-		default:
-			s.writeError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "不支持该请求方法")
-		}
 	default:
 		if r.URL.Path == "/api/v1/threads" || strings.HasPrefix(r.URL.Path, "/api/v1/threads/") {
 			s.routeThread(w, r)
@@ -225,15 +212,6 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		}
 		if r.URL.Path == "/api/v1/projects" || strings.HasPrefix(r.URL.Path, "/api/v1/projects/") {
 			s.routeProject(w, r)
-			return
-		}
-		if r.URL.Path == "/api/v1/sessions" || strings.HasPrefix(r.URL.Path, "/api/v1/sessions/") {
-			s.routeSession(w, r)
-			return
-		}
-		const taskPrefix = "/api/v1/tasks/"
-		if strings.HasPrefix(r.URL.Path, taskPrefix) {
-			s.routeTask(w, r)
 			return
 		}
 		const nodePrefix = "/api/v1/nodes/"
@@ -611,13 +589,10 @@ type errorDetails struct {
 }
 
 type errorBody struct {
-	CurrentVersion int           `json:"current_version,omitempty"`
-	CurrentStatus  string        `json:"current_status,omitempty"`
-	Code           string        `json:"code"`
-	Message        string        `json:"message"`
-	RequestID      string        `json:"request_id"`
-	TaskID         string        `json:"task_id,omitempty"`
-	Details        *errorDetails `json:"details,omitempty"`
+	Code      string        `json:"code"`
+	Message   string        `json:"message"`
+	RequestID string        `json:"request_id"`
+	Details   *errorDetails `json:"details,omitempty"`
 }
 
 func (s *Server) writeError(w http.ResponseWriter, r *http.Request, status int, code, message string) {
@@ -640,36 +615,8 @@ func requestID(ctx context.Context) string {
 func safePath(path string) string {
 	switch path {
 	case "/api/v1/login", "/api/v1/logout", "/api/v1/me", "/api/v1/me/password",
-		"/api/v1/node-enrollments", "/api/v1/nodes", "/api/v1/nodes/register", "/api/v1/me/default-pc", "/api/v1/me/default-device",
-		"/api/v1/tasks":
+		"/api/v1/node-enrollments", "/api/v1/nodes", "/api/v1/nodes/register", "/api/v1/me/default-pc", "/api/v1/me/default-device":
 		return path
-	}
-	const taskPrefix = "/api/v1/tasks/"
-	if strings.HasPrefix(path, taskPrefix) {
-		rest := strings.TrimPrefix(path, taskPrefix)
-		for _, action := range []string{"resolve", "rerun", "acceptance"} {
-			if strings.HasSuffix(rest, "/"+action) {
-				id := strings.TrimSuffix(rest, "/"+action)
-				if id != "" && !strings.Contains(id, "/") {
-					return "/api/v1/tasks/:id/" + action
-				}
-			}
-		}
-		if strings.HasSuffix(rest, "/events") {
-			id := strings.TrimSuffix(rest, "/events")
-			if id != "" && !strings.Contains(id, "/") {
-				return "/api/v1/tasks/:id/events"
-			}
-		}
-		if strings.HasSuffix(rest, "/cancel") {
-			id := strings.TrimSuffix(rest, "/cancel")
-			if id != "" && !strings.Contains(id, "/") {
-				return "/api/v1/tasks/:id/cancel"
-			}
-		}
-		if rest != "" && !strings.Contains(rest, "/") {
-			return "/api/v1/tasks/:id"
-		}
 	}
 	const nodePrefix = "/api/v1/nodes/"
 	if strings.HasPrefix(path, nodePrefix) {

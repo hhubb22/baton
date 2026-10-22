@@ -14,16 +14,27 @@ import (
 
 func TestProjectRuntimePiFauxRealCoordinator(t *testing.T) {
 	t.Parallel()
-	if os.Getenv("BATON_TEST_NODE_PROJECT_RUNTIME") != "1" {
-		t.Skip("需安装 Runtime 依赖并显式启用真实 Node 集成验证")
+	required := os.Getenv("BATON_TEST_NODE_PROJECT_RUNTIME") == "1"
+	if os.Getenv("BATON_TEST_NODE_PROJECT_RUNTIME") == "0" {
+		t.Skip("已显式关闭真实 Node Runtime 验证")
 	}
 	node, err := exec.LookPath("node")
 	if err != nil {
-		t.Fatal(err)
+		if required {
+			t.Fatal("CI 真实 Runtime 验证需要 Node.js", err)
+		}
+		t.Skip("本机缺少 Node.js，跳过真实 Runtime 验证")
 	}
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
+	}
+	loader := filepath.Join(root, "runtimes/project-agent/node_modules/tsx/dist/loader.mjs")
+	if _, err := os.Stat(loader); err != nil {
+		if required {
+			t.Fatal("CI 真实 Runtime 验证需要本地 Runtime 依赖", err)
+		}
+		t.Skip("本机缺少 Runtime 依赖，跳过真实 Runtime 验证")
 	}
 	dir := t.TempDir()
 	binary := filepath.Join(dir, "baton-project-runtime")
@@ -33,10 +44,10 @@ func TestProjectRuntimePiFauxRealCoordinator(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", binary, "./testdata/node_project_runtime.go").CombinedOutput(); err != nil {
 		t.Fatalf("构建 Node 启动器: %v %s", err, out)
 	}
-	st := startProjectPrepareStack(t, map[string]string{
+	st := startProjectStack(t, map[string]string{
 		"PATH":                      dir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"BATON_TEST_RUNTIME_NODE":   node,
-		"BATON_TEST_RUNTIME_LOADER": filepath.Join(root, "runtimes/project-agent/node_modules/tsx/dist/loader.mjs"),
+		"BATON_TEST_RUNTIME_LOADER": loader,
 		"BATON_TEST_RUNTIME_WORKER": filepath.Join(root, "runtimes/project-agent/test/integration-worker.ts"),
 	})
 	waitRuntimeReport(t, st, func(r protocol.RuntimeReport) bool { return r.ProjectRuntime != nil })

@@ -11,7 +11,6 @@ import (
 
 	"baton/internal/identity"
 	"baton/internal/privatefiletest"
-	"baton/internal/startpermit"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -78,7 +77,7 @@ func TestNodeTokenRoundTripAndRejection(t *testing.T) {
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    Issuer,
 			Subject:   nodeID,
-			Audience:  jwt.ClaimStrings{StartAudience},
+			Audience:  jwt.ClaimStrings{"other-audience"},
 			ExpiresAt: jwt.NewNumericDate(expires),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			ID:        credentialID,
@@ -90,16 +89,7 @@ func TestNodeTokenRoundTripAndRejection(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := VerifyNodeToken(pub, signed, time.Now()); err == nil {
-		t.Fatal("启动许可被接受为连接凭据")
-	}
-}
-
-func TestStartPermitConstantsMatchNodeCredentials(t *testing.T) {
-	if startpermit.Issuer != Issuer || startpermit.StartAudience != StartAudience || startpermit.NodeAudience != NodeAudience {
-		t.Fatal("启动许可和连接凭据的签发声明不一致")
-	}
-	if StartAudience == NodeAudience {
-		t.Fatal("启动许可和连接凭据使用了同一个受众")
+		t.Fatal("其他受众的凭据被接受为连接凭据")
 	}
 }
 

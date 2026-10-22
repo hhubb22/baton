@@ -17,48 +17,6 @@ func execProjectRuntime(parent context.Context, db *sql.DB, query string, args .
 	return db.ExecContext(ctx, query, args...)
 }
 
-// 旧账本的终态也不能证明本地收尾已完成，新增字段一律保守初始化。
-func ensureProjectRuntimeCleanup(db *sql.DB) error {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	rows, err := tx.QueryContext(ctx, `PRAGMA table_info(project_runtime_runs)`)
-	if err != nil {
-		return err
-	}
-	columns := map[string]bool{}
-	for rows.Next() {
-		var cid, notNull, pk int
-		var name, typ string
-		var defaultValue any
-		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
-			rows.Close()
-			return err
-		}
-		columns[name] = true
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return err
-	}
-	for _, column := range []string{"cleanup_complete", "cleanup_acked", "cleanup_next_at", "cleanup_attempts"} {
-		if !columns[column] {
-			if _, err := tx.ExecContext(ctx, `ALTER TABLE project_runtime_runs ADD COLUMN `+column+` INTEGER NOT NULL DEFAULT 0`); err != nil {
-				return err
-			}
-		}
-	}
-	if _, err := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS project_runtime_cleanup_due ON project_runtime_runs(cleanup_next_at,run_id) WHERE cleanup_complete=1 AND cleanup_acked=0`); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
 func (m *projectRuntimeManager) signalCleanup() {
 	select {
 	case m.cleanupReady <- struct{}{}:
@@ -156,6 +114,12 @@ func (m *projectRuntimeManager) cleanupReceiptLoop() {
 		case <-ticker.C:
 		}
 		m.persistPendingCleanup()
+		m.mu.Lock()
+		connected := m.loop != nil && !m.closed
+		m.mu.Unlock()
+		if !connected {
+			continue
+		}
 		for range 32 {
 			if m.ctx.Err() != nil {
 				return

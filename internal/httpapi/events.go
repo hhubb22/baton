@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"baton/internal/agent"
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -17,15 +18,14 @@ import (
 	"github.com/coder/websocket"
 )
 
-// SessionGateway 是节点 Session 的临时通道；正文不进入中心持久化记录。
+// SessionGateway 通过 session.request 读取 Thread 的原生历史和输出，正文不持久化。
 type SessionGateway interface {
 	SessionRequest(context.Context, string, string, protocol.SessionRequest) (protocol.SessionResult, error)
 }
 
 type browserSubscription struct {
-	ThreadID  string `json:"thread_id,omitempty"`
-	SessionID string `json:"session_id"`
-	Cursor    string `json:"cursor,omitempty"`
+	ThreadID string `json:"thread_id"`
+	Cursor   string `json:"cursor,omitempty"`
 }
 
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
@@ -74,18 +74,13 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			var next browserSubscription
-			if json.Unmarshal(raw, &next) != nil || len(next.Cursor) > 100 {
+			dec := json.NewDecoder(bytes.NewReader(raw))
+			dec.DisallowUnknownFields()
+			if !json.Valid(raw) || dec.Decode(&next) != nil || len(next.Cursor) > protocol.SessionCursorBytes {
 				return
 			}
-			if next.ThreadID != "" {
-				if _, err := identity.ParseUUID(next.ThreadID); err != nil || next.SessionID != "" {
-					return
-				}
-			}
-			if next.SessionID != "" {
-				if _, err := identity.ParseUUID(next.SessionID); err != nil {
-					return
-				}
+			if _, err := identity.ParseUUID(next.ThreadID); err != nil {
+				return
 			}
 			mu.Lock()
 			sub = next
@@ -110,7 +105,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	}
 	ticker := time.NewTicker(s.eventInterval)
 	defer ticker.Stop()
-	var lastSessions, lastTasks, lastThreads string
+	var lastThreads string
 	for {
 		select {
 		case <-ctx.Done():
@@ -127,22 +122,6 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 			_ = ws.Close(websocket.StatusPolicyViolation, "登录已失效")
 			return
 		}
-		sessionStamp, taskStamp, err := s.store.NotificationStamps(ctx, login.Employee.ID)
-		if err != nil {
-			return
-		}
-		if sessionStamp != lastSessions {
-			if !write(map[string]string{"type": "session.changed"}) {
-				return
-			}
-			lastSessions = sessionStamp
-		}
-		if taskStamp != lastTasks {
-			if !write(map[string]string{"type": "task.changed"}) {
-				return
-			}
-			lastTasks = taskStamp
-		}
 		threadStamp, err := s.store.ThreadNotificationStamp(ctx, login.Employee.ID)
 		if err != nil {
 			return
@@ -156,17 +135,10 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		selected := sub
 		mu.Unlock()
-		if selected.SessionID == "" && selected.ThreadID == "" {
+		if selected.ThreadID == "" {
 			continue
 		}
-		var item store.WorkSession
-		if selected.ThreadID != "" {
-			var view store.ThreadView
-			view, err = s.store.GetThread(ctx, login.Employee.ID, selected.ThreadID)
-			item = store.WorkSession{SessionID: selected.ThreadID, NodeID: view.NodeID, Status: view.Status}
-		} else {
-			item, err = s.store.GetSession(ctx, login.Employee.ID, selected.SessionID)
-		}
+		item, err := s.store.GetThread(ctx, login.Employee.ID, selected.ThreadID)
 		if err != nil {
 			_ = ws.Close(websocket.StatusPolicyViolation, "不能查看该会话")
 			return
@@ -178,7 +150,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 			}
 			defer s.outputBudget.Release(protocol.SessionOutputBytes)
 
-			result := s.sessionRPC(ctx, login.Employee.ID, item, protocol.SessionRequest{OperationID: operation, SessionID: item.SessionID, Action: "output", Cursor: selected.Cursor})
+			result := s.sessionRPC(ctx, login.Employee.ID, item, protocol.SessionRequest{OperationID: operation, SessionID: item.ID, Action: "output", Cursor: selected.Cursor})
 			cookie, err = r.Cookie(auth.SessionCookieName)
 			if err != nil {
 				return false
@@ -187,15 +159,11 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 				return false
 			}
 			result.Text = boundedSessionText(result.Text)
-			outputType := "session.output"
-			if selected.ThreadID != "" {
-				outputType = "thread.output"
-			}
 			if !write(struct {
 				Type     string `json:"type"`
 				ThreadID string `json:"thread_id,omitempty"`
 				protocol.SessionResult
-			}{Type: outputType, ThreadID: selected.ThreadID, SessionResult: result}) {
+			}{Type: "thread.output", ThreadID: selected.ThreadID, SessionResult: result}) {
 				return false
 			}
 			mu.Lock()
@@ -217,8 +185,8 @@ func boundedSessionText(text string) string {
 	return agent.PlainText(text)
 }
 
-func (s *Server) sessionRPC(ctx context.Context, employeeID string, item store.WorkSession, req protocol.SessionRequest) protocol.SessionResult {
-	fail := protocol.SessionResult{Type: protocol.BodySessionResult, OperationID: req.OperationID, SessionID: item.SessionID, Code: "node_unavailable"}
+func (s *Server) sessionRPC(ctx context.Context, employeeID string, item store.ThreadView, req protocol.SessionRequest) protocol.SessionResult {
+	fail := protocol.SessionResult{Type: protocol.BodySessionResult, OperationID: req.OperationID, SessionID: item.ID, Code: "node_unavailable"}
 	node, err := s.store.OwnNode(ctx, employeeID, item.NodeID)
 	if err != nil || node.Revoked {
 		fail.Code = "revoked"
@@ -233,11 +201,8 @@ func (s *Server) sessionRPC(ctx context.Context, employeeID string, item store.W
 	}
 	req.Type = protocol.BodySessionRequest
 	result, err := s.sessions.SessionRequest(ctx, employeeID, item.NodeID, req)
-	if err != nil || result.SessionID != item.SessionID || result.OperationID != req.OperationID {
+	if err != nil || result.SessionID != item.ID || result.OperationID != req.OperationID {
 		return fail
-	}
-	if item.Status == "waiting_input" && result.State == "running" {
-		result.State = "waiting_input"
 	}
 	if len(result.Text) > protocol.SessionOutputBytes {
 		result.Text = boundedSessionText(result.Text)

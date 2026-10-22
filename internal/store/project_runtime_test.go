@@ -33,7 +33,9 @@ func projectRunNode(t *testing.T, ctx context.Context, pool *pgxpool.Pool, repo 
 	if available {
 		status = "available"
 	}
-	if _, err := repo.SaveRuntimeReport(ctx, src, protocol.RuntimeReport{ProjectRuntime: &protocol.ProjectRuntime{Version: "test", Providers: []protocol.RuntimeProvider{{Provider: "openai-codex", Status: status}}}, Exec: protocol.RuntimeExec{Shell: "sh"}}); err != nil {
+	if _, err := repo.SaveRuntimeReport(ctx, src, protocol.RuntimeReport{ProjectRuntime: &protocol.ProjectRuntime{Version: "test", Providers: []protocol.RuntimeProvider{{Provider: "openai-codex", Status: status}}}, Exec: protocol.RuntimeExec{Shell: "sh"}, Agents: []protocol.RuntimeAgent{
+		{AgentType: "codex", Version: "1", Status: "available", Capabilities: protocol.ThreadCapabilities{Create: true, Queue: true, Steer: true, Stop: true, Resume: true, SwitchModel: true}},
+	}}); err != nil {
 		t.Fatal(err)
 	}
 	return src
@@ -208,17 +210,9 @@ func TestProjectRunPassiveCoalescingAndFallback(t *testing.T) {
 func TestProjectRunBoundedResultsAndAssistantIdempotency(t *testing.T) {
 	ctx, pool, repo, owner, p, src := projectRunFixture(t)
 	for i := 1; i <= 20; i++ {
-		tx, err := pool.Begin(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err = store.EnqueueProjectTaskResult(ctx, tx, owner, p.Agent.ID, store.ProjectTaskResultInput{TaskID: mustID(t), Version: 1, Status: "completed", Text: strings.Repeat("a", 16<<10) + strings.Repeat("b", 16<<10)}); err != nil {
-			t.Fatal(err)
-		}
-		if err = tx.Commit(ctx); err != nil {
-			t.Fatal(err)
-		}
+		acceptProjectInput(t, ctx, repo, owner, p.ID, fmt.Sprint(i), strings.Repeat("a", 32<<10))
 	}
+
 	if err := repo.ScheduleProjectRuns(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -263,30 +257,6 @@ func TestProjectRunBoundedResultsAndAssistantIdempotency(t *testing.T) {
 	req.Payload = []byte(`{"format":"pi-ai/1","message":{"role":"assistant","content":[{"type":"text","text":"` + strings.Repeat("x", 161<<10) + `"}]}}`)
 	if _, err = repo.ProjectRuntime(ctx, src, req); !errors.Is(err, projectagent.ErrTooLarge) {
 		t.Fatalf("超长输出: %v", err)
-	}
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	original := strings.Repeat("开始中文", 6000) + strings.Repeat("<\"\\", 6000) + strings.Repeat("末尾中文", 6000)
-	taskID := mustID(t)
-	if err = store.EnqueueProjectTaskResult(ctx, tx, owner, p.Agent.ID, store.ProjectTaskResultInput{TaskID: taskID, Version: 1, Status: "completed", Text: original}); err != nil {
-		t.Fatal(err)
-	}
-	if err = tx.Commit(ctx); err != nil {
-		t.Fatal(err)
-	}
-	var result store.ProjectTaskResultInput
-	var payload []byte
-	var size int
-	if err = pool.QueryRow(ctx, `SELECT payload,octet_length(payload::text) FROM project_agent_input_queue WHERE source_key=$1`, "task:"+taskID+":result:1").Scan(&payload, &size); err != nil {
-		t.Fatal(err)
-	}
-	if err = json.Unmarshal(payload, &result); err != nil {
-		t.Fatal(err)
-	}
-	if len(result.Text) > 32<<10 || size > 40<<10 || !result.Truncated || result.OriginalBytes != len(original) || !strings.HasPrefix(result.Text, "开始") || !strings.HasSuffix(result.Text, "中文") {
-		t.Fatalf("结果限长 %d %d", len(result.Text), size)
 	}
 }
 

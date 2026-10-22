@@ -32,7 +32,7 @@ func (g *sessionGateway) SessionRequest(_ context.Context, _, _ string, req prot
 	if text == "" {
 		text = "<script>window.pwned=true</script>"
 	}
-	return protocol.SessionResult{Type: protocol.BodySessionResult, OperationID: req.OperationID, SessionID: req.SessionID, OK: true, State: "running", InputSupported: true, Text: text, Cursor: "fixture:1"}, nil
+	return protocol.SessionResult{Type: protocol.BodySessionResult, OperationID: req.OperationID, SessionID: req.SessionID, OK: true, State: "running", Text: text, Cursor: "fixture:1"}, nil
 }
 func TestBrowserEventsAuthenticationOwnershipAndLogout(t *testing.T) {
 	pool := dbtest.Open(t)
@@ -57,10 +57,7 @@ func TestBrowserEventsAuthenticationOwnershipAndLogout(t *testing.T) {
 	csrf := loginFor(t, browser, srv.URL, "eventalice", "events-password")
 	ident := registerIdent(t, browser, srv.URL, csrf, "Desk")
 	markOnline(t, pool, employee.ID, ident)
-	id, _ := identity.NewUUID()
-	if _, err := pool.Exec(context.Background(), `INSERT INTO sessions(id,employee_id,node_id,agent_type,status,created_at,updated_at) VALUES($1,$2,$3,'pi','running',now(),now())`, id, employee.ID, ident.NodeID); err != nil {
-		t.Fatal(err)
-	}
+	id := createOwnedThread(t, pool, employee.ID, ident)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	u, _ := url.Parse(srv.URL)
@@ -97,7 +94,7 @@ func TestBrowserEventsAuthenticationOwnershipAndLogout(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ws.CloseNow()
-	raw, _ := json.Marshal(map[string]string{"session_id": id})
+	raw, _ := json.Marshal(map[string]string{"thread_id": id})
 	if err := ws.Write(ctx, websocket.MessageText, raw); err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +111,7 @@ func TestBrowserEventsAuthenticationOwnershipAndLogout(t *testing.T) {
 		if json.Unmarshal(raw, &event) != nil {
 			t.Fatal("事件格式错误")
 		}
-		if event.Type == "session.output" {
+		if event.Type == "thread.output" {
 			if !strings.Contains(event.Text, "<script>") {
 				t.Fatal("输出没有保持为数据")
 			}
@@ -127,7 +124,7 @@ func TestBrowserEventsAuthenticationOwnershipAndLogout(t *testing.T) {
 	}
 	calls := gateway.calls.Load()
 	foreign, _ := identity.NewUUID()
-	raw, _ = json.Marshal(map[string]string{"session_id": foreign})
+	raw, _ = json.Marshal(map[string]string{"thread_id": foreign})
 	if err := ws.Write(ctx, websocket.MessageText, raw); err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +134,30 @@ func TestBrowserEventsAuthenticationOwnershipAndLogout(t *testing.T) {
 		}
 	}
 	if gateway.calls.Load() != calls {
-		t.Fatal("不可见 Session 发起了节点 RPC")
+		t.Fatal("不可见 Thread 发起了节点 RPC")
+	}
+	for _, legacy := range []map[string]string{{"session_id": id}, {"thread_id": id, "session_id": id}} {
+		legacyWS, _, err := dial(srv.URL, cookie)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := legacyWS.Read(ctx); err != nil {
+			t.Fatal(err)
+		}
+		before := gateway.calls.Load()
+		raw, _ := json.Marshal(legacy)
+		if err := legacyWS.Write(ctx, websocket.MessageText, raw); err != nil {
+			t.Fatal(err)
+		}
+		for {
+			if _, _, err := legacyWS.Read(ctx); err != nil {
+				break
+			}
+		}
+		legacyWS.CloseNow()
+		if ctx.Err() != nil || gateway.calls.Load() != before {
+			t.Fatal("旧 Session 订阅未拒绝或发起了节点 RPC")
+		}
 	}
 	ws, _, err = dial(srv.URL, cookie)
 	if err != nil {
@@ -185,10 +205,7 @@ func TestBrowserSlowTransportReleasesConnectionSlot(t *testing.T) {
 	csrf := loginFor(t, browser, srv.URL, "slowalice", "events-password")
 	ident := registerIdent(t, browser, srv.URL, csrf, "Desk")
 	markOnline(t, pool, employee.ID, ident)
-	id, _ := identity.NewUUID()
-	if _, err := pool.Exec(context.Background(), `INSERT INTO sessions(id,employee_id,node_id,agent_type,status,created_at,updated_at) VALUES($1,$2,$3,'pi','running',now(),now())`, id, employee.ID, ident.NodeID); err != nil {
-		t.Fatal(err)
-	}
+	id := createOwnedThread(t, pool, employee.ID, ident)
 	transport := browser.http.Transport.(*http.Transport).Clone()
 	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
 		c, err := (&net.Dialer{}).DialContext(ctx, network, address)
@@ -211,7 +228,7 @@ func TestBrowserSlowTransportReleasesConnectionSlot(t *testing.T) {
 	if api.BrowserConnectionsForTest() != 1 {
 		t.Fatal("连接没有占用预算")
 	}
-	raw, _ := json.Marshal(map[string]string{"session_id": id})
+	raw, _ := json.Marshal(map[string]string{"thread_id": id})
 	if err := ws.Write(ctx, websocket.MessageText, raw); err != nil {
 		t.Fatal(err)
 	}

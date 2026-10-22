@@ -21,25 +21,22 @@ import (
 	"baton/internal/privatefile"
 	"baton/internal/projectexec"
 	"baton/internal/sidecar"
-	"baton/internal/task"
 )
 
 type Adapter struct {
 	messageID                           string
-	threadMode                          bool
 	events                              []agent.Event
 	config                              agent.Config
 	mu                                  sync.Mutex
 	started, submitted, closed, stopped bool
 	process                             *sidecar.Process
 	done                                chan struct{}
-	outputs                             []agent.Output
 	aborted                             bool
 	pending                             *completionRecord
 	restorePending, maintaining         bool
 	retryAt                             time.Time
 	failures                            int
-	diagnostic                          *agent.Output
+	diagnostic                          *agent.Event
 	lastError                           string
 	readFile                            func(string) ([]byte, error)
 	writeFile                           func(string, []byte) error
@@ -65,7 +62,7 @@ func (a *Adapter) Start(ctx context.Context) error {
 		if err := a.validateIdentity(); err != nil {
 			return fmt.Errorf("%w: %v", agent.ErrHistoryMissing, err)
 		}
-		record, err := a.loadCompletion(true)
+		record, err := a.loadCompletion()
 		if err != nil {
 			a.noteFailureLocked("read", err)
 			if definitiveHistoryError(err) {
@@ -86,27 +83,6 @@ func (a *Adapter) Start(ctx context.Context) error {
 	}
 	a.started = true
 	return nil
-}
-
-// SubmitInput 只启动一次命令；结束结果由 Worker 的现有 Drain 轮询读取。
-func (a *Adapter) SubmitInput(ctx context.Context, payload string) (agent.Output, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if !a.started || a.closed || a.submitted || a.stopped {
-		return agent.Output{}, errors.New("命令执行器状态无效")
-	}
-	a.submitted = true
-	var input struct {
-		Description string `json:"description"`
-		Generation  int    `json:"generation"`
-	}
-	if len(payload) > task.ExecutorInputLimit || json.Unmarshal([]byte(payload), &input) != nil || input.Description == "" || input.Generation != 1 {
-		return a.failureLocked("命令任务输入无效"), nil
-	}
-	if err := a.launchLocked(ctx, input.Description); err != nil {
-		return a.failureLocked(err.Error()), nil
-	}
-	return agent.Output{}, nil
 }
 
 func (a *Adapter) launchLocked(ctx context.Context, command string) error {
@@ -144,9 +120,7 @@ func (a *Adapter) launchLocked(ctx context.Context, command string) error {
 		return errors.New("无法启动命令使用的 shell")
 	}
 	a.process, a.done = process, make(chan struct{})
-	if a.threadMode {
-		a.events = append(a.events, agent.Event{Kind: agent.EventTurnStarted, ClientMessageID: a.messageID, NativeSessionID: a.config.SessionID})
-	}
+	a.events = append(a.events, agent.Event{Kind: agent.EventTurnStarted, ClientMessageID: a.messageID, NativeSessionID: a.config.SessionID})
 	go func() {
 		err := process.Wait()
 		code := 0
@@ -160,14 +134,13 @@ func (a *Adapter) launchLocked(ctx context.Context, command string) error {
 			}
 		}
 		result := output.result(code)
-		out := formatResult(result, "")
 		a.mu.Lock()
 		kind := "exited"
 		if a.aborted {
 			kind = "stopped"
 		}
 		a.stopped = true
-		a.queueCompletionLocked(out, kind)
+		a.queueCompletionLocked(result, kind)
 		close(a.done)
 		a.mu.Unlock()
 	}()
@@ -207,43 +180,7 @@ func authorizedDirectory(dataDir, directory string) (string, error) {
 	return "", errors.New("工作目录未登记")
 }
 
-func (a *Adapter) failureLocked(reason string) agent.Output {
-	a.stopped = true
-	a.queueCompletionLocked(formatResult(task.CommandResult{ExitCode: -1}, reason), "launch_failed")
-	return agent.Output{}
-}
-
-func formatResult(result task.CommandResult, reason string) agent.Output {
-	status, summary := task.StatusCompleted, "命令已完成"
-	var failure any
-	if result.ExitCode != 0 {
-		status, summary = task.StatusFailed, "命令执行失败"
-		if reason == "" {
-			reason = fmt.Sprintf("命令退出码为 %d", result.ExitCode)
-		}
-		failure = struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		}{task.CodeExecutionFailed, reason}
-	}
-	raw, _ := json.Marshal(struct {
-		Status               string             `json:"status"`
-		Summary              string             `json:"summary"`
-		Evidence             []task.ResultRef   `json:"evidence"`
-		Artifacts            []task.ResultRef   `json:"artifacts"`
-		EvidenceEmptyReason  string             `json:"evidence_empty_reason"`
-		ArtifactsEmptyReason string             `json:"artifacts_empty_reason"`
-		Error                any                `json:"error"`
-		Result               task.CommandResult `json:"command_result"`
-	}{status, summary, []task.ResultRef{}, []task.ResultRef{}, "命令输出记录在执行结果中", "命令执行未声明文件产物", failure, result})
-	return agent.Output{Final: string(raw), Exited: true}
-}
-
-func (a *Adapter) DeliverResult(context.Context, string, string) (agent.Output, error) {
-	return agent.Output{}, errors.New("命令不能接收子任务结果")
-}
-func (a *Adapter) HistoryContains(string, bool) (bool, error) { return false, nil }
-func (a *Adapter) historyPath() string                        { return filepath.Join(a.config.SessionDir, "output.json") }
+func (a *Adapter) historyPath() string { return filepath.Join(a.config.SessionDir, "output.json") }
 func (a *Adapter) ReadHistory(ctx context.Context, cursor string) (agent.HistoryPage, error) {
 	if cursor != "" {
 		return agent.HistoryPage{}, agent.ErrInvalidCursor
@@ -251,25 +188,14 @@ func (a *Adapter) ReadHistory(ctx context.Context, cursor string) (agent.History
 	if err := ctx.Err(); err != nil {
 		return agent.HistoryPage{}, err
 	}
-	record, err := a.loadCompletion(false)
+	record, err := a.loadCompletion()
 	if err != nil {
 		return agent.HistoryPage{}, fmt.Errorf("%w: %v", agent.ErrHistoryMissing, err)
 	}
-	page, _ := json.Marshal([]json.RawMessage{record.Result})
+	page, _ := json.Marshal([]commandOutput{record.Result})
 	return agent.HistoryPage{Data: page}, nil
 }
-func (a *Adapter) Drain() []agent.Output {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.maintainLocked()
-	out := a.outputs
-	a.outputs = nil
-	if a.diagnostic != nil {
-		out = append(out, *a.diagnostic)
-		a.diagnostic = nil
-	}
-	return out
-}
+
 func (a *Adapter) StopStatus() (bool, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -305,6 +231,17 @@ func (a *Adapter) Close() error {
 	return err
 }
 
+const commandOutputBytes = 32 * 1024
+
+// commandOutput 保存命令退出和合并输出事实。
+type commandOutput struct {
+	Encoding   string `json:"encoding,omitempty"`
+	Output     string `json:"output"`
+	TotalBytes int64  `json:"total_bytes"`
+	ExitCode   int    `json:"exit_code"`
+	Truncated  bool   `json:"truncated"`
+}
+
 type boundedOutput struct {
 	head, tail []byte
 	total      int64
@@ -313,7 +250,7 @@ type boundedOutput struct {
 func (b *boundedOutput) Write(p []byte) (int, error) {
 	n := len(p)
 	b.total += int64(n)
-	const half = task.CommandOutputBytes / 2
+	const half = commandOutputBytes / 2
 	if len(b.head) < half {
 		take := min(half-len(b.head), len(p))
 		b.head = append(b.head, p[:take]...)
@@ -330,7 +267,7 @@ func (b *boundedOutput) Write(p []byte) (int, error) {
 	}
 	return n, nil
 }
-func (b *boundedOutput) result(code int) task.CommandResult {
+func (b *boundedOutput) result(code int) commandOutput {
 	raw := append(append([]byte(nil), b.head...), b.tail...)
 	// 二进制及控制字节用 base64 保存，避免 JSON 转义放大结果。
 	encoding, text := "", string(raw)
@@ -346,8 +283,7 @@ func (b *boundedOutput) result(code int) task.CommandResult {
 	if binary || len(escaped) > 40*1024 {
 		encoding, text = "base64", base64.StdEncoding.EncodeToString(raw)
 	}
-	return task.CommandResult{Encoding: encoding, Output: text, TotalBytes: b.total, ExitCode: code, Truncated: b.total > task.CommandOutputBytes}
+	return commandOutput{Encoding: encoding, Output: text, TotalBytes: b.total, ExitCode: code, Truncated: b.total > commandOutputBytes}
 }
 
 var _ agent.Adapter = (*Adapter)(nil)
-var _ agent.StopObserver = (*Adapter)(nil)

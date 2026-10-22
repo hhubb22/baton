@@ -1,9 +1,8 @@
 package store_test
 
 import (
-	"crypto/sha256"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"strings"
 	"testing"
 
@@ -86,7 +85,7 @@ func TestThreadModelDefaultsSelectionAndIdempotency(t *testing.T) {
 	}
 }
 
-func TestThreadModelValidationAndLegacyReports(t *testing.T) {
+func TestThreadModelValidationAndCapabilities(t *testing.T) {
 	h := newThreadHarness(t)
 	setThreadModelAgents(t, h, modelAgents())
 	v := h.create("models")
@@ -164,13 +163,33 @@ func TestThreadModelValidationAndLegacyReports(t *testing.T) {
 	if _, err = h.repo.SendThreadMessage(h.ctx, h.owner, fixed.ID, store.ThreadMessageInput{ClientMessageID: "inherit", Content: "next"}); err != nil {
 		t.Fatal(err)
 	}
-	setThreadModelAgents(t, h, nil)
-	legacy := h.create("legacy-model")
-	if legacy.Model != "" {
-		t.Fatal(legacy)
+}
+
+func TestThreadRequiresAvailableAgentReport(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		agents []protocol.RuntimeAgent
+	}{
+		{name: "agents_omitted"},
+		{name: "agents_empty", agents: []protocol.RuntimeAgent{}},
+		{name: "other_agent", agents: []protocol.RuntimeAgent{{AgentType: "codex", Version: "1", Status: "available", Capabilities: protocol.ThreadCapabilities{Create: true}}}},
+		{name: "unverified", agents: []protocol.RuntimeAgent{{AgentType: "pi", Version: "1", Status: "unverified", Capabilities: protocol.ThreadCapabilities{Create: true}}}},
+		{name: "unavailable", agents: []protocol.RuntimeAgent{{AgentType: "pi", Version: "1", Status: "unavailable", Capabilities: protocol.ThreadCapabilities{Create: true}}}},
+		{name: "cannot_create", agents: []protocol.RuntimeAgent{{AgentType: "pi", Version: "1", Status: "available"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newThreadHarness(t)
+			setThreadModelAgents(t, h, tc.agents)
+			_, _, err := h.repo.CreateThread(h.ctx, h.owner, h.input(tc.name, h.src.NodeID))
+			var rejection *store.ThreadError
+			if !errors.As(err, &rejection) || rejection.Status != 422 || rejection.Code != "agent_unavailable" {
+				t.Fatalf("未报告 Agent 可用时仍接受新建：%v", err)
+			}
+			if h.count(`SELECT count(*) FROM threads`) != 0 || h.count(`SELECT count(*) FROM thread_outbox`) != 0 {
+				t.Fatal("拒绝的新建请求产生了 Thread 或命令")
+			}
+		})
 	}
-	_, err = h.repo.SendThreadMessage(h.ctx, h.owner, legacy.ID, store.ThreadMessageInput{ClientMessageID: "legacy-explicit", Content: "next", Model: "model-a"})
-	threadRejection(t, err, 422)
 }
 
 func TestThreadModelOpenRetryAndMessageCommandsKeepOriginalModel(t *testing.T) {
@@ -217,18 +236,6 @@ func TestThreadModelOpenRetryAndMessageCommandsKeepOriginalModel(t *testing.T) {
 	}
 	if cmd := threadCommand(t, batch[0]); cmd.Action != "message" || cmd.Model != "model-b" || cmd.ClientMessageID != "outbox-switch" {
 		t.Fatal(cmd)
-	}
-}
-
-func TestThreadModelEmptyPreservesLegacyRequestHash(t *testing.T) {
-	h := newThreadHarness(t)
-	v := h.create("legacy-hash")
-	// 旧版本规范化后的 JSON 不包含 model。
-	legacy := fmt.Sprintf(`{"Input":{"client_thread_id":"legacy-hash","node_id":%q,"agent_type":"pi","working_directory":"/src/repo","execution_timeout_seconds":7200,"message":{"client_message_id":"legacy-hash:first","content":"first","mode":"queue"}},"Actor":"employee","Conversation":"","Tool":""}`, h.src.NodeID)
-	want := sha256.Sum256([]byte(legacy))
-	var actual []byte
-	if err := h.pool.QueryRow(h.ctx, `SELECT request_hash FROM threads WHERE id=$1`, v.ID).Scan(&actual); err != nil || string(actual) != string(want[:]) {
-		t.Fatalf("legacy hash differs: %x want %x: %v", actual, want, err)
 	}
 }
 

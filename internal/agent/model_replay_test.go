@@ -10,6 +10,7 @@ import (
 	"baton/internal/agent/codex"
 	"baton/internal/agent/codex/replaytest"
 	"baton/internal/agent/pi"
+
 	"github.com/google/uuid"
 )
 
@@ -20,7 +21,7 @@ func TestRecordedThreadModelSwitch(t *testing.T) {
 			tape := replaytest.Load(t, filepath.Join(kind, "testdata", "replay", "model_switch.ndjson"))
 			r := replaytest.Prepare(t, binary, tape)
 			c := agent.Config{Binary: r.Binary, Directory: r.Work, Home: r.Home, Model: tape.Header.Model, SessionID: uuid.NewString(), SessionDir: filepath.Join(r.Work, "native"), StatePath: filepath.Join(r.Work, "state.json")}
-			var a agent.ThreadAdapter
+			var a agent.Adapter
 			var models func(context.Context) (agent.ModelCatalog, error)
 			next := "gpt-6-luna"
 			if kind == "pi" {

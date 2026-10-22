@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"baton/internal/monotime"
 	"baton/internal/protocol"
-	"baton/internal/startpermit"
 
 	"github.com/coder/websocket"
 )
@@ -78,7 +78,7 @@ func receiptConnection(t *testing.T, m *projectRuntimeManager, reply func(contex
 	if err != nil {
 		t.Fatal(err)
 	}
-	loop := newStartLoop(ctx, Identity{}, m.ledger, nil, newWSWriter(ws), nil)
+	loop := newRuntimeRPC(newWSWriter(ws))
 	m.setLoop(loop)
 	done := make(chan struct{})
 	go func() {
@@ -122,7 +122,7 @@ func syntheticProjectProcess(m *projectRuntimeManager, command protocol.ProjectR
 func TestProjectWakeReceiptBoundedQueueAndIdempotentNotifications(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	m := &projectRuntimeManager{ctx: ctx, clock: startpermit.NewClock(), leaseDeadline: time.Minute, runs: map[string]*projectRuntimeProcess{}, wakeReceipts: make(chan projectWakeReceipt, 64), loop: &startLoop{}}
+	m := &projectRuntimeManager{ctx: ctx, clock: monotime.NewClock(), leaseDeadline: time.Minute, runs: map[string]*projectRuntimeProcess{}, wakeReceipts: make(chan projectWakeReceipt, 64), loop: &runtimeRPC{}}
 	command := projectCommand()
 	p := syntheticProjectProcess(m, command)
 	thread := projectCommand().RunID
@@ -257,7 +257,7 @@ func TestProjectWakeReceiptNewInputsAndConnectionCapability(t *testing.T) {
 		t.Fatal("reconnected center inherited the previous capability")
 	}
 	// 排队的旧连接回执不能借用新连接的能力。
-	m.sendWakeReceipt(projectWakeReceipt{command: command, loop: &startLoop{}})
+	m.sendWakeReceipt(projectWakeReceipt{command: command, loop: &runtimeRPC{}})
 	// 即便同一 run ID 被错误复用，epoch 变化也必须使旧回执失效。
 	p.command.LeaseEpoch++
 	m.mu.Lock()

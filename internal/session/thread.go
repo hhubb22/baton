@@ -17,8 +17,8 @@ import (
 	"baton/internal/agent"
 	"baton/internal/fileaccess"
 	"baton/internal/identity"
+	"baton/internal/monotime"
 	"baton/internal/protocol"
-	"baton/internal/startpermit"
 )
 
 // ThreadOptions 是账本中保存的 Thread 身份与适配器配置。
@@ -34,7 +34,7 @@ type ThreadOptions struct {
 	StopTimeout             time.Duration `json:"stop_timeout,omitempty"`
 }
 
-type ThreadAdapterFactory func(agentType string, config agent.Config) (agent.ThreadAdapter, error)
+type ThreadAdapterFactory func(agentType string, config agent.Config) (agent.Adapter, error)
 
 // ThreadProcessKiller 返回整个 Agent 进程树是否已确认回收。
 // 适配器的 Close 不构成进程树回收证据。
@@ -48,13 +48,13 @@ type ThreadWorker struct {
 	dataDir   string
 	options   ThreadOptions
 	factory   ThreadAdapterFactory
-	adapter   agent.ThreadAdapter
-	clock     startpermit.Timer
+	adapter   agent.Adapter
+	clock     monotime.Timer
 	events    []agent.Event
 	abortDone chan error
 	forceKill func() (bool, error)
 	closed    bool
-	live      workerDB
+	live      liveOutput
 }
 
 func ThreadLedgerPath(dataDir, threadID string) (string, error) {
@@ -93,38 +93,19 @@ CREATE TABLE IF NOT EXISTS thread_outbox (
  report_json TEXT NOT NULL, acked INTEGER NOT NULL DEFAULT 0 CHECK(acked IN (0,1)));
 `
 
-func ensureThreadColumns(db *sql.DB) error {
-	for _, column := range []struct{ table, name string }{
-		{"thread_meta", "model"},
-		{"thread_messages", "model"},
-		{"thread_turns", "model"},
-		{"thread_messages", "status_reason"},
-	} {
-		var exists int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name=?`, column.table, column.name).Scan(&exists); err != nil {
-			return err
-		}
-		if exists != 0 {
-			continue
-		}
-		if _, err := db.Exec(`ALTER TABLE ` + column.table + ` ADD COLUMN ` + column.name + ` TEXT NOT NULL DEFAULT ''`); err != nil {
-			// Host 和 Worker 可能同时打开旧账本，另一连接已添加列时沿用它。
-			if checkErr := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name=?`, column.table, column.name).Scan(&exists); checkErr != nil || exists == 0 {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
 func openThreadDB(dataDir string, options ThreadOptions, create bool) (*sql.DB, ThreadOptions, error) {
 	path, err := ThreadLedgerPath(dataDir, options.ThreadID)
 	if err != nil {
 		return nil, options, err
 	}
 	if !create {
-		if _, err := os.Stat(path); err != nil {
-			return nil, options, err
+		if info, err := os.Stat(path); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil, options, ErrHistoryMissing
+			}
+			return nil, options, classifyLedgerErr(err)
+		} else if !info.Mode().IsRegular() || info.Size() == 0 {
+			return nil, options, ErrHistoryIncompatible
 		}
 	}
 	if err := fileaccess.PrepareDataDir(filepath.Dir(path)); err != nil {
@@ -135,11 +116,22 @@ func openThreadDB(dataDir string, options ThreadOptions, create bool) (*sql.DB, 
 		return nil, options, err
 	}
 	db.SetMaxOpenConns(1)
-	fail := func(err error) (*sql.DB, ThreadOptions, error) { db.Close(); return nil, options, err }
-	if _, err := db.Exec(threadSchema); err != nil {
-		return fail(err)
+	if !create {
+		var existing int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='thread_meta'`).Scan(&existing); err != nil {
+			db.Close()
+			return nil, options, classifyLedgerErr(err)
+		}
+		if existing != 1 {
+			db.Close()
+			return nil, options, ErrHistoryIncompatible
+		}
 	}
-	if err := ensureThreadColumns(db); err != nil {
+	fail := func(err error) (*sql.DB, ThreadOptions, error) {
+		db.Close()
+		return nil, options, classifyLedgerErr(err)
+	}
+	if _, err := db.Exec(threadSchema); err != nil {
 		return fail(err)
 	}
 	if create {
@@ -150,7 +142,7 @@ func openThreadDB(dataDir string, options ThreadOptions, create bool) (*sql.DB, 
 		if options.Model != "" {
 			config.Model = options.Model
 		}
-		config.DataDir, config.Directory, config.SessionID, config.ExecutionID = dataDir, options.WorkingDirectory, options.ThreadID, options.ThreadID
+		config.DataDir, config.Directory, config.SessionID = dataDir, options.WorkingDirectory, options.ThreadID
 		config.SessionDir = filepath.Join(filepath.Dir(path), "native")
 		config.StatePath = filepath.Join(config.SessionDir, "state.json")
 	}
@@ -193,7 +185,7 @@ func OpenThreadWorker(ctx context.Context, dataDir string, options ThreadOptions
 	if err != nil {
 		return nil, err
 	}
-	w := &ThreadWorker{db: db, dataDir: dataDir, options: saved, factory: factory, clock: startpermit.NewClock()}
+	w := &ThreadWorker{db: db, dataDir: dataDir, options: saved, factory: factory, clock: monotime.NewClock()}
 	if err := w.open(ctx); err != nil {
 		w.Close()
 		return nil, err
@@ -869,7 +861,7 @@ func (w *ThreadWorker) drainLocked() error {
 		w.live.appendLiveLocked(text, gap)
 	}
 	if len(w.events) == 0 {
-		w.events = w.adapter.DrainEvents()
+		w.events = w.adapter.Drain()
 	}
 	for len(w.events) > 0 {
 		if err := w.saveEvent(w.events[0]); err != nil {

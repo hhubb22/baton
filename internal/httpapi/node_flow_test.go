@@ -552,17 +552,19 @@ func TestEqualNodesDefaultDeviceCompatibilityAndRouting(t *testing.T) {
 			t.Fatal("列表仍然包含 role")
 		}
 	}
-	status, body, _ := postJSON(t, client, srv.URL+"/api/v1/tasks", origin, "", map[string]any{"request_id": "default-device-routing", "description": "检查节点", "agent_type": "pi"}, csrf)
-	if status != http.StatusOK {
-		t.Fatalf("默认设备任务失败: %d %s", status, body)
+	markOnline(t, pool, alice.ID, nodes[2])
+	reportThreadRoot(t, pool, alice.ID, nodes[2])
+	status, body, _ := postJSON(t, client, srv.URL+"/api/v1/threads", origin, "", map[string]any{"client_thread_id": "default-device-routing", "agent_type": "pi", "working_directory": "/src/repo", "message": map[string]string{"client_message_id": "first", "content": "检查节点"}}, csrf)
+	if status != http.StatusCreated {
+		t.Fatalf("默认设备 Thread 失败: %d %s", status, body)
 	}
 	var accepted struct {
-		Target string `json:"target_node_id"`
+		Target string `json:"node_id"`
 	}
 	if err := json.Unmarshal([]byte(body), &accepted); err != nil {
 		t.Fatal(err)
 	}
 	if accepted.Target != nodes[2].NodeID {
-		t.Fatalf("任务没有发往无 role 的默认设备: %s", body)
+		t.Fatalf("Thread 没有发往无 role 的默认设备: %s", body)
 	}
 }

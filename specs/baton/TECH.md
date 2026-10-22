@@ -131,8 +131,8 @@ Turn 由 Worker 定义：从一条消息被 Agent 接受开始，到适配器报
 
 | 表 | 内容 |
 |---|---|
-| `employees`、`login_sessions` | 员工与登录会话（0001） |
-| `nodes`、`node_credentials`、`node_enrollments`、`employee_settings`、`node_presence`、`node_revocations`、`node_runtime_reports` | 设备身份、凭据、默认设备、在线状态、吊销、能力报告（0002～0004、0015） |
+| `employees`、`login_sessions` | 员工与登录会话 |
+| `nodes`、`node_credentials`、`node_enrollments`、`employee_settings`、`node_presence`、`node_revocations`、`node_runtime_reports` | 设备身份、凭据、默认设备、在线状态、吊销、能力报告 |
 | `threads` | 一个 Thread：员工、可选 Project、设备、Agent 类型、当前模型、工作目录、执行时限、状态与原因、创建者（员工或 Project Agent 及工具调用）、`client_thread_id`、`opened_at`、`archived_at`、版本 |
 | `thread_messages` | 消息：Thread、`client_message_id`、发送方、方式、可选模型、正文（≤ 64 KiB）、状态（accepted / queued / sent / withdrawn / unknown）、状态原因 `status_reason`（≤ 4 KiB）、所属 Turn |
 | `thread_turns` | Turn：Thread、`worker_turn_seq`、发起方（员工或 Project Agent）、使用的模型、开始与结束时间、结束原因 |
@@ -145,13 +145,13 @@ Turn 由 Worker 定义：从一条消息被 Agent 接受开始，到适配器报
 
 ### 迁移
 
-中心 Thread 模型使用增量迁移，与现有任务路径并存。`0001`～`0024` 保持原样；`0025_threads.sql` 新建 `threads`、`thread_messages`、`thread_turns`、`thread_replies`、`thread_events`、`thread_outbox` 和 `thread_reports`，并扩充 Project 输入类型。任务、Session 和 Execution 的表及接口在切换 Project Agent 之前继续使用；删除和收敛旧迁移在实施步骤 6 进行。
+中心迁移从 `migrations/0001_initial.sql` 的当前 schema 基线创建员工、设备、Thread、Project、主对话、记忆和事项表。实验室阶段允许重建数据库，不提供旧开发版本的升级路径；正式发布后使用版本化增量迁移。
 
-`0027_thread_models.sql` 为 `threads`、`thread_messages` 和 `thread_turns` 增加模型列，并为消息增加 `status_reason`、为 Project 输入增加 `thread_message_failed` 类型。已有行保留空模型，表示该 Agent 在设备上的默认模型；不回填历史模型。
+Thread、消息和 Turn 直接包含模型字段，消息保存 `status_reason`，Project 输入类型为当前七种输入。
 
-`thread_reports` 保存 `(thread_id, event_id)`、连续 Worker 序号、报告内容摘要、摘要版本及原 ACK，不保存完整报告正文。版本 1 按旧协议字段校验摘要，兼容旧中心忽略模型后已处理的报告；新记录使用版本 2，模型参与内容冲突检查。`thread_events` 只追加审计与时间线事件，回复事件保存限长正文。`threads.request_hash` 用于比较规范化的新建请求，读取接口不返回它。Turn 的 ID 与 Worker Turn 序号使用同一个含员工身份的复合外键，避免消息或回复关联到两个不同的 Turn。
+`thread_reports` 保存 `(thread_id, event_id)`、连续 Worker 序号、报告内容摘要及原 ACK，不保存完整报告正文。摘要包含模型和恢复标记等当前报告字段，用于检测相同事件身份下的内容冲突。`thread_events` 只追加审计与时间线事件，回复事件保存限长正文。`threads.request_hash` 用于比较规范化的新建请求，读取接口不返回它。Turn 的 ID 与 Worker Turn 序号使用同一个含员工身份的复合外键，避免消息或回复关联到两个不同的 Turn。
 
-`project_agent_input_queue` 同时接受原有的 `task_result`、`user_task_result` 和 Thread 的 `thread_reply`、`turn_ended`、`thread_message_failed`。`thread_reply` 为被动输入，`turn_ended` 与 `thread_message_failed` 为主动输入，参与放置、领取和重启后的通知重置。
+`project_agent_input_queue` 的 Thread 输入为 `thread_reply`、`turn_ended`、`thread_message_failed`。`thread_reply` 为被动输入，`turn_ended` 与 `thread_message_failed` 为主动输入，参与放置、领取和重启后的通知重置。其他输入类型见 Project Agent TECH。
 
 迁移文件编号之间允许空缺，`internal/migrate` 按文件名排序执行。
 
@@ -177,6 +177,8 @@ Worker 的报告类型：
 
 每个报告带 `event_id` 和 Worker 序号。中心在一个事务里保存报告、更新状态，并按消息或 Turn 的归属写入 Project Agent 输入队列（Project Agent TECH 第 9 节），提交后返回 ACK；Worker 收到 ACK 才确认本地 outbox。重复报告按 `event_id` 返回原 ACK。中心按 Worker 序号处理，序号跳跃时拒绝并要求补报，保证 `turn.ended` 不会早于这一轮的回复入库。
 
+原 Worker 账本缺失、损坏或不兼容时，batond 先补送节点账本中尚未确认的 Worker 报告，再发送带 `history_unavailable:true` 的 `thread.stopped` 恢复报告。暂时无法读取时继续有界重试，保留原 Worker 的报告序列。中心在同一报告事务内，将已有活动 Turn 以 `agent_exited` 结束，保存审计并写入对应 Project 输入，再更新 Thread 状态。重复恢复报告沿用原 ACK；普通状态报告仍须在 Turn 结束后提交。
+
 ## 设备与 Worker 数据
 
 ### batond 账本（`node.db`）
@@ -186,10 +188,12 @@ Worker 的报告类型：
 | `meta` | 存储代次 |
 | `threads` | 中心 Thread ID 到本地 Session 目录的映射、Agent 类型、工作目录；`thread.open` 的接收记录 |
 | `workers` | Worker 进程索引 |
-| `thread_command_receipts` | 命令 ID、请求摘要及其版本、原回执；旧摘要忽略模型，新摘要包含模型 |
+| `thread_command_receipts` | 命令 ID、请求摘要及原回执 |
+| `thread_worker_reports` | 节点已读到、中心尚未确认的 Worker 报告；保留原事件身份、序号和正文 |
+| `thread_node_reports`、`thread_report_progress` | 本地恢复报告及已发送序号，支持 Worker 账本不可读时补报 |
 | `project_runtime_runs` | Project Runtime 的启动去重与清理确认，见 Project Agent TECH |
 
-`thread.open` 先写 `threads` 再回执，重复命令返回同一映射。`thread.opened` 带上存储代次，中心保存在 `threads` 上，之后的命令都携带它。设备重装或 `node.db` 丢失后代次改变，batond 拒绝旧代次的命令，Thread 进入 `stopped`，原因为本地历史缺失，不会用同一个 Thread ID 新开一个空会话。旧的 `receipts`、`sessions`、`agent_contexts` 删除。
+`thread.open` 先写 `threads` 再回执，重复命令返回同一映射。`thread.opened` 带上存储代次，中心保存在 `threads` 上，之后的命令都携带它。设备重装或 `node.db` 丢失后代次改变，batond 拒绝旧代次的命令，Thread 进入 `stopped`，原因为本地历史缺失，不会用同一个 Thread ID 新开一个空会话。设备账本按当前 schema 创建，只保存 Thread 与 Project Runtime 所需状态。
 
 ### Worker 账本
 
@@ -244,7 +248,7 @@ type Adapter interface {
 }
 ```
 
-`id` 是 `client_message_id`。`Send` 收到与当前不同的 `model` 时，先切换模型再开启这一轮，切换失败时不发出消息，返回原因；Worker 只在 Turn 开始前切换，Steer 不改变模型。`Sent` 判断消息是否已被 Agent 接收：Codex 把 `id` 作为 `clientUserMessageId` 写进原生历史并按它查找；Pi 和 Kiro 没有这个字段，Worker 在 `intent` 里记下发送前原生历史中 user 消息的数量，`Sent` 检查这个位置之后是否有正文相同的 user 消息。现有 `SubmitInput`、`DeliverResult`、`HistoryContains`、`Supplement` 合并进这组方法，`WaitingForChildren` 删除。
+`id` 是 `client_message_id`。`Send` 收到与当前不同的 `model` 时，先切换模型再开启这一轮，切换失败时不发出消息，返回原因；Worker 只在 Turn 开始前切换，Steer 不改变模型。`Sent` 判断消息是否已被 Agent 接收：Codex 把 `id` 作为 `clientUserMessageId` 写进原生历史并按它查找；Pi 和 Kiro 没有这个字段，Worker 在 `intent` 里记下发送前原生历史中 user 消息的数量，`Sent` 检查这个位置之后是否有正文相同的 user 消息。
 
 ### 各 Agent
 
@@ -257,11 +261,11 @@ type Adapter interface {
 
 Kiro 只提供排队。需要打断时，员工先停止这一轮再发消息。
 
-各 Agent 的系统提示只说明运行环境（Baton Thread、工作目录、附件写法），不要求固定结果格式。现有 `instructions`、`codex.Instructions` 和 `ResultSchema` 中关于任务信封、JSON 结果、委托 CLI 的内容删除。
+各 Agent 的系统提示只说明运行环境（Baton Thread、工作目录、附件写法），回复按普通文本保存。
 
 ### 能力上报
 
-batond 在 `node_runtime_reports.report.agents` 上报每种 Agent 的 `{agent_type, version, status, models:[{id, name}], default_model, capabilities:{create, queue, steer, stop, resume, switch_model}}`。模型列表来自 Agent 自己的接口：Codex 用 `model/list`，Pi 用 `get_available_models`，Kiro 取 `session/new` 返回的 `models`；取不到时 `models` 为空，只能使用默认模型。`status` 为 `available`、`unverified` 或 `unavailable`；只有 `available` 且支持 `create` 的 Agent 可新建 Thread。`queue` 和 `stop` 对已接入的 Agent 恒为真；`steer`、`resume`、`switch_model` 来自 `Capabilities()`。未验证的版本标为 `unverified`，界面不显示为已支持（D1）。旧设备未上报 `agents` 时，中心沿用 `nodes.capabilities` 验证 Agent 类型，插入能力缺省关闭。中心检查指定的模型在上报的 `models` 内，按目标系统的路径规则检查工作目录位于上报的 `roots` 内，设备在执行前核实目录存在及解析后的边界。
+batond 在 `node_runtime_reports.report.agents` 上报每种 Agent 的 `{agent_type, version, status, models:[{id, name}], default_model, capabilities:{create, queue, steer, stop, resume, switch_model}}`。模型列表来自 Agent 自己的接口：Codex 用 `model/list`，Pi 用 `get_available_models`，Kiro 取 `session/new` 返回的 `models`；取不到时 `models` 为空，只能使用默认模型。`status` 为 `available`、`unverified` 或 `unavailable`；只有 `available` 且支持 `create` 的 Agent 可新建 Thread。`queue` 和 `stop` 对已接入的 Agent 恒为真；`steer`、`resume`、`switch_model` 来自 `Capabilities()`。未验证的版本标为 `unverified`，界面不显示为已支持（D1）。中心检查指定的模型在上报的 `models` 内，按目标系统的路径规则检查工作目录位于上报的 `roots` 内，设备在执行前核实目录存在及解析后的边界。
 
 batond 在启动后的首次采集及 Agent 可执行文件路径或版本变化时探测模型，结果在进程内缓存；探测失败同样缓存为空列表。重连和后续报告复用缓存，模型探测不发送推理请求。模型目录的探测与目录扫描分别计时，不阻塞连接、心跳和 Worker 消息。
 
@@ -284,9 +288,9 @@ URL 相对 `/api/v1`。员工会话、CSRF、Origin 检查沿用现状。
 | `GET /threads/{id}/history` | 从设备分页读取原生历史，见「历史读取」 |
 | `/events` | 浏览器 WebSocket，订阅 Thread 的实时输出与状态变化 |
 
-节点、登录、默认设备、文件浏览、Project、Inbox 接口保持现状。旧 `/tasks*`、`/sessions*`、`/acceptances` 接口保留到任务模型删除；Thread 路径使用独立 Store 和协议。
+节点、登录、默认设备、文件浏览、Project、Inbox 接口保持现状。Thread 使用独立的 Store 和协议；`/tasks*`、`/sessions*`、`/acceptances` 业务接口已移除。
 
-浏览器 WebSocket 接受 `{thread_id, cursor?}` 订阅，发送 `thread.changed` 和 `thread.output`，保留原 Session 订阅格式。Thread 的历史与输出复用 `session.request`，其中 `session_id` 为 Thread ID；正文不持久化，历史响应为 `Cache-Control: no-store`。
+浏览器 WebSocket 接受 `{thread_id, cursor?}` 订阅，发送 `thread.changed` 和 `thread.output`。Thread 的历史与输出复用 `session.request`，其中 `session_id` 为 Thread ID；正文不持久化，历史响应为 `Cache-Control: no-store`。
 
 错误对象为 `{code, message, request_id, details?}`；`details` 不回传凭据和完整工具输出。
 
@@ -303,11 +307,11 @@ Thread 命令以信封 `message_id` 作为稳定身份，`thread.command_result`
 
 Thread 回包事务按 Node → Credential → Presence 锁定认证记录，再锁目标 Outbox 或 Thread；全部锁取得后用数据库当前时刻复核凭据期限。凭据吊销、连接替换和锁等待跨越有效期都不能写入执行事实。
 
-旧 `execution.*`、`agent.request`、`execution.children*` 和启动许可在任务路径继续使用，随实施步骤 6 删除。Thread 没有排队期限，消息由员工明确发出，设备收到即可执行。
+Thread 没有排队期限，消息由员工明确发出，设备收到即可执行。启动与回复通过 Thread 命令和报告确认。
 
-### 跨版本字段
+### 协议扩展
 
-Coordinator、batond 和 Project Runtime 之间的消息只做增量变化：可以新增可选字段和消息类型，已有字段不删除、不改类型、不改含义（R-25）。接收方忽略未知字段，继续验证必填字段、身份、关联标识和容量。浏览器 API、模型工具参数和本地配置保持严格检查。
+消息携带协议版本，接收方忽略未知字段，继续验证必填字段、身份、关联标识和容量；可选能力缺省关闭。浏览器 API、模型工具参数和本地配置保持严格检查。实验室阶段统一当前结构，正式发布版本的兼容范围按 R-25 约定。
 
 ## 通信与认证
 
@@ -373,41 +377,29 @@ Coordinator 与 PostgreSQL 部署在一处，Coordinator 提供静态页面、AP
 
 承载 Project Agent 的设备另外安装 Node.js 和 `baton-project-runtime`，见 Project Agent TECH 第 2.1 节。
 
-## 代码改动
+## 模块职责与后续实施
 
-### 模块清单
-
-| 模块 | 处理 |
+| 模块 | 职责 |
 |---|---|
-| `internal/gateway`、`internal/auth`、`internal/admin`、`internal/identity`、`internal/redact`、`internal/privatefile`、`internal/sidecar`、`internal/delivery`、`internal/migrate`、`internal/db` | 保留 |
-| `internal/node` 的身份、注册、连接、能力报告、文件浏览、Project Runtime | 保留 |
-| `internal/node` 的 `prepare.go`、`start.go`、`execution.go`、`stop.go`、`agent.go`、`child_delivery.go`、`ledger.go` 的 receipts | 改为 `thread.command` 接收与报告转发 |
-| `internal/session` 的 Worker 进程、IPC、历史读取、输出事务、进程守护 | 保留 |
-| `internal/session` 的 `ledger.go`、`browser.go`、`reuse.go`、`stop.go` | 改为消息队列、Turn 与回复账本；`child_delivery.go`、`executor.go` 的任务脚本删除 |
-| `internal/agent/{pi,codex,kiro,shell}` | 接口改为上节的 `Adapter`；删除任务信封、结果格式、子结果交付 |
-| `internal/agent/replay` | 保留；转录随适配器更新重新录制 |
-| `internal/store` 的节点、连接、吊销、Project、对话、记忆、放置、投递、压缩 | 保留 |
-| `internal/store` 的 `task*.go`、`dispatch.go`、`start.go`、`result.go`、`stop.go`、`resolve.go`、`acceptance.go`、`artifact.go`、`child_delivery.go`、`agent.go`、`session.go` | 删除，新建 `thread.go`、`thread_report.go`、`thread_outbox.go` |
-| `internal/store` 的 `project_tools.go`、`project_exec*.go`、`project_inputs.go`、`inbox.go` | 改为 Thread 工具与 Turn 输入，见 Project Agent TECH |
-| `internal/control` 的 `prepare.go`、`start.go`、`result.go`、`agent.go`、`child_delivery.go`、`dispatch.go`、`session.go` | 合并为 `thread.go`：命令派发与报告处理 |
-| `internal/task`、`internal/startpermit`、`internal/agentcli`、`internal/plane`、`cmd/baton` | 删除 |
-| `internal/fileaccess` | 保留浏览；`CheckArtifacts` 改为附件解析 |
-| `internal/httpapi` 的 `tasks.go`、`sessions.go`、`resolve.go`、`acceptance.go` | 删除，新建 `threads.go` |
-| `internal/protocol` 的 `prepare.go`、`result.go`、`agent.go`、`delivery.go` | 删除，新建 `thread.go` |
-| `web/src` 的任务页、Session 页、`TaskComposer`、`TaskActions`、`TaskReferences`、`AttentionCard` 的任务快照 | 删除或改为 Thread 页面，按 `design/` 实现 |
+| `internal/gateway`、`internal/protocol` | 节点认证、版本化信封、有界队列、Thread 命令与报告、临时查询 |
+| `internal/node` | 设备身份、注册与连接、能力报告、文件浏览、Thread Worker 与 Project Runtime 管理、本地节点账本 |
+| `internal/session` | Thread 消息队列、发送意图、Turn、回复与 outbox、Worker 进程、本地认证 IPC、原生历史和实时输出 |
+| `internal/agent/{pi,codex,kiro,shell}` | 原生 Agent 的 Thread 接口、模型选择、停止、恢复和历史查询 |
+| `internal/agent/replay` | 录制、规范化、协议回放与故障派生 |
+| `internal/store` | 设备与连接、Thread、消息与报告、Project、对话、记忆、放置、租约、投递、输入和 Inbox 事务 |
+| `internal/control` | Thread 命令派发、报告回执、节点同步、Project 放置与 Runtime 命令、临时文件和历史查询 |
+| `internal/monotime` | 包含系统休眠的单调时钟，供 Turn 执行时限与 Project Runtime 租约使用 |
+| `internal/fileaccess` | 登记根内的受限浏览与 Thread 附件解析 |
+| `internal/httpapi` | 员工、设备、Thread、Project、Inbox 与浏览器事件 API |
+| `migrations` | 当前数据库 schema 基线与迁移执行器 |
+| `web/src` | 现有页面；Thread 页面尚待按 `design/` 实现 |
 
-### 实施步骤
+后续实施：
 
-每一步结束时 `go vet ./...`、`go test ./...` 和前端测试通过。
-
-1. **删除不再需要的入口。** 删除 `internal/plane`、`internal/agentcli`、`cmd/baton`、迁移 0013 与 0019 及对应测试和配置。行为不变的部分照常运行。
-2. **中心 Thread 模型。** 新增迁移，新建 `threads`、`thread_messages`、`thread_turns`、`thread_replies`、`thread_events`、`thread_outbox` 和报告去重账本及 Store；浏览器 Thread API；`thread.command` 派发与 `thread.report` 处理。用 Go 测试里的假节点验证新建、消息去重、离线等待、报告去重和序号检查。旧任务路径与新路径并存到第 4 步。
-3. **Worker 与适配器。** Worker 账本改为消息队列、Turn 与回复；适配器改为新接口，Pi、Codex、Kiro、shell 逐个迁移，回放测试覆盖排队、插入、停止、执行时限、崩溃恢复和 `Sent` 查询。batond 接收 `thread.command`。
-4. **切换 Project Agent。** `tasks.*` 工具换成 `threads.*`，Turn 结束与回复进入输入队列，`nodes.exec` 改为 shell Thread；Inbox 关联 Thread。见 Project Agent TECH 第 9、10 节。
-5. **模型选择与 Thread 归属。** 中心、Worker 和适配器保存并传递模型，设备探测并缓存可用模型及默认模型，Pi 和 Codex 支持在新 Turn 开始前换模型。浏览器新建的 Thread 不属于 Project，执行时限固定为 2 小时；Project Agent 新建的 Thread 属于本 Project，回复按 Turn 的发起方进入输入队列。
-6. **删除任务模型。** 删除 `tasks` 相关表、Store、协议、`internal/task`、`internal/startpermit`、启动许可和子任务交付代码，收敛旧迁移。
 7. **Web。** Thread 列表与 Thread 页、Project 页的 Thread 区域按 `design/` 实现；删除任务页与 Session 页。
 8. **端到端。** 真实 Codex、Kiro、Pi 各跑一遍 PRODUCT 验收表的多轮、排队可靠性和恢复场景。
+
+每一步结束时 `go vet ./...`、`go test ./...` 和前端测试通过。
 
 ## 验证
 
@@ -429,7 +421,7 @@ Coordinator 与 PostgreSQL 部署在一处，Coordinator 提供静态页面、AP
 | R-18 | 回复里写登记目录内路径、目录外路径、`commit <SHA>` | 目录外路径生成附件；commit 缺少仓库 | 单元测试 |
 | R-19、R-20 | 执行中重启 Coordinator、batond、Worker，短停 PostgreSQL | 消息重发；回复重复；同步前设备显示可用 | 进程测试 |
 | R-24 | 500 台设备、100 个执行中 Thread，24 小时 | 未达到约定阈值（D6） | 压测环境 |
-| R-25 | 上一版 batond 连接新中心，中心消息带未知字段 | Thread 新建、消息、停止、回复失败 | 兼容测试 |
+| R-25 | 当前消息带未知字段、未声明可选能力 | 未知字段导致拒绝或已知字段改变；未声明能力被启用 | 协议扩展测试 |
 
 真实 Agent 的验收只能在对应系统上进行；交叉编译不代替 Windows、Linux 原生验证。
 

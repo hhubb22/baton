@@ -8,13 +8,13 @@ import (
 	"time"
 
 	"baton/internal/identity"
+	"baton/internal/monotime"
 	"baton/internal/protocol"
-	"baton/internal/startpermit"
 )
 
-func threadWaitFixture(t *testing.T) (*projectRuntimeManager, *projectRuntimeProcess, *startpermit.Manual, string) {
+func threadWaitFixture(t *testing.T) (*projectRuntimeManager, *projectRuntimeProcess, *monotime.Manual, string) {
 	t.Helper()
-	clock := startpermit.NewManual(time.Time{})
+	clock := monotime.NewManual(time.Time{})
 	p := &projectRuntimeProcess{command: projectCommand(), ctx: t.Context(), done: make(chan struct{}), wake: make(chan struct{}, 1), stop: func() {}, started: true}
 	m := &projectRuntimeManager{ctx: t.Context(), clock: clock, leaseDeadline: time.Minute, runs: map[string]*projectRuntimeProcess{p.command.RunID: p}}
 	id, _ := identity.NewUUID()
@@ -123,7 +123,6 @@ func TestThreadWaitFiltersGenericDuplicateAndStaleNotifications(t *testing.T) {
 	command := p.command
 	command.Type = protocol.BodyProjectRunWake
 	command.InputIDs = []int64{1}
-	command.TaskUpdates = []protocol.ProjectTaskUpdate{{TaskID: id, Version: 100}}
 	sendProjectCommand(m, command)
 	command.LeaseEpoch--
 	command.ThreadUpdates = []protocol.ProjectThreadUpdate{{ThreadID: id, Version: 100}}

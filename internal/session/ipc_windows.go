@@ -6,7 +6,7 @@ import (
 	"context"
 	"net"
 
-	"github.com/Microsoft/go-winio"
+	winio "github.com/Microsoft/go-winio"
 	"golang.org/x/sys/windows"
 )
 

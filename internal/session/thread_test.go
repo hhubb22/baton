@@ -15,8 +15,8 @@ import (
 
 	"baton/internal/agent"
 	"baton/internal/fileaccess"
+	"baton/internal/monotime"
 	"baton/internal/protocol"
-	"baton/internal/startpermit"
 )
 
 type threadFake struct {
@@ -66,7 +66,7 @@ func (a *threadFake) Sent(id string) (bool, error) {
 	defer a.mu.Unlock()
 	return a.sent[id], nil
 }
-func (a *threadFake) DrainEvents() []agent.Event {
+func (a *threadFake) Drain() []agent.Event {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	events := a.events
@@ -113,7 +113,7 @@ func (a *threadFake) add(events ...agent.Event) {
 	defer a.mu.Unlock()
 	a.events = append(a.events, events...)
 }
-func (a *threadFake) factory(kind string, config agent.Config) (agent.ThreadAdapter, error) {
+func (a *threadFake) factory(kind string, config agent.Config) (agent.Adapter, error) {
 	a.configs = append(a.configs, config)
 	a.model = config.Model
 	return a, nil
@@ -310,7 +310,7 @@ func TestThreadStopAndExecutionTimeout(t *testing.T) {
 			a := &threadFake{resume: true, abortEvents: true, abortCalled: make(chan struct{})}
 			done := a.abortCalled
 			w := newThreadTestWorker(t, func(o *ThreadOptions) { o.ExecutionTimeoutSeconds = 2 }, a)
-			clock := startpermit.NewManual(time.Now())
+			clock := monotime.NewManual(time.Now())
 			w.clock = clock
 			threadMessage(t, w, "first", "queue")
 			threadMessage(t, w, "queued", "queue")
@@ -349,7 +349,7 @@ func TestThreadForcedStopEvidenceAndAbortError(t *testing.T) {
 				}
 				done := a.abortCalled
 				w := newThreadTestWorker(t, nil, a)
-				clock := startpermit.NewManual(time.Now())
+				clock := monotime.NewManual(time.Now())
 				w.clock = clock
 				threadMessage(t, w, "first", "queue")
 				threadMessage(t, w, "queued", "queue")
@@ -438,7 +438,7 @@ func TestThreadUnknownStopWithoutKnownTurn(t *testing.T) {
 	a := &threadFake{resume: true, killKnown: true, abortCalled: make(chan struct{})}
 	done := a.abortCalled
 	w := newThreadTestWorker(t, nil, a)
-	clock := startpermit.NewManual(time.Now())
+	clock := monotime.NewManual(time.Now())
 	w.clock = clock
 	threadMust(t, w.transaction(func(tx *sql.Tx) error {
 		return w.stateReport(tx, "unknown", "thread.unknown", "消息发送状态不明")

@@ -20,9 +20,12 @@ type sessionNotice struct {
 	bad       bool
 }
 
-// SessionRequest 向节点发送一次临时 Session RPC，并校验响应来源与关联标识。
-// 它不写入 dispatch_outbox，失败后也不自动重发。
+// SessionRequest 读取 Thread 的原生历史或输出，并校验响应来源与关联标识。
+// 请求不持久化，失败后不自动重发。
 func (s *Server) SessionRequest(ctx context.Context, employeeID, nodeID string, req protocol.SessionRequest) (protocol.SessionResult, error) {
+	if req.Action != "history" && req.Action != "output" {
+		return protocol.SessionResult{}, errors.New("不支持该 Thread 读取操作")
+	}
 	if _, err := identity.ParseUUID(nodeID); err != nil {
 		return protocol.SessionResult{}, errors.New("节点暂时不可达")
 	}
@@ -36,12 +39,10 @@ func (s *Server) SessionRequest(ctx context.Context, employeeID, nodeID string, 
 		}
 		req.OperationID = operationID
 	}
-	if req.Action == "output" || req.Action == "history" {
-		if !s.budget.Reserve(protocol.SessionOutputBytes) {
-			return protocol.SessionResult{}, errors.New("输出缓存已达上限")
-		}
-		defer s.budget.Release(protocol.SessionOutputBytes)
+	if !s.budget.Reserve(protocol.SessionOutputBytes) {
+		return protocol.SessionResult{}, errors.New("输出缓存已达上限")
 	}
+	defer s.budget.Release(protocol.SessionOutputBytes)
 	req.Type = protocol.BodySessionRequest
 
 	messageID, err := identity.NewUUID()

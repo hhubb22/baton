@@ -114,7 +114,7 @@ func TestThreadRejectedPromptAndNextTurn(t *testing.T) {
 	if err := a.Send(context.Background(), "rejected", "正文", ""); err == nil {
 		t.Fatal("prompt 被拒绝却返回成功")
 	}
-	if a.active || len(a.DrainEvents()) != 0 {
+	if a.active || len(a.Drain()) != 0 {
 		t.Fatal("被拒绝的 prompt 开启了 Turn")
 	}
 	for _, id := range []string{"first", "second"} {
@@ -126,7 +126,7 @@ func TestThreadRejectedPromptAndNextTurn(t *testing.T) {
 			defer a.mu.Unlock()
 			return !a.active
 		})
-		got := a.DrainEvents()
+		got := a.Drain()
 		want := []agent.Event{
 			{Kind: agent.EventTurnStarted, ClientMessageID: id, NativeSessionID: a.config.SessionID},
 			{Kind: agent.EventReply, Content: "完成"},
@@ -154,7 +154,7 @@ func TestThreadLateAcceptanceAfterUnconfirmedWrite(t *testing.T) {
 		t.Fatal("没有收到确认却返回成功")
 	}
 	id := <-requestID
-	if got := a.DrainEvents(); len(got) != 1 || got[0].Kind != agent.EventUncertain || got[0].ClientMessageID != "late" {
+	if got := a.Drain(); len(got) != 1 || got[0].Kind != agent.EventUncertain || got[0].ClientMessageID != "late" {
 		t.Fatalf("发送结果不明时没有报告 uncertain: %+v", got)
 	}
 	if err := a.Send(context.Background(), "duplicate", "正文", ""); !errors.Is(err, agent.ErrBusy) {
@@ -164,7 +164,7 @@ func TestThreadLateAcceptanceAfterUnconfirmedWrite(t *testing.T) {
 	if err := a.consume(raw); err != nil {
 		t.Fatal(err)
 	}
-	if got := a.DrainEvents(); len(got) != 1 || got[0].Kind != agent.EventTurnStarted || got[0].ClientMessageID != "late" {
+	if got := a.Drain(); len(got) != 1 || got[0].Kind != agent.EventTurnStarted || got[0].ClientMessageID != "late" {
 		t.Fatalf("迟到的接受事件丢失: %+v", got)
 	}
 }
@@ -180,7 +180,7 @@ func TestThreadExitReportsUncertaintyWithoutSettlement(t *testing.T) {
 		if active {
 			want = append([]agent.Event{{Kind: agent.EventUncertain, Reason: "Pi process exited before settlement"}}, want...)
 		}
-		if got := a.DrainEvents(); !reflect.DeepEqual(got, want) {
+		if got := a.Drain(); !reflect.DeepEqual(got, want) {
 			t.Fatalf("进程退出 active=%v: %+v", active, got)
 		}
 	}
@@ -222,13 +222,13 @@ func TestThreadSettlementReasons(t *testing.T) {
 			if err := a.consume(raw); err != nil {
 				t.Fatal(err)
 			}
-			if events := a.DrainEvents(); len(events) != 1 || events[0].Kind != agent.EventTurnEnded || events[0].Reason != tc.want {
+			if events := a.Drain(); len(events) != 1 || events[0].Kind != agent.EventTurnEnded || events[0].Reason != tc.want {
 				t.Fatalf("结束事件: %+v", events)
 			}
-			if len(a.DrainEvents()) != 0 || len(a.Drain()) != 0 {
+			if len(a.Drain()) != 0 || len(a.Drain()) != 0 {
 				t.Fatal("重复报告或产生旧任务结果")
 			}
-			if err := a.consume(raw); err != nil || len(a.DrainEvents()) != 0 {
+			if err := a.consume(raw); err != nil || len(a.Drain()) != 0 {
 				t.Fatal("重复 settled 产生第二次结束事件")
 			}
 		})
@@ -330,10 +330,10 @@ func TestThreadRPCReplay(t *testing.T) {
 		{Kind: agent.EventReply, Content: "第二条"},
 		{Kind: agent.EventTurnEnded, Reason: agent.EndStopped},
 	}
-	if got := a.DrainEvents(); !reflect.DeepEqual(got, want) {
+	if got := a.Drain(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("事件顺序: %+v", got)
 	}
-	if len(a.DrainEvents()) != 0 {
+	if len(a.Drain()) != 0 {
 		t.Fatal("重复消费事件")
 	}
 }
@@ -375,7 +375,7 @@ func TestThreadRestoreReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.Wait(t, gates[1])
-	if a.history.File != file || a.NativeSessionID() != sid || len(a.DrainEvents()) != 0 {
+	if a.history.File != file || a.NativeSessionID() != sid || len(a.Drain()) != 0 {
 		t.Fatal("恢复改变了原生会话或启动了新 Turn")
 	}
 	a.RestoreIntent("original", "<any>", count)

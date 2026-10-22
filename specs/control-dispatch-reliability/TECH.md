@@ -2,7 +2,7 @@
 
 Status: approved
 Owner: Baton
-Basis: [Baton R-14、R-16、R-19、R-24、R-25](../baton/PRODUCT.md)；[Project Agent PA-05、PA-08～PA-10](../project-agent/PRODUCT.md)；[Baton TECH](../baton/TECH.md)「下行投递」。Thread 与旧任务路径并存，start、stop、wake 保留各自投递进度。
+Basis: [Baton R-14、R-16、R-19、R-24、R-25](../baton/PRODUCT.md)；[Project Agent PA-05、PA-08～PA-10](../project-agent/PRODUCT.md)；[Baton TECH](../baton/TECH.md)「下行投递」。Thread 命令与 Project 的 start、stop、wake 各自保存投递进度。
 
 ## 1. 方案
 

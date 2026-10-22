@@ -95,8 +95,12 @@ func Open(t *testing.T) *pgxpool.Pool {
 			  AND table_name IN (
 			    'employees', 'login_sessions', 'schema_migrations',
 			    'node_enrollments', 'nodes', 'node_credentials', 'employee_settings',
-			    'node_presence', 'node_revocations', 'node_runtime_reports', 'tasks', 'task_events', 'executions',
-			    'dispatch_outbox', 'request_tombstones', 'sessions', 'task_relations', 'task_acceptances'
+			    'node_presence', 'node_revocations', 'node_runtime_reports',
+			    'threads', 'thread_messages', 'thread_turns', 'thread_replies',
+			    'thread_events', 'thread_outbox', 'thread_reports',
+			    'projects', 'project_agents', 'conversations', 'conversation_events',
+			    'project_agent_input_queue', 'agent_runs', 'project_memory_entries',
+			    'project_memory_revisions', 'attention_requests'
 			  )`).Scan(&n); err != nil {
 			t.Errorf("检查 public 失败: %s", redact.Scrub(err.Error()))
 		} else if n != 0 {

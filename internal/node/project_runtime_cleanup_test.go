@@ -18,16 +18,12 @@ import (
 	"encoding/json"
 )
 
-func TestProjectCleanupMigrationAndUnknownRecovery(t *testing.T) {
+func TestProjectCleanupUnknownRecovery(t *testing.T) {
 	ledger, err := OpenLedger(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ledger.Close()
-	_, err = ledger.db.Exec(`CREATE TABLE project_runtime_runs(run_id TEXT PRIMARY KEY,lease_epoch INTEGER NOT NULL,state TEXT NOT NULL,reason TEXT NOT NULL DEFAULT '')`)
-	if err != nil {
-		t.Fatal(err)
-	}
 	var commands []protocol.ProjectRunCommand
 	for _, state := range []string{"starting", "running", "exited", "failed"} {
 		command := projectCommand()
@@ -41,9 +37,6 @@ func TestProjectCleanupMigrationAndUnknownRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer m.close()
-	if err := ensureProjectRuntimeCleanup(ledger.db); err != nil {
-		t.Fatalf("migration is not additive/idempotent: %v", err)
-	}
 	for i, state := range []string{"starting", "running", "exited", "failed"} {
 		command := commands[i]
 		command.Type = protocol.BodyProjectRunStop
@@ -60,7 +53,7 @@ func TestProjectCleanupMigrationAndUnknownRecovery(t *testing.T) {
 		}
 	}
 	if _, err := claimProjectCleanup(context.Background(), ledger.db, time.Now()); !errors.Is(err, sql.ErrNoRows) {
-		t.Fatalf("unproved legacy cleanup was eligible for delivery: %v", err)
+		t.Fatalf("unproved cleanup was eligible for delivery: %v", err)
 	}
 }
 

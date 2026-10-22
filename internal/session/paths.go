@@ -36,14 +36,6 @@ func LockPath(dataDir, sessionID string) (string, error) {
 	return filepath.Join(dir, "session.lock"), nil
 }
 
-func LedgerPath(dataDir, sessionID string) (string, error) {
-	dir, err := SessionDir(dataDir, sessionID)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, "ledger.db"), nil
-}
-
 func LogPath(dataDir, sessionID string) (string, error) {
 	dir, err := SessionDir(dataDir, sessionID)
 	if err != nil {

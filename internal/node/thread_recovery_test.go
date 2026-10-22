@@ -110,7 +110,7 @@ func TestThreadMissingLedgerAlignsStoppedReportToCoordinatorSequence(t *testing.
 	if err := s.reportResult(ctx, gap); err != nil {
 		t.Fatal(err)
 	}
-	if len(sent) != 1 || sent[0].WorkerSeq != 42 || sent[0].Kind != "thread.stopped" || sent[0].EventID != original.EventID {
+	if len(sent) != 1 || sent[0].WorkerSeq != 42 || sent[0].Kind != "thread.stopped" || !sent[0].HistoryUnavailable || sent[0].EventID != original.EventID {
 		t.Fatalf("缺失历史无法报告给已有 Thread：%+v", sent)
 	}
 	gap.OK = true

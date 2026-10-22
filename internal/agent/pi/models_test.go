@@ -51,7 +51,7 @@ func TestThreadSwitchFailureNeverPrompts(t *testing.T) {
 			if failure != "invalid-id" && !reflect.DeepEqual(calls, []string{"set_model"}) {
 				t.Fatal(calls)
 			}
-			if a.active || len(a.intents) != 0 || len(a.DrainEvents()) != 0 || a.Model() != "magpie/auto/gpt-6.1-sol" {
+			if a.active || len(a.intents) != 0 || len(a.Drain()) != 0 || a.Model() != "magpie/auto/gpt-6.1-sol" {
 				t.Fatal("失败切换改变了发送事实")
 			}
 		})

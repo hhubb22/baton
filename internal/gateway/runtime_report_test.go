@@ -142,7 +142,7 @@ func TestRuntimeReportLostAckReconnectsAndIgnoresUnknownFields(t *testing.T) {
 		t.Fatal("第二个节点认证失败")
 	}
 	defer peer.ws.CloseNow()
-	sendEnvelope(t, peer.ws, map[string]any{"version": 1, "message_id": newID(t), "body": map[string]any{"type": "node.sync", "display_name": "Other", "system": "linux", "capabilities": []string{"start"}}})
+	sendEnvelope(t, peer.ws, map[string]any{"version": 1, "message_id": newID(t), "body": map[string]any{"type": "node.sync", "display_name": "Other", "system": "linux", "capabilities": []string{"pi"}}})
 	peer.next(t)
 	sendEnvelope(t, peer.ws, map[string]any{"version": 1, "message_id": newID(t), "body": map[string]any{
 		"type": protocol.BodyRuntimeReport, "future_field": true,

@@ -21,7 +21,7 @@ import (
 )
 
 type projectRuntimeProbe struct {
-	stack    *prepareStack
+	stack    *processStack
 	commands string
 	log      string
 }
@@ -42,7 +42,7 @@ func startProjectRuntimeStack(t *testing.T) *projectRuntimeProbe {
 	if err := os.WriteFile(p.commands, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	p.stack = startProjectPrepareStack(t, map[string]string{
+	p.stack = startProjectStack(t, map[string]string{
 		"PATH":                                dir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"BATON_TEST_PROJECT_RUNTIME_COMMANDS": p.commands,
 		"BATON_TEST_PROJECT_RUNTIME_LOG":      p.log,
@@ -125,7 +125,7 @@ func (p *projectRuntimeProbe) call(t *testing.T, runID, id string, req protocol.
 	return result
 }
 
-func runtimeProjectHTTP(t *testing.T, st *prepareStack, method, path string, payload, out any, want int) {
+func runtimeProjectHTTP(t *testing.T, st *processStack, method, path string, payload, out any, want int) {
 	t.Helper()
 	body, err := json.Marshal(payload)
 	if err != nil {

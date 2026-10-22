@@ -11,7 +11,6 @@ import (
 
 	"baton/internal/identity"
 	"baton/internal/privatefile"
-	"baton/internal/startpermit"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -19,10 +18,8 @@ import (
 const (
 	// Issuer 是节点连接凭据的签发方。私钥只在 Coordinator。
 	Issuer = "baton-coordinator"
-	// NodeAudience 是节点连接凭据的受众，不能当作启动许可使用。
+	// NodeAudience 是节点连接凭据的受众。
 	NodeAudience = "baton-node"
-	// StartAudience 预留给启动许可，Gateway 不接受这个受众的连接凭据。
-	StartAudience = "baton-start"
 )
 
 // TokenSigner 用 Coordinator 的私钥签发节点连接凭据，并能给出验签公钥。
@@ -102,22 +99,10 @@ func (s Signer) MarshalPKCS8PEM() ([]byte, error) {
 	return pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), nil
 }
 
-// ValidSigningPublicKey 检查身份文件里的启动许可验签公钥。空字符串表示旧身份，不能用来启动。
+// ValidSigningPublicKey 检查身份文件保存的 Coordinator 签名公钥。
 func ValidSigningPublicKey(raw string) bool {
 	decoded, err := base64.RawURLEncoding.DecodeString(raw)
 	return err == nil && len(decoded) == ed25519.PublicKeySize
-}
-
-// StartPublicKey 取出注册时钉住的 Coordinator 公钥。没有公钥时不能校验启动许可。
-func (id Identity) StartPublicKey() (ed25519.PublicKey, error) {
-	if !ValidSigningPublicKey(id.SigningPublicKey) {
-		return nil, errors.New("没有启动许可公钥")
-	}
-	decoded, err := base64.RawURLEncoding.DecodeString(id.SigningPublicKey)
-	if err != nil {
-		return nil, errors.New("没有启动许可公钥")
-	}
-	return ed25519.PublicKey(decoded), nil
 }
 
 // PublicKey 返回 Gateway 用来验签的公钥。
@@ -130,14 +115,6 @@ func (s Signer) PublicKey() (ed25519.PublicKey, error) {
 		return nil, errors.New("节点签名密钥无效")
 	}
 	return pub, nil
-}
-
-// SignStartPermit 签发启动许可。调用方必须已经提交 start_authorized。
-func (s Signer) SignStartPermit(c startpermit.Claims) (string, error) {
-	if len(s.key) == 0 {
-		return "", errors.New("没有节点签名密钥")
-	}
-	return startpermit.Sign(s.key, c)
 }
 
 // SignNodeToken 签发绑定节点、员工、credential_id、签发方、受众和有效期的 JWT。

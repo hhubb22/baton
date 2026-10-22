@@ -11,7 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/santhosh-tekuri/jsonschema/v5"
+	"baton/internal/agent"
+
+	jsonschema "github.com/santhosh-tekuri/jsonschema/v5"
 	"github.com/sourcegraph/jsonrpc2"
 )
 
@@ -27,15 +29,15 @@ func TestNotificationsAreBoundAndApprovalsRefused(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		a.notification("item/agentMessage/delta", json.RawMessage(`{"threadId":"thread-fixture","turnId":"turn-fixture","delta":"text"}`))
 	}
-	select {
-	case <-a.Events():
+	if len(a.Drain()) != 0 {
 		t.Fatal("unrelated notifications accepted")
-	default:
 	}
-	a.notification("item/completed", json.RawMessage(`{"threadId":"thread-fixture","turnId":"turn-fixture","item":{"type":"userMessage","id":"item-1","clientId":"delivery-1","content":[]}}`))
-	if e := <-a.Events(); e.ConfirmedInput != "delivery-1" || a.Snapshot().SteerID != "" {
-		t.Fatal("history confirmation lost")
+	a.notification("item/completed", json.RawMessage(`{"threadId":"thread-fixture","turnId":"turn-fixture","item":{"type":"agentMessage","id":"reply","text":"reply"}}`))
+	events := a.Drain()
+	if len(events) != 2 || events[1].Kind != agent.EventReply || events[1].Content != "reply" {
+		t.Fatal(events)
 	}
+
 	for _, method := range []string{"item/commandExecution/requestApproval", "account/chatgptAuthTokens/refresh", "item/tool/requestUserInput"} {
 		_, err := a.handle(context.Background(), nil, &jsonrpc2.Request{Method: method})
 		var rpc *jsonrpc2.Error
@@ -44,6 +46,8 @@ func TestNotificationsAreBoundAndApprovalsRefused(t *testing.T) {
 		}
 	}
 }
+
+
 
 func TestEnvironmentExcludesDaemonCredentials(t *testing.T) {
 	for _, key := range []string{"BATON_CONTROL_TOKEN", "BATON_DATABASE_URL", "BATON_NODE_SIGNING_KEY"} {

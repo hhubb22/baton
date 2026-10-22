@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"baton/internal/agent"
+
 	"github.com/sourcegraph/jsonrpc2"
 )
 
@@ -48,7 +49,7 @@ func TestThreadRepliesFlushAtToolBoundaries(t *testing.T) {
 	a := New(agent.Config{})
 	defer a.Close()
 	a.state.NativeID = "native"
-	a.active, a.threadMode = true, true
+	a.active = true
 	a.threadMessageID = "message"
 	update := func(kind, text string) {
 		raw, _ := json.Marshal(map[string]any{"sessionId": "native", "update": map[string]any{"sessionUpdate": kind, "content": map[string]string{"type": "text", "text": text}}})
@@ -67,7 +68,7 @@ func TestThreadRepliesFlushAtToolBoundaries(t *testing.T) {
 	a.mu.Lock()
 	a.flushReplyLocked()
 	a.mu.Unlock()
-	events := a.DrainEvents()
+	events := a.Drain()
 	want := []string{"before tool", "between tools", "after tools"}
 	if len(events) != len(want) {
 		t.Fatal(events)
@@ -77,7 +78,7 @@ func TestThreadRepliesFlushAtToolBoundaries(t *testing.T) {
 			t.Fatal(e)
 		}
 	}
-	if len(a.DrainEvents()) != 0 {
+	if len(a.Drain()) != 0 {
 		t.Fatal("reply emitted twice")
 	}
 }

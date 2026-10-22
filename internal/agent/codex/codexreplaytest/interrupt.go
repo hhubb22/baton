@@ -44,6 +44,13 @@ func WithoutProbe(tape replay.Transcript) replay.Transcript {
 			continue
 		}
 		e.Process--
+		if e.Type == "expect_outbound" {
+			var f map[string]any
+			if json.Unmarshal(e.Frame, &f) == nil && f["method"] == "turn/start" {
+				delete(f["params"].(map[string]any), "outputSchema")
+				e.Frame, _ = json.Marshal(f)
+			}
+		}
 		entries = append(entries, e)
 	}
 	tape.Entries = entries

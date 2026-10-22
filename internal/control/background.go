@@ -2,7 +2,6 @@ package control
 
 import (
 	"context"
-	"sync"
 	"time"
 )
 
@@ -27,34 +26,11 @@ func (s *Server) backgroundDB(ctx context.Context, fn func(context.Context) erro
 	return fn(ctx)
 }
 
-// DeliverMaintenance 独立推进各项期限与吊销补偿，单项扫描不重叠执行。
+// DeliverMaintenance 独立推进凭据吊销补偿。
 func (s *Server) DeliverMaintenance(ctx context.Context) {
-	jobs := []struct {
-		name string
-		work func(context.Context) error
-	}{
-		{"execution_expire", func(ctx context.Context) error {
-			return s.backgroundDB(ctx, func(ctx context.Context) error { return s.store.ExpireExecutionsAt(ctx, time.Now()) })
-		}},
-		{"prepare_expire", func(ctx context.Context) error {
-			return s.backgroundDB(ctx, s.store.FailUnsentPrepares)
-		}},
-		{"queue_expire", func(ctx context.Context) error {
-			return s.backgroundDB(ctx, s.store.ExpireQueuedTasks)
-		}},
-		{"revocation_apply", func(ctx context.Context) error {
-			return s.dispatchRevocations(ctx, true)
-		}},
-	}
-	var wg sync.WaitGroup
-	for _, job := range jobs {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			s.periodic(ctx, 200*time.Millisecond, job.name, job.work)
-		}()
-	}
-	wg.Wait()
+	s.periodic(ctx, 200*time.Millisecond, "revocation_apply", func(ctx context.Context) error {
+		return s.dispatchRevocations(ctx, true)
+	})
 }
 
 func (s *Server) periodic(ctx context.Context, interval time.Duration, name string, work func(context.Context) error) {

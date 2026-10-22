@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"baton/internal/agent"
+
 	"github.com/google/uuid"
 )
 
@@ -18,7 +19,7 @@ func ProbeModels(ctx context.Context, c agent.Config) (agent.ModelCatalog, error
 	}
 	defer os.RemoveAll(dir)
 	c.SessionDir, c.StatePath, c.SessionID = filepath.Join(dir, "session"), filepath.Join(dir, "state.json"), uuid.NewString()
-	c.Restore, c.ExecutionID = false, ""
+	c.Restore = false
 	a := New(c)
 	defer a.Close()
 	if err := a.Start(ctx); err != nil {

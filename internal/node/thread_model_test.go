@@ -2,7 +2,6 @@ package node
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -30,37 +29,6 @@ func TestThreadInitialModelSurvivesLedgerReopen(t *testing.T) {
 	record, err := reopened.Thread(t.Context(), cmd.ThreadID)
 	if err != nil || record.Model != cmd.Model || record.StorageGeneration != generation {
 		t.Fatalf("Thread 模型没有随账本保存：%+v %v", record, err)
-	}
-}
-
-func TestThreadModelUpgradePreservesExistingMapping(t *testing.T) {
-	ledger := openTestLedger(t)
-	cmd := protocol.ThreadCommand{
-		ThreadID: threadUUID(t), AgentType: "codex", WorkingDirectory: filepath.Join(t.TempDir(), "work"),
-		ExecutionTimeoutSeconds: 7200,
-	}
-	if err := ledger.insertThread(t.Context(), threadUUID(t), cmd); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ledger.db.Exec(`ALTER TABLE threads DROP COLUMN model`); err != nil {
-		t.Fatal(err)
-	}
-	dir, generation := ledger.dir, ledger.Generation()
-	if err := ledger.Close(); err != nil {
-		t.Fatal(err)
-	}
-	for range 2 {
-		reopened, err := OpenLedger(dir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		record, err := reopened.Thread(t.Context(), cmd.ThreadID)
-		if err != nil || record.Model != "" || record.WorkingDirectory != cmd.WorkingDirectory || record.StorageGeneration != generation {
-			t.Fatalf("旧 Thread 映射升级错误：%+v %v", record, err)
-		}
-		if err := reopened.Close(); err != nil {
-			t.Fatal(err)
-		}
 	}
 }
 

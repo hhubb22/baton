@@ -194,39 +194,6 @@ func TestThreadModelFailureReasonFitsReportProtocol(t *testing.T) {
 	}
 }
 
-func TestThreadOldLedgerModelsStayEmpty(t *testing.T) {
-	a := &threadFake{resume: true}
-	w := newThreadTestWorker(t, func(o *ThreadOptions) { o.AdapterConfig.Model = "old-config-model" }, a)
-	threadMessage(t, w, "old-message", "queue")
-	a.add(agent.Event{Kind: agent.EventTurnEnded})
-	threadMust(t, w.Poll(context.Background()))
-	data, options := w.dataDir, w.options
-	threadMust(t, w.Close())
-	path, err := ThreadLedgerPath(data, options.ThreadID)
-	threadMust(t, err)
-	db, err := sql.Open("sqlite", sqliteDSN(path))
-	threadMust(t, err)
-	for _, table := range []string{"thread_meta", "thread_messages", "thread_turns"} {
-		_, err := db.Exec(`ALTER TABLE ` + table + ` DROP COLUMN model`)
-		threadMust(t, err)
-	}
-	_, err = db.Exec(`ALTER TABLE thread_messages DROP COLUMN status_reason`)
-	threadMust(t, err)
-	threadMust(t, db.Close())
-	b := &threadFake{resume: true}
-	restored, err := OpenThreadWorker(context.Background(), data, options, b.factory)
-	threadMust(t, err)
-	defer restored.Close()
-	for _, table := range []string{"thread_meta", "thread_messages", "thread_turns"} {
-		if n := threadCount(t, restored, `SELECT COUNT(*) FROM `+table+` WHERE model<>''`); n != 0 {
-			t.Fatalf("%s old models were filled: %d", table, n)
-		}
-	}
-	if b.configs[0].Model != "" {
-		t.Fatalf("old model was restored from stale adapter config: %+v", b.configs[0])
-	}
-}
-
 func TestThreadModelMessageRetriesAdapterRecovery(t *testing.T) {
 	a := &threadFake{resume: true, switchModel: true}
 	w := newThreadTestWorker(t, func(o *ThreadOptions) { o.Model = "initial" }, a)

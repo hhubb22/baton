@@ -2,12 +2,12 @@ package shell
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -16,7 +16,6 @@ import (
 	"baton/internal/agent"
 	"baton/internal/identity"
 	"baton/internal/privatefile"
-	"baton/internal/task"
 )
 
 const completionLimit = 192 * 1024
@@ -24,25 +23,19 @@ const completionLimit = 192 * 1024
 var errCompletion = errors.New("命令完成记录无效")
 
 type completionRecord struct {
-	MessageID       string          `json:"message_id,omitempty"`
-	SchemaVersion   int             `json:"schema_version"`
-	SessionID       string          `json:"session_id"`
-	ExecutionID     string          `json:"execution_id"`
-	InputGeneration int             `json:"input_generation"`
-	CompletionKind  string          `json:"completion_kind"`
-	ProcessStopped  bool            `json:"process_stopped"`
-	Result          json.RawMessage `json:"result"`
+	MessageID      string        `json:"message_id,omitempty"`
+	SchemaVersion  int           `json:"schema_version"`
+	SessionID      string        `json:"session_id"`
+	CompletionKind string        `json:"completion_kind"`
+	ProcessStopped bool          `json:"process_stopped"`
+	Result         commandOutput `json:"result"`
 }
 
 func (a *Adapter) validateIdentity() error {
 	if _, err := identity.ParseUUID(a.config.SessionID); err != nil {
 		return fmt.Errorf("%w: session_id", errCompletion)
 	}
-	if a.config.ExecutionID != "" {
-		if _, err := identity.ParseUUID(a.config.ExecutionID); err != nil {
-			return fmt.Errorf("%w: execution_id", errCompletion)
-		}
-	}
+
 	return nil
 }
 
@@ -125,7 +118,7 @@ func checkJSON(raw []byte) error {
 	return nil
 }
 
-func (a *Adapter) loadCompletion(restore bool) (*completionRecord, error) {
+func (a *Adapter) loadCompletion() (*completionRecord, error) {
 	raw, err := a.readFile(a.historyPath())
 	if err != nil {
 		return nil, err
@@ -134,70 +127,48 @@ func (a *Adapter) loadCompletion(restore bool) (*completionRecord, error) {
 		return nil, fmt.Errorf("%w: JSON 或大小不合法", errCompletion)
 	}
 	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
+	if json.Unmarshal(raw, &fields) != nil || len(fields) != 6 || requireFields(fields, "schema_version", "session_id", "message_id", "completion_kind", "process_stopped", "result") != nil {
 		return nil, errCompletion
 	}
 	record := &completionRecord{}
-	if _, envelope := fields["schema_version"]; envelope {
-		_, threadRecord := fields["message_id"]
-		fieldCount := 7
-		if threadRecord {
-			fieldCount++
-		}
-		if len(fields) != fieldCount || requireFields(fields, "schema_version", "session_id", "execution_id", "input_generation", "completion_kind", "process_stopped", "result") != nil {
-			return nil, fmt.Errorf("%w: 完成信封字段不完整", errCompletion)
-		}
-		dec := json.NewDecoder(bytes.NewReader(raw))
-		dec.DisallowUnknownFields()
-		if err := dec.Decode(record); err != nil {
-			return nil, fmt.Errorf("%w: %v", errCompletion, err)
-		}
-		if err := a.validateIdentity(); err != nil {
-			return nil, err
-		}
-		validSchema := record.SchemaVersion == 1 && !threadRecord && a.config.ExecutionID != ""
-		if threadRecord {
-			validSchema = record.SchemaVersion == 2 && record.MessageID != ""
-		}
-		if !validSchema || record.SessionID != a.config.SessionID || record.ExecutionID != a.config.ExecutionID || record.InputGeneration != 1 || !record.ProcessStopped {
-			return nil, fmt.Errorf("%w: 版本、执行身份、代次或停止事实不匹配", errCompletion)
-		}
-	} else {
-		// Worker 根据账本校验持久化 Config 的 Session 和 execution；shell 只允许 generation=1。
-		// 裸结果还必须位于该 Config 对应的原 Session 私有目录。
-		if restore && !a.legacyBound() {
-			return nil, fmt.Errorf("%w: 旧结果无法证明属于当前执行", errCompletion)
-		}
-		record = &completionRecord{SchemaVersion: 1, SessionID: a.config.SessionID, ExecutionID: a.config.ExecutionID, InputGeneration: 1, CompletionKind: "exited", ProcessStopped: true, Result: raw}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(record); err != nil {
+		return nil, fmt.Errorf("%w: %v", errCompletion, err)
 	}
-	var resultFields, commandFields map[string]json.RawMessage
-	if json.Unmarshal(record.Result, &resultFields) != nil || requireFields(resultFields, "command_result") != nil || json.Unmarshal(resultFields["command_result"], &commandFields) != nil || requireFields(commandFields, "output", "total_bytes", "exit_code", "truncated") != nil {
-		return nil, fmt.Errorf("%w: 缺少命令退出或输出字段", errCompletion)
+	if err := a.validateIdentity(); err != nil {
+		return nil, err
 	}
-	for name := range commandFields {
-		switch name {
-		case "encoding", "output", "total_bytes", "exit_code", "truncated":
-		default:
-			return nil, fmt.Errorf("%w: command_result.%s", errCompletion, name)
+	if record.SchemaVersion != 3 || record.MessageID == "" || record.SessionID != a.config.SessionID || !record.ProcessStopped {
+		return nil, errCompletion
+	}
+	var resultFields map[string]json.RawMessage
+	if json.Unmarshal(fields["result"], &resultFields) != nil || requireFields(resultFields, "output", "total_bytes", "exit_code", "truncated") != nil {
+		return nil, errCompletion
+	}
+	if encoding, ok := resultFields["encoding"]; ok && bytes.Equal(bytes.TrimSpace(encoding), []byte("null")) {
+		return nil, errCompletion
+	}
+	result := record.Result
+	output := []byte(result.Output)
+	if result.Encoding == "base64" {
+		var err error
+		output, err = base64.StdEncoding.DecodeString(result.Output)
+		if err != nil {
+			return nil, errCompletion
 		}
+	} else if result.Encoding != "" {
+		return nil, errCompletion
 	}
-	if encoding, ok := commandFields["encoding"]; ok && bytes.Equal(bytes.TrimSpace(encoding), []byte("null")) {
-		return nil, fmt.Errorf("%w: command_result.encoding", errCompletion)
-	}
-	candidate, err := task.ParseCandidate(string(record.Result))
-	if err != nil || candidate.CommandResult == nil || (candidate.Status != task.StatusCompleted && candidate.Status != task.StatusFailed) {
-		return nil, fmt.Errorf("%w: 候选命令结果不合法", errCompletion)
+	if result.TotalBytes < 0 || result.ExitCode < -1 || int64(len(output)) != min(result.TotalBytes, int64(commandOutputBytes)) || result.Truncated != (result.TotalBytes > commandOutputBytes) {
+		return nil, errCompletion
 	}
 	switch record.CompletionKind {
 	case "exited", "stopped":
-	case "launch_failed":
-		r := candidate.CommandResult
-		if candidate.Status != task.StatusFailed || r.ExitCode != -1 || r.TotalBytes != 0 {
-			return nil, fmt.Errorf("%w: 启动失败事实不合法", errCompletion)
-		}
 	default:
-		return nil, fmt.Errorf("%w: completion_kind", errCompletion)
+		return nil, errCompletion
 	}
+
 	return record, nil
 }
 
@@ -211,19 +182,6 @@ func requireFields(fields map[string]json.RawMessage, names ...string) error {
 	return nil
 }
 
-func (a *Adapter) legacyBound() bool {
-	if !a.config.Restore || a.config.DataDir == "" || a.validateIdentity() != nil {
-		return false
-	}
-	session, _ := identity.ParseUUID(a.config.SessionID)
-	want, err := filepath.Abs(filepath.Join(a.config.DataDir, "sessions", session, "native"))
-	if err != nil {
-		return false
-	}
-	got, err := filepath.Abs(a.config.SessionDir)
-	return err == nil && got == want && privatefile.CheckDir(got) == nil && privatefile.CheckDir(filepath.Dir(got)) == nil
-}
-
 func definitiveHistoryError(err error) bool {
 	if errors.Is(err, errCompletion) || os.IsNotExist(err) || errors.Is(err, syscall.ELOOP) || errors.Is(err, syscall.ENOTDIR) {
 		return true
@@ -235,22 +193,14 @@ func definitiveHistoryError(err error) bool {
 	return !errors.As(err, &pathErr) && !errors.As(err, &syscallErr) && !errors.As(err, &errno)
 }
 
-func completionOutput(record *completionRecord) agent.Output {
-	return agent.Output{Final: string(record.Result), Exited: true, Uncertain: record.CompletionKind == "stopped"}
-}
-
 func (a *Adapter) restoreLocked(record *completionRecord) {
 	a.restorePending = false
 	a.stopped = record.ProcessStopped
-	a.outputs = append(a.outputs, completionOutput(record))
 	a.completionEventsLocked(record)
 }
 
-func (a *Adapter) queueCompletionLocked(out agent.Output, kind string) {
-	a.pending = &completionRecord{SchemaVersion: 1, SessionID: a.config.SessionID, ExecutionID: a.config.ExecutionID, InputGeneration: 1, CompletionKind: kind, ProcessStopped: true, Result: json.RawMessage(out.Final)}
-	if a.threadMode {
-		a.pending.SchemaVersion, a.pending.MessageID = 2, a.messageID
-	}
+func (a *Adapter) queueCompletionLocked(result commandOutput, kind string) {
+	a.pending = &completionRecord{SchemaVersion: 3, SessionID: a.config.SessionID, MessageID: a.messageID, CompletionKind: kind, ProcessStopped: true, Result: result}
 	a.maintainLocked()
 }
 
@@ -276,7 +226,7 @@ func (a *Adapter) maintainLocked() {
 				err = a.writeFile(a.historyPath(), raw)
 			}
 		} else {
-			record, err = a.loadCompletion(true)
+			record, err = a.loadCompletion()
 		}
 		a.mu.Lock()
 		defer a.mu.Unlock()
@@ -285,13 +235,12 @@ func (a *Adapter) maintainLocked() {
 			a.noteFailureLocked(op, err)
 			if pending == nil && definitiveHistoryError(err) {
 				a.restorePending = false
-				a.outputs = append(a.outputs, agent.Output{Uncertain: true})
+				a.events = append(a.events, agent.Event{Kind: agent.EventUncertain})
 			}
 			return
 		}
 		a.failures, a.lastError, a.retryAt = 0, "", time.Time{}
 		if pending != nil {
-			a.outputs = append(a.outputs, completionOutput(pending))
 			a.completionEventsLocked(pending)
 			a.pending = nil
 		} else {
@@ -313,7 +262,7 @@ func (a *Adapter) noteFailureLocked(op string, err error) {
 		Error      string `json:"error"`
 	}{"shell_completion_error", op, a.failures, a.failures > 1, err.Error()})
 	// 维护失败只产生本地诊断；最终结果仍保留在 pending 中。
-	a.diagnostic = &agent.Output{Raw: raw}
+	a.diagnostic = &agent.Event{Raw: raw}
 }
 
 // Diagnostics 返回最近一次文件错误；失败次数和下次重试间隔包含在诊断中。

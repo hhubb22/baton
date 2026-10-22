@@ -17,9 +17,9 @@ import (
 	"time"
 
 	"baton/internal/identity"
+	"baton/internal/monotime"
 	"baton/internal/privatefile"
 	"baton/internal/protocol"
-	"baton/internal/startpermit"
 
 	"github.com/coder/websocket"
 )
@@ -91,7 +91,7 @@ func projectRuntimeFixture(t *testing.T, beforeReply ...func(protocol.ProjectRun
 	if err != nil {
 		t.Fatal(err)
 	}
-	loop := newStartLoop(ctx, Identity{}, ledger, nil, newWSWriter(ws), nil)
+	loop := newRuntimeRPC(newWSWriter(ws))
 	m.setLoop(loop)
 	done := make(chan struct{})
 	go func() {
@@ -225,7 +225,7 @@ func TestProjectRuntimeBindingWakeAndPersistentDedup(t *testing.T) {
 
 func TestProjectRuntimeLeaseDeadlineAcrossDisconnect(t *testing.T) {
 	m, requests, _ := projectRuntimeFixture(t)
-	clock := startpermit.NewManual(time.Time{})
+	clock := monotime.NewManual(time.Time{})
 	m.clock = clock
 	m.renewInterval = 50 * time.Millisecond
 	m.leaseDeadline = 300 * time.Millisecond
@@ -286,7 +286,7 @@ func TestProjectRuntimeCapacityAndStopAck(t *testing.T) {
 
 func TestProjectRuntimeStopsAfterSystemSuspend(t *testing.T) {
 	m, requests, _ := projectRuntimeFixture(t)
-	clock := startpermit.NewManual(time.Time{})
+	clock := monotime.NewManual(time.Time{})
 	m.clock = clock
 	m.renewInterval = 50 * time.Millisecond
 	command := projectCommand()
@@ -319,7 +319,7 @@ func TestProjectRuntimeStopsAfterSystemSuspend(t *testing.T) {
 }
 
 func TestProjectRuntimeCountsRenewalRoundTripFromRequestStart(t *testing.T) {
-	clock := startpermit.NewManual(time.Time{})
+	clock := monotime.NewManual(time.Time{})
 	var renewals atomic.Int32
 	m, requests, _ := projectRuntimeFixture(t, func(request protocol.ProjectRuntimeRequest) {
 		if request.Operation == "renew" && renewals.Add(1) == 1 {
@@ -342,7 +342,7 @@ func TestProjectRuntimeCountsRenewalRoundTripFromRequestStart(t *testing.T) {
 }
 
 type failingProjectRuntimeClock struct {
-	*startpermit.Manual
+	*monotime.Manual
 	failed atomic.Bool
 }
 
@@ -355,7 +355,7 @@ func (c *failingProjectRuntimeClock) Mono() (time.Duration, error) {
 
 func TestProjectRuntimeStopsWhenMonotonicClockFails(t *testing.T) {
 	m, requests, _ := projectRuntimeFixture(t)
-	clock := &failingProjectRuntimeClock{Manual: startpermit.NewManual(time.Time{})}
+	clock := &failingProjectRuntimeClock{Manual: monotime.NewManual(time.Time{})}
 	m.clock = clock
 	command := projectCommand()
 	sendProjectCommand(m, command)
@@ -372,7 +372,7 @@ func TestProjectRuntimeStopsWhenMonotonicClockFails(t *testing.T) {
 }
 
 func TestProjectRuntimeRejectsLateRenewalAfterSuspend(t *testing.T) {
-	clock := startpermit.NewManual(time.Time{})
+	clock := monotime.NewManual(time.Time{})
 	var renewals atomic.Int32
 	pending := make(chan struct{})
 	release := make(chan struct{})

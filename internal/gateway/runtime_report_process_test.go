@@ -12,10 +12,9 @@ import (
 	"time"
 
 	"baton/internal/protocol"
-	"baton/internal/task"
 )
 
-func TestRuntimeReportRealProcessesAndWorker(t *testing.T) {
+func TestRuntimeReportRealProcesses(t *testing.T) {
 	t.Parallel()
 	binDir := t.TempDir()
 	probeFile := filepath.Join(t.TempDir(), "probe.json")
@@ -34,7 +33,7 @@ func TestRuntimeReportRealProcessesAndWorker(t *testing.T) {
 		}
 	}
 	writeProbe(`{"version":"0.1.0","providers":[{"provider":"openai-codex","status":"available"}]}`)
-	st := startPrepareStack(t, map[string]string{"PATH": binDir + string(os.PathListSeparator) + os.Getenv("PATH"), "BATON_TEST_PROBE_FILE": probeFile, "BATON_TEST_HOLD_START": "0"})
+	st := startThreadStack(t, map[string]string{"PATH": binDir + string(os.PathListSeparator) + os.Getenv("PATH"), "BATON_TEST_PROBE_FILE": probeFile})
 	initialVersion, _ := waitRuntimeReport(t, st, func(r protocol.RuntimeReport) bool { return r.ProjectRuntime != nil && !r.Exec.Enabled })
 	root := t.TempDir()
 	for _, args := range [][]string{{"init", root}, {"-C", root, "remote", "add", "origin", "https://user:credential-secret@git.example/team/repo?token=query-secret"}} {
@@ -61,11 +60,8 @@ func TestRuntimeReportRealProcessesAndWorker(t *testing.T) {
 	v, _ = waitRuntimeReport(t, st, func(r protocol.RuntimeReport) bool {
 		return r.ProjectRuntime != nil && len(r.ProjectRuntime.Providers) == 1 && r.ProjectRuntime.Providers[0].Status == "login_required"
 	})
-	// 慢 probe 期间，真实 Worker 仍能通过现有能力判断启动任务。
+	// 慢 probe 期间，节点仍须保持连接并更新能力报告。
 	writeProbe("slow")
-	created := acceptTask(t, st, "runtime-report-worker")
-	waitExecutor(t, st, "start\ninput\n")
-	waitTaskStatus(t, st, created.TaskID, task.StatusRunning)
 	_, _ = waitRuntimeReport(t, st, func(r protocol.RuntimeReport) bool { return r.ProjectRuntime == nil })
 	st.batond.stop()
 	if err := os.Remove(probeBinary); err != nil {
@@ -73,10 +69,9 @@ func TestRuntimeReportRealProcessesAndWorker(t *testing.T) {
 	}
 	st.batond = startCmd(t, st.batondBin, st.batondArgs, st.batondEnv)
 	waitNode(t, st.client, st.base, st.ident.NodeID, true, true, true)
-	waitLog(t, st.batond, "event=worker_reconnected")
 	v, report = waitRuntimeReport(t, st, func(r protocol.RuntimeReport) bool { return r.ProjectRuntime == nil && r.Exec.Enabled })
 	var caps []string
-	if err := st.pool.QueryRow(context.Background(), `SELECT capabilities FROM nodes WHERE id=$1::uuid`, st.ident.NodeID).Scan(&caps); err != nil || strings.Join(caps, ",") != "pi,codex,start" {
+	if err := st.pool.QueryRow(context.Background(), `SELECT capabilities FROM nodes WHERE id=$1::uuid`, st.ident.NodeID).Scan(&caps); err != nil || strings.Join(caps, ",") != "pi,codex" {
 		t.Fatalf("执行 Agent 能力改变：%v %v", caps, err)
 	}
 	cli("project-exec", "--data-dir", st.dataDir, "--enabled=false", "--shell", "sh")
@@ -94,10 +89,10 @@ func TestRuntimeReportRealProcessesAndWorker(t *testing.T) {
 			}
 		}
 	}
-	t.Logf("真实 Coordinator、batond、Worker 验证通过；报告版本 %d → %d，probe 为契约测试程序", initialVersion, final)
+	t.Logf("真实 Coordinator、batond 验证通过；报告版本 %d → %d，probe 为契约测试程序", initialVersion, final)
 }
 
-func waitRuntimeReport(t *testing.T, st *prepareStack, match func(protocol.RuntimeReport) bool) (int64, protocol.RuntimeReport) {
+func waitRuntimeReport(t *testing.T, st *processStack, match func(protocol.RuntimeReport) bool) (int64, protocol.RuntimeReport) {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {

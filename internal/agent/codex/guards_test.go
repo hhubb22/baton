@@ -13,6 +13,7 @@ import (
 
 	"baton/internal/agent/codex/replaytest"
 	"baton/internal/privatefile"
+
 	"github.com/sourcegraph/jsonrpc2"
 )
 
@@ -37,8 +38,8 @@ func TestRecoveryPaginationAndGuards(t *testing.T) {
 			c.Directory, _ = filepath.EvalSymlinks(c.Directory)
 			s := State{Version: Version, ThreadID: "thread-1", TurnID: "turn-1", Directory: c.Directory, SessionID: c.SessionID}
 			if name == "previous-version" {
-				s.Version = "0.162.1"
-			}
+ s.Version="0.162.1"
+ }
 			raw, _ := json.Marshal(s)
 			if err := privatefile.WriteFile(c.StatePath, raw); err != nil {
 				t.Fatal(err)
@@ -87,7 +88,7 @@ func TestRecoveryPaginationAndGuards(t *testing.T) {
 			})
 			err := a.Attach(context.Background())
 			switch name {
-			case "paged", "previous-version":
+			case "paged", "previous-version", "missing-items":
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -110,40 +111,7 @@ func TestRecoveryPaginationAndGuards(t *testing.T) {
 		})
 	}
 }
-func TestHistoryContainsExactIdentity(t *testing.T) {
-	for _, tc := range []struct {
-		name, item    string
-		queried, want bool
-	}{
-		{"client-id", `{"type":"userMessage","clientId":"delivery-1"}`, false, true},
-		{"user-envelope", `{"type":"userMessage","content":[{"text":"{\"delivery_id\":\"delivery-1\"}"}]}`, false, true},
-		{"successful-query", `{"type":"commandExecution","exitCode":0,"aggregatedOutput":"{\"delivery_id\":\"delivery-1\"}"}`, true, true},
-		{"failed-query", `{"type":"commandExecution","exitCode":1,"aggregatedOutput":"{\"delivery_id\":\"delivery-1\"}"}`, true, false},
-		{"assistant", `{"type":"agentMessage","text":"{\"delivery_id\":\"delivery-1\"}"}`, false, false},
-		{"wrong-role", `{"type":"userMessage","clientId":"delivery-1"}`, true, false},
-		{"substring", `{"type":"userMessage","clientId":"delivery-10","content":[{"text":"{\"delivery_id\":\"delivery-10\"}"}]}`, false, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			a := New(Config{})
-			a.state.ThreadID = "thread-1"
-			calls := 0
-			unitRPC(t, a, func(method string, _ json.RawMessage) (any, error) {
-				if method != "thread/items/list" {
-					t.Errorf("额外请求 %s", method)
-				}
-				calls++
-				if calls == 1 {
-					return map[string]any{"data": []any{}, "nextCursor": "next"}, nil
-				}
-				return json.RawMessage(`{"data":[{"turnId":"turn-1","item":` + tc.item + `}]}`), nil
-			})
-			found, err := a.HistoryContains("delivery-1", tc.queried)
-			if err != nil || found != tc.want || calls != 2 {
-				t.Fatalf("历史确认: %v %v calls=%d", found, err, calls)
-			}
-		})
-	}
-}
+
 func TestCodexLFFramingLimits(t *testing.T) {
 	codec := lineCodec{}
 	// 读取边界与帧上限无法由逐帧转录表达。

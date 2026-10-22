@@ -119,7 +119,7 @@ func TestGatewayAuthSyncAndIsolation(t *testing.T) {
 		"route":    map[string]string{"to": protocol.ToControl},
 		"priority": protocol.PriorityControl,
 		"body": map[string]any{
-			"type": "node.sync", "display_name": "Desk", "system": "linux", "role": "pc", "capabilities": []string{"start"},
+			"type": "node.sync", "display_name": "Desk", "system": "linux", "role": "pc", "capabilities": []string{"pi"},
 		},
 	})
 	synced := deskPeer.next(t)
@@ -310,7 +310,7 @@ func registerNode(t *testing.T, ctx context.Context, repo *store.Store, signer n
 	}
 	ident, err := repo.Register(ctx, store.RegisterInput{
 		Token: token, DisplayName: name, System: node.SystemLinux, Role: node.RolePC,
-		Capabilities: []string{"start"}, CredentialTTL: 30 * 24 * time.Hour,
+		Capabilities: []string{"pi"}, CredentialTTL: 30 * 24 * time.Hour,
 	}, signer)
 	if err != nil {
 		t.Fatal(err)

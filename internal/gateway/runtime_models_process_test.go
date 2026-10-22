@@ -22,7 +22,7 @@ func TestRuntimeModelProbeDoesNotConsumeReplayProcess(t *testing.T) {
 	fixture := pireplaytest.New(t, pireplaytest.Build(t, "../../tools/agent-replay"),
 		pireplaytest.Tape(t, "../agent/pi/testdata/replay", "simple"),
 		dir, newProcessID(t), dir)
-	st := startPrepareStack(t, map[string]string{"BATON_AGENT_DRIVER": "native", "BATON_PI_BIN": fixture.Binary, "BATON_PI_MODEL": pireplaytest.Model})
+	st := startThreadStack(t, map[string]string{"BATON_PI_BIN": fixture.Binary, "BATON_PI_MODEL": pireplaytest.Model})
 	waitRuntimeReport(t, st, func(r protocol.RuntimeReport) bool {
 		for _, a := range r.Agents {
 			if a.AgentType == "pi" {

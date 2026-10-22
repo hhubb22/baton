@@ -73,6 +73,17 @@ func TestThreadWireSyncReconnectAndReceipts(t *testing.T) {
 			completed <- err
 			return
 		}
+		var syncBody map[string]json.RawMessage
+		if err := json.Unmarshal(sync.Body, &syncBody); err != nil || len(syncBody) != 5 || string(syncBody["type"]) != `"node.sync"` {
+			completed <- errorsForWire("同步正文应只含节点身份和能力", err)
+			return
+		}
+		for _, field := range []string{"display_name", "system", "role", "capabilities"} {
+			if _, ok := syncBody[field]; !ok {
+				completed <- errorsForWire("同步缺少 "+field, nil)
+				return
+			}
+		}
 		// 同步确认前只有心跳，Thread 报告必须等待 node.sync_result。
 		if _, kind, err := read(); err != nil || kind != protocol.KindHeartbeat {
 			completed <- errorsForWire("同步前发送了 Thread 报告", err)

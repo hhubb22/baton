@@ -21,7 +21,7 @@ type fileNotice struct {
 }
 
 // BrowseFiles 把一次文件浏览作为临时 RPC 发给节点，并等待这一条响应。
-// 它不写入 dispatch_outbox，失败后也不自动重发。
+// 请求不持久化，失败后不自动重发。
 func (s *Server) BrowseFiles(ctx context.Context, employeeID, nodeID string, req protocol.FileRequest) (protocol.FileResult, error) {
 	if _, err := identity.ParseUUID(nodeID); err != nil {
 		return protocol.FileResult{}, errors.New("节点暂时不可达")

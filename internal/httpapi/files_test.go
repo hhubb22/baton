@@ -102,7 +102,7 @@ func TestFileBrowseRejectsEscapeOfflineAndForeignNode(t *testing.T) {
 		t.Fatal("浏览日志包含路径或预览内容")
 	}
 	var outbox int
-	if err := pool.QueryRow(context.Background(), `SELECT COUNT(*) FROM dispatch_outbox`).Scan(&outbox); err != nil || outbox != 0 {
+	if err := pool.QueryRow(context.Background(), `SELECT COUNT(*) FROM thread_outbox`).Scan(&outbox); err != nil || outbox != 0 {
 		t.Fatalf("浏览写入了 outbox: %v %d", err, outbox)
 	}
 

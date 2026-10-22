@@ -12,19 +12,17 @@ import (
 	"time"
 
 	"baton/internal/agent"
-	"baton/internal/agent/codex/replaytest"
-	"baton/internal/agent/replay"
 	"baton/internal/privatefile"
 	"baton/internal/protocol"
 )
 
 func TestBrowserHistoryReadableAfterExit(t *testing.T) {
-	for _, version := range []string{Version, "0.162.1"} {
-		t.Run(version, func(t *testing.T) { testBrowserHistoryVersion(t, version) })
-	}
+ for _,version:=range []string{Version,"0.162.1"} {
+ t.Run(version,func(t *testing.T){testBrowserHistoryVersion(t,version)})
+ }
 }
 
-func testBrowserHistoryVersion(t *testing.T, version string) {
+func testBrowserHistoryVersion(t *testing.T,version string) {
 	dir, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -47,9 +45,7 @@ func testBrowserHistoryVersion(t *testing.T, version string) {
 		t.Fatalf("退出后受限历史: %+v %v", page, err)
 	}
 	other := Version
-	if version == Version {
-		other = "0.162.1"
-	}
+ if version==Version{other="0.162.1"}
 	mismatch, _ := json.Marshal(map[string]any{"type": "session_meta", "payload": map[string]string{"id": state.ThreadID, "cwd": dir, "cli_version": other}})
 	if err := os.WriteFile(state.HistoryPath, append(mismatch, '\n'), 0600); err != nil {
 		t.Fatal(err)
@@ -154,69 +150,4 @@ func TestCodexHistoryNoModelProbe(t *testing.T) {
 		t.Fatal("原生历史删除未报告缺失", err)
 	}
 	t.Logf("Codex %s：无模型输入；原生文件 %d 条/%d 页，包含 12 MiB 条目，读取耗时 %s；删除被准确识别", Version, count, pages, time.Since(started))
-}
-
-// 旧映射的协议查询使用独立 app-server；录制片段只派生只读参数与大条目。
-func TestBrowserHistoryFallbackReplayIsolation(t *testing.T) {
-	binary := replaytest.Build(t, "../../../tools/agent-replay")
-	tape := replaytest.AdapterTape(replaytest.Load(t, "testdata/replay/simple.ndjson"))
-	tape, ends := replaytest.EndGates(tape)
-	original := append([]replay.Entry(nil), tape.Entries...)
-	for _, e := range original {
-		if e.Process == 1 {
-			e.Process = 3
-			if e.Label != "" {
-				e.Label += ":browser"
-			}
-			tape.Entries = append(tape.Entries, e)
-		}
-	}
-	history := replaytest.Load(t, "testdata/replay/restore_load_only.ndjson")
-	tape.Entries = append(tape.Entries, replay.Entry{Type: "process_start", Process: 4, Args: []string{"app-server", "--stdio"}})
-	for _, label := range []string{"request:initialize", "response:initialize", "notification:initialized", "request:thread/read", "response:thread/read", "request:thread/items/list", "response:thread/items/list"} {
-		for _, e := range history.Entries {
-			if e.Label != label {
-				continue
-			}
-			e.Process = 4
-			e.Label += ":browser"
-			var f map[string]any
-			if err := json.Unmarshal(e.Frame, &f); err != nil {
-				t.Fatal(err)
-			}
-			switch label {
-			case "request:thread/read":
-				f["params"].(map[string]any)["includeTurns"] = false
-			case "response:thread/read":
-				f["result"].(map[string]any)["thread"].(map[string]any)["path"] = ""
-			case "request:thread/items/list":
-				f["params"].(map[string]any)["limit"] = 1
-			case "response:thread/items/list":
-				f["result"] = map[string]any{"data": []any{map[string]any{"turnId": "turn-1", "item": map[string]string{"id": "item-browser", "type": "agentMessage", "text": strings.Repeat("中文", 10000)}}}}
-			}
-			e.Frame, _ = json.Marshal(f)
-			tape.Entries = append(tape.Entries, e)
-		}
-	}
-	r := replaytest.Prepare(t, binary, tape, append(ends, "event:turn/completed")...)
-	config := replayConfig(r)
-	a := New(config)
-	defer a.Close()
-	mustStart(t, a)
-	mustInput(t, a)
-	r.Wait(t, "event:turn/completed")
-	saved := a.Snapshot()
-	saved.HistoryPath = ""
-	saved.HistoryRoot = ""
-	raw, _ := json.Marshal(saved)
-	if err := privatefile.WriteFile(config.StatePath, raw); err != nil {
-		t.Fatal(err)
-	}
-	page, err := a.ReadBrowserHistory(context.Background(), "", 16)
-	if err != nil || !protocol.ValidHistoryPage(&page) || len(page.Entries) != 1 || !page.Entries[0].Truncated {
-		t.Fatal("独立协议历史查询", page, err)
-	}
-	r.Release(t, "event:turn/completed")
-	successful(t, awaitOutput(t, a))
-	r.Wait(t, ends[0])
 }

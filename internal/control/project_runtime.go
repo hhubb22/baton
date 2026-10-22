@@ -53,7 +53,7 @@ func (s *Server) onProjectRuntimeRequest(ctx context.Context, connID string, env
 	if raw, err := protocol.MarshalJSON(result); err != nil || len(raw) > protocol.MaxProjectRuntimeBytes {
 		result = protocol.ProjectRuntimeResult{Type: protocol.BodyProjectRuntimeResult, Code: "too_large"}
 	}
-	s.replyExecution(ctx, connID, env, result)
+	s.replyNode(ctx, connID, env, result)
 }
 
 // ScheduleProjectRunsLoop 独立执行放置与租约回收，每次数据库操作共用后台并发门。

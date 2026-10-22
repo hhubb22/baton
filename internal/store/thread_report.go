@@ -24,6 +24,9 @@ func (s *Store) SaveThreadReport(ctx context.Context, src protocol.Source, r pro
 	if r.Type != protocol.BodyThreadReport || !threadID(r.ThreadID) || !threadID(r.EventID) || r.WorkerSeq < 1 || !threadReportKinds[r.Kind] || !utf8.ValidString(r.Content) || strings.ContainsRune(r.Content, 0) || len(r.Content) > 1<<20 || len(r.Reason) > 4096 || strings.ContainsRune(r.Reason, 0) || !threadModel(r.Model) {
 		return ack, threadInvalid()
 	}
+	if r.HistoryUnavailable && r.Kind != "thread.stopped" && r.Kind != "thread.unknown" {
+		return ack, threadInvalid()
+	}
 	raw, err := protocol.MarshalJSON(r)
 	if err != nil {
 		return ack, err
@@ -48,21 +51,9 @@ func (s *Store) SaveThreadReport(ctx context.Context, src protocol.Source, r pro
 		return ack, err
 	}
 	var oldHash, saved []byte
-	var hashVersion int16
-	err = tx.QueryRow(ctx, `SELECT payload_hash,ack,payload_hash_version FROM thread_reports WHERE employee_id=$1 AND thread_id=$2 AND event_id=$3`, src.EmployeeID, t.ID, r.EventID).Scan(&oldHash, &saved, &hashVersion)
+	err = tx.QueryRow(ctx, `SELECT payload_hash,ack FROM thread_reports WHERE employee_id=$1 AND thread_id=$2 AND event_id=$3`, src.EmployeeID, t.ID, r.EventID).Scan(&oldHash, &saved)
 	if err == nil {
-		comparisonHash := hash
-		if hashVersion == 1 {
-			// 旧中心解码时忽略 Model，摘要只包含旧协议字段。
-			legacy := r
-			legacy.Model = ""
-			legacyRaw, err := protocol.MarshalJSON(legacy)
-			if err != nil {
-				return ack, err
-			}
-			comparisonHash = sha256.Sum256(legacyRaw)
-		}
-		if string(oldHash) != string(comparisonHash[:]) {
+		if string(oldHash) != string(hash[:]) {
 			return ack, threadConflict()
 		}
 		err = json.Unmarshal(saved, &ack)
@@ -96,7 +87,7 @@ func (s *Store) SaveThreadReport(ctx context.Context, src protocol.Source, r pro
 	if err != nil {
 		return ack, err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO thread_reports(employee_id,thread_id,event_id,worker_seq,payload_hash,ack,payload_hash_version) VALUES($1,$2,$3,$4,$5,$6,2)`, src.EmployeeID, t.ID, r.EventID, r.WorkerSeq, hash[:], saved); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO thread_reports(employee_id,thread_id,event_id,worker_seq,payload_hash,ack) VALUES($1,$2,$3,$4,$5,$6)`, src.EmployeeID, t.ID, r.EventID, r.WorkerSeq, hash[:], saved); err != nil {
 		return ack, err
 	}
 	if err = checkThreadCredentialTime(ctx, tx, src); err != nil {
@@ -150,6 +141,31 @@ func noActiveThreadTurn(ctx context.Context, tx pgx.Tx, id string) error {
 		return threadConflict()
 	}
 	return nil
+}
+
+// endThreadTurnAfterHistoryLoss 结束中心已知的一轮，原 Worker 账本缺失时仍能通知 Project Agent。
+func endThreadTurnAfterHistoryLoss(ctx context.Context, tx pgx.Tx, t Thread) error {
+	var raw []byte
+	err := tx.QueryRow(ctx, `SELECT to_jsonb(v) FROM thread_turns v WHERE employee_id=$1 AND thread_id=$2 AND ended_at IS NULL`, t.EmployeeID, t.ID).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var turn ThreadTurn
+	if err := json.Unmarshal(raw, &turn); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE thread_turns SET ended_at=clock_timestamp(),end_reason='agent_exited' WHERE id=$1`, turn.ID); err != nil {
+		return err
+	}
+	if err := enqueueThreadTurnEnded(ctx, tx, t, turn, "agent_exited"); err != nil {
+		return err
+	}
+	return threadAudit(ctx, tx, t, "turn.ended", "device", t.NodeID, map[string]any{
+		"worker_turn_seq": turn.WorkerTurnSeq, "reason": "agent_exited", "history_unavailable": true,
+	})
 }
 
 func setThreadModel(ctx context.Context, tx pgx.Tx, t *Thread, model string) error {
@@ -322,7 +338,11 @@ func applyThreadReport(ctx context.Context, tx pgx.Tx, t *Thread, r *protocol.Th
 		}
 		return setThreadStatus(ctx, tx, t, status, "")
 	case "thread.stopped", "thread.unknown":
-		if err := noActiveThreadTurn(ctx, tx, t.ID); err != nil {
+		if r.HistoryUnavailable {
+			if err := endThreadTurnAfterHistoryLoss(ctx, tx, *t); err != nil {
+				return err
+			}
+		} else if err := noActiveThreadTurn(ctx, tx, t.ID); err != nil {
 			return err
 		}
 		if r.Kind == "thread.stopped" && t.StopRequestedAt != nil {

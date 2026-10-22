@@ -1,12 +1,14 @@
 package codex
 
 import (
-	"baton/internal/agent/codex/codexreplaytest"
 	"context"
 	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"baton/internal/agent"
+	"baton/internal/agent/codex/codexreplaytest"
 )
 
 func TestTranscriptReplayRecordedEarlyInterrupt(t *testing.T) {
@@ -18,7 +20,7 @@ func TestTranscriptReplayRecordedEarlyInterrupt(t *testing.T) {
 	}
 	home := t.TempDir()
 	f := codexreplaytest.New(t, binary, work, home, tape, "event:turn/started", "event:turn/completed", "process:done")
-	a := New(Config{Directory: work, Home: home, SessionID: "session", ExecutionID: "execution", StatePath: filepath.Join(home, "state.json"), Model: tape.Header.Model, Binary: f.Binary})
+	a := New(Config{Directory: work, Home: home, SessionID: "session", StatePath: filepath.Join(home, "state.json"), Model: tape.Header.Model, Binary: f.Binary})
 	defer a.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -26,7 +28,7 @@ func TestTranscriptReplayRecordedEarlyInterrupt(t *testing.T) {
 		f.Check(t)
 		t.Fatal(err)
 	}
-	if _, err := a.SubmitInput(ctx, `{"description":"early interrupt","generation":1}`); err != nil {
+	if err := a.Send(ctx, "execution:1", "early interrupt", ""); err != nil {
 		f.Check(t)
 		t.Fatal(err)
 	}
@@ -59,7 +61,7 @@ func TestTranscriptReplayRecordedEarlyInterrupt(t *testing.T) {
 	}
 	f.Wait(t, "process:done")
 	for _, out := range a.Drain() {
-		if out.Final != "" {
+		if out.Kind == agent.EventTurnEnded && out.Reason != agent.EndStopped {
 			t.Fatal("中止回合交付了最终结果")
 		}
 	}
@@ -77,14 +79,14 @@ func TestTranscriptReplayEarlyInterrupt(t *testing.T) {
 			}
 			home := t.TempDir()
 			f := codexreplaytest.New(t, binary, work, home, tape, "event:other_completed", "event:turn/completed", "process:done")
-			a := New(Config{Directory: work, Home: home, SessionID: "session", ExecutionID: "execution", StatePath: filepath.Join(home, "state.json"), Model: tape.Header.Model, Binary: f.Binary})
+			a := New(Config{Directory: work, Home: home, SessionID: "session", StatePath: filepath.Join(home, "state.json"), Model: tape.Header.Model, Binary: f.Binary})
 			defer a.Close()
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
 			if err := a.Start(ctx); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := a.SubmitInput(ctx, `{"description":"early interrupt","generation":1}`); err != nil {
+			if err := a.Send(ctx, "execution:1", "early interrupt", ""); err != nil {
 				t.Fatal(err)
 			}
 			stopped, known, err := a.Abort()

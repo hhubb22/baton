@@ -113,7 +113,7 @@ func TestThreadRecordedKiro(t *testing.T) {
 			var events []agent.Event
 			ended := false
 			for !ended {
-				for _, e := range a.DrainEvents() {
+				for _, e := range a.Drain() {
 					events = append(events, e)
 					if e.Kind == agent.EventTurnEnded {
 						ended = true
@@ -160,7 +160,7 @@ func TestThreadRecordedKiro(t *testing.T) {
 			if err := b.Start(ctx); err != nil {
 				t.Fatal(err)
 			}
-			if len(b.DrainEvents()) != 0 {
+			if len(b.Drain()) != 0 {
 				t.Fatal("load replay became a new turn")
 			}
 			b.RestoreIntent("restored", "thread prompt", 0)

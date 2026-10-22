@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"time"
 
 	"baton/internal/agent"
 	"baton/internal/agent/codex"
@@ -33,36 +32,13 @@ func historyResult(req protocol.SessionRequest, page protocol.SessionHistoryPage
 	return result
 }
 
-func (w *workerDB) browserHistory(req protocol.SessionRequest) protocol.SessionResult {
-	w.mu.Lock()
-	adapter, ok := w.adapter.(agent.BrowserHistoryAdapter)
-	w.mu.Unlock()
-	if !ok {
-		return historyResult(req, protocol.SessionHistoryPage{}, agent.ErrHistoryUnread)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	page, err := adapter.ReadBrowserHistory(ctx, req.Cursor, req.Limit)
-	return historyResult(req, page, err)
-}
-
 // storedHistory 只读既有配置和历史，查询不依赖 Worker 的存活状态。
 func (h *Host) storedHistory(ctx context.Context, req protocol.SessionRequest) (protocol.SessionResult, bool) {
 	fail := func(err error) (protocol.SessionResult, bool) {
 		return historyResult(req, protocol.SessionHistoryPage{}, err), true
 	}
-	path, err := LedgerPath(h.DataDir, req.SessionID)
+	path, err := ThreadLedgerPath(h.DataDir, req.SessionID)
 	if err != nil {
-		return fail(err)
-	}
-	threadPath, err := ThreadLedgerPath(h.DataDir, req.SessionID)
-	if err != nil {
-		return fail(err)
-	}
-	thread := false
-	if _, err := os.Stat(threadPath); err == nil {
-		path, thread = threadPath, true
-	} else if !os.IsNotExist(err) {
 		return fail(err)
 	}
 	if _, err := os.Stat(path); err != nil {
@@ -78,10 +54,7 @@ func (h *Host) storedHistory(ctx context.Context, req protocol.SessionRequest) (
 	defer db.Close()
 	db.SetMaxOpenConns(1)
 	var raw, kind string
-	kindQuery, configQuery := `SELECT value FROM meta WHERE key='agent_type'`, `SELECT value FROM meta WHERE key='adapter_config'`
-	if thread {
-		kindQuery, configQuery = `SELECT agent_type FROM thread_meta`, `SELECT adapter_config FROM thread_meta`
-	}
+	kindQuery, configQuery := `SELECT agent_type FROM thread_meta`, `SELECT adapter_config FROM thread_meta`
 	if err := db.QueryRowContext(ctx, kindQuery).Scan(&kind); err != nil {
 		return fail(err)
 	}

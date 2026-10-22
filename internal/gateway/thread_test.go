@@ -16,7 +16,9 @@ func TestThreadReportsAndReceiptsUseControlCapacity(t *testing.T) {
 			t.Fatalf("%s: %s %v", kind, priority, err)
 		}
 	}
-	for _, kind := range []string{protocol.BodyThreadCommand, protocol.BodyThreadReportResult} {
+	for _, kind := range []string{protocol.BodyThreadCommand, protocol.BodyThreadReportResult,
+		"agent.request", "execution.control", "execution.children", "execution.child_ack",
+		"execution.prepare_result", "execution.start_permit", "execution.start_report", "execution.input", "execution.report"} {
 		body, _ := json.Marshal(map[string]string{"type": kind})
 		if _, err := incomingPriority(body); err == nil {
 			t.Fatalf("node sent coordinator message %s", kind)

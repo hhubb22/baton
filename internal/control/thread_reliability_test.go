@@ -12,15 +12,17 @@ import (
 	"baton/internal/store"
 )
 
-func threadControlNode(t *testing.T, h *prepareControl, name string) protocol.Source {
+func threadControlNode(t *testing.T, h *threadControl, name string) protocol.Source {
 	t.Helper()
 	src := h.addNode(name)
-	if _, err := h.repo.SaveRuntimeReport(t.Context(), src, protocol.RuntimeReport{Exec: protocol.RuntimeExec{Shell: "sh"}, Roots: []protocol.RuntimeRoot{{RootID: "dev", Path: "/src"}}}); err != nil {
+	if _, err := h.repo.SaveRuntimeReport(t.Context(), src, protocol.RuntimeReport{Exec: protocol.RuntimeExec{Shell: "sh"}, Roots: []protocol.RuntimeRoot{{RootID: "dev", Path: "/src"}}, Agents: []protocol.RuntimeAgent{
+		{AgentType: "pi", Version: "1.3.0", Status: "available", Capabilities: protocol.ThreadCapabilities{Create: true, Queue: true, Steer: true, Stop: true, Resume: true, SwitchModel: true}},
+	}}); err != nil {
 		t.Fatal(err)
 	}
 	return src
 }
-func threadControlCreate(t *testing.T, h *prepareControl, src protocol.Source, key string) store.Thread {
+func threadControlCreate(t *testing.T, h *threadControl, src protocol.Source, key string) store.Thread {
 	t.Helper()
 	v, _, err := h.repo.CreateThread(t.Context(), h.owner, store.CreateThreadInput{ClientThreadID: key, NodeID: src.NodeID, AgentType: "pi", WorkingDirectory: "/src/repo", Message: store.ThreadMessageInput{ClientMessageID: key + ":first", Content: "hello"}})
 	if err != nil {
@@ -29,7 +31,7 @@ func threadControlCreate(t *testing.T, h *prepareControl, src protocol.Source, k
 	return v
 }
 func TestThreadDispatchSlowNodeAndLateAck(t *testing.T) {
-	h := newPrepareControl(t)
+	h := newThreadControl(t)
 	slow := threadControlNode(t, h, "slow")
 	fast := threadControlNode(t, h, "fast")
 	for i := range 20 {
@@ -37,7 +39,7 @@ func TestThreadDispatchSlowNodeAndLateAck(t *testing.T) {
 	}
 	v := threadControlCreate(t, h, fast, "fast")
 	var sent []protocol.Envelope
-	h.server.SetSender(prepareSender{send: func(ctx context.Context, nodeID string, env protocol.Envelope) error {
+	h.server.SetSender(threadSender{send: func(ctx context.Context, nodeID string, env protocol.Envelope) error {
 		var attempts int
 		if err := h.pool.QueryRow(ctx, `SELECT attempts FROM thread_outbox WHERE message_id=$1`, env.MessageID).Scan(&attempts); err != nil {
 			return err
@@ -81,7 +83,7 @@ func TestThreadDispatchSlowNodeAndLateAck(t *testing.T) {
 		t.Fatal(ack, err)
 	}
 	var actions []string
-	h.server.SetSender(prepareSender{send: func(_ context.Context, nodeID string, env protocol.Envelope) error {
+	h.server.SetSender(threadSender{send: func(_ context.Context, nodeID string, env protocol.Envelope) error {
 		if nodeID == fast.NodeID {
 			var cmd protocol.ThreadCommand
 			_ = json.Unmarshal(env.Body, &cmd)
@@ -98,7 +100,7 @@ func TestThreadDispatchSlowNodeAndLateAck(t *testing.T) {
 }
 
 func TestThreadControlReportsOfflineAndMultiTurn(t *testing.T) {
-	h := newPrepareControl(t)
+	h := newThreadControl(t)
 	src := threadControlNode(t, h, "Desk")
 	if err := h.repo.MarkOffline(t.Context(), src.NodeID, src.ConnID, time.Now()); err != nil {
 		t.Fatal(err)
@@ -106,7 +108,7 @@ func TestThreadControlReportsOfflineAndMultiTurn(t *testing.T) {
 	v := threadControlCreate(t, h, src, "multi")
 	var commands []protocol.ThreadCommand
 	var acks []protocol.ThreadReportResult
-	h.server.SetSender(prepareSender{send: func(_ context.Context, _ string, env protocol.Envelope) error {
+	h.server.SetSender(threadSender{send: func(_ context.Context, _ string, env protocol.Envelope) error {
 		var head struct {
 			Type string `json:"type"`
 		}

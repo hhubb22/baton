@@ -56,13 +56,13 @@ type Event struct {
 	Raw             json.RawMessage `json:"raw,omitempty"`
 }
 
-// ThreadAdapter defines the Thread/Turn native Agent contract (Baton TECH "Agent 适配").
-type ThreadAdapter interface {
+// Adapter defines the Thread/Turn native Agent contract (Baton TECH "Agent 适配").
+type Adapter interface {
 	Start(ctx context.Context) error                        // 新建或恢复原生会话
 	Send(ctx context.Context, id, text, model string) error // 开启新 Turn；model 为空时沿用当前模型
 	Steer(ctx context.Context, id, text string) error       // 加入当前 Turn；不支持时返回 ErrUnsupported
 	Abort() (stopped, outcomeKnown bool, err error)         // 停止当前 Turn
-	DrainEvents() []Event                                   // 非阻塞取回 TurnStarted、Reply、TurnEnded、Exited、Uncertain
+	Drain() []Event                                         // 非阻塞取回 TurnStarted、Reply、TurnEnded、Exited、Uncertain
 	Sent(id string) (bool, error)                           // 在原生历史里查找这条消息
 	ReadHistory(ctx context.Context, cursor string) (HistoryPage, error)
 	Capabilities() Capabilities // steer、resume、switch_model
@@ -81,50 +81,20 @@ type SessionIDProvider interface {
 	NativeSessionID() string
 }
 
-type Output struct {
-	WaitingForChildren bool
-	Progress           []string
-	Final              string
-	Exited             bool // The Agent has settled, not merely exited its OS process.
-	Uncertain          bool
-	Raw                json.RawMessage // Node-local native event; never an ExecutionReport.
-}
-
 type Config struct {
-	DataDir     string
-	Directory   string
-	SessionDir  string
-	SessionID   string
-	ExecutionID string
-	StatePath   string
-	Home        string
-	Model       string
-	Binary      string
-	Env         []string `json:"-"`
-	Restore     bool
-}
-
-// Adapter never retries task input. Drain is nonblocking; control responses are
-// not completion evidence. HistoryContains must inspect persisted native history.
-// ReadHistory returns bounded, node-local pages, never Relay report payloads.
-type Adapter interface {
-	Start(context.Context) error
-	SubmitInput(context.Context, string) (Output, error)
-	DeliverResult(context.Context, string, string) (Output, error)
-	HistoryContains(deliveryID string, queried bool) (bool, error)
-	ReadHistory(context.Context, string) (HistoryPage, error)
-	Drain() []Output
-	Abort() (stopped, outcomeKnown bool, err error)
-	Close() error
+	DataDir    string
+	Directory  string
+	SessionDir string
+	SessionID  string
+	StatePath  string
+	Home       string
+	Model      string
+	Binary     string
+	Env        []string `json:"-"`
+	Restore    bool
 }
 
 type HistoryPage struct {
 	Data       json.RawMessage
 	NextCursor string
-}
-
-// StopObserver retains stop evidence after Abort returns, including on timeout.
-// Process exit alone is not settlement; observation must not retry task input.
-type StopObserver interface {
-	StopStatus() (stopped, outcomeKnown bool)
 }

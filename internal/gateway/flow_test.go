@@ -17,23 +17,24 @@ import (
 	"baton/internal/node"
 	"baton/internal/protocol"
 	"baton/internal/store"
-	"baton/internal/task"
 	"github.com/coder/websocket"
 )
 
-func TestSessionControlReceiptsSurviveExhaustedOutputBudget(t *testing.T) {
+func TestThreadReportsSurviveExhaustedOutputBudget(t *testing.T) {
 	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	pool := dbtest.Open(t)
 	repo := store.New(pool)
 	signer, err := node.GenerateSigner()
 	if err != nil {
 		t.Fatal(err)
 	}
-	emp, err := admin.CreateLocal(context.Background(), pool, "alice", "Alice", "gateway-test-password")
+	emp, err := admin.CreateLocal(ctx, pool, "alice", "Alice", "gateway-test-password")
 	if err != nil {
 		t.Fatal(err)
 	}
-	ident := registerNode(t, context.Background(), repo, signer, emp.ID, "Desk")
+	ident := registerNode(t, ctx, repo, signer, emp.ID, "Desk")
 	budget := protocol.NewBudget(protocol.MaxOutputCacheBytes)
 	ctrl, err := control.New(repo, signer, nil, budget)
 	if err != nil {
@@ -44,68 +45,71 @@ func TestSessionControlReceiptsSurviveExhaustedOutputBudget(t *testing.T) {
 	srv := httptest.NewTLSServer(gw)
 	defer srv.Close()
 	defer gw.Close()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	go gw.Run(ctx)
 	roots := x509.NewCertPool()
 	roots.AddCert(srv.Certificate())
-	peer, result := dialPeer(t, strings.TrimPrefix(srv.URL, "https://"), ident.Credential.Token, newID(t), roots)
+	inc := newID(t)
+	peer, result := dialPeer(t, strings.TrimPrefix(srv.URL, "https://"), ident.Credential.Token, inc, roots)
 	if !result.OK {
 		t.Fatal(result)
 	}
 	defer peer.ws.CloseNow()
-	sendEnvelope(t, peer.ws, map[string]any{"version": 1, "message_id": newID(t), "body": map[string]any{"type": "node.sync", "display_name": "Desk", "system": "linux", "capabilities": []string{"start"}}})
+	sendEnvelope(t, peer.ws, map[string]any{"version": 1, "message_id": newID(t), "body": map[string]any{"type": "node.sync", "display_name": "Desk", "system": "linux", "capabilities": []string{"pi"}}})
 	peer.next(t)
+	src := protocol.Source{Kind: protocol.SourceNode, NodeID: ident.NodeID, EmployeeID: emp.ID, CredentialID: ident.Credential.ID, Incarnation: inc}
+	if err := pool.QueryRow(ctx, "SELECT conn_id FROM node_presence WHERE node_id=$1", ident.NodeID).Scan(&src.ConnID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SaveRuntimeReport(ctx, src, protocol.RuntimeReport{Exec: protocol.RuntimeExec{Shell: "sh"}, Roots: []protocol.RuntimeRoot{{RootID: "dev", Path: "/src"}}, Agents: []protocol.RuntimeAgent{{AgentType: "pi", Version: "1.3.0", Status: "available", Capabilities: protocol.ThreadCapabilities{Create: true, Queue: true, Stop: true}}}}); err != nil {
+		t.Fatal(err)
+	}
+	mid := newID(t)
+	thread, _, err := repo.CreateThread(ctx, emp.ID, store.CreateThreadInput{ClientThreadID: newID(t), NodeID: ident.NodeID, AgentType: "pi", WorkingDirectory: "/src", Message: store.ThreadMessageInput{ClientMessageID: mid, Content: "hello"}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !budget.Reserve(protocol.MaxOutputCacheBytes) {
 		t.Fatal("无法占满输出预算")
 	}
 	defer budget.Release(protocol.MaxOutputCacheBytes)
-	for _, action := range []string{"input", "input_status"} {
-		request := protocol.SessionRequest{OperationID: newID(t), SessionID: newID(t), Action: action, Text: "一次输入"}
-		done := make(chan error, 1)
-		go func() {
-			res, err := ctrl.SessionRequest(ctx, emp.ID, ident.NodeID, request)
-			if err == nil && !res.OK {
-				err = gateway.ErrUnavailable
-			}
-			done <- err
-		}()
+	for i, kind := range []string{"thread.opened", "turn.started", "message.sent", "reply", "turn.ended"} {
+		r := protocol.ThreadReport{Type: protocol.BodyThreadReport, ThreadID: thread.ID, EventID: newID(t), WorkerSeq: int64(i + 1), Kind: kind, QueueEmpty: true}
+		switch kind {
+		case "thread.opened":
+			r.StorageGeneration, r.NativeSessionID = "generation", "native"
+		case "turn.started", "message.sent":
+			r.WorkerTurnSeq, r.ClientMessageID = 1, mid
+		case "reply":
+			r.WorkerTurnSeq, r.Content = 1, "saved reply"
+		case "turn.ended":
+			r.WorkerTurnSeq, r.Reason = 1, "completed"
+		}
+		messageID := newID(t)
+		sendEnvelope(t, peer.ws, map[string]any{"version": 1, "message_id": messageID, "priority": "output", "body": r})
 		frame := peer.next(t)
 		var env protocol.Envelope
-		if json.Unmarshal(frame.Envelope, &env) != nil {
-			t.Fatal("无法解析 Session 请求")
-		}
-		var req protocol.SessionRequest
-		_ = json.Unmarshal(env.Body, &req)
-		if req.OperationID != request.OperationID || req.Action != action {
-			t.Fatal("控制请求未送达原节点")
-		}
-		// 节点自报 output，服务端仍根据已登记的请求关联保留控制回执额度。
-		sendEnvelope(t, peer.ws, map[string]any{"version": 1, "message_id": newID(t), "priority": "output", "correlation_id": env.MessageID, "body": protocol.SessionResult{Type: protocol.BodySessionResult, OperationID: req.OperationID, SessionID: req.SessionID, OK: true}})
-		select {
-		case err := <-done:
-			if err != nil {
-				t.Fatal(err)
-			}
-		case <-time.After(3 * time.Second):
-			t.Fatal("输出洪泛阻断了控制回执")
+		var ack protocol.ThreadReportResult
+		if json.Unmarshal(frame.Envelope, &env) != nil || json.Unmarshal(env.Body, &ack) != nil || !ack.OK || ack.EventID != r.EventID || env.CorrelationID != messageID {
+			t.Fatalf("输出预算阻断报告 %s: %+v %+v", kind, env, ack)
 		}
 	}
-	if _, err := ctrl.SessionRequest(ctx, emp.ID, ident.NodeID, protocol.SessionRequest{Action: "output"}); err == nil {
-		t.Fatal("输出预算耗尽仍接受输出查询")
+	view, err := repo.GetThread(ctx, emp.ID, thread.ID)
+	if err != nil || view.Status != "idle" || view.LastWorkerSeq != 5 {
+		t.Fatal(view, err)
 	}
 }
 
-func TestOutputFloodLeavesOtherNodeTaskAndCancelResponsive(t *testing.T) {
+func TestOutputFloodLeavesOtherNodeThreadAndStopResponsive(t *testing.T) {
 	t.Parallel()
-	st := startPrepareStack(t, map[string]string{"BATON_TEST_HOLD_START": "0", "BATON_TEST_ABORT_SCRIPT": "confirmed"})
+	e := startProjectExecStack(t)
+	st := e.stack
 	attacker := registerThrough(t, st.client, st.base, st.csrf, "Flood")
 	peer, result := dialPeer(t, st.nodeAddr, attacker.Credential.Token, newID(t), st.roots)
 	if !result.OK {
 		t.Fatal(result)
 	}
 	defer peer.ws.CloseNow()
-	sendEnvelope(t, peer.ws, map[string]any{"version": 1, "message_id": newID(t), "body": map[string]any{"type": "node.sync", "display_name": "Flood", "system": "linux", "capabilities": []string{"start"}}})
+	sendEnvelope(t, peer.ws, map[string]any{"version": 1, "message_id": newID(t), "body": map[string]any{"type": "node.sync", "display_name": "Flood", "system": "linux", "capabilities": []string{"pi"}}})
 	peer.next(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -143,15 +147,16 @@ func TestOutputFloodLeavesOtherNodeTaskAndCancelResponsive(t *testing.T) {
 		}
 	}()
 	start := time.Now()
-	created := acceptTask(t, st, "flood-other-node")
-	waitTaskStatus(t, st, created.TaskID, task.StatusRunning)
+	threadID, _ := e.start(t, "flood-other-node", execGatedCommand(), 0)
+	e.waitCommandStarted(t)
+	waitThreadStatus(t, st, threadID, "running")
 	var reply any
-	if code := postJSON(t, st.client, st.base+"/api/v1/tasks/"+created.TaskID+"/cancel", map[string]any{}, st.csrf, &reply); code != 200 {
+	if code := postJSON(t, st.client, st.base+"/api/v1/threads/"+threadID+"/stop", map[string]any{}, st.csrf, &reply); code != 202 {
 		t.Fatal(code)
 	}
-	waitTaskStatus(t, st, created.TaskID, task.StatusCancelled)
+	waitThreadStatus(t, st, threadID, "stopped")
 	if time.Since(start) > 8*time.Second {
-		t.Fatal("另一节点任务与取消被输出阻塞")
+		t.Fatal("另一节点 Thread 消息与停止被输出阻塞")
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for limited.Load() == 0 && time.Now().Before(deadline) {
@@ -160,14 +165,12 @@ func TestOutputFloodLeavesOtherNodeTaskAndCancelResponsive(t *testing.T) {
 	if sent.Load() < 100 || limited.Load() == 0 {
 		t.Fatalf("未形成超额输出: sent=%d limited=%d", sent.Load(), limited.Load())
 	}
-	t.Logf("洪泛消息=%d，限流回执=%d，另一节点派发与取消耗时=%s", sent.Load(), limited.Load(), time.Since(start))
+	t.Logf("洪泛消息=%d，限流回执=%d，另一节点消息与停止耗时=%s", sent.Load(), limited.Load(), time.Since(start))
 	cancel()
 	peer.ws.CloseNow()
 	<-written
 	<-stopped
-	if executorCount(t, st, "input") != 1 {
-		t.Fatal("输出洪泛导致任务重复输入")
-	}
+	e.assertOneExecution(t, threadID)
 }
 
 func mustJSON(t *testing.T, value any) json.RawMessage {
@@ -255,7 +258,7 @@ func TestRevocationBetweenAuthenticationAndRegistration(t *testing.T) {
 
 func TestPendingRevocationRecoversWithoutRestart(t *testing.T) {
 	t.Parallel()
-	st := startPrepareStack(t, nil)
+	st := startThreadStack(t, nil)
 	repo := store.New(st.pool)
 	if _, err := repo.RevokeNode(context.Background(), st.employeeID, st.ident.NodeID); err != nil {
 		t.Fatal(err)
@@ -267,10 +270,10 @@ func TestPendingRevocationRecoversWithoutRestart(t *testing.T) {
 	}
 }
 
-func TestLegacyClientRetriesTemporaryDatabaseAuthenticationFailure(t *testing.T) {
+func TestClientRetriesTemporaryDatabaseAuthenticationFailure(t *testing.T) {
 	pg := startPrivatePostgres(t)
 	t.Setenv("BATON_TEST_DATABASE_URL", pg.url)
-	st := startPrepareStack(t, nil)
+	st := startThreadStack(t, nil)
 	st.batond.stop()
 	proxy := newProxy(t, st.nodeAddr)
 	args := append([]string(nil), st.batondArgs...)
@@ -287,12 +290,12 @@ func TestLegacyClientRetriesTemporaryDatabaseAuthenticationFailure(t *testing.T)
 	proxy.drop()
 	time.Sleep(1500 * time.Millisecond)
 	if strings.Contains(st.batond.out.String(), "需要重新认证") {
-		t.Fatal("数据库暂时不可用使旧客户端永久退出")
+		t.Fatal("数据库暂时不可用使客户端永久退出")
 	}
 	pg.start(t)
 	waitCount(t, st.batond, "event=connected", 2)
 	waitNode(t, st.client, st.base, st.ident.NodeID, true, true, true)
 	if strings.Count(st.batond.out.String(), "event=connected") < 2 {
-		t.Fatal("旧客户端没有恢复连接")
+		t.Fatal("客户端没有恢复连接")
 	}
 }

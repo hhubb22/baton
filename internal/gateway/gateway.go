@@ -83,7 +83,6 @@ type connection struct {
 	rateAt                      time.Time
 	controlTokens, outputTokens float64
 	synced                      bool
-	rpcControl                  map[string]time.Time
 	syncIn                      *queue
 }
 
@@ -207,7 +206,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nodeCtx, stop := context.WithCancel(r.Context())
-	nc := &connection{rpcControl: map[string]time.Time{}, source: src, ws: ws, ctx: nodeCtx, cancel: stop,
+	nc := &connection{source: src, ws: ws, ctx: nodeCtx, cancel: stop,
 		syncIn: newQueue(2, protocol.MaxQueueBytes), in: newQueue(protocol.MaxQueueMessages, protocol.MaxQueueBytes), output: newQueue(MaxOutputMessages, MaxOutputBytes),
 		out: newQueue(protocol.MaxQueueMessages, protocol.MaxQueueBytes), outOutput: newQueue(MaxOutputMessages, MaxOutputBytes), local: make(chan []byte, 8), last: time.Now(), rateAt: time.Now(), controlTokens: 64, outputTokens: 128}
 	nc.output.budget = g.budget
@@ -302,16 +301,6 @@ func (g *Gateway) readNode(nc *connection) {
 			g.localError(nc, protocol.CodeInvalidMessage, env.MessageID)
 			continue
 		}
-		g.mu.Lock()
-		if until, known := nc.rpcControl[env.CorrelationID]; known && until.After(time.Now()) {
-			priority = protocol.PriorityControl
-		}
-		for id, until := range nc.rpcControl {
-			if until.Before(time.Now()) {
-				delete(nc.rpcControl, id)
-			}
-		}
-		g.mu.Unlock()
 		env.Priority = priority
 		raw, err = protocol.MarshalJSON(env)
 		if err != nil {
@@ -348,9 +337,6 @@ func (g *Gateway) readNode(nc *connection) {
 			g.localError(nc, protocol.CodeOf(err), env.MessageID)
 			continue
 		}
-		g.mu.Lock()
-		delete(nc.rpcControl, env.CorrelationID)
-		g.mu.Unlock()
 		g.wakeUp()
 	}
 }
@@ -366,7 +352,7 @@ func incomingPriority(body json.RawMessage) (string, error) {
 	switch head.Type {
 	case protocol.BodyRuntimeReport, protocol.BodyProjectRuntimeRequest:
 		return protocol.PriorityControl, nil
-	case "node.sync", protocol.BodyThreadCommandResult, protocol.BodyThreadReport, protocol.BodyAgentRequest, protocol.BodyExecutionControl, protocol.BodyChildDeliveries, protocol.BodyChildDeliveryAck, protocol.BodyPrepareResult, protocol.BodyStartPermit, protocol.BodyStartReport, protocol.BodyExecutionInput, protocol.BodyExecutionReport, protocol.BodyFileResult:
+	case "node.sync", protocol.BodyThreadCommandResult, protocol.BodyThreadReport, protocol.BodyFileResult:
 		return protocol.PriorityControl, nil
 	case protocol.BodySessionResult:
 		return protocol.PriorityOutput, nil
@@ -510,9 +496,8 @@ func (g *Gateway) Send(ctx context.Context, nodeID, connID string, env protocol.
 		return ErrUnavailable
 	}
 	var head struct {
-		Type   string `json:"type"`
-		OK     bool   `json:"ok"`
-		Action string `json:"action"`
+		Type string `json:"type"`
+		OK   bool   `json:"ok"`
 	}
 	if json.Unmarshal(env.Body, &head) != nil {
 		return protocol.ErrInvalidMessage
@@ -523,23 +508,8 @@ func (g *Gateway) Send(ctx context.Context, nodeID, connID string, env protocol.
 	if !nc.synced && head.Type != "node.sync_result" {
 		return ErrUnavailable
 	}
-	if head.Type == protocol.BodySessionRequest && (head.Action == "output" || head.Action == "history") {
-		return nc.outOutput.Push(raw)
-	}
 	if head.Type == protocol.BodySessionRequest {
-		for id, until := range nc.rpcControl {
-			if until.Before(time.Now()) {
-				delete(nc.rpcControl, id)
-			}
-		}
-		if len(nc.rpcControl) >= 128 {
-			return protocol.ErrQueueFull
-		}
-		if err := nc.out.Push(raw); err != nil {
-			return err
-		}
-		nc.rpcControl[env.MessageID] = time.Now().Add(15 * time.Second)
-		return nil
+		return nc.outOutput.Push(raw)
 	}
 	return nc.out.Push(raw)
 }

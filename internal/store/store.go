@@ -1,4 +1,4 @@
-// Package store 把员工、登录会话、节点和任务接受记录写入 PostgreSQL。口令与凭据明文不进入数据库。
+// Package store 把员工、登录会话、节点、Thread 和 Project写入 PostgreSQL。口令与凭据明文不进入数据库。
 package store
 
 import (
@@ -43,8 +43,6 @@ type Store struct {
 	projectAgentLeaseSeconds int
 	mu                       sync.Mutex
 	beforeCommit             func(context.Context) error
-	beforeStartCommit        func(context.Context) error
-	beforeCancelCommit       func(context.Context) error
 }
 
 var _ identity.Directory = (*Store)(nil)

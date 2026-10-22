@@ -36,12 +36,10 @@ func startProjectExecStack(t *testing.T) *projectExecProbe {
 	if err := os.WriteFile(p.commands, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	p.stack = startProjectPrepareStack(t, map[string]string{
+	p.stack = startProjectStack(t, map[string]string{
 		"PATH":                                dir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"BATON_TEST_PROJECT_RUNTIME_COMMANDS": p.commands,
 		"BATON_TEST_PROJECT_RUNTIME_LOG":      p.log,
-		"BATON_AGENT_DRIVER":                  "native",
-		"BATON_TEST_HOLD_START":               "0",
 	})
 	waitRuntimeReport(t, p.stack, func(r protocol.RuntimeReport) bool { return r.ProjectRuntime != nil })
 	rawRoot := t.TempDir()
@@ -177,7 +175,7 @@ func (e *projectExecProbe) assertOneExecution(t *testing.T, threadID string) {
 	}
 }
 
-func waitThreadStatus(t *testing.T, st *prepareStack, threadID, want string) {
+func waitThreadStatus(t *testing.T, st *processStack, threadID, want string) {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	var got string

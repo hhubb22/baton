@@ -176,25 +176,3 @@ func (a *Adapter) ReadHistory(ctx context.Context, cursor string) (agent.History
 	raw, err := json.Marshal(items)
 	return agent.HistoryPage{Data: raw, NextCursor: next}, err
 }
-
-func (a *Adapter) HistoryContains(deliveryID string, queried bool) (bool, error) {
-	found := false
-	err := a.walkHistory(func(m message) {
-		role := "user"
-		if queried {
-			role = "toolResult"
-		}
-		if m.Role != role || (queried && (m.ToolName != "bash" || m.IsError)) {
-			return
-		}
-		for _, line := range strings.Split(textContent(m.Content), "\n") {
-			var envelope struct {
-				DeliveryID string `json:"delivery_id"`
-			}
-			if json.Unmarshal([]byte(line), &envelope) == nil && envelope.DeliveryID == deliveryID {
-				found = true
-			}
-		}
-	})
-	return found, err
-}

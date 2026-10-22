@@ -16,12 +16,13 @@ import (
 
 	"baton/internal/agent"
 	"baton/internal/privatefile"
+
 	"github.com/sourcegraph/jsonrpc2"
 )
 
 const Version = "0.163.0"
 
-// 已有录制与原生历史保留创建时的版本；兼容性仅限核对过官方契约的版本。
+// 已核对官方契约并保留录制的上游 CLI 版本。
 func supportedVersion(version string) bool { return version == Version || version == "0.162.1" }
 
 var (
@@ -39,15 +40,6 @@ type Capabilities struct {
 	Start, Input, Interrupt, Resume, History bool
 }
 
-// Event is the pinned native protocol evidence used by contract/real probes.
-// Worker lifecycle consumers use agent.Adapter.Drain instead.
-type Event struct {
-	ThreadID, TurnID            string
-	Raw                         json.RawMessage
-	Final, ConfirmedInput       string
-	Stopped, Settled, Uncertain bool
-}
-
 type State struct {
 	HistoryPath string   `json:"history_path,omitempty"`
 	HistoryRoot string   `json:"history_root,omitempty"`
@@ -61,7 +53,6 @@ type State struct {
 	SteerID     string   `json:"steer_id"`
 	Operations  []string `json:"operations"`
 	Model       string   `json:"model,omitempty"`
-	ThreadMode  bool     `json:"thread_mode,omitempty"`
 }
 
 type turn struct {
@@ -86,7 +77,6 @@ type Adapter struct {
 	final              string
 	conn               *jsonrpc2.Conn
 	processDone        chan struct{}
-	events             chan Event
 	stopped            bool
 	closed             chan struct{}
 	closeOnce          sync.Once
@@ -106,9 +96,7 @@ type notification struct {
 }
 
 var _ agent.Adapter = (*Adapter)(nil)
-var _ agent.ThreadAdapter = (*Adapter)(nil)
 var _ agent.SessionIDProvider = (*Adapter)(nil)
-var _ agent.StopObserver = (*Adapter)(nil)
 
 func New(c Config) *Adapter {
 	if directory, err := filepath.EvalSymlinks(c.Directory); err == nil {
@@ -120,7 +108,7 @@ func New(c Config) *Adapter {
 	if c.Model == "" && !c.Restore {
 		c.Model = os.Getenv("BATON_CODEX_MODEL")
 	}
-	a := &Adapter{config: c, cliVersion: Version, events: make(chan Event, 128), closed: make(chan struct{}), inbox: make(chan notification, 128), liveInbox: make(chan notification, 32)}
+	a := &Adapter{config: c, cliVersion: Version, closed: make(chan struct{}), inbox: make(chan notification, 128), liveInbox: make(chan notification, 32)}
 	go func() {
 		for {
 			select {
@@ -212,7 +200,7 @@ func (a *Adapter) connect(ctx context.Context) error {
 			return
 		default:
 		}
-		a.emit(Event{Uncertain: true})
+		a.emitThread(agent.Event{Kind: agent.EventUncertain})
 	}()
 	var result struct {
 		UserAgent string `json:"userAgent"`
@@ -372,9 +360,7 @@ func (a *Adapter) Attach(ctx context.Context) error {
 	if a.config.Model != "" {
 		p["model"] = a.config.Model
 	}
-	if s.ThreadMode {
-		p["developerInstructions"] = threadInstructions(a.config.Directory)
-	}
+	p["developerInstructions"] = threadInstructions(a.config.Directory)
 	if err := a.call(ctx, "thread/resume", p, &resumed); err != nil {
 		return err
 	}
@@ -432,18 +418,7 @@ func (a *Adapter) Attach(ctx context.Context) error {
 				return ErrUncertain
 			}
 		}
-		if original.Status == "completed" && !s.ThreadMode {
-			found := false
-			for _, raw := range original.Items {
-				var item struct{ Type, Text, Phase string }
-				if json.Unmarshal(raw, &item) == nil && item.Type == "agentMessage" && item.Phase != "commentary" && item.Text != "" {
-					found = true
-				}
-			}
-			if !found {
-				return ErrHistoryMissing
-			}
-		}
+
 		raw, _ := json.Marshal(map[string]any{"threadId": s.ThreadID, "turn": original})
 		a.notification("turn/completed", raw)
 	}
@@ -454,11 +429,7 @@ func textInput(text string) []map[string]any {
 	return []map[string]any{{"type": "text", "text": text, "text_elements": []any{}}}
 }
 
-func (a *Adapter) StartTask(ctx context.Context, operationID, text string) error {
-	return a.startTurn(ctx, operationID, text, "", false)
-}
-
-func (a *Adapter) startTurn(ctx context.Context, operationID, text, model string, threadMode bool) error {
+func (a *Adapter) startTurn(ctx context.Context, operationID, text, model string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.active {
@@ -476,7 +447,6 @@ func (a *Adapter) startTurn(ctx context.Context, operationID, text, model string
 	previousState := a.state
 	previousStarted, previousEnded, previousReplies := a.threadStarted, a.threadEnded, a.replyItems
 	a.state.Pending = true
-	a.state.ThreadMode = threadMode
 	a.threadStarted, a.threadEnded = false, false
 	a.replyItems = nil
 	a.state.OperationID, a.state.TurnID = operationID, ""
@@ -488,9 +458,6 @@ func (a *Adapter) startTurn(ctx context.Context, operationID, text, model string
 		Turn turn `json:"turn"`
 	}
 	p := map[string]any{"threadId": a.state.ThreadID, "input": textInput(text), "clientUserMessageId": operationID}
-	if !threadMode {
-		p["outputSchema"] = ResultSchema()
-	}
 	if model == "" {
 		model = a.config.Model
 	}
@@ -499,7 +466,7 @@ func (a *Adapter) startTurn(ctx context.Context, operationID, text, model string
 	}
 	if err := a.call(ctx, "turn/start", p, &result); err != nil {
 		var rpcErr *jsonrpc2.Error
-		if threadMode && model != a.config.Model && errors.As(err, &rpcErr) {
+		if model != a.config.Model && errors.As(err, &rpcErr) {
 			a.state = previousState
 			a.threadStarted, a.threadEnded, a.replyItems = previousStarted, previousEnded, previousReplies
 			if saveErr := a.saveLocked(); saveErr != nil {
@@ -507,15 +474,11 @@ func (a *Adapter) startTurn(ctx context.Context, operationID, text, model string
 			}
 			return &agent.ModelSwitchError{Err: err}
 		}
-		if threadMode {
-			a.emitThread(agent.Event{Kind: agent.EventUncertain, NativeSessionID: a.state.ThreadID})
-		}
+		a.emitThread(agent.Event{Kind: agent.EventUncertain, NativeSessionID: a.state.ThreadID})
 		return err
 	}
 	if result.Turn.ID == "" || (result.Turn.Status != "inProgress" && result.Turn.Status != "completed" && result.Turn.Status != "interrupted" && result.Turn.Status != "failed") {
-		if threadMode {
-			a.emitThread(agent.Event{Kind: agent.EventUncertain, NativeSessionID: a.state.ThreadID})
-		}
+		a.emitThread(agent.Event{Kind: agent.EventUncertain, NativeSessionID: a.state.ThreadID})
 		return ErrIncompatible
 	}
 	a.config.Model, a.state.Model = model, model
@@ -555,23 +518,16 @@ func (a *Adapter) SendInput(ctx context.Context, operationID, text string) error
 		TurnID string `json:"turnId"`
 	}
 	if err := a.call(ctx, "turn/steer", map[string]any{"threadId": a.state.ThreadID, "expectedTurnId": a.state.TurnID, "input": textInput(text), "clientUserMessageId": operationID}, &result); err != nil {
-		if a.state.ThreadMode {
-			a.emitThread(agent.Event{Kind: agent.EventUncertain, NativeSessionID: a.state.ThreadID})
-		}
+		a.emitThread(agent.Event{Kind: agent.EventUncertain, NativeSessionID: a.state.ThreadID})
 		return err
 	}
 	if result.TurnID != a.state.TurnID {
-		if a.state.ThreadMode {
-			a.emitThread(agent.Event{Kind: agent.EventUncertain, NativeSessionID: a.state.ThreadID})
-		}
+		a.emitThread(agent.Event{Kind: agent.EventUncertain, NativeSessionID: a.state.ThreadID})
 		return ErrIncompatible
 	}
-	if a.state.ThreadMode {
-		// A successful steer response confirms acceptance; the Worker owns its send ledger.
-		a.state.SteerID = ""
-		return a.saveLocked()
-	}
-	return nil
+	// A successful steer response confirms acceptance.
+	a.state.SteerID = ""
+	return a.saveLocked()
 }
 
 func (a *Adapter) usedLocked(id string) bool {
@@ -615,7 +571,7 @@ func (a *Adapter) Interrupt(ctx context.Context) (bool, bool, error) {
 	return false, false, err
 }
 
-// retryInterruptLocked 只消费一次当前回合的补发意图，不重发任务输入。
+// retryInterruptLocked 只消费一次当前回合的补发意图，不重发消息。
 func (a *Adapter) retryInterruptLocked() {
 	if !a.active || !a.turnStarted || !a.interruptPending {
 		return
@@ -632,7 +588,7 @@ func (a *Adapter) retryInterruptLocked() {
 			}
 			a.mu.Unlock()
 			if matched {
-				a.emit(Event{ThreadID: id, TurnID: tid, Uncertain: true})
+				a.emitThread(agent.Event{Kind: agent.EventUncertain, NativeSessionID: id})
 			}
 		}
 	}()
@@ -668,27 +624,8 @@ func cursorOrNil(s string) any {
 	}
 	return s
 }
-func (a *Adapter) Events() <-chan Event { return a.events }
-func (a *Adapter) Snapshot() State      { a.mu.Lock(); defer a.mu.Unlock(); return a.state }
 
-func (a *Adapter) emit(e Event) {
-	if e.Uncertain {
-		a.emitThread(agent.Event{Kind: agent.EventUncertain, Raw: e.Raw})
-	}
-	select {
-	case a.events <- e:
-	default:
-		select {
-		case <-a.events:
-		default:
-		}
-		select {
-		case a.events <- Event{Uncertain: true}:
-		default:
-		}
-		go a.Close()
-	}
-}
+func (a *Adapter) Snapshot() State { a.mu.Lock(); defer a.mu.Unlock(); return a.state }
 
 func (a *Adapter) handle(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) (any, error) {
 	if !req.Notif {
@@ -713,12 +650,12 @@ func (a *Adapter) handle(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2
 	if req.Params == nil {
 		return nil, nil
 	}
-	// Never hold the reader loop on the caller's StartTask mutex.
+	// Never hold the reader loop on the caller's Send mutex.
 	params := append(json.RawMessage(nil), (*req.Params)...)
 	select {
 	case a.inbox <- notification{req.Method, params}:
 	default:
-		a.emit(Event{Uncertain: true})
+		a.emitThread(agent.Event{Kind: agent.EventUncertain})
 		go a.Close()
 	}
 	return nil, nil
@@ -752,86 +689,7 @@ func (a *Adapter) notification(method string, raw json.RawMessage) {
 	if json.Unmarshal(raw, &p) != nil || a.state.ThreadID == "" || p.ThreadID != a.state.ThreadID {
 		return
 	}
-	if a.state.ThreadMode {
-		a.threadNotificationLocked(method, raw)
-		return
-	}
-	if method == "turn/started" {
-		if a.active && p.Turn.ID == a.state.TurnID && p.Turn.Status == "inProgress" {
-			a.turnStarted = true
-			a.retryInterruptLocked()
-		}
-		return
-	}
-	if method == "item/completed" && p.TurnID != a.state.TurnID {
-		return
-	}
-	e := Event{ThreadID: p.ThreadID, TurnID: p.TurnID, Raw: raw}
-	if method == "item/completed" && p.TurnID == a.state.TurnID && p.Item.Type == "userMessage" && p.Item.ClientID != "" && (p.Item.ClientID == a.state.SteerID || a.usedLocked(p.Item.ClientID)) {
-		e.ConfirmedInput = p.Item.ClientID
-		if p.Item.ClientID == a.state.SteerID {
-			a.state.SteerID = ""
-		}
-		if a.saveLocked() != nil {
-			e.ConfirmedInput = ""
-			e.Uncertain = true
-		}
-	}
-	if method == "item/completed" && p.TurnID == a.state.TurnID && p.Item.Type == "agentMessage" && p.Item.Phase != "commentary" {
-		a.final = p.Item.Text
-	}
-	if method == "turn/completed" {
-		if p.Turn.ID != a.state.TurnID {
-			return
-		}
-		if p.Turn.Status != "completed" && p.Turn.Status != "interrupted" && p.Turn.Status != "failed" {
-			e.Uncertain = true
-		} else {
-			a.active = false
-			a.interruptPending = false
-			a.stopped = true
-			e.Stopped = true
-			a.state.Pending = false
-			if err := a.saveLocked(); err != nil {
-				e.Uncertain = true
-			} else {
-				e.Settled = true
-			}
-		}
-		// Persisted turn items are authoritative, not deltas or process exit.
-		for _, rawItem := range p.Turn.Items {
-			var item struct{ Type, Text, Phase, ClientID string }
-			if json.Unmarshal(rawItem, &item) == nil && item.Type == "userMessage" && item.ClientID != "" && (item.ClientID == a.state.SteerID || a.usedLocked(item.ClientID)) {
-				a.emit(Event{ThreadID: p.ThreadID, TurnID: p.Turn.ID, ConfirmedInput: item.ClientID})
-				if item.ClientID == a.state.SteerID {
-					a.state.SteerID = ""
-				}
-				if a.saveLocked() != nil {
-					e.Uncertain = true
-					e.Settled = false
-				}
-			}
-			if json.Unmarshal(rawItem, &item) == nil && item.Type == "agentMessage" && item.Phase != "commentary" {
-				a.final = item.Text
-			}
-		}
-		e.TurnID = p.Turn.ID
-		if a.state.SteerID != "" {
-			e.Settled = false
-			e.Uncertain = true
-		}
-		if p.Turn.Status == "completed" {
-			e.Final = a.final
-			if e.Final == "" {
-				e.Uncertain = true
-				e.Settled = false
-			}
-		} else {
-			e.Uncertain = true
-			e.Settled = false
-		}
-	}
-	a.emit(e)
+	a.threadNotificationLocked(method, raw)
 }
 
 func (a *Adapter) Close() error {

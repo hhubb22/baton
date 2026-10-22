@@ -238,6 +238,17 @@ func rewriteRoute(raw json.RawMessage, to string) (json.RawMessage, error) {
 	return out, nil
 }
 
+// MessageID 从信封里取出 message_id。解析失败时返回空字符串。
+func MessageID(raw json.RawMessage) string {
+	var env struct {
+		MessageID string `json:"message_id"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return ""
+	}
+	return env.MessageID
+}
+
 func hasControl(s string) bool {
 	for _, r := range s {
 		if r < 0x20 || r == 0x7f {

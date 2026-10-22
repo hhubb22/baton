@@ -23,14 +23,14 @@ func (a *Adapter) NativeSessionID() string {
 }
 
 func (a *Adapter) Send(ctx context.Context, id, text, model string) error {
-	return a.startTurn(ctx, id, text, model, true)
+	return a.startTurn(ctx, id, text, model)
 }
 
 func (a *Adapter) Steer(ctx context.Context, id, text string) error {
 	return a.SendInput(ctx, id, text)
 }
 
-func (a *Adapter) DrainEvents() []agent.Event {
+func (a *Adapter) Drain() []agent.Event {
 	a.threadEventsMu.Lock()
 	defer a.threadEventsMu.Unlock()
 	events := a.threadEvents

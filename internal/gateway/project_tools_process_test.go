@@ -88,7 +88,7 @@ func startProjectThreadToolsStack(t *testing.T) (*projectRuntimeProbe, string) {
 	if err := os.WriteFile(p.commands, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	p.stack = startProjectPrepareStack(t, map[string]string{
+	p.stack = startProjectStack(t, map[string]string{
 		"BATON_PI_BIN":                        piBin,
 		"PATH":                                dir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"BATON_TEST_PROJECT_RUNTIME_COMMANDS": p.commands,

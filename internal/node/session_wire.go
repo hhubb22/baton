@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func handleSessionEnvelope(ctx context.Context, raw []byte, w *wsWriter, host *session.Host, ledger *Ledger) bool {
+func handleSessionEnvelope(ctx context.Context, raw []byte, w *wsWriter, host *session.Host) bool {
 	var frame struct {
 		Envelope protocol.Envelope `json:"envelope"`
 	}
@@ -31,17 +31,11 @@ func handleSessionEnvelope(ctx context.Context, raw []byte, w *wsWriter, host *s
 	go func() {
 		defer func() { <-w.sessionSlots }()
 		result := protocol.SessionResult{Type: protocol.BodySessionResult, OperationID: req.OperationID, SessionID: req.SessionID, Code: "unavailable"}
-		if host != nil {
+		if host != nil && (req.Action == "history" || req.Action == "output") {
 			bounded, cancel := context.WithTimeout(ctx, 12*time.Second)
 			defer cancel()
 			if got, err := host.BrowserRequest(bounded, req); err == nil {
 				result = got
-				if req.Action == "resume" && result.OK && result.State == "idle" && ledger != nil {
-					if err := ledger.releaseSession(req.SessionID, result.ExecutionID); err != nil {
-						result.OK = false
-						result.Code = "unavailable"
-					}
-				}
 			}
 		}
 		id, err := identity.NewUUID()

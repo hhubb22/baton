@@ -79,23 +79,24 @@ var errThreadReportLimit = errors.New("Thread 报告发送额度已用完")
 
 // threadService 使用一个有界入口和一个处理循环，不在 WebSocket 读循环等待 Worker IPC。
 type threadService struct {
-	ledger    *Ledger
-	host      ThreadHost
-	budget    int64
-	caps      []string
-	send      func(context.Context, string, any) error
-	inbox     chan protocol.Envelope
-	ready     chan struct{}
-	synced    atomic.Bool
-	sent      map[string]time.Time
-	tokens    float64
-	refill    time.Time
-	scanAfter string
+	ledger       *Ledger
+	host         ThreadHost
+	budget       int64
+	caps         []string
+	send         func(context.Context, string, any) error
+	inbox        chan protocol.Envelope
+	ready        chan struct{}
+	synced       atomic.Bool
+	sent         map[string]time.Time
+	historyRetry map[string]time.Time
+	tokens       float64
+	refill       time.Time
+	scanAfter    string
 }
 
 func newThreadService(l *Ledger, host ThreadHost, budget int64, caps []string, send func(context.Context, string, any) error) *threadService {
 	return &threadService{ledger: l, host: host, budget: budget, caps: append([]string(nil), caps...), send: send,
-		inbox: make(chan protocol.Envelope, 64), ready: make(chan struct{}, 1), sent: make(map[string]time.Time), tokens: 32, refill: time.Now()}
+		inbox: make(chan protocol.Envelope, 64), ready: make(chan struct{}, 1), sent: make(map[string]time.Time), historyRetry: make(map[string]time.Time), tokens: 32, refill: time.Now()}
 }
 
 func (s *threadService) handle(env protocol.Envelope) bool {
@@ -221,6 +222,13 @@ func (s *threadService) command(ctx context.Context, id string, cmd protocol.Thr
 		return result, err
 	}
 	found := err == nil
+	if found && record.Status == "history_missing" {
+		result.Code = "history_missing"
+		if err := s.ledger.saveThreadReceipt(ctx, id, cmd, result); err != nil {
+			return result, err
+		}
+		return result, nil
+	}
 	if cmd.Action == "open" {
 		if found {
 			if record.AgentType != cmd.AgentType || record.Model != cmd.Model || record.WorkingDirectory != cmd.WorkingDirectory || record.ExecutionTimeoutSeconds != cmd.ExecutionTimeoutSeconds {
@@ -341,24 +349,42 @@ func (s *threadService) agentAvailable(ctx context.Context, agent string) error 
 }
 
 func (s *threadService) pending(ctx context.Context, id string, from int64) ([]protocol.ThreadReport, error) {
-	local, err := s.ledger.nodeThreadPending(ctx, id, from)
-	if err != nil {
-		return nil, err
-	}
 	record, err := s.ledger.Thread(ctx, id)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
-	if err == nil && record.Status == "ready" && s.host != nil {
+	if err == nil && record.Status == "ready" && s.host != nil && !time.Now().Before(s.historyRetry[id]) {
 		worker, err := s.host.ThreadPending(ctx, id, from)
-		if err != nil {
-			return nil, err
+		if errors.Is(err, session.ErrHistoryUnread) {
+			// 每次读取仍受调用期限限制；暂时 I/O 错误不占用报告序号。
+			s.historyRetry[id] = time.Now().Add(time.Second)
+		} else if err != nil {
+			handled, saveErr := s.ledger.threadHistoryFailure(ctx, id, err)
+			if saveErr != nil {
+				return nil, saveErr
+			}
+			if !handled {
+				return nil, err
+			}
+		} else {
+			delete(s.historyRetry, id)
+			if len(worker) > 32 {
+				return nil, errors.New("Worker 报告批次超过上限")
+			}
+			if err := s.ledger.cacheThreadWorkerReports(ctx, id, worker); err != nil {
+				return nil, err
+			}
 		}
-		if len(worker) > 32 {
-			return nil, errors.New("Worker 报告批次超过上限")
-		}
-		local = append(local, worker...)
 	}
+	local, err := s.ledger.nodeThreadPending(ctx, id, from)
+	if err != nil {
+		return nil, err
+	}
+	worker, err := s.ledger.cachedThreadWorkerReports(ctx, id, from)
+	if err != nil {
+		return nil, err
+	}
+	local = append(local, worker...)
 	sort.Slice(local, func(i, j int) bool { return local[i].WorkerSeq < local[j].WorkerSeq })
 	if len(local) > 32 {
 		local = local[:32]
@@ -460,8 +486,17 @@ func (s *threadService) reportResult(ctx context.Context, result protocol.Thread
 		if err != nil {
 			return err
 		}
-		if count == 0 && s.host != nil {
-			return s.host.ThreadAck(ctx, result.ThreadID, result.EventID, result.WorkerSeq)
+		if count == 0 {
+			if _, err := s.ledger.db.ExecContext(ctx, `DELETE FROM thread_worker_reports WHERE thread_id=? AND event_id=? AND worker_seq=?`, result.ThreadID, result.EventID, result.WorkerSeq); err != nil {
+				return err
+			}
+			record, err := s.ledger.Thread(ctx, result.ThreadID)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			if err == nil && record.Status == "ready" && s.host != nil {
+				return s.host.ThreadAck(ctx, result.ThreadID, result.EventID, result.WorkerSeq)
+			}
 		}
 		return nil
 	}

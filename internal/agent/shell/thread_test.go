@@ -25,7 +25,7 @@ func threadEvents(t *testing.T, a *Adapter) []agent.Event {
 	var events []agent.Event
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		for _, e := range a.DrainEvents() {
+		for _, e := range a.Drain() {
 			events = append(events, e)
 			if e.Kind == agent.EventExited {
 				return events
@@ -39,8 +39,6 @@ func threadEvents(t *testing.T, a *Adapter) []agent.Event {
 
 func TestThreadCommandAndRestore(t *testing.T) {
 	a, root := configured(t)
-	// Thread execution has no legacy task execution ID.
-	a.config.ExecutionID = ""
 	if a.Capabilities() != (agent.Capabilities{}) {
 		t.Fatal(a.Capabilities())
 	}
@@ -88,11 +86,11 @@ func TestThreadCommandAndRestore(t *testing.T) {
 	if err := b.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	restored := b.DrainEvents()
+	restored := b.Drain()
 	if len(restored) != 3 || restored[0].Content != reply.Content || restored[1].Reason != agent.EndCompleted {
 		t.Fatal(restored)
 	}
-	if len(b.DrainEvents()) != 0 {
+	if len(b.Drain()) != 0 {
 		t.Fatal("duplicate recovery events")
 	}
 	if sent, err := b.Sent("message-1"); err != nil || !sent {
@@ -109,7 +107,7 @@ func TestThreadCommandAndRestore(t *testing.T) {
 		t.Fatal(err)
 	}
 	var record completionRecord
-	if err := json.Unmarshal(raw, &record); err != nil || record.SchemaVersion != 2 || record.MessageID != "message-1" || record.SessionID != a.config.SessionID {
+	if err := json.Unmarshal(raw, &record); err != nil || record.SchemaVersion != 3 || record.MessageID != "message-1" || record.SessionID != a.config.SessionID {
 		t.Fatal(record, err)
 	}
 	record.SessionID = "33333333-3333-4333-8333-333333333333"
@@ -137,8 +135,8 @@ func TestThreadCompletionWaitsForDurableRecord(t *testing.T) {
 	}
 	<-a.done
 	waitMaintenance(t, a)
-	events := a.DrainEvents()
-	if len(events) != 1 || events[0].Kind != agent.EventTurnStarted {
+	events := a.Drain()
+	if len(events) != 2 || events[0].Kind != agent.EventTurnStarted || events[1].Kind != "" {
 		t.Fatal("unpersisted output published", events)
 	}
 	if sent, err := a.Sent("durable"); sent || err == nil {
@@ -162,7 +160,7 @@ func TestThreadRejectsDisabledExec(t *testing.T) {
 	if err := a.Send(context.Background(), "disabled", "echo forbidden", ""); err == nil {
 		t.Fatal("disabled command accepted")
 	}
-	if len(a.DrainEvents()) != 0 || a.process != nil {
+	if len(a.Drain()) != 0 || a.process != nil {
 		t.Fatal("disabled command started")
 	}
 }
@@ -193,7 +191,7 @@ func TestThreadBusyAbortAndRecovery(t *testing.T) {
 	if err := b.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if events := b.DrainEvents(); len(events) != 3 || events[1].Reason != agent.EndStopped {
+	if events := b.Drain(); len(events) != 3 || events[1].Reason != agent.EndStopped {
 		t.Fatal(events)
 	}
 }
@@ -210,8 +208,8 @@ func TestThreadBinaryAndTruncatedOutputEvents(t *testing.T) {
 			}
 			_, _ = output.Write(raw)
 			a.mu.Lock()
-			a.threadMode, a.messageID = true, "output"
-			a.queueCompletionLocked(formatResult(output.result(0), ""), "exited")
+			a.messageID = "output"
+			a.queueCompletionLocked(output.result(0), "exited")
 			a.mu.Unlock()
 			events := threadEvents(t, a)
 			reply := events[0]

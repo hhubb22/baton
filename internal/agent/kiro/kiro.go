@@ -16,7 +16,7 @@ import (
 
 	"baton/internal/agent"
 	"baton/internal/privatefile"
-	"baton/internal/task"
+
 	"github.com/sourcegraph/jsonrpc2"
 )
 
@@ -27,8 +27,6 @@ var (
 	ErrBusy         = errors.New("Kiro 回合仍在运行")
 	ErrUncertain    = errors.New("Kiro 输入结果未知，拒绝重发")
 )
-
-const instructions = `Baton task protocol: follow the JSON task envelope description, authorization_scope and expected_outputs. Only operate in authorized resources. Return exactly one JSON object without Markdown: {"status":"completed","summary":"...","evidence":[],"evidence_empty_reason":"...","artifacts":[],"artifacts_empty_reason":"...","error":null}. Do not invent evidence. Failed results use status failed and error {"code":"execution_failed","message":"..."}. If waiting for children, return exactly {"baton_waiting_for_children":true}; Baton delivers results in a later message. Finish only after all children are processed.`
 
 type State struct {
 	Version    string   `json:"version"`
@@ -49,23 +47,8 @@ type Adapter struct {
 	processDone                          chan struct{}
 	closed                               bool
 	active, stopped, usedTools, aborting bool
-	final                                string
-	finalOverflow                        bool
-	transitioning                        bool
 	settled                              chan struct{}
-	queryConfirmed                       map[string]bool
-	queryObserved                        map[string]bool
-	queuedFinal                          *agent.Output
-	queuedFinalAt                        time.Time
-	queryIDs                             map[string]bool
-	queryDone                            chan struct{}
-	queryChecking                        bool
-	queryLast                            time.Time
-	queryCtx                             context.Context
-	queryCancel                          context.CancelFunc
-	queryWG                              sync.WaitGroup
 	collecting                           bool
-	threadMode                           bool
 	threadMessageID                      string
 	threadReply                          replyBuffer
 	threadEvents                         []agent.Event
@@ -73,14 +56,11 @@ type Adapter struct {
 	history                              []json.RawMessage
 	historyBytes                         int
 	historyOverflow                      bool
-	outputs                              []agent.Output
 	live                                 agent.LiveBuffer
 }
 
 var _ agent.Adapter = (*Adapter)(nil)
-var _ agent.StopObserver = (*Adapter)(nil)
 var _ agent.LiveAdapter = (*Adapter)(nil)
-var _ agent.InputAdapter = (*Adapter)(nil)
 
 func New(c agent.Config) *Adapter {
 	if dir, err := filepath.EvalSymlinks(c.Directory); err == nil {
@@ -89,8 +69,7 @@ func New(c agent.Config) *Adapter {
 	if c.Binary == "" {
 		c.Binary = "kiro-cli"
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	return &Adapter{config: c, queryCtx: ctx, queryCancel: cancel, queryConfirmed: map[string]bool{}, queryIDs: map[string]bool{}, queryObserved: map[string]bool{}}
+	return &Adapter{config: c}
 }
 
 func (a *Adapter) environment() []string {
@@ -156,16 +135,14 @@ func (a *Adapter) connect(ctx context.Context) error {
 		<-conn.DisconnectNotify()
 		a.mu.Lock()
 		defer a.mu.Unlock()
-		if !a.closed && a.threadMode {
+		if !a.closed {
 			if a.active {
 				a.flushReplyLocked()
 				a.threadEventLocked(agent.Event{Kind: agent.EventUncertain})
 			}
 			a.threadEventLocked(agent.Event{Kind: agent.EventExited})
 		}
-		if !a.closed && a.active {
-			a.emitLocked(agent.Output{Uncertain: true})
-		}
+
 	}()
 	var init struct {
 		ProtocolVersion int `json:"protocolVersion"`
@@ -304,7 +281,7 @@ func (a *Adapter) attach(ctx context.Context) error {
 	}
 	a.mu.Unlock()
 	var result map[string]any
-	// 加载中的回放通知不参与当前任务完成判断。
+	// 加载中的回放通知不形成新 Turn 的回复。
 	if err = a.call(ctx, "session/load", map[string]any{"sessionId": s.NativeID, "cwd": a.config.Directory, "mcpServers": []any{}}, &result); err != nil {
 		return err
 	}
@@ -316,132 +293,6 @@ func (a *Adapter) attach(ctx context.Context) error {
 	return nil
 }
 
-func (a *Adapter) SubmitInput(ctx context.Context, payload string) (agent.Output, error) {
-	var input struct {
-		Description string `json:"description"`
-		Generation  int    `json:"generation"`
-	}
-	if len(payload) > task.ExecutorInputLimit || json.Unmarshal([]byte(payload), &input) != nil || input.Description == "" || input.Generation != 1 || a.config.ExecutionID == "" {
-		return agent.Output{}, errors.New("Kiro 任务输入无效")
-	}
-	return agent.Output{}, a.prompt(ctx, a.config.ExecutionID+":1", instructions+"\n"+payload)
-}
-
-func (a *Adapter) prompt(ctx context.Context, id, text string) error {
-	a.sendMu.Lock()
-	defer a.sendMu.Unlock()
-	return a.promptLocked(ctx, id, text)
-}
-
-func (a *Adapter) promptLocked(ctx context.Context, id, text string) error {
-	a.mu.Lock()
-	if a.active {
-		a.mu.Unlock()
-		return ErrBusy
-	}
-	if a.closed || a.state.NativeID == "" {
-		a.mu.Unlock()
-		return agent.ErrHistoryMissing
-	}
-	if id == "" || a.state.Pending || slices.Contains(a.state.Operations, id) {
-		a.mu.Unlock()
-		return ErrUncertain
-	}
-	a.state.Pending = true
-	a.state.Operations = append(a.state.Operations, id)
-	if err := a.saveLocked(); err != nil {
-		a.mu.Unlock()
-		return err
-	}
-	a.outputs = nil
-	a.queuedFinal = nil
-	a.active, a.stopped, a.aborting, a.final = true, false, false, ""
-	a.finalOverflow = false
-	a.settled = make(chan struct{})
-	settled := a.settled
-	native := a.state.NativeID
-	a.mu.Unlock()
-	// 同步完成写入后才返回，保证随后 cancel 的线序位于 prompt 之后。
-	waiter, err := a.conn.DispatchCall(ctx, "session/prompt", map[string]any{"sessionId": native, "prompt": []map[string]string{{"type": "text", "text": text}}})
-	if err != nil {
-		return ErrUncertain
-	}
-	go func() {
-		defer close(settled)
-		var result struct {
-			StopReason string `json:"stopReason"`
-		}
-		err := waiter.Wait(context.Background(), &result)
-		queriesOK := true
-		if err == nil {
-			queriesOK = a.confirmQueries()
-		}
-		a.mu.Lock()
-		defer a.mu.Unlock()
-		if a.closed {
-			return
-		}
-		a.active = false
-		if err != nil {
-			a.emitLocked(agent.Output{Uncertain: true})
-			return
-		}
-		switch result.StopReason {
-		case "end_turn", "cancelled", "max_tokens", "max_turn_requests", "refusal":
-		default:
-			a.emitLocked(agent.Output{Uncertain: true})
-			return
-		}
-		a.stopped = !a.transitioning
-		a.state.Pending = false
-		if err := a.saveLocked(); err != nil {
-			a.emitLocked(agent.Output{Uncertain: true})
-			return
-		}
-		if a.transitioning {
-			return
-		}
-		out := agent.Output{Exited: true, Uncertain: a.finalOverflow || !queriesOK}
-		if result.StopReason == "end_turn" && !a.aborting && !a.finalOverflow && queriesOK {
-			var waiting struct {
-				Waiting bool `json:"baton_waiting_for_children"`
-			}
-			if json.Unmarshal([]byte(a.final), &waiting) == nil && waiting.Waiting {
-				out.Exited = false
-				out.WaitingForChildren = true
-			} else {
-				out.Final = a.final
-			}
-		}
-		if queriesOK && !a.queriesObservedLocked() {
-			a.queuedFinal = &out
-			a.queuedFinalAt = time.Now()
-		} else {
-			a.emitLocked(out)
-		}
-	}()
-	return nil
-}
-
-func (a *Adapter) emitLocked(out agent.Output) {
-	if len(a.outputs) >= 128 {
-		a.outputs = []agent.Output{{Uncertain: true}}
-		a.live.MarkGap()
-		return
-	}
-	a.outputs = append(a.outputs, out)
-}
-func (a *Adapter) Drain() []agent.Output {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.queuedFinal != nil && time.Since(a.queuedFinalAt) >= 10*time.Second {
-		a.emitLocked(agent.Output{Exited: true, Uncertain: true})
-		a.queuedFinal = nil
-	}
-	out := a.outputs
-	a.outputs = nil
-	return out
-}
 func (a *Adapter) DrainLive() (string, bool) { return a.live.Drain() }
 func (a *Adapter) Snapshot() State {
 	a.mu.Lock()
@@ -449,42 +300,6 @@ func (a *Adapter) Snapshot() State {
 	s := a.state
 	s.Operations = slices.Clone(s.Operations)
 	return s
-}
-
-// Supplement 沿用 Kiro 活动输入的打断语义，先等旧 prompt 结束再发新输入。
-func (a *Adapter) Supplement(ctx context.Context, id, text string) error {
-	a.sendMu.Lock()
-	defer a.sendMu.Unlock()
-	a.mu.Lock()
-	if id == "" || slices.Contains(a.state.Operations, id) || a.closed {
-		a.mu.Unlock()
-		return ErrUncertain
-	}
-	active := a.active
-	if !active {
-		a.mu.Unlock()
-		return a.promptLocked(ctx, id, text)
-	}
-	a.transitioning, a.aborting = true, true
-	settled, native := a.settled, a.state.NativeID
-	a.mu.Unlock()
-	defer func() { a.mu.Lock(); a.transitioning = false; a.mu.Unlock() }()
-	if err := a.conn.Notify(ctx, "session/cancel", map[string]string{"sessionId": native}); err != nil {
-		return ErrUncertain
-	}
-	select {
-	case <-ctx.Done():
-		return ErrUncertain
-	case <-settled:
-	}
-	a.mu.Lock()
-	pending := a.state.Pending
-	a.transitioning = false
-	a.mu.Unlock()
-	if pending {
-		return ErrUncertain
-	}
-	return a.promptLocked(ctx, id, text)
 }
 
 func (a *Adapter) Abort() (bool, bool, error) {
@@ -579,36 +394,16 @@ func (a *Adapter) handle(ctx context.Context, c *jsonrpc2.Conn, r *jsonrpc2.Requ
 	if !a.active {
 		return nil, nil
 	}
-	if a.threadMode {
-		switch p.Update.Kind {
-		case "agent_message_chunk":
-			var content struct{ Type, Text string }
-			if json.Unmarshal(p.Update.Content, &content) == nil && content.Type == "text" {
-				a.live.Append(content.Text)
-				a.threadReply.append(content.Text)
-			}
-		case "tool_call", "tool_call_update":
-			a.flushReplyLocked()
-			a.usedTools = true
-		}
-		return nil, nil
-	}
 	switch p.Update.Kind {
 	case "agent_message_chunk":
 		var content struct{ Type, Text string }
 		if json.Unmarshal(p.Update.Content, &content) == nil && content.Type == "text" {
 			a.live.Append(content.Text)
-			if len(a.final)+len(content.Text) <= task.ExecutorInputLimit {
-				a.final += content.Text
-			} else {
-				a.final = ""
-				a.finalOverflow = true
-				a.emitLocked(agent.Output{Uncertain: true})
-			}
+			a.threadReply.append(content.Text)
 		}
-	case "tool_call":
+	case "tool_call", "tool_call_update":
+		a.flushReplyLocked()
 		a.usedTools = true
-		a.final = ""
 	}
 	return nil, nil
 }
@@ -620,13 +415,11 @@ func (a *Adapter) Close() error {
 		return nil
 	}
 	a.closed = true
-	a.queryCancel()
 	conn, done := a.conn, a.processDone
 	a.mu.Unlock()
 	if conn != nil {
 		_ = conn.Close()
 	}
-	a.queryWG.Wait()
 	if done != nil {
 		select {
 		case <-done:

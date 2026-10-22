@@ -263,9 +263,6 @@ func buildBins(t *testing.T) (string, string) {
 		}
 		builtCoord = filepath.Join(out, "coordinator"+suffix)
 		builtBatond = filepath.Join(out, "batond"+suffix)
-		if legacy := os.Getenv("BATON_TEST_LEGACY_BATOND"); legacy != "" {
-			builtBatond = legacy
-		}
 	})
 	if buildErr != nil {
 		t.Fatal(buildErr)
@@ -470,7 +467,7 @@ func registerThrough(t *testing.T, client *http.Client, base, csrf, name string)
 		"display_name":     name,
 		"system":           "linux",
 		"role":             "pc",
-		"capabilities":     []string{"start"},
+		"capabilities":     []string{"pi"},
 	}, "", &ident)
 	if code != http.StatusOK || ident.NodeID == "" || ident.Credential.Token == "" {
 		t.Fatalf("注册状态 %d", code)
@@ -502,7 +499,7 @@ func postJSON(t *testing.T, client *http.Client, rawURL string, payload any, csr
 	if err != nil {
 		t.Fatal(err)
 	}
-	if dest != nil && resp.StatusCode == http.StatusOK {
+	if dest != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		if err := json.Unmarshal(raw, dest); err != nil {
 			t.Fatal(err)
 		}

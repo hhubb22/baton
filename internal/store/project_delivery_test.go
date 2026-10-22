@@ -5,11 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
-	"baton/internal/migrate"
 	"baton/internal/projectagent"
 	"baton/internal/protocol"
 	"baton/internal/store"
@@ -341,7 +339,7 @@ func TestProjectWakeReceiptDoesNotCoverLowerIDCommittedLater(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer late.Rollback(h.ctx)
-	if err = store.EnqueueProjectTaskResult(h.ctx, late, h.owner, h.project.Agent.ID, store.ProjectTaskResultInput{TaskID: mustUUID(t), Version: 1, Status: "completed"}); err != nil {
+	if err = enqueueThreadEndFixture(h.ctx, late, h.owner, h.project.Agent.ID, "late-turn", mustUUID(t)); err != nil {
 		t.Fatal(err)
 	}
 	var lower int64
@@ -614,6 +612,8 @@ func TestProjectPlacementPageExcludesHealthyLeases(t *testing.T) {
 
 func TestProjectWakeInsertionDoesNotLockAgentAndDoesNotRearmDuplicates(t *testing.T) {
 	h := deliveryHarness(t)
+	id := createProjectThread(t, h)
+	startProjectShell(t, h, id)
 	locked, err := h.pool.Begin(h.ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -624,67 +624,55 @@ func TestProjectWakeInsertionDoesNotLockAgentAndDoesNotRearmDuplicates(t *testin
 	}
 	ctx, cancel := context.WithTimeout(h.ctx, time.Second)
 	defer cancel()
-	tx, err := h.pool.Begin(ctx)
-	if err != nil {
+	report := protocol.ThreadReport{Type: protocol.BodyThreadReport, ThreadID: id, EventID: mustUUID(t), WorkerSeq: 4, Kind: "turn.ended", WorkerTurnSeq: 1, Reason: "completed", QueueEmpty: true}
+	if ack, err := h.repo.SaveThreadReport(ctx, h.src, report); err != nil || !ack.OK {
+		t.Fatal("Thread 通知插入等待了 Agent 锁", ack, err)
+	}
+	if err := locked.Commit(h.ctx); err != nil {
 		t.Fatal(err)
 	}
-	defer tx.Rollback(h.ctx)
-	input := store.ProjectTaskResultInput{TaskID: mustUUID(t), Version: 3, Status: "completed"}
-	if err = store.EnqueueProjectTaskResult(ctx, tx, h.owner, h.project.Agent.ID, input); err != nil {
-		t.Fatal("任务通知插入等待了 Agent 锁", err)
+	commands := claimDelivery(t, h, protocol.BodyProjectRunWake)
+	if len(commands) != 1 {
+		t.Fatal("缺少 Thread 通知", commands)
 	}
-	if err = tx.Commit(ctx); err != nil {
+	if _, err := h.repo.ProjectRuntime(h.ctx, h.src, wakeReceipt(h.req, commands[0].Command.InputIDs)); err != nil {
 		t.Fatal(err)
 	}
-	if err = locked.Commit(h.ctx); err != nil {
+	if ack, err := h.repo.SaveThreadReport(h.ctx, h.src, report); err != nil || !ack.OK {
+		t.Fatal("重复报告未幂等确认", ack, err)
+	}
+	// 下一轮回复只形成被动输入。
+	if _, err := h.repo.SendThreadMessage(h.ctx, h.owner, id, store.ThreadMessageInput{ClientMessageID: "next", Content: "next turn", Sender: "project_agent", OriginToolCallID: "next-tool"}); err != nil {
 		t.Fatal(err)
 	}
-	command := claimDelivery(t, h, protocol.BodyProjectRunWake)[0]
-	if _, err = h.repo.ProjectRuntime(h.ctx, h.src, wakeReceipt(h.req, command.Command.InputIDs)); err != nil {
-		t.Fatal(err)
-	}
-	tx, err = h.pool.Begin(h.ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback(h.ctx)
-	if err = store.EnqueueProjectTaskResult(h.ctx, tx, h.owner, h.project.Agent.ID, input); err != nil {
-		t.Fatal(err)
-	}
-	input.NotificationOnly, input.TaskID = true, mustUUID(t)
-	if err = store.EnqueueProjectTaskResult(h.ctx, tx, h.owner, h.project.Agent.ID, input); err != nil {
-		t.Fatal(err)
-	}
-	if err = tx.Commit(h.ctx); err != nil {
-		t.Fatal(err)
-	}
+	projectReport(t, h, id, "turn.started", func(r *protocol.ThreadReport) { r.WorkerTurnSeq = 2; r.ClientMessageID = "next" })
+	projectReport(t, h, id, "message.sent", func(r *protocol.ThreadReport) { r.WorkerTurnSeq = 2; r.ClientMessageID = "next" })
+	projectReport(t, h, id, "reply", func(r *protocol.ThreadReport) { r.WorkerTurnSeq = 2; r.Content = "passive reply" })
 	if commands := claimDelivery(t, h, protocol.BodyProjectRunWake); len(commands) != 0 {
-		t.Fatal("重复或被动任务通知触发了 wake", commands)
+		t.Fatal("重复报告或被动回复触发了 wake", commands)
 	}
 }
 
-func TestProjectWakeEncodingLimitLeavesUnsentRowsImmediatelyDue(t *testing.T) {
+func TestProjectWakeBatchesLeaveUnsentRowsImmediatelyDue(t *testing.T) {
 	h := deliveryHarness(t)
 	tx, err := h.pool.Begin(h.ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(h.ctx)
-	for i := range 8 {
-		// 输入在既有 40KiB 限制内，合并成单条通知后会超过控制帧容量。
-		input := store.ProjectTaskResultInput{TaskID: fmt.Sprint(i) + strings.Repeat("x", 32<<10), Version: 1, Status: "completed"}
-		if err = store.EnqueueProjectTaskResult(h.ctx, tx, h.owner, h.project.Agent.ID, input); err != nil {
+	for i := range 80 {
+		if err := enqueueThreadEndFixture(h.ctx, tx, h.owner, h.project.Agent.ID, fmt.Sprint(i), mustUUID(t)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err = tx.Commit(h.ctx); err != nil {
+	if err := tx.Commit(h.ctx); err != nil {
 		t.Fatal(err)
 	}
 	seen := map[int64]bool{}
-	for range 2 {
+	for _, want := range []int{32, 32, 16} {
 		commands := claimDelivery(t, h, protocol.BodyProjectRunWake)
-		if len(commands) != 1 || len(commands[0].Command.InputIDs) != 4 {
-			t.Fatal("编码容量没有分批", commands)
+		if len(commands) != 1 || len(commands[0].Command.InputIDs) != want {
+			t.Fatal("通知没有按额度分批", commands)
 		}
 		c := commands[0].Command
 		raw, err := protocol.MarshalJSON(c)
@@ -693,50 +681,12 @@ func TestProjectWakeEncodingLimitLeavesUnsentRowsImmediatelyDue(t *testing.T) {
 		}
 		for _, id := range c.InputIDs {
 			if seen[id] {
-				t.Fatal("未发送的后页输入没有优先于退避项", id)
+				t.Fatal("未发送输入未优先于退避项", id)
 			}
 			seen[id] = true
 		}
 	}
-	if len(seen) != 8 {
+	if len(seen) != 80 {
 		t.Fatal("遗漏输入", len(seen))
-	}
-}
-
-func TestProjectDeliveryMigrationInitializesOnlyUnconfirmedWork(t *testing.T) {
-	h := deliveryHarness(t)
-	_, pending := insertDeliveryRun(t, h, h.src, "finished")
-	_, acked := insertDeliveryRun(t, h, h.src, "finished")
-	_, starting := insertDeliveryRun(t, h, h.src, "starting")
-	acceptProjectInput(t, h.ctx, h.repo, h.owner, h.project.ID, "migration", "未认领")
-	if _, err := h.pool.Exec(h.ctx, "UPDATE agent_runs SET stop_acked_at=clock_timestamp() WHERE id=$1", acked); err != nil {
-		t.Fatal(err)
-	}
-	// 回到新增投递列之前的 schema，再通过正式迁移入口应用。
-	if _, err := h.pool.Exec(h.ctx, `ALTER TABLE agent_runs DROP COLUMN stop_requested_at,DROP COLUMN command_next_at,DROP COLUMN command_attempts;
- ALTER TABLE project_agent_input_queue DROP COLUMN wake_required,DROP COLUMN wake_next_at,DROP COLUMN wake_attempts;
- DELETE FROM schema_migrations WHERE version='0024_project_delivery.sql'`); err != nil {
-		t.Fatal(err)
-	}
-	var before time.Time
-	if err := h.pool.QueryRow(h.ctx, "SELECT clock_timestamp()").Scan(&before); err != nil {
-		t.Fatal(err)
-	}
-	if err := migrate.Up(h.ctx, h.pool); err != nil {
-		t.Fatal(err)
-	}
-	var requested *time.Time
-	var next time.Time
-	if err := h.pool.QueryRow(h.ctx, "SELECT stop_requested_at,command_next_at FROM agent_runs WHERE id=$1", pending).Scan(&requested, &next); err != nil || requested == nil || next.Before(before) || next.After(time.Now().Add(30*time.Second)) {
-		t.Fatal("历史未确认清理没有建立错开的停止意图", requested, next, err)
-	}
-	if err := h.pool.QueryRow(h.ctx, "SELECT stop_requested_at FROM agent_runs WHERE id=$1", acked).Scan(&requested); err != nil || requested != nil {
-		t.Fatal("已确认的历史运行被重新打开", requested, err)
-	}
-	if commands := claimDelivery(t, h, protocol.BodyProjectRunStart); len(commands) != 1 || commands[0].Command.RunID != starting {
-		t.Fatal("迁移后既有启动丢失", commands)
-	}
-	if commands := claimDelivery(t, h, protocol.BodyProjectRunWake); len(commands) != 1 || len(commands[0].Command.InputIDs) != 1 {
-		t.Fatal("迁移后未认领主动输入遗漏通知", commands)
 	}
 }

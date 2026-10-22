@@ -2,439 +2,198 @@ package session
 
 import (
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
 	"database/sql"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
-
-	"baton/internal/protocol"
-	"baton/internal/startpermit"
-	"baton/internal/task"
 )
 
-func TestRestartAfterStartIntentDoesNotResendInput(t *testing.T) {
-	dir := t.TempDir()
-	sessionID := mustSessionID(t)
-	logPath := filepath.Join(dir, "executor.log")
-	t.Setenv("BATON_TEST_EXECUTOR_LOG", logPath)
-	if _, err := EnsureToken(dir, sessionID); err != nil {
-		t.Fatal(err)
-	}
-	ledgerPath, err := LedgerPath(dir, sessionID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := CreateLedger(ledgerPath); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() { _ = RunWorker(ctx, dir, sessionID) }()
-	endpoint, err := Endpoint(dir, sessionID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	token, err := readToken(dir, sessionID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	client := waitClient(t, endpoint, token)
-	taskID, execID := mustSessionID(t), mustSessionID(t)
-	if _, err := client.Bind(taskID, execID, "pi"); err != nil {
-		t.Fatal(err)
-	}
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	nonce := armNonce(t, client, taskID, execID)
-	generation := mustSessionID(t)
-	queue := time.Now().UTC().Add(time.Minute).Truncate(time.Millisecond)
-	permit := signPermit(t, priv, taskID, execID, generation, nonce, queue, startpermit.PermitTTL)
-	if _, err := client.Authorize(taskID, execID, permit, base64.RawURLEncoding.EncodeToString(pub), generation, queue.Format(time.RFC3339Nano)); err != nil {
-		t.Fatal(err)
-	}
-	client.Close()
-	cancel()
-	waitWorkerDown(t, endpoint, token)
-
-	ctx, cancel = context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	go func() { _ = runWorkerWhenFree(ctx, dir, sessionID) }()
-	client = waitClient(t, endpoint, token)
-	defer client.Close()
-	st, err := client.Status()
-	if err != nil || !st.Uncertain || !st.StartIntent || st.ExecutorInputs != 0 || st.ExecutorStarts != 0 {
-		t.Fatalf("重启后的 Worker 仍像可以继续输入: %v %+v", err, st)
-	}
-	got, err := client.SubmitInput(`{"description":"不要重发"}`)
-	if err != nil || got.ExecutorInputs != 0 || !got.Uncertain {
-		t.Fatalf("不确定窗口又提交了输入: %v %+v", err, got)
-	}
-	var verified bool
-	for _, rep := range got.Reports {
-		if rep.Kind != protocol.ReportNeedsVerification {
-			continue
-		}
-		var body struct {
-			Status    string `json:"status"`
-			ErrorCode string `json:"error_code"`
-		}
-		if err := json.Unmarshal(rep.Body, &body); err != nil {
-			t.Fatal(err)
-		}
-		verified = body.Status == task.StatusNeedsVerification && body.ErrorCode == task.CodeUncertainInput
-	}
-	if !verified {
-		t.Fatalf("没有留下待核实报告: %+v", got.Reports)
-	}
-	raw, err := os.ReadFile(logPath)
-	if err != nil || strings.Count(string(raw), "start\n") != 1 || strings.Count(string(raw), "input\n") != 0 {
-		t.Fatalf("执行器日志不正确: %q %v", raw, err)
-	}
+func ledgerOptions(t *testing.T) ThreadOptions {
+	t.Helper()
+	return ThreadOptions{ThreadID: mustSessionID(t), StorageGeneration: "generation", AgentType: "pi", WorkingDirectory: t.TempDir()}
 }
-
+func createTestThreadDB(t *testing.T, data string, options ThreadOptions) *sql.DB {
+	t.Helper()
+	db, _, err := openThreadDB(data, options, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return db
+}
 func TestCorruptLedgerIsNotReplaced(t *testing.T) {
-	dir := t.TempDir()
-	sessionID := mustSessionID(t)
-	path, err := LedgerPath(dir, sessionID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte("not-a-sqlite-ledger"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := EnsureToken(dir, sessionID); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	err = RunWorker(ctx, dir, sessionID)
+	data := t.TempDir()
+	options := ledgerOptions(t)
+	path, err := ThreadLedgerPath(data, options.ThreadID)
+	threadMust(t, err)
+	threadMust(t, os.MkdirAll(filepath.Dir(path), 0700))
+	threadMust(t, os.WriteFile(path, []byte("not-a-sqlite-ledger"), 0600))
+	_, err = EnsureToken(data, options.ThreadID)
+	threadMust(t, err)
+	err = RunWorker(context.Background(), data, options.ThreadID)
 	if !errors.Is(err, ErrHistoryIncompatible) {
-		t.Fatalf("损坏账本被当成可恢复: %v", err)
+		t.Fatal(err)
 	}
-	if err := InspectLedger(path); !errors.Is(err, ErrHistoryIncompatible) {
-		t.Fatalf("损坏账本被换成了空历史: %v", err)
+	raw, err := os.ReadFile(path)
+	threadMust(t, err)
+	if string(raw) != "not-a-sqlite-ledger" {
+		t.Fatal("corrupt ledger replaced")
 	}
 }
-
 func TestMissingLedgerIsNotCreated(t *testing.T) {
-	dir := t.TempDir()
-	sessionID := mustSessionID(t)
-	path, err := LedgerPath(dir, sessionID)
-	if err != nil {
+	data := t.TempDir()
+	id := mustSessionID(t)
+	_, err := EnsureToken(data, id)
+	threadMust(t, err)
+	path, err := ThreadLedgerPath(data, id)
+	threadMust(t, err)
+	if err := RunWorker(context.Background(), data, id); !errors.Is(err, ErrHistoryMissing) {
 		t.Fatal(err)
 	}
-	if err := InspectLedger(path); !errors.Is(err, ErrHistoryMissing) {
-		t.Fatalf("缺失账本的结论是 %v", err)
-	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("检查缺失账本时创建了文件: %v", err)
-	}
-	if _, err := EnsureToken(dir, sessionID); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	err = RunWorker(ctx, dir, sessionID)
-	if !errors.Is(err, ErrHistoryMissing) {
-		t.Fatalf("缺失账本被当成可以新建: %v", err)
-	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("Worker 新建了缺失账本: %v", err)
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("missing ledger created", err)
 	}
 }
-
 func TestBusyLedgerIsNotTreatedAsCorrupt(t *testing.T) {
-	dir := t.TempDir()
-	sessionID := mustSessionID(t)
-	path, err := LedgerPath(dir, sessionID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := CreateLedger(path); err != nil {
-		t.Fatal(err)
-	}
-	holder, err := sql.Open("sqlite", sqliteDSN(path))
-	if err != nil {
-		t.Fatal(err)
-	}
+	data := t.TempDir()
+	o := ledgerOptions(t)
+	holder := createTestThreadDB(t, data, o)
 	defer holder.Close()
-	if _, err := holder.Exec(`PRAGMA journal_mode=DELETE`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := holder.Exec(`BEGIN EXCLUSIVE`); err != nil {
-		t.Fatal(err)
-	}
-	defer holder.Exec(`ROLLBACK`)
+	path, err := ThreadLedgerPath(data, o.ThreadID)
+	threadMust(t, err)
+	_, err = holder.Exec("PRAGMA journal_mode=DELETE")
+	threadMust(t, err)
+	_, err = holder.Exec("BEGIN EXCLUSIVE")
+	threadMust(t, err)
+	defer holder.Exec("ROLLBACK")
 	reader, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?mode=ro&_pragma=busy_timeout(100)")
-	if err != nil {
-		t.Fatal(err)
-	}
+	threadMust(t, err)
 	defer reader.Close()
-	_, err = reader.Exec(`SELECT COUNT(*) FROM outbox`)
+	_, err = reader.Exec("SELECT COUNT(*) FROM thread_outbox")
 	if err == nil {
-		t.Fatal("独占锁没有挡住读取")
+		t.Fatal("exclusive lock did not block read")
 	}
 	if !errors.Is(classifyLedgerErr(err), ErrHistoryUnread) || errors.Is(classifyLedgerErr(err), ErrHistoryIncompatible) {
-		t.Fatalf("暂时读不了被当成历史损坏: %v", err)
-	}
-	if err := os.WriteFile(path+".bad", []byte("not-a-database"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := InspectLedger(path + ".bad"); !errors.Is(err, ErrHistoryIncompatible) {
-		t.Fatalf("损坏文件没有标成不兼容: %v", err)
-	}
 }
-
 func TestLedgerPermissionErrorsAreUnread(t *testing.T) {
-	for _, statDenied := range []bool{false, true} {
-		t.Run(fmt.Sprintf("stat_denied=%v", statDenied), func(t *testing.T) {
-			dir := t.TempDir()
-			path, err := LedgerPath(dir, mustSessionID(t))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := CreateLedger(path); err != nil {
-				t.Fatal(err)
-			}
+	for _, parent := range []bool{false, true} {
+		t.Run(map[bool]string{false: "file", true: "directory"}[parent], func(t *testing.T) {
+			data := t.TempDir()
+			o := ledgerOptions(t)
+			db := createTestThreadDB(t, data, o)
+			threadMust(t, db.Close())
+			path, err := ThreadLedgerPath(data, o.ThreadID)
+			threadMust(t, err)
 			denied := path
-			mode := os.FileMode(0o600)
-			if statDenied {
+			mode := os.FileMode(0600)
+			if parent {
 				denied = filepath.Dir(path)
-				mode = 0o700
+				mode = 0700
 			}
-			if err := os.Chmod(denied, 0); err != nil {
-				t.Fatal(err)
-			}
+			threadMust(t, os.Chmod(denied, 0))
 			t.Cleanup(func() { _ = os.Chmod(denied, mode) })
 			if f, err := os.Open(path); err == nil {
 				f.Close()
-				t.Skip("当前用户仍能读取无权限文件")
+				t.Skip("current user can read permissionless file")
 			}
-			if _, err := os.Stat(path); errors.Is(err, os.ErrPermission) != statDenied {
-				t.Fatalf("没有建立预期的 Stat 权限前提: %v", err)
+			db, _, err = openThreadDB(data, o, false)
+			if db != nil {
+				db.Close()
 			}
-			if err := InspectLedger(path); !errors.Is(err, ErrHistoryUnread) {
-				t.Fatalf("权限错误被当成损坏: %v", err)
-			}
-			if w, err := openWorkerDB(path, nil); !errors.Is(err, ErrHistoryUnread) {
-				if w != nil {
-					w.Close()
-				}
-				t.Fatalf("Worker 打开权限错误被当成损坏: %v", err)
+			if !errors.Is(err, ErrHistoryUnread) {
+				t.Fatal(err)
 			}
 		})
 	}
 }
-
 func TestLedgerIOErrorIsUnread(t *testing.T) {
-	for _, err := range []error{
-		&os.PathError{Op: "read", Path: "ledger.db", Err: syscall.EIO},
-		&os.PathError{Op: "open", Path: "malformed/ledger.db", Err: os.ErrPermission},
-		&os.PathError{Op: "open", Path: "not a database/ledger.db", Err: os.ErrPermission},
-		errors.New("malformed file URI"),
-	} {
-		if got := classifyLedgerErr(err); !errors.Is(got, ErrHistoryUnread) || errors.Is(got, ErrHistoryIncompatible) {
-			t.Fatalf("打开错误 %v 被当成历史损坏: %v", err, got)
-		} else if !errors.Is(got, err) {
-			t.Fatalf("打开错误的底层原因丢失: %v", got)
+	for _, err := range []error{&os.PathError{Op: "read", Path: "thread.db", Err: syscall.EIO}, &os.PathError{Op: "open", Path: "malformed/thread.db", Err: os.ErrPermission}, errors.New("malformed file URI")} {
+		got := classifyLedgerErr(err)
+		if !errors.Is(got, ErrHistoryUnread) || errors.Is(got, ErrHistoryIncompatible) || !errors.Is(got, err) {
+			t.Fatal(got)
 		}
 	}
 }
-
-func TestCreateLedgerOpenFailureIsUnread(t *testing.T) {
-	parent := filepath.Join(t.TempDir(), "not a directory")
-	if err := os.WriteFile(parent, []byte("blocked"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := CreateLedger(filepath.Join(parent, "ledger.db")); !errors.Is(err, ErrHistoryUnread) {
-		t.Fatalf("路径错误被当成历史损坏: %v", err)
-	}
-}
-
 func TestLedgerSQLiteOpenErrorIsUnread(t *testing.T) {
-	db, err := sql.Open("sqlite", "file://invalid/ledger.db")
-	if err != nil {
-		t.Fatal(err)
-	}
+	db, err := sql.Open("sqlite", "file://invalid/thread.db")
+	threadMust(t, err)
 	defer db.Close()
 	err = db.Ping()
 	if err == nil {
-		t.Fatal("无效 URI 意外打开成功")
+		t.Fatal("invalid URI accepted")
 	}
 	if got := classifyLedgerErr(err); !errors.Is(got, ErrHistoryUnread) || !errors.Is(got, err) {
-		t.Fatalf("URI 打开错误没有保留原因并标为暂时读不了: %v", got)
+		t.Fatal(got)
 	}
 }
-
-func TestCreateLedgerSchemaWriteFailureIsUnread(t *testing.T) {
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(`PRAGMA query_only=ON`); err != nil {
-		t.Fatal(err)
-	}
-	if err := createWorkerSchema(db); !errors.Is(err, ErrHistoryUnread) {
-		t.Fatalf("写入错误被当成历史损坏: %v", err)
-	}
-}
-
 func TestChmodDBRequiresLedgerButNotSidecars(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "ledger.db")
+	path := filepath.Join(t.TempDir(), "thread.db")
 	if err := chmodDB(path); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("主账本不存在时没有报错: %v", err)
-	}
-	if err := os.WriteFile(path, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := chmodDB(path); err != nil {
-		t.Fatalf("临时文件不存在时无法设置账本权限: %v", err)
-	}
+	threadMust(t, os.WriteFile(path, nil, 0600))
+	threadMust(t, chmodDB(path))
 }
-
 func TestLedgerPathRoundTrip(t *testing.T) {
-	for _, name := range []string{"absolute", "relative"} {
-		t.Run(name, func(t *testing.T) {
+	for _, absolute := range []bool{false, true} {
+		t.Run(map[bool]string{false: "relative", true: "absolute"}[absolute], func(t *testing.T) {
 			t.Chdir(t.TempDir())
-			path := filepath.Join("Session data 中文 %23 # &+", "ledger.db")
-			if name == "absolute" {
+			data := "Session data 中文 %23 # &+"
+			if absolute {
 				var err error
-				path, err = filepath.Abs(path)
-				if err != nil {
-					t.Fatal(err)
-				}
+				data, err = filepath.Abs(data)
+				threadMust(t, err)
 			}
-			if err := CreateLedger(path); err != nil {
-				t.Fatal(err)
+			o := ledgerOptions(t)
+			db := createTestThreadDB(t, data, o)
+			_, err := db.Exec("UPDATE thread_meta SET native_session_id='preserved'")
+			threadMust(t, err)
+			threadMust(t, db.Close())
+			db, _, err = openThreadDB(data, o, false)
+			threadMust(t, err)
+			defer db.Close()
+			var native string
+			threadMust(t, db.QueryRow("SELECT native_session_id FROM thread_meta").Scan(&native))
+			if native != "preserved" {
+				t.Fatal(native)
 			}
-			w, err := openWorkerDB(path, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := w.db.Exec(`INSERT INTO meta (key, value) VALUES ('path_test', 'preserved')`); err != nil {
-				w.Close()
-				t.Fatal(err)
-			}
-			if err := w.Close(); err != nil {
-				t.Fatal(err)
-			}
-			if err := CreateLedger(path); err != nil {
-				t.Fatal(err)
-			}
-			if err := InspectLedger(path); err != nil {
-				t.Fatal(err)
-			}
-			w, err = openWorkerDB(path, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer w.Close()
-			var value string
-			if err := w.db.QueryRow(`SELECT value FROM meta WHERE key = 'path_test'`).Scan(&value); err != nil || value != "preserved" {
-				t.Fatalf("重开账本丢失已有记录: value=%q err=%v", value, err)
-			}
-			if needed, err := LedgerNeedsWorker(path); err != nil || needed {
-				t.Fatalf("恢复筛选错误: needed=%v err=%v", needed, err)
-			}
-			if _, err := os.Stat(path); err != nil {
-				t.Fatalf("账本没有保存在指定路径: %v", err)
+			path, err := ThreadLedgerPath(data, o.ThreadID)
+			threadMust(t, err)
+			if !strings.Contains(path, data) {
+				t.Fatal(path)
 			}
 		})
 	}
 }
-
-func TestVerificationReasonsDoNotShareAnEventID(t *testing.T) {
-	id := mustSessionID(t)
-	inputID, err := VerificationEventID(id, task.CodeUncertainInput)
-	if err != nil {
-		t.Fatal(err)
-	}
-	historyID, err := VerificationEventID(id, task.CodeUncertainHistory)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if inputID == historyID {
-		t.Fatal("不同原因共用了事件标识")
-	}
-	again, err := VerificationEventID(id, task.CodeUncertainInput)
-	if err != nil || again != inputID {
-		t.Fatalf("同一原因的事件标识不稳定: %s %v", again, err)
-	}
-}
-
-func TestDeliveredLedgerDoesNotNeedAWorker(t *testing.T) {
-	dir := t.TempDir()
-	sessionID := mustSessionID(t)
-	path, err := LedgerPath(dir, sessionID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := CreateLedger(path); err != nil {
-		t.Fatal(err)
-	}
-	needs, err := LedgerNeedsWorker(path)
-	if err != nil || needs {
-		t.Fatalf("尚未申请许可的账本不应恢复 Worker: %v %v", needs, err)
-	}
-	db, err := sql.Open("sqlite", sqliteDSN(path))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`INSERT INTO meta (key, value) VALUES ('result_delivered', '1')`); err != nil {
-		t.Fatal(err)
-	}
-	_ = db.Close()
-	needs, err = LedgerNeedsWorker(path)
-	if err != nil || needs {
-		t.Fatalf("已交付账本仍会拉起 Worker: %v %v", needs, err)
-	}
-}
-
 func waitWorkerDown(t *testing.T, endpoint, token string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-		client, err := Dial(ctx, endpoint, token)
+		c, err := Dial(ctx, endpoint, token)
 		cancel()
 		if err != nil {
 			return
 		}
-		client.Close()
+		c.Close()
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatal("原来的 Worker 没有退出")
+	t.Fatal("Worker did not stop")
 }
-
-func runWorkerWhenFree(ctx context.Context, dir, sessionID string) error {
+func runWorkerWhenFree(ctx context.Context, dir, id string) error {
 	deadline := time.Now().Add(5 * time.Second)
-	var last error
 	for {
-		err := RunWorker(ctx, dir, sessionID)
+		err := RunWorker(ctx, dir, id)
 		if ctx.Err() != nil {
 			return nil
 		}
-		if !errors.Is(err, ErrSessionOwned) {
+		if !errors.Is(err, ErrSessionOwned) || time.Now().After(deadline) {
 			return err
-		}
-		last = err
-		if time.Now().After(deadline) {
-			return last
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

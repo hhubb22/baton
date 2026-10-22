@@ -19,8 +19,6 @@ import (
 
 const Version = "1.3.0"
 
-const instructions = `Baton task protocol: the next user message is a JSON task envelope. Follow its description, authorization_scope and expected_outputs; those are limits, not additional authority. Only operate in the task working directory and explicitly authorized resources. When done, return exactly one JSON object, no Markdown: {"status":"completed","summary":"...","evidence":[],"evidence_empty_reason":"...","artifacts":[],"artifacts_empty_reason":"...","error":null}. Failed results use status failed and error {"code":"execution_failed","message":"..."}. Never invent evidence. If you delegated children and must wait, return exactly {"baton_waiting_for_children":true}; Baton will deliver child results in a later user message. Do not claim completion while children are unprocessed.`
-
 type response struct {
 	Type    string          `json:"type"`
 	ID      string          `json:"id"`
@@ -46,13 +44,11 @@ type Adapter struct {
 	pending           map[string]chan response
 	sequence          uint64
 	active            bool
-	waiting           bool
 	settled           chan struct{}
 	aborting          bool
 	usedTools         bool
 	final             string
 	stopReason        string
-	outputs           []agent.Output
 	closed            bool
 	model             string
 	threadTurn        bool
@@ -66,10 +62,8 @@ type Adapter struct {
 }
 
 var _ agent.Adapter = (*Adapter)(nil)
-var _ agent.ThreadAdapter = (*Adapter)(nil)
 var _ agent.IntentRestorer = (*Adapter)(nil)
 var _ agent.SessionIDProvider = (*Adapter)(nil)
-var _ agent.StopObserver = (*Adapter)(nil)
 
 func New(config agent.Config, options ...Option) *Adapter {
 	a := &Adapter{config: config, pending: make(map[string]chan response)}
@@ -138,11 +132,7 @@ func (a *Adapter) Start(ctx context.Context) error {
 	if strings.TrimSpace(string(raw)) != Version {
 		return errors.New("Pi 1.3.0 required; installed CLI version could not be verified")
 	}
-	prompt := instructions
-	// Legacy task sessions carry an ExecutionID; Thread sessions use SessionID.
-	if a.config.ExecutionID == "" {
-		prompt = fmt.Sprintf(threadInstructions, a.config.Directory)
-	}
+	prompt := fmt.Sprintf(threadInstructions, a.config.Directory)
 	args := []string{"--mode", "rpc", "--offline", "--no-extensions", "--no-mcp", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-approve", "--session-dir", a.config.SessionDir, "--append-system-prompt", prompt}
 	if a.config.Restore {
 		args = append(args, "--session", a.history.File)
@@ -191,9 +181,7 @@ func (a *Adapter) Start(ctx context.Context) error {
 		}
 		a.recordExit(cmd, waitErr)
 		a.mu.Lock()
-		if !a.closed && !a.aborting && (a.active || a.waiting) {
-			a.outputs = append(a.outputs, agent.Output{Uncertain: true})
-		}
+
 		a.processExitedLocked(readErr)
 		a.active = false
 		a.mu.Unlock()
@@ -362,76 +350,11 @@ func (a *Adapter) consume(raw []byte) error {
 			}
 		}
 	case "agent_settled":
-		threadTurn := a.threadTurn
 		a.endThreadTurnLocked(r)
 		a.active = false
 		close(a.settled)
-		if !a.aborting && !threadTurn {
-			var wait struct {
-				Waiting bool `json:"baton_waiting_for_children"`
-			}
-			_ = json.Unmarshal([]byte(a.final), &wait)
-			a.waiting = wait.Waiting
-			out := agent.Output{Final: a.final, Exited: true}
-			if wait.Waiting {
-				out = agent.Output{WaitingForChildren: true}
-			}
-			if r.Aborted || a.stopReason == "error" || a.stopReason == "aborted" {
-				out = agent.Output{Uncertain: true, Exited: true}
-			}
-			a.outputs = append(a.outputs, out)
-		}
 	}
 	return nil
-}
-
-func (a *Adapter) SubmitInput(ctx context.Context, payload string) (agent.Output, error) {
-	a.mu.Lock()
-	if a.active || a.closed {
-		a.mu.Unlock()
-		return agent.Output{}, errors.New("Pi Session busy or closed")
-	}
-	a.threadTurn, a.threadStarted = false, false
-	a.freshHistory = false
-	a.active, a.aborting, a.final, a.stopReason, a.waiting = true, false, "", "", false
-	a.settled = make(chan struct{})
-	a.mu.Unlock()
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	r, err := a.call(ctx, "prompt", map[string]any{"message": payload})
-	if err != nil {
-		return agent.Output{}, err
-	}
-	var data struct {
-		Disposition string `json:"disposition"`
-	}
-	if json.Unmarshal(r.Data, &data) != nil || data.Disposition != "started" {
-		return agent.Output{}, errors.New("Pi did not start the task prompt")
-	}
-	return agent.Output{}, nil
-}
-
-func (a *Adapter) DeliverResult(ctx context.Context, deliveryID string, payload string) (agent.Output, error) {
-	var envelope struct {
-		DeliveryID string `json:"delivery_id"`
-	}
-	if deliveryID == "" || json.Unmarshal([]byte(payload), &envelope) != nil || envelope.DeliveryID != deliveryID {
-		return agent.Output{}, errors.New("Pi delivery identity mismatch")
-	}
-	if found, err := a.HistoryContains(deliveryID, false); err != nil {
-		return agent.Output{}, err
-	} else if found {
-		return agent.Output{}, nil
-	}
-	return a.SubmitInput(ctx, payload)
-}
-
-func (a *Adapter) Drain() []agent.Output {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	out := a.outputs
-	a.outputs = nil
-	return out
 }
 
 func (a *Adapter) StopStatus() (bool, bool) {
@@ -497,16 +420,3 @@ func (a *Adapter) Close() error {
 }
 
 func (a *Adapter) DrainLive() (string, bool) { return a.live.Drain() }
-
-// Supplement 对当前任务补充输入，Pi 返回确认后才向调用方报告送达。
-func (a *Adapter) Supplement(ctx context.Context, operationID, text string) error {
-	a.mu.Lock()
-	active := a.active
-	a.mu.Unlock()
-	if !active {
-		_, err := a.SubmitInput(ctx, text)
-		return err
-	}
-	_, err := a.call(ctx, "steer", map[string]any{"message": text})
-	return err
-}

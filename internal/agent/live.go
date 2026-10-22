@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"context"
 	"strings"
 	"sync"
 	"unicode"
@@ -56,8 +55,5 @@ func PlainText(text string) string {
 }
 
 type LiveAdapter interface{ DrainLive() (string, bool) }
-type InputAdapter interface {
-	Supplement(context.Context, string, string) error
-}
 
 func (b *LiveBuffer) MarkGap() { b.mu.Lock(); b.gap = true; b.mu.Unlock() }

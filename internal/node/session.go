@@ -96,18 +96,8 @@ func Maintain(ctx context.Context, opts RunOptions) error {
 		if err != nil {
 			return err
 		}
-		var reconnectable []string
-		for _, id := range sessions {
-			failures, err := ledger.historyReadFailures(id)
-			if err != nil {
-				return errors.New("无法读取历史重试状态")
-			}
-			if failures < historyReadFailureLimit {
-				reconnectable = append(reconnectable, id)
-			}
-		}
 		reconnectCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		host.Reconnect(reconnectCtx, reconnectable)
+		host.Reconnect(reconnectCtx, sessions)
 		cancel()
 	}
 	attempt := 0
@@ -192,20 +182,19 @@ func runOnce(ctx context.Context, opts RunOptions, incarnation string, ledger *L
 	var expect atomic.Value
 	expect.Store("")
 	writer := newWSWriter(ws)
-	loop := newStartLoop(ctx, opts.Identity, ledger, host, writer, opts.Logger)
+	loop := newRuntimeRPC(writer)
 	threadHost := opts.ThreadHost
 	if threadHost == nil && host != nil {
 		threadHost = newSessionThreadHost(host, ledger, opts.Identity.NodeID)
 	}
-	loop.threads = newThreadService(ledger, threadHost, opts.ThreadBudgetBytes, opts.Identity.Capabilities, func(ctx context.Context, correlation string, value any) error {
+	threads := newThreadService(ledger, threadHost, opts.ThreadBudgetBytes, opts.Identity.Capabilities, func(ctx context.Context, correlation string, value any) error {
 		return writeThreadEnvelope(ctx, writer, correlation, value)
 	})
 	threadDone := make(chan struct{})
-	go func() { defer close(threadDone); loop.threads.run(ctx) }()
+	go func() { defer close(threadDone); threads.run(ctx) }()
 	defer func() { cancel(); <-threadDone }()
 	if opts.projectRuntime != nil {
-		opts.projectRuntime.setLoop(loop)
-		defer opts.projectRuntime.setLoop(nil)
+		opts.projectRuntime.setLoop(nil)
 	}
 	errCh := make(chan error, 1)
 	reportSender := opts.reportSender.connect()
@@ -218,18 +207,18 @@ func runOnce(ctx context.Context, opts RunOptions, incarnation string, ledger *L
 		default:
 		}
 	}
+	readerDone := make(chan struct{})
 	go func() {
-		errCh <- readRelay(ctx, writer, &acked, &expect, opts.Logger, opts.Identity, ledger, host, loop, opts.DataDir, reportSender, opts.projectRuntime)
+		defer close(readerDone)
+		errCh <- readRelay(ctx, writer, &acked, &expect, opts.Logger, opts.Identity, host, loop, threads, opts.DataDir, reportSender, opts.projectRuntime)
 	}()
-	var replayBusy atomic.Bool
-	replay := func() {
-		if !replayBusy.CompareAndSwap(false, true) {
-			return
+	defer func() {
+		cancel()
+		<-readerDone
+		if opts.projectRuntime != nil {
+			opts.projectRuntime.setLoop(nil)
 		}
-		defer replayBusy.Store(false)
-		loop.resendPending(ctx)
-	}
-	go replay()
+	}()
 	ticker := time.NewTicker(opts.Heartbeat)
 	defer ticker.Stop()
 	if err := writeSync(ctx, writer, opts, &expect, &acked); err != nil {
@@ -263,7 +252,6 @@ func runOnce(ctx context.Context, opts RunOptions, incarnation string, ledger *L
 					return err
 				}
 			}
-			go replay()
 			if !acked.Load() {
 				if err := writeSync(ctx, writer, opts, &expect, &acked); err != nil {
 					return err
@@ -292,7 +280,7 @@ func dialRelay(ctx context.Context, opts RunOptions) (*websocket.Conn, error) {
 	return ws, nil
 }
 
-func readRelay(ctx context.Context, w *wsWriter, acked *atomic.Bool, expect *atomic.Value, log *slog.Logger, ident Identity, ledger *Ledger, host *session.Host, loop *startLoop, dataDir string, reports *runtimeReportConnection, runtimes ...*projectRuntimeManager) error {
+func readRelay(ctx context.Context, w *wsWriter, acked *atomic.Bool, expect *atomic.Value, log *slog.Logger, ident Identity, host *session.Host, loop *runtimeRPC, threads *threadService, dataDir string, reports *runtimeReportConnection, runtimes ...*projectRuntimeManager) error {
 	for {
 		_, raw, err := w.ws.Read(ctx)
 		if err != nil {
@@ -321,16 +309,16 @@ func readRelay(ctx context.Context, w *wsWriter, acked *atomic.Bool, expect *ato
 				continue
 			}
 			reports.note(wrap.Envelope)
-			if loop != nil && loop.threads != nil && loop.threads.handle(wrap.Envelope) {
+			if threads != nil && threads.handle(wrap.Envelope) {
 				continue
 			}
 			if len(runtimes) > 0 && runtimes[0] != nil && runtimes[0].handle(wrap.Envelope) {
 				continue
 			}
-			if handleNodeEnvelope(ctx, raw, w, ledger, host, ident.Capabilities, log, loop) {
+			if loop != nil && wrap.Envelope.Source != nil && wrap.Envelope.Source.Kind == protocol.SourceControl && loop.onReply(wrap.Envelope) {
 				continue
 			}
-			if handleSessionEnvelope(ctx, raw, w, host, ledger) {
+			if handleSessionEnvelope(ctx, raw, w, host) {
 				continue
 			}
 			if handleFileEnvelope(ctx, raw, w, dataDir, log) {
@@ -344,9 +332,12 @@ func readRelay(ctx context.Context, w *wsWriter, acked *atomic.Bool, expect *ato
 			want, _ := expect.Load().(string)
 			if body.Type == "node.sync_result" && body.OK && wrap.Envelope.CorrelationID == want && want != "" {
 				if acked.CompareAndSwap(false, true) {
+					if len(runtimes) > 0 && runtimes[0] != nil {
+						runtimes[0].setLoop(loop)
+					}
 					log.Info("event=synced", "node_id", ident.NodeID)
-					if loop != nil && loop.threads != nil {
-						loop.threads.syncReady()
+					if threads != nil {
+						threads.syncReady()
 					}
 					select {
 					case reports.ready <- struct{}{}:

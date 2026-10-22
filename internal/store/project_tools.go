@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"strings"
 	"unicode/utf8"
@@ -14,7 +13,6 @@ import (
 	"baton/internal/inbox"
 	"baton/internal/projectagent"
 	"baton/internal/protocol"
-	"baton/internal/task"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -52,17 +50,10 @@ type toolArguments struct {
 	AfterID                 string         `json:"after_id"`
 	AfterSeq                int64          `json:"after_seq"`
 	ThroughSeq              int64          `json:"through_seq"`
-	TaskID                  string         `json:"task_id"`
 	Status                  string         `json:"status"`
-	Version                 int            `json:"version"`
-	TargetNodeID            string         `json:"target_node_id"`
 	AgentType               string         `json:"agent_type"`
 	WorkingDirectory        string         `json:"working_directory"`
-	Description             string         `json:"description"`
-	ExpectedOutputs         string         `json:"expected_outputs"`
-	QueueTimeoutSeconds     *int           `json:"queue_timeout_seconds"`
 	ExecutionTimeoutSeconds *int           `json:"execution_timeout_seconds"`
-	RetryOfTaskID           string         `json:"retry_of_task_id"`
 	Offset                  int            `json:"offset"`
 	MaxBytes                int            `json:"max_bytes"`
 }
@@ -86,10 +77,6 @@ var projectToolFields = map[string]string{
 	"history.search":  "query after_seq through_seq offset max_bytes",
 	"history.read":    "after_seq through_seq offset max_bytes",
 	"devices.list":    "after_id offset max_bytes",
-	"tasks.dispatch":  "target_node_id agent_type working_directory description expected_outputs queue_timeout_seconds execution_timeout_seconds retry_of_task_id",
-	"tasks.list":      "status after_id offset max_bytes",
-	"tasks.get":       "task_id version offset max_bytes",
-	"tasks.cancel":    "task_id",
 }
 
 func decodeToolArguments(name string, raw json.RawMessage) (toolArguments, error) {
@@ -112,10 +99,10 @@ func decodeToolArguments(name string, raw json.RawMessage) (toolArguments, error
 	if d.Decode(&a) != nil || d.Decode(new(any)) != io.EOF {
 		return a, projectagent.ErrInvalid
 	}
-	if a.Offset < 0 || a.MaxBytes < 0 || a.MaxBytes > maxProjectToolBytes || a.Revision < 0 || a.AfterSeq < 0 || a.ThroughSeq < 0 || a.Version < 0 || a.AfterTurn < 0 || a.ThroughTurn < 0 {
+	if a.Offset < 0 || a.MaxBytes < 0 || a.MaxBytes > maxProjectToolBytes || a.Revision < 0 || a.AfterSeq < 0 || a.ThroughSeq < 0 || a.AfterTurn < 0 || a.ThroughTurn < 0 {
 		return a, projectagent.ErrInvalid
 	}
-	for _, id := range []string{a.ThreadID, a.EntryID, a.TaskID, a.AfterID, a.TargetNodeID, a.NodeID, a.RetryOfTaskID, a.RequestID} {
+	for _, id := range []string{a.ThreadID, a.EntryID, a.AfterID, a.NodeID, a.RequestID} {
 		if id != "" {
 			if _, err := identity.ParseUUID(id); err != nil {
 				return a, projectagent.ErrInvalid
@@ -232,7 +219,6 @@ func (s *Store) callProjectTool(ctx context.Context, tx pgx.Tx, b projectRunBind
 			return empty, err
 		}
 		var threadErr *ThreadError
-		var rejection *task.Rejection
 		var conflict *projectagent.MemoryConflict
 		switch {
 		case errors.As(businessErr, &conflict):
@@ -247,11 +233,9 @@ func (s *Store) callProjectTool(ctx context.Context, tx pgx.Tx, b projectRunBind
 			}
 		case errors.As(businessErr, &threadErr):
 			output = map[string]any{"error": threadErr.Message, "code": threadErr.Code}
-		case errors.As(businessErr, &rejection):
-			output = map[string]any{"error": rejection.Message, "code": rejection.Code}
 		case errors.Is(businessErr, inbox.ErrInvalid), errors.Is(businessErr, inbox.ErrNotFound), errors.Is(businessErr, inbox.ErrLimit):
 			output = map[string]any{"error": businessErr.Error()}
-		case errors.Is(businessErr, projectagent.ErrInvalid), errors.Is(businessErr, projectagent.ErrTooLarge), errors.Is(businessErr, projectagent.ErrConflict), errors.Is(businessErr, ErrNotFound), errors.Is(businessErr, ErrNotVisible):
+		case errors.Is(businessErr, projectagent.ErrInvalid), errors.Is(businessErr, projectagent.ErrTooLarge), errors.Is(businessErr, projectagent.ErrConflict), errors.Is(businessErr, ErrNotFound):
 			output = map[string]any{"error": "工具名称、参数、资源归属或版本无效"}
 		default:
 			return empty, businessErr
@@ -457,105 +441,6 @@ func (s *Store) executeProjectTool(ctx context.Context, tx pgx.Tx, b projectRunB
 			return nil, err
 		}
 		return toolJSONPage(map[string]any{"devices": items, "next_after_id": last}, a)
-	case "tasks.dispatch":
-		return s.dispatchProjectTask(ctx, tx, b, callID, a)
-	case "tasks.get", "tasks.cancel":
-		if a.TaskID == "" {
-			return nil, projectagent.ErrInvalid
-		}
-		suffix := ""
-		if name == "tasks.cancel" {
-			suffix = " FOR UPDATE"
-		}
-		rec, _, found, err := loadTask(ctx, tx, ` WHERE employee_id=$1 AND project_id=$2 AND id=$3`+suffix, b.owner, b.projectID, a.TaskID)
-		if err != nil {
-			return nil, err
-		}
-		if !found {
-			return nil, ErrNotFound
-		}
-		if name == "tasks.cancel" {
-			if _, err = s.cancelTree(ctx, tx, b.owner, a.TaskID, false); err != nil {
-				return nil, err
-			}
-			return map[string]any{"task_id": a.TaskID, "read_tool": "tasks.get"}, nil
-		}
-		if a.Version != 0 && a.Version != rec.Version {
-			return nil, projectagent.ErrConflict
-		}
-		loaded := []task.Record{rec}
-		if err = attachResults(ctx, tx, b.owner, loaded); err != nil {
-			return nil, err
-		}
-		return toolJSONPage(loaded[0], a)
-	case "tasks.list":
-		switch a.Status {
-		case "", task.StatusQueued, task.StatusRunning, task.StatusNeedsVerification, task.StatusCompleted, task.StatusFailed, task.StatusCancelled:
-		default:
-			return nil, projectagent.ErrInvalid
-		}
-		rows, err := tx.Query(ctx, `SELECT id::text,status,version,description FROM tasks WHERE employee_id=$1 AND project_id=$2 AND ($3='' OR status=$3) AND ($4::uuid IS NULL OR id>$4) ORDER BY id LIMIT 20`, b.owner, b.projectID, a.Status, nullableProjectID(a.AfterID))
-		if err != nil {
-			return nil, err
-		}
-		items := []any{}
-		last := ""
-		for rows.Next() {
-			var id, status, desc string
-			var version int
-			if err = rows.Scan(&id, &status, &version, &desc); err != nil {
-				rows.Close()
-				return nil, err
-			}
-			last = id
-			items = append(items, map[string]any{"task_id": id, "status": status, "version": version, "description": boundedText(desc, 512)})
-		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
-			return nil, err
-		}
-		return toolJSONPage(map[string]any{"tasks": items, "next_after_id": last}, a)
 	}
 	return nil, projectagent.ErrInvalid
-}
-
-func (s *Store) dispatchProjectTask(ctx context.Context, tx pgx.Tx, b projectRunBinding, callID string, a toolArguments) (any, error) {
-	if a.TargetNodeID == "" || a.AgentType == "" || a.AgentType == "shell" || a.WorkingDirectory == "" || a.Description == "" || a.ExpectedOutputs == "" {
-		return nil, projectagent.ErrInvalid
-	}
-	if a.RetryOfTaskID != "" {
-		var status string
-		err := tx.QueryRow(ctx, `SELECT status FROM tasks WHERE employee_id=$1 AND project_id=$2 AND id=$3 FOR UPDATE`, b.owner, b.projectID, a.RetryOfTaskID).Scan(&status)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrNotFound
-		}
-		if err != nil {
-			return nil, err
-		}
-		if status != task.StatusFailed && status != task.StatusCancelled {
-			return nil, projectagent.ErrConflict
-		}
-	}
-	input := task.Input{RequestID: fmt.Sprintf("pa:%s:%s", b.conversationID, callID), TargetNodeID: &a.TargetNodeID, AgentType: &a.AgentType, WorkingDirectory: &a.WorkingDirectory, Description: a.Description, ExpectedOutputs: &a.ExpectedOutputs, QueueTimeoutSeconds: a.QueueTimeoutSeconds, ExecutionTimeoutSeconds: a.ExecutionTimeoutSeconds}
-	if err := task.Validate(input); err != nil {
-		return nil, err
-	}
-	prepared, err := task.Prepare(input)
-	if err != nil {
-		return nil, err
-	}
-	rec, _, err := s.acceptOnceTx(ctx, tx, b.owner, prepared, nil)
-	if err != nil {
-		return nil, err
-	}
-	if _, err = tx.Exec(ctx, `UPDATE tasks SET project_id=$2,origin_conversation_id=$3,origin_tool_call_id=$4 WHERE id=$1`, rec.TaskID, b.projectID, b.conversationID, callID); err != nil {
-		return nil, err
-	}
-	if a.RetryOfTaskID != "" {
-		if _, err = tx.Exec(ctx, `UPDATE task_relations SET rerun_of_task_id=$2 WHERE task_id=$1`, rec.TaskID, a.RetryOfTaskID); err != nil {
-			return nil, err
-		}
-	}
-	return map[string]any{"task_id": rec.TaskID, "status": rec.Status, "version": rec.Version, "read_tool": "tasks.get"}, nil
 }

@@ -1,22 +1,24 @@
 # Baton
 
-Baton 是跨设备 AI Agent 协同与任务派发系统。员工使用部署管理员分配的本地账号登录中心服务（`coordinator`），注册并管理自己的设备节点（`batond`），通过 Project Agent 主对话或直接任务派发在设备上运行受控的本地 Agent 会话（Pi、Codex、Kiro），并在中心留存结构化结果、证据引用与待办事项（Inbox）。
+Baton 是跨设备 AI Agent 协同系统。员工使用管理员分配的本地账号登录中心服务（`coordinator`），注册并管理自己的设备节点（`batond`），在指定设备和目录中使用 Pi、Codex、Kiro Thread，也可以通过 Project Agent 主对话协调多个 Thread。中心保存消息、回复、附件引用与待办事项（Inbox），原生会话历史留在设备上。
 
 ## 系统架构与组件
 
 | 组件 | 入口 / 目录 | 说明 |
 |---|---|---|
-| `coordinator` | `cmd/coordinator` | 中心控制面：员工认证、节点注册与凭据吊销、Project / Task / Inbox 状态机、内置 Gateway（`/v1/node` 与 `/api/v1/events`）、嵌入式 Web UI |
+| `coordinator` | `cmd/coordinator` | 中心控制面：员工认证、节点注册与凭据吊销、Project / Thread / Inbox 状态机、内置 Gateway（`/v1/node` 与 `/api/v1/events`）、嵌入式 Web UI |
 | `batond` | `cmd/batond` | 节点守护进程：主动经 TLS WebSocket 连接 `coordinator`，维护本地 SQLite 账本（`node.db`），管理 Session Worker、Project Agent Runtime 及受限文件浏览根目录 |
 | `baton-project-runtime` | `runtimes/project-agent` | 基于 Node.js / TypeScript 的 Project Agent 进程，通过本地 stdio JSON-RPC 与 `batond` 交互 |
 | Web UI | `web/` (`internal/webui/dist`) | React + TypeScript + Vite 前端，编译产物由 `coordinator` 直接内嵌提供 |
 
 ### 核心机制
 
-- **准备与执行分离**：任务被中心接受后，先通过 `dispatch_outbox` 发送 `prepare` 指令；节点将 `task_id -> execution_id -> session_id` 写入本地 SQLite 账本并启动独立 Session Worker 后才确认 `prepare`。Worker 向中心申请短时启动许可（`start_authorized`）并持久化 `start_intent` 后，才向底层 Agent 提交一次任务输入。
-- **统一 Agent 适配**：`internal/agent.Adapter` 统一抽象 `Start`、`SubmitInput`、`DeliverResult`、`HistoryContains`、`ReadHistory`、`Drain`、`Abort`、`Close` 与 `StopObserver`，支持 Pi RPC（`internal/agent/pi`）、Codex CLI app-server（`internal/agent/codex`）与 Kiro CLI ACP V3（`internal/agent/kiro`）。
-- **确定性回放验证**：`internal/agent/replay` 与 `tools/agent-replay` 提供跨平台 NDJSON 协议录制、脱敏规范化与故障派生回放（`CutAfter` / `Drop` / `Replace`），日常测试无需调用真实外部大模型。
-- **锁顺序与崩溃恢复**：中心事务同时锁定任务与执行记录时，固定先锁 `tasks` 再锁 `executions`；`batond` 重启后通过本地认证 IPC 重新附着存活的 Session Worker，不重复发送任务输入。
+- 消息与 Turn：中心在同一事务保存 Thread 消息和 `thread_outbox` 投递意图；设备上的独立 Session Worker 持久保存消息队列、Turn 边界和回复，确认保存后返回回执。重复命令和回复按稳定标识去重。
+- 统一 Agent 适配：`internal/agent.Adapter` 提供 `Start`、`Send`、`Steer`、`Abort`、`Drain`、`Sent`、`ReadHistory`、`Capabilities` 与 `Close`，支持 Pi RPC、Codex CLI app-server、Kiro CLI ACP V3；Project Agent 命令通过 shell Thread 执行。
+- 确定性回放验证：`internal/agent/replay` 与 `tools/agent-replay` 提供跨平台 NDJSON 协议录制、脱敏规范化与故障派生回放（`CutAfter` / `Drop` / `Replace`），日常测试无需调用真实外部大模型。
+- 崩溃恢复：Worker 在发送消息前持久保存意图，恢复时查询原生历史确认是否已发送；无法确认时标为状态未知，避免重复执行。`batond` 重启后通过本地认证 IPC 重新连接存活的 Worker，未确认报告继续补送。
+
+浏览器 API 使用 `/api/v1/threads`。Web 界面尚待按 Thread 设计实现，现有 Task 与 Session 页面使用的后端接口已移除。
 
 ## 环境要求
 
@@ -35,6 +37,8 @@ node tools/build.mjs
 该命令按锁文件安装前端依赖、构建 Web UI，再将 `coordinator`、`batond` 编译到 `bin/`（Windows 下带 `.exe` 后缀）。前端构建产物保存在 `internal/webui/dist`，不提交到 Git。Coordinator 在编译时嵌入这些文件，部署时无需 Node.js、pnpm 或独立前端服务。Project Agent Runtime 的安装另见 [Runtime 文档](runtimes/project-agent/README.md)。
 
 ### 2. 数据库迁移与员工账号管理
+
+实验室阶段从当前 schema 基线创建数据库，开发结构变化后重建本地数据，不提供旧开发版本升级路径。迁移执行器按版本记录幂等执行，正式发布后可用于增量迁移。
 
 ```sh
 # 执行中心数据库迁移

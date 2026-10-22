@@ -126,16 +126,16 @@ func buildFixture(t *testing.T, source, name string, testBinary ...bool) string 
 	return built.path
 }
 
-func startProjectPrepareStack(t *testing.T, extra map[string]string) *prepareStack {
+func startProjectStack(t *testing.T, extra map[string]string) *processStack {
 	t.Helper()
 	coord, batond := buildProjectBins(t)
-	return startPrepareStackWithBins(t, extra, coord, batond)
+	return startThreadStackWithBins(t, extra, coord, batond)
 }
 
 // Project 测试使用注入短租约的测试二进制，覆盖配置不参与这组构建。
 func buildProjectBins(t *testing.T) (string, string) {
 	t.Helper()
-	if os.Getenv("BATON_TEST_BIN_DIR") == "" && os.Getenv("BATON_TEST_LEGACY_BATOND") == "" {
+	if os.Getenv("BATON_TEST_BIN_DIR") == "" {
 		return buildBins(t)
 	}
 	return buildFixture(t, "../../cmd/coordinator", "coordinator", true), buildFixture(t, "../../cmd/batond", "batond", true)

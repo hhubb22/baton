@@ -75,7 +75,7 @@ func awaitThreadEnd(t *testing.T, a *Adapter) []agent.Event {
 	t.Helper()
 	var events []agent.Event
 	await(t, func() bool {
-		events = append(events, a.DrainEvents()...)
+		events = append(events, a.Drain()...)
 		for _, event := range events {
 			if event.Kind == agent.EventUncertain || event.Kind == agent.EventExited {
 				t.Fatalf("Unexpected Thread event: %+v", event)
@@ -200,7 +200,7 @@ func TestThreadReplayProcessExitAndLostAcceptance(t *testing.T) {
 			}
 			var exited, uncertain bool
 			await(t, func() bool {
-				for _, e := range a.DrainEvents() {
+				for _, e := range a.Drain() {
 					exited = exited || e.Kind == agent.EventExited
 					uncertain = uncertain || e.Kind == agent.EventUncertain
 					if e.Kind == agent.EventTurnEnded {

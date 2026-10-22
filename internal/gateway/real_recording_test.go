@@ -1,7 +1,6 @@
 package gateway_test
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -11,16 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"baton/internal/agent"
 	"baton/internal/agent/replay"
-	"baton/internal/task"
 )
 
-var realScenarios = []string{
-	"simple", "result_free_text", "interrupt_idle", "interrupt_mid_tool",
-	"interrupt_before_turn_started", "deliver_active", "deliver_idle",
-	"restore_load_only", "restore_missing", "provider_error", "symlinked_workspace",
-}
+var realScenarios = []string{"multi_turn", "stop", "restore_load_only", "restore_missing"}
 
 func realRecordingTool(t *testing.T) string {
 	t.Helper()
@@ -105,31 +98,6 @@ func (r *realRecording) bind(t *testing.T, key, value string) {
 	writeRealJSON(t, r.binary+".record.json", r.config)
 }
 
-// 录制开启时，要求工具开始帧已经落入原始记录，避免只凭工作目录里的文件就提前中止。
-func (r *realRecording) waitCodexCommandStarted(t *testing.T, ctx context.Context, threadID, turnID string) {
-	t.Helper()
-	if r.config == nil {
-		return
-	}
-	path := filepath.Join(r.config.RawDir, filepath.Base(t.Name())+".raw.ndjson")
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	for {
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal("无法读取工具开始的录制证据", err)
-		}
-		if recordedCodexCommandStarted(raw, threadID, turnID) {
-			return
-		}
-		select {
-		case <-ctx.Done():
-			t.Fatal("录制中没有匹配回合的 commandExecution 开始事件")
-		case <-time.After(20 * time.Millisecond):
-		}
-	}
-}
-
 func recordedCodexCommandStarted(raw []byte, threadID, turnID string) bool {
 	decoder := json.NewDecoder(strings.NewReader(string(raw)))
 	for {
@@ -167,77 +135,10 @@ func writeRealJSON(t *testing.T, path string, value any) {
 
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
 
-func realSymlinkedWorkspace(t *testing.T, work string) string {
-	t.Helper()
-	if runtime.GOOS != "darwin" {
-		t.Skip("此场景录制 macOS /tmp 到 /private/tmp 的路径别名")
-	}
-	dir, err := os.MkdirTemp("/tmp", "baton-real-symlink-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	link := filepath.Join(dir, "workspace")
-	if err := os.Symlink(work, link); err != nil {
-		t.Fatal(err)
-	}
-	return link
-}
-
-func assertRealCompleted(t *testing.T, out agent.Output, summary string) {
-	t.Helper()
-	candidate, err := task.ParseCandidate(out.Final)
-	if err != nil || candidate.Status != task.StatusCompleted || candidate.Summary != summary || !out.Exited || out.Uncertain {
-		t.Fatal("Agent 未以 settled 的结构化结果完成")
-	}
-}
-
-func waitRealStop(t *testing.T, a agent.StopObserver) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	defer cancel()
-	for {
-		if stopped, _ := a.StopStatus(); stopped {
-			return
-		}
-		select {
-		case <-ctx.Done():
-			t.Fatal("中止后未观察到停止事实")
-		case <-time.After(100 * time.Millisecond):
-		}
-	}
-}
-
-func waitRealFile(t *testing.T, ctx context.Context, path string) {
-	t.Helper()
-	deadline := time.NewTimer(2 * time.Minute)
-	defer deadline.Stop()
-	for {
-		if _, err := os.Stat(path); err == nil {
-			return
-		}
-		select {
-		case <-ctx.Done():
-			t.Fatal("真实测试超时")
-		case <-deadline.C:
-			t.Fatal("模型未到达工具门控文件")
-		case <-time.After(100 * time.Millisecond):
-		}
-	}
-}
-
 func writeRealPiWrapper(t *testing.T, wrapper, profile, binary string) {
 	t.Helper()
 	script := "#!/bin/sh\nexec /usr/bin/sandbox-exec -f " + shellQuote(profile) + " " + shellQuote(binary) + " \"$@\"\n"
 	if err := os.WriteFile(wrapper, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func assertRealOnceOnlyFile(t *testing.T, work string) {
-	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(work, "count.txt"))
-	if err != nil || string(raw) != "one\n" {
-		t.Fatal("restore changed the once-only fixture")
 	}
 }

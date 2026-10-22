@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"baton/internal/agent"
+	"baton/internal/monotime"
 	"baton/internal/protocol"
-	"baton/internal/startpermit"
 )
 
 type processThreadFake struct {
@@ -40,7 +40,7 @@ func TestThreadProcessTreeTimeout(t *testing.T) {
 		w := newThreadTestWorker(t, nil, fake)
 		adapter := &processThreadFake{threadFake: fake}
 		w.adapter = adapter
-		clock := startpermit.NewManual(time.Now())
+		clock := monotime.NewManual(time.Now())
 		w.clock = clock
 		threadMessage(t, w, "start", "queue")
 		defer func() {

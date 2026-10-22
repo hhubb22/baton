@@ -14,7 +14,6 @@ import (
 	"baton/internal/projectagent"
 	"baton/internal/protocol"
 	"baton/internal/store"
-	"baton/internal/task"
 )
 
 func execArgs(h *toolHarness, wait int) map[string]any {
@@ -74,11 +73,11 @@ func TestProjectExecParametersAndIdempotentRecovery(t *testing.T) {
 		}
 	}
 	req := h.save(t, "nodes.exec", execArgs(h, 600))
-	h.repo.SetTaskCommitHook(func(context.Context) error { return errors.New("injected") })
+	h.repo.SetCommitHook(func(context.Context) error { return errors.New("injected") })
 	if _, err := h.repo.ProjectRuntime(h.ctx, h.src, req); err == nil {
 		t.Fatal("注入失败未生效")
 	}
-	h.repo.SetTaskCommitHook(nil)
+	h.repo.SetCommitHook(nil)
 	if n := countRows(t, h.ctx, h.pool, `SELECT count(*) FROM threads`); n != 0 {
 		t.Fatal(n)
 	}
@@ -119,9 +118,6 @@ func TestProjectExecParametersAndIdempotentRecovery(t *testing.T) {
 	if _, err = h.repo.ProjectRuntime(h.ctx, h.src, wait); err != nil {
 		t.Fatal(err)
 	}
-	if n := countRows(t, h.ctx, h.pool, `SELECT count(*) FROM tasks`); n != 0 {
-		t.Fatal("命令创建了旧任务", n)
-	}
 	if _, err = h.repo.SendThreadMessage(h.ctx, h.owner, id, store.ThreadMessageInput{ClientMessageID: "second", Content: "again"}); err == nil {
 		t.Fatal("shell 接受第二条消息")
 	}
@@ -153,9 +149,12 @@ func TestProjectExecCompletionOutputAndNoDuplicateInputs(t *testing.T) {
 			e := out.(projectagent.Event)
 			raw, bad := toolText(t, e)
 			var result struct {
-				ThreadID string             `json:"thread_id"`
-				Status   string             `json:"status"`
-				Command  task.CommandResult `json:"command_result"`
+				ThreadID string `json:"thread_id"`
+				Status   string `json:"status"`
+				Command  struct {
+					ExitCode int    `json:"exit_code"`
+					Output   string `json:"output"`
+				} `json:"command_result"`
 			}
 			if err = json.Unmarshal(raw, &result); err != nil || bad || result.ThreadID != p.ThreadID || result.Status != "stopped" || result.Command.ExitCode != 7 || result.Command.Output == "" {
 				t.Fatal(string(raw), err)
@@ -219,21 +218,5 @@ func TestProjectExecWaitDeadlineTerminalRace(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestProjectExecPublicTaskCannotBypassConversation(t *testing.T) {
-	h := newToolHarness(t)
-	enableExec(t, h)
-	if _, err := h.pool.Exec(h.ctx, `UPDATE nodes SET capabilities=array_append(capabilities,'shell'),default_agent_type='shell' WHERE id=$1`, h.src.NodeID); err != nil {
-		t.Fatal(err)
-	}
-	shell := "shell"
-	for _, agent := range []*string{&shell, nil} {
-		_, err := h.repo.AcceptTask(h.ctx, h.owner, task.Input{RequestID: fmt.Sprint(agent == nil), Description: "printf unaudited", TargetNodeID: &h.src.NodeID, AgentType: agent})
-		var rejection *task.Rejection
-		if !errors.As(err, &rejection) || rejection.Code != task.CodeUnsupported {
-			t.Fatal(err)
-		}
 	}
 }

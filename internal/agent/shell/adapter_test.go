@@ -10,14 +10,12 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-	"time"
 
 	"baton/internal/agent"
 	"baton/internal/fileaccess"
 	"baton/internal/identity"
 	"baton/internal/projectexec"
 	"baton/internal/protocol"
-	"baton/internal/task"
 )
 
 func configured(t *testing.T) (*Adapter, string) {
@@ -37,11 +35,7 @@ func configured(t *testing.T) (*Adapter, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	executionID, err := identity.NewUUID()
-	if err != nil {
-		t.Fatal(err)
-	}
-	a := New(agent.Config{DataDir: data, Directory: root, SessionDir: filepath.Join(data, "sessions", sessionID, "native"), SessionID: sessionID, ExecutionID: executionID})
+	a := New(agent.Config{DataDir: data, Directory: root, SessionDir: filepath.Join(data, "sessions", sessionID, "native"), SessionID: sessionID})
 	if err := a.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -52,39 +46,7 @@ func configured(t *testing.T) (*Adapter, string) {
 	})
 	return a, root
 }
-func submit(t *testing.T, a *Adapter, command string) agent.Output {
-	t.Helper()
-	payload, _ := json.Marshal(map[string]any{"description": command, "generation": 1})
-	out, err := a.SubmitInput(context.Background(), string(payload))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return out
-}
-func result(t *testing.T, a *Adapter, out agent.Output) task.Candidate {
-	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
-	for !out.Exited && time.Now().Before(deadline) {
-		for _, next := range a.Drain() {
-			if next.Exited {
-				out = next
-				break
-			}
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if !out.Exited {
-		t.Fatal("命令没有结束")
-	}
-	got, err := task.ParseCandidate(out.Final)
-	if err != nil {
-		t.Fatalf("无效的命令结果: %v %s", err, out.Final)
-	}
-	if got.CommandResult == nil {
-		t.Fatal("缺少命令结果")
-	}
-	return got
-}
+
 func TestCommandSuccessFailureAndHistory(t *testing.T) {
 	for _, failed := range []bool{false, true} {
 		t.Run(map[bool]string{true: "failure", false: "success"}[failed], func(t *testing.T) {
@@ -97,30 +59,26 @@ func TestCommandSuccessFailureAndHistory(t *testing.T) {
 				command += "; exit 7"
 			}
 			initial := submit(t, a, command)
-			if initial.Final != "" {
+			if len(initial) != 0 {
 				t.Fatal("命令启动阻塞了 Worker")
 			}
 			got := result(t, a, initial)
-			wantStatus, wantCode := task.StatusCompleted, 0
+			wantCode := 0
 			if failed {
-				wantStatus, wantCode = task.StatusFailed, 7
+				wantCode = 7
 			}
-			if got.Status != wantStatus || got.CommandResult.ExitCode != wantCode || got.CommandResult.TotalBytes != 12 || !strings.Contains(got.CommandResult.Output, "stdout") || !strings.Contains(got.CommandResult.Output, "stderr") {
-				t.Fatalf("命令结果不正确: %+v %+v", got, *got.CommandResult)
+			if got.ExitCode != wantCode || got.TotalBytes != 12 || !strings.Contains(got.Output, "stdout") || !strings.Contains(got.Output, "stderr") {
+				t.Fatal(got)
 			}
+
 			page, err := a.ReadHistory(context.Background(), "")
 			if err != nil || !strings.Contains(string(page.Data), "stdout") {
 				t.Fatalf("输出没有保存在本地: %s %v", page.Data, err)
 			}
-			if contains, err := a.HistoryContains("delivery", false); contains || err != nil {
-				t.Fatal("命令错误地确认了子任务投递")
+			if err := a.Send(context.Background(), "second", "exit 0", ""); err == nil {
+				t.Fatal("second command accepted")
 			}
-			if _, err := a.DeliverResult(context.Background(), "delivery", "{}"); err == nil {
-				t.Fatal("命令接受了子任务结果")
-			}
-			if _, err := a.SubmitInput(context.Background(), `{"description":"exit 0","generation":1}`); err == nil {
-				t.Fatal("同一个执行接受了第二条命令")
-			}
+
 		})
 	}
 }
@@ -164,9 +122,9 @@ func TestExecutionRechecksLocalAuthorization(t *testing.T) {
 			if runtime.GOOS == "windows" {
 				command = "Set-Content -LiteralPath '" + strings.ReplaceAll(marker, "'", "''") + "' -Value 'bad'"
 			}
-			got := result(t, a, submit(t, a, command))
-			if got.Status != task.StatusFailed || got.CommandResult.ExitCode != -1 {
-				t.Fatalf("未明确拒绝启动: %+v", got)
+			err := a.Send(context.Background(), "denied", command, "")
+			if err == nil {
+				t.Fatal("未明确拒绝启动")
 			}
 			if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
 				t.Fatal("授权失效后执行了命令")
@@ -182,7 +140,7 @@ func TestRestoreNeverRestartsCommand(t *testing.T) {
 	if err := restored.Start(context.Background()); !errors.Is(err, agent.ErrHistoryMissing) {
 		t.Fatalf("恢复结果: %v", err)
 	}
-	if _, err := restored.SubmitInput(context.Background(), `{"description":"exit 0","generation":1}`); err == nil {
+	if err := restored.Send(context.Background(), "message", "exit 0", ""); err == nil {
 		t.Fatal("恢复缺少完成记录的执行时重新接受了输入")
 	}
 }
@@ -196,10 +154,10 @@ func TestBoundedOutputRetainsExactHeadTailAndRawByteCount(t *testing.T) {
 			}
 			got := b.result(0)
 			want := raw
-			if size > task.CommandOutputBytes {
-				want = raw[:task.CommandOutputBytes/2] + raw[len(raw)-task.CommandOutputBytes/2:]
+			if size > commandOutputBytes {
+				want = raw[:commandOutputBytes/2] + raw[len(raw)-commandOutputBytes/2:]
 			}
-			if got.Output != want || got.TotalBytes != int64(size) || got.Truncated != (size > task.CommandOutputBytes) {
+			if got.Output != want || got.TotalBytes != int64(size) || got.Truncated != (size > commandOutputBytes) {
 				t.Fatalf("size=%d chunk=%d retained=%d total=%d", size, chunk, len(got.Output), got.TotalBytes)
 			}
 		}
@@ -218,14 +176,14 @@ func TestCommandOutputIsBoundedInRealProcess(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		command = "[Console]::Out.Write(('a' * 40000) + 'END')"
 	}
-	got := result(t, a, submit(t, a, command)).CommandResult
-	if got.TotalBytes != 40003 || !got.Truncated || len(got.Output) != task.CommandOutputBytes || !strings.HasSuffix(got.Output, "END") {
+	got := result(t, a, submit(t, a, command))
+	if got.TotalBytes != 40003 || !got.Truncated || len(got.Output) != commandOutputBytes || !strings.HasSuffix(got.Output, "END") {
 		t.Fatalf("真实进程输出截断不正确: %+v", got)
 	}
 }
 
 func TestOutputEncodingBoundsEscapedPayload(t *testing.T) {
-	for _, raw := range []string{strings.Repeat("<", task.CommandOutputBytes), strings.Repeat("\\", task.CommandOutputBytes), strings.Repeat("\x00", task.CommandOutputBytes), "\u0085"} {
+	for _, raw := range []string{strings.Repeat("<", commandOutputBytes), strings.Repeat("\\", commandOutputBytes), strings.Repeat("\x00", commandOutputBytes), "\u0085"} {
 		b := &boundedOutput{}
 		_, _ = b.Write([]byte(raw))
 		got := b.result(0)
@@ -236,13 +194,35 @@ func TestOutputEncodingBoundsEscapedPayload(t *testing.T) {
 		if err != nil || string(decoded) != raw {
 			t.Fatal("输出编码改变了保留字节")
 		}
-		out := formatResult(got, "")
-		if _, err := task.ParseCandidate(out.Final); err != nil {
-			t.Fatal(err)
-		}
-		nested, _ := json.Marshal(out.Final)
+		nested, _ := json.Marshal(got)
 		if len(nested) > 64*1024 {
 			t.Fatalf("编码后的结果不能进入消息: %d", len(nested))
 		}
 	}
+}
+
+func submit(t *testing.T, a *Adapter, command string) []agent.Event {
+	t.Helper()
+	if err := a.Send(context.Background(), "message", command, ""); err != nil {
+		t.Fatal(err)
+	}
+	return nil
+}
+func result(t *testing.T, a *Adapter, _ []agent.Event) commandOutput {
+	t.Helper()
+	events := threadEvents(t, a)
+	for _, e := range events {
+		if e.Kind == agent.EventReply {
+			var meta struct {
+				ExitCode int `json:"exit_code"`
+				Encoding string
+			}
+			if err := json.Unmarshal(e.Metadata, &meta); err != nil {
+				t.Fatal(err)
+			}
+			return commandOutput{Encoding: meta.Encoding, ExitCode: meta.ExitCode, Output: e.Content, TotalBytes: e.OriginalBytes, Truncated: e.Truncated}
+		}
+	}
+	t.Fatal("missing reply", events)
+	return commandOutput{}
 }

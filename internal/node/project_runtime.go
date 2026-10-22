@@ -19,11 +19,11 @@ import (
 	"time"
 
 	"baton/internal/identity"
+	"baton/internal/monotime"
 	"baton/internal/privatefile"
 	"baton/internal/protocol"
 	"baton/internal/session"
 	"baton/internal/sidecar"
-	"baton/internal/startpermit"
 )
 
 const projectRuntimeMaxBytes = 192 << 10
@@ -57,12 +57,12 @@ type projectRuntimeManager struct {
 	reports         *runtimeReports
 	mu              sync.Mutex
 	closed          bool
-	loop            *startLoop
+	loop            *runtimeRPC
 	runs            map[string]*projectRuntimeProcess
 	wg              sync.WaitGroup
 	renewInterval   time.Duration
 	leaseDeadline   time.Duration
-	clock           startpermit.Timer
+	clock           monotime.Timer
 	controlReceipts bool
 	wakeReceipts    chan projectWakeReceipt
 	cleanupReady    chan struct{}
@@ -96,21 +96,15 @@ func newProjectRuntimeManagerWithTiming(ctx context.Context, ledger *Ledger, tim
 	if err != nil {
 		return nil, err
 	}
-	if _, err := execProjectRuntime(ctx, ledger.db, `CREATE TABLE IF NOT EXISTS project_runtime_runs (run_id TEXT PRIMARY KEY, lease_epoch INTEGER NOT NULL, state TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '')`); err != nil {
-		return nil, err
-	}
-	if err := ensureProjectRuntimeCleanup(ledger.db); err != nil {
-		return nil, err
-	}
 	ctx, cancel := context.WithCancel(ctx)
-	m := &projectRuntimeManager{ctx: ctx, cancel: cancel, ledger: ledger, runs: map[string]*projectRuntimeProcess{}, renewInterval: timing.RenewInterval, leaseDeadline: timing.LeaseDeadline, clock: startpermit.NewClock(), wakeReceipts: make(chan projectWakeReceipt, 64), cleanupReady: make(chan struct{}, 1)}
+	m := &projectRuntimeManager{ctx: ctx, cancel: cancel, ledger: ledger, runs: map[string]*projectRuntimeProcess{}, renewInterval: timing.RenewInterval, leaseDeadline: timing.LeaseDeadline, clock: monotime.NewClock(), wakeReceipts: make(chan projectWakeReceipt, 64), cleanupReady: make(chan struct{}, 1)}
 	m.wg.Add(2)
 	go func() { defer m.wg.Done(); m.wakeReceiptLoop() }()
 	go func() { defer m.wg.Done(); m.cleanupReceiptLoop() }()
 	return m, nil
 }
 
-func (m *projectRuntimeManager) setLoop(loop *startLoop) {
+func (m *projectRuntimeManager) setLoop(loop *runtimeRPC) {
 	m.mu.Lock()
 	if m.loop != loop {
 		m.controlReceipts = false
@@ -147,7 +141,7 @@ func (m *projectRuntimeManager) call(ctx context.Context, req protocol.ProjectRu
 	return m.callOnLoop(ctx, req, loop)
 }
 
-func (m *projectRuntimeManager) callOnLoop(ctx context.Context, req protocol.ProjectRuntimeRequest, loop *startLoop) protocol.ProjectRuntimeResult {
+func (m *projectRuntimeManager) callOnLoop(ctx context.Context, req protocol.ProjectRuntimeRequest, loop *runtimeRPC) protocol.ProjectRuntimeResult {
 	if loop == nil {
 		return projectRuntimeFailure("unavailable")
 	}

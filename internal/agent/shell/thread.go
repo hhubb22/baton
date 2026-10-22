@@ -7,10 +7,9 @@ import (
 	"fmt"
 
 	"baton/internal/agent"
-	"baton/internal/task"
 )
 
-var _ agent.ThreadAdapter = (*Adapter)(nil)
+var _ agent.Adapter = (*Adapter)(nil)
 
 func (*Adapter) Capabilities() agent.Capabilities            { return agent.Capabilities{} }
 func (*Adapter) Steer(context.Context, string, string) error { return agent.ErrUnsupported }
@@ -33,14 +32,18 @@ func (a *Adapter) Send(ctx context.Context, id, text, model string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	a.threadMode, a.messageID, a.submitted = true, id, true
+	a.messageID, a.submitted = id, true
 	return a.launchLocked(ctx, text)
 }
 
-func (a *Adapter) DrainEvents() []agent.Event {
+func (a *Adapter) Drain() []agent.Event {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.maintainLocked()
+	if a.diagnostic != nil {
+		a.events = append(a.events, *a.diagnostic)
+		a.diagnostic = nil
+	}
 	events := a.events
 	a.events = nil
 	return events
@@ -50,27 +53,19 @@ func (a *Adapter) Sent(id string) (bool, error) {
 	if id == "" {
 		return false, agent.ErrHistoryUnread
 	}
-	record, err := a.loadCompletion(true)
+	record, err := a.loadCompletion()
 	if err != nil {
 		return false, fmt.Errorf("%w: %v", agent.ErrHistoryUnread, err)
 	}
-	if record.SchemaVersion != 2 {
+	if record.SchemaVersion != 3 {
 		return false, agent.ErrHistoryUnread
 	}
 	return record.MessageID == id, nil
 }
 
 func (a *Adapter) completionEventsLocked(record *completionRecord) {
-	if record.SchemaVersion != 2 {
-		return
-	}
-	candidate, err := task.ParseCandidate(string(record.Result))
-	if err != nil || candidate.CommandResult == nil {
-		a.events = append(a.events, agent.Event{Kind: agent.EventUncertain})
-		return
-	}
-	a.threadMode, a.messageID = true, record.MessageID
-	result := candidate.CommandResult
+	a.messageID = record.MessageID
+	result := record.Result
 	metadata, _ := json.Marshal(struct {
 		ExitCode int    `json:"exit_code"`
 		Encoding string `json:"encoding,omitempty"`

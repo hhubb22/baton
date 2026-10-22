@@ -22,7 +22,6 @@ import (
 type Server struct {
 	projectPreviews map[string]projectagent.Preview
 	store           *store.Store
-	signer          node.Signer
 	public          ed25519.PublicKey
 	log             *slog.Logger
 	sender          gateway.Sender
@@ -46,7 +45,7 @@ func New(st *store.Store, signer node.Signer, log *slog.Logger, budgets ...*prot
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &Server{budget: budget, store: st, signer: signer, public: pub, log: log, fileWait: map[string]chan fileNotice{}}, nil
+	return &Server{budget: budget, store: st, public: pub, log: log, fileWait: map[string]chan fileNotice{}}, nil
 }
 
 // SetSender 在开放监听前设置一次，业务层不持有传输连接。
@@ -130,30 +129,6 @@ func (s *Server) onEnvelope(ctx context.Context, connID string, raw json.RawMess
 		return
 	case protocol.BodySessionResult:
 		s.noteSessionResult(env)
-		return
-	case protocol.BodyAgentRequest:
-		s.onAgentRequest(ctx, connID, env)
-		return
-	case protocol.BodyExecutionControl:
-		s.onExecutionControl(ctx, connID, env)
-		return
-	case protocol.BodyChildDeliveries, protocol.BodyChildDeliveryAck:
-		s.onChildDelivery(ctx, connID, env)
-		return
-	case protocol.BodyPrepareResult:
-		s.notePrepareResult(ctx, env)
-		return
-	case protocol.BodyStartPermit:
-		s.onStartPermit(ctx, connID, env)
-		return
-	case protocol.BodyStartReport:
-		s.onStartReport(ctx, connID, env)
-		return
-	case protocol.BodyExecutionInput:
-		s.onExecutionInput(ctx, connID, env)
-		return
-	case protocol.BodyExecutionReport:
-		s.onExecutionReport(ctx, connID, env)
 		return
 	}
 	if kind.Type == protocol.BodyFileResult {

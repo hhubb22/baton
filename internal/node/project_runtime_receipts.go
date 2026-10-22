@@ -8,7 +8,7 @@ import (
 
 type projectWakeReceipt struct {
 	command protocol.ProjectRunCommand
-	loop    *startLoop
+	loop    *runtimeRPC
 }
 
 func (m *projectRuntimeManager) receiveWake(command protocol.ProjectRunCommand) {
@@ -79,6 +79,6 @@ func (m *projectRuntimeManager) sendWakeReceipt(receipt projectWakeReceipt) {
 	}{receipt.command.InputIDs})
 	ctx, cancel := context.WithTimeout(m.ctx, projectReceiptTimeout)
 	defer cancel()
-	// 固定到观察过能力的连接，重连到旧中心时不会发送新操作。
+	// 固定到已确认能力的连接，每次重连都重新核实能力。
 	m.callOnLoop(ctx, protocol.ProjectRuntimeRequest{RunID: receipt.command.RunID, LeaseEpoch: receipt.command.LeaseEpoch, Operation: "wake_received", Payload: payload}, receipt.loop)
 }

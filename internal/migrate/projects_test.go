@@ -1,71 +1,89 @@
 package migrate
 
 import (
-	"io/fs"
+	"fmt"
+	"strings"
 	"testing"
-	"testing/fstest"
 
-	"baton/migrations"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func TestProjectsUpgradeExistingDatabaseAndRepeat(t *testing.T) {
-	pool := openTestDB(t)
+func seedProject(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	execOK(t, pool, `INSERT INTO projects(id,employee_id,title) VALUES($1,$2,'项目')`, testProject, testEmployee)
+	execOK(t, pool, `INSERT INTO project_agents(id,employee_id,project_id,provider,model) VALUES($1,$2,$3,'pi','model-a')`, testAgent, testEmployee, testProject)
+	execOK(t, pool, `INSERT INTO conversations(id,employee_id,agent_id) VALUES($1,$2,$3)`, testConversation, testEmployee, testAgent)
+}
+
+func TestProjectHistoryAndDeferredMemoryForeignKey(t *testing.T) {
+	pool := migratedTestDB(t)
+	seedIdentity(t, pool)
+	seedProject(t, pool)
 	ctx := t.Context()
-	before := fstest.MapFS{}
-	names, err := Versions()
+	execOK(t, pool, `INSERT INTO conversation_events(conversation_id,seq,employee_id,kind,payload) VALUES($1,1,$2,'input','{}')`, testConversation, testEmployee)
+	execFails(t, pool, "23514", `UPDATE conversation_events SET payload='{"changed":true}'`)
+	execFails(t, pool, "23514", `DELETE FROM conversation_events`)
+	execFails(t, pool, "23503", `UPDATE project_agents SET employee_id=$1`, testOtherEmployee)
+	const memory = "60000000-0000-4000-8000-000000000001"
+	const entrySQL = `INSERT INTO project_memory_entries(id,employee_id,project_id,title,current_revision) VALUES($1,$2,$3,'记忆',1)`
+	execFails(t, pool, "23503", entrySQL, memory, testEmployee, testProject)
+	tx, err := pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range names {
-		if name >= "0016" {
-			continue
-		}
-		body, err := fs.ReadFile(migrations.Files, name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		before[name] = &fstest.MapFile{Data: body}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, entrySQL, memory, testEmployee, testProject); err != nil {
+		t.Fatal("当前修订外键未延迟到提交", err)
 	}
-	if err := upFS(ctx, pool, before); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO project_memory_revisions(entry_id,employee_id,revision,content,author) VALUES($1,$2,1,'内容','agent')`, memory, testEmployee); err != nil {
 		t.Fatal(err)
 	}
-	const employee = "00000000-0000-4000-8000-000000000001"
-	const node = "10000000-0000-4000-8000-000000000001"
-	if _, err := pool.Exec(ctx, `INSERT INTO employees(id,username,display_name,auth_source,external_subject,must_change_password,created_at,updated_at)
-        VALUES($1,'existing','已有员工','directory','existing',false,now(),now())`, employee); err != nil {
+	if err := tx.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO nodes(id,employee_id,display_name,system_name,capabilities,registration_seq,registered_at,credential_version,revoked_at)
-        VALUES($1,$2,'已吊销设备','linux','{}',nextval('node_registration_seq'),now(),1,now())`, node, employee); err != nil {
-		t.Fatal(err)
+	execFails(t, pool, "23514", `UPDATE project_memory_revisions SET content='changed'`)
+	execFails(t, pool, "23514", `DELETE FROM project_memory_revisions`)
+}
+
+func TestProjectInputTypesAndPayloadLimits(t *testing.T) {
+	pool := migratedTestDB(t)
+	seedIdentity(t, pool)
+	seedProject(t, pool)
+	const inputSQL = `INSERT INTO project_agent_input_queue(employee_id,agent_id,source_type,source_key,payload,payload_hash)
+		VALUES($1,$2,$3,$4,$5::jsonb,decode(repeat('00',32),'hex'))`
+	for _, kind := range []string{"user_message", "attention_answer", "memory_updated", "project_updated", "thread_reply", "turn_ended", "thread_message_failed"} {
+		execOK(t, pool, inputSQL, testEmployee, testAgent, kind, kind, `{}`)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO employee_settings(employee_id,default_device_node_id,updated_at) VALUES($1,$2,'2026-01-01T00:00:00Z')`, employee, node); err != nil {
-		t.Fatal(err)
+	for _, kind := range []string{"task_result", "user_task_result", "unrecognized"} {
+		execFails(t, pool, "23514", inputSQL, testEmployee, testAgent, kind, kind, `{}`)
 	}
-	if err := Up(ctx, pool); err != nil {
-		t.Fatal(err)
+	execFails(t, pool, "23503", inputSQL, testOtherEmployee, testAgent, "user_message", "foreign", `{}`)
+	execFails(t, pool, "23505", inputSQL, testEmployee, testAgent, "user_message", "user_message", `{}`)
+	for i, tc := range []struct {
+		kind              string
+		size              int
+		command, accepted bool
+	}{
+		{"thread_reply", 40000, false, true}, {"thread_reply", 41000, false, false},
+		{"thread_message_failed", 40000, false, true}, {"thread_message_failed", 41000, false, false},
+		{"turn_ended", 4000, false, true}, {"turn_ended", 4100, false, false},
+		{"turn_ended", 70000, true, true}, {"turn_ended", 74000, true, false},
+		{"memory_updated", 1000, false, true}, {"memory_updated", 1024, false, false},
+		{"project_updated", 4000, false, true}, {"project_updated", 4096, false, false},
+		{"attention_answer", 32000, false, true}, {"attention_answer", 32768, false, false},
+		{"user_message", 74000, false, false},
+	} {
+		t.Run(fmt.Sprintf("%s/%d/command=%t", tc.kind, tc.size, tc.command), func(t *testing.T) {
+			payload := `{"data":"` + strings.Repeat("x", tc.size) + `"}`
+			if tc.command {
+				payload = `{"command_result":` + payload + `}`
+			}
+			key := fmt.Sprintf("size:%d", i)
+			if tc.accepted {
+				execOK(t, pool, inputSQL, testEmployee, testAgent, tc.kind, key, payload)
+			} else {
+				execFails(t, pool, "23514", inputSQL, testEmployee, testAgent, tc.kind, key, payload)
+			}
+		})
 	}
-	if err := Check(ctx, pool); err != nil {
-		t.Fatal(err)
-	}
-	var defaultNode string
-	if err := pool.QueryRow(ctx, `SELECT default_device_node_id::text FROM employee_settings WHERE employee_id=$1`, employee).Scan(&defaultNode); err != nil || defaultNode != node {
-		t.Fatalf("已有默认设备变化: %s %v", defaultNode, err)
-	}
-	fingerprint := schemaFingerprint(t, ctx, pool)
-	if err := Up(ctx, pool); err != nil {
-		t.Fatal(err)
-	}
-	if fingerprint != schemaFingerprint(t, ctx, pool) {
-		t.Fatal("重复迁移改变结构或版本")
-	}
-	for _, table := range []string{"projects", "project_agents", "conversations", "conversation_events", "project_agent_input_queue", "project_memory_entries", "project_memory_revisions", "agent_runs"} {
-		if !tableExists(t, ctx, pool, table) {
-			t.Fatalf("缺少 %s", table)
-		}
-		assertInSchema(t, ctx, pool, table)
-	}
-	assertFunctionSchema(t, ctx, pool, "reject_project_history_mutation")
-	assertTriggerSchema(t, ctx, pool, "conversation_events_append_only")
-	assertTriggerSchema(t, ctx, pool, "project_memory_revisions_append_only")
 }

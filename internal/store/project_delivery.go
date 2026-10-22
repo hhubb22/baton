@@ -185,7 +185,7 @@ func claimProjectWakes(ctx context.Context, tx pgx.Tx) ([]projectagent.RunComman
 		if !valid {
 			continue
 		}
-		inputs, err := tx.Query(ctx, `SELECT id,source_type,payload,wake_attempts,clock_timestamp()
+		inputs, err := tx.Query(ctx, `SELECT id,payload,wake_attempts,clock_timestamp()
  FROM project_agent_input_queue WHERE agent_id=$1 AND delivered_seq IS NULL AND wake_required AND wake_next_at<=statement_timestamp()
  ORDER BY wake_next_at,id LIMIT 32 FOR UPDATE SKIP LOCKED`, w.agentID)
 		if err != nil {
@@ -193,7 +193,6 @@ func claimProjectWakes(ctx context.Context, tx pgx.Tx) ([]projectagent.RunComman
 		}
 		type input struct {
 			id      int64
-			kind    string
 			payload []byte
 			attempt int
 			now     time.Time
@@ -201,7 +200,7 @@ func claimProjectWakes(ctx context.Context, tx pgx.Tx) ([]projectagent.RunComman
 		var chosen []input
 		for inputs.Next() {
 			var i input
-			if err = inputs.Scan(&i.id, &i.kind, &i.payload, &i.attempt, &i.now); err != nil {
+			if err = inputs.Scan(&i.id, &i.payload, &i.attempt, &i.now); err != nil {
 				inputs.Close()
 				return nil, err
 			}
@@ -214,10 +213,8 @@ func claimProjectWakes(ctx context.Context, tx pgx.Tx) ([]projectagent.RunComman
 		}
 		for len(chosen) > 0 {
 			w.command.Command.InputIDs = nil
-			w.command.Command.TaskUpdates = nil
 			w.command.Command.ThreadUpdates = nil
 			threadIDs := map[string]bool{}
-			updates := map[string]int64{}
 			for _, i := range chosen {
 				w.command.Command.InputIDs = append(w.command.Command.InputIDs, i.id)
 				var thread struct {
@@ -228,15 +225,6 @@ func claimProjectWakes(ctx context.Context, tx pgx.Tx) ([]projectagent.RunComman
 				}
 				if threadID(thread.ThreadID) {
 					threadIDs[thread.ThreadID] = true
-				}
-				if i.kind == "task_result" || i.kind == "user_task_result" {
-					var u protocol.ProjectTaskUpdate
-					if err = json.Unmarshal(i.payload, &u); err != nil {
-						return nil, err
-					}
-					if u.TaskID != "" && u.Version > updates[u.TaskID] {
-						updates[u.TaskID] = u.Version
-					}
 				}
 			}
 			ids := make([]string, 0, len(threadIDs))
@@ -263,12 +251,6 @@ func claimProjectWakes(ctx context.Context, tx pgx.Tx) ([]projectagent.RunComman
 					return nil, err
 				}
 			}
-			for id, version := range updates {
-				w.command.Command.TaskUpdates = append(w.command.Command.TaskUpdates, protocol.ProjectTaskUpdate{TaskID: id, Version: version})
-			}
-			sort.Slice(w.command.Command.TaskUpdates, func(i, j int) bool {
-				return w.command.Command.TaskUpdates[i].TaskID < w.command.Command.TaskUpdates[j].TaskID
-			})
 			raw, err := protocol.MarshalJSON(w.command.Command)
 			if err != nil {
 				return nil, err

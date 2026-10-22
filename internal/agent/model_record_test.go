@@ -15,6 +15,7 @@ import (
 	"baton/internal/agent/codex"
 	"baton/internal/agent/pi"
 	"baton/internal/agent/replay"
+
 	"github.com/google/uuid"
 )
 
@@ -77,7 +78,7 @@ func TestRealThreadModelSwitch(t *testing.T) {
 			}
 			writeModelTestJSON(t, tool+".record.json", recordConfig)
 			c.Binary = tool
-			var a agent.ThreadAdapter
+			var a agent.Adapter
 			var models func(context.Context) (agent.ModelCatalog, error)
 			if kind == "pi" {
 				p := pi.New(c)
@@ -183,13 +184,13 @@ func writeModelTestJSON(t *testing.T, path string, value any) {
 	}
 }
 
-func waitModelTestTurn(t *testing.T, ctx context.Context, a agent.ThreadAdapter, native string) {
+func waitModelTestTurn(t *testing.T, ctx context.Context, a agent.Adapter, native string) {
 	t.Helper()
 	started, reply := false, false
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		for _, e := range a.DrainEvents() {
+		for _, e := range a.Drain() {
 			switch e.Kind {
 			case agent.EventTurnStarted:
 				started = true

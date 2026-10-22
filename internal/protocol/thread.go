@@ -50,6 +50,8 @@ type ThreadReport struct {
 	Metadata          json.RawMessage `json:"metadata,omitempty"`
 	Reason            string          `json:"reason,omitempty"`
 	QueueEmpty        bool            `json:"queue_empty,omitempty"`
+	// HistoryUnavailable 表示节点已无法读取原 Worker 账本，中心据此结束仍活动的 Turn。
+	HistoryUnavailable bool `json:"history_unavailable,omitempty"`
 }
 
 type ThreadReportResult struct {

@@ -38,11 +38,11 @@ func createProjectThread(t *testing.T, h *toolHarness) string {
 func TestProjectThreadToolsAtomicCreationAndReplay(t *testing.T) {
 	h := newToolHarness(t)
 	req := h.save(t, "threads.create", threadToolArgs(t, h))
-	h.repo.SetTaskCommitHook(func(context.Context) error { return errors.New("injected") })
+	h.repo.SetCommitHook(func(context.Context) error { return errors.New("injected") })
 	if _, err := h.repo.ProjectRuntime(h.ctx, h.src, req); err == nil {
 		t.Fatal("未回滚")
 	}
-	h.repo.SetTaskCommitHook(nil)
+	h.repo.SetCommitHook(nil)
 	for _, table := range []string{"threads", "thread_messages", "thread_outbox"} {
 		if n := countRows(t, h.ctx, h.pool, "SELECT count(*) FROM "+table); n != 0 {
 			t.Fatal(table, n)
@@ -183,6 +183,9 @@ func TestProjectThreadPAA16EmployeeThenAgentTurnAndRead(t *testing.T) {
 
 func TestProjectThreadScopeAndSteerRejections(t *testing.T) {
 	h := newToolHarness(t)
+	if _, err := h.pool.Exec(h.ctx, `UPDATE node_runtime_reports SET report=jsonb_set(report,'{agents,0,capabilities,steer}','false') WHERE node_id=$1`, h.src.NodeID); err != nil {
+		t.Fatal(err)
+	}
 	id := createProjectThread(t, h)
 	if _, bad := h.call(t, "threads.send", map[string]any{"thread_id": id, "message": "steer", "mode": "steer"}); !bad {
 		t.Fatal("未声明 steer 能力仍接受")

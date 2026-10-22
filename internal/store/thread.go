@@ -94,9 +94,8 @@ func ThreadDirectoryAllowed(system, directory string, roots []protocol.RuntimeRo
 
 func threadNode(ctx context.Context, tx pgx.Tx, employeeID, nodeID, agentType, directory string, steer bool, model *string, switchModel bool) error {
 	var system string
-	var caps []string
 	var reportRaw []byte
-	err := tx.QueryRow(ctx, `SELECT n.system_name,n.capabilities,COALESCE(r.report,'{}'::jsonb) FROM nodes n LEFT JOIN node_runtime_reports r ON r.node_id=n.id WHERE n.id=$1::uuid AND n.employee_id=$2::uuid AND n.revoked_at IS NULL`, nodeID, employeeID).Scan(&system, &caps, &reportRaw)
+	err := tx.QueryRow(ctx, `SELECT n.system_name,COALESCE(r.report,'{}'::jsonb) FROM nodes n LEFT JOIN node_runtime_reports r ON r.node_id=n.id WHERE n.id=$1::uuid AND n.employee_id=$2::uuid AND n.revoked_at IS NULL`, nodeID, employeeID).Scan(&system, &reportRaw)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -124,21 +123,14 @@ func threadNode(ctx context.Context, tx pgx.Tx, employeeID, nodeID, agentType, d
 	canSwitch := false
 	var models []protocol.RuntimeModel
 	defaultModel := ""
-	if len(report.Agents) > 0 {
-		for _, a := range report.Agents {
-			if a.AgentType == agentType && a.Status == "available" && a.Capabilities.Create {
-				available = true
-				canSteer = a.Capabilities.Steer
-				canSwitch = a.Capabilities.SwitchModel
-				models = a.Models
-				defaultModel = a.DefaultModel
-			}
-		}
-	} else {
-		for _, cap := range caps {
-			if cap == agentType {
-				available = true
-			}
+	for _, a := range report.Agents {
+		if a.AgentType == agentType && a.Status == "available" && a.Capabilities.Create {
+			available = true
+			canSteer = a.Capabilities.Steer
+			canSwitch = a.Capabilities.SwitchModel
+			models = a.Models
+			defaultModel = a.DefaultModel
+			break
 		}
 	}
 	if !available {
@@ -242,20 +234,10 @@ func createThreadTx(ctx context.Context, tx pgx.Tx, employeeID string, in Create
 	if !threadModel(in.Model) || in.Message.Model != "" {
 		return empty, false, threadError(422, "model_invalid", "新建 Thread 时请在 model 指定有效模型")
 	}
-	// 空模型沿用旧请求的摘要，升级后重发仍可命中原 Thread。
-	hashInput := struct {
-		CreateThreadInput
-		Model   string `json:"model,omitempty"`
-		Message struct {
-			ThreadMessageInput
-			Model string `json:"model,omitempty"`
-		} `json:"message"`
-	}{CreateThreadInput: in, Model: in.Model}
-	hashInput.Message.ThreadMessageInput = in.Message
 	raw, _ := json.Marshal(struct {
-		Input                     any
+		Input                     CreateThreadInput
 		Actor, Conversation, Tool string
-	}{hashInput, in.CreatedBy, in.OriginConversationID, in.OriginToolCallID})
+	}{in, in.CreatedBy, in.OriginConversationID, in.OriginToolCallID})
 	hash := sha256.Sum256(raw)
 	lookup := func() (Thread, bool, error) {
 		var id string

@@ -18,7 +18,7 @@ func TestThreadRejectsModelSwitchBeforeNativeIO(t *testing.T) {
 	if !errors.As(err, &selection) || !errors.Is(err, agent.ErrUnsupported) {
 		t.Fatalf("不支持换模型的错误: %v", err)
 	}
-	if a.state.Pending || a.active || len(a.intents) != 0 || len(a.DrainEvents()) != 0 {
+	if a.state.Pending || a.active || len(a.intents) != 0 || len(a.Drain()) != 0 {
 		t.Fatal("换模型请求写入了发送事实")
 	}
 	if a.Capabilities().SwitchModel {

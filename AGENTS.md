@@ -1,18 +1,18 @@
 # Baton — Agent Guide
 
-Baton 是跨设备 AI Agent 协同与任务派发系统，由中心服务（`coordinator`）、节点守护进程（`batond`）、本地会话执行器（Session Worker）、Project Agent Runtime（`runtimes/project-agent`）和嵌入式 Web UI（`web/`）组成。
+Baton 是跨设备 AI Agent 协同系统，由中心服务（`coordinator`）、节点守护进程（`batond`）、本地会话执行器（Session Worker）、Project Agent Runtime（`runtimes/project-agent`）和嵌入式 Web UI（`web/`）组成。
 
 ## 核心架构与目录
 
 | 目录 / 模块 | 职责 |
 |---|---|
-| `cmd/coordinator` | 中心控制面：员工认证、Project 与任务调度、内置 Gateway（`/v1/node` 与 `/api/v1/events`）、嵌入式 Web UI |
+| `cmd/coordinator` | 中心控制面：员工认证、Project 与 Thread 调度、内置 Gateway（`/v1/node` 与 `/api/v1/events`）、嵌入式 Web UI |
 | `cmd/batond` | 节点守护进程：节点注册、出站 TLS WebSocket 连接、本地 SQLite 账本（`node.db`）、Session Worker 与 Project Runtime 管理 |
-| `internal/session` | Session Worker 生命周期、本地认证 IPC 与幂等执行账本 |
-| `internal/agent/{pi,codex,kiro,replay}` | 统一 `agent.Adapter` 接口实现（Pi RPC、Codex app-server、Kiro ACP V3）与确定性录制回放 |
+| `internal/session` | Session Worker 生命周期、本地认证 IPC、Thread 消息队列与 Turn 账本 |
+| `internal/agent/{pi,codex,kiro,shell,replay}` | 统一 `agent.Adapter` 接口实现（Pi RPC、Codex app-server、Kiro ACP V3）与确定性录制回放 |
 | `runtimes/project-agent` | 基于 Node.js / TypeScript 的 Project Agent 进程（通过 stdio JSON-RPC 与 `batond` 通信） |
-| `web` | React + TypeScript + Vite 前端，构建产物生成到 `internal/webui/dist` 后嵌入 Coordinator，不提交到 Git |
-| `design` | Web UI 的 Elyx 设计稿（`.elyx`），前端按它实现；修改前先读 `design/AGENTS.md` |
+| `web` | React + TypeScript + Vite 前端，构建产物生成到 `internal/webui/dist` 后嵌入 Coordinator，不提交到 Git；界面文案遵循 `design/WRITING.md` |
+| `design` | Web UI 的 Elyx 设计稿（`.elyx`）与界面文案规范（`design/WRITING.md`），前端按它实现；修改前先读 `design/AGENTS.md` |
 | `specs/` | 持久产品规格（`PRODUCT.md`）与技术设计（`TECH.md`） |
 
 ## 常用构建与验证命令
@@ -44,3 +44,4 @@ Baton 是跨设备 AI Agent 协同与任务派发系统，由中心服务（`coo
 2. **禁止在生产代码中埋入测试环境变量钩子**：除 `BATON_TEST_DATABASE_URL` 外，不要在业务代码中新增 `os.Getenv("BATON_TEST_*")` 分支；故障注入应通过 Go 接口、依赖注入或测试替身完成。
 3. **测试金字塔**：边界条件、错误分支、并发竞争与存储不变量优先使用包内单元测试或确定性回放验证，全栈多进程与浏览器 E2E 测试只覆盖核心主链路。
 4. **文档只写当前状态，不写工单流水账**：更新 `README.md`、`PRODUCT.md`、`TECH.md` 时，直接原地修改对应章节以反映最新架构与行为，**严禁**追加「当前已实现 PS-xxx...」或「2026-xx-xx 修订」之类的工单历史段落。
+5. **实验室阶段统一当前结构**：产品正式发布并确定版本号前，不维护旧开发版本的数据库、设备账本、结果格式或摘要兼容分支；结构变化可重建本地数据。保留协议版本、未知字段容忍和可选能力声明等扩展机制，正式发布后再为支持的版本组合提供兼容和升级路径。

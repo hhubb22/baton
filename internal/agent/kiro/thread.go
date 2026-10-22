@@ -10,10 +10,11 @@ import (
 	"unicode/utf8"
 
 	"baton/internal/agent"
+
 	"github.com/sourcegraph/jsonrpc2"
 )
 
-var _ agent.ThreadAdapter = (*Adapter)(nil)
+var _ agent.Adapter = (*Adapter)(nil)
 var _ agent.IntentRestorer = (*Adapter)(nil)
 var _ agent.SessionIDProvider = (*Adapter)(nil)
 
@@ -74,7 +75,7 @@ func (a *Adapter) Send(ctx context.Context, id, text, model string) error {
 		a.mu.Unlock()
 		return err
 	}
-	a.threadMode, a.active, a.stopped, a.aborting = true, true, false, false
+	a.active, a.stopped, a.aborting = true, false, false
 	a.usedTools = false
 	a.threadMessageID = id
 	a.threadReply = replyBuffer{}
@@ -146,7 +147,7 @@ func (a *Adapter) flushReplyLocked() {
 	a.threadEventLocked(agent.Event{Kind: agent.EventReply, Content: content, OriginalBytes: a.threadReply.total, Truncated: a.threadReply.total > 32*1024})
 	a.threadReply = replyBuffer{}
 }
-func (a *Adapter) DrainEvents() []agent.Event {
+func (a *Adapter) Drain() []agent.Event {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	events := a.threadEvents

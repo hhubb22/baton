@@ -55,7 +55,7 @@ Gateway 消息类型 `ProjectRuntimeRequest` / `ProjectRuntimeResult`：batond �
 
 batond 启动命令为 `baton-project-runtime run`，工作目录是私有空目录。环境中的 `BATON_PROJECT_RUNTIME_ENDPOINT`、`BATON_PROJECT_RUNTIME_TOKEN`、`BATON_PROJECT_RUN_ID`、`BATON_PROJECT_LEASE_EPOCH` 只用于本次运行。本地 IPC 每个连接发送一条 `{token, request}` JSON，响应为 `ProjectRuntimeResult`；batond 校验 token 后覆盖请求的运行身份，Runtime 不能自行发送续租或启动回执。`poll_wake` 最长等待 25 秒，返回 `{wake:true|false}`；Runtime 闲置时可重复调用。
 
-节点管理请求为 `started`、`renew`、`start_failed`、`exited`、`stopped`、`wake_received`，Runtime IPC 不能调用这些操作。`started` / `renew` 成功返回 `{lease_seconds:60,control_receipts:1}`；能力字段缺失时，batond 沿用旧中心通知方式。`stopped` 只确认已结束运行的进程清理，重复回执幂等；它不能恢复租约或修改对话。进程树回收、本地 IPC 和目录收尾结束后，batond 在 SQLite 保存清理事实，再主动补送 `exited` / `stopped`，失败保留到期重试。暂时写入失败时保留有界本机清理事实继续补写；重启或旧账本缺少清理证据时保持未确认。
+节点管理请求为 `started`、`renew`、`start_failed`、`exited`、`stopped`、`wake_received`，Runtime IPC 不能调用这些操作。`started` / `renew` 成功返回 `{lease_seconds:60,control_receipts:1}`；能力字段缺失时，batond 不发送 `wake_received` 确认。`stopped` 只确认已结束运行的进程清理，重复回执幂等；它不能恢复租约或修改对话。进程树回收、本地 IPC 和目录收尾结束后，batond 在 SQLite 保存清理事实，再主动补送 `exited` / `stopped`，失败保留到期重试。暂时写入失败时保留有界本机清理事实继续补写；重启后账本缺少清理证据时保持未确认。
 
 启动前先检查 provider，再向中心确认租约；启动意图先写入 SQLite，同一 run 在 batond 重启后不会重启进程。Unix 使用随 batond 管道关闭而停止进程组的守护，Windows 使用关闭时终止整个组的 Job Object。连接重建保留当前 Runtime，续租仍受 58 秒期限限制。期限使用包含系统休眠的单调时钟，最多每秒检查一次；机器唤醒后先核对旧期限，再发送或接受续租。读取时钟失败时停止进程。
 
@@ -96,7 +96,7 @@ Runtime 进程的工作目录是一个空的控制目录。pi-agent-core 本身�
 
 `threads` 带可空列 `project_id`、`origin_conversation_id`、`origin_tool_call_id`，后两列唯一。只有 Project Agent 新建的 Thread 填写这三列；员工新建的 Thread 三列都为空。`thread_turns.initiator` 记录这一轮由员工还是 Project Agent 开启，Project Agent 开启时另记 `origin_tool_call_id`。
 
-输入队列是 Coordinator 内部的数据，用户界面上的待办事项不用这张表。事项表由 Agent Inbox 的技术设计定义。Thread 路径的 `source_type` 有七种，分成两类。与旧任务路径并存期间，队列还保留主动的 `task_result` 和被动的 `user_task_result`；现有任务工具继续使用它们。
+输入队列是 Coordinator 内部的数据，用户界面上的待办事项不用这张表。事项表由 Agent Inbox 的技术设计定义。`source_type` 有七种，分成两类。
 
 | source_type | 类别 | 来源 | payload 上限 |
 |---|---|---|---|

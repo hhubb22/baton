@@ -153,7 +153,7 @@ func (a *Adapter) sendThreadInput(ctx context.Context, id, text, model string, s
 	}
 	if !steer {
 		a.threadTurn, a.threadStarted, a.threadMessageID = true, false, id
-		a.active, a.aborting, a.final, a.stopReason, a.waiting = true, false, "", "", false
+		a.active, a.aborting, a.final, a.stopReason = true, false, "", ""
 		a.usedTools = false
 		a.settled = make(chan struct{})
 	}
@@ -232,7 +232,7 @@ func (a *Adapter) processExitedLocked(readErr error) {
 	a.events = append(a.events, agent.Event{Kind: agent.EventExited, NativeSessionID: a.NativeSessionID()})
 }
 
-func (a *Adapter) DrainEvents() []agent.Event {
+func (a *Adapter) Drain() []agent.Event {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	events := a.events

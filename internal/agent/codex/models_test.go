@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"baton/internal/agent"
+
 	"github.com/sourcegraph/jsonrpc2"
 )
 
@@ -39,7 +40,7 @@ func TestThreadModelSelectionAndRPCRejection(t *testing.T) {
 	if !errors.As(err, &selection) || !errors.As(err, &rpcErr) || !errors.Is(err, ErrIncompatible) {
 		t.Fatalf("RPC 拒绝没有保留错误类型: %v", err)
 	}
-	if a.state.Pending || a.state.Model != "gpt-6.1-sol" || a.config.Model != "gpt-6.1-sol" || len(a.DrainEvents()) != 0 {
+	if a.state.Pending || a.state.Model != "gpt-6.1-sol" || a.config.Model != "gpt-6.1-sol" || len(a.Drain()) != 0 {
 		t.Fatalf("被拒绝的消息改变了运行事实: %+v", a.state)
 	}
 	if err := a.Send(context.Background(), "accepted", "question", "gpt-6-luna"); err != nil {
@@ -67,7 +68,7 @@ func TestThreadRPCRejectionWithoutModelChangeRemainsUncertain(t *testing.T) {
 			if err == nil || errors.As(err, &selection) || !errors.Is(err, ErrIncompatible) || !a.state.Pending || a.state.OperationID != "message" {
 				t.Fatalf("ordinary RPC error lost send intent: %v %+v", err, a.state)
 			}
-			events := a.DrainEvents()
+			events := a.Drain()
 			if len(events) != 1 || events[0].Kind != agent.EventUncertain {
 				t.Fatal(events)
 			}
@@ -87,7 +88,7 @@ func TestThreadNetworkErrorRemainsUncertain(t *testing.T) {
 	if err == nil || errors.As(err, &selection) || !a.state.Pending {
 		t.Fatalf("网络错误被当作确定未发送: %v %+v", err, a.state)
 	}
-	events := a.DrainEvents()
+	events := a.Drain()
 	if len(events) != 1 || events[0].Kind != agent.EventUncertain {
 		t.Fatal(events)
 	}

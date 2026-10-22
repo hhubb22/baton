@@ -16,7 +16,7 @@ Coordinator 在 `call_tool` 事务里执行工具并保存唯一的 `tool_result
 
 ### 2. 数据模型
 
-迁移 `0018_attention_requests.sql` 新增 `attention_requests`：`id`、`employee_id`、`project_id`、`agent_id`、`conversation_id`、`origin_tool_call_id`、`source`、`thread_id`、`title`、`content`、`options`、`allow_text`、`state`、`version`、`resolution`、`resolved_at`、`withdraw_reason`、`created_at`、`updated_at`。
+当前 schema 定义 `attention_requests`：`id`、`employee_id`、`project_id`、`agent_id`、`conversation_id`、`origin_tool_call_id`、`source`、`thread_id`、`title`、`content`、`options`、`allow_text`、`state`、`version`、`resolution`、`resolved_at`、`withdraw_reason`、`created_at`、`updated_at`。
 
 - `source` 为 `agent` 或 `system`。Agent 事项的 `(conversation_id, origin_tool_call_id)` 唯一。
 - `state` 为 `open`、`answered`、`closed`、`withdrawn` 或 `resolved`；每次状态变化使 `version` 加一。

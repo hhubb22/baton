@@ -76,7 +76,10 @@ func newThreadHTTP(t *testing.T) *threadHTTP {
 	if err = repo.SyncNode(t.Context(), emp.ID, src.NodeID, src.ConnID, "Desk", ident.System, ident.Role, []string{"pi", "kiro"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = repo.SaveRuntimeReport(t.Context(), src, protocol.RuntimeReport{Exec: protocol.RuntimeExec{Shell: "sh"}, Roots: []protocol.RuntimeRoot{{RootID: "dev", Path: "/src"}}}); err != nil {
+	if _, err = repo.SaveRuntimeReport(t.Context(), src, protocol.RuntimeReport{Exec: protocol.RuntimeExec{Shell: "sh"}, Roots: []protocol.RuntimeRoot{{RootID: "dev", Path: "/src"}}, Agents: []protocol.RuntimeAgent{
+		{AgentType: "pi", Version: "1.3.0", Status: "available", Capabilities: protocol.ThreadCapabilities{Create: true, Queue: true, Steer: true, Stop: true, Resume: true, SwitchModel: true}},
+		{AgentType: "kiro", Version: "1", Status: "available", Capabilities: protocol.ThreadCapabilities{Create: true, Queue: true, Stop: true, Resume: true}},
+	}}); err != nil {
 		t.Fatal(err)
 	}
 	return &threadHTTP{t: t, pool: pool, srv: srv, browser: b, csrf: csrf, owner: emp.ID, repo: repo, src: src, gateway: gateway}
@@ -156,7 +159,6 @@ func TestThreadHTTPFlowIsolationPaginationHistoryAndStop(t *testing.T) {
 	h.post(path+"/messages", store.ThreadMessageInput{ClientMessageID: "queue", Content: "next"}, 202)
 	h.post(path+"/messages", store.ThreadMessageInput{ClientMessageID: "queue", Content: "next"}, 202)
 	h.post(path+"/messages", store.ThreadMessageInput{ClientMessageID: "queue", Content: "changed"}, 409)
-	h.post(path+"/messages", store.ThreadMessageInput{ClientMessageID: "steer", Content: "change", Mode: "steer"}, 422)
 	h.post(path+"/messages", store.ThreadMessageInput{ClientMessageID: "oversize", Content: strings.Repeat("\x01", 64<<10)}, 413)
 	h.post(path+"/messages/http:first/withdraw", struct{}{}, 409)
 	h.report(v.ID, 4, "message.queued", 0, "queue", "")
@@ -234,6 +236,16 @@ func TestThreadHTTPFlowIsolationPaginationHistoryAndStop(t *testing.T) {
 	if status != 404 || h.gateway.calls.Load() != calls {
 		t.Fatal("foreign access reached node", status)
 	}
+}
+
+func TestThreadHTTPRejectsKiroSteer(t *testing.T) {
+	h := newThreadHTTP(t)
+	body := h.post("/threads", map[string]any{"client_thread_id": "kiro", "agent_type": "kiro", "working_directory": "/src/repo", "message": map[string]string{"client_message_id": "kiro:first", "content": "hello"}}, 201)
+	var v store.Thread
+	if err := json.Unmarshal([]byte(body), &v); err != nil || v.ID == "" {
+		t.Fatal(body, err)
+	}
+	h.post("/threads/"+v.ID+"/messages", store.ThreadMessageInput{ClientMessageID: "steer", Content: "change", Mode: "steer"}, 422)
 }
 
 func TestThreadWebSocketSubscriptionOutputAndOwnership(t *testing.T) {

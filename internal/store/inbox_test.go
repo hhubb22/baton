@@ -42,14 +42,14 @@ func answerInbox(key string) inbox.Handle {
 func TestInboxToolsIdempotencyLimitAndScope(t *testing.T) {
 	h := newToolHarness(t)
 	req := h.save(t, "inbox.ask", inboxArgs())
-	h.repo.SetTaskCommitHook(func(context.Context) error { return errors.New("事务回滚") })
+	h.repo.SetCommitHook(func(context.Context) error { return errors.New("事务回滚") })
 	if _, err := h.repo.ProjectRuntime(h.ctx, h.src, req); err == nil {
 		t.Fatal("故障未回滚")
 	}
 	if countRows(t, h.ctx, h.pool, `SELECT count(*) FROM attention_requests`) != 0 {
 		t.Fatal("事项残留")
 	}
-	h.repo.SetTaskCommitHook(nil)
+	h.repo.SetCommitHook(nil)
 	first, err := h.repo.ProjectRuntime(h.ctx, h.src, req)
 	if err != nil {
 		t.Fatal(err)
@@ -226,14 +226,14 @@ func TestInboxOfflinePauseArchiveAndRollback(t *testing.T) {
 	if _, err := h.repo.PatchProject(h.ctx, h.owner, h.project.ID, projectagent.Patch{Status: &status}); err != nil {
 		t.Fatal(err)
 	}
-	h.repo.SetTaskCommitHook(func(context.Context) error { return errors.New("回滚回答") })
+	h.repo.SetCommitHook(func(context.Context) error { return errors.New("回滚回答") })
 	if _, err := h.repo.HandleAttentionRequest(h.ctx, h.owner, paused.ID, answerInbox("paused"), false); err == nil {
 		t.Fatal("未注入回滚")
 	}
 	if got, err := h.repo.AttentionRequest(h.ctx, h.owner, paused.ID); err != nil || got.State != "open" {
 		t.Fatal("回滚残留", err)
 	}
-	h.repo.SetTaskCommitHook(nil)
+	h.repo.SetCommitHook(nil)
 	if _, err := h.repo.HandleAttentionRequest(h.ctx, h.owner, paused.ID, answerInbox("paused"), false); err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +281,7 @@ func TestInboxOfflinePauseArchiveAndRollback(t *testing.T) {
 	}
 	t.Log("离线与暂停回答成功；暂停不放置，恢复领取 attention_answer；归档 3 个事项均撤回")
 }
-func TestInboxThreadAssociationAndTaskIsolation(t *testing.T) {
+func TestInboxThreadAssociationAndIsolation(t *testing.T) {
 	h := newToolHarness(t)
 	id := createProjectThread(t, h)
 	args := inboxArgs()
@@ -315,13 +315,6 @@ func TestInboxThreadAssociationAndTaskIsolation(t *testing.T) {
 	}
 	if _, bad = h.call(t, "inbox.ask", args); !bad {
 		t.Fatal("接受跨 Project Thread")
-	}
-	taskID := h.dispatch(t)
-	if _, err = h.repo.RequestCancel(h.ctx, h.owner, taskID); err != nil {
-		t.Fatal(err)
-	}
-	if n := countRows(t, h.ctx, h.pool, `SELECT count(*) FROM attention_requests WHERE source='system'`); n != 0 {
-		t.Fatal("旧任务生成系统事项", n)
 	}
 }
 

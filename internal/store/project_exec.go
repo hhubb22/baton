@@ -10,7 +10,6 @@ import (
 
 	"baton/internal/projectagent"
 	"baton/internal/protocol"
-	"baton/internal/task"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -74,7 +73,7 @@ func projectExecEnabled(ctx context.Context, tx pgx.Tx, employeeID, nodeID strin
 		return err
 	}
 	if !enabled {
-		return &task.Rejection{Code: task.CodeUnsupported, Message: "目标节点未开启 Project Agent 命令执行", Fields: []string{"node_id"}}
+		return threadError(422, "unsupported", "目标节点未开启 Project Agent 命令执行")
 	}
 	return nil
 }
