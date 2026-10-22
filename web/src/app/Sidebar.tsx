@@ -202,7 +202,13 @@ export function Sidebar() {
       <div {...stylex.props(styles.brand)}>
         <BrandMark />
         {!collapsed && <span {...stylex.props(text.bodyMedium, styles.brandName)}>Baton</span>}
-        {!collapsed && <IconButton icon="pen" label="New chat" onClick={() => void navigate({ to: '/threads' })} />}
+        {!collapsed && (
+          <IconButton
+            icon="pen"
+            label="New chat"
+            onClick={() => void navigate({ to: '/threads', search: { compose: 'focus' } })}
+          />
+        )}
       </div>
 
       <div {...stylex.props(styles.nav)}>
@@ -211,7 +217,7 @@ export function Sidebar() {
             type="button"
             aria-label="New chat"
             title="New chat"
-            onClick={() => void navigate({ to: '/threads' })}
+            onClick={() => void navigate({ to: '/threads', search: { compose: 'focus' } })}
             {...stylex.props(styles.row, styles.plainButton, focusRing.ring)}
           >
             <Icon name="pen" size={16} style={styles.rowIcon} />

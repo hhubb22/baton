@@ -9,7 +9,7 @@ import {
 } from '@tanstack/react-query'
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { ClientError, type BatonClient } from './client'
-import type { ID, Session } from './types'
+import type { AgentKind, ID, SendMode, Session } from './types'
 
 // 查询键的第一段是数据主题，收到某个主题的变化时刷新以它开头的全部查询。
 export const keys = {
@@ -17,6 +17,8 @@ export const keys = {
   devices: ['devices'] as const,
   // 设置码状态随设备接入变化，所以放在 devices 主题下。
   enrollment: (id: ID) => ['devices', 'enrollment', id] as const,
+  // 目录列表随设备连接状态变化。
+  folders: (deviceId: ID, path: string | null) => ['devices', 'folders', deviceId, path] as const,
   projects: ['projects'] as const,
   threads: ['threads'] as const,
   messages: (threadId: ID) => ['messages', threadId] as const,
@@ -113,6 +115,15 @@ export function useFile(deviceId: ID, path: string) {
   return useQuery({ queryKey: keys.file(deviceId, path), queryFn: () => client.readFile(deviceId, path), gcTime: 0 })
 }
 
+export function useFolders(deviceId: ID | null, path: string | null) {
+  const client = useClient()
+  return useQuery({
+    queryKey: keys.folders(deviceId ?? '', path),
+    queryFn: () => client.listFolders(deviceId!, path),
+    enabled: deviceId !== null,
+  })
+}
+
 export function useOperation(id: ID | null) {
   const client = useClient()
   return useQuery({
@@ -154,16 +165,50 @@ export function newClientId() {
   return `web-${Date.now().toString(36)}-${clientSequence}`
 }
 
+export function useCreateThread() {
+  const client = useClient()
+  return useMutation({
+    mutationFn: (input: {
+      deviceId: ID
+      folder: string
+      agent: AgentKind
+      model: string
+      body: string
+      clientId: string
+    }) => client.createThread(input),
+  })
+}
+
 export function useSendMessage() {
   const client = useClient()
   return useMutation({
-    mutationFn: (input: { threadId: ID; body: string; clientId: string }) => client.sendMessage(input),
+    mutationFn: (input: { threadId: ID; body: string; clientId: string; mode?: SendMode }) => client.sendMessage(input),
   })
+}
+
+export function useCancelMessage() {
+  const client = useClient()
+  return useMutation({ mutationFn: (messageId: ID) => client.cancelMessage(messageId) })
+}
+
+export function useSetThreadModel() {
+  const client = useClient()
+  return useMutation({ mutationFn: (input: { threadId: ID; model: string }) => client.setThreadModel(input) })
 }
 
 export function useStopThread() {
   const client = useClient()
   return useMutation({ mutationFn: (threadId: ID) => client.stopThread(threadId) })
+}
+
+export function useArchiveThread() {
+  const client = useClient()
+  return useMutation({ mutationFn: (threadId: ID) => client.archiveThread(threadId) })
+}
+
+export function useResumeThread() {
+  const client = useClient()
+  return useMutation({ mutationFn: (threadId: ID) => client.resumeThread(threadId) })
 }
 
 export function useAnswerItem() {

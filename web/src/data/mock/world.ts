@@ -14,6 +14,12 @@ export interface World {
   // 已在其他页面或设备上处理过的事项，下一次回答时返回冲突。
   answeredElsewhere: Record<ID, string>
   enrollments: EnrollmentRecord[]
+  // 设备上实际存在的目录（完整路径），用来列出子目录和发现找不到的目录。
+  directories: Record<ID, string[]>
+  // Agent 收到停止请求后不会自己停下的 Thread，设备一分钟后结束进程。
+  stubbornStops: ID[]
+  // 设备上已经找不到对话记录的 Thread，恢复时失败。
+  lostHistory: ID[]
 }
 
 export interface EnrollmentRecord {

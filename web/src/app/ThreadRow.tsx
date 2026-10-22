@@ -1,6 +1,6 @@
 import * as stylex from '@stylexjs/stylex'
 import { Link } from '@tanstack/react-router'
-import { agentNames, threadView } from '../data/derive'
+import { agentNames, folderName, threadView } from '../data/derive'
 import type { Device, Thread } from '../data/types'
 import { text } from '../theme/text'
 import { colors, radius, size, space } from '../theme/tokens.stylex'
@@ -25,10 +25,6 @@ const styles = stylex.create({
   meta: { color: colors.muted, whiteSpace: 'nowrap' },
 })
 
-export function folderName(folder: string) {
-  return folder.split(/[\\/]/).filter(Boolean).pop() ?? folder
-}
-
 // Thread 行：状态点、名称、目录最后一段，右侧是设备 · Agent 和状态。
 export function ThreadRow({ thread, device }: { thread: Thread; device: Device | undefined }) {
   const view = threadView(thread, device)
@@ -48,5 +44,3 @@ export function ThreadRow({ thread, device }: { thread: Thread; device: Device |
     </Link>
   )
 }
-
-export { agentNames }

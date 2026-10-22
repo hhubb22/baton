@@ -1,5 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router'
-import { act, render, screen, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createMockClient } from '../data/mock/client'
@@ -176,6 +176,138 @@ describe('app', () => {
 
     act(() => scheduler.advance(browserLatency.run))
     expect(await screen.findByText('Idle')).toBeInTheDocument()
+  })
+})
+
+describe('threads', () => {
+  // 模拟请求先等读取延迟，再安排保存等后续步骤，所以分小步推进时间，每步之间让 Promise 继续执行。
+  async function advance(scheduler: ReturnType<typeof manualScheduler>, ms: number) {
+    for (let passed = 0; passed < ms; passed += 50) {
+      await act(async () => scheduler.advance(Math.min(50, ms - passed)))
+    }
+  }
+
+  function panel(name: string | RegExp) {
+    return screen.findByRole('complementary', { name })
+  }
+
+  it('starts a chat from an empty list, continues it and archives it', async () => {
+    const user = userEvent.setup()
+    const { scheduler } = renderApp('/threads', 'noChats')
+    expect(await screen.findByText('No chats yet')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /baton · MacBook Pro/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Codex · gpt-6.1-sol/ })).toBeInTheDocument()
+
+    await user.type(screen.getByLabelText('New chat message'), 'Add a health check{Enter}')
+    await advance(scheduler, browserLatency.read + browserLatency.save)
+    const detail = await panel('Add a health check')
+    expect(await within(detail).findByText('Running')).toBeInTheDocument()
+    expect(screen.getByLabelText('New chat message')).toHaveValue('')
+
+    await advance(scheduler, browserLatency.read + browserLatency.run)
+    expect(await within(detail).findByText('Idle')).toBeInTheDocument()
+    expect(within(detail).getByText('Done. The change is ready for review.')).toBeInTheDocument()
+
+    await user.type(within(detail).getByLabelText('Message'), 'Also document it{Enter}')
+    await advance(scheduler, browserLatency.save + browserLatency.run)
+    await waitFor(() => expect(within(detail).getAllByText('Done. The change is ready for review.')).toHaveLength(2))
+
+    await user.click(within(detail).getByRole('button', { name: 'Close chat' }))
+    const row = await screen.findByRole('link', { name: /Add a health check/ })
+    expect(within(row).getByText('No project')).toBeInTheDocument()
+
+    await user.click(row)
+    const reopened = await panel('Add a health check')
+    await user.click(within(reopened).getByRole('button', { name: 'Chat actions' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Archive chat' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Archive this chat?' })
+    await user.click(within(dialog).getByRole('button', { name: 'Archive chat' }))
+    await advance(scheduler, browserLatency.read + browserLatency.save)
+    expect(
+      await within(reopened).findByText(
+        'This chat is closed to new messages. Past replies and attachment links are kept.',
+      ),
+    ).toBeInTheDocument()
+    expect(within(reopened).queryByLabelText('Message')).not.toBeInTheDocument()
+  })
+
+  it('queues the next message and cancels it before it is sent', async () => {
+    const user = userEvent.setup()
+    const { scheduler } = renderApp('/threads?thread=thr-gateway')
+    const detail = await panel('Fix gateway reconnect race')
+    expect(within(detail).getByText('Sends after current reply')).toBeInTheDocument()
+    await user.type(within(detail).getByLabelText('Message'), 'Also add a regression test{Enter}')
+    await advance(scheduler, browserLatency.read + browserLatency.save)
+    expect(await within(detail).findByText(/Sending next/)).toBeInTheDocument()
+
+    await user.click(within(detail).getByRole('button', { name: 'Cancel' }))
+    await advance(scheduler, browserLatency.read + browserLatency.save)
+    expect(await within(detail).findByText('Not sent')).toBeInTheDocument()
+  })
+
+  it('explains why Kiro cannot read messages during a reply', async () => {
+    const user = userEvent.setup()
+    renderApp('/threads?thread=thr-patrol')
+    const detail = await panel('Organize switch patrol scripts')
+    await user.click(within(detail).getByRole('button', { name: 'Send now' }))
+    expect(within(detail).getByText(/Kiro can't read messages during a reply/)).toBeInTheDocument()
+    expect(within(detail).getByRole('button', { name: 'Send next' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('stops a reply only after the device confirms', async () => {
+    const user = userEvent.setup()
+    const { scheduler } = renderApp('/threads?thread=thr-gateway')
+    const detail = await panel('Fix gateway reconnect race')
+    await user.click(within(detail).getByRole('button', { name: 'Stop current reply' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Stop current reply?' })
+    await user.click(within(dialog).getByRole('button', { name: 'Stop reply' }))
+    await advance(scheduler, browserLatency.read + browserLatency.save)
+    expect(await within(detail).findByText('Stopping… (forces quit in 1m)')).toBeInTheDocument()
+
+    await advance(scheduler, browserLatency.read + browserLatency.device)
+    expect(await within(detail).findByText('Stopped by you')).toBeInTheDocument()
+    expect(within(detail).getByLabelText('Message')).toBeInTheDocument()
+  })
+
+  it('keeps the last report while the device is offline and waits on the same device', async () => {
+    const user = userEvent.setup()
+    const { client } = renderApp('/threads?thread=thr-gateway')
+    const detail = await panel('Fix gateway reconnect race')
+    act(() => client.controls.setDeviceConnection('dev-ubuntu', 'offline'))
+    expect(await within(detail).findByText('Ubuntu Dev is offline')).toBeInTheDocument()
+    expect(within(detail).getAllByText('Last seen running').length).toBeGreaterThan(0)
+
+    await user.click(within(detail).getByRole('button', { name: 'View devices' }))
+    expect(await screen.findByRole('heading', { name: 'Devices' })).toBeInTheDocument()
+  })
+
+  it('offers recovery without resending anything', async () => {
+    const user = userEvent.setup()
+    renderApp('/threads?thread=thr-sleep', 'error')
+    const detail = await panel('Run sleep tests on Windows')
+    expect(within(detail).getByText('Codex could not start')).toBeInTheDocument()
+    expect(within(detail).queryByLabelText('Message')).not.toBeInTheDocument()
+
+    await user.click(within(detail).getByRole('button', { name: 'New chat in this folder' }))
+    expect(screen.getByRole('button', { name: /baton · Windows Desktop/ })).toBeInTheDocument()
+    expect(screen.getByLabelText('New chat message')).toHaveFocus()
+    expect(screen.getByLabelText('New chat message')).toHaveValue('')
+  })
+
+  it('asks for another folder when the old one is missing', async () => {
+    const user = userEvent.setup()
+    renderApp('/threads/thr-compat', 'error')
+    await user.click(await screen.findByRole('button', { name: 'Choose folder' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Choose folder' })
+    expect(within(dialog).getByLabelText('Device')).toHaveValue('dev-windows')
+    expect(await within(dialog).findByText('Windows Desktop is offline')).toBeInTheDocument()
+
+    await user.selectOptions(within(dialog).getByLabelText('Device'), 'dev-mac')
+    await user.click(await within(dialog).findByRole('button', { name: '~/src' }))
+    await user.click(await within(dialog).findByRole('button', { name: 'compat-suite' }))
+    await user.click(within(dialog).getByRole('button', { name: 'Select folder' }))
+    expect(await screen.findByRole('button', { name: /compat-suite · MacBook Pro/ })).toBeInTheDocument()
+    expect(screen.getByLabelText('New chat message')).toHaveFocus()
   })
 })
 

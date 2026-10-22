@@ -1,8 +1,12 @@
 import { ClientError, type ChangeEvent, type Topic } from '../client'
+import { agentNames } from '../derive'
 import type {
+  AgentKind,
   Device,
+  DeviceAgent,
   DeviceConnection,
   DeviceOS,
+  FolderListing,
   ID,
   SessionEnd,
   Message,
@@ -10,6 +14,7 @@ import type {
   OperationKind,
   OperationPhase,
   Project,
+  SendMode,
   Thread,
 } from '../types'
 import { createWorld, type ScenarioId } from './scenarios'
@@ -28,6 +33,9 @@ export interface Latency {
 }
 
 export const browserLatency: Latency = { read: 150, save: 400, device: 900, run: 8000 }
+
+// Agent 收到停止请求一分钟后还没停下，设备结束它的进程。
+export const stopTimeout = 60_000
 
 // 设置码 10 分钟内有效，只能用一次。
 export const enrollmentTtl = 10 * 60_000
@@ -48,6 +56,24 @@ function sampleCode(seed: number) {
   return [group(8), group(4), group(4), group(4)].join('-')
 }
 
+function separator(path: string) {
+  return path.includes('\\') ? '\\' : '/'
+}
+
+export function insideFolder(path: string, root: string) {
+  return path === root || path.startsWith(root.endsWith(separator(root)) ? root : root + separator(root))
+}
+
+function parentFolder(path: string) {
+  return path.slice(0, path.lastIndexOf(separator(path)))
+}
+
+// 新对话的标题取第一条消息的第一行。
+function titleFrom(body: string) {
+  const line = body.trim().split('\n')[0]
+  return line.length > 60 ? `${line.slice(0, 59).trimEnd()}…` : line
+}
+
 const newDeviceDefaults: Record<DeviceOS, Pick<Device, 'system' | 'folders' | 'repos'> & { shell: string }> = {
   macOS: { system: 'macOS 15.0.1', folders: ['~/src'], repos: ['~/src/baton'], shell: 'zsh' },
   Linux: { system: 'Ubuntu 24.04', folders: ['~/work'], repos: ['~/work/baton'], shell: 'bash' },
@@ -62,6 +88,8 @@ export class MockStore {
   private listeners = new Set<(event: ChangeEvent) => void>()
   private timers = new Set<() => void>()
   private runs = new Map<ID, () => void>()
+  // 已发给设备、等待确认的停止，键为操作 ID。
+  private stopTimers = new Map<ID, { operation: Operation; cancel: () => void }>()
   private clientIds = new Map<string, { opId: ID; body: string }>()
   private sequence = 0
   readonly scheduler: Scheduler
@@ -117,6 +145,7 @@ export class MockStore {
     for (const cancel of [...this.timers]) cancel()
     this.timers.clear()
     this.runs.clear()
+    this.stopTimers.clear()
     this.clientIds.clear()
     this.sequence = 0
     this.scenarioId = scenarioId
@@ -180,13 +209,13 @@ export class MockStore {
 
   // ---- 操作 ----
 
-  private createOperation(kind: OperationKind, targetId: ID): Operation {
+  private createOperation(kind: OperationKind, targetId: ID, detail: string | null = null): Operation {
     const operation: Operation = {
       id: this.nextId('op'),
       kind,
       targetId,
       phase: 'submitted',
-      detail: null,
+      detail,
       updatedAt: this.scheduler.now(),
     }
     this.world.operations.push(operation)
@@ -199,17 +228,21 @@ export class MockStore {
     operation.updatedAt = this.scheduler.now()
   }
 
-  sendMessage(threadId: ID, body: string, clientId: string): Operation {
-    const existing = this.clientIds.get(clientId)
-    if (existing) {
-      if (existing.body !== body) throw new ClientError('conflict', 'This message was already sent with different text')
-      return this.operation(existing.opId)
-    }
-    const thread = this.thread(threadId)
-    if (thread.status === 'archived') throw new ClientError('invalid', "Archived threads can't receive messages")
-    if (body.trim() === '') throw new ClientError('invalid', 'Message is empty')
+  private agentOf(thread: Pick<Thread, 'deviceId' | 'agent'>): DeviceAgent | undefined {
+    return this.world.devices
+      .find((item) => item.id === thread.deviceId)
+      ?.agents.find((item) => item.kind === thread.agent)
+  }
 
-    const operation = this.createOperation('sendMessage', threadId)
+  // 同一个 clientId 重试时返回第一次的操作，内容不同则拒绝。
+  private repeated(clientId: string, body: string) {
+    const existing = this.clientIds.get(clientId)
+    if (!existing) return null
+    if (existing.body !== body) throw new ClientError('conflict', 'This message was already sent with different text')
+    return this.operation(existing.opId)
+  }
+
+  private userMessage(threadId: ID, body: string): Message {
     const message: Message = {
       id: this.nextId('msg'),
       threadId,
@@ -220,21 +253,105 @@ export class MockStore {
       delivery: 'submitted',
     }
     this.world.messages.push(message)
+    return message
+  }
+
+  createThread(
+    input: { deviceId: ID; folder: string; agent: AgentKind; model: string; body: string },
+    clientId: string,
+  ) {
+    const { deviceId, folder, agent: kind, model, body } = input
+    const repeated = this.repeated(clientId, body)
+    if (repeated) return repeated
+    const device = this.device(deviceId)
+    const agent = device.agents.find((item) => item.kind === kind)
+    if (body.trim() === '') throw new ClientError('invalid', 'Message is empty')
+    if (!device.folders.some((root) => insideFolder(folder, root))) {
+      throw new ClientError('invalid', `${folder} is outside the allowed folders on ${device.name}`)
+    }
+    if (!agent || agent.problem)
+      throw new ClientError('invalid', `${agentNames[kind]} is not available on ${device.name}`)
+    if (!agent.models.includes(model))
+      throw new ClientError('invalid', `${model} is not available for ${agentNames[kind]}`)
+
+    const now = this.scheduler.now()
+    const thread: Thread = {
+      id: this.nextId('thr'),
+      title: titleFrom(body),
+      deviceId,
+      folder,
+      agent: kind,
+      model,
+      projectId: null,
+      status: 'idle',
+      stop: null,
+      pending: null,
+      stopCanceled: 0,
+      createdAt: now,
+      updatedAt: now,
+      runStartedAt: null,
+      unread: false,
+    }
+    this.world.threads.push(thread)
+    const message = this.userMessage(thread.id, body)
+    const operation = this.createOperation('createThread', thread.id, message.id)
     this.clientIds.set(clientId, { opId: operation.id, body })
-    operation.detail = message.id
-    this.emit('messages', 'operations')
+    this.emit('threads', 'messages', 'operations')
 
     this.schedule(this.latency.save, () => {
       message.delivery = 'saved'
       this.setPhase(operation, 'saved', message.id)
-      thread.updatedAt = this.scheduler.now()
       this.route(thread, message, operation)
       this.emit('threads', 'messages', 'operations')
     })
     return operation
   }
 
-  // 已保存的消息：设备离线时等待设备，执行中时排到下一轮，否则开始新的一轮。
+  // 停止、归档或无法继续的 Thread 不再接收消息，返回给页面的原因和恢复办法一致。
+  private ensureWritable(thread: Thread) {
+    if (thread.status === 'archived') throw new ClientError('invalid', "Archived chats can't receive messages")
+    if (thread.pending === 'archive') throw new ClientError('invalid', 'This chat is being archived')
+    if (thread.status !== 'stopped' || !thread.stop) return
+    const ended =
+      thread.stop.kind === 'historyLost' || thread.stop.kind === 'folderMissing' || thread.stop.kind === 'startFailed'
+    if (ended || (thread.stop.kind === 'interrupted' && !this.agentOf(thread)?.abilities.resume)) {
+      throw new ClientError('invalid', "This chat can't continue. Start a new chat.")
+    }
+  }
+
+  sendMessage(threadId: ID, body: string, clientId: string, mode: SendMode = 'next'): Operation {
+    const repeated = this.repeated(clientId, body)
+    if (repeated) return repeated
+    const thread = this.thread(threadId)
+    this.ensureWritable(thread)
+    if (body.trim() === '') throw new ClientError('invalid', 'Message is empty')
+    if (mode === 'now' && !this.agentOf(thread)?.abilities.steer) {
+      throw new ClientError('invalid', `${agentNames[thread.agent]} can't read messages during a reply. Send it next.`)
+    }
+
+    const message = this.userMessage(threadId, body)
+    const operation = this.createOperation('sendMessage', threadId, message.id)
+    this.clientIds.set(clientId, { opId: operation.id, body })
+    this.emit('messages', 'operations')
+
+    this.schedule(this.latency.save, () => {
+      message.delivery = 'saved'
+      this.setPhase(operation, 'saved', message.id)
+      thread.updatedAt = this.scheduler.now()
+      if (mode === 'now' && thread.status === 'running' && !thread.pending && this.online(thread.deviceId)) {
+        // Agent 在当前回复中读到这条消息，这一轮重新计时。
+        message.delivery = 'delivered'
+        this.setPhase(operation, 'running', message.id)
+        this.scheduleRunEnd(thread.id)
+      } else {
+        this.route(thread, message, operation)
+      }
+      this.emit('threads', 'messages', 'operations')
+    })
+    return operation
+  }
+
+  // 已保存的消息：设备离线时等待设备，执行中或正在停止时排到下一轮，否则开始新的一轮。
   private route(thread: Thread, message: Message, operation: Operation) {
     if (!this.online(thread.deviceId)) {
       message.delivery = 'waitingDevice'
@@ -242,7 +359,7 @@ export class MockStore {
       if (thread.status !== 'running') thread.status = 'waiting'
       return
     }
-    if (thread.status === 'running' || thread.status === 'waiting') {
+    if (thread.status === 'running' || thread.status === 'waiting' || thread.pending) {
       message.delivery = 'queued'
       this.setPhase(operation, 'queued', message.id)
       return
@@ -251,11 +368,23 @@ export class MockStore {
   }
 
   private startRun(thread: Thread, message: Message, operation: Operation | null) {
+    const now = this.scheduler.now()
+    thread.updatedAt = now
+    if (!this.world.directories[thread.deviceId]?.includes(thread.folder)) {
+      // 目录在设备上不存在，Agent 不会启动，消息也没有发出。
+      message.delivery = 'withdrawn'
+      if (operation) this.setPhase(operation, 'failed', `Folder not found: ${thread.folder}`)
+      this.withdrawPending(thread)
+      thread.status = 'stopped'
+      thread.stop = { kind: 'folderMissing', detail: thread.folder }
+      thread.runStartedAt = null
+      return
+    }
     message.delivery = 'delivered'
     thread.status = 'running'
-    thread.stopReason = null
-    thread.runStartedAt = this.scheduler.now()
-    thread.updatedAt = this.scheduler.now()
+    thread.stop = null
+    thread.stopCanceled = 0
+    thread.runStartedAt = now
     if (operation) this.setPhase(operation, 'running', message.id)
     this.scheduleRunEnd(thread.id)
   }
@@ -275,12 +404,14 @@ export class MockStore {
   }
 
   private operationFor(messageId: ID) {
-    return this.world.operations.find((item) => item.kind === 'sendMessage' && item.detail === messageId)
+    return this.world.operations.find(
+      (item) => (item.kind === 'sendMessage' || item.kind === 'createThread') && item.detail === messageId,
+    )
   }
 
   private finishRun(threadId: ID) {
     const thread = this.thread(threadId)
-    if (thread.status !== 'running') return
+    if (thread.status !== 'running' || thread.pending) return
     const now = this.scheduler.now()
     this.world.messages.push({
       id: this.nextId('msg'),
@@ -291,17 +422,22 @@ export class MockStore {
       createdAt: now,
       delivery: 'delivered',
     })
-    for (const operation of this.world.operations) {
-      if (operation.kind === 'sendMessage' && operation.targetId === threadId && operation.phase === 'running') {
-        this.setPhase(operation, 'done', operation.detail)
-      }
-    }
+    this.endRunningSends(thread, 'done')
     thread.status = 'idle'
     thread.runStartedAt = null
     thread.updatedAt = now
     thread.unread = true
     this.startNext(thread)
     this.emit('threads', 'messages', 'operations')
+  }
+
+  private endRunningSends(thread: Thread, phase: 'done' | 'stopped') {
+    for (const operation of this.world.operations) {
+      if (operation.targetId !== thread.id || operation.phase !== 'running') continue
+      if (operation.kind === 'sendMessage' || operation.kind === 'createThread') {
+        this.setPhase(operation, phase, operation.detail)
+      }
+    }
   }
 
   // 一轮结束或设备上线后，发出最早一条排队或等待设备的消息。
@@ -319,48 +455,197 @@ export class MockStore {
     this.startRun(thread, next, this.operationFor(next.id) ?? null)
   }
 
+  // 撤回还没发给 Agent 的消息，返回撤回的条数。
+  private withdrawPending(thread: Thread) {
+    let count = 0
+    for (const message of this.world.messages) {
+      if (message.threadId !== thread.id || message.role !== 'user') continue
+      if (message.delivery === 'queued' || message.delivery === 'waitingDevice') {
+        message.delivery = 'withdrawn'
+        count += 1
+        const pending = this.operationFor(message.id)
+        if (pending) this.setPhase(pending, 'stopped', message.id)
+      }
+    }
+    return count
+  }
+
+  cancelMessage(messageId: ID): Message {
+    const message = this.world.messages.find((item) => item.id === messageId)
+    if (!message || message.role !== 'user') throw new ClientError('notFound', `Message ${messageId} not found`)
+    if (message.delivery === 'withdrawn') return message
+    if (message.delivery !== 'queued' && message.delivery !== 'waitingDevice') {
+      throw new ClientError('conflict', 'This message was already sent')
+    }
+    const thread = this.thread(message.threadId)
+    message.delivery = 'withdrawn'
+    const operation = this.operationFor(message.id)
+    if (operation) this.setPhase(operation, 'stopped', message.id)
+    if (thread.status === 'waiting') this.startNext(thread)
+    this.emit('threads', 'messages', 'operations')
+    return message
+  }
+
+  setThreadModel(threadId: ID, model: string): Thread {
+    const thread = this.thread(threadId)
+    this.ensureWritable(thread)
+    const agent = this.agentOf(thread)
+    const name = agentNames[thread.agent]
+    if (thread.model === model) return thread
+    if (!agent?.abilities.switchModel) {
+      throw new ClientError('invalid', `${name} cannot switch models in this chat. Start a new chat to choose another.`)
+    }
+    if (!agent.models.includes(model)) throw new ClientError('invalid', `${model} is not available for ${name}`)
+    thread.model = model
+    thread.updatedAt = this.scheduler.now()
+    this.emit('threads')
+    return thread
+  }
+
   stopThread(threadId: ID): Operation {
     const thread = this.thread(threadId)
+    if (thread.status === 'archived') throw new ClientError('invalid', 'This chat is archived')
+    if (thread.status === 'running' && !this.agentOf(thread)?.abilities.stop) {
+      throw new ClientError('invalid', `${agentNames[thread.agent]} does not support stopping from Baton`)
+    }
+    const existing = this.pendingEnd(thread)
+    if (existing) return existing
     const operation = this.createOperation('stopThread', threadId)
     this.emit('operations')
 
     this.schedule(this.latency.save, () => {
-      // 排队中尚未发出的消息一起撤回。
-      for (const message of this.world.messages) {
-        if (message.threadId !== threadId || message.role !== 'user') continue
-        if (message.delivery === 'queued' || message.delivery === 'waitingDevice') {
-          message.delivery = 'withdrawn'
-          const pending = this.operationFor(message.id)
-          if (pending) this.setPhase(pending, 'stopped', message.id)
-        }
-      }
+      const canceled = this.withdrawPending(thread)
       if (thread.status !== 'running') {
         if (thread.status === 'waiting') thread.status = 'idle'
         this.setPhase(operation, 'stopped')
-      } else if (this.online(thread.deviceId)) {
-        this.setPhase(operation, 'stopping')
-        this.schedule(this.latency.device, () => this.confirmStop(thread, operation))
       } else {
-        this.setPhase(operation, 'waitingDevice')
+        thread.pending = 'stop'
+        thread.stopCanceled = canceled
+        this.sendStop(thread, operation)
       }
+      thread.updatedAt = this.scheduler.now()
       this.emit('threads', 'messages', 'operations')
     })
     return operation
   }
 
-  // 只有设备确认停止后，Thread 才变为空闲。
-  private confirmStop(thread: Thread, operation: Operation) {
-    this.cancelRun(thread.id)
-    for (const item of this.world.operations) {
-      if (item.kind === 'sendMessage' && item.targetId === thread.id && item.phase === 'running') {
-        this.setPhase(item, 'stopped', item.detail)
-      }
+  archiveThread(threadId: ID): Operation {
+    const thread = this.thread(threadId)
+    if (thread.status === 'archived') throw new ClientError('invalid', 'This chat is already archived')
+    if (thread.status === 'running' && !this.agentOf(thread)?.abilities.stop) {
+      throw new ClientError('invalid', `Wait for ${agentNames[thread.agent]} to finish, then archive this chat`)
     }
-    thread.status = 'idle'
+    const operation = this.createOperation('archiveThread', threadId)
+    this.emit('operations')
+
+    this.schedule(this.latency.save, () => {
+      const canceled = this.withdrawPending(thread)
+      // 已经在停止时沿用那次停止，设备确认后归档。
+      const stop = thread.pending ? this.pendingEnd(thread) : undefined
+      if (thread.status === 'running') {
+        thread.pending = 'archive'
+        thread.stopCanceled += canceled
+        if (stop) {
+          this.setPhase(operation, stop.phase === 'waitingDevice' ? 'waitingDevice' : 'stopping')
+          this.setPhase(stop, 'stopped')
+          this.retarget(stop, operation)
+        } else {
+          this.sendStop(thread, operation)
+        }
+      } else {
+        this.archive(thread, operation)
+      }
+      thread.updatedAt = this.scheduler.now()
+      this.emit('threads', 'messages', 'operations')
+    })
+    return operation
+  }
+
+  private pendingEnd(thread: Thread) {
+    return this.world.operations.find(
+      (item) =>
+        item.targetId === thread.id &&
+        (item.kind === 'stopThread' || item.kind === 'archiveThread') &&
+        (item.phase === 'submitted' || item.phase === 'stopping' || item.phase === 'waitingDevice'),
+    )
+  }
+
+  // 停止请求已发给设备时，设备确认后完成的是归档操作。
+  private retarget(previous: Operation | undefined, next: Operation) {
+    const timer = previous && this.stopTimers.get(previous.id)
+    if (!timer) return
+    this.stopTimers.delete(previous.id)
+    this.stopTimers.set(next.id, timer)
+    timer.operation = next
+  }
+
+  private archive(thread: Thread, operation: Operation) {
+    thread.status = 'archived'
+    thread.pending = null
+    thread.runStartedAt = null
+    this.setPhase(operation, 'done')
+  }
+
+  // 设备在线时发出停止请求；离线时请求已保存，等设备连上再发。
+  private sendStop(thread: Thread, operation: Operation) {
+    if (!this.online(thread.deviceId)) {
+      this.setPhase(operation, 'waitingDevice')
+      return
+    }
+    this.setPhase(operation, 'stopping')
+    const stubborn = this.world.stubbornStops.includes(thread.id)
+    const timer = { operation, cancel: () => {} }
+    timer.cancel = this.schedule(stubborn ? stopTimeout : this.latency.device, () => {
+      this.stopTimers.delete(timer.operation.id)
+      this.confirmStop(thread, timer.operation, stubborn ? 'forced' : 'byYou')
+    })
+    this.stopTimers.set(operation.id, timer)
+  }
+
+  // 只有设备确认停止后，Thread 才变为已停止或已归档。停止后发的消息接着发出。
+  private confirmStop(thread: Thread, operation: Operation, kind: 'byYou' | 'forced') {
+    this.cancelRun(thread.id)
+    this.endRunningSends(thread, 'stopped')
     thread.runStartedAt = null
     thread.updatedAt = this.scheduler.now()
-    this.setPhase(operation, 'stopped')
-    this.emit('threads', 'operations')
+    if (operation.kind === 'archiveThread') {
+      this.archive(thread, operation)
+    } else {
+      thread.status = 'stopped'
+      thread.pending = null
+      thread.stop = { kind, detail: null }
+      this.setPhase(operation, 'stopped')
+      this.startNext(thread)
+    }
+    this.emit('threads', 'messages', 'operations')
+  }
+
+  resumeThread(threadId: ID): Operation {
+    const thread = this.thread(threadId)
+    const device = this.device(thread.deviceId)
+    if (thread.status !== 'stopped' || thread.stop?.kind !== 'interrupted') {
+      throw new ClientError('invalid', 'This chat does not need resuming')
+    }
+    if (!this.agentOf(thread)?.abilities.resume) {
+      throw new ClientError('invalid', `${agentNames[thread.agent]} on ${device.name} does not support resuming`)
+    }
+    if (!this.online(device.id)) throw new ClientError('invalid', `Reconnect ${device.name} to resume this chat`)
+    const operation = this.createOperation('resumeThread', threadId)
+    this.emit('operations')
+
+    this.schedule(this.latency.save + this.latency.device, () => {
+      if (this.world.lostHistory.includes(thread.id)) {
+        thread.stop = { kind: 'historyLost', detail: null }
+        this.setPhase(operation, 'failed', 'Chat history not found')
+      } else {
+        thread.status = 'idle'
+        thread.stop = null
+        this.setPhase(operation, 'done')
+      }
+      thread.updatedAt = this.scheduler.now()
+      this.emit('threads', 'operations')
+    })
+    return operation
   }
 
   answerItem(itemId: ID, answer: string, revision: number): Operation {
@@ -405,13 +690,14 @@ export class MockStore {
 
   private deviceOnline(device: Device) {
     for (const operation of this.world.operations) {
-      if (operation.kind !== 'stopThread' || operation.phase !== 'waitingDevice') continue
+      if (operation.kind !== 'stopThread' && operation.kind !== 'archiveThread') continue
+      if (operation.phase !== 'waitingDevice') continue
       const thread = this.thread(operation.targetId)
-      if (thread.deviceId === device.id) this.confirmStop(thread, operation)
+      if (thread.deviceId === device.id) this.sendStop(thread, operation)
     }
     for (const thread of this.world.threads) {
       if (thread.deviceId !== device.id) continue
-      if (thread.status === 'running') this.scheduleRunEnd(thread.id)
+      if (thread.status === 'running' && !thread.pending) this.scheduleRunEnd(thread.id)
       else if (thread.status === 'waiting' || thread.status === 'idle') this.startNext(thread)
     }
     for (const project of this.world.projects) {
@@ -421,10 +707,17 @@ export class MockStore {
     }
   }
 
-  // 设备离线或重新同步时，执行中的一轮继续由设备负责，网页上暂停计时，不把它当成已结束。
+  // 设备离线或重新同步时，执行中的一轮继续由设备负责，网页上不把它当成已结束。
+  // 已发出但没确认的停止回到等待设备，重新连上后再发一次。
   private deviceUnavailable(device: Device) {
     for (const thread of this.world.threads) {
       if (thread.deviceId === device.id && thread.status === 'running') this.cancelRun(thread.id)
+    }
+    for (const [id, timer] of [...this.stopTimers]) {
+      if (this.thread(timer.operation.targetId).deviceId !== device.id) continue
+      timer.cancel()
+      this.stopTimers.delete(id)
+      this.setPhase(timer.operation, 'waitingDevice')
     }
     for (const project of this.world.projects) {
       if (project.agent.deviceId !== device.id || project.agent.state !== 'running') continue
@@ -549,9 +842,27 @@ export class MockStore {
     return device.hasRuntime && device.subscriptions.some((item) => item.provider === 'ChatGPT' && item.signedIn)
   }
 
+  // 场景里已经在执行或正在停止的 Thread 接着往下走。
   private startExistingRuns() {
     for (const thread of this.world.threads) {
-      if (thread.status === 'running' && this.online(thread.deviceId)) this.scheduleRunEnd(thread.id)
+      if (thread.status === 'running' && !thread.pending && this.online(thread.deviceId)) this.scheduleRunEnd(thread.id)
     }
+    for (const operation of this.world.operations) {
+      if (operation.phase === 'stopping') this.sendStop(this.thread(operation.targetId), operation)
+    }
+  }
+
+  // 设备上某个目录的子目录，只在允许的目录里列出。
+  listFolders(deviceId: ID, path: string | null): FolderListing {
+    const device = this.device(deviceId)
+    if (device.connection !== 'online') return { state: 'unavailable', deviceId, path, reason: device.connection }
+    if (path === null) return { state: 'ready', deviceId, path, folders: device.folders }
+    if (!device.folders.some((root) => insideFolder(path, root))) {
+      return { state: 'unavailable', deviceId, path, reason: 'outsideFolders' }
+    }
+    const existing = this.world.directories[deviceId] ?? []
+    if (!existing.includes(path)) return { state: 'unavailable', deviceId, path, reason: 'missing' }
+    const folders = existing.filter((item) => parentFolder(item) === path).sort()
+    return { state: 'ready', deviceId, path, folders }
   }
 }

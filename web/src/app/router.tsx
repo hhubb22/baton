@@ -35,6 +35,26 @@ export interface DevicesSearch {
   connect?: true
 }
 
+export interface ThreadsSearch {
+  // 右侧打开的 Thread。
+  thread?: string
+  // 筛选：设备、Project（none 表示不属于 Project）、只看已归档。
+  device?: string
+  project?: string
+  archived?: true
+  // 新对话：focus 聚焦顶部输入区，folder 打开选择目录；from 用这个 Thread 的设备和目录预填。
+  compose?: 'focus' | 'folder'
+  from?: string
+}
+
+function optionalString(value: unknown) {
+  return typeof value === 'string' && value !== '' ? value : undefined
+}
+
+function flag(value: unknown) {
+  return [true, 1, '1', 'true'].includes(value as never) ? true : undefined
+}
+
 const notices: LoginNotice[] = ['signedOut', 'expired', 'passwordReset']
 
 // 只接受站内路径，避免登录后被带到别的网站。
@@ -60,7 +80,19 @@ const routeTree = rootRoute.addChildren([
   workspaceRoute.addChildren([
     createRoute({ getParentRoute: () => workspaceRoute, path: '/', component: HomePage }),
     createRoute({ getParentRoute: () => workspaceRoute, path: '/inbox', component: InboxPage }),
-    createRoute({ getParentRoute: () => workspaceRoute, path: '/threads', component: ThreadsPage }),
+    createRoute({
+      getParentRoute: () => workspaceRoute,
+      path: '/threads',
+      component: ThreadsPage,
+      validateSearch: (search: Record<string, unknown>): ThreadsSearch => ({
+        thread: optionalString(search.thread),
+        device: optionalString(search.device),
+        project: optionalString(search.project),
+        archived: flag(search.archived),
+        compose: search.compose === 'focus' || search.compose === 'folder' ? search.compose : undefined,
+        from: optionalString(search.from),
+      }),
+    }),
     createRoute({ getParentRoute: () => workspaceRoute, path: '/threads/$threadId', component: ThreadPage }),
     createRoute({
       getParentRoute: () => workspaceRoute,
@@ -68,7 +100,7 @@ const routeTree = rootRoute.addChildren([
       component: DevicesPage,
       // 带 connect 参数时打开接入窗口。
       validateSearch: (search: Record<string, unknown>): DevicesSearch => ({
-        connect: [true, 1, '1', 'true'].includes(search.connect as never) ? true : undefined,
+        connect: flag(search.connect),
       }),
     }),
     createRoute({ getParentRoute: () => workspaceRoute, path: '/projects/$projectId', component: ProjectPage }),

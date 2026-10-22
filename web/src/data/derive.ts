@@ -8,64 +8,238 @@ export interface StatusView {
   label: string
 }
 
-export interface ThreadView {
-  status: StatusView
-  // 设备不可用时输入区上方的横幅；设备正常时为 null。
-  notice: { title: string; detail: string } | null
+// 列表分组，按需要处理的先后排列。
+// stopping 是设备在线、正在等它确认停止；stopRequested 是设备不在线，停止请求还没发出。
+export type ThreadGroup = 'attention' | 'running' | 'stopping' | 'stopRequested' | 'waiting' | 'idle' | 'archived'
+
+export const threadGroups: { id: ThreadGroup; label: string }[] = [
+  { id: 'attention', label: 'Needs attention' },
+  { id: 'running', label: 'Running' },
+  { id: 'stopping', label: 'Stopping' },
+  { id: 'stopRequested', label: 'Stop requested' },
+  { id: 'waiting', label: 'Waiting for device' },
+  { id: 'idle', label: 'Idle' },
+  { id: 'archived', label: 'Archived' },
+]
+
+// 卡片上的恢复办法。newChat 用同一设备和目录新建对话，chooseFolder 先选目录再新建。
+export type ThreadAction = 'resume' | 'newChat' | 'chooseFolder' | 'viewDevices' | 'viewActivity'
+
+export interface ThreadNotice {
+  tone: 'neutral' | 'danger' | 'attention'
+  title: string
+  detail: string
+  action: ThreadAction | null
 }
 
-export function deviceStatus(device: Device | undefined): StatusView {
-  if (!device) return { tone: 'neutral', label: 'Device removed' }
-  switch (device.connection) {
-    case 'online':
-      return { tone: 'success', label: 'Online' }
-    case 'syncing':
-      return { tone: 'neutral', label: 'Syncing' }
-    case 'offline':
-      return { tone: 'neutral', label: 'Offline' }
+export interface ThreadView {
+  status: StatusView
+  group: ThreadGroup
+  // 时间线末尾说明当前状态和恢复办法；状态正常时为 null。
+  notice: ThreadNotice | null
+  // 已归档、不能恢复、启动失败或等待设备确认停止时不显示输入区。
+  composer: boolean
+  // 设备在线、正在执行时显示计时。设备离线时只保留最后报告的状态，不计时。
+  live: boolean
+}
+
+function notice(
+  title: string,
+  detail: string,
+  action: ThreadAction | null = null,
+  tone: ThreadNotice['tone'] = 'neutral',
+) {
+  return { tone, title, detail, action }
+}
+
+function canceledNote(count: number) {
+  if (count === 0) return ''
+  return count === 1 ? ' 1 waiting message was canceled.' : ` ${count} waiting messages were canceled.`
+}
+
+// unknownDelivery：Thread 里有一条不确定是否送达的消息。
+export function threadView(
+  thread: Thread,
+  device: Device | undefined,
+  options: { resume?: boolean; unknownDelivery?: boolean } = {},
+): ThreadView {
+  const name = device?.name ?? 'This device'
+  const agent = agentNames[thread.agent]
+  const reachable = device?.connection === 'online'
+  const away = device?.connection === 'syncing' ? 'syncing' : 'offline'
+  const view = (
+    status: StatusView,
+    group: ThreadGroup,
+    note: ThreadNotice | null = null,
+    composer = true,
+    live = false,
+  ): ThreadView => ({ status, group, notice: note, composer, live })
+
+  if (thread.status === 'archived') {
+    return view(
+      { tone: 'hollow', label: 'Archived' },
+      'archived',
+      notice('Archived', 'This chat is closed to new messages. Past replies and attachment links are kept.'),
+      false,
+    )
+  }
+  if (thread.pending === 'archive') {
+    if (reachable) {
+      return view(
+        { tone: 'info', label: 'Archiving…' },
+        'stopping',
+        notice('Stopping before archiving…', `Waiting for ${name} to confirm ${agent} has stopped.`),
+        false,
+        true,
+      )
+    }
+    return view(
+      { tone: 'neutral', label: 'Waiting to archive' },
+      'stopRequested',
+      notice(
+        `Waiting for ${name}`,
+        `${name} is ${away} and may still be running ${agent}. Reconnect it to confirm stopping and finish archiving.`,
+        'viewDevices',
+      ),
+      false,
+    )
+  }
+  if (thread.pending === 'stop') {
+    if (reachable) return view({ tone: 'info', label: 'Stopping…' }, 'stopping', null, true, true)
+    return view(
+      { tone: 'neutral', label: 'Waiting to stop' },
+      'stopRequested',
+      notice(
+        `Stop is waiting for ${name}`,
+        `The stop request is saved.${canceledNote(thread.stopCanceled)} Reconnect ${name} to send it and confirm stopping. ${agent} may still be running.`,
+        'viewDevices',
+      ),
+      false,
+    )
+  }
+  switch (thread.status) {
+    case 'stopped':
+      return view({ tone: 'danger', label: 'Stopped' }, 'attention', ...stoppedNotice(thread, name, agent, options))
+    case 'unknown':
+      return view(
+        { tone: 'attention', label: 'Status unknown' },
+        'attention',
+        options.unknownDelivery
+          ? notice(
+              `Not sure if ${agent} received your message`,
+              `${agent} restarted while sending. Check the activity before sending your message again. Baton will not resend it automatically.`,
+              'viewActivity',
+              'attention',
+            )
+          : notice(
+              'Status unknown',
+              `${name} has not reported this chat since it reconnected. Check the activity before sending more messages.`,
+              'viewActivity',
+              'attention',
+            ),
+      )
+    case 'running':
+      if (!reachable) {
+        return view(
+          { tone: 'hollow', label: 'Last seen running' },
+          'running',
+          notice(
+            `${name} is ${away}`,
+            'The reply may still be running on the device. Updates appear after it reconnects.',
+            'viewDevices',
+          ),
+        )
+      }
+      return view({ tone: 'info', label: 'Running' }, 'running', null, true, true)
+    case 'waiting':
+      return view(
+        { tone: 'neutral', label: 'Waiting for device' },
+        'waiting',
+        notice(
+          `Waiting for ${name} to come online`,
+          `Your message is saved and will send when ${name} is online. This chat stays on ${name}.`,
+          'viewDevices',
+        ),
+      )
+    case 'idle':
+      return view(
+        { tone: 'neutral', label: 'Idle' },
+        'idle',
+        reachable ? null : notice(`${name} is ${away}`, 'New messages wait until it connects.'),
+      )
   }
 }
 
-export function threadView(thread: Thread, device: Device | undefined): ThreadView {
-  const name = device?.name ?? 'This device'
-  const reachable = device?.connection === 'online'
-  switch (thread.status) {
-    case 'archived':
-      return { status: { tone: 'hollow', label: 'Archived' }, notice: null }
-    case 'stopped':
-      return {
-        status: { tone: 'danger', label: 'Stopped' },
-        notice: { title: 'Stopped', detail: thread.stopReason ?? 'This thread stopped.' },
+function stoppedNotice(
+  thread: Thread,
+  name: string,
+  agent: string,
+  options: { resume?: boolean },
+): [ThreadNotice, boolean] {
+  const stop = thread.stop ?? { kind: 'byYou', detail: null }
+  const keep = 'File changes are kept. Send a message below to continue.'
+  switch (stop.kind) {
+    case 'byYou':
+      return [notice('Stopped by you', `${name} confirmed stopping.${canceledNote(thread.stopCanceled)} ${keep}`), true]
+    case 'forced':
+      return [
+        notice(
+          'Stopped by you',
+          `${agent} did not stop within 1 minute, so ${name} ended it.${canceledNote(thread.stopCanceled)} ${keep}`,
+        ),
+        true,
+      ]
+    case 'interrupted':
+      if (options.resume) {
+        return [
+          notice(
+            `${agent} stopped before finishing`,
+            `${agent} on ${name} was interrupted, for example by a restart. Resume the chat to continue where it left off.`,
+            'resume',
+            'danger',
+          ),
+          true,
+        ]
       }
-    case 'unknown':
-      return {
-        status: { tone: 'attention', label: 'Status unknown' },
-        notice: { title: 'Status unknown', detail: `${name} has not reported this thread since it reconnected.` },
-      }
-    case 'running':
-      if (!reachable) {
-        return {
-          status: { tone: 'info', label: 'Running' },
-          notice: {
-            title: `${name} is ${device?.connection === 'syncing' ? 'syncing' : 'offline'}`,
-            detail: 'The task keeps running on the device. Updates appear after it reconnects.',
-          },
-        }
-      }
-      return { status: { tone: 'info', label: 'Running' }, notice: null }
-    case 'waiting':
-      return {
-        status: { tone: 'neutral', label: 'Waiting for device' },
-        notice: { title: `Waiting for ${name}`, detail: 'Your message is saved and will be sent when it connects.' },
-      }
-    case 'idle':
-      if (!reachable) {
-        return {
-          status: { tone: 'neutral', label: 'Idle' },
-          notice: { title: `${name} is offline`, detail: 'New messages wait until it connects.' },
-        }
-      }
-      return { status: { tone: 'neutral', label: 'Idle' }, notice: null }
+      return [
+        notice(
+          'This agent cannot resume past chats',
+          `The agent on ${name} does not support resuming. Start a new chat in this folder to continue.`,
+          'newChat',
+          'danger',
+        ),
+        false,
+      ]
+    case 'historyLost':
+      return [
+        notice(
+          'Chat history not found',
+          `${name} no longer has the history of this chat, so ${agent} cannot resume it. Start a new chat in this folder to continue.`,
+          'newChat',
+          'danger',
+        ),
+        false,
+      ]
+    case 'folderMissing':
+      return [
+        notice(
+          'Folder not found',
+          `${stop.detail ?? thread.folder} no longer exists on ${name}. Choose a folder to start a new chat.`,
+          'chooseFolder',
+          'danger',
+        ),
+        false,
+      ]
+    case 'startFailed':
+      return [
+        notice(
+          `${agent} could not start`,
+          `${stop.detail ?? `${agent} exited during startup`}. Fix it on ${name}, then start a new chat in this folder.`,
+          'newChat',
+          'danger',
+        ),
+        false,
+      ]
   }
 }
 
@@ -247,6 +421,79 @@ export function agentSummary(device: Device) {
 
 export function liveThreads(threads: Thread[]) {
   return threads.filter((item) => item.status !== 'archived')
+}
+
+// 列表右侧的更新时间。
+export function relativeTime(at: number, now: number) {
+  const minutes = Math.floor((now - at) / 60_000)
+  if (minutes < 1) return 'Just now'
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.round((startOfDay(now) - startOfDay(at)) / 86_400_000)
+  return days <= 1 ? 'Yesterday' : `${days}d ago`
+}
+
+function startOfDay(at: number) {
+  const date = new Date(at)
+  date.setHours(0, 0, 0, 0)
+  return date.getTime()
+}
+
+// 执行计时，例如 03:12；超过一小时为 1:03:12。
+export function runTimer(startedAt: number, now: number) {
+  const total = Math.max(0, Math.floor((now - startedAt) / 1000))
+  const pad = (value: number) => String(value).padStart(2, '0')
+  const hours = Math.floor(total / 3600)
+  const rest = `${pad(Math.floor((total % 3600) / 60))}:${pad(total % 60)}`
+  return hours > 0 ? `${hours}:${rest}` : rest
+}
+
+// 路径的最后一段，用作目录的短名。
+export function folderName(path: string) {
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? path
+}
+
+// 上一级目录；已经是第一级时为 null。
+export function parentFolder(path: string) {
+  const index = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  return index > 0 ? path.slice(0, index) : null
+}
+
+export interface Location {
+  deviceId: ID
+  folder: string
+}
+
+// 最近用过的设备和目录，按 Thread 更新时间从新到旧，不重复。
+export function recentLocations(threads: Thread[], devices: Device[], limit = 3): Location[] {
+  const seen = new Set<string>()
+  const result: Location[] = []
+  for (const thread of [...threads].sort((a, b) => b.updatedAt - a.updatedAt)) {
+    const key = `${thread.deviceId}:${thread.folder}`
+    if (seen.has(key) || !devices.some((item) => item.id === thread.deviceId)) continue
+    seen.add(key)
+    result.push({ deviceId: thread.deviceId, folder: thread.folder })
+    if (result.length === limit) break
+  }
+  return result
+}
+
+// 新对话默认用默认设备上最近用过的目录，没有时用它的第一个仓库或允许的目录。
+export function defaultLocation(threads: Thread[], devices: Device[], defaultDeviceId: ID | null): Location | null {
+  const device = devices.find((item) => item.id === defaultDeviceId) ?? devices[0]
+  if (!device) return null
+  const recent = recentLocations(
+    threads.filter((item) => item.deviceId === device.id),
+    devices,
+    1,
+  )[0]
+  return recent ?? { deviceId: device.id, folder: device.repos[0] ?? device.folders[0] ?? '' }
+}
+
+// 能开新对话的 Agent：已安装且订阅已登录。
+export function usableAgents(device: Device | undefined) {
+  return (device?.agents ?? []).filter((agent) => !agent.problem && agent.models.length > 0)
 }
 
 // 操作的确认阶段。已提交和已保存分开显示，设备确认前不显示最终结果。

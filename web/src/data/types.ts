@@ -90,6 +90,18 @@ export interface IssuedEnrollment extends Enrollment {
 
 export type ThreadStatus = 'waiting' | 'running' | 'idle' | 'stopped' | 'unknown' | 'archived'
 
+// Thread 停止的原因，决定页面给出的恢复办法。
+// byYou：你停止，设备已确认；forced：Agent 一分钟内没有停下，设备结束了进程；
+// interrupted：设备重启等原因中断，Agent 支持时可以恢复；historyLost：恢复时设备上找不到对话记录；
+// folderMissing：设备上找不到目录；startFailed：Agent 没能启动。
+export type StopKind = 'byYou' | 'forced' | 'interrupted' | 'historyLost' | 'folderMissing' | 'startFailed'
+
+export interface ThreadStop {
+  kind: StopKind
+  // 设备报告的说明，例如找不到的目录或 Agent 的错误信息。
+  detail: string | null
+}
+
 export interface Thread {
   id: ID
   title: string
@@ -99,15 +111,22 @@ export interface Thread {
   model: string
   projectId: ID | null
   status: ThreadStatus
-  stopReason: string | null
+  stop: ThreadStop | null
+  // 已提交、还在等设备确认的停止或归档。设备确认前 status 保持原样。
+  pending: 'stop' | 'archive' | null
+  // 最近一次停止或归档撤回的排队消息条数。
+  stopCanceled: number
   createdAt: number
   updatedAt: number
   runStartedAt: number | null
   unread: boolean
 }
 
-// 一条消息从提交到被 Agent 读到的过程。
-export type Delivery = 'submitted' | 'saved' | 'waitingDevice' | 'queued' | 'delivered' | 'withdrawn'
+// 一条消息从提交到被 Agent 读到的过程。unknown 表示设备在发送途中重启，不确定 Agent 是否收到，Baton 不会自动重发。
+export type Delivery = 'submitted' | 'saved' | 'waitingDevice' | 'queued' | 'delivered' | 'withdrawn' | 'unknown'
+
+// next 等当前回复结束后发送；now 在 Agent 支持时插入当前回复。
+export type SendMode = 'next' | 'now'
 
 export interface Message {
   id: ID
@@ -155,7 +174,8 @@ export interface InboxItem {
   createdAt: number
 }
 
-export type OperationKind = 'sendMessage' | 'stopThread' | 'answerItem'
+export type OperationKind =
+  'createThread' | 'sendMessage' | 'stopThread' | 'archiveThread' | 'resumeThread' | 'answerItem'
 
 // 操作确认的各个阶段，界面据此区分已提交、已保存、等待设备、执行中和已停止。
 export type OperationPhase =
@@ -182,3 +202,13 @@ export interface Operation {
 export type FilePreview =
   | { state: 'ready'; deviceId: ID; path: string; content: string }
   | { state: 'unavailable'; deviceId: ID; path: string; reason: 'offline' | 'syncing' | 'outsideFolders' | 'missing' }
+
+// 设备上某个目录的子目录。path 为 null 时列出允许 Agent 访问的目录。
+export type FolderListing =
+  | { state: 'ready'; deviceId: ID; path: string | null; folders: string[] }
+  | {
+      state: 'unavailable'
+      deviceId: ID
+      path: string | null
+      reason: 'offline' | 'syncing' | 'outsideFolders' | 'missing'
+    }

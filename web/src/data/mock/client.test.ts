@@ -138,7 +138,11 @@ describe('operations', () => {
     expect((await client.listThreads()).find((item) => item.id === 'thr-gateway')!.status).toBe('running')
     scheduler.advance(browserLatency.device)
     expect((await client.getOperation(stop.id)).phase).toBe('stopped')
-    expect((await client.listThreads()).find((item) => item.id === 'thr-gateway')!.status).toBe('idle')
+    expect((await client.listThreads()).find((item) => item.id === 'thr-gateway')).toMatchObject({
+      status: 'stopped',
+      stop: { kind: 'byYou' },
+      stopCanceled: 1,
+    })
     const messages = await client.listMessages('thr-gateway')
     expect(messages.find((item) => item.body === 'Next')!.delivery).toBe('withdrawn')
     expect((await client.getOperation(queued.id)).phase).toBe('stopped')
@@ -150,8 +154,130 @@ describe('operations', () => {
     const stop = await client.stopThread('thr-gateway')
     scheduler.advance(browserLatency.save)
     expect((await client.getOperation(stop.id)).phase).toBe('waitingDevice')
+    const waiting = (await client.listThreads()).find((item) => item.id === 'thr-gateway')!
+    expect(waiting).toMatchObject({ status: 'running', pending: 'stop' })
     client.controls.setDeviceConnection('dev-ubuntu', 'online')
+    expect((await client.getOperation(stop.id)).phase).toBe('stopping')
+    scheduler.advance(browserLatency.device)
     expect((await client.getOperation(stop.id)).phase).toBe('stopped')
+  })
+
+  it('force quits when the agent does not stop within a minute', async () => {
+    const { client, scheduler } = setup('waiting')
+    const thread = () => client.listThreads().then((items) => items.find((item) => item.id === 'thr-patrol')!)
+    expect(await thread()).toMatchObject({ status: 'running', pending: 'stop' })
+    scheduler.advance(browserLatency.device)
+    expect((await thread()).pending).toBe('stop')
+    scheduler.advance(60_000)
+    expect(await thread()).toMatchObject({ status: 'stopped', pending: null, stop: { kind: 'forced' } })
+  })
+
+  it('creates a standalone thread, talks, and archives it', async () => {
+    const { client, scheduler } = setup()
+    const op = await client.createThread({
+      deviceId: 'dev-mac',
+      folder: '~/src/elyx',
+      agent: 'codex',
+      model: 'gpt-6.1-sol',
+      body: 'List the open TODOs\nand group them by file',
+      clientId: 'n1',
+    })
+    const created = (await client.listThreads()).find((item) => item.id === op.targetId)!
+    expect(created).toMatchObject({ projectId: null, title: 'List the open TODOs', folder: '~/src/elyx' })
+    scheduler.advance(browserLatency.save)
+    expect((await client.getOperation(op.id)).phase).toBe('running')
+    scheduler.advance(browserLatency.run)
+    expect((await client.listThreads()).find((item) => item.id === op.targetId)!.status).toBe('idle')
+
+    await client.sendMessage({ threadId: op.targetId, body: 'Thanks', clientId: 'n2' })
+    scheduler.advance(browserLatency.save + browserLatency.run)
+    const messages = await client.listMessages(op.targetId)
+    expect(messages.map((item) => item.role)).toEqual(['user', 'agent', 'user', 'agent'])
+
+    const archive = await client.archiveThread(op.targetId)
+    scheduler.advance(browserLatency.save)
+    expect((await client.getOperation(archive.id)).phase).toBe('done')
+    expect((await client.listThreads()).find((item) => item.id === op.targetId)!.status).toBe('archived')
+    await expect(client.sendMessage({ threadId: op.targetId, body: 'More', clientId: 'n3' })).rejects.toMatchObject({
+      code: 'invalid',
+    })
+  })
+
+  it('rejects folders outside the allowed folders', async () => {
+    const { client } = setup()
+    await expect(
+      client.createThread({
+        deviceId: 'dev-mac',
+        folder: '/etc',
+        agent: 'codex',
+        model: 'gpt-6.1-sol',
+        body: 'Hi',
+        clientId: 'n1',
+      }),
+    ).rejects.toMatchObject({ code: 'invalid' })
+  })
+
+  it('stops a running thread before archiving it', async () => {
+    const { client, scheduler } = setup()
+    const queued = await client.sendMessage({ threadId: 'thr-gateway', body: 'Later', clientId: 'c1' })
+    const archive = await client.archiveThread('thr-gateway')
+    scheduler.advance(browserLatency.save)
+    expect((await client.getOperation(archive.id)).phase).toBe('stopping')
+    expect((await client.listThreads()).find((item) => item.id === 'thr-gateway')!.pending).toBe('archive')
+    scheduler.advance(browserLatency.device)
+    expect((await client.getOperation(archive.id)).phase).toBe('done')
+    expect((await client.listThreads()).find((item) => item.id === 'thr-gateway')!.status).toBe('archived')
+    expect((await client.getOperation(queued.id)).phase).toBe('stopped')
+  })
+
+  it('cancels a queued message but not a delivered one', async () => {
+    const { client, scheduler } = setup()
+    await client.sendMessage({ threadId: 'thr-gateway', body: 'Later', clientId: 'c1' })
+    scheduler.advance(browserLatency.save)
+    const queued = (await client.listMessages('thr-gateway')).find((item) => item.body === 'Later')!
+    expect(queued.delivery).toBe('queued')
+    expect((await client.cancelMessage(queued.id)).delivery).toBe('withdrawn')
+    const delivered = (await client.listMessages('thr-gateway')).find((item) => item.delivery === 'delivered')!
+    await expect(client.cancelMessage(delivered.id)).rejects.toMatchObject({ code: 'conflict' })
+  })
+
+  it('sends now only when the agent can steer', async () => {
+    const { client, scheduler } = setup()
+    const now = await client.sendMessage({ threadId: 'thr-gateway', body: 'Use v2', clientId: 'c1', mode: 'now' })
+    scheduler.advance(browserLatency.save)
+    expect((await client.getOperation(now.id)).phase).toBe('running')
+    await expect(
+      client.sendMessage({ threadId: 'thr-patrol', body: 'Hurry', clientId: 'c2', mode: 'now' }),
+    ).rejects.toMatchObject({ code: 'invalid' })
+  })
+
+  it('stops with folder missing instead of resending', async () => {
+    const { client, scheduler } = setup('error')
+    const compat = (await client.listThreads()).find((item) => item.id === 'thr-compat')!
+    expect(compat.stop?.kind).toBe('folderMissing')
+    await expect(client.sendMessage({ threadId: 'thr-compat', body: 'Again', clientId: 'c1' })).rejects.toBeTruthy()
+    scheduler.advance(browserLatency.run)
+    expect((await client.listMessages('thr-upgrade')).filter((item) => item.delivery === 'unknown')).toHaveLength(1)
+  })
+
+  it('resumes an interrupted thread or reports lost history', async () => {
+    const { client, scheduler } = setup('error')
+    const resume = await client.resumeThread('thr-guide')
+    scheduler.advance(browserLatency.save + browserLatency.device)
+    expect(await client.getOperation(resume.id)).toMatchObject({ phase: 'failed', detail: 'Chat history not found' })
+    expect((await client.listThreads()).find((item) => item.id === 'thr-guide')!.stop?.kind).toBe('historyLost')
+    await expect(client.resumeThread('thr-patrol')).rejects.toMatchObject({ code: 'invalid' })
+  })
+
+  it('lists allowed folders and their children', async () => {
+    const { client } = setup()
+    const roots = await client.listFolders('dev-mac', null)
+    expect(roots).toMatchObject({ state: 'ready', folders: ['~/src'] })
+    const children = await client.listFolders('dev-mac', '~/src')
+    expect(children.state === 'ready' && children.folders).toContain('~/src/baton')
+    expect(await client.listFolders('dev-mac', '/etc')).toMatchObject({ reason: 'outsideFolders' })
+    client.controls.setDeviceConnection('dev-mac', 'offline')
+    expect(await client.listFolders('dev-mac', null)).toMatchObject({ reason: 'offline' })
   })
 
   it('reports a conflict when the item was answered elsewhere', async () => {

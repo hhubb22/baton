@@ -3,6 +3,7 @@ import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { EnrollDialog } from '../app/EnrollDialog'
 import { Page } from '../app/Page'
+import { useNow } from '../app/useNow'
 import {
   agentSummary,
   capabilityLines,
@@ -421,16 +422,6 @@ function NoticeBox({ notice, children }: { notice: Notice; children?: ReactNode 
   )
 }
 
-// 最后联系时间按分钟显示，每分钟刷新一次。
-function useNow() {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 60_000)
-    return () => clearInterval(timer)
-  }, [])
-  return now
-}
-
 export function DevicesPage() {
   const devices = useDevices()
   const projects = useProjects()
@@ -458,7 +449,8 @@ export function DevicesPage() {
 
   const list = devices.data ?? []
   const defaultId = session.data?.defaultDeviceId ?? null
-  const now = useNow()
+  // 最后联系时间按分钟显示，每分钟刷新一次。
+  const now = useNow(60_000)
 
   const saveDefault = (device: Device, offline: boolean) => {
     setDefault.mutate(device.id, {

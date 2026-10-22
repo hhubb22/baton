@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex'
-import { useRef, type KeyboardEvent, type ReactNode } from 'react'
+import { useRef, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
 import { shadow } from '../theme/base.stylex'
 import { text } from '../theme/text'
 import { colors, radius, size, space } from '../theme/tokens.stylex'
@@ -45,7 +45,8 @@ const styles = stylex.create({
     gap: space.sm,
     cursor: 'default',
   },
-  chips: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '2px', minWidth: 0 },
+  chips: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '2px', flexGrow: 1, minWidth: 0 },
+  actions: { display: 'flex', alignItems: 'center', gap: space.sm, flexShrink: 0 },
   send: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -59,6 +60,11 @@ const styles = stylex.create({
     backgroundColor: { default: colors.accent, ':hover': colors.accentHover, ':active': colors.accentPressed },
     color: colors.onAccent,
   },
+  // 没有内容时按钮变灰，点击不发送。
+  sendIdle: {
+    backgroundColor: { default: colors.subtle, ':hover': colors.subtle, ':active': colors.subtle },
+    color: colors.faint,
+  },
 })
 
 // 输入区：提示文字在上，工具栏在下。Enter 发送，Shift+Enter 换行，输入法组合时不发送。
@@ -68,16 +74,25 @@ export function Composer({
   onSend,
   placeholder,
   chips,
+  actions,
   label = 'Message',
+  inputRef,
+  style,
 }: {
   value: string
   onChange: (value: string) => void
   onSend: () => void
   placeholder: string
   chips?: ReactNode
+  // 发送按钮左边的控件，例如发送方式和停止。
+  actions?: ReactNode
   label?: string
+  inputRef?: RefObject<HTMLTextAreaElement | null>
+  style?: stylex.StyleXStyles
 }) {
   const localRef = useRef<HTMLTextAreaElement | null>(null)
+  const empty = value.trim() === ''
+  const ref = inputRef ?? localRef
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
@@ -86,9 +101,9 @@ export function Composer({
   }
 
   return (
-    <div {...stylex.props(styles.composer)} onClick={() => localRef.current?.focus()}>
+    <div {...stylex.props(styles.composer, style)} onClick={() => ref.current?.focus()}>
       <textarea
-        ref={localRef}
+        ref={ref}
         aria-label={label}
         rows={1}
         value={value}
@@ -99,9 +114,17 @@ export function Composer({
       />
       <div {...stylex.props(styles.toolbar)} onClick={(event) => event.stopPropagation()}>
         <div {...stylex.props(styles.chips)}>{chips}</div>
-        <button type="button" aria-label="Send" onClick={onSend} {...stylex.props(styles.send, focusRing.ring)}>
-          <Icon name="arrow-up" size={16} />
-        </button>
+        <div {...stylex.props(styles.actions)}>
+          {actions}
+          <button
+            type="button"
+            aria-label="Send"
+            onClick={onSend}
+            {...stylex.props(styles.send, empty && styles.sendIdle, focusRing.ring)}
+          >
+            <Icon name="arrow-up" size={16} />
+          </button>
+        </div>
       </div>
     </div>
   )

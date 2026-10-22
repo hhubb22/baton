@@ -126,17 +126,43 @@ export function createMockClient(
         if (content === undefined) return { state: 'unavailable', deviceId, path, reason: 'missing' }
         return { state: 'ready', deviceId, path, content }
       }),
+    listFolders: (deviceId, path) => guarded(() => store.listFolders(deviceId, path)),
     getOperation: (id) => guarded(() => store.operation(id)),
 
-    async sendMessage({ threadId, body, clientId }) {
+    async createThread({ clientId, ...input }) {
       await connect(latency.read)
       signedIn()
-      return structuredClone(store.sendMessage(threadId, body, clientId))
+      return structuredClone(store.createThread(input, clientId))
+    },
+    async sendMessage({ threadId, body, clientId, mode }) {
+      await connect(latency.read)
+      signedIn()
+      return structuredClone(store.sendMessage(threadId, body, clientId, mode))
+    },
+    async cancelMessage(messageId) {
+      await connect(latency.save)
+      signedIn()
+      return structuredClone(store.cancelMessage(messageId))
+    },
+    async setThreadModel({ threadId, model }) {
+      await connect(latency.save)
+      signedIn()
+      return structuredClone(store.setThreadModel(threadId, model))
     },
     async stopThread(threadId) {
       await connect(latency.read)
       signedIn()
       return structuredClone(store.stopThread(threadId))
+    },
+    async archiveThread(threadId) {
+      await connect(latency.read)
+      signedIn()
+      return structuredClone(store.archiveThread(threadId))
+    },
+    async resumeThread(threadId) {
+      await connect(latency.read)
+      signedIn()
+      return structuredClone(store.resumeThread(threadId))
     },
     async answerItem({ itemId, answer, revision }) {
       await connect(latency.read)

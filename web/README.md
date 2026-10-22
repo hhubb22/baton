@@ -8,7 +8,7 @@
 |---|---|
 | `src/theme` | 设计 token、字体、浅色和深色主题。`tokens.stylex.ts` 与 `themes.ts` 由 `pnpm tokens` 从 `design/tokens` 生成，不手改 |
 | `src/ui` | 通用组件：按钮、状态点、横幅、卡片、输入区、菜单、弹窗等 |
-| `src/app` | 路由、侧栏和页面框架，以及多个页面共用的 Thread 行、文件预览 |
+| `src/app` | 路由、侧栏和页面框架，以及多个页面共用的 Thread 行、Thread 详情、文件预览和选择目录弹窗 |
 | `src/pages` | 各路由的页面 |
 | `src/data` | `BatonClient` 接口、查询 hooks、由多个对象组合出的显示状态（`derive.ts`） |
 | `src/data/mock` | 模拟数据：场景、状态变化、延迟和事件都在这里 |
@@ -28,10 +28,11 @@
 |---|---|
 | `normal` | 三台设备、四个 Project、进行中的 Thread 和待处理事项 |
 | `empty` | 已登录但还没有设备，显示首次使用引导 |
+| `noChats` | 设备已接入但还没有对话，Threads 页显示空列表，可以从顶部输入区开始第一个对话 |
 | `signedOut` | 未登录，打开任何页面都进入登录页 |
-| `offline` | Ubuntu Dev 和 MacBook Pro 离线：执行中的 Thread 提示设备离线，Project 助手等待可用设备 |
-| `waiting` | Windows Desktop 同步中，发给它的消息已保存等待发送；另一条消息排在执行中的 Thread 后面 |
-| `error` | Thread 停止、Thread 状态未知，ChatGPT 登录过期导致 Project 助手停止 |
+| `offline` | Ubuntu Dev 和 MacBook Pro 离线：执行中的 Thread 只显示最后报告的状态，停止请求等设备连上再发出，Project 助手等待可用设备 |
+| `waiting` | Windows Desktop 同步中，发给它的消息已保存等待发送；另一条消息排在执行中的 Thread 后面；Kiro 收到停止后没有停下，一分钟后由设备结束进程 |
+| `error` | Thread 的各种停止原因：目录不存在、设备重启打断（Kiro 不能恢复，Pi 恢复时找不到对话记录）、Agent 启动失败；另一个 Thread 状态未知，不会自动重发；ChatGPT 登录过期导致 Project 助手停止 |
 | `conflict` | 事项已在别处处理，回答时提示冲突 |
 
 模拟登录接受任意非空用户名和密码，密码为 `wrong` 时返回登录失败。仓库里不保存真实账号或口令。
