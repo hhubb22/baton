@@ -54,14 +54,19 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.write(w, r, name)
 }
 
+// 前端路由的页面地址，深链接返回 index.html，其余未知路径交给 API。
+var pageRoutes = []string{"/login", "/inbox", "/threads", "/devices", "/projects"}
+
 func staticName(raw string) string {
 	cleaned := path.Clean("/" + raw)
 	switch cleaned {
 	case "/", "/index.html":
 		return "index.html"
 	}
-	if cleaned == "/inbox" || strings.HasPrefix(cleaned, "/inbox/") || cleaned == "/projects" || strings.HasPrefix(cleaned, "/projects/") || cleaned == "/tasks" || strings.HasPrefix(cleaned, "/tasks/") {
-		return "index.html"
+	for _, route := range pageRoutes {
+		if cleaned == route || strings.HasPrefix(cleaned, route+"/") {
+			return "index.html"
+		}
 	}
 	if !strings.HasPrefix(cleaned, "/") || strings.Contains(cleaned, "\\") {
 		return ""

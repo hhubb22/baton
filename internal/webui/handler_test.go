@@ -95,9 +95,9 @@ func TestEmbeddedUIHasNoThirdPartyHosts(t *testing.T) {
 	}
 }
 
-func TestTaskDeepLinksKeepAPISeparate(t *testing.T) {
+func TestPageDeepLinksKeepAPISeparate(t *testing.T) {
 	h := Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNotFound) }))
-	for _, target := range []string{"/inbox", "/inbox/ef874c79-bf16-4533-b326-c1f22c413dfa", "/projects", "/projects/ef874c79-bf16-4533-b326-c1f22c413dfa", "/tasks", "/tasks/ef874c79-bf16-4533-b326-c1f22c413dfa"} {
+	for _, target := range []string{"/login", "/inbox", "/threads", "/threads/ef874c79-bf16-4533-b326-c1f22c413dfa", "/devices", "/projects/ef874c79-bf16-4533-b326-c1f22c413dfa"} {
 		for _, method := range []string{http.MethodGet, http.MethodHead} {
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, httptest.NewRequest(method, target, nil))
@@ -106,7 +106,7 @@ func TestTaskDeepLinksKeepAPISeparate(t *testing.T) {
 			}
 		}
 	}
-	for _, target := range []string{"/api/v1/tasks", "/tasks-other", "/projects-other", "/inbox-other", "/api/v1/inbox", "/api/v1/projects", "/future-api"} {
+	for _, target := range []string{"/tasks", "/threads-other", "/projects-other", "/inbox-other", "/api/v1/threads", "/api/v1/projects", "/future-api"} {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
 		if rec.Code != http.StatusNotFound {

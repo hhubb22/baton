@@ -9,7 +9,7 @@ Baton 是跨设备 AI Agent 协同系统。员工使用管理员分配的本地�
 | `coordinator` | `cmd/coordinator` | 中心控制面：员工认证、节点注册与凭据吊销、Project / Thread / Inbox 状态机、内置 Gateway（`/v1/node` 与 `/api/v1/events`）、嵌入式 Web UI |
 | `batond` | `cmd/batond` | 节点守护进程：主动经 TLS WebSocket 连接 `coordinator`，维护本地 SQLite 账本（`node.db`），管理 Session Worker、Project Agent Runtime 及受限文件浏览根目录 |
 | `baton-project-runtime` | `runtimes/project-agent` | 基于 Node.js / TypeScript 的 Project Agent 进程，通过本地 stdio JSON-RPC 与 `batond` 交互 |
-| Web UI | `web/` (`internal/webui/dist`) | React + TypeScript + Vite 前端，编译产物由 `coordinator` 直接内嵌提供 |
+| Web UI | `web/` (`internal/webui/dist`) | React + TypeScript + StyleX + Vite 前端，编译产物由 `coordinator` 直接内嵌提供 |
 
 ### 核心机制
 
@@ -18,7 +18,7 @@ Baton 是跨设备 AI Agent 协同系统。员工使用管理员分配的本地�
 - 确定性回放验证：`internal/agent/replay` 与 `tools/agent-replay` 提供跨平台 NDJSON 协议录制、脱敏规范化与故障派生回放（`CutAfter` / `Drop` / `Replace`），日常测试无需调用真实外部大模型。
 - 崩溃恢复：Worker 在发送消息前持久保存意图，恢复时查询原生历史确认是否已发送；无法确认时标为状态未知，避免重复执行。`batond` 重启后通过本地认证 IPC 重新连接存活的 Worker，未确认报告继续补送。
 
-浏览器 API 使用 `/api/v1/threads`。Web 界面尚待按 Thread 设计实现，现有 Task 与 Session 页面使用的后端接口已移除。
+浏览器 API 使用 `/api/v1/threads`。Web 界面按 `design/` 实现，目前读写模拟数据，尚未接入这些接口；实施顺序见 [Web UI 实施计划](specs/web-ui/PLAN.md)。
 
 ## 环境要求
 
@@ -119,7 +119,7 @@ pnpm --dir runtimes/project-agent test
 
 ### Web 前端开发与验证
 
-开发时使用 Vite 提供热更新页面，通过代理访问 Go API：
+开发时使用 Vite 提供热更新页面。页面目前使用模拟数据，不需要启动后端；场景切换和模拟账号见 [web/README.md](web/README.md)。
 
 ```sh
 pnpm --dir web install --frozen-lockfile

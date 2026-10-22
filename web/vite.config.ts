@@ -1,22 +1,28 @@
-import basicSsl from '@vitejs/plugin-basic-ssl'
+import stylex from '@stylexjs/unplugin/vite'
 import react from '@vitejs/plugin-react'
+import { fileURLToPath } from 'node:url'
+import type { Plugin } from 'vite'
 import { defineConfig } from 'vitest/config'
 
-const apiTarget = process.env.BATON_DEV_API ?? 'https://127.0.0.1:8080'
+const root = fileURLToPath(new URL('.', import.meta.url))
+
+const stylexPlugin: Plugin = stylex({
+  unstable_moduleResolution: { type: 'commonJS', rootDir: root },
+  // 类名带上源文件和样式键，方便在浏览器里定位。
+  debug: process.env.NODE_ENV !== 'production',
+})
+
+// Vitest 的服务器没有 HTTP 端口，StyleX 开发服务器里的轮询定时器不会被清理，测试进程无法退出。
+// 测试只需要编译样式，不需要热更新。
+if (process.env.VITEST) delete stylexPlugin.configureServer
 
 export default defineConfig({
-  plugins: [react(), ...(process.env.VITEST ? [] : [basicSsl()])],
+  plugins: [stylexPlugin, react()],
   server: {
     host: 'localhost',
     port: 5173,
-    proxy: {
-      '/api': {
-        target: apiTarget,
-        changeOrigin: false,
-        ws: true,
-        secure: false,
-      },
-    },
+    // 图标直接读 design/resources/assets。
+    fs: { allow: ['..'] },
   },
   build: {
     outDir: '../internal/webui/dist',

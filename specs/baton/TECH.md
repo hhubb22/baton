@@ -392,11 +392,11 @@ Coordinator 与 PostgreSQL 部署在一处，Coordinator 提供静态页面、AP
 | `internal/fileaccess` | 登记根内的受限浏览与 Thread 附件解析 |
 | `internal/httpapi` | 员工、设备、Thread、Project、Inbox 与浏览器事件 API |
 | `migrations` | 当前数据库 schema 基线与迁移执行器 |
-| `web/src` | 现有页面；Thread 页面尚待按 `design/` 实现 |
+| `web/src` | 按 `design/` 实现的页面，经 `BatonClient` 读写数据，目前只有模拟实现 |
 
 后续实施：
 
-7. **Web。** Thread 列表与 Thread 页、Project 页的 Thread 区域按 `design/` 实现；删除任务页与 Session 页。
+7. **Web。** 按 `specs/web-ui/PLAN.md` 完成各流程页面，再实现真实 `BatonClient` 接入 `/api/v1`。
 8. **端到端。** 真实 Codex、Kiro、Pi 各跑一遍 PRODUCT 验收表的多轮、排队可靠性和恢复场景。
 
 每一步结束时 `go vet ./...`、`go test ./...` 和前端测试通过。
