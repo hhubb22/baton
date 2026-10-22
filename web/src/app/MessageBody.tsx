@@ -35,7 +35,12 @@ export function MessageBody({ body, onOpenPath }: { body: string; onOpenPath: (p
         if (index % 2 === 0) return part
         if (isPath(part)) {
           return (
-            <button key={index} type="button" onClick={() => onOpenPath(part)} {...stylex.props(styles.path, focusRing.ring)}>
+            <button
+              key={index}
+              type="button"
+              onClick={() => onOpenPath(part)}
+              {...stylex.props(styles.path, focusRing.ring)}
+            >
               {part}
             </button>
           )

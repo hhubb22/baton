@@ -100,7 +100,9 @@ export function MenuOption({
     <BaseMenu.Item
       onClick={onSelect}
       aria-checked={selected === undefined ? undefined : selected}
-      className={(state) => stylex.props(text.small, styles.option, state.highlighted && styles.highlighted).className ?? ''}
+      className={(state) =>
+        stylex.props(text.small, styles.option, state.highlighted && styles.highlighted).className ?? ''
+      }
     >
       {dot && <StatusDot tone={dot} />}
       <span {...stylex.props(styles.name, text.truncate)}>{children}</span>

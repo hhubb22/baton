@@ -185,8 +185,8 @@ export function EnrollDialog({
       <Dialog
         open
         onOpenChange={(open) => {
-        if (!open) close()
-      }}
+          if (!open) close()
+        }}
         title="Connect a device"
         wide
         finalFocus={finalFocus}
@@ -226,7 +226,9 @@ export function EnrollDialog({
     codeNote = <span {...stylex.props(styles.helper)}>The command will be ready when the code is issued.</span>
   } else if (phase === 'failed') {
     codeNote = (
-      <span {...stylex.props(styles.warning)}>Baton could not be reached. Check your connection, then get a new code.</span>
+      <span {...stylex.props(styles.warning)}>
+        Baton could not be reached. Check your connection, then get a new code.
+      </span>
     )
   } else if (phase === 'expired') {
     codeNote = <span {...stylex.props(styles.error)}>Get a new code, then run the command again.</span>
@@ -247,7 +249,9 @@ export function EnrollDialog({
   }
 
   let commandNote = (
-    <span {...stylex.props(styles.helper)}>Paste the setup code, then press Enter. The code stays hidden as you type.</span>
+    <span {...stylex.props(styles.helper)}>
+      Paste the setup code, then press Enter. The code stays hidden as you type.
+    </span>
   )
   if (copied?.target === 'command') {
     commandNote = copied.ok ? (

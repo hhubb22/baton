@@ -236,7 +236,9 @@ export function Sidebar() {
           icon="laptop"
           label="Devices"
           collapsed={collapsed}
-          trailing={devices.data && <span {...stylex.props(text.caption, text.faint)}>{onlineSummary(devices.data)}</span>}
+          trailing={
+            devices.data && <span {...stylex.props(text.caption, text.faint)}>{onlineSummary(devices.data)}</span>
+          }
         />
       </div>
 
@@ -296,14 +298,17 @@ function ProjectList({ projects, loaded }: { projects: Project[]; loaded: boolea
     <>
       <div {...stylex.props(styles.sectionHead)}>
         <span {...stylex.props(text.captionMedium)}>Projects</span>
-        <button type="button" aria-label="New project" title="New project" {...stylex.props(styles.addProject, focusRing.ring)}>
+        <button
+          type="button"
+          aria-label="New project"
+          title="New project"
+          {...stylex.props(styles.addProject, focusRing.ring)}
+        >
           <Icon name="plus" size={14} />
         </button>
       </div>
       <div {...stylex.props(styles.projects)}>
-        {loaded && projects.length === 0 && (
-          <span {...stylex.props(text.caption, styles.empty)}>No projects yet</span>
-        )}
+        {loaded && projects.length === 0 && <span {...stylex.props(text.caption, styles.empty)}>No projects yet</span>}
         {projects.map((project) => (
           <ProjectRow key={project.id} project={project} pending={pendingInbox(inbox.data ?? [], project.id).length} />
         ))}

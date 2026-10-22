@@ -65,5 +65,7 @@ jobs:
         run: go test ./...
       - name: Runtime tests
         run: pnpm --dir runtimes/project-agent test
+      - name: Web format
+        run: pnpm --dir web format:check
       - name: Web unit tests
         run: pnpm --dir web test

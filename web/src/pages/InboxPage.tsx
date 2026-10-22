@@ -84,7 +84,11 @@ export function InboxPage() {
           <p {...stylex.props(text.body, text.muted, styles.empty)}>Nothing needs your decision</p>
         )}
         {pending.map((item) => (
-          <ItemCard key={item.id} item={item} project={projects.data?.find((project) => project.id === item.projectId)} />
+          <ItemCard
+            key={item.id}
+            item={item}
+            project={projects.data?.find((project) => project.id === item.projectId)}
+          />
         ))}
       </Column>
     </Page>

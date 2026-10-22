@@ -130,6 +130,7 @@ pnpm --dir web dev
 
 ```sh
 pnpm --dir web install
+pnpm --dir web format:check
 pnpm --dir web lint
 pnpm --dir web typecheck
 pnpm --dir web test

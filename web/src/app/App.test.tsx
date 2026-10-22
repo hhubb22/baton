@@ -335,4 +335,3 @@ describe('devices', () => {
     expect(await screen.findByText('Running on MacBook Pro')).toBeInTheDocument()
   })
 })
-

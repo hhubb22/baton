@@ -78,7 +78,10 @@ describe('device connection', () => {
     const { client } = setup()
     client.controls.setDeviceConnection('dev-ubuntu', 'offline')
     const projects = await client.listProjects()
-    expect(projects.find((item) => item.id === 'prj-baton')!.agent).toMatchObject({ state: 'running', deviceId: 'dev-mac' })
+    expect(projects.find((item) => item.id === 'prj-baton')!.agent).toMatchObject({
+      state: 'running',
+      deviceId: 'dev-mac',
+    })
   })
 })
 
@@ -153,7 +156,11 @@ describe('operations', () => {
 
   it('reports a conflict when the item was answered elsewhere', async () => {
     const { client, scheduler } = setup('conflict')
-    const op = await client.answerItem({ itemId: 'itm-compat-paths', answer: 'Skip them and open a follow-up', revision: 1 })
+    const op = await client.answerItem({
+      itemId: 'itm-compat-paths',
+      answer: 'Skip them and open a follow-up',
+      revision: 1,
+    })
     scheduler.advance(browserLatency.save)
     expect(await client.getOperation(op.id)).toMatchObject({
       phase: 'conflict',

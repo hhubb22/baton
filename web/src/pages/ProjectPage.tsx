@@ -74,7 +74,11 @@ export function ProjectPage() {
           <h2 {...stylex.props(text.captionMedium, styles.heading)}>Threads</h2>
           {projectThreads.length === 0 && <p {...stylex.props(text.small, styles.empty)}>No threads yet</p>}
           {projectThreads.map((thread) => (
-            <ThreadRow key={thread.id} thread={thread} device={devices.data?.find((item) => item.id === thread.deviceId)} />
+            <ThreadRow
+              key={thread.id}
+              thread={thread}
+              device={devices.data?.find((item) => item.id === thread.deviceId)}
+            />
           ))}
         </section>
       </Column>

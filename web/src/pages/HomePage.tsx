@@ -37,9 +37,7 @@ export function HomePage() {
         </Button>
         <div {...stylex.props(styles.actions)}>
           <Button>New project</Button>
-          <Button onClick={() => void navigate({ to: '/threads' })}>
-            Open Threads
-          </Button>
+          <Button onClick={() => void navigate({ to: '/threads' })}>Open Threads</Button>
         </div>
       </div>
     </Page>

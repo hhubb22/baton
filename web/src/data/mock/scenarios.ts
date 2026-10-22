@@ -384,7 +384,9 @@ export function createWorld(id: ScenarioId, now: number): World {
       ubuntu.subscriptions = ubuntu.subscriptions.map((item) =>
         item.provider === 'ChatGPT' ? { ...item, signedIn: false } : item,
       )
-      ubuntu.agents = ubuntu.agents.map((agent) => (agent.account === 'ChatGPT' ? { ...agent, problem: 'signedOut' } : agent))
+      ubuntu.agents = ubuntu.agents.map((agent) =>
+        agent.account === 'ChatGPT' ? { ...agent, problem: 'signedOut' } : agent,
+      )
       const baton = world.projects.find((item) => item.id === 'prj-baton')!
       baton.agent = { state: 'stopped', deviceId: 'dev-ubuntu', reason: 'ChatGPT sign-in expired on Ubuntu Dev' }
       world.inbox.push({

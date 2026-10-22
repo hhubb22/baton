@@ -33,7 +33,11 @@ export function folderName(folder: string) {
 export function ThreadRow({ thread, device }: { thread: Thread; device: Device | undefined }) {
   const view = threadView(thread, device)
   return (
-    <Link to="/threads/$threadId" params={{ threadId: thread.id }} {...stylex.props(text.small, styles.row, focusRing.ring)}>
+    <Link
+      to="/threads/$threadId"
+      params={{ threadId: thread.id }}
+      {...stylex.props(text.small, styles.row, focusRing.ring)}
+    >
       <StatusDot tone={view.status.tone} />
       <span {...stylex.props(styles.title, text.truncate)}>{thread.title}</span>
       {thread.unread && <UnreadDot />}

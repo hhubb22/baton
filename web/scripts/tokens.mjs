@@ -73,7 +73,10 @@ for (const group of ['space', 'radius', 'size']) {
 }
 
 const themes = [header, "import * as stylex from '@stylexjs/stylex'", "import { colors } from './tokens.stylex'", '']
-for (const [name, source] of [['light', {}], ['dark', dark.colors]]) {
+for (const [name, source] of [
+  ['light', {}],
+  ['dark', dark.colors],
+]) {
   themes.push(`export const ${name}Theme = stylex.createTheme(colors, {`)
   for (const [key, value] of Object.entries(light.colors)) themes.push(`  ${key}: '${color(source[key] ?? value)}',`)
   themes.push('})', '')

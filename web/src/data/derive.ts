@@ -161,7 +161,9 @@ export function deviceConnectionView(device: Device, projects: Project[], now: n
       const running = projects.find(
         (item) => item.status === 'active' && item.agent.state === 'running' && item.agent.deviceId === device.id,
       )
-      return running ? { tone: 'agent', label: `Online · running ${running.name}` } : { tone: 'success', label: 'Online' }
+      return running
+        ? { tone: 'agent', label: `Online · running ${running.name}` }
+        : { tone: 'success', label: 'Online' }
     }
   }
 }
@@ -198,7 +200,8 @@ export function capabilityLines(device: Device): CapabilityLine[] {
   })
   let runtime: CapabilityLine = { name: 'Project assistant', ok: true, detail: 'ChatGPT signed in' }
   if (!device.hasRuntime) runtime = { name: 'Project assistant', ok: false, detail: 'Not installed' }
-  else if (!chatGPTSignedIn(device)) runtime = { name: 'Project assistant', ok: false, detail: 'ChatGPT sign-in expired' }
+  else if (!chatGPTSignedIn(device))
+    runtime = { name: 'Project assistant', ok: false, detail: 'ChatGPT sign-in expired' }
   return [...lines, runtime]
 }
 

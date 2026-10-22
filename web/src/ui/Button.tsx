@@ -91,12 +91,28 @@ type ButtonProps = Omit<ComponentProps<'button'>, 'className' | 'style'> & {
 }
 
 // 不可用的操作仍然可以点击，由调用方在 onClick 里说明原因，所以这里没有禁用态样式。
-export function Button({ variant = 'secondary', small, block, icon, style, children, type = 'button', ...rest }: ButtonProps) {
+export function Button({
+  variant = 'secondary',
+  small,
+  block,
+  icon,
+  style,
+  children,
+  type = 'button',
+  ...rest
+}: ButtonProps) {
   return (
     <button
       type={type}
       {...rest}
-      {...stylex.props(styles.base, styles[variant], small && styles.small, block && styles.block, focusRing.ring, style)}
+      {...stylex.props(
+        styles.base,
+        styles[variant],
+        small && styles.small,
+        block && styles.block,
+        focusRing.ring,
+        style,
+      )}
     >
       {icon && <Icon name={icon} size={15} />}
       {children}

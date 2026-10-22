@@ -48,7 +48,9 @@ export function Toggle({
       aria-label={label}
       className={(state) => stylex.props(styles.track, state.checked && styles.on, focusRing.ring).className ?? ''}
     >
-      <Switch.Thumb className={(state) => stylex.props(styles.thumb, state.checked && styles.thumbOn).className ?? ''} />
+      <Switch.Thumb
+        className={(state) => stylex.props(styles.thumb, state.checked && styles.thumbOn).className ?? ''}
+      />
     </Switch.Root>
   )
 }

@@ -32,6 +32,7 @@ Baton 是跨设备 AI Agent 协同系统，由中心服务（`coordinator`）、
   ```
 - **Web 前端构建与测试**：
   ```sh
+  pnpm --dir web format:check
   pnpm --dir web lint
   pnpm --dir web typecheck
   pnpm --dir web test

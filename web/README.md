@@ -40,4 +40,6 @@
 
 样式用 `stylex.create` 定义，颜色、间距、圆角和尺寸取自 `src/theme/tokens.stylex.ts`，文字样式取自 `src/theme/text.ts`。页面不写内联 `style`，因为生产环境的 CSP 只允许同源样式表；Base UI 通过 `CSPProvider disableStyleElements` 关闭运行时插入的 `<style>`。
 
+代码格式由 Prettier 统一（`.prettierrc.json`），改完运行 `pnpm --dir web format`。Markdown 不参与格式化，表格沿用仓库其他文档的紧凑写法。
+
 修改 `design/tokens` 后运行 `pnpm --dir web tokens` 重新生成主题文件。

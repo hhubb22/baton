@@ -1,5 +1,17 @@
 import { ClientError, type ChangeEvent, type Topic } from '../client'
-import type { Device, DeviceConnection, DeviceOS, ID, SessionEnd, Message, Operation, OperationKind, OperationPhase, Project, Thread } from '../types'
+import type {
+  Device,
+  DeviceConnection,
+  DeviceOS,
+  ID,
+  SessionEnd,
+  Message,
+  Operation,
+  OperationKind,
+  OperationPhase,
+  Project,
+  Thread,
+} from '../types'
 import { createWorld, type ScenarioId } from './scenarios'
 import type { Scheduler } from './scheduler'
 import type { EnrollmentRecord, World } from './world'
@@ -296,7 +308,9 @@ export class MockStore {
   private startNext(thread: Thread) {
     const next = this.world.messages.find(
       (item) =>
-        item.threadId === thread.id && item.role === 'user' && (item.delivery === 'queued' || item.delivery === 'waitingDevice'),
+        item.threadId === thread.id &&
+        item.role === 'user' &&
+        (item.delivery === 'queued' || item.delivery === 'waitingDevice'),
     )
     if (!next) {
       if (thread.status === 'waiting') thread.status = 'idle'

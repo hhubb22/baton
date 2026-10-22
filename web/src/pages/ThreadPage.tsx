@@ -99,7 +99,9 @@ export function ThreadPage() {
   if (threads.data && !thread) {
     return (
       <Page title="Thread not found">
-        <p {...stylex.props(text.body, text.muted, styles.messages)}>This thread was deleted or you no longer have access.</p>
+        <p {...stylex.props(text.body, text.muted, styles.messages)}>
+          This thread was deleted or you no longer have access.
+        </p>
       </Page>
     )
   }
@@ -180,7 +182,9 @@ export function ThreadPage() {
             </span>
           </div>
         </div>
-        {previewPath && <FilePreview deviceId={thread.deviceId} path={previewPath} onClose={() => setPreviewPath(null)} />}
+        {previewPath && (
+          <FilePreview deviceId={thread.deviceId} path={previewPath} onClose={() => setPreviewPath(null)} />
+        )}
       </div>
     </Page>
   )

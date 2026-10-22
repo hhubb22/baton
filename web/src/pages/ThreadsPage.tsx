@@ -22,7 +22,11 @@ export function ThreadsPage() {
         )}
         <div {...stylex.props(styles.list)}>
           {rows.map((thread) => (
-            <ThreadRow key={thread.id} thread={thread} device={devices.data?.find((item) => item.id === thread.deviceId)} />
+            <ThreadRow
+              key={thread.id}
+              thread={thread}
+              device={devices.data?.find((item) => item.id === thread.deviceId)}
+            />
           ))}
         </div>
       </Column>
