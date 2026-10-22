@@ -29,17 +29,19 @@ var (
 
 // RunOptions 是一次常驻连接使用的本地身份和 Relay 地址。
 type RunOptions struct {
-	RelayURL          string
-	Identity          Identity
-	Heartbeat         time.Duration
-	RootCAs           *x509.CertPool
-	Logger            *slog.Logger
-	DataDir           string
-	ThreadHost        ThreadHost
-	ThreadBudgetBytes int64
-	reports           *runtimeReports
-	reportSender      *runtimeReportSender
-	projectRuntime    *projectRuntimeManager
+	RelayURL                 string
+	Identity                 Identity
+	Heartbeat                time.Duration
+	RootCAs                  *x509.CertPool
+	Logger                   *slog.Logger
+	DataDir                  string
+	ThreadHost               ThreadHost
+	ThreadBudgetBytes        int64
+	DiscoverRuntimeModels    RuntimeModelDiscovery
+	ProbeRuntimeAgentVersion func(context.Context, string) (string, error)
+	reports                  *runtimeReports
+	reportSender             *runtimeReportSender
+	projectRuntime           *projectRuntimeManager
 }
 
 // Maintain 保持到 Relay 的出站连接。同一进程的重连沿用启动时生成的 incarnation。
@@ -102,7 +104,7 @@ func Maintain(ctx context.Context, opts RunOptions) error {
 	attempt := 0
 	opts.reportSender = &runtimeReportSender{}
 	if opts.DataDir != "" {
-		opts.reports = collectRuntimeReports(ctx, opts.DataDir)
+		opts.reports = collectRuntimeReports(ctx, opts.DataDir, opts.DiscoverRuntimeModels, opts.ProbeRuntimeAgentVersion)
 		opts.projectRuntime.reports = opts.reports
 	}
 	for {

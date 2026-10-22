@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -59,6 +60,7 @@ type State struct {
 	OperationID string   `json:"operation_id"`
 	SteerID     string   `json:"steer_id"`
 	Operations  []string `json:"operations"`
+	Model       string   `json:"model,omitempty"`
 	ThreadMode  bool     `json:"thread_mode,omitempty"`
 }
 
@@ -241,9 +243,9 @@ func (a *Adapter) call(ctx context.Context, method string, params, result any) e
 			return errNoActiveTurn
 		}
 		if errors.As(err, &rpc) && (rpc.Code == jsonrpc2.CodeMethodNotFound || rpc.Code == jsonrpc2.CodeInvalidParams) {
-			return ErrIncompatible
+			return fmt.Errorf("%w: %w", ErrIncompatible, err)
 		}
-		return errors.New("Codex " + method + " failed; no automatic retry")
+		return fmt.Errorf("Codex %s failed; no automatic retry: %w", method, err)
 	}
 	return nil
 }
@@ -271,6 +273,7 @@ func (a *Adapter) CreateSession(ctx context.Context) error {
 			ID   string `json:"id"`
 			Path string `json:"path"`
 		} `json:"thread"`
+		Model string `json:"model"`
 	}
 	p := map[string]any{"cwd": a.config.Directory, "approvalPolicy": "never", "sandbox": "workspace-write", "historyMode": "paginated", "ephemeral": false, "developerInstructions": threadInstructions(a.config.Directory)}
 	p["config"] = map[string]any{"sandbox_workspace_write.network_access": true, "shell_environment_policy.inherit": "all"}
@@ -285,7 +288,10 @@ func (a *Adapter) CreateSession(ctx context.Context) error {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.state = State{HistoryPath: response.Thread.Path, HistoryRoot: a.nativeHome, Version: a.cliVersion, ThreadID: response.Thread.ID, SessionID: a.config.SessionID, Directory: a.config.Directory}
+	if response.Model != "" {
+		a.config.Model = response.Model
+	}
+	a.state = State{Model: a.config.Model, HistoryPath: response.Thread.Path, HistoryRoot: a.nativeHome, Version: a.cliVersion, ThreadID: response.Thread.ID, SessionID: a.config.SessionID, Directory: a.config.Directory}
 	return a.saveLocked()
 }
 
@@ -352,6 +358,9 @@ func (a *Adapter) Attach(ctx context.Context) error {
 		}
 	} else if s.Pending {
 		return ErrUncertain
+	}
+	if a.config.Model == "" {
+		a.config.Model = s.Model
 	}
 	var resumed struct {
 		Thread struct {
@@ -446,10 +455,10 @@ func textInput(text string) []map[string]any {
 }
 
 func (a *Adapter) StartTask(ctx context.Context, operationID, text string) error {
-	return a.startTurn(ctx, operationID, text, false)
+	return a.startTurn(ctx, operationID, text, "", false)
 }
 
-func (a *Adapter) startTurn(ctx context.Context, operationID, text string, threadMode bool) error {
+func (a *Adapter) startTurn(ctx context.Context, operationID, text, model string, threadMode bool) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.active {
@@ -464,6 +473,8 @@ func (a *Adapter) startTurn(ctx context.Context, operationID, text string, threa
 	if a.state.ThreadID == "" || operationID == "" {
 		return ErrHistoryMissing
 	}
+	previousState := a.state
+	previousStarted, previousEnded, previousReplies := a.threadStarted, a.threadEnded, a.replyItems
 	a.state.Pending = true
 	a.state.ThreadMode = threadMode
 	a.threadStarted, a.threadEnded = false, false
@@ -480,10 +491,22 @@ func (a *Adapter) startTurn(ctx context.Context, operationID, text string, threa
 	if !threadMode {
 		p["outputSchema"] = ResultSchema()
 	}
-	if a.config.Model != "" {
-		p["model"] = a.config.Model
+	if model == "" {
+		model = a.config.Model
+	}
+	if model != "" {
+		p["model"] = model
 	}
 	if err := a.call(ctx, "turn/start", p, &result); err != nil {
+		var rpcErr *jsonrpc2.Error
+		if threadMode && model != a.config.Model && errors.As(err, &rpcErr) {
+			a.state = previousState
+			a.threadStarted, a.threadEnded, a.replyItems = previousStarted, previousEnded, previousReplies
+			if saveErr := a.saveLocked(); saveErr != nil {
+				err = errors.Join(err, saveErr)
+			}
+			return &agent.ModelSwitchError{Err: err}
+		}
 		if threadMode {
 			a.emitThread(agent.Event{Kind: agent.EventUncertain, NativeSessionID: a.state.ThreadID})
 		}
@@ -495,6 +518,7 @@ func (a *Adapter) startTurn(ctx context.Context, operationID, text string, threa
 		}
 		return ErrIncompatible
 	}
+	a.config.Model, a.state.Model = model, model
 	a.state.TurnID, a.active, a.final, a.stopped = result.Turn.ID, true, "", false
 	a.turnStarted = result.Turn.StartedAt != nil
 	a.interruptRequested, a.interruptPending = false, false

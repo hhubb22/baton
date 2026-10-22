@@ -75,10 +75,21 @@ func (s *Server) routeThread(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if collection {
-			var in store.CreateThreadInput
-			if !s.readJSONLimit(w, r, &in, 512<<10) {
+			var body struct {
+				ClientThreadID   string `json:"client_thread_id"`
+				NodeID           string `json:"node_id"`
+				AgentType        string `json:"agent_type"`
+				Model            string `json:"model"`
+				WorkingDirectory string `json:"working_directory"`
+				Message          struct {
+					ClientMessageID string `json:"client_message_id"`
+					Content         string `json:"content"`
+				} `json:"message"`
+			}
+			if !s.readJSONLimit(w, r, &body, 512<<10) {
 				return
 			}
+			in := store.CreateThreadInput{ClientThreadID: body.ClientThreadID, NodeID: body.NodeID, AgentType: body.AgentType, Model: body.Model, WorkingDirectory: body.WorkingDirectory, Message: store.ThreadMessageInput{ClientMessageID: body.Message.ClientMessageID, Content: body.Message.Content}}
 			t, created, err := s.store.CreateThread(r.Context(), employeeID, in)
 			if err != nil {
 				s.writeThreadError(w, r, err)

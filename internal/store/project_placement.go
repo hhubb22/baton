@@ -13,7 +13,7 @@ import (
 )
 
 // recoveryWork 只把尚未完成的主动轮次视作恢复工作，被动通知不参与放置。
-const recoveryWork = `(EXISTS(SELECT 1 FROM project_agent_input_queue q WHERE q.agent_id=a.id AND delivered_seq IS NULL AND source_type IN ('user_message','task_result','attention_answer','turn_ended'))
+const recoveryWork = `(EXISTS(SELECT 1 FROM project_agent_input_queue q WHERE q.agent_id=a.id AND delivered_seq IS NULL AND source_type IN ('user_message','task_result','attention_answer','turn_ended','thread_message_failed'))
  OR EXISTS(SELECT 1 FROM conversation_events e WHERE e.conversation_id=c.id AND e.seq=(SELECT max(t.seq) FROM conversation_events t WHERE t.conversation_id=c.id AND t.kind<>'compaction')
  AND (e.kind IN ('input','tool_result') OR (e.kind='assistant' AND jsonb_path_exists(e.payload,'$.message.content[*] ? (@.type == "toolCall")')))))`
 
@@ -212,7 +212,7 @@ func (s *Store) scheduleProjectRun(ctx context.Context, agentID string) error {
 		return err
 	}
 	if _, err = tx.Exec(ctx, `UPDATE project_agent_input_queue SET wake_required=true,wake_next_at=clock_timestamp(),wake_attempts=0
- WHERE agent_id=$1 AND delivered_seq IS NULL AND source_type IN ('user_message','task_result','attention_answer','turn_ended')`, agentID); err != nil {
+ WHERE agent_id=$1 AND delivered_seq IS NULL AND source_type IN ('user_message','task_result','attention_answer','turn_ended','thread_message_failed')`, agentID); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

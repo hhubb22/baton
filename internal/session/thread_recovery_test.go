@@ -23,7 +23,7 @@ func TestThreadConcurrentDuplicatesAndReplyAttachments(t *testing.T) {
 		group.Add(1)
 		go func() {
 			defer group.Done()
-			if err := w.EnqueueThreadMessage(context.Background(), "same", "same content", "queue"); err != nil {
+			if err := w.EnqueueThreadMessage(context.Background(), "same", "same content", "queue", ""); err != nil {
 				failures <- err
 			}
 		}()
@@ -89,7 +89,7 @@ func TestThreadShellCompletesOnceAndRecoversCompletion(t *testing.T) {
 	a := &threadFake{resume: false}
 	w := newThreadTestWorker(t, func(o *ThreadOptions) { o.AgentType = "shell" }, a)
 	threadMessage(t, w, "command", "queue")
-	if err := w.EnqueueThreadMessage(context.Background(), "second", "echo bad", "queue"); err == nil {
+	if err := w.EnqueueThreadMessage(context.Background(), "second", "echo bad", "queue", ""); err == nil {
 		t.Fatal("accepted second shell command")
 	}
 	data, options := w.dataDir, w.options
@@ -116,7 +116,7 @@ func TestThreadInitialDirectoryFailureDoesNotLaunchAdapter(t *testing.T) {
 func TestThreadFrameLimitAndConflictingOpen(t *testing.T) {
 	a := &threadFake{resume: true}
 	w := newThreadTestWorker(t, nil, a)
-	if err := w.EnqueueThreadMessage(context.Background(), "large", string(make([]byte, 64<<10)), "queue"); err == nil {
+	if err := w.EnqueueThreadMessage(context.Background(), "large", string(make([]byte, 64<<10)), "queue", ""); err == nil {
 		t.Fatal("accepted escaped oversized frame")
 	}
 	if threadCount(t, w, `SELECT COUNT(*) FROM thread_messages`) != 0 {

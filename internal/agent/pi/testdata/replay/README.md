@@ -19,6 +19,12 @@
 
 额外保留 `startup`，独立检查实际模型非空和版本，避免它的探针会话成为其他场景的首个会话；`restore_recall` 保留恢复后显式新回合回忆原上下文及 once-only 文件断言。所有场景都执行原沙箱的内部读写、外部读写拒绝、符号链接逃逸拒绝检查，对应目录隔离能力。
 
+## 模型目录与切换
+
+`model_switch.ndjson` 由 `TestRealThreadModelSwitch/pi` 在 macOS arm64、Pi 1.3.0 上录制。先以 `--model magpie/auto/gpt-6.1-sol` 启动，读取 `get_available_models` 的 63 项目录；第一轮结束后调用 `set_model`，指定 provider `openai`、modelId `gpt-6-luna`，在同一原生 Session 开启第二轮。原生 JSONL 的两条 assistant 记录分别带 `provider=magpie, model=auto/gpt-6.1-sol` 和 `provider=openai, model=gpt-6-luna`。两轮都返回 `BATON_MODEL_ONE`，第二轮从第一轮上下文回忆标记；回放同时断言这些原生模型字段和唯一 Session ID。
+
+此转录由 `internal/agent` 的 `TestRecordedThreadModelSwitch/pi` 单独回放，旧任务场景枚举排除它。真实入口为 `BATON_MODEL_RECORD_DIR=/tmp/baton-model-recording go test -v ./internal/agent -run '^TestRealThreadModelSwitch/pi$' -count=1`；输出目录每次使用新路径。测试使用临时 HOME 中的本机配置副本，不发送工具调用。模型目录帧保留，凭据字段仍由规范化器删除；原始录制在成功规范化后删除。
+
 ## CI 回放
 
 两层测试共用 `pireplaytest` 准备路径绑定、跨进程捕获、门控和故障变体。转录只替换头部声明的绑定；`<tools>` 等原文保留。符号链接目录不可创建时只跳过 `symlinked_workspace`，其余路径绑定照常在三系统 CI 执行。Worker 构造真实 Pi 适配器时将原生目录绑定到录制中的目录布局，生命周期与协议处理均使用产品代码。

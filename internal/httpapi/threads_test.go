@@ -99,7 +99,7 @@ func (h *threadHTTP) post(path string, payload any, want int) string {
 }
 func (h *threadHTTP) create(key string) store.Thread {
 	h.t.Helper()
-	body := h.post("/threads", store.CreateThreadInput{ClientThreadID: key, AgentType: "pi", WorkingDirectory: "/src/repo", Message: store.ThreadMessageInput{ClientMessageID: key + ":first", Content: "hello"}}, 201)
+	body := h.post("/threads", map[string]any{"client_thread_id": key, "agent_type": "pi", "working_directory": "/src/repo", "message": map[string]string{"client_message_id": key + ":first", "content": "hello"}}, 201)
 	var v store.Thread
 	if err := json.Unmarshal([]byte(body), &v); err != nil || v.ID == "" {
 		h.t.Fatal(body, err)
@@ -130,9 +130,10 @@ func TestThreadHTTPFlowIsolationPaginationHistoryAndStop(t *testing.T) {
 	if v.Status != "waiting_device" {
 		t.Fatal(v.Status)
 	}
-	in := store.CreateThreadInput{ClientThreadID: "http", AgentType: "pi", WorkingDirectory: "/src/repo", Message: store.ThreadMessageInput{ClientMessageID: "http:first", Content: "hello"}}
+	message := map[string]string{"client_message_id": "http:first", "content": "hello"}
+	in := map[string]any{"client_thread_id": "http", "agent_type": "pi", "working_directory": "/src/repo", "message": message}
 	h.post("/threads", in, 200)
-	in.Message.Content = "different"
+	message["content"] = "different"
 	h.post("/threads", in, 409)
 	status, text := getText(t, h.browser, h.srv.URL+"/api/v1/threads/"+v.ID)
 	if status != 200 || !strings.Contains(text, `"node_online":false`) {

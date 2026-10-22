@@ -34,13 +34,14 @@ func (h *sessionThreadHost) OpenThread(ctx context.Context, thread ThreadRecord)
 		StorageGeneration:       thread.StorageGeneration,
 		NodeID:                  h.nodeID,
 		AgentType:               thread.AgentType,
+		Model:                   thread.Model,
 		WorkingDirectory:        thread.WorkingDirectory,
 		ExecutionTimeoutSeconds: thread.ExecutionTimeoutSeconds,
 	})
 }
 
 func (h *sessionThreadHost) ThreadMessage(ctx context.Context, _ string, cmd protocol.ThreadCommand) error {
-	return h.host.ThreadMessage(ctx, cmd.ThreadID, cmd.ClientMessageID, cmd.Content, cmd.Mode)
+	return h.host.ThreadMessage(ctx, cmd.ThreadID, cmd.ClientMessageID, cmd.Content, cmd.Mode, cmd.Model)
 }
 
 func (h *sessionThreadHost) ThreadWithdraw(ctx context.Context, _ string, cmd protocol.ThreadCommand) error {
@@ -182,6 +183,9 @@ func validThreadCommand(id string, cmd protocol.ThreadCommand) bool {
 	if cmd.Type != protocol.BodyThreadCommand {
 		return false
 	}
+	if !validModelText(cmd.Model) {
+		return false
+	}
 	switch cmd.Action {
 	case "open":
 		return agentName.MatchString(cmd.AgentType) && cmd.WorkingDirectory != "" && cmd.ExecutionTimeoutSeconds >= 0
@@ -189,7 +193,7 @@ func validThreadCommand(id string, cmd protocol.ThreadCommand) bool {
 		if !validThreadClientID(cmd.ClientMessageID) {
 			return false
 		}
-		return cmd.Content != "" && len(cmd.Content) <= 64<<10 && utf8.ValidString(cmd.Content) && (cmd.Mode == "" || cmd.Mode == "queue" || cmd.Mode == "steer")
+		return !(cmd.Mode == "steer" && cmd.Model != "") && cmd.Content != "" && len(cmd.Content) <= 64<<10 && utf8.ValidString(cmd.Content) && (cmd.Mode == "" || cmd.Mode == "queue" || cmd.Mode == "steer")
 	case "withdraw":
 		return validThreadClientID(cmd.ClientMessageID)
 	case "stop":
@@ -219,7 +223,7 @@ func (s *threadService) command(ctx context.Context, id string, cmd protocol.Thr
 	found := err == nil
 	if cmd.Action == "open" {
 		if found {
-			if record.AgentType != cmd.AgentType || record.WorkingDirectory != cmd.WorkingDirectory || record.ExecutionTimeoutSeconds != cmd.ExecutionTimeoutSeconds {
+			if record.AgentType != cmd.AgentType || record.Model != cmd.Model || record.WorkingDirectory != cmd.WorkingDirectory || record.ExecutionTimeoutSeconds != cmd.ExecutionTimeoutSeconds {
 				result.Code = "thread_conflict"
 				return result, nil
 			}

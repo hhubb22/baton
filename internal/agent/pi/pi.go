@@ -26,6 +26,7 @@ type response struct {
 	ID      string          `json:"id"`
 	Command string          `json:"command"`
 	Success bool            `json:"success"`
+	Error   string          `json:"error"`
 	Data    json.RawMessage `json:"data"`
 	Message message         `json:"message"`
 	Aborted bool            `json:"aborted"`
@@ -294,12 +295,12 @@ func (a *Adapter) call(ctx context.Context, command string, fields map[string]an
 		return response{}, errors.New("Pi command write timed out; outcome uncertain")
 	}
 	if err != nil {
-		return response{}, errors.New("Pi command write not confirmed")
+		return response{}, fmt.Errorf("Pi command write not confirmed: %w", err)
 	}
 	select {
 	case r := <-reply:
 		if !r.Success || r.Command != command {
-			return r, errors.New("Pi command rejected")
+			return r, fmt.Errorf("Pi command rejected: %s", r.Error)
 		}
 		return r, nil
 	case <-ctx.Done():

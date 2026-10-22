@@ -35,6 +35,9 @@ func TestMain(m *testing.M) {
 	if buildDir != "" {
 		_ = os.RemoveAll(buildDir)
 	}
+	if replayDir != "" {
+		_ = os.RemoveAll(replayDir)
+	}
 	os.Exit(code)
 }
 
@@ -206,6 +209,10 @@ var (
 	buildErr       error
 	builtCoord     string
 	builtBatond    string
+	replayOnce     sync.Once
+	replayDir      string
+	replayBatond   string
+	replayErr      error
 	processMu      sync.Mutex
 	processHandles []*running
 )

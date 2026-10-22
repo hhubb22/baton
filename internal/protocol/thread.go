@@ -16,6 +16,7 @@ type ThreadCommand struct {
 	Action                  string `json:"action"`
 	StorageGeneration       string `json:"storage_generation,omitempty"`
 	AgentType               string `json:"agent_type,omitempty"`
+	Model                   string `json:"model,omitempty"`
 	WorkingDirectory        string `json:"working_directory,omitempty"`
 	ExecutionTimeoutSeconds int    `json:"execution_timeout_seconds,omitempty"`
 	ClientMessageID         string `json:"client_message_id,omitempty"`
@@ -41,6 +42,7 @@ type ThreadReport struct {
 	ClientMessageID   string          `json:"client_message_id,omitempty"`
 	StorageGeneration string          `json:"storage_generation,omitempty"`
 	NativeSessionID   string          `json:"native_session_id,omitempty"`
+	Model             string          `json:"model,omitempty"`
 	Content           string          `json:"content,omitempty"`
 	Truncated         bool            `json:"truncated,omitempty"`
 	OriginalBytes     int64           `json:"original_bytes,omitempty"`

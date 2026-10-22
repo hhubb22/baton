@@ -31,6 +31,7 @@ type toolArguments struct {
 	ThreadID                string         `json:"thread_id"`
 	Message                 string         `json:"message"`
 	Mode                    string         `json:"mode"`
+	Model                   string         `json:"model"`
 	AfterTurn               int64          `json:"after_turn"`
 	ThroughTurn             int64          `json:"through_turn"`
 	NodeID                  string         `json:"node_id"`
@@ -67,8 +68,8 @@ type toolArguments struct {
 }
 
 var projectToolFields = map[string]string{
-	"threads.create":  "node_id agent_type working_directory message execution_timeout_seconds",
-	"threads.send":    "thread_id message mode",
+	"threads.create":  "node_id agent_type model working_directory message execution_timeout_seconds",
+	"threads.send":    "thread_id message mode model",
 	"threads.stop":    "thread_id",
 	"threads.archive": "thread_id",
 	"threads.list":    "status after_id offset max_bytes",

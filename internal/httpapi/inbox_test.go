@@ -187,7 +187,7 @@ func TestInboxHTTPThreadFilter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v, _, err := h.repo.CreateThread(ctx, h.owner, store.CreateThreadInput{ClientThreadID: "inbox-thread", NodeID: h.src.NodeID, AgentType: "pi", WorkingDirectory: "/src/repo", ProjectID: p.ID, Message: store.ThreadMessageInput{ClientMessageID: "inbox-first", Content: "检查"}})
+	v, _, err := h.repo.CreateThread(ctx, h.owner, store.CreateThreadInput{ClientThreadID: "inbox-thread", NodeID: h.src.NodeID, AgentType: "pi", WorkingDirectory: "/src/repo", ProjectID: p.ID, CreatedBy: "project_agent", OriginConversationID: p.Conversation.ID, OriginToolCallID: "inbox-thread", Message: store.ThreadMessageInput{ClientMessageID: "inbox-first", Content: "检查"}})
 	if err != nil {
 		t.Fatal(err)
 	}

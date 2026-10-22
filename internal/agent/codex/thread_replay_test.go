@@ -102,10 +102,10 @@ func TestThreadRecordedReplay(t *testing.T) {
 			defer a.Close()
 			mustStart(t, a)
 			ctx := context.Background()
-			if err := a.Send(ctx, "execution-runtime:1", "a plain text question"); err != nil {
+			if err := a.Send(ctx, "execution-runtime:1", "a plain text question", ""); err != nil {
 				t.Fatal(err)
 			}
-			if err := a.Send(ctx, "another-message", "busy"); !errors.Is(err, agent.ErrBusy) {
+			if err := a.Send(ctx, "another-message", "busy", ""); !errors.Is(err, agent.ErrBusy) {
 				t.Fatal(err)
 			}
 			if source == "deliver_active" || source == "restore_load_only" {
@@ -187,7 +187,7 @@ func TestThreadReplayProcessExitAndLostAcceptance(t *testing.T) {
 			a := New(replayConfig(r))
 			defer a.Close()
 			mustStart(t, a)
-			err = a.Send(context.Background(), "message-runtime", "question")
+			err = a.Send(context.Background(), "message-runtime", "question", "")
 			if label == "request:turn/start" && err == nil {
 				t.Fatal("Lost response accepted")
 			}
@@ -209,7 +209,7 @@ func TestThreadReplayProcessExitAndLostAcceptance(t *testing.T) {
 				}
 				return exited && uncertain
 			})
-			if err := a.Send(context.Background(), "message-runtime", "retry"); err == nil {
+			if err := a.Send(context.Background(), "message-runtime", "retry", ""); err == nil {
 				t.Fatal("Unconfirmed message was resent")
 			}
 		})

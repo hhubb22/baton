@@ -22,13 +22,13 @@ type processThreadFake struct {
 	cmd *exec.Cmd
 }
 
-func (a *processThreadFake) Send(ctx context.Context, id, text string) error {
+func (a *processThreadFake) Send(ctx context.Context, id, text, model string) error {
 	a.cmd = exec.Command("/bin/sh", "-c", "/bin/sh -c 'sleep 600 & wait' & wait")
 	a.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := a.cmd.Start(); err != nil {
 		return err
 	}
-	return a.threadFake.Send(ctx, id, text)
+	return a.threadFake.Send(ctx, id, text, model)
 }
 func (a *processThreadFake) KillProcessTree() (bool, error) { return killThreadChildren() }
 

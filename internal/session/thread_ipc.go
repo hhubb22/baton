@@ -50,6 +50,9 @@ func (h *Host) OpenThread(ctx context.Context, options ThreadOptions) error {
 	config.DataDir, config.Directory, config.SessionID, config.ExecutionID = h.DataDir, options.WorkingDirectory, options.ThreadID, options.ThreadID
 	config.SessionDir = filepath.Join(dir, "native")
 	config.StatePath = filepath.Join(config.SessionDir, "state.json")
+	if options.Model != "" {
+		config.Model = options.Model
+	}
 	if registration, ok := registeredAdapters[options.AgentType]; ok {
 		if config.Model == "" {
 			config.Model = os.Getenv(registration.modelEnv)
@@ -98,8 +101,8 @@ func (h *Host) threadCall(ctx context.Context, threadID string, msg ipcMessage) 
 	return h.call(ctx, threadID, call)
 }
 
-func (h *Host) ThreadMessage(ctx context.Context, threadID, clientMessageID, content, mode string) error {
-	_, err := h.threadCall(ctx, threadID, ipcMessage{Type: "thread_message", ClientMessageID: clientMessageID, Payload: content, Mode: mode})
+func (h *Host) ThreadMessage(ctx context.Context, threadID, clientMessageID, content, mode, model string) error {
+	_, err := h.threadCall(ctx, threadID, ipcMessage{Type: "thread_message", ClientMessageID: clientMessageID, Payload: content, Mode: mode, Model: model})
 	return err
 }
 func (h *Host) ThreadWithdraw(ctx context.Context, threadID, clientMessageID string) error {
@@ -124,8 +127,8 @@ func (c *Client) OpenThread() error {
 	return err
 }
 
-func (c *Client) ThreadMessage(id, content, mode string) error {
-	_, err := c.roundTrip(ipcMessage{Type: "thread_message", ClientMessageID: id, Payload: content, Mode: mode})
+func (c *Client) ThreadMessage(id, content, mode, model string) error {
+	_, err := c.roundTrip(ipcMessage{Type: "thread_message", ClientMessageID: id, Payload: content, Mode: mode, Model: model})
 	return err
 }
 func (c *Client) ThreadWithdraw(id string) error {
@@ -247,7 +250,7 @@ func handleThreadWorker(ctx context.Context, w *ThreadWorker, msg ipcMessage) ip
 	switch msg.Type {
 	case "status", "thread_open":
 	case "thread_message":
-		err = w.EnqueueThreadMessage(ctx, msg.ClientMessageID, msg.Payload, msg.Mode)
+		err = w.EnqueueThreadMessage(ctx, msg.ClientMessageID, msg.Payload, msg.Mode, msg.Model)
 	case "thread_withdraw":
 		err = w.WithdrawThreadMessage(msg.ClientMessageID)
 	case "thread_stop":

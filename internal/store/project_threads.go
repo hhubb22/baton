@@ -46,7 +46,9 @@ func (s *Store) executeProjectThreadTool(ctx context.Context, tx pgx.Tx, b proje
 				return nil, projectagent.ErrInvalid
 			}
 		}
-		t, _, err := createThreadTx(ctx, tx, b.owner, projectThreadInput(b, callID, a.NodeID, a.AgentType, a.WorkingDirectory, a.Message, timeout))
+		in := projectThreadInput(b, callID, a.NodeID, a.AgentType, a.WorkingDirectory, a.Message, timeout)
+		in.Model = a.Model
+		t, _, err := createThreadTx(ctx, tx, b.owner, in)
 		if err != nil {
 			return nil, err
 		}
@@ -86,7 +88,7 @@ func (s *Store) executeProjectThreadTool(ctx context.Context, tx pgx.Tx, b proje
 	}
 	switch name {
 	case "threads.send":
-		in := ThreadMessageInput{ClientMessageID: fmt.Sprintf("pa:%s:%s", b.conversationID, callID), Content: a.Message, Mode: a.Mode, Sender: "project_agent", OriginToolCallID: callID}
+		in := ThreadMessageInput{ClientMessageID: fmt.Sprintf("pa:%s:%s", b.conversationID, callID), Content: a.Message, Mode: a.Mode, Model: a.Model, Sender: "project_agent", OriginToolCallID: callID}
 		if err = normalizeThreadMessage(&in); err != nil {
 			return nil, err
 		}

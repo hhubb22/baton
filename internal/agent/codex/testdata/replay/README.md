@@ -23,6 +23,12 @@ PS-181 于同日使用本机 Codex 0.163.0 / `gpt-6.1-sol` 替换 `interrupt_mid
 
 `result_free_text` 不适用，保留同名跳过子测试。`internal/agent/codex/codex.go` 的 `StartTask` 每次 `turn/start` 都携带 `outputSchema: ResultSchema()`，`internal/agent/codex/result.go` 要求包含 status、summary 等字段的对象；[Baton TECH](../../../../../specs/baton/TECH.md)「结构化结果」优先使用原生 output schema。当前适配器无法通过任务提示关闭该约束，要求模型自由文本不能稳定产生对应转录。自由文本拒绝继续由既有结果校验测试覆盖，真实错误帧的派生回放由后续迁移工单处理。
 
+## 模型目录与切换
+
+`model_switch.ndjson` 由 `TestRealThreadModelSwitch/codex` 在 macOS arm64、Codex 0.163.0 上录制。`model/list` 返回 7 项目录，包含 `gpt-6.1-sol` 与 `gpt-6-luna`；`thread/start` 和第一轮 `turn/start` 使用 `gpt-6.1-sol`，第二轮 `turn/start` 使用 `gpt-6-luna`。转录包含原生 rollout 追加记录，两条 `turn_context.model` 分别为 `gpt-6.1-sol`、`gpt-6-luna`，唯一 `session_meta.id` 对应两轮请求的同一个 thread；回放逐项断言这些历史字段。第二轮从第一轮上下文回忆 `BATON_MODEL_ONE`。
+
+此转录由 `internal/agent` 的 `TestRecordedThreadModelSwitch/codex` 单独回放，旧任务场景枚举排除它。真实入口为 `BATON_MODEL_RECORD_DIR=/tmp/baton-model-recording go test -v ./internal/agent -run '^TestRealThreadModelSwitch/codex$' -count=1`；输出目录每次使用新路径。测试使用临时 CODEX_HOME 中的本机配置副本；`model/list` 失败或缺少两个指定 ID 时立即结束该场景，不替换模型。模型目录与两轮请求、事件、原生历史一并规范化。rollout 的系统指令沿用请求中的 `<any>` 规则，实际用户 HOME 绑定为 `<caller_home>`，隔离的 CODEX_HOME 绑定为 `<home>`；模型字段与模型输出保留。原始录制在成功规范化后删除；扫描失败时仅保留在系统临时目录供本机修正规则，处理完后删除。
+
 ## CI 回放
 
 `TestRecordedCodexScenarios` 和 `TestRecordedCodexWorkerScenarios` 分别回放上述 10 份转录（含 interrupt_before_turn_started）。早到中止另有补发失败、通知先到及回合身份等派生回放。

@@ -55,7 +55,7 @@ var normalizationPolicies = map[string]normalizationPolicy{
 		privateFields: stringSet("account", "authMode", "authStatus", "requiresOpenaiAuth", "accessToken", "refreshToken", "apiKey", "machineId", "deviceId", "hostname", "username", "serverName", "installationId"),
 	},
 	"pi": {
-		dropMethods:   stringSet("get_available_models", "get_commands"),
+		dropMethods:   stringSet("get_commands"),
 		privateFields: stringSet("account", "auth", "authStatus", "apiKey", "accessToken", "refreshToken", "machineId", "hostname", "username"),
 	},
 	"kiro": {
@@ -472,6 +472,28 @@ func (n *normalizer) strip(v any) {
 	}
 }
 
+// 模型目录是配置数据；只清理模型配置中的凭据，不改动模型回复或工具输出。
+func (n *normalizer) stripPiModelConfiguration(v any, method string) {
+	data := object(object(v)["data"])
+	var models []any
+	switch method {
+	case "get_available_models":
+		models, _ = data["models"].([]any)
+	case "get_state":
+		models = []any{data["model"]}
+	case "set_model":
+		models = []any{data}
+	}
+	for _, model := range models {
+		m := object(model)
+		for key := range n.policy.privateFields {
+			delete(m, key)
+		}
+		delete(m, "headers")
+		delete(m, "extraHeaders")
+	}
+}
+
 func (n *normalizer) label(direction, method string) string {
 	if method == "" {
 		method = "frame"
@@ -633,6 +655,9 @@ func Normalize(raw RawRecording) (Transcript, error) {
 			}
 			n.normalizeUserMessages(f.value)
 			n.strip(f.value)
+			if agent == "pi" && e.Type == "stdout" {
+				n.stripPiModelConfiguration(f.value, method)
+			}
 			if agent == "kiro" {
 				stripKiroPrivate(f.value)
 			}
@@ -666,6 +691,9 @@ func Normalize(raw RawRecording) (Transcript, error) {
 			for _, line := range strings.Split(string(e.Data), "\n") {
 				if v, err := decode([]byte(line)); err == nil {
 					n.normalizeUserMessages(v)
+					if agent == "codex" {
+						n.normalizeCodexHistoryInstructions(v)
+					}
 					data, err := marshalUnescaped(n.replaceValues(v))
 					if err != nil {
 						return Transcript{}, err
@@ -839,6 +867,56 @@ func (n *normalizer) normalizeUserMessages(v any) {
 	case []any:
 		for _, c := range m {
 			n.normalizeUserMessages(c)
+		}
+	}
+}
+
+// 原生 rollout 中的运行指令与 thread/start 的指令采用相同规则。
+func (n *normalizer) normalizeCodexHistoryInstructions(v any) {
+	m := object(v)
+	p := object(m["payload"])
+	switch m["type"] {
+	case "session_meta", "turn_context":
+		normalizeInstructionFields(p)
+	case "response_item":
+		if p["type"] == "message" && (p["role"] == "developer" || p["role"] == "system") {
+			for _, block := range array(p["content"]) {
+				b := object(block)
+				if _, exists := b["text"]; exists {
+					b["text"] = "<any>"
+				}
+			}
+		}
+	case "event_msg":
+		if p["type"] == "user_message" {
+			if text, ok := p["message"].(string); ok && !n.delivery(text) {
+				p["message"] = "<any>"
+			}
+		}
+	}
+}
+
+func normalizeInstructionFields(v any) {
+	switch x := v.(type) {
+	case map[string]any:
+		for key, value := range x {
+			if key == "base_instructions" || key == "developer_instructions" || key == "user_instructions" {
+				if value != nil {
+					if obj := object(value); obj != nil {
+						if _, ok := obj["text"]; ok {
+							obj["text"] = "<any>"
+						}
+					} else {
+						x[key] = "<any>"
+					}
+				}
+			} else {
+				normalizeInstructionFields(value)
+			}
+		}
+	case []any:
+		for _, value := range x {
+			normalizeInstructionFields(value)
 		}
 	}
 }

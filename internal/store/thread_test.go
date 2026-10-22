@@ -283,14 +283,21 @@ func TestThreadProjectInputsFollowTurnInitiator(t *testing.T) {
 	}
 	in := h.input("project-thread", h.src.NodeID)
 	in.ProjectID = p.ID
+	in.CreatedBy = "project_agent"
+	in.OriginConversationID = p.Conversation.ID
+	in.OriginToolCallID = "create-thread"
 	v, _, err := h.repo.CreateThread(h.ctx, h.owner, in)
 	if err != nil {
 		t.Fatal(err)
 	}
 	h.opened(v)
-	h.start(v, 2, 1, "project-thread:first")
-	h.report(v.ID, 4, "reply", func(r *protocol.ThreadReport) { r.WorkerTurnSeq = 1; r.Content = "employee reply" })
-	h.report(v.ID, 5, "turn.ended", func(r *protocol.ThreadReport) { r.WorkerTurnSeq = 1; r.Reason = "completed"; r.QueueEmpty = true })
+	h.report(v.ID, 2, "message.withdrawn", func(r *protocol.ThreadReport) { r.ClientMessageID = "project-thread:first" })
+	if _, err = h.repo.SendThreadMessage(h.ctx, h.owner, v.ID, store.ThreadMessageInput{ClientMessageID: "employee-first", Content: "employee turn"}); err != nil {
+		t.Fatal(err)
+	}
+	h.start(v, 3, 1, "employee-first")
+	h.report(v.ID, 5, "reply", func(r *protocol.ThreadReport) { r.WorkerTurnSeq = 1; r.Content = "employee reply" })
+	h.report(v.ID, 6, "turn.ended", func(r *protocol.ThreadReport) { r.WorkerTurnSeq = 1; r.Reason = "completed"; r.QueueEmpty = true })
 	if n := h.count(`SELECT count(*) FROM project_agent_input_queue`); n != 0 {
 		t.Fatal("employee turn notified", n)
 	}
@@ -298,14 +305,14 @@ func TestThreadProjectInputsFollowTurnInitiator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.start(v, 6, 2, "pa")
-	for seq := int64(8); seq <= 10; seq++ {
+	h.start(v, 7, 2, "pa")
+	for seq := int64(9); seq <= 11; seq++ {
 		h.report(v.ID, seq, "reply", func(r *protocol.ThreadReport) { r.WorkerTurnSeq = 2; r.Content = strings.Repeat("\t\"\\", 16000) })
 	}
 	if n := h.count(`SELECT count(*) FROM project_agent_input_queue WHERE wake_required`); n != 0 {
 		t.Fatal("reply woke agent", n)
 	}
-	h.report(v.ID, 11, "turn.ended", func(r *protocol.ThreadReport) { r.WorkerTurnSeq = 2; r.Reason = "completed"; r.QueueEmpty = true })
+	h.report(v.ID, 12, "turn.ended", func(r *protocol.ThreadReport) { r.WorkerTurnSeq = 2; r.Reason = "completed"; r.QueueEmpty = true })
 	if n := h.count(`SELECT count(*) FROM project_agent_input_queue WHERE source_type='thread_reply' AND NOT wake_required AND octet_length(payload::text)<=40960`); n != 3 {
 		t.Fatal("reply inputs", n)
 	}

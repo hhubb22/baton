@@ -90,18 +90,21 @@ func (s *Store) ClaimThreadCommands(ctx context.Context) ([]ThreadIntent, error)
 		cmd := protocol.ThreadCommand{Type: protocol.BodyThreadCommand, ThreadID: t.ID, Action: c.action, StorageGeneration: t.StorageGeneration}
 		var payload struct {
 			ClientMessageID string `json:"client_message_id"`
+			Model           string `json:"model"`
 		}
 		if err = json.Unmarshal(c.payload, &payload); err != nil {
 			return nil, err
 		}
 		cmd.ClientMessageID = payload.ClientMessageID
 		if c.action == "open" {
+			cmd.StorageGeneration = ""
 			cmd.AgentType = t.AgentType
+			cmd.Model = payload.Model
 			cmd.WorkingDirectory = t.WorkingDirectory
 			cmd.ExecutionTimeoutSeconds = t.ExecutionTimeoutSeconds
 		}
 		if c.action == "message" {
-			if err = tx.QueryRow(ctx, `SELECT content,mode FROM thread_messages WHERE employee_id=$1 AND thread_id=$2 AND client_message_id=$3`, t.EmployeeID, t.ID, payload.ClientMessageID).Scan(&cmd.Content, &cmd.Mode); err != nil {
+			if err = tx.QueryRow(ctx, `SELECT content,mode,model FROM thread_messages WHERE employee_id=$1 AND thread_id=$2 AND client_message_id=$3`, t.EmployeeID, t.ID, payload.ClientMessageID).Scan(&cmd.Content, &cmd.Mode, &cmd.Model); err != nil {
 				return nil, err
 			}
 		}

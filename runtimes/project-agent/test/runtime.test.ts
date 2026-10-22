@@ -831,9 +831,9 @@ test("Thread 工具按 assistant 中的顺序保存参数和结果，再继续�
   const calls = [
     fauxToolCall("threads.create", {
       node_id: "node-b", agent_type: "pi", working_directory: "/repo",
-      message: "修复登录并运行测试", execution_timeout_seconds: 600,
+      message: "修复登录并运行测试", model: "model-a", execution_timeout_seconds: 600,
     }, { id: "create" }),
-    fauxToolCall("threads.send", { thread_id: "thread-1", message: "继续" }, { id: "send" }),
+    fauxToolCall("threads.send", { thread_id: "thread-1", message: "继续", model: "model-b" }, { id: "send" }),
     fauxToolCall("threads.send", { thread_id: "thread-1", message: "调整目标", mode: "steer" }, { id: "steer" }),
     fauxToolCall("threads.stop", { thread_id: "thread-1" }, { id: "stop" }),
     fauxToolCall("threads.archive", { thread_id: "thread-1" }, { id: "archive" }),

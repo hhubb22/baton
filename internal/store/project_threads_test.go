@@ -102,18 +102,24 @@ func TestProjectThreadToolsAtomicCreationAndReplay(t *testing.T) {
 	}
 }
 
-func TestProjectThreadSendEmployeeThreadAndReadTurns(t *testing.T) {
+func TestProjectThreadPAA16EmployeeThenAgentTurnAndRead(t *testing.T) {
 	h := newToolHarness(t)
-	_ = threadToolArgs(t, h)
-	v, _, err := h.repo.CreateThread(h.ctx, h.owner, store.CreateThreadInput{ClientThreadID: "employee", NodeID: h.src.NodeID, AgentType: "codex", WorkingDirectory: "/registered", ProjectID: h.project.ID, Message: store.ThreadMessageInput{ClientMessageID: "employee-first", Content: "员工消息"}})
-	if err != nil {
+	id := createProjectThread(t, h)
+	startProjectShell(t, h, id)
+	finishProjectShell(t, h, id, "initial-agent-reply", nil)
+	baseline := countRows(t, h.ctx, h.pool, `SELECT count(*) FROM project_agent_input_queue WHERE source_type IN ('thread_reply','turn_ended')`)
+	v, err := h.repo.GetThread(h.ctx, h.owner, id)
+	if err != nil || v.CreatedBy != "project_agent" {
+		t.Fatal(v, err)
+	}
+	if _, err = h.repo.SendThreadMessage(h.ctx, h.owner, id, store.ThreadMessageInput{ClientMessageID: "employee-first", Content: "员工消息"}); err != nil {
 		t.Fatal(err)
 	}
-	projectReport(t, h, v.ID, "thread.opened", func(r *protocol.ThreadReport) { r.StorageGeneration = "generation"; r.NativeSessionID = "session" })
-	projectReport(t, h, v.ID, "turn.started", func(r *protocol.ThreadReport) { r.WorkerTurnSeq = 1; r.ClientMessageID = "employee-first" })
-	projectReport(t, h, v.ID, "message.sent", func(r *protocol.ThreadReport) { r.WorkerTurnSeq = 1; r.ClientMessageID = "employee-first" })
-	finishProjectShell(t, h, v.ID, "employee-reply", nil)
-	if n := countRows(t, h.ctx, h.pool, `SELECT count(*) FROM project_agent_input_queue WHERE source_type IN ('thread_reply','turn_ended')`); n != 0 {
+	projectReport(t, h, v.ID, "turn.started", func(r *protocol.ThreadReport) { r.WorkerTurnSeq = 2; r.ClientMessageID = "employee-first" })
+	projectReport(t, h, v.ID, "message.sent", func(r *protocol.ThreadReport) { r.WorkerTurnSeq = 2; r.ClientMessageID = "employee-first" })
+	projectReport(t, h, v.ID, "reply", func(r *protocol.ThreadReport) { r.WorkerTurnSeq = 2; r.Content = "employee-reply" })
+	projectReport(t, h, v.ID, "turn.ended", func(r *protocol.ThreadReport) { r.WorkerTurnSeq = 2; r.Reason = "completed"; r.QueueEmpty = true })
+	if n := countRows(t, h.ctx, h.pool, `SELECT count(*) FROM project_agent_input_queue WHERE source_type IN ('thread_reply','turn_ended')`); n != baseline {
 		t.Fatal("员工轮次进入队列", n)
 	}
 	raw, bad := h.call(t, "threads.send", map[string]any{"thread_id": v.ID, "message": "Agent 的下一轮"})
@@ -127,16 +133,16 @@ func TestProjectThreadSendEmployeeThreadAndReadTurns(t *testing.T) {
 	if !strings.HasPrefix(result.Key, "pa:"+h.project.Conversation.ID+":") {
 		t.Fatal(result)
 	}
-	projectReport(t, h, v.ID, "turn.started", func(r *protocol.ThreadReport) { r.WorkerTurnSeq = 2; r.ClientMessageID = result.Key })
-	projectReport(t, h, v.ID, "message.sent", func(r *protocol.ThreadReport) { r.WorkerTurnSeq = 2; r.ClientMessageID = result.Key })
+	projectReport(t, h, v.ID, "turn.started", func(r *protocol.ThreadReport) { r.WorkerTurnSeq = 3; r.ClientMessageID = result.Key })
+	projectReport(t, h, v.ID, "message.sent", func(r *protocol.ThreadReport) { r.WorkerTurnSeq = 3; r.ClientMessageID = result.Key })
 	for i := 0; i < 3; i++ {
-		projectReport(t, h, v.ID, "reply", func(r *protocol.ThreadReport) { r.WorkerTurnSeq = 2; r.Content = fmt.Sprintf("agent-reply-%d", i) })
+		projectReport(t, h, v.ID, "reply", func(r *protocol.ThreadReport) { r.WorkerTurnSeq = 3; r.Content = fmt.Sprintf("agent-reply-%d", i) })
 	}
 	if n := countRows(t, h.ctx, h.pool, `SELECT count(*) FROM project_agent_input_queue WHERE source_type='thread_reply' AND wake_required`); n != 0 {
 		t.Fatal("被动回复触发唤醒", n)
 	}
-	projectReport(t, h, v.ID, "turn.ended", func(r *protocol.ThreadReport) { r.WorkerTurnSeq = 2; r.Reason = "completed"; r.QueueEmpty = true })
-	raw, bad = h.call(t, "threads.read", map[string]any{"thread_id": v.ID, "after_turn": 1, "through_turn": 2})
+	projectReport(t, h, v.ID, "turn.ended", func(r *protocol.ThreadReport) { r.WorkerTurnSeq = 3; r.Reason = "completed"; r.QueueEmpty = true })
+	raw, bad = h.call(t, "threads.read", map[string]any{"thread_id": v.ID, "after_turn": 2, "through_turn": 3})
 	if bad {
 		t.Fatal(string(raw))
 	}
@@ -145,7 +151,7 @@ func TestProjectThreadSendEmployeeThreadAndReadTurns(t *testing.T) {
 		t.Fatal(text)
 	}
 	var previous int64
-	rows, err := h.pool.Query(h.ctx, `SELECT id,source_type FROM project_agent_input_queue WHERE payload->>'thread_id'=$1 ORDER BY id`, v.ID)
+	rows, err := h.pool.Query(h.ctx, `SELECT id,source_type FROM project_agent_input_queue WHERE payload->>'thread_id'=$1 AND payload->>'worker_turn_seq'='3' ORDER BY id`, v.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

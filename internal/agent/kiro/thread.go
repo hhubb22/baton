@@ -30,13 +30,17 @@ func (a *Adapter) NativeSessionID() string {
 	return a.state.NativeID
 }
 
-func (a *Adapter) Send(ctx context.Context, id, text string) error {
+func (a *Adapter) Send(ctx context.Context, id, text, model string) error {
 	a.sendMu.Lock()
 	defer a.sendMu.Unlock()
 	a.mu.Lock()
 	if a.active {
 		a.mu.Unlock()
 		return agent.ErrBusy
+	}
+	if model != "" && model != a.config.Model {
+		a.mu.Unlock()
+		return &agent.ModelSwitchError{Err: agent.ErrUnsupported}
 	}
 	if a.closed || a.state.NativeID == "" {
 		a.mu.Unlock()

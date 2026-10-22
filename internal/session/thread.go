@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"baton/internal/agent"
@@ -25,6 +27,7 @@ type ThreadOptions struct {
 	StorageGeneration       string        `json:"storage_generation"`
 	NodeID                  string        `json:"node_id"`
 	AgentType               string        `json:"agent_type"`
+	Model                   string        `json:"model,omitempty"`
 	WorkingDirectory        string        `json:"working_directory"`
 	ExecutionTimeoutSeconds int           `json:"execution_timeout_seconds"`
 	AdapterConfig           agent.Config  `json:"adapter_config"`
@@ -67,17 +70,19 @@ CREATE TABLE IF NOT EXISTS thread_meta (
  thread_id TEXT PRIMARY KEY, storage_generation TEXT NOT NULL, agent_type TEXT NOT NULL,
  working_directory TEXT NOT NULL, execution_timeout_seconds INTEGER NOT NULL,
  adapter_config TEXT NOT NULL, options_json TEXT NOT NULL, native_session_id TEXT NOT NULL DEFAULT '',
+ model TEXT NOT NULL DEFAULT '',
  current_turn_seq INTEGER NOT NULL DEFAULT 0, turn_started_monotonic_ns INTEGER NOT NULL DEFAULT 0,
  status TEXT NOT NULL DEFAULT 'opening', stop_requested_at INTEGER NOT NULL DEFAULT 0,
  stop_reason TEXT NOT NULL DEFAULT '', commit_token TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS thread_messages (
  seq INTEGER PRIMARY KEY AUTOINCREMENT, client_message_id TEXT NOT NULL UNIQUE,
- mode TEXT NOT NULL CHECK(mode IN ('queue','steer')), content TEXT NOT NULL,
+ mode TEXT NOT NULL CHECK(mode IN ('queue','steer')), content TEXT NOT NULL, model TEXT NOT NULL DEFAULT '',
  status TEXT NOT NULL CHECK(status IN ('queued','intent','sent','withdrawn','unknown')),
+ status_reason TEXT NOT NULL DEFAULT '',
  turn_seq INTEGER NOT NULL DEFAULT 0, intent_user_count INTEGER NOT NULL DEFAULT -1);
 CREATE TABLE IF NOT EXISTS thread_turns (
  turn_seq INTEGER PRIMARY KEY, client_message_id TEXT NOT NULL,
- started_at TEXT NOT NULL, ended_at TEXT, end_reason TEXT);
+ started_at TEXT NOT NULL, ended_at TEXT, end_reason TEXT, model TEXT NOT NULL DEFAULT '');
 CREATE UNIQUE INDEX IF NOT EXISTS thread_one_active_turn ON thread_turns((1)) WHERE ended_at IS NULL;
 CREATE TABLE IF NOT EXISTS thread_replies (
  reply_seq INTEGER PRIMARY KEY AUTOINCREMENT, turn_seq INTEGER NOT NULL REFERENCES thread_turns(turn_seq),
@@ -87,6 +92,30 @@ CREATE TABLE IF NOT EXISTS thread_outbox (
  worker_seq INTEGER PRIMARY KEY, event_id TEXT NOT NULL UNIQUE,
  report_json TEXT NOT NULL, acked INTEGER NOT NULL DEFAULT 0 CHECK(acked IN (0,1)));
 `
+
+func ensureThreadColumns(db *sql.DB) error {
+	for _, column := range []struct{ table, name string }{
+		{"thread_meta", "model"},
+		{"thread_messages", "model"},
+		{"thread_turns", "model"},
+		{"thread_messages", "status_reason"},
+	} {
+		var exists int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name=?`, column.table, column.name).Scan(&exists); err != nil {
+			return err
+		}
+		if exists != 0 {
+			continue
+		}
+		if _, err := db.Exec(`ALTER TABLE ` + column.table + ` ADD COLUMN ` + column.name + ` TEXT NOT NULL DEFAULT ''`); err != nil {
+			// Host 和 Worker 可能同时打开旧账本，另一连接已添加列时沿用它。
+			if checkErr := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name=?`, column.table, column.name).Scan(&exists); checkErr != nil || exists == 0 {
+				return err
+			}
+		}
+	}
+	return nil
+}
 
 func openThreadDB(dataDir string, options ThreadOptions, create bool) (*sql.DB, ThreadOptions, error) {
 	path, err := ThreadLedgerPath(dataDir, options.ThreadID)
@@ -110,11 +139,17 @@ func openThreadDB(dataDir string, options ThreadOptions, create bool) (*sql.DB, 
 	if _, err := db.Exec(threadSchema); err != nil {
 		return fail(err)
 	}
+	if err := ensureThreadColumns(db); err != nil {
+		return fail(err)
+	}
 	if create {
 		if options.StorageGeneration == "" || options.AgentType == "" || options.ExecutionTimeoutSeconds < 0 {
 			return fail(errors.New("Thread 配置无效"))
 		}
 		config := &options.AdapterConfig
+		if options.Model != "" {
+			config.Model = options.Model
+		}
 		config.DataDir, config.Directory, config.SessionID, config.ExecutionID = dataDir, options.WorkingDirectory, options.ThreadID, options.ThreadID
 		config.SessionDir = filepath.Join(filepath.Dir(path), "native")
 		config.StatePath = filepath.Join(config.SessionDir, "state.json")
@@ -131,7 +166,7 @@ func openThreadDB(dataDir string, options ThreadOptions, create bool) (*sql.DB, 
 		if err != nil {
 			return fail(err)
 		}
-		if _, err := db.Exec(`INSERT INTO thread_meta(thread_id,storage_generation,agent_type,working_directory,execution_timeout_seconds,adapter_config,options_json) VALUES(?,?,?,?,?,?,?) ON CONFLICT(thread_id) DO NOTHING`, options.ThreadID, options.StorageGeneration, options.AgentType, options.WorkingDirectory, options.ExecutionTimeoutSeconds, string(config), string(raw)); err != nil {
+		if _, err := db.Exec(`INSERT INTO thread_meta(thread_id,storage_generation,agent_type,working_directory,execution_timeout_seconds,adapter_config,options_json,model) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(thread_id) DO NOTHING`, options.ThreadID, options.StorageGeneration, options.AgentType, options.WorkingDirectory, options.ExecutionTimeoutSeconds, string(config), string(raw), options.AdapterConfig.Model); err != nil {
 			return fail(err)
 		}
 	}
@@ -143,7 +178,7 @@ func openThreadDB(dataDir string, options ThreadOptions, create bool) (*sql.DB, 
 	if err := json.Unmarshal([]byte(raw), &saved); err != nil {
 		return fail(err)
 	}
-	if create && (saved.StorageGeneration != options.StorageGeneration || saved.AgentType != options.AgentType || saved.WorkingDirectory != options.WorkingDirectory || saved.NodeID != options.NodeID || saved.ExecutionTimeoutSeconds != options.ExecutionTimeoutSeconds) {
+	if create && (saved.StorageGeneration != options.StorageGeneration || saved.AgentType != options.AgentType || saved.Model != options.Model || saved.WorkingDirectory != options.WorkingDirectory || saved.NodeID != options.NodeID || saved.ExecutionTimeoutSeconds != options.ExecutionTimeoutSeconds) {
 		return fail(errors.New("Thread 配置冲突"))
 	}
 	if err := chmodDB(path); err != nil {
@@ -252,6 +287,9 @@ func (w *ThreadWorker) startAdapter(ctx context.Context, restore bool) error {
 		w.adapter = nil
 	}
 	config := w.options.AdapterConfig
+	if err := w.db.QueryRow(`SELECT model FROM thread_meta`).Scan(&config.Model); err != nil {
+		return err
+	}
 	config.Restore = restore
 	a, err := w.factory(w.options.AgentType, config)
 	if err != nil {
@@ -366,11 +404,14 @@ func (w *ThreadWorker) Close() error {
 	return errors.Join(err, w.db.Close())
 }
 
-func threadValidateMessage(id, content, mode string) error {
-	if id == "" || len(id) > 1024 || content == "" || len(content) > 64<<10 || !utf8.ValidString(content) || (mode != "queue" && mode != "steer") {
+func threadValidateMessage(id, content, mode, model string) error {
+	if mode == "steer" && model != "" {
+		return errors.New("插入消息不能指定模型")
+	}
+	if id == "" || len(id) > 1024 || content == "" || len(content) > 64<<10 || !utf8.ValidString(content) || len(model) > 512 || !utf8.ValidString(model) || strings.ContainsFunc(model, unicode.IsControl) || (mode != "queue" && mode != "steer") {
 		return errors.New("Thread 消息无效")
 	}
-	raw, err := json.Marshal(protocol.ThreadCommand{Type: protocol.BodyThreadCommand, ThreadID: "00000000-0000-4000-8000-000000000000", StorageGeneration: "00000000-0000-4000-8000-000000000000", Action: "message", ClientMessageID: id, Content: content, Mode: mode})
+	raw, err := json.Marshal(protocol.ThreadCommand{Type: protocol.BodyThreadCommand, ThreadID: "00000000-0000-4000-8000-000000000000", StorageGeneration: "00000000-0000-4000-8000-000000000000", Action: "message", ClientMessageID: id, Content: content, Mode: mode, Model: model})
 	if err != nil {
 		return err
 	}
@@ -380,19 +421,19 @@ func threadValidateMessage(id, content, mode string) error {
 	return nil
 }
 
-func (w *ThreadWorker) EnqueueThreadMessage(ctx context.Context, id, content, mode string) error {
+func (w *ThreadWorker) EnqueueThreadMessage(ctx context.Context, id, content, mode, model string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if mode == "" {
 		mode = "queue"
 	}
-	if err := threadValidateMessage(id, content, mode); err != nil {
+	if err := threadValidateMessage(id, content, mode, model); err != nil {
 		return err
 	}
-	var oldContent, oldMode string
-	err := w.db.QueryRow(`SELECT content,mode FROM thread_messages WHERE client_message_id=?`, id).Scan(&oldContent, &oldMode)
+	var oldContent, oldMode, oldModel string
+	err := w.db.QueryRow(`SELECT content,mode,model FROM thread_messages WHERE client_message_id=?`, id).Scan(&oldContent, &oldMode, &oldModel)
 	if err == nil {
-		if oldContent != content || oldMode != mode {
+		if oldContent != content || oldMode != mode || oldModel != model {
 			return errors.New("client_message_id 内容冲突")
 		}
 		return nil
@@ -441,8 +482,11 @@ func (w *ThreadWorker) EnqueueThreadMessage(ctx context.Context, id, content, mo
 			return err
 		}
 	}
+	if model != "" && (w.adapter == nil || !w.adapter.Capabilities().SwitchModel) {
+		return fmt.Errorf("Agent 不支持换模型: %w", agent.ErrUnsupported)
+	}
 	if err := w.transaction(func(tx *sql.Tx) error {
-		if _, err := tx.Exec(`INSERT INTO thread_messages(client_message_id,content,mode,status) VALUES(?,?,?,'queued')`, id, content, mode); err != nil {
+		if _, err := tx.Exec(`INSERT INTO thread_messages(client_message_id,content,mode,model,status) VALUES(?,?,?,?,'queued')`, id, content, mode, model); err != nil {
 			return err
 		}
 		return w.report(tx, protocol.ThreadReport{Kind: "message.queued", ClientMessageID: id})
@@ -459,26 +503,31 @@ func (w *ThreadWorker) EnqueueThreadMessage(ctx context.Context, id, content, mo
 }
 
 func (w *ThreadWorker) sendNext(ctx context.Context) error {
-	state, err := w.status()
-	if err != nil {
-		return err
+	for {
+		state, err := w.status()
+		if err != nil {
+			return err
+		}
+		if state != "idle" {
+			return nil
+		}
+		var id, text string
+		err = w.db.QueryRow(`SELECT client_message_id,content FROM thread_messages WHERE status='queued' ORDER BY seq LIMIT 1`).Scan(&id, &text)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		var turn int64
+		if err := w.db.QueryRow(`SELECT current_turn_seq+1 FROM thread_meta`).Scan(&turn); err != nil {
+			return err
+		}
+		if err := w.send(ctx, id, text, turn, false); err != nil {
+			return err
+		}
+		// 模型选择失败会撤回当前消息，继续尝试队列中的下一条。
 	}
-	if state != "idle" {
-		return nil
-	}
-	var id, text string
-	err = w.db.QueryRow(`SELECT client_message_id,content FROM thread_messages WHERE status='queued' ORDER BY seq LIMIT 1`).Scan(&id, &text)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	var turn int64
-	if err := w.db.QueryRow(`SELECT current_turn_seq+1 FROM thread_meta`).Scan(&turn); err != nil {
-		return err
-	}
-	return w.send(ctx, id, text, turn, false)
 }
 
 func (w *ThreadWorker) send(ctx context.Context, id, text string, turn int64, steer bool) error {
@@ -505,11 +554,32 @@ func (w *ThreadWorker) send(ctx context.Context, id, text string, turn int64, st
 	if steer {
 		err = w.adapter.Steer(sendCtx, id, text)
 	} else {
-		err = w.adapter.Send(sendCtx, id, text)
+		var model string
+		if err := w.db.QueryRow(`SELECT COALESCE(NULLIF(m.model,''),t.model) FROM thread_messages m CROSS JOIN thread_meta t WHERE m.client_message_id=?`, id).Scan(&model); err != nil {
+			return err
+		}
+		err = w.adapter.Send(sendCtx, id, text, model)
 	}
 	if err != nil {
+		var switchErr *agent.ModelSwitchError
+		if !steer && errors.As(err, &switchErr) {
+			reason := strings.ToValidUTF8(strings.ReplaceAll(switchErr.Error(), "\x00", "�"), "�")
+			if len(reason) > 4096 {
+				end := 4096 - len("…")
+				for !utf8.RuneStart(reason[end]) {
+					end--
+				}
+				reason = reason[:end] + "…"
+			}
+			return w.transaction(func(tx *sql.Tx) error {
+				if _, err := tx.Exec(`UPDATE thread_messages SET status='withdrawn',status_reason=?,turn_seq=0 WHERE client_message_id=? AND status='intent'`, reason, id); err != nil {
+					return err
+				}
+				return w.report(tx, protocol.ThreadReport{Kind: "message.withdrawn", ClientMessageID: id, Reason: reason})
+			})
+		}
 		// intent 已经持久化；查询失败也不能重发。
-		if recoveryErr := w.recoverIntents(); recoveryErr != nil {
+		if recoveryErr := w.recoverIntentsReason(err.Error()); recoveryErr != nil {
 			return recoveryErr
 		}
 		return err
@@ -532,13 +602,17 @@ func (w *ThreadWorker) confirmSent(id string, turn int64) error {
 		}
 		// turn.started 先落地，中心才能用已存在的 Turn 关联 message.sent。
 		if exists == 0 {
-			if _, err := tx.Exec(`INSERT INTO thread_turns(turn_seq,client_message_id,started_at) VALUES(?,?,?)`, turn, id, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+			var model string
+			if err := tx.QueryRow(`SELECT COALESCE(NULLIF(m.model,''),t.model) FROM thread_messages m CROSS JOIN thread_meta t WHERE m.client_message_id=?`, id).Scan(&model); err != nil {
 				return err
 			}
-			if _, err := tx.Exec(`UPDATE thread_meta SET current_turn_seq=?,turn_started_monotonic_ns=?,status='running'`, turn, int64(mono)); err != nil {
+			if _, err := tx.Exec(`INSERT INTO thread_turns(turn_seq,client_message_id,started_at,model) VALUES(?,?,?,?)`, turn, id, time.Now().UTC().Format(time.RFC3339Nano), model); err != nil {
 				return err
 			}
-			if err := w.report(tx, protocol.ThreadReport{Kind: "turn.started", WorkerTurnSeq: turn, ClientMessageID: id}); err != nil {
+			if _, err := tx.Exec(`UPDATE thread_meta SET current_turn_seq=?,turn_started_monotonic_ns=?,status='running',model=?`, turn, int64(mono), model); err != nil {
+				return err
+			}
+			if err := w.report(tx, protocol.ThreadReport{Kind: "turn.started", WorkerTurnSeq: turn, ClientMessageID: id, Model: model}); err != nil {
 				return err
 			}
 		}
@@ -577,6 +651,10 @@ func (w *ThreadWorker) unknownIntentsTx(tx *sql.Tx) error {
 }
 
 func (w *ThreadWorker) recoverIntents() error {
+	return w.recoverIntentsReason("无法确认消息是否已经发出")
+}
+
+func (w *ThreadWorker) recoverIntentsReason(reason string) error {
 	rows, err := w.db.Query(`SELECT client_message_id,content,turn_seq,intent_user_count FROM thread_messages WHERE status='intent' ORDER BY seq`)
 	if err != nil {
 		return err
@@ -618,7 +696,7 @@ func (w *ThreadWorker) recoverIntents() error {
 			if err := w.endTx(tx, agent.EndAgentExited); err != nil {
 				return err
 			}
-			return w.stateReport(tx, "unknown", "thread.unknown", "无法确认消息是否已经发出")
+			return w.stateReport(tx, "unknown", "thread.unknown", reason)
 		})
 	}
 	return nil
@@ -647,7 +725,8 @@ func (w *ThreadWorker) WithdrawThreadMessage(id string) error {
 
 func (w *ThreadWorker) endTx(tx *sql.Tx, reason string) error {
 	var turn int64
-	err := tx.QueryRow(`SELECT turn_seq FROM thread_turns WHERE ended_at IS NULL`).Scan(&turn)
+	var model string
+	err := tx.QueryRow(`SELECT turn_seq,model FROM thread_turns WHERE ended_at IS NULL`).Scan(&turn, &model)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -664,7 +743,7 @@ func (w *ThreadWorker) endTx(tx *sql.Tx, reason string) error {
 	if _, err := tx.Exec(`UPDATE thread_meta SET status='idle',stop_requested_at=0,stop_reason=''`); err != nil {
 		return err
 	}
-	return w.report(tx, protocol.ThreadReport{Kind: "turn.ended", WorkerTurnSeq: turn, Reason: reason, QueueEmpty: count == 0})
+	return w.report(tx, protocol.ThreadReport{Kind: "turn.ended", WorkerTurnSeq: turn, Model: model, Reason: reason, QueueEmpty: count == 0})
 }
 
 func truncateThreadReply(text string) (string, bool, int64) {

@@ -59,6 +59,10 @@ batond files 只在本机登记可浏览目录。浏览器提交目录标识和�
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer, getenv func(string) string) error {
+	return runWithOptions(ctx, args, stdout, stderr, getenv, node.RunOptions{})
+}
+
+func runWithOptions(ctx context.Context, args []string, stdout, stderr io.Writer, getenv func(string) string, opts node.RunOptions) error {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
 		return &exitCode{code: 2, err: errors.New(usage())}
 	}
@@ -66,7 +70,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, getenv fu
 	case "register":
 		return cmdRegister(ctx, args[1:], stdout, stderr, getenv)
 	case "run":
-		return cmdRun(ctx, args[1:], stderr, getenv)
+		return cmdRun(ctx, args[1:], stderr, getenv, opts)
 	case "files":
 		return cmdFiles(args[1:], stdout, getenv)
 	case "project-exec":
@@ -80,7 +84,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, getenv fu
 	}
 }
 
-func cmdRun(ctx context.Context, args []string, stderr io.Writer, getenv func(string) string) error {
+func cmdRun(ctx context.Context, args []string, stderr io.Writer, getenv func(string) string, opts node.RunOptions) error {
 	relayURL, dataDir, err := parseRun(args)
 	if err != nil {
 		return err
@@ -111,14 +115,13 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer, getenv func(st
 		return err
 	}
 	logger := slog.New(slog.NewTextHandler(stderr, nil))
-	err = node.Maintain(ctx, node.RunOptions{
-		RelayURL:  relayURL,
-		Identity:  ident,
-		Heartbeat: heartbeat,
-		RootCAs:   roots,
-		Logger:    logger,
-		DataDir:   dir,
-	})
+	opts.RelayURL = relayURL
+	opts.Identity = ident
+	opts.Heartbeat = heartbeat
+	opts.RootCAs = roots
+	opts.Logger = logger
+	opts.DataDir = dir
+	err = node.Maintain(ctx, opts)
 	if errors.Is(err, node.ErrNeedsReauth) {
 		return err
 	}

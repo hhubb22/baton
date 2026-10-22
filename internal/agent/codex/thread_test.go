@@ -57,7 +57,7 @@ func TestThreadRequestsAndLifecycle(t *testing.T) {
 		}
 	})
 	ctx := context.Background()
-	if got := a.Capabilities(); got != (agent.Capabilities{Steer: true, Resume: true}) {
+	if got := a.Capabilities(); got != (agent.Capabilities{Steer: true, Resume: true, SwitchModel: true}) {
 		t.Fatal(got)
 	}
 	mustStart(t, a)
@@ -67,10 +67,10 @@ func TestThreadRequestsAndLifecycle(t *testing.T) {
 	if err := a.Steer(ctx, "idle-steer", "text"); !errors.Is(err, agent.ErrBusy) {
 		t.Fatal(err)
 	}
-	if err := a.Send(ctx, "message-1", "first question"); err != nil {
+	if err := a.Send(ctx, "message-1", "first question", ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.Send(ctx, "busy", "second question"); !errors.Is(err, agent.ErrBusy) {
+	if err := a.Send(ctx, "busy", "second question", ""); !errors.Is(err, agent.ErrBusy) {
 		t.Fatal(err)
 	}
 	started := json.RawMessage(`{"threadId":"native-thread","turn":{"id":"turn-1","status":"inProgress"}}`)
@@ -110,7 +110,7 @@ func TestThreadRequestsAndLifecycle(t *testing.T) {
 	if events := a.DrainEvents(); len(events) != 0 {
 		t.Fatal(events)
 	}
-	if err := a.Send(ctx, "message-2", "next turn"); err != nil {
+	if err := a.Send(ctx, "message-2", "next turn", ""); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"thread/start", "turn/start", "turn/steer", "turn/interrupt", "turn/start"}

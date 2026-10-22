@@ -174,6 +174,9 @@ func TestRecordedCodexWorkerScenarios(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, path := range paths {
+		if filepath.Base(path) == "model_switch.ndjson" {
+			continue
+		}
 		t.Run(strings.TrimSuffix(filepath.Base(path), ".ndjson"), func(t *testing.T) { runRecordedCodexWorker(t, binary, path, "") })
 	}
 	for _, variant := range []string{"exit_after_response", "exit_mid_turn", "disconnect", "drop_settled", "free_text", "delivery_wrong_id"} {

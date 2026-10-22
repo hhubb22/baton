@@ -24,6 +24,7 @@ func (e *ThreadCommandError) Error() string { return e.Message }
 type ipcMessage struct {
 	ClientMessageID   string                   `json:"client_message_id,omitempty"`
 	Mode              string                   `json:"mode,omitempty"`
+	Model             string                   `json:"model,omitempty"`
 	AfterWorkerSeq    int64                    `json:"after_worker_seq,omitempty"`
 	WorkerSeq         int64                    `json:"worker_seq,omitempty"`
 	ThreadReports     []protocol.ThreadReport  `json:"thread_reports,omitempty"`

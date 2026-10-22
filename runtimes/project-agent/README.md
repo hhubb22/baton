@@ -24,7 +24,7 @@ batond 检查版本 `0.1.0`、登录状态和租约后，在空控制目录启�
 
 assistant 的 `message_end` 监听器先等待 `append_event` 提交，再按消息内的顺序发出 `call_tool`。每个工具结果由 Coordinator 保存；后续模型请求使用中心保存的结果。Runtime 的工具执行模式为 `sequential`。恢复时读取已有结果，只为缺少结果的工具调用发送原 ID；最后一条非压缩事件为 input 或 tool_result 时调用 `continue()`，为无工具 assistant 时领取下一批输入；压缩事件不改变未完成轮次的恢复位置。
 
-开发工作通过 `threads.create` 和 `threads.send` 交给执行 Agent，使用 `threads.get/read` 查询状态和回复，`threads.stop/archive` 停止当前一轮或归档 Thread。`inbox.ask` 可用 `thread_id` 关联本 Project 的 Thread。
+开发工作通过 `threads.create` 和 `threads.send` 交给执行 Agent，使用 `threads.get/read` 查询状态和回复，`threads.stop/archive` 停止当前一轮或归档 Thread。新建时按设备能力、用户要求和项目记忆选择 Agent 与模型；`threads.create` 的 `model` 省略时使用设备上该 Agent 的默认模型。`threads.send` 可用 `model` 指定下一轮模型，省略时沿用当前模型；设备必须上报该模型且支持换模型，`steer` 沿用当前一轮模型。工具操作的 Thread 都属于本 Project，由 Project Agent 新建；用户随后可以在其中开启自己的轮次，回复按每轮第一条消息的发送方决定是否送回 Project Agent。`inbox.ask` 可用 `thread_id` 关联本 Project 的 Thread。
 
 `nodes.exec` 的 pending 响应携带 `thread_id`；`wait_protocol=1` 时还携带非负安全整数 `version` 和 `wait_remaining_ms`。batond 声明 `local_wait_protocol=1` 时，Runtime 用 `{thread_id, after_version, wait_ms}` 本地等待最多 25 秒，然后通过 `wait_tool` 查询中心保存的状态。未声明协议时每 250ms 查询一次；运行期限到达时用 `finish_wait=true` 保存当前状态。等待结束后命令继续执行，输出可通过 `threads.read` 获取。
 

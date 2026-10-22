@@ -52,7 +52,7 @@ func TestThreadCommandAndRestore(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		command = "[IO.File]::AppendAllText('" + strings.ReplaceAll(marker, "'", "''") + "', 'x'); [Console]::Out.Write('stdout'); [Console]::Error.Write('stderr'); exit 7"
 	}
-	if err := a.Send(context.Background(), "message-1", command); err != nil {
+	if err := a.Send(context.Background(), "message-1", command, ""); err != nil {
 		t.Fatal(err)
 	}
 	events := threadEvents(t, a)
@@ -72,7 +72,7 @@ func TestThreadCommandAndRestore(t *testing.T) {
 			t.Fatal(e)
 		}
 	}
-	if err := a.Send(context.Background(), "message-2", "exit 0"); err == nil {
+	if err := a.Send(context.Background(), "message-2", "exit 0", ""); err == nil {
 		t.Fatal("second turn accepted")
 	}
 	if sent, err := a.Sent("message-1"); err != nil || !sent {
@@ -98,7 +98,7 @@ func TestThreadCommandAndRestore(t *testing.T) {
 	if sent, err := b.Sent("message-1"); err != nil || !sent {
 		t.Fatal(sent, err)
 	}
-	if err := b.Send(context.Background(), "message-1", command); err == nil {
+	if err := b.Send(context.Background(), "message-1", command, ""); err == nil {
 		t.Fatal("restored command reran")
 	}
 	if raw, err := os.ReadFile(marker); err != nil || string(raw) != "x" {
@@ -132,7 +132,7 @@ func TestThreadCompletionWaitsForDurableRecord(t *testing.T) {
 		}
 		return privatefile.WriteFile(path, raw)
 	}
-	if err := a.Send(context.Background(), "durable", "echo saved"); err != nil {
+	if err := a.Send(context.Background(), "durable", "echo saved", ""); err != nil {
 		t.Fatal(err)
 	}
 	<-a.done
@@ -159,7 +159,7 @@ func TestThreadRejectsDisabledExec(t *testing.T) {
 	if err := projectexec.WriteProjectExec(a.config.DataDir, protocol.RuntimeExec{Enabled: false, Shell: "missing"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.Send(context.Background(), "disabled", "echo forbidden"); err == nil {
+	if err := a.Send(context.Background(), "disabled", "echo forbidden", ""); err == nil {
 		t.Fatal("disabled command accepted")
 	}
 	if len(a.DrainEvents()) != 0 || a.process != nil {
@@ -173,10 +173,10 @@ func TestThreadBusyAbortAndRecovery(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		command = "[Console]::Out.Write('before-stop'); Start-Sleep -Seconds 60"
 	}
-	if err := a.Send(context.Background(), "stop", command); err != nil {
+	if err := a.Send(context.Background(), "stop", command, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.Send(context.Background(), "busy", "exit 0"); !errors.Is(err, agent.ErrBusy) {
+	if err := a.Send(context.Background(), "busy", "exit 0", ""); !errors.Is(err, agent.ErrBusy) {
 		t.Fatal(err)
 	}
 	if stopped, known, err := a.Abort(); err != nil || !stopped || known {

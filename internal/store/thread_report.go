@@ -21,7 +21,7 @@ var threadEndReasons = map[string]bool{"completed": true, "stopped": true, "time
 // SaveThreadReport 原子保存序号、回复、状态和 Project 输入，ACK 丢失可安全补报。
 func (s *Store) SaveThreadReport(ctx context.Context, src protocol.Source, r protocol.ThreadReport) (protocol.ThreadReportResult, error) {
 	ack := protocol.ThreadReportResult{Type: protocol.BodyThreadReportResult, ThreadID: r.ThreadID, EventID: r.EventID, WorkerSeq: r.WorkerSeq}
-	if r.Type != protocol.BodyThreadReport || !threadID(r.ThreadID) || !threadID(r.EventID) || r.WorkerSeq < 1 || !threadReportKinds[r.Kind] || !utf8.ValidString(r.Content) || strings.ContainsRune(r.Content, 0) || len(r.Content) > 1<<20 || len(r.Reason) > 4096 || strings.ContainsRune(r.Reason, 0) {
+	if r.Type != protocol.BodyThreadReport || !threadID(r.ThreadID) || !threadID(r.EventID) || r.WorkerSeq < 1 || !threadReportKinds[r.Kind] || !utf8.ValidString(r.Content) || strings.ContainsRune(r.Content, 0) || len(r.Content) > 1<<20 || len(r.Reason) > 4096 || strings.ContainsRune(r.Reason, 0) || !threadModel(r.Model) {
 		return ack, threadInvalid()
 	}
 	raw, err := protocol.MarshalJSON(r)
@@ -48,9 +48,21 @@ func (s *Store) SaveThreadReport(ctx context.Context, src protocol.Source, r pro
 		return ack, err
 	}
 	var oldHash, saved []byte
-	err = tx.QueryRow(ctx, `SELECT payload_hash,ack FROM thread_reports WHERE employee_id=$1 AND thread_id=$2 AND event_id=$3`, src.EmployeeID, t.ID, r.EventID).Scan(&oldHash, &saved)
+	var hashVersion int16
+	err = tx.QueryRow(ctx, `SELECT payload_hash,ack,payload_hash_version FROM thread_reports WHERE employee_id=$1 AND thread_id=$2 AND event_id=$3`, src.EmployeeID, t.ID, r.EventID).Scan(&oldHash, &saved, &hashVersion)
 	if err == nil {
-		if string(oldHash) != string(hash[:]) {
+		comparisonHash := hash
+		if hashVersion == 1 {
+			// 旧中心解码时忽略 Model，摘要只包含旧协议字段。
+			legacy := r
+			legacy.Model = ""
+			legacyRaw, err := protocol.MarshalJSON(legacy)
+			if err != nil {
+				return ack, err
+			}
+			comparisonHash = sha256.Sum256(legacyRaw)
+		}
+		if string(oldHash) != string(comparisonHash[:]) {
 			return ack, threadConflict()
 		}
 		err = json.Unmarshal(saved, &ack)
@@ -84,7 +96,7 @@ func (s *Store) SaveThreadReport(ctx context.Context, src protocol.Source, r pro
 	if err != nil {
 		return ack, err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO thread_reports(employee_id,thread_id,event_id,worker_seq,payload_hash,ack) VALUES($1,$2,$3,$4,$5,$6)`, src.EmployeeID, t.ID, r.EventID, r.WorkerSeq, hash[:], saved); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO thread_reports(employee_id,thread_id,event_id,worker_seq,payload_hash,ack,payload_hash_version) VALUES($1,$2,$3,$4,$5,$6,2)`, src.EmployeeID, t.ID, r.EventID, r.WorkerSeq, hash[:], saved); err != nil {
 		return ack, err
 	}
 	if err = checkThreadCredentialTime(ctx, tx, src); err != nil {
@@ -140,6 +152,17 @@ func noActiveThreadTurn(ctx context.Context, tx pgx.Tx, id string) error {
 	return nil
 }
 
+func setThreadModel(ctx context.Context, tx pgx.Tx, t *Thread, model string) error {
+	if model == "" || model == t.Model {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `UPDATE threads SET model=$2 WHERE id=$1`, t.ID, model); err != nil {
+		return err
+	}
+	t.Model = model
+	return nil
+}
+
 func applyThreadReport(ctx context.Context, tx pgx.Tx, t *Thread, r *protocol.ThreadReport) error {
 	switch r.Kind {
 	case "thread.opened":
@@ -148,6 +171,9 @@ func applyThreadReport(ctx context.Context, tx pgx.Tx, t *Thread, r *protocol.Th
 		}
 		_, err := tx.Exec(ctx, `UPDATE threads SET storage_generation=$2,native_session_id=$3,opened_at=clock_timestamp() WHERE id=$1`, t.ID, r.StorageGeneration, r.NativeSessionID)
 		if err != nil {
+			return err
+		}
+		if err = setThreadModel(ctx, tx, t, r.Model); err != nil {
 			return err
 		}
 		return setThreadStatus(ctx, tx, t, "idle", "")
@@ -191,12 +217,24 @@ func applyThreadReport(ctx context.Context, tx pgx.Tx, t *Thread, r *protocol.Th
 			turnID = turn.ID
 			turnSeq = turn.WorkerTurnSeq
 		}
-		_, err = tx.Exec(ctx, `UPDATE thread_messages SET status=$4,turn_id=COALESCE($5::uuid,turn_id),worker_turn_seq=COALESCE($6::bigint,worker_turn_seq) WHERE employee_id=$1 AND thread_id=$2 AND client_message_id=$3`, t.EmployeeID, t.ID, r.ClientMessageID, next, turnID, turnSeq)
+		_, err = tx.Exec(ctx, `UPDATE thread_messages SET status=$4,turn_id=COALESCE($5::uuid,turn_id),worker_turn_seq=COALESCE($6::bigint,worker_turn_seq),status_reason=$7 WHERE employee_id=$1 AND thread_id=$2 AND client_message_id=$3`, t.EmployeeID, t.ID, r.ClientMessageID, next, turnID, turnSeq, r.Reason)
 		if err != nil {
 			return err
 		}
 		if next == "unknown" {
 			return setThreadStatus(ctx, tx, t, "unknown", r.Reason)
+		}
+		if next == "withdrawn" && r.Reason != "" {
+			if err := noActiveThreadTurn(ctx, tx, t.ID); err != nil {
+				return err
+			}
+			if m.Status != "withdrawn" && m.Sender == "project_agent" {
+				payload := map[string]any{"thread_id": t.ID, "client_message_id": m.ClientMessageID, "origin_tool_call_id": m.OriginToolCallID, "reason": r.Reason}
+				if err := insertThreadProjectInput(ctx, tx, *t, "thread_message_failed", fmt.Sprintf("thread:%s:message:%s:failed", t.ID, m.ID), payload, 40<<10); err != nil {
+					return err
+				}
+			}
+			return setThreadStatus(ctx, tx, t, "idle", "")
 		}
 		return nil
 	case "turn.started":
@@ -224,12 +262,22 @@ func applyThreadReport(ctx context.Context, tx pgx.Tx, t *Thread, r *protocol.Th
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO thread_turns(id,employee_id,thread_id,worker_turn_seq,initiator,origin_tool_call_id,started_at) VALUES($1,$2,$3,$4,$5,$6,clock_timestamp())`, id, t.EmployeeID, t.ID, r.WorkerTurnSeq, m.Sender, nullableProjectID(m.OriginToolCallID))
+		model := r.Model
+		if model == "" {
+			model = m.Model
+		}
+		if model == "" {
+			model = t.Model
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO thread_turns(id,employee_id,thread_id,worker_turn_seq,initiator,origin_tool_call_id,started_at,model) VALUES($1,$2,$3,$4,$5,$6,clock_timestamp(),$7)`, id, t.EmployeeID, t.ID, r.WorkerTurnSeq, m.Sender, nullableProjectID(m.OriginToolCallID), model)
 		if err != nil {
 			return err
 		}
 		_, err = tx.Exec(ctx, `UPDATE thread_messages SET turn_id=$3,worker_turn_seq=$4 WHERE employee_id=$1 AND id=$2`, t.EmployeeID, m.ID, id, r.WorkerTurnSeq)
 		if err != nil {
+			return err
+		}
+		if err = setThreadModel(ctx, tx, t, model); err != nil {
 			return err
 		}
 		return setThreadStatus(ctx, tx, t, "running", "")
@@ -247,8 +295,14 @@ func applyThreadReport(ctx context.Context, tx pgx.Tx, t *Thread, r *protocol.Th
 		if !threadEndReasons[r.Reason] {
 			return threadInvalid()
 		}
-		_, err = tx.Exec(ctx, `UPDATE thread_turns SET ended_at=clock_timestamp(),end_reason=$2 WHERE id=$1`, turn.ID, r.Reason)
+		if r.Model != "" {
+			turn.Model = r.Model
+		}
+		_, err = tx.Exec(ctx, `UPDATE thread_turns SET ended_at=clock_timestamp(),end_reason=$2,model=$3 WHERE id=$1`, turn.ID, r.Reason, turn.Model)
 		if err != nil {
+			return err
+		}
+		if err = setThreadModel(ctx, tx, t, turn.Model); err != nil {
 			return err
 		}
 		if t.StopRequestedAt != nil && (r.Reason == "stopped" || r.Reason == "timeout") {
@@ -331,7 +385,7 @@ func saveThreadReply(ctx context.Context, tx pgx.Tx, t Thread, turn ThreadTurn, 
 	if turn.Initiator != "project_agent" {
 		return nil
 	}
-	payload := map[string]any{"thread_id": t.ID, "worker_turn_seq": turn.WorkerTurnSeq, "worker_seq": r.WorkerSeq, "content": r.Content, "truncated": r.Truncated, "original_bytes": r.OriginalBytes, "attachments": r.Attachments, "full_content": "完整内容用 threads.read 读取"}
+	payload := map[string]any{"thread_id": t.ID, "worker_turn_seq": turn.WorkerTurnSeq, "model": turn.Model, "worker_seq": r.WorkerSeq, "content": r.Content, "truncated": r.Truncated, "original_bytes": r.OriginalBytes, "attachments": r.Attachments, "full_content": "完整内容用 threads.read 读取"}
 	return insertThreadProjectInput(ctx, tx, t, "thread_reply", fmt.Sprintf("thread:%s:reply:%d", t.ID, r.WorkerSeq), payload, 40<<10)
 }
 func enqueueThreadTurnEnded(ctx context.Context, tx pgx.Tx, t Thread, turn ThreadTurn, reason string) error {
@@ -342,7 +396,7 @@ func enqueueThreadTurnEnded(ctx context.Context, tx pgx.Tx, t Thread, turn Threa
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM thread_replies WHERE thread_id=$1 AND turn_id=$2`, t.ID, turn.ID).Scan(&count); err != nil {
 		return err
 	}
-	payload := map[string]any{"thread_id": t.ID, "worker_turn_seq": turn.WorkerTurnSeq, "reason": reason, "reply_count": count}
+	payload := map[string]any{"thread_id": t.ID, "worker_turn_seq": turn.WorkerTurnSeq, "model": turn.Model, "reason": reason, "reply_count": count}
 	limit := 4 << 10
 	if t.AgentType == "shell" {
 		command, err := shellThreadCommandResult(ctx, tx, t.EmployeeID, t.ID)

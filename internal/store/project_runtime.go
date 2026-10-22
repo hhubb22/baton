@@ -405,7 +405,7 @@ func appendProjectAssistant(ctx context.Context, tx pgx.Tx, b projectRunBinding,
 func claimProjectInputs(ctx context.Context, tx pgx.Tx, b projectRunBinding, req protocol.ProjectRuntimeRequest) (projectagent.Claim, error) {
 	out := projectagent.Claim{}
 	var active bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM project_agent_input_queue WHERE agent_id=$1 AND delivered_seq IS NULL AND source_type IN ('user_message','task_result','attention_answer','turn_ended'))`, b.agentID).Scan(&active); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM project_agent_input_queue WHERE agent_id=$1 AND delivered_seq IS NULL AND source_type IN ('user_message','task_result','attention_answer','turn_ended','thread_message_failed'))`, b.agentID).Scan(&active); err != nil {
 		return out, err
 	}
 	if !active {

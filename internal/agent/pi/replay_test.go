@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +21,8 @@ func TestPiRecordedTranscripts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// 模型切换由 TestRecordedThreadModelSwitch 驱动。
+	files = slices.DeleteFunc(files, func(path string) bool { return filepath.Base(path) == "model_switch.ndjson" })
 	if len(files) != len(pireplaytest.Scenarios) {
 		t.Fatalf("转录数=%d，场景数=%d", len(files), len(pireplaytest.Scenarios))
 	}

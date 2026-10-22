@@ -85,7 +85,7 @@ func TestThreadRecordedKiro(t *testing.T) {
 			if a.NativeSessionID() != "native-session-1" || a.Capabilities() != (agent.Capabilities{Resume: true}) {
 				t.Fatal("invalid capabilities/session")
 			}
-			if err := a.Send(ctx, "message-1", "thread prompt"); err != nil {
+			if err := a.Send(ctx, "message-1", "thread prompt", ""); err != nil {
 				t.Fatal(err)
 			}
 			gate := "response:session/prompt"
@@ -93,7 +93,7 @@ func TestThreadRecordedKiro(t *testing.T) {
 				gate = "notification:session/cancel"
 			}
 			r.Wait(t, gate)
-			if err := a.Send(ctx, "busy", "ignored"); !errors.Is(err, agent.ErrBusy) {
+			if err := a.Send(ctx, "busy", "ignored", ""); !errors.Is(err, agent.ErrBusy) {
 				t.Fatal(err)
 			}
 			if err := a.Steer(ctx, "steer", "ignored"); !errors.Is(err, agent.ErrUnsupported) {

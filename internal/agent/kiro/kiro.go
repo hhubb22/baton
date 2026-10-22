@@ -35,6 +35,7 @@ type State struct {
 	NativeID   string   `json:"native_id"`
 	SessionID  string   `json:"session_id"`
 	Directory  string   `json:"directory"`
+	Model      string   `json:"model,omitempty"`
 	Pending    bool     `json:"pending"`
 	Operations []string `json:"operations"`
 }
@@ -216,14 +217,8 @@ func (a *Adapter) Start(ctx context.Context) error {
 	if err := a.connect(ctx); err != nil {
 		return err
 	}
-	p := map[string]any{"cwd": a.config.Directory, "mcpServers": []any{}}
-	if a.config.Model != "" {
-		p["_meta"] = map[string]any{"kiro": map[string]string{"modelId": a.config.Model}}
-	}
-	var result struct {
-		SessionID string `json:"sessionId"`
-	}
-	if err := a.call(ctx, "session/new", p, &result); err != nil {
+	result, err := a.newSession(ctx)
+	if err != nil {
 		return err
 	}
 	if result.SessionID == "" {
@@ -231,7 +226,10 @@ func (a *Adapter) Start(ctx context.Context) error {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.state = State{Version: Version, NativeID: result.SessionID, SessionID: a.config.SessionID, Directory: a.config.Directory}
+	if model := result.catalog().DefaultModel; model != "" {
+		a.config.Model = model
+	}
+	a.state = State{Model: a.config.Model, Version: Version, NativeID: result.SessionID, SessionID: a.config.SessionID, Directory: a.config.Directory}
 	return a.saveLocked()
 }
 
@@ -301,6 +299,9 @@ func (a *Adapter) attach(ctx context.Context) error {
 	}
 	a.mu.Lock()
 	a.state = s
+	if s.Model != "" {
+		a.config.Model = s.Model
+	}
 	a.mu.Unlock()
 	var result map[string]any
 	// 加载中的回放通知不参与当前任务完成判断。

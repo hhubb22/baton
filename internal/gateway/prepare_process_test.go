@@ -179,6 +179,9 @@ func startPrepareStack(t *testing.T, extra map[string]string) *prepareStack {
 
 func startPrepareStackWithBins(t *testing.T, extra map[string]string, coordBin, batondBin string, dataRoot ...string) *prepareStack {
 	t.Helper()
+	if extra["BATON_PI_BIN"] != "" || extra["BATON_CODEX_BINARY"] != "" || extra["BATON_KIRO_BINARY"] != "" {
+		batondBin = buildReplayBatond(t)
+	}
 	pool := dbtest.Open(t)
 	ctx := context.Background()
 	var schema string

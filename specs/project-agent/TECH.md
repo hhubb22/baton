@@ -96,12 +96,13 @@ Runtime 进程的工作目录是一个空的控制目录。pi-agent-core 本身�
 
 `threads` 带可空列 `project_id`、`origin_conversation_id`、`origin_tool_call_id`，后两列唯一。只有 Project Agent 新建的 Thread 填写这三列；员工新建的 Thread 三列都为空。`thread_turns.initiator` 记录这一轮由员工还是 Project Agent 开启，Project Agent 开启时另记 `origin_tool_call_id`。
 
-输入队列是 Coordinator 内部的数据，用户界面上的待办事项不用这张表。事项表由 Agent Inbox 的技术设计定义。Thread 路径的 `source_type` 有六种，分成两类。与旧任务路径并存期间，队列还保留主动的 `task_result` 和被动的 `user_task_result`；现有任务工具继续使用它们。
+输入队列是 Coordinator 内部的数据，用户界面上的待办事项不用这张表。事项表由 Agent Inbox 的技术设计定义。Thread 路径的 `source_type` 有七种，分成两类。与旧任务路径并存期间，队列还保留主动的 `task_result` 和被动的 `user_task_result`；现有任务工具继续使用它们。
 
 | source_type | 类别 | 来源 | payload 上限 |
 |---|---|---|---|
 | `user_message` | 主动 | 用户在主对话发送的消息，API 拒绝超过 64 KiB 的消息 | 64 KiB 正文加元数据 |
 | `thread_reply` | 被动 | Project Agent 开启的一轮里，Agent 的一条回复（第 9 节） | 40 KiB |
+| `thread_message_failed` | 主动 | Project Agent 的消息在 Turn 开始前因模型选择失败而撤回，包含 Thread ID、消息 ID、工具调用 ID 和原因（第 9 节） | 40 KiB |
 | `turn_ended` | 主动 | Project Agent 开启的一轮结束；shell Thread 的这一条带命令输出（第 9、10 节） | 4 KiB；带命令输出时 72 KiB |
 | `attention_answer` | 主动 | 用户回答或关闭一个事项（Agent Inbox IB-12），内容是事项 ID、标题、选中的选项和最多 4 KiB 的文字；上限包含 JSON 转义 | 32 KiB |
 | `memory_updated` | 被动 | 用户在界面上新建或修改记忆（第 6.4 节） | 1 KiB |
@@ -312,9 +313,9 @@ batond 在连接时和能力变化时上报 `node_runtime_reports.report`，结�
 
 batond 通过 Gateway 的控制队列传送 `node.runtime_report`，正文为 `{ "type": "node.runtime_report", "report": { ... } }`。Coordinator 返回 `node.runtime_report_result`，含 `ok`、成功时的 `report_version` 或失败时的 `code`，信封 `correlation_id` 对应请求的 `message_id`。节点在 `node.sync` 成功后发送报告；未收到成功回执时，在同一进程的连接重试中保留原消息标识和报告内容；采集到的新内容在待确认报告成功后发送。重连后重新发送报告，已确认的报告使用新消息标识。回执只作用于发送该报告的当前连接，旧连接迟到的回执不能确认新连接上的报告。中心只接受当前已同步、未吊销连接的报告，并在事务内再次检查员工、节点、凭据和连接。`report_version` 从 1 开始，报告内容变化时加一；相同内容的重发只刷新 `reported_at`。这些写入不修改 `nodes.capabilities`。
 
-节点每轮采集完成后等待 5 秒再采集，连接建立时也请求刷新。采集在独立循环中串行运行，连接、心跳和 Worker 消息不等待扫描。每轮预算 2 秒；文件系统调用返回后检查期限，无法被操作系统取消的文件系统等待最多占用一个采集协程，重连不另起扫描。扫描只保存登记目录、仓库路径及 origin；目录文件内容不进入报告。
+节点每轮采集完成后等待 5 秒再采集，连接建立时也请求刷新。采集在独立循环中串行运行，连接、心跳和 Worker 消息不等待扫描。目录与仓库扫描、Project Runtime 探测共用每轮 2 秒预算；Agent 模型目录在首次采集及可执行文件路径或版本变化时单独探测并缓存，见 [Baton TECH「能力上报」](../baton/TECH.md#能力上报)。文件系统调用返回后检查期限，无法被操作系统取消的文件系统等待最多占用一个采集协程，重连不另起扫描。扫描只保存登记目录、仓库路径及 origin；目录文件内容不进入报告。
 
-扫描最多向下 4 层（登记根为第 0 层）、读取 4096 个目录条目、记录 128 个仓库。每批读取至多 64 个条目，不跟随遍历中的符号链接，不进入 `.git`。Git 配置最多读取 16 KiB，通过 `git config --no-includes --file - --get remote.origin.url` 解析，每次最多 200 ms，不读取 include 或全局配置。worktree 的 `.git` 和 `commondir` 只允许指向同一登记根内的元数据；指向根外时仍登记仓库路径，省略 origin。origin 仅保留主机和仓库路径，去掉用户信息、端口、查询和片段，忽略本地路径及不支持的传输格式。扫描、读取或容量受限时报告带 `truncated: true`；超出报告容量时先移除末尾仓库，再移除末尾目录。发送前采用带缩进的 JSON 计量，给 PostgreSQL `jsonb::text` 的空格留出余量，报告和数据库文本均不超过 64 KiB。
+扫描最多向下 4 层（登记根为第 0 层）、读取 4096 个目录条目、记录 128 个仓库。每批读取至多 64 个条目，不跟随遍历中的符号链接，不进入 `.git`。Git 配置最多读取 16 KiB，通过 `git config --no-includes --file - --get remote.origin.url` 解析，每次最多 200 ms，不读取 include 或全局配置。worktree 的 `.git` 和 `commondir` 只允许指向同一登记根内的元数据；指向根外时仍登记仓库路径，省略 origin。origin 仅保留主机和仓库路径，去掉用户信息、端口、查询和片段，忽略本地路径及不支持的传输格式。扫描、读取或容量受限时报告带 `truncated: true`；超出报告容量时先移除末尾仓库，再裁剪模型列表并优先保留默认模型，最后移除末尾目录。发送前采用带缩进的 JSON 计量，给 PostgreSQL `jsonb::text` 的空格留出余量，报告和数据库文本均不超过 64 KiB。
 
 `batond project-exec --enabled=true|false [--shell 路径] [--data-dir 目录]` 原子保存本机 `project-exec.json`。必须显式给出开关，初始值为关闭；默认 shell 在 Windows 为 `pwsh`，其他系统采用 `SHELL`，未设置时为 `/bin/sh`。配置损坏或权限检查失败时上报关闭。该命令维护配置；Session Worker 在启动命令前重新读取开关。CLI 和节点页面在开启前说明当前用户权限、任意命令、没有沙箱和注入风险。
 
@@ -340,6 +341,8 @@ batond 通过 Gateway 的控制队列传送 `node.runtime_report`，正文为 `{
 来源键冲突时忽略，重复报告不会形成第二条输入。这一步只写 `project_agent_input_queue`，不锁 `project_agents`。被动的回复按 `id` 顺序排在主动的 `turn_ended` 之前，同一批领取时 Project Agent 先读到回复再读到结束（PA-A14）。回复条数超过一批上限时，剩下的在后续轮次领取，`turn_ended` 仍在它们之后。
 
 员工开启的一轮不写输入队列（PA-19）。
+
+**Turn 开始前的模型选择失败。** Worker 以带原因的 `message.withdrawn` 报告失败，中心在消息的 `status_reason` 保存原因。`threads.get` 的 `failed_messages` 返回这些消息。消息属于 Project Agent 时，在同一事务写一条主动 `thread_message_failed` 输入，内容为 Thread ID、`client_message_id`、`origin_tool_call_id` 和原因；`source_key` 为 `thread:{thread_id}:message:{消息记录 ID}:failed`，同一消息最多通知一次。它参与放置、唤醒、输入领取和新运行的通知重置。员工消息失败不入队。这种失败没有开启 Turn，不产生 `turn_ended`，Thread 保持可发送下一条消息的状态。
 
 **执行时限与停止。** Worker 保证每个开始的 Turn 都有一次 `turn.ended`（Baton TECH「Turn 边界」），所以 Project Agent 不需要自己设置等待期限。Thread 进入 `unknown` 时，这一轮以 `agent_exited` 结束，同样形成 `turn_ended` 输入。
 

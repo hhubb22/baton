@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -29,13 +30,12 @@ type runtimeReports struct {
 }
 
 // collectRuntimeReports 在整个 Maintain 生命周期中只有一个采集者。阻塞文件系统也不会随重连增加采集协程。
-func collectRuntimeReports(ctx context.Context, dir string) *runtimeReports {
+func collectRuntimeReports(ctx context.Context, dir string, discover RuntimeModelDiscovery, version func(context.Context, string) (string, error)) *runtimeReports {
 	r := &runtimeReports{changed: make(chan struct{}, 1), refresh: make(chan struct{}, 1)}
+	probe := newAgentProbe(discover, version)
 	go func() {
 		for ctx.Err() == nil {
-			collectCtx, cancel := context.WithTimeout(ctx, runtimeCollectTimeout)
-			report, agents := collectRuntimeReportWithAgents(collectCtx, dir)
-			cancel()
+			report, agents := collectRuntimeReportUsingProbe(ctx, dir, probe)
 			r.agents.Store(&agents)
 			r.latest.Store(&report)
 			select {
@@ -62,17 +62,23 @@ func collectRuntimeReport(ctx context.Context, dir string) protocol.RuntimeRepor
 }
 
 func collectRuntimeReportWithAgents(ctx context.Context, dir string) (protocol.RuntimeReport, []agentRuntimeReport) {
+	return collectRuntimeReportUsingProbe(ctx, dir, defaultAgentProbe())
+}
+
+func collectRuntimeReportUsingProbe(ctx context.Context, dir string, probe agentRuntimeProbe) (protocol.RuntimeReport, []agentRuntimeReport) {
 	cfg, err := ReadProjectExec(dir)
 	if err != nil {
 		cfg = protocol.RuntimeExec{Shell: DefaultProjectShell()}
 	}
 	r := protocol.RuntimeReport{Exec: cfg, Truncated: err != nil}
-	agents := collectAgentRuntimeReports(ctx, cfg, defaultAgentProbe())
+	agents := collectAgentRuntimeReports(ctx, cfg, probe)
 	for _, a := range agents {
 		r.Agents = append(r.Agents, a.RuntimeAgent)
 	}
-	r.ProjectRuntime = probeProjectRuntime(ctx)
-	roots, repos, truncated := fileaccess.ScanRuntimeRoots(ctx, dir)
+	collectCtx, cancel := context.WithTimeout(ctx, runtimeCollectTimeout)
+	defer cancel()
+	r.ProjectRuntime = probeProjectRuntime(collectCtx)
+	roots, repos, truncated := fileaccess.ScanRuntimeRoots(collectCtx, dir)
 	r.Roots, r.Repos, r.Truncated = roots, repos, r.Truncated || truncated
 	for {
 		if _, err := runtimeReportWireJSON(r, &agents); err == nil {
@@ -81,6 +87,25 @@ func collectRuntimeReportWithAgents(ctx context.Context, dir string) (protocol.R
 		r.Truncated = true
 		if len(r.Repos) > 0 {
 			r.Repos = r.Repos[:len(r.Repos)-1]
+			continue
+		}
+		removedModel := false
+		for pass := 0; pass < 2 && !removedModel; pass++ {
+			for i := len(r.Agents) - 1; i >= 0; i-- {
+				models := r.Agents[i].Models
+				index := len(models) - 1
+				if pass == 0 && index >= 0 && models[index].ID == r.Agents[i].DefaultModel {
+					index--
+				}
+				if index < 0 {
+					continue
+				}
+				r.Agents[i].Models = slices.Delete(slices.Clone(models), index, index+1)
+				removedModel = true
+				break
+			}
+		}
+		if removedModel {
 			continue
 		}
 		if len(r.Roots) > 0 {

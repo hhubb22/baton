@@ -111,14 +111,14 @@ func TestThreadRejectedPromptAndNextTurn(t *testing.T) {
 		}
 		return a.consume([]byte(`{"type":"agent_settled"}`))
 	}}
-	if err := a.Send(context.Background(), "rejected", "正文"); err == nil {
+	if err := a.Send(context.Background(), "rejected", "正文", ""); err == nil {
 		t.Fatal("prompt 被拒绝却返回成功")
 	}
 	if a.active || len(a.DrainEvents()) != 0 {
 		t.Fatal("被拒绝的 prompt 开启了 Turn")
 	}
 	for _, id := range []string{"first", "second"} {
-		if err := a.Send(context.Background(), id, "正文"); err != nil {
+		if err := a.Send(context.Background(), id, "正文", ""); err != nil {
 			t.Fatal(err)
 		}
 		waitPi(t, func() bool {
@@ -150,14 +150,14 @@ func TestThreadLateAcceptanceAfterUnconfirmedWrite(t *testing.T) {
 		requestID <- command.ID
 		return errors.New("write outcome unknown")
 	}}
-	if err := a.Send(context.Background(), "late", "正文"); err == nil {
+	if err := a.Send(context.Background(), "late", "正文", ""); err == nil {
 		t.Fatal("没有收到确认却返回成功")
 	}
 	id := <-requestID
 	if got := a.DrainEvents(); len(got) != 1 || got[0].Kind != agent.EventUncertain || got[0].ClientMessageID != "late" {
 		t.Fatalf("发送结果不明时没有报告 uncertain: %+v", got)
 	}
-	if err := a.Send(context.Background(), "duplicate", "正文"); !errors.Is(err, agent.ErrBusy) {
+	if err := a.Send(context.Background(), "duplicate", "正文", ""); !errors.Is(err, agent.ErrBusy) {
 		t.Fatalf("确认丢失后允许再次发送: %v", err)
 	}
 	raw, _ := json.Marshal(map[string]any{"type": "response", "id": id, "command": "prompt", "success": true, "data": map[string]string{"disposition": "started"}})
@@ -279,7 +279,7 @@ func TestThreadRPCReplay(t *testing.T) {
 	if err := a.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if a.Capabilities() != (agent.Capabilities{Steer: true, Resume: true}) || a.NativeSessionID() != f.Agent.SessionID {
+	if a.Capabilities() != (agent.Capabilities{Steer: true, Resume: true, SwitchModel: true}) || a.NativeSessionID() != f.Agent.SessionID {
 		t.Fatal("能力或原生会话 ID 错误")
 	}
 	prompt := ""
@@ -297,11 +297,11 @@ func TestThreadRPCReplay(t *testing.T) {
 	if err := a.Steer(context.Background(), "early", "补充"); err == nil {
 		t.Fatal("空闲时接受 steer")
 	}
-	if err := a.Send(context.Background(), "first", "开始"); err != nil {
+	if err := a.Send(context.Background(), "first", "开始", ""); err != nil {
 		t.Fatal(err)
 	}
 	f.Wait(t, "event:first-reply")
-	if err := a.Send(context.Background(), "busy", "排队"); !errors.Is(err, agent.ErrBusy) {
+	if err := a.Send(context.Background(), "busy", "排队", ""); !errors.Is(err, agent.ErrBusy) {
 		t.Fatalf("忙时 Send: %v", err)
 	}
 	if sent, err := a.Sent("first"); !sent || err != nil {
@@ -357,7 +357,7 @@ func TestThreadRestoreReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := a.Send(context.Background(), "original", "<any>"); err != nil {
+	if err := a.Send(context.Background(), "original", "<any>", ""); err != nil {
 		t.Fatal(err)
 	}
 	f.Wait(t, gates[0])

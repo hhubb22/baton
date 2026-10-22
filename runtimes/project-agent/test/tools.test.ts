@@ -26,6 +26,8 @@ test("固定工具顺序与 Thread、Inbox 契约一致", () => {
   for (const [name, args] of [
     ["threads.create", create],
     ["threads.create", { ...create, execution_timeout_seconds: 1 }],
+    ["threads.create", { ...create, model: "model-a" }],
+    ["threads.send", { thread_id: "thread-1", message: "继续", model: "model-b" }],
     ["threads.send", { thread_id: "thread-1", message: "继续" }],
     ["threads.send", { thread_id: "thread-1", message: "继续", mode: "queue" }],
     ["threads.send", { thread_id: "thread-1", message: "调整目标", mode: "steer" }],
@@ -46,6 +48,8 @@ test("Thread 工具拒绝旧参数、缺少必填字段及无效模式和读取�
     ["threads.create", { ...create, target_node_id: "node-b" }],
     ["threads.create", { node_id: "node-b", agent_type: "pi", working_directory: "/repo" }],
     ["threads.create", { ...create, execution_timeout_seconds: 0 }],
+    ["threads.create", { ...create, model: {} }],
+    ["threads.send", { thread_id: "thread-1", message: "继续", model: {} }],
     ["threads.send", { thread_id: "thread-1", message: "继续", mode: "insert" }],
     ["threads.stop", {}],
     ["threads.archive", { task_id: "task-1" }],

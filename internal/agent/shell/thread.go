@@ -15,11 +15,14 @@ var _ agent.ThreadAdapter = (*Adapter)(nil)
 func (*Adapter) Capabilities() agent.Capabilities            { return agent.Capabilities{} }
 func (*Adapter) Steer(context.Context, string, string) error { return agent.ErrUnsupported }
 
-func (a *Adapter) Send(ctx context.Context, id, text string) error {
+func (a *Adapter) Send(ctx context.Context, id, text, model string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.process != nil && !a.stopped {
 		return agent.ErrBusy
+	}
+	if model != "" {
+		return &agent.ModelSwitchError{Err: agent.ErrUnsupported}
 	}
 	if !a.started || a.closed || a.submitted || a.stopped {
 		return errors.New("shell Thread 只能执行一轮")

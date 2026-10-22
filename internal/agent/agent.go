@@ -14,9 +14,19 @@ var (
 )
 
 type Capabilities struct {
-	Steer  bool `json:"steer"`
-	Resume bool `json:"resume"`
+	Steer       bool `json:"steer"`
+	Resume      bool `json:"resume"`
+	SwitchModel bool `json:"switch_model"`
 }
+
+// ModelSwitchError 表示模型选择失败，消息确定尚未发出。
+// Worker 可以撤回这条消息，并保存停止原因。
+type ModelSwitchError struct {
+	Err error
+}
+
+func (e *ModelSwitchError) Error() string { return "model selection failed: " + e.Err.Error() }
+func (e *ModelSwitchError) Unwrap() error { return e.Err }
 
 const (
 	EventTurnStarted = "turn.started"
@@ -48,14 +58,14 @@ type Event struct {
 
 // ThreadAdapter defines the Thread/Turn native Agent contract (Baton TECH "Agent 适配").
 type ThreadAdapter interface {
-	Start(ctx context.Context) error                  // 新建或恢复原生会话
-	Send(ctx context.Context, id, text string) error  // 开启新 Turn；Agent 忙时返回 ErrBusy
-	Steer(ctx context.Context, id, text string) error // 加入当前 Turn；不支持时返回 ErrUnsupported
-	Abort() (stopped, outcomeKnown bool, err error)   // 停止当前 Turn
-	DrainEvents() []Event                             // 非阻塞取回 TurnStarted、Reply、TurnEnded、Exited、Uncertain
-	Sent(id string) (bool, error)                     // 在原生历史里查找这条消息
+	Start(ctx context.Context) error                        // 新建或恢复原生会话
+	Send(ctx context.Context, id, text, model string) error // 开启新 Turn；model 为空时沿用当前模型
+	Steer(ctx context.Context, id, text string) error       // 加入当前 Turn；不支持时返回 ErrUnsupported
+	Abort() (stopped, outcomeKnown bool, err error)         // 停止当前 Turn
+	DrainEvents() []Event                                   // 非阻塞取回 TurnStarted、Reply、TurnEnded、Exited、Uncertain
+	Sent(id string) (bool, error)                           // 在原生历史里查找这条消息
 	ReadHistory(ctx context.Context, cursor string) (HistoryPage, error)
-	Capabilities() Capabilities // steer、resume
+	Capabilities() Capabilities // steer、resume、switch_model
 	Close() error
 }
 

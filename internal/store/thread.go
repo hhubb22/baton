@@ -23,6 +23,9 @@ func threadID(s string) bool { _, err := identity.ParseUUID(s); return err == ni
 func threadKey(s string) bool {
 	return threadText(s, 256) && !strings.ContainsFunc(s, unicode.IsControl)
 }
+func threadModel(s string) bool {
+	return s == "" || (threadText(s, 512) && !strings.ContainsFunc(s, unicode.IsControl))
+}
 func normalizeThreadMessage(in *ThreadMessageInput) error {
 	if in.Mode == "" {
 		in.Mode = "queue"
@@ -36,9 +39,15 @@ func normalizeThreadMessage(in *ThreadMessageInput) error {
 	if in.Sender == "project_agent" && !threadKey(in.OriginToolCallID) {
 		return threadInvalid()
 	}
+	if !threadModel(in.Model) {
+		return threadError(422, "model_invalid", "模型标识无效")
+	}
+	if in.Model != "" && in.Mode == "steer" {
+		return threadError(422, "model_with_steer", "插入消息沿用当前一轮的模型，请用排队消息换模型")
+	}
 	// 存储代次最多 256 字节，按全部需要转义的情况为它预留传输容量。
 	const frameID = "00000000-0000-4000-8000-000000000000"
-	body, err := protocol.MarshalJSON(protocol.ThreadCommand{Type: protocol.BodyThreadCommand, ThreadID: frameID, Action: "message", StorageGeneration: strings.Repeat(`\`, 256), ClientMessageID: in.ClientMessageID, Content: in.Content, Mode: in.Mode})
+	body, err := protocol.MarshalJSON(protocol.ThreadCommand{Type: protocol.BodyThreadCommand, ThreadID: frameID, Action: "message", StorageGeneration: strings.Repeat(`\`, 256), ClientMessageID: in.ClientMessageID, Content: in.Content, Mode: in.Mode, Model: in.Model})
 	if err != nil {
 		return err
 	}
@@ -83,7 +92,7 @@ func ThreadDirectoryAllowed(system, directory string, roots []protocol.RuntimeRo
 	return false
 }
 
-func threadNode(ctx context.Context, tx pgx.Tx, employeeID, nodeID, agentType, directory string, steer bool) error {
+func threadNode(ctx context.Context, tx pgx.Tx, employeeID, nodeID, agentType, directory string, steer bool, model *string, switchModel bool) error {
 	var system string
 	var caps []string
 	var reportRaw []byte
@@ -102,6 +111,9 @@ func threadNode(ctx context.Context, tx pgx.Tx, employeeID, nodeID, agentType, d
 		return threadError(422, "directory_not_allowed", "工作目录必须位于设备登记的目录内")
 	}
 	if agentType == "shell" {
+		if *model != "" {
+			return threadError(422, "model_unsupported", "命令 Thread 不使用模型")
+		}
 		if steer {
 			return threadError(422, "steer_unsupported", "命令 Thread 不支持插入消息")
 		}
@@ -109,11 +121,17 @@ func threadNode(ctx context.Context, tx pgx.Tx, employeeID, nodeID, agentType, d
 	}
 	available := false
 	canSteer := false
+	canSwitch := false
+	var models []protocol.RuntimeModel
+	defaultModel := ""
 	if len(report.Agents) > 0 {
 		for _, a := range report.Agents {
 			if a.AgentType == agentType && a.Status == "available" && a.Capabilities.Create {
 				available = true
 				canSteer = a.Capabilities.Steer
+				canSwitch = a.Capabilities.SwitchModel
+				models = a.Models
+				defaultModel = a.DefaultModel
 			}
 		}
 	} else {
@@ -128,6 +146,23 @@ func threadNode(ctx context.Context, tx pgx.Tx, employeeID, nodeID, agentType, d
 	}
 	if steer && !canSteer {
 		return threadError(422, "steer_unsupported", "设备的 Agent 不支持插入消息")
+	}
+	if *model != "" {
+		found := false
+		for _, candidate := range models {
+			if candidate.ID == *model {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return threadError(422, "model_unavailable", "设备未报告该模型可用")
+		}
+		if switchModel && !canSwitch {
+			return threadError(422, "model_switch_unsupported", "设备的 Agent 不支持换模型")
+		}
+	} else if !switchModel {
+		*model = defaultModel
 	}
 	return nil
 }
@@ -201,13 +236,26 @@ func createThreadTx(ctx context.Context, tx pgx.Tx, employeeID string, in Create
 	if in.CreatedBy == "project_agent" && (!threadID(in.OriginConversationID) || !threadID(in.ProjectID) || !threadKey(in.OriginToolCallID)) {
 		return empty, false, threadInvalid()
 	}
-	if in.CreatedBy == "employee" && (in.OriginConversationID != "" || in.OriginToolCallID != "") {
+	if in.CreatedBy == "employee" && (in.ProjectID != "" || in.OriginConversationID != "" || in.OriginToolCallID != "") {
 		return empty, false, threadInvalid()
 	}
+	if !threadModel(in.Model) || in.Message.Model != "" {
+		return empty, false, threadError(422, "model_invalid", "新建 Thread 时请在 model 指定有效模型")
+	}
+	// 空模型沿用旧请求的摘要，升级后重发仍可命中原 Thread。
+	hashInput := struct {
+		CreateThreadInput
+		Model   string `json:"model,omitempty"`
+		Message struct {
+			ThreadMessageInput
+			Model string `json:"model,omitempty"`
+		} `json:"message"`
+	}{CreateThreadInput: in, Model: in.Model}
+	hashInput.Message.ThreadMessageInput = in.Message
 	raw, _ := json.Marshal(struct {
-		Input                     CreateThreadInput
+		Input                     any
 		Actor, Conversation, Tool string
-	}{in, in.CreatedBy, in.OriginConversationID, in.OriginToolCallID})
+	}{hashInput, in.CreatedBy, in.OriginConversationID, in.OriginToolCallID})
 	hash := sha256.Sum256(raw)
 	lookup := func() (Thread, bool, error) {
 		var id string
@@ -235,7 +283,7 @@ func createThreadTx(ctx context.Context, tx pgx.Tx, employeeID string, in Create
 			return empty, false, err
 		}
 	}
-	if err = threadNode(ctx, tx, employeeID, in.NodeID, in.AgentType, in.WorkingDirectory, false); err != nil {
+	if err = threadNode(ctx, tx, employeeID, in.NodeID, in.AgentType, in.WorkingDirectory, false, &in.Model, false); err != nil {
 		return empty, false, err
 	}
 	if in.ProjectID != "" {
@@ -252,8 +300,8 @@ func createThreadTx(ctx context.Context, tx pgx.Tx, employeeID string, in Create
 	if err != nil {
 		return empty, false, err
 	}
-	tag, err := tx.Exec(ctx, `INSERT INTO threads(id,employee_id,client_thread_id,request_hash,project_id,origin_conversation_id,origin_tool_call_id,node_id,agent_type,working_directory,execution_timeout_seconds,created_by)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(employee_id,client_thread_id) DO NOTHING`, id, employeeID, in.ClientThreadID, hash[:], nullableProjectID(in.ProjectID), nullableProjectID(in.OriginConversationID), nullableProjectID(in.OriginToolCallID), in.NodeID, in.AgentType, in.WorkingDirectory, in.ExecutionTimeoutSeconds, in.CreatedBy)
+	tag, err := tx.Exec(ctx, `INSERT INTO threads(id,employee_id,client_thread_id,request_hash,project_id,origin_conversation_id,origin_tool_call_id,node_id,agent_type,working_directory,execution_timeout_seconds,created_by,model)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT(employee_id,client_thread_id) DO NOTHING`, id, employeeID, in.ClientThreadID, hash[:], nullableProjectID(in.ProjectID), nullableProjectID(in.OriginConversationID), nullableProjectID(in.OriginToolCallID), in.NodeID, in.AgentType, in.WorkingDirectory, in.ExecutionTimeoutSeconds, in.CreatedBy, in.Model)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -272,7 +320,7 @@ func createThreadTx(ctx context.Context, tx pgx.Tx, employeeID string, in Create
 	if err = threadAudit(ctx, tx, t, "thread.created", t.CreatedBy, employeeID, map[string]any{"node_id": t.NodeID, "origin_tool_call_id": in.OriginToolCallID}); err != nil {
 		return empty, false, err
 	}
-	if err = enqueueThreadCommand(ctx, tx, t, "open", map[string]any{}); err != nil {
+	if err = enqueueThreadCommand(ctx, tx, t, "open", map[string]string{"model": t.Model}); err != nil {
 		return empty, false, err
 	}
 	if _, _, err = insertThreadMessage(ctx, tx, t, in.Message); err != nil {
@@ -293,7 +341,7 @@ func insertThreadMessage(ctx context.Context, tx pgx.Tx, t Thread, in ThreadMess
 		if err = json.Unmarshal(raw, &m); err != nil {
 			return m, false, err
 		}
-		if m.Content != in.Content || m.Mode != in.Mode || m.Sender != in.Sender || m.OriginToolCallID != in.OriginToolCallID {
+		if m.Content != in.Content || m.Mode != in.Mode || m.Model != in.Model || m.Sender != in.Sender || m.OriginToolCallID != in.OriginToolCallID {
 			return m, false, threadConflict()
 		}
 		return m, false, nil
@@ -319,8 +367,8 @@ func insertThreadMessage(ctx context.Context, tx pgx.Tx, t Thread, in ThreadMess
 	if in.Sender == "project_agent" && t.ProjectID == "" {
 		return m, false, threadInvalid()
 	}
-	if in.Mode == "steer" {
-		if err = threadNode(ctx, tx, t.EmployeeID, t.NodeID, t.AgentType, t.WorkingDirectory, true); err != nil {
+	if in.Mode == "steer" || in.Model != "" {
+		if err = threadNode(ctx, tx, t.EmployeeID, t.NodeID, t.AgentType, t.WorkingDirectory, in.Mode == "steer", &in.Model, true); err != nil {
 			return m, false, err
 		}
 	}
@@ -328,7 +376,7 @@ func insertThreadMessage(ctx context.Context, tx pgx.Tx, t Thread, in ThreadMess
 	if err != nil {
 		return m, false, err
 	}
-	err = tx.QueryRow(ctx, `INSERT INTO thread_messages(id,employee_id,thread_id,client_message_id,sender,origin_tool_call_id,content,mode) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING to_jsonb(thread_messages)`, id, t.EmployeeID, t.ID, in.ClientMessageID, in.Sender, nullableProjectID(in.OriginToolCallID), in.Content, in.Mode).Scan(&raw)
+	err = tx.QueryRow(ctx, `INSERT INTO thread_messages(id,employee_id,thread_id,client_message_id,sender,origin_tool_call_id,content,mode,model) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING to_jsonb(thread_messages)`, id, t.EmployeeID, t.ID, in.ClientMessageID, in.Sender, nullableProjectID(in.OriginToolCallID), in.Content, in.Mode, in.Model).Scan(&raw)
 	if err != nil {
 		return m, false, err
 	}

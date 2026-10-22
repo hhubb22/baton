@@ -13,7 +13,7 @@ func threadInstructions(directory string) string {
 }
 
 func (a *Adapter) Capabilities() agent.Capabilities {
-	return agent.Capabilities{Steer: true, Resume: true}
+	return agent.Capabilities{Steer: true, Resume: true, SwitchModel: true}
 }
 
 func (a *Adapter) NativeSessionID() string {
@@ -22,8 +22,8 @@ func (a *Adapter) NativeSessionID() string {
 	return a.state.ThreadID
 }
 
-func (a *Adapter) Send(ctx context.Context, id, text string) error {
-	return a.startTurn(ctx, id, text, true)
+func (a *Adapter) Send(ctx context.Context, id, text, model string) error {
+	return a.startTurn(ctx, id, text, model, true)
 }
 
 func (a *Adapter) Steer(ctx context.Context, id, text string) error {

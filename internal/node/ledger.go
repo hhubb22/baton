@@ -86,6 +86,10 @@ func OpenLedger(dir string) (*Ledger, error) {
 		db.Close()
 		return nil, errors.New("无法创建节点账本")
 	}
+	if err := ensureThreadColumns(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("无法升级 Thread 账本字段: %w", err)
+	}
 	if err := ensureReceiptExpiry(db); err != nil {
 		db.Close()
 		return nil, err

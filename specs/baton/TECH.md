@@ -134,7 +134,7 @@ Turn 由 Worker 定义：从一条消息被 Agent 接受开始，到适配器报
 | `employees`、`login_sessions` | 员工与登录会话（0001） |
 | `nodes`、`node_credentials`、`node_enrollments`、`employee_settings`、`node_presence`、`node_revocations`、`node_runtime_reports` | 设备身份、凭据、默认设备、在线状态、吊销、能力报告（0002～0004、0015） |
 | `threads` | 一个 Thread：员工、可选 Project、设备、Agent 类型、当前模型、工作目录、执行时限、状态与原因、创建者（员工或 Project Agent 及工具调用）、`client_thread_id`、`opened_at`、`archived_at`、版本 |
-| `thread_messages` | 消息：Thread、`client_message_id`、发送方、方式、可选模型、正文（≤ 64 KiB）、状态（accepted / queued / sent / withdrawn / unknown）、所属 Turn |
+| `thread_messages` | 消息：Thread、`client_message_id`、发送方、方式、可选模型、正文（≤ 64 KiB）、状态（accepted / queued / sent / withdrawn / unknown）、状态原因 `status_reason`（≤ 4 KiB）、所属 Turn |
 | `thread_turns` | Turn：Thread、`worker_turn_seq`、发起方（员工或 Project Agent）、使用的模型、开始与结束时间、结束原因 |
 | `thread_replies` | 回复：Thread、Turn、`worker_seq`、正文、截断标记与原字节数、附件 JSON、元数据（shell 的退出码） |
 | `thread_events` | 只追加的审计事件：新建、消息接受、停止请求、归档、状态变化，附操作者与时间（R-23） |
@@ -145,11 +145,13 @@ Turn 由 Worker 定义：从一条消息被 Agent 接受开始，到适配器报
 
 ### 迁移
 
-中心 Thread 模型使用增量迁移，与现有任务路径并存。`0001`～`0024` 保持原样；`0025_threads.sql` 新建 `threads`、`thread_messages`、`thread_turns`、`thread_replies`、`thread_events`、`thread_outbox` 和 `thread_reports`，并扩充 Project 输入类型。任务、Session 和 Execution 的表及接口在切换 Project Agent 之前继续使用；删除和收敛旧迁移在实施步骤 5 进行。
+中心 Thread 模型使用增量迁移，与现有任务路径并存。`0001`～`0024` 保持原样；`0025_threads.sql` 新建 `threads`、`thread_messages`、`thread_turns`、`thread_replies`、`thread_events`、`thread_outbox` 和 `thread_reports`，并扩充 Project 输入类型。任务、Session 和 Execution 的表及接口在切换 Project Agent 之前继续使用；删除和收敛旧迁移在实施步骤 6 进行。
 
-`thread_reports` 保存 `(thread_id, event_id)`、连续 Worker 序号、报告内容摘要及原 ACK，不保存完整报告正文。`thread_events` 只追加审计与时间线事件，回复事件保存限长正文。`threads.request_hash` 用于比较规范化的新建请求，读取接口不返回它。Turn 的 ID 与 Worker Turn 序号使用同一个含员工身份的复合外键，避免消息或回复关联到两个不同的 Turn。
+`0027_thread_models.sql` 为 `threads`、`thread_messages` 和 `thread_turns` 增加模型列，并为消息增加 `status_reason`、为 Project 输入增加 `thread_message_failed` 类型。已有行保留空模型，表示该 Agent 在设备上的默认模型；不回填历史模型。
 
-`project_agent_input_queue` 同时接受原有的 `task_result`、`user_task_result` 和新的 `thread_reply`、`turn_ended`。`thread_reply` 为被动输入，`turn_ended` 为主动输入，参与放置、领取和重启后的通知重置。
+`thread_reports` 保存 `(thread_id, event_id)`、连续 Worker 序号、报告内容摘要、摘要版本及原 ACK，不保存完整报告正文。版本 1 按旧协议字段校验摘要，兼容旧中心忽略模型后已处理的报告；新记录使用版本 2，模型参与内容冲突检查。`thread_events` 只追加审计与时间线事件，回复事件保存限长正文。`threads.request_hash` 用于比较规范化的新建请求，读取接口不返回它。Turn 的 ID 与 Worker Turn 序号使用同一个含员工身份的复合外键，避免消息或回复关联到两个不同的 Turn。
+
+`project_agent_input_queue` 同时接受原有的 `task_result`、`user_task_result` 和 Thread 的 `thread_reply`、`turn_ended`、`thread_message_failed`。`thread_reply` 为被动输入，`turn_ended` 与 `thread_message_failed` 为主动输入，参与放置、领取和重启后的通知重置。
 
 迁移文件编号之间允许空缺，`internal/migrate` 按文件名排序执行。
 
@@ -167,13 +169,13 @@ Worker 的报告类型：
 |---|---|
 | `thread.opened` | `waiting_device` → `idle`，保存原生会话标识 |
 | `thread.open_failed` | → `stopped`，保存原因（目录不存在、Agent 不可用等） |
-| `message.queued` / `message.sent` / `message.withdrawn` / `message.unknown` | 更新消息状态与所属 Turn |
+| `message.queued` / `message.sent` / `message.withdrawn` / `message.unknown` | 更新消息状态、状态原因与所属 Turn；模型选择失败的撤回不关联 Turn，Thread → `idle` |
 | `turn.started` | 插入 `thread_turns`，Thread → `running` |
 | `reply` | 插入 `thread_replies` |
 | `turn.ended` | 写结束时间与原因；Worker 队列为空时 Thread → `idle` |
 | `thread.stopped` / `thread.unknown` | → `stopped` / `unknown`，附原因 |
 
-每个报告带 `event_id` 和 Worker 序号。中心在一个事务里保存报告、更新状态，并在 Turn 属于 Project Agent 时写入它的输入队列（Project Agent TECH 第 9 节），提交后返回 ACK；Worker 收到 ACK 才确认本地 outbox。重复报告按 `event_id` 返回原 ACK。中心按 Worker 序号处理，序号跳跃时拒绝并要求补报，保证 `turn.ended` 不会早于这一轮的回复入库。
+每个报告带 `event_id` 和 Worker 序号。中心在一个事务里保存报告、更新状态，并按消息或 Turn 的归属写入 Project Agent 输入队列（Project Agent TECH 第 9 节），提交后返回 ACK；Worker 收到 ACK 才确认本地 outbox。重复报告按 `event_id` 返回原 ACK。中心按 Worker 序号处理，序号跳跃时拒绝并要求补报，保证 `turn.ended` 不会早于这一轮的回复入库。
 
 ## 设备与 Worker 数据
 
@@ -184,6 +186,7 @@ Worker 的报告类型：
 | `meta` | 存储代次 |
 | `threads` | 中心 Thread ID 到本地 Session 目录的映射、Agent 类型、工作目录；`thread.open` 的接收记录 |
 | `workers` | Worker 进程索引 |
+| `thread_command_receipts` | 命令 ID、请求摘要及其版本、原回执；旧摘要忽略模型，新摘要包含模型 |
 | `project_runtime_runs` | Project Runtime 的启动去重与清理确认，见 Project Agent TECH |
 
 `thread.open` 先写 `threads` 再回执，重复命令返回同一映射。`thread.opened` 带上存储代次，中心保存在 `threads` 上，之后的命令都携带它。设备重装或 `node.db` 丢失后代次改变，batond 拒绝旧代次的命令，Thread 进入 `stopped`，原因为本地历史缺失，不会用同一个 Thread ID 新开一个空会话。旧的 `receipts`、`sessions`、`agent_contexts` 删除。
@@ -195,8 +198,8 @@ Worker 的报告类型：
 | 表 | 内容 |
 |---|---|
 | `meta` | Thread ID、Agent 类型、当前模型、适配器配置、原生会话标识、当前 Turn 序号与状态 |
-| `messages` | `client_message_id`（唯一）、seq、方式、可选模型、正文、状态（queued / intent / sent / withdrawn / unknown）、所属 Turn |
-| `turns` | Turn 序号、开始与结束时间、结束原因 |
+| `messages` | `client_message_id`（唯一）、seq、方式、可选模型、正文、状态（queued / intent / sent / withdrawn / unknown）、状态原因 `status_reason`、所属 Turn |
+| `turns` | Turn 序号、使用的模型、开始与结束时间、结束原因 |
 | `replies` | 回复序号、Turn、正文、附件、元数据 |
 | `outbox` | 待中心确认的报告 |
 
@@ -206,6 +209,8 @@ Worker 的报告类型：
 2. 同一时刻最多一个 Turn 处于开始而未结束的状态。
 3. `turn.ended` 的 outbox 事件在这一轮所有 `reply` 事件之后写入。
 4. 回复与对应 outbox 事件在同一事务提交；提交状态不明时从独立连接读回确认（沿用 `output_transaction.go`）。
+
+`Send` 明确返回模型选择失败时，消息确定未发出，Worker 将它记为 `withdrawn`，清除预留的 Turn 序号，把原因保存到该消息的 `status_reason` 并通过 `message.withdrawn` 报告，不开启 Turn。原因摘要最多 4 KiB，替换无效 UTF-8 和 NUL，截断时保留完整字符并加省略号。Thread 保持 `idle`，保留 Agent 进程和当前模型，继续发送下一条排队消息。中心在同一事务保存消息原因；浏览器 Thread 详情和 Project Agent 的 `threads.get` 通过 `failed_messages` 读取这些失败消息。Project Agent 发起的失败消息另形成一条主动 `thread_message_failed` 输入，员工消息不写输入队列。无法确认消息是否发出的错误仍按发送意图恢复规则处理。Worker 在开始和结束报告中携带该 Turn 使用的模型，中心在 `turn.started` 时更新 Thread 当前模型。
 
 完整原生历史由 Agent 保存在自己的文件里，Worker 账本不复制。
 
@@ -258,6 +263,8 @@ Kiro 只提供排队。需要打断时，员工先停止这一轮再发消息。
 
 batond 在 `node_runtime_reports.report.agents` 上报每种 Agent 的 `{agent_type, version, status, models:[{id, name}], default_model, capabilities:{create, queue, steer, stop, resume, switch_model}}`。模型列表来自 Agent 自己的接口：Codex 用 `model/list`，Pi 用 `get_available_models`，Kiro 取 `session/new` 返回的 `models`；取不到时 `models` 为空，只能使用默认模型。`status` 为 `available`、`unverified` 或 `unavailable`；只有 `available` 且支持 `create` 的 Agent 可新建 Thread。`queue` 和 `stop` 对已接入的 Agent 恒为真；`steer`、`resume`、`switch_model` 来自 `Capabilities()`。未验证的版本标为 `unverified`，界面不显示为已支持（D1）。旧设备未上报 `agents` 时，中心沿用 `nodes.capabilities` 验证 Agent 类型，插入能力缺省关闭。中心检查指定的模型在上报的 `models` 内，按目标系统的路径规则检查工作目录位于上报的 `roots` 内，设备在执行前核实目录存在及解析后的边界。
 
+batond 在启动后的首次采集及 Agent 可执行文件路径或版本变化时探测模型，结果在进程内缓存；探测失败同样缓存为空列表。重连和后续报告复用缓存，模型探测不发送推理请求。模型目录的探测与目录扫描分别计时，不阻塞连接、心跳和 Worker 消息。
+
 ## 接口
 
 ### 浏览器 API
@@ -296,7 +303,7 @@ Thread 命令以信封 `message_id` 作为稳定身份，`thread.command_result`
 
 Thread 回包事务按 Node → Credential → Presence 锁定认证记录，再锁目标 Outbox 或 Thread；全部锁取得后用数据库当前时刻复核凭据期限。凭据吊销、连接替换和锁等待跨越有效期都不能写入执行事实。
 
-旧 `execution.*`、`agent.request`、`execution.children*` 和启动许可在任务路径继续使用，随实施步骤 5 删除。Thread 没有排队期限，消息由员工明确发出，设备收到即可执行。
+旧 `execution.*`、`agent.request`、`execution.children*` 和启动许可在任务路径继续使用，随实施步骤 6 删除。Thread 没有排队期限，消息由员工明确发出，设备收到即可执行。
 
 ### 跨版本字段
 
@@ -397,9 +404,10 @@ Coordinator 与 PostgreSQL 部署在一处，Coordinator 提供静态页面、AP
 2. **中心 Thread 模型。** 新增迁移，新建 `threads`、`thread_messages`、`thread_turns`、`thread_replies`、`thread_events`、`thread_outbox` 和报告去重账本及 Store；浏览器 Thread API；`thread.command` 派发与 `thread.report` 处理。用 Go 测试里的假节点验证新建、消息去重、离线等待、报告去重和序号检查。旧任务路径与新路径并存到第 4 步。
 3. **Worker 与适配器。** Worker 账本改为消息队列、Turn 与回复；适配器改为新接口，Pi、Codex、Kiro、shell 逐个迁移，回放测试覆盖排队、插入、停止、执行时限、崩溃恢复和 `Sent` 查询。batond 接收 `thread.command`。
 4. **切换 Project Agent。** `tasks.*` 工具换成 `threads.*`，Turn 结束与回复进入输入队列，`nodes.exec` 改为 shell Thread；Inbox 关联 Thread。见 Project Agent TECH 第 9、10 节。
-5. **删除任务模型。** 删除 `tasks` 相关表、Store、协议、`internal/task`、`internal/startpermit`、启动许可和子任务交付代码，收敛旧迁移。
-6. **Web。** Thread 列表与 Thread 页、Project 页的 Thread 区域按 `design/` 实现；删除任务页与 Session 页。
-7. **端到端。** 真实 Codex、Kiro、Pi 各跑一遍 PRODUCT 验收表的多轮、排队可靠性和恢复场景。
+5. **模型选择与 Thread 归属。** 中心、Worker 和适配器保存并传递模型，设备探测并缓存可用模型及默认模型，Pi 和 Codex 支持在新 Turn 开始前换模型。浏览器新建的 Thread 不属于 Project，执行时限固定为 2 小时；Project Agent 新建的 Thread 属于本 Project，回复按 Turn 的发起方进入输入队列。
+6. **删除任务模型。** 删除 `tasks` 相关表、Store、协议、`internal/task`、`internal/startpermit`、启动许可和子任务交付代码，收敛旧迁移。
+7. **Web。** Thread 列表与 Thread 页、Project 页的 Thread 区域按 `design/` 实现；删除任务页与 Session 页。
+8. **端到端。** 真实 Codex、Kiro、Pi 各跑一遍 PRODUCT 验收表的多轮、排队可靠性和恢复场景。
 
 ## 验证
 

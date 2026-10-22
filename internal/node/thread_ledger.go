@@ -40,6 +40,7 @@ type ThreadRecord struct {
 	SessionID               string
 	StorageGeneration       string
 	AgentType               string
+	Model                   string
 	WorkingDirectory        string
 	ExecutionTimeoutSeconds int
 	OpenMessageID           string
@@ -54,6 +55,7 @@ CREATE TABLE IF NOT EXISTS threads (
  session_id TEXT NOT NULL UNIQUE,
  storage_generation TEXT NOT NULL,
  agent_type TEXT NOT NULL,
+ model TEXT NOT NULL DEFAULT '',
  working_directory TEXT NOT NULL,
  execution_timeout_seconds INTEGER NOT NULL,
  open_message_id TEXT NOT NULL UNIQUE,
@@ -64,6 +66,7 @@ CREATE TABLE IF NOT EXISTS threads (
 CREATE TABLE IF NOT EXISTS thread_command_receipts (
  message_id TEXT PRIMARY KEY,
  request_hash TEXT NOT NULL,
+ request_hash_version INTEGER NOT NULL DEFAULT 1 CHECK(request_hash_version IN (1,2)),
  result BLOB NOT NULL
 );
 CREATE TABLE IF NOT EXISTS thread_node_reports (
@@ -81,11 +84,32 @@ CREATE TABLE IF NOT EXISTS thread_report_progress (
 );
 `
 
+func ensureThreadColumns(db *sql.DB) error {
+	for _, column := range []struct{ table, name, definition string }{
+		{"threads", "model", "TEXT NOT NULL DEFAULT ''"},
+		{"thread_command_receipts", "request_hash_version", "INTEGER NOT NULL DEFAULT 1 CHECK(request_hash_version IN (1,2))"},
+	} {
+		var count int
+		if err := db.QueryRow(`SELECT count(*) FROM pragma_table_info(?) WHERE name=?`, column.table, column.name).Scan(&count); err != nil {
+			return err
+		}
+		if count > 0 {
+			continue
+		}
+		if _, err := db.Exec(`ALTER TABLE ` + column.table + ` ADD COLUMN ` + column.name + ` ` + column.definition); err != nil {
+			if checkErr := db.QueryRow(`SELECT count(*) FROM pragma_table_info(?) WHERE name=?`, column.table, column.name).Scan(&count); checkErr != nil || count == 0 {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func (l *Ledger) Thread(ctx context.Context, id string) (ThreadRecord, error) {
 	var r ThreadRecord
-	err := l.db.QueryRowContext(ctx, `SELECT thread_id, session_id, storage_generation, agent_type,
+	err := l.db.QueryRowContext(ctx, `SELECT thread_id, session_id, storage_generation, agent_type, model,
  working_directory, execution_timeout_seconds, open_message_id, status, created_at, updated_at
- FROM threads WHERE thread_id=?`, id).Scan(&r.ThreadID, &r.SessionID, &r.StorageGeneration, &r.AgentType,
+ FROM threads WHERE thread_id=?`, id).Scan(&r.ThreadID, &r.SessionID, &r.StorageGeneration, &r.AgentType, &r.Model,
 		&r.WorkingDirectory, &r.ExecutionTimeoutSeconds, &r.OpenMessageID, &r.Status, &r.CreatedAt, &r.UpdatedAt)
 	return r, err
 }
@@ -142,13 +166,17 @@ func threadRequestHash(cmd protocol.ThreadCommand) string {
 
 func (l *Ledger) threadReceipt(ctx context.Context, id string, cmd protocol.ThreadCommand) (protocol.ThreadCommandResult, bool, error) {
 	var hash string
+	var version int
 	var raw []byte
-	err := l.db.QueryRowContext(ctx, `SELECT request_hash, result FROM thread_command_receipts WHERE message_id=?`, id).Scan(&hash, &raw)
+	err := l.db.QueryRowContext(ctx, `SELECT request_hash,request_hash_version,result FROM thread_command_receipts WHERE message_id=?`, id).Scan(&hash, &version, &raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return protocol.ThreadCommandResult{}, false, nil
 	}
 	if err != nil {
 		return protocol.ThreadCommandResult{}, false, err
+	}
+	if version == 1 {
+		cmd.Model = ""
 	}
 	if hash != threadRequestHash(cmd) {
 		return protocol.ThreadCommandResult{}, false, errors.New("命令身份冲突")
@@ -163,15 +191,15 @@ func (l *Ledger) saveThreadReceipt(ctx context.Context, id string, cmd protocol.
 	if err != nil {
 		return err
 	}
-	_, err = l.db.ExecContext(ctx, `INSERT INTO thread_command_receipts(message_id,request_hash,result) VALUES(?,?,?)`, id, threadRequestHash(cmd), raw)
+	_, err = l.db.ExecContext(ctx, `INSERT INTO thread_command_receipts(message_id,request_hash,request_hash_version,result) VALUES(?,?,2,?)`, id, threadRequestHash(cmd), raw)
 	return err
 }
 
 func (l *Ledger) insertThread(ctx context.Context, id string, cmd protocol.ThreadCommand) error {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	_, err := l.db.ExecContext(ctx, `INSERT INTO threads(thread_id,session_id,storage_generation,agent_type,
+	_, err := l.db.ExecContext(ctx, `INSERT INTO threads(thread_id,session_id,storage_generation,agent_type,model,
  working_directory,execution_timeout_seconds,open_message_id,status,created_at,updated_at)
- VALUES(?,?,?,?,?,?,?,'opening',?,?)`, cmd.ThreadID, cmd.ThreadID, l.generation, cmd.AgentType,
+ VALUES(?,?,?,?,?,?,?,?,'opening',?,?)`, cmd.ThreadID, cmd.ThreadID, l.generation, cmd.AgentType, cmd.Model,
 		cmd.WorkingDirectory, cmd.ExecutionTimeoutSeconds, id, now, now)
 	return err
 }

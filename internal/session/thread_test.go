@@ -26,6 +26,10 @@ type threadFake struct {
 	sent                        map[string]bool
 	restores                    map[string]int
 	configs                     []agent.Config
+	model                       string
+	models                      []string
+	switchModel                 bool
+	switchErr                   error
 	steer, resume, killKnown    bool
 	startErr, sendErr, abortErr error
 	abortEvents                 bool
@@ -34,9 +38,16 @@ type threadFake struct {
 }
 
 func (a *threadFake) Start(context.Context) error { return a.startErr }
-func (a *threadFake) Send(_ context.Context, id, text string) error {
+func (a *threadFake) Send(_ context.Context, id, text, model string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if model != "" && model != a.model && a.switchErr != nil {
+		return &agent.ModelSwitchError{Err: a.switchErr}
+	}
+	if model != "" {
+		a.model = model
+	}
+	a.models = append(a.models, a.model)
 	a.sends = append(a.sends, id)
 	if a.sent == nil {
 		a.sent = map[string]bool{}
@@ -79,7 +90,7 @@ func (a *threadFake) ReadHistory(context.Context, string) (agent.HistoryPage, er
 	return agent.HistoryPage{Data: json.RawMessage(`[]`)}, nil
 }
 func (a *threadFake) Capabilities() agent.Capabilities {
-	return agent.Capabilities{Steer: a.steer, Resume: a.resume}
+	return agent.Capabilities{Steer: a.steer, Resume: a.resume, SwitchModel: a.switchModel}
 }
 func (a *threadFake) NativeSessionID() string        { return "native-session" }
 func (a *threadFake) UserMessageCount() (int, error) { return 7, nil }
@@ -104,6 +115,7 @@ func (a *threadFake) add(events ...agent.Event) {
 }
 func (a *threadFake) factory(kind string, config agent.Config) (agent.ThreadAdapter, error) {
 	a.configs = append(a.configs, config)
+	a.model = config.Model
 	return a, nil
 }
 
@@ -135,7 +147,7 @@ func threadMust(t *testing.T, err error) {
 }
 func threadMessage(t *testing.T, w *ThreadWorker, id, mode string) {
 	t.Helper()
-	threadMust(t, w.EnqueueThreadMessage(context.Background(), id, "content "+id, mode))
+	threadMust(t, w.EnqueueThreadMessage(context.Background(), id, "content "+id, mode, ""))
 }
 func threadReports(t *testing.T, w *ThreadWorker) []protocol.ThreadReport {
 	t.Helper()
@@ -170,7 +182,7 @@ func TestThreadQueueSteerWithdrawAndOutbox(t *testing.T) {
 		t.Fatal("withdrew sent message")
 	}
 	threadMessage(t, w, "first", "queue")
-	if err := w.EnqueueThreadMessage(context.Background(), "first", "different", "queue"); err == nil {
+	if err := w.EnqueueThreadMessage(context.Background(), "first", "different", "queue", ""); err == nil {
 		t.Fatal("accepted ID conflict")
 	}
 	for range 3 {
@@ -222,7 +234,7 @@ func TestThreadUnsupportedSteerAndIdleFallback(t *testing.T) {
 	a := &threadFake{resume: true}
 	w := newThreadTestWorker(t, nil, a)
 	threadMessage(t, w, "first", "steer")
-	if err := w.EnqueueThreadMessage(context.Background(), "insert", "hello", "steer"); !errors.Is(err, agent.ErrUnsupported) {
+	if err := w.EnqueueThreadMessage(context.Background(), "insert", "hello", "steer", ""); !errors.Is(err, agent.ErrUnsupported) {
 		t.Fatalf("steer error=%v", err)
 	}
 	if n := threadCount(t, w, `SELECT COUNT(*) FROM thread_messages`); n != 1 {
@@ -403,7 +415,7 @@ func TestThreadOpenFailureAndMissingHistory(t *testing.T) {
 	if len(r) != 1 || r[0].Kind != "thread.open_failed" || r[0].Reason == "" {
 		t.Fatal(r)
 	}
-	if err := w.EnqueueThreadMessage(context.Background(), "retry", "message", "queue"); !errors.Is(err, agent.ErrHistoryMissing) {
+	if err := w.EnqueueThreadMessage(context.Background(), "retry", "message", "queue", ""); !errors.Is(err, agent.ErrHistoryMissing) {
 		t.Fatalf("missing history error=%v", err)
 	}
 	if len(a.sends) != 0 || threadState(t, w) != "stopped" {
@@ -433,7 +445,7 @@ func TestThreadUnknownStopWithoutKnownTurn(t *testing.T) {
 	}))
 	threadMust(t, w.StopThread(agent.EndStopped))
 	<-done
-	if err := w.EnqueueThreadMessage(context.Background(), "new", "body", "queue"); err == nil {
+	if err := w.EnqueueThreadMessage(context.Background(), "new", "body", "queue", ""); err == nil {
 		t.Fatal("accepted message during unknown stop")
 	}
 	clock.Suspend(2 * time.Second)
@@ -464,7 +476,8 @@ func TestThreadExitedDuringStopRetainsTimeoutReason(t *testing.T) {
 }
 
 func TestThreadIPCAndHostMethods(t *testing.T) {
-	w := newThreadTestWorker(t, nil, nil)
+	a := &threadFake{resume: true, switchModel: true}
+	w := newThreadTestWorker(t, func(o *ThreadOptions) { o.Model = "initial" }, a)
 	token, err := EnsureToken(w.dataDir, w.options.ThreadID)
 	threadMust(t, err)
 	endpoint, err := Endpoint(w.dataDir, w.options.ThreadID)
@@ -485,8 +498,11 @@ func TestThreadIPCAndHostMethods(t *testing.T) {
 	}()
 	h := &Host{DataDir: w.dataDir}
 	threadMust(t, h.OpenThread(ctx, w.options))
-	threadMust(t, h.ThreadMessage(ctx, w.options.ThreadID, "first", "body", "queue"))
-	threadMust(t, h.ThreadMessage(ctx, w.options.ThreadID, "queued", "next", "queue"))
+	threadMust(t, h.ThreadMessage(ctx, w.options.ThreadID, "first", "body", "queue", "replacement"))
+	threadMust(t, h.ThreadMessage(ctx, w.options.ThreadID, "queued", "next", "queue", "later"))
+	if !reflect.DeepEqual(a.models, []string{"replacement"}) || threadModel(t, w) != "replacement" {
+		t.Fatalf("IPC model lost or applied before turn: sends=%v current=%s", a.models, threadModel(t, w))
+	}
 	threadMust(t, h.ThreadWithdraw(ctx, w.options.ThreadID, "queued"))
 	reports, err := h.ThreadPending(ctx, w.options.ThreadID, 0)
 	threadMust(t, err)

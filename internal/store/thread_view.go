@@ -13,6 +13,7 @@ import (
 func (s *Store) GetThread(ctx context.Context, employeeID, id string) (ThreadView, error) {
 	var view ThreadView
 	view.PendingMessages = []ThreadMessage{}
+	view.FailedMessages = []ThreadMessage{}
 	if !threadID(employeeID) || !threadID(id) {
 		return view, threadInvalid()
 	}
@@ -29,7 +30,7 @@ func (s *Store) GetThread(ctx context.Context, employeeID, id string) (ThreadVie
 }
 
 func threadDetailTx(ctx context.Context, tx pgx.Tx, employeeID, id string) (ThreadView, error) {
-	view := ThreadView{PendingMessages: []ThreadMessage{}}
+	view := ThreadView{PendingMessages: []ThreadMessage{}, FailedMessages: []ThreadMessage{}}
 	var err error
 	view.Thread, err = readThread(ctx, tx, employeeID, id, false)
 	if err != nil {
@@ -56,7 +57,7 @@ func threadDetailTx(ctx context.Context, tx pgx.Tx, employeeID, id string) (Thre
 	if err != nil {
 		return view, err
 	}
-	rows, err = tx.Query(ctx, `SELECT to_jsonb(m) FROM thread_messages m WHERE employee_id=$1 AND thread_id=$2 AND status IN ('accepted','queued','unknown') ORDER BY created_at,id`, employeeID, id)
+	rows, err = tx.Query(ctx, `SELECT to_jsonb(m) FROM thread_messages m WHERE employee_id=$1 AND thread_id=$2 AND (status IN ('accepted','queued','unknown') OR (status='withdrawn' AND status_reason<>'')) ORDER BY created_at,id`, employeeID, id)
 	if err != nil {
 		return view, err
 	}
@@ -70,7 +71,11 @@ func threadDetailTx(ctx context.Context, tx pgx.Tx, employeeID, id string) (Thre
 			rows.Close()
 			return view, err
 		}
-		view.PendingMessages = append(view.PendingMessages, m)
+		if m.Status == "withdrawn" {
+			view.FailedMessages = append(view.FailedMessages, m)
+		} else {
+			view.PendingMessages = append(view.PendingMessages, m)
+		}
 	}
 	err = rows.Err()
 	rows.Close()

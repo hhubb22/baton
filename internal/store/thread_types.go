@@ -35,6 +35,7 @@ type Thread struct {
 	OriginToolCallID        string     `json:"origin_tool_call_id,omitempty"`
 	NodeID                  string     `json:"node_id"`
 	AgentType               string     `json:"agent_type"`
+	Model                   string     `json:"model"`
 	WorkingDirectory        string     `json:"working_directory"`
 	ExecutionTimeoutSeconds int        `json:"execution_timeout_seconds"`
 	Status                  string     `json:"status"`
@@ -60,6 +61,7 @@ type ThreadMessageInput struct {
 	ClientMessageID  string `json:"client_message_id"`
 	Content          string `json:"content"`
 	Mode             string `json:"mode,omitempty"`
+	Model            string `json:"model"`
 	Sender           string `json:"-"`
 	OriginToolCallID string `json:"-"`
 }
@@ -67,6 +69,7 @@ type CreateThreadInput struct {
 	ClientThreadID          string             `json:"client_thread_id"`
 	NodeID                  string             `json:"node_id,omitempty"`
 	AgentType               string             `json:"agent_type"`
+	Model                   string             `json:"model"`
 	WorkingDirectory        string             `json:"working_directory"`
 	ProjectID               string             `json:"project_id,omitempty"`
 	ExecutionTimeoutSeconds int                `json:"execution_timeout_seconds,omitempty"`
@@ -83,7 +86,9 @@ type ThreadMessage struct {
 	OriginToolCallID string    `json:"origin_tool_call_id,omitempty"`
 	Content          string    `json:"content"`
 	Mode             string    `json:"mode"`
+	Model            string    `json:"model"`
 	Status           string    `json:"status"`
+	StatusReason     string    `json:"status_reason"`
 	TurnID           string    `json:"turn_id,omitempty"`
 	WorkerTurnSeq    *int64    `json:"worker_turn_seq,omitempty"`
 	CreatedAt        time.Time `json:"created_at"`
@@ -93,6 +98,7 @@ type ThreadTurn struct {
 	ThreadID         string     `json:"thread_id"`
 	WorkerTurnSeq    int64      `json:"worker_turn_seq"`
 	Initiator        string     `json:"initiator"`
+	Model            string     `json:"model"`
 	OriginToolCallID string     `json:"origin_tool_call_id,omitempty"`
 	StartedAt        time.Time  `json:"started_at"`
 	EndedAt          *time.Time `json:"ended_at,omitempty"`
@@ -102,6 +108,7 @@ type ThreadView struct {
 	Thread
 	CurrentTurn     *ThreadTurn     `json:"current_turn"`
 	PendingMessages []ThreadMessage `json:"pending_messages"`
+	FailedMessages  []ThreadMessage `json:"failed_messages"`
 }
 type ThreadFilter struct {
 	ProjectID, NodeID, Status, Cursor string

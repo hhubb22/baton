@@ -60,10 +60,11 @@ export const toolDefinitions = [
   {
     name: "threads.create",
     description:
-      "在目标设备上新建 Thread 并向执行 Agent 发出第一条消息，立即返回 Thread ID 和状态。工作目录必须已存在；agent_type 不能为 shell，命令通过 nodes.exec 执行。在 message 中写明工作目标和验证方式，找不到验证方式时写明原因。结果可用 threads.read 查询。",
+      "在目标设备上新建 Thread 并向执行 Agent 发出第一条消息，立即返回 Thread ID 和状态。按设备能力、用户要求和项目记忆选择 Agent 与模型；省略 model 时使用设备上该 Agent 的默认模型。工作目录必须已存在；agent_type 不能为 shell，命令通过 nodes.exec 执行。在 message 中写明工作目标和验证方式，找不到验证方式时写明原因。结果可用 threads.read 查询。",
     parameters: obj({
       node_id: str(),
       agent_type: str(),
+      model: opt(),
       working_directory: str(),
       message: str(),
       execution_timeout_seconds: Type.Optional(Type.Integer({ minimum: 1 })),
@@ -72,10 +73,11 @@ export const toolDefinitions = [
   {
     name: "threads.send",
     description:
-      "向本 Project 的 Thread 发送消息，包括用户新建的 Thread。mode 默认为 queue；steer 插入当前一轮，不支持时返回错误。",
+      "向本 Project 的 Thread 发送消息。mode 默认为 queue；可用 model 指定下一轮模型，省略时沿用当前模型。设备需上报该模型并支持换模型。steer 插入当前一轮并沿用当前模型，不能同时指定 model，不支持时返回错误。",
     parameters: obj({
       thread_id: str(),
       message: str(),
+      model: opt(),
       mode: Type.Optional(
         Type.Union([Type.Literal("queue"), Type.Literal("steer")]),
       ),

@@ -5,6 +5,84 @@ import (
 	"testing"
 )
 
+func TestRuntimeAgentModels(t *testing.T) {
+	base := RuntimeAgent{
+		AgentType: "pi", Version: "1.2.3", Status: "available",
+		Models:       []RuntimeModel{{ID: "magpie/auto/gpt-6.1-sol", Name: "GPT 6.1"}},
+		DefaultModel: "magpie/auto/gpt-6.1-sol", Capabilities: ThreadCapabilities{Create: true, SwitchModel: true},
+	}
+	report := func(a RuntimeAgent) ([]byte, error) {
+		return RuntimeReportJSON(RuntimeReport{Exec: RuntimeExec{Shell: "sh"}, Agents: []RuntimeAgent{a}})
+	}
+	raw, err := report(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded RuntimeReport
+	if DecodeRuntimeMessage(raw, &decoded) != nil || len(decoded.Agents) != 1 {
+		t.Fatalf("模型报告无法读取：%s", raw)
+	}
+	got := decoded.Agents[0]
+	if len(got.Models) != 1 || got.Models[0] != base.Models[0] || got.DefaultModel != base.DefaultModel || !got.Capabilities.SwitchModel {
+		t.Fatalf("模型字段丢失：%+v", got)
+	}
+	for _, tc := range []struct {
+		name  string
+		model RuntimeModel
+		ok    bool
+	}{
+		{"maximum ID", RuntimeModel{ID: strings.Repeat("x", 512), Name: "Model"}, true},
+		{"oversize ID", RuntimeModel{ID: strings.Repeat("x", 513), Name: "Model"}, false},
+		{"multibyte ID", RuntimeModel{ID: strings.Repeat("模", 171), Name: "Model"}, false},
+		{"empty ID", RuntimeModel{Name: "Model"}, false},
+		{"empty name", RuntimeModel{ID: "model"}, false},
+		{"control ID", RuntimeModel{ID: "model\nsecret", Name: "Model"}, false},
+		{"control name", RuntimeModel{ID: "model", Name: "Model\x00"}, false},
+		{"invalid UTF-8", RuntimeModel{ID: "\xff", Name: "Model"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := base
+			a.Models = []RuntimeModel{tc.model}
+			if _, err := report(a); (err == nil) != tc.ok {
+				t.Fatalf("模型校验结果错误：%v", err)
+			}
+		})
+	}
+	a := base
+	a.Models = append(a.Models, a.Models[0])
+	if _, err := report(a); err == nil {
+		t.Fatal("接受了重复模型 ID")
+	}
+	for _, defaultModel := range []string{strings.Repeat("x", 513), "model\n", "\xff"} {
+		a := base
+		a.DefaultModel = defaultModel
+		if _, err := report(a); err == nil {
+			t.Fatal("接受了无效默认模型")
+		}
+	}
+	a = base
+	a.Models = []RuntimeModel{}
+	if _, err := report(a); err != nil {
+		t.Fatal("空列表不能上报已知默认模型", err)
+	}
+	legacy := []byte(`{"exec":{"shell":"sh"},"agents":[{"agent_type":"codex","version":"1.2.3","status":"available","capabilities":{"create":true},"future":true}]}`)
+	decoded = RuntimeReport{}
+	if DecodeRuntimeMessage(legacy, &decoded) != nil {
+		t.Fatal("旧版模型字段缺省报告无法读取")
+	}
+	if _, err := RuntimeReportJSON(decoded); err != nil || decoded.Agents[0].DefaultModel != "" || decoded.Agents[0].Capabilities.SwitchModel {
+		t.Fatalf("旧版模型能力缺省值错误：%+v %v", decoded, err)
+	}
+	extended := []byte(`{"exec":{"shell":"sh"},"agents":[{"agent_type":"pi","version":"1.2.3","status":"available","models":[{"id":"provider/model","name":"Model","future":true}],"default_model":"provider/model","capabilities":{"switch_model":true,"future":true}}]}`)
+	if DecodeRuntimeMessage(extended, &decoded) != nil {
+		t.Fatal("模型字段扩展无法读取")
+	}
+	saved, err := RuntimeReportJSON(decoded)
+	if err != nil || strings.Contains(string(saved), "future") || decoded.Agents[0].Models[0].ID != "provider/model" {
+		t.Fatalf("模型扩展字段处理错误：%s %v", saved, err)
+	}
+}
+
 func TestRuntimeOriginsStripCredentials(t *testing.T) {
 	for raw, want := range map[string]string{
 		"https://user:password@github.com/team/repo.git?token=secret#fragment": "github.com/team/repo.git",

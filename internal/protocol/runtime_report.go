@@ -31,14 +31,23 @@ type RuntimeAgent struct {
 	AgentType    string             `json:"agent_type"`
 	Version      string             `json:"version"`
 	Status       string             `json:"status"`
+	Models       []RuntimeModel     `json:"models"`
+	DefaultModel string             `json:"default_model"`
 	Capabilities ThreadCapabilities `json:"capabilities"`
 }
+
+type RuntimeModel struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 type ThreadCapabilities struct {
-	Create bool `json:"create"`
-	Queue  bool `json:"queue"`
-	Steer  bool `json:"steer"`
-	Stop   bool `json:"stop"`
-	Resume bool `json:"resume"`
+	Create      bool `json:"create"`
+	Queue       bool `json:"queue"`
+	Steer       bool `json:"steer"`
+	Stop        bool `json:"stop"`
+	Resume      bool `json:"resume"`
+	SwitchModel bool `json:"switch_model"`
 }
 
 type ProjectRuntime struct {
@@ -137,6 +146,16 @@ func RuntimeReportJSON(r RuntimeReport) ([]byte, error) {
 	for _, a := range r.Agents {
 		if !runtimeName.MatchString(a.AgentType) || !runtimeName.MatchString(a.Version) || agents[a.AgentType] || (a.Status != "available" && a.Status != "unverified" && a.Status != "unavailable") {
 			return nil, ErrRuntimeReport
+		}
+		if a.DefaultModel != "" && !runtimeText(a.DefaultModel, 512) {
+			return nil, ErrRuntimeReport
+		}
+		models := map[string]bool{}
+		for _, model := range a.Models {
+			if !runtimeText(model.ID, 512) || !runtimeText(model.Name, 512) || models[model.ID] {
+				return nil, ErrRuntimeReport
+			}
+			models[model.ID] = true
 		}
 		agents[a.AgentType] = true
 	}

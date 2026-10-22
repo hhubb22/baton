@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"baton/internal/agent"
@@ -19,7 +20,7 @@ type sendIntent struct {
 }
 
 func (a *Adapter) Capabilities() agent.Capabilities {
-	return agent.Capabilities{Steer: true, Resume: true}
+	return agent.Capabilities{Steer: true, Resume: true, SwitchModel: true}
 }
 
 func (a *Adapter) NativeSessionID() string { return a.config.SessionID }
@@ -86,15 +87,15 @@ func (a *Adapter) Sent(id string) (bool, error) {
 	return found, nil
 }
 
-func (a *Adapter) Send(ctx context.Context, id, text string) error {
-	return a.sendThreadInput(ctx, id, text, false)
+func (a *Adapter) Send(ctx context.Context, id, text, model string) error {
+	return a.sendThreadInput(ctx, id, text, model, false)
 }
 
 func (a *Adapter) Steer(ctx context.Context, id, text string) error {
-	return a.sendThreadInput(ctx, id, text, true)
+	return a.sendThreadInput(ctx, id, text, "", true)
 }
 
-func (a *Adapter) sendThreadInput(ctx context.Context, id, text string, steer bool) error {
+func (a *Adapter) sendThreadInput(ctx context.Context, id, text, model string, steer bool) error {
 	a.inputMu.Lock()
 	defer a.inputMu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -122,7 +123,23 @@ func (a *Adapter) sendThreadInput(ctx context.Context, id, text string, steer bo
 		a.mu.Unlock()
 		return errors.New("Pi has no running Thread turn to steer")
 	}
+	currentModel := a.model
 	a.mu.Unlock()
+	if model != "" && model != currentModel {
+		provider, modelID, ok := strings.Cut(model, "/")
+		if !ok || provider == "" || modelID == "" {
+			return &agent.ModelSwitchError{Err: errors.New("Pi model must be provider/model")}
+		}
+		switchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		_, err := a.call(switchCtx, "set_model", map[string]any{"provider": provider, "modelId": modelID})
+		cancel()
+		if err != nil {
+			return &agent.ModelSwitchError{Err: err}
+		}
+		a.mu.Lock()
+		a.model = model
+		a.mu.Unlock()
+	}
 	count, err := a.UserMessageCount()
 	if err != nil {
 		return err

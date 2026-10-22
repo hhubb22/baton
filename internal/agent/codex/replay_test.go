@@ -73,6 +73,9 @@ func TestRecordedCodexScenarios(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, path := range paths {
+		if filepath.Base(path) == "model_switch.ndjson" {
+			continue // 模型切换由 TestRecordedThreadModelSwitch 驱动。
+		}
 		t.Run(strings.TrimSuffix(filepath.Base(path), ".ndjson"), func(t *testing.T) {
 			tape := replaytest.AdapterTape(replaytest.Load(t, path))
 			tape, ends := replaytest.EndGates(tape)
