@@ -633,29 +633,11 @@ export threadDetail = frame {
 
     item = frame : attention.attentionCard {
       width: 100%,
-      overrides: [
-        remove(attention.attentionCard.footer),
-        remove(attention.attentionCard.threadRef),
-        remove(attention.attentionCard.summary)
-      ],
+      overrides: [remove(attention.attentionCard.threadRef)],
 
       head {
         time {
           display: .none
-        }
-      }
-
-      options {
-        third {
-          label {
-            contents: "Run the test once more"
-          }
-        }
-
-        second {
-          label {
-            contents: "Skip for now"
-          }
         }
       }
 
@@ -1315,6 +1297,414 @@ export threadDetailFailed = frame : threadDetail {
           content {
             contents: "Run the unit test suite in ~/src/baton-old."
           }
+        }
+      }
+    }
+  }
+}
+
+@variant
+export threadTraceLoading = frame : threadTraceOffline {
+  title: "Thread trace / Loading",
+  caption: "Read full activity from the device. Saved replies stay visible.",
+  left: 0px,
+  top: 2200px,
+
+  logBody {
+    logSteps {
+      unavailable {
+        contents: "Loading activity from Windows Desktop…"
+      }
+    }
+  }
+}
+
+@variant
+export threadTraceFailed = frame : threadTraceLoading {
+  title: "Thread trace / Read failed",
+  caption: "Retry reads the same activity without sending another message.",
+  left: 0px,
+  top: 2440px,
+
+  logBody {
+    logSteps {
+      overrides: [insert(retry, after = threadTrace.unavailable)],
+
+      unavailable {
+        width: 100%,
+        contents: "Windows Desktop did not return this activity. Retry to read it again."
+      }
+    }
+  }
+
+  retry = frame : buttons.smallSecondary {
+    label {
+      contents: "Retry"
+    }
+  }
+}
+
+export historyPager = frame {
+  title: "History pagination",
+  left: 0px,
+  top: 2800px,
+  width: 392px,
+  layout: {direction: .column, align-items: .center, item-gap: 8px},
+  children: [action, note],
+
+  action = frame : buttons.smallSecondary {
+    label {
+      contents: "Load earlier history"
+    }
+  }
+
+  note = text : t.caption {
+    width: 100%,
+    contents: "Showing recent activity",
+    align: .center,
+    fill[0].color: c.colors.muted
+  }
+}
+
+@variant
+export threadDetailHistory = frame : threadDetail {
+  title: "Thread detail / Earlier history available",
+  caption: "Load earlier history prepends a page and keeps the current reading position.",
+  left: 520px,
+  top: 2300px,
+
+  body {
+    overrides: [insert(pager, after = .nil)],
+
+    item {
+      display: .none
+    }
+
+    layout.justify-content: .start,
+
+    reply1 {
+      @with-variant(threadTraceOpen)
+      trace {}
+    }
+
+    message1 {
+      display: .none
+    }
+  }
+
+  head {
+    lead {
+      name {
+        contents: "Reconnect tests"
+      }
+    }
+  }
+
+  pager = frame : historyPager {
+    width: 100%
+  }
+}
+
+@variant
+export threadDetailHistoryLoading = frame : threadDetailHistory {
+  title: "Thread detail / History loading",
+  caption: "Keep the saved reply while loading activity and an earlier page from the device.",
+  left: 1080px,
+  top: 2300px,
+
+  body {
+    reply1 {
+      @with-variant(threadTraceLoading)
+      trace {
+        left: .nil
+      }
+    }
+
+    pager {
+      action {
+        display: .none
+      }
+
+      note {
+        contents: "Loading earlier history from Windows Desktop…"
+      }
+    }
+  }
+}
+
+@variant
+export threadDetailHistoryFailed = frame : threadDetailHistory {
+  title: "Thread detail / History read failed",
+  caption: "Retry preserves loaded pages, the saved reply, and the reading position.",
+  left: 1640px,
+  top: 2300px,
+
+  body {
+    reply1 {
+      @with-variant(threadTraceFailed)
+      trace {
+        left: .nil
+      }
+    }
+
+    pager {
+      note {
+        contents: "Windows Desktop did not return the earlier history. Loaded replies are still available."
+      }
+
+      action {
+        label {
+          contents: "Retry earlier history"
+        }
+      }
+    }
+  }
+}
+
+@variant
+export threadDetailHistoryStart = frame : threadDetailHistory {
+  title: "Thread detail / Start of history",
+  caption: "The final page has loaded. Continue reading the saved conversation below.",
+  left: 2200px,
+  top: 2300px,
+
+  body {
+    reply1 {
+      @with-variant(threadTrace)
+      trace {}
+    }
+
+    pager {
+      action {
+        display: .none
+      }
+
+      note {
+        contents: "Start of chat history"
+      }
+    }
+
+    message1 {
+      display: .visible
+    }
+  }
+}
+
+@variant
+export threadDetailLimited = frame : threadDetailRunning {
+  title: "Thread detail / Send next only",
+  caption: "The device reports no Send now or model switching support. Model menu explains the limit.",
+  left: 520px,
+  top: 3460px,
+
+  footer {
+    @with-variant(composers.threadComposerQueueOnly)
+    composer {}
+  }
+
+  body {
+    message1 {
+      display: .none
+    }
+  }
+
+  head {
+    lead {
+      name {
+        contents: "Reconnect tests"
+      }
+    }
+  }
+}
+
+@variant
+export threadDetailResumeUnsupported = frame : threadDetailStopped {
+  title: "Thread detail / Resume unavailable",
+  caption: "Start a new chat with the same device, folder, and an available model. Keep the old chat read-only.",
+  left: 1080px,
+  top: 3460px,
+
+  footer {
+    composer {
+      display: .none
+    }
+
+    notice {
+      copy {
+        heading {
+          contents: "This agent cannot resume past chats"
+        }
+
+        detail {
+          contents: "The agent on Windows Desktop does not support resuming. Start a new chat in this folder to continue."
+        }
+      }
+
+      action {
+        label {
+          contents: "New chat in this folder"
+        }
+
+        display: .visible
+      }
+    }
+  }
+
+  head {
+    lead {
+      name {
+        contents: "Reconnect tests"
+      }
+    }
+  }
+}
+
+@variant
+export threadDetailArchivePending = frame : threadDetailStopping {
+  title: "Thread detail / Waiting to archive",
+  caption: "Stop requested; archive only after the device confirms. Keep the running state until then.",
+  left: 1640px,
+  top: 3460px,
+
+  footer {
+    composer {
+      display: .none
+    }
+
+    notice {
+      action {
+        display: .none
+      }
+
+      copy {
+        heading {
+          contents: "Stopping before archiving…"
+        }
+
+        detail {
+          contents: "Stop requested on Windows Desktop. 1 waiting message was canceled. This chat will archive after the device confirms stopping."
+        }
+      }
+
+      display: .visible
+    }
+  }
+
+  head {
+    lead {
+      name {
+        contents: "Reconnect tests"
+      }
+    }
+  }
+}
+
+@variant
+export threadDetailArchiveOffline = frame : threadDetailArchivePending {
+  title: "Thread detail / Offline while archiving",
+  caption: "Wait for the original device to reconnect and confirm stopping before showing Archived.",
+  left: 2200px,
+  top: 3460px,
+
+  footer {
+    notice {
+      copy {
+        detail {
+          contents: "Windows Desktop is offline and may still be running Codex. Reconnect it to confirm stopping and finish archiving."
+        }
+
+        heading {
+          contents: "Waiting for Windows Desktop"
+        }
+      }
+    }
+  }
+
+  body {
+    @with-variant(liveOutputInterrupted)
+    live {}
+  }
+
+  head {
+    lead {
+      state {
+        stateText {
+          fill[0].color: c.colors.muted,
+          contents: "Waiting to stop"
+        }
+
+        @with-variant(status.dotIdle)
+        mark {
+          left: .nil
+        }
+      }
+    }
+  }
+}
+
+@variant
+export threadDetailStopOffline = frame : threadDetailArchiveOffline {
+  title: "Thread detail / Offline while stopping",
+  caption: "Keep waiting for the device to confirm stopping. The chat remains unarchived.",
+  left: 2760px,
+  top: 3460px,
+
+  footer {
+    notice {
+      copy {
+        heading {
+          contents: "Stop is waiting for Windows Desktop"
+        }
+
+        detail {
+          contents: "The stop request is saved and 1 waiting message was canceled. Reconnect Windows Desktop to send it and confirm stopping. Codex may still be running."
+        }
+      }
+    }
+  }
+}
+
+@variant
+export standaloneSelectionMenu = frame : selectionMenu {
+  title: "Selection / Standalone chat",
+  caption: "Copy text without choosing a project for this independent chat.",
+  left: 0px,
+  top: 3140px,
+
+  ask {
+    label {
+      contents: "Copy selection"
+    }
+
+    @with-variant(icons.copy)
+    lead {}
+  }
+}
+
+@variant
+export threadDetailStoppedByUser = frame : threadDetailStopped {
+  title: "Thread detail / Stop confirmed",
+  caption: "The device confirmed stopping. A new message resumes the original chat when supported.",
+  left: 3320px,
+  top: 3460px,
+
+  head {
+    lead {
+      name {
+        contents: "Reconnect tests"
+      }
+    }
+  }
+
+  footer {
+    notice {
+      copy {
+        heading {
+          contents: "Stopped by you"
+        }
+
+        detail {
+          contents: "Windows Desktop confirmed stopping. 1 waiting message was canceled. File changes are kept. Send a message below to continue."
         }
       }
     }

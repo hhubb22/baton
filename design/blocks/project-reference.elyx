@@ -1,0 +1,154 @@
+import "tokens/colors.elyx" as c
+import "foundations/typography.elyx" as t
+import "blocks/composer.elyx" as composers
+import "controls/button.elyx" as buttons
+
+@variant
+export referenceComposer = frame : composers.composer {
+  title: "Project composer / Reference",
+  caption: "References appear only in a project's main chat. Edit the request before sending.",
+  left: 0px,
+  top: 0px,
+  overrides: [insert(quote, after = .nil)],
+
+  prompt {
+    fill[0].color: c.colors.text,
+    contents: "Explain the timeout and suggest the next check."
+  }
+
+  quote = frame {
+    width: 100%,
+    layout: {direction: .column, item-gap: 6px},
+    fill: c.colors.subtle,
+    border: c.colors.borderSoft,
+    corner-radius: 10px,
+    padding: 12px,
+    children: [head, origin, excerpt, truncation],
+
+    head = frame {
+      width: 100%,
+      layout: {
+        justify-content: .space-between,
+        align-items: .center,
+        item-gap: 8px
+      },
+      children: [label, clear],
+
+      label = text : t.captionMedium {
+        width: 100%,
+        contents: "From Run reconnect tests on Windows",
+        fill[0].color: c.colors.muted
+      }
+
+      clear = frame : buttons.smallGhost {
+        label {
+          contents: "Remove"
+        }
+      }
+    }
+
+    origin = text : t.caption {
+      width: 100%,
+      contents: "Thread T-160-WIN · Reply 3 · Windows Desktop",
+      fill[0].color: c.colors.muted
+    }
+
+    excerpt = text : t.small {
+      width: 100%,
+      contents: "Reconnect timed out after the device restarted. The new session did not receive the acknowledgment."
+    }
+
+    truncation = text : t.caption {
+      width: 100%,
+      display: .none,
+      contents: "Showing the first 8 KB of 14 KB selected.",
+      fill[0].color: c.colors.muted
+    }
+  }
+}
+
+@variant
+export fileReferenceComposer = frame : referenceComposer {
+  title: "Project composer / File reference",
+  caption: "File references keep the device, full path and selected line range.",
+  left: 864px,
+  top: 0px,
+
+  quote {
+    head {
+      label {
+        contents: "From reconnect-test.log"
+      }
+    }
+
+    origin {
+      contents: "Thread T-160-WIN · Reply 3 · Windows Desktop\nD:\\src\\baton-ps160\\logs\\reconnect-test.log · Lines 84–89"
+    }
+
+    excerpt {
+      contents: "84  reconnect attempt 3\n85  waiting for acknowledgment\n89  deadline exceeded after 30s",
+      font-size: 12,
+      font-family: "Paper Mono"
+    }
+  }
+
+  prompt {
+    contents: "Compare these log lines with the reconnect reply."
+  }
+}
+
+@variant
+export questionReferenceComposer = frame : referenceComposer {
+  title: "Project composer / Question reference",
+  caption: "Question references keep the question ID and linked thread.",
+  left: 0px,
+  top: 432px,
+
+  quote {
+    head {
+      label {
+        contents: "From Windows reconnect question"
+      }
+    }
+
+    origin {
+      contents: "Question Q-158 · Thread T-160-WIN · Reply 3"
+    }
+
+    excerpt {
+      contents: "The retry passed once, but the disconnect still occurs after restarting Windows."
+    }
+  }
+
+  prompt {
+    contents: "What evidence would distinguish a timing issue from a delivery issue?"
+  }
+}
+
+@variant
+export longReferenceComposer = frame : fileReferenceComposer {
+  title: "Project composer / Long reference",
+  caption: "Selections over 8 KB are shortened. The original length and source remain attached.",
+  left: 864px,
+  top: 432px,
+
+  quote {
+    origin {
+      contents: "Thread T-160-WIN · Reply 3 · Windows Desktop\nD:\\src\\baton-ps160\\logs\\reconnect-test.log · Lines 1–420"
+    }
+
+    excerpt {
+      contents: "1  reconnect test started\n2  device restarted; checking delivery…\n…",
+      font-size: 12,
+      font-family: "Paper Mono"
+    }
+
+    truncation {
+      display: .visible
+    }
+  }
+
+  prompt {
+    contents: "Find the first point where the reconnect stopped progressing."
+  }
+}

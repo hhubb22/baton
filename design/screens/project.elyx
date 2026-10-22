@@ -2,11 +2,16 @@ import "tokens/colors.elyx" as c
 import "tokens/spacing.elyx" as s
 import "blocks/project-page.elyx" as page
 import "controls/icons.elyx" as icons
+import "controls/button.elyx" as buttons
 import "controls/status.elyx" as status
 import "blocks/project-header.elyx" as headers
 import "blocks/conversation.elyx" as conv
+import "blocks/thread-line.elyx" as lines
 import "blocks/overview.elyx" as overviews
 import "blocks/banner.elyx" as banners
+import "screens/project-settings.elyx" as settingsScreen
+import "screens/project-memory.elyx" as memoryScreen
+import "screens/project-thread.elyx" as threadScreens
 
 @with-context()
 file {}
@@ -15,7 +20,42 @@ running = frame : page.projectPage {
   title: "Project · Running",
   caption: "The assistant is reading a reply from Ubuntu Dev. Stop run stops only the project assistant.",
   left: 0px,
-  top: 0px
+  top: 0px,
+
+  main {
+    transcript {
+      typing {
+        connections[0].target: reported,
+        connections[0].label: "Both replies received"
+      }
+
+      agent1 {
+        work {
+          cardRows {
+            row1 {
+              connections[0].target: threadScreens.threadRunning
+            }
+          }
+        }
+      }
+    }
+
+    header {
+      trail {
+        more {
+          connections[0].target: projectMenu
+        }
+      }
+
+      lead {
+        state {
+          stop {
+            connections[0].target: stopping
+          }
+        }
+      }
+    }
+  }
 }
 
 offline = frame : page.projectPage {
@@ -460,5 +500,861 @@ paused = frame : page.projectPage {
     glyph {}
   }
 
-  pauseBanner = frame : banners.bannerPaused {}
+  pauseBanner = frame : banners.bannerPaused {
+    action {
+      connections[0].target: resumed
+    }
+  }
+}
+
+noEligibleDevice = frame : page.projectPage {
+  title: "Project / No device ready",
+  caption: "Send a message while devices need attention; open Devices to restore access.",
+  left: 0px,
+  top: 1080px,
+
+  overview {
+    summary {
+      runtime {
+        runtimeCard {
+          runtimeLine {
+            runtimeState {
+              runtimeStateText {
+                fill[0].color: c.colors.muted,
+                contents: "Waiting for device"
+              }
+
+              @with-variant(status.dotQueued)
+              runtimeDot {}
+            }
+
+            runtimeDevice {
+              display: .none
+            }
+          }
+
+          runtimeNote {
+            contents: "ChatGPT is unavailable on all 3 devices. Messages stay saved."
+          }
+        }
+      }
+    }
+  }
+
+  main {
+    dock {
+      overrides: [insert(deviceBanner, after = .nil)]
+    }
+
+    transcript {
+      overrides: [
+        insert(waitingMessage, after = page.projectPage.main.transcript.agent1),
+        remove(page.projectPage.main.transcript.typing)
+      ]
+    }
+
+    @with-variant(headers.headerWaiting)
+    header {
+      top: .nil
+    }
+  }
+
+  sidebar {
+    top {
+      projects {
+        projBaton {
+          trail {
+            live {
+              display: .none
+            }
+          }
+        }
+      }
+    }
+  }
+
+  waitingMessage = frame : conv.userMessagePending {
+    width: 100%,
+    max-width: s.size.measure,
+
+    meta {
+      metaText {
+        contents: "Saved · waiting for a device with ChatGPT signed in"
+      }
+    }
+  }
+
+  deviceBanner = frame : banners.banner {
+    copy {
+      heading {
+        contents: "No device is ready for this model"
+      }
+
+      detail {
+        contents: "MacBook Pro is offline. Sign in to ChatGPT on Ubuntu Dev. The project assistant is not installed on Windows Desktop. Your message stays saved."
+      }
+    }
+  }
+}
+
+switchedDevice = frame : page.projectPage {
+  title: "Project / Switched device",
+  caption: "A reply starts on Ubuntu Dev because the default device is offline.",
+  left: 1728px,
+  top: 1080px,
+
+  main {
+    transcript {
+      overrides: [
+        insert(switchNote, after = page.projectPage.main.transcript.agent1)
+      ]
+    }
+  }
+
+  switchNote = frame : conv.systemNote {
+    width: 100%,
+    max-width: s.size.measure,
+
+    label {
+      contents: "Switched to Ubuntu Dev because MacBook Pro is offline"
+    }
+  }
+}
+
+stopping = frame : page.projectPage {
+  title: "Project / Stopping assistant",
+  caption: "Stop run waits for confirmation. Existing threads keep working.",
+  left: 3456px,
+  top: 1080px,
+
+  overview {
+    summary {
+      runtime {
+        runtimeCard {
+          runtimeLine {
+            runtimeState {
+              runtimeStateText {
+                fill[0].color: c.colors.muted,
+                contents: "Stopping"
+              }
+            }
+          }
+
+          runtimeNote {
+            contents: "Stop requested. Threads continue on their devices."
+          }
+        }
+      }
+    }
+  }
+
+  main {
+    dock {
+      overrides: [insert(stopBanner, after = .nil)]
+    }
+
+    header {
+      lead {
+        state {
+          stop {
+            connections[0].target: stopping,
+
+            label {
+              contents: "Stop requested"
+            }
+          }
+
+          stateText {
+            fill[0].color: c.colors.muted,
+            contents: "Stopping on Ubuntu Dev…"
+          }
+
+          @with-variant(status.dotIdle)
+          mark {}
+        }
+      }
+    }
+
+    transcript {
+      typing {
+        label {
+          contents: "Waiting for Ubuntu Dev to confirm the assistant has stopped…"
+        }
+      }
+    }
+  }
+
+  stopBanner = frame : banners.banner {
+    connections[0].label: "Device confirms stop",
+    connections[0].target: stopped,
+
+    action {
+      display: .none
+    }
+
+    copy {
+      detail {
+        contents: "Existing threads keep running. This does not undo file changes or commands already run."
+      }
+
+      heading {
+        contents: "Waiting for the project assistant to stop"
+      }
+    }
+
+    @with-variant(icons.stop)
+    glyph {}
+  }
+}
+
+stopped = frame : page.projectPage {
+  title: "Project / Assistant stopped",
+  caption: "After stop is confirmed, send a new message to start another assistant run.",
+  left: 5184px,
+  top: 1080px,
+
+  overview {
+    summary {
+      runtime {
+        runtimeCard {
+          runtimeLine {
+            runtimeState {
+              runtimeStateText {
+                fill[0].color: c.colors.muted,
+                contents: "Idle"
+              }
+
+              @with-variant(status.dotIdle)
+              runtimeDot {}
+            }
+
+            runtimeDevice {
+              display: .none
+            }
+          }
+
+          runtimeNote {
+            contents: "Current run stopped. Existing threads continue."
+          }
+        }
+      }
+    }
+  }
+
+  main {
+    dock {
+      overrides: [insert(stoppedBanner, after = .nil)]
+    }
+
+    transcript {
+      overrides: [
+        insert(stopNote, after = page.projectPage.main.transcript.agent1),
+        remove(page.projectPage.main.transcript.typing)
+      ]
+    }
+
+    @with-variant(headers.headerIdle)
+    header {
+      top: .nil
+    }
+  }
+
+  sidebar {
+    top {
+      projects {
+        projBaton {
+          trail {
+            live {
+              display: .none
+            }
+          }
+        }
+      }
+    }
+  }
+
+  stopNote = frame : conv.systemNote {
+    width: 100%,
+    max-width: s.size.measure,
+
+    label {
+      contents: "15:04 · You stopped the project assistant"
+    }
+
+    @with-variant(icons.stop)
+    glyph {}
+  }
+
+  stoppedBanner = frame : banners.banner {
+    action {
+      display: .none
+    }
+
+    copy {
+      detail {
+        contents: "Existing threads keep running. Send a message below to start a new assistant run."
+      }
+
+      heading {
+        contents: "Project assistant stopped"
+      }
+    }
+
+    @with-variant(icons.stop)
+    glyph {}
+  }
+}
+
+resumed = frame : page.projectPage {
+  title: "Project / Resumed",
+  caption: "Resume processes the three saved inputs. Threads and questions remain available.",
+  left: 0px,
+  top: 2160px,
+
+  main {
+    transcript {
+      overrides: [
+        insert(resumeNote, after = page.projectPage.main.transcript.agent1)
+      ],
+
+      typing {
+        label {
+          contents: "Reading 3 saved messages…"
+        }
+      }
+    }
+  }
+
+  resumeNote = frame : conv.systemNote {
+    width: 100%,
+    max-width: s.size.measure,
+
+    label {
+      contents: "15:08 · You resumed the project"
+    }
+  }
+}
+
+archived = frame : page.projectPage {
+  title: "Project / Archived",
+  caption: "Open an archived project to read chats and memory. Existing threads remain usable.",
+  left: 1728px,
+  top: 2160px,
+
+  overview {
+    body {
+      overrides: [
+        remove(overviews.overview.body.needsHead),
+        remove(overviews.overview.body.needsRow)
+      ],
+
+      activeRow1 {
+        connections[0].target: threadScreens.archivedProjectThread
+      }
+    }
+
+    tabBar {
+      memoryTab {
+        connections[0].target: memoryScreen.archivedMemory
+      }
+    }
+
+    summary {
+      runtime {
+        runtimeCard {
+          runtimeLine {
+            runtimeState {
+              runtimeStateText {
+                fill[0].color: c.colors.muted,
+                contents: "Archived"
+              }
+
+              @with-variant(status.dotIdle)
+              runtimeDot {}
+            }
+
+            runtimeDevice {
+              display: .none
+            }
+          }
+
+          runtimeNote {
+            contents: "Assistant stopped. 1 open question withdrawn."
+          }
+        }
+      }
+
+      goal {
+        goalHead {
+          goalEdit {
+            display: .none
+          }
+        }
+      }
+    }
+  }
+
+  main {
+    dock {
+      overrides: [
+        insert(archiveBanner, after = .nil),
+        remove(page.projectPage.main.dock.composer)
+      ]
+    }
+
+    transcript {
+      overrides: [
+        insert(archiveNote, after = page.projectPage.main.transcript.agent1),
+        remove(page.projectPage.main.transcript.typing)
+      ]
+    }
+
+    @with-variant(headers.headerIdle)
+    header {
+      trail {
+        more {
+          connections[0].target: archivedMenu
+        }
+      }
+
+      lead {
+        state {
+          stateText {
+            contents: "Archived"
+          }
+        }
+      }
+
+      top: .nil
+    }
+  }
+
+  sidebar {
+    top {
+      projects {
+        projBaton {
+          trail {
+            live {
+              display: .none
+            }
+          }
+        }
+      }
+
+      nav {
+        navInbox {
+          trail {
+            count {
+              value {
+                contents: "2"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  archiveNote = frame : conv.systemNote {
+    width: 100%,
+    max-width: s.size.measure,
+
+    label {
+      contents: "15:12 · You archived this project · 1 question withdrawn"
+    }
+
+    @with-variant(icons.archive)
+    glyph {}
+  }
+
+  archiveBanner = frame : banners.banner {
+    action {
+      display: .none
+    }
+
+    copy {
+      detail {
+        contents: "Past chats and memory are read-only. Open an existing thread to continue work there."
+      }
+
+      heading {
+        contents: "Project is archived"
+      }
+    }
+
+    @with-variant(icons.archive)
+    glyph {}
+  }
+}
+
+projectMenu = frame : page.projectPage {
+  title: "Project / More menu",
+  caption: "Open the header menu for settings or memory; use the sidebar to find archived projects.",
+  left: 3456px,
+  top: 2160px,
+  overrides: [insert(menu, after = page.projectPage.overview)],
+
+  main {
+    header {
+      trail {
+        more {
+          fill[0].color: c.colors.selected
+        }
+      }
+    }
+  }
+
+  sidebar {
+    top {
+      projects {
+        overrides: [insert(archiveLink, after = .nil)]
+      }
+    }
+  }
+
+  archiveLink = frame : buttons.smallGhost {
+    width: 100%,
+    connections[0].target: archivedProjects,
+
+    label {
+      contents: "Archived projects"
+    }
+  }
+
+  menu = frame {
+    left: 836px,
+    top: 48px,
+    width: 268px,
+    ignore-stack: .true,
+    layout: {direction: .column, item-gap: 4px},
+    fill: c.colors.surface,
+    border: c.colors.border,
+    corner-radius: 10px,
+    padding: 6px,
+    children: [settingsItem, memoryItem, pauseItem, archiveItem],
+
+    settingsItem = frame : buttons.secondary {
+      width: 100%,
+      border[0].width: 0px,
+      connections[0].target: settingsScreen.settings,
+
+      label {
+        contents: "Project settings"
+      }
+    }
+
+    memoryItem = frame : buttons.secondary {
+      width: 100%,
+      border[0].width: 0px,
+      connections[0].target: memoryScreen.memory,
+
+      label {
+        contents: "Project memory"
+      }
+    }
+
+    pauseItem = frame : buttons.secondary {
+      width: 100%,
+      border[0].width: 0px,
+      connections[0].target: paused,
+
+      label {
+        contents: "Pause project"
+      }
+    }
+
+    archiveItem = frame : buttons.secondary {
+      width: 100%,
+      border[0].width: 0px,
+      connections[0].target: settingsScreen.archiveConfirm,
+
+      label {
+        fill[0].color: c.colors.danger,
+        contents: "Archive project"
+      }
+    }
+  }
+}
+
+archivedProjects = frame : page.projectPage {
+  title: "Archived projects",
+  caption: "Open Archived projects in the sidebar, then choose a project to read its records.",
+  left: 5184px,
+  top: 2160px,
+
+  overview {
+    display: .none
+  }
+
+  main {
+    dock {
+      display: .none
+    }
+
+    transcript {
+      overrides: [
+        insert(archiveRow, after = .nil),
+        remove(page.projectPage.main.transcript.typing),
+        remove(page.projectPage.main.transcript.agent0),
+        remove(page.projectPage.main.transcript.user1),
+        remove(page.projectPage.main.transcript.user0),
+        remove(page.projectPage.main.transcript.agent1),
+        remove(page.projectPage.main.transcript.day)
+      ],
+      layout.justify-content: .start
+    }
+
+    header {
+      trail {
+        display: .none
+      }
+
+      lead {
+        state {
+          display: .none
+        }
+
+        identity {
+          avatar {
+            display: .none
+          }
+
+          name {
+            contents: "Archived projects"
+          }
+        }
+      }
+    }
+  }
+
+  sidebar {
+    top {
+      projects {
+        overrides: [insert(archiveLink, after = .nil)],
+
+        projBaton {
+          trail {
+            live {
+              display: .none
+            }
+          }
+        }
+      }
+
+      nav {
+        navInbox {
+          trail {
+            count {
+              value {
+                contents: "2"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  archiveLink = frame : buttons.smallGhost {
+    width: 100%,
+    fill[0].color: c.colors.selected,
+
+    label {
+      contents: "Archived projects"
+    }
+  }
+
+  archiveRow = frame : buttons.secondary {
+    width: 100%,
+    height: 72px,
+    max-width: s.size.measure,
+    connections[0].target: archived,
+    layout.justify-content: .space-between,
+
+    label {
+      width: 100%,
+      contents: "Baton Dev · Archived today at 15:12"
+    }
+  }
+}
+
+archivedMenu = frame : archived {
+  title: "Archived project / More menu",
+  caption: "Archived settings are read-only; inspect memory or return to the archived project list.",
+  left: 0px,
+  top: 3240px,
+  overrides: [insert(menu, after = page.projectPage.overview)],
+
+  menu = frame {
+    left: 836px,
+    top: 48px,
+    width: 268px,
+    ignore-stack: .true,
+    layout: {direction: .column, item-gap: 4px},
+    fill: c.colors.surface,
+    border: c.colors.border,
+    corner-radius: 10px,
+    padding: 6px,
+    children: [settingsItem, memoryItem, listItem],
+
+    settingsItem = frame : buttons.secondary {
+      width: 100%,
+      border[0].width: 0px,
+      connections[0].target: settingsScreen.archivedSettings,
+
+      label {
+        contents: "Project settings"
+      }
+    }
+
+    memoryItem = frame : buttons.secondary {
+      width: 100%,
+      border[0].width: 0px,
+      connections[0].target: memoryScreen.archivedMemory,
+
+      label {
+        contents: "Project memory"
+      }
+    }
+
+    listItem = frame : buttons.secondary {
+      width: 100%,
+      border[0].width: 0px,
+      connections[0].target: archivedProjects,
+
+      label {
+        contents: "Archived projects"
+      }
+    }
+  }
+}
+
+reported = frame : page.projectPage {
+  title: "Project / Replies received",
+  caption: "Both assistant-started threads have replied. Read the combined report or open a thread for details.",
+  left: 1728px,
+  top: 3240px,
+
+  overview {
+    body {
+      activeRow2 {
+        line {
+          time {
+            contents: "14:58"
+          }
+
+          lead {
+            @with-variant(status.dotIdle)
+            mark {
+              left: .nil
+            }
+          }
+        }
+      }
+
+      activeRow1 {
+        line {
+          time {
+            contents: "15:01"
+          }
+
+          lead {
+            @with-variant(status.dotIdle)
+            mark {
+              left: .nil
+            }
+          }
+        }
+      }
+
+      activeHead {
+        lead {
+          label {
+            contents: "Idle"
+          }
+        }
+      }
+    }
+
+    summary {
+      runtime {
+        runtimeCard {
+          runtimeLine {
+            runtimeState {
+              runtimeStateText {
+                fill[0].color: c.colors.muted,
+                contents: "Idle"
+              }
+
+              @with-variant(status.dotIdle)
+              runtimeDot {}
+            }
+
+            runtimeDevice {
+              display: .none
+            }
+          }
+
+          runtimeNote {
+            contents: "Both thread replies are saved."
+          }
+        }
+      }
+    }
+  }
+
+  main {
+    transcript {
+      overrides: [
+        insert(report, after = page.projectPage.main.transcript.agent1),
+        remove(page.projectPage.main.transcript.typing)
+      ],
+
+      agent1 {
+        @with-variant(lines.threadCardIdle)
+        work {}
+      }
+    }
+
+    @with-variant(headers.headerIdle)
+    header {
+      top: .nil
+    }
+  }
+
+  sidebar {
+    top {
+      projects {
+        projBaton {
+          trail {
+            live {
+              display: .none
+            }
+          }
+        }
+      }
+    }
+  }
+
+  report = frame : conv.agentTurn {
+    width: 100%,
+    max-width: s.size.measure,
+
+    content {
+      contents: "Windows reconnect tests: 47 of 48 passed; TestReconnectAfterSleep timed out. Ubuntu unit tests passed. The Windows log is attached to its reply. Review the Windows thread before choosing what to run next."
+    }
+
+    @with-variant(lines.threadCardIdle)
+    work {
+      cardHead {
+        cardTitle {
+          cardName {
+            contents: "Replies from 2 chats"
+          }
+        }
+      }
+
+      display: .visible
+    }
+  }
 }

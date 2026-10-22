@@ -79,9 +79,16 @@ export copyBlock = frame {
 // The token is passed via environment variable or stdin rather than command-line arguments. The dialog waits until the device connects or the token expires
 export enrollDialog = frame : dialogs.dialog {
   title: "Connect device / Waiting",
+  caption: "Run the command, then paste the code when prompted.",
   left: 0px,
   top: 200px,
   width: 600px,
+  connections[0].label: "Code expires",
+  connections[0].target: enrollExpired,
+  connections[1].label: "Device connected",
+  connections[1].target: enrollConnected,
+  connections[2].label: "Code already used",
+  connections[2].target: enrollRejected,
 
   footer {
     overrides: [
@@ -172,12 +179,14 @@ export enrollDialog = frame : dialogs.dialog {
 
       windows = frame : systemTab {
         width: 100%,
-        height: 100%
+        height: 100%,
+        connections[0].target: enrollWindows
       }
 
       macos = frame : systemTabOn {
         width: 100%,
         height: 100%,
+        connections[0].target: enrollDialog,
 
         tabLabel {
           contents: "macOS"
@@ -187,6 +196,7 @@ export enrollDialog = frame : dialogs.dialog {
       linux = frame : systemTab {
         width: 100%,
         height: 100%,
+        connections[0].target: enrollLinux,
 
         tabLabel {
           contents: "Linux"
@@ -207,7 +217,14 @@ export enrollDialog = frame : dialogs.dialog {
     }
 
     token = frame : copyBlock {
-      width: 100%
+      width: 100%,
+
+      copy {
+        connections[1].target: enrollCopyFailed,
+        connections[0].target: enrollCopied,
+        connections[1].label: "Clipboard blocked",
+        connections[0].label: "Copied"
+      }
     }
 
     tokenNote = text : t.caption {
@@ -230,6 +247,13 @@ export enrollDialog = frame : dialogs.dialog {
 
     command = frame : copyBlock {
       width: 100%,
+
+      copy {
+        connections[1].target: enrollCommandCopyFailed,
+        connections[0].target: enrollCommandCopied,
+        connections[1].label: "Clipboard blocked",
+        connections[0].label: "Copied"
+      }
 
       code {
         contents: "read -rs BATON_ENROLLMENT_TOKEN && export BATON_ENROLLMENT_TOKEN\nbatond register --coordinator https://baton.example.com \\\n  --display-name \"MacBook Pro\" --system macos"
@@ -423,8 +447,260 @@ export enrollExpired = frame : enrollDialog {
   }
 
   regen = frame : buttons.button {
+    connections[0].target: enrollCodeLoading,
+
     label {
       contents: "Get a new code"
+    }
+  }
+}
+
+@variant
+export enrollLinux = frame : enrollDialog {
+  title: "Connect device / Linux",
+  caption: "Read the setup code without adding it to command arguments.",
+  left: 2880px,
+  top: 200px,
+
+  content {
+    commandField {
+      command {
+        code {
+          contents: "read -rs BATON_ENROLLMENT_TOKEN && export BATON_ENROLLMENT_TOKEN\nbatond register --coordinator https://baton.example.com \\\n  --display-name \"Ubuntu Dev\" --system linux"
+        }
+      }
+    }
+
+    nameRow {
+      systems {
+        @with-variant(systemTabOn)
+        linux {}
+
+        @with-variant(systemTab)
+        macos {
+          left: .nil
+        }
+      }
+
+      nameField {
+        nameInput {
+          value {
+            contents: "Ubuntu Dev"
+          }
+        }
+      }
+    }
+  }
+}
+
+@variant
+export enrollCodeLoading = frame : enrollDialog {
+  title: "Connect device / Getting a code",
+  caption: "Keep the device name and system while a new setup code is requested.",
+  left: 0px,
+  top: 1080px,
+  connections[0].label: "Code ready",
+  connections[0].target: enrollDialog,
+  connections[1].label: "Request failed",
+  connections[1].target: enrollCodeFailed,
+  connections[2]: .nil,
+
+  footer {
+    waiting {
+      waitTime {
+        display: .none
+      }
+
+      waitText {
+        contents: "Getting a new code…"
+      }
+    }
+  }
+
+  content {
+    commandField {
+      display: .none
+    }
+
+    tokenField {
+      token {
+        copy {
+          display: .none
+        }
+
+        code {
+          contents: "Waiting for Baton…"
+        }
+      }
+
+      tokenNote {
+        contents: "The command will be ready when the code is issued."
+      }
+
+      tokenLabel {
+        labelText {
+          contents: "Getting a setup code…"
+        }
+      }
+    }
+  }
+}
+
+@variant
+export enrollCodeFailed = frame : enrollCodeLoading {
+  title: "Connect device / Could not get a code",
+  caption: "Check the connection and retry without re-entering the device name.",
+  left: 720px,
+  top: 1080px,
+
+  content {
+    tokenField {
+      tokenNote {
+        fill[0].color: c.colors.attentionText,
+        contents: "Baton could not be reached. Check your connection, then get a new code."
+      }
+
+      tokenLabel {
+        labelText {
+          contents: "Setup code unavailable"
+        }
+      }
+
+      token {
+        code {
+          contents: "No code issued"
+        }
+      }
+    }
+  }
+
+  footer {
+    waiting {
+      waitText {
+        contents: "Could not get a setup code"
+      }
+    }
+
+    actions {
+      overrides: [insert(retry, after = dialogs.dialog.footer.actions.cancel)]
+    }
+  }
+
+  retry = frame : buttons.button {
+    connections[0].target: enrollCodeLoading,
+
+    label {
+      contents: "Get a new code"
+    }
+  }
+}
+
+@variant
+export enrollCopied = frame : enrollDialog {
+  title: "Connect device / Code copied",
+  caption: "Copy feedback stays next to the code. Paste it into the waiting terminal.",
+  left: 1440px,
+  top: 1080px,
+
+  content {
+    tokenField {
+      tokenNote {
+        contents: "Setup code copied. Paste it into your terminal when prompted."
+      }
+
+      token {
+        copy {
+          @with-variant(icons.check)
+          glyph {}
+        }
+      }
+    }
+  }
+}
+
+@variant
+export enrollCopyFailed = frame : enrollDialog {
+  title: "Connect device / Copy unavailable",
+  caption: "Select and copy the code manually when clipboard access is blocked.",
+  left: 2160px,
+  top: 1080px,
+
+  content {
+    tokenField {
+      tokenNote {
+        fill[0].color: c.colors.attentionText,
+        contents: "Browser clipboard access is blocked. Select the setup code and copy it manually."
+      }
+    }
+  }
+}
+
+@variant
+export enrollRejected = frame : enrollExpired {
+  title: "Connect device / Code already used",
+  caption: "Issue a fresh setup code for this computer.",
+  left: 2880px,
+  top: 1080px,
+
+  content {
+    tokenField {
+      tokenLabel {
+        labelText {
+          contents: "Setup code already used"
+        }
+      }
+
+      tokenNote {
+        contents: "This code has already connected a device. Get a new code to connect another computer."
+      }
+    }
+  }
+
+  footer {
+    waiting {
+      waitText {
+        contents: "Setup code already used"
+      }
+    }
+  }
+}
+
+@variant
+export enrollCommandCopied = frame : enrollDialog {
+  title: "Connect device / Command copied",
+  caption: "Paste the command into the terminal before entering the setup code.",
+  left: 0px,
+  top: 1960px,
+
+  content {
+    commandField {
+      commandNote {
+        contents: "Command copied. Paste it into your terminal, then enter the setup code when prompted."
+      }
+
+      command {
+        copy {
+          @with-variant(icons.check)
+          glyph {}
+        }
+      }
+    }
+  }
+}
+
+@variant
+export enrollCommandCopyFailed = frame : enrollDialog {
+  title: "Connect device / Copy command manually",
+  caption: "Select and copy the command if browser clipboard access is blocked.",
+  left: 720px,
+  top: 1960px,
+
+  content {
+    commandField {
+      commandNote {
+        fill[0].color: c.colors.attentionText,
+        contents: "Browser clipboard access is blocked. Select the command and copy it manually."
+      }
     }
   }
 }

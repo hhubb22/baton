@@ -1,181 +1,402 @@
-import "tokens/colors.elyx" as c
-import "tokens/spacing.elyx" as s
-import "foundations/typography.elyx" as t
-import "blocks/sidebar.elyx" as sidebars
-import "controls/icons.elyx" as icons
-import "controls/button.elyx" as buttons
+import "blocks/inbox-page.elyx" as pages
 import "blocks/attention-card.elyx" as attention
 
-inbox = frame {
-  title: "Inbox",
-  caption: "Questions and sign-in issues across projects. Answers stay in the related chats.",
+inbox = frame : pages.inboxPage {
+  title: "Inbox / Pending",
+  caption: "Details start collapsed. Scroll the list; Handled items stays in the header. Browser tab: Baton (3).",
   left: 0px,
   top: 0px,
-  width: s.size.screenWidth,
-  height: s.size.screenHeight,
-  layout: {direction: .row},
-  fill: c.colors.canvas,
-  children: [sidebar, main],
 
-  sidebar = frame : sidebars.sidebar {
+  main {
+    head {
+      handled {
+        connections[0].target: ::handled,
+        connections[0].label: "Handled items"
+      }
+    }
+  }
+}
+
+empty = frame : pages.inboxPage {
+  title: "Inbox / Nothing waiting",
+  caption: "The last handled item leaves Inbox. Its card remains in the main chat and linked thread; open Handled items for the record. Browser tab: Baton.",
+  left: 1760px,
+  top: 0px,
+
+  main {
+    head {
+      handled {
+        connections[0].target: ::handled,
+        connections[0].label: "View past decisions"
+      }
+    }
+
+    content {
+      item3 {
+        display: .none
+      }
+
+      item2 {
+        display: .none
+      }
+
+      item1 {
+        display: .none
+      }
+
+      intro {
+        introCount {
+          display: .none
+        }
+
+        introText {
+          contents: "All caught up"
+        }
+      }
+
+      notice {
+        display: .visible
+      }
+    }
+  }
+
+  sidebar {
     top {
       projects {
-        @with-variant(sidebars.projectRowAttention)
+        projCompat {
+          trail {
+            count {
+              display: .none
+            }
+          }
+        }
+
         projBaton {
           trail {
             count {
-              value {
-                contents: "1"
-              }
+              display: .none
+            }
+
+            live {
+              display: .none
             }
           }
         }
       }
 
       nav {
-        @with-variant(sidebars.navRowActive)
         navInbox {
-          top: .nil
+          trail {
+            count {
+              display: .none
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+loadFailed = frame : pages.inboxPage {
+  title: "Inbox / Loading failed",
+  caption: "Keep the last known pending count while the connection is unavailable. Try again reloads the list; it never shows an empty success state.",
+  left: 3520px,
+  top: 0px,
+
+  main {
+    content {
+      notice {
+        retry {
+          connections[0].target: ::inbox,
+          connections[0].label: "Try again",
+          display: .visible
+        }
+
+        explanation {
+          contents: "Baton could not connect. Check your connection and try again. Saved decisions remain in your chats."
+        }
+
+        noticeTitle {
+          contents: "Could not load your items"
+        }
+
+        display: .visible
+      }
+
+      item3 {
+        display: .none
+      }
+
+      item2 {
+        display: .none
+      }
+
+      item1 {
+        display: .none
+      }
+
+      intro {
+        introCount {
+          display: .none
+        }
+
+        introText {
+          contents: "Inbox unavailable"
+        }
+      }
+    }
+
+    head {
+      handled {
+        connections[0].target: ::handled,
+        connections[0].label: "Handled items"
+      }
+    }
+  }
+}
+
+handled = frame : pages.inboxPage {
+  title: "Inbox / Handled items",
+  caption: "Read past answers, closes, withdrawals, and resolutions here. Open the project name or linked chat for context. Browser tab: Baton.",
+  left: 0px,
+  top: 1120px,
+
+  main {
+    content {
+      overrides: [
+        insert(closedItem, after = pages.inboxPage.main.content.item3)
+      ],
+
+      @with-variant(attention.attentionWithdrawn)
+      item3 {
+        answer {
+          answerText {
+            contents: "Withdrawn by the project assistant · Yesterday 22:15\nThe test host was upgraded during maintenance."
+          }
+        }
+
+        head {
+          time {
+            contents: "Yesterday"
+          }
+
+          kind {
+            project {
+              display: .visible
+            }
+          }
+        }
+      }
+
+      @with-variant(attention.systemResolved)
+      item2 {
+        head {
+          time {
+            contents: "15:24"
+          }
+        }
+      }
+
+      @with-variant(attention.attentionAnsweredPaused)
+      item1 {
+        answer {
+          answerText {
+            contents: "Bundle the certificate and retest · Kaken He · 16:00\nInclude the intermediate certificate. Keep the installer logs."
+          }
+        }
+
+        head {
+          time {
+            contents: "16:00"
+          }
+
+          kind {
+            project {
+              display: .visible
+            }
+          }
+        }
+      }
+
+      intro {
+        introCount {
+          contents: "Most recent first"
+        }
+
+        introText {
+          contents: "Past decisions"
+        }
+      }
+    }
+
+    head {
+      handled {
+        connections[0].target: ::inbox,
+        connections[0].label: "Back to inbox",
+
+        label {
+          contents: "Back to inbox"
+        }
+      }
+
+      headTitle {
+        contents: "Handled items"
+      }
+    }
+  }
+
+  sidebar {
+    top {
+      projects {
+        projCompat {
+          trail {
+            count {
+              display: .none
+            }
+          }
+        }
+
+        projBaton {
+          trail {
+            count {
+              display: .none
+            }
+
+            live {
+              display: .none
+            }
+          }
+        }
+      }
+
+      nav {
+        navInbox {
+          trail {
+            count {
+              display: .none
+            }
+          }
         }
       }
     }
   }
 
-  main = frame {
+  closedItem = frame : attention.attentionClosed {
     width: 100%,
-    height: 100%,
-    layout: {direction: .column, align-items: .center},
-    children: [head, content],
 
-    head = frame {
-      width: 100%,
-      height: s.size.header,
-      layout: {align-items: .center},
-      border: {color: c.colors.borderSoft, sides: .bottom},
-      padding: [0px, 20px],
-      children: headTitle,
+    threadRef {
+      display: .none
+    }
 
-      headTitle = text : t.label {
-        contents: "Inbox",
-        font-size: 14,
-        font-style: "Semibold"
+    heading {
+      contents: "Should the Ubuntu report include debug logs?"
+    }
+
+    head {
+      time {
+        contents: "Yesterday"
+      }
+
+      kind {
+        project {
+          display: .visible
+        }
       }
     }
 
-    content = frame {
-      width: s.size.measure,
-      layout: {direction: .column, item-gap: s.space.lg},
-      padding: [s.space.xxl, 0px],
-      children: [intro, item1, item2, item3, handled],
-
-      intro = frame {
-        width: 100%,
-        layout: {justify-content: .space-between, align-items: .end},
-        padding: [0px, 0px, s.space.xs],
-        children: [introText, introCount],
-
-        introText = text : t.title {
-          contents: "3 items waiting for you"
-        }
-
-        introCount = text : t.caption {
-          contents: "Newest first",
-          fill[0].color: c.colors.faint
-        }
+    answer {
+      answerText {
+        contents: "Closed by Kaken He · Yesterday 20:15"
       }
+    }
+  }
+}
 
-      item1 = frame : attention.inboxItem {
+compactReply = frame : pages.inboxPage {
+  title: "Inbox / Reply at 1024 px",
+  caption: "At 1024 px the sidebar and 720 px list fit without horizontal scrolling. The reply stays in the scrolling list; Handled items remains visible.",
+  left: 1760px,
+  top: 1120px,
+  width: 1024px,
+
+  main {
+    content {
+      @with-variant(attention.attentionReply)
+      item1 {
+        response {
+          note {
+            value {
+              contents: "Include the intermediate certificate. Keep the installer logs."
+            }
+          }
+        }
+
         head {
-          time {
-            contents: "15:41"
-          }
-        }
-
-        heading {
-          contents: "Installer signature check failed on Windows 11 24H2. What next?"
-        }
-
-        summary {
-          contents: "The installer reports an unknown publisher on 24H2 while passing on the other two devices. The signing certificate chain is missing an intermediate certificate."
-        }
-
-        threadRef {
-          threadName {
-            contents: "Verify installer on Windows 11"
-          }
-        }
-
-        options {
-          first {
-            label {
-              contents: "Bundle the intermediate cert, re-sign, and retest"
-            }
-          }
-
-          second {
-            label {
-              contents: "Record as a known issue and continue other platforms"
-            }
-          }
-
-          third {
-            label {
-              contents: "Skip 24H2 for this release"
+          kind {
+            project {
+              display: .visible
             }
           }
         }
       }
+    }
 
-      item2 = frame : attention.systemItem {}
+    head {
+      handled {
+        connections[0].target: ::handled,
+        connections[0].label: "Handled items"
+      }
+    }
+  }
+}
 
-      item3 = frame : attention.inboxItem {
-        options {
-          overrides: [remove(attention.attentionCard.options.third)],
+loading = frame : pages.inboxPage {
+  title: "Inbox / Loading",
+  caption: "Fetching the current list. Keep the last known count until it loads; questions are not marked handled by loading.",
+  left: 3520px,
+  top: 1120px,
 
-          second {
-            label {
-              contents: "Stay on 15.0.1 and upgrade next release"
-            }
-          }
+  main {
+    head {
+      handled {
+        connections[0].target: ::handled,
+        connections[0].label: "Handled items"
+      }
+    }
 
-          first {
-            label {
-              contents: "Upgrade first and test on 15.1"
-            }
-          }
-        }
+    content {
+      item3 {
+        display: .none
+      }
 
-        threadRef {
+      item2 {
+        display: .none
+      }
+
+      item1 {
+        display: .none
+      }
+
+      intro {
+        introCount {
           display: .none
         }
 
-        summary {
-          contents: "macOS 15.1 changed local network permission prompts, which may affect batond's first connection. The test host is currently on 15.0.1."
-        }
-
-        heading {
-          contents: "Upgrade the macOS test host to 15.1 before running?"
-        }
-
-        head {
-          time {
-            contents: "Yesterday 22:10"
-          }
+        introText {
+          contents: "Loading inbox…"
         }
       }
 
-      handled = frame : buttons.smallGhost {
-        label {
-          fill[0].color: c.colors.muted,
-          contents: "View resolved items"
+      notice {
+        explanation {
+          contents: "Waiting for the latest questions and notices."
         }
 
-        @with-variant(icons.check)
-        lead {
-          width: 14px,
-          height: 14px,
-          display: .visible
+        noticeTitle {
+          contents: "Loading your items…"
         }
+
+        display: .visible
       }
     }
   }

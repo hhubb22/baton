@@ -18,6 +18,22 @@ create = frame : page.projectPage {
   top: 0px,
   overrides: [insert(scrim, after = page.projectPage.overview)],
 
+  main {
+    dock {
+      composer {
+        toolbar {
+          send {
+            fill[0].color: c.colors.subtle,
+
+            sendGlyph {
+              fill[0].color: c.colors.text
+            }
+          }
+        }
+      }
+    }
+  }
+
   scrim = frame {
     left: 0px,
     top: 0px,
@@ -34,7 +50,7 @@ create = frame : page.projectPage {
           confirm {
             border[0].color: c.colors.transparent,
             fill[0].color: c.colors.accent,
-            connections[0].target: created,
+            connections[0].target: creating,
 
             label {
               fill[0].color: c.colors.onAccent,
@@ -148,17 +164,17 @@ created = frame : page.projectPage {
     body {
       overrides: [
         insert(noTasks, after = .nil),
-        remove(overviews.overview.body.recentHead),
-        remove(overviews.overview.body.queuedHead),
-        remove(overviews.overview.body.activeRow2),
         remove(overviews.overview.body.recentMore),
-        remove(overviews.overview.body.activeRow1),
         remove(overviews.overview.body.recentRow2),
         remove(overviews.overview.body.queuedRow),
-        remove(overviews.overview.body.activeHead),
         remove(overviews.overview.body.recentRow1),
+        remove(overviews.overview.body.queuedHead),
+        remove(overviews.overview.body.activeRow2),
+        remove(overviews.overview.body.recentHead),
+        remove(overviews.overview.body.activeHead),
+        remove(overviews.overview.body.needsHead),
         remove(overviews.overview.body.needsRow),
-        remove(overviews.overview.body.needsHead)
+        remove(overviews.overview.body.activeRow1)
       ]
     }
 
@@ -214,8 +230,8 @@ created = frame : page.projectPage {
       overrides: [
         insert(empty, after = .nil),
         remove(page.projectPage.main.transcript.typing),
-        remove(page.projectPage.main.transcript.user1),
         remove(page.projectPage.main.transcript.agent0),
+        remove(page.projectPage.main.transcript.user1),
         remove(page.projectPage.main.transcript.user0),
         remove(page.projectPage.main.transcript.agent1),
         remove(page.projectPage.main.transcript.day)
@@ -343,6 +359,100 @@ nameRequired = frame : create {
             }
 
             border[0].width: 1
+          }
+        }
+      }
+    }
+  }
+}
+
+creating = frame : create {
+  title: "New project / Creating",
+  caption: "Create project keeps the form visible until the project is saved.",
+  left: 0px,
+  top: 1080px,
+
+  scrim {
+    form {
+      footer {
+        actions {
+          confirm {
+            connections[0].target: created,
+
+            label {
+              contents: "Creating…"
+            }
+          }
+        }
+
+        note {
+          display: .visible,
+          contents: "Creating project…"
+        }
+      }
+    }
+  }
+}
+
+creationFailed = frame : create {
+  title: "New project / Could not save",
+  caption: "Creation failed. Keep the entered name, goal and model, then retry.",
+  left: 1728px,
+  top: 1080px,
+
+  scrim {
+    form {
+      footer {
+        note {
+          fill[0].color: c.colors.danger,
+          width: 100%,
+          contents: "Baton could not save this project. Your entries are kept. Try again.",
+          display: .visible
+        }
+
+        actions {
+          confirm {
+            connections[0].target: creating,
+
+            label {
+              contents: "Try again"
+            }
+          }
+        }
+
+        layout.direction: .column,
+        layout.align-items: .end
+      }
+    }
+  }
+}
+
+noReadyDevice = frame : create {
+  title: "New project / No device ready",
+  caption: "Creation remains available. Work waits until a device is ready.",
+  left: 3456px,
+  top: 1080px,
+
+  scrim {
+    form {
+      content {
+        modelField {
+          modelRow {
+            subscription {
+              value {
+                contents: "Claude subscription"
+              }
+            }
+
+            model {
+              value {
+                contents: "claude-opus-5.5"
+              }
+            }
+          }
+
+          modelHelp {
+            contents: "No online device has Claude signed in. You can create this project now; messages wait until a device is ready."
           }
         }
       }

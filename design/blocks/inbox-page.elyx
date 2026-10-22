@@ -1,0 +1,207 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+import "blocks/sidebar.elyx" as sidebars
+import "controls/button.elyx" as buttons
+import "blocks/attention-card.elyx" as attention
+
+export inboxPage = frame {
+  title: "Inbox",
+  caption: "Details start collapsed. The list scrolls; handled items stay accessible in the header. Browser tab: Baton (3).",
+  left: 0px,
+  top: 0px,
+  width: s.size.screenWidth,
+  height: s.size.screenHeight,
+  layout: {direction: .row},
+  fill: c.colors.canvas,
+  children: [sidebar, main],
+
+  sidebar = frame : sidebars.sidebar {
+    top {
+      projects {
+        @with-variant(sidebars.projectRowAttention)
+        projBaton {
+          trail {
+            live {
+              display: .hidden
+            }
+
+            count {
+              value {
+                contents: "1"
+              }
+            }
+          }
+        }
+      }
+
+      nav {
+        @with-variant(sidebars.navRowActive)
+        navInbox {
+          top: .nil
+        }
+      }
+    }
+  }
+
+  main = frame {
+    width: 100%,
+    height: 100%,
+    layout: {direction: .column, align-items: .center},
+    children: [head, content],
+
+    head = frame {
+      width: 100%,
+      height: s.size.header,
+      layout: {justify-content: .space-between, align-items: .center},
+      border: {color: c.colors.borderSoft, sides: .bottom},
+      padding: [0px, 20px],
+      children: [headTitle, handled],
+
+      handled = frame : buttons.smallGhost {
+        label {
+          contents: "Handled items"
+        }
+      }
+
+      headTitle = text : t.label {
+        contents: "Inbox",
+        font-size: 14,
+        font-style: "Semibold"
+      }
+    }
+
+    content = frame {
+      width: 100%,
+      height: 100%,
+      max-width: s.size.measure,
+      layout: {direction: .column, item-gap: s.space.lg},
+      overflow: .scroll,
+      padding: [s.space.xxl, 0px],
+      children: [intro, notice, item1, item2, item3],
+
+      notice = frame {
+        width: 100%,
+        display: .none,
+        layout: {direction: .column, item-gap: s.space.md},
+        padding: [48px, 24px],
+        children: [noticeTitle, explanation, retry],
+
+        noticeTitle = text : t.heading {
+          width: 100%,
+          contents: "No items waiting"
+        }
+
+        explanation = text : t.small {
+          width: 100%,
+          contents: "Questions from your project assistants appear here. View handled items for past decisions.",
+          fill[0].color: c.colors.muted
+        }
+
+        retry = frame : buttons.smallSecondary {
+          display: .none,
+
+          label {
+            contents: "Try again"
+          }
+        }
+      }
+
+      intro = frame {
+        width: 100%,
+        layout: {justify-content: .space-between, align-items: .end},
+        padding: [0px, 0px, s.space.xs],
+        children: [introText, introCount],
+
+        introText = text : t.title {
+          contents: "3 items waiting for you"
+        }
+
+        introCount = text : t.caption {
+          contents: "Newest first",
+          fill[0].color: c.colors.faint
+        }
+      }
+
+      item1 = frame : attention.inboxItem {
+        head {
+          time {
+            contents: "15:41"
+          }
+        }
+
+        heading {
+          contents: "Installer signature check failed on Windows 11 24H2. What next?"
+        }
+
+        summary {
+          contents: "The installer reports an unknown publisher on 24H2 while passing on the other two devices. The signing certificate chain is missing an intermediate certificate."
+        }
+
+        threadRef {
+          threadName {
+            contents: "Verify installer on Windows 11"
+          }
+        }
+
+        options {
+          first {
+            label {
+              contents: "Bundle the certificate and retest"
+            }
+          }
+
+          second {
+            label {
+              contents: "Record issue and test other platforms"
+            }
+          }
+
+          third {
+            label {
+              contents: "Skip 24H2 for this release"
+            }
+          }
+        }
+      }
+
+      item2 = frame : attention.systemItem {}
+
+      item3 = frame : attention.inboxItem {
+        options {
+          overrides: [remove(attention.attentionCard.options.third)],
+
+          second {
+            label {
+              contents: "Stay on 15.0.1 and upgrade next release"
+            }
+          }
+
+          first {
+            label {
+              contents: "Upgrade first and test on 15.1"
+            }
+          }
+        }
+
+        threadRef {
+          display: .none
+        }
+
+        summary {
+          contents: "macOS 15.1 changed local network permission prompts, which may affect batond's first connection. The test host is currently on 15.0.1."
+        }
+
+        heading {
+          contents: "Upgrade the macOS test host to 15.1 before running?"
+        }
+
+        head {
+          time {
+            contents: "Yesterday 22:10"
+          }
+        }
+      }
+    }
+  }
+}

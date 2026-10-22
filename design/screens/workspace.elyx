@@ -1,0 +1,264 @@
+import "tokens/colors.elyx" as c
+import "blocks/workspace-shell.elyx" as shells
+import "blocks/sidebar.elyx" as sidebars
+import "controls/icons.elyx" as icons
+import "blocks/login-shell.elyx" as signIn
+import "blocks/enroll-dialog.elyx" as enroll
+
+firstVisit = frame : shells.firstVisit {
+  caption: "Connect a device is the main action. Create a project or open Threads from here.",
+  left: 0px,
+  top: 0px,
+
+  main {
+    content {
+      welcome {
+        action {
+          connections[0].target: firstDeviceSetup
+        }
+      }
+    }
+
+    head {
+      collapse {
+        connections[0].target: collapsed
+      }
+    }
+  }
+
+  sidebar {
+    footer {
+      settings {
+        connections[0].target: accountOpen
+      }
+
+      account {
+        connections[0].target: accountOpen
+      }
+    }
+  }
+}
+
+accountOpen = frame : shells.firstVisit {
+  title: "Workspace / Account menu",
+  caption: "Open the current account menu. Escape or an outside click closes it.",
+  left: 1728px,
+  top: 0px,
+  connections[0].label: "Close menu",
+  connections[0].target: firstVisit,
+  overrides: [insert(menu, after = shells.firstVisit.main)],
+
+  menu = frame : sidebars.accountMenu {
+    left: 8px,
+    top: 704px,
+    ignore-stack: .true,
+
+    signOut {
+      connections[0].target: signingOut
+    }
+  }
+}
+
+signingOut = frame : shells.firstVisit {
+  title: "Workspace / Signing out",
+  caption: "Wait for the browser session to end before showing the sign-in page.",
+  left: 3456px,
+  top: 0px,
+  connections[0].label: "Session ended",
+  connections[0].target: signedOut,
+  connections[1].label: "Could not sign out",
+  connections[1].target: signOutFailed,
+  overrides: [insert(menu, after = shells.firstVisit.main)],
+
+  menu = frame : sidebars.accountMenu {
+    left: 8px,
+    top: 704px,
+    ignore-stack: .true,
+
+    signOut {
+      label {
+        contents: "Signing out…"
+      }
+    }
+  }
+}
+
+signOutFailed = frame : shells.firstVisit {
+  title: "Workspace / Sign-out unavailable",
+  caption: "Check the connection and retry sign-out.",
+  left: 0px,
+  top: 1080px,
+
+  main {
+    content {
+      welcome {
+        action {
+          connections[0].target: signingOut,
+
+          label {
+            contents: "Retry sign-out"
+          }
+        }
+
+        otherActions {
+          display: .none
+        }
+
+        next {
+          display: .none
+        }
+
+        detail {
+          contents: "Baton could not be reached to confirm sign-out. Your browser may still be signed in. Check your connection and try again."
+        }
+
+        title {
+          contents: "Could not sign out"
+        }
+      }
+    }
+  }
+}
+
+collapsed = frame : shells.firstVisit {
+  title: "Workspace / Sidebar collapsed",
+  caption: "Navigation stays available as icons. Expand to see projects and labels.",
+  left: 1728px,
+  top: 1080px,
+
+  main {
+    head {
+      collapse {
+        title: "Expand sidebar",
+        connections[0].target: firstVisit,
+
+        @with-variant(icons.chevronRight)
+        glyph {}
+      }
+    }
+  }
+
+  @with-variant(sidebars.sidebarCollapsed)
+  sidebar {
+    footer {
+      account {
+        connections[0].target: accountOpen
+      }
+    }
+
+    top {
+      nav {
+        navInbox {
+          trail {
+            count {
+              display: .none
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+connected = frame : shells.firstVisit {
+  title: "Workspace / First device connected",
+  caption: "Start a chat opens Threads with the new default device preselected.",
+  left: 3456px,
+  top: 1080px,
+
+  main {
+    content {
+      welcome {
+        otherActions {
+          newChat {
+            display: .none
+          }
+        }
+
+        title {
+          contents: "MacBook Pro is ready"
+        }
+
+        detail {
+          contents: "Codex and Pi are available. MacBook Pro is your default device for new chats."
+        }
+
+        action {
+          label {
+            contents: "Start a chat"
+          }
+        }
+
+        next {
+          contents: "Choose a folder and model in Threads, then send your first message."
+        }
+      }
+    }
+  }
+
+  sidebar {
+    top {
+      nav {
+        navDevices {
+          trail {
+            note {
+              contents: "1/1 online"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+signedOut = frame : signIn.signedOutPage {
+  title: "Workspace / Signed out",
+  caption: "Sign-out returns to the sign-in form with the password cleared.",
+  left: 5184px,
+  top: 0px
+}
+
+firstDeviceSetup = frame : shells.firstVisit {
+  title: "Workspace / Connect first device",
+  caption: "Finish setup, then start a chat in Threads.",
+  left: 5184px,
+  top: 1080px,
+  connections[0].label: "Device connected; close setup",
+  connections[0].target: connected,
+  overrides: [insert(scrim, after = shells.firstVisit.main)],
+
+  main {
+    content {
+      welcome {
+        action {
+          fill[0].color: c.colors.surface,
+
+          label {
+            fill[0].color: c.colors.text
+          }
+        }
+      }
+    }
+  }
+
+  scrim = frame {
+    left: 0px,
+    top: 0px,
+    width: 100%,
+    height: 100%,
+    ignore-stack: .true,
+    layout: {justify-content: .center, align-items: .center},
+    fill: c.colors.overlay,
+    children: form,
+
+    form = frame : enroll.enrollDialog {
+      footer {
+        actions {
+          cancel {
+            connections[0].target: firstVisit
+          }
+        }
+      }
+    }
+  }
+}

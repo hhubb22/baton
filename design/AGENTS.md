@@ -1,6 +1,6 @@
 # Baton Elyx 设计项目
 
-此目录管理 Baton Web UI 的界面设计。`.elyx` 保存设计，`elyx.json` 保存项目配置。产品行为以仓库 `specs/` 为准，界面文案遵循 `design/WRITING.md`；设计稿独立于 `web/` 里的代码，代码按设计稿实现。
+此目录管理 Baton Web UI 的界面设计。`.elyx` 保存设计，`elyx.json` 保存项目配置。产品行为以仓库 `specs/` 为准，界面文案遵循 `design/WRITING.md`，入口和返回路径见 `design/FLOWS.md`；设计稿独立于 `web/` 里的代码，代码按设计稿实现。
 
 ## 项目结构
 
@@ -10,11 +10,11 @@
 - `controls/`：基础控件和图标。图标都是 `icons.glyph` 的变体，实例里用 `@with-variant(icons.<名称>)` 换图标。
 - `blocks/`：组合区块。`project-page.elyx` 是完整的 Project 页，`thread-list.elyx` 是完整的 Thread 页，screens 里的页面状态都是它们的实例。`thread-detail.elyx` 收着 Thread 详情的全部状态；`new-thread.elyx` 是位置菜单和模型菜单，`enroll-dialog.elyx`、`file-preview.elyx` 是接入设备和文件预览。
 - `screens/`：完整页面，一类页面一个文件，同一页面的不同状态放在同一文件的多个画板里。
-- `resources/assets/`：SVG 图标，24 视框、1.7px 描边、黑色单色。
+- `resources/assets/`：操作图标采用 24 视框、1.7px 描边、黑色单色；Baton 品牌 SVG 保留提供的 64 视框、比例和颜色，通过 `controls/brand.elyx` 复用。
 
 ## 设计规则
 
-- 青色（`agent`、`agentText`、`agentSoft`）只用于 Project Agent：它的标识、运行中状态和它给出的建议。用户主操作用蓝色 `accent`，即发送和主按钮；卡片里的次要动作用 `accentSoft` 底配 `link` 文字。侧栏的 Baton 标识用近黑色，保证一屏只有一处实心蓝。
+- 界面中的青色（`agent`、`agentText`、`agentSoft`）用于 Project Agent：它的标识、运行中状态和它给出的建议。Baton 彩色品牌标识保留 SVG 自带的青色，不作为状态提示。用户主操作用蓝色 `accent`，即发送和主按钮；卡片里的次要动作用 `accentSoft` 底配 `link` 文字。侧栏用 Baton 单色标识，颜色跟随 `text`；登录页用随主题切换的彩色标识。项目头像继续使用项目名称首字母，不与 Baton 品牌标识混用。
 - 一屏最多一个实心主按钮，其余用 secondary 或 ghost。
 - 浮层最多两层。需要第三层时改用弹窗，并替换当前弹窗。
 - 弱化文字用 `muted` 或 `faint`，不用透明度。`faint` 只给占位符和元信息。

@@ -5,6 +5,7 @@ import "controls/status.elyx" as status
 import "controls/avatar.elyx" as avatars
 import "controls/input.elyx" as inputs
 import "blocks/sidebar.elyx" as sidebars
+import "controls/button.elyx" as buttons
 import "blocks/overview.elyx" as overviews
 import "blocks/thread-detail.elyx" as details
 import "blocks/composer.elyx" as composers
@@ -761,6 +762,175 @@ export threadsPageSplit = frame : threadsPage {
       lead {
         back {
           display: .none
+        }
+      }
+    }
+  }
+}
+
+export listFeedback = frame {
+  title: "Thread list feedback",
+  left: 0px,
+  top: 2600px,
+  width: 600px,
+  height: 300px,
+  layout: {
+    direction: .column,
+    justify-content: .center,
+    align-items: .center,
+    item-gap: 8px
+  },
+  children: [heading, description, action],
+
+  heading = text : t.label {
+    contents: "No chats yet"
+  }
+
+  description = text : t.small {
+    width: 380px,
+    contents: "Choose a folder and model above, then send your first message.",
+    align: .center,
+    fill[0].color: c.colors.muted
+  }
+
+  action = frame : buttons.smallSecondary {
+    label {
+      contents: "Write first message"
+    }
+  }
+}
+
+@variant
+export threadsPageEmpty = frame : threadsPage {
+  title: "Threads / Empty",
+  caption: "Write first message focuses the new chat input above.",
+  left: 0px,
+  top: 3100px,
+
+  main {
+    overrides: [insert(feedback, after = threadsPage.main.list)],
+
+    list {
+      display: .none
+    }
+
+    filters {
+      total {
+        contents: "0 threads"
+      }
+    }
+  }
+
+  feedback = frame : listFeedback {
+    width: 100%,
+    height: 100%
+  }
+}
+
+@variant
+export threadsPageNoResults = frame : threadsPageEmpty {
+  title: "Threads / No filter results",
+  caption: "Clear filters restores the full list and keeps the draft.",
+  left: 1728px,
+  top: 3100px,
+
+  main {
+    filters {
+      pickers {
+        byDevice {
+          value {
+            contents: "MacBook Pro"
+          }
+        }
+
+        byProject {
+          value {
+            contents: "Switch Patrol"
+          }
+        }
+
+        byState {
+          value {
+            contents: "Archived"
+          }
+        }
+      }
+    }
+
+    feedback {
+      heading {
+        contents: "No chats match these filters"
+      }
+
+      description {
+        contents: "Try another device, project, or archive filter."
+      }
+
+      action {
+        label {
+          contents: "Clear filters"
+        }
+      }
+    }
+  }
+}
+
+@variant
+export threadsPageLoading = frame : threadsPageEmpty {
+  title: "Threads / Loading",
+  caption: "Fetch the list while keeping the new chat input available.",
+  left: 3456px,
+  top: 3100px,
+
+  main {
+    feedback {
+      action {
+        display: .none
+      }
+
+      heading {
+        contents: "Loading chats…"
+      }
+
+      description {
+        contents: "Your list will appear here."
+      }
+    }
+
+    filters {
+      total {
+        contents: "Loading…"
+      }
+    }
+  }
+}
+
+@variant
+export threadsPageFailed = frame : threadsPageEmpty {
+  title: "Threads / Loading failed",
+  caption: "Retry keeps the current filters and new chat draft.",
+  left: 0px,
+  top: 4280px,
+
+  main {
+    filters {
+      total {
+        contents: "List unavailable"
+      }
+    }
+
+    feedback {
+      heading {
+        contents: "Could not load chats"
+      }
+
+      description {
+        contents: "Baton could not read your chat list. Check your connection, then retry."
+      }
+
+      action {
+        label {
+          contents: "Retry"
         }
       }
     }

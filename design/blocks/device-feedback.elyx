@@ -1,0 +1,63 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+import "controls/button.elyx" as buttons
+
+export notice = frame {
+  title: "Device feedback",
+  left: 0px,
+  top: 0px,
+  width: 800px,
+  layout: {direction: .column, item-gap: 8px},
+  fill: c.colors.panel,
+  border: c.colors.borderSoft,
+  corner-radius: s.radius.md,
+  padding: 16px,
+  children: [heading, detail, action],
+
+  heading = text : t.label {
+    contents: "Choose a default device"
+  }
+
+  detail = text : t.small {
+    width: 100%,
+    contents: "Your default device was removed. Choose another device for new chats and projects.",
+    fill[0].color: c.colors.muted
+  }
+
+  action = frame : buttons.smallSecondary {
+    label {
+      contents: "Set Windows Desktop as default"
+    }
+  }
+}
+
+export emptyDevices = frame {
+  title: "No connected devices",
+  left: 0px,
+  top: 240px,
+  width: 800px,
+  layout: {direction: .column, align-items: .center, item-gap: 12px},
+  fill: c.colors.surface,
+  border: c.colors.borderSoft,
+  corner-radius: 10px,
+  padding: [64px, 32px],
+  children: [heading, detail, action],
+
+  heading = text : t.heading {
+    contents: "No devices connected"
+  }
+
+  detail = text : t.small {
+    width: 480px,
+    contents: "Connect a computer to start chats and run work in your projects.",
+    align: .center,
+    fill[0].color: c.colors.muted
+  }
+
+  action = frame : buttons.button {
+    label {
+      contents: "Connect a device"
+    }
+  }
+}

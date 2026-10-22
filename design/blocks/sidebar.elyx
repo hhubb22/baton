@@ -6,6 +6,7 @@ import "controls/button.elyx" as buttons
 import "controls/avatar.elyx" as avatars
 import "controls/badge.elyx" as badges
 import "controls/status.elyx" as status
+import "controls/brand.elyx" as logos
 
 // Navigation row: icon, label, and trailing count or note
 export navRow = frame {
@@ -220,21 +221,9 @@ export sidebar = frame {
         layout: {align-items: .center, item-gap: s.space.sm},
         children: [mark, wordmark],
 
-        mark = frame {
-          width: 20px,
-          height: 20px,
-          layout: {justify-content: .center, align-items: .center},
-          fill: c.colors.text,
-          corner-radius: 5px,
-          children: markLetter,
-
-          markLetter = text : t.caption {
-            contents: "B",
-            font-size: 11,
-            font-style: "Semibold",
-            line-height: 1,
-            fill[0].color: c.colors.surface
-          }
+        mark = asset : logos.monoMark {
+          width: 24px,
+          height: 24px
         }
 
         wordmark = text : t.label {
@@ -413,6 +402,191 @@ export sidebar = frame {
     settings = frame : buttons.iconButton {
       @with-variant(icons.settings)
       glyph {}
+    }
+  }
+}
+
+@variant
+export sidebarEmpty = frame : sidebar {
+  title: "Sidebar / First visit",
+  caption: "Open Threads to start a chat or connect a device first.",
+  left: 640px,
+  top: 0px,
+
+  top {
+    overrides: [insert(emptyProjects, after = sidebar.top.projects)],
+
+    brand {
+      newProject {
+        title: "New chat"
+      }
+    }
+
+    nav {
+      navInbox {
+        trail {
+          count {
+            display: .none
+          }
+        }
+      }
+
+      navDevices {
+        trail {
+          note {
+            contents: "0 devices"
+          }
+        }
+      }
+    }
+
+    projects {
+      display: .none
+    }
+  }
+
+  emptyProjects = text : t.caption {
+    width: 100%,
+    contents: "No projects yet",
+    fill[0].color: c.colors.faint
+  }
+}
+
+@variant
+export sidebarCollapsed = frame : sidebar {
+  title: "Sidebar / Collapsed",
+  caption: "Keep navigation icons visible. Expand to see labels and projects.",
+  left: 960px,
+  top: 0px,
+  width: 64px,
+
+  top {
+    brand {
+      brandLead {
+        wordmark {
+          display: .none
+        }
+      }
+
+      newProject {
+        display: .none
+      }
+    }
+
+    nav {
+      overrides: [insert(newChat, after = .nil)],
+
+      navInbox {
+        lead {
+          label {
+            display: .none
+          }
+        }
+
+        trail {
+          display: .none
+        }
+      }
+
+      navThreads {
+        lead {
+          label {
+            display: .none
+          }
+        }
+
+        trail {
+          display: .none
+        }
+      }
+
+      navDevices {
+        lead {
+          label {
+            display: .none
+          }
+        }
+
+        trail {
+          display: .none
+        }
+      }
+    }
+
+    sectionHead {
+      display: .none
+    }
+
+    projects {
+      display: .none
+    }
+  }
+
+  footer {
+    account {
+      personName {
+        display: .none
+      }
+    }
+
+    settings {
+      display: .none
+    }
+  }
+
+  newChat = frame : navRow {
+    title: "New chat",
+    width: 100%,
+
+    trail {
+      display: .none
+    }
+
+    lead {
+      label {
+        display: .none
+      }
+
+      @with-variant(icons.pen)
+      glyph {}
+    }
+  }
+}
+
+export accountMenu = frame {
+  title: "Account menu",
+  caption: "Sign out of the current browser session.",
+  left: 1100px,
+  top: 0px,
+  width: 232px,
+  layout: {direction: .column, item-gap: 8px},
+  fill: c.colors.surface,
+  border: c.colors.border,
+  corner-radius: s.radius.md,
+  padding: 8px,
+  children: [identity, signOut],
+
+  identity = frame {
+    width: 100%,
+    layout: {direction: .column, item-gap: 4px},
+    padding: 8px,
+    children: [personName, username],
+
+    personName = text : t.label {
+      contents: "Kaken He"
+    }
+
+    username = text : t.caption {
+      contents: "kaken",
+      fill[0].color: c.colors.faint
+    }
+  }
+
+  signOut = frame : buttons.secondary {
+    width: 100%,
+
+    label {
+      contents: "Sign out"
     }
   }
 }

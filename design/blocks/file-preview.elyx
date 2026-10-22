@@ -536,3 +536,194 @@ export filePreviewDenied = frame : filePreview {
     }
   }
 }
+
+@variant
+export filePreviewMissing = frame : filePreview {
+  title: "File preview / File not found",
+  caption: "Go back to the folder to choose another file. No previous preview is shown.",
+  left: 0px,
+  top: 1640px,
+
+  body {
+    empty {
+      emptyAction {
+        connections[0].target: filePreview,
+        connections[0].label: "Return to folder",
+
+        label {
+          contents: "Go back"
+        }
+      }
+
+      emptyDetail {
+        width: 420px,
+        contents: "reconnect_test.go was moved or deleted. Go back to the folder and choose another file.",
+        align: .center
+      }
+
+      emptyHeading {
+        contents: "File not found on Windows Desktop"
+      }
+
+      display: .visible,
+
+      @with-variant(icons.file)
+      emptyGlyph {}
+    }
+
+    preview {
+      display: .none
+    }
+  }
+
+  head {
+    copy {
+      display: .none
+    }
+
+    location {
+      meta {
+        contents: "Windows Desktop · D:\\src\\baton-ps160"
+      }
+    }
+  }
+}
+
+@variant
+export filePreviewLoading = frame : filePreviewMissing {
+  title: "File preview / Loading",
+  caption: "Read the selected file from the device without showing the previous preview.",
+  left: 1200px,
+  top: 1640px,
+
+  body {
+    empty {
+      emptyAction {
+        display: .none
+      }
+
+      emptyDetail {
+        contents: "Reading reconnect_test.go from Windows Desktop."
+      }
+
+      emptyHeading {
+        contents: "Loading file…"
+      }
+
+      @with-variant(icons.clock)
+      emptyGlyph {}
+    }
+  }
+}
+
+@variant
+export filePreviewBinary = frame : filePreviewMissing {
+  title: "File preview / Binary file",
+  caption: "Open the binary file on its device, or go back to choose a text file.",
+  left: 0px,
+  top: 2380px,
+
+  head {
+    location {
+      path {
+        contents: "internal/gateway/testdata/capture.bin"
+      }
+
+      meta {
+        contents: "Windows Desktop · D:\\src\\baton-ps160 · 2.4 MB"
+      }
+    }
+  }
+
+  body {
+    tree {
+      crumb {
+        folder {
+          contents: "testdata"
+        }
+      }
+
+      testdata {
+        name {
+          contents: "fixtures"
+        }
+      }
+
+      client {
+        name {
+          contents: "manifest.json"
+        }
+      }
+
+      gateway {
+        name {
+          contents: "capture.txt"
+        }
+      }
+
+      reconnect {
+        name {
+          contents: "metadata.json"
+        }
+      }
+
+      session {
+        name {
+          contents: "readme.txt"
+        }
+      }
+
+      current {
+        name {
+          contents: "capture.bin"
+        }
+
+        size {
+          contents: "2.4 MB"
+        }
+      }
+    }
+
+    empty {
+      emptyHeading {
+        contents: "Binary file cannot be previewed"
+      }
+
+      emptyDetail {
+        contents: "Baton only reads limited text previews. Open capture.bin on Windows Desktop, or choose a text file."
+      }
+    }
+  }
+}
+
+@variant
+export filePreviewFailed = frame : filePreviewMissing {
+  title: "File preview / Read failed",
+  caption: "Retry the same file. The previous preview stays hidden.",
+  left: 1200px,
+  top: 2380px,
+
+  body {
+    empty {
+      emptyAction {
+        connections[0].target: filePreviewLoading,
+        connections[0].label: "Read file again",
+
+        label {
+          contents: "Retry"
+        }
+      }
+
+      emptyDetail {
+        contents: "Windows Desktop did not return reconnect_test.go. Retry to read it again, or choose another file."
+      }
+
+      emptyHeading {
+        contents: "Could not read this file"
+      }
+
+      @with-variant(icons.alert)
+      emptyGlyph {}
+    }
+  }
+}

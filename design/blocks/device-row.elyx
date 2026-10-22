@@ -182,3 +182,38 @@ export capabilityLine = frame {
     fill[0].color: c.colors.faint
   }
 }
+
+@variant
+export deviceSyncing = frame : deviceRow {
+  title: "Device row / Syncing",
+  caption: "Connected; chats wait until device information is up to date.",
+  left: 0px,
+  top: 360px,
+
+  state {
+    stateText {
+      fill[0].color: c.colors.muted,
+      contents: "Syncing · last seen now"
+    }
+
+    @with-variant(status.dotQueued)
+    mark {}
+  }
+
+  agents {
+    contents: "Checking availability…"
+  }
+}
+
+@variant
+export deviceMissing = frame : deviceRow {
+  title: "Device row / Setup needed",
+  caption: "Open details to check missing programs and sign-ins.",
+  left: 0px,
+  top: 480px,
+
+  agents {
+    fill[0].color: c.colors.attentionText,
+    contents: "Codex needs sign-in"
+  }
+}

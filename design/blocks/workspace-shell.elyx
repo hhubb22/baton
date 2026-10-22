@@ -1,0 +1,105 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+import "blocks/sidebar.elyx" as sidebars
+import "controls/icons.elyx" as icons
+import "controls/button.elyx" as buttons
+
+export firstVisit = frame {
+  title: "Workspace / First visit",
+  caption: "Connect a device first, then start a chat in Threads.",
+  left: 0px,
+  top: 0px,
+  width: s.size.screenWidth,
+  height: s.size.screenHeight,
+  layout: {direction: .row},
+  fill: c.colors.canvas,
+  children: [sidebar, main],
+
+  sidebar = frame : sidebars.sidebarEmpty {}
+
+  main = frame {
+    width: 100%,
+    height: 100%,
+    layout: {direction: .column},
+    children: [head, content],
+
+    head = frame {
+      width: 100%,
+      height: s.size.header,
+      layout: {align-items: .center, item-gap: 12px},
+      border: {color: c.colors.borderSoft, sides: .bottom},
+      padding: [0px, 20px],
+      children: [collapse, heading],
+
+      collapse = frame : buttons.iconButton {
+        title: "Collapse sidebar",
+
+        @with-variant(icons.chevronLeft)
+        glyph {}
+      }
+
+      heading = text : t.label {
+        contents: "Workspace"
+      }
+    }
+
+    content = frame {
+      width: 100%,
+      height: 100%,
+      layout: {
+        direction: .column,
+        justify-content: .center,
+        align-items: .center
+      },
+      children: welcome,
+
+      welcome = frame {
+        width: 520px,
+        layout: {direction: .column, align-items: .center, item-gap: 16px},
+        children: [title, detail, action, next, otherActions],
+
+        title = text : t.title {
+          contents: "Connect your first device"
+        }
+
+        detail = text : t.small {
+          width: 100%,
+          contents: "Connect the computer where your code lives to chat with Codex, Kiro, or Pi.",
+          align: .center,
+          fill[0].color: c.colors.muted
+        }
+
+        action = frame : buttons.button {
+          label {
+            contents: "Connect a device"
+          }
+        }
+
+        next = text : t.caption {
+          width: 100%,
+          contents: "Once connected, open Threads to start a chat.",
+          align: .center,
+          fill[0].color: c.colors.faint
+        }
+
+        otherActions = frame {
+          layout: {align-items: .center, item-gap: 8px},
+          children: [newProject, newChat],
+
+          newProject = frame : buttons.secondary {
+            label {
+              contents: "New project"
+            }
+          }
+
+          newChat = frame : buttons.ghost {
+            label {
+              contents: "Open Threads"
+            }
+          }
+        }
+      }
+    }
+  }
+}

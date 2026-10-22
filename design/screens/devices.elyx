@@ -4,12 +4,14 @@ import "foundations/typography.elyx" as t
 import "blocks/sidebar.elyx" as sidebars
 import "controls/icons.elyx" as icons
 import "controls/button.elyx" as buttons
+import "controls/status.elyx" as status
 import "blocks/device-row.elyx" as rows
 import "controls/toggle.elyx" as toggles
 import "blocks/enroll-dialog.elyx" as enroll
 import "blocks/dialog.elyx" as dialogs
+import "blocks/device-feedback.elyx" as feedback
 
-devices = frame {
+export devices = frame {
   title: "Devices",
   caption: "Manage connected computers, assistants, allowed folders, and command permissions.",
   left: 0px,
@@ -61,7 +63,19 @@ devices = frame {
       width: 800px,
       layout: {direction: .column, item-gap: s.space.lg},
       padding: [s.space.xxl, 0px],
-      children: [intro, list],
+      children: [intro, notice, list, empty],
+
+      notice = frame : feedback.notice {
+        display: .none
+      }
+
+      empty = frame : feedback.emptyDevices {
+        display: .none,
+
+        action {
+          connections[0].target: devicesEnroll
+        }
+      }
 
       intro = frame {
         width: 100%,
@@ -108,7 +122,9 @@ devices = frame {
         mac = frame : rows.deviceOffline {
           width: 100%,
           border[0].color: c.colors.borderSoft,
-          border[0].sides: .bottom
+          border[0].sides: .bottom,
+          connections[0].label: "View offline device",
+          connections[0].target: devicesOfflineView
         }
 
         windows = frame : rows.deviceRow {
@@ -137,7 +153,19 @@ devices = frame {
             agentsCol = frame {
               width: 100%,
               layout: {direction: .column, item-gap: s.space.sm},
-              children: [agentsLabel, agentLine1, agentLine2, agentLine3],
+              children: [
+                agentsLabel,
+                agentLine1,
+                agentLine2,
+                agentLine3,
+                capabilityNote
+              ],
+
+              capabilityNote = text : t.caption {
+                width: 100%,
+                contents: "Codex 0.42 · GPT-5 (default), GPT-5 mini\nNew chat · send next · send now · stop\nResume chat · change model",
+                fill[0].color: c.colors.muted
+              }
 
               agentsLabel = text : t.captionMedium {
                 contents: "Agents & subscriptions",
@@ -212,10 +240,19 @@ devices = frame {
             border: c.colors.borderSoft,
             corner-radius: s.radius.md,
             padding: [14px, s.space.lg],
-            children: [execToggle, warning],
+            children: [execToggle, warning, permissionFeedback],
+
+            permissionFeedback = text : t.caption {
+              width: 100%,
+              display: .none,
+              contents: "Saving command permission…",
+              fill[0].color: c.colors.muted
+            }
 
             execToggle = frame : toggles.on {
               width: 100%,
+              connections[0].label: "Change command permission",
+              connections[0].target: devicesPermissionSaving,
 
               copy {
                 helper {
@@ -257,6 +294,8 @@ devices = frame {
             children: [makeDefault, revoke, revokeNote],
 
             makeDefault = frame : buttons.smallSecondary {
+              connections[0].target: devicesDefaultSaved,
+
               label {
                 contents: "Set as default"
               }
@@ -284,7 +323,7 @@ devices = frame {
   }
 }
 
-devicesEnroll = frame : devices {
+export devicesEnroll = frame : devices {
   title: "Devices · Connect device",
   caption: "Choose a system, run the command, and paste the setup code.",
   left: 1728px,
@@ -301,7 +340,15 @@ devicesEnroll = frame : devices {
     fill: c.colors.overlay,
     children: form,
 
-    form = frame : enroll.enrollDialog {}
+    form = frame : enroll.enrollDialog {
+      footer {
+        actions {
+          cancel {
+            connections[0].target: devices
+          }
+        }
+      }
+    }
   }
 }
 
@@ -325,14 +372,16 @@ devicesDisconnect = frame : devices {
     form = frame : dialogs.dialog {
       footer {
         actions {
-          cancel {
-            connections[0].target: devices
-          }
-
           confirm {
+            connections[0].target: devicesDisconnecting,
+
             label {
               contents: "Disconnect device"
             }
+          }
+
+          cancel {
+            connections[0].target: devices
           }
         }
       }
@@ -345,6 +394,1000 @@ devicesDisconnect = frame : devices {
 
       heading {
         contents: "Disconnect “Ubuntu Dev”?"
+      }
+    }
+  }
+}
+
+export devicesEmpty = frame : devices {
+  title: "Devices / No devices",
+  caption: "Connect a computer, then open Threads to start a chat.",
+  left: 0px,
+  top: 1080px,
+
+  main {
+    content {
+      intro {
+        enroll {
+          display: .none
+        }
+
+        introCopy {
+          introTitle {
+            contents: "Your devices"
+          }
+        }
+      }
+
+      list {
+        display: .none
+      }
+
+      empty {
+        display: .visible
+      }
+    }
+  }
+
+  sidebar {
+    top {
+      nav {
+        navDevices {
+          trail {
+            note {
+              contents: "0 devices"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+devicesSyncing = frame : devices {
+  title: "Devices / Syncing",
+  caption: "Connection is restored. Wait for device information before starting work.",
+  left: 1728px,
+  top: 1080px,
+
+  main {
+    content {
+      list {
+        ubuntu {
+          state {
+            stateText {
+              fill[0].color: c.colors.muted,
+              contents: "Syncing · last seen now"
+            }
+
+            @with-variant(status.dotQueued)
+            mark {}
+          }
+
+          agents {
+            contents: "Checking availability…"
+          }
+        }
+
+        ubuntuDetail {
+          display: .none
+        }
+      }
+
+      notice {
+        action {
+          display: .none
+        }
+
+        detail {
+          contents: "Connected just now. Chats will wait until device information is up to date."
+        }
+
+        heading {
+          contents: "Ubuntu Dev is syncing"
+        }
+
+        display: .visible
+      }
+
+      intro {
+        introCopy {
+          introTitle {
+            contents: "3 devices · 1 online · 1 syncing"
+          }
+        }
+      }
+    }
+  }
+
+  sidebar {
+    top {
+      nav {
+        navDevices {
+          trail {
+            note {
+              contents: "1 online · 1 syncing"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+devicesMissing = frame : devices {
+  title: "Devices / Missing programs and sign-ins",
+  caption: "Check setup on Ubuntu Dev; availability updates after the device reports again.",
+  left: 3456px,
+  top: 1080px,
+
+  main {
+    content {
+      list {
+        ubuntuDetail {
+          columns {
+            agentsCol {
+              agentLine3 {
+                note {
+                  fill[0].color: c.colors.attentionText,
+                  contents: "Not installed"
+                }
+
+                check {
+                  display: .none
+                }
+              }
+
+              agentLine2 {
+                note {
+                  fill[0].color: c.colors.attentionText,
+                  contents: "Program not installed"
+                }
+
+                check {
+                  display: .none
+                }
+              }
+
+              agentLine1 {
+                note {
+                  fill[0].color: c.colors.attentionText,
+                  contents: "ChatGPT sign-in expired"
+                }
+
+                check {
+                  display: .none
+                }
+              }
+
+              capabilityNote {
+                contents: "Codex 0.42 · GPT-5 (default)\nNew chats unavailable until signed in.\nPi models unavailable until installed."
+              }
+            }
+          }
+
+          exec {
+            display: .none
+          }
+        }
+
+        ubuntu {
+          agents {
+            fill[0].color: c.colors.attentionText,
+            contents: "Setup needed"
+          }
+
+          state {
+            stateText {
+              fill[0].color: c.colors.text,
+              contents: "Online"
+            }
+
+            @with-variant(status.dotOnline)
+            mark {}
+          }
+        }
+      }
+
+      notice {
+        action {
+          display: .none
+        }
+
+        detail {
+          contents: "Sign in to ChatGPT for Codex, install Pi, and update Baton for the project assistant. Make these changes on Ubuntu Dev."
+        }
+
+        heading {
+          contents: "Finish setup on Ubuntu Dev"
+        }
+
+        display: .visible
+      }
+    }
+  }
+}
+
+devicesDefaultOffline = frame : devicesDisconnect {
+  title: "Devices / Choose offline default",
+  caption: "Save an offline default after reviewing how new work waits or uses another device.",
+  left: 0px,
+  top: 2160px,
+
+  scrim {
+    form {
+      footer {
+        actions {
+          cancel {
+            connections[0].target: devicesOfflineSelect
+          }
+
+          confirm {
+            fill[0].color: c.colors.accent,
+            connections[0].target: devicesOfflineDefaultSaved,
+
+            label {
+              contents: "Save default device"
+            }
+          }
+        }
+      }
+
+      heading {
+        contents: "Use MacBook Pro as default?"
+      }
+
+      content {
+        message {
+          contents: "MacBook Pro is offline, last seen at 13:52. New chats on it wait until it reconnects. Projects can use another available computer. You can still save it as your default."
+        }
+      }
+    }
+  }
+
+  main {
+    content {
+      list {
+        mac {
+          identity {
+            copy {
+              nameLine {
+                defaultTag {
+                  display: .none
+                }
+              }
+            }
+          }
+        }
+
+        windows {
+          identity {
+            copy {
+              nameLine {
+                defaultTag {
+                  display: .none
+                }
+              }
+            }
+          }
+        }
+
+        ubuntu {
+          identity {
+            copy {
+              nameLine {
+                defaultTag {
+                  display: .visible
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+devicesOfflineDefaultSaved = frame : devices {
+  title: "Devices / Offline default saved",
+  caption: "MacBook Pro stays the default even while offline.",
+  left: 1728px,
+  top: 2160px,
+
+  main {
+    content {
+      notice {
+        action {
+          display: .none
+        }
+
+        heading {
+          contents: "Default device saved"
+        }
+
+        detail {
+          contents: "MacBook Pro is your default device. It is offline; new chats on it wait until it reconnects."
+        }
+
+        display: .visible
+      }
+    }
+  }
+}
+
+devicesDefaultSaved = frame : devices {
+  title: "Devices / Default saved",
+  caption: "The new default is used for the next chat and preferred for projects.",
+  left: 3456px,
+  top: 2160px,
+
+  main {
+    content {
+      list {
+        ubuntuDetail {
+          detailActions {
+            revoke {
+              connections[0].target: devicesDefaultDisconnect
+            }
+
+            makeDefault {
+              label {
+                contents: "Default device"
+              }
+            }
+          }
+        }
+
+        mac {
+          connections[0].target: devicesOfflineSelect,
+
+          identity {
+            copy {
+              nameLine {
+                defaultTag {
+                  display: .none
+                }
+              }
+            }
+          }
+        }
+
+        ubuntu {
+          identity {
+            copy {
+              nameLine {
+                defaultTag {
+                  display: .visible
+                }
+              }
+            }
+          }
+        }
+      }
+
+      notice {
+        action {
+          display: .none
+        }
+
+        heading {
+          contents: "Default device saved"
+        }
+
+        detail {
+          contents: "Ubuntu Dev is your default for new chats and the first choice for the project assistant."
+        }
+
+        display: .visible
+      }
+    }
+  }
+}
+
+devicesPermissionSaving = frame : devices {
+  title: "Devices / Saving permission",
+  caption: "Keep the last saved setting visible until the change is saved.",
+  left: 0px,
+  top: 3240px,
+  connections[0].label: "Saved",
+  connections[0].target: devicesPermissionSaved,
+  connections[1].label: "Could not save",
+  connections[1].target: devicesPermissionFailed,
+
+  main {
+    content {
+      list {
+        ubuntuDetail {
+          exec {
+            permissionFeedback {
+              display: .visible
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+devicesPermissionSaved = frame : devices {
+  title: "Devices / Commands turned off",
+  caption: "The switch changes after the permission is saved.",
+  left: 1728px,
+  top: 3240px,
+
+  main {
+    content {
+      list {
+        ubuntuDetail {
+          exec {
+            permissionFeedback {
+              display: .visible,
+              contents: "Saved · command permission is off"
+            }
+
+            @with-variant(toggles.toggle)
+            execToggle {
+              connections[0].target: devicesPermissionEnabling,
+
+              copy {
+                helper {
+                  contents: "Commands run as user “kaken” (zsh) in allowed folders. Turn on only if you allow direct access without a sandbox."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+devicesPermissionFailed = frame : devices {
+  title: "Devices / Permission not saved",
+  caption: "The previous setting stays active. Retry the change.",
+  left: 3456px,
+  top: 3240px,
+
+  main {
+    content {
+      list {
+        ubuntuDetail {
+          exec {
+            permissionFeedback {
+              fill[0].color: c.colors.attentionText,
+              connections[0].target: devicesPermissionSaving,
+              display: .visible,
+              contents: "Could not save because Baton could not be reached. Commands are still allowed. Click the switch to try again."
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+devicesDisconnecting = frame : devicesDisconnect {
+  title: "Devices / Disconnecting",
+  caption: "Wait until new connections are blocked and the current connection is closed.",
+  left: 0px,
+  top: 4320px,
+  connections[0].label: "Disconnected",
+  connections[0].target: devicesDisconnected,
+  connections[1].label: "Could not disconnect",
+  connections[1].target: devicesDisconnectFailed,
+
+  scrim {
+    form {
+      footer {
+        actions {
+          cancel {
+            display: .none
+          }
+
+          confirm {
+            label {
+              contents: "Disconnecting…"
+            }
+          }
+        }
+      }
+
+      content {
+        message {
+          contents: "Baton is blocking new connections and closing the current connection. Wait for confirmation before treating this device as disconnected."
+        }
+      }
+
+      heading {
+        contents: "Disconnecting Ubuntu Dev…"
+      }
+    }
+  }
+}
+
+devicesDisconnectFailed = frame : devicesDisconnect {
+  title: "Devices / Disconnect not confirmed",
+  caption: "Keep the device listed until disconnection can be confirmed.",
+  left: 1728px,
+  top: 4320px,
+
+  scrim {
+    form {
+      footer {
+        actions {
+          confirm {
+            connections[0].target: devicesDisconnecting,
+
+            label {
+              contents: "Retry disconnection"
+            }
+          }
+        }
+      }
+
+      heading {
+        contents: "Could not confirm disconnection"
+      }
+
+      content {
+        message {
+          contents: "Baton could not be reached while disconnecting Ubuntu Dev. Its connection may still be active. Check your connection, then retry to confirm removal."
+        }
+      }
+    }
+  }
+}
+
+devicesDisconnected = frame : devices {
+  title: "Devices / Device disconnected",
+  caption: "The removed device is gone from the list. Saved chats and records remain.",
+  left: 3456px,
+  top: 4320px,
+
+  main {
+    content {
+      notice {
+        action {
+          display: .none
+        }
+
+        heading {
+          contents: "Ubuntu Dev disconnected"
+        }
+
+        detail {
+          contents: "Past chats and records are kept. If Ubuntu Dev was offline, its agents may still be running locally."
+        }
+
+        display: .visible
+      }
+
+      list {
+        ubuntu {
+          display: .none
+        }
+
+        ubuntuDetail {
+          display: .none
+        }
+      }
+
+      intro {
+        introCopy {
+          introTitle {
+            contents: "2 devices, 1 online"
+          }
+        }
+      }
+    }
+  }
+
+  sidebar {
+    top {
+      nav {
+        navDevices {
+          trail {
+            note {
+              contents: "1/2 online"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+devicesDefaultRemoved = frame : devicesDisconnected {
+  title: "Devices / Default device removed",
+  caption: "Removing the default clears it. Choose another device; Baton does not choose one for you.",
+  left: 0px,
+  top: 5400px,
+
+  main {
+    content {
+      notice {
+        action {
+          connections[0].target: devicesReplacementSaved,
+          display: .visible
+        }
+
+        detail {
+          contents: "Ubuntu Dev was your default and has been removed. No replacement has been selected. Past chats and records are kept."
+        }
+
+        heading {
+          contents: "Choose a new default device"
+        }
+      }
+
+      list {
+        mac {
+          identity {
+            copy {
+              nameLine {
+                defaultTag {
+                  display: .none
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+devicesReplacementSaved = frame : devicesDisconnected {
+  title: "Devices / Replacement default saved",
+  caption: "Windows Desktop becomes the default only after you choose it.",
+  left: 1728px,
+  top: 5400px,
+
+  main {
+    content {
+      list {
+        mac {
+          identity {
+            copy {
+              nameLine {
+                defaultTag {
+                  display: .none
+                }
+              }
+            }
+          }
+        }
+
+        windows {
+          identity {
+            copy {
+              nameLine {
+                defaultTag {
+                  display: .visible
+                }
+              }
+            }
+          }
+        }
+      }
+
+      notice {
+        heading {
+          contents: "Default device saved"
+        }
+
+        detail {
+          contents: "Windows Desktop is your default for new chats and projects."
+        }
+      }
+    }
+  }
+}
+
+devicesDefaultDisconnect = frame : devicesDisconnect {
+  title: "Devices / Disconnect default device",
+  caption: "Removing the default leaves no replacement until you choose one.",
+  left: 3456px,
+  top: 5400px,
+
+  scrim {
+    form {
+      footer {
+        actions {
+          cancel {
+            connections[0].target: devicesDefaultSaved
+          }
+
+          confirm {
+            connections[0].target: devicesDefaultDisconnecting
+          }
+        }
+      }
+
+      content {
+        message {
+          contents: "Ubuntu Dev is your default device. Removing it leaves no default until you choose another. Offline agents may keep running locally. Past chats and records are kept; file changes and commands already run are not undone."
+        }
+      }
+    }
+  }
+
+  main {
+    content {
+      list {
+        mac {
+          identity {
+            copy {
+              nameLine {
+                defaultTag {
+                  display: .none
+                }
+              }
+            }
+          }
+        }
+
+        ubuntu {
+          identity {
+            copy {
+              nameLine {
+                defaultTag {
+                  display: .visible
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+devicesDefaultDisconnecting = frame : devicesDisconnecting {
+  title: "Devices / Disconnecting default device",
+  caption: "Show the choose-default prompt only after disconnection is confirmed.",
+  left: 0px,
+  top: 6480px,
+  connections[0].label: "Default device disconnected",
+  connections[0].target: devicesDefaultRemoved,
+  connections[1].target: devicesDefaultDisconnectFailed,
+
+  main {
+    content {
+      list {
+        mac {
+          identity {
+            copy {
+              nameLine {
+                defaultTag {
+                  display: .none
+                }
+              }
+            }
+          }
+        }
+
+        ubuntu {
+          identity {
+            copy {
+              nameLine {
+                defaultTag {
+                  display: .visible
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+devicesOfflineView = frame : devices {
+  title: "Devices / Offline details",
+  caption: "Last contact stays visible. New chats wait for the same device.",
+  left: 1728px,
+  top: 6480px,
+
+  main {
+    content {
+      list {
+        ubuntuDetail {
+          display: .none
+        }
+
+        mac {
+          @with-variant(icons.chevronDown)
+          chevron {}
+        }
+      }
+
+      notice {
+        action {
+          display: .none
+        }
+
+        detail {
+          contents: "Last contact at 13:52. New chats on MacBook Pro wait for it to reconnect. Wake MacBook Pro and reconnect it to the network."
+        }
+
+        heading {
+          contents: "MacBook Pro is offline"
+        }
+
+        display: .visible
+      }
+    }
+  }
+}
+
+devicesOfflineSelect = frame : devicesOfflineView {
+  title: "Devices / Select offline default",
+  caption: "Set an offline device as default from its details.",
+  left: 3456px,
+  top: 6480px,
+
+  main {
+    content {
+      notice {
+        action {
+          connections[0].target: devicesDefaultOffline,
+
+          label {
+            contents: "Set as default"
+          }
+
+          display: .visible
+        }
+      }
+
+      list {
+        mac {
+          identity {
+            copy {
+              nameLine {
+                defaultTag {
+                  display: .none
+                }
+              }
+            }
+          }
+        }
+
+        ubuntu {
+          identity {
+            copy {
+              nameLine {
+                defaultTag {
+                  display: .visible
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+devicesPermissionEnabling = frame : devicesPermissionSaved {
+  title: "Devices / Enabling commands",
+  caption: "Keep permission off until the new setting is saved.",
+  left: 0px,
+  top: 7560px,
+  connections[0].label: "Saved",
+  connections[0].target: devicesPermissionEnabled,
+  connections[1].label: "Could not save",
+  connections[1].target: devicesPermissionEnableFailed,
+
+  main {
+    content {
+      list {
+        ubuntuDetail {
+          exec {
+            permissionFeedback {
+              contents: "Saving command permission…"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+devicesPermissionEnabled = frame : devices {
+  title: "Devices / Commands turned on",
+  caption: "Permission is on after it has been saved.",
+  left: 1728px,
+  top: 7560px,
+
+  main {
+    content {
+      list {
+        ubuntuDetail {
+          exec {
+            permissionFeedback {
+              display: .visible,
+              contents: "Saved · command permission is on"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+devicesPermissionEnableFailed = frame : devicesPermissionSaved {
+  title: "Devices / Commands remain off",
+  caption: "A failed change leaves the previous setting active. Retry the switch.",
+  left: 3456px,
+  top: 7560px,
+
+  main {
+    content {
+      list {
+        ubuntuDetail {
+          exec {
+            permissionFeedback {
+              fill[0].color: c.colors.attentionText,
+              connections[0].target: devicesPermissionEnabling,
+              contents: "Baton could not be reached. Command permission is still off. Click the switch to try again."
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+devicesDefaultDisconnectFailed = frame : devicesDisconnectFailed {
+  title: "Devices / Default disconnect not confirmed",
+  caption: "Keep the saved default until disconnection is confirmed.",
+  left: 0px,
+  top: 8640px,
+
+  scrim {
+    form {
+      footer {
+        actions {
+          cancel {
+            connections[0].target: devicesDefaultSaved
+          }
+
+          confirm {
+            connections[0].target: devicesDefaultDisconnecting
+          }
+        }
+      }
+    }
+  }
+
+  main {
+    content {
+      list {
+        mac {
+          identity {
+            copy {
+              nameLine {
+                defaultTag {
+                  display: .none
+                }
+              }
+            }
+          }
+        }
+
+        ubuntu {
+          identity {
+            copy {
+              nameLine {
+                defaultTag {
+                  display: .visible
+                }
+              }
+            }
+          }
+        }
       }
     }
   }

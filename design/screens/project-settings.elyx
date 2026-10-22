@@ -4,6 +4,9 @@ import "foundations/typography.elyx" as t
 import "blocks/project-page.elyx" as page
 import "controls/icons.elyx" as icons
 import "controls/button.elyx" as buttons
+import "controls/status.elyx" as status
+import "blocks/project-header.elyx" as headers
+import "blocks/overview.elyx" as overviews
 import "controls/input.elyx" as inputs
 import "blocks/dialog.elyx" as dialogs
 import "controls/field.elyx" as fields
@@ -11,10 +14,26 @@ import "controls/label.elyx" as labels
 
 settings = frame : page.projectPage {
   title: "Project settings",
-  caption: "Changes save automatically. The next reply uses the updated goal and model.",
+  caption: "Open Project settings from the header menu. Changes save automatically; the model applies next run.",
   left: 0px,
   top: 0px,
   overrides: [insert(scrim, after = page.projectPage.overview)],
+
+  main {
+    dock {
+      composer {
+        toolbar {
+          send {
+            fill[0].color: c.colors.subtle,
+
+            sendGlyph {
+              fill[0].color: c.colors.text
+            }
+          }
+        }
+      }
+    }
+  }
 
   scrim = frame {
     left: 0px,
@@ -42,7 +61,7 @@ settings = frame : page.projectPage {
         }
 
         note {
-          contents: "Changes save automatically."
+          contents: "Saved"
         }
       }
 
@@ -91,7 +110,7 @@ settings = frame : page.projectPage {
           }
 
           helper {
-            contents: "The project assistant uses this goal on its next reply."
+            contents: "The project assistant reads goal changes with your next message."
           }
         }
       }
@@ -133,7 +152,7 @@ settings = frame : page.projectPage {
 
         agentHelp = text : t.caption {
           width: 100%,
-          contents: "Applies to the next reply. The current reply on Ubuntu Dev continues with its existing model.",
+          contents: "Applies to the next run. The current run on Ubuntu Dev keeps its model.",
           fill[0].color: c.colors.muted
         }
       }
@@ -145,10 +164,16 @@ settings = frame : page.projectPage {
         padding: [s.space.lg, 0px, 0px],
         children: [pauseRow, archiveRow],
 
-        pauseRow = frame : dialogs.settingRow {}
+        pauseRow = frame : dialogs.settingRow {
+          action {
+            connections[0].target: pausedSettings
+          }
+        }
 
         archiveRow = frame : dialogs.settingRow {
           action {
+            connections[0].target: archiveConfirm,
+
             label {
               fill[0].color: c.colors.danger,
               contents: "Archive"
@@ -162,7 +187,7 @@ settings = frame : page.projectPage {
 
           copy {
             rowText {
-              contents: "Stops the project assistant and closes open questions. Past chats and memory are kept. Work in individual threads continues."
+              contents: "Stops the project assistant and withdraws open questions. Chats and memory are kept. Existing threads continue."
             }
 
             rowTitle {
@@ -177,10 +202,26 @@ settings = frame : page.projectPage {
 
 archiveConfirm = frame : page.projectPage {
   title: "Archive confirmation",
-  caption: "Archiving stops the project assistant and closes questions. Past chats are kept.",
+  caption: "Archive project replaces settings with this confirmation. Existing threads keep working.",
   left: 1728px,
   top: 0px,
   overrides: [insert(scrim, after = page.projectPage.overview)],
+
+  main {
+    dock {
+      composer {
+        toolbar {
+          send {
+            fill[0].color: c.colors.subtle,
+
+            sendGlyph {
+              fill[0].color: c.colors.text
+            }
+          }
+        }
+      }
+    }
+  }
 
   scrim = frame {
     left: 0px,
@@ -193,21 +234,489 @@ archiveConfirm = frame : page.projectPage {
     children: form,
 
     form = frame : dialogs.dialog {
-      heading {
-        contents: "Archive “Baton Dev”?"
+      footer {
+        actions {
+          confirm {
+            connections[0].target: archiving
+          }
+
+          cancel {
+            connections[0].target: settings
+          }
+        }
       }
 
       content {
         message {
-          contents: "Stops the project assistant and closes 1 open question. Past chats and project memory are kept. Work in individual threads continues."
+          contents: "Stops the project assistant and withdraws 1 open question. Chats and memory are kept. Existing threads continue."
+        }
+      }
+
+      heading {
+        contents: "Archive “Baton Dev”?"
+      }
+    }
+  }
+}
+
+saving = frame : settings {
+  title: "Project settings / Saving",
+  caption: "Editing a field starts autosave. Keep the draft visible until saved.",
+  left: 0px,
+  top: 1080px,
+
+  scrim {
+    form {
+      content {
+        general {
+          titleField {
+            input {
+              value {
+                contents: "Baton Release"
+              }
+            }
+          }
         }
       }
 
       footer {
+        note {
+          contents: "Saving…"
+        }
+      }
+    }
+  }
+}
+
+saveFailed = frame : settings {
+  title: "Project settings / Save failed",
+  caption: "Autosave failed. The edited name stays in the form; Retry saves it again.",
+  left: 1728px,
+  top: 1080px,
+
+  scrim {
+    form {
+      content {
+        general {
+          titleField {
+            helper {
+              fill[0].color: c.colors.danger,
+              contents: "Name not saved. Baton could not be reached. Retry to save your changes.",
+              display: .visible
+            }
+
+            input {
+              value {
+                contents: "Baton Release"
+              }
+            }
+          }
+        }
+      }
+
+      footer {
+        note {
+          fill[0].color: c.colors.danger,
+          contents: "Changes not saved"
+        }
+
+        actions {
+          overrides: [insert(retry, after = .nil)]
+        }
+      }
+    }
+  }
+
+  retry = frame : buttons.button {
+    connections[0].target: saving,
+
+    label {
+      contents: "Retry"
+    }
+  }
+}
+
+saved = frame : settings {
+  title: "Project settings / Saved",
+  caption: "After autosave, the new name appears in the header and sidebar.",
+  left: 3456px,
+  top: 1080px,
+
+  main {
+    header {
+      lead {
+        identity {
+          name {
+            contents: "Baton Release"
+          }
+        }
+      }
+    }
+  }
+
+  sidebar {
+    top {
+      projects {
+        projBaton {
+          lead {
+            name {
+              contents: "Baton Release"
+            }
+          }
+        }
+      }
+    }
+  }
+
+  scrim {
+    form {
+      heading {
+        contents: "Baton Release · settings"
+      }
+
+      content {
+        general {
+          titleField {
+            input {
+              value {
+                contents: "Baton Release"
+              }
+            }
+          }
+        }
+      }
+
+      footer {
+        note {
+          contents: "Saved"
+        }
+      }
+    }
+  }
+}
+
+pausedSettings = frame : settings {
+  title: "Project settings / Paused",
+  caption: "Pause keeps messages and question replies saved. Resume makes them available to the assistant.",
+  left: 0px,
+  top: 2160px,
+
+  scrim {
+    form {
+      content {
+        lifecycle {
+          pauseRow {
+            action {
+              connections[0].target: resumedSettings,
+
+              label {
+                contents: "Resume"
+              }
+            }
+
+            copy {
+              rowText {
+                contents: "3 inputs are saved. Threads and questions remain available. Resume to process the saved inputs."
+              }
+
+              rowTitle {
+                contents: "Project is paused"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  overview {
+    summary {
+      runtime {
+        runtimeCard {
+          runtimeLine {
+            runtimeState {
+              runtimeStateText {
+                fill[0].color: c.colors.muted,
+                contents: "Paused"
+              }
+
+              @with-variant(status.dotIdle)
+              runtimeDot {}
+            }
+
+            runtimeDevice {
+              display: .none
+            }
+          }
+
+          runtimeNote {
+            contents: "3 inputs saved until you resume."
+          }
+        }
+      }
+    }
+  }
+
+  main {
+    transcript {
+      overrides: [remove(page.projectPage.main.transcript.typing)]
+    }
+
+    @with-variant(headers.headerPaused)
+    header {
+      top: .nil
+    }
+  }
+
+  sidebar {
+    top {
+      projects {
+        projBaton {
+          trail {
+            live {
+              display: .none
+            }
+
+            paused {
+              display: .visible
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+resumedSettings = frame : settings {
+  title: "Project settings / Resumed",
+  caption: "Resume lets the assistant process saved inputs. Done returns to the main conversation.",
+  left: 1728px,
+  top: 2160px,
+
+  scrim {
+    form {
+      content {
+        lifecycle {
+          pauseRow {
+            copy {
+              rowText {
+                contents: "Project resumed. The assistant can now process the 3 saved inputs on an available device."
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+archiving = frame : archiveConfirm {
+  title: "Project / Archiving",
+  caption: "Archive waits for confirmation before showing the read-only project.",
+  left: 3456px,
+  top: 2160px,
+
+  scrim {
+    form {
+      footer {
+        note {
+          contents: "Archiving…"
+        }
+
         actions {
           confirm {
             label {
-              contents: "Archive"
+              contents: "Archiving…"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+archiveFailed = frame : archiveConfirm {
+  title: "Project / Archive failed",
+  caption: "If the archive request cannot be saved, retry from the confirmation.",
+  left: 0px,
+  top: 3240px,
+
+  scrim {
+    form {
+      footer {
+        note {
+          fill[0].color: c.colors.danger,
+          contents: "Baton could not save the archive request. Try again."
+        }
+
+        layout.direction: .column,
+        layout.align-items: .end,
+
+        actions {
+          confirm {
+            label {
+              contents: "Try again"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+archivedSettings = frame : settings {
+  title: "Archived project / Settings",
+  caption: "Open settings from an archived project's menu. Values remain readable; Done returns to its records.",
+  left: 1728px,
+  top: 3240px,
+
+  scrim {
+    form {
+      content {
+        agent {
+          agentRow {
+            model {
+              border[0].width: 0px,
+
+              chevron {
+                display: .none
+              }
+            }
+
+            subscription {
+              border[0].width: 0px,
+
+              chevron {
+                display: .none
+              }
+            }
+          }
+
+          agentHelp {
+            contents: "Project assistant stopped. Existing threads remain available."
+          }
+        }
+
+        general {
+          goalField {
+            input {
+              border[0].width: 0px
+            }
+
+            helper {
+              contents: "Project settings are read-only while archived."
+            }
+          }
+
+          titleField {
+            input {
+              border[0].width: 0px
+            }
+          }
+        }
+
+        lifecycle {
+          display: .none
+        }
+      }
+
+      footer {
+        note {
+          contents: "Read-only · project archived"
+        }
+      }
+
+      heading {
+        contents: "Baton Dev · archived"
+      }
+    }
+  }
+
+  overview {
+    body {
+      overrides: [
+        remove(overviews.overview.body.needsHead),
+        remove(overviews.overview.body.needsRow)
+      ]
+    }
+
+    summary {
+      runtime {
+        runtimeCard {
+          runtimeLine {
+            runtimeState {
+              runtimeStateText {
+                fill[0].color: c.colors.muted,
+                contents: "Archived"
+              }
+
+              @with-variant(status.dotIdle)
+              runtimeDot {}
+            }
+
+            runtimeDevice {
+              display: .none
+            }
+          }
+
+          runtimeNote {
+            contents: "Project assistant stopped. 1 question withdrawn."
+          }
+        }
+      }
+
+      goal {
+        goalHead {
+          goalEdit {
+            display: .none
+          }
+        }
+      }
+    }
+  }
+
+  main {
+    dock {
+      overrides: [remove(page.projectPage.main.dock.composer)]
+    }
+
+    transcript {
+      overrides: [remove(page.projectPage.main.transcript.typing)]
+    }
+
+    @with-variant(headers.headerIdle)
+    header {
+      lead {
+        state {
+          stateText {
+            contents: "Archived"
+          }
+        }
+      }
+
+      top: .nil
+    }
+  }
+
+  sidebar {
+    top {
+      projects {
+        projBaton {
+          trail {
+            live {
+              display: .none
+            }
+          }
+        }
+      }
+
+      nav {
+        navInbox {
+          trail {
+            count {
+              value {
+                contents: "2"
+              }
             }
           }
         }

@@ -1,0 +1,145 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
+import "foundations/typography.elyx" as t
+import "controls/input.elyx" as inputs
+import "controls/button.elyx" as buttons
+
+export replyForm = frame {
+  title: "Question reply",
+  caption: "Send the selected option and an optional note to the project assistant.",
+  left: 0px,
+  top: 0px,
+  width: 688px,
+  layout: {direction: .column, item-gap: s.space.sm},
+  children: [noteLabel, note, limit, feedback, actions],
+
+  noteLabel = text : t.captionMedium {
+    contents: "Note (optional)"
+  }
+
+  note = frame : inputs.textarea {
+    width: 100%,
+    border[0].color: c.colors.focus,
+
+    value {
+      fill[0].color: c.colors.text,
+      contents: "Check the wake-up handshake first. Keep the logs from this run."
+    }
+  }
+
+  limit = text : t.caption {
+    contents: "Up to 4 KB of text",
+    fill[0].color: c.colors.faint
+  }
+
+  feedback = text : t.small {
+    width: 100%,
+    display: .none,
+    contents: "Your reply could not be saved. Your choice and note are kept. Try again.",
+    fill[0].color: c.colors.muted
+  }
+
+  actions = frame {
+    width: 100%,
+    layout: {justify-content: .end, align-items: .center, item-gap: s.space.sm},
+    children: [cancel, submit],
+
+    cancel = frame : buttons.smallGhost {
+      label {
+        contents: "Cancel"
+      }
+    }
+
+    submit = frame : buttons.small {
+      label {
+        contents: "Send reply"
+      }
+    }
+  }
+}
+
+@variant
+export sending = frame : replyForm {
+  title: "Question reply / Sending",
+  caption: "Keep the choice and text visible until saving finishes. Repeat clicks show this status.",
+  left: 0px,
+  top: 300px,
+
+  note {
+    border[0].color: c.colors.border
+  }
+
+  actions {
+    cancel {
+      display: .none
+    }
+
+    submit {
+      label {
+        contents: "Sending…"
+      }
+    }
+  }
+
+  feedback {
+    display: .visible,
+    contents: "Saving your reply. Wait for this to finish."
+  }
+}
+
+@variant
+export failed = frame : replyForm {
+  title: "Question reply / Save failed",
+  caption: "Retry the retained choice and note after the connection returns.",
+  left: 0px,
+  top: 600px,
+
+  actions {
+    submit {
+      label {
+        contents: "Try again"
+      }
+    }
+  }
+
+  feedback {
+    display: .visible
+  }
+}
+
+@variant
+export empty = frame : replyForm {
+  title: "Question reply / Missing answer",
+  caption: "Clicking Send reply explains the missing answer and focuses the text field.",
+  left: 0px,
+  top: 900px,
+
+  note {
+    value {
+      fill[0].color: c.colors.faint,
+      contents: "Write your answer…"
+    }
+  }
+
+  noteLabel {
+    contents: "Your reply"
+  }
+
+  feedback {
+    display: .visible,
+    contents: "Choose an option or write a reply."
+  }
+}
+
+@variant
+export tooLong = frame : replyForm {
+  title: "Question reply / Text limit",
+  caption: "Keep the full draft. Shorten the text before sending again.",
+  left: 0px,
+  top: 1200px,
+
+  feedback {
+    display: .visible,
+    contents: "Your note is over 4 KB. Shorten it before sending."
+  }
+}

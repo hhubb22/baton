@@ -1,0 +1,558 @@
+import "tokens/colors.elyx" as c
+import "foundations/typography.elyx" as t
+import "blocks/project-page.elyx" as page
+import "controls/button.elyx" as buttons
+import "blocks/project-header.elyx" as headers
+import "blocks/overview.elyx" as overviews
+import "blocks/dialog.elyx" as dialogs
+import "blocks/banner.elyx" as banners
+import "controls/input.elyx" as inputs
+
+memory = frame : page.projectPage {
+  title: "Project / Memory",
+  caption: "Open Memory in Overview or the project menu. Choose a note to edit it, or add a new note.",
+  left: 0px,
+  top: 0px,
+
+  @with-variant(overviews.overviewMemory)
+  overview {
+    body {
+      overviews.overviewMemory.addMemory {
+        connections[0].target: addMemory
+      }
+
+      overviews.overviewMemory.mem2 {
+        connections[0].target: editMemory
+      }
+
+      overviews.overviewMemory.mem1 {
+        connections[0].target: editMemory
+      }
+    }
+  }
+}
+
+emptyMemory = frame : memory {
+  title: "Project / Empty memory",
+  caption: "With no notes, Add memory opens the first note editor.",
+  left: 1728px,
+  top: 0px,
+
+  overview {
+    body {
+      overrides: [
+        insert(empty, after = .nil),
+        remove(overviews.overviewMemory.mem4),
+        remove(overviews.overviewMemory.mem2),
+        remove(overviews.overviewMemory.mem3),
+        remove(overviews.overviewMemory.mem1)
+      ]
+    }
+
+    tabBar {
+      memoryTab {
+        count {
+          contents: "0"
+        }
+      }
+    }
+  }
+
+  empty = text : t.small {
+    width: 100%,
+    contents: "No project memory yet. Add a note for the assistant to use with your next message.",
+    fill[0].color: c.colors.muted
+  }
+}
+
+addMemory = frame : memory {
+  title: "Project memory / Add",
+  caption: "Add memory opens a note editor. Save adds a versioned note; Cancel returns without saving.",
+  left: 3456px,
+  top: 0px,
+  overrides: [insert(scrim, after = page.projectPage.overview)],
+
+  main {
+    dock {
+      composer {
+        toolbar {
+          send {
+            fill[0].color: c.colors.subtle,
+
+            sendGlyph {
+              fill[0].color: c.colors.text
+            }
+          }
+        }
+      }
+    }
+  }
+
+  scrim = frame {
+    left: 0px,
+    top: 0px,
+    width: 100%,
+    height: 100%,
+    ignore-stack: .true,
+    layout: {justify-content: .center, align-items: .center},
+    fill: c.colors.overlay,
+    children: form,
+
+    form = frame : dialogs.dialog {
+      width: 560px,
+
+      footer {
+        actions {
+          @with-variant(buttons.button)
+          confirm {
+            connections[0].target: addingMemory,
+
+            label {
+              contents: "Save memory"
+            }
+          }
+
+          cancel {
+            connections[0].target: memory
+          }
+        }
+
+        note {
+          contents: "New note"
+        }
+      }
+
+      content {
+        overrides: [
+          insert(editor, after = .nil),
+          insert(helper, after = editor),
+          remove(dialogs.dialog.content.message)
+        ]
+      }
+
+      heading {
+        contents: "Add memory"
+      }
+
+      editor = frame : inputs.textarea {
+        width: 100%,
+        height: 112px,
+
+        value {
+          fill[0].color: c.colors.text,
+          contents: "Release verification runs on Windows and Ubuntu before merging."
+        }
+      }
+
+      helper = text : t.caption {
+        width: 100%,
+        contents: "Saved notes are read with your next message. Adding a note does not start the assistant.",
+        fill[0].color: c.colors.muted
+      }
+    }
+  }
+}
+
+editMemory = frame : addMemory {
+  title: "Project memory / Edit",
+  caption: "Choose a note in Memory. Edit its text and save a new version.",
+  left: 0px,
+  top: 1080px,
+
+  scrim {
+    form {
+      footer {
+        actions {
+          confirm {
+            connections[0].target: savingMemory
+          }
+        }
+
+        note {
+          contents: "Editing v2"
+        }
+      }
+
+      content {
+        helper {
+          contents: "v2 · project assistant · Today 14:05\nSave creates a new version; the assistant reads it with your next message."
+        }
+
+        editor {
+          value {
+            contents: "Baton repo path is ~/src/baton on MacBook Pro and ~/work/baton on Ubuntu Dev."
+          }
+        }
+      }
+
+      heading {
+        contents: "Edit memory"
+      }
+    }
+  }
+}
+
+savingMemory = frame : editMemory {
+  title: "Project memory / Saving",
+  caption: "Save keeps the note visible until a new version is confirmed.",
+  left: 1728px,
+  top: 1080px,
+
+  scrim {
+    form {
+      footer {
+        actions {
+          confirm {
+            connections[0].target: savedMemory,
+
+            label {
+              contents: "Saving…"
+            }
+          }
+        }
+
+        note {
+          contents: "Saving…"
+        }
+      }
+    }
+  }
+}
+
+saveFailedMemory = frame : editMemory {
+  title: "Project memory / Save failed",
+  caption: "If saving fails, keep the edited text and retry from the same editor.",
+  left: 3456px,
+  top: 1080px,
+
+  scrim {
+    form {
+      content {
+        helper {
+          fill[0].color: c.colors.danger,
+          contents: "Baton could not save this note. Your edits are kept. Try again."
+        }
+      }
+
+      footer {
+        note {
+          fill[0].color: c.colors.danger,
+          contents: "Not saved"
+        }
+
+        actions {
+          confirm {
+            label {
+              contents: "Try again"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+conflictMemory = frame : editMemory {
+  title: "Project memory / Save conflict",
+  caption: "A newer version arrived. Keep your draft while reviewing the latest note before saving again.",
+  left: 0px,
+  top: 2160px,
+
+  scrim {
+    form {
+      footer {
+        actions {
+          confirm {
+            border[0].color: c.colors.border,
+            fill[0].color: c.colors.surface,
+            connections[0].target: reviewMemory,
+
+            label {
+              fill[0].color: c.colors.link,
+              contents: "Review latest"
+            }
+          }
+        }
+
+        note {
+          contents: "Your draft is kept"
+        }
+      }
+
+      content {
+        overrides: [insert(latest, after = addMemory.scrim.form.editor)],
+
+        helper {
+          fill[0].color: c.colors.attentionText,
+          contents: "Your edit was based on v2. Review v3 and update your draft before saving again."
+        }
+      }
+    }
+  }
+
+  latest = frame {
+    width: 100%,
+    layout: {direction: .column, item-gap: 6px},
+    fill: c.colors.subtle,
+    corner-radius: 8px,
+    padding: 12px,
+    children: [meta, note],
+
+    meta = text : t.caption {
+      width: 100%,
+      contents: "Latest · v3 · project assistant · Today 14:08",
+      fill[0].color: c.colors.muted
+    }
+
+    note = text : t.small {
+      width: 100%,
+      contents: "Baton repo is ~/src/baton on MacBook Pro and ~/work/baton-release on Ubuntu Dev."
+    }
+  }
+}
+
+reviewMemory = frame : conflictMemory {
+  title: "Project memory / Review latest",
+  caption: "Review the latest version beside your retained draft, then save your revised note against v3.",
+  left: 1728px,
+  top: 2160px,
+
+  scrim {
+    form {
+      footer {
+        actions {
+          confirm {
+            connections[0].target: savedMemory,
+
+            label {
+              contents: "Save memory"
+            }
+          }
+        }
+
+        note {
+          contents: "Editing v3"
+        }
+      }
+
+      content {
+        helper {
+          fill[0].color: c.colors.muted,
+          contents: "Editing from v3. Your revised note becomes v4 when saved."
+        }
+
+        editor {
+          value {
+            contents: "Baton repo is ~/src/baton on MacBook Pro and ~/work/baton-release on Ubuntu Dev. Verify both before merging."
+          }
+        }
+      }
+    }
+  }
+}
+
+savedMemory = frame : memory {
+  title: "Project memory / Saved",
+  caption: "The editor closes after saving. The note shows its updated version, source and time.",
+  left: 3456px,
+  top: 2160px,
+
+  overview {
+    body {
+      overviews.overviewMemory.mem1 {
+        content {
+          contents: "Baton repo is ~/src/baton on MacBook Pro and ~/work/baton-release on Ubuntu Dev. Verify both before merging."
+        }
+
+        meta {
+          contents: "v4 · You · Today 14:10"
+        }
+      }
+    }
+  }
+}
+
+archivedMemory = frame : memory {
+  title: "Archived project / Memory",
+  caption: "Read retained notes with their versions and sources. Archived projects have no memory editor.",
+  left: 0px,
+  top: 3240px,
+
+  overview {
+    body {
+      overrides: [remove(overviews.overviewMemory.addMemory)],
+
+      overviews.overviewMemory.mem2 {
+        connections[0]: .nil
+      }
+
+      overviews.overviewMemory.mem1 {
+        connections[0]: .nil
+      }
+    }
+
+    summary {
+      runtime {
+        runtimeCard {
+          runtimeLine {
+            runtimeState {
+              runtimeStateText {
+                fill[0].color: c.colors.muted,
+                contents: "Archived"
+              }
+
+              runtimeDot {
+                fill[0].color: c.colors.faint
+              }
+            }
+
+            runtimeDevice {
+              display: .none
+            }
+          }
+
+          runtimeNote {
+            contents: "Project assistant stopped. Threads remain available."
+          }
+        }
+      }
+
+      goal {
+        goalHead {
+          goalEdit {
+            display: .none
+          }
+        }
+      }
+    }
+  }
+
+  main {
+    dock {
+      overrides: [
+        insert(archiveBanner, after = .nil),
+        remove(page.projectPage.main.dock.composer)
+      ]
+    }
+
+    transcript {
+      overrides: [remove(page.projectPage.main.transcript.typing)]
+    }
+
+    @with-variant(headers.headerIdle)
+    header {
+      lead {
+        state {
+          stateText {
+            contents: "Archived"
+          }
+        }
+      }
+
+      top: .nil
+    }
+  }
+
+  sidebar {
+    top {
+      projects {
+        projBaton {
+          trail {
+            live {
+              display: .none
+            }
+          }
+        }
+      }
+
+      nav {
+        navInbox {
+          trail {
+            count {
+              value {
+                contents: "2"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  archiveBanner = frame : banners.banner {
+    action {
+      display: .none
+    }
+
+    copy {
+      heading {
+        contents: "Project is archived"
+      }
+
+      detail {
+        contents: "Chats and memory are read-only. Existing threads remain usable."
+      }
+    }
+  }
+}
+
+addingMemory = frame : addMemory {
+  title: "Project memory / Adding",
+  caption: "Saving a new note keeps the draft visible until v1 is stored.",
+  left: 1728px,
+  top: 3240px,
+
+  scrim {
+    form {
+      footer {
+        actions {
+          confirm {
+            connections[0].target: addedMemory,
+
+            label {
+              contents: "Saving…"
+            }
+          }
+        }
+
+        note {
+          contents: "Saving…"
+        }
+      }
+    }
+  }
+}
+
+addedMemory = frame : memory {
+  title: "Project memory / Added",
+  caption: "The new note appears as v1 with its author and time. Memory changes wait for the next message.",
+  left: 3456px,
+  top: 3240px,
+
+  overview {
+    tabBar {
+      memoryTab {
+        count {
+          contents: "5"
+        }
+      }
+    }
+
+    body {
+      overrides: [insert(newNote, after = overviews.overviewMemory.mem4)]
+    }
+  }
+
+  newNote = frame : overviews.memoryRow {
+    width: 100%,
+    connections[0].target: editMemory,
+
+    meta {
+      contents: "v1 · You · Today 14:12"
+    }
+
+    content {
+      contents: "Release verification runs on Windows and Ubuntu before merging."
+    }
+  }
+}

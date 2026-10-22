@@ -6,10 +6,13 @@ import "controls/button.elyx" as buttons
 import "controls/status.elyx" as status
 import "controls/badge.elyx" as badges
 import "controls/avatar.elyx" as avatars
+import "blocks/attention-reply.elyx" as replies
 
 // Option row: one choice offered by the Project Agent. Subtle background, no border, leading number, and Recommended tag when suggested
 export option = frame {
   title: "Attention option",
+  left: 0px,
+  top: 0px,
   width: 480px,
   min-height: 36px,
   layout: {align-items: .center, item-gap: 10px},
@@ -38,7 +41,8 @@ export option = frame {
 @variant
 export optionSuggested = frame : option {
   title: "Attention option / Recommended",
-  top: 48px,
+  left: 640px,
+  top: 0px,
 
   suggested {
     display: .visible
@@ -49,7 +53,9 @@ export optionSuggested = frame : option {
 // Matches Thread card styling: hairline border, 14px radius, two soft shadows.
 export attentionCard = frame {
   title: "Attention card / Open",
-  top: 120px,
+  caption: "Details start collapsed in Inbox, the main chat, and linked threads. Option clicks select a reply; Send reply submits it to the project assistant.",
+  left: 0px,
+  top: 160px,
   width: s.size.measure,
   layout: {direction: .column, item-gap: 10px},
   fill: c.colors.surface,
@@ -72,7 +78,18 @@ export attentionCard = frame {
   ],
   corner-radius: 14px,
   padding: [s.space.lg, s.space.lg, s.space.md],
-  children: [head, heading, summary, threadRef, options, footer, answer],
+  children: [
+    head,
+    heading,
+    details,
+    summary,
+    threadRef,
+    options,
+    footer,
+    response,
+    answer,
+    resultNote
+  ],
 
   head = frame {
     width: 100%,
@@ -123,8 +140,26 @@ export attentionCard = frame {
     contents: "1 reconnect test failed on Windows. What next?"
   }
 
+  details = frame : buttons.smallGhost {
+    connections[0].label: "Show details",
+    connections[0].target: attentionExpanded,
+
+    label {
+      fill[0].color: c.colors.muted,
+      contents: "Show details"
+    }
+
+    @with-variant(icons.chevronDown)
+    lead {
+      width: 14px,
+      height: 14px,
+      display: .visible
+    }
+  }
+
   summary = text : t.small {
     width: 100%,
+    display: .none,
     contents: "TestReconnectAfterSleep did not reconnect within 30s after waking from sleep on Windows; the other 47 tests passed. Logs show the first TLS handshake after wake timed out.",
     fill[0].color: c.colors.muted
   }
@@ -157,7 +192,9 @@ export attentionCard = frame {
     children: [first, second, third],
 
     first = frame : optionSuggested {
-      width: 100%
+      width: 100%,
+      connections[0].label: "Select option and add note",
+      connections[0].target: attentionReply
     }
 
     second = frame : option {
@@ -168,7 +205,7 @@ export attentionCard = frame {
       }
 
       label {
-        contents: "Skip for now and test Ubuntu and macOS"
+        contents: "Skip for now"
       }
     }
 
@@ -180,7 +217,7 @@ export attentionCard = frame {
       }
 
       label {
-        contents: "Run the Windows test once more"
+        contents: "Run the test once more"
       }
     }
   }
@@ -193,6 +230,8 @@ export attentionCard = frame {
     reply = frame : buttons.smallGhost {
       padding-left: 6px,
       padding-right: 6px,
+      connections[0].label: "Write a reply",
+      connections[0].target: attentionTextReply,
 
       label {
         fill[0].color: c.colors.muted,
@@ -208,16 +247,28 @@ export attentionCard = frame {
     }
 
     close = frame : buttons.smallGhost {
-      padding-top: 0px,
       padding-left: 6px,
-      padding-bottom: 0px,
       padding-right: 6px,
+      connections[0].label: "Close question",
+      connections[0].target: attentionClosed,
 
       label {
         fill[0].color: c.colors.muted,
         contents: "Close question"
       }
     }
+  }
+
+  response = frame : replies.replyForm {
+    width: 100%,
+    display: .none
+  }
+
+  resultNote = text : t.small {
+    width: 100%,
+    display: .none,
+    contents: "Your reply is saved. The project assistant will read it next.",
+    fill[0].color: c.colors.muted
   }
 
   answer = frame {
@@ -233,6 +284,7 @@ export attentionCard = frame {
     }
 
     answerText = text : t.small {
+      width: 100%,
       contents: "Find the cause and fix it · Kaken He 14:51",
       fill[0].color: c.colors.muted
     }
@@ -243,7 +295,25 @@ export attentionCard = frame {
 @variant
 export attentionAnswered = frame : attentionCard {
   title: "Attention card / Answered",
-  top: 560px,
+  caption: "Removed from Inbox; retained in the main chat and linked thread. Open pages update within 5 seconds.",
+  left: 0px,
+  top: 820px,
+
+  footer {
+    display: .none
+  }
+
+  options {
+    display: .none
+  }
+
+  answer {
+    display: .visible
+  }
+
+  details {
+    connections[0]: .nil
+  }
 
   head {
     kind {
@@ -256,29 +326,14 @@ export attentionAnswered = frame : attentionCard {
       mark {}
     }
   }
-
-  footer {
-    display: .none
-  }
-
-  options {
-    display: .none
-  }
-
-  summary {
-    display: .none
-  }
-
-  answer {
-    display: .visible
-  }
 }
 
 // Attention item in Inbox: shows its parent Project at the start of the header
 @variant
 export inboxItem = frame : attentionCard {
   title: "Attention card / Inbox",
-  top: 720px,
+  left: 880px,
+  top: 160px,
 
   head {
     kind {
@@ -293,23 +348,32 @@ export inboxItem = frame : attentionCard {
 @variant
 export systemItem = frame : attentionCard {
   title: "Attention card / System",
-  top: 1160px,
+  caption: "Created by Baton. Go to the project to confirm a retry, or close the notice. No option or text reply.",
+  left: 1760px,
+  top: 160px,
 
   footer {
+    close {
+      connections[0].target: systemClosed,
+      connections[0].label: "Close notice",
+
+      label {
+        contents: "Close notice"
+      }
+    }
+
     reply {
+      connections[0].target: systemRetry,
+
       label {
         fill[0].color: c.colors.link,
         contents: "Go to project"
       }
 
+      connections[0].label: "Go to project to retry",
+
       lead {
         display: .none
-      }
-    }
-
-    close {
-      label {
-        contents: "Close notice"
       }
     }
   }
@@ -322,8 +386,13 @@ export systemItem = frame : attentionCard {
     display: .none
   }
 
+  details {
+    display: .none
+  }
+
   summary {
-    contents: "Sign in to ChatGPT on Ubuntu Dev, then retry in the project. Your messages and replies are saved."
+    contents: "Sign in to ChatGPT on Ubuntu Dev, then retry in the project. Your messages and replies are saved.",
+    display: .visible
   }
 
   heading {
@@ -336,6 +405,14 @@ export systemItem = frame : attentionCard {
     }
 
     kind {
+      system {
+        value {
+          contents: "Baton"
+        }
+
+        display: .visible
+      }
+
       kindLabel {
         contents: "Needs attention"
       }
@@ -351,5 +428,420 @@ export systemItem = frame : attentionCard {
         projectAvatar {}
       }
     }
+  }
+}
+
+@variant
+export attentionClosed = frame : attentionAnswered {
+  title: "Attention card / Closed",
+  caption: "Close question saves one decision for the project assistant. Removed from Inbox; kept in the main chat, linked thread, and handled items.",
+  left: 880px,
+  top: 820px,
+
+  head {
+    kind {
+      kindLabel {
+        contents: "Closed"
+      }
+    }
+  }
+
+  answer {
+    answerText {
+      contents: "Closed by Kaken He · 14:52"
+    }
+  }
+}
+
+@variant
+export attentionWithdrawn = frame : attentionAnswered {
+  title: "Attention card / Withdrawn",
+  caption: "Removed from Inbox; the reason stays in both chats and handled items. Withdrawal creates no reply.",
+  left: 1760px,
+  top: 820px,
+
+  head {
+    kind {
+      kindLabel {
+        contents: "Withdrawn"
+      }
+    }
+  }
+
+  answer {
+    answerText {
+      contents: "Withdrawn by the project assistant · 14:52\nThe test was rerun and the reconnect issue no longer occurs."
+    }
+  }
+}
+
+@variant
+export attentionReply = frame : attentionCard {
+  title: "Attention card / Option and note",
+  caption: "Select an option, optionally add a note, then Send reply. Options send a decision to the project assistant; they do not run device actions.",
+  left: 0px,
+  top: 1480px,
+
+  response {
+    actions {
+      submit {
+        connections[0].target: attentionSending,
+        connections[0].label: "Send reply"
+      }
+
+      cancel {
+        connections[0].target: attentionCard,
+        connections[0].label: "Cancel reply"
+      }
+    }
+
+    display: .visible
+  }
+
+  options {
+    first {
+      border[0].color: c.colors.focus,
+      fill[0].color: c.colors.accentSoft
+    }
+  }
+
+  footer {
+    reply {
+      display: .none
+    }
+  }
+}
+
+@variant
+export attentionTextReply = frame : attentionReply {
+  title: "Attention card / Text answer",
+  caption: "No options are offered; this question accepts a text reply. Send reply saves the text for the project assistant.",
+  left: 880px,
+  top: 1480px,
+
+  options {
+    display: .none
+  }
+
+  heading {
+    contents: "What should the reconnect report include?"
+  }
+
+  response {
+    noteLabel {
+      contents: "Your reply"
+    }
+
+    note {
+      value {
+        contents: "Include the Windows wake-up logs and compare the first handshake with Ubuntu."
+      }
+    }
+  }
+}
+
+@variant
+export attentionSending = frame : attentionReply {
+  title: "Attention card / Sending reply",
+  caption: "The selection and note remain visible. Repeated Send reply or Close question clicks explain that saving is in progress.",
+  left: 1760px,
+  top: 1480px,
+  connections[0].label: "Saved",
+  connections[0].target: attentionAnswered,
+  connections[1].label: "Saved while paused",
+  connections[1].target: attentionAnsweredPaused,
+  connections[2].label: "Saved while offline",
+  connections[2].target: attentionAnsweredOffline,
+  connections[3].label: "Save failed",
+  connections[3].target: attentionReplyFailed,
+  connections[4].label: "Another reply saved first",
+  connections[4].target: attentionConflict,
+  connections[5].label: "Withdrawal saved first",
+  connections[5].target: attentionWithdrawalWins,
+  connections[6].label: "Reply saved first",
+  connections[6].target: attentionAnswerWins,
+  connections[7].label: "Closed first",
+  connections[7].target: attentionClosedConflict,
+
+  @with-variant(replies.sending)
+  response {}
+}
+
+@variant
+export attentionReplyFailed = frame : attentionReply {
+  title: "Attention card / Reply not saved",
+  caption: "The connection failed before saving. Retry preserves the selected option and full note; the question remains pending.",
+  left: 0px,
+  top: 2140px,
+
+  @with-variant(replies.failed)
+  response {}
+}
+
+@variant
+export attentionAnsweredPaused = frame : attentionAnswered {
+  title: "Attention card / Answer saved while paused",
+  caption: "Removed from Inbox; retained in the main chat and linked thread. Resume the project to let its assistant process the saved reply.",
+  left: 880px,
+  top: 2140px,
+
+  answer {
+    answerText {
+      contents: "Find the cause and fix it · Kaken He · 14:51\nCheck the wake-up handshake first. Keep the logs from this run."
+    }
+  }
+
+  resultNote {
+    display: .visible,
+    contents: "Reply saved. The project is paused; the assistant will read it after you resume."
+  }
+}
+
+@variant
+export attentionAnsweredOffline = frame : attentionAnsweredPaused {
+  title: "Attention card / Answer saved while offline",
+  caption: "Removed from Inbox; retained in both chats. The reply waits for an available device; answering does not start device work immediately.",
+  left: 1760px,
+  top: 2140px,
+
+  resultNote {
+    contents: "Reply saved. All devices are offline; the assistant will read it when a device is available."
+  }
+}
+
+@variant
+export attentionConflict = frame : attentionAnswered {
+  title: "Attention card / Another reply saved first",
+  caption: "The earlier reply is the effective result. Removed from Inbox; both chats show this same answer. Only one reply reaches the project assistant.",
+  left: 0px,
+  top: 2800px,
+
+  answer {
+    answerText {
+      contents: "Run the Windows test once more · Kaken He · 14:50\nKeep the current logs for comparison."
+    }
+  }
+
+  resultNote {
+    display: .visible,
+    contents: "This question was already answered in another window. The saved reply is shown above."
+  }
+}
+
+@variant
+export attentionWithdrawalWins = frame : attentionWithdrawn {
+  title: "Attention card / Withdrawal saved first",
+  caption: "A reply submitted during withdrawal is rejected. Show the effective withdrawal and reason in both chats; remove the item from Inbox.",
+  left: 880px,
+  top: 2800px,
+
+  resultNote {
+    display: .visible,
+    contents: "The question was withdrawn before your reply was saved. You can continue in the linked chat."
+  }
+}
+
+@variant
+export attentionAnswerWins = frame : attentionAnswered {
+  title: "Attention card / Reply saved before withdrawal",
+  caption: "A later withdrawal has no effect. Keep the saved answer in both chats and handled items; remove the item from Inbox.",
+  left: 1760px,
+  top: 2800px,
+
+  answer {
+    answerText {
+      contents: "Find the cause and fix it · Kaken He · 14:51\nCheck the wake-up handshake first. Keep the logs from this run."
+    }
+  }
+
+  resultNote {
+    display: .visible,
+    contents: "Your reply was saved before the question could be withdrawn. The assistant will read this reply."
+  }
+}
+
+@variant
+export systemRetry = frame : systemItem {
+  title: "System notice / Retry in project",
+  caption: "Go to project opens this notice above its input. Confirm Retry project after signing in; no option or text reply is offered.",
+  left: 0px,
+  top: 3460px,
+
+  footer {
+    reply {
+      connections[0].target: systemRetrying,
+      connections[0].label: "Confirm Retry project",
+
+      label {
+        contents: "Retry project"
+      }
+    }
+  }
+}
+
+@variant
+export systemRetrying = frame : systemRetry {
+  title: "System notice / Saving retry",
+  caption: "Keep the notice pending until the retry request is saved. Repeated clicks explain that the request is in progress.",
+  left: 880px,
+  top: 3460px,
+  connections[0].label: "Retry saved",
+  connections[0].target: systemResolved,
+  connections[1].label: "Save failed",
+  connections[1].target: systemRetryFailed,
+
+  resultNote {
+    contents: "Saving your retry request. Wait for this to finish.",
+    display: .visible
+  }
+
+  footer {
+    reply {
+      label {
+        contents: "Retrying…"
+      }
+    }
+  }
+}
+
+@variant
+export systemRetryFailed = frame : systemRetry {
+  title: "System notice / Retry not saved",
+  caption: "The notice stays pending. Try Retry project again after the connection returns.",
+  left: 1760px,
+  top: 3460px,
+
+  resultNote {
+    display: .visible,
+    contents: "The retry request could not be saved. Check your connection and retry."
+  }
+}
+
+@variant
+export systemResolved = frame : systemItem {
+  title: "System notice / Resolved",
+  caption: "Retry confirmation resolves the notice without waiting for a model reply. Removed from Inbox; kept in the main chat and handled items. No assistant message is created.",
+  left: 0px,
+  top: 4120px,
+
+  footer {
+    close {
+      display: .none
+    }
+
+    reply {
+      connections[0]: .nil
+    }
+  }
+
+  resultNote {
+    contents: "Retry requested. Go to the project to check progress.",
+    display: .visible
+  }
+
+  answer {
+    answerText {
+      contents: "Retry requested by Kaken He · 15:24"
+    }
+
+    display: .visible
+  }
+
+  head {
+    kind {
+      kindLabel {
+        fill[0].color: c.colors.muted,
+        contents: "Resolved"
+      }
+
+      @with-variant(status.dotIdle)
+      mark {}
+    }
+  }
+}
+
+@variant
+export systemClosed = frame : systemResolved {
+  title: "System notice / Closed",
+  caption: "Close notice removes it from Inbox without retrying or creating an assistant message. The same fault does not immediately create a replacement notice.",
+  left: 880px,
+  top: 4120px,
+
+  head {
+    kind {
+      kindLabel {
+        contents: "Closed"
+      }
+    }
+  }
+
+  answer {
+    answerText {
+      contents: "Notice closed by Kaken He · 15:24"
+    }
+  }
+
+  resultNote {
+    contents: "The project still needs attention. Go to the project when you are ready to retry."
+  }
+}
+
+@variant
+export attentionExpanded = frame : attentionCard {
+  title: "Attention card / Details expanded",
+  caption: "Show details expands the saved Markdown in place; Hide details collapses it. Allowed formatting and https links render; HTML and images do not.",
+  left: 1760px,
+  top: 4120px,
+
+  details {
+    connections[0].target: attentionCard,
+    connections[0].label: "Hide details",
+
+    label {
+      contents: "Hide details"
+    }
+  }
+
+  summary {
+    display: .visible
+  }
+}
+
+@variant
+export attentionClosedConflict = frame : attentionClosed {
+  title: "Attention card / Closed in another window",
+  caption: "A competing reply cannot replace the earlier close. Show the effective person and time; remove from Inbox and retain both chat cards.",
+  left: 0px,
+  top: 4780px,
+
+  resultNote {
+    display: .visible,
+    contents: "This question was already closed in another window. You can continue in the linked chat."
+  }
+}
+
+@variant
+export attentionCloseFailed = frame : attentionCard {
+  title: "Attention card / Close not saved",
+  caption: "Keep the question pending and preserve any draft reply. Close question retries the failed close.",
+  left: 880px,
+  top: 4780px,
+
+  resultNote {
+    display: .visible,
+    contents: "The question could not be closed. Check your connection and try Close question again."
+  }
+}
+
+@variant
+export systemCloseFailed = frame : systemItem {
+  title: "System notice / Close not saved",
+  caption: "Keep the system notice pending. Close notice retries without creating an assistant reply.",
+  left: 1760px,
+  top: 4780px,
+
+  resultNote {
+    display: .visible,
+    contents: "The notice could not be closed. Check your connection and try Close notice again."
   }
 }

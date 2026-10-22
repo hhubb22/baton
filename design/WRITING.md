@@ -73,7 +73,7 @@ Baton 的底层跨越了中心服务、节点守护进程、项目代理和多�
 
 | 场景 | 推荐写法 | 避免写法 |
 |---|---|---|
-| 归档项目确认弹窗 | `This stops any active work and closes 1 open question. You can still view all past chats and files.`<br>这会停止正在进行的工作，并关闭 1 个待回答的问题。已有的对话和文件仍可随时查看。 | `The Project Agent will stop its current run and will not start again. 1 open attention item will be withdrawn as Project archived. Conversation history, memory, and Threads are preserved.` |
+| 归档项目确认弹窗 | `Stops the project assistant and closes 1 open question. Past chats and project memory are kept. Work in individual threads continues.`<br>停止项目助手，并关闭 1 个待回答的问题。已有对话和项目记忆保留，各个 Thread 中的工作继续执行。 | `The Project Agent will stop its current run and will not start again. 1 open attention item will be withdrawn as Project archived. Conversation history, memory, and Threads are preserved.` |
 | 断开并移除电脑 | `Disconnects this computer from Baton. If it is offline, any agents still running on it will keep running locally.`<br>将该电脑从 Baton 断开。如果电脑当前离线，上面正在运行的助手仍会在本地继续执行。 | `Disconnects immediately; running Agents on an offline device will not be stopped.` |
 | 开启命令行执行权限 | `Lets the project assistant run shell commands in allowed folders as user "kaken" (zsh). Commands run directly on your machine without a sandbox.`<br>允许项目助手以 kaken 账号（zsh）在授权文件夹内运行终端命令。命令直接在宿主机上执行，无沙箱隔离。 | `Project Agent can run arbitrary commands inside registered directories as kaken via zsh. Baton does not sandbox or inspect these commands.` |
 

@@ -1,10 +1,14 @@
 import "tokens/colors.elyx" as c
 import "tokens/spacing.elyx" as s
 import "blocks/project-page.elyx" as page
+import "foundations/typography.elyx" as t
 import "blocks/project-header.elyx" as headers
 import "blocks/thread-line.elyx" as lines
 import "blocks/attention-card.elyx" as attention
 import "blocks/thread-detail.elyx" as details
+import "blocks/banner.elyx" as banners
+import "blocks/project-reference.elyx" as references
+import "blocks/file-preview.elyx" as previews
 
 threadOpen = frame : page.projectPage {
   title: "Project · Thread detail",
@@ -117,36 +121,22 @@ threadOpen = frame : page.projectPage {
     ask = frame : details.selectionMenu {
       left: 150px,
       top: 426px,
-      ignore-stack: .true
+      ignore-stack: .true,
+
+      ask {
+        connections[0].target: threadQuote
+      }
     }
   }
 
   decision = frame : attention.attentionCard {
     width: 100%,
     max-width: s.size.measure,
-    overrides: [
-      remove(attention.attentionCard.footer),
-      remove(attention.attentionCard.threadRef),
-      remove(attention.attentionCard.summary)
-    ],
+    overrides: [remove(attention.attentionCard.threadRef)],
 
     head {
       time {
         display: .none
-      }
-    }
-
-    options {
-      third {
-        label {
-          contents: "Run the test once more"
-        }
-      }
-
-      second {
-        label {
-          contents: "Skip for now"
-        }
       }
     }
 
@@ -240,4 +230,880 @@ threadRunning = frame : page.projectPage {
   }
 
   detail = frame : details.threadDetailRunning {}
+}
+
+threadQuote = frame : page.projectPage {
+  title: "Project / Thread reference draft",
+  caption: "Ask project assistant fills the main composer with the selected reply and its source. Add a request, then send.",
+  left: 0px,
+  top: 1080px,
+  overrides: [
+    insert(detail, after = page.projectPage.main),
+    remove(page.projectPage.overview)
+  ],
+
+  main {
+    dock {
+      @with-variant(references.referenceComposer)
+      composer {
+        toolbar {
+          send {
+            connections[0].target: referenceSent
+          }
+        }
+
+        references.referenceComposer.quote {
+          head {
+            clear {
+              connections[0].target: threadDraft,
+              connections[0].label: "Remove reference and keep request"
+            }
+          }
+        }
+
+        left: .nil,
+        top: .nil
+      }
+
+      signals {
+        display: .visible
+      }
+    }
+
+    transcript {
+      overrides: [
+        insert(decision, after = page.projectPage.main.transcript.agent1),
+        remove(page.projectPage.main.transcript.typing),
+        remove(page.projectPage.main.transcript.agent0),
+        remove(page.projectPage.main.transcript.user0),
+        remove(page.projectPage.main.transcript.day)
+      ],
+
+      agent1 {
+        @with-variant(lines.threadCardIdle)
+        work {}
+      }
+    }
+
+    @with-variant(headers.headerIdle)
+    header {
+      top: .nil
+    }
+  }
+
+  sidebar {
+    top {
+      projects {
+        projBaton {
+          trail {
+            live {
+              display: .none
+            }
+          }
+        }
+      }
+    }
+  }
+
+  detail = frame : details.threadDetail {
+    footer {
+      composer {
+        toolbar {
+          actions {
+            send {
+              fill[0].color: c.colors.subtle,
+
+              sendGlyph {
+                fill[0].color: c.colors.text
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  decision = frame : attention.attentionCard {
+    width: 100%,
+    max-width: s.size.measure,
+    overrides: [remove(attention.attentionCard.threadRef)],
+
+    head {
+      time {
+        display: .none
+      }
+    }
+
+    heading {
+      contents: "1 Windows reconnect test failed. What next?"
+    }
+  }
+}
+
+fileQuote = frame : threadQuote {
+  title: "Project / File reference draft",
+  caption: "Ask from a project file preview keeps its device, path and line range in the main chat draft.",
+  left: 1728px,
+  top: 1080px,
+
+  main {
+    dock {
+      @with-variant(references.fileReferenceComposer)
+      composer {
+        toolbar {
+          send {
+            connections[0].target: fileReferenceSent
+          }
+        }
+
+        references.referenceComposer.quote {
+          head {
+            clear {
+              connections[0].target: fileDraft
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+questionQuote = frame : threadQuote {
+  title: "Project / Question reference draft",
+  caption: "Ask from question details keeps the question ID. Sending the draft does not answer the question.",
+  left: 3456px,
+  top: 1080px,
+
+  main {
+    dock {
+      @with-variant(references.questionReferenceComposer)
+      composer {
+        toolbar {
+          send {
+            connections[0].target: questionReferenceSent
+          }
+        }
+
+        references.referenceComposer.quote {
+          head {
+            clear {
+              connections[0].target: questionDraft
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+longQuote = frame : threadQuote {
+  title: "Project / Long reference draft",
+  caption: "Over 8 KB is shortened before prefill. Show the original length and source beside the excerpt.",
+  left: 0px,
+  top: 2160px,
+
+  main {
+    dock {
+      @with-variant(references.longReferenceComposer)
+      composer {
+        toolbar {
+          send {
+            connections[0].target: longReferenceSent
+          }
+        }
+
+        references.referenceComposer.quote {
+          head {
+            clear {
+              connections[0].target: longDraft
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+threadDraft = frame : threadQuote {
+  title: "Project / Thread request draft",
+  caption: "Remove the reference and keep the request, conversation and thread state.",
+  left: 0px,
+  top: 5400px,
+
+  main {
+    dock {
+      composer {
+        overrides: [remove(references.referenceComposer.quote)],
+
+        toolbar {
+          send {
+            connections[0].target: threadRequestSent
+          }
+        }
+      }
+    }
+  }
+}
+
+fileDraft = frame : fileQuote {
+  title: "Project / File request draft",
+  caption: "Remove the file reference and keep the request ready to send.",
+  left: 1728px,
+  top: 5400px,
+
+  main {
+    dock {
+      composer {
+        overrides: [remove(references.referenceComposer.quote)],
+
+        toolbar {
+          send {
+            connections[0].target: fileRequestSent
+          }
+        }
+      }
+    }
+  }
+}
+
+questionDraft = frame : questionQuote {
+  title: "Project / Question request draft",
+  caption: "Remove the question reference and keep the request. The question remains open.",
+  left: 3456px,
+  top: 5400px,
+
+  main {
+    dock {
+      composer {
+        overrides: [remove(references.referenceComposer.quote)],
+
+        toolbar {
+          send {
+            connections[0].target: questionRequestSent
+          }
+        }
+      }
+    }
+  }
+}
+
+longDraft = frame : longQuote {
+  title: "Project / Long selection request draft",
+  caption: "Remove the shortened reference and keep the full request.",
+  left: 0px,
+  top: 6480px,
+
+  main {
+    dock {
+      composer {
+        overrides: [remove(references.referenceComposer.quote)],
+
+        toolbar {
+          send {
+            connections[0].target: longRequestSent
+          }
+        }
+      }
+    }
+  }
+}
+
+threadRequestSent = frame : threadDraft {
+  title: "Project / Thread request sent",
+  caption: "Save the request without a reference. Clear the composer after sending.",
+  left: 1728px,
+  top: 6480px,
+
+  main {
+    dock {
+      composer {
+        prompt {
+          fill[0].color: c.colors.faint,
+          contents: "Ask the project assistant…"
+        }
+
+        toolbar {
+          send {
+            connections[0]: .nil,
+            fill[0].color: c.colors.subtle,
+
+            sendGlyph {
+              fill[0].color: c.colors.text
+            }
+          }
+        }
+      }
+    }
+
+    transcript {
+      overrides: [insert(sentMessage, after = threadQuote.decision)]
+    }
+  }
+
+  sentMessage = frame : referenceSent.sentMessage {
+    sentQuote {
+      overrides: [remove(references.referenceComposer.quote)]
+    }
+  }
+}
+
+fileRequestSent = frame : threadRequestSent {
+  title: "Project / File request sent",
+  caption: "Save the request without the removed file reference.",
+  left: 3456px,
+  top: 6480px,
+
+  main {
+    transcript {
+      sentMessage {
+        sentQuote {
+          prompt {
+            contents: "Compare these log lines with the reconnect reply."
+          }
+        }
+      }
+    }
+  }
+}
+
+questionRequestSent = frame : threadRequestSent {
+  title: "Project / Question request sent",
+  caption: "Save the request without the removed question reference. The question remains open.",
+  left: 0px,
+  top: 7560px,
+
+  main {
+    transcript {
+      sentMessage {
+        sentQuote {
+          prompt {
+            contents: "What evidence would distinguish a timing issue from a delivery issue?"
+          }
+        }
+      }
+    }
+  }
+}
+
+longRequestSent = frame : threadRequestSent {
+  title: "Project / Long selection request sent",
+  caption: "Save the request without the removed long reference.",
+  left: 1728px,
+  top: 7560px,
+
+  main {
+    transcript {
+      sentMessage {
+        sentQuote {
+          prompt {
+            contents: "Find the first point where the reconnect stopped progressing."
+          }
+        }
+      }
+    }
+  }
+}
+
+referenceSent = frame : threadOpen {
+  title: "Project / Reference sent",
+  caption: "Send saves an ordinary main-chat message with its reference; the composer clears for the next request.",
+  left: 1728px,
+  top: 2160px,
+
+  detail {
+    overrides: [remove(threadOpen.detail.ask)]
+  }
+
+  main {
+    transcript {
+      overrides: [insert(sentMessage, after = threadOpen.decision)],
+
+      agent0 {
+        display: .none
+      }
+
+      user0 {
+        display: .none
+      }
+
+      day {
+        display: .none
+      }
+    }
+  }
+
+  sentMessage = frame {
+    width: 100%,
+    max-width: s.size.measure,
+    layout: {direction: .column, align-items: .end, item-gap: 6px},
+    children: [sentQuote, sentStatus],
+
+    sentQuote = frame : references.referenceComposer {
+      width: 100%,
+      corner-radius: 18px,
+      fill[0].color: c.colors.subtle,
+
+      toolbar {
+        display: .none
+      }
+
+      quote {
+        head {
+          clear {
+            display: .none
+          }
+        }
+      }
+    }
+
+    sentStatus = text : t.caption {
+      contents: "Saved · waiting for the assistant",
+      fill[0].color: c.colors.faint
+    }
+  }
+}
+
+archivedProjectThread = frame : threadRunning {
+  title: "Archived project / Existing thread",
+  caption: "An archived project keeps its existing threads usable. The main project chat stays read-only.",
+  left: 3456px,
+  top: 2160px,
+
+  main {
+    dock {
+      overrides: [
+        insert(archiveBanner, after = .nil),
+        remove(page.projectPage.main.dock.composer)
+      ],
+
+      signals {
+        overrides: [remove(page.projectPage.main.dock.signals.attention)]
+      }
+    }
+
+    header {
+      lead {
+        state {
+          stateText {
+            contents: "Archived"
+          }
+        }
+      }
+    }
+  }
+
+  sidebar {
+    top {
+      nav {
+        navInbox {
+          trail {
+            count {
+              value {
+                contents: "2"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  archiveBanner = frame : banners.banner {
+    action {
+      display: .none
+    }
+
+    copy {
+      heading {
+        contents: "Project is archived"
+      }
+
+      detail {
+        contents: "The project assistant has stopped. Send messages directly in this thread to continue work."
+      }
+    }
+  }
+}
+
+fileReferenceSent = frame : referenceSent {
+  title: "Project / File reference sent",
+  caption: "The saved message keeps the file source and selected lines. The draft clears after sending.",
+  left: 0px,
+  top: 3240px,
+
+  main {
+    transcript {
+      sentMessage {
+        @with-variant(references.fileReferenceComposer)
+        sentQuote {}
+      }
+    }
+  }
+}
+
+questionReferenceSent = frame : referenceSent {
+  title: "Project / Question reference sent",
+  caption: "The saved message keeps the question ID. The question remains open until answered or closed.",
+  left: 1728px,
+  top: 3240px,
+
+  main {
+    transcript {
+      sentMessage {
+        @with-variant(references.questionReferenceComposer)
+        sentQuote {}
+      }
+    }
+  }
+}
+
+longReferenceSent = frame : referenceSent {
+  title: "Project / Long reference sent",
+  caption: "The saved message keeps the shortened reference, original length and full source.",
+  left: 3456px,
+  top: 3240px,
+
+  main {
+    transcript {
+      sentMessage {
+        @with-variant(references.longReferenceComposer)
+        sentQuote {}
+      }
+    }
+  }
+}
+
+fileSelection = frame : threadOpen {
+  title: "Project / Select file text",
+  caption: "Ask project assistant closes the file preview and fills the main chat with lines 84–89 and their source.",
+  left: 0px,
+  top: 4320px,
+  overrides: [insert(scrim, after = threadOpen.detail)],
+
+  detail {
+    overrides: [remove(threadOpen.detail.ask)],
+
+    footer {
+      composer {
+        toolbar {
+          actions {
+            send {
+              fill[0].color: c.colors.subtle,
+
+              sendGlyph {
+                fill[0].color: c.colors.text
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  scrim = frame {
+    left: 0px,
+    top: 0px,
+    width: 100%,
+    height: 100%,
+    ignore-stack: .true,
+    layout: {justify-content: .center, align-items: .center},
+    fill: c.colors.overlay,
+    children: preview,
+
+    preview = frame : previews.filePreview {
+      overrides: [insert(selectionMenu, after = previews.filePreview.body)],
+
+      body {
+        preview {
+          overrides: [
+            insert(logContent, after = previews.filePreview.body.preview.code)
+          ],
+
+          code {
+            display: .none
+          }
+        }
+
+        tree {
+          testdata {
+            display: .none
+          }
+
+          session {
+            name {
+              contents: "node-b.log"
+            }
+          }
+
+          current {
+            size {
+              contents: "14 KB"
+            }
+
+            name {
+              contents: "reconnect-test.log"
+            }
+          }
+
+          reconnect {
+            name {
+              contents: "node-a.log"
+            }
+          }
+
+          gateway {
+            name {
+              contents: "gateway-soak.log"
+            }
+          }
+
+          client {
+            name {
+              contents: "gateway-smoke.log"
+            }
+          }
+
+          crumb {
+            folder {
+              contents: "logs"
+            }
+          }
+        }
+      }
+
+      head {
+        close {
+          connections[0].target: threadOpen,
+          connections[0].label: "Close preview and selection"
+        }
+
+        location {
+          meta {
+            contents: "Windows Desktop · Thread T-160-WIN · Reply 3"
+          }
+
+          path {
+            contents: "D:\\src\\baton-ps160\\logs\\reconnect-test.log"
+          }
+        }
+      }
+
+      logContent = frame {
+        width: 100%,
+        layout: {direction: .column, item-gap: 12px},
+        children: [before, selectedLines, after, selectionNote],
+
+        before = text : t.mono {
+          width: 100%,
+          contents: "81  reconnect test resumed\n82  session ready\n83  checking delivery",
+          line-height: 1.7
+        }
+
+        selectedLines = frame {
+          width: 100%,
+          layout: {item-gap: 16px},
+          fill: c.colors.accentSoft,
+          corner-radius: 4px,
+          padding: 8px,
+          children: [numbers, selectedText],
+
+          numbers = text : t.mono {
+            contents: "84\n85\n86\n87\n88\n89",
+            line-height: 1.7,
+            fill[0].color: c.colors.link
+          }
+
+          selectedText = text : t.mono {
+            width: 100%,
+            contents: "reconnect attempt 3\nwaiting for acknowledgment\n\n\n\ndeadline exceeded after 30s",
+            line-height: 1.7
+          }
+        }
+
+        after = text : t.mono {
+          width: 100%,
+          contents: "90  reconnect test ended\n91  log saved",
+          line-height: 1.7
+        }
+
+        selectionNote = text : t.caption {
+          contents: "Lines 84–89 selected",
+          fill[0].color: c.colors.muted
+        }
+      }
+
+      selectionMenu = frame : details.selectionMenu {
+        left: 420px,
+        top: 110px,
+        ignore-stack: .true,
+
+        ask {
+          connections[0].target: fileQuote,
+          connections[0].label: "Close preview and prefill file reference"
+        }
+      }
+    }
+  }
+}
+
+questionSelection = frame : threadOpen {
+  title: "Project / Select question text",
+  caption: "Ask project assistant closes the selection menu and fills the main chat with Q-158. The question stays open.",
+  left: 1728px,
+  top: 4320px,
+
+  detail {
+    overrides: [
+      insert(questionMenu, after = details.threadDetail.footer),
+      remove(threadOpen.detail.ask)
+    ],
+
+    footer {
+      composer {
+        toolbar {
+          actions {
+            send {
+              fill[0].color: c.colors.subtle,
+
+              sendGlyph {
+                fill[0].color: c.colors.text
+              }
+            }
+          }
+        }
+      }
+    }
+
+    body {
+      layout.justify-content: .start,
+
+      @with-variant(attention.attentionExpanded)
+      item {
+        overrides: [
+          insert(questionExcerpt, after = attention.attentionCard.details)
+        ],
+
+        details {
+          connections[0].target: threadOpen,
+          connections[0].label: "Close expanded question and selection"
+        }
+
+        heading {
+          contents: "Windows reconnect question"
+        }
+      }
+
+      reply1 {
+        display: .none
+      }
+
+      message1 {
+        display: .none
+      }
+    }
+
+    head {
+      tools {
+        close {
+          connections[0].target: threadOpen,
+          connections[0].label: "Close question selection"
+        }
+      }
+    }
+  }
+
+  main {
+    transcript {
+      decision {
+        heading {
+          contents: "Windows reconnect question"
+        }
+      }
+    }
+  }
+
+  questionExcerpt = frame {
+    width: 100%,
+    layout: {direction: .column, item-gap: 8px},
+    children: [origin, selectedSentence],
+
+    origin = text : t.caption {
+      width: 100%,
+      contents: "Question Q-158 · Thread T-160-WIN · Reply 3",
+      fill[0].color: c.colors.muted
+    }
+
+    selectedSentence = frame {
+      width: 100%,
+      layout: {direction: .column},
+      fill: c.colors.accentSoft,
+      corner-radius: 4px,
+      padding: 8px,
+      children: selectedText,
+
+      selectedText = text : t.small {
+        width: 100%,
+        contents: "The retry passed once, but the disconnect still occurs after restarting Windows."
+      }
+    }
+  }
+
+  questionMenu = frame : details.selectionMenu {
+    left: 178px,
+    top: 174px,
+    ignore-stack: .true,
+
+    ask {
+      connections[0].target: questionQuote,
+      connections[0].label: "Close selection and prefill question reference"
+    }
+  }
+}
+
+longFileSelection = frame : fileSelection {
+  title: "Project / Select long file text",
+  caption: "Ask project assistant shortens the 14 KB selection to 8 KB and keeps lines 1–420 with the full source.",
+  left: 3456px,
+  top: 4320px,
+
+  scrim {
+    preview {
+      selectionMenu {
+        ask {
+          connections[0].target: longQuote,
+          connections[0].label: "Close preview and prefill shortened reference"
+        }
+
+        top: 92px
+      }
+
+      body {
+        preview {
+          logContent {
+            after {
+              display: .none
+            }
+
+            before {
+              display: .none
+            }
+
+            selectionNote {
+              contents: "Lines 1–420 selected · 14 KB"
+            }
+
+            selectedLines {
+              selectedText {
+                contents: "reconnect test started\ndevice restarted; checking delivery…\nreconnect attempt 1\nwaiting for acknowledgment\nreconnect attempt 2\nwaiting for acknowledgment\nreconnect attempt 3\nwaiting for acknowledgment\ndeadline exceeded after 30s\nretry scheduled\n…\nreconnect test ended"
+              }
+
+              numbers {
+                contents: "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n…\n420"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }

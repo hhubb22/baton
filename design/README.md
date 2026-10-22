@@ -1,6 +1,6 @@
 # Baton 界面设计
 
-Baton Web UI 的 Elyx 设计项目，包括设计系统总览和第一个里程碑用到的页面。项目根目录为 `design/`，配置保存在 `elyx.json`。产品行为以仓库 `specs/` 为准，界面交互和文案遵循 [WRITING.md](WRITING.md)。设计稿里的状态对应产品规格。
+Baton Web UI 的 Elyx 设计项目，包含设计系统、品牌资源，以及登录、设备、Thread、项目协同、文件与引用、事项处理、项目维护的页面和状态。项目根目录为 `design/`，配置保存在 `elyx.json`。产品行为以仓库 `specs/` 为准，入口与返回路径见 [FLOWS.md](FLOWS.md)，界面文案遵循 [WRITING.md](WRITING.md)。前端实施顺序和验收范围见 [Web UI 实施计划](../specs/web-ui/PLAN.md)。
 
 在 Elyx 中打开此目录，或在仓库根目录运行：
 
@@ -13,16 +13,29 @@ elyx design
 | 文件 | 内容 | 对应规格 |
 |---|---|---|
 | [index.elyx](index.elyx) | 设计系统总览：设计规则、颜色、文字、控件、状态、主对话条目、输入区与横幅 | — |
-| [screens/project.elyx](screens/project.elyx) | Project 页的四个状态：运行中、所有设备离线、需要处理、已暂停 | PA-07、PA-13、PA-22、PA-23 |
-| [screens/project-thread.elyx](screens/project-thread.elyx) | 在 Project 页右侧打开 Thread 详情的两个状态：空闲时带展开的过程记录、事项和选中文字提问，执行中带实时输出和 Thread 输入区 | R-08、R-09、R-10、R-11、R-15、R-16、R-17、PA-19、PA-22、IB-08、IB-13 |
-| [screens/inbox.elyx](screens/inbox.elyx) | 待处理：跨 Project 的事项和 Project Agent 暂停的系统事项 | IB-06、IB-10、IB-18 |
-| [screens/threads.elyx](screens/threads.elyx) | Thread 页：顶部新建 Thread 的输入区、位置菜单、模型菜单、分组列表、右侧打开详情、换模型、状态未知、等待设备和文件预览 | R-05、R-06、R-07、R-08、R-10、R-13、R-14、R-18 |
-| [screens/devices.elyx](screens/devices.elyx) | 设备列表、助手可用情况、允许访问的文件夹与命令权限；连接设备和断开设备确认弹窗 | R-02、R-04、R-06、PA-06、PA-21 |
-| [screens/login.elyx](screens/login.elyx) | 登录、账号或口令不对、口令被管理员重置 | R-01、D2 |
-| [screens/new-project.elyx](screens/new-project.elyx) | 新建项目弹窗、名称校验和创建后的任务输入引导 | PA-01、PA-04 |
-| [screens/project-settings.elyx](screens/project-settings.elyx) | Project 设置弹窗和归档确认 | PA-04、PA-23、IB-16 |
+| [screens/login.elyx](screens/login.elyx) | 登录、提交中、账号或口令错误、口令被重置、登录失效、退出与连接失败 | R-01、D2 |
+| [screens/workspace.elyx](screens/workspace.elyx) | 首次进入、账号菜单、退出处理中与失败、收起侧栏、首台设备接入 | R-01、R-02、R-17 |
+| [screens/devices.elyx](screens/devices.elyx) | 空设备列表、同步中、能力缺失、默认设备、命令权限保存与失败、断开确认及结果 | R-02～R-06、PA-06、PA-21 |
+| [screens/threads.elyx](screens/threads.elyx) | 新建与筛选、目录选择、模型菜单、详情、停止与归档确认、离线等待、恢复、历史读取与文件预览 | R-05～R-18 |
+| [screens/new-project.elyx](screens/new-project.elyx) | 创建、校验、提交中与失败、无可用设备时创建、创建后引导 | PA-01、PA-04、PA-07 |
+| [screens/project.elyx](screens/project.elyx) | 主对话、运行与等待原因、换设备、停止、暂停恢复、汇报、项目菜单及归档记录 | PA-07、PA-13、PA-22、PA-23、IB-16 |
+| [screens/project-thread.elyx](screens/project-thread.elyx) | 项目内 Thread 详情、实时输出、文字引用预填与发送、归档项目内继续使用 Thread | R-08～R-17、PA-19、PA-22、IB-08、IB-13 |
+| [screens/inbox.elyx](screens/inbox.elyx) | 待处理、空列表、加载与失败、已处理列表、1024px 回答画面 | IB-06～IB-12、IB-18～IB-20 |
+| [screens/project-settings.elyx](screens/project-settings.elyx) | 自动保存、失败重试、暂停恢复、归档确认与结果、只读设置 | PA-04、PA-23、IB-16 |
+| [screens/project-memory.elyx](screens/project-memory.elyx) | 记忆列表、添加编辑、保存与失败、版本冲突、归档后只读 | PA-17、PA-22 |
 
-Project 页的各个状态都是 `blocks/project-page.elyx` 的实例，Thread 页的各个状态都是 `blocks/thread-list.elyx` 的实例，只覆盖和默认状态不同的部分。Thread 详情的全部状态（执行中、正在停止、执行中设备离线、等待设备、状态未知、已停止、无法恢复、已归档）在 `blocks/thread-detail.elyx`；位置菜单和模型菜单在 `blocks/new-thread.elyx`，目录不存在和历史被删的状态提供换文件夹、新建对话入口；连接设备和文件预览的各个状态分别在 `blocks/enroll-dialog.elyx`、`blocks/file-preview.elyx`。
+Project、Thread 和 Inbox 页面分别复用 `blocks/project-page.elyx`、`blocks/thread-list.elyx` 和 `blocks/inbox-page.elyx`。同一页面的状态只覆盖差异部分。弹窗、表单和卡片的独立状态位于对应 block 文件，便于在多个入口复用。
+
+| 文件 | 独立交互状态 |
+|---|---|
+| [blocks/enroll-dialog.elyx](blocks/enroll-dialog.elyx) | 各系统注册命令、口令加载与失败、过期、接入结果、复制反馈 |
+| [blocks/new-thread.elyx](blocks/new-thread.elyx) | 位置与模型菜单、允许目录选择、设备选择、无目录及读取失败 |
+| [blocks/thread-actions.elyx](blocks/thread-actions.elyx) | 操作菜单、停止和归档确认、能力受限原因 |
+| [blocks/thread-detail.elyx](blocks/thread-detail.elyx) | 运行、停止、离线、未知、恢复、归档、历史加载分页与实时输出 |
+| [blocks/file-preview.elyx](blocks/file-preview.elyx) | 正常、截断、加载、离线、越界、文件不存在、二进制和读取失败 |
+| [blocks/project-reference.elyx](blocks/project-reference.elyx) | Thread、文件、事项和长引用的主对话输入区 |
+| [blocks/attention-card.elyx](blocks/attention-card.elyx) | 事项默认与展开、回复、终态、重复处理与撤回竞态、系统事项 |
+| [blocks/attention-reply.elyx](blocks/attention-reply.elyx) | 附言与纯文字回复、提交中、保存失败、空内容与长度校验 |
 
 ## 文件组织
 
@@ -36,6 +49,24 @@ Project 页的各个状态都是 `blocks/project-page.elyx` 的实例，Thread �
 | `resources/assets/` | SVG 图标 |
 | `resources/fonts/` | 项目字体目录，当前为空 |
 | `renders/` | 本地渲染结果，已被 Git 忽略 |
+
+## 品牌资源
+
+`resources/assets/` 保留原始 SVG，`controls/brand.elyx` 提供设计组件。
+
+| 资源 | 用途 |
+|---|---|
+| `baton-mark-mono.svg` | 侧栏单色标识，颜色跟随当前主题的正文色 |
+| `baton-mark.svg` | 浅色背景上的彩色标识，用于登录页 |
+| `baton-mark-dark.svg` | 深色背景上的彩色标识 |
+| `baton-app-icon.svg` | 带背景的应用图标 |
+| `favicon.svg` | 浏览器图标，通过 SVG 内的媒体查询适配系统主题，供前端接入 |
+
+Baton 品牌标识与项目头像分开使用；项目头像保留项目名称首字母。品牌 SVG 的自带颜色不表示运行状态。
+
+`baton-app-icon-flattened.svg` 是应用图标的设计预览资源，将原 SVG 的变换展开到路径坐标，供 Elyx 渲染使用。前端使用原始 `baton-app-icon.svg`。两个 SVG 的 1024 × 1024 光栅化结果逐像素一致。
+
+彩色标识嵌入可复用组件时，父组件的深色变体显式选择 `brand.colorMarkDark`；示例见 `controls/brand.elyx` 和 `blocks/login-shell.elyx`。
 
 ## 字体
 
