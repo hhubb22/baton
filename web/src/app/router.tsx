@@ -23,7 +23,30 @@ function NotFound() {
 
 const rootRoute = createRootRoute({ component: Outlet })
 
-const loginRoute = createRoute({ getParentRoute: () => rootRoute, path: '/login', component: LoginPage })
+export type LoginNotice = 'signedOut' | 'expired' | 'passwordReset'
+
+export interface LoginSearch {
+  notice?: LoginNotice
+  // 登录后回到的站内地址。
+  redirect?: string
+}
+
+const notices: LoginNotice[] = ['signedOut', 'expired', 'passwordReset']
+
+// 只接受站内路径，避免登录后被带到别的网站。
+function safeRedirect(value: unknown) {
+  return typeof value === 'string' && value.startsWith('/') && !value.startsWith('//') ? value : undefined
+}
+
+const loginRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/login',
+  component: LoginPage,
+  validateSearch: (search: Record<string, unknown>): LoginSearch => ({
+    notice: notices.find((item) => item === search.notice),
+    redirect: safeRedirect(search.redirect),
+  }),
+})
 
 // 登录后的页面共用侧栏布局；未登录时布局跳到 /login。
 const workspaceRoute = createRoute({ getParentRoute: () => rootRoute, id: 'workspace', component: WorkspaceLayout })

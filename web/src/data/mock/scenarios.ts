@@ -290,7 +290,7 @@ function files(): Record<string, string> {
 
 function base(now: number): World {
   return {
-    session: { account, defaultDeviceId: 'dev-mac' },
+    session: { account, defaultDeviceId: 'dev-mac', ended: null },
     devices: devices(now),
     projects: projects(now),
     threads: threads(now),
@@ -316,7 +316,7 @@ export function createWorld(id: ScenarioId, now: number): World {
     case 'empty':
       return {
         ...world,
-        session: { account, defaultDeviceId: null },
+        session: { account, defaultDeviceId: null, ended: null },
         devices: [],
         projects: [],
         threads: [],
@@ -325,7 +325,7 @@ export function createWorld(id: ScenarioId, now: number): World {
         files: {},
       }
     case 'signedOut':
-      return { ...world, session: { account: null, defaultDeviceId: null } }
+      return { ...world, session: { account: null, defaultDeviceId: null, ended: null } }
     case 'offline': {
       // Ubuntu Dev 掉线：上面执行中的 Thread 显示设备离线，Project Agent 没有其他满足条件的设备而等待。
       setDevice(world, 'dev-ubuntu', 'offline', now - 6 * minute)

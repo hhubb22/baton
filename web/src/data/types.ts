@@ -11,9 +11,13 @@ export interface Account {
   username: string
 }
 
+// 会话结束的原因。登录过期和管理员重置口令时登录页给出不同提示，主动退出或从未登录时为 null。
+export type SessionEnd = 'expired' | 'passwordReset'
+
 export interface Session {
   account: Account | null
   defaultDeviceId: ID | null
+  ended: SessionEnd | null
 }
 
 // 连接成功、状态同步完成和 Thread 执行状态分开表示。

@@ -1,5 +1,5 @@
 import { ClientError, type ChangeEvent, type Topic } from '../client'
-import type { Device, DeviceConnection, ID, Message, Operation, OperationKind, OperationPhase, Project, Thread } from '../types'
+import type { Device, DeviceConnection, ID, SessionEnd, Message, Operation, OperationKind, OperationPhase, Project, Thread } from '../types'
 import { createWorld, type ScenarioId } from './scenarios'
 import type { Scheduler } from './scheduler'
 import type { World } from './world'
@@ -117,9 +117,10 @@ export class MockStore {
   signIn(username: string, password: string) {
     // 模拟登录接受任意非空用户名和密码，密码 `wrong` 用来演示登录失败。
     if (username.trim() === '' || password === '' || password === 'wrong') {
-      throw new ClientError('unauthorized', 'Username or password is incorrect')
+      throw new ClientError('unauthorized', 'Invalid username or password')
     }
     this.world.session.account = { id: 'emp-kaken', name: 'Kaken He', username: username.trim() }
+    this.world.session.ended = null
     if (!this.world.session.defaultDeviceId && this.world.devices.length > 0) {
       this.world.session.defaultDeviceId = [...this.world.devices].sort((a, b) => a.registeredAt - b.registeredAt)[0].id
     }
@@ -128,6 +129,15 @@ export class MockStore {
 
   signOut() {
     this.world.session.account = null
+    this.world.session.ended = null
+    this.emit('session')
+  }
+
+  // 中心让当前会话失效：登录过期，或管理员重置了口令。
+  endSession(reason: SessionEnd) {
+    if (!this.world.session.account) return
+    this.world.session.account = null
+    this.world.session.ended = reason
     this.emit('session')
   }
 

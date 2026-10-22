@@ -2,7 +2,7 @@ import * as stylex from '@stylexjs/stylex'
 import { useState } from 'react'
 import type { MockControls } from '../data/mock/client'
 import { scenarioIds, scenarioLabels, type ScenarioId } from '../data/mock/scenarios'
-import { useDevices } from '../data/queries'
+import { useDevices, useSession } from '../data/queries'
 import { shadow } from '../theme/base.stylex'
 import { text } from '../theme/text'
 import { colors, radius, space } from '../theme/tokens.stylex'
@@ -52,11 +52,13 @@ const styles = stylex.create({
   devices: { display: 'flex', flexDirection: 'column', gap: space.xs },
 })
 
-// 只在开发服务器里出现：切换和重置模拟场景，手动让设备上下线。
+// 只在开发服务器里出现：切换和重置模拟场景，手动让设备上下线、结束会话或断开与 Baton 的连接。
 export function ScenarioPanel({ controls }: { controls: MockControls }) {
   const [open, setOpen] = useState(false)
   const [scenario, setScenario] = useState<ScenarioId>(controls.scenario)
+  const [reachable, setReachable] = useState(controls.reachable)
   const devices = useDevices()
+  const session = useSession()
 
   if (!open) {
     return (
@@ -97,6 +99,27 @@ export function ScenarioPanel({ controls }: { controls: MockControls }) {
           Reset
         </Button>
       </div>
+      <div {...stylex.props(styles.row, text.small)}>
+        <span>Baton reachable</span>
+        <Toggle
+          label="Baton reachable"
+          checked={reachable}
+          onChange={(next) => {
+            setReachable(next)
+            controls.setReachable(next)
+          }}
+        />
+      </div>
+      {session.data?.account && (
+        <div {...stylex.props(styles.row)}>
+          <Button small onClick={() => controls.endSession('expired')}>
+            Expire sign-in
+          </Button>
+          <Button small onClick={() => controls.endSession('passwordReset')}>
+            Reset password
+          </Button>
+        </div>
+      )}
       {devices.data && devices.data.length > 0 && (
         <div {...stylex.props(styles.devices)}>
           {devices.data.map((device) => (

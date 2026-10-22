@@ -18,7 +18,8 @@ export interface ChangeEvent {
 }
 
 export class ClientError extends Error {
-  readonly code: 'unauthorized' | 'notFound' | 'conflict' | 'invalid'
+  // unavailable 表示没有连上 Baton，请求结果未知，可以原样重试。
+  readonly code: 'unauthorized' | 'notFound' | 'conflict' | 'invalid' | 'unavailable'
 
   constructor(code: ClientError['code'], message: string) {
     super(message)

@@ -2,16 +2,18 @@ import * as stylex from '@stylexjs/stylex'
 import type { ReactNode } from 'react'
 import { text } from '../theme/text'
 import { colors, size, space } from '../theme/tokens.stylex'
+import { IconButton } from '../ui/Button'
+import { useWorkspace } from './workspace'
 
 const styles = stylex.create({
   page: { display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0, height: '100%' },
   header: {
     display: 'flex',
     alignItems: 'center',
-    gap: space.sm,
+    gap: space.md,
     flexShrink: 0,
     height: size.header,
-    paddingInline: space.xl,
+    paddingInline: '20px',
     borderBottomWidth: '1px',
     borderBottomStyle: 'solid',
     borderBottomColor: colors.borderSoft,
@@ -30,11 +32,18 @@ const styles = stylex.create({
   },
 })
 
-// 工作区右侧的页面：48px 标题栏，下面是可滚动的内容。
+// 工作区右侧的页面：48px 标题栏，最左边是收起或展开侧栏的按钮，下面是可滚动的内容。
 export function Page({ title, actions, children }: { title: ReactNode; actions?: ReactNode; children: ReactNode }) {
+  const { collapsed, toggleSidebar } = useWorkspace()
   return (
     <section {...stylex.props(styles.page)}>
       <header {...stylex.props(styles.header)}>
+        <IconButton
+          icon={collapsed ? 'chevron-right' : 'chevron-left'}
+          label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-expanded={!collapsed}
+          onClick={toggleSidebar}
+        />
         <h1 {...stylex.props(text.bodyMedium, styles.title, text.truncate)}>{title}</h1>
         {actions}
       </header>

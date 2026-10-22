@@ -1,7 +1,7 @@
 import { createMemoryHistory } from '@tanstack/react-router'
 import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { createMockClient } from '../data/mock/client'
 import type { ScenarioId } from '../data/mock/scenarios'
 import { manualScheduler } from '../data/mock/scheduler'
@@ -17,6 +17,17 @@ function renderApp(path: string, scenario: ScenarioId = 'normal') {
   return { client, scheduler, router }
 }
 
+beforeEach(() => localStorage.clear())
+
+async function signIn(user: ReturnType<typeof userEvent.setup>, password = 'sample-password') {
+  await user.type(screen.getByLabelText('Password'), password)
+  await user.click(screen.getByRole('button', { name: /Sign in|Try signing in again/ }))
+}
+
+async function openAccountMenu(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByRole('button', { name: /Kaken He/ }))
+}
+
 describe('app', () => {
   it('shows the first-visit guide when no device is connected', async () => {
     renderApp('/', 'empty')
@@ -30,19 +41,110 @@ describe('app', () => {
     expect(router.state.location.pathname).toBe('/threads')
   })
 
-  it('asks for sign-in and accepts the sample account', async () => {
+  it('keeps the username after invalid credentials and returns to the requested page', async () => {
     const user = userEvent.setup()
     const { router } = renderApp('/inbox', 'signedOut')
     await user.type(await screen.findByLabelText('Username'), 'kaken')
-    await user.type(screen.getByLabelText('Password'), 'wrong')
-    await user.click(screen.getByRole('button', { name: 'Sign in' }))
-    expect(await screen.findByText('Username or password is incorrect.')).toBeInTheDocument()
+    await signIn(user, 'wrong')
+    expect(await screen.findByText('Invalid username or password.')).toBeInTheDocument()
+    expect(screen.getByLabelText('Username')).toHaveValue('kaken')
+    expect(screen.getByLabelText('Password')).toHaveValue('')
+    expect(screen.getByLabelText('Password')).toHaveFocus()
 
-    await user.clear(screen.getByLabelText('Password'))
-    await user.type(screen.getByLabelText('Password'), 'sample-password')
-    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+    await signIn(user)
+    expect(await screen.findByRole('heading', { name: 'Inbox' })).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe('/inbox')
+  })
+
+  it('explains an expired sign-in and returns to the same thread', async () => {
+    const user = userEvent.setup()
+    const { client, router } = renderApp('/threads/thr-webui')
+    expect(await screen.findByRole('heading', { name: 'Rebuild web UI foundation' })).toBeInTheDocument()
+
+    act(() => client.controls.endSession('expired'))
+    expect(await screen.findByText('Your sign-in expired')).toBeInTheDocument()
+    await user.type(screen.getByLabelText('Username'), 'kaken')
+    await signIn(user)
+    expect(await screen.findByRole('heading', { name: 'Rebuild web UI foundation' })).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe('/threads/thr-webui')
+  })
+
+  it('asks for the new password after an administrator reset', async () => {
+    const { client } = renderApp('/devices')
+    expect(await screen.findByRole('heading', { name: 'Devices' })).toBeInTheDocument()
+    act(() => client.controls.endSession('passwordReset'))
+    expect(await screen.findByText('Password reset by administrator')).toBeInTheDocument()
+    expect(screen.getByLabelText('Password')).toHaveAttribute('placeholder', 'New password')
+  })
+
+  it('keeps the form when Baton cannot be reached', async () => {
+    const user = userEvent.setup()
+    const { client, router } = renderApp('/login', 'signedOut')
+    await user.type(await screen.findByLabelText('Username'), 'kaken')
+    client.controls.setReachable(false)
+    await signIn(user)
+    expect(await screen.findByText('Baton could not be reached')).toBeInTheDocument()
+    expect(screen.getByLabelText('Username')).toHaveValue('kaken')
+    expect(screen.getByLabelText('Password')).toHaveValue('sample-password')
+
+    client.controls.setReachable(true)
+    await user.click(screen.getByRole('button', { name: 'Try signing in again' }))
     expect(await screen.findByRole('link', { name: /Rebuild web UI foundation/ })).toBeInTheDocument()
     expect(router.state.location.pathname).toBe('/threads')
+  })
+
+  it('signs out to an empty sign-in form', async () => {
+    const user = userEvent.setup()
+    const { router } = renderApp('/threads')
+    await openAccountMenu(user)
+    await user.click(await screen.findByRole('button', { name: 'Sign out' }))
+    expect(await screen.findByText('You are signed out')).toBeInTheDocument()
+    expect(screen.getByLabelText('Password')).toHaveValue('')
+    expect(router.state.location.search).toEqual({ notice: 'signedOut' })
+  })
+
+  it('stays signed in and offers a retry when sign-out cannot be confirmed', async () => {
+    const user = userEvent.setup()
+    const { client } = renderApp('/threads')
+    await openAccountMenu(user)
+    client.controls.setReachable(false)
+    await user.click(await screen.findByRole('button', { name: 'Sign out' }))
+    expect(await screen.findByRole('heading', { name: 'Could not sign out' })).toBeInTheDocument()
+
+    client.controls.setReachable(true)
+    await user.click(screen.getByRole('button', { name: 'Retry sign-out' }))
+    expect(await screen.findByText('You are signed out')).toBeInTheDocument()
+  })
+
+  it('collapses the sidebar to icons and remembers it', async () => {
+    const user = userEvent.setup()
+    renderApp('/threads')
+    const sidebar = await screen.findByRole('navigation', { name: 'Workspace' })
+    expect(await within(sidebar).findByRole('link', { name: /Baton/ })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Collapse sidebar' }))
+    expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeInTheDocument()
+    expect(within(sidebar).queryByText('Projects')).not.toBeInTheDocument()
+    expect(within(sidebar).getByRole('link', { name: 'Threads' })).toHaveAttribute('aria-current', 'page')
+    expect(within(sidebar).getByRole('button', { name: 'New chat' })).toBeInTheDocument()
+    expect(localStorage.getItem('baton.sidebar.collapsed')).toBe('true')
+
+    await user.click(screen.getByRole('button', { name: 'Expand sidebar' }))
+    expect(within(sidebar).getByText('Projects')).toBeInTheDocument()
+  })
+
+  it('moves between pages and projects with the current one selected', async () => {
+    const user = userEvent.setup()
+    const { router } = renderApp('/threads')
+    const sidebar = await screen.findByRole('navigation', { name: 'Workspace' })
+    await user.click(await within(sidebar).findByRole('link', { name: /Baton/ }))
+    expect(router.state.location.pathname).toBe('/projects/prj-baton')
+    expect(within(sidebar).getByRole('link', { name: /Baton/ })).toHaveAttribute('aria-current', 'page')
+    expect(within(sidebar).getByRole('link', { name: /Threads/ })).not.toHaveAttribute('aria-current')
+
+    await user.click(within(sidebar).getByRole('link', { name: /Inbox/ }))
+    expect(router.state.location.pathname).toBe('/inbox')
+    expect(within(sidebar).getByRole('link', { name: /Inbox/ })).toHaveAttribute('aria-current', 'page')
   })
 
   it('updates thread, project and file preview when a device goes offline', async () => {

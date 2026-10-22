@@ -1,7 +1,15 @@
-import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  MutationCache,
+  QueryCache,
+  QueryClient,
+  QueryClientProvider,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import type { BatonClient } from './client'
-import type { ID } from './types'
+import { ClientError, type BatonClient } from './client'
+import type { ID, Session } from './types'
 
 // 查询键的第一段是数据主题，收到某个主题的变化时刷新以它开头的全部查询。
 export const keys = {
@@ -23,12 +31,21 @@ export function useClient() {
   return client
 }
 
+// 任何请求被拒绝为未登录，都说明会话已在中心结束，重新读取会话让工作区回到登录页。
 export function createQueryClient() {
-  return new QueryClient({
+  const onError = (error: Error) => {
+    if (error instanceof ClientError && error.code === 'unauthorized') {
+      void queryClient.invalidateQueries({ queryKey: keys.session })
+    }
+  }
+  const queryClient: QueryClient = new QueryClient({
+    queryCache: new QueryCache({ onError }),
+    mutationCache: new MutationCache({ onError }),
     defaultOptions: {
       queries: { retry: false, refetchOnWindowFocus: false, staleTime: Infinity },
     },
   })
+  return queryClient
 }
 
 export function ClientProvider({ client, children }: { client: BatonClient; children: ReactNode }) {
@@ -112,6 +129,7 @@ export function useSignOut() {
   return useMutation({
     mutationFn: () => client.signOut(),
     onSuccess: () => {
+      queryClient.setQueryData<Session>(keys.session, { account: null, defaultDeviceId: null, ended: null })
       queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== 'session' })
     },
   })

@@ -58,10 +58,10 @@ const styles = stylex.create({
   s15: { width: '15px', height: '15px' },
   s16: { width: '16px', height: '16px' },
   s24: { width: '24px', height: '24px' },
-  s40: { width: '40px', height: '40px' },
+  s36: { width: '36px', height: '36px' },
 })
 
-const sizes = { 12: styles.s12, 14: styles.s14, 15: styles.s15, 16: styles.s16, 24: styles.s24, 40: styles.s40 }
+const sizes = { 12: styles.s12, 14: styles.s14, 15: styles.s15, 16: styles.s16, 24: styles.s24, 36: styles.s36 }
 
 export function Icon({
   name,
