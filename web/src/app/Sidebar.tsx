@@ -157,6 +157,7 @@ function ProjectTrailing({ project, pending }: { project: Project; pending: numb
   if (project.status === 'paused') return <Icon name="pause" size={14} label="Paused" style={styles.rowIcon} />
   if (pending > 0) return <Count value={pending} label={`${pending} waiting for your reply`} />
   if (project.agent.state === 'running') return <StatusDot tone="agent" label="Running" />
+  if (project.agent.state === 'stopping') return <StatusDot tone="agent" label="Stopping" />
   if (project.agent.state === 'waitingDevice') return <span {...stylex.props(text.caption, text.faint)}>Waiting</span>
   return null
 }
@@ -300,6 +301,7 @@ export function Sidebar() {
 
 function ProjectList({ projects, loaded }: { projects: Project[]; loaded: boolean }) {
   const inbox = useInbox()
+  const { newProject } = useWorkspace()
   return (
     <>
       <div {...stylex.props(styles.sectionHead)}>
@@ -308,6 +310,7 @@ function ProjectList({ projects, loaded }: { projects: Project[]; loaded: boolea
           type="button"
           aria-label="New project"
           title="New project"
+          onClick={newProject}
           {...stylex.props(styles.addProject, focusRing.ring)}
         >
           <Icon name="plus" size={14} />

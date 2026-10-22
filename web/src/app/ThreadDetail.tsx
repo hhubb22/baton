@@ -347,11 +347,14 @@ export function ThreadDetail({
   threadId,
   layout,
   onClose,
+  onBack,
   onRecover,
 }: {
   threadId: string
   layout: 'panel' | 'page'
   onClose?: () => void
+  // Project 页里的详情替换了概览栏，返回按钮回到概览。
+  onBack?: () => void
   // 用同一设备和目录新建对话，或重新选择目录。
   onRecover: (action: RecoverAction, thread: Thread) => void
 }) {
@@ -710,6 +713,7 @@ export function ThreadDetail({
   return (
     <aside aria-label={thread.title} {...stylex.props(styles.panel)}>
       <div {...stylex.props(styles.header)}>
+        {onBack && <IconButton icon="chevron-left" label="Back to overview" onClick={onBack} />}
         <h2 {...stylex.props(text.bodyMedium, styles.headerTitle, text.truncate)}>{thread.title}</h2>
         {statusLabel}
         <IconButton

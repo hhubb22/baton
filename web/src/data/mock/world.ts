@@ -1,10 +1,24 @@
-import type { Device, EnrollmentState, ID, InboxItem, Message, Operation, Project, Session, Thread } from '../types'
+import type {
+  Device,
+  EnrollmentState,
+  ID,
+  InboxItem,
+  MemoryNote,
+  Message,
+  Operation,
+  Project,
+  ProjectEntry,
+  Session,
+  Thread,
+} from '../types'
 
 // 模拟后端的完整状态。场景只负责生成初始 World，状态变化规则都在 store.ts。
 export interface World {
   session: Session
   devices: Device[]
   projects: Project[]
+  projectEntries: ProjectEntry[]
+  memory: MemoryNote[]
   threads: Thread[]
   messages: Message[]
   inbox: InboxItem[]
@@ -20,6 +34,8 @@ export interface World {
   stubbornStops: ID[]
   // 设备上已经找不到对话记录的 Thread，恢复时失败。
   lostHistory: ID[]
+  // 接下来这么多次新建 Project 会保存失败，用来演示失败后重试。
+  failProjectSaves: number
 }
 
 export interface EnrollmentRecord {

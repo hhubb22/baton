@@ -161,7 +161,7 @@ describe('app', () => {
 
     act(() => client.controls.setDeviceConnection('dev-ubuntu', 'offline'))
     await act(() => router.navigate({ to: '/projects/$projectId', params: { projectId: 'prj-baton' } }))
-    expect(await screen.findByText('Project assistant is waiting for a device')).toBeInTheDocument()
+    expect(await screen.findByText('Waiting for a device to come online')).toBeInTheDocument()
   })
 
   it('shows send phases until the agent replies', async () => {
@@ -176,6 +176,113 @@ describe('app', () => {
 
     act(() => scheduler.advance(browserLatency.run))
     expect(await screen.findByText('Idle')).toBeInTheDocument()
+  })
+})
+
+describe('projects', () => {
+  async function advance(scheduler: ReturnType<typeof manualScheduler>, ms: number) {
+    for (let passed = 0; passed < ms; passed += 50) {
+      await act(async () => scheduler.advance(Math.min(50, ms - passed)))
+    }
+  }
+
+  async function createProject(user: ReturnType<typeof userEvent.setup>, name: string) {
+    await user.click(await screen.findByRole('button', { name: 'New project' }))
+    const dialog = await screen.findByRole('dialog', { name: 'New project' })
+    await user.type(within(dialog).getByLabelText('Name'), name)
+    await user.click(within(dialog).getByRole('button', { name: 'Create project' }))
+    return dialog
+  }
+
+  it('asks for a name, then opens the empty project', async () => {
+    const user = userEvent.setup()
+    const { scheduler, router } = renderApp('/threads')
+    await user.click(await screen.findByRole('button', { name: 'New project' }))
+    const dialog = await screen.findByRole('dialog', { name: 'New project' })
+    expect(within(dialog).getByText('Uses your ChatGPT account. Signed in on 2 online devices.')).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: 'Create project' }))
+    expect(within(dialog).getByText('Enter a project name.')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Name')).toHaveFocus()
+
+    await user.selectOptions(within(dialog).getByLabelText('Assistant subscription'), 'Claude')
+    expect(within(dialog).getByLabelText('Model')).toHaveValue('claude-opus-5-5')
+    await user.selectOptions(within(dialog).getByLabelText('Assistant subscription'), 'ChatGPT')
+    await user.type(within(dialog).getByLabelText('Name'), 'Release{Enter}')
+    await advance(scheduler, 500)
+    expect(await screen.findByText(/Ask the assistant to run tests/)).toBeInTheDocument()
+    expect(router.state.location.pathname).toMatch(/^\/projects\/prj-/)
+    expect(screen.getByLabelText('Message the project assistant')).toHaveAttribute(
+      'placeholder',
+      'Describe what you want to build or verify…',
+    )
+    expect(screen.getByText('No chats in this project yet. Ask the assistant to start work.')).toBeInTheDocument()
+  })
+
+  it('keeps the entries when saving fails and saves on retry', async () => {
+    const user = userEvent.setup()
+    const { scheduler, router } = renderApp('/threads', 'error')
+    const dialog = await createProject(user, 'Retry me')
+    await advance(scheduler, 500)
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Baton could not save this project.')
+    expect(within(dialog).getByLabelText('Name')).toHaveValue('Retry me')
+    await user.click(within(dialog).getByRole('button', { name: 'Try again' }))
+    await advance(scheduler, 500)
+    await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/projects\/prj-/))
+    expect(await screen.findAllByText('Retry me')).not.toHaveLength(0)
+  })
+
+  it('opens two threads, shows their replies and opens one beside the conversation', async () => {
+    const user = userEvent.setup()
+    const { scheduler } = renderApp('/threads')
+    await createProject(user, 'Compat run')
+    await advance(scheduler, 500)
+    await user.type(
+      await screen.findByLabelText('Message the project assistant'),
+      'Run the compat suite on MacBook Pro and Ubuntu Dev.{Enter}',
+    )
+    await advance(scheduler, browserLatency.save + browserLatency.run / 2)
+    const opened = await screen.findByRole('region', { name: 'Opened 2 chats' })
+    expect(within(opened).getByText('2 running')).toBeInTheDocument()
+    const overview = screen.getByRole('complementary', { name: 'Overview' })
+    expect(within(overview).getByRole('tab', { name: /Threads/ })).toHaveTextContent('2')
+
+    await advance(scheduler, browserLatency.run * 2)
+    const replies = await screen.findByRole('region', { name: 'Replies from 2 chats' })
+    expect(within(replies).getByText('All replied')).toBeInTheDocument()
+    expect(screen.getByText(/^Both chats finished\./)).toBeInTheDocument()
+
+    await user.click(within(replies).getAllByRole('button')[0])
+    const panel = await screen.findByRole('complementary', { name: /compat/i })
+    expect(screen.queryByRole('complementary', { name: 'Overview' })).not.toBeInTheDocument()
+    await user.click(within(panel).getByRole('button', { name: 'Back to overview' }))
+    expect(await screen.findByRole('complementary', { name: 'Overview' })).toBeInTheDocument()
+  })
+
+  it('saves messages while no device can run the assistant', async () => {
+    const user = userEvent.setup()
+    const { scheduler } = renderApp('/projects/prj-docs', 'waiting')
+    expect(await screen.findByText('No device is ready for this model')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'View devices' })).toBeInTheDocument()
+    await user.type(screen.getByLabelText('Message the project assistant'), 'Check the install guide.{Enter}')
+    await advance(scheduler, browserLatency.save + 100)
+    await waitFor(() =>
+      expect(screen.getAllByText('Saved · waiting for a device with Claude signed in')).toHaveLength(2),
+    )
+    expect(screen.getByText(/2 messages waiting/)).toBeInTheDocument()
+  })
+
+  it('stops the assistant run and leaves its threads running', async () => {
+    const user = userEvent.setup()
+    const { scheduler } = renderApp('/projects/prj-baton')
+    await user.click(await screen.findByRole('button', { name: 'Stop run' }))
+    expect(await screen.findByText('Waiting for the project assistant to stop')).toBeInTheDocument()
+    expect(screen.getByText('Stop requested')).toBeInTheDocument()
+    await advance(scheduler, browserLatency.device + 100)
+    expect(
+      await screen.findByText('You stopped the project assistant. Chats it opened keep running.'),
+    ).toBeInTheDocument()
+    const overview = screen.getByRole('complementary', { name: 'Overview' })
+    expect(within(within(overview).getByRole('region', { name: 'Running' })).getByText(/gateway/i)).toBeInTheDocument()
   })
 })
 

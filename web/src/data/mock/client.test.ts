@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ChangeEvent } from '../client'
-import { previewProblem, threadView, projectAgentStatus } from '../derive'
+import { assistantWait, previewProblem, projectAgentStatus, threadView } from '../derive'
 import { createMockClient } from './client'
 import { scenarioIds } from './scenarios'
 import { manualScheduler } from './scheduler'
@@ -57,7 +57,7 @@ describe('device connection', () => {
 
     const baton = projects.find((item) => item.id === 'prj-baton')!
     expect(baton.agent.state).toBe('waitingDevice')
-    expect(projectAgentStatus(baton, devices).label).toBe('Waiting for a device to come online')
+    expect(projectAgentStatus(baton, devices).label).toBe('Waiting for device')
 
     const preview = await client.readFile('dev-ubuntu', '/home/kaken/work/baton/internal/gateway/conn.go')
     expect(preview.state).toBe('unavailable')
@@ -301,5 +301,174 @@ describe('operations', () => {
     await expect(client.signIn('kaken', 'wrong')).rejects.toMatchObject({ code: 'unauthorized' })
     await client.signIn('kaken', 'example-password')
     expect(await client.listThreads()).not.toHaveLength(0)
+  })
+})
+
+describe('projects', () => {
+  async function create(client: ReturnType<typeof createMockClient>, scheduler: ReturnType<typeof manualScheduler>) {
+    const project = await client.createProject({
+      name: 'Release check',
+      goal: 'Run the compat suite before each release.',
+      subscription: 'ChatGPT',
+      model: 'gpt-6.1-sol',
+      clientId: 'p1',
+    })
+    scheduler.advance(0)
+    return project
+  }
+
+  it('creates a project that waits for its first message', async () => {
+    const { client, scheduler } = setup()
+    await expect(
+      client.createProject({ name: '  ', goal: '', subscription: 'ChatGPT', model: 'gpt-6.1-sol', clientId: 'p0' }),
+    ).rejects.toMatchObject({ code: 'invalid', message: 'Enter a project name.' })
+    const project = await create(client, scheduler)
+    expect(project).toMatchObject({ status: 'active', agent: { state: 'notStarted' } })
+    expect((await create(client, scheduler)).id).toBe(project.id)
+    expect(await client.listProjectEntries(project.id)).toEqual([])
+  })
+
+  it('fails once in the error scenario and saves on retry', async () => {
+    const { client } = setup('error')
+    const input = { name: 'Retry', goal: '', subscription: 'ChatGPT', model: 'gpt-6.1-sol', clientId: 'p1' }
+    await expect(client.createProject(input)).rejects.toMatchObject({ code: 'unavailable' })
+    expect((await client.createProject(input)).name).toBe('Retry')
+  })
+
+  it('opens two threads, waits for both replies, then reports once', async () => {
+    const { client, scheduler } = setup()
+    const project = await create(client, scheduler)
+    await client.sendProjectMessage({
+      projectId: project.id,
+      body: 'Run the compat suite on MacBook Pro and Ubuntu Dev.',
+      clientId: 'm1',
+    })
+    scheduler.advance(browserLatency.save)
+    expect((await client.listProjects()).find((item) => item.id === project.id)!.agent).toMatchObject({
+      state: 'running',
+      deviceId: 'dev-mac',
+      activity: 'Reading your message…',
+    })
+
+    scheduler.advance(browserLatency.run / 2)
+    const threads = (await client.listThreads()).filter((item) => item.projectId === project.id)
+    expect(threads.map((item) => [item.deviceId, item.status, item.folder])).toEqual([
+      ['dev-mac', 'running', '~/src/compat-suite'],
+      ['dev-ubuntu', 'running', '/home/kaken/work/baton'],
+    ])
+    const messages = await client.listMessages(threads[0].id)
+    expect(messages[0]).toMatchObject({ sender: 'projectAgent', delivery: 'delivered' })
+    let entries = await client.listProjectEntries(project.id)
+    expect(entries.at(-1)).toMatchObject({
+      kind: 'assistant',
+      threads: { action: 'opened', threadIds: threads.map((item) => item.id) },
+      body: "Opened 2 chats on MacBook Pro and Ubuntu Dev. I'll report back once both finish.",
+    })
+    expect(entries.at(-1)).toMatchObject({ process: [{ kind: 'command', deviceId: 'dev-mac' }, {}, {}] })
+    expect(await client.listProjectMemory(project.id)).toHaveLength(2)
+
+    scheduler.advance(browserLatency.run / 2)
+    expect((await client.listProjects()).find((item) => item.id === project.id)!.agent.state).toBe('idle')
+    scheduler.advance(browserLatency.run / 2)
+    expect((await client.listProjects()).find((item) => item.id === project.id)!.agent.activity).toBe(
+      "Reading Codex's reply from MacBook Pro…",
+    )
+    scheduler.advance(browserLatency.run / 2)
+    entries = await client.listProjectEntries(project.id)
+    expect(entries.at(-1)).toMatchObject({
+      kind: 'assistant',
+      threads: { action: 'replies', threadIds: threads.map((item) => item.id) },
+    })
+    expect(entries.at(-1)!.kind === 'assistant' && entries.at(-1)!.body).toMatch(/^Both chats finished\./)
+    scheduler.advance(browserLatency.run)
+    expect(await client.listProjectEntries(project.id)).toHaveLength(entries.length)
+  })
+
+  it('wakes the assistant only for turns it started', async () => {
+    const { client, scheduler } = setup()
+    const project = await create(client, scheduler)
+    await client.sendProjectMessage({ projectId: project.id, body: 'Fix the flaky test.', clientId: 'm1' })
+    scheduler.advance(browserLatency.save + browserLatency.run * 2)
+    const [thread] = (await client.listThreads()).filter((item) => item.projectId === project.id)
+    let entries = await client.listProjectEntries(project.id)
+    const reported = entries.length
+    expect(entries.at(-1)).toMatchObject({ threads: { action: 'replies' } })
+
+    // 你在助手开的 Thread 里发的消息，回复不交给助手。
+    await client.sendMessage({ threadId: thread.id, body: 'Also update the changelog.', clientId: 't1' })
+    scheduler.advance(browserLatency.save + browserLatency.run * 2)
+    entries = await client.listProjectEntries(project.id)
+    expect(entries).toHaveLength(reported)
+    expect((await client.listProjects()).find((item) => item.id === project.id)!.agent.state).toBe('idle')
+  })
+
+  it('reports a stopped thread back to the assistant', async () => {
+    const { client, scheduler } = setup()
+    const project = await create(client, scheduler)
+    await client.sendProjectMessage({ projectId: project.id, body: 'Fix the flaky test.', clientId: 'm1' })
+    scheduler.advance(browserLatency.save + browserLatency.run / 2)
+    const [thread] = (await client.listThreads()).filter((item) => item.projectId === project.id)
+    await client.stopThread(thread.id)
+    scheduler.advance(browserLatency.save + browserLatency.device + browserLatency.run / 2)
+    expect((await client.listProjectEntries(project.id)).at(-1)).toMatchObject({
+      body: 'Codex on MacBook Pro stopped before replying.',
+    })
+  })
+
+  it('keeps messages waiting while no device can run the assistant', async () => {
+    const { client, scheduler } = setup('waiting')
+    const docs = (await client.listProjects()).find((item) => item.id === 'prj-docs')!
+    expect(docs.agent).toMatchObject({ state: 'waitingDevice', reason: 'An online device with Claude signed in' })
+    const devices = await client.listDevices()
+    expect(assistantWait(docs, devices).detail).toBe(
+      'Sign in to Claude on MacBook Pro. Sign in to Claude on Ubuntu Dev. The project assistant is not installed on Windows Desktop. Your message stays saved.',
+    )
+    await client.sendProjectMessage({ projectId: 'prj-docs', body: 'Check the install guide.', clientId: 'm1' })
+    scheduler.advance(browserLatency.run * 4)
+    expect((await client.listProjectEntries('prj-docs')).map((item) => item.kind === 'user' && item.delivery)).toEqual([
+      'waitingDevice',
+      'waitingDevice',
+    ])
+  })
+
+  it('switches device with a note and resumes after reconnect', async () => {
+    const { client, scheduler } = setup()
+    client.controls.setDeviceConnection('dev-ubuntu', 'offline')
+    expect((await client.listProjectEntries('prj-baton')).at(-1)).toMatchObject({
+      kind: 'note',
+      body: 'Switched to MacBook Pro because Ubuntu Dev is offline.',
+    })
+    client.controls.setDeviceConnection('dev-mac', 'offline')
+    expect((await client.listProjects()).find((item) => item.id === 'prj-baton')!.agent.state).toBe('waitingDevice')
+    client.controls.setDeviceConnection('dev-ubuntu', 'online')
+    expect((await client.listProjects()).find((item) => item.id === 'prj-baton')!.agent).toMatchObject({
+      state: 'running',
+      deviceId: 'dev-ubuntu',
+    })
+    // 恢复后接着运行，Ubuntu Dev 上的 Thread 回复后再汇报一次。
+    scheduler.advance(browserLatency.run * 2)
+    expect((await client.listProjects()).find((item) => item.id === 'prj-baton')!.agent.state).toBe('idle')
+    expect((await client.listProjectEntries('prj-baton')).at(-1)).toMatchObject({
+      threads: { action: 'replies', threadIds: ['thr-gateway'] },
+    })
+  })
+
+  it('stops the assistant run without stopping its threads', async () => {
+    const { client, scheduler } = setup()
+    await expect(client.stopProjectRun('prj-compat')).rejects.toMatchObject({ code: 'invalid' })
+    const stopping = await client.stopProjectRun('prj-baton')
+    expect(stopping.agent.state).toBe('stopping')
+    scheduler.advance(browserLatency.device)
+    const baton = (await client.listProjects()).find((item) => item.id === 'prj-baton')!
+    expect(baton.agent).toMatchObject({ state: 'stopped', reason: null })
+    expect((await client.listThreads()).find((item) => item.id === 'thr-gateway')!.status).toBe('running')
+    expect((await client.listProjectEntries('prj-baton')).at(-1)).toMatchObject({ kind: 'note' })
+
+    // 停止后 Thread 的结果等下一条消息一起读。
+    scheduler.advance(browserLatency.run)
+    expect((await client.listProjects()).find((item) => item.id === 'prj-baton')!.agent.state).toBe('stopped')
+    await client.sendProjectMessage({ projectId: 'prj-baton', body: 'What changed?', clientId: 'm1' })
+    scheduler.advance(browserLatency.save)
+    expect((await client.listProjects()).find((item) => item.id === 'prj-baton')!.agent.state).toBe('running')
   })
 })

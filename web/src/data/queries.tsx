@@ -20,6 +20,8 @@ export const keys = {
   // 目录列表随设备连接状态变化。
   folders: (deviceId: ID, path: string | null) => ['devices', 'folders', deviceId, path] as const,
   projects: ['projects'] as const,
+  projectEntries: (id: ID) => ['projects', 'entries', id] as const,
+  projectMemory: (id: ID) => ['projects', 'memory', id] as const,
   threads: ['threads'] as const,
   messages: (threadId: ID) => ['messages', threadId] as const,
   inbox: ['inbox'] as const,
@@ -92,6 +94,16 @@ export function useEnrollment(id: ID | null) {
 export function useProjects() {
   const client = useClient()
   return useQuery({ queryKey: keys.projects, queryFn: () => client.listProjects() })
+}
+
+export function useProjectEntries(projectId: ID) {
+  const client = useClient()
+  return useQuery({ queryKey: keys.projectEntries(projectId), queryFn: () => client.listProjectEntries(projectId) })
+}
+
+export function useProjectMemory(projectId: ID) {
+  const client = useClient()
+  return useQuery({ queryKey: keys.projectMemory(projectId), queryFn: () => client.listProjectMemory(projectId) })
 }
 
 export function useThreads() {
@@ -209,6 +221,26 @@ export function useArchiveThread() {
 export function useResumeThread() {
   const client = useClient()
   return useMutation({ mutationFn: (threadId: ID) => client.resumeThread(threadId) })
+}
+
+export function useCreateProject() {
+  const client = useClient()
+  return useMutation({
+    mutationFn: (input: { name: string; goal: string; subscription: string; model: string; clientId: string }) =>
+      client.createProject(input),
+  })
+}
+
+export function useSendProjectMessage() {
+  const client = useClient()
+  return useMutation({
+    mutationFn: (input: { projectId: ID; body: string; clientId: string }) => client.sendProjectMessage(input),
+  })
+}
+
+export function useStopProjectRun() {
+  const client = useClient()
+  return useMutation({ mutationFn: (projectId: ID) => client.stopProjectRun(projectId) })
 }
 
 export function useAnswerItem() {

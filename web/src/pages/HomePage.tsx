@@ -4,6 +4,7 @@ import { useDevices } from '../data/queries'
 import { text } from '../theme/text'
 import { space } from '../theme/tokens.stylex'
 import { Page } from '../app/Page'
+import { useWorkspace } from '../app/workspace'
 import { Button } from '../ui/Button'
 
 const styles = stylex.create({
@@ -23,6 +24,7 @@ const styles = stylex.create({
 export function HomePage() {
   const navigate = useNavigate()
   const devices = useDevices()
+  const { newProject } = useWorkspace()
   if (!devices.data) return null
   if (devices.data.length > 0) return <Navigate to="/threads" replace />
   return (
@@ -36,7 +38,7 @@ export function HomePage() {
           Connect a device
         </Button>
         <div {...stylex.props(styles.actions)}>
-          <Button>New project</Button>
+          <Button onClick={newProject}>New project</Button>
           <Button onClick={() => void navigate({ to: '/threads' })}>Open Threads</Button>
         </div>
       </div>

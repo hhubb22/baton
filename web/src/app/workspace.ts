@@ -6,6 +6,8 @@ export interface Workspace {
   toggleSidebar(): void
   signingOut: boolean
   signOut(): void
+  // 打开新建 Project 弹窗。
+  newProject(): void
 }
 
 export const WorkspaceContext = createContext<Workspace | null>(null)

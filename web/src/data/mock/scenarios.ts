@@ -1,4 +1,14 @@
-import type { Account, Device, DeviceAgent, InboxItem, Message, Project, Thread } from '../types'
+import type {
+  Account,
+  Device,
+  DeviceAgent,
+  InboxItem,
+  MemoryNote,
+  Message,
+  Project,
+  ProjectEntry,
+  Thread,
+} from '../types'
 import { fileKey, type World } from './world'
 
 export const scenarioIds = [
@@ -128,7 +138,10 @@ function projects(now: number): Project[] {
       name: 'Baton Dev',
       hue: 'slate',
       status: 'active',
-      agent: { state: 'running', deviceId: 'dev-ubuntu', reason: null },
+      goal: 'Keep device connections stable across network changes and restarts.',
+      subscription: 'ChatGPT',
+      model: 'gpt-6.1-sol',
+      agent: { state: 'running', deviceId: 'dev-ubuntu', reason: null, activity: 'Planning the next step…' },
       createdAt: now - 14 * 24 * hour,
     },
     {
@@ -136,7 +149,10 @@ function projects(now: number): Project[] {
       name: 'Compatibility',
       hue: 'amber',
       status: 'active',
-      agent: { state: 'idle', deviceId: 'dev-mac', reason: null },
+      goal: 'Run the compat suite on every supported OS before each release.',
+      subscription: 'ChatGPT',
+      model: 'gpt-6.1-sol',
+      agent: { state: 'idle', deviceId: 'dev-mac', reason: null, activity: null },
       createdAt: now - 9 * 24 * hour,
     },
     {
@@ -144,7 +160,10 @@ function projects(now: number): Project[] {
       name: 'Docs Cleanup',
       hue: 'violet',
       status: 'active',
-      agent: { state: 'idle', deviceId: null, reason: null },
+      goal: 'Remove outdated setup steps from the docs.',
+      subscription: 'Claude',
+      model: 'claude-sonnet-5-5',
+      agent: { state: 'notStarted', deviceId: null, reason: null, activity: null },
       createdAt: now - 5 * 24 * hour,
     },
     {
@@ -152,8 +171,93 @@ function projects(now: number): Project[] {
       name: 'Switch Patrol',
       hue: 'green',
       status: 'paused',
-      agent: { state: 'idle', deviceId: null, reason: null },
+      goal: 'Audit switch configs every week.',
+      subscription: 'ChatGPT',
+      model: 'gpt-6.1-sol',
+      agent: { state: 'idle', deviceId: null, reason: null, activity: null },
       createdAt: now - 2 * 24 * hour,
+    },
+  ]
+}
+
+// Baton Dev 的助手开了一个 Thread 还没回复；Compatibility 的助手已经汇报过 Thread 的结果。
+function projectEntries(now: number): ProjectEntry[] {
+  return [
+    {
+      id: 'ent-baton-1',
+      projectId: 'prj-baton',
+      kind: 'user',
+      body: 'Devices reconnect twice after a network change. Find out why on Ubuntu Dev and fix it.',
+      delivery: 'delivered',
+      createdAt: now - 5 * minute,
+    },
+    {
+      id: 'ent-baton-2',
+      projectId: 'prj-baton',
+      kind: 'assistant',
+      process: [{ kind: 'note', body: 'Gateway code is in `/home/kaken/work/baton/internal/gateway` on Ubuntu Dev.' }],
+      threads: { action: 'opened', threadIds: ['thr-gateway'] },
+      body: "Opened a chat on Ubuntu Dev to reproduce the race and fix it. I'll report back when Codex finishes.",
+      createdAt: now - 4 * minute,
+    },
+    {
+      id: 'ent-compat-1',
+      projectId: 'prj-compat',
+      kind: 'user',
+      body: 'Run the compat suite on Windows Desktop and report failures.',
+      delivery: 'delivered',
+      createdAt: now - 3 * hour - 2 * minute,
+    },
+    {
+      id: 'ent-compat-2',
+      projectId: 'prj-compat',
+      kind: 'assistant',
+      process: [
+        {
+          kind: 'command',
+          deviceId: 'dev-mac',
+          command: 'git -C ~/src/compat-suite log -1 --oneline',
+          exitCode: 0,
+          output: '4f2c9e1 Add drive letter cases to path tests',
+          durationMs: 400,
+        },
+        { kind: 'note', body: 'Compat suite is in `C:\\src\\compat-suite` on Windows Desktop.' },
+      ],
+      threads: { action: 'opened', threadIds: ['thr-compat'] },
+      body: "Opened a chat on Windows Desktop. I'll report back once the suite finishes.",
+      createdAt: now - 3 * hour,
+    },
+    {
+      id: 'ent-compat-3',
+      projectId: 'prj-compat',
+      kind: 'assistant',
+      process: [],
+      threads: { action: 'replies', threadIds: ['thr-compat'] },
+      body: 'The suite finished with 2 failures in `path_test.go`. Both come from Windows drive letters. I asked in your inbox whether to skip them for now, and which runner should run the nightly suite.',
+      createdAt: now - 2 * hour,
+    },
+  ]
+}
+
+function memory(now: number): MemoryNote[] {
+  return [
+    {
+      id: 'mem-baton-1',
+      projectId: 'prj-baton',
+      body: 'Gateway code is in `/home/kaken/work/baton/internal/gateway` on Ubuntu Dev.',
+      updatedAt: now - 4 * minute,
+    },
+    {
+      id: 'mem-baton-2',
+      projectId: 'prj-baton',
+      body: 'Run `go test ./internal/gateway/...` before reporting a fix.',
+      updatedAt: now - 2 * 24 * hour,
+    },
+    {
+      id: 'mem-compat-1',
+      projectId: 'prj-compat',
+      body: 'Compat suite is in `C:\\src\\compat-suite` on Windows Desktop.',
+      updatedAt: now - 3 * hour,
     },
   ]
 }
@@ -455,6 +559,8 @@ function base(now: number): World {
     session: { account, defaultDeviceId: 'dev-mac', ended: null },
     devices: devices(now),
     projects: projects(now),
+    projectEntries: projectEntries(now),
+    memory: memory(now),
     threads: threads(now),
     messages: messages(now),
     inbox: inbox(now),
@@ -465,6 +571,7 @@ function base(now: number): World {
     directories: directories(),
     stubbornStops: [],
     lostHistory: [],
+    failProjectSaves: 0,
   }
 }
 
@@ -513,6 +620,8 @@ export function createWorld(id: ScenarioId, now: number): World {
         session: { account, defaultDeviceId: null, ended: null },
         devices: [],
         projects: [],
+        projectEntries: [],
+        memory: [],
         threads: [],
         messages: [],
         inbox: [],
@@ -529,9 +638,22 @@ export function createWorld(id: ScenarioId, now: number): World {
       setDevice(world, 'dev-mac', 'offline', now - 40 * minute)
       for (const project of world.projects) {
         if (project.agent.state === 'running') {
-          project.agent = { state: 'waitingDevice', deviceId: null, reason: 'An online device with ChatGPT signed in' }
+          project.agent = {
+            state: 'waitingDevice',
+            deviceId: null,
+            reason: 'An online device with ChatGPT signed in',
+            activity: null,
+          }
         }
       }
+      world.projectEntries.push({
+        id: 'ent-baton-3',
+        projectId: 'prj-baton',
+        kind: 'user',
+        body: 'Also add a regression test for the double reconnect.',
+        delivery: 'waitingDevice',
+        createdAt: now - 2 * minute,
+      })
       // 停止请求在 Ubuntu Dev 离线后提交，等它连上再发出。
       pendingStop(world, now, 'thr-patrol', 'waitingDevice')
       return world
@@ -558,8 +680,26 @@ export function createWorld(id: ScenarioId, now: number): World {
         createdAt: now - minute,
         delivery: 'queued',
       })
+      // Docs Cleanup 用 Claude，只有 Ubuntu Dev 登录过 Claude，现在登录已过期。
+      const ubuntu = world.devices.find((item) => item.id === 'dev-ubuntu')!
+      ubuntu.subscriptions = ubuntu.subscriptions.map((item) =>
+        item.provider === 'Claude' ? { ...item, signedIn: false } : item,
+      )
       const docs = world.projects.find((item) => item.id === 'prj-docs')!
-      docs.agent = { state: 'waitingDevice', deviceId: null, reason: 'An online device with Claude signed in' }
+      docs.agent = {
+        state: 'waitingDevice',
+        deviceId: null,
+        reason: 'An online device with Claude signed in',
+        activity: null,
+      }
+      world.projectEntries.push({
+        id: 'ent-docs-1',
+        projectId: 'prj-docs',
+        kind: 'user',
+        body: 'List the docs pages that still mention the old installer.',
+        delivery: 'waitingDevice',
+        createdAt: now - 3 * minute,
+      })
       // Kiro 收到停止请求后没有停下，一分钟后设备结束它。
       pendingStop(world, now, 'thr-patrol', 'stopping')
       world.stubbornStops.push('thr-patrol')
@@ -594,7 +734,14 @@ export function createWorld(id: ScenarioId, now: number): World {
         agent.account === 'ChatGPT' ? { ...agent, problem: 'signedOut' } : agent,
       )
       const baton = world.projects.find((item) => item.id === 'prj-baton')!
-      baton.agent = { state: 'stopped', deviceId: 'dev-ubuntu', reason: 'ChatGPT sign-in expired on Ubuntu Dev' }
+      baton.agent = {
+        state: 'stopped',
+        deviceId: 'dev-ubuntu',
+        reason: 'ChatGPT sign-in expired on Ubuntu Dev',
+        activity: null,
+      }
+      // 第一次新建 Project 保存失败，重试成功。
+      world.failProjectSaves = 1
       world.inbox.push({
         id: 'itm-baton-signin',
         projectId: 'prj-baton',

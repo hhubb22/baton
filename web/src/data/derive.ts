@@ -248,15 +248,107 @@ export function projectAgentStatus(project: Project, devices: Device[]): StatusV
   if (project.status === 'archived') return { tone: 'hollow', label: 'Archived' }
   const device = devices.find((item) => item.id === project.agent.deviceId)
   switch (project.agent.state) {
+    case 'notStarted':
+      return { tone: 'neutral', label: 'Not started yet' }
     case 'running':
       return { tone: 'agent', label: device ? `Running on ${device.name}` : 'Running' }
+    case 'stopping':
+      return { tone: 'agent', label: device ? `Stopping on ${device.name}…` : 'Stopping…' }
     case 'waitingDevice':
-      return { tone: 'neutral', label: 'Waiting for a device to come online' }
+      return { tone: 'neutral', label: 'Waiting for device' }
     case 'stopped':
-      return { tone: 'danger', label: 'Stopped' }
+      // 你停止的运行没有原因，之后发消息就会重新运行，和空闲一样显示。
+      return project.agent.reason ? { tone: 'danger', label: 'Stopped' } : { tone: 'neutral', label: 'Idle' }
     case 'idle':
       return { tone: 'neutral', label: 'Idle' }
   }
+}
+
+// Project 助手可选的订阅和模型。
+export const assistantModels: Record<string, string[]> = {
+  ChatGPT: ['gpt-6.1-sol', 'gpt-6.1-mini'],
+  Claude: ['claude-opus-5-5', 'claude-sonnet-5-5'],
+}
+
+// 设备不能运行 Project 助手的原因，按处理顺序：先装 Runtime，再连上设备，最后登录订阅。
+export type AssistantBlock = 'noRuntime' | 'offline' | 'syncing' | 'signedOut'
+
+export function assistantBlock(device: Device, subscription: string): AssistantBlock | null {
+  if (!device.hasRuntime) return 'noRuntime'
+  if (device.connection !== 'online') return device.connection
+  if (!device.subscriptions.some((item) => item.provider === subscription && item.signedIn)) return 'signedOut'
+  return null
+}
+
+// 切换设备说明里的原因，例如 `MacBook Pro is offline`。
+export function blockReason(device: Device, block: AssistantBlock, subscription: string) {
+  switch (block) {
+    case 'noRuntime':
+      return `the project assistant is not installed on ${device.name}`
+    case 'offline':
+      return `${device.name} is offline`
+    case 'syncing':
+      return `${device.name} is syncing`
+    case 'signedOut':
+      return `${subscription} is not signed in on ${device.name}`
+  }
+}
+
+function blockStep(device: Device, block: AssistantBlock, subscription: string) {
+  switch (block) {
+    case 'noRuntime':
+      return `The project assistant is not installed on ${device.name}.`
+    case 'offline':
+      return `${device.name} is offline.`
+    case 'syncing':
+      return `${device.name} is syncing.`
+    case 'signedOut':
+      return `Sign in to ${subscription} on ${device.name}.`
+  }
+}
+
+// 订阅已登录的设备数，新建 Project 时提示用。
+export function subscriptionReach(devices: Device[], subscription: string) {
+  return devices.filter((item) => assistantBlock(item, subscription) === null).length
+}
+
+export interface AssistantWait {
+  title: string
+  detail: string
+  // 概览里助手卡片的说明。
+  overview: string
+}
+
+// 没有设备能运行 Project 助手时，主对话上方的说明。
+export function assistantWait(project: Project, devices: Device[]): AssistantWait {
+  const subscription = project.subscription
+  const count = `${devices.length} ${devices.length === 1 ? 'device' : 'devices'}`
+  if (devices.length > 0 && devices.every((item) => item.connection !== 'online')) {
+    return {
+      title: 'Waiting for a device to come online',
+      detail: `${devices.length === 1 ? 'Your device is' : `All ${count} are`} offline. Your messages are saved and will send when a device with ${subscription} signed in is available.`,
+      overview: `${devices.length === 1 ? 'Your device is' : `All ${count} are`} offline. Waiting for a computer with ${subscription} signed in.`,
+    }
+  }
+  const steps = devices.flatMap((device) => {
+    const block = assistantBlock(device, subscription)
+    return block ? [blockStep(device, block, subscription)] : []
+  })
+  return {
+    title: 'No device is ready for this model',
+    detail: [...(devices.length === 0 ? ['Connect a device first.'] : steps), 'Your message stays saved.'].join(' '),
+    overview: `${subscription} is unavailable on ${devices.length === 1 ? 'your device' : `all ${count}`}. Messages stay saved.`,
+  }
+}
+
+// 主对话 Thread 卡片右侧的进度。
+export function threadCardStatus(threads: Thread[]) {
+  const running = threads.filter((item) => item.status === 'running' || item.pending === 'stop').length
+  const waiting = threads.filter((item) => item.status === 'waiting').length
+  if (running > 0) return { tone: 'info' as const, label: `${running} running` }
+  if (waiting > 0) return { tone: 'neutral' as const, label: `${waiting} waiting for device` }
+  if (threads.some((item) => item.status === 'stopped')) return { tone: 'neutral' as const, label: 'Finished' }
+  return { tone: 'success' as const, label: 'All replied' }
 }
 
 export interface PreviewView {

@@ -1,11 +1,20 @@
 import { ClientError, type ChangeEvent, type Topic } from '../client'
-import { agentNames } from '../derive'
+import {
+  agentNames,
+  assistantBlock,
+  assistantModels,
+  blockReason,
+  folderName,
+  sentenceList,
+  usableAgents,
+} from '../derive'
 import type {
   AgentKind,
   Device,
   DeviceAgent,
   DeviceConnection,
   DeviceOS,
+  EntryThreads,
   FolderListing,
   ID,
   SessionEnd,
@@ -13,7 +22,10 @@ import type {
   Operation,
   OperationKind,
   OperationPhase,
+  MemoryNote,
+  ProcessStep,
   Project,
+  ProjectEntry,
   SendMode,
   Thread,
 } from '../types'
@@ -74,6 +86,25 @@ function titleFrom(body: string) {
   return line.length > 60 ? `${line.slice(0, 59).trimEnd()}…` : line
 }
 
+type UserEntry = Extract<ProjectEntry, { kind: 'user' }>
+
+// Project 助手发起的一轮结束后交给助手的结果。
+interface Reply {
+  threadId: ID
+  outcome: 'replied' | 'stopped'
+}
+
+const projectHues: Project['hue'][] = ['blue', 'rose', 'green', 'violet', 'amber', 'slate']
+
+// 模拟助手按关键词判断消息是不是要在设备上做的事。
+const workPattern =
+  /\b(run|test|tests|fix|build|check|verify|reproduce|investigate|update|upgrade|install|audit|review)\b/i
+
+// 比较名字时忽略大小写和连字符，`compat-suite` 与 `Compat suite` 视为相同。
+function loose(text: string) {
+  return text.toLowerCase().replace(/[-_]+/g, ' ')
+}
+
 const newDeviceDefaults: Record<DeviceOS, Pick<Device, 'system' | 'folders' | 'repos'> & { shell: string }> = {
   macOS: { system: 'macOS 15.0.1', folders: ['~/src'], repos: ['~/src/baton'], shell: 'zsh' },
   Linux: { system: 'Ubuntu 24.04', folders: ['~/work'], repos: ['~/work/baton'], shell: 'bash' },
@@ -91,6 +122,15 @@ export class MockStore {
   // 已发给设备、等待确认的停止，键为操作 ID。
   private stopTimers = new Map<ID, { operation: Operation; cancel: () => void }>()
   private clientIds = new Map<string, { opId: ID; body: string }>()
+  private projectClientIds = new Map<string, { id: ID; body: string }>()
+  // Project 助手正在进行的一次运行，以及它读走的消息和 Thread 结果；运行被打断时放回。
+  private assistantRuns = new Map<ID, { cancel: () => void; inputs: UserEntry[]; replies: Reply[] }>()
+  // 等 Project 助手读取的 Thread 结果，键为 Project ID。
+  private replies = new Map<ID, Reply[]>()
+  // 设备断开打断了运行、要在设备回来后接着运行的 Project。
+  private interrupted = new Set<ID>()
+  // Thread 当前一轮由谁的消息开始。只有助手开始的一轮，结束后才通知助手。
+  private turnOwners = new Map<ID, Message['sender']>()
   private sequence = 0
   readonly scheduler: Scheduler
   readonly latency: Latency
@@ -147,6 +187,11 @@ export class MockStore {
     this.runs.clear()
     this.stopTimers.clear()
     this.clientIds.clear()
+    this.projectClientIds.clear()
+    this.assistantRuns.clear()
+    this.replies.clear()
+    this.interrupted.clear()
+    this.turnOwners.clear()
     this.sequence = 0
     this.scenarioId = scenarioId
     this.world = createWorld(scenarioId, this.scheduler.now())
@@ -172,6 +217,12 @@ export class MockStore {
     const operation = this.world.operations.find((item) => item.id === id)
     if (!operation) throw new ClientError('notFound', `Operation ${id} not found`)
     return operation
+  }
+
+  project(id: ID): Project {
+    const project = this.world.projects.find((item) => item.id === id)
+    if (!project) throw new ClientError('notFound', `Project ${id} not found`)
+    return project
   }
 
   private online(deviceId: ID) {
@@ -370,6 +421,7 @@ export class MockStore {
   private startRun(thread: Thread, message: Message, operation: Operation | null) {
     const now = this.scheduler.now()
     thread.updatedAt = now
+    this.turnOwners.set(thread.id, message.sender)
     if (!this.world.directories[thread.deviceId]?.includes(thread.folder)) {
       // 目录在设备上不存在，Agent 不会启动，消息也没有发出。
       message.delivery = 'withdrawn'
@@ -378,6 +430,7 @@ export class MockStore {
       thread.status = 'stopped'
       thread.stop = { kind: 'folderMissing', detail: thread.folder }
       thread.runStartedAt = null
+      this.notifyProject(thread, 'stopped')
       return
     }
     message.delivery = 'delivered'
@@ -427,6 +480,7 @@ export class MockStore {
     thread.runStartedAt = null
     thread.updatedAt = now
     thread.unread = true
+    this.notifyProject(thread, 'replied')
     this.startNext(thread)
     this.emit('threads', 'messages', 'operations')
   }
@@ -608,6 +662,7 @@ export class MockStore {
     this.endRunningSends(thread, 'stopped')
     thread.runStartedAt = null
     thread.updatedAt = this.scheduler.now()
+    this.notifyProject(thread, 'stopped')
     if (operation.kind === 'archiveThread') {
       this.archive(thread, operation)
     } else {
@@ -701,9 +756,7 @@ export class MockStore {
       else if (thread.status === 'waiting' || thread.status === 'idle') this.startNext(thread)
     }
     for (const project of this.world.projects) {
-      if (project.status === 'active' && project.agent.state === 'waitingDevice' && this.eligible(device, project)) {
-        project.agent = { state: 'running', deviceId: device.id, reason: null }
-      }
+      if (project.status === 'active' && project.agent.state === 'waitingDevice') this.wake(project)
     }
   }
 
@@ -719,12 +772,29 @@ export class MockStore {
       this.stopTimers.delete(id)
       this.setPhase(timer.operation, 'waitingDevice')
     }
+    // 助手所在设备不可用时换到另一台符合条件的设备接着运行；没有时把读到的消息和结果放回，等设备。
     for (const project of this.world.projects) {
       if (project.agent.deviceId !== device.id || project.agent.state !== 'running') continue
-      const fallback = this.world.devices.find((item) => item.connection === 'online' && this.eligible(item, project))
-      project.agent = fallback
-        ? { state: 'running', deviceId: fallback.id, reason: null }
-        : { state: 'waitingDevice', deviceId: null, reason: 'An online device with ChatGPT signed in' }
+      const fallback = this.pickDevice(project)
+      if (fallback) {
+        this.switchNote(project, fallback, device)
+        project.agent.deviceId = fallback.id
+        continue
+      }
+      const run = this.assistantRuns.get(project.id)
+      run?.cancel()
+      this.assistantRuns.delete(project.id)
+      if (run) {
+        for (const entry of run.inputs) entry.delivery = 'waitingDevice'
+        this.replies.set(project.id, [...run.replies, ...(this.replies.get(project.id) ?? [])])
+      }
+      this.interrupted.add(project.id)
+      project.agent = {
+        state: 'waitingDevice',
+        deviceId: device.id,
+        reason: this.waitReason(project),
+        activity: null,
+      }
     }
   }
 
@@ -838,18 +908,434 @@ export class MockStore {
     })
   }
 
-  private eligible(device: Device, _project: Project) {
-    return device.hasRuntime && device.subscriptions.some((item) => item.provider === 'ChatGPT' && item.signedIn)
-  }
-
-  // 场景里已经在执行或正在停止的 Thread 接着往下走。
+  // 场景里已经在执行或正在停止的 Thread 和 Project 助手接着往下走。
   private startExistingRuns() {
     for (const thread of this.world.threads) {
-      if (thread.status === 'running' && !thread.pending && this.online(thread.deviceId)) this.scheduleRunEnd(thread.id)
+      if (thread.status !== 'running') continue
+      const started = this.world.messages.findLast(
+        (item) => item.threadId === thread.id && item.role === 'user' && item.delivery === 'delivered',
+      )
+      if (started) this.turnOwners.set(thread.id, started.sender)
+      if (!thread.pending && this.online(thread.deviceId)) this.scheduleRunEnd(thread.id)
+    }
+    for (const project of this.world.projects) {
+      if (project.status !== 'active' || project.agent.state !== 'running') continue
+      if (!project.agent.deviceId || !this.online(project.agent.deviceId)) continue
+      this.startAssistantRun(project, [], [])
     }
     for (const operation of this.world.operations) {
       if (operation.phase === 'stopping') this.sendStop(this.thread(operation.targetId), operation)
     }
+  }
+
+  // ---- Project ----
+
+  createProject(input: { name: string; goal: string; subscription: string; model: string }, clientId: string) {
+    const existing = this.projectClientIds.get(clientId)
+    if (existing) return this.project(existing.id)
+    const name = input.name.trim()
+    if (name === '') throw new ClientError('invalid', 'Enter a project name.')
+    if (!assistantModels[input.subscription]?.includes(input.model)) {
+      throw new ClientError('invalid', `${input.model} is not available with ${input.subscription}`)
+    }
+    if (this.world.failProjectSaves > 0) {
+      this.world.failProjectSaves -= 1
+      throw new ClientError('unavailable', 'Baton could not save this project')
+    }
+    const used = new Set(this.world.projects.map((item) => item.hue))
+    const project: Project = {
+      id: this.nextId('prj'),
+      name,
+      hue: projectHues.find((hue) => !used.has(hue)) ?? projectHues[this.world.projects.length % projectHues.length],
+      status: 'active',
+      goal: input.goal.trim(),
+      subscription: input.subscription,
+      model: input.model,
+      agent: { state: 'notStarted', deviceId: null, reason: null, activity: null },
+      createdAt: this.scheduler.now(),
+    }
+    this.world.projects.push(project)
+    this.projectClientIds.set(clientId, { id: project.id, body: name })
+    this.emit('projects')
+    return project
+  }
+
+  projectEntries(projectId: ID) {
+    this.project(projectId)
+    return this.world.projectEntries.filter((item) => item.projectId === projectId)
+  }
+
+  projectMemory(projectId: ID) {
+    this.project(projectId)
+    return this.world.memory.filter((item) => item.projectId === projectId)
+  }
+
+  // 消息先保存，再交给助手；助手正在运行时，这条消息在这次运行结束后一起读。
+  sendProjectMessage(projectId: ID, body: string, clientId: string): ProjectEntry {
+    const existing = this.projectClientIds.get(clientId)
+    if (existing) {
+      if (existing.body !== body) throw new ClientError('conflict', 'This message was already sent with different text')
+      const entry = this.world.projectEntries.find((item) => item.id === existing.id)
+      if (entry) return entry
+    }
+    const project = this.project(projectId)
+    if (project.status === 'paused') throw new ClientError('invalid', 'Resume this project to send messages')
+    if (project.status === 'archived') throw new ClientError('invalid', 'This project is archived')
+    if (body.trim() === '') throw new ClientError('invalid', 'Message is empty')
+    const entry: UserEntry = {
+      id: this.nextId('ent'),
+      projectId,
+      kind: 'user',
+      body: body.trim(),
+      delivery: 'submitted',
+      createdAt: this.scheduler.now(),
+    }
+    this.world.projectEntries.push(entry)
+    this.projectClientIds.set(clientId, { id: entry.id, body })
+    this.emit('projects')
+
+    this.schedule(this.latency.save, () => {
+      entry.delivery = 'saved'
+      this.wake(project)
+      this.emit('projects', 'threads', 'messages', 'operations')
+    })
+    return entry
+  }
+
+  // 停止只影响助手这一次运行，它开的 Thread 继续执行。
+  stopProjectRun(projectId: ID): Project {
+    const project = this.project(projectId)
+    if (project.agent.state === 'stopping') return project
+    if (project.agent.state !== 'running') throw new ClientError('invalid', 'The project assistant is not running')
+    const run = this.assistantRuns.get(projectId)
+    run?.cancel()
+    this.assistantRuns.delete(projectId)
+    if (run) this.replies.set(projectId, [...run.replies, ...(this.replies.get(projectId) ?? [])])
+    // 停止前发出、还没被读到的消息一起撤回；停止请求之后发的消息在停下后读取。
+    for (const entry of this.unread(project)) entry.delivery = 'withdrawn'
+    const device = this.world.devices.find((item) => item.id === project.agent.deviceId)
+    project.agent.state = 'stopping'
+    project.agent.activity = `Waiting for ${device?.name ?? 'the device'} to confirm the assistant has stopped…`
+    this.emit('projects')
+
+    this.schedule(this.latency.device, () => {
+      project.agent = { state: 'stopped', deviceId: project.agent.deviceId, reason: null, activity: null }
+      this.pushNote(project, 'You stopped the project assistant. Chats it opened keep running.')
+      this.wake(project)
+      this.emit('projects', 'threads', 'messages', 'operations')
+    })
+    return project
+  }
+
+  // 设备能运行 Project 助手：在线、装了 Runtime、助手用的订阅已登录。
+  private eligible(device: Device, project: Project) {
+    return assistantBlock(device, project.subscription) === null
+  }
+
+  // 优先默认设备，其次上次运行的设备，再其次任一符合条件的设备。默认设备不因此改变。
+  private pickDevice(project: Project) {
+    const ready = this.world.devices.filter((item) => this.eligible(item, project))
+    for (const id of [this.world.session.defaultDeviceId, project.agent.deviceId]) {
+      const device = ready.find((item) => item.id === id)
+      if (device) return device
+    }
+    return ready[0] ?? null
+  }
+
+  private waitReason(project: Project) {
+    return `An online device with ${project.subscription} signed in`
+  }
+
+  private unread(project: Project) {
+    return this.world.projectEntries.filter(
+      (item): item is UserEntry =>
+        item.projectId === project.id &&
+        item.kind === 'user' &&
+        (item.delivery === 'saved' || item.delivery === 'waitingDevice'),
+    )
+  }
+
+  private pushNote(project: Project, body: string) {
+    this.world.projectEntries.push({
+      id: this.nextId('ent'),
+      projectId: project.id,
+      kind: 'note',
+      body,
+      createdAt: this.scheduler.now(),
+    })
+  }
+
+  private pushAssistant(project: Project, process: ProcessStep[], threads: EntryThreads | null, body: string) {
+    this.world.projectEntries.push({
+      id: this.nextId('ent'),
+      projectId: project.id,
+      kind: 'assistant',
+      process,
+      threads,
+      body,
+      createdAt: this.scheduler.now(),
+    })
+  }
+
+  // 助手没在默认设备（或上次的设备）上运行时，在主对话里说明换到了哪台、为什么。
+  private switchNote(project: Project, chosen: Device, skipped?: Device) {
+    const previous = project.agent.deviceId
+    const from =
+      skipped ??
+      this.world.devices.find((item) => item.id === this.world.session.defaultDeviceId) ??
+      this.world.devices.find((item) => item.id === previous)
+    if (!from || from.id === chosen.id || chosen.id === previous) return
+    const block = assistantBlock(from, project.subscription)
+    const reason = block ? blockReason(from, block, project.subscription) : `${from.name} was disconnected from Baton`
+    this.pushNote(project, `Switched to ${chosen.name} because ${reason}.`)
+  }
+
+  // 有没读的消息或 Thread 结果时开始一次运行。你停止后，Thread 结果等你下一条消息再一起读。
+  private wake(project: Project) {
+    if (project.status !== 'active') return
+    if (project.agent.state === 'running' || project.agent.state === 'stopping') return
+    const inputs = this.unread(project)
+    const replies = this.replies.get(project.id) ?? []
+    const resume = this.interrupted.has(project.id)
+    if (!resume && inputs.length === 0 && (replies.length === 0 || project.agent.state === 'stopped')) {
+      if (project.agent.state === 'waitingDevice') project.agent = { ...project.agent, state: 'idle', reason: null }
+      return
+    }
+    const device = this.pickDevice(project)
+    if (!device) {
+      for (const entry of inputs) entry.delivery = 'waitingDevice'
+      project.agent = {
+        state: 'waitingDevice',
+        deviceId: project.agent.deviceId,
+        reason: this.waitReason(project),
+        activity: null,
+      }
+      return
+    }
+    this.switchNote(project, device)
+    for (const entry of inputs) entry.delivery = 'delivered'
+    this.replies.delete(project.id)
+    this.interrupted.delete(project.id)
+    project.agent = { state: 'running', deviceId: device.id, reason: null, activity: this.readingText(inputs, replies) }
+    this.startAssistantRun(project, inputs, replies)
+  }
+
+  private startAssistantRun(project: Project, inputs: UserEntry[], replies: Reply[]) {
+    const run = { inputs, replies, cancel: () => {} }
+    run.cancel = this.schedule(this.latency.run / 2, () => {
+      this.assistantRuns.delete(project.id)
+      this.respond(project, inputs, replies)
+    })
+    this.assistantRuns.set(project.id, run)
+  }
+
+  private readingText(inputs: UserEntry[], replies: Reply[]) {
+    if (inputs.length > 0) return inputs.length === 1 ? 'Reading your message…' : `Reading ${inputs.length} messages…`
+    if (replies.length === 0) return 'Picking up where it left off…'
+    if (replies.length > 1) return `Reading ${replies.length} replies…`
+    const thread = this.world.threads.find((item) => item.id === replies[0]?.threadId)
+    const device = this.world.devices.find((item) => item.id === thread?.deviceId)
+    if (!thread || !device) return 'Reading a reply…'
+    return `Reading ${agentNames[thread.agent]}'s reply from ${device.name}…`
+  }
+
+  private respond(project: Project, inputs: UserEntry[], replies: Reply[]) {
+    if (replies.length > 0) this.reportReplies(project, replies)
+    if (inputs.length > 0) this.answer(project, inputs)
+    project.agent = { ...project.agent, state: 'idle', reason: null, activity: null }
+    this.wake(project)
+    this.emit('projects', 'threads', 'messages', 'operations')
+  }
+
+  // 同一次开出的几个 Thread 全部结束后合成一条汇报，其中还有在执行的就先不报。
+  private reportReplies(project: Project, replies: Reply[]) {
+    const entries = this.world.projectEntries.filter((item) => item.projectId === project.id)
+    const reported = new Set<string>()
+    for (const reply of replies) {
+      const originIndex = entries.findLastIndex(
+        (item) =>
+          item.kind === 'assistant' &&
+          item.threads?.action !== 'replies' &&
+          !!item.threads?.threadIds.includes(reply.threadId),
+      )
+      const origin = entries[originIndex]
+      const batch = origin?.kind === 'assistant' && origin.threads ? origin.threads.threadIds : [reply.threadId]
+      const key = batch.join(',')
+      if (reported.has(key)) continue
+      const covered = entries
+        .slice(originIndex + 1)
+        .some(
+          (item) =>
+            item.kind === 'assistant' && item.threads?.action === 'replies' && item.threads.threadIds.join(',') === key,
+        )
+      const threads = batch.flatMap((id) => this.world.threads.filter((item) => item.id === id))
+      if (covered || threads.some((item) => item.status === 'running' || item.status === 'waiting' || item.pending))
+        continue
+      reported.add(key)
+      this.pushAssistant(project, [], { action: 'replies', threadIds: batch }, this.replyBody(threads))
+    }
+  }
+
+  private replyBody(threads: Thread[]) {
+    const lines = threads.map((thread) => {
+      const device = this.world.devices.find((item) => item.id === thread.deviceId)?.name ?? 'a removed device'
+      const last = this.world.messages.findLast((item) => item.threadId === thread.id && item.role === 'agent')
+      const name = agentNames[thread.agent]
+      if (thread.status === 'stopped' || !last)
+        return { device, text: `${name} on ${device} stopped before replying.`, short: 'stopped before replying.' }
+      return { device, text: `${name} on ${device} replied: ${last.body}`, short: last.body }
+    })
+    if (lines.length === 1) return lines[0].text
+    const head = lines.length === 2 ? 'Both chats finished.' : `All ${lines.length} chats finished.`
+    return [head, ...lines.map((line) => `${line.device}: ${line.short}`)].join('\n')
+  }
+
+  private answer(project: Project, inputs: UserEntry[]) {
+    const text = inputs.map((item) => item.body).join('\n')
+    if (workPattern.test(text)) {
+      this.startWork(project, text)
+      return
+    }
+    const running = this.world.threads.filter((item) => item.projectId === project.id && item.status === 'running')
+    const body =
+      running.length > 0
+        ? `${running.length === 1 ? 'One chat is' : `${running.length} chats are`} still running: ${sentenceList(running.map((item) => item.title))}. I'll report back when ${running.length === 1 ? 'it finishes' : 'they finish'}.`
+        : 'Got it. Ask me to run tests, fix bugs, or check logs on your connected computers, and name the computer if it matters.'
+    this.pushAssistant(project, [], null, body)
+  }
+
+  // 按消息里提到的设备开 Thread；没提到时用默认设备，消息要求两台时再加一台。
+  private startWork(project: Project, text: string) {
+    const lower = loose(text)
+    const defaultId = this.world.session.defaultDeviceId
+    const ordered = [...this.world.devices].sort((a, b) => Number(b.id === defaultId) - Number(a.id === defaultId))
+    const named = ordered.filter((device) => {
+      const name = loose(device.name)
+      return lower.includes(name) || new RegExp(`\\b${name.split(' ')[0]}\\b`).test(lower)
+    })
+    const ready = (device: Device) =>
+      device.connection === 'online' && usableAgents(device).length > 0 && device.repos.length > 0
+    const count = /\b(both|two|each|all)\b/i.test(text) ? 2 : 1
+    const targets = (named.length > 0 ? named : ordered).filter(ready).slice(0, named.length > 0 ? 2 : count)
+    const missing = named.filter((device) => !ready(device))
+    const notes = missing.map((device) =>
+      device.connection === 'online'
+        ? `${device.name} has no agent ready for new chats.`
+        : `${device.name} is ${device.connection}.`,
+    )
+    if (targets.length === 0) {
+      this.pushAssistant(
+        project,
+        [],
+        null,
+        [...notes, 'No connected computer can run this right now. Ask again when one is online.'].join(' '),
+      )
+      return
+    }
+
+    const task = this.taskText(text)
+    const now = this.scheduler.now()
+    const opened: Thread[] = []
+    for (const device of targets) {
+      const agent = usableAgents(device)[0]
+      const folder = this.repoFor(device, project, text)
+      const thread: Thread = {
+        id: this.nextId('thr'),
+        title: titleFrom(targets.length > 1 ? `${task} on ${device.name}` : task),
+        deviceId: device.id,
+        folder,
+        agent: agent.kind,
+        model: agent.defaultModel ?? agent.models[0],
+        projectId: project.id,
+        status: 'idle',
+        stop: null,
+        pending: null,
+        stopCanceled: 0,
+        createdAt: now,
+        updatedAt: now,
+        runStartedAt: null,
+        unread: false,
+      }
+      this.world.threads.push(thread)
+      const message: Message = {
+        id: this.nextId('msg'),
+        threadId: thread.id,
+        role: 'user',
+        sender: 'projectAgent',
+        body: `${task} in \`${folder}\`. Report back what changed.`,
+        createdAt: now,
+        delivery: 'saved',
+      }
+      this.world.messages.push(message)
+      this.startRun(thread, message, null)
+      opened.push(thread)
+    }
+
+    const process: ProcessStep[] = []
+    const shell = [project.agent.deviceId, ...targets.map((item) => item.id)]
+      .map((id) => this.world.devices.find((item) => item.id === id))
+      .find((device) => device?.connection === 'online' && device.commandAccess.enabled && device.repos.length > 0)
+    if (shell) {
+      process.push({
+        kind: 'command',
+        deviceId: shell.id,
+        command: `git -C ${this.repoFor(shell, project, text)} status --short --branch`,
+        exitCode: 0,
+        output: '## main...origin/main',
+        durationMs: 300,
+      })
+    }
+    for (const thread of opened) {
+      const device = this.device(thread.deviceId)
+      const body = `${folderName(thread.folder)} is in \`${thread.folder}\` on ${device.name}.`
+      if (this.world.memory.some((item) => item.projectId === project.id && item.body === body)) continue
+      const note: MemoryNote = { id: this.nextId('mem'), projectId: project.id, body, updatedAt: now }
+      this.world.memory.push(note)
+      process.push({ kind: 'note', body })
+    }
+
+    const names = opened.map((thread) => this.device(thread.deviceId).name)
+    const summary =
+      opened.length === 1
+        ? `Opened a chat on ${names[0]}. I'll report back when ${agentNames[opened[0].agent]} finishes.`
+        : `Opened ${opened.length} chats on ${sentenceList(names)}. I'll report back once ${opened.length === 2 ? 'both' : 'all of them'} finish.`
+    this.pushAssistant(
+      project,
+      process,
+      { action: 'opened', threadIds: opened.map((item) => item.id) },
+      [...notes, summary].join(' '),
+    )
+  }
+
+  // 任务描述取消息第一行，去掉礼貌用语和「在某台设备上」。
+  private taskText(text: string) {
+    let line = text
+      .trim()
+      .split('\n')[0]
+      .replace(/^(please|can you|could you)\s+/i, '')
+    for (const device of this.world.devices) {
+      line = line.replace(new RegExp(`\\s+(on|in)\\s+(the\\s+)?${device.name}`, 'ig'), '')
+    }
+    line = line.replace(/[.!?。]+$/, '')
+    return `${line.charAt(0).toUpperCase()}${line.slice(1)}`
+  }
+
+  // 优先名字出现在 Project 或消息里的仓库。
+  private repoFor(device: Device, project: Project, text: string) {
+    const context = loose(`${project.name} ${project.goal} ${text}`)
+    return device.repos.find((repo) => context.includes(loose(folderName(repo)))) ?? device.repos[0]
+  }
+
+  // 助手发起的一轮结束或被停止后，把结果交给助手；你发起的一轮不通知助手。
+  private notifyProject(thread: Thread, outcome: Reply['outcome']) {
+    const owner = this.turnOwners.get(thread.id)
+    this.turnOwners.delete(thread.id)
+    if (owner !== 'projectAgent' || !thread.projectId) return
+    const project = this.world.projects.find((item) => item.id === thread.projectId)
+    if (!project) return
+    this.replies.set(project.id, [...(this.replies.get(project.id) ?? []), { threadId: thread.id, outcome }])
+    this.wake(project)
+    this.emit('projects')
   }
 
   // 设备上某个目录的子目录，只在允许的目录里列出。

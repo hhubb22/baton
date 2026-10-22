@@ -5,6 +5,7 @@ import { useSession, useSignOut } from '../data/queries'
 import { text } from '../theme/text'
 import { colors, space } from '../theme/tokens.stylex'
 import { Button } from '../ui/Button'
+import { NewProjectDialog } from './NewProjectDialog'
 import { Page } from './Page'
 import type { LoginNotice } from './router'
 import { Sidebar } from './Sidebar'
@@ -72,6 +73,7 @@ export function WorkspaceLayout() {
   const [collapsed, setCollapsed] = useState(readCollapsed)
   // 退出失败的提示只留在发起退出的页面，切到别的页面后不再显示。
   const [failedAt, setFailedAt] = useState<string | null>(null)
+  const [creatingProject, setCreatingProject] = useState(false)
 
   const workspace = useMemo<Workspace>(
     () => ({
@@ -85,6 +87,9 @@ export function WorkspaceLayout() {
         if (signOut.isPending) return
         setFailedAt(null)
         signOut.mutate(undefined, { onError: () => setFailedAt(router.state.location.pathname) })
+      },
+      newProject() {
+        setCreatingProject(true)
       },
     }),
     [collapsed, signOut, router],
@@ -107,6 +112,7 @@ export function WorkspaceLayout() {
         <Sidebar />
         <Main failedAt={failedAt} onRetry={workspace.signOut} />
       </div>
+      {creatingProject && <NewProjectDialog onClose={() => setCreatingProject(false)} />}
     </WorkspaceContext>
   )
 }

@@ -141,20 +141,59 @@ export interface Message {
 
 export type ProjectStatus = 'active' | 'paused' | 'archived'
 
-export type ProjectAgentState = 'idle' | 'running' | 'waitingDevice' | 'stopped'
+// notStarted：新建后还没收到第一条消息；stopping：已请求停止，等设备确认。
+export type ProjectAgentState = 'notStarted' | 'idle' | 'running' | 'waitingDevice' | 'stopping' | 'stopped'
 
 export interface Project {
   id: ID
   name: string
   hue: 'slate' | 'amber' | 'violet' | 'green' | 'blue' | 'rose'
   status: ProjectStatus
+  goal: string
+  // Project 助手使用的订阅和模型，修改后从下一次运行开始生效。
+  subscription: string
+  model: string
   agent: {
     state: ProjectAgentState
+    // 正在运行或最近一次运行所在的设备。
     deviceId: ID | null
-    // 等待设备或停止时，说明缺什么，例如 `An online device with ChatGPT signed in`。
+    // 等待设备或出错停止时，说明缺什么，例如 `An online device with ChatGPT signed in`。你停止时为 null。
     reason: string | null
+    // 运行中正在做的事，例如 `Reading your message…`，显示在主对话末尾。
+    activity: string | null
   }
   createdAt: number
+}
+
+// 助手一次运行中做过的事，折叠在回复上方。
+export type ProcessStep =
+  | { kind: 'command'; deviceId: ID; command: string; exitCode: number; output: string; durationMs: number }
+  | { kind: 'note'; body: string }
+
+// 回复里提到的 Thread：本次新开的、发了消息的，或汇报回复的。
+export interface EntryThreads {
+  action: 'opened' | 'messaged' | 'replies'
+  threadIds: ID[]
+}
+
+interface EntryBase {
+  id: ID
+  projectId: ID
+  createdAt: number
+}
+
+// 主对话的一条记录：你的消息、助手的一轮回复，或系统说明（切换设备、停止等）。
+export type ProjectEntry =
+  | (EntryBase & { kind: 'user'; body: string; delivery: Delivery })
+  | (EntryBase & { kind: 'assistant'; process: ProcessStep[]; threads: EntryThreads | null; body: string })
+  | (EntryBase & { kind: 'note'; body: string })
+
+// 助手记下的项目记忆，跨运行保留。
+export interface MemoryNote {
+  id: ID
+  projectId: ID
+  body: string
+  updatedAt: number
 }
 
 export type InboxStatus = 'pending' | 'answered' | 'closed' | 'withdrawn' | 'resolved'

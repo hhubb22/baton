@@ -7,9 +7,11 @@ import type {
   ID,
   InboxItem,
   IssuedEnrollment,
+  MemoryNote,
   Message,
   Operation,
   Project,
+  ProjectEntry,
   SendMode,
   Session,
   Thread,
@@ -40,6 +42,9 @@ export interface BatonClient {
 
   listDevices(): Promise<Device[]>
   listProjects(): Promise<Project[]>
+  // Project 主对话：你的消息、助手的回复和系统说明，按时间排列。
+  listProjectEntries(projectId: ID): Promise<ProjectEntry[]>
+  listProjectMemory(projectId: ID): Promise<MemoryNote[]>
   listThreads(): Promise<Thread[]>
   listMessages(threadId: ID): Promise<Message[]>
   listInbox(): Promise<InboxItem[]>
@@ -65,6 +70,18 @@ export interface BatonClient {
   // 执行中的 Thread 先停止，设备确认后才归档。
   archiveThread(threadId: ID): Promise<Operation>
   resumeThread(threadId: ID): Promise<Operation>
+  // 同一个 clientId 重试时返回第一次新建的 Project。
+  createProject(input: {
+    name: string
+    goal: string
+    subscription: string
+    model: string
+    clientId: string
+  }): Promise<Project>
+  // 消息先保存；没有设备能运行助手时一直等待，不会过期。
+  sendProjectMessage(input: { projectId: ID; body: string; clientId: string }): Promise<ProjectEntry>
+  // 只停止助手这一次运行，它开的 Thread 继续执行。
+  stopProjectRun(projectId: ID): Promise<Project>
   answerItem(input: { itemId: ID; answer: string; revision: number }): Promise<Operation>
 
   setDefaultDevice(deviceId: ID): Promise<Session>

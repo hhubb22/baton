@@ -110,6 +110,8 @@ export function createMockClient(
 
     listDevices: () => guarded(() => store.snapshot().devices),
     listProjects: () => guarded(() => store.snapshot().projects),
+    listProjectEntries: (projectId) => guarded(() => store.projectEntries(projectId)),
+    listProjectMemory: (projectId) => guarded(() => store.projectMemory(projectId)),
     listThreads: () => guarded(() => store.snapshot().threads),
     listMessages: (threadId) => guarded(() => store.snapshot().messages.filter((item) => item.threadId === threadId)),
     listInbox: () => guarded(() => store.snapshot().inbox),
@@ -163,6 +165,21 @@ export function createMockClient(
       await connect(latency.read)
       signedIn()
       return structuredClone(store.resumeThread(threadId))
+    },
+    async createProject({ clientId, ...input }) {
+      await connect(latency.save)
+      signedIn()
+      return structuredClone(store.createProject(input, clientId))
+    },
+    async sendProjectMessage({ projectId, body, clientId }) {
+      await connect(latency.read)
+      signedIn()
+      return structuredClone(store.sendProjectMessage(projectId, body, clientId))
+    },
+    async stopProjectRun(projectId) {
+      await connect(latency.read)
+      signedIn()
+      return structuredClone(store.stopProjectRun(projectId))
     },
     async answerItem({ itemId, answer, revision }) {
       await connect(latency.read)

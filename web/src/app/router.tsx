@@ -47,6 +47,11 @@ export interface ThreadsSearch {
   from?: string
 }
 
+export interface ProjectSearch {
+  // 右侧打开的 Thread，替换概览栏。
+  thread?: string
+}
+
 function optionalString(value: unknown) {
   return typeof value === 'string' && value !== '' ? value : undefined
 }
@@ -103,7 +108,12 @@ const routeTree = rootRoute.addChildren([
         connect: flag(search.connect),
       }),
     }),
-    createRoute({ getParentRoute: () => workspaceRoute, path: '/projects/$projectId', component: ProjectPage }),
+    createRoute({
+      getParentRoute: () => workspaceRoute,
+      path: '/projects/$projectId',
+      component: ProjectPage,
+      validateSearch: (search: Record<string, unknown>): ProjectSearch => ({ thread: optionalString(search.thread) }),
+    }),
     createRoute({ getParentRoute: () => workspaceRoute, path: '$', component: NotFound }),
   ]),
 ])
