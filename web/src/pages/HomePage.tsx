@@ -32,7 +32,7 @@ export function HomePage() {
         <p {...stylex.props(text.body, text.muted)}>
           Connect the computer where your code lives to chat with Codex, Kiro, or Pi.
         </p>
-        <Button variant="primary" onClick={() => void navigate({ to: '/devices' })}>
+        <Button variant="primary" onClick={() => void navigate({ to: '/devices', search: { connect: true } })}>
           Connect a device
         </Button>
         <div {...stylex.props(styles.actions)}>

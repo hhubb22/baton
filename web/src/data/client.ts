@@ -1,8 +1,10 @@
 import type {
   Device,
+  Enrollment,
   FilePreview,
   ID,
   InboxItem,
+  IssuedEnrollment,
   Message,
   Operation,
   Project,
@@ -44,6 +46,13 @@ export interface BatonClient {
   sendMessage(input: { threadId: ID; body: string; clientId: string }): Promise<Operation>
   stopThread(threadId: ID): Promise<Operation>
   answerItem(input: { itemId: ID; answer: string; revision: number }): Promise<Operation>
+
+  setDefaultDevice(deviceId: ID): Promise<Session>
+  setCommandAccess(input: { deviceId: ID; enabled: boolean }): Promise<Device>
+  // 返回时中心已经拒绝这台设备的新连接并关闭了当前连接。
+  removeDevice(deviceId: ID): Promise<void>
+  createEnrollment(): Promise<IssuedEnrollment>
+  getEnrollment(id: ID): Promise<Enrollment>
 
   subscribe(listener: (event: ChangeEvent) => void): () => void
 }

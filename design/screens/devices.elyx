@@ -117,7 +117,7 @@ export devices = frame {
         fill: c.colors.surface,
         border: c.colors.border,
         corner-radius: 10px,
-        children: [mac, windows, ubuntu, ubuntuDetail],
+        children: [mac, macDetail, windows, ubuntu, ubuntuDetail],
 
         mac = frame : rows.deviceOffline {
           width: 100%,
@@ -125,6 +125,41 @@ export devices = frame {
           border[0].sides: .bottom,
           connections[0].label: "View offline device",
           connections[0].target: devicesOfflineView
+        }
+
+        macDetail = frame {
+          width: 100%,
+          display: .none,
+          layout: {direction: .column, item-gap: 20px},
+          fill: c.colors.panel,
+          border: {color: c.colors.borderSoft, sides: .bottom},
+          padding: [s.space.xs, s.space.lg, 20px, 60px],
+          children: [macNotice, macActions],
+
+          macNotice = frame : feedback.deviceNotice {
+            width: 100%
+          }
+
+          macActions = frame {
+            width: 100%,
+            layout: {align-items: .center, item-gap: s.space.sm},
+            children: [macDefault, macRevoke],
+
+            macDefault = frame : buttons.smallSecondary {
+              label {
+                contents: "Default device"
+              }
+            }
+
+            macRevoke = frame : buttons.smallGhost {
+              connections[0].target: devicesDisconnect,
+
+              label {
+                fill[0].color: c.colors.danger,
+                contents: "Disconnect device"
+              }
+            }
+          }
         }
 
         windows = frame : rows.deviceRow {
@@ -143,7 +178,12 @@ export devices = frame {
           layout: {direction: .column, item-gap: 20px},
           fill: c.colors.panel,
           padding: [s.space.xs, s.space.lg, 20px, 60px],
-          children: [columns, exec, detailActions],
+          children: [deviceNotice, columns, exec, detailActions],
+
+          deviceNotice = frame : feedback.deviceNotice {
+            width: 100%,
+            display: .none
+          }
 
           columns = frame {
             width: 100%,
@@ -470,24 +510,26 @@ devicesSyncing = frame : devices {
         }
 
         ubuntuDetail {
-          display: .none
-        }
-      }
+          exec {
+            display: .none
+          }
 
-      notice {
-        action {
-          display: .none
-        }
+          columns {
+            display: .none
+          }
 
-        detail {
-          contents: "Connected just now. Chats will wait until device information is up to date."
-        }
+          deviceNotice {
+            detail {
+              contents: "Connected just now. Chats will wait until device information is up to date."
+            }
 
-        heading {
-          contents: "Ubuntu Dev is syncing"
-        }
+            heading {
+              contents: "Ubuntu Dev is syncing"
+            }
 
-        display: .visible
+            display: .visible
+          }
+        }
       }
 
       intro {
@@ -569,6 +611,18 @@ devicesMissing = frame : devices {
           exec {
             display: .none
           }
+
+          deviceNotice {
+            detail {
+              contents: "Sign in to ChatGPT for Codex, install Pi, and update Baton for the project assistant. Make these changes on Ubuntu Dev."
+            }
+
+            heading {
+              contents: "Finish setup on Ubuntu Dev"
+            }
+
+            display: .visible
+          }
         }
 
         ubuntu {
@@ -587,22 +641,6 @@ devicesMissing = frame : devices {
             mark {}
           }
         }
-      }
-
-      notice {
-        action {
-          display: .none
-        }
-
-        detail {
-          contents: "Sign in to ChatGPT for Codex, install Pi, and update Baton for the project assistant. Make these changes on Ubuntu Dev."
-        }
-
-        heading {
-          contents: "Finish setup on Ubuntu Dev"
-        }
-
-        display: .visible
       }
     }
   }
@@ -1192,30 +1230,27 @@ devicesOfflineView = frame : devices {
   main {
     content {
       list {
+        ubuntu {
+          fill[0].color: c.colors.surface,
+
+          @with-variant(icons.chevronRight)
+          chevron {}
+        }
+
         ubuntuDetail {
           display: .none
         }
 
         mac {
+          fill[0].color: c.colors.panel,
+
           @with-variant(icons.chevronDown)
           chevron {}
         }
-      }
 
-      notice {
-        action {
-          display: .none
+        macDetail {
+          display: .visible
         }
-
-        detail {
-          contents: "Last contact at 13:52. New chats on MacBook Pro wait for it to reconnect. Wake MacBook Pro and reconnect it to the network."
-        }
-
-        heading {
-          contents: "MacBook Pro is offline"
-        }
-
-        display: .visible
       }
     }
   }
@@ -1229,19 +1264,19 @@ devicesOfflineSelect = frame : devicesOfflineView {
 
   main {
     content {
-      notice {
-        action {
-          connections[0].target: devicesDefaultOffline,
-
-          label {
-            contents: "Set as default"
-          }
-
-          display: .visible
-        }
-      }
-
       list {
+        macDetail {
+          macActions {
+            macDefault {
+              connections[0].target: devicesDefaultOffline,
+
+              label {
+                contents: "Set as default"
+              }
+            }
+          }
+        }
+
         mac {
           identity {
             copy {

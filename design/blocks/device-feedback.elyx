@@ -32,6 +32,30 @@ export notice = frame {
   }
 }
 
+// 展开设备行里的状态提示：离线、同步中或需要补齐时放在详情最上方。
+export deviceNotice = frame {
+  title: "Device notice",
+  left: 0px,
+  top: 480px,
+  width: 680px,
+  layout: {direction: .column, item-gap: s.space.xs},
+  fill: c.colors.surface,
+  border: c.colors.borderSoft,
+  corner-radius: s.radius.md,
+  padding: [12px, 16px],
+  children: [heading, detail],
+
+  heading = text : t.label {
+    contents: "MacBook Pro is offline"
+  }
+
+  detail = text : t.small {
+    width: 100%,
+    contents: "Last contact at 13:52. New chats on MacBook Pro wait for it to reconnect. Wake MacBook Pro and reconnect it to the network.",
+    fill[0].color: c.colors.muted
+  }
+}
+
 export emptyDevices = frame {
   title: "No connected devices",
   left: 0px,

@@ -31,7 +31,8 @@ const codex: DeviceAgent = {
   models: ['gpt-6.1-sol', 'gpt-6.1-mini'],
   defaultModel: 'gpt-6.1-sol',
   abilities: allAbilities,
-  missing: null,
+  account: 'ChatGPT',
+  problem: null,
 }
 
 const kiro: DeviceAgent = {
@@ -40,7 +41,8 @@ const kiro: DeviceAgent = {
   models: ['claude-sonnet-5-5', 'claude-haiku-5-5'],
   defaultModel: 'claude-sonnet-5-5',
   abilities: { ...allAbilities, steer: false },
-  missing: null,
+  account: 'Kiro',
+  problem: null,
 }
 
 const pi: DeviceAgent = {
@@ -49,7 +51,8 @@ const pi: DeviceAgent = {
   models: ['gpt-6.1-sol'],
   defaultModel: 'gpt-6.1-sol',
   abilities: { ...allAbilities, switchModel: false },
-  missing: null,
+  account: null,
+  problem: null,
 }
 
 function devices(now: number): Device[] {
@@ -58,6 +61,8 @@ function devices(now: number): Device[] {
       id: 'dev-mac',
       name: 'MacBook Pro',
       os: 'macOS',
+      system: 'macOS 15.0.1',
+      batondVersion: '0.9.2',
       connection: 'online',
       lastSeenAt: now,
       registeredAt: now - 30 * 24 * hour,
@@ -72,6 +77,8 @@ function devices(now: number): Device[] {
       id: 'dev-ubuntu',
       name: 'Ubuntu Dev',
       os: 'Linux',
+      system: 'Ubuntu 24.04',
+      batondVersion: '0.9.2',
       connection: 'online',
       lastSeenAt: now,
       registeredAt: now - 20 * 24 * hour,
@@ -89,10 +96,12 @@ function devices(now: number): Device[] {
       id: 'dev-windows',
       name: 'Windows Desktop',
       os: 'Windows',
+      system: 'Windows 11 24H2',
+      batondVersion: '0.9.2',
       connection: 'offline',
       lastSeenAt: now - 3 * hour,
       registeredAt: now - 10 * 24 * hour,
-      agents: [codex, { ...kiro, version: null, models: [], defaultModel: null, missing: 'kiro-cli not found' }],
+      agents: [codex, { ...kiro, version: null, models: [], defaultModel: null, problem: 'notInstalled' }],
       subscriptions: [{ provider: 'ChatGPT', signedIn: true }],
       hasRuntime: false,
       folders: ['C:\\src'],
@@ -299,6 +308,7 @@ function base(now: number): World {
     operations: [],
     files: files(),
     answeredElsewhere: {},
+    enrollments: [],
   }
 }
 
@@ -374,6 +384,7 @@ export function createWorld(id: ScenarioId, now: number): World {
       ubuntu.subscriptions = ubuntu.subscriptions.map((item) =>
         item.provider === 'ChatGPT' ? { ...item, signedIn: false } : item,
       )
+      ubuntu.agents = ubuntu.agents.map((agent) => (agent.account === 'ChatGPT' ? { ...agent, problem: 'signedOut' } : agent))
       const baton = world.projects.find((item) => item.id === 'prj-baton')!
       baton.agent = { state: 'stopped', deviceId: 'dev-ubuntu', reason: 'ChatGPT sign-in expired on Ubuntu Dev' }
       world.inbox.push({

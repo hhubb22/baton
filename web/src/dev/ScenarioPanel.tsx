@@ -52,13 +52,16 @@ const styles = stylex.create({
   devices: { display: 'flex', flexDirection: 'column', gap: space.xs },
 })
 
-// 只在开发服务器里出现：切换和重置模拟场景，手动让设备上下线、结束会话或断开与 Baton 的连接。
+// 只在开发服务器里出现：切换和重置模拟场景，手动让设备上下线、结束会话、断开与 Baton 的连接，
+// 以及让等待中的设置码连上设备、过期或被别处用掉。
 export function ScenarioPanel({ controls }: { controls: MockControls }) {
   const [open, setOpen] = useState(false)
   const [scenario, setScenario] = useState<ScenarioId>(controls.scenario)
   const [reachable, setReachable] = useState(controls.reachable)
   const devices = useDevices()
   const session = useSession()
+  // 设置码的变化通过 devices 通知，useDevices 刷新时这里一起重新读取。
+  const pending = controls.pendingEnrollment
 
   if (!open) {
     return (
@@ -117,6 +120,22 @@ export function ScenarioPanel({ controls }: { controls: MockControls }) {
           </Button>
           <Button small onClick={() => controls.endSession('passwordReset')}>
             Reset password
+          </Button>
+        </div>
+      )}
+      {pending && (
+        <div {...stylex.props(styles.devices)}>
+          <span {...stylex.props(text.caption, text.muted)}>Setup code waiting</span>
+          <div {...stylex.props(styles.row)}>
+            <Button small onClick={() => controls.connectEnrollment('Build Server', 'Linux')}>
+              Connect device
+            </Button>
+            <Button small onClick={() => controls.expireEnrollment()}>
+              Expire code
+            </Button>
+          </div>
+          <Button small onClick={() => controls.useEnrollmentElsewhere()}>
+            Code used elsewhere
           </Button>
         </div>
       )}

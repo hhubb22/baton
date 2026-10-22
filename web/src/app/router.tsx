@@ -31,6 +31,10 @@ export interface LoginSearch {
   redirect?: string
 }
 
+export interface DevicesSearch {
+  connect?: true
+}
+
 const notices: LoginNotice[] = ['signedOut', 'expired', 'passwordReset']
 
 // 只接受站内路径，避免登录后被带到别的网站。
@@ -58,7 +62,15 @@ const routeTree = rootRoute.addChildren([
     createRoute({ getParentRoute: () => workspaceRoute, path: '/inbox', component: InboxPage }),
     createRoute({ getParentRoute: () => workspaceRoute, path: '/threads', component: ThreadsPage }),
     createRoute({ getParentRoute: () => workspaceRoute, path: '/threads/$threadId', component: ThreadPage }),
-    createRoute({ getParentRoute: () => workspaceRoute, path: '/devices', component: DevicesPage }),
+    createRoute({
+      getParentRoute: () => workspaceRoute,
+      path: '/devices',
+      component: DevicesPage,
+      // 带 connect 参数时打开接入窗口。
+      validateSearch: (search: Record<string, unknown>): DevicesSearch => ({
+        connect: [true, 1, '1', 'true'].includes(search.connect as never) ? true : undefined,
+      }),
+    }),
     createRoute({ getParentRoute: () => workspaceRoute, path: '/projects/$projectId', component: ProjectPage }),
     createRoute({ getParentRoute: () => workspaceRoute, path: '$', component: NotFound }),
   ]),

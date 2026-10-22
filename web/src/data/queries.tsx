@@ -15,6 +15,8 @@ import type { ID, Session } from './types'
 export const keys = {
   session: ['session'] as const,
   devices: ['devices'] as const,
+  // 设置码状态随设备接入变化，所以放在 devices 主题下。
+  enrollment: (id: ID) => ['devices', 'enrollment', id] as const,
   projects: ['projects'] as const,
   threads: ['threads'] as const,
   messages: (threadId: ID) => ['messages', threadId] as const,
@@ -74,6 +76,15 @@ export function useSession() {
 export function useDevices() {
   const client = useClient()
   return useQuery({ queryKey: keys.devices, queryFn: () => client.listDevices() })
+}
+
+export function useEnrollment(id: ID | null) {
+  const client = useClient()
+  return useQuery({
+    queryKey: keys.enrollment(id ?? ''),
+    queryFn: () => client.getEnrollment(id!),
+    enabled: id !== null,
+  })
 }
 
 export function useProjects() {
@@ -160,4 +171,30 @@ export function useAnswerItem() {
   return useMutation({
     mutationFn: (input: { itemId: ID; answer: string; revision: number }) => client.answerItem(input),
   })
+}
+
+export function useSetDefaultDevice() {
+  const client = useClient()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (deviceId: ID) => client.setDefaultDevice(deviceId),
+    onSuccess: (session) => queryClient.setQueryData(keys.session, session),
+  })
+}
+
+export function useSetCommandAccess() {
+  const client = useClient()
+  return useMutation({
+    mutationFn: (input: { deviceId: ID; enabled: boolean }) => client.setCommandAccess(input),
+  })
+}
+
+export function useRemoveDevice() {
+  const client = useClient()
+  return useMutation({ mutationFn: (deviceId: ID) => client.removeDevice(deviceId) })
+}
+
+export function useCreateEnrollment() {
+  const client = useClient()
+  return useMutation({ mutationFn: () => client.createEnrollment() })
 }

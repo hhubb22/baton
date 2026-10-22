@@ -1,8 +1,8 @@
 import { ClientError, type ChangeEvent, type Topic } from '../client'
-import type { Device, DeviceConnection, ID, SessionEnd, Message, Operation, OperationKind, OperationPhase, Project, Thread } from '../types'
+import type { Device, DeviceConnection, DeviceOS, ID, SessionEnd, Message, Operation, OperationKind, OperationPhase, Project, Thread } from '../types'
 import { createWorld, type ScenarioId } from './scenarios'
 import type { Scheduler } from './scheduler'
-import type { World } from './world'
+import type { EnrollmentRecord, World } from './world'
 
 export interface Latency {
   // 读取一次数据。
@@ -16,6 +16,31 @@ export interface Latency {
 }
 
 export const browserLatency: Latency = { read: 150, save: 400, device: 900, run: 8000 }
+
+// 设置码 10 分钟内有效，只能用一次。
+export const enrollmentTtl = 10 * 60_000
+
+const codeAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'
+
+// 模拟设置码按序号生成，同一场景每次相同，不是可用的凭据。
+function sampleCode(seed: number) {
+  let state = seed * 7919 + 17
+  const group = (length: number) => {
+    let out = ''
+    for (let index = 0; index < length; index += 1) {
+      state = (state * 1103515245 + 12345) % 2147483648
+      out += codeAlphabet[state % codeAlphabet.length]
+    }
+    return out
+  }
+  return [group(8), group(4), group(4), group(4)].join('-')
+}
+
+const newDeviceDefaults: Record<DeviceOS, Pick<Device, 'system' | 'folders' | 'repos'> & { shell: string }> = {
+  macOS: { system: 'macOS 15.0.1', folders: ['~/src'], repos: ['~/src/baton'], shell: 'zsh' },
+  Linux: { system: 'Ubuntu 24.04', folders: ['~/work'], repos: ['~/work/baton'], shell: 'bash' },
+  Windows: { system: 'Windows 11 24H2', folders: ['C:\\src'], repos: ['C:\\src\\baton'], shell: 'pwsh' },
+}
 
 // 模拟后端的状态变化规则集中在这里：设备上下线、消息投递、停止和事项处理。
 // 页面和 MockClient 都不直接改 World。
@@ -394,6 +419,116 @@ export class MockStore {
         ? { state: 'running', deviceId: fallback.id, reason: null }
         : { state: 'waitingDevice', deviceId: null, reason: 'An online device with ChatGPT signed in' }
     }
+  }
+
+  // ---- 设备管理 ----
+
+  setDefaultDevice(deviceId: ID) {
+    this.device(deviceId)
+    this.world.session.defaultDeviceId = deviceId
+    this.emit('session', 'devices')
+  }
+
+  setCommandAccess(deviceId: ID, enabled: boolean): Device {
+    const device = this.device(deviceId)
+    device.commandAccess.enabled = enabled
+    this.emit('devices')
+    return device
+  }
+
+  // 断开后这台设备不能再用原来的凭据连回来。历史 Thread 和消息保留，设备上已经在运行的 Agent 不受影响。
+  removeDevice(deviceId: ID) {
+    const device = this.device(deviceId)
+    this.world.devices = this.world.devices.filter((item) => item !== device)
+    if (this.world.session.defaultDeviceId === deviceId) this.world.session.defaultDeviceId = null
+    this.deviceUnavailable(device)
+    this.emit('session', 'devices', 'threads', 'messages', 'projects', 'files', 'operations')
+  }
+
+  createEnrollment(): EnrollmentRecord {
+    this.sequence += 1
+    const record: EnrollmentRecord = {
+      id: `enr-${this.sequence}`,
+      code: sampleCode(this.sequence),
+      state: 'pending',
+      expiresAt: this.scheduler.now() + enrollmentTtl,
+      deviceId: null,
+    }
+    this.world.enrollments.push(record)
+    this.schedule(enrollmentTtl, () => this.closeEnrollment(record, 'expired'))
+    this.emit('devices')
+    return record
+  }
+
+  enrollment(id: ID): EnrollmentRecord {
+    const record = this.world.enrollments.find((item) => item.id === id)
+    if (!record) throw new ClientError('notFound', `Setup code ${id} not found`)
+    return record
+  }
+
+  pendingEnrollment() {
+    return this.world.enrollments.findLast((item) => item.state === 'pending') ?? null
+  }
+
+  closeEnrollment(record: EnrollmentRecord, state: 'expired' | 'used') {
+    if (record.state !== 'pending') return
+    record.state = state
+    this.emit('devices')
+  }
+
+  // 设备用最近一个有效的设置码完成注册：先同步设备信息，再上线。还没有默认设备时，它成为默认设备。
+  connectEnrollment(name: string, os: DeviceOS) {
+    const record = this.pendingEnrollment()
+    if (!record) return
+    const defaults = newDeviceDefaults[os]
+    const world = this.world
+    const device: Device = {
+      id: this.nextId('dev'),
+      name,
+      os,
+      system: defaults.system,
+      batondVersion: '0.9.2',
+      connection: 'syncing',
+      lastSeenAt: this.scheduler.now(),
+      registeredAt: this.scheduler.now(),
+      agents: [],
+      subscriptions: [{ provider: 'ChatGPT', signedIn: true }],
+      hasRuntime: true,
+      folders: defaults.folders,
+      repos: defaults.repos,
+      commandAccess: { enabled: false, user: world.session.account?.username ?? 'kaken', shell: defaults.shell },
+    }
+    world.devices.push(device)
+    record.state = 'connected'
+    record.deviceId = device.id
+    if (!world.session.defaultDeviceId) world.session.defaultDeviceId = device.id
+    this.emit('session', 'devices')
+
+    this.schedule(this.latency.device, () => {
+      if (!world.devices.includes(device)) return
+      const abilities = { queue: true, steer: true, stop: true, resume: true, switchModel: true }
+      device.agents = [
+        {
+          kind: 'codex',
+          version: '0.98.0',
+          models: ['gpt-6.1-sol', 'gpt-6.1-mini'],
+          defaultModel: 'gpt-6.1-sol',
+          abilities,
+          account: 'ChatGPT',
+          problem: null,
+        },
+        {
+          kind: 'pi',
+          version: '0.31.0',
+          models: ['gpt-6.1-sol'],
+          defaultModel: 'gpt-6.1-sol',
+          abilities: { ...abilities, switchModel: false },
+          account: null,
+          problem: null,
+        },
+      ]
+      this.setDeviceConnection(device.id, 'online')
+    })
   }
 
   private eligible(device: Device, _project: Project) {

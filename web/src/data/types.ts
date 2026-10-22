@@ -37,8 +37,10 @@ export interface DeviceAgent {
   models: string[]
   defaultModel: string | null
   abilities: AgentAbilities
-  // 缺少程序、认证或配置时的具体缺项，例如 `codex not found`。
-  missing: string | null
+  // 登录 Agent 使用的订阅，例如 Codex 用 ChatGPT；不需要登录的 Agent 为 null。
+  account: string | null
+  // 程序没装或订阅登录过期时新对话不可用，要在设备上处理。
+  problem: 'notInstalled' | 'signedOut' | null
 }
 
 export interface Subscription {
@@ -49,16 +51,41 @@ export interface Subscription {
 export interface Device {
   id: ID
   name: string
-  os: 'macOS' | 'Windows' | 'Linux'
+  os: DeviceOS
+  // 系统版本，例如 `macOS 15.0.1`、`Ubuntu 24.04`。
+  system: string
+  batondVersion: string
   connection: DeviceConnection
   lastSeenAt: number
   registeredAt: number
   agents: DeviceAgent[]
   subscriptions: Subscription[]
+  // 设备上装了 Project Agent Runtime，Project 助手才能在这台设备上运行。
   hasRuntime: boolean
+  // 允许 Agent 访问的目录，在设备的 batond 配置里修改。
   folders: string[]
   repos: string[]
+  // Project 助手能否在允许的目录里直接运行命令，以哪个系统用户和 shell 运行。
   commandAccess: { enabled: boolean; user: string; shell: string }
+}
+
+export type DeviceOS = 'macOS' | 'Windows' | 'Linux'
+
+// 接入设备用的一次性设置码。凭据只在创建时返回一次，查询时不再带回。
+export type EnrollmentState = 'pending' | 'connected' | 'expired' | 'used'
+
+export interface Enrollment {
+  id: ID
+  state: EnrollmentState
+  coordinatorUrl: string
+  // 返回时距离过期还剩多少毫秒，页面按收到的时间倒计时，不依赖两边时钟一致。
+  expiresIn: number
+  // 连接成功后的设备。
+  deviceId: ID | null
+}
+
+export interface IssuedEnrollment extends Enrollment {
+  code: string
 }
 
 export type ThreadStatus = 'waiting' | 'running' | 'idle' | 'stopped' | 'unknown' | 'archived'

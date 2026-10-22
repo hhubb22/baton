@@ -1,7 +1,7 @@
 // 由多个查询组合出的界面状态。设备、Thread、Project 各自只存原始状态，
 // 页面显示时在这里合并，所以设备状态一变，所有用到它的页面一起更新。
 import type { Tone } from '../ui/Status'
-import type { Device, FilePreview, ID, InboxItem, Operation, Project, Thread } from './types'
+import type { AgentKind, Device, DeviceAgent, FilePreview, ID, InboxItem, Operation, Project, Thread } from './types'
 
 export interface StatusView {
   tone: Tone
@@ -114,10 +114,132 @@ export function pendingInbox(items: InboxItem[], projectId?: ID) {
   return items.filter((item) => item.status === 'pending' && (!projectId || item.projectId === projectId))
 }
 
+function connectionCounts(devices: Device[]) {
+  return {
+    online: devices.filter((item) => item.connection === 'online').length,
+    syncing: devices.filter((item) => item.connection === 'syncing').length,
+  }
+}
+
+// 侧栏 Devices 右侧的数量。
 export function onlineSummary(devices: Device[]) {
   if (devices.length === 0) return '0 devices'
-  const online = devices.filter((item) => item.connection === 'online').length
+  const { online, syncing } = connectionCounts(devices)
+  if (syncing > 0) return `${online} online · ${syncing} syncing`
   return `${online}/${devices.length} online`
+}
+
+// 设备页标题。
+export function devicesHeading(devices: Device[]) {
+  if (devices.length === 0) return 'Your devices'
+  const { online, syncing } = connectionCounts(devices)
+  const count = `${devices.length} ${devices.length === 1 ? 'device' : 'devices'}`
+  if (syncing > 0) return `${count} · ${online} online · ${syncing} syncing`
+  return `${count}, ${online} online`
+}
+
+export const agentNames: Record<AgentKind, string> = { codex: 'Codex', kiro: 'Kiro', pi: 'Pi' }
+
+const clock = new Intl.DateTimeFormat('en', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+const day = new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric' })
+
+// 当天只显示时刻，更早的加上日期；一分钟内显示 now。
+export function lastSeen(at: number, now: number) {
+  if (now - at < 60_000) return 'now'
+  const time = clock.format(at)
+  return new Date(at).toDateString() === new Date(now).toDateString() ? time : `${day.format(at)}, ${time}`
+}
+
+// 设备行的状态列：离线和同步中带最后联系时间，在线且有 Project 助手运行时写出 Project 名。
+export function deviceConnectionView(device: Device, projects: Project[], now: number): StatusView {
+  switch (device.connection) {
+    case 'offline':
+      return { tone: 'neutral', label: `Offline · last seen ${lastSeen(device.lastSeenAt, now)}` }
+    case 'syncing':
+      return { tone: 'hollow', label: `Syncing · last seen ${lastSeen(device.lastSeenAt, now)}` }
+    case 'online': {
+      const running = projects.find(
+        (item) => item.status === 'active' && item.agent.state === 'running' && item.agent.deviceId === device.id,
+      )
+      return running ? { tone: 'agent', label: `Online · running ${running.name}` } : { tone: 'success', label: 'Online' }
+    }
+  }
+}
+
+function chatGPTSignedIn(device: Device) {
+  return device.subscriptions.some((item) => item.provider === 'ChatGPT' && item.signedIn)
+}
+
+// 设备上需要处理才能用的 Agent 和 Project 助手。
+export function setupNeeded(device: Device) {
+  return device.agents.some((agent) => agent.problem) || !device.hasRuntime || !chatGPTSignedIn(device)
+}
+
+export interface CapabilityLine {
+  name: string
+  ok: boolean
+  detail: string
+}
+
+function abilityNotes(agent: DeviceAgent) {
+  const notes: string[] = []
+  if (agent.abilities.steer) notes.push('send now')
+  if (agent.abilities.resume) notes.push('resume chat')
+  return notes
+}
+
+// 「Agents & subscriptions」里每行的状态：可用时写登录状态和支持的操作，不可用时写缺什么。
+export function capabilityLines(device: Device): CapabilityLine[] {
+  const lines = device.agents.map((agent): CapabilityLine => {
+    const name = agentNames[agent.kind]
+    if (agent.problem === 'notInstalled') return { name, ok: false, detail: 'Program not installed' }
+    if (agent.problem === 'signedOut') return { name, ok: false, detail: `${agent.account} sign-in expired` }
+    return { name, ok: true, detail: [agent.account ? 'Signed in' : 'Installed', ...abilityNotes(agent)].join(' · ') }
+  })
+  let runtime: CapabilityLine = { name: 'Project assistant', ok: true, detail: 'ChatGPT signed in' }
+  if (!device.hasRuntime) runtime = { name: 'Project assistant', ok: false, detail: 'Not installed' }
+  else if (!chatGPTSignedIn(device)) runtime = { name: 'Project assistant', ok: false, detail: 'ChatGPT sign-in expired' }
+  return [...lines, runtime]
+}
+
+// Agent 版本和模型；不可用的 Agent 说明什么时候能用。
+export function modelLines(device: Device) {
+  return device.agents.flatMap((agent) => {
+    const name = agentNames[agent.kind]
+    if (agent.problem === 'notInstalled') return [`${name} models unavailable until installed.`]
+    const models = agent.models.map((model) => (model === agent.defaultModel ? `${model} (default)` : model))
+    const line = [`${name} ${agent.version ?? ''}`.trim(), models.join(', ')].filter(Boolean).join(' · ')
+    return agent.problem === 'signedOut' ? [line, `New ${name} chats unavailable until signed in.`] : [line]
+  })
+}
+
+// 英文并列：a and b；a, b, and c。
+export function sentenceList(items: string[]) {
+  if (items.length <= 1) return items.join('')
+  return `${items.slice(0, -1).join(', ')}${items.length > 2 ? ',' : ''} and ${items[items.length - 1]}`
+}
+
+// 设备需要补齐时的提示，逐项写出要在设备上做什么。
+export function setupSteps(device: Device) {
+  const steps = device.agents.flatMap((agent) => {
+    const name = agentNames[agent.kind]
+    if (agent.problem === 'signedOut') return [`sign in to ${agent.account} for ${name}`]
+    if (agent.problem === 'notInstalled') return [`install ${name}`]
+    return []
+  })
+  if (!device.hasRuntime) steps.push('update Baton for the project assistant')
+  else if (!chatGPTSignedIn(device) && !device.agents.some((agent) => agent.account === 'ChatGPT' && agent.problem)) {
+    steps.push('sign in to ChatGPT for the project assistant')
+  }
+  const list = sentenceList(steps)
+  return `${list.charAt(0).toUpperCase()}${list.slice(1)}. Make these changes on ${device.name}.`
+}
+
+// 设备行的 Agent 列。
+export function agentSummary(device: Device) {
+  if (device.connection === 'syncing') return { label: 'Checking availability…', attention: false }
+  if (setupNeeded(device)) return { label: 'Setup needed', attention: true }
+  return { label: device.agents.map((agent) => agentNames[agent.kind]).join(' · '), attention: false }
 }
 
 export function liveThreads(threads: Thread[]) {

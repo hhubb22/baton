@@ -1,6 +1,6 @@
 import * as stylex from '@stylexjs/stylex'
 import { Link } from '@tanstack/react-router'
-import { threadView } from '../data/derive'
+import { agentNames, threadView } from '../data/derive'
 import type { Device, Thread } from '../data/types'
 import { text } from '../theme/text'
 import { colors, radius, size, space } from '../theme/tokens.stylex'
@@ -24,8 +24,6 @@ const styles = stylex.create({
   folder: { color: colors.faint, flexShrink: 1 },
   meta: { color: colors.muted, whiteSpace: 'nowrap' },
 })
-
-const agentNames = { codex: 'Codex', kiro: 'Kiro', pi: 'Pi' } as const
 
 export function folderName(folder: string) {
   return folder.split(/[\\/]/).filter(Boolean).pop() ?? folder

@@ -1,10 +1,10 @@
 import type { BatonClient, ChangeEvent } from '../client'
 import { ClientError } from '../client'
-import type { DeviceConnection, FilePreview, ID, SessionEnd } from '../types'
+import type { DeviceConnection, DeviceOS, Enrollment, FilePreview, ID, SessionEnd } from '../types'
 import type { ScenarioId } from './scenarios'
 import { realScheduler, type Scheduler } from './scheduler'
 import { browserLatency, MockStore, type Latency } from './store'
-import { fileKey } from './world'
+import { fileKey, type EnrollmentRecord } from './world'
 
 // 开发场景面板使用的控制入口，页面代码不调用。
 export interface MockControls {
@@ -15,7 +15,15 @@ export interface MockControls {
   // 关闭后所有请求都按连不上 Baton 失败，用来演示网络中断。
   readonly reachable: boolean
   setReachable(reachable: boolean): void
+  // 最近一个有效的设置码；没有时为 null。下面三个操作都作用于它。
+  readonly pendingEnrollment: { id: ID } | null
+  connectEnrollment(name: string, os: DeviceOS): void
+  expireEnrollment(): void
+  useEnrollmentElsewhere(): void
 }
+
+// 模拟中心返回的接入地址，不是真实服务。
+export const mockCoordinatorUrl = 'https://baton.example.com'
 
 export interface MockClient extends BatonClient {
   readonly controls: MockControls
@@ -29,6 +37,21 @@ export function createMockClient(
   const latency = options.latency ?? browserLatency
   const store = new MockStore(scenario, scheduler, latency)
   let reachable = true
+
+  function enrollmentView(record: EnrollmentRecord): Enrollment {
+    return {
+      id: record.id,
+      state: record.state,
+      coordinatorUrl: mockCoordinatorUrl,
+      expiresIn: Math.max(0, record.expiresAt - scheduler.now()),
+      deviceId: record.deviceId,
+    }
+  }
+
+  function closePending(state: 'expired' | 'used') {
+    const record = store.pendingEnrollment()
+    if (record) store.closeEnrollment(record, state)
+  }
 
   // 每次读写先等待模拟延迟，返回的数据是副本，页面改动不会影响模拟状态。
   async function connect(ms: number) {
@@ -65,6 +88,13 @@ export function createMockClient(
       setReachable(next) {
         reachable = next
       },
+      get pendingEnrollment() {
+        const record = store.pendingEnrollment()
+        return record && { id: record.id }
+      },
+      connectEnrollment: (name, os) => store.connectEnrollment(name, os),
+      expireEnrollment: () => closePending('expired'),
+      useEnrollmentElsewhere: () => closePending('used'),
     },
 
     getSession: () => read(() => store.snapshot().session),
@@ -113,6 +143,30 @@ export function createMockClient(
       signedIn()
       return structuredClone(store.answerItem(itemId, answer, revision))
     },
+
+    async setDefaultDevice(deviceId) {
+      await connect(latency.save)
+      signedIn()
+      store.setDefaultDevice(deviceId)
+      return structuredClone(store.snapshot().session)
+    },
+    async setCommandAccess({ deviceId, enabled }) {
+      await connect(latency.save)
+      signedIn()
+      return structuredClone(store.setCommandAccess(deviceId, enabled))
+    },
+    async removeDevice(deviceId) {
+      await connect(latency.save + latency.device)
+      signedIn()
+      store.removeDevice(deviceId)
+    },
+    async createEnrollment() {
+      await connect(latency.save)
+      signedIn()
+      const record = store.createEnrollment()
+      return { ...enrollmentView(record), code: record.code }
+    },
+    getEnrollment: (id) => guarded(() => enrollmentView(store.enrollment(id))),
 
     subscribe: (listener: (event: ChangeEvent) => void) => store.subscribe(listener),
   }

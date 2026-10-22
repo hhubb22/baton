@@ -1,6 +1,6 @@
 import { Dialog as BaseDialog } from '@base-ui/react/dialog'
 import * as stylex from '@stylexjs/stylex'
-import type { ReactNode } from 'react'
+import type { ComponentProps, ReactNode } from 'react'
 import { shadow } from '../theme/base.stylex'
 import { text } from '../theme/text'
 import { colors, space } from '../theme/tokens.stylex'
@@ -35,8 +35,8 @@ const styles = stylex.create({
     color: colors.text,
     outline: 'none',
   },
-  wide: { width: '560px' },
-  header: { display: 'flex', flexDirection: 'column', gap: '6px' },
+  wide: { width: '600px' },
+  header: { display: 'flex', flexDirection: 'column', gap: '20px' },
   description: { color: colors.muted },
   footer: {
     display: 'flex',
@@ -58,6 +58,7 @@ export function Dialog({
   note,
   actions,
   wide,
+  finalFocus,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -67,12 +68,14 @@ export function Dialog({
   note?: ReactNode
   actions?: ReactNode
   wide?: boolean
+  // 关闭后焦点回到哪里；默认回到打开弹窗的按钮，按钮已经不在页面上时由调用方指定。
+  finalFocus?: ComponentProps<typeof BaseDialog.Popup>['finalFocus']
 }) {
   return (
     <BaseDialog.Root open={open} onOpenChange={(next) => onOpenChange(next)}>
       <BaseDialog.Portal>
         <BaseDialog.Backdrop {...stylex.props(styles.backdrop)} />
-        <BaseDialog.Popup {...stylex.props(styles.popup, wide && styles.wide)}>
+        <BaseDialog.Popup finalFocus={finalFocus} {...stylex.props(styles.popup, wide && styles.wide)}>
           <div {...stylex.props(styles.header)}>
             <BaseDialog.Title {...stylex.props(text.heading)}>{title}</BaseDialog.Title>
             {description && (

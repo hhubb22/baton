@@ -43,6 +43,9 @@ const styles = stylex.create({
     lineHeight: 1,
     fontWeight: weight.medium,
   },
+  // 和输入框并排时与输入框等高，选项平分宽度。
+  segmentedBlock: { flexGrow: 1, height: size.control },
+  segmentBlock: { flexGrow: 1, flexBasis: 0, justifyContent: 'center' },
   segmentActive: {
     backgroundColor: colors.surface,
     color: colors.text,
@@ -87,14 +90,16 @@ export function Segmented<T extends string>({
   value,
   onChange,
   label,
+  block,
 }: {
   options: TabOption<T>[]
   value: T
   onChange: (value: T) => void
   label: string
+  block?: boolean
 }) {
   return (
-    <div role="radiogroup" aria-label={label} {...stylex.props(styles.segmented)}>
+    <div role="radiogroup" aria-label={label} {...stylex.props(styles.segmented, block && styles.segmentedBlock)}>
       {options.map((option) => (
         <button
           key={option.value}
@@ -102,7 +107,12 @@ export function Segmented<T extends string>({
           role="radio"
           aria-checked={option.value === value}
           onClick={() => onChange(option.value)}
-          {...stylex.props(styles.segment, option.value === value && styles.segmentActive, focusRing.ring)}
+          {...stylex.props(
+            styles.segment,
+            block && styles.segmentBlock,
+            option.value === value && styles.segmentActive,
+            focusRing.ring,
+          )}
         >
           {option.label}
         </button>
