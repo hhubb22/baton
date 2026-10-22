@@ -24,6 +24,7 @@ import (
 )
 
 func TestGatewayAuthSyncAndIsolation(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.Open(t)
 	ctx := context.Background()
 	repo := store.New(pool)

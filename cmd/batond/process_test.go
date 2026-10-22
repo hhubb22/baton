@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 	"testing"
+	"time"
 
 	"baton/internal/agent/codex"
 	"baton/internal/agent/kiro"
@@ -26,6 +27,8 @@ func TestMain(m *testing.M) {
 	case "register", "run", "files", "project-exec", "sidecar-file", "worker":
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		opts := node.RunOptions{
+			ProjectRuntimeTiming:  node.ProjectRuntimeTiming{RenewInterval: time.Second, LeaseDeadline: 2500 * time.Millisecond},
+			RuntimeReportInterval: 250 * time.Millisecond,
 			DiscoverRuntimeModels: func(context.Context, string, string) ([]protocol.RuntimeModel, string, error) {
 				return []protocol.RuntimeModel{}, "", nil
 			},

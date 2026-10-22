@@ -22,6 +22,7 @@ import (
 )
 
 func TestSessionControlReceiptsSurviveExhaustedOutputBudget(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.Open(t)
 	repo := store.New(pool)
 	signer, err := node.GenerateSigner()
@@ -96,6 +97,7 @@ func TestSessionControlReceiptsSurviveExhaustedOutputBudget(t *testing.T) {
 }
 
 func TestOutputFloodLeavesOtherNodeTaskAndCancelResponsive(t *testing.T) {
+	t.Parallel()
 	st := startPrepareStack(t, map[string]string{"BATON_TEST_HOLD_START": "0", "BATON_TEST_ABORT_SCRIPT": "confirmed"})
 	attacker := registerThrough(t, st.client, st.base, st.csrf, "Flood")
 	peer, result := dialPeer(t, st.nodeAddr, attacker.Credential.Token, newID(t), st.roots)
@@ -197,6 +199,7 @@ func (p *pausedAuth) Authenticate(ctx context.Context, token string) (protocol.S
 }
 
 func TestRevocationBetweenAuthenticationAndRegistration(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.Open(t)
 	repo := store.New(pool)
 	signer, err := node.GenerateSigner()
@@ -251,6 +254,7 @@ func TestRevocationBetweenAuthenticationAndRegistration(t *testing.T) {
 }
 
 func TestPendingRevocationRecoversWithoutRestart(t *testing.T) {
+	t.Parallel()
 	st := startPrepareStack(t, nil)
 	repo := store.New(st.pool)
 	if _, err := repo.RevokeNode(context.Background(), st.employeeID, st.ident.NodeID); err != nil {

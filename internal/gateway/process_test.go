@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -35,13 +36,14 @@ func TestMain(m *testing.M) {
 	if buildDir != "" {
 		_ = os.RemoveAll(buildDir)
 	}
-	if replayDir != "" {
-		_ = os.RemoveAll(replayDir)
+	if fixtureDir != "" {
+		_ = os.RemoveAll(fixtureDir)
 	}
 	os.Exit(code)
 }
 
 func TestProcessReconnectsAfterDisconnectAndRestart(t *testing.T) {
+	t.Parallel()
 	coordBin, batondBin := buildBins(t)
 	pool := dbtest.Open(t)
 	ctx := context.Background()
@@ -61,8 +63,8 @@ func TestProcessReconnectsAfterDisconnectAndRestart(t *testing.T) {
 	}
 	roots := x509.NewCertPool()
 	roots.AddCert(cert)
-	apiAddr := freeAddr(t)
-	nodeAddr := apiAddr
+	apiAddr := "127.0.0.1:0"
+	var nodeAddr string
 	dbURL := dbtest.URL()
 	coordEnv := childEnv(map[string]string{
 		"BATON_DATABASE_URL":       dbURL,
@@ -76,8 +78,9 @@ func TestProcessReconnectsAfterDisconnectAndRestart(t *testing.T) {
 		"BATON_OFFLINE_AFTER":      "8s",
 	})
 	coordProc := startCmd(t, coordBin, []string{"serve"}, coordEnv)
-	waitListen(t, apiAddr)
-	waitListen(t, nodeAddr)
+	apiAddr = coordProc.listenAddr(t)
+	nodeAddr = apiAddr
+	setChildEnv(coordEnv, "BATON_HTTP_ADDR", apiAddr)
 
 	const password = "process-test-password-1"
 	if _, err := admin.CreateLocal(ctx, pool, "alice", "Alice", password); err != nil {
@@ -183,7 +186,7 @@ func TestProcessReconnectsAfterDisconnectAndRestart(t *testing.T) {
 	if err := getJSON(t, client, base+"/api/v1/nodes", &listed); err != nil || len(listed.Nodes) != 2 {
 		t.Fatalf("节点数量不正确: %+v %v", listed.Nodes, err)
 	}
-	logs := allLogs() + oldCoord.out.String()
+	logs := allLogs(t) + oldCoord.out.String()
 	if strings.Contains(logs, desk.Credential.Token) || strings.Contains(logs, "postgres:") {
 		t.Fatal("运行日志包含凭据或数据库连接串")
 	}
@@ -209,17 +212,17 @@ var (
 	buildErr       error
 	builtCoord     string
 	builtBatond    string
-	replayOnce     sync.Once
-	replayDir      string
-	replayBatond   string
-	replayErr      error
 	processMu      sync.Mutex
-	processHandles []*running
+	processHandles = make(map[*testing.T][]*running)
+	portMu         sync.Mutex
+	reservedPorts  = make(map[string]net.Listener)
 )
 
 func buildBins(t *testing.T) (string, string) {
 	t.Helper()
 	buildOnce.Do(func() {
+		buildMu.Lock()
+		defer buildMu.Unlock()
 		root, err := filepath.Abs(filepath.Join("..", ".."))
 		if err != nil {
 			buildErr = err
@@ -251,7 +254,7 @@ func buildBins(t *testing.T) (string, string) {
 				}
 				continue
 			}
-			cmd := exec.Command("go", "build", "-o", filepath.Join(out, name+suffix), "./cmd/"+name)
+			cmd := exec.Command("go", "test", "-c", "-o", filepath.Join(out, name+suffix), "./cmd/"+name)
 			cmd.Dir = root
 			if raw, err := cmd.CombinedOutput(); err != nil {
 				buildErr = errString(name + ": " + string(raw) + ": " + err.Error())
@@ -306,10 +309,11 @@ func (l *lockedBuf) String() string {
 }
 
 type running struct {
-	cmd  *exec.Cmd
-	out  *lockedBuf
-	once sync.Once
-	bin  string
+	cmd    *exec.Cmd
+	out    *lockedBuf
+	once   sync.Once
+	bin    string
+	exited atomic.Bool
 }
 
 func startCmd(t *testing.T, bin string, args, env []string) *running {
@@ -319,13 +323,20 @@ func startCmd(t *testing.T, bin string, args, env []string) *running {
 	cmd.Env = env
 	cmd.Stdout = buf
 	cmd.Stderr = buf
+	if len(args) > 0 && args[0] == "serve" {
+		for _, item := range env {
+			if addr, ok := strings.CutPrefix(item, "BATON_HTTP_ADDR="); ok && !strings.HasSuffix(addr, ":0") {
+				portMu.Lock()
+				defer portMu.Unlock()
+				releasePort(addr)
+			}
+		}
+	}
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
 	proc := &running{cmd: cmd, out: buf, bin: bin}
-	processMu.Lock()
-	processHandles = append(processHandles, proc)
-	processMu.Unlock()
+	trackProcess(t, proc)
 	t.Cleanup(func() {
 		proc.stop()
 		if len(args) > 0 && args[0] == "run" {
@@ -337,6 +348,9 @@ func startCmd(t *testing.T, bin string, args, env []string) *running {
 			}
 		}
 	})
+	if len(args) > 0 && args[0] == "serve" {
+		proc.listenAddr(t)
+	}
 	return proc
 }
 
@@ -344,9 +358,10 @@ func latestProc(t *testing.T, bin string) *running {
 	t.Helper()
 	processMu.Lock()
 	defer processMu.Unlock()
-	for i := len(processHandles) - 1; i >= 0; i-- {
-		if processHandles[i].bin == bin && processHandles[i].cmd.ProcessState == nil {
-			return processHandles[i]
+	owned := processHandles[t]
+	for i := len(owned) - 1; i >= 0; i-- {
+		if owned[i].bin == bin && !owned[i].exited.Load() {
+			return owned[i]
 		}
 	}
 	t.Fatal("没有找到进程")
@@ -354,13 +369,13 @@ func latestProc(t *testing.T, bin string) *running {
 }
 
 func (p *running) stop() {
-	if p == nil || p.cmd.Process == nil {
+	if p == nil || p.cmd.Process == nil || p.exited.Load() {
 		return
 	}
 	_ = terminateProcess(p.cmd.Process)
 	done := make(chan struct{})
 	go func() {
-		p.once.Do(func() { _ = p.cmd.Wait() })
+		p.wait()
 		close(done)
 	}()
 	select {
@@ -373,12 +388,19 @@ func (p *running) stop() {
 
 func freeAddr(t *testing.T) string {
 	t.Helper()
+	portMu.Lock()
+	defer portMu.Unlock()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	addr := ln.Addr().String()
-	ln.Close()
+	reservedPorts[addr] = ln
+	t.Cleanup(func() {
+		portMu.Lock()
+		defer portMu.Unlock()
+		releasePort(addr)
+	})
 	return addr
 }
 
@@ -602,11 +624,12 @@ func waitCount(t *testing.T, proc *running, needle string, want int) {
 	t.Fatalf("日志里 %s 没有达到 %d 次", needle, want)
 }
 
-func allLogs() string {
+func allLogs(t *testing.T) string {
+	t.Helper()
 	processMu.Lock()
 	defer processMu.Unlock()
 	var b strings.Builder
-	for _, proc := range processHandles {
+	for _, proc := range processHandles[t] {
 		b.WriteString(proc.out.String())
 	}
 	return b.String()

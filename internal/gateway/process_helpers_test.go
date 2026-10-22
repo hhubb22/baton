@@ -27,18 +27,19 @@ func TestGatewayProcessHelper(t *testing.T) {
 		}
 		defer file.Close()
 	}
-	fmt.Println("idle_process_ready")
+	fmt.Println("idle_process_ready", os.Getenv("BATON_TEST_PROCESS_LABEL"))
 	_, _ = io.Copy(io.Discard, os.Stdin)
 	os.Exit(code)
 }
 
-func startIdleProcess(t *testing.T, exitCode int) (*running, io.WriteCloser) {
+func startIdleProcess(t *testing.T, exitCode int, env ...string) (*running, io.WriteCloser) {
 	t.Helper()
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(exe, "-test.run=^TestGatewayProcessHelper$", "--", "baton-idle-process", strconv.Itoa(exitCode))
+	cmd.Env = append(childEnv(nil), env...)
 	input, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -49,7 +50,8 @@ func startIdleProcess(t *testing.T, exitCode int) (*running, io.WriteCloser) {
 		input.Close()
 		t.Fatal(err)
 	}
-	process := &running{cmd: cmd, out: buf}
+	process := &running{cmd: cmd, out: buf, bin: exe}
+	trackProcess(t, process)
 	t.Cleanup(func() {
 		process.stop()
 		input.Close()
@@ -59,6 +61,7 @@ func startIdleProcess(t *testing.T, exitCode int) (*running, io.WriteCloser) {
 }
 
 func TestProcessAliveAndCleanup(t *testing.T) {
+	t.Parallel()
 	for _, pid := range []int{0, -1} {
 		if err := processAlive(pid); err == nil {
 			t.Fatalf("无效 PID %d 被判为存活", pid)
@@ -67,6 +70,7 @@ func TestProcessAliveAndCleanup(t *testing.T) {
 	}
 	for _, code := range []int{0, 259} {
 		t.Run("exit_"+strconv.Itoa(code), func(t *testing.T) {
+			t.Parallel()
 			process, input := startIdleProcess(t, code)
 			pid := process.cmd.Process.Pid
 			if err := processAlive(pid); err != nil {
@@ -95,6 +99,7 @@ func TestProcessAliveAndCleanup(t *testing.T) {
 	}
 	for _, stop := range []string{"worker", "command"} {
 		t.Run(stop, func(t *testing.T) {
+			t.Parallel()
 			process, _ := startIdleProcess(t, 0)
 			pid := process.cmd.Process.Pid
 			if stop == "worker" {
@@ -111,15 +116,16 @@ func TestProcessAliveAndCleanup(t *testing.T) {
 }
 
 func TestPrivatePostgresProcessLifecycle(t *testing.T) {
+	t.Parallel()
 	postgres := startPrivatePostgres(t)
 	postgres.stop(t)
 	postgres.start(t)
 }
 
 func TestStopWorkerWaitsForFileRelease(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "held-file")
-	t.Setenv("BATON_TEST_HELD_FILE", path)
-	process, _ := startIdleProcess(t, 0)
+	process, _ := startIdleProcess(t, 0, "BATON_TEST_HELD_FILE="+path)
 	stopWorker(process.cmd.Process.Pid)
 	if err := os.Rename(path, path+".released"); err != nil {
 		t.Fatalf("进程退出后文件仍被占用: %v", err)

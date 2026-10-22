@@ -70,14 +70,10 @@ func killRuntimeAtBoundary(t *testing.T, p *projectRuntimeProbe, runID, id strin
 func startProjectThreadToolsStack(t *testing.T) (*projectRuntimeProbe, string) {
 	t.Helper()
 	dir := t.TempDir()
-	runtimeBin := filepath.Join(dir, "baton-project-runtime")
+	installProjectRuntime(t, dir)
 	piBin := filepath.Join(dir, "pi")
 	if runtime.GOOS == "windows" {
-		runtimeBin += ".exe"
 		piBin += ".cmd"
-	}
-	if out, err := exec.Command("go", "build", "-o", runtimeBin, "./testdata/project_runtime.go").CombinedOutput(); err != nil {
-		t.Fatalf("构建 Runtime 契约程序失败：%v %s", err, out)
 	}
 	if runtime.GOOS == "windows" {
 		if err := os.WriteFile(piBin, []byte("@echo off\r\necho 1.3.0\r\n"), 0700); err != nil {
@@ -92,7 +88,8 @@ func startProjectThreadToolsStack(t *testing.T) (*projectRuntimeProbe, string) {
 	if err := os.WriteFile(p.commands, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	p.stack = startPrepareStack(t, map[string]string{
+	p.stack = startProjectPrepareStack(t, map[string]string{
+		"BATON_PI_BIN":                        piBin,
 		"PATH":                                dir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"BATON_TEST_PROJECT_RUNTIME_COMMANDS": p.commands,
 		"BATON_TEST_PROJECT_RUNTIME_LOG":      p.log,
@@ -120,8 +117,10 @@ func startProjectThreadToolsStack(t *testing.T) (*projectRuntimeProbe, string) {
 }
 
 func TestProjectToolsRealProcessesCrashRecovery(t *testing.T) {
+	t.Parallel()
 	for _, boundary := range []string{"assistant_before", "assistant_after", "transaction_before", "transaction_during", "transaction_after", "result_before", "result_after"} {
 		t.Run(boundary, func(t *testing.T) {
+			t.Parallel()
 			p, root := startProjectThreadToolsStack(t)
 			st := p.stack
 			ctx := context.Background()
@@ -154,17 +153,21 @@ func TestProjectToolsRealProcessesCrashRecovery(t *testing.T) {
 						t.Fatal(err)
 					}
 					defer lock.Rollback(ctx)
-					if _, err = lock.Exec(ctx, `SELECT pg_advisory_xact_lock(157157)`); err != nil {
+					if _, err = lock.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_schema(), 157157))`); err != nil {
 						t.Fatal(err)
 					}
-					if _, err = st.pool.Exec(ctx, `CREATE FUNCTION block_tool_result() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.kind='tool_result' THEN PERFORM pg_advisory_xact_lock(157157); END IF; RETURN NEW; END $$; CREATE TRIGGER block_tool_result BEFORE INSERT ON conversation_events FOR EACH ROW EXECUTE FUNCTION block_tool_result()`); err != nil {
+					if _, err = st.pool.Exec(ctx, `CREATE FUNCTION block_tool_result() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.kind='tool_result' THEN PERFORM pg_advisory_xact_lock(hashtextextended(current_schema(), 157157)); END IF; RETURN NEW; END $$; CREATE TRIGGER block_tool_result BEFORE INSERT ON conversation_events FOR EACH ROW EXECUTE FUNCTION block_tool_result()`); err != nil {
+						t.Fatal(err)
+					}
+					var blockerPID int
+					if err = lock.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&blockerPID); err != nil {
 						t.Fatal(err)
 					}
 					p.send(t, runID, "blocked", toolReq)
 					deadline := time.Now().Add(10 * time.Second)
 					blocked := false
 					for time.Now().Before(deadline) {
-						if err = st.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE wait_event='advisory' AND query LIKE 'INSERT INTO conversation_events%')`).Scan(&blocked); err != nil {
+						if err = st.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE wait_event='advisory' AND $1 = ANY(pg_blocking_pids(pid)) AND query LIKE 'INSERT INTO conversation_events%')`, blockerPID).Scan(&blocked); err != nil {
 							t.Fatal(err)
 						}
 						if blocked {
@@ -243,6 +246,7 @@ func TestProjectToolsRealProcessesCrashRecovery(t *testing.T) {
 }
 
 func TestProjectToolsRealProcessesMissingDirectoryAndSecurity(t *testing.T) {
+	t.Parallel()
 	p, root := startProjectThreadToolsStack(t)
 	st := p.stack
 	project := createRuntimeProject(t, p)

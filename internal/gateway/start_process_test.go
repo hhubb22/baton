@@ -14,6 +14,7 @@ import (
 )
 
 func TestStartPermitEntersObservableExecutor(t *testing.T) {
+	t.Parallel()
 	st := startPrepareStack(t, map[string]string{
 		"BATON_TEST_HOLD_START":  "0",
 		"BATON_TEST_WALL_OFFSET": "24h",
@@ -39,6 +40,7 @@ func TestStartPermitEntersObservableExecutor(t *testing.T) {
 }
 
 func TestStartPermitCancelRacePreservesPossibleStart(t *testing.T) {
+	t.Parallel()
 	st := startPrepareStack(t, map[string]string{
 		"BATON_TEST_HOLD_START":  "0",
 		"BATON_TEST_START_DELAY": "1s",
@@ -65,6 +67,7 @@ func TestStartPermitCancelRacePreservesPossibleStart(t *testing.T) {
 }
 
 func TestStartPermitCancelAndRevokeBeforeIssue(t *testing.T) {
+	t.Parallel()
 	gate := t.TempDir()
 	st := startPrepareStack(t, map[string]string{
 		"BATON_TEST_HOLD_START": "0",
@@ -111,6 +114,7 @@ func TestStartPermitCancelAndRevokeBeforeIssue(t *testing.T) {
 }
 
 func TestStartPermitSuspendAndWrongGenerationDoNotStart(t *testing.T) {
+	t.Parallel()
 	permitFile := filepath.Join(t.TempDir(), "permit.txt")
 	st := startPrepareStack(t, map[string]string{
 		"BATON_TEST_HOLD_START":       "0",
@@ -166,6 +170,7 @@ func TestStartPermitSuspendAndWrongGenerationDoNotStart(t *testing.T) {
 }
 
 func TestSuspendAloneRefusesStart(t *testing.T) {
+	t.Parallel()
 	st := startPrepareStack(t, map[string]string{
 		"BATON_TEST_HOLD_START":        "0",
 		"BATON_TEST_SUSPEND_AFTER_ARM": "6s",
@@ -271,9 +276,10 @@ func releaseGate(t *testing.T, gate, executionID string) {
 }
 
 func TestStartPermitUnknownFieldCompletesTask(t *testing.T) {
+	t.Parallel()
 	st := startPrepareStack(t, map[string]string{
-		"BATON_TEST_HOLD_START": "0",
-		"BATON_TEST_EXECUTOR_SCRIPT": "success",
+		"BATON_TEST_HOLD_START":               "0",
+		"BATON_TEST_EXECUTOR_SCRIPT":          "success",
 		"BATON_TEST_START_PERMIT_EXTRA_FIELD": "1",
 	})
 	created := acceptTask(t, st, "start-permit-extra-field")

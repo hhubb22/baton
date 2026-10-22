@@ -13,6 +13,7 @@ import (
 )
 
 func TestProjectRuntimePiFauxRealCoordinator(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("BATON_TEST_NODE_PROJECT_RUNTIME") != "1" {
 		t.Skip("需安装 Runtime 依赖并显式启用真实 Node 集成验证")
 	}
@@ -32,7 +33,7 @@ func TestProjectRuntimePiFauxRealCoordinator(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", binary, "./testdata/node_project_runtime.go").CombinedOutput(); err != nil {
 		t.Fatalf("构建 Node 启动器: %v %s", err, out)
 	}
-	st := startPrepareStack(t, map[string]string{
+	st := startProjectPrepareStack(t, map[string]string{
 		"PATH":                      dir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"BATON_TEST_RUNTIME_NODE":   node,
 		"BATON_TEST_RUNTIME_LOADER": filepath.Join(root, "runtimes/project-agent/node_modules/tsx/dist/loader.mjs"),

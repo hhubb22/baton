@@ -14,6 +14,7 @@ import (
 )
 
 func TestExecutionPersistsStructuredResultOnce(t *testing.T) {
+	t.Parallel()
 	st := startPrepareStack(t, map[string]string{
 		"BATON_TEST_HOLD_START":       "0",
 		"BATON_TEST_EXECUTOR_SCRIPT":  "success",
@@ -66,6 +67,7 @@ func TestExecutionPersistsStructuredResultOnce(t *testing.T) {
 }
 
 func TestExecutionDeliveryWaitsForCenterCommit(t *testing.T) {
+	t.Parallel()
 	gate := t.TempDir()
 	st := startPrepareStack(t, map[string]string{
 		"BATON_TEST_HOLD_START":      "0",
@@ -107,8 +109,10 @@ func TestExecutionDeliveryWaitsForCenterCommit(t *testing.T) {
 }
 
 func TestExecutionFreeTextAndExitAreNotSuccess(t *testing.T) {
+	t.Parallel()
 	for _, script := range []string{"text", "exit"} {
 		t.Run(script, func(t *testing.T) {
+			t.Parallel()
 			st := startPrepareStack(t, map[string]string{
 				"BATON_TEST_HOLD_START":      "0",
 				"BATON_TEST_EXECUTOR_SCRIPT": script,

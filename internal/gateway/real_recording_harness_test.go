@@ -99,8 +99,10 @@ func TestRealRecordingHarness(t *testing.T) {
 }
 
 func TestRecordedCodexCommandStartEvidence(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"matching", "other-thread", "other-turn", "completed", "message", "stderr", "partial"} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			item := map[string]string{"type": "commandExecution", "status": "inProgress"}
 			params := map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": item}
 			method, kind := "item/started", "stdout"

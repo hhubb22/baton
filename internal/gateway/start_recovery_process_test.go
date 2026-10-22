@@ -13,12 +13,14 @@ import (
 )
 
 func TestCentralStartRejectionDoesNotRespawnWorker(t *testing.T) {
+	t.Parallel()
 	for _, workerExited := range []bool{false, true} {
 		name := "worker_alive"
 		if workerExited {
 			name = "worker_exited"
 		}
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			gate := t.TempDir()
 			st := startPrepareStack(t, map[string]string{
 				"BATON_TEST_HOLD_START": "0",
@@ -78,12 +80,14 @@ func TestCentralStartRejectionDoesNotRespawnWorker(t *testing.T) {
 }
 
 func TestPreparedWorkerRecoveryDependsOnStartRequest(t *testing.T) {
+	t.Parallel()
 	for _, requested := range []bool{false, true} {
 		name := "never_requested"
 		if requested {
 			name = "waiting_for_permit"
 		}
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			st := startPrepareStack(t, nil)
 			created := acceptTask(t, st, name)
 			waitLog(t, st.batond, "event=prepare_acked")
@@ -117,6 +121,7 @@ func TestPreparedWorkerRecoveryDependsOnStartRequest(t *testing.T) {
 }
 
 func TestStartRefusalPersistenceFailureStillReportsToCenter(t *testing.T) {
+	t.Parallel()
 	permitFile := filepath.Join(t.TempDir(), "permit.txt")
 	st := startPrepareStack(t, map[string]string{
 		"BATON_TEST_HOLD_START":       "0",

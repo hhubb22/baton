@@ -25,6 +25,7 @@ import (
 )
 
 func TestCrashAfterStartIntentDoesNotSendInput(t *testing.T) {
+	t.Parallel()
 	st := startPrepareStack(t, map[string]string{
 		"BATON_TEST_HOLD_START":      "0",
 		"BATON_TEST_EXECUTOR_SCRIPT": "success",
@@ -45,6 +46,7 @@ func TestCrashAfterStartIntentDoesNotSendInput(t *testing.T) {
 }
 
 func TestCrashAfterInputSendDoesNotResend(t *testing.T) {
+	t.Parallel()
 	st := startPrepareStack(t, map[string]string{
 		"BATON_TEST_HOLD_START":      "0",
 		"BATON_TEST_EXECUTOR_SCRIPT": "success",
@@ -62,6 +64,7 @@ func TestCrashAfterInputSendDoesNotResend(t *testing.T) {
 }
 
 func TestCrashAfterResultSaveReplaysOnce(t *testing.T) {
+	t.Parallel()
 	st := startPrepareStack(t, map[string]string{
 		"BATON_TEST_HOLD_START":      "0",
 		"BATON_TEST_EXECUTOR_SCRIPT": "success",
@@ -76,6 +79,7 @@ func TestCrashAfterResultSaveReplaysOnce(t *testing.T) {
 }
 
 func TestCrashAfterResultAckReplaysWithoutSecondExecution(t *testing.T) {
+	t.Parallel()
 	st := startPrepareStack(t, map[string]string{
 		"BATON_TEST_HOLD_START":      "0",
 		"BATON_TEST_EXECUTOR_SCRIPT": "success",
@@ -99,6 +103,7 @@ func TestCrashAfterResultAckReplaysWithoutSecondExecution(t *testing.T) {
 }
 
 func TestBatondRestartKeepsLivingWorker(t *testing.T) {
+	t.Parallel()
 	gate := t.TempDir()
 	st := startPrepareStack(t, map[string]string{
 		"BATON_TEST_HOLD_START":      "0",
@@ -128,6 +133,7 @@ func TestBatondRestartKeepsLivingWorker(t *testing.T) {
 }
 
 func TestStalePIDDoesNotRerun(t *testing.T) {
+	t.Parallel()
 	st := startPrepareStack(t, map[string]string{
 		"BATON_TEST_HOLD_START":      "0",
 		"BATON_TEST_EXECUTOR_SCRIPT": "success",
@@ -159,8 +165,10 @@ func TestStalePIDDoesNotRerun(t *testing.T) {
 }
 
 func TestStaleCentralStateDoesNotRerun(t *testing.T) {
+	t.Parallel()
 	for _, staleStatus := range []string{task.StatusQueued, task.StatusRunning} {
 		t.Run(staleStatus, func(t *testing.T) {
+			t.Parallel()
 			st := startPrepareStack(t, map[string]string{
 				"BATON_TEST_HOLD_START":      "0",
 				"BATON_TEST_EXECUTOR_SCRIPT": "success",
@@ -229,6 +237,7 @@ func TestStaleCentralStateDoesNotRerun(t *testing.T) {
 }
 
 func TestCorruptHistoryDoesNotLookLikeRecovery(t *testing.T) {
+	t.Parallel()
 	st := startPrepareStack(t, map[string]string{
 		"BATON_TEST_HOLD_START":      "0",
 		"BATON_TEST_EXECUTOR_SCRIPT": "success",
@@ -260,6 +269,7 @@ func TestCorruptHistoryDoesNotLookLikeRecovery(t *testing.T) {
 }
 
 func TestCrashAfterInputIntentDoesNotSendInput(t *testing.T) {
+	t.Parallel()
 	st := startPrepareStack(t, map[string]string{
 		"BATON_TEST_HOLD_START":      "0",
 		"BATON_TEST_EXECUTOR_SCRIPT": "success",
@@ -278,6 +288,7 @@ func TestCrashAfterInputIntentDoesNotSendInput(t *testing.T) {
 }
 
 func TestMissingHistoryFromRunningIsReported(t *testing.T) {
+	t.Parallel()
 	st := startPrepareStack(t, map[string]string{
 		"BATON_TEST_HOLD_START":      "0",
 		"BATON_TEST_EXECUTOR_SCRIPT": "success",
@@ -313,8 +324,10 @@ func TestMissingHistoryFromRunningIsReported(t *testing.T) {
 }
 
 func TestPersistentHistoryPermissionFailureIsReported(t *testing.T) {
+	t.Parallel()
 	for _, statDenied := range []bool{false, true} {
 		t.Run(fmt.Sprintf("stat_denied=%v", statDenied), func(t *testing.T) {
+			t.Parallel()
 			st := startPrepareStack(t, map[string]string{
 				"BATON_TEST_HOLD_START":      "0",
 				"BATON_TEST_EXECUTOR_SCRIPT": "success",
@@ -376,6 +389,7 @@ func TestPersistentHistoryPermissionFailureIsReported(t *testing.T) {
 }
 
 func TestLivingWorkerResultSurvivesMissingLedger(t *testing.T) {
+	t.Parallel()
 	gate := t.TempDir()
 	st := startPrepareStack(t, map[string]string{
 		"BATON_TEST_HOLD_START":      "0",
@@ -434,6 +448,7 @@ func TestLivingWorkerResultSurvivesMissingLedger(t *testing.T) {
 }
 
 func TestRelayAndCoordinatorRestartDoNotRerun(t *testing.T) {
+	t.Parallel()
 	gate := t.TempDir()
 	st := startPrepareStack(t, map[string]string{
 		"BATON_TEST_HOLD_START":      "0",
@@ -680,9 +695,12 @@ func startPrivatePostgres(t *testing.T) *privatePostgres {
 
 func (p *privatePostgres) start(t *testing.T) {
 	t.Helper()
+	portMu.Lock()
+	defer portMu.Unlock()
+	releasePort(reservedAddr(p.port))
 	options := fmt.Sprintf("-p %d -h 127.0.0.1", p.port)
 	if runtime.GOOS != "windows" {
-		options += " -k /tmp"
+		options += " -k ''"
 	}
 	if err := runPostgresCtl(p.user, p.dir, p.bin, "start", "-w", "-o", options); err != nil {
 		t.Fatal(err)

@@ -23,6 +23,7 @@ import (
 
 // TestRealPi 仅在显式开启后运行，凭据来自环境变量，使用隔离的 Pi 目录。
 func TestRealPi(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("BATON_REAL_PI") != "1" {
 		t.Skip("set BATON_REAL_PI=1 explicitly; requires a model and isolated test PostgreSQL")
 	}
@@ -407,6 +408,7 @@ func readRealPiStopStatus(st *prepareStack, id string) (task.Record, error) {
 }
 
 func TestRealPiStopStatusRead(t *testing.T) {
+	t.Parallel()
 	st := startPrepareStack(t, map[string]string{"BATON_TEST_HOLD_START": "0", "BATON_TEST_ABORT_SCRIPT": "unknown"})
 	created := acceptTask(t, st, "real-pi-stop-status-read")
 	waitTaskStatus(t, st, created.TaskID, task.StatusRunning)

@@ -15,6 +15,7 @@ import (
 )
 
 func TestArtifactsAcrossTwoNodesBlockUnavailableInputs(t *testing.T) {
+	t.Parallel()
 	gate := t.TempDir()
 	st := startPrepareStack(t, map[string]string{
 		"BATON_TEST_HOLD_START": "0", "BATON_TEST_EXECUTOR_SCRIPT": "success", "BATON_TEST_START_GATE": gate,

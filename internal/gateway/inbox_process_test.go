@@ -11,6 +11,7 @@ import (
 )
 
 func TestInboxRealProcessesToolsValidationAndRecovery(t *testing.T) {
+	t.Parallel()
 	p := startProjectRuntimeStack(t)
 	st := p.stack
 	ctx := context.Background()

@@ -9,9 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -39,18 +37,12 @@ type projectRuntimeRecord struct {
 func startProjectRuntimeStack(t *testing.T) *projectRuntimeProbe {
 	t.Helper()
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "baton-project-runtime")
-	if runtime.GOOS == "windows" {
-		binary += ".exe"
-	}
-	if out, err := exec.Command("go", "build", "-o", binary, "./testdata/project_runtime.go").CombinedOutput(); err != nil {
-		t.Fatalf("构建 Runtime 契约程序失败：%v %s", err, out)
-	}
+	installProjectRuntime(t, dir)
 	p := &projectRuntimeProbe{commands: filepath.Join(dir, "commands.jsonl"), log: filepath.Join(dir, "runtime.jsonl")}
 	if err := os.WriteFile(p.commands, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	p.stack = startPrepareStack(t, map[string]string{
+	p.stack = startProjectPrepareStack(t, map[string]string{
 		"PATH":                                dir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"BATON_TEST_PROJECT_RUNTIME_COMMANDS": p.commands,
 		"BATON_TEST_PROJECT_RUNTIME_LOG":      p.log,
@@ -210,6 +202,7 @@ func waitProjectRunEnded(t *testing.T, p *projectRuntimeProbe, runID string) str
 }
 
 func TestProjectRuntimeRealProcessesPlacementPagingAndWake(t *testing.T) {
+	t.Parallel()
 	p := startProjectRuntimeStack(t)
 	st := p.stack
 	project := createRuntimeProject(t, p)
@@ -401,6 +394,7 @@ func waitRuntimePIDStopped(t *testing.T, pid int) {
 }
 
 func TestProjectRuntimeRealProcessesLeaseLossAndPause(t *testing.T) {
+	t.Parallel()
 	p := startProjectRuntimeStack(t)
 	st := p.stack
 	project := createRuntimeProject(t, p)
@@ -441,6 +435,7 @@ func TestProjectRuntimeRealProcessesLeaseLossAndPause(t *testing.T) {
 }
 
 func TestProjectRuntimeRealProcessesFailureAndRetry(t *testing.T) {
+	t.Parallel()
 	p := startProjectRuntimeStack(t)
 	st := p.stack
 	project := createRuntimeProject(t, p)
@@ -514,6 +509,7 @@ func TestProjectRuntimeRealProcessesFailureAndRetry(t *testing.T) {
 }
 
 func TestProjectRuntimeRealProcessesDisconnectDeadline(t *testing.T) {
+	t.Parallel()
 	p := startProjectRuntimeStack(t)
 	st := p.stack
 	project := createRuntimeProject(t, p)
@@ -523,19 +519,23 @@ func TestProjectRuntimeRealProcessesDisconnectDeadline(t *testing.T) {
 	if r := p.call(t, runID, "claim-disconnect", protocol.ProjectRuntimeRequest{Operation: "claim_inputs"}, nil); !r.OK {
 		t.Fatalf("断联前领取失败：%+v", r)
 	}
+	// cmd/batond 的测试二进制通过 RunOptions 注入这些期限。
+	const renewInterval = time.Second
+	const leaseDeadline = 2500 * time.Millisecond
+	const schedulingSlack = leaseDeadline / 2
 	disconnected := time.Now()
 	st.coord.stop()
-	// 真实续租间隔与停止期限保持默认值，验证无法连接中心时 batond 自行停止子进程。
-	deadline := time.Now().Add(65 * time.Second)
+	deadline := disconnected.Add(leaseDeadline + schedulingSlack)
 	for time.Now().Before(deadline) && processAlive(started.PID) == nil {
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 	}
 	elapsed := time.Since(disconnected)
 	if processAlive(started.PID) == nil {
 		t.Fatalf("断联 %s 后 Runtime 仍然存活；节点：%s", elapsed, st.batond.out.String())
 	}
-	if elapsed < 55*time.Second || elapsed > 63*time.Second {
-		t.Fatalf("真实断联自停耗时 %s，预期最后一次续租后约58秒", elapsed)
+	// 断线可能发生在两个续租周期之间，保留轮询与进程停止的调度余量。
+	if elapsed < leaseDeadline-renewInterval-100*time.Millisecond || elapsed > leaseDeadline+schedulingSlack {
+		t.Fatalf("真实断联自停耗时 %s，续租间隔 %s，自停期限 %s", elapsed, renewInterval, leaseDeadline)
 	}
-	t.Logf("真实 Coordinator 断联后 batond 在 %s 自行停止 Runtime；未修改20秒续租与58秒停止期限", elapsed.Round(time.Millisecond))
+	t.Logf("真实 Coordinator 断联后 batond 在 %s 自行停止 Runtime；续租间隔 %s，自停期限 %s", elapsed.Round(time.Millisecond), renewInterval, leaseDeadline)
 }

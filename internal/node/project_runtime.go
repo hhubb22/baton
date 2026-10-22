@@ -30,6 +30,26 @@ const projectRuntimeMaxBytes = 192 << 10
 const projectRuntimeRenewInterval = 20 * time.Second
 const projectRuntimeLeaseDeadline = 58 * time.Second
 
+// ProjectRuntimeTiming 控制续租频率和节点失去中心连接后的自停期限。
+// 零值使用生产默认值：每 20 秒续租，58 秒未续上时停止。
+type ProjectRuntimeTiming struct {
+	RenewInterval time.Duration
+	LeaseDeadline time.Duration
+}
+
+func (timing ProjectRuntimeTiming) normalized() (ProjectRuntimeTiming, error) {
+	if timing.RenewInterval == 0 {
+		timing.RenewInterval = projectRuntimeRenewInterval
+	}
+	if timing.LeaseDeadline == 0 {
+		timing.LeaseDeadline = projectRuntimeLeaseDeadline
+	}
+	if timing.RenewInterval <= 0 || timing.LeaseDeadline <= timing.RenewInterval {
+		return ProjectRuntimeTiming{}, errors.New("Project Runtime 续租间隔须为正且小于自停期限")
+	}
+	return timing, nil
+}
+
 type projectRuntimeManager struct {
 	ctx             context.Context
 	cancel          context.CancelFunc
@@ -68,6 +88,14 @@ type projectRuntimeProcess struct {
 }
 
 func newProjectRuntimeManager(ctx context.Context, ledger *Ledger) (*projectRuntimeManager, error) {
+	return newProjectRuntimeManagerWithTiming(ctx, ledger, ProjectRuntimeTiming{})
+}
+
+func newProjectRuntimeManagerWithTiming(ctx context.Context, ledger *Ledger, timing ProjectRuntimeTiming) (*projectRuntimeManager, error) {
+	timing, err := timing.normalized()
+	if err != nil {
+		return nil, err
+	}
 	if _, err := execProjectRuntime(ctx, ledger.db, `CREATE TABLE IF NOT EXISTS project_runtime_runs (run_id TEXT PRIMARY KEY, lease_epoch INTEGER NOT NULL, state TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '')`); err != nil {
 		return nil, err
 	}
@@ -75,7 +103,7 @@ func newProjectRuntimeManager(ctx context.Context, ledger *Ledger) (*projectRunt
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	m := &projectRuntimeManager{ctx: ctx, cancel: cancel, ledger: ledger, runs: map[string]*projectRuntimeProcess{}, renewInterval: projectRuntimeRenewInterval, leaseDeadline: projectRuntimeLeaseDeadline, clock: startpermit.NewClock(), wakeReceipts: make(chan projectWakeReceipt, 64), cleanupReady: make(chan struct{}, 1)}
+	m := &projectRuntimeManager{ctx: ctx, cancel: cancel, ledger: ledger, runs: map[string]*projectRuntimeProcess{}, renewInterval: timing.RenewInterval, leaseDeadline: timing.LeaseDeadline, clock: startpermit.NewClock(), wakeReceipts: make(chan projectWakeReceipt, 64), cleanupReady: make(chan struct{}, 1)}
 	m.wg.Add(2)
 	go func() { defer m.wg.Done(); m.wakeReceiptLoop() }()
 	go func() { defer m.wg.Done(); m.cleanupReceiptLoop() }()

@@ -7,6 +7,7 @@ import (
 )
 
 func TestManualResolveAndRerunHaveExplicitExecutionCounts(t *testing.T) {
+	t.Parallel()
 	st := startPrepareStack(t, map[string]string{"BATON_TEST_HOLD_START": "0", "BATON_TEST_ABORT_SCRIPT": "unknown"})
 	original := acceptTask(t, st, "manual-original")
 	base := st.base + "/api/v1/tasks/" + original.TaskID

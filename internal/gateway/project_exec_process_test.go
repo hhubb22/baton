@@ -31,18 +31,12 @@ type projectExecProbe struct {
 func startProjectExecStack(t *testing.T) *projectExecProbe {
 	t.Helper()
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "baton-project-runtime")
-	if runtime.GOOS == "windows" {
-		binary += ".exe"
-	}
-	if out, err := exec.Command("go", "build", "-o", binary, "./testdata/project_runtime.go").CombinedOutput(); err != nil {
-		t.Fatalf("构建 Runtime 契约程序：%v %s", err, out)
-	}
+	installProjectRuntime(t, dir)
 	p := &projectRuntimeProbe{commands: filepath.Join(dir, "commands.jsonl"), log: filepath.Join(dir, "runtime.jsonl")}
 	if err := os.WriteFile(p.commands, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	p.stack = startPrepareStack(t, map[string]string{
+	p.stack = startProjectPrepareStack(t, map[string]string{
 		"PATH":                                dir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"BATON_TEST_PROJECT_RUNTIME_COMMANDS": p.commands,
 		"BATON_TEST_PROJECT_RUNTIME_LOG":      p.log,
@@ -159,7 +153,9 @@ func (e *projectExecProbe) waitCommandStarted(t *testing.T) {
 		}
 		time.Sleep(40 * time.Millisecond)
 	}
-	t.Fatalf("真实 shell 命令未启动；节点：%s", e.stack.batond.out.String())
+	var threads string
+	err := e.stack.pool.QueryRow(context.Background(), `SELECT COALESCE(jsonb_agg(jsonb_build_object('id',id,'status',status,'reason',status_reason)),'[]')::text FROM threads WHERE project_id=$1`, e.project.ID).Scan(&threads)
+	t.Fatalf("真实 shell 命令未启动；Thread：%s（%v）；Coordinator：%s；节点：%s", threads, err, e.stack.coord.out.String(), e.stack.batond.out.String())
 }
 
 func (e *projectExecProbe) release(t *testing.T) {
@@ -195,6 +191,7 @@ func waitThreadStatus(t *testing.T, st *prepareStack, threadID, want string) {
 }
 
 func TestProjectExecRealProcessesVersionWake(t *testing.T) {
+	t.Parallel()
 	e := startProjectExecStack(t)
 	threadID, _ := e.start(t, "version-wake", execGatedCommand(), 600)
 	e.waitCommandStarted(t)
@@ -235,8 +232,10 @@ func TestProjectExecRealProcessesVersionWake(t *testing.T) {
 }
 
 func TestProjectExecRealProcessesExitAndOutput(t *testing.T) {
+	t.Parallel()
 	for _, code := range []int{0, 7} {
 		t.Run(fmt.Sprintf("exit_%d", code), func(t *testing.T) {
+			t.Parallel()
 			e := startProjectExecStack(t)
 			command := fmt.Sprintf("printf 'shell-stdout\\n'; printf 'shell-stderr\\n' >&2; exit %d", code)
 			if runtime.GOOS == "windows" {
@@ -271,8 +270,10 @@ func TestProjectExecRealProcessesExitAndOutput(t *testing.T) {
 }
 
 func TestProjectExecRealProcessesWaitExpiryContinuesCommand(t *testing.T) {
+	t.Parallel()
 	for _, force := range []bool{false, true} {
 		t.Run(fmt.Sprintf("runtime_finishes_wait_%t", force), func(t *testing.T) {
+			t.Parallel()
 			e := startProjectExecStack(t)
 			waitSeconds := 0
 			if force {
@@ -304,6 +305,7 @@ func TestProjectExecRealProcessesWaitExpiryContinuesCommand(t *testing.T) {
 }
 
 func TestProjectExecRealProcessesBinaryOutputAndAsyncInput(t *testing.T) {
+	t.Parallel()
 	e := startProjectExecStack(t)
 	original := make([]byte, 40<<10)
 	for i := range original {
@@ -401,8 +403,10 @@ func waitStoppedThreadOutput(t *testing.T, e *projectExecProbe, threadID string)
 }
 
 func TestProjectExecRealProcessesCancelAndTimeoutKeepPartialOutput(t *testing.T) {
+	t.Parallel()
 	for _, reason := range []string{"stopped", "timeout"} {
 		t.Run(reason, func(t *testing.T) {
+			t.Parallel()
 			e := startProjectExecStack(t)
 			command := "printf 'partial-before-stop\\n'; printf '%s' $$ > command.pid; printf 'run\\n' >> counter.txt; while [ ! -f release ]; do sleep 0.1; done"
 			if runtime.GOOS == "windows" {
@@ -456,6 +460,7 @@ func TestProjectExecRealProcessesCancelAndTimeoutKeepPartialOutput(t *testing.T)
 }
 
 func TestProjectExecRealProcessesRuntimeCrashDoesNotRepeat(t *testing.T) {
+	t.Parallel()
 	e := startProjectExecStack(t)
 	threadID, req := e.start(t, "recover-command", execGatedCommand(), 600)
 	e.waitCommandStarted(t)
@@ -483,6 +488,7 @@ func TestProjectExecRealProcessesRuntimeCrashDoesNotRepeat(t *testing.T) {
 }
 
 func TestProjectExecRealProcessesWorkerCrashNeedsVerification(t *testing.T) {
+	t.Parallel()
 	e := startProjectExecStack(t)
 	threadID, _ := e.start(t, "worker-crash", execGatedCommand(), 0)
 	e.waitCommandStarted(t)
@@ -501,8 +507,10 @@ func TestProjectExecRealProcessesWorkerCrashNeedsVerification(t *testing.T) {
 }
 
 func TestProjectExecRealProcessesReportedAndLocalOptOut(t *testing.T) {
+	t.Parallel()
 	for _, stale := range []bool{false, true} {
 		t.Run(fmt.Sprintf("stale_report_%t", stale), func(t *testing.T) {
+			t.Parallel()
 			e := startProjectExecStack(t)
 			e.enable(t, false)
 			if stale {

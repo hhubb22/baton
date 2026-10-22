@@ -166,12 +166,12 @@ func (s *Store) ProjectRuntime(ctx context.Context, src protocol.Source, req pro
 			_, err = tx.Exec(ctx, `UPDATE agent_runs SET state='running' WHERE id=$1 AND state='starting'`, req.RunID)
 		}
 		if err == nil {
-			_, err = tx.Exec(ctx, `UPDATE project_agents SET lease_until=clock_timestamp()+interval '60 seconds' WHERE id=$1 AND lease_until>clock_timestamp()`, b.agentID)
+			_, err = tx.Exec(ctx, `UPDATE project_agents SET lease_until=clock_timestamp()+($2::bigint * interval '1 second') WHERE id=$1 AND lease_until>clock_timestamp()`, b.agentID, s.projectAgentLeaseSeconds)
 		}
 		data = struct {
 			LeaseSeconds    int `json:"lease_seconds"`
 			ControlReceipts int `json:"control_receipts"`
-		}{60, 1}
+		}{s.projectAgentLeaseSeconds, 1}
 	case "bootstrap":
 		data, err = s.bootstrapProjectRun(ctx, tx, b)
 	case "read_events":

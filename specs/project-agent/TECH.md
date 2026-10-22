@@ -133,7 +133,7 @@ Runtime 进程的工作目录是一个空的控制目录。pi-agent-core 本身�
 
 **取得租约。** 一个事务里锁定 `project_agents` 行，确认租约为空或已过期，`lease_epoch` 加一，写 `lease_run_id` 和 `lease_until = now() + 60s`，插入 `agent_runs`（`state = starting`）。`agent_runs` 自己记录启动和停止命令的投递进度。start、stop、wake 分别领取，每类每秒最多 32 条、每节点最多两条，节点额度在全局 LIMIT 前应用。领取先保存下一次尝试时间，再向 Gateway 入队，按最多 30 秒的抖动退避重试；发送循环不等待回包。处于 `starting` 的运行以 `run_id` 为稳定消息 ID 重发 `project_run_start`，直到 batond 回执。batond 在本地 SQLite 里按 `run_id` 去重，同一 run 不会启动两个进程。启动前 batond 先执行一次 `probe`：所需 provider 已经不是登录状态时，拒绝启动并更新能力报告，Coordinator 以 `login_required` 结束这次运行，不计入失败次数，扫描会在下一轮选择其他节点。
 
-**续租。** Runtime 进程存活期间，batond 每 20 秒发送一次续租。Coordinator 只在 `(run_id, lease_epoch)` 仍是当前值且未过期时，把 `lease_until` 延长到 `now() + 60s`。batond 按单调时钟计时：从最后一次续租成功起超过 58 秒仍未续上，就停止 Runtime 进程。租约过期后，旧实例的任何请求都返回 `lease_lost`，Runtime 收到后立即退出。
+**续租。** Runtime 进程存活期间，batond 每 20 秒发送一次续租。Coordinator 只在 `(run_id, lease_epoch)` 仍是当前值且未过期时，把 `lease_until` 延长到 `now() + 60s`。batond 按单调时钟计时：从最后一次续租成功起超过 58 秒仍未续上，就停止 Runtime 进程。租约过期后，旧实例的任何请求都返回 `lease_lost`，Runtime 收到后立即退出。租约时长可通过 Store 的 `Options.ProjectAgentLeaseDuration` 注入，续租间隔和本地自停期限可通过 batond 的 `RunOptions.ProjectRuntimeTiming` 注入，零值使用上述默认值。
 
 **停止。** Project 被暂停或归档、运行所在节点被吊销、员工在界面上停止运行时，Coordinator 在同一事务作废租约（`lease_epoch` 不变，清空 `lease_run_id`）并保存停止意图，独立发送 `project_run_stop`。batond 收到后停止 Runtime，已结束的运行补送原清理确认。自然 `finish` / `report_failure` 给节点 2 秒主动清理确认宽限；其他停止立即到期。只有 `stopped` 回执确认清理，业务终态和新运行租约保持不变。停止重试只查询待确认索引，不与 start / wake 共用批次。即使停止消息没有送达，旧实例的下一次请求也会因租约失效被拒绝。
 

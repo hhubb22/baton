@@ -13,12 +13,14 @@ import (
 )
 
 func TestChildDeliveryAcrossWorkersAndCrashWindows(t *testing.T) {
+	t.Parallel()
 	for _, point := range []string{"", "source_stopped", "delivery_received", "delivery_intent", "delivery_send", "delivery_saved"} {
 		name := point
 		if name == "" {
 			name = "duplicate"
 		}
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			st := startPrepareStack(t, map[string]string{
 				"BATON_TEST_HOLD_START": "0", "BATON_TEST_EXECUTOR_SCRIPT": "candidate_waiting",
 				"BATON_TEST_DELIVERY_SCRIPT": "success", "BATON_TEST_CRASH_AFTER": point,

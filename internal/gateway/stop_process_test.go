@@ -13,6 +13,7 @@ import (
 )
 
 func TestCancelBeforePermitDrainsStopReportAcrossBatondRestarts(t *testing.T) {
+	t.Parallel()
 	gate := t.TempDir()
 	st := startPrepareStack(t, map[string]string{"BATON_TEST_HOLD_START": "0", "BATON_TEST_START_GATE": gate})
 	created := acceptTask(t, st, "cancel-before-permit-stop")
@@ -112,8 +113,10 @@ func TestCancelBeforePermitDrainsStopReportAcrossBatondRestarts(t *testing.T) {
 }
 
 func TestRunningCancelNeedsWorkerStopAndOutcomeEvidence(t *testing.T) {
+	t.Parallel()
 	for _, script := range []string{"unconfirmed", "unknown", "confirmed"} {
 		t.Run(script, func(t *testing.T) {
+			t.Parallel()
 			st := startPrepareStack(t, map[string]string{"BATON_TEST_HOLD_START": "0", "BATON_TEST_ABORT_SCRIPT": script})
 			created := acceptTask(t, st, "cancel-"+script)
 			waitTaskStatus(t, st, created.TaskID, task.StatusRunning)
@@ -146,8 +149,10 @@ func TestRunningCancelNeedsWorkerStopAndOutcomeEvidence(t *testing.T) {
 }
 
 func TestHeartbeatResendChecksPersistedCancellationAndDeadline(t *testing.T) {
+	t.Parallel()
 	for _, reason := range []string{task.StatusCancelled, task.CodeExecutionTimeout, task.CodeQueueTimeout} {
 		t.Run(reason, func(t *testing.T) {
+			t.Parallel()
 			gate := t.TempDir()
 			st := startPrepareStack(t, map[string]string{"BATON_TEST_HOLD_START": "0", "BATON_TEST_INPUT_GATE": gate})
 			created := acceptTask(t, st, "resend-block-"+reason)
@@ -192,6 +197,7 @@ func TestHeartbeatResendChecksPersistedCancellationAndDeadline(t *testing.T) {
 }
 
 func TestHeartbeatResendRecordsActualDelayWithoutReplay(t *testing.T) {
+	t.Parallel()
 	gate := t.TempDir()
 	st := startPrepareStack(t, map[string]string{"BATON_TEST_HOLD_START": "0", "BATON_TEST_INPUT_GATE": gate})
 	created := acceptTask(t, st, "resend-delay")
@@ -229,6 +235,7 @@ func TestHeartbeatResendRecordsActualDelayWithoutReplay(t *testing.T) {
 }
 
 func TestOfflineWorkerEnforcesExecutionDeadline(t *testing.T) {
+	t.Parallel()
 	st := startPrepareStack(t, map[string]string{"BATON_TEST_HOLD_START": "0"})
 	var created task.Record
 	if code := postJSON(t, st.client, st.base+"/api/v1/tasks", map[string]any{"request_id": "offline-timeout", "description": "离线执行期限", "execution_timeout_seconds": 2}, st.csrf, &created); code != 200 {
@@ -265,6 +272,7 @@ func TestOfflineWorkerEnforcesExecutionDeadline(t *testing.T) {
 }
 
 func TestCompletedWorkerResultRacingCancelRetainsCompletion(t *testing.T) {
+	t.Parallel()
 	gate := t.TempDir()
 	st := startPrepareStack(t, map[string]string{"BATON_TEST_HOLD_START": "0", "BATON_TEST_EXECUTOR_SCRIPT": "success", "BATON_TEST_RESULT_GATE": gate})
 	created := acceptTask(t, st, "completion-cancel")

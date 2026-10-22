@@ -8,6 +8,7 @@ import (
 )
 
 func TestThreadReportsAndReceiptsUseControlCapacity(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{protocol.BodyThreadCommandResult, protocol.BodyThreadReport} {
 		body, _ := json.Marshal(map[string]any{"type": kind, "future_field": true})
 		priority, err := incomingPriority(body)

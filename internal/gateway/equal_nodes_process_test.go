@@ -14,6 +14,7 @@ import (
 )
 
 func TestDefaultDeviceRoutesToLegacyUbuntuNode(t *testing.T) {
+	t.Parallel()
 	st := startPrepareStack(t, map[string]string{"BATON_TEST_HOLD_START": "0"})
 	target := registerAgent(t, st.client, st.base, st.csrf, "Ubuntu", []string{"pi", "start"}, "ubuntu")
 	// 旧身份文件在重连时仍会发送 ubuntu，中心忽略该兼容字段。

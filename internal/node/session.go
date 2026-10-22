@@ -29,14 +29,17 @@ var (
 
 // RunOptions 是一次常驻连接使用的本地身份和 Relay 地址。
 type RunOptions struct {
-	RelayURL                 string
-	Identity                 Identity
-	Heartbeat                time.Duration
-	RootCAs                  *x509.CertPool
-	Logger                   *slog.Logger
-	DataDir                  string
-	ThreadHost               ThreadHost
-	ThreadBudgetBytes        int64
+	RelayURL             string
+	Identity             Identity
+	Heartbeat            time.Duration
+	RootCAs              *x509.CertPool
+	Logger               *slog.Logger
+	DataDir              string
+	ThreadHost           ThreadHost
+	ThreadBudgetBytes    int64
+	ProjectRuntimeTiming ProjectRuntimeTiming
+	// RuntimeReportInterval 为零时每 5 秒重新采集节点能力。
+	RuntimeReportInterval    time.Duration
 	DiscoverRuntimeModels    RuntimeModelDiscovery
 	ProbeRuntimeAgentVersion func(context.Context, string) (string, error)
 	reports                  *runtimeReports
@@ -56,6 +59,12 @@ func Maintain(ctx context.Context, opts RunOptions) error {
 	}
 	if opts.Heartbeat < 100*time.Millisecond || opts.Heartbeat > 2*time.Minute {
 		return errors.New("心跳间隔无效")
+	}
+	if opts.RuntimeReportInterval < 0 {
+		return errors.New("Runtime 报告采集间隔无效")
+	}
+	if opts.RuntimeReportInterval == 0 {
+		opts.RuntimeReportInterval = runtimeReportInterval
 	}
 	if opts.Logger == nil {
 		opts.Logger = slog.New(slog.DiscardHandler)
@@ -77,7 +86,7 @@ func Maintain(ctx context.Context, opts RunOptions) error {
 			return err
 		}
 		defer ledger.Close()
-		opts.projectRuntime, err = newProjectRuntimeManager(ctx, ledger)
+		opts.projectRuntime, err = newProjectRuntimeManagerWithTiming(ctx, ledger, opts.ProjectRuntimeTiming)
 		if err != nil {
 			return err
 		}
@@ -104,7 +113,7 @@ func Maintain(ctx context.Context, opts RunOptions) error {
 	attempt := 0
 	opts.reportSender = &runtimeReportSender{}
 	if opts.DataDir != "" {
-		opts.reports = collectRuntimeReports(ctx, opts.DataDir, opts.DiscoverRuntimeModels, opts.ProbeRuntimeAgentVersion)
+		opts.reports = collectRuntimeReports(ctx, opts.DataDir, opts.DiscoverRuntimeModels, opts.ProbeRuntimeAgentVersion, opts.RuntimeReportInterval)
 		opts.projectRuntime.reports = opts.reports
 	}
 	for {

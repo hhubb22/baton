@@ -39,17 +39,35 @@ type Session struct {
 }
 
 type Store struct {
-	pool               *pgxpool.Pool
-	mu                 sync.Mutex
-	beforeCommit       func(context.Context) error
-	beforeStartCommit  func(context.Context) error
-	beforeCancelCommit func(context.Context) error
+	pool                     *pgxpool.Pool
+	projectAgentLeaseSeconds int
+	mu                       sync.Mutex
+	beforeCommit             func(context.Context) error
+	beforeStartCommit        func(context.Context) error
+	beforeCancelCommit       func(context.Context) error
 }
 
 var _ identity.Directory = (*Store)(nil)
 
+// Options 提供 Store 的运行依赖。
+type Options struct {
+	// ProjectAgentLeaseDuration 默认 60 秒；正值向上取整到秒，与协议中的 lease_seconds 一致。
+	ProjectAgentLeaseDuration time.Duration
+}
+
 func New(pool *pgxpool.Pool) *Store {
-	return &Store{pool: pool}
+	return NewWithOptions(pool, Options{})
+}
+
+func NewWithOptions(pool *pgxpool.Pool, opts Options) *Store {
+	seconds := 60
+	if opts.ProjectAgentLeaseDuration > 0 {
+		seconds = int(opts.ProjectAgentLeaseDuration / time.Second)
+		if opts.ProjectAgentLeaseDuration%time.Second != 0 {
+			seconds++
+		}
+	}
+	return &Store{pool: pool, projectAgentLeaseSeconds: seconds}
 }
 
 func (s *Store) InsertLocalEmployee(ctx context.Context, employee identity.Employee, passwordHash string) error {

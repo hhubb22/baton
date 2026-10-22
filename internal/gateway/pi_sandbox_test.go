@@ -118,6 +118,7 @@ func checkPiSandbox(t *testing.T, profile, root string) {
 }
 
 func TestPiSandboxPolicy(t *testing.T) {
+	t.Parallel()
 	policy := piSandboxPolicy([]string{"/isolated"}, []string{"/isolated/work"}, "/tmp/pi.sock")
 	for _, rule := range []string{
 		"(deny default)\n(import \"bsd.sb\")\n(deny file-read* file-write*)",
@@ -137,6 +138,7 @@ func TestPiSandboxPolicy(t *testing.T) {
 }
 
 func TestPiSandboxRuntimeDir(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	for _, parts := range [][]string{
 		{"node_modules", "@vendor", "pi", "dist", "src", "cli.js"},
@@ -158,6 +160,7 @@ func TestPiSandboxRuntimeDir(t *testing.T) {
 }
 
 func TestPiSandbox(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS != "darwin" {
 		t.Skip("requires macOS sandbox-exec; no model or database needed")
 	}
@@ -181,6 +184,7 @@ func TestPiSandbox(t *testing.T) {
 }
 
 func TestPiSandboxStartupDiagnostics(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS != "darwin" {
 		t.Skip("requires macOS sandbox-exec; no model or database needed")
 	}
@@ -294,6 +298,7 @@ require('node:readline').createInterface({input: process.stdin}).on('line', line
 }
 
 func TestPiSandboxDiagnostic(t *testing.T) {
+	t.Parallel()
 	cmd := exec.Command(os.Args[0], "-test.run=^TestPiSandboxDiagnosticChild$")
 	cmd.Env = append(os.Environ(), "BATON_TEST_SANDBOX_DIAGNOSTIC=1")
 	code, stderr, err := piSandboxCommandResult(cmd)

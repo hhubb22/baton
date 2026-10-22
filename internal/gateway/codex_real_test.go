@@ -18,6 +18,7 @@ import (
 
 // TestRealCodex 使用独立认证的临时 CODEX_HOME；真实模型调用需显式开启。
 func TestRealCodex(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("BATON_REAL_CODEX") != "1" {
 		t.Skip("requires explicit real-model opt-in; replay is not a substitute")
 	}

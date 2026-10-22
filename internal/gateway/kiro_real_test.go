@@ -16,6 +16,7 @@ import (
 )
 
 func TestRealKiro(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("BATON_REAL_KIRO") != "1" {
 		t.Skip("设置 BATON_REAL_KIRO=1 运行真实 Kiro")
 	}

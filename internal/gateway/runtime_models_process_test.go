@@ -1,9 +1,7 @@
 package gateway_test
 
 import (
-	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -14,27 +12,12 @@ import (
 // buildReplayBatond 在整个测试进程内只构建一次测试版 batond。
 func buildReplayBatond(t *testing.T) string {
 	t.Helper()
-	replayOnce.Do(func() {
-		replayDir, replayErr = os.MkdirTemp("", "baton-replay-batond-*")
-		if replayErr != nil {
-			return
-		}
-		binary := filepath.Join(replayDir, "batond.exe")
-		cmd := exec.Command("go", "test", "-c", "-o", binary, "./cmd/batond")
-		cmd.Dir = filepath.Join("..", "..")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			replayErr = fmt.Errorf("%w %s", err, out)
-			return
-		}
-		replayBatond = binary
-	})
-	if replayErr != nil {
-		t.Fatalf("构建回放测试 batond：%v", replayErr)
-	}
-	return replayBatond
+	_, binary := buildProjectBins(t)
+	return binary
 }
 
 func TestRuntimeModelProbeDoesNotConsumeReplayProcess(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	fixture := pireplaytest.New(t, pireplaytest.Build(t, "../../tools/agent-replay"),
 		pireplaytest.Tape(t, "../agent/pi/testdata/replay", "simple"),

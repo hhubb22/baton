@@ -27,6 +27,7 @@ func (h *heldHandler) Handle(ctx context.Context, src protocol.Source, env proto
 }
 
 func TestSchedulingRetainsNextNodeWhenGlobalSlotsAreFull(t *testing.T) {
+	t.Parallel()
 	h := &heldHandler{arrived: make(chan string, 32), release: make(chan struct{}, 32)}
 	g := New(nil, h, time.Hour, nil)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -77,6 +78,7 @@ func TestSchedulingRetainsNextNodeWhenGlobalSlotsAreFull(t *testing.T) {
 }
 
 func TestOutputBudgetIncludesInFlightAndLeavesControlCapacity(t *testing.T) {
+	t.Parallel()
 	budget := protocol.NewBudget(64)
 	a, b := newQueue(2, 64), newQueue(2, 64)
 	a.budget = budget

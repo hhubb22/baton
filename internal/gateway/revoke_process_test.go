@@ -24,15 +24,14 @@ import (
 )
 
 func TestProcessRevokeDisconnectsAndSurvivesCoordinatorRestart(t *testing.T) {
+	t.Parallel()
 	coordBin, batondBin := buildBins(t)
 	pool := dbtest.Open(t)
 	ctx := context.Background()
 	schema := currentSchema(t, pool)
 	env := revokeProcessEnv(t, schema)
 	time.Sleep(300 * time.Millisecond)
-	coordProc := startCmd(t, coordBin, []string{"serve"}, env.coord)
-	waitListen(t, env.apiAddr)
-	waitListen(t, env.nodeAddr)
+	coordProc := env.startCoordinator(t, coordBin)
 
 	const password = "revoke-process-password"
 	alice, err := admin.CreateLocal(ctx, pool, "alice", "Alice", password)
@@ -113,13 +112,13 @@ func TestProcessRevokeDisconnectsAndSurvivesCoordinatorRestart(t *testing.T) {
 }
 
 func TestProcessRevokeStaysPendingWhileCoordinatorIsDown(t *testing.T) {
+	t.Parallel()
 	coordBin, batondBin := buildBins(t)
 	pool := dbtest.Open(t)
 	ctx := context.Background()
 	schema := currentSchema(t, pool)
 	env := revokeProcessEnv(t, schema)
-	startCmd(t, coordBin, []string{"serve"}, env.coord)
-	waitListen(t, env.apiAddr)
+	env.startCoordinator(t, coordBin)
 
 	const password = "revoke-down-password-01"
 	alice, err := admin.CreateLocal(ctx, pool, "alice", "Alice", password)
@@ -205,11 +204,10 @@ func revokeProcessEnv(t *testing.T, schema string) revokeEnv {
 	}
 	roots := x509.NewCertPool()
 	roots.AddCert(cert)
-	apiAddr := freeAddr(t)
-	nodeAddr := apiAddr
+	apiAddr := "127.0.0.1:0"
 	dbURL := dbtest.URL()
 	return revokeEnv{
-		dir: dir, certFile: certFile, apiAddr: apiAddr, nodeAddr: nodeAddr, roots: roots,
+		dir: dir, certFile: certFile, apiAddr: apiAddr, nodeAddr: apiAddr, roots: roots,
 		coord: childEnv(map[string]string{
 			"BATON_DATABASE_URL":       dbURL,
 			"BATON_DB_SCHEMA":          schema,
@@ -237,7 +235,7 @@ func (p *running) waitExit(t *testing.T, timeout time.Duration) {
 	t.Helper()
 	done := make(chan struct{})
 	go func() {
-		p.once.Do(func() { _ = p.cmd.Wait() })
+		p.wait()
 		close(done)
 	}()
 	select {

@@ -62,10 +62,12 @@ func stopWorker(pid int) {
 	}
 	allowed := sameExecutable(image, exe)
 	processMu.Lock()
-	for _, p := range processHandles {
-		if len(p.cmd.Args) > 1 && p.cmd.Args[1] == "run" && sameExecutable(image, p.bin) {
-			allowed = true
-			break
+	for _, handles := range processHandles {
+		for _, p := range handles {
+			if len(p.cmd.Args) > 1 && p.cmd.Args[1] == "run" && sameExecutable(image, p.bin) {
+				allowed = true
+				break
+			}
 		}
 	}
 	processMu.Unlock()
@@ -93,6 +95,7 @@ func sameExecutable(a, b string) bool {
 }
 
 func TestStopWorkerRejectsUnrelatedExecutable(t *testing.T) {
+	t.Parallel()
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)

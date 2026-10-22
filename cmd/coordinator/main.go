@@ -64,7 +64,16 @@ func usage() string {
 `
 }
 
+// RunOptions 提供 Coordinator 的运行依赖。
+type RunOptions struct {
+	ProjectAgentLeaseDuration time.Duration
+}
+
 func run(ctx context.Context, args []string, stdout, stderr io.Writer, getenv func(string) string) error {
+	return runWithOptions(ctx, args, stdout, stderr, getenv, RunOptions{})
+}
+
+func runWithOptions(ctx context.Context, args []string, stdout, stderr io.Writer, getenv func(string) string, opts RunOptions) error {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" {
 		return &exitCode{code: 2, err: errors.New(usage())}
 	}
@@ -80,7 +89,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, getenv fu
 		if len(args) != 1 {
 			return &exitCode{code: 2, err: errors.New(usage())}
 		}
-		return cmdServe(ctx, stderr, getenv)
+		return cmdServe(ctx, stderr, getenv, opts)
 	case "admin":
 		return cmdAdmin(ctx, args[1:], stdout, stderr, getenv)
 	default:
@@ -155,7 +164,7 @@ func cmdReset(ctx context.Context, args []string, stdout, stderr io.Writer, pool
 	return err
 }
 
-func cmdServe(ctx context.Context, stderr io.Writer, getenv func(string) string) error {
+func cmdServe(ctx context.Context, stderr io.Writer, getenv func(string) string, opts RunOptions) error {
 	return withDB(ctx, getenv, true, func(cfg config.Config, pool *pgxpool.Pool) error {
 		if err := migrate.Check(ctx, pool); err != nil {
 			return err
@@ -173,7 +182,7 @@ func cmdServe(ctx context.Context, stderr io.Writer, getenv func(string) string)
 			return err
 		}
 		logger := slog.New(slog.NewTextHandler(stderr, nil))
-		repo := store.New(pool)
+		repo := store.NewWithOptions(pool, store.Options{ProjectAgentLeaseDuration: opts.ProjectAgentLeaseDuration})
 		if err := repo.ResetConnections(ctx); err != nil {
 			return err
 		}

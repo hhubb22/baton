@@ -22,6 +22,7 @@ import (
 )
 
 func TestBrowserSlowSubscriberDoesNotBlockNativeWorker(t *testing.T) {
+	t.Parallel()
 	dir := pireplaytest.Canonical(t, t.TempDir())
 	fixture := pireplaytest.Build(t, "../../tools/agent-replay")
 	tape := pireplaytest.Tape(t, "../agent/pi/testdata/replay", "simple")
@@ -54,7 +55,7 @@ func TestBrowserSlowSubscriberDoesNotBlockNativeWorker(t *testing.T) {
 	}
 	stateDir := filepath.Join(dir, "replay-state")
 	gate := t.TempDir()
-	st := startPrepareStack(t, map[string]string{"BATON_TEST_HOLD_START": "0", "BATON_TEST_START_GATE": gate, "BATON_AGENT_DRIVER": "native", "BATON_PI_BIN": fixture, "BATON_PI_MODEL": pireplaytest.Model})
+	st := startPrepareStack(t, map[string]string{"BATON_HTTP_ADDR": freeAddr(t), "BATON_TEST_HOLD_START": "0", "BATON_TEST_START_GATE": gate, "BATON_AGENT_DRIVER": "native", "BATON_PI_BIN": fixture, "BATON_PI_MODEL": pireplaytest.Model})
 	t.Cleanup(func() {
 		if raw, err := os.ReadFile(filepath.Join(stateDir, "failure.json")); err == nil {
 			t.Errorf("转录失配: %s", raw)

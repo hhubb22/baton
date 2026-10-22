@@ -30,7 +30,7 @@ type runtimeReports struct {
 }
 
 // collectRuntimeReports 在整个 Maintain 生命周期中只有一个采集者。阻塞文件系统也不会随重连增加采集协程。
-func collectRuntimeReports(ctx context.Context, dir string, discover RuntimeModelDiscovery, version func(context.Context, string) (string, error)) *runtimeReports {
+func collectRuntimeReports(ctx context.Context, dir string, discover RuntimeModelDiscovery, version func(context.Context, string) (string, error), interval time.Duration) *runtimeReports {
 	r := &runtimeReports{changed: make(chan struct{}, 1), refresh: make(chan struct{}, 1)}
 	probe := newAgentProbe(discover, version)
 	go func() {
@@ -42,7 +42,7 @@ func collectRuntimeReports(ctx context.Context, dir string, discover RuntimeMode
 			case r.changed <- struct{}{}:
 			default:
 			}
-			timer := time.NewTimer(runtimeReportInterval)
+			timer := time.NewTimer(interval)
 			select {
 			case <-ctx.Done():
 				timer.Stop()

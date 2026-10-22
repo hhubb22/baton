@@ -204,7 +204,7 @@ func (s *Store) scheduleProjectRun(ctx context.Context, agentID string) error {
 	if err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, `UPDATE project_agents SET lease_epoch=lease_epoch+1,lease_run_id=$2,lease_until=clock_timestamp()+interval '60 seconds' WHERE id=$1`, agentID, newRun); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE project_agents SET lease_epoch=lease_epoch+1,lease_run_id=$2,lease_until=clock_timestamp()+($3::bigint * interval '1 second') WHERE id=$1`, agentID, newRun, s.projectAgentLeaseSeconds); err != nil {
 		return err
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO agent_runs(id,employee_id,agent_id,node_id,lease_epoch,state,provider,model,placement_reason)

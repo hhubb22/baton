@@ -16,6 +16,7 @@ import (
 )
 
 func TestRuntimeReportRealProcessesAndWorker(t *testing.T) {
+	t.Parallel()
 	binDir := t.TempDir()
 	probeFile := filepath.Join(t.TempDir(), "probe.json")
 	probeBinary := filepath.Join(binDir, "baton-project-runtime")

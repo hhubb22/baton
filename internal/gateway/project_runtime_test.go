@@ -21,6 +21,7 @@ import (
 )
 
 func TestProjectRuntimeRequestsPassAuthenticatedGateway(t *testing.T) {
+	t.Parallel()
 	pool := dbtest.Open(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)

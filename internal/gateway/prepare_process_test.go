@@ -50,6 +50,7 @@ type prepareStack struct {
 }
 
 func TestPrepareReconnectsWorkerAndRejectsBusySession(t *testing.T) {
+	t.Parallel()
 	st := startPrepareStack(t, map[string]string{
 		"BATON_TEST_DROP_PREPARE_ACKS": "1",
 		"BATON_TEST_SLOW_WRITE":        "1",
@@ -143,6 +144,7 @@ func TestPrepareReconnectsWorkerAndRejectsBusySession(t *testing.T) {
 }
 
 func TestPrepareDoesNotAckWhenPersistFails(t *testing.T) {
+	t.Parallel()
 	st := startPrepareStack(t, map[string]string{"BATON_TEST_FAIL_PERSIST": "1"})
 	var created task.Record
 	if code := postJSON(t, st.client, st.base+"/api/v1/tasks", map[string]any{
@@ -205,8 +207,12 @@ func startPrepareStackWithBins(t *testing.T, extra map[string]string, coordBin, 
 	}
 	roots := x509.NewCertPool()
 	roots.AddCert(cert)
-	apiAddr := freeAddr(t)
-	nodeAddr := apiAddr
+	apiAddr := "127.0.0.1:0"
+	// 浏览器实时通道要求预先配置同源地址，端口保留到 Coordinator 启动。
+	if extra["BATON_HTTP_ADDR"] != "" {
+		apiAddr = extra["BATON_HTTP_ADDR"]
+	}
+	var nodeAddr string
 	dbURL := dbtest.URL()
 	coordValues := map[string]string{
 		"BATON_DATABASE_URL":       dbURL,
@@ -226,8 +232,9 @@ func startPrepareStackWithBins(t *testing.T, extra map[string]string, coordBin, 
 	}
 	coordEnv := childEnv(coordValues)
 	coord := startCmd(t, coordBin, []string{"serve"}, coordEnv)
-	waitListen(t, apiAddr)
-	waitListen(t, nodeAddr)
+	apiAddr = coord.listenAddr(t)
+	nodeAddr = apiAddr
+	setChildEnv(coordEnv, "BATON_HTTP_ADDR", apiAddr)
 	const password = "prepare-test-password-1"
 	emp, err := admin.CreateLocal(ctx, pool, "alice", "Alice", password)
 	if err != nil {
