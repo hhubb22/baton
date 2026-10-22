@@ -1,11 +1,11 @@
 import "tokens/colors.elyx" as c
 
-// 界面字体：设计稿用 PingFang SC，Web 端用系统 UI 字体栈。字重只用 Regular / Medium / Semibold。
-// 代码字体：Paper Mono；含中文的等宽内容用 Maple Mono CN。
+// UI font: PingFang SC in design files, system UI font stack on the web. Weights: Regular / Medium / Semibold.
+// Code font: Paper Mono.
 export body = text {
   top: 120px,
   fill: c.colors.text,
-  contents: "正文 Body · Project Agent 的回复和用户消息",
+  contents: "Body · Project Agent replies and user messages",
   font-size: 14,
   font-family: "PingFang SC",
   font-style: "Regular",
@@ -14,7 +14,7 @@ export body = text {
 
 export title = text : body {
   top: 0px,
-  contents: "页面标题 Title",
+  contents: "Title · Page heading",
   font-size: 20,
   font-style: "Semibold",
   line-height: 1.4
@@ -22,7 +22,7 @@ export title = text : body {
 
 export heading = text : body {
   top: 48px,
-  contents: "区块标题 Heading",
+  contents: "Heading · Dialog and section title",
   font-size: 15,
   font-style: "Semibold",
   line-height: 1.45
@@ -30,20 +30,20 @@ export heading = text : body {
 
 export bodyMedium = text : body {
   top: 160px,
-  contents: "正文强调 Body Medium",
+  contents: "Body Medium · Emphasized body text",
   font-style: "Medium"
 }
 
 export small = text : body {
   top: 200px,
-  contents: "界面文字 Small · 列表、表单、说明",
+  contents: "Small · Lists, forms, and descriptions",
   font-size: 13,
   line-height: 1.5
 }
 
 export label = text : body {
   top: 240px,
-  contents: "标签 Label · 按钮、行标题、字段名",
+  contents: "Label · Buttons, row titles, and field names",
   font-size: 13,
   font-style: "Medium",
   line-height: 1.45
@@ -51,7 +51,7 @@ export label = text : body {
 
 export caption = text : body {
   top: 280px,
-  contents: "注释 Caption · 时间、设备、版本",
+  contents: "Caption · Timestamps, devices, and versions",
   font-size: 12,
   line-height: 1.45,
   fill[0].color: c.colors.muted
@@ -59,7 +59,7 @@ export caption = text : body {
 
 export captionMedium = text : caption {
   top: 316px,
-  contents: "分组标题 Caption Medium",
+  contents: "Caption Medium · Group headers",
   font-style: "Medium"
 }
 
@@ -70,10 +70,4 @@ export mono = text : body {
   font-family: "Paper Mono",
   font-style: "Regular",
   line-height: 1.55
-}
-
-export monoCN = text : mono {
-  top: 388px,
-  contents: "测试结果：1 项失败",
-  font-family: "Maple Mono CN"
 }

@@ -5,10 +5,10 @@ import "controls/icons.elyx" as icons
 import "controls/avatar.elyx" as avatars
 import "blocks/thread-line.elyx" as lines
 
-// 主对话里的条目。组件默认宽 720px，放进对话列时改成 100%，和输入区左右对齐。
-// 用户消息：右对齐，浅灰圆角气泡，最宽 560px。设计稿里超过一行的消息要给正文写明宽度
+// Entries in the main conversation. Default width is 720px; set to 100% inside the conversation column so edges align with the composer.
+// User message: right-aligned subtle bubble, max-width 560px. Specify an explicit width on multiline text in design files
 export userMessage = frame {
-  title: "用户消息",
+  title: "User message",
   top: 0px,
   width: s.size.measure,
   layout: {direction: .column, align-items: .end, item-gap: 6px},
@@ -31,7 +31,7 @@ export userMessage = frame {
     children: content,
 
     content = text : t.body {
-      contents: "PS-160 的验收要在三台设备上跑。先在 Windows 上跑重连测试，结果出来告诉我。"
+      contents: "Run PS-160 reconnect tests on Windows first and let me know when they finish."
     }
   }
 
@@ -48,21 +48,21 @@ export userMessage = frame {
     }
 
     metaText = text : t.caption {
-      contents: "已保存，等设备上线后处理",
+      contents: "Saved · sends when a device is available",
       fill[0].color: c.colors.faint
     }
   }
 }
 
-// 所有设备离线时发出的消息
+// Message sent while all devices are offline
 @variant
 export userMessagePending = frame : userMessage {
-  title: "用户消息 / 等待设备",
+  title: "User message / Waiting for device",
   top: 72px,
 
   bubble {
     content {
-      contents: "MacBook 上线后先把 PS-160 的分支推上去。"
+      contents: "Push the PS-160 branch as soon as the MacBook is back online."
     }
   }
 
@@ -71,10 +71,10 @@ export userMessagePending = frame : userMessage {
   }
 }
 
-// Project Agent 的一段回复：没有头像和名字，靠左对齐的正文就是它说的话。
-// 这一轮执行过命令或改过记忆时，开头是一行可展开的过程记录；开过或发过消息的 Thread 收在正文前的卡片里。
+// Project Agent turn: left-aligned body text without an avatar or name.
+// When commands or memory edits ran in the turn, an expandable activity log sits at the top; Threads opened or messaged in the turn appear in a card before the text.
 export agentTurn = frame {
-  title: "Project Agent 回复",
+  title: "Project assistant reply",
   top: 168px,
   width: s.size.measure,
   layout: {direction: .column, item-gap: s.space.md},
@@ -92,14 +92,14 @@ export agentTurn = frame {
 
   content = text : t.body {
     width: 100%,
-    contents: "Windows 台式机在线，worktree 建在 D:\\src\\baton-ps160，重连测试已经在跑，结果出来告诉你。"
+    contents: "Windows Desktop is online. Created a worktree at D:\\src\\baton-ps160 and started the reconnect tests; I'll report back when they finish."
   }
 }
 
-// 带过程记录和 Thread 卡片的回复
+// Turn with an activity log and Thread card
 @variant
 export agentTurnWork = frame : agentTurn {
-  title: "Project Agent 回复 / 开了 Thread",
+  title: "Project assistant reply / Opened threads",
   top: 240px,
 
   log {
@@ -111,9 +111,9 @@ export agentTurnWork = frame : agentTurn {
   }
 }
 
-// 运行中：Project Agent 正在处理这一轮
+// Active run: Project Agent is processing the current turn
 export typing = frame {
-  title: "Project Agent 正在处理",
+  title: "Project assistant working",
   top: 600px,
   width: s.size.measure,
   layout: {align-items: .center, item-gap: s.space.sm},
@@ -122,28 +122,28 @@ export typing = frame {
   mark = frame : avatars.agentMark {}
 
   label = text : t.small {
-    contents: "正在处理 2 条输入…",
+    contents: "Reading 2 messages…",
     fill[0].color: c.colors.agentText
   }
 }
 
-// 日期分隔
+// Day divider
 export dayDivider = frame {
-  title: "日期分隔",
+  title: "Day divider",
   top: 648px,
   width: s.size.measure,
   layout: {justify-content: .center, align-items: .center},
   children: label,
 
   label = text : t.caption {
-    contents: "今天",
+    contents: "Today",
     fill[0].color: c.colors.faint
   }
 }
 
-// 系统记录：运行实例换设备、Project 暂停或恢复等
+// System note: runtime device handoff, Project pause or resume
 export systemNote = frame {
-  title: "系统记录",
+  title: "System note",
   top: 688px,
   width: s.size.measure,
   layout: {justify-content: .center, align-items: .center, item-gap: 6px},
@@ -156,14 +156,14 @@ export systemNote = frame {
   }
 
   label = text : t.caption {
-    contents: "Project Agent 在 Ubuntu 开发机上启动：默认设备 MacBook Pro 离线",
+    contents: "Switched to Ubuntu Dev because MacBook Pro is offline",
     fill[0].color: c.colors.faint
   }
 }
 
-// 过程记录里的一步：图标、内容、右侧说明。命令点开后在下方显示输出。
+// Activity step: icon, summary, and trailing note. Expanding a command step shows its output below.
 export activityStep = frame {
-  title: "过程步骤 / 命令",
+  title: "Activity step / Command",
   top: 736px,
   width: s.size.measure,
   layout: {direction: .column, item-gap: s.space.xs},
@@ -196,7 +196,7 @@ export activityStep = frame {
     }
 
     stepNote = text : t.small {
-      contents: "Windows 台式机 · 3.8 秒",
+      contents: "Windows Desktop · 3.8s",
       line-height: 1,
       fill[0].color: c.colors.faint
     }
@@ -212,18 +212,18 @@ export activityStep = frame {
     padding: [10px, s.space.md],
     children: stepResult,
 
-    stepResult = text : t.monoCN {
+    stepResult = text : t.mono {
       width: 100%,
-      contents: "Preparing worktree (detached HEAD 4c1e9a2)\nHEAD is now at 4c1e9a2 build: 统一前后端构建",
+      contents: "Preparing worktree (detached HEAD 4c1e9a2)\nHEAD is now at 4c1e9a2 build: unify frontend and backend build",
       fill[0].color: c.colors.muted
     }
   }
 }
 
-// 展开的命令步骤：显示输出
+// Expanded command step showing output
 @variant
 export activityStepOpen = frame : activityStep {
-  title: "过程步骤 / 命令展开",
+  title: "Activity step / Command open",
   top: 784px,
 
   stepOutput {
@@ -231,20 +231,20 @@ export activityStepOpen = frame : activityStep {
   }
 }
 
-// 记忆修改步骤：点开在原位显示修改前后
+// Memory edit step: expands in place to show the change
 @variant
 export activityStepMemory = frame : activityStep {
-  title: "过程步骤 / 记忆",
+  title: "Activity step / Memory",
   top: 896px,
 
   stepRow {
     stepNote {
-      contents: "项目记忆 v1"
+      contents: "Memory v1"
     }
 
     stepLead {
       stepLabel {
-        contents: "记下：Windows 上的 worktree 在 D:\\src\\baton-ps160",
+        contents: "Saved: Windows worktree is at D:\\src\\baton-ps160",
         font-size: 13,
         font-family: "PingFang SC"
       }
@@ -255,10 +255,10 @@ export activityStepMemory = frame : activityStep {
   }
 }
 
-// 过程记录：Project Agent 一轮里执行的命令和修改的记忆。默认收起成一行，点开在原位逐条查看，每条命令或记忆占一行。
-// 时间在悬停时显示；命令在哪台设备上执行写在展开后的每一步里。
+// Activity log: commands and memory edits in a Project Agent turn. Collapsed into one line by default; expands in place with one row per step.
+// Timestamps appear on hover; the device that ran each command appears on its expanded step row.
 export activityLog = frame {
-  title: "过程记录 / 收起",
+  title: "Activity log / Collapsed",
   top: 944px,
   width: s.size.measure,
   layout: {direction: .column, item-gap: 6px},
@@ -276,7 +276,7 @@ export activityLog = frame {
     }
 
     logLabel = text : t.small {
-      contents: "执行了 1 条命令，改了 1 处记忆",
+      contents: "Ran 1 command, saved 1 note",
       line-height: 1,
       fill[0].color: c.colors.muted
     }
@@ -307,10 +307,10 @@ export activityLog = frame {
   }
 }
 
-// 展开：逐条列出步骤，命令可以继续展开看输出
+// Expanded: lists each step in order, with command outputs expandable inline
 @variant
 export activityLogOpen = frame : activityLog {
-  title: "过程记录 / 展开",
+  title: "Activity log / Expanded",
   top: 992px,
 
   logBody {

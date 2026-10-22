@@ -4,10 +4,10 @@ import "foundations/typography.elyx" as t
 import "controls/button.elyx" as buttons
 import "controls/icons.elyx" as icons
 
-// 弹窗：标题、内容、底部说明和操作。内容和操作区是插槽。
-// 浮层最多两层；弹窗里可以再打开下拉菜单，不再叠弹窗。
+// Dialog: heading, content slot, footer note, and actions slot.
+// At most two overlay layers; a dialog may open a select menu inside it, never a stacked dialog.
 export dialog = frame {
-  title: "弹窗",
+  title: "Dialog",
   width: 480px,
   layout: {direction: .column, item-gap: 20px},
   fill: c.colors.surface,
@@ -33,7 +33,7 @@ export dialog = frame {
   children: [heading, content, footer],
 
   heading = text : t.heading {
-    contents: "归档「交换机巡检」？"
+    contents: "Archive “Switch Patrol”?"
   }
 
   content = frame {
@@ -44,7 +44,7 @@ export dialog = frame {
 
     message = text : t.small {
       width: 100%,
-      contents: "Project Agent 停止运行，3 个待处理事项会被撤回。对话、记忆和 Thread 都会保留。",
+      contents: "Stops the project assistant and closes 3 open questions. Past chats and project memory are kept. Work in individual threads continues.",
       fill[0].color: c.colors.muted
     }
   }
@@ -76,9 +76,9 @@ export dialog = frame {
   }
 }
 
-// 设置里的一行操作：标题、说明、按钮
+// Settings action row: title, description, and button
 export settingRow = frame {
-  title: "设置操作行",
+  title: "Settings action row",
   top: 400px,
   width: 512px,
   layout: {
@@ -94,19 +94,19 @@ export settingRow = frame {
     children: [rowTitle, rowText],
 
     rowTitle = text : t.label {
-      contents: "暂停 Project"
+      contents: "Pause project"
     }
 
     rowText = text : t.caption {
       width: 100%,
-      contents: "Project Agent 不再启动，Thread 照常可用。暂停期间你仍可以给 Thread 发消息和处理事项，产生的输入都会保存。",
+      contents: "Pauses automatic replies. You can still use individual threads and answer questions. Messages and replies here are saved until you resume.",
       fill[0].color: c.colors.muted
     }
   }
 
   action = frame : buttons.smallSecondary {
     label {
-      contents: "暂停"
+      contents: "Pause"
     }
 
     @with-variant(icons.pause)

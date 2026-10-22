@@ -12,8 +12,8 @@ import "controls/field.elyx" as fields
 import "controls/label.elyx" as labels
 
 create = frame : page.projectPage {
-  title: "新建 Project",
-  caption: "只有标题必填。模型来自设备上已登录的订阅，不需要 API key。Project 不绑定设备或仓库。",
+  title: "New project",
+  caption: "Name the project, add an optional goal, and choose a model.",
   left: 0px,
   top: 0px,
   overrides: [insert(scrim, after = page.projectPage.overview)],
@@ -34,10 +34,11 @@ create = frame : page.projectPage {
           confirm {
             border[0].color: c.colors.transparent,
             fill[0].color: c.colors.accent,
+            connections[0].target: created,
 
             label {
               fill[0].color: c.colors.onAccent,
-              contents: "创建"
+              contents: "Create project"
             }
 
             border[0].width: 0px
@@ -45,7 +46,7 @@ create = frame : page.projectPage {
         }
 
         note {
-          contents: "创建后可以暂停或归档，不能删除。"
+          display: .none
         }
       }
 
@@ -59,20 +60,20 @@ create = frame : page.projectPage {
       }
 
       heading {
-        contents: "新建 Project"
+        contents: "New project"
       }
 
       titleField = frame : fields.field {
         width: 100%,
 
         helper {
-          contents: "标题可以随时修改。"
+          display: .none
         }
 
         @with-variant(inputs.focus)
         input {
           value {
-            contents: "发版检查"
+            contents: "Release Check"
           }
 
           top: .nil
@@ -85,12 +86,12 @@ create = frame : page.projectPage {
         input {
           value {
             fill[0].color: c.colors.text,
-            contents: "每次发版前在三种系统上跑完整测试，回复带附件回来"
+            contents: "Run the full test suite across all three OSes before every release and return logs as attachments"
           }
         }
 
         helper {
-          contents: "Project Agent 每次运行都会读到目标。"
+          display: .none
         }
       }
 
@@ -101,7 +102,7 @@ create = frame : page.projectPage {
 
         modelLabel = frame : labels.label {
           labelText {
-            contents: "Project Agent 使用的模型"
+            contents: "Project assistant model"
           }
         }
 
@@ -114,7 +115,7 @@ create = frame : page.projectPage {
             width: 100%,
 
             value {
-              contents: "ChatGPT 订阅"
+              contents: "ChatGPT subscription"
             }
           }
 
@@ -129,7 +130,7 @@ create = frame : page.projectPage {
 
         modelHelp = text : t.caption {
           width: 100%,
-          contents: "使用设备上已登录的订阅。2 台在线设备可用这个订阅。以后修改从下一次运行起生效。",
+          contents: "Uses your ChatGPT account. Signed in on 2 online devices.",
           fill[0].color: c.colors.muted
         }
       }
@@ -138,8 +139,8 @@ create = frame : page.projectPage {
 }
 
 created = frame : page.projectPage {
-  title: "新 Project 的空对话",
-  caption: "创建后直接进入主对话。发出第一条消息时，Coordinator 选一台满足条件的设备启动 Project Agent。",
+  title: "New project / Empty conversation",
+  caption: "Describe the first task to start working with the project assistant.",
   left: 1728px,
   top: 0px,
 
@@ -171,20 +172,16 @@ created = frame : page.projectPage {
 
             runtimeDevice {
               runtimeName {
-                contents: "还没有运行过"
+                contents: "Not started yet"
               }
             }
-          }
-
-          runtimeNote {
-            contents: "ChatGPT 订阅 · gpt-5.1。发出第一条消息后启动，优先使用默认设备。"
           }
         }
       }
 
       goal {
         goalText {
-          contents: "每次发版前在三种系统上跑完整测试，回复带附件回来"
+          contents: "Run the full test suite across all three OSes before every release and return logs as attachments"
         }
       }
     }
@@ -205,6 +202,14 @@ created = frame : page.projectPage {
   }
 
   main {
+    dock {
+      composer {
+        prompt {
+          contents: "Describe what you want to build or verify…"
+        }
+      }
+    }
+
     transcript {
       overrides: [
         insert(empty, after = .nil),
@@ -226,18 +231,18 @@ created = frame : page.projectPage {
             fill[0].color: c.hues.blue,
 
             initial {
-              contents: "发"
+              contents: "R"
             }
           }
 
           name {
-            contents: "发版检查"
+            contents: "Release Check"
           }
         }
 
         state {
           stateText {
-            contents: "还没有运行过"
+            contents: "Not started yet"
           }
         }
       }
@@ -265,12 +270,12 @@ created = frame : page.projectPage {
         fill[0].color: c.hues.blue,
 
         initial {
-          contents: "发"
+          contents: "R"
         }
       }
 
       name {
-        contents: "发版检查"
+        contents: "Release Check"
       }
     }
   }
@@ -284,24 +289,24 @@ created = frame : page.projectPage {
       fill[0].color: c.hues.blue,
 
       initial {
-        contents: "发"
+        contents: "R"
       }
     }
 
     emptyTitle = text : t.title {
-      contents: "发版检查"
+      contents: "Release Check"
     }
 
     emptyGoal = text : t.small {
       width: 100%,
-      contents: "每次发版前在三种系统上跑完整测试，回复带附件回来",
+      contents: "Run the full test suite across all three OSes before every release and return logs as attachments",
       align: .center,
       fill[0].color: c.colors.muted
     }
 
     emptyHint = text : t.caption {
       width: 100%,
-      contents: "对话、记忆和 Thread 记录都保存在 Coordinator。Project Agent 这次在 Mac 上运行，下次换到 Windows 也接得上。",
+      contents: "Ask the assistant to run tests, fix bugs, or check logs on your connected computers.",
       align: .center,
       fill[0].color: c.colors.faint
     }
@@ -309,7 +314,38 @@ created = frame : page.projectPage {
 
   noTasks = text : t.small {
     width: 100%,
-    contents: "还没有 Thread。Project Agent 开的 Thread 会列在这里。",
-    fill[0].color: c.colors.faint
+    contents: "No chats in this project yet. Ask the assistant to start work.",
+    fill[0].color: c.colors.muted
+  }
+}
+
+nameRequired = frame : create {
+  title: "New project / Name required",
+  caption: "The name error appears beside the field. Goal and model choices stay filled in.",
+  left: 3456px,
+  top: 0px,
+
+  scrim {
+    form {
+      content {
+        titleField {
+          helper {
+            fill[0].color: c.colors.danger,
+            contents: "Enter a project name.",
+            display: .visible
+          }
+
+          input {
+            border[0].color: c.colors.danger,
+
+            value {
+              contents: ""
+            }
+
+            border[0].width: 1
+          }
+        }
+      }
+    }
   }
 }

@@ -1,6 +1,6 @@
 # Baton 界面设计
 
-Baton Web UI 的 Elyx 设计项目，包括设计系统总览和第一个里程碑用到的页面。项目根目录为 `design/`，配置保存在 `elyx.json`。产品行为以仓库 `specs/` 为准，设计稿里的文案和状态都对应其中的条目。
+Baton Web UI 的 Elyx 设计项目，包括设计系统总览和第一个里程碑用到的页面。项目根目录为 `design/`，配置保存在 `elyx.json`。产品行为以仓库 `specs/` 为准，界面交互和文案遵循 [WRITING.md](WRITING.md)。设计稿里的状态对应产品规格。
 
 在 Elyx 中打开此目录，或在仓库根目录运行：
 
@@ -17,12 +17,12 @@ elyx design
 | [screens/project-thread.elyx](screens/project-thread.elyx) | 在 Project 页右侧打开 Thread 详情的两个状态：空闲时带展开的过程记录、事项和选中文字提问，执行中带实时输出和 Thread 输入区 | R-08、R-09、R-10、R-11、R-15、R-16、R-17、PA-19、PA-22、IB-08、IB-13 |
 | [screens/inbox.elyx](screens/inbox.elyx) | 待处理：跨 Project 的事项和 Project Agent 暂停的系统事项 | IB-06、IB-10、IB-18 |
 | [screens/threads.elyx](screens/threads.elyx) | Thread 页：顶部新建 Thread 的输入区、位置菜单、模型菜单、分组列表、右侧打开详情、换模型、状态未知、等待设备和文件预览 | R-05、R-06、R-07、R-08、R-10、R-13、R-14、R-18 |
-| [screens/devices.elyx](screens/devices.elyx) | 设备列表，展开的设备上有 Agent 能力、发现的仓库、「允许 Project Agent 执行命令」和吊销说明；接入设备弹窗 | R-02、R-04、R-06、PA-06、PA-21 |
+| [screens/devices.elyx](screens/devices.elyx) | 设备列表、助手可用情况、允许访问的文件夹与命令权限；连接设备和断开设备确认弹窗 | R-02、R-04、R-06、PA-06、PA-21 |
 | [screens/login.elyx](screens/login.elyx) | 登录、账号或口令不对、口令被管理员重置 | R-01、D2 |
-| [screens/new-project.elyx](screens/new-project.elyx) | 新建 Project 弹窗和创建后的空对话 | PA-01、PA-04 |
+| [screens/new-project.elyx](screens/new-project.elyx) | 新建项目弹窗、名称校验和创建后的任务输入引导 | PA-01、PA-04 |
 | [screens/project-settings.elyx](screens/project-settings.elyx) | Project 设置弹窗和归档确认 | PA-04、PA-23、IB-16 |
 
-Project 页的各个状态都是 `blocks/project-page.elyx` 的实例，Thread 页的各个状态都是 `blocks/thread-list.elyx` 的实例，只覆盖和默认状态不同的部分。Thread 详情的全部状态（执行中、正在停止、执行中设备离线、等待设备、状态未知、已停止、无法恢复、已归档）在 `blocks/thread-detail.elyx`；位置菜单和模型菜单在 `blocks/new-thread.elyx`，接入设备和文件预览的各个状态分别在 `blocks/enroll-dialog.elyx`、`blocks/file-preview.elyx`。
+Project 页的各个状态都是 `blocks/project-page.elyx` 的实例，Thread 页的各个状态都是 `blocks/thread-list.elyx` 的实例，只覆盖和默认状态不同的部分。Thread 详情的全部状态（执行中、正在停止、执行中设备离线、等待设备、状态未知、已停止、无法恢复、已归档）在 `blocks/thread-detail.elyx`；位置菜单和模型菜单在 `blocks/new-thread.elyx`，目录不存在和历史被删的状态提供换文件夹、新建对话入口；连接设备和文件预览的各个状态分别在 `blocks/enroll-dialog.elyx`、`blocks/file-preview.elyx`。
 
 ## 文件组织
 
@@ -39,14 +39,14 @@ Project 页的各个状态都是 `blocks/project-page.elyx` 的实例，Thread �
 
 ## 字体
 
-设计稿的界面字体是 PingFang SC，代码字体是 Paper Mono，含中文的等宽内容用 Maple Mono CN。Elyx 不做字体回退，中文必须用带中文字形的字体，否则显示为缺字方框。字体文件不随项目提供，在其他设备上查看时需要安装 Paper Mono 和 Maple Mono CN。
+设计稿文案、画板 `title` 和 `caption` 均使用英文；界面字体是 PingFang SC，代码与等宽字体是 Paper Mono。字体文件不随项目提供，在其他设备上查看时需要安装 Paper Mono。
 
 Web 端界面使用系统 UI 字体栈，不打包字体文件：
 
 ```css
 font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
   "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
-font-family: "Paper Mono", "Maple Mono Normal NF CN", "Maple Mono CN", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+font-family: "Paper Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 ```
 
 ## 检查与渲染

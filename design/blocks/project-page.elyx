@@ -7,11 +7,11 @@ import "controls/chip.elyx" as chips
 import "blocks/composer.elyx" as composers
 import "blocks/overview.elyx" as overviews
 
-// Project 页：侧栏、主对话、概览栏。screens/ 里的各个状态都是它的实例。
-// 主对话从底部对齐，较早的内容在上方被裁掉，相当于滚动到最新位置。
-// 对话条目和输入区放在同一列里，最宽 720px，左右边缘对齐。概览栏被 Thread 详情替换时，输入区上方显示状态片。
+// Project page: sidebar, main conversation, and overview panel. Each state in screens/ instantiates this block.
+// Main conversation aligns to the bottom so earlier turns clip at the top as if scrolled to the latest turn.
+// Conversation turns and the composer share a single column (max-width 720px). When Thread detail replaces the overview panel, status chips appear above the composer.
 export projectPage = frame {
-  title: "Project 页",
+  title: "Project page",
   width: s.size.screenWidth,
   height: s.size.screenHeight,
   layout: {direction: .row},
@@ -54,7 +54,7 @@ export projectPage = frame {
 
         bubble {
           content {
-            contents: "PS-160 合进 main 了吗？"
+            contents: "Has PS-160 been merged into main?"
           }
         }
       }
@@ -64,7 +64,7 @@ export projectPage = frame {
         max-width: s.size.measure,
 
         content {
-          contents: "合进去了，main 现在在 4c1e9a2。可以开始验收。"
+          contents: "Yes, main is now at 4c1e9a2. Ready for verification."
         }
       }
 
@@ -75,7 +75,7 @@ export projectPage = frame {
         bubble {
           content {
             width: 420px,
-            contents: "验收先在 Windows 和 Ubuntu 上跑：Windows 跑重连测试，Ubuntu 跑单元测试。结果出来告诉我。"
+            contents: "Start verification on Windows and Ubuntu: run reconnect tests on Windows and unit tests on Ubuntu. Tell me when they finish."
           }
         }
       }
@@ -85,7 +85,7 @@ export projectPage = frame {
         max-width: s.size.measure,
 
         content {
-          contents: "两个 Thread 都开好了。Windows 上的 worktree 在 D:\\src\\baton-ps160，已经记进项目记忆。两边都回复后一起汇报。"
+          contents: "Opened both chats. Saved the Windows worktree path, D:\\src\\baton-ps160, in project memory. I'll report back once both finish."
         }
       }
 
@@ -94,7 +94,7 @@ export projectPage = frame {
         max-width: s.size.measure,
 
         label {
-          contents: "正在处理 1 条输入：Ubuntu 上 Codex 的回复"
+          contents: "Reading Codex's reply from Ubuntu Dev…"
         }
       }
     }

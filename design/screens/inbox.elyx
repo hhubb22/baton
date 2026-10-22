@@ -7,8 +7,8 @@ import "controls/button.elyx" as buttons
 import "blocks/attention-card.elyx" as attention
 
 inbox = frame {
-  title: "待处理",
-  caption: "所有 Project 里等你处理的事项，最新的在前。Baton 不发通知，用户自己回来看；处理后事项离开这里，在主对话和关联的 Thread 里仍能看到处理结果。系统事项只有一种：Project Agent 重试达到上限后暂停。",
+  title: "Inbox",
+  caption: "Questions and sign-in issues across projects. Answers stay in the related chats.",
   left: 0px,
   top: 0px,
   width: s.size.screenWidth,
@@ -56,7 +56,7 @@ inbox = frame {
       children: headTitle,
 
       headTitle = text : t.label {
-        contents: "待处理",
+        contents: "Inbox",
         font-size: 14,
         font-style: "Semibold"
       }
@@ -75,11 +75,11 @@ inbox = frame {
         children: [introText, introCount],
 
         introText = text : t.title {
-          contents: "3 件事等你处理"
+          contents: "3 items waiting for you"
         }
 
         introCount = text : t.caption {
-          contents: "最新的在前",
+          contents: "Newest first",
           fill[0].color: c.colors.faint
         }
       }
@@ -92,35 +92,35 @@ inbox = frame {
         }
 
         heading {
-          contents: "Windows 11 24H2 上安装包签名校验失败，要怎么处理？"
+          contents: "Installer signature check failed on Windows 11 24H2. What next?"
         }
 
         summary {
-          contents: "安装器在 24H2 上提示发布者未知，另外两台设备通过。原因是签名证书链缺少中间证书。"
+          contents: "The installer reports an unknown publisher on 24H2 while passing on the other two devices. The signing certificate chain is missing an intermediate certificate."
         }
 
         threadRef {
           threadName {
-            contents: "在 Windows 11 上验证安装包"
+            contents: "Verify installer on Windows 11"
           }
         }
 
         options {
           first {
             label {
-              contents: "补上中间证书，重新签名后再测"
+              contents: "Bundle the intermediate cert, re-sign, and retest"
             }
           }
 
           second {
             label {
-              contents: "先记为已知问题，继续其他平台"
+              contents: "Record as a known issue and continue other platforms"
             }
           }
 
           third {
             label {
-              contents: "这次发版跳过 24H2"
+              contents: "Skip 24H2 for this release"
             }
           }
         }
@@ -134,13 +134,13 @@ inbox = frame {
 
           second {
             label {
-              contents: "保持 15.0.1，下次发版再升"
+              contents: "Stay on 15.0.1 and upgrade next release"
             }
           }
 
           first {
             label {
-              contents: "先升级，按 15.1 跑"
+              contents: "Upgrade first and test on 15.1"
             }
           }
         }
@@ -150,16 +150,16 @@ inbox = frame {
         }
 
         summary {
-          contents: "15.1 改了本地网络权限的提示方式，可能影响 batond 首次连接。现在测试机是 15.0.1。"
+          contents: "macOS 15.1 changed local network permission prompts, which may affect batond's first connection. The test host is currently on 15.0.1."
         }
 
         heading {
-          contents: "macOS 测试机要不要先升到 15.1 再跑？"
+          contents: "Upgrade the macOS test host to 15.1 before running?"
         }
 
         head {
           time {
-            contents: "昨天 22:10"
+            contents: "Yesterday 22:10"
           }
         }
       }
@@ -167,7 +167,7 @@ inbox = frame {
       handled = frame : buttons.smallGhost {
         label {
           fill[0].color: c.colors.muted,
-          contents: "查看已处理的事项"
+          contents: "View resolved items"
         }
 
         @with-variant(icons.check)

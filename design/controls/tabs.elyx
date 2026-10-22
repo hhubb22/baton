@@ -2,16 +2,16 @@ import "tokens/colors.elyx" as c
 import "tokens/spacing.elyx" as s
 import "foundations/typography.elyx" as t
 
-// 标签页：选中项文字加深并有底线，计数用灰色
+// Tab: active tab has dark text and a bottom rule; count uses faint gray
 export tab = frame {
-  title: "标签页 / 选中",
+  title: "Tab / Active",
   height: 36px,
   layout: {align-items: .center, item-gap: 6px},
   border: {color: c.colors.text, width: 1.5px, sides: .bottom},
   children: [label, count],
 
   label = text : t.label {
-    contents: "Thread"
+    contents: "Threads"
   }
 
   count = text : t.caption {
@@ -22,13 +22,13 @@ export tab = frame {
 
 @variant
 export tabIdle = frame : tab {
-  title: "标签页 / 未选中",
-  left: 80px,
+  title: "Tab / Idle",
+  left: 88px,
   border[0].color: c.colors.transparent,
 
   label {
     fill[0].color: c.colors.muted,
-    contents: "记忆"
+    contents: "Memory"
   }
 
   count {
@@ -36,9 +36,9 @@ export tabIdle = frame : tab {
   }
 }
 
-// 分段切换：胶囊底，选中项白底浮起。Thread 输入区用它切「排队」和「插入」
+// Segmented control: pill track with elevated white active item. Used in Thread composer to switch between Queue and Steer
 export segmented = frame {
-  title: "分段切换",
+  title: "Segmented control",
   top: 64px,
   height: 28px,
   layout: {align-items: .center, item-gap: 2px},
@@ -72,7 +72,7 @@ export segmented = frame {
     children: firstLabel,
 
     firstLabel = text : t.label {
-      contents: "排队",
+      contents: "Send next",
       font-size: 12,
       line-height: 1
     }
@@ -86,7 +86,7 @@ export segmented = frame {
     children: secondLabel,
 
     secondLabel = text : t.label {
-      contents: "插入",
+      contents: "Send now",
       font-size: 12,
       line-height: 1,
       fill[0].color: c.colors.muted
@@ -96,7 +96,7 @@ export segmented = frame {
 
 @variant
 export segmentedSecond = frame : segmented {
-  title: "分段切换 / 选中第二项",
+  title: "Segmented control / Second selected",
   left: 160px,
   top: 64px,
 

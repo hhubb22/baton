@@ -5,10 +5,10 @@ import "controls/icons.elyx" as icons
 import "controls/tabs.elyx" as tabs
 import "controls/chip.elyx" as chips
 
-// 输入区：给 Project Agent 发消息。
-// 和对话列同宽，白底、发丝线外框、两层浅阴影。所有设备离线或 Project 暂停时仍然可以发消息。
+// Composer: messages the Project Agent.
+// Same width as the conversation column, white surface, hairline border, two soft shadows. Remains available when all devices are offline or the Project is paused.
 export composer = frame {
-  title: "输入区 / 发消息",
+  title: "Composer / Message",
   width: s.size.measure,
   layout: {direction: .column, item-gap: 18px},
   fill: c.colors.surface,
@@ -35,7 +35,7 @@ export composer = frame {
 
   prompt = text : t.body {
     width: 100%,
-    contents: "给 Project Agent 发消息",
+    contents: "Ask the project assistant…",
     fill[0].color: c.colors.faint
   }
 
@@ -45,7 +45,13 @@ export composer = frame {
     children: [lead, send],
 
     lead = frame {
-      layout: {align-items: .center, item-gap: s.space.xxs},
+      width: 100%,
+      layout: {
+        align-items: .center,
+        item-gap: s.space.xxs,
+        wrap: .true,
+        line-gap: 8px
+      },
       children: [location, model, hint],
 
       location = frame : chips.chip {
@@ -58,7 +64,7 @@ export composer = frame {
 
       hint = text : t.caption {
         display: .none,
-        contents: "离线，上线后开始",
+        contents: "Ubuntu Dev is offline · sends when back online",
         fill[0].color: c.colors.faint
       }
     }
@@ -82,24 +88,24 @@ export composer = frame {
 
 @variant
 export composerFilled = frame : composer {
-  title: "输入区 / 已输入",
+  title: "Composer / Filled",
   top: 160px,
 
   prompt {
     fill[0].color: c.colors.text,
-    contents: "Ubuntu 上也顺便跑一遍单元测试。"
+    contents: "Also run the unit test suite on Ubuntu."
   }
 }
 
-// 新建 Thread：Thread 页顶部的输入区。位置预填默认设备上次用的目录，模型预填这个位置上次用的 Agent 和模型；
-// Agent 跟着模型走，只写在提示文字里。发出第一条消息即新建
+// New Thread: top composer on the Threads page. Location prefills the last directory on the default device, model prefills the last Agent and model at that location;
+// the Agent follows the model and is shown in the placeholder. Sending the first message creates the Thread
 @variant
 export composerNewThread = frame : composer {
-  title: "输入区 / 新建 Thread",
+  title: "Composer / New thread",
   top: 320px,
 
   prompt {
-    contents: "给 Codex 发消息"
+    contents: "Message Codex on MacBook Pro…"
   }
 
   toolbar {
@@ -115,17 +121,17 @@ export composerNewThread = frame : composer {
   }
 }
 
-// 选了离线设备上的位置：照样可以发，Thread 等设备上线后开始
+// Selected a location on an offline device: can still send; the Thread starts once the device comes online
 @variant
 export composerNewThreadOffline = frame : composerNewThread {
-  title: "输入区 / 新建 Thread / 设备离线",
+  title: "Composer / New thread / Offline device",
   top: 440px,
 
   toolbar {
     lead {
       location {
         label {
-          contents: "baton · Ubuntu 开发机"
+          contents: "baton · Ubuntu Dev"
         }
       }
 
@@ -142,15 +148,15 @@ export composerNewThreadOffline = frame : composerNewThread {
   }
 
   prompt {
-    contents: "给 Pi 发消息"
+    contents: "Message Pi on Ubuntu Dev…"
   }
 }
 
-// Thread 输入区：消息直接发给这个 Thread 的 Agent，Agent 写在提示文字里，新建后不能换。
-// 模型选择片只列这个 Agent 的模型，新的一轮从选中的模型开始。
-// Agent 执行中时消息默认排队，发出前可以撤回；只有 Agent 支持时才能选「插入」。
+// Thread composer: messages the Thread's Agent directly. The Agent is named in the placeholder and fixed for the life of the Thread.
+// The model chip lists only models for that Agent; the next turn starts with the selected model.
+// While running, messages queue by default and can be withdrawn before delivery; Steer is available when the Agent supports it.
 export threadComposer = frame {
-  title: "Thread 输入区 / 空闲",
+  title: "Thread composer / Idle",
   top: 600px,
   width: 480px,
   layout: {direction: .column, item-gap: 14px},
@@ -172,13 +178,13 @@ export threadComposer = frame {
       }
     }
   ],
-  corner-radius: 18px,
+  corner-radius: 20px,
   padding: [14px, 10px, 10px, 16px],
   children: [prompt, toolbar],
 
   prompt = text : t.body {
     width: 100%,
-    contents: "给 Codex 发消息",
+    contents: "Message Codex on Windows Desktop…",
     fill[0].color: c.colors.faint
   }
 
@@ -188,7 +194,13 @@ export threadComposer = frame {
     children: [delivery, actions],
 
     delivery = frame {
-      layout: {align-items: .center, item-gap: s.space.xs},
+      width: 100%,
+      layout: {
+        align-items: .center,
+        item-gap: s.space.xs,
+        wrap: .true,
+        line-gap: 8px
+      },
       children: [model, mode, hint],
 
       model = frame : chips.chipModel {}
@@ -198,8 +210,9 @@ export threadComposer = frame {
       }
 
       hint = text : t.caption {
+        width: 100%,
         display: .none,
-        contents: "Kiro 不支持插入，消息会排队",
+        contents: "Sends after current reply",
         fill[0].color: c.colors.faint
       }
     }
@@ -242,10 +255,10 @@ export threadComposer = frame {
   }
 }
 
-// Agent 执行中：可以选排队或插入，也可以停止这一轮
+// Agent running: choose Queue or Steer, or stop the current turn
 @variant
 export threadComposerRunning = frame : threadComposer {
-  title: "Thread 输入区 / 执行中",
+  title: "Thread composer / Running",
   top: 720px,
 
   toolbar {
@@ -263,23 +276,23 @@ export threadComposerRunning = frame : threadComposer {
   }
 }
 
-// Kiro 不支持插入，执行中只提供排队
+// Kiro does not support steering; only Queue is offered while running
 @variant
 export threadComposerQueueOnly = frame : threadComposer {
-  title: "Thread 输入区 / 只能排队",
+  title: "Thread composer / Send next only",
   top: 840px,
-
-  prompt {
-    contents: "给 Kiro 发消息"
-  }
 
   toolbar {
     delivery {
+      layout.direction: .column,
+
       model {
         label {
           contents: "claude-sonnet-5.5"
         }
       }
+
+      layout.align-items: .start,
 
       hint {
         display: .visible
@@ -292,12 +305,16 @@ export threadComposerQueueOnly = frame : threadComposer {
       }
     }
   }
+
+  prompt {
+    contents: "Message Kiro on Windows Desktop…"
+  }
 }
 
-// 停止请求已发出：Agent 1 分钟内没停下，设备会结束它的进程
+// Stop requested: if the Agent does not stop within 1 minute, the device terminates its process
 @variant
 export threadComposerStopping = frame : threadComposer {
-  title: "Thread 输入区 / 正在停止",
+  title: "Thread composer / Stopping",
   top: 960px,
 
   toolbar {
@@ -314,10 +331,14 @@ export threadComposerStopping = frame : threadComposer {
     }
 
     delivery {
+      layout.direction: .column,
+
       hint {
-        contents: "已请求停止，1 分钟内没停下会结束进程",
+        contents: "Stopping… (forces quit in 1m)",
         display: .visible
       }
+
+      layout.align-items: .start
     }
   }
 }

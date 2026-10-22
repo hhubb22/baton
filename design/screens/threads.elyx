@@ -5,22 +5,22 @@ import "blocks/new-thread.elyx" as newThread
 import "blocks/file-preview.elyx" as previews
 
 threads = frame : lists.threadsPage {
-  title: "Thread",
-  caption: "顶部输入区新建 Thread：位置预填默认设备上次用的目录，模型预填这个位置上次用的 Agent 和模型，发出即新建。下面是本人所有 Thread，按需要处理、执行中、等待设备、空闲分组，可以按设备、Project 和是否归档筛选。",
+  title: "Threads",
+  caption: "Send a first message to start a chat. Location and model use your recent choices.",
   left: 0px,
   top: 0px
 }
 
 threadsOpen = frame : lists.threadsPageSplit {
-  title: "Thread · 详情",
-  caption: "点一行在右侧打开详情，列表收起 Project 和目录两列。",
+  title: "Threads · Detail open",
+  caption: "Chat details open beside the list. Project and folder columns collapse.",
   left: 1728px,
   top: 0px
 }
 
 threadsUnknown = frame : lists.threadsPageSplit {
-  title: "Thread · 状态未知",
-  caption: "Worker 重启后没能确认 Agent 是否收到消息。Baton 不自动重发，由你看过过程记录后决定是否再发一次。",
+  title: "Threads · Status unknown",
+  caption: "Delivery is uncertain after Codex restarted. Check activity before sending again.",
   left: 3456px,
   top: 0px,
 
@@ -43,8 +43,8 @@ threadsUnknown = frame : lists.threadsPageSplit {
 }
 
 threadsWaiting = frame : lists.threadsPageSplit {
-  title: "Thread · 等待设备",
-  caption: "设备离线时新建的 Thread 等这台设备上线，不改派到其他设备；第一条消息在发出前可以撤回。",
+  title: "Threads · Waiting for device",
+  caption: "Messages wait for MacBook Pro. Cancel a message before it sends.",
   left: 0px,
   top: 1180px,
 
@@ -67,8 +67,8 @@ threadsWaiting = frame : lists.threadsPageSplit {
 }
 
 threadsNew = frame : lists.threadsPage {
-  title: "Thread · 选位置",
-  caption: "位置是目录加设备。先列最近用过的，再按设备列出发现的仓库，其他目录在登记目录里选。离线设备照样可选，Thread 等它上线后开始。",
+  title: "Threads · Location menu",
+  caption: "Choose a folder and computer. Offline computers remain selectable.",
   left: 1728px,
   top: 1180px,
   overrides: [insert(menu, after = lists.threadsPage.main)],
@@ -81,8 +81,8 @@ threadsNew = frame : lists.threadsPage {
 }
 
 threadsModel = frame : lists.threadsPage {
-  title: "Thread · 选模型",
-  caption: "模型按 Agent 分组，只列这个位置的设备上已接入的 Agent。选了模型就定了 Agent，提示文字跟着变。",
+  title: "Threads · Model menu",
+  caption: "Choose a model from the assistants available on this computer.",
   left: 0px,
   top: 2360px,
   overrides: [insert(menu, after = lists.threadsPage.main)],
@@ -95,8 +95,8 @@ threadsModel = frame : lists.threadsPage {
 }
 
 threadsSwitchModel = frame : lists.threadsPageSplit {
-  title: "Thread · 换模型",
-  caption: "Thread 输入区的模型只列这个 Agent 的模型，新的一轮从选中的模型开始；Agent 新建后不能换。Agent 不支持换模型时，菜单只显示当前模型和原因。",
+  title: "Threads · Switch model",
+  caption: "The selected model applies to the next reply. Unsupported changes show a reason.",
   left: 1728px,
   top: 2360px,
   overrides: [insert(menu, after = lists.threadsPageSplit.detail)],
@@ -109,8 +109,8 @@ threadsSwitchModel = frame : lists.threadsPageSplit {
 }
 
 threadsFile = frame : lists.threadsPageSplit {
-  title: "Thread · 文件预览",
-  caption: "点附件或在设备的登记目录里浏览，预览从设备实时读取，超过 64 KiB 只显示开头。",
+  title: "Threads · File preview",
+  caption: "Files load from the computer. Large files show the first 64 KB.",
   left: 3456px,
   top: 1180px,
   overrides: [insert(scrim, after = lists.threadsPageSplit.detail)],

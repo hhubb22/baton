@@ -3,7 +3,7 @@ import "tokens/spacing.elyx" as s
 import "foundations/typography.elyx" as t
 
 export kbd = frame {
-  title: "键盘提示",
+  title: "Keyboard shortcut",
   width: .auto,
   height: 18px,
   layout: {justify-content: .center, align-items: .center},
@@ -23,6 +23,7 @@ export kbd = frame {
 
 @variant
 export esc = frame : kbd {
+  title: "Keyboard shortcut / Esc",
   left: 48px,
 
   keyLabel {

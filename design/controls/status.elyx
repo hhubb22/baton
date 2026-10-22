@@ -2,10 +2,10 @@ import "tokens/colors.elyx" as c
 import "tokens/spacing.elyx" as s
 import "foundations/typography.elyx" as t
 
-// 状态点只有六种颜色，具体含义由旁边的文字和分组标题说明。
-// 蓝：执行中；灰：等待设备、空闲、已归档或离线；绿：设备在线；红：已停止；橙：状态未知或等你处理；青：Project Agent 运行中。
+// Status dots use six colors; the adjacent label or group heading explains the exact meaning.
+// Blue: running; gray: waiting for device, idle, archived, or offline; green: device online; red: stopped; orange: status unknown or needs attention; teal: Project Agent running.
 export dot = shape {
-  title: "状态点 / 执行中",
+  title: "Status dot / Running",
   width: s.size.dot,
   height: s.size.dot,
   fill: c.colors.info,
@@ -14,7 +14,7 @@ export dot = shape {
 
 @variant
 export dotQueued = shape : dot {
-  title: "状态点 / 等待设备",
+  title: "Status dot / Waiting for device",
   left: 24px,
   border[0].color: c.colors.faint,
   border[0].width: 1.2px,
@@ -23,43 +23,43 @@ export dotQueued = shape : dot {
 
 @variant
 export dotOnline = shape : dot {
-  title: "状态点 / 设备在线",
+  title: "Status dot / Online",
   left: 48px,
   fill[0].color: c.colors.success
 }
 
 @variant
 export dotStopped = shape : dot {
-  title: "状态点 / 已停止",
+  title: "Status dot / Stopped",
   left: 72px,
   fill[0].color: c.colors.danger
 }
 
 @variant
 export dotAttention = shape : dot {
-  title: "状态点 / 状态未知、等你处理",
+  title: "Status dot / Unknown or needs attention",
   left: 96px,
   fill[0].color: c.colors.attention
 }
 
 @variant
 export dotIdle = shape : dot {
-  title: "状态点 / 空闲、已归档、离线",
+  title: "Status dot / Idle, archived, or offline",
   left: 120px,
   fill[0].color: c.colors.faint
 }
 
 @variant
 export dotAgent = shape : dot {
-  title: "状态点 / Project Agent 运行中",
+  title: "Status dot / Project assistant running",
   left: 144px,
   fill[0].color: c.colors.agent
 }
 
-// Thread 状态标签：用在 Thread 行、Thread 详情和事项的关联 Thread 上。
-// 状态只来自设备报告；Baton 不判断一轮对话做得好不好，所以没有成功和失败。
+// Thread status pill: used on Thread rows, Thread detail, and linked Threads in attention items.
+// Status comes from device reports; Baton does not judge whether a turn succeeded or failed.
 export pill = frame {
-  title: "Thread 状态 / 执行中",
+  title: "Thread status / Running",
   top: 40px,
   width: .auto,
   height: s.size.micro,
@@ -72,20 +72,20 @@ export pill = frame {
   mark = shape : dot {}
 
   label = text : t.caption {
-    contents: "执行中",
+    contents: "Running",
     fill[0].color: c.colors.text
   }
 }
 
 @variant
 export pillQueued = frame : pill {
-  title: "Thread 状态 / 等待设备",
-  left: 96px,
+  title: "Thread status / Waiting for device",
+  left: 104px,
   top: 40px,
   fill[0].color: c.colors.subtle,
 
   label {
-    contents: "等待设备"
+    contents: "Waiting for device"
   }
 
   @with-variant(dotQueued)
@@ -96,13 +96,13 @@ export pillQueued = frame : pill {
 
 @variant
 export pillIdle = frame : pill {
-  title: "Thread 状态 / 空闲",
-  left: 208px,
+  title: "Thread status / Idle",
+  left: 256px,
   top: 40px,
   fill[0].color: c.colors.subtle,
 
   label {
-    contents: "空闲"
+    contents: "Idle"
   }
 
   @with-variant(dotIdle)
@@ -113,13 +113,13 @@ export pillIdle = frame : pill {
 
 @variant
 export pillStopped = frame : pill {
-  title: "Thread 状态 / 已停止",
-  left: 288px,
+  title: "Thread status / Stopped",
+  left: 328px,
   top: 40px,
   fill[0].color: c.colors.dangerSoft,
 
   label {
-    contents: "已停止"
+    contents: "Stopped"
   }
 
   @with-variant(dotStopped)
@@ -130,13 +130,13 @@ export pillStopped = frame : pill {
 
 @variant
 export pillUnknown = frame : pill {
-  title: "Thread 状态 / 状态未知",
-  left: 384px,
+  title: "Thread status / Status unknown",
+  left: 424px,
   top: 40px,
   fill[0].color: c.colors.attentionSoft,
 
   label {
-    contents: "状态未知"
+    contents: "Status unknown"
   }
 
   @with-variant(dotAttention)
@@ -147,14 +147,14 @@ export pillUnknown = frame : pill {
 
 @variant
 export pillArchived = frame : pill {
-  title: "Thread 状态 / 已归档",
-  left: 496px,
+  title: "Thread status / Archived",
+  left: 560px,
   top: 40px,
   fill[0].color: c.colors.subtle,
 
   label {
     fill[0].color: c.colors.muted,
-    contents: "已归档"
+    contents: "Archived"
   }
 
   @with-variant(dotIdle)

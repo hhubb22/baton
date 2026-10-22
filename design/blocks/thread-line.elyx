@@ -3,10 +3,10 @@ import "tokens/spacing.elyx" as s
 import "foundations/typography.elyx" as t
 import "controls/status.elyx" as status
 
-// Thread 行：Project Agent 开的或发过消息的一个 Thread 在主对话里占一行，点开在右侧看详情。
-// 状态点、名称、目录标签，右侧是设备和 Agent，最后是状态：执行中显示这一轮的计时，其余只显示状态名。
+// Thread row: each Thread opened or messaged by the Project Agent occupies one row in the main conversation and opens its detail on the right when clicked.
+// Status dot, title, directory tag, trailing device · Agent, and state: running shows the current turn's elapsed timer; other states show only the state name.
 export threadLine = frame {
-  title: "Thread 行 / 执行中",
+  title: "Thread row / Running",
   width: s.size.measure,
   height: 36px,
   layout: {
@@ -35,7 +35,7 @@ export threadLine = frame {
     }
 
     lineName = text : t.body {
-      contents: "在 Windows 上跑重连测试",
+      contents: "Run reconnect tests on Windows",
       line-height: 1
     }
 
@@ -60,7 +60,7 @@ export threadLine = frame {
     children: [lineMeta, lineState],
 
     lineMeta = text : t.small {
-      contents: "Windows 台式机 · Codex",
+      contents: "Windows Desktop · Codex",
       line-height: 1,
       fill[0].color: c.colors.faint
     }
@@ -77,19 +77,19 @@ export threadLine = frame {
 
 @variant
 export threadLineIdle = frame : threadLine {
-  title: "Thread 行 / 空闲",
+  title: "Thread row / Idle",
   top: 56px,
 
   lineTrail {
     lineState {
       fill[0].color: c.colors.muted,
-      contents: "空闲",
+      contents: "Idle",
       font-size: 13,
       font-family: "PingFang SC"
     }
 
     lineMeta {
-      contents: "Ubuntu 开发机 · Codex"
+      contents: "Ubuntu Dev · Codex"
     }
   }
 
@@ -104,7 +104,7 @@ export threadLineIdle = frame : threadLine {
     }
 
     lineName {
-      contents: "在 Ubuntu 上跑单元测试"
+      contents: "Run unit tests on Ubuntu"
     }
 
     lineMark {
@@ -118,13 +118,14 @@ export threadLineIdle = frame : threadLine {
 
 @variant
 export threadLineQueued = frame : threadLine {
-  title: "Thread 行 / 等待设备",
+  title: "Thread row / Waiting for device",
   top: 112px,
 
   lineTrail {
     lineState {
       fill[0].color: c.colors.muted,
-      contents: "等待设备",
+      width: .auto,
+      contents: "Waiting for device",
       font-size: 13,
       font-family: "PingFang SC"
     }
@@ -145,7 +146,7 @@ export threadLineQueued = frame : threadLine {
     }
 
     lineName {
-      contents: "推送 PS-160 分支"
+      contents: "Push PS-160 branch"
     }
 
     lineMark {
@@ -159,13 +160,13 @@ export threadLineQueued = frame : threadLine {
 
 @variant
 export threadLineStopped = frame : threadLine {
-  title: "Thread 行 / 已停止",
+  title: "Thread row / Stopped",
   top: 168px,
 
   lineTrail {
     lineState {
       fill[0].color: c.colors.muted,
-      contents: "已停止",
+      contents: "Stopped",
       font-size: 13,
       font-family: "PingFang SC"
     }
@@ -189,10 +190,10 @@ export threadLineStopped = frame : threadLine {
   }
 }
 
-// 详情已在右侧打开
+// Selected when its detail panel is open on the right
 @variant
 export threadLineSelected = frame : threadLineIdle {
-  title: "Thread 行 / 已打开",
+  title: "Thread row / Selected",
   top: 224px,
   fill[0].color: c.colors.selected,
 
@@ -206,21 +207,21 @@ export threadLineSelected = frame : threadLineIdle {
     }
 
     lineName {
-      contents: "在 Windows 上跑重连测试"
+      contents: "Run reconnect tests on Windows"
     }
   }
 
   lineTrail {
     lineMeta {
-      contents: "Windows 台式机 · Codex"
+      contents: "Windows Desktop · Codex"
     }
   }
 }
 
-// Thread 卡片：Project Agent 一轮里开的 Thread 或发过消息的 Thread 收在一张卡片里，每个 Thread 一行。
-// 标题说这一轮做了什么，右上角是其中最需要留意的状态。
+// Thread card: groups Threads opened or messaged in a single Project Agent turn into one card, one row per Thread.
+// Card heading summarizes the turn's action; top-right shows the most notable state among them.
 export threadCard = frame {
-  title: "Thread 卡片 / 执行中",
+  title: "Thread card / Running",
   top: 320px,
   width: s.size.measure,
   layout: {direction: .column, item-gap: s.space.xs},
@@ -258,7 +259,7 @@ export threadCard = frame {
       children: cardName,
 
       cardName = text : t.heading {
-        contents: "开了 2 个 Thread",
+        contents: "Opened 2 chats",
         font-size: 14,
         line-height: 1
       }
@@ -271,7 +272,7 @@ export threadCard = frame {
       cardDot = shape : status.dot {}
 
       cardStateText = text : t.label {
-        contents: "1 个执行中",
+        contents: "1 running",
         line-height: 1,
         fill[0].color: c.colors.info
       }
@@ -293,10 +294,10 @@ export threadCard = frame {
   }
 }
 
-// 这一轮的 Thread 都已回复
+// All Threads in this turn have replied
 @variant
 export threadCardIdle = frame : threadCard {
-  title: "Thread 卡片 / 都已回复",
+  title: "Thread card / All replied",
   top: 480px,
 
   cardRows {
@@ -304,7 +305,7 @@ export threadCardIdle = frame : threadCard {
     row1 {
       lineTrail {
         lineMeta {
-          contents: "Windows 台式机 · Codex"
+          contents: "Windows Desktop · Codex"
         }
       }
 
@@ -316,7 +317,7 @@ export threadCardIdle = frame : threadCard {
         }
 
         lineName {
-          contents: "在 Windows 上跑重连测试"
+          contents: "Run reconnect tests on Windows"
         }
       }
 
@@ -328,7 +329,7 @@ export threadCardIdle = frame : threadCard {
     cardState {
       cardStateText {
         fill[0].color: c.colors.muted,
-        contents: "都已回复"
+        contents: "All replied"
       }
 
       @with-variant(status.dotIdle)
@@ -339,10 +340,10 @@ export threadCardIdle = frame : threadCard {
   }
 }
 
-// 给已有的 Thread 发了消息
+// Sent a message to an existing Thread
 @variant
 export threadCardSent = frame : threadCard {
-  title: "Thread 卡片 / 发了消息",
+  title: "Thread card / Messaged",
   top: 640px,
 
   cardRows {
@@ -352,7 +353,7 @@ export threadCardSent = frame : threadCard {
   cardHead {
     cardTitle {
       cardName {
-        contents: "给 1 个 Thread 发了消息"
+        contents: "Messaged 1 chat"
       }
     }
   }

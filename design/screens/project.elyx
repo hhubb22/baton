@@ -12,52 +12,31 @@ import "blocks/banner.elyx" as banners
 file {}
 
 running = frame : page.projectPage {
-  title: "Project · 运行中",
-  caption: "Project Agent 在 Ubuntu 开发机上处理 Thread 刚发回的回复。标题栏写明运行位置，可以停止这次运行；它开的 Thread 不受影响。",
+  title: "Project · Running",
+  caption: "The assistant is reading a reply from Ubuntu Dev. Stop run stops only the project assistant.",
   left: 0px,
   top: 0px
 }
 
 offline = frame : page.projectPage {
-  title: "Project · 所有设备离线",
-  caption: "消息照常保存，不显示「正在运行」。横幅说明在等什么；设备离线时，执行中的 Thread 显示最后一次报告的时间，不当成仍在执行。",
+  title: "Project · All devices offline",
+  caption: "Messages wait for an available computer. Offline chats show when they were last seen.",
   left: 1728px,
   top: 0px,
 
   overview {
-    summary {
-      runtime {
-        runtimeCard {
-          runtimeLine {
-            runtimeState {
-              runtimeStateText {
-                fill[0].color: c.colors.muted,
-                contents: "等待设备"
-              }
-
-              @with-variant(status.dotQueued)
-              runtimeDot {}
-            }
-
-            runtimeDevice {
-              runtimeName {
-                contents: "没有运行实例"
-              }
-            }
-          }
-
-          runtimeNote {
-            contents: "3 台设备都离线。设备在线、已同步、装有 Runtime 且订阅可用时启动。"
-          }
-        }
-      }
-    }
-
     body {
       activeRow2 {
         line {
           time {
-            contents: "14:19 后无报告"
+            contents: "14:19"
+          }
+
+          lead {
+            @with-variant(status.dotIdle)
+            mark {
+              left: .nil
+            }
           }
         }
       }
@@ -65,7 +44,52 @@ offline = frame : page.projectPage {
       activeRow1 {
         line {
           time {
-            contents: "14:18 后无报告"
+            contents: "14:18"
+          }
+
+          lead {
+            @with-variant(status.dotIdle)
+            mark {
+              left: .nil
+            }
+          }
+        }
+      }
+
+      activeHead {
+        lead {
+          label {
+            contents: "Last seen running"
+          }
+        }
+      }
+    }
+
+    summary {
+      runtime {
+        runtimeCard {
+          runtimeLine {
+            runtimeState {
+              runtimeStateText {
+                fill[0].color: c.colors.muted,
+                contents: "Waiting for device"
+              }
+
+              @with-variant(status.dotQueued)
+              runtimeDot {}
+            }
+
+            runtimeDevice {
+              display: .none,
+
+              runtimeName {
+                contents: "Idle"
+              }
+            }
+          }
+
+          runtimeNote {
+            contents: "All 3 devices are offline. Waiting for a computer with ChatGPT signed in."
           }
         }
       }
@@ -93,7 +117,7 @@ offline = frame : page.projectPage {
                 lineState {
                   fill[0].color: c.colors.faint,
                   width: .auto,
-                  contents: "14:18 后无报告",
+                  contents: "No report since 14:18",
                   font-size: 13,
                   font-family: "PingFang SC"
                 }
@@ -114,7 +138,7 @@ offline = frame : page.projectPage {
             cardState {
               cardStateText {
                 fill[0].color: c.colors.muted,
-                contents: "设备离线"
+                contents: "Device offline"
               }
 
               @with-variant(status.dotQueued)
@@ -153,7 +177,7 @@ offline = frame : page.projectPage {
         navDevices {
           trail {
             note {
-              contents: "0/3 在线"
+              contents: "0/3 online"
             }
           }
         }
@@ -166,7 +190,7 @@ offline = frame : page.projectPage {
     max-width: s.size.measure,
 
     label {
-      contents: "14:20 Ubuntu 开发机离线，Project Agent 这一轮已处理完，没有新的运行实例"
+      contents: "14:20 · Ubuntu Dev went offline after finishing its reply"
     }
 
     @with-variant(icons.offline)
@@ -182,8 +206,8 @@ offline = frame : page.projectPage {
 }
 
 attention = frame : page.projectPage {
-  title: "Project · 需要处理",
-  caption: "模型请求达到重试上限后主对话暂停，Inbox 里同时出现一个系统事项。之后的消息继续保存，重试后从原位置继续。",
+  title: "Project · Needs attention",
+  caption: "ChatGPT sign-in expired. Messages stay saved until you sign in and retry.",
   left: 3456px,
   top: 0px,
 
@@ -207,7 +231,7 @@ attention = frame : page.projectPage {
             runtimeState {
               runtimeStateText {
                 fill[0].color: c.colors.attentionText,
-                contents: "需要处理"
+                contents: "Needs attention"
               }
 
               @with-variant(status.dotAttention)
@@ -216,7 +240,7 @@ attention = frame : page.projectPage {
           }
 
           runtimeNote {
-            contents: "ChatGPT 订阅返回 401，需要在 Ubuntu 开发机上重新登录。"
+            contents: "Sign in to ChatGPT on Ubuntu Dev, then retry in the main chat."
           }
         }
       }
@@ -283,7 +307,7 @@ attention = frame : page.projectPage {
 
     label {
       fill[0].color: c.colors.attentionText,
-      contents: "15:20 模型请求连续失败 5 次，主对话暂停。最后一次错误：401 Unauthorized"
+      contents: "15:20 · ChatGPT sign-in expired on Ubuntu Dev"
     }
 
     @with-variant(icons.alert)
@@ -298,13 +322,13 @@ attention = frame : page.projectPage {
 
     bubble {
       content {
-        contents: "先把 Windows 上的测试日志贴给我。"
+        contents: "Send me the test log from Windows first."
       }
     }
 
     meta {
       metaText {
-        contents: "已保存，重试后处理"
+        contents: "Saved · sends after you sign in and retry"
       }
     }
   }
@@ -315,8 +339,12 @@ attention = frame : page.projectPage {
     width: 100%,
 
     sub {
+      dir {
+        display: .none
+      }
+
       place {
-        contents: "系统事项 · Baton 创建"
+        contents: "Ubuntu Dev"
       }
     }
 
@@ -327,7 +355,7 @@ attention = frame : page.projectPage {
 
       lead {
         name {
-          contents: "Project Agent 暂停：模型请求失败"
+          contents: "ChatGPT sign-in expired"
         }
 
         @with-variant(status.dotAttention)
@@ -340,8 +368,8 @@ attention = frame : page.projectPage {
 }
 
 paused = frame : page.projectPage {
-  title: "Project · 已暂停",
-  caption: "暂停后 Project Agent 不再启动，Thread 照常可用。用户仍可以直接给 Thread 发消息；主对话里的消息先保存，恢复后再处理。",
+  title: "Project · Paused",
+  caption: "Automatic replies are paused. Individual chats remain available.",
   left: 5184px,
   top: 0px,
 
@@ -353,7 +381,7 @@ paused = frame : page.projectPage {
             runtimeState {
               runtimeStateText {
                 fill[0].color: c.colors.muted,
-                contents: "已暂停"
+                contents: "Paused"
               }
 
               @with-variant(status.dotIdle)
@@ -361,14 +389,16 @@ paused = frame : page.projectPage {
             }
 
             runtimeDevice {
+              display: .none,
+
               runtimeName {
-                contents: "没有运行实例"
+                contents: "Idle"
               }
             }
           }
 
           runtimeNote {
-            contents: "恢复后处理暂停期间的 3 条输入。"
+            contents: "3 messages waiting until you resume."
           }
         }
       }
@@ -423,7 +453,7 @@ paused = frame : page.projectPage {
     max-width: s.size.measure,
 
     label {
-      contents: "15:02 何家健暂停了 Project"
+      contents: "15:02 · Kaken He paused the project"
     }
 
     @with-variant(icons.pause)

@@ -2,9 +2,9 @@ import "tokens/colors.elyx" as c
 import "tokens/spacing.elyx" as s
 import "foundations/typography.elyx" as t
 
-// 等你处理的数量：橙色实心，超过 9 显示 9+
+// Attention count: solid orange pill, shows 9+ above 9
 export count = frame {
-  title: "数量 / 等你处理",
+  title: "Count / Needs attention",
   width: .auto,
   height: 16px,
   min-width: 16px,
@@ -23,10 +23,10 @@ export count = frame {
   }
 }
 
-// 普通数量：灰色文字，用在标签页和分组标题
+// Quiet count: muted text for tabs and group headings
 @variant
 export countQuiet = frame : count {
-  title: "数量 / 普通",
+  title: "Count / Quiet",
   left: 40px,
   fill[0].color: c.colors.subtle,
 
@@ -36,9 +36,9 @@ export countQuiet = frame : count {
   }
 }
 
-// 标签：说明来源或属性，例如「默认设备」「Baton 创建」
+// Tag: indicates source or attribute, such as "Default device" or "Created by Baton"
 export tag = frame {
-  title: "标签",
+  title: "Tag",
   left: 88px,
   width: .auto,
   height: 18px,
@@ -49,7 +49,7 @@ export tag = frame {
   children: value,
 
   value = text : t.caption {
-    contents: "默认设备",
+    contents: "Default device",
     font-size: 11,
     line-height: 1,
     fill[0].color: c.colors.muted
@@ -58,32 +58,32 @@ export tag = frame {
 
 @variant
 export tagAgent = frame : tag {
-  title: "标签 / Project Agent",
-  left: 168px,
+  title: "Tag / Project assistant",
+  left: 200px,
   fill[0].color: c.colors.agentSoft,
 
   value {
     fill[0].color: c.colors.agentText,
-    contents: "建议"
+    contents: "Recommended"
   }
 }
 
 @variant
 export tagAttention = frame : tag {
-  title: "标签 / 需要处理",
-  left: 216px,
+  title: "Tag / Needs attention",
+  left: 312px,
   fill[0].color: c.colors.attentionSoft,
 
   value {
     fill[0].color: c.colors.attentionText,
-    contents: "需要处理"
+    contents: "Needs attention"
   }
 }
 
-// 未读圆点
+// Unread dot
 export unread = shape {
-  title: "未读",
-  left: 296px,
+  title: "Unread dot",
+  left: 432px,
   top: 5px,
   width: 6px,
   height: 6px,

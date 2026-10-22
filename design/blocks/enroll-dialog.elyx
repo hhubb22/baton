@@ -8,9 +8,9 @@ import "controls/input.elyx" as inputs
 import "controls/label.elyx" as labels
 import "blocks/dialog.elyx" as dialogs
 
-// 系统切换里的一项
+// OS switcher tab item
 export systemTab = frame {
-  title: "系统切换项",
+  title: "OS tab",
   left: 0px,
   top: 0px,
   width: 80px,
@@ -29,7 +29,7 @@ export systemTab = frame {
 
 @variant
 export systemTabOn = frame : systemTab {
-  title: "系统切换项 / 选中",
+  title: "OS tab / Selected",
   top: 40px,
   fill[0].color: c.colors.surface,
   shadow[0].drop-shadow.blur-radius: 2px,
@@ -44,9 +44,9 @@ export systemTabOn = frame : systemTab {
   }
 }
 
-// 带复制按钮的等宽块：注册凭据和注册命令
+// Copyable monospace block for enrollment token and registration command
 export copyBlock = frame {
-  title: "可复制的等宽块",
+  title: "Copyable code block",
   left: 0px,
   top: 96px,
   width: 512px,
@@ -75,10 +75,10 @@ export copyBlock = frame {
   }
 }
 
-// 接入设备：员工登录后领一张 10 分钟内有效、只能用一次的注册凭据，在设备上用它注册 batond。
-// 凭据经环境变量或文件交给 batond，不写进命令行参数。弹窗一直等到设备连上或凭据过期
+// Enroll device: issues a single-use enrollment token valid for 10 minutes to register batond on a device.
+// The token is passed via environment variable or stdin rather than command-line arguments. The dialog waits until the device connects or the token expires
 export enrollDialog = frame : dialogs.dialog {
-  title: "接入设备 / 等待连接",
+  title: "Connect device / Waiting",
   left: 0px,
   top: 200px,
   width: 600px,
@@ -94,7 +94,7 @@ export enrollDialog = frame : dialogs.dialog {
 
       cancel {
         label {
-          contents: "关闭"
+          contents: "Close"
         }
       }
     }
@@ -110,23 +110,28 @@ export enrollDialog = frame : dialogs.dialog {
   }
 
   heading {
-    contents: "接入设备"
+    contents: "Connect a device"
   }
 
   waiting = frame {
     width: 100%,
-    layout: {align-items: .center, item-gap: s.space.sm},
+    layout: {
+      align-items: .center,
+      item-gap: s.space.sm,
+      wrap: .true,
+      line-gap: 4px
+    },
     children: [waitDot, waitText, waitTime],
 
     waitDot = shape : status.dotQueued {}
 
     waitText = text : t.caption {
-      contents: "等待设备连接",
+      contents: "Waiting for your computer to connect…",
       fill[0].color: c.colors.muted
     }
 
     waitTime = text : t.caption {
-      contents: "凭据还剩 9:41",
+      contents: "Expires in 9m 41s",
       fill[0].color: c.colors.faint
     }
   }
@@ -143,7 +148,7 @@ export enrollDialog = frame : dialogs.dialog {
 
       nameLabel = frame : labels.label {
         labelText {
-          contents: "设备名称"
+          contents: "Device name"
         }
       }
 
@@ -197,7 +202,7 @@ export enrollDialog = frame : dialogs.dialog {
 
     tokenLabel = frame : labels.label {
       labelText {
-        contents: "注册凭据"
+        contents: "Setup code (expires in 10 minutes)"
       }
     }
 
@@ -207,7 +212,7 @@ export enrollDialog = frame : dialogs.dialog {
 
     tokenNote = text : t.caption {
       width: 100%,
-      contents: "10 分钟内有效，只能用一次。",
+      contents: "Use this code once to connect this computer.",
       fill[0].color: c.colors.muted
     }
   }
@@ -219,7 +224,7 @@ export enrollDialog = frame : dialogs.dialog {
 
     commandLabel = frame : labels.label {
       labelText {
-        contents: "在设备上运行"
+        contents: "Run this in your terminal"
       }
     }
 
@@ -233,16 +238,16 @@ export enrollDialog = frame : dialogs.dialog {
 
     commandNote = text : t.caption {
       width: 100%,
-      contents: "运行后粘贴注册凭据，输入不会显示。",
+      contents: "Paste the setup code, then press Enter. The code stays hidden as you type.",
       fill[0].color: c.colors.muted
     }
   }
 }
 
-// Windows 用 PowerShell 读入凭据
+// Windows reads the token via PowerShell
 @variant
 export enrollWindows = frame : enrollDialog {
-  title: "接入设备 / Windows",
+  title: "Connect device / Windows",
   left: 720px,
   top: 200px,
 
@@ -250,8 +255,7 @@ export enrollWindows = frame : enrollDialog {
     commandField {
       command {
         code {
-          contents: "$env:BATON_ENROLLMENT_TOKEN = Read-Host -MaskInput\nbatond register --coordinator https://baton.example.com `\n  --display-name \"Windows 台式机\" --system windows",
-          font-family: "Maple Mono CN"
+          contents: "$env:BATON_ENROLLMENT_TOKEN = Read-Host -MaskInput\nbatond register --coordinator https://baton.example.com `\n  --display-name \"Windows Desktop\" --system windows"
         }
       }
     }
@@ -278,7 +282,7 @@ export enrollWindows = frame : enrollDialog {
       nameField {
         nameInput {
           value {
-            contents: "Windows 台式机"
+            contents: "Windows Desktop"
           }
         }
       }
@@ -286,10 +290,10 @@ export enrollWindows = frame : enrollDialog {
   }
 }
 
-// 设备连上后凭据作废，弹窗换成结果
+// Token is consumed once the device connects; dialog shows the result
 @variant
 export enrollConnected = frame : enrollDialog {
-  title: "接入设备 / 已连接",
+  title: "Connect device / Connected",
   left: 1440px,
   top: 200px,
 
@@ -298,7 +302,7 @@ export enrollConnected = frame : enrollDialog {
       @with-variant(buttons.button)
       cancel {
         label {
-          contents: "完成"
+          contents: "Done"
         }
       }
     }
@@ -306,7 +310,7 @@ export enrollConnected = frame : enrollDialog {
     waiting {
       waitText {
         fill[0].color: c.colors.text,
-        contents: "已连接"
+        contents: "Connected"
       }
 
       waitTime {
@@ -360,17 +364,17 @@ export enrollConnected = frame : enrollDialog {
 
       doneMeta = text : t.caption {
         width: 100%,
-        contents: "macOS · 已同步 · Codex、Pi 可用",
+        contents: "macOS · Codex and Pi available",
         fill[0].color: c.colors.muted
       }
     }
   }
 }
 
-// 凭据过期或已被用过：命令里的凭据不能再用，重新生成一张
+// Token expired or already consumed: regenerate a new token
 @variant
 export enrollExpired = frame : enrollDialog {
-  title: "接入设备 / 凭据过期",
+  title: "Connect device / Code expired",
   left: 2160px,
   top: 200px,
 
@@ -385,7 +389,7 @@ export enrollExpired = frame : enrollDialog {
       }
 
       waitText {
-        contents: "设备没有在 10 分钟内连上"
+        contents: "Setup code expired"
       }
 
       @with-variant(status.dotStopped)
@@ -396,17 +400,23 @@ export enrollExpired = frame : enrollDialog {
   content {
     tokenField {
       tokenNote {
-        fill[0].color: rgb(74.1%, 25.8%, 22.9%),
-        contents: "已过期，用这张凭据注册会被拒绝。"
+        fill[0].color: c.colors.danger,
+        contents: "Get a new code, then run the command again."
       }
 
       token {
         code {
-          fill[0].color: rgb(56%, 56%, 57%)
+          fill[0].color: c.colors.faint
         }
 
         copy {
           display: .none
+        }
+      }
+
+      tokenLabel {
+        labelText {
+          contents: "Setup code expired"
         }
       }
     }
@@ -414,7 +424,7 @@ export enrollExpired = frame : enrollDialog {
 
   regen = frame : buttons.button {
     label {
-      contents: "重新生成"
+      contents: "Get a new code"
     }
   }
 }

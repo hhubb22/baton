@@ -7,8 +7,8 @@ import "blocks/attention-card.elyx" as attention
 import "blocks/thread-detail.elyx" as details
 
 threadOpen = frame : page.projectPage {
-  title: "Project · Thread 详情",
-  caption: "点主对话里的 Thread 记录或概览里的 Thread 行，Thread 在右侧打开，替换概览栏，主对话不跳走。事项同时显示在主对话和关联的 Thread 里，在任何一处处理都会同步。选中回复里的文字可以带着引用问 Project Agent。",
+  title: "Project · Thread detail",
+  caption: "Read a chat beside the project conversation. Questions stay in sync in both places.",
   left: 0px,
   top: 0px,
   overrides: [
@@ -18,6 +18,18 @@ threadOpen = frame : page.projectPage {
 
   main {
     dock {
+      composer {
+        toolbar {
+          send {
+            fill[0].color: c.colors.subtle,
+
+            sendGlyph {
+              fill[0].color: c.colors.text
+            }
+          }
+        }
+      }
+
       signals {
         attention {
           count {
@@ -60,14 +72,6 @@ threadOpen = frame : page.projectPage {
 
           glyph {
             fill[0].color: c.colors.muted
-          }
-        }
-      }
-
-      lead {
-        state {
-          stateText {
-            contents: "空闲"
           }
         }
       }
@@ -122,8 +126,8 @@ threadOpen = frame : page.projectPage {
     max-width: s.size.measure,
     overrides: [
       remove(attention.attentionCard.footer),
-      remove(attention.attentionCard.summary),
-      remove(attention.attentionCard.threadRef)
+      remove(attention.attentionCard.threadRef),
+      remove(attention.attentionCard.summary)
     ],
 
     head {
@@ -135,32 +139,26 @@ threadOpen = frame : page.projectPage {
     options {
       third {
         label {
-          contents: "再跑一次"
+          contents: "Run the test once more"
         }
       }
 
       second {
         label {
-          contents: "先跳过"
-        }
-      }
-
-      first {
-        label {
-          contents: "找出原因并修好"
+          contents: "Skip for now"
         }
       }
     }
 
     heading {
-      contents: "1 项测试没通过，下一步怎么做？"
+      contents: "1 Windows reconnect test failed. What next?"
     }
   }
 }
 
 threadRunning = frame : page.projectPage {
-  title: "Project · Thread 执行中",
-  caption: "用户在 Thread 里直接给 Codex 发消息，开启新的一轮；Project Agent 不会收到通知。实时输出显示这一轮已过的时间。执行中再发的消息默认排队，发出前可以撤回；Codex 支持插入。可以停止这一轮。",
+  title: "Project · Thread running",
+  caption: "Follow live output from Codex. Send a message next, send now, or stop the current reply.",
   left: 1728px,
   top: 0px,
   overrides: [
@@ -170,6 +168,18 @@ threadRunning = frame : page.projectPage {
 
   main {
     dock {
+      composer {
+        toolbar {
+          send {
+            fill[0].color: c.colors.subtle,
+
+            sendGlyph {
+              fill[0].color: c.colors.text
+            }
+          }
+        }
+      }
+
       signals {
         display: .visible
       }
@@ -197,14 +207,6 @@ threadRunning = frame : page.projectPage {
 
           glyph {
             fill[0].color: c.colors.muted
-          }
-        }
-      }
-
-      lead {
-        state {
-          stateText {
-            contents: "空闲"
           }
         }
       }

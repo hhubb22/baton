@@ -4,9 +4,9 @@ import "foundations/typography.elyx" as t
 import "controls/icons.elyx" as icons
 import "controls/button.elyx" as buttons
 
-// 输入区上方的状态横幅：一句标题、一句说明、一个动作
+// Status banner above the composer: one heading, one explanation, one action
 export banner = frame {
-  title: "横幅 / 等待设备",
+  title: "Banner / Waiting for device",
   width: s.size.measure,
   layout: {align-items: .center, item-gap: s.space.md},
   fill: c.colors.panel,
@@ -27,41 +27,42 @@ export banner = frame {
     children: [heading, detail],
 
     heading = text : t.label {
-      contents: "等待设备上线"
+      width: 100%,
+      contents: "Waiting for a device to come online"
     }
 
     detail = text : t.caption {
       width: 100%,
-      contents: "3 台设备都离线。消息已保存，有设备满足条件后 Project Agent 接着处理。",
+      contents: "All 3 devices are offline. Your messages are saved and will send when a device with ChatGPT signed in is available.",
       fill[0].color: c.colors.muted
     }
   }
 
   action = frame : buttons.smallSecondary {
     label {
-      contents: "查看设备"
+      contents: "View devices"
     }
   }
 }
 
 @variant
 export bannerPaused = frame : banner {
-  title: "横幅 / 已暂停",
+  title: "Banner / Paused",
   top: 96px,
 
   action {
     label {
-      contents: "恢复"
+      contents: "Resume"
     }
   }
 
   copy {
     detail {
-      contents: "Project Agent 不会启动，Thread 照常可用。期间的消息和 Thread 回复都会保存，恢复后一起处理。"
+      contents: "Automatic replies are paused. You can still chat in individual threads. Messages and replies here are saved until you resume."
     }
 
     heading {
-      contents: "Project 已暂停"
+      contents: "Project is paused"
     }
   }
 
@@ -71,24 +72,24 @@ export bannerPaused = frame : banner {
 
 @variant
 export bannerAttention = frame : banner {
-  title: "横幅 / 需要处理",
+  title: "Banner / Needs attention",
   top: 192px,
   border[0].color: rgb(91%, 41%, 12%, 18%),
   fill[0].color: c.colors.attentionSoft,
 
   action {
     label {
-      contents: "重试"
+      contents: "Retry"
     }
   }
 
   copy {
     detail {
-      contents: "Ubuntu 开发机上的 ChatGPT 订阅需要重新登录。之后的消息继续保存，重试后从原位置继续。"
+      contents: "Sign in to ChatGPT on Ubuntu Dev, then retry. Your messages and replies are saved."
     }
 
     heading {
-      contents: "Project Agent 暂停：模型请求连续失败 5 次"
+      contents: "ChatGPT sign-in expired on Ubuntu Dev"
     }
   }
 

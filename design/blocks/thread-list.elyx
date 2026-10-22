@@ -9,10 +9,10 @@ import "blocks/overview.elyx" as overviews
 import "blocks/thread-detail.elyx" as details
 import "blocks/composer.elyx" as composers
 
-// Thread 列表行：状态点、名称、所属 Project、设备 · Agent、工作目录、状态和最后活动时间。
-// 状态列和 Thread 行一致：执行中显示这一轮的计时，其余只显示状态名。不属于 Project 的 Thread 留空
+// Thread list row: status dot, title, parent Project, device · Agent, working directory, state, and last activity time.
+// State column matches Thread rows: running shows the current turn's elapsed timer; other states show only the state name. Standalone Threads leave the Project column blank
 export threadListRow = frame {
-  title: "Thread 列表行 / 执行中",
+  title: "Thread list row / Running",
   width: 1192px,
   height: 40px,
   layout: {align-items: .center, item-gap: s.space.md},
@@ -34,7 +34,7 @@ export threadListRow = frame {
     }
 
     name = text : t.small {
-      contents: "在 Windows 上跑重连测试",
+      contents: "Run reconnect tests on Windows",
       line-height: 1
     }
   }
@@ -55,15 +55,15 @@ export threadListRow = frame {
     }
 
     projectName = text : t.caption {
-      contents: "Baton 开发",
+      contents: "Baton Dev",
       line-height: 1,
       fill[0].color: c.colors.muted
     }
   }
 
   place = text : t.caption {
-    width: 168px,
-    contents: "Windows 台式机 · Codex",
+    width: 156px,
+    contents: "Windows Desktop · Codex",
     line-height: 1,
     fill[0].color: c.colors.muted
   }
@@ -76,7 +76,7 @@ export threadListRow = frame {
   }
 
   state = text : t.caption {
-    width: 64px,
+    width: 108px,
     contents: "03:12",
     font-family: "Paper Mono",
     line-height: 1,
@@ -84,8 +84,8 @@ export threadListRow = frame {
   }
 
   time = text : t.caption {
-    width: 56px,
-    contents: "刚刚",
+    width: 64px,
+    contents: "Just now",
     line-height: 1,
     align: .right,
     fill[0].color: c.colors.faint
@@ -94,17 +94,17 @@ export threadListRow = frame {
 
 @variant
 export threadListRowIdle = frame : threadListRow {
-  title: "Thread 列表行 / 空闲",
+  title: "Thread list row / Idle",
   top: 64px,
 
   state {
     fill[0].color: c.colors.muted,
-    contents: "空闲",
+    contents: "Idle",
     font-family: "PingFang SC"
   }
 
   time {
-    contents: "2 小时前"
+    contents: "2h ago"
   }
 
   lead {
@@ -119,17 +119,17 @@ export threadListRowIdle = frame : threadListRow {
 
 @variant
 export threadListRowWaiting = frame : threadListRow {
-  title: "Thread 列表行 / 等待设备",
+  title: "Thread list row / Waiting for device",
   top: 128px,
 
   state {
     fill[0].color: c.colors.muted,
-    contents: "等待设备",
+    contents: "Waiting for device",
     font-family: "PingFang SC"
   }
 
   time {
-    contents: "5 分钟前"
+    contents: "5m ago"
   }
 
   lead {
@@ -144,17 +144,17 @@ export threadListRowWaiting = frame : threadListRow {
 
 @variant
 export threadListRowStopped = frame : threadListRow {
-  title: "Thread 列表行 / 已停止",
+  title: "Thread list row / Stopped",
   top: 192px,
 
   state {
     fill[0].color: c.colors.danger,
-    contents: "已停止",
+    contents: "Stopped",
     font-family: "PingFang SC"
   }
 
   time {
-    contents: "20 分钟前"
+    contents: "20m ago"
   }
 
   lead {
@@ -169,17 +169,17 @@ export threadListRowStopped = frame : threadListRow {
 
 @variant
 export threadListRowUnknown = frame : threadListRow {
-  title: "Thread 列表行 / 状态未知",
+  title: "Thread list row / Status unknown",
   top: 256px,
 
   state {
     fill[0].color: c.colors.attentionText,
-    contents: "状态未知",
+    contents: "Status unknown",
     font-family: "PingFang SC"
   }
 
   time {
-    contents: "8 分钟前"
+    contents: "8m ago"
   }
 
   lead {
@@ -194,7 +194,7 @@ export threadListRowUnknown = frame : threadListRow {
 
 @variant
 export threadListRowArchived = frame : threadListRowIdle {
-  title: "Thread 列表行 / 已归档",
+  title: "Thread list row / Archived",
   top: 320px,
 
   lead {
@@ -204,26 +204,26 @@ export threadListRowArchived = frame : threadListRowIdle {
   }
 
   state {
-    contents: "已归档"
+    contents: "Archived"
   }
 
   time {
-    contents: "上周"
+    contents: "Last week"
   }
 }
 
-// 选中：右侧打开着这个 Thread 的详情
+// Selected when its detail panel is open on the right
 @variant
 export threadListRowSelected = frame : threadListRow {
-  title: "Thread 列表行 / 选中",
+  title: "Thread list row / Selected",
   top: 384px,
   fill[0].color: c.colors.selected
 }
 
-// Thread 页：按设备、Project 和状态筛选。需要处理的排在最前，然后是执行中、等待设备，其余按最后活动时间排列；
-// 已归档的默认不显示，在状态筛选里选出。点一行在右侧打开详情
+// Threads page: filters by device, Project, and archive state. Groups Needs attention first, then Running, Waiting for device, and Idle;
+// archived Threads are hidden by default and selectable via the state filter. Clicking a row opens its detail panel on the right
 export threadsPage = frame {
-  title: "Thread 页",
+  title: "Threads page",
   left: 0px,
   top: 520px,
   width: s.size.screenWidth,
@@ -263,13 +263,13 @@ export threadsPage = frame {
       children: headTitle,
 
       headTitle = text : t.label {
-        contents: "Thread",
+        contents: "Threads",
         font-size: 14,
         font-style: "Semibold"
       }
     }
 
-    // 新建 Thread 的输入区：选位置和模型，发出第一条消息即新建
+    // New Thread composer: pick location and model; sending the first message creates the Thread
     compose = frame {
       width: 100%,
       layout: {direction: .column},
@@ -294,25 +294,25 @@ export threadsPage = frame {
 
         byDevice = frame : inputs.selectCompact {
           value {
-            contents: "全部设备"
+            contents: "All devices"
           }
         }
 
         byProject = frame : inputs.selectCompact {
           value {
-            contents: "全部 Project"
+            contents: "All projects"
           }
         }
 
         byState = frame : inputs.selectCompact {
           value {
-            contents: "未归档"
+            contents: "Active"
           }
         }
       }
 
       total = text : t.caption {
-        contents: "9 个 Thread",
+        contents: "9 threads",
         fill[0].color: c.colors.faint
       }
     }
@@ -352,7 +352,7 @@ export threadsPage = frame {
 
         lead {
           label {
-            contents: "需要处理"
+            contents: "Needs attention"
           }
         }
       }
@@ -362,7 +362,7 @@ export threadsPage = frame {
 
         lead {
           name {
-            contents: "升级 Windows 上的 batond"
+            contents: "Upgrade batond on Windows"
           }
         }
 
@@ -385,12 +385,12 @@ export threadsPage = frame {
         }
 
         place {
-          contents: "Ubuntu 开发机 · Codex"
+          contents: "Ubuntu Dev · Codex"
         }
 
         lead {
           name {
-            contents: "在 Ubuntu 上跑单元测试"
+            contents: "Run unit tests on Ubuntu"
           }
         }
 
@@ -424,12 +424,12 @@ export threadsPage = frame {
             fill[0].color: c.hues.green,
 
             initial {
-              contents: "交"
+              contents: "S"
             }
           }
 
           projectName {
-            contents: "交换机巡检"
+            contents: "Switch Patrol"
           }
         }
 
@@ -438,12 +438,12 @@ export threadsPage = frame {
         }
 
         place {
-          contents: "Ubuntu 开发机 · Kiro"
+          contents: "Ubuntu Dev · Kiro"
         }
 
         lead {
           name {
-            contents: "整理交换机巡检脚本"
+            contents: "Organize switch patrol scripts"
           }
         }
 
@@ -452,7 +452,7 @@ export threadsPage = frame {
         }
 
         time {
-          contents: "1 分钟前"
+          contents: "1m ago"
         }
       }
 
@@ -470,7 +470,7 @@ export threadsPage = frame {
 
         lead {
           label {
-            contents: "等待设备"
+            contents: "Waiting for device"
           }
 
           count {
@@ -488,7 +488,7 @@ export threadsPage = frame {
 
         lead {
           name {
-            contents: "在 MacBook 上跑重连测试"
+            contents: "Run reconnect tests on MacBook"
           }
         }
 
@@ -511,7 +511,7 @@ export threadsPage = frame {
 
         lead {
           label {
-            contents: "空闲"
+            contents: "Idle"
           }
 
           count {
@@ -539,7 +539,7 @@ export threadsPage = frame {
 
         lead {
           name {
-            contents: "修 Web 构建告警"
+            contents: "Fix web build warnings"
           }
         }
 
@@ -553,7 +553,7 @@ export threadsPage = frame {
 
         lead {
           name {
-            contents: "给 gateway 补重连日志"
+            contents: "Add reconnect logging to gateway"
           }
         }
 
@@ -562,7 +562,7 @@ export threadsPage = frame {
         }
 
         time {
-          contents: "昨天"
+          contents: "Yesterday"
         }
       }
 
@@ -574,22 +574,22 @@ export threadsPage = frame {
             fill[0].color: c.hues.green,
 
             initial {
-              contents: "交"
+              contents: "S"
             }
           }
 
           projectName {
-            contents: "交换机巡检"
+            contents: "Switch Patrol"
           }
         }
 
         place {
-          contents: "Ubuntu 开发机 · Kiro"
+          contents: "Ubuntu Dev · Kiro"
         }
 
         lead {
           name {
-            contents: "核对 PICOS 版本"
+            contents: "Verify PICOS versions"
           }
         }
 
@@ -598,7 +598,7 @@ export threadsPage = frame {
         }
 
         time {
-          contents: "昨天"
+          contents: "Yesterday"
         }
       }
 
@@ -621,7 +621,7 @@ export threadsPage = frame {
 
         lead {
           name {
-            contents: "写 batond 安装说明"
+            contents: "Write batond setup guide"
           }
         }
 
@@ -630,22 +630,36 @@ export threadsPage = frame {
         }
 
         time {
-          contents: "3 天前"
+          contents: "3d ago"
         }
       }
     }
   }
 }
 
-// 打开详情：右侧是 Thread 详情面板，列表收起 Project 和目录两列
+// Detail open: shows Thread detail panel on the right and collapses the Project and directory columns in the list
 @variant
 export threadsPageSplit = frame : threadsPage {
-  title: "Thread 页 / 打开详情",
+  title: "Threads page / Detail open",
   left: 0px,
   top: 1520px,
   overrides: [insert(detail, after = threadsPage.main)],
 
   main {
+    compose {
+      composer {
+        toolbar {
+          send {
+            fill[0].color: c.colors.subtle,
+
+            sendGlyph {
+              fill[0].color: c.colors.text
+            }
+          }
+        }
+      }
+    }
+
     list {
       runningRow {
         fill[0].color: c.colors.selected,
@@ -741,7 +755,7 @@ export threadsPageSplit = frame : threadsPage {
     }
   }
 
-  // Thread 页没有可返回的概览，详情不显示返回
+  // Threads page has no Overview panel to return to, so Back is hidden
   detail = frame : details.threadDetailRunning {
     head {
       lead {

@@ -6,9 +6,9 @@ import "controls/button.elyx" as buttons
 import "controls/avatar.elyx" as avatars
 import "controls/status.elyx" as status
 
-// Project 标题栏：标题和 Project Agent 当前状态。状态文字说明它在哪台设备上运行，或者为什么没有运行。
+// Project header: Project title and current Project Agent state. State copy explains which device it is running on or why it is not running.
 export projectHeader = frame {
-  title: "Project 标题栏 / 运行中",
+  title: "Project header / Running",
   width: 872px,
   height: s.size.header,
   layout: {
@@ -31,7 +31,7 @@ export projectHeader = frame {
       avatar = frame : avatars.avatar {}
 
       name = text : t.label {
-        contents: "Baton 开发",
+        contents: "Baton Dev",
         font-size: 14,
         font-style: "Semibold"
       }
@@ -44,7 +44,7 @@ export projectHeader = frame {
       mark = shape : status.dotAgent {}
 
       stateText = text : t.caption {
-        contents: "Project Agent 在 Ubuntu 开发机上运行",
+        contents: "Running on Ubuntu Dev",
         fill[0].color: c.colors.agentText
       }
 
@@ -55,7 +55,7 @@ export projectHeader = frame {
 
         label {
           fill[0].color: c.colors.muted,
-          contents: "停止这次运行"
+          contents: "Stop run"
         }
 
         @with-variant(icons.stop)
@@ -83,14 +83,14 @@ export projectHeader = frame {
 
 @variant
 export headerIdle = frame : projectHeader {
-  title: "Project 标题栏 / 空闲",
+  title: "Project header / Idle",
   top: 80px,
 
   lead {
     state {
       stateText {
         fill[0].color: c.colors.muted,
-        contents: "空闲 · 14:12 在 Ubuntu 开发机上运行过"
+        contents: "Idle"
       }
 
       stop {
@@ -105,14 +105,14 @@ export headerIdle = frame : projectHeader {
 
 @variant
 export headerWaiting = frame : projectHeader {
-  title: "Project 标题栏 / 等待设备",
+  title: "Project header / Waiting for device",
   top: 160px,
 
   lead {
     state {
       stateText {
         fill[0].color: c.colors.muted,
-        contents: "等待设备：3 台设备都离线，1 条消息未处理"
+        contents: "Waiting for device · 1 message waiting"
       }
 
       stop {
@@ -127,14 +127,14 @@ export headerWaiting = frame : projectHeader {
 
 @variant
 export headerAttention = frame : projectHeader {
-  title: "Project 标题栏 / 需要处理",
+  title: "Project header / Needs attention",
   top: 240px,
 
   lead {
     state {
       stateText {
         fill[0].color: c.colors.attentionText,
-        contents: "需要处理：模型请求连续失败，已暂停"
+        contents: "ChatGPT sign-in expired on Ubuntu Dev"
       }
 
       stop {
@@ -149,14 +149,14 @@ export headerAttention = frame : projectHeader {
 
 @variant
 export headerPaused = frame : projectHeader {
-  title: "Project 标题栏 / 已暂停",
+  title: "Project header / Paused",
   top: 320px,
 
   lead {
     state {
       stateText {
         fill[0].color: c.colors.muted,
-        contents: "已暂停 · Thread 照常可用"
+        contents: "Paused"
       }
 
       stop {

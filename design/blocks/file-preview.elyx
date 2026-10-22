@@ -4,9 +4,9 @@ import "foundations/typography.elyx" as t
 import "controls/icons.elyx" as icons
 import "controls/button.elyx" as buttons
 
-// 目录里的一项：图标、名称，右侧是大小
+// Directory entry: icon, filename, and trailing size
 export entryRow = frame {
-  title: "目录项 / 文件",
+  title: "Directory entry / File",
   left: 0px,
   top: 0px,
   width: 232px,
@@ -37,7 +37,7 @@ export entryRow = frame {
 
 @variant
 export entryFolder = frame : entryRow {
-  title: "目录项 / 目录",
+  title: "Directory entry / Folder",
   left: 0px,
   top: 40px,
 
@@ -55,7 +55,7 @@ export entryFolder = frame : entryRow {
 
 @variant
 export entrySelected = frame : entryRow {
-  title: "目录项 / 当前文件",
+  title: "Directory entry / Selected file",
   left: 0px,
   top: 80px,
   fill[0].color: c.colors.selected,
@@ -69,10 +69,10 @@ export entrySelected = frame : entryRow {
   }
 }
 
-// 文件预览：只能浏览设备上登记的目录，左边是当前目录，右边是文本预览。
-// 预览从设备实时读取，设备离线时不显示旧内容
+// File preview: browses only registered directories on the device, with the current directory on the left and live text preview on the right.
+// Reads live from the device and never shows stale content when offline
 export filePreview = frame {
-  title: "文件预览",
+  title: "File preview",
   left: 0px,
   top: 160px,
   width: 960px,
@@ -117,7 +117,7 @@ export filePreview = frame {
       }
 
       meta = text : t.caption {
-        contents: "Windows 台式机 · D:\\src\\baton-ps160 · 18.2 KB",
+        contents: "Windows Desktop · D:\\src\\baton-ps160 · 18.2 KB",
         fill[0].color: c.colors.faint
       }
     }
@@ -294,7 +294,7 @@ export filePreview = frame {
         }
 
         cutText = text : t.caption {
-          contents: "只显示前 64 KiB",
+          contents: "Showing first 64 KB",
           fill[0].color: c.colors.muted
         }
 
@@ -325,27 +325,27 @@ export filePreview = frame {
       }
 
       emptyHeading = text : t.label {
-        contents: "Windows 台式机离线，暂不可查看"
+        contents: "Windows Desktop is offline"
       }
 
       emptyDetail = text : t.caption {
-        contents: "设备上线后重新读取。",
+        contents: "Reconnect Windows Desktop, then retry to view this file.",
         fill[0].color: c.colors.muted
       }
 
       emptyAction = frame : buttons.smallSecondary {
         label {
-          contents: "重试"
+          contents: "Retry"
         }
       }
     }
   }
 }
 
-// 文件超过 64 KiB 时只取开头，末尾标出截断
+// Files larger than 64 KiB show the beginning and mark truncation at the bottom
 @variant
 export filePreviewTruncated = frame : filePreview {
-  title: "文件预览 / 已截断",
+  title: "File preview / Truncated",
   left: 1200px,
   top: 160px,
 
@@ -411,7 +411,7 @@ export filePreviewTruncated = frame : filePreview {
     preview {
       code {
         gutter {
-          contents: "1806\n1807\n1808\n1809\n1810\n1811\n1812\n1813\n1814\n1815\n1816\n1817\n1818\n1819\n1820\n1821\n1822\n1823\n1824\n1825"
+          contents: "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20"
         }
 
         source {
@@ -432,16 +432,16 @@ export filePreviewTruncated = frame : filePreview {
       }
 
       meta {
-        contents: "Windows 台式机 · D:\\src\\baton-ps160 · 2.4 MB"
+        contents: "Windows Desktop · D:\\src\\baton-ps160 · 2.4 MB"
       }
     }
   }
 }
 
-// 设备离线：目录和内容都不显示，不用缓存
+// Offline device: hides directory tree and file content rather than showing cached data
 @variant
 export filePreviewOffline = frame : filePreview {
-  title: "文件预览 / 设备离线",
+  title: "File preview / Offline device",
   left: 0px,
   top: 900px,
 
@@ -452,7 +452,7 @@ export filePreviewOffline = frame : filePreview {
 
     location {
       meta {
-        contents: "Windows 台式机 · D:\\src\\baton-ps160"
+        contents: "Windows Desktop · D:\\src\\baton-ps160"
       }
     }
   }
@@ -476,10 +476,10 @@ export filePreviewOffline = frame : filePreview {
   }
 }
 
-// 越界：路径或链接解析后落在登记目录之外，拒绝读取
+// Out of bounds: path or symlink resolves outside registered directories and is denied
 @variant
 export filePreviewDenied = frame : filePreview {
-  title: "文件预览 / 不在登记目录内",
+  title: "File preview / Outside allowed folders",
   left: 1200px,
   top: 900px,
 
@@ -487,16 +487,16 @@ export filePreviewDenied = frame : filePreview {
     empty {
       emptyAction {
         label {
-          contents: "返回上一级"
+          contents: "Go back"
         }
       }
 
       emptyDetail {
-        contents: "这个链接指向 C:\\Users\\dev\\certs，只能浏览设备上登记的目录。"
+        contents: "This link points to C:\\Users\\dev\\certs, which is not shared with Baton on Windows Desktop."
       }
 
       emptyHeading {
-        contents: "不在登记的目录内"
+        contents: "Folder is outside allowed paths"
       }
 
       display: .visible,
@@ -527,7 +527,7 @@ export filePreviewDenied = frame : filePreview {
 
     location {
       meta {
-        contents: "Windows 台式机 · D:\\src\\baton-ps160"
+        contents: "Windows Desktop · D:\\src\\baton-ps160"
       }
 
       path {

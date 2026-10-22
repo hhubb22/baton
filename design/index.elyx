@@ -19,8 +19,8 @@ import "blocks/banner.elyx" as banners
 import "blocks/thread-detail.elyx" as details
 
 overview = frame {
-  title: "Baton 设计系统",
-  caption: "浅色为默认主题。页面见 screens/。",
+  title: "Baton design system",
+  caption: "Light is the default theme. Full screens live in screens/.",
   left: 0px,
   top: 0px,
   width: 1200px,
@@ -44,13 +44,13 @@ intro = frame {
   children: [introTitle, introText, rules],
 
   introTitle = text : t.title {
-    contents: "Baton 设计系统",
+    contents: "Baton design system",
     font-size: 28
   }
 
   introText = text : t.body {
     width: 760px,
-    contents: "Baton 的界面围绕 Project 主对话组织：用户和 Project Agent 对话，Project Agent 在各台设备上开 Thread 交给 Agent 执行，需要判断的事进入待处理。界面要让人随时看清三件事：Project Agent 在哪台设备上运行或者为什么没运行，每个 Thread 在哪台设备、处于什么状态、最后一次报告是什么时候，哪些事在等自己。",
+    contents: "Connect your computers, chat with coding assistants, and assign work across devices through a project. Questions that need your decision appear in the inbox.",
     fill[0].color: c.colors.muted
   }
 
@@ -61,34 +61,34 @@ intro = frame {
     children: [rule1, rule2, rule3, rule4, rule5, rule6],
 
     rule1 = text : t.small {
-      contents: "青色只属于 Project Agent：它的标识、运行中状态和它给出的建议。用户主操作用实心蓝，一屏只有一个。"
+      contents: "Teal identifies the project assistant, its activity, and its recommendations. Blue marks the primary user action."
     }
 
     rule2 = text : t.small {
-      contents: "一屏最多一个实心主按钮，其余用次要或轻量按钮。"
+      contents: "At most one solid primary button per screen; use secondary or ghost buttons for everything else."
     }
 
     rule3 = text : t.small {
-      contents: "浮层最多两层。需要第三层时改用弹窗，并替换当前弹窗。"
+      contents: "At most two overlay layers. When a third would open, replace the current dialog instead of stacking."
     }
 
     rule4 = text : t.small {
-      contents: "弱化文字用 muted 或 faint 颜色，不用透明度。faint 只给占位符和元信息。"
+      contents: "De-emphasize text with muted or faint colors, not opacity. Reserve faint for placeholders and metadata."
     }
 
     rule5 = text : t.small {
-      contents: "对话条目、卡片和输入区共用一列，左右对齐。卡片用发丝线外框、14px 圆角和两层浅阴影，行之间不加分隔线。"
+      contents: "Messages, replies, cards, and the composer share one aligned column. Cards use a hairline border, 14px radius, and two soft shadows."
     }
 
     rule6 = text : t.small {
-      contents: "每个等待或异常状态都配一句标题、一句说明和一个动作。"
+      contents: "Every waiting or abnormal state pairs a short heading with a one-line explanation and a single action when actionable."
     }
   }
 }
 
-// 色块：示例颜色、名称、用途
+// Color swatch: sample color, token name, and purpose
 swatch = frame {
-  title: "色块",
+  title: "Color swatch",
   left: 1300px,
   top: 0px,
   width: 168px,
@@ -109,13 +109,13 @@ swatch = frame {
 
   purpose = text : t.caption {
     width: 100%,
-    contents: "主内容区",
+    contents: "Main content area",
     fill[0].color: c.colors.faint
   }
 }
 
 section = frame {
-  title: "区块",
+  title: "Section",
   left: 1300px,
   top: 160px,
   width: 1104px,
@@ -127,7 +127,7 @@ section = frame {
   children: [heading, note],
 
   heading = text : t.heading {
-    contents: "颜色"
+    contents: "Colors"
   }
 
   note = text : t.small {
@@ -146,7 +146,7 @@ colorSection = frame : section {
   ],
 
   note {
-    contents: "四层中性表面用亮度区分，边界用 8% / 11% / 16% 的发丝线。角色色各管一件事。"
+    contents: "Four neutral surfaces separated by luminance, with 8% / 11% / 16% hairline borders. Each role color serves a single purpose."
   }
 
   surfaceRow = frame {
@@ -166,7 +166,7 @@ colorSection = frame : section {
       }
 
       purpose {
-        contents: "侧栏、概览栏"
+        contents: "Sidebar, overview"
       }
     }
 
@@ -181,7 +181,7 @@ colorSection = frame : section {
       }
 
       purpose {
-        contents: "卡片、输入区、弹窗"
+        contents: "Cards, composer, dialogs"
       }
     }
 
@@ -195,7 +195,7 @@ colorSection = frame : section {
       }
 
       purpose {
-        contents: "用户消息、标签底色"
+        contents: "User messages, pill fills"
       }
     }
 
@@ -209,7 +209,7 @@ colorSection = frame : section {
       }
 
       purpose {
-        contents: "正文和次要文字"
+        contents: "Body and secondary text"
       }
     }
 
@@ -223,7 +223,7 @@ colorSection = frame : section {
       }
 
       purpose {
-        contents: "占位符、时间、设备名"
+        contents: "Placeholders and metadata"
       }
     }
   }
@@ -243,7 +243,7 @@ colorSection = frame : section {
       }
 
       purpose {
-        contents: "用户主操作、发送"
+        contents: "Primary action, send"
       }
     }
 
@@ -257,7 +257,7 @@ colorSection = frame : section {
       }
 
       purpose {
-        contents: "Project Agent 标识与运行中"
+        contents: "Project assistant activity"
       }
     }
 
@@ -271,7 +271,7 @@ colorSection = frame : section {
       }
 
       purpose {
-        contents: "Project Agent 的建议标签"
+        contents: "Project assistant suggestion"
       }
     }
 
@@ -285,7 +285,7 @@ colorSection = frame : section {
       }
 
       purpose {
-        contents: "链接、焦点、未读"
+        contents: "Links, focus, unread"
       }
     }
 
@@ -299,7 +299,7 @@ colorSection = frame : section {
       }
 
       purpose {
-        contents: "等你处理、状态未知"
+        contents: "Needs attention, unknown"
       }
     }
 
@@ -313,7 +313,7 @@ colorSection = frame : section {
       }
 
       purpose {
-        contents: "已停止、归档、吊销"
+        contents: "Stopped, archive, disconnect"
       }
     }
   }
@@ -333,7 +333,7 @@ colorSection = frame : section {
       }
 
       purpose {
-        contents: "Thread 执行中"
+        contents: "Thread running"
       }
     }
 
@@ -347,7 +347,7 @@ colorSection = frame : section {
       }
 
       purpose {
-        contents: "设备在线、命令退出码 0"
+        contents: "Device online"
       }
     }
 
@@ -361,7 +361,7 @@ colorSection = frame : section {
       }
 
       purpose {
-        contents: "状态标签底色"
+        contents: "Status pill fill"
       }
     }
 
@@ -375,7 +375,7 @@ colorSection = frame : section {
       }
 
       purpose {
-        contents: "需要处理的横幅"
+        contents: "Attention banner fill"
       }
     }
 
@@ -389,7 +389,7 @@ colorSection = frame : section {
       }
 
       purpose {
-        contents: "已停止标签底色"
+        contents: "Stopped pill fill"
       }
     }
   }
@@ -400,57 +400,44 @@ typeSection = frame : section {
   overrides: [insert(typeList, after = section.note)],
 
   heading {
-    contents: "文字"
+    contents: "Typography"
   }
 
   note {
-    contents: "界面字体在设计稿里用 PingFang SC，Web 端用系统 UI 字体栈；字重只用 Regular、Medium、Semibold。代码用 Paper Mono，含中文的等宽内容用 Maple Mono CN。"
+    contents: "UI copy uses PingFang SC in design files and the system UI font stack on the web, in Regular, Medium, and Semibold. Code and monospace copy use Paper Mono."
   }
 
   typeList = frame {
     width: 100%,
     layout: {direction: .column, item-gap: s.space.md},
-    children: [
-      tTitle,
-      tHeading,
-      tBody,
-      tSmall,
-      tLabel,
-      tCaption,
-      tMono,
-      tMonoCN
-    ],
+    children: [tTitle, tHeading, tBody, tSmall, tLabel, tCaption, tMono],
 
     tTitle = text : t.title {
-      contents: "title 20 · 页面标题"
+      contents: "title 20 · Page title"
     }
 
     tHeading = text : t.heading {
-      contents: "heading 15 · 弹窗和事项标题"
+      contents: "heading 15 · Dialog and item heading"
     }
 
     tBody = text : t.body {
-      contents: "body 14 · 主对话里的消息和回复"
+      contents: "body 14 · Messages and replies in main conversation"
     }
 
     tSmall = text : t.small {
-      contents: "small 13 · 列表、表单、说明"
+      contents: "small 13 · Lists, forms, and descriptions"
     }
 
     tLabel = text : t.label {
-      contents: "label 13 · 按钮、行标题、字段名"
+      contents: "label 13 · Buttons, row titles, and field names"
     }
 
     tCaption = text : t.caption {
-      contents: "caption 12 · 时间、设备、版本"
+      contents: "caption 12 · Timestamps, devices, and versions"
     }
 
     tMono = text : t.mono {
       contents: "mono 12 · git worktree add D:\\src\\baton-ps160"
-    }
-
-    tMonoCN = text : t.monoCN {
-      contents: "monoCN 12 · --- FAIL: 测试超时（30 秒）"
     }
   }
 }
@@ -465,11 +452,11 @@ controlSection = frame : section {
   ],
 
   heading {
-    contents: "控件"
+    contents: "Controls"
   }
 
   note {
-    contents: "控件高度 20 / 28 / 32，圆角 4 / 6 / 8 / 12；卡片 14，气泡 18，输入区 20，分段切换、工具栏选择片和状态片用全圆角。不可用的操作保持可点，点击后说明原因。"
+    contents: "Control heights are 20 / 28 / 32 with 4 / 6 / 8 / 12 corner radii; cards use 14, bubbles 18, composer 20, and segmented controls, picker chips, and status chips use full pills. Unavailable actions remain clickable and explain why."
   }
 
   buttonRow = frame {
@@ -496,13 +483,13 @@ controlSection = frame : section {
 
     bSmall = frame : buttons.small {
       label {
-        contents: "新建"
+        contents: "New"
       }
     }
 
     bSmallSecondary = frame : buttons.smallSecondary {
       label {
-        contents: "重试"
+        contents: "Retry"
       }
     }
 
@@ -534,7 +521,7 @@ controlSection = frame : section {
 
       copy {
         helper {
-          contents: "在已登记目录下以设备上的用户身份执行。Baton 不提供沙箱。"
+          contents: "Runs shell commands in allowed folders as your user account. Baton does not sandbox commands."
         }
       }
     }
@@ -631,11 +618,11 @@ statusSection = frame : section {
   ],
 
   heading {
-    contents: "状态"
+    contents: "Status"
   }
 
   note {
-    contents: "Thread 有六种状态，Baton 不判断一轮是成功还是失败。状态点只用六种颜色，含义由旁边的文字说明。等你处理用橙色实心数量，未读用蓝点，两者分开。"
+    contents: "Show whether a chat is running, waiting, idle, stopped, unknown, or archived. Labels explain each status dot. Commands show exit codes; replies explain the results."
   }
 
   pillRow = frame {
@@ -690,11 +677,11 @@ conversationSection = frame : section {
   overrides: [insert(convColumns, after = section.note)],
 
   heading {
-    contents: "主对话"
+    contents: "Main conversation"
   }
 
   note {
-    contents: "用户消息是右对齐的浅灰气泡，Project Agent 的回复是靠左的正文。一轮里执行的命令和记忆修改收在一行可展开的过程记录里；开过或发过消息的 Thread 收进一张卡片，每个 Thread 一行。等你决定的事项也是卡片，选项是带序号的浅灰行。Thread 回复的附件写明所在设备，设备离线时暂不可查看。"
+    contents: "User messages are right-aligned bubbles. Assistant replies start with collapsible activity, followed by chat cards and reply text. Questions offer specific actions. Attachments name their computer and show when it is offline."
   }
 
   convColumns = frame {
@@ -778,11 +765,11 @@ inputSection = frame : section {
   overrides: [insert(inputColumns, after = section.note)],
 
   heading {
-    contents: "输入区与横幅"
+    contents: "Composer and banners"
   }
 
   note {
-    contents: "主对话输入区只给 Project Agent 发消息。Thread 页顶部的输入区用来新建 Thread，选位置和模型，Agent 跟着模型走，写在提示文字里。Thread 输入区直接发给 Agent：可以换模型，执行中默认排队，Agent 支持时可以插入，也可以停止这一轮。横幅放在输入区上方，说明为什么没有运行或不能继续。"
+    contents: "Placeholders name the assistant and computer. While a reply is running, offer Send next and Send now when supported. Put waiting, stopping, and recovery details beside the affected input."
   }
 
   inputColumns = frame {

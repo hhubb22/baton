@@ -6,8 +6,8 @@ import "controls/input.elyx" as inputs
 import "controls/field.elyx" as fields
 
 login = frame {
-  title: "登录",
-  caption: "账号由管理员创建，没有自助注册和找回口令。管理员修改或重置口令后，已登录的会话全部退出。",
+  title: "Sign in",
+  caption: "Sign in with the account provided by your administrator.",
   left: 0px,
   top: 0px,
   width: s.size.screenWidth,
@@ -43,7 +43,7 @@ login = frame {
       }
 
       heading = text : t.title {
-        contents: "登录 Baton"
+        contents: "Sign in to Baton"
       }
     }
 
@@ -58,12 +58,12 @@ login = frame {
       children: [noticeHeading, noticeDetail],
 
       noticeHeading = text : t.label {
-        contents: "口令已被管理员重置"
+        contents: "Password reset by administrator"
       }
 
       noticeDetail = text : t.caption {
         width: 100%,
-        contents: "之前的登录都已退出，用新口令重新登录。",
+        contents: "Previous sessions have been signed out. Sign in with your new password.",
         fill[0].color: c.colors.muted
       }
     }
@@ -111,7 +111,7 @@ login = frame {
 
         label {
           labelText {
-            contents: "账号"
+            contents: "Username"
           }
         }
       }
@@ -134,7 +134,7 @@ login = frame {
 
         label {
           labelText {
-            contents: "口令"
+            contents: "Password"
           }
         }
       }
@@ -143,21 +143,21 @@ login = frame {
         width: 100%,
 
         label {
-          contents: "登录"
+          contents: "Sign in"
         }
       }
     }
 
     note = text : t.caption {
-      contents: "没有账号或忘记口令，请联系管理员。",
+      contents: "Contact your administrator if you need an account or password reset.",
       fill[0].color: c.colors.faint
     }
   }
 }
 
 loginError = frame : login {
-  title: "登录 / 账号或口令不对",
-  caption: "不区分是账号不存在还是口令不对。",
+  title: "Sign in / Invalid credentials",
+  caption: "The same message covers an incorrect username or password.",
   left: 1728px,
   top: 0px,
 
@@ -167,7 +167,7 @@ loginError = frame : login {
         helper {
           fill[0].color: c.colors.danger,
           display: .visible,
-          contents: "账号或口令不对。"
+          contents: "Invalid username or password."
         }
 
         @with-variant(inputs.error)
@@ -183,8 +183,8 @@ loginError = frame : login {
 }
 
 loginReset = frame : login {
-  title: "登录 / 口令被重置",
-  caption: "管理员重置口令后，原来的会话打开任何页面都回到这里，并说明原因。",
+  title: "Sign in / Password reset",
+  caption: "Sign in again with the password provided by your administrator.",
   left: 3456px,
   top: 0px,
 
@@ -194,7 +194,7 @@ loginReset = frame : login {
         input {
           value {
             fill[0].color: c.colors.faint,
-            contents: "新口令"
+            contents: "New password"
           }
         }
       }

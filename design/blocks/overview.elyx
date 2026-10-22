@@ -6,9 +6,9 @@ import "controls/button.elyx" as buttons
 import "controls/status.elyx" as status
 import "controls/tabs.elyx" as tabs
 
-// 概览里的 Thread 行：状态点、标题（第一条消息的开头）、最后活动时间；第二行写设备、Agent 和目录名
+// Overview Thread row: status dot, title (opening of first message), and last activity time on the first line; device, Agent, and directory basename on the second line
 export threadRow = frame {
-  title: "Thread 行 / 执行中",
+  title: "Overview row / Running",
   width: 288px,
   layout: {direction: .column, item-gap: 1px},
   corner-radius: s.radius.sm,
@@ -25,18 +25,20 @@ export threadRow = frame {
     children: [lead, time],
 
     lead = frame {
+      width: 100%,
       layout: {align-items: .center, item-gap: s.space.sm},
       children: [mark, name],
 
       mark = shape : status.dot {}
 
       name = text : t.small {
-        contents: "在 Windows 上跑重连测试"
+        width: 100%,
+        contents: "Run reconnect tests on Windows"
       }
     }
 
     time = text : t.caption {
-      contents: "12 分钟",
+      contents: "12:00",
       fill[0].color: c.colors.faint
     }
   }
@@ -48,7 +50,7 @@ export threadRow = frame {
     children: [place, dir],
 
     place = text : t.caption {
-      contents: "Windows 台式机 · Codex ·",
+      contents: "Windows Desktop · Codex ·",
       fill[0].color: c.colors.faint
     }
 
@@ -63,14 +65,14 @@ export threadRow = frame {
 
 @variant
 export threadRowSelected = frame : threadRow {
-  title: "Thread 行 / 选中",
+  title: "Overview row / Selected",
   top: 64px,
   fill[0].color: c.colors.selected
 }
 
-// 记忆条目：内容、版本、修改者和时间
+// Memory entry: content, version, author, and timestamp
 export memoryRow = frame {
-  title: "记忆条目",
+  title: "Memory entry",
   top: 128px,
   width: 288px,
   layout: {direction: .column, item-gap: s.space.xxs},
@@ -80,18 +82,18 @@ export memoryRow = frame {
 
   content = text : t.small {
     width: 100%,
-    contents: "Baton 仓库在 MacBook 上的路径是 ~/src/baton，在 Ubuntu 上是 ~/work/baton。"
+    contents: "Baton repo path is ~/src/baton on MacBook and ~/work/baton on Ubuntu."
   }
 
   meta = text : t.caption {
-    contents: "v2 · Project Agent · 今天 14:05",
+    contents: "v2 · project assistant · today 14:05",
     fill[0].color: c.colors.faint
   }
 }
 
-// 分组标题
+// Group heading
 export groupHead = frame {
-  title: "分组标题",
+  title: "Group heading",
   top: 224px,
   width: 288px,
   height: 28px,
@@ -104,7 +106,7 @@ export groupHead = frame {
     children: [label, count],
 
     label = text : t.captionMedium {
-      contents: "执行中",
+      contents: "Running",
       fill[0].color: c.colors.muted
     }
 
@@ -121,10 +123,10 @@ export groupHead = frame {
   }
 }
 
-// 概览栏：目标、运行实例、Thread 和记忆
+// Overview panel: goal, runtime instance, Threads, and memory
 export overview = frame {
-  title: "概览栏 / Thread",
-  caption: "320px。等你处理的事项排在最前，然后是执行中和等待设备的 Thread，其余按最后活动时间排列；已归档的不显示。目录只显示最后一段，完整路径在详情里；Project Agent 执行的命令结束后显示退出码。",
+  title: "Overview panel / Threads",
+  caption: "Questions, running chats, and recent work. Commands show their exit code.",
   left: 360px,
   width: s.size.overview,
   height: s.size.screenHeight,
@@ -141,7 +143,7 @@ export overview = frame {
     children: [headLabel, headMore],
 
     headLabel = text : t.label {
-      contents: "概览"
+      contents: "Overview"
     }
 
     headMore = frame : buttons.iconButton {}
@@ -164,7 +166,7 @@ export overview = frame {
         children: [goalLabel, goalEdit],
 
         goalLabel = text : t.captionMedium {
-          contents: "目标",
+          contents: "Goal",
           fill[0].color: c.colors.faint
         }
 
@@ -177,7 +179,7 @@ export overview = frame {
 
       goalText = text : t.small {
         width: 100%,
-        contents: "第一个里程碑：一件真实工作跨设备走通全程，回复带附件回来。"
+        contents: "Milestone 1: run real work end-to-end across devices and return replies with attachments."
       }
     }
 
@@ -187,7 +189,7 @@ export overview = frame {
       children: [runtimeLabel, runtimeCard],
 
       runtimeLabel = text : t.captionMedium {
-        contents: "Project Agent",
+        contents: "Project assistant",
         fill[0].color: c.colors.faint
       }
 
@@ -216,7 +218,7 @@ export overview = frame {
             }
 
             runtimeName = text : t.label {
-              contents: "Ubuntu 开发机"
+              contents: "Ubuntu Dev"
             }
           }
 
@@ -227,7 +229,7 @@ export overview = frame {
             runtimeDot = shape : status.dotAgent {}
 
             runtimeStateText = text : t.caption {
-              contents: "运行中",
+              contents: "Running",
               fill[0].color: c.colors.agentText
             }
           }
@@ -235,7 +237,7 @@ export overview = frame {
 
         runtimeNote = text : t.caption {
           width: 100%,
-          contents: "ChatGPT 订阅 · gpt-5.1。默认设备 MacBook Pro 离线，改在这台运行。",
+          contents: "ChatGPT · gpt-5.1",
           fill[0].color: c.colors.muted
         }
       }
@@ -278,7 +280,7 @@ export overview = frame {
 
       lead {
         label {
-          contents: "等你处理"
+          contents: "Needs attention"
         }
 
         count {
@@ -296,7 +298,7 @@ export overview = frame {
         }
 
         place {
-          contents: "事项 · 检查 PS-158 迁移脚本"
+          contents: "Decision · Check PS-158 migration"
         }
       }
 
@@ -307,7 +309,7 @@ export overview = frame {
 
         lead {
           name {
-            contents: "迁移 031 要不要先在副本上跑？"
+            contents: "Run migration 031 on replica first?"
           }
 
           @with-variant(status.dotAttention)
@@ -336,18 +338,18 @@ export overview = frame {
       line {
         lead {
           name {
-            contents: "整理 PS-160 验收记录"
+            contents: "Write PS-160 test notes"
           }
         }
 
         time {
-          contents: "2 分钟"
+          contents: "02:00"
         }
       }
 
       sub {
         place {
-          contents: "Ubuntu 开发机 · Pi ·"
+          contents: "Ubuntu Dev · Pi ·"
         }
 
         dir {
@@ -365,7 +367,7 @@ export overview = frame {
 
       lead {
         label {
-          contents: "等待设备"
+          contents: "Waiting for device"
         }
 
         count {
@@ -394,7 +396,7 @@ export overview = frame {
 
         lead {
           name {
-            contents: "推送 PS-160 分支"
+            contents: "Push PS-160 branch"
           }
 
           @with-variant(status.dotQueued)
@@ -414,7 +416,7 @@ export overview = frame {
 
       lead {
         label {
-          contents: "最近"
+          contents: "Recent"
         }
 
         count {
@@ -432,7 +434,7 @@ export overview = frame {
         }
 
         place {
-          contents: "Ubuntu 开发机 · Codex ·"
+          contents: "Ubuntu Dev · Codex ·"
         }
       }
 
@@ -443,7 +445,7 @@ export overview = frame {
 
         lead {
           name {
-            contents: "在 Ubuntu 上跑单元测试"
+            contents: "Run unit tests on Ubuntu"
           }
 
           @with-variant(status.dotIdle)
@@ -463,7 +465,7 @@ export overview = frame {
         }
 
         place {
-          contents: "Windows 台式机 · 命令 · 退出码 0"
+          contents: "Windows Desktop · Command · exit 0"
         }
       }
 
@@ -490,16 +492,16 @@ export overview = frame {
     recentMore = frame : buttons.smallGhost {
       label {
         fill[0].color: c.colors.muted,
-        contents: "显示其余 10 个"
+        contents: "Show 10 more"
       }
     }
   }
 }
 
-// 记忆标签页
+// Memory tab
 @variant
 export overviewMemory = frame : overview {
-  title: "概览栏 / 记忆",
+  title: "Overview panel / Memory",
   left: 760px,
 
   body {
@@ -531,7 +533,7 @@ export overviewMemory = frame : overview {
       }
 
       label {
-        contents: "记忆"
+        contents: "Memory"
       }
     }
 
@@ -542,7 +544,7 @@ export overviewMemory = frame : overview {
       }
 
       label {
-        contents: "Thread"
+        contents: "Threads"
       }
 
       left: .nil
@@ -557,11 +559,11 @@ export overviewMemory = frame : overview {
     width: 100%,
 
     content {
-      contents: "Windows 上的 PS-160 worktree 在 D:\\src\\baton-ps160。"
+      contents: "PS-160 worktree on Windows is at D:\\src\\baton-ps160."
     }
 
     meta {
-      contents: "v1 · Project Agent · 今天 14:03"
+      contents: "v1 · project assistant · today 14:03"
     }
   }
 
@@ -569,11 +571,11 @@ export overviewMemory = frame : overview {
     width: 100%,
 
     content {
-      contents: "验收必须用真实订阅，替身测试不算。"
+      contents: "Verification must use a real subscription; test doubles do not count."
     }
 
     meta {
-      contents: "v3 · 我 · 昨天 21:40"
+      contents: "v3 · You · Yesterday 21:40"
     }
   }
 
@@ -581,18 +583,18 @@ export overviewMemory = frame : overview {
     width: 100%,
 
     content {
-      contents: "跑测试前先 node tools/build.mjs，前端产物不提交。"
+      contents: "Run node tools/build.mjs before go test; frontend build artifacts are not committed."
     }
 
     meta {
-      contents: "v1 · Project Agent · 10月18日"
+      contents: "v1 · project assistant · Oct 18"
     }
   }
 
   addMemory = frame : buttons.smallGhost {
     label {
       fill[0].color: c.colors.muted,
-      contents: "添加记忆"
+      contents: "Add memory"
     }
 
     lead {

@@ -5,9 +5,9 @@ import "controls/icons.elyx" as icons
 import "controls/status.elyx" as status
 import "controls/badge.elyx" as badges
 
-// 设备行：名称与系统、连接状态、已装的 Agent。离线时写最后联系时间。
+// Device row: name and OS, connection state, installed Agents. Shows last contact time when offline.
 export deviceRow = frame {
-  title: "设备行 / 在线",
+  title: "Device row / Online",
   width: 800px,
   height: 60px,
   layout: {align-items: .center, item-gap: s.space.lg},
@@ -43,7 +43,7 @@ export deviceRow = frame {
         children: [name, defaultTag],
 
         name = text : t.label {
-          contents: "Windows 台式机"
+          contents: "Windows Desktop"
         }
 
         defaultTag = frame : badges.tag {
@@ -66,7 +66,7 @@ export deviceRow = frame {
     mark = shape : status.dotOnline {}
 
     stateText = text : t.small {
-      contents: "在线"
+      contents: "Online"
     }
   }
 
@@ -85,13 +85,13 @@ export deviceRow = frame {
 
 @variant
 export deviceOffline = frame : deviceRow {
-  title: "设备行 / 离线",
+  title: "Device row / Offline",
   top: 80px,
 
   state {
     stateText {
       fill[0].color: c.colors.muted,
-      contents: "离线 · 最后联系 13:52"
+      contents: "Offline · last seen 13:52"
     }
 
     @with-variant(status.dotIdle)
@@ -121,10 +121,10 @@ export deviceOffline = frame : deviceRow {
   }
 }
 
-// 运行着 Project Agent 的设备
+// Device currently running a Project Agent
 @variant
 export deviceRuntime = frame : deviceRow {
-  title: "设备行 / 运行 Project Agent",
+  title: "Device row / Running project assistant",
   top: 160px,
 
   @with-variant(icons.chevronDown)
@@ -133,7 +133,7 @@ export deviceRuntime = frame : deviceRow {
   state {
     stateText {
       fill[0].color: c.colors.agentText,
-      contents: "在线 · 运行 Baton 开发"
+      contents: "Online · running Baton Dev"
     }
 
     @with-variant(status.dotAgent)
@@ -152,16 +152,16 @@ export deviceRuntime = frame : deviceRow {
 
       nameLine {
         name {
-          contents: "Ubuntu 开发机"
+          contents: "Ubuntu Dev"
         }
       }
     }
   }
 }
 
-// 能力行：设备上的 Agent、Runtime 和订阅
+// Capability row: Agent, Runtime, and subscription status on the device
 export capabilityLine = frame {
-  title: "能力行",
+  title: "Capability row",
   top: 240px,
   width: 320px,
   layout: {align-items: .center, item-gap: s.space.sm},
@@ -178,7 +178,7 @@ export capabilityLine = frame {
   }
 
   note = text : t.caption {
-    contents: "已安装 · 已登录",
+    contents: "Installed · signed in",
     fill[0].color: c.colors.faint
   }
 }

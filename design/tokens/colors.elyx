@@ -3,40 +3,40 @@ export primary = tokens {
   black: .black
 }
 
-// 浅色是默认主题。组件只读 colors 组；深色覆盖见 colors@dark.elyx。
+// Light is the default theme. Components read only from colors; dark overrides live in colors@dark.elyx.
 export colors = tokens {
-  // 表面：canvas 主内容区，panel 侧栏与概览栏，surface 卡片、输入区与浮层，subtle 悬停与标签底色
+  // Surfaces: canvas for main area, panel for sidebar and overview, surface for cards/composers/popovers, subtle for hover and pill backgrounds
   canvas: rgb(98.8%, 98.8%, 98.7%),
   panel: rgb(96.4%, 96.4%, 96.2%),
   surface: .white,
   subtle: rgb(94.2%, 94.2%, 94%),
   hover: rgb(0%, 0%, 0%, 4%),
   selected: rgb(0%, 0%, 0%, 6%),
-  // 发丝线：hairline 用于卡片和输入区外框，配合浅阴影
+  // Hairline borders: hairline for card and composer outlines paired with soft shadows
   hairline: rgb(0%, 0%, 0%, 6%),
   borderSoft: rgb(0%, 0%, 0%, 8%),
   border: rgb(0%, 0%, 0%, 11%),
   borderStrong: rgb(0%, 0%, 0%, 16%),
-  // 文字：muted 用于次要文字，faint 只给占位符和元信息
+  // Text: muted for secondary copy, faint only for placeholders and metadata
   text: rgb(11.6%, 11.6%, 12%),
   muted: rgb(40%, 40%, 41%),
   faint: rgb(56%, 56%, 57%),
-  // 用户主操作：实心蓝用于发送和主按钮，accentSoft 配 link 文字用于卡片里的动作
+  // Primary user actions: solid blue for send and primary buttons, accentSoft with link text for secondary card actions
   accent: rgb(17%, 42%, 93%),
   accentHover: rgb(13%, 36%, 85%),
   accentPressed: rgb(11%, 31%, 76%),
   accentSoft: rgb(92%, 95%, 100%),
   accentSoftHover: rgb(86.5%, 91.5%, 100%),
   onAccent: .white,
-  // Project Agent：只用于 Project Agent 的身份、运行中状态和它发起的动作
+  // Project Agent: reserved for Project Agent identity, active runs, and recommendations
   agent: rgb(4.34%, 62.32%, 58.42%),
   agentText: rgb(0%, 45.24%, 42.24%),
   agentSoft: rgb(89.94%, 97.31%, 96.3%),
   onAgent: .white,
-  // 链接与焦点
+  // Links and focus
   link: rgb(14%, 40%, 76%),
   focus: rgb(24%, 52%, 92%),
-  // 状态
+  // Status
   info: rgb(15.5%, 51.6%, 83.6%),
   infoSoft: rgb(91.5%, 95.4%, 99.4%),
   success: rgb(15%, 54%, 30%),
@@ -46,7 +46,7 @@ export colors = tokens {
   attentionSoft: rgb(99.6%, 94.4%, 90.4%),
   danger: rgb(74.1%, 25.8%, 22.9%),
   dangerSoft: rgb(100%, 92.9%, 92.6%),
-  // 代码与其他
+  // Code and misc
   code: rgb(95.6%, 95.6%, 95.4%),
   codeBorder: rgb(0%, 0%, 0%, 7%),
   disabled: rgb(92.1%, 92.1%, 92.4%),
@@ -56,7 +56,7 @@ export colors = tokens {
   transparent: .transparent
 }
 
-// Project 头像底色，按创建顺序轮换
+// Project avatar background hues, rotated in creation order
 export hues = tokens {
   slate: rgb(36%, 42%, 52%),
   amber: rgb(85%, 55%, 15%),

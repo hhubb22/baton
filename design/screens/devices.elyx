@@ -7,10 +7,11 @@ import "controls/button.elyx" as buttons
 import "blocks/device-row.elyx" as rows
 import "controls/toggle.elyx" as toggles
 import "blocks/enroll-dialog.elyx" as enroll
+import "blocks/dialog.elyx" as dialogs
 
 devices = frame {
-  title: "设备",
-  caption: "每台设备的连接状态、Agent 及其支持的操作、订阅、已登记目录和其中发现的仓库。展开的设备上可以单独开启「允许 Project Agent 执行命令」，开启前写明没有沙箱。吊销旁边写明不会停止离线设备上的 Agent。",
+  title: "Devices",
+  caption: "Manage connected computers, assistants, allowed folders, and command permissions.",
   left: 0px,
   top: 0px,
   width: s.size.screenWidth,
@@ -50,7 +51,7 @@ devices = frame {
       children: headTitle,
 
       headTitle = text : t.label {
-        contents: "设备",
+        contents: "Devices",
         font-size: 14,
         font-style: "Semibold"
       }
@@ -73,19 +74,21 @@ devices = frame {
           children: [introTitle, introText],
 
           introTitle = text : t.title {
-            contents: "3 台设备，2 台在线"
+            contents: "3 devices, 2 online"
           }
 
           introText = text : t.small {
             width: 100%,
-            contents: "Project Agent 在满足条件的设备上运行：在线、已同步、装有 Runtime、所需订阅可用。默认设备满足条件时优先使用。",
+            contents: "Connect the computers where your code lives. The project assistant uses your default device first, then another available computer.",
             fill[0].color: c.colors.muted
           }
         }
 
         enroll = frame : buttons.secondary {
+          connections[0].target: devicesEnroll,
+
           label {
-            contents: "接入设备"
+            contents: "Connect a device"
           }
 
           lead {
@@ -137,13 +140,13 @@ devices = frame {
               children: [agentsLabel, agentLine1, agentLine2, agentLine3],
 
               agentsLabel = text : t.captionMedium {
-                contents: "Agent 与订阅",
+                contents: "Agents & subscriptions",
                 fill[0].color: c.colors.faint
               }
 
               agentLine1 = frame : rows.capabilityLine {
                 note {
-                  contents: "已登录 · 可插入、可恢复"
+                  contents: "Signed in · send now · resume chat"
                 }
               }
 
@@ -153,17 +156,19 @@ devices = frame {
                 }
 
                 note {
-                  contents: "已安装 · 可插入、可恢复"
+                  contents: "Installed · send now · resume chat"
                 }
               }
 
               agentLine3 = frame : rows.capabilityLine {
+                width: 100%,
+
                 name {
-                  contents: "Project Agent Runtime"
+                  contents: "Project assistant"
                 }
 
                 note {
-                  contents: "0.3.1 · ChatGPT 订阅可用"
+                  contents: "ChatGPT signed in"
                 }
               }
             }
@@ -174,7 +179,7 @@ devices = frame {
               children: [dirsLabel, dir1, dir2, repos, dirsNote],
 
               dirsLabel = text : t.captionMedium {
-                contents: "已登记目录",
+                contents: "Allowed folders",
                 fill[0].color: c.colors.faint
               }
 
@@ -188,12 +193,13 @@ devices = frame {
 
               repos = text : t.caption {
                 width: 100%,
-                contents: "发现 2 个仓库：baton、baton-docs",
+                contents: "2 repositories discovered: baton, baton-docs",
                 fill[0].color: c.colors.muted
               }
 
               dirsNote = text : t.caption {
-                contents: "在这台设备的 batond 配置里修改。",
+                width: 100%,
+                contents: "Manage these folders in the batond configuration on Ubuntu Dev.",
                 fill[0].color: c.colors.faint
               }
             }
@@ -213,7 +219,7 @@ devices = frame {
 
               copy {
                 helper {
-                  contents: "Project Agent 可以在已登记目录下执行任意命令，以 hejiajian 身份用 zsh 运行。单条命令最长 2 小时，等待超时不会终止命令。"
+                  contents: "Lets the project assistant run shell commands in allowed folders as user “kaken” (zsh). Commands can run for up to 2 hours."
                 }
               }
             }
@@ -234,31 +240,41 @@ devices = frame {
 
               warnText = text : t.caption {
                 width: 100%,
-                contents: "Baton 不为这些命令提供沙箱，也不检查命令内容。命令能读写这些目录里的任何文件。",
+                contents: "Commands run directly on Ubuntu Dev without a sandbox. Baton does not inspect them.",
                 fill[0].color: c.colors.attentionText
               }
             }
           }
 
           detailActions = frame {
-            layout: {align-items: .center, item-gap: s.space.sm},
+            width: 100%,
+            layout: {
+              align-items: .center,
+              item-gap: s.space.sm,
+              wrap: .true,
+              line-gap: 8px
+            },
             children: [makeDefault, revoke, revokeNote],
 
             makeDefault = frame : buttons.smallSecondary {
               label {
-                contents: "设为默认设备"
+                contents: "Set as default"
               }
             }
 
             revoke = frame : buttons.smallGhost {
+              connections[0].target: devicesDisconnect,
+
               label {
                 fill[0].color: c.colors.danger,
-                contents: "吊销这台设备"
+                contents: "Disconnect device"
               }
             }
 
             revokeNote = text : t.caption {
-              contents: "吊销后立即断开；设备离线时，上面正在运行的 Agent 不会因此停止。",
+              width: 100%,
+              display: .none,
+              contents: "Removes this computer from Baton. If it is offline, agents still running on it will keep running locally. Past records are kept.",
               fill[0].color: c.colors.faint
             }
           }
@@ -269,8 +285,8 @@ devices = frame {
 }
 
 devicesEnroll = frame : devices {
-  title: "设备 · 接入设备",
-  caption: "点「接入设备」领一张 10 分钟内有效、只能用一次的注册凭据，在设备上运行注册命令。凭据由命令读入，不写进命令行参数。弹窗等到设备连上或凭据过期。",
+  title: "Devices · Connect device",
+  caption: "Choose a system, run the command, and paste the setup code.",
   left: 1728px,
   top: 0px,
   overrides: [insert(scrim, after = devices.main)],
@@ -286,5 +302,50 @@ devicesEnroll = frame : devices {
     children: form,
 
     form = frame : enroll.enrollDialog {}
+  }
+}
+
+devicesDisconnect = frame : devices {
+  title: "Devices · Disconnect device",
+  caption: "Confirm removal after reviewing what happens to local work and saved records.",
+  left: 3456px,
+  top: 0px,
+  overrides: [insert(scrim, after = devices.main)],
+
+  scrim = frame {
+    left: 0px,
+    top: 0px,
+    width: 100%,
+    height: 100%,
+    ignore-stack: .true,
+    layout: {justify-content: .center, align-items: .center},
+    fill: c.colors.overlay,
+    children: form,
+
+    form = frame : dialogs.dialog {
+      footer {
+        actions {
+          cancel {
+            connections[0].target: devices
+          }
+
+          confirm {
+            label {
+              contents: "Disconnect device"
+            }
+          }
+        }
+      }
+
+      content {
+        message {
+          contents: "Removes Ubuntu Dev from Baton. If it is offline, agents still running on it will keep running locally. Past chats and records are kept. This does not undo file changes or commands already run."
+        }
+      }
+
+      heading {
+        contents: "Disconnect “Ubuntu Dev”?"
+      }
+    }
   }
 }

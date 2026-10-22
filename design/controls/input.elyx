@@ -4,7 +4,7 @@ import "foundations/typography.elyx" as t
 import "resources/assets/chevron-down.svg" as chevronAsset
 
 export input = frame {
-  title: "输入框 / 占位",
+  title: "Input / Placeholder",
   width: 320px,
   height: s.size.control,
   layout: {align-items: .center},
@@ -15,38 +15,38 @@ export input = frame {
   children: value,
 
   value = text : t.small {
-    contents: "例如 Baton 开发",
+    contents: "e.g. Baton Dev",
     fill[0].color: c.colors.faint
   }
 }
 
 @variant
 export filled = frame : input {
-  title: "输入框 / 已填写",
+  title: "Input / Filled",
   top: 56px,
 
   value {
     fill[0].color: c.colors.text,
-    contents: "Baton 开发"
+    contents: "Baton Dev"
   }
 }
 
 @variant
 export focus = frame : input {
-  title: "输入框 / 焦点",
+  title: "Input / Focus",
   top: 112px,
   border[0].color: c.colors.focus,
   border[0].width: 1.5px,
 
   value {
     fill[0].color: c.colors.text,
-    contents: "Baton 开发"
+    contents: "Baton Dev"
   }
 }
 
 @variant
 export error = frame : input {
-  title: "输入框 / 错误",
+  title: "Input / Error",
   top: 168px,
   border[0].color: c.colors.danger,
 
@@ -55,10 +55,10 @@ export error = frame : input {
   }
 }
 
-// 多行文本
+// Multiline text input
 @variant
 export textarea = frame : input {
-  title: "多行输入",
+  title: "Textarea",
   top: 224px,
   height: 80px,
   padding-top: 8px,
@@ -70,13 +70,13 @@ export textarea = frame : input {
 
   value {
     width: 100%,
-    contents: "补充说明"
+    contents: "Additional context"
   }
 }
 
-// 下拉选择：值 + 右侧箭头
+// Select dropdown: value + trailing chevron
 export select = frame {
-  title: "下拉选择",
+  title: "Select",
   left: 360px,
   width: 240px,
   height: s.size.control,
@@ -105,7 +105,7 @@ export select = frame {
 
 @variant
 export selectCompact = frame : select {
-  title: "下拉选择 / 紧凑",
+  title: "Select / Compact",
   left: 360px,
   top: 56px,
   width: .auto,

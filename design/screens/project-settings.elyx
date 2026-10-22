@@ -10,8 +10,8 @@ import "controls/field.elyx" as fields
 import "controls/label.elyx" as labels
 
 settings = frame : page.projectPage {
-  title: "Project 设置",
-  caption: "标题、目标和模型改完即保存。模型从下一次运行起生效。暂停和归档写明对 Project Agent、Thread 和事项的影响；没有删除。",
+  title: "Project settings",
+  caption: "Changes save automatically. The next reply uses the updated goal and model.",
   left: 0px,
   top: 0px,
   overrides: [insert(scrim, after = page.projectPage.overview)],
@@ -36,13 +36,13 @@ settings = frame : page.projectPage {
           @with-variant(buttons.secondary)
           confirm {
             label {
-              contents: "完成"
+              contents: "Done"
             }
           }
         }
 
         note {
-          contents: "改动自动保存。"
+          contents: "Changes save automatically."
         }
       }
 
@@ -57,7 +57,7 @@ settings = frame : page.projectPage {
       }
 
       heading {
-        contents: "Baton 开发 · 设置"
+        contents: "Baton Dev · settings"
       }
 
       general = frame {
@@ -84,14 +84,14 @@ settings = frame : page.projectPage {
           input {
             value {
               fill[0].color: c.colors.text,
-              contents: "第一个里程碑：一件真实工作跨设备走通全程，回复带附件回来。"
+              contents: "Milestone 1: run real work end-to-end across devices and return replies with attachments."
             }
 
             height: 64px
           }
 
           helper {
-            contents: "修改后 Project Agent 在下一次处理消息时收到通知。"
+            contents: "The project assistant uses this goal on its next reply."
           }
         }
       }
@@ -105,7 +105,7 @@ settings = frame : page.projectPage {
 
         agentLabel = frame : labels.label {
           labelText {
-            contents: "Project Agent 使用的模型"
+            contents: "Project assistant model"
           }
         }
 
@@ -118,7 +118,7 @@ settings = frame : page.projectPage {
             width: 100%,
 
             value {
-              contents: "ChatGPT 订阅"
+              contents: "ChatGPT subscription"
             }
           }
 
@@ -133,7 +133,7 @@ settings = frame : page.projectPage {
 
         agentHelp = text : t.caption {
           width: 100%,
-          contents: "从下一次运行起生效，Ubuntu 开发机上正在进行的这次运行不受影响。",
+          contents: "Applies to the next reply. The current reply on Ubuntu Dev continues with its existing model.",
           fill[0].color: c.colors.muted
         }
       }
@@ -151,7 +151,7 @@ settings = frame : page.projectPage {
           action {
             label {
               fill[0].color: c.colors.danger,
-              contents: "归档"
+              contents: "Archive"
             }
 
             @with-variant(icons.archive)
@@ -162,11 +162,11 @@ settings = frame : page.projectPage {
 
           copy {
             rowText {
-              contents: "Project Agent 停止运行，待处理事项撤回并注明原因。对话、记忆和 Thread 保留。"
+              contents: "Stops the project assistant and closes open questions. Past chats and memory are kept. Work in individual threads continues."
             }
 
             rowTitle {
-              contents: "归档 Project"
+              contents: "Archive project"
             }
           }
         }
@@ -176,8 +176,8 @@ settings = frame : page.projectPage {
 }
 
 archiveConfirm = frame : page.projectPage {
-  title: "归档确认",
-  caption: "归档用单独的弹窗确认，替换设置弹窗，不叠第二层。正文写明会停止什么、保留什么。",
+  title: "Archive confirmation",
+  caption: "Archiving stops the project assistant and closes questions. Past chats are kept.",
   left: 1728px,
   top: 0px,
   overrides: [insert(scrim, after = page.projectPage.overview)],
@@ -194,12 +194,12 @@ archiveConfirm = frame : page.projectPage {
 
     form = frame : dialogs.dialog {
       heading {
-        contents: "归档「Baton 开发」？"
+        contents: "Archive “Baton Dev”?"
       }
 
       content {
         message {
-          contents: "Project Agent 停止这次运行，之后不再启动。1 个待处理事项会被撤回，原因写为 Project 已归档。对话、记忆和 Thread 都会保留。"
+          contents: "Stops the project assistant and closes 1 open question. Past chats and project memory are kept. Work in individual threads continues."
         }
       }
 
@@ -207,7 +207,7 @@ archiveConfirm = frame : page.projectPage {
         actions {
           confirm {
             label {
-              contents: "归档"
+              contents: "Archive"
             }
           }
         }

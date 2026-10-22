@@ -7,15 +7,15 @@ import "controls/status.elyx" as status
 import "controls/badge.elyx" as badges
 import "controls/avatar.elyx" as avatars
 
-// 选项行：Project Agent 给出的一个选择。浅灰底、无边框，前面是序号，建议项带标签
+// Option row: one choice offered by the Project Agent. Subtle background, no border, leading number, and Recommended tag when suggested
 export option = frame {
-  title: "事项选项",
+  title: "Attention option",
   width: 480px,
-  height: 36px,
+  min-height: 36px,
   layout: {align-items: .center, item-gap: 10px},
   fill: c.colors.subtle,
   corner-radius: 10px,
-  padding: [0px, s.space.md],
+  padding: [8px, s.space.md],
   children: [index, label, suggested],
 
   index = text : t.mono {
@@ -26,8 +26,8 @@ export option = frame {
 
   label = text : t.small {
     width: 100%,
-    contents: "调查原因并修复",
-    line-height: 1
+    contents: "Find the cause and fix it",
+    line-height: 1.4
   }
 
   suggested = frame : badges.tagAgent {
@@ -37,7 +37,7 @@ export option = frame {
 
 @variant
 export optionSuggested = frame : option {
-  title: "事项选项 / 建议",
+  title: "Attention option / Recommended",
   top: 48px,
 
   suggested {
@@ -45,10 +45,10 @@ export optionSuggested = frame : option {
   }
 }
 
-// 事项卡片：Project Agent 请用户做的决定。主对话、关联的 Thread 和待处理页显示同一个事项。
-// 外观和 Thread 卡片一致：发丝线外框、14px 圆角、两层浅阴影。
+// Attention card: a decision requested by the Project Agent. Shown in the main conversation, linked Thread, and Inbox.
+// Matches Thread card styling: hairline border, 14px radius, two soft shadows.
 export attentionCard = frame {
-  title: "事项 / 待处理",
+  title: "Attention card / Open",
   top: 120px,
   width: s.size.measure,
   layout: {direction: .column, item-gap: 10px},
@@ -92,14 +92,14 @@ export attentionCard = frame {
         projectAvatar = frame : avatars.amber {}
 
         projectName = text : t.label {
-          contents: "兼容性测试"
+          contents: "Compatibility"
         }
       }
 
       mark = shape : status.dotAttention {}
 
       kindLabel = text : t.captionMedium {
-        contents: "等你决定",
+        contents: "Waiting for your reply",
         fill[0].color: c.colors.attentionText
       }
 
@@ -107,7 +107,7 @@ export attentionCard = frame {
         display: .none,
 
         value {
-          contents: "Baton 创建"
+          contents: "Sign-in required"
         }
       }
     }
@@ -120,12 +120,12 @@ export attentionCard = frame {
 
   heading = text : t.heading {
     width: 100%,
-    contents: "重连测试有 1 项失败，下一步怎么处理？"
+    contents: "1 reconnect test failed on Windows. What next?"
   }
 
   summary = text : t.small {
     width: 100%,
-    contents: "TestReconnectAfterSleep 在 Windows 睡眠唤醒后 30 秒内没有重新连上，另外 47 项通过。日志显示唤醒后第一次 TLS 握手超时。",
+    contents: "TestReconnectAfterSleep did not reconnect within 30s after waking from sleep on Windows; the other 47 tests passed. Logs show the first TLS handshake after wake timed out.",
     fill[0].color: c.colors.muted
   }
 
@@ -140,12 +140,12 @@ export attentionCard = frame {
     threadDot = shape : status.dotIdle {}
 
     threadName = text : t.caption {
-      contents: "在 Windows 上跑重连测试",
+      contents: "Run reconnect tests on Windows",
       fill[0].color: c.colors.text
     }
 
     threadState = text : t.caption {
-      contents: "空闲",
+      contents: "Idle",
       fill[0].color: c.colors.faint
     }
   }
@@ -168,7 +168,7 @@ export attentionCard = frame {
       }
 
       label {
-        contents: "先跳过，继续 Ubuntu 和 macOS 的验收"
+        contents: "Skip for now and test Ubuntu and macOS"
       }
     }
 
@@ -180,7 +180,7 @@ export attentionCard = frame {
       }
 
       label {
-        contents: "在 Windows 上重跑一次，排除偶发"
+        contents: "Run the Windows test once more"
       }
     }
   }
@@ -196,7 +196,7 @@ export attentionCard = frame {
 
       label {
         fill[0].color: c.colors.muted,
-        contents: "附加说明或直接回复"
+        contents: "Add a note or reply"
       }
 
       @with-variant(icons.message)
@@ -215,7 +215,7 @@ export attentionCard = frame {
 
       label {
         fill[0].color: c.colors.muted,
-        contents: "关闭事项"
+        contents: "Close question"
       }
     }
   }
@@ -229,27 +229,27 @@ export attentionCard = frame {
     answerGlyph = asset : icons.check {
       width: 14px,
       height: 14px,
-      fill[0].color: c.colors.success
+      fill[0].color: c.colors.muted
     }
 
     answerText = text : t.small {
-      contents: "调查原因并修复 · 何家健 14:51",
+      contents: "Find the cause and fix it · Kaken He 14:51",
       fill[0].color: c.colors.muted
     }
   }
 }
 
-// 已处理：收起选项，保留标题和处理结果
+// Answered: collapses options and keeps the heading and resolution
 @variant
 export attentionAnswered = frame : attentionCard {
-  title: "事项 / 已回答",
+  title: "Attention card / Answered",
   top: 560px,
 
   head {
     kind {
       kindLabel {
         fill[0].color: c.colors.muted,
-        contents: "已回答"
+        contents: "Answered"
       }
 
       @with-variant(status.dotIdle)
@@ -274,10 +274,10 @@ export attentionAnswered = frame : attentionCard {
   }
 }
 
-// 待处理页里的事项：开头显示所属 Project
+// Attention item in Inbox: shows its parent Project at the start of the header
 @variant
 export inboxItem = frame : attentionCard {
-  title: "事项 / 待处理页",
+  title: "Attention card / Inbox",
   top: 720px,
 
   head {
@@ -289,21 +289,27 @@ export inboxItem = frame : attentionCard {
   }
 }
 
-// 系统事项：Baton 直接创建，没有选项，只能去处理位置或关闭
+// System item: created directly by Baton with no options; links to the Project or can be dismissed
 @variant
 export systemItem = frame : attentionCard {
-  title: "事项 / 系统",
+  title: "Attention card / System",
   top: 1160px,
 
   footer {
     reply {
       label {
         fill[0].color: c.colors.link,
-        contents: "打开 Project 重试"
+        contents: "Go to project"
       }
 
       lead {
         display: .none
+      }
+    }
+
+    close {
+      label {
+        contents: "Close notice"
       }
     }
   }
@@ -317,11 +323,11 @@ export systemItem = frame : attentionCard {
   }
 
   summary {
-    contents: "Ubuntu 开发机上的 ChatGPT 订阅返回 401，需要重新登录。之后的消息和 Thread 回复都已保存，重试后从原位置继续。"
+    contents: "Sign in to ChatGPT on Ubuntu Dev, then retry in the project. Your messages and replies are saved."
   }
 
   heading {
-    contents: "Project Agent 暂停：模型请求连续失败 5 次"
+    contents: "ChatGPT sign-in expired on Ubuntu Dev"
   }
 
   head {
@@ -331,22 +337,18 @@ export systemItem = frame : attentionCard {
 
     kind {
       kindLabel {
-        contents: "需要处理"
+        contents: "Needs attention"
       }
 
       project {
         projectName {
-          contents: "Baton 开发"
+          contents: "Baton Dev"
         }
 
         display: .visible,
 
         @with-variant(avatars.avatar)
         projectAvatar {}
-      }
-
-      system {
-        display: .visible
       }
     }
   }

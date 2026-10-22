@@ -7,9 +7,9 @@ import "controls/avatar.elyx" as avatars
 import "controls/badge.elyx" as badges
 import "controls/status.elyx" as status
 
-// 导航行：图标、名称、右侧数量或说明
+// Navigation row: icon, label, and trailing count or note
 export navRow = frame {
-  title: "导航行",
+  title: "Nav row",
   width: 232px,
   height: s.size.row,
   layout: {
@@ -32,7 +32,7 @@ export navRow = frame {
     }
 
     label = text : t.small {
-      contents: "待处理"
+      contents: "Inbox"
     }
   }
 
@@ -48,7 +48,7 @@ export navRow = frame {
 
     note = text : t.caption {
       display: .none,
-      contents: "2/3 在线",
+      contents: "2/3 online",
       fill[0].color: c.colors.faint
     }
   }
@@ -56,7 +56,7 @@ export navRow = frame {
 
 @variant
 export navRowActive = frame : navRow {
-  title: "导航行 / 当前",
+  title: "Nav row / Active",
   top: 40px,
   fill[0].color: c.colors.selected,
 
@@ -71,9 +71,9 @@ export navRowActive = frame : navRow {
   }
 }
 
-// Project 行：头像、标题、右侧状态。只在需要用户注意时显示状态。
+// Project row: avatar, title, and trailing status. Shows status only when it needs user attention or is active.
 export projectRow = frame {
-  title: "Project 行 / 空闲",
+  title: "Project row / Idle",
   top: 96px,
   width: 232px,
   height: 30px,
@@ -93,7 +93,7 @@ export projectRow = frame {
     avatar = frame : avatars.avatar {}
 
     name = text : t.small {
-      contents: "文档整理"
+      contents: "Docs Cleanup"
     }
   }
 
@@ -118,7 +118,7 @@ export projectRow = frame {
 
     note = text : t.caption {
       display: .none,
-      contents: "等待设备",
+      contents: "Waiting",
       fill[0].color: c.colors.faint
     }
   }
@@ -126,7 +126,7 @@ export projectRow = frame {
 
 @variant
 export projectRowActive = frame : projectRow {
-  title: "Project 行 / 当前",
+  title: "Project row / Active",
   top: 136px,
   fill[0].color: c.colors.selected,
 
@@ -139,7 +139,7 @@ export projectRowActive = frame : projectRow {
 
 @variant
 export projectRowLive = frame : projectRow {
-  title: "Project 行 / 运行中",
+  title: "Project row / Running",
   top: 176px,
 
   trail {
@@ -151,7 +151,7 @@ export projectRowLive = frame : projectRow {
 
 @variant
 export projectRowAttention = frame : projectRow {
-  title: "Project 行 / 等你处理",
+  title: "Project row / Needs attention",
   top: 216px,
 
   trail {
@@ -163,7 +163,7 @@ export projectRowAttention = frame : projectRow {
 
 @variant
 export projectRowPaused = frame : projectRow {
-  title: "Project 行 / 已暂停",
+  title: "Project row / Paused",
   top: 256px,
 
   lead {
@@ -181,7 +181,7 @@ export projectRowPaused = frame : projectRow {
 
 @variant
 export projectRowWaiting = frame : projectRow {
-  title: "Project 行 / 等待设备",
+  title: "Project row / Waiting for device",
   top: 296px,
 
   trail {
@@ -191,10 +191,10 @@ export projectRowWaiting = frame : projectRow {
   }
 }
 
-// 侧栏：全局导航 + Project 列表 + 账户
+// Sidebar: global navigation, Project list, and employee account
 export sidebar = frame {
-  title: "侧栏",
-  caption: "248px。上方是跨 Project 的入口，下方是 Project 列表。",
+  title: "Sidebar",
+  caption: "Navigate between inbox, threads, devices, and projects.",
   left: 320px,
   width: s.size.sidebar,
   height: s.size.screenHeight,
@@ -270,7 +270,7 @@ export sidebar = frame {
 
         lead {
           label {
-            contents: "Thread"
+            contents: "Threads"
           }
 
           @with-variant(icons.terminal)
@@ -293,7 +293,7 @@ export sidebar = frame {
 
         lead {
           label {
-            contents: "设备"
+            contents: "Devices"
           }
 
           @with-variant(icons.device)
@@ -310,7 +310,7 @@ export sidebar = frame {
       children: [sectionLabel, sectionAdd],
 
       sectionLabel = text : t.captionMedium {
-        contents: "Project",
+        contents: "Projects",
         fill[0].color: c.colors.faint
       }
 
@@ -331,7 +331,7 @@ export sidebar = frame {
 
         lead {
           name {
-            contents: "Baton 开发"
+            contents: "Baton Dev"
           }
 
           avatar {
@@ -353,7 +353,7 @@ export sidebar = frame {
 
         lead {
           name {
-            contents: "兼容性测试"
+            contents: "Compatibility"
           }
 
           @with-variant(avatars.amber)
@@ -379,7 +379,7 @@ export sidebar = frame {
 
         lead {
           name {
-            contents: "交换机巡检"
+            contents: "Switch Patrol"
           }
 
           @with-variant(avatars.green)
@@ -406,7 +406,7 @@ export sidebar = frame {
       person = frame : avatars.person {}
 
       personName = text : t.small {
-        contents: "何家健"
+        contents: "Kaken He"
       }
     }
 

@@ -4,9 +4,9 @@ import "foundations/typography.elyx" as t
 import "controls/icons.elyx" as icons
 import "controls/status.elyx" as status
 
-// 菜单里的一项：可选的状态点、名称、右侧浅色说明和当前选中
+// Menu option: optional status dot, label, trailing faint note, and selected checkmark
 export menuOption = frame {
-  title: "菜单项",
+  title: "Menu option",
   left: 0px,
   top: 0px,
   width: 288px,
@@ -40,10 +40,10 @@ export menuOption = frame {
   }
 }
 
-// 设备上发现的仓库：右侧是路径
+// Repository discovered on a device: shows path on the right
 @variant
 export menuOptionRepo = frame : menuOption {
-  title: "菜单项 / 仓库",
+  title: "Menu option / Repository",
   left: 0px,
   top: 48px,
 
@@ -58,9 +58,9 @@ export menuOptionRepo = frame : menuOption {
   }
 }
 
-// 菜单分组的标题：最近、设备名或 Agent 名。设备分组带连接状态，离线时写明
+// Menu group heading: Recent, device name, or Agent name. Device groups show connection status and note when offline
 export menuHeading = frame {
-  title: "菜单分组标题",
+  title: "Menu group heading",
   left: 0px,
   top: 96px,
   width: 288px,
@@ -75,22 +75,22 @@ export menuHeading = frame {
 
   label = text : t.captionMedium {
     width: 100%,
-    contents: "最近",
+    contents: "Recent",
     line-height: 1,
     fill[0].color: c.colors.faint
   }
 
   note = text : t.caption {
     display: .none,
-    contents: "离线",
+    contents: "Offline",
     line-height: 1,
     fill[0].color: c.colors.faint
   }
 }
 
-// 菜单面板：白底、外框和浅阴影
+// Menu panel: white surface, border, and soft shadow
 export menu = frame {
-  title: "菜单",
+  title: "Menu",
   left: 0px,
   top: 144px,
   width: 304px,
@@ -108,9 +108,9 @@ export menu = frame {
   padding: s.space.xs
 }
 
-// 分组之间的细线
+// Thin rule between menu groups
 export menuRule = frame {
-  title: "菜单分隔线",
+  title: "Menu divider",
   left: 0px,
   top: 216px,
   width: 288px,
@@ -125,10 +125,10 @@ export menuRule = frame {
   }
 }
 
-// 位置菜单：先列最近用过的位置，再按设备列出发现的仓库，最后可以在登记目录里选其他目录。
-// 离线设备照样可选，选中后 Thread 等它上线再开始
+// Location menu: lists recent locations first, then discovered repositories by device, and finally other directories inside registered roots.
+// Offline devices remain selectable; the Thread waits until that device comes online
 export locationMenu = frame : menu {
-  title: "位置菜单",
+  title: "Location menu",
   left: 0px,
   top: 280px,
   overrides: [
@@ -168,7 +168,7 @@ export locationMenu = frame : menu {
     width: 100%,
 
     note {
-      contents: "Windows 台式机"
+      contents: "Windows Desktop"
     }
 
     name {
@@ -216,7 +216,7 @@ export locationMenu = frame : menu {
     width: 100%,
 
     label {
-      contents: "Windows 台式机"
+      contents: "Windows Desktop"
     }
 
     mark {
@@ -240,7 +240,7 @@ export locationMenu = frame : menu {
     width: 100%,
 
     label {
-      contents: "Ubuntu 开发机"
+      contents: "Ubuntu Dev"
     }
 
     note {
@@ -274,7 +274,7 @@ export locationMenu = frame : menu {
 
     name {
       fill[0].color: c.colors.muted,
-      contents: "其他目录…"
+      contents: "Choose another folder…"
     }
 
     note {
@@ -283,9 +283,9 @@ export locationMenu = frame : menu {
   }
 }
 
-// 模型菜单：按 Agent 分组，只列这个位置的设备上已接入的 Agent。选模型就选定了 Agent
+// Model menu: grouped by Agent, listing only Agents available on the selected location's device. Choosing a model selects its Agent
 export modelMenu = frame : menu {
-  title: "模型菜单",
+  title: "Model menu",
   left: 400px,
   top: 280px,
   width: 240px,
@@ -403,9 +403,9 @@ export modelMenu = frame : menu {
   }
 }
 
-// Thread 里的模型菜单：只列这个 Thread 的 Agent 的模型，不分组。新的一轮从选中的模型开始
+// Thread model menu: lists only models for the Thread's Agent without grouping. The next turn uses the selected model
 export threadModelMenu = frame : menu {
-  title: "Thread 模型菜单",
+  title: "Thread model menu",
   left: 720px,
   top: 280px,
   width: 240px,
@@ -457,9 +457,9 @@ export threadModelMenu = frame : menu {
   }
 }
 
-// Agent 不支持中途换模型：只显示当前模型，下面写原因
+// Agent does not support switching models mid-Thread: shows the current model and the reason below
 export threadModelMenuFixed = frame : menu {
-  title: "Thread 模型菜单 / 不能换",
+  title: "Thread model menu / Fixed",
   left: 1040px,
   top: 280px,
   width: 240px,
@@ -488,7 +488,7 @@ export threadModelMenuFixed = frame : menu {
 
     reasonText = text : t.caption {
       width: 100%,
-      contents: "Kiro 不支持中途换模型",
+      contents: "To use another model with Kiro, start a new chat.",
       fill[0].color: c.colors.faint
     }
   }

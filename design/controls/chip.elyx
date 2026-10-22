@@ -4,10 +4,10 @@ import "foundations/typography.elyx" as t
 import "controls/icons.elyx" as icons
 import "controls/status.elyx" as status
 
-// 选择片：输入区工具栏里的位置和模型选择，平时无底色，悬停时出现浅底。
-// 位置是目录加设备，例如「baton · MacBook Pro」
+// Picker chip: location and model selectors in composer toolbars; transparent at rest, subtle fill on hover.
+// Location is directory plus device, e.g. "baton · MacBook Pro"
 export chip = frame {
-  title: "选择片 / 位置",
+  title: "Picker chip / Location",
   width: .auto,
   height: s.size.compact,
   layout: {align-items: .center, item-gap: 6px},
@@ -35,7 +35,7 @@ export chip = frame {
 
 @variant
 export chipModel = frame : chip {
-  title: "选择片 / 模型",
+  title: "Picker chip / Model",
   left: 200px,
 
   label {
@@ -48,14 +48,14 @@ export chipModel = frame : chip {
 
 @variant
 export chipHover = frame : chip {
-  title: "选择片 / 悬停",
+  title: "Picker chip / Hover",
   left: 360px,
   fill[0].color: c.colors.hover
 }
 
-// 状态片：浮在输入区上方，汇总这个 Project 里需要留意的 Thread 和事项，点开定位到概览
+// Status chip: floats above the composer to summarize active Threads and items when the overview panel is replaced
 export statusChip = frame {
-  title: "状态片 / 执行中",
+  title: "Status chip / Running",
   top: 56px,
   width: .auto,
   height: s.size.compact,
@@ -76,7 +76,7 @@ export statusChip = frame {
   mark = shape : status.dot {}
 
   label = text : t.small {
-    contents: "执行中",
+    contents: "Running",
     line-height: 1
   }
 
@@ -91,7 +91,7 @@ export statusChip = frame {
 
 @variant
 export statusChipQueued = frame : statusChip {
-  title: "状态片 / 等待设备",
+  title: "Status chip / Waiting",
   left: 120px,
   top: 56px,
 
@@ -100,7 +100,7 @@ export statusChipQueued = frame : statusChip {
   }
 
   label {
-    contents: "等待设备"
+    contents: "Waiting for device"
   }
 
   @with-variant(status.dotQueued)
@@ -111,8 +111,8 @@ export statusChipQueued = frame : statusChip {
 
 @variant
 export statusChipAttention = frame : statusChip {
-  title: "状态片 / 等你决定",
-  left: 256px,
+  title: "Status chip / Decision",
+  left: 296px,
   top: 56px,
 
   count {
@@ -120,7 +120,7 @@ export statusChipAttention = frame : statusChip {
   }
 
   label {
-    contents: "等你决定"
+    contents: "Needs decision"
   }
 
   @with-variant(status.dotAttention)

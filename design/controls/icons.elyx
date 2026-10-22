@@ -34,8 +34,8 @@ import "resources/assets/stop.svg" as stopAsset
 import "resources/assets/tasks.svg" as tasksAsset
 import "resources/assets/terminal.svg" as terminalAsset
 
-// 图标：24 视框、1.7px 描边、单色，用 fill 着色。
-// 每个图标都是 glyph 的变体，实例里可以用 @with-variant(icons.<名称>) 换图标。
+// Icons: 24px viewBox, 1.7px stroke, monochrome, tinted with fill.
+// Every icon is a variant of glyph; swap icons in instances with @with-variant(icons.<name>).
 export glyph = asset {
   title: "glyph",
   width: 20px,
