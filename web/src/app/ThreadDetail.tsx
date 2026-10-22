@@ -1,13 +1,14 @@
 import * as stylex from '@stylexjs/stylex'
 import { useNavigate } from '@tanstack/react-router'
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { ClientError } from '../data/client'
-import { agentNames, runTimer, threadView, type ThreadAction, type ThreadNotice, type ThreadView } from '../data/derive'
+import { agentNames, shortenExcerpt, threadView, type ThreadAction, type ThreadNotice } from '../data/derive'
 import {
   newClientId,
   useArchiveThread,
   useCancelMessage,
   useDevices,
+  useEarlierHistory,
   useMessages,
   useOperation,
   useResumeThread,
@@ -16,7 +17,7 @@ import {
   useStopThread,
   useThreads,
 } from '../data/queries'
-import type { Device, DeviceAgent, Message, SendMode, Thread } from '../data/types'
+import type { Device, DeviceAgent, ID, Message, Reference, SendMode, Thread } from '../data/types'
 import { text } from '../theme/text'
 import { colors, radius, size, space } from '../theme/tokens.stylex'
 import { Banner } from '../ui/Banner'
@@ -30,7 +31,10 @@ import { StatusDot, type Tone } from '../ui/Status'
 import { FilePreview } from './FilePreview'
 import { MessageBody } from './MessageBody'
 import { Page } from './Page'
+import { ActivityTrace, Attachments, HistoryPager, LiveOutput } from './ReplyParts'
+import { copySelection, SelectionArea } from './SelectionMenu'
 import { useNow } from './useNow'
+import { useWorkspace } from './workspace'
 
 const styles = stylex.create({
   panel: {
@@ -81,7 +85,7 @@ const styles = stylex.create({
     backgroundColor: colors.subtle,
   },
   withdrawn: { color: colors.muted },
-  agent: { alignSelf: 'stretch' },
+  agent: { display: 'flex', flexDirection: 'column', gap: space.sm, alignSelf: 'stretch' },
   sender: { color: colors.faint },
   note: { display: 'inline-flex', alignItems: 'center', gap: '4px', color: colors.faint },
   noteUnknown: { color: colors.attentionText },
@@ -92,7 +96,6 @@ const styles = stylex.create({
     color: colors.link,
     textDecoration: { default: 'none', ':hover': 'underline' },
   },
-  run: { display: 'inline-flex', alignItems: 'center', gap: '6px' },
   info: { color: colors.info },
   muted: { color: colors.muted },
   danger: { color: colors.danger },
@@ -195,21 +198,36 @@ function errorText(cause: unknown, fallback: string) {
   return cause instanceof ClientError ? cause.message : fallback
 }
 
+// reply 是 Agent 回复的序号，选中文字引用时写明来源；从设备读到的更早对话没有序号，也不读过程。
 function MessageItem({
   message,
+  deviceId,
   device,
-  onOpenPath,
+  devices,
+  reply,
+  earlier,
+  onOpen,
   onCancel,
 }: {
   message: Message
+  deviceId: ID
   device: Device | undefined
-  onOpenPath: (path: string) => void
+  devices: Device[]
+  reply: number | null
+  earlier: boolean
+  onOpen: (deviceId: ID, path: string) => void
   onCancel: (message: Message) => void
 }) {
+  // 回复里的路径指向 Thread 所在设备。
+  const onOpenPath = (path: string) => onOpen(deviceId, path)
   if (message.role === 'agent') {
     return (
       <article id={`message-${message.id}`} {...stylex.props(text.body, styles.agent)}>
-        <MessageBody body={message.body} onOpenPath={onOpenPath} />
+        {!earlier && <ActivityTrace message={message} device={device} />}
+        <div data-reply={reply ?? 'earlier'}>
+          <MessageBody body={message.body} onOpenPath={onOpenPath} />
+        </div>
+        <Attachments attachments={message.attachments} devices={devices} onOpen={onOpen} />
       </article>
     )
   }
@@ -287,26 +305,6 @@ function NoticeCard({ notice, action }: { notice: ThreadNotice; action: ReactNod
   )
 }
 
-// 执行中的一轮：设备在线时计时，离线时只写最后报告的状态。
-function RunLine({ thread, view, now }: { thread: Thread; view: ThreadView; now: number }) {
-  if (thread.status !== 'running' || thread.runStartedAt === null) return null
-  if (!view.live) {
-    return (
-      <span {...stylex.props(text.small, styles.run, styles.muted)}>
-        <StatusDot tone="hollow" />
-        Last seen running
-      </span>
-    )
-  }
-  return (
-    <span {...stylex.props(text.small, styles.run, styles.info)}>
-      <StatusDot tone="info" />
-      {thread.pending ? 'Stopping' : 'Running'} ·{' '}
-      <span {...stylex.props(text.mono)}>{runTimer(thread.runStartedAt, now)}</span>
-    </span>
-  )
-}
-
 function ModelMenu({
   thread,
   agent,
@@ -373,8 +371,11 @@ export function ThreadDetail({
   const [error, setError] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<Confirm>(null)
   const [resumeId, setResumeId] = useState<string | null>(null)
-  const [previewPath, setPreviewPath] = useState<string | null>(null)
+  const [preview, setPreview] = useState<{ deviceId: ID; path: string; reply: number | null } | null>(null)
   const timelineRef = useRef<HTMLDivElement | null>(null)
+  const historyAnchor = useRef<number | null>(null)
+  const history = useEarlierHistory(threadId)
+  const workspace = useWorkspace()
   const resumeOperation = useOperation(resumeId)
 
   const thread = threads.data?.find((item) => item.id === threadId)
@@ -394,6 +395,14 @@ export function ThreadDetail({
     const node = timelineRef.current
     if (node) node.scrollTop = node.scrollHeight
   }, [list.length])
+
+  // 更早的消息插到顶部后，保持原来看到的位置。
+  useLayoutEffect(() => {
+    const node = timelineRef.current
+    if (!node || historyAnchor.current === null) return
+    node.scrollTop = node.scrollHeight - historyAnchor.current
+    historyAnchor.current = null
+  }, [history.messages.length])
 
   if (threads.isError) {
     return (
@@ -427,6 +436,38 @@ export function ThreadDetail({
   const waiting = waitingCount(list)
   const resuming = resumeOperation.data !== undefined && !['done', 'failed'].includes(resumeOperation.data.phase)
   const resumeFailed = resumeOperation.data?.phase === 'failed' ? resumeOperation.data.detail : null
+
+  const loadEarlier = () => {
+    const node = timelineRef.current
+    if (node) historyAnchor.current = node.scrollHeight - node.scrollTop
+    history.load()
+  }
+
+  // 选中回复里的文字：属于 Project 时带着来源去问 Project 助手，否则复制。
+  const describeSelection = (range: Range, value: string) => {
+    const start = range.startContainer
+    const element = start instanceof Element ? start : start.parentElement
+    const body = element?.closest<HTMLElement>('[data-reply]')
+    if (!body) return null
+    if (!thread.projectId) return () => copySelection(value)
+    const projectId = thread.projectId
+    const reference: Reference = {
+      kind: 'thread',
+      title: thread.title,
+      threadId,
+      reply: body.dataset.reply === 'earlier' ? null : Number(body.dataset.reply),
+      deviceId: thread.deviceId,
+      path: null,
+      lines: null,
+      itemId: null,
+      ...shortenExcerpt(value),
+    }
+    return () => workspace.askProject(projectId, reference)
+  }
+
+  let replies = 0
+  const openFile = (reply: number | null) => (deviceId: ID, path: string) => setPreview({ deviceId, path, reply })
+  const deviceList = devices.data ?? []
 
   const onSend = () => {
     const body = draft.trim()
@@ -548,7 +589,26 @@ export function ThreadDetail({
     <div {...stylex.props(styles.split)}>
       <div {...stylex.props(styles.main)}>
         <div ref={timelineRef} tabIndex={-1} aria-label="Messages" role="region" {...stylex.props(styles.timeline)}>
-          <div {...stylex.props(styles.messages, layout === 'panel' && styles.messagesPanel)}>
+          <SelectionArea
+            label={thread.projectId ? 'Ask project assistant' : 'Copy selection'}
+            icon={thread.projectId ? 'reply' : 'copy'}
+            describe={describeSelection}
+            style={[styles.messages, layout === 'panel' && styles.messagesPanel]}
+          >
+            {thread.earlier && <HistoryPager history={{ ...history, load: loadEarlier }} device={device} />}
+            {history.messages.map((message) => (
+              <MessageItem
+                key={message.id}
+                message={message}
+                deviceId={thread.deviceId}
+                device={device}
+                devices={deviceList}
+                reply={null}
+                earlier
+                onOpen={openFile(null)}
+                onCancel={onCancel}
+              />
+            ))}
             {messages.isPending && <p {...stylex.props(text.caption, styles.muted)}>Loading messages…</p>}
             {messages.isError && (
               <Banner
@@ -561,17 +621,24 @@ export function ThreadDetail({
                 }
               />
             )}
-            {list.map((message) => (
-              <MessageItem
-                key={message.id}
-                message={message}
-                device={device}
-                onOpenPath={setPreviewPath}
-                onCancel={onCancel}
-              />
-            ))}
-            <RunLine thread={thread} view={view} now={now} />
-          </div>
+            {list.map((message) => {
+              const reply = message.role === 'agent' ? ++replies : null
+              return (
+                <MessageItem
+                  key={message.id}
+                  message={message}
+                  deviceId={thread.deviceId}
+                  device={device}
+                  devices={deviceList}
+                  reply={reply}
+                  earlier={false}
+                  onOpen={openFile(reply)}
+                  onCancel={onCancel}
+                />
+              )
+            })}
+            <LiveOutput thread={thread} device={device} live={view.live} now={now} />
+          </SelectionArea>
         </div>
         <div {...stylex.props(styles.dock, layout === 'panel' && styles.dockPanel)}>
           {view.notice && (
@@ -659,14 +726,21 @@ export function ThreadDetail({
           </div>
         </div>
       </div>
-      {previewPath && layout === 'page' && (
-        <FilePreview deviceId={thread.deviceId} path={previewPath} onClose={() => setPreviewPath(null)} />
-      )}
     </div>
   )
 
   const dialogs = (
     <>
+      {preview && (
+        <FilePreview
+          key={`${preview.deviceId}:${preview.path}`}
+          deviceId={preview.deviceId}
+          path={preview.path}
+          onClose={() => setPreview(null)}
+          projectId={thread.projectId}
+          source={{ threadId, reply: preview.reply }}
+        />
+      )}
       <StopDialog
         open={confirm === 'stop'}
         onClose={() => setConfirm(null)}
@@ -725,9 +799,6 @@ export function ThreadDetail({
         {onClose && <IconButton icon="close" label="Close chat" onClick={onClose} />}
       </div>
       {body}
-      {previewPath && (
-        <FilePreviewDialog deviceId={thread.deviceId} path={previewPath} onClose={() => setPreviewPath(null)} />
-      )}
       {dialogs}
     </aside>
   )
@@ -753,15 +824,6 @@ function Shell({
       </div>
       {children}
     </aside>
-  )
-}
-
-// 列表右侧的面板太窄，文件预览改在弹窗里显示。
-function FilePreviewDialog({ deviceId, path, onClose }: { deviceId: string; path: string; onClose: () => void }) {
-  return (
-    <Dialog open onOpenChange={(open) => !open && onClose()} title="File preview" wide>
-      <FilePreview deviceId={deviceId} path={path} onClose={onClose} />
-    </Dialog>
   )
 }
 

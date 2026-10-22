@@ -25,6 +25,7 @@ const styles = stylex.create({
     boxShadow: shadow.composer,
     cursor: 'text',
   },
+  header: { cursor: 'auto' },
   input: {
     width: '100%',
     minHeight: '24px',
@@ -75,6 +76,7 @@ export function Composer({
   placeholder,
   chips,
   actions,
+  header,
   label = 'Message',
   inputRef,
   style,
@@ -86,6 +88,8 @@ export function Composer({
   chips?: ReactNode
   // 发送按钮左边的控件，例如发送方式和停止。
   actions?: ReactNode
+  // 输入框上方的内容，例如要一起发送的引用。
+  header?: ReactNode
   label?: string
   inputRef?: RefObject<HTMLTextAreaElement | null>
   style?: stylex.StyleXStyles
@@ -102,6 +106,11 @@ export function Composer({
 
   return (
     <div {...stylex.props(styles.composer, style)} onClick={() => ref.current?.focus()}>
+      {header && (
+        <div onClick={(event) => event.stopPropagation()} {...stylex.props(styles.header)}>
+          {header}
+        </div>
+      )}
       <textarea
         ref={ref}
         aria-label={label}

@@ -2,6 +2,7 @@ import * as stylex from '@stylexjs/stylex'
 import { Navigate, Outlet, useLocation, useRouter } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
 import { useSession, useSignOut } from '../data/queries'
+import type { ID, Reference } from '../data/types'
 import { text } from '../theme/text'
 import { colors, space } from '../theme/tokens.stylex'
 import { Button } from '../ui/Button'
@@ -74,6 +75,7 @@ export function WorkspaceLayout() {
   // 退出失败的提示只留在发起退出的页面，切到别的页面后不再显示。
   const [failedAt, setFailedAt] = useState<string | null>(null)
   const [creatingProject, setCreatingProject] = useState(false)
+  const [references, setReferences] = useState<Record<ID, Reference>>({})
 
   const workspace = useMemo<Workspace>(
     () => ({
@@ -91,8 +93,21 @@ export function WorkspaceLayout() {
       newProject() {
         setCreatingProject(true)
       },
+      references,
+      askProject(projectId, reference) {
+        setReferences((current) => ({ ...current, [projectId]: reference }))
+        if (router.state.location.pathname !== `/projects/${projectId}`) {
+          void router.navigate({ to: '/projects/$projectId', params: { projectId } })
+        }
+      },
+      clearReference(projectId) {
+        setReferences((current) => {
+          const { [projectId]: _removed, ...rest } = current
+          return rest
+        })
+      },
     }),
-    [collapsed, signOut, router],
+    [collapsed, signOut, router, references],
   )
 
   if (session.isPending) return null

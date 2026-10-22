@@ -4,17 +4,21 @@ import type {
   Enrollment,
   FilePreview,
   FolderListing,
+  HistoryPage,
   ID,
   InboxItem,
   IssuedEnrollment,
+  LiveOutput,
   MemoryNote,
   Message,
   Operation,
   Project,
   ProjectEntry,
+  Reference,
   SendMode,
   Session,
   Thread,
+  Trace,
 } from './types'
 
 // 数据变化按主题通知，页面据此刷新对应的查询。
@@ -49,6 +53,12 @@ export interface BatonClient {
   listMessages(threadId: ID): Promise<Message[]>
   listInbox(): Promise<InboxItem[]>
   readFile(deviceId: ID, path: string): Promise<FilePreview>
+  // 回复的完整过程留在设备上，展开时读取。
+  readTrace(messageId: ID): Promise<Trace>
+  // 比中心保存的消息更早的对话，从设备按页读取；before 为已显示的最早一条消息，null 从最近一页开始。
+  readHistory(threadId: ID, before: ID | null): Promise<HistoryPage>
+  // 执行中的一轮的实时输出，这一轮结束后为空。
+  readOutput(threadId: ID): Promise<LiveOutput>
   listFolders(deviceId: ID, path: string | null): Promise<FolderListing>
   getOperation(id: ID): Promise<Operation>
 
@@ -79,7 +89,13 @@ export interface BatonClient {
     clientId: string
   }): Promise<Project>
   // 消息先保存；没有设备能运行助手时一直等待，不会过期。
-  sendProjectMessage(input: { projectId: ID; body: string; clientId: string }): Promise<ProjectEntry>
+  // reference 是从回复、文件或事项里选中的一段，作为普通消息的一部分发给助手。
+  sendProjectMessage(input: {
+    projectId: ID
+    body: string
+    clientId: string
+    reference?: Reference | null
+  }): Promise<ProjectEntry>
   // 只停止助手这一次运行，它开的 Thread 继续执行。
   stopProjectRun(projectId: ID): Promise<Project>
   answerItem(input: { itemId: ID; answer: string; revision: number }): Promise<Operation>

@@ -120,6 +120,8 @@ export interface Thread {
   updatedAt: number
   runStartedAt: number | null
   unread: boolean
+  // 设备上还有比中心保存的消息更早的对话记录，可以按页读取。
+  earlier: boolean
 }
 
 // 一条消息从提交到被 Agent 读到的过程。unknown 表示设备在发送途中重启，不确定 Agent 是否收到，Baton 不会自动重发。
@@ -137,6 +139,62 @@ export interface Message {
   body: string
   createdAt: number
   delivery: Delivery
+  // Agent 回复这一轮做过的事的计数，完整过程留在设备上，展开时读取；没有过程为 null。
+  activity: ActivitySummary | null
+  attachments: Attachment[]
+}
+
+export interface ActivitySummary {
+  commands: number
+  tools: number
+  files: number
+}
+
+// 回复附带的文件或代码提交。文件写明所在设备，能否打开由设备状态决定；提交写明仓库和完整 SHA，之后工作区变化不影响它。
+export type Attachment =
+  | { kind: 'file'; deviceId: ID; path: string; size: number }
+  | { kind: 'commit'; repo: string; sha: string; subject: string }
+
+// 一轮回复的过程：命令和输出、工具调用、文件改动。
+export type TraceStep =
+  | { kind: 'command'; command: string; output: string }
+  | { kind: 'tool'; name: string; detail: string }
+  | { kind: 'file'; action: 'wrote' | 'edited' | 'deleted'; path: string }
+
+// 过程从设备读取。offline：设备离线，暂时读不到；missing：设备上的对话记录已经删除。
+export type Trace =
+  | { state: 'ready'; messageId: ID; steps: TraceStep[] }
+  | { state: 'unavailable'; messageId: ID; reason: 'offline' | 'missing' }
+
+// 设备上比中心保存的消息更早的对话记录，按页从设备读取，before 为已显示的最早一条消息。
+export type HistoryPage =
+  | { state: 'ready'; threadId: ID; messages: Message[]; more: boolean }
+  | { state: 'unavailable'; threadId: ID; reason: 'offline' | 'missing' }
+
+// 执行中的一轮的实时输出。gap 表示设备已经丢掉、补不回来的一段。
+export type OutputChunk = { kind: 'text'; text: string } | { kind: 'gap' }
+
+export interface LiveOutput {
+  threadId: ID
+  chunks: OutputChunk[]
+}
+
+// 选中一段内容去问 Project 助手时带上的来源。Thread 回复写 Thread 和第几条回复；文件再写设备、路径和行号；事项写事项 ID。
+export interface Reference {
+  kind: 'thread' | 'file' | 'item'
+  // 来源的名字：Thread 标题、文件名或事项标题。
+  title: string
+  threadId: ID | null
+  // 第几条 Agent 回复，从 1 开始。
+  reply: number | null
+  deviceId: ID | null
+  path: string | null
+  lines: { from: number; to: number } | null
+  itemId: ID | null
+  // 选中的文字。超过 8 KiB 时只保留开头。
+  excerpt: string
+  // 选中文字原来的 UTF-8 字节数。
+  bytes: number
 }
 
 export type ProjectStatus = 'active' | 'paused' | 'archived'
@@ -184,7 +242,7 @@ interface EntryBase {
 
 // 主对话的一条记录：你的消息、助手的一轮回复，或系统说明（切换设备、停止等）。
 export type ProjectEntry =
-  | (EntryBase & { kind: 'user'; body: string; delivery: Delivery })
+  | (EntryBase & { kind: 'user'; body: string; delivery: Delivery; reference: Reference | null })
   | (EntryBase & { kind: 'assistant'; process: ProcessStep[]; threads: EntryThreads | null; body: string })
   | (EntryBase & { kind: 'note'; body: string })
 
@@ -238,13 +296,28 @@ export interface Operation {
   updatedAt: number
 }
 
-export type FilePreview =
-  | { state: 'ready'; deviceId: ID; path: string; content: string }
-  | { state: 'unavailable'; deviceId: ID; path: string; reason: 'offline' | 'syncing' | 'outsideFolders' | 'missing' }
+// 预览最多读取这么多字节，更大的文件只显示开头。
+export const previewLimit = 64 * 1024
 
-// 设备上某个目录的子目录。path 为 null 时列出允许 Agent 访问的目录。
+// 文件的文本预览。truncated 表示文件超过 previewLimit，content 只有开头；二进制文件不传内容。
+export type FilePreview =
+  | { state: 'ready'; deviceId: ID; path: string; size: number; content: string; truncated: boolean }
+  | {
+      state: 'unavailable'
+      deviceId: ID
+      path: string
+      reason: 'offline' | 'syncing' | 'outsideFolders' | 'missing' | 'binary'
+      size: number | null
+    }
+
+export interface FileEntry {
+  path: string
+  size: number
+}
+
+// 设备上某个目录的子目录和文件。path 为 null 时列出允许 Agent 访问的目录。
 export type FolderListing =
-  | { state: 'ready'; deviceId: ID; path: string | null; folders: string[] }
+  | { state: 'ready'; deviceId: ID; path: string | null; folders: string[]; files: FileEntry[] }
   | {
       state: 'unavailable'
       deviceId: ID

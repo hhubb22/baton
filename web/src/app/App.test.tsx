@@ -151,7 +151,7 @@ describe('app', () => {
     const user = userEvent.setup()
     const { client, router } = renderApp('/threads/thr-webui')
     await user.click(await screen.findByRole('button', { name: '~/src/baton/README.md' }))
-    const preview = await screen.findByRole('complementary', { name: 'File preview' })
+    const preview = await screen.findByRole('dialog', { name: 'README.md' })
     expect(await within(preview).findByText(/Baton/)).toBeInTheDocument()
 
     act(() => client.controls.setDeviceConnection('dev-mac', 'offline'))
@@ -572,5 +572,169 @@ describe('devices', () => {
 
     await act(() => router.navigate({ to: '/projects/$projectId', params: { projectId: 'prj-baton' } }))
     expect(await screen.findByText('Running on MacBook Pro')).toBeInTheDocument()
+  })
+})
+
+describe('execution details', () => {
+  async function advance(scheduler: ReturnType<typeof manualScheduler>, ms: number) {
+    for (let passed = 0; passed < ms; passed += 50) {
+      await act(async () => scheduler.advance(Math.min(50, ms - passed)))
+    }
+  }
+
+  // 选中节点里的全部文字，再像松开鼠标一样通知选区菜单。
+  function select(node: Node) {
+    const range = document.createRange()
+    range.selectNodeContents(node)
+    const selection = window.getSelection()!
+    selection.removeAllRanges()
+    selection.addRange(range)
+    const target = node instanceof Element ? node : node.parentElement!
+    act(() => {
+      target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+    })
+  }
+
+  it('expands a reply trace and reads it again after a failure', async () => {
+    const user = userEvent.setup()
+    renderApp('/threads/thr-webui', 'error')
+    const toggle = await screen.findByRole('button', { name: /Ran 2 commands, used 1 tool, wrote 2 files/ })
+    await user.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(await screen.findByText(/MacBook Pro did not return this activity/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(await screen.findByText('pnpm --dir web build')).toBeInTheDocument()
+    expect(screen.getByText(/✓ built in 1.84s/)).toBeInTheDocument()
+
+    await user.click(toggle)
+    expect(screen.queryByText('pnpm --dir web build')).not.toBeInTheDocument()
+  })
+
+  it('opens attachments that are online and copies the full commit SHA', async () => {
+    const user = userEvent.setup()
+    const { client } = renderApp('/threads?thread=thr-gateway')
+    const detail = await screen.findByRole('complementary', { name: 'Fix gateway reconnect race' })
+    const attachments = await within(detail).findByRole('list', { name: 'Attachments' })
+    expect(within(attachments).getByText('9b1e4d7a2c5f8e0b3d6a9c2f5e8b1d4a7c0e3f62')).toBeInTheDocument()
+
+    await user.click(within(attachments).getByRole('button', { name: 'Copy commit SHA' }))
+    expect(await navigator.clipboard.readText()).toBe('9b1e4d7a2c5f8e0b3d6a9c2f5e8b1d4a7c0e3f62')
+    expect(within(attachments).getByRole('button', { name: 'Copied commit SHA' })).toBeInTheDocument()
+
+    act(() => client.controls.setDeviceConnection('dev-windows', 'offline'))
+    expect(await within(attachments).findByText(/offline, unavailable/)).toBeInTheDocument()
+    expect(within(attachments).queryByRole('button', { name: 'View windows-reconnect.log' })).not.toBeInTheDocument()
+
+    await user.click(within(attachments).getByRole('button', { name: 'View reconnect.log' }))
+    const preview = await screen.findByRole('dialog', { name: 'logs/reconnect.log' })
+    expect(await within(preview).findByText(/FAIL TestReconnectAfterSleep/)).toBeInTheDocument()
+  })
+
+  it('marks lost live output after the device reconnects', async () => {
+    const { client } = renderApp('/threads?thread=thr-gateway', 'offline')
+    const detail = await screen.findByRole('complementary', { name: 'Fix gateway reconnect race' })
+    expect(await within(detail).findByText('Connection lost · output resumes when reconnected')).toBeInTheDocument()
+    expect(within(detail).getByText(/No report since/)).toBeInTheDocument()
+
+    act(() => client.controls.setDeviceConnection('dev-ubuntu', 'online'))
+    expect(
+      await within(detail).findByText('Earlier output is no longer available on this computer'),
+    ).toBeInTheDocument()
+    expect(within(detail).getByLabelText('Live output')).toHaveTextContent(/waiting for resume/)
+  })
+
+  it('pages earlier history from the device and retries a failed page', async () => {
+    const user = userEvent.setup()
+    renderApp('/threads/thr-webui', 'error')
+    await user.click(await screen.findByRole('button', { name: 'Load earlier history' }))
+    expect(await screen.findByText(/did not return the earlier history/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Retry earlier history' }))
+    expect(await screen.findByText('List the routes the first milestone needs.')).toBeInTheDocument()
+    expect(screen.queryByText('Compare StyleX and vanilla-extract for the new UI.')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Load earlier history' }))
+    expect(await screen.findByText('Compare StyleX and vanilla-extract for the new UI.')).toBeInTheDocument()
+    expect(screen.getByText('Start of chat history')).toBeInTheDocument()
+  })
+
+  it('says why earlier history is unavailable', async () => {
+    const user = userEvent.setup()
+    const { client } = renderApp('/threads/thr-webui')
+    act(() => client.controls.setDeviceConnection('dev-mac', 'offline'))
+    await user.click(await screen.findByRole('button', { name: 'Load earlier history' }))
+    expect(await screen.findByText('MacBook Pro is offline · earlier history unavailable')).toBeInTheDocument()
+  })
+
+  it('browses folders in the file preview and explains files it cannot show', async () => {
+    const user = userEvent.setup()
+    renderApp('/threads?thread=thr-gateway', 'error')
+    const detail = await screen.findByRole('complementary', { name: 'Fix gateway reconnect race' })
+    await user.click(await within(detail).findByRole('button', { name: 'View reconnect.log' }))
+    const preview = await screen.findByRole('dialog', { name: 'logs/reconnect.log' })
+    const folders = within(preview).getByRole('navigation', { name: 'Folders' })
+
+    await user.click(await within(folders).findByRole('button', { name: /gateway-soak.log/ }))
+    expect(await within(preview).findByText('Showing first 64 KB')).toBeInTheDocument()
+
+    await user.click(within(folders).getByRole('button', { name: 'Parent folder' }))
+    await user.click(await within(folders).findByRole('button', { name: /^internal/ }))
+    await user.click(await within(folders).findByRole('button', { name: /^gateway/ }))
+    await user.click(await within(folders).findByRole('button', { name: /reconnect_test.go/ }))
+    expect(await within(preview).findByText(/did not return/)).toBeInTheDocument()
+    await user.click(within(preview).getByRole('button', { name: 'Retry' }))
+    expect(await within(preview).findByText(/func TestReconnectAfterSleep/)).toBeInTheDocument()
+
+    await user.click(await within(folders).findByRole('button', { name: /^testdata/ }))
+    await user.click(await within(folders).findByRole('button', { name: /capture.bin/ }))
+    expect(await within(preview).findByText(/binary/i)).toBeInTheDocument()
+    expect(within(preview).queryByRole('region', { name: /Contents of/ })).not.toBeInTheDocument()
+  })
+
+  it('asks the project assistant about a selected reply and sends the reference', async () => {
+    const user = userEvent.setup()
+    const { router, scheduler } = renderApp('/threads?thread=thr-gateway')
+    const detail = await screen.findByRole('complementary', { name: 'Fix gateway reconnect race' })
+    select(await within(detail).findByText(/did not reconnect within 30s/))
+    await user.click(await within(detail).findByRole('button', { name: 'Ask project assistant' }))
+
+    await waitFor(() => expect(router.state.location.pathname).toBe('/projects/prj-baton'))
+    const reference = await screen.findByRole('figure', { name: 'Reference from Fix gateway reconnect race' })
+    expect(within(reference).getByText(/Reply 1/)).toBeInTheDocument()
+    const input = screen.getByLabelText('Message the project assistant')
+    expect(input).toHaveFocus()
+
+    await user.click(within(reference).getByRole('button', { name: 'Remove reference' }))
+    expect(screen.queryByRole('figure', { name: /Reference from/ })).not.toBeInTheDocument()
+    expect(input).toHaveFocus()
+
+    await act(() => router.navigate({ to: '/threads', search: { thread: 'thr-gateway' } }))
+    const again = await screen.findByRole('complementary', { name: 'Fix gateway reconnect race' })
+    select(await within(again).findByText(/did not reconnect within 30s/))
+    await user.click(await within(again).findByRole('button', { name: 'Ask project assistant' }))
+    await user.type(await screen.findByLabelText('Message the project assistant'), 'Why only after sleep?{Enter}')
+    await advance(scheduler, browserLatency.save + 100)
+    expect(await screen.findByText('Why only after sleep?')).toBeInTheDocument()
+    expect(screen.getAllByRole('figure', { name: 'Reference from Fix gateway reconnect race' })).toHaveLength(1)
+  })
+
+  it('copies a selection in a chat outside any project', async () => {
+    const user = userEvent.setup()
+    renderApp('/threads/thr-webui')
+    select(await screen.findByText(/Scaffold is in place/))
+    await user.click(await screen.findByRole('button', { name: 'Copy selection' }))
+    expect(await screen.findByText('Copied')).toBeInTheDocument()
+    expect(await navigator.clipboard.readText()).toMatch(/Scaffold is in place/)
+  })
+
+  it('asks the project assistant about an inbox question', async () => {
+    const user = userEvent.setup()
+    const { router } = renderApp('/inbox')
+    select(await screen.findByText('MacBook Pro sleeps at night. Ubuntu Dev is always on.'))
+    await user.click(await screen.findByRole('button', { name: 'Ask project assistant' }))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/projects/prj-compat'))
+    const reference = await screen.findByRole('figure', { name: 'Reference from Which runner should run nightly?' })
+    expect(within(reference).getByText(/MacBook Pro sleeps at night/)).toBeInTheDocument()
   })
 })

@@ -26,13 +26,13 @@
 
 | 场景 | 内容 |
 |---|---|
-| `normal` | 三台设备、四个 Project、进行中的 Thread 和待处理事项。Baton Dev 的助手开了一个 Thread 正在等回复，Compatibility 的助手已经汇报结果 |
+| `normal` | 三台设备、四个 Project、进行中的 Thread 和待处理事项。Baton Dev 的助手开了一个 Thread 正在等回复，Compatibility 的助手已经汇报结果。回复带执行过程、文件和提交附件；Rebuild web UI foundation 在设备上还有三轮更早的对话，每页读三条；Ubuntu Dev 的 `logs` 目录里有超过 64 KB 的日志，`internal/gateway/testdata` 里有二进制文件 |
 | `empty` | 已登录但还没有设备，显示首次使用引导 |
 | `noChats` | 设备已接入但还没有对话，Threads 页显示空列表，可以从顶部输入区开始第一个对话 |
 | `signedOut` | 未登录，打开任何页面都进入登录页 |
-| `offline` | Ubuntu Dev 和 MacBook Pro 离线：执行中的 Thread 只显示最后报告的状态，停止请求等设备连上再发出，Project 助手等待可用设备，发给它的消息已保存 |
+| `offline` | Ubuntu Dev 和 MacBook Pro 离线：执行中的 Thread 只显示最后报告的状态，停止请求等设备连上再发出，Project 助手等待可用设备，发给它的消息已保存；Ubuntu Dev 重新连上后，Fix gateway reconnect race 的实时输出标出断开期间丢失的一段 |
 | `waiting` | Windows Desktop 同步中，发给它的消息已保存等待发送；另一条消息排在执行中的 Thread 后面；Kiro 收到停止后没有停下，一分钟后由设备结束进程；Docs Cleanup 用 Claude，但没有在线设备登录了 Claude，消息保存后等待设备 |
-| `error` | Thread 的各种停止原因：目录不存在、设备重启打断（Kiro 不能恢复，Pi 恢复时找不到对话记录）、Agent 启动失败；另一个 Thread 状态未知，不会自动重发；ChatGPT 登录过期导致 Project 助手停止；第一次新建 Project 保存失败，重试成功 |
+| `error` | Thread 的各种停止原因：目录不存在、设备重启打断（Kiro 不能恢复，Pi 恢复时找不到对话记录）、Agent 启动失败；另一个 Thread 状态未知，不会自动重发；ChatGPT 登录过期导致 Project 助手停止；第一次新建 Project 保存失败，重试成功；Rebuild web UI foundation 的回复过程、更早的对话和 `reconnect_test.go` 预览第一次读取失败，重试成功；Write batond setup guide 的对话记录已删除，回复过程读不到 |
 | `conflict` | 事项已在别处处理，回答时提示冲突 |
 
 模拟的 Project 助手按关键词判断消息是不是要在设备上做的事（run、test、fix 等），按消息里提到的设备开 Thread；提到两台设备或写了 both、two 时开两个，每个 Thread 约 8 秒后回复，全部回复后助手汇报。

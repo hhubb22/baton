@@ -7,9 +7,9 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query'
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { ClientError, type BatonClient } from './client'
-import type { AgentKind, ID, SendMode, Session } from './types'
+import type { AgentKind, HistoryPage, ID, Message, Reference, SendMode, Session } from './types'
 
 // 查询键的第一段是数据主题，收到某个主题的变化时刷新以它开头的全部查询。
 export const keys = {
@@ -26,6 +26,9 @@ export const keys = {
   messages: (threadId: ID) => ['messages', threadId] as const,
   inbox: ['inbox'] as const,
   file: (deviceId: ID, path: string) => ['files', deviceId, path] as const,
+  // 过程从设备读取，设备连接变化时重读，离线后不留旧内容。
+  trace: (messageId: ID) => ['devices', 'trace', messageId] as const,
+  output: (threadId: ID) => ['messages', 'output', threadId] as const,
   operation: (id: ID) => ['operations', id] as const,
 }
 
@@ -122,9 +125,67 @@ export function useInbox() {
 }
 
 // 文件内容随设备状态刷新：设备变化会发出 files 主题，旧预览不保留。
-export function useFile(deviceId: ID, path: string) {
+export function useFile(deviceId: ID, path: string | null) {
   const client = useClient()
-  return useQuery({ queryKey: keys.file(deviceId, path), queryFn: () => client.readFile(deviceId, path), gcTime: 0 })
+  return useQuery({
+    queryKey: keys.file(deviceId, path ?? ''),
+    queryFn: () => client.readFile(deviceId, path!),
+    enabled: path !== null,
+    gcTime: 0,
+  })
+}
+
+export function useTrace(messageId: ID, enabled: boolean) {
+  const client = useClient()
+  return useQuery({ queryKey: keys.trace(messageId), queryFn: () => client.readTrace(messageId), enabled, gcTime: 0 })
+}
+
+export function useLiveOutput(threadId: ID, enabled: boolean) {
+  const client = useClient()
+  return useQuery({ queryKey: keys.output(threadId), queryFn: () => client.readOutput(threadId), enabled })
+}
+
+export interface EarlierHistory {
+  // 已读到的更早消息，按时间排列。
+  messages: Message[]
+  // idle：还没读或可以继续读；done：已经读到开头。
+  status: 'idle' | 'loading' | 'failed' | 'unavailable' | 'done'
+  reason: Extract<HistoryPage, { state: 'unavailable' }>['reason'] | null
+  load: () => void
+}
+
+// 更早的对话按需一页页读取。已读到的页留在页面里，之后某页读不到也不影响已显示的消息。
+export function useEarlierHistory(threadId: ID): EarlierHistory {
+  const client = useClient()
+  const [state, setState] = useState<Omit<EarlierHistory, 'load'> & { threadId: ID }>({
+    threadId,
+    messages: [],
+    status: 'idle',
+    reason: null,
+  })
+  const current =
+    state.threadId === threadId ? state : { threadId, messages: [], status: 'idle' as const, reason: null }
+  const latest = useRef(current)
+  useEffect(() => {
+    latest.current = current
+  })
+
+  const load = useCallback(() => {
+    const before = latest.current
+    if (before.status === 'loading' || before.status === 'done') return
+    setState({ ...before, status: 'loading', reason: null })
+    client.readHistory(threadId, before.messages[0]?.id ?? null).then(
+      (page) =>
+        setState((now) => {
+          if (now.threadId !== threadId) return now
+          if (page.state === 'unavailable') return { ...now, status: 'unavailable', reason: page.reason }
+          return { ...now, messages: [...page.messages, ...now.messages], status: page.more ? 'idle' : 'done' }
+        }),
+      () => setState((now) => (now.threadId === threadId ? { ...now, status: 'failed' } : now)),
+    )
+  }, [client, threadId])
+
+  return { messages: current.messages, status: current.status, reason: current.reason, load }
 }
 
 export function useFolders(deviceId: ID | null, path: string | null) {
@@ -234,7 +295,8 @@ export function useCreateProject() {
 export function useSendProjectMessage() {
   const client = useClient()
   return useMutation({
-    mutationFn: (input: { projectId: ID; body: string; clientId: string }) => client.sendProjectMessage(input),
+    mutationFn: (input: { projectId: ID; body: string; clientId: string; reference?: Reference | null }) =>
+      client.sendProjectMessage(input),
   })
 }
 

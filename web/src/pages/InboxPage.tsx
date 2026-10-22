@@ -2,8 +2,10 @@ import * as stylex from '@stylexjs/stylex'
 import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
 import { Column, Page } from '../app/Page'
+import { SelectionArea } from '../app/SelectionMenu'
+import { useWorkspace } from '../app/workspace'
 import { ClientError } from '../data/client'
-import { operationLabel, pendingInbox } from '../data/derive'
+import { operationLabel, pendingInbox, shortenExcerpt } from '../data/derive'
 import { useAnswerItem, useInbox, useOperation, useProjects } from '../data/queries'
 import type { InboxItem, Project } from '../data/types'
 import { text } from '../theme/text'
@@ -18,6 +20,7 @@ const styles = stylex.create({
   options: { display: 'flex', flexWrap: 'wrap', gap: space.sm },
   status: { color: colors.muted },
   empty: { paddingBlock: space.xl, textAlign: 'center' },
+  content: { display: 'flex', flexDirection: 'column', gap: '10px' },
 })
 
 function ItemCard({ item, project }: { item: InboxItem; project: Project | undefined }) {
@@ -26,6 +29,21 @@ function ItemCard({ item, project }: { item: InboxItem; project: Project | undef
   const [error, setError] = useState<string | null>(null)
   const operation = useOperation(operationId)
   const phase = operation.data ? operationLabel(operation.data, undefined) : null
+  const workspace = useWorkspace()
+
+  // 选中事项里的文字，带着事项来源去问它所属 Project 的助手。
+  const describe = (_range: Range, value: string) => () =>
+    workspace.askProject(item.projectId, {
+      kind: 'item',
+      title: item.title,
+      threadId: item.threadId,
+      reply: null,
+      deviceId: null,
+      path: null,
+      lines: null,
+      itemId: item.id,
+      ...shortenExcerpt(value),
+    })
 
   const choose = (option: string) => {
     setError(null)
@@ -52,8 +70,10 @@ function ItemCard({ item, project }: { item: InboxItem; project: Project | undef
           </Link>
         )}
       </div>
-      <h2 {...stylex.props(text.heading)}>{item.title}</h2>
-      <p {...stylex.props(text.body, text.muted)}>{item.body}</p>
+      <SelectionArea label="Ask project assistant" icon="reply" describe={describe} style={styles.content}>
+        <h2 {...stylex.props(text.heading)}>{item.title}</h2>
+        <p {...stylex.props(text.body, text.muted)}>{item.body}</p>
+      </SelectionArea>
       {item.status === 'pending' && item.options.length > 0 && (
         <div {...stylex.props(styles.options)}>
           {item.options.map((option) => (

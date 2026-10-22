@@ -1,7 +1,18 @@
 // 由多个查询组合出的界面状态。设备、Thread、Project 各自只存原始状态，
 // 页面显示时在这里合并，所以设备状态一变，所有用到它的页面一起更新。
 import type { Tone } from '../ui/Status'
-import type { AgentKind, Device, DeviceAgent, FilePreview, ID, InboxItem, Operation, Project, Thread } from './types'
+import type {
+  ActivitySummary,
+  AgentKind,
+  Device,
+  DeviceAgent,
+  FilePreview,
+  ID,
+  InboxItem,
+  Operation,
+  Project,
+  Thread,
+} from './types'
 
 export interface StatusView {
   tone: Tone
@@ -354,26 +365,91 @@ export function threadCardStatus(threads: Thread[]) {
 export interface PreviewView {
   title: string
   detail: string
+  // retry：设备或读取的问题，重读一次可能成功；back：这个文件读不了，回到目录选别的文件。
+  action: 'retry' | 'back'
+}
+
+export function baseName(path: string) {
+  return path.split(/[\\/]/).pop() || path
 }
 
 // 文件预览只显示从设备实时读到的内容，读不到时只给原因。
 export function previewProblem(preview: FilePreview, device: Device | undefined): PreviewView | null {
   if (preview.state === 'ready') return null
   const name = device?.name ?? 'This device'
-  const file = preview.path.split(/[\\/]/).pop() ?? preview.path
+  const file = baseName(preview.path)
   switch (preview.reason) {
     case 'offline':
-      return { title: `${name} is offline`, detail: `Reconnect ${name}, then retry to view this file.` }
+      return {
+        title: `${name} is offline`,
+        detail: `Reconnect ${name}, then retry to view this file.`,
+        action: 'retry',
+      }
     case 'syncing':
-      return { title: `${name} is syncing`, detail: 'Retry when it finishes syncing.' }
+      return { title: `${name} is syncing`, detail: 'Retry when it finishes syncing.', action: 'retry' }
     case 'outsideFolders':
       return {
         title: 'Folder is outside allowed paths',
-        detail: `${preview.path} is not shared with Baton on ${name}.`,
+        detail: `This link points to ${preview.path}, which is not shared with Baton on ${name}.`,
+        action: 'back',
       }
     case 'missing':
-      return { title: `File not found on ${name}`, detail: `${file} may have been moved or deleted.` }
+      return {
+        title: `File not found on ${name}`,
+        detail: `${file} was moved or deleted. Go back to the folder and choose another file.`,
+        action: 'back',
+      }
+    case 'binary':
+      return {
+        title: 'Binary file cannot be previewed',
+        detail: `Baton only reads limited text previews. Open ${file} on ${name}, or choose a text file.`,
+        action: 'back',
+      }
   }
+}
+
+// 读取失败（设备没有返回）时的说明。
+export function readFailure(path: string, device: Device | undefined): PreviewView {
+  const name = device?.name ?? 'This device'
+  return {
+    title: 'Could not read this file',
+    detail: `${name} did not return ${baseName(path)}. Retry to read it again, or choose another file.`,
+    action: 'retry',
+  }
+}
+
+export function fileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) {
+    const kb = bytes / 1024
+    return `${kb < 10 ? kb.toFixed(1).replace(/\.0$/, '') : Math.round(kb)} KB`
+  }
+  return `${(bytes / 1024 / 1024).toFixed(1).replace(/\.0$/, '')} MB`
+}
+
+function counted(count: number, one: string, many: string) {
+  return `${count} ${count === 1 ? one : many}`
+}
+
+// 回复过程折叠时的一句话，例如「Ran 1 command, wrote 1 file」。
+export function activityLine(activity: ActivitySummary) {
+  const parts = [
+    activity.commands > 0 && `ran ${counted(activity.commands, 'command', 'commands')}`,
+    activity.tools > 0 && `used ${counted(activity.tools, 'tool', 'tools')}`,
+    activity.files > 0 && `wrote ${counted(activity.files, 'file', 'files')}`,
+  ].filter((item): item is string => Boolean(item))
+  const line = parts.join(', ')
+  return line.charAt(0).toUpperCase() + line.slice(1)
+}
+
+// 引用最多带 8 KiB。按 UTF-8 字节截断，不切开多字节字符。
+export const referenceLimit = 8 * 1024
+
+export function shortenExcerpt(selected: string) {
+  const bytes = new TextEncoder().encode(selected)
+  if (bytes.length <= referenceLimit) return { excerpt: selected, bytes: bytes.length }
+  const excerpt = new TextDecoder().decode(bytes.slice(0, referenceLimit)).replace(/\uFFFD$/, '')
+  return { excerpt, bytes: bytes.length }
 }
 
 export function pendingInbox(items: InboxItem[], projectId?: ID) {
@@ -408,6 +484,11 @@ export const agentNames: Record<AgentKind, string> = { codex: 'Codex', kiro: 'Ki
 
 const clock = new Intl.DateTimeFormat('en', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
 const day = new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric' })
+
+// 24 小时制的时刻，例如 14:32。
+export function clockTime(at: number) {
+  return clock.format(at)
+}
 
 // 当天只显示时刻，更早的加上日期；一分钟内显示 now。
 export function lastSeen(at: number, now: number) {

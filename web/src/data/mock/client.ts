@@ -1,10 +1,10 @@
 import type { BatonClient, ChangeEvent } from '../client'
 import { ClientError } from '../client'
-import type { DeviceConnection, DeviceOS, Enrollment, FilePreview, ID, SessionEnd } from '../types'
+import type { DeviceConnection, DeviceOS, Enrollment, ID, SessionEnd } from '../types'
 import type { ScenarioId } from './scenarios'
 import { realScheduler, type Scheduler } from './scheduler'
 import { browserLatency, MockStore, type Latency } from './store'
-import { fileKey, type EnrollmentRecord } from './world'
+import type { EnrollmentRecord } from './world'
 
 // 开发场景面板使用的控制入口，页面代码不调用。
 export interface MockControls {
@@ -115,20 +115,11 @@ export function createMockClient(
     listThreads: () => guarded(() => store.snapshot().threads),
     listMessages: (threadId) => guarded(() => store.snapshot().messages.filter((item) => item.threadId === threadId)),
     listInbox: () => guarded(() => store.snapshot().inbox),
-    readFile: (deviceId, path) =>
-      guarded((): FilePreview => {
-        const world = store.snapshot()
-        const device = store.device(deviceId)
-        if (device.connection === 'offline') return { state: 'unavailable', deviceId, path, reason: 'offline' }
-        if (device.connection === 'syncing') return { state: 'unavailable', deviceId, path, reason: 'syncing' }
-        if (!device.folders.some((folder) => path.startsWith(folder))) {
-          return { state: 'unavailable', deviceId, path, reason: 'outsideFolders' }
-        }
-        const content = world.files[fileKey(deviceId, path)]
-        if (content === undefined) return { state: 'unavailable', deviceId, path, reason: 'missing' }
-        return { state: 'ready', deviceId, path, content }
-      }),
+    readFile: (deviceId, path) => guarded(() => store.readFile(deviceId, path)),
     listFolders: (deviceId, path) => guarded(() => store.listFolders(deviceId, path)),
+    readTrace: (messageId) => guarded(() => store.readTrace(messageId)),
+    readHistory: (threadId, before) => guarded(() => store.readHistory(threadId, before)),
+    readOutput: (threadId) => guarded(() => store.readOutput(threadId)),
     getOperation: (id) => guarded(() => store.operation(id)),
 
     async createThread({ clientId, ...input }) {
@@ -171,10 +162,10 @@ export function createMockClient(
       signedIn()
       return structuredClone(store.createProject(input, clientId))
     },
-    async sendProjectMessage({ projectId, body, clientId }) {
+    async sendProjectMessage({ projectId, body, clientId, reference }) {
       await connect(latency.read)
       signedIn()
-      return structuredClone(store.sendProjectMessage(projectId, body, clientId))
+      return structuredClone(store.sendProjectMessage(projectId, body, clientId, reference ?? null))
     },
     async stopProjectRun(projectId) {
       await connect(latency.read)

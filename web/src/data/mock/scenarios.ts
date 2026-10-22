@@ -5,11 +5,13 @@ import type {
   InboxItem,
   MemoryNote,
   Message,
+  OutputChunk,
   Project,
   ProjectEntry,
   Thread,
+  TraceStep,
 } from '../types'
-import { fileKey, type World } from './world'
+import { fileKey, type DeviceFile, type World } from './world'
 
 export const scenarioIds = [
   'normal',
@@ -40,6 +42,10 @@ export function isScenarioId(value: unknown): value is ScenarioId {
 
 const minute = 60_000
 const hour = 60 * minute
+const kb = 1024
+const mb = 1024 * kb
+
+const ubuntuRepo = '/home/kaken/work/baton'
 
 const account: Account = { id: 'emp-kaken', name: 'Kaken He', username: 'kaken' }
 
@@ -187,6 +193,7 @@ function projectEntries(now: number): ProjectEntry[] {
       id: 'ent-baton-1',
       projectId: 'prj-baton',
       kind: 'user',
+      reference: null,
       body: 'Devices reconnect twice after a network change. Find out why on Ubuntu Dev and fix it.',
       delivery: 'delivered',
       createdAt: now - 5 * minute,
@@ -204,6 +211,7 @@ function projectEntries(now: number): ProjectEntry[] {
       id: 'ent-compat-1',
       projectId: 'prj-compat',
       kind: 'user',
+      reference: null,
       body: 'Run the compat suite on Windows Desktop and report failures.',
       delivery: 'delivered',
       createdAt: now - 3 * hour - 2 * minute,
@@ -275,6 +283,7 @@ function thread(now: number, fields: Partial<Thread> & Pick<Thread, 'id' | 'titl
     updatedAt: now - 20 * minute,
     runStartedAt: null,
     unread: false,
+    earlier: false,
     ...fields,
   }
 }
@@ -288,6 +297,7 @@ function threads(now: number): Thread[] {
       folder: '/home/kaken/work/baton',
       projectId: 'prj-baton',
       status: 'running',
+      createdAt: now - 12 * minute,
       runStartedAt: now - 4 * minute,
       updatedAt: now - minute,
     }),
@@ -298,6 +308,7 @@ function threads(now: number): Thread[] {
       folder: '~/src/baton',
       status: 'idle',
       unread: true,
+      earlier: true,
     }),
     thread(now, {
       id: 'thr-compat',
@@ -369,8 +380,43 @@ function threads(now: number): Thread[] {
   ]
 }
 
+type MessageSeed = Omit<Message, 'activity' | 'attachments'> & Partial<Pick<Message, 'activity' | 'attachments'>>
+
+function message(seed: MessageSeed): Message {
+  return { activity: null, attachments: [], ...seed }
+}
+
 function messages(now: number): Message[] {
-  return [
+  const seeds: MessageSeed[] = [
+    {
+      id: 'msg-gateway-0',
+      threadId: 'thr-gateway',
+      role: 'user',
+      sender: 'projectAgent',
+      body: 'Run `go test -run Reconnect ./internal/gateway` and attach the log.',
+      createdAt: now - 12 * minute,
+      delivery: 'delivered',
+    },
+    {
+      id: 'msg-gateway-r1',
+      threadId: 'thr-gateway',
+      role: 'agent',
+      sender: 'agent',
+      body: '47 of 48 tests passed. `TestReconnectAfterSleep` did not reconnect within 30s after waking from sleep; log attached.',
+      createdAt: now - 6 * minute,
+      delivery: 'delivered',
+      activity: { commands: 1, tools: 0, files: 1 },
+      attachments: [
+        { kind: 'file', deviceId: 'dev-ubuntu', path: `${ubuntuRepo}/logs/reconnect.log`, size: 48 * kb },
+        { kind: 'file', deviceId: 'dev-windows', path: 'C:\\src\\baton\\logs\\windows-reconnect.log', size: 52 * kb },
+        {
+          kind: 'commit',
+          repo: 'github.com/hhubb22/baton',
+          sha: '9b1e4d7a2c5f8e0b3d6a9c2f5e8b1d4a7c0e3f62',
+          subject: 'test(gateway): cover reconnect after sleep',
+        },
+      ],
+    },
     {
       id: 'msg-gateway-1',
       threadId: 'thr-gateway',
@@ -397,6 +443,16 @@ function messages(now: number): Message[] {
       body: 'Scaffold is in place. Setup notes are in `~/src/baton/README.md`.',
       createdAt: now - 20 * minute,
       delivery: 'delivered',
+      activity: { commands: 2, tools: 1, files: 2 },
+      attachments: [
+        { kind: 'file', deviceId: 'dev-mac', path: '~/src/baton/README.md', size: 1229 },
+        {
+          kind: 'commit',
+          repo: 'github.com/hhubb22/baton',
+          sha: '3f9c2a7e4b1d8c6f0a5e2d9b7c4a1f3e8d6b2c90',
+          subject: 'feat(web): scaffold StyleX workspace',
+        },
+      ],
     },
     {
       id: 'msg-compat-1',
@@ -415,6 +471,16 @@ function messages(now: number): Message[] {
       body: '2 failures in `path_test.go`. See the report in `C:\\src\\compat-suite\\report.md`.',
       createdAt: now - 3 * hour + 10 * minute,
       delivery: 'delivered',
+      activity: { commands: 1, tools: 0, files: 1 },
+      attachments: [
+        { kind: 'file', deviceId: 'dev-windows', path: 'C:\\src\\compat-suite\\report.md', size: 3482 },
+        {
+          kind: 'commit',
+          repo: 'github.com/hhubb22/compat-suite',
+          sha: '4f2c9e1a7d3b5c8e0f6a2d4b9c1e7f3a5d8b0c26',
+          subject: 'test: add drive letter cases to path tests',
+        },
+      ],
     },
     {
       id: 'msg-patrol-1',
@@ -460,6 +526,7 @@ function messages(now: number): Message[] {
       body: 'Downloaded 0.9.2. Restarting the batond service now.',
       createdAt: now - 3 * hour - 12 * minute,
       delivery: 'delivered',
+      activity: { commands: 2, tools: 0, files: 0 },
     },
     {
       id: 'msg-upgrade-3',
@@ -496,17 +563,32 @@ function messages(now: number): Message[] {
       body: 'The guide is in `~/src/baton/docs/batond.md`.',
       createdAt: now - 3 * 24 * hour,
       delivery: 'delivered',
+      activity: { commands: 0, tools: 1, files: 1 },
+      attachments: [{ kind: 'file', deviceId: 'dev-mac', path: '~/src/baton/docs/batond.md', size: 2150 }],
     },
   ]
+  return seeds.map(message)
 }
 
 // 设备上存在的目录。允许的目录之外的不列出。
 function directories(): Record<string, string[]> {
   return {
-    'dev-mac': ['~/src', '~/src/baton', '~/src/baton/web', '~/src/compat-suite', '~/src/elyx', '~/src/dotfiles'],
+    'dev-mac': [
+      '~/src',
+      '~/src/baton',
+      '~/src/baton/docs',
+      '~/src/baton/web',
+      '~/src/compat-suite',
+      '~/src/elyx',
+      '~/src/dotfiles',
+    ],
     'dev-ubuntu': [
       '/home/kaken/work',
       '/home/kaken/work/baton',
+      '/home/kaken/work/baton/internal',
+      '/home/kaken/work/baton/internal/gateway',
+      '/home/kaken/work/baton/internal/gateway/testdata',
+      '/home/kaken/work/baton/logs',
       '/home/kaken/work/switch-patrol',
       '/home/kaken/work/netops',
     ],
@@ -545,12 +627,276 @@ function inbox(now: number): InboxItem[] {
   ]
 }
 
-function files(): Record<string, string> {
+const connGo = `package gateway
+
+import (
+	"context"
+	"errors"
+	"sync"
+	"time"
+)
+
+// Conn 是设备的一条出站连接。重连时旧连接的读循环可能还在运行。
+type Conn struct {
+	mu       sync.Mutex
+	deviceID string
+	session  *Session
+	closed   chan struct{}
+	lastSeen time.Time
+}
+
+var errClosed = errors.New("gateway: connection closed")
+
+func newConn(deviceID string, session *Session) *Conn {
+	return &Conn{
+		deviceID: deviceID,
+		session:  session,
+		closed:   make(chan struct{}),
+		lastSeen: time.Now(),
+	}
+}
+
+func (c *Conn) DeviceID() string {
+	return c.deviceID
+}
+
+func (c *Conn) Touch() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lastSeen = time.Now()
+}
+
+func (c *Conn) LastSeen() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastSeen
+}
+
+func (c *Conn) Close() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	select {
+	case <-c.closed:
+	default:
+		close(c.closed)
+	}
+}
+
+func (c *Conn) Done() <-chan struct{} {
+	return c.closed
+}
+
+// Replace 把会话交给新连接。旧连接关闭前，新连接不接收消息。
+func (c *Conn) Replace(ctx context.Context, next *Conn) error {
+	c.mu.Lock()
+	session := c.session
+	c.session = nil
+	c.mu.Unlock()
+	if session == nil {
+		return errClosed
+	}
+	c.Close()
+	select {
+	case <-c.Done():
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	next.mu.Lock()
+	next.session = session
+	next.mu.Unlock()
+	return nil
+}
+
+func (c *Conn) Send(ctx context.Context, frame []byte) error {
+	c.mu.Lock()
+	session := c.session
+	c.mu.Unlock()
+	if session == nil {
+		return errClosed
+	}
+	return session.Write(ctx, frame)
+}
+
+func (c *Conn) readLoop(ctx context.Context, frames <-chan []byte) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-c.closed:
+			return
+		case frame, ok := <-frames:
+			if !ok {
+				c.Close()
+				return
+			}
+			c.Touch()
+			c.mu.Lock()
+			session := c.session
+			c.mu.Unlock()
+			if session != nil {
+				session.Deliver(frame)
+			}
+		}
+	}
+}
+`
+
+const readme = `# Baton
+
+Cross-device AI agent coordination.
+
+## Development
+
+Install dependencies and start the web UI:
+
+    pnpm --dir web install
+    pnpm --dir web dev
+
+The mock backend runs in the browser. Pick a scenario with ?scenario=offline.
+`
+
+const reconnectLog = Array.from({ length: 48 }, (_, index) => {
+  const seconds = String(index).padStart(2, '0')
+  if (index === 41) return `14:31:${seconds} FAIL TestReconnectAfterSleep (30.02s): no reconnect after resume`
+  return `14:31:${seconds} ok   TestReconnect/case-${index + 1} (${(index * 0.07).toFixed(2)}s)`
+}).join('\n')
+
+// 超过预览上限的日志：预览只取开头 64 KB。
+const soakLog = Array.from(
+  { length: 1600 },
+  (_, index) => `soak ${String(index + 1).padStart(5, '0')} reconnect ok rtt=${12 + (index % 9)}ms frames=${index * 3}`,
+).join('\n')
+
+function file(text: string | null, size = text === null ? 0 : new TextEncoder().encode(text).length): DeviceFile {
+  return { size, text }
+}
+
+function files(): Record<string, DeviceFile> {
   return {
-    [fileKey('dev-mac', '~/src/baton/README.md')]: '# Baton\n\nCross-device AI agent coordination.\n',
-    [fileKey('dev-ubuntu', '/home/kaken/work/baton/internal/gateway/conn.go')]:
-      'package gateway\n\n// Conn 是设备的一条连接。\ntype Conn struct{}\n',
-    [fileKey('dev-windows', 'C:\\src\\compat-suite\\report.md')]: '# Compat report\n\n- path_test.go: 2 failures\n',
+    [fileKey('dev-mac', '~/src/baton/README.md')]: file(readme),
+    [fileKey('dev-mac', '~/src/baton/docs/batond.md')]: file(
+      '# batond on macOS\n\n1. Install with Homebrew.\n2. Run `batond enroll` and enter the code from the web page.\n3. Run `brew services start batond`.\n',
+    ),
+    [fileKey('dev-ubuntu', `${ubuntuRepo}/internal/gateway/conn.go`)]: file(connGo),
+    [fileKey('dev-ubuntu', `${ubuntuRepo}/internal/gateway/reconnect.go`)]: file(
+      'package gateway\n\n// reconnect 在设备恢复连接后接回原来的会话。\nfunc (g *Gateway) reconnect(deviceID string, next *Conn) error {\n\treturn g.conns[deviceID].Replace(g.ctx, next)\n}\n',
+    ),
+    [fileKey('dev-ubuntu', `${ubuntuRepo}/internal/gateway/reconnect_test.go`)]: file(
+      'package gateway\n\nimport "testing"\n\nfunc TestReconnectAfterSleep(t *testing.T) {\n\tt.Parallel()\n}\n',
+    ),
+    [fileKey('dev-ubuntu', `${ubuntuRepo}/internal/gateway/session.go`)]: file(
+      'package gateway\n\n// Session 保存设备在中心的会话状态，换连接时保留。\ntype Session struct{}\n',
+    ),
+    [fileKey('dev-ubuntu', `${ubuntuRepo}/internal/gateway/testdata/capture.bin`)]: file(null, 2.4 * mb),
+    [fileKey('dev-ubuntu', `${ubuntuRepo}/logs/reconnect.log`)]: file(reconnectLog, 48 * kb),
+    [fileKey('dev-ubuntu', `${ubuntuRepo}/logs/gateway-soak.log`)]: file(soakLog, 2.4 * mb),
+    [fileKey('dev-windows', 'C:\\src\\compat-suite\\report.md')]: file(
+      '# Compat report\n\n- path_test.go: 2 failures\n  - TestJoinDrive: got C:foo, want C:\\foo\n  - TestRelDrive: different volumes\n',
+    ),
+    [fileKey('dev-windows', 'C:\\src\\baton\\logs\\windows-reconnect.log')]: file(
+      '14:30:02 ok TestReconnect\n',
+      52 * kb,
+    ),
+  }
+}
+
+// 设备上保存的回复过程，只在展开时按需读取。
+function traces(): Record<string, TraceStep[]> {
+  return {
+    'msg-gateway-r1': [
+      {
+        kind: 'command',
+        command: 'go test -run Reconnect ./internal/gateway',
+        output:
+          '--- FAIL: TestReconnectAfterSleep (30.02s)\n    reconnect_test.go:41: no reconnect after resume\nFAIL\nFAIL\tgithub.com/hhubb22/baton/internal/gateway\t31.408s',
+      },
+      { kind: 'file', action: 'wrote', path: `${ubuntuRepo}/logs/reconnect.log` },
+    ],
+    'msg-webui-2': [
+      {
+        kind: 'command',
+        command: 'pnpm create vite web --template react-ts',
+        output: 'Scaffolding project in ~/src/baton/web...\nDone.',
+      },
+      { kind: 'tool', name: 'Read', detail: '~/src/baton/specs/web-ui/PLAN.md' },
+      { kind: 'file', action: 'wrote', path: '~/src/baton/web/vite.config.ts' },
+      {
+        kind: 'command',
+        command: 'pnpm --dir web build',
+        output: 'vite v7.1.4 building for production...\n✓ 42 modules transformed.\n✓ built in 1.84s',
+      },
+      { kind: 'file', action: 'edited', path: '~/src/baton/README.md' },
+    ],
+    'msg-compat-2': [
+      {
+        kind: 'command',
+        command: 'go test ./...',
+        output:
+          '--- FAIL: TestJoinDrive (0.00s)\n--- FAIL: TestRelDrive (0.00s)\nFAIL\tgithub.com/hhubb22/compat-suite/path\t0.212s',
+      },
+      { kind: 'file', action: 'wrote', path: 'C:\\src\\compat-suite\\report.md' },
+    ],
+    'msg-upgrade-2': [
+      { kind: 'command', command: 'batond upgrade --version 0.9.2', output: 'Downloaded batond 0.9.2 (18.4 MB)' },
+      { kind: 'command', command: 'Restart-Service batond', output: '' },
+    ],
+    'msg-guide-2': [
+      { kind: 'tool', name: 'Search', detail: 'batond enroll' },
+      { kind: 'file', action: 'wrote', path: '~/src/baton/docs/batond.md' },
+    ],
+  }
+}
+
+// 设备上比中心更早的对话。Rebuild web UI foundation 这个 Thread 之前还聊过三轮。
+function earlierHistory(now: number): Record<string, Message[]> {
+  const turns = [
+    [
+      'Compare StyleX and vanilla-extract for the new UI.',
+      'StyleX fits better: atomic CSS and typed tokens. vanilla-extract needs a separate theme contract.',
+    ],
+    [
+      'Check whether Base UI works with our CSP.',
+      'It works. Base UI positions popups through the CSSOM, which `style-src-attr` does not block.',
+    ],
+    ['List the routes the first milestone needs.', 'Six routes: sign-in, inbox, projects, project, chats and devices.'],
+  ]
+  return {
+    'thr-webui': turns.flatMap(([ask, reply], index) => {
+      const at = now - (5 - index) * hour
+      return [
+        message({
+          id: `msg-webui-e${index * 2 + 1}`,
+          threadId: 'thr-webui',
+          role: 'user',
+          sender: 'you',
+          body: ask,
+          createdAt: at,
+          delivery: 'delivered',
+        }),
+        message({
+          id: `msg-webui-e${index * 2 + 2}`,
+          threadId: 'thr-webui',
+          role: 'agent',
+          sender: 'agent',
+          body: reply,
+          createdAt: at + 4 * minute,
+          delivery: 'delivered',
+        }),
+      ]
+    }),
+  }
+}
+
+// 执行中 Thread 已经收到的实时输出。
+function outputs(): Record<string, OutputChunk[]> {
+  return {
+    'thr-gateway': [
+      {
+        kind: 'text',
+        text: '$ go test -run TestReconnectAfterSleep -count=5 ./internal/gateway\n=== RUN   TestReconnectAfterSleep\n    reconnect_test.go:41: waiting for resume\n',
+      },
+    ],
+    'thr-patrol': [{ kind: 'text', text: '$ ls scripts/\npatrol.sh  backup.sh  collect.py\n' }],
   }
 }
 
@@ -566,6 +912,11 @@ function base(now: number): World {
     inbox: inbox(now),
     operations: [],
     files: files(),
+    traces: traces(),
+    earlierHistory: earlierHistory(now),
+    outputs: outputs(),
+    outputLoss: [],
+    failingReads: [],
     answeredElsewhere: {},
     enrollments: [],
     directories: directories(),
@@ -584,15 +935,17 @@ function pendingStop(world: World, now: number, threadId: string, phase: 'stoppi
   const target = findThread(world, threadId)
   target.pending = 'stop'
   target.stopCanceled = 1
-  world.messages.push({
-    id: `msg-${threadId}-withdrawn`,
-    threadId,
-    role: 'user',
-    sender: 'you',
-    body: 'Attach the log as well.',
-    createdAt: now - minute,
-    delivery: 'withdrawn',
-  })
+  world.messages.push(
+    message({
+      id: `msg-${threadId}-withdrawn`,
+      threadId,
+      role: 'user',
+      sender: 'you',
+      body: 'Attach the log as well.',
+      createdAt: now - minute,
+      delivery: 'withdrawn',
+    }),
+  )
   world.operations.push({
     id: `op-${threadId}-stop`,
     kind: 'stopThread',
@@ -626,10 +979,21 @@ export function createWorld(id: ScenarioId, now: number): World {
         messages: [],
         inbox: [],
         files: {},
+        traces: {},
+        earlierHistory: {},
+        outputs: {},
       }
     case 'noChats':
       // 设备已接入，还没有任何对话。
-      return { ...world, threads: [], messages: [], inbox: world.inbox.filter((item) => item.threadId === null) }
+      return {
+        ...world,
+        threads: [],
+        messages: [],
+        traces: {},
+        earlierHistory: {},
+        outputs: {},
+        inbox: world.inbox.filter((item) => item.threadId === null),
+      }
     case 'signedOut':
       return { ...world, session: { account: null, defaultDeviceId: null, ended: null } }
     case 'offline': {
@@ -650,10 +1014,13 @@ export function createWorld(id: ScenarioId, now: number): World {
         id: 'ent-baton-3',
         projectId: 'prj-baton',
         kind: 'user',
+        reference: null,
         body: 'Also add a regression test for the double reconnect.',
         delivery: 'waitingDevice',
         createdAt: now - 2 * minute,
       })
+      // Ubuntu Dev 断开期间的输出有一段没保留下来，重连后标出缺口。
+      world.outputLoss.push('thr-gateway')
       // 停止请求在 Ubuntu Dev 离线后提交，等它连上再发出。
       pendingStop(world, now, 'thr-patrol', 'waitingDevice')
       return world
@@ -662,24 +1029,28 @@ export function createWorld(id: ScenarioId, now: number): World {
       setDevice(world, 'dev-windows', 'syncing', now)
       const compat = world.threads.find((item) => item.id === 'thr-compat')!
       compat.status = 'waiting'
-      world.messages.push({
-        id: 'msg-compat-3',
-        threadId: 'thr-compat',
-        role: 'user',
-        sender: 'you',
-        body: 'Rerun only the path tests.',
-        createdAt: now - 5 * minute,
-        delivery: 'waitingDevice',
-      })
-      world.messages.push({
-        id: 'msg-gateway-2',
-        threadId: 'thr-gateway',
-        role: 'user',
-        sender: 'you',
-        body: 'Also add a regression test.',
-        createdAt: now - minute,
-        delivery: 'queued',
-      })
+      world.messages.push(
+        message({
+          id: 'msg-compat-3',
+          threadId: 'thr-compat',
+          role: 'user',
+          sender: 'you',
+          body: 'Rerun only the path tests.',
+          createdAt: now - 5 * minute,
+          delivery: 'waitingDevice',
+        }),
+      )
+      world.messages.push(
+        message({
+          id: 'msg-gateway-2',
+          threadId: 'thr-gateway',
+          role: 'user',
+          sender: 'you',
+          body: 'Also add a regression test.',
+          createdAt: now - minute,
+          delivery: 'queued',
+        }),
+      )
       // Docs Cleanup 用 Claude，只有 Ubuntu Dev 登录过 Claude，现在登录已过期。
       const ubuntu = world.devices.find((item) => item.id === 'dev-ubuntu')!
       ubuntu.subscriptions = ubuntu.subscriptions.map((item) =>
@@ -696,6 +1067,7 @@ export function createWorld(id: ScenarioId, now: number): World {
         id: 'ent-docs-1',
         projectId: 'prj-docs',
         kind: 'user',
+        reference: null,
         body: 'List the docs pages that still mention the old installer.',
         delivery: 'waitingDevice',
         createdAt: now - 3 * minute,
@@ -742,6 +1114,12 @@ export function createWorld(id: ScenarioId, now: number): World {
       }
       // 第一次新建 Project 保存失败，重试成功。
       world.failProjectSaves = 1
+      // 这些内容第一次读取失败，重试成功。
+      world.failingReads.push(
+        'trace:msg-webui-2',
+        'history:thr-webui',
+        fileKey('file:dev-ubuntu', `${ubuntuRepo}/internal/gateway/reconnect_test.go`),
+      )
       world.inbox.push({
         id: 'itm-baton-signin',
         projectId: 'prj-baton',

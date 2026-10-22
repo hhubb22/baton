@@ -4,9 +4,11 @@ import { useEffect, useRef, useState } from 'react'
 import { FilePreview } from '../app/FilePreview'
 import { MessageBody } from '../app/MessageBody'
 import { Page } from '../app/Page'
+import { ReferenceBlock } from '../app/ReferenceBlock'
 import type { ProjectSearch } from '../app/router'
 import { statusTextStyle, ThreadDetail, type RecoverAction } from '../app/ThreadDetail'
 import { useNow } from '../app/useNow'
+import { useWorkspace } from '../app/workspace'
 import { ClientError } from '../data/client'
 import {
   agentNames,
@@ -50,7 +52,6 @@ import { Banner } from '../ui/Banner'
 import { Button, focusRing, IconButton } from '../ui/Button'
 import { Card } from '../ui/Card'
 import { Composer } from '../ui/Composer'
-import { Dialog } from '../ui/Dialog'
 import { Icon } from '../ui/Icon'
 import { StatusChip, StatusDot, type Tone } from '../ui/Status'
 import { Tabs } from '../ui/Tabs'
@@ -407,6 +408,7 @@ function Entry({
       return (
         <div {...stylex.props(styles.userItem)}>
           <div {...stylex.props(text.body, styles.user, entry.delivery === 'withdrawn' && styles.withdrawn)}>
+            {entry.reference && <ReferenceBlock reference={entry.reference} />}
             <MessageBody body={entry.body} onOpenPath={onOpenPath} />
           </div>
           {note && <span {...stylex.props(text.caption, styles.faint)}>{note}</span>}
@@ -711,6 +713,8 @@ export function ProjectPage() {
   const [failed, setFailed] = useState<{ body: string; clientId: string } | null>(null)
   const [overviewOpen, setOverviewOpen] = useState(true)
   const [previewPath, setPreviewPath] = useState<string | null>(null)
+  const workspace = useWorkspace()
+  const reference = workspace.references[projectId] ?? null
 
   const allDevices = devices.data ?? []
   const projectThreads = (threads.data ?? []).filter((item) => item.projectId === projectId)
@@ -722,6 +726,11 @@ export function ProjectPage() {
     const timeline = timelineRef.current
     if (timeline) timeline.scrollTop = timeline.scrollHeight
   }, [list.length, projectId])
+
+  // 从别处选中内容带过来时，把焦点放到输入区。
+  useEffect(() => {
+    if (reference) inputRef.current?.focus()
+  }, [reference])
 
   const project = projects.data?.find((item) => item.id === projectId)
   if (projects.data && !project) {
@@ -759,11 +768,12 @@ export function ProjectPage() {
     const clientId = failed && failed.body === body ? failed.clientId : newClientId()
     setError(null)
     send.mutate(
-      { projectId, body, clientId },
+      { projectId, body, clientId, reference },
       {
         onSuccess: () => {
           setDraft('')
           setFailed(null)
+          workspace.clearReference(projectId)
         },
         onError: (cause) => {
           setFailed({ body, clientId })
@@ -899,6 +909,17 @@ export function ProjectPage() {
             <Composer
               label="Message the project assistant"
               inputRef={inputRef}
+              header={
+                reference && (
+                  <ReferenceBlock
+                    reference={reference}
+                    onRemove={() => {
+                      workspace.clearReference(projectId)
+                      inputRef.current?.focus()
+                    }}
+                  />
+                )
+              }
               value={draft}
               onChange={setDraft}
               onSend={onSend}
@@ -939,9 +960,14 @@ export function ProjectPage() {
         )
       )}
       {previewPath && previewDevice && (
-        <Dialog open onOpenChange={(open) => !open && setPreviewPath(null)} title="File preview" wide>
-          <FilePreview deviceId={previewDevice} path={previewPath} onClose={() => setPreviewPath(null)} />
-        </Dialog>
+        <FilePreview
+          key={previewPath}
+          deviceId={previewDevice}
+          path={previewPath}
+          onClose={() => setPreviewPath(null)}
+          projectId={projectId}
+          source={null}
+        />
       )}
     </div>
   )

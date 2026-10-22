@@ -24,14 +24,20 @@ import type {
   OperationPhase,
   MemoryNote,
   ProcessStep,
+  FilePreview,
+  HistoryPage,
+  LiveOutput,
   Project,
   ProjectEntry,
+  Reference,
   SendMode,
   Thread,
+  Trace,
 } from '../types'
+import { previewLimit } from '../types'
 import { createWorld, type ScenarioId } from './scenarios'
 import type { Scheduler } from './scheduler'
-import type { EnrollmentRecord, World } from './world'
+import { fileKey, type EnrollmentRecord, type World } from './world'
 
 export interface Latency {
   // 读取一次数据。
@@ -45,6 +51,9 @@ export interface Latency {
 }
 
 export const browserLatency: Latency = { read: 150, save: 400, device: 900, run: 8000 }
+
+// 从设备读取更早的对话时每页的条数。
+export const historyPage = 3
 
 // Agent 收到停止请求一分钟后还没停下，设备结束它的进程。
 export const stopTimeout = 60_000
@@ -302,6 +311,8 @@ export class MockStore {
       body,
       createdAt: this.scheduler.now(),
       delivery: 'submitted',
+      activity: null,
+      attachments: [],
     }
     this.world.messages.push(message)
     return message
@@ -342,6 +353,7 @@ export class MockStore {
       updatedAt: now,
       runStartedAt: null,
       unread: false,
+      earlier: false,
     }
     this.world.threads.push(thread)
     const message = this.userMessage(thread.id, body)
@@ -438,17 +450,31 @@ export class MockStore {
     thread.stop = null
     thread.stopCanceled = 0
     thread.runStartedAt = now
+    this.world.outputs[thread.id] = [{ kind: 'text', text: `$ cd ${thread.folder}\n` }]
     if (operation) this.setPhase(operation, 'running', message.id)
     this.scheduleRunEnd(thread.id)
   }
 
+  // 一轮执行到一半时设备报告一段输出，结束时整理成回复。
   private scheduleRunEnd(threadId: ID) {
     this.runs.get(threadId)?.()
-    const cancel = this.schedule(this.latency.run, () => {
+    const cancelOutput = this.schedule(this.latency.run / 2, () => {
+      this.appendOutput(threadId, '$ go test ./...\nok  \tgithub.com/hhubb22/baton/internal/gateway\t2.314s\n')
+    })
+    const cancelEnd = this.schedule(this.latency.run, () => {
       this.runs.delete(threadId)
       this.finishRun(threadId)
     })
-    this.runs.set(threadId, cancel)
+    this.runs.set(threadId, () => {
+      cancelOutput()
+      cancelEnd()
+    })
+  }
+
+  private appendOutput(threadId: ID, text: string) {
+    const chunks = this.world.outputs[threadId] ?? []
+    this.world.outputs[threadId] = [...chunks, { kind: 'text', text }]
+    this.emit('messages')
   }
 
   private cancelRun(threadId: ID) {
@@ -466,7 +492,7 @@ export class MockStore {
     const thread = this.thread(threadId)
     if (thread.status !== 'running' || thread.pending) return
     const now = this.scheduler.now()
-    this.world.messages.push({
+    const reply: Message = {
       id: this.nextId('msg'),
       threadId,
       role: 'agent',
@@ -474,7 +500,14 @@ export class MockStore {
       body: 'Done. The change is ready for review.',
       createdAt: now,
       delivery: 'delivered',
-    })
+      activity: { commands: 1, tools: 0, files: 0 },
+      attachments: [],
+    }
+    this.world.messages.push(reply)
+    // 实时输出整理进这一轮的过程，中心不再保留。
+    const output = (this.world.outputs[threadId] ?? []).flatMap((chunk) => (chunk.kind === 'text' ? [chunk.text] : []))
+    this.world.traces[reply.id] = [{ kind: 'command', command: 'go test ./...', output: output.join('').trimEnd() }]
+    delete this.world.outputs[threadId]
     this.endRunningSends(thread, 'done')
     thread.status = 'idle'
     thread.runStartedAt = null
@@ -752,6 +785,10 @@ export class MockStore {
     }
     for (const thread of this.world.threads) {
       if (thread.deviceId !== device.id) continue
+      if (this.world.outputLoss.includes(thread.id) && this.world.outputs[thread.id]) {
+        this.world.outputs[thread.id].push({ kind: 'gap' })
+        this.world.outputLoss = this.world.outputLoss.filter((id) => id !== thread.id)
+      }
       if (thread.status === 'running' && !thread.pending) this.scheduleRunEnd(thread.id)
       else if (thread.status === 'waiting' || thread.status === 'idle') this.startNext(thread)
     }
@@ -971,7 +1008,7 @@ export class MockStore {
   }
 
   // 消息先保存，再交给助手；助手正在运行时，这条消息在这次运行结束后一起读。
-  sendProjectMessage(projectId: ID, body: string, clientId: string): ProjectEntry {
+  sendProjectMessage(projectId: ID, body: string, clientId: string, reference: Reference | null = null): ProjectEntry {
     const existing = this.projectClientIds.get(clientId)
     if (existing) {
       if (existing.body !== body) throw new ClientError('conflict', 'This message was already sent with different text')
@@ -988,6 +1025,7 @@ export class MockStore {
       kind: 'user',
       body: body.trim(),
       delivery: 'submitted',
+      reference,
       createdAt: this.scheduler.now(),
     }
     this.world.projectEntries.push(entry)
@@ -1255,6 +1293,7 @@ export class MockStore {
         updatedAt: now,
         runStartedAt: null,
         unread: false,
+        earlier: false,
       }
       this.world.threads.push(thread)
       const message: Message = {
@@ -1265,6 +1304,8 @@ export class MockStore {
         body: `${task} in \`${folder}\`. Report back what changed.`,
         createdAt: now,
         delivery: 'saved',
+        activity: null,
+        attachments: [],
       }
       this.world.messages.push(message)
       this.startRun(thread, message, null)
@@ -1342,13 +1383,75 @@ export class MockStore {
   listFolders(deviceId: ID, path: string | null): FolderListing {
     const device = this.device(deviceId)
     if (device.connection !== 'online') return { state: 'unavailable', deviceId, path, reason: device.connection }
-    if (path === null) return { state: 'ready', deviceId, path, folders: device.folders }
+    if (path === null) return { state: 'ready', deviceId, path, folders: device.folders, files: [] }
     if (!device.folders.some((root) => insideFolder(path, root))) {
       return { state: 'unavailable', deviceId, path, reason: 'outsideFolders' }
     }
     const existing = this.world.directories[deviceId] ?? []
     if (!existing.includes(path)) return { state: 'unavailable', deviceId, path, reason: 'missing' }
     const folders = existing.filter((item) => parentFolder(item) === path).sort()
-    return { state: 'ready', deviceId, path, folders }
+    const prefix = `${deviceId}:`
+    const files = Object.entries(this.world.files)
+      .filter(([key]) => key.startsWith(prefix) && parentFolder(key.slice(prefix.length)) === path)
+      .map(([key, file]) => ({ path: key.slice(prefix.length), size: file.size }))
+      .sort((a, b) => a.path.localeCompare(b.path))
+    return { state: 'ready', deviceId, path, folders, files }
+  }
+
+  // 场景里标记为读取失败的内容第一次读取时失败，之后正常返回。
+  private failOnce(key: string) {
+    if (!this.world.failingReads.includes(key)) return
+    this.world.failingReads = this.world.failingReads.filter((item) => item !== key)
+    throw new ClientError('unavailable', 'The device did not return this content')
+  }
+
+  // 文件预览只读允许的目录，超过 previewLimit 只返回开头，二进制文件不传内容。
+  readFile(deviceId: ID, path: string): FilePreview {
+    const device = this.device(deviceId)
+    const unavailable = (
+      reason: Extract<FilePreview, { state: 'unavailable' }>['reason'],
+      size: number | null = null,
+    ) => ({ state: 'unavailable', deviceId, path, reason, size }) as const
+    if (device.connection !== 'online') return unavailable(device.connection)
+    if (!device.folders.some((root) => insideFolder(path, root))) return unavailable('outsideFolders')
+    this.failOnce(`file:${fileKey(deviceId, path)}`)
+    const file = this.world.files[fileKey(deviceId, path)]
+    if (!file) return unavailable('missing')
+    if (file.text === null) return unavailable('binary', file.size)
+    const bytes = new TextEncoder().encode(file.text)
+    const truncated = file.size > previewLimit
+    const content = bytes.length > previewLimit ? new TextDecoder().decode(bytes.slice(0, previewLimit)) : file.text
+    return { state: 'ready', deviceId, path, size: file.size, content, truncated }
+  }
+
+  // 回复的过程保存在 Thread 所在设备上，设备离线或对话记录已删除时读不到。
+  readTrace(messageId: ID): Trace {
+    const message = this.world.messages.find((item) => item.id === messageId)
+    if (!message) throw new ClientError('notFound', `Message ${messageId} not found`)
+    const thread = this.thread(message.threadId)
+    if (!this.online(thread.deviceId)) return { state: 'unavailable', messageId, reason: 'offline' }
+    if (this.world.lostHistory.includes(thread.id)) return { state: 'unavailable', messageId, reason: 'missing' }
+    this.failOnce(`trace:${messageId}`)
+    return { state: 'ready', messageId, steps: this.world.traces[messageId] ?? [] }
+  }
+
+  // 从设备按页读取更早的对话，每页 historyPage 条，从 before 往前。
+  readHistory(threadId: ID, before: ID | null): HistoryPage {
+    const thread = this.thread(threadId)
+    if (!this.online(thread.deviceId)) return { state: 'unavailable', threadId, reason: 'offline' }
+    if (this.world.lostHistory.includes(threadId)) return { state: 'unavailable', threadId, reason: 'missing' }
+    this.failOnce(`history:${threadId}`)
+    const earlier = this.world.earlierHistory[threadId] ?? []
+    const index = before === null ? -1 : earlier.findIndex((item) => item.id === before)
+    const end = index < 0 ? earlier.length : index
+    const start = Math.max(0, end - historyPage)
+    return { state: 'ready', threadId, messages: earlier.slice(start, end), more: start > 0 }
+  }
+
+  // 只有执行中的一轮有实时输出。
+  readOutput(threadId: ID): LiveOutput {
+    const thread = this.thread(threadId)
+    const chunks = thread.status === 'running' ? (this.world.outputs[threadId] ?? []) : []
+    return { threadId, chunks }
   }
 }
