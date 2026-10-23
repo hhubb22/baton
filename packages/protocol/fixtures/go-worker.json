@@ -1,0 +1,406 @@
+{
+  "source": "internal/session/wire.go:ipcMessage",
+  "fields": [
+    {
+      "go_type": "string",
+      "name": "client_message_id",
+      "optional": true
+    },
+    {
+      "go_type": "string",
+      "name": "mode",
+      "optional": true
+    },
+    {
+      "go_type": "string",
+      "name": "model",
+      "optional": true
+    },
+    {
+      "go_type": "int64",
+      "name": "after_worker_seq",
+      "optional": true
+    },
+    {
+      "go_type": "int64",
+      "name": "worker_seq",
+      "optional": true
+    },
+    {
+      "go_type": "[]protocol.ThreadReport",
+      "name": "thread_reports",
+      "optional": true
+    },
+    {
+      "go_type": "*protocol.SessionRequest",
+      "name": "session_request",
+      "optional": true
+    },
+    {
+      "go_type": "*protocol.SessionResult",
+      "name": "session_result",
+      "optional": true
+    },
+    {
+      "go_type": "jsontext.Value",
+      "name": "history",
+      "optional": true
+    },
+    {
+      "go_type": "string",
+      "name": "history_cursor",
+      "optional": true
+    },
+    {
+      "go_type": "string",
+      "name": "stop_reason",
+      "optional": true
+    },
+    {
+      "go_type": "string",
+      "name": "type",
+      "optional": false
+    },
+    {
+      "go_type": "string",
+      "name": "token",
+      "optional": true
+    },
+    {
+      "go_type": "bool",
+      "name": "ok",
+      "optional": false
+    },
+    {
+      "go_type": "string",
+      "name": "code",
+      "optional": true
+    },
+    {
+      "go_type": "string",
+      "name": "message",
+      "optional": true
+    },
+    {
+      "go_type": "int",
+      "name": "pid",
+      "optional": true
+    },
+    {
+      "go_type": "string",
+      "name": "session_id",
+      "optional": true
+    },
+    {
+      "go_type": "string",
+      "name": "payload",
+      "optional": true
+    },
+    {
+      "go_type": "string",
+      "name": "event_id",
+      "optional": true
+    }
+  ],
+  "cases": [
+    {
+      "schema": "WorkerIPCMessage",
+      "name": "auth",
+      "value": {
+        "ok": false,
+        "token": "0000000000000000000000000000000000000000000000000000000000000000",
+        "type": "auth"
+      }
+    },
+    {
+      "schema": "WorkerIPCMessage",
+      "name": "status",
+      "value": {
+        "ok": false,
+        "type": "status"
+      }
+    },
+    {
+      "schema": "WorkerIPCMessage",
+      "name": "thread_open",
+      "value": {
+        "ok": false,
+        "type": "thread_open"
+      }
+    },
+    {
+      "schema": "WorkerIPCMessage",
+      "name": "thread_message",
+      "value": {
+        "client_message_id": "input-1",
+        "mode": "queue",
+        "model": "gpt-6.1-sol",
+        "ok": false,
+        "payload": "运行本地检查",
+        "type": "thread_message"
+      }
+    },
+    {
+      "schema": "WorkerIPCMessage",
+      "name": "thread_withdraw",
+      "value": {
+        "client_message_id": "input-1",
+        "ok": false,
+        "type": "thread_withdraw"
+      }
+    },
+    {
+      "schema": "WorkerIPCMessage",
+      "name": "thread_resume",
+      "value": {
+        "ok": false,
+        "type": "thread_resume"
+      }
+    },
+    {
+      "schema": "WorkerIPCMessage",
+      "name": "thread_stop",
+      "value": {
+        "ok": false,
+        "stop_reason": "employee_stop",
+        "type": "thread_stop"
+      }
+    },
+    {
+      "schema": "WorkerIPCMessage",
+      "name": "thread_pending",
+      "value": {
+        "after_worker_seq": 1,
+        "ok": false,
+        "type": "thread_pending"
+      }
+    },
+    {
+      "schema": "WorkerIPCMessage",
+      "name": "thread_ack",
+      "value": {
+        "event_id": "12345678-1234-4234-8234-123456789abc",
+        "ok": false,
+        "type": "thread_ack",
+        "worker_seq": 2
+      }
+    },
+    {
+      "schema": "WorkerIPCMessage",
+      "name": "session_request",
+      "value": {
+        "ok": false,
+        "session_request": {
+          "action": "output",
+          "cursor": "12345678-1234-4234-8234-123456789abc:0",
+          "operation_id": "12345678-1234-4234-8234-123456789abc",
+          "session_id": "12345678-1234-4234-8234-123456789abc",
+          "type": "session.request"
+        },
+        "type": "session_request"
+      }
+    },
+    {
+      "schema": "WorkerIPCMessage",
+      "name": "native_history",
+      "value": {
+        "ok": false,
+        "payload": "native-cursor",
+        "type": "native_history"
+      }
+    },
+    {
+      "schema": "WorkerIPCMessage",
+      "name": "result.auth",
+      "value": {
+        "type": "result",
+        "ok": true
+      }
+    },
+    {
+      "schema": "WorkerIPCMessage",
+      "name": "result.status",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc"
+      }
+    },
+    {
+      "schema": "WorkerIPCMessage",
+      "name": "result.error",
+      "value": {
+        "type": "result",
+        "ok": false,
+        "code": "thread_rejected",
+        "message": "尚未实现的 Thread 适配器"
+      }
+    },
+    {
+      "schema": "WorkerIPCMessage",
+      "name": "result.pending",
+      "value": {
+        "thread_reports": [
+          {
+            "type": "thread.report",
+            "thread_id": "12345678-1234-4234-8234-123456789abc",
+            "event_id": "12345678-1234-4234-8234-123456789abc",
+            "worker_seq": 1,
+            "kind": "thread.opened",
+            "storage_generation": "12345678-1234-4234-8234-123456789abc",
+            "native_session_id": "native-session-1"
+          }
+        ],
+        "type": "result",
+        "ok": true
+      }
+    },
+    {
+      "schema": "WorkerIPCMessage",
+      "name": "result.output",
+      "value": {
+        "session_result": {
+          "type": "session.result",
+          "operation_id": "12345678-1234-4234-8234-123456789abc",
+          "session_id": "12345678-1234-4234-8234-123456789abc",
+          "ok": true,
+          "state": "idle",
+          "text": "检查通过",
+          "cursor": "12345678-1234-4234-8234-123456789abc:12",
+          "gap": true
+        },
+        "type": "result",
+        "ok": true
+      }
+    },
+    {
+      "schema": "WorkerIPCMessage",
+      "name": "result.native_history",
+      "value": {
+        "history": {
+          "messages": [
+            {
+              "role": "assistant",
+              "text": "检查通过"
+            }
+          ]
+        },
+        "history_cursor": "native-cursor",
+        "type": "result",
+        "ok": true
+      }
+    },
+    {
+      "schema": "WorkerIPCMessage",
+      "name": "thread_open.command_id",
+      "value": {
+        "type": "thread_open",
+        "ok": false,
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "thread_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "open_config": {
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "node_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "agent_type": "codex",
+          "model": "gpt-6.1-sol",
+          "working_directory": "/work/baton",
+          "execution_timeout_seconds": 7200,
+          "adapter_config": {
+            "home": "/home/fixture/.codex",
+            "binary": "codex",
+            "state_path": "/private/thread/native/state.json",
+            "session_dir": "/private/thread/native"
+          }
+        }
+      }
+    },
+    {
+      "schema": "WorkerIPCMessage",
+      "name": "thread_message.command_id",
+      "value": {
+        "client_message_id": "input-1",
+        "mode": "queue",
+        "model": "gpt-6.1-sol",
+        "type": "thread_message",
+        "ok": false,
+        "payload": "运行本地检查",
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "thread_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1"
+      }
+    },
+    {
+      "schema": "WorkerIPCMessage",
+      "name": "thread_withdraw.command_id",
+      "value": {
+        "client_message_id": "input-1",
+        "type": "thread_withdraw",
+        "ok": false,
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "thread_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1"
+      }
+    },
+    {
+      "schema": "WorkerIPCMessage",
+      "name": "thread_resume.command_id",
+      "value": {
+        "type": "thread_resume",
+        "ok": false,
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "thread_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1"
+      }
+    },
+    {
+      "schema": "WorkerIPCMessage",
+      "name": "thread_stop.command_id",
+      "value": {
+        "stop_reason": "employee_stop",
+        "type": "thread_stop",
+        "ok": false,
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "thread_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1"
+      }
+    },
+    {
+      "schema": "WorkerIPCMessage",
+      "name": "result.agent_starting",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "worker_ready": true,
+        "agent_ready": false
+      }
+    },
+    {
+      "schema": "WorkerIPCMessage",
+      "name": "result.agent_ready",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "worker_ready": true,
+        "agent_ready": true
+      }
+    },
+    {
+      "schema": "WorkerIPCMessage",
+      "name": "result.storage_generation",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "12345678-1234-4234-8234-123456789abc"
+      }
+    }
+  ]
+}

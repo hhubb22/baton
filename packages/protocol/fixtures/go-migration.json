@@ -1,0 +1,1362 @@
+{
+  "source": "specs/agent-adapters/TECH.md · test-only contracts",
+  "cases": [
+    {
+      "schema": "WorkerOpenConfig",
+      "name": "codex",
+      "value": {
+        "thread_id": "12345678-1234-4234-8234-123456789abc",
+        "node_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "agent_type": "codex",
+        "model": "gpt-6.1-sol",
+        "working_directory": "/work/baton",
+        "execution_timeout_seconds": 7200,
+        "adapter_config": {
+          "home": "/home/fixture/.codex",
+          "binary": "codex",
+          "state_path": "/private/thread/native/state.json",
+          "session_dir": "/private/thread/native"
+        }
+      }
+    },
+    {
+      "schema": "WorkerAdapterConfig",
+      "name": "paths",
+      "value": {
+        "home": "/home/fixture/.codex",
+        "binary": "codex",
+        "state_path": "/private/thread/native/state.json",
+        "session_dir": "/private/thread/native"
+      }
+    },
+    {
+      "schema": "WorkerCommandReceipt",
+      "name": "open",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "thread_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "action": "open"
+      }
+    },
+    {
+      "schema": "WorkerRequest",
+      "name": "open",
+      "value": {
+        "type": "thread_open",
+        "ok": false,
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "thread_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "open_config": {
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "node_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "agent_type": "codex",
+          "model": "gpt-6.1-sol",
+          "working_directory": "/work/baton",
+          "execution_timeout_seconds": 7200,
+          "adapter_config": {
+            "home": "/home/fixture/.codex",
+            "binary": "codex",
+            "state_path": "/private/thread/native/state.json",
+            "session_dir": "/private/thread/native"
+          }
+        }
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "open.accepted",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "accepted"
+      }
+    },
+    {
+      "schema": "WorkerCommandResult",
+      "name": "open.accepted",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "receipt": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "action": "open"
+        },
+        "command_status": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "state": "accepted"
+        }
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "open.running",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "running"
+      }
+    },
+    {
+      "schema": "WorkerCommandResult",
+      "name": "open.running",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "receipt": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "action": "open"
+        },
+        "command_status": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "state": "running"
+        }
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "open.succeeded",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "succeeded",
+        "command_outcome": "succeeded",
+        "reason": "命令已经结束"
+      }
+    },
+    {
+      "schema": "WorkerCommandResult",
+      "name": "open.succeeded",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "receipt": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "action": "open"
+        },
+        "command_status": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "state": "succeeded",
+          "command_outcome": "succeeded",
+          "reason": "命令已经结束"
+        }
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "open.failed",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "failed",
+        "command_outcome": "failed",
+        "reason": "命令已经结束"
+      }
+    },
+    {
+      "schema": "WorkerCommandResult",
+      "name": "open.failed",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "receipt": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "action": "open"
+        },
+        "command_status": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "state": "failed",
+          "command_outcome": "failed",
+          "reason": "命令已经结束"
+        }
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "open.cancelled",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "cancelled",
+        "command_outcome": "cancelled",
+        "reason": "命令已经结束"
+      }
+    },
+    {
+      "schema": "WorkerCommandResult",
+      "name": "open.cancelled",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "receipt": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "action": "open"
+        },
+        "command_status": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "state": "cancelled",
+          "command_outcome": "cancelled",
+          "reason": "命令已经结束"
+        }
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "open.unknown",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "unknown",
+        "command_outcome": "unknown",
+        "reason": "命令已经结束"
+      }
+    },
+    {
+      "schema": "WorkerCommandResult",
+      "name": "open.unknown",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "receipt": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "action": "open"
+        },
+        "command_status": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "state": "unknown",
+          "command_outcome": "unknown",
+          "reason": "命令已经结束"
+        }
+      }
+    },
+    {
+      "schema": "WorkerCommandReceipt",
+      "name": "message",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "thread_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "action": "message"
+      }
+    },
+    {
+      "schema": "WorkerRequest",
+      "name": "message",
+      "value": {
+        "client_message_id": "input-1",
+        "mode": "queue",
+        "type": "thread_message",
+        "ok": false,
+        "payload": "运行本地检查",
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "thread_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1"
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "message.accepted",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "accepted"
+      }
+    },
+    {
+      "schema": "WorkerCommandResult",
+      "name": "message.accepted",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "receipt": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "action": "message"
+        },
+        "command_status": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "state": "accepted"
+        }
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "message.running",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "running"
+      }
+    },
+    {
+      "schema": "WorkerCommandResult",
+      "name": "message.running",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "receipt": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "action": "message"
+        },
+        "command_status": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "state": "running"
+        }
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "message.succeeded",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "succeeded",
+        "command_outcome": "succeeded",
+        "reason": "命令已经结束"
+      }
+    },
+    {
+      "schema": "WorkerCommandResult",
+      "name": "message.succeeded",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "receipt": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "action": "message"
+        },
+        "command_status": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "state": "succeeded",
+          "command_outcome": "succeeded",
+          "reason": "命令已经结束"
+        }
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "message.failed",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "failed",
+        "command_outcome": "failed",
+        "reason": "命令已经结束"
+      }
+    },
+    {
+      "schema": "WorkerCommandResult",
+      "name": "message.failed",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "receipt": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "action": "message"
+        },
+        "command_status": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "state": "failed",
+          "command_outcome": "failed",
+          "reason": "命令已经结束"
+        }
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "message.cancelled",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "cancelled",
+        "command_outcome": "cancelled",
+        "reason": "命令已经结束"
+      }
+    },
+    {
+      "schema": "WorkerCommandResult",
+      "name": "message.cancelled",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "receipt": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "action": "message"
+        },
+        "command_status": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "state": "cancelled",
+          "command_outcome": "cancelled",
+          "reason": "命令已经结束"
+        }
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "message.unknown",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "unknown",
+        "command_outcome": "unknown",
+        "reason": "命令已经结束"
+      }
+    },
+    {
+      "schema": "WorkerCommandResult",
+      "name": "message.unknown",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "receipt": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "action": "message"
+        },
+        "command_status": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "state": "unknown",
+          "command_outcome": "unknown",
+          "reason": "命令已经结束"
+        }
+      }
+    },
+    {
+      "schema": "WorkerCommandReceipt",
+      "name": "withdraw",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "thread_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "action": "withdraw"
+      }
+    },
+    {
+      "schema": "WorkerRequest",
+      "name": "withdraw",
+      "value": {
+        "client_message_id": "input-1",
+        "type": "thread_withdraw",
+        "ok": false,
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "thread_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1"
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "withdraw.accepted",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "accepted"
+      }
+    },
+    {
+      "schema": "WorkerCommandResult",
+      "name": "withdraw.accepted",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "receipt": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "action": "withdraw"
+        },
+        "command_status": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "state": "accepted"
+        }
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "withdraw.running",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "running"
+      }
+    },
+    {
+      "schema": "WorkerCommandResult",
+      "name": "withdraw.running",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "receipt": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "action": "withdraw"
+        },
+        "command_status": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "state": "running"
+        }
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "withdraw.succeeded",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "succeeded",
+        "command_outcome": "succeeded",
+        "reason": "命令已经结束"
+      }
+    },
+    {
+      "schema": "WorkerCommandResult",
+      "name": "withdraw.succeeded",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "receipt": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "action": "withdraw"
+        },
+        "command_status": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "state": "succeeded",
+          "command_outcome": "succeeded",
+          "reason": "命令已经结束"
+        }
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "withdraw.failed",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "failed",
+        "command_outcome": "failed",
+        "reason": "命令已经结束"
+      }
+    },
+    {
+      "schema": "WorkerCommandResult",
+      "name": "withdraw.failed",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "receipt": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "action": "withdraw"
+        },
+        "command_status": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "state": "failed",
+          "command_outcome": "failed",
+          "reason": "命令已经结束"
+        }
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "withdraw.cancelled",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "cancelled",
+        "command_outcome": "cancelled",
+        "reason": "命令已经结束"
+      }
+    },
+    {
+      "schema": "WorkerCommandResult",
+      "name": "withdraw.cancelled",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "receipt": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "action": "withdraw"
+        },
+        "command_status": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "state": "cancelled",
+          "command_outcome": "cancelled",
+          "reason": "命令已经结束"
+        }
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "withdraw.unknown",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "unknown",
+        "command_outcome": "unknown",
+        "reason": "命令已经结束"
+      }
+    },
+    {
+      "schema": "WorkerCommandResult",
+      "name": "withdraw.unknown",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "receipt": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "action": "withdraw"
+        },
+        "command_status": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "state": "unknown",
+          "command_outcome": "unknown",
+          "reason": "命令已经结束"
+        }
+      }
+    },
+    {
+      "schema": "WorkerCommandReceipt",
+      "name": "resume",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "thread_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "action": "resume"
+      }
+    },
+    {
+      "schema": "WorkerRequest",
+      "name": "resume",
+      "value": {
+        "type": "thread_resume",
+        "ok": false,
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "thread_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1"
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "resume.accepted",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "accepted"
+      }
+    },
+    {
+      "schema": "WorkerCommandResult",
+      "name": "resume.accepted",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "receipt": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "action": "resume"
+        },
+        "command_status": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "state": "accepted"
+        }
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "resume.running",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "running"
+      }
+    },
+    {
+      "schema": "WorkerCommandResult",
+      "name": "resume.running",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "receipt": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "action": "resume"
+        },
+        "command_status": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "state": "running"
+        }
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "resume.succeeded",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "succeeded",
+        "command_outcome": "succeeded",
+        "reason": "命令已经结束"
+      }
+    },
+    {
+      "schema": "WorkerCommandResult",
+      "name": "resume.succeeded",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "receipt": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "action": "resume"
+        },
+        "command_status": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "state": "succeeded",
+          "command_outcome": "succeeded",
+          "reason": "命令已经结束"
+        }
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "resume.failed",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "failed",
+        "command_outcome": "failed",
+        "reason": "命令已经结束"
+      }
+    },
+    {
+      "schema": "WorkerCommandResult",
+      "name": "resume.failed",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "receipt": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "action": "resume"
+        },
+        "command_status": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "state": "failed",
+          "command_outcome": "failed",
+          "reason": "命令已经结束"
+        }
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "resume.cancelled",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "cancelled",
+        "command_outcome": "cancelled",
+        "reason": "命令已经结束"
+      }
+    },
+    {
+      "schema": "WorkerCommandResult",
+      "name": "resume.cancelled",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "receipt": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "action": "resume"
+        },
+        "command_status": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "state": "cancelled",
+          "command_outcome": "cancelled",
+          "reason": "命令已经结束"
+        }
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "resume.unknown",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "unknown",
+        "command_outcome": "unknown",
+        "reason": "命令已经结束"
+      }
+    },
+    {
+      "schema": "WorkerCommandResult",
+      "name": "resume.unknown",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "receipt": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "action": "resume"
+        },
+        "command_status": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "state": "unknown",
+          "command_outcome": "unknown",
+          "reason": "命令已经结束"
+        }
+      }
+    },
+    {
+      "schema": "WorkerCommandReceipt",
+      "name": "stop",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "thread_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "action": "stop"
+      }
+    },
+    {
+      "schema": "WorkerRequest",
+      "name": "stop",
+      "value": {
+        "stop_reason": "employee_stop",
+        "type": "thread_stop",
+        "ok": false,
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "thread_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1"
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "stop.accepted",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "accepted"
+      }
+    },
+    {
+      "schema": "WorkerCommandResult",
+      "name": "stop.accepted",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "receipt": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "action": "stop"
+        },
+        "command_status": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "state": "accepted"
+        }
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "stop.running",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "running"
+      }
+    },
+    {
+      "schema": "WorkerCommandResult",
+      "name": "stop.running",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "receipt": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "action": "stop"
+        },
+        "command_status": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "state": "running"
+        }
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "stop.succeeded",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "succeeded",
+        "command_outcome": "succeeded",
+        "reason": "命令已经结束"
+      }
+    },
+    {
+      "schema": "WorkerCommandResult",
+      "name": "stop.succeeded",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "receipt": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "action": "stop"
+        },
+        "command_status": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "state": "succeeded",
+          "command_outcome": "succeeded",
+          "reason": "命令已经结束"
+        }
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "stop.failed",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "failed",
+        "command_outcome": "failed",
+        "reason": "命令已经结束"
+      }
+    },
+    {
+      "schema": "WorkerCommandResult",
+      "name": "stop.failed",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "receipt": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "action": "stop"
+        },
+        "command_status": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "state": "failed",
+          "command_outcome": "failed",
+          "reason": "命令已经结束"
+        }
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "stop.cancelled",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "cancelled",
+        "command_outcome": "cancelled",
+        "reason": "命令已经结束"
+      }
+    },
+    {
+      "schema": "WorkerCommandResult",
+      "name": "stop.cancelled",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "receipt": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "action": "stop"
+        },
+        "command_status": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "state": "cancelled",
+          "command_outcome": "cancelled",
+          "reason": "命令已经结束"
+        }
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "stop.unknown",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "unknown",
+        "command_outcome": "unknown",
+        "reason": "命令已经结束"
+      }
+    },
+    {
+      "schema": "WorkerCommandResult",
+      "name": "stop.unknown",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "pid": 1234,
+        "session_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "receipt": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "action": "stop"
+        },
+        "command_status": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "state": "unknown",
+          "command_outcome": "unknown",
+          "reason": "命令已经结束"
+        }
+      }
+    },
+    {
+      "schema": "WorkerRequest",
+      "name": "query",
+      "value": {
+        "type": "thread_command_status",
+        "ok": false,
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "thread_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1"
+      }
+    },
+    {
+      "schema": "WorkerIPCMessage",
+      "name": "query.not_found",
+      "value": {
+        "type": "result",
+        "ok": false,
+        "code": "command_not_found",
+        "message": "命令尚未持久接收"
+      }
+    },
+    {
+      "schema": "DevicesChanged",
+      "name": "report_version",
+      "value": {
+        "type": "devices.changed",
+        "node_id": "12345678-1234-4234-8234-123456789abc",
+        "report_version": 0
+      }
+    },
+    {
+      "schema": "DevicesChanged",
+      "name": "report_version",
+      "value": {
+        "type": "devices.changed",
+        "node_id": "12345678-1234-4234-8234-123456789abc",
+        "report_version": 1
+      }
+    },
+    {
+      "schema": "DevicesChanged",
+      "name": "report_version",
+      "value": {
+        "type": "devices.changed",
+        "node_id": "12345678-1234-4234-8234-123456789abc",
+        "report_version": 2
+      }
+    },
+    {
+      "schema": "CommandCompleted",
+      "name": "completion_before_ack",
+      "value": {
+        "type": "thread.report",
+        "thread_id": "12345678-1234-4234-8234-123456789abc",
+        "event_id": "22345678-1234-4234-8234-123456789abc",
+        "worker_seq": 2,
+        "kind": "command.completed",
+        "storage_generation": "generation-1",
+        "reason": "命令已完成",
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "command_outcome": "succeeded"
+      }
+    },
+    {
+      "schema": "CommandCompleted",
+      "name": "completion_after_ack",
+      "value": {
+        "type": "thread.report",
+        "thread_id": "12345678-1234-4234-8234-123456789abc",
+        "event_id": "22345678-1234-4234-8234-123456789abc",
+        "worker_seq": 2,
+        "kind": "command.completed",
+        "storage_generation": "generation-1",
+        "reason": "命令已完成",
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "command_outcome": "succeeded"
+      }
+    },
+    {
+      "schema": "ThreadCommandResult",
+      "name": "ack_after_completion",
+      "value": {
+        "type": "thread.command_result",
+        "thread_id": "12345678-1234-4234-8234-123456789abc",
+        "ok": true
+      }
+    },
+    {
+      "schema": "ThreadCommandResult",
+      "name": "ack_before_completion",
+      "value": {
+        "type": "thread.command_result",
+        "thread_id": "12345678-1234-4234-8234-123456789abc",
+        "ok": true
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "schema": "DevicesChanged",
+      "name": "wrong_type",
+      "value": {
+        "type": "thread.changed",
+        "node_id": "12345678-1234-4234-8234-123456789abc",
+        "report_version": 1
+      }
+    },
+    {
+      "schema": "DevicesChanged",
+      "name": "bad_node",
+      "value": {
+        "type": "devices.changed",
+        "node_id": "other",
+        "report_version": 1
+      }
+    },
+    {
+      "schema": "DevicesChanged",
+      "name": "negative_version",
+      "value": {
+        "type": "devices.changed",
+        "node_id": "12345678-1234-4234-8234-123456789abc",
+        "report_version": -1
+      }
+    },
+    {
+      "schema": "DevicesChanged",
+      "name": "missing_version",
+      "value": {
+        "node_id": "12345678-1234-4234-8234-123456789abc",
+        "type": "devices.changed"
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "accepted_with_outcome",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "accepted",
+        "command_outcome": "succeeded"
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "terminal_without_outcome",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "succeeded"
+      }
+    },
+    {
+      "schema": "WorkerCommandStatus",
+      "name": "terminal_mismatch",
+      "value": {
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "state": "succeeded",
+        "command_outcome": "unknown"
+      }
+    },
+    {
+      "schema": "WorkerCommandResult",
+      "name": "wrong_command",
+      "value": {
+        "type": "result",
+        "ok": true,
+        "receipt": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "thread_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "action": "resume"
+        },
+        "command_status": {
+          "command_id": "22345678-1234-4234-8234-123456789abc",
+          "state": "running"
+        }
+      }
+    },
+    {
+      "schema": "WorkerRequest",
+      "name": "missing_command_id",
+      "value": {
+        "type": "thread_resume",
+        "ok": false,
+        "thread_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1"
+      }
+    },
+    {
+      "schema": "WorkerRequest",
+      "name": "foreign_open_config",
+      "value": {
+        "type": "thread_open",
+        "ok": false,
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "thread_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1",
+        "open_config": {
+          "thread_id": "22345678-1234-4234-8234-123456789abc",
+          "node_id": "12345678-1234-4234-8234-123456789abc",
+          "storage_generation": "generation-1",
+          "agent_type": "codex",
+          "model": "gpt-6.1-sol",
+          "working_directory": "/work/baton",
+          "execution_timeout_seconds": 7200,
+          "adapter_config": {
+            "home": "/home/fixture/.codex",
+            "binary": "codex",
+            "state_path": "/private/thread/native/state.json",
+            "session_dir": "/private/thread/native"
+          }
+        }
+      }
+    },
+    {
+      "schema": "WorkerRequest",
+      "name": "missing_open_config",
+      "value": {
+        "type": "thread_open",
+        "ok": false,
+        "command_id": "12345678-1234-4234-8234-123456789abc",
+        "thread_id": "12345678-1234-4234-8234-123456789abc",
+        "storage_generation": "generation-1"
+      }
+    },
+    {
+      "schema": "RuntimeAgent",
+      "name": "credential_reason",
+      "value": {
+        "agent_type": "cursor",
+        "version": "1.0.35",
+        "status": "unverified",
+        "models": [],
+        "default_model": "",
+        "capabilities": {
+          "create": false,
+          "queue": false,
+          "steer": false,
+          "stop": false,
+          "resume": false,
+          "switch_model": false
+        },
+        "reason": "Authorization: Bearer fixture-not-a-real-credential"
+      }
+    },
+    {
+      "schema": "ThreadOpenCommandResult",
+      "name": "open_ack_without_generation",
+      "value": {
+        "type": "thread.command_result",
+        "thread_id": "12345678-1234-4234-8234-123456789abc",
+        "ok": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "name": "baton",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.11.2",
+  "engines": {
+    "node": ">=26.0.0"
+  },
+  "scripts": {
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "format:check": "prettier --check apps packages package.json tsconfig.base.json *.js pnpm-workspace.yaml vitest.config.ts",
+    "format": "prettier --write apps packages package.json tsconfig.base.json *.js pnpm-workspace.yaml vitest.config.ts"
+  },
+  "devDependencies": {
+    "@effect/platform-node": "catalog:",
+    "@effect/sql-pg": "catalog:",
+    "@effect/vitest": "catalog:",
+    "@eslint/js": "catalog:",
+    "@types/node": "catalog:",
+    "effect": "catalog:",
+    "esbuild": "catalog:",
+    "eslint": "catalog:",
+    "globals": "catalog:",
+    "prettier": "catalog:",
+    "typescript": "catalog:",
+    "typescript-eslint": "catalog:",
+    "vitest": "catalog:"
+  }
+}

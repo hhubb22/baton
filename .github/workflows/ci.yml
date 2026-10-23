@@ -42,14 +42,22 @@ jobs:
           cache: true
       - uses: pnpm/action-setup@v4
         with:
-          version: '10'
+          version: '12.11.2'
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '26.11.1'
           cache: pnpm
           cache-dependency-path: |
+            pnpm-lock.yaml
             web/pnpm-lock.yaml
             runtimes/project-agent/pnpm-lock.yaml
+      - name: Install workspace
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Workspace checks
+        run: |
+          pnpm -r typecheck
+          pnpm -r lint
+          pnpm -r test
       - name: Build
         run: |
           node --test tools/*.test.mjs
@@ -63,6 +71,11 @@ jobs:
           BATON_TEST_BIN_DIR: ${{ github.workspace }}/bin
           BATON_TEST_NODE_PROJECT_RUNTIME: '1'
         run: go test ./...
+      - name: Verify exported protocol fixtures
+        run: |
+          pnpm --filter @baton/protocol fixtures:export
+          pnpm --filter @baton/protocol test
+          git diff --exit-code -- packages/protocol/fixtures
       - name: Runtime tests
         run: pnpm --dir runtimes/project-agent test
       - name: Web format
