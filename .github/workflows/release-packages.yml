@@ -46,17 +46,25 @@ jobs:
           cache: true
       - uses: pnpm/action-setup@v6
         with:
-          version: '10'
+          version: '12.11.2'
       - uses: actions/setup-node@v7
         with:
-          node-version: '24'
+          node-version: '26.11.1'
           cache: pnpm
           cache-dependency-path: |
+            pnpm-lock.yaml
             web/pnpm-lock.yaml
             runtimes/project-agent/pnpm-lock.yaml
       - name: Validate version and native target
         run: |
           node --input-type=module -e 'import { releaseTarget } from "./tools/package-release.mjs"; const result = releaseTarget(process.env.RELEASE_VERSION); if (result.target !== process.env.RELEASE_TARGET) throw new Error("Runner architecture does not match release target");'
+      - name: Install workspace
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Workspace checks
+        run: |
+          pnpm -r typecheck
+          pnpm -r lint
+          pnpm -r test
       - name: Build
         run: |
           node --test tools/*.test.mjs

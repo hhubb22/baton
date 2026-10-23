@@ -1,4 +1,8 @@
 /bin/
+node_modules/
+/apps/*/dist/
+/packages/*/dist/
+*.tsbuildinfo
 /internal/webui/dist/
 *.exe
 *.test

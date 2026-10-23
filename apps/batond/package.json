@@ -1,0 +1,21 @@
+{
+  "name": "@baton/batond",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run --config ../../vitest.config.ts"
+  },
+  "dependencies": {
+    "effect": "catalog:",
+    "@effect/platform-node": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

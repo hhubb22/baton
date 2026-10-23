@@ -1,4 +1,4 @@
-import js from '@eslint/js'
+import base from '../eslint.base.js'
 import stylex from '@stylexjs/eslint-plugin'
 import reactHooks from 'eslint-plugin-react-hooks'
 import globals from 'globals'
@@ -6,8 +6,7 @@ import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
   { ignores: ['dist', 'node_modules'] },
-  js.configs.recommended,
-  ...tseslint.configs.recommended,
+  ...base,
   {
     files: ['**/*.{ts,tsx}'],
     languageOptions: { globals: globals.browser },
@@ -17,7 +16,6 @@ export default tseslint.config(
       '@stylexjs/valid-styles': 'error',
       '@stylexjs/no-unused': 'error',
       '@stylexjs/valid-shorthands': 'error',
-      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
     },
   },
   {

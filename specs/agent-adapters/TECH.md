@@ -329,7 +329,7 @@ Web 的 NodeDTO、DeviceAgent 和 mapDevice 保留 status、create 和 reason，
 
 ## 安装包与代码复用
 
-Worker 与适配器随 batond 的 SEA 分发，打包方式见迁移 TECH。SEA 内的 Node 为 26，`@cursor/sdk` 对 Node 的要求须不高于它。无法打进 SEA 的 SDK 原生部分放在可执行文件旁的附带目录，版本由 pnpm 锁文件固定。构建禁止依赖安装脚本，若 SDK 必须通过安装脚本下载辅助程序，应改为显式受控打包步骤并先审查。
+Worker 与适配器随 batond 的 SEA 分发，打包方式见迁移 TECH。SEA 内的 Node 为 26，`@cursor/sdk@1.0.35` 声明 Node `>=22.13`。经实测，SDK 默认入口与公开 `/bundled` 入口均不能按当前 esbuild 配置直接在 Node SEA 中运行；可执行文件旁的 `node_modules` 必须外置完整 SDK（含 JavaScript）、全部生产依赖及当前系统/架构的平台包，由 SEA 通过 `createRequire` 加载，版本由 pnpm 锁文件固定。此方案已通过 macOS arm64 加载检查；Cursor Linux arm64 的 sandbox helper 要求 glibc 2.39+，Fedora 43 的本机验证待补，该验证不阻塞迁移 P0。构建禁止依赖安装脚本，若 SDK 必须通过安装脚本下载辅助程序，应改为显式受控打包步骤并先审查。
 
 安装包检查在脱离源码目录、无系统 Node 的环境中运行 SEA：检查附带目录的模块解析、探测、私有状态和模拟 SDK 协议；不能把该检查标成真实 Agent 验证。Windows、macOS、Linux 分别打包原生依赖，不能复制另一系统的 node_modules。Grok、Antigravity 原生程序单独安装，不进入 Baton 安装包。
 

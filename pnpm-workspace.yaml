@@ -1,0 +1,32 @@
+packages:
+  - apps/*
+  - packages/*
+  - runtimes/project-agent
+  - runtimes/shared
+  - web
+
+catalog:
+  effect: 4.0.6
+  '@effect/platform-node': 4.0.6
+  '@effect/sql-pg': 4.0.6
+  '@effect/vitest': 4.0.6
+  '@effect/openapi-generator': 4.0.6
+  typescript: 6.0.3
+  vitest: 5.0.5
+  eslint: 10.13.0
+  '@eslint/js': 10.0.1
+  typescript-eslint: 8.72.0
+  prettier: 3.9.10
+  globals: 17.13.0
+  '@types/node': 26.6.5
+  esbuild: 0.28.2
+
+allowBuilds:
+  esbuild: true
+  '@google/genai': false
+  protobufjs: false
+
+minimumReleaseAgeExclude:
+  - '@effect/openapi-generator@4.0.6'
+  - '@effect/platform-node@4.0.6'
+  - effect@4.0.6

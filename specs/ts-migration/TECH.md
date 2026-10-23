@@ -98,7 +98,7 @@ Project Runtime 的租约要计入系统睡眠：设备睡眠期间中心可能�
 |---|---|
 | `baton-server` 镜像 | Node 26 slim 基础镜像，`apps/server` 的 esbuild bundle 与 `dist/web`；`compose.yaml` 和环境变量不变 |
 | `batond` | 每个目标系统一个 Node SEA 可执行文件，入口按 argv 分派到 `up`、`register`、`run`、`worker`、`watchdog`、`cursor-host`、`project-runtime` |
-| `batond` 附带目录 | 只放无法打进 SEA 的原生依赖的 `node_modules`（如 `@cursor/sdk` 有原生部分）；t3code 的 `build-exe` 采用同样做法 |
+| `batond` 附带目录 | 在可执行文件旁的 `node_modules` 中外置完整 `@cursor/sdk`（含 JavaScript）、全部生产依赖及当前系统/架构的平台包；SEA 经 `createRequire` 从该目录加载。此方案已通过 macOS arm64 加载检查；Linux arm64 的 Cursor sandbox helper 要求 glibc 2.39+ |
 
 目标系统为 macOS arm64、Linux x64 与 arm64、Windows x64。SEA 交叉构建用 Node 25.7+ 的 `--build-sea`，需要各目标的官方 Node 二进制；发布脚本从本地缓存目录读取，缓存缺失时报错并给出下载命令，不在构建中隐式联网。Project Agent 不再要求设备自装 Node 22.19+，`runtimes/README.md` 的 sidecar 约定改写为子命令约定。
 
@@ -152,7 +152,8 @@ Go 测试约 3.8 万行，不逐行翻译。每个模块以对应 Go 测试的�
 | 项目 | 当前依据与缺口 | 处理 |
 |---|---|---|
 | Windows 第一版的安全缺口 | 进程回收、私有文件、命名管道三项弱于 Go 版 | 已接受，按上文平台相关实现执行 |
-| FULL 同步提交耗时 | 未测量 | P0 |
-| SEA 冷启动 | 未测量 | P0 |
-| `@cursor/sdk` 的原生依赖 | 未安装核查 | P0 |
-| 发布用 Node 二进制缓存 | SEA 交叉构建需要各目标的官方 Node，现有 Go 交叉编译没有这项依赖 | 已接受；P0 确定缓存位置与校验和记录方式 |
+| FULL 同步提交耗时 | 官方 Node 26.11.1，每事务 1 KiB，预热 200 次后连续提交 10,000 次，WAL/FULL、4096 字节页、1000 页自动 checkpoint。macOS arm64 / Apple M4 / Darwin 27.2.0 / APFS：COMMIT p99 **0.248 ms**，事件循环 p99 **10.59 ms**；本机 OrbStack Linux arm64 / 内核 7.2.9 / Docker named volume（Btrfs）：COMMIT p99 **47.90 ms**，事件循环 p99 **2552.23 ms**。均每 100 次事务让出事件循环，监测分辨率 1 ms。逐事务让出的补测：macOS COMMIT / 事件循环 p99 为 **0.277 / 1.97 ms**，Linux 为 **36.97 / 37.16 ms** | 已测平台的提交 p99 低于 50 ms；Linux 连续同步批次的事件循环延迟已超命令接收目标，Worker 串行队列应逐事务让出并在实际账本中复测，超标时采用 worker_threads。Windows、Linux x64 未测。`fullfsync=0`，未做断电验证；Linux 为本机虚拟机结果，不能代表物理 Linux 磁盘。复现：`tools/ts-migration/sqlite-full.mjs` |
+| SEA 冷启动 | 官方 Node 26.11.1 + Effect 4.0.6 + esbuild 0.27.3，最小 Worker 子命令含新建 WAL/FULL SQLite 和令牌认证 IPC，每平台 100 个新进程。macOS arm64 监听 / 认证 p99 **36.72 / 37.64 ms**，首次认证 **1122.90 ms**；另一次重新构建后的 2 样本冒烟，首次认证 **2286.09 ms**。OrbStack Linux arm64 监听 / 认证 p99 **349.49 / 356.54 ms**，首次认证 **168.99 ms**，认证最大 **422.02 ms**。macOS SEA 145,640,480 字节，Linux SEA 150,662,192 字节，未启用 snapshot/code cache | 实测样本均低于 3 秒；Windows、Linux x64 未测。安装目录仅含 SEA，空 PATH、临时 HOME；未清空系统页缓存，属于新进程启动测量。完整 Worker 的锁、迁移、恢复与模块加载仍需 W/D 复测。复现：`tools/ts-migration/sea-startup.mjs` |
+| Windows 进程回收实测 | 本机无 Windows / PowerShell 执行环境，`taskkill`、CIM 创建时间及真实 PID 复用均**未测**。提供 `tools/ts-migration/windows-processes.mjs`：完整父子孙进程树回收、故意过期的创建时间与无关存活进程核对、中间父进程先退出后的后代存活检查；创建时间取 `Get-CimInstance Win32_Process` 的 UTC ticks 字符串 | 在 Windows 执行脚本后补实测。过期记录检查不等于操作系统真实复用 PID；脚本不验证 Worker 崩溃至重启之间的延迟。CIM 校验与 taskkill 之间有竞争窗口，无法给出原子排除 PID 复用的保证；第一版已接受的两个进程回收缺口仍保留 |
+| `@cursor/sdk` 的原生依赖 | 实测公开包 **1.0.35**，`engines.node >=22.13`，Node 26.11.1 满足；安装禁用脚本。默认入口直接 esbuild 报动态路径解析错误，公开 `/bundled` 入口在 Node SEA 报 `bun:sqlite` 不存在。SEA 用 `createRequire` 加载旁置的完整 SDK、生产依赖和对应平台包，可导入 SDK、打开临时 SQLite store、加载 tree-sitter/Bash `.node` 并运行 ripgrep；移走附带目录时正确失败。macOS arm64 的 sandbox helper `--help` 通过；Linux arm64 helper 要求 **GLIBC_2.39**，当前 Debian 12 / glibc 2.36 无法加载 | macOS arm64 的加载检查通过；Cursor Linux arm64 的支持要求为 glibc 2.39+，Debian 12 / glibc 2.36 不满足该要求。Fedora 43 的本机验证待补，不阻塞 P0；Windows / Linux x64 未测。当前可用方案须携带 SDK 的 JS 与生产依赖，只有原生文件的附带目录不足。没有调用 Agent/create/resume/send 或真实模型，不证明会话、认证或 sandbox 策略可用。SDK 许可及来源见 `third_party/cursor-sdk/`；复现：`tools/ts-migration/cursor-sea.mjs` |
+| 发布用 Node 二进制缓存 | 缓存确定为 `~/.cache/baton/node/v<版本>/`，支持 `BATON_NODE_CACHE` 覆盖；保留官方归档与经 HTTPS 获取的 `SHASUMS256.txt`，解包前校验 SHA256。已获取 v26.11.1：darwin-arm64 tar.gz 为 `d916511b55965e91be7a88e17f88d895b6793ceaba3e6c9b194aefe51c2c65ac`；linux-arm64 tar.gz 为 `170454fb022f5e9b5f6cc76c25fa32ef5100895be44eb04e92f9780591491bbf` | `tools/ts-migration/cache-node.mjs` 仅显式 `--download` 联网，离线缺失时输出下载命令；未校验离线发布签名。Windows x64 / Linux x64 缓存尚未获取；D 的发布打包继续采用缓存输入 |
