@@ -10,6 +10,12 @@ node tools/build.mjs
 
 向设备分发时保留 `batond` 与同目录的 `sidecars/`，包括其内部目录和相对符号链接。不能只复制 `batond`。构建机使用 pnpm 10+；目标机无需 pnpm，也无需联网安装 npm 依赖。
 
+## 发布附件
+
+完整构建后，执行 `node tools/package-release.mjs <版本号>`，从 `bin/` 中选择两个 Go 程序和 `sidecars/`，生成带安装说明及源码提交信息的发布包。输出位于 `bin/releases/`，Linux amd64、macOS arm64 使用 tar.gz，Windows amd64 使用 zip；压缩由系统 tar 完成。脚本解压最终附件、运行安装包检查并生成 SHA-256 校验文件，临时文件和设备数据不进入附件。
+
+`Release packages` 工作流在三个原生平台上执行相同流程，以 `CGO_ENABLED=0` 构建 Go 程序，并验证原生 sidecar 宿主。附件上传到 Actions artifacts，不自动创建 tag 或 Release。发布仍需对同一提交完成 CI 及真实订阅验收。
+
 ## Bundle
 
 每个 sidecar 是一个独立 npm 项目，有固定的 `version`、一个 CLI 入口、`build` 命令和锁文件。通用打包命令：

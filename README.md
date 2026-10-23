@@ -40,6 +40,10 @@ Coordinator 嵌入 `internal/webui/dist` 中的静态文件，部署中心服务
 
 `node tools/check-sidecar-package.mjs` 检查统一构建的设备产物：搬到临时目录、隔离 PATH 后验证 Runtime 定位、版本、订阅状态与私有文件读写，并确认缺少 bundle 时返回安装错误。CI 在统一构建后直接执行该检查，同时运行 Web 格式、lint、typecheck 和单元测试。
 
+发布包使用原生构建产物。运行 `node tools/package-release.mjs v0.1.0-alpha.1`，在 `bin/releases/` 生成当前平台的压缩包及 `.sha256` 校验文件；打包脚本会解压最终附件，再检查 Runtime 定位、订阅状态和私有文件读写。包内含 `coordinator`、`batond`、`sidecars/`、[安装说明](runtimes/INSTALL.md)及记录源码提交的 `release.json`。
+
+GitHub Actions 的 `Release packages` 工作流可手动指定版本，分别在 Linux amd64、macOS arm64 和 Windows amd64 的原生 runner 上构建及检查。Linux、macOS 生成 `.tar.gz`，Windows 生成 `.zip`。压缩使用系统提供的 `tar`；Windows 使用支持 zip 的系统 tar。工作流仅上传附件到 Actions artifacts，保留 30 天，不创建 tag 或发布 Release。发布前须确认同一提交的 CI 通过，并完成真实订阅登录及模型调用验收。
+
 ### 2. 数据库迁移与员工账号管理
 
 实验室阶段从当前 schema 基线创建数据库，开发结构变化后重建本地数据，不提供旧开发版本升级路径。迁移执行器按版本记录幂等执行，正式发布后可用于增量迁移。

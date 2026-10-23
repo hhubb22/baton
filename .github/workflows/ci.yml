@@ -52,7 +52,7 @@ jobs:
             runtimes/project-agent/pnpm-lock.yaml
       - name: Build
         run: |
-          node --test tools/build.test.mjs
+          node --test tools/*.test.mjs
           node tools/build.mjs
       - name: Check sidecar package
         run: node tools/check-sidecar-package.mjs

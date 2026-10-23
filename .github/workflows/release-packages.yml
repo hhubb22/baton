@@ -1,0 +1,74 @@
+name: Release packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version
+        required: true
+        default: v0.1.0-alpha.1
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-packages-${{ github.ref }}-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Package ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: linux-amd64
+          - runner: macos-15
+            target: darwin-arm64
+          - runner: windows-2025
+            target: windows-amd64
+    env:
+      CGO_ENABLED: '0'
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_TARGET: ${{ matrix.target }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: pnpm/action-setup@v6
+        with:
+          version: '10'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: |
+            web/pnpm-lock.yaml
+            runtimes/project-agent/pnpm-lock.yaml
+      - name: Validate version and native target
+        run: |
+          node --input-type=module -e 'import { releaseTarget } from "./tools/package-release.mjs"; const result = releaseTarget(process.env.RELEASE_VERSION); if (result.target !== process.env.RELEASE_TARGET) throw new Error("Runner architecture does not match release target");'
+      - name: Build
+        run: |
+          node --test tools/*.test.mjs
+          node tools/build.mjs
+      - name: Test native Runtime host
+        run: go test ./internal/sidecar ./internal/projectruntime
+      - name: Archive and verify extracted package
+        run: node tools/package-release.mjs "$RELEASE_VERSION"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: baton-${{ inputs.version }}-${{ matrix.target }}
+          path: bin/releases/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
