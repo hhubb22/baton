@@ -79,7 +79,11 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 			if !json.Valid(raw) || dec.Decode(&next) != nil || len(next.Cursor) > protocol.SessionCursorBytes {
 				return
 			}
-			if _, err := identity.ParseUUID(next.ThreadID); err != nil {
+			if next.ThreadID == "" {
+				if next.Cursor != "" {
+					return
+				}
+			} else if _, err := identity.ParseUUID(next.ThreadID); err != nil {
 				return
 			}
 			mu.Lock()

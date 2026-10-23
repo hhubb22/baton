@@ -159,7 +159,15 @@ export function useTrace(messageId: ID, enabled: boolean) {
 
 export function useLiveOutput(threadId: ID, enabled: boolean) {
   const client = useClient()
-  return useQuery({ queryKey: keys.output(threadId), queryFn: () => client.readOutput(threadId), enabled })
+  const queryClient = useQueryClient()
+  useEffect(() => {
+    if (!enabled || !client.subscribeOutput) return
+    return client.subscribeOutput(threadId, (output) => {
+      if (output) queryClient.setQueryData(keys.output(threadId), output)
+      else void queryClient.invalidateQueries({ queryKey: keys.output(threadId), exact: true })
+    })
+  }, [client, queryClient, threadId, enabled])
+  return useQuery({ queryKey: keys.output(threadId), queryFn: () => client.readOutput(threadId), enabled, gcTime: 0 })
 }
 
 export interface EarlierHistory {

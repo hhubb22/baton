@@ -117,9 +117,15 @@ type ThreadFilter struct {
 	ProjectID, NodeID, Status, Cursor string
 	Limit                             int
 }
+type ThreadSummary struct {
+	Thread
+	Title        string      `json:"title"`
+	StopCanceled int         `json:"stop_canceled"`
+	CurrentTurn  *ThreadTurn `json:"current_turn"`
+}
 type ThreadPage struct {
-	Threads    []Thread `json:"threads"`
-	NextCursor string   `json:"next_cursor,omitempty"`
+	Threads    []ThreadSummary `json:"threads"`
+	NextCursor string          `json:"next_cursor,omitempty"`
 }
 type ThreadEvent struct {
 	ID        int64           `json:"id"`

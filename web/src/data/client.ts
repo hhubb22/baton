@@ -65,6 +65,8 @@ export interface BatonClient {
   readHistory(threadId: ID, before: ID | null): Promise<HistoryPage>
   // 执行中的一轮的实时输出，这一轮结束后为空。
   readOutput(threadId: ID): Promise<LiveOutput>
+  // 推送输出快照；null 表示连接或读取状态变化，需要重读。返回函数取消订阅。
+  subscribeOutput?(threadId: ID, listener: (output: LiveOutput | null) => void): () => void
   listFolders(deviceId: ID, path: string | null): Promise<FolderListing>
   getOperation(id: ID): Promise<Operation>
 

@@ -5,7 +5,6 @@ import type {
   FilePreview,
   FolderListing,
   HistoryPage,
-  LiveOutput,
   Message,
   OperationPhase,
   Thread,
@@ -15,8 +14,11 @@ import type {
 } from '../types'
 import { apiPath, timestamp, type HttpContext } from './context'
 import { HttpError } from './transport'
+import { createOutputAPI } from './output'
 
 type ThreadDTO = {
+  title?: string
+  stop_canceled?: number
   id: string
   node_id: string
   agent_type: string
@@ -178,7 +180,7 @@ function mapThread(t: ThreadDTO, events: EventDTO[]): Thread {
   const canceled = latestStop < 0 ? [] : events.slice(latestStop).filter((event) => event.kind === 'message.withdrawn')
   return {
     id: t.id,
-    title: first?.split('\n')[0].slice(0, 120) || t.working_directory || t.id,
+    title: t.title || first?.split('\n')[0].slice(0, 120) || t.working_directory || t.id,
     deviceId: t.node_id,
     folder: t.working_directory,
     agent: t.agent_type === 'shell' ? null : t.agent_type,
@@ -194,50 +196,13 @@ function mapThread(t: ThreadDTO, events: EventDTO[]): Thread {
           : t.stop_requested_at && !t.stop_confirmed_at
             ? 'stop'
             : null,
-    stopCanceled: canceled.length,
+    stopCanceled: t.stop_canceled ?? canceled.length,
     createdAt: timestamp(t.created_at),
     updatedAt: timestamp(t.last_activity_at),
     runStartedAt: t.current_turn ? timestamp(t.current_turn.started_at) : null,
     unread: false,
     earlier: Boolean(t.native_session_id),
   }
-}
-
-const outputByteLimit = 256 * 1024
-function appendOutput(previous: LiveOutput['chunks'], result: SessionDTO): LiveOutput['chunks'] {
-  const chunks = previous.map((chunk) => ({ ...chunk }))
-  if (result.gap && chunks.at(-1)?.kind !== 'gap') chunks.push({ kind: 'gap' })
-  if (result.text) {
-    const last = chunks.at(-1)
-    if (last?.kind === 'text') last.text += result.text
-    else chunks.push({ kind: 'text', text: result.text })
-  }
-  const encoder = new TextEncoder()
-  let bytes = chunks.reduce(
-    (total, chunk) => total + (chunk.kind === 'text' ? encoder.encode(chunk.text).byteLength : 0),
-    0,
-  )
-  let dropped = false
-  while (bytes > outputByteLimit || chunks.length > 255) {
-    dropped = true
-    const first = chunks[0]
-    if (first.kind === 'gap') {
-      chunks.shift()
-      continue
-    }
-    const encoded = encoder.encode(first.text)
-    if (chunks.length > 255 || bytes - encoded.length >= outputByteLimit) {
-      bytes -= encoded.length
-      chunks.shift()
-    } else {
-      let offset = bytes - outputByteLimit
-      while (offset < encoded.length && (encoded[offset] & 0xc0) === 0x80) offset += 1
-      first.text = new TextDecoder().decode(encoded.subarray(offset))
-      bytes -= offset
-    }
-  }
-  if (dropped && chunks[0]?.kind !== 'gap') chunks.unshift({ kind: 'gap' })
-  return chunks
 }
 
 const record = (value: unknown): Record<string, unknown> | null =>
@@ -360,12 +325,10 @@ function deliveryOf(m: MessageDTO, t: ThreadDTO): Delivery {
   }
 }
 
-export function createThreadAPI(ctx: HttpContext): ThreadAPI {
+export function createThreadAPI(ctx: HttpContext, output = createOutputAPI(ctx.request)): ThreadAPI {
   const clientIDs = new Map<string, string>()
   const messages = new Map<string, MessageDTO>()
   const replies = new Map<string, { threadId: string; seq: number }>()
-  const output = new Map<string, { seq: number; cursor: string; chunks: LiveOutput['chunks'] }>()
-  const outputReads = new Map<string, Promise<LiveOutput>>()
   async function sessionResult<T extends SessionDTO>(path: string): Promise<T> {
     try {
       return await ctx.request<T>(path)
@@ -585,29 +548,6 @@ export function createThreadAPI(ctx: HttpContext): ThreadAPI {
         return null
     }
   }
-  async function readOutput(threadId: string): Promise<LiveOutput> {
-    const t = await view(threadId)
-    if (t.status !== 'running' || !t.current_turn) {
-      output.delete(threadId)
-      return { threadId, chunks: [] }
-    }
-    let current = output.get(threadId)
-    if (!current || current.seq !== t.current_turn.worker_turn_seq)
-      current = { seq: t.current_turn.worker_turn_seq, cursor: '', chunks: [] }
-    const query = new URLSearchParams()
-    if (current.cursor) query.set('cursor', current.cursor)
-    const result = await sessionResult<SessionDTO>(`${threadPath(threadId)}/output${query.size ? `?${query}` : ''}`)
-    if (!result.ok)
-      unavailable(result.code === 'node_offline' ? 'The device is offline.' : 'The device could not read live output.')
-    if (result.state && ['idle', 'stopped', 'unknown'].includes(result.state)) {
-      output.delete(threadId)
-      return { threadId, chunks: [] }
-    }
-    if (!result.cursor) unavailable('The device returned an incomplete output cursor.')
-    const chunks = appendOutput(current.chunks, result)
-    output.set(threadId, { seq: current.seq, cursor: result.cursor!, chunks })
-    return { threadId, chunks: structuredClone(chunks) }
-  }
   const api: ThreadAPI = {
     async listThreads() {
       const all: ThreadDTO[] = []
@@ -622,12 +562,7 @@ export function createThreadAPI(ctx: HttpContext): ThreadAPI {
         if (cursor && cursors.has(cursor)) unavailable('The thread cursor did not advance.')
         cursors.add(cursor)
       } while (cursor)
-      return Promise.all(
-        all.map(async (t) => {
-          const [detail, events] = await Promise.all([view(t.id), timeline(t.id)])
-          return mapThread(detail, events)
-        }),
-      )
+      return all.map((t) => mapThread(t, []))
     },
     async listMessages(threadId) {
       const [t, events] = await Promise.all([view(threadId), timeline(threadId)])
@@ -780,15 +715,7 @@ export function createThreadAPI(ctx: HttpContext): ThreadAPI {
       const start = Math.max(0, end - 16)
       return { state: 'ready', threadId, messages: native.slice(start, end), more: start > 0, gap }
     },
-    readOutput(threadId): Promise<LiveOutput> {
-      const pending = outputReads.get(threadId)
-      if (pending) return pending
-      const read = readOutput(threadId).finally(() => {
-        outputReads.delete(threadId)
-      })
-      outputReads.set(threadId, read)
-      return read
-    },
+    readOutput: output.readOutput,
     async listFolders(deviceId, path): Promise<FolderListing> {
       try {
         const connection = (await ctx.devices()).find((device) => device.id === deviceId)?.connection

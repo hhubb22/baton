@@ -4,6 +4,7 @@ import type { HttpContext } from './context'
 import { apiPath, timestamp } from './context'
 import { createProjectAPI } from './projects'
 import { createThreadAPI } from './threads'
+import { createOutputAPI, type OutputResult } from './output'
 import { createTransport, HttpError } from './transport'
 
 interface RuntimeReport {
@@ -129,11 +130,13 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
         signedIn = false
         ended = 'expired'
         stop()
+        output.clear()
         emit('session')
       }
     },
   })
   const request = transport.request
+  const output = createOutputAPI(request)
   const nodes = () => {
     if (!nodeRead)
       nodeRead = request<NodesDTO>('/nodes').finally(() => {
@@ -161,8 +164,10 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
   function stop() {
     if (timer) clearInterval(timer)
     timer = null
-    socket?.close()
+    const previous = socket
     socket = null
+    output.setConnection(null)
+    previous?.close()
   }
   function start() {
     if (!signedIn || listeners.size === 0 || timer) return
@@ -180,17 +185,25 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
     const next = new Socket(url.href)
     socket = next
     next.onmessage = (event) => {
-      let message: { type?: string }
+      if (socket !== next) return
+      let message: OutputResult & { type?: string; thread_id?: string }
       try {
         message = JSON.parse(String(event.data))
       } catch {
         return
       }
+      if (message.type === 'ready') {
+        output.setConnection((subscription) => {
+          if (socket === next && next.readyState === 1) next.send(JSON.stringify(subscription))
+        })
+      }
       if (message.type === 'thread.changed') emit('threads', 'messages', 'operations')
+      if (message.type === 'thread.output' && message.thread_id) output.receive(message.thread_id, message)
     }
     next.onclose = () => {
       if (socket === next) {
         socket = null
+        output.setConnection(null)
         emit('session')
       }
     }
@@ -225,7 +238,8 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
 
   return {
     mode: 'http',
-    ...createThreadAPI(ctx),
+    ...createThreadAPI(ctx, output),
+    subscribeOutput: output.subscribeOutput,
     ...createProjectAPI(ctx),
     getSession,
     async signIn(username, password) {
@@ -238,6 +252,7 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
       ended = null
       stop()
       transport.clear()
+      output.clear()
       operations.clear()
       emit('session')
     },
@@ -249,6 +264,7 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
       transport.clear()
       signedIn = false
       stop()
+      output.clear()
       return { account: null, defaultDeviceId: null, ended: null }
     },
     listDevices,

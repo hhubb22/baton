@@ -94,6 +94,10 @@ func TestBrowserEventsAuthenticationOwnershipAndLogout(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ws.CloseNow()
+	// 空 Thread 取消输出订阅，连接仍可接收下一次订阅。
+	if err := ws.Write(ctx, websocket.MessageText, []byte(`{"thread_id":""}`)); err != nil {
+		t.Fatal(err)
+	}
 	raw, _ := json.Marshal(map[string]string{"thread_id": id})
 	if err := ws.Write(ctx, websocket.MessageText, raw); err != nil {
 		t.Fatal(err)

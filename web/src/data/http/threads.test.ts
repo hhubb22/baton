@@ -99,24 +99,20 @@ function setup(handler: Handler, devices: Device[] = [device()]) {
 const rootResponse = { kind: 'roots', roots: [{ id: 'root-id', path: '/work' }], truncated: false }
 
 describe('HTTP thread contracts', () => {
-  it('reads every thread and timeline page and keeps unconfirmed stop/archive pending', async () => {
+  it('reads only list pages and preserves summary titles and pending actions', async () => {
     const secondId = '0d28bd24-30ed-419b-8bf3-9b783b9be9ba'
     const { api, fetcher } = setup((url) => {
-      if (url.pathname === '/api/v1/threads')
-        return url.searchParams.has('cursor')
-          ? { threads: [thread({ id: secondId })] }
-          : { threads: [thread()], next_cursor: 'next/+' }
-      if (url.pathname.endsWith('/timeline'))
-        return url.searchParams.has('cursor')
-          ? { events: [event(2, 'stop.requested', {})] }
-          : { events: [accepted()], next_cursor: '1' }
-      return thread({
-        id: url.pathname.split('/').at(-1),
+      if (url.pathname !== '/api/v1/threads') throw new Error('List requested thread details')
+      const t = thread({
+        title: 'Inspect this repository',
         status: 'running',
         stop_requested_at: later,
-        archive_requested_at: url.pathname.endsWith(secondId) ? later : undefined,
+        stop_canceled: 3,
         current_turn: { worker_turn_seq: 2, started_at: at },
       })
+      return url.searchParams.has('cursor')
+        ? { threads: [thread({ ...t, id: secondId, archive_requested_at: later })] }
+        : { threads: [t], next_cursor: 'next/+' }
     })
     expect(await api.listThreads()).toMatchObject([
       {
@@ -124,12 +120,26 @@ describe('HTTP thread contracts', () => {
         title: 'Inspect this repository',
         status: 'running',
         pending: 'stop',
+        stopCanceled: 3,
         runStartedAt: Date.parse(at),
       },
       { id: secondId, status: 'running', pending: 'archive' },
     ])
+    expect(fetcher).toHaveBeenCalledTimes(2)
     expect(fetcher.mock.calls.some(([url]) => String(url).includes('cursor=next%2F%2B'))).toBe(true)
-    expect(fetcher.mock.calls.some(([url]) => String(url).includes('cursor=1'))).toBe(true)
+  })
+
+  it('uses one request to list 20 threads and reads the timeline only for opened messages', async () => {
+    const { api, fetcher } = setup((url) => {
+      if (url.pathname === '/api/v1/threads')
+        return { threads: Array.from({ length: 20 }, (_, i) => thread({ id: String(i), title: 'Title' })) }
+      if (url.pathname.endsWith('/timeline')) return { events: [accepted()] }
+      return thread()
+    })
+    expect(await api.listThreads()).toHaveLength(20)
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    expect(await api.listMessages(threadId)).toHaveLength(1)
+    expect(fetcher).toHaveBeenCalledTimes(3)
   })
 
   it.each([

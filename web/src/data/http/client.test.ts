@@ -172,6 +172,69 @@ describe('HTTP account and devices', () => {
     expect(fetch).toHaveBeenCalledTimes(1)
   })
 
+  it('subscribes over the event socket, resumes after reconnecting, and unsubscribes without closing it', async () => {
+    vi.useFakeTimers()
+    class Socket {
+      static instances: Socket[] = []
+      readyState = 1
+      onmessage: ((event: { data: string }) => void) | null = null
+      onclose: (() => void) | null = null
+      onerror: (() => void) | null = null
+      send = vi.fn()
+      url: string
+      constructor(url: string) {
+        this.url = url
+        Socket.instances.push(this)
+      }
+      receive(value: unknown) {
+        this.onmessage?.({ data: JSON.stringify(value) })
+      }
+      close() {
+        this.readyState = 3
+        this.onclose?.()
+      }
+    }
+    const fetch = fetcher()
+      .mockResolvedValueOnce(response({ employee, csrf_token: 'current' }))
+      .mockResolvedValueOnce(response({ nodes: [], default_device: {} }))
+      .mockResolvedValueOnce(response({ status: 'running', current_turn: { worker_turn_seq: 1 } }))
+      .mockResolvedValueOnce(response({ ok: true, text: ' fallback', cursor: 'epoch:14' }))
+    const client = createHttpClient({
+      fetch,
+      WebSocket: Socket as unknown as typeof WebSocket,
+      origin: 'https://baton.test',
+      pollInterval: 100,
+    })
+    const unsubscribe = client.subscribe(vi.fn())
+    await client.getSession()
+    const listener = vi.fn()
+    const stopOutput = client.subscribeOutput!('thread', listener)
+    const first = Socket.instances[0]
+    expect(first.url).toBe('wss://baton.test/api/v1/events')
+    expect(first.send).not.toHaveBeenCalled()
+    first.receive({ type: 'ready' })
+    expect(JSON.parse(first.send.mock.calls[0][0])).toEqual({ thread_id: 'thread' })
+    first.receive({ type: 'thread.output', thread_id: 'thread', ok: true, text: 'stream', cursor: 'epoch:6' })
+    expect((await client.readOutput('thread')).chunks).toEqual([{ kind: 'text', text: 'stream' }])
+    await vi.advanceTimersByTimeAsync(200)
+    expect((await client.readOutput('thread')).chunks).toEqual([{ kind: 'text', text: 'stream' }])
+    expect(fetch).toHaveBeenCalledTimes(2)
+    first.close()
+    expect((await client.readOutput('thread')).chunks).toEqual([{ kind: 'text', text: 'stream fallback' }])
+    await vi.advanceTimersByTimeAsync(100)
+    const second = Socket.instances[1]
+    second.receive({ type: 'ready' })
+    expect(JSON.parse(second.send.mock.calls[0][0])).toEqual({ thread_id: 'thread', cursor: 'epoch:14' })
+    first.receive({ type: 'thread.output', thread_id: 'thread', ok: true, text: 'late', cursor: 'epoch:18' })
+    expect((await client.readOutput('thread')).chunks).toEqual([{ kind: 'text', text: 'stream fallback' }])
+    stopOutput()
+    expect(JSON.parse(second.send.mock.calls.at(-1)![0])).toEqual({ thread_id: '' })
+    expect(second.readyState).toBe(1)
+    unsubscribe()
+    expect(second.readyState).toBe(3)
+    expect(listener).toHaveBeenCalled()
+  })
+
   it('stops polling when the last subscriber leaves', async () => {
     vi.useFakeTimers()
     const fetch = fetcher()

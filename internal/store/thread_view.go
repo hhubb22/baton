@@ -101,7 +101,7 @@ func threadStatus(status string) bool {
 	return false
 }
 func (s *Store) ListThreads(ctx context.Context, employeeID string, f ThreadFilter) (ThreadPage, error) {
-	page := ThreadPage{Threads: []Thread{}}
+	page := ThreadPage{Threads: []ThreadSummary{}}
 	if !threadID(employeeID) || (f.ProjectID != "" && !threadID(f.ProjectID)) || (f.NodeID != "" && !threadID(f.NodeID)) || (f.Status != "" && !threadStatus(f.Status)) {
 		return page, threadInvalid()
 	}
@@ -122,16 +122,36 @@ func (s *Store) ListThreads(ctx context.Context, employeeID string, f ThreadFilt
 		at = c.At
 		id = c.ID
 	}
-	rows, err := s.pool.Query(ctx, `SELECT `+threadJSON+` FROM threads t LEFT JOIN node_presence p ON p.node_id=t.node_id
- WHERE t.employee_id=$1 AND ($2::uuid IS NULL OR t.project_id=$2) AND ($3::uuid IS NULL OR t.node_id=$3)
- AND ($4='' OR t.status=$4) AND ($5::timestamptz IS NULL OR (t.last_activity_at,t.id)<($5::timestamptz,$6::uuid)) ORDER BY t.last_activity_at DESC,t.id DESC LIMIT $7`, employeeID, nullableProjectID(f.ProjectID), nullableProjectID(f.NodeID), f.Status, at, id, f.Limit+1)
+	rows, err := s.pool.Query(ctx, `SELECT `+threadJSON+` || jsonb_build_object(
+ 'title',COALESCE(NULLIF((
+   SELECT left(split_part(e.payload->>'content',chr(10),1),120)
+   FROM thread_events e WHERE e.employee_id=t.employee_id AND e.thread_id=t.id AND e.kind='message.accepted'
+   ORDER BY e.id LIMIT 1
+ ),''),NULLIF(t.working_directory,''),t.id::text),
+ 'stop_canceled',(
+   SELECT count(*) FROM thread_events e
+   WHERE e.employee_id=t.employee_id AND e.thread_id=t.id AND e.kind='message.withdrawn'
+   AND e.id>(SELECT s.id FROM thread_events s
+     WHERE s.employee_id=t.employee_id AND s.thread_id=t.id AND s.kind IN ('stop.requested','archive.requested')
+     ORDER BY s.id DESC LIMIT 1)
+ ),
+ 'current_turn',(
+   SELECT to_jsonb(v) FROM thread_turns v
+   WHERE v.employee_id=t.employee_id AND v.thread_id=t.id AND v.ended_at IS NULL
+ )) FROM (
+ SELECT * FROM threads
+ WHERE employee_id=$1 AND ($2::uuid IS NULL OR project_id=$2) AND ($3::uuid IS NULL OR node_id=$3)
+ AND ($4='' OR status=$4) AND ($5::timestamptz IS NULL OR (last_activity_at,id)<($5::timestamptz,$6::uuid))
+ ORDER BY last_activity_at DESC,id DESC LIMIT $7
+ ) t LEFT JOIN node_presence p ON p.node_id=t.node_id
+ ORDER BY t.last_activity_at DESC,t.id DESC`, employeeID, nullableProjectID(f.ProjectID), nullableProjectID(f.NodeID), f.Status, at, id, f.Limit+1)
 	if err != nil {
 		return page, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var raw []byte
-		var t Thread
+		var t ThreadSummary
 		if err = rows.Scan(&raw); err == nil {
 			err = json.Unmarshal(raw, &t)
 		}
