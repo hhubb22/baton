@@ -4,17 +4,30 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "node ../../tools/ts-migration/run-batond.mjs",
+    "build": "node ../../tools/ts-migration/build-batond.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run --config ../../vitest.config.ts"
   },
   "dependencies": {
+    "@baton/protocol": "workspace:*",
+    "@baton/sqlite": "workspace:*",
+    "@baton/providers": "workspace:*",
+    "@cursor/sdk": "1.0.35",
     "effect": "catalog:",
     "@effect/platform-node": "catalog:"
+  },
+  "optionalDependencies": {
+    "@cursor/sdk-darwin-arm64": "1.0.35",
+    "@cursor/sdk-linux-arm64": "1.0.35",
+    "@cursor/sdk-linux-x64": "1.0.35",
+    "@cursor/sdk-win32-x64": "1.0.35"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
     "@types/node": "catalog:",
+    "esbuild": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

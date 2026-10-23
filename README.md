@@ -24,7 +24,7 @@ Baton 是跨设备 AI Agent 协同系统。员工使用管理员分配的本地�
 
 - Go 1.27+
 - PostgreSQL 16+
-- Node.js 24+ 与 pnpm 10+（用于 `web/` 与 `runtimes/project-agent/`）
+- Node.js 26+ 与 pnpm 12+（TypeScript workspace、`web/` 与 `runtimes/project-agent/`）
 
 ## 构建与常用命令
 
@@ -132,6 +132,18 @@ BATON_ENROLLMENT_TOKEN='<网页提供的一次性注册凭据>' \
 | `BATON_PROJECT_RUNTIME_DATA_DIR` | `batond` / Project Runtime | 模型订阅凭据目录，默认 `~/.baton/project-runtime`；登录和守护进程须使用相同配置 |
 
 ## 本地开发与测试
+
+### TypeScript 本地 Thread
+
+`apps/batond` 提供 Cursor 本地 Thread 开发入口，通过令牌认证 IPC 连接独立 Worker，使用私有 SQLite 保存命令、消息队列、输入意图、回复和报告。发布构建仍使用 Go 入口。开发环境要求 Node 26，依赖安装禁用安装脚本：
+
+```sh
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm --filter @baton/batond dev help
+pnpm --filter @baton/batond dev probe
+```
+
+Cursor 使用显式配置的 `CURSOR_API_KEY`；探测只查询认证和模型、检查本机依赖，不发送推理请求。只有已验证的 SDK / 系统组合且探测结果为 `available` 时，开发 CLI 才允许新建。命令用法、恢复语义和验证入口见 [本地 Thread 文档](apps/batond/README.md)，上游复用范围见 [providers 文档](packages/providers/README.md)。
 
 ### Go 单元与集成测试
 

@@ -10,6 +10,9 @@ Baton 是跨设备 AI Agent 协同系统，由中心服务（`baton-server`）�
 | `cmd/batond` | 节点守护进程：节点注册、出站 TLS WebSocket 连接、本地 SQLite 账本（`node.db`）、Session Worker 与 Project Runtime 管理 |
 | `internal/session` | Session Worker 生命周期、本地认证 IPC、Thread 消息队列与 Turn 账本 |
 | `internal/agent/{pi,codex,kiro,shell,replay}` | 统一 `agent.Adapter` 接口实现（Pi RPC、Codex app-server、Kiro ACP V3）与确定性录制回放 |
+| `apps/batond` | TypeScript 本地 Thread 开发入口：认证 IPC、持久 Worker、Cursor SDK host 与平台进程回收；独立于 Go 发布入口 |
+| `packages/{protocol,sqlite}` | TypeScript 协议 Schema 与 WAL/FULL SQLite 客户端、提交结果核查 |
+| `packages/{providers,provider-testing}` | 从固定 t3code 提交复用的 Cursor SDK/runtime、上游测试和确定性回放 |
 | `runtimes/project-agent` | 基于 Node.js / TypeScript 的 Project Agent 进程（通过 stdio JSON-RPC 与 `batond` 通信） |
 | `web` | React + TypeScript + Vite 前端，构建产物生成到 `internal/webui/dist` 后嵌入 Coordinator，不提交到 Git；界面文案遵循 `design/WRITING.md` |
 | `design` | Web UI 的 Elyx 设计稿（`.elyx`）与界面文案规范（`design/WRITING.md`），前端按它实现；修改前先读 `design/AGENTS.md` |
@@ -24,7 +27,15 @@ Baton 是跨设备 AI Agent 协同系统，由中心服务（`baton-server`）�
   node tools/check-sidecar-package.mjs
   go vet ./...
   ```
-- **Go 单元与集成测试**（先完成上述构建；默认连接本机 `postgres://postgres:baton@127.0.0.1:5432/baton_test?sslmode=disable`，若未启动会自动尝试通过 `pg_ctl` 拉起 `~/.baton-postgres`，可通过 `BATON_TEST_DATABASE_URL` 覆盖）：
+- **TypeScript workspace**（Node 26、pnpm 12；真实 Cursor 验证单独显式运行，见 `apps/batond/README.md`）：
+  ```sh
+  pnpm install --frozen-lockfile --ignore-scripts
+  pnpm -r typecheck
+  pnpm -r lint
+  pnpm -r test
+  pnpm --filter @baton/batond build
+  ```
+- **Go 单元与集成测试**（先运行 `node tools/build.mjs`；默认连接本机 `postgres://postgres:baton@127.0.0.1:5432/baton_test?sslmode=disable`，若未启动会自动尝试通过 `pg_ctl` 拉起 `~/.baton-postgres`，可通过 `BATON_TEST_DATABASE_URL` 覆盖）：
   ```sh
   go test ./...
   ```

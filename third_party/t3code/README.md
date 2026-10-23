@@ -1,12 +1,16 @@
 # t3code 来源与许可
 
-来源仓库为 [pingdotgg/t3code](https://github.com/pingdotgg/t3code)，固定提交为 `9828cad49f3e1ef4f9e037b3baaca19f4e4928fc`。上游 MIT 许可和 `Copyright (c) 2026 T3 Tools Inc.` 保留在 [LICENSE](LICENSE)，三个本地包也携带该许可。
+来源仓库为 [pingdotgg/t3code](https://github.com/pingdotgg/t3code)，固定提交为 `9828cad49f3e1ef4f9e037b3baaca19f4e4928fc`。上游 MIT 许可和 `Copyright (c) 2026 T3 Tools Inc.` 保留在 [LICENSE](LICENSE)，引入包也携带该许可。
 
 | 上游路径 | 本仓库路径 | 使用方式 |
 |---|---|---|
 | `packages/effect-acp/` | `packages/effect-acp/` | 保留目录与源码，调整包脚本和开发依赖以使用本仓库的 TypeScript、Vitest 和 ESLint |
 | `packages/effect-codex-app-server/` | `packages/effect-codex-app-server/` | 保留目录与客户端源码，调整工具配置，固定 Codex 生成来源并重新生成 schema |
 | `packages/shared/src/nodeSqliteClient.ts` | `packages/sqlite/src/index.ts` | 参考连接、SqlClient、串行事务和 SQLite 错误适配实现；使用 FULL 同步、逐次 prepare 和单连接，不引入上游 reader/checkpoint worker |
+| `packages/provider-cursor/src/server/{CursorAgentSdk,CursorSdk,sdk}.ts` 与相关测试 | `packages/providers/src/cursor/server/` | 抽取 SDK runner、异常处理与磁盘 SDK loader，保留选定模块测试并应用 Baton 差异 |
+| `packages/contracts/src/{baseSchemas,providerInstance}.ts`、`packages/provider-core/src/server/ProviderEventLoggers.ts` | `packages/providers/src/upstream/` | 保留 runner 必需的 branded ID 与日志 service |
+| `packages/provider-cursor/src/server/adapter.ts` | `packages/providers/src/cursor/index.ts` | 抽取 `textFromAgentMessage`；Baton 策略 wrapper 在相同入口导出 |
+| `apps/server/src/orchestration-v2/Adapters/CursorAdapterV2.testkit.ts` 与选定 SDK 转录 | `packages/provider-testing/` | 抽取 SDK 回放 runner，保留六份原始转录，测试驱动真实 SDK 封装 |
 
 逐文件来源与引入时的 SHA-256 记录在 [sources.json](sources.json)。`kind=copy` 条目给出上游文件与本地文件的对应路径，`kind=derived` 标记 SQLite 实现的参考来源。Baton 新增的测试和许可文件不冒充上游文件。
 
@@ -29,3 +33,29 @@ pnpm --filter effect-codex-app-server test
 ```
 
 `--source` 目录应来自上面固定的提交。重新生成并不调用模型，也不要求登录 Codex。
+
+## Cursor SDK 复用
+
+`@baton/providers` 的运行依赖为 `effect` 和 `@cursor/sdk@1.0.35`，`@baton/provider-testing` 依赖实际 workspace 包名 `@baton/providers`。测试使用仓库统一的 TypeScript、Vitest、`@effect/vitest` 与 `@effect/platform-node`。包接口与宿主示例见 [providers README](../../packages/providers/README.md)，回放接口见 [provider-testing README](../../packages/provider-testing/README.md)。SDK 自身的许可及平台依赖见 [Cursor SDK 来源](../cursor-sdk/README.md)。
+
+完整 provider 的实际尝试使用固定的本机上游检出，运行命令为 `cd packages/providers && ../../node_modules/.bin/vitest run --config reuse-attempt/vitest.config.mjs`。临时配置将 `@t3tools/*` exports 映射到固定上游源码、Effect 映射到本仓库安装，`vite-plus/test` 映射到 Vitest；入口包括原始 `driver.test.ts`、`adapter.test.ts`，以及使用临时私有目录、实际文件系统、固定 settings 和磁盘 credentials 的完整 CursorDriver 宿主测试。加载到真实 provider 后，adapter 测试报 `Cannot find package 'yaml'`，driver 与宿主入口报 SDK loader 的 `Cannot find module '@cursor/sdk'`（上游检出没有安装依赖）。三个 suite 均未进入测试执行，不能记作完整 provider 通过。按任务边界，尝试源码已移除。
+
+完整 driver 的声明依赖是 `@cursor/sdk`、`@napi-rs/keyring`、`yaml`、`@t3tools/{contracts,provider-core,shared}` 和 `effect`，测试另需 `@t3tools/provider-testing`。源码核查确认：driver 创建 credential store、浏览器认证 controller、账号用量和 managed provider snapshot；adapter 引入 MCP session、T3 orchestration instructions、runtime instructions、ID allocator、执行节点、子任务 projection、附件、技能发现和配置变更。保留完整 driver 需要带入这些超出 Baton 宿主边界的运行逻辑。本包采用规格允许的 SDK/runtime 抽取路线，没有复制登录、keyring 或 T3 orchestrator。
+
+保留的上游模块为 `CursorAgentSdk`、`CursorSdk`、SDK loader、日志 service、所需 ID schema、消息正文提取函数，以及 SDK 回放 runner。原 `CursorSdk.test.ts` 的两个异常处理测试保持断言；`CursorAgentSdk.test.ts` 原有的 resume 冲突测试改为断言单次 send、无 listRuns/cancelRun，与 Baton 的输入不重放约束一致。新增测试只覆盖所需策略、独立 store/历史、取消与缓存边界。
+
+局部差异如下：
+
+- 移除 resume 后 active-run conflict 的自动 listRuns、cancelRun 和再次 send；冲突直接返回错误。
+- Baton runner 要求显式 API key 与本地 runtime，固定 `autoReview: true`、sandbox 开启和 `enableAgentRetries: false`。原始 runner 保留上游选项形状，供原始转录验证。
+- session 历史补传 open 时的 store；新增 detached `listMessages(nativeId, {cwd, store?})`，直接调用静态 SDK messages.list，不 open/resume/send。
+- Baton wrapper 缓存 close、cancel 和 wait；取消响应不生成运行终态，没有上游 adapter 的十秒 finalizeTurn 路径。
+- 句柄建立前的 pendingUpdates 和之后的待处理 callback 均限制为 256；溢出或 callback 失败以 `run.onDelta` 失败传播，不能合成停止。
+- SDK service 与 loader 分开，类型/runner 入口不加载 SDK。loader 在 SEA 中从可执行文件旁使用 createRequire，源码中从 import.meta.url 加载完整磁盘 SDK。
+- `inspectCursorSdk` 从解析后的 entry 向上查找 SDK 根元数据，读取实际版本、Node 要求、平台版本与资产路径；跳过只有 type 的内部 package.json。它不启动 SDK/helper，执行检查由宿主负责。
+
+六份原始转录覆盖 simple、multi_turn、provider_thread_resume、turn_interrupt_mid_tool、tool_call_read_only、subagent，文件内容未改。回放驱动提取自上游 `CursorAdapterV2.testkit.ts`，在原生 SDK 边界替换调用后执行真实 `makeCursorAgentSdkRunner`，比较全部 SDK 出站调用和回调顺序。中断等待录制的 tool-call-started 事件；native agent/run ID 和运行结果保持原文。转录声明的是协议版本 1，未携带精确的录制 SDK 版本，不能用上游当前 package.json 的 1.0.35 补造该字段。转录中的 retries/full-access 参数只用于复验原始模块，Baton 配置策略另外测试。
+
+离线验证在 macOS arm64、Node 26.11.1 上执行：两个包的 typecheck、lint 和测试通过，providers 8 项、provider-testing 6 项。实际 SDK `SqliteLocalAgentStore.open({workspaceRef, stateRoot})` 可关闭后重新打开，detached reader 从该显式 store 读取空历史，且未调用 create/resume；这不证明执行中非空历史或跨进程恢复。静态 inspection 返回 SDK/平台版本 1.0.35、Node 要求 >=22.13、缺失资产为空。全部验证未使用网络或模型推理。
+
+Cursor 的非空独立历史、多轮执行、输入去重、活跃工具取消、Worker 强杀后的 watchdog 回收，以及恢复原会话后执行新输入，已在 macOS arm64、Node 26.11.1、SDK 1.0.35 上完成真实验证。其他系统组合保持未验证。执行策略与平台验证范围见 [Agent 适配设计](../../specs/agent-adapters/TECH.md) 和 [本地 Thread 文档](../../apps/batond/README.md)。

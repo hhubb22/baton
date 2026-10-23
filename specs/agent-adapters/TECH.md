@@ -234,7 +234,7 @@ xAI 的 prompt 完成通知、标准 prompt RPC、后台任务通知分别处理
 
 Cursor 优先复用 t3code `provider-cursor` 与 `CursorAgentSdk` 的实现、模块测试和 SDK 转录，底层使用官方 `@cursor/sdk`。T1 先尝试完整 provider 配最小宿主，检查其实际依赖；若需带入无关编排运行逻辑，则抽取 SDK / runtime 模块并保留其测试。实际 SDK 版本锁定在 pnpm 锁文件，记录 CLI、本机辅助进程及 Node 要求；上游的 `1.0.35` 与现有加载测量不代表 Baton 的执行与恢复已验证。
 
-SDK 运行在 Worker 启动的 `cursor-host` 子进程里，Worker 进程本身不加载 SDK。这样 SDK 派生的本机进程都落在 cursor-host 的进程组内，停止回收可以整组结束而不杀掉 Worker。Worker 与 cursor-host 之间用 `effect/rpc` 经 stdio 通信，请求与事件的 schema 定义在 `apps/batond` 内部，双方是同一可执行文件，不单独维护协议版本。
+SDK 运行在 Worker 启动的 `cursor-host` 子进程里，Worker 进程本身不加载 SDK。每个 POSIX host 必须是其独立进程组的组长；加载 SDK 前，宿主约束 Node `spawn` / `fork` 的 `detached: true`，使 SDK 的 shell helper 和后代继承该 Thread 的组，保留 argv、环境与 stdio（含 SDK 使用的额外描述符）。该进程配置保持到 host 退出；Scope 结束时禁止新建子进程并清理已有子进程。Worker 与 cursor-host 之间用 `effect/rpc` 经 stdio 通信，请求与事件的 schema 定义在 `apps/batond` 内部，双方是同一可执行文件，不单独维护协议版本。SDK console 输出进入 stderr，stdout 只承载 RPC。
 
 每个 Thread 一个 cursor-host、一个本地 SDK Agent。使用 `Agent.create/resume`、`send`、`onDelta`、`run.wait/cancel` 和 `listMessages` 等已核查入口；具体签名与持久化能力以安装的 SDK 类型和实际录制为准。禁止 SDK 运行模式转到远程执行环境。
 
@@ -253,13 +253,15 @@ Worker 保存 Baton Thread 与 SDK 原生 agent ID、工作目录、配置位置
 
 认证先支持员工为该原生 Agent 明确配置的 `CURSOR_API_KEY`，仅经私有进程环境注入 cursor-host；SDK 自身公开的 credential store 可在验证后接入。不能假定 `agent login` 的私有 CLI 凭据可直接被 SDK 复用。需要读取私有格式或增加 Baton 登录流程时，先补充并审查本节及产品 R-03，不复制 T3 的登录服务。凭据不持久化到 Agent 配置、中心或诊断中。
 
-首期选择 SDK 本地 `autoReview: true`，启用其实际支持的原生 sandbox；不因某系统不支持而自动设为 false。上游指出 Windows 的文件 sandbox 存在限制，因此 Windows 作为独立验证组合，满足不了选定执行策略时保持未验证。`enableAgentRetries` 必须按输入确认约束核查，不能照搬上游的 true。
+首期选择 SDK 本地 `autoReview: true`，启用其实际支持的原生 sandbox；不因某系统不支持而自动设为 false。平台辅助包必须出现在 batond 入口可达的 `node_modules/@cursor/sdk-<系统>-<架构>`，仅能从 pnpm 的 SDK 间接依赖中解析到文件不足以满足 SDK 的 helper 查找。执行与隔离探测通过公开 `createAgentPlatform().prewarmLocalWorkspace` 初始化本机 workspace，显式关闭 ambient setting sources、MCP 和自定义 Agent；探测使用临时空目录和私有 store，不发送 prompt。上游指出 Windows 的文件 sandbox 存在限制，因此 Windows 作为独立验证组合，满足不了选定执行策略时保持未验证。`enableAgentRetries` 固定为 false，Baton 不采用上游的自动输入恢复重试。
 
-首期 `steer=false`，模型在下一轮原生支持时切换。后台 SDK 活动、取消后的 delta、运行结果和进程退出由同一会话代次关联，关闭与取消均幂等。
+首期 `steer=false`，模型在新建时选择，尚未验证的轮间模型切换保持关闭；不指定模型时使用 SDK 的原生 `default` 标识。后台 SDK 活动、取消后的 delta、运行结果和进程退出由同一会话代次关联。SDK 的 `run.wait` 包含后台 Promise 的等待，宿主还须核查所属进程组的活动子进程已经结束，才生成回合终止事件。SDK 对单个 shell 的负 PID 取消不能代替该核查；Thread 取消同时清理宿主组内的剩余子进程，Worker 最终再回收整个 host 组。关闭与取消均幂等。
 
 上游 Cursor provider 的 `interruptTurn` 在等待完成 10 秒超时后会调用 `finalizeTurn(interrupted)`；这条终态路径必须修改，使 Baton 继续等待真实终止或按一分钟预算回收进程树，不能直接把该合成终态写成已停止。上游 `enableAgentRetries: true` 也须按输入不重放要求核查。修改点与所选模块的上游测试一并保留，并补取消未完成和重试输入次数的差异测试。
 
-只读 cursor-host 从既有映射读取原生历史，不创建新会话，不发送消息。优先验证 t3code 已在使用的 `Agent.messages.list(nativeId, {runtime: "local", cwd})`；若仅 resume 能读取，必须证明它在独立进程中无项目动作且不干扰活动 Agent，否则此路线不满足 R-10。SDK 一次返回完整列表时，按下文建立有界只读快照。
+只读 cursor-host 从既有映射读取原生历史，不创建新会话，不发送消息，使用公开的 `Agent.messages.list(nativeId, {runtime: "local", cwd, store})`。SDK 1.0.35 可在一条外层记录中返回完整 ConversationTurn protobuf；设备拆出 userMessage 与 steps.assistantMessage，保留稳定的 turn / step 标识，发送核查与展示历史消费同一转换，不能把外层 type 当作唯一消息角色。读取时通过公开 store 元数据核查原生会话和工作目录；缺失时返回不可用。SDK 一次返回完整列表时，由后续公共历史层建立有界只读快照。
+
+显式恢复前由 Worker 确认旧执行进程树已回收。宿主在 resume 时只读核查公开 store 的 activeRun；若 SDK 仍保留 queued/running 的旧 run，记录下一条新输入需要 `local.force`。该标记只在新 Baton 输入的单次 send 中消费，使 SDK 结束崩溃遗留 run 后追加新回合，不重发旧 intent，也不在发送失败后再次 send。历史与 sent 读取不使用 force，不改变原生执行状态。
 
 ## 设备端历史归一化与分页（R-10）
 
@@ -308,7 +310,7 @@ ACP 的 user_message_chunk/agent_message_chunk 按原生消息 ID、replay ID �
 | Pi | 现有 `BATON_PI_BIN`、`BATON_PI_HOME`、`BATON_PI_MODEL` | 原生 steer、resume、switch_model 保留 |
 | Codex | 现有 `BATON_CODEX_BINARY`、`BATON_CODEX_HOME`、`BATON_CODEX_MODEL` | 原生 steer、resume、switch_model 保留 |
 | Kiro | 现有 `BATON_KIRO_BINARY`、`BATON_KIRO_HOME`、`BATON_KIRO_MODEL` | resume；steer 与 switch_model 关闭 |
-| Cursor | 随 batond 分发的 SDK；本机 Cursor CLI 环境 | steer 关闭；resume、history 及模型切换须实证 |
+| Cursor | 随 batond 分发的 SDK、平台辅助包与本机 shell | steer 关闭；macOS arm64 / SDK 1.0.35 已验证 resume 与基本历史，轮间模型切换关闭 |
 | Grok | `BATON_GROK_BINARY`，默认 `grok`；新增 `_HOME`、`_MODEL` 配置入口 | steer 关闭；其余按原生协议验证 |
 | Antigravity | 显式 `BATON_ANTIGRAVITY_BINARY`、`_HOME`、`_MODEL`，必要的 harness 路径单独配置 | steer 关闭；其余按原生协议验证 |
 
@@ -440,9 +442,9 @@ Grok、Antigravity 在切换后分别接入和验收，复用已经交付的 ACP
 
 | 项目 | 当前依据与缺口 | 处理与阻塞范围 |
 |---|---|---|
-| FULL 同步提交耗时 | macOS arm64 和本机 Linux arm64 虚拟机已有测量，Linux 批量同步事务会显著阻塞事件循环；Windows、Linux x64 未测 | 复现与数据见迁移 TECH；T1 接入实际账本复测，提交 p99 超过 50 ms 或接收期限超标时改用 worker_threads |
+| FULL 同步提交耗时 | 真实 Worker 串行队列的进程记录事务已测：macOS arm64 COMMIT / 事件循环 p99 为 0.080 / 1.656 ms，本机 Linux arm64 虚拟机为 21.680 / 23.282 ms；逐事务让出。输入 intent、大队列、Windows 和 Linux x64 未测 | 复现与负载范围见迁移 TECH；实际负载提交 p99 超过 50 ms 或接收期限超标时改用 worker_threads |
 | Windows 进程回收 | 第一版用 `taskkill /T /F` 加进程账本，有父进程先退出和 Worker 崩溃后延迟回收两个缺口 | 已接受为第一版范围；`specs/baton/TECH.md` 停止一节在切换提交中修改；Job Object 推到第一版之后 |
-| SEA 冷启动 | 最小入口在 macOS / Linux arm64 的测量低于 3 秒，完整 Worker 和其他目标未测 | T1/T5 复测完整入口；超出时先缩减加载 |
+| SEA 冷启动 | 完整 Worker 在 macOS arm64 和本机 Linux arm64 虚拟机各 100 个新进程均低于 3 秒，认证 status 最大值分别为 2058.295 / 638.046 ms；已有大量命令的恢复及其他目标未测 | 复现与数据见迁移 TECH；T5 复验完整安装包，超出时先缩减加载 |
 | Codex schema 版本 | 已按官方 0.162.1 重生，并用 9 个既有录制场景的 642 个帧解码检查，见来源说明 | T4 验证接入后的请求、事件、输入恢复及最低版本，字段解码不替代生命周期测试 |
 | Cursor 认证入口 | 已核查上游向 SDK 注入 API key，也有 SDK 登录与 credential store；未验证本机 `agent login` 的订阅凭据可直接复用 | 需审查本期是否接受显式 `CURSOR_API_KEY`；若要求直接复用 CLI 订阅登录，先验证公开接口并补齐设计，不能自动转成另一个计费账号 |
 | Cursor SDK 基线 | 1.0.35 已在 SEA 旁置完整 SDK 的加载检查中使用；跨进程 store、只读历史、真实执行和完整回收未验证 | T1 检查点核查所复用实现及 SDK 行为；Linux arm64 的 glibc 要求和其他系统结果见迁移 TECH |

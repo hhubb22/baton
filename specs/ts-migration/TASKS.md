@@ -14,6 +14,9 @@ T4 的设备侧可以与 T2 并行，网页验收依赖 T2。任务是能力验�
 
 ## T1 交付 Cursor 本地可靠会话
 
+Status: complete
+实现与验证入口：[本地 Thread](../../apps/batond/README.md)。Cursor 启用 macOS arm64 / SDK 1.0.35；其他系统组合的验证留给 T5。
+
 - 依据：[上游复用边界](../agent-adapters/TECH.md#上游复用边界)、[Worker 接收与异步执行](../agent-adapters/TECH.md#worker-接收与异步执行r-04r-05r-08)、[Cursor](../agent-adapters/TECH.md#cursorr-01r-12)。
 - 依赖：现有基础包；首先交付可运行的 provider、最小宿主及上游测试检查点，记录依赖、保留模块与修改范围。
 - 交付：本地调用方通过认证 IPC 新建 Cursor Thread，持久排队、多轮执行、停止、恢复并读取基本历史；含 cursor-host、进程管理与探测。
