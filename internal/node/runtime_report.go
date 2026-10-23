@@ -4,22 +4,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"os"
 	"os/user"
 	"runtime/debug"
 	"slices"
-	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"baton/internal/fileaccess"
 	"baton/internal/identity"
+	"baton/internal/projectruntime"
 	"baton/internal/protocol"
-	"baton/internal/sidecar"
 )
-
-const projectRuntimeVersion = "0.1.0"
 
 const runtimeReportInterval = 5 * time.Second
 const runtimeCollectTimeout = 2 * time.Second
@@ -147,29 +143,10 @@ func collectRuntimeReportUsingProbe(ctx context.Context, dir string, probe agent
 	}
 }
 
-// probeProjectRuntime 仅调用无推理请求的 probe；失败或未知字段不会进入中心报告。
+// probeProjectRuntime 只读取本地状态；探测失败时不生成 Runtime 报告。
 func probeProjectRuntime(ctx context.Context) *protocol.ProjectRuntime {
-	probeCtx, cancel := context.WithTimeout(ctx, time.Second)
-	defer cancel()
-	cmd, err := sidecar.Command(probeCtx, "project-agent", projectRuntimeVersion, "baton-project-runtime", "probe")
-	if err != nil {
-		return nil
-	}
-	host, err := os.Executable()
-	if err != nil {
-		return nil
-	}
-	cmd.Env = append(os.Environ(), "BATON_SIDECAR_HOST="+host)
-	out, err := sidecar.Capture(probeCtx, cmd, 16<<10)
-	if err != nil {
-		return nil
-	}
-	var p protocol.ProjectRuntime
-	if protocol.DecodeRuntimeMessage(out, &p) != nil || protocol.ValidateProjectRuntime(&p) != nil || p.Version != projectRuntimeVersion {
-		return nil
-	}
-	sort.Slice(p.Providers, func(i, j int) bool { return p.Providers[i].Provider < p.Providers[j].Provider })
-	return &p
+	report, _ := projectruntime.Probe(ctx)
+	return report
 }
 
 type runtimeReportSender struct {

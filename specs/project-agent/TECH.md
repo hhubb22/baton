@@ -64,7 +64,7 @@ batond 启动命令为 `baton-project-runtime run`，工作目录是私有空目
 
 #### 2.1 Node sidecar 分发与 stdio
 
-Runtime 以带生产依赖与锁文件的 Node bundle 发布，位置为 batond 同目录的 `sidecars/project-agent/`。通用打包工具、manifest 校验、stdio 容量、进程树回收和崩溃后重新启动的职责见 [Node sidecar 约定](../../runtimes/README.md)。`node tools/package-batond.mjs` 构建可分发目录；登录命令见 [Runtime 安装说明](../../runtimes/project-agent/README.md)。
+Runtime 以带生产依赖与锁文件的 Node bundle 发布，位置为 batond 同目录的 `sidecars/project-agent/`。通用打包工具、manifest 校验、stdio 容量、进程树回收和崩溃后重新启动的职责见 [Node sidecar 约定](../../runtimes/README.md)。`node tools/build.mjs` 统一构建前端、Go 程序和 Runtime bundle；仅构建设备安装包可运行 `node tools/package-batond.mjs`。两个入口共用 sidecar 打包脚本，安装锁定的 Runtime 构建依赖，统一构建不重复编译 batond。CI 直接验证统一构建产物的搬迁、隔离 PATH 后的 Runtime 定位及缺包错误，不另行打包来补齐产物。登录命令见 [Runtime 安装说明](../../runtimes/project-agent/README.md)。
 
 batond 优先使用 bundle，通过 Node 直接运行 manifest 中的入口，要求 Runtime 版本 `0.1.0`、stdio 协议版本 1。没有 bundle 时仍可通过 PATH 发现 `baton-project-runtime`。启动前 `probe` 的版本须匹配。bundle 存在但版本不兼容时拒绝启动。
 
@@ -74,7 +74,9 @@ bootstrap 顶层的 `local_wait_protocol:1` 表示 batond 支持按 Thread 版�
 
 `call_tool` 的请求字段为 `tool_call_id`、`tool_name`、`arguments` 和 `last_seq`，成功返回保存的 `tool_result` Event。工具定义见第 7 节，工具状态不存于本地控制目录。
 
-Runtime 的登录由用户在设备上执行 `baton-project-runtime login <provider>` 完成，走 pi-ai 的 OAuth 流程。凭据存在 Runtime 自己的数据目录，文件权限沿用 batond 的私有文件约定。`baton-project-runtime probe` 只读取凭据状态并返回各 provider 是否已登录，不发送推理请求；batond 用它生成能力报告。
+用户在设备上执行 `batond login <provider>`，支持 `openai-codex`（ChatGPT）和 `xai`。命令使用与守护进程相同的 Runtime 定位逻辑，调用 `login <provider>` 并继承当前终端的标准输入、输出和错误流；Ctrl+C 取消子进程，登录失败返回非零退出码。Runtime 走 pi-ai 的 OAuth 流程，登录方式可通过编号、选项 ID 或回车选择默认项。凭据默认保存在 `~/.baton/project-runtime`，可用 `BATON_PROJECT_RUNTIME_DATA_DIR` 指定；登录和守护进程须使用相同的系统用户及目录配置，文件权限沿用 batond 的私有文件约定。
+
+`batond subscriptions` 调用 Runtime 的 `probe`，以与设备能力采集相同的时限、容量、协议及版本校验读取各 provider 的本地状态，显示登录指引或凭据读取问题。该命令不刷新 token、不发送推理请求，也不输出原始凭据或探测诊断；Runtime 缺失或报告无效时返回错误。本地凭据状态不代表已向服务端验证授权有效。在线 batond 在下一轮能力采集后自动上报登录状态。
 
 Runtime 进程的工作目录是一个空的控制目录。pi-agent-core 本身不加载 AGENTS.md、skills、扩展或 MCP，Runtime 也不启用这些功能，工具只有第 7 节列出的那些。
 

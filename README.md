@@ -28,13 +28,17 @@ Baton 是跨设备 AI Agent 协同系统。员工使用管理员分配的本地�
 
 ## 构建与常用命令
 
-### 1. 构建二进制
+### 1. 构建完整运行目录
 
 ```sh
 node tools/build.mjs
 ```
 
-该命令按锁文件安装前端依赖、构建 Web UI，再将 `coordinator`、`batond` 编译到 `bin/`（Windows 下带 `.exe` 后缀）。前端构建产物保存在 `internal/webui/dist`，不提交到 Git。Coordinator 在编译时嵌入这些文件，部署时无需 Node.js、pnpm 或独立前端服务。Project Agent Runtime 的安装另见 [Runtime 文档](runtimes/project-agent/README.md)。
+该命令按锁文件安装前端和 Runtime 依赖，构建 Web UI，编译 `coordinator`、`batond` 到 `bin/`（Windows 下带 `.exe` 后缀），并将 Project Agent Runtime 及其生产依赖打包到 `bin/sidecars/project-agent/`。构建产物不提交到 Git，无需另行运行打包命令。
+
+Coordinator 嵌入 `internal/webui/dist` 中的静态文件，部署中心服务只需 `coordinator`，无需 Node.js、pnpm 或独立前端服务。设备端须保留 `batond` 与同目录的 `sidecars/`，并安装 Node.js 22.19.0 或更高版本；目标设备无需 pnpm 或联网安装 npm 依赖。登录及安装说明见 [Runtime 文档](runtimes/project-agent/README.md)。
+
+`node tools/check-sidecar-package.mjs` 检查统一构建的设备产物：搬到临时目录、隔离 PATH 后验证 Runtime 定位、版本、订阅状态与私有文件读写，并确认缺少 bundle 时返回安装错误。CI 在统一构建后直接执行该检查，同时运行 Web 格式、lint、typecheck 和单元测试。
 
 ### 2. 数据库迁移与员工账号管理
 
@@ -77,6 +81,18 @@ BATON_ENROLLMENT_TOKEN='<one-time-enrollment-token>' \
 ./bin/batond run --relay wss://baton.example/v1/node --data-dir "$HOME/Library/Application Support/baton/node"
 ```
 
+### 4. 登录 Project assistant 的模型订阅
+
+在运行 batond 的设备上，使用同一个系统用户执行：
+
+```sh
+# ChatGPT；xAI 使用 ./bin/batond login xai
+./bin/batond login openai-codex
+./bin/batond subscriptions
+```
+
+登录命令会显示授权步骤；ChatGPT 支持浏览器和设备码登录。统一构建已包含 Project Runtime bundle，设备安装时保留 `sidecars/` 目录，详见 [Runtime 安装说明](runtimes/project-agent/README.md)。凭据保存在设备上，独立于 Pi、Codex CLI 的登录记录；在线 batond 自动上报登录状态。
+
 ## 配置参考
 
 | 环境变量 | 适用进程 | 说明 |
@@ -94,6 +110,7 @@ BATON_ENROLLMENT_TOKEN='<one-time-enrollment-token>' \
 | `BATON_OFFLINE_AFTER` | `coordinator` | 超过该时间未联系判定节点离线，默认 `30s`（须大于心跳间隔） |
 | `BATON_ENROLLMENT_TOKEN` | `batond register` | 一次性节点注册凭据（也可通过 `--enrollment-token-file` 提供） |
 | `BATON_TLS_CA_FILE` | `batond` | 额外信任的根证书文件路径 |
+| `BATON_PROJECT_RUNTIME_DATA_DIR` | `batond` / Project Runtime | 模型订阅凭据目录，默认 `~/.baton/project-runtime`；登录和守护进程须使用相同配置 |
 
 ## 本地开发与测试
 

@@ -21,6 +21,7 @@ import (
 	"baton/internal/identity"
 	"baton/internal/monotime"
 	"baton/internal/privatefile"
+	"baton/internal/projectruntime"
 	"baton/internal/protocol"
 	"baton/internal/session"
 	"baton/internal/sidecar"
@@ -406,16 +407,12 @@ func (m *projectRuntimeManager) run(p *projectRuntimeProcess) error {
 			p.cleanupFailed = true
 		}
 	}()
-	cmd, err := sidecar.Command(p.ctx, "project-agent", projectRuntimeVersion, "baton-project-runtime", "run")
+	cmd, err := projectruntime.Command(p.ctx, "run")
 	if err != nil {
 		return err
 	}
 	cmd.Dir = control
-	host, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	cmd.Env = append(os.Environ(), "BATON_SIDECAR_HOST="+host, "BATON_SIDECAR_TRANSPORT=stdio", "BATON_PROJECT_RUNTIME_ENDPOINT="+endpoint, "BATON_PROJECT_RUNTIME_TOKEN="+p.token, "BATON_PROJECT_RUN_ID="+p.command.RunID, "BATON_PROJECT_LEASE_EPOCH="+strconv.FormatInt(p.command.LeaseEpoch, 10))
+	cmd.Env = append(cmd.Environ(), "BATON_SIDECAR_TRANSPORT=stdio", "BATON_PROJECT_RUNTIME_ENDPOINT="+endpoint, "BATON_PROJECT_RUNTIME_TOKEN="+p.token, "BATON_PROJECT_RUN_ID="+p.command.RunID, "BATON_PROJECT_LEASE_EPOCH="+strconv.FormatInt(p.command.LeaseEpoch, 10))
 
 	input, err := cmd.StdinPipe()
 	if err != nil {

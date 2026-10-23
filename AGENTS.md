@@ -17,9 +17,11 @@ Baton 是跨设备 AI Agent 协同系统，由中心服务（`coordinator`）、
 
 ## 常用构建与验证命令
 
-- **构建与静态检查**（首次检出或修改前端后先构建；脚本安装前端依赖、生成静态文件，再编译 `coordinator`、`batond` 两个 Go 二进制到 `bin/`）：
+- **构建与静态检查**（首次检出或修改前端后先构建；脚本安装前端和 Runtime 依赖、生成静态文件，编译 `coordinator`、`batond` 到 `bin/`，并打包 Project Runtime 到 `bin/sidecars/project-agent/`）：
   ```sh
+  node --test tools/build.test.mjs
   node tools/build.mjs
+  node tools/check-sidecar-package.mjs
   go vet ./...
   ```
 - **Go 单元与集成测试**（先完成上述构建；默认连接本机 `postgres://postgres:baton@127.0.0.1:5432/baton_test?sslmode=disable`，若未启动会自动尝试通过 `pg_ctl` 拉起 `~/.baton-postgres`，可通过 `BATON_TEST_DATABASE_URL` 覆盖）：

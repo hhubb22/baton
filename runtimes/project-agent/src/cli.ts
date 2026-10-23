@@ -4,6 +4,7 @@ import { createInterface } from "node:readline/promises";
 import { StdioClient, frames, writeFrame } from "../../shared/stdio.js";
 import { probe, runtimeModels, VERSION, PROVIDERS } from "./auth.js";
 import { checkedRPC, type Request } from "./protocol.js";
+import { createLoginInteraction } from "./login.js";
 
 async function ipc(request: Request): Promise<unknown> {
   const endpoint = process.env.BATON_PROJECT_RUNTIME_ENDPOINT,
@@ -36,22 +37,20 @@ async function main() {
       input: process.stdin,
       output: process.stderr,
     });
+    const cancel = new AbortController();
+    input.on("SIGINT", () => cancel.abort());
+    input.on("close", () => cancel.abort());
     try {
       await models.login(
         provider,
         "oauth",
-        {
-          prompt: (question) =>
-            input.question(question.message + "\n", {
-              signal: question.signal,
-            }),
-          notify: (event) => {
-            if (event.type === "auth_url") console.error(event.url);
-            else if (event.type === "device_code")
-              console.error(`${event.verificationUri}\n${event.userCode}`);
-            else console.error(event.message);
+        createLoginInteraction(
+          (message, signal) => input.question(message, { signal }),
+          (text) => {
+            process.stderr.write(text);
           },
-        },
+          cancel.signal,
+        ),
         { agentName: "Baton Project Runtime" },
       );
     } finally {

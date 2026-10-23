@@ -16,6 +16,19 @@ for (const name of ["batond"]) {
   );
   if (result.status !== 0) throw new Error("Go 构建失败");
 }
+const install = spawnSync(
+  "pnpm",
+  [
+    "--dir",
+    "runtimes/project-agent",
+    "install",
+    "--frozen-lockfile",
+    "--ignore-scripts",
+  ],
+  { stdio: "inherit", shell: process.platform === "win32" },
+);
+if (install.error) throw install.error;
+if (install.status !== 0) throw new Error("Runtime 依赖安装失败");
 const result = spawnSync(
   process.execPath,
   [

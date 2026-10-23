@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"baton/internal/node"
+	"baton/internal/projectruntime"
 	"baton/internal/redact"
 	"baton/internal/session"
 )
@@ -48,6 +49,8 @@ func usage() string {
   batond files remove --id 标识 [--data-dir 目录]
   batond files list [--data-dir 目录]
   batond project-exec --enabled=true|false [--shell 路径] [--data-dir 目录]
+  batond login openai-codex|xai
+  batond subscriptions
 
 注册凭据从环境变量 BATON_ENROLLMENT_TOKEN 或 --enrollment-file 读取，不能作为命令行参数，也不能放进地址。
 可选环境变量 BATON_TLS_CA_FILE 指向额外的 CA 证书。
@@ -55,6 +58,9 @@ func usage() string {
 batond run 使用已保存的身份连接 Coordinator。BATON_HEARTBEAT_INTERVAL 默认 10s，允许 100ms 到 2m。
 认证失效时退出并说明需要重新认证，不会重新注册。
 batond files 只在本机登记可浏览目录。浏览器提交目录标识和相对路径，不能提交绝对路径。
+batond login 登录 Project assistant 的模型订阅：openai-codex 对应 ChatGPT，xai 对应 xAI。
+batond subscriptions 查看本机订阅登录状态，不刷新 token 或请求模型。
+订阅凭据默认保存在 ~/.baton/project-runtime，可用 BATON_PROJECT_RUNTIME_DATA_DIR 指定目录；请与 batond run 使用相同的系统用户和配置。
 `
 }
 
@@ -75,6 +81,10 @@ func runWithOptions(ctx context.Context, args []string, stdout, stderr io.Writer
 		return cmdFiles(args[1:], stdout, getenv)
 	case "project-exec":
 		return cmdProjectExec(args[1:], stdout, getenv)
+	case "login":
+		return cmdLogin(ctx, args[1:], os.Stdin, stdout, stderr, projectruntime.Command)
+	case "subscriptions":
+		return cmdSubscriptions(ctx, args[1:], stdout, projectruntime.Probe)
 	case "sidecar-file":
 		return cmdSidecarFile(args[1:], stdout)
 	case "worker":

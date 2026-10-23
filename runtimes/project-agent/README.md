@@ -7,12 +7,19 @@
 使用随 batond 分发的固定版本 Node bundle，构建和进程约定见 [Node sidecar 约定](../README.md)。在解压后的安装目录运行：
 
 ```sh
-node sidecars/project-agent/dist/project-agent/src/cli.js --version
-node sidecars/project-agent/dist/project-agent/src/cli.js login openai-codex
-node sidecars/project-agent/dist/project-agent/src/cli.js probe
+./batond login openai-codex
+./batond subscriptions
 ```
 
-支持 `openai-codex` 和 `xai` 的 OAuth 登录。凭据默认保存在用户主目录下的 `.baton/project-runtime`；可用 `BATON_PROJECT_RUNTIME_DATA_DIR` 指定 Runtime 专用的私有目录。`probe` 只检查本地凭据状态，不刷新 token，不请求模型，不输出 token。过期但带有刷新凭据的订阅会在下一次真实请求时刷新。
+`openai-codex` 对应 ChatGPT，`xai` 对应 xAI。登录 ChatGPT 时，终端显示浏览器登录和设备码登录选项；输入编号或选项 ID，回车选择第一项。浏览器登录支持粘贴回调地址；无浏览器的设备可选择设备码登录，在另一台设备的浏览器中输入终端显示的验证码。按 Ctrl+C 取消登录。
+
+`batond` 优先定位同目录的 Runtime bundle；没有 bundle 时通过 PATH 查找独立安装的 `baton-project-runtime`。无需进入 bundle 或手动寻找 JS 入口。
+
+使用运行 `batond run` 的同一个系统用户登录。凭据默认保存在用户主目录下的 `.baton/project-runtime`；可用 `BATON_PROJECT_RUNTIME_DATA_DIR` 指定 Runtime 专用的私有目录，登录和守护进程须使用相同配置。凭据与 Pi、Codex CLI 的登录记录分别保存，不上传 Coordinator。
+
+`batond subscriptions` 显示各 provider 的已登录、需要登录或无法读取状态，并在需要登录时给出命令。它调用 Runtime 的 `probe`，只检查本地凭据，不刷新 token，不请求模型，不输出 token。已登录表示本地存在所需凭据；实际授权是否有效由后续请求确认。过期但带有刷新凭据的订阅会在下一次真实请求时刷新。
+
+在线的 batond 会在下一轮能力采集后自动上报登录状态，无需重新注册或重启；刷新网页即可查看。Runtime 缺失、版本不匹配或探测失败时，命令返回错误。
 
 batond 检查版本 `0.1.0`、登录状态和租约后，在空控制目录启动 `run`。正常安装使用 stdio；独立运行也支持 TECH 规定的本地 IPC 环境变量。Runtime 从不加载项目目录中的 AGENTS.md、skills、扩展或 MCP。
 

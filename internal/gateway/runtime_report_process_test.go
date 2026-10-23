@@ -33,7 +33,17 @@ func TestRuntimeReportRealProcesses(t *testing.T) {
 		}
 	}
 	writeProbe(`{"version":"0.1.0","providers":[{"provider":"openai-codex","status":"available"}]}`)
-	st := startThreadStack(t, map[string]string{"PATH": binDir + string(os.PathListSeparator) + os.Getenv("PATH"), "BATON_TEST_PROBE_FILE": probeFile})
+	// 本测试通过 PATH 切换 probe 状态，使用不带 bundle 的独立 batond 副本。
+	coord, batond := buildBins(t)
+	standalone := filepath.Join(binDir, filepath.Base(batond))
+	raw, err := os.ReadFile(batond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(standalone, raw, 0700); err != nil {
+		t.Fatal(err)
+	}
+	st := startThreadStackWithBins(t, map[string]string{"PATH": binDir + string(os.PathListSeparator) + os.Getenv("PATH"), "BATON_TEST_PROBE_FILE": probeFile}, coord, standalone)
 	initialVersion, _ := waitRuntimeReport(t, st, func(r protocol.RuntimeReport) bool { return r.ProjectRuntime != nil && !r.Exec.Enabled })
 	root := t.TempDir()
 	for _, args := range [][]string{{"init", root}, {"-C", root, "remote", "add", "origin", "https://user:credential-secret@git.example/team/repo?token=query-secret"}} {

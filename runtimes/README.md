@@ -1,12 +1,14 @@
 # Node sidecar 约定
 
-Baton 的 Node sidecar 随 batond 一起分发。发布目录包含 `batond`、`baton` 和 `sidecars/<名称>/`；目标设备安装 Node.js 22.19.0 或更高版本。构建产物按目标系统分别制作，生产依赖由各 Runtime 的 `pnpm-lock.yaml` 固定，构建时禁用依赖安装脚本。
+Baton 的 Node sidecar 随 batond 一起分发。设备安装目录包含 `batond` 和 `sidecars/<名称>/`；目标设备安装 Node.js 22.19.0 或更高版本。构建产物按目标系统分别制作，生产依赖由各 Runtime 的 `pnpm-lock.yaml` 固定，构建时禁用依赖安装脚本。
 
 ```sh
-node tools/package-batond.mjs
+node tools/build.mjs
 ```
 
-该命令构建本机版本的 Go 程序和 Project Agent bundle。将整个 `bin` 目录作为安装包分发，保留 `sidecars` 内部目录和相对符号链接。不能只复制 `batond`。构建机使用 pnpm 12.11.2；目标机无需 pnpm，也无需联网安装 npm 依赖。
+统一构建安装锁定的前端及 Runtime 依赖，生成 `bin/coordinator`、`bin/batond` 和 `bin/sidecars/project-agent/`。只构建设备安装包时，可运行 `node tools/package-batond.mjs [输出目录]`，默认输出到 `bin/`；该命令也会自动安装 Runtime 构建依赖。两个入口共用 `tools/package-sidecar.mjs` 打包 Runtime，统一构建只编译一次 Go 程序。
+
+向设备分发时保留 `batond` 与同目录的 `sidecars/`，包括其内部目录和相对符号链接。不能只复制 `batond`。构建机使用 pnpm 10+；目标机无需 pnpm，也无需联网安装 npm 依赖。
 
 ## Bundle
 
@@ -45,6 +47,6 @@ go test ./internal/sidecar
 go test ./internal/node -run 'TestProjectRuntime|TestRuntimeProbe'
 ```
 
-`node tools/check-sidecar-package.mjs` 将完整分发包复制到新目录，检查依赖链接、版本、probe 与原生私有文件读写。
+`node tools/check-sidecar-package.mjs [安装包目录]` 默认检查 `bin/`，不重新打包。检查将完整设备产物复制到临时目录，从安装目录之外运行，只在 PATH 中提供 Node，验证依赖链接、版本、probe、订阅状态与原生私有文件读写；移走 bundle 后须返回安装错误，防止独立安装的 Runtime 掩盖包内缺项。
 
-CI 在 Linux、macOS、Windows 上构建并运行同一套 faux 测试。三个系统分别保存 `request.json`，后续检查使用 `cmp` 比较系统提示词、工具定义、超过 1 MiB 的分页历史和请求选项。进程树和 batond 崩溃后的回收沿用各系统的原生测试。
+CI 在 Linux 上直接检查统一构建生成的安装包，并运行 Go 与 Runtime 的 faux 测试。跨系统测试使用相同的请求夹具，覆盖系统提示词、工具定义、超过 1 MiB 的分页历史和请求选项。进程树和 batond 崩溃后的回收沿用各系统的原生测试。

@@ -21,8 +21,21 @@ function runCommand(command, args) {
 export function build(run = runCommand) {
   run("pnpm", ["--dir", "web", "install", "--frozen-lockfile"]);
   run("pnpm", ["--dir", "web", "build"]);
+  run("pnpm", [
+    "--dir",
+    "runtimes/project-agent",
+    "install",
+    "--frozen-lockfile",
+    "--ignore-scripts",
+  ]);
   mkdirSync(output, { recursive: true });
   run("go", ["build", "-o", "bin" + sep, "./cmd/..."]);
+  run(process.execPath, [
+    "tools/package-sidecar.mjs",
+    "runtimes/project-agent",
+    join("bin", "sidecars", "project-agent"),
+    "project-agent",
+  ]);
 }
 
 if (import.meta.main) {

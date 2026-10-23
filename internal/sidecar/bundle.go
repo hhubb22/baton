@@ -55,6 +55,10 @@ func commandAt(ctx context.Context, root, name, version, fallback string, args .
 	if err != nil || !supportedNode(strings.TrimSpace(string(out))) {
 		return nil, errors.New("sidecar 需要 Node.js >=22.19.0")
 	}
+	dir, err = filepath.EvalSymlinks(dir)
+	if err != nil {
+		return nil, err
+	}
 	entry := filepath.Join(dir, m.Entry)
 	resolved, err := filepath.EvalSymlinks(entry)
 	if err != nil {

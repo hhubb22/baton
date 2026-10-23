@@ -50,12 +50,12 @@ jobs:
           cache-dependency-path: |
             web/pnpm-lock.yaml
             runtimes/project-agent/pnpm-lock.yaml
-      - name: Install Runtime dependencies
-        run: pnpm --dir runtimes/project-agent install --frozen-lockfile
       - name: Build
         run: |
           node --test tools/build.test.mjs
           node tools/build.mjs
+      - name: Check sidecar package
+        run: node tools/check-sidecar-package.mjs
       - name: Go vet
         run: go vet ./...
       - name: Go tests
@@ -67,5 +67,9 @@ jobs:
         run: pnpm --dir runtimes/project-agent test
       - name: Web format
         run: pnpm --dir web format:check
+      - name: Web lint
+        run: pnpm --dir web lint
+      - name: Web typecheck
+        run: pnpm --dir web typecheck
       - name: Web unit tests
         run: pnpm --dir web test
