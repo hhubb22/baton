@@ -1,4 +1,4 @@
-// Package pi implements the Pi 1.3.0 RPC contract, not terminal output parsing.
+// Package pi implements the Pi RPC contract using structured protocol frames.
 package pi
 
 import (
@@ -15,9 +15,13 @@ import (
 	"time"
 
 	"baton/internal/agent"
+	"baton/internal/sidecar"
 )
 
 const Version = "1.3.0"
+
+// SupportsVersion 检查 CLI 的最低正式版本，启动后继续校验 RPC 响应。
+func SupportsVersion(version string) bool { return agent.CLIVersionAtLeast(version, Version) }
 
 type response struct {
 	Type    string          `json:"type"`
@@ -39,6 +43,7 @@ type Adapter struct {
 	mu                sync.Mutex
 	writeMu           sync.Mutex
 	cmd               *exec.Cmd
+	stopProcess       func()
 	in                io.WriteCloser
 	done              chan struct{}
 	pending           map[string]chan response
@@ -127,10 +132,10 @@ func (a *Adapter) Start(ctx context.Context) error {
 	raw, err := version.Output()
 	a.recordExit(version, err)
 	if err != nil {
-		return fmt.Errorf("Pi 1.3.0 version check failed: %w", err)
+		return fmt.Errorf("Pi version check failed: %w", err)
 	}
-	if strings.TrimSpace(string(raw)) != Version {
-		return errors.New("Pi 1.3.0 required; installed CLI version could not be verified")
+	if !SupportsVersion(strings.TrimSpace(string(raw))) {
+		return fmt.Errorf("Pi %s or newer stable version required", Version)
 	}
 	prompt := fmt.Sprintf(threadInstructions, a.config.Directory)
 	args := []string{"--mode", "rpc", "--offline", "--no-extensions", "--no-mcp", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-approve", "--session-dir", a.config.SessionDir, "--append-system-prompt", prompt}
@@ -149,35 +154,48 @@ func (a *Adapter) Start(ctx context.Context) error {
 	if err != nil {
 		return errors.New("Pi stdin unavailable")
 	}
-	out, err := cmd.StdoutPipe()
+	out, output, err := os.Pipe()
 	if err != nil {
+		_ = a.in.Close()
 		return errors.New("Pi stdout unavailable")
 	}
-	if err := cmd.Start(); err != nil {
+	// 独立持有读端，Wait 不会在协议协程读完最后一帧前关闭它。
+	cmd.Stdout = output
+	cmd.WaitDelay = time.Second
+	stop, err := sidecar.StartTree(cmd)
+	_ = output.Close()
+	if err != nil {
+		_ = a.in.Close()
+		_ = out.Close()
 		a.recordExit(cmd, err)
 		return fmt.Errorf("Pi process could not start: %w", err)
 	}
-	a.cmd, a.done = cmd, make(chan struct{})
+	a.cmd, a.stopProcess, a.done = cmd, sync.OnceFunc(stop), make(chan struct{})
+	waited := make(chan error, 1)
 	go func() {
+		err := cmd.Wait()
+		a.stopProcess()
+		waited <- err
+	}()
+	go func() {
+		defer out.Close()
 		readErr := readFrames(out, a.consume)
 		var waitErr error
 		if a.diagnostic != nil && readErr == nil {
-			// Let a naturally exiting diagnostic probe report its real status.
-			waited := make(chan error, 1)
-			go func() { waited <- cmd.Wait() }()
+			// 诊断保留自然退出的真实状态，超时再回收进程树。
 			select {
 			case waitErr = <-waited:
 			case <-time.After(250 * time.Millisecond):
 				a.diagnostic.markCleanupKill()
-				_ = cmd.Process.Kill()
+				a.stopProcess()
 				waitErr = <-waited
 			}
 		} else {
 			if a.diagnostic != nil {
 				a.diagnostic.markCleanupKill()
 			}
-			_ = cmd.Process.Kill()
-			waitErr = cmd.Wait()
+			a.stopProcess()
+			waitErr = <-waited
 		}
 		a.recordExit(cmd, waitErr)
 		a.mu.Lock()
@@ -279,7 +297,7 @@ func (a *Adapter) call(ctx context.Context, command string, fields map[string]an
 		if a.diagnostic != nil {
 			a.diagnostic.markCleanupKill()
 		}
-		_ = a.cmd.Process.Kill()
+		a.stopProcess()
 		return response{}, errors.New("Pi command write timed out; outcome uncertain")
 	}
 	if err != nil {
@@ -413,7 +431,7 @@ func (a *Adapter) Close() error {
 		if a.diagnostic != nil {
 			a.diagnostic.markCleanupKill()
 		}
-		_ = a.cmd.Process.Kill()
+		a.stopProcess()
 		<-a.done
 	}
 	return nil

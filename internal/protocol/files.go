@@ -40,9 +40,10 @@ type FileRequest struct {
 	Cursor      string `json:"cursor,omitempty"`
 }
 
-// FileRoot 是节点本地配置的一个授权目录。响应只含标识，不含本机绝对路径。
+// FileRoot 是节点本地配置的授权目录，标识与真实路径来自同一条配置。
 type FileRoot struct {
-	ID string `json:"id"`
+	ID   string `json:"id"`
+	Path string `json:"path"`
 }
 
 // FileEntry 是目录中的一条。符号链接不展开目标路径。

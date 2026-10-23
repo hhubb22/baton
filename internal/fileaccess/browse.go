@@ -200,7 +200,7 @@ func Browse(dir string, req protocol.FileRequest) protocol.FileResult {
 		result.Kind = protocol.FileKindRoots
 		result.Roots = make([]protocol.FileRoot, 0, len(roots))
 		for _, root := range roots {
-			result.Roots = append(result.Roots, protocol.FileRoot{ID: root.ID})
+			result.Roots = append(result.Roots, protocol.FileRoot{ID: root.ID, Path: root.Path})
 		}
 		return result
 	}

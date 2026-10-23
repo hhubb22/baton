@@ -43,8 +43,8 @@ func (s *Server) routeThread(w http.ResponseWriter, r *http.Request) {
 		want = r.Method
 	} else {
 		switch action {
-		case "", "timeline", "history":
-		case "messages", "withdraw", "stop", "archive":
+		case "", "timeline", "history", "output", "trace":
+		case "messages", "withdraw", "stop", "archive", "model", "resume":
 			want = http.MethodPost
 		default:
 			s.writeError(w, r, 404, "not_found", "找不到对应接口")
@@ -54,6 +54,10 @@ func (s *Server) routeThread(w http.ResponseWriter, r *http.Request) {
 			s.writeError(w, r, 405, "method_not_allowed", "不支持该请求方法")
 			return
 		}
+	}
+	if action == "output" || action == "trace" {
+		s.threadRead(w, r, id, action)
+		return
 	}
 	if action == "history" {
 		s.threadHistory(w, r, id)
@@ -115,8 +119,32 @@ func (s *Server) routeThread(w http.ResponseWriter, r *http.Request) {
 			s.writeJSON(w, 202, m)
 			return
 		}
+		if action == "model" {
+			var in struct {
+				Model string `json:"model"`
+			}
+			if !s.readJSON(w, r, &in) {
+				return
+			}
+			view, err := s.store.SetThreadModel(r.Context(), employeeID, id, in.Model)
+			if err != nil {
+				s.writeThreadError(w, r, err)
+				return
+			}
+			s.writeJSON(w, 200, view)
+			return
+		}
 		var in struct{}
 		if !s.readJSON(w, r, &in) {
+			return
+		}
+		if action == "resume" {
+			view, err := s.store.ResumeThread(r.Context(), employeeID, id)
+			if err != nil {
+				s.writeThreadError(w, r, err)
+				return
+			}
+			s.writeJSON(w, 202, view)
 			return
 		}
 		t, err := s.store.RequestThreadAction(r.Context(), employeeID, id, action, mid)

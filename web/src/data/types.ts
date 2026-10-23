@@ -18,6 +18,7 @@ export interface Session {
   account: Account | null
   defaultDeviceId: ID | null
   ended: SessionEnd | null
+  mustChangePassword?: boolean
 }
 
 // 连接成功、状态同步完成和 Thread 执行状态分开表示。
@@ -40,12 +41,14 @@ export interface DeviceAgent {
   // 登录 Agent 使用的订阅，例如 Codex 用 ChatGPT；不需要登录的 Agent 为 null。
   account: string | null
   // 程序没装或订阅登录过期时新对话不可用，要在设备上处理。
-  problem: 'notInstalled' | 'signedOut' | null
+  problem: 'notInstalled' | 'signedOut' | 'unavailable' | null
 }
 
 export interface Subscription {
   provider: string
   signedIn: boolean
+  status?: 'available' | 'login_required' | 'unknown'
+  models?: string[]
 }
 
 export interface Device {
@@ -107,7 +110,7 @@ export interface Thread {
   title: string
   deviceId: ID
   folder: string
-  agent: AgentKind
+  agent: AgentKind | null
   model: string
   projectId: ID | null
   status: ThreadStatus
@@ -168,7 +171,7 @@ export type Trace =
 
 // 设备上比中心保存的消息更早的对话记录，按页从设备读取，before 为已显示的最早一条消息。
 export type HistoryPage =
-  | { state: 'ready'; threadId: ID; messages: Message[]; more: boolean }
+  | { state: 'ready'; threadId: ID; messages: Message[]; more: boolean; gap?: boolean }
   | { state: 'unavailable'; threadId: ID; reason: 'offline' | 'missing' }
 
 // 执行中的一轮的实时输出。gap 表示设备已经丢掉、补不回来的一段。
@@ -200,13 +203,14 @@ export interface Reference {
 export type ProjectStatus = 'active' | 'paused' | 'archived'
 
 // notStarted：新建后还没收到第一条消息；stopping：已请求停止，等设备确认。
-export type ProjectAgentState = 'notStarted' | 'idle' | 'running' | 'waitingDevice' | 'stopping' | 'stopped'
+export type ProjectAgentState = 'notStarted' | 'idle' | 'running' | 'waitingDevice' | 'stopping' | 'stopped' | 'blocked'
 
 export interface Project {
   id: ID
   name: string
   hue: 'slate' | 'amber' | 'violet' | 'green' | 'blue' | 'rose'
   status: ProjectStatus
+  archivedAt: number | null
   goal: string
   // Project 助手使用的订阅和模型，修改后从下一次运行开始生效。
   subscription: string
@@ -222,6 +226,8 @@ export interface Project {
   }
   createdAt: number
 }
+
+export type ProjectPatch = Partial<Pick<Project, 'name' | 'goal' | 'subscription' | 'model'>>
 
 // 助手一次运行中做过的事，折叠在回复上方。
 export type ProcessStep =
@@ -246,13 +252,29 @@ export type ProjectEntry =
   | (EntryBase & { kind: 'assistant'; process: ProcessStep[]; threads: EntryThreads | null; body: string })
   | (EntryBase & { kind: 'note'; body: string })
 
-// 助手记下的项目记忆，跨运行保留。
-export interface MemoryNote {
-  id: ID
-  projectId: ID
+export interface MemoryVersion {
+  version: number
   body: string
+  source: 'you' | 'assistant'
   updatedAt: number
 }
+
+// 记忆保留各次保存的版本；顶层字段表示最新版本。
+export interface MemoryNote extends MemoryVersion {
+  id: ID
+  projectId: ID
+  versions: MemoryVersion[]
+}
+
+export interface SaveMemoryInput {
+  projectId: ID
+  noteId: ID | null
+  body: string
+  version: number | null
+  clientId: string
+}
+
+export type MemorySave = { state: 'saved' | 'conflict'; note: MemoryNote }
 
 export type InboxStatus = 'pending' | 'answered' | 'closed' | 'withdrawn' | 'resolved'
 
@@ -264,12 +286,23 @@ export interface InboxItem {
   title: string
   body: string
   options: string[]
+  recommended: number | null
+  allowText: boolean
   status: InboxStatus
-  answer: string | null
+  result: {
+    option: string | null
+    note: string
+    actor: string
+    at: number
+    reason: string | null
+    inputId: ID | null
+  } | null
   // 每次处理都会递增，用来发现其他页面或设备已经处理过。
   revision: number
   createdAt: number
 }
+
+export type ItemDecision = { kind: 'answer'; option: string | null; note: string } | { kind: 'close' }
 
 export type OperationKind =
   'createThread' | 'sendMessage' | 'stopThread' | 'archiveThread' | 'resumeThread' | 'answerItem'

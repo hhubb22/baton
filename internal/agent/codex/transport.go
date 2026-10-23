@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"os/exec"
 	"sync"
 
 	"github.com/sourcegraph/jsonrpc2"
@@ -38,15 +37,26 @@ func (lineCodec) ReadObject(r *bufio.Reader, v any) error {
 type processIO struct {
 	io.ReadCloser
 	io.WriteCloser
-	cmd  *exec.Cmd
-	once sync.Once
+	stopTree func()
+	once     sync.Once
+}
+
+func (p *processIO) Write(data []byte) (int, error) {
+	n, err := p.WriteCloser.Write(data)
+	if err != nil {
+		_ = p.Close()
+	}
+	return n, err
 }
 
 func (p *processIO) Close() error {
 	p.once.Do(func() {
+		// Windows 同步管道的关闭会等待读写结束，先终止进程树以释放这些操作。
+		if p.stopTree != nil {
+			p.stopTree()
+		}
 		_ = p.WriteCloser.Close()
 		_ = p.ReadCloser.Close()
-		_ = p.cmd.Process.Kill()
 	})
 	return nil
 }

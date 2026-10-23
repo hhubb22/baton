@@ -75,7 +75,7 @@ export function threadView(
   options: { resume?: boolean; unknownDelivery?: boolean } = {},
 ): ThreadView {
   const name = device?.name ?? 'This device'
-  const agent = agentNames[thread.agent]
+  const agent = thread.agent ? agentNames[thread.agent] : 'Command'
   const reachable = device?.connection === 'online'
   const away = device?.connection === 'syncing' ? 'syncing' : 'offline'
   const view = (
@@ -84,7 +84,16 @@ export function threadView(
     note: ThreadNotice | null = null,
     composer = true,
     live = false,
-  ): ThreadView => ({ status, group, notice: note, composer, live })
+  ): ThreadView => ({
+    status,
+    group,
+    notice:
+      thread.agent === null && note?.action && ['resume', 'newChat', 'chooseFolder'].includes(note.action)
+        ? { ...note, action: null }
+        : note,
+    composer: composer && thread.agent !== null,
+    live,
+  })
 
   if (thread.status === 'archived') {
     return view(
@@ -259,6 +268,8 @@ export function projectAgentStatus(project: Project, devices: Device[]): StatusV
   if (project.status === 'archived') return { tone: 'hollow', label: 'Archived' }
   const device = devices.find((item) => item.id === project.agent.deviceId)
   switch (project.agent.state) {
+    case 'blocked':
+      return { tone: 'attention', label: 'Needs attention' }
     case 'notStarted':
       return { tone: 'neutral', label: 'Not started yet' }
     case 'running':
@@ -453,7 +464,9 @@ export function shortenExcerpt(selected: string) {
 }
 
 export function pendingInbox(items: InboxItem[], projectId?: ID) {
-  return items.filter((item) => item.status === 'pending' && (!projectId || item.projectId === projectId))
+  return items
+    .filter((item) => item.status === 'pending' && (!projectId || item.projectId === projectId))
+    .sort((a, b) => b.createdAt - a.createdAt)
 }
 
 function connectionCounts(devices: Device[]) {
@@ -515,13 +528,13 @@ export function deviceConnectionView(device: Device, projects: Project[], now: n
   }
 }
 
-function chatGPTSignedIn(device: Device) {
-  return device.subscriptions.some((item) => item.provider === 'ChatGPT' && item.signedIn)
+function subscriptionSignedIn(device: Device) {
+  return device.subscriptions.some((item) => item.signedIn)
 }
 
 // 设备上需要处理才能用的 Agent 和 Project 助手。
 export function setupNeeded(device: Device) {
-  return device.agents.some((agent) => agent.problem) || !device.hasRuntime || !chatGPTSignedIn(device)
+  return device.agents.some((agent) => agent.problem) || !device.hasRuntime || !subscriptionSignedIn(device)
 }
 
 export interface CapabilityLine {
@@ -541,14 +554,26 @@ function abilityNotes(agent: DeviceAgent) {
 export function capabilityLines(device: Device): CapabilityLine[] {
   const lines = device.agents.map((agent): CapabilityLine => {
     const name = agentNames[agent.kind]
+    if (agent.problem === 'unavailable') return { name, ok: false, detail: 'Agent unavailable on this device' }
     if (agent.problem === 'notInstalled') return { name, ok: false, detail: 'Program not installed' }
     if (agent.problem === 'signedOut') return { name, ok: false, detail: `${agent.account} sign-in expired` }
     return { name, ok: true, detail: [agent.account ? 'Signed in' : 'Installed', ...abilityNotes(agent)].join(' · ') }
   })
-  let runtime: CapabilityLine = { name: 'Project assistant', ok: true, detail: 'ChatGPT signed in' }
+  const subscriptions = device.subscriptions.filter((item) => item.signedIn).map((item) => item.provider)
+  let runtime: CapabilityLine = {
+    name: 'Project assistant',
+    ok: true,
+    detail: `${sentenceList(subscriptions)} signed in`,
+  }
   if (!device.hasRuntime) runtime = { name: 'Project assistant', ok: false, detail: 'Not installed' }
-  else if (!chatGPTSignedIn(device))
-    runtime = { name: 'Project assistant', ok: false, detail: 'ChatGPT sign-in expired' }
+  else if (!subscriptionSignedIn(device))
+    runtime = {
+      name: 'Project assistant',
+      ok: false,
+      detail: device.subscriptions.some((item) => item.status)
+        ? 'Subscription sign-in needed'
+        : 'ChatGPT sign-in expired',
+    }
   return [...lines, runtime]
 }
 
@@ -556,6 +581,7 @@ export function capabilityLines(device: Device): CapabilityLine[] {
 export function modelLines(device: Device) {
   return device.agents.flatMap((agent) => {
     const name = agentNames[agent.kind]
+    if (agent.problem === 'unavailable') return [`${name} is unavailable. Check the agent on this device.`]
     if (agent.problem === 'notInstalled') return [`${name} models unavailable until installed.`]
     const models = agent.models.map((model) => (model === agent.defaultModel ? `${model} (default)` : model))
     const line = [`${name} ${agent.version ?? ''}`.trim(), models.join(', ')].filter(Boolean).join(' · ')
@@ -578,8 +604,12 @@ export function setupSteps(device: Device) {
     return []
   })
   if (!device.hasRuntime) steps.push('update Baton for the project assistant')
-  else if (!chatGPTSignedIn(device) && !device.agents.some((agent) => agent.account === 'ChatGPT' && agent.problem)) {
-    steps.push('sign in to ChatGPT for the project assistant')
+  else if (
+    !subscriptionSignedIn(device) &&
+    !device.agents.some((agent) => agent.account === 'ChatGPT' && agent.problem)
+  ) {
+    const providers = device.subscriptions.map((item) => item.provider).join(' or ') || 'a supported subscription'
+    steps.push(`sign in to ${providers} for the project assistant`)
   }
   const list = sentenceList(steps)
   return `${list.charAt(0).toUpperCase()}${list.slice(1)}. Make these changes on ${device.name}.`
@@ -666,7 +696,7 @@ export function defaultLocation(threads: Thread[], devices: Device[], defaultDev
 
 // 能开新对话的 Agent：已安装且订阅已登录。
 export function usableAgents(device: Device | undefined) {
-  return (device?.agents ?? []).filter((agent) => !agent.problem && agent.models.length > 0)
+  return (device?.agents ?? []).filter((agent) => !agent.problem)
 }
 
 // 操作的确认阶段。已提交和已保存分开显示，设备确认前不显示最终结果。

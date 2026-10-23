@@ -2,29 +2,16 @@ import * as stylex from '@stylexjs/stylex'
 import { useNavigate } from '@tanstack/react-router'
 import { useRef, useState } from 'react'
 import { ClientError } from '../data/client'
-import { assistantModels, subscriptionReach } from '../data/derive'
-import { newClientId, useCreateProject, useDevices } from '../data/queries'
+import { subscriptionReach } from '../data/derive'
+import { newClientId, useCreateProject } from '../data/queries'
 import { text } from '../theme/text'
-import { colors, radius, size, space } from '../theme/tokens.stylex'
-import { Button, focusRing } from '../ui/Button'
+import { colors } from '../theme/tokens.stylex'
+import { Button } from '../ui/Button'
 import { Dialog, DialogClose } from '../ui/Dialog'
 import { Field, Input, TextArea } from '../ui/Field'
+import { ProjectModelFields, useProjectModelCatalog } from './ProjectModelFields'
 
 const styles = stylex.create({
-  models: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space.md },
-  select: {
-    width: '100%',
-    height: size.control,
-    paddingInline: '10px',
-    backgroundColor: colors.surface,
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: { default: colors.border, ':focus': colors.focus },
-    borderRadius: radius.sm,
-    outline: 'none',
-    color: colors.text,
-  },
-  assistant: { display: 'flex', flexDirection: 'column', gap: '6px' },
   hint: { color: colors.muted },
   failure: { color: colors.danger },
 })
@@ -36,22 +23,28 @@ function reachHint(subscription: string, ready: number) {
   return `Uses your ${subscription} account. Signed in on ${ready} online ${ready === 1 ? 'device' : 'devices'}.`
 }
 
-// 新建 Project：只有名称必填。订阅和模型属于这个 Project，之后每次运行助手都用它们。
+// 订阅和模型属于这个 Project，之后每次运行助手都用它们。
 export function NewProjectDialog({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate()
-  const devices = useDevices()
+  const { catalog, devices } = useProjectModelCatalog()
   const create = useCreateProject()
   const nameRef = useRef<HTMLInputElement>(null)
   const [name, setName] = useState('')
   const [goal, setGoal] = useState('')
-  const [subscription, setSubscription] = useState('ChatGPT')
-  const [model, setModel] = useState(assistantModels.ChatGPT[0])
+  const [selection, setSelection] = useState<{ subscription: string; model: string } | null>(null)
+  const { subscription, model } = selection ?? {
+    subscription: catalog[0]?.provider ?? '',
+    model: catalog[0]?.models[0] ?? '',
+  }
   const [nameError, setNameError] = useState<string | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
   // 重试沿用同一个 clientId，第一次其实已保存时不会建出两个 Project。
   const [clientId] = useState(newClientId)
 
-  const ready = subscriptionReach(devices.data ?? [], subscription)
+  const subscriptionLabel =
+    ({ 'openai-codex': 'ChatGPT', xai: 'xAI', anthropic: 'Claude' } as Record<string, string>)[subscription] ??
+    subscription
+  const ready = subscriptionReach(devices.data ?? [], subscriptionLabel)
 
   const submit = () => {
     if (create.isPending) return
@@ -60,9 +53,13 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
       nameRef.current?.focus()
       return
     }
+    if (!subscription.trim() || !model.trim()) {
+      setFailure('Choose a provider and model, or enter them manually.')
+      return
+    }
     setFailure(null)
     create.mutate(
-      { name, goal, subscription, model, clientId },
+      { name, goal, subscription: subscription.trim(), model: model.trim(), clientId },
       {
         onSuccess: (project) => {
           onClose()
@@ -132,46 +129,16 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
           />
         )}
       </Field>
-      <div {...stylex.props(styles.assistant)}>
-        <div {...stylex.props(styles.models)}>
-          <Field label="Assistant subscription">
-            {(props) => (
-              <select
-                {...props}
-                value={subscription}
-                onChange={(event) => {
-                  setSubscription(event.target.value)
-                  setModel(assistantModels[event.target.value][0])
-                }}
-                {...stylex.props(text.small, styles.select, focusRing.ring)}
-              >
-                {Object.keys(assistantModels).map((item) => (
-                  <option key={item} value={item}>
-                    {item} subscription
-                  </option>
-                ))}
-              </select>
-            )}
-          </Field>
-          <Field label="Model">
-            {(props) => (
-              <select
-                {...props}
-                value={model}
-                onChange={(event) => setModel(event.target.value)}
-                {...stylex.props(text.small, styles.select, focusRing.ring)}
-              >
-                {assistantModels[subscription].map((item) => (
-                  <option key={item} value={item}>
-                    {item}
-                  </option>
-                ))}
-              </select>
-            )}
-          </Field>
-        </div>
-        {devices.data && <p {...stylex.props(text.caption, styles.hint)}>{reachHint(subscription, ready)}</p>}
-      </div>
+      <ProjectModelFields
+        catalog={catalog}
+        value={{ subscription, model }}
+        onChange={setSelection}
+        creating
+        loading={devices.isPending}
+      />
+      {devices.data && subscription && (
+        <p {...stylex.props(text.caption, styles.hint)}>{reachHint(subscriptionLabel, ready)}</p>
+      )}
     </Dialog>
   )
 }

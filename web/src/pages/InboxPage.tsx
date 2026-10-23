@@ -1,115 +1,98 @@
 import * as stylex from '@stylexjs/stylex'
-import { Link } from '@tanstack/react-router'
-import { useState } from 'react'
+import { useNavigate, useSearch } from '@tanstack/react-router'
+import { useEffect, useRef, useState } from 'react'
+import { AttentionCard } from '../app/AttentionCard'
 import { Column, Page } from '../app/Page'
-import { SelectionArea } from '../app/SelectionMenu'
-import { useWorkspace } from '../app/workspace'
-import { ClientError } from '../data/client'
-import { operationLabel, pendingInbox, shortenExcerpt } from '../data/derive'
-import { useAnswerItem, useInbox, useOperation, useProjects } from '../data/queries'
-import type { InboxItem, Project } from '../data/types'
+import { pendingInbox } from '../data/derive'
+import { useInbox } from '../data/queries'
 import { text } from '../theme/text'
-import { colors, space } from '../theme/tokens.stylex'
-import { Avatar } from '../ui/Avatar'
+import { space } from '../theme/tokens.stylex'
+import { Banner } from '../ui/Banner'
 import { Button } from '../ui/Button'
-import { Card } from '../ui/Card'
 
 const styles = stylex.create({
-  head: { display: 'flex', alignItems: 'center', gap: space.sm },
-  project: { color: colors.muted, textDecoration: 'none' },
-  options: { display: 'flex', flexWrap: 'wrap', gap: space.sm },
-  status: { color: colors.muted },
+  heading: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space.sm },
   empty: { paddingBlock: space.xl, textAlign: 'center' },
-  content: { display: 'flex', flexDirection: 'column', gap: '10px' },
+  recent: { display: 'flex', flexDirection: 'column', gap: space.md },
 })
 
-function ItemCard({ item, project }: { item: InboxItem; project: Project | undefined }) {
-  const answer = useAnswerItem()
-  const [operationId, setOperationId] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const operation = useOperation(operationId)
-  const phase = operation.data ? operationLabel(operation.data, undefined) : null
-  const workspace = useWorkspace()
-
-  // 选中事项里的文字，带着事项来源去问它所属 Project 的助手。
-  const describe = (_range: Range, value: string) => () =>
-    workspace.askProject(item.projectId, {
-      kind: 'item',
-      title: item.title,
-      threadId: item.threadId,
-      reply: null,
-      deviceId: null,
-      path: null,
-      lines: null,
-      itemId: item.id,
-      ...shortenExcerpt(value),
-    })
-
-  const choose = (option: string) => {
-    setError(null)
-    answer.mutate(
-      { itemId: item.id, answer: option, revision: item.revision },
-      {
-        onSuccess: (result) => setOperationId(result.id),
-        onError: (cause) => setError(cause instanceof ClientError ? cause.message : 'Could not save. Try again.'),
-      },
-    )
-  }
-
-  return (
-    <Card label={item.title}>
-      <div {...stylex.props(styles.head)}>
-        {project && <Avatar name={project.name} hue={project.hue} />}
-        {project && (
-          <Link
-            to="/projects/$projectId"
-            params={{ projectId: project.id }}
-            {...stylex.props(text.caption, styles.project)}
-          >
-            {project.name}
-          </Link>
-        )}
-      </div>
-      <SelectionArea label="Ask project assistant" icon="reply" describe={describe} style={styles.content}>
-        <h2 {...stylex.props(text.heading)}>{item.title}</h2>
-        <p {...stylex.props(text.body, text.muted)}>{item.body}</p>
-      </SelectionArea>
-      {item.status === 'pending' && item.options.length > 0 && (
-        <div {...stylex.props(styles.options)}>
-          {item.options.map((option) => (
-            <Button key={option} small onClick={() => choose(option)}>
-              {option}
-            </Button>
-          ))}
-        </div>
-      )}
-      {(error ?? phase) && (
-        <span role="status" {...stylex.props(text.caption, error ? text.danger : styles.status)}>
-          {error ?? phase}
-        </span>
-      )}
-    </Card>
-  )
-}
-
-// 等你决定的事项：在这里回答和在 Project 里回答是同一个对象，任何一处处理后两边一起更新。
+// @elyx design/screens/inbox.elyx#inbox
 export function InboxPage() {
   const inbox = useInbox()
-  const projects = useProjects()
-  const pending = pendingInbox(inbox.data ?? [])
+  const { handled } = useSearch({ from: '/workspace/inbox' })
+  const navigate = useNavigate()
+  const [recentResult, setRecentResult] = useState<{ id: string; feedback: string | null } | null>(null)
+  const recentRef = useRef<HTMLDivElement>(null)
+  const all = inbox.data ?? []
+  const pending = pendingInbox(all)
+  const items = handled
+    ? all.filter((item) => item.status !== 'pending').sort((a, b) => b.createdAt - a.createdAt)
+    : pending
+  const recent = handled ? undefined : all.find((item) => item.id === recentResult?.id && item.status !== 'pending')
+  const focusedResultId = recent?.id
+  useEffect(() => {
+    if (focusedResultId) recentRef.current?.focus()
+  }, [focusedResultId])
   return (
-    <Page title="Inbox">
+    <Page
+      title="Inbox"
+      actions={
+        <Button
+          small
+          variant="ghost"
+          onClick={() => {
+            setRecentResult(null)
+            void navigate({ to: '/inbox', search: handled ? {} : { handled: true } })
+          }}
+        >
+          {handled ? 'Pending items' : 'Handled items'}
+        </Button>
+      }
+    >
       <Column>
-        {inbox.data && pending.length === 0 && (
-          <p {...stylex.props(text.body, text.muted, styles.empty)}>Nothing needs your decision</p>
+        <div {...stylex.props(styles.heading)}>
+          <h2 {...stylex.props(text.title)}>
+            {handled
+              ? 'Handled items'
+              : !inbox.data
+                ? 'Inbox'
+                : `${pending.length} ${pending.length === 1 ? 'item' : 'items'} waiting for you`}
+          </h2>
+          <span {...stylex.props(text.caption, text.faint)}>Newest first</span>
+        </div>
+        {inbox.isPending && (
+          <p role="status" {...stylex.props(text.small, text.muted)}>
+            Loading inbox…
+          </p>
         )}
-        {pending.map((item) => (
-          <ItemCard
-            key={item.id}
-            item={item}
-            project={projects.data?.find((project) => project.id === item.projectId)}
+        {inbox.isError && (
+          <Banner
+            icon="alert"
+            title="Could not load your inbox"
+            detail="Your questions are kept. Try again."
+            action={
+              <Button small onClick={() => void inbox.refetch()}>
+                Retry
+              </Button>
+            }
           />
+        )}
+        {inbox.data && items.length === 0 && (
+          <p {...stylex.props(text.body, text.muted, styles.empty)}>
+            {handled ? 'No handled items yet' : 'Nothing needs your decision'}
+          </p>
+        )}
+        {items.map((item) => (
+          <AttentionCard key={item.id} item={item} onHandled={(id, feedback) => setRecentResult({ id, feedback })} />
         ))}
+        {recent && (
+          <div ref={recentRef} tabIndex={-1} role="region" aria-label="Latest result" {...stylex.props(styles.recent)}>
+            <AttentionCard key={recent.id} item={recent} feedback={recentResult?.feedback} />
+            <Button small variant="ghost" onClick={() => void navigate({ to: '/inbox', search: { handled: true } })}>
+              View handled items
+            </Button>
+          </div>
+        )}
       </Column>
     </Page>
   )

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"os/exec"
 	"sync"
 	"time"
 
@@ -39,7 +38,7 @@ func (lineCodec) ReadObject(r *bufio.Reader, v any) error {
 type processIO struct {
 	io.ReadCloser
 	io.WriteCloser
-	cmd          *exec.Cmd
+	stopTree     func()
 	once         sync.Once
 	writeTimeout time.Duration
 }
@@ -52,14 +51,18 @@ func (p *processIO) Write(data []byte) (int, error) {
 	}
 	timer := time.AfterFunc(timeout, func() { _ = p.Close() })
 	defer timer.Stop()
-	return p.WriteCloser.Write(data)
+	n, err := p.WriteCloser.Write(data)
+	if err != nil {
+		_ = p.Close()
+	}
+	return n, err
 }
 
 func (p *processIO) Close() error {
 	p.once.Do(func() {
-		// Windows 同步管道的关闭会等待读写结束，先终止进程以释放这些操作。
-		if p.cmd != nil && p.cmd.Process != nil {
-			_ = p.cmd.Process.Kill()
+		// Windows 同步管道的关闭会等待读写结束，先终止进程树以释放这些操作。
+		if p.stopTree != nil {
+			p.stopTree()
 		}
 		_ = p.WriteCloser.Close()
 		_ = p.ReadCloser.Close()

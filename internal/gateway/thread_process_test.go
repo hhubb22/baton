@@ -57,7 +57,9 @@ func startThreadReplayStack(t *testing.T, tape replay.Transcript, gates ...strin
 	t.Cleanup(func() {
 		// Worker 与 batond 分开存活，先结束节点再清理 Worker。
 		st.batond.stop()
-		cleanupSessionWorkers(st.dataDir)
+		if err := cleanupSessionWorkers(st.dataDir); err != nil {
+			t.Errorf("清理 Thread Worker: %v", err)
+		}
 	})
 	if out, err := exec.Command(st.batondBin, "files", "add", "--data-dir", st.dataDir, "--id", "thread-root", "--path", work).CombinedOutput(); err != nil {
 		t.Fatalf("登记目录: %v %s", err, out)

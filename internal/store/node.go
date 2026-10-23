@@ -149,6 +149,9 @@ func (s *Store) Register(ctx context.Context, in RegisterInput, signer node.Toke
 	if err != nil {
 		return node.Identity{}, fmt.Errorf("保存节点失败: %s", redact.Scrub(err.Error()))
 	}
+	if _, err := tx.Exec(ctx, `UPDATE node_enrollments SET device_id=$2::uuid WHERE token_hash=$1`, auth.Digest(in.Token), nodeID); err != nil {
+		return node.Identity{}, err
+	}
 	var credentialExpires time.Time
 	err = tx.QueryRow(ctx, `
 		INSERT INTO node_credentials (

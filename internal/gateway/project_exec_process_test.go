@@ -235,6 +235,9 @@ func TestProjectExecRealProcessesExitAndOutput(t *testing.T) {
 		t.Run(fmt.Sprintf("exit_%d", code), func(t *testing.T) {
 			t.Parallel()
 			e := startProjectExecStack(t)
+			if _, err := e.stack.pool.Exec(t.Context(), `UPDATE employees SET must_change_password=false WHERE id=$1`, e.stack.employeeID); err != nil {
+				t.Fatal(err)
+			}
 			command := fmt.Sprintf("printf 'shell-stdout\\n'; printf 'shell-stderr\\n' >&2; exit %d", code)
 			if runtime.GOOS == "windows" {
 				command = fmt.Sprintf("[Console]::Out.WriteLine('shell-stdout'); [Console]::Error.WriteLine('shell-stderr'); exit %d", code)
@@ -258,6 +261,17 @@ func TestProjectExecRealProcessesExitAndOutput(t *testing.T) {
 			var pending, results int
 			if err := e.stack.pool.QueryRow(context.Background(), `SELECT (SELECT count(*) FROM project_agent_input_queue WHERE agent_id=$1 AND source_type IN ('turn_ended','thread_reply') AND delivered_seq IS NULL),(SELECT count(*) FROM conversation_events WHERE conversation_id=$2 AND kind='tool_result')`, e.project.Agent.ID, e.project.Conversation.ID).Scan(&pending, &results); err != nil || pending != 0 || results != 1 {
 				t.Fatalf("同步返回后仍有重复输入 pending=%d results=%d：%v", pending, results, err)
+			}
+			var trace store.ThreadTrace
+			if err := getJSON(t, e.stack.client, e.stack.base+"/api/v1/threads/"+threadID+"/trace?worker_turn_seq=1", &trace); err != nil || !trace.OK || len(trace.Steps) != 1 || trace.Steps[0].Kind != "command" || trace.Steps[0].Command != command || !strings.Contains(trace.Steps[0].Output, "shell-stdout") || !strings.Contains(trace.Steps[0].Output, "shell-stderr") || trace.Steps[0].Truncated {
+				t.Fatalf("HTTP trace 没有返回真实 shell 命令及完整输出：%+v %v", trace, err)
+			}
+			var output protocol.SessionResult
+			if err := getJSON(t, e.stack.client, e.stack.base+"/api/v1/threads/"+threadID+"/output", &output); err != nil || !output.OK || output.Text != "" || output.State != "stopped" {
+				t.Fatalf("已结束 shell 的历史输出不能冒充实时输出：%+v %v", output, err)
+			}
+			if status := postJSON(t, e.stack.client, e.stack.base+"/api/v1/threads/"+threadID+"/resume", struct{}{}, e.stack.csrf, nil); status != 422 {
+				t.Fatalf("shell Thread 恢复应被拒绝：%d", status)
 			}
 			var delivered int
 			if err := e.stack.pool.QueryRow(context.Background(), `SELECT count(*) FROM project_agent_input_queue WHERE agent_id=$1 AND source_type='turn_ended' AND delivered_seq=$2`, e.project.Agent.ID, result.Seq).Scan(&delivered); err != nil || delivered != 1 {

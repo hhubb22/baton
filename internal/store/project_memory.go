@@ -129,8 +129,8 @@ func writeProjectMemoryTx(ctx context.Context, tx pgx.Tx, employeeID, projectID,
 		}
 	}
 	revision := in.ExpectedRevision + 1
-	if _, err = tx.Exec(ctx, `INSERT INTO project_memory_revisions(entry_id, employee_id, revision, content, author, source_seq)
-        VALUES($1,$2,$3,$4,$5,$6)`, entryID, employeeID, revision, in.Content, in.Author, in.SourceSeq); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO project_memory_revisions(entry_id, employee_id, revision, content, author, source_seq, title)
+        VALUES($1,$2,$3,$4,$5,$6,$7)`, entryID, employeeID, revision, in.Content, in.Author, in.SourceSeq, in.Title); err != nil {
 		return out, err
 	}
 	if _, err = tx.Exec(ctx, `UPDATE project_memory_entries SET title=$4, current_revision=$5, updated_at=clock_timestamp()

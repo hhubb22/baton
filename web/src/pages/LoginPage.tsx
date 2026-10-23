@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex'
-import { useRouter, useSearch } from '@tanstack/react-router'
+import { Navigate, useRouter, useSearch } from '@tanstack/react-router'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import type { LoginNotice } from '../app/router'
 import { ClientError } from '../data/client'
@@ -52,6 +52,7 @@ const notices: Record<Notice, { title: string; detail: string }> = {
     title: 'Password reset by administrator',
     detail: 'Previous sessions have been signed out. Sign in with your new password.',
   },
+  passwordUpdated: { title: 'Password updated', detail: 'Sign in again with your new password.' },
   unavailable: { title: 'Baton could not be reached', detail: 'Check your connection, then try signing in again.' },
 }
 
@@ -71,11 +72,13 @@ export function LoginPage() {
   const passwordRef = useRef<HTMLInputElement>(null)
 
   const signedIn = Boolean(session.data?.account)
+  const mustChangePassword = session.data?.mustChangePassword
   // 登录后回到登录前所在的页面；redirect 由路由校验过，只会是站内地址。
   useEffect(() => {
-    if (signedIn) router.history.replace(search.redirect ?? '/')
-  }, [signedIn, router, search.redirect])
+    if (signedIn && !mustChangePassword) router.history.replace(search.redirect ?? '/')
+  }, [signedIn, mustChangePassword, router, search.redirect])
 
+  if (signedIn && mustChangePassword) return <Navigate to="/password" search={{ redirect: search.redirect }} replace />
   if (signedIn) return null
 
   const unreachable = unavailable(signIn.error) || (signIn.isIdle && unavailable(session.error))

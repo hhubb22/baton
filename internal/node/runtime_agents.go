@@ -161,7 +161,20 @@ func newAgentProbe(discover RuntimeModelDiscovery, version func(context.Context,
 		version = probeAgentVersion
 	}
 	return agentRuntimeProbe{lookup: exec.LookPath, models: cache.models, version: version,
-		verified: func(_ string, version string) bool { return version != "" && version != "unknown" }}
+		verified: supportsAgentVersion}
+}
+
+func supportsAgentVersion(name, version string) bool {
+	switch name {
+	case "pi":
+		return pi.SupportsVersion(version)
+	case "codex":
+		return codex.SupportsVersion(version)
+	case "kiro":
+		return kiro.SupportsVersion(version)
+	default:
+		return false
+	}
 }
 
 func probeAgentVersion(ctx context.Context, path string) (string, error) {

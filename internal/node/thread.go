@@ -48,6 +48,10 @@ func (h *sessionThreadHost) ThreadWithdraw(ctx context.Context, _ string, cmd pr
 	return h.host.ThreadWithdraw(ctx, cmd.ThreadID, cmd.ClientMessageID)
 }
 
+func (h *sessionThreadHost) ThreadResume(ctx context.Context, _ string, cmd protocol.ThreadCommand) error {
+	return h.host.ThreadResume(ctx, cmd.ThreadID)
+}
+
 func (h *sessionThreadHost) ThreadStop(ctx context.Context, _ string, cmd protocol.ThreadCommand) error {
 	return h.host.ThreadStop(ctx, cmd.ThreadID, "stopped")
 }
@@ -82,7 +86,6 @@ type threadService struct {
 	ledger       *Ledger
 	host         ThreadHost
 	budget       int64
-	caps         []string
 	send         func(context.Context, string, any) error
 	inbox        chan protocol.Envelope
 	ready        chan struct{}
@@ -94,8 +97,8 @@ type threadService struct {
 	scanAfter    string
 }
 
-func newThreadService(l *Ledger, host ThreadHost, budget int64, caps []string, send func(context.Context, string, any) error) *threadService {
-	return &threadService{ledger: l, host: host, budget: budget, caps: append([]string(nil), caps...), send: send,
+func newThreadService(l *Ledger, host ThreadHost, budget int64, send func(context.Context, string, any) error) *threadService {
+	return &threadService{ledger: l, host: host, budget: budget, send: send,
 		inbox: make(chan protocol.Envelope, 64), ready: make(chan struct{}, 1), sent: make(map[string]time.Time), historyRetry: make(map[string]time.Time), tokens: 32, refill: time.Now()}
 }
 
@@ -197,7 +200,7 @@ func validThreadCommand(id string, cmd protocol.ThreadCommand) bool {
 		return !(cmd.Mode == "steer" && cmd.Model != "") && cmd.Content != "" && len(cmd.Content) <= 64<<10 && utf8.ValidString(cmd.Content) && (cmd.Mode == "" || cmd.Mode == "queue" || cmd.Mode == "steer")
 	case "withdraw":
 		return validThreadClientID(cmd.ClientMessageID)
-	case "stop":
+	case "stop", "resume":
 		return true
 	}
 	return false
@@ -310,6 +313,15 @@ func (s *threadService) command(ctx context.Context, id string, cmd protocol.Thr
 				err = s.host.ThreadMessage(ctx, id, cmd)
 			case "withdraw":
 				err = s.host.ThreadWithdraw(ctx, id, cmd)
+			case "resume":
+				if host, ok := s.host.(interface {
+					ThreadResume(context.Context, string, protocol.ThreadCommand) error
+				}); ok {
+					err = host.ThreadResume(ctx, id, cmd)
+				} else {
+					result.Code = "resume_unsupported"
+					return result, nil
+				}
 			case "stop":
 				err = s.host.ThreadStop(ctx, id, cmd)
 			}
@@ -338,9 +350,6 @@ func (s *threadService) agentAvailable(ctx context.Context, agent string) error 
 	}
 	if agent != "pi" && agent != "codex" && agent != "kiro" {
 		return errors.New("不支持此 Agent 类型")
-	}
-	if !containsCap(s.caps, agent) {
-		return errors.New("节点未启用此 Agent")
 	}
 	if _, err := threadAgentLookup(agent); err != nil {
 		return errors.New("缺少 Agent 可执行文件：" + threadAgentBinary(agent))

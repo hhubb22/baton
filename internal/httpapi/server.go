@@ -42,6 +42,7 @@ type Settings struct {
 	Revocations       RevocationDispatcher
 	Sessions          SessionGateway
 	Files             FileBrowser
+	NodeSettings      NodeSettingsGateway
 	Logger            *slog.Logger
 }
 
@@ -75,6 +76,7 @@ type Server struct {
 	browserSlots      chan struct{}
 	eventInterval     time.Duration
 	files             FileBrowser
+	nodeSettings      NodeSettingsGateway
 	log               *slog.Logger
 }
 
@@ -112,6 +114,7 @@ func New(pool *pgxpool.Pool, settings Settings) (*Server, error) {
 		signer:            settings.Signer,
 		revocations:       settings.Revocations,
 		files:             settings.Files,
+		nodeSettings:      settings.NodeSettings,
 		sessions:          settings.Sessions,
 		browserSlots:      make(chan struct{}, 128),
 		outputBudget:      settings.OutputBudget,
@@ -202,6 +205,14 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		}
 		s.putDefaultDevice(w, r)
 	default:
+		if strings.HasPrefix(r.URL.Path, "/api/v1/node-enrollments/") {
+			if r.Method != http.MethodGet {
+				s.writeError(w, r, 405, "method_not_allowed", "不支持该请求方法")
+				return
+			}
+			s.getEnrollment(w, r, strings.TrimPrefix(r.URL.Path, "/api/v1/node-enrollments/"))
+			return
+		}
 		if r.URL.Path == "/api/v1/threads" || strings.HasPrefix(r.URL.Path, "/api/v1/threads/") {
 			s.routeThread(w, r)
 			return
@@ -217,6 +228,15 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		const nodePrefix = "/api/v1/nodes/"
 		if strings.HasPrefix(r.URL.Path, nodePrefix) {
 			rest := strings.TrimPrefix(r.URL.Path, nodePrefix)
+			if strings.HasSuffix(rest, "/project-exec") {
+				id := strings.TrimSuffix(rest, "/project-exec")
+				if r.Method != http.MethodPut {
+					s.writeError(w, r, 405, "method_not_allowed", "不支持该请求方法")
+					return
+				}
+				s.setProjectExec(w, r, id)
+				return
+			}
 			if strings.HasSuffix(rest, "/revoke") {
 				id := strings.TrimSuffix(rest, "/revoke")
 				if id == "" || strings.Contains(id, "/") {
@@ -334,8 +354,10 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.writeJSON(w, http.StatusOK, sessionView{
+	cookie, _ := r.Cookie(auth.SessionCookieName)
+	s.writeJSON(w, http.StatusOK, sessionResponse{
 		Employee:  employeeJSON(sess.Employee),
+		CSRFToken: auth.SessionCSRF(cookie.Value),
 		ExpiresAt: sess.ExpiresAt.UTC(),
 	})
 }

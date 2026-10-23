@@ -16,11 +16,15 @@ import (
 
 	"baton/internal/agent"
 	"baton/internal/privatefile"
+	"baton/internal/sidecar"
 
 	"github.com/sourcegraph/jsonrpc2"
 )
 
 const Version = "2.32.0"
+
+// SupportsVersion 检查 CLI 的最低正式版本，启动后继续校验 ACP 能力。
+func SupportsVersion(version string) bool { return agent.CLIVersionAtLeast(version, Version) }
 
 var (
 	ErrIncompatible = errors.New("Kiro ACP 能力或版本不兼容")
@@ -107,7 +111,8 @@ func (a *Adapter) connect(ctx context.Context) error {
 	cmd := exec.CommandContext(ctx, a.config.Binary, "--version")
 	cmd.Dir, cmd.Env = a.config.Directory, a.environment()
 	raw, err := cmd.Output()
-	if err != nil || strings.TrimSpace(string(raw)) != "kiro-cli "+Version {
+	version, found := strings.CutPrefix(strings.TrimSpace(string(raw)), "kiro-cli ")
+	if err != nil || !found || !SupportsVersion(version) {
 		return ErrIncompatible
 	}
 	cmd = exec.Command(a.config.Binary, "acp", "--agent-engine=v3")
@@ -122,15 +127,22 @@ func (a *Adapter) connect(ctx context.Context) error {
 		out.Close()
 		return err
 	}
-	if err = cmd.Start(); err != nil {
+	stopTree, err := sidecar.StartTree(cmd)
+	if err != nil {
 		out.Close()
 		in.Close()
 		return errors.New("Kiro ACP 无法启动")
 	}
+	stopTree = sync.OnceFunc(stopTree)
 	a.processDone = make(chan struct{})
-	a.conn = jsonrpc2.NewConn(context.Background(), jsonrpc2.NewBufferedStream(&processIO{ReadCloser: out, WriteCloser: in, cmd: cmd}, lineCodec{}), jsonrpc2.HandlerWithError(a.handle), jsonrpc2.SetLogger(discardLogger{}))
+	a.conn = jsonrpc2.NewConn(context.Background(), jsonrpc2.NewBufferedStream(&processIO{ReadCloser: out, WriteCloser: in, stopTree: stopTree}, lineCodec{}), jsonrpc2.HandlerWithError(a.handle), jsonrpc2.SetLogger(discardLogger{}))
 	conn := a.conn
-	go func() { _ = cmd.Wait(); close(a.processDone); _ = conn.Close() }()
+	go func() {
+		_ = cmd.Wait()
+		stopTree()
+		close(a.processDone)
+		_ = conn.Close()
+	}()
 	go func() {
 		<-conn.DisconnectNotify()
 		a.mu.Lock()

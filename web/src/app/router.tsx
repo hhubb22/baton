@@ -1,9 +1,11 @@
 import * as stylex from '@stylexjs/stylex'
 import { createRootRoute, createRoute, createRouter, Outlet } from '@tanstack/react-router'
+import { ArchivedProjectsPage } from '../pages/ArchivedProjectsPage'
 import { DevicesPage } from '../pages/DevicesPage'
 import { HomePage } from '../pages/HomePage'
 import { InboxPage } from '../pages/InboxPage'
 import { LoginPage } from '../pages/LoginPage'
+import { PasswordPage } from '../pages/PasswordPage'
 import { ProjectPage } from '../pages/ProjectPage'
 import { ThreadPage } from '../pages/ThreadPage'
 import { ThreadsPage } from '../pages/ThreadsPage'
@@ -23,7 +25,7 @@ function NotFound() {
 
 const rootRoute = createRootRoute({ component: Outlet })
 
-export type LoginNotice = 'signedOut' | 'expired' | 'passwordReset'
+export type LoginNotice = 'signedOut' | 'expired' | 'passwordReset' | 'passwordUpdated'
 
 export interface LoginSearch {
   notice?: LoginNotice
@@ -47,7 +49,14 @@ export interface ThreadsSearch {
   from?: string
 }
 
+export interface InboxSearch {
+  handled?: true
+}
+
 export interface ProjectSearch {
+  settings?: true
+  archive?: true
+  view?: 'memory'
   // 右侧打开的 Thread，替换概览栏。
   thread?: string
 }
@@ -60,11 +69,14 @@ function flag(value: unknown) {
   return [true, 1, '1', 'true'].includes(value as never) ? true : undefined
 }
 
-const notices: LoginNotice[] = ['signedOut', 'expired', 'passwordReset']
+const notices: LoginNotice[] = ['signedOut', 'expired', 'passwordReset', 'passwordUpdated']
 
 // 只接受站内路径，避免登录后被带到别的网站。
 function safeRedirect(value: unknown) {
-  return typeof value === 'string' && value.startsWith('/') && !value.startsWith('//') ? value : undefined
+  if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//') || value.includes('\\')) return
+  const url = new URL(value, 'https://baton.local')
+  if (url.origin !== 'https://baton.local' || /^\/(login|password)\/*$/.test(url.pathname)) return
+  return `${url.pathname}${url.search}${url.hash}`
 }
 
 const loginRoute = createRoute({
@@ -77,14 +89,29 @@ const loginRoute = createRoute({
   }),
 })
 
+const passwordRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/password',
+  component: PasswordPage,
+  validateSearch: (search: Record<string, unknown>): Pick<LoginSearch, 'redirect'> => ({
+    redirect: safeRedirect(search.redirect),
+  }),
+})
+
 // 登录后的页面共用侧栏布局；未登录时布局跳到 /login。
 const workspaceRoute = createRoute({ getParentRoute: () => rootRoute, id: 'workspace', component: WorkspaceLayout })
 
 const routeTree = rootRoute.addChildren([
   loginRoute,
+  passwordRoute,
   workspaceRoute.addChildren([
     createRoute({ getParentRoute: () => workspaceRoute, path: '/', component: HomePage }),
-    createRoute({ getParentRoute: () => workspaceRoute, path: '/inbox', component: InboxPage }),
+    createRoute({
+      getParentRoute: () => workspaceRoute,
+      path: '/inbox',
+      component: InboxPage,
+      validateSearch: (search: Record<string, unknown>): InboxSearch => ({ handled: flag(search.handled) }),
+    }),
     createRoute({
       getParentRoute: () => workspaceRoute,
       path: '/threads',
@@ -108,11 +135,17 @@ const routeTree = rootRoute.addChildren([
         connect: flag(search.connect),
       }),
     }),
+    createRoute({ getParentRoute: () => workspaceRoute, path: '/projects/archived', component: ArchivedProjectsPage }),
     createRoute({
       getParentRoute: () => workspaceRoute,
       path: '/projects/$projectId',
       component: ProjectPage,
-      validateSearch: (search: Record<string, unknown>): ProjectSearch => ({ thread: optionalString(search.thread) }),
+      validateSearch: (search: Record<string, unknown>): ProjectSearch => ({
+        thread: optionalString(search.thread),
+        settings: flag(search.settings),
+        archive: flag(search.archive),
+        view: search.view === 'memory' ? 'memory' : undefined,
+      }),
     }),
     createRoute({ getParentRoute: () => workspaceRoute, path: '$', component: NotFound }),
   ]),

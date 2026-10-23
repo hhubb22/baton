@@ -1,8 +1,8 @@
 import * as stylex from '@stylexjs/stylex'
 import { Navigate, Outlet, useLocation, useRouter } from '@tanstack/react-router'
-import { useMemo, useState } from 'react'
-import { useSession, useSignOut } from '../data/queries'
-import type { ID, Reference } from '../data/types'
+import { useEffect, useMemo, useState } from 'react'
+import { useInbox, useSession, useSignOut } from '../data/queries'
+import type { ID, ProjectPatch, Reference } from '../data/types'
 import { text } from '../theme/text'
 import { colors, space } from '../theme/tokens.stylex'
 import { Button } from '../ui/Button'
@@ -10,7 +10,7 @@ import { NewProjectDialog } from './NewProjectDialog'
 import { Page } from './Page'
 import type { LoginNotice } from './router'
 import { Sidebar } from './Sidebar'
-import { WorkspaceContext, type Workspace } from './workspace'
+import { WorkspaceContext, type ItemDraft, type MemoryDraft, type Workspace } from './workspace'
 
 const styles = stylex.create({
   shell: { display: 'flex', height: '100vh', overflow: 'hidden', backgroundColor: colors.canvas },
@@ -67,6 +67,18 @@ function Main({ failedAt, onRetry }: { failedAt: string | null; onRetry: () => v
   return failedAt === pathname ? <SignOutFailed onRetry={onRetry} /> : <Outlet />
 }
 
+function WorkspaceTitle() {
+  const inbox = useInbox()
+  const count = (inbox.data ?? []).filter((item) => item.status === 'pending').length
+  useEffect(() => {
+    document.title = count > 0 ? `(${count}) Baton` : 'Baton'
+    return () => {
+      document.title = 'Baton'
+    }
+  }, [count])
+  return null
+}
+
 export function WorkspaceLayout() {
   const session = useSession()
   const signOut = useSignOut()
@@ -76,6 +88,9 @@ export function WorkspaceLayout() {
   const [failedAt, setFailedAt] = useState<string | null>(null)
   const [creatingProject, setCreatingProject] = useState(false)
   const [references, setReferences] = useState<Record<ID, Reference>>({})
+  const [itemDrafts, setItemDrafts] = useState<Record<ID, ItemDraft>>({})
+  const [settingsDrafts, setSettingsDrafts] = useState<Record<ID, ProjectPatch>>({})
+  const [memoryDrafts, setMemoryDrafts] = useState<Record<ID, MemoryDraft>>({})
 
   const workspace = useMemo<Workspace>(
     () => ({
@@ -93,6 +108,35 @@ export function WorkspaceLayout() {
       newProject() {
         setCreatingProject(true)
       },
+      itemDrafts,
+      setItemDraft(itemId, draft) {
+        setItemDrafts((current) => {
+          const next = { ...current }
+          if (draft) next[itemId] = draft
+          else delete next[itemId]
+          return next
+        })
+      },
+      settingsDrafts,
+      setSettingsDraft(projectId, draft) {
+        setSettingsDrafts((current) => {
+          const next = { ...current }
+          const value = typeof draft === 'function' ? draft(current[projectId]) : draft
+          if (value) next[projectId] = value
+          else delete next[projectId]
+          return next
+        })
+      },
+      memoryDrafts,
+      setMemoryDraft(key, draft) {
+        setMemoryDrafts((current) => {
+          const next = { ...current }
+          const value = typeof draft === 'function' ? draft(current[key]) : draft
+          if (value) next[key] = value
+          else delete next[key]
+          return next
+        })
+      },
       references,
       askProject(projectId, reference) {
         setReferences((current) => ({ ...current, [projectId]: reference }))
@@ -107,7 +151,7 @@ export function WorkspaceLayout() {
         })
       },
     }),
-    [collapsed, signOut, router, references],
+    [collapsed, signOut, router, references, itemDrafts, settingsDrafts, memoryDrafts],
   )
 
   if (session.isPending) return null
@@ -121,8 +165,14 @@ export function WorkspaceLayout() {
     return <Navigate to="/login" search={{ notice, redirect }} replace />
   }
 
+  if (session.data.mustChangePassword) {
+    const { href } = router.state.location
+    return <Navigate to="/password" search={{ redirect: href === '/' ? undefined : href }} replace />
+  }
+
   return (
     <WorkspaceContext value={workspace}>
+      <WorkspaceTitle />
       <div {...stylex.props(styles.shell)}>
         <Sidebar />
         <Main failedAt={failedAt} onRetry={workspace.signOut} />

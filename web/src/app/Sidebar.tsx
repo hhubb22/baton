@@ -321,6 +321,9 @@ function ProjectList({ projects, loaded }: { projects: Project[]; loaded: boolea
         {projects.map((project) => (
           <ProjectRow key={project.id} project={project} pending={pendingInbox(inbox.data ?? [], project.id).length} />
         ))}
+        <Link to="/projects/archived" {...stylex.props(text.caption, text.muted, styles.row, focusRing.ring)}>
+          Archived projects
+        </Link>
       </div>
     </>
   )

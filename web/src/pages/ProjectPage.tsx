@@ -1,4 +1,9 @@
 import * as stylex from '@stylexjs/stylex'
+import { AttentionCard } from '../app/AttentionCard'
+import { InboxFeedback } from '../app/InboxFeedback'
+import { ProjectRecovery } from '../app/ProjectRecovery'
+import { ProjectMemory } from '../app/ProjectMemory'
+import { ProjectSettingsDialog } from '../app/ProjectSettingsDialog'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { FilePreview } from '../app/FilePreview'
@@ -30,6 +35,7 @@ import {
   useProjectMemory,
   useProjects,
   useSendProjectMessage,
+  useSetProjectStatus,
   useStopProjectRun,
   useThreads,
 } from '../data/queries'
@@ -53,6 +59,7 @@ import { Button, focusRing, IconButton } from '../ui/Button'
 import { Card } from '../ui/Card'
 import { Composer } from '../ui/Composer'
 import { Icon } from '../ui/Icon'
+import { Menu, MenuOption, MenuRule } from '../ui/Menu'
 import { StatusChip, StatusDot, type Tone } from '../ui/Status'
 import { Tabs } from '../ui/Tabs'
 
@@ -216,7 +223,6 @@ const styles = stylex.create({
     backgroundColor: 'transparent',
     color: colors.link,
   },
-  memory: { display: 'flex', flexDirection: 'column', gap: '2px', paddingBlock: space.xs, paddingInline: space.sm },
 })
 
 const recentLimit = 5
@@ -232,12 +238,12 @@ function dayLabel(at: number, now: number) {
   return new Date(at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
-function deliveryNote(delivery: Delivery, subscription: string) {
+function deliveryNote(delivery: Delivery, subscription: string, status: Project['status']) {
   switch (delivery) {
     case 'submitted':
       return 'Sending…'
     case 'saved':
-      return 'Saved'
+      return status === 'paused' ? 'Saved · the assistant reads it when the project resumes' : 'Saved'
     case 'queued':
       return 'Saved · the assistant reads it after this step'
     case 'waitingDevice':
@@ -332,7 +338,7 @@ function ThreadButton({
       <span {...stylex.props(styles.threadTitle, text.truncate)}>{thread.title}</span>
       <span {...stylex.props(text.caption, styles.folderTag, text.truncate)}>{folderName(thread.folder)}</span>
       <span {...stylex.props(text.caption, styles.threadMeta)}>
-        {device?.name ?? 'Removed device'} · {agentNames[thread.agent]}
+        {device?.name ?? 'Removed device'} · {thread.agent ? agentNames[thread.agent] : 'Command'}
       </span>
       <span {...stylex.props(text.caption, styles.threadMeta, statusTextStyle(view.status.tone))}>
         {timer ?? view.status.label}
@@ -404,7 +410,7 @@ function Entry({
 }) {
   switch (entry.kind) {
     case 'user': {
-      const note = deliveryNote(entry.delivery, project.subscription)
+      const note = deliveryNote(entry.delivery, project.subscription, project.status)
       return (
         <div {...stylex.props(styles.userItem)}>
           <div {...stylex.props(text.body, styles.user, entry.delivery === 'withdrawn' && styles.withdrawn)}>
@@ -457,6 +463,8 @@ function EmptyConversation({ project }: { project: Project }) {
 
 function assistantLine(project: Project, devices: Device[]) {
   switch (project.agent.state) {
+    case 'blocked':
+      return project.agent.reason ?? 'Needs attention'
     case 'waitingDevice':
       return assistantWait(project, devices).overview
     case 'stopping':
@@ -477,6 +485,9 @@ function Overview({
   memory,
   onOpenThread,
   onOpenInbox,
+  onSettings,
+  tab,
+  onTabChange,
 }: {
   project: Project
   status: StatusView
@@ -486,8 +497,10 @@ function Overview({
   memory: MemoryNote[] | undefined
   onOpenThread: (threadId: string) => void
   onOpenInbox: () => void
+  onSettings: () => void
+  tab: 'threads' | 'memory'
+  onTabChange: (tab: 'threads' | 'memory') => void
 }) {
-  const [tab, setTab] = useState<'threads' | 'memory'>('threads')
   const [showAll, setShowAll] = useState(false)
   const now = useNow(60_000)
   const device = devices.find((item) => item.id === project.agent.deviceId)
@@ -531,7 +544,10 @@ function Overview({
 
   return (
     <aside aria-label="Overview" {...stylex.props(styles.overview)}>
-      <h2 {...stylex.props(text.bodyMedium)}>Overview</h2>
+      <div {...stylex.props(styles.assistantHead)}>
+        <h2 {...stylex.props(text.bodyMedium)}>Overview</h2>
+        <IconButton icon="settings" label="Project settings" onClick={onSettings} />
+      </div>
       {project.goal && (
         <section {...stylex.props(styles.section)}>
           <h3 {...stylex.props(text.captionMedium, styles.sectionLabel)}>Goal</h3>
@@ -558,7 +574,7 @@ function Overview({
       <Tabs
         label="Overview lists"
         value={tab}
-        onChange={setTab}
+        onChange={onTabChange}
         options={[
           { value: 'threads', label: 'Threads', count: live.length },
           { value: 'memory', label: 'Memory', count: memory?.length ?? 0 },
@@ -606,19 +622,7 @@ function Overview({
           )}
         </>
       )}
-      {tab === 'memory' &&
-        (memory && memory.length > 0 ? (
-          memory.map((note) => (
-            <div key={note.id} {...stylex.props(styles.memory)}>
-              <p {...stylex.props(text.small)}>{note.body}</p>
-              <span {...stylex.props(text.caption, styles.faint)}>{relativeTime(note.updatedAt, now)}</span>
-            </div>
-          ))
-        ) : (
-          <p {...stylex.props(text.small, styles.faint)}>
-            The assistant saves notes here as it learns about this project.
-          </p>
-        ))}
+      {tab === 'memory' && <ProjectMemory key={project.id} project={project} />}
     </aside>
   )
 }
@@ -627,15 +631,40 @@ function DockBanner({
   project,
   devices,
   onViewDevices,
+  onResume,
+  resuming,
 }: {
   project: Project
   devices: Device[]
   onViewDevices: () => void
+  onResume: () => void
+  resuming: boolean
 }) {
+  if (project.status === 'archived')
+    return (
+      <Banner
+        icon="archive"
+        title="This project is archived"
+        detail="Chats and memory are kept. Existing threads can still be used."
+      />
+    )
   if (project.status === 'paused') {
-    return <Banner icon="pause" title="This project is paused" detail="Resume it to send messages." />
+    return (
+      <Banner
+        icon="pause"
+        title="This project is paused"
+        detail="Messages and replies are saved until you resume. Threads and questions remain available."
+        action={
+          <Button small onClick={onResume}>
+            {resuming ? 'Resuming…' : 'Resume project'}
+          </Button>
+        }
+      />
+    )
   }
   switch (project.agent.state) {
+    case 'blocked':
+      return <ProjectRecovery project={project} />
     case 'waitingDevice': {
       const wait = assistantWait(project, devices)
       return (
@@ -705,6 +734,7 @@ export function ProjectPage() {
   const memory = useProjectMemory(projectId)
   const send = useSendProjectMessage()
   const stop = useStopProjectRun()
+  const changeStatus = useSetProjectStatus()
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const timelineRef = useRef<HTMLDivElement>(null)
   const [draft, setDraft] = useState('')
@@ -742,7 +772,29 @@ export function ProjectPage() {
       </Page>
     )
   }
-  if (!project) return null
+  if (!project)
+    return (
+      <Page title="Project">
+        <div {...stylex.props(styles.entries)}>
+          {projects.isError ? (
+            <Banner
+              icon="alert"
+              title="Could not load project"
+              detail="Your project and conversation are kept. Try again."
+              action={
+                <Button small onClick={() => void projects.refetch()}>
+                  Retry project
+                </Button>
+              }
+            />
+          ) : (
+            <p role="status" {...stylex.props(text.small, text.muted)}>
+              Loading project…
+            </p>
+          )}
+        </div>
+      </Page>
+    )
 
   const setThread = (thread: string | undefined) =>
     void navigate({
@@ -795,14 +847,42 @@ export function ProjectPage() {
     })
   }
 
+  const onStatus = (next: 'active' | 'paused') => {
+    if (changeStatus.isPending) return
+    setError(null)
+    changeStatus.mutate(
+      { projectId, status: next },
+      { onError: () => setError(`Could not ${next === 'active' ? 'resume' : 'pause'} this project. Try again.`) },
+    )
+  }
+  const settings = (open: boolean, archive = false) =>
+    void navigate({
+      to: '/projects/$projectId',
+      params: { projectId },
+      search: (prev: ProjectSearch) => ({
+        ...prev,
+        settings: open ? true : undefined,
+        archive: open && archive ? true : undefined,
+      }),
+    })
   const status = projectAgentStatus(project, allDevices)
   const pending = pendingInbox(inbox.data ?? [], project.id)
-  const waitingMessages = list.filter((entry) => entry.kind === 'user' && entry.delivery === 'waitingDevice').length
+  const waitingMessages = list.filter(
+    (entry) => entry.kind === 'user' && (entry.delivery === 'waitingDevice' || entry.delivery === 'saved'),
+  ).length
   const counts = threadCounts(projectThreads, allDevices)
-  const running = project.agent.state === 'running'
+  const running = project.status === 'active' && project.agent.state === 'running'
   const stopping = project.agent.state === 'stopping'
   const showPanel = overviewOpen || search.thread !== undefined
-  const statusLine = error ?? (send.isPending ? 'Sending…' : stop.isPending ? 'Stopping…' : null)
+  const statusLine =
+    error ??
+    (send.isPending
+      ? 'Sending…'
+      : stop.isPending
+        ? 'Stopping…'
+        : changeStatus.isPending
+          ? 'Saving project status…'
+          : null)
   const previewDevice = project.agent.deviceId ?? projectThreads[0]?.deviceId
 
   let conversation
@@ -820,27 +900,39 @@ export function ProjectPage() {
         }
       />
     )
-  } else if (list.length === 0) {
+  } else if (list.length === 0 && !(inbox.data ?? []).some((item) => item.projectId === projectId)) {
     conversation = <EmptyConversation project={project} />
   } else {
-    conversation = list.map((entry, index) => {
-      const previous = list[index - 1]
-      const day = dayLabel(entry.createdAt, now)
+    const timeline = [
+      ...list.map((entry) => ({ id: entry.id, at: entry.createdAt, entry, item: null })),
+      ...(inbox.data ?? [])
+        .filter((item) => item.projectId === projectId)
+        .map((item) => ({ id: item.id, at: item.createdAt, entry: null, item })),
+    ].sort((a, b) => a.at - b.at)
+    conversation = timeline.map(({ id, at, entry, item }, index) => {
+      const previous = timeline[index - 1]
+      const day = dayLabel(at, now)
       return (
-        <div key={entry.id} {...stylex.props(styles.assistant)}>
-          {(!previous || dayLabel(previous.createdAt, now) !== day) && (
+        <div key={id} {...stylex.props(styles.assistant)}>
+          {(!previous || dayLabel(previous.at, now) !== day) && (
             <span {...stylex.props(text.caption, styles.day)}>{day}</span>
           )}
-          <Entry
-            entry={entry}
-            project={project}
-            threads={projectThreads}
-            devices={allDevices}
-            openThread={search.thread}
-            now={now}
-            onOpenThread={onOpenThread}
-            onOpenPath={setPreviewPath}
-          />
+          {item ? (
+            <AttentionCard item={item} />
+          ) : (
+            entry && (
+              <Entry
+                entry={entry}
+                project={project}
+                threads={projectThreads}
+                devices={allDevices}
+                openThread={search.thread}
+                now={now}
+                onOpenThread={onOpenThread}
+                onOpenPath={setPreviewPath}
+              />
+            )
+          )}
         </div>
       )
     })
@@ -868,6 +960,26 @@ export function ProjectPage() {
               </Button>
             )}
             {stopping && <span {...stylex.props(text.caption, styles.muted)}>Stop requested</span>}
+            <Menu narrow align="end" trigger={<IconButton icon="dots" label="Project actions" />}>
+              <MenuOption onSelect={() => settings(true)}>Settings</MenuOption>
+              <MenuOption
+                onSelect={() => {
+                  setOverviewOpen(true)
+                  void navigate({ to: '/projects/$projectId', params: { projectId }, search: { view: 'memory' } })
+                }}
+              >
+                Memory
+              </MenuOption>
+              {project.status !== 'archived' && (
+                <>
+                  <MenuRule />
+                  <MenuOption onSelect={() => onStatus(project.status === 'paused' ? 'active' : 'paused')}>
+                    {project.status === 'paused' ? 'Resume project' : 'Pause project'}
+                  </MenuOption>
+                  <MenuOption onSelect={() => settings(true, true)}>Archive project</MenuOption>
+                </>
+              )}
+            </Menu>
             <IconButton
               icon="panel-right"
               label={showPanel ? 'Hide overview' : 'Show overview'}
@@ -884,6 +996,7 @@ export function ProjectPage() {
         <div {...stylex.props(styles.main)}>
           <div ref={timelineRef} role="region" aria-label="Conversation" {...stylex.props(styles.timeline)}>
             <div {...stylex.props(styles.entries)}>
+              <InboxFeedback />
               {conversation}
               {(running || stopping) && project.agent.activity && (
                 <span role="status" {...stylex.props(text.small, styles.activity)}>
@@ -898,6 +1011,8 @@ export function ProjectPage() {
               project={project}
               devices={allDevices}
               onViewDevices={() => void navigate({ to: '/devices' })}
+              onResume={() => onStatus('active')}
+              resuming={changeStatus.isPending}
             />
             {search.thread && (counts.running > 0 || counts.waiting > 0 || pending.length > 0) && (
               <div aria-label="Project threads" {...stylex.props(styles.chips)}>
@@ -906,27 +1021,29 @@ export function ProjectPage() {
                 {pending.length > 0 && <StatusChip tone="attention" label="Needs decision" count={pending.length} />}
               </div>
             )}
-            <Composer
-              label="Message the project assistant"
-              inputRef={inputRef}
-              header={
-                reference && (
-                  <ReferenceBlock
-                    reference={reference}
-                    onRemove={() => {
-                      workspace.clearReference(projectId)
-                      inputRef.current?.focus()
-                    }}
-                  />
-                )
-              }
-              value={draft}
-              onChange={setDraft}
-              onSend={onSend}
-              placeholder={
-                list.length === 0 ? 'Describe what you want to build or verify…' : 'Ask the project assistant…'
-              }
-            />
+            {project.status !== 'archived' && (
+              <Composer
+                label="Message the project assistant"
+                inputRef={inputRef}
+                header={
+                  reference && (
+                    <ReferenceBlock
+                      reference={reference}
+                      onRemove={() => {
+                        workspace.clearReference(projectId)
+                        inputRef.current?.focus()
+                      }}
+                    />
+                  )
+                }
+                value={draft}
+                onChange={setDraft}
+                onSend={onSend}
+                placeholder={
+                  list.length === 0 ? 'Describe what you want to build or verify…' : 'Ask the project assistant…'
+                }
+              />
+            )}
             <span role="status" {...stylex.props(text.caption, styles.status, error !== null && styles.danger)}>
               {statusLine}
             </span>
@@ -956,8 +1073,25 @@ export function ProjectPage() {
             memory={memory.data}
             onOpenThread={onOpenThread}
             onOpenInbox={() => void navigate({ to: '/inbox' })}
+            onSettings={() => settings(true)}
+            tab={search.view === 'memory' ? 'memory' : 'threads'}
+            onTabChange={(tab) =>
+              void navigate({
+                to: '/projects/$projectId',
+                params: { projectId },
+                search: (prev: ProjectSearch) => ({ ...prev, view: tab === 'memory' ? 'memory' : undefined }),
+              })
+            }
           />
         )
+      )}
+      {search.settings && (
+        <ProjectSettingsDialog
+          key={project.id}
+          project={project}
+          initialArchive={search.archive}
+          onClose={() => settings(false)}
+        />
       )}
       {previewPath && previewDevice && (
         <FilePreview

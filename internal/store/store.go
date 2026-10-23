@@ -143,10 +143,7 @@ func (s *Store) InsertSession(ctx context.Context, employeeID, verifiedHash stri
 	if err != nil {
 		return "", "", time.Time{}, err
 	}
-	csrf, err = auth.NewSecret()
-	if err != nil {
-		return "", "", time.Time{}, err
-	}
+	csrf = auth.SessionCSRF(token)
 	sessionID, err := identity.NewUUID()
 	if err != nil {
 		return "", "", time.Time{}, err

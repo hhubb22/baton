@@ -3,10 +3,12 @@ package protocol
 import "encoding/json"
 
 const (
-	BodyThreadCommand       = "thread.command"
-	BodyThreadCommandResult = "thread.command_result"
-	BodyThreadReport        = "thread.report"
-	BodyThreadReportResult  = "thread.report_result"
+	// MaxThreadAttachmentsBytes 与 PostgreSQL thread_replies 的 JSONB 文本上限一致。
+	MaxThreadAttachmentsBytes = 4 << 10
+	BodyThreadCommand         = "thread.command"
+	BodyThreadCommandResult   = "thread.command_result"
+	BodyThreadReport          = "thread.report"
+	BodyThreadReportResult    = "thread.report_result"
 )
 
 // ThreadCommand 的 MessageID 在信封中；重试沿用同一标识。

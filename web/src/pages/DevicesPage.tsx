@@ -371,7 +371,7 @@ function DeviceDetails({
           </div>
         </div>
       )}
-      {connected && device.hasRuntime && !setupNeeded(device) && (
+      {connected && device.hasRuntime && (
         <CommandPermission device={device} state={permission} onChange={onPermission} />
       )}
       <div {...stylex.props(styles.actions)}>

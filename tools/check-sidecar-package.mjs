@@ -7,8 +7,11 @@ import assert from "node:assert/strict";
 const root = await mkdtemp(join(tmpdir(), "baton-package-"));
 try {
   const installed = join(root, "installed");
-  await cp(resolve(process.argv[2] ?? "bin"), installed, { recursive: true });
-  const bundle = join(installed, "sidecars/project-agent");
+  await cp(resolve(process.argv[2] ?? "bin"), installed, {
+    recursive: true,
+    verbatimSymlinks: true,
+  });
+  const bundle = await realpath(join(installed, "sidecars/project-agent"));
   async function checkLinks(directory) {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const path = join(directory, entry.name);

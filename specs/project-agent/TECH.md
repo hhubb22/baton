@@ -84,14 +84,14 @@ Runtime 进程的工作目录是一个空的控制目录。pi-agent-core 本身�
 
 | 表 | 主要字段 | 说明 |
 |---|---|---|
-| `projects` | id, employee_id, title, goal, status, version, created_at, updated_at | `status` 为 active / paused / archived；没有设备、仓库、目录字段 |
+| `projects` | id, employee_id, client_project_id, create_request, title, goal, status, version, created_at, updated_at | `status` 为 active / paused / archived；可选 `client_project_id` 在员工内唯一，`create_request` 保存原始创建请求供幂等比较；没有设备、仓库、目录字段 |
 | `project_agents` | id, employee_id, project_id, provider, model, prompt_version, lease_run_id, lease_epoch, lease_until | 每个 Project 一行；`provider` 和 `model` 由用户选择，修改从下一次运行起生效；租约直接放在这一行，`lease_epoch` 只增不减 |
 | `conversations` | id, employee_id, agent_id, kind, next_seq, compaction_seq, state, attention_reason, failure_count, next_attempt_at | 本期每个 Agent 一个 `primary` 对话；`state` 为 active / needs_attention |
 | `conversation_events` | conversation_id, seq, employee_id, kind, client_event_id, tool_call_id, run_id, lease_epoch, payload, created_at | 主键 `(conversation_id, seq)`；`(conversation_id, client_event_id)` 唯一；`kind=tool_result` 时 `(conversation_id, tool_call_id)` 唯一；只允许 INSERT |
 | `project_agent_input_queue` | id, employee_id, agent_id, source_type, source_key, payload, payload_hash, delivered_seq, created_at | 输入队列；`(agent_id, source_key)` 唯一；`delivered_seq` 为空表示待处理；领取后保留 |
 | `agent_runs` | id, employee_id, agent_id, node_id, lease_epoch, state, placement_reason, started_at, ended_at, end_reason | 每次运行一行；运行位置只记在这里 |
 | `project_memory_entries` | id, employee_id, project_id, title, current_revision, updated_at | 记忆条目 |
-| `project_memory_revisions` | entry_id, employee_id, revision, content, author, source_seq, created_at | 只追加；`author` 为 agent 或 user |
+| `project_memory_revisions` | entry_id, employee_id, revision, title, content, author, source_seq, created_at | 只追加，保存每次修订的标题与正文；`author` 为 agent 或 user，`source_seq` 关联 Agent 修改所依据的主对话事件 |
 | `node_runtime_reports` | node_id, employee_id, report_version, reported_at, report | 节点能力的结构化报告（第 8 节）；现有 `nodes.capabilities` 是最多 32 项的字符串数组，装不下目录和仓库信息 |
 
 `threads` 带可空列 `project_id`、`origin_conversation_id`、`origin_tool_call_id`，后两列唯一。只有 Project Agent 新建的 Thread 填写这三列；员工新建的 Thread 三列都为空。`thread_turns.initiator` 记录这一轮由员工还是 Project Agent 开启，Project Agent 开启时另记 `origin_tool_call_id`。
@@ -123,7 +123,7 @@ Runtime 进程的工作目录是一个空的控制目录。pi-agent-core 本身�
 
 用户消息队列的 payload 为 `{"content":"正文"}`，来源键为 `user:{client_message_id}`，摘要为正文 UTF-8 字节的 SHA-256。同一来源键与相同正文返回原始队列 ID 和创建时间，不同正文返回冲突。正文上限为 64 KiB，另检查数据库中 jsonb 规范文本的 72 KiB 上限，超限返回 413。接收消息不检查设备在线状态，也不生成 `input` 事件；领取事务负责生成事件。
 
-记忆修改先锁条目，再读取当前修订。`expected_revision=0` 用于创建；已有条目的版本不匹配时返回 409、`current_revision` 和当前记忆全文。新修订与条目当前版本在同一事务内提交，修订不可更新或删除。员工 API 固定写 `author=user`；Agent 工具必须先校验运行身份，再以 `author=agent` 调用同一存储入口，`source_seq` 必须属于本 Project 主对话。
+记忆修改先锁条目，再读取当前修订。`expected_revision=0` 用于创建；已有条目的版本不匹配时返回 409、`current_revision` 和当前记忆全文。每次保存把 `title`、`content`、来源 `author`、可选 `source_seq` 和 `created_at` 写入新修订，与条目当前版本在同一事务内提交，修订不可更新或删除。员工 API 固定写 `author=user`；Agent 工具必须先校验运行身份，再以 `author=agent` 调用同一存储入口，`source_seq` 必须属于本 Project 主对话。所有修订可通过第 11 节的记忆版本接口分页读取。
 
 对话事件 payload 采用 pi-ai 的消息 JSON，并标注 `format: "pi-ai/1"`。这是为了让 assistant 消息原样往返：Anthropic 的 thinking 签名、OpenAI Responses 的 reasoning 内容都要原样发回，Baton 自己的中立格式很难保证不丢字段。代价是 Web 端渲染和 `history.search` 需要理解 pi-ai 的消息结构（text、thinking、toolCall 几种内容块）。将来更换 Runtime 时，需要一个从 `pi-ai/1` 转换的适配器，本期不做。
 
@@ -301,13 +301,13 @@ batond 在连接时和能力变化时上报 `node_runtime_reports.report`，结�
     "version": "0.1.0",
     "providers": [{ "provider": "openai-codex", "status": "available" }]
   },
-  "exec": { "enabled": true, "shell": "zsh" },
-  "roots": [{ "root_id": "dev", "path": "/Users/asa/src" }],
-  "repos": [{ "path": "/Users/asa/src/baton", "origin": "github.com/hhubb22/baton" }]
+  "exec": { "enabled": true, "shell": "zsh", "user": "<节点运行用户>" },
+  "roots": [{ "root_id": "dev", "path": "<节点登记根的绝对路径>" }],
+  "repos": [{ "path": "<登记根内的仓库绝对路径>", "origin": "<脱敏后的主机和仓库路径>" }]
 }
 ```
 
-`exec.enabled` 来自 batond 本地配置里的「允许 Project Agent 执行命令」开关，默认关闭；`exec.shell` 是该节点执行命令使用的 shell。`roots` 来自用户在节点上授权的目录，沿用现有 `batond files` 的登记。`roots` 上报真实路径，因为 Thread 的 `working_directory` 本来就是目标节点上的路径；Web 文件浏览仍只用 `root_id` 和相对路径。`repos` 是在授权目录内有限深度扫描得到的 Git 仓库，上报路径和去掉凭据的 origin，不上传文件内容。`provider.status` 为 available / login_required / unknown，凭据不离开设备。
+`exec.enabled` 来自 batond 本地配置里的「允许 Project Agent 执行命令」开关，默认关闭；`exec.shell` 是该节点执行命令使用的 shell，`exec.user` 为采集时读取的节点运行用户，获取失败时省略。`roots` 来自用户在节点上授权的目录，沿用现有 `batond files` 的登记。`roots` 上报真实路径，因为 Thread 的 `working_directory` 本来就是目标节点上的路径；Web 文件浏览仍只用 `root_id` 和相对路径。`repos` 是在授权目录内有限深度扫描得到的 Git 仓库，上报路径和去掉凭据的 origin，不上传文件内容。`provider.status` 为 available / login_required / unknown，凭据不离开设备。
 
 `devices.list` 把这些报告交给 Project Agent，它据此选择工作目录。
 
@@ -317,9 +317,9 @@ batond 通过 Gateway 的控制队列传送 `node.runtime_report`，正文为 `{
 
 扫描最多向下 4 层（登记根为第 0 层）、读取 4096 个目录条目、记录 128 个仓库。每批读取至多 64 个条目，不跟随遍历中的符号链接，不进入 `.git`。Git 配置最多读取 16 KiB，通过 `git config --no-includes --file - --get remote.origin.url` 解析，每次最多 200 ms，不读取 include 或全局配置。worktree 的 `.git` 和 `commondir` 只允许指向同一登记根内的元数据；指向根外时仍登记仓库路径，省略 origin。origin 仅保留主机和仓库路径，去掉用户信息、端口、查询和片段，忽略本地路径及不支持的传输格式。扫描、读取或容量受限时报告带 `truncated: true`；超出报告容量时先移除末尾仓库，再裁剪模型列表并优先保留默认模型，最后移除末尾目录。发送前采用带缩进的 JSON 计量，给 PostgreSQL `jsonb::text` 的空格留出余量，报告和数据库文本均不超过 64 KiB。
 
-`batond project-exec --enabled=true|false [--shell 路径] [--data-dir 目录]` 原子保存本机 `project-exec.json`。必须显式给出开关，初始值为关闭；默认 shell 在 Windows 为 `pwsh`，其他系统采用 `SHELL`，未设置时为 `/bin/sh`。配置损坏或权限检查失败时上报关闭。该命令维护配置；Session Worker 在启动命令前重新读取开关。CLI 和节点页面在开启前说明当前用户权限、任意命令、没有沙箱和注入风险。
+`batond project-exec --enabled=true|false [--shell 路径] [--data-dir 目录]` 原子保存本机 `project-exec.json`。必须显式给出开关，初始值为关闭；默认 shell 在 Windows 为 `pwsh`，其他系统采用 `SHELL`，未设置时为 `/bin/sh`。配置损坏或权限检查失败时上报关闭。浏览器通过 `PUT /api/v1/nodes/{id}/project-exec` 提交 `{enabled}`，Coordinator 校验归属与当前已同步连接，再经 Gateway 发送 `node.project_exec_set`。设备在同一文件锁内保留本机 shell、原子保存并回读开关，以 `node.project_exec_result` 返回 `operation_id`、`ok` 和确认后的 `exec`（含可取得的 `user`）。Coordinator 核对操作、连接、开关值及吊销状态后才返回成功；超时不记作成功，也不自动重发，客户端重新读取设备报告。配置事实随后由能力报告同步。Session Worker 在启动命令前重新读取开关。CLI 和节点页面在开启前说明当前用户权限、任意命令、没有沙箱和注入风险。
 
-`baton-project-runtime probe` 的 stdout 契约是一个 JSON 对象：`{ "version": "0.1.0", "providers": [{ "provider": "openai-codex", "status": "available" }] }`。状态只接受 `available`、`login_required`、`unknown`，最多 32 个 provider，名称和版本不超过 128 个 ASCII 字符（字母、数字、点、下划线、加号、连字符）。batond 每轮调用一次 `probe`，时限 1 秒，stdout 缓冲最多 16 KiB，丢弃 stderr；拒绝未知字段、尾随数据和超限输出。Runtime 未安装、probe 失败或输出无效时省略 `project_runtime`，不复用旧登录状态。
+`baton-project-runtime probe` 的 stdout 契约是一个 JSON 对象：`{ "version": "0.1.0", "providers": [{ "provider": "openai-codex", "status": "available", "models": [...] }] }`。每个 provider 可选上报 `models:[{id,name}]`，最多 64 项，ID 不重复；缺省表示未上报模型目录。Runtime 当前支持 `openai-codex` 和 `xai`，目录来自随 pi-ai 安装的本地静态 catalog。`probe` 只读取本地凭据与目录，不刷新 OAuth、不请求在线模型列表，也不发送推理请求。状态只接受 `available`、`login_required`、`unknown`，最多 32 个 provider，provider 名称和 Runtime 版本不超过 128 个 ASCII 字符（字母、数字、点、下划线、加号、连字符）。batond 每轮调用一次 `probe`，时限 1 秒，stdout 缓冲最多 16 KiB，丢弃 stderr；忽略未知字段，仍检查必填字段、版本、编码、单个 JSON 文档和容量。Runtime 未安装、probe 失败或输出无效时省略 `project_runtime`，不复用旧登录状态。
 
 ### 9. Thread 操作与回复回收
 
@@ -375,11 +375,14 @@ batond 通过 Gateway 的控制队列传送 `node.runtime_report`，正文为 `{
 
 `/projects/{id}` 展示主对话、Project 的 Thread 列表、记忆和运行状态。主对话里，`threads.create`、`threads.send`、`nodes.exec` 的工具调用各显示为一行，例如「给 Windows 台式机派发了一个任务」「执行了 1 条命令」，点开进入 Thread。页面按 `design/` 实现，每 2 秒查询中心记录。
 
+界面通过 `POST /api/v1/projects` 创建 Project，正文为 `{title,goal,provider,model,client_project_id?}`。可选客户端标识必须为规范 UUID；在同一员工内，存储的原始 `create_request` 与重发 JSON 相等时返回同一个 Project 的当前记录，内容不同返回 `409 project_conflict`。原始请求独立于后续设置修改保留；省略标识时每次创建新 Project。首次创建与幂等重发均返回 201。
+
 界面使用的只读接口：
 
 - `GET /api/v1/projects/{id}/status`：`state`、`waiting_reason`、`pending_inputs`、`last_error`、`next_attempt_at`、`last_seq`，以及最近一次运行的设备、放置原因、是否仍有效和停止回执。
 - `GET /api/v1/projects/{id}/messages`：尚未领取的用户消息，按 `after_id` 分页；指定 `client_message_id` 时返回该消息，用于恢复发送响应。
 - `GET /api/v1/threads?project_id={id}`：本 Project 的 Thread，都由 Project Agent 新建。
+- `GET /api/v1/projects/{id}/memory/{mid}/revisions`：校验本人 Project 与条目归属，按修订号升序读取所有保留版本；接受 `after_revision`（默认 0）和 `limit`（默认 50、最多 100），返回 `{revisions,next_after_revision?}`。每条修订为 `{revision,title,content,author,created_at}`，`title` 可空；`author` 为 `user` / `agent`，表示修改来源。客户端按游标读取全部页面，标题、正文、来源和时间均取各次修订记录。
 
 Runtime 的 `preview` 操作发送 `{last_seq, payload:{text, truncated}}` 文本快照，最多 32 KiB、每秒一次。Coordinator 在内存里为每个运行保留最新快照，30 秒过期，不保存到对话历史；`status` 只在 `after_seq` 等于当前历史尾部时附带它。
 

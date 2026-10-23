@@ -16,11 +16,26 @@ const stylexPlugin: Plugin = stylex({
 // 测试只需要编译样式，不需要热更新。
 if (process.env.VITEST) delete stylexPlugin.configureServer
 
+const backend = process.env.BATON_DEV_BACKEND
+
 export default defineConfig({
   plugins: [stylexPlugin, react()],
   server: {
     host: 'localhost',
     port: 5173,
+    proxy: backend
+      ? {
+          '/api': {
+            target: backend,
+            changeOrigin: true,
+            ws: true,
+            configure(proxy) {
+              proxy.on('proxyReq', (request) => request.setHeader('Origin', new URL(backend).origin))
+              proxy.on('proxyReqWs', (request) => request.setHeader('Origin', new URL(backend).origin))
+            },
+          },
+        }
+      : undefined,
     // 图标直接读 design/resources/assets。
     fs: { allow: ['..'] },
   },

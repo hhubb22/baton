@@ -27,6 +27,7 @@ func threadConflict() error {
 func threadInvalid() error { return threadError(400, "invalid_request", "Thread 请求无效") }
 
 type Thread struct {
+	NextModel               string     `json:"next_model,omitempty"`
 	ID                      string     `json:"id"`
 	EmployeeID              string     `json:"employee_id"`
 	ClientThreadID          string     `json:"client_thread_id"`
@@ -79,6 +80,7 @@ type CreateThreadInput struct {
 	OriginToolCallID        string             `json:"-"`
 }
 type ThreadMessage struct {
+	RequestedModel   string    `json:"requested_model,omitempty"`
 	ID               string    `json:"id"`
 	ThreadID         string    `json:"thread_id"`
 	ClientMessageID  string    `json:"client_message_id"`
@@ -105,6 +107,7 @@ type ThreadTurn struct {
 	EndReason        string     `json:"end_reason,omitempty"`
 }
 type ThreadView struct {
+	ResumePending bool `json:"resume_pending"`
 	Thread
 	CurrentTurn     *ThreadTurn     `json:"current_turn"`
 	PendingMessages []ThreadMessage `json:"pending_messages"`

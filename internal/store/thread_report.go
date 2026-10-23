@@ -15,7 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-var threadReportKinds = map[string]bool{"thread.opened": true, "thread.open_failed": true, "message.queued": true, "message.sent": true, "message.withdrawn": true, "message.unknown": true, "turn.started": true, "reply": true, "turn.ended": true, "thread.stopped": true, "thread.unknown": true}
+var threadReportKinds = map[string]bool{"thread.opened": true, "thread.open_failed": true, "message.queued": true, "message.sent": true, "message.withdrawn": true, "message.unknown": true, "turn.started": true, "reply": true, "turn.ended": true, "thread.stopped": true, "thread.unknown": true, "thread.resumed": true}
 var threadEndReasons = map[string]bool{"completed": true, "stopped": true, "timeout": true, "agent_exited": true, "failed": true}
 
 // SaveThreadReport 原子保存序号、回复、状态和 Project 输入，ACK 丢失可安全补报。
@@ -337,6 +337,14 @@ func applyThreadReport(ctx context.Context, tx pgx.Tx, t *Thread, r *protocol.Th
 			status = "stopped"
 		}
 		return setThreadStatus(ctx, tx, t, status, "")
+	case "thread.resumed":
+		if t.OpenedAt == nil || t.Status == "archived" {
+			return threadConflict()
+		}
+		if err := noActiveThreadTurn(ctx, tx, t.ID); err != nil {
+			return err
+		}
+		return setThreadStatus(ctx, tx, t, "idle", "")
 	case "thread.stopped", "thread.unknown":
 		if r.HistoryUnavailable {
 			if err := endThreadTurnAfterHistoryLoss(ctx, tx, *t); err != nil {
@@ -387,7 +395,7 @@ func saveThreadReply(ctx context.Context, tx pgx.Tx, t Thread, turn ThreadTurn, 
 		r.Content = boundedText(r.Content, 32<<10)
 		r.Truncated = r.Truncated || r.OriginalBytes > int64(len(r.Content))
 	}
-	err := tx.QueryRow(ctx, `SELECT jsonb_typeof($1::jsonb)='array' AND octet_length($1::jsonb::text)<=4096 AND jsonb_typeof($2::jsonb)='object' AND octet_length($2::jsonb::text)<=4096`, r.Attachments, r.Metadata).Scan(&valid)
+	err := tx.QueryRow(ctx, `SELECT jsonb_typeof($1::jsonb)='array' AND octet_length($1::jsonb::text)<=$3 AND jsonb_typeof($2::jsonb)='object' AND octet_length($2::jsonb::text)<=4096`, r.Attachments, r.Metadata, protocol.MaxThreadAttachmentsBytes).Scan(&valid)
 	if err != nil {
 		return err
 	}

@@ -9,9 +9,14 @@ import { browserLatency } from '../data/mock/store'
 import { App } from './App'
 import { createAppRouter } from './router'
 
-function renderApp(path: string, scenario: ScenarioId = 'normal') {
+function renderApp(
+  path: string,
+  scenario: ScenarioId = 'normal',
+  configure?: (client: ReturnType<typeof createMockClient>) => void,
+) {
   const scheduler = manualScheduler()
   const client = createMockClient(scenario, { scheduler, latency: browserLatency })
+  configure?.(client)
   const router = createAppRouter({ history: createMemoryHistory({ initialEntries: [path] }) })
   render(<App client={client} router={router} />)
   return { client, scheduler, router }
@@ -39,6 +44,36 @@ describe('app', () => {
     const { router } = renderApp('/')
     expect(await screen.findByRole('link', { name: /Rebuild web UI foundation/ })).toBeInTheDocument()
     expect(router.state.location.pathname).toBe('/threads')
+  })
+
+  it('offers the real empty model ID as Default model when switching back to Pi', async () => {
+    const user = userEvent.setup()
+    renderApp('/threads', 'normal', (client) => {
+      const read = client.listDevices
+      client.listDevices = async () =>
+        (await read()).map((device) => ({
+          ...device,
+          agents: device.agents.map((agent) =>
+            agent.kind === 'pi' ? { ...agent, models: [], defaultModel: null, problem: null } : agent,
+          ),
+        }))
+    })
+    await user.click(await screen.findByRole('button', { name: /Codex ·/ }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Default model' }))
+    expect(await screen.findByRole('button', { name: 'Pi · Default model' })).toBeInTheDocument()
+  })
+
+  it('renders command threads without a chat composer and keeps command output available', async () => {
+    renderApp('/threads/thr-webui', 'normal', (client) => {
+      const readThreads = client.listThreads
+      const readMessages = client.listMessages
+      client.listThreads = async () =>
+        (await readThreads()).map((thread) => (thread.id === 'thr-webui' ? { ...thread, agent: null } : thread))
+      client.listMessages = async (id) => (await readMessages(id)).map((message) => ({ ...message, activity: null }))
+    })
+    expect(await screen.findByRole('heading', { name: 'Rebuild web UI foundation' })).toBeInTheDocument()
+    expect(await screen.findAllByRole('button', { name: 'Command output' })).not.toHaveLength(0)
+    expect(screen.queryByLabelText('Message')).not.toBeInTheDocument()
   })
 
   it('keeps the username after invalid credentials and returns to the requested page', async () => {
@@ -512,6 +547,15 @@ describe('devices', () => {
     expect(within(details!).getByRole('button', { name: 'Disconnect device' })).toBeInTheDocument()
   })
 
+  it('allows reviewing command permission before subscription sign-in is repaired', async () => {
+    const user = userEvent.setup()
+    renderApp('/devices', 'error')
+    await screen.findByRole('heading', { name: '3 devices, 2 online' })
+    await user.click(deviceRow('Ubuntu Dev'))
+    expect(screen.getAllByText('ChatGPT sign-in expired').length).toBeGreaterThan(0)
+    expect(screen.getByRole('switch', { name: 'Allow project assistant to run commands' })).not.toBeChecked()
+  })
+
   it('shows the saved command permission and keeps it when saving fails', async () => {
     const user = userEvent.setup()
     const { client } = renderApp('/devices')
@@ -731,6 +775,8 @@ describe('execution details', () => {
   it('asks the project assistant about an inbox question', async () => {
     const user = userEvent.setup()
     const { router } = renderApp('/inbox')
+    const card = await screen.findByRole('region', { name: 'Which runner should run nightly?' })
+    await user.click(within(card).getByRole('button', { name: 'Show details' }))
     select(await screen.findByText('MacBook Pro sleeps at night. Ubuntu Dev is always on.'))
     await user.click(await screen.findByRole('button', { name: 'Ask project assistant' }))
     await waitFor(() => expect(router.state.location.pathname).toBe('/projects/prj-compat'))

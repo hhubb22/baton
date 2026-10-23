@@ -11,7 +11,7 @@ import {
   shortenExcerpt,
   type PreviewView,
 } from '../data/derive'
-import { useDevices, useFile, useFolders, useThreads } from '../data/queries'
+import { useDevices, useFile, useFolders, useProjects, useThreads } from '../data/queries'
 import { previewLimit, type Device, type ID, type Reference } from '../data/types'
 import { fonts, shadow } from '../theme/base.stylex'
 import { text } from '../theme/text'
@@ -439,6 +439,8 @@ function FileContent({
   onBack: () => void
 }) {
   const workspace = useWorkspace()
+  const projects = useProjects()
+  const canAsk = !!projectId && projects.data?.find((item) => item.id === projectId)?.status !== 'archived'
   const [selected, setSelected] = useState<{ from: number; to: number } | null>(null)
 
   const failed = (view: PreviewView, icon: 'alert' | 'offline' | 'file' | 'lock') => (
@@ -481,7 +483,7 @@ function FileContent({
       if (to < from) return null
       setSelected({ from, to })
       const selectedText = lines.slice(from - 1, to).join('\n')
-      if (!projectId) return () => copySelection(selectedText)
+      if (!projectId || !canAsk) return () => copySelection(selectedText)
       const { excerpt, bytes } = shortenExcerpt(selectedText)
       const reference: Reference = {
         kind: 'file',
@@ -500,8 +502,8 @@ function FileContent({
     body = (
       <>
         <SelectionArea
-          label={projectId ? 'Ask project assistant' : 'Copy selection'}
-          icon={projectId ? 'reply' : 'copy'}
+          label={canAsk ? 'Ask project assistant' : 'Copy selection'}
+          icon={canAsk ? 'reply' : 'copy'}
           describe={describe}
           onHide={() => setSelected(null)}
           style={styles.scroll}

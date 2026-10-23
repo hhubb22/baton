@@ -550,6 +550,11 @@ func (w *ThreadWorker) send(ctx context.Context, id, text string, turn int64, st
 		if err := w.db.QueryRow(`SELECT COALESCE(NULLIF(m.model,''),t.model) FROM thread_messages m CROSS JOIN thread_meta t WHERE m.client_message_id=?`, id).Scan(&model); err != nil {
 			return err
 		}
+		// 清除前一轮尚未消费的实时文本；新一轮使用独立游标。
+		if live, ok := w.adapter.(agent.LiveAdapter); ok {
+			live.DrainLive()
+		}
+		w.live = liveOutput{}
 		err = w.adapter.Send(sendCtx, id, text, model)
 	}
 	if err != nil {

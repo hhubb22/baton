@@ -165,6 +165,12 @@ func NewSecret() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(raw[:]), nil
 }
 
+// SessionCSRF 从高熵会话令牌派生稳定的 CSRF 令牌，域前缀隔离会话摘要。
+func SessionCSRF(token string) string {
+	sum := sha256.Sum256([]byte("baton:session-csrf:v1\x00" + token))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
 // Digest 计算会话令牌或 CSRF 令牌的 SHA-256。数据库只保存这个结果。
 func Digest(secret string) []byte {
 	sum := sha256.Sum256([]byte(secret))

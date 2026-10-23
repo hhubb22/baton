@@ -82,6 +82,9 @@ func threadDetailTx(ctx context.Context, tx pgx.Tx, employeeID, id string) (Thre
 	if err != nil {
 		return view, err
 	}
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM thread_outbox WHERE employee_id=$1 AND thread_id=$2 AND action='resume' AND acked_at IS NULL)`, employeeID, id).Scan(&view.ResumePending); err != nil {
+		return view, err
+	}
 	return view, nil
 }
 

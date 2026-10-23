@@ -29,6 +29,7 @@ type Server struct {
 	backgroundOnce  sync.Once
 	background      chan struct{}
 	fileWait        map[string]chan fileNotice
+	settingsWait    map[string]chan settingsNotice
 	sessionWaiters  map[string]chan sessionNotice
 	budget          *protocol.Budget
 }
@@ -126,6 +127,9 @@ func (s *Server) onEnvelope(ctx context.Context, connID string, raw json.RawMess
 		return
 	case protocol.BodyRuntimeReport:
 		s.onRuntimeReport(ctx, connID, env)
+		return
+	case protocol.BodyProjectExecResult:
+		s.noteSettingsResult(env)
 		return
 	case protocol.BodySessionResult:
 		s.noteSessionResult(env)

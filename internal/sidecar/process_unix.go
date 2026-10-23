@@ -31,7 +31,7 @@ func StartTree(cmd *exec.Cmd) (func(), error) {
 	}
 	binary, args := cmd.Path, cmd.Args
 	cmd.Path = "/bin/sh"
-	cmd.Args = append([]string{"sh", "-c", `(read ignored <&3; kill -KILL -$$) & watcher=$!; "$@" 3<&-; code=$?; kill "$watcher" 2>/dev/null; exit "$code"`, "baton-runtime", binary}, args[1:]...)
+	cmd.Args = append([]string{"sh", "-c", `(read ignored <&3; kill -KILL -$$) </dev/null >/dev/null 2>&1 & exec "$@" 3<&-`, "baton-runtime", binary}, args[1:]...)
 	cmd.ExtraFiles = []*os.File{reader}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {

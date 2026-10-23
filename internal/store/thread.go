@@ -323,7 +323,7 @@ func insertThreadMessage(ctx context.Context, tx pgx.Tx, t Thread, in ThreadMess
 		if err = json.Unmarshal(raw, &m); err != nil {
 			return m, false, err
 		}
-		if m.Content != in.Content || m.Mode != in.Mode || m.Model != in.Model || m.Sender != in.Sender || m.OriginToolCallID != in.OriginToolCallID {
+		if m.Content != in.Content || m.Mode != in.Mode || m.RequestedModel != in.Model || m.Sender != in.Sender || m.OriginToolCallID != in.OriginToolCallID {
 			return m, false, threadConflict()
 		}
 		return m, false, nil
@@ -349,6 +349,10 @@ func insertThreadMessage(ctx context.Context, tx pgx.Tx, t Thread, in ThreadMess
 	if in.Sender == "project_agent" && t.ProjectID == "" {
 		return m, false, threadInvalid()
 	}
+	requestedModel := in.Model
+	if in.Mode != "steer" && in.Model == "" {
+		in.Model = t.NextModel
+	}
 	if in.Mode == "steer" || in.Model != "" {
 		if err = threadNode(ctx, tx, t.EmployeeID, t.NodeID, t.AgentType, t.WorkingDirectory, in.Mode == "steer", &in.Model, true); err != nil {
 			return m, false, err
@@ -358,7 +362,7 @@ func insertThreadMessage(ctx context.Context, tx pgx.Tx, t Thread, in ThreadMess
 	if err != nil {
 		return m, false, err
 	}
-	err = tx.QueryRow(ctx, `INSERT INTO thread_messages(id,employee_id,thread_id,client_message_id,sender,origin_tool_call_id,content,mode,model) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING to_jsonb(thread_messages)`, id, t.EmployeeID, t.ID, in.ClientMessageID, in.Sender, nullableProjectID(in.OriginToolCallID), in.Content, in.Mode, in.Model).Scan(&raw)
+	err = tx.QueryRow(ctx, `INSERT INTO thread_messages(id,employee_id,thread_id,client_message_id,sender,origin_tool_call_id,content,mode,model,requested_model) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING to_jsonb(thread_messages)`, id, t.EmployeeID, t.ID, in.ClientMessageID, in.Sender, nullableProjectID(in.OriginToolCallID), in.Content, in.Mode, in.Model, requestedModel).Scan(&raw)
 	if err != nil {
 		return m, false, err
 	}

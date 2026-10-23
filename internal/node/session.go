@@ -187,7 +187,7 @@ func runOnce(ctx context.Context, opts RunOptions, incarnation string, ledger *L
 	if threadHost == nil && host != nil {
 		threadHost = newSessionThreadHost(host, ledger, opts.Identity.NodeID)
 	}
-	threads := newThreadService(ledger, threadHost, opts.ThreadBudgetBytes, opts.Identity.Capabilities, func(ctx context.Context, correlation string, value any) error {
+	threads := newThreadService(ledger, threadHost, opts.ThreadBudgetBytes, func(ctx context.Context, correlation string, value any) error {
 		return writeThreadEnvelope(ctx, writer, correlation, value)
 	})
 	threadDone := make(chan struct{})
@@ -197,7 +197,7 @@ func runOnce(ctx context.Context, opts RunOptions, incarnation string, ledger *L
 		opts.projectRuntime.setLoop(nil)
 	}
 	errCh := make(chan error, 1)
-	reportSender := opts.reportSender.connect()
+	reportSender := opts.reportSender.connect(opts.reports)
 	defer reportSender.close()
 	var reportChanged <-chan struct{}
 	if opts.reports != nil {
@@ -319,6 +319,9 @@ func readRelay(ctx context.Context, w *wsWriter, acked *atomic.Bool, expect *ato
 				continue
 			}
 			if handleSessionEnvelope(ctx, raw, w, host) {
+				continue
+			}
+			if handleNodeSettings(ctx, raw, w, dataDir, reports.reports) {
 				continue
 			}
 			if handleFileEnvelope(ctx, raw, w, dataDir, log) {

@@ -10,6 +10,8 @@ import {
   useDevices,
   useEarlierHistory,
   useMessages,
+  useInbox,
+  useProjects,
   useOperation,
   useResumeThread,
   useSendMessage,
@@ -28,6 +30,8 @@ import { Dialog, DialogClose } from '../ui/Dialog'
 import { Icon } from '../ui/Icon'
 import { Menu, MenuHeading, MenuOption } from '../ui/Menu'
 import { StatusDot, type Tone } from '../ui/Status'
+import { AttentionCard } from './AttentionCard'
+import { InboxFeedback } from './InboxFeedback'
 import { FilePreview } from './FilePreview'
 import { MessageBody } from './MessageBody'
 import { Page } from './Page'
@@ -206,6 +210,7 @@ function MessageItem({
   devices,
   reply,
   earlier,
+  command = false,
   onOpen,
   onCancel,
 }: {
@@ -215,6 +220,7 @@ function MessageItem({
   devices: Device[]
   reply: number | null
   earlier: boolean
+  command?: boolean
   onOpen: (deviceId: ID, path: string) => void
   onCancel: (message: Message) => void
 }) {
@@ -223,7 +229,7 @@ function MessageItem({
   if (message.role === 'agent') {
     return (
       <article id={`message-${message.id}`} {...stylex.props(text.body, styles.agent)}>
-        {!earlier && <ActivityTrace message={message} device={device} />}
+        {!earlier && <ActivityTrace message={message} device={device} command={command} />}
         <div data-reply={reply ?? 'earlier'}>
           <MessageBody body={message.body} onOpenPath={onOpenPath} />
         </div>
@@ -314,12 +320,13 @@ function ModelMenu({
   agent: DeviceAgent | undefined
   onSelect: (model: string) => void
 }) {
-  const name = agentNames[thread.agent]
+  const name = thread.agent ? agentNames[thread.agent] : 'Command'
   return (
-    <Menu side="top" trigger={<Chip icon="sparkle">{thread.model}</Chip>}>
+    <Menu side="top" trigger={<Chip icon="sparkle">{thread.model || 'Default model'}</Chip>}>
       {agent?.abilities.switchModel ? (
         <>
           <MenuHeading>{name}</MenuHeading>
+          {agent.models.length === 0 && <MenuOption selected>Default model</MenuOption>}
           {agent.models.map((model) => (
             <MenuOption key={model} selected={model === thread.model} onSelect={() => onSelect(model)}>
               {model}
@@ -331,7 +338,7 @@ function ModelMenu({
           <p {...stylex.props(text.caption, styles.menuNote)}>
             {name} cannot switch models in this chat. Start a new chat to choose another.
           </p>
-          <MenuOption selected>{thread.model}</MenuOption>
+          <MenuOption selected>{thread.model || 'Default model'}</MenuOption>
         </>
       )}
     </Menu>
@@ -360,6 +367,8 @@ export function ThreadDetail({
   const threads = useThreads()
   const devices = useDevices()
   const messages = useMessages(threadId)
+  const inbox = useInbox()
+  const projects = useProjects()
   const send = useSendMessage()
   const cancelMessage = useCancelMessage()
   const setModel = useSetThreadModel()
@@ -379,6 +388,8 @@ export function ThreadDetail({
   const resumeOperation = useOperation(resumeId)
 
   const thread = threads.data?.find((item) => item.id === threadId)
+  const projectArchived = projects.data?.find((item) => item.id === thread?.projectId)?.status === 'archived'
+  const canAsk = !!thread?.projectId && !projectArchived
   const device = devices.data?.find((item) => item.id === thread?.deviceId)
   const agent = device?.agents.find((item) => item.kind === thread?.agent)
   const list = messages.data ?? []
@@ -431,7 +442,7 @@ export function ThreadDetail({
   if (!thread || !view) return null
 
   const name = device?.name ?? 'the device'
-  const agentName = agentNames[thread.agent]
+  const agentName = thread.agent ? agentNames[thread.agent] : 'Command'
   const running = thread.status === 'running' && thread.pending === null
   const waiting = waitingCount(list)
   const resuming = resumeOperation.data !== undefined && !['done', 'failed'].includes(resumeOperation.data.phase)
@@ -449,7 +460,7 @@ export function ThreadDetail({
     const element = start instanceof Element ? start : start.parentElement
     const body = element?.closest<HTMLElement>('[data-reply]')
     if (!body) return null
-    if (!thread.projectId) return () => copySelection(value)
+    if (!thread.projectId || projectArchived) return () => copySelection(value)
     const projectId = thread.projectId
     const reference: Reference = {
       kind: 'thread',
@@ -590,11 +601,12 @@ export function ThreadDetail({
       <div {...stylex.props(styles.main)}>
         <div ref={timelineRef} tabIndex={-1} aria-label="Messages" role="region" {...stylex.props(styles.timeline)}>
           <SelectionArea
-            label={thread.projectId ? 'Ask project assistant' : 'Copy selection'}
-            icon={thread.projectId ? 'reply' : 'copy'}
+            label={canAsk ? 'Ask project assistant' : 'Copy selection'}
+            icon={canAsk ? 'reply' : 'copy'}
             describe={describeSelection}
             style={[styles.messages, layout === 'panel' && styles.messagesPanel]}
           >
+            <InboxFeedback />
             {thread.earlier && <HistoryPager history={{ ...history, load: loadEarlier }} device={device} />}
             {history.messages.map((message) => (
               <MessageItem
@@ -621,22 +633,32 @@ export function ThreadDetail({
                 }
               />
             )}
-            {list.map((message) => {
-              const reply = message.role === 'agent' ? ++replies : null
-              return (
-                <MessageItem
-                  key={message.id}
-                  message={message}
-                  deviceId={thread.deviceId}
-                  device={device}
-                  devices={deviceList}
-                  reply={reply}
-                  earlier={false}
-                  onOpen={openFile(reply)}
-                  onCancel={onCancel}
-                />
-              )
-            })}
+            {[
+              ...list.map((message) => ({ id: message.id, at: message.createdAt, message, item: null })),
+              ...(inbox.data ?? [])
+                .filter((item) => item.threadId === threadId)
+                .map((item) => ({ id: item.id, at: item.createdAt, message: null, item })),
+            ]
+              .sort((a, b) => a.at - b.at)
+              .map(({ message, item, id }) => {
+                if (item) return <AttentionCard key={id} item={item} />
+                if (!message) return null
+                const reply = message.role === 'agent' ? ++replies : null
+                return (
+                  <MessageItem
+                    key={message.id}
+                    message={message}
+                    deviceId={thread.deviceId}
+                    device={device}
+                    devices={deviceList}
+                    reply={reply}
+                    earlier={false}
+                    command={thread.agent === null}
+                    onOpen={openFile(reply)}
+                    onCancel={onCancel}
+                  />
+                )
+              })}
             <LiveOutput thread={thread} device={device} live={view.live} now={now} />
           </SelectionArea>
         </div>
@@ -746,7 +768,7 @@ export function ThreadDetail({
         onClose={() => setConfirm(null)}
         onConfirm={onStop}
         submitting={stop.isPending}
-        agent={agent}
+        canStop={thread.agent === null || !!agent?.abilities.stop}
         agentName={agentName}
         deviceName={name}
         waiting={waiting}
@@ -834,7 +856,7 @@ function StopDialog({
   onClose,
   onConfirm,
   submitting,
-  agent,
+  canStop,
   agentName,
   deviceName,
   waiting,
@@ -844,13 +866,13 @@ function StopDialog({
   onClose: () => void
   onConfirm: () => void
   submitting: boolean
-  agent: DeviceAgent | undefined
+  canStop: boolean
   agentName: string
   deviceName: string
   waiting: number
   finalFocus: FinalFocus
 }) {
-  if (!agent?.abilities.stop) {
+  if (!canStop) {
     return (
       <Dialog
         open={open}
@@ -906,7 +928,7 @@ function ArchiveDialog({
   finalFocus: FinalFocus
 }) {
   const running = thread.status === 'running'
-  if (running && !agent?.abilities.stop) {
+  if (running && thread.agent !== null && !agent?.abilities.stop) {
     return (
       <Dialog
         open={open}

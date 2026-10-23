@@ -6,6 +6,8 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -29,6 +31,7 @@ import (
 	"baton/internal/session"
 
 	"github.com/coder/websocket"
+	"github.com/gofrs/flock"
 )
 
 func TestMain(m *testing.M) {
@@ -339,7 +342,9 @@ func startCmd(t *testing.T, bin string, args, env []string) *running {
 		if len(args) > 0 && args[0] == "run" {
 			for i, arg := range args {
 				if arg == "--data-dir" && i+1 < len(args) {
-					cleanupSessionWorkers(args[i+1])
+					if err := cleanupSessionWorkers(args[i+1]); err != nil {
+						t.Errorf("清理 Session Worker: %v", err)
+					}
 					break
 				}
 			}
@@ -696,29 +701,122 @@ func (p *tcpProxy) drop() {
 	p.conns = nil
 }
 
-// cleanupSessionWorkers 在测试节点退出后结束其 Worker，防止恢复循环抢先重新拉起进程。
-func cleanupSessionWorkers(dataDir string) {
-	paths, _ := filepath.Glob(filepath.Join(dataDir, "sessions", "*", "token"))
+// cleanupSessionWorkers 在测试节点退出后结束其 Worker，等待初始化中的 Worker 开始提供认证 IPC。
+func cleanupSessionWorkers(dataDir string) error {
+	paths, err := filepath.Glob(filepath.Join(dataDir, "sessions", "*", "token"))
+	if err != nil {
+		return err
+	}
+	var failures []error
 	for _, path := range paths {
 		sessionID := filepath.Base(filepath.Dir(path))
-		endpoint, err := session.Endpoint(dataDir, sessionID)
-		if err != nil {
-			continue
-		}
 		token, err := os.ReadFile(path)
 		if err != nil {
+			failures = append(failures, fmt.Errorf("Session %s 读取令牌: %w", sessionID, err))
 			continue
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		client, err := session.Dial(ctx, endpoint, strings.TrimSpace(string(token)))
+		// Agent 初始化最多 30 秒，Close 最多再等待 2 秒。
+		ctx, cancel := context.WithTimeout(context.Background(), 32*time.Second)
+		err = cleanupSessionWorker(ctx, dataDir, sessionID, strings.TrimSpace(string(token)))
+		cancel()
+		if err != nil {
+			failures = append(failures, fmt.Errorf("Session %s: %w", sessionID, err))
+		}
+	}
+	return errors.Join(failures...)
+}
+
+func cleanupSessionWorker(ctx context.Context, dataDir, sessionID, token string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	endpoint, err := session.Endpoint(dataDir, sessionID)
+	if err != nil {
+		return err
+	}
+	lockPath, err := session.LockPath(dataDir, sessionID)
+	if err != nil {
+		return err
+	}
+	lock := flock.New(lockPath)
+	defer lock.Close()
+	lockFree := func() (bool, error) {
+		free, err := lock.TryLock()
+		if err != nil || !free {
+			return false, err
+		}
+		return true, lock.Unlock()
+	}
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	var lastErr error
+retry:
+	for {
+		probeCtx, cancel := context.WithTimeout(ctx, time.Second)
+		client, err := session.Dial(probeCtx, endpoint, token)
+		var status session.Status
 		if err == nil {
-			if status, err := client.Status(); err == nil {
-				_ = client.Close()
-				stopWorker(status.PID)
-			} else {
-				_ = client.Close()
-			}
+			status, err = client.Status()
+			_ = client.Close()
 		}
 		cancel()
+		if err == nil {
+			if status.PID <= 0 || status.SessionID != sessionID {
+				return errors.New("Worker 认证状态中的进程或 Session 标识无效")
+			}
+			exitCtx, exitCancel := context.WithTimeout(ctx, 5*time.Second)
+			defer exitCancel()
+			if err := stopWorkerContext(exitCtx, status.PID); err != nil {
+				return fmt.Errorf("终止 Worker %d: %w", status.PID, err)
+			}
+			for {
+				free, err := lockFree()
+				if err != nil {
+					return fmt.Errorf("检查 Worker 锁释放: %w", err)
+				}
+				if free && processAlive(status.PID) != nil {
+					starting, err := sessionWorkerStarting(exitCtx, dataDir, sessionID)
+					if err != nil {
+						return err
+					}
+					if !starting {
+						return nil
+					}
+					continue retry
+				}
+				select {
+				case <-exitCtx.Done():
+					return fmt.Errorf("Worker %d 未确认退出或释放会话锁: %w", status.PID, exitCtx.Err())
+				case <-ticker.C:
+				}
+			}
+		}
+		lastErr = err
+		free, err := lockFree()
+		if err != nil {
+			return fmt.Errorf("检查 Worker 会话锁: %w", err)
+		}
+		if free {
+			probeCtx, cancel := context.WithTimeout(ctx, time.Second)
+			conn, dialErr := session.DialLocal(probeCtx, endpoint)
+			cancel()
+			if dialErr != nil {
+				starting, err := sessionWorkerStarting(ctx, dataDir, sessionID)
+				if err != nil {
+					return err
+				}
+				if !starting {
+					return nil
+				}
+			} else {
+				_ = conn.Close()
+				return fmt.Errorf("会话锁空闲但 IPC 仍可连接，无法确认 Worker 身份: %w", lastErr)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("Worker 已启动或持有会话锁，但认证 IPC 未就绪: %w", errors.Join(ctx.Err(), lastErr))
+		case <-ticker.C:
+		}
 	}
 }

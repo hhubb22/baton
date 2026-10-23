@@ -37,6 +37,13 @@ func scanProject(row pgx.Row) (projectagent.Project, error) {
 }
 
 func (s *Store) CreateProject(ctx context.Context, employeeID string, in projectagent.CreateInput) (projectagent.Project, error) {
+	if in.ClientProjectID != "" {
+		id, err := identity.ParseUUID(in.ClientProjectID)
+		if err != nil {
+			return projectagent.Project{}, projectagent.ErrInvalid
+		}
+		in.ClientProjectID = id
+	}
 	p := projectagent.Project{Title: in.Title, Goal: in.Goal, Status: "active", Agent: projectagent.Agent{Provider: in.Provider, Model: in.Model}}
 	if err := p.Validate(); err != nil {
 		return p, err
@@ -56,8 +63,22 @@ func (s *Store) CreateProject(ctx context.Context, employeeID string, in project
 		return p, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err = tx.Exec(ctx, `INSERT INTO projects(id, employee_id, title, goal) VALUES($1,$2,$3,$4)`,
-		p.ID, employeeID, p.Title, p.Goal); err != nil {
+	request, _ := json.Marshal(in)
+	tag, err := tx.Exec(ctx, `INSERT INTO projects(id,employee_id,title,goal,client_project_id,create_request) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(employee_id,client_project_id) DO NOTHING`, p.ID, employeeID, p.Title, p.Goal, nullableProjectID(in.ClientProjectID), request)
+	if err != nil {
+		return p, err
+	}
+	if tag.RowsAffected() == 0 {
+		var id string
+		var matches bool
+		err = tx.QueryRow(ctx, `SELECT id::text,create_request=$3::jsonb FROM projects WHERE employee_id=$1 AND client_project_id=$2`, employeeID, in.ClientProjectID, request).Scan(&id, &matches)
+		if err != nil {
+			return p, err
+		}
+		if !matches {
+			return p, projectagent.ErrProjectConflict
+		}
+		p, err = scanProject(tx.QueryRow(ctx, projectSelect+` WHERE p.employee_id=$1 AND p.id=$2`, employeeID, id))
 		return p, err
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO project_agents(id, employee_id, project_id, provider, model) VALUES($1,$2,$3,$4,$5)`,

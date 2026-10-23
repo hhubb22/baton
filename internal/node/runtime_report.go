@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/user"
+	"runtime/debug"
 	"slices"
 	"sort"
 	"sync"
@@ -70,7 +72,22 @@ func collectRuntimeReportUsingProbe(ctx context.Context, dir string, probe agent
 	if err != nil {
 		cfg = protocol.RuntimeExec{Shell: DefaultProjectShell()}
 	}
+	cfg.User = ""
 	r := protocol.RuntimeReport{Exec: cfg, Truncated: err != nil}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		if info.Main.Version != "(devel)" {
+			r.BatondVersion = info.Main.Version
+		}
+		for _, setting := range info.Settings {
+			if setting.Key == "vcs.revision" {
+				r.BatondVersion = setting.Value
+			}
+		}
+	}
+	if current, err := user.Current(); err == nil {
+		r.User = current.Username
+		r.Exec.User = current.Username
+	}
 	agents := collectAgentRuntimeReports(ctx, cfg, probe)
 	for _, a := range agents {
 		r.Agents = append(r.Agents, a.RuntimeAgent)
@@ -107,6 +124,20 @@ func collectRuntimeReportUsingProbe(ctx context.Context, dir string, probe agent
 		}
 		if removedModel {
 			continue
+		}
+		if r.ProjectRuntime != nil {
+			removed := false
+			for i := len(r.ProjectRuntime.Providers) - 1; i >= 0; i-- {
+				p := &r.ProjectRuntime.Providers[i]
+				if len(p.Models) > 0 {
+					p.Models = p.Models[:len(p.Models)-1]
+					removed = true
+					break
+				}
+			}
+			if removed {
+				continue
+			}
 		}
 		if len(r.Roots) > 0 {
 			r.Roots = r.Roots[:len(r.Roots)-1]
@@ -150,12 +181,13 @@ type runtimeReportSender struct {
 }
 
 type runtimeReportConnection struct {
-	sender *runtimeReportSender
-	ready  chan struct{}
-	sent   bool
+	reports *runtimeReports
+	sender  *runtimeReportSender
+	ready   chan struct{}
+	sent    bool
 }
 
-func (s *runtimeReportSender) connect() *runtimeReportConnection {
+func (s *runtimeReportSender) connect(reports ...*runtimeReports) *runtimeReportConnection {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// 已确认的报告在新连接上重新发送；未确认的报告保留原消息标识和内容。
@@ -163,6 +195,9 @@ func (s *runtimeReportSender) connect() *runtimeReportConnection {
 		s.messageID, s.raw, s.acked = "", nil, false
 	}
 	c := &runtimeReportConnection{sender: s, ready: make(chan struct{}, 1)}
+	if len(reports) > 0 {
+		c.reports = reports[0]
+	}
 	s.current = c
 	return c
 }

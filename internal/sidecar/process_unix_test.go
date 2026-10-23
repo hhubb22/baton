@@ -3,6 +3,8 @@
 package sidecar
 
 import (
+	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +13,54 @@ import (
 	"testing"
 	"time"
 )
+
+func TestProcessTreePreservesChildExitStatus(t *testing.T) {
+	for _, script := range []string{"exit 23", "kill -KILL $$"} {
+		t.Run(script, func(t *testing.T) {
+			cmd := exec.Command("/bin/sh", "-c", script)
+			process, err := Start(cmd)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer process.Stop()
+			var exit *exec.ExitError
+			if err := process.Wait(); !errors.As(err, &exit) {
+				t.Fatalf("expected child exit status, got %v", err)
+			}
+			status := exit.Sys().(syscall.WaitStatus)
+			if script == "exit 23" {
+				if status.ExitStatus() != 23 {
+					t.Fatalf("exit status = %v", status)
+				}
+			} else if !status.Signaled() || status.Signal() != syscall.SIGKILL {
+				t.Fatalf("child signal was not preserved: %v", status)
+			}
+		})
+	}
+}
+
+func TestProcessTreeGuardianDoesNotKeepProtocolOutputOpen(t *testing.T) {
+	cmd := exec.Command("/bin/sh", "-c", "printf ready")
+	var output bytes.Buffer
+	cmd.Stdout = &output
+	process, err := Start(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer process.Stop()
+	done := make(chan error, 1)
+	go func() { done <- process.Wait() }()
+	select {
+	case err := <-done:
+		if err != nil || output.String() != "ready" {
+			t.Fatalf("output=%q err=%v", output.String(), err)
+		}
+	case <-time.After(3 * time.Second):
+		process.Stop()
+		<-done
+		t.Fatal("guardian kept the protocol output pipe open after child exit")
+	}
+}
 
 func TestProcessTreeGuardianHelper(t *testing.T) {
 	path := os.Getenv("BATON_TEST_PROCESS_GUARDIAN_PATH")

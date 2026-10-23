@@ -77,6 +77,7 @@ const styles = stylex.create({
 const problemNotes: Record<NonNullable<DeviceAgent['problem']>, string> = {
   notInstalled: 'Not installed',
   signedOut: 'Sign-in expired',
+  unavailable: 'Agent unavailable',
 }
 
 interface AgentChoice {
@@ -162,7 +163,7 @@ function ModelMenu({
   onSelect: (choice: AgentChoice) => void
   onUnavailable: (message: string) => void
 }) {
-  const label = choice ? `${agentNames[choice.agent]} · ${choice.model}` : 'No agent'
+  const label = choice ? `${agentNames[choice.agent]} · ${choice.model || 'Default model'}` : 'No agent'
   return (
     <Menu side="bottom" trigger={<Chip icon="sparkle">{label}</Chip>}>
       {(device?.agents ?? []).map((agent) => (
@@ -175,20 +176,22 @@ function ModelMenu({
                 onUnavailable(
                   agent.problem === 'notInstalled'
                     ? `${agentNames[agent.kind]} is not installed on ${device?.name}. Install it on the device, then try again.`
-                    : `${agentNames[agent.kind]} is signed out on ${device?.name}. Sign in on the device, then try again.`,
+                    : agent.problem === 'signedOut'
+                      ? `${agentNames[agent.kind]} is signed out on ${device?.name}. Sign in on the device, then try again.`
+                      : `${agentNames[agent.kind]} is unavailable on ${device?.name}. Check the agent on the device, then try again.`,
                 )
               }
             >
               {agentNames[agent.kind]}
             </MenuOption>
           ) : (
-            agent.models.map((model) => (
+            (agent.models.length ? agent.models : ['']).map((model) => (
               <MenuOption
                 key={model}
                 selected={choice?.agent === agent.kind && choice.model === model}
                 onSelect={() => onSelect({ agent: agent.kind, model })}
               >
-                {model}
+                {model || 'Default model'}
               </MenuOption>
             ))
           )}
@@ -241,7 +244,7 @@ function ThreadListRow({
         </span>
       )}
       <span {...stylex.props(text.caption, styles.where, text.truncate)}>
-        {device?.name ?? 'Removed device'} · {agentNames[thread.agent]}
+        {device?.name ?? 'Removed device'} · {thread.agent ? agentNames[thread.agent] : 'Command'}
       </span>
       {!split && (
         <span title={thread.folder} {...stylex.props(text.mono, styles.folder, text.truncate)}>
@@ -287,7 +290,7 @@ export function ThreadsPage() {
     setError(null)
     if (thread) {
       setLocation({ deviceId: thread.deviceId, folder: thread.folder })
-      setAgentChoice({ agent: thread.agent, model: thread.model })
+      setAgentChoice(thread.agent ? { agent: thread.agent, model: thread.model } : null)
     }
     if (action === 'chooseFolder') setBrowseDevice(thread?.deviceId ?? current?.deviceId ?? null)
   }

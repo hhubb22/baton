@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -18,6 +19,10 @@ var ErrSyncRejected = errors.New("sync rejected")
 
 // NodeView 是本人节点的注册信息和连接状态。
 type NodeView struct {
+	RegisteredAt         time.Time
+	RuntimeReport        *protocol.RuntimeReport
+	RuntimeReportVersion int64
+	RuntimeReportedAt    *time.Time
 	ID                   string
 	DisplayName          string
 	System               string
@@ -306,23 +311,33 @@ const nodeStatusSQL = `
 	       COALESCE(p.online, false),
 	       COALESCE(p.synced, false),
 	       p.last_contact_at,
-	       p.status_updated_at
+	       p.status_updated_at, n.registered_at, rr.report, COALESCE(rr.report_version,0), rr.reported_at
 	FROM nodes n
-	LEFT JOIN node_presence p ON p.node_id = n.id AND p.employee_id = n.employee_id`
+	LEFT JOIN node_presence p ON p.node_id = n.id AND p.employee_id = n.employee_id
+ LEFT JOIN node_runtime_reports rr ON rr.node_id=n.id AND rr.employee_id=n.employee_id`
 
 func scanNodeView(row pgx.Row) (NodeView, error) {
 	var view NodeView
 	var caps []string
 	var creds []string
+	var report []byte
 	if err := row.Scan(
 		&view.ID, &view.DisplayName, &view.System, &caps, &view.RegistrationSeq,
 		&view.Revoked, &view.RevocationStatus, &view.RevokedBy, &view.RevocationRequested, &view.RevocationApplied, &creds,
 		&view.Online, &view.Synced, &view.LastContact, &view.StatusUpdated,
+		&view.RegisteredAt, &report, &view.RuntimeReportVersion, &view.RuntimeReportedAt,
 	); err != nil {
 		return NodeView{}, fmt.Errorf("读取节点状态失败: %s", redact.Scrub(err.Error()))
 	}
 	if caps == nil {
 		caps = []string{}
+	}
+	if report != nil {
+		var r protocol.RuntimeReport
+		if err := json.Unmarshal(report, &r); err != nil {
+			return NodeView{}, err
+		}
+		view.RuntimeReport = &r
 	}
 	view.Capabilities = caps
 	if creds == nil {

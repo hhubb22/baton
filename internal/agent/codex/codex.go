@@ -16,17 +16,20 @@ import (
 
 	"baton/internal/agent"
 	"baton/internal/privatefile"
+	"baton/internal/sidecar"
 
 	"github.com/sourcegraph/jsonrpc2"
 )
 
 const Version = "0.163.0"
 
-// 已核对官方契约并保留录制的上游 CLI 版本。
-func supportedVersion(version string) bool { return version == Version || version == "0.162.1" }
+// SupportsVersion 检查 CLI 的最低正式版本，启动后继续校验 app-server 响应。
+func SupportsVersion(version string) bool { return agent.CLIVersionAtLeast(version, "0.162.1") }
+
+func supportedVersion(version string) bool { return SupportsVersion(version) }
 
 var (
-	ErrIncompatible   = errors.New("Codex 实验协议不兼容；支持 CLI 0.163.0 / 0.162.1")
+	ErrIncompatible   = errors.New("Codex app-server 协议不兼容；需要 CLI 0.162.1 或更新的正式版本")
 	ErrHistoryMissing = agent.ErrHistoryMissing
 	ErrUncertain      = errors.New("Codex input outcome unknown; refusing replay")
 	ErrBusy           = agent.ErrBusy
@@ -175,16 +178,19 @@ func (a *Adapter) connect(ctx context.Context) error {
 		_ = out.Close()
 		return err
 	}
-	if err := cmd.Start(); err != nil {
+	stopTree, err := sidecar.StartTree(cmd)
+	if err != nil {
 		_ = out.Close()
 		_ = in.Close()
 		return errors.New("Codex app-server could not start")
 	}
+	stopTree = sync.OnceFunc(stopTree)
 	a.processDone = make(chan struct{})
-	p := &processIO{ReadCloser: out, WriteCloser: in, cmd: cmd}
+	p := &processIO{ReadCloser: out, WriteCloser: in, stopTree: stopTree}
 	a.conn = jsonrpc2.NewConn(context.Background(), jsonrpc2.NewBufferedStream(p, lineCodec{}), jsonrpc2.HandlerWithError(a.handle), jsonrpc2.SetLogger(discardLogger{}))
 	go func() {
 		_ = cmd.Wait()
+		stopTree()
 		close(a.processDone)
 		select {
 		case <-a.closed:

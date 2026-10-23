@@ -109,11 +109,19 @@ const styles = stylex.create({
 })
 
 // 回复上方的一行过程摘要，展开后从设备读取完整过程。
-export function ActivityTrace({ message, device }: { message: Message; device: Device | undefined }) {
+export function ActivityTrace({
+  message,
+  device,
+  command = false,
+}: {
+  message: Message
+  device: Device | undefined
+  command?: boolean
+}) {
   const [open, setOpen] = useState(false)
   const trace = useTrace(message.id, open)
   const name = device?.name ?? 'This device'
-  if (!message.activity) return null
+  if (!message.activity && !command) return null
 
   let content: ReactNode
   if (trace.isPending) {
@@ -148,7 +156,7 @@ export function ActivityTrace({ message, device }: { message: Message; device: D
         {...stylex.props(text.small, styles.toggle, focusRing.ring)}
       >
         <Icon name={open ? 'chevron-down' : 'chevron-right'} size={12} />
-        {activityLine(message.activity)}
+        {message.activity ? activityLine(message.activity) : 'Command output'}
       </button>
       {open && <div {...stylex.props(styles.steps)}>{content}</div>}
     </div>
@@ -404,6 +412,11 @@ export function HistoryPager({ history, device }: { history: EarlierHistory; dev
   return (
     <div {...stylex.props(styles.history)}>
       {action}
+      {history.gap && (
+        <span role="status" {...stylex.props(text.caption, styles.muted)}>
+          Some history entries are truncated or missing.
+        </span>
+      )}
       {detail && (
         <span role="status" {...stylex.props(text.caption, styles.muted)}>
           {detail}

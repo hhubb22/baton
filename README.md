@@ -18,7 +18,7 @@ Baton 是跨设备 AI Agent 协同系统。员工使用管理员分配的本地�
 - 确定性回放验证：`internal/agent/replay` 与 `tools/agent-replay` 提供跨平台 NDJSON 协议录制、脱敏规范化与故障派生回放（`CutAfter` / `Drop` / `Replace`），日常测试无需调用真实外部大模型。
 - 崩溃恢复：Worker 在发送消息前持久保存意图，恢复时查询原生历史确认是否已发送；无法确认时标为状态未知，避免重复执行。`batond` 重启后通过本地认证 IPC 重新连接存活的 Worker，未确认报告继续补送。
 
-浏览器 API 使用 `/api/v1/threads`。Web 界面按 `design/` 实现，目前读写模拟数据，尚未接入这些接口；实施顺序见 [Web UI 实施计划](specs/web-ui/PLAN.md)。
+浏览器 API 使用 `/api/v1/threads`。Web 界面按 `design/` 实现，默认通过同源 `/api/v1` 连接真实后端；模拟数据仅用于显式启用的开发场景，见 [Web UI 文档](web/README.md)。
 
 ## 环境要求
 
@@ -69,11 +69,12 @@ BATON_ENROLLMENT_TOKEN='<one-time-enrollment-token>' \
   ./bin/batond register \
   --coordinator https://baton.example \
   --display-name "Workstation" \
-  --data-dir /var/lib/baton-node
+  --system macos \
+  --data-dir "$HOME/Library/Application Support/baton/node"
 
 # 登记受限浏览目录并运行节点守护进程
-./bin/batond files add --id repo --path /srv/work/repo --data-dir /var/lib/baton-node
-./bin/batond run --relay wss://baton.example/v1/node --data-dir /var/lib/baton-node
+./bin/batond files add --id repo --path /你的代码目录 --data-dir "$HOME/Library/Application Support/baton/node"
+./bin/batond run --relay wss://baton.example/v1/node --data-dir "$HOME/Library/Application Support/baton/node"
 ```
 
 ## 配置参考
@@ -119,7 +120,7 @@ pnpm --dir runtimes/project-agent test
 
 ### Web 前端开发与验证
 
-开发时使用 Vite 提供热更新页面。页面目前使用模拟数据，不需要启动后端；场景切换和模拟账号见 [web/README.md](web/README.md)。
+开发时使用 Vite 提供热更新页面，默认连接真实后端；可用 `BATON_DEV_BACKEND` 配置 Coordinator 代理地址。显式添加 `?mock=1` 或 `?scenario=<id>` 可启用模拟场景，无需启动后端；运行方式和场景说明见 [web/README.md](web/README.md)。
 
 ```sh
 pnpm --dir web install --frozen-lockfile

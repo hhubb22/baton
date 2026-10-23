@@ -8,6 +8,7 @@ import (
 
 	"baton/internal/identity"
 	"baton/internal/node"
+	"baton/internal/protocol"
 	"baton/internal/store"
 )
 
@@ -34,10 +35,12 @@ func (s *Server) issueEnrollment(w http.ResponseWriter, r *http.Request) {
 		EnrollmentID    string `json:"enrollment_id"`
 		EnrollmentToken string `json:"enrollment_token"`
 		ExpiresAt       any    `json:"expires_at"`
+		ExpiresInMS     int64  `json:"expires_in_ms"`
 	}{
 		EnrollmentID:    id,
 		EnrollmentToken: token,
 		ExpiresAt:       expires,
+		ExpiresInMS:     max(int64(0), time.Until(expires).Milliseconds()),
 	})
 }
 
@@ -82,18 +85,24 @@ func (s *Server) registerNode(w http.ResponseWriter, r *http.Request) {
 const localProcessNotice = "吊销连接凭据不会停止离线节点上的本地进程。重新接入需要新的连接凭据。"
 
 type nodeStatusJSON struct {
-	ID               string          `json:"id"`
-	DisplayName      string          `json:"display_name"`
-	System           string          `json:"system"`
-	Capabilities     []string        `json:"capabilities"`
-	RegistrationSeq  int64           `json:"registration_seq"`
-	Online           bool            `json:"online"`
-	LastContact      *time.Time      `json:"last_contact_at"`
-	StatusUpdated    *time.Time      `json:"status_updated_at"`
-	Synced           bool            `json:"synced"`
-	Executable       bool            `json:"executable"`
-	RevocationStatus string          `json:"revocation_status"`
-	Revocation       *revocationJSON `json:"revocation,omitempty"`
+	RegisteredAt         time.Time               `json:"registered_at"`
+	RuntimeReport        *protocol.RuntimeReport `json:"runtime_report"`
+	RuntimeReportVersion int64                   `json:"runtime_report_version"`
+	RuntimeReportedAt    *time.Time              `json:"runtime_reported_at"`
+	BatondVersion        string                  `json:"batond_version,omitempty"`
+	User                 string                  `json:"user"`
+	ID                   string                  `json:"id"`
+	DisplayName          string                  `json:"display_name"`
+	System               string                  `json:"system"`
+	Capabilities         []string                `json:"capabilities"`
+	RegistrationSeq      int64                   `json:"registration_seq"`
+	Online               bool                    `json:"online"`
+	LastContact          *time.Time              `json:"last_contact_at"`
+	StatusUpdated        *time.Time              `json:"status_updated_at"`
+	Synced               bool                    `json:"synced"`
+	Executable           bool                    `json:"executable"`
+	RevocationStatus     string                  `json:"revocation_status"`
+	Revocation           *revocationJSON         `json:"revocation,omitempty"`
 }
 
 type revocationJSON struct {
@@ -115,6 +124,7 @@ type defaultDeviceJSON struct {
 
 func nodeStatusFrom(view store.NodeView) nodeStatusJSON {
 	out := nodeStatusJSON{
+		RegisteredAt: view.RegisteredAt, RuntimeReport: view.RuntimeReport, RuntimeReportVersion: view.RuntimeReportVersion, RuntimeReportedAt: view.RuntimeReportedAt,
 		ID:               view.ID,
 		DisplayName:      view.DisplayName,
 		System:           view.System,
@@ -126,6 +136,10 @@ func nodeStatusFrom(view store.NodeView) nodeStatusJSON {
 		Synced:           view.Synced,
 		Executable:       view.Executable(),
 		RevocationStatus: view.RevocationStatus,
+	}
+	if view.RuntimeReport != nil {
+		out.BatondVersion = view.RuntimeReport.BatondVersion
+		out.User = view.RuntimeReport.User
 	}
 	if out.RevocationStatus == "" {
 		out.RevocationStatus = store.RevocationNone

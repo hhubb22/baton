@@ -75,7 +75,7 @@ func TestProjectIdentityOwnershipAndConstraints(t *testing.T) {
 		columns = append(columns, column)
 	}
 	rows.Close()
-	if strings.Join(columns, ",") != "id,employee_id,title,goal,status,version,created_at,updated_at" {
+	if strings.Join(columns, ",") != "client_project_id,create_request,id,employee_id,title,goal,status,version,created_at,updated_at" {
 		t.Fatalf("Project 列: %v", columns)
 	}
 	invalidSQL := []struct {

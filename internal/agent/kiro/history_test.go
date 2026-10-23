@@ -12,7 +12,8 @@ import (
 func TestBlockedProtocolWriteHasDeadline(t *testing.T) {
 	reader, writer := io.Pipe()
 	defer reader.Close()
-	p := &processIO{ReadCloser: reader, WriteCloser: writer, writeTimeout: 20 * time.Millisecond}
+	stopped := make(chan struct{})
+	p := &processIO{ReadCloser: reader, WriteCloser: writer, writeTimeout: 20 * time.Millisecond, stopTree: func() { close(stopped) }}
 	done := make(chan error, 1)
 	go func() { _, err := p.Write(make([]byte, 256*1024)); done <- err }()
 	select {
@@ -22,6 +23,11 @@ func TestBlockedProtocolWriteHasDeadline(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("协议写入没有释放")
+	}
+	select {
+	case <-stopped:
+	default:
+		t.Fatal("写入超时没有停止进程树")
 	}
 }
 
@@ -51,7 +57,7 @@ func TestProcessCloseKillsBeforeClosingPipe(t *testing.T) {
 	t.Cleanup(func() { _ = cmd.Process.Kill(); <-exited })
 	reader, writer := io.Pipe()
 	defer reader.Close()
-	p := &processIO{ReadCloser: processBoundReader{Reader: strings.NewReader(""), exited: exited}, WriteCloser: writer, cmd: cmd}
+	p := &processIO{ReadCloser: processBoundReader{Reader: strings.NewReader(""), exited: exited}, WriteCloser: writer, stopTree: func() { _ = cmd.Process.Kill() }}
 	done := make(chan struct{})
 	go func() { _ = p.Close(); close(done) }()
 	select {

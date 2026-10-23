@@ -107,7 +107,7 @@ func TestThreadHistoryUnreadRecoversAfterRepeatedFailuresAndReconnect(t *testing
 			}
 			defer reopened.Close()
 			h.ledger = reopened
-			s = newThreadService(reopened, h, 0, nil, func(context.Context, string, any) error { return nil })
+			s = newThreadService(reopened, h, 0, func(context.Context, string, any) error { return nil })
 		}
 		s.historyRetry[open.ThreadID] = time.Now().Add(-time.Second)
 		reports, err := s.pending(t.Context(), open.ThreadID, 1)

@@ -101,6 +101,11 @@ func (h *Host) ThreadWithdraw(ctx context.Context, threadID, clientMessageID str
 	_, err := h.threadCall(ctx, threadID, ipcMessage{Type: "thread_withdraw", ClientMessageID: clientMessageID})
 	return err
 }
+func (h *Host) ThreadResume(ctx context.Context, threadID string) error {
+	_, err := h.threadCall(ctx, threadID, ipcMessage{Type: "thread_resume"})
+	return err
+}
+
 func (h *Host) ThreadStop(ctx context.Context, threadID, reason string) error {
 	_, err := h.threadCall(ctx, threadID, ipcMessage{Type: "thread_stop", StopReason: reason})
 	return err
@@ -245,6 +250,8 @@ func handleThreadWorker(ctx context.Context, w *ThreadWorker, msg ipcMessage) ip
 		err = w.EnqueueThreadMessage(ctx, msg.ClientMessageID, msg.Payload, msg.Mode, msg.Model)
 	case "thread_withdraw":
 		err = w.WithdrawThreadMessage(msg.ClientMessageID)
+	case "thread_resume":
+		err = w.ResumeThread(ctx)
 	case "thread_stop":
 		err = w.StopThread(msg.StopReason)
 	case "thread_pending":

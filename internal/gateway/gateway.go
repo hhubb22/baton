@@ -352,7 +352,7 @@ func incomingPriority(body json.RawMessage) (string, error) {
 	switch head.Type {
 	case protocol.BodyRuntimeReport, protocol.BodyProjectRuntimeRequest:
 		return protocol.PriorityControl, nil
-	case "node.sync", protocol.BodyThreadCommandResult, protocol.BodyThreadReport, protocol.BodyFileResult:
+	case "node.sync", protocol.BodyThreadCommandResult, protocol.BodyThreadReport, protocol.BodyFileResult, protocol.BodyProjectExecResult:
 		return protocol.PriorityControl, nil
 	case protocol.BodySessionResult:
 		return protocol.PriorityOutput, nil

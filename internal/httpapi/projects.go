@@ -30,6 +30,8 @@ func (s *Server) routeProject(w http.ResponseWriter, r *http.Request) {
 		allowed = r.Method == http.MethodPost || (parts[1] == "messages" && r.Method == http.MethodGet)
 	case len(parts) == 2 && (parts[1] == "status" || parts[1] == "events" || parts[1] == "memory"):
 		allowed = r.Method == http.MethodGet
+	case len(parts) == 4 && parts[1] == "memory" && parts[3] == "revisions":
+		allowed = r.Method == http.MethodGet
 	case len(parts) == 3 && parts[1] == "memory":
 		allowed = r.Method == http.MethodPut || r.Method == http.MethodGet
 	default:
@@ -61,7 +63,7 @@ func (s *Server) routeProject(w http.ResponseWriter, r *http.Request) {
 		}
 		parts[0] = id
 	}
-	if len(parts) == 3 {
+	if len(parts) >= 3 {
 		id, err := identity.ParseUUID(parts[2])
 		if err != nil {
 			s.writeError(w, r, 400, "invalid_id", "记忆标识不正确")
@@ -213,6 +215,34 @@ func (s *Server) routeProject(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.writeJSON(w, 200, page)
+	case len(parts) == 4:
+		q, ok := s.projectQuery(w, r, "after_revision", "limit")
+		if !ok {
+			return
+		}
+		after, err := projectQueryInt(q, "after_revision", 0, 0, 1<<63-1)
+		if err != nil {
+			s.writeProjectError(w, r, err)
+			return
+		}
+		limit, err := projectQueryInt(q, "limit", 50, 1, 100)
+		if err != nil {
+			s.writeProjectError(w, r, err)
+			return
+		}
+		revisions, err := s.store.ProjectMemoryRevisions(r.Context(), employeeID, parts[0], parts[2], after, int(limit))
+		if err != nil {
+			s.writeProjectError(w, r, err)
+			return
+		}
+		var next int64
+		if len(revisions) == int(limit) {
+			next = revisions[len(revisions)-1].Revision
+		}
+		s.writeJSON(w, 200, struct {
+			Revisions []store.MemoryRevision `json:"revisions"`
+			Next      int64                  `json:"next_after_revision,omitempty"`
+		}{revisions, next})
 	case len(parts) == 2:
 		after, limit, ok := s.projectListQuery(w, r)
 		if !ok {
@@ -328,6 +358,8 @@ func (s *Server) writeProjectError(w http.ResponseWriter, r *http.Request, err e
 		s.writeError(w, r, 400, "invalid_request", "请求参数不正确")
 	case errors.Is(err, projectagent.ErrTooLarge):
 		s.writeError(w, r, 413, "body_too_large", "正文超过 64 KiB 或编码后的消息超过队列容量")
+	case errors.Is(err, projectagent.ErrProjectConflict):
+		s.writeError(w, r, 409, "project_conflict", "项目标识已用于不同内容")
 	case errors.Is(err, projectagent.ErrMessageConflict):
 		s.writeError(w, r, 409, "message_conflict", "消息标识已用于不同内容")
 	case errors.As(err, &conflict):

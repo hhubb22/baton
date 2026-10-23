@@ -19,6 +19,8 @@ const (
 )
 
 type RuntimeReport struct {
+	BatondVersion  string          `json:"batond_version,omitempty"`
+	User           string          `json:"user,omitempty"`
 	Agents         []RuntimeAgent  `json:"agents,omitempty"`
 	ProjectRuntime *ProjectRuntime `json:"project_runtime,omitempty"`
 	Exec           RuntimeExec     `json:"exec"`
@@ -55,10 +57,12 @@ type ProjectRuntime struct {
 	Providers []RuntimeProvider `json:"providers"`
 }
 type RuntimeProvider struct {
-	Provider string `json:"provider"`
-	Status   string `json:"status"`
+	Models   []RuntimeModel `json:"models,omitempty"`
+	Provider string         `json:"provider"`
+	Status   string         `json:"status"`
 }
 type RuntimeExec struct {
+	User    string `json:"user,omitempty"`
 	Enabled bool   `json:"enabled"`
 	Shell   string `json:"shell"`
 }
@@ -125,6 +129,16 @@ func ValidateProjectRuntime(p *ProjectRuntime) error {
 		if v.Status != "available" && v.Status != "login_required" && v.Status != "unknown" {
 			return ErrRuntimeReport
 		}
+		if len(v.Models) > 64 {
+			return ErrRuntimeReport
+		}
+		models := map[string]bool{}
+		for _, m := range v.Models {
+			if !runtimeText(m.ID, 512) || !runtimeText(m.Name, 512) || models[m.ID] {
+				return ErrRuntimeReport
+			}
+			models[m.ID] = true
+		}
 		seen[v.Provider] = true
 	}
 	return nil
@@ -136,6 +150,9 @@ func runtimeText(s string, max int) bool {
 
 // RuntimeReportJSON 使用比 PostgreSQL jsonb 文本更宽的排版计量，预留数据库规范化的空格。
 func RuntimeReportJSON(r RuntimeReport) ([]byte, error) {
+	if (r.Exec.User != "" && !runtimeText(r.Exec.User, 256)) || (r.BatondVersion != "" && !runtimeText(r.BatondVersion, 256)) || (r.User != "" && !runtimeText(r.User, 256)) {
+		return nil, ErrRuntimeReport
+	}
 	if ValidateProjectRuntime(r.ProjectRuntime) != nil || !runtimeText(r.Exec.Shell, 4096) || len(r.Roots) > 32 || len(r.Repos) > 128 {
 		return nil, ErrRuntimeReport
 	}

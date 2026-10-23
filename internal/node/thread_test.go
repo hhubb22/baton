@@ -149,7 +149,7 @@ func threadTestService(t *testing.T) (*threadService, *threadTestHost, protocol.
 		t.Fatal(err)
 	}
 	h := newThreadTestHost(l)
-	s := newThreadService(l, h, 0, nil, func(context.Context, string, any) error { return nil })
+	s := newThreadService(l, h, 0, func(context.Context, string, any) error { return nil })
 	cmd := protocol.ThreadCommand{Type: protocol.BodyThreadCommand, ThreadID: threadUUID(t), Action: "open", AgentType: "shell", WorkingDirectory: root, ExecutionTimeoutSeconds: 20}
 	return s, h, cmd
 }
@@ -281,7 +281,6 @@ func TestThreadOpenFailuresAreDurable(t *testing.T) {
 			case "binary_missing":
 				t.Setenv("PATH", t.TempDir())
 				cmd.AgentType = "codex"
-				s.caps = []string{"codex"}
 			case "symlink_escape":
 				link := filepath.Join(cmd.WorkingDirectory, "outside")
 				if err := os.Symlink(t.TempDir(), link); err != nil {

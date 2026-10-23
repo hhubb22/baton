@@ -16,6 +16,7 @@ const MaxEventPageBytes = 192 << 10
 
 var ErrInvalid = errors.New("Project 参数不正确")
 var ErrTooLarge = errors.New("正文超过 64 KiB")
+var ErrProjectConflict = errors.New("项目标识已用于不同内容")
 var ErrMessageConflict = errors.New("消息标识已用于不同内容")
 
 type MessageInput struct {
@@ -67,10 +68,11 @@ type Conversation struct {
 }
 
 type CreateInput struct {
-	Title    string `json:"title"`
-	Goal     string `json:"goal"`
-	Provider string `json:"provider"`
-	Model    string `json:"model"`
+	ClientProjectID string `json:"client_project_id,omitempty"`
+	Title           string `json:"title"`
+	Goal            string `json:"goal"`
+	Provider        string `json:"provider"`
+	Model           string `json:"model"`
 }
 
 type Patch struct {

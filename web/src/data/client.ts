@@ -7,9 +7,13 @@ import type {
   HistoryPage,
   ID,
   InboxItem,
+  ItemDecision,
   IssuedEnrollment,
   LiveOutput,
   MemoryNote,
+  MemorySave,
+  SaveMemoryInput,
+  ProjectPatch,
   Message,
   Operation,
   Project,
@@ -40,9 +44,11 @@ export class ClientError extends Error {
 
 // 页面只通过这个接口读写数据。模拟实现见 mock/，接入后端时换成真实实现。
 export interface BatonClient {
+  readonly mode?: 'http' | 'mock'
   getSession(): Promise<Session>
   signIn(username: string, password: string): Promise<Session>
   signOut(): Promise<void>
+  changePassword(currentPassword: string, newPassword: string): Promise<Session>
 
   listDevices(): Promise<Device[]>
   listProjects(): Promise<Project[]>
@@ -96,9 +102,14 @@ export interface BatonClient {
     clientId: string
     reference?: Reference | null
   }): Promise<ProjectEntry>
+  updateProject(input: { projectId: ID; patch: ProjectPatch }): Promise<Project>
+  setProjectStatus(input: { projectId: ID; status: 'active' | 'paused' | 'archived' }): Promise<Project>
+  saveMemory(input: SaveMemoryInput): Promise<MemorySave>
   // 只停止助手这一次运行，它开的 Thread 继续执行。
   stopProjectRun(projectId: ID): Promise<Project>
-  answerItem(input: { itemId: ID; answer: string; revision: number }): Promise<Operation>
+  handleItem(input: { itemId: ID; decision: ItemDecision; revision: number }): Promise<Operation>
+  // 重试解除系统阻塞，同时解决尚未关闭的系统通知，不产生事项回答。
+  retryProject(projectId: ID): Promise<Project>
 
   setDefaultDevice(deviceId: ID): Promise<Session>
   setCommandAccess(input: { deviceId: ID; enabled: boolean }): Promise<Device>

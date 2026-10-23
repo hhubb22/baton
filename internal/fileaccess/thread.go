@@ -1,7 +1,9 @@
 package fileaccess
 
 import (
+	"baton/internal/protocol"
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -10,6 +12,8 @@ import (
 // ThreadAttachment 是回复中的本地文件或 Git commit 引用。
 type ThreadAttachment struct {
 	Kind         string `json:"kind"`
+	AbsolutePath string `json:"absolute_path,omitempty"`
+	Size         *int64 `json:"size,omitempty"`
 	NodeID       string `json:"node_id,omitempty"`
 	RootID       string `json:"root_id,omitempty"`
 	Path         string `json:"path,omitempty"`
@@ -66,7 +70,8 @@ func ParseThreadAttachments(dataDir, nodeID, workingDir, content string) ([]Thre
 			key := root.ID + ":" + rel
 			if !seen[key] {
 				seen[key] = true
-				result = append(result, ThreadAttachment{Kind: "file", NodeID: nodeID, RootID: root.ID, Path: rel, AccessStatus: "available"})
+				size := info.Size()
+				result = append(result, ThreadAttachment{Kind: "file", NodeID: nodeID, RootID: root.ID, Path: rel, AbsolutePath: filepath.Join(root.Path, filepath.FromSlash(rel)), Size: &size, AccessStatus: "available"})
 			}
 			break
 		}
@@ -85,7 +90,68 @@ func ParseThreadAttachments(dataDir, nodeID, workingDir, content string) ([]Thre
 			}
 		}
 	}
-	return result, nil
+	return boundThreadAttachments(result), nil
+}
+
+// boundThreadAttachments 优先保留完整来源，再用剩余额度保存大小和绝对路径。
+// 单条来源超限时跳过整条引用，原始路径仍保留在回复正文。
+func boundThreadAttachments(refs []ThreadAttachment) []ThreadAttachment {
+	result := make([]ThreadAttachment, 0, len(refs))
+	originals := make([]ThreadAttachment, 0, len(refs))
+	for _, ref := range refs {
+		core := ref
+		core.AbsolutePath = ""
+		core.Size = nil
+		result = append(result, core)
+		if !threadAttachmentsFit(result) {
+			result = result[:len(result)-1]
+			continue
+		}
+		originals = append(originals, ref)
+	}
+	for i, original := range originals {
+		result[i].Size = original.Size
+		if !threadAttachmentsFit(result) {
+			result[i].Size = nil
+		}
+	}
+	for i, original := range originals {
+		result[i].AbsolutePath = original.AbsolutePath
+		if !threadAttachmentsFit(result) {
+			result[i].AbsolutePath = ""
+		}
+	}
+	return result
+}
+
+// threadAttachmentsFit 对字符串、布尔值和 int64 字段计算 JSONB 文本大小的上界。
+// PostgreSQL 在字符串外的逗号和冒号后插入空格；Go 的 HTML/Unicode 转义只会高估长度。
+func threadAttachmentsFit(refs []ThreadAttachment) bool {
+	raw, err := json.Marshal(refs)
+	if err != nil {
+		return false
+	}
+	size := len(raw)
+	quoted, escaped := false, false
+	for _, b := range raw {
+		if quoted {
+			if escaped {
+				escaped = false
+			} else if b == '\\' {
+				escaped = true
+			} else if b == '"' {
+				quoted = false
+			}
+		} else {
+			switch b {
+			case '"':
+				quoted = true
+			case ':', ',':
+				size++
+			}
+		}
+	}
+	return size <= protocol.MaxThreadAttachmentsBytes
 }
 
 func threadWorkingOrigin(roots []BrowseRoot, workingDir string) string {

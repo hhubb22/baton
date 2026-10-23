@@ -12,6 +12,7 @@ import (
 	"baton/internal/fileaccess"
 	"baton/internal/privatefile"
 	"baton/internal/protocol"
+	"github.com/gofrs/flock"
 )
 
 const FileName = "project-exec.json"
@@ -50,6 +51,39 @@ func validateProjectExec(cfg protocol.RuntimeExec) error {
 
 // WriteProjectExec 原子保存本机开关；报告循环会重新读取，不需要重启连接。
 func WriteProjectExec(dir string, cfg protocol.RuntimeExec) error {
+	if err := fileaccess.PrepareDataDir(dir); err != nil {
+		return err
+	}
+	lock := flock.New(filepath.Join(dir, "project-exec.lock"))
+	if err := lock.Lock(); err != nil {
+		return err
+	}
+	defer lock.Unlock()
+	return writeProjectExec(dir, cfg)
+}
+
+// SetEnabled 保留本机 shell，在同一文件锁内保存并回读授权状态。
+func SetEnabled(dir string, enabled bool) (protocol.RuntimeExec, error) {
+	if err := fileaccess.PrepareDataDir(dir); err != nil {
+		return protocol.RuntimeExec{}, err
+	}
+	lock := flock.New(filepath.Join(dir, "project-exec.lock"))
+	if err := lock.Lock(); err != nil {
+		return protocol.RuntimeExec{}, err
+	}
+	defer lock.Unlock()
+	cfg, err := ReadProjectExec(dir)
+	if err != nil {
+		return protocol.RuntimeExec{}, err
+	}
+	cfg.Enabled = enabled
+	if err := writeProjectExec(dir, cfg); err != nil {
+		return protocol.RuntimeExec{}, err
+	}
+	return ReadProjectExec(dir)
+}
+
+func writeProjectExec(dir string, cfg protocol.RuntimeExec) error {
 	if validateProjectExec(cfg) != nil {
 		return errors.New("Project Agent 命令配置无效")
 	}
@@ -57,7 +91,10 @@ func WriteProjectExec(dir string, cfg protocol.RuntimeExec) error {
 		return err
 	}
 	// 使用固定字段序列化，配置文件不保存任何凭据。
-	raw, err := json.Marshal(cfg)
+	raw, err := json.Marshal(struct {
+		Enabled bool   `json:"enabled"`
+		Shell   string `json:"shell"`
+	}{cfg.Enabled, cfg.Shell})
 	if err != nil {
 		return err
 	}

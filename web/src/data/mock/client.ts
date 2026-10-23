@@ -75,6 +75,7 @@ export function createMockClient(
   }
 
   return {
+    mode: 'mock',
     controls: {
       get scenario() {
         return store.scenario
@@ -108,8 +109,16 @@ export function createMockClient(
       store.signOut()
     },
 
+    async changePassword(currentPassword, newPassword) {
+      await connect(latency.save)
+      signedIn()
+      if (!currentPassword || newPassword.length < 12) throw new ClientError('invalid', 'Use at least 12 characters.')
+      store.signOut()
+      return structuredClone(store.snapshot().session)
+    },
+
     listDevices: () => guarded(() => store.snapshot().devices),
-    listProjects: () => guarded(() => store.snapshot().projects),
+    listProjects: () => guarded(() => store.listProjects()),
     listProjectEntries: (projectId) => guarded(() => store.projectEntries(projectId)),
     listProjectMemory: (projectId) => guarded(() => store.projectMemory(projectId)),
     listThreads: () => guarded(() => store.snapshot().threads),
@@ -167,15 +176,37 @@ export function createMockClient(
       signedIn()
       return structuredClone(store.sendProjectMessage(projectId, body, clientId, reference ?? null))
     },
+    async updateProject({ projectId, patch }) {
+      const savedPatch = structuredClone(patch)
+      await connect(latency.save)
+      signedIn()
+      return structuredClone(store.updateProject(projectId, savedPatch))
+    },
+    async setProjectStatus({ projectId, status }) {
+      await connect(latency.save)
+      signedIn()
+      return structuredClone(store.setProjectStatus(projectId, status))
+    },
+    async saveMemory(input) {
+      const savedInput = structuredClone(input)
+      await connect(latency.save)
+      signedIn()
+      return structuredClone(store.saveMemory(savedInput))
+    },
     async stopProjectRun(projectId) {
       await connect(latency.read)
       signedIn()
       return structuredClone(store.stopProjectRun(projectId))
     },
-    async answerItem({ itemId, answer, revision }) {
-      await connect(latency.read)
+    async handleItem({ itemId, decision, revision }) {
+      await connect(latency.save)
       signedIn()
-      return structuredClone(store.answerItem(itemId, answer, revision))
+      return structuredClone(store.handleItem(itemId, decision, revision))
+    },
+    async retryProject(projectId) {
+      await connect(latency.save)
+      signedIn()
+      return structuredClone(store.retryProject(projectId))
     },
 
     async setDefaultDevice(deviceId) {

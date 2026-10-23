@@ -1,5 +1,17 @@
 import { createContext, useContext } from 'react'
-import type { ID, Reference } from '../data/types'
+import type { ID, ProjectPatch, Reference } from '../data/types'
+
+export interface ItemDraft {
+  option: string | null
+  note: string
+  replying: boolean
+}
+
+export interface MemoryDraft {
+  body: string
+  version: number | null
+  clientId: string
+}
 
 // 工作区布局提供给侧栏和页面标题栏的状态。
 export interface Workspace {
@@ -14,6 +26,15 @@ export interface Workspace {
   // 把引用放进 Project 输入区并打开这个 Project；已经在这个 Project 页时不跳转。
   askProject(projectId: ID, reference: Reference): void
   clearReference(projectId: ID): void
+  itemDrafts: Record<ID, ItemDraft>
+  setItemDraft(itemId: ID, draft: ItemDraft | null): void
+  settingsDrafts: Record<ID, ProjectPatch>
+  setSettingsDraft(
+    projectId: ID,
+    draft: ProjectPatch | null | ((current: ProjectPatch | undefined) => ProjectPatch | null),
+  ): void
+  memoryDrafts: Record<ID, MemoryDraft>
+  setMemoryDraft(key: ID, draft: MemoryDraft | null | ((current: MemoryDraft | undefined) => MemoryDraft | null)): void
 }
 
 export const WorkspaceContext = createContext<Workspace | null>(null)

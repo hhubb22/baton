@@ -26,9 +26,15 @@ import type {
   ProcessStep,
   FilePreview,
   HistoryPage,
+  ItemDecision,
+  InboxItem,
   LiveOutput,
   Project,
   ProjectEntry,
+  ProjectPatch,
+  SaveMemoryInput,
+  MemorySave,
+  MemoryVersion,
   Reference,
   SendMode,
   Thread,
@@ -37,7 +43,7 @@ import type {
 import { previewLimit } from '../types'
 import { createWorld, type ScenarioId } from './scenarios'
 import type { Scheduler } from './scheduler'
-import { fileKey, type EnrollmentRecord, type World } from './world'
+import { fileKey, type AssistantContext, type EnrollmentRecord, type PassiveInput, type World } from './world'
 
 export interface Latency {
   // 读取一次数据。
@@ -132,8 +138,13 @@ export class MockStore {
   private stopTimers = new Map<ID, { operation: Operation; cancel: () => void }>()
   private clientIds = new Map<string, { opId: ID; body: string }>()
   private projectClientIds = new Map<string, { id: ID; body: string }>()
+  private memoryClientIds = new Map<string, { fingerprint: string; result: MemorySave }>()
+  private assistantStops = new Map<ID, () => void>()
   // Project 助手正在进行的一次运行，以及它读走的消息和 Thread 结果；运行被打断时放回。
-  private assistantRuns = new Map<ID, { cancel: () => void; inputs: UserEntry[]; replies: Reply[] }>()
+  private assistantRuns = new Map<
+    ID,
+    { cancel: () => void; inputs: UserEntry[]; replies: Reply[]; context: AssistantContext }
+  >()
   // 等 Project 助手读取的 Thread 结果，键为 Project ID。
   private replies = new Map<ID, Reply[]>()
   // 设备断开打断了运行、要在设备回来后接着运行的 Project。
@@ -197,6 +208,8 @@ export class MockStore {
     this.stopTimers.clear()
     this.clientIds.clear()
     this.projectClientIds.clear()
+    this.memoryClientIds.clear()
+    this.assistantStops.clear()
     this.assistantRuns.clear()
     this.replies.clear()
     this.interrupted.clear()
@@ -389,7 +402,10 @@ export class MockStore {
     this.ensureWritable(thread)
     if (body.trim() === '') throw new ClientError('invalid', 'Message is empty')
     if (mode === 'now' && !this.agentOf(thread)?.abilities.steer) {
-      throw new ClientError('invalid', `${agentNames[thread.agent]} can't read messages during a reply. Send it next.`)
+      throw new ClientError(
+        'invalid',
+        `${thread.agent ? agentNames[thread.agent] : 'Command'} can't read messages during a reply. Send it next.`,
+      )
     }
 
     const message = this.userMessage(threadId, body)
@@ -577,7 +593,7 @@ export class MockStore {
     const thread = this.thread(threadId)
     this.ensureWritable(thread)
     const agent = this.agentOf(thread)
-    const name = agentNames[thread.agent]
+    const name = thread.agent ? agentNames[thread.agent] : 'Command'
     if (thread.model === model) return thread
     if (!agent?.abilities.switchModel) {
       throw new ClientError('invalid', `${name} cannot switch models in this chat. Start a new chat to choose another.`)
@@ -593,7 +609,10 @@ export class MockStore {
     const thread = this.thread(threadId)
     if (thread.status === 'archived') throw new ClientError('invalid', 'This chat is archived')
     if (thread.status === 'running' && !this.agentOf(thread)?.abilities.stop) {
-      throw new ClientError('invalid', `${agentNames[thread.agent]} does not support stopping from Baton`)
+      throw new ClientError(
+        'invalid',
+        `${thread.agent ? agentNames[thread.agent] : 'Command'} does not support stopping from Baton`,
+      )
     }
     const existing = this.pendingEnd(thread)
     if (existing) return existing
@@ -620,7 +639,10 @@ export class MockStore {
     const thread = this.thread(threadId)
     if (thread.status === 'archived') throw new ClientError('invalid', 'This chat is already archived')
     if (thread.status === 'running' && !this.agentOf(thread)?.abilities.stop) {
-      throw new ClientError('invalid', `Wait for ${agentNames[thread.agent]} to finish, then archive this chat`)
+      throw new ClientError(
+        'invalid',
+        `Wait for ${thread.agent ? agentNames[thread.agent] : 'Command'} to finish, then archive this chat`,
+      )
     }
     const operation = this.createOperation('archiveThread', threadId)
     this.emit('operations')
@@ -715,7 +737,10 @@ export class MockStore {
       throw new ClientError('invalid', 'This chat does not need resuming')
     }
     if (!this.agentOf(thread)?.abilities.resume) {
-      throw new ClientError('invalid', `${agentNames[thread.agent]} on ${device.name} does not support resuming`)
+      throw new ClientError(
+        'invalid',
+        `${thread.agent ? agentNames[thread.agent] : 'Command'} on ${device.name} does not support resuming`,
+      )
     }
     if (!this.online(device.id)) throw new ClientError('invalid', `Reconnect ${device.name} to resume this chat`)
     const operation = this.createOperation('resumeThread', threadId)
@@ -736,31 +761,127 @@ export class MockStore {
     return operation
   }
 
-  answerItem(itemId: ID, answer: string, revision: number): Operation {
+  handleItem(itemId: ID, decision: ItemDecision, revision: number): Operation {
     const item = this.world.inbox.find((entry) => entry.id === itemId)
-    if (!item) throw new ClientError('notFound', `Item ${itemId} not found`)
-    const operation = this.createOperation('answerItem', itemId)
-    this.emit('operations')
-
-    this.schedule(this.latency.save, () => {
-      const elsewhere = this.world.answeredElsewhere[itemId]
-      if (elsewhere !== undefined) {
-        delete this.world.answeredElsewhere[itemId]
-        item.status = 'answered'
-        item.answer = elsewhere
-        item.revision += 1
-      }
-      if (item.status !== 'pending' || item.revision !== revision) {
-        this.setPhase(operation, 'conflict', item.answer ? `Already answered: ${item.answer}` : 'Already handled')
-      } else {
-        item.status = 'answered'
-        item.answer = answer
-        item.revision += 1
-        this.setPhase(operation, 'done')
-      }
+    if (!item) throw new ClientError('notFound', 'This question is no longer available.')
+    const project = this.project(item.projectId)
+    const elsewhere = this.world.answeredElsewhere[itemId]
+    if (elsewhere !== undefined && item.status === 'pending') {
+      delete this.world.answeredElsewhere[itemId]
+      this.saveDecision(item, { kind: 'answer', option: elsewhere, note: '' })
+    }
+    const withdrawn = this.world.withdrawnElsewhere[itemId]
+    if (withdrawn !== undefined && item.status === 'pending') {
+      delete this.world.withdrawnElsewhere[itemId]
+      this.withdrawItem(itemId, withdrawn)
+    }
+    if (item.status !== 'pending' || item.revision !== revision) {
+      const detail =
+        item.status === 'answered'
+          ? `Already answered: ${[item.result?.option, item.result?.note].filter(Boolean).join(' · ')}`
+          : 'Already handled'
+      const operation = this.createOperation('answerItem', itemId)
+      this.setPhase(operation, 'conflict', detail)
       this.emit('inbox', 'projects', 'operations')
-    })
+      return operation
+    }
+    if (project.status === 'archived') throw new ClientError('invalid', 'This project is archived.')
+    if (decision.kind === 'answer') {
+      if (item.kind === 'system') throw new ClientError('invalid', 'Go to the project to retry.')
+      if (decision.option !== null && !item.options.includes(decision.option)) {
+        throw new ClientError('invalid', 'Choose one of the available options.')
+      }
+      if (decision.option === null && !item.allowText) throw new ClientError('invalid', 'Choose an option to reply.')
+      if (decision.option === null && !decision.note.trim()) throw new ClientError('invalid', 'Enter a reply.')
+      if (new TextEncoder().encode(decision.note).length > 4096) {
+        throw new ClientError('invalid', 'Keep your reply within 4 KB of text.')
+      }
+    }
+    if (this.world.failItemSaves > 0) {
+      this.world.failItemSaves -= 1
+      throw new ClientError('unavailable', 'Your reply could not be saved. Your choice and note are kept. Try again.')
+    }
+    this.saveDecision(item, decision)
+    const operation = this.createOperation('answerItem', itemId)
+    this.setPhase(operation, 'done')
+    this.emit('inbox', 'projects', 'operations')
     return operation
+  }
+
+  private saveDecision(item: InboxItem, decision: ItemDecision) {
+    const project = this.project(item.projectId)
+    item.status = decision.kind === 'close' ? 'closed' : 'answered'
+    item.revision += 1
+    item.result = {
+      option: decision.kind === 'answer' ? decision.option : null,
+      note: decision.kind === 'answer' ? decision.note.trim() : '',
+      actor: this.world.session.account?.name ?? 'You',
+      at: this.scheduler.now(),
+      reason: null,
+      inputId: null,
+    }
+    if (item.kind === 'system') return
+    const response =
+      decision.kind === 'close' ? 'Closed question' : [item.result.option, item.result.note].filter(Boolean).join('\n')
+    const entry: UserEntry = {
+      id: this.nextId('ent'),
+      projectId: item.projectId,
+      kind: 'user',
+      body: `Question ${item.id}: ${item.title}
+${response}`,
+      delivery: 'saved',
+      reference: null,
+      createdAt: this.scheduler.now(),
+    }
+    this.world.projectEntries.push(entry)
+    item.result.inputId = entry.id
+    this.wake(project)
+  }
+
+  withdrawItem(itemId: ID, reason: string) {
+    const item = this.world.inbox.find((entry) => entry.id === itemId)
+    if (!item || item.kind === 'system' || item.status !== 'pending') return
+    item.status = 'withdrawn'
+    item.revision += 1
+    item.result = {
+      option: null,
+      note: '',
+      actor: 'Project assistant',
+      at: this.scheduler.now(),
+      reason,
+      inputId: null,
+    }
+    this.emit('inbox')
+  }
+
+  retryProject(projectId: ID) {
+    const project = this.project(projectId)
+    if (project.status !== 'active') throw new ClientError('invalid', 'Resume this project before retrying.')
+    if (project.agent.state !== 'blocked') return project
+    if (!this.pickDevice(project)) {
+      throw new ClientError(
+        'invalid',
+        'No device is ready. Sign in on an online device, then try again. Your messages are saved.',
+      )
+    }
+    for (const item of this.world.inbox) {
+      if (item.projectId !== projectId || item.kind !== 'system' || item.status !== 'pending') continue
+      item.status = 'resolved'
+      item.revision += 1
+      item.result = {
+        option: null,
+        note: '',
+        actor: this.world.session.account?.name ?? 'You',
+        at: this.scheduler.now(),
+        reason: null,
+        inputId: null,
+      }
+    }
+    project.agent = { ...project.agent, state: 'idle', reason: null }
+    this.interrupted.add(projectId)
+    this.wake(project)
+    this.emit('projects', 'inbox')
+    return project
   }
 
   // ---- 设备事件 ----
@@ -812,19 +933,16 @@ export class MockStore {
     // 助手所在设备不可用时换到另一台符合条件的设备接着运行；没有时把读到的消息和结果放回，等设备。
     for (const project of this.world.projects) {
       if (project.agent.deviceId !== device.id || project.agent.state !== 'running') continue
-      const fallback = this.pickDevice(project)
+      const configuration = this.assistantRuns.get(project.id)?.context ?? project
+      const runningProject = { ...project, subscription: configuration.subscription, model: configuration.model }
+      const fallback = this.pickDevice(runningProject)
       if (fallback) {
-        this.switchNote(project, fallback, device)
+        this.switchNote(runningProject, fallback, device)
         project.agent.deviceId = fallback.id
         continue
       }
-      const run = this.assistantRuns.get(project.id)
-      run?.cancel()
-      this.assistantRuns.delete(project.id)
-      if (run) {
-        for (const entry of run.inputs) entry.delivery = 'waitingDevice'
-        this.replies.set(project.id, [...run.replies, ...(this.replies.get(project.id) ?? [])])
-      }
+      this.cancelAssistant(project, true)
+      for (const entry of this.unread(project)) entry.delivery = 'waitingDevice'
       this.interrupted.add(project.id)
       project.agent = {
         state: 'waitingDevice',
@@ -972,7 +1090,10 @@ export class MockStore {
     if (existing) return this.project(existing.id)
     const name = input.name.trim()
     if (name === '') throw new ClientError('invalid', 'Enter a project name.')
-    if (!assistantModels[input.subscription]?.includes(input.model)) {
+    if (
+      !Object.hasOwn(assistantModels, input.subscription) ||
+      !assistantModels[input.subscription].includes(input.model)
+    ) {
       throw new ClientError('invalid', `${input.model} is not available with ${input.subscription}`)
     }
     if (this.world.failProjectSaves > 0) {
@@ -985,6 +1106,7 @@ export class MockStore {
       name,
       hue: projectHues.find((hue) => !used.has(hue)) ?? projectHues[this.world.projects.length % projectHues.length],
       status: 'active',
+      archivedAt: null,
       goal: input.goal.trim(),
       subscription: input.subscription,
       model: input.model,
@@ -997,27 +1119,204 @@ export class MockStore {
     return project
   }
 
+  private ensureProjectWritable(project: Project) {
+    if (project.status === 'archived') throw new ClientError('invalid', 'This project is archived')
+  }
+
+  updateProject(projectId: ID, patch: ProjectPatch): Project {
+    const project = this.project(projectId)
+    this.ensureProjectWritable(project)
+    const fields = ['name', 'goal', 'subscription', 'model']
+    if (
+      Object.keys(patch).some((key) => !fields.includes(key)) ||
+      Object.values(patch).some((value) => typeof value !== 'string')
+    ) {
+      throw new ClientError('invalid', 'Project settings must contain text fields.')
+    }
+    const next = { ...project, ...patch }
+    next.name = next.name.trim()
+    next.goal = next.goal.trim()
+    if (!next.name) throw new ClientError('invalid', 'Enter a project name.')
+    if (
+      !Object.hasOwn(assistantModels, next.subscription) ||
+      !assistantModels[next.subscription].includes(next.model)
+    ) {
+      throw new ClientError('invalid', `${next.model} is not available with ${next.subscription}`)
+    }
+    if (this.world.failSettingsSaves > 0) {
+      this.world.failSettingsSaves -= 1
+      throw new ClientError('unavailable', 'Baton could not save these settings. Try again.')
+    }
+    const passive: Pick<ProjectPatch, 'name' | 'goal'> = {}
+    if (next.name !== project.name) passive.name = next.name
+    if (next.goal !== project.goal) passive.goal = next.goal
+    Object.assign(project, { name: next.name, goal: next.goal, subscription: next.subscription, model: next.model })
+    if (Object.keys(passive).length > 0) {
+      this.queuePassive({ projectId, kind: 'settings', patch: passive, updatedAt: this.scheduler.now() })
+    }
+    this.emit('projects')
+    return project
+  }
+
+  setProjectStatus(projectId: ID, status: Project['status']): Project {
+    const project = this.project(projectId)
+    if (!['active', 'paused', 'archived'].includes(status)) throw new ClientError('invalid', 'Unknown project status.')
+    if (project.status === status) return project
+    this.ensureProjectWritable(project)
+    if (this.world.failStatusSaves > 0) {
+      this.world.failStatusSaves -= 1
+      throw new ClientError('unavailable', 'Baton could not save the project status. Try again.')
+    }
+    project.status = status
+    if (status === 'active') {
+      this.wake(project)
+    } else {
+      const hadRun = this.cancelAssistant(project, true)
+      this.assistantStops.get(projectId)?.()
+      this.assistantStops.delete(projectId)
+      if (hadRun) this.interrupted.add(projectId)
+      // 系统阻塞保留到用户明确 Retry。
+      if (project.agent.state !== 'blocked') {
+        project.agent = { ...project.agent, state: 'idle', reason: null, activity: null }
+      }
+      if (status === 'archived') {
+        project.archivedAt = this.scheduler.now()
+        project.agent = { ...project.agent, state: 'stopped', reason: null, activity: null }
+        this.replies.delete(projectId)
+        this.interrupted.delete(projectId)
+        this.world.passiveInputs = this.world.passiveInputs.filter((input) => input.projectId !== projectId)
+        for (const item of this.world.inbox) {
+          if (item.projectId !== projectId || item.status !== 'pending') continue
+          item.status = 'withdrawn'
+          item.revision += 1
+          item.result = {
+            option: null,
+            note: '',
+            actor: this.world.session.account?.name ?? 'You',
+            at: this.scheduler.now(),
+            reason: 'Project archived',
+            inputId: null,
+          }
+        }
+      }
+    }
+    this.emit('projects', 'inbox')
+    return project
+  }
+
+  saveMemory(input: SaveMemoryInput): MemorySave {
+    const { projectId, noteId, body, version, clientId } = input
+    this.ensureProjectWritable(this.project(projectId))
+    const fingerprint = JSON.stringify([projectId, noteId, body, version])
+    const existing = this.memoryClientIds.get(clientId)
+    if (existing) {
+      if (existing.fingerprint !== fingerprint)
+        throw new ClientError('conflict', 'This memory request was already saved with different content.')
+      return structuredClone(existing.result)
+    }
+    if (typeof body !== 'string' || !body.trim()) throw new ClientError('invalid', 'Enter a memory note.')
+    if (!clientId || (noteId === null ? version !== null : !Number.isInteger(version) || (version ?? 0) < 1)) {
+      throw new ClientError('invalid', 'A memory ID and its current version are required when editing.')
+    }
+    let note =
+      noteId === null ? undefined : this.world.memory.find((item) => item.id === noteId && item.projectId === projectId)
+    if (noteId !== null && !note) throw new ClientError('notFound', 'This memory note is no longer available.')
+    if (this.world.failMemorySaves > 0) {
+      this.world.failMemorySaves -= 1
+      throw new ClientError('unavailable', 'Baton could not save this memory note. Try again.')
+    }
+    if (note) {
+      const elsewhere = this.world.memoryElsewhere[note.id]
+      if (elsewhere !== undefined) {
+        delete this.world.memoryElsewhere[note.id]
+        this.appendMemoryVersion(note, elsewhere, 'assistant')
+        this.emit('projects')
+      }
+      if (note.version !== version) return { state: 'conflict', note }
+      this.appendMemoryVersion(note, body.trim(), 'you')
+    } else {
+      const first: MemoryVersion = { version: 1, body: body.trim(), source: 'you', updatedAt: this.scheduler.now() }
+      note = { id: this.nextId('mem'), projectId, ...first, versions: [first] }
+      this.world.memory.push(note)
+    }
+    const result: MemorySave = { state: 'saved', note }
+    this.memoryClientIds.set(clientId, { fingerprint, result: structuredClone(result) })
+    this.queuePassive({
+      projectId,
+      kind: 'memory',
+      noteId: note.id,
+      version: note.version,
+      body: note.body,
+      updatedAt: note.updatedAt,
+    })
+    this.emit('projects')
+    return result
+  }
+
+  private appendMemoryVersion(note: MemoryNote, body: string, source: MemoryVersion['source']) {
+    const latest: MemoryVersion = { version: note.version + 1, body, source, updatedAt: this.scheduler.now() }
+    note.versions.push(latest)
+    Object.assign(note, latest)
+  }
+
+  private queuePassive(input: PassiveInput) {
+    const index = this.world.passiveInputs.findIndex(
+      (pending) =>
+        pending.projectId === input.projectId &&
+        pending.kind === input.kind &&
+        (pending.kind !== 'memory' || (input.kind === 'memory' && pending.noteId === input.noteId)),
+    )
+    if (index < 0) {
+      this.world.passiveInputs.push(input)
+      return
+    }
+    const previous = this.world.passiveInputs[index]
+    if (previous.kind === 'settings' && input.kind === 'settings') {
+      input = { ...input, patch: { ...previous.patch, ...input.patch } }
+    }
+    this.world.passiveInputs.splice(index, 1)
+    this.world.passiveInputs.push(input)
+  }
+
+  private cancelAssistant(project: Project, restoreInputs: boolean) {
+    const run = this.assistantRuns.get(project.id)
+    if (!run) return false
+    run.cancel()
+    this.assistantRuns.delete(project.id)
+    if (restoreInputs) for (const entry of run.inputs) entry.delivery = 'saved'
+    this.replies.set(project.id, [...run.replies, ...(this.replies.get(project.id) ?? [])])
+    const pending = this.world.passiveInputs
+    this.world.passiveInputs = []
+    for (const input of [...run.context.passiveInputs, ...pending]) this.queuePassive(input)
+    return true
+  }
+
   projectEntries(projectId: ID) {
     this.project(projectId)
     return this.world.projectEntries.filter((item) => item.projectId === projectId)
   }
 
+  listProjects() {
+    this.failOnce('projects')
+    return this.world.projects
+  }
+
   projectMemory(projectId: ID) {
     this.project(projectId)
+    this.failOnce(`memory:${projectId}`)
     return this.world.memory.filter((item) => item.projectId === projectId)
   }
 
   // 消息先保存，再交给助手；助手正在运行时，这条消息在这次运行结束后一起读。
   sendProjectMessage(projectId: ID, body: string, clientId: string, reference: Reference | null = null): ProjectEntry {
+    const project = this.project(projectId)
+    this.ensureProjectWritable(project)
     const existing = this.projectClientIds.get(clientId)
     if (existing) {
       if (existing.body !== body) throw new ClientError('conflict', 'This message was already sent with different text')
-      const entry = this.world.projectEntries.find((item) => item.id === existing.id)
+      const entry = this.world.projectEntries.find((item) => item.id === existing.id && item.projectId === projectId)
       if (entry) return entry
     }
-    const project = this.project(projectId)
-    if (project.status === 'paused') throw new ClientError('invalid', 'Resume this project to send messages')
-    if (project.status === 'archived') throw new ClientError('invalid', 'This project is archived')
     if (body.trim() === '') throw new ClientError('invalid', 'Message is empty')
     const entry: UserEntry = {
       id: this.nextId('ent'),
@@ -1043,12 +1342,10 @@ export class MockStore {
   // 停止只影响助手这一次运行，它开的 Thread 继续执行。
   stopProjectRun(projectId: ID): Project {
     const project = this.project(projectId)
+    this.ensureProjectWritable(project)
     if (project.agent.state === 'stopping') return project
     if (project.agent.state !== 'running') throw new ClientError('invalid', 'The project assistant is not running')
-    const run = this.assistantRuns.get(projectId)
-    run?.cancel()
-    this.assistantRuns.delete(projectId)
-    if (run) this.replies.set(projectId, [...run.replies, ...(this.replies.get(projectId) ?? [])])
+    this.cancelAssistant(project, false)
     // 停止前发出、还没被读到的消息一起撤回；停止请求之后发的消息在停下后读取。
     for (const entry of this.unread(project)) entry.delivery = 'withdrawn'
     const device = this.world.devices.find((item) => item.id === project.agent.deviceId)
@@ -1056,12 +1353,15 @@ export class MockStore {
     project.agent.activity = `Waiting for ${device?.name ?? 'the device'} to confirm the assistant has stopped…`
     this.emit('projects')
 
-    this.schedule(this.latency.device, () => {
+    const cancel = this.schedule(this.latency.device, () => {
+      if (this.assistantStops.get(projectId) !== cancel || project.status !== 'active') return
+      this.assistantStops.delete(projectId)
       project.agent = { state: 'stopped', deviceId: project.agent.deviceId, reason: null, activity: null }
       this.pushNote(project, 'You stopped the project assistant. Chats it opened keep running.')
       this.wake(project)
       this.emit('projects', 'threads', 'messages', 'operations')
     })
+    this.assistantStops.set(projectId, cancel)
     return project
   }
 
@@ -1131,7 +1431,8 @@ export class MockStore {
   // 有没读的消息或 Thread 结果时开始一次运行。你停止后，Thread 结果等你下一条消息再一起读。
   private wake(project: Project) {
     if (project.status !== 'active') return
-    if (project.agent.state === 'running' || project.agent.state === 'stopping') return
+    if (project.agent.state === 'running' || project.agent.state === 'stopping' || project.agent.state === 'blocked')
+      return
     const inputs = this.unread(project)
     const replies = this.replies.get(project.id) ?? []
     const resume = this.interrupted.has(project.id)
@@ -1159,8 +1460,16 @@ export class MockStore {
   }
 
   private startAssistantRun(project: Project, inputs: UserEntry[], replies: Reply[]) {
-    const run = { inputs, replies, cancel: () => {} }
+    const context: AssistantContext = {
+      subscription: project.subscription,
+      model: project.model,
+      passiveInputs: this.world.passiveInputs.filter((input) => input.projectId === project.id),
+    }
+    this.world.passiveInputs = this.world.passiveInputs.filter((input) => input.projectId !== project.id)
+    this.world.assistantContexts[project.id] = structuredClone(context)
+    const run = { inputs, replies, context, cancel: () => {} }
     run.cancel = this.schedule(this.latency.run / 2, () => {
+      if (this.assistantRuns.get(project.id) !== run || project.status !== 'active') return
       this.assistantRuns.delete(project.id)
       this.respond(project, inputs, replies)
     })
@@ -1174,7 +1483,7 @@ export class MockStore {
     const thread = this.world.threads.find((item) => item.id === replies[0]?.threadId)
     const device = this.world.devices.find((item) => item.id === thread?.deviceId)
     if (!thread || !device) return 'Reading a reply…'
-    return `Reading ${agentNames[thread.agent]}'s reply from ${device.name}…`
+    return `Reading ${thread.agent ? agentNames[thread.agent] : 'Command'}'s reply from ${device.name}…`
   }
 
   private respond(project: Project, inputs: UserEntry[], replies: Reply[]) {
@@ -1218,7 +1527,7 @@ export class MockStore {
     const lines = threads.map((thread) => {
       const device = this.world.devices.find((item) => item.id === thread.deviceId)?.name ?? 'a removed device'
       const last = this.world.messages.findLast((item) => item.threadId === thread.id && item.role === 'agent')
-      const name = agentNames[thread.agent]
+      const name = thread.agent ? agentNames[thread.agent] : 'Command'
       if (thread.status === 'stopped' || !last)
         return { device, text: `${name} on ${device} stopped before replying.`, short: 'stopped before replying.' }
       return { device, text: `${name} on ${device} replied: ${last.body}`, short: last.body }
@@ -1330,7 +1639,8 @@ export class MockStore {
       const device = this.device(thread.deviceId)
       const body = `${folderName(thread.folder)} is in \`${thread.folder}\` on ${device.name}.`
       if (this.world.memory.some((item) => item.projectId === project.id && item.body === body)) continue
-      const note: MemoryNote = { id: this.nextId('mem'), projectId: project.id, body, updatedAt: now }
+      const version: MemoryVersion = { version: 1, body, source: 'assistant', updatedAt: now }
+      const note: MemoryNote = { id: this.nextId('mem'), projectId: project.id, ...version, versions: [version] }
       this.world.memory.push(note)
       process.push({ kind: 'note', body })
     }
@@ -1338,7 +1648,7 @@ export class MockStore {
     const names = opened.map((thread) => this.device(thread.deviceId).name)
     const summary =
       opened.length === 1
-        ? `Opened a chat on ${names[0]}. I'll report back when ${agentNames[opened[0].agent]} finishes.`
+        ? `Opened a chat on ${names[0]}. I'll report back when ${opened[0].agent ? agentNames[opened[0].agent] : 'Command'} finishes.`
         : `Opened ${opened.length} chats on ${sentenceList(names)}. I'll report back once ${opened.length === 2 ? 'both' : 'all of them'} finish.`
     this.pushAssistant(
       project,
@@ -1373,7 +1683,7 @@ export class MockStore {
     this.turnOwners.delete(thread.id)
     if (owner !== 'projectAgent' || !thread.projectId) return
     const project = this.world.projects.find((item) => item.id === thread.projectId)
-    if (!project) return
+    if (!project || project.status === 'archived') return
     this.replies.set(project.id, [...(this.replies.get(project.id) ?? []), { threadId: thread.id, outcome }])
     this.wake(project)
     this.emit('projects')

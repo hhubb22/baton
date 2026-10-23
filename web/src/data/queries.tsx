@@ -9,7 +9,19 @@ import {
 } from '@tanstack/react-query'
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { ClientError, type BatonClient } from './client'
-import type { AgentKind, HistoryPage, ID, Message, Reference, SendMode, Session } from './types'
+import type {
+  AgentKind,
+  HistoryPage,
+  ID,
+  ItemDecision,
+  Message,
+  Project,
+  ProjectPatch,
+  Reference,
+  SaveMemoryInput,
+  SendMode,
+  Session,
+} from './types'
 
 // 查询键的第一段是数据主题，收到某个主题的变化时刷新以它开头的全部查询。
 export const keys = {
@@ -106,7 +118,12 @@ export function useProjectEntries(projectId: ID) {
 
 export function useProjectMemory(projectId: ID) {
   const client = useClient()
-  return useQuery({ queryKey: keys.projectMemory(projectId), queryFn: () => client.listProjectMemory(projectId) })
+  return useQuery({
+    queryKey: keys.projectMemory(projectId),
+    queryFn: () => client.listProjectMemory(projectId),
+    refetchOnMount: false,
+    retryOnMount: false,
+  })
 }
 
 export function useThreads() {
@@ -151,6 +168,7 @@ export interface EarlierHistory {
   // idle：还没读或可以继续读；done：已经读到开头。
   status: 'idle' | 'loading' | 'failed' | 'unavailable' | 'done'
   reason: Extract<HistoryPage, { state: 'unavailable' }>['reason'] | null
+  gap?: boolean
   load: () => void
 }
 
@@ -162,9 +180,10 @@ export function useEarlierHistory(threadId: ID): EarlierHistory {
     messages: [],
     status: 'idle',
     reason: null,
+    gap: false,
   })
   const current =
-    state.threadId === threadId ? state : { threadId, messages: [], status: 'idle' as const, reason: null }
+    state.threadId === threadId ? state : { threadId, messages: [], status: 'idle' as const, reason: null, gap: false }
   const latest = useRef(current)
   useEffect(() => {
     latest.current = current
@@ -179,13 +198,18 @@ export function useEarlierHistory(threadId: ID): EarlierHistory {
         setState((now) => {
           if (now.threadId !== threadId) return now
           if (page.state === 'unavailable') return { ...now, status: 'unavailable', reason: page.reason }
-          return { ...now, messages: [...page.messages, ...now.messages], status: page.more ? 'idle' : 'done' }
+          return {
+            ...now,
+            messages: [...page.messages, ...now.messages],
+            status: page.more ? 'idle' : 'done',
+            gap: now.gap || page.gap,
+          }
         }),
       () => setState((now) => (now.threadId === threadId ? { ...now, status: 'failed' } : now)),
     )
   }, [client, threadId])
 
-  return { messages: current.messages, status: current.status, reason: current.reason, load }
+  return { messages: current.messages, status: current.status, reason: current.reason, gap: current.gap, load }
 }
 
 export function useFolders(deviceId: ID | null, path: string | null) {
@@ -212,8 +236,8 @@ export function useSignIn() {
   return useMutation({
     mutationFn: ({ username, password }: { username: string; password: string }) => client.signIn(username, password),
     onSuccess: (session) => {
+      queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== 'session' })
       queryClient.setQueryData(keys.session, session)
-      void queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] !== 'session' })
     },
   })
 }
@@ -230,12 +254,9 @@ export function useSignOut() {
   })
 }
 
-let clientSequence = 0
-
 // 同一次发送重试时沿用 clientId，避免重复消息。
 export function newClientId() {
-  clientSequence += 1
-  return `web-${Date.now().toString(36)}-${clientSequence}`
+  return crypto.randomUUID()
 }
 
 export function useCreateThread() {
@@ -300,16 +321,46 @@ export function useSendProjectMessage() {
   })
 }
 
+export function useUpdateProject(projectId: ID) {
+  const client = useClient()
+  const cache = useQueryClient()
+  return useMutation({
+    scope: { id: `project-settings:${projectId}` },
+    mutationFn: (input: { projectId: ID; patch: ProjectPatch }) => client.updateProject(input),
+    onSuccess: (project) =>
+      cache.setQueryData<Project[]>(keys.projects, (items) =>
+        items?.map((item) => (item.id === project.id ? project : item)),
+      ),
+  })
+}
+
+export function useSetProjectStatus() {
+  const client = useClient()
+  return useMutation({
+    mutationFn: (input: { projectId: ID; status: 'active' | 'paused' | 'archived' }) => client.setProjectStatus(input),
+  })
+}
+
+export function useSaveMemory() {
+  const client = useClient()
+  return useMutation({ mutationFn: (input: SaveMemoryInput) => client.saveMemory(input) })
+}
+
 export function useStopProjectRun() {
   const client = useClient()
   return useMutation({ mutationFn: (projectId: ID) => client.stopProjectRun(projectId) })
 }
 
-export function useAnswerItem() {
+export function useHandleItem() {
   const client = useClient()
   return useMutation({
-    mutationFn: (input: { itemId: ID; answer: string; revision: number }) => client.answerItem(input),
+    mutationFn: (input: { itemId: ID; decision: ItemDecision; revision: number }) => client.handleItem(input),
   })
+}
+
+export function useRetryProject() {
+  const client = useClient()
+  return useMutation({ mutationFn: (projectId: ID) => client.retryProject(projectId) })
 }
 
 export function useSetDefaultDevice() {

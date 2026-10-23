@@ -151,6 +151,7 @@ CREATE TABLE node_enrollments (
     created_at timestamp with time zone NOT NULL,
     expires_at timestamp with time zone NOT NULL,
     used_at timestamp with time zone,
+    device_id uuid,
     CONSTRAINT node_enrollments_expires_after_create CHECK ((expires_at > created_at)),
     CONSTRAINT node_enrollments_hash_length CHECK ((octet_length(token_hash) = 32))
 );
@@ -278,6 +279,7 @@ CREATE TABLE project_memory_revisions (
     entry_id uuid NOT NULL,
     employee_id uuid NOT NULL,
     revision bigint NOT NULL,
+    title text,
     content text NOT NULL,
     author text NOT NULL,
     source_seq bigint,
@@ -288,6 +290,9 @@ CREATE TABLE project_memory_revisions (
 );
 
 CREATE TABLE projects (
+    client_project_id uuid,
+    create_request jsonb,
+    UNIQUE(employee_id, client_project_id),
     id uuid NOT NULL,
     employee_id uuid NOT NULL,
     title text NOT NULL,
@@ -322,6 +327,7 @@ CREATE SEQUENCE thread_events_id_seq
 ALTER SEQUENCE thread_events_id_seq OWNED BY thread_events.id;
 
 CREATE TABLE thread_messages (
+    requested_model text NOT NULL DEFAULT '',
     id uuid NOT NULL,
     employee_id uuid NOT NULL,
     thread_id uuid NOT NULL,
@@ -358,7 +364,7 @@ CREATE TABLE thread_outbox (
     next_attempt_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
     acked_at timestamp with time zone,
     result jsonb,
-    CONSTRAINT thread_outbox_action_check CHECK ((action = ANY (ARRAY['open'::text, 'message'::text, 'withdraw'::text, 'stop'::text]))),
+    CONSTRAINT thread_outbox_action_check CHECK ((action = ANY (ARRAY['open'::text, 'message'::text, 'withdraw'::text, 'stop'::text, 'resume'::text]))),
     CONSTRAINT thread_outbox_attempts_check CHECK ((attempts >= 0))
 );
 
@@ -428,6 +434,7 @@ CREATE TABLE thread_turns (
 );
 
 CREATE TABLE threads (
+    next_model text NOT NULL DEFAULT '',
     id uuid NOT NULL,
     employee_id uuid NOT NULL,
     client_thread_id text NOT NULL,
@@ -728,6 +735,9 @@ ALTER TABLE ONLY login_sessions
 
 ALTER TABLE ONLY node_credentials
     ADD CONSTRAINT node_credentials_node_fk FOREIGN KEY (employee_id, node_id) REFERENCES nodes(employee_id, id);
+
+ALTER TABLE ONLY node_enrollments
+    ADD CONSTRAINT node_enrollments_device_id_fkey FOREIGN KEY (employee_id, device_id) REFERENCES nodes(employee_id, id);
 
 ALTER TABLE ONLY node_enrollments
     ADD CONSTRAINT node_enrollments_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES employees(id);

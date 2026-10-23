@@ -22,6 +22,13 @@ export const scenarioIds = [
   'error',
   'conflict',
   'signedOut',
+  'inbox',
+  'inboxPaused',
+  'inboxWithdrawn',
+  'maintenance',
+  'maintenanceError',
+  'memoryConflict',
+  'archived',
 ] as const
 export type ScenarioId = (typeof scenarioIds)[number]
 
@@ -34,6 +41,13 @@ export const scenarioLabels: Record<ScenarioId, string> = {
   error: 'Error',
   conflict: 'Conflict',
   signedOut: 'Signed out',
+  inbox: 'Questions and history',
+  inboxPaused: 'Questions · paused project',
+  inboxWithdrawn: 'Question withdrawn while replying',
+  maintenance: 'Project maintenance',
+  maintenanceError: 'Maintenance · save and read errors',
+  memoryConflict: 'Memory · newer assistant version',
+  archived: 'Archived project',
 }
 
 export function isScenarioId(value: unknown): value is ScenarioId {
@@ -141,6 +155,7 @@ function projects(now: number): Project[] {
   return [
     {
       id: 'prj-baton',
+      archivedAt: null,
       name: 'Baton Dev',
       hue: 'slate',
       status: 'active',
@@ -152,6 +167,7 @@ function projects(now: number): Project[] {
     },
     {
       id: 'prj-compat',
+      archivedAt: null,
       name: 'Compatibility',
       hue: 'amber',
       status: 'active',
@@ -163,6 +179,7 @@ function projects(now: number): Project[] {
     },
     {
       id: 'prj-docs',
+      archivedAt: null,
       name: 'Docs Cleanup',
       hue: 'violet',
       status: 'active',
@@ -174,6 +191,7 @@ function projects(now: number): Project[] {
     },
     {
       id: 'prj-switch',
+      archivedAt: null,
       name: 'Switch Patrol',
       hue: 'green',
       status: 'paused',
@@ -248,7 +266,7 @@ function projectEntries(now: number): ProjectEntry[] {
 }
 
 function memory(now: number): MemoryNote[] {
-  return [
+  const notes: Omit<MemoryNote, 'version' | 'source' | 'versions'>[] = [
     {
       id: 'mem-baton-1',
       projectId: 'prj-baton',
@@ -268,6 +286,10 @@ function memory(now: number): MemoryNote[] {
       updatedAt: now - 3 * hour,
     },
   ]
+  return notes.map((note) => {
+    const first = { version: 1, source: 'assistant' as const, body: note.body, updatedAt: note.updatedAt }
+    return { ...note, ...first, versions: [first] }
+  })
 }
 
 function thread(now: number, fields: Partial<Thread> & Pick<Thread, 'id' | 'title' | 'deviceId' | 'folder'>): Thread {
@@ -606,8 +628,10 @@ function inbox(now: number): InboxItem[] {
       title: 'Skip Windows path tests for now?',
       body: '2 tests fail only on Windows because of drive letters.',
       options: ['Skip them and open a follow-up', 'Fix them before merging'],
+      recommended: 1,
+      allowText: true,
       status: 'pending',
-      answer: null,
+      result: null,
       revision: 1,
       createdAt: now - 2 * hour,
     },
@@ -619,8 +643,10 @@ function inbox(now: number): InboxItem[] {
       title: 'Which runner should run nightly?',
       body: 'MacBook Pro sleeps at night. Ubuntu Dev is always on.',
       options: ['Ubuntu Dev', 'MacBook Pro'],
+      recommended: 0,
+      allowText: false,
       status: 'pending',
-      answer: null,
+      result: null,
       revision: 1,
       createdAt: now - 90 * minute,
     },
@@ -907,6 +933,8 @@ function base(now: number): World {
     projects: projects(now),
     projectEntries: projectEntries(now),
     memory: memory(now),
+    passiveInputs: [],
+    assistantContexts: {},
     threads: threads(now),
     messages: messages(now),
     inbox: inbox(now),
@@ -918,11 +946,17 @@ function base(now: number): World {
     outputLoss: [],
     failingReads: [],
     answeredElsewhere: {},
+    withdrawnElsewhere: {},
+    failItemSaves: 0,
     enrollments: [],
     directories: directories(),
     stubbornStops: [],
     lostHistory: [],
     failProjectSaves: 0,
+    failSettingsSaves: 0,
+    failMemorySaves: 0,
+    failStatusSaves: 0,
+    memoryElsewhere: {},
   }
 }
 
@@ -966,7 +1000,37 @@ export function createWorld(id: ScenarioId, now: number): World {
   const world = base(now)
   switch (id) {
     case 'normal':
+    case 'maintenance':
       return world
+    case 'maintenanceError':
+      world.failSettingsSaves = 1
+      world.failMemorySaves = 1
+      world.failStatusSaves = 1
+      world.failingReads.push('projects', 'memory:prj-compat')
+      return world
+    case 'memoryConflict':
+      world.memoryElsewhere['mem-compat-1'] = 'Run the Windows drive-letter tests before every release.'
+      return world
+    case 'archived': {
+      const project = world.projects.find((item) => item.id === 'prj-compat')!
+      project.status = 'archived'
+      project.archivedAt = now - hour
+      project.agent = { ...project.agent, state: 'stopped', reason: null, activity: null }
+      for (const item of world.inbox) {
+        if (item.projectId !== project.id || item.status !== 'pending') continue
+        item.status = 'withdrawn'
+        item.revision += 1
+        item.result = {
+          option: null,
+          note: '',
+          actor: account.name,
+          at: project.archivedAt,
+          reason: 'Project archived',
+          inputId: null,
+        }
+      }
+      return world
+    }
     case 'empty':
       return {
         ...world,
@@ -994,6 +1058,53 @@ export function createWorld(id: ScenarioId, now: number): World {
         outputs: {},
         inbox: world.inbox.filter((item) => item.threadId === null),
       }
+    case 'inbox':
+    case 'inboxPaused': {
+      world.inbox.push({
+        id: 'itm-compat-notes',
+        projectId: 'prj-compat',
+        threadId: null,
+        kind: 'question',
+        title: 'What should the release notes mention?',
+        body: '**Windows support** needs a release note.\n\n- Include the drive-letter fix\n- Mention the nightly runner\n\nSee [release guidance](https://example.com/releases).',
+        options: [],
+        recommended: null,
+        allowText: true,
+        status: 'pending',
+        result: null,
+        revision: 1,
+        createdAt: now - 5 * minute,
+      })
+      for (const [index, status] of (['answered', 'closed', 'withdrawn', 'resolved'] as const).entries()) {
+        world.inbox.push({
+          id: `itm-history-${status}`,
+          projectId: 'prj-compat',
+          threadId: 'thr-compat',
+          kind: status === 'resolved' ? 'system' : 'question',
+          title: `Release preparation · ${status}`,
+          body: 'Past context is kept with the result.',
+          options: [],
+          recommended: null,
+          allowText: status !== 'resolved',
+          status,
+          result: {
+            option: null,
+            note: status === 'answered' ? 'Include Windows support.' : '',
+            actor: status === 'withdrawn' ? 'Project assistant' : account.name,
+            at: now - hour,
+            reason: status === 'withdrawn' ? 'The newer test run replaced this question.' : null,
+            inputId: null,
+          },
+          revision: 2,
+          createdAt: now - (index + 4) * hour,
+        })
+      }
+      if (id === 'inboxPaused') world.projects.find((item) => item.id === 'prj-compat')!.status = 'paused'
+      return world
+    }
+    case 'inboxWithdrawn':
+      world.withdrawnElsewhere['itm-compat-paths'] = 'A newer test run replaced this question.'
+      return world
     case 'signedOut':
       return { ...world, session: { account: null, defaultDeviceId: null, ended: null } }
     case 'offline': {
@@ -1107,13 +1218,14 @@ export function createWorld(id: ScenarioId, now: number): World {
       )
       const baton = world.projects.find((item) => item.id === 'prj-baton')!
       baton.agent = {
-        state: 'stopped',
+        state: 'blocked',
         deviceId: 'dev-ubuntu',
         reason: 'ChatGPT sign-in expired on Ubuntu Dev',
         activity: null,
       }
       // 第一次新建 Project 保存失败，重试成功。
       world.failProjectSaves = 1
+      world.failItemSaves = 1
       // 这些内容第一次读取失败，重试成功。
       world.failingReads.push(
         'trace:msg-webui-2',
@@ -1128,8 +1240,10 @@ export function createWorld(id: ScenarioId, now: number): World {
         title: 'ChatGPT sign-in expired',
         body: 'Sign in to ChatGPT on Ubuntu Dev, then resume the project.',
         options: [],
+        recommended: null,
+        allowText: false,
         status: 'pending',
-        answer: null,
+        result: null,
         revision: 1,
         createdAt: now - 10 * minute,
       })

@@ -3,12 +3,14 @@
 package gateway_test
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/sys/windows"
 )
@@ -42,23 +44,32 @@ func terminateProcess(process *os.Process) error {
 }
 
 func stopWorker(pid int) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = stopWorkerContext(ctx, pid)
+}
+
+func stopWorkerContext(ctx context.Context, pid int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if pid <= 0 {
-		return
+		return os.ErrProcessDone
 	}
 	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.PROCESS_TERMINATE|windows.SYNCHRONIZE, false, uint32(pid))
 	if err != nil {
-		return
+		return err
 	}
 	defer windows.CloseHandle(handle)
 	name := make([]uint16, 32768)
 	size := uint32(len(name))
 	if err := windows.QueryFullProcessImageName(handle, 0, &name[0], &size); err != nil {
-		return
+		return err
 	}
 	image := windows.UTF16ToString(name[:size])
 	exe, err := os.Executable()
 	if err != nil {
-		return
+		return err
 	}
 	allowed := sameExecutable(image, exe)
 	processMu.Lock()
@@ -73,16 +84,42 @@ func stopWorker(pid int) {
 	processMu.Unlock()
 	fmt.Fprintf(os.Stderr, "event=test_worker_stop pid=%d image=%q allowed=%t\n", pid, image, allowed)
 	if !allowed {
-		return
+		return fmt.Errorf("拒绝终止未登记的 Worker 可执行文件: %s", image)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	// 校验、终止和等待共用句柄，PID 在此期间被复用也不会指向另一个进程。
 	err = windows.TerminateProcess(handle, 1)
 	fmt.Fprintf(os.Stderr, "event=test_worker_terminated pid=%d error=%v\n", pid, err)
 	if err != nil {
-		return
+		return err
 	}
-	status, err := windows.WaitForSingleObject(handle, 5000)
-	fmt.Fprintf(os.Stderr, "event=test_worker_wait pid=%d status=%d error=%v\n", pid, status, err)
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		wait := 50 * time.Millisecond
+		if deadline, ok := ctx.Deadline(); ok {
+			if remaining := time.Until(deadline); remaining < wait {
+				wait = remaining
+			}
+		}
+		if wait <= 0 {
+			return context.DeadlineExceeded
+		}
+		status, err := windows.WaitForSingleObject(handle, uint32((wait+time.Millisecond-1)/time.Millisecond))
+		if err != nil {
+			return err
+		}
+		switch status {
+		case windows.WAIT_OBJECT_0:
+			return nil
+		case uint32(windows.WAIT_TIMEOUT):
+		default:
+			return fmt.Errorf("无法等待 Worker %d 退出: wait status %d", pid, status)
+		}
+	}
 }
 
 func sameExecutable(a, b string) bool {
@@ -91,7 +128,16 @@ func sameExecutable(a, b string) bool {
 		return false
 	}
 	b, err = filepath.Abs(b)
-	return err == nil && strings.EqualFold(a, b)
+	if err != nil {
+		return false
+	}
+	if resolved, err := filepath.EvalSymlinks(a); err == nil {
+		a = resolved
+	}
+	if resolved, err := filepath.EvalSymlinks(b); err == nil {
+		b = resolved
+	}
+	return strings.EqualFold(a, b)
 }
 
 func TestStopWorkerRejectsUnrelatedExecutable(t *testing.T) {
