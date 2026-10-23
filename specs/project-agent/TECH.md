@@ -153,7 +153,7 @@ Runtime 进程的工作目录是一个空的控制目录。pi-agent-core 本身�
    - 同一条记忆有多条待处理的 `memory_updated` 时，只把版本号最大的一条写进 `input`，其余一起标为已投递。
 
    每条输入在写入时已经限长，所以一批不会超过事件上限。这个上限只针对传输：128 KiB 约合 3～4 万个 token，低于常见窗口的压缩阈值；上下文用量由第 6.2 节单独检查。
-4. 把 `input` 消息交给 Agent。模型回复的 assistant 消息在 `message_end` 监听器里通过 `append_event` 保存；保存返回之前，pi-agent-core 不会执行工具。
+4. 把 `input` 消息交给 Agent。调用模型前，Runtime 将固定工具名中的点号替换为下划线，例如 `memory.search` 转为 `memory_search`，符合 provider 的函数名约束。转换覆盖系统工具声明、历史调用和工具结果；正常回复与压缩请求使用同一规则。收到 assistant 后按固定映射还原工具名，再交给 Agent、保存历史和执行中心 RPC；参数、调用 ID、签名与其他字段保持不变。未知名称不自动改写为已知工具，仍由工具校验拒绝。模型回复的 assistant 消息在 `message_end` 监听器里通过 `append_event` 保存；保存返回之前，pi-agent-core 不会执行工具。
 5. 每个工具调用通过 `call_tool` 交给 Coordinator 执行（第 7 节），Coordinator 在同一事务里写入 `tool_result` 事件。工具设为顺序执行（`toolExecution: "sequential"`），结果事件的顺序和调用顺序一致。
 6. 模型给出不含工具调用的回复后，这一轮结束，回到第 3 步。
 7. 闲置 180 秒内没有新输入，或单次运行满 15 分钟，就进入收尾：需要时压缩（第 6.3 节），然后调用 `finish`，Coordinator 清空租约并记录结束原因，batond 停止进程。

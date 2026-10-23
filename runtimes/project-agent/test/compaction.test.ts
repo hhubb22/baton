@@ -12,6 +12,7 @@ import {
   summaryText,
 } from "../src/compaction.js";
 import { modelMessages } from "../src/context.js";
+import { modelContext } from "../src/tool-names.js";
 import { RuntimeError, type Event } from "../src/protocol.js";
 import { Backend, setup, input, assistant } from "./fixture.js";
 
@@ -196,10 +197,12 @@ test("50% 收尾生成摘要，复用原前缀及签名，新提示词与记忆�
   assert.match(request.context.messages.at(-1).content, /不向用户已停止或归档的 Thread 继续发消息，除非用户在对话里要求/);
   assert.deepEqual(
     request.context.messages.slice(0, -1),
-    modelMessages(
-      boot,
-      original.filter((e) => e.seq <= compact.payload.through_seq),
-    ),
+    modelContext({
+      messages: modelMessages(
+        boot,
+        original.filter((e) => e.seq <= compact.payload.through_seq),
+      ),
+    }).messages,
   );
   const next = modelMessages(b.boot(), b.events);
   assert.match(String(next[0].content), /项目标题：Baton/);
@@ -467,7 +470,9 @@ test("轮内压缩已提交后崩溃，另一个实例继续分析保留的工�
     b.events.findLast((e) => e.kind !== "compaction")?.kind,
     "tool_result",
   );
-  const expected = modelMessages(b.boot(), b.events);
+  const expected = modelContext({
+    messages: modelMessages(b.boot(), b.events),
+  }).messages;
   const second = setup(b, [() => assistant(), () => summary()], {
     contextWindow: 128000,
   });

@@ -18,6 +18,7 @@ import {
   type RPC,
 } from "./protocol.js";
 import { toolDefinitions } from "./tools.js";
+import { batonMessage, modelContext } from "./tool-names.js";
 import { modelMessages, promptFor } from "./context.js";
 import {
   clearedToolResults,
@@ -213,7 +214,7 @@ export class ProjectRuntime {
       try {
         const stream = this.models.streamSimple(
           model,
-          { messages },
+          modelContext({ messages }),
           {
             maxTokens: Math.min(32000, model.maxTokens, available),
             maxRetries: 0,
@@ -225,7 +226,7 @@ export class ProjectRuntime {
         for await (const _ of stream) {
           /* 等待完整摘要，部分输出不能替换历史。 */
         }
-        const response = await stream.result();
+        const response = batonMessage(await stream.result());
         payload = {
           through_seq: through,
           summary: summaryText(response),
@@ -421,11 +422,15 @@ export class ProjectRuntime {
       for (let attempt = 0; ; attempt++) {
         let message: AssistantMessage | undefined;
         try {
-          const stream = this.models.streamSimple(requestModel, context, {
-            ...options,
-            maxTokens: Math.min(32000, requestModel.maxTokens),
-            maxRetries: 0,
-          });
+          const stream = this.models.streamSimple(
+            requestModel,
+            modelContext(context),
+            {
+              ...options,
+              maxTokens: Math.min(32000, requestModel.maxTokens),
+              maxRetries: 0,
+            },
+          );
           let preview = "";
           let lastPreview = -Infinity;
           const publishPreview = async (text: string) => {
@@ -455,7 +460,7 @@ export class ProjectRuntime {
               }
             }
           }
-          message = await stream.result();
+          message = batonMessage(await stream.result());
           if (
             message.stopReason === "error" &&
             isContextOverflow(message, requestModel.contextWindow)
