@@ -128,7 +128,7 @@ func (s *Server) onEnvelope(ctx context.Context, connID string, raw json.RawMess
 	case protocol.BodyRuntimeReport:
 		s.onRuntimeReport(ctx, connID, env)
 		return
-	case protocol.BodyProjectExecResult:
+	case protocol.BodyProjectExecResult, protocol.BodyBrowseRootsResult, protocol.BodySubscriptionLoginResult:
 		s.noteSettingsResult(env)
 		return
 	case protocol.BodySessionResult:

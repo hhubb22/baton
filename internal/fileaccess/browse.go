@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path"
@@ -74,6 +75,86 @@ func PrepareDataDir(dir string) error {
 		return errors.New("节点数据目录允许其他用户进入")
 	}
 	return nil
+}
+
+// HasBrowseRootsConfig 检查本机是否已有浏览目录配置，包括暂时无法读取的配置。
+func HasBrowseRootsConfig(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, browseRootsFile))
+	return !errors.Is(err, os.ErrNotExist)
+}
+
+// AddBrowseRootPath 按真实路径幂等登记目录，并自动生成目录标识。
+func AddBrowseRootPath(dir, rootPath string) (BrowseRoot, error) {
+	cleaned, err := cleanRootPath(strings.TrimSpace(rootPath))
+	if err != nil {
+		return BrowseRoot{}, err
+	}
+	if real, err := filepath.EvalSymlinks(cleaned); err == nil {
+		cleaned = real
+	}
+	roots, err := ListBrowseRoots(dir)
+	if err != nil {
+		return BrowseRoot{}, err
+	}
+	used := make(map[string]bool, len(roots))
+	for _, root := range roots {
+		if sameRootPath(root.Path, cleaned) {
+			return root, nil
+		}
+		used[root.ID] = true
+	}
+	id := strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-' {
+			return r
+		}
+		return -1
+	}, strings.ToLower(filepath.Base(cleaned)))
+	if id == "" || id[0] < 'a' || id[0] > 'z' {
+		id = "root-" + id
+	}
+	if len(id) > 48 {
+		id = id[:48]
+	}
+	base := id
+	for n := 2; used[id]; n++ {
+		id = fmt.Sprintf("%s-%d", base, n)
+	}
+	if _, err := os.Stat(cleaned); errors.Is(err, os.ErrNotExist) {
+		return BrowseRoot{}, &BrowseError{Code: protocol.FileCodeInvalidPath, Message: "目录不存在"}
+	}
+	if err := AddBrowseRoot(dir, id, cleaned); err != nil {
+		return BrowseRoot{}, err
+	}
+	return BrowseRoot{ID: id, Path: cleaned}, nil
+}
+
+func sameRootPath(a, b string) bool {
+	if a == b {
+		return true
+	}
+	if real, err := filepath.EvalSymlinks(a); err == nil {
+		a = real
+	}
+	if real, err := filepath.EvalSymlinks(b); err == nil {
+		b = real
+	}
+	return a == b
+}
+
+// RemoveBrowseRootPath 支持按标识或路径移除目录，路径可以指向同一目录的符号链接。
+func RemoveBrowseRootPath(dir, target string) error {
+	target = strings.TrimSpace(target)
+	roots, err := ListBrowseRoots(dir)
+	if err != nil {
+		return err
+	}
+	cleaned, pathErr := cleanRootPath(target)
+	for _, root := range roots {
+		if root.ID == target || root.Path == target || pathErr == nil && sameRootPath(root.Path, cleaned) {
+			return RemoveBrowseRoot(dir, root.ID)
+		}
+	}
+	return &BrowseError{Code: protocol.FileCodeRootForbidden, Message: "不能浏览该目录"}
 }
 
 // AddBrowseRoot 把一个本机目录登记为可浏览根。路径必须是已存在的真实目录，不能是符号链接。

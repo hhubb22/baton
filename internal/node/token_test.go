@@ -15,6 +15,66 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+func TestLoadOrCreateSigner(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "keys", "node-signing.key")
+	signer, created, err := LoadOrCreateSigner(path)
+	if err != nil || !created {
+		t.Fatalf("生成签名密钥: created=%t err=%v", created, err)
+	}
+	privatefiletest.AssertPrivate(t, path)
+	privatefiletest.AssertPrivate(t, filepath.Dir(path))
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, created, err := LoadOrCreateSigner(path)
+	if err != nil || created || !bytes.Equal(signer.key, loaded.key) {
+		t.Fatalf("重新加载签名密钥: created=%t err=%v", created, err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("已有密钥被改写")
+	}
+	for _, kind := range []string{"loose", "corrupt", "symlink", "dangling", "directory"} {
+		t.Run(kind, func(t *testing.T) {
+			bad := filepath.Join(t.TempDir(), "key")
+			switch kind {
+			case "loose":
+				if err := signer.WriteFile(bad); err != nil {
+					t.Fatal(err)
+				}
+				privatefiletest.MakePublic(t, bad)
+			case "corrupt":
+				if err := os.WriteFile(bad, []byte("invalid"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			case "symlink", "dangling":
+				target := path
+				if kind == "dangling" {
+					target = filepath.Join(t.TempDir(), "missing")
+				}
+				if err := os.Symlink(target, bad); err != nil {
+					t.Fatal(err)
+				}
+			case "directory":
+				if err := os.Mkdir(bad, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, created, err := LoadOrCreateSigner(bad); err == nil || created {
+				t.Fatalf("接受不安全或无效的密钥: created=%t err=%v", created, err)
+			}
+		})
+	}
+}
+
+func TestLoadOrCreateSignerInCurrentDirectory(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if _, created, err := LoadOrCreateSigner("node-signing.key"); err != nil || !created {
+		t.Fatalf("生成默认密钥: created=%t err=%v", created, err)
+	}
+}
+
 func TestNodeTokenRoundTripAndRejection(t *testing.T) {
 	signer, err := GenerateSigner()
 	if err != nil {

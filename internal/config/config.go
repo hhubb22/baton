@@ -12,6 +12,7 @@ import (
 )
 
 const (
+	DefaultSigningKeyFile    = "node-signing.key"
 	DefaultSchema            = "public"
 	DefaultAddr              = "127.0.0.1:8080"
 	DefaultTTL               = 12 * time.Hour
@@ -116,7 +117,7 @@ func Load(getenv func(string) string, serve bool) (Config, error) {
 	cfg.AllowedOrigins = origins
 	cfg.SigningKeyFile = strings.TrimSpace(getenv("BATON_NODE_SIGNING_KEY"))
 	if cfg.SigningKeyFile == "" {
-		return Config{}, errors.New("需要设置 BATON_NODE_SIGNING_KEY")
+		cfg.SigningKeyFile = DefaultSigningKeyFile
 	}
 	heartbeat, err := parseBoundedDuration(getenv("BATON_HEARTBEAT_INTERVAL"), "BATON_HEARTBEAT_INTERVAL", DefaultHeartbeat, minHeartbeat, maxHeartbeat)
 	if err != nil {

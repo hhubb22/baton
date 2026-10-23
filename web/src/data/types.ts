@@ -51,6 +51,13 @@ export interface Subscription {
   models?: string[]
 }
 
+export interface SubscriptionLoginChallenge {
+  provider: string
+  verificationUri: string
+  userCode: string
+  expiresInSeconds: number
+}
+
 export interface Device {
   id: ID
   name: string
@@ -65,7 +72,7 @@ export interface Device {
   subscriptions: Subscription[]
   // 设备上装了 Project Agent Runtime，Project 助手才能在这台设备上运行。
   hasRuntime: boolean
-  // 允许 Agent 访问的目录，在设备的 batond 配置里修改。
+  // 允许 Agent 访问的目录，可在网页或设备本机管理。
   folders: string[]
   repos: string[]
   // Project 助手能否在允许的目录里直接运行命令，以哪个系统用户和 shell 运行。

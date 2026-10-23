@@ -4,7 +4,10 @@ import { createInterface } from "node:readline/promises";
 import { StdioClient, frames, writeFrame } from "../../shared/stdio.js";
 import { probe, runtimeModels, VERSION, PROVIDERS } from "./auth.js";
 import { checkedRPC, type Request } from "./protocol.js";
-import { createLoginInteraction } from "./login.js";
+import {
+  createDeviceCodeLoginInteraction,
+  createLoginInteraction,
+} from "./login.js";
 
 async function ipc(request: Request): Promise<unknown> {
   const endpoint = process.env.BATON_PROJECT_RUNTIME_ENDPOINT,
@@ -28,6 +31,40 @@ async function main() {
   }
   if (command === "probe") {
     console.log(JSON.stringify(await probe()));
+    return;
+  }
+  if (command === "login-device") {
+    if (!PROVIDERS.includes(provider)) throw new Error("unsupported_provider");
+    const cancel = new AbortController();
+    const abort = () => cancel.abort();
+    process.on("SIGINT", abort);
+    process.on("SIGTERM", abort);
+    process.stdin.on("close", abort);
+    process.stdin.resume();
+    try {
+      const models = await runtimeModels();
+      await models.login(
+        provider,
+        "oauth",
+        createDeviceCodeLoginInteraction((info) => {
+          process.stdout.write(
+            JSON.stringify({
+              type: "device_code",
+              provider,
+              verification_uri: info.verificationUri,
+              user_code: info.userCode,
+              expires_in_seconds: info.expiresInSeconds ?? 900,
+            }) + "\n",
+          );
+        }, cancel.signal),
+        { agentName: "Baton Project Runtime" },
+      );
+    } finally {
+      process.off("SIGINT", abort);
+      process.off("SIGTERM", abort);
+      process.stdin.off("close", abort);
+      process.stdin.destroy();
+    }
     return;
   }
   if (command === "login") {
@@ -61,7 +98,7 @@ async function main() {
   }
   if (command !== "run")
     throw new Error(
-      "usage: baton-project-runtime run|probe|login <provider>|--version",
+      "usage: baton-project-runtime run|probe|login <provider>|login-device <provider>|--version",
     );
   const models = await runtimeModels();
   const { ProjectRuntime } = await import("./runtime.js");

@@ -57,10 +57,10 @@ func (e *exitCode) Unwrap() error { return e.err }
 
 func usage() string {
 	return `用法:
-  coordinator migrate
-  coordinator serve
-  coordinator admin employee create --username <用户名> --display-name <显示名>
-  coordinator admin employee reset-password --username <用户名>
+  baton-server migrate
+  baton-server serve
+  baton-server admin employee create --username <用户名> --display-name <显示名>
+  baton-server admin employee reset-password --username <用户名>
 `
 }
 
@@ -166,6 +166,9 @@ func cmdReset(ctx context.Context, args []string, stdout, stderr io.Writer, pool
 
 func cmdServe(ctx context.Context, stderr io.Writer, getenv func(string) string, opts RunOptions) error {
 	return withDB(ctx, getenv, true, func(cfg config.Config, pool *pgxpool.Pool) error {
+		if err := migrate.Up(ctx, pool); err != nil {
+			return err
+		}
 		if err := migrate.Check(ctx, pool); err != nil {
 			return err
 		}
@@ -177,7 +180,7 @@ func cmdServe(ctx context.Context, stderr io.Writer, getenv func(string) string,
 				return errors.New("无法读取 TLS 密钥文件")
 			}
 		}
-		signer, err := node.LoadSigner(cfg.SigningKeyFile)
+		signer, _, err := node.LoadOrCreateSigner(cfg.SigningKeyFile)
 		if err != nil {
 			return err
 		}

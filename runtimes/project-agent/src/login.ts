@@ -2,6 +2,39 @@ import type { Models } from "@earendil-works/pi-ai/models";
 
 type LoginInteraction = Parameters<Models["login"]>[2];
 
+export function createDeviceCodeLoginInteraction(
+  onDeviceCode: (info: {
+    verificationUri: string;
+    userCode: string;
+    expiresInSeconds?: number;
+  }) => void,
+  signal?: AbortSignal,
+): LoginInteraction {
+  return {
+    signal,
+    async prompt(question) {
+      signal?.throwIfAborted();
+      question.signal?.throwIfAborted();
+      if (question.type !== "select")
+        throw new Error("interactive_input_unsupported");
+      const option =
+        question.options.find((item) => item.id === "device_code") ??
+        question.options[0];
+      if (!option) throw new Error("login_options_missing");
+      return option.id;
+    },
+    notify(event) {
+      if (event.type === "device_code") {
+        onDeviceCode({
+          verificationUri: event.verificationUri,
+          userCode: event.userCode,
+          expiresInSeconds: event.expiresInSeconds,
+        });
+      }
+    },
+  };
+}
+
 export function createLoginInteraction(
   ask: (message: string, signal?: AbortSignal) => Promise<string>,
   write: (text: string) => void,

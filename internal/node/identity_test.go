@@ -1,6 +1,8 @@
 package node
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -32,6 +34,44 @@ func TestIdentityFileSurvivesReloadAndRejectsLoosePermissions(t *testing.T) {
 	_, err = ReadIdentity(dir)
 	if err == nil || strings.Contains(err.Error(), ident.Credential.Token) {
 		t.Fatal("权限过宽的身份文件仍被读取，或错误包含凭据")
+	}
+}
+
+func TestIdentityCoordinatorURL(t *testing.T) {
+	for _, coordinator := range []string{"", "https://baton.example:8443"} {
+		t.Run(coordinator, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "node")
+			ident := sampleIdentity(t)
+			ident.CoordinatorURL = coordinator
+			if err := WriteIdentity(dir, ident); err != nil {
+				t.Fatal(err)
+			}
+			got, err := ReadIdentity(dir)
+			if err != nil || got.CoordinatorURL != coordinator {
+				t.Fatalf("中心地址未保留: %q %v", got.CoordinatorURL, err)
+			}
+		})
+	}
+	for _, coordinator := range []string{"http://baton.example", "https://user:password@baton.example", "https://baton.example/path"} {
+		ident := sampleIdentity(t)
+		ident.CoordinatorURL = coordinator
+		dir := filepath.Join(t.TempDir(), "node")
+		if err := WriteIdentity(dir, ident); err == nil {
+			t.Fatal("写入了无效中心地址")
+		}
+		if err := PrepareDataDir(dir); err != nil {
+			t.Fatal(err)
+		}
+		raw, err := json.Marshal(ident)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, IdentityFileName), raw, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ReadIdentity(dir); err == nil {
+			t.Fatal("读取了无效中心地址")
+		}
 	}
 }
 

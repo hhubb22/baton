@@ -81,7 +81,7 @@ export async function packageRelease(
     await mkdir(payload);
     const suffix = process.platform === "win32" ? ".exe" : "";
     let modified = false;
-    for (const binary of ["coordinator", "batond"]) {
+    for (const binary of ["baton-server", "batond"]) {
       const path = join(source, binary + suffix);
       const info = run("go", ["version", "-m", path], { capture: true });
       modified = validateBuildInfo(info, target, commit) || modified;

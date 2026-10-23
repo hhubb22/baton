@@ -1,4 +1,4 @@
-// Package projectruntime locates the Project Agent Runtime and reads its local capabilities.
+// Package projectruntime 定位 Project Agent Runtime 并读取本机能力。
 package projectruntime
 
 import (
@@ -16,8 +16,7 @@ import (
 
 const Version = "0.1.0"
 
-// Command uses the bundled Runtime or the standalone executable on PATH.
-// The native host handles private credential files on Windows.
+// Command 使用随包 Runtime 或 PATH 上的独立程序。Windows 私有凭据文件由原生宿主处理。
 func Command(ctx context.Context, args ...string) (*exec.Cmd, error) {
 	resolved, err := sidecar.Command(ctx, "project-agent", Version, "baton-project-runtime", args...)
 	if err != nil {
@@ -32,7 +31,7 @@ func Command(ctx context.Context, args ...string) (*exec.Cmd, error) {
 	return cmd, nil
 }
 
-// Probe reads local credential status and model catalogs without refreshing tokens or requesting inference.
+// Probe 读取本地凭据状态和模型目录，不刷新令牌或请求模型。
 func Probe(ctx context.Context) (*protocol.ProjectRuntime, error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()

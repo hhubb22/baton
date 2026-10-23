@@ -1,12 +1,12 @@
 # Baton — Agent Guide
 
-Baton 是跨设备 AI Agent 协同系统，由中心服务（`coordinator`）、节点守护进程（`batond`）、本地会话执行器（Session Worker）、Project Agent Runtime（`runtimes/project-agent`）和嵌入式 Web UI（`web/`）组成。
+Baton 是跨设备 AI Agent 协同系统，由中心服务（`baton-server`）、节点守护进程（`batond`）、本地会话执行器（Session Worker）、Project Agent Runtime（`runtimes/project-agent`）和嵌入式 Web UI（`web/`）组成。
 
 ## 核心架构与目录
 
 | 目录 / 模块 | 职责 |
 |---|---|
-| `cmd/coordinator` | 中心控制面：员工认证、Project 与 Thread 调度、内置 Gateway（`/v1/node` 与 `/api/v1/events`）、嵌入式 Web UI |
+| `cmd/baton-server` | 中心控制面：员工认证、Project 与 Thread 调度、内置 Gateway（`/v1/node` 与 `/api/v1/events`）、嵌入式 Web UI |
 | `cmd/batond` | 节点守护进程：节点注册、出站 TLS WebSocket 连接、本地 SQLite 账本（`node.db`）、Session Worker 与 Project Runtime 管理 |
 | `internal/session` | Session Worker 生命周期、本地认证 IPC、Thread 消息队列与 Turn 账本 |
 | `internal/agent/{pi,codex,kiro,shell,replay}` | 统一 `agent.Adapter` 接口实现（Pi RPC、Codex app-server、Kiro ACP V3）与确定性录制回放 |
@@ -17,9 +17,9 @@ Baton 是跨设备 AI Agent 协同系统，由中心服务（`coordinator`）、
 
 ## 常用构建与验证命令
 
-- **构建与静态检查**（首次检出或修改前端后先构建；脚本安装前端和 Runtime 依赖、生成静态文件，编译 `coordinator`、`batond` 到 `bin/`，并打包 Project Runtime 到 `bin/sidecars/project-agent/`）：
+- **构建与静态检查**（首次检出或修改前端后先构建；脚本安装前端和 Runtime 依赖、生成静态文件，编译 `baton-server`、`batond` 到 `bin/`，并打包 Project Runtime 到 `bin/sidecars/project-agent/`）：
   ```sh
-  node --test tools/build.test.mjs
+  node --test tools/*.test.mjs
   node tools/build.mjs
   node tools/check-sidecar-package.mjs
   go vet ./...
@@ -40,6 +40,14 @@ Baton 是跨设备 AI Agent 协同系统，由中心服务（`coordinator`）、
   pnpm --dir web test
   pnpm --dir web build
   ```
+
+## 部署与设备接入
+
+- `baton-server serve` 自动执行数据库迁移，再检查迁移状态；签名密钥默认使用工作目录下的 `node-signing.key`，不存在时生成 `0600` 文件，也可用 `BATON_NODE_SIGNING_KEY` 指定。已有密钥的权限、类型和内容仍须通过校验。
+- `Dockerfile` 构建内嵌 Web UI 的服务端镜像，使用非 root 用户运行。`compose.yaml` 编排 PostgreSQL 16 与 `baton-server`，数据库及 `/var/lib/baton` 分别持久化；需配置 `BATON_POSTGRES_PASSWORD` 和 `BATON_ALLOWED_ORIGINS`，默认通过本机端口交给 HTTPS 反向代理。
+- `BATON_ENROLLMENT_TOKEN='...' ./bin/batond up --coordinator https://baton.example` 首次注册并运行，已有身份时直接复用；注册凭据也可来自 `--enrollment-file`。显示名默认主机名，系统自动推导。首次启动且尚无 `browse-roots.json` 时默认开放当前用户主目录，已有配置（含空列表）保留；可选 `--workspace /绝对路径` 在连接前幂等登记指定目录。
+- 网页 Devices 的在线设备详情支持添加、移除允许访问的目录，并以设备码登录 ChatGPT / xAI 订阅；选目录弹窗也可直接输入设备路径并添加。凭据保存在设备本地，登录进程退出后立即刷新订阅报告。
+- `batond register --coordinator https://主机` 将中心地址保存为身份文件的 `coordinator_url`；`batond run` 据此推导 WSS 地址，`--relay` 可显式指定。身份文件不含中心地址时需要 `--relay`。各命令使用相同的 `--data-dir`。
 
 ## 开发与演进约束（防熵增守则）
 

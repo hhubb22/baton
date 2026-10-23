@@ -25,13 +25,15 @@ type runtimeReports struct {
 	agents  atomic.Pointer[[]agentRuntimeReport]
 	changed chan struct{}
 	refresh chan struct{}
+	done    chan struct{}
 }
 
 // collectRuntimeReports 在整个 Maintain 生命周期中只有一个采集者。阻塞文件系统也不会随重连增加采集协程。
 func collectRuntimeReports(ctx context.Context, dir string, discover RuntimeModelDiscovery, version func(context.Context, string) (string, error), interval time.Duration) *runtimeReports {
-	r := &runtimeReports{changed: make(chan struct{}, 1), refresh: make(chan struct{}, 1)}
+	r := &runtimeReports{changed: make(chan struct{}, 1), refresh: make(chan struct{}, 1), done: make(chan struct{})}
 	probe := newAgentProbe(discover, version)
 	go func() {
+		defer close(r.done)
 		for ctx.Err() == nil {
 			report, agents := collectRuntimeReportUsingProbe(ctx, dir, probe)
 			r.agents.Store(&agents)

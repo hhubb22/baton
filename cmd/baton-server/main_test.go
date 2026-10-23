@@ -11,15 +11,20 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"baton/internal/auth"
+	"baton/internal/config"
 	"baton/internal/db"
 	"baton/internal/dbtest"
 	"baton/internal/httpapi"
+	"baton/internal/migrate"
 	"baton/internal/node"
+	"baton/internal/privatefiletest"
 	"baton/internal/redact"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -54,7 +59,8 @@ func TestServeRejectsHTTPOriginBeforeDial(t *testing.T) {
 	}
 }
 
-func TestCLIMigrateCreateResetAndServeGuard(t *testing.T) {
+func TestCLIMigrateCreateResetAndServe(t *testing.T) {
+	t.Chdir(t.TempDir())
 	raw := dbtest.URL()
 	schema := "cli" + strings.ToLower(strings.ReplaceAll(time.Now().UTC().Format("150405.000000"), ".", ""))
 	getenv := func(key string) string {
@@ -67,8 +73,6 @@ func TestCLIMigrateCreateResetAndServeGuard(t *testing.T) {
 			return "https://baton.example"
 		case "BATON_HTTP_ADDR":
 			return "127.0.0.1:0"
-		case "BATON_NODE_SIGNING_KEY":
-			return "node-signing.key"
 		default:
 			return ""
 		}
@@ -148,11 +152,39 @@ func TestCLIMigrateCreateResetAndServeGuard(t *testing.T) {
 	}
 	serveCtx, serveCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer serveCancel()
-	err = run(serveCtx, []string{"serve"}, io.Discard, io.Discard, unmigrated)
-	if err == nil || !strings.Contains(err.Error(), "迁移") {
-		t.Fatalf("未迁移时 serve 应失败: %s", redact.Scrub(errorText(err)))
+	listening := make(chan struct{}, 1)
+	logs := writeFunc(func(p []byte) (int, error) {
+		if strings.Contains(string(p), "event=listening") {
+			listening <- struct{}{}
+			serveCancel()
+		}
+		return len(p), nil
+	})
+	if err := run(serveCtx, []string{"serve"}, io.Discard, logs, unmigrated); err != nil {
+		t.Fatalf("空 schema 启动失败: %s", redact.Scrub(err.Error()))
+	}
+	select {
+	case <-listening:
+	default:
+		t.Fatal("服务没有开始监听")
+	}
+	emptyPool := openSchema(t, raw, emptySchema)
+	defer emptyPool.Close()
+	if err := migrate.Check(ctx, emptyPool); err != nil {
+		t.Fatal(err)
+	}
+	privatefiletest.AssertPrivate(t, config.DefaultSigningKeyFile)
+	if _, err := node.LoadSigner(config.DefaultSigningKeyFile); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(filepath.Clean(config.DefaultSigningKeyFile)); err != nil || info.Size() == 0 {
+		t.Fatal("没有生成签名密钥文件")
 	}
 }
+
+type writeFunc func([]byte) (int, error)
+
+func (f writeFunc) Write(p []byte) (int, error) { return f(p) }
 
 func issuedPassword(t *testing.T, stdout string) string {
 	t.Helper()

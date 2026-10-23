@@ -10,6 +10,7 @@ import { Button, focusRing } from '../ui/Button'
 import { Dialog, DialogClose } from '../ui/Dialog'
 import { Field } from '../ui/Field'
 import { Icon } from '../ui/Icon'
+import { DeviceFolderForm } from './DeviceFolderForm'
 
 const styles = stylex.create({
   select: {
@@ -132,6 +133,14 @@ export function FolderDialog({
           </select>
         )}
       </Field>
+      <DeviceFolderForm
+        key={selectedDevice}
+        deviceId={selectedDevice}
+        onAdded={(folder, updated) => {
+          const added = updated.folders.find((item) => !device?.folders.includes(item))
+          setPath(updated.folders.includes(folder) ? folder : (added ?? folder))
+        }}
+      />
       <div>
         <div role="group" aria-label="Folders" {...stylex.props(styles.box)}>
           {path === null ? (
@@ -194,7 +203,9 @@ export function FolderDialog({
               </button>
             ))}
         </div>
-        <p {...stylex.props(text.caption, styles.hint)}>Folder access is managed on this device.</p>
+        <p {...stylex.props(text.caption, styles.hint)}>
+          Add a folder path above or choose from shared folders on this device.
+        </p>
       </div>
     </Dialog>
   )

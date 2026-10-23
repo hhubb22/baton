@@ -113,6 +113,10 @@ func startThreadStackWithBins(t *testing.T, extra map[string]string, coordBin, b
 	if err := node.WriteIdentity(dataDir, ident); err != nil {
 		t.Fatal(err)
 	}
+	// 进程场景显式配置授权目录，避免扫描运行测试的用户主目录。
+	if err := os.WriteFile(filepath.Join(dataDir, "browse-roots.json"), []byte(`{"roots":[]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
 	env := map[string]string{
 		"BATON_TLS_CA_FILE":        certFile,
 		"BATON_HEARTBEAT_INTERVAL": "200ms",

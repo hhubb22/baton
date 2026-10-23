@@ -46,7 +46,7 @@ func TestRegisterKeepsEnrollmentTokenOutOfURL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.NodeID != ident.NodeID || got.Credential.Token != ident.Credential.Token {
+	if got.NodeID != ident.NodeID || got.Credential.Token != ident.Credential.Token || got.CoordinatorURL != srv.URL {
 		t.Fatal("注册结果没有保留节点身份")
 	}
 	if seenURI != "/api/v1/nodes/register" || strings.Contains(seenURI, token) || strings.Contains(authz, token) {
@@ -77,6 +77,31 @@ func TestRegisterKeepsEnrollmentTokenOutOfURL(t *testing.T) {
 	})
 	if err == nil || strings.Contains(err.Error(), token) {
 		t.Fatalf("地址中的凭据被接受或回显: %v", err)
+	}
+}
+
+func TestCoordinatorURLs(t *testing.T) {
+	for _, tc := range []struct{ raw, normalized, relay string }{
+		{" https://Baton.Example:443/ ", "https://baton.example", "wss://baton.example/v1/node"},
+		{"https://baton.example:8443", "https://baton.example:8443", "wss://baton.example:8443/v1/node"},
+		{"https://[::1]:443/", "https://[::1]", "wss://[::1]/v1/node"},
+	} {
+		got, err := NormalizeCoordinatorURL(tc.raw)
+		if err != nil || got != tc.normalized {
+			t.Fatalf("规范中心地址 %q: %q %v", tc.raw, got, err)
+		}
+		relay, err := RelayURL(tc.raw)
+		if err != nil || relay != tc.relay {
+			t.Fatalf("推导连接地址 %q: %q %v", tc.raw, relay, err)
+		}
+	}
+	for _, raw := range []string{"", "http://baton.example", "wss://baton.example", "https://user:password@baton.example", "https://baton.example/api", "https://baton.example?token=secret", "https://baton.example?", "https://baton.example#", "https://baton.example#fragment", "https:///missing", "https://baton.example/%2f"} {
+		if _, err := NormalizeCoordinatorURL(raw); err == nil {
+			t.Fatalf("接受无效中心地址 %q", raw)
+		}
+		if _, err := RelayURL(raw); err == nil {
+			t.Fatalf("从无效中心地址推导连接地址 %q", raw)
+		}
 	}
 }
 

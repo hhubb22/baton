@@ -2,6 +2,8 @@ import * as stylex from '@stylexjs/stylex'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { EnrollDialog } from '../app/EnrollDialog'
+import { DeviceFolderForm } from '../app/DeviceFolderForm'
+import { SubscriptionLoginDialog } from '../app/SubscriptionLoginDialog'
 import { Page } from '../app/Page'
 import { useNow } from '../app/useNow'
 import {
@@ -18,6 +20,7 @@ import {
   useDevices,
   useProjects,
   useRemoveDevice,
+  useRemoveDeviceFolder,
   useSession,
   useSetCommandAccess,
   useSetDefaultDevice,
@@ -25,7 +28,7 @@ import {
 import type { Device, ID } from '../data/types'
 import { text } from '../theme/text'
 import { colors, radius, space } from '../theme/tokens.stylex'
-import { Button, focusRing } from '../ui/Button'
+import { Button, IconButton, focusRing } from '../ui/Button'
 import { Tag } from '../ui/Badge'
 import { Dialog } from '../ui/Dialog'
 import { Icon } from '../ui/Icon'
@@ -129,6 +132,8 @@ const styles = stylex.create({
   },
   columns: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space.xl },
   group: { display: 'flex', flexDirection: 'column', gap: space.sm, minWidth: 0 },
+  folder: { display: 'flex', alignItems: 'center', gap: space.sm },
+  folderPath: { flexGrow: 1, overflowWrap: 'anywhere', minWidth: 0 },
   capability: { display: 'flex', alignItems: 'baseline', gap: space.sm },
   ok: { color: colors.success, alignSelf: 'center' },
   problem: { color: colors.attention, alignSelf: 'center' },
@@ -219,6 +224,7 @@ function DeviceRow({
   return (
     <button
       type="button"
+      id={`device-row-${device.id}`}
       aria-expanded={open}
       aria-controls={`device-${device.id}`}
       onClick={onToggle}
@@ -321,6 +327,8 @@ function DeviceDetails({
   onDisconnect: () => void
 }) {
   const repos = repoNames(device)
+  const removeFolder = useRemoveDeviceFolder()
+  const [loginProvider, setLoginProvider] = useState<string | null>(null)
   // 离线或同步中的设备只显示提示和操作，Agent 与文件夹信息要等设备同步完才准确。
   const connected = device.connection === 'online'
   let defaultLabel = 'Set as default'
@@ -328,6 +336,9 @@ function DeviceDetails({
   else if (savingDefault) defaultLabel = 'Saving…'
   return (
     <div id={`device-${device.id}`} {...stylex.props(styles.details)}>
+      {loginProvider && (
+        <SubscriptionLoginDialog device={device} provider={loginProvider} onClose={() => setLoginProvider(null)} />
+      )}
       {notice && (
         <div {...stylex.props(styles.deviceNotice)}>
           <span {...stylex.props(text.label)}>{notice.title}</span>
@@ -345,6 +356,14 @@ function DeviceDetails({
                 <span {...stylex.props(text.caption, line.ok ? text.muted : styles.attention)}>{line.detail}</span>
               </span>
             ))}
+            {device.hasRuntime &&
+              device.subscriptions
+                .filter((sub) => !sub.signedIn)
+                .map((sub) => (
+                  <Button key={sub.provider} small onClick={() => setLoginProvider(sub.provider)}>
+                    Sign in to {sub.provider}
+                  </Button>
+                ))}
             <span {...stylex.props(styles.models)}>
               {modelLines(device).map((line) => (
                 <span key={line} {...stylex.props(text.caption, text.muted)}>
@@ -356,18 +375,29 @@ function DeviceDetails({
           <div {...stylex.props(styles.group)}>
             <span {...stylex.props(text.caption, text.muted)}>Allowed folders</span>
             {device.folders.map((folder) => (
-              <span key={folder} {...stylex.props(text.mono)}>
-                {folder}
-              </span>
+              <div key={folder} {...stylex.props(styles.folder)}>
+                <span {...stylex.props(text.mono, styles.folderPath)}>{folder}</span>
+                <IconButton
+                  icon="close"
+                  label={`Remove ${folder}`}
+                  aria-disabled={removeFolder.isPending || undefined}
+                  onClick={() => {
+                    if (!removeFolder.isPending) removeFolder.mutate({ deviceId: device.id, path: folder })
+                  }}
+                />
+              </div>
             ))}
             {repos.length > 0 && (
               <span {...stylex.props(text.caption, text.muted)}>
                 {repos.length} {repos.length === 1 ? 'repository' : 'repositories'} discovered: {repos.join(', ')}
               </span>
             )}
-            <span {...stylex.props(text.caption, text.faint)}>
-              Manage these folders in the batond configuration on {device.name}.
-            </span>
+            <DeviceFolderForm deviceId={device.id} />
+            {removeFolder.isError && (
+              <p role="alert" {...stylex.props(text.caption, styles.attention)}>
+                Could not remove folder. Check the device connection, then try again.
+              </p>
+            )}
           </div>
         </div>
       )}

@@ -15,7 +15,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,9 +25,11 @@ import (
 	"baton/internal/auth"
 	"baton/internal/dbtest"
 	"baton/internal/httpapi"
+	"baton/internal/identity"
 	"baton/internal/node"
 	"baton/internal/privatefiletest"
 
+	"github.com/coder/websocket"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -146,7 +150,7 @@ func TestRegisterKeepsIdentityAcrossRestart(t *testing.T) {
 	if err := json.Unmarshal(raw, &ident); err != nil {
 		t.Fatal(err)
 	}
-	if ident.NodeID != nodeID || strings.Contains(combined, ident.Credential.Token) {
+	if ident.NodeID != nodeID || ident.CoordinatorURL != srv.URL || strings.Contains(combined, ident.Credential.Token) {
 		t.Fatal("重启前的输出包含连接凭据，或节点 ID 不一致")
 	}
 	privatefiletest.AssertPrivate(t, filepath.Join(dir, node.IdentityFileName))
@@ -191,6 +195,234 @@ func TestRegisterKeepsIdentityAcrossRestart(t *testing.T) {
 	if strings.Contains(logs.String(), enrollment) || strings.Contains(logs.String(), ident.Credential.Token) || strings.Contains(logs.String(), password) {
 		t.Fatal("服务日志包含凭据或口令")
 	}
+}
+
+func TestRegisterDefaults(t *testing.T) {
+	opts, err := parseRegister([]string{"--coordinator", "https://baton.example"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostname, _ := os.Hostname()
+	if opts.displayName != defaultDisplayName(hostname) || opts.system != defaultSystem(runtime.GOOS) {
+		t.Fatalf("注册默认值不正确: %+v", opts)
+	}
+	for goos, want := range map[string]string{"darwin": "macos", "windows": "windows", "linux": "linux"} {
+		if got := defaultSystem(goos); got != want {
+			t.Fatalf("系统 %s: %s", goos, got)
+		}
+	}
+	for _, tc := range []struct{ raw, want string }{
+		{" \tDesk\n\x7f\u0085 ", "Desk"},
+		{"\t\n", "Workstation"},
+		{strings.Repeat("机", 81), strings.Repeat("机", 80)},
+		{strings.Repeat("a", 79) + " b", strings.Repeat("a", 79)},
+	} {
+		if got := defaultDisplayName(tc.raw); got != tc.want {
+			t.Fatalf("主机名清理结果 %q", got)
+		}
+	}
+	opts, err = parseRegister([]string{"--coordinator", "https://baton.example", "--display-name", " My Desk ", "--system", "custom"})
+	if err != nil || opts.displayName != " My Desk " || opts.system != "custom" {
+		t.Fatal("显式参数被修改")
+	}
+	if _, err := parseRegister([]string{"--coordinator", "https://baton.example", "--display-name", ""}); err == nil {
+		t.Fatal("显式空显示名被接受")
+	}
+}
+
+func TestUpRegistersReusesIdentityAndRuns(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "node")
+	workspace := filepath.Join(t.TempDir(), "My Repo")
+	if err := os.Mkdir(workspace, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	workspace, _ = filepath.EvalSymlinks(workspace)
+	ident := cliIdentity(t)
+	var registrations, connections atomic.Int32
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/nodes/register":
+			registrations.Add(1)
+			var payload struct {
+				DisplayName string `json:"display_name"`
+				System      string `json:"system"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Error(err)
+				return
+			}
+			if err := node.Validate(payload.DisplayName, payload.System, "", nil); err != nil {
+				t.Error(err)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(ident)
+		case "/v1/node":
+			connections.Add(1)
+			roots, err := node.ListBrowseRoots(dir)
+			if err != nil || len(roots) != 1 || roots[0].Path != workspace {
+				t.Errorf("连接前没有登记 workspace: %+v %v", roots, err)
+			}
+			ws, err := websocket.Accept(w, r, nil)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			defer ws.CloseNow()
+			_, _, err = ws.Read(r.Context())
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			_ = ws.Write(r.Context(), websocket.MessageText, []byte(`{"kind":"auth_result","ok":false,"code":"invalid_credential"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	ca := writeCA(t, srv.Certificate())
+	token, err := auth.NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	getenv := func(key string) string {
+		switch key {
+		case "BATON_ENROLLMENT_TOKEN":
+			return token
+		case "BATON_TLS_CA_FILE":
+			return ca
+		default:
+			return ""
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	runCommand := func(args []string, getenv func(string) string) error {
+		return runWithOptions(ctx, args, io.Discard, io.Discard, getenv, node.RunOptions{
+			ProbeRuntimeAgentVersion: func(context.Context, string) (string, error) { return "", errors.New("未启用版本探测") },
+		})
+	}
+	args := []string{"up", "--coordinator", srv.URL, "--workspace", workspace, "--data-dir", dir}
+	if err := runCommand(args, getenv); !errors.Is(err, node.ErrNeedsReauth) {
+		t.Fatalf("注册后未进入连接: %v", err)
+	}
+	before, err := os.ReadFile(filepath.Join(dir, node.IdentityFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	getenvWithoutEnrollment := func(key string) string {
+		if key == "BATON_TLS_CA_FILE" {
+			return ca
+		}
+		return ""
+	}
+	for i := 0; i < 2; i++ {
+		if err := runCommand([]string{"up", "--workspace", workspace, "--data-dir", dir}, getenvWithoutEnrollment); !errors.Is(err, node.ErrNeedsReauth) {
+			t.Fatalf("复用身份连接: %v", err)
+		}
+	}
+	after, err := os.ReadFile(filepath.Join(dir, node.IdentityFileName))
+	if err != nil || !bytes.Equal(before, after) || registrations.Load() != 1 || connections.Load() != 3 {
+		t.Fatal("重启未复用身份或重复注册")
+	}
+	if err := runCommand([]string{"run", "--data-dir", dir}, getenvWithoutEnrollment); !errors.Is(err, node.ErrNeedsReauth) {
+		t.Fatalf("run 未推导 relay: %v", err)
+	}
+	if err := runCommand([]string{"run", "--data-dir", dir, "--relay", "http://invalid"}, getenvWithoutEnrollment); err == nil || errors.Is(err, node.ErrNeedsReauth) {
+		t.Fatal("显式 relay 没有优先使用")
+	}
+}
+
+func TestUpRequiresEnrollmentAndRejectsDamagedIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{nil, "--coordinator"},
+		{[]string{"--coordinator", "https://baton.example"}, "注册凭据"},
+		{[]string{"--workspace", "relative"}, "绝对路径"},
+	} {
+		args := append([]string{"up", "--data-dir", filepath.Join(t.TempDir(), "node")}, tc.args...)
+		err := run(context.Background(), args, io.Discard, io.Discard, func(string) string { return "" })
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("缺少前置条件: %v", err)
+		}
+	}
+	dir := filepath.Join(t.TempDir(), "node")
+	if err := node.PrepareDataDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, node.IdentityFileName)
+	if err := os.WriteFile(path, []byte("invalid"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := run(context.Background(), []string{"up", "--data-dir", dir}, io.Discard, io.Discard, func(string) string { return "" })
+	if err == nil || strings.Contains(err.Error(), "--coordinator") {
+		t.Fatal("损坏身份被视为未注册")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil || string(raw) != "invalid" {
+		t.Fatal("损坏身份被覆盖")
+	}
+}
+
+func TestRunRequiresRelayForIdentityWithoutCoordinator(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "node")
+	if err := node.WriteIdentity(dir, cliIdentity(t)); err != nil {
+		t.Fatal(err)
+	}
+	err := run(context.Background(), []string{"run", "--data-dir", dir}, io.Discard, io.Discard, nil)
+	if err == nil || !strings.Contains(err.Error(), "--relay") {
+		t.Fatalf("没有提示 relay: %v", err)
+	}
+}
+
+func TestEnsureWorkspaceIDsAndIdempotency(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "node")
+	for _, name := range []string{"Repo", "repo", "中文", strings.Repeat("x", 100)} {
+		workspace := filepath.Join(t.TempDir(), name)
+		if err := os.Mkdir(workspace, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < 2; i++ {
+			if err := ensureWorkspace(dir, workspace); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	roots, err := node.ListBrowseRoots(dir)
+	if err != nil || len(roots) != 4 {
+		t.Fatalf("目录重复登记: %+v %v", roots, err)
+	}
+	for _, root := range roots {
+		if err := node.CheckBrowseQuery(root.ID, "", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := ensureWorkspace(dir, "relative"); err == nil {
+		t.Fatal("相对 workspace 被接受")
+	}
+}
+
+func cliIdentity(t *testing.T) node.Identity {
+	t.Helper()
+	ids := make([]string, 3)
+	for i := range ids {
+		var err error
+		ids[i], err = identity.NewUUID()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	signer, err := node.GenerateSigner()
+	if err != nil {
+		t.Fatal(err)
+	}
+	expires := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	token, err := signer.SignNodeToken(ids[0], ids[1], ids[2], expires)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return node.Identity{NodeID: ids[0], EmployeeID: ids[1], DisplayName: "Desk", System: node.SystemLinux, RegistrationSeq: 1, RegisteredAt: time.Now().UTC(), Credential: node.Credential{ID: ids[2], Version: 1, Token: token, ExpiresAt: expires}}
 }
 
 func registerArgs(coordinator, dir, enrollmentFile string) []string {

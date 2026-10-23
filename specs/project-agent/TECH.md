@@ -76,6 +76,8 @@ bootstrap 顶层的 `local_wait_protocol:1` 表示 batond 支持按 Thread 版�
 
 用户在设备上执行 `batond login <provider>`，支持 `openai-codex`（ChatGPT）和 `xai`。命令使用与守护进程相同的 Runtime 定位逻辑，调用 `login <provider>` 并继承当前终端的标准输入、输出和错误流；Ctrl+C 取消子进程，登录失败返回非零退出码。Runtime 走 pi-ai 的 OAuth 流程，登录方式可通过编号、选项 ID 或回车选择默认项。凭据默认保存在 `~/.baton/project-runtime`，可用 `BATON_PROJECT_RUNTIME_DATA_DIR` 指定；登录和守护进程须使用相同的系统用户及目录配置，文件权限沿用 batond 的私有文件约定。
 
+设备设置 API 经 `node.subscription_login` / `node.subscription_login_result` 请求本人在线且已同步设备启动 `baton-project-runtime login-device <provider>`。Runtime 自动选择 `device_code`，只在 stdout 写入一行 `{type:"device_code",provider,verification_uri,user_code,expires_in_seconds}`，其他交互输入返回错误；SIGINT、SIGTERM 或标准输入关闭取消轮询。batond 保持标准输入打开，最多等待 10 秒取得设备码；失败或请求取消时结束进程。返回设备码后轮询使用独立的 15 分钟后台上下文，同 provider 的新请求先取消旧进程，进程退出触发能力采集刷新。控制面用消息关联、操作标识和当前节点连接核对响应，等待时限为 12 秒。
+
 `batond subscriptions` 调用 Runtime 的 `probe`，以与设备能力采集相同的时限、容量、协议及版本校验读取各 provider 的本地状态，显示登录指引或凭据读取问题。该命令不刷新 token、不发送推理请求，也不输出原始凭据或探测诊断；Runtime 缺失或报告无效时返回错误。本地凭据状态不代表已向服务端验证授权有效。在线 batond 在下一轮能力采集后自动上报登录状态。
 
 Runtime 进程的工作目录是一个空的控制目录。pi-agent-core 本身不加载 AGENTS.md、skills、扩展或 MCP，Runtime 也不启用这些功能，工具只有第 7 节列出的那些。
@@ -309,7 +311,7 @@ batond 在连接时和能力变化时上报 `node_runtime_reports.report`，结�
 }
 ```
 
-`exec.enabled` 来自 batond 本地配置里的「允许 Project Agent 执行命令」开关，默认关闭；`exec.shell` 是该节点执行命令使用的 shell，`exec.user` 为采集时读取的节点运行用户，获取失败时省略。`roots` 来自用户在节点上授权的目录，沿用现有 `batond files` 的登记。`roots` 上报真实路径，因为 Thread 的 `working_directory` 本来就是目标节点上的路径；Web 文件浏览仍只用 `root_id` 和相对路径。`repos` 是在授权目录内有限深度扫描得到的 Git 仓库，上报路径和去掉凭据的 origin，不上传文件内容。`provider.status` 为 available / login_required / unknown，凭据不离开设备。
+`exec.enabled` 来自 batond 本地配置里的「允许 Project Agent 执行命令」开关，默认关闭；`exec.shell` 是该节点执行命令使用的 shell，`exec.user` 为采集时读取的节点运行用户，获取失败时省略。`roots` 来自用户在节点上授权的目录，沿用 `batond files` 的登记。`up` / `run` 在浏览配置文件不存在时默认登记有效的用户主目录，已有空列表保留。`node.browse_roots_set` 的 `{operation_id,action,path}` 支持 add / remove，设备解析真实路径并幂等添加或按路径、标识移除，保存成功后扫描并以 `node.browse_roots_result` 返回最新 roots / repos，同时触发能力报告刷新。`roots` 上报真实路径，因为 Thread 的 `working_directory` 本来就是目标节点上的路径；Web 文件浏览仍只用 `root_id` 和相对路径。`repos` 是在授权目录内有限深度扫描得到的 Git 仓库，上报路径和去掉凭据的 origin，不上传文件内容。`provider.status` 为 available / login_required / unknown，凭据不离开设备。
 
 `devices.list` 把这些报告交给 Project Agent，它据此选择工作目录。
 

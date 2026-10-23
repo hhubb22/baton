@@ -436,6 +436,24 @@ describe('threads', () => {
     expect(screen.getByLabelText('New chat message')).toHaveValue('')
   })
 
+  it('adds and selects a folder path directly from the folder dialog', async () => {
+    const user = userEvent.setup()
+    const { client } = renderApp('/threads/thr-compat', 'error')
+    await user.click(await screen.findByRole('button', { name: 'Choose folder' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Choose folder' })
+    await user.selectOptions(within(dialog).getByLabelText('Device'), 'dev-mac')
+    await user.type(within(dialog).getByLabelText('Folder path'), '  /Users/kaken/new-project  {Enter}')
+    expect(await within(dialog).findByText('No subfolders')).toBeInTheDocument()
+    expect(
+      within(dialog).getByText('Add a folder path above or choose from shared folders on this device.'),
+    ).toBeInTheDocument()
+    expect((await client.listDevices()).find((device) => device.id === 'dev-mac')?.folders).toContain(
+      '/Users/kaken/new-project',
+    )
+    await user.click(within(dialog).getByRole('button', { name: 'Select folder' }))
+    expect(await screen.findByRole('button', { name: /new-project · MacBook Pro/ })).toBeInTheDocument()
+  })
+
   it('asks for another folder when the old one is missing', async () => {
     const user = userEvent.setup()
     renderApp('/threads/thr-compat', 'error')
@@ -469,6 +487,7 @@ describe('devices', () => {
     await user.click(within(dialog).getByRole('radio', { name: 'Linux' }))
     const command = within(dialog).getByLabelText('Run this in your terminal')
     expect(command).toHaveTextContent('read -rs BATON_ENROLLMENT_TOKEN && export BATON_ENROLLMENT_TOKEN')
+    expect(command).toHaveTextContent('batond up --coordinator')
     expect(command).toHaveTextContent('--display-name "Build Server" --system linux')
     expect(command.textContent).not.toMatch(/[A-Za-z0-9]{8}-[A-Za-z0-9]{4}-/)
 
@@ -514,6 +533,90 @@ describe('devices', () => {
 
     act(() => client.controls.useEnrollmentElsewhere())
     expect((await within(dialog).findAllByText('Setup code already used')).length).toBeGreaterThan(0)
+  })
+
+  it('adds and removes allowed folders on the device page', async () => {
+    const user = userEvent.setup()
+    const { client } = renderApp('/devices')
+    await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
+    const input = screen.getByLabelText('Folder path')
+    await user.type(input, '  /home/kaken/new-project  ')
+    await user.click(screen.getByRole('button', { name: 'Add folder' }))
+    expect(await screen.findByRole('button', { name: 'Remove /home/kaken/new-project' })).toBeInTheDocument()
+    expect(input).toHaveValue('')
+    await user.type(input, '/home/kaken/new-project')
+    await user.click(screen.getByRole('button', { name: 'Add folder' }))
+    await waitFor(() => expect(input).toHaveValue(''))
+    expect(screen.getAllByRole('button', { name: 'Remove /home/kaken/new-project' })).toHaveLength(1)
+    expect(await client.listFolders('dev-ubuntu', '/home/kaken/new-project')).toMatchObject({
+      state: 'ready',
+      folders: [],
+    })
+    await user.click(screen.getByRole('button', { name: 'Remove /home/kaken/new-project' }))
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Remove /home/kaken/new-project' })).not.toBeInTheDocument(),
+    )
+    expect(await client.listFolders('dev-ubuntu', '/home/kaken/new-project')).toMatchObject({
+      state: 'unavailable',
+      reason: 'outsideFolders',
+    })
+  })
+
+  it('keeps the folder path when adding fails and preserves a folder when removal fails', async () => {
+    const user = userEvent.setup()
+    const { client } = renderApp('/devices')
+    await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
+    await user.type(screen.getByLabelText('Folder path'), '/home/kaken/new-project')
+    client.controls.setReachable(false)
+    await user.click(screen.getByRole('button', { name: 'Add folder' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not add folder')
+    expect(screen.getByLabelText('Folder path')).toHaveValue('/home/kaken/new-project')
+    await user.click(screen.getByRole('button', { name: 'Remove /home/kaken/work' }))
+    expect(await screen.findByText(/Could not remove folder/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Remove /home/kaken/work' })).toBeInTheDocument()
+    client.controls.setReachable(true)
+    await user.click(screen.getByRole('button', { name: 'Add folder' }))
+    expect(await screen.findByRole('button', { name: 'Remove /home/kaken/new-project' })).toBeInTheDocument()
+  })
+
+  it('signs in to a subscription with a device code and waits for the device report', async () => {
+    const user = userEvent.setup()
+    const { client } = renderApp('/devices', 'error')
+    await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
+    await user.click(screen.getByRole('button', { name: 'Sign in to ChatGPT' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Sign in to ChatGPT on Ubuntu Dev' })
+    expect(await within(dialog).findByText('BATON-1234')).toBeInTheDocument()
+    expect(within(dialog).getByText(/Expires in 15m|Expires in 14m/)).toBeInTheDocument()
+    expect(within(dialog).getByRole('link', { name: 'Open sign-in page' })).toHaveAttribute(
+      'href',
+      'https://auth.openai.com/codex/device',
+    )
+    expect(within(dialog).getByRole('link', { name: 'Open sign-in page' })).toHaveAttribute('target', '_blank')
+    expect(within(dialog).getByRole('link', { name: 'Open sign-in page' })).toHaveAttribute('rel', 'noreferrer')
+    await user.click(within(dialog).getByRole('button', { name: 'Copy code' }))
+    expect(await within(dialog).findByText('Code copied')).toBeInTheDocument()
+    expect(await navigator.clipboard.readText()).toBe('BATON-1234')
+    expect(within(dialog).queryByText('Signed in')).not.toBeInTheDocument()
+    act(() => client.controls.completeSubscriptionLogin('Ubuntu Dev', 'openai-codex'))
+    expect(await within(dialog).findByText('Signed in')).toBeInTheDocument()
+    expect(within(dialog).queryByText('BATON-1234')).not.toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: 'Done' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(deviceRow('Ubuntu Dev')).toHaveFocus()
+    expect(screen.queryByRole('button', { name: 'Sign in to ChatGPT' })).not.toBeInTheDocument()
+  })
+
+  it('retries a subscription login after the device could not be reached', async () => {
+    const user = userEvent.setup()
+    const { client } = renderApp('/devices', 'error')
+    await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
+    client.controls.setReachable(false)
+    await user.click(screen.getByRole('button', { name: 'Sign in to ChatGPT' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Sign in to ChatGPT on Ubuntu Dev' })
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Could not start sign-in')
+    client.controls.setReachable(true)
+    await user.click(within(dialog).getByRole('button', { name: 'Retry sign-in' }))
+    expect(await within(dialog).findByText('BATON-1234')).toBeInTheDocument()
   })
 
   it('warns before making an offline device the default', async () => {

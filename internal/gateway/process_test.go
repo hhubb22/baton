@@ -249,7 +249,7 @@ func buildBins(t *testing.T) (string, string) {
 			buildErr = err
 			return
 		}
-		for _, name := range []string{"coordinator", "batond"} {
+		for _, name := range []string{"baton-server", "batond"} {
 			if prebuilt {
 				if _, err := os.Stat(filepath.Join(out, name+suffix)); err != nil {
 					buildErr = err
@@ -264,7 +264,7 @@ func buildBins(t *testing.T) (string, string) {
 				return
 			}
 		}
-		builtCoord = filepath.Join(out, "coordinator"+suffix)
+		builtCoord = filepath.Join(out, "baton-server"+suffix)
 		builtBatond = filepath.Join(out, "batond"+suffix)
 	})
 	if buildErr != nil {

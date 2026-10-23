@@ -7,6 +7,8 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"errors"
+	"os"
+	"path/filepath"
 	"time"
 
 	"baton/internal/identity"
@@ -55,6 +57,27 @@ func GenerateSigner() (Signer, error) {
 		return Signer{}, errors.New("无法生成节点签名密钥")
 	}
 	return Signer{key: priv}, nil
+}
+
+// LoadOrCreateSigner 加载签名密钥，文件不存在时生成并保存新密钥。
+func LoadOrCreateSigner(path string) (Signer, bool, error) {
+	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+		if dir := filepath.Dir(path); dir != "." && dir != "" {
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				return Signer{}, false, errors.New("无法创建节点签名密钥目录")
+			}
+		}
+		signer, err := GenerateSigner()
+		if err != nil {
+			return Signer{}, false, err
+		}
+		if err := signer.WriteFile(path); err != nil {
+			return Signer{}, false, err
+		}
+		return signer, true, nil
+	}
+	signer, err := LoadSigner(path)
+	return signer, false, err
 }
 
 // LoadSigner 读取 PKCS#8 PEM。文件必须只有当前用户可读，也不能是符号链接。

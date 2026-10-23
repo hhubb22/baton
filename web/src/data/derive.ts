@@ -595,7 +595,7 @@ export function sentenceList(items: string[]) {
   return `${items.slice(0, -1).join(', ')}${items.length > 2 ? ',' : ''} and ${items[items.length - 1]}`
 }
 
-// 设备需要补齐时的提示，逐项写出要在设备上做什么。
+// 设备需要补齐时的提示，逐项列出安装和登录要求。
 export function setupSteps(device: Device) {
   const steps = device.agents.flatMap((agent) => {
     const name = agentNames[agent.kind]
@@ -612,7 +612,7 @@ export function setupSteps(device: Device) {
     steps.push(`sign in to ${providers} for the project assistant`)
   }
   const list = sentenceList(steps)
-  return `${list.charAt(0).toUpperCase()}${list.slice(1)}. Make these changes on ${device.name}.`
+  return `${list.charAt(0).toUpperCase()}${list.slice(1)}.`
 }
 
 // 设备行的 Agent 列。

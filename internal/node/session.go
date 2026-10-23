@@ -42,6 +42,7 @@ type RunOptions struct {
 	RuntimeReportInterval    time.Duration
 	DiscoverRuntimeModels    RuntimeModelDiscovery
 	ProbeRuntimeAgentVersion func(context.Context, string) (string, error)
+	StartSubscriptionLogin   func(context.Context, string, func()) (protocol.SubscriptionLoginResult, error)
 	reports                  *runtimeReports
 	reportSender             *runtimeReportSender
 	projectRuntime           *projectRuntimeManager
@@ -105,6 +106,10 @@ func Maintain(ctx context.Context, opts RunOptions) error {
 	if opts.DataDir != "" {
 		opts.reports = collectRuntimeReports(ctx, opts.DataDir, opts.DiscoverRuntimeModels, opts.ProbeRuntimeAgentVersion, opts.RuntimeReportInterval)
 		opts.projectRuntime.reports = opts.reports
+		defer func() {
+			cancel()
+			<-opts.reports.done
+		}()
 	}
 	for {
 		if ctx.Err() != nil {
@@ -210,7 +215,7 @@ func runOnce(ctx context.Context, opts RunOptions, incarnation string, ledger *L
 	readerDone := make(chan struct{})
 	go func() {
 		defer close(readerDone)
-		errCh <- readRelay(ctx, writer, &acked, &expect, opts.Logger, opts.Identity, host, loop, threads, opts.DataDir, reportSender, opts.projectRuntime)
+		errCh <- readRelay(ctx, writer, &acked, &expect, opts.Logger, opts.Identity, host, loop, threads, opts.DataDir, reportSender, opts.StartSubscriptionLogin, opts.projectRuntime)
 	}()
 	defer func() {
 		cancel()
@@ -280,7 +285,7 @@ func dialRelay(ctx context.Context, opts RunOptions) (*websocket.Conn, error) {
 	return ws, nil
 }
 
-func readRelay(ctx context.Context, w *wsWriter, acked *atomic.Bool, expect *atomic.Value, log *slog.Logger, ident Identity, host *session.Host, loop *runtimeRPC, threads *threadService, dataDir string, reports *runtimeReportConnection, runtimes ...*projectRuntimeManager) error {
+func readRelay(ctx context.Context, w *wsWriter, acked *atomic.Bool, expect *atomic.Value, log *slog.Logger, ident Identity, host *session.Host, loop *runtimeRPC, threads *threadService, dataDir string, reports *runtimeReportConnection, startLogin subscriptionLoginStarter, runtimes ...*projectRuntimeManager) error {
 	for {
 		_, raw, err := w.ws.Read(ctx)
 		if err != nil {
@@ -321,7 +326,7 @@ func readRelay(ctx context.Context, w *wsWriter, acked *atomic.Bool, expect *ato
 			if handleSessionEnvelope(ctx, raw, w, host) {
 				continue
 			}
-			if handleNodeSettings(ctx, raw, w, dataDir, reports.reports) {
+			if handleNodeSettings(ctx, raw, w, dataDir, reports.reports, startLogin) {
 				continue
 			}
 			if handleFileEnvelope(ctx, raw, w, dataDir, log) {

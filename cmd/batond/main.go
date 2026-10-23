@@ -9,9 +9,11 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
 
 	"baton/internal/node"
 	"baton/internal/projectruntime"
@@ -43,8 +45,9 @@ func (e *exitCode) Unwrap() error { return e.err }
 
 func usage() string {
 	return `用法:
-  batond register --coordinator https://主机 --display-name 名称 --system windows|macos|linux [--data-dir 目录] [--capability 名称 ...] [--enrollment-file 文件]
-  batond run --relay wss://主机/v1/node [--data-dir 目录]
+  batond up [--coordinator https://主机] [--display-name 名称] [--system windows|macos|linux] [--workspace 绝对路径] [--data-dir 目录] [--enrollment-file 文件] [--relay wss://主机/v1/node]
+  batond register --coordinator https://主机 [--display-name 名称] [--system windows|macos|linux] [--data-dir 目录] [--capability 名称 ...] [--enrollment-file 文件]
+  batond run [--relay wss://主机/v1/node] [--data-dir 目录]
   batond files add --id 标识 --path 绝对路径 [--data-dir 目录]
   batond files remove --id 标识 [--data-dir 目录]
   batond files list [--data-dir 目录]
@@ -55,7 +58,9 @@ func usage() string {
 注册凭据从环境变量 BATON_ENROLLMENT_TOKEN 或 --enrollment-file 读取，不能作为命令行参数，也不能放进地址。
 可选环境变量 BATON_TLS_CA_FILE 指向额外的 CA 证书。
 未指定 --data-dir 时使用当前用户的应用数据目录。
-batond run 使用已保存的身份连接 Coordinator。BATON_HEARTBEAT_INTERVAL 默认 10s，允许 100ms 到 2m。
+batond up 首次注册后连接中心服务，后续启动复用本地身份；--workspace 登记本机可浏览目录。
+注册默认使用主机名与当前操作系统。batond run 从身份文件中的中心地址推导连接地址，可用 --relay 指定。
+BATON_HEARTBEAT_INTERVAL 默认 10s，允许 100ms 到 2m。
 认证失效时退出并说明需要重新认证，不会重新注册。
 batond files 只在本机登记可浏览目录。浏览器提交目录标识和相对路径，不能提交绝对路径。
 batond login 登录 Project assistant 的模型订阅：openai-codex 对应 ChatGPT，xai 对应 xAI。
@@ -73,6 +78,8 @@ func runWithOptions(ctx context.Context, args []string, stdout, stderr io.Writer
 		return &exitCode{code: 2, err: errors.New(usage())}
 	}
 	switch args[0] {
+	case "up":
+		return cmdUp(ctx, args[1:], stdout, stderr, getenv, opts)
 	case "register":
 		return cmdRegister(ctx, args[1:], stdout, stderr, getenv)
 	case "run":
@@ -116,6 +123,15 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer, getenv func(st
 	if err != nil {
 		return err
 	}
+	if strings.TrimSpace(relayURL) == "" {
+		if ident.CoordinatorURL == "" {
+			return errors.New("本地身份没有中心地址，需要通过 --relay 指定连接地址")
+		}
+		relayURL, err = node.RelayURL(ident.CoordinatorURL)
+		if err != nil {
+			return err
+		}
+	}
 	heartbeat, err := heartbeatInterval(getenv("BATON_HEARTBEAT_INTERVAL"))
 	if err != nil {
 		return err
@@ -131,6 +147,7 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer, getenv func(st
 	opts.RootCAs = roots
 	opts.Logger = logger
 	opts.DataDir = dir
+	node.EnsureDefaultBrowseRoot(dir)
 	err = node.Maintain(ctx, opts)
 	if errors.Is(err, node.ErrNeedsReauth) {
 		return err
@@ -159,7 +176,7 @@ func parseRun(args []string) (string, string, error) {
 	var relayURL, dataDir string
 	fs.StringVar(&relayURL, "relay", "", "")
 	fs.StringVar(&dataDir, "data-dir", "", "")
-	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || strings.TrimSpace(relayURL) == "" {
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
 		return "", "", &exitCode{code: 2, err: errors.New(usage())}
 	}
 	return relayURL, dataDir, nil
@@ -192,6 +209,11 @@ func cmdRegister(ctx context.Context, args []string, stdout, stderr io.Writer, g
 	if err != nil {
 		return err
 	}
+	return register(ctx, opts, stdout, stderr, getenv)
+}
+
+func register(ctx context.Context, opts registerOpts, stdout, stderr io.Writer, getenv func(string) string) error {
+	var err error
 	if getenv == nil {
 		getenv = func(string) string { return "" }
 	}
@@ -215,6 +237,9 @@ func cmdRegister(ctx context.Context, args []string, stdout, stderr io.Writer, g
 	}
 	if !errors.Is(err, os.ErrNotExist) {
 		return err
+	}
+	if strings.TrimSpace(opts.coordinator) == "" {
+		return errors.New("首次注册需要提供 --coordinator")
 	}
 	token, err := enrollmentToken(opts.enrollment, getenv)
 	if err != nil {
@@ -245,23 +270,51 @@ func cmdRegister(ctx context.Context, args []string, stdout, stderr io.Writer, g
 func parseRegister(args []string) (registerOpts, error) {
 	fs := flag.NewFlagSet("register", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	var opts registerOpts
-	var caps stringList
-	fs.StringVar(&opts.coordinator, "coordinator", "", "")
-	fs.StringVar(&opts.dataDir, "data-dir", "", "")
-	fs.StringVar(&opts.displayName, "display-name", "", "")
-	fs.StringVar(&opts.system, "system", "", "")
-	fs.StringVar(&opts.role, "role", "", "")
-	fs.StringVar(&opts.enrollment, "enrollment-file", "", "")
-	fs.Var(&caps, "capability", "")
+	opts := registerFlags(fs)
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
 		return registerOpts{}, &exitCode{code: 2, err: errors.New(usage())}
 	}
 	if opts.coordinator == "" || opts.displayName == "" || opts.system == "" {
 		return registerOpts{}, &exitCode{code: 2, err: errors.New(usage())}
 	}
-	opts.capabilities = []string(caps)
-	return opts, nil
+	return *opts, nil
+}
+
+func registerFlags(fs *flag.FlagSet) *registerOpts {
+	opts := &registerOpts{}
+	hostname, _ := os.Hostname()
+	fs.StringVar(&opts.coordinator, "coordinator", "", "")
+	fs.StringVar(&opts.dataDir, "data-dir", "", "")
+	fs.StringVar(&opts.displayName, "display-name", defaultDisplayName(hostname), "")
+	fs.StringVar(&opts.system, "system", defaultSystem(runtime.GOOS), "")
+	fs.StringVar(&opts.role, "role", "", "")
+	fs.StringVar(&opts.enrollment, "enrollment-file", "", "")
+	fs.Var((*stringList)(&opts.capabilities), "capability", "")
+	return opts
+}
+
+func defaultSystem(goos string) string {
+	if goos == "darwin" {
+		return node.SystemMacOS
+	}
+	return goos
+}
+
+func defaultDisplayName(hostname string) string {
+	name := strings.TrimSpace(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, hostname))
+	runes := []rune(name)
+	if len(runes) > 80 {
+		name = strings.TrimSpace(string(runes[:80]))
+	}
+	if name == "" {
+		return "Workstation"
+	}
+	return name
 }
 
 func enrollmentToken(path string, getenv func(string) string) (string, error) {

@@ -11,6 +11,8 @@ import (
 
 type NodeSettingsGateway interface {
 	SetProjectExec(context.Context, string, string, protocol.ProjectExecRequest) (protocol.ProjectExecResult, error)
+	UpdateBrowseRoots(context.Context, string, string, protocol.BrowseRootsRequest) (protocol.BrowseRootsResult, error)
+	StartSubscriptionLogin(context.Context, string, string, protocol.SubscriptionLoginRequest) (protocol.SubscriptionLoginResult, error)
 }
 
 func (s *Server) getEnrollment(w http.ResponseWriter, r *http.Request, id string) {

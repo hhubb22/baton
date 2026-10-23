@@ -42,7 +42,11 @@ func Register(ctx context.Context, req RegisterRequest) (Identity, error) {
 	if err := Validate(req.DisplayName, req.System, req.Role, caps); err != nil {
 		return Identity{}, err
 	}
-	endpoint, err := coordinatorRegisterURL(req.CoordinatorURL)
+	coordinatorURL, err := NormalizeCoordinatorURL(req.CoordinatorURL)
+	if err != nil {
+		return Identity{}, err
+	}
+	endpoint, err := coordinatorRegisterURL(coordinatorURL)
 	if err != nil {
 		return Identity{}, err
 	}
@@ -111,6 +115,7 @@ func Register(ctx context.Context, req RegisterRequest) (Identity, error) {
 	if err := json.Unmarshal(raw, &ident); err != nil {
 		return Identity{}, errors.New("注册响应无法读取")
 	}
+	ident.CoordinatorURL = coordinatorURL
 	if ident.Capabilities == nil {
 		ident.Capabilities = []string{}
 	}
@@ -120,21 +125,40 @@ func Register(ctx context.Context, req RegisterRequest) (Identity, error) {
 	return ident, nil
 }
 
-func coordinatorRegisterURL(base string) (string, error) {
+// NormalizeCoordinatorURL 返回不带路径的 HTTPS 中心地址。
+func NormalizeCoordinatorURL(raw string) (string, error) {
 	const rejected = "Coordinator 地址必须是不带凭据和查询参数的 https 地址"
-	u, err := url.Parse(strings.TrimSpace(base))
+	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || u.Hostname() == "" || !u.IsAbs() || !strings.EqualFold(u.Scheme, "https") || u.User != nil {
 		return "", errors.New(rejected)
 	}
-	if u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
+	if u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(raw, "#") || (u.Path != "" && u.Path != "/") || u.RawPath != "" || strings.Contains(u.Host, "\\") {
 		return "", errors.New(rejected)
 	}
 	u.Scheme = "https"
-	u.Path = "/api/v1/nodes/register"
-	u.RawQuery = ""
-	u.Fragment = ""
-	u.Opaque = ""
+	u.Host = strings.ToLower(u.Host)
+	if u.Port() == "443" {
+		u.Host = strings.TrimSuffix(u.Host, ":443")
+	}
+	u.Path = ""
 	return u.String(), nil
+}
+
+func coordinatorRegisterURL(base string) (string, error) {
+	normalized, err := NormalizeCoordinatorURL(base)
+	if err != nil {
+		return "", err
+	}
+	return normalized + "/api/v1/nodes/register", nil
+}
+
+// RelayURL 从中心地址推导节点的 WSS 连接地址。
+func RelayURL(coordinatorURL string) (string, error) {
+	normalized, err := NormalizeCoordinatorURL(coordinatorURL)
+	if err != nil {
+		return "", err
+	}
+	return "wss://" + strings.TrimPrefix(normalized, "https://") + "/v1/node", nil
 }
 
 // LoadRootCAs 读取额外信任的 CA。空路径使用系统信任库。

@@ -21,6 +21,7 @@ import type {
   Reference,
   SendMode,
   Session,
+  SubscriptionLoginChallenge,
   Thread,
   Trace,
 } from './types'
@@ -114,6 +115,9 @@ export interface BatonClient {
   retryProject(projectId: ID): Promise<Project>
 
   setDefaultDevice(deviceId: ID): Promise<Session>
+  addDeviceFolder(input: { deviceId: ID; path: string }): Promise<Device>
+  removeDeviceFolder(input: { deviceId: ID; path: string }): Promise<Device>
+  startSubscriptionLogin(input: { deviceId: ID; provider: string }): Promise<SubscriptionLoginChallenge>
   setCommandAccess(input: { deviceId: ID; enabled: boolean }): Promise<Device>
   // 返回时中心已经拒绝这台设备的新连接并关闭了当前连接。
   removeDevice(deviceId: ID): Promise<void>

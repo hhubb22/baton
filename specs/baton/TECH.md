@@ -282,6 +282,8 @@ URL 相对 `/api/v1`。读取检查员工会话与资源归属，写入另检查
 | `POST /node-enrollments` | 创建一次性注册凭据，返回 `enrollment_id`、`enrollment_token`、`expires_at` 和非负的 `expires_in_ms`；凭据仅在创建时返回 |
 | `GET /node-enrollments/{id}` | 仅查询本人记录，其他员工的记录返回 404；返回 `enrollment_id`、`state`、可空 `device_id`、`expires_at`、`expires_in_ms`。未使用时按期限显示 `pending` / `expired`；已使用且关联设备未吊销、在线并已同步时为 `connected`，其余已使用记录为 `used` |
 | `GET /nodes`、`GET /nodes/{id}` | 返回本人设备状态。Node DTO 包含 `registered_at`、可空 `runtime_report`、`runtime_report_version`、可空 `runtime_reported_at`，以及报告中的 `batond_version`、`user`；在线状态和最后联系时间独立返回 |
+| `POST /nodes/{id}/roots`、`DELETE /nodes/{id}/roots` | `{path}`；通过 Gateway 等待本人在线且已同步设备保存目录设置，返回含最新 `roots`、`repos` 的 Node DTO。添加支持真实路径幂等登记，移除支持路径或目录标识；无效路径返回 400，节点离线返回 503 `node_offline` |
+| `POST /nodes/{id}/subscriptions/login` | `{provider}`；通过 Gateway 启动设备端 OAuth 设备码登录，返回 `{provider, verification_uri, user_code, expires_in_seconds}`，凭据留在设备。支持 `openai-codex` / `ChatGPT` 和 `xai` / `xAI`，未取得设备码返回 503 |
 | `PUT /nodes/{id}/project-exec` | `{enabled}`；通过 Gateway 等待在线且已同步设备原子保存并回读本机开关，确认后返回 Node DTO，报告中的 `exec` 使用设备确认值；未确认返回 503，客户端重新读取状态。协议与 `exec.user` 见 Project Agent TECH「节点能力报告」 |
 | `POST /threads` | `client_thread_id`、可选 `node_id`（缺省为默认设备）、`agent_type`、可选 `model`（缺省为该 Agent 的 `default_model`）、`working_directory`、第一条消息 `message:{client_message_id, content}`。浏览器新建的 Thread 不属于 Project，执行时限取默认 2 小时。新建返回 201，幂等重发返回 200，内容冲突返回 409 |
 | `GET /threads` | 可按 `project_id`、`node_id`、`status` 筛选，按 `(last_activity_at, id)` 倒序分页；`limit` 默认 50、最多 100，续页使用 `next_cursor`。每条记录包含 Thread 基础字段、`title`、可空 `current_turn` 和 `stop_canceled`，供列表直接展示 |
@@ -387,7 +389,11 @@ Pi 读取原生 JSONL，Codex 读取 thread 文件并核对 thread ID、cwd 和 
 
 ## 部署
 
-Coordinator 与 PostgreSQL 部署在一处，Coordinator 提供静态页面、API、浏览器 WebSocket 和节点 WSS。升级顺序为停止旧实例、迁移、启动新实例；batond 退避重连并同步。设备上 Windows 用当前员工的登录启动项，macOS 用 LaunchAgent，Linux 用 `systemd --user`，不以 root 或 LocalSystem 运行。
+中心服务二进制为 `baton-server`，入口在 `cmd/baton-server`，与 PostgreSQL 部署在一处，提供静态页面、API、浏览器 WebSocket 和节点 WSS。`serve` 先执行 `migrate.Up`，再执行 `migrate.Check`；`migrate` 子命令可单独运行。签名密钥路径由 `BATON_NODE_SIGNING_KEY` 指定，默认工作目录下的 `node-signing.key`；仅在 `Lstat` 确认文件不存在时生成 Ed25519 私钥并原子写入 `0600` 文件，已有文件继续校验权限、类型和内容。升级时先停止旧实例，再启动新实例完成迁移；batond 退避重连并同步。
+
+`Dockerfile` 分别用 Node.js 24 构建 Web UI、Go 1.27 静态编译服务端，再放入 Debian bookworm slim 镜像，以非 root 用户运行。`compose.yaml` 等待 PostgreSQL 16 健康后启动中心服务，数据库和 `/var/lib/baton` 分别挂载数据卷，签名密钥保存在后者。容器监听 `0.0.0.0:8080`，宿主机默认绑定 `127.0.0.1:8080`，通过 HTTPS 反向代理公开 HTTP/WebSocket 服务。
+
+`batond register` 默认将 `runtime.GOOS` 映射为系统名，将主机名去除首尾空白和控制字符并限制到 80 个字符，空名称回退为 `Workstation`。注册成功后，`identity.json` 的可选 `coordinator_url` 保存规范化的 HTTPS 中心地址；非空时读写身份均校验地址。`batond run` 优先使用显式 `--relay`，否则从中心地址推导 `wss://主机/v1/node`。`batond up` 复用相同的注册和运行逻辑，在本地没有身份时要求中心地址和注册凭据；workspace 通过本机目录登记逻辑在连接前幂等保存。设备上 Windows 用当前员工的登录启动项，macOS 用 LaunchAgent，Linux 用 `systemd --user`，不以 root 或 LocalSystem 运行。
 
 承载 Project Agent 的设备另外安装 Node.js 和 `baton-project-runtime`，见 Project Agent TECH 第 2.1 节。
 

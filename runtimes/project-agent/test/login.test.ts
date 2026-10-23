@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createLoginInteraction } from "../src/login.js";
+import {
+  createDeviceCodeLoginInteraction,
+  createLoginInteraction,
+} from "../src/login.js";
 
 const options = [
   { id: "browser", label: "Browser login (default)" },
@@ -147,5 +150,70 @@ test("授权链接、设备验证码和进度写入诊断输出", () => {
   assert.equal(
     output,
     "Open this URL\nhttps://example.test/authorize\nhttps://example.test/device\nFIXTURE-CODE\nWaiting\n",
+  );
+});
+
+test("设备码登录自动选择方式并转发授权信息", async () => {
+  const received: unknown[] = [];
+  const interaction = createDeviceCodeLoginInteraction((info) =>
+    received.push(info),
+  );
+  assert.equal(
+    await interaction.prompt({ type: "select", message: "Method", options }),
+    "device_code",
+  );
+  assert.equal(
+    await interaction.prompt({
+      type: "select",
+      message: "Method",
+      options: [options[0]],
+    }),
+    "browser",
+  );
+  await assert.rejects(
+    interaction.prompt({ type: "select", message: "Method", options: [] }),
+    /login_options_missing/,
+  );
+  await assert.rejects(
+    interaction.prompt({ type: "manual_code", message: "Code" }),
+    /interactive_input_unsupported/,
+  );
+  interaction.notify({ type: "progress", message: "等待授权" });
+  interaction.notify({
+    type: "device_code",
+    verificationUri: "https://example.test/device",
+    userCode: "CODE-1234",
+    expiresInSeconds: 600,
+  });
+  assert.deepEqual(received, [
+    {
+      verificationUri: "https://example.test/device",
+      userCode: "CODE-1234",
+      expiresInSeconds: 600,
+    },
+  ]);
+});
+
+test("设备码登录遵循流程和问题的取消信号", async () => {
+  const controller = new AbortController();
+  const interaction = createDeviceCodeLoginInteraction(
+    () => {},
+    controller.signal,
+  );
+  assert.equal(interaction.signal, controller.signal);
+  controller.abort();
+  await assert.rejects(
+    interaction.prompt({ type: "select", message: "Method", options }),
+    { name: "AbortError" },
+  );
+  const separate = createDeviceCodeLoginInteraction(() => {});
+  await assert.rejects(
+    separate.prompt({
+      type: "select",
+      message: "Method",
+      options,
+      signal: controller.signal,
+    }),
+    { name: "AbortError" },
   );
 });

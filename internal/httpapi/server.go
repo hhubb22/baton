@@ -228,6 +228,22 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		const nodePrefix = "/api/v1/nodes/"
 		if strings.HasPrefix(r.URL.Path, nodePrefix) {
 			rest := strings.TrimPrefix(r.URL.Path, nodePrefix)
+			if strings.HasSuffix(rest, "/roots") {
+				if r.Method != http.MethodPost && r.Method != http.MethodDelete {
+					s.writeError(w, r, 405, "method_not_allowed", "不支持该请求方法")
+					return
+				}
+				s.updateBrowseRoots(w, r, strings.TrimSuffix(rest, "/roots"))
+				return
+			}
+			if strings.HasSuffix(rest, "/subscriptions/login") {
+				if r.Method != http.MethodPost {
+					s.writeError(w, r, 405, "method_not_allowed", "不支持该请求方法")
+					return
+				}
+				s.startSubscriptionLogin(w, r, strings.TrimSuffix(rest, "/subscriptions/login"))
+				return
+			}
 			if strings.HasSuffix(rest, "/project-exec") {
 				id := strings.TrimSuffix(rest, "/project-exec")
 				if r.Method != http.MethodPut {

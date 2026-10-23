@@ -65,6 +65,96 @@ describe('HTTP transport', () => {
 })
 
 describe('HTTP account and devices', () => {
+  it('adds and removes shared folders and notifies device and file queries', async () => {
+    const node = {
+      id: 'node/id',
+      display_name: 'Desk',
+      system: 'linux',
+      online: true,
+      synced: true,
+      revocation_status: 'none',
+      runtime_report: { roots: [{ path: '/work' }], repos: [{ path: '/work/repo' }] },
+    }
+    const fetch = fetcher()
+      .mockResolvedValueOnce(response({ employee, csrf_token: 'folder-csrf' }))
+      .mockResolvedValueOnce(response(node))
+      .mockResolvedValueOnce(response({ ...node, runtime_report: { roots: [], repos: [] } }))
+    const client = createHttpClient({ fetch, WebSocket: null })
+    const listener = vi.fn()
+    const unsubscribe = client.subscribe(listener)
+    expect(await client.addDeviceFolder({ deviceId: node.id, path: '/work' })).toMatchObject({
+      folders: ['/work'],
+      repos: ['/work/repo'],
+    })
+    expect(await client.removeDeviceFolder({ deviceId: node.id, path: '/work' })).toMatchObject({
+      folders: [],
+      repos: [],
+    })
+    for (const [index, method] of [
+      [1, 'POST'],
+      [2, 'DELETE'],
+    ] as const) {
+      const [url, init] = fetch.mock.calls[index]
+      expect(url).toBe('/api/v1/nodes/node%2Fid/roots')
+      expect(init?.method).toBe(method)
+      expect(JSON.parse(String(init?.body))).toEqual({ path: '/work' })
+      expect(new Headers(init?.headers).get('X-CSRF-Token')).toBe('folder-csrf')
+    }
+    expect(listener.mock.calls.map(([event]) => event.topics)).toEqual([
+      ['devices', 'files'],
+      ['devices', 'files'],
+    ])
+    unsubscribe()
+  })
+
+  it.each([
+    ['openai-codex', 'ChatGPT'],
+    ['xai', 'xAI'],
+  ])('starts a %s device login without claiming it is complete', async (provider, name) => {
+    const fetch = fetcher()
+      .mockResolvedValueOnce(response({ employee, csrf_token: 'login-csrf' }))
+      .mockResolvedValueOnce(
+        response({
+          provider,
+          verification_uri: 'https://example.test/device',
+          user_code: 'CODE-1234',
+          expires_in_seconds: 600,
+        }),
+      )
+    const client = createHttpClient({ fetch, WebSocket: null })
+    expect(await client.startSubscriptionLogin({ deviceId: 'desk', provider: name })).toEqual({
+      provider: name,
+      verificationUri: 'https://example.test/device',
+      userCode: 'CODE-1234',
+      expiresInSeconds: 600,
+    })
+    const [url, init] = fetch.mock.calls[1]
+    expect(url).toBe('/api/v1/nodes/desk/subscriptions/login')
+    expect(init?.method).toBe('POST')
+    expect(JSON.parse(String(init?.body))).toEqual({ provider: name })
+    expect(new Headers(init?.headers).get('X-CSRF-Token')).toBe('login-csrf')
+  })
+
+  it('propagates invalid folder and offline login responses without emitting changes', async () => {
+    const fetch = fetcher()
+      .mockResolvedValueOnce(response({ employee, csrf_token: 'csrf' }))
+      .mockResolvedValueOnce(response({ code: 'invalid_path' }, 400))
+      .mockResolvedValueOnce(response({ code: 'node_offline' }, 503))
+    const client = createHttpClient({ fetch, WebSocket: null })
+    const listener = vi.fn()
+    const unsubscribe = client.subscribe(listener)
+    await expect(client.addDeviceFolder({ deviceId: 'desk', path: 'relative' })).rejects.toMatchObject({
+      status: 400,
+      code: 'invalid',
+    })
+    await expect(client.startSubscriptionLogin({ deviceId: 'desk', provider: 'ChatGPT' })).rejects.toMatchObject({
+      status: 503,
+      code: 'unavailable',
+    })
+    expect(listener).not.toHaveBeenCalled()
+    unsubscribe()
+  })
+
   it('maps the server report without inventing models or installed programs', () => {
     const device = mapDevice({
       id: 'node',

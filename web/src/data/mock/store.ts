@@ -1,4 +1,5 @@
 import { ClientError, type ChangeEvent, type Topic } from '../client'
+import { subscriptionName } from '../http/client'
 import {
   agentNames,
   assistantBlock,
@@ -38,6 +39,7 @@ import type {
   Reference,
   SendMode,
   Thread,
+  SubscriptionLoginChallenge,
   Trace,
 } from '../types'
 import { previewLimit } from '../types'
@@ -961,6 +963,59 @@ ${response}`,
     this.emit('session', 'devices')
   }
 
+  private onlineDevice(deviceId: ID) {
+    const device = this.device(deviceId)
+    if (device.connection !== 'online') throw new ClientError('unavailable', 'Reconnect this device to continue.')
+    return device
+  }
+
+  addDeviceFolder(deviceId: ID, path: string): Device {
+    const device = this.onlineDevice(deviceId)
+    path = path.trim()
+    const absolutePath = path.split(separator(path)).join('/')
+    if (!absolutePath.startsWith('/') && !(/^[a-z]:/i.test(absolutePath) && absolutePath[2] === '/')) {
+      throw new ClientError('invalid', 'Enter an absolute folder path.')
+    }
+    if (!device.folders.includes(path)) device.folders.push(path)
+    const directories = (this.world.directories[deviceId] ??= [])
+    if (!directories.includes(path)) directories.push(path)
+    this.emit('devices', 'files')
+    return device
+  }
+
+  removeDeviceFolder(deviceId: ID, path: string): Device {
+    const device = this.onlineDevice(deviceId)
+    path = path.trim()
+    if (!device.folders.includes(path)) throw new ClientError('notFound', 'This folder is no longer shared.')
+    device.folders = device.folders.filter((folder) => folder !== path)
+    device.repos = device.repos.filter((repo) => device.folders.some((root) => insideFolder(repo, root)))
+    this.emit('devices', 'files')
+    return device
+  }
+
+  startSubscriptionLogin(deviceId: ID, provider: string): SubscriptionLoginChallenge {
+    const device = this.onlineDevice(deviceId)
+    if (!device.hasRuntime) throw new ClientError('unavailable', 'Install the project assistant on this device first.')
+    return {
+      provider: subscriptionName(provider),
+      verificationUri: provider.toLowerCase().includes('xai')
+        ? 'https://auth.x.ai/activate'
+        : 'https://auth.openai.com/codex/device',
+      userCode: 'BATON-1234',
+      expiresInSeconds: 900,
+    }
+  }
+
+  completeSubscriptionLogin(deviceNameOrId: string, provider: string) {
+    const device = this.world.devices.find((item) => item.id === deviceNameOrId || item.name === deviceNameOrId)
+    if (!device) throw new ClientError('notFound', 'Device not found')
+    provider = subscriptionName(provider)
+    const subscription = device.subscriptions.find((item) => item.provider === provider)
+    if (subscription) Object.assign(subscription, { signedIn: true, status: 'available' })
+    else device.subscriptions.push({ provider, signedIn: true, status: 'available' })
+    this.emit('devices', 'projects')
+  }
+
   setCommandAccess(deviceId: ID, enabled: boolean): Device {
     const device = this.device(deviceId)
     device.commandAccess.enabled = enabled
@@ -1026,8 +1081,8 @@ ${response}`,
       agents: [],
       subscriptions: [{ provider: 'ChatGPT', signedIn: true }],
       hasRuntime: true,
-      folders: defaults.folders,
-      repos: defaults.repos,
+      folders: [...defaults.folders],
+      repos: [...defaults.repos],
       commandAccess: { enabled: false, user: world.session.account?.username ?? 'kaken', shell: defaults.shell },
     }
     world.devices.push(device)

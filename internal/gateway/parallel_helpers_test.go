@@ -138,7 +138,7 @@ func buildProjectBins(t *testing.T) (string, string) {
 	if os.Getenv("BATON_TEST_BIN_DIR") == "" {
 		return buildBins(t)
 	}
-	return buildFixture(t, "../../cmd/coordinator", "coordinator", true), buildFixture(t, "../../cmd/batond", "batond", true)
+	return buildFixture(t, "../../cmd/baton-server", "baton-server", true), buildFixture(t, "../../cmd/batond", "batond", true)
 }
 
 func installProjectRuntime(t *testing.T, dir string) {

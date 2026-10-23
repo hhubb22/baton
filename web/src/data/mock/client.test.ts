@@ -44,6 +44,54 @@ describe('mock scenarios', () => {
   })
 })
 
+describe('device settings', () => {
+  it('supports Windows folders and preserves directory contents across removal and re-adding', async () => {
+    const { client, events } = setup()
+    client.controls.setDeviceConnection('dev-windows', 'online')
+    const path = 'D:' + String.fromCharCode(92) + 'projects'
+    await client.addDeviceFolder({ deviceId: 'dev-windows', path: '  ' + path + '  ' })
+    await client.addDeviceFolder({ deviceId: 'dev-windows', path })
+    const device = (await client.listDevices()).find((item) => item.id === 'dev-windows')!
+    expect(device.folders.filter((folder) => folder === path)).toHaveLength(1)
+    expect(await client.listFolders(device.id, path)).toMatchObject({ state: 'ready', folders: [] })
+    await client.removeDeviceFolder({ deviceId: device.id, path })
+    expect(await client.listFolders(device.id, path)).toMatchObject({ state: 'unavailable', reason: 'outsideFolders' })
+    await client.addDeviceFolder({ deviceId: device.id, path })
+    expect(await client.listFolders(device.id, path)).toMatchObject({ state: 'ready' })
+    expect(events.at(-1)?.topics).toEqual(['devices', 'files'])
+    await expect(client.addDeviceFolder({ deviceId: device.id, path: 'relative' })).rejects.toMatchObject({
+      code: 'invalid',
+    })
+    client.controls.setDeviceConnection(device.id, 'offline')
+    await expect(client.removeDeviceFolder({ deviceId: device.id, path })).rejects.toMatchObject({
+      code: 'unavailable',
+    })
+  })
+
+  it('only completes an xAI subscription after the device reports sign-in', async () => {
+    const { client, events } = setup()
+    const challenge = await client.startSubscriptionLogin({ deviceId: 'dev-ubuntu', provider: 'xai' })
+    expect(challenge).toEqual({
+      provider: 'xAI',
+      verificationUri: 'https://auth.x.ai/activate',
+      userCode: 'BATON-1234',
+      expiresInSeconds: 900,
+    })
+    expect(
+      (await client.listDevices())
+        .find((item) => item.id === 'dev-ubuntu')!
+        .subscriptions.some((sub) => sub.provider === 'xAI' && sub.signedIn),
+    ).toBe(false)
+    client.controls.completeSubscriptionLogin('dev-ubuntu', 'xai')
+    expect((await client.listDevices()).find((item) => item.id === 'dev-ubuntu')!.subscriptions).toContainEqual({
+      provider: 'xAI',
+      signedIn: true,
+      status: 'available',
+    })
+    expect(events.at(-1)?.topics).toEqual(['devices', 'projects'])
+  })
+})
+
 describe('device connection', () => {
   it('updates thread, project and file preview together', async () => {
     const { client, events } = setup()

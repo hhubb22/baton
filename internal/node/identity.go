@@ -37,6 +37,7 @@ type Credential struct {
 
 // Identity 是注册成功后保存在节点本地的身份。重启后继续使用同一份。
 type Identity struct {
+	CoordinatorURL   string     `json:"coordinator_url,omitempty"`
 	NodeID           string     `json:"node_id"`
 	EmployeeID       string     `json:"employee_id"`
 	DisplayName      string     `json:"display_name"`
@@ -66,6 +67,11 @@ func FormatPublic(id Identity) string {
 }
 
 func (id Identity) complete() error {
+	if id.CoordinatorURL != "" {
+		if _, err := NormalizeCoordinatorURL(id.CoordinatorURL); err != nil {
+			return err
+		}
+	}
 	if _, err := identity.ParseUUID(id.NodeID); err != nil {
 		return err
 	}

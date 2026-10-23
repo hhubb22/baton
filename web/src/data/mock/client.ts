@@ -20,6 +20,7 @@ export interface MockControls {
   connectEnrollment(name: string, os: DeviceOS): void
   expireEnrollment(): void
   useEnrollmentElsewhere(): void
+  completeSubscriptionLogin(deviceNameOrId: string, provider: string): void
 }
 
 // 模拟中心返回的接入地址，不是真实服务。
@@ -96,6 +97,7 @@ export function createMockClient(
       connectEnrollment: (name, os) => store.connectEnrollment(name, os),
       expireEnrollment: () => closePending('expired'),
       useEnrollmentElsewhere: () => closePending('used'),
+      completeSubscriptionLogin: (device, provider) => store.completeSubscriptionLogin(device, provider),
     },
 
     getSession: () => read(() => store.snapshot().session),
@@ -214,6 +216,21 @@ export function createMockClient(
       signedIn()
       store.setDefaultDevice(deviceId)
       return structuredClone(store.snapshot().session)
+    },
+    async addDeviceFolder({ deviceId, path }) {
+      await connect(latency.save)
+      signedIn()
+      return structuredClone(store.addDeviceFolder(deviceId, path))
+    },
+    async removeDeviceFolder({ deviceId, path }) {
+      await connect(latency.save)
+      signedIn()
+      return structuredClone(store.removeDeviceFolder(deviceId, path))
+    },
+    async startSubscriptionLogin({ deviceId, provider }) {
+      await connect(latency.save)
+      signedIn()
+      return structuredClone(store.startSubscriptionLogin(deviceId, provider))
     },
     async setCommandAccess({ deviceId, enabled }) {
       await connect(latency.save)

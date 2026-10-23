@@ -24,7 +24,7 @@ func TestMain(m *testing.M) {
 		os.Exit(m.Run())
 	}
 	switch os.Args[1] {
-	case "register", "run", "files", "project-exec", "login", "subscriptions", "sidecar-file", "worker":
+	case "up", "register", "run", "files", "project-exec", "login", "subscriptions", "sidecar-file", "worker":
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		opts := node.RunOptions{
 			ProjectRuntimeTiming:  node.ProjectRuntimeTiming{RenewInterval: time.Second, LeaseDeadline: 2500 * time.Millisecond},

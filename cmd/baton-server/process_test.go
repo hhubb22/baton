@@ -50,7 +50,7 @@ func TestCoordinatorProcessCLI(t *testing.T) {
 	defer cancel()
 	output, err := exec.CommandContext(ctx, executable, "admin").CombinedOutput()
 	var exit *exec.ExitError
-	if !errors.As(err, &exit) || exit.ExitCode() != 2 || !strings.Contains(string(output), "coordinator serve") {
+	if !errors.As(err, &exit) || exit.ExitCode() != 2 || !strings.Contains(string(output), "baton-server serve") {
 		t.Fatalf("测试二进制未按 CLI 返回用法错误: %s, %v", output, err)
 	}
 }

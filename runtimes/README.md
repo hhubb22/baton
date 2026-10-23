@@ -6,9 +6,13 @@ Baton 的 Node sidecar 随 batond 一起分发。设备安装目录包含 `baton
 node tools/build.mjs
 ```
 
-统一构建安装锁定的前端及 Runtime 依赖，生成 `bin/coordinator`、`bin/batond` 和 `bin/sidecars/project-agent/`。只构建设备安装包时，可运行 `node tools/package-batond.mjs [输出目录]`，默认输出到 `bin/`；该命令也会自动安装 Runtime 构建依赖。两个入口共用 `tools/package-sidecar.mjs` 打包 Runtime，统一构建只编译一次 Go 程序。
+统一构建安装锁定的前端及 Runtime 依赖，生成 `bin/baton-server`、`bin/batond` 和 `bin/sidecars/project-agent/`。只构建设备安装包时，可运行 `node tools/package-batond.mjs [输出目录]`，默认输出到 `bin/`；该命令也会自动安装 Runtime 构建依赖。两个入口共用 `tools/package-sidecar.mjs` 打包 Runtime，统一构建只编译一次 Go 程序。
 
 向设备分发时保留 `batond` 与同目录的 `sidecars/`，包括其内部目录和相对符号链接。不能只复制 `batond`。构建机使用 pnpm 10+；目标机无需 pnpm，也无需联网安装 npm 依赖。
+
+设备首次接入可用 `batond up --coordinator https://主机 --workspace /绝对工作目录`，通过 `BATON_ENROLLMENT_TOKEN` 或 `--enrollment-file` 提供一次性注册凭据。显示名和系统自动推导；后续 `batond up` 复用身份。也可先运行 `batond register --coordinator https://主机`，再运行 `batond run`，连接地址从身份文件的 `coordinator_url` 推导，可用 `--relay` 指定。安装步骤见 [INSTALL.md](INSTALL.md)。
+
+中心服务 `baton-server` 可独立部署或通过仓库的 `compose.yaml` 与 PostgreSQL 一起运行。`serve` 自动迁移数据库并生成缺失的签名密钥；容器将密钥持久保存到 `/var/lib/baton`，具体配置见 [仓库 README](../README.md)。
 
 ## 发布附件
 

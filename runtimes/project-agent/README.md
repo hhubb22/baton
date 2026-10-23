@@ -13,6 +13,8 @@
 
 `openai-codex` 对应 ChatGPT，`xai` 对应 xAI。登录 ChatGPT 时，终端显示浏览器登录和设备码登录选项；输入编号或选项 ID，回车选择第一项。浏览器登录支持粘贴回调地址；无浏览器的设备可选择设备码登录，在另一台设备的浏览器中输入终端显示的验证码。按 Ctrl+C 取消登录。
 
+设备设置 API 可发起在线设备的非交互登录。Runtime 的 `login-device <provider>` 自动选择设备码方式，stdout 首行返回 `{type:"device_code",provider,verification_uri,user_code,expires_in_seconds}`，随后继续轮询直到凭据保存完成；未提供有效期时使用 900 秒。SIGINT、SIGTERM 或标准输入关闭取消登录，其他交互输入返回错误。batond 取得设备码后让进程在后台继续等待，结束时立即刷新订阅报告。
+
 `batond` 优先定位同目录的 Runtime bundle；没有 bundle 时通过 PATH 查找独立安装的 `baton-project-runtime`。无需进入 bundle 或手动寻找 JS 入口。
 
 使用运行 `batond run` 的同一个系统用户登录。凭据默认保存在用户主目录下的 `.baton/project-runtime`；可用 `BATON_PROJECT_RUNTIME_DATA_DIR` 指定 Runtime 专用的私有目录，登录和守护进程须使用相同配置。凭据与 Pi、Codex CLI 的登录记录分别保存，不上传 Coordinator。

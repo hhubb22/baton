@@ -85,13 +85,13 @@ export function registerCommand(coordinatorUrl: string, name: string, os: Device
   if (os === 'Windows') {
     return [
       '$env:BATON_ENROLLMENT_TOKEN = Read-Host -MaskInput',
-      `batond register --coordinator ${coordinatorUrl} \``,
+      `batond up --coordinator ${coordinatorUrl} \``,
       `  --display-name ${displayName} --system windows`,
     ].join('\n')
   }
   return [
     'read -rs BATON_ENROLLMENT_TOKEN && export BATON_ENROLLMENT_TOKEN',
-    `batond register --coordinator ${coordinatorUrl} \\`,
+    `batond up --coordinator ${coordinatorUrl} \\`,
     `  --display-name ${displayName} --system ${os === 'macOS' ? 'macos' : 'linux'}`,
   ].join('\n')
 }

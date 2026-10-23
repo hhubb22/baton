@@ -380,6 +380,23 @@ export function useSetDefaultDevice() {
   })
 }
 
+export function useAddDeviceFolder() {
+  const client = useClient()
+  return useMutation({ mutationFn: (input: { deviceId: ID; path: string }) => client.addDeviceFolder(input) })
+}
+
+export function useRemoveDeviceFolder() {
+  const client = useClient()
+  return useMutation({ mutationFn: (input: { deviceId: ID; path: string }) => client.removeDeviceFolder(input) })
+}
+
+export function useStartSubscriptionLogin() {
+  const client = useClient()
+  return useMutation({
+    mutationFn: (input: { deviceId: ID; provider: string }) => client.startSubscriptionLogin(input),
+  })
+}
+
 export function useSetCommandAccess() {
   const client = useClient()
   return useMutation({

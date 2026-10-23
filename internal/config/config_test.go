@@ -35,16 +35,20 @@ func TestLoadServeRequiresDatabaseAndOrigins(t *testing.T) {
 		t.Fatal("http Origin 被接受")
 	}
 	env["BATON_ALLOWED_ORIGINS"] = "https://baton.example"
-	if _, err := Load(getenv, true); err == nil {
-		t.Fatal("缺少签名密钥时仍通过")
-	}
-	env["BATON_NODE_SIGNING_KEY"] = "node-signing.key"
 	cfg, err := Load(getenv, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.HTTPAddr != DefaultAddr || cfg.Schema != DefaultSchema || cfg.SessionTTL != DefaultTTL || cfg.EnrollmentTTL != DefaultEnrollmentTTL || cfg.NodeCredentialTTL != DefaultNodeCredentialTTL || cfg.Heartbeat != DefaultHeartbeat || cfg.OfflineAfter != DefaultOfflineAfter {
 		t.Fatalf("默认配置不正确: %+v", cfg.Redacted())
+	}
+	if cfg.SigningKeyFile != DefaultSigningKeyFile {
+		t.Fatalf("默认签名密钥路径 %q", cfg.SigningKeyFile)
+	}
+	env["BATON_NODE_SIGNING_KEY"] = " /custom/signing.key "
+	custom, err := Load(getenv, true)
+	if err != nil || custom.SigningKeyFile != "/custom/signing.key" {
+		t.Fatalf("显式签名密钥路径 %q: %v", custom.SigningKeyFile, err)
 	}
 	if strings.Contains(cfg.Redacted(), cfg.DatabaseURL) {
 		t.Fatal("配置摘要包含数据库连接串或控制凭据")

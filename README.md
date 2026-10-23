@@ -1,15 +1,15 @@
 # Baton
 
-Baton 是跨设备 AI Agent 协同系统。员工使用管理员分配的本地账号登录中心服务（`coordinator`），注册并管理自己的设备节点（`batond`），在指定设备和目录中使用 Pi、Codex、Kiro Thread，也可以通过 Project Agent 主对话协调多个 Thread。中心保存消息、回复、附件引用与待办事项（Inbox），原生会话历史留在设备上。
+Baton 是跨设备 AI Agent 协同系统。员工使用管理员分配的本地账号登录中心服务（`baton-server`），注册并管理自己的设备节点（`batond`），在指定设备和目录中使用 Pi、Codex、Kiro Thread，也可以通过 Project Agent 主对话协调多个 Thread。中心保存消息、回复、附件引用与待办事项（Inbox），原生会话历史留在设备上。
 
 ## 系统架构与组件
 
 | 组件 | 入口 / 目录 | 说明 |
 |---|---|---|
-| `coordinator` | `cmd/coordinator` | 中心控制面：员工认证、节点注册与凭据吊销、Project / Thread / Inbox 状态机、内置 Gateway（`/v1/node` 与 `/api/v1/events`）、嵌入式 Web UI |
-| `batond` | `cmd/batond` | 节点守护进程：主动经 TLS WebSocket 连接 `coordinator`，维护本地 SQLite 账本（`node.db`），管理 Session Worker、Project Agent Runtime 及受限文件浏览根目录 |
+| `baton-server` | `cmd/baton-server` | 中心控制面：员工认证、节点注册与凭据吊销、Project / Thread / Inbox 状态机、内置 Gateway（`/v1/node` 与 `/api/v1/events`）、嵌入式 Web UI |
+| `batond` | `cmd/batond` | 节点守护进程：主动经 TLS WebSocket 连接 `baton-server`，维护本地 SQLite 账本（`node.db`），管理 Session Worker、Project Agent Runtime 及受限文件浏览根目录 |
 | `baton-project-runtime` | `runtimes/project-agent` | 基于 Node.js / TypeScript 的 Project Agent 进程，通过本地 stdio JSON-RPC 与 `batond` 交互 |
-| Web UI | `web/` (`internal/webui/dist`) | React + TypeScript + StyleX + Vite 前端，编译产物由 `coordinator` 直接内嵌提供 |
+| Web UI | `web/` (`internal/webui/dist`) | React + TypeScript + StyleX + Vite 前端，编译产物由 `baton-server` 直接内嵌提供 |
 
 ### 核心机制
 
@@ -34,60 +34,75 @@ Baton 是跨设备 AI Agent 协同系统。员工使用管理员分配的本地�
 node tools/build.mjs
 ```
 
-该命令按锁文件安装前端和 Runtime 依赖，构建 Web UI，编译 `coordinator`、`batond` 到 `bin/`（Windows 下带 `.exe` 后缀），并将 Project Agent Runtime 及其生产依赖打包到 `bin/sidecars/project-agent/`。构建产物不提交到 Git，无需另行运行打包命令。
+该命令按锁文件安装前端和 Runtime 依赖，构建 Web UI，编译 `baton-server`、`batond` 到 `bin/`（Windows 下带 `.exe` 后缀），并将 Project Agent Runtime 及其生产依赖打包到 `bin/sidecars/project-agent/`。构建产物不提交到 Git，无需另行运行打包命令。
 
-Coordinator 嵌入 `internal/webui/dist` 中的静态文件，部署中心服务只需 `coordinator`，无需 Node.js、pnpm 或独立前端服务。设备端须保留 `batond` 与同目录的 `sidecars/`，并安装 Node.js 22.19.0 或更高版本；目标设备无需 pnpm 或联网安装 npm 依赖。登录及安装说明见 [Runtime 文档](runtimes/project-agent/README.md)。
+Coordinator 嵌入 `internal/webui/dist` 中的静态文件，部署中心服务只需 `baton-server`，无需 Node.js、pnpm 或独立前端服务。设备端须保留 `batond` 与同目录的 `sidecars/`，并安装 Node.js 22.19.0 或更高版本；目标设备无需 pnpm 或联网安装 npm 依赖。登录及安装说明见 [Runtime 文档](runtimes/project-agent/README.md)。
 
 `node tools/check-sidecar-package.mjs` 检查统一构建的设备产物：搬到临时目录、隔离 PATH 后验证 Runtime 定位、版本、订阅状态与私有文件读写，并确认缺少 bundle 时返回安装错误。CI 在统一构建后直接执行该检查，同时运行 Web 格式、lint、typecheck 和单元测试。
 
-发布包使用原生构建产物。运行 `node tools/package-release.mjs v0.1.0-alpha.1`，在 `bin/releases/` 生成当前平台的压缩包及 `.sha256` 校验文件；打包脚本会解压最终附件，再检查 Runtime 定位、订阅状态和私有文件读写。包内含 `coordinator`、`batond`、`sidecars/`、[安装说明](runtimes/INSTALL.md)及记录源码提交的 `release.json`。
+发布包使用原生构建产物。运行 `node tools/package-release.mjs v0.1.0-alpha.1`，在 `bin/releases/` 生成当前平台的压缩包及 `.sha256` 校验文件；打包脚本会解压最终附件，再检查 Runtime 定位、订阅状态和私有文件读写。包内含 `baton-server`、`batond`、`sidecars/`、[安装说明](runtimes/INSTALL.md)及记录源码提交的 `release.json`。
 
 GitHub Actions 的 `Release packages` 工作流可手动指定版本，分别在 Linux amd64、macOS arm64 和 Windows amd64 的原生 runner 上构建及检查。Linux、macOS 生成 `.tar.gz`，Windows 生成 `.zip`。压缩使用系统提供的 `tar`；Windows 使用支持 zip 的系统 tar。工作流仅上传附件到 Actions artifacts，保留 30 天，不创建 tag 或发布 Release。发布前须确认同一提交的 CI 通过，并完成真实订阅登录及模型调用验收。
 
-### 2. 数据库迁移与员工账号管理
+### 2. 部署中心服务与员工账号管理
+
+`baton-server serve` 启动时自动执行数据库迁移，并在签名私钥不存在时生成 `0600` 私钥文件。默认路径为工作目录下的 `node-signing.key`，可用 `BATON_NODE_SIGNING_KEY` 指定；部署时持久保存该文件。已有密钥权限过宽、内容损坏或为符号链接时，启动会报错。
+
+使用 Docker Compose 部署：
+
+```sh
+export BATON_POSTGRES_PASSWORD="$(openssl rand -hex 24)"
+export BATON_ALLOWED_ORIGINS='https://baton.example'
+docker compose up -d --build
+
+# 创建员工账号，标准输出返回一次性初始口令
+docker compose exec baton-server baton-server admin employee create --username alice --display-name "Alice"
+
+# 重置员工口令并使旧会话失效
+docker compose exec baton-server baton-server admin employee reset-password --username alice
+```
+
+将这两个环境变量保存在部署环境中，后续 Compose 命令使用相同配置和数据库口令。Compose 使用 PostgreSQL 16，分别以数据卷保存数据库和签名密钥，默认将 HTTP 端口绑定到本机 `127.0.0.1:8080`。通过支持 WebSocket 的 HTTPS 反向代理公开该端口，并把公开地址填入 `BATON_ALLOWED_ORIGINS`；`BATON_BIND_ADDR` 和 `BATON_PORT` 可调整宿主机绑定。容器以非 root 用户运行。
+
+直接部署二进制时，配置数据库和公开 HTTPS Origin：
+
+```sh
+BATON_DATABASE_URL='postgres://用户:口令@127.0.0.1:5432/baton?sslmode=disable' \
+BATON_ALLOWED_ORIGINS='https://baton.example' \
+  ./bin/baton-server serve
+```
+
+默认监听 `127.0.0.1:8080`，由 HTTPS 反向代理转发；也可同时设置 `BATON_TLS_CERT_FILE` 和 `BATON_TLS_KEY_FILE` 直接提供 HTTPS/WSS。管理员命令使用相同的 `BATON_DATABASE_URL`，执行 `./bin/baton-server admin employee create --username alice --display-name "Alice"` 或 `./bin/baton-server admin employee reset-password --username alice`。`./bin/baton-server migrate` 可单独执行幂等迁移。
 
 实验室阶段从当前 schema 基线创建数据库，开发结构变化后重建本地数据，不提供旧开发版本升级路径。迁移执行器按版本记录幂等执行，正式发布后可用于增量迁移。
 
-```sh
-# 执行中心数据库迁移
-BATON_DATABASE_URL='postgres://postgres:baton@127.0.0.1:5432/baton?sslmode=disable' \
-  ./bin/coordinator migrate
+### 3. 接入设备
 
-# 创建员工账号（标准输出返回一次性初始口令）
-BATON_DATABASE_URL='postgres://postgres:baton@127.0.0.1:5432/baton?sslmode=disable' \
-  ./bin/coordinator admin employee create --username alice --display-name "Alice"
-
-# 重置员工口令并使旧会话失效
-BATON_DATABASE_URL='postgres://postgres:baton@127.0.0.1:5432/baton?sslmode=disable' \
-  ./bin/coordinator admin employee reset-password --username alice
-```
-
-### 3. 启动中心服务与注册节点
+登录网页并领取一次性注册凭据后，在设备上运行：
 
 ```sh
-# 启动 coordinator
-BATON_DATABASE_URL='postgres://postgres:baton@127.0.0.1:5432/baton?sslmode=disable' \
-BATON_ALLOWED_ORIGINS='https://baton.example' \
-BATON_HTTP_ADDR='127.0.0.1:8080' \
-BATON_NODE_SIGNING_KEY='/path/to/node-signing.key' \
-  ./bin/coordinator serve
-
-# 注册节点（通过环境变量传入一次性注册凭据）
-BATON_ENROLLMENT_TOKEN='<one-time-enrollment-token>' \
-  ./bin/batond register \
-  --coordinator https://baton.example \
-  --display-name "Workstation" \
-  --system macos \
-  --data-dir "$HOME/Library/Application Support/baton/node"
-
-# 登记受限浏览目录并运行节点守护进程
-./bin/batond files add --id repo --path /你的代码目录 --data-dir "$HOME/Library/Application Support/baton/node"
-./bin/batond run --relay wss://baton.example/v1/node --data-dir "$HOME/Library/Application Support/baton/node"
+BATON_ENROLLMENT_TOKEN='<网页提供的一次性注册凭据>' \
+  ./bin/batond up --coordinator https://baton.example
 ```
+
+`up` 首次运行时注册并连接中心服务，后续执行 `./bin/batond up` 即可复用本地身份。首次运行且尚无 `browse-roots.json` 时，默认开放当前用户主目录；已有配置（包括空列表）保持原样。回到网页，在设备详情的 Allowed folders 中直接添加或移除设备上的目录；选目录弹窗也支持输入路径后添加并选中。可选的 `--workspace /绝对路径` 在连接前登记指定目录，要求路径已经存在，重复登记同一路径不报错。显示名默认使用清理后的主机名，系统自动识别为 `windows`、`macos` 或 `linux`；可通过 `--display-name` 和 `--system` 指定。
+
+也可以分步注册与运行：
+
+```sh
+BATON_ENROLLMENT_TOKEN='<网页提供的一次性注册凭据>' \
+  ./bin/batond register --coordinator https://baton.example
+./bin/batond files add --id repo --path /你的代码目录
+./bin/batond run
+```
+
+注册将规范化的中心 HTTPS 地址保存在 `identity.json` 的 `coordinator_url` 中，`run` 从中推导 `wss://主机/v1/node`。可通过 `--relay` 显式指定连接地址；身份文件没有中心地址时需要提供该参数。`register`、`up`、`run` 和 `files` 均支持 `--data-dir`，须使用同一数据目录。注册凭据也可经 `--enrollment-file` 从仅当前用户可读的文件加载。
 
 ### 4. 登录 Project assistant 的模型订阅
 
-在运行 batond 的设备上，使用同一个系统用户执行：
+在网页 Devices 中展开在线设备，点击 `Sign in to ChatGPT` 或 `Sign in to xAI`，复制设备码并打开授权页完成登录。设备上报登录状态后，弹窗显示 `Signed in`。模型订阅凭据保存在设备上，不上传中心。
+
+也可以在运行 batond 的设备上，使用同一个系统用户执行：
 
 ```sh
 # ChatGPT；xAI 使用 ./bin/batond login xai
@@ -95,24 +110,24 @@ BATON_ENROLLMENT_TOKEN='<one-time-enrollment-token>' \
 ./bin/batond subscriptions
 ```
 
-登录命令会显示授权步骤；ChatGPT 支持浏览器和设备码登录。统一构建已包含 Project Runtime bundle，设备安装时保留 `sidecars/` 目录，详见 [Runtime 安装说明](runtimes/project-agent/README.md)。凭据保存在设备上，独立于 Pi、Codex CLI 的登录记录；在线 batond 自动上报登录状态。
+登录命令会显示授权步骤；ChatGPT 支持浏览器和设备码登录。网页登录使用相同的设备本地凭据目录，授权完成后设备立即刷新订阅状态。统一构建已包含 Project Runtime bundle，设备安装时保留 `sidecars/` 目录，详见 [Runtime 安装说明](runtimes/project-agent/README.md)。凭据保存在设备上，独立于 Pi、Codex CLI 的登录记录；在线 batond 自动上报登录状态。
 
 ## 配置参考
 
 | 环境变量 | 适用进程 | 说明 |
 |---|---|---|
-| `BATON_DATABASE_URL` | `coordinator` | PostgreSQL 连接串 |
-| `BATON_DB_SCHEMA` | `coordinator` | 数据库 schema，默认 `public` |
-| `BATON_HTTP_ADDR` | `coordinator` | HTTP/WebSocket 监听地址，默认 `127.0.0.1:8080` |
-| `BATON_ALLOWED_ORIGINS` | `coordinator` | 逗号分隔的允许 HTTPS Origin（`serve` 必填） |
-| `BATON_NODE_SIGNING_KEY` | `coordinator` | Ed25519 PKCS#8 私钥文件路径（仅当前用户可读，`0600`） |
-| `BATON_TLS_CERT_FILE` / `BATON_TLS_KEY_FILE` | `coordinator` | 直接提供 HTTPS/WSS 时的证书与私钥路径 |
-| `BATON_SESSION_TTL` | `coordinator` | 浏览器登录会话有效期，默认 `12h`（`5m`～`168h`） |
-| `BATON_ENROLLMENT_TTL` | `coordinator` | 一次性节点注册凭据有效期，默认 `10m`（`1m`～`24h`） |
-| `BATON_NODE_CREDENTIAL_TTL` | `coordinator` | 节点连接凭据有效期，默认 `720h`（`1h`～`2160h`） |
-| `BATON_HEARTBEAT_INTERVAL` | `coordinator` / `batond` | 心跳间隔，默认 `10s`（`100ms`～`2m`） |
-| `BATON_OFFLINE_AFTER` | `coordinator` | 超过该时间未联系判定节点离线，默认 `30s`（须大于心跳间隔） |
-| `BATON_ENROLLMENT_TOKEN` | `batond register` | 一次性节点注册凭据（也可通过 `--enrollment-token-file` 提供） |
+| `BATON_DATABASE_URL` | `baton-server` | PostgreSQL 连接串 |
+| `BATON_DB_SCHEMA` | `baton-server` | 数据库 schema，默认 `public` |
+| `BATON_HTTP_ADDR` | `baton-server` | HTTP/WebSocket 监听地址，默认 `127.0.0.1:8080`，容器内为 `0.0.0.0:8080` |
+| `BATON_ALLOWED_ORIGINS` | `baton-server` | 逗号分隔的允许 HTTPS Origin（`serve` 必填） |
+| `BATON_NODE_SIGNING_KEY` | `baton-server` | Ed25519 PKCS#8 私钥文件路径，默认 `node-signing.key`，不存在时自动生成（仅当前用户可读，`0600`）；容器内为 `/var/lib/baton/node-signing.key` |
+| `BATON_TLS_CERT_FILE` / `BATON_TLS_KEY_FILE` | `baton-server` | 直接提供 HTTPS/WSS 时的证书与私钥路径 |
+| `BATON_SESSION_TTL` | `baton-server` | 浏览器登录会话有效期，默认 `12h`（`5m`～`168h`） |
+| `BATON_ENROLLMENT_TTL` | `baton-server` | 一次性节点注册凭据有效期，默认 `10m`（`1m`～`24h`） |
+| `BATON_NODE_CREDENTIAL_TTL` | `baton-server` | 节点连接凭据有效期，默认 `720h`（`1h`～`2160h`） |
+| `BATON_HEARTBEAT_INTERVAL` | `baton-server` / `batond` | 心跳间隔，默认 `10s`（`100ms`～`2m`） |
+| `BATON_OFFLINE_AFTER` | `baton-server` | 超过该时间未联系判定节点离线，默认 `30s`（须大于心跳间隔） |
+| `BATON_ENROLLMENT_TOKEN` | `batond register` / `batond up` | 一次性节点注册凭据（也可通过 `--enrollment-file` 提供） |
 | `BATON_TLS_CA_FILE` | `batond` | 额外信任的根证书文件路径 |
 | `BATON_PROJECT_RUNTIME_DATA_DIR` | `batond` / Project Runtime | 模型订阅凭据目录，默认 `~/.baton/project-runtime`；登录和守护进程须使用相同配置 |
 

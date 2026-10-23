@@ -281,6 +281,39 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
       emit('session', 'devices')
       return getSession()
     },
+    async addDeviceFolder({ deviceId, path }) {
+      const value = await request<NodeDTO>(`/nodes/${apiPath(deviceId)}/roots`, {
+        method: 'POST',
+        body: JSON.stringify({ path }),
+      })
+      emit('devices', 'files')
+      return mapDevice(value)
+    },
+    async removeDeviceFolder({ deviceId, path }) {
+      const value = await request<NodeDTO>(`/nodes/${apiPath(deviceId)}/roots`, {
+        method: 'DELETE',
+        body: JSON.stringify({ path }),
+      })
+      emit('devices', 'files')
+      return mapDevice(value)
+    },
+    async startSubscriptionLogin({ deviceId, provider }) {
+      const value = await request<{
+        provider: string
+        verification_uri: string
+        user_code: string
+        expires_in_seconds: number
+      }>(`/nodes/${apiPath(deviceId)}/subscriptions/login`, {
+        method: 'POST',
+        body: JSON.stringify({ provider }),
+      })
+      return {
+        provider: subscriptionName(value.provider),
+        verificationUri: value.verification_uri,
+        userCode: value.user_code,
+        expiresInSeconds: value.expires_in_seconds,
+      }
+    },
     async setCommandAccess({ deviceId, enabled }) {
       const value = await request<NodeDTO>(`/nodes/${apiPath(deviceId)}/project-exec`, {
         method: 'PUT',
