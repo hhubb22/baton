@@ -3,7 +3,10 @@
 package gateway_test
 
 import (
+	"fmt"
+	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -22,11 +25,25 @@ func replayPIDs(t *testing.T, binary string) []int {
 	var pids []int
 	for _, line := range strings.Split(string(raw), "\n") {
 		fields := strings.Fields(line)
-		if len(fields) >= 3 && !strings.HasPrefix(fields[1], "Z") && strings.Join(fields[2:], " ") == binary {
-			pid, err := strconv.Atoi(fields[0])
+		if len(fields) < 3 || strings.HasPrefix(fields[1], "Z") {
+			continue
+		}
+		pid, err := strconv.Atoi(fields[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		executable := strings.Join(fields[2:], " ")
+		if runtime.GOOS == "linux" {
+			// Linux 的 comm 只有进程名；按 /proc 中的可执行文件路径区分同名回放器。
+			executable, err = os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
+			if os.IsNotExist(err) || os.IsPermission(err) {
+				continue
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
+		}
+		if executable == binary {
 			pids = append(pids, pid)
 		}
 	}
