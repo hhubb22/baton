@@ -72,6 +72,12 @@ try {
     assert.equal(result.status, 0, `分发包命令失败：${result.stderr}`);
     return result.stdout;
   }
+  assert.equal(
+    run(node, ["--version"]).trim(),
+    process.version,
+    "隔离 PATH 中的 Node 无法独立运行",
+  );
+  console.log(`隔离 PATH 的 Node.js 已验证：${process.version}`);
   const cli = join(bundle, "dist/project-agent/src/cli.js");
   assert.equal(run(process.execPath, [cli, "--version"]).trim(), "0.1.0");
   const signedOut = run(host, ["subscriptions"]);
