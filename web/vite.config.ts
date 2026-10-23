@@ -46,6 +46,7 @@ export default defineConfig({
     assetsDir: 'assets',
   },
   test: {
+    fsModuleCachePath: 'node_modules/.vitest-cache',
     environment: 'jsdom',
     setupFiles: './src/test/setup.ts',
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
