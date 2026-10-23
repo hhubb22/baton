@@ -8,6 +8,8 @@ Basis: 2026-10-19 用户确认的测试方案；[Baton TECH](../baton/TECH.md) �
 
 当前已实现 Kiro ACP V3 规范化与回放（PS-123）：独立策略处理路径、原生 Session、双向 JSON-RPC ID、加载回放的 user 输入及隐私字段，版本探测随对应会话筛选。13 份真实 Kiro 2.32.0 转录覆盖适配器与 Worker；丢失 prompt 响应、崩溃和 Worker 前置状态从真实录制派生，来源及适用边界见 [Kiro 场景说明](../../internal/agent/kiro/testdata/replay/README.md)。
 
+本文描述现有 Go 录制与回放实现。TypeScript 迁移复用 t3code 工具、测试与转录的方式，以及新增录制的条件，见 [Agent 适配 TECH 的验证策略](../agent-adapters/TECH.md#验证策略)；TS 侧按该节执行。
+
 ## Context
 
 Baton 的适配器测试分三层。纯逻辑单测覆盖分帧和 Schema 形状。CI 中，测试进程以子进程模式冒充 Agent，适配器通过真实的 stdin/stdout 与它通信。门控的真实测试只在本机运行，使用真实 Agent 和模型。这一分层与 t3code 相同，差别在回放数据的来源。
@@ -158,7 +160,7 @@ Agent 版本升级的流程：用新版本把全部场景重录一遍，规范�
 
 在 `agent.Output` 这一层录制：转录里会少掉适配器自己的解析和判断，而协议偏差正是在这一层出问题。
 
-直接使用 t3code 的 `acp-replay-agent.ts`：只支持 ACP，而且 Go 测试需要依赖 Node。转录格式借用它的，代码不借用。
+Go 版直接使用 t3code 的 `acp-replay-agent.ts`：只覆盖 ACP，且会给 Go 测试增加 Node 依赖，因此 Go 工具保持现有实现。TS 版复用上游工具及转录，范围见 Agent 适配 TECH。
 
 在仓库外维护转录：版本升级时就无法在审查中看到行为变化，而这正是录制带来的主要好处。
 

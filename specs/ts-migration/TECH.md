@@ -2,19 +2,31 @@
 
 Status: draft
 Owner: 待指定
-Basis: [Baton TECH](../baton/TECH.md)；[Agent 适配 TECH](../agent-adapters/TECH.md)；Baton `32d5fff`；t3code `9828cad49f3e1ef4f9e037b3baaca19f4e4928fc`。
+Basis: [Baton PRODUCT](../baton/PRODUCT.md)；[Baton TECH](../baton/TECH.md)；[Agent 适配 TECH](../agent-adapters/TECH.md)；Baton `0841a59`；t3code `9828cad49f3e1ef4f9e037b3baaca19f4e4928fc`。
 
 ## 目标与切换方式
 
-Coordinator、batond 和 Session Worker 全部改用 TypeScript + Effect 4，与 Agent 适配规格同时实施，一次切换。切换前发布和部署的始终是 Go 版；切换提交同时启用 TS 版的构建与发布、删除 Go 代码。任何时候都不存在 Go 进程与 TS 进程互相通信的发布形态，因此协议不需要为两种实现之间的兼容让步。
+Coordinator、batond 和 Session Worker 按 Baton 与 Agent 适配 PRODUCT 重新实现为 TypeScript + Effect 4，优先复用 t3code 的 provider、运行时封装和测试。Go 实现用于查漏和选择缺陷回归用例，TS 的服务边界、并发模型和内部接口按目标运行时设计。
+
+切换前发布和部署的始终是 Go 版；切换提交同时启用 TS 版的构建与发布、删除 Go 代码。开发与测试可以分别启动完整的 TS 链路；发布形态中没有 Go 与 TS 后端进程混用。
 
 | 规则 | 内容 |
 |---|---|
-| 开发位置 | TS 代码在 main 上的新目录开发（见下文仓库结构），频繁合入；`tools/build.mjs` 在切换前不构建它们 |
+| 开发位置 | TS 代码在 main 上的新目录开发（见下文仓库结构），频繁合入；切换前使用独立开发与验证入口，`tools/build.mjs` 仍构建 Go 版 |
 | Go 冻结 | 本规格批准后，Go 代码只接受阻塞当前使用的修复。Agent 适配规格的全部改动只在 TS 版实现 |
-| 行为基准 | 冻结时的 Go 版行为加上 Agent 适配规格的改动。浏览器 HTTP API、节点 WSS 协议、Worker IPC、PostgreSQL schema 的结构保持不变，只加入适配规格新增的字段 |
+| 行为基准 | Baton PRODUCT 与 Agent 适配 PRODUCT。规格未覆盖的现有行为先核查用途；已知实现缺陷不作为兼容要求 |
+| 契约范围 | 保留浏览器 HTTP API、节点 WSS 信封和中心 PostgreSQL schema 的已有结构，加入适配规格新增字段与统一历史。Worker IPC、设备账本和进程内服务允许按 TS 重设，相关调用方与 `packages/protocol` 同步修改 |
 | 本地数据 | 按实验室阶段约定不迁移：切换后设备重新注册、Worker 账本与 node.db 重建；中心数据库可保留，因为 schema 只增加字段 |
-| 切换条件 | 下文验证表全部通过 |
+| 首次交付 | TS 切换覆盖现有 Pi、Codex、Kiro、shell 和新增 Cursor；Grok、Antigravity 在切换后按各自支持矩阵交付 |
+| 切换条件 | 下文验证表通过；Pi、Codex、Kiro 的现有交付组合须完成回归，新增 Cursor 以实测支持矩阵交付，未通过的新增组合保持 unverified |
+
+## 实现原则
+
+服务通过 Effect `Context.Service` 与 `Layer` 组合；进程、连接和后台任务由 `Scope` 管理。Worker 用串行队列提交短事务，慢 I/O 在独立 fiber 中执行，结果带控制代次回到状态队列；取消、停止确认与资源回收分别处理。领域状态和确定性解析使用普通 TS 数据结构与函数，Web 保持现有 React 写法。
+
+目录表描述职责与查阅入口。可以按领域合并原 Go 包、拆分大模块；保留员工隔离、事务原子性、命令幂等、租约和恢复证据等约束。账本复用已有 `packages/sqlite` 的串行事务与提交核查，不能因为重设内部接口而丢失 intent 的持久性。
+
+provider 按“直接接入原模块及测试 → 补宿主实现与事件映射 → 必要时抽取模块”的顺序复用。首次切片先在 Cursor 上验证依赖范围；只重写产品语义不同或依赖无法合理隔离的部分。具体边界见 [Agent 适配 TECH](../agent-adapters/TECH.md#架构与职责)。
 
 ## 技术选型
 
@@ -25,11 +37,11 @@ Coordinator、batond 和 Session Worker 全部改用 TypeScript + Effect 4，与
 | 框架 | `effect` 4.0.6，`@effect/platform-node`、`@effect/sql-pg`、`@effect/vitest` 同版本 | pnpm catalog 统一锁定。HTTP 用 `effect/http`，子进程用 `effect/process`，Worker 与 cursor-host 之间用 `effect/rpc` |
 | WebSocket | `ws` | 中心的节点与浏览器两个端点，以及 batond 的出站连接；需要自定义握手头和 TLS 参数 |
 | 中心存储 | PostgreSQL 16+，`@effect/sql-pg`，手写 SQL | 沿用 `migrations/0001_initial.sql`，不引入 ORM |
-| 设备存储 | `node:sqlite`，WAL + `synchronous=FULL` | 参考 t3code `nodeSqliteClient.ts` 包装成 Effect `SqlClient` |
+| 设备存储 | `node:sqlite`，WAL + `synchronous=FULL` | 复用已有 `packages/sqlite` Effect `SqlClient`，包含提交结果核查 |
 | 测试 | Vitest + `@effect/vitest` | PostgreSQL 集成测试沿用 `BATON_TEST_DATABASE_URL` 和自动拉起本机实例的逻辑 |
 | 静态检查 | ESLint + typescript-eslint，Prettier | 与 `web/` 共用配置 |
 | 打包 | esbuild 产出单文件 JS；batond 再打成 Node SEA | 服务端在 Docker 中直接用 Node 运行 bundle |
-| Agent 协议 | `effect-acp`、`effect-codex-app-server`（从 t3code 引入），`@cursor/sdk` | 见 Agent 适配 TECH |
+| Agent 接入 | t3code provider / runtime、`effect-acp`、`effect-codex-app-server`、`@cursor/sdk` | 优先复用实现及测试，Baton 提供宿主、可靠性和领域事件映射 |
 
 Web 保持 React + Vite，不引入 Effect。Project Agent Runtime 保持现有实现，只改为 batond 的子命令（见下文打包）。
 
@@ -40,6 +52,9 @@ pnpm-workspace.yaml          catalog 锁定 effect、typescript、vitest 等版�
 apps/server/                 Coordinator（baton-server）
 apps/batond/                 batond 及其子命令：worker、watchdog、cursor-host、project-runtime
 packages/protocol/           Effect Schema：HTTP DTO、节点信封、Worker IPC、ThreadReport、HistoryEntry
+packages/sqlite/             已有 SQLite SqlClient、串行事务与提交核查
+packages/providers/          拟引入的 t3code provider / runtime 及必要的上游类型、辅助模块
+packages/provider-testing/   拟复用的上游回放工具、转录与测试支撑
 packages/effect-acp/         从 t3code 引入
 packages/effect-codex-app-server/  从 t3code 引入
 runtimes/project-agent/      现有 Project Agent Runtime，作为 workspace 包被 apps/batond 引用
@@ -50,34 +65,33 @@ third_party/t3code/          MIT 许可与来源记录
 
 切换提交删除 `cmd/`、`internal/`、`go.mod`、`go.sum`、`migrations/embed.go`、`runtimes/shared/`，并更新 `AGENTS.md`、`README.md`、`runtimes/README.md` 和 `specs/baton/TECH.md` 的技术选择、模块职责、部署与验证章节。
 
-## 模块对照
+## 服务职责
 
 ### Coordinator（`apps/server`）
 
-| Go 包 | TS 位置 | 要点 |
+| 职责 | 建议位置 | 实现约束与现有查阅入口 |
 |---|---|---|
-| `internal/store` | `src/store` | 事务与版本检查原样转写为 SQL；每个函数的 Go 测试作为用例清单 |
-| `internal/migrate`、`migrations` | `src/migrate` | 版本化 SQL、`serve` 先 Up 后 Check 的流程不变 |
-| `internal/gateway` | `src/gateway` | 节点认证、连接代次、心跳、限流、有界队列；队列用 Effect `Queue` 的有界策略 |
-| `internal/control`、`delivery`、`inbox` | `src/control`、`src/inbox` | 命令派发、报告回执、期限扫描；新增 outbox 完成字段 |
-| `internal/httpapi`、`auth`、`admin` | `src/http` | `effect/http` 路由，DTO 来自 `packages/protocol` |
-| `internal/projectagent`、`projectruntime` 的中心部分 | `src/project` | Project 放置与 Runtime 命令 |
-| `internal/webui` | `src/http/static` | 从 bundle 旁的 `dist/web` 目录提供静态文件 |
-| `internal/redact`、`config`、`db`、`identity` | `src/shared` | 按需转写 |
+| Thread、Project 与员工数据 | `src/store` | 手写 SQL，保留事务、版本检查、锁顺序与员工隔离；查阅 `internal/store`，测试按不变量选择 |
+| 数据库迁移 | `src/migrate` | 版本化 SQL、`serve` 先 Up 后 Check；查阅 `internal/migrate` 与 `migrations` |
+| 节点与浏览器连接 | `src/gateway` | 认证、连接代次、心跳、限流、有界队列；查阅 `internal/gateway` |
+| 命令与报告 | `src/control` | 持久领取、重试期限、接收与完成分离、报告回执；查阅 `internal/control`、`delivery` 与控制面调度规格 |
+| HTTP、认证与静态文件 | `src/http` | `effect/http` 路由，公开 DTO 来自 `packages/protocol`，静态文件从 bundle 旁的 `dist/web` 提供 |
+| Project 与事项 | `src/project`、`src/inbox` | Runtime 放置、租约、命令、记忆与事项；查阅 `internal/projectagent`、`projectruntime`、`inbox` |
 
 签名密钥沿用当前规则：`lstat` 确认不存在才生成 Ed25519 私钥并以 `0600` 原子写入，已有文件校验权限、类型和内容。`node:crypto` 提供 Ed25519。
 
 ### batond（`apps/batond`）
 
-| Go 包 | TS 位置 | 要点 |
+| 职责 | 建议位置 | 实现约束与现有查阅入口 |
 |---|---|---|
-| `cmd/batond`、`internal/node` | `src/daemon` | 注册、`up`、出站 WSS、node.db、能力报告、Worker 发现与启动、Project Runtime 启停与续租、订阅登录 |
-| `internal/session`、`internal/agent/*` | `src/worker`、`src/agents` | 见 Agent 适配 TECH |
-| `internal/fileaccess` | `src/files` | 登记根内浏览与附件解析：`realpath` 后判断前缀，POSIX 以 `O_NOFOLLOW` 打开 |
-| `internal/privatefile` | `src/platform/private-file` | 见下文平台实现 |
-| `internal/sidecar` | 删除 | Project Runtime 与 cursor-host 都是同一可执行文件的子命令 |
-| `internal/monotime` | `src/platform/clock` | 见下文平台实现 |
-| `cmd/batond/project_exec.go`、`internal/projectexec` | `src/project` | Project Agent 的受限命令执行 |
+| 设备连接与本地状态 | `src/daemon` | 注册、`up`、WSS 重连、node.db、能力报告与 Worker 发现；查阅 `cmd/batond`、`internal/node` |
+| 本地 Thread 执行 | `src/worker` | 账本、命令接收、停止和恢复，由 Baton 独占；provider 接入见 Agent 适配 TECH |
+| Agent 接入 | `src/agents` | 注册描述、宿主实现、provider 事件与证据映射；复用代码位于 `packages/providers` |
+| 文件与附件 | `src/files` | 登记根内浏览、目录设置与附件解析；保留 `internal/fileaccess` 的路径授权和符号链接边界 |
+| 私有文件、时钟与进程 | `src/platform` | 平台差异集中管理，见下文平台实现 |
+| Project 执行与订阅 | `src/project` | Runtime 启停、续租、受限 shell 与订阅登录；复用现有 TS Runtime |
+
+Project Runtime 与 cursor-host 都作为可执行文件的子命令分发。现有 `internal/sidecar` 的发现机制由子命令调用替代，设备使用时无需安装系统 Node。
 
 ## 平台相关实现
 
@@ -90,7 +104,7 @@ Node 没有 Win32 安全描述符与 Job Object 的 API。第一版不引入原�
 | Worker IPC | 私有目录下的 UDS | 命名管道使用 Node 默认安全描述符，不能限定为当前用户；依靠现有 IPC 令牌认证，令牌存于私有数据目录 |
 | 含睡眠的单调时间 | 见下段 | 见下段 |
 
-Project Runtime 的租约要计入系统睡眠：设备睡眠期间中心可能已经让租约过期，设备醒来后不能继续认为自己持有租约。Node 只有不含睡眠的 `process.hrtime`，所以租约经过时间取 `max(hrtime 经过值, Date.now 经过值)`。睡眠由墙上时钟计入；墙上时钟回拨时由 hrtime 兜底；墙上时钟前跳只会让租约提前过期，这是安全的方向。Worker 的停止计时只用 hrtime。
+Project Runtime 的租约要计入系统睡眠：设备睡眠期间中心可能已经让租约过期，设备醒来后不能继续认为自己持有租约。Node 只有不含睡眠的 `process.hrtime`，所以租约经过时间取 `max(hrtime 经过值, Date.now 经过值)`。睡眠由墙上时钟计入；墙上时钟回拨时取 hrtime 经过值；墙上时钟前跳只会让租约提前过期，这是安全的方向。Worker 的停止计时只用 hrtime。
 
 ## 打包与发布
 
@@ -102,39 +116,43 @@ Project Runtime 的租约要计入系统睡眠：设备睡眠期间中心可能�
 
 目标系统为 macOS arm64、Linux x64 与 arm64、Windows x64。SEA 交叉构建用 Node 25.7+ 的 `--build-sea`，需要各目标的官方 Node 二进制；发布脚本从本地缓存目录读取，缓存缺失时报错并给出下载命令，不在构建中隐式联网。Project Agent 不再要求设备自装 Node 22.19+，`runtimes/README.md` 的 sidecar 约定改写为子命令约定。
 
-## 工作分解
+## 实施切片
+
+切换前分为五个可独立验收的能力切片，详细任务见 [TASKS.md](TASKS.md)。workspace、协议 Schema、SQLite SqlClient、两个协议包及部分测量已有实现，作为输入复核和按需补齐，不再单列基础建设任务。
 
 ```text
-P0 基础 ──┬─ C 中心 ──────────┐
-          ├─ D 设备守护进程 ───┼─ X 切换
-          └─ W Worker 与适配器 ┘
+T1 Cursor 本地可靠会话 ──┬─ T2 网页远程 Thread ── T3 Project 与设备管理 ──┐
+                        └─ T4 既有 Agent 与统一历史 ────────────────────┼─ T5 发布切换
 ```
 
-| 编号 | 内容 | 依赖 | 完成标志 |
-|---|---|---|---|
-| P0 | workspace、catalog、ESLint/Prettier/Vitest 配置；引入两个 t3code 协议包；`packages/protocol` 覆盖全部 HTTP DTO、节点信封和 IPC 消息；从 Go 测试导出协议样例到 `packages/protocol/fixtures`；`node:sqlite` 的 SqlClient 包装；四项测量（见验证） | 无 | TS 解码并重新编码全部样例后与原文等价；测量结果写入本文待验证表 |
-| C | Coordinator 全部模块；Agent 适配规格的中心部分（reason、outbox 完成字段、统一历史转发） | P0 | Store、Gateway、HTTP 的用例清单全部通过；用协议样例驱动的假节点跑通 Thread 主链路 |
-| D | batond 守护进程、node.db、文件浏览、订阅登录、Project Runtime 管理、SEA 打包 | P0 | 对假中心完成注册、重连、能力上报、文件浏览、Project Runtime 续租；三个系统上 SEA 启动 |
-| W | Agent 适配规格的实施顺序第 1～3 项（Worker、Pi/Codex/Kiro、统一历史、Cursor） | P0 | 现有转录在 TS Worker 上的 ThreadReport 序列与账本终态和 Go 版相同；适配规格验证表中对应各行通过 |
-| X | 三者连起来跑端到端；切换构建、发布与 Docker；删除 Go；更新长期文档 | C、D、W | 下文验证表全部通过 |
+T4 的设备端实现可与 T2 并行，网页验收在 T2 完成后进行。每个切片包含其所需的协议、持久化、调用方与测试；可以分多个小提交和 PR 合入。T1 先验收复用，再验收本地可靠执行；T3 先验收设备操作，再验收 Project 协同；T4 按 Agent 接入并验收，再统一历史消费。这些检查点在同一任务内推进，避免把整项任务做成一个大 PR。平台实现、探测和真实 Agent 验证随所属切片完成，T5 负责完整安装包与系统矩阵复验。
 
-C、D、W 只通过 `packages/protocol` 互相依赖，可交给三个 thread 并行。任一方需要改协议时先改 `packages/protocol` 和样例，单独合入，再各自实现。Agent 适配规格的第 4、5 项（Grok、Antigravity）在切换之后进行。
+T1 先交付 Cursor provider 与上游测试的可运行复用检查点，明确直接保留、宿主接入、局部抽取和必须修改的部分；验证独立历史、恢复、取消及输入重试的证据。路线成立后，在同一切片内交付仅依赖本地认证 IPC 的可靠 Thread。复用路线或 SDK 能力不满足时，先修订对应设计和剩余任务，不把缺口藏进通用 Worker。
 
-Go 测试约 3.8 万行，不逐行翻译。每个模块以对应 Go 测试的用例名和断言作为清单，在 TS 中用 Vitest 重写；回放转录和协议样例直接复用。
+T2 只完成远程 Thread 主链路；T3 补齐 Project、事项、目录、附件、设备设置、订阅与受限 shell。T4 只接回 Pi、Codex、Kiro 及四种 Agent 的统一历史。Grok、Antigravity 保持切换后分别交付，复用 T4 的 ACP 层与验收方式，不并入 T5。
+
+## 测试依据
+
+复用模块连同其上游测试、回放工具和原始转录引入。TS 测试按产品验收、存储与并发不变量、已知缺陷回归组织；Go 测试用于选择场景和查漏，取消逐函数或逐用例重写要求。已有 Go 录制中的原生证据继续使用，允许因内部组织不同调整测试驱动。
+
+对仍承诺保留的 HTTP 与 WSS 契约保留 Go 导出样例往返测试。调整 Worker IPC 或新增契约时，由 TS Schema 和独立样例验证，不修改冻结的 Go 类型来模拟已实现的新行为。删除 Go 前将仍需使用的转录、协议样例和来源说明移入 TS 包；CI 改为检查 TS 契约及已保留的静态基线，不再依赖 Go 导出器。
+
+跨版本对照只比较同一输入下的原生提交次数、Thread 身份、消息与 Turn 归属、回复顺序、unknown 判定和持久终态。新增 `command.completed`、异步接收时序与内部表结构由 TS 自身验证；验收不要求 Go 与 TS 的完整 ThreadReport 序列相同。上游转录的适用范围和补录条件见 Agent 适配 TECH。
 
 ## 验证
 
 | 场景 | 失败条件 | 层次 |
 |---|---|---|
-| 协议样例往返（P0） | 任一样例解码失败，或重新编码后字段丢失、取值改变 | 单元测试 |
-| `node:sqlite` FULL 同步连续提交，三个系统各测 p99 与事件循环延迟（P0） | p99 超过 50 ms 且没有改到 `worker_threads` | 基准测试 |
-| batond SEA 与 Worker 子命令冷启动到 IPC 就绪，三个系统（P0） | 超过 Host 的 3 秒就绪预算 | 基准测试 |
-| Windows `taskkill` 回收与 PID 账本，含孙进程和 PID 复用（P0） | 误杀无关进程；结果与 Agent 适配 TECH 所述缺口不符 | 进程测试 |
-| `@cursor/sdk` 能否打进 SEA，原生部分是否只需附带目录（P0） | 运行时找不到模块，或需要设备上另装依赖 | 打包检查 |
-| Baton TECH 验证表 R-01～R-25 各行（X） | 任一行在 TS 版上失败 | 原测试层次 |
-| Agent 适配 TECH 验证表中实施顺序第 1～3 项对应各行（W、X） | 同该表 | 同该表 |
-| 真实 Codex、Kiro、Pi、Cursor 在 macOS、Linux、Windows 上跑 PRODUCT 验收的多轮、排队、停止和恢复（X） | 任一组合失败且未标为不支持 | 门控真实验证 |
-| 中心重启、batond 重启、Worker 被杀、PostgreSQL 短停（X） | 消息重发、回复重复、同步前设备显示可用 | 进程测试 |
+| 保留的 HTTP / WSS 样例往返及新增 TS 契约（T1、T2） | 字段丢失、取值改变，或内部契约调整后调用方与样例不一致 | 单元测试 |
+| 上游 provider、SDK 封装与回放工具接入（T1、T4） | 选用模块的相关上游测试未运行、修改了转录响应来掩盖请求不匹配，或缺少 Baton 差异测试 | 模块测试与确定性回放 |
+| `node:sqlite` FULL 同步连续提交，三个系统各测 p99 与事件循环延迟（T1、T5） | p99 超过 50 ms 且没有改到 `worker_threads`，或实际账本阻塞命令接收期限 | 基准测试 |
+| batond SEA 与 Worker 子命令冷启动到 IPC 就绪，三个系统（T1、T5） | 超过 Host 的 3 秒就绪预算 | 基准测试 |
+| Windows `taskkill` 回收与 PID 账本，含孙进程和 PID 复用（T1、T5） | 误杀无关进程；结果与 Agent 适配 TECH 所述缺口不符 | 进程测试 |
+| `@cursor/sdk` 完整附带目录与 SEA 加载（T1、T5） | 运行时找不到模块，或需要设备上另装依赖 | 打包检查 |
+| Baton TECH 验证表 R-01～R-25 中适用各行（T2～T5） | 任一现有承诺未覆盖；已定义负载阈值未满足 | 原测试层次 |
+| Agent 适配 TECH 中 Pi、Codex、Kiro、Cursor 的验证行（T1、T4、T5） | 同该表 | 同该表 |
+| Pi、Codex、Kiro 的现有交付系统组合及 Cursor 拟支持组合（T4、T5） | 既有组合回归失败，或新增组合未经真实验证却标为 available | 门控真实验证 |
+| 中心重启、batond 重启、Worker 被杀、PostgreSQL 短停（T1～T3、T5） | 消息重发、回复重复、同步前设备显示可用 | 进程测试 |
 
 切换提交前执行 `pnpm -r typecheck`、`pnpm -r lint`、`pnpm -r test`、`pnpm --dir web build` 和 SEA 打包检查。
 
@@ -145,7 +163,7 @@ Go 测试约 3.8 万行，不逐行翻译。每个模块以对应 Go 测试的�
 | Windows Job Object 与逐句柄 DACL 检查 | 需要原生模块；第一版用 taskkill 和目录 ACL |
 | Windows 命名管道限定当前用户 | 同上 |
 | TS 7 原生编译器 | 先确认 typescript-eslint 支持 |
-| Worker 账本移到 `worker_threads` | 只在 P0 测量超标时提前 |
+| Worker 账本移到 `worker_threads` | 测量或实际账本的命令接收延迟超标时提前 |
 
 ## 待验证与批准事项
 
@@ -153,7 +171,7 @@ Go 测试约 3.8 万行，不逐行翻译。每个模块以对应 Go 测试的�
 |---|---|---|
 | Windows 第一版的安全缺口 | 进程回收、私有文件、命名管道三项弱于 Go 版 | 已接受，按上文平台相关实现执行 |
 | FULL 同步提交耗时 | 官方 Node 26.11.1，每事务 1 KiB，预热 200 次后连续提交 10,000 次，WAL/FULL、4096 字节页、1000 页自动 checkpoint。macOS arm64 / Apple M4 / Darwin 27.2.0 / APFS：COMMIT p99 **0.248 ms**，事件循环 p99 **10.59 ms**；本机 OrbStack Linux arm64 / 内核 7.2.9 / Docker named volume（Btrfs）：COMMIT p99 **47.90 ms**，事件循环 p99 **2552.23 ms**。均每 100 次事务让出事件循环，监测分辨率 1 ms。逐事务让出的补测：macOS COMMIT / 事件循环 p99 为 **0.277 / 1.97 ms**，Linux 为 **36.97 / 37.16 ms** | 已测平台的提交 p99 低于 50 ms；Linux 连续同步批次的事件循环延迟已超命令接收目标，Worker 串行队列应逐事务让出并在实际账本中复测，超标时采用 worker_threads。Windows、Linux x64 未测。`fullfsync=0`，未做断电验证；Linux 为本机虚拟机结果，不能代表物理 Linux 磁盘。复现：`tools/ts-migration/sqlite-full.mjs` |
-| SEA 冷启动 | 官方 Node 26.11.1 + Effect 4.0.6 + esbuild 0.27.3，最小 Worker 子命令含新建 WAL/FULL SQLite 和令牌认证 IPC，每平台 100 个新进程。macOS arm64 监听 / 认证 p99 **36.72 / 37.64 ms**，首次认证 **1122.90 ms**；另一次重新构建后的 2 样本冒烟，首次认证 **2286.09 ms**。OrbStack Linux arm64 监听 / 认证 p99 **349.49 / 356.54 ms**，首次认证 **168.99 ms**，认证最大 **422.02 ms**。macOS SEA 145,640,480 字节，Linux SEA 150,662,192 字节，未启用 snapshot/code cache | 实测样本均低于 3 秒；Windows、Linux x64 未测。安装目录仅含 SEA，空 PATH、临时 HOME；未清空系统页缓存，属于新进程启动测量。完整 Worker 的锁、迁移、恢复与模块加载仍需 W/D 复测。复现：`tools/ts-migration/sea-startup.mjs` |
+| SEA 冷启动 | 官方 Node 26.11.1 + Effect 4.0.6 + esbuild 0.27.3，最小 Worker 子命令含新建 WAL/FULL SQLite 和令牌认证 IPC，每平台 100 个新进程。macOS arm64 监听 / 认证 p99 **36.72 / 37.64 ms**，首次认证 **1122.90 ms**；另一次重新构建后的 2 样本冒烟，首次认证 **2286.09 ms**。OrbStack Linux arm64 监听 / 认证 p99 **349.49 / 356.54 ms**，首次认证 **168.99 ms**，认证最大 **422.02 ms**。macOS SEA 145,640,480 字节，Linux SEA 150,662,192 字节，未启用 snapshot/code cache | 实测样本均低于 3 秒；Windows、Linux x64 未测。安装目录仅含 SEA，空 PATH、临时 HOME；未清空系统页缓存，属于新进程启动测量。完整 Worker 的锁、迁移、恢复与模块加载仍需 T1/T5 复测。复现：`tools/ts-migration/sea-startup.mjs` |
 | Windows 进程回收实测 | 本机无 Windows / PowerShell 执行环境，`taskkill`、CIM 创建时间及真实 PID 复用均**未测**。提供 `tools/ts-migration/windows-processes.mjs`：完整父子孙进程树回收、故意过期的创建时间与无关存活进程核对、中间父进程先退出后的后代存活检查；创建时间取 `Get-CimInstance Win32_Process` 的 UTC ticks 字符串 | 在 Windows 执行脚本后补实测。过期记录检查不等于操作系统真实复用 PID；脚本不验证 Worker 崩溃至重启之间的延迟。CIM 校验与 taskkill 之间有竞争窗口，无法给出原子排除 PID 复用的保证；第一版已接受的两个进程回收缺口仍保留 |
-| `@cursor/sdk` 的原生依赖 | 实测公开包 **1.0.35**，`engines.node >=22.13`，Node 26.11.1 满足；安装禁用脚本。默认入口直接 esbuild 报动态路径解析错误，公开 `/bundled` 入口在 Node SEA 报 `bun:sqlite` 不存在。SEA 用 `createRequire` 加载旁置的完整 SDK、生产依赖和对应平台包，可导入 SDK、打开临时 SQLite store、加载 tree-sitter/Bash `.node` 并运行 ripgrep；移走附带目录时正确失败。macOS arm64 的 sandbox helper `--help` 通过；Linux arm64 helper 要求 **GLIBC_2.39**，当前 Debian 12 / glibc 2.36 无法加载 | macOS arm64 的加载检查通过；Cursor Linux arm64 的支持要求为 glibc 2.39+，Debian 12 / glibc 2.36 不满足该要求。Fedora 43 的本机验证待补，不阻塞 P0；Windows / Linux x64 未测。当前可用方案须携带 SDK 的 JS 与生产依赖，只有原生文件的附带目录不足。没有调用 Agent/create/resume/send 或真实模型，不证明会话、认证或 sandbox 策略可用。SDK 许可及来源见 `third_party/cursor-sdk/`；复现：`tools/ts-migration/cursor-sea.mjs` |
-| 发布用 Node 二进制缓存 | 缓存确定为 `~/.cache/baton/node/v<版本>/`，支持 `BATON_NODE_CACHE` 覆盖；保留官方归档与经 HTTPS 获取的 `SHASUMS256.txt`，解包前校验 SHA256。已获取 v26.11.1：darwin-arm64 tar.gz 为 `d916511b55965e91be7a88e17f88d895b6793ceaba3e6c9b194aefe51c2c65ac`；linux-arm64 tar.gz 为 `170454fb022f5e9b5f6cc76c25fa32ef5100895be44eb04e92f9780591491bbf` | `tools/ts-migration/cache-node.mjs` 仅显式 `--download` 联网，离线缺失时输出下载命令；未校验离线发布签名。Windows x64 / Linux x64 缓存尚未获取；D 的发布打包继续采用缓存输入 |
+| `@cursor/sdk` 的原生依赖 | 实测公开包 **1.0.35**，`engines.node >=22.13`，Node 26.11.1 满足；安装禁用脚本。默认入口直接 esbuild 报动态路径解析错误，公开 `/bundled` 入口在 Node SEA 报 `bun:sqlite` 不存在。SEA 用 `createRequire` 加载旁置的完整 SDK、生产依赖和对应平台包，可导入 SDK、打开临时 SQLite store、加载 tree-sitter/Bash `.node` 并运行 ripgrep；移走附带目录时正确失败。macOS arm64 的 sandbox helper `--help` 通过；Linux arm64 helper 要求 **GLIBC_2.39**，当前 Debian 12 / glibc 2.36 无法加载 | macOS arm64 的加载检查通过；Cursor Linux arm64 的支持要求为 glibc 2.39+，Debian 12 / glibc 2.36 不满足该要求。Fedora 43 的本机验证待补，不阻塞 Cursor 模块的离线复用检查点；Windows / Linux x64 未测。当前可用方案须携带 SDK 的 JS 与生产依赖，只有原生文件的附带目录不足。没有调用 Agent/create/resume/send 或真实模型，不证明会话、认证或 sandbox 策略可用。SDK 许可及来源见 `third_party/cursor-sdk/`；复现：`tools/ts-migration/cursor-sea.mjs` |
+| 发布用 Node 二进制缓存 | 缓存确定为 `~/.cache/baton/node/v<版本>/`，支持 `BATON_NODE_CACHE` 覆盖；保留官方归档与经 HTTPS 获取的 `SHASUMS256.txt`，解包前校验 SHA256。已获取 v26.11.1：darwin-arm64 tar.gz 为 `d916511b55965e91be7a88e17f88d895b6793ceaba3e6c9b194aefe51c2c65ac`；linux-arm64 tar.gz 为 `170454fb022f5e9b5f6cc76c25fa32ef5100895be44eb04e92f9780591491bbf` | `tools/ts-migration/cache-node.mjs` 仅显式 `--download` 联网，离线缺失时输出下载命令；未校验离线发布签名。Windows x64 / Linux x64 缓存尚未获取；T5 的发布打包继续采用缓存输入 |

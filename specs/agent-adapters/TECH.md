@@ -2,7 +2,7 @@
 
 Status: draft
 Owner: 待指定
-Basis: [行为规格](PRODUCT.md)；[TypeScript 迁移 TECH](../ts-migration/TECH.md)；Baton `32d5fff`；t3code `9828cad49f3e1ef4f9e037b3baaca19f4e4928fc`。本文为实施设计，代码核查与验证计划分开记录。
+Basis: [行为规格](PRODUCT.md)；[TypeScript 迁移 TECH](../ts-migration/TECH.md)；Baton `0841a59`；t3code `9828cad49f3e1ef4f9e037b3baaca19f4e4928fc`。本文为实施设计，代码核查与验证计划分开记录。
 
 ## 现有实现与设计边界
 
@@ -10,11 +10,11 @@ Basis: [行为规格](PRODUCT.md)；[TypeScript 迁移 TECH](../ts-migration/TEC
 
 `internal/session/thread.go` 的 Worker 独占 Thread SQLite。输入先提交 `intent`，再调用适配器；恢复时调用 `Sent`，找不到确定证据就进入 `unknown`，不重发。现有 `IntentRestorer.UserMessageCount()` 不接受 context，Pi/Kiro 的 Send 还会再次读取历史。Worker 在原生 Start 完成后才监听 IPC；Host 等待监听为 3 秒，节点命令期限为 5 秒，而原生启动和发送各有 30 秒预算。Enqueue 同步准备和发送，慢调用还持有 Worker 状态锁。
 
-本设计与 [TypeScript 迁移](../ts-migration/TECH.md) 同时实施，一次切换：Coordinator、batond、Session Worker 和全部适配器都改用 TypeScript + Effect，切换后删除 Go 代码，不存在 Go 进程启动 TS Worker 的中间形态。选择 TS 的直接原因是新增 Agent 的官方接入只有 TS：Cursor 只有 `@cursor/sdk`，ACP 有官方 TS SDK，t3code 已有只依赖 `effect` 的 ACP 与 Codex app-server 客户端。本文的路径均指迁移后的 `apps/batond`、`apps/server` 与 `packages/*`。
+本设计与 [TypeScript 迁移](../ts-migration/TECH.md) 同时实施，一次切换。Coordinator、batond、Session Worker 按 PRODUCT 的行为重新实现为 TypeScript + Effect，Agent 接入优先复用 t3code provider、运行时封装和测试。切换后删除 Go 代码，发布形态中没有 Go 与 TS 后端进程混用。本文路径指 `apps/batond`、`apps/server` 与 `packages/*`；Go 路径作为行为查阅入口。
 
 现有节点私有 `agentRuntimeReport.Reason` 没有进入 `protocol.RuntimeAgent`，中心解码后重新序列化时会丢弃它；Web 还只把 unavailable 映射为不可用，未保留 create 能力。本设计将历史归一化、正式诊断字段与消费端准入、Worker 异步执行作为公共改动。
 
-Coordinator 与 Worker 继续分别拥有中心命令及设备执行事实。新增 Agent 不引入 T3 的 Run、执行节点、checkpoint、MCP 工具或账号实例模型。中心现有 JSONB 报告增加 reason，thread_outbox 增加异步命令完成字段；Worker 本地账本保存命令生命周期和输入准备。产品条目下文简称 R-01 至 R-12，均指配套行为规格。
+Coordinator 与 Worker 继续分别拥有中心命令及设备执行事实。复用的 provider 可以保留内部所需的 T3 类型与辅助模块；Baton 的公开协议、数据库和产品能力仍使用 Thread、Turn、消息及回复。Run、执行节点、checkpoint、审批和账号实例等上游概念不扩展为 Baton 产品能力。中心 JSONB 报告增加 reason，thread_outbox 增加异步命令完成字段；Worker 本地账本保存命令生命周期和输入准备。产品条目下文简称 R-01 至 R-12，均指配套行为规格。
 
 ## 架构与职责
 
@@ -22,21 +22,23 @@ Coordinator 与 Worker 继续分别拥有中心命令及设备执行事实。新
 Coordinator：现有 Thread 命令与报告
   └─ batond：设备能力与探测、Worker 发现与启动、历史快照
       └─ batond worker 子命令：thread.db、输入意图、Turn、回复与 outbox
-          └─ Adapter
-              ├─ Pi：Pi RPC
-              ├─ Codex：effect-codex-app-server → codex app-server
-              ├─ Kiro / Grok / Antigravity：effect-acp + 各自协议策略
-              └─ Cursor：cursor-host 子进程 → @cursor/sdk → 本机 Agent
+          └─ Baton provider 接入层：宿主、事件映射、输入证据
+              ├─ Pi：复用 provider-pi / RPC
+              ├─ Codex：复用 Codex provider / effect-codex-app-server
+              ├─ Kiro / Grok / Antigravity：复用 ACP runtime + 各自策略
+              └─ Cursor：cursor-host → 复用 Cursor provider / SDK 封装 → @cursor/sdk
 ```
 
 | 位置 | 拟议职责 | 对应需求 |
 |---|---|---|
 | `packages/protocol` | 用 Effect Schema 定义 Worker IPC、ThreadReport、统一历史消息和 RuntimeAgent；batond、Coordinator 与 Web 共用 | R-01、R-10 |
 | `packages/effect-acp`、`packages/effect-codex-app-server` | 从 t3code 原样引入的协议客户端，只依赖 `effect`；本地修改单独提交并记录 | R-04、R-08、R-11 |
+| `packages/providers` | 复用的 provider、RPC / SDK / ACP runtime 及必要的上游类型和辅助模块；具体直接引入或局部抽取由 T1 验证 | R-04～R-11 |
+| `packages/provider-testing` | 上游回放、设门工具、选定模块测试与原始转录，保留来源和版本 | R-04～R-12 |
 | `apps/batond/src/worker` | 认证 IPC 提前监听、短事务接收命令、异步执行、停止裁决、outbox | R-01、R-04、R-05、R-08、R-10 |
-| `apps/batond/src/worker/ledger` | `node:sqlite` 账本，WAL + `synchronous=FULL`，串行事务 | R-04、R-05 |
-| `apps/batond/src/agents/{pi,codex,kiro,grok,antigravity,cursor}` | 各 Agent 的会话、历史格式、认证选择、模型、取消与扩展通知 | R-01～R-11 |
-| `apps/batond/src/agents/acp` | 在 effect-acp 之上的共享会话生命周期、客户端回调、权限策略和分块合并 | R-04、R-08、R-10、R-11 |
+| `apps/batond/src/worker/ledger` | 复用 `packages/sqlite`，WAL + `synchronous=FULL`、串行事务与提交核查 | R-04、R-05 |
+| `apps/batond/src/agents/{pi,codex,kiro,grok,antigravity,cursor}` | Baton 宿主接入、配置、探测、事件及历史证据映射；产品差异在此处理 | R-01～R-11 |
+| `apps/batond/src/agents/acp` | 对接复用的 ACP runtime，提供 Kiro 等协议策略、权限边界与 Baton 取消规则 | R-04、R-08、R-10、R-11 |
 | `apps/batond/src/agents/registry.ts` | 唯一的 Agent 注册描述：工厂、版本策略、探测、历史构造、静态能力上限 | R-01～R-03、R-07 |
 | `apps/batond/src/platform/process` | 进程组、停止回收、POSIX watchdog、Windows 进程账本 | R-08 |
 | `apps/batond/src/history` | 统一消息分页、只读快照缓存 | R-10 |
@@ -46,13 +48,28 @@ Coordinator：现有 Thread 命令与报告
 
 Worker、watchdog 和 cursor-host 都是 batond 可执行文件的子命令。batond 与 Worker 之间只通过认证 IPC 通信，Worker 账本只由 Worker 进程打开。探测和历史读取在 batond 进程内调用注册表，它们拉起的原生读取进程（ACP load、只读 cursor-host 等）作为 batond 的子进程运行，用同一套 `src/platform/process` 回收。
 
-执行契约沿用现有 `Adapter` 的九个操作，改写为 Effect 服务：慢操作返回 `Effect` 并接受中断，`drain` 改为有界的 `Stream<AgentEvent>`。不增加 fork、rollback、审批或计划接口。可选扩展 `SessionIdProvider`、`BrowserHistory`、`Live` 和 `InputPreparer` 由注册描述声明。协议层只负责读写与关联，不能因为断线自行重启会话或重放 prompt。
+Baton 接入层按会话生命周期、执行与取消、输入证据、历史与能力分组提供 Effect 服务；原生事件用有界 `Stream` 消费。直接接入上游 provider 时，允许保留其接口，在边界映射 Baton 的身份、事件与错误；无需维持 Go Adapter 的九方法结构。文中的 open、send、abort、sent、prepareInput 等名称描述动作与不变量，具体函数形状由接入实现确定。协议层断线不能自行重放 prompt 或重建执行会话。
+
+### 上游复用边界
+
+| 上游模块 | 接入方式 | Baton 必须补齐的行为 |
+|---|---|---|
+| `effect-acp`、`effect-codex-app-server` | 使用已有引入包及上游测试 | 最低协议版本和扩展校验 |
+| `provider-pi` 的 RPC、会话与事件处理 | 优先复用模块及测试，适配进程和配置宿主 | 原生 steer 归属、输入证据、当前分支历史 |
+| Codex provider 与事件归一化 | 尝试保留实现及相关测试，必要时抽取 | client message ID、恢复查询与后台任务边界 |
+| `provider-acp` 的 `AcpSessionRuntime`、配置与分块处理 | 复用共享 runtime，以策略接入各 Agent | Kiro V3 扩展、一次权限、目录与进程授权 |
+| `provider-cursor`、`CursorAgentSdk` | 先验证完整 provider 加最小宿主；依赖不适合时抽取 SDK / runtime 模块 | 输入确认、独立历史、cursor-host 隔离与停止证据 |
+| `provider-testing`、录制脚本与原始转录 | 连同对应实现引入，替换运行器和 Baton 断言 | Worker 账本、中心补报与跨设备故障场景 |
+
+上游模块放在 `packages/providers`，Baton 配置和事件映射放在 `apps/batond/src/agents`；回放支撑放在 `packages/provider-testing`。T1 记录实际依赖、保留模块、宿主接口和局部修改；允许引入必要的 `contracts`、`provider-core`、`shared` 源码子集及其内部类型。宿主提供私有状态路径、显式配置、选定凭据、进程创建与回收、受限文件操作；边界使用实际类型，不用空实现或类型断言伪造运行条件。涉及审批、MCP 或后台任务的回调按 PRODUCT 的能力边界显式处理。
+
+Baton 的持久接收、输入 intent、Thread / Turn 账本、报告 outbox 和设备重连由 Worker 与中心实现。上游事件经接入层核对原生身份、控制代次和停止证据后才能写入 Baton 账本。选用的 provider 有对应测试支撑；局部改动保留差异测试和来源记录。
 
 ## 运行时与进程模型（R-08、R-12）
 
 ### 运行时与本地存储
 
-Worker 运行在 batond SEA 携带的 Node 26 上，依赖 `effect` 4 与 `@effect/platform-node`，版本在 pnpm catalog 中统一锁定。账本使用 `node:sqlite`（25.7 起为 release candidate），参考 t3code `packages/shared/src/nodeSqliteClient.ts` 包装成 Effect `SqlClient`，Schema 沿用 Worker 现有表并增加下文字段，不读旧账本。
+Worker 运行在 batond SEA 携带的 Node 26 上，依赖 `effect` 4 与 `@effect/platform-node`，版本在 pnpm catalog 中统一锁定。账本复用已有 `packages/sqlite`，在现有表的数据职责基础上设计 TS schema，保存下文命令、输入基准和进程字段，不读旧账本。提交结果不确定时使用 SqlClient 的提交核查；仍无法确认则停止执行并从持久事实恢复。
 
 账本保持 `journal_mode=WAL`、`synchronous=FULL`。t3code 使用 NORMAL，因为 `node:sqlite` 在主线程同步提交，FULL 会让每次提交的 fsync 停住事件循环。Baton 的 intent 必须在调用原生提交前落盘，NORMAL 在断电时可能丢掉已提交的 intent，所以不采用。每个 Thread 一个 Worker 进程，提交卡顿只影响该 Thread；实施前测量三个系统上单次 FULL 提交的 p99，超过 50 ms 时把账本移到 `worker_threads` 再评审。
 
@@ -123,7 +140,7 @@ open 的成功 `ThreadCommandResult` 增加当前 `storage_generation`，中心�
 
 所有慢操作都是可中断的 Effect，并以 `Effect.timeout` 套上本表预算。Worker 在登记任务时为其建立独立 Scope，不能复用即将结束的 5 秒命令上下文。RestoreInput 只恢复本地基准，不发起历史查询。断开命令 IPC 不中断已经持久接收的执行，持久 stop、阶段超时和 Worker 退出负责中断任务。SEA 冷启动耗时计入 3 秒就绪预算，在三个系统上测量；超出时先缩小 Worker 入口的同步加载，不放宽 Host 期限。
 
-`InputPreparer` 提供 `prepareInput(id, text) → Effect<InputPreparation>` 与 `restoreInput(id, text, preparation)`。数量匹配的 Pi、Kiro、Cursor、Grok、Antigravity 使用它；Codex 继续使用原生客户端消息 ID。InputPreparation 至少包含原生会话、user_count、完整历史前缀摘要及准备标识，不含凭据，编码后最多 4 KiB。
+输入证据服务提供一次准备与恢复本地基准的操作，可采用 `prepareInput(id, text) → Effect<InputPreparation>` 和 `restoreInput(id, text, preparation)`。数量匹配的 Pi、Kiro、Cursor、Grok、Antigravity 使用该证据；Codex 继续使用原生客户端消息 ID。InputPreparation 至少包含原生会话、user_count、完整历史前缀摘要及准备标识，不含凭据，编码后最多 4 KiB。
 
 每个输入只采集一次发送前基准。prepareInput 在其 10 秒期限内读取并缓存，Worker 将该基准与 intent 原子提交，Send 使用同一份基准，不为重新计数而再启动历史进程。提交后为确认接收或故障恢复而查询新鲜历史仍可进行，但不能替换已保存的准备基准。进程重启通过 restoreInput 恢复基准。新输入、控制代次变化或原生身份变化使内存准备失效；实际提交时核对输入、代次和可用的原生版本/叶子标识。需重新读取完整历史才能保证安全时，该 intent 不自动重准备或提交，按未知处理。
 
@@ -138,7 +155,7 @@ open 的成功 `ThreadCommandResult` 增加当前 `storage_generation`，中心�
 | Worker 提交意图 | 在同一事务保存 intent_preparation、client_message_id 和 intent；Send 使用这份基准 | Worker 重启通过 restoreInput 恢复；提交后不重新计数 |
 | 原生提交 | 有原生客户端 ID 时直接传入；否则绑定本次 ID、原生会话、历史基准和正文 | 不做传输层重试或 SDK 输入重放；请求超时不等于未接收 |
 | 接收确认 | `send` 成功必须有原生接受或原生历史证据；SDK handle、管道写入成功与进程存活均不足以确认 | 在 Worker 发送时限内拿不到证据则返回不确定错误，由 Worker 查历史 |
-| 恢复查询 | `sent(id)` 只读原生记录，核对原生会话、历史前缀和输入位置 | 能证明存在才返回 true；无匹配或查询失败按既有 Worker 逻辑转为 unknown，永不重发 |
+| 恢复查询 | `sent(id)` 只读原生记录，核对原生会话、历史前缀和输入位置 | 能证明存在才返回 true；无匹配或查询失败进入 unknown，不重发 |
 
 数量匹配须验证发送前历史前缀未变，不得只在全部历史中搜索相同正文。重复正文、历史被截断、另一原生会话、不同工作目录都应有独立测试。准备基准由 Worker 的 intent_preparation 保存；原生映射以同目录临时文件加 `rename` 原子写入 `Config.statePath`，文件权限 0600。这些恢复证据不从网页历史快照推断，也不保存凭据。
 
@@ -175,15 +192,15 @@ Worker 消费 drain 流时有明确的终态优先级：同一故障已产生 `U
 
 ### Pi、Codex（R-04～R-10）
 
-Pi 保持 RPC、原生 JSONL 与会话归属，在 TS 中重写 `internal/agent/pi` 的现有行为，输入准备改用一次性 prepareInput 基准。实现可参考 t3code `packages/provider-pi/src/server/rpc.ts` 的进程与帧处理。核查发送确认、工具运行中的 abort、输入队列清除、部分写入、compaction 与回合结束的时序。会话树只读取当前分支；若增加 `get_entries` 支持，用真实版本转录验证，不能把 t3code 的 SDK/CLI 假设套到 Baton 的 Pi 最低版本。
+Pi 保持 RPC、原生 JSONL 与会话归属，优先引入 t3code `packages/provider-pi` 的 RPC、会话与事件模块及相应测试，通过 Baton 宿主接入；输入准备使用一次性基准。核查发送确认、工具运行中的 abort、输入队列清除、部分写入、compaction 与回合结束时序。会话树只读取当前分支；若增加 `get_entries` 支持，用相应版本的真实转录验证最低版本。
 
-Codex 使用 `effect-codex-app-server` 客户端，保留 `clientUserMessageId`。该包的 schema 由上游脚本从 `openai/codex` 的 `app-server-protocol` 生成，生成时的 Codex 版本未记录；引入时对照 Baton 最低版本重新生成或用现有回放证明兼容。重点核查 `turn/start` 响应和通知先后、原生 turn 存在之前的中止、`expectedTurnId`、断线后的原生历史查询、恢复中的分页以及子任务的迟到通知。保留 `approvalPolicy: never`、`sandbox: workspace-write`，不移植 T3 的审批与原生回退接口。
+Codex 优先接入现成 provider 与事件归一化，使用已有 `effect-codex-app-server` 包，保留 `clientUserMessageId`。当前包已按官方 0.162.1 重生 schema，并有 Baton 录制帧解码检查，依据见 [来源说明](../../third_party/t3code/README.md#codex-schema-基线)；接入后的请求与生命周期仍需回放验证。重点核查 `turn/start` 响应和通知先后、原生 turn 存在之前的中止、`expectedTurnId`、断线后的原生历史查询、恢复中的分页及子任务迟到通知。保留 `approvalPolicy: never`、`sandbox: workspace-write`，不暴露上游审批与回退产品接口。
 
 既有 Pi 1.3.0、Codex 0.162.1 及更新的稳定版本检查策略继续适用；新增协议要求必须先证明这些最低版本满足，或另行修改并审查最低版本约定。
 
 ### 共享 ACP 与 Kiro（R-04、R-08～R-11）
 
-`effect-acp` 提供 NDJSON 分帧、双向 JSON-RPC、请求生命周期和扩展方法/通知的注册入口。`src/agents/acp` 在其上实现 Baton 需要的共享部分：进程所有权与回收、取消注册屏障、会话代次校验、权限回调策略和消息分块合并。
+`effect-acp` 提供 NDJSON 分帧、双向 JSON-RPC、请求生命周期和扩展入口。优先复用 t3code `provider-acp` 的 `AcpSessionRuntime`、配置和分块处理及相关测试；`src/agents/acp` 提供 Baton 宿主、权限边界、取消证据与协议策略，避免另写一套 ACP 生命周期。
 
 各协议策略提供结构化启动配置和以下内容：initialize 参数及能力校验、认证方式、new/load/resume、模型配置、session/update 与扩展事件解析、原生输入历史获取、取消与结束证据、客户端文件或终端回调。策略以函数或 Effect 服务注入，共享层不按 Agent 名称分支。
 
@@ -193,7 +210,7 @@ Kiro 保持 `kiro-cli acp --agent-engine=v3`、ACP `protocolVersion: 1` 及 `_ki
 
 ### Grok（R-01～R-11）
 
-新增 `src/agents/grok`，启动原生 `grok agent stdio`，由其协议策略选择 initialize/认证参数和 xAI 扩展，可参考 t3code `packages/provider-grok`。首期沿用 CLI 原生权限检查，显式采用 `--permission-mode default`；权限回调只允许当前回合的一次请求，不写项目级授权，不使用 `--always-approve`。
+新增 `src/agents/grok`，优先复用 t3code `packages/provider-grok` 和共享 ACP runtime 的实现及测试，启动原生 `grok agent stdio`；接入层选择 initialize、认证参数和 xAI 扩展。首期沿用 CLI 原生权限检查，显式采用 `--permission-mode default`；权限回调只允许当前回合的一次请求，不写项目级授权，不使用 `--always-approve`。
 
 认证使用本机 Grok 已配置的账号或员工明确配置的原生 API key。环境白名单只允许必要的系统、网络和该 Agent 的配置项，不继承其他提供商密钥或 Project Runtime OAuth。具体原生 profile 环境变量须通过启动与恢复录制确认，不能简单替换整个系统 HOME。
 
@@ -203,7 +220,7 @@ xAI 的 prompt 完成通知、标准 prompt RPC、后台任务通知分别处理
 
 ### Antigravity（R-01～R-11）
 
-新增 `src/agents/antigravity`，接入用户已准备好的 `agy_acp_server` 或等价原生 ACP 启动器。启动器及可能需要的 harness 路径分别解析成结构化参数，不能拼接任意 shell 命令。Baton 本期不下载二进制、不复制 T3 托管认证代码、不分发未核实许可的第三方安装资产。
+新增 `src/agents/antigravity`，优先复用上游 ACP provider 与 Antigravity 策略及测试，接入用户已准备好的 `agy_acp_server` 或等价原生 ACP 启动器。启动器及可能需要的 harness 路径分别解析成结构化参数，不能拼接任意 shell 命令。Baton 本期不下载二进制、不接入 T3 托管认证流程、不分发未核实许可的第三方安装资产。
 
 执行使用显式配置的原生 profile；认证只采用已完成的本机上下文。后台探测和 Worker 不发起交互登录，原生要求重新认证时退出并给出本机操作原因。移除未选择的 ambient Google 凭据，避免落到其他账号或计费项目；不复用 Project Agent 的订阅登录。
 
@@ -215,7 +232,7 @@ xAI 的 prompt 完成通知、标准 prompt RPC、后台任务通知分别处理
 
 ### Cursor（R-01～R-12）
 
-Cursor 适配器直接依赖官方 `@cursor/sdk`，不依赖 `@t3tools/*`。t3code 使用 `1.0.35`，这是参考版本，不是 Baton 已验证基线；实际版本锁定在 pnpm 锁文件，并记录 SDK、CLI、本机辅助进程及 Node 的要求。
+Cursor 优先复用 t3code `provider-cursor` 与 `CursorAgentSdk` 的实现、模块测试和 SDK 转录，底层使用官方 `@cursor/sdk`。T1 先尝试完整 provider 配最小宿主，检查其实际依赖；若需带入无关编排运行逻辑，则抽取 SDK / runtime 模块并保留其测试。实际 SDK 版本锁定在 pnpm 锁文件，记录 CLI、本机辅助进程及 Node 要求；上游的 `1.0.35` 与现有加载测量不代表 Baton 的执行与恢复已验证。
 
 SDK 运行在 Worker 启动的 `cursor-host` 子进程里，Worker 进程本身不加载 SDK。这样 SDK 派生的本机进程都落在 cursor-host 的进程组内，停止回收可以整组结束而不杀掉 Worker。Worker 与 cursor-host 之间用 `effect/rpc` 经 stdio 通信，请求与事件的 schema 定义在 `apps/batond` 内部，双方是同一可执行文件，不单独维护协议版本。
 
@@ -238,7 +255,9 @@ Worker 保存 Baton Thread 与 SDK 原生 agent ID、工作目录、配置位置
 
 首期选择 SDK 本地 `autoReview: true`，启用其实际支持的原生 sandbox；不因某系统不支持而自动设为 false。上游指出 Windows 的文件 sandbox 存在限制，因此 Windows 作为独立验证组合，满足不了选定执行策略时保持未验证。`enableAgentRetries` 必须按输入确认约束核查，不能照搬上游的 true。
 
-首期 `steer=false`；不复制 T3 的 interrupt-and-restart steering。模型可在下一轮原生支持时切换。后台 SDK 活动、取消后的 delta、运行结果和进程退出由同一会话代次关联，关闭与取消均幂等。
+首期 `steer=false`，模型在下一轮原生支持时切换。后台 SDK 活动、取消后的 delta、运行结果和进程退出由同一会话代次关联，关闭与取消均幂等。
+
+上游 Cursor provider 的 `interruptTurn` 在等待完成 10 秒超时后会调用 `finalizeTurn(interrupted)`；这条终态路径必须修改，使 Baton 继续等待真实终止或按一分钟预算回收进程树，不能直接把该合成终态写成已停止。上游 `enableAgentRetries: true` 也须按输入不重放要求核查。修改点与所选模块的上游测试一并保留，并补取消未完成和重试输入次数的差异测试。
 
 只读 cursor-host 从既有映射读取原生历史，不创建新会话，不发送消息。优先验证 t3code 已在使用的 `Agent.messages.list(nativeId, {runtime: "local", cwd})`；若仅 resume 能读取，必须证明它在独立进程中无项目动作且不干扰活动 Agent，否则此路线不满足 R-10。SDK 一次返回完整列表时，按下文建立有界只读快照。
 
@@ -329,22 +348,35 @@ Web 的 NodeDTO、DeviceAgent 和 mapDevice 保留 status、create 和 reason，
 
 ## 安装包与代码复用
 
-Worker 与适配器随 batond 的 SEA 分发，打包方式见迁移 TECH。SEA 内的 Node 为 26，`@cursor/sdk@1.0.35` 声明 Node `>=22.13`。经实测，SDK 默认入口与公开 `/bundled` 入口均不能按当前 esbuild 配置直接在 Node SEA 中运行；可执行文件旁的 `node_modules` 必须外置完整 SDK（含 JavaScript）、全部生产依赖及当前系统/架构的平台包，由 SEA 通过 `createRequire` 加载，版本由 pnpm 锁文件固定。此方案已通过 macOS arm64 加载检查；Cursor Linux arm64 的 sandbox helper 要求 glibc 2.39+，Fedora 43 的本机验证待补，该验证不阻塞迁移 P0。构建禁止依赖安装脚本，若 SDK 必须通过安装脚本下载辅助程序，应改为显式受控打包步骤并先审查。
+Worker 与适配器随 batond 的 SEA 分发，打包方式见迁移 TECH。SEA 内的 Node 为 26，`@cursor/sdk@1.0.35` 声明 Node `>=22.13`。经实测，SDK 默认入口与公开 `/bundled` 入口均不能按当前 esbuild 配置直接在 Node SEA 中运行；可执行文件旁的 `node_modules` 必须外置完整 SDK（含 JavaScript）、全部生产依赖及当前系统/架构的平台包，由 SEA 通过 `createRequire` 加载，版本由 pnpm 锁文件固定。此方案已通过 macOS arm64 加载检查；Cursor Linux arm64 的 sandbox helper 要求 glibc 2.39+，Fedora 43 的本机验证待补。缺少证据时阻塞该组合的 available 声明，不阻塞模块离线复用。构建禁止依赖安装脚本，若 SDK 必须通过安装脚本下载辅助程序，应改为显式受控打包步骤并先审查。
 
 安装包检查在脱离源码目录、无系统 Node 的环境中运行 SEA：检查附带目录的模块解析、探测、私有状态和模拟 SDK 协议；不能把该检查标成真实 Agent 验证。Windows、macOS、Linux 分别打包原生依赖，不能复制另一系统的 node_modules。Grok、Antigravity 原生程序单独安装，不进入 Baton 安装包。
 
-`effect-acp` 与 `effect-codex-app-server` 从 t3code 复制进 `packages/`，保持源码结构以便后续对照上游更新。t3code 的 `provider-*` 包依赖 `@t3tools/contracts`、`@t3tools/shared` 和 T3 的 Run 模型，不引入；Pi、Cursor、Grok、ACP 适配器参考其生命周期处理在 Baton 的 Adapter 契约下重写。`provider-testing` 的回放框架作为录制回放实现的参考。复制或实质性转写的代码保留 MIT 版权和许可，在 `third_party/t3code/` 记录 LICENSE、来源路径、提交及对应本机文件。官方 SDK 的许可按各自包记录，不能用 T3 MIT 代替。
+引入的协议包、provider / runtime、辅助模块和测试固定到同一 t3code 提交，保留可对照上游的文件结构。允许保留所需的上游内部接口、类型和少量依赖；Baton 边界与局部差异集中在宿主及接入层。若必须修改上游实现，保留原测试并增加差异测试，不同时维护第二套等价实现。复制或实质性转写的代码与测试保留 MIT 版权和许可，在 `third_party/t3code/` 记录来源路径、提交及本机文件。SDK 和转录各自记录来源，官方 SDK 的许可按各自包保留。
 
 ## 验证策略
 
-复用 [Agent 录制回放设计](../agent-replay/TECH.md)。已有 Pi、Codex、Kiro 转录是 TS Worker 的回归基线：冻结的 Go 版与 TS 版在同一组转录上必须产生相同的 ThreadReport 序列与账本终态，这是迁移切换条件之一。新 Agent 从真实原生版本采集，规范化时保留 ID 关联、收发顺序、取消竞态和历史身份。T3 转录可作协议线索，但不能代替 Baton 的实际录制或证明另一个 CLI 版本兼容。
+优先复用选定实现的上游模块测试、`provider-testing` 回放工具和原始协议 / SDK 转录，同时保留 Baton 已有 Pi、Codex、Kiro 录制作为补充。来源、固定提交、Agent / SDK 版本、场景与已知补丁随转录记录，原始收发顺序、ID 关联、取消竞态和历史身份保持可追溯。已有 Go 录制格式与故障派生机制见 [Agent 录制回放设计](../agent-replay/TECH.md)；TS 侧的复用与验收按本节执行。
 
-Cursor 需要两处验证边界：SDK 调用/回调转录驱动真实 cursor-host，以及 cursor-host RPC 转录驱动真实 Cursor 适配器与 Worker。只回放 RPC 不能证明 SDK 映射正确。ACP 回放替换原生进程，effect-acp、共享层、各自协议策略、Worker、SQLite 和 outbox 均运行真实代码。
+| 测试来源 | 使用方式 | 额外验证 |
+|---|---|---|
+| 原样保留的上游模块测试 | 连同实现运行，调整本地运行器和宿主依赖 | 模块有改动时增加差异测试 |
+| 上游原始协议 / SDK 转录 | 作为 CI 回归输入，驱动接入后的真实代码 | 末端断言改为 Baton 身份、事件和持久结果 |
+| 上游编排集成测试 | 选择与 PRODUCT 相关的场景，复用原始转录和驱动 | 用真实 Worker / 中心替代 T3 orchestrator，断言 Thread、Turn、intent 与 outbox |
+| Baton 已有录制和已知缺陷 | 保留适用场景，迁移驱动及必要断言 | 覆盖最低版本、输入不重发、停止与恢复 |
+| Baton 新增机制 | 包内单测、确定性回放及少量主链路集成 | 覆盖 ACK / 完成乱序、持久接收、控制代次、中心补报与 Worker 回收 |
+
+出站参数和原生版本与已有转录适用范围一致时，可以直接使用上游录制，无需仅为变更仓库归属重新录制。请求语义、认证、权限、版本或恢复路径改变，以及现有转录缺少对应证据时，补录或增加明确标注来源的派生故障场景。不得修改录制的成功响应来适配不相符的请求。真实 Agent 的系统交付验证仍在 Baton 本机环境执行，回放通过不作为 available 的依据。
+
+Go 实现只用来核查既有场景及不变量。对照原生提交次数、会话归属、回复顺序、unknown 判定与持久终态，不要求完整 ThreadReport 序列或物理账本结构相同；新增异步命令、停止裁决与报告顺序由 TS 测试独立验收。
+
+Cursor 的上游 SDK 调用 / 回调转录驱动复用后的真实 SDK 封装与 cursor-host；另用 RPC 回放驱动真实 Baton 接入层、Worker 与 SQLite。只回放 RPC 不能证明 SDK 映射正确。ACP 回放替换原生进程，协议客户端、复用 runtime、协议策略、Worker 与 outbox 均运行真实代码。
 
 | 需求 | 设置与观察 | 失败条件 | 层次 | 状态 |
 |---|---|---|---|---|
-| R-04～R-09 | 现有 Pi、Codex、Kiro 转录分别驱动 Go 版与 TS 版 Worker | ThreadReport 序列或账本终态不同 | 回放对照 | planned |
-| R-05、R-08 | FULL 同步下连续提交，测量三个系统的提交耗时和事件循环延迟 | p99 超过 50 ms 且未改到 worker_threads | 基准测试 | planned |
+| R-04～R-09 | 上游与 Baton 既有转录驱动真实 provider、接入层及 Worker | 原生输入重复、会话或回合归属改变、回复乱序、错误恢复或持久终态违反 PRODUCT | 确定性回放与账本断言 | planned |
+| R-04～R-12 | 运行选用模块的上游测试，核对保留模块、来源及 Baton 差异测试 | 相关模块测试遗漏、宿主伪造运行条件、取消合成终态或 SDK 重试未经核查 | 模块测试与 SDK / 协议回放 | planned |
+| R-05、R-08 | FULL 同步下连续提交，测量三个系统的提交耗时和事件循环延迟 | p99 超过 50 ms 且未改到 worker_threads，或实际账本阻塞命令接收期限 | 基准测试 | planned |
 | R-08 | POSIX 强杀 Worker；Windows 强杀 Worker 后重启，另构造 PID 复用 | 进程组残留、误杀复用 PID 的无关进程 | 各系统进程树测试 | planned |
 | R-01、R-02、R-12 | 缺程序、SEA 附带目录缺失、认证未知、旧版本及不兼容握手；检查节点与 UI | 假报 available、执行模型请求或自动登录、创建未在执行前拒绝 | 包内测试与探测替身 | planned |
 | R-03、R-04 | 保存映射后退出；删除映射、换 profile、工作目录符号链接；独立进程恢复 | 静默新建、跨会话读取、历史工具重执行 | 真实转录 + Worker | planned |
@@ -372,23 +404,27 @@ Cursor 需要两处验证边界：SDK 调用/回调转录驱动真实 cursor-hos
 | R-12 | 脱离源码路径启动 SEA；移走附带目录、禁用网络、平台原生依赖 | 联网补依赖、路径回退掩盖坏包、不同系统产物混用 | 安装包检查 | planned |
 | R-01～R-12 | 每个新增 Agent 在声明支持的系统上运行核心场景 | 无法满足行为规格却声明已支持 | 门控本机真实验证 | planned |
 
-实施验证使用迁移 TECH 列出的 `pnpm -r typecheck`、`lint`、`test`（`@effect/vitest`）与 SEA 打包检查；回放对照一行另需在冻结的 Go 版上执行 `go test ./...`。本轮仅编写规格，上表均未执行。
+实施验证使用迁移 TECH 列出的 `pnpm -r typecheck`、`lint`、`test`（`@effect/vitest`）与 SEA 打包检查。只有为核查既有行为而运行 Go 对照时才需执行对应 Go 测试；删除 Go 后保留相关静态转录与来源。上表为接入后的验收计划，不能用基础包测试或已有测量替代。
 
 ## 实施顺序
 
-前置工作是迁移 TECH 的 P0：pnpm workspace、`packages/protocol`、引入 `effect-acp` 与 `effect-codex-app-server`，以及 FULL 同步提交耗时、SEA 冷启动和 Windows 进程账本等测量。前三项是迁移 TECH 中的 W，在切换前完成；后两项在切换后进行。正式任务在规格批准后建立：
+按 [迁移任务清单](../ts-migration/TASKS.md) 执行，切换前共五个切片，共享基础包作为现有输入，不单独拆卡。
 
-1. TS Worker 与 Pi、Codex、Kiro 适配器：短事务接收和异步启动/准备/发送、一次性输入基准、进程模型、注册表探测，以及 reason/status/create 的完整诊断与准入链路；以现有转录与 Go 版对照通过。
-2. 设备端统一历史、ACP 分块合并与有界只读快照；Kiro 迁到共享 ACP 层；完成 Web 契约迁移和 Pi/Codex/Kiro 回归。
-3. Cursor 适配器、cursor-host、独立历史及完整安装包验证。
-4. Grok，包括原生历史核查、停止与后台任务归属验证。
-5. 在确认原生运行环境后交付 Antigravity，并同步六种 Agent 的系统支持矩阵。
+| 切片 | 本设计中的交付 | 依赖 |
+|---|---|---|
+| T1：Cursor 本地可靠会话 | 先接入上游 provider / SDK 封装、测试和转录，验证宿主与必要差异；再交付 cursor-host、认证 IPC、Worker 持久队列、停止与恢复及基本历史读取 | 现有 workspace、协议包、SQLite 与测量工具 |
+| T2：网页远程 Thread | 节点报告、reason/status/create、中心接收与完成、远程 Thread 操作和实时回复，补断线与 ACK 乱序验收 | T1 |
+| T3：Project 与设备管理 | 将同一设备能力、Thread 与历史契约交给 Project Agent；完成 Runtime、事项、设备目录、附件、订阅与 shell 业务 | T2 |
+| T4：既有 Agent 与统一历史 | 接回 Pi、Codex、Kiro，复用 ACP；四种 Agent 的快照、分页与网页统一消费，保留原生 steer 和最低版本 | T1；网页验收依赖 T2 |
+| T5：发布切换 | 各目标系统完整安装包、真实 Agent 支持矩阵、故障复验、构建切换与删除 Go | T2、T3、T4 |
 
-第 1 项的中心侧改动（reason 字段、outbox 完成字段）直接在 TS Coordinator（迁移 TECH 的 C）中实现，以 `packages/protocol` 为准。所有运行中的结果必须先核对控制代次，长时操作不交给 IPC handler。
+T1 的复用检查点先于通用 Worker 扩展完成：记录实际保留模块、依赖、宿主和差异，核查 Cursor 历史、跨进程恢复及取消语义。缺少凭据或系统环境的真实验证保持未验证；Cursor 路线不成立时先调整设计，不把回放或 SDK 加载冒充可交付会话。T1 与 T4 各自包含所属 provider 的探测、进程回收和测试，T5 不集中补做这些实现。
+
+Grok、Antigravity 在切换后分别接入和验收，复用已经交付的 ACP、历史和报告链路。它们的原生环境缺口只阻塞各自交付，不扩大 T4 或 T5 的范围。所有异步结果写状态前仍须核对控制代次。
 
 ## 上游参考
 
-所有链接固定到本设计核查的提交。转写时按实际引用更新来源清单，不跟随 main 自动变更。
+所有上游链接固定到本设计核查的提交。引入或抽取时记录实际来源文件、测试与转录，不跟随 main 自动变更。
 
 | 参考 | 用途 |
 |---|---|
@@ -404,12 +440,12 @@ Cursor 需要两处验证边界：SDK 调用/回调转录驱动真实 cursor-hos
 
 | 项目 | 当前依据与缺口 | 处理与阻塞范围 |
 |---|---|---|
-| FULL 同步提交耗时 | t3code 因主线程 fsync 选择 NORMAL；Baton 尚无三个系统上的测量 | 迁移 P0 测量；p99 超过 50 ms 时评审 worker_threads 方案 |
+| FULL 同步提交耗时 | macOS arm64 和本机 Linux arm64 虚拟机已有测量，Linux 批量同步事务会显著阻塞事件循环；Windows、Linux x64 未测 | 复现与数据见迁移 TECH；T1 接入实际账本复测，提交 p99 超过 50 ms 或接收期限超标时改用 worker_threads |
 | Windows 进程回收 | 第一版用 `taskkill /T /F` 加进程账本，有父进程先退出和 Worker 崩溃后延迟回收两个缺口 | 已接受为第一版范围；`specs/baton/TECH.md` 停止一节在切换提交中修改；Job Object 推到第一版之后 |
-| SEA 冷启动 | Worker 就绪预算 3 秒包含 SEA 启动与 Effect 加载，未测量 | 迁移 P0 测量；超出时先缩减入口加载 |
-| Codex schema 版本 | effect-codex-app-server 的生成来源未记录 Codex 版本 | 引入时对照 0.162.1 重新生成或以回放证明兼容 |
+| SEA 冷启动 | 最小入口在 macOS / Linux arm64 的测量低于 3 秒，完整 Worker 和其他目标未测 | T1/T5 复测完整入口；超出时先缩减加载 |
+| Codex schema 版本 | 已按官方 0.162.1 重生，并用 9 个既有录制场景的 642 个帧解码检查，见来源说明 | T4 验证接入后的请求、事件、输入恢复及最低版本，字段解码不替代生命周期测试 |
 | Cursor 认证入口 | 已核查上游向 SDK 注入 API key，也有 SDK 登录与 credential store；未验证本机 `agent login` 的订阅凭据可直接复用 | 需审查本期是否接受显式 `CURSOR_API_KEY`；若要求直接复用 CLI 订阅登录，先验证公开接口并补齐设计，不能自动转成另一个计费账号 |
-| Cursor SDK 基线 | 上游依赖 1.0.35；未在 Baton 安装或执行，也未核实跨进程 store、只读历史及 Node 要求 | 在 Cursor 实施前验证；不满足公开接口时返回设计评审，不能用私有格式猜测实现 |
+| Cursor SDK 基线 | 1.0.35 已在 SEA 旁置完整 SDK 的加载检查中使用；跨进程 store、只读历史、真实执行和完整回收未验证 | T1 检查点核查所复用实现及 SDK 行为；Linux arm64 的 glibc 要求和其他系统结果见迁移 TECH |
 | 各 Agent 的探测隔离 | Pi/Kiro 已有空目录建会话取模型路径，但未对六种 Agent 证明禁用用户级 hooks、扩展、MCP、交互登录和临时会话清理 | 每种 Agent 的隔离策略在启用前实测；无法保证时保留 unknown，不伪装为已安全探测 |
 | Grok 原生历史 | 已核查 ACP 接入与 xAI 扩展，未证明独立历史足以恢复输入身份 | 在 Grok 标为 available 前录制；不能验证时保持未验证并说明原因 |
 | Antigravity 安装与登录 | 上游依赖其托管程序、harness 和 profile；本设计选择用户准备环境，尚缺可复现的独立准备步骤 | 在该 Agent 实施前确定合法来源和本机认证入口；需要托管下载或登录时单独扩展并审查范围 |
