@@ -18,7 +18,7 @@ Coordinator、batond 和 Session Worker 按 Baton 与 Agent 适配 PRODUCT 重�
 | 契约范围 | 保留浏览器 HTTP API、节点 WSS 信封和中心 PostgreSQL schema 的已有结构，加入适配规格新增字段与统一历史。Worker IPC、设备账本和进程内服务允许按 TS 重设，相关调用方与 `packages/protocol` 同步修改 |
 | 本地数据 | 按实验室阶段约定不迁移：切换后设备重新注册、Worker 账本与 node.db 重建；中心数据库可保留，因为 schema 只增加字段 |
 | 首次交付 | TS 切换覆盖现有 Pi、Codex、Kiro、shell 和新增 Cursor；Grok、Antigravity 在切换后按各自支持矩阵交付 |
-| 切换条件 | 下文验证表通过；Pi、Codex、Kiro 的现有交付组合须完成回归，新增 Cursor 以实测支持矩阵交付，未通过的新增组合保持 unverified |
+| 切换条件 | 下文验证表通过；Pi、Codex、Kiro 的现有交付组合须完成回归，新增 Cursor 以离线行为测试与本地安装包检查的支持矩阵交付，未通过的新增组合保持 unverified |
 
 ## 实现原则
 
@@ -125,7 +125,7 @@ T1 Cursor 本地可靠会话 ──┬─ T2 网页远程 Thread ── T3 Proje
                         └─ T4 既有 Agent 与统一历史 ────────────────────┼─ T5 发布切换
 ```
 
-T4 的设备端实现可与 T2 并行，网页验收在 T2 完成后进行。每个切片包含其所需的协议、持久化、调用方与测试；可以分多个小提交和 PR 合入。T1 先验收复用，再验收本地可靠执行；T3 先验收设备操作，再验收 Project 协同；T4 按 Agent 接入并验收，再统一历史消费。这些检查点在同一任务内推进，避免把整项任务做成一个大 PR。平台实现、探测和真实 Agent 验证随所属切片完成，T5 负责完整安装包与系统矩阵复验。
+T4 的设备端实现可与 T2 并行，网页验收在 T2 完成后进行。每个切片包含其所需的协议、持久化、调用方与测试；可以分多个小提交和 PR 合入。T1 先验收复用，再验收本地可靠执行；T3 先验收设备操作，再验收 Project 协同；T4 按 Agent 接入并验收，再统一历史消费。这些检查点在同一任务内推进，避免把整项任务做成一个大 PR。平台实现、探测替身测试和 Agent 离线转录回放随所属切片完成，T5 负责完整安装包与系统矩阵复验。
 
 T1 先交付 Cursor provider 与上游测试的可运行复用检查点，明确直接保留、宿主接入、局部抽取和必须修改的部分；验证独立历史、恢复、取消及输入重试的证据。路线成立后，在同一切片内交付仅依赖本地认证 IPC 的可靠 Thread。复用路线或 SDK 能力不满足时，先修订对应设计和剩余任务，不把缺口藏进通用 Worker。
 
@@ -133,11 +133,11 @@ T2 只完成远程 Thread 主链路；T3 补齐 Project、事项、目录、附�
 
 ## 测试依据
 
-复用模块连同其上游测试、回放工具和原始转录引入。TS 测试按产品验收、存储与并发不变量、已知缺陷回归组织；Go 测试用于选择场景和查漏，取消逐函数或逐用例重写要求。已有 Go 录制中的原生证据继续使用，允许因内部组织不同调整测试驱动。
+复用模块连同其上游离线测试、回放工具和原始静态转录引入。所有适配器行为验证仅依赖本地静态录制、确定性回放和本地替身；测试与验证脚本禁止要求真实 API Key、在线模型推理或外部真实服务联调，也不以在线补录或实机核查证据作为验收前提。TS 测试按产品验收、存储与并发不变量、已知缺陷回归组织；Go 测试用于选择场景和查漏，取消逐函数或逐用例重写要求。已有 Go 录制中的原生证据继续使用，允许因内部组织不同调整测试驱动。
 
 对仍承诺保留的 HTTP 与 WSS 契约保留 Go 导出样例往返测试。调整 Worker IPC 或新增契约时，由 TS Schema 和独立样例验证，不修改冻结的 Go 类型来模拟已实现的新行为。删除 Go 前将仍需使用的转录、协议样例和来源说明移入 TS 包；CI 改为检查 TS 契约及已保留的静态基线，不再依赖 Go 导出器。
 
-跨版本对照只比较同一输入下的原生提交次数、Thread 身份、消息与 Turn 归属、回复顺序、unknown 判定和持久终态。新增 `command.completed`、异步接收时序与内部表结构由 TS 自身验证；验收不要求 Go 与 TS 的完整 ThreadReport 序列相同。上游转录的适用范围和补录条件见 Agent 适配 TECH。
+跨版本对照只比较同一输入下的原生提交次数、Thread 身份、消息与 Turn 归属、回复顺序、unknown 判定和持久终态。新增 `command.completed`、异步接收时序与内部表结构由 TS 自身验证；验收不要求 Go 与 TS 的完整 ThreadReport 序列相同。上游转录的适用范围和派生夹具要求见 Agent 适配 TECH。
 
 ## 验证
 
@@ -151,7 +151,7 @@ T2 只完成远程 Thread 主链路；T3 补齐 Project、事项、目录、附�
 | `@cursor/sdk` 完整附带目录与 SEA 加载（T1、T5） | 运行时找不到模块，或需要设备上另装依赖 | 打包检查 |
 | Baton TECH 验证表 R-01～R-25 中适用各行（T2～T5） | 任一现有承诺未覆盖；已定义负载阈值未满足 | 原测试层次 |
 | Agent 适配 TECH 中 Pi、Codex、Kiro、Cursor 的验证行（T1、T4、T5） | 同该表 | 同该表 |
-| Pi、Codex、Kiro 的现有交付系统组合及 Cursor 拟支持组合（T4、T5） | 既有组合回归失败，或新增组合未经真实验证却标为 available | 门控真实验证 |
+| Pi、Codex、Kiro 的现有交付系统组合及 Cursor 拟支持组合（T4、T5） | 既有组合回归失败，或新增组合缺少离线行为与本地安装包检查却标为 available | 静态转录回放、本地替身与安装包检查 |
 | 中心重启、batond 重启、Worker 被杀、PostgreSQL 短停（T1～T3、T5） | 消息重发、回复重复、同步前设备显示可用 | 进程测试 |
 
 切换提交前执行 `pnpm -r typecheck`、`pnpm -r lint`、`pnpm -r test`、`pnpm --dir web build` 和 SEA 打包检查。
@@ -173,5 +173,5 @@ T2 只完成远程 Thread 主链路；T3 补齐 Project、事项、目录、附�
 | FULL 同步提交耗时 | 官方 Node 26.11.1、Effect 4.0.6，真实 `makeWorker` 串行队列预热 200 次后执行 2000 次 `records.add/remove`，每次提交后让出事件循环。macOS arm64 / Apple M4 / Darwin 27.2.0 / APFS：COMMIT p99 **0.080 ms**、最大 **0.268 ms**，队列操作 p99 **0.181 ms**，事件循环 p99 **1.656 ms**。OrbStack Linux arm64 / 内核 7.2.9 / Docker named volume（Btrfs）：COMMIT p99 **21.680 ms**、最大 **41.063 ms**，队列操作 p99 **23.595 ms**，事件循环 p99 **23.282 ms** | 两个平台此负载的提交 p99 低于 50 ms；Worker 保持逐事务让出。测量覆盖实际账本、提交核查和状态队列，不含 Agent、IPC、输入 intent 或大队列负载，不能推断全部命令接收延迟；Windows、Linux x64 未测。WAL/FULL、`fullfsync=0`，未做断电验证；Linux 为本机虚拟机结果。复现：`tools/ts-migration/worker-startup.mjs 100 --ledger 2000`；单独 SQLite 压力工具为 `sqlite-full.mjs` |
 | SEA 冷启动 | 官方 Node 26.11.1 + Effect 4.0.6 + esbuild 0.28.2，完整 Worker 每平台 100 个新进程，包含独占锁、实际 SQLite 迁移、空账本恢复调度、Agent 接入模块加载和 watchdog。macOS arm64：spawn 到认证 status p99 **225.874 ms**、最大 **2058.295 ms**，含 Host 目录与令牌准备的总耗时 p99 **236.225 ms**、最大 **2071.289 ms**。OrbStack Linux arm64：认证 status p99 **624.646 ms**、最大 **638.046 ms**，Host 总耗时 p99 **753.595 ms**、最大 **797.125 ms**。每次确认 SIGTERM 后 Worker、watchdog 退出和锁释放 | 全部样本低于 3 秒；Windows、Linux x64 未测。安装目录仅含 SEA，空 PATH、临时 HOME、每次新建数据库，不加载 Cursor SDK；未清空系统页缓存。Linux 数据位于 VM 的 Btrfs named volume，容器禁止联网。已有大量命令与 intent 的恢复耗时仍需单独验证，T5 复验完整安装包。复现：`tools/ts-migration/worker-startup.mjs`，离线 Linux 命令见工具 README |
 | Windows 进程回收实测 | 本机无 Windows / PowerShell 执行环境，`taskkill`、CIM 创建时间及真实 PID 复用均**未测**。提供 `tools/ts-migration/windows-processes.mjs`：完整父子孙进程树回收、故意过期的创建时间与无关存活进程核对、中间父进程先退出后的后代存活检查；创建时间取 `Get-CimInstance Win32_Process` 的 UTC ticks 字符串 | 在 Windows 执行脚本后补实测。过期记录检查不等于操作系统真实复用 PID；脚本不验证 Worker 崩溃至重启之间的延迟。CIM 校验与 taskkill 之间有竞争窗口，无法给出原子排除 PID 复用的保证；第一版已接受的两个进程回收缺口仍保留 |
-| `@cursor/sdk` 的原生依赖 | 实测公开包 **1.0.35**，`engines.node >=22.13`，Node 26.11.1 满足；安装禁用脚本。默认入口直接 esbuild 报动态路径解析错误，公开 `/bundled` 入口在 Node SEA 报 `bun:sqlite` 不存在。SEA 用 `createRequire` 加载旁置的完整 SDK、生产依赖和对应平台包，可导入 SDK、打开临时 SQLite store、加载 tree-sitter/Bash `.node` 并运行 ripgrep；移走附带目录时正确失败。macOS arm64 的 sandbox helper `--help` 通过；Linux arm64 helper 要求 **GLIBC_2.39**，当前 Debian 12 / glibc 2.36 无法加载 | macOS arm64 的加载与真实会话验证均通过：多轮、输入去重、非空独立历史、工具取消、活跃 Worker 被杀后的整组回收及原会话恢复后执行。Cursor Linux arm64 要求 glibc 2.39+，当前 Debian 12 / glibc 2.36 不满足；其他系统组合保持 unverified，Fedora 43 验证待补。需携带 SDK JS、全部生产依赖及入口可达的平台包；只有原生文件不足。SDK 许可及来源见 `third_party/cursor-sdk/`；加载检查复现 `tools/ts-migration/cursor-sea.mjs`，真实会话复现 `verify-cursor.mjs` |
+| `@cursor/sdk` 的原生依赖 | 实测公开包 **1.0.35**，`engines.node >=22.13`，Node 26.11.1 满足；安装禁用脚本。默认入口直接 esbuild 报动态路径解析错误，公开 `/bundled` 入口在 Node SEA 报 `bun:sqlite` 不存在。SEA 用 `createRequire` 加载旁置的完整 SDK、生产依赖和对应平台包，可导入 SDK、打开临时 SQLite store、加载 tree-sitter/Bash `.node` 并运行 ripgrep；移走附带目录时正确失败。macOS arm64 的 sandbox helper `--help` 通过；Linux arm64 helper 要求 **GLIBC_2.39**，当前 Debian 12 / glibc 2.36 无法加载 | macOS arm64 的本地加载检查通过；会话行为统一使用离线 SDK 转录、确定性回放和本地替身验证。Cursor Linux arm64 要求 glibc 2.39+，当前 Debian 12 / glibc 2.36 不满足；其他系统组合保持 unverified，Fedora 43 验证待补。需携带 SDK JS、全部生产依赖及入口可达的平台包；只有原生文件不足。SDK 许可及来源见 `third_party/cursor-sdk/`；加载检查复现 `tools/ts-migration/cursor-sea.mjs`，离线测试入口见 `apps/batond/README.md` |
 | 发布用 Node 二进制缓存 | 缓存确定为 `~/.cache/baton/node/v<版本>/`，支持 `BATON_NODE_CACHE` 覆盖；保留官方归档与经 HTTPS 获取的 `SHASUMS256.txt`，解包前校验 SHA256。已获取 v26.11.1：darwin-arm64 tar.gz 为 `d916511b55965e91be7a88e17f88d895b6793ceaba3e6c9b194aefe51c2c65ac`；linux-arm64 tar.gz 为 `170454fb022f5e9b5f6cc76c25fa32ef5100895be44eb04e92f9780591491bbf` | `tools/ts-migration/cache-node.mjs` 仅显式 `--download` 联网，离线缺失时输出下载命令；未校验离线发布签名。Windows x64 / Linux x64 缓存尚未获取；T5 的发布打包继续采用缓存输入 |

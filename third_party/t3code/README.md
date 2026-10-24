@@ -56,6 +56,4 @@ pnpm --filter effect-codex-app-server test
 
 六份原始转录覆盖 simple、multi_turn、provider_thread_resume、turn_interrupt_mid_tool、tool_call_read_only、subagent，文件内容未改。回放驱动提取自上游 `CursorAdapterV2.testkit.ts`，在原生 SDK 边界替换调用后执行真实 `makeCursorAgentSdkRunner`，比较全部 SDK 出站调用和回调顺序。中断等待录制的 tool-call-started 事件；native agent/run ID 和运行结果保持原文。转录声明的是协议版本 1，未携带精确的录制 SDK 版本，不能用上游当前 package.json 的 1.0.35 补造该字段。转录中的 retries/full-access 参数只用于复验原始模块，Baton 配置策略另外测试。
 
-离线测试使用选定的上游模块测试与六份原始 SDK 转录，覆盖 runner、异常处理、显式凭据、禁用重试与取消后等待终态。原生 store、非空独立历史与跨进程恢复由显式的 `tools/ts-migration/verify-cursor.mjs` 验证。静态 inspection 提供 SDK/平台版本、Node 要求及缺失资产，不启动 SDK/helper。
-
-Cursor 的非空独立历史、多轮执行、输入去重、活跃工具取消、Worker 强杀后的 watchdog 回收，以及恢复原会话后执行新输入，已在 macOS arm64、Node 26.11.1、SDK 1.0.35 上完成真实验证。其他系统组合保持未验证。执行策略与平台验证范围见 [Agent 适配设计](../../specs/agent-adapters/TECH.md) 和 [本地 Thread 文档](../../apps/batond/README.md)。
+适配器行为验证仅使用选定的上游离线模块测试、六份原始 SDK 静态转录、确定性回放和本地替身，覆盖 runner、异常处理、显式凭据传递、禁用重试与取消后等待终态。store、非空独立历史、多轮执行、输入去重、跨进程恢复和 Worker 回收使用本地 SDK / RPC 替身与账本断言；凭据传递使用虚构值，测试与验证脚本禁止依赖真实 API Key、在线模型推理或外部真实服务。静态 inspection 提供 SDK/平台版本、Node 要求及缺失资产，不启动 SDK/helper。执行策略与本地平台检查范围见 [Agent 适配设计](../../specs/agent-adapters/TECH.md) 和 [本地 Thread 文档](../../apps/batond/README.md)。

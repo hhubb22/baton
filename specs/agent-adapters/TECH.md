@@ -88,7 +88,7 @@ POSIX 的 watchdog 是 batond 可执行文件的 `watchdog` 子命令，与 Go �
 
 Windows 第一版接受两个已知缺口。`taskkill /T` 按父 PID 向下查找，中间进程先退出时，其后代会漏掉；Worker 被强杀后，到下次 Worker 启动之间 Agent 进程会继续运行。Windows 进程创建时间在恢复时通过 PowerShell `Get-CimInstance Win32_Process` 读取，用于排除 PID 复用。kill-on-close Job Object 推到第一版之后，届时以一个原生模块接入 `src/platform/process`，其余代码不变。`specs/baton/TECH.md` 的停止一节在切换提交中改写为 Windows 的当前保证。
 
-停止确认仍以 Turn 终止事件或进程树回收结果为证据。SDK 创建的 detached 后代必须纳入真实回收验证，不能只看 cursor-host PID 已消失。batond 重启仍通过已有认证 IPC 连接存活的 Worker，不因重连重开 Agent。
+停止确认仍以 Turn 终止事件或进程树回收结果为证据。回收测试用本地替身创建 detached 后代，核对整棵进程树退出，不能只看 cursor-host PID 已消失。batond 重启仍通过已有认证 IPC 连接存活的 Worker，不因重连重开 Agent。
 
 ### Worker IPC
 
@@ -180,7 +180,7 @@ Worker 消费 drain 流时有明确的终态优先级：同一故障已产生 `U
 
 后台任务有独立归属。原生后台任务能在根 prompt 返回后继续执行时，要等待可核查的结束状态；本期不把原生自动唤醒转换成新的 Baton 输入。不能关闭自动续跑、判断后台归属或停止其进程的组合保持未验证。已结束回合的迟到事件不得绑定到当前输入。
 
-保留 Pi、Codex 的原生 steer。T3 的 Pi `prompt + streamingBehavior: steer` 在空闲时会开启新执行，不能直接套入 Baton 的“只加入当前 Turn”语义。对已支持的 Pi 版本，优先保留明确的 steer RPC；只有实测能核对当前回合且不会遗留到下一轮，才替换实现。竞态中拿不到归属证据就报 `Uncertain`，不补发 prompt。其余四种 Agent 的 `steer` 返回 `Unsupported`，不用中断重启来模拟。
+保留 Pi、Codex 的原生 steer。T3 的 Pi `prompt + streamingBehavior: steer` 在空闲时会开启新执行，不能直接套入 Baton 的“只加入当前 Turn”语义。对已支持的 Pi 版本，优先保留明确的 steer RPC；只有静态转录与确定性回放能核对当前回合且不会遗留到下一轮，才替换实现。竞态中拿不到归属证据就报 `Uncertain`，不补发 prompt。其余四种 Agent 的 `steer` 返回 `Unsupported`，不用中断重启来模拟。
 
 ### 停止（R-08）
 
@@ -192,7 +192,7 @@ Worker 消费 drain 流时有明确的终态优先级：同一故障已产生 `U
 
 ### Pi、Codex（R-04～R-10）
 
-Pi 保持 RPC、原生 JSONL 与会话归属，优先引入 t3code `packages/provider-pi` 的 RPC、会话与事件模块及相应测试，通过 Baton 宿主接入；输入准备使用一次性基准。核查发送确认、工具运行中的 abort、输入队列清除、部分写入、compaction 与回合结束时序。会话树只读取当前分支；若增加 `get_entries` 支持，用相应版本的真实转录验证最低版本。
+Pi 保持 RPC、原生 JSONL 与会话归属，优先引入 t3code `packages/provider-pi` 的 RPC、会话与事件模块及相应测试，通过 Baton 宿主接入；输入准备使用一次性基准。核查发送确认、工具运行中的 abort、输入队列清除、部分写入、compaction 与回合结束时序。会话树只读取当前分支；若增加 `get_entries` 支持，用相应版本的已有静态转录验证最低版本。
 
 Codex 优先接入现成 provider 与事件归一化，使用已有 `effect-codex-app-server` 包，保留 `clientUserMessageId`。当前包已按官方 0.162.1 重生 schema，并有 Baton 录制帧解码检查，依据见 [来源说明](../../third_party/t3code/README.md#codex-schema-基线)；接入后的请求与生命周期仍需回放验证。重点核查 `turn/start` 响应和通知先后、原生 turn 存在之前的中止、`expectedTurnId`、断线后的原生历史查询、恢复中的分页及子任务迟到通知。保留 `approvalPolicy: never`、`sandbox: workspace-write`，不暴露上游审批与回退产品接口。
 
@@ -212,7 +212,7 @@ Kiro 保持 `kiro-cli acp --agent-engine=v3`、ACP `protocolVersion: 1` 及 `_ki
 
 新增 `src/agents/grok`，优先复用 t3code `packages/provider-grok` 和共享 ACP runtime 的实现及测试，启动原生 `grok agent stdio`；接入层选择 initialize、认证参数和 xAI 扩展。首期沿用 CLI 原生权限检查，显式采用 `--permission-mode default`；权限回调只允许当前回合的一次请求，不写项目级授权，不使用 `--always-approve`。
 
-认证使用本机 Grok 已配置的账号或员工明确配置的原生 API key。环境白名单只允许必要的系统、网络和该 Agent 的配置项，不继承其他提供商密钥或 Project Runtime OAuth。具体原生 profile 环境变量须通过启动与恢复录制确认，不能简单替换整个系统 HOME。
+认证使用本机 Grok 已配置的账号或员工明确配置的原生 API key。环境白名单只允许必要的系统、网络和该 Agent 的配置项，不继承其他提供商密钥或 Project Runtime OAuth。具体原生 profile 环境变量须通过已有启动与恢复静态转录及本地替身确认，不能简单替换整个系统 HOME。
 
 xAI 的 prompt 完成通知、标准 prompt RPC、后台任务通知分别处理，按本轮身份去重，只结束一次。取消参考原生 Ctrl+C 语义与 `session/cancel` 扩展，用户 Stop 必须覆盖子任务；原生取消不足时依靠 Worker 回收整个进程树。
 
@@ -224,7 +224,7 @@ xAI 的 prompt 完成通知、标准 prompt RPC、后台任务通知分别处理
 
 执行使用显式配置的原生 profile；认证只采用已完成的本机上下文。后台探测和 Worker 不发起交互登录，原生要求重新认证时退出并给出本机操作原因。移除未选择的 ambient Google 凭据，避免落到其他账号或计费项目；不复用 Project Agent 的订阅登录。
 
-恢复优先采用实测无工具重执行的原生 resume；load 是否用于独立历史读取需另证。模型只在原生 config options 已公布后设置。启动选择原生 `default` 权限模式，只处理当前回合的 `allow_once`，不自动改为 `yolo`。
+恢复优先采用已有静态转录与确定性回放证明无工具重执行的原生 resume；load 是否用于独立历史读取需另证。模型只在原生 config options 已公布后设置。启动选择原生 `default` 权限模式，只处理当前回合的 `allow_once`，不自动改为 `yolo`。
 
 如果原生执行需要客户端文件回调，仅对本 Thread 已验证的工作目录提供读写，规则与 `internal/fileaccess` 一致：先 `realpath` 再判断前缀，POSIX 以 `O_NOFOLLOW` 打开，拒绝目录外、解析后越界与未知会话请求。Windows 上 Node 没有 `O_NOFOLLOW`，打开后再次比对句柄路径，做不到时该系统不提供写回调。独立历史连接不提供写权限。未实现的客户端 terminal 不做能力声明。
 
@@ -340,7 +340,7 @@ Web 的 NodeDTO、DeviceAgent 和 mapDevice 保留 status、create 和 reason，
 | 隔离会话 | initialize/authenticate 既有凭据，必要的 session/new 或 SDK 临时 Agent；读取模型与配置 | 注册策略已证明无全局或项目 hooks/扩展/MCP，无 prompt；不接入员工已有会话 |
 | 不满足隔离条件 | 仅返回已知元数据与 unknown 认证 | 报 unverified 并拒绝创建，给出缺项；正常 start 不作为绕过入口 |
 
-隔离探测使用 canonical 临时空工作目录、独立临时会话存储和进程树，只挂载选定认证上下文。显式传空 mcpServers，并使用对应版本已验证的禁用 hooks、extensions、MCP、技能和项目配置参数；SDK 同样关闭对应 settingSources/服务配置。空目录和空 mcpServers 本身不证明隔离，必须用带用户级、项目级哨兵配置的真实验证确认。禁用参数不存在或认证会弹窗时，不能走这条路径。
+隔离探测使用 canonical 临时空工作目录、独立临时会话存储和进程树，只挂载选定认证上下文。显式传空 mcpServers，并使用对应版本已验证的禁用 hooks、extensions、MCP、技能和项目配置参数；SDK 同样关闭对应 settingSources/服务配置。隔离行为通过静态转录与带用户级、项目级哨兵配置的本地替身验证，检查禁用参数和清理结果。禁用参数不存在或认证会弹窗时，不能走这条路径。
 
 探测不自动回复权限请求、不向模型发送消息；原生要求登录时立即报告缺项。每个任务最多 30 秒，版本和配置一致时复用结果，结束或失败后关闭进程并清理临时会话数据，不删真实认证目录。SDK/原生程序无法安全清理临时会话或禁止启动动作时保持未验证。
 
@@ -352,13 +352,13 @@ Web 的 NodeDTO、DeviceAgent 和 mapDevice 保留 status、create 和 reason，
 
 Worker 与适配器随 batond 的 SEA 分发，打包方式见迁移 TECH。SEA 内的 Node 为 26，`@cursor/sdk@1.0.35` 声明 Node `>=22.13`。经实测，SDK 默认入口与公开 `/bundled` 入口均不能按当前 esbuild 配置直接在 Node SEA 中运行；可执行文件旁的 `node_modules` 必须外置完整 SDK（含 JavaScript）、全部生产依赖及当前系统/架构的平台包，由 SEA 通过 `createRequire` 加载，版本由 pnpm 锁文件固定。此方案已通过 macOS arm64 加载检查；Cursor Linux arm64 的 sandbox helper 要求 glibc 2.39+，Fedora 43 的本机验证待补。缺少证据时阻塞该组合的 available 声明，不阻塞模块离线复用。构建禁止依赖安装脚本，若 SDK 必须通过安装脚本下载辅助程序，应改为显式受控打包步骤并先审查。
 
-安装包检查在脱离源码目录、无系统 Node 的环境中运行 SEA：检查附带目录的模块解析、探测、私有状态和模拟 SDK 协议；不能把该检查标成真实 Agent 验证。Windows、macOS、Linux 分别打包原生依赖，不能复制另一系统的 node_modules。Grok、Antigravity 原生程序单独安装，不进入 Baton 安装包。
+安装包检查在脱离源码目录、无系统 Node 的离线环境中运行 SEA：检查附带目录的模块解析、探测替身、私有状态和模拟 SDK 协议。Windows、macOS、Linux 分别打包原生依赖，不能复制另一系统的 node_modules。Grok、Antigravity 原生程序单独安装，不进入 Baton 安装包。
 
 引入的协议包、provider / runtime、辅助模块和测试固定到同一 t3code 提交，保留可对照上游的文件结构。允许保留所需的上游内部接口、类型和少量依赖；Baton 边界与局部差异集中在宿主及接入层。若必须修改上游实现，保留原测试并增加差异测试，不同时维护第二套等价实现。复制或实质性转写的代码与测试保留 MIT 版权和许可，在 `third_party/t3code/` 记录来源路径、提交及本机文件。SDK 和转录各自记录来源，官方 SDK 的许可按各自包保留。
 
 ## 验证策略
 
-优先复用选定实现的上游模块测试、`provider-testing` 回放工具和原始协议 / SDK 转录，同时保留 Baton 已有 Pi、Codex、Kiro 录制作为补充。来源、固定提交、Agent / SDK 版本、场景与已知补丁随转录记录，原始收发顺序、ID 关联、取消竞态和历史身份保持可追溯。已有 Go 录制格式与故障派生机制见 [Agent 录制回放设计](../agent-replay/TECH.md)；TS 侧的复用与验收按本节执行。
+所有适配器行为验证仅依赖本地静态录制、确定性回放和本地替身。测试与验证脚本禁止要求真实 API Key、调用在线模型推理或与外部真实服务联调，包括显式运行的门控脚本；开发、验收和发布均不要求在线补录或实机核查证据。优先复用选定实现的上游离线模块测试、`provider-testing` 回放工具和原始协议 / SDK 转录，同时保留 Baton 已有 Pi、Codex、Kiro 录制作为补充。来源、固定提交、Agent / SDK 版本、场景与已知补丁随转录记录，原始收发顺序、ID 关联、取消竞态和历史身份保持可追溯。已有 Go 录制格式与故障派生机制见 [Agent 录制回放设计](../agent-replay/TECH.md)；TS 侧的复用与验收按本节执行。
 
 | 测试来源 | 使用方式 | 额外验证 |
 |---|---|---|
@@ -368,7 +368,7 @@ Worker 与适配器随 batond 的 SEA 分发，打包方式见迁移 TECH。SEA 
 | Baton 已有录制和已知缺陷 | 保留适用场景，迁移驱动及必要断言 | 覆盖最低版本、输入不重发、停止与恢复 |
 | Baton 新增机制 | 包内单测、确定性回放及少量主链路集成 | 覆盖 ACK / 完成乱序、持久接收、控制代次、中心补报与 Worker 回收 |
 
-出站参数和原生版本与已有转录适用范围一致时，可以直接使用上游录制，无需仅为变更仓库归属重新录制。请求语义、认证、权限、版本或恢复路径改变，以及现有转录缺少对应证据时，补录或增加明确标注来源的派生故障场景。不得修改录制的成功响应来适配不相符的请求。真实 Agent 的系统交付验证仍在 Baton 本机环境执行，回放通过不作为 available 的依据。
+出站参数和原生版本与已有转录适用范围一致时，直接使用上游录制。请求语义、认证、权限、版本或恢复路径改变，以及现有转录缺少对应证据时，使用已有离线材料，或增加明确标注来源、变换与验证范围的派生夹具和本地替身场景。不得修改录制的成功响应来掩盖不相符的请求。系统交付依据为离线行为回归与本地安装包检查；运行时 available 仍须满足已交付系统 / 版本范围及本机探测条件。
 
 Go 实现只用来核查既有场景及不变量。对照原生提交次数、会话归属、回复顺序、unknown 判定与持久终态，不要求完整 ThreadReport 序列或物理账本结构相同；新增异步命令、停止裁决与报告顺序由 TS 测试独立验收。
 
@@ -383,7 +383,7 @@ Cursor 的上游 SDK 调用 / 回调转录驱动复用后的真实 SDK 封装与
 | R-01、R-02、R-12 | 缺程序、SEA 附带目录缺失、认证未知、旧版本及不兼容握手；检查节点与 UI | 假报 available、执行模型请求或自动登录、创建未在执行前拒绝 | 包内测试与探测替身 | planned |
 | R-03、R-04 | 保存映射后退出；删除映射、换 profile、工作目录符号链接；独立进程恢复 | 静默新建、跨会话读取、历史工具重执行 | 真实转录 + Worker | planned |
 | R-05 | 在原生记录输入前后、响应前后分别断线和终止；重复相同正文 | 同一客户端 ID 再提交、只凭 SDK handle 或本地标记确认 sent | 派生回放 + SQLite 恢复 | planned |
-| R-05 | SDK 失败重试与主动重连场景，核对原生用户输入次数 | 用户输入被隐藏重放、自动恢复另开会话 | SDK 转录与门控真实测试 | planned |
+| R-05 | SDK 失败重试与主动重连场景，核对原生用户输入次数 | 用户输入被隐藏重放、自动恢复另开会话 | SDK 静态转录与本地替身 | planned |
 | R-06 | Pi/Codex steer 贴近终止；其余四种直接调用 steer | 另开 Turn、下轮消费旧队列、模拟中断重启 | 确定性回放 | planned |
 | R-07 | 未公布模型配置、默认值、模型拒绝与响应丢失 | 虚构模型 ID、先发后切换、未知提交被错误撤回 | 包内与回放 | planned |
 | R-08 | 发送后立即取消、工具中取消、SDK cancel 提前返回；一分钟超时 | 提前宣告停止、未回收后代、误杀另一 Thread | 设门回放 + 各系统进程树测试 | planned |
@@ -400,11 +400,11 @@ Cursor 的上游 SDK 调用 / 回调转录驱动复用后的真实 SDK 封装与
 | R-04、R-08 | open 成功提交与 stop 接收两侧设屏障，start 返回迟到实例；完成报告早于命令 ACK；重启后补报 | 已取消 open 补发 opened、遗留进程、报告乱序、终态命令再执行 | Worker 事务与 batond/Store 回放 | planned |
 | R-04 | resume 已 ACK 但未完成时再次请求，随后成功、失败或被 stop 取消 | pending 过早清除、新命令重复恢复、完成被迟到 ACK 覆盖 | Store/控制面 + Worker 集成 | planned |
 | R-05 | prepareInput 设置屏障后停止/退出；确认准备调用一次、intent 基准跨重启相同 | 重复读取并换基准、不可中断、停止后提交、把仍 queued 的消息写成 sent | 适配器 + Worker 确定性回放 | planned |
-| R-02 | 静态与隔离会话探测，设置用户/项目 hooks、扩展、MCP、登录弹窗哨兵；到期清理 | 触发任一动作、发送 prompt、残留进程，或仅因 session/new 就永远 unknown | 探测替身 + 每原生版本门控验证 | planned |
+| R-02 | 静态与隔离会话探测，设置用户/项目 hooks、扩展、MCP、登录弹窗哨兵；到期清理 | 触发任一动作、发送 prompt、残留进程，或仅因 session/new 就永远 unknown | 探测替身 + 各版本静态转录回放 | planned |
 | R-02、R-07 | 可见模型但认证未知；认证有效而目录失败；创建快路径检查正在探测 | 前者可创建、后者不能使用默认模型，或命令循环同步执行重型探测 | 准入、探测与消费端集成 | planned |
 | R-11 | 非当前 session 的权限、停止后的 allow_once、客户端文件越界 | 永久授权、权限请求悬挂、历史读取写文件、越界通过 | 包内与原生回放 | planned |
 | R-12 | 脱离源码路径启动 SEA；移走附带目录、禁用网络、平台原生依赖 | 联网补依赖、路径回退掩盖坏包、不同系统产物混用 | 安装包检查 | planned |
-| R-01～R-12 | 每个新增 Agent 在声明支持的系统上运行核心场景 | 无法满足行为规格却声明已支持 | 门控本机真实验证 | planned |
+| R-01～R-12 | 每个新增 Agent 用静态转录和本地替身运行核心场景，并检查目标系统安装包 | 无法满足行为规格却声明已支持 | 确定性回放、本地替身与安装包检查 | planned |
 
 实施验证使用迁移 TECH 列出的 `pnpm -r typecheck`、`lint`、`test`（`@effect/vitest`）与 SEA 打包检查。只有为核查既有行为而运行 Go 对照时才需执行对应 Go 测试；删除 Go 后保留相关静态转录与来源。上表为接入后的验收计划，不能用基础包测试或已有测量替代。
 
@@ -418,9 +418,9 @@ Cursor 的上游 SDK 调用 / 回调转录驱动复用后的真实 SDK 封装与
 | T2：网页远程 Thread | 节点报告、reason/status/create、中心接收与完成、远程 Thread 操作和实时回复，补断线与 ACK 乱序验收 | T1 |
 | T3：Project 与设备管理 | 将同一设备能力、Thread 与历史契约交给 Project Agent；完成 Runtime、事项、设备目录、附件、订阅与 shell 业务 | T2 |
 | T4：既有 Agent 与统一历史 | 接回 Pi、Codex、Kiro，复用 ACP；四种 Agent 的快照、分页与网页统一消费，保留原生 steer 和最低版本 | T1；网页验收依赖 T2 |
-| T5：发布切换 | 各目标系统完整安装包、真实 Agent 支持矩阵、故障复验、构建切换与删除 Go | T2、T3、T4 |
+| T5：发布切换 | 各目标系统完整安装包、Agent 离线行为与本地打包支持矩阵、故障复验、构建切换与删除 Go | T2、T3、T4 |
 
-T1 的复用检查点先于通用 Worker 扩展完成：记录实际保留模块、依赖、宿主和差异，核查 Cursor 历史、跨进程恢复及取消语义。缺少凭据或系统环境的真实验证保持未验证；Cursor 路线不成立时先调整设计，不把回放或 SDK 加载冒充可交付会话。T1 与 T4 各自包含所属 provider 的探测、进程回收和测试，T5 不集中补做这些实现。
+T1 的复用检查点先于通用 Worker 扩展完成：记录实际保留模块、依赖、宿主和差异，核查 Cursor 历史、跨进程恢复及取消语义。行为证据由静态转录、确定性回放与本地替身提供；缺少目标系统安装包检查的组合保持未验证。Cursor 路线不成立时先调整设计。T1 与 T4 各自包含所属 provider 的探测、进程回收和测试，T5 不集中补做这些实现。
 
 Grok、Antigravity 在切换后分别接入和验收，复用已经交付的 ACP、历史和报告链路。它们的原生环境缺口只阻塞各自交付，不扩大 T4 或 T5 的范围。所有异步结果写状态前仍须核对控制代次。
 
@@ -447,10 +447,10 @@ Grok、Antigravity 在切换后分别接入和验收，复用已经交付的 ACP
 | SEA 冷启动 | 完整 Worker 在 macOS arm64 和本机 Linux arm64 虚拟机各 100 个新进程均低于 3 秒，认证 status 最大值分别为 2058.295 / 638.046 ms；已有大量命令的恢复及其他目标未测 | 复现与数据见迁移 TECH；T5 复验完整安装包，超出时先缩减加载 |
 | Codex schema 版本 | 已按官方 0.162.1 重生，并用 9 个既有录制场景的 642 个帧解码检查，见来源说明 | T4 验证接入后的请求、事件、输入恢复及最低版本，字段解码不替代生命周期测试 |
 | Cursor 认证入口 | 已核查上游向 SDK 注入 API key，也有 SDK 登录与 credential store；未验证本机 `agent login` 的订阅凭据可直接复用 | 需审查本期是否接受显式 `CURSOR_API_KEY`；若要求直接复用 CLI 订阅登录，先验证公开接口并补齐设计，不能自动转成另一个计费账号 |
-| Cursor SDK 基线 | 1.0.35 已在 SEA 旁置完整 SDK 的加载检查中使用；跨进程 store、只读历史、真实执行和完整回收未验证 | T1 检查点核查所复用实现及 SDK 行为；Linux arm64 的 glibc 要求和其他系统结果见迁移 TECH |
-| 各 Agent 的探测隔离 | Pi/Kiro 已有空目录建会话取模型路径，但未对六种 Agent 证明禁用用户级 hooks、扩展、MCP、交互登录和临时会话清理 | 每种 Agent 的隔离策略在启用前实测；无法保证时保留 unknown，不伪装为已安全探测 |
-| Grok 原生历史 | 已核查 ACP 接入与 xAI 扩展，未证明独立历史足以恢复输入身份 | 在 Grok 标为 available 前录制；不能验证时保持未验证并说明原因 |
+| Cursor SDK 基线 | 1.0.35 已在 SEA 旁置完整 SDK 的加载检查中使用；跨进程 store、只读历史、执行事件和完整回收使用离线转录与本地替身验证 | T1 检查点核查所复用实现及离线测试覆盖；Linux arm64 的 glibc 要求和其他系统结果见迁移 TECH |
+| 各 Agent 的探测隔离 | Pi/Kiro 已有空目录建会话取模型路径，但未对六种 Agent 证明禁用用户级 hooks、扩展、MCP、交互登录和临时会话清理 | 每种 Agent 的隔离策略在启用前通过静态转录和本地哨兵替身测试；无法保证时保留 unknown |
+| Grok 原生历史 | 已核查 ACP 接入与 xAI 扩展，未证明独立历史足以恢复输入身份 | 在 Grok 标为 available 前用已有静态转录及本地替身验证；不能覆盖时保持未验证并说明原因 |
 | Antigravity 安装与登录 | 上游依赖其托管程序、harness 和 profile；本设计选择用户准备环境，尚缺可复现的独立准备步骤 | 在该 Agent 实施前确定合法来源和本机认证入口；需要托管下载或登录时单独扩展并审查范围 |
-| 新增系统与最低版本 | 只有上游代码证据，没有 Baton 在三个系统上的运行结果 | 实施时维护每系统版本、协议与能力记录，通过后才更新可用声明 |
+| 新增系统与最低版本 | 只有上游代码证据，仍需各组合的静态转录、本地替身与离线安装包检查 | 实施时维护每系统版本、协议、能力与本地检查记录，通过后才更新可用声明 |
 
 审批本设计不等于上述组合已通过验证。实施记录应保存在对应转录说明和测试证据中，长期规格原地更新其最终行为。

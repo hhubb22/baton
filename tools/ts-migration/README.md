@@ -4,7 +4,7 @@
 
 ## 本地开发
 
-`build-batond.mjs`、`run-batond.mjs`、`worker-startup.mjs` 和 `verify-cursor.mjs` 使用 workspace 依赖。在仓库根目录准备 Node 26 和 pnpm，然后安装依赖：
+`build-batond.mjs`、`run-batond.mjs` 和 `worker-startup.mjs` 使用 workspace 依赖。在仓库根目录准备 Node 26 和 pnpm，然后安装依赖：
 
 ```sh
 pnpm install --ignore-scripts
@@ -14,7 +14,7 @@ node tools/ts-migration/run-batond.mjs --help
 
 `build-batond.mjs [输出路径]` 将真实 batond 打包为 CJS，默认输出 `apps/batond/dist/batond.cjs`，SDK 保持外置。`run-batond.mjs [batond 参数...]` 先构建再运行开发 bundle，并向子进程转发 SIGINT/SIGTERM。两者使用执行脚本的 Node；SEA 测量另需支持 `--build-sea` 的官方 Node，macOS 需要系统 `codesign`。
 
-`verify-cursor.mjs [--keep] [--model 原生ID]` 是显式真实 Cursor 门控，需提供 `CURSOR_API_KEY`，会调用真实模型，默认使用原生 `default`。它在临时 workspace 中验证多轮输入、相同命令重试不重发、独立历史、长工具取消，以及长工具运行时 SIGKILL Worker 后的 watchdog 整组回收。随后恢复同一原生会话并发送新输入，核对旧工具副作用文件的时间戳不变。`--keep` 保留临时私有数据供排障；该命令不放入 `pnpm test`。macOS arm64 / SDK 1.0.35 已通过全部这些门控，其他系统组合须分别验证。
+适配器行为验证统一使用上游 SDK 静态转录、确定性回放和本地替身，入口见 [本地 Thread 文档](../../apps/batond/README.md#验证)。多轮输入、输入去重、独立历史、跨进程恢复和取消通过离线测试验证；进程回收使用本地替身进程。测试与验证脚本禁止依赖真实 API Key、在线模型推理或外部真实服务。
 
 ## P0 测量依赖
 
@@ -97,7 +97,7 @@ node tools/ts-migration/windows-processes.mjs
 
 `cursor-sea.mjs` 比较默认入口 bundle、默认入口加平台目录、`/bundled` 入口、`/bundled` 入口加平台目录、完整 SDK 附带目录五种方式。最后一种以可执行文件旁的 `node_modules` 为解析基准，复制 SDK、生产依赖与当前平台包，在临时 HOME、空 PATH 下执行。检查 SDK 导出、临时 SQLite store、tree-sitter Bash 原生解析器和 ripgrep；移动附带目录后必须找不到 SDK。单独运行平台 sandbox helper 的 `--help`，只检查加载能力。
 
-脚本不调用 Agent 执行入口。完整目录方案和 sandbox helper 加载均通过时才输出 `packagingPassed: true` 并以 0 退出。默认入口的动态解析、`/bundled` 的 `bun:sqlite` 依赖及 Linux arm64 helper 所需的 glibc 2.39 均会按实际结果记录；当前 Debian 12/glibc 2.36 的检查退出码为 1。SDK 的持久化、认证、取消与 sandbox 策略仍属于 W/X 的真实验证。SDK 来源和许可见 [`third_party/cursor-sdk`](../../third_party/cursor-sdk/README.md)。
+脚本不调用 Agent 执行入口。完整目录方案和 sandbox helper 加载均通过时才输出 `packagingPassed: true` 并以 0 退出。默认入口的动态解析、`/bundled` 的 `bun:sqlite` 依赖及 Linux arm64 helper 所需的 glibc 2.39 均会按实际结果记录；当前 Debian 12/glibc 2.36 的检查退出码为 1。SDK 的持久化、认证、取消与 sandbox 策略通过静态转录、确定性回放和本地替身验证。SDK 来源和许可见 [`third_party/cursor-sdk`](../../third_party/cursor-sdk/README.md)。
 
 ## 本机 Linux 容器
 
@@ -118,7 +118,7 @@ docker volume rm baton-worker-measure
 rm -rf "$worker_measure_bundle"
 ```
 
-命令要求本机已有 `baton-cursor-env:latest` Linux arm64 镜像，`--pull=never` 和 `--network none` 禁止拉取或联网。只读挂载的 workspace 提供脚本与纯 JS 依赖，预打包入口在容器内不调用 esbuild。Worker 的临时安装目录仍仅含 Linux SEA。该测量只验证 Worker；SDK helper 的 glibc 要求和真实 Cursor 门控分别验收。
+命令要求本机已有 `baton-cursor-env:latest` Linux arm64 镜像，`--pull=never` 和 `--network none` 禁止拉取或联网。只读挂载的 workspace 提供脚本与纯 JS 依赖，预打包入口在容器内不调用 esbuild。Worker 的临时安装目录仍仅含 Linux SEA。该测量只验证 Worker；SDK helper 的 glibc 要求由本地加载检查验证，适配器行为由离线转录与本地替身验证。
 
 P0 的 Linux arm64 测量运行于本机 OrbStack 的 Linux 虚拟机，数据库放在 Docker named volume，而非 macOS bind mount。以下可在相同环境复现；`baton-cursor-env:latest` 为本机已有 Debian 容器镜像，其他环境可显式拉取官方 `node:26.11.1-bookworm-slim` 作为运行底座。运行时仍使用上文缓存的官方 Node。
 

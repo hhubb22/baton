@@ -62,4 +62,4 @@ probe 检查实际 SDK 版本、完整平台资产、helper 可执行性和 `Cur
 
 模块测试覆盖完整前缀与重复正文、一次准备与只读恢复、事件归属、普通 RPC 额度占满时取消，以及真实 ConversationTurn 形状。一条实际子进程 stdio/RPC 测试串接 provider SDK 回放 runner，覆盖 open、独立 history、延迟确认、send、增量、abort 和真实 end；上游原始转录保持不变。
 
-在 `apps/batond` 下运行 `pnpm exec vitest run --config ../../vitest.config.ts src/agents/cursor`，并执行应用 typecheck。真实模型和进程故障门控由 `tools/ts-migration/verify-cursor.mjs` 执行；离线回放不代替该门控。
+在 `apps/batond` 下运行 `pnpm exec vitest run --config ../../vitest.config.ts src/agents/cursor`，并执行应用 typecheck。适配器行为与进程故障验证仅依赖本地静态转录、确定性回放和替身进程，禁止使用真实 API Key、在线模型推理或外部真实服务。

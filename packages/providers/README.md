@@ -67,4 +67,4 @@ run.cancel: Effect<void, CursorAgentSdkRunnerError>
 
 cancel 完成只表示取消请求结束；wait 仍等待 SDK 终态，失败则保留失败。句柄建立前与之后的待处理 delta 均限制为 256，超限以 `run.onDelta` 失败传播。超时、中断调用或 close 均不能作为整个进程树已停止的证据。Worker 的持久输入证据、事件归属、停止预算与进程回收由宿主实现。
 
-离线测试覆盖 SDK runner、原上游异常处理、关闭 SDK 重试和取消后等待原生终态；原生 store、独立历史与跨进程恢复通过显式的 `tools/ts-migration/verify-cursor.mjs` 验证。SDK 1.0.35 的真实多轮、非空独立历史、取消、Worker 崩溃回收及恢复后执行已在 macOS arm64 验证；支持矩阵和复现入口见 [本地 Thread 文档](../../apps/batond/README.md)。离线转录自身不扩大平台支持范围。
+适配器行为验证仅使用 SDK 静态转录、确定性回放与本地替身，覆盖 SDK runner、原上游异常处理、关闭 SDK 重试和取消后等待终态；store、独立历史、跨进程恢复与 Worker 崩溃回收通过本地 SDK / RPC 替身及账本测试验证。测试与验证脚本禁止依赖真实 API Key、在线模型推理或外部真实服务。平台支持范围与本地检查入口见 [本地 Thread 文档](../../apps/batond/README.md)。

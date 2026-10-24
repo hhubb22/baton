@@ -50,4 +50,4 @@ pnpm --filter @baton/batond lint
 pnpm --filter @baton/batond test
 ```
 
-自动化测试使用上游 SDK 转录和本地替身，驱动实际 SDK 封装、RPC、Worker 和 SQLite，无需真实认证或模型调用。行为测试围绕输入不重发、命令去重、停止竞态、未知终态、恢复和提交核查组织。完整入口测量与显式真实 Cursor 验证见 [迁移工具](../../tools/ts-migration/README.md)。真实验证命令会调用模型，在临时工作目录执行受控 shell 操作，不属于日常 `pnpm test`。
+适配器行为验证仅使用上游 SDK 静态转录、确定性回放和本地替身，驱动实际 SDK 封装、RPC、Worker 和 SQLite。测试覆盖输入不重发、命令去重、停止竞态、未知终态、独立历史、跨进程恢复和提交核查，禁止依赖真实 API Key、在线模型推理或外部真实服务。完整入口、SQLite 与本地进程测量见 [迁移工具](../../tools/ts-migration/README.md)。
