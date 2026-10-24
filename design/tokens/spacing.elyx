@@ -26,6 +26,7 @@ export size = tokens {
   control: 32,
   comfortable: 40,
   header: 48,
+  gutter: 8,
   sidebar: 248,
   overview: 320,
   detail: 440,

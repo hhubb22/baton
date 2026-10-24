@@ -103,7 +103,7 @@ export menu = frame {
   border: c.colors.border,
   shadow: {
     drop-shadow: {
-      color: rgb(0%, 0%, 0%, 10%),
+      color: c.colors.shadowFar,
       offset: point(0px, 8px),
       blur-radius: 24px
     }
@@ -607,13 +607,8 @@ export folderPickerBrowse = frame : folderPicker {
 
   footer {
     actions {
-      confirm {
-        fill[0].color: c.colors.accent,
-
-        label {
-          fill[0].color: c.colors.onAccent
-        }
-      }
+      @with-variant(buttons.button)
+      confirm {}
     }
 
     note {
@@ -824,7 +819,7 @@ export folderPickerFailed = frame : folderPickerOffline {
       }
 
       feedback {
-        contents: "MacBook Pro did not return this folder's contents. Retry or go back to allowed folders."
+        contents: "Could not read this folder on MacBook Pro."
       }
 
       parent {

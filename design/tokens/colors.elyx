@@ -4,64 +4,74 @@ export primary = tokens {
 }
 
 // Light is the default theme. Components read only from colors; dark overrides live in colors@dark.elyx.
+// Values come from OKLCH: neutrals share hue 262 at low chroma so surfaces, borders, shadows, and the scrim match the backdrop's cool tone.
+// Text colors used for reading (text, muted, faint, *Text, danger, success) reach 4.5:1 on canvas, surface, and subtle.
 export colors = tokens {
-  // Surfaces: canvas for main area, panel for sidebar and overview, surface for cards/composers/popovers, subtle for hover and pill backgrounds
-  canvas: rgb(98.8%, 98.8%, 98.7%),
-  panel: rgb(96.4%, 96.4%, 96.2%),
+  // Shell: the backdrop image sits under glass; the sidebar reads directly on glass, glassLift raises the overview, raised marks the selected row
+  glass: rgb(100%, 100%, 100%, 66%),
+  glassLift: rgb(100%, 100%, 100%, 50%),
+  glassEdge: rgb(100%, 100%, 100%, 55%),
+  raised: rgb(100%, 100%, 100%, 78%),
+  // Elevation: shadowSoft for controls and rows, shadowNear and shadowFar as the two layers under cards, composers, and popovers; highlight and sheen light solid buttons
+  shadowSoft: rgb(10.2%, 12.3%, 16.1%, 5%),
+  shadowNear: rgb(10.2%, 12.3%, 16.1%, 8%),
+  shadowFar: rgb(10.2%, 12.3%, 16.1%, 14%),
+  highlight: rgb(100%, 100%, 100%, 28%),
+  sheen: rgb(100%, 100%, 100%, 14%),
+  // Surfaces: canvas for content cards, panel for notices and inset areas, surface for cards/composers/popovers, subtle for hover and pill backgrounds
+  canvas: rgb(98.1%, 98.4%, 99%),
+  panel: rgb(95.8%, 96.4%, 97.4%),
   surface: .white,
-  subtle: rgb(94.2%, 94.2%, 94%),
-  hover: rgb(0%, 0%, 0%, 4%),
-  selected: rgb(0%, 0%, 0%, 6%),
-  // Hairline borders: hairline for card and composer outlines paired with soft shadows
-  hairline: rgb(0%, 0%, 0%, 6%),
-  borderSoft: rgb(0%, 0%, 0%, 8%),
-  border: rgb(0%, 0%, 0%, 11%),
-  borderStrong: rgb(0%, 0%, 0%, 16%),
+  subtle: rgb(92.9%, 93.8%, 95.4%),
+  hover: rgb(10.2%, 12.3%, 16.1%, 4%),
+  selected: rgb(10.2%, 12.3%, 16.1%, 7%),
+  // Borders: hairline for card and composer outlines paired with shadows
+  hairline: rgb(10.2%, 12.3%, 16.1%, 7%),
+  borderSoft: rgb(10.2%, 12.3%, 16.1%, 9%),
+  border: rgb(10.2%, 12.3%, 16.1%, 13%),
+  borderStrong: rgb(10.2%, 12.3%, 16.1%, 19%),
   // Text: muted for secondary copy, faint only for placeholders and metadata
-  text: rgb(11.6%, 11.6%, 12%),
-  muted: rgb(40%, 40%, 41%),
-  faint: rgb(56%, 56%, 57%),
-  // Primary user actions: solid blue for send and primary buttons, accentSoft with link text for secondary card actions
-  accent: rgb(17%, 42%, 93%),
-  accentHover: rgb(13%, 36%, 85%),
-  accentPressed: rgb(11%, 31%, 76%),
-  accentSoft: rgb(92%, 95%, 100%),
-  accentSoftHover: rgb(86.5%, 91.5%, 100%),
+  text: rgb(11%, 12.3%, 14.5%),
+  muted: rgb(28.6%, 30.3%, 33.3%),
+  faint: rgb(41.1%, 42.9%, 46.1%),
+  // Accent (blue): send, primary buttons, running state, links, and focus. accentSoft with accentText for secondary card actions
+  accent: rgb(16.5%, 41.2%, 90%),
+  accentHover: rgb(10.4%, 34.9%, 83.2%),
+  accentPressed: rgb(8.5%, 30%, 72.3%),
+  accentSoft: rgb(90.6%, 94.6%, 99.8%),
+  accentText: rgb(15.6%, 36%, 76.2%),
+  accentShadow: rgb(16.5%, 41.2%, 90%, 28%),
   onAccent: .white,
-  // Project Agent: reserved for Project Agent identity, active runs, and recommendations
-  agent: rgb(4.34%, 62.32%, 58.42%),
-  agentText: rgb(0%, 45.24%, 42.24%),
-  agentSoft: rgb(89.94%, 97.31%, 96.3%),
-  onAgent: .white,
-  // Links and focus
-  link: rgb(14%, 40%, 76%),
-  focus: rgb(24%, 52%, 92%),
+  focus: rgb(25.2%, 53%, 93.2%),
+  // Project Agent (teal): reserved for Project Agent identity, active runs, and recommendations
+  agent: rgb(0.7%, 66.4%, 59.4%),
+  agentText: rgb(2.7%, 45.2%, 40.4%),
+  agentSoft: rgb(89.5%, 97.5%, 95.9%),
   // Status
-  info: rgb(15.5%, 51.6%, 83.6%),
-  infoSoft: rgb(91.5%, 95.4%, 99.4%),
-  success: rgb(15%, 54%, 30%),
-  successSoft: rgb(91%, 96.6%, 92.6%),
-  attention: rgb(91%, 41%, 12%),
-  attentionText: rgb(70%, 30%, 6%),
-  attentionSoft: rgb(99.6%, 94.4%, 90.4%),
-  danger: rgb(74.1%, 25.8%, 22.9%),
-  dangerSoft: rgb(100%, 92.9%, 92.6%),
-  // Code and misc
-  code: rgb(95.6%, 95.6%, 95.4%),
-  codeBorder: rgb(0%, 0%, 0%, 7%),
-  disabled: rgb(92.1%, 92.1%, 92.4%),
-  disabledText: rgb(60%, 60%, 61%),
-  selection: rgb(86.2%, 91.4%, 99%),
-  overlay: rgb(0%, 0%, 0%, 28%),
+  success: rgb(9.5%, 47.8%, 23.1%),
+  attention: rgb(93%, 43%, 7.1%),
+  attentionText: rgb(61.6%, 27.3%, 8.6%),
+  attentionSoft: rgb(99.9%, 94.3%, 90.1%),
+  attentionEdge: rgb(93%, 43%, 7.1%, 22%),
+  danger: rgb(74.4%, 18.4%, 18.2%),
+  dangerSoft: rgb(99.8%, 93.3%, 93.1%),
+  // Inverse: the one floating notice that must stand out on a page (dark in light theme, light in dark theme)
+  inverse: rgb(13.5%, 14.6%, 16.8%),
+  onInverse: rgb(97%, 97.5%, 98.2%),
+  onInverseMuted: rgb(68%, 69.5%, 72.5%),
+  // Code and scrim
+  code: rgb(95.8%, 96.4%, 97.4%),
+  codeBorder: rgb(10.2%, 12.3%, 16.1%, 8%),
+  overlay: rgb(10.2%, 12.3%, 16.1%, 32%),
   transparent: .transparent
 }
 
-// Project avatar background hues, rotated in creation order
+// Project avatar background hues, rotated in creation order. Same OKLCH lightness (0.6) so no Project looks louder than another.
 export hues = tokens {
-  slate: rgb(36%, 42%, 52%),
-  amber: rgb(85%, 55%, 15%),
-  violet: rgb(50%, 40%, 80%),
-  green: rgb(30%, 60%, 35%),
-  blue: rgb(25%, 50%, 85%),
-  rose: rgb(80%, 35%, 45%)
+  slate: rgb(45.8%, 50.5%, 58.7%),
+  amber: rgb(70.7%, 42.8%, 6.3%),
+  violet: rgb(52.7%, 43.3%, 77.3%),
+  green: rgb(29.2%, 57.4%, 36.1%),
+  blue: rgb(25.8%, 51.8%, 77.2%),
+  rose: rgb(75.3%, 35.8%, 43.3%)
 }

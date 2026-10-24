@@ -4,14 +4,39 @@ import "foundations/typography.elyx" as t
 import "controls/icons.elyx" as icons
 
 // At most one solid primary button per screen; use secondary or ghost for the rest.
+// Primary carries a top sheen, a 1px highlight, and an accent-tinted shadow; secondary and danger keep a 1px neutral shadow; ghost is flat.
 // Leading icon is hidden by default; set lead.display and select an icon with @with-variant in instances.
 export button = frame {
   title: "Button / Primary",
   width: .auto,
   height: s.size.control,
   layout: {justify-content: .center, align-items: .center, item-gap: 6px},
-  fill: c.colors.accent,
-  corner-radius: s.radius.sm,
+  fill: [
+    c.colors.accent,
+    {
+      linear-gradient: {
+        angle: 180deg,
+        stops: [stop(0%, c.colors.sheen), stop(100%, c.colors.transparent)]
+      }
+    }
+  ],
+  shadow: [
+    {
+      inner-shadow: {
+        color: c.colors.highlight,
+        offset: point(0px, 1px),
+        blur-radius: 0px
+      }
+    },
+    {
+      drop-shadow: {
+        color: c.colors.accentShadow,
+        offset: point(0px, 2px),
+        blur-radius: 6px
+      }
+    }
+  ],
+  corner-radius: s.radius.md,
   padding: [0px, s.space.md],
   children: [lead, label],
 
@@ -34,6 +59,10 @@ export secondary = frame : button {
   left: 160px,
   border[0].color: c.colors.border,
   fill[0].color: c.colors.surface,
+  shadow[0].drop-shadow.blur-radius: 2px,
+  shadow[0].drop-shadow.color: c.colors.shadowNear,
+  shadow[0].inner-shadow.color: c.colors.shadowNear,
+  shadow[1]: .nil,
 
   label {
     fill[0].color: c.colors.text,
@@ -50,14 +79,16 @@ export ghost = frame : button {
   title: "Button / Ghost",
   left: 320px,
   fill[0].color: c.colors.transparent,
-
-  lead {
-    fill[0].color: c.colors.muted
-  }
+  shadow[0]: .nil,
+  shadow[1]: .nil,
 
   label {
     fill[0].color: c.colors.text,
     contents: "View details"
+  }
+
+  lead {
+    fill[0].color: c.colors.muted
   }
 }
 
@@ -67,6 +98,10 @@ export danger = frame : button {
   left: 480px,
   border[0].color: c.colors.border,
   fill[0].color: c.colors.surface,
+  shadow[0].drop-shadow.blur-radius: 2px,
+  shadow[0].drop-shadow.color: c.colors.shadowNear,
+  shadow[0].inner-shadow.color: c.colors.shadowNear,
+  shadow[1]: .nil,
 
   label {
     fill[0].color: c.colors.danger,
@@ -154,7 +189,40 @@ export smallGhost = frame : ghost {
   padding-right: s.space.sm,
 
   label {
+    fill[0].color: c.colors.muted,
     font-size: 12
+  }
+}
+
+@variant
+export smallDanger = frame : danger {
+  title: "Button / Danger small",
+  top: 192px,
+  height: s.size.compact,
+  padding-top: 0px,
+  padding-left: 10px,
+  padding-bottom: 0px,
+  padding-right: 10px,
+
+  label {
+    contents: "Remove",
+    font-size: 12
+  }
+}
+
+@variant
+export smallGhostDanger = frame : smallGhost {
+  title: "Button / Ghost small danger",
+  left: 160px,
+  top: 192px,
+
+  label {
+    fill[0].color: c.colors.danger,
+    contents: "Disconnect device"
+  }
+
+  lead {
+    fill[0].color: c.colors.danger
   }
 }
 
@@ -185,5 +253,35 @@ export iconButtonOn = frame : iconButton {
 
   glyph {
     fill[0].color: c.colors.text
+  }
+}
+
+// Send button: solid accent when the composer has text, idle on subtle while it is empty. Stays clickable in both states.
+export sendButton = frame {
+  title: "Send button",
+  left: 600px,
+  top: 128px,
+  width: s.size.control,
+  height: s.size.control,
+  layout: {justify-content: .center, align-items: .center},
+  fill: c.colors.accent,
+  corner-radius: s.radius.pill,
+  children: glyph,
+
+  glyph = asset : icons.arrowUp {
+    width: 16px,
+    height: 16px,
+    fill[0].color: c.colors.onAccent
+  }
+}
+
+@variant
+export sendButtonIdle = frame : sendButton {
+  title: "Send button / Empty composer",
+  left: 648px,
+  fill[0].color: c.colors.subtle,
+
+  glyph {
+    fill[0].color: c.colors.muted
   }
 }

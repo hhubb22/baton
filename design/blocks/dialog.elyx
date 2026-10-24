@@ -15,14 +15,14 @@ export dialog = frame {
   shadow: [
     {
       drop-shadow: {
-        color: rgb(0%, 0%, 0%, 12%),
+        color: c.colors.shadowFar,
         offset: point(0px, 12px),
         blur-radius: 32px
       }
     },
     {
       drop-shadow: {
-        color: rgb(0%, 0%, 0%, 6%),
+        color: c.colors.shadowNear,
         offset: point(0px, 2px),
         blur-radius: 6px
       }

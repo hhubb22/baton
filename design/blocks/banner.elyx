@@ -70,26 +70,40 @@ export bannerPaused = frame : banner {
   glyph {}
 }
 
+// The one problem on the page that needs you: an inverted floating notice instead of a tinted box
 @variant
 export bannerAttention = frame : banner {
   title: "Banner / Needs attention",
   top: 192px,
-  border[0].color: rgb(91%, 41%, 12%, 18%),
-  fill[0].color: c.colors.attentionSoft,
+  corner-radius: 16px,
+  padding-top: 14px,
+  padding-left: 18px,
+  padding-bottom: 14px,
+  padding-right: 14px,
+  border[0].color: c.colors.transparent,
+  fill[0].color: c.colors.inverse,
+  shadow[0].drop-shadow.blur-radius: 3px,
+  shadow[0].drop-shadow.color: c.colors.shadowNear,
+  shadow[0].drop-shadow.offset: [0px, 1px],
+  shadow[1].drop-shadow.blur-radius: 32px,
+  shadow[1].drop-shadow.color: c.colors.shadowFar,
+  shadow[1].drop-shadow.offset: [0px, 12px],
+
+  copy {
+    detail {
+      fill[0].color: c.colors.onInverseMuted,
+      contents: "Sign in to ChatGPT on Ubuntu Dev to continue. Your messages and replies are saved."
+    }
+
+    heading {
+      fill[0].color: c.colors.onInverse,
+      contents: "ChatGPT sign-in expired on Ubuntu Dev"
+    }
+  }
 
   action {
     label {
       contents: "Retry"
-    }
-  }
-
-  copy {
-    detail {
-      contents: "Sign in to ChatGPT on Ubuntu Dev, then retry. Your messages and replies are saved."
-    }
-
-    heading {
-      contents: "ChatGPT sign-in expired on Ubuntu Dev"
     }
   }
 

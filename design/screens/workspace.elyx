@@ -1,7 +1,8 @@
 import "tokens/colors.elyx" as c
+import "controls/button.elyx" as buttons
+import "controls/icons.elyx" as icons
 import "blocks/workspace-shell.elyx" as shells
 import "blocks/sidebar.elyx" as sidebars
-import "controls/icons.elyx" as icons
 import "blocks/login-shell.elyx" as signIn
 import "blocks/enroll-dialog.elyx" as enroll
 
@@ -96,7 +97,7 @@ signOutFailed = frame : shells.firstVisit {
           connections[0].target: signingOut,
 
           label {
-            contents: "Retry sign-out"
+            contents: "Sign out"
           }
         }
 
@@ -109,7 +110,7 @@ signOutFailed = frame : shells.firstVisit {
         }
 
         detail {
-          contents: "Baton could not be reached to confirm sign-out. Your browser may still be signed in. Check your connection and try again."
+          contents: "Baton could not be reached, so you may still be signed in on this browser. Check your connection and try again."
         }
 
         title {
@@ -230,12 +231,9 @@ firstDeviceSetup = frame : shells.firstVisit {
   main {
     content {
       welcome {
+        @with-variant(buttons.secondary)
         action {
-          fill[0].color: c.colors.surface,
-
-          label {
-            fill[0].color: c.colors.text
-          }
+          left: .nil
         }
       }
     }

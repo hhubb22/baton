@@ -4,7 +4,7 @@ import "foundations/typography.elyx" as t
 import "controls/status.elyx" as status
 
 // Thread row: each Thread opened or messaged by the Project Agent occupies one row in the main conversation and opens its detail on the right when clicked.
-// Status dot, title, directory tag, trailing device · Agent, and state: running shows the current turn's elapsed timer; other states show only the state name.
+// Status dot, title, directory name in faint mono, trailing device · Agent, and state: running shows the current turn's elapsed timer; other states show only the state name.
 export threadLine = frame {
   title: "Thread row / Running",
   width: s.size.measure,
@@ -42,15 +42,12 @@ export threadLine = frame {
     lineTag = frame {
       height: 20px,
       layout: {align-items: .center},
-      fill: c.colors.accentSoft,
-      corner-radius: s.radius.inner,
-      padding: [0px, 6px],
       children: lineTagText,
 
       lineTagText = text : t.mono {
         contents: "baton-ps160",
         line-height: 1,
-        fill[0].color: c.colors.link
+        fill[0].color: c.colors.faint
       }
     }
   }
@@ -70,7 +67,7 @@ export threadLine = frame {
       contents: "03:12",
       line-height: 1,
       align: .right,
-      fill[0].color: c.colors.info
+      fill[0].color: c.colors.accentText
     }
   }
 }
@@ -85,7 +82,7 @@ export threadLineIdle = frame : threadLine {
       fill[0].color: c.colors.muted,
       contents: "Idle",
       font-size: 13,
-      font-family: "PingFang SC"
+      font-family: "Inter"
     }
 
     lineMeta {
@@ -95,10 +92,7 @@ export threadLineIdle = frame : threadLine {
 
   lineLead {
     lineTag {
-      fill[0].color: c.colors.subtle,
-
       lineTagText {
-        fill[0].color: c.colors.muted,
         contents: "baton"
       }
     }
@@ -127,7 +121,7 @@ export threadLineQueued = frame : threadLine {
       width: .auto,
       contents: "Waiting for device",
       font-size: 13,
-      font-family: "PingFang SC"
+      font-family: "Inter"
     }
 
     lineMeta {
@@ -137,10 +131,7 @@ export threadLineQueued = frame : threadLine {
 
   lineLead {
     lineTag {
-      fill[0].color: c.colors.subtle,
-
       lineTagText {
-        fill[0].color: c.colors.muted,
         contents: "baton"
       }
     }
@@ -168,19 +159,11 @@ export threadLineStopped = frame : threadLine {
       fill[0].color: c.colors.muted,
       contents: "Stopped",
       font-size: 13,
-      font-family: "PingFang SC"
+      font-family: "Inter"
     }
   }
 
   lineLead {
-    lineTag {
-      fill[0].color: c.colors.subtle,
-
-      lineTagText {
-        fill[0].color: c.colors.muted
-      }
-    }
-
     lineMark {
       @with-variant(status.dotStopped)
       lineDot {
@@ -199,8 +182,6 @@ export threadLineSelected = frame : threadLineIdle {
 
   lineLead {
     lineTag {
-      fill[0].color: c.colors.surface,
-
       lineTagText {
         contents: "baton-ps160"
       }
@@ -218,63 +199,36 @@ export threadLineSelected = frame : threadLineIdle {
   }
 }
 
-// Thread card: groups Threads opened or messaged in a single Project Agent turn into one card, one row per Thread.
+// Thread group: Threads opened or messaged in a single Project Agent turn, one row per Thread on a branch rail. No card surface.
 // Card heading summarizes the turn's action; top-right shows the most notable state among them.
 export threadCard = frame {
   title: "Thread card / Running",
   top: 320px,
   width: s.size.measure,
   layout: {direction: .column, item-gap: s.space.xs},
-  fill: c.colors.surface,
-  border: c.colors.hairline,
-  shadow: [
-    {
-      drop-shadow: {
-        color: rgb(0%, 0%, 0%, 3%),
-        offset: point(0px, 1px),
-        blur-radius: 2px
-      }
-    },
-    {
-      drop-shadow: {
-        color: rgb(0%, 0%, 0%, 4%),
-        offset: point(0px, 4px),
-        blur-radius: 16px
-      }
-    }
-  ],
-  corner-radius: 14px,
-  padding: [s.space.md, s.space.sm, s.space.sm],
   children: [cardHead, cardRows],
 
   cardHead = frame {
     width: 100%,
-    height: 28px,
+    height: 24px,
     layout: {justify-content: .space-between, align-items: .center},
-    padding: [0px, s.space.sm],
     children: [cardTitle, cardState],
 
     cardTitle = frame {
       layout: {align-items: .center, item-gap: 6px},
       children: cardName,
 
-      cardName = text : t.heading {
+      cardName = text : t.label {
         contents: "Opened 2 chats",
-        font-size: 14,
-        line-height: 1
+        line-height: 1,
+        fill[0].color: c.colors.muted
       }
     }
 
-    cardState = frame {
-      layout: {align-items: .center, item-gap: 6px},
-      children: [cardDot, cardStateText],
-
-      cardDot = shape : status.dot {}
-
-      cardStateText = text : t.label {
+    cardState = frame : status.label {
+      caption {
         contents: "1 running",
-        line-height: 1,
-        fill[0].color: c.colors.info
+        line-height: 1
       }
     }
   }
@@ -282,6 +236,8 @@ export threadCard = frame {
   cardRows = frame {
     width: 100%,
     layout: {direction: .column},
+    border: {color: c.colors.borderSoft, sides: .left},
+    padding: [0px, 0px, 0px, 6px],
     children: [row1, row2],
 
     row1 = frame : threadLine {
@@ -326,16 +282,13 @@ export threadCardIdle = frame : threadCard {
   }
 
   cardHead {
+    @with-variant(status.labelIdle)
     cardState {
-      cardStateText {
-        fill[0].color: c.colors.muted,
+      caption {
         contents: "All replied"
       }
 
-      @with-variant(status.dotIdle)
-      cardDot {
-        left: .nil
-      }
+      left: .nil
     }
   }
 }

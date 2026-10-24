@@ -15,7 +15,7 @@ export avatar = frame {
   initial = text : t.caption {
     contents: "B",
     font-size: 11,
-    font-style: "Semibold",
+    font-style: "SemiBold",
     line-height: 1,
     fill[0].color: c.primary.white
   }

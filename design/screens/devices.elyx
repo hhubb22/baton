@@ -1,5 +1,10 @@
+use "resources/fonts/Inter-Medium.otf"
+use "resources/fonts/Inter-Regular.otf"
+use "resources/fonts/Inter-SemiBold.otf"
+
 import "tokens/colors.elyx" as c
 import "tokens/spacing.elyx" as s
+import "resources/assets/backdrop-day-frost.jpg" as backdrop
 import "foundations/typography.elyx" as t
 import "blocks/sidebar.elyx" as sidebars
 import "controls/icons.elyx" as icons
@@ -18,11 +23,14 @@ export devices = frame {
   top: 0px,
   width: s.size.screenWidth,
   height: s.size.screenHeight,
-  layout: {direction: .row},
-  fill: c.colors.canvas,
+  layout: {item-gap: s.size.gutter},
+  fill: [{image: {ref: backdrop}}, c.colors.glass],
+  padding: [s.size.gutter, s.size.gutter, s.size.gutter, 0px],
   children: [sidebar, main],
 
   sidebar = frame : sidebars.sidebar {
+    height: 100%,
+
     top {
       projects {
         @with-variant(sidebars.projectRowLive)
@@ -42,6 +50,25 @@ export devices = frame {
     width: 100%,
     height: 100%,
     layout: {direction: .column, align-items: .center},
+    fill: c.colors.canvas,
+    border: c.colors.hairline,
+    shadow: [
+      {
+        drop-shadow: {
+          color: c.colors.shadowNear,
+          offset: point(0px, 1px),
+          blur-radius: 3px
+        }
+      },
+      {
+        drop-shadow: {
+          color: c.colors.shadowFar,
+          offset: point(0px, 12px),
+          blur-radius: 40px
+        }
+      }
+    ],
+    corner-radius: s.radius.lg,
     children: [head, content],
 
     head = frame {
@@ -55,7 +82,7 @@ export devices = frame {
       headTitle = text : t.label {
         contents: "Devices",
         font-size: 14,
-        font-style: "Semibold"
+        font-style: "SemiBold"
       }
     }
 
@@ -93,7 +120,7 @@ export devices = frame {
 
           introText = text : t.small {
             width: 100%,
-            contents: "Connect the computers where your code lives. The project assistant uses your default device first, then another available computer.",
+            contents: "Connect the computers where your code lives. The project assistant uses your default device first, then another online device.",
             fill[0].color: c.colors.muted
           }
         }
@@ -114,9 +141,7 @@ export devices = frame {
       list = frame {
         width: 100%,
         layout: {direction: .column},
-        fill: c.colors.surface,
-        border: c.colors.border,
-        corner-radius: 10px,
+        border: {color: c.colors.borderSoft, sides: .top},
         children: [mac, macDetail, windows, ubuntu, ubuntuDetail],
 
         mac = frame : rows.deviceOffline {
@@ -131,7 +156,6 @@ export devices = frame {
           width: 100%,
           display: .none,
           layout: {direction: .column, item-gap: 20px},
-          fill: c.colors.panel,
           border: {color: c.colors.borderSoft, sides: .bottom},
           padding: [s.space.xs, s.space.lg, 20px, 60px],
           children: [macNotice, macActions],
@@ -151,11 +175,10 @@ export devices = frame {
               }
             }
 
-            macRevoke = frame : buttons.smallGhost {
+            macRevoke = frame : buttons.smallGhostDanger {
               connections[0].target: devicesDisconnect,
 
               label {
-                fill[0].color: c.colors.danger,
                 contents: "Disconnect device"
               }
             }
@@ -170,14 +193,14 @@ export devices = frame {
 
         ubuntu = frame : rows.deviceRuntime {
           width: 100%,
-          fill[0].color: c.colors.panel
+          fill[0].color: c.colors.selected
         }
 
         ubuntuDetail = frame {
           width: 100%,
           layout: {direction: .column, item-gap: 20px},
-          fill: c.colors.panel,
-          padding: [s.space.xs, s.space.lg, 20px, 60px],
+          border: {color: c.colors.borderSoft, sides: .bottom},
+          padding: [s.space.lg, s.space.lg, 20px, 60px],
           children: [deviceNotice, columns, exec, detailActions],
 
           deviceNotice = frame : feedback.deviceNotice {
@@ -276,10 +299,8 @@ export devices = frame {
           exec = frame {
             width: 100%,
             layout: {direction: .column, item-gap: 10px},
-            fill: c.colors.surface,
-            border: c.colors.borderSoft,
-            corner-radius: s.radius.md,
-            padding: [14px, s.space.lg],
+            border: {color: c.colors.borderSoft, sides: .top},
+            padding: [s.space.lg, 0px, 0px],
             children: [execToggle, warning, permissionFeedback],
 
             permissionFeedback = text : t.caption {
@@ -304,9 +325,6 @@ export devices = frame {
             warning = frame {
               width: 100%,
               layout: {item-gap: s.space.sm},
-              fill: c.colors.attentionSoft,
-              corner-radius: s.radius.sm,
-              padding: [s.space.sm, 10px],
               children: [warnGlyph, warnText],
 
               warnGlyph = asset : icons.shield {
@@ -317,7 +335,7 @@ export devices = frame {
 
               warnText = text : t.caption {
                 width: 100%,
-                contents: "Commands run directly on Ubuntu Dev without a sandbox. Baton does not inspect them.",
+                contents: "Commands run directly on Ubuntu Dev without a sandbox.",
                 fill[0].color: c.colors.attentionText
               }
             }
@@ -341,11 +359,10 @@ export devices = frame {
               }
             }
 
-            revoke = frame : buttons.smallGhost {
+            revoke = frame : buttons.smallGhostDanger {
               connections[0].target: devicesDisconnect,
 
               label {
-                fill[0].color: c.colors.danger,
                 contents: "Disconnect device"
               }
             }
@@ -353,7 +370,7 @@ export devices = frame {
             revokeNote = text : t.caption {
               width: 100%,
               display: .none,
-              contents: "Removes this computer from Baton. If it is offline, agents still running on it will keep running locally. Past records are kept.",
+              contents: "Disconnects this device from Baton. If it is offline, agents still running on it keep running locally. Past chats are kept.",
               fill[0].color: c.colors.faint
             }
           }
@@ -428,7 +445,7 @@ devicesDisconnect = frame : devices {
 
       content {
         message {
-          contents: "Removes Ubuntu Dev from Baton. If it is offline, agents still running on it will keep running locally. Past chats and records are kept. This does not undo file changes or commands already run."
+          contents: "Disconnects Ubuntu Dev from Baton. If it is offline, agents still running on it will keep running locally. Past chats and records are kept. This does not undo file changes or commands already run."
         }
       }
 
@@ -493,22 +510,6 @@ devicesSyncing = frame : devices {
   main {
     content {
       list {
-        ubuntu {
-          state {
-            stateText {
-              fill[0].color: c.colors.muted,
-              contents: "Syncing · last seen now"
-            }
-
-            @with-variant(status.dotQueued)
-            mark {}
-          }
-
-          agents {
-            contents: "Checking availability…"
-          }
-        }
-
         ubuntuDetail {
           exec {
             display: .none
@@ -530,12 +531,25 @@ devicesSyncing = frame : devices {
             display: .visible
           }
         }
+
+        ubuntu {
+          agents {
+            contents: "Checking availability…"
+          }
+
+          @with-variant(status.labelQueued)
+          state {
+            caption {
+              contents: "Syncing…"
+            }
+          }
+        }
       }
 
       intro {
         introCopy {
           introTitle {
-            contents: "3 devices · 1 online · 1 syncing"
+            contents: "3 devices, 1 online, 1 syncing"
           }
         }
       }
@@ -567,49 +581,43 @@ devicesMissing = frame : devices {
     content {
       list {
         ubuntuDetail {
+          exec {
+            display: .none
+          }
+
           columns {
             agentsCol {
-              agentLine3 {
-                note {
-                  fill[0].color: c.colors.attentionText,
-                  contents: "Not installed"
-                }
-
-                check {
-                  display: .none
-                }
-              }
-
-              agentLine2 {
-                note {
-                  fill[0].color: c.colors.attentionText,
-                  contents: "Program not installed"
-                }
-
-                check {
-                  display: .none
-                }
-              }
-
-              agentLine1 {
-                note {
-                  fill[0].color: c.colors.attentionText,
-                  contents: "ChatGPT sign-in expired"
-                }
-
-                check {
-                  display: .none
-                }
-              }
-
               capabilityNote {
                 contents: "Codex 0.42 · GPT-5 (default)\nNew chats unavailable until signed in.\nPi models unavailable until installed."
               }
-            }
-          }
 
-          exec {
-            display: .none
+              @with-variant(rows.capabilityMissing)
+              agentLine3 {
+                note {
+                  contents: "Not installed"
+                }
+
+                left: .nil
+              }
+
+              @with-variant(rows.capabilityMissing)
+              agentLine2 {
+                note {
+                  contents: "Not installed"
+                }
+
+                left: .nil
+              }
+
+              @with-variant(rows.capabilityMissing)
+              agentLine1 {
+                note {
+                  contents: "ChatGPT sign-in expired"
+                }
+
+                left: .nil
+              }
+            }
           }
 
           deviceNotice {
@@ -631,15 +639,8 @@ devicesMissing = frame : devices {
             contents: "Setup needed"
           }
 
-          state {
-            stateText {
-              fill[0].color: c.colors.text,
-              contents: "Online"
-            }
-
-            @with-variant(status.dotOnline)
-            mark {}
-          }
+          @with-variant(status.labelOnline)
+          state {}
         }
       }
     }
@@ -656,29 +657,29 @@ devicesDefaultOffline = frame : devicesDisconnect {
     form {
       footer {
         actions {
-          cancel {
-            connections[0].target: devicesOfflineSelect
-          }
-
+          @with-variant(buttons.button)
           confirm {
-            fill[0].color: c.colors.accent,
             connections[0].target: devicesOfflineDefaultSaved,
 
             label {
               contents: "Save default device"
             }
           }
+
+          cancel {
+            connections[0].target: devicesOfflineSelect
+          }
+        }
+      }
+
+      content {
+        message {
+          contents: "MacBook Pro is offline (last seen 13:52). New chats on it wait until it reconnects; projects can use another online device."
         }
       }
 
       heading {
         contents: "Use MacBook Pro as default?"
-      }
-
-      content {
-        message {
-          contents: "MacBook Pro is offline, last seen at 13:52. New chats on it wait until it reconnects. Projects can use another available computer. You can still save it as your default."
-        }
       }
     }
   }
@@ -687,18 +688,6 @@ devicesDefaultOffline = frame : devicesDisconnect {
     content {
       list {
         mac {
-          identity {
-            copy {
-              nameLine {
-                defaultTag {
-                  display: .none
-                }
-              }
-            }
-          }
-        }
-
-        windows {
           identity {
             copy {
               nameLine {
@@ -891,11 +880,12 @@ devicesPermissionFailed = frame : devices {
       list {
         ubuntuDetail {
           exec {
+            @with-variant(t.captionAttention)
             permissionFeedback {
-              fill[0].color: c.colors.attentionText,
               connections[0].target: devicesPermissionSaving,
+              left: .nil,
               display: .visible,
-              contents: "Could not save because Baton could not be reached. Commands are still allowed. Click the switch to try again."
+              contents: "Could not save. Commands are still allowed."
             }
           }
         }
@@ -932,7 +922,7 @@ devicesDisconnecting = frame : devicesDisconnect {
 
       content {
         message {
-          contents: "Baton is blocking new connections and closing the current connection. Wait for confirmation before treating this device as disconnected."
+          contents: "Disconnecting Ubuntu Dev from Baton…"
         }
       }
 
@@ -957,7 +947,7 @@ devicesDisconnectFailed = frame : devicesDisconnect {
             connections[0].target: devicesDisconnecting,
 
             label {
-              contents: "Retry disconnection"
+              contents: "Try again"
             }
           }
         }
@@ -1050,7 +1040,7 @@ devicesDefaultRemoved = frame : devicesDisconnected {
         }
 
         detail {
-          contents: "Ubuntu Dev was your default and has been removed. No replacement has been selected. Past chats and records are kept."
+          contents: "Ubuntu Dev was disconnected. Choose another default device for new chats and projects."
         }
 
         heading {
@@ -1363,10 +1353,11 @@ devicesPermissionEnableFailed = frame : devicesPermissionSaved {
       list {
         ubuntuDetail {
           exec {
+            @with-variant(t.captionAttention)
             permissionFeedback {
-              fill[0].color: c.colors.attentionText,
               connections[0].target: devicesPermissionEnabling,
-              contents: "Baton could not be reached. Command permission is still off. Click the switch to try again."
+              left: .nil,
+              contents: "Could not save. Commands are still off."
             }
           }
         }

@@ -1,3 +1,7 @@
+use "resources/fonts/Inter-SemiBold.otf"
+use "resources/fonts/Inter-Regular.otf"
+use "resources/fonts/Inter-Medium.otf"
+
 import "tokens/colors.elyx" as c
 import "tokens/spacing.elyx" as s
 import "foundations/typography.elyx" as t
@@ -18,22 +22,6 @@ settings = frame : page.projectPage {
   left: 0px,
   top: 0px,
   overrides: [insert(scrim, after = page.projectPage.overview)],
-
-  main {
-    dock {
-      composer {
-        toolbar {
-          send {
-            fill[0].color: c.colors.subtle,
-
-            sendGlyph {
-              fill[0].color: c.colors.text
-            }
-          }
-        }
-      }
-    }
-  }
 
   scrim = frame {
     left: 0px,
@@ -101,12 +89,12 @@ settings = frame : page.projectPage {
           width: 100%,
 
           input {
+            height: 64px,
+
+            @with-variant(t.small)
             value {
-              fill[0].color: c.colors.text,
               contents: "Milestone 1: run real work end-to-end across devices and return replies with attachments."
             }
-
-            height: 64px
           }
 
           helper {
@@ -171,23 +159,21 @@ settings = frame : page.projectPage {
         }
 
         archiveRow = frame : dialogs.settingRow {
+          @with-variant(buttons.smallDanger)
           action {
             connections[0].target: archiveConfirm,
 
             label {
-              fill[0].color: c.colors.danger,
               contents: "Archive"
             }
 
             @with-variant(icons.archive)
-            lead {
-              fill[0].color: c.colors.danger
-            }
+            lead {}
           }
 
           copy {
             rowText {
-              contents: "Stops the project assistant and withdraws open questions. Chats and memory are kept. Existing threads continue."
+              contents: "Stops the project assistant and closes open questions. Chats and memory are kept. Existing threads continue."
             }
 
             rowTitle {
@@ -206,22 +192,6 @@ archiveConfirm = frame : page.projectPage {
   left: 1728px,
   top: 0px,
   overrides: [insert(scrim, after = page.projectPage.overview)],
-
-  main {
-    dock {
-      composer {
-        toolbar {
-          send {
-            fill[0].color: c.colors.subtle,
-
-            sendGlyph {
-              fill[0].color: c.colors.text
-            }
-          }
-        }
-      }
-    }
-  }
 
   scrim = frame {
     left: 0px,
@@ -248,7 +218,7 @@ archiveConfirm = frame : page.projectPage {
 
       content {
         message {
-          contents: "Stops the project assistant and withdraws 1 open question. Chats and memory are kept. Existing threads continue."
+          contents: "Stops the project assistant and closes 1 open question. Chats and memory are kept. Existing threads continue."
         }
       }
 
@@ -296,12 +266,23 @@ saveFailed = frame : settings {
 
   scrim {
     form {
+      footer {
+        actions {
+          overrides: [insert(retry, after = .nil)]
+        }
+
+        @with-variant(t.captionDanger)
+        note {
+          contents: "Changes not saved"
+        }
+      }
+
       content {
         general {
           titleField {
+            @with-variant(t.captionDanger)
             helper {
-              fill[0].color: c.colors.danger,
-              contents: "Name not saved. Baton could not be reached. Retry to save your changes.",
+              contents: "Could not save the project name. Check your connection and try again.",
               display: .visible
             }
 
@@ -311,17 +292,6 @@ saveFailed = frame : settings {
               }
             }
           }
-        }
-      }
-
-      footer {
-        note {
-          fill[0].color: c.colors.danger,
-          contents: "Changes not saved"
-        }
-
-        actions {
-          overrides: [insert(retry, after = .nil)]
         }
       }
     }
@@ -416,7 +386,7 @@ pausedSettings = frame : settings {
 
             copy {
               rowText {
-                contents: "3 inputs are saved. Threads and questions remain available. Resume to process the saved inputs."
+                contents: "3 messages are waiting. You can still use individual threads and answer questions."
               }
 
               rowTitle {
@@ -433,24 +403,21 @@ pausedSettings = frame : settings {
     summary {
       runtime {
         runtimeCard {
+          runtimeNote {
+            contents: "3 messages waiting until you resume."
+          }
+
           runtimeLine {
+            @with-variant(status.labelIdle)
             runtimeState {
-              runtimeStateText {
-                fill[0].color: c.colors.muted,
+              caption {
                 contents: "Paused"
               }
-
-              @with-variant(status.dotIdle)
-              runtimeDot {}
             }
 
             runtimeDevice {
               display: .none
             }
-          }
-
-          runtimeNote {
-            contents: "3 inputs saved until you resume."
           }
         }
       }
@@ -500,7 +467,7 @@ resumedSettings = frame : settings {
           pauseRow {
             copy {
               rowText {
-                contents: "Project resumed. The assistant can now process the 3 saved inputs on an available device."
+                contents: "Project resumed. The project assistant will read the 3 waiting messages on an available device."
               }
             }
           }
@@ -544,11 +511,6 @@ archiveFailed = frame : archiveConfirm {
   scrim {
     form {
       footer {
-        note {
-          fill[0].color: c.colors.danger,
-          contents: "Baton could not save the archive request. Try again."
-        }
-
         layout.direction: .column,
         layout.align-items: .end,
 
@@ -558,6 +520,11 @@ archiveFailed = frame : archiveConfirm {
               contents: "Try again"
             }
           }
+        }
+
+        @with-variant(t.captionDanger)
+        note {
+          contents: "Could not archive this project. Check your connection and try again."
         }
       }
     }
@@ -643,24 +610,21 @@ archivedSettings = frame : settings {
     summary {
       runtime {
         runtimeCard {
+          runtimeNote {
+            contents: "Project assistant stopped. 1 open question closed."
+          }
+
           runtimeLine {
+            @with-variant(status.labelIdle)
             runtimeState {
-              runtimeStateText {
-                fill[0].color: c.colors.muted,
+              caption {
                 contents: "Archived"
               }
-
-              @with-variant(status.dotIdle)
-              runtimeDot {}
             }
 
             runtimeDevice {
               display: .none
             }
-          }
-
-          runtimeNote {
-            contents: "Project assistant stopped. 1 question withdrawn."
           }
         }
       }
@@ -688,7 +652,7 @@ archivedSettings = frame : settings {
     header {
       lead {
         state {
-          stateText {
+          caption {
             contents: "Archived"
           }
         }

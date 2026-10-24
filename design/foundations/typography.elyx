@@ -1,31 +1,43 @@
 import "tokens/colors.elyx" as c
 
-// UI font: PingFang SC in design files, system UI font stack on the web. Weights: Regular / Medium / Semibold.
+// UI font: Inter (resources/fonts) with PingFang SC as the CJK fallback on the web. Weights: Regular / Medium / SemiBold.
+// Letter spacing follows Inter's size-based tracking; captions use tabular figures so times and counts line up.
 // Code font: Paper Mono.
 export body = text {
   top: 120px,
   fill: c.colors.text,
   contents: "Body · Project Agent replies and user messages",
   font-size: 14,
-  font-family: "PingFang SC",
+  font-family: "Inter",
   font-style: "Regular",
-  line-height: 1.6
+  line-height: 1.6,
+  letter-spacing: -0.6%
+}
+
+// Placeholder text in composers and inputs; switch to body once the user has typed
+@variant
+export placeholder = text : body {
+  top: 88px,
+  contents: "Placeholder · Composer and input prompts",
+  fill[0].color: c.colors.faint
 }
 
 export title = text : body {
   top: 0px,
   contents: "Title · Page heading",
   font-size: 20,
-  font-style: "Semibold",
-  line-height: 1.4
+  font-style: "SemiBold",
+  line-height: 1.4,
+  letter-spacing: -1.7%
 }
 
 export heading = text : body {
   top: 48px,
   contents: "Heading · Dialog and section title",
   font-size: 15,
-  font-style: "Semibold",
-  line-height: 1.45
+  font-style: "SemiBold",
+  line-height: 1.45,
+  letter-spacing: -0.9%
 }
 
 export bodyMedium = text : body {
@@ -38,7 +50,16 @@ export small = text : body {
   top: 200px,
   contents: "Small · Lists, forms, and descriptions",
   font-size: 13,
-  line-height: 1.5
+  line-height: 1.5,
+  letter-spacing: -0.3%
+}
+
+// Input placeholder; switch to small once the field has a value
+@variant
+export smallPlaceholder = text : small {
+  top: 220px,
+  contents: "Small placeholder · Empty inputs",
+  fill[0].color: c.colors.faint
 }
 
 export label = text : body {
@@ -46,7 +67,8 @@ export label = text : body {
   contents: "Label · Buttons, row titles, and field names",
   font-size: 13,
   font-style: "Medium",
-  line-height: 1.45
+  line-height: 1.45,
+  letter-spacing: -0.3%
 }
 
 export caption = text : body {
@@ -54,7 +76,26 @@ export caption = text : body {
   contents: "Caption · Timestamps, devices, and versions",
   font-size: 12,
   line-height: 1.45,
+  letter-spacing: 0,
+  font-features: .tabular-figures,
   fill[0].color: c.colors.muted
+}
+
+// Field errors and failure notes
+@variant
+export captionDanger = text : caption {
+  top: 298px,
+  contents: "Caption danger · Field errors",
+  fill[0].color: c.colors.danger
+}
+
+// Warnings and saves that need the user to act
+@variant
+export captionAttention = text : caption {
+  left: 240px,
+  top: 298px,
+  contents: "Caption attention · Warnings",
+  fill[0].color: c.colors.attentionText
 }
 
 export captionMedium = text : caption {

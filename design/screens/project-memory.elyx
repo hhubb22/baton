@@ -1,3 +1,8 @@
+use "resources/fonts/Inter-Regular.otf"
+use "resources/fonts/Inter-Medium.otf"
+use "resources/fonts/Inter-SemiBold.otf"
+
+import "controls/status.elyx" as status
 import "tokens/colors.elyx" as c
 import "foundations/typography.elyx" as t
 import "blocks/project-page.elyx" as page
@@ -43,8 +48,8 @@ emptyMemory = frame : memory {
       overrides: [
         insert(empty, after = .nil),
         remove(overviews.overviewMemory.mem4),
-        remove(overviews.overviewMemory.mem2),
         remove(overviews.overviewMemory.mem3),
+        remove(overviews.overviewMemory.mem2),
         remove(overviews.overviewMemory.mem1)
       ]
     }
@@ -60,7 +65,7 @@ emptyMemory = frame : memory {
 
   empty = text : t.small {
     width: 100%,
-    contents: "No project memory yet. Add a note for the assistant to use with your next message.",
+    contents: "No project memory yet. Add a note for the project assistant to use with your next message.",
     fill[0].color: c.colors.muted
   }
 }
@@ -71,22 +76,6 @@ addMemory = frame : memory {
   left: 3456px,
   top: 0px,
   overrides: [insert(scrim, after = page.projectPage.overview)],
-
-  main {
-    dock {
-      composer {
-        toolbar {
-          send {
-            fill[0].color: c.colors.subtle,
-
-            sendGlyph {
-              fill[0].color: c.colors.text
-            }
-          }
-        }
-      }
-    }
-  }
 
   scrim = frame {
     left: 0px,
@@ -138,8 +127,8 @@ addMemory = frame : memory {
         width: 100%,
         height: 112px,
 
+        @with-variant(t.small)
         value {
-          fill[0].color: c.colors.text,
           contents: "Release verification runs on Windows and Ubuntu before merging."
         }
       }
@@ -175,7 +164,7 @@ editMemory = frame : addMemory {
 
       content {
         helper {
-          contents: "v2 · project assistant · Today 14:05\nSave creates a new version; the assistant reads it with your next message."
+          contents: "v2 · project assistant · Today 14:05\nSave creates a new version; the project assistant reads it with your next message."
         }
 
         editor {
@@ -227,25 +216,25 @@ saveFailedMemory = frame : editMemory {
 
   scrim {
     form {
-      content {
-        helper {
-          fill[0].color: c.colors.danger,
-          contents: "Baton could not save this note. Your edits are kept. Try again."
-        }
-      }
-
       footer {
-        note {
-          fill[0].color: c.colors.danger,
-          contents: "Not saved"
-        }
-
         actions {
           confirm {
             label {
               contents: "Try again"
             }
           }
+        }
+
+        @with-variant(t.captionDanger)
+        note {
+          contents: "Not saved"
+        }
+      }
+
+      content {
+        @with-variant(t.captionDanger)
+        helper {
+          contents: "Could not save this note. Check your connection and try again."
         }
       }
     }
@@ -262,15 +251,15 @@ conflictMemory = frame : editMemory {
     form {
       footer {
         actions {
+          @with-variant(buttons.secondary)
           confirm {
-            border[0].color: c.colors.border,
-            fill[0].color: c.colors.surface,
             connections[0].target: reviewMemory,
 
             label {
-              fill[0].color: c.colors.link,
               contents: "Review latest"
             }
+
+            left: .nil
           }
         }
 
@@ -282,8 +271,9 @@ conflictMemory = frame : editMemory {
       content {
         overrides: [insert(latest, after = addMemory.scrim.form.editor)],
 
+        @with-variant(t.captionAttention)
         helper {
-          fill[0].color: c.colors.attentionText,
+          left: .nil,
           contents: "Your edit was based on v2. Review v3 and update your draft before saving again."
         }
       }
@@ -337,7 +327,6 @@ reviewMemory = frame : conflictMemory {
 
       content {
         helper {
-          fill[0].color: c.colors.muted,
           contents: "Editing from v3. Your revised note becomes v4 when saved."
         }
 
@@ -394,25 +383,21 @@ archivedMemory = frame : memory {
     summary {
       runtime {
         runtimeCard {
-          runtimeLine {
-            runtimeState {
-              runtimeStateText {
-                fill[0].color: c.colors.muted,
-                contents: "Archived"
-              }
+          runtimeNote {
+            contents: "Project assistant stopped. Threads remain available."
+          }
 
-              runtimeDot {
-                fill[0].color: c.colors.faint
+          runtimeLine {
+            @with-variant(status.labelIdle)
+            runtimeState {
+              caption {
+                contents: "Archived"
               }
             }
 
             runtimeDevice {
               display: .none
             }
-          }
-
-          runtimeNote {
-            contents: "Project assistant stopped. Threads remain available."
           }
         }
       }
@@ -443,7 +428,7 @@ archivedMemory = frame : memory {
     header {
       lead {
         state {
-          stateText {
+          caption {
             contents: "Archived"
           }
         }

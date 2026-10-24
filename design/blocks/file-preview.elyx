@@ -82,14 +82,14 @@ export filePreview = frame {
   shadow: [
     {
       drop-shadow: {
-        color: rgb(0%, 0%, 0%, 12%),
+        color: c.colors.shadowFar,
         offset: point(0px, 12px),
         blur-radius: 32px
       }
     },
     {
       drop-shadow: {
-        color: rgb(0%, 0%, 0%, 6%),
+        color: c.colors.shadowNear,
         offset: point(0px, 2px),
         blur-radius: 6px
       }
@@ -496,7 +496,7 @@ export filePreviewDenied = frame : filePreview {
       }
 
       emptyHeading {
-        contents: "Folder is outside allowed paths"
+        contents: "Folder is outside allowed folders"
       }
 
       display: .visible,
@@ -690,7 +690,7 @@ export filePreviewBinary = frame : filePreviewMissing {
       }
 
       emptyDetail {
-        contents: "Baton only reads limited text previews. Open capture.bin on Windows Desktop, or choose a text file."
+        contents: "Open capture.bin directly on Windows Desktop, or choose a text file."
       }
     }
   }
@@ -715,7 +715,7 @@ export filePreviewFailed = frame : filePreviewMissing {
       }
 
       emptyDetail {
-        contents: "Windows Desktop did not return reconnect_test.go. Retry to read it again, or choose another file."
+        contents: "Could not read reconnect_test.go from Windows Desktop. Try again, or choose another file."
       }
 
       emptyHeading {

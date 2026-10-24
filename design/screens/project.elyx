@@ -108,16 +108,13 @@ offline = frame : page.projectPage {
     summary {
       runtime {
         runtimeCard {
-          runtimeLine {
-            runtimeState {
-              runtimeStateText {
-                fill[0].color: c.colors.muted,
-                contents: "Waiting for device"
-              }
+          runtimeNote {
+            contents: "All 3 devices are offline. Waiting for a computer with ChatGPT signed in."
+          }
 
-              @with-variant(status.dotQueued)
-              runtimeDot {}
-            }
+          runtimeLine {
+            @with-variant(status.labelQueued)
+            runtimeState {}
 
             runtimeDevice {
               display: .none,
@@ -126,10 +123,6 @@ offline = frame : page.projectPage {
                 contents: "Idle"
               }
             }
-          }
-
-          runtimeNote {
-            contents: "All 3 devices are offline. Waiting for a computer with ChatGPT signed in."
           }
         }
       }
@@ -159,7 +152,7 @@ offline = frame : page.projectPage {
                   width: .auto,
                   contents: "No report since 14:18",
                   font-size: 13,
-                  font-family: "PingFang SC"
+                  font-family: "Inter"
                 }
               }
 
@@ -175,16 +168,13 @@ offline = frame : page.projectPage {
           }
 
           cardHead {
+            @with-variant(status.labelQueued)
             cardState {
-              cardStateText {
-                fill[0].color: c.colors.muted,
+              caption {
                 contents: "Device offline"
               }
 
-              @with-variant(status.dotQueued)
-              cardDot {
-                left: .nil
-              }
+              left: .nil
             }
           }
         }
@@ -230,7 +220,7 @@ offline = frame : page.projectPage {
     max-width: s.size.measure,
 
     label {
-      contents: "14:20 · Ubuntu Dev went offline after finishing its reply"
+      contents: "Ubuntu Dev went offline after finishing its reply"
     }
 
     @with-variant(icons.offline)
@@ -247,40 +237,25 @@ offline = frame : page.projectPage {
 
 attention = frame : page.projectPage {
   title: "Project · Needs attention",
-  caption: "ChatGPT sign-in expired. Messages stay saved until you sign in and retry.",
+  caption: "ChatGPT sign-in expired. The banner above the composer is the one place that explains it and offers Retry; the header and overview only show the state.",
   left: 3456px,
   top: 0px,
 
   overview {
-    body {
-      overrides: [insert(systemRow, after = overviews.overview.body.needsHead)],
-
-      needsHead {
-        lead {
-          count {
-            contents: "2"
-          }
-        }
-      }
-    }
-
     summary {
       runtime {
         runtimeCard {
-          runtimeLine {
-            runtimeState {
-              runtimeStateText {
-                fill[0].color: c.colors.attentionText,
-                contents: "Needs attention"
-              }
-
-              @with-variant(status.dotAttention)
-              runtimeDot {}
-            }
+          runtimeNote {
+            display: .none
           }
 
-          runtimeNote {
-            contents: "Sign in to ChatGPT on Ubuntu Dev, then retry in the main chat."
+          runtimeLine {
+            @with-variant(status.labelAttention)
+            runtimeState {
+              caption {
+                contents: "Needs sign-in"
+              }
+            }
           }
         }
       }
@@ -294,8 +269,7 @@ attention = frame : page.projectPage {
 
     transcript {
       overrides: [
-        insert(failNote, after = page.projectPage.main.transcript.agent1),
-        insert(laterMessage, after = failNote),
+        insert(laterMessage, after = page.projectPage.main.transcript.agent1),
         remove(page.projectPage.main.transcript.typing),
         remove(page.projectPage.main.transcript.day)
       ]
@@ -341,21 +315,6 @@ attention = frame : page.projectPage {
     }
   }
 
-  failNote = frame : conv.systemNote {
-    width: 100%,
-    max-width: s.size.measure,
-
-    label {
-      fill[0].color: c.colors.attentionText,
-      contents: "15:20 · ChatGPT sign-in expired on Ubuntu Dev"
-    }
-
-    @with-variant(icons.alert)
-    glyph {
-      fill[0].color: c.colors.attention
-    }
-  }
-
   laterMessage = frame : conv.userMessagePending {
     width: 100%,
     max-width: s.size.measure,
@@ -374,37 +333,6 @@ attention = frame : page.projectPage {
   }
 
   failBanner = frame : banners.bannerAttention {}
-
-  systemRow = frame : overviews.threadRow {
-    width: 100%,
-
-    sub {
-      dir {
-        display: .none
-      }
-
-      place {
-        contents: "Ubuntu Dev"
-      }
-    }
-
-    line {
-      time {
-        contents: "15:20"
-      }
-
-      lead {
-        name {
-          contents: "ChatGPT sign-in expired"
-        }
-
-        @with-variant(status.dotAttention)
-        mark {
-          left: .nil
-        }
-      }
-    }
-  }
 }
 
 paused = frame : page.projectPage {
@@ -417,15 +345,16 @@ paused = frame : page.projectPage {
     summary {
       runtime {
         runtimeCard {
+          runtimeNote {
+            contents: "3 messages waiting until you resume."
+          }
+
           runtimeLine {
+            @with-variant(status.labelIdle)
             runtimeState {
-              runtimeStateText {
-                fill[0].color: c.colors.muted,
+              caption {
                 contents: "Paused"
               }
-
-              @with-variant(status.dotIdle)
-              runtimeDot {}
             }
 
             runtimeDevice {
@@ -435,10 +364,6 @@ paused = frame : page.projectPage {
                 contents: "Idle"
               }
             }
-          }
-
-          runtimeNote {
-            contents: "3 messages waiting until you resume."
           }
         }
       }
@@ -493,7 +418,7 @@ paused = frame : page.projectPage {
     max-width: s.size.measure,
 
     label {
-      contents: "15:02 · Kaken He paused the project"
+      contents: "Kaken He paused the project"
     }
 
     @with-variant(icons.pause)
@@ -517,24 +442,17 @@ noEligibleDevice = frame : page.projectPage {
     summary {
       runtime {
         runtimeCard {
-          runtimeLine {
-            runtimeState {
-              runtimeStateText {
-                fill[0].color: c.colors.muted,
-                contents: "Waiting for device"
-              }
+          runtimeNote {
+            contents: "ChatGPT is unavailable on all 3 devices. Messages stay saved."
+          }
 
-              @with-variant(status.dotQueued)
-              runtimeDot {}
-            }
+          runtimeLine {
+            @with-variant(status.labelQueued)
+            runtimeState {}
 
             runtimeDevice {
               display: .none
             }
-          }
-
-          runtimeNote {
-            contents: "ChatGPT is unavailable on all 3 devices. Messages stay saved."
           }
         }
       }
@@ -591,7 +509,7 @@ noEligibleDevice = frame : page.projectPage {
       }
 
       detail {
-        contents: "MacBook Pro is offline. Sign in to ChatGPT on Ubuntu Dev. The project assistant is not installed on Windows Desktop. Your message stays saved."
+        contents: "Sign in to ChatGPT on Ubuntu Dev or bring MacBook Pro online to continue. Your messages are saved."
       }
     }
   }
@@ -631,17 +549,16 @@ stopping = frame : page.projectPage {
     summary {
       runtime {
         runtimeCard {
+          runtimeNote {
+            contents: "Stop requested. Threads continue on their devices."
+          }
+
           runtimeLine {
             runtimeState {
-              runtimeStateText {
-                fill[0].color: c.colors.muted,
+              caption {
                 contents: "Stopping"
               }
             }
-          }
-
-          runtimeNote {
-            contents: "Stop requested. Threads continue on their devices."
           }
         }
       }
@@ -653,8 +570,17 @@ stopping = frame : page.projectPage {
       overrides: [insert(stopBanner, after = .nil)]
     }
 
+    transcript {
+      typing {
+        label {
+          contents: "Waiting for Ubuntu Dev to confirm the assistant has stopped…"
+        }
+      }
+    }
+
     header {
       lead {
+        @with-variant(status.labelIdle)
         state {
           stop {
             connections[0].target: stopping,
@@ -664,21 +590,9 @@ stopping = frame : page.projectPage {
             }
           }
 
-          stateText {
-            fill[0].color: c.colors.muted,
+          caption {
             contents: "Stopping on Ubuntu Dev…"
           }
-
-          @with-variant(status.dotIdle)
-          mark {}
-        }
-      }
-    }
-
-    transcript {
-      typing {
-        label {
-          contents: "Waiting for Ubuntu Dev to confirm the assistant has stopped…"
         }
       }
     }
@@ -717,24 +631,17 @@ stopped = frame : page.projectPage {
     summary {
       runtime {
         runtimeCard {
-          runtimeLine {
-            runtimeState {
-              runtimeStateText {
-                fill[0].color: c.colors.muted,
-                contents: "Idle"
-              }
+          runtimeNote {
+            contents: "Current run stopped. Existing threads continue."
+          }
 
-              @with-variant(status.dotIdle)
-              runtimeDot {}
-            }
+          runtimeLine {
+            @with-variant(status.labelIdle)
+            runtimeState {}
 
             runtimeDevice {
               display: .none
             }
-          }
-
-          runtimeNote {
-            contents: "Current run stopped. Existing threads continue."
           }
         }
       }
@@ -778,7 +685,7 @@ stopped = frame : page.projectPage {
     max-width: s.size.measure,
 
     label {
-      contents: "15:04 · You stopped the project assistant"
+      contents: "You stopped the project assistant"
     }
 
     @with-variant(icons.stop)
@@ -830,7 +737,7 @@ resumed = frame : page.projectPage {
     max-width: s.size.measure,
 
     label {
-      contents: "15:08 · You resumed the project"
+      contents: "You resumed the project"
     }
   }
 }
@@ -844,8 +751,8 @@ archived = frame : page.projectPage {
   overview {
     body {
       overrides: [
-        remove(overviews.overview.body.needsHead),
-        remove(overviews.overview.body.needsRow)
+        remove(overviews.overview.body.needsRow),
+        remove(overviews.overview.body.needsHead)
       ],
 
       activeRow1 {
@@ -862,24 +769,21 @@ archived = frame : page.projectPage {
     summary {
       runtime {
         runtimeCard {
+          runtimeNote {
+            contents: "Project assistant stopped. 1 open question closed."
+          }
+
           runtimeLine {
+            @with-variant(status.labelIdle)
             runtimeState {
-              runtimeStateText {
-                fill[0].color: c.colors.muted,
+              caption {
                 contents: "Archived"
               }
-
-              @with-variant(status.dotIdle)
-              runtimeDot {}
             }
 
             runtimeDevice {
               display: .none
             }
-          }
-
-          runtimeNote {
-            contents: "Assistant stopped. 1 open question withdrawn."
           }
         }
       }
@@ -919,7 +823,7 @@ archived = frame : page.projectPage {
 
       lead {
         state {
-          stateText {
+          caption {
             contents: "Archived"
           }
         }
@@ -960,7 +864,7 @@ archived = frame : page.projectPage {
     max-width: s.size.measure,
 
     label {
-      contents: "15:12 · You archived this project · 1 question withdrawn"
+      contents: "You archived this project · 1 open question closed"
     }
 
     @with-variant(icons.archive)
@@ -974,7 +878,7 @@ archived = frame : page.projectPage {
 
     copy {
       detail {
-        contents: "Past chats and memory are read-only. Open an existing thread to continue work there."
+        contents: "Main chat and project memory are read-only. Work in individual threads continues."
       }
 
       heading {
@@ -997,9 +901,8 @@ projectMenu = frame : page.projectPage {
   main {
     header {
       trail {
-        more {
-          fill[0].color: c.colors.selected
-        }
+        @with-variant(buttons.iconButtonOn)
+        more {}
       }
     }
   }
@@ -1063,13 +966,12 @@ projectMenu = frame : page.projectPage {
       }
     }
 
-    archiveItem = frame : buttons.secondary {
+    archiveItem = frame : buttons.danger {
       width: 100%,
       border[0].width: 0px,
       connections[0].target: settingsScreen.archiveConfirm,
 
       label {
-        fill[0].color: c.colors.danger,
         contents: "Archive project"
       }
     }
@@ -1097,8 +999,8 @@ archivedProjects = frame : page.projectPage {
         remove(page.projectPage.main.transcript.typing),
         remove(page.projectPage.main.transcript.agent0),
         remove(page.projectPage.main.transcript.user1),
-        remove(page.projectPage.main.transcript.user0),
         remove(page.projectPage.main.transcript.agent1),
+        remove(page.projectPage.main.transcript.user0),
         remove(page.projectPage.main.transcript.day)
       ],
       layout.justify-content: .start
@@ -1279,24 +1181,17 @@ reported = frame : page.projectPage {
     summary {
       runtime {
         runtimeCard {
-          runtimeLine {
-            runtimeState {
-              runtimeStateText {
-                fill[0].color: c.colors.muted,
-                contents: "Idle"
-              }
+          runtimeNote {
+            contents: "Both thread replies are saved."
+          }
 
-              @with-variant(status.dotIdle)
-              runtimeDot {}
-            }
+          runtimeLine {
+            @with-variant(status.labelIdle)
+            runtimeState {}
 
             runtimeDevice {
               display: .none
             }
-          }
-
-          runtimeNote {
-            contents: "Both thread replies are saved."
           }
         }
       }

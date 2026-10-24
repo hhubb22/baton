@@ -1,4 +1,9 @@
+use "resources/fonts/Inter-Regular.otf"
+use "resources/fonts/Inter-Medium.otf"
+use "resources/fonts/Inter-SemiBold.otf"
+
 import "tokens/colors.elyx" as c
+import "controls/button.elyx" as buttons
 import "tokens/spacing.elyx" as s
 import "foundations/typography.elyx" as t
 import "blocks/project-page.elyx" as page
@@ -18,22 +23,6 @@ create = frame : page.projectPage {
   top: 0px,
   overrides: [insert(scrim, after = page.projectPage.overview)],
 
-  main {
-    dock {
-      composer {
-        toolbar {
-          send {
-            fill[0].color: c.colors.subtle,
-
-            sendGlyph {
-              fill[0].color: c.colors.text
-            }
-          }
-        }
-      }
-    }
-  }
-
   scrim = frame {
     left: 0px,
     top: 0px,
@@ -47,17 +36,13 @@ create = frame : page.projectPage {
     form = frame : dialogs.dialog {
       footer {
         actions {
+          @with-variant(buttons.button)
           confirm {
-            border[0].color: c.colors.transparent,
-            fill[0].color: c.colors.accent,
             connections[0].target: creating,
 
             label {
-              fill[0].color: c.colors.onAccent,
               contents: "Create project"
             }
-
-            border[0].width: 0px
           }
         }
 
@@ -99,15 +84,15 @@ create = frame : page.projectPage {
       goalField = frame : fields.optionalText {
         width: 100%,
 
-        input {
-          value {
-            fill[0].color: c.colors.text,
-            contents: "Run the full test suite across all three OSes before every release and return logs as attachments"
-          }
-        }
-
         helper {
           display: .none
+        }
+
+        input {
+          @with-variant(t.small)
+          value {
+            contents: "Run the full test suite across all three OSes before every release and return logs as attachments"
+          }
         }
       }
 
@@ -165,15 +150,15 @@ created = frame : page.projectPage {
       overrides: [
         insert(noTasks, after = .nil),
         remove(overviews.overview.body.recentMore),
-        remove(overviews.overview.body.recentRow2),
         remove(overviews.overview.body.queuedRow),
-        remove(overviews.overview.body.recentRow1),
         remove(overviews.overview.body.queuedHead),
-        remove(overviews.overview.body.activeRow2),
         remove(overviews.overview.body.recentHead),
-        remove(overviews.overview.body.activeHead),
+        remove(overviews.overview.body.activeRow2),
+        remove(overviews.overview.body.recentRow2),
         remove(overviews.overview.body.needsHead),
         remove(overviews.overview.body.needsRow),
+        remove(overviews.overview.body.activeHead),
+        remove(overviews.overview.body.recentRow1),
         remove(overviews.overview.body.activeRow1)
       ]
     }
@@ -229,11 +214,11 @@ created = frame : page.projectPage {
     transcript {
       overrides: [
         insert(empty, after = .nil),
-        remove(page.projectPage.main.transcript.typing),
-        remove(page.projectPage.main.transcript.agent0),
-        remove(page.projectPage.main.transcript.user1),
         remove(page.projectPage.main.transcript.user0),
         remove(page.projectPage.main.transcript.agent1),
+        remove(page.projectPage.main.transcript.user1),
+        remove(page.projectPage.main.transcript.agent0),
+        remove(page.projectPage.main.transcript.typing),
         remove(page.projectPage.main.transcript.day)
       ],
       layout.justify-content: .center
@@ -257,7 +242,7 @@ created = frame : page.projectPage {
         }
 
         state {
-          stateText {
+          caption {
             contents: "Not started yet"
           }
         }
@@ -322,7 +307,7 @@ created = frame : page.projectPage {
 
     emptyHint = text : t.caption {
       width: 100%,
-      contents: "Ask the assistant to run tests, fix bugs, or check logs on your connected computers.",
+      contents: "Assign work across your devices. Ask the project assistant to run tests, fix bugs, or check logs on any connected device.",
       align: .center,
       fill[0].color: c.colors.faint
     }
@@ -330,7 +315,7 @@ created = frame : page.projectPage {
 
   noTasks = text : t.small {
     width: 100%,
-    contents: "No chats in this project yet. Ask the assistant to start work.",
+    contents: "No chats in this project yet. Ask the project assistant to start work.",
     fill[0].color: c.colors.muted
   }
 }
@@ -345,21 +330,14 @@ nameRequired = frame : create {
     form {
       content {
         titleField {
+          @with-variant(t.captionDanger)
           helper {
-            fill[0].color: c.colors.danger,
-            contents: "Enter a project name.",
-            display: .visible
+            display: .visible,
+            contents: "Enter a project name."
           }
 
-          input {
-            border[0].color: c.colors.danger,
-
-            value {
-              contents: ""
-            }
-
-            border[0].width: 1
-          }
+          @with-variant(inputs.error)
+          input {}
         }
       }
     }
@@ -403,25 +381,22 @@ creationFailed = frame : create {
   scrim {
     form {
       footer {
-        note {
-          fill[0].color: c.colors.danger,
-          width: 100%,
-          contents: "Baton could not save this project. Your entries are kept. Try again.",
-          display: .visible
-        }
+        layout.direction: .column,
+        layout.align-items: .end,
 
         actions {
           confirm {
-            connections[0].target: creating,
-
             label {
               contents: "Try again"
             }
           }
         }
 
-        layout.direction: .column,
-        layout.align-items: .end
+        @with-variant(t.captionDanger)
+        note {
+          display: .visible,
+          contents: "Could not create this project. Check your connection and try again."
+        }
       }
     }
   }

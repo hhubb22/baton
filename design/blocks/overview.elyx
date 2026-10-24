@@ -6,7 +6,8 @@ import "controls/button.elyx" as buttons
 import "controls/status.elyx" as status
 import "controls/tabs.elyx" as tabs
 
-// Overview Thread row: status dot, title (opening of first message), and last activity time on the first line; device, Agent, and directory basename on the second line
+// Overview Thread row: status dot and title (opening of first message) on the first line; device and directory basename on the second line.
+// Last activity time appears only on hover. The Agent name is left out; the detail panel shows it
 export threadRow = frame {
   title: "Overview row / Running",
   width: 288px,
@@ -38,6 +39,7 @@ export threadRow = frame {
     }
 
     time = text : t.caption {
+      display: .none,
       contents: "12:00",
       fill[0].color: c.colors.faint
     }
@@ -50,7 +52,7 @@ export threadRow = frame {
     children: [place, dir],
 
     place = text : t.caption {
-      contents: "Windows Desktop · Codex ·",
+      contents: "Windows Desktop ·",
       fill[0].color: c.colors.faint
     }
 
@@ -68,6 +70,19 @@ export threadRowSelected = frame : threadRow {
   title: "Overview row / Selected",
   top: 64px,
   fill[0].color: c.colors.selected
+}
+
+@variant
+export threadRowHover = frame : threadRow {
+  title: "Overview row / Hover",
+  top: 296px,
+  fill[0].color: c.colors.hover,
+
+  line {
+    time {
+      display: .visible
+    }
+  }
 }
 
 // Memory entry: content, version, author, and timestamp
@@ -131,8 +146,9 @@ export overview = frame {
   width: s.size.overview,
   height: s.size.screenHeight,
   layout: {direction: .column},
-  fill: c.colors.panel,
-  border: {color: c.colors.borderSoft, sides: .left},
+  fill: c.colors.glassLift,
+  border: c.colors.glassEdge,
+  corner-radius: s.radius.lg,
   children: [head, summary, tabBar, body],
 
   head = frame {
@@ -196,10 +212,6 @@ export overview = frame {
       runtimeCard = frame {
         width: 100%,
         layout: {direction: .column, item-gap: s.space.xxs},
-        fill: c.colors.surface,
-        border: c.colors.borderSoft,
-        corner-radius: s.radius.md,
-        padding: [10px, s.space.md],
         children: [runtimeLine, runtimeNote],
 
         runtimeLine = frame {
@@ -222,17 +234,7 @@ export overview = frame {
             }
           }
 
-          runtimeState = frame {
-            layout: {align-items: .center, item-gap: 6px},
-            children: [runtimeDot, runtimeStateText],
-
-            runtimeDot = shape : status.dotAgent {}
-
-            runtimeStateText = text : t.caption {
-              contents: "Running",
-              fill[0].color: c.colors.agentText
-            }
-          }
+          runtimeState = frame : status.labelAgent {}
         }
 
         runtimeNote = text : t.caption {
@@ -298,7 +300,7 @@ export overview = frame {
         }
 
         place {
-          contents: "Decision · Check PS-158 migration"
+          contents: "Question · Check PS-158 migration"
         }
       }
 
@@ -349,7 +351,7 @@ export overview = frame {
 
       sub {
         place {
-          contents: "Ubuntu Dev · Pi ·"
+          contents: "Ubuntu Dev ·"
         }
 
         dir {
@@ -385,7 +387,7 @@ export overview = frame {
         }
 
         place {
-          contents: "MacBook Pro · Codex ·"
+          contents: "MacBook Pro ·"
         }
       }
 
@@ -434,7 +436,7 @@ export overview = frame {
         }
 
         place {
-          contents: "Ubuntu Dev · Codex ·"
+          contents: "Ubuntu Dev ·"
         }
       }
 
@@ -465,7 +467,7 @@ export overview = frame {
         }
 
         place {
-          contents: "Windows Desktop · Command · exit 0"
+          contents: "Windows Desktop · exit 0"
         }
       }
 
@@ -491,7 +493,6 @@ export overview = frame {
 
     recentMore = frame : buttons.smallGhost {
       label {
-        fill[0].color: c.colors.muted,
         contents: "Show 10 more"
       }
     }
@@ -511,16 +512,16 @@ export overviewMemory = frame : overview {
       insert(mem3, after = mem2),
       insert(mem4, after = mem3),
       insert(addMemory, after = mem4),
-      remove(overview.body.recentMore),
-      remove(overview.body.recentRow1),
+      remove(overview.body.recentRow2),
       remove(overview.body.recentHead),
+      remove(overview.body.queuedRow),
       remove(overview.body.queuedHead),
+      remove(overview.body.activeRow2),
+      remove(overview.body.recentMore),
       remove(overview.body.activeHead),
       remove(overview.body.activeRow1),
-      remove(overview.body.activeRow2),
+      remove(overview.body.recentRow1),
       remove(overview.body.needsRow),
-      remove(overview.body.recentRow2),
-      remove(overview.body.queuedRow),
       remove(overview.body.needsHead)
     ]
   }
@@ -592,15 +593,14 @@ export overviewMemory = frame : overview {
   }
 
   addMemory = frame : buttons.smallGhost {
-    label {
-      fill[0].color: c.colors.muted,
-      contents: "Add memory"
-    }
-
     lead {
       width: 13px,
       height: 13px,
       display: .visible
+    }
+
+    label {
+      contents: "Add memory"
     }
   }
 }

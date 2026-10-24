@@ -41,7 +41,7 @@ export attachmentRow = frame {
 
   action = text : t.caption {
     contents: "View",
-    fill[0].color: c.colors.link
+    fill[0].color: c.colors.accentText
   }
 }
 
@@ -116,7 +116,7 @@ export threadMessage = frame {
       fill: c.colors.subtle,
       shadow: {
         drop-shadow: {
-          color: rgb(0%, 0%, 0%, 4%),
+          color: c.colors.shadowSoft,
           offset: point(0px, 1px),
           blur-radius: 2px
         }
@@ -151,7 +151,7 @@ export threadMessage = frame {
 
     withdraw = text : t.caption {
       contents: "Cancel",
-      fill[0].color: c.colors.link
+      fill[0].color: c.colors.accentText
     }
   }
 }
@@ -205,26 +205,8 @@ export threadReply = frame {
   attachments = frame {
     width: 100%,
     layout: {direction: .column},
-    fill: c.colors.surface,
-    border: c.colors.hairline,
-    shadow: [
-      {
-        drop-shadow: {
-          color: rgb(0%, 0%, 0%, 3%),
-          offset: point(0px, 1px),
-          blur-radius: 2px
-        }
-      },
-      {
-        drop-shadow: {
-          color: rgb(0%, 0%, 0%, 4%),
-          offset: point(0px, 4px),
-          blur-radius: 16px
-        }
-      }
-    ],
-    corner-radius: 14px,
-    padding: [s.space.xxs, s.space.md],
+    border: {color: c.colors.borderSoft, sides: .left},
+    padding: [0px, 0px, 0px, 14px],
     children: [first, second],
 
     first = frame : attachmentRow {
@@ -385,7 +367,7 @@ export liveOutput = frame {
     label = text : t.small {
       contents: "Running · 03:12",
       line-height: 1,
-      fill[0].color: c.colors.info
+      fill[0].color: c.colors.accentText
     }
   }
 
@@ -488,7 +470,7 @@ export liveOutputGap = frame : liveOutput {
       lines {
         gap {
           gapText {
-            contents: "Earlier output is no longer available on this computer"
+            contents: "Earlier output is no longer available on Windows Desktop"
           }
 
           display: .visible,
@@ -520,7 +502,7 @@ export selectionMenu = frame {
   border: c.colors.border,
   shadow: {
     drop-shadow: {
-      color: rgb(0%, 0%, 0%, 8%),
+      color: c.colors.shadowNear,
       offset: point(0px, 4px),
       blur-radius: 12px
     }
@@ -554,7 +536,24 @@ export threadDetail = frame {
   height: s.size.screenHeight,
   layout: {direction: .column},
   fill: c.colors.surface,
-  border: {color: c.colors.borderSoft, sides: .left},
+  border: c.colors.hairline,
+  shadow: [
+    {
+      drop-shadow: {
+        color: c.colors.shadowNear,
+        offset: point(0px, 1px),
+        blur-radius: 3px
+      }
+    },
+    {
+      drop-shadow: {
+        color: c.colors.shadowFar,
+        offset: point(0px, 12px),
+        blur-radius: 40px
+      }
+    }
+  ],
+  corner-radius: s.radius.lg,
   children: [head, body, footer],
 
   head = frame {
@@ -581,20 +580,14 @@ export threadDetail = frame {
       name = text : t.label {
         contents: "Run reconnect tests on Windows",
         font-size: 14,
-        font-style: "Semibold"
+        font-style: "SemiBold"
       }
 
-      state = frame {
-        layout: {align-items: .center, item-gap: 6px},
-        padding: [0px, 0px, 0px, 6px],
-        children: [mark, stateText],
-
-        mark = shape : status.dotIdle {}
-
-        stateText = text : t.caption {
-          contents: "Idle",
-          fill[0].color: c.colors.muted
-        }
+      state = frame : status.labelIdle {
+        padding-top: 0px,
+        padding-left: 6px,
+        padding-bottom: 0px,
+        padding-right: 0px
       }
     }
 
@@ -633,17 +626,7 @@ export threadDetail = frame {
 
     item = frame : attention.attentionCard {
       width: 100%,
-      overrides: [remove(attention.attentionCard.threadRef)],
-
-      head {
-        time {
-          display: .none
-        }
-      }
-
-      heading {
-        contents: "1 Windows reconnect test failed. What next?"
-      }
+      overrides: [remove(attention.attentionCard.threadRef)]
     }
 
     message2 = frame : conv.userMessage {
@@ -745,20 +728,6 @@ export threadDetailRunning = frame : threadDetail {
     composer {}
   }
 
-  head {
-    lead {
-      state {
-        stateText {
-          fill[0].color: c.colors.info,
-          contents: "Running"
-        }
-
-        @with-variant(status.dot)
-        mark {}
-      }
-    }
-  }
-
   body {
     item {
       display: .none
@@ -782,6 +751,13 @@ export threadDetailRunning = frame : threadDetail {
 
     message2 {
       display: .visible
+    }
+  }
+
+  head {
+    lead {
+      @with-variant(status.label)
+      state {}
     }
   }
 }
@@ -823,7 +799,7 @@ export threadDetailStopping = frame : threadDetailRunning {
   head {
     lead {
       state {
-        stateText {
+        caption {
           contents: "Stopping…"
         }
       }
@@ -865,16 +841,13 @@ export threadDetailOffline = frame : threadDetailRunning {
 
   head {
     lead {
+      @with-variant(status.labelIdle)
       state {
-        stateText {
-          fill[0].color: c.colors.muted,
+        caption {
           contents: "Last seen running"
         }
 
-        @with-variant(status.dotIdle)
-        mark {
-          left: .nil
-        }
+        left: .nil
       }
     }
   }
@@ -923,7 +896,7 @@ export threadDetailArchived = frame : threadDetail {
   head {
     lead {
       state {
-        stateText {
+        caption {
           contents: "Archived"
         }
       }
@@ -1008,14 +981,8 @@ export threadDetailWaiting = frame : threadDetail {
 
   head {
     lead {
-      state {
-        stateText {
-          contents: "Waiting for device"
-        }
-
-        @with-variant(status.dotQueued)
-        mark {}
-      }
+      @with-variant(status.labelQueued)
+      state {}
 
       name {
         contents: "Run reconnect tests on MacBook"
@@ -1042,11 +1009,11 @@ export threadDetailUnknown = frame : threadDetail {
 
       copy {
         detail {
-          contents: "Codex restarted while sending. Check the activity before sending your message again. Baton will not resend it automatically."
+          contents: "Codex restarted while sending. Check the output above before sending your message again."
         }
 
         heading {
-          contents: "Not sure if Codex received your message"
+          contents: "Not sure if Codex received your last message"
         }
       }
 
@@ -1086,15 +1053,8 @@ export threadDetailUnknown = frame : threadDetail {
 
   head {
     lead {
-      state {
-        stateText {
-          fill[0].color: c.colors.attentionText,
-          contents: "Status unknown"
-        }
-
-        @with-variant(status.dotAttention)
-        mark {}
-      }
+      @with-variant(status.labelAttention)
+      state {}
     }
   }
 }
@@ -1129,20 +1089,6 @@ export threadDetailStopped = frame : threadDetail {
     }
   }
 
-  head {
-    lead {
-      state {
-        stateText {
-          fill[0].color: c.colors.danger,
-          contents: "Stopped"
-        }
-
-        @with-variant(status.dotStopped)
-        mark {}
-      }
-    }
-  }
-
   body {
     item {
       display: .none
@@ -1158,6 +1104,13 @@ export threadDetailStopped = frame : threadDetail {
 
     message2 {
       display: .visible
+    }
+  }
+
+  head {
+    lead {
+      @with-variant(status.labelStopped)
+      state {}
     }
   }
 }
@@ -1260,24 +1213,6 @@ export threadDetailFailed = frame : threadDetail {
     }
   }
 
-  head {
-    lead {
-      state {
-        stateText {
-          fill[0].color: c.colors.danger,
-          contents: "Stopped"
-        }
-
-        @with-variant(status.dotStopped)
-        mark {}
-      }
-
-      name {
-        contents: "Run unit tests on Ubuntu"
-      }
-    }
-  }
-
   body {
     item {
       display: .none
@@ -1298,6 +1233,17 @@ export threadDetailFailed = frame : threadDetail {
             contents: "Run the unit test suite in ~/src/baton-old."
           }
         }
+      }
+    }
+  }
+
+  head {
+    lead {
+      @with-variant(status.labelStopped)
+      state {}
+
+      name {
+        contents: "Run unit tests on Ubuntu"
       }
     }
   }
@@ -1332,7 +1278,7 @@ export threadTraceFailed = frame : threadTraceLoading {
 
       unavailable {
         width: 100%,
-        contents: "Windows Desktop did not return this activity. Retry to read it again."
+        contents: "Could not read this activity from Windows Desktop."
       }
     }
   }
@@ -1449,12 +1395,12 @@ export threadDetailHistoryFailed = frame : threadDetailHistory {
 
     pager {
       note {
-        contents: "Windows Desktop did not return the earlier history. Loaded replies are still available."
+        contents: "Could not load earlier history from Windows Desktop."
       }
 
       action {
         label {
-          contents: "Retry earlier history"
+          contents: "Try again"
         }
       }
     }
@@ -1627,16 +1573,13 @@ export threadDetailArchiveOffline = frame : threadDetailArchivePending {
 
   head {
     lead {
+      @with-variant(status.labelIdle)
       state {
-        stateText {
-          fill[0].color: c.colors.muted,
+        caption {
           contents: "Waiting to stop"
         }
 
-        @with-variant(status.dotIdle)
-        mark {
-          left: .nil
-        }
+        left: .nil
       }
     }
   }

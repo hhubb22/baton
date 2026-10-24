@@ -1,7 +1,8 @@
 import "tokens/colors.elyx" as c
+import "controls/button.elyx" as buttons
 import "tokens/spacing.elyx" as s
-import "blocks/project-page.elyx" as page
 import "foundations/typography.elyx" as t
+import "blocks/project-page.elyx" as page
 import "blocks/project-header.elyx" as headers
 import "blocks/thread-line.elyx" as lines
 import "blocks/attention-card.elyx" as attention
@@ -22,18 +23,6 @@ threadOpen = frame : page.projectPage {
 
   main {
     dock {
-      composer {
-        toolbar {
-          send {
-            fill[0].color: c.colors.subtle,
-
-            sendGlyph {
-              fill[0].color: c.colors.text
-            }
-          }
-        }
-      }
-
       signals {
         attention {
           count {
@@ -70,17 +59,12 @@ threadOpen = frame : page.projectPage {
 
     @with-variant(headers.headerIdle)
     header {
+      top: .nil,
+
       trail {
-        overview {
-          fill[0].color: c.colors.transparent,
-
-          glyph {
-            fill[0].color: c.colors.muted
-          }
-        }
+        @with-variant(buttons.iconButton)
+        overview {}
       }
-
-      top: .nil
     }
   }
 
@@ -109,7 +93,7 @@ threadOpen = frame : page.projectPage {
   }
 
   detail = frame : details.threadDetail {
-    overrides: [insert(ask, after = details.threadDetail.footer)],
+    height: 100%,
 
     body {
       reply1 {
@@ -117,32 +101,12 @@ threadOpen = frame : page.projectPage {
         trace {}
       }
     }
-
-    ask = frame : details.selectionMenu {
-      left: 150px,
-      top: 426px,
-      ignore-stack: .true,
-
-      ask {
-        connections[0].target: threadQuote
-      }
-    }
   }
 
   decision = frame : attention.attentionCard {
     width: 100%,
     max-width: s.size.measure,
-    overrides: [remove(attention.attentionCard.threadRef)],
-
-    head {
-      time {
-        display: .none
-      }
-    }
-
-    heading {
-      contents: "1 Windows reconnect test failed. What next?"
-    }
+    overrides: [remove(attention.attentionCard.threadRef)]
   }
 }
 
@@ -158,18 +122,6 @@ threadRunning = frame : page.projectPage {
 
   main {
     dock {
-      composer {
-        toolbar {
-          send {
-            fill[0].color: c.colors.subtle,
-
-            sendGlyph {
-              fill[0].color: c.colors.text
-            }
-          }
-        }
-      }
-
       signals {
         display: .visible
       }
@@ -191,17 +143,12 @@ threadRunning = frame : page.projectPage {
 
     @with-variant(headers.headerIdle)
     header {
+      top: .nil,
+
       trail {
-        overview {
-          fill[0].color: c.colors.transparent,
-
-          glyph {
-            fill[0].color: c.colors.muted
-          }
-        }
+        @with-variant(buttons.iconButton)
+        overview {}
       }
-
-      top: .nil
     }
   }
 
@@ -229,7 +176,9 @@ threadRunning = frame : page.projectPage {
     }
   }
 
-  detail = frame : details.threadDetailRunning {}
+  detail = frame : details.threadDetailRunning {
+    height: 100%
+  }
 }
 
 threadQuote = frame : page.projectPage {
@@ -306,37 +255,13 @@ threadQuote = frame : page.projectPage {
   }
 
   detail = frame : details.threadDetail {
-    footer {
-      composer {
-        toolbar {
-          actions {
-            send {
-              fill[0].color: c.colors.subtle,
-
-              sendGlyph {
-                fill[0].color: c.colors.text
-              }
-            }
-          }
-        }
-      }
-    }
+    height: 100%
   }
 
   decision = frame : attention.attentionCard {
     width: 100%,
     max-width: s.size.measure,
-    overrides: [remove(attention.attentionCard.threadRef)],
-
-    head {
-      time {
-        display: .none
-      }
-    }
-
-    heading {
-      contents: "1 Windows reconnect test failed. What next?"
-    }
+    overrides: [remove(attention.attentionCard.threadRef)]
   }
 }
 
@@ -518,18 +443,12 @@ threadRequestSent = frame : threadDraft {
     dock {
       composer {
         prompt {
-          fill[0].color: c.colors.faint,
           contents: "Ask the project assistant…"
         }
 
         toolbar {
           send {
-            connections[0]: .nil,
-            fill[0].color: c.colors.subtle,
-
-            sendGlyph {
-              fill[0].color: c.colors.text
-            }
+            connections[0]: .nil
           }
         }
       }
@@ -610,10 +529,6 @@ referenceSent = frame : threadOpen {
   left: 1728px,
   top: 2160px,
 
-  detail {
-    overrides: [remove(threadOpen.detail.ask)]
-  }
-
   main {
     transcript {
       overrides: [insert(sentMessage, after = threadOpen.decision)],
@@ -684,7 +599,7 @@ archivedProjectThread = frame : threadRunning {
     header {
       lead {
         state {
-          stateText {
+          caption {
             contents: "Archived"
           }
         }
@@ -719,7 +634,7 @@ archivedProjectThread = frame : threadRunning {
       }
 
       detail {
-        contents: "The project assistant has stopped. Send messages directly in this thread to continue work."
+        contents: "Main chat and project memory are read-only. Work in individual threads continues."
       }
     }
   }
@@ -779,26 +694,6 @@ fileSelection = frame : threadOpen {
   left: 0px,
   top: 4320px,
   overrides: [insert(scrim, after = threadOpen.detail)],
-
-  detail {
-    overrides: [remove(threadOpen.detail.ask)],
-
-    footer {
-      composer {
-        toolbar {
-          actions {
-            send {
-              fill[0].color: c.colors.subtle,
-
-              sendGlyph {
-                fill[0].color: c.colors.text
-              }
-            }
-          }
-        }
-      }
-    }
-  }
 
   scrim = frame {
     left: 0px,
@@ -879,7 +774,7 @@ fileSelection = frame : threadOpen {
 
         location {
           meta {
-            contents: "Windows Desktop · Thread T-160-WIN · Reply 3"
+            contents: "Windows Desktop · D:\\src\\baton-ps160 · 14 KB"
           }
 
           path {
@@ -910,7 +805,7 @@ fileSelection = frame : threadOpen {
           numbers = text : t.mono {
             contents: "84\n85\n86\n87\n88\n89",
             line-height: 1.7,
-            fill[0].color: c.colors.link
+            fill[0].color: c.colors.accentText
           }
 
           selectedText = text : t.mono {
@@ -953,26 +848,7 @@ questionSelection = frame : threadOpen {
   top: 4320px,
 
   detail {
-    overrides: [
-      insert(questionMenu, after = details.threadDetail.footer),
-      remove(threadOpen.detail.ask)
-    ],
-
-    footer {
-      composer {
-        toolbar {
-          actions {
-            send {
-              fill[0].color: c.colors.subtle,
-
-              sendGlyph {
-                fill[0].color: c.colors.text
-              }
-            }
-          }
-        }
-      }
-    }
+    overrides: [insert(questionMenu, after = details.threadDetail.footer)],
 
     body {
       layout.justify-content: .start,
@@ -986,10 +862,6 @@ questionSelection = frame : threadOpen {
         details {
           connections[0].target: threadOpen,
           connections[0].label: "Close expanded question and selection"
-        }
-
-        heading {
-          contents: "Windows reconnect question"
         }
       }
 
@@ -1007,16 +879,6 @@ questionSelection = frame : threadOpen {
         close {
           connections[0].target: threadOpen,
           connections[0].label: "Close question selection"
-        }
-      }
-    }
-  }
-
-  main {
-    transcript {
-      decision {
-        heading {
-          contents: "Windows reconnect question"
         }
       }
     }
@@ -1104,6 +966,51 @@ longFileSelection = frame : fileSelection {
           }
         }
       }
+    }
+  }
+}
+
+replySelection = frame : threadOpen {
+  title: "Project · Select reply text",
+  caption: "Selecting text in a Thread reply shows Ask project assistant above the selection. It quotes the text into the main chat input.",
+  left: 3456px,
+  top: 0px,
+
+  detail {
+    overrides: [insert(ask, after = details.threadDetail.footer)],
+
+    body {
+      reply1 {
+        overrides: [insert(selection, after = details.threadReply.content)],
+
+        content {
+          display: .none
+        }
+      }
+    }
+  }
+
+  selection = frame {
+    width: 100%,
+    layout: {direction: .column},
+    fill: c.colors.accentSoft,
+    corner-radius: 4px,
+    children: selectedText,
+
+    selectedText = text : t.body {
+      width: 100%,
+      contents: "47 of 48 tests passed. TestReconnectAfterSleep did not reconnect within 30s after waking from sleep; log attached."
+    }
+  }
+
+  ask = frame : details.selectionMenu {
+    left: 150px,
+    top: 214px,
+    ignore-stack: .true,
+
+    ask {
+      connections[0].target: threadQuote,
+      connections[0].label: "Quote selection in the main chat"
     }
   }
 }

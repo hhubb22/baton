@@ -146,7 +146,7 @@ colorSection = frame : section {
   ],
 
   note {
-    contents: "Four neutral surfaces separated by luminance, with 8% / 11% / 16% hairline borders. Each role color serves a single purpose."
+    contents: "Cool neutrals share one hue with the backdrop. Pages sit on a frosted backdrop, content on solid cards. Reading text reaches 4.5:1; each role color serves a single purpose."
   }
 
   surfaceRow = frame {
@@ -166,7 +166,7 @@ colorSection = frame : section {
       }
 
       purpose {
-        contents: "Sidebar, overview"
+        contents: "Notices, inset areas"
       }
     }
 
@@ -277,15 +277,15 @@ colorSection = frame : section {
 
     rLink = frame : swatch {
       chip {
-        fill[0].color: c.colors.link
+        fill[0].color: c.colors.accentText
       }
 
       name {
-        contents: "link / focus"
+        contents: "accentText"
       }
 
       purpose {
-        contents: "Links, focus, unread"
+        contents: "Running, links, unread"
       }
     }
 
@@ -325,15 +325,16 @@ colorSection = frame : section {
 
     stInfo = frame : swatch {
       chip {
-        fill[0].color: c.colors.info
+        fill[0].color: c.colors.glass,
+        border[0].color: c.colors.border
       }
 
       name {
-        contents: "info"
+        contents: "glass"
       }
 
       purpose {
-        contents: "Thread running"
+        contents: "Frosted backdrop tint"
       }
     }
 
@@ -353,15 +354,15 @@ colorSection = frame : section {
 
     stInfoSoft = frame : swatch {
       chip {
-        fill[0].color: c.colors.infoSoft
+        fill[0].color: c.colors.accentSoft
       }
 
       name {
-        contents: "infoSoft"
+        contents: "accentSoft"
       }
 
       purpose {
-        contents: "Status pill fill"
+        contents: "Running pill, card actions"
       }
     }
 
@@ -404,7 +405,7 @@ typeSection = frame : section {
   }
 
   note {
-    contents: "UI copy uses PingFang SC in design files and the system UI font stack on the web, in Regular, Medium, and Semibold. Code and monospace copy use Paper Mono."
+    contents: "UI copy uses Inter in Regular, Medium, and SemiBold, with PingFang SC as the CJK fallback. Code and monospace copy use Paper Mono."
   }
 
   typeList = frame {

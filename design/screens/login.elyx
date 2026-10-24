@@ -1,4 +1,8 @@
-import "tokens/colors.elyx" as c
+use "resources/fonts/Inter-Medium.otf"
+use "resources/fonts/Inter-SemiBold.otf"
+use "resources/fonts/Inter-Regular.otf"
+
+import "foundations/typography.elyx" as t
 import "controls/input.elyx" as inputs
 import "blocks/login-shell.elyx" as auth
 
@@ -30,16 +34,16 @@ loginError = frame : auth.loginPage {
       }
 
       secret {
+        @with-variant(t.captionDanger)
         helper {
-          fill[0].color: c.colors.danger,
           display: .visible,
           contents: "Invalid username or password."
         }
 
         @with-variant(inputs.error)
         input {
+          @with-variant(t.small)
           value {
-            fill[0].color: c.colors.text,
             contents: "••••••••"
           }
         }
@@ -64,7 +68,6 @@ loginReset = frame : auth.loginPage {
       secret {
         input {
           value {
-            fill[0].color: c.colors.faint,
             contents: "New password"
           }
         }
@@ -121,7 +124,6 @@ loginExpired = frame : auth.loginPage {
       secret {
         input {
           value {
-            fill[0].color: c.colors.faint,
             contents: "Password"
           }
         }

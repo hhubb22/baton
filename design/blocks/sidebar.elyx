@@ -59,7 +59,10 @@ export navRow = frame {
 export navRowActive = frame : navRow {
   title: "Nav row / Active",
   top: 40px,
-  fill[0].color: c.colors.selected,
+  fill[0].color: c.colors.raised,
+  shadow[0].drop-shadow.blur-radius: 2px,
+  shadow[0].drop-shadow.color: c.colors.shadowNear,
+  shadow[0].drop-shadow.offset: [0px, 1px],
 
   lead {
     glyph {
@@ -129,7 +132,10 @@ export projectRow = frame {
 export projectRowActive = frame : projectRow {
   title: "Project row / Active",
   top: 136px,
-  fill[0].color: c.colors.selected,
+  fill[0].color: c.colors.raised,
+  shadow[0].drop-shadow.blur-radius: 2px,
+  shadow[0].drop-shadow.color: c.colors.shadowNear,
+  shadow[0].drop-shadow.offset: [0px, 1px],
 
   lead {
     name {
@@ -200,8 +206,6 @@ export sidebar = frame {
   width: s.size.sidebar,
   height: s.size.screenHeight,
   layout: {direction: .column, justify-content: .space-between},
-  fill: c.colors.panel,
-  border: {color: c.colors.borderSoft, sides: .right},
   padding: [0px, s.space.sm, s.space.sm],
   children: [top, footer],
 
@@ -229,7 +233,7 @@ export sidebar = frame {
         wordmark = text : t.label {
           contents: "Baton",
           font-size: 14,
-          font-style: "Semibold"
+          font-style: "SemiBold"
         }
       }
 

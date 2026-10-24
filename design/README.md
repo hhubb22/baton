@@ -70,12 +70,12 @@ Baton 品牌标识与项目头像分开使用；项目头像保留项目名称�
 
 ## 字体
 
-设计稿文案、画板 `title` 和 `caption` 均使用英文；界面字体是 PingFang SC，代码与等宽字体是 Paper Mono。字体文件不随项目提供，在其他设备上查看时需要安装 Paper Mono。
+设计稿文案、画板 `title` 和 `caption` 均使用英文；界面字体是 Inter，中文回落到 PingFang SC，代码与等宽字体是 Paper Mono。Inter 的 Regular、Medium、SemiBold 和许可证在 `resources/fonts/`，Elyx 通过 `elyx.json` 的 `fonts.include` 加载；Paper Mono 不随项目提供，在其他设备上查看时需要安装。
 
-Web 端界面使用系统 UI 字体栈，不打包字体文件：
+Web 端随网页打包 Inter 的 woff2 文件，中文和等宽字体用系统字体栈：
 
 ```css
-font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+font-family: "Inter", system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
   "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
 font-family: "Paper Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 ```

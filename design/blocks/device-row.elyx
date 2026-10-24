@@ -3,7 +3,6 @@ import "tokens/spacing.elyx" as s
 import "foundations/typography.elyx" as t
 import "controls/icons.elyx" as icons
 import "controls/status.elyx" as status
-import "controls/badge.elyx" as badges
 
 // Device row: name and OS, connection state, installed Agents. Shows last contact time when offline.
 export deviceRow = frame {
@@ -23,8 +22,6 @@ export deviceRow = frame {
       width: 32px,
       height: 32px,
       layout: {justify-content: .center, align-items: .center},
-      fill: c.colors.subtle,
-      corner-radius: s.radius.md,
       children: glyph,
 
       glyph = asset : icons.device {
@@ -46,8 +43,10 @@ export deviceRow = frame {
           contents: "Windows Desktop"
         }
 
-        defaultTag = frame : badges.tag {
-          display: .none
+        defaultTag = text : t.caption {
+          display: .none,
+          contents: "Default",
+          fill[0].color: c.colors.faint
         }
       }
 
@@ -58,15 +57,12 @@ export deviceRow = frame {
     }
   }
 
-  state = frame {
+  state = frame : status.labelOnline {
     width: 200px,
-    layout: {align-items: .center, item-gap: 6px},
-    children: [mark, stateText],
 
-    mark = shape : status.dotOnline {}
-
-    stateText = text : t.small {
-      contents: "Online"
+    caption {
+      font-size: 13,
+      letter-spacing: -0.3%
     }
   }
 
@@ -88,18 +84,15 @@ export deviceOffline = frame : deviceRow {
   title: "Device row / Offline",
   top: 80px,
 
-  state {
-    stateText {
-      fill[0].color: c.colors.muted,
-      contents: "Offline · last seen 13:52"
-    }
-
-    @with-variant(status.dotIdle)
-    mark {}
-  }
-
   agents {
     contents: "Codex · Pi · Kiro"
+  }
+
+  @with-variant(status.labelIdle)
+  state {
+    caption {
+      contents: "Offline · last seen 13:52"
+    }
   }
 
   identity {
@@ -130,18 +123,15 @@ export deviceRuntime = frame : deviceRow {
   @with-variant(icons.chevronDown)
   chevron {}
 
-  state {
-    stateText {
-      fill[0].color: c.colors.agentText,
-      contents: "Online · running Baton Dev"
-    }
-
-    @with-variant(status.dotAgent)
-    mark {}
-  }
-
   agents {
     contents: "Codex · Pi"
+  }
+
+  @with-variant(status.labelAgent)
+  state {
+    caption {
+      contents: "Online · running Baton Dev"
+    }
   }
 
   identity {
@@ -183,6 +173,22 @@ export capabilityLine = frame {
   }
 }
 
+// Agent that is missing or needs sign-in: no check mark, the note names what to fix
+@variant
+export capabilityMissing = frame : capabilityLine {
+  title: "Capability row / Needs setup",
+  left: 400px,
+
+  note {
+    fill[0].color: c.colors.attentionText,
+    contents: "Needs setup"
+  }
+
+  check {
+    display: .none
+  }
+}
+
 @variant
 export deviceSyncing = frame : deviceRow {
   title: "Device row / Syncing",
@@ -190,18 +196,15 @@ export deviceSyncing = frame : deviceRow {
   left: 0px,
   top: 360px,
 
-  state {
-    stateText {
-      fill[0].color: c.colors.muted,
-      contents: "Syncing · last seen now"
-    }
-
-    @with-variant(status.dotQueued)
-    mark {}
-  }
-
   agents {
     contents: "Checking availability…"
+  }
+
+  @with-variant(status.labelQueued)
+  state {
+    caption {
+      contents: "Syncing…"
+    }
   }
 }
 

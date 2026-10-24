@@ -1,3 +1,7 @@
+use "resources/fonts/Inter-SemiBold.otf"
+use "resources/fonts/Inter-Medium.otf"
+use "resources/fonts/Inter-Regular.otf"
+
 import "tokens/colors.elyx" as c
 import "tokens/spacing.elyx" as s
 import "foundations/typography.elyx" as t
@@ -8,7 +12,7 @@ import "controls/badge.elyx" as badges
 import "controls/avatar.elyx" as avatars
 import "blocks/attention-reply.elyx" as replies
 
-// Option row: one choice offered by the Project Agent. Subtle background, no border, leading number, and Recommended tag when suggested
+// Option row: one choice offered by the Project Agent, hung on the branch rail. Keycap number, no outline; hover adds a soft fill. The suggested option has a medium label and teal "Suggested" text
 export option = frame {
   title: "Attention option",
   left: 0px,
@@ -16,15 +20,26 @@ export option = frame {
   width: 480px,
   min-height: 36px,
   layout: {align-items: .center, item-gap: 10px},
-  fill: c.colors.subtle,
-  corner-radius: 10px,
-  padding: [8px, s.space.md],
-  children: [index, label, suggested],
+  fill: c.colors.transparent,
+  border: c.colors.transparent,
+  corner-radius: 8px,
+  padding: [6px, 8px],
+  children: [key, label, suggested],
 
-  index = text : t.mono {
-    contents: "1",
-    line-height: 1,
-    fill[0].color: c.colors.faint
+  key = frame {
+    width: 20px,
+    height: 20px,
+    layout: {justify-content: .center, align-items: .center},
+    fill: c.colors.subtle,
+    corner-radius: 5px,
+    children: index,
+
+    index = text : t.mono {
+      contents: "1",
+      font-size: 11,
+      line-height: 1,
+      fill[0].color: c.colors.muted
+    }
   }
 
   label = text : t.small {
@@ -33,51 +48,71 @@ export option = frame {
     line-height: 1.4
   }
 
-  suggested = frame : badges.tagAgent {
-    display: .none
+  suggested = text : t.caption {
+    display: .none,
+    contents: "Suggested",
+    fill[0].color: c.colors.agentText
   }
 }
 
 @variant
 export optionSuggested = frame : option {
-  title: "Attention option / Recommended",
+  title: "Attention option / Suggested",
   left: 640px,
   top: 0px,
+
+  label {
+    font-style: "Medium"
+  }
 
   suggested {
     display: .visible
   }
 }
 
+@variant
+export optionHover = frame : option {
+  title: "Attention option / Hover",
+  left: 640px,
+  top: 80px,
+  fill[0].color: c.colors.hover,
+
+  label {
+    contents: "Skip for now"
+  }
+}
+
+// Free-text reply: the last branch opens the reply field
+@variant
+export optionOther = frame : option {
+  title: "Attention option / Own reply",
+  left: 1280px,
+  top: 0px,
+
+  label {
+    fill[0].color: c.colors.muted,
+    contents: "Other…"
+  }
+
+  key {
+    index {
+      contents: "4"
+    }
+  }
+}
+
 // Attention card: a decision requested by the Project Agent. Shown in the main conversation, linked Thread, and Inbox.
-// Matches Thread card styling: hairline border, 14px radius, two soft shadows.
+// No card surface: meta line, question, context, and options on the branch rail, in the same column as the conversation text.
 export attentionCard = frame {
   title: "Attention card / Open",
   caption: "Details start collapsed in Inbox, the main chat, and linked threads. Option clicks select a reply; Send reply submits it to the project assistant.",
   left: 0px,
   top: 160px,
   width: s.size.measure,
-  layout: {direction: .column, item-gap: 10px},
-  fill: c.colors.surface,
-  border: c.colors.hairline,
-  shadow: [
-    {
-      drop-shadow: {
-        color: rgb(0%, 0%, 0%, 3%),
-        offset: point(0px, 1px),
-        blur-radius: 2px
-      }
-    },
-    {
-      drop-shadow: {
-        color: rgb(0%, 0%, 0%, 4%),
-        offset: point(0px, 4px),
-        blur-radius: 16px
-      }
-    }
-  ],
-  corner-radius: 14px,
-  padding: [s.space.lg, s.space.lg, s.space.md],
+  layout: {direction: .column, item-gap: s.space.md},
+  fill: c.colors.transparent,
+  border: c.colors.transparent,
+  padding: [s.space.xs, 0px],
   children: [
     head,
     heading,
@@ -94,7 +129,7 @@ export attentionCard = frame {
   head = frame {
     width: 100%,
     layout: {justify-content: .space-between, align-items: .center},
-    children: [kind, time],
+    children: [kind, time, dismiss],
 
     kind = frame {
       layout: {align-items: .center, item-gap: s.space.sm},
@@ -115,9 +150,9 @@ export attentionCard = frame {
 
       mark = shape : status.dotAttention {}
 
-      kindLabel = text : t.captionMedium {
-        contents: "Waiting for your reply",
-        fill[0].color: c.colors.attentionText
+      kindLabel = text : t.caption {
+        contents: "Run reconnect tests on Windows",
+        fill[0].color: c.colors.faint
       }
 
       system = frame : badges.tag {
@@ -130,8 +165,20 @@ export attentionCard = frame {
     }
 
     time = text : t.caption {
+      display: .none,
       contents: "14:33",
       fill[0].color: c.colors.faint
+    }
+
+    dismiss = frame : buttons.iconButton {
+      connections[0].label: "Close question",
+      connections[0].target: attentionClosed,
+
+      @with-variant(icons.close)
+      glyph {
+        width: 14px,
+        height: 14px
+      }
     }
   }
 
@@ -141,11 +188,11 @@ export attentionCard = frame {
   }
 
   details = frame : buttons.smallGhost {
+    display: .none,
     connections[0].label: "Show details",
     connections[0].target: attentionExpanded,
 
     label {
-      fill[0].color: c.colors.muted,
       contents: "Show details"
     }
 
@@ -159,13 +206,13 @@ export attentionCard = frame {
 
   summary = text : t.small {
     width: 100%,
-    display: .none,
     contents: "TestReconnectAfterSleep did not reconnect within 30s after waking from sleep on Windows; the other 47 tests passed. Logs show the first TLS handshake after wake timed out.",
     fill[0].color: c.colors.muted
   }
 
   threadRef = frame {
     height: 26px,
+    display: .none,
     layout: {align-items: .center, item-gap: 6px},
     border: c.colors.hairline,
     corner-radius: s.radius.pill,
@@ -187,9 +234,10 @@ export attentionCard = frame {
 
   options = frame {
     width: 100%,
-    layout: {direction: .column, item-gap: s.space.xxs},
-    padding: [s.space.xxs, 0px, 0px],
-    children: [first, second, third],
+    layout: {direction: .column, item-gap: 2px},
+    border: {color: c.colors.borderSoft, sides: .left},
+    padding: [0px, 0px, 0px, 6px],
+    children: [first, second, third, other],
 
     first = frame : optionSuggested {
       width: 100%,
@@ -200,8 +248,10 @@ export attentionCard = frame {
     second = frame : option {
       width: 100%,
 
-      index {
-        contents: "2"
+      key {
+        index {
+          contents: "2"
+        }
       }
 
       label {
@@ -212,18 +262,27 @@ export attentionCard = frame {
     third = frame : option {
       width: 100%,
 
-      index {
-        contents: "3"
+      key {
+        index {
+          contents: "3"
+        }
       }
 
       label {
         contents: "Run the test once more"
       }
     }
+
+    other = frame : optionOther {
+      width: 100%,
+      connections[0].label: "Write a reply",
+      connections[0].target: attentionTextReply
+    }
   }
 
   footer = frame {
     width: 100%,
+    display: .none,
     layout: {justify-content: .space-between, align-items: .center},
     children: [reply, close],
 
@@ -234,15 +293,7 @@ export attentionCard = frame {
       connections[0].target: attentionTextReply,
 
       label {
-        fill[0].color: c.colors.muted,
         contents: "Add a note or reply"
-      }
-
-      @with-variant(icons.message)
-      lead {
-        width: 14px,
-        height: 14px,
-        display: .visible
       }
     }
 
@@ -253,7 +304,6 @@ export attentionCard = frame {
       connections[0].target: attentionClosed,
 
       label {
-        fill[0].color: c.colors.muted,
         contents: "Close question"
       }
     }
@@ -285,7 +335,7 @@ export attentionCard = frame {
 
     answerText = text : t.small {
       width: 100%,
-      contents: "Find the cause and fix it · Kaken He 14:51",
+      contents: "Find the cause and fix it · Kaken He · 14:51",
       fill[0].color: c.colors.muted
     }
   }
@@ -299,11 +349,11 @@ export attentionAnswered = frame : attentionCard {
   left: 0px,
   top: 820px,
 
-  footer {
+  options {
     display: .none
   }
 
-  options {
+  summary {
     display: .none
   }
 
@@ -316,27 +366,36 @@ export attentionAnswered = frame : attentionCard {
   }
 
   head {
-    kind {
-      kindLabel {
-        fill[0].color: c.colors.muted,
-        contents: "Answered"
-      }
+    dismiss {
+      display: .none
+    }
 
+    kind {
       @with-variant(status.dotIdle)
       mark {}
     }
   }
 }
 
-// Attention item in Inbox: shows its parent Project at the start of the header
+// Attention item in Inbox: a row on the page with its parent Project at the start of the header
 @variant
 export inboxItem = frame : attentionCard {
   title: "Attention card / Inbox",
   left: 880px,
   top: 160px,
+  padding-top: s.space.xl,
+  padding-left: 0px,
+  padding-bottom: s.space.xl,
+  padding-right: 0px,
+  border[0].color: c.colors.borderSoft,
+  border[0].sides: .bottom,
 
   head {
     kind {
+      mark {
+        display: .none
+      }
+
       project {
         display: .visible
       }
@@ -354,67 +413,31 @@ export systemItem = frame : attentionCard {
 
   footer {
     close {
-      connections[0].target: systemClosed,
-      connections[0].label: "Close notice",
-
-      label {
-        contents: "Close notice"
-      }
+      display: .none
     }
 
+    display: .visible,
+
+    @with-variant(buttons.smallSecondary)
     reply {
       connections[0].target: systemRetry,
-
-      label {
-        fill[0].color: c.colors.link,
-        contents: "Go to project"
-      }
-
       connections[0].label: "Go to project to retry",
 
-      lead {
-        display: .none
+      label {
+        contents: "Go to project"
       }
     }
-  }
-
-  options {
-    display: .none
-  }
-
-  threadRef {
-    display: .none
-  }
-
-  details {
-    display: .none
-  }
-
-  summary {
-    contents: "Sign in to ChatGPT on Ubuntu Dev, then retry in the project. Your messages and replies are saved.",
-    display: .visible
-  }
-
-  heading {
-    contents: "ChatGPT sign-in expired on Ubuntu Dev"
   }
 
   head {
-    time {
-      contents: "15:20"
+    dismiss {
+      connections[0].target: systemClosed,
+      connections[0].label: "Close notice"
     }
 
     kind {
-      system {
-        value {
-          contents: "Baton"
-        }
-
-        display: .visible
-      }
-
       kindLabel {
-        contents: "Needs attention"
+        display: .none
       }
 
       project {
@@ -428,6 +451,22 @@ export systemItem = frame : attentionCard {
         projectAvatar {}
       }
     }
+
+    time {
+      contents: "15:20"
+    }
+  }
+
+  options {
+    display: .none
+  }
+
+  summary {
+    contents: "Sign in to ChatGPT on Ubuntu Dev, then retry in the project. Your messages and replies are saved."
+  }
+
+  heading {
+    contents: "ChatGPT sign-in expired on Ubuntu Dev"
   }
 }
 
@@ -437,14 +476,6 @@ export attentionClosed = frame : attentionAnswered {
   caption: "Close question saves one decision for the project assistant. Removed from Inbox; kept in the main chat, linked thread, and handled items.",
   left: 880px,
   top: 820px,
-
-  head {
-    kind {
-      kindLabel {
-        contents: "Closed"
-      }
-    }
-  }
 
   answer {
     answerText {
@@ -459,14 +490,6 @@ export attentionWithdrawn = frame : attentionAnswered {
   caption: "Removed from Inbox; the reason stays in both chats and handled items. Withdrawal creates no reply.",
   left: 1760px,
   top: 820px,
-
-  head {
-    kind {
-      kindLabel {
-        contents: "Withdrawn"
-      }
-    }
-  }
 
   answer {
     answerText {
@@ -500,7 +523,6 @@ export attentionReply = frame : attentionCard {
 
   options {
     first {
-      border[0].color: c.colors.focus,
       fill[0].color: c.colors.accentSoft
     }
   }
@@ -624,7 +646,7 @@ export attentionConflict = frame : attentionAnswered {
 
   resultNote {
     display: .visible,
-    contents: "This question was already answered in another window. The saved reply is shown above."
+    contents: "Already answered in another window."
   }
 }
 
@@ -663,17 +685,17 @@ export attentionAnswerWins = frame : attentionAnswered {
 @variant
 export systemRetry = frame : systemItem {
   title: "System notice / Retry in project",
-  caption: "Go to project opens this notice above its input. Confirm Retry project after signing in; no option or text reply is offered.",
+  caption: "Go to project opens this notice above its input. Confirm Retry after signing in; no option or text reply is offered.",
   left: 0px,
   top: 3460px,
 
   footer {
     reply {
       connections[0].target: systemRetrying,
-      connections[0].label: "Confirm Retry project",
+      connections[0].label: "Confirm Retry",
 
       label {
-        contents: "Retry project"
+        contents: "Retry"
       }
     }
   }
@@ -707,13 +729,13 @@ export systemRetrying = frame : systemRetry {
 @variant
 export systemRetryFailed = frame : systemRetry {
   title: "System notice / Retry not saved",
-  caption: "The notice stays pending. Try Retry project again after the connection returns.",
+  caption: "The notice stays pending. Try Retry again after the connection returns.",
   left: 1760px,
   top: 3460px,
 
   resultNote {
     display: .visible,
-    contents: "The retry request could not be saved. Check your connection and retry."
+    contents: "Could not retry. Check your connection and try again."
   }
 }
 
@@ -723,16 +745,6 @@ export systemResolved = frame : systemItem {
   caption: "Retry confirmation resolves the notice without waiting for a model reply. Removed from Inbox; kept in the main chat and handled items. No assistant message is created.",
   left: 0px,
   top: 4120px,
-
-  footer {
-    close {
-      display: .none
-    }
-
-    reply {
-      connections[0]: .nil
-    }
-  }
 
   resultNote {
     contents: "Retry requested. Go to the project to check progress.",
@@ -747,13 +759,22 @@ export systemResolved = frame : systemItem {
     display: .visible
   }
 
-  head {
-    kind {
-      kindLabel {
-        fill[0].color: c.colors.muted,
-        contents: "Resolved"
-      }
+  footer {
+    reply {
+      connections[0]: .nil
+    }
+  }
 
+  summary {
+    display: .none
+  }
+
+  head {
+    dismiss {
+      display: .none
+    }
+
+    kind {
       @with-variant(status.dotIdle)
       mark {}
     }
@@ -766,14 +787,6 @@ export systemClosed = frame : systemResolved {
   caption: "Close notice removes it from Inbox without retrying or creating an assistant message. The same fault does not immediately create a replacement notice.",
   left: 880px,
   top: 4120px,
-
-  head {
-    kind {
-      kindLabel {
-        contents: "Closed"
-      }
-    }
-  }
 
   answer {
     answerText {
@@ -801,10 +814,6 @@ export attentionExpanded = frame : attentionCard {
       contents: "Hide details"
     }
   }
-
-  summary {
-    display: .visible
-  }
 }
 
 @variant
@@ -829,7 +838,7 @@ export attentionCloseFailed = frame : attentionCard {
 
   resultNote {
     display: .visible,
-    contents: "The question could not be closed. Check your connection and try Close question again."
+    contents: "Could not close this question. Check your connection and try again."
   }
 }
 
@@ -843,5 +852,89 @@ export systemCloseFailed = frame : systemItem {
   resultNote {
     display: .visible,
     contents: "The notice could not be closed. Check your connection and try Close notice again."
+  }
+}
+
+// System notice in Inbox: same row treatment as inboxItem
+@variant
+export inboxSystemItem = frame : systemItem {
+  title: "System notice / Inbox",
+  left: 2640px,
+  top: 160px,
+  padding-top: s.space.xl,
+  padding-left: 0px,
+  padding-bottom: s.space.xl,
+  padding-right: 0px,
+  border[0].color: c.colors.borderSoft,
+  border[0].sides: .bottom,
+
+  head {
+    kind {
+      mark {
+        display: .none
+      }
+    }
+  }
+}
+
+// Collapsed Inbox row: project and question only. Clicking it expands the item in place and collapses the previous one
+@variant
+export inboxRow = frame : inboxItem {
+  title: "Attention card / Inbox collapsed",
+  left: 880px,
+  top: 700px,
+  padding-top: s.space.md,
+  padding-bottom: s.space.md,
+  connections[0].label: "Expand",
+  connections[0].target: inboxItem,
+  layout.item-gap: s.space.xs,
+
+  summary {
+    display: .none
+  }
+
+  options {
+    display: .none
+  }
+
+  head {
+    dismiss {
+      display: .hidden
+    }
+  }
+
+  heading {
+    font-size: 14,
+    font-style: "Medium"
+  }
+}
+
+// Collapsed system notice in Inbox
+@variant
+export inboxSystemRow = frame : inboxSystemItem {
+  title: "System notice / Inbox collapsed",
+  left: 2640px,
+  top: 700px,
+  padding-top: s.space.md,
+  padding-bottom: s.space.md,
+  layout.item-gap: s.space.xs,
+
+  summary {
+    display: .none
+  }
+
+  footer {
+    display: .none
+  }
+
+  head {
+    dismiss {
+      display: .hidden
+    }
+  }
+
+  heading {
+    font-size: 14,
+    font-style: "Medium"
   }
 }

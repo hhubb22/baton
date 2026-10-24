@@ -1,3 +1,6 @@
+use "resources/fonts/Inter-Medium.otf"
+use "resources/fonts/Inter-Regular.otf"
+
 import "tokens/colors.elyx" as c
 import "tokens/spacing.elyx" as s
 import "foundations/typography.elyx" as t
@@ -21,7 +24,7 @@ export userMessage = frame {
     fill: c.colors.subtle,
     shadow: {
       drop-shadow: {
-        color: rgb(0%, 0%, 0%, 4%),
+        color: c.colors.shadowSoft,
         offset: point(0px, 1px),
         blur-radius: 2px
       }
@@ -161,6 +164,24 @@ export systemNote = frame {
   }
 }
 
+// System note for a failure that needs the user: alert icon and attention text
+@variant
+export systemNoteAttention = frame : systemNote {
+  title: "System note / Needs attention",
+  left: 800px,
+  top: 688px,
+
+  label {
+    fill[0].color: c.colors.attentionText,
+    contents: "ChatGPT sign-in expired on Ubuntu Dev"
+  }
+
+  @with-variant(icons.alert)
+  glyph {
+    fill[0].color: c.colors.attention
+  }
+}
+
 // Activity step: icon, summary, and trailing note. Expanding a command step shows its output below.
 export activityStep = frame {
   title: "Activity step / Command",
@@ -246,7 +267,7 @@ export activityStepMemory = frame : activityStep {
       stepLabel {
         contents: "Saved: Windows worktree is at D:\\src\\baton-ps160",
         font-size: 13,
-        font-family: "PingFang SC"
+        font-family: "Inter"
       }
 
       @with-variant(icons.memory)

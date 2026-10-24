@@ -21,8 +21,8 @@ export replyForm = frame {
     width: 100%,
     border[0].color: c.colors.focus,
 
+    @with-variant(t.small)
     value {
-      fill[0].color: c.colors.text,
       contents: "Check the wake-up handshake first. Keep the logs from this run."
     }
   }
@@ -35,7 +35,7 @@ export replyForm = frame {
   feedback = text : t.small {
     width: 100%,
     display: .none,
-    contents: "Your reply could not be saved. Your choice and note are kept. Try again.",
+    contents: "Could not send your reply. Check your connection and try again.",
     fill[0].color: c.colors.muted
   }
 
@@ -116,7 +116,6 @@ export empty = frame : replyForm {
 
   note {
     value {
-      fill[0].color: c.colors.faint,
       contents: "Write your answer…"
     }
   }

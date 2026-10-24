@@ -87,6 +87,6 @@ export unread = shape {
   top: 5px,
   width: 6px,
   height: 6px,
-  fill: c.colors.link,
+  fill: c.colors.accentText,
   type: .ellipse
 }

@@ -5,6 +5,10 @@ import "controls/button.elyx" as buttons
 import "controls/input.elyx" as inputs
 import "controls/field.elyx" as fields
 import "controls/brand.elyx" as logos
+import "resources/assets/backdrop-day.jpg" as scene
+import "resources/assets/backdrop-day-frost.jpg" as frost
+import "resources/assets/backdrop-night.jpg" as nightScene
+import "resources/assets/backdrop-night-frost.jpg" as nightFrost
 
 export loginPage = frame {
   title: "Sign in",
@@ -14,12 +18,27 @@ export loginPage = frame {
   width: s.size.screenWidth,
   height: s.size.screenHeight,
   layout: {justify-content: .center, align-items: .center},
-  fill: c.colors.canvas,
+  fill: {image: {ref: scene}},
   children: column,
 
+  // Glass panel centered on the page, so the blurred copy lines up with zero offset.
   column = frame {
-    width: 360px,
+    width: 400px,
     layout: {direction: .column, align-items: .center, item-gap: s.space.xl},
+    fill: [
+      {image: {ref: frost, sizing: {scale: 0.75, offset: [0px, 0px]}}},
+      c.colors.glass
+    ],
+    border: c.colors.glassEdge,
+    shadow: {
+      drop-shadow: {
+        color: c.colors.shadowFar,
+        offset: point(0px, 24px),
+        blur-radius: 64px
+      }
+    },
+    corner-radius: 24px,
+    padding: [36px, 32px, 28px],
     children: [brand, notice, card, note],
 
     brand = frame {
@@ -60,26 +79,6 @@ export loginPage = frame {
     card = frame {
       width: 100%,
       layout: {direction: .column, item-gap: s.space.lg},
-      fill: c.colors.surface,
-      border: c.colors.hairline,
-      shadow: [
-        {
-          drop-shadow: {
-            color: rgb(0%, 0%, 0%, 4%),
-            offset: point(0px, 1px),
-            blur-radius: 2px
-          }
-        },
-        {
-          drop-shadow: {
-            color: rgb(0%, 0%, 0%, 4%),
-            offset: point(0px, 8px),
-            blur-radius: 24px
-          }
-        }
-      ],
-      corner-radius: 14px,
-      padding: s.space.xl,
       children: [account, secret, submit],
 
       account = frame : fields.field {
@@ -140,7 +139,7 @@ export loginPage = frame {
     note = text : t.caption {
       width: 100%,
       contents: "Contact your administrator if you need an account or password reset.",
-      fill[0].color: c.colors.faint
+      fill[0].color: c.colors.muted
     }
   }
 }
@@ -150,8 +149,11 @@ export loginPageDark = frame : loginPage {
   title: "Sign in / Dark",
   left: 1728px,
   top: 0px,
+  fill[0].image.ref: nightScene,
 
   column {
+    fill[0].image.ref: nightFrost,
+
     brand {
       @with-variant(logos.colorMarkDark)
       mark {}
@@ -170,7 +172,6 @@ export signedOutPage = frame : loginPage {
       secret {
         input {
           value {
-            fill[0].color: c.colors.faint,
             contents: "Password"
           }
         }
@@ -196,8 +197,11 @@ export signedOutPageDark = frame : signedOutPage {
   title: "Signed out / Dark",
   left: 1728px,
   top: 1080px,
+  fill[0].image.ref: nightScene,
 
   column {
+    fill[0].image.ref: nightFrost,
+
     brand {
       @with-variant(logos.colorMarkDark)
       mark {}

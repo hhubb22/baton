@@ -8,7 +8,7 @@ export dot = shape {
   title: "Status dot / Running",
   width: s.size.dot,
   height: s.size.dot,
-  fill: c.colors.info,
+  fill: c.colors.accent,
   type: .ellipse
 }
 
@@ -64,7 +64,7 @@ export pill = frame {
   width: .auto,
   height: s.size.micro,
   layout: {align-items: .center, item-gap: 6px},
-  fill: c.colors.infoSoft,
+  fill: c.colors.accentSoft,
   corner-radius: s.radius.pill,
   padding: [0px, s.space.sm],
   children: [mark, label],
@@ -158,6 +158,122 @@ export pillArchived = frame : pill {
   }
 
   @with-variant(dotIdle)
+  mark {
+    left: .nil
+  }
+}
+
+// Status label: dot plus a short caption. The variant sets both colors, so instances only change the words.
+export label = frame {
+  title: "Status label / Running",
+  top: 100px,
+  layout: {align-items: .center, item-gap: 6px},
+  children: [mark, caption],
+
+  mark = shape : dot {}
+
+  caption = text : t.caption {
+    contents: "Running",
+    fill[0].color: c.colors.accentText
+  }
+}
+
+@variant
+export labelAgent = frame : label {
+  title: "Status label / Project assistant running",
+  left: 120px,
+  top: 100px,
+
+  caption {
+    fill[0].color: c.colors.agentText
+  }
+
+  @with-variant(dotAgent)
+  mark {
+    left: .nil
+  }
+}
+
+@variant
+export labelQueued = frame : label {
+  title: "Status label / Waiting for device",
+  left: 240px,
+  top: 100px,
+
+  caption {
+    fill[0].color: c.colors.muted,
+    contents: "Waiting for device"
+  }
+
+  @with-variant(dotQueued)
+  mark {
+    left: .nil
+  }
+}
+
+@variant
+export labelIdle = frame : label {
+  title: "Status label / Idle, archived, or offline",
+  left: 400px,
+  top: 100px,
+
+  caption {
+    fill[0].color: c.colors.muted,
+    contents: "Idle"
+  }
+
+  @with-variant(dotIdle)
+  mark {
+    left: .nil
+  }
+}
+
+@variant
+export labelOnline = frame : label {
+  title: "Status label / Online",
+  left: 480px,
+  top: 100px,
+
+  caption {
+    fill[0].color: c.colors.text,
+    contents: "Online"
+  }
+
+  @with-variant(dotOnline)
+  mark {
+    left: .nil
+  }
+}
+
+@variant
+export labelStopped = frame : label {
+  title: "Status label / Stopped",
+  left: 560px,
+  top: 100px,
+
+  caption {
+    fill[0].color: c.colors.danger,
+    contents: "Stopped"
+  }
+
+  @with-variant(dotStopped)
+  mark {
+    left: .nil
+  }
+}
+
+@variant
+export labelAttention = frame : label {
+  title: "Status label / Unknown or needs attention",
+  left: 660px,
+  top: 100px,
+
+  caption {
+    fill[0].color: c.colors.attentionText,
+    contents: "Status unknown"
+  }
+
+  @with-variant(dotAttention)
   mark {
     left: .nil
   }

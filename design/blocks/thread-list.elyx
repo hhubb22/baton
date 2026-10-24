@@ -1,5 +1,6 @@
 import "tokens/colors.elyx" as c
 import "tokens/spacing.elyx" as s
+import "resources/assets/backdrop-day-frost.jpg" as backdrop
 import "foundations/typography.elyx" as t
 import "controls/status.elyx" as status
 import "controls/avatar.elyx" as avatars
@@ -11,7 +12,7 @@ import "blocks/thread-detail.elyx" as details
 import "blocks/composer.elyx" as composers
 
 // Thread list row: status dot, title, parent Project, device · Agent, working directory, state, and last activity time.
-// State column matches Thread rows: running shows the current turn's elapsed timer; other states show only the state name. Standalone Threads leave the Project column blank
+// State column: running shows the current turn's elapsed timer; Needs attention rows name the reason; Waiting and Idle rows leave it blank because the group heading already says it. Standalone Threads leave the Project column blank
 export threadListRow = frame {
   title: "Thread list row / Running",
   width: 1192px,
@@ -81,7 +82,7 @@ export threadListRow = frame {
     contents: "03:12",
     font-family: "Paper Mono",
     line-height: 1,
-    fill[0].color: c.colors.info
+    fill[0].color: c.colors.accentText
   }
 
   time = text : t.caption {
@@ -100,8 +101,8 @@ export threadListRowIdle = frame : threadListRow {
 
   state {
     fill[0].color: c.colors.muted,
-    contents: "Idle",
-    font-family: "PingFang SC"
+    contents: "",
+    font-family: "Inter"
   }
 
   time {
@@ -125,8 +126,8 @@ export threadListRowWaiting = frame : threadListRow {
 
   state {
     fill[0].color: c.colors.muted,
-    contents: "Waiting for device",
-    font-family: "PingFang SC"
+    contents: "",
+    font-family: "Inter"
   }
 
   time {
@@ -151,7 +152,7 @@ export threadListRowStopped = frame : threadListRow {
   state {
     fill[0].color: c.colors.danger,
     contents: "Stopped",
-    font-family: "PingFang SC"
+    font-family: "Inter"
   }
 
   time {
@@ -176,7 +177,7 @@ export threadListRowUnknown = frame : threadListRow {
   state {
     fill[0].color: c.colors.attentionText,
     contents: "Status unknown",
-    font-family: "PingFang SC"
+    font-family: "Inter"
   }
 
   time {
@@ -205,7 +206,9 @@ export threadListRowArchived = frame : threadListRowIdle {
   }
 
   state {
-    contents: "Archived"
+    fill[0].color: c.colors.muted,
+    contents: "Archived",
+    font-family: "Inter"
   }
 
   time {
@@ -229,11 +232,14 @@ export threadsPage = frame {
   top: 520px,
   width: s.size.screenWidth,
   height: s.size.screenHeight,
-  layout: {direction: .row},
-  fill: c.colors.canvas,
+  layout: {item-gap: s.size.gutter},
+  fill: [{image: {ref: backdrop}}, c.colors.glass],
+  padding: [s.size.gutter, s.size.gutter, s.size.gutter, 0px],
   children: [sidebar, main],
 
   sidebar = frame : sidebars.sidebar {
+    height: 100%,
+
     top {
       projects {
         @with-variant(sidebars.projectRowLive)
@@ -253,6 +259,25 @@ export threadsPage = frame {
     width: 100%,
     height: 100%,
     layout: {direction: .column},
+    fill: c.colors.canvas,
+    border: c.colors.hairline,
+    shadow: [
+      {
+        drop-shadow: {
+          color: c.colors.shadowNear,
+          offset: point(0px, 1px),
+          blur-radius: 3px
+        }
+      },
+      {
+        drop-shadow: {
+          color: c.colors.shadowFar,
+          offset: point(0px, 12px),
+          blur-radius: 40px
+        }
+      }
+    ],
+    corner-radius: s.radius.lg,
     children: [head, compose, filters, list],
 
     head = frame {
@@ -266,7 +291,7 @@ export threadsPage = frame {
       headTitle = text : t.label {
         contents: "Threads",
         font-size: 14,
-        font-style: "Semibold"
+        font-style: "SemiBold"
       }
     }
 
@@ -647,20 +672,6 @@ export threadsPageSplit = frame : threadsPage {
   overrides: [insert(detail, after = threadsPage.main)],
 
   main {
-    compose {
-      composer {
-        toolbar {
-          send {
-            fill[0].color: c.colors.subtle,
-
-            sendGlyph {
-              fill[0].color: c.colors.text
-            }
-          }
-        }
-      }
-    }
-
     list {
       runningRow {
         fill[0].color: c.colors.selected,
@@ -758,6 +769,8 @@ export threadsPageSplit = frame : threadsPage {
 
   // Threads page has no Overview panel to return to, so Back is hidden
   detail = frame : details.threadDetailRunning {
+    height: 100%,
+
     head {
       lead {
         back {
@@ -925,7 +938,7 @@ export threadsPageFailed = frame : threadsPageEmpty {
       }
 
       description {
-        contents: "Baton could not read your chat list. Check your connection, then retry."
+        contents: "Check your connection and try again."
       }
 
       action {

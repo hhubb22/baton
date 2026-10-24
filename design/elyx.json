@@ -20,7 +20,7 @@
   "defaults": {
     "text": {
       "font": {
-        "family": "PingFang SC",
+        "family": "Inter",
         "style": "Regular"
       },
       "fontSize": 14,

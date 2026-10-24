@@ -1,4 +1,5 @@
 import "tokens/colors.elyx" as c
+import "controls/button.elyx" as buttons
 import "tokens/spacing.elyx" as s
 import "foundations/typography.elyx" as t
 import "controls/icons.elyx" as icons
@@ -16,14 +17,14 @@ export composer = frame {
   shadow: [
     {
       drop-shadow: {
-        color: rgb(0%, 0%, 0%, 3%),
+        color: c.colors.shadowSoft,
         offset: point(0px, 1px),
         blur-radius: 2px
       }
     },
     {
       drop-shadow: {
-        color: rgb(0%, 0%, 0%, 6%),
+        color: c.colors.shadowNear,
         offset: point(0px, 8px),
         blur-radius: 24px
       }
@@ -33,10 +34,9 @@ export composer = frame {
   padding: [16px, 12px, 12px, 18px],
   children: [prompt, toolbar],
 
-  prompt = text : t.body {
+  prompt = text : t.placeholder {
     width: 100%,
-    contents: "Ask the project assistant…",
-    fill[0].color: c.colors.faint
+    contents: "Ask the project assistant…"
   }
 
   toolbar = frame {
@@ -69,20 +69,7 @@ export composer = frame {
       }
     }
 
-    send = frame {
-      width: s.size.control,
-      height: s.size.control,
-      layout: {justify-content: .center, align-items: .center},
-      fill: c.colors.accent,
-      corner-radius: s.radius.pill,
-      children: sendGlyph,
-
-      sendGlyph = asset : icons.arrowUp {
-        width: 16px,
-        height: 16px,
-        fill[0].color: c.colors.onAccent
-      }
-    }
+    send = frame : buttons.sendButtonIdle {}
   }
 }
 
@@ -91,8 +78,15 @@ export composerFilled = frame : composer {
   title: "Composer / Filled",
   top: 160px,
 
+  toolbar {
+    @with-variant(buttons.sendButton)
+    send {
+      top: .nil
+    }
+  }
+
+  @with-variant(t.body)
   prompt {
-    fill[0].color: c.colors.text,
     contents: "Also run the unit test suite on Ubuntu."
   }
 }
@@ -165,14 +159,14 @@ export threadComposer = frame {
   shadow: [
     {
       drop-shadow: {
-        color: rgb(0%, 0%, 0%, 3%),
+        color: c.colors.shadowSoft,
         offset: point(0px, 1px),
         blur-radius: 2px
       }
     },
     {
       drop-shadow: {
-        color: rgb(0%, 0%, 0%, 6%),
+        color: c.colors.shadowNear,
         offset: point(0px, 8px),
         blur-radius: 24px
       }
@@ -182,10 +176,9 @@ export threadComposer = frame {
   padding: [14px, 10px, 10px, 16px],
   children: [prompt, toolbar],
 
-  prompt = text : t.body {
+  prompt = text : t.placeholder {
     width: 100%,
-    contents: "Message Codex on Windows Desktop…",
-    fill[0].color: c.colors.faint
+    contents: "Message Codex on Windows Desktop…"
   }
 
   toolbar = frame {
@@ -237,20 +230,7 @@ export threadComposer = frame {
         }
       }
 
-      send = frame {
-        width: s.size.control,
-        height: s.size.control,
-        layout: {justify-content: .center, align-items: .center},
-        fill: c.colors.accent,
-        corner-radius: s.radius.pill,
-        children: sendGlyph,
-
-        sendGlyph = asset : icons.arrowUp {
-          width: 16px,
-          height: 16px,
-          fill[0].color: c.colors.onAccent
-        }
-      }
+      send = frame : buttons.sendButtonIdle {}
     }
   }
 }

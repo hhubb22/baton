@@ -33,19 +33,15 @@ export projectHeader = frame {
       name = text : t.label {
         contents: "Baton Dev",
         font-size: 14,
-        font-style: "Semibold"
+        font-style: "SemiBold"
       }
     }
 
-    state = frame {
-      layout: {align-items: .center, item-gap: 6px},
-      children: [mark, stateText, stop],
+    state = frame : status.labelAgent {
+      overrides: [insert(stop, after = status.label.caption)],
 
-      mark = shape : status.dotAgent {}
-
-      stateText = text : t.caption {
-        contents: "Running on Ubuntu Dev",
-        fill[0].color: c.colors.agentText
+      caption {
+        contents: "Running on Ubuntu Dev"
       }
 
       stop = frame : buttons.smallGhost {
@@ -54,7 +50,6 @@ export projectHeader = frame {
         padding-right: 6px,
 
         label {
-          fill[0].color: c.colors.muted,
           contents: "Stop run"
         }
 
@@ -87,18 +82,15 @@ export headerIdle = frame : projectHeader {
   top: 80px,
 
   lead {
+    @with-variant(status.labelIdle)
     state {
-      stateText {
-        fill[0].color: c.colors.muted,
-        contents: "Idle"
-      }
-
       stop {
         display: .none
       }
 
-      @with-variant(status.dotIdle)
-      mark {}
+      caption {
+        contents: "Idle on Ubuntu Dev"
+      }
     }
   }
 }
@@ -109,18 +101,15 @@ export headerWaiting = frame : projectHeader {
   top: 160px,
 
   lead {
+    @with-variant(status.labelQueued)
     state {
-      stateText {
-        fill[0].color: c.colors.muted,
-        contents: "Waiting for device · 1 message waiting"
-      }
-
       stop {
         display: .none
       }
 
-      @with-variant(status.dotQueued)
-      mark {}
+      caption {
+        contents: "Waiting for device · 1 message waiting"
+      }
     }
   }
 }
@@ -131,18 +120,15 @@ export headerAttention = frame : projectHeader {
   top: 240px,
 
   lead {
+    @with-variant(status.labelAttention)
     state {
-      stateText {
-        fill[0].color: c.colors.attentionText,
-        contents: "ChatGPT sign-in expired on Ubuntu Dev"
-      }
-
       stop {
         display: .none
       }
 
-      @with-variant(status.dotAttention)
-      mark {}
+      caption {
+        contents: "Sign-in expired"
+      }
     }
   }
 }
@@ -153,18 +139,15 @@ export headerPaused = frame : projectHeader {
   top: 320px,
 
   lead {
+    @with-variant(status.labelIdle)
     state {
-      stateText {
-        fill[0].color: c.colors.muted,
-        contents: "Paused"
-      }
-
       stop {
         display: .none
       }
 
-      @with-variant(status.dotIdle)
-      mark {}
+      caption {
+        contents: "Paused"
+      }
     }
   }
 }

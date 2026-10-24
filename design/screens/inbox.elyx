@@ -1,3 +1,5 @@
+import "tokens/colors.elyx" as c
+import "tokens/spacing.elyx" as s
 import "blocks/inbox-page.elyx" as pages
 import "blocks/attention-card.elyx" as attention
 
@@ -113,11 +115,11 @@ loadFailed = frame : pages.inboxPage {
         }
 
         explanation {
-          contents: "Baton could not connect. Check your connection and try again. Saved decisions remain in your chats."
+          contents: "Check your connection. Past decisions are still saved in your chats."
         }
 
         noticeTitle {
-          contents: "Could not load your items"
+          contents: "Could not load inbox"
         }
 
         display: .visible
@@ -169,53 +171,97 @@ handled = frame : pages.inboxPage {
 
       @with-variant(attention.attentionWithdrawn)
       item3 {
-        answer {
-          answerText {
-            contents: "Withdrawn by the project assistant · Yesterday 22:15\nThe test host was upgraded during maintenance."
-          }
-        }
+        border[0].color: c.colors.borderSoft,
+        border[0].sides: .bottom,
 
         head {
-          time {
-            contents: "Yesterday"
-          }
-
           kind {
+            mark {
+              display: .none
+            }
+
             project {
               display: .visible
             }
           }
+
+          time {
+            contents: "Yesterday"
+          }
         }
+
+        answer {
+          answerText {
+            contents: "Withdrawn by the project assistant · Yesterday 22:15"
+          }
+        }
+
+        padding-top: s.space.xl,
+        padding-bottom: s.space.xl
       }
 
       @with-variant(attention.systemResolved)
       item2 {
+        border[0].color: c.colors.borderSoft,
+        border[0].sides: .bottom,
+
+        resultNote {
+          display: .none
+        }
+
+        footer {
+          display: .none
+        }
+
         head {
+          kind {
+            mark {
+              display: .none
+            }
+          }
+
           time {
             contents: "15:24"
           }
         }
+
+        padding-top: s.space.xl,
+        padding-bottom: s.space.xl
       }
 
       @with-variant(attention.attentionAnsweredPaused)
       item1 {
-        answer {
-          answerText {
-            contents: "Bundle the certificate and retest · Kaken He · 16:00\nInclude the intermediate certificate. Keep the installer logs."
-          }
+        border[0].color: c.colors.borderSoft,
+        border[0].sides: .bottom,
+
+        resultNote {
+          display: .none
         }
 
         head {
-          time {
-            contents: "16:00"
-          }
-
           kind {
+            mark {
+              display: .none
+            }
+
             project {
               display: .visible
             }
           }
+
+          time {
+            contents: "16:00"
+          }
         }
+
+        answer {
+          answerText {
+            contents: "Bundle the certificate and retest · Kaken He · 16:00"
+          }
+        }
+
+        padding-top: s.space.xl,
+        padding-bottom: s.space.xl
       }
 
       intro {
@@ -283,25 +329,35 @@ handled = frame : pages.inboxPage {
 
   closedItem = frame : attention.attentionClosed {
     width: 100%,
+    padding-top: s.space.xl,
+    padding-left: 0px,
+    padding-bottom: s.space.xl,
+    padding-right: 0px,
+    border[0].color: c.colors.borderSoft,
+    border[0].sides: .bottom,
 
     threadRef {
       display: .none
     }
 
-    heading {
-      contents: "Should the Ubuntu report include debug logs?"
-    }
-
     head {
-      time {
-        contents: "Yesterday"
-      }
-
       kind {
+        mark {
+          display: .none
+        }
+
         project {
           display: .visible
         }
       }
+
+      time {
+        contents: "Yesterday"
+      }
+    }
+
+    heading {
+      contents: "Should the Ubuntu report include debug logs?"
     }
 
     answer {
@@ -393,7 +449,7 @@ loading = frame : pages.inboxPage {
         }
 
         noticeTitle {
-          contents: "Loading your items…"
+          contents: "Loading inbox…"
         }
 
         display: .visible

@@ -1,5 +1,6 @@
 import "tokens/colors.elyx" as c
 import "tokens/spacing.elyx" as s
+import "resources/assets/backdrop-day-frost.jpg" as backdrop
 import "foundations/typography.elyx" as t
 import "blocks/sidebar.elyx" as sidebars
 import "controls/button.elyx" as buttons
@@ -12,11 +13,14 @@ export inboxPage = frame {
   top: 0px,
   width: s.size.screenWidth,
   height: s.size.screenHeight,
-  layout: {direction: .row},
-  fill: c.colors.canvas,
+  layout: {item-gap: s.size.gutter},
+  fill: [{image: {ref: backdrop}}, c.colors.glass],
+  padding: [s.size.gutter, s.size.gutter, s.size.gutter, 0px],
   children: [sidebar, main],
 
   sidebar = frame : sidebars.sidebar {
+    height: 100%,
+
     top {
       projects {
         @with-variant(sidebars.projectRowAttention)
@@ -48,6 +52,25 @@ export inboxPage = frame {
     width: 100%,
     height: 100%,
     layout: {direction: .column, align-items: .center},
+    fill: c.colors.canvas,
+    border: c.colors.hairline,
+    shadow: [
+      {
+        drop-shadow: {
+          color: c.colors.shadowNear,
+          offset: point(0px, 1px),
+          blur-radius: 3px
+        }
+      },
+      {
+        drop-shadow: {
+          color: c.colors.shadowFar,
+          offset: point(0px, 12px),
+          blur-radius: 40px
+        }
+      }
+    ],
+    corner-radius: s.radius.lg,
     children: [head, content],
 
     head = frame {
@@ -67,7 +90,7 @@ export inboxPage = frame {
       headTitle = text : t.label {
         contents: "Inbox",
         font-size: 14,
-        font-style: "Semibold"
+        font-style: "SemiBold"
       }
     }
 
@@ -75,7 +98,7 @@ export inboxPage = frame {
       width: 100%,
       height: 100%,
       max-width: s.size.measure,
-      layout: {direction: .column, item-gap: s.space.lg},
+      layout: {direction: .column},
       overflow: .scroll,
       padding: [s.space.xxl, 0px],
       children: [intro, notice, item1, item2, item3],
@@ -118,6 +141,7 @@ export inboxPage = frame {
         }
 
         introCount = text : t.caption {
+          display: .none,
           contents: "Newest first",
           fill[0].color: c.colors.faint
         }
@@ -128,6 +152,12 @@ export inboxPage = frame {
           time {
             contents: "15:41"
           }
+
+          kind {
+            kindLabel {
+              contents: "Verify installer on Windows 11"
+            }
+          }
         }
 
         heading {
@@ -136,12 +166,6 @@ export inboxPage = frame {
 
         summary {
           contents: "The installer reports an unknown publisher on 24H2 while passing on the other two devices. The signing certificate chain is missing an intermediate certificate."
-        }
-
-        threadRef {
-          threadName {
-            contents: "Verify installer on Windows 11"
-          }
         }
 
         options {
@@ -165,9 +189,9 @@ export inboxPage = frame {
         }
       }
 
-      item2 = frame : attention.systemItem {}
+      item2 = frame : attention.inboxSystemRow {}
 
-      item3 = frame : attention.inboxItem {
+      item3 = frame : attention.inboxRow {
         options {
           overrides: [remove(attention.attentionCard.options.third)],
 
@@ -184,8 +208,16 @@ export inboxPage = frame {
           }
         }
 
-        threadRef {
-          display: .none
+        head {
+          kind {
+            kindLabel {
+              display: .none
+            }
+          }
+
+          time {
+            contents: "Yesterday 22:10"
+          }
         }
 
         summary {
@@ -194,12 +226,6 @@ export inboxPage = frame {
 
         heading {
           contents: "Upgrade the macOS test host to 15.1 before running?"
-        }
-
-        head {
-          time {
-            contents: "Yesterday 22:10"
-          }
         }
       }
     }

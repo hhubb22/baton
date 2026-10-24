@@ -1,4 +1,6 @@
 import "tokens/colors.elyx" as c
+import "foundations/typography.elyx" as t
+import "controls/button.elyx" as buttons
 import "blocks/thread-list.elyx" as lists
 import "blocks/thread-detail.elyx" as details
 import "blocks/new-thread.elyx" as newThread
@@ -262,19 +264,16 @@ threadsFolderRoots = frame : lists.threadsPage {
   main {
     compose {
       composer {
-        prompt {
-          fill[0].color: c.colors.text,
-          contents: "Run the reconnect tests."
+        toolbar {
+          @with-variant(buttons.sendButton)
+          send {
+            top: .nil
+          }
         }
 
-        toolbar {
-          send {
-            fill[0].color: c.colors.subtle,
-
-            sendGlyph {
-              fill[0].color: c.colors.text
-            }
-          }
+        @with-variant(t.body)
+        prompt {
+          contents: "Run the reconnect tests."
         }
       }
     }
@@ -331,19 +330,16 @@ threadsFolderBrowse = frame : lists.threadsPage {
   main {
     compose {
       composer {
-        prompt {
-          fill[0].color: c.colors.text,
-          contents: "Run the reconnect tests."
+        toolbar {
+          @with-variant(buttons.sendButton)
+          send {
+            top: .nil
+          }
         }
 
-        toolbar {
-          send {
-            fill[0].color: c.colors.subtle,
-
-            sendGlyph {
-              fill[0].color: c.colors.text
-            }
-          }
+        @with-variant(t.body)
+        prompt {
+          contents: "Run the reconnect tests."
         }
       }
     }
@@ -401,19 +397,16 @@ threadsFolderSelected = frame : lists.threadsPage {
   main {
     compose {
       composer {
-        prompt {
-          fill[0].color: c.colors.text,
-          contents: "Run the reconnect tests."
+        toolbar {
+          @with-variant(buttons.sendButton)
+          send {
+            top: .nil
+          }
         }
 
-        toolbar {
-          send {
-            fill[0].color: c.colors.subtle,
-
-            sendGlyph {
-              fill[0].color: c.colors.text
-            }
-          }
+        @with-variant(t.body)
+        prompt {
+          contents: "Run the reconnect tests."
         }
       }
     }
@@ -457,19 +450,16 @@ threadsFolderDevices = frame : lists.threadsPage {
   main {
     compose {
       composer {
-        prompt {
-          fill[0].color: c.colors.text,
-          contents: "Run the reconnect tests."
+        toolbar {
+          @with-variant(buttons.sendButton)
+          send {
+            top: .nil
+          }
         }
 
-        toolbar {
-          send {
-            fill[0].color: c.colors.subtle,
-
-            sendGlyph {
-              fill[0].color: c.colors.text
-            }
-          }
+        @with-variant(t.body)
+        prompt {
+          contents: "Run the reconnect tests."
         }
       }
     }
@@ -535,8 +525,15 @@ threadsDraft = frame : lists.threadsPage {
   main {
     compose {
       composer {
+        toolbar {
+          @with-variant(buttons.sendButton)
+          send {
+            top: .nil
+          }
+        }
+
+        @with-variant(t.body)
         prompt {
-          fill[0].color: c.colors.text,
           contents: "Run the reconnect tests."
         }
       }
@@ -553,12 +550,12 @@ threadsFolderApplied = frame : lists.threadsPage {
   main {
     compose {
       composer {
-        prompt {
-          fill[0].color: c.colors.text,
-          contents: "Run the reconnect tests."
-        }
-
         toolbar {
+          @with-variant(buttons.sendButton)
+          send {
+            top: .nil
+          }
+
           lead {
             location {
               label {
@@ -566,6 +563,11 @@ threadsFolderApplied = frame : lists.threadsPage {
               }
             }
           }
+        }
+
+        @with-variant(t.body)
+        prompt {
+          contents: "Run the reconnect tests."
         }
       }
     }
@@ -605,19 +607,16 @@ threadsFolderWindows = frame : lists.threadsPage {
   main {
     compose {
       composer {
-        prompt {
-          fill[0].color: c.colors.text,
-          contents: "Run the reconnect tests."
+        toolbar {
+          @with-variant(buttons.sendButton)
+          send {
+            top: .nil
+          }
         }
 
-        toolbar {
-          send {
-            fill[0].color: c.colors.subtle,
-
-            sendGlyph {
-              fill[0].color: c.colors.text
-            }
-          }
+        @with-variant(t.body)
+        prompt {
+          contents: "Run the reconnect tests."
         }
       }
     }
@@ -686,19 +685,16 @@ threadsFolderOffline = frame : lists.threadsPage {
   main {
     compose {
       composer {
-        prompt {
-          fill[0].color: c.colors.text,
-          contents: "Run the reconnect tests."
+        toolbar {
+          @with-variant(buttons.sendButton)
+          send {
+            top: .nil
+          }
         }
 
-        toolbar {
-          send {
-            fill[0].color: c.colors.subtle,
-
-            sendGlyph {
-              fill[0].color: c.colors.text
-            }
-          }
+        @with-variant(t.body)
+        prompt {
+          contents: "Run the reconnect tests."
         }
       }
     }
@@ -774,22 +770,6 @@ threadsStopConfirm = frame : lists.threadsPageSplit {
   overrides: [insert(scrim, after = lists.threadsPageSplit.detail)],
 
   detail {
-    footer {
-      composer {
-        toolbar {
-          actions {
-            send {
-              fill[0].color: c.colors.subtle,
-
-              sendGlyph {
-                fill[0].color: c.colors.text
-              }
-            }
-          }
-        }
-      }
-    }
-
     head {
       lead {
         name {
@@ -835,22 +815,6 @@ threadsArchiveConfirm = frame : lists.threadsPageSplit {
   overrides: [insert(scrim, after = lists.threadsPageSplit.detail)],
 
   detail {
-    footer {
-      composer {
-        toolbar {
-          actions {
-            send {
-              fill[0].color: c.colors.subtle,
-
-              sendGlyph {
-                fill[0].color: c.colors.text
-              }
-            }
-          }
-        }
-      }
-    }
-
     head {
       lead {
         name {
@@ -920,7 +884,7 @@ threadsStopping = frame : lists.threadsPageSplit {
       runningRow {
         state {
           contents: "Stopping…",
-          font-family: "PingFang SC"
+          font-family: "Inter"
         }
       }
 
@@ -969,7 +933,7 @@ threadsArchivePending = frame : lists.threadsPageSplit {
       runningRow {
         state {
           contents: "Stopping…",
-          font-family: "PingFang SC"
+          font-family: "Inter"
         }
       }
 
@@ -1009,24 +973,17 @@ threadsArchiveOffline = frame : lists.threadsPageSplit {
 
   main {
     list {
-      runningRow {
-        state {
-          fill[0].color: c.colors.muted,
-          contents: "Waiting to stop",
-          font-family: "PingFang SC"
-        }
-
-        lead {
-          mark {
-            dot {
-              fill[0].color: c.colors.muted
-            }
-          }
-        }
-      }
-
       kiroRow {
         display: .none
+      }
+
+      @with-variant(lists.threadListRowWaiting)
+      runningRow {
+        state {
+          contents: "Waiting to stop"
+        }
+
+        top: .nil
       }
 
       runningHead {
@@ -1063,24 +1020,17 @@ threadsStopOffline = frame : lists.threadsPageSplit {
 
   main {
     list {
-      runningRow {
-        state {
-          fill[0].color: c.colors.muted,
-          contents: "Waiting to stop",
-          font-family: "PingFang SC"
-        }
-
-        lead {
-          mark {
-            dot {
-              fill[0].color: c.colors.muted
-            }
-          }
-        }
-      }
-
       kiroRow {
         display: .none
+      }
+
+      @with-variant(lists.threadListRowWaiting)
+      runningRow {
+        state {
+          contents: "Waiting to stop"
+        }
+
+        top: .nil
       }
 
       runningHead {
@@ -1125,22 +1075,6 @@ threadsArchived = frame : lists.threadsPageSplit {
 
   main {
     list {
-      runningRow {
-        state {
-          fill[0].color: c.colors.muted,
-          contents: "Archived",
-          font-family: "PingFang SC"
-        }
-
-        lead {
-          mark {
-            dot {
-              fill[0].color: c.colors.muted
-            }
-          }
-        }
-      }
-
       idleRow4 {
         display: .none
       }
@@ -1171,6 +1105,15 @@ threadsArchived = frame : lists.threadsPageSplit {
 
       kiroRow {
         display: .none
+      }
+
+      @with-variant(lists.threadListRowArchived)
+      runningRow {
+        time {
+          contents: "Just now"
+        }
+
+        top: .nil
       }
 
       stoppedRow {
@@ -1251,22 +1194,6 @@ threadsStopUnavailable = frame : lists.threadsPageSplit {
   overrides: [insert(scrim, after = lists.threadsPageSplit.detail)],
 
   detail {
-    footer {
-      composer {
-        toolbar {
-          actions {
-            send {
-              fill[0].color: c.colors.subtle,
-
-              sendGlyph {
-                fill[0].color: c.colors.text
-              }
-            }
-          }
-        }
-      }
-    }
-
     head {
       lead {
         name {
@@ -1514,22 +1441,6 @@ threadsFileLoading = frame : lists.threadsPageSplit {
   overrides: [insert(scrim, after = lists.threadsPageSplit.detail)],
 
   detail {
-    footer {
-      composer {
-        toolbar {
-          actions {
-            send {
-              fill[0].color: c.colors.subtle,
-
-              sendGlyph {
-                fill[0].color: c.colors.text
-              }
-            }
-          }
-        }
-      }
-    }
-
     head {
       lead {
         name {
@@ -1561,22 +1472,6 @@ threadsFileMissing = frame : lists.threadsPageSplit {
   overrides: [insert(scrim, after = lists.threadsPageSplit.detail)],
 
   detail {
-    footer {
-      composer {
-        toolbar {
-          actions {
-            send {
-              fill[0].color: c.colors.subtle,
-
-              sendGlyph {
-                fill[0].color: c.colors.text
-              }
-            }
-          }
-        }
-      }
-    }
-
     head {
       lead {
         name {
@@ -1608,22 +1503,6 @@ threadsFileBinary = frame : lists.threadsPageSplit {
   overrides: [insert(scrim, after = lists.threadsPageSplit.detail)],
 
   detail {
-    footer {
-      composer {
-        toolbar {
-          actions {
-            send {
-              fill[0].color: c.colors.subtle,
-
-              sendGlyph {
-                fill[0].color: c.colors.text
-              }
-            }
-          }
-        }
-      }
-    }
-
     head {
       lead {
         name {
@@ -1655,22 +1534,6 @@ threadsFileFailed = frame : lists.threadsPageSplit {
   overrides: [insert(scrim, after = lists.threadsPageSplit.detail)],
 
   detail {
-    footer {
-      composer {
-        toolbar {
-          actions {
-            send {
-              fill[0].color: c.colors.subtle,
-
-              sendGlyph {
-                fill[0].color: c.colors.text
-              }
-            }
-          }
-        }
-      }
-    }
-
     head {
       lead {
         name {
@@ -1789,19 +1652,16 @@ threadsFolderWindowsBrowse = frame : lists.threadsPage {
   main {
     compose {
       composer {
-        prompt {
-          fill[0].color: c.colors.text,
-          contents: "Run the reconnect tests."
+        toolbar {
+          @with-variant(buttons.sendButton)
+          send {
+            top: .nil
+          }
         }
 
-        toolbar {
-          send {
-            fill[0].color: c.colors.subtle,
-
-            sendGlyph {
-              fill[0].color: c.colors.text
-            }
-          }
+        @with-variant(t.body)
+        prompt {
+          contents: "Run the reconnect tests."
         }
       }
     }
@@ -1875,12 +1735,12 @@ threadsFolderWindowsApplied = frame : lists.threadsPage {
   main {
     compose {
       composer {
-        prompt {
-          fill[0].color: c.colors.text,
-          contents: "Run the reconnect tests."
-        }
-
         toolbar {
+          @with-variant(buttons.sendButton)
+          send {
+            top: .nil
+          }
+
           lead {
             location {
               label {
@@ -1888,6 +1748,11 @@ threadsFolderWindowsApplied = frame : lists.threadsPage {
               }
             }
           }
+        }
+
+        @with-variant(t.body)
+        prompt {
+          contents: "Run the reconnect tests."
         }
       }
     }

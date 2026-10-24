@@ -64,7 +64,7 @@ export statusChip = frame {
   border: c.colors.hairline,
   shadow: {
     drop-shadow: {
-      color: rgb(0%, 0%, 0%, 4%),
+      color: c.colors.shadowSoft,
       offset: point(0px, 1px),
       blur-radius: 3px
     }

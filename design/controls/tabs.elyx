@@ -54,14 +54,14 @@ export segmented = frame {
     shadow: [
       {
         drop-shadow: {
-          color: rgb(0%, 0%, 0%, 8%),
+          color: c.colors.shadowNear,
           offset: point(0px, 1px),
           blur-radius: 2px
         }
       },
       {
         drop-shadow: {
-          color: rgb(0%, 0%, 0%, 4%),
+          color: c.colors.shadowSoft,
           offset: point(0px, 1px),
           blur-radius: 6px
         }
@@ -101,8 +101,8 @@ export segmentedSecond = frame : segmented {
   top: 64px,
 
   second {
-    shadow[0].drop-shadow.color: rgb(0%, 0%, 0%, 8%),
-    shadow[1].drop-shadow.color: rgb(0%, 0%, 0%, 4%),
+    shadow[0].drop-shadow.color: c.colors.shadowNear,
+    shadow[1].drop-shadow.color: c.colors.shadowSoft,
     fill[0].color: c.colors.surface,
 
     secondLabel {

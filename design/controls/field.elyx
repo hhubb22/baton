@@ -28,8 +28,8 @@ export error = frame : field {
   title: "Field / Error",
   top: 120px,
 
+  @with-variant(t.captionDanger)
   helper {
-    fill[0].color: c.colors.danger,
     contents: "Enter a project name."
   }
 

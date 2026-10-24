@@ -14,9 +14,8 @@ export input = frame {
   padding: [0px, 10px],
   children: value,
 
-  value = text : t.small {
-    contents: "e.g. Baton Dev",
-    fill[0].color: c.colors.faint
+  value = text : t.smallPlaceholder {
+    contents: "e.g. Baton Dev"
   }
 }
 
@@ -25,8 +24,8 @@ export filled = frame : input {
   title: "Input / Filled",
   top: 56px,
 
+  @with-variant(t.small)
   value {
-    fill[0].color: c.colors.text,
     contents: "Baton Dev"
   }
 }
@@ -38,8 +37,8 @@ export focus = frame : input {
   border[0].color: c.colors.focus,
   border[0].width: 1.5px,
 
+  @with-variant(t.small)
   value {
-    fill[0].color: c.colors.text,
     contents: "Baton Dev"
   }
 }

@@ -4,6 +4,7 @@ import "foundations/typography.elyx" as t
 import "blocks/sidebar.elyx" as sidebars
 import "controls/icons.elyx" as icons
 import "controls/button.elyx" as buttons
+import "resources/assets/backdrop-day-frost.jpg" as backdrop
 
 export firstVisit = frame {
   title: "Workspace / First visit",
@@ -12,16 +13,38 @@ export firstVisit = frame {
   top: 0px,
   width: s.size.screenWidth,
   height: s.size.screenHeight,
-  layout: {direction: .row},
-  fill: c.colors.canvas,
+  layout: {item-gap: s.size.gutter},
+  fill: [{image: {ref: backdrop}}, c.colors.glass],
+  padding: [s.size.gutter, s.size.gutter, s.size.gutter, 0px],
   children: [sidebar, main],
 
-  sidebar = frame : sidebars.sidebarEmpty {}
+  sidebar = frame : sidebars.sidebarEmpty {
+    height: 100%
+  }
 
   main = frame {
     width: 100%,
     height: 100%,
     layout: {direction: .column},
+    fill: c.colors.canvas,
+    border: c.colors.hairline,
+    shadow: [
+      {
+        drop-shadow: {
+          color: c.colors.shadowNear,
+          offset: point(0px, 1px),
+          blur-radius: 3px
+        }
+      },
+      {
+        drop-shadow: {
+          color: c.colors.shadowFar,
+          offset: point(0px, 12px),
+          blur-radius: 40px
+        }
+      }
+    ],
+    corner-radius: s.radius.lg,
     children: [head, content],
 
     head = frame {

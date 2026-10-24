@@ -6,6 +6,7 @@ import "blocks/conversation.elyx" as conv
 import "controls/chip.elyx" as chips
 import "blocks/composer.elyx" as composers
 import "blocks/overview.elyx" as overviews
+import "resources/assets/backdrop-day-frost.jpg" as backdrop
 
 // Project page: sidebar, main conversation, and overview panel. Each state in screens/ instantiates this block.
 // Main conversation aligns to the bottom so earlier turns clip at the top as if scrolled to the latest turn.
@@ -14,16 +15,38 @@ export projectPage = frame {
   title: "Project page",
   width: s.size.screenWidth,
   height: s.size.screenHeight,
-  layout: {direction: .row},
-  fill: c.colors.canvas,
+  layout: {item-gap: s.size.gutter},
+  fill: [{image: {ref: backdrop}}, c.colors.glass],
+  padding: [s.size.gutter, s.size.gutter, s.size.gutter, 0px],
   children: [sidebar, main, overview],
 
-  sidebar = frame : sidebars.sidebar {}
+  sidebar = frame : sidebars.sidebar {
+    height: 100%
+  }
 
   main = frame {
     width: 100%,
     height: 100%,
     layout: {direction: .column},
+    fill: c.colors.canvas,
+    border: c.colors.hairline,
+    shadow: [
+      {
+        drop-shadow: {
+          color: c.colors.shadowNear,
+          offset: point(0px, 1px),
+          blur-radius: 3px
+        }
+      },
+      {
+        drop-shadow: {
+          color: c.colors.shadowFar,
+          offset: point(0px, 12px),
+          blur-radius: 40px
+        }
+      }
+    ],
+    corner-radius: s.radius.lg,
     children: [header, transcript, dock],
 
     header = frame : headers.projectHeader {
@@ -127,5 +150,7 @@ export projectPage = frame {
     }
   }
 
-  overview = frame : overviews.overview {}
+  overview = frame : overviews.overview {
+    height: 100%
+  }
 }

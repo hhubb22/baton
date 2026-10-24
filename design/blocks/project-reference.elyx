@@ -11,8 +11,15 @@ export referenceComposer = frame : composers.composer {
   top: 0px,
   overrides: [insert(quote, after = .nil)],
 
+  toolbar {
+    @with-variant(buttons.sendButton)
+    send {
+      top: .nil
+    }
+  }
+
+  @with-variant(t.body)
   prompt {
-    fill[0].color: c.colors.text,
     contents: "Explain the timeout and suggest the next check."
   }
 

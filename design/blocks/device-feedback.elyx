@@ -21,7 +21,7 @@ export notice = frame {
 
   detail = text : t.small {
     width: 100%,
-    contents: "Your default device was removed. Choose another device for new chats and projects.",
+    contents: "Your default device was disconnected. Choose another device for new chats and projects.",
     fill[0].color: c.colors.muted
   }
 
