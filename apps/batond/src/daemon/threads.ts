@@ -69,7 +69,7 @@ export function makeThreadService(options: {
   ledger: NodeLedger
   host: DaemonWorkerHost
   tracer?: Tracer.Tracer
-  capability: () => RuntimeAgent
+  capability: () => RuntimeAgent | readonly RuntimeAgent[]
 }) {
   const { ledger, host } = options
   const recovery = makeWorkerRecovery({ dataDirectory: options.dataDirectory, ledger, host })
@@ -162,13 +162,17 @@ export function makeThreadService(options: {
       const previous = await io(ledger.worker(cmd.thread_id))
       let request: WorkerRequest
       if (cmd.action === 'open') {
-        const capability = options.capability()
+        const agentType = cmd.agent_type
+        if (agentType === undefined) throw new AdmissionRejected('agent_unavailable')
+        const reported = options.capability()
+        const capabilities = Array.isArray(reported) ? reported : [reported]
+        const capability = capabilities.find((agent) => agent.agent_type === agentType)
         if (previous) throw new AdmissionRejected('thread_already_exists')
-        const shell = cmd.agent_type === 'shell'
+        const shell = agentType === 'shell'
         if (shell) {
           if (!cmd.project_id || !cmd.origin_conversation_id || !cmd.origin_tool_call_id)
             throw new AdmissionRejected('project_required')
-        } else if (cmd.agent_type !== 'cursor' || capability.status !== 'available' || !capability.capabilities.create)
+        } else if (!capability || capability.status !== 'available' || !capability.capabilities.create)
           throw new AdmissionRejected('agent_unavailable')
         if (!cmd.working_directory) throw new AdmissionRejected('invalid_working_directory')
         let cwd: string
@@ -179,7 +183,7 @@ export function makeThreadService(options: {
         }
         const generation = cmd.storage_generation ?? randomUUID()
         const paths = workerPaths(options.dataDirectory, cmd.thread_id)
-        const model = shell ? '' : (cmd.model ?? capability.default_model)
+        const model = shell || capability === undefined ? '' : (cmd.model ?? capability.default_model)
         request = {
           type: 'thread_open',
           ok: false,
@@ -190,7 +194,7 @@ export function makeThreadService(options: {
             thread_id: cmd.thread_id,
             node_id: options.identity.node_id,
             storage_generation: generation,
-            agent_type: shell ? 'shell' : 'cursor',
+            agent_type: agentType,
             ...(cmd.project_id ? { project_id: cmd.project_id } : {}),
             ...(cmd.origin_conversation_id ? { origin_conversation_id: cmd.origin_conversation_id } : {}),
             ...(cmd.origin_tool_call_id ? { origin_tool_call_id: cmd.origin_tool_call_id } : {}),

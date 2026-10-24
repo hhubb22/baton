@@ -21,7 +21,13 @@ import { ensurePrivateDirectory, readPrivateFile } from '../platform/private.ts'
 import { findSent, validatePreparation } from './evidence.ts'
 import { loadMapping, mappingFor, mappingThread, persistMapping, statePath } from './mapping.ts'
 import type { NativeMapping } from './mapping.ts'
-import { AgentHostError, AgentHostProcessGroup, type AgentHostDriverShape, type ExecutionEvent } from './protocol.ts'
+import {
+  AgentHostError,
+  AgentHostProcessGroup,
+  type AgentHostDriverShape,
+  type ExecutionEvent,
+  type ProbeResult,
+} from './protocol.ts'
 import { runtimeRequestDecision } from './runtime-request.ts'
 
 export interface ProviderHostDriverOptions {
@@ -35,7 +41,8 @@ export interface ProviderHostDriverOptions {
   readonly interactionMode: ProviderInteractionMode
   readonly runtimePolicy: (cwd: string) => ProviderAdapter.ProviderAdapterV2RuntimePolicy
   readonly model: (config: WorkerOpenConfig) => ModelSelection
-  readonly probe: AgentHostDriverShape['probe']
+  /** Dependencies are provided by the caller, so this effect's requirements are empty. */
+  readonly probe: Effect.Effect<ProbeResult, AgentHostError>
   /** Overrides the default `Baton <thread>` session title. Replay uses the recorded name. */
   readonly sessionTitle?: string
 }
@@ -321,7 +328,7 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
         }),
       send: ({ message, preparation }) =>
         Effect.gen(function* () {
-          if (!session || !providerThread || !config || !appThread || closed || stopped)
+          if (!session || !providerThread || !mapping || !config || !appThread || closed || stopped)
             return yield* error(`${label} cannot submit in its current state`)
           yield* Effect.try({
             try: () => validatePreparation(message, preparation),
@@ -352,7 +359,7 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
                 Effect.timeout('30 seconds'),
                 Effect.mapError((cause) => fail('steer turn', cause)),
               )
-            return { nativeSessionId: mapping!.nativeSessionId, executionId: turn.runId }
+            return { nativeSessionId: mapping.nativeSessionId, executionId: turn.runId }
           }
           if (active && !active.ended) return yield* error(`${label} turn is still active`)
           ordinal += 1
@@ -393,7 +400,7 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
             Effect.match({ onFailure: () => undefined, onSuccess: (value) => value }),
           )
           if (turnId) turn.providerTurnId = turnId
-          return { nativeSessionId: mapping!.nativeSessionId, executionId: runId }
+          return { nativeSessionId: mapping.nativeSessionId, executionId: runId }
         }),
       sent: ({ config: input, message, preparation }) =>
         Effect.gen(function* () {

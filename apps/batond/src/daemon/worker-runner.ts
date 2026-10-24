@@ -58,11 +58,18 @@ export const runWorker = (options: {
         Effect.runPromise(Deferred.await(workerReady).pipe(Effect.flatMap((worker) => worker.records.remove(record)))),
     }
     const registry = (yield* Effect.promise(() => import('../agents/registry.ts'))).agentRegistry
+    const hostCommand = { file: invocation.executable, args: invocation.args }
     const cursorFactory = registry.cursor.makeFactory({
-      command: { file: invocation.executable, args: invocation.args },
+      command: hostCommand,
       records,
       ...(watchdog ? { watchdog } : {}),
       paths: registry.cursor.paths,
+    })
+    const piFactory = registry.pi.makeFactory({
+      command: hostCommand,
+      records,
+      ...(watchdog ? { watchdog } : {}),
+      paths: registry.pi.paths,
     })
     const shellFactory = registry.shell.makeFactory({
       dataDirectory: options.dataDirectory,
@@ -73,6 +80,7 @@ export const runWorker = (options: {
       options.agentFactory ??
       ((config) => {
         if (config.agent_type === 'cursor') return cursorFactory(config)
+        if (config.agent_type === 'pi') return piFactory(config)
         if (config.agent_type === 'shell') return shellFactory(config)
         throw new Error(`Unsupported Thread agent_type: ${config.agent_type}`)
       })

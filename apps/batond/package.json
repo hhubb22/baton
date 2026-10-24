@@ -36,6 +36,7 @@
     "@t3tools/contracts": "workspace:*",
     "@t3tools/provider-core": "workspace:*",
     "@t3tools/provider-cursor": "workspace:*",
+    "@t3tools/provider-pi": "workspace:*",
     "@t3tools/shared": "workspace:*",
     "effect": "catalog:",
     "ws": "8.22.0"

@@ -1,9 +1,11 @@
 import { cursorAgentHostModule } from '../agents/cursor/host-module.ts'
+import { piAgentHostModule } from '../agents/pi/host-module.ts'
 import { runAgentHost, type AgentHostModule } from './host.ts'
 import type { AgentHostPaths } from './host-layer.ts'
 
 const modules: Readonly<Record<string, AgentHostModule>> = {
   cursor: cursorAgentHostModule,
+  pi: piAgentHostModule,
 }
 
 export const agentHostModule = (agentType: string): AgentHostModule | undefined => modules[agentType]

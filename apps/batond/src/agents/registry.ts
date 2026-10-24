@@ -1,8 +1,10 @@
 import { Effect } from 'effect'
 import { dirname, isAbsolute } from 'node:path'
 import type { RuntimeAgent, WorkerOpenConfig } from '@baton/protocol'
+import type { ProbeResult } from '../agent-host/protocol.ts'
 import { inspectCursorSdk } from './cursor/sdk-loader.ts'
 import { makeCursorAgentFactory, probeCursor } from './cursor/index.ts'
+import { makePiAgentFactory, probePi } from './pi/index.ts'
 import { makeShellAgentFactory } from './shell/index.ts'
 import { startProcessWatchdog } from '../platform/process.ts'
 import { currentBatondCommand } from '../daemon/host.ts'
@@ -12,10 +14,52 @@ import { AgentError } from '../worker/agent.ts'
 const verifiedCombinations = new Set(['darwin-arm64'])
 
 /** The Thread working directory and the private directory beside the native mapping. */
-const cursorPaths = (config: WorkerOpenConfig) => {
+const agentPaths = (label: string) => (config: WorkerOpenConfig) => {
   const statePath = config.adapter_config.state_path
-  if (!statePath || !isAbsolute(statePath)) throw new AgentError('Cursor requires an absolute private state_path')
+  if (!statePath || !isAbsolute(statePath)) throw new AgentError(`${label} requires an absolute private state_path`)
   return { workingDirectory: config.working_directory, privateDirectory: dirname(statePath) }
+}
+
+const cursorPaths = agentPaths('Cursor')
+const narrowed = { create: false, queue: true, steer: false, stop: true, resume: false, switch_model: false }
+
+/**
+ * Upstream Pi and Codex can steer and switch models. The worker still rejects
+ * those commands, so the reported capabilities stay narrower.
+ */
+export function hostedAgentReport(
+  agentType: 'pi' | 'codex',
+  result: ProbeResult,
+  missingReason: string,
+): RuntimeAgent {
+  const version = typeof result.details.version === 'string' ? result.details.version : 'unknown'
+  const platform = typeof result.details.platform === 'string' ? result.details.platform : `${process.platform}-${process.arch}`
+  const models = [...new Set(result.models)].map((id) => ({ id, name: id }))
+  const base: RuntimeAgent = {
+    agent_type: agentType,
+    version,
+    status: 'unverified',
+    models,
+    default_model: '',
+    capabilities: narrowed,
+  }
+  if (result.details.installed === false)
+    return { ...base, status: 'unavailable', reason: result.reason ?? missingReason }
+  if (result.authenticated === 'missing')
+    return { ...base, status: 'unavailable', reason: result.reason ?? missingReason }
+  if (result.authenticated !== 'valid') return { ...base, reason: result.reason ?? `${agentType} 认证状态尚未确认` }
+  const ready = {
+    ...base,
+    default_model: models[0]?.id || 'default',
+    ...(result.models.length === 0 ? { reason: result.reason ?? '模型目录暂不可读，可使用默认模型' } : {}),
+  }
+  if (!verifiedCombinations.has(platform))
+    return { ...ready, reason: `${agentType} ${version} / ${platform} 尚未通过执行、停止与恢复验证` }
+  return {
+    ...ready,
+    status: 'available',
+    capabilities: { ...narrowed, create: true, resume: true },
+  }
 }
 
 export async function probeLocalCursor(): Promise<RuntimeAgent> {
@@ -96,12 +140,49 @@ export async function probeLocalCursor(): Promise<RuntimeAgent> {
   }
 }
 
+const probeHost = (probe: typeof probeCursor) =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const watchdog = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            startProcessWatchdog({ file: currentBatondCommand().executable, args: [...currentBatondCommand().args, 'watchdog'] }),
+          ),
+          (owned) => Effect.promise(() => owned.close()),
+        )
+        const invocation = currentBatondCommand()
+        return yield* probe({
+          command: { file: invocation.executable, args: invocation.args },
+          watchdog,
+        }).pipe(Effect.timeout('30 seconds'))
+      }),
+    ),
+  )
+
+export async function probeLocalPi(): Promise<RuntimeAgent> {
+  try {
+    return hostedAgentReport('pi', await probeHost(probePi), 'Pi CLI 未安装或尚未认证')
+  } catch {
+    return hostedAgentReport('pi', { authenticated: 'unknown', models: [], details: { installed: false, version: 'unknown', platform: `${process.platform}-${process.arch}` }, reason: 'Pi 依赖或只读探测暂不可用' }, 'Pi CLI 未安装或尚未认证')
+  }
+}
+
+export async function probeLocalAgents(): Promise<RuntimeAgent[]> {
+  return Promise.all([probeLocalCursor(), probeLocalPi()])
+}
+
 export const agentRegistry = {
   cursor: {
     type: 'cursor',
     makeFactory: makeCursorAgentFactory,
     probe: probeLocalCursor,
     paths: cursorPaths,
+  },
+  pi: {
+    type: 'pi',
+    makeFactory: makePiAgentFactory,
+    probe: probeLocalPi,
+    paths: agentPaths('Pi'),
   },
   shell: { type: 'shell', makeFactory: makeShellAgentFactory },
 } as const

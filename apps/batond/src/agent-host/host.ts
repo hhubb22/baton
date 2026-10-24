@@ -1,5 +1,5 @@
 import { Console } from 'node:console'
-import { Cause, Effect, Exit, Fiber, Layer, Semaphore, Stream } from 'effect'
+import { Cause, Context, Effect, Exit, Fiber, Layer, Semaphore, Stream } from 'effect'
 import { RpcServer, RpcSerialization } from 'effect/rpc'
 import { NodeStdio } from '@effect/platform-node'
 import { installHostProcessGroup } from '../platform/host-process-group.ts'
@@ -85,7 +85,7 @@ export const runAgentHost = (module: AgentHostModule, options: AgentHostOptions)
       ),
     )
     const driver = yield* AgentHostDriver.pipe(Effect.provideContext(environment))
-    const handlers = yield* makeAgentHostHandlers(driver)
+    const handlers = yield* makeAgentHostHandlers(driver, environment)
     return yield* RpcServer.make(AgentHostRpc, { concurrency: 'unbounded', disableTracing: true }).pipe(
       Effect.provide(AgentHostRpc.toLayer(handlers)),
       Effect.provide(RpcServer.layerProtocolStdio),
@@ -99,19 +99,23 @@ export const runAgentHost = (module: AgentHostModule, options: AgentHostOptions)
     )
   })
 
-export const makeAgentHostHandlers = (driver: AgentHostDriverShape) =>
+export const makeAgentHostHandlers = <Services>(
+  driver: AgentHostDriverShape,
+  context: Context.Context<Services>,
+) =>
   Effect.gen(function* () {
     const regular = Semaphore.makeUnsafe(7)
     const control = Semaphore.makeUnsafe(1)
     let generation = ''
     let sequence = 0
+    const hosted = <A, E>(effect: Effect.Effect<A, E>) => effect.pipe(Effect.provideContext(context))
     const frames = driver.events.pipe(Stream.map((event): HostEvent => ({ generation, sequence: ++sequence, event })))
-    yield* Effect.addFinalizer(() => driver.close.pipe(Effect.ignore))
+    yield* Effect.addFinalizer(() => hosted(driver.close).pipe(Effect.ignore))
     return AgentHostRpc.of({
-      probe: () => regular.withPermit(driver.probe),
+      probe: () => regular.withPermit(hosted(driver.probe)),
       open: ({ config, generation: next }) =>
         regular.withPermit(
-          driver.open({ config, generation: next }).pipe(
+          hosted(driver.open({ config, generation: next })).pipe(
             Effect.tap((identity) =>
               Effect.sync(() => {
                 generation = next
@@ -123,7 +127,7 @@ export const makeAgentHostHandlers = (driver: AgentHostDriverShape) =>
         ),
       resume: ({ config, generation: next, nativeSessionId }) =>
         regular.withPermit(
-          driver.resume({ config, generation: next, nativeSessionId }).pipe(
+          hosted(driver.resume({ config, generation: next, nativeSessionId })).pipe(
             Effect.tap((identity) =>
               Effect.sync(() => {
                 generation = next
@@ -133,11 +137,13 @@ export const makeAgentHostHandlers = (driver: AgentHostDriverShape) =>
             ),
           ),
         ),
-      send: ({ message, preparation }) => regular.withPermit(driver.send({ message, preparation })),
+      send: ({ message, preparation }) => regular.withPermit(hosted(driver.send({ message, preparation }))),
       sent: ({ config, message, preparation }) =>
-        regular.withPermit(driver.sent({ config, message, preparation }).pipe(Effect.map((value) => value ?? null))),
+        regular.withPermit(
+          hosted(driver.sent({ config, message, preparation })).pipe(Effect.map((value) => value ?? null)),
+        ),
       events: () => Stream.unwrap(Effect.as(regular.take(1), frames.pipe(Stream.ensuring(regular.release(1))))),
-      abort: () => control.withPermit(driver.abort),
-      close: () => control.withPermit(driver.close),
+      abort: () => control.withPermit(hosted(driver.abort)),
+      close: () => control.withPermit(hosted(driver.close)),
     })
   })

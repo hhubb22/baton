@@ -43,7 +43,7 @@ export interface RunDaemonOptions {
   readonly pollIntervalMs?: number
   readonly probeIntervalMs?: number
   readonly transport?: DaemonTransport
-  readonly probe?: (signal: AbortSignal) => Promise<RuntimeAgent>
+  readonly probe?: (signal: AbortSignal) => Promise<RuntimeAgent | readonly RuntimeAgent[]>
   readonly host?: DaemonWorkerHost
   readonly random?: () => number
   readonly project?: Omit<ProjectManagerOptions, 'dataDir'>
@@ -53,7 +53,7 @@ export class DaemonServices extends Context.Service<
   {
     readonly host: DaemonWorkerHost
     readonly transport: DaemonTransport
-    readonly probe: (signal: AbortSignal) => Promise<RuntimeAgent>
+    readonly probe: (signal: AbortSignal) => Promise<RuntimeAgent | readonly RuntimeAgent[]>
   }
 >()('baton/DaemonServices') {}
 
@@ -406,13 +406,13 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
       ),
       (service) => Effect.promise(() => service.close()),
     )
-    let capability = pendingCapability()
+    let agents: RuntimeAgent[] = [pendingCapability()]
     const threads = makeThreadService({
       dataDirectory: options.dataDirectory,
       identity,
       ledger,
       host: services.host,
-      capability: () => capability,
+      capability: () => agents,
       tracer: yield* Tracer.Tracer,
     })
     yield* controlAttempt((signal) => threads.discover(signal))
@@ -434,7 +434,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
       boundRuntimeReport({
         batond_version: '0.0.0',
         ...(username ? { user: username } : {}),
-        agents: [capability],
+        agents,
         ...deviceReport,
       })
     const collectDevices = Effect.gen(function* () {
@@ -461,9 +461,10 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
       while (true) {
         yield* attempt(async (signal) => {
           try {
-            capability = await services.probe(signal)
+            const probed = await services.probe(signal)
+            agents = Array.isArray(probed) ? [...probed] : [probed]
           } catch {
-            capability = { ...pendingCapability(), reason: 'Cursor 能力探测暂不可用' }
+            agents = [{ ...pendingCapability(), reason: '能力探测暂不可用' }]
           }
         })
         yield* Effect.sleep(probeMs)
@@ -514,7 +515,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
     Effect.provideService(DaemonServices, {
       host: options.host ?? new LocalWorkerHost(options.dataDirectory),
       transport: options.transport ?? connectWebSocket,
-      probe: options.probe ?? (async () => (await import('../agents/registry.ts')).probeLocalCursor()),
+      probe: options.probe ?? (async () => (await import('../agents/registry.ts')).probeLocalAgents()),
     }),
   )
 }
