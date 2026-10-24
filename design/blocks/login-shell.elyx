@@ -184,7 +184,7 @@ export signedOutPage = frame : loginPage {
       }
 
       noticeDetail {
-        contents: "Sign in to view your devices, chats, and projects."
+        contents: "Sign in to view your devices, threads, and projects."
       }
 
       display: .visible

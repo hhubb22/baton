@@ -5,7 +5,7 @@ import "blocks/attention-card.elyx" as attention
 
 inbox = frame : pages.inboxPage {
   title: "Inbox / Pending",
-  caption: "Details start collapsed. Scroll the list; Handled items stays in the header. Browser tab: Baton (3).",
+  caption: "One item is expanded; clicking another row expands it and collapses this one. Browser tab: Baton (3).",
   left: 0px,
   top: 0px,
 
@@ -47,6 +47,8 @@ empty = frame : pages.inboxPage {
       }
 
       intro {
+        display: .none,
+
         introCount {
           display: .none
         }
@@ -115,7 +117,7 @@ loadFailed = frame : pages.inboxPage {
         }
 
         explanation {
-          contents: "Check your connection. Past decisions are still saved in your chats."
+          contents: "Check your connection. Past decisions are still saved in their projects."
         }
 
         noticeTitle {
@@ -138,6 +140,8 @@ loadFailed = frame : pages.inboxPage {
       }
 
       intro {
+        display: .none,
+
         introCount {
           display: .none
         }
@@ -265,6 +269,8 @@ handled = frame : pages.inboxPage {
       }
 
       intro {
+        display: .none,
+
         introCount {
           contents: "Most recent first"
         }
@@ -286,7 +292,7 @@ handled = frame : pages.inboxPage {
       }
 
       headTitle {
-        contents: "Handled items"
+        contents: "Handled"
       }
     }
   }
@@ -434,6 +440,8 @@ loading = frame : pages.inboxPage {
       }
 
       intro {
+        display: .none,
+
         introCount {
           display: .none
         }
@@ -445,7 +453,7 @@ loading = frame : pages.inboxPage {
 
       notice {
         explanation {
-          contents: "Waiting for the latest questions and notices."
+          display: .none
         }
 
         noticeTitle {

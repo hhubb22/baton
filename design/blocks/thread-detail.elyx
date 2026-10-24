@@ -335,7 +335,7 @@ export threadTraceMissing = frame : threadTraceOffline {
   logBody {
     logSteps {
       unavailable {
-        contents: "Past chat history was deleted on this computer"
+        contents: "Thread history was deleted on Windows Desktop"
       }
     }
   }
@@ -872,7 +872,7 @@ export threadDetailArchived = frame : threadDetail {
 
       copy {
         detail {
-          contents: "This chat is closed to new messages. Past replies and attachment links are kept."
+          contents: "This thread is closed to new messages. Past replies and attachment links are kept."
         }
 
         heading {
@@ -967,7 +967,7 @@ export threadDetailWaiting = frame : threadDetail {
     notice {
       copy {
         detail {
-          contents: "Your message is saved and will send when MacBook Pro is online. This chat stays on MacBook Pro."
+          contents: "Your message is saved and will send when MacBook Pro is online. This thread stays on MacBook Pro."
         }
 
         heading {
@@ -1130,7 +1130,7 @@ export threadDetailUnresumable = frame : threadDetailStopped {
     notice {
       action {
         label {
-          contents: "New chat in this folder"
+          contents: "New thread in this folder"
         }
 
         display: .visible
@@ -1138,11 +1138,11 @@ export threadDetailUnresumable = frame : threadDetailStopped {
 
       copy {
         detail {
-          contents: "Codex cannot continue because its local chat history was deleted. Start a new chat in this folder."
+          contents: "Codex cannot continue because its local history was deleted. Start a new thread in this folder."
         }
 
         heading {
-          contents: "Past chat history was deleted on Windows Desktop"
+          contents: "Thread history was deleted on Windows Desktop"
         }
       }
 
@@ -1198,7 +1198,7 @@ export threadDetailFailed = frame : threadDetail {
 
       copy {
         detail {
-          contents: "~/src/baton-old no longer exists on Ubuntu Dev. Choose another folder to start a new chat."
+          contents: "~/src/baton-old no longer exists on Ubuntu Dev. Choose another folder to start a new thread."
         }
 
         heading {
@@ -1426,7 +1426,7 @@ export threadDetailHistoryStart = frame : threadDetailHistory {
       }
 
       note {
-        contents: "Start of chat history"
+        contents: "Start of thread history"
       }
     }
 
@@ -1478,17 +1478,17 @@ export threadDetailResumeUnsupported = frame : threadDetailStopped {
     notice {
       copy {
         heading {
-          contents: "This agent cannot resume past chats"
+          contents: "This agent cannot resume past threads"
         }
 
         detail {
-          contents: "The agent on Windows Desktop does not support resuming. Start a new chat in this folder to continue."
+          contents: "The agent on Windows Desktop does not support resuming. Start a new thread in this folder to continue."
         }
       }
 
       action {
         label {
-          contents: "New chat in this folder"
+          contents: "New thread in this folder"
         }
 
         display: .visible
@@ -1528,7 +1528,7 @@ export threadDetailArchivePending = frame : threadDetailStopping {
         }
 
         detail {
-          contents: "Stop requested on Windows Desktop. 1 waiting message was canceled. This chat will archive after the device confirms stopping."
+          contents: "Stop requested on Windows Desktop. 1 waiting message was canceled. This thread will archive after the device confirms stopping."
         }
       }
 

@@ -475,7 +475,7 @@ archivedMemory = frame : memory {
       }
 
       detail {
-        contents: "Chats and memory are read-only. Existing threads remain usable."
+        contents: "The main chat and memory are read-only. Existing threads remain usable."
       }
     }
   }

@@ -26,6 +26,9 @@ Baton 的底层跨越了中心服务、节点守护进程、项目代理和多�
 | `Steer` vs `Queue`（插入与排队） | 助手正忙时，新消息是等它忙完再发，还是现在立刻发进去 | `Send next` vs `Send now` | 下一条发送 vs 立即插话 |
 | `Eligible device`（满足条件的设备） | 在线且已登录所需模型账号的电脑 | `An online device with ChatGPT signed in` | 已登录 ChatGPT 的在线设备 |
 | `Attention item`（待处理事项） | 需要你拍板的问题 | `Question` / `Waiting for your reply` | 待你决定的问题 |
+| `Thread` 与 Project 主对话 | Agent 在某台设备某个目录里的对话，和项目助手的对话是两回事 | 前者一律叫 `thread`（`New thread`、`Archive thread`、`No threads yet`），后者叫 `main chat`；`chat` 只作动词或用在 `main chat` 里 | Thread / 主对话 |
+| 界面里的 `item` / `items` | Inbox 里等你处理的东西 | 按类型写 `question`、`notice`，或省掉名词（`3 waiting for you`、`Nothing waiting`）；处理过的列表叫 `Handled` | 问题、提示、已处理 |
+| `Node` / 电脑 | 用户连进 Baton 的机器 | 状态、按钮、报错和设置写 `device` 或设备名；只在讲接入一台实体电脑时写 `computer`（`Connect the computers where your code lives`） | 设备 / 电脑 |
 | `System attention item` / `Created by Baton` | 运行出错暂停了，需要你处理 | 直接写具体故障（如 `ChatGPT sign-in expired`） | 直接写具体故障（如 `ChatGPT 登录已过期`） |
 | `Enroll device` / `Enrollment token` | 把一台电脑连进 Baton / 连接用的临时口令 | `Connect a device` / `Setup code` | 连接新设备 / 接入口令 |
 | `Revoke device`（吊销凭据） | 断开并移除这台电脑 | `Disconnect device` | 断开并移除设备 |
@@ -51,7 +54,7 @@ Baton 的底层跨越了中心服务、节点守护进程、项目代理和多�
 
 | 场景 | 推荐写法（用户任务视角） | 避免写法（内部架构视角） |
 |---|---|---|
-| 新建项目后的空状态 | `Assign work across your devices. Ask the assistant to run tests, fix bugs, or check logs on any connected computer.`<br>跨电脑安排工作。你可以让助手在任意已连接的电脑上跑测试、修问题或查日志。 | `Conversation, memory, and Thread records are stored on the Coordinator. If the Project Agent runs on your Mac now, it can pick right up on Windows next time.` |
+| 新建项目后的空状态 | `Assign work across your devices. Ask the assistant to run tests, fix bugs, or check logs on any connected device.`<br>跨电脑安排工作。你可以让助手在任意已连接的电脑上跑测试、修问题或查日志。 | `Conversation, memory, and Thread records are stored on the Coordinator. If the Project Agent runs on your Mac now, it can pick right up on Windows next time.` |
 | 设备页顶部说明 | `Connect the computers where your code lives. Baton uses your default device first, and switches to another online device if it's asleep.`<br>连接存放代码的电脑。Baton 优先使用默认设备；默认设备休眠时，自动换用其他在线电脑。 | `Project Agent runs on any eligible device: online, synced, with the Runtime installed and the required subscription available. Your default device is preferred when eligible.` |
 | 项目助手正在工作 | `Reading Codex's reply from Ubuntu Dev…`<br>正在读取 Ubuntu Dev 上 Codex 的回复…… | `Processing 1 input: Codex reply from Ubuntu Dev` |
 
@@ -73,8 +76,8 @@ Baton 的底层跨越了中心服务、节点守护进程、项目代理和多�
 
 | 场景 | 推荐写法 | 避免写法 |
 |---|---|---|
-| 归档项目确认弹窗 | `Stops the project assistant and closes 1 open question. Past chats and project memory are kept. Work in individual threads continues.`<br>停止项目助手，并关闭 1 个待回答的问题。已有对话和项目记忆保留，各个 Thread 中的工作继续执行。 | `The Project Agent will stop its current run and will not start again. 1 open attention item will be withdrawn as Project archived. Conversation history, memory, and Threads are preserved.` |
-| 断开并移除电脑 | `Disconnects this computer from Baton. If it is offline, any agents still running on it will keep running locally.`<br>将该电脑从 Baton 断开。如果电脑当前离线，上面正在运行的助手仍会在本地继续执行。 | `Disconnects immediately; running Agents on an offline device will not be stopped.` |
+| 归档项目确认弹窗 | `Stops the project assistant and closes 1 open question. The main chat and project memory are kept. Work in individual threads continues.`<br>停止项目助手，并关闭 1 个待回答的问题。已有对话和项目记忆保留，各个 Thread 中的工作继续执行。 | `The Project Agent will stop its current run and will not start again. 1 open attention item will be withdrawn as Project archived. Conversation history, memory, and Threads are preserved.` |
+| 断开并移除电脑 | `Disconnects this device from Baton. If it is offline, any agents still running on it will keep running locally.`<br>将该电脑从 Baton 断开。如果电脑当前离线，上面正在运行的助手仍会在本地继续执行。 | `Disconnects immediately; running Agents on an offline device will not be stopped.` |
 | 开启命令行执行权限 | `Lets the project assistant run shell commands in allowed folders as user "kaken" (zsh). Commands run directly on your machine without a sandbox.`<br>允许项目助手以 kaken 账号（zsh）在授权文件夹内运行终端命令。命令直接在宿主机上执行，无沙箱隔离。 | `Project Agent can run arbitrary commands inside registered directories as kaken via zsh. Baton does not sandbox or inspect these commands.` |
 
 ### 5. 在恰当的时机和位置提供信息（Contextual Communication）
@@ -109,8 +112,8 @@ Baton 的底层跨越了中心服务、节点守护进程、项目代理和多�
 | 场景 | 推荐写法 | 避免写法 |
 |---|---|---|
 | 模型订阅登录过期 | 标题：`ChatGPT sign-in expired on Ubuntu Dev`<br>说明：`Sign in to ChatGPT on Ubuntu Dev to continue. Your recent messages are saved and will run once you're signed back in.`<br>按钮：`Retry` | 标题：`Project Agent paused: 5 consecutive model request failures`<br>说明：`ChatGPT subscription on Ubuntu Dev needs a new sign-in. Incoming messages stay saved and resume from where it stopped.` |
-| 工作目录不存在 | 标题：`Folder not found on MacBook Pro`<br>说明：`~/src/baton-old no longer exists on this computer. Choose another folder to start a new chat.`<br>按钮：`Choose folder` | 标题：`Could not start Codex`<br>说明：`Directory ~/src/baton-old does not exist.`<br>按钮：`View devices` |
-| 历史文件被删无法恢复会话 | 标题：`Past chat history was deleted on MacBook Pro`<br>说明：`Codex can't continue this conversation because its local session files were removed. Start a new chat to keep working.`<br>按钮：`New chat in this folder` | 标题：`Cannot resume original session`<br>说明：`Session history on the device was deleted.` |
+| 工作目录不存在 | 标题：`Folder not found on MacBook Pro`<br>说明：`~/src/baton-old no longer exists on MacBook Pro. Choose another folder to start a new thread.`<br>按钮：`Choose folder` | 标题：`Could not start Codex`<br>说明：`Directory ~/src/baton-old does not exist.`<br>按钮：`View devices` |
+| 历史文件被删无法恢复会话 | 标题：`Thread history was deleted on MacBook Pro`<br>说明：`Codex can't continue this conversation because its local session files were removed. Start a new thread to keep working.`<br>按钮：`New thread in this folder` | 标题：`Cannot resume original session`<br>说明：`Session history on the device was deleted.` |
 | 访问授权目录外的软链接 | 标题：`Folder is outside allowed paths`<br>说明：`This link points to C:\Users\dev\certs, which isn't shared with Baton on Windows Desktop.`<br>按钮：`Go back` | 标题：`Outside registered directories`<br>说明：`This symlink points to C:\Users\dev\certs. Only registered directories on the device can be browsed.` |
 
 ### 8. 尊重用户的注意力与自主权（Respect for User Agency）
@@ -130,10 +133,10 @@ Baton 的底层跨越了中心服务、节点守护进程、项目代理和多�
 | 侧栏与导航 | 用简短复数名词，不加 `My` / `Your` | `Inbox`、`Threads`、`Devices`、`Projects` |
 | 输入框占位符 | 直接点明对话对象和所在电脑 | 主对话：`Ask the project assistant…`<br>独立对话：`Message Codex on Windows Desktop…` |
 | 过程记录折叠行 | 用过去式动词短语汇总实际做过的事，不写“思考完成” | `Ran 1 command, saved 1 note`<br>`Ran 1 command, edited 1 file` |
-| 暂停横幅 | 说明谁停了、什么还能用、怎么恢复 | 标题：`Project is paused`<br>说明：`Automatic replies are paused. You can still chat in individual Threads, and new messages here will wait until you resume.`<br>按钮：`Resume` |
+| 暂停横幅 | 说明谁停了、什么还能用、怎么恢复 | 标题：`Project is paused`<br>说明：`Automatic replies are paused. You can still use individual threads, and new messages here will wait until you resume.`<br>按钮：`Resume` |
 | 超时停止横幅 | 说明为什么停、本地改动还在、怎么接着聊 | 标题：`Stopped after reaching the 2-hour limit`<br>说明：`Files already changed on Windows Desktop were kept. Send a message below to continue where it left off.` |
 | 待决定问题卡片 | 标题直接提问，选项是具体行动动词短语，不用内部状态词 | 标题：`1 reconnect test failed on Windows. What should we do next?`<br>选项 1：`Find the cause and fix it`（标 `Recommended`）<br>选项 2：`Run the test once more`<br>选项 3：`Skip for now and test Ubuntu` |
-| 空状态 | 一句话说清这里放什么 + 一句话或一个按钮指明第一步怎么开始 | `No chats in this project yet. Ask the assistant in the main chat to start work, or open a Thread yourself.` |
+| 空状态 | 一句话说清这里放什么 + 一句话或一个按钮指明第一步怎么开始 | `No threads in this project yet. Ask the project assistant in the main chat to start work, or open a thread yourself.` |
 | 连接新电脑弹窗 | 按步骤写清：选系统、运行命令、粘贴口令 | 标题：`Connect a device`<br>口令标签：`Setup code (expires in 10 minutes)`<br>命令标签：`Run this in your terminal`<br>底部状态：`Waiting for your computer to connect…` |
 
 ---
@@ -150,7 +153,7 @@ Baton 的底层跨越了中心服务、节点守护进程、项目代理和多�
 
 1. 全部界面元素（页面标题、弹窗标题、横幅标题、按钮、菜单项、标签、状态词）统一使用 **Sentence case**，只大写句首第一个词和专有名词。
 2. 只有在指代具体产品或品牌名时才大写首字母：`Baton`、`Codex`、`Kiro`、`Pi`、`ChatGPT`、`Claude`、`Windows`、`macOS`、`Ubuntu`。
-3. 取消句中人为造出的大写概念词：句中写 `project`、`thread`（或 `chat`）、`inbox`、`memory` 时一律用普通小写名词，不写成 `switching models mid-Thread` 或 `Open Project to retry`。
+3. 取消句中人为造出的大写概念词：句中写 `project`、`thread`、`inbox`、`memory` 时一律用普通小写名词，不写成 `switching models mid-Thread` 或 `Open Project to retry`。
 4. 按钮、标签和状态片省略冠词（`a`、`an`、`the`）；横幅正文、空状态和表单说明保留完整冠词和自然语序，不写成电报体。
 5. 涉及安全边界、数据去向或不可逆后果的句子，使用完整否定形式（`does not`、`will not`、`cannot`），不用缩略式。
 

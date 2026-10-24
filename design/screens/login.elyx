@@ -132,7 +132,7 @@ loginExpired = frame : auth.loginPage {
 
     notice {
       noticeDetail {
-        contents: "Sign in again to continue. Saved chats and devices are still in your account."
+        contents: "Sign in again to continue. Saved threads, projects, and devices are still in your account."
       }
 
       noticeHeading {

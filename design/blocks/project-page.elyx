@@ -108,7 +108,7 @@ export projectPage = frame {
         max-width: s.size.measure,
 
         content {
-          contents: "Opened both chats. Saved the Windows worktree path, D:\\src\\baton-ps160, in project memory. I'll report back once both finish."
+          contents: "Opened both threads. Saved the Windows worktree path, D:\\src\\baton-ps160, in project memory. I'll report back once both finish."
         }
       }
 

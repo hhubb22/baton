@@ -101,7 +101,7 @@ export firstVisit = frame {
 
         next = text : t.caption {
           width: 100%,
-          contents: "Once connected, open Threads to start a chat.",
+          contents: "Once connected, open Threads to start a thread.",
           align: .center,
           fill[0].color: c.colors.faint
         }

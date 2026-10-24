@@ -58,7 +58,7 @@ export bannerPaused = frame : banner {
 
   copy {
     detail {
-      contents: "Automatic replies are paused. You can still chat in individual threads. Messages and replies here are saved until you resume."
+      contents: "Automatic replies are paused. You can still use individual threads. Messages and replies here are saved until you resume."
     }
 
     heading {

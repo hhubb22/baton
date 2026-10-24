@@ -44,7 +44,7 @@ export dialog = frame {
 
     message = text : t.small {
       width: 100%,
-      contents: "Stops the project assistant and closes 3 open questions. Past chats and project memory are kept. Work in individual threads continues.",
+      contents: "Stops the project assistant and closes 3 open questions. The main chat and project memory are kept. Work in individual threads continues.",
       fill[0].color: c.colors.muted
     }
   }

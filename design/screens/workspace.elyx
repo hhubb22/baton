@@ -181,12 +181,12 @@ connected = frame : shells.firstVisit {
         }
 
         detail {
-          contents: "Codex and Pi are available. MacBook Pro is your default device for new chats."
+          contents: "Codex and Pi are available. MacBook Pro is your default device for new threads."
         }
 
         action {
           label {
-            contents: "Start a chat"
+            contents: "Start a thread"
           }
         }
 

@@ -495,7 +495,7 @@ export threadModelMenuFixed = frame : menu {
 
     reasonText = text : t.caption {
       width: 100%,
-      contents: "Kiro cannot switch models in this chat. Start a new chat to choose another.",
+      contents: "Kiro cannot switch models in this thread. Start a new thread to choose another.",
       fill[0].color: c.colors.muted
     }
   }
@@ -838,7 +838,7 @@ export folderPickerFailed = frame : folderPickerOffline {
 @variant
 export folderPickerNoRoots = frame : folderPickerOffline {
   title: "Choose folder / No allowed folders",
-  caption: "Add an allowed folder on the device, then retry.",
+  caption: "No folder is allowed on this device yet. Add one in Devices.",
   left: 1520px,
   top: 1780px,
 
@@ -855,7 +855,7 @@ export folderPickerNoRoots = frame : folderPickerOffline {
       }
 
       feedback {
-        contents: "Add an allowed folder in the device configuration on MacBook Pro, then retry."
+        contents: "Add a folder for MacBook Pro in Devices."
       }
     }
   }

@@ -796,7 +796,7 @@ export listFeedback = frame {
   children: [heading, description, action],
 
   heading = text : t.label {
-    contents: "No chats yet"
+    contents: "No threads yet"
   }
 
   description = text : t.small {
@@ -872,7 +872,7 @@ export threadsPageNoResults = frame : threadsPageEmpty {
 
     feedback {
       heading {
-        contents: "No chats match these filters"
+        contents: "No threads match these filters"
       }
 
       description {
@@ -902,7 +902,7 @@ export threadsPageLoading = frame : threadsPageEmpty {
       }
 
       heading {
-        contents: "Loading chats…"
+        contents: "Loading threads…"
       }
 
       description {
@@ -934,7 +934,7 @@ export threadsPageFailed = frame : threadsPageEmpty {
 
     feedback {
       heading {
-        contents: "Could not load chats"
+        contents: "Could not load threads"
       }
 
       description {

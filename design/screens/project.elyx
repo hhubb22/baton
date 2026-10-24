@@ -109,7 +109,7 @@ offline = frame : page.projectPage {
       runtime {
         runtimeCard {
           runtimeNote {
-            contents: "All 3 devices are offline. Waiting for a computer with ChatGPT signed in."
+            contents: "All 3 devices are offline. Waiting for a device with ChatGPT signed in."
           }
 
           runtimeLine {
@@ -1244,7 +1244,7 @@ reported = frame : page.projectPage {
       cardHead {
         cardTitle {
           cardName {
-            contents: "Replies from 2 chats"
+            contents: "Replies from 2 threads"
           }
         }
       }

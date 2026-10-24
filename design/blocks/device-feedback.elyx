@@ -21,7 +21,7 @@ export notice = frame {
 
   detail = text : t.small {
     width: 100%,
-    contents: "Your default device was disconnected. Choose another device for new chats and projects.",
+    contents: "Your default device was disconnected. Choose another device for new threads and projects.",
     fill[0].color: c.colors.muted
   }
 
@@ -51,7 +51,7 @@ export deviceNotice = frame {
 
   detail = text : t.small {
     width: 100%,
-    contents: "Last contact at 13:52. New chats on MacBook Pro wait for it to reconnect. Wake MacBook Pro and reconnect it to the network.",
+    contents: "Last contact at 13:52. New threads on MacBook Pro wait for it to reconnect. Wake MacBook Pro and reconnect it to the network.",
     fill[0].color: c.colors.muted
   }
 }
@@ -74,7 +74,7 @@ export emptyDevices = frame {
 
   detail = text : t.small {
     width: 480px,
-    contents: "Connect a computer to start chats and run work in your projects.",
+    contents: "Connect a device to start threads and run work in your projects.",
     align: .center,
     fill[0].color: c.colors.muted
   }

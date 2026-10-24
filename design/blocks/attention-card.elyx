@@ -105,7 +105,7 @@ export optionOther = frame : option {
 // No card surface: meta line, question, context, and options on the branch rail, in the same column as the conversation text.
 export attentionCard = frame {
   title: "Attention card / Open",
-  caption: "Details start collapsed in Inbox, the main chat, and linked threads. Option clicks select a reply; Send reply submits it to the project assistant.",
+  caption: "Question, background, and options on a branch line. Option clicks select a reply; Send reply submits it to the project assistant.",
   left: 0px,
   top: 160px,
   width: s.size.measure,
@@ -659,7 +659,7 @@ export attentionWithdrawalWins = frame : attentionWithdrawn {
 
   resultNote {
     display: .visible,
-    contents: "The question was withdrawn before your reply was saved. You can continue in the linked chat."
+    contents: "The question was withdrawn before your reply was saved. You can continue in the linked thread."
   }
 }
 
@@ -825,7 +825,7 @@ export attentionClosedConflict = frame : attentionClosed {
 
   resultNote {
     display: .visible,
-    contents: "This question was already closed in another window. You can continue in the linked chat."
+    contents: "This question was already closed in another window. You can continue in the linked thread."
   }
 }
 

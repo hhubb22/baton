@@ -8,7 +8,7 @@ import "blocks/attention-card.elyx" as attention
 
 export inboxPage = frame {
   title: "Inbox",
-  caption: "Details start collapsed. The list scrolls; handled items stay accessible in the header. Browser tab: Baton (3).",
+  caption: "One item is expanded; the others show project and question. Handled stays in the header. Browser tab: Baton (3).",
   left: 0px,
   top: 0px,
   width: s.size.screenWidth,
@@ -83,7 +83,7 @@ export inboxPage = frame {
 
       handled = frame : buttons.smallGhost {
         label {
-          contents: "Handled items"
+          contents: "Handled"
         }
       }
 
@@ -112,12 +112,12 @@ export inboxPage = frame {
 
         noticeTitle = text : t.heading {
           width: 100%,
-          contents: "No items waiting"
+          contents: "Nothing waiting"
         }
 
         explanation = text : t.small {
           width: 100%,
-          contents: "Questions from your project assistants appear here. View handled items for past decisions.",
+          contents: "Questions and notices from your project assistants appear here.",
           fill[0].color: c.colors.muted
         }
 
@@ -137,7 +137,7 @@ export inboxPage = frame {
         children: [introText, introCount],
 
         introText = text : t.title {
-          contents: "3 items waiting for you"
+          contents: "3 waiting for you"
         }
 
         introCount = text : t.caption {

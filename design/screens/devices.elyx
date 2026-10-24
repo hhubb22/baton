@@ -18,7 +18,7 @@ import "blocks/device-feedback.elyx" as feedback
 
 export devices = frame {
   title: "Devices",
-  caption: "Manage connected computers, assistants, allowed folders, and command permissions.",
+  caption: "Manage connected computers, assistants, allowed folders, and command permissions. Add folder opens the folder picker for this device; hovering a folder shows Remove.",
   left: 0px,
   top: 0px,
   width: s.size.screenWidth,
@@ -170,6 +170,8 @@ export devices = frame {
             children: [macDefault, macRevoke],
 
             macDefault = frame : buttons.smallSecondary {
+              display: .none,
+
               label {
                 contents: "Default device"
               }
@@ -226,7 +228,7 @@ export devices = frame {
 
               capabilityNote = text : t.caption {
                 width: 100%,
-                contents: "Codex 0.42 · GPT-5 (default), GPT-5 mini\nNew chat · send next · send now · stop\nResume chat · change model",
+                contents: "Codex 0.42 · GPT-5 (default), GPT-5 mini\nNew thread · send next · send now · stop\nResume thread · change model",
                 fill[0].color: c.colors.muted
               }
 
@@ -237,7 +239,7 @@ export devices = frame {
 
               agentLine1 = frame : rows.capabilityLine {
                 note {
-                  contents: "Signed in · send now · resume chat"
+                  contents: "Signed in · send now · resume thread"
                 }
               }
 
@@ -247,7 +249,7 @@ export devices = frame {
                 }
 
                 note {
-                  contents: "Installed · send now · resume chat"
+                  contents: "Installed · send now · resume thread"
                 }
               }
 
@@ -288,10 +290,19 @@ export devices = frame {
                 fill[0].color: c.colors.muted
               }
 
-              dirsNote = text : t.caption {
-                width: 100%,
-                contents: "Manage these folders in the batond configuration on Ubuntu Dev.",
-                fill[0].color: c.colors.faint
+              dirsNote = frame : buttons.smallGhost {
+                padding-left: 6px,
+                padding-right: 6px,
+
+                lead {
+                  width: 13px,
+                  height: 13px,
+                  display: .visible
+                }
+
+                label {
+                  contents: "Add folder"
+                }
               }
             }
           }
@@ -370,7 +381,7 @@ export devices = frame {
             revokeNote = text : t.caption {
               width: 100%,
               display: .none,
-              contents: "Disconnects this device from Baton. If it is offline, agents still running on it keep running locally. Past chats are kept.",
+              contents: "Disconnects this device from Baton. If it is offline, agents still running on it keep running locally. Past threads are kept.",
               fill[0].color: c.colors.faint
             }
           }
@@ -445,7 +456,7 @@ devicesDisconnect = frame : devices {
 
       content {
         message {
-          contents: "Disconnects Ubuntu Dev from Baton. If it is offline, agents still running on it will keep running locally. Past chats and records are kept. This does not undo file changes or commands already run."
+          contents: "Disconnects Ubuntu Dev from Baton. If it is offline, agents still running on it will keep running locally. Past threads and records are kept. This does not undo file changes or commands already run."
         }
       }
 
@@ -521,7 +532,7 @@ devicesSyncing = frame : devices {
 
           deviceNotice {
             detail {
-              contents: "Connected just now. Chats will wait until device information is up to date."
+              contents: "Connected just now. Threads will wait until device information is up to date."
             }
 
             heading {
@@ -588,7 +599,7 @@ devicesMissing = frame : devices {
           columns {
             agentsCol {
               capabilityNote {
-                contents: "Codex 0.42 · GPT-5 (default)\nNew chats unavailable until signed in.\nPi models unavailable until installed."
+                contents: "Codex 0.42 · GPT-5 (default)\nNew threads unavailable until signed in.\nPi models unavailable until installed."
               }
 
               @with-variant(rows.capabilityMissing)
@@ -674,7 +685,7 @@ devicesDefaultOffline = frame : devicesDisconnect {
 
       content {
         message {
-          contents: "MacBook Pro is offline (last seen 13:52). New chats on it wait until it reconnects; projects can use another online device."
+          contents: "MacBook Pro is offline (last seen 13:52). New threads on it wait until it reconnects; projects can use another online device."
         }
       }
 
@@ -715,36 +726,16 @@ devicesDefaultOffline = frame : devicesDisconnect {
   }
 }
 
-devicesOfflineDefaultSaved = frame : devices {
+devicesOfflineDefaultSaved = frame : devicesOfflineView {
   title: "Devices / Offline default saved",
-  caption: "MacBook Pro stays the default even while offline.",
+  caption: "MacBook Pro stays the default even while offline. The Default label moves in place; no banner.",
   left: 1728px,
-  top: 2160px,
-
-  main {
-    content {
-      notice {
-        action {
-          display: .none
-        }
-
-        heading {
-          contents: "Default device saved"
-        }
-
-        detail {
-          contents: "MacBook Pro is your default device. It is offline; new chats on it wait until it reconnects."
-        }
-
-        display: .visible
-      }
-    }
-  }
+  top: 2160px
 }
 
 devicesDefaultSaved = frame : devices {
   title: "Devices / Default saved",
-  caption: "The new default is used for the next chat and preferred for projects.",
+  caption: "The Default label moves to Ubuntu Dev in place; no banner.",
   left: 3456px,
   top: 2160px,
 
@@ -758,9 +749,7 @@ devicesDefaultSaved = frame : devices {
             }
 
             makeDefault {
-              label {
-                contents: "Default device"
-              }
+              display: .none
             }
           }
         }
@@ -793,19 +782,7 @@ devicesDefaultSaved = frame : devices {
       }
 
       notice {
-        action {
-          display: .none
-        }
-
-        heading {
-          contents: "Default device saved"
-        }
-
-        detail {
-          contents: "Ubuntu Dev is your default for new chats and the first choice for the project assistant."
-        }
-
-        display: .visible
+        display: .none
       }
     }
   }
@@ -984,7 +961,7 @@ devicesDisconnected = frame : devices {
         }
 
         detail {
-          contents: "Past chats and records are kept. If Ubuntu Dev was offline, its agents may still be running locally."
+          contents: "Past threads and records are kept. If Ubuntu Dev was offline, its agents may still be running locally."
         }
 
         display: .visible
@@ -1040,7 +1017,7 @@ devicesDefaultRemoved = frame : devicesDisconnected {
         }
 
         detail {
-          contents: "Ubuntu Dev was disconnected. Choose another default device for new chats and projects."
+          contents: "Ubuntu Dev was disconnected. Choose another default device for new threads and projects."
         }
 
         heading {
@@ -1100,13 +1077,7 @@ devicesReplacementSaved = frame : devicesDisconnected {
       }
 
       notice {
-        heading {
-          contents: "Default device saved"
-        }
-
-        detail {
-          contents: "Windows Desktop is your default for new chats and projects."
-        }
+        display: .none
       }
     }
   }
@@ -1134,7 +1105,7 @@ devicesDefaultDisconnect = frame : devicesDisconnect {
 
       content {
         message {
-          contents: "Ubuntu Dev is your default device. Removing it leaves no default until you choose another. Offline agents may keep running locally. Past chats and records are kept; file changes and commands already run are not undone."
+          contents: "Ubuntu Dev is your default device. Removing it leaves no default until you choose another. Offline agents may keep running locally. Past threads and records are kept; file changes and commands already run are not undone."
         }
       }
     }
@@ -1263,6 +1234,8 @@ devicesOfflineSelect = frame : devicesOfflineView {
               label {
                 contents: "Set as default"
               }
+
+              display: .visible
             }
           }
         }

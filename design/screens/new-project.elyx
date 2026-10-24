@@ -315,7 +315,7 @@ created = frame : page.projectPage {
 
   noTasks = text : t.small {
     width: 100%,
-    contents: "No chats in this project yet. Ask the project assistant to start work.",
+    contents: "No threads in this project yet. Ask the project assistant to start work.",
     fill[0].color: c.colors.muted
   }
 }

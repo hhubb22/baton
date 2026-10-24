@@ -173,7 +173,7 @@ settings = frame : page.projectPage {
 
           copy {
             rowText {
-              contents: "Stops the project assistant and closes open questions. Chats and memory are kept. Existing threads continue."
+              contents: "Stops the project assistant and closes open questions. The main chat and memory are kept. Existing threads continue."
             }
 
             rowTitle {
@@ -218,7 +218,7 @@ archiveConfirm = frame : page.projectPage {
 
       content {
         message {
-          contents: "Stops the project assistant and closes 1 open question. Chats and memory are kept. Existing threads continue."
+          contents: "Stops the project assistant and closes 1 open question. The main chat and memory are kept. Existing threads continue."
         }
       }
 

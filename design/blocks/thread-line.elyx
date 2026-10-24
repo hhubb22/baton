@@ -219,7 +219,7 @@ export threadCard = frame {
       children: cardName,
 
       cardName = text : t.label {
-        contents: "Opened 2 chats",
+        contents: "Opened 2 threads",
         line-height: 1,
         fill[0].color: c.colors.muted
       }
@@ -306,7 +306,7 @@ export threadCardSent = frame : threadCard {
   cardHead {
     cardTitle {
       cardName {
-        contents: "Messaged 1 chat"
+        contents: "Messaged 1 thread"
       }
     }
   }
