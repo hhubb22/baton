@@ -1,4 +1,6 @@
 import { Effect } from 'effect'
+import { DEFAULT_MODEL } from '@t3tools/contracts'
+import { agentCapabilities } from './capabilities.ts'
 import { dirname, isAbsolute } from 'node:path'
 import type { RuntimeAgent, WorkerOpenConfig } from '@baton/protocol'
 import type { ProbeResult } from '../agent-host/protocol.ts'
@@ -11,8 +13,9 @@ import { startProcessWatchdog } from '../platform/process.ts'
 import { currentBatondCommand } from '../daemon/host.ts'
 import { AgentError } from '../worker/agent.ts'
 
-/** Delivery combinations are enabled only after real send, cancellation and resume validation. */
+/** Adapter combinations validated through the host with upstream offline transcripts. */
 const verifiedCombinations = new Set(['darwin-arm64'])
+const verifiedProviderVersions = { pi: '1.0.0', codex: '0.156.1' }
 
 /** The Thread working directory and the private directory beside the native mapping. */
 const agentPaths = (label: string) => (config: WorkerOpenConfig) => {
@@ -24,10 +27,7 @@ const agentPaths = (label: string) => (config: WorkerOpenConfig) => {
 const cursorPaths = agentPaths('Cursor')
 const narrowed = { create: false, queue: true, steer: false, stop: true, resume: false, switch_model: false }
 
-/**
- * Upstream Pi and Codex can steer and switch models. The worker still rejects
- * those commands, so the reported capabilities stay narrower.
- */
+/** Availability gates creation and resume; active steering follows the registered provider. */
 export function hostedAgentReport(agentType: 'pi' | 'codex', result: ProbeResult, missingReason: string): RuntimeAgent {
   const version = typeof result.details.version === 'string' ? result.details.version : 'unknown'
   const platform =
@@ -48,15 +48,15 @@ export function hostedAgentReport(agentType: 'pi' | 'codex', result: ProbeResult
   if (result.authenticated !== 'valid') return { ...base, reason: result.reason ?? `${agentType} 认证状态尚未确认` }
   const ready = {
     ...base,
-    default_model: models[0]?.id || 'default',
+    default_model: models[0]?.id || (agentType === 'codex' ? DEFAULT_MODEL : 'default'),
     ...(result.models.length === 0 ? { reason: result.reason ?? '模型目录暂不可读，可使用默认模型' } : {}),
   }
-  if (!verifiedCombinations.has(platform))
+  if (version !== verifiedProviderVersions[agentType] || !verifiedCombinations.has(platform))
     return { ...ready, reason: `${agentType} ${version} / ${platform} 尚未通过执行、停止与恢复验证` }
   return {
     ...ready,
     status: 'available',
-    capabilities: { ...narrowed, create: true, resume: true },
+    capabilities: agentCapabilities[agentType],
   }
 }
 
@@ -201,21 +201,24 @@ export async function probeLocalAgents(): Promise<RuntimeAgent[]> {
 export const agentRegistry = {
   cursor: {
     type: 'cursor',
+    capabilities: agentCapabilities.cursor,
     makeFactory: makeCursorAgentFactory,
     probe: probeLocalCursor,
     paths: cursorPaths,
   },
   pi: {
     type: 'pi',
+    capabilities: agentCapabilities.pi,
     makeFactory: makePiAgentFactory,
     probe: probeLocalPi,
     paths: agentPaths('Pi'),
   },
   codex: {
     type: 'codex',
+    capabilities: agentCapabilities.codex,
     makeFactory: makeCodexAgentFactory,
     probe: probeLocalCodex,
     paths: agentPaths('Codex'),
   },
-  shell: { type: 'shell', makeFactory: makeShellAgentFactory },
+  shell: { type: 'shell', capabilities: agentCapabilities.shell, makeFactory: makeShellAgentFactory },
 } as const

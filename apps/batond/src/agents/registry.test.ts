@@ -7,19 +7,19 @@ it('keeps an authenticated Pi unavailable until its platform is in the verified 
     {
       authenticated: 'valid',
       models: ['openrouter/example'],
-      details: { version: '0.80.5', platform: 'darwin-arm64', installed: true },
+      details: { version: '1.0.0', platform: 'darwin-arm64', installed: true },
     },
     'missing',
   )
   expect(verified.status).toBe('available')
-  expect(verified.capabilities).toMatchObject({ create: true, steer: false, resume: true, switch_model: false })
+  expect(verified.capabilities).toMatchObject({ create: true, steer: true, resume: true, switch_model: false })
 
   const other = hostedAgentReport(
     'pi',
     {
       authenticated: 'valid',
       models: ['openrouter/example'],
-      details: { version: '0.80.5', platform: 'linux-x64', installed: true },
+      details: { version: '1.0.0', platform: 'linux-x64', installed: true },
     },
     'missing',
   )

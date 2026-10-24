@@ -12,6 +12,7 @@ import { CommitUnknown } from '@baton/sqlite'
 import { captureTrace, traceParent, withTraceSpan } from '@baton/telemetry'
 import { Cause, Deferred, Effect, Exit, Fiber, Queue, Schema, Scope, Stream } from 'effect'
 import type { ProcessRecord } from '../platform/process-types.ts'
+import { capabilitiesFor } from '../agents/capabilities.ts'
 import type { AgentError, AgentEvent, AgentFactory, InputAcceptance, ThreadAgent } from './agent.ts'
 import { OutputBuffer, type AgentOutput } from './output.ts'
 import { boundReason, boundReport, pendingResult } from './reports.ts'
@@ -139,6 +140,9 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         event_id: randomUUID(),
         worker_seq: draft.outbox.length + 1,
         kind,
+        ...(kind === 'turn.ended'
+          ? { queue_empty: !Object.values(draft.messages).some((message) => message.state === 'queued') }
+          : {}),
         ...fields,
       }),
     })
@@ -200,6 +204,10 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
     }
   }
   function markUnknown(draft: State, reason: string, settleInputs = true) {
+    for (const message of Object.values(draft.messages)) {
+      if (message.state === 'intent' && (settleInputs || message.input.mode === 'steer'))
+        settleMessage(draft, message, 'unknown', reason)
+    }
     if (draft.phase !== 'unknown') {
       draft.phase = 'unknown'
       draft.epoch++
@@ -209,10 +217,6 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
       endActive(draft, draft.stopReason ?? 'agent_exited')
       report(draft, 'thread.unknown', { reason })
     }
-    if (settleInputs)
-      for (const message of Object.values(draft.messages)) {
-        if (message.state === 'intent') settleMessage(draft, message, 'unknown', reason)
-      }
     for (const command of Object.values(draft.commands)) {
       if (command.receipt.action !== 'message') finish(draft, command, 'unknown', reason)
     }
@@ -427,6 +431,18 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
       markUnknown(draft, 'Input acceptance identity mismatch')
       return
     }
+    if (message.input.mode === 'steer') {
+      const target = Object.values(draft.messages).find(
+        (item) => item.input.mode === 'queue' && item.turn === message.input.targetTurn,
+      )
+      if (!target?.executionId || target.executionId !== acceptance.executionId) {
+        markUnknown(draft, 'Steering acceptance has no conclusive target turn')
+        return
+      }
+      message.executionId = acceptance.executionId
+      settleMessage(draft, message, 'succeeded')
+      return
+    }
     message.executionId = acceptance.executionId
     message.startedAtNs = process.hrtime.bigint().toString()
     message.startedAtMs = Date.now()
@@ -524,6 +540,14 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         yield* uncertain('Agent execution identity mismatch')
         return
       }
+      const submitting =
+        operation?.kind === 'send' && operation.messageId ? state.messages[operation.messageId] : undefined
+      // The coordinator attaches sent inputs only while their target turn is still open.
+      if (event.type === 'end' && submitting?.input.mode === 'steer' && submitting.state === 'intent') {
+        if (buffered.length >= 256) yield* uncertain('Agent event buffer overflow before steering acceptance')
+        else buffered.push(event)
+        return
+      }
       yield* commit((draft) => {
         const current = draft.messages[event.messageId]!
         if (event.type === 'reply') {
@@ -582,7 +606,8 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
   }
   function recoverInput(current: ThreadAgent, message: Message, timeoutMs = sendMs) {
     return Effect.gen(function* () {
-      if (!message.preparation) return undefined
+      // A snapshot proves text presence, but not the native turn that received a steer.
+      if (!message.preparation || message.input.mode === 'steer') return undefined
       yield* current.restoreInput(message.input, message.preparation)
       return yield* current.sent(message.input, message.preparation)
     }).pipe(
@@ -896,8 +921,21 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         )
         return
       }
-      if (state.phase !== 'idle') return
-      const message = Object.values(state.messages).find((item) => item.state === 'queued')
+      if (state.phase !== 'idle' && state.phase !== 'busy') return
+      const active = state.activeMessage ? state.messages[state.activeMessage] : undefined
+      const queued = Object.values(state.messages).filter((item) => item.state === 'queued')
+      const stale = queued.find(
+        (item) => item.input.mode === 'steer' && (!active || active.ended || item.input.targetTurn !== active.turn),
+      )
+      if (stale) {
+        yield* commit((draft) => {
+          const next = draft.messages[stale.input.id]
+          if (next) settleMessage(draft, next, 'cancelled', 'Target turn ended before steering input intent')
+        })
+        yield* drive()
+        return
+      }
+      const message = queued.find((item) => state.phase === 'idle' || item.input.mode === 'steer')
       if (!message) return
       yield* launch(
         newOperation('prepare', message.input.id),
@@ -921,6 +959,16 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
             }
             const preparation = result.value
             if (state.messages[message.input.id]?.state !== 'queued') return
+            if (message.input.mode === 'steer') {
+              const target = state.activeMessage ? state.messages[state.activeMessage] : undefined
+              if (!target || target.ended || target.turn !== message.input.targetTurn) {
+                yield* commit((draft) => {
+                  const next = draft.messages[message.input.id]
+                  if (next) settleMessage(draft, next, 'cancelled', 'Target turn ended before steering input intent')
+                })
+                return
+              }
+            }
             if (
               preparation.nativeSessionId !== state.nativeId ||
               Buffer.byteLength(JSON.stringify(preparation)) > 4096 ||
@@ -938,9 +986,15 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
               next.state = 'intent'
               draft.processTreeStopped = false
               next.preparation = preparation
-              next.turn = ++draft.turn
-              draft.activeMessage = next.input.id
-              draft.phase = 'busy'
+              if (next.input.mode === 'steer') {
+                if (next.input.targetTurn === undefined)
+                  return reject('invalid_state', 'Steering input has no durable target turn')
+                next.turn = next.input.targetTurn
+              } else {
+                next.turn = ++draft.turn
+                draft.activeMessage = next.input.id
+                draft.phase = 'busy'
+              }
               for (const command of Object.values(draft.commands)) {
                 if (command.messageId === next.input.id && isPending(command))
                   command.status = { ...command.status, state: 'running' }
@@ -1043,7 +1097,6 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         case 'message': {
           if (!request.client_message_id || !request.payload)
             return reject('invalid_request', 'Message ID and content are required')
-          if (request.mode === 'steer') return reject('unsupported', 'This Worker does not support steer')
           command.messageId = request.client_message_id
           const messageDigest = digest({
             text: request.payload,
@@ -1059,6 +1112,14 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
             const outcome = terminalMessage(existingMessage)
             if (outcome) finish(draft, command, outcome, existingMessage.reason ?? '')
             break
+          }
+          const target = draft.activeMessage ? draft.messages[draft.activeMessage] : undefined
+          if (request.mode === 'steer') {
+            if (!draft.config || !capabilitiesFor(draft.config.agent_type)?.steer)
+              return reject('unsupported', 'This Agent does not support steer')
+            if (request.model) return reject('model_with_steer', 'Steering cannot change the model')
+            if (draft.phase !== 'busy' || !target || target.ended || target.turn === undefined)
+              return reject('invalid_state', 'Steering requires an active target turn')
           }
           if (draft.config?.agent_type === 'shell' && Object.keys(draft.messages).length > 0)
             return reject('unsupported', 'shell Thread accepts only one command')
@@ -1081,7 +1142,8 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
                 text: request.payload,
                 epoch: draft.epoch,
                 operationId: randomUUID(),
-                mode: 'queue',
+                mode: request.mode ?? 'queue',
+                ...(request.mode === 'steer' && target?.turn !== undefined ? { targetTurn: target.turn } : {}),
                 ...(request.model === undefined ? {} : { model: request.model }),
               },
             } satisfies Message,
