@@ -1,6 +1,6 @@
 import * as stylex from '@stylexjs/stylex'
 import { useNavigate } from '@tanstack/react-router'
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { ClientError } from '../data/client'
 import { agentNames, shortenExcerpt, threadView, type ThreadAction, type ThreadNotice } from '../data/derive'
 import {
@@ -8,7 +8,6 @@ import {
   useArchiveThread,
   useCancelMessage,
   useDevices,
-  useEarlierHistory,
   useMessages,
   useInbox,
   useProjects,
@@ -35,7 +34,7 @@ import { InboxFeedback } from './InboxFeedback'
 import { FilePreview } from './FilePreview'
 import { MessageBody } from './MessageBody'
 import { Page } from './Page'
-import { ActivityTrace, Attachments, HistoryPager, LiveOutput } from './ReplyParts'
+import { ActivityTrace, Attachments, LiveOutput } from './ReplyParts'
 import { copySelection, SelectionArea } from './SelectionMenu'
 import { useNow } from './useNow'
 import { useWorkspace } from './workspace'
@@ -202,14 +201,13 @@ function errorText(cause: unknown, fallback: string) {
   return cause instanceof ClientError ? cause.message : fallback
 }
 
-// reply 是 Agent 回复的序号，选中文字引用时写明来源；从设备读到的更早对话没有序号，也不读过程。
+// reply 是 Agent 回复的序号，选中文字引用时写明来源。
 function MessageItem({
   message,
   deviceId,
   device,
   devices,
   reply,
-  earlier,
   command = false,
   onOpen,
   onCancel,
@@ -219,7 +217,6 @@ function MessageItem({
   device: Device | undefined
   devices: Device[]
   reply: number | null
-  earlier: boolean
   command?: boolean
   onOpen: (deviceId: ID, path: string) => void
   onCancel: (message: Message) => void
@@ -229,8 +226,8 @@ function MessageItem({
   if (message.role === 'agent') {
     return (
       <article id={`message-${message.id}`} {...stylex.props(text.body, styles.agent)}>
-        {!earlier && <ActivityTrace message={message} device={device} command={command} />}
-        <div data-reply={reply ?? 'earlier'}>
+        <ActivityTrace message={message} device={device} command={command} />
+        <div data-reply={reply}>
           <MessageBody body={message.body} onOpenPath={onOpenPath} />
         </div>
         <Attachments attachments={message.attachments} devices={devices} onOpen={onOpen} />
@@ -382,8 +379,6 @@ export function ThreadDetail({
   const [resumeId, setResumeId] = useState<string | null>(null)
   const [preview, setPreview] = useState<{ deviceId: ID; path: string; reply: number | null } | null>(null)
   const timelineRef = useRef<HTMLDivElement | null>(null)
-  const historyAnchor = useRef<number | null>(null)
-  const history = useEarlierHistory(threadId)
   const workspace = useWorkspace()
   const resumeOperation = useOperation(resumeId)
 
@@ -406,14 +401,6 @@ export function ThreadDetail({
     const node = timelineRef.current
     if (node) node.scrollTop = node.scrollHeight
   }, [list.length])
-
-  // 更早的消息插到顶部后，保持原来看到的位置。
-  useLayoutEffect(() => {
-    const node = timelineRef.current
-    if (!node || historyAnchor.current === null) return
-    node.scrollTop = node.scrollHeight - historyAnchor.current
-    historyAnchor.current = null
-  }, [history.messages.length])
 
   if (threadQuery.error instanceof ClientError && threadQuery.error.code === 'notFound') {
     return (
@@ -451,12 +438,6 @@ export function ThreadDetail({
       !['done', 'failed', 'stopped', 'conflict'].includes(resumeOperation.data.phase))
   const resumeFailed = resumeOperation.data?.phase === 'failed' ? resumeOperation.data.detail : null
 
-  const loadEarlier = () => {
-    const node = timelineRef.current
-    if (node) historyAnchor.current = node.scrollHeight - node.scrollTop
-    history.load()
-  }
-
   // 选中回复里的文字：属于 Project 时带着来源去问 Project 助手，否则复制。
   const describeSelection = (range: Range, value: string) => {
     const start = range.startContainer
@@ -469,7 +450,7 @@ export function ThreadDetail({
       kind: 'thread',
       title: thread.title,
       threadId,
-      reply: body.dataset.reply === 'earlier' ? null : Number(body.dataset.reply),
+      reply: Number(body.dataset.reply),
       deviceId: thread.deviceId,
       path: null,
       lines: null,
@@ -611,20 +592,6 @@ export function ThreadDetail({
             style={[styles.messages, layout === 'panel' && styles.messagesPanel]}
           >
             <InboxFeedback />
-            {thread.earlier && <HistoryPager history={{ ...history, load: loadEarlier }} device={device} />}
-            {history.messages.map((message) => (
-              <MessageItem
-                key={message.id}
-                message={message}
-                deviceId={thread.deviceId}
-                device={device}
-                devices={deviceList}
-                reply={null}
-                earlier
-                onOpen={openFile(null)}
-                onCancel={onCancel}
-              />
-            ))}
             {messages.isPending && <p {...stylex.props(text.caption, styles.muted)}>Loading messages…</p>}
             {messages.isError && (
               <Banner
@@ -656,7 +623,6 @@ export function ThreadDetail({
                     device={device}
                     devices={deviceList}
                     reply={reply}
-                    earlier={false}
                     command={thread.agent === null}
                     onOpen={openFile(reply)}
                     onCancel={onCancel}

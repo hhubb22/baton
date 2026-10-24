@@ -45,13 +45,11 @@ export interface World {
   files: Record<string, DeviceFile>
   // 设备上保存的每轮回复过程，键为回复的消息 ID。
   traces: Record<ID, TraceStep[]>
-  // 设备上比中心消息更早的对话记录，键为 Thread ID，按时间排列。
-  earlierHistory: Record<ID, Message[]>
   // 执行中的一轮的实时输出，键为 Thread ID。中心只为传输暂存，这一轮结束后清掉。
   outputs: Record<ID, OutputChunk[]>
   // 重连后补不齐输出的 Thread：设备回来时在输出里标出缺口。
   outputLoss: ID[]
-  // 下一次读取会失败一次的内容，键为 `trace:消息 ID`、`history:Thread ID` 或 `file:设备 ID:路径`。
+  // 下一次读取会失败一次的内容，键为 `trace:消息 ID` 或 `file:设备 ID:路径`。
   failingReads: string[]
   // 已在其他页面或设备上处理过的事项，下一次回答时返回冲突。
   answeredElsewhere: Record<ID, string>

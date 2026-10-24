@@ -134,7 +134,6 @@ export function createMockClient(
     readFile: (deviceId, path) => guarded(() => store.readFile(deviceId, path)),
     listFolders: (deviceId, path) => guarded(() => store.listFolders(deviceId, path)),
     readTrace: (messageId) => guarded(() => store.readTrace(messageId)),
-    readHistory: (threadId, before) => guarded(() => store.readHistory(threadId, before)),
     readOutput: (threadId) => guarded(() => store.readOutput(threadId)),
     getOperation: (id) => guarded(() => store.operation(id)),
 

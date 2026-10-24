@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vite-plus/test'
-import { ClientError } from '../client'
 import { threadView } from '../derive'
 import type { Device, OperationPhase } from '../types'
 import type { HttpContext } from './context'
@@ -386,243 +385,61 @@ describe('HTTP thread contracts', () => {
     ])
   })
 
-  it('reads raw history with stable references and translates forward cursors into older message pages', async () => {
-    const entries = Array.from({ length: 20 }, (_, index) => ({
-      text: JSON.stringify({
-        timestamp: new Date(Date.parse(at) + index * 1000).toISOString(),
-        type: 'response_item',
-        payload: {
-          type: 'message',
-          role: index % 2 ? 'assistant' : 'user',
-          content: [{ type: index % 2 ? 'output_text' : 'input_text', text: `Native message ${index}` }],
-        },
-      }),
-      reference: `codex:native-session:${index * 100}`,
-      truncated: false,
-    }))
-    const { api, fetcher } = setup((url) => {
-      if (url.pathname.endsWith('/timeline')) return { events: [] }
-      if (!url.pathname.endsWith('/history')) return thread()
-      const last = url.searchParams.has('cursor')
-      return {
-        ok: true,
-        history: {
-          entries: last ? entries.slice(16) : entries.slice(0, 16),
-          cursor: last ? 'end-digest' : '16:digest',
-          has_more: !last,
-          gap: false,
-        },
-      }
-    })
-    const recent = await api.readHistory(threadId, null)
-    expect(recent).toMatchObject({ state: 'ready', more: true })
-    if (recent.state !== 'ready') throw new Error('Expected a ready page')
-    expect(recent.messages).toHaveLength(16)
-    const firstID = `history:${threadId}:${encodeURIComponent('codex:native-session:400')}`
-    expect(recent.messages[0].id).toBe(firstID)
-    expect(fetcher.mock.calls.some(([url]) => requestURL(url).includes('cursor=16%3Adigest'))).toBe(true)
-    const older = await api.readHistory(threadId, firstID)
-    expect(older).toMatchObject({ state: 'ready', more: false })
-    if (older.state === 'ready') expect(older.messages).toHaveLength(4)
-    expect(fetcher.mock.calls.every(([url]) => !requestURL(url).includes('/history/messages'))).toBe(true)
-  })
-
-  it('only returns native messages before the uniquely matched saved conversation', async () => {
-    const raw = (id: string, role: string, body: string) => ({
-      id,
-      reference: id,
-      truncated: false,
-      text: JSON.stringify({
-        id,
-        type: 'message',
-        timestamp: at,
-        message: { role, content: [{ type: 'text', text: body }] },
-      }),
-    })
-    const entries = [
-      raw('old', 'assistant', 'An earlier reply'),
-      raw('user', 'user', 'Inspect this repository'),
-      raw('reply', 'assistant', 'Actual reply'),
+  it('pages center timeline records and does not request native history', async () => {
+    const pages = [
+      {
+        events: [accepted(), event(2, 'message.sent', { client_message_id: 'client-message', worker_turn_seq: 1 })],
+        next_cursor: 'page-2',
+      },
+      {
+        events: [event(3, 'reply', { event_id: 'reply-1', worker_turn_seq: 1, content: 'First reply' }, later)],
+        next_cursor: 'page-3',
+      },
+      {
+        events: [
+          event(
+            4,
+            'message.accepted',
+            message({ id: 'message-2', client_message_id: 'second', content: 'Next question', created_at: later }),
+            later,
+          ),
+          event(5, 'message.sent', { client_message_id: 'second', worker_turn_seq: 2 }, later),
+        ],
+        next_cursor: 'page-4',
+      },
+      { events: [event(6, 'reply', { event_id: 'reply-2', worker_turn_seq: 2, content: 'Second reply' }, later)] },
     ]
-    const events = [
-      accepted(),
-      event(2, 'message.sent', { client_message_id: 'client-message', worker_turn_seq: 1 }),
-      event(3, 'reply', { event_id: 'report', worker_turn_seq: 1, content: 'Actual reply' }, later),
-    ]
-    const { api } = setup((url) =>
-      url.pathname.endsWith('/history')
-        ? { ok: true, history: { entries, cursor: 'end', has_more: false, gap: false } }
-        : url.pathname.endsWith('/timeline')
-          ? { events }
-          : thread({ agent_type: 'pi' }),
-    )
-    expect(await api.readHistory(threadId, null)).toMatchObject({
-      state: 'ready',
-      more: false,
-      messages: [{ id: `history:${threadId}:old`, body: 'An earlier reply' }],
-    })
-  })
-
-  it('uses the active parent chain for Pi native history branches', async () => {
-    const raw = (id: string, parentId: string | null) => ({
-      id,
-      parent_id: parentId,
-      reference: id,
-      truncated: false,
-      text: JSON.stringify({
-        id,
-        parentId,
-        type: 'message',
-        timestamp: at,
-        message: { role: 'assistant', content: id },
-      }),
-    })
-    const entries = [raw('root', null), raw('other-branch', 'root'), raw('active-branch', 'root')]
-    const { api } = setup((url) =>
-      url.pathname.endsWith('/history')
-        ? { ok: true, history: { entries, cursor: 'end', has_more: false, gap: false } }
-        : url.pathname.endsWith('/timeline')
-          ? { events: [] }
-          : thread({ agent_type: 'pi' }),
-    )
-    const history = await api.readHistory(threadId, null)
-    if (history.state !== 'ready') throw new Error('Expected ready history')
-    expect(history.messages.map((m) => m.body)).toEqual(['root', 'active-branch'])
-  })
-
-  it('maps explicit native missing/offline states and preserves other failures', async () => {
-    let response: Record<string, unknown> = { ok: false, code: 'history_missing' }
-    const { api } = setup((url) => (url.pathname.endsWith('/history') ? response : thread()))
-    expect(await api.readHistory(threadId, null)).toEqual({ state: 'unavailable', threadId, reason: 'missing' })
-    response = { ok: false, code: 'node_offline' }
-    expect(await api.readHistory(threadId, null)).toMatchObject({ reason: 'offline' })
-    response = { ok: false, code: 'history_busy' }
-    await expect(api.readHistory(threadId, null)).rejects.toBeInstanceOf(ClientError)
-  })
-
-  it.each([
-    { gap: true, entries: [] },
-    { gap: false, entries: [{ reference: 'raw', text: '{}', truncated: true }] },
-    { gap: false, entries: [{ reference: 'raw', text: '{', truncated: false }] },
-    {
-      gap: false,
-      entries: [
-        {
-          reference: 'raw',
-          truncated: false,
-          text: JSON.stringify({ type: 'message', id: 'no-time', message: { role: 'user', content: 'Hello' } }),
-        },
-      ],
-    },
-  ])('does not invent complete history for incomplete native records %#', async (page) => {
-    const { api } = setup((url) =>
-      url.pathname.endsWith('/history')
-        ? { ok: true, history: { ...page, cursor: 'end', has_more: false } }
-        : url.pathname.endsWith('/timeline')
-          ? { events: [] }
-          : thread({ agent_type: 'pi' }),
-    )
-    expect(await api.readHistory(threadId, null)).toMatchObject({ state: 'ready', messages: [], gap: true })
-  })
-
-  it('retains complete messages and advances the cursor through a page containing a gap and truncated JSON', async () => {
-    const raw = (text: string) => ({
-      text: JSON.stringify({
-        type: 'response_item',
-        timestamp: at,
-        payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] },
-      }),
-      reference: `codex:native:${text}`,
-      truncated: false,
-    })
+    let index = 0
     const { api, fetcher } = setup((url) => {
-      if (url.pathname.endsWith('/timeline')) return { events: [] }
-      if (!url.pathname.endsWith('/history')) return thread()
-      const second = url.searchParams.has('cursor')
-      return {
-        ok: true,
-        history: {
-          entries: second
-            ? [raw('second-page')]
-            : [{ kind: 'session_meta', text: '{', reference: 'codex:native:0', truncated: true }, raw('first-page')],
-          cursor: second ? '3:digest' : '2:digest',
-          has_more: !second,
-          gap: !second,
-        },
-      }
+      if (url.pathname.endsWith('/history')) throw new Error(`Unexpected history request: ${url.pathname}`)
+      if (!url.pathname.endsWith('/timeline')) return thread({ node_online: false, node_synced: false })
+      const page = pages[index]
+      index += 1
+      return page ?? { events: [] }
     })
-    const history = await api.readHistory(threadId, null)
-    expect(history).toMatchObject({ state: 'ready', gap: true, more: false })
-    if (history.state !== 'ready') throw new Error('Expected ready history')
-    expect(history.messages.map((message) => message.body)).toEqual(['first-page', 'second-page'])
-    expect(fetcher.mock.calls.some(([url]) => requestURL(url).includes('cursor=2%3Adigest'))).toBe(true)
+    const messages = await api.listMessages(threadId)
+    expect(messages.map((item) => item.body)).toEqual([
+      'Inspect this repository',
+      'First reply',
+      'Next question',
+      'Second reply',
+    ])
+    expect(messages.every((item) => item.delivery === 'delivered')).toBe(true)
+    const timelines = fetcher.mock.calls.map(([url]) => requestURL(url)).filter((url) => url.includes('/timeline'))
+    expect(timelines).toEqual([
+      `/api/v1/threads/${threadId}/timeline?limit=100`,
+      `/api/v1/threads/${threadId}/timeline?limit=100&cursor=page-2`,
+      `/api/v1/threads/${threadId}/timeline?limit=100&cursor=page-3`,
+      `/api/v1/threads/${threadId}/timeline?limit=100&cursor=page-4`,
+    ])
+    expect(fetcher.mock.calls.every(([url]) => !requestURL(url).includes('/history'))).toBe(true)
   })
 
-  it('displays the bounded text of a complete but truncated JSON message with an explicit marker', async () => {
+  it('rejects a timeline cursor that does not advance', async () => {
     const { api } = setup((url) =>
-      url.pathname.endsWith('/history')
-        ? {
-            ok: true,
-            history: {
-              entries: [
-                {
-                  reference: 'native:bounded',
-                  truncated: true,
-                  text: JSON.stringify({
-                    type: 'response_item',
-                    timestamp: at,
-                    payload: {
-                      type: 'message',
-                      role: 'assistant',
-                      content: [{ type: 'output_text', text: 'Actual bounded text' }],
-                    },
-                  }),
-                },
-              ],
-              cursor: '1:digest',
-              has_more: false,
-              gap: true,
-            },
-          }
-        : url.pathname.endsWith('/timeline')
-          ? { events: [] }
-          : thread(),
+      url.pathname.endsWith('/timeline') ? { events: [accepted()], next_cursor: 'stuck' } : thread(),
     )
-    expect(await api.readHistory(threadId, null)).toMatchObject({
-      state: 'ready',
-      gap: true,
-      messages: [
-        { body: 'Actual bounded text\n\n[History entry truncated]', createdAt: Date.parse(at), role: 'agent' },
-      ],
-    })
-  })
-
-  it('rejects an ambiguous center boundary and a history cursor that does not advance', async () => {
-    let repeatCursor = false
-    const entries = [0, 1].map((i) => ({
-      reference: `ref-${i}`,
-      truncated: false,
-      text: JSON.stringify({
-        type: 'response_item',
-        timestamp: at,
-        payload: { type: 'message', role: 'user', content: 'Inspect this repository' },
-      }),
-    }))
-    const { api } = setup((url) =>
-      url.pathname.endsWith('/history')
-        ? { ok: true, history: { entries, cursor: 'same', has_more: repeatCursor, gap: false } }
-        : url.pathname.endsWith('/timeline')
-          ? {
-              events: [
-                accepted(),
-                event(2, 'message.sent', { client_message_id: 'client-message', worker_turn_seq: 1 }),
-              ],
-            }
-          : thread(),
-    )
-    await expect(api.readHistory(threadId, null)).rejects.toThrow('could not be matched')
-    repeatCursor = true
-    await expect(api.readHistory(threadId, null)).rejects.toThrow('cursor did not advance')
+    await expect(api.listMessages(threadId)).rejects.toThrow('cursor did not advance')
   })
 
   it('reads the actual trace for the reply turn and reports missing history honestly', async () => {

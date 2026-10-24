@@ -311,7 +311,6 @@ function thread(now: number, fields: Partial<Thread> & Pick<Thread, 'id' | 'titl
     updatedAt: now - 20 * minute,
     runStartedAt: null,
     unread: false,
-    earlier: false,
     ...fields,
   }
 }
@@ -336,7 +335,6 @@ function threads(now: number): Thread[] {
       folder: '~/src/baton',
       status: 'idle',
       unread: true,
-      earlier: true,
     }),
     thread(now, {
       id: 'thr-compat',
@@ -879,46 +877,6 @@ function traces(): Record<string, TraceStep[]> {
   }
 }
 
-// 设备上比中心更早的对话。Rebuild web UI foundation 这个 Thread 之前还聊过三轮。
-function earlierHistory(now: number): Record<string, Message[]> {
-  const turns = [
-    [
-      'Compare StyleX and vanilla-extract for the new UI.',
-      'StyleX fits better: atomic CSS and typed tokens. vanilla-extract needs a separate theme contract.',
-    ],
-    [
-      'Check whether Base UI works with our CSP.',
-      'It works. Base UI positions popups through the CSSOM, which `style-src-attr` does not block.',
-    ],
-    ['List the routes the first milestone needs.', 'Six routes: sign-in, inbox, projects, project, chats and devices.'],
-  ]
-  return {
-    'thr-webui': turns.flatMap(([ask, reply], index) => {
-      const at = now - (5 - index) * hour
-      return [
-        message({
-          id: `msg-webui-e${index * 2 + 1}`,
-          threadId: 'thr-webui',
-          role: 'user',
-          sender: 'you',
-          body: ask,
-          createdAt: at,
-          delivery: 'delivered',
-        }),
-        message({
-          id: `msg-webui-e${index * 2 + 2}`,
-          threadId: 'thr-webui',
-          role: 'agent',
-          sender: 'agent',
-          body: reply,
-          createdAt: at + 4 * minute,
-          delivery: 'delivered',
-        }),
-      ]
-    }),
-  }
-}
-
 // 执行中 Thread 已经收到的实时输出。
 function outputs(): Record<string, OutputChunk[]> {
   return {
@@ -947,7 +905,6 @@ function base(now: number): World {
     operations: [],
     files: files(),
     traces: traces(),
-    earlierHistory: earlierHistory(now),
     outputs: outputs(),
     outputLoss: [],
     failingReads: [],
@@ -1050,7 +1007,6 @@ export function createWorld(id: ScenarioId, now: number): World {
         inbox: [],
         files: {},
         traces: {},
-        earlierHistory: {},
         outputs: {},
       }
     case 'noChats':
@@ -1060,7 +1016,6 @@ export function createWorld(id: ScenarioId, now: number): World {
         threads: [],
         messages: [],
         traces: {},
-        earlierHistory: {},
         outputs: {},
         inbox: world.inbox.filter((item) => item.threadId === null),
       }
@@ -1235,7 +1190,6 @@ export function createWorld(id: ScenarioId, now: number): World {
       // 这些内容第一次读取失败，重试成功。
       world.failingReads.push(
         'trace:msg-webui-2',
-        'history:thr-webui',
         fileKey('file:dev-ubuntu', `${ubuntuRepo}/internal/gateway/reconnect_test.go`),
       )
       world.inbox.push({

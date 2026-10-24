@@ -29,7 +29,7 @@ Vite 代理保持后端 TLS 证书验证。后端使用私有 CA 时，在启动
 
 HTTP 客户端读取真实 API 返回的记录、能力和操作结果。操作返回 `Operation`，界面按操作阶段显示进度；事项处理在保存后返回生效或冲突结果。列表、主对话和记忆版本按各接口的游标读完全部页面。
 
-远程 Thread 支持 Cursor、Codex、Kiro 和 Pi。设备报告保留 Agent 的 `status`、`reason` 和 `capabilities.create`；只有 `available` 且明确支持 `create` 时才能新建对话，未知状态和 `unverified` 均不可创建，并显示设备报告的原因。消息已保存、设备已接收和 Agent 已打开分别处理；`opened_at` 为空时显示启动中或等待设备，`resume_pending` 为真时持续显示恢复中，停止与归档等待设备执行结果确认。详情通过现有 `/threads/{id}` 和时间线读取，刷新页面后仍能显示待完成的恢复。
+远程 Thread 支持 Cursor、Codex、Kiro 和 Pi。设备报告保留 Agent 的 `status`、`reason` 和 `capabilities.create`；只有 `available` 且明确支持 `create` 时才能新建对话，未知状态和 `unverified` 均不可创建，并显示设备报告的原因。消息已保存、设备已接收和 Agent 已打开分别处理；`opened_at` 为空时显示启动中或等待设备，`resume_pending` 为真时持续显示恢复中，停止与归档等待设备执行结果确认。详情通过 `/threads/{id}` 和时间线读取。时间线就是 Thread 历史：中心保存的输入和回复，按游标分页，设备离线时仍然显示。网页不解析各 Agent 的原生会话，在 Baton 之外继续同一会话产生的消息不会出现。刷新页面后仍能显示待完成的恢复。
 
 Thread 页面独立于 Project 和 Inbox 查询。后端未提供这些接口时，远程 Thread 的创建、发送、输出、停止、恢复及归档继续使用现有 HTTP 契约；项目查询失败显示不可用，业务数据始终来自接口。选择工作目录使用 `/nodes/{id}/files` 的 roots 和 directory 响应；根目录管理、Project、附件和订阅功能需要后端提供各自的接口。
 
@@ -37,7 +37,7 @@ Thread 页面独立于 Project 和 Inbox 查询。后端未提供这些接口时
 
 已登录且有页面订阅时，客户端连接 `/api/v1/events` WebSocket，收到 `thread.changed` 后刷新 Thread、消息和操作状态；收到带有 `node_id`、非负整数 `report_version` 的 `devices.changed` 后重新读取设备报告并刷新目录和文件查询，能力以查询结果为准。同时每 2 秒通知刷新设备、项目、Thread、消息、Inbox 和操作状态，补充尚无服务器事件覆盖的变化；连接断开后，轮询继续执行并尝试重连。
 
-已保存的项目、Thread、消息、记忆及版本、事项结果由 Coordinator 和设备按各自职责持久化，刷新网页后从真实接口重新读取。完整历史、执行过程和文件内容按接口从设备读取，离线、记录缺失和输出缺口按实际状态呈现。未保存的草稿与引用选择保存在当前页面或工作区内存中，刷新网页或离开工作区后清除。
+已保存的项目、Thread、消息、记忆及版本、事项结果由 Coordinator 和设备按各自职责持久化，刷新网页后从真实接口重新读取。Thread 的输入和回复从中心读取，设备离线时仍然可见。执行过程和文件内容从设备读取；设备离线、记录缺失和实时输出缺口按实际状态呈现。未保存的草稿与引用选择保存在当前页面或工作区内存中，刷新网页或离开工作区后清除。
 
 Inbox 按创建时间从新到旧列出所有项目的待处理事项，侧栏和浏览器标签页显示待处理数量。事项卡片在 Inbox、项目主对话和关联 Thread 里复用，说明默认收起，仅渲染受限 Markdown。选项、最多 4 KiB 的附言、允许时的纯文字回答，以及关闭操作都通过同一数据接口保存。处理结果保留处理人、时间和内容，可从 `Handled items` 查看；遇到其他页面已处理或助手已撤回时，显示已生效的结果。
 
@@ -63,13 +63,13 @@ Memory 展示最新内容、版本、来源和时间，可添加、编辑并查�
 
 | 场景 | 内容 |
 |---|---|
-| `normal` | 三台设备、四个 Project、进行中的 Thread 和待处理事项。Baton Dev 的助手开了一个 Thread 正在等回复，Compatibility 的助手已经汇报结果。回复带执行过程、文件和提交附件；Rebuild web UI foundation 在设备上还有三轮更早的对话，每页读三条；Ubuntu Dev 的 `logs` 目录里有超过 64 KB 的日志，`internal/gateway/testdata` 里有二进制文件 |
+| `normal` | 三台设备、四个 Project、进行中的 Thread 和待处理事项。Baton Dev 的助手开了一个 Thread 正在等回复，Compatibility 的助手已经汇报结果。回复带执行过程、文件和提交附件；Ubuntu Dev 的 `logs` 目录里有超过 64 KB 的日志，`internal/gateway/testdata` 里有二进制文件 |
 | `empty` | 已登录但还没有设备，显示首次使用引导 |
 | `noChats` | 设备已接入但还没有对话，Threads 页显示空列表，可以从顶部输入区开始第一个对话 |
 | `signedOut` | 未登录，打开任何页面都进入登录页 |
 | `offline` | Ubuntu Dev 和 MacBook Pro 离线：执行中的 Thread 只显示最后报告的状态，停止请求等设备连上再发出，Project 助手等待可用设备，发给它的消息已保存；Ubuntu Dev 重新连上后，Fix gateway reconnect race 的实时输出标出断开期间丢失的一段 |
 | `waiting` | Windows Desktop 同步中，发给它的消息已保存等待发送；另一条消息排在执行中的 Thread 后面；Kiro 收到停止后没有停下，一分钟后由设备结束进程；Docs Cleanup 的模拟订阅尚未在在线设备上登录，消息保存后等待设备 |
-| `error` | Thread 的各种停止原因：目录不存在、设备重启打断（Kiro 不能恢复，Pi 恢复时找不到对话记录）、Agent 启动失败；另一个 Thread 状态未知，不会自动重发；ChatGPT 登录过期导致 Project 助手需要处理，并生成系统事项；第一次新建 Project 和第一次处理事项保存失败，重试可再次提交；Rebuild web UI foundation 的回复过程、更早的对话和 `reconnect_test.go` 预览第一次读取失败，重试成功；Write batond setup guide 的对话记录已删除，回复过程读不到 |
+| `error` | Thread 的各种停止原因：目录不存在、设备重启打断（Kiro 不能恢复，Pi 恢复时找不到对话记录）、Agent 启动失败；另一个 Thread 状态未知，不会自动重发；ChatGPT 登录过期导致 Project 助手需要处理，并生成系统事项；第一次新建 Project 和第一次处理事项保存失败，重试可再次提交；Rebuild web UI foundation 的回复过程和 `reconnect_test.go` 预览第一次读取失败，重试成功；Write batond setup guide 的对话记录已删除，回复过程读不到 |
 | `conflict` | 事项已在别处处理，回答时提示冲突并展示生效的回答 |
 | `inbox` | 选项题、纯文字问题，以及已回答、已关闭、已撤回和已解决的历史事项 |
 | `inboxPaused` | Compatibility 暂停，保留全部问题和历史；回答和关闭成功后，项目输入等待恢复 |

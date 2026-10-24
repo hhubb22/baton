@@ -26,7 +26,6 @@ import type {
   MemoryNote,
   ProcessStep,
   FilePreview,
-  HistoryPage,
   ItemDecision,
   InboxItem,
   LiveOutput,
@@ -59,9 +58,6 @@ export interface Latency {
 }
 
 export const browserLatency: Latency = { read: 150, save: 400, device: 900, run: 8000 }
-
-// 从设备读取更早的对话时每页的条数。
-export const historyPage = 3
 
 // Agent 收到停止请求一分钟后还没停下，设备结束它的进程。
 export const stopTimeout = 60_000
@@ -370,7 +366,6 @@ export class MockStore {
       updatedAt: now,
       runStartedAt: null,
       unread: false,
-      earlier: false,
     }
     this.world.threads.push(thread)
     const message = this.userMessage(thread.id, body)
@@ -1665,7 +1660,6 @@ ${response}`,
         updatedAt: now,
         runStartedAt: null,
         unread: false,
-        earlier: false,
       }
       this.world.threads.push(thread)
       const message: Message = {
@@ -1806,19 +1800,6 @@ ${response}`,
     if (this.world.lostHistory.includes(thread.id)) return { state: 'unavailable', messageId, reason: 'missing' }
     this.failOnce(`trace:${messageId}`)
     return { state: 'ready', messageId, steps: this.world.traces[messageId] ?? [] }
-  }
-
-  // 从设备按页读取更早的对话，每页 historyPage 条，从 before 往前。
-  readHistory(threadId: ID, before: ID | null): HistoryPage {
-    const thread = this.thread(threadId)
-    if (!this.online(thread.deviceId)) return { state: 'unavailable', threadId, reason: 'offline' }
-    if (this.world.lostHistory.includes(threadId)) return { state: 'unavailable', threadId, reason: 'missing' }
-    this.failOnce(`history:${threadId}`)
-    const earlier = this.world.earlierHistory[threadId] ?? []
-    const index = before === null ? -1 : earlier.findIndex((item) => item.id === before)
-    const end = index < 0 ? earlier.length : index
-    const start = Math.max(0, end - historyPage)
-    return { state: 'ready', threadId, messages: earlier.slice(start, end), more: start > 0 }
   }
 
   // 只有执行中的一轮有实时输出。

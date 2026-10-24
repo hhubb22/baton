@@ -309,8 +309,9 @@ export const httpHandlers = (options: HTTPOptions) => {
           httpBusiness(
             Effect.gen(function* () {
               const { employee } = yield* CurrentBrowserSession
-              const thread = yield* Threads.view(employee.id, params.threadId)
-              return sessionResult(params.threadId, thread.node_online ? 'history_unavailable' : 'node_offline')
+              // 时间线已经返回中心记录。协议仍声明此路由，这里只做权限检查，不向设备查询。
+              yield* Threads.view(employee.id, params.threadId)
+              return sessionResult(params.threadId, 'history_unavailable')
             }),
           ),
         )

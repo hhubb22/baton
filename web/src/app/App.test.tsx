@@ -791,29 +791,6 @@ describe('execution details', () => {
     expect(within(detail).getByLabelText('Live output')).toHaveTextContent(/waiting for resume/)
   })
 
-  it('pages earlier history from the device and retries a failed page', async () => {
-    const user = userEvent.setup()
-    renderApp('/threads/thr-webui', 'error')
-    await user.click(await screen.findByRole('button', { name: 'Load earlier history' }))
-    expect(await screen.findByText(/did not return the earlier history/)).toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: 'Retry earlier history' }))
-    expect(await screen.findByText('List the routes the first milestone needs.')).toBeInTheDocument()
-    expect(screen.queryByText('Compare StyleX and vanilla-extract for the new UI.')).not.toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: 'Load earlier history' }))
-    expect(await screen.findByText('Compare StyleX and vanilla-extract for the new UI.')).toBeInTheDocument()
-    expect(screen.getByText('Start of chat history')).toBeInTheDocument()
-  })
-
-  it('says why earlier history is unavailable', async () => {
-    const user = userEvent.setup()
-    const { client } = renderApp('/threads/thr-webui')
-    act(() => client.controls.setDeviceConnection('dev-mac', 'offline'))
-    await user.click(await screen.findByRole('button', { name: 'Load earlier history' }))
-    expect(await screen.findByText('MacBook Pro is offline · earlier history unavailable')).toBeInTheDocument()
-  })
-
   it('browses folders in the file preview and explains files it cannot show', async () => {
     const user = userEvent.setup()
     renderApp('/threads?thread=thr-gateway', 'error')

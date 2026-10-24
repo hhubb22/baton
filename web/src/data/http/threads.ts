@@ -5,7 +5,6 @@ import type {
   Delivery,
   FilePreview,
   FolderListing,
-  HistoryPage,
   Message,
   OperationPhase,
   Thread,
@@ -98,17 +97,6 @@ type SessionDTO = {
   cursor?: string
   gap?: boolean
 }
-type NativeEntry = {
-  id?: string
-  parent_id?: string
-  kind?: string
-  text: string
-  reference: string
-  truncated: boolean
-}
-type HistoryDTO = SessionDTO & {
-  history?: { entries: NativeEntry[]; cursor: string; has_more: boolean; gap: boolean; code?: string }
-}
 type Phase = { phase: OperationPhase; detail?: string | null }
 type ThreadAPI = Pick<
   BatonClient,
@@ -123,7 +111,6 @@ type ThreadAPI = Pick<
   | 'archiveThread'
   | 'resumeThread'
   | 'readTrace'
-  | 'readHistory'
   | 'readOutput'
   | 'listFolders'
   | 'readFile'
@@ -212,113 +199,7 @@ function mapThread(t: ThreadDTO, events: EventDTO[]): Thread {
     updatedAt: timestamp(t.last_activity_at),
     runStartedAt: t.current_turn ? timestamp(t.current_turn.started_at) : null,
     unread: false,
-    earlier: Boolean(t.native_session_id),
   }
-}
-
-const record = (value: unknown): Record<string, unknown> | null =>
-  value != null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null
-
-function nativeMessages(
-  threadId: string,
-  agent: string,
-  entries: NativeEntry[],
-): { messages: Message[]; gap: boolean } {
-  let gap = entries.some((entry) => entry.truncated)
-  const decoded = entries.flatMap((entry) => {
-    let raw: Record<string, unknown> | null = null
-    try {
-      raw = record(JSON.parse(entry.text))
-    } catch {
-      gap = true
-    }
-    if (!raw) {
-      gap = true
-      return []
-    }
-    return [{ entry, raw }]
-  })
-  let active = decoded
-  if (agent === 'pi' && decoded.some(({ entry, raw }) => entry.parent_id || raw.parentId)) {
-    const byID = new Map(
-      decoded.filter(({ raw }) => typeof raw.id === 'string').map((item) => [item.raw.id as string, item]),
-    )
-    const ids = new Set<string>()
-    let leaf = decoded.findLast(({ raw }) => typeof raw.id === 'string' && raw.type !== 'session')
-    let complete = true
-    while (leaf) {
-      const id = leaf.raw.id as string
-      if (ids.has(id)) {
-        complete = false
-        break
-      }
-      ids.add(id)
-      const parent = leaf.entry.parent_id || leaf.raw.parentId
-      if (!parent) break
-      if (typeof parent !== 'string' || !byID.has(parent)) {
-        complete = false
-        break
-      }
-      leaf = byID.get(parent as string)
-    }
-    if (complete) active = decoded.filter(({ raw }) => ids.has(raw.id as string))
-    else gap = true
-  }
-  if (agent === 'kiro' && entries.length) gap = true
-  const messages: Message[] = []
-  const ids = new Set<string>()
-  for (const { entry, raw } of active) {
-    let message: Record<string, unknown> | null = null
-    if (agent === 'pi' && raw.type === 'message') message = record(raw.message)
-    else if (agent === 'codex' && raw.type === 'response_item') {
-      const payload = record(raw.payload)
-      if (payload?.type === 'message') message = payload
-    }
-    if (!message || (message.role !== 'user' && message.role !== 'assistant')) continue
-    let body: string
-    if (typeof message.content === 'string') body = message.content
-    else if (Array.isArray(message.content)) {
-      body = message.content
-        .map((block: unknown) => {
-          const part = record(block)
-          return part &&
-            ['text', 'input_text', 'output_text'].includes(String(part.type)) &&
-            typeof part.text === 'string'
-            ? part.text
-            : ''
-        })
-        .join('')
-    } else {
-      gap = true
-      continue
-    }
-    if (!body) continue
-    const sourceID = entry.id || (typeof raw.id === 'string' ? raw.id : entry.reference)
-    const time = raw.timestamp ?? message.timestamp
-    const createdAt = typeof time === 'string' || typeof time === 'number' ? timestamp(time) : NaN
-    if (!sourceID || !Number.isFinite(createdAt)) {
-      gap = true
-      continue
-    }
-    const id = 'history:' + threadId + ':' + encodeURIComponent(sourceID)
-    if (ids.has(id)) {
-      gap = true
-      continue
-    }
-    ids.add(id)
-    messages.push({
-      id,
-      threadId,
-      role: message.role === 'user' ? 'user' : 'agent',
-      sender: message.role === 'user' ? 'you' : 'agent',
-      body: entry.truncated ? body + '\n\n[History entry truncated]' : body,
-      createdAt,
-      delivery: 'delivered',
-      activity: null,
-      attachments: [],
-    })
-  }
-  return { messages, gap }
 }
 
 function deliveryOf(m: MessageDTO, t: ThreadDTO): Delivery {
@@ -683,62 +564,6 @@ export function createThreadAPI(
       if (!result.steps) unavailable('The device returned an incomplete trace.')
       if (result.steps!.some((step) => step.truncated)) unavailable('The stored trace is incomplete.')
       return { state: 'ready', messageId, steps: result.steps! }
-    },
-    async readHistory(threadId, before): Promise<HistoryPage> {
-      const t = await view(threadId)
-      const entries: NativeEntry[] = []
-      const cursors = new Set<string>()
-      let cursor = ''
-      let bytes = 0
-      let gap = false
-      for (let pageNumber = 0; ; pageNumber += 1) {
-        if (pageNumber >= 128 || bytes > 2 * 1024 * 1024)
-          unavailable('The native history exceeds the browser reading limit.')
-        const query = new URLSearchParams({ limit: '16' })
-        if (cursor) query.set('cursor', cursor)
-        const response = await sessionResult<HistoryDTO>(`${threadPath(threadId)}/history?${query}`)
-        if (!response.ok) {
-          const reason = unavailableReason(response.code)
-          if (reason) return { state: 'unavailable', threadId, reason }
-          unavailable('The device could not read this history.')
-        }
-        const page = response.history
-        if (!page) unavailable('The device returned an incomplete history page.')
-        gap ||= Boolean(page!.gap || page!.code)
-        entries.push(...page!.entries)
-        bytes += page!.entries.reduce((sum, entry) => sum + new TextEncoder().encode(entry.text).byteLength, 0)
-        if (!page!.has_more) break
-        if (!page!.cursor || cursors.has(page!.cursor)) unavailable('The history cursor did not advance.')
-        cursors.add(page!.cursor)
-        cursor = page!.cursor
-      }
-      const parsed = nativeMessages(threadId, t.agent_type, entries)
-      const native = parsed.messages
-      gap ||= parsed.gap
-      let end = native.length
-      if (before != null) {
-        end = native.findIndex((message) => message.id === before)
-        if (end < 0) unavailable('The native history changed. Reload the conversation before reading more.')
-      } else {
-        const saved = (await readMessages(t, await timeline(threadId))).filter(
-          (message) => message.delivery === 'delivered',
-        )
-        if (saved.length) {
-          // 完整且唯一的消息序列确定中心记录的起点，避免依赖两端时钟一致。
-          const matches = native.flatMap((_, index) =>
-            saved.every(
-              (message, offset) =>
-                native[index + offset]?.role === message.role && native[index + offset]?.body === message.body,
-            )
-              ? [index]
-              : [],
-          )
-          if (matches.length === 1) end = matches[0]
-          else if (!gap) unavailable('The native history could not be matched to the saved conversation.')
-        }
-      }
-      const start = Math.max(0, end - 16)
-      return { state: 'ready', threadId, messages: native.slice(start, end), more: start > 0, gap }
     },
     readOutput: (id) => output.readOutput(id),
     async listFolders(deviceId, path): Promise<FolderListing> {

@@ -136,8 +136,6 @@ export interface Thread {
   updatedAt: number
   runStartedAt: number | null
   unread: boolean
-  // 设备上还有比中心保存的消息更早的对话记录，可以按页读取。
-  earlier: boolean
 }
 
 // 一条消息从提交到被 Agent 读到的过程。unknown 表示设备在发送途中重启，不确定 Agent 是否收到，Baton 不会自动重发。
@@ -181,11 +179,6 @@ export type TraceStep =
 export type Trace =
   | { state: 'ready'; messageId: ID; steps: TraceStep[] }
   | { state: 'unavailable'; messageId: ID; reason: 'offline' | 'missing' }
-
-// 设备上比中心保存的消息更早的对话记录，按页从设备读取，before 为已显示的最早一条消息。
-export type HistoryPage =
-  | { state: 'ready'; threadId: ID; messages: Message[]; more: boolean; gap?: boolean }
-  | { state: 'unavailable'; threadId: ID; reason: 'offline' | 'missing' }
 
 // 执行中的一轮的实时输出。gap 表示设备已经丢掉、补不回来的一段。
 export type OutputChunk = { kind: 'text'; text: string } | { kind: 'gap' }

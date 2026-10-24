@@ -4,7 +4,6 @@ import type {
   Enrollment,
   FilePreview,
   FolderListing,
-  HistoryPage,
   ID,
   InboxItem,
   ItemDecision,
@@ -63,8 +62,6 @@ export interface BatonClient {
   readFile(deviceId: ID, path: string): Promise<FilePreview>
   // 回复的完整过程留在设备上，展开时读取。
   readTrace(messageId: ID): Promise<Trace>
-  // 比中心保存的消息更早的对话，从设备按页读取；before 为已显示的最早一条消息，null 从最近一页开始。
-  readHistory(threadId: ID, before: ID | null): Promise<HistoryPage>
   // 执行中的一轮的实时输出，这一轮结束后为空。
   readOutput(threadId: ID): Promise<LiveOutput>
   // 推送输出快照；null 表示连接或读取状态变化，需要重读。返回函数取消订阅。

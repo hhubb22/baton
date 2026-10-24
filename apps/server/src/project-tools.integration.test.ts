@@ -341,3 +341,166 @@ it('chunks escaped UTF-8 JSON below tool result capacity without breaking charac
   }
   expect(JSON.parse(text)).toEqual(value)
 })
+
+it('reads the same center thread records from the web timeline and history tools while the device is offline', async () =>
+  withTestDatabase(async (db) => {
+    const { context: c, nodeId, source } = await projectToolFixture(db)
+    const created = await db.run(
+      executeProjectTool(c, 'threads.create', {
+        node_id: nodeId,
+        agent_type: 'cursor',
+        working_directory: '/work',
+        message: 'Start',
+      }),
+    )
+    const id = (created.value as { thread_id: string }).thread_id
+    const commands = await db.run(threads.claimCommands())
+    const open = commands.find((command) => command.body.thread_id === id && command.body.action === 'open')
+    expect(open).toBeTruthy()
+    await db.run(
+      threads.processReceipt(source, open!.message_id, {
+        type: 'thread.command_result',
+        thread_id: id,
+        ok: true,
+        storage_generation: 'generation',
+      }),
+    )
+    const report = (seq: number, kind: ThreadReport['kind'], extra: Partial<ThreadReport> = {}): ThreadReport => ({
+      type: 'thread.report',
+      thread_id: id,
+      event_id: randomUUID(),
+      worker_seq: seq,
+      kind,
+      storage_generation: 'generation',
+      ...extra,
+    })
+    const firstMessage = `pa:${c.conversationId}:${c.toolCallId}:0`
+    await db.run(threads.processReport(source, report(1, 'thread.opened', { native_session_id: 'continued-outside' })))
+    await db.run(
+      threads.processReport(source, report(2, 'turn.started', { worker_turn_seq: 1, client_message_id: firstMessage })),
+    )
+    await db.run(
+      threads.processReport(source, report(3, 'message.sent', { worker_turn_seq: 1, client_message_id: firstMessage })),
+    )
+    await db.run(threads.processReport(source, report(4, 'reply', { worker_turn_seq: 1, content: 'alpha' })))
+    await db.run(
+      threads.processReport(
+        source,
+        report(5, 'turn.ended', { worker_turn_seq: 1, reason: 'completed', queue_empty: true }),
+      ),
+    )
+    const send = { ...c, toolCallId: 'send-2' }
+    await db.run(executeProjectTool(send, 'threads.send', { thread_id: id, message: 'More' }))
+    const secondMessage = `pa:${c.conversationId}:send-2`
+    await db.run(
+      threads.processReport(
+        source,
+        report(6, 'turn.started', { worker_turn_seq: 2, client_message_id: secondMessage }),
+      ),
+    )
+    await db.run(
+      threads.processReport(
+        source,
+        report(7, 'message.sent', { worker_turn_seq: 2, client_message_id: secondMessage }),
+      ),
+    )
+    await db.run(threads.processReport(source, report(8, 'reply', { worker_turn_seq: 2, content: 'beta' })))
+    await db.run(
+      threads.processReport(
+        source,
+        report(9, 'turn.ended', { worker_turn_seq: 2, reason: 'completed', queue_empty: true }),
+      ),
+    )
+    await db.run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql`UPDATE node_presence SET online=false, synced=false WHERE node_id=${nodeId}`
+        yield* sql`INSERT INTO conversation_events(conversation_id,seq,employee_id,kind,payload) VALUES
+          (${c.conversationId},2,${c.employeeId},'input','{"text":"page-two"}'::jsonb),
+          (${c.conversationId},3,${c.employeeId},'assistant','{"text":"page-three"}'::jsonb)`
+      }),
+    )
+    expect((await db.run(threads.view(c.employeeId, id))).node_online).toBe(false)
+
+    const paths: string[] = []
+    const { createThreadAPI } = await import(new URL('../../../web/src/data/http/threads.ts', import.meta.url).href)
+    const api = createThreadAPI({
+      request: async (path: string) => {
+        paths.push(path)
+        const url = new URL(path, 'https://baton.test')
+        if (url.pathname === `/threads/${id}`) return db.run(threads.view(c.employeeId, id))
+        if (url.pathname === `/threads/${id}/timeline`) {
+          const cursor = url.searchParams.get('cursor') ?? undefined
+          return db.run(threads.timeline(c.employeeId, id, { limit: '2', ...(cursor ? { cursor } : {}) }))
+        }
+        throw new Error(`Unexpected Web request: ${path}`)
+      },
+      emit: () => {},
+      devices: async () => [],
+      operation: () => {
+        throw new Error('Unexpected operation')
+      },
+    })
+    const messages: Array<{ body: string; delivery: string }> = await api.listMessages(id)
+    const saved = ['Start', 'alpha', 'More', 'beta']
+    expect(messages.map((item) => item.body)).toEqual(saved)
+    expect(messages.every((item) => item.delivery === 'delivered')).toBe(true)
+    expect(paths.some((path) => path.includes('cursor='))).toBe(true)
+    expect(paths.every((path) => !path.includes('/history'))).toBe(true)
+
+    const turnsOf = (value: {
+      turns: Array<{ messages: Array<{ content: string }>; replies: Array<{ content: string }> }>
+    }) =>
+      value.turns.flatMap((turn) => [
+        ...turn.messages.map((item) => item.content),
+        ...turn.replies.map((item) => item.content),
+      ])
+    const read = async (args: Record<string, unknown>) =>
+      unpack(await db.run(executeProjectTool(c, 'threads.read', { thread_id: id, ...args })))
+    expect(turnsOf(await read({}))).toEqual(saved)
+    expect(turnsOf(await read({ through_turn: 1 }))).toEqual(['Start', 'alpha'])
+    expect(turnsOf(await read({ after_turn: 1 }))).toEqual(['More', 'beta'])
+
+    const history = async (args: Record<string, unknown> = {}) =>
+      unpack(await db.run(executeProjectTool({ ...c, assistantSeq: 3, toolCallId: 'history' }, 'history.read', args)))
+    expect((await history()).events.map((event: { seq: number }) => event.seq)).toEqual([1, 2, 3])
+    expect((await history({ after_seq: 1, through_seq: 2 })).events.map((event: { seq: number }) => event.seq)).toEqual(
+      [2],
+    )
+    expect(
+      await db.run(executeProjectTool({ ...c, assistantSeq: 3 }, 'history.read', { through_seq: 4 })),
+    ).toMatchObject({
+      isError: true,
+      value: { code: 'invalid_range' },
+    })
+    const found = unpack(
+      await db.run(executeProjectTool({ ...c, assistantSeq: 3 }, 'history.search', { query: 'page-three' })),
+    )
+    expect(found.events).toEqual([expect.objectContaining({ seq: 3 })])
+
+    const other = await projectToolFixture(db)
+    await expect(db.run(threads.timeline(other.context.employeeId, id))).rejects.toMatchObject({ code: 'not_found' })
+    await expect(db.run(threads.view(other.context.employeeId, id))).rejects.toMatchObject({ code: 'not_found' })
+    expect(await db.run(executeProjectTool(other.context, 'threads.read', { thread_id: id }))).toMatchObject({
+      isError: true,
+      value: { code: 'not_found' },
+    })
+    expect(JSON.stringify(unpack(await db.run(executeProjectTool(other.context, 'history.read', {}))))).not.toContain(
+      'alpha',
+    )
+    const foreign = createThreadAPI({
+      request: async (path: string) => {
+        const url = new URL(path, 'https://baton.test')
+        if (url.pathname === `/threads/${id}`) return db.run(threads.view(other.context.employeeId, id))
+        if (url.pathname === `/threads/${id}/timeline`)
+          return db.run(threads.timeline(other.context.employeeId, id, { limit: '2' }))
+        throw new Error(path)
+      },
+      emit: () => {},
+      devices: async () => [],
+      operation: () => {
+        throw new Error('Unexpected operation')
+      },
+    })
+    await expect(foreign.listMessages(id)).rejects.toMatchObject({ code: 'not_found' })
+  }))

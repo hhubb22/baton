@@ -1,7 +1,7 @@
 import * as stylex from '@stylexjs/stylex'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { activityLine, baseName, clockTime, fileSize, runTimer } from '../data/derive'
-import { useLiveOutput, useTrace, type EarlierHistory } from '../data/queries'
+import { useLiveOutput, useTrace } from '../data/queries'
 import type { Attachment, Device, Message, Thread, TraceStep } from '../data/types'
 import { fonts } from '../theme/base.stylex'
 import { text } from '../theme/text'
@@ -105,7 +105,6 @@ const styles = stylex.create({
     fontFamily: fonts.ui,
   },
   liveFoot: { display: 'inline-flex', alignItems: 'center', gap: '6px', color: colors.faint },
-  history: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', textAlign: 'center' },
 })
 
 // 回复上方的一行过程摘要，展开后从设备读取完整过程。
@@ -358,68 +357,6 @@ export function LiveOutput({
         <span {...stylex.props(text.caption, styles.liveFoot)}>
           <Icon name="offline" size={12} />
           Connection lost · output resumes when reconnected
-        </span>
-      )}
-    </div>
-  )
-}
-
-// 时间线顶部读取更早的对话。某页读不到时已显示的消息保留。
-export function HistoryPager({ history, device }: { history: EarlierHistory; device: Device | undefined }) {
-  const name = device?.name ?? 'This device'
-  let action = null
-  let detail: string | null = null
-  switch (history.status) {
-    case 'idle':
-      action = (
-        <Button small onClick={history.load}>
-          Load earlier history
-        </Button>
-      )
-      detail = history.messages.length > 0 ? null : 'Showing recent activity'
-      break
-    case 'loading':
-      action = (
-        <Button small disabled>
-          Loading earlier history…
-        </Button>
-      )
-      break
-    case 'failed':
-      action = (
-        <Button small onClick={history.load}>
-          Retry earlier history
-        </Button>
-      )
-      detail = `${name} did not return the earlier history. Loaded replies are still available.`
-      break
-    case 'unavailable':
-      if (history.reason === 'offline') {
-        action = (
-          <Button small onClick={history.load}>
-            Retry earlier history
-          </Button>
-        )
-        detail = `${name} is offline · earlier history unavailable`
-      } else {
-        detail = 'Past chat history was deleted on this computer'
-      }
-      break
-    case 'done':
-      detail = 'Start of chat history'
-      break
-  }
-  return (
-    <div {...stylex.props(styles.history)}>
-      {action}
-      {history.gap && (
-        <span role="status" {...stylex.props(text.caption, styles.muted)}>
-          Some history entries are truncated or missing.
-        </span>
-      )}
-      {detail && (
-        <span role="status" {...stylex.props(text.caption, styles.muted)}>
-          {detail}
         </span>
       )}
     </div>

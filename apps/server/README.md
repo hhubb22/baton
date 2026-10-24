@@ -88,9 +88,11 @@ pnpm --filter @baton/batond dev up \
 
 Cursor 设备运行进程需显式配置 `CURSOR_API_KEY`，能力探测成功并上报 `available` 后才允许创建 Thread。当前启用 macOS arm64 / SDK 1.0.35；其他组合保持 `unverified` 或报告具体不可用原因。凭据保留在设备端。设备接入、连接恢复及本地命令见 [batond 文档](../batond/README.md)。
 
-网页支持 Cursor 新建、排队消息、撤回、停止、恢复、归档和回复时间线。命令的持久接收与实际完成分别报告；daemon 或中心重启后，存活 Worker 继续执行，重连时按原命令和报告身份恢复。模型在新建时选择，Thread 内固定。
+网页支持 Cursor 新建、排队消息、撤回、停止、恢复、归档和时间线。命令的持久接收与实际完成分别报告；daemon 或中心重启后，存活 Worker 继续执行，重连时按原命令和报告身份恢复。模型在新建时选择，Thread 内固定。
 
-实时输出由 Worker 保留当前 Turn 最近 256 KiB，每次读取最多 16 KiB，游标为 `epoch:字节偏移`。Turn 结束和切换时清空；淘汰、旧 epoch 或上游丢失输出时返回 `gap:true`。HTTP 输出查询和浏览器 WebSocket 复用设备临时 RPC，中心不持久化实时输出。回复时间线读取中心已保存的回复；它与设备原生历史是不同接口。
+Thread 历史是中心保存的输入和回复，所有 Agent 格式相同。网页时间线按事件游标分页读取这些记录，设备离线时仍可查看。在 Baton 之外继续同一原生会话产生的消息不会出现。Project 工具 `threads.read` 读取同一份输入和回复。`history.read` 与 `history.search` 读取 Project 主对话已经保存在中心的事件，不访问设备。
+
+实时输出由 Worker 保留当前 Turn 最近 256 KiB，每次读取最多 16 KiB，游标为 `epoch:字节偏移`。Turn 结束和切换时清空；淘汰、旧 epoch 或上游丢失输出时返回 `gap:true`。HTTP 输出查询和浏览器 WebSocket 复用设备临时 RPC，中心不持久化实时输出。
 
 ## Project 与设备管理
 
@@ -133,11 +135,11 @@ docker run --rm --name baton-tracing \
 | Pi、Codex、Kiro | 当前节点只上报 Cursor；新建返回 HTTP 422，`code:"agent_unavailable"` |
 | Cursor steer                                     | HTTP 422，`code:"steer_unsupported"`；同时传模型时为 `model_with_steer`                              |
 | Cursor 轮间模型切换                              | HTTP 422，`code:"model_switch_unsupported"`                                                          |
-| 网页原生历史 `/threads/{id}/history`             | HTTP 200 的 `SessionResult`，`ok:false`；在线设备为 `history_unavailable`，离线设备为 `node_offline` |
+| Thread 历史                                      | 时间线返回中心保存的输入和回复，设备离线时仍可分页读取。`/threads/{id}/history` 在权限检查后返回 HTTP 200 的 `SessionResult`，`ok:false`、`code:"history_unavailable"`，不向设备发送 `native_history` |
 | 过程 `/threads/{id}/trace`                       | 合法查询返回 HTTP 200，`{ok:false,code:"trace_missing",steps:[]}`                                    |
 | 实时输出时设备离线或尚未同步                     | HTTP 200 的 `SessionResult`，`ok:false`，分别为 `node_offline` 或 `node_syncing`                     |
 
-其他 Agent 与统一历史属于迁移 T4；完整安装包和发布切换属于 T5。Project Runtime 从当前源码仓库与已安装的依赖启动，开发 bundle 需要保留该仓库布局。Go 发布入口保留其已有功能。
+完整安装包和发布切换仍使用 Go 发布入口。Project Runtime 从当前源码仓库与已安装的依赖启动，开发 bundle 需要保留该仓库布局。Go 发布入口保留其已有功能。
 
 ## 验证
 
