@@ -31,8 +31,9 @@ Baton 是跨设备 AI Agent 协同系统，由中心服务（`baton-server`）�
   node tools/check-sidecar-package.mjs
   go vet ./...
   ```
-- **TypeScript workspace**（Node 26、pnpm 12、Vite+ 1.4；适配器验证使用离线转录与本地替身。TS 构建和测试可独立于 Go 构建运行，配置与入口见 [中心文档](apps/server/README.md) 和 [节点文档](apps/batond/README.md)）：
+- **TypeScript workspace**（Node 26、pnpm 12、Vite+ 1.4；`vendor/t3code` 是 git submodule，首次检出先运行 `git submodule update --init`。适配器验证使用离线转录与本地替身。TS 构建和测试可独立于 Go 构建运行，配置与入口见 [中心文档](apps/server/README.md) 和 [节点文档](apps/batond/README.md)）：
   ```sh
+  git submodule update --init
   pnpm install --frozen-lockfile --ignore-scripts
   pnpm check
   pnpm typecheck
