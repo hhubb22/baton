@@ -16,6 +16,8 @@
     "./worker/output": "./src/worker/output.ts",
     "./platform/process": "./src/platform/process.ts",
     "./agents/shell/index": "./src/agents/shell/index.ts",
+    "./testing/pi/transcripts": "./src/testing/pi/transcripts.ts",
+    "./testing/codex/transcripts": "./src/testing/codex/transcripts.ts",
     "./testing/daemon": "./src/testing/daemon.ts"
   },
   "scripts": {
