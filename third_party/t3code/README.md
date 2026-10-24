@@ -1,6 +1,6 @@
 # t3code 来源与许可
 
-Baton 通过 git submodule `vendor/t3code` 使用 fork [hhubb22/t3code](https://github.com/hhubb22/t3code) 的 `baton` 分支，固定提交 `3ddc5ba36e2b9647831ef86fa4fbee7e54790adb`。该提交基于上游 [pingdotgg/t3code](https://github.com/pingdotgg/t3code) 的 `9828cad49f3e1ef4f9e037b3baaca19f4e4928fc`。上游 MIT 许可和 `Copyright (c) 2026 T3 Tools Inc.` 保留在 [LICENSE](LICENSE)。
+Baton 通过 git submodule `upstream/t3code` 使用 fork [hhubb22/t3code](https://github.com/hhubb22/t3code) 的 `baton` 分支，固定提交 `3ddc5ba36e2b9647831ef86fa4fbee7e54790adb`。该提交基于上游 [pingdotgg/t3code](https://github.com/pingdotgg/t3code) 的 `9828cad49f3e1ef4f9e037b3baaca19f4e4928fc`。上游 MIT 许可和 `Copyright (c) 2026 T3 Tools Inc.` 保留在 [LICENSE](LICENSE)。
 
 workspace 收录这些包：`provider-core`、`provider-pi`、`provider-acp`、`provider-acp-registry`、`provider-cursor`、`provider-codex`、`provider-testing`、`contracts`、`shared`、`effect-acp`、`effect-codex-app-server`。`effect-acp` 与 `effect-codex-app-server` 使用 fork 里的同名包。`packages/providers` 与 `packages/provider-testing` 仍是 Baton 本地的 Cursor SDK 抽取。
 
@@ -21,9 +21,9 @@ workspace 收录这些包：`provider-core`、`provider-pi`、`provider-acp`、`
 
 这些包用 `catalog:` 引用依赖，因此解析到 Baton 根 catalog。上游 catalog 里的 `effect` 与 `@effect/*` 是 `4.0.5`，`vite-plus` 是 `1.3.0`，`@types/node` 是 `24.12.4`，`typescript` 是 `@tsc-rs/typescript@0.8.0`。Baton catalog 把它们统一为 `effect` / `@effect/*` `4.0.6`、`vite-plus` `1.4.0`、`@types/node` `26.6.5`、`typescript` `6.0.3`。
 
-`@t3tools/shared` 和 provider 包还引用 Baton 原来没有的 catalog 项。这些项按上游 catalog 补进根 catalog：`@noble/curves@1.9.1`、`@noble/hashes@1.8.0`、`jose@6.2.2`、`yaml@^2.9.0`，以及 `unified`、`remark-*`、`rehype-*`、`micromark-*`、`mdast-util-directive`。`@cursor/sdk` 在两边都是 `1.0.35`。数学 Markdown 沿用上游的 `micromark-extension-llm-math@3.1.0` 替换和 `vendor/t3code/patches` 里的 `mdast-util-math`、`micromark-extension-llm-math`、`micromark-extension-gfm-table` 补丁，否则 `shared` 的离线解析测试对不上。
+`@t3tools/shared` 和 provider 包还引用 Baton 原来没有的 catalog 项。这些项按上游 catalog 补进根 catalog：`@noble/curves@1.9.1`、`@noble/hashes@1.8.0`、`jose@6.2.2`、`yaml@^2.9.0`，以及 `unified`、`remark-*`、`rehype-*`、`micromark-*`、`mdast-util-directive`。`@cursor/sdk` 在两边都是 `1.0.35`。数学 Markdown 沿用上游的 `micromark-extension-llm-math@3.1.0` 替换和 `upstream/t3code/patches` 里的 `mdast-util-math`、`micromark-extension-llm-math`、`micromark-extension-gfm-table` 补丁，否则 `shared` 的离线解析测试对不上。
 
-这些包的 `test` 脚本由 `pnpm test` 执行，只用离线夹具和本地替身。`@t3tools/provider-testing` 没有测试文件，脚本在没有匹配文件时通过。Baton 的格式和 lint 不改写 `vendor/t3code`。
+这些包的 `test` 脚本由 `pnpm test` 执行，只用离线夹具和本地替身。`@t3tools/provider-testing` 没有测试文件，脚本在没有匹配文件时通过。Baton 的格式和 lint 不改写 `upstream/t3code`。
 
 ## 仍在本仓库的抽取
 

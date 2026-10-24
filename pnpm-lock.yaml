@@ -589,7 +589,7 @@ importers:
 
   runtimes/shared: {}
 
-  vendor/t3code/packages/contracts:
+  upstream/t3code/packages/contracts:
     dependencies:
       effect:
         specifier: 'catalog:'
@@ -602,29 +602,7 @@ importers:
         specifier: 'catalog:'
         version: 1.4.0(@types/node@26.6.5)(@vitest/ui@5.0.5)(esbuild@0.28.2)(jsdom@30.1.3(@noble/hashes@1.8.0))(tsx@4.20.6)(typescript@6.0.3)(yaml@2.9.1)
 
-  vendor/t3code/packages/effect-acp:
-    dependencies:
-      effect:
-        specifier: 'catalog:'
-        version: 4.0.6
-    devDependencies:
-      '@effect/openapi-generator':
-        specifier: 'catalog:'
-        version: 4.0.6(@effect/platform-node@4.0.6(effect@4.0.6)(redis@6.3.0))(effect@4.0.6)
-      '@effect/platform-node':
-        specifier: 'catalog:'
-        version: 4.0.6(effect@4.0.6)(redis@6.3.0)
-      '@effect/vitest':
-        specifier: 'catalog:'
-        version: 4.0.6(effect@4.0.6)(vitest@5.0.5)
-      '@types/node':
-        specifier: 'catalog:'
-        version: 26.6.5
-      vite-plus:
-        specifier: 'catalog:'
-        version: 1.4.0(@types/node@26.6.5)(@vitest/ui@5.0.5)(esbuild@0.28.2)(jsdom@30.1.3(@noble/hashes@1.8.0))(tsx@4.20.6)(typescript@6.0.3)(yaml@2.9.1)
-
-  vendor/t3code/packages/effect-codex-app-server:
+  upstream/t3code/packages/effect-acp:
     dependencies:
       effect:
         specifier: 'catalog:'
@@ -646,7 +624,29 @@ importers:
         specifier: 'catalog:'
         version: 1.4.0(@types/node@26.6.5)(@vitest/ui@5.0.5)(esbuild@0.28.2)(jsdom@30.1.3(@noble/hashes@1.8.0))(tsx@4.20.6)(typescript@6.0.3)(yaml@2.9.1)
 
-  vendor/t3code/packages/provider-acp:
+  upstream/t3code/packages/effect-codex-app-server:
+    dependencies:
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.6
+    devDependencies:
+      '@effect/openapi-generator':
+        specifier: 'catalog:'
+        version: 4.0.6(@effect/platform-node@4.0.6(effect@4.0.6)(redis@6.3.0))(effect@4.0.6)
+      '@effect/platform-node':
+        specifier: 'catalog:'
+        version: 4.0.6(effect@4.0.6)(redis@6.3.0)
+      '@effect/vitest':
+        specifier: 'catalog:'
+        version: 4.0.6(effect@4.0.6)(vitest@5.0.5)
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.5
+      vite-plus:
+        specifier: 'catalog:'
+        version: 1.4.0(@types/node@26.6.5)(@vitest/ui@5.0.5)(esbuild@0.28.2)(jsdom@30.1.3(@noble/hashes@1.8.0))(tsx@4.20.6)(typescript@6.0.3)(yaml@2.9.1)
+
+  upstream/t3code/packages/provider-acp:
     dependencies:
       '@t3tools/contracts':
         specifier: workspace:*
@@ -680,7 +680,7 @@ importers:
         specifier: 'catalog:'
         version: 1.4.0(@types/node@26.6.5)(@vitest/ui@5.0.5)(esbuild@0.28.2)(jsdom@30.1.3(@noble/hashes@1.8.0))(tsx@4.20.6)(typescript@6.0.3)(yaml@2.9.1)
 
-  vendor/t3code/packages/provider-acp-registry:
+  upstream/t3code/packages/provider-acp-registry:
     dependencies:
       '@noble/hashes':
         specifier: 'catalog:'
@@ -720,7 +720,7 @@ importers:
         specifier: 'catalog:'
         version: 1.4.0(@types/node@26.6.5)(@vitest/ui@5.0.5)(esbuild@0.28.2)(jsdom@30.1.3(@noble/hashes@1.8.0))(tsx@4.20.6)(typescript@6.0.3)(yaml@2.9.1)
 
-  vendor/t3code/packages/provider-codex:
+  upstream/t3code/packages/provider-codex:
     dependencies:
       '@t3tools/contracts':
         specifier: workspace:*
@@ -751,7 +751,7 @@ importers:
         specifier: 'catalog:'
         version: 1.4.0(@types/node@26.6.5)(@vitest/ui@5.0.5)(esbuild@0.28.2)(jsdom@30.1.3(@noble/hashes@1.8.0))(tsx@4.20.6)(typescript@6.0.3)(yaml@2.9.1)
 
-  vendor/t3code/packages/provider-core:
+  upstream/t3code/packages/provider-core:
     dependencies:
       '@t3tools/contracts':
         specifier: workspace:*
@@ -776,7 +776,7 @@ importers:
         specifier: 'catalog:'
         version: 1.4.0(@types/node@26.6.5)(@vitest/ui@5.0.5)(esbuild@0.28.2)(jsdom@30.1.3(@noble/hashes@1.8.0))(tsx@4.20.6)(typescript@6.0.3)(yaml@2.9.1)
 
-  vendor/t3code/packages/provider-cursor:
+  upstream/t3code/packages/provider-cursor:
     dependencies:
       '@cursor/sdk':
         specifier: 1.0.35
@@ -816,7 +816,7 @@ importers:
         specifier: 'catalog:'
         version: 1.4.0(@types/node@26.6.5)(@vitest/ui@5.0.5)(esbuild@0.28.2)(jsdom@30.1.3(@noble/hashes@1.8.0))(tsx@4.20.6)(typescript@6.0.3)(yaml@2.9.1)
 
-  vendor/t3code/packages/provider-pi:
+  upstream/t3code/packages/provider-pi:
     dependencies:
       '@t3tools/contracts':
         specifier: workspace:*
@@ -847,7 +847,7 @@ importers:
         specifier: 'catalog:'
         version: 1.4.0(@types/node@26.6.5)(@vitest/ui@5.0.5)(esbuild@0.28.2)(jsdom@30.1.3(@noble/hashes@1.8.0))(tsx@4.20.6)(typescript@6.0.3)(yaml@2.9.1)
 
-  vendor/t3code/packages/provider-testing:
+  upstream/t3code/packages/provider-testing:
     dependencies:
       '@effect/platform-node':
         specifier: 'catalog:'
@@ -869,7 +869,7 @@ importers:
         specifier: 'catalog:'
         version: 26.6.5
 
-  vendor/t3code/packages/shared:
+  upstream/t3code/packages/shared:
     dependencies:
       '@noble/curves':
         specifier: 'catalog:'

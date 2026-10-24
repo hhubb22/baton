@@ -1,4 +1,4 @@
-[submodule "vendor/t3code"]
-	path = vendor/t3code
+[submodule "upstream/t3code"]
+	path = upstream/t3code
 	url = https://github.com/hhubb22/t3code.git
 	branch = baton

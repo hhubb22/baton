@@ -55,7 +55,7 @@ Status: complete
 
 - 依据：[架构与职责](../agent-adapters/TECH.md#架构与职责)、[Worker 保证与上游行为](../agent-adapters/TECH.md#worker-保证与上游行为r-04r-09)、[各 Agent 实现](../agent-adapters/TECH.md#各-agent-实现)、[历史](../agent-adapters/TECH.md#历史r-10)。
 - 依赖：T1 的 Worker 与进程管理，T2 的远程 Thread 链路。
-- 交付：建立 t3code fork 与 `vendor/t3code` submodule，workspace 收录所需包并删除本地 `effect-acp`、`effect-codex-app-server`、`packages/providers`、`packages/provider-testing`；`cursor-host` 泛化为 agent-host，提供宿主层与事件映射；Cursor 改用完整 `provider-cursor`；接入 Pi、Codex（fork 中拆成 `provider-codex`）和 Kiro（fork 中新增 `kiroAcp`）；Thread 历史改用中心记录，删除设备原生历史与网页原生解析。
+- 交付：建立 t3code fork 与 `upstream/t3code` submodule，workspace 收录所需包并删除本地 `effect-acp`、`effect-codex-app-server`、`packages/providers`、`packages/provider-testing`；`cursor-host` 泛化为 agent-host，提供宿主层与事件映射；Cursor 改用完整 `provider-cursor`；接入 Pi、Codex（fork 中拆成 `provider-codex`）和 Kiro（fork 中新增 `kiroAcp`）；Thread 历史改用中心记录，删除设备原生历史与网页原生解析。
 - 边界：接受上游行为，不在接入层修改 adapter 语义；MCP 只接注入接口，不配置 endpoint；不增加 Grok、Antigravity 或上游 fork / rollback / 审批产品能力。
 - 验证：所用包的上游测试在 Baton CI 中运行；宿主层单测；用上游 testkit 替身驱动真实 adapter 验证事件映射与 `sent` 判定。
 - 验证：T2 的 Cursor 远程链路换到 agent-host 后回归通过；Pi、Codex、Kiro 各有一条网页发送、回复、停止、恢复的回放链路；Kiro 使用由 Go 录制转换的夹具。

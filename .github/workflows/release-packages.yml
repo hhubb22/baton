@@ -41,7 +41,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Check out t3code submodule
-        run: git submodule update --init --depth 1 vendor/t3code
+        run: git submodule update --init --depth 1 upstream/t3code
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod

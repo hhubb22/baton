@@ -5,17 +5,17 @@ packages:
   - runtimes/project-agent
   - runtimes/shared
   - web
-  - vendor/t3code/packages/provider-core
-  - vendor/t3code/packages/provider-pi
-  - vendor/t3code/packages/provider-acp
-  - vendor/t3code/packages/provider-acp-registry
-  - vendor/t3code/packages/provider-cursor
-  - vendor/t3code/packages/provider-codex
-  - vendor/t3code/packages/provider-testing
-  - vendor/t3code/packages/contracts
-  - vendor/t3code/packages/shared
-  - vendor/t3code/packages/effect-acp
-  - vendor/t3code/packages/effect-codex-app-server
+  - upstream/t3code/packages/provider-core
+  - upstream/t3code/packages/provider-pi
+  - upstream/t3code/packages/provider-acp
+  - upstream/t3code/packages/provider-acp-registry
+  - upstream/t3code/packages/provider-cursor
+  - upstream/t3code/packages/provider-codex
+  - upstream/t3code/packages/provider-testing
+  - upstream/t3code/packages/contracts
+  - upstream/t3code/packages/shared
+  - upstream/t3code/packages/effect-acp
+  - upstream/t3code/packages/effect-codex-app-server
 
 catalog:
   effect: 4.0.6
@@ -66,9 +66,9 @@ overrides:
   micromark-extension-gfm-table: 2.1.1
   micromark-util-types: 2.0.2
 patchedDependencies:
-  mdast-util-math@3.0.0: vendor/t3code/patches/mdast-util-math@3.0.0.patch
-  micromark-extension-llm-math@3.1.0: vendor/t3code/patches/micromark-extension-llm-math@3.1.0.patch
-  micromark-extension-gfm-table@2.1.1: vendor/t3code/patches/micromark-extension-gfm-table@2.1.1.patch
+  mdast-util-math@3.0.0: upstream/t3code/patches/mdast-util-math@3.0.0.patch
+  micromark-extension-llm-math@3.1.0: upstream/t3code/patches/micromark-extension-llm-math@3.1.0.patch
+  micromark-extension-gfm-table@2.1.1: upstream/t3code/patches/micromark-extension-gfm-table@2.1.1.patch
 peerDependencyRules:
   allowAny:
     - vite

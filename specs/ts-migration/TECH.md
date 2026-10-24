@@ -54,7 +54,7 @@ apps/server/                 Coordinator（baton-server）
 apps/batond/                 batond 及其子命令：worker、watchdog、agent-host、project-runtime
 packages/protocol/           Effect Schema：HTTP DTO、节点信封、Worker IPC、ThreadReport
 packages/sqlite/             已有 SQLite SqlClient、串行事务与提交核查
-vendor/t3code/               Baton 的 t3code fork（git submodule），workspace 收录所需 @t3tools/* 包
+upstream/t3code/             Baton 的 t3code fork（git submodule），workspace 收录所需 @t3tools/* 包
 runtimes/project-agent/      现有 Project Agent Runtime，作为 workspace 包被 apps/batond 引用
 web/                         现有前端，构建产物输出到 apps/server/dist/web
 migrations/                  SQL 迁移（保留）

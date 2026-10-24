@@ -15,7 +15,7 @@ Baton 是跨设备 AI Agent 协同系统，由中心服务（`baton-server`）�
 | `e2e` | 中心、节点与独立 Worker 的跨 app 集成测试，显式依赖两个 app；见 `e2e/README.md` |
 | `packages/telemetry`                          | Effect 原生 OTLP/HTTP 追踪、标准上下文传播与导出字段过滤，默认不连接采集端                                                                                             |
 | `packages/{protocol,sqlite}`                  | TypeScript 协议 Schema 与 WAL/FULL SQLite 客户端、提交结果核查                                                                                                         |
-| `vendor/t3code`                               | Baton 的 t3code fork submodule，固定提交；workspace 收录用到的 `@t3tools/*` 包与 `effect-acp`、`effect-codex-app-server`                                                |
+| `upstream/t3code`                             | Baton 的 t3code fork submodule，固定提交；workspace 收录用到的 `@t3tools/*` 包与 `effect-acp`、`effect-codex-app-server`                                                |
 | `packages/{providers,provider-testing}`       | 从固定 t3code 提交复用的 Cursor SDK/runtime、上游测试和确定性回放；完整 provider 包在 fork 中，本目录保留到接入宿主层时替换                                              |
 | `runtimes/project-agent`                      | 基于 Node.js / TypeScript 的 Project Agent 进程（通过 stdio JSON-RPC 与 `batond` 通信）                                                                                |
 | `web`                                         | React + TypeScript + Vite 前端，默认构建到 `internal/webui/dist` 供 Go 嵌入；TS 中心使用 `apps/server/dist/web`，产物不提交 Git；界面文案遵循 `design/WRITING.md`      |
@@ -31,7 +31,7 @@ Baton 是跨设备 AI Agent 协同系统，由中心服务（`baton-server`）�
   node tools/check-sidecar-package.mjs
   go vet ./...
   ```
-- **TypeScript workspace**（Node 26、pnpm 12、Vite+ 1.4；`vendor/t3code` 是 git submodule，首次检出先运行 `git submodule update --init`。适配器验证使用离线转录与本地替身。TS 构建和测试可独立于 Go 构建运行，配置与入口见 [中心文档](apps/server/README.md) 和 [节点文档](apps/batond/README.md)）：
+- **TypeScript workspace**（Node 26、pnpm 12、Vite+ 1.4；`upstream/t3code` 是 git submodule，首次检出先运行 `git submodule update --init`。适配器验证使用离线转录与本地替身。TS 构建和测试可独立于 Go 构建运行，配置与入口见 [中心文档](apps/server/README.md) 和 [节点文档](apps/batond/README.md)）：
   ```sh
   git submodule update --init
   pnpm install --frozen-lockfile --ignore-scripts

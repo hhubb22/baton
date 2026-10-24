@@ -28,8 +28,8 @@ Coordinator：Thread 命令、报告与历史记录
 
 | 位置 | 职责 | 对应需求 |
 |---|---|---|
-| `vendor/t3code` | Baton fork 的 git submodule，固定提交；pnpm workspace 收录其中用到的 `@t3tools/*` 包 | R-04～R-11 |
-| `vendor/t3code/packages/effect-acp`、`vendor/t3code/packages/effect-codex-app-server` | fork 中的 ACP 与 Codex app-server 客户端，由 workspace 直接收录 | R-04、R-08、R-11 |
+| `upstream/t3code` | Baton fork 的 git submodule，固定提交；pnpm workspace 收录其中用到的 `@t3tools/*` 包 | R-04～R-11 |
+| `upstream/t3code/packages/effect-acp`、`upstream/t3code/packages/effect-codex-app-server` | fork 中的 ACP 与 Codex app-server 客户端，由 workspace 直接收录 | R-04、R-08、R-11 |
 | `packages/providers`、`packages/provider-testing` | 删除；由 fork 的 `provider-cursor` 与 `provider-testing` 取代 | R-04～R-12 |
 | `packages/protocol` | Worker IPC、ThreadReport 和 RuntimeAgent 的 Effect Schema；删除原生历史条目 `HistoryEntry` | R-01、R-10 |
 | `apps/batond/src/worker` | 沿用 T1～T3 的接收、执行、停止裁决与 outbox；`ThreadAgent` 契约按下文简化 | R-01、R-04、R-05、R-08 |
@@ -212,7 +212,7 @@ Web 的 NodeDTO、DeviceAgent 和 mapDevice 保留 status、create 和 reason，
 
 ## 安装包与代码复用
 
-Baton fork 托管 Baton 的改动分支，`vendor/t3code` 固定到其中一个提交，升级上游时在 fork 中合并后再移动 submodule。fork 地址、固定提交和 Baton 补丁清单记录在 `third_party/t3code/README.md`，保留上游 MIT 许可与版权。
+Baton fork 托管 Baton 的改动分支，`upstream/t3code` 固定到其中一个提交，升级上游时在 fork 中合并后再移动 submodule。fork 地址、固定提交和 Baton 补丁清单记录在 `third_party/t3code/README.md`，保留上游 MIT 许可与版权。
 
 batond bundle 直接打包用到的 `@t3tools/*` 包及其纯 JS 依赖。原生模块和需要磁盘布局的依赖（`@cursor/sdk` 与平台包、`@napi-rs/keyring`）放在 SEA 旁的附带 `node_modules`，打包检查见迁移 TECH。宿主层提供凭据文件后，若 keyring 不再被调用，可在 fork 中去掉该依赖。
 
@@ -235,7 +235,7 @@ batond bundle 直接打包用到的 `@t3tools/*` 包及其纯 JS 依赖。原生
 
 按 [迁移任务清单](../ts-migration/TASKS.md) 执行。T1～T3 已完成；T4 按以下顺序推进，每步可单独合入：
 
-1. 建立 fork 与 `vendor/t3code`，workspace 收录所需包，删除本地 `effect-acp`、`effect-codex-app-server` 副本，上游测试在 Baton CI 中运行。
+1. 建立 fork 与 `upstream/t3code`，workspace 收录所需包，删除本地 `effect-acp`、`effect-codex-app-server` 副本，上游测试在 Baton CI 中运行。
 2. 把 `cursor-host` 泛化为 agent-host，实现宿主层与事件映射，用完整 `provider-cursor` 替换 `packages/providers`，T2 的 Cursor 远程链路回归通过。
 3. 接入 Pi、Codex（含 fork 中拆包）和 Kiro（fork 中新增 `kiroAcp`）。
 4. 历史改用中心记录，删除设备原生历史与网页原生解析。
