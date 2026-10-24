@@ -1,41 +1,29 @@
-import { readFile } from 'node:fs/promises'
+import { realpath } from 'node:fs/promises'
 import { parseArgs } from 'node:util'
-import { Effect, Layer, Schema } from 'effect'
+import { Effect, Layer } from 'effect'
 import * as CodexReplay from 'effect-codex-app-server/replay'
 import { layerCodexReplayClientFactory } from '@t3tools/provider-codex/testing'
+import { materialized, readCodexTranscript, sandboxed } from './transcripts.ts'
+export { readCodexTranscript } from './transcripts.ts'
 import { runAgentHost, type AgentHostModule } from '../../agent-host/host.ts'
 import { codexHostDriver } from '../../agents/codex/host-driver.ts'
-
-const Header = Schema.Struct({
-  type: Schema.Literal('transcript_start'),
-  provider: Schema.String,
-  protocol: Schema.String,
-  version: Schema.String,
-  scenario: Schema.String,
-  metadata: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
-})
-
-export const readCodexTranscript = async (path: string) => {
-  const lines = (await readFile(path, 'utf8')).split('\n').filter((line) => line.trim() !== '')
-  const header = Schema.decodeUnknownSync(Header)(JSON.parse(lines[0] ?? 'null'))
-  return Schema.decodeUnknownSync(CodexReplay.CodexAppServerReplayTranscript)({
-    provider: header.provider,
-    protocol: header.protocol,
-    version: header.version,
-    scenario: header.scenario,
-    ...(header.metadata ? { metadata: header.metadata } : {}),
-    entries: lines.slice(1).map((line) => {
-      const parsed: unknown = JSON.parse(line)
-      return parsed
-    }),
-  })
-}
 
 /** Real Codex adapter with the upstream app-server replay client. */
 export const codexReplayModule = (transcript: CodexReplay.CodexAppServerReplayTranscript): AgentHostModule => ({
   foldDetached: false,
   driver: ({ agentType, paths }) =>
-    codexHostDriver({ agentType, paths }).pipe(Layer.provide(layerCodexReplayClientFactory({ transcript }))),
+    Layer.unwrap(
+      Effect.gen(function* () {
+        const cwd = yield* Effect.promise(() => realpath(paths.workingDirectory))
+        return codexHostDriver({ agentType, paths }).pipe(
+          Layer.provide(
+            layerCodexReplayClientFactory({
+              transcript: materialized(sandboxed(transcript), cwd),
+            }),
+          ),
+        )
+      }),
+    ),
 })
 
 const { values } = parseArgs({
@@ -44,6 +32,8 @@ const { values } = parseArgs({
   options: { transcript: { type: 'string' }, cwd: { type: 'string' }, state: { type: 'string' } },
 })
 if (values.transcript && values.cwd && values.state) {
+  if ((await realpath(process.cwd())) !== (await realpath(values.cwd)))
+    throw new Error('Codex host process cwd does not match its workspace')
   const transcript = await readCodexTranscript(values.transcript)
   const controller = new AbortController()
   process.once('SIGINT', () => controller.abort())
