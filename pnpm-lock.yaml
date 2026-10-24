@@ -304,6 +304,9 @@ importers:
       '@t3tools/contracts':
         specifier: workspace:*
         version: link:../../upstream/t3code/packages/contracts
+      '@t3tools/provider-acp-registry':
+        specifier: workspace:*
+        version: link:../../upstream/t3code/packages/provider-acp-registry
       '@t3tools/provider-codex':
         specifier: workspace:*
         version: link:../../upstream/t3code/packages/provider-codex

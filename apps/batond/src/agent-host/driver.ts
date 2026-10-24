@@ -39,6 +39,8 @@ export interface ProviderHostDriverOptions {
   readonly steer: boolean
   /** Pi requires binding the native thread before its active-branch snapshot can be read. */
   readonly bindSnapshot?: boolean
+  /** ACP must load the native session during openSession, before resumeThread or snapshot reads. */
+  readonly resumeOnOpen?: boolean
   readonly snapshotMessages?: (
     snapshot: ProviderAdapter.ProviderAdapterV2ThreadSnapshot,
   ) => ReadonlyArray<SnapshotMessage>
@@ -318,6 +320,7 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
               providerSessionId: authorized.providerSessionId,
               modelSelection: authorized.selection,
               runtimePolicy: authorized.policy,
+              ...(options.resumeOnOpen ? { initialNativeThreadId: stored.nativeSessionId } : {}),
             })
             .pipe(
               Effect.provideService(Scope.Scope, scope),
@@ -425,6 +428,7 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
                 providerSessionId: authorized.providerSessionId,
                 modelSelection: authorized.selection,
                 runtimePolicy: authorized.policy,
+                ...(options.resumeOnOpen ? { initialNativeThreadId: stored.nativeSessionId } : {}),
               })
               const storedThread = mappingThread(stored)
               const thread = options.bindSnapshot

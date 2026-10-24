@@ -8,6 +8,7 @@ import { inspectCursorSdk } from './cursor/sdk-loader.ts'
 import { makeCursorAgentFactory, probeCursor } from './cursor/index.ts'
 import { makeCodexAgentFactory, probeCodex } from './codex/index.ts'
 import { makePiAgentFactory, probePi } from './pi/index.ts'
+import { makeKiroAgentFactory, probeKiro } from './kiro/index.ts'
 import { makeShellAgentFactory } from './shell/index.ts'
 import { startProcessWatchdog } from '../platform/process.ts'
 import { currentBatondCommand } from '../daemon/host.ts'
@@ -15,7 +16,7 @@ import { AgentError } from '../worker/agent.ts'
 
 /** Adapter combinations validated through the host with upstream offline transcripts. */
 const verifiedCombinations = new Set(['darwin-arm64'])
-const verifiedProviderVersions = { pi: '1.0.0', codex: '0.156.1' }
+const verifiedProviderVersions = { pi: '1.0.0', codex: '0.156.1', kiro: '2.32.0' }
 
 /** The Thread working directory and the private directory beside the native mapping. */
 const agentPaths = (label: string) => (config: WorkerOpenConfig) => {
@@ -28,7 +29,11 @@ const cursorPaths = agentPaths('Cursor')
 const narrowed = { create: false, queue: true, steer: false, stop: true, resume: false, switch_model: false }
 
 /** Availability gates creation and resume; active steering follows the registered provider. */
-export function hostedAgentReport(agentType: 'pi' | 'codex', result: ProbeResult, missingReason: string): RuntimeAgent {
+export function hostedAgentReport(
+  agentType: 'pi' | 'codex' | 'kiro',
+  result: ProbeResult,
+  missingReason: string,
+): RuntimeAgent {
   const version = typeof result.details.version === 'string' ? result.details.version : 'unknown'
   const platform =
     typeof result.details.platform === 'string' ? result.details.platform : `${process.platform}-${process.arch}`
@@ -194,8 +199,25 @@ export async function probeLocalCodex(): Promise<RuntimeAgent> {
   }
 }
 
+export async function probeLocalKiro(): Promise<RuntimeAgent> {
+  try {
+    return hostedAgentReport('kiro', await probeHost(probeKiro), 'Kiro CLI 未安装或尚未认证')
+  } catch {
+    return hostedAgentReport(
+      'kiro',
+      {
+        authenticated: 'unknown',
+        models: [],
+        details: { installed: false, version: 'unknown', platform: `${process.platform}-${process.arch}` },
+        reason: 'Kiro 依赖或只读探测暂不可用',
+      },
+      'Kiro CLI 未安装或尚未认证',
+    )
+  }
+}
+
 export async function probeLocalAgents(): Promise<RuntimeAgent[]> {
-  return Promise.all([probeLocalCursor(), probeLocalPi(), probeLocalCodex()])
+  return Promise.all([probeLocalCursor(), probeLocalPi(), probeLocalCodex(), probeLocalKiro()])
 }
 
 export const agentRegistry = {
@@ -219,6 +241,13 @@ export const agentRegistry = {
     makeFactory: makeCodexAgentFactory,
     probe: probeLocalCodex,
     paths: agentPaths('Codex'),
+  },
+  kiro: {
+    type: 'kiro',
+    capabilities: agentCapabilities.kiro,
+    makeFactory: makeKiroAgentFactory,
+    probe: probeLocalKiro,
+    paths: agentPaths('Kiro'),
   },
   shell: { type: 'shell', capabilities: agentCapabilities.shell, makeFactory: makeShellAgentFactory },
 } as const

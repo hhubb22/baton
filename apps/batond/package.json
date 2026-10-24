@@ -18,6 +18,7 @@
     "./agents/shell/index": "./src/agents/shell/index.ts",
     "./testing/pi/transcripts": "./src/testing/pi/transcripts.ts",
     "./testing/codex/transcripts": "./src/testing/codex/transcripts.ts",
+    "./testing/kiro/transcripts": "./src/testing/kiro/transcripts.ts",
     "./testing/daemon": "./src/testing/daemon.ts"
   },
   "scripts": {
@@ -36,6 +37,7 @@
     "@cursor/sdk": "1.0.35",
     "@effect/platform-node": "catalog:",
     "@t3tools/contracts": "workspace:*",
+    "@t3tools/provider-acp-registry": "workspace:*",
     "@t3tools/provider-codex": "workspace:*",
     "@t3tools/provider-core": "workspace:*",
     "@t3tools/provider-cursor": "workspace:*",
