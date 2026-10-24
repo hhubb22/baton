@@ -36,8 +36,8 @@ jobs:
           --health-retries 12
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: true
+      - name: Check out t3code submodule
+        run: git submodule update --init --depth 1 vendor/t3code
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod

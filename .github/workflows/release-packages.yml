@@ -40,8 +40,8 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v7
-        with:
-          submodules: true
+      - name: Check out t3code submodule
+        run: git submodule update --init --depth 1 vendor/t3code
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
