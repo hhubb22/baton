@@ -8,7 +8,7 @@
 - `probeCursor(options)`：在临时空工作目录的只读 host 中执行探测，不 open/resume，不发送 prompt。
 - `cursorAgentHostModule`：`agent-host` 子命令按 `cursor` 类型加载的 driver 层。
 
-`host-driver.ts` 用 fork 导出的 `makeCursorAdapterV2` 构造 adapter，环境取 host 进程已白名单过滤的 `process.env`。模型来自 `config.model ?? adapter_config.model ?? 'default'`；`runtimeMode` 为 `approval-required`、`approvalPolicy` 为 `never`、`interactionMode` 为 `default`，原生 sandbox 保持开启。Cursor 不支持 steer 和中途换模型，`send` 只接受队列模式。
+`host-driver.ts` 用 fork 导出的 `makeCursorAdapterV2` 构造 adapter，会话与事件映射交给 `agent-host/driver.ts` 的通用驱动，环境取 host 进程已白名单过滤的 `process.env`。模型来自 `config.model ?? adapter_config.model ?? 'default'`；`runtimeMode` 为 `approval-required`、`approvalPolicy` 为 `never`、`interactionMode` 为 `default`，原生 sandbox 保持开启。Cursor 不支持 steer 和中途换模型，`send` 只接受队列模式。
 
 ## 认证与探测
 
@@ -36,7 +36,7 @@ host 消费 `ProviderAdapterV2` 的事件并映射为 `agent-host` 协议：
 | `turn.terminal` completed | `end`，outcome `completed` |
 | `turn.terminal` interrupted/cancelled | `end`，outcome `cancelled` |
 | `turn.terminal` failed | `uncertain` |
-| `runtime_request.updated` | 忽略；Cursor SDK 不提供交互式审批或提问 |
+| `runtime_request.updated` | 通用驱动按权限当次允许、提问取消的策略应答；停止后的请求取消 |
 | `provider_turn.updated` | 记录 `providerTurnId`，供 abort 使用 |
 
 事件按 `runAttemptId`、`runId` 和序号归属到当前执行，旧 Turn 的迟到消息不能进入下一轮。文本增量立即交给输出流，控制事件进入有界队列；会话事件流失败且不是停止或关闭时发 `uncertain`。

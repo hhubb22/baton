@@ -1,8 +1,8 @@
 # TypeScript 节点与 Thread
 
-`@baton/batond` 通过出站 WSS 连接 [TypeScript 开发中心](../server/README.md)，提供 Cursor 远程 Thread、Project Runtime、设备目录和订阅管理。节点守护进程保存设备身份、命令与报告账本，网页可发送排队消息、撤回、停止、恢复并读取实时输出。每个 Thread 使用独立 Worker，每个执行中的 Cursor Thread 独占一个 agent-host；Worker 管理 SQLite、Turn、回复和报告，agent-host 用 fork 的 Cursor adapter 执行本机 Cursor。本地调用方也可直接通过认证 IPC 使用 Worker。
+`@baton/batond` 通过出站 WSS 连接 [TypeScript 开发中心](../server/README.md)，提供 Cursor、Pi、Codex 远程 Thread、Project Runtime、设备目录和订阅管理。节点守护进程保存设备身份、命令与报告账本，网页可发送排队消息、撤回、停止、恢复并读取实时输出。每个 Thread 使用独立 Worker，每个执行中的 Agent Thread 独占一个 agent-host；Worker 管理 SQLite、Turn、回复和报告，agent-host 用 fork 的完整 adapter 执行本机 Agent。本地调用方也可直接通过认证 IPC 使用 Worker。
 
-Go 的 `cmd/baton-server`、`cmd/batond` 和根目录构建脚本仍是发布入口，TypeScript 发布切换在迁移 T5 进行。TS 提供 Cursor 远程 Thread、Project 协同和受限 shell；其他 Agent 与统一历史的范围和实际拒绝响应见 [中心能力表](../server/README.md#当前能力范围)。
+Go 的 `cmd/baton-server`、`cmd/batond` 和根目录构建脚本仍是发布入口，TypeScript 发布切换在迁移 T5 进行。TS 提供 Cursor、Pi、Codex 远程 Thread、Project 协同和受限 shell；其他 Agent 与统一历史的范围和实际拒绝响应见 [中心能力表](../server/README.md#当前能力范围)。
 
 ## 开发入口
 
@@ -41,7 +41,7 @@ pnpm --filter @baton/batond dev run --relay wss://localhost:8443/v1/node --ca-fi
 
 所有节点命令支持 `--data-dir`，默认 `~/.baton-ts`。仅在授权配置不存在时登记用户主目录，已有配置包括空列表都会保留；`--workspace` 在连接前按真实绝对路径幂等登记工作目录。网页设备详情与本地 `files` 命令可以增删授权根；目录选择与附件预览使用同一真实路径边界。节点锁、身份与报告恢复细节见 [远程节点模块](src/daemon/README.md)，实时输出的游标和缓冲规则见 [Worker 文档](src/worker/README.md#real-time-output)。
 
-节点连接和能力探测分别进行。Cursor 探测完成前上报 `unverified`，创建 Thread 需等待 `available`；设备进程需显式配置 `CURSOR_API_KEY`。节点退出不结束独立 Worker，重启后从账本重新发现存活 Worker；未确认命令继续使用原 ID，已接收输入不会因为重连再次发送。
+节点连接和能力探测分别进行。Cursor、Pi、Codex 探测完成前上报 `unverified`，创建 Thread 需等待 `available`；设备进程需显式配置 `CURSOR_API_KEY`。节点退出不结束独立 Worker，重启后从账本重新发现存活 Worker；未确认命令继续使用原 ID，已接收输入不会因为重连再次发送。
 
 ## 设备目录与模型订阅
 
@@ -74,7 +74,7 @@ pnpm --filter @baton/batond dev history --thread-id <UUID>
 pnpm --filter @baton/batond dev resume --thread-id <UUID>
 ```
 
-`open` 可用 `--model` 选择模型；未指定时使用 SDK 原生的 `default`。Thread 内固定该选择，轮间切换与 steer 暂未开放。`open` 返回 Thread ID 和持久接收回执。启动、发送、恢复和停止的实际终态通过 `command --command-id <UUID>` 或 `reports` 查询；Worker 就绪与 Agent 就绪分别报告。`message` 支持 `--message-id`，执行命令支持 `--command-id`，重试时保留原标识。相同命令 ID、相同内容复用回执和结果，内容冲突会被拒绝。
+`open` 可用 `--model` 选择模型；未指定时使用 SDK 原生的 `default`。Thread 内固定该选择，轮间切换暂未开放。Pi、Codex 支持向活动回合插入，Cursor 只接受排队消息。`open` 返回 Thread ID 和持久接收回执。启动、发送、恢复和停止的实际终态通过 `command --command-id <UUID>` 或 `reports` 查询；Worker 就绪与 Agent 就绪分别报告。`message` 支持 `--message-id`，执行命令支持 `--command-id`，重试时保留原标识。相同命令 ID、相同内容复用回执和结果，内容冲突会被拒绝。
 
 `withdraw --message-id <ID>` 撤回尚未提交的输入。`reports --after-worker-seq <序号>` 顺序读取有界报告，`ack --event-id <UUID> --worker-seq <序号>` 确认已消费报告。设备不再保存原生历史，本地 `history` 和 `/threads/{id}/history` 都返回 `ok:false` / `history_unavailable`。网页时间线按中心保存的 Thread 消息、回复和实时输出分页。
 

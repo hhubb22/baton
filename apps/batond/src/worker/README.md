@@ -21,7 +21,7 @@ yield* worker.failed
 - `abort` records cancellation independently of a pending open or send. `reap` confirms the whole process tree and excludes late resource creation from cancelled startup.
 - Reply identity and the native session, input and execution IDs determine event ownership. Old instance events and ended-turn events cannot become output for a new turn.
 
-The Worker supports queued messages. `steer` receives an explicit unsupported response. A failed open or resume runs bounded close/reap cleanup before its failure is completed. Confirmed cleanup retires the instance; retries obtain a fresh instance. Unconfirmed cleanup leaves the Thread unknown and prevents execution until process reaping is confirmed.
+The Worker supports queued messages and accepts `steer` when the Agent registry reports it (Pi and Codex). Steering persists the active target turn with the queued input, checks that target before writing intent, and submits through the adapter without starting another Worker turn. A terminal event that overtakes a pending steering response is buffered until acceptance is recorded, so message.sent reaches the coordinator while the target turn is still open. A failed steering submission becomes unknown because text presence in a snapshot cannot establish which native turn received it. Cursor and shell reject steering. A failed open or resume runs bounded close/reap cleanup before its failure is completed. Confirmed cleanup retires the instance; retries obtain a fresh instance. Unconfirmed cleanup leaves the Thread unknown and prevents execution until process reaping is confirmed.
 
 ## Real-time output
 
@@ -43,7 +43,7 @@ An adapter using Promise callbacks can bridge them with `Effect.runPromise(worke
 
 The Worker alone owns the ledger. `@baton/sqlite` supplies WAL, FULL synchronization and commit verification. A serial queue runs short state transitions and transactions; slow I/O runs in scoped fibers. Control epochs and operation IDs reject stale completions.
 
-Commands bind their ID to a content digest and immutable receipt. Distinct command IDs for the same message share its execution result; conflicting message content is rejected. Business reports precede `command.completed` in the same transaction. The outbox retains stable report IDs and sequences until acknowledgment. Reports fit within 120 KiB of encoded JSON and a pending response fits within 240 KiB; shortened text carries its original UTF-8 byte count and truncation flag.
+Commands bind their ID to a content digest and immutable receipt. Distinct command IDs for the same message share its execution result; conflicting message content is rejected. Business reports precede `command.completed` in the same transaction. Every `turn.ended` includes `queue_empty` from that transaction: the coordinator uses it to select idle when no queued input remains, or running while another input waits. The outbox retains stable report IDs and sequences until acknowledgment. Reports fit within 120 KiB of encoded JSON and a pending response fits within 240 KiB; shortened text carries its original UTF-8 byte count and truncation flag.
 
 On reopen, queued inputs can resume from their durable native mapping. Persisted intent is restored and checked with read-only evidence, and is never automatically sent again. An interrupted first open without a committed Worker mapping becomes unknown. A cancelled first open cannot resume or create another native session. Stop withdraws queued messages, invalidates pending execution results and uses turn termination or process reaping as evidence. An uncertain outcome remains unknown after a later process exit.
 
@@ -56,9 +56,9 @@ Each accepted Turn uses `execution_timeout_seconds` from the open configuration.
 Run from the repository root:
 
 ```sh
-pnpm --dir apps/batond exec vitest run --config ../../vitest.config.ts src/worker
-pnpm --dir apps/batond typecheck
-pnpm exec eslint apps/batond/src/worker
+pnpm --dir apps/batond exec vp test run --config ../../vitest.config.ts src/worker
+pnpm --filter @baton/batond typecheck
+pnpm exec vp lint apps/batond/src/worker
 ```
 
 The tests use real temporary SQLite files and controllable Agents. They cover receipts and conflicts, queued turns, cancellation, event ownership, Scope recovery, process record recovery, bounded outbox delivery, Turn timeouts, explicit continuation after uncertainty, commit uncertainty, UTF-8 cursors, bounded output, upstream gaps and stop responsiveness during output floods. Platform process-tree behavior, authenticated IPC and real Cursor execution are exercised by their integration owners.

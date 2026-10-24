@@ -1,6 +1,6 @@
 # TypeScript 开发中心
 
-`@baton/server` 提供员工登录、设备管理、Cursor 远程 Thread、Project 调度、主对话、事项和记忆，以及持久命令、回复时间线和实时输出。它与 [`apps/batond`](../batond/README.md) 的出站 WSS 节点连接配合，网页静态目录由中心构建脚本生成并由中心提供。
+`@baton/server` 提供员工登录、设备管理、Cursor / Pi / Codex 远程 Thread、Project 调度、主对话、事项和记忆，以及持久命令、回复时间线和实时输出。它与 [`apps/batond`](../batond/README.md) 的出站 WSS 节点连接配合，网页静态目录由中心构建脚本生成并由中心提供。
 
 Go 的 `cmd/baton-server`、`cmd/batond`、根构建脚本和 Docker 镜像仍是发布入口；TypeScript 开发入口独立构建，发布切换在迁移 T5 进行。TS 的当前能力范围见下表，完整迁移边界见 [迁移设计](../../specs/ts-migration/TECH.md)。
 
@@ -86,9 +86,9 @@ pnpm --filter @baton/batond dev up \
 
 注册也可从 `BATON_ENROLLMENT_TOKEN` 读取凭据；已有身份时 `up` 直接复用。`--workspace` 将真实绝对目录幂等登记到本机授权根，首次无配置时同时登记用户主目录。设备默认数据目录为 `~/.baton-ts`；重启和本地命令使用相同的 `--data-dir`。自建 CA 通过 `--ca-file` 供 HTTPS 注册和 WSS 连接使用，证书校验保持开启；使用系统已信任证书时可省略该选项。CA 文件路径不会写入身份，后续 `run` 仍需传入。
 
-Cursor 设备运行进程需显式配置 `CURSOR_API_KEY`，能力探测成功并上报 `available` 后才允许创建 Thread。当前启用 macOS arm64 / SDK 1.0.35；其他组合保持 `unverified` 或报告具体不可用原因。凭据保留在设备端。设备接入、连接恢复及本地命令见 [batond 文档](../batond/README.md)。
+Cursor 设备运行进程需显式配置 `CURSOR_API_KEY`，能力探测成功并上报 `available` 后才允许创建 Thread。Pi、Codex 使用设备上原生 CLI 的认证配置，分别通过 `PI_CODING_AGENT_DIR`、`PI_CODING_AGENT_SESSION_DIR` 和 `CODEX_HOME` 指定目录。当前启用 macOS arm64 / SDK 1.0.35；其他组合保持 `unverified` 或报告具体不可用原因。凭据保留在设备端。设备接入、连接恢复及本地命令见 [batond 文档](../batond/README.md)。
 
-网页支持 Cursor 新建、排队消息、撤回、停止、恢复、归档和时间线。命令的持久接收与实际完成分别报告；daemon 或中心重启后，存活 Worker 继续执行，重连时按原命令和报告身份恢复。模型在新建时选择，Thread 内固定。
+网页支持 Cursor、Pi、Codex 新建、排队消息、撤回、停止、恢复、归档和时间线；Pi 与 Codex 还支持活动回合插入。命令的持久接收与实际完成分别报告；daemon 或中心重启后，存活 Worker 继续执行，重连时按原命令和报告身份恢复。模型在新建时选择，Thread 内固定。
 
 Thread 历史是中心保存的输入和回复，所有 Agent 格式相同。网页时间线按事件游标分页读取这些记录，设备离线时仍可查看。在 Baton 之外继续同一原生会话产生的消息不会出现。Project 工具 `threads.read` 读取同一份输入和回复。`history.read` 与 `history.search` 读取 Project 主对话已经保存在中心的事件，不访问设备。
 
@@ -132,14 +132,15 @@ docker run --rm --name baton-tracing \
 | 在线设备授权目录增删、Project 执行授权、订阅登录 | 等待设备保存确认，订阅凭据留在设备 |
 | 文件和附件预览 | 授权根内目录分页和受限文本预览；越界与二进制内容拒绝 |
 | 受限 shell Thread | 仅供 Project `nodes.exec` 使用，要求目标设备本机已开启执行授权 |
-| Pi、Codex、Kiro | 当前节点只上报 Cursor；新建返回 HTTP 422，`code:"agent_unavailable"` |
+| Pi、Codex | 节点完成只读认证、版本与模型探测后上报；支持新建、排队、插入、停止、恢复。macOS arm64 的 Pi 1.0.0、Codex 0.156.1 通过上游转录回放，其余版本或系统组合为 `unverified`，新建返回 HTTP 422，`code:"agent_unavailable"` |
+| Kiro | 尚未接入当前节点；新建返回 HTTP 422，`code:"agent_unavailable"` |
 | Cursor steer                                     | HTTP 422，`code:"steer_unsupported"`；同时传模型时为 `model_with_steer`                              |
-| Cursor 轮间模型切换                              | HTTP 422，`code:"model_switch_unsupported"`                                                          |
+| Cursor、Pi、Codex 轮间模型切换                              | HTTP 422，`code:"model_switch_unsupported"`                                                          |
 | Thread 历史                                      | 时间线返回中心保存的输入和回复，设备离线时仍可分页读取。`/threads/{id}/history` 在权限检查后返回 HTTP 200 的 `SessionResult`，`ok:false`、`code:"history_unavailable"`，不向设备发送 `native_history` |
 | 过程 `/threads/{id}/trace`                       | 合法查询返回 HTTP 200，`{ok:false,code:"trace_missing",steps:[]}`                                    |
 | 实时输出时设备离线或尚未同步                     | HTTP 200 的 `SessionResult`，`ok:false`，分别为 `node_offline` 或 `node_syncing`                     |
 
-其他 Agent 属于迁移 T4；完整安装包和发布切换属于 T5。Project Runtime 从当前源码仓库与已安装的依赖启动，开发 bundle 需要保留该仓库布局。Go 发布入口保留其已有功能。
+Kiro 与后续 Agent 的接入范围见适配规格；完整安装包和发布切换属于 T5。Project Runtime 从当前源码仓库与已安装的依赖启动，开发 bundle 需要保留该仓库布局。Go 发布入口保留其已有功能。
 
 ## 验证
 

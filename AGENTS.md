@@ -1,6 +1,6 @@
 # Baton — Agent Guide
 
-Baton 是跨设备 AI Agent 协同系统，由中心服务（`baton-server`）、节点守护进程（`batond`）、本地会话执行器（Session Worker）、Project Agent Runtime（`runtimes/project-agent`）和 Web UI（`web/`）组成。Go 的 `cmd/baton-server`、`cmd/batond`、根构建脚本与 Docker 镜像仍是发布入口，发布切换在 TypeScript 迁移 T5 进行；`apps/server` 与 `apps/batond` 提供独立的 Cursor 远程 Thread、Project 与设备管理开发入口。
+Baton 是跨设备 AI Agent 协同系统，由中心服务（`baton-server`）、节点守护进程（`batond`）、本地会话执行器（Session Worker）、Project Agent Runtime（`runtimes/project-agent`）和 Web UI（`web/`）组成。Go 的 `cmd/baton-server`、`cmd/batond`、根构建脚本与 Docker 镜像仍是发布入口，发布切换在 TypeScript 迁移 T5 进行；`apps/server` 与 `apps/batond` 提供独立的 Cursor、Pi、Codex 远程 Thread、Project 与设备管理开发入口。
 
 ## 核心架构与目录
 
@@ -10,8 +10,8 @@ Baton 是跨设备 AI Agent 协同系统，由中心服务（`baton-server`）�
 | `cmd/batond`                                  | 节点守护进程：节点注册、出站 TLS WebSocket 连接、本地 SQLite 账本（`node.db`）、Session Worker 与 Project Runtime 管理                                                 |
 | `internal/session`                            | Session Worker 生命周期、本地认证 IPC、Thread 消息队列与 Turn 账本                                                                                                     |
 | `internal/agent/{pi,codex,kiro,shell,replay}` | 统一 `agent.Adapter` 接口实现（Pi RPC、Codex app-server、Kiro ACP V3）与确定性录制回放                                                                                 |
-| `apps/server` | TypeScript 开发中心：账号、设备、Cursor 远程 Thread、Project 租约调度、主对话、事项和记忆、持久命令与回复、Gateway 和实时输出；见 `apps/server/README.md` |
-| `apps/batond` | TypeScript 节点与本地 Thread：注册和 WSS、认证 IPC、持久 Worker、Agent host、受限 shell、Project Runtime 宿主、目录和订阅管理；见 `apps/batond/README.md` |
+| `apps/server` | TypeScript 开发中心：账号、设备、Cursor / Pi / Codex 远程 Thread、Project 租约调度、主对话、事项和记忆、持久命令与回复、Gateway 和实时输出；见 `apps/server/README.md` |
+| `apps/batond` | TypeScript 节点与本地 Thread：注册和 WSS、认证 IPC、持久 Worker、Cursor / Pi / Codex Agent host、受限 shell、Project Runtime 宿主、目录和订阅管理；见 `apps/batond/README.md` |
 | `e2e` | 中心、节点与独立 Worker 的跨 app 集成测试，显式依赖两个 app；见 `e2e/README.md` |
 | `packages/telemetry`                          | Effect 原生 OTLP/HTTP 追踪、标准上下文传播与导出字段过滤，默认不连接采集端                                                                                             |
 | `packages/{protocol,sqlite}`                  | TypeScript 协议 Schema 与 WAL/FULL SQLite 客户端、提交结果核查                                                                                                         |
