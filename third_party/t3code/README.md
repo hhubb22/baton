@@ -1,6 +1,6 @@
 # t3code 来源与许可
 
-Baton 通过 git submodule `upstream/t3code` 使用 fork [hhubb22/t3code](https://github.com/hhubb22/t3code) 的 `baton` 分支，固定提交 `ef43d5d436b3dbe05dbbfdf753b196a392e5410e`。该提交基于上游 [pingdotgg/t3code](https://github.com/pingdotgg/t3code) 的 `9828cad49f3e1ef4f9e037b3baaca19f4e4928fc`。上游 MIT 许可和 `Copyright (c) 2026 T3 Tools Inc.` 保留在 [LICENSE](LICENSE)。
+Baton 通过 git submodule `upstream/t3code` 使用 fork [hhubb22/t3code](https://github.com/hhubb22/t3code) 的 `baton` 分支，固定提交 `f7553c2a5de01f67091c4ca01bb627665a951dd4`。该提交基于上游 [pingdotgg/t3code](https://github.com/pingdotgg/t3code) 的 `9828cad49f3e1ef4f9e037b3baaca19f4e4928fc`。上游 MIT 许可和 `Copyright (c) 2026 T3 Tools Inc.` 保留在 [LICENSE](LICENSE)。
 
 workspace 收录这些包：`provider-core`、`provider-pi`、`provider-acp`、`provider-acp-registry`、`provider-cursor`、`provider-codex`、`provider-testing`、`contracts`、`shared`、`effect-acp`、`effect-codex-app-server`。`effect-acp` 与 `effect-codex-app-server` 使用 fork 里的同名包。Cursor 适配器直接使用 `provider-cursor` 的 `makeCursorAdapterV2`。
 
@@ -18,6 +18,7 @@ workspace 收录这些包：`provider-core`、`provider-pi`、`provider-acp`、`
 | `provider-testing` 测试脚本 | 包内没有测试文件。补上与其他包相同的 `vp test` 脚本，没有匹配文件时退出码为 0 |
 | `packages/provider-cursor/src/testing` | Cursor 回放转录 Schema、确定性回放 runner、录制函数与六份离线转录从 `apps/server/src/orchestration-v2/Adapters/CursorAdapterV2.testkit.ts` 移入该包，新增 `./testing` 与 `./testing/replay` 导出；`apps/server` 原路径改为再导出，注册表相关的 layer 与 harness 留在应用内 |
 | `packages/provider-cursor/src/server.ts` | 导出 `makeCursorAdapterV2` 与 `CursorAdapterV2Options`，供 Baton 的 agent-host 直接构造 adapter |
+| `packages/provider-pi/src/testing`、`packages/provider-codex/src/testing` | Pi RPC 回放 spawner、录制函数与 Codex 回放客户端工厂从 `apps/server` 的 testkit 移入各包，新增 `./testing` 导出；`apps/server` 原路径再导出，注册表 layer 与 harness 留在应用内 |
 
 ## 版本
 
