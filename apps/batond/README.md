@@ -1,6 +1,6 @@
 # TypeScript 节点与 Thread
 
-`@baton/batond` 通过出站 WSS 连接 [TypeScript 开发中心](../server/README.md)，提供 Cursor 远程 Thread、Project Runtime、设备目录和订阅管理。节点守护进程保存设备身份、命令与报告账本，网页可发送排队消息、撤回、停止、恢复并读取实时输出。每个 Thread 使用独立 Worker，每个 Cursor Thread 独占一个 cursor-host；Worker 管理 SQLite、Turn、回复和报告，cursor-host 通过复用的 SDK/runtime 执行本机 Cursor。本地调用方也可直接通过认证 IPC 使用 Worker。
+`@baton/batond` 通过出站 WSS 连接 [TypeScript 开发中心](../server/README.md)，提供 Cursor 远程 Thread、Project Runtime、设备目录和订阅管理。节点守护进程保存设备身份、命令与报告账本，网页可发送排队消息、撤回、停止、恢复并读取实时输出。每个 Thread 使用独立 Worker，每个执行中的 Cursor Thread 独占一个 agent-host；Worker 管理 SQLite、Turn、回复和报告，agent-host 用 fork 的 Cursor adapter 执行本机 Cursor。本地调用方也可直接通过认证 IPC 使用 Worker。
 
 Go 的 `cmd/baton-server`、`cmd/batond` 和根目录构建脚本仍是发布入口，TypeScript 发布切换在迁移 T5 进行。TS 提供 Cursor 远程 Thread、Project 协同和受限 shell；其他 Agent 与统一历史的范围和实际拒绝响应见 [中心能力表](../server/README.md#当前能力范围)。
 
@@ -76,17 +76,17 @@ pnpm --filter @baton/batond dev resume --thread-id <UUID>
 
 `open` 可用 `--model` 选择模型；未指定时使用 SDK 原生的 `default`。Thread 内固定该选择，轮间切换与 steer 暂未开放。`open` 返回 Thread ID 和持久接收回执。启动、发送、恢复和停止的实际终态通过 `command --command-id <UUID>` 或 `reports` 查询；Worker 就绪与 Agent 就绪分别报告。`message` 支持 `--message-id`，执行命令支持 `--command-id`，重试时保留原标识。相同命令 ID、相同内容复用回执和结果，内容冲突会被拒绝。
 
-`withdraw --message-id <ID>` 撤回尚未提交的输入。`reports --after-worker-seq <序号>` 顺序读取有界报告，`ack --event-id <UUID> --worker-seq <序号>` 确认已消费报告。本地 `history` 提供 Cursor 的基本原生 user/assistant 消息；网页原生历史当前返回 `ok:false`，在线设备为 `history_unavailable`、离线设备为 `node_offline`。统一历史与公共分页属于迁移 T4。
+`withdraw --message-id <ID>` 撤回尚未提交的输入。`reports --after-worker-seq <序号>` 顺序读取有界报告，`ack --event-id <UUID> --worker-seq <序号>` 确认已消费报告。设备不再保存原生历史，本地 `history` 和 `/threads/{id}/history` 都返回 `ok:false` / `history_unavailable`。网页时间线按中心保存的 Thread 消息、回复和实时输出分页。
 
 ## 持久化与恢复
 
 默认数据目录为 `~/.baton-ts`，设备和 Thread 命令支持 `--data-dir`。POSIX 目录权限为 0700、文件为 0600；已有权限不符合要求时拒绝使用。UDS 路径超过系统限制时，使用更短的数据目录。Windows 使用令牌认证的命名管道和私有目录 ACL，平台限制见 [platform 文档](src/platform/README.md)。
 
-每个 Thread 的目录包含 Worker 独占锁、IPC 令牌、`thread.db`、原生会话映射和 SDK store。账本使用 WAL 与 `synchronous=FULL`。命令回执与排队状态原子提交；原生发送前把一次采集的历史基准和 intent 原子提交。提交结果无法核查时，Worker 停止执行并关闭本次运行资源。
+每个 Thread 的目录包含 Worker 独占锁、IPC 令牌、`thread.db`、原生会话映射和 SDK store。账本使用 WAL 与 `synchronous=FULL`。命令回执与排队状态原子提交；原生发送前把本地准备文档和 intent 原子提交。提交结果无法核查时，Worker 停止执行并关闭本次运行资源。
 
-Worker 重启后，queued 输入可继续调度；已有 intent 只查询原生历史，无法证明已接收时标记 unknown，保留原消息结果。员工显式发送新输入或 resume 时，Worker 先确认旧进程树已回收，再恢复既有原生会话，旧 queued 撤回、旧 unknown 输入保持终态。恢复绑定原生会话、工作目录和私有 store，不重发输入、不新建空会话代替恢复。batond 或本地 CLI 退出后，存活 Worker 继续执行，后续调用通过原 IPC 重连。
+Worker 重启后，queued 输入可继续调度；已有 intent 只用新的只读 host 核对原生快照，无法证明已接收时标记 unknown，保留原消息结果。员工显式发送新输入或 resume 时，Worker 先确认旧进程树已回收，再恢复既有原生会话，旧 queued 撤回、旧 unknown 输入保持终态。恢复绑定原生会话、工作目录和私有 store，不重发输入、不新建空会话代替恢复。batond 或本地 CLI 退出后，存活 Worker 继续执行，后续调用通过原 IPC 重连。
 
-停止先持久登记，再中断启动、准备或发送，撤回 queued 输入；已提交的 intent 通过历史核查裁决。取消响应与真实终止分别处理，最多一分钟后回收所属进程树。POSIX 的 SDK spawn/fork 继承 cursor-host 组，宿主取消与回合结束均核查活动子进程，Worker 崩溃时 watchdog 按该组回收。首次打开被取消时，迟到的 SDK 实例会被回收，该命令不会补报打开成功。
+停止先持久登记，再中断启动、准备或发送，撤回 queued 输入；已提交的 intent 通过只读快照核对裁决。取消响应与真实终止分别处理，最多一分钟后回收所属进程树。POSIX 的 SDK spawn/fork 继承 agent-host 组；Worker 崩溃时 watchdog 按该组回收，宿主 Scope 结束时终止剩余子进程。首次打开被取消时，迟到的 SDK 实例会被回收，该命令不会补报打开成功。
 
 ## 追踪
 
@@ -97,9 +97,6 @@ Worker 重启后，queued 输入可继续调度；已有 intent 只查询原生�
 ## 验证
 
 ```sh
-pnpm --filter @baton/providers typecheck
-pnpm --filter @baton/providers test
-pnpm --filter @baton/provider-testing test
 pnpm --filter @baton/batond typecheck
 pnpm --filter @baton/batond lint
 pnpm --filter @baton/batond test
@@ -110,4 +107,4 @@ pnpm test:e2e
 
 `test` 包含全部包内测试；`test:unit` 排除 `*.integration.test.ts`，`test:integration` 仅运行这些文件。辅助程序集中在 `src/testing/`。跨 app 测试位于 [`e2e/`](../../e2e/README.md)；验证节点改动及依赖它的 e2e 时，可运行 `pnpm --filter '...@baton/batond' --workspace-concurrency=1 test`。
 
-适配器行为验证仅使用上游 SDK 静态转录、确定性回放和本地替身，驱动实际 SDK 封装、RPC、Worker 和 SQLite。测试覆盖输入不重发、命令去重、停止竞态、未知终态、独立历史、跨进程恢复、提交核查、输出字节游标与洪泛，以及 daemon 断线、持久报告和存活 Worker 重发现，禁止依赖真实 API Key、在线模型推理或外部真实服务。中心与独立 Worker 的完整远程链路验证见 [中心文档](../server/README.md#验证)。完整入口、SQLite 与本地进程测量见 [迁移工具](../../tools/ts-migration/README.md)。
+适配器行为验证仅使用上游 SDK 静态转录、确定性回放和本地替身，驱动实际 SDK 封装、RPC、Worker 和 SQLite。测试覆盖输入不重发、命令去重、停止竞态、未知终态、只读发送核对、跨进程恢复、提交核查、输出字节游标与洪泛，以及 daemon 断线、持久报告和存活 Worker 重发现，禁止依赖真实 API Key、在线模型推理或外部真实服务。中心与独立 Worker 的完整远程链路验证见 [中心文档](../server/README.md#验证)。完整入口、SQLite 与本地进程测量见 [迁移工具](../../tools/ts-migration/README.md)。

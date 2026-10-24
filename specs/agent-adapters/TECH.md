@@ -6,7 +6,7 @@ Basis: [行为规格](PRODUCT.md)；[TypeScript 迁移 TECH](../ts-migration/TEC
 
 ## 现有实现与设计边界
 
-TS 版已交付 T1～T3：Worker 的认证 IPC、持久命令回执、intent 账本、停止裁决与 outbox，batond 的注册、WSS 和 Worker 管理，中心与网页的远程 Thread、Project 和设备管理。Cursor 通过 `cursor-host` 子进程接入，SDK runner 从 t3code 抽取到 `packages/providers`，并为输入不重放做过修改。Go 版 Session Worker 与 Pi、Codex、Kiro 适配器在切换时删除，不再作为行为基准或验收对照。
+TS 版已交付 T1～T3：Worker 的认证 IPC、持久命令回执、intent 账本、停止裁决与 outbox，batond 的注册、WSS 和 Worker 管理，中心与网页的远程 Thread、Project 和设备管理。Cursor 经 `agent-host` 子进程使用 fork 的完整 `provider-cursor` adapter，不再保留本地抽取的 SDK runner。Go 版 Session Worker 与 Pi、Codex、Kiro 适配器在切换时删除，不再作为行为基准或验收对照。
 
 Agent 接入整包依赖 Baton 维护的 t3code fork，使用其完整 provider 包和 `ProviderAdapterV2` 接口，接受上游的协议处理、重试、重连、steer、取消和事件归一化行为。Baton 不为产品差异修改上游 adapter；上游缺少的能力（如 Kiro）在 fork 中按上游写法补齐。包体积和依赖范围在第一版接受现状，之后再按需要逐步转写为自实现。
 
@@ -30,10 +30,10 @@ Coordinator：Thread 命令、报告与历史记录
 |---|---|---|
 | `upstream/t3code` | Baton fork 的 git submodule，固定提交；pnpm workspace 收录其中用到的 `@t3tools/*` 包 | R-04～R-11 |
 | `upstream/t3code/packages/effect-acp`、`upstream/t3code/packages/effect-codex-app-server` | fork 中的 ACP 与 Codex app-server 客户端，由 workspace 直接收录 | R-04、R-08、R-11 |
-| `packages/providers`、`packages/provider-testing` | 删除；由 fork 的 `provider-cursor` 与 `provider-testing` 取代 | R-04～R-12 |
-| `packages/protocol` | Worker IPC、ThreadReport 和 RuntimeAgent 的 Effect Schema；删除原生历史条目 `HistoryEntry` | R-01、R-10 |
+| `packages/providers`、`packages/provider-testing` | 已删除；Cursor 直接使用 fork 的 `provider-cursor`，回放测试使用其 `./testing` 导出 | R-04～R-12 |
+| `packages/protocol` | Worker IPC、ThreadReport 和 RuntimeAgent 的 Effect Schema；原生历史条目与历史页字段已删除 | R-01、R-10 |
 | `apps/batond/src/worker` | 沿用 T1～T3 的接收、执行、停止裁决与 outbox；`ThreadAgent` 契约按下文简化 | R-01、R-04、R-05、R-08 |
-| `apps/batond/src/agent-host` | 由 `cursor-host` 泛化而来：宿主层、事件映射，经 stdio `effect/rpc` 与 Worker 通信 | R-04～R-11 |
+| `apps/batond/src/agent-host` | Agent host 子命令：宿主层、事件映射，经 stdio `effect/rpc` 与 Worker 通信 | R-04～R-11 |
 | `apps/batond/src/agents/registry.ts` | Agent 类型到 t3code driver、设置、探测和静态能力上限的唯一注册描述 | R-01～R-03、R-07 |
 | `apps/batond/src/platform/process` | 进程组、POSIX watchdog、Windows 进程账本；登记上游新建的进程组 | R-08 |
 | `apps/server`、Web 数据层 | 正式 reason 字段、status/create 准入；历史使用中心记录，删除前端原生解析 | R-01、R-10 |
@@ -48,7 +48,7 @@ agent-host 为上游 adapter 提供它要求的 Effect service：
 |---|---|
 | `ChildProcessSpawner`、`FileSystem` | `@effect/platform-node`；spawner 包装后把上游新建的进程组或 PID 登记给 watchdog 与 Windows 进程账本 |
 | `AgentScope` | agent-host 的执行 Scope，Scope 结束时关闭 adapter 并禁止新建进程 |
-| `ProviderHost` | `paths` 指向 Thread 工作目录与设备私有状态目录；`settings` 由 Agent 配置生成，不随运行变化；`credentials` 读写设备私有凭据文件；`shouldRunBackgroundWork` 返回 false |
+| `ProviderHost` | `paths` 指向 Thread 工作目录与设备私有状态目录；`settings` 是静态快照；`credentials` 是只读空实现，认证使用设备显式配置的 `CURSOR_API_KEY`；`shouldRunBackgroundWork` 返回 false |
 | `McpProviderSessions` | 使用 provider-core 的内存实现；第一版不写入任何会话配置，Agent 不挂载 MCP 工具 |
 
 adapter 选项中的 `environment` 只含系统必要变量和该 Agent 的配置项，不继承其他提供商密钥或 Project Runtime 凭据。`continuationRequests` 不提供，上游的自动续跑不转换成 Baton 输入。
@@ -61,13 +61,13 @@ agent-host 把 `ProviderAdapterV2` 映射到 Worker 现有的 `ThreadAgent`：
 |---|---|
 | `open` | `openSession` 与 `ensureThread`；返回前把 `OrchestrationV2ProviderThread` 原子写入原生映射文件 |
 | `resume` | 读取映射，调用 `resumeThread` |
-| `send` | 队列消息调用 `startTurn`，插入调用 `steerTurn`；调用成功即视为原生接收 |
+| `send` | 队列消息调用 `startTurn`，插入消息在 Cursor 不支持 steer 时拒绝；调用成功即视为原生接收 |
 | `sent` | 新建只读 agent-host 调用 `readThreadSnapshot`；user 消息数超过 Worker 已确认发送数且下一条正文相同时确认，否则返回未确认 |
 | `abort` | `interruptTurn` |
 | `events` | assistant 消息完成映射为 `reply`，turn 完成或中断映射为 `end`，会话错误或进程退出映射为 `uncertain` / `exited` |
 | `output` | assistant 文本增量 |
 
-`prepareInput` 与 `restoreInput` 不再读取原生历史，InputPreparation 只保存原生会话与准备标识；`readHistory` 从契约中删除。运行时请求（权限、提问）由宿主按 Agent 配置的策略自动应答：权限选择当次允许，提问返回取消，Worker 中不会出现等待人工确认的回合。上游的 `rollbackThread`、`forkThread`、`compactThread` 与 `uploadFeedback` 不接入。
+`prepareInput` 与 `restoreInput` 不再读取原生历史，InputPreparation 只保存原生会话、准备标识和 Worker 已确认的发送数；`readHistory` 从契约中删除，`native_history` 请求固定返回 `history_unavailable`。运行时请求（权限、提问）由宿主按 Agent 配置的策略自动应答：权限选择当次允许，提问返回取消，Worker 中不会出现等待人工确认的回合。上游的 `rollbackThread`、`forkThread`、`compactThread` 与 `uploadFeedback` 不接入。
 
 ## 运行时与进程模型（R-08、R-12）
 
@@ -150,7 +150,7 @@ open 的成功 `ThreadCommandResult` 增加当前 `storage_generation`，中心�
 
 以下由 Worker 保证，与具体 adapter 无关：命令先持久接收再执行；intent 提交后才调用 `send`；`send` 结果未知时先调用 `sent`，仍无法确认则进入 unknown，Worker 不再次提交同一输入；stop 有独立登记路径，一分钟内没有终止事件就回收进程树；所有异步结果写状态前核对控制代次。
 
-以下按上游实现接受：adapter 内部的请求重试、断线重连和会话恢复（如 Cursor resume 冲突时取消旧 run 再发送，`enableAgentRetries`）；Pi、Codex 的 steer 归属；子任务与后台任务何时算回合结束；中断后的终态时序。T1 为输入不重放对 Cursor runner 做的修改随 `packages/providers` 一并删除。上游行为导致的问题先在 fork 中修复并提交上游，不在 Baton 接入层另做一套等价逻辑。
+以下按上游实现接受：adapter 内部的请求重试、断线重连和会话恢复（如 Cursor resume 冲突时取消旧 run 再发送，`enableAgentRetries`）；Pi、Codex 的 steer 归属；子任务与后台任务何时算回合结束；中断后的终态时序。T1 在本地抽取 runner 上做的输入不重放修改随 `packages/providers` 一并删除。上游行为导致的问题先在 fork 中修复并提交上游，不在 Baton 接入层另做一套等价逻辑。
 
 ## 各 Agent 实现
 
@@ -159,7 +159,7 @@ open 的成功 `ThreadCommandResult` 增加当前 `storage_generation`，中心�
 | Pi | `provider-pi` | 注册与配置映射 |
 | Codex | `apps/server/.../CodexAdapterV2.ts`，fork 中移成 `provider-codex` 包，依赖 `effect-codex-app-server` | 在 fork 中拆包，保留上游测试；运行策略沿用 `approvalPolicy: never`、`sandbox: workspace-write` |
 | Kiro | `provider-acp` 与 `provider-acp-registry` | 在 fork 中按 `claudeAcp.ts`、`copilotAcp.ts` 的写法新增 `kiroAcp.ts`，启动 `kiro-cli acp --agent-engine=v3`，模型经 `_meta.kiro.modelId` 传递；`effect-acp` 按 initialize 响应协商 v1，不强制改成 v2 |
-| Cursor | `provider-cursor`（完整 driver 与 adapter） | 取代 T1 的抽取 runner；`cursor-host` 并入 agent-host；SDK 附带目录与平台包分发方式不变 |
+| Cursor | `provider-cursor`（完整 driver 与 adapter） | 已用 `makeCursorAdapterV2` 取代 T1 的抽取 runner；`cursor-host` 泛化为 agent-host；SDK 附带目录与平台包分发方式不变 |
 | Grok、Antigravity | `provider-grok`、`provider-acp` | 切换后接入，复用同一宿主层 |
 
 最低版本和协议要求以上游 driver 的检查为准，不再单独维护 Pi 1.3.0、Codex 0.162.1 的版本策略。上游没有 Kiro 转录，删除 Go 代码前把 `internal/agent/kiro` 的录制转换为 fork 中 `kiroAcp` 的测试夹具。
@@ -168,7 +168,7 @@ open 的成功 `ThreadCommandResult` 增加当前 `storage_generation`，中心�
 
 Thread 历史使用中心已保存的记录：`thread_messages` 保存员工和 Project Agent 发出的输入，`thread_replies` 保存 Worker 上报的回复。网页时间线与 Project 工具的 `history.read`、`history.search` 读取同一份数据，中心按 worker_seq 分页。这与 t3code 用自身事件投影提供历史的方式一致。
 
-设备端原生历史读取、HistoryPager、只读快照缓存、前缀摘要游标和 `history_loading` 均删除。网页删除 `nativeMessages` 的按 Agent 解析和 Pi 分支遍历，`/threads/{id}/history` 改为返回中心记录或删除。在 Baton 之外继续同一原生会话产生的消息不显示；第一版之后可在 resume 时调用 `readThreadSnapshot` 补录。
+设备端原生历史读取、HistoryPager、只读快照缓存、前缀摘要游标和 `history_loading` 均已删除。Worker 的 `native_history` 请求固定返回 `history_unavailable`；网页时间线已改为按中心记录分页，`/threads/{id}/history` 保留路由并固定返回失败结果。在 Baton 之外继续同一原生会话产生的消息不显示。
 
 ## MCP 注入
 
@@ -236,7 +236,7 @@ batond bundle 直接打包用到的 `@t3tools/*` 包及其纯 JS 依赖。原生
 按 [迁移任务清单](../ts-migration/TASKS.md) 执行。T1～T3 已完成；T4 按以下顺序推进，每步可单独合入：
 
 1. 建立 fork 与 `upstream/t3code`，workspace 收录所需包，删除本地 `effect-acp`、`effect-codex-app-server` 副本，上游测试在 Baton CI 中运行。
-2. 把 `cursor-host` 泛化为 agent-host，实现宿主层与事件映射，用完整 `provider-cursor` 替换 `packages/providers`，T2 的 Cursor 远程链路回归通过。
+2. 建立 agent-host，实现宿主层与事件映射，用完整 `provider-cursor` 替换本地抽取的 runner，T2 的 Cursor 远程链路回归通过。
 3. 接入 Pi、Codex（含 fork 中拆包）和 Kiro（fork 中新增 `kiroAcp`）。
 4. 历史改用中心记录，删除设备原生历史与网页原生解析。
 
@@ -259,8 +259,8 @@ Grok、Antigravity 在切换后接入，复用同一宿主层。
 |---|---|---|
 | FULL 同步提交耗时 | 输入 intent、大队列、Windows 和 Linux x64 未测 | 复现与负载范围见迁移 TECH；p99 超过 50 ms 时改用 worker_threads |
 | Windows 进程回收 | taskkill 有父进程先退出和 Worker 崩溃后延迟回收两个缺口 | 已接受为第一版范围；Job Object 放第一版之后 |
-| 上游进程组 | 上游 adapter 自建 detached 进程组时，需确认包装后的 spawner 能全部登记 | T4 第 2 步用回收测试确认；登记不到时在 fork 中改为经宿主 spawner 创建 |
-| Cursor 认证 | 上游 driver 使用 credential store 与 keyring；Baton 原用显式 `CURSOR_API_KEY` | T4 第 2 步确定走 `ProviderHost.credentials` 还是保留 API key 注入 |
+| 上游进程组 | 上游 adapter 自建 detached 进程组时的登记 | 已由 `agent-host/reclaim.integration.test.ts` 确认：本地替身经包装 spawner 拉起 detached 子进程及后代，整树回收后全部退出 |
+| Cursor 认证 | 上游 driver 使用 credential store 与 keyring | 已定：只用设备显式配置的 `CURSOR_API_KEY`，经 adapter 的 `environment` 注入；`ProviderHost.credentials` 保持只读空实现 |
 | Kiro ACP | 上游无 Kiro 转录；需确认 v1 协商、`session/load` 恢复和模型选择 | 用 Go 录制转换的夹具验证，不通过时在 fork 中补 Kiro 扩展处理 |
 | agent-host 冷启动 | 加载 t3code 依赖后的启动耗时未测 | 不计入 Worker 3 秒预算；open 仍受 30 秒原生预算约束，T5 复验 |
 | t3code 依赖打包 | `@t3tools/shared` 的 markdown 依赖与 keyring 原生模块进 SEA 未验证 | T5 打包检查；不需要的依赖在 fork 中去掉 |

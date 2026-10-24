@@ -8,7 +8,7 @@ import { startProcessWatchdog } from '../platform/process.ts'
 import { currentBatondCommand } from '../daemon/host.ts'
 import { AgentError } from '../worker/agent.ts'
 
-/** Delivery combinations are enabled only after real send, cancellation, history and resume validation. */
+/** Delivery combinations are enabled only after real send, cancellation and resume validation. */
 const verifiedCombinations = new Set(['darwin-arm64'])
 
 /** The Thread working directory and the private directory beside the native mapping. */
@@ -84,7 +84,7 @@ export async function probeLocalCursor(): Promise<RuntimeAgent> {
         reason: result.authenticated === 'missing' ? '需要显式配置 CURSOR_API_KEY' : 'Cursor 认证状态尚未确认',
       }
     if (version !== '1.0.35' || !verifiedCombinations.has(platform))
-      return { ...report, reason: `Cursor SDK ${version} / ${platform} 尚未通过执行、停止、历史与恢复验证` }
+      return { ...report, reason: `Cursor SDK ${version} / ${platform} 尚未通过执行、停止与恢复验证` }
     return {
       ...report,
       status: 'available',
