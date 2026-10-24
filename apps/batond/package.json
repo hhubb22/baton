@@ -34,9 +34,11 @@
     "@cursor/sdk": "1.0.35",
     "@effect/platform-node": "catalog:",
     "@t3tools/contracts": "workspace:*",
+    "@t3tools/provider-codex": "workspace:*",
     "@t3tools/provider-core": "workspace:*",
     "@t3tools/provider-cursor": "workspace:*",
     "@t3tools/provider-pi": "workspace:*",
+    "effect-codex-app-server": "workspace:*",
     "@t3tools/shared": "workspace:*",
     "effect": "catalog:",
     "ws": "8.22.0"

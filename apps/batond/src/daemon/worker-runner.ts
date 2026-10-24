@@ -65,6 +65,12 @@ export const runWorker = (options: {
       ...(watchdog ? { watchdog } : {}),
       paths: registry.cursor.paths,
     })
+    const codexFactory = registry.codex.makeFactory({
+      command: hostCommand,
+      records,
+      ...(watchdog ? { watchdog } : {}),
+      paths: registry.codex.paths,
+    })
     const piFactory = registry.pi.makeFactory({
       command: hostCommand,
       records,
@@ -81,6 +87,7 @@ export const runWorker = (options: {
       ((config) => {
         if (config.agent_type === 'cursor') return cursorFactory(config)
         if (config.agent_type === 'pi') return piFactory(config)
+        if (config.agent_type === 'codex') return codexFactory(config)
         if (config.agent_type === 'shell') return shellFactory(config)
         throw new Error(`Unsupported Thread agent_type: ${config.agent_type}`)
       })

@@ -304,6 +304,9 @@ importers:
       '@t3tools/contracts':
         specifier: workspace:*
         version: link:../../upstream/t3code/packages/contracts
+      '@t3tools/provider-codex':
+        specifier: workspace:*
+        version: link:../../upstream/t3code/packages/provider-codex
       '@t3tools/provider-core':
         specifier: workspace:*
         version: link:../../upstream/t3code/packages/provider-core
@@ -319,6 +322,9 @@ importers:
       effect:
         specifier: 'catalog:'
         version: 4.0.6
+      effect-codex-app-server:
+        specifier: workspace:*
+        version: link:../../upstream/t3code/packages/effect-codex-app-server
       ws:
         specifier: 8.22.0
         version: 8.22.0

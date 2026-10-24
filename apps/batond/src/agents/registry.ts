@@ -4,6 +4,7 @@ import type { RuntimeAgent, WorkerOpenConfig } from '@baton/protocol'
 import type { ProbeResult } from '../agent-host/protocol.ts'
 import { inspectCursorSdk } from './cursor/sdk-loader.ts'
 import { makeCursorAgentFactory, probeCursor } from './cursor/index.ts'
+import { makeCodexAgentFactory, probeCodex } from './codex/index.ts'
 import { makePiAgentFactory, probePi } from './pi/index.ts'
 import { makeShellAgentFactory } from './shell/index.ts'
 import { startProcessWatchdog } from '../platform/process.ts'
@@ -27,13 +28,10 @@ const narrowed = { create: false, queue: true, steer: false, stop: true, resume:
  * Upstream Pi and Codex can steer and switch models. The worker still rejects
  * those commands, so the reported capabilities stay narrower.
  */
-export function hostedAgentReport(
-  agentType: 'pi' | 'codex',
-  result: ProbeResult,
-  missingReason: string,
-): RuntimeAgent {
+export function hostedAgentReport(agentType: 'pi' | 'codex', result: ProbeResult, missingReason: string): RuntimeAgent {
   const version = typeof result.details.version === 'string' ? result.details.version : 'unknown'
-  const platform = typeof result.details.platform === 'string' ? result.details.platform : `${process.platform}-${process.arch}`
+  const platform =
+    typeof result.details.platform === 'string' ? result.details.platform : `${process.platform}-${process.arch}`
   const models = [...new Set(result.models)].map((id) => ({ id, name: id }))
   const base: RuntimeAgent = {
     agent_type: agentType,
@@ -146,7 +144,10 @@ const probeHost = (probe: typeof probeCursor) =>
       Effect.gen(function* () {
         const watchdog = yield* Effect.acquireRelease(
           Effect.promise(() =>
-            startProcessWatchdog({ file: currentBatondCommand().executable, args: [...currentBatondCommand().args, 'watchdog'] }),
+            startProcessWatchdog({
+              file: currentBatondCommand().executable,
+              args: [...currentBatondCommand().args, 'watchdog'],
+            }),
           ),
           (owned) => Effect.promise(() => owned.close()),
         )
@@ -163,12 +164,38 @@ export async function probeLocalPi(): Promise<RuntimeAgent> {
   try {
     return hostedAgentReport('pi', await probeHost(probePi), 'Pi CLI 未安装或尚未认证')
   } catch {
-    return hostedAgentReport('pi', { authenticated: 'unknown', models: [], details: { installed: false, version: 'unknown', platform: `${process.platform}-${process.arch}` }, reason: 'Pi 依赖或只读探测暂不可用' }, 'Pi CLI 未安装或尚未认证')
+    return hostedAgentReport(
+      'pi',
+      {
+        authenticated: 'unknown',
+        models: [],
+        details: { installed: false, version: 'unknown', platform: `${process.platform}-${process.arch}` },
+        reason: 'Pi 依赖或只读探测暂不可用',
+      },
+      'Pi CLI 未安装或尚未认证',
+    )
+  }
+}
+
+export async function probeLocalCodex(): Promise<RuntimeAgent> {
+  try {
+    return hostedAgentReport('codex', await probeHost(probeCodex), 'Codex CLI 未安装或尚未认证')
+  } catch {
+    return hostedAgentReport(
+      'codex',
+      {
+        authenticated: 'unknown',
+        models: [],
+        details: { installed: false, version: 'unknown', platform: `${process.platform}-${process.arch}` },
+        reason: 'Codex 依赖或只读探测暂不可用',
+      },
+      'Codex CLI 未安装或尚未认证',
+    )
   }
 }
 
 export async function probeLocalAgents(): Promise<RuntimeAgent[]> {
-  return Promise.all([probeLocalCursor(), probeLocalPi()])
+  return Promise.all([probeLocalCursor(), probeLocalPi(), probeLocalCodex()])
 }
 
 export const agentRegistry = {
@@ -183,6 +210,12 @@ export const agentRegistry = {
     makeFactory: makePiAgentFactory,
     probe: probeLocalPi,
     paths: agentPaths('Pi'),
+  },
+  codex: {
+    type: 'codex',
+    makeFactory: makeCodexAgentFactory,
+    probe: probeLocalCodex,
+    paths: agentPaths('Codex'),
   },
   shell: { type: 'shell', makeFactory: makeShellAgentFactory },
 } as const

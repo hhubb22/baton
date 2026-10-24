@@ -1,9 +1,11 @@
+import { codexAgentHostModule } from '../agents/codex/host-module.ts'
 import { cursorAgentHostModule } from '../agents/cursor/host-module.ts'
 import { piAgentHostModule } from '../agents/pi/host-module.ts'
 import { runAgentHost, type AgentHostModule } from './host.ts'
 import type { AgentHostPaths } from './host-layer.ts'
 
 const modules: Readonly<Record<string, AgentHostModule>> = {
+  codex: codexAgentHostModule,
   cursor: cursorAgentHostModule,
   pi: piAgentHostModule,
 }
