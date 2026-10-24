@@ -1,4 +1,4 @@
-import { cursorAgentHostModule } from '../agents/cursor/index.ts'
+import { cursorAgentHostModule } from '../agents/cursor/host-module.ts'
 import { runAgentHost, type AgentHostModule } from './host.ts'
 import type { AgentHostPaths } from './host-layer.ts'
 

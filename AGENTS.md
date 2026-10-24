@@ -16,7 +16,6 @@ Baton 是跨设备 AI Agent 协同系统，由中心服务（`baton-server`）�
 | `packages/telemetry`                          | Effect 原生 OTLP/HTTP 追踪、标准上下文传播与导出字段过滤，默认不连接采集端                                                                                             |
 | `packages/{protocol,sqlite}`                  | TypeScript 协议 Schema 与 WAL/FULL SQLite 客户端、提交结果核查                                                                                                         |
 | `upstream/t3code`                             | Baton 的 t3code fork submodule，固定提交；workspace 收录用到的 `@t3tools/*` 包与 `effect-acp`、`effect-codex-app-server`                                                |
-| `packages/{providers,provider-testing}`       | 从固定 t3code 提交复用的 Cursor SDK/runtime、上游测试和确定性回放；完整 provider 包在 fork 中，本目录保留到接入宿主层时替换                                              |
 | `runtimes/project-agent`                      | 基于 Node.js / TypeScript 的 Project Agent 进程（通过 stdio JSON-RPC 与 `batond` 通信）                                                                                |
 | `web`                                         | React + TypeScript + Vite 前端，默认构建到 `internal/webui/dist` 供 Go 嵌入；TS 中心使用 `apps/server/dist/web`，产物不提交 Git；界面文案遵循 `design/WRITING.md`      |
 | `design`                                      | Web UI 的 Elyx 设计稿（`.elyx`）与界面文案规范（`design/WRITING.md`），前端按它实现；修改前先读 `design/AGENTS.md`                                                     |

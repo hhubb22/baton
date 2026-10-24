@@ -1,42 +1,31 @@
 import type { Preparation } from '../../agent-host/protocol.ts'
-import type { WorkerOpenConfig } from '@baton/protocol'
 import type { AgentMessage } from '../../worker/agent.ts'
 import { AgentError } from '../../worker/agent.ts'
-import { preparationId } from '../../agent-host/preparation.ts'
-import type { NativeMapping, NativeMessage } from './protocol.ts'
+import type { SnapshotMessage } from './protocol.ts'
 
-export function validatePreparation(
-  config: WorkerOpenConfig,
-  message: AgentMessage,
-  mapping: NativeMapping,
-  preparation: Preparation,
-): void {
+export function validatePreparation(message: AgentMessage, preparation: Preparation): void {
   if (
-    preparation.nativeSessionId !== mapping.nativeSessionId ||
-    preparation.preparationId !== preparationId(config, mapping.nativeSessionId, message) ||
+    !preparation.nativeSessionId ||
+    Buffer.byteLength(JSON.stringify(preparation)) > 4096 ||
     !Number.isSafeInteger(preparation.confirmedSends) ||
-    preparation.confirmedSends < 0 ||
-    Buffer.byteLength(JSON.stringify(preparation)) > 4096
-  ) {
-    throw new AgentError('Cursor input preparation does not match this input and native mapping')
-  }
+    preparation.confirmedSends < 0
+  )
+    throw new AgentError('Cursor input preparation is invalid')
 }
 
 /**
- * Only the next user record after the already confirmed ones can prove this
- * input reached the native session.
+ * Confirms this input only when the native snapshot has more user messages than
+ * the Worker already confirmed and the next user message carries this text.
  */
 export function findSent(
-  config: WorkerOpenConfig,
   message: AgentMessage,
-  mapping: NativeMapping,
   preparation: Preparation,
-  history: ReadonlyArray<NativeMessage>,
+  messages: ReadonlyArray<SnapshotMessage>,
 ): { nativeSessionId: string; executionId: string } | undefined {
-  validatePreparation(config, message, mapping, preparation)
-  const users = history.filter((entry) => entry.role === 'user')
+  validatePreparation(message, preparation)
+  const users = messages.filter((entry) => entry.role === 'user')
   if (users.length <= preparation.confirmedSends) return undefined
   const candidate = users[preparation.confirmedSends]
   if (!candidate || candidate.text !== message.text) return undefined
-  return { nativeSessionId: mapping.nativeSessionId, executionId: candidate.id }
+  return { nativeSessionId: preparation.nativeSessionId, executionId: candidate.id }
 }

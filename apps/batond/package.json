@@ -29,13 +29,13 @@
   },
   "dependencies": {
     "@baton/protocol": "workspace:*",
-    "@baton/providers": "workspace:*",
     "@baton/sqlite": "workspace:*",
     "@baton/telemetry": "workspace:*",
     "@cursor/sdk": "1.0.35",
     "@effect/platform-node": "catalog:",
     "@t3tools/contracts": "workspace:*",
     "@t3tools/provider-core": "workspace:*",
+    "@t3tools/provider-cursor": "workspace:*",
     "@t3tools/shared": "workspace:*",
     "effect": "catalog:",
     "ws": "8.22.0"
@@ -47,14 +47,13 @@
     "@cursor/sdk-win32-x64": "1.0.35"
   },
   "devDependencies": {
-    "@baton/provider-testing": "workspace:*",
     "@baton/project-agent-runtime": "workspace:*",
     "@effect/vitest": "catalog:",
     "@types/node": "catalog:",
     "@types/ws": "8.18.2",
     "esbuild": "catalog:",
     "typescript": "catalog:",
-    "vitest": "catalog:",
-    "vite-plus": "catalog:"
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
   }
 }

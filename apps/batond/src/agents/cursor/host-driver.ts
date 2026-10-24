@@ -3,88 +3,115 @@ import { homedir, tmpdir } from 'node:os'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { dirname, join } from 'node:path'
-import { Effect, Exit, Layer, Queue, Scope, Stream } from 'effect'
+import { DateTime, Deferred, Effect, Layer, Queue, Scope, Stream } from 'effect'
+import type {
+  ModelSelection,
+  OrchestrationV2AppThread,
+  OrchestrationV2ProviderThread,
+  ProviderTurnId,
+} from '@t3tools/contracts'
 import {
-  makeBatonCursorAgentSdkRunner,
-  ProviderEventLoggers,
-  NoOpProviderEventLoggers,
+  MessageId as MessageIdSchema,
+  ModelSelection as ModelSelectionSchema,
+  ProjectId,
+  ProviderInstanceId as ProviderInstanceIdSchema,
   ThreadId,
-  ProviderSessionId,
-  textFromInteractionUpdate,
-  type CursorAgentSdkSession,
-  type CursorAgentSdkRun,
-  type InteractionUpdate,
-  type LocalAgentStore,
-} from '@baton/providers/cursor'
+} from '@t3tools/contracts'
 import type { WorkerOpenConfig } from '@baton/protocol'
+import * as CursorAgentSdk from '@t3tools/provider-cursor/server/CursorAgentSdk'
+import { makeCursorAdapterV2 } from '@t3tools/provider-cursor/server'
+import { CursorSettings } from '@t3tools/provider-cursor/settings'
+import { Schema } from 'effect'
+import * as IdAllocator from '@t3tools/provider-core/server/IdAllocator'
+import * as ProviderAdapter from '@t3tools/provider-core/server/ProviderAdapter'
 import { makeOutputMailbox } from '../../worker/output.ts'
 import { ensurePrivateDirectory, readPrivateFile } from '../../platform/private.ts'
-import {
-  AgentHostDriver,
-  AgentHostError,
-  AgentHostProcessGroup,
-  type ExecutionEvent,
-  type ProbeResult,
-} from '../../agent-host/protocol.ts'
 import type { AgentHostEnvironment } from '../../agent-host/host-layer.ts'
+import { AgentHostDriver, AgentHostError, AgentHostProcessGroup } from '../../agent-host/protocol.ts'
 import { findSent, validatePreparation } from './evidence.ts'
-import { nativeMessagesFromSdk } from './history.ts'
-import { loadMapping, mappingFor, persistMapping } from './mapping.ts'
-import type { NativeMapping, NativeMessage } from './protocol.ts'
+import { loadMapping, mappingFor, mappingThread, persistMapping, statePath } from './mapping.ts'
+import type { NativeMapping } from './protocol.ts'
+import { inspectCursorSdk, Cursor, createAgentPlatform, SqliteLocalAgentStore } from './sdk-loader.ts'
 
-type Store = LocalAgentStore & { dispose(): Promise<void> }
-type Sdk = typeof import('@baton/providers/cursor/sdk')
-type SdkLoader = typeof import('@baton/providers/cursor/sdk-loader')
-type Runner = Effect.Success<ReturnType<typeof makeBatonCursorAgentSdkRunner>>
+const instanceId = ProviderInstanceIdSchema.make('cursor')
+const settings = Schema.decodeSync(CursorSettings)({ enabled: true })
 
-/**
- * Cursor driver for the Agent host, built on the extracted SDK runner. One host
- * owns one Thread: open or resume once, then send, observe and stop.
- */
+const sdkError = (operation: string, cause: unknown) => {
+  // Only class names and codes leave the host; SDK payloads stay inside it.
+  const tags: string[] = []
+  let current: unknown = cause
+  for (let depth = 0; depth < 4 && current && typeof current === 'object'; depth++) {
+    const tag: unknown = Reflect.get(current, '_tag') ?? Reflect.get(current, 'name')
+    if (typeof tag === 'string' && /^[A-Za-z0-9_]{1,64}$/.test(tag)) tags.push(tag)
+    current = Reflect.get(current, 'cause')
+  }
+  return new AgentHostError({ message: `Cursor ${operation} failed (${tags.join(' > ') || 'unknown'})` })
+}
+
+const runtimePolicy = (cwd: string): ProviderAdapter.ProviderAdapterV2RuntimePolicy => ({
+  // Approval policy "never" keeps auto-review off while the native sandbox stays on.
+  runtimeMode: 'approval-required',
+  interactionMode: 'default',
+  cwd,
+  approvalPolicy: 'never',
+})
+
+const modelSelection = (config: WorkerOpenConfig): ModelSelection =>
+  Schema.decodeSync(ModelSelectionSchema)({
+    instanceId,
+    model: config.model ?? config.adapter_config.model ?? 'default',
+  })
+
 export const cursorHostDriver = (input: {
   readonly agentType: string
-}): Layer.Layer<AgentHostDriver, unknown, AgentHostEnvironment> =>
+}): Layer.Layer<AgentHostDriver, AgentHostError, AgentHostEnvironment | CursorAgentSdk.CursorAgentSdkRunner> =>
   Layer.effect(
     AgentHostDriver,
     Effect.gen(function* () {
       if (input.agentType !== 'cursor')
         return yield* new AgentHostError({ message: 'Cursor host driver requires agent type cursor' })
-      const loader = yield* Effect.tryPromise({
-        try: () => import('@baton/providers/cursor/sdk-loader'),
-        catch: () => new AgentHostError({ message: 'Cursor SDK loader could not be loaded' }),
-      })
-      const sdk = yield* Effect.tryPromise({
-        try: () => import('@baton/providers/cursor/sdk'),
-        catch: () => new AgentHostError({ message: 'Cursor SDK could not be loaded' }),
-      })
-      const sdkContext = yield* Layer.build(sdk.layer)
-      const runner = yield* makeBatonCursorAgentSdkRunner().pipe(
-        Effect.provide(sdkContext),
-        Effect.provideService(ProviderEventLoggers, NoOpProviderEventLoggers),
+      const adapter = yield* makeCursorAdapterV2({
+        instanceId,
+        settings,
+        environment: process.env,
+        getModels: () => [],
+      }).pipe(Effect.mapError((cause) => sdkError('adapter', cause)))
+      return yield* makeCursorDriver(adapter).pipe(
+        Effect.mapError((cause: unknown) => (cause instanceof AgentHostError ? cause : sdkError('driver', cause))),
       )
-      return yield* makeCursorDriver(runner, sdk, loader)
     }),
   )
 
-const makeCursorDriver = (runner: Runner, sdk: Sdk, loader: SdkLoader) =>
+interface ActiveTurn {
+  readonly messageId: string
+  readonly runId: string
+  readonly attemptId: string
+  readonly ordinal: number
+  readonly started: Deferred.Deferred<ProviderTurnId>
+  providerTurnId?: ProviderTurnId
+  ended: boolean
+}
+
+const makeCursorDriver = (adapter: ProviderAdapter.ProviderAdapterV2['Service']) =>
   Effect.gen(function* () {
     const scope = yield* Scope.Scope
-    const control = yield* Queue.bounded<ExecutionEvent, AgentHostError>(256)
-    const output = makeOutputMailbox()
     const processGroup = yield* AgentHostProcessGroup
+    const idAllocator = yield* IdAllocator.IdAllocatorV2
+    const control = yield* Queue.bounded<import('../../agent-host/protocol.ts').ExecutionEvent, AgentHostError>(256)
+    const output = makeOutputMailbox()
     let mapping: NativeMapping | undefined
     let config: WorkerOpenConfig | undefined
-    let session: CursorAgentSdkSession | undefined
-    let store: Store | undefined
-    let cancelled = false
+    let providerThread: OrchestrationV2ProviderThread | undefined
+    let session: ProviderAdapter.ProviderAdapterV2SessionRuntime | undefined
+    let appThread: OrchestrationV2AppThread | undefined
+    let active: ActiveTurn | undefined
+    let ordinal = 0
     let closed = false
-    let sending = false
-    let forceNextInput = false
-    let executionTimeoutMs = 0
-    let run: CursorAgentSdkRun | undefined
-    let activeInput: object | undefined
+    let cancelled = false
+    const streams = new Map<string, string>()
+    const replied = new Set<string>()
     const error = (message: string) => new AgentHostError({ message })
-    const emit = (event: ExecutionEvent) =>
+    const emit = (event: import('../../agent-host/protocol.ts').ExecutionEvent) =>
       Effect.gen(function* () {
         if (event.type === 'delta') {
           output.offer(event)
@@ -92,168 +119,151 @@ const makeCursorDriver = (runner: Runner, sdk: Sdk, loader: SdkLoader) =>
         }
         yield* Queue.offer(control, event)
       })
-    const sdkFailure = (cause: unknown, operation: string): AgentHostError => {
-      if (cause instanceof AgentHostError) return cause
-      const tagged = cause && typeof cause === 'object' ? cause : undefined
-      const timeout = tagged && '_tag' in tagged && tagged._tag === 'TimeoutError'
-      const method =
-        tagged && 'method' in tagged && typeof tagged.method === 'string' && /^[a-zA-Z.]{1,64}$/.test(tagged.method)
-          ? ` (${tagged.method})`
-          : ''
-      const details = new Set<string>()
-      let current: unknown = cause
-      for (let depth = 0; depth < 4 && current && typeof current === 'object'; depth++) {
-        for (const key of ['name', 'code']) {
-          const value: unknown = Reflect.get(current, key)
-          if (typeof value === 'string' && /^[A-Za-z0-9_/-]{1,64}$/.test(value)) details.add(value)
+    const identity = (turn: ActiveTurn) => ({
+      nativeSessionId: mapping?.nativeSessionId ?? '',
+      messageId: turn.messageId,
+      executionId: turn.runId,
+    })
+    const consume = (event: ProviderAdapter.ProviderAdapterV2Event) =>
+      Effect.gen(function* () {
+        if (closed || cancelled) return
+        switch (event.type) {
+          case 'provider_turn.updated': {
+            const turn = event.providerTurn
+            if (!active || turn.runAttemptId !== active.attemptId) return
+            if (turn.status !== 'running') return
+            active.providerTurnId = turn.id
+            yield* Deferred.succeed(active.started, turn.id).pipe(Effect.ignore)
+            return
+          }
+          case 'message.updated': {
+            const message = event.message
+            // Late events from a previous turn never reach the next turn's identity.
+            if (!active || active.ended || message.role !== 'assistant' || message.runId !== active.runId) return
+            const turn = active
+            if (message.streaming) {
+              const previous = streams.get(message.id) ?? ''
+              if (message.text === previous) return
+              const suffix = message.text.startsWith(previous) ? message.text.slice(previous.length) : message.text
+              streams.set(message.id, message.text)
+              if (suffix.length > 0)
+                yield* emit({
+                  ...identity(turn),
+                  type: 'delta',
+                  id: message.id,
+                  text: suffix,
+                  ...(message.text.startsWith(previous) ? {} : { gap: true }),
+                })
+              return
+            }
+            streams.delete(message.id)
+            if (message.text.length === 0 || replied.has(message.id)) return
+            replied.add(message.id)
+            yield* emit({ ...identity(turn), type: 'reply', id: message.id, text: message.text })
+            return
+          }
+          case 'turn.terminal': {
+            if (!active || event.runOrdinal !== active.ordinal) return
+            active.ended = true
+            if (event.status === 'failed') {
+              yield* emit({ type: 'uncertain', reason: 'Cursor turn failed' })
+              return
+            }
+            yield* emit({
+              ...identity(active),
+              type: 'end',
+              outcome: event.status === 'completed' ? 'completed' : 'cancelled',
+            })
+            return
+          }
+          case 'runtime_request.updated':
+            // The Cursor SDK exposes no interactive request, and a stopped turn cancels any late one.
+            return
+          default:
+            return
         }
-        const status: unknown = Reflect.get(current, 'status')
-        if (typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599)
-          details.add(`HTTP ${status}`)
-        current = Reflect.get(current, 'cause')
-      }
-      const category = details.size > 0 ? ` [${[...details].join(', ')}]` : ''
-      return error(`Cursor SDK ${operation}${method} ${timeout ? 'timed out' : 'failed'}${category}`)
-    }
-    const sdkCall = <A, E>(effect: Effect.Effect<A, E>, operation: string) =>
-      effect.pipe(
-        Effect.timeout('30 seconds'),
-        Effect.mapError((cause) => sdkFailure(cause, operation)),
+      })
+    const consumeEvents = (runtime: ProviderAdapter.ProviderAdapterV2SessionRuntime) =>
+      runtime.events.pipe(
+        Stream.runForEach(consume),
+        Effect.catchCause(() =>
+          cancelled || closed ? Effect.void : emit({ type: 'uncertain', reason: 'Cursor session event stream failed' }),
+        ),
+        Effect.forkIn(scope),
       )
-    const openStore = (native: NativeMapping) =>
-      Effect.tryPromise({
-        try: () => loader.SqliteLocalAgentStore.open({ workspaceRef: native.cwd, stateRoot: native.storePath }),
-        catch: () => error('Cursor persistent store could not be opened'),
-      }).pipe(Effect.map((opened) => opened as Store))
-    const persistedAgent = (native: NativeMapping, source: Store) =>
-      Effect.tryPromise({
-        try: async () => {
-          const agent = await source.agents.get({ agentId: native.nativeSessionId })
-          if (!agent || agent.agentId !== native.nativeSessionId || agent.cwd !== native.cwd)
-            throw error('Cursor native history unavailable: session metadata is missing or mismatched')
-          return agent
-        },
-        catch: (cause) => sdkFailure(cause, 'native session lookup'),
-      })
-    /** Read-only evidence; never attaches to the execution channel. */
-    const readHistory = (native: NativeMapping) =>
+    const authorize = (input: WorkerOpenConfig) =>
       Effect.gen(function* () {
-        const reader = yield* openStore(native)
-        const messages = yield* sdkCall(
-          persistedAgent(native, reader).pipe(
-            Effect.andThen(runner.listMessages(native.nativeSessionId, { cwd: native.cwd, store: reader })),
-          ),
-          'history',
-        ).pipe(Effect.ensuring(Effect.promise(() => reader.dispose())))
-        return nativeMessagesFromSdk(messages) as ReadonlyArray<NativeMessage>
-      })
-    const cancelAndTerminate = (handle: CursorAgentSdkRun | undefined) =>
-      Effect.gen(function* () {
-        const results = yield* Effect.all(
-          [
-            Effect.exit(handle ? sdkCall(handle.cancel, 'cancel') : Effect.void),
-            Effect.exit(processGroup.terminateChildren),
-          ],
-          { concurrency: 'unbounded' },
-        )
-        for (const result of results) if (Exit.isFailure(result)) return yield* Effect.failCause(result.cause)
-      })
-    const flush = (
-      identity: { nativeSessionId: string; messageId: string; executionId: string },
-      assistant: { text: string; index: number },
-    ) =>
-      Effect.gen(function* () {
-        if (!assistant.text) return
-        yield* emit({
-          ...identity,
-          type: 'reply',
-          id: `${identity.executionId}:${assistant.index++}`,
-          text: assistant.text,
+        const cwd = yield* Effect.tryPromise({
+          try: () => realpath(input.working_directory),
+          catch: () => error('Cursor working directory is not accessible'),
         })
-        assistant.text = ''
+        return {
+          threadId: ThreadId.make(input.thread_id),
+          providerSessionId: idAllocator.derive.providerSession({ providerInstanceId: instanceId }),
+          selection: modelSelection(input),
+          policy: runtimePolicy(cwd),
+          cwd,
+        }
       })
-    yield* Effect.addFinalizer(() =>
-      Effect.gen(function* () {
-        cancelled = true
-        yield* cancelAndTerminate(run).pipe(Effect.ignore)
-        if (session) yield* session.close.pipe(Effect.ignore)
-        if (store) yield* Effect.promise(() => store!.dispose())
-      }),
-    )
-    const mappingForConfig = (input: WorkerOpenConfig) =>
-      Effect.tryPromise({
-        try: () => mappingFor(input, ''),
-        catch: () => error('Invalid Cursor native mapping'),
-      })
-    const prepareState = (base: NativeMapping) =>
-      Effect.tryPromise({
-        try: async () => {
-          await ensurePrivateDirectory(dirname(base.statePath))
-          await ensurePrivateDirectory(base.storePath)
-        },
-        catch: () => error('Cursor private state is not accessible'),
-      })
-    const startSession = (
+    const appThreadFor = (input: WorkerOpenConfig, selection: ModelSelection, now: DateTime.Utc) => {
+      const threadId = ThreadId.make(input.thread_id)
+      return {
+        createdBy: 'user',
+        creationSource: 'server',
+        id: threadId,
+        projectId: ProjectId.make(`project:baton:${input.thread_id}`),
+        title: `Baton ${input.thread_id}`,
+        providerInstanceId: instanceId,
+        modelSelection: selection,
+        runtimeMode: 'approval-required',
+        interactionMode: 'default',
+        branch: null,
+        worktreePath: null,
+        activeProviderThreadId: null,
+        lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+        forkedFrom: null,
+        createdAt: now,
+        updatedAt: now,
+        archivedAt: null,
+        deletedAt: null,
+        lastVisitedAt: null,
+        settledOverride: null,
+        settledAt: null,
+      } satisfies OrchestrationV2AppThread
+    }
+    const attach = (
       input: WorkerOpenConfig,
-      base: NativeMapping,
-      operation: 'create' | 'resume',
-      nativeSessionId: string,
+      runtime: ProviderAdapter.ProviderAdapterV2SessionRuntime,
+      thread: OrchestrationV2ProviderThread,
+      selection: ModelSelection,
     ) =>
       Effect.gen(function* () {
-        executionTimeoutMs = input.execution_timeout_seconds * 1000
-        store = yield* openStore(base)
-        if (operation === 'resume') {
-          const resumeStore = store
-          const agent = yield* persistedAgent(base, resumeStore)
-          forceNextInput = yield* sdkCall(
-            Effect.tryPromise({
-              try: async () => {
-                if (!agent.activeRunId) return false
-                const previous = await resumeStore.runs.get({ agentId: agent.agentId, runId: agent.activeRunId })
-                if (!previous || previous.agentId !== agent.agentId || previous.runId !== agent.activeRunId)
-                  throw error('Cursor persisted active run identity mismatch')
-                return previous.status === 'queued' || previous.status === 'running'
-              },
-              catch: (cause) => sdkFailure(cause, 'resume state lookup'),
-            }),
-            'resume state lookup',
-          )
-        }
-        session = yield* sdkCall(
-          runner.open({
-            operation,
-            ...(operation === 'resume' ? { agentId: nativeSessionId } : {}),
-            threadId: ThreadId.make(input.thread_id),
-            providerSessionId: ProviderSessionId.make(input.thread_id),
-            options: {
-              apiKey: process.env.CURSOR_API_KEY ?? '',
-              model: { id: input.model ?? input.adapter_config.model ?? 'default' },
-              local: {
-                cwd: base.cwd,
-                store,
-                autoReview: true,
-                settingSources: [],
-                sandboxOptions: { enabled: true },
-                enableAgentRetries: false,
-              },
-              mcpServers: {},
-            },
-          }),
-          'open',
-        )
-        if (cancelled || closed) {
-          yield* session.close.pipe(Effect.ignore)
-          return yield* Effect.fail(error('Cursor startup was cancelled'))
-        }
-        if (operation === 'resume' && session.agentId !== nativeSessionId)
-          return yield* Effect.fail(error('Cursor resumed a different native session'))
+        const nativeSessionId = thread.nativeThreadRef?.nativeId
+        if (!nativeSessionId) return yield* error('Cursor provider thread has no native session id')
+        const next = yield* Effect.tryPromise({
+          try: () => mappingFor(input, nativeSessionId, thread),
+          catch: () => error('Invalid Cursor native mapping'),
+        })
+        yield* Effect.tryPromise({
+          try: () => ensurePrivateDirectory(dirname(statePath(input))),
+          catch: () => error('Cursor private state is not accessible'),
+        })
+        yield* Effect.tryPromise({
+          try: () => persistMapping(next),
+          catch: () => error('Cursor native mapping could not be persisted'),
+        })
+        mapping = next
+        providerThread = thread
+        session = runtime
         config = input
-        return { ...base, nativeSessionId: session.agentId }
+        ordinal = 0
+        appThread = appThreadFor(input, selection, yield* DateTime.now)
+        return { nativeSessionId }
       })
     const driver: AgentHostDriver['Service'] = {
       probe: Effect.gen(function* () {
         const key = process.env.CURSOR_API_KEY
-        const inspected = yield* Effect.try({ try: () => loader.inspectCursorSdk(), catch: () => undefined }).pipe(
+        const inspected = yield* Effect.try({ try: () => inspectCursorSdk(), catch: () => undefined }).pipe(
           Effect.option,
         )
         const details: Record<string, string | number | boolean> = {
@@ -262,7 +272,14 @@ const makeCursorDriver = (runner: Runner, sdk: Sdk, loader: SdkLoader) =>
           integrity: false,
           sandboxHelper: false,
         }
-        const result = (fields: Omit<ProbeResult, 'details'>): ProbeResult => ({ ...fields, details })
+        const result = (fields: {
+          authenticated: 'valid' | 'missing' | 'unknown'
+          models: string[]
+          reason?: string
+        }) => ({
+          ...fields,
+          details,
+        })
         if (inspected._tag === 'None' || inspected.value.missingAssets.length > 0)
           return result({
             authenticated: 'unknown',
@@ -293,7 +310,7 @@ const makeCursorDriver = (runner: Runner, sdk: Sdk, loader: SdkLoader) =>
             reason: 'An explicit CURSOR_API_KEY is required',
           })
         const authenticated = yield* Effect.tryPromise({
-          try: () => loader.Cursor.me({ apiKey: key }),
+          try: () => Cursor.me({ apiKey: key }),
           catch: () => undefined,
         }).pipe(Effect.match({ onFailure: () => false, onSuccess: () => true }))
         if (!authenticated)
@@ -312,13 +329,13 @@ const makeCursorDriver = (runner: Runner, sdk: Sdk, loader: SdkLoader) =>
               if (!cause || typeof cause !== 'object' || !('code' in cause) || cause.code !== 'ENOENT') throw cause
             }
             const temporary = await mkdtemp(join(tmpdir(), 'baton-cursor-probe-'))
-            let probeStore: Awaited<ReturnType<typeof loader.SqliteLocalAgentStore.open>> | undefined
+            let probeStore: Awaited<ReturnType<typeof SqliteLocalAgentStore.open>> | undefined
             try {
               const cwd = await realpath(temporary)
               const storePath = join(cwd, 'state')
               await ensurePrivateDirectory(storePath)
-              probeStore = await loader.SqliteLocalAgentStore.open({ workspaceRef: cwd, stateRoot: storePath })
-              const platform = await loader.createAgentPlatform({
+              probeStore = await SqliteLocalAgentStore.open({ workspaceRef: cwd, stateRoot: storePath })
+              const platform = await createAgentPlatform({
                 workspaceRef: cwd,
                 localStore: probeStore,
                 stateRoot: storePath,
@@ -355,7 +372,7 @@ const makeCursorDriver = (runner: Runner, sdk: Sdk, loader: SdkLoader) =>
           })
         details.sandboxHelper = true
         const models = yield* Effect.tryPromise({
-          try: () => loader.Cursor.models.list({ apiKey: key }),
+          try: () => Cursor.models.list({ apiKey: key }),
           catch: () => undefined,
         }).pipe(Effect.option)
         if (models._tag === 'None')
@@ -368,174 +385,198 @@ const makeCursorDriver = (runner: Runner, sdk: Sdk, loader: SdkLoader) =>
       }),
       open: ({ config: input }) =>
         Effect.gen(function* () {
-          if (session || mapping || closed || cancelled || config !== undefined)
-            return yield* Effect.fail(error('Cursor host cannot open another session'))
-          const base = yield* mappingForConfig(input)
-          yield* prepareState(base)
+          if (session || providerThread || closed || cancelled)
+            return yield* error('Cursor host cannot open another session')
           const exists = yield* Effect.promise(() =>
-            readPrivateFile(base.statePath).then(
+            readPrivateFile(statePath(input)).then(
               () => true,
               () => false,
             ),
           )
-          if (exists) return yield* Effect.fail(error('Cursor mapping already exists; resume explicitly'))
-          mapping = yield* startSession(input, base, 'create', '')
-          yield* Effect.tryPromise({
-            try: () => persistMapping(mapping!),
-            catch: () => error('Cursor native mapping could not be persisted'),
-          })
-          return { nativeSessionId: mapping.nativeSessionId }
+          if (exists) return yield* error('Cursor mapping already exists; resume explicitly')
+          const authorized = yield* authorize(input)
+          const runtime = yield* adapter
+            .openSession({
+              threadId: authorized.threadId,
+              providerSessionId: authorized.providerSessionId,
+              modelSelection: authorized.selection,
+              runtimePolicy: authorized.policy,
+            })
+            .pipe(
+              Effect.provideService(Scope.Scope, scope),
+              Effect.mapError((cause) => sdkError('open', cause)),
+            )
+          const thread = yield* runtime
+            .ensureThread({
+              threadId: authorized.threadId,
+              modelSelection: authorized.selection,
+              runtimePolicy: authorized.policy,
+              providerSessionId: authorized.providerSessionId,
+            })
+            .pipe(Effect.mapError((cause) => sdkError('ensure thread', cause)))
+          const result = yield* attach(input, runtime, thread, authorized.selection)
+          yield* consumeEvents(runtime)
+          return result
         }),
       resume: ({ config: input, nativeSessionId }) =>
         Effect.gen(function* () {
-          if (session || mapping || closed || cancelled || config !== undefined)
-            return yield* Effect.fail(error('Cursor host cannot open another session'))
-          const existing = yield* Effect.tryPromise({
+          if (session || providerThread || closed || cancelled)
+            return yield* error('Cursor host cannot open another session')
+          const stored = yield* Effect.tryPromise({
             try: () => loadMapping(input, nativeSessionId),
             catch: () => error('Cursor native mapping identity or working directory mismatch'),
           })
-          mapping = yield* startSession(input, existing, 'resume', nativeSessionId)
-          return { nativeSessionId: mapping.nativeSessionId }
+          const authorized = yield* authorize(input)
+          const runtime = yield* adapter
+            .openSession({
+              threadId: authorized.threadId,
+              providerSessionId: authorized.providerSessionId,
+              modelSelection: authorized.selection,
+              runtimePolicy: authorized.policy,
+            })
+            .pipe(
+              Effect.provideService(Scope.Scope, scope),
+              Effect.mapError((cause) => sdkError('resume', cause)),
+            )
+          const thread = yield* runtime
+            .resumeThread({
+              providerThread: mappingThread(stored),
+              threadId: authorized.threadId,
+              modelSelection: authorized.selection,
+              runtimePolicy: authorized.policy,
+            })
+            .pipe(Effect.mapError((cause) => sdkError('resume thread', cause)))
+          const result = yield* attach(input, runtime, thread, authorized.selection)
+          yield* consumeEvents(runtime)
+          return result
         }),
       send: ({ message, preparation }) =>
         Effect.gen(function* () {
-          if (!session || !mapping || !store || !config || cancelled || closed || sending || run)
-            return yield* Effect.fail(error('Cursor cannot submit in its current state'))
-          if (message.mode !== 'queue') return yield* Effect.fail(error('Cursor does not support steer'))
+          if (!session || !providerThread || !config || !appThread || closed || cancelled)
+            return yield* error('Cursor cannot submit in its current state')
+          if (active && !active.ended) return yield* error('Cursor turn is still active')
+          if (message.mode !== 'queue') return yield* error('Cursor does not support steer')
           yield* Effect.try({
-            try: () => validatePreparation(config!, message, mapping!, preparation),
+            try: () => validatePreparation(message, preparation),
             catch: (cause) => (cause instanceof AgentHostError ? cause : error('Invalid Cursor preparation')),
           })
-          const native = mapping
-          const agent = session
-          sending = true
-          const identity = { nativeSessionId: native.nativeSessionId, messageId: message.id, executionId: '' }
-          const token = {}
-          activeInput = token
-          const assistant = { text: '', index: 0 }
-          const earlyUpdates: InteractionUpdate[] = []
-          let earlyBytes = 0
-          let callbacksReady = false
-          const update = (value: InteractionUpdate) =>
-            Effect.gen(function* () {
-              if (activeInput !== token) return
-              const text = textFromInteractionUpdate(value)
-              if (text !== undefined) {
-                assistant.text += text
-                if (assistant.text.length > 1024 * 1024)
-                  return yield* Effect.fail(error('Cursor assistant output exceeds buffer limit'))
-                yield* emit({ ...identity, type: 'delta', id: `${identity.executionId}:${assistant.index}`, text })
-              } else if (
-                [
-                  'thinking-delta',
-                  'tool-call-started',
-                  'partial-tool-call',
-                  'tool-call-completed',
-                  'step-completed',
-                  'turn-ended',
-                ].includes(value.type)
-              ) {
-                yield* flush(identity, assistant)
-              }
+          const threadId = ThreadId.make(config.thread_id)
+          const selection = modelSelection(config)
+          const policy = runtimePolicy((yield* authorize(config)).cwd)
+          ordinal += 1
+          const runId = idAllocator.derive.run({ threadId, ordinal })
+          const attemptId = idAllocator.derive.runAttempt({ runId, attemptOrdinal: 1 })
+          const rootNodeId = idAllocator.derive.rootNode({ runId })
+          const started = yield* Deferred.make<ProviderTurnId>()
+          const turn: ActiveTurn = { messageId: message.id, runId, attemptId, ordinal, started, ended: false }
+          active = turn
+          streams.clear()
+          replied.clear()
+          yield* session
+            .startTurn({
+              appThread,
+              threadId,
+              runId,
+              runOrdinal: ordinal,
+              providerTurnOrdinal: ordinal,
+              attemptId,
+              rootNodeId,
+              providerThread,
+              message: {
+                messageId: MessageIdSchema.make(`message:baton:${message.id}`),
+                text: message.text,
+                attachments: [],
+                createdBy: 'user',
+                creationSource: 'server',
+              },
+              modelSelection: selection,
+              runtimePolicy: policy,
             })
-          let phase = 'send'
-          return yield* Effect.gen(function* () {
-            const force = forceNextInput
-            forceNextInput = false
-            const handle = yield* agent
-              .send({
-                message: message.text,
-                options: {
-                  ...(message.model ? { model: { id: message.model } } : {}),
-                  ...(force ? { local: { force: true } } : {}),
-                  mcpServers: {},
-                },
-                onDelta: (value) =>
-                  Effect.gen(function* () {
-                    if (activeInput !== token) return
-                    if (callbacksReady) return yield* update(value)
-                    const bytes = Buffer.byteLength(JSON.stringify(value))
-                    if (earlyUpdates.length >= 256 || earlyBytes + bytes > 1024 * 1024)
-                      return yield* Effect.fail(error('Cursor startup event buffer overflow'))
-                    earlyBytes += bytes
-                    earlyUpdates.push(value)
-                  }),
-              })
-              .pipe(Effect.mapError((cause) => sdkFailure(cause, 'send')))
-            phase = 'input confirmation'
-            run = handle
-            identity.executionId = handle.runId
-            if (handle.agentId !== native.nativeSessionId)
-              return yield* Effect.fail(error('Cursor native run identity mismatch'))
-            if (cancelled || closed) yield* cancelAndTerminate(handle).pipe(Effect.ignore)
-            while (earlyUpdates.length) yield* update(earlyUpdates.shift()!)
-            callbacksReady = true
-            yield* handle.wait.pipe(
-              Effect.flatMap((result) =>
-                Effect.gen(function* () {
-                  if (result.id !== handle.runId)
-                    return yield* emit({ type: 'uncertain', reason: 'Cursor terminal run identity mismatch' })
-                  yield* flush(identity, assistant)
-                  if (result.status === 'finished' || result.status === 'cancelled') {
-                    yield* processGroup.waitQuiescent(executionTimeoutMs)
-                    yield* flush(identity, assistant)
-                    yield* emit({
-                      ...identity,
-                      type: 'end',
-                      outcome: result.status === 'finished' ? 'completed' : 'cancelled',
-                    })
-                  } else yield* emit({ type: 'uncertain', reason: 'Cursor native run failed' })
-                }),
-              ),
-              Effect.catchCause(() => emit({ type: 'uncertain', reason: 'Cursor native run termination is unknown' })),
-              Effect.ensuring(
-                Effect.sync(() => {
-                  if (run === handle) run = undefined
-                  if (activeInput === token) activeInput = undefined
-                }),
-              ),
-              Effect.forkIn(scope),
+            .pipe(
+              Effect.timeout('30 seconds'),
+              Effect.mapError((cause) => sdkError('start turn', cause)),
             )
-            return { nativeSessionId: native.nativeSessionId, executionId: handle.runId }
-          }).pipe(
-            Effect.timeout('30 seconds'),
-            Effect.mapError((cause) => sdkFailure(cause, phase)),
-            Effect.ensuring(
-              Effect.sync(() => {
-                sending = false
-              }),
-            ),
+          const turnId = yield* Deferred.await(started).pipe(
+            Effect.timeout('5 seconds'),
+            Effect.match({ onFailure: () => undefined, onSuccess: (value) => value }),
           )
+          if (turnId) turn.providerTurnId = turnId
+          return { nativeSessionId: mapping!.nativeSessionId, executionId: runId }
         }),
       sent: ({ config: input, message, preparation }) =>
         Effect.gen(function* () {
-          const native = yield* Effect.tryPromise({
+          const stored = yield* Effect.tryPromise({
             try: () => loadMapping(input, preparation.nativeSessionId),
             catch: () => error('Cursor native mapping identity or working directory mismatch'),
           })
-          const history = yield* readHistory(native)
+          const authorized = yield* authorize(input)
+          const snapshot = yield* Effect.scoped(
+            Effect.gen(function* () {
+              const runtime = yield* adapter.openSession({
+                threadId: authorized.threadId,
+                providerSessionId: authorized.providerSessionId,
+                modelSelection: authorized.selection,
+                runtimePolicy: authorized.policy,
+              })
+              return yield* runtime
+                .readThreadSnapshot({ providerThread: mappingThread(stored) })
+                .pipe(Effect.timeout('30 seconds'))
+            }),
+          ).pipe(Effect.mapError((cause) => sdkError('read snapshot', cause)))
+          const messages = snapshot.messages.flatMap((entry) =>
+            entry.role === 'user' || entry.role === 'assistant'
+              ? [{ id: entry.id, role: entry.role, text: entry.text }]
+              : [],
+          )
           return yield* Effect.try({
-            try: () => findSent(input, message, native, preparation, history),
+            try: () => findSent(message, preparation, messages),
             catch: (cause) => (cause instanceof AgentHostError ? cause : error('Cursor input evidence is invalid')),
           })
         }),
       events: Stream.fromQueue(control).pipe(
         Stream.merge(
           output.stream.pipe(
-            Stream.map((event): ExecutionEvent => ({ ...event, type: 'delta', id: event.executionId })),
+            Stream.map((event): import('../../agent-host/protocol.ts').ExecutionEvent => ({
+              ...event,
+              type: 'delta',
+              id: event.executionId,
+            })),
           ),
         ),
       ),
-      abort: Effect.sync(() => {
-        cancelled = true
-      }).pipe(Effect.andThen(cancelAndTerminate(run))),
-      close: Effect.sync(() => {
+      abort: Effect.gen(function* () {
+        const turn = active
+        if (!session || !providerThread || !turn || turn.ended) return
+        const turnId =
+          turn.providerTurnId ??
+          (yield* Deferred.await(turn.started).pipe(
+            Effect.timeout('5 seconds'),
+            Effect.match({ onFailure: () => undefined, onSuccess: (value) => value }),
+          ))
+        if (!turnId) {
+          yield* processGroup.terminateChildren.pipe(Effect.ignore)
+          return
+        }
+        yield* session
+          .interruptTurn({ providerThread, providerTurnId: turnId })
+          .pipe(Effect.timeout('30 seconds'), Effect.ignore)
+      }),
+      close: Effect.gen(function* () {
         closed = true
         cancelled = true
-      }).pipe(
-        Effect.andThen(cancelAndTerminate(run)),
-        Effect.andThen(session ? sdkCall(session.close, 'close') : Effect.void),
-      ),
+        const turn = active
+        if (!session || !providerThread || !turn || turn.ended) return
+        if (!turn.providerTurnId) return
+        yield* session
+          .interruptTurn({ providerThread, providerTurnId: turn.providerTurnId })
+          .pipe(Effect.timeout('10 seconds'), Effect.ignore)
+      }),
     }
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        closed = true
+        cancelled = true
+      }),
+    )
     return driver
   })

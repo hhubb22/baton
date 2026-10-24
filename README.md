@@ -158,7 +158,7 @@ pnpm test
 
 工作区使用 Vite+ 1.4：根目录 `vite.config.ts` 统一配置 Oxlint 推荐规则、Oxfmt 和 TypeScript Go 检查，测试通过内置 Vitest 运行。`pnpm lint` 和 `pnpm check` 对警告返回失败，CI 使用同一检查入口。`pnpm typecheck` 同时保留各包现有编译检查。Node 与 pnpm 继续由现有环境提供，无需安装全局 `vp`。
 
-工作区测试按依赖顺序串行执行，不启用任务结果缓存；测试会构建 Project Runtime，须与 `node tools/build.mjs` 分开执行，避免同时清理同一个产物目录。上游复用范围见 [providers 文档](packages/providers/README.md)。
+工作区测试按依赖顺序串行执行，不启用任务结果缓存；测试会构建 Project Runtime，须与 `node tools/build.mjs` 分开执行，避免同时清理同一个产物目录。上游复用范围见 [t3code 来源与许可](third_party/t3code/README.md)。
 
 ### Go 单元与集成测试
 

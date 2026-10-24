@@ -1,19 +1,20 @@
 import { Schema } from 'effect'
 
-/** Cursor-specific persisted state; the generic host protocol only knows the session id. */
-export const NativeMessage = Schema.Struct({
-  id: Schema.String,
-  role: Schema.Literals(['user', 'assistant']),
-  text: Schema.String,
-})
-export type NativeMessage = typeof NativeMessage.Type
-
+/** Native session attribution persisted by the Agent host before `open`/`resume` returns. */
 export const NativeMapping = Schema.Struct({
-  version: Schema.Literal(1),
+  version: Schema.Literal(2),
   threadId: Schema.String,
   nativeSessionId: Schema.String,
   cwd: Schema.String,
   statePath: Schema.String,
-  storePath: Schema.String,
+  /** Upstream `OrchestrationV2ProviderThread`, kept opaque here and decoded by the driver. */
+  providerThread: Schema.Json,
 })
 export type NativeMapping = typeof NativeMapping.Type
+
+/** Snapshot message projected by the upstream adapter's `readThreadSnapshot`. */
+export interface SnapshotMessage {
+  readonly id: string
+  readonly role: 'user' | 'assistant'
+  readonly text: string
+}

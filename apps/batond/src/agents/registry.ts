@@ -1,7 +1,7 @@
 import { Effect } from 'effect'
 import { dirname, isAbsolute } from 'node:path'
 import type { RuntimeAgent, WorkerOpenConfig } from '@baton/protocol'
-import { inspectCursorSdk } from '@baton/providers/cursor'
+import { inspectCursorSdk } from './cursor/sdk-loader.ts'
 import { makeCursorAgentFactory, probeCursor } from './cursor/index.ts'
 import { makeShellAgentFactory } from './shell/index.ts'
 import { startProcessWatchdog } from '../platform/process.ts'
