@@ -64,7 +64,7 @@ async function fixture() {
   }
   const watchdog = await startProcessWatchdog({
     file: process.execPath,
-    args: [fileURLToPath(new URL('../../platform/test-fixtures/process.mjs', import.meta.url)), 'watchdog'],
+    args: [fileURLToPath(new URL('../../testing/platform/process.mjs', import.meta.url)), 'watchdog'],
   })
   watchdogs.push(watchdog)
   const factory = makeShellAgentFactory({ dataDirectory: root, watchdog })

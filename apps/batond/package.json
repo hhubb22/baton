@@ -3,12 +3,29 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "exports": {
+    "./daemon/daemon": "./src/daemon/daemon.ts",
+    "./daemon/identity": "./src/daemon/identity.ts",
+    "./daemon/transport": "./src/daemon/transport.ts",
+    "./daemon/roots": "./src/daemon/roots.ts",
+    "./daemon/host": "./src/daemon/host.ts",
+    "./daemon/worker-runner": "./src/daemon/worker-runner.ts",
+    "./daemon/ledger": "./src/daemon/ledger.ts",
+    "./daemon/threads": "./src/daemon/threads.ts",
+    "./worker/agent": "./src/worker/agent.ts",
+    "./worker/output": "./src/worker/output.ts",
+    "./platform/process": "./src/platform/process.ts",
+    "./agents/shell/index": "./src/agents/shell/index.ts",
+    "./testing/daemon": "./src/testing/daemon.ts"
+  },
   "scripts": {
     "dev": "node ../../tools/ts-migration/run-batond.mjs",
     "build": "node ../../tools/ts-migration/build-batond.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "vp lint .",
-    "test": "vp test run --config ../../vitest.config.ts"
+    "test": "vp test run --config ../../vitest.config.ts",
+    "test:unit": "vp test run --config ../../vitest.config.ts --project unit",
+    "test:integration": "vp test run --config ../../vitest.config.ts --project integration"
   },
   "dependencies": {
     "@baton/telemetry": "workspace:*",
@@ -27,6 +44,8 @@
     "@cursor/sdk-win32-x64": "1.0.35"
   },
   "devDependencies": {
+    "@baton/provider-testing": "workspace:*",
+    "@baton/project-agent-runtime": "workspace:*",
     "@effect/vitest": "catalog:",
     "@types/node": "catalog:",
     "@types/ws": "8.18.2",

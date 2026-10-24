@@ -3,7 +3,7 @@ import { once } from 'node:events'
 import { createInterface } from 'node:readline'
 import { Effect } from 'effect'
 import * as Fiber from 'effect/Fiber'
-import { hostProcessGroupScoped, installHostProcessGroup } from '../host-process-group.ts'
+import { hostProcessGroupScoped, installHostProcessGroup } from '../../platform/host-process-group.ts'
 
 const role = process.argv[2]
 if (role === 'leaf') {

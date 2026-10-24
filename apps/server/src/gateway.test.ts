@@ -9,6 +9,15 @@ import { WebSocket } from 'ws'
 import { AppError, type NodeSource } from './errors.ts'
 import { webSocketText, Gateway, type GatewayHandlers } from './gateway.ts'
 
+test('decodes WebSocket data with UTF-8 characters split across buffers', () => {
+  const text = '{"text":"你好🙂"}'
+  const bytes = Buffer.from(text)
+  const split = bytes.indexOf(Buffer.from('你')) + 1
+  for (const data of [bytes, [bytes.subarray(0, split), bytes.subarray(split)], Uint8Array.from(bytes).buffer]) {
+    expect(webSocketText(data)).toBe(text)
+  }
+})
+
 const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => {
   try {

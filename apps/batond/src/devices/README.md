@@ -26,5 +26,5 @@ batond project-exec --enabled=false --data-dir /私有数据目录
 
 ```sh
 pnpm --dir apps/batond exec vp test run --config ../../vitest.config.ts src/devices/devices.test.ts src/devices/config.test.ts
-pnpm --dir apps/server exec vp test run --config ../../vitest.config.ts src/device-management.test.ts
+pnpm --dir apps/server exec vp test run --config ../../vitest.config.ts src/device-management.integration.test.ts
 ```

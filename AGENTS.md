@@ -12,6 +12,7 @@ Baton 是跨设备 AI Agent 协同系统，由中心服务（`baton-server`）�
 | `internal/agent/{pi,codex,kiro,shell,replay}` | 统一 `agent.Adapter` 接口实现（Pi RPC、Codex app-server、Kiro ACP V3）与确定性录制回放                                                                                 |
 | `apps/server` | TypeScript 开发中心：账号、设备、Cursor 远程 Thread、Project 租约调度、主对话、事项和记忆、持久命令与回复、Gateway 和实时输出；见 `apps/server/README.md` |
 | `apps/batond` | TypeScript 节点与本地 Thread：注册和 WSS、认证 IPC、持久 Worker、Cursor SDK host、受限 shell、Project Runtime 宿主、目录和订阅管理；见 `apps/batond/README.md` |
+| `e2e` | 中心、节点与独立 Worker 的跨 app 集成测试，显式依赖两个 app；见 `e2e/README.md` |
 | `packages/telemetry`                          | Effect 原生 OTLP/HTTP 追踪、标准上下文传播与导出字段过滤，默认不连接采集端                                                                                             |
 | `packages/{protocol,sqlite}`                  | TypeScript 协议 Schema 与 WAL/FULL SQLite 客户端、提交结果核查                                                                                                         |
 | `packages/{providers,provider-testing}`       | 从固定 t3code 提交复用的 Cursor SDK/runtime、上游测试和确定性回放                                                                                                      |
@@ -43,7 +44,7 @@ Baton 是跨设备 AI Agent 协同系统，由中心服务（`baton-server`）�
   pnpm --filter @baton/server --filter @baton/batond typecheck
   pnpm --filter @baton/server --filter @baton/batond lint
   pnpm --filter @baton/batond test
-  pnpm --dir apps/server exec vp test run --config ../../vitest.config.ts src/remote.integration.test.ts
+  pnpm test:e2e
   ```
 - **Go 单元与集成测试**（先运行 `node tools/build.mjs`；默认连接本机 `postgres://postgres:baton@127.0.0.1:5432/baton_test?sslmode=disable`，若未启动会自动尝试通过 `pg_ctl` 拉起 `~/.baton-postgres`，可通过 `BATON_TEST_DATABASE_URL` 覆盖）：
   ```sh
@@ -63,6 +64,8 @@ Baton 是跨设备 AI Agent 协同系统，由中心服务（`baton-server`）�
   ```
 
 ## Effect 与开发工具
+
+包内复用的测试辅助代码放在 `src/testing/`，静态数据放在其中的 `data/`；只供单个测试文件使用的小函数留在该文件内。跨 app 测试放在 `e2e/`，通过声明的 workspace 依赖与包导出访问源码。中心的 PostgreSQL 测试使用 `*.integration.test.ts`，根 Vitest 配置按文件名分为 `unit` 和 `integration`，两个 app 支持 `test:unit` 与 `test:integration`。`pnpm test` 包含全部组及 e2e；按包筛选受影响测试时用 `pnpm --filter '...@baton/batond' --workspace-concurrency=1 test` 包含依赖该包的 e2e。
 
 工作区通过根目录 `vite.config.ts` 配置 Vite+ 的 Oxlint、Oxfmt 与类型检查，采用推荐规则。`pnpm lint` 和 `pnpm check` 将警告视为失败；`pnpm check` 统一执行格式、lint 和 TypeScript Go 检查，`pnpm typecheck` 保留各包编译器检查；`pnpm test` 按依赖顺序串行执行各包的测试，数据库与进程集成测试不缓存。网页使用 Vite+，发布打包继续使用现有 esbuild 与 Go 脚本。
 

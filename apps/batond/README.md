@@ -103,6 +103,11 @@ pnpm --filter @baton/provider-testing test
 pnpm --filter @baton/batond typecheck
 pnpm --filter @baton/batond lint
 pnpm --filter @baton/batond test
+pnpm --filter @baton/batond test:unit
+pnpm --filter @baton/batond test:integration
+pnpm test:e2e
 ```
+
+`test` 包含全部包内测试；`test:unit` 排除 `*.integration.test.ts`，`test:integration` 仅运行这些文件。辅助程序集中在 `src/testing/`。跨 app 测试位于 [`e2e/`](../../e2e/README.md)；验证节点改动及依赖它的 e2e 时，可运行 `pnpm --filter '...@baton/batond' --workspace-concurrency=1 test`。
 
 适配器行为验证仅使用上游 SDK 静态转录、确定性回放和本地替身，驱动实际 SDK 封装、RPC、Worker 和 SQLite。测试覆盖输入不重发、命令去重、停止竞态、未知终态、独立历史、跨进程恢复、提交核查、输出字节游标与洪泛，以及 daemon 断线、持久报告和存活 Worker 重发现，禁止依赖真实 API Key、在线模型推理或外部真实服务。中心与独立 Worker 的完整远程链路验证见 [中心文档](../server/README.md#验证)。完整入口、SQLite 与本地进程测量见 [迁移工具](../../tools/ts-migration/README.md)。

@@ -10,7 +10,7 @@ import { acquireProcessLock, ProcessLockBusy, processLockIsHeld, readProcessLock
 import { writePrivateFile } from './private.ts'
 import { readProcessIdentity } from './identity.ts'
 
-const fixture = fileURLToPath(new URL('./test-fixtures/process.mjs', import.meta.url))
+const fixture = fileURLToPath(new URL('../testing/platform/process.mjs', import.meta.url))
 const directories: string[] = []
 const children: ChildProcess[] = []
 afterEach(async () => {

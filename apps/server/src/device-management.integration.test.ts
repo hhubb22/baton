@@ -5,7 +5,7 @@ import * as Auth from './auth.ts'
 import * as Nodes from './nodes.ts'
 import * as Devices from './device-management.ts'
 import { AppError, type NodeSource } from './errors.ts'
-import { openTestDatabase, type TestDatabase } from './test-database.ts'
+import { openTestDatabase, type TestDatabase } from './testing/database.ts'
 
 let database: TestDatabase
 let alice: Auth.Employee, bob: Auth.Employee

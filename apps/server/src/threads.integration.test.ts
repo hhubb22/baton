@@ -3,50 +3,12 @@ import { Effect, Option, Schema, Tracer } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import { expect, it } from 'vite-plus/test'
 import * as P from '@baton/protocol'
-import { createDatabaseRuntime } from './database.ts'
-import { openTestDatabase, type TestDatabase } from './test-database.ts'
-import type { NodeSource } from './errors.ts'
+import { seedNode, withTestDatabase, type TestDatabase } from './testing/database.ts'
 import { withTraceSpan } from '@baton/telemetry'
 import * as threads from './threads.ts'
 
 type Run = TestDatabase['run']
-const runner =
-  (runtime: ReturnType<typeof createDatabaseRuntime>): Run =>
-  async (effect) => {
-    const result = await runtime.runPromise(
-      Effect.match(effect, {
-        onSuccess: (value) => ({ ok: true, value }) as const,
-        onFailure: (error) => ({ ok: false, error }) as const,
-      }),
-    )
-    if (!result.ok) throw result.error
-    return result.value
-  }
-async function database(test: (run: Run, restart: () => Promise<Run>) => Promise<void>) {
-  const db = await openTestDatabase()
-  let runtime = db.runtime
-  try {
-    await test(db.run, async () => {
-      await runtime.dispose()
-      runtime = createDatabaseRuntime({ url: db.url, schema: db.schema })
-      return runner(runtime)
-    })
-  } finally {
-    if (runtime !== db.runtime) await runtime.dispose()
-    await db.close()
-  }
-}
 async function fixture(run: Run) {
-  const employee = randomUUID()
-  const node = randomUUID()
-  const credential = randomUUID()
-  const source: NodeSource = {
-    employee_id: employee,
-    node_id: node,
-    credential_id: credential,
-    incarnation: 'incarnation',
-    conn_id: 'connection',
-  }
   const report: P.RuntimeReport = {
     exec: { enabled: false, shell: '/bin/sh' },
     roots: [{ root_id: 'home', path: '/workspace' }],
@@ -62,16 +24,16 @@ async function fixture(run: Run) {
       },
     ],
   }
-  await run(
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      yield* sql`INSERT INTO employees(id,username,display_name,auth_source,external_subject,must_change_password,created_at,updated_at) VALUES(${employee},${'u' + employee.replaceAll('-', '')},'Employee','test',${employee},false,now(),now())`
-      yield* sql`INSERT INTO nodes(id,employee_id,display_name,system_name,capabilities,registration_seq,registered_at,credential_version) VALUES(${node},${employee},'Device','linux',ARRAY[]::text[],nextval('node_registration_seq'),now(),1)`
-      yield* sql`INSERT INTO node_credentials(id,node_id,employee_id,version,created_at,expires_at) VALUES(${credential},${node},${employee},1,now(),now()+interval '1 day')`
-      yield* sql`INSERT INTO node_presence(node_id,employee_id,online,synced,incarnation,conn_id,status_updated_at) VALUES(${node},${employee},true,true,${source.incarnation},${source.conn_id},now())`
-      yield* sql`INSERT INTO node_runtime_reports(node_id,employee_id,report_version,reported_at,report) VALUES(${node},${employee},1,now(),${JSON.stringify(report)}::jsonb)`
-    }),
-  )
+  const {
+    employeeId: employee,
+    nodeId: node,
+    credentialId: credential,
+    source,
+  } = await seedNode(run, {
+    incarnation: 'incarnation',
+    connId: 'connection',
+    report,
+  })
   const input: P.CreateBrowserThreadInput = {
     client_thread_id: randomUUID(),
     node_id: node,
@@ -128,7 +90,7 @@ async function open(run: Run, f: Awaited<ReturnType<typeof fixture>>) {
 }
 
 it('persists request trace separately from business identity and dispatches it after database runtime restart', () =>
-  database(async (run, restart) => {
+  withTestDatabase(async ({ run, restart }) => {
     const f = await fixture(run)
     const spans: Tracer.NativeSpan[] = []
     const tracer = Tracer.make({
@@ -164,7 +126,7 @@ it('persists request trace separately from business identity and dispatches it a
   }))
 
 it('normalizes browser retries, isolates employees, admits saved roots and keeps DTOs', () =>
-  database(async (run) => {
+  withTestDatabase(async ({ run }) => {
     const f = await fixture(run)
     const [a, b] = await Promise.all([f.create(), f.create()])
     expect(a.thread.id).toBe(b.thread.id)
@@ -217,7 +179,7 @@ it('normalizes browser retries, isolates employees, admits saved roots and keeps
   }))
 
 it('persists bounded fair claims before send and survives coordinator restart', () =>
-  database(async (run, restart) => {
+  withTestDatabase(async ({ run, restart }) => {
     const f = await fixture(run)
     const other = await fixture(run)
     for (let i = 0; i < 7; i++)
@@ -249,7 +211,7 @@ it('persists bounded fair claims before send and survives coordinator restart', 
   }))
 
 it('binds startup generation without opening and delivers early stop before queued input', () =>
-  database(async (run) => {
+  withTestDatabase(async ({ run }) => {
     const f = await fixture(run)
     const { thread } = await f.create()
     const [open] = await run(threads.claimCommands())
@@ -301,7 +263,7 @@ it('binds startup generation without opening and delivers early stop before queu
   }))
 
 it('accepts completion before ACK, rejects conflicting source/generation and keeps resume pending until completion', () =>
-  database(async (run, restart) => {
+  withTestDatabase(async ({ run, restart }) => {
     const f = await fixture(run)
     const t = await open(run, f)
     await run(threads.processReport(f.source, report(t.id, 3, 'thread.stopped', { reason: 'exited' })))
@@ -386,7 +348,7 @@ it('accepts completion before ACK, rejects conflicting source/generation and kee
   }))
 
 it('accepts opened and completion before startup ACK and rejects late generation changes', () =>
-  database(async (run) => {
+  withTestDatabase(async ({ run }) => {
     const f = await fixture(run)
     const { thread } = await f.create()
     const [command] = await run(threads.claimCommands())
@@ -427,7 +389,7 @@ it('accepts opened and completion before startup ACK and rejects late generation
   }))
 
 it('paginates complete ascending timeline pages and binds cursors to the employee and Thread', () =>
-  database(async (run) => {
+  withTestDatabase(async ({ run }) => {
     const f = await fixture(run)
     const { thread } = await f.create()
     for (let i = 0; i < 4; i++)
@@ -458,7 +420,7 @@ it('paginates complete ascending timeline pages and binds cursors to the employe
   }))
 
 it('preserves the first-message title and delivered messages in the existing Web timeline consumer', () =>
-  database(async (run) => {
+  withTestDatabase(async ({ run }) => {
     const f = await fixture(run)
     const t = await open(run, f)
     await run(
@@ -533,7 +495,7 @@ it('preserves the first-message title and delivered messages in the existing Web
   }))
 
 it('commits ordered turns and replies once, rolls back invalid reports, and requires stop confirmation for archive', () =>
-  database(async (run) => {
+  withTestDatabase(async ({ run }) => {
     const f = await fixture(run)
     const t = await open(run, f)
     const turn = report(t.id, 3, 'turn.started', {
@@ -576,7 +538,7 @@ it('commits ordered turns and replies once, rolls back invalid reports, and requ
   }))
 
 it('ends pending commands unknown on missing history and rejects replaced connections', () =>
-  database(async (run) => {
+  withTestDatabase(async ({ run }) => {
     const f = await fixture(run)
     const t = await open(run, f)
     await run(threads.processReport(f.source, report(t.id, 3, 'thread.stopped', { reason: 'exited' })))
@@ -639,7 +601,7 @@ async function holdLock(run: Run, table: 'threads' | 'thread_outbox', id: string
 }
 
 it('skips locked outbox and Thread rows without starving another device', () =>
-  database(async (run) => {
+  withTestDatabase(async ({ run }) => {
     const a = await fixture(run)
     const b = await fixture(run)
     const c = await fixture(run)
@@ -664,7 +626,7 @@ it('skips locked outbox and Thread rows without starving another device', () =>
   }))
 
 it('rechecks credential expiry after waiting for the Thread lock and commits no partial report', () =>
-  database(async (run) => {
+  withTestDatabase(async ({ run }) => {
     const f = await fixture(run)
     const t = await open(run, f)
     await run(
@@ -734,7 +696,7 @@ it('rechecks credential expiry after waiting for the Thread lock and commits no 
   }))
 
 it('rejects revoked or expired source before committing business reports', () =>
-  database(async (run) => {
+  withTestDatabase(async ({ run }) => {
     const f = await fixture(run)
     const t = await open(run, f)
     await run(

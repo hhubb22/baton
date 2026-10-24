@@ -12,7 +12,7 @@ import { randomUUID } from 'node:crypto'
 import { httpApplication, httpRouteTemplate } from './http.ts'
 import * as Auth from './auth.ts'
 import * as Nodes from './nodes.ts'
-import { openTestDatabase, type TestDatabase } from './test-database.ts'
+import { openTestDatabase, type TestDatabase } from './testing/database.ts'
 import type { Gateway } from './gateway.ts'
 
 let database: TestDatabase

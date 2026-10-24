@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "exports": {
+    "./testing/integration-worker": "./test/integration-worker.ts",
+    "./testing/project-worker": "./test/t3-worker.ts"
+  },
   "engines": {
     "node": ">=22.19.0"
   },

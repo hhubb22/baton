@@ -20,7 +20,10 @@ const open = async (mode = 'idle', real = false) => {
   const scope = Scope.makeUnsafe()
   const base = real
     ? defaultRuntimeCommand()
-    : { file: process.execPath, args: [fileURLToPath(new URL('./fixtures/runtime.mjs', import.meta.url)), mode] }
+    : {
+        file: process.execPath,
+        args: [fileURLToPath(new URL('../testing/project/runtime.mjs', import.meta.url)), mode],
+      }
   const manager = await Effect.runPromise(
     makeProjectManager({
       dataDir,

@@ -5,17 +5,9 @@ import { expect, it } from 'vite-plus/test'
 import * as Auth from './auth.ts'
 import * as Nodes from './nodes.ts'
 import { createDatabaseRuntime } from './database.ts'
-import { openTestDatabase, type TestDatabase } from './test-database.ts'
+import { withTestDatabase, type TestDatabase } from './testing/database.ts'
 import { compensateRevocations, createRevocationCompensator } from './control-maintenance.ts'
 
-async function database(test: (db: TestDatabase) => Promise<void>) {
-  const db = await openTestDatabase()
-  try {
-    await test(db)
-  } finally {
-    await db.close()
-  }
-}
 async function employee(db: TestDatabase) {
   return db.run(Auth.createEmployee('u' + randomUUID().replaceAll('-', ''), 'Employee', 'offline-maintenance-password'))
 }
@@ -45,7 +37,7 @@ async function node(db: TestDatabase, owner: Auth.Employee, connect = false) {
 }
 
 it('finishes persisted revocation after startup reset and keeps disconnect outside database locks', () =>
-  database(async (db) => {
+  withTestDatabase(async (db) => {
     const owner = await employee(db)
     const { identity } = await node(db, owner, true)
     expect((await db.run(Nodes.revokeNode(owner.id, identity.node_id))).status).toBe('pending')
@@ -109,7 +101,7 @@ it('finishes persisted revocation after startup reset and keeps disconnect outsi
   }))
 
 it('retains failed disconnect intent and retries it on the next scan', () =>
-  database(async (db) => {
+  withTestDatabase(async (db) => {
     const owner = await employee(db)
     const { identity, source } = await node(db, owner, true)
     await db.run(Nodes.revokeNode(owner.id, identity.node_id))
@@ -126,7 +118,7 @@ it('retains failed disconnect intent and retries it on the next scan', () =>
   }))
 
 it('requires presence to be offline before confirming a successful disconnect callback', () =>
-  database(async (db) => {
+  withTestDatabase(async (db) => {
     const owner = await employee(db)
     const { identity, source } = await node(db, owner, true)
     await db.run(Nodes.revokeNode(owner.id, identity.node_id))
@@ -141,7 +133,7 @@ it('requires presence to be offline before confirming a successful disconnect ca
   }))
 
 it('advances past a failing full batch and bounds batch size, concurrency and overlapping scans', () =>
-  database(async (db) => {
+  withTestDatabase(async (db) => {
     const owner = await employee(db)
     const ids: string[] = []
     for (let i = 0; i < 35; i++) {
@@ -182,7 +174,7 @@ it('advances past a failing full batch and bounds batch size, concurrency and ov
   }))
 
 it('merges credentials per node and rejects unbounded page requests', () =>
-  database(async (db) => {
+  withTestDatabase(async (db) => {
     const owner = await employee(db)
     const { identity } = await node(db, owner)
     await db.run(

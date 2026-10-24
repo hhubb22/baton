@@ -9,7 +9,7 @@ import { createDatabaseRuntime, migrateDatabase } from './database.ts'
 import * as Auth from './auth.ts'
 import * as Nodes from './nodes.ts'
 import type { NodeSource } from './errors.ts'
-import { openTestDatabase, type TestDatabase } from './test-database.ts'
+import { openTestDatabase, type TestDatabase } from './testing/database.ts'
 
 let database: TestDatabase
 let schema: string

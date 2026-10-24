@@ -16,7 +16,7 @@ import {
   type ProcessWatchdog,
 } from './process.ts'
 
-const fixture = fileURLToPath(new URL('./test-fixtures/process.mjs', import.meta.url))
+const fixture = fileURLToPath(new URL('../testing/platform/process.mjs', import.meta.url))
 const command = (role: string) => ({ file: process.execPath, args: [fixture, role] })
 const watchdogs: ProcessWatchdog[] = []
 const ownedProcesses: OwnedProcess[] = []

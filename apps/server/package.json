@@ -3,12 +3,22 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "exports": {
+    "./auth": "./src/auth.ts",
+    "./database": "./src/database.ts",
+    "./gateway": "./src/gateway.ts",
+    "./nodes": "./src/nodes.ts",
+    "./server": "./src/server.ts",
+    "./testing/database": "./src/testing/database.ts"
+  },
   "scripts": {
     "dev": "node ../../tools/ts-migration/run-server.mjs",
     "build": "node ../../tools/ts-migration/build-server.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "vp lint .",
-    "test": "vp test run --config ../../vitest.config.ts"
+    "test": "vp test run --config ../../vitest.config.ts",
+    "test:unit": "vp test run --config ../../vitest.config.ts --project unit",
+    "test:integration": "vp test run --config ../../vitest.config.ts --project integration"
   },
   "dependencies": {
     "@baton/telemetry": "workspace:*",

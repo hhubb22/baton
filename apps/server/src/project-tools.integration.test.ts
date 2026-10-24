@@ -3,7 +3,8 @@ import { Effect } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import { expect, it } from 'vite-plus/test'
 import type { ThreadReport } from '@baton/protocol'
-import { projectToolFixture, withProjectToolDatabase } from './project-tools.test-support.ts'
+import { projectToolFixture } from './testing/project-tools.ts'
+import { withTestDatabase } from './testing/database.ts'
 import {
   executeProjectTool,
   waitProjectTool,
@@ -16,7 +17,7 @@ import * as threads from './threads.ts'
 const unpack = (result: { value: unknown }) => JSON.parse((result.value as { text: string }).text)
 
 it('executes all 18 tools, bounds read results, rejects unknown arguments and prevents cross-project thread access', async () =>
-  withProjectToolDatabase(async (db) => {
+  withTestDatabase(async (db) => {
     const { context: c, nodeId } = await projectToolFixture(db)
     let n = 0
     const call = (name: string, args: unknown) =>
@@ -129,7 +130,7 @@ it('executes all 18 tools, bounds read results, rejects unknown arguments and pr
   }))
 
 it('preserves exec wait deadlines across retries and consumes terminal inputs only with the saved tool result', async () =>
-  withProjectToolDatabase(async (db) => {
+  withTestDatabase(async (db) => {
     const { context: c, nodeId, source } = await projectToolFixture(db)
     const args = { node_id: nodeId, working_directory: '/work', command: 'printf done', wait_seconds: 600 }
     const first = await db.run(executeProjectTool(c, 'nodes.exec', args))
@@ -232,7 +233,7 @@ it('preserves exec wait deadlines across retries and consumes terminal inputs on
   }))
 
 it('delivers Project turn replies in order, keeps employee turns private, and emits early message failures once', async () =>
-  withProjectToolDatabase(async (db) => {
+  withTestDatabase(async (db) => {
     const { context: c, nodeId, source } = await projectToolFixture(db)
     const create = await db.run(
       executeProjectTool(c, 'threads.create', {

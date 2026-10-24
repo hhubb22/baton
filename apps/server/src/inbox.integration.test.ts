@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { Effect } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import { expect, it } from 'vite-plus/test'
-import { projectToolFixture, withProjectToolDatabase } from './project-tools.test-support.ts'
+import { projectToolFixture } from './testing/project-tools.ts'
+import { withTestDatabase } from './testing/database.ts'
 import {
   createAgentAttention,
   createSystemAttention,
@@ -44,7 +45,7 @@ const ask = {
 }
 
 it('serializes concurrent handling and withdrawal, preserves retry result and queues exactly one active answer', async () =>
-  withProjectToolDatabase(async (db) => {
+  withTestDatabase(async (db) => {
     const { context: c } = await projectToolFixture(db)
     for (let i = 0; i < 10; i++) {
       const request = await db.run(createAgentAttention(c, `call-${i}`, ask))
@@ -135,7 +136,7 @@ it('serializes concurrent handling and withdrawal, preserves retry result and qu
   }))
 
 it('enforces pending limit, thread ownership and system item rules without queuing system inputs', async () =>
-  withProjectToolDatabase(async (db) => {
+  withTestDatabase(async (db) => {
     const { context: c } = await projectToolFixture(db)
     await db.run(createSystemAttention(c, 'Model failed'))
     await db.run(createSystemAttention(c, 'Same condition'))
@@ -195,7 +196,7 @@ it('enforces pending limit, thread ownership and system item rules without queui
   }))
 
 it('keeps the proposal limit and call identity under concurrent creation', async () =>
-  withProjectToolDatabase(async (db) => {
+  withTestDatabase(async (db) => {
     const { context: c } = await projectToolFixture(db)
     const results = await Promise.all(
       Array.from({ length: 12 }, (_, i) =>

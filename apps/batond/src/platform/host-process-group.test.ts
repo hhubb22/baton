@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { installHostProcessGroup } from './host-process-group.ts'
 
-const fixture = fileURLToPath(new URL('./test-fixtures/fork-child.mjs', import.meta.url))
+const fixture = fileURLToPath(new URL('../testing/platform/fork-child.mjs', import.meta.url))
 
 afterEach(() => {
   vi.restoreAllMocks()

@@ -3,13 +3,14 @@ import { Effect, Schema } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import { expect, it } from 'vite-plus/test'
 import { ProjectEvent, type ProjectRuntimeRequest, type ThreadReport } from '@baton/protocol'
-import { projectToolFixture, withProjectToolDatabase } from './project-tools.test-support.ts'
+import { projectToolFixture } from './testing/project-tools.ts'
+import { withTestDatabase } from './testing/database.ts'
 import { executeProjectTool, waitProjectTool, consumeProjectExecInputs } from './project-tools.ts'
 import * as threads from './threads.ts'
 import { runtimeRequest } from './project-runtime.ts'
 
 it('notifies an unknown shell result without a Turn once after its tool wait has ended', async () =>
-  withProjectToolDatabase(async (db) => {
+  withTestDatabase(async (db) => {
     const { context: c, nodeId, source } = await projectToolFixture(db)
     for (const mode of ['thread-first', 'message-first', 'history-unavailable'] as const) {
       const context = { ...c, toolCallId: mode }
@@ -151,7 +152,7 @@ it('notifies an unknown shell result without a Turn once after its tool wait has
 it.each(['unknown', 'still_running'] as const)(
   'handles a late unknown notification after wait_tool saved %s',
   async (status) =>
-    withProjectToolDatabase(async (db) => {
+    withTestDatabase(async (db) => {
       const { context: c, nodeId, source } = await projectToolFixture(db)
       await db.run(
         Effect.gen(function* () {
@@ -243,7 +244,7 @@ it.each(['unknown', 'still_running'] as const)(
 )
 
 it('keeps Project agent audit identity through create, messages, stop and deferred archive while preserving employee identity', async () =>
-  withProjectToolDatabase(async (db) => {
+  withTestDatabase(async (db) => {
     const { context: c, nodeId, source } = await projectToolFixture(db)
     const call = (toolCallId: string, name: string, args: unknown) =>
       db.run(executeProjectTool({ ...c, toolCallId }, name, args))

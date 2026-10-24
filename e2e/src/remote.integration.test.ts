@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { createServer } from 'node:http'
 import { telemetryLayer } from '@baton/telemetry'
 import type { TraceData } from 'effect/observability/OtlpTracer'
-import { createDatabaseRuntime } from './database.ts'
+import { createDatabaseRuntime } from '@baton/server/database'
 import { mkdtemp, readFile, realpath, rm, writeFile, chmod } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,15 +11,15 @@ import { Effect, Exit, Scope, Schema } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import { expect, test, vi } from 'vite-plus/test'
 import * as P from '@baton/protocol'
-import { startServer } from './server.ts'
-import { openTestDatabase } from './test-database.ts'
-import * as Auth from './auth.ts'
-import * as Nodes from './nodes.ts'
-import { registerNode } from '../../batond/src/daemon/identity.ts'
-import { runDaemon } from '../../batond/src/daemon/daemon.ts'
-import { connectWebSocket } from '../../batond/src/daemon/transport.ts'
-import { initializeBrowseRoots } from '../../batond/src/daemon/roots.ts'
-import { LocalWorkerHost } from '../../batond/src/daemon/host.ts'
+import { startServer } from '@baton/server/server'
+import { openTestDatabase } from '@baton/server/testing/database'
+import * as Auth from '@baton/server/auth'
+import * as Nodes from '@baton/server/nodes'
+import { registerNode } from '@baton/batond/daemon/identity'
+import { runDaemon } from '@baton/batond/daemon/daemon'
+import { connectWebSocket } from '@baton/batond/daemon/transport'
+import { initializeBrowseRoots } from '@baton/batond/daemon/roots'
+import { LocalWorkerHost } from '@baton/batond/daemon/host'
 
 test('HTTP → TS center → batond → independent Worker survives reconnects without resending input', async () => {
   const database = await openTestDatabase()
@@ -101,7 +101,7 @@ test('HTTP → TS center → batond → independent Worker survives reconnects w
   }
   try {
     await build({
-      entryPoints: [new URL('./fixtures/replay-worker.ts', import.meta.url).pathname],
+      entryPoints: [new URL('./testing/replay-worker.ts', import.meta.url).pathname],
       outfile: bundle,
       bundle: true,
       platform: 'node',

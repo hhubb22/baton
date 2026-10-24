@@ -145,11 +145,16 @@ docker run --rm --name baton-tracing \
 pnpm --filter @baton/server typecheck
 pnpm --filter @baton/server lint
 pnpm --filter @baton/server test
+pnpm --filter @baton/server test:unit
+pnpm --filter @baton/server test:integration
+pnpm test:e2e
 pnpm --filter @baton/server build
 ```
+
+`test:unit` 运行无需 PostgreSQL 的包内测试；`test:integration` 运行 `*.integration.test.ts` 数据库测试；`test` 包含两组。跨 app 测试位于 [`e2e/`](../../e2e/README.md)，使用 `pnpm test:e2e` 运行。测试辅助模块位于 `src/testing/`，数据库创建、清理、连接重启和节点数据准备分别由 `withTestDatabase`、`openTestDatabase` 与 `seedNode` 提供。
 
 工作区测试会重新构建 Project Runtime，与统一构建分开执行可避免争用同一产物目录；串行工作区验证使用 `pnpm test`。
 
 `GET /api/v1/diagnostics` 返回当前员工的设备与浏览器连接数、收发字节数、控制队列占用、待完成 RPC 和 Thread 状态分布，不包含消息正文或凭据。断线状态写入失败后按原连接身份重试；未完成的凭据吊销由独立维护循环继续关闭连接并确认生效。
 
-数据库测试使用本机 PostgreSQL，为每个夹具创建和清理独立 schema；默认连接 `postgres://postgres:baton@127.0.0.1:5432/baton_test?sslmode=disable`。未启动时尝试用 `pg_ctl` 拉起 `~/.baton-postgres`，也可用 `BATON_TEST_DATABASE_URL` 覆盖。远程集成测试使用本机 HTTP/WebSocket、独立 Worker 进程和确定性 replay Agent，覆盖账号、注册、远程消息、输出、停止、中心与 daemon 重启、输入不重发及设备吊销，不调用在线模型或外部 API。
+数据库测试使用本机 PostgreSQL，为每个夹具创建和清理独立 schema；默认连接 `postgres://postgres:baton@127.0.0.1:5432/baton_test?sslmode=disable`。未启动时尝试用 `pg_ctl` 拉起 `~/.baton-postgres`，也可用 `BATON_TEST_DATABASE_URL` 覆盖。`@baton/e2e` 的远程集成测试使用本机 HTTP/WebSocket、独立 Worker 进程和确定性 replay Agent，覆盖账号、注册、远程消息、输出、停止、中心与 daemon 重启、输入不重发及设备吊销，不调用在线模型或外部 API。

@@ -1,9 +1,14 @@
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
-import { acquireProcessLock } from '../lock.ts'
-import { spawnOwnedProcess, spawnDetachedWorker, startProcessWatchdog, runWatchdogCommand } from '../process.ts'
-import { installHostProcessGroup } from '../host-process-group.ts'
+import { acquireProcessLock } from '../../platform/lock.ts'
+import {
+  spawnOwnedProcess,
+  spawnDetachedWorker,
+  startProcessWatchdog,
+  runWatchdogCommand,
+} from '../../platform/process.ts'
+import { installHostProcessGroup } from '../../platform/host-process-group.ts'
 
 const self = fileURLToPath(import.meta.url)
 const [role, path] = process.argv.slice(2)

@@ -6,7 +6,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { afterEach, describe, expect, it } from 'vite-plus/test'
 import { readProcessIdentity, systemCommand } from './identity.ts'
 
-const fixture = fileURLToPath(new URL('./test-fixtures/group-host.mjs', import.meta.url))
+const fixture = fileURLToPath(new URL('../testing/platform/group-host.mjs', import.meta.url))
 const children: { child: childProcess.ChildProcess; grouped: boolean }[] = []
 afterEach(async () => {
   for (const { child, grouped } of children.splice(0)) {

@@ -1,15 +1,12 @@
 import { Effect } from 'effect'
 import { RpcServer, RpcSerialization } from 'effect/rpc'
 import { NodeStdio } from '@effect/platform-node'
-import { runWatchdogCommand } from '../../../platform/process.ts'
-import { makeCursorHostHandlers, type CursorHostDependencies } from '../host.ts'
-import { CursorHostRpc } from '../protocol.ts'
+import { runWatchdogCommand } from '../../platform/process.ts'
+import { makeCursorHostHandlers, type CursorHostDependencies } from '../../agents/cursor/host.ts'
+import { CursorHostRpc } from '../../agents/cursor/protocol.ts'
 import { CURSOR_AGENT_SDK_PROTOCOL, CURSOR_PROVIDER } from '@baton/providers/cursor'
-import { nativeMessagesFromSdk } from '../history.ts'
-import {
-  makeCursorAgentSdkReplayRunner,
-  type CursorAgentSdkReplayTranscript,
-} from '../../../../../../packages/provider-testing/src/cursor.ts'
+import { nativeMessagesFromSdk } from '../../agents/cursor/history.ts'
+import { makeCursorAgentSdkReplayRunner, type CursorAgentSdkReplayTranscript } from '@baton/provider-testing/cursor'
 
 if (process.argv.at(-1) === 'watchdog') await runWatchdogCommand()
 else {

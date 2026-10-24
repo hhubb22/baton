@@ -12,14 +12,14 @@ import { Effect, Scope, Exit, Schema } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import { expect, test } from 'vite-plus/test'
 import * as P from '@baton/protocol'
-import * as Auth from './auth.ts'
-import * as Nodes from './nodes.ts'
-import { startServer } from './server.ts'
-import { openTestDatabase } from './test-database.ts'
-import { registerNode } from '../../batond/src/daemon/identity.ts'
-import { initializeBrowseRoots } from '../../batond/src/daemon/roots.ts'
-import { LocalWorkerHost } from '../../batond/src/daemon/host.ts'
-import { runDaemon } from '../../batond/src/daemon/daemon.ts'
+import * as Auth from '@baton/server/auth'
+import * as Nodes from '@baton/server/nodes'
+import { startServer } from '@baton/server/server'
+import { openTestDatabase } from '@baton/server/testing/database'
+import { registerNode } from '@baton/batond/daemon/identity'
+import { initializeBrowseRoots } from '@baton/batond/daemon/roots'
+import { LocalWorkerHost } from '@baton/batond/daemon/host'
+import { runDaemon } from '@baton/batond/daemon/daemon'
 
 const origin = 'https://baton.local'
 function browser(base: string, ca: string) {
@@ -130,7 +130,7 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
     ])
     const ca = await readFile(caFile, 'utf8')
     await build({
-      entryPoints: [fileURLToPath(new URL('./fixtures/replay-worker.ts', import.meta.url))],
+      entryPoints: [fileURLToPath(new URL('./testing/replay-worker.ts', import.meta.url))],
       outfile: bundle,
       bundle: true,
       platform: 'node',
@@ -180,7 +180,7 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
       script,
       "require('node:fs').appendFileSync('shell-runs.txt', 'once\\n'); process.stdout.write('t3-shell-output\\n');\n",
     )
-    const runtimeEntry = new URL('../../../runtimes/project-agent/test/t3-worker.ts', import.meta.url)
+    const runtimeEntry = new URL(import.meta.resolve('@baton/project-agent-runtime/testing/project-worker'))
     const loader = createRequire(runtimeEntry).resolve('tsx')
     const capability: P.RuntimeAgent = {
       agent_type: 'cursor',

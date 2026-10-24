@@ -264,6 +264,12 @@ importers:
         specifier: 8.22.0
         version: 8.22.0
     devDependencies:
+      '@baton/project-agent-runtime':
+        specifier: workspace:*
+        version: link:../../runtimes/project-agent
+      '@baton/provider-testing':
+        specifier: workspace:*
+        version: link:../../packages/provider-testing
       '@effect/vitest':
         specifier: 'catalog:'
         version: 4.0.6(effect@4.0.6)(vitest@5.0.5)
@@ -338,6 +344,42 @@ importers:
       '@types/ws':
         specifier: 8.18.2
         version: 8.18.2
+      esbuild:
+        specifier: 'catalog:'
+        version: 0.28.2
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vite-plus:
+        specifier: 'catalog:'
+        version: 1.4.0(@types/node@26.6.5)(@vitest/ui@5.0.5)(esbuild@0.28.2)(jsdom@30.1.3)(tsx@4.20.6)(typescript@6.0.3)
+      vitest:
+        specifier: 'catalog:'
+        version: 5.0.5(@types/node@26.6.5)(@vitest/browser-preview@5.0.5)(@vitest/ui@5.0.5)(@voidzero-dev/vite-plus-core@1.4.0(@types/node@26.6.5)(esbuild@0.28.2)(tsx@4.20.6)(typescript@6.0.3))(esbuild@0.28.2)(jsdom@30.1.3)(tsx@4.20.6)(typescript@6.0.3)
+
+  e2e:
+    devDependencies:
+      '@baton/batond':
+        specifier: workspace:*
+        version: link:../apps/batond
+      '@baton/project-agent-runtime':
+        specifier: workspace:*
+        version: link:../runtimes/project-agent
+      '@baton/protocol':
+        specifier: workspace:*
+        version: link:../packages/protocol
+      '@baton/server':
+        specifier: workspace:*
+        version: link:../apps/server
+      '@baton/telemetry':
+        specifier: workspace:*
+        version: link:../packages/telemetry
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.5
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.6
       esbuild:
         specifier: 'catalog:'
         version: 0.28.2

@@ -14,7 +14,7 @@ it('keeps the real stdio event RPC open across open, independent history and sen
   const directory = await mkdtemp(join(tmpdir(), 'baton-cursor-rpc-'))
   const outfile = join(directory, 'peer.mjs')
   await build({
-    entryPoints: [fileURLToPath(new URL('./fixtures/rpc-peer.ts', import.meta.url))],
+    entryPoints: [fileURLToPath(new URL('../../testing/cursor/rpc-peer.ts', import.meta.url))],
     outfile,
     bundle: true,
     platform: 'node',

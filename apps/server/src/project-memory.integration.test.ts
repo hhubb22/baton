@@ -2,12 +2,13 @@ import { randomUUID } from 'node:crypto'
 import { Effect } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import { expect, it } from 'vite-plus/test'
-import { projectToolFixture, withProjectToolDatabase } from './project-tools.test-support.ts'
+import { projectToolFixture } from './testing/project-tools.ts'
+import { withTestDatabase } from './testing/database.ts'
 import { getProjectMemory, listProjectMemory, projectMemoryRevisions, writeProjectMemory } from './project-memory.ts'
 import { executeProjectTool } from './project-tools.ts'
 
 it('keeps immutable memory revisions, returns the winning version on conflict, and isolates employees and projects', async () =>
-  withProjectToolDatabase(async (db) => {
+  withTestDatabase(async (db) => {
     const { context: c } = await projectToolFixture(db)
     const id = randomUUID()
     const first = await db.run(
@@ -67,7 +68,7 @@ it('keeps immutable memory revisions, returns the winning version on conflict, a
   }))
 
 it('rolls tool side effects back if the result cannot commit and propagates database failures', async () =>
-  withProjectToolDatabase(async (db) => {
+  withTestDatabase(async (db) => {
     const { context: c } = await projectToolFixture(db)
     await expect(
       db.run(
