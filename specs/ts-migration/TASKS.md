@@ -3,21 +3,21 @@
 Status: draft
 依据：[迁移 TECH](TECH.md)、[Agent 适配 PRODUCT](../agent-adapters/PRODUCT.md)、[Agent 适配 TECH](../agent-adapters/TECH.md)。
 
-首次切换包含 Pi、Codex、Kiro、Cursor 与既有 shell；Grok、Antigravity 按适配设计在切换后分别接入。本清单安排切换前的五个任务。现有 workspace、协议与 SQLite 包作为输入，缺项随使用它们的切片补齐。
+首次切换包含 Pi、Codex、Kiro、Cursor 与既有 shell，Agent 接入整包依赖 Baton 的 t3code fork；Grok、Antigravity 按适配设计在切换后分别接入。本清单安排切换前的五个任务。现有 workspace、协议与 SQLite 包作为输入，缺项随使用它们的切片补齐。
 
 ```text
 T1 ──┬─ T2 ── T3 ──┐
      └─ T4 ─────────┼─ T5
 ```
 
-T4 的设备侧可以与 T2 并行，网页验收依赖 T2。任务是能力验收单位，可以由多个小提交和 PR 完成；每个任务同时交付实现、调用方与测试。T1 按复用检查点、本地可靠执行推进；T3 按设备操作、Project 协同推进；T4 按 Agent 接入、统一历史消费推进。检查点在同一任务内逐项合入，复用检查点完成后再估算剩余工作。
+T1～T3 已完成。任务是能力验收单位，可以由多个小提交和 PR 完成；每个任务同时交付实现、调用方与测试。T1 按复用检查点、本地可靠执行推进；T3 按设备操作、Project 协同推进；T4 按 fork 与宿主层、各 Agent 接入、历史来源推进。检查点在同一任务内逐项合入，复用检查点完成后再估算剩余工作。
 
 ## T1 交付 Cursor 本地可靠会话
 
 Status: complete
 实现与验证入口：[本地 Thread](../../apps/batond/README.md)。Cursor 启用 macOS arm64 / SDK 1.0.35；其他系统组合的验证留给 T5。
 
-- 依据：[上游复用边界](../agent-adapters/TECH.md#上游复用边界)、[Worker 接收与异步执行](../agent-adapters/TECH.md#worker-接收与异步执行r-04r-05r-08)、[Cursor](../agent-adapters/TECH.md#cursorr-01r-12)。
+- 依据：[架构与职责](../agent-adapters/TECH.md#架构与职责)、[Worker 接收与异步执行](../agent-adapters/TECH.md#worker-接收与异步执行r-04r-05r-08)、[各 Agent 实现](../agent-adapters/TECH.md#各-agent-实现)。
 - 依赖：现有基础包；首先交付可运行的 provider、最小宿主及上游测试检查点，记录依赖、保留模块与修改范围。
 - 交付：本地调用方通过认证 IPC 新建 Cursor Thread，持久排队、多轮执行、停止、恢复并读取基本历史；含 cursor-host、进程管理与探测。
 - 边界：只接 Cursor；不实现中心、网页、Project、其他 Agent 或多 Agent 历史缓存。复用或 SDK 路线不成立时先调整设计。
@@ -51,22 +51,22 @@ Status: complete
 - 验证：租约失效、睡眠唤醒、旧代次回执与中心短停时，不重复运行 Project 或越权执行；复用包内调度与存储不变量测试。
 - 验证：目录、符号链接和附件越界被拒绝；设备设置和订阅登录通过本地认证替身验证按设备确认及结果显示，认证材料留在设备。
 
-## T4 交付既有 Agent 与统一历史
+## T4 用 t3code fork 接入 Agent 并统一历史
 
-- 依据：[Pi、Codex](../agent-adapters/TECH.md#picodexr-04r-10)、[共享 ACP 与 Kiro](../agent-adapters/TECH.md#共享-acp-与-kiror-04r-08r-11)、[历史与分页](../agent-adapters/TECH.md#设备端历史归一化与分页r-10)。
-- 依赖：T1 的接入层、Worker 与进程管理；设备侧可与 T2 并行，网页消费验收依赖 T2。
-- 交付：Pi、Codex、Kiro 接入相同 Thread 执行链路；这三种及 Cursor 的历史经设备归一化和有界分页，网页与 Project 工具消费同一契约。
-- 边界：复用 T1 的生命周期与证据服务；本任务只做三种协议接入、探测和公共历史，不增加 Grok、Antigravity 或上游 fork / rollback / 审批产品能力。
-- 验证：相关上游测试和既有 Baton 录制通过；最低版本、会话恢复、输入不重发、Pi / Codex 原生 steer 归属及 Kiro V3 扩展符合规格。
-- 验证：缺时间、分块长回复、同角色多消息、大历史、并发翻页、快照失效和匹配歧义正确处理；网页删除原生协议解析。
-- 验证：各 provider 的隔离探测、取消与进程回收单独验证；继承 T2 的命令和报告链路，不另建一套队列或恢复逻辑。
+- 依据：[架构与职责](../agent-adapters/TECH.md#架构与职责)、[Worker 保证与上游行为](../agent-adapters/TECH.md#worker-保证与上游行为r-04r-09)、[各 Agent 实现](../agent-adapters/TECH.md#各-agent-实现)、[历史](../agent-adapters/TECH.md#历史r-10)。
+- 依赖：T1 的 Worker 与进程管理，T2 的远程 Thread 链路。
+- 交付：建立 t3code fork 与 `vendor/t3code` submodule，workspace 收录所需包并删除本地 `effect-acp`、`effect-codex-app-server`、`packages/providers`、`packages/provider-testing`；`cursor-host` 泛化为 agent-host，提供宿主层与事件映射；Cursor 改用完整 `provider-cursor`；接入 Pi、Codex（fork 中拆成 `provider-codex`）和 Kiro（fork 中新增 `kiroAcp`）；Thread 历史改用中心记录，删除设备原生历史与网页原生解析。
+- 边界：接受上游行为，不在接入层修改 adapter 语义；MCP 只接注入接口，不配置 endpoint；不增加 Grok、Antigravity 或上游 fork / rollback / 审批产品能力。
+- 验证：所用包的上游测试在 Baton CI 中运行；宿主层单测；用上游 testkit 替身驱动真实 adapter 验证事件映射与 `sent` 判定。
+- 验证：T2 的 Cursor 远程链路换到 agent-host 后回归通过；Pi、Codex、Kiro 各有一条网页发送、回复、停止、恢复的回放链路；Kiro 使用由 Go 录制转换的夹具。
+- 验证：Worker 的接收、intent、unknown、停止裁决与进程树回收测试换成 agent-host 替身后通过；网页与 `history.read` 读取同一份中心记录。
 
 ## T5 交付安装包并切换 TS 发布
 
 - 依据：[打包与发布](TECH.md#打包与发布)、[验证](TECH.md#验证)、[Agent 适配验收](../agent-adapters/PRODUCT.md#验收)。
 - 依赖：T2、T3、T4；各切片的业务测试与所属平台实现完成。
-- 交付：server Docker 镜像、四个系统 / 架构目标的 batond SEA、Cursor 完整附带依赖及 Runtime 子命令；切换构建发布入口并删除 Go。
+- 交付：server Docker 镜像、四个系统 / 架构目标的 batond SEA、Cursor 与 t3code 原生依赖的附带目录及 Runtime、agent-host 子命令；切换构建发布入口并删除 Go。
 - 边界：完成打包集成、安装包缺陷修复与交付复验；不新增 Agent、补造业务模块或改变支持策略。既有交付组合的回归失败阻塞切换。
 - 验证：脱离源码、无系统 Node、无运行时依赖下载时启动安装包；缺少 SDK 附带目录会明确失败，来源、许可与静态夹具保留。
-- 验证：三类系统上运行本地故障恢复、替身进程回收、冷启动、FULL 与 Agent 离线转录回放；Cursor 只启用已通过离线行为及本地安装包检查的组合，Go 删除后的 CI 不再调用 Go 导出器。
+- 验证：三类系统上运行本地故障恢复、替身进程回收、冷启动、FULL 与 Agent 离线转录回放；各 Agent 只启用已通过离线行为及本地安装包检查的组合，Go 删除后的 CI 不再调用 Go 导出器。
 - 验证：工作区静态检查、测试、Web 构建和安装包检查通过，长期文档同步；Baton 验证表中的负载测试按明确阈值执行，阈值缺项须在切换前确定。
