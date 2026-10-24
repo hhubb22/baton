@@ -29,9 +29,13 @@ Vite 代理保持后端 TLS 证书验证。后端使用私有 CA 时，在启动
 
 HTTP 客户端读取真实 API 返回的记录、能力和操作结果。操作返回 `Operation`，界面按操作阶段显示进度；事项处理在保存后返回生效或冲突结果。列表、主对话和记忆版本按各接口的游标读完全部页面。
 
+远程 Thread 支持 Cursor、Codex、Kiro 和 Pi。设备报告保留 Agent 的 `status`、`reason` 和 `capabilities.create`；只有 `available` 且明确支持 `create` 时才能新建对话，未知状态和 `unverified` 均不可创建，并显示设备报告的原因。消息已保存、设备已接收和 Agent 已打开分别处理；`opened_at` 为空时显示启动中或等待设备，`resume_pending` 为真时持续显示恢复中，停止与归档等待设备执行结果确认。详情通过现有 `/threads/{id}` 和时间线读取，刷新页面后仍能显示待完成的恢复。
+
+Thread 页面独立于 Project 和 Inbox 查询。后端未提供这些接口时，远程 Thread 的创建、发送、输出、停止、恢复及归档继续使用现有 HTTP 契约；项目查询失败显示不可用，业务数据始终来自接口。选择工作目录使用 `/nodes/{id}/files` 的 roots 和 directory 响应；根目录管理、Project、附件和订阅功能需要后端提供各自的接口。
+
 网页打开或刷新时，通过 `GET /api/v1/me` 和会话 Cookie 恢复登录状态，并取得 CSRF token。需要 CSRF 校验的写请求携带 `X-CSRF-Token`；尚未取得 token 时先读取 `/me`，收到 `csrf_rejected` 时重新读取 `/me` 并重试原请求一次。会话失效后返回登录页，保留可恢复的站内位置。首次登录或管理员重置口令后，`must_change_password` 要求用户先在 `/password` 修改口令；保存成功后重新登录，再进入工作区。
 
-已登录且有页面订阅时，客户端连接 `/api/v1/events` WebSocket，收到 `thread.changed` 后刷新 Thread、消息和操作状态。同时每 2 秒通知刷新设备、项目、Thread、消息、Inbox 和操作状态，补充尚无服务器事件覆盖的变化；连接断开后，轮询继续执行并尝试重连。
+已登录且有页面订阅时，客户端连接 `/api/v1/events` WebSocket，收到 `thread.changed` 后刷新 Thread、消息和操作状态；收到带有 `node_id`、非负整数 `report_version` 的 `devices.changed` 后重新读取设备报告并刷新目录和文件查询，能力以查询结果为准。同时每 2 秒通知刷新设备、项目、Thread、消息、Inbox 和操作状态，补充尚无服务器事件覆盖的变化；连接断开后，轮询继续执行并尝试重连。
 
 已保存的项目、Thread、消息、记忆及版本、事项结果由 Coordinator 和设备按各自职责持久化，刷新网页后从真实接口重新读取。完整历史、执行过程和文件内容按接口从设备读取，离线、记录缺失和输出缺口按实际状态呈现。未保存的草稿与引用选择保存在当前页面或工作区内存中，刷新网页或离开工作区后清除。
 
@@ -83,6 +87,6 @@ Memory 展示最新内容、版本、来源和时间，可添加、编辑并查�
 
 样式用 `stylex.create` 定义，颜色、间距、圆角和尺寸取自 `src/theme/tokens.stylex.ts`，文字样式取自 `src/theme/text.ts`。页面不写内联 `style`，因为生产环境的 CSP 只允许同源样式表；Base UI 通过 `CSPProvider disableStyleElements` 关闭运行时插入的 `<style>`。
 
-代码格式由 Prettier 统一（`.prettierrc.json`），改完运行 `pnpm --dir web format`。Markdown 不参与格式化，表格沿用仓库其他文档的紧凑写法。
+开发、构建和测试使用 Vite+。代码格式与推荐 lint 规则由根目录 `vite.config.ts` 中的 Oxfmt、Oxlint 配置统一管理；改完运行 `pnpm check`，单独格式化运行 `pnpm --dir web format`。依赖统一使用根工作区锁文件。Markdown 不参与格式化，表格沿用仓库其他文档的紧凑写法。
 
 修改 `design/tokens` 后运行 `pnpm --dir web tokens` 重新生成主题文件。

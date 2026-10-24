@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vite-plus/test'
 import { prepare, findSent } from './evidence.ts'
 import type { NativeMapping, NativeMessage } from './protocol.ts'
 import type { AgentMessage } from '../../worker/agent.ts'

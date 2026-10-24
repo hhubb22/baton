@@ -9,8 +9,9 @@ import {
   type WorkerOpenConfig,
   type WorkerRequest,
 } from '@baton/protocol'
-import { Deferred, Effect, Queue, Schema, Stream } from 'effect'
-import { describe, expect, it, vi } from 'vitest'
+import { Deferred, Effect, Fiber, Option, Queue, Schema, Stream, Tracer } from 'effect'
+import { describe, expect, it, vi } from 'vite-plus/test'
+import { makeOutputMailbox } from './output.ts'
 import {
   AgentError,
   makeWorker,
@@ -68,6 +69,7 @@ const findCompletion = (items: readonly ThreadReport[], id: string) =>
 interface Fake {
   readonly agent: ThreadAgent
   readonly events: Queue.Queue<AgentEvent>
+  readonly output: ReturnType<typeof makeOutputMailbox>
   readonly calls: string[]
   readonly sentInputs: AgentMessage[]
   readonly restored: InputPreparation[]
@@ -80,12 +82,14 @@ interface Fake {
 }
 const fake = Effect.gen(function* () {
   const events = yield* Queue.unbounded<AgentEvent>()
+  const output = makeOutputMailbox()
   const calls: string[] = []
   const sentInputs: AgentMessage[] = []
   const restored: InputPreparation[] = []
   const evidence = new Map<string, InputAcceptance>()
   const result: Fake = {
     events,
+    output,
     calls,
     sentInputs,
     restored,
@@ -128,6 +132,7 @@ const fake = Effect.gen(function* () {
           return evidence.get(input.id)
         }),
       events: Stream.fromQueue(events),
+      output: output.stream,
       abort: () =>
         Effect.sync(() => {
           calls.push('abort')
@@ -162,7 +167,136 @@ const event = (id: string, type: 'end' | 'reply'): AgentEvent =>
     ? { type, nativeSessionId: 'native', messageId: id, executionId: `exec:${id}`, outcome: 'completed' }
     : { type, nativeSessionId: 'native', messageId: id, executionId: `exec:${id}`, id: `reply:${id}`, text: 'answer' }
 
+const readOutput = (worker: Worker, cfg: WorkerOpenConfig, cursor?: string) =>
+  worker
+    .handle({
+      type: 'session_request',
+      ok: true,
+      session_request: {
+        type: 'session.request',
+        operation_id: randomUUID(),
+        session_id: cfg.thread_id,
+        action: 'output',
+        ...(cursor === undefined ? {} : { cursor }),
+      },
+    })
+    .pipe(
+      Effect.map((response) => {
+        expect(Schema.is(WorkerIPCMessageSchema)(response)).toBe(true)
+        return response.session_result!
+      }),
+    )
+const delta = (id: string, text: string) => ({
+  nativeSessionId: 'native',
+  messageId: id,
+  executionId: `exec:${id}`,
+  text,
+})
+
 describe('reliable Worker', () => {
+  it('serves fresh output before acceptance without ledger writes and clears it between turns', () =>
+    fixture(async (dbPath) => {
+      await run(
+        Effect.gen(function* () {
+          const cfg = config()
+          const f = yield* fake
+          const gate = yield* Deferred.make<void>()
+          f.sendTask = Deferred.await(gate)
+          const worker = yield* makeWorker({ dbPath, agentFactory: () => f.agent })
+          yield* worker.handle(request(cfg, 'thread_open'))
+          yield* opened(worker)
+          const first = message(cfg)
+          yield* worker.handle(first)
+          yield* until(
+            Effect.sync(() => f.sentInputs.length),
+            (count) => count === 1,
+          )
+          const initial = yield* readOutput(worker, cfg)
+          const db = new DatabaseSync(dbPath, { readOnly: true })
+          try {
+            const token = db.prepare('SELECT commit_token FROM worker_commit').get()?.commit_token
+            f.output.offer(delta(first.client_message_id!, 'live 😀'))
+            const live = yield* until(readOutput(worker, cfg, initial.cursor), (result) => result.text === 'live 😀')
+            expect(live.state).toBe('running')
+            expect(live.gap).toBe(false)
+            f.output.offer({ ...delta(first.client_message_id!, 'lost'), gap: true })
+            const lost = yield* until(readOutput(worker, cfg, live.cursor), (result) => result.gap)
+            expect(lost.text).toBe('lost')
+            expect(db.prepare('SELECT commit_token FROM worker_commit').get()?.commit_token).toBe(token)
+          } finally {
+            db.close()
+          }
+          yield* Deferred.succeed(gate, undefined)
+          yield* completed(worker, first.command_id!)
+          const old = yield* readOutput(worker, cfg)
+          yield* Queue.offer(f.events, event(first.client_message_id!, 'reply'))
+          yield* Queue.offer(f.events, event(first.client_message_id!, 'end'))
+          yield* until(readOutput(worker, cfg, old.cursor), (result) => result.state === 'idle')
+          expect(yield* readOutput(worker, cfg, old.cursor)).toMatchObject({ text: '', gap: true })
+          const second = message(cfg)
+          yield* worker.handle(second)
+          yield* completed(worker, second.command_id!)
+          f.output.offer(delta(first.client_message_id!, 'old turn'))
+          f.output.offer({ ...delta(second.client_message_id!, 'wrong execution'), executionId: 'foreign' })
+          yield* Effect.sleep(5)
+          expect((yield* readOutput(worker, cfg)).text).toBe('')
+          f.output.offer(delta(second.client_message_id!, 'second'))
+          expect((yield* until(readOutput(worker, cfg), (result) => result.text === 'second')).text).toBe('second')
+          expect((yield* readOutput(worker, cfg, 'bad')).code).toBe('invalid_cursor')
+          expect((yield* readOutput(worker, { ...cfg, thread_id: randomUUID() })).code).toBe('invalid_request')
+          expect((yield* reports(worker)).filter((item) => item.kind === 'reply')).toHaveLength(1)
+        }),
+      )
+    }))
+
+  it('keeps stop responsive during output floods and excludes a retired Agent instance', () =>
+    fixture(async (dbPath) => {
+      await run(
+        Effect.gen(function* () {
+          const cfg = config()
+          const firstAgent = yield* fake
+          const secondAgent = yield* fake
+          let instances = 0
+          const worker = yield* makeWorker({
+            dbPath,
+            agentFactory: () => (instances++ === 0 ? firstAgent.agent : secondAgent.agent),
+            stopTimeoutMs: 100,
+          })
+          yield* worker.handle(request(cfg, 'thread_open'))
+          yield* opened(worker)
+          const first = message(cfg)
+          yield* worker.handle(first)
+          yield* completed(worker, first.command_id!)
+          const flood = yield* Effect.forkScoped(
+            Effect.forever(
+              Effect.gen(function* () {
+                for (let index = 0; index < 100; index++)
+                  firstAgent.output.offer(delta(first.client_message_id!, 'output'.repeat(100)))
+                yield* Effect.yieldNow
+              }),
+            ),
+          )
+          yield* Effect.sleep(5)
+          const stop = request(cfg, 'thread_stop')
+          yield* worker.handle(stop).pipe(Effect.timeout(1000))
+          yield* Queue.offer(firstAgent.events, event(first.client_message_id!, 'end'))
+          yield* completed(worker, stop.command_id!).pipe(Effect.timeout(1000))
+          yield* Fiber.interrupt(flood)
+          expect(firstAgent.calls).toContain('abort')
+          expect(yield* readOutput(worker, cfg)).toMatchObject({ state: 'stopped', text: '' })
+          const second = message(cfg)
+          yield* worker.handle(second)
+          yield* completed(worker, second.command_id!)
+          firstAgent.output.offer(delta(second.client_message_id!, 'retired instance'))
+          yield* Effect.sleep(5)
+          expect((yield* readOutput(worker, cfg)).text).toBe('')
+          secondAgent.output.offer(delta(second.client_message_id!, 'fresh instance'))
+          yield* until(readOutput(worker, cfg), (result) => result.text === 'fresh instance')
+          expect((yield* reports(worker)).some((item) => item.kind === 'reply')).toBe(false)
+        }),
+      )
+    }))
+
   it('persists receipts, rejects content conflicts, deduplicates message IDs, and runs sequential turns', () =>
     fixture(async (dbPath) => {
       await run(
@@ -376,10 +510,22 @@ describe('reliable Worker', () => {
     }),
   )
 
-  it('restores a persistent queued input after Scope exit before intent', () =>
+  it('restores a persistent queued input and its trace after Scope exit without changing retry identity', () =>
     fixture(async (dbPath) => {
       const cfg = config()
-      const input = message(cfg)
+      const input = {
+        ...message(cfg),
+        trace_context: { traceparent: `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01` },
+      } as WorkerRequest
+      const spans: Tracer.NativeSpan[] = []
+      const tracer = Tracer.make({
+        span(options) {
+          const span = new Tracer.NativeSpan(options)
+          spans.push(span)
+          return span
+        },
+      })
+      let durableSpan: string | undefined
       await run(
         Effect.gen(function* () {
           const f = yield* fake
@@ -387,13 +533,27 @@ describe('reliable Worker', () => {
           const worker = yield* makeWorker({ dbPath, agentFactory: () => f.agent })
           yield* worker.handle(request(cfg, 'thread_open'))
           yield* opened(worker)
-          yield* worker.handle(input)
+          const receipt = yield* worker.handle(input)
+          const retry = yield* worker.handle({
+            ...input,
+            trace_context: { traceparent: `00-${'c'.repeat(32)}-${'d'.repeat(16)}-01` },
+          })
+          expect(retry.receipt).toEqual(receipt.receipt)
           yield* until(
             Effect.sync(() => f.calls),
             (calls) => calls.includes(`prepare:${input.client_message_id}`),
           )
-        }),
+        }).pipe(Effect.provideService(Tracer.Tracer, tracer)),
       )
+      const db = new DatabaseSync(dbPath, { readOnly: true })
+      try {
+        const row = db.prepare('SELECT payload FROM thread_messages WHERE id = ?').get(input.client_message_id!)
+        const saved = JSON.parse(String(row?.payload)) as { trace_context: { traceparent: string } }
+        expect(saved.trace_context.traceparent.split('-')[1]).toBe('a'.repeat(32))
+        durableSpan = saved.trace_context.traceparent.split('-')[2]
+      } finally {
+        db.close()
+      }
       await run(
         Effect.gen(function* () {
           const f = yield* fake
@@ -401,8 +561,13 @@ describe('reliable Worker', () => {
           yield* completed(worker, input.command_id!)
           expect(f.calls.includes('resume')).toBe(true)
           expect(f.sentInputs.map((message) => message.id)).toEqual([input.client_message_id])
-        }),
+        }).pipe(Effect.provideService(Tracer.Tracer, tracer)),
       )
+      const sent = spans.find((span) => span.name === 'baton.worker.send')
+      expect(sent?.traceId).toBe('a'.repeat(32))
+      expect(sent && Option.getOrUndefined(sent.parent)?.spanId).toBe(durableSpan)
+      const retried = spans.find((span) => span.name === 'baton.worker.receive' && span.traceId === 'c'.repeat(32))
+      expect(retried?.links[0]?.span.spanId).toBe(durableSpan)
     }))
 
   it('keeps recovery I/O outside construction and the command queue', () =>
@@ -835,6 +1000,7 @@ describe('reliable Worker', () => {
           const worker = yield* makeWorker({ dbPath, agentFactory: () => f.agent })
           yield* worker.handle(request(cfg, 'thread_open'))
           yield* opened(worker)
+          // oxlint-disable-next-line typescript/unbound-method -- Save the original for prepare.call(this, query) inside the injected failure.
           const prepare = DatabaseSync.prototype.prepare
           let breakCommit = false
           let uncertainCommit = false
@@ -848,7 +1014,7 @@ describe('reliable Worker', () => {
             if (query.startsWith('INSERT INTO thread_messages')) {
               const nativeRun = statement.run.bind(statement)
               vi.spyOn(statement, 'run').mockImplementationOnce((...args) => {
-                if (String(args[1]).includes('"state":"intent"')) breakCommit = true
+                if (typeof args[1] === 'string' && args[1].includes('"state":"intent"')) breakCommit = true
                 return nativeRun(...args)
               })
             }

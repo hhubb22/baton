@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest'
+import { expect, it } from 'vite-plus/test'
 import { nativeMessagesFromSdk } from './history.ts'
 import { findSent, prepare } from './evidence.ts'
 import type { NativeMapping } from './protocol.ts'

@@ -2,7 +2,7 @@ import childProcess, { spawn as esmSpawn, fork as esmFork } from 'node:child_pro
 import { once } from 'node:events'
 import { syncBuiltinESMExports } from 'node:module'
 import { fileURLToPath } from 'node:url'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { installHostProcessGroup } from './host-process-group.ts'
 
 const fixture = fileURLToPath(new URL('./test-fixtures/fork-child.mjs', import.meta.url))

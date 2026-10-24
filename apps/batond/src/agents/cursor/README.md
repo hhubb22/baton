@@ -44,9 +44,9 @@ host 与 Worker 通过 `effect/rpc` 的 NDJSON stdio 协议通信，Socket retry
 
 host 在加载 SDK 前设置 POSIX umask 077，并安装平台的 spawn/fork 同组策略，使 SDK 子进程继承 host 的进程组。外层 Worker 对 cursor-host 的独立进程组启动不受影响。生产代理保持到 host 进程退出；Scope 清理会终止剩余子进程并等待静默，终止后的迟到 SDK spawn/fork 被拒绝。
 
-host 的普通请求和事件订阅共用七个额度，abort/close 使用另一个额度。SDK open/send 为三十秒预算，RPC 为三十二秒；失败关闭通道，保留原生结果可能不确定的事实。事件缓冲和句柄建立前的回调缓冲均有界；溢出、序号缺口或归属不符产生 uncertain。
+host 的普通请求和事件订阅共用七个额度，abort/close 使用另一个额度。SDK open/send 为三十秒预算，RPC 为三十二秒；失败关闭通道，保留原生结果可能不确定的事实。reply、end 和 uncertain 使用有界控制队列，队列满时反压且不丢控制事件。句柄建立前的回调缓冲按条数和字节数限制；该缓冲溢出、序号缺口或控制事件归属不符产生 uncertain。文本在 host 和 ThreadAgent 各自进入独立的 256 KiB UTF-8 环形缓冲，只有一个待处理唤醒通知；慢读时淘汰旧文本，单次转发最多 16 KiB，并用 gap 标记缺口。host 在合并输出和控制流后分配传输序号，因此文本淘汰不会制造控制序号缺口。
 
-文本增量进入 `onDelta`；assistant 边界产生 reply。原生 run.wait 返回 finished/cancelled 后先发送已收到的 reply，再等待平台 `waitQuiescent` 确认组内没有活动子进程，补发等待期间累计的 reply 后才发送 end。静默等待上限取 execution_timeout_seconds，Worker 仍负责实际执行期限和独立停止计时；SDK root 返回后仍有合法后台子进程时不能转为空闲。工具或 step 完成、取消响应和通道关闭不会生成 end。SDK error 仍产生 uncertain。
+SDK 的 text-delta 通过 host RPC 进入 ThreadAgent 的 `output` 流，由 Worker 独立消费；可选 `onDelta` 同时收到已核对身份的实时增量。迟到的旧 Turn 文本被排除，host 的 SDK 回调也只属于创建该回调的输入。assistant 边界仍产生独立的 reply。原生 run.wait 返回 finished/cancelled 后先发送已收到的 reply，再等待平台 `waitQuiescent` 确认组内没有活动子进程，补发等待期间累计的 reply 后才发送 end。静默等待上限取 execution_timeout_seconds，Worker 仍负责实际执行期限和独立停止计时；SDK root 返回后仍有合法后台子进程时不能转为空闲。工具或 step 完成、取消响应和通道关闭不会生成 end。SDK error 仍产生 uncertain。
 
 abort 先登记取消，再并行请求 SDK cancel 与平台 terminateChildren，不因 SDK cancel 等待而推迟本机子进程终止。句柄稍后返回时再次应用取消和整组终止。强制终止使用短预算，Worker 独立负责整个停止期限与整树回收。
 

@@ -8,7 +8,7 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U baton -d baton"]
+      test: ['CMD-SHELL', 'pg_isready -U baton -d baton']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -25,7 +25,7 @@ services:
       BATON_HTTP_ADDR: 0.0.0.0:8080
       BATON_NODE_SIGNING_KEY: /var/lib/baton/node-signing.key
     ports:
-      - "${BATON_BIND_ADDR:-127.0.0.1}:${BATON_PORT:-8080}:8080"
+      - '${BATON_BIND_ADDR:-127.0.0.1}:${BATON_PORT:-8080}:8080'
     volumes:
       - server-data:/var/lib/baton
     restart: unless-stopped

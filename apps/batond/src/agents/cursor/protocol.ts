@@ -39,7 +39,13 @@ export const Acceptance = Schema.Struct({ nativeSessionId: Schema.String, execut
 const identity = { nativeSessionId: Schema.String, messageId: Schema.String, executionId: Schema.String }
 export const ExecutionEvent = Schema.Union([
   Schema.Struct({ ...identity, type: Schema.Literal('reply'), id: Schema.String, text: Schema.String }),
-  Schema.Struct({ ...identity, type: Schema.Literal('delta'), id: Schema.String, text: Schema.String }),
+  Schema.Struct({
+    ...identity,
+    type: Schema.Literal('delta'),
+    id: Schema.String,
+    text: Schema.String,
+    gap: Schema.optionalKey(Schema.Boolean),
+  }),
   Schema.Struct({ ...identity, type: Schema.Literal('end'), outcome: Schema.Literals(['completed', 'cancelled']) }),
   Schema.Struct({ type: Schema.Literal('uncertain'), reason: Schema.String }),
 ])

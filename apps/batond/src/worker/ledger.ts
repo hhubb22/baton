@@ -6,6 +6,7 @@ import type {
   WorkerOpenConfig,
 } from '@baton/protocol'
 import * as Sqlite from '@baton/sqlite'
+import type { TraceContext } from '@baton/telemetry'
 import { Effect } from 'effect'
 import * as Reactivity from 'effect/reactivity/Reactivity'
 import type { ProcessRecord } from '../platform/process-types.ts'
@@ -15,12 +16,14 @@ export type Outcome = 'succeeded' | 'failed' | 'cancelled' | 'unknown'
 export type Phase = 'empty' | 'opening' | 'idle' | 'busy' | 'stopping' | 'stopped' | 'unknown' | 'failed'
 
 export interface Command {
+  trace_context?: TraceContext
   receipt: WorkerCommandReceipt
   digest: string
   status: WorkerCommandStatus
   messageId?: string
 }
 export interface Message {
+  trace_context?: TraceContext
   input: AgentMessage
   digest: string
   state: 'queued' | 'intent' | 'sent' | 'withdrawn' | 'unknown'

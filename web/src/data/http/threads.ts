@@ -1,4 +1,5 @@
 import { ClientError, type BatonClient } from '../client'
+import { agentUnavailableReason, canCreateAgent } from '../derive'
 import type {
   Attachment,
   Delivery,
@@ -31,7 +32,8 @@ type ThreadDTO = {
   created_at: string
   last_activity_at: string
   native_session_id?: string
-  opened_at?: string
+  opened_at?: string | null
+  resume_pending?: boolean
   stop_requested_at?: string
   stop_confirmed_at?: string
   archive_requested_at?: string
@@ -111,6 +113,7 @@ type Phase = { phase: OperationPhase; detail?: string | null }
 type ThreadAPI = Pick<
   BatonClient,
   | 'listThreads'
+  | 'getThread'
   | 'listMessages'
   | 'createThread'
   | 'sendMessage'
@@ -171,7 +174,13 @@ function mapThread(t: ThreadDTO, events: EventDTO[]): Thread {
     unknown: 'unknown',
     archived: 'archived',
   }
-  if (t.agent_type !== 'pi' && t.agent_type !== 'codex' && t.agent_type !== 'kiro' && t.agent_type !== 'shell') {
+  if (
+    t.agent_type !== 'pi' &&
+    t.agent_type !== 'codex' &&
+    t.agent_type !== 'kiro' &&
+    t.agent_type !== 'cursor' &&
+    t.agent_type !== 'shell'
+  ) {
     throw new ClientError('invalid', `Unsupported thread agent: ${t.agent_type}`)
   }
   const latestStop = events.findLastIndex(
@@ -196,6 +205,8 @@ function mapThread(t: ThreadDTO, events: EventDTO[]): Thread {
           : t.stop_requested_at && !t.stop_confirmed_at
             ? 'stop'
             : null,
+    starting: !t.opened_at && !['stopped', 'unknown', 'archived'].includes(t.status),
+    resumePending: t.resume_pending,
     stopCanceled: t.stop_canceled ?? canceled.length,
     createdAt: timestamp(t.created_at),
     updatedAt: timestamp(t.last_activity_at),
@@ -325,7 +336,10 @@ function deliveryOf(m: MessageDTO, t: ThreadDTO): Delivery {
   }
 }
 
-export function createThreadAPI(ctx: HttpContext, output = createOutputAPI(ctx.request)): ThreadAPI {
+export function createThreadAPI(
+  ctx: HttpContext,
+  output = createOutputAPI(<T>(path: string, init?: RequestInit) => ctx.request<T>(path, init)),
+): ThreadAPI {
   const clientIDs = new Map<string, string>()
   const messages = new Map<string, MessageDTO>()
   const replies = new Map<string, { threadId: string; seq: number }>()
@@ -371,8 +385,8 @@ export function createThreadAPI(ctx: HttpContext, output = createOutputAPI(ctx.r
   async function agentFor(t: Pick<ThreadDTO, 'node_id' | 'agent_type'>, model?: string) {
     const device = (await ctx.devices()).find((device) => device.id === t.node_id)
     const agent = device?.agents.find((agent) => agent.kind === t.agent_type)
-    if (!agent || agent.problem)
-      throw new ClientError('invalid', 'The device has not reported this agent as available.')
+    if (!agent) throw new ClientError('invalid', 'The device has not reported this agent as available.')
+    if (agent.status !== 'available' || agent.problem) throw new ClientError('invalid', agentUnavailableReason(agent))
     if (model && !agent.models.includes(model))
       throw new ClientError('invalid', 'The device has not reported this model as available.')
     return agent
@@ -520,6 +534,8 @@ export function createThreadAPI(ctx: HttpContext, output = createOutputAPI(ctx.r
     return ctx.operation(kind, threadId, phase.phase, phase.detail, async () => {
       const current = await view(threadId)
       if (kind !== 'resumeThread') return actionPhase(kind, current)
+      if (current.resume_pending)
+        return { phase: !current.node_online || !current.node_synced ? 'waitingDevice' : 'saved' }
       const reports = (await timeline(threadId)).filter((event) => event.id > baseline)
       const failure = reports.findLast((event) => event.kind === 'thread.stopped' || event.kind === 'thread.unknown')
       if (failure)
@@ -527,7 +543,11 @@ export function createThreadAPI(ctx: HttpContext, output = createOutputAPI(ctx.r
           phase: 'failed',
           detail: failure.payload.reason || current.status_reason || 'The agent could not resume.',
         }
-      if (reports.some((event) => event.kind === 'thread.resumed')) return { phase: 'done' }
+      if (current.resume_pending === false) {
+        if (current.opened_at && ['idle', 'running'].includes(current.status)) return { phase: 'done' }
+        if (['stopped', 'unknown', 'archived'].includes(current.status))
+          return { phase: 'failed', detail: current.status_reason || 'The chat did not resume.' }
+      }
       return { phase: !current.node_online || !current.node_synced ? 'waitingDevice' : 'saved' }
     })
   }
@@ -564,12 +584,17 @@ export function createThreadAPI(ctx: HttpContext, output = createOutputAPI(ctx.r
       } while (cursor)
       return all.map((t) => mapThread(t, []))
     },
+    async getThread(threadId) {
+      const [t, events] = await Promise.all([view(threadId), timeline(threadId)])
+      return mapThread(t, events)
+    },
     async listMessages(threadId) {
       const [t, events] = await Promise.all([view(threadId), timeline(threadId)])
       return readMessages(t, events)
     },
     async createThread(input) {
-      await agentFor({ node_id: input.deviceId, agent_type: input.agent }, input.model)
+      const agent = await agentFor({ node_id: input.deviceId, agent_type: input.agent }, input.model)
+      if (!canCreateAgent(agent)) throw new ClientError('invalid', agentUnavailableReason(agent))
       const messageId = uuid('create-message', input.clientId)
       const t = await ctx.request<ThreadDTO>(
         base,
@@ -715,7 +740,7 @@ export function createThreadAPI(ctx: HttpContext, output = createOutputAPI(ctx.r
       const start = Math.max(0, end - 16)
       return { state: 'ready', threadId, messages: native.slice(start, end), more: start > 0, gap }
     },
-    readOutput: output.readOutput,
+    readOutput: (id) => output.readOutput(id),
     async listFolders(deviceId, path): Promise<FolderListing> {
       try {
         const connection = (await ctx.devices()).find((device) => device.id === deviceId)?.connection

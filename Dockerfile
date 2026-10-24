@@ -1,8 +1,9 @@
-FROM node:24-bookworm-slim AS web
+FROM node:26-bookworm-slim AS web
 WORKDIR /src
-RUN corepack enable
-COPY web/package.json web/pnpm-lock.yaml ./web/
-RUN pnpm --dir web install --frozen-lockfile
+RUN npm install --global pnpm@12.11.2
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml vite.config.ts ./
+COPY web/package.json ./web/
+RUN pnpm --filter baton-web install --frozen-lockfile --ignore-scripts
 COPY web/ ./web/
 COPY design/resources/ ./design/resources/
 RUN pnpm --dir web build

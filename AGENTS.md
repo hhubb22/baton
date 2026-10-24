@@ -1,22 +1,24 @@
 # Baton — Agent Guide
 
-Baton 是跨设备 AI Agent 协同系统，由中心服务（`baton-server`）、节点守护进程（`batond`）、本地会话执行器（Session Worker）、Project Agent Runtime（`runtimes/project-agent`）和嵌入式 Web UI（`web/`）组成。
+Baton 是跨设备 AI Agent 协同系统，由中心服务（`baton-server`）、节点守护进程（`batond`）、本地会话执行器（Session Worker）、Project Agent Runtime（`runtimes/project-agent`）和 Web UI（`web/`）组成。Go 的 `cmd/baton-server`、`cmd/batond`、根构建脚本与 Docker 镜像仍是发布入口，发布切换在 TypeScript 迁移 T5 进行；`apps/server` 与 `apps/batond` 提供独立的 Cursor 远程 Thread 开发入口。
 
 ## 核心架构与目录
 
-| 目录 / 模块 | 职责 |
-|---|---|
-| `cmd/baton-server` | 中心控制面：员工认证、Project 与 Thread 调度、内置 Gateway（`/v1/node` 与 `/api/v1/events`）、嵌入式 Web UI |
-| `cmd/batond` | 节点守护进程：节点注册、出站 TLS WebSocket 连接、本地 SQLite 账本（`node.db`）、Session Worker 与 Project Runtime 管理 |
-| `internal/session` | Session Worker 生命周期、本地认证 IPC、Thread 消息队列与 Turn 账本 |
-| `internal/agent/{pi,codex,kiro,shell,replay}` | 统一 `agent.Adapter` 接口实现（Pi RPC、Codex app-server、Kiro ACP V3）与确定性录制回放 |
-| `apps/batond` | TypeScript 本地 Thread 开发入口：认证 IPC、持久 Worker、Cursor SDK host 与平台进程回收；独立于 Go 发布入口 |
-| `packages/{protocol,sqlite}` | TypeScript 协议 Schema 与 WAL/FULL SQLite 客户端、提交结果核查 |
-| `packages/{providers,provider-testing}` | 从固定 t3code 提交复用的 Cursor SDK/runtime、上游测试和确定性回放 |
-| `runtimes/project-agent` | 基于 Node.js / TypeScript 的 Project Agent 进程（通过 stdio JSON-RPC 与 `batond` 通信） |
-| `web` | React + TypeScript + Vite 前端，构建产物生成到 `internal/webui/dist` 后嵌入 Coordinator，不提交到 Git；界面文案遵循 `design/WRITING.md` |
-| `design` | Web UI 的 Elyx 设计稿（`.elyx`）与界面文案规范（`design/WRITING.md`），前端按它实现；修改前先读 `design/AGENTS.md` |
-| `specs/` | 持久产品规格（`PRODUCT.md`）与技术设计（`TECH.md`） |
+| 目录 / 模块                                   | 职责                                                                                                                                                                   |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cmd/baton-server`                            | 中心控制面：员工认证、Project 与 Thread 调度、内置 Gateway（`/v1/node` 与 `/api/v1/events`）、嵌入式 Web UI                                                            |
+| `cmd/batond`                                  | 节点守护进程：节点注册、出站 TLS WebSocket 连接、本地 SQLite 账本（`node.db`）、Session Worker 与 Project Runtime 管理                                                 |
+| `internal/session`                            | Session Worker 生命周期、本地认证 IPC、Thread 消息队列与 Turn 账本                                                                                                     |
+| `internal/agent/{pi,codex,kiro,shell,replay}` | 统一 `agent.Adapter` 接口实现（Pi RPC、Codex app-server、Kiro ACP V3）与确定性录制回放                                                                                 |
+| `apps/server`                                 | TypeScript 开发中心：本地员工账号、设备身份与能力、Cursor 远程 Thread、持久命令与回复、Gateway 和实时输出；构建时自动生成网页静态目录，见 `apps/server/README.md`      |
+| `apps/batond`                                 | TypeScript 节点与本地 Thread：HTTPS 注册、出站 WSS、节点命令和报告账本、认证 IPC、持久 Worker、Cursor SDK host、有界实时输出与平台进程回收，见 `apps/batond/README.md` |
+| `packages/telemetry`                          | Effect 原生 OTLP/HTTP 追踪、标准上下文传播与导出字段过滤，默认不连接采集端                                                                                             |
+| `packages/{protocol,sqlite}`                  | TypeScript 协议 Schema 与 WAL/FULL SQLite 客户端、提交结果核查                                                                                                         |
+| `packages/{providers,provider-testing}`       | 从固定 t3code 提交复用的 Cursor SDK/runtime、上游测试和确定性回放                                                                                                      |
+| `runtimes/project-agent`                      | 基于 Node.js / TypeScript 的 Project Agent 进程（通过 stdio JSON-RPC 与 `batond` 通信）                                                                                |
+| `web`                                         | React + TypeScript + Vite 前端，默认构建到 `internal/webui/dist` 供 Go 嵌入；TS 中心使用 `apps/server/dist/web`，产物不提交 Git；界面文案遵循 `design/WRITING.md`      |
+| `design`                                      | Web UI 的 Elyx 设计稿（`.elyx`）与界面文案规范（`design/WRITING.md`），前端按它实现；修改前先读 `design/AGENTS.md`                                                     |
+| `specs/`                                      | 持久产品规格（`PRODUCT.md`）与技术设计（`TECH.md`）                                                                                                                    |
 
 ## 常用构建与验证命令
 
@@ -27,13 +29,21 @@ Baton 是跨设备 AI Agent 协同系统，由中心服务（`baton-server`）�
   node tools/check-sidecar-package.mjs
   go vet ./...
   ```
-- **TypeScript workspace**（Node 26、pnpm 12；适配器验证使用离线转录与本地替身，见 `apps/batond/README.md`）：
+- **TypeScript workspace**（Node 26、pnpm 12、Vite+ 1.4；适配器验证使用离线转录与本地替身。TS 构建和测试可独立于 Go 构建运行，配置与入口见 [中心文档](apps/server/README.md) 和 [节点文档](apps/batond/README.md)）：
   ```sh
   pnpm install --frozen-lockfile --ignore-scripts
-  pnpm -r typecheck
-  pnpm -r lint
-  pnpm -r test
+  pnpm check
+  pnpm typecheck
+  pnpm test
+  pnpm --filter @baton/server build
   pnpm --filter @baton/batond build
+  ```
+  `@baton/server` 的 `build` 和 `dev` 自动将网页构建到 bundle 旁的 `web/`，默认无需单独构建前端。TS 中心测试使用本机 PostgreSQL，默认测试库、自动启动和 `BATON_TEST_DATABASE_URL` 与下述 Go 测试相同；各夹具使用独立 schema。仅验证远程开发链路时可运行：
+  ```sh
+  pnpm --filter @baton/server --filter @baton/batond typecheck
+  pnpm --filter @baton/server --filter @baton/batond lint
+  pnpm --filter @baton/batond test
+  pnpm --dir apps/server exec vp test run --config ../../vitest.config.ts src/remote.integration.test.ts
   ```
 - **Go 单元与集成测试**（先运行 `node tools/build.mjs`；默认连接本机 `postgres://postgres:baton@127.0.0.1:5432/baton_test?sslmode=disable`，若未启动会自动尝试通过 `pg_ctl` 拉起 `~/.baton-postgres`，可通过 `BATON_TEST_DATABASE_URL` 覆盖）：
   ```sh
@@ -52,7 +62,15 @@ Baton 是跨设备 AI Agent 协同系统，由中心服务（`baton-server`）�
   pnpm --dir web build
   ```
 
+## Effect 与开发工具
+
+工作区通过根目录 `vite.config.ts` 配置 Vite+ 的 Oxlint、Oxfmt 与类型检查，采用推荐规则。`pnpm lint` 和 `pnpm check` 将警告视为失败；`pnpm check` 统一执行格式、lint 和 TypeScript Go 检查，`pnpm typecheck` 保留各包编译器检查；`pnpm test` 按依赖顺序串行执行各包的测试，数据库与进程集成测试不缓存。网页使用 Vite+，发布打包继续使用现有 esbuild 与 Go 脚本。
+
+本仓库使用 Effect TypeScript。编写 Effect 代码前，完整阅读 `node_modules/effect/AGENTS.md`，按需阅读其中引用的示例；未覆盖的 API 查阅 `node_modules/effect/src` 中的固定版本源码。
+
 ## 部署与设备接入
+
+以下二进制与容器命令使用 Go 发布入口。TS 开发中心使用 `pnpm --filter @baton/server dev` 运行账号管理、迁移和 `serve`，节点使用 `pnpm --filter @baton/batond dev <命令>` 运行 `up`、`register` 或 `run`；本机 HTTPS、CA 与 `--workspace` 配置见 [开发接入说明](apps/server/README.md#设备接入与远程-thread)。TS 的 Project、目录增删、订阅登录、其他 Agent 与统一历史尚未开放，实际拒绝响应见 [能力表](apps/server/README.md#当前能力范围)。
 
 - `baton-server serve` 自动执行数据库迁移，再检查迁移状态；签名密钥默认使用工作目录下的 `node-signing.key`，不存在时生成 `0600` 文件，也可用 `BATON_NODE_SIGNING_KEY` 指定。已有密钥的权限、类型和内容仍须通过校验。
 - `Dockerfile` 构建内嵌 Web UI 的服务端镜像，使用非 root 用户运行。`compose.yaml` 编排 PostgreSQL 16 与 `baton-server`，数据库及 `/var/lib/baton` 分别持久化；需配置 `BATON_POSTGRES_PASSWORD` 和 `BATON_ALLOWED_ORIGINS`，默认通过本机端口交给 HTTPS 反向代理。

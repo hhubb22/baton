@@ -16,25 +16,28 @@ export interface MemoryDraft {
 // 工作区布局提供给侧栏和页面标题栏的状态。
 export interface Workspace {
   collapsed: boolean
-  toggleSidebar(): void
+  toggleSidebar: () => void
   signingOut: boolean
-  signOut(): void
+  signOut: () => void
   // 打开新建 Project 弹窗。
-  newProject(): void
+  newProject: () => void
   // 选中内容后准备发给 Project 助手的引用，按 Project 保存，发送或移除后清空。
   references: Record<ID, Reference>
   // 把引用放进 Project 输入区并打开这个 Project；已经在这个 Project 页时不跳转。
-  askProject(projectId: ID, reference: Reference): void
-  clearReference(projectId: ID): void
+  askProject: (projectId: ID, reference: Reference) => void
+  clearReference: (projectId: ID) => void
   itemDrafts: Record<ID, ItemDraft>
-  setItemDraft(itemId: ID, draft: ItemDraft | null): void
+  setItemDraft: (itemId: ID, draft: ItemDraft | null) => void
   settingsDrafts: Record<ID, ProjectPatch>
-  setSettingsDraft(
+  setSettingsDraft: (
     projectId: ID,
     draft: ProjectPatch | null | ((current: ProjectPatch | undefined) => ProjectPatch | null),
-  ): void
+  ) => void
   memoryDrafts: Record<ID, MemoryDraft>
-  setMemoryDraft(key: ID, draft: MemoryDraft | null | ((current: MemoryDraft | undefined) => MemoryDraft | null)): void
+  setMemoryDraft: (
+    key: ID,
+    draft: MemoryDraft | null | ((current: MemoryDraft | undefined) => MemoryDraft | null),
+  ) => void
 }
 
 export const WorkspaceContext = createContext<Workspace | null>(null)

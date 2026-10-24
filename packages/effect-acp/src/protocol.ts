@@ -175,7 +175,9 @@ const makeStrictNdJsonRpcParser = () => {
     },
     encode: (response: Parameters<typeof codec.encode>[0]) => {
       const encoded = codec.encode(response);
-      return encoded === undefined ? undefined : `${encoded}\n`;
+      if (encoded === undefined) return undefined;
+      const text = typeof encoded === "string" ? encoded : new TextDecoder().decode(encoded);
+      return `${text}\n`;
     },
   };
 };

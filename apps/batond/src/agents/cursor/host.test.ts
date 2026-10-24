@@ -2,13 +2,13 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Effect, Deferred, Fiber, Queue, Stream } from 'effect'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vite-plus/test'
 import type { WorkerOpenConfig } from '@baton/protocol'
 import { makeCursorHostHandlers, type CursorHostDependencies } from './host.ts'
 import { prepare } from './evidence.ts'
 import type { AgentMessage } from '../../worker/agent.ts'
 import type { NativeMessage } from './protocol.ts'
-import type { CursorAgentSdkSession, SendOptions } from '@baton/providers/cursor'
+import type { CursorAgentSdkSession, SendOptions, InteractionUpdate } from '@baton/providers/cursor'
 import { mappingFor } from './mapping.ts'
 
 const config = (directory: string): WorkerOpenConfig => ({
@@ -33,6 +33,92 @@ const inHost = async (test: (directory: string) => Promise<void>) => {
 }
 
 describe('Cursor host lifecycle', () => {
+  it('buffers SDK text within a byte bound while preserving reply/end and abort during floods', () =>
+    inHost(async (directory) => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const history: NativeMessage[] = []
+            const terminal = yield* Deferred.make<{ id: string; status: 'cancelled' }>()
+            let callback: ((update: InteractionUpdate) => Effect.Effect<void, unknown>) | undefined
+            let cancellations = 0
+            const session: CursorAgentSdkSession = {
+              agentId: 'native',
+              listMessages: Effect.succeed([]),
+              close: Effect.void,
+              send: (request) =>
+                Effect.sync(() => {
+                  callback = request.onDelta
+                  history.push({ id: 'user', role: 'user', text: input.text })
+                  return {
+                    agentId: 'native',
+                    runId: 'run',
+                    cancel: Effect.sync(() => {
+                      cancellations++
+                    }),
+                    wait: Deferred.await(terminal),
+                  }
+                }),
+            }
+            const unused = async (): Promise<never> => {
+              throw new Error('Unexpected store mutation')
+            }
+            const handlers = yield* makeCursorHostHandlers({
+              runner: {
+                open: () => Effect.succeed(session),
+                assertComplete: Effect.void,
+                listMessages: () => Effect.succeed([]),
+              },
+              processGroup: { terminateChildren: Effect.void, waitQuiescent: () => Effect.void },
+              openStore: () =>
+                Effect.succeed({
+                  agents: { get: unused, create: unused, update: unused, delete: unused, list: unused },
+                  runs: { get: unused, create: unused, update: unused, delete: unused, list: unused },
+                  checkpoints: { get: unused, create: unused, update: unused, delete: unused, list: unused },
+                  runEvents: { append: unused, list: unused, delete: unused },
+                  dispose: async () => {},
+                }),
+              history: () => Effect.succeed(history),
+              probe: Effect.succeed({
+                authenticated: 'unknown',
+                models: [],
+                sdkVersion: 'fixture',
+                platform: 'fixture',
+                integrity: true,
+                sandboxHelper: true,
+              }),
+            })
+            const native = yield* handlers.open({ config: config(directory), generation: 'flood' })
+            yield* handlers.send({ message: input, preparation: prepare(input, native, []) })
+            for (let index = 0; index < 700; index++) yield* callback!({ type: 'text-delta', text: 'x'.repeat(1024) })
+            const frames = yield* handlers.events().pipe(Stream.take(1), Stream.runCollect)
+            expect(frames[0]).toMatchObject({
+              generation: 'flood',
+              sequence: 1,
+              event: { type: 'delta', gap: true, messageId: input.id, executionId: 'run' },
+            })
+            const delta = frames[0]!.event
+            expect(delta.type === 'delta' && Buffer.byteLength(delta.text)).toBe(16 * 1024)
+            yield* handlers.abort().pipe(Effect.timeout(1000))
+            expect(cancellations).toBe(1)
+            const controls = yield* Effect.forkScoped(
+              handlers.events().pipe(
+                Stream.filter((frame) => frame.event.type !== 'delta'),
+                Stream.take(2),
+                Stream.runCollect,
+              ),
+            )
+            yield* Deferred.succeed(terminal, { id: 'run', status: 'cancelled' as const })
+            const ended = yield* Fiber.join(controls).pipe(Effect.timeout(1000))
+            expect(ended.map((frame) => frame.event.type)).toEqual(['reply', 'end'])
+            expect(ended[0]!.event).toMatchObject({ type: 'reply', text: 'x'.repeat(700 * 1024) })
+            // SDK callbacks can outlive the run; the host must ignore them after termination.
+            yield* callback!({ type: 'text-delta', text: 'late output' })
+          }),
+        ),
+      )
+    }))
+
   it('rejects history when the mapped native agent is missing without opening an execution session', () =>
     inHost(async (directory) => {
       await Effect.runPromise(
@@ -129,7 +215,11 @@ describe('Cursor host lifecycle', () => {
                   Effect.sync(() => {
                     calls.push(request.options)
                     const runId = `new-run-${calls.length}`
-                    history.push({ id: `user-${calls.length}`, role: 'user', text: String(request.message) })
+                    history.push({
+                      id: `user-${calls.length}`,
+                      role: 'user',
+                      text: typeof request.message === 'string' ? request.message : request.message.text,
+                    })
                     return {
                       agentId: 'native',
                       runId,

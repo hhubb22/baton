@@ -8,9 +8,11 @@ import {
   type WorkerIPCMessage,
 } from '@baton/protocol'
 import { CommitUnknown } from '@baton/sqlite'
+import { captureTrace, traceParent, withTraceSpan } from '@baton/telemetry'
 import { Cause, Deferred, Effect, Exit, Fiber, Queue, Schema, Scope, Stream } from 'effect'
 import type { ProcessRecord } from '../platform/process-types.ts'
 import type { AgentError, AgentEvent, AgentFactory, InputAcceptance, ThreadAgent } from './agent.ts'
+import { OutputBuffer, type AgentOutput } from './output.ts'
 import { boundReason, boundReport, pendingResult } from './reports.ts'
 import {
   commandAction,
@@ -101,6 +103,10 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
   let operation: Operation | undefined
   let stopFiber: Fiber.Fiber<void> | undefined
   let eventsFiber: Fiber.Fiber<void> | undefined
+  let outputFiber: Fiber.Fiber<void> | undefined
+  const output = new OutputBuffer()
+  let outputTurn: string | undefined
+  let outputExecution: string | undefined
   let stopEvidence: Deferred.Deferred<void> | undefined
   let frozen: WorkerFailure | undefined
   let closed = false
@@ -243,6 +249,17 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         .save(draft, state)
         .pipe(Effect.catch((cause) => freeze(cause).pipe(Effect.andThen(Effect.fail(frozen!)))))
       state = draft
+      const active = state.activeMessage ? state.messages[state.activeMessage] : undefined
+      const turn = active && !active.ended ? `${active.input.id}:${active.turn}` : undefined
+      if (turn !== outputTurn) {
+        output.reset()
+        outputTurn = turn
+        outputExecution = undefined
+      }
+      if (active?.executionId && outputExecution && active.executionId !== outputExecution) {
+        output.reset()
+        outputExecution = active.executionId
+      }
       return value
     }).pipe(Effect.uninterruptible)
   }
@@ -265,7 +282,17 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
       operation = op
       op.fiber = yield* Effect.forkIn(
         Effect.gen(function* () {
-          const result = yield* Effect.exit(task)
+          const durableTrace = op.messageId
+            ? state.messages[op.messageId]?.trace_context
+            : Object.values(state.commands).find(
+                (command) => isPending(command) && command.receipt.action === (op.kind === 'open' ? 'open' : 'resume'),
+              )?.trace_context
+          const result = yield* Effect.exit(
+            withTraceSpan(task, `baton.worker.${op.kind}`, durableTrace, {
+              kind: 'internal',
+              attributes: { 'baton.thread.id': state.config?.thread_id ?? '', 'baton.recovery': op.kind === 'recover' },
+            }),
+          )
           yield* post(
             Effect.suspend(() => {
               if (operation?.id !== op.id || state.epoch !== op.epoch) return Effect.void
@@ -289,7 +316,26 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
       const previous = eventsFiber
       eventsFiber = undefined
       if (previous) yield* Effect.forkIn(Fiber.interrupt(previous), scope)
+      if (outputFiber) yield* Effect.forkIn(Fiber.interrupt(outputFiber), scope)
+      outputFiber = undefined
     })
+  }
+  function receiveOutput(current: ThreadAgent, event: AgentOutput) {
+    if (closed || closing || frozen || agent !== current || operation?.kind === 'cleanup') return
+    const message = state.activeMessage ? state.messages[state.activeMessage] : undefined
+    if (
+      !message ||
+      message.ended ||
+      !outputTurn ||
+      (state.phase !== 'busy' && state.phase !== 'stopping') ||
+      state.nativeId !== event.nativeSessionId ||
+      message.input.id !== event.messageId ||
+      (message.executionId !== undefined && message.executionId !== event.executionId) ||
+      (outputExecution !== undefined && outputExecution !== event.executionId)
+    )
+      return
+    outputExecution = event.executionId
+    output.append(event.text, event.gap)
   }
   function ensureAgent(): Effect.Effect<ThreadAgent> {
     return Effect.gen(function* () {
@@ -337,6 +383,17 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         ),
         scope,
       )
+      if (current.output)
+        outputFiber = yield* Effect.forkIn(
+          Stream.runForEach(current.output, (event) => Effect.sync(() => receiveOutput(current, event))).pipe(
+            Effect.catch(() =>
+              Effect.sync(() => {
+                if (agent === current && outputTurn) output.append('', true)
+              }),
+            ),
+          ),
+          scope,
+        )
       return current
     })
   }
@@ -916,6 +973,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         action,
       }
       const command: Command = {
+        ...(request.trace_context ? { trace_context: request.trace_context } : {}),
         receipt,
         digest: contentDigest,
         status: { command_id: request.command_id, state: 'accepted' },
@@ -960,6 +1018,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
             configurable: true,
             value: {
               state: 'queued',
+              ...(request.trace_context ? { trace_context: request.trace_context } : {}),
               digest: messageDigest,
               input: {
                 id: request.client_message_id,
@@ -1150,11 +1209,32 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
   )
 
   const handle: Worker['handle'] = (input) =>
-    Effect.gen(function* () {
+    Effect.gen(function* (): Effect.fn.Return<WorkerIPCMessage, WorkerFailure> {
       if (closed || closing) return yield* Effect.fail(new WorkerFailure('worker_closed', 'Worker scope has closed'))
       const decoded = yield* Schema.decodeUnknownEffect(WorkerRequest)(input).pipe(
         Effect.mapError((cause) => new WorkerFailure('invalid_request', 'Invalid Worker request', cause)),
       )
+      if (decoded.type === 'session_request') {
+        const request = decoded.session_request
+        const stateName = state.phase === 'busy' ? 'running' : state.phase
+        const result = {
+          type: 'session.result' as const,
+          operation_id: request.operation_id,
+          session_id: request.session_id,
+          state: stateName,
+          ...(request.action !== 'output'
+            ? { ok: false, code: 'unsupported', gap: false }
+            : !state.config || frozen || recovering
+              ? { ok: false, code: 'unavailable', gap: false }
+              : request.session_id !== state.config.thread_id ||
+                  (decoded.thread_id !== undefined && decoded.thread_id !== state.config.thread_id) ||
+                  (decoded.storage_generation !== undefined &&
+                    decoded.storage_generation !== state.config.storage_generation)
+                ? { ok: false, code: 'invalid_request', gap: false }
+                : output.read(request.cursor)),
+        }
+        return { type: 'result', ok: result.ok, session_result: result }
+      }
       if (decoded.type === 'native_history') {
         if (closed) return yield* Effect.fail(new WorkerFailure('worker_closed', 'Worker scope has closed'))
         if (frozen) return yield* Effect.fail(frozen)
@@ -1177,13 +1257,22 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         const history = yield* Fiber.join(historyFiber)
         return { type: 'result', ok: true, history }
       }
-      return yield* submit(shortRequest(decoded)).pipe(
+      const trace = commandAction(decoded.type) ? yield* captureTrace : undefined
+      return yield* submit(shortRequest({ ...decoded, ...(trace ? { trace_context: trace } : {}) })).pipe(
         Effect.catch((error) =>
           error.code === 'storage_error' || error.code === 'commit_unknown' || error.code === 'worker_closed'
             ? Effect.fail(error)
             : Effect.succeed({ type: 'result' as const, ok: false, code: error.code, message: error.message }),
         ),
       )
+    }).pipe((effect) => {
+      if (!commandAction(input.type)) return effect
+      const original = traceParent(state.commands[input.command_id ?? '']?.trace_context)
+      return withTraceSpan(effect, 'baton.worker.receive', input.trace_context, {
+        kind: 'server',
+        links: original ? [{ span: original, attributes: {} }] : [],
+        attributes: { 'baton.command.id': input.command_id ?? '', 'baton.thread.id': input.thread_id ?? '' },
+      })
     })
   const records: Worker['records'] = {
     add: (record) =>

@@ -1,8 +1,14 @@
 import { parseArgs } from 'node:util'
 import { Effect } from 'effect'
+import { telemetryLayer } from '@baton/telemetry'
 
 async function main() {
   const [action, ...args] = process.argv.slice(2)
+  if (action === 'up' || action === 'register' || action === 'run') {
+    const { runDaemonCLI } = await import('./daemon/cli.ts')
+    await runDaemonCLI(action, args)
+    return
+  }
   if (action === 'watchdog') {
     const { runWatchdogCommand } = await import('./platform/process.ts')
     await runWatchdogCommand()
@@ -22,7 +28,9 @@ async function main() {
         if (!values['data-dir'] || !values['thread-id']) throw new Error('Worker needs --data-dir and --thread-id')
         const { runWorker } = await import('./daemon/worker-runner.ts')
         await Effect.runPromise(
-          Effect.scoped(runWorker({ dataDirectory: values['data-dir'], threadId: values['thread-id'] })),
+          Effect.scoped(runWorker({ dataDirectory: values['data-dir'], threadId: values['thread-id'] })).pipe(
+            Effect.provide(telemetryLayer('baton-worker')),
+          ),
           { signal: controller.signal },
         )
       } else {

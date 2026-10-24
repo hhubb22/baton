@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { Schema } from 'effect'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vite-plus/test'
 import * as Protocol from '../src/index.ts'
 
 type Sample = { schema: string; name: string; value: Record<string, unknown> }

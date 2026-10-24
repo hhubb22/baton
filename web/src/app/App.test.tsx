@@ -1,7 +1,7 @@
 import { createMemoryHistory } from '@tanstack/react-router'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vite-plus/test'
 import { createMockClient } from '../data/mock/client'
 import type { ScenarioId } from '../data/mock/scenarios'
 import { manualScheduler } from '../data/mock/scheduler'
@@ -49,7 +49,7 @@ describe('app', () => {
   it('offers the real empty model ID as Default model when switching back to Pi', async () => {
     const user = userEvent.setup()
     renderApp('/threads', 'normal', (client) => {
-      const read = client.listDevices
+      const read = client.listDevices.bind(client)
       client.listDevices = async () =>
         (await read()).map((device) => ({
           ...device,
@@ -65,8 +65,8 @@ describe('app', () => {
 
   it('renders command threads without a chat composer and keeps command output available', async () => {
     renderApp('/threads/thr-webui', 'normal', (client) => {
-      const readThreads = client.listThreads
-      const readMessages = client.listMessages
+      const readThreads = client.listThreads.bind(client)
+      const readMessages = client.listMessages.bind(client)
       client.listThreads = async () =>
         (await readThreads()).map((thread) => (thread.id === 'thr-webui' ? { ...thread, agent: null } : thread))
       client.listMessages = async (id) => (await readMessages(id)).map((message) => ({ ...message, activity: null }))

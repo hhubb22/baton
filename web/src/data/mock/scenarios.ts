@@ -63,10 +63,12 @@ const ubuntuRepo = '/home/kaken/work/baton'
 
 const account: Account = { id: 'emp-kaken', name: 'Kaken He', username: 'kaken' }
 
-const allAbilities = { queue: true, steer: true, stop: true, resume: true, switchModel: true }
+const allAbilities = { create: true, queue: true, steer: true, stop: true, resume: true, switchModel: true }
 
 const codex: DeviceAgent = {
   kind: 'codex',
+  status: 'available',
+  reason: null,
   version: '0.98.0',
   models: ['gpt-6.1-sol', 'gpt-6.1-mini'],
   defaultModel: 'gpt-6.1-sol',
@@ -77,6 +79,8 @@ const codex: DeviceAgent = {
 
 const kiro: DeviceAgent = {
   kind: 'kiro',
+  status: 'available',
+  reason: null,
   version: '1.4.2',
   models: ['claude-sonnet-5-5', 'claude-haiku-5-5'],
   defaultModel: 'claude-sonnet-5-5',
@@ -87,6 +91,8 @@ const kiro: DeviceAgent = {
 
 const pi: DeviceAgent = {
   kind: 'pi',
+  status: 'available',
+  reason: null,
   version: '0.31.0',
   models: ['gpt-6.1-sol'],
   defaultModel: 'gpt-6.1-sol',

@@ -154,7 +154,7 @@ func TestBaselineCreatesCurrentSchemaAndStaysStable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(want, ",") != "0001_initial.sql" {
+	if strings.Join(want, ",") != "0001_initial.sql,0002_ts_threads.sql,0003_thread_tracing.sql" {
 		t.Fatalf("嵌入迁移 = %v", want)
 	}
 	if got := migrationVersions(t, ctx, pool); strings.Join(got, ",") != strings.Join(want, ",") {
@@ -163,7 +163,8 @@ func TestBaselineCreatesCurrentSchemaAndStaysStable(t *testing.T) {
 	before := schemaFingerprint(t, ctx, pool)
 	for _, fragment := range []string{"employees:password_hash:", "node_presence:incarnation:", "node_registration_seq",
 		"threads:request_hash:", "threads:model:", "threads:exec_wait_until:", "thread_messages:model:",
-		"thread_messages:status_reason:", "thread_turns:model:", "project_agents:model:"} {
+		"thread_messages:status_reason:", "thread_turns:model:", "project_agents:model:",
+		"thread_outbox:completed_at:", "thread_outbox:completion:", "thread_outbox:trace_context:"} {
 		if !strings.Contains(before, fragment) {
 			t.Fatal("缺少当前字段或序列", fragment)
 		}
@@ -214,7 +215,7 @@ func TestBaselineFailureRollsBackAndCanRetry(t *testing.T) {
 
 func TestCheckRequiresExactMigrationLedger(t *testing.T) {
 	pool := migratedTestDB(t)
-	execOK(t, pool, `UPDATE schema_migrations SET version='unexpected.sql'`)
+	execOK(t, pool, `UPDATE schema_migrations SET version='unexpected-' || version`)
 	if err := Check(t.Context(), pool); err == nil {
 		t.Fatal("未知版本被视为迁移完成")
 	}

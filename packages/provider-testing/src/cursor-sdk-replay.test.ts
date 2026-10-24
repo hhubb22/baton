@@ -4,7 +4,7 @@ import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
 import * as Deferred from 'effect/Deferred'
 import * as Schema from 'effect/Schema'
-import { vi } from 'vitest'
+import { vi } from 'vite-plus/test'
 import {
   makeCursorAgentSdkRunner,
   ThreadId,

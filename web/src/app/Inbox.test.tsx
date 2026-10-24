@@ -1,7 +1,7 @@
 import { createMemoryHistory } from '@tanstack/react-router'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import { ClientError } from '../data/client'
 import { createMockClient } from '../data/mock/client'
 import type { ScenarioId } from '../data/mock/scenarios'
@@ -34,7 +34,7 @@ describe('inbox decisions', () => {
       const user = userEvent.setup()
       let failing = true
       setup(path, 'normal', (client) => {
-        const list = client.listInbox
+        const list = client.listInbox.bind(client)
         vi.spyOn(client, 'listInbox').mockImplementation(() =>
           failing ? Promise.reject(new ClientError('unavailable', 'Could not load')) : list(),
         )
@@ -73,8 +73,8 @@ describe('inbox decisions', () => {
         search: { thread: 'thr-compat' },
       }),
     )
-    const shared = await screen.findAllByRole('region', { name: pathsQuestion })
-    expect(shared).toHaveLength(2)
+    await waitFor(() => expect(screen.getAllByRole('region', { name: pathsQuestion })).toHaveLength(2))
+    const shared = screen.getAllByRole('region', { name: pathsQuestion })
     for (const item of shared) {
       expect(within(item).getByText('Answered')).toBeInTheDocument()
       expect(within(item).getByText(/Keep the regression tests/)).toBeInTheDocument()

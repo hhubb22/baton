@@ -17,7 +17,7 @@ import {
   useSendMessage,
   useSetThreadModel,
   useStopThread,
-  useThreads,
+  useThread,
 } from '../data/queries'
 import type { Device, DeviceAgent, ID, Message, Reference, SendMode, Thread } from '../data/types'
 import { text } from '../theme/text'
@@ -364,7 +364,7 @@ export function ThreadDetail({
   onRecover: (action: RecoverAction, thread: Thread) => void
 }) {
   const navigate = useNavigate()
-  const threads = useThreads()
+  const threadQuery = useThread(threadId)
   const devices = useDevices()
   const messages = useMessages(threadId)
   const inbox = useInbox()
@@ -387,9 +387,9 @@ export function ThreadDetail({
   const workspace = useWorkspace()
   const resumeOperation = useOperation(resumeId)
 
-  const thread = threads.data?.find((item) => item.id === threadId)
+  const thread = threadQuery.data
   const projectArchived = projects.data?.find((item) => item.id === thread?.projectId)?.status === 'archived'
-  const canAsk = !!thread?.projectId && !projectArchived
+  const canAsk = !!thread?.projectId && projects.isSuccess && !projectArchived
   const device = devices.data?.find((item) => item.id === thread?.deviceId)
   const agent = device?.agents.find((item) => item.kind === thread?.agent)
   const list = messages.data ?? []
@@ -415,7 +415,14 @@ export function ThreadDetail({
     historyAnchor.current = null
   }, [history.messages.length])
 
-  if (threads.isError) {
+  if (threadQuery.error instanceof ClientError && threadQuery.error.code === 'notFound') {
+    return (
+      <Shell layout={layout} title="Chat not found" onClose={onClose}>
+        <p {...stylex.props(text.body, styles.empty)}>This chat was deleted or you no longer have access.</p>
+      </Shell>
+    )
+  }
+  if (threadQuery.isError) {
     return (
       <Shell layout={layout} title="Chat" onClose={onClose}>
         <div {...stylex.props(styles.empty)}>
@@ -423,7 +430,7 @@ export function ThreadDetail({
             icon="alert"
             title="Could not load this chat"
             action={
-              <Button small onClick={() => void threads.refetch()}>
+              <Button small onClick={() => void threadQuery.refetch()}>
                 Retry
               </Button>
             }
@@ -432,20 +439,16 @@ export function ThreadDetail({
       </Shell>
     )
   }
-  if (threads.data && !thread) {
-    return (
-      <Shell layout={layout} title="Chat not found" onClose={onClose}>
-        <p {...stylex.props(text.body, styles.empty)}>This chat was deleted or you no longer have access.</p>
-      </Shell>
-    )
-  }
   if (!thread || !view) return null
 
   const name = device?.name ?? 'the device'
   const agentName = thread.agent ? agentNames[thread.agent] : 'Command'
-  const running = thread.status === 'running' && thread.pending === null
+  const running = thread.status === 'running' && thread.pending === null && !thread.starting && !thread.resumePending
   const waiting = waitingCount(list)
-  const resuming = resumeOperation.data !== undefined && !['done', 'failed'].includes(resumeOperation.data.phase)
+  const resuming =
+    !!thread.resumePending ||
+    (resumeOperation.data !== undefined &&
+      !['done', 'failed', 'stopped', 'conflict'].includes(resumeOperation.data.phase))
   const resumeFailed = resumeOperation.data?.phase === 'failed' ? resumeOperation.data.detail : null
 
   const loadEarlier = () => {
@@ -460,7 +463,7 @@ export function ThreadDetail({
     const element = start instanceof Element ? start : start.parentElement
     const body = element?.closest<HTMLElement>('[data-reply]')
     if (!body) return null
-    if (!thread.projectId || projectArchived) return () => copySelection(value)
+    if (!canAsk || !thread.projectId) return () => copySelection(value)
     const projectId = thread.projectId
     const reference: Reference = {
       kind: 'thread',
@@ -541,6 +544,7 @@ export function ThreadDetail({
     setError(null)
     switch (action) {
       case 'resume':
+        if (resuming || resume.isPending) return
         resume.mutate(threadId, {
           onSuccess: (operation) => setResumeId(operation.id),
           onError: (cause) => setError(errorText(cause, 'Could not resume. Try again.')),
@@ -572,7 +576,7 @@ export function ThreadDetail({
   else if (running) status = mode === 'now' ? 'Sends during the current reply' : 'Sends after current reply'
 
   const menuItems = [
-    running && (
+    (running || thread.starting || thread.resumePending) && !thread.pending && (
       <MenuOption key="stop" onSelect={() => setConfirm('stop')}>
         Stop current reply
       </MenuOption>
@@ -668,7 +672,11 @@ export function ThreadDetail({
               notice={view.notice}
               action={
                 view.notice.action && (
-                  <Button small onClick={() => onAction(view.notice!.action!)}>
+                  <Button
+                    small
+                    disabled={view.notice.action === 'resume' && (resuming || resume.isPending)}
+                    onClick={() => onAction(view.notice!.action!)}
+                  >
                     {actionLabels[view.notice.action]}
                   </Button>
                 )
@@ -927,7 +935,7 @@ function ArchiveDialog({
   waiting: number
   finalFocus: FinalFocus
 }) {
-  const running = thread.status === 'running'
+  const running = thread.status === 'running' || !!thread.starting || !!thread.resumePending
   if (running && thread.agent !== null && !agent?.abilities.stop) {
     return (
       <Dialog

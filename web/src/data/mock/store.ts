@@ -204,6 +204,8 @@ export class MockStore {
 
   // 重新生成场景。未完成的模拟任务全部取消，同一场景每次得到相同的状态。
   reset(scenarioId: ScenarioId = this.scenarioId) {
+    // 取消回调可能修改定时器集合；只遍历本次重置开始时的任务。
+    // oxlint-disable-next-line unicorn/no-useless-spread
     for (const cancel of [...this.timers]) cancel()
     this.timers.clear()
     this.runs.clear()
@@ -926,6 +928,8 @@ ${response}`,
     for (const thread of this.world.threads) {
       if (thread.deviceId === device.id && thread.status === 'running') this.cancelRun(thread.id)
     }
+    // 取消和状态通知可能修改停止任务集合，保留当前任务快照。
+    // oxlint-disable-next-line unicorn/no-useless-spread
     for (const [id, timer] of [...this.stopTimers]) {
       if (this.thread(timer.operation.targetId).deviceId !== device.id) continue
       timer.cancel()
@@ -1093,10 +1097,12 @@ ${response}`,
 
     this.schedule(this.latency.device, () => {
       if (!world.devices.includes(device)) return
-      const abilities = { queue: true, steer: true, stop: true, resume: true, switchModel: true }
+      const abilities = { create: true, queue: true, steer: true, stop: true, resume: true, switchModel: true }
       device.agents = [
         {
           kind: 'codex',
+          status: 'available',
+          reason: null,
           version: '0.98.0',
           models: ['gpt-6.1-sol', 'gpt-6.1-mini'],
           defaultModel: 'gpt-6.1-sol',
@@ -1106,6 +1112,8 @@ ${response}`,
         },
         {
           kind: 'pi',
+          status: 'available',
+          reason: null,
           version: '0.31.0',
           models: ['gpt-6.1-sol'],
           defaultModel: 'gpt-6.1-sol',

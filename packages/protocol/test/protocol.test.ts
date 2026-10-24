@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { Schema, SchemaAST } from 'effect'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vite-plus/test'
 import {
   CommandOutcome,
   Cursor,
@@ -68,6 +68,7 @@ const codecs: Record<string, Schema.Codec<unknown>> = {
 const additions: Record<string, string[]> = {
   RuntimeAgent: ['reason'],
   ThreadReport: ['command_id', 'command_outcome'],
+  ThreadCommand: ['trace_context'],
   ThreadCommandResult: ['storage_generation'],
 }
 const inputOptional = new Set([
@@ -138,7 +139,7 @@ describe('Go JSON 字段与 Effect Schema', () => {
   }
   it('Worker IPC 的全部 Go 字段和适配器新增字段均存在', () => {
     const fields = objectAST(WorkerIPCMessage).propertySignatures
-    expect(fields.map((field) => field.name).sort()).toEqual(
+    expect(fields.map((field) => String(field.name)).sort()).toEqual(
       [
         ...worker.fields.map((field) => field.name),
         'command_id',
@@ -149,6 +150,7 @@ describe('Go JSON 字段与 Effect Schema', () => {
         'receipt',
         'command_status',
         'open_config',
+        'trace_context',
       ].sort(),
     )
     for (const field of worker.fields) {

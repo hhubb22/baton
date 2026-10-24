@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vite-plus/test'
 import type { BatonClient } from './client'
 import type { HttpContext } from './http/context'
 import { createOutputAPI } from './http/output'
@@ -8,20 +8,22 @@ import { ClientProvider, useLiveOutput, useMessages } from './queries'
 
 function setup(request: HttpContext['request']) {
   const output = createOutputAPI(request)
+  const listMessages = vi.fn(async () => [])
   const client = {
     subscribe: () => () => {},
-    readOutput: output.readOutput,
-    subscribeOutput: output.subscribeOutput,
-    listMessages: vi.fn(async () => []),
+    readOutput: (id: string) => output.readOutput(id),
+    subscribeOutput: (id: string, listener: Parameters<typeof output.subscribeOutput>[1]) =>
+      output.subscribeOutput(id, listener),
+    listMessages,
   } as unknown as BatonClient
   const wrapper = ({ children }: { children: ReactNode }) => <ClientProvider client={client}>{children}</ClientProvider>
-  return { output, client, wrapper }
+  return { output, client, wrapper, listMessages }
 }
 
 describe('live output queries', () => {
   it('updates only the output query on pushed frames and releases the subscription when disabled', async () => {
     const request = vi.fn()
-    const { output, client, wrapper } = setup(request)
+    const { output, listMessages, wrapper } = setup(request)
     const send = vi.fn()
     output.setConnection(send)
     const { result, rerender, unmount } = renderHook(
@@ -34,7 +36,7 @@ describe('live output queries', () => {
       output.receive('one', { ok: true, state: 'running', text: 'next', cursor: 'epoch:9' })
     })
     await waitFor(() => expect(result.current.output.data?.chunks).toEqual([{ kind: 'text', text: 'firstnext' }]))
-    expect(client.listMessages).toHaveBeenCalledTimes(1)
+    expect(listMessages).toHaveBeenCalledTimes(1)
     expect(request).not.toHaveBeenCalled()
     rerender({ id: 'two', enabled: true })
     await waitFor(() => expect(result.current.output.data).toEqual({ threadId: 'two', chunks: [] }))

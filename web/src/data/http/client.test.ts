@@ -1,7 +1,16 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { createTransport, HttpError } from './transport'
 import { createHttpClient, mapDevice } from './client'
-import { capabilityLines, setupNeeded } from '../derive'
+import { capabilityLines, setupNeeded, usableAgents } from '../derive'
+
+function requestURL(input: RequestInfo | URL): string {
+  return input instanceof Request ? input.url : input.toString()
+}
+
+function jsonBody(body: RequestInit['body']): string {
+  if (typeof body !== 'string') throw new TypeError('Expected a JSON string request body')
+  return body
+}
 
 const employee = {
   id: 'cc263ca7-58b5-48bc-b9b6-895141a9a951',
@@ -65,6 +74,47 @@ describe('HTTP transport', () => {
 })
 
 describe('HTTP account and devices', () => {
+  it.each([
+    ['available', true, true],
+    ['available', false, false],
+    ['available', undefined, false],
+    ['unverified', true, false],
+    ['unavailable', true, false],
+    ['future-status', true, false],
+  ])('preserves Cursor status %s, create %s and the reported reason', (status, create, enabled) => {
+    const device = mapDevice({
+      id: 'cursor-device',
+      display_name: 'Desk',
+      system: 'linux',
+      online: true,
+      synced: true,
+      revocation_status: 'none',
+      runtime_report: {
+        agents: [
+          {
+            agent_type: 'cursor',
+            version: '1.0.35',
+            status,
+            reason: 'Local sandbox needs setup.',
+            models: [],
+            default_model: '',
+            capabilities: { create, queue: true, steer: false, stop: true, resume: true, switch_model: false },
+          },
+        ],
+      },
+    })
+    expect(device.agents[0]).toMatchObject({
+      kind: 'cursor',
+      status,
+      reason: 'Local sandbox needs setup.',
+      models: [],
+      defaultModel: null,
+      abilities: { create: create === true, steer: false, resume: true },
+    })
+    expect(usableAgents(device)).toHaveLength(enabled ? 1 : 0)
+    if (!enabled) expect(capabilityLines(device)[0]).toMatchObject({ ok: false, detail: 'Local sandbox needs setup.' })
+  })
+
   it('adds and removes shared folders and notifies device and file queries', async () => {
     const node = {
       id: 'node/id',
@@ -97,7 +147,7 @@ describe('HTTP account and devices', () => {
       const [url, init] = fetch.mock.calls[index]
       expect(url).toBe('/api/v1/nodes/node%2Fid/roots')
       expect(init?.method).toBe(method)
-      expect(JSON.parse(String(init?.body))).toEqual({ path: '/work' })
+      expect(JSON.parse(jsonBody(init?.body))).toEqual({ path: '/work' })
       expect(new Headers(init?.headers).get('X-CSRF-Token')).toBe('folder-csrf')
     }
     expect(listener.mock.calls.map(([event]) => event.topics)).toEqual([
@@ -131,7 +181,7 @@ describe('HTTP account and devices', () => {
     const [url, init] = fetch.mock.calls[1]
     expect(url).toBe('/api/v1/nodes/desk/subscriptions/login')
     expect(init?.method).toBe('POST')
-    expect(JSON.parse(String(init?.body))).toEqual({ provider: name })
+    expect(JSON.parse(jsonBody(init?.body))).toEqual({ provider: name })
     expect(new Headers(init?.headers).get('X-CSRF-Token')).toBe('login-csrf')
   })
 
@@ -172,7 +222,7 @@ describe('HTTP account and devices', () => {
             status: 'available',
             default_model: 'model-real',
             models: [{ id: 'model-real' }],
-            capabilities: { queue: true, steer: false, stop: true, resume: true, switch_model: true },
+            capabilities: { create: true, queue: true, steer: false, stop: true, resume: true, switch_model: true },
           },
         ],
         project_runtime: {
@@ -323,6 +373,67 @@ describe('HTTP account and devices', () => {
     unsubscribe()
     expect(second.readyState).toBe(3)
     expect(listener).toHaveBeenCalled()
+  })
+
+  it('refreshes a reason-only device report from devices.changed without treating the event as capability data', async () => {
+    class Socket {
+      static instance: Socket
+      onmessage: ((event: { data: string }) => void) | null = null
+      constructor() {
+        Socket.instance = this
+      }
+      close() {}
+      receive(value: unknown) {
+        this.onmessage?.({ data: JSON.stringify(value) })
+      }
+    }
+    let reason = 'Checking local sandbox.'
+    const fetch = fetcher().mockImplementation(async (url) => {
+      if (requestURL(url).endsWith('/me')) return response({ employee })
+      return response({
+        nodes: [
+          {
+            id: 'desk',
+            display_name: 'Desk',
+            system: 'linux',
+            online: true,
+            synced: true,
+            revocation_status: 'none',
+            runtime_report: {
+              agents: [
+                {
+                  agent_type: 'cursor',
+                  version: '1',
+                  status: 'unverified',
+                  reason,
+                  models: [],
+                  default_model: '',
+                  capabilities: { create: false },
+                },
+              ],
+            },
+          },
+        ],
+        default_device: {},
+      })
+    })
+    const client = createHttpClient({ fetch, WebSocket: Socket as unknown as typeof WebSocket })
+    const listener = vi.fn()
+    const unsubscribe = client.subscribe(listener)
+    try {
+      await client.getSession()
+      expect((await client.listDevices())[0].agents[0].reason).toBe(reason)
+      reason = 'Local sandbox unavailable.'
+      Socket.instance.receive({ type: 'devices.changed', node_id: 'desk', report_version: 2 })
+      expect(listener).toHaveBeenLastCalledWith({ topics: ['devices', 'files'] })
+      expect((await client.listDevices())[0].agents[0].reason).toBe(reason)
+      listener.mockClear()
+      Socket.instance.receive({ type: 'devices.changed', node_id: 'desk', report_version: -1 })
+      Socket.instance.receive({ type: 'devices.changed', node_id: 'desk' })
+      expect(listener).not.toHaveBeenCalled()
+    } finally {
+      unsubscribe()
+    }
   })
 
   it('stops polling when the last subscriber leaves', async () => {

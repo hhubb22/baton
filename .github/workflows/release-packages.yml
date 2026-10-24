@@ -53,7 +53,6 @@ jobs:
           cache: pnpm
           cache-dependency-path: |
             pnpm-lock.yaml
-            web/pnpm-lock.yaml
             runtimes/project-agent/pnpm-lock.yaml
       - name: Validate version and native target
         run: |
@@ -62,9 +61,9 @@ jobs:
         run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Workspace checks
         run: |
-          pnpm -r typecheck
-          pnpm -r lint
-          pnpm -r test
+          pnpm check
+          pnpm typecheck
+          pnpm test
       - name: Build
         run: |
           node --test tools/*.test.mjs

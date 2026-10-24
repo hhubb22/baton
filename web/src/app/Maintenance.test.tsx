@@ -1,7 +1,7 @@
 import { createMemoryHistory } from '@tanstack/react-router'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vite-plus/test'
 import { ClientError } from '../data/client'
 import { createMockClient } from '../data/mock/client'
 import type { ScenarioId } from '../data/mock/scenarios'
@@ -115,9 +115,10 @@ describe('project maintenance', () => {
 
   it('preserves newer settings during delayed saves and after browser back and reopening', async () => {
     const user = userEvent.setup()
+    let updateSpy!: MockInstance<ReturnType<typeof createMockClient>['updateProject']>
     const { client, scheduler, router } = setup(settingsPath, 'normal', (client, clock) => {
-      const update = client.updateProject
-      vi.spyOn(client, 'updateProject').mockImplementation(async (input) => {
+      const update = client.updateProject.bind(client)
+      updateSpy = vi.spyOn(client, 'updateProject').mockImplementation(async (input) => {
         const snapshot = structuredClone(input)
         await new Promise<void>((resolve) => clock.after(browserLatency.save, resolve))
         return update(snapshot)
@@ -145,7 +146,7 @@ describe('project maintenance', () => {
     await user.click(within(reopened).getByLabelText(/^Goal/))
     expect(within(reopened).getByRole('status')).toHaveTextContent('Saving…')
     await replace(user, within(reopened).getByLabelText('Project name'), 'Queued in old dialog')
-    await act(() => router.history.back())
+    await act(async () => router.history.back())
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     const remounted = await openSettings(user)
     expect(within(remounted).getByLabelText('Project name')).toHaveValue('Queued in old dialog')
@@ -161,9 +162,7 @@ describe('project maintenance', () => {
     expect((await client.listProjects()).find((project) => project.id === 'prj-compat')?.name).toBe(
       'After reopening settings',
     )
-    expect(vi.mocked(client.updateProject).mock.calls.map(([input]) => input.patch.name)).not.toContain(
-      'Queued in old dialog',
-    )
+    expect(updateSpy.mock.calls.map(([input]) => input.patch.name)).not.toContain('Queued in old dialog')
   })
 
   it('keeps new memory drafts in their own project across browser history', async () => {
@@ -176,13 +175,13 @@ describe('project maintenance', () => {
     await user.click(await screen.findByRole('button', { name: 'Add memory' }))
     const dialog = await screen.findByRole('dialog', { name: 'Add memory' })
     await user.type(within(dialog).getByLabelText('Memory'), 'Only the Compatibility project should get this memory.')
-    await act(() => router.history.back())
+    await act(async () => router.history.back())
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     await user.click(await screen.findByRole('button', { name: 'Add memory' }))
     const other = await screen.findByRole('dialog', { name: 'Add memory' })
     expect(within(other).getByLabelText('Memory')).toHaveValue('')
     await user.click(within(other).getByRole('button', { name: 'Cancel' }))
-    await act(() => router.history.forward())
+    await act(async () => router.history.forward())
     await user.click(await screen.findByRole('button', { name: 'Add memory' }))
     const restored = await screen.findByRole('dialog', { name: 'Add memory' })
     expect(within(restored).getByLabelText('Memory')).toHaveValue(
@@ -226,9 +225,10 @@ describe('project maintenance', () => {
   it('recovers failed project and memory reads with Retry project and Retry memory', async () => {
     const user = userEvent.setup()
     let failing = true
-    const { client } = setup(projectPath, 'maintenanceError', (client) => {
-      const listMemory = client.listProjectMemory
-      vi.spyOn(client, 'listProjectMemory').mockImplementation(async (projectId) => {
+    let memorySpy!: MockInstance<ReturnType<typeof createMockClient>['listProjectMemory']>
+    setup(projectPath, 'maintenanceError', (client) => {
+      const listMemory = client.listProjectMemory.bind(client)
+      memorySpy = vi.spyOn(client, 'listProjectMemory').mockImplementation(async (projectId) => {
         const notes = await listMemory(projectId)
         if (failing) throw new ClientError('unavailable', 'Could not load memory')
         return notes
@@ -239,18 +239,18 @@ describe('project maintenance', () => {
     await user.click(screen.getByRole('button', { name: 'Retry project' }))
     expect(await screen.findByRole('heading', { name: 'Compatibility' })).toBeInTheDocument()
     expect(screen.queryByText('Could not load project', { exact: true })).not.toBeInTheDocument()
-    await waitFor(() => expect(client.listProjectMemory).toHaveBeenCalledWith('prj-compat'))
+    await waitFor(() => expect(memorySpy).toHaveBeenCalledWith('prj-compat'))
     await act(async () => {
-      await Promise.allSettled(vi.mocked(client.listProjectMemory).mock.results.map((result) => result.value))
+      await Promise.allSettled(memorySpy.mock.results.map((result) => result.value))
     })
-    expect(client.listProjectMemory).toHaveBeenCalledTimes(1)
+    expect(memorySpy).toHaveBeenCalledTimes(1)
 
     failing = false
     await user.click(screen.getByRole('tab', { name: /Memory/ }))
     const memory = await screen.findByRole('region', { name: 'Project memory' })
     expect(await within(memory).findByText('Could not load project memory')).toBeInTheDocument()
     expect(within(memory).queryByRole('article')).not.toBeInTheDocument()
-    expect(client.listProjectMemory).toHaveBeenCalledTimes(1)
+    expect(memorySpy).toHaveBeenCalledTimes(1)
     expect(screen.getByRole('region', { name: 'Conversation' })).toHaveTextContent(
       'Run the compat suite on Windows Desktop and report failures.',
     )
@@ -259,7 +259,7 @@ describe('project maintenance', () => {
     expect(await within(memory).findByRole('button', { name: originalMemory })).toBeInTheDocument()
     expect(within(memory).queryByText('Could not load project memory')).not.toBeInTheDocument()
     expect(within(memory).queryByRole('button', { name: 'Retry memory' })).not.toBeInTheDocument()
-    expect(client.listProjectMemory).toHaveBeenCalledTimes(2)
+    expect(memorySpy).toHaveBeenCalledTimes(2)
   })
 
   it('adds memory and records the author and previous version when editing assistant memory', async () => {

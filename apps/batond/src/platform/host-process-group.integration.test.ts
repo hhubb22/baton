@@ -3,7 +3,7 @@ import { once } from 'node:events'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vite-plus/test'
 import { readProcessIdentity, systemCommand } from './identity.ts'
 
 const fixture = fileURLToPath(new URL('./test-fixtures/group-host.mjs', import.meta.url))

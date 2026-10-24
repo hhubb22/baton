@@ -39,8 +39,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --config ../../vitest.config.ts",
-    "lint": "eslint .",
+    "test": "vp test run --config ../../vitest.config.ts",
+    "lint": "vp lint .",
     "generate": "node scripts/generate.ts"
   },
   "dependencies": {
@@ -52,6 +52,7 @@
     "@effect/vitest": "catalog:",
     "@types/node": "catalog:",
     "vitest": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vite-plus": "catalog:"
   }
 }

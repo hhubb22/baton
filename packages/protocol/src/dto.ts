@@ -1,4 +1,5 @@
 import { Schema } from 'effect'
+import { TraceContext } from './trace.ts'
 import {
   AgentType,
   AgentStatus,
@@ -1134,6 +1135,7 @@ export type Thread = typeof Thread.Type
 
 // internal/protocol/thread.go · ThreadCommand
 export const ThreadCommand = Schema.Struct({
+  trace_context: Schema.optionalKey(TraceContext),
   type: Schema.Literal('thread.command'),
   thread_id: UUID,
   action: Schema.Literals(['open', 'message', 'withdraw', 'stop', 'resume']),

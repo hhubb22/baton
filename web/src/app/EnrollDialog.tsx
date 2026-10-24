@@ -153,7 +153,7 @@ export function EnrollDialog({
     requested.current = true
     request()
     // 只在打开时取一次码，之后由「Get a new code」重新取。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const state = enrollment.data?.state ?? issued?.enrollment.state

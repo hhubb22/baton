@@ -1,5 +1,0 @@
-dist
-node_modules
-pnpm-lock.yaml
-# 文档沿用仓库统一的紧凑表格写法
-*.md

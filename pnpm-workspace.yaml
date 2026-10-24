@@ -13,13 +13,11 @@ catalog:
   '@effect/openapi-generator': 4.0.6
   typescript: 6.0.3
   vitest: 5.0.5
-  eslint: 10.13.0
-  '@eslint/js': 10.0.1
-  typescript-eslint: 8.72.0
   prettier: 3.9.10
-  globals: 17.13.0
   '@types/node': 26.6.5
   esbuild: 0.28.2
+  vite: npm:@voidzero-dev/vite-plus-core@1.4.0
+  vite-plus: 1.4.0
 
 allowBuilds:
   esbuild: true
@@ -30,3 +28,16 @@ minimumReleaseAgeExclude:
   - '@effect/openapi-generator@4.0.6'
   - '@effect/platform-node@4.0.6'
   - effect@4.0.6
+  - '@voidzero-dev/vite-plus-core@1.4.0'
+  - '@voidzero-dev/vite-plus-linux-arm64-gnu@1.4.0'
+  - vite-plus@1.4.0
+overrides:
+  vite@*: 'catalog:'
+  vitest@*: 'catalog:'
+peerDependencyRules:
+  allowAny:
+    - vite
+    - vitest
+  allowedVersions:
+    vite: '*'
+    vitest: '*'

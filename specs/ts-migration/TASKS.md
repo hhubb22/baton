@@ -27,6 +27,9 @@ Status: complete
 
 ## T2 交付网页远程 Thread
 
+Status: complete
+实现与验证入口：[TS 中心与网页](../../apps/server/README.md)、[远程节点](../../apps/batond/src/daemon/README.md)。使用真实 PostgreSQL、WSS、认证 IPC、独立 Worker 与离线回放验证远程链路；当前 Cursor 支持组合沿用 T1，完整安装包与系统矩阵复验归 T5。
+
 - 依据：[Coordinator 与 batond 职责](TECH.md#服务职责)、[启动与命令回执](../agent-adapters/TECH.md#启动与命令回执)、Baton PRODUCT R-01～R-14、R-16、R-19、R-23。
 - 依赖：T1 的 Worker、接入契约与本地持久事实。
 - 交付：员工登录并注册设备，从网页创建 Cursor Thread、排队、停止、恢复、归档、查看回复与实时输出；含对应 HTTP、PostgreSQL、WSS、node.db 与重连。

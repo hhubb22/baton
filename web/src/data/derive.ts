@@ -137,6 +137,27 @@ export function threadView(
       false,
     )
   }
+  if (thread.resumePending) {
+    return view(
+      { tone: 'info', label: 'Resuming…' },
+      'waiting',
+      notice(`Resuming ${agent}…`, `Waiting for ${name} to confirm this chat has resumed.`),
+      false,
+    )
+  }
+  if (thread.starting) {
+    return reachable
+      ? view(
+          { tone: 'info', label: 'Starting…' },
+          'waiting',
+          notice(`Starting ${agent}…`, `Your message is saved. Waiting for ${agent} to open on ${name}.`),
+        )
+      : view(
+          { tone: 'neutral', label: 'Waiting for device' },
+          'waiting',
+          notice(`Waiting for ${name}`, `Your message is saved. ${agent} has not opened this chat yet.`, 'viewDevices'),
+        )
+  }
   switch (thread.status) {
     case 'stopped':
       return view({ tone: 'danger', label: 'Stopped' }, 'attention', ...stoppedNotice(thread, name, agent, options))
@@ -493,7 +514,7 @@ export function devicesHeading(devices: Device[]) {
   return `${count}, ${online} online`
 }
 
-export const agentNames: Record<AgentKind, string> = { codex: 'Codex', kiro: 'Kiro', pi: 'Pi' }
+export const agentNames: Record<AgentKind, string> = { codex: 'Codex', kiro: 'Kiro', pi: 'Pi', cursor: 'Cursor' }
 
 const clock = new Intl.DateTimeFormat('en', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
 const day = new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric' })
@@ -534,7 +555,7 @@ function subscriptionSignedIn(device: Device) {
 
 // 设备上需要处理才能用的 Agent 和 Project 助手。
 export function setupNeeded(device: Device) {
-  return device.agents.some((agent) => agent.problem) || !device.hasRuntime || !subscriptionSignedIn(device)
+  return device.agents.some((agent) => !canCreateAgent(agent)) || !device.hasRuntime || !subscriptionSignedIn(device)
 }
 
 export interface CapabilityLine {
@@ -554,9 +575,7 @@ function abilityNotes(agent: DeviceAgent) {
 export function capabilityLines(device: Device): CapabilityLine[] {
   const lines = device.agents.map((agent): CapabilityLine => {
     const name = agentNames[agent.kind]
-    if (agent.problem === 'unavailable') return { name, ok: false, detail: 'Agent unavailable on this device' }
-    if (agent.problem === 'notInstalled') return { name, ok: false, detail: 'Program not installed' }
-    if (agent.problem === 'signedOut') return { name, ok: false, detail: `${agent.account} sign-in expired` }
+    if (!canCreateAgent(agent)) return { name, ok: false, detail: agentUnavailableReason(agent) }
     return { name, ok: true, detail: [agent.account ? 'Signed in' : 'Installed', ...abilityNotes(agent)].join(' · ') }
   })
   const subscriptions = device.subscriptions.filter((item) => item.signedIn).map((item) => item.provider)
@@ -581,11 +600,10 @@ export function capabilityLines(device: Device): CapabilityLine[] {
 export function modelLines(device: Device) {
   return device.agents.flatMap((agent) => {
     const name = agentNames[agent.kind]
-    if (agent.problem === 'unavailable') return [`${name} is unavailable. Check the agent on this device.`]
-    if (agent.problem === 'notInstalled') return [`${name} models unavailable until installed.`]
+    if (!canCreateAgent(agent)) return [`${name} · ${agentUnavailableReason(agent)}`]
     const models = agent.models.map((model) => (model === agent.defaultModel ? `${model} (default)` : model))
     const line = [`${name} ${agent.version ?? ''}`.trim(), models.join(', ')].filter(Boolean).join(' · ')
-    return agent.problem === 'signedOut' ? [line, `New ${name} chats unavailable until signed in.`] : [line]
+    return [line]
   })
 }
 
@@ -694,9 +712,22 @@ export function defaultLocation(threads: Thread[], devices: Device[], defaultDev
   return recent ?? { deviceId: device.id, folder: device.repos[0] ?? device.folders[0] ?? '' }
 }
 
-// 能开新对话的 Agent：已安装且订阅已登录。
+export function canCreateAgent(agent: DeviceAgent) {
+  return agent.status === 'available' && agent.abilities.create === true && !agent.problem
+}
+
+export function agentUnavailableReason(agent: DeviceAgent) {
+  if (agent.reason) return agent.reason
+  if (agent.problem === 'notInstalled') return 'Program not installed'
+  if (agent.problem === 'signedOut') return `${agent.account ?? agentNames[agent.kind]} sign-in expired`
+  if (agent.status === 'unverified') return 'This agent has not been verified on this device.'
+  if (agent.status === 'available' && !agent.problem) return 'This agent does not support starting new chats.'
+  return 'Agent unavailable on this device'
+}
+
+// 新对话同时要求可用状态和明确的创建能力。
 export function usableAgents(device: Device | undefined) {
-  return (device?.agents ?? []).filter((agent) => !agent.problem)
+  return (device?.agents ?? []).filter(canCreateAgent)
 }
 
 // 操作的确认阶段。已提交和已保存分开显示，设备确认前不显示最终结果。

@@ -11,8 +11,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --config ../../vitest.config.ts",
-    "lint": "eslint src"
+    "test": "vp test run --config ../../vitest.config.ts",
+    "lint": "vp lint src"
   },
   "dependencies": {
     "@cursor/sdk": "1.0.35",
@@ -23,6 +23,7 @@
     "@effect/vitest": "catalog:",
     "@types/node": "catalog:",
     "typescript": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "vite-plus": "catalog:"
   }
 }

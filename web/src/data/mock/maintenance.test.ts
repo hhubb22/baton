@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vite-plus/test'
 import type { ProjectPatch, SaveMemoryInput } from '../types'
 import { createMockClient } from './client'
 import { createWorld, type ScenarioId } from './scenarios'

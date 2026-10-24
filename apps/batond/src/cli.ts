@@ -8,7 +8,16 @@ import { WorkerOpen, type WorkerRequest } from '@baton/protocol'
 import { LocalWorkerHost, initializeWorkerDirectory } from './daemon/host.ts'
 import { readPrivateFile, writePrivateFileAtomic } from './platform/private.ts'
 
-const usage = `Baton 本地 Thread（TypeScript 开发入口）
+const usage = `Baton Thread（TypeScript 开发入口）
+
+  up --coordinator <https://中心> [--workspace <绝对目录>]
+  register --coordinator <https://中心> [--enrollment-file <私有文件>]
+  run [--relay <wss://中心/v1/node>]
+
+注册凭据来自 BATON_ENROLLMENT_TOKEN 或 --enrollment-file。
+up 复用已有身份，首次运行登记主目录；--workspace 可额外登记目录。
+
+本地命令：
 
   open --cwd <目录> [--thread-id <UUID>] [--model <模型>]
   message --thread-id <UUID> --text <正文> [--message-id <ID>]

@@ -35,6 +35,7 @@ export const keys = {
   projectEntries: (id: ID) => ['projects', 'entries', id] as const,
   projectMemory: (id: ID) => ['projects', 'memory', id] as const,
   threads: ['threads'] as const,
+  thread: (id: ID) => ['threads', 'detail', id] as const,
   messages: (threadId: ID) => ['messages', threadId] as const,
   inbox: ['inbox'] as const,
   file: (deviceId: ID, path: string) => ['files', deviceId, path] as const,
@@ -129,6 +130,11 @@ export function useProjectMemory(projectId: ID) {
 export function useThreads() {
   const client = useClient()
   return useQuery({ queryKey: keys.threads, queryFn: () => client.listThreads() })
+}
+
+export function useThread(threadId: ID) {
+  const client = useClient()
+  return useQuery({ queryKey: keys.thread(threadId), queryFn: () => client.getThread(threadId) })
 }
 
 export function useMessages(threadId: ID) {

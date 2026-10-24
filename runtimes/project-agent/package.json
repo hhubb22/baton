@@ -14,7 +14,7 @@
   ],
   "scripts": {
     "build": "node scripts/clean.mjs && tsc -p tsconfig.json",
-    "test": "pnpm build && tsx --test test/*.test.ts",
+    "test": "pnpm build && node --import tsx --test test/*.test.ts",
     "check": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

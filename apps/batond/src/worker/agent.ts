@@ -1,5 +1,7 @@
 import type { WorkerOpenConfig } from '@baton/protocol'
 import type { Effect, Schema, Stream } from 'effect'
+import type { AgentOutput } from './output.ts'
+export type { AgentOutput } from './output.ts'
 
 export type JsonValue = typeof Schema.Json.Type
 
@@ -72,6 +74,8 @@ export interface ThreadAgent {
     preparation: InputPreparation,
   ) => Effect.Effect<InputAcceptance | undefined, AgentError>
   readonly events: Stream.Stream<AgentEvent, AgentError>
+  /** Best-effort fresh text; bounded separately from durable reply and lifecycle events. */
+  readonly output?: Stream.Stream<AgentOutput, AgentError>
   /** Registers cancellation immediately; its response alone does not confirm termination. */
   readonly abort: () => Effect.Effect<void, AgentError>
   readonly close: () => Effect.Effect<void, AgentError>

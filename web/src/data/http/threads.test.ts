@@ -1,9 +1,19 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vite-plus/test'
 import { ClientError } from '../client'
+import { threadView } from '../derive'
 import type { Device, OperationPhase } from '../types'
 import type { HttpContext } from './context'
 import { createThreadAPI } from './threads'
 import { createTransport, HttpError } from './transport'
+
+function requestURL(input: RequestInfo | URL): string {
+  return input instanceof Request ? input.url : input.toString()
+}
+
+function jsonBody(body: RequestInit['body']): string {
+  if (typeof body !== 'string') throw new TypeError('Expected a JSON string request body')
+  return body
+}
 
 const threadId = '74b66275-348c-4dd3-ae1d-7f3d21440f70'
 const deviceId = '729f92e9-e68c-4a30-817a-0adb2da87b51'
@@ -59,10 +69,12 @@ const device = (connection: Device['connection'] = 'online'): Device => ({
   agents: [
     {
       kind: 'codex',
+      status: 'available',
+      reason: null,
       version: '1',
       models: ['reported-model', 'second-model'],
       defaultModel: 'reported-model',
-      abilities: { queue: true, steer: true, stop: true, resume: true, switchModel: true },
+      abilities: { create: true, queue: true, steer: true, stop: true, resume: true, switchModel: true },
       account: 'ChatGPT',
       problem: null,
     },
@@ -73,10 +85,10 @@ const device = (connection: Device['connection'] = 'online'): Device => ({
   repos: [],
   commandAccess: { enabled: false, shell: '/bin/sh', user: 'user' },
 })
-type Handler = (url: URL, init: RequestInit) => unknown | Promise<unknown>
+type Handler = (url: URL, init: RequestInit) => unknown
 function setup(handler: Handler, devices: Device[] = [device()]) {
   const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = new URL(String(input), 'https://baton.test')
+    const url = new URL(requestURL(input), 'https://baton.test')
     const result = url.pathname === '/api/v1/me' ? { csrf_token: 'csrf' } : await handler(url, init ?? {})
     if (result instanceof Response) return result
     if (result === undefined) throw new Error(`Unexpected request: ${url.pathname}${url.search}`)
@@ -99,6 +111,82 @@ function setup(handler: Handler, devices: Device[] = [device()]) {
 const rootResponse = { kind: 'roots', roots: [{ id: 'root-id', path: '/work' }], truncated: false }
 
 describe('HTTP thread contracts', () => {
+  it('keeps Cursor startup separate from saved, accepted and actually opened execution', async () => {
+    const cursorDevice = device()
+    cursorDevice.agents[0].kind = 'cursor'
+    let t = thread({ agent_type: 'cursor', opened_at: null, native_session_id: undefined, status: 'waiting_device' })
+    const events = [accepted()]
+    const { api } = setup((url) => (url.pathname.endsWith('/timeline') ? { events } : t), [cursorDevice])
+    expect(await api.getThread(threadId)).toMatchObject({ agent: 'cursor', starting: true })
+    expect(threadView(await api.getThread(threadId), cursorDevice).status.label).toBe('Starting…')
+    const op = await api.createThread({
+      deviceId,
+      folder: '/work',
+      agent: 'cursor',
+      model: '',
+      body: 'Hello',
+      clientId: 'cursor-create',
+    })
+    expect(op.phase).toBe('saved')
+    // 设备已持久接收消息，但尚未打开原生对话。
+    events.push(event(2, 'message.queued', { client_message_id: 'client-message' }))
+    expect(threadView(await api.getThread(threadId), cursorDevice).status.label).toBe('Starting…')
+    t = thread({ agent_type: 'cursor' })
+    expect(threadView(await api.getThread(threadId), cursorDevice).status.label).toBe('Idle')
+    t = thread({
+      agent_type: 'cursor',
+      opened_at: null,
+      status: 'stopped',
+      status_reason: 'Local sandbox could not start.',
+    })
+    expect(threadView(await api.getThread(threadId), cursorDevice).notice).toMatchObject({
+      title: 'Cursor could not start',
+      detail: expect.stringContaining('Local sandbox could not start.'),
+    })
+  })
+
+  it('rejects Cursor creation without explicit create capability', async () => {
+    const cursorDevice = device()
+    cursorDevice.agents[0] = {
+      ...cursorDevice.agents[0],
+      kind: 'cursor',
+      reason: 'Creation disabled.',
+      abilities: { ...cursorDevice.agents[0].abilities, create: false },
+    }
+    const { api, fetcher } = setup(() => thread(), [cursorDevice])
+    await expect(
+      api.createThread({ deviceId, folder: '/work', agent: 'cursor', model: '', body: 'Hello', clientId: 'id' }),
+    ).rejects.toMatchObject({ code: 'invalid', message: 'Creation disabled.' })
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it.each(['done', 'failed', 'stopped'] as const)(
+    'keeps Cursor resume pending through receipt ACK and opened report until %s completion',
+    async (outcome) => {
+      const cursorDevice = device()
+      cursorDevice.agents[0].kind = 'cursor'
+      let t = thread({ agent_type: 'cursor', status: 'stopped', resume_pending: true })
+      let events: ReturnType<typeof event>[] = []
+      const { api, refreshes } = setup((url) => (url.pathname.endsWith('/timeline') ? { events } : t), [cursorDevice])
+      const op = await api.resumeThread(threadId)
+      expect(op.phase).toBe('saved')
+      expect((await api.getThread(threadId)).resumePending).toBe(true)
+      expect(threadView(await api.getThread(threadId), cursorDevice).composer).toBe(false)
+      expect(await refreshes.get(op.id)!()).toMatchObject({ phase: 'saved' })
+      events = [event(1, 'thread.resumed', {})]
+      t = thread({ agent_type: 'cursor', resume_pending: true })
+      expect(await refreshes.get(op.id)!()).toMatchObject({ phase: 'saved' })
+      t = thread({
+        agent_type: 'cursor',
+        status: outcome === 'done' ? 'idle' : outcome === 'failed' ? 'unknown' : 'stopped',
+        status_reason: outcome === 'done' ? '' : 'Resume did not finish.',
+        resume_pending: false,
+      })
+      expect(await refreshes.get(op.id)!()).toMatchObject({ phase: outcome === 'done' ? 'done' : 'failed' })
+      expect((await api.getThread(threadId)).resumePending).toBe(false)
+    },
+  )
+
   it('reads only list pages and preserves summary titles and pending actions', async () => {
     const secondId = '0d28bd24-30ed-419b-8bf3-9b783b9be9ba'
     const { api, fetcher } = setup((url) => {
@@ -126,7 +214,7 @@ describe('HTTP thread contracts', () => {
       { id: secondId, status: 'running', pending: 'archive' },
     ])
     expect(fetcher).toHaveBeenCalledTimes(2)
-    expect(fetcher.mock.calls.some(([url]) => String(url).includes('cursor=next%2F%2B'))).toBe(true)
+    expect(fetcher.mock.calls.some(([url]) => requestURL(url).includes('cursor=next%2F%2B'))).toBe(true)
   })
 
   it('uses one request to list 20 threads and reads the timeline only for opened messages', async () => {
@@ -186,7 +274,7 @@ describe('HTTP thread contracts', () => {
   it('sends JSON with actual UUIDs and reuses both IDs after an uncertain create', async () => {
     const bodies: { client_thread_id: string; message: { client_message_id: string; content: string } }[] = []
     const { api } = setup((_url, init) => {
-      bodies.push(JSON.parse(String(init.body)))
+      bodies.push(JSON.parse(jsonBody(init.body)))
       if (bodies.length === 1) throw new Error('Lost response')
       return thread({ status: 'waiting_device', node_online: false })
     })
@@ -223,7 +311,7 @@ describe('HTTP thread contracts', () => {
     const bodies: Record<string, string>[] = []
     const { api, refreshes } = setup((url, init) => {
       if (init.method === 'POST') {
-        const body = JSON.parse(String(init.body)) as Record<string, string>
+        const body = JSON.parse(jsonBody(init.body)) as Record<string, string>
         bodies.push(body)
         return message({ client_message_id: body.client_message_id })
       }
@@ -286,7 +374,7 @@ describe('HTTP thread contracts', () => {
   it('uses real model and resume endpoints without claiming an immediate resume', async () => {
     const calls: { path: string; body: unknown }[] = []
     const { api } = setup((url, init) => {
-      if (init.method === 'POST') calls.push({ path: url.pathname, body: JSON.parse(String(init.body)) })
+      if (init.method === 'POST') calls.push({ path: url.pathname, body: JSON.parse(jsonBody(init.body)) })
       if (url.pathname.endsWith('/timeline')) return { events: [] }
       return thread({ status: 'stopped', model: url.pathname.endsWith('/model') ? 'second-model' : 'reported-model' })
     })
@@ -332,11 +420,11 @@ describe('HTTP thread contracts', () => {
     expect(recent.messages).toHaveLength(16)
     const firstID = `history:${threadId}:${encodeURIComponent('codex:native-session:400')}`
     expect(recent.messages[0].id).toBe(firstID)
-    expect(fetcher.mock.calls.some(([url]) => String(url).includes('cursor=16%3Adigest'))).toBe(true)
+    expect(fetcher.mock.calls.some(([url]) => requestURL(url).includes('cursor=16%3Adigest'))).toBe(true)
     const older = await api.readHistory(threadId, firstID)
     expect(older).toMatchObject({ state: 'ready', more: false })
     if (older.state === 'ready') expect(older.messages).toHaveLength(4)
-    expect(fetcher.mock.calls.every(([url]) => !String(url).includes('/history/messages'))).toBe(true)
+    expect(fetcher.mock.calls.every(([url]) => !requestURL(url).includes('/history/messages'))).toBe(true)
   })
 
   it('only returns native messages before the uniquely matched saved conversation', async () => {
@@ -467,7 +555,7 @@ describe('HTTP thread contracts', () => {
     expect(history).toMatchObject({ state: 'ready', gap: true, more: false })
     if (history.state !== 'ready') throw new Error('Expected ready history')
     expect(history.messages.map((message) => message.body)).toEqual(['first-page', 'second-page'])
-    expect(fetcher.mock.calls.some(([url]) => String(url).includes('cursor=2%3Adigest'))).toBe(true)
+    expect(fetcher.mock.calls.some(([url]) => requestURL(url).includes('cursor=2%3Adigest'))).toBe(true)
   })
 
   it('displays the bounded text of a complete but truncated JSON message with an explicit marker', async () => {
@@ -551,7 +639,7 @@ describe('HTTP thread contracts', () => {
       state: 'ready',
       steps: [{ kind: 'command', command: 'go test', output: 'ok' }],
     })
-    expect(String(fetcher.mock.calls.at(-1)![0])).toBe(`/api/v1/threads/${threadId}/trace?worker_turn_seq=3`)
+    expect(requestURL(fetcher.mock.calls.at(-1)![0])).toBe(`/api/v1/threads/${threadId}/trace?worker_turn_seq=3`)
     result = { ok: false, code: 'trace_missing' }
     expect(await api.readTrace(replyId)).toEqual({ state: 'unavailable', messageId: replyId, reason: 'missing' })
   })
@@ -565,13 +653,18 @@ describe('HTTP thread contracts', () => {
     expect((await api.setThreadModel({ threadId, model: 'second-model' })).model).toBe('second-model')
   })
 
-  it('does not complete an idle resume before a new device report', async () => {
+  it('does not complete an idle resume before execution completion', async () => {
     let events = [event(1, 'thread.resumed', {})]
-    const { api, refreshes } = setup((url) => (url.pathname.endsWith('/timeline') ? { events } : thread()))
+    let pending = true
+    const { api, refreshes } = setup((url) =>
+      url.pathname.endsWith('/timeline') ? { events } : thread({ resume_pending: pending }),
+    )
     const op = await api.resumeThread(threadId)
     expect(op.phase).toBe('saved')
     expect(await refreshes.get(op.id)!()).toMatchObject({ phase: 'saved' })
     events = [...events, event(2, 'thread.resumed', {})]
+    expect(await refreshes.get(op.id)!()).toMatchObject({ phase: 'saved' })
+    pending = false
     expect(await refreshes.get(op.id)!()).toMatchObject({ phase: 'done' })
   })
 
@@ -629,7 +722,7 @@ describe('HTTP thread contracts', () => {
       { kind: 'file', deviceId, path: '/work/result.txt', size: 25 },
       { kind: 'commit', repo: 'https://example.test/repo', sha: 'a'.repeat(40), subject: 'Save result' },
     ])
-    expect(fetcher.mock.calls.some(([url]) => String(url).includes('/files'))).toBe(false)
+    expect(fetcher.mock.calls.some(([url]) => requestURL(url).includes('/files'))).toBe(false)
   })
 
   it('maps an HTTP offline trace response and does not hide a permission failure', async () => {
@@ -657,10 +750,10 @@ describe('HTTP thread contracts', () => {
     const first = await Promise.all([api.readOutput(threadId), api.readOutput(threadId)])
     expect(first[0].chunks).toEqual([{ kind: 'text', text: 'turn-1' }])
     expect(first[1]).toEqual(first[0])
-    expect(fetcher.mock.calls.filter(([url]) => String(url).includes('/output'))).toHaveLength(1)
+    expect(fetcher.mock.calls.filter(([url]) => requestURL(url).includes('/output'))).toHaveLength(1)
     seq = 2
     expect((await api.readOutput(threadId)).chunks).toEqual([{ kind: 'text', text: 'turn-2' }])
-    expect(String(fetcher.mock.calls.at(-1)![0])).not.toContain('cursor=')
+    expect(requestURL(fetcher.mock.calls.at(-1)![0])).not.toContain('cursor=')
   })
 
   it('clears output when the worker reports completion before the coordinator snapshot', async () => {
@@ -757,7 +850,7 @@ describe('HTTP thread contracts', () => {
       { kind: 'gap' },
       { kind: 'text', text: 'last' },
     ])
-    expect(String(fetcher.mock.calls.at(-1)![0])).toContain('cursor=epoch%3A5')
+    expect(requestURL(fetcher.mock.calls.at(-1)![0])).toContain('cursor=epoch%3A5')
     t = thread({ status: 'idle' })
     expect((await api.readOutput(threadId)).chunks).toEqual([])
   })
@@ -781,7 +874,7 @@ describe('HTTP file contracts', () => {
       folders: ['/work/baton/src'],
       files: [{ path: '/work/baton/README.md', size: 31 }],
     })
-    expect(fetcher.mock.calls.some(([url]) => String(url).includes('cursor=page%2F%2B2'))).toBe(true)
+    expect(fetcher.mock.calls.some(([url]) => requestURL(url).includes('cursor=page%2F%2B2'))).toBe(true)
   })
 
   it('maps text preview size and truncation without filling content', async () => {
@@ -827,7 +920,7 @@ describe('HTTP file contracts', () => {
   it.each(['/work-other/file', '/work/../private/file'])('does not send an unauthorized path %s', async (path) => {
     const { api, fetcher } = setup(() => rootResponse)
     expect(await api.readFile(deviceId, path)).toMatchObject({ state: 'unavailable', reason: 'outsideFolders' })
-    expect(fetcher.mock.calls.every(([url]) => !String(url).includes('root_id='))).toBe(true)
+    expect(fetcher.mock.calls.every(([url]) => !requestURL(url).includes('root_id='))).toBe(true)
   })
 
   it('preserves transient failures and refuses an incomplete directory scan', async () => {

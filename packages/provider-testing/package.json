@@ -9,8 +9,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --config ../../vitest.config.ts",
-    "lint": "eslint src"
+    "test": "vp test run --config ../../vitest.config.ts",
+    "lint": "vp lint src"
   },
   "dependencies": {
     "@baton/providers": "workspace:*",
@@ -22,6 +22,7 @@
     "@types/node": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:",
-    "@cursor/sdk": "1.0.35"
+    "@cursor/sdk": "1.0.35",
+    "vite-plus": "catalog:"
   }
 }

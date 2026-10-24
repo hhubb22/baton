@@ -1,20 +1,32 @@
 # TypeScript 开发与测量
 
-这里包含 TS batond 的本地开发入口、完整 Worker 测量，以及 P0 阶段的独立测量脚本。结果输出为 JSON，包含 Node、系统和架构。请在目标系统本机执行；容器结果必须注明宿主虚拟机和数据库所在文件系统。
+这里包含 TS 开发中心、远程节点与本地 Thread 的构建入口、完整 Worker 测量，以及 P0 阶段的独立测量脚本。TS 开发入口独立于 Go 发布入口；根构建和 Docker 镜像继续发布 Go，迁移 T5 负责发布切换。测量结果输出为 JSON，包含 Node、系统和架构。请在目标系统本机执行；容器结果必须注明宿主虚拟机和数据库所在文件系统。
 
 ## 本地开发
 
-`build-batond.mjs`、`run-batond.mjs` 和 `worker-startup.mjs` 使用 workspace 依赖。在仓库根目录准备 Node 26 和 pnpm，然后安装依赖：
+`build-server.mjs`、`run-server.mjs`、`build-batond.mjs`、`run-batond.mjs` 和 `worker-startup.mjs` 使用 workspace 依赖。在仓库根目录准备 Node 26 和 pnpm 12，然后安装依赖：
 
 ```sh
-pnpm install --ignore-scripts
+pnpm install --frozen-lockfile --ignore-scripts
+node tools/ts-migration/build-server.mjs
+node tools/ts-migration/run-server.mjs --help
 node tools/ts-migration/build-batond.mjs
 node tools/ts-migration/run-batond.mjs --help
 ```
 
-`build-batond.mjs [输出路径]` 将真实 batond 打包为 CJS，默认输出 `apps/batond/dist/batond.cjs`，SDK 保持外置。`run-batond.mjs [batond 参数...]` 先构建再运行开发 bundle，并向子进程转发 SIGINT/SIGTERM。两者使用执行脚本的 Node；SEA 测量另需支持 `--build-sea` 的官方 Node，macOS 需要系统 `codesign`。
+`build-server.mjs [输出路径]` 先通过 Vite+ 的 `vp build` 调用 Vite，将网页构建到输出 bundle 旁的 `web/`，再将中心打包为 CJS，默认输出 `apps/server/dist/server.cjs`，并将根目录的 SQL 迁移复制到 bundle 旁的 `migrations/`。`run-server.mjs [中心参数...]` 先构建再运行开发 bundle，支持 `migrate`、`serve`、`admin employee create` 和 `admin employee reset-password`；向子进程转发 SIGINT/SIGTERM。对应 workspace 命令为 `pnpm --filter @baton/server build` 与 `pnpm --filter @baton/server dev <参数...>`。
 
-适配器行为验证统一使用上游 SDK 静态转录、确定性回放和本地替身，入口见 [本地 Thread 文档](../../apps/batond/README.md#验证)。多轮输入、输入去重、独立历史、跨进程恢复和取消通过离线测试验证；进程回收使用本地替身进程。测试与验证脚本禁止依赖真实 API Key、在线模型推理或外部真实服务。
+中心 `build` 和 `dev` 均包含网页构建，默认即可提供网页。静态目录默认是 bundle 旁的 `web/`，也可由 `BATON_WEB_DIR` 指定。若只需重建默认输出布局的网页，可单独运行：
+
+```sh
+pnpm --dir web build --outDir ../apps/server/dist/web
+```
+
+本机数据库配置、账号初始化、迁移、HTTPS 与 `serve` 命令见 [中心开发文档](../../apps/server/README.md#本地账号迁移与启动)。节点通过 `up/register/run` 注册或复用身份、建立 WSS 连接；私有注册凭据、CA 和 `--workspace` 用法见 [节点接入文档](../../apps/batond/README.md#远程节点)。
+
+`build-batond.mjs [输出路径]` 将真实 batond 打包为 CJS，默认输出 `apps/batond/dist/batond.cjs`，SDK 保持外置。`run-batond.mjs [batond 参数...]` 先构建再运行开发 bundle，并向子进程转发 SIGINT/SIGTERM。这些构建与运行脚本使用执行脚本的 Node；SEA 测量另需支持 `--build-sea` 的官方 Node，macOS 需要系统 `codesign`。
+
+适配器行为验证统一使用上游 SDK 静态转录、确定性回放和本地替身，入口见 [节点与 Thread 文档](../../apps/batond/README.md#验证) 及 [中心验证文档](../../apps/server/README.md#验证)。多轮输入、输入去重、独立历史、跨进程恢复和取消通过离线测试验证；进程回收使用本地替身进程。测试与验证脚本禁止依赖真实 API Key、在线模型推理或外部真实服务。
 
 ## P0 测量依赖
 

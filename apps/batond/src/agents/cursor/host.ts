@@ -20,6 +20,7 @@ import {
   type LocalAgentStore,
   type InteractionUpdate,
 } from '@baton/providers/cursor'
+import { makeOutputMailbox } from '../../worker/output.ts'
 import { installHostProcessGroup } from '../../platform/host-process-group.ts'
 import { ensurePrivateDirectory } from '../../platform/private.ts'
 import { findSent, validatePreparation } from './evidence.ts'
@@ -244,7 +245,8 @@ export const makeCursorHostHandlers = (deps: CursorHostDependencies) =>
     const scope = yield* Scope.Scope
     const regular = Semaphore.makeUnsafe(7)
     const control = Semaphore.makeUnsafe(1)
-    const events = yield* Queue.dropping<HostEvent, CursorHostError>(256)
+    const events = yield* Queue.bounded<ExecutionEvent, CursorHostError>(256)
+    const output = makeOutputMailbox()
     let mapping: NativeMapping | undefined
     let session: CursorAgentSdkSession | undefined
     let store: Store | undefined
@@ -252,25 +254,20 @@ export const makeCursorHostHandlers = (deps: CursorHostDependencies) =>
     let sequence = 0
     let cancelled = false
     let closed = false
-    let failed = false
     let sending = false
     let forceNextInput = false
     let executionTimeoutMs = 0
     let run: CursorAgentSdkRun | undefined
+    let activeInput: object | undefined
     const submitted = new Set<string>()
     const error = (message: string) => new CursorHostError({ message })
     const emit = (event: ExecutionEvent) =>
       Effect.gen(function* () {
-        if (failed) return
-        if (!(yield* Queue.offer(events, { generation, sequence: ++sequence, event }))) {
-          failed = true
-          yield* Queue.clear(events)
-          yield* Queue.offer(events, {
-            generation,
-            sequence: ++sequence,
-            event: { type: 'uncertain', reason: 'Cursor host event buffer overflow' },
-          })
+        if (event.type === 'delta') {
+          output.offer(event)
+          return
         }
+        yield* Queue.offer(events, event)
       })
     const sdkFailure = (cause: unknown, operation: string): CursorHostError => {
       if (cause instanceof CursorHostError) return cause
@@ -428,7 +425,7 @@ export const makeCursorHostHandlers = (deps: CursorHostDependencies) =>
       send: ({ message, preparation }) =>
         regular.withPermit(
           Effect.gen(function* () {
-            if (!session || !mapping || !store || cancelled || closed || failed || sending || run)
+            if (!session || !mapping || !store || cancelled || closed || sending || run)
               return yield* Effect.fail(error('Cursor cannot submit in its current state'))
             if (message.mode !== 'queue' || submitted.has(message.id))
               return yield* Effect.fail(error('Cursor input replay or steer is not supported'))
@@ -443,11 +440,15 @@ export const makeCursorHostHandlers = (deps: CursorHostDependencies) =>
             const localStore = store
             // The callback and wait fiber share this input, never the next input's mutable state.
             const identity = { nativeSessionId: native.nativeSessionId, messageId: message.id, executionId: '' }
+            const token = {}
+            activeInput = token
             const assistant = { text: '', index: 0 }
             const earlyUpdates: InteractionUpdate[] = []
+            let earlyBytes = 0
             let callbacksReady = false
             const update = (value: InteractionUpdate) =>
               Effect.gen(function* () {
+                if (activeInput !== token) return
                 const text = textFromInteractionUpdate(value)
                 if (text !== undefined) {
                   assistant.text += text
@@ -482,9 +483,12 @@ export const makeCursorHostHandlers = (deps: CursorHostDependencies) =>
                   },
                   onDelta: (value) =>
                     Effect.gen(function* () {
+                      if (activeInput !== token) return
                       if (callbacksReady) return yield* update(value)
-                      if (earlyUpdates.length >= 256)
+                      const bytes = Buffer.byteLength(JSON.stringify(value))
+                      if (earlyUpdates.length >= 256 || earlyBytes + bytes > 1024 * 1024)
                         return yield* Effect.fail(error('Cursor startup event buffer overflow'))
+                      earlyBytes += bytes
                       earlyUpdates.push(value)
                     }),
                 })
@@ -520,6 +524,7 @@ export const makeCursorHostHandlers = (deps: CursorHostDependencies) =>
                 Effect.ensuring(
                   Effect.sync(() => {
                     if (run === handle) run = undefined
+                    if (activeInput === token) activeInput = undefined
                   }),
                 ),
                 Effect.forkIn(scope),
@@ -546,7 +551,21 @@ export const makeCursorHostHandlers = (deps: CursorHostDependencies) =>
           }),
         ),
       events: () =>
-        Stream.unwrap(Effect.as(regular.take(1), Stream.fromQueue(events).pipe(Stream.ensuring(regular.release(1))))),
+        Stream.unwrap(
+          Effect.as(
+            regular.take(1),
+            Stream.fromQueue(events).pipe(
+              Stream.merge(
+                output.stream.pipe(
+                  Stream.map((event): ExecutionEvent => ({ ...event, type: 'delta', id: event.executionId })),
+                ),
+              ),
+              // Sequence transport frames after lossy text buffering, keeping control continuity intact.
+              Stream.map((event): HostEvent => ({ generation, sequence: ++sequence, event })),
+              Stream.ensuring(regular.release(1)),
+            ),
+          ),
+        ),
       abort: () => {
         // This handler runs outside the seven ordinary request permits.
         cancelled = true

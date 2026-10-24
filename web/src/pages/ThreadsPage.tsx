@@ -9,6 +9,8 @@ import { useNow } from '../app/useNow'
 import { ClientError } from '../data/client'
 import {
   agentNames,
+  agentUnavailableReason,
+  canCreateAgent,
   defaultLocation,
   folderName,
   recentLocations,
@@ -21,7 +23,7 @@ import {
   type ThreadGroup,
 } from '../data/derive'
 import { newClientId, useCreateThread, useDevices, useProjects, useSession, useThreads } from '../data/queries'
-import type { AgentKind, Device, DeviceAgent, Project, Thread } from '../data/types'
+import type { AgentKind, Device, Project, Thread } from '../data/types'
 import { text } from '../theme/text'
 import { colors, radius, size, space } from '../theme/tokens.stylex'
 import { Avatar } from '../ui/Avatar'
@@ -73,12 +75,6 @@ const styles = stylex.create({
   },
   muted: { color: colors.muted },
 })
-
-const problemNotes: Record<NonNullable<DeviceAgent['problem']>, string> = {
-  notInstalled: 'Not installed',
-  signedOut: 'Sign-in expired',
-  unavailable: 'Agent unavailable',
-}
 
 interface AgentChoice {
   agent: AgentKind
@@ -169,18 +165,10 @@ function ModelMenu({
       {(device?.agents ?? []).map((agent) => (
         <div key={agent.kind}>
           <MenuHeading>{agentNames[agent.kind]}</MenuHeading>
-          {agent.problem ? (
+          {!canCreateAgent(agent) ? (
             <MenuOption
-              note={problemNotes[agent.problem]}
-              onSelect={() =>
-                onUnavailable(
-                  agent.problem === 'notInstalled'
-                    ? `${agentNames[agent.kind]} is not installed on ${device?.name}. Install it on the device, then try again.`
-                    : agent.problem === 'signedOut'
-                      ? `${agentNames[agent.kind]} is signed out on ${device?.name}. Sign in on the device, then try again.`
-                      : `${agentNames[agent.kind]} is unavailable on ${device?.name}. Check the agent on the device, then try again.`,
-                )
-              }
+              note={agentUnavailableReason(agent)}
+              onSelect={() => onUnavailable(agentUnavailableReason(agent))}
             >
               {agentNames[agent.kind]}
             </MenuOption>
@@ -382,7 +370,7 @@ export function ThreadsPage() {
   const filterDevice = allDevices.find((item) => item.id === search.device)
   const filterProject = projects.data?.find((item) => item.id === search.project)
   const filtering = search.device !== undefined || search.project !== undefined || archived
-  const statusLine = error ?? (create.isPending ? 'Starting chat…' : null)
+  const statusLine = error ?? (create.isPending ? 'Saving chat…' : null)
 
   let list
   if (threads.isPending) {
@@ -444,7 +432,17 @@ export function ThreadsPage() {
     <div {...stylex.props(styles.layout)}>
       <Page title="Threads">
         <div {...stylex.props(styles.content)}>
-          {devices.data && allDevices.length === 0 ? (
+          {devices.isError ? (
+            <Banner
+              icon="alert"
+              title="Could not load devices"
+              action={
+                <Button small onClick={() => void devices.refetch()}>
+                  Retry
+                </Button>
+              }
+            />
+          ) : devices.data && allDevices.length === 0 ? (
             <Banner
               icon="device"
               title="Connect a device first"
@@ -516,29 +514,33 @@ export function ThreadsPage() {
                 </MenuOption>
               ))}
             </Menu>
-            <Menu
-              trigger={
-                <Chip icon="tasks">
-                  {search.project === 'none' ? 'No project' : (filterProject?.name ?? 'All projects')}
-                </Chip>
-              }
-            >
-              <MenuOption selected={!search.project} onSelect={() => setSearch({ project: undefined })}>
-                All projects
-              </MenuOption>
-              <MenuOption selected={search.project === 'none'} onSelect={() => setSearch({ project: 'none' })}>
-                No project
-              </MenuOption>
-              {projects.data?.map((item) => (
-                <MenuOption
-                  key={item.id}
-                  selected={search.project === item.id}
-                  onSelect={() => setSearch({ project: item.id })}
-                >
-                  {item.name}
+            {projects.isError ? (
+              <span {...stylex.props(text.caption, styles.muted)}>Projects unavailable</span>
+            ) : (
+              <Menu
+                trigger={
+                  <Chip icon="tasks">
+                    {search.project === 'none' ? 'No project' : (filterProject?.name ?? 'All projects')}
+                  </Chip>
+                }
+              >
+                <MenuOption selected={!search.project} onSelect={() => setSearch({ project: undefined })}>
+                  All projects
                 </MenuOption>
-              ))}
-            </Menu>
+                <MenuOption selected={search.project === 'none'} onSelect={() => setSearch({ project: 'none' })}>
+                  No project
+                </MenuOption>
+                {projects.data?.map((item) => (
+                  <MenuOption
+                    key={item.id}
+                    selected={search.project === item.id}
+                    onSelect={() => setSearch({ project: item.id })}
+                  >
+                    {item.name}
+                  </MenuOption>
+                ))}
+              </Menu>
+            )}
             <Menu trigger={<Chip icon="archive">{archived ? 'Archived' : 'Active'}</Chip>}>
               <MenuOption selected={!archived} onSelect={() => setSearch({ archived: undefined })}>
                 Active

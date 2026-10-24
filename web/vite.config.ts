@@ -1,8 +1,8 @@
 import stylex from '@stylexjs/unplugin/vite'
 import react from '@vitejs/plugin-react'
 import { fileURLToPath } from 'node:url'
-import type { Plugin } from 'vite'
-import { defineConfig } from 'vitest/config'
+import type { Plugin } from 'vite-plus'
+import { defineConfig, lazyPlugins } from 'vite-plus'
 
 const root = fileURLToPath(new URL('.', import.meta.url))
 
@@ -19,7 +19,7 @@ if (process.env.VITEST) delete stylexPlugin.configureServer
 const backend = process.env.BATON_DEV_BACKEND
 
 export default defineConfig({
-  plugins: [stylexPlugin, react()],
+  plugins: lazyPlugins(() => [stylexPlugin, react()]),
   server: {
     host: 'localhost',
     port: 5173,

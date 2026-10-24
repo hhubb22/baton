@@ -459,8 +459,8 @@ it.layer(NodeServices.layer)("effect-codex-app-server protocol", (it) => {
         stdin: baseStdio.stdin.pipe(
           Stream.ensuring(Deferred.succeed(readerStopped, undefined).pipe(Effect.asVoid)),
         ),
-        stdout: baseStdio.stdout,
-        stderr: baseStdio.stderr,
+        stdout: (options) => baseStdio.stdout(options),
+        stderr: (options) => baseStdio.stderr(options),
       });
       const transport = yield* CodexProtocol.makeCodexAppServerPatchedProtocol({
         stdio,

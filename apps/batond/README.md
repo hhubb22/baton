@@ -1,6 +1,8 @@
-# TypeScript 本地 Thread
+# TypeScript 节点与 Thread
 
-本地调用方通过认证 IPC 使用独立的 Worker；每个 Cursor Thread 独占一个 cursor-host。Worker 管理 SQLite、消息排队、Turn、回复和报告，cursor-host 通过复用的 SDK/runtime 执行本机 Cursor。服务端、网页与 Project 的远程接入由迁移后续切片实现。
+`@baton/batond` 通过出站 WSS 连接 [TypeScript 开发中心](../server/README.md)，提供 Cursor 远程 Thread。节点守护进程保存设备身份、命令与报告账本，网页可发送排队消息、撤回、停止、恢复并读取实时输出。每个 Thread 使用独立 Worker，每个 Cursor Thread 独占一个 cursor-host；Worker 管理 SQLite、Turn、回复和报告，cursor-host 通过复用的 SDK/runtime 执行本机 Cursor。本地调用方也可直接通过认证 IPC 使用 Worker。
+
+Go 的 `cmd/baton-server`、`cmd/batond` 和根目录构建脚本仍是发布入口，TypeScript 发布切换在迁移 T5 进行。TS 当前开放 Cursor 远程 Thread，Project、设备管理、其他 Agent 与统一历史的范围和实际拒绝响应见 [中心能力表](../server/README.md#当前能力范围)。
 
 ## 开发入口
 
@@ -12,9 +14,36 @@ pnpm --filter @baton/batond dev help
 pnpm --filter @baton/batond dev probe
 ```
 
-`dev` 构建独立的 `dist/batond.cjs` 后运行。也可以运行 `pnpm --filter @baton/batond build`，再直接调用 `node apps/batond/dist/batond.cjs`。发布构建使用根目录原有入口。
+`dev` 构建独立的 `dist/batond.cjs` 后运行。也可以运行 `pnpm --filter @baton/batond build`，再直接调用 `node apps/batond/dist/batond.cjs`。中心账号初始化、数据库迁移、TLS 配置和服务启动见 [中心文档](../server/README.md#本地账号迁移与启动)。`pnpm --filter @baton/server build` 和 `dev` 会自动将网页构建到中心 bundle 旁的 `web/`，默认无需单独构建前端。
 
 显式设置 `CURSOR_API_KEY` 后运行 probe。它在独立 host 中核查 SDK 与辅助程序，调用公开的认证、模型查询接口，不建立执行会话、不发送 prompt、不打开登录浏览器。macOS arm64 / SDK 1.0.35 已启用；Linux 和 Windows 组合保持 `unverified`，依赖不满足时返回不可用原因。只有 `available` 且 `capabilities.create` 为 true 时，CLI 才允许新建。凭据只经子进程环境传递，不写入配置、命令、报告或日志。
+
+## 远程节点
+
+登录中心网页并完成首次改密后，从 Devices 取得一次性注册凭据。将凭据保存到私有文件，POSIX 文件权限为 0600，再接入中心：
+
+```sh
+pnpm --filter @baton/batond dev up \
+  --coordinator https://localhost:8443 \
+  --enrollment-file /绝对路径/enrollment-token \
+  --workspace /绝对路径/工作目录 \
+  --ca-file /绝对路径/local-ca.crt
+```
+
+凭据也可来自 `BATON_ENROLLMENT_TOKEN`。`up` 首次注册并保存身份，已有身份时直接连接；`register` 只注册且拒绝覆盖已有身份；`run` 读取已有身份。默认从保存的 HTTPS 中心地址推导 `/v1/node` 的 WSS 地址，`--relay` 可显式指定。后续启动示例：
+
+```sh
+pnpm --filter @baton/batond dev run --ca-file /绝对路径/local-ca.crt
+pnpm --filter @baton/batond dev run --relay wss://localhost:8443/v1/node --ca-file /绝对路径/local-ca.crt
+```
+
+`--ca-file` 同时供 HTTPS 注册和 WSS 连接校验证书，使用系统已信任证书时可省略；该路径不会保存在身份中。中心地址必须为 HTTPS，Relay 必须为 WSS，证书需匹配访问主机名。
+
+所有节点命令支持 `--data-dir`，默认 `~/.baton-ts`。仅在授权配置不存在时登记用户主目录，已有配置包括空列表都会保留；`--workspace` 在连接前按真实绝对路径幂等登记工作目录。当前目录选择器只读取授权根及子目录，网页增删根尚未开放。节点锁、身份与报告恢复细节见 [远程节点模块](src/daemon/README.md)，实时输出的游标和缓冲规则见 [Worker 文档](src/worker/README.md#real-time-output)。
+
+节点连接和能力探测分别进行。Cursor 探测完成前上报 `unverified`，创建 Thread 需等待 `available`；设备进程需显式配置 `CURSOR_API_KEY`。节点退出不结束独立 Worker，重启后从账本重新发现存活 Worker；未确认命令继续使用原 ID，已接收输入不会因为重连再次发送。
+
+## 本地 Thread 命令
 
 ```sh
 pnpm --filter @baton/batond dev open --cwd /绝对路径/工作目录
@@ -27,7 +56,7 @@ pnpm --filter @baton/batond dev resume --thread-id <UUID>
 
 `open` 可用 `--model` 选择模型；未指定时使用 SDK 原生的 `default`。Thread 内固定该选择，轮间切换与 steer 暂未开放。`open` 返回 Thread ID 和持久接收回执。启动、发送、恢复和停止的实际终态通过 `command --command-id <UUID>` 或 `reports` 查询；Worker 就绪与 Agent 就绪分别报告。`message` 支持 `--message-id`，执行命令支持 `--command-id`，重试时保留原标识。相同命令 ID、相同内容复用回执和结果，内容冲突会被拒绝。
 
-`withdraw --message-id <ID>` 撤回尚未提交的输入。`reports --after-worker-seq <序号>` 顺序读取有界报告，`ack --event-id <UUID> --worker-seq <序号>` 确认已消费报告。当前历史入口提供 Cursor 的基本原生 user/assistant 消息；公共历史分页与缓存由迁移 T4 提供。
+`withdraw --message-id <ID>` 撤回尚未提交的输入。`reports --after-worker-seq <序号>` 顺序读取有界报告，`ack --event-id <UUID> --worker-seq <序号>` 确认已消费报告。本地 `history` 提供 Cursor 的基本原生 user/assistant 消息；网页原生历史当前返回 `ok:false`，在线设备为 `history_unavailable`、离线设备为 `node_offline`。统一历史与公共分页属于迁移 T4。
 
 ## 持久化与恢复
 
@@ -38,6 +67,12 @@ pnpm --filter @baton/batond dev resume --thread-id <UUID>
 Worker 重启后，queued 输入可继续调度；已有 intent 只查询原生历史，无法证明已接收时标记 unknown，保留原消息结果。员工显式发送新输入或 resume 时，Worker 先确认旧进程树已回收，再恢复既有原生会话，旧 queued 撤回、旧 unknown 输入保持终态。恢复绑定原生会话、工作目录和私有 store，不重发输入、不新建空会话代替恢复。batond 或本地 CLI 退出后，存活 Worker 继续执行，后续调用通过原 IPC 重连。
 
 停止先持久登记，再中断启动、准备或发送，撤回 queued 输入；已提交的 intent 通过历史核查裁决。取消响应与真实终止分别处理，最多一分钟后回收所属进程树。POSIX 的 SDK spawn/fork 继承 cursor-host 组，宿主取消与回合结束均核查活动子进程，Worker 崩溃时 watchdog 按该组回收。首次打开被取消时，迟到的 SDK 实例会被回收，该命令不会补报打开成功。
+
+## 追踪
+
+节点与独立 Worker 使用 `@baton/telemetry`，默认服务名为 `batond` 和 `baton-worker`。设置 `OTEL_EXPORTER_OTLP_ENDPOINT` 或 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` 可启用 OTLP/HTTP JSON 导出，Worker 继承配置；默认不连接采集端。配置和本地查看命令见 [中心追踪说明](../server/README.md#http-契约与追踪)。
+
+中心持久命令携带标准 trace context，经节点账本和认证 IPC 传入 Worker。接收、派发、执行和恢复按命令、Thread 与原始上下文关联；追踪元数据独立于命令和消息的业务摘要，重试不会因为新的 span 身份而产生内容冲突。SQLite 提交核查与执行恢复语义继续由账本决定。
 
 ## 验证
 
@@ -50,4 +85,4 @@ pnpm --filter @baton/batond lint
 pnpm --filter @baton/batond test
 ```
 
-适配器行为验证仅使用上游 SDK 静态转录、确定性回放和本地替身，驱动实际 SDK 封装、RPC、Worker 和 SQLite。测试覆盖输入不重发、命令去重、停止竞态、未知终态、独立历史、跨进程恢复和提交核查，禁止依赖真实 API Key、在线模型推理或外部真实服务。完整入口、SQLite 与本地进程测量见 [迁移工具](../../tools/ts-migration/README.md)。
+适配器行为验证仅使用上游 SDK 静态转录、确定性回放和本地替身，驱动实际 SDK 封装、RPC、Worker 和 SQLite。测试覆盖输入不重发、命令去重、停止竞态、未知终态、独立历史、跨进程恢复、提交核查、输出字节游标与洪泛，以及 daemon 断线、持久报告和存活 Worker 重发现，禁止依赖真实 API Key、在线模型推理或外部真实服务。中心与独立 Worker 的完整远程链路验证见 [中心文档](../server/README.md#验证)。完整入口、SQLite 与本地进程测量见 [迁移工具](../../tools/ts-migration/README.md)。

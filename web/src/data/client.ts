@@ -57,6 +57,7 @@ export interface BatonClient {
   listProjectEntries(projectId: ID): Promise<ProjectEntry[]>
   listProjectMemory(projectId: ID): Promise<MemoryNote[]>
   listThreads(): Promise<Thread[]>
+  getThread(threadId: ID): Promise<Thread>
   listMessages(threadId: ID): Promise<Message[]>
   listInbox(): Promise<InboxItem[]>
   readFile(deviceId: ID, path: string): Promise<FilePreview>

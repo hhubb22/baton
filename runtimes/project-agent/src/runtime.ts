@@ -1,4 +1,4 @@
-import { Agent, type StreamFn } from "@earendil-works/pi-agent-core";
+import { Agent, type StreamFn } from '@earendil-works/pi-agent-core'
 import {
   createAssistantMessageEventStream,
   isContextOverflow,
@@ -7,19 +7,13 @@ import {
   type Models,
   type ToolCall,
   type ToolResultMessage,
-} from "@earendil-works/pi-ai";
-import { randomUUID } from "node:crypto";
-import { setTimeout as delay } from "node:timers/promises";
-import {
-  eventMessage,
-  RuntimeError,
-  type Bootstrap,
-  type Event,
-  type RPC,
-} from "./protocol.js";
-import { toolDefinitions } from "./tools.js";
-import { batonMessage, modelContext } from "./tool-names.js";
-import { modelMessages, promptFor } from "./context.js";
+} from '@earendil-works/pi-ai'
+import { randomUUID } from 'node:crypto'
+import { setTimeout as delay } from 'node:timers/promises'
+import { eventMessage, RuntimeError, type Bootstrap, type Event, type RPC } from './protocol.js'
+import { toolDefinitions } from './tools.js'
+import { batonMessage, modelContext } from './tool-names.js'
+import { modelMessages, promptFor } from './context.js'
 import {
   clearedToolResults,
   compactionSettings,
@@ -30,210 +24,167 @@ import {
   summaryText,
   type CompactionPayload,
   type CompactionSettings,
-} from "./compaction.js";
+} from './compaction.js'
 
-export { modelMessages } from "./context.js";
+export { modelMessages } from './context.js'
 
-export const IDLE_MS = 180_000;
-export const RUN_MS = 900_000;
-export const RETRIES = [5_000, 15_000, 45_000];
+export const IDLE_MS = 180_000
+export const RUN_MS = 900_000
+export const RETRIES = [5_000, 15_000, 45_000]
 export interface Clock {
-  now(): number;
-  sleep(ms: number): Promise<void>;
+  now(): number
+  sleep(ms: number): Promise<void>
 }
-const clock: Clock = { now: () => performance.now(), sleep: (ms) => delay(ms) };
+const clock: Clock = { now: () => performance.now(), sleep: (ms) => delay(ms) }
 export class ProjectRuntime {
-  private boot!: Bootstrap;
-  private events: Event[] = [];
-  private seq = 0;
-  private results = new Map<string, ToolResultMessage>();
-  private started = 0;
-  private stopAfterWait = false;
-  private compaction: CompactionSettings;
+  private boot!: Bootstrap
+  private events: Event[] = []
+  private seq = 0
+  private results = new Map<string, ToolResultMessage>()
+  private started = 0
+  private stopAfterWait = false
+  private compaction: CompactionSettings
   constructor(
     private rpc: RPC,
     private models: Models,
     private timer: Clock = clock,
     compaction: Partial<CompactionSettings> = {},
   ) {
-    this.compaction = compactionSettings(compaction);
+    this.compaction = compactionSettings(compaction)
   }
   private model() {
-    const model = this.models.getModel(
-      this.boot.project.agent.provider,
-      this.boot.project.agent.model,
-    );
-    if (
-      !model ||
-      !Number.isFinite(model.contextWindow) ||
-      model.contextWindow <= 0
-    )
-      throw new RuntimeError("model_not_found");
-    return model;
+    const model = this.models.getModel(this.boot.project.agent.provider, this.boot.project.agent.model)
+    if (!model || !Number.isFinite(model.contextWindow) || model.contextWindow <= 0)
+      throw new RuntimeError('model_not_found')
+    return model
   }
   private async saveCompaction(payload: CompactionPayload): Promise<void> {
-    const candidate: Event = { seq: this.seq + 1, kind: "compaction", payload };
-    payload.tokens_before = estimateMessages(
-      modelMessages(this.boot, this.events),
-    );
-    payload.tokens_after = estimateMessages(
-      modelMessages({ ...this.boot, compaction: candidate }, this.events),
-    );
+    const candidate: Event = { seq: this.seq + 1, kind: 'compaction', payload }
+    payload.tokens_before = estimateMessages(modelMessages(this.boot, this.events))
+    payload.tokens_after = estimateMessages(modelMessages({ ...this.boot, compaction: candidate }, this.events))
     if (
       payload.tokens_after >= payload.tokens_before ||
       Buffer.byteLength(JSON.stringify(payload, null, 1)) > 160 * 1024
     )
-      throw new RuntimeError("invalid_compaction_summary");
+      throw new RuntimeError('invalid_compaction_summary')
     const request = {
-      operation: "commit_compaction",
+      operation: 'commit_compaction',
       last_seq: this.seq,
       client_event_id: randomUUID(),
       payload,
-    };
-    let saved: Event;
+    }
+    let saved: Event
     for (let attempt = 0; ; attempt++) {
       try {
-        saved = await this.rpc.call(request);
-        break;
+        saved = await this.rpc.call(request)
+        break
       } catch (error) {
-        if (error instanceof RuntimeError && error.code !== "unavailable")
-          throw error;
-        if (attempt === RETRIES.length) throw error;
-        await this.timer.sleep(RETRIES[attempt]);
+        if (error instanceof RuntimeError && error.code !== 'unavailable') throw error
+        if (attempt === RETRIES.length) throw error
+        await this.timer.sleep(RETRIES[attempt])
       }
     }
-    if (saved.kind !== "compaction" || saved.seq !== candidate.seq)
-      throw new RuntimeError("invalid_compaction_event");
-    this.seq = saved.seq;
-    this.boot.compaction = saved;
-    this.boot.compaction_seq = saved.seq;
-    this.events = this.events.filter((e) => e.seq > payload.through_seq);
-    this.events.push(saved);
-    this.results.clear();
+    if (saved.kind !== 'compaction' || saved.seq !== candidate.seq) throw new RuntimeError('invalid_compaction_event')
+    this.seq = saved.seq
+    this.boot.compaction = saved
+    this.boot.compaction_seq = saved.seq
+    this.events = this.events.filter((e) => e.seq > payload.through_seq)
+    this.events.push(saved)
+    this.results.clear()
     for (const event of this.events)
-      if (event.kind === "tool_result") {
-        const message = eventMessage(event) as ToolResultMessage;
-        this.results.set(message.toolCallId, message);
+      if (event.kind === 'tool_result') {
+        const message = eventMessage(event) as ToolResultMessage
+        this.results.set(message.toolCallId, message)
       }
   }
-  private async compact(
-    ratio: number,
-    signal?: AbortSignal,
-    force = false,
-  ): Promise<boolean> {
+  private async compact(ratio: number, signal?: AbortSignal, force = false): Promise<boolean> {
     // 序号冲突会丢弃旧摘要，从中心的新快照重新选取范围。
     let changed = false,
-      conflicts = 0;
-    for (let pass = 0; pass < 3; ) {
+      conflicts = 0
+    for (let pass = 0; pass < 3;) {
       try {
-        if (!(await this.compactOnce(ratio, signal, force && !changed)))
-          return changed;
-        changed = true;
-        pass++;
+        if (!(await this.compactOnce(ratio, signal, force && !changed))) return changed
+        changed = true
+        pass++
       } catch (error) {
-        if (
-          !(error instanceof RuntimeError) ||
-          error.code !== "conflict" ||
-          conflicts++ === 1
-        )
-          throw error;
-        await this.reload();
+        if (!(error instanceof RuntimeError) || error.code !== 'conflict' || conflicts++ === 1) throw error
+        await this.reload()
       }
     }
-    return changed;
+    return changed
   }
-  private async compactOnce(
-    ratio: number,
-    signal?: AbortSignal,
-    force = false,
-  ): Promise<boolean> {
+  private async compactOnce(ratio: number, signal?: AbortSignal, force = false): Promise<boolean> {
     const model = this.model(),
-      window = model.contextWindow;
-    const outputReserve = Math.min(32000, model.maxTokens);
-    const threshold = Math.min(window * ratio, window - outputReserve);
-    if (!force && contextTokens(this.boot, this.events) <= threshold)
-      return false;
-    signal?.throwIfAborted();
-    let changed = false;
-    const previous = this.boot.compaction?.payload;
-    const cleared = clearedToolResults(this.boot, this.events, this.compaction);
+      window = model.contextWindow
+    const outputReserve = Math.min(32000, model.maxTokens)
+    const threshold = Math.min(window * ratio, window - outputReserve)
+    if (!force && contextTokens(this.boot, this.events) <= threshold) return false
+    signal?.throwIfAborted()
+    let changed = false
+    const previous = this.boot.compaction?.payload
+    const cleared = clearedToolResults(this.boot, this.events, this.compaction)
     if (cleared.length > (previous?.cleared_tool_result_seqs?.length ?? 0)) {
       await this.saveCompaction({
         through_seq: previous?.through_seq ?? 0,
-        summary: previous?.summary ?? "",
+        summary: previous?.summary ?? '',
         cleared_tool_result_seqs: cleared,
-        memory_index: previous?.memory_index ?? "",
+        memory_index: previous?.memory_index ?? '',
         prompt: promptFor(this.boot, this.events),
         tokens_before: 0,
         tokens_after: 0,
         provider: model.provider,
         model: model.id,
-      });
-      changed = true;
-      if (
-        contextTokens(this.boot, this.events) <=
-        Math.min(window * this.compaction.targetRatio, threshold)
-      )
-        return true;
+      })
+      changed = true
+      if (contextTokens(this.boot, this.events) <= Math.min(window * this.compaction.targetRatio, threshold))
+        return true
     }
-    const instructionTokens = estimateMessages([
-      { role: "user", content: COMPACTION_INSTRUCTION, timestamp: 0 },
-    ]);
+    const instructionTokens = estimateMessages([{ role: 'user', content: COMPACTION_INSTRUCTION, timestamp: 0 }])
     const through = selectThroughSeq(
       this.boot,
       this.events,
       window,
       this.compaction,
       window - outputReserve - instructionTokens,
-    );
-    if (through === undefined) return changed;
-    const metadata: Bootstrap = await this.rpc.call({ operation: "bootstrap" });
-    if (metadata.last_seq !== this.seq) throw new RuntimeError("conflict");
+    )
+    if (through === undefined) return changed
+    const metadata: Bootstrap = await this.rpc.call({ operation: 'bootstrap' })
+    if (metadata.last_seq !== this.seq) throw new RuntimeError('conflict')
     if (metadata.goal_utf8_base64)
-      metadata.project.goal = Buffer.from(
-        metadata.goal_utf8_base64,
-        "base64",
-      ).toString("utf8");
+      metadata.project.goal = Buffer.from(metadata.goal_utf8_base64, 'base64').toString('utf8')
     // 只追加指令，摘要前缀保留原提示词、工具声明和消息（含 provider 签名）。
     const prefix = modelMessages(
       this.boot,
       this.events.filter((e) => e.seq <= through),
-    );
-    const messages: Message[] = [
-      ...prefix,
-      { role: "user", content: COMPACTION_INSTRUCTION, timestamp: 0 },
-    ];
-    const available = window - estimateMessages(messages);
+    )
+    const messages: Message[] = [...prefix, { role: 'user', content: COMPACTION_INSTRUCTION, timestamp: 0 }]
+    const available = window - estimateMessages(messages)
     if (available <= 0) {
-      if (changed) return true;
-      throw new RuntimeError("model_request_failed");
+      if (changed) return true
+      throw new RuntimeError('model_request_failed')
     }
     for (let attempt = 0; ; attempt++) {
-      signal?.throwIfAborted();
-      let payload: CompactionPayload;
+      signal?.throwIfAborted()
+      let payload: CompactionPayload
       try {
-        const stream = this.models.streamSimple(
-          model,
-          modelContext({ messages }),
-          {
-            maxTokens: Math.min(32000, model.maxTokens, available),
-            maxRetries: 0,
-            sessionId: this.boot.project.conversation.id,
-            toolChoice: "none",
-            signal,
-          },
-        );
+        const stream = this.models.streamSimple(model, modelContext({ messages }), {
+          maxTokens: Math.min(32000, model.maxTokens, available),
+          maxRetries: 0,
+          sessionId: this.boot.project.conversation.id,
+          toolChoice: 'none',
+          signal,
+        })
         for await (const _ of stream) {
           /* 等待完整摘要，部分输出不能替换历史。 */
         }
-        const response = batonMessage(await stream.result());
+        const response = batonMessage(await stream.result())
         payload = {
           through_seq: through,
           summary: summaryText(response),
-          cleared_tool_result_seqs: (
-            this.boot.compaction?.payload.cleared_tool_result_seqs ?? []
-          ).filter((seq: number) => seq > through),
-          memory_index: metadata.memory_index ?? "",
+          cleared_tool_result_seqs: (this.boot.compaction?.payload.cleared_tool_result_seqs ?? []).filter(
+            (seq: number) => seq > through,
+          ),
+          memory_index: metadata.memory_index ?? '',
           prompt: {
             version: metadata.prompt_version,
             title: metadata.project.title,
@@ -244,89 +195,77 @@ export class ProjectRuntime {
           provider: model.provider,
           model: model.id,
           usage: response.usage,
-        };
+        }
         const candidate: Event = {
           seq: this.seq + 1,
-          kind: "compaction",
+          kind: 'compaction',
           payload,
-        };
+        }
         if (
-          estimateMessages(
-            modelMessages({ ...this.boot, compaction: candidate }, this.events),
-          ) >= estimateMessages(modelMessages(this.boot, this.events)) ||
+          estimateMessages(modelMessages({ ...this.boot, compaction: candidate }, this.events)) >=
+            estimateMessages(modelMessages(this.boot, this.events)) ||
           Buffer.byteLength(JSON.stringify(payload, null, 1)) > 160 * 1024
         )
-          throw new RuntimeError("invalid_compaction_summary");
+          throw new RuntimeError('invalid_compaction_summary')
       } catch {
-        if (signal?.aborted) throw new RuntimeError("aborted");
-        if (attempt === RETRIES.length)
-          throw new RuntimeError("model_request_failed");
-        await this.timer.sleep(RETRIES[attempt]);
-        continue;
+        if (signal?.aborted) throw new RuntimeError('aborted')
+        if (attempt === RETRIES.length) throw new RuntimeError('model_request_failed')
+        await this.timer.sleep(RETRIES[attempt])
+        continue
       }
-      signal?.throwIfAborted();
-      await this.saveCompaction(payload);
-      return true;
+      signal?.throwIfAborted()
+      await this.saveCompaction(payload)
+      return true
     }
   }
   private async reload() {
-    this.boot = await this.rpc.call({ operation: "bootstrap" });
+    this.boot = await this.rpc.call({ operation: 'bootstrap' })
     if (this.boot.goal_utf8_base64)
-      this.boot.project.goal = Buffer.from(
-        this.boot.goal_utf8_base64,
-        "base64",
-      ).toString("utf8");
-    this.events = [];
-    let after = this.boot.after_seq;
+      this.boot.project.goal = Buffer.from(this.boot.goal_utf8_base64, 'base64').toString('utf8')
+    this.events = []
+    let after = this.boot.after_seq
     while (true) {
       const page = await this.rpc.call({
-        operation: "read_events",
+        operation: 'read_events',
         after_seq: after,
         max_bytes: 128 * 1024,
-      });
+      })
       for (const event of page.events ?? []) {
-        if (event.seq <= after) throw new RuntimeError("invalid_event_order");
-        this.events.push(event);
-        after = event.seq;
+        if (event.seq <= after) throw new RuntimeError('invalid_event_order')
+        this.events.push(event)
+        after = event.seq
       }
-      if (!page.has_more) break;
-      if (page.next_after_seq !== after || !page.events?.length)
-        throw new RuntimeError("invalid_event_page");
+      if (!page.has_more) break
+      if (page.next_after_seq !== after || !page.events?.length) throw new RuntimeError('invalid_event_page')
     }
-    this.seq = Math.max(this.boot.last_seq, after);
+    this.seq = Math.max(this.boot.last_seq, after)
     if (!this.boot.compaction && this.boot.compaction_seq)
-      this.boot.compaction = this.events.find(
-        (e) => e.seq === this.boot.compaction_seq,
-      );
-    this.results.clear();
+      this.boot.compaction = this.events.find((e) => e.seq === this.boot.compaction_seq)
+    this.results.clear()
     for (const event of this.events)
-      if (event.kind === "tool_result") {
-        const message = eventMessage(event) as ToolResultMessage;
-        this.results.set(message.toolCallId, message);
+      if (event.kind === 'tool_result') {
+        const message = eventMessage(event) as ToolResultMessage
+        this.results.set(message.toolCallId, message)
       }
   }
   private async execute(call: ToolCall): Promise<ToolResultMessage> {
-    const saved = this.results.get(call.id);
-    if (saved) return saved;
+    const saved = this.results.get(call.id)
+    if (saved) return saved
     // Coordinator 持久化工具调用；恢复时使用原调用 ID 获取已保存的 Thread 或结果。
-    let requestStarted = this.timer.now();
+    let requestStarted = this.timer.now()
     let response = await this.rpc.call({
-      operation: "call_tool",
+      operation: 'call_tool',
       last_seq: this.seq,
       tool_call_id: call.id,
       tool_name: call.name,
       arguments: call.arguments,
-    });
-    let waitUntil = Infinity;
-    let initialCheck = true;
+    })
+    let waitUntil = Infinity
+    let initialCheck = true
     while (response?.pending === true) {
-      if (
-        call.name !== "nodes.exec" ||
-        typeof response.thread_id !== "string" ||
-        response.thread_id.length === 0
-      )
-        throw new RuntimeError("invalid_tool_result");
-      const versioned = response.wait_protocol === 1;
+      if (call.name !== 'nodes.exec' || typeof response.thread_id !== 'string' || response.thread_id.length === 0)
+        throw new RuntimeError('invalid_tool_result')
+      const versioned = response.wait_protocol === 1
       if (versioned) {
         if (
           !Number.isSafeInteger(response.version) ||
@@ -334,210 +273,175 @@ export class ProjectRuntime {
           !Number.isSafeInteger(response.wait_remaining_ms) ||
           response.wait_remaining_ms < 0
         )
-          throw new RuntimeError("invalid_tool_result");
+          throw new RuntimeError('invalid_tool_result')
         // 中心期限保持不变；每次响应重新估计，扣除该次请求的往返耗时。
-        waitUntil = requestStarted + response.wait_remaining_ms;
+        waitUntil = requestStarted + response.wait_remaining_ms
       }
-      const runRemaining = RUN_MS - (this.timer.now() - this.started);
+      const runRemaining = RUN_MS - (this.timer.now() - this.started)
       if (!initialCheck && runRemaining > 0) {
-        const waitMs = Math.min(
-          25_000,
-          waitUntil - this.timer.now(),
-          runRemaining,
-        );
-        if (
-          versioned &&
-          this.boot.local_wait_protocol === 1 &&
-          waitMs > 0
-        ) {
+        const waitMs = Math.min(25_000, waitUntil - this.timer.now(), runRemaining)
+        if (versioned && this.boot.local_wait_protocol === 1 && waitMs > 0) {
           await this.rpc.call({
-            operation: "poll_wake",
+            operation: 'poll_wake',
             payload: {
               thread_id: response.thread_id,
               after_version: response.version,
               wait_ms: Math.max(1, Math.floor(waitMs)),
             },
-          });
+          })
         } else {
           // 旧协议或本地预算耗尽时，短暂退避后再查询中心。
-          await this.timer.sleep(Math.min(250, runRemaining));
+          await this.timer.sleep(Math.min(250, runRemaining))
         }
       }
-      initialCheck = false;
-      const finishWait = this.timer.now() - this.started >= RUN_MS;
-      if (finishWait) this.stopAfterWait = true;
-      requestStarted = this.timer.now();
+      initialCheck = false
+      const finishWait = this.timer.now() - this.started >= RUN_MS
+      if (finishWait) this.stopAfterWait = true
+      requestStarted = this.timer.now()
       response = await this.rpc.call({
-        operation: "wait_tool",
+        operation: 'wait_tool',
         tool_call_id: call.id,
         last_seq: this.seq,
         ...(finishWait ? { payload: { finish_wait: true } } : {}),
-      });
-      if (this.timer.now() - this.started >= RUN_MS) this.stopAfterWait = true;
-      if (response?.pending === true && finishWait)
-        throw new RuntimeError("invalid_tool_result");
+      })
+      if (this.timer.now() - this.started >= RUN_MS) this.stopAfterWait = true
+      if (response?.pending === true && finishWait) throw new RuntimeError('invalid_tool_result')
     }
-    const event = response as Event;
-    if (!event || event.kind !== "tool_result" || event.seq <= this.seq)
-      throw new RuntimeError("invalid_tool_result");
-    this.events.push(event);
-    this.seq = event.seq;
-    const message = eventMessage(event) as ToolResultMessage;
-    if (message.toolCallId !== call.id)
-      throw new RuntimeError("invalid_tool_result");
-    this.results.set(call.id, message);
-    return message;
+    const event = response as Event
+    if (!event || event.kind !== 'tool_result' || event.seq <= this.seq) throw new RuntimeError('invalid_tool_result')
+    this.events.push(event)
+    this.seq = event.seq
+    const message = eventMessage(event) as ToolResultMessage
+    if (message.toolCallId !== call.id) throw new RuntimeError('invalid_tool_result')
+    this.results.set(call.id, message)
+    return message
   }
   private pendingCalls(): ToolCall[] {
-    const assistant = this.events.findLast((e) => e.kind === "assistant");
-    if (!assistant) return [];
+    const assistant = this.events.findLast((e) => e.kind === 'assistant')
+    if (!assistant) return []
     return (eventMessage(assistant) as AssistantMessage).content.filter(
-      (c): c is ToolCall => c.type === "toolCall" && !this.results.has(c.id),
-    );
+      (c): c is ToolCall => c.type === 'toolCall' && !this.results.has(c.id),
+    )
   }
   private needsResponse(): boolean {
-    const last = this.events.findLast((e) => e.kind !== "compaction");
-    if (!last) return false;
+    const last = this.events.findLast((e) => e.kind !== 'compaction')
+    if (!last) return false
     return (
-      last.kind === "input" ||
-      last.kind === "tool_result" ||
-      (last.kind === "assistant" &&
-        (eventMessage(last) as AssistantMessage).content.some(
-          (c) => c.type === "toolCall",
-        ))
-    );
+      last.kind === 'input' ||
+      last.kind === 'tool_result' ||
+      (last.kind === 'assistant' && (eventMessage(last) as AssistantMessage).content.some((c) => c.type === 'toolCall'))
+    )
   }
   private async respond() {
     for (const call of this.pendingCalls()) {
-      await this.execute(call);
-      if (this.stopAfterWait) return;
+      await this.execute(call)
+      if (this.stopAfterWait) return
     }
-    if (this.stopAfterWait) return;
-    const model = this.model();
-    let fatal: unknown;
+    if (this.stopAfterWait) return
+    const model = this.model()
+    let fatal: unknown
     const streamFn: StreamFn = async (requestModel, context, options) => {
-      const output = createAssistantMessageEventStream();
+      const output = createAssistantMessageEventStream()
       // 缓冲一条完成的回复后再交给 Agent，失败和超限输出不能进入持久化或工具执行。
-      let recoveredOverflow = false;
+      let recoveredOverflow = false
       for (let attempt = 0; ; attempt++) {
-        let message: AssistantMessage | undefined;
+        let message: AssistantMessage | undefined
         try {
-          const stream = this.models.streamSimple(
-            requestModel,
-            modelContext(context),
-            {
-              ...options,
-              maxTokens: Math.min(32000, requestModel.maxTokens),
-              maxRetries: 0,
-            },
-          );
-          let preview = "";
-          let lastPreview = -Infinity;
+          const stream = this.models.streamSimple(requestModel, modelContext(context), {
+            ...options,
+            maxTokens: Math.min(32000, requestModel.maxTokens),
+            maxRetries: 0,
+          })
+          let preview = ''
+          let lastPreview = -Infinity
           const publishPreview = async (text: string) => {
             // 预览通过现有 RPC 发送完整快照，正式保存与工具执行仍等待完整回复。
-            const bytes = Buffer.from(text);
-            const truncated = bytes.length > 32 * 1024;
-            let end = Math.min(bytes.length, 32 * 1024);
-            while (end < bytes.length && (bytes[end] & 0xc0) === 0x80) end--;
+            const bytes = Buffer.from(text)
+            const truncated = bytes.length > 32 * 1024
+            let end = Math.min(bytes.length, 32 * 1024)
+            while (end < bytes.length && (bytes[end] & 0xc0) === 0x80) end--
             await this.rpc
               .call({
-                operation: "preview",
+                operation: 'preview',
                 last_seq: this.seq,
                 payload: {
-                  text: bytes.subarray(0, end).toString("utf8"),
+                  text: bytes.subarray(0, end).toString('utf8'),
                   truncated,
                 },
               })
-              .catch(() => {});
-          };
+              .catch(() => {})
+          }
           for await (const event of stream) {
-            if (event.type === "text_delta") {
-              if (Buffer.byteLength(preview) < 32 * 1024 + 4)
-                preview = (preview + event.delta).slice(0, 32 * 1024 + 4);
+            if (event.type === 'text_delta') {
+              if (Buffer.byteLength(preview) < 32 * 1024 + 4) preview = (preview + event.delta).slice(0, 32 * 1024 + 4)
               if (this.timer.now() - lastPreview >= 1000) {
-                lastPreview = this.timer.now();
-                await publishPreview(preview);
+                lastPreview = this.timer.now()
+                await publishPreview(preview)
               }
             }
           }
-          message = batonMessage(await stream.result());
-          if (
-            message.stopReason === "error" &&
-            isContextOverflow(message, requestModel.contextWindow)
-          ) {
-            let compacted = false;
+          message = batonMessage(await stream.result())
+          if (message.stopReason === 'error' && isContextOverflow(message, requestModel.contextWindow)) {
+            let compacted = false
             if (!recoveredOverflow) {
               try {
-                compacted = await this.compact(
-                  this.compaction.requestRatio,
-                  options?.signal,
-                  true,
-                );
+                compacted = await this.compact(this.compaction.requestRatio, options?.signal, true)
               } catch (error) {
-                fatal = error;
-                throw error;
+                fatal = error
+                throw error
               }
             }
             if (compacted) {
-              recoveredOverflow = true;
+              recoveredOverflow = true
               context = {
                 ...context,
                 messages: modelMessages(this.boot, this.events),
-              };
-              continue;
+              }
+              continue
             }
-            throw new RuntimeError("context_overflow");
+            throw new RuntimeError('context_overflow')
           }
-          if (
-            message.stopReason === "error" ||
-            message.stopReason === "aborted"
-          )
-            throw new Error("model_request_failed");
+          if (message.stopReason === 'error' || message.stopReason === 'aborted')
+            throw new Error('model_request_failed')
           const payload = {
-            format: "pi-ai/1",
+            format: 'pi-ai/1',
             message,
             prompt: promptFor(this.boot, this.events),
-          };
+          }
           // 带缩进表示为 PostgreSQL jsonb 的空格预留容量。
           if (Buffer.byteLength(JSON.stringify(payload, null, 1)) > 160 * 1024)
-            throw new Error("model_output_too_large");
+            throw new Error('model_output_too_large')
           output.push({
-            type: "done",
-            reason: message.stopReason as "stop" | "length" | "toolUse",
+            type: 'done',
+            reason: message.stopReason as 'stop' | 'length' | 'toolUse',
             message,
-          });
-          output.end(message);
-          return output;
+          })
+          output.end(message)
+          return output
         } catch (error) {
           await this.rpc
             .call({
-              operation: "preview",
+              operation: 'preview',
               last_seq: this.seq,
-              payload: { text: "", truncated: false },
+              payload: { text: '', truncated: false },
             })
-            .catch(() => {});
-          if (options?.signal?.aborted) throw new RuntimeError("aborted");
-          if (fatal !== undefined && fatal === error) throw error;
+            .catch(() => {})
+          if (options?.signal?.aborted) throw new RuntimeError('aborted')
+          if (fatal !== undefined && fatal === error) throw error
+          if (error instanceof RuntimeError && error.code === 'context_overflow')
+            throw new RuntimeError('model_request_failed')
           if (
             error instanceof RuntimeError &&
-            error.code === "context_overflow"
-          )
-            throw new RuntimeError("model_request_failed");
-          if (
-            error instanceof RuntimeError &&
-            !["model_request_failed", "invalid_compaction_summary"].includes(
-              error.code,
-            )
+            !['model_request_failed', 'invalid_compaction_summary'].includes(error.code)
           ) {
-            fatal = error;
-            throw error;
+            fatal = error
+            throw error
           }
-          if (attempt === RETRIES.length)
-            throw new RuntimeError("model_request_failed");
-          await this.timer.sleep(RETRIES[attempt]);
+          if (attempt === RETRIES.length) throw new RuntimeError('model_request_failed')
+          await this.timer.sleep(RETRIES[attempt])
         }
       }
-    };
+    }
     const agent = new Agent({
       initialState: {
         model,
@@ -546,141 +450,128 @@ export class ProjectRuntime {
           ...def,
           label: def.name,
           execute: async (id: string) => {
-            const result = this.results.get(id);
-            if (!result) throw new RuntimeError("tool_not_persisted");
+            const result = this.results.get(id)
+            if (!result) throw new RuntimeError('tool_not_persisted')
             return {
               content: result.content,
               details: result.details,
               isError: result.isError,
-            };
+            }
           },
         })),
       },
       streamFn,
       sessionId: this.boot.project.conversation.id,
-      toolExecution: "sequential",
+      toolExecution: 'sequential',
       prepareRequest: async ({ context }, signal) => {
         try {
-          await this.compact(this.compaction.requestRatio, signal);
+          await this.compact(this.compaction.requestRatio, signal)
           return {
             context: {
               ...context,
               messages: modelMessages(this.boot, this.events),
             },
-          };
+          }
         } catch (error) {
-          fatal = error;
-          throw error;
+          fatal = error
+          throw error
         }
       },
-    });
+    })
     agent.subscribe(async (event) => {
-      if (event.type !== "message_end" || event.message.role !== "assistant")
-        return;
-      if (
-        event.message.stopReason === "error" ||
-        event.message.stopReason === "aborted"
-      )
-        return;
+      if (event.type !== 'message_end' || event.message.role !== 'assistant') return
+      if (event.message.stopReason === 'error' || event.message.stopReason === 'aborted') return
       try {
         const saved: Event = await this.rpc.call({
-          operation: "append_event",
+          operation: 'append_event',
           last_seq: this.seq,
           client_event_id: randomUUID(),
           payload: {
-            format: "pi-ai/1",
+            format: 'pi-ai/1',
             message: event.message,
             prompt: promptFor(this.boot, this.events),
           },
-        });
-        this.seq = saved.seq;
-        this.events.push(saved);
+        })
+        this.seq = saved.seq
+        this.events.push(saved)
         for (const call of event.message.content) {
-          if (call.type === "toolCall") await this.execute(call);
-          if (this.stopAfterWait) break;
+          if (call.type === 'toolCall') await this.execute(call)
+          if (this.stopAfterWait) break
         }
-        if (this.stopAfterWait) agent.abort();
+        if (this.stopAfterWait) agent.abort()
       } catch (error) {
-        fatal = error;
-        agent.abort();
-        throw error;
+        fatal = error
+        agent.abort()
+        throw error
       }
-    });
-    await agent.continue();
-    if (fatal) throw fatal;
-    if (this.stopAfterWait) return;
-    if (agent.state.errorMessage)
-      throw new RuntimeError("model_request_failed");
+    })
+    await agent.continue()
+    if (fatal) throw fatal
+    if (this.stopAfterWait) return
+    if (agent.state.errorMessage) throw new RuntimeError('model_request_failed')
   }
   async run(): Promise<void> {
-    this.started = this.timer.now();
-    const started = this.started;
-    this.stopAfterWait = false;
-    let idleSince = this.timer.now();
-    await this.reload();
+    this.started = this.timer.now()
+    const started = this.started
+    this.stopAfterWait = false
+    let idleSince = this.timer.now()
+    await this.reload()
     if (this.needsResponse()) {
-      await this.respond();
-      idleSince = this.timer.now();
+      await this.respond()
+      idleSince = this.timer.now()
     }
     while (this.timer.now() - started < RUN_MS) {
       try {
         const claim = await this.rpc.call({
-          operation: "claim_inputs",
+          operation: 'claim_inputs',
           last_seq: this.seq,
-        });
+        })
         if (claim.event) {
-          this.events.push(claim.event);
-          this.seq = claim.event.seq;
-          await this.respond();
-          idleSince = this.timer.now();
-          continue;
+          this.events.push(claim.event)
+          this.seq = claim.event.seq
+          await this.respond()
+          idleSince = this.timer.now()
+          continue
         }
       } catch (error) {
-        if (error instanceof RuntimeError && error.code === "conflict") {
-          await this.reload();
-          if (this.needsResponse()) await this.respond();
-          idleSince = this.timer.now();
-          continue;
+        if (error instanceof RuntimeError && error.code === 'conflict') {
+          await this.reload()
+          if (this.needsResponse()) await this.respond()
+          idleSince = this.timer.now()
+          continue
         }
-        throw error;
+        throw error
       }
-      if (this.timer.now() - idleSince >= IDLE_MS) break;
+      if (this.timer.now() - idleSince >= IDLE_MS) break
       await this.rpc.call({
-        operation: "poll_wake",
+        operation: 'poll_wake',
         payload: {
           wait_ms: Math.max(
             1,
-            Math.min(
-              25_000,
-              IDLE_MS - (this.timer.now() - idleSince),
-              RUN_MS - (this.timer.now() - started),
-            ),
+            Math.min(25_000, IDLE_MS - (this.timer.now() - idleSince), RUN_MS - (this.timer.now() - started)),
           ),
         },
-      });
+      })
     }
-    await this.compact(this.compaction.finishRatio);
+    await this.compact(this.compaction.finishRatio)
     await this.rpc.call({
-      operation: "finish",
+      operation: 'finish',
       last_seq: this.seq,
-      reason: this.timer.now() - started >= RUN_MS ? "run_limit" : "idle",
-    });
+      reason: this.timer.now() - started >= RUN_MS ? 'run_limit' : 'idle',
+    })
   }
   async start(): Promise<void> {
     try {
-      await this.run();
+      await this.run()
     } catch (error) {
-      if (
-        error instanceof RuntimeError &&
-        error.code === "model_request_failed"
-      ) {
+      if (error instanceof RuntimeError && error.code === 'model_request_failed') {
         await this.rpc.call({
-          operation: "report_failure",
-          reason: "model_request_failed",
-        });
-        return;
+          operation: 'report_failure',
+          reason: 'model_request_failed',
+        })
+        return
       }
-      throw error;
+      throw error
     }
   }
 }

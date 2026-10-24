@@ -3,7 +3,7 @@
 
 export type ID = string
 
-export type AgentKind = 'codex' | 'kiro' | 'pi'
+export type AgentKind = 'codex' | 'kiro' | 'pi' | 'cursor'
 
 export interface Account {
   id: ID
@@ -25,6 +25,7 @@ export interface Session {
 export type DeviceConnection = 'online' | 'syncing' | 'offline'
 
 export interface AgentAbilities {
+  create: boolean
   queue: boolean
   steer: boolean
   stop: boolean
@@ -34,6 +35,8 @@ export interface AgentAbilities {
 
 export interface DeviceAgent {
   kind: AgentKind
+  status: string
+  reason: string | null
   version: string | null
   models: string[]
   defaultModel: string | null
@@ -124,6 +127,9 @@ export interface Thread {
   stop: ThreadStop | null
   // 已提交、还在等设备确认的停止或归档。设备确认前 status 保持原样。
   pending: 'stop' | 'archive' | null
+  // 尚未收到实际打开或恢复完成的执行结果。
+  starting?: boolean
+  resumePending?: boolean
   // 最近一次停止或归档撤回的排队消息条数。
   stopCanceled: number
   createdAt: number
@@ -312,7 +318,12 @@ export interface InboxItem {
 export type ItemDecision = { kind: 'answer'; option: string | null; note: string } | { kind: 'close' }
 
 export type OperationKind =
-  'createThread' | 'sendMessage' | 'stopThread' | 'archiveThread' | 'resumeThread' | 'answerItem'
+  | 'createThread'
+  | 'sendMessage'
+  | 'stopThread'
+  | 'archiveThread'
+  | 'resumeThread'
+  | 'answerItem'
 
 // 操作确认的各个阶段，界面据此区分已提交、已保存、等待设备、执行中和已停止。
 export type OperationPhase =

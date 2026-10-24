@@ -1,0 +1,23 @@
+{
+  "name": "@baton/telemetry",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "vp lint .",
+    "test": "vp test run"
+  },
+  "dependencies": {
+    "effect": "catalog:",
+    "@baton/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

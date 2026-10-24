@@ -133,17 +133,32 @@ BATON_ENROLLMENT_TOKEN='<网页提供的一次性注册凭据>' \
 
 ## 本地开发与测试
 
-### TypeScript 本地 Thread
+### TypeScript 远程与本地 Thread
 
-`apps/batond` 提供 Cursor 本地 Thread 开发入口，通过令牌认证 IPC 连接独立 Worker，使用私有 SQLite 保存命令、消息队列、输入意图、回复和报告。发布构建仍使用 Go 入口。开发环境要求 Node 26，依赖安装禁用安装脚本：
+`apps/server` 与 `apps/batond` 提供 Cursor 远程 Thread：员工登录网页、注册设备后，可以新建会话、排队、撤回、停止、恢复、归档并读取回复和实时输出。中心使用 PostgreSQL 保存账号、设备、命令与回复；节点通过出站 WSS 连接，使用私有 SQLite 保存投递事实，再通过认证 IPC 连接独立 Worker。本地 CLI 也可直接调用同一 Worker。发布构建仍使用 Go 入口，TS 使用独立开发命令：
 
 ```sh
 pnpm install --frozen-lockfile --ignore-scripts
+pnpm --filter @baton/server build
+pnpm --filter @baton/batond build
+pnpm --filter @baton/server dev help
 pnpm --filter @baton/batond dev help
 pnpm --filter @baton/batond dev probe
 ```
 
-Cursor 使用显式配置的 `CURSOR_API_KEY`；探测只查询认证和模型、检查本机依赖，不发送推理请求。只有已验证的 SDK / 系统组合且探测结果为 `available` 时，开发 CLI 才允许新建。命令用法、恢复语义和验证入口见 [本地 Thread 文档](apps/batond/README.md)，上游复用范围见 [providers 文档](packages/providers/README.md)。
+中心构建包含网页和 SQL 迁移。账号初始化、HTTPS 配置和设备接入见 [中心文档](apps/server/README.md)；节点与本地命令、恢复语义见 [Thread 文档](apps/batond/README.md)。Cursor 使用设备上显式配置的 `CURSOR_API_KEY`；后台探测只查询认证和模型、检查本机依赖，不发送推理请求。仅 `available` 且声明创建能力的 SDK / 系统组合允许新建。TS 的 Project、设备目录管理和统一原生历史按后续迁移切片交付。
+
+验证使用本机 PostgreSQL、确定性回放和本地替身，无需真实模型凭据；包括独立 Worker、中心与节点重启、ACK 丢失、数据库连接中断和跨员工隔离。Node 26、pnpm 12 的工作区检查为：
+
+```sh
+pnpm check
+pnpm typecheck
+pnpm test
+```
+
+工作区使用 Vite+ 1.4：根目录 `vite.config.ts` 统一配置 Oxlint 推荐规则、Oxfmt 和 TypeScript Go 检查，测试通过内置 Vitest 运行。`pnpm lint` 和 `pnpm check` 对警告返回失败，CI 使用同一检查入口。`pnpm typecheck` 同时保留各包现有编译检查。Node 与 pnpm 继续由现有环境提供，无需安装全局 `vp`。
+
+工作区测试按依赖顺序串行执行，不启用任务结果缓存；测试会构建 Project Runtime，须与 `node tools/build.mjs` 分开执行，避免同时清理同一个产物目录。上游复用范围见 [providers 文档](packages/providers/README.md)。
 
 ### Go 单元与集成测试
 

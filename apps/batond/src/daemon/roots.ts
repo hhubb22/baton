@@ -1,0 +1,116 @@
+import { createHash } from 'node:crypto'
+import { readdir, realpath, stat } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { Schema } from 'effect'
+import { FileRequest, type FileResult } from '@baton/protocol'
+import { ensurePrivateDirectory, readPrivateFile, writePrivateFileAtomic } from '../platform/private.ts'
+import { acquireProcessLock } from '../platform/lock.ts'
+import { isMissing } from './identity.ts'
+
+const Root = Schema.Struct({ id: Schema.String, path: Schema.String })
+const Roots = Schema.Struct({ roots: Schema.Array(Root).check(Schema.isMaxLength(32)) })
+export type BrowseRoot = typeof Root.Type
+const inside = (root: string, path: string) => {
+  const rel = relative(root, path)
+  return rel === '' || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`))
+}
+
+export async function loadBrowseRoots(dataDirectory: string): Promise<ReadonlyArray<BrowseRoot>> {
+  const raw = await readPrivateFile(join(dataDirectory, 'browse-roots.json'))
+  try {
+    const { roots } = Schema.decodeUnknownSync(Roots)(JSON.parse(raw.toString('utf8')))
+    if (
+      roots.some((r) => !/^[a-z][a-z0-9._-]{0,63}$/.test(r.id) || !isAbsolute(r.path)) ||
+      new Set(roots.map((r) => r.id)).size !== roots.length
+    )
+      throw new Error()
+    return roots
+  } catch {
+    throw new Error('授权目录配置无效')
+  }
+}
+
+/** An existing empty configuration is an explicit denial of directory access. */
+export async function initializeBrowseRoots(
+  dataDirectory: string,
+  workspace?: string,
+): Promise<ReadonlyArray<BrowseRoot>> {
+  await ensurePrivateDirectory(dataDirectory)
+  const release = await acquireProcessLock(join(dataDirectory, 'browse-roots.lock'))
+  try {
+    let roots: BrowseRoot[]
+    let changed = false
+    try {
+      roots = [...(await loadBrowseRoots(dataDirectory))]
+    } catch (error) {
+      if (!isMissing(error)) throw error
+      const path = await realpath(homedir())
+      roots = [{ id: 'home', path }]
+      changed = true
+    }
+    if (workspace) {
+      if (!isAbsolute(workspace)) throw new Error('--workspace 需要绝对路径')
+      const path = await realpath(workspace)
+      if (!(await stat(path)).isDirectory()) throw new Error('工作目录必须是目录')
+      if (!roots.some((root) => root.path === path)) {
+        if (roots.length >= 32) throw new Error('授权目录最多 32 个')
+        roots.push({ id: `root-${createHash('sha256').update(path).digest('hex').slice(0, 16)}`, path })
+        changed = true
+      }
+    }
+    if (changed) await writePrivateFileAtomic(join(dataDirectory, 'browse-roots.json'), JSON.stringify({ roots }))
+    return roots
+  } finally {
+    await release()
+  }
+}
+
+export async function authorizeDirectory(dataDirectory: string, path: string): Promise<string> {
+  if (!isAbsolute(path)) throw new Error('工作目录需要绝对路径')
+  const actual = await realpath(path)
+  if (!(await stat(actual)).isDirectory()) throw new Error('工作目录必须是目录')
+  for (const root of await loadBrowseRoots(dataDirectory)) {
+    // Replacing a registered root with a symlink must not grant access to its new target.
+    if ((await realpath(root.path)) !== resolve(root.path)) continue
+    if (inside(root.path, actual)) return actual
+  }
+  throw new Error('工作目录超出本机授权目录')
+}
+
+/** Minimal directory chooser: only roots and directory names are exposed. */
+export async function browseDirectories(dataDirectory: string, input: FileRequest): Promise<FileResult> {
+  const base = { type: 'files.browse_result' as const, operation_id: input.operation_id }
+  try {
+    const req = Schema.decodeUnknownSync(FileRequest)(input)
+    const roots = await loadBrowseRoots(dataDirectory)
+    if (!req.root_id) {
+      if (req.path || req.cursor) throw new Error()
+      return { ...base, ok: true, kind: 'roots', roots }
+    }
+    const root = roots.find((r) => r.id === req.root_id)
+    if (!root || isAbsolute(req.path ?? '')) throw new Error()
+    const path = resolve(root.path, req.path ?? '.')
+    if (!inside(root.path, path)) throw new Error()
+    const actual = await authorizeDirectory(dataDirectory, path)
+    if (!inside(root.path, actual)) throw new Error()
+    const names = (await readdir(actual, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort()
+    const offset = req.cursor ? Number(req.cursor) : 0
+    if (!Number.isSafeInteger(offset) || offset < 0) throw new Error()
+    const next = offset + 200
+    return {
+      ...base,
+      ok: true,
+      kind: 'directory',
+      root_id: root.id,
+      path: req.path ?? '',
+      entries: names.slice(offset, next).map((name) => ({ name, kind: 'directory' })),
+      ...(next < names.length ? { next_cursor: String(next), truncated: true } : {}),
+    }
+  } catch {
+    return { ...base, ok: false, code: 'path_forbidden', message: '无法浏览该授权目录' }
+  }
+}

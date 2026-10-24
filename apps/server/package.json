@@ -4,19 +4,27 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "node ../../tools/ts-migration/run-server.mjs",
+    "build": "node ../../tools/ts-migration/build-server.mjs",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint .",
-    "test": "vitest run --config ../../vitest.config.ts"
+    "lint": "vp lint .",
+    "test": "vp test run --config ../../vitest.config.ts"
   },
   "dependencies": {
+    "@baton/telemetry": "workspace:*",
+    "@baton/protocol": "workspace:*",
+    "ws": "8.22.0",
     "effect": "catalog:",
     "@effect/platform-node": "catalog:",
     "@effect/sql-pg": "catalog:"
   },
   "devDependencies": {
+    "@types/ws": "8.18.2",
+    "esbuild": "catalog:",
     "@effect/vitest": "catalog:",
     "@types/node": "catalog:",
     "typescript": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "vite-plus": "catalog:"
   }
 }

@@ -29,11 +29,11 @@ const styles = stylex.create({
 function passwordError(password: string, username: string) {
   if (
     password !== password.trim() ||
-    [...password].some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)
+    Array.from(password).some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)
   ) {
     return 'Use no control characters or spaces at the start or end.'
   }
-  if ([...password].length < 12 || [...password].length > 128) return 'Use 12 to 128 characters.'
+  if (Array.from(password).length < 12 || Array.from(password).length > 128) return 'Use 12 to 128 characters.'
   if (password.toLowerCase() === username.toLowerCase()) return 'Choose a password different from your username.'
 }
 

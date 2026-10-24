@@ -7,16 +7,18 @@
     "dev": "node ../../tools/ts-migration/run-batond.mjs",
     "build": "node ../../tools/ts-migration/build-batond.mjs",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint .",
-    "test": "vitest run --config ../../vitest.config.ts"
+    "lint": "vp lint .",
+    "test": "vp test run --config ../../vitest.config.ts"
   },
   "dependencies": {
+    "@baton/telemetry": "workspace:*",
     "@baton/protocol": "workspace:*",
     "@baton/sqlite": "workspace:*",
     "@baton/providers": "workspace:*",
     "@cursor/sdk": "1.0.35",
     "effect": "catalog:",
-    "@effect/platform-node": "catalog:"
+    "@effect/platform-node": "catalog:",
+    "ws": "8.22.0"
   },
   "optionalDependencies": {
     "@cursor/sdk-darwin-arm64": "1.0.35",
@@ -27,8 +29,10 @@
   "devDependencies": {
     "@effect/vitest": "catalog:",
     "@types/node": "catalog:",
+    "@types/ws": "8.18.2",
     "esbuild": "catalog:",
     "typescript": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "vite-plus": "catalog:"
   }
 }

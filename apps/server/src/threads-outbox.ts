@@ -1,0 +1,152 @@
+import { Effect } from 'effect'
+import * as SqlClient from 'effect/sql/SqlClient'
+import type { Thread, ThreadCommand, ThreadCommandResult } from '@baton/protocol'
+import { ThreadCommandResult as ResultSchema } from '@baton/protocol'
+import { captureTrace, withTraceSpan, type TraceContext } from '@baton/telemetry'
+import type { NodeSource } from './errors.ts'
+import { lockNodeSource, revalidateNodeSource } from './nodes.ts'
+import { audit, canonical, decode, failure, readThread, transaction, type DB } from './threads-core.ts'
+
+export interface ClaimedCommand {
+  readonly message_id: string
+  readonly node_id: string
+  readonly employee_id: string
+  readonly body: ThreadCommand
+}
+interface Outbox {
+  id: string
+  employee_id: string
+  thread_id: string
+  node_id: string
+  message_id: string
+  action: ThreadCommand['action']
+  trace_context: TraceContext | null
+  payload: { client_message_id?: string; model?: string }
+  acked_at: string | null
+  completed_at: string | null
+  result: ThreadCommandResult | null
+}
+export const claimCommands = (): DB<ClaimedCommand[]> =>
+  transaction(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const due = `o.acked_at IS NULL AND o.completed_at IS NULL AND o.next_attempt_at<=statement_timestamp()
+    AND EXISTS(SELECT 1 FROM threads eligible WHERE eligible.id=o.thread_id
+      AND (eligible.status<>'archived' OR o.action IN ('stop','withdraw'))
+      AND (o.action IN ('open','stop') OR (eligible.opened_at IS NOT NULL AND eligible.storage_generation IS NOT NULL))
+      AND NOT EXISTS(SELECT 1 FROM thread_outbox older WHERE older.thread_id=o.thread_id AND older.acked_at IS NULL AND older.completed_at IS NULL AND older.id<o.id
+        AND (eligible.status<>'archived' OR older.action IN ('stop','withdraw'))
+        AND (older.action IN ('open','stop') OR eligible.opened_at IS NOT NULL)))`
+      const rows = yield* sql.unsafe<{ command: Outbox; thread: Thread }>(`WITH candidates AS MATERIALIZED (
+    SELECT p.node_id FROM node_presence p JOIN nodes n ON n.id=p.node_id AND n.employee_id=p.employee_id
+    CROSS JOIN LATERAL (SELECT o.id,o.next_attempt_at FROM thread_outbox o WHERE o.node_id=p.node_id AND ${due} ORDER BY o.next_attempt_at,o.id LIMIT 1) first_due
+    WHERE p.online AND p.synced AND n.revoked_at IS NULL ORDER BY first_due.next_attempt_at,first_due.id
+  ) SELECT command.* FROM candidates p CROSS JOIN LATERAL (
+    SELECT to_jsonb(o) AS command,jsonb_strip_nulls(to_jsonb(t)-'request_hash') AS thread
+    FROM (SELECT o.* FROM thread_outbox o WHERE o.node_id=p.node_id AND ${due} ORDER BY o.next_attempt_at,o.id FOR UPDATE OF o SKIP LOCKED) o
+    CROSS JOIN LATERAL (SELECT t.* FROM threads t WHERE t.id=o.thread_id AND (t.status<>'archived' OR o.action IN ('stop','withdraw'))
+      AND (o.action IN ('open','stop') OR (t.opened_at IS NOT NULL AND t.storage_generation IS NOT NULL)) FOR UPDATE OF t SKIP LOCKED) t LIMIT 4
+  ) command LIMIT 32`)
+      const commands: ClaimedCommand[] = []
+      for (const row of rows) {
+        const o = row.command
+        const t = row.thread
+        const body: ThreadCommand = {
+          ...(o.trace_context ? { trace_context: o.trace_context } : {}),
+          type: 'thread.command',
+          thread_id: t.id,
+          action: o.action,
+          ...(o.action !== 'open' && t.storage_generation ? { storage_generation: t.storage_generation } : {}),
+          ...(o.payload.client_message_id ? { client_message_id: o.payload.client_message_id } : {}),
+          ...(o.action === 'open'
+            ? {
+                agent_type: t.agent_type,
+                model: o.payload.model || '',
+                working_directory: t.working_directory,
+                execution_timeout_seconds: t.execution_timeout_seconds,
+              }
+            : {}),
+        }
+        if (o.action === 'message') {
+          const messages = yield* sql<{
+            content: string
+            mode: 'queue' | 'steer'
+            model: string
+          }>`SELECT content,mode,model FROM thread_messages WHERE employee_id=${o.employee_id} AND thread_id=${t.id} AND client_message_id=${o.payload.client_message_id!}`
+          if (!messages.length) return yield* Effect.fail(failure())
+          Object.assign(body, messages[0]!)
+        }
+        const dispatchTrace = yield* withTraceSpan(captureTrace, 'baton.command.dispatch', o.trace_context, {
+          kind: 'producer',
+          attributes: { 'baton.command.id': o.message_id, 'baton.thread.id': t.id },
+        })
+        if (dispatchTrace) Object.assign(body, { trace_context: dispatchTrace })
+        if (
+          Buffer.byteLength(
+            JSON.stringify({
+              kind: 'envelope',
+              envelope: {
+                version: 1,
+                message_id: o.message_id,
+                route: { to: o.node_id },
+                priority: 'control',
+                source: { kind: 'control' },
+                body,
+              },
+            }),
+          ) >
+          256 * 1024
+        )
+          return yield* Effect.fail(failure('message_too_large', 413))
+        yield* sql`UPDATE thread_outbox SET attempts=LEAST(attempts::bigint+1,2147483647)::integer,
+      next_attempt_at=clock_timestamp()+make_interval(secs=>LEAST(30.0,power(2.0,LEAST(attempts,5)))*(0.8+random()*0.2)) WHERE id=${o.id}`
+        commands.push({ message_id: o.message_id, node_id: o.node_id, employee_id: o.employee_id, body })
+      }
+      return commands
+    }),
+  )
+
+export const processReceipt = (
+  source: NodeSource,
+  correlationCommandID: string,
+  input: ThreadCommandResult,
+): DB<void> =>
+  transaction(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const result = yield* decode(ResultSchema, input)
+      yield* lockNodeSource(source)
+      const rows = yield* sql<{
+        value: Outbox
+      }>`SELECT to_jsonb(o) AS value FROM thread_outbox o WHERE message_id=${correlationCommandID} AND employee_id=${source.employee_id} AND node_id=${source.node_id} AND thread_id=${result.thread_id} FOR UPDATE`
+      if (!rows.length) return yield* Effect.fail(failure('not_found', 404))
+      const o = rows[0]!.value
+      const t = yield* readThread(source.employee_id, result.thread_id, true)
+      yield* revalidateNodeSource(source)
+      if (o.acked_at) {
+        if (canonical(o.result) !== canonical(result)) return yield* Effect.fail(failure())
+        return
+      }
+      if (result.storage_generation && t.storage_generation && result.storage_generation !== t.storage_generation)
+        return yield* Effect.fail(failure('storage_generation_mismatch'))
+      if (result.ok && o.action === 'open') {
+        if (!result.storage_generation) return yield* Effect.fail(failure('storage_generation_required', 422))
+        yield* sql`UPDATE threads SET storage_generation=COALESCE(storage_generation,${result.storage_generation}) WHERE id=${t.id}`
+      }
+      // 迟到的接收回执只补记接收事实，保留已经提交的执行结果。
+      yield* sql`UPDATE thread_outbox SET acked_at=clock_timestamp(),result=${JSON.stringify(result)}::jsonb WHERE id=${o.id}`
+      if (!result.ok && !o.completed_at) {
+        yield* sql`UPDATE thread_outbox SET completed_at=clock_timestamp(),completion=${JSON.stringify({ command_outcome: 'failed', reason: result.code || 'command_rejected' })}::jsonb WHERE id=${o.id}`
+        if (o.action === 'message')
+          yield* sql`UPDATE thread_messages SET status='withdrawn',status_reason=${result.code || 'command_rejected'} WHERE employee_id=${source.employee_id} AND thread_id=${t.id} AND client_message_id=${o.payload.client_message_id!} AND status IN ('accepted','queued')`
+        if (o.action === 'open') {
+          yield* sql`UPDATE threads SET status='stopped',status_reason=${result.code || 'open_rejected'},version=version+1 WHERE id=${t.id} AND opened_at IS NULL`
+          yield* sql`UPDATE thread_messages SET status='withdrawn',status_reason=${result.code || 'open_rejected'} WHERE thread_id=${t.id} AND status='accepted'`
+        }
+      } else if (result.ok && o.action === 'message' && !o.completed_at) {
+        yield* sql`UPDATE thread_messages SET status='queued' WHERE employee_id=${source.employee_id} AND thread_id=${t.id} AND client_message_id=${o.payload.client_message_id!} AND status='accepted'`
+      }
+      yield* audit(t, 'command.received', { command_id: correlationCommandID, ...result }, 'device', source.node_id)
+      yield* revalidateNodeSource(source)
+    }),
+  )

@@ -1,10 +1,19 @@
 import { createMemoryHistory } from '@tanstack/react-router'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import { createHttpClient } from '../data/http/client'
 import { App } from './App'
 import { createAppRouter } from './router'
+
+function requestURL(input: RequestInfo | URL): string {
+  return input instanceof Request ? input.url : input.toString()
+}
+
+function jsonBody(body: RequestInit['body']): string {
+  if (typeof body !== 'string') throw new TypeError('Expected a JSON string request body')
+  return body
+}
 
 function setup(
   path = '/inbox?handled=true',
@@ -17,9 +26,9 @@ function setup(
   let failure: 'offline' | 'wrongPassword' | null = null
   const requests: { path: string; method: string; body: Record<string, string> }[] = []
   const fetcher = vi.fn<typeof fetch>(async (input, init) => {
-    const path = String(input).replace('/api/v1', '')
+    const path = requestURL(input).replace('/api/v1', '')
     const method = init?.method ?? 'GET'
-    const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, string>
+    const body = JSON.parse(jsonBody(init?.body ?? '{}')) as Record<string, string>
     requests.push({ path, method, body })
     if (path === '/me/password') {
       if (failure === 'offline') throw new TypeError('Disconnected')
@@ -59,7 +68,7 @@ function setup(
     client,
     router,
     requests,
-    fail(next: typeof failure) {
+    fail: (next: typeof failure) => {
       failure = next
     },
   }

@@ -9,6 +9,7 @@ import {
   type InputPreparation,
   type ThreadAgent,
 } from '../../worker/agent.ts'
+import { makeOutputMailbox } from '../../worker/output.ts'
 import { findSent, messageBinding, prepare, validatePreparation } from './evidence.ts'
 import { loadMapping, persistMapping, statePath } from './mapping.ts'
 import type { NativeMapping, HostEvent } from './protocol.ts'
@@ -21,6 +22,7 @@ export interface CursorDelta {
   readonly executionId: string
   readonly id: string
   readonly text: string
+  readonly gap?: boolean
 }
 
 export interface CursorAgentOptions extends CursorProcessOptions {
@@ -38,7 +40,8 @@ export const makeCursorAgentFactory =
 function makeCursorAgent(config: WorkerOpenConfig, options: CursorAgentOptions): ThreadAgent {
   // These allocations only establish local state; host and filesystem work starts inside Effects.
   const scope = Scope.makeUnsafe()
-  const queue = Effect.runSync(Queue.dropping<AgentEvent>(options.eventCapacity ?? 256))
+  const queue = Effect.runSync(Queue.bounded<AgentEvent>(options.eventCapacity ?? 256))
+  const output = makeOutputMailbox()
   const controller = new AbortController()
   const connections = new Set<CursorHostConnection>()
   const pending = new Set<Promise<CursorHostConnection>>()
@@ -113,15 +116,7 @@ function makeCursorAgent(config: WorkerOpenConfig, options: CursorAgentOptions):
       }
       return host
     })
-  const emit = (event: AgentEvent): Effect.Effect<void> =>
-    Effect.gen(function* () {
-      if (!(yield* Queue.offer(queue, event))) {
-        broken = true
-        yield* Queue.clear(queue)
-        yield* Queue.offer(queue, { type: 'uncertain', reason: 'Cursor event buffer overflow' })
-        if (live) yield* live.disconnect
-      }
-    })
+  const emit = (event: AgentEvent): Effect.Effect<void> => Queue.offer(queue, event).pipe(Effect.asVoid)
   const uncertain = (reason: string) =>
     Effect.gen(function* () {
       if (broken) return
@@ -137,6 +132,8 @@ function makeCursorAgent(config: WorkerOpenConfig, options: CursorAgentOptions):
       sequence = frame.sequence
       const event = frame.event
       if (event.type === 'uncertain') return yield* uncertain(event.reason)
+      // Delayed text from a completed input cannot belong to the next turn.
+      if (event.type === 'delta' && (!active || active.ended || event.messageId !== active.messageId)) return
       if (
         !mapping ||
         !active ||
@@ -150,7 +147,10 @@ function makeCursorAgent(config: WorkerOpenConfig, options: CursorAgentOptions):
       if (event.type === 'end') active.ended = true
       if (event.type === 'delta') {
         yield* Effect.try({
-          try: () => options.onDelta?.(event),
+          try: () => {
+            output.offer(event)
+            options.onDelta?.(event)
+          },
           catch: () => new AgentError('Cursor live text sink failed'),
         }).pipe(Effect.catch(() => uncertain('Cursor live text sink failed')))
       } else yield* emit(event)
@@ -303,6 +303,7 @@ function makeCursorAgent(config: WorkerOpenConfig, options: CursorAgentOptions):
         })
       }),
     events: Stream.fromQueue(queue),
+    output: output.stream,
     abort: () =>
       Effect.gen(function* () {
         stopped = true
@@ -322,7 +323,7 @@ function makeCursorAgent(config: WorkerOpenConfig, options: CursorAgentOptions):
         controller.abort()
         reaping = true
         for (const reader of readers) reader.abort()
-        yield* io(() => Promise.allSettled([...pending]))
+        yield* io(() => Promise.allSettled(pending))
         let processTreeStopped = true
         for (const host of connections) {
           yield* host.disconnect

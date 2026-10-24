@@ -124,6 +124,11 @@ export function createMockClient(
     listProjectEntries: (projectId) => guarded(() => store.projectEntries(projectId)),
     listProjectMemory: (projectId) => guarded(() => store.projectMemory(projectId)),
     listThreads: () => guarded(() => store.snapshot().threads),
+    async getThread(threadId) {
+      const thread = (await this.listThreads()).find((item) => item.id === threadId)
+      if (!thread) throw new ClientError('notFound', 'The chat was not found.')
+      return thread
+    },
     listMessages: (threadId) => guarded(() => store.snapshot().messages.filter((item) => item.threadId === threadId)),
     listInbox: () => guarded(() => store.snapshot().inbox),
     readFile: (deviceId, path) => guarded(() => store.readFile(deviceId, path)),

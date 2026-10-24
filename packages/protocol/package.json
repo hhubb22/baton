@@ -9,8 +9,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "lint": "eslint .",
-    "test": "vitest run --config ../../vitest.config.ts",
+    "lint": "vp lint .",
+    "test": "vp test run --config ../../vitest.config.ts",
     "fixtures:export": "go test ../../internal/httpapi ../../internal/session -run TestExport.*ProtocolFixtures -count=1 -v"
   },
   "dependencies": {
@@ -20,6 +20,7 @@
     "@effect/vitest": "catalog:",
     "@types/node": "catalog:",
     "typescript": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "vite-plus": "catalog:"
   }
 }

@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Effect, Queue, Stream } from 'effect'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vite-plus/test'
 import type { WorkerOpenConfig } from '@baton/protocol'
 import type { AgentMessage } from '../../worker/agent.ts'
 import { makeCursorAgentFactory } from './thread-agent.ts'
@@ -139,6 +139,60 @@ describe('Cursor ThreadAgent', () => {
         }),
       )
       expect(await event).toEqual([{ type: 'uncertain', reason: 'Cursor event execution identity mismatch' }])
+      await Effect.runPromise(agent.reap())
+    }))
+  it('keeps lossy text separate from reliable control events and rejects old-turn text', () =>
+    withDirectory(async (directory) => {
+      const config = configFor(directory),
+        fixture = hosts(config)
+      const agent = makeCursorAgentFactory({ command: { file: 'unused' }, connect: fixture.connect, eventCapacity: 1 })(
+        config,
+      )
+      await Effect.runPromise(agent.open(config))
+      const baseline = await Effect.runPromise(agent.prepareInput(input))
+      await Effect.runPromise(agent.send(input, baseline))
+      let sequence = 0
+      const publish = (event: HostEvent['event']) =>
+        Effect.runPromise(
+          Queue.offer(fixture.events, {
+            generation: fixture.generation(),
+            sequence: ++sequence,
+            event,
+          }),
+        )
+      const identity = { nativeSessionId: 'native', messageId: input.id, executionId: 'run' }
+      for (let index = 0; index < 2000; index++)
+        await publish({ ...identity, type: 'delta', id: 'text', text: '😀'.repeat(128) })
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          while (Queue.sizeUnsafe(fixture.events) > 0) yield* Effect.yieldNow
+          yield* Effect.yieldNow
+        }),
+      )
+      const output = await Effect.runPromise(Stream.runCollect(agent.output!.pipe(Stream.take(1))))
+      expect(output[0]).toMatchObject({ ...identity, gap: true })
+      expect(Buffer.byteLength(output[0]!.text)).toBe(16 * 1024)
+      await publish({ ...identity, type: 'reply', id: 'reply', text: 'durable answer' })
+      await publish({ ...identity, type: 'end', outcome: 'completed' })
+      const controls = await Effect.runPromise(
+        Stream.runCollect(agent.events.pipe(Stream.take(2), Stream.timeout(1000))),
+      )
+      expect(controls.map((event) => event.type)).toEqual(['reply', 'end'])
+      const next = { ...input, id: 'next', operationId: 'next-operation' }
+      const preparation = await Effect.runPromise(agent.prepareInput(next))
+      await Effect.runPromise(agent.send(next, preparation))
+      await publish({ ...identity, type: 'delta', id: 'late', text: 'late previous turn' })
+      await publish({ ...identity, messageId: next.id, type: 'delta', id: 'fresh', text: 'fresh text', gap: true })
+      const fresh = await Effect.runPromise(
+        Stream.runCollect(
+          agent.output!.pipe(
+            Stream.filter((event) => event.messageId === next.id),
+            Stream.take(1),
+            Stream.timeout(1000),
+          ),
+        ),
+      )
+      expect(fresh).toEqual([{ ...identity, messageId: next.id, text: 'fresh text', gap: true }])
       await Effect.runPromise(agent.reap())
     }))
   it('rejects other agent types before creating any host', () =>

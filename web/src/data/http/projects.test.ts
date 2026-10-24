@@ -1,9 +1,14 @@
 import { createTransport } from './transport'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import { ClientError } from '../client'
 import type { Operation, Reference } from '../types'
 import type { HttpContext } from './context'
 import { createProjectAPI, mapInboxItem, mapProject, mapProjectEntries } from './projects'
+
+function jsonBody(body: RequestInit['body']): string {
+  if (typeof body !== 'string') throw new TypeError('Expected a JSON string request body')
+  return body
+}
 
 const projectId = '11111111-1111-4111-8111-111111111111'
 const conversationId = '22222222-2222-4222-8222-222222222222'
@@ -79,7 +84,7 @@ function setup(replies: Reply[]) {
     expect(reply, `Unexpected request: ${path}`).toBeDefined()
     expect(path).toBe(reply!.path)
     expect(init?.method ?? 'GET').toBe(reply!.method ?? 'GET')
-    if (reply!.body !== undefined) expect(JSON.parse(String(init?.body))).toEqual(reply!.body)
+    if (reply!.body !== undefined) expect(JSON.parse(jsonBody(init?.body))).toEqual(reply!.body)
     return new Response(JSON.stringify(reply!.response), { status: reply!.status ?? 200 })
   })
   vi.stubGlobal('fetch', fetcher)
@@ -441,7 +446,7 @@ describe('Project HTTP contract', () => {
     h.ctx.request = async <T>(_path: string, init?: RequestInit) => {
       expect(_path).toBe(`/projects/${projectId}/messages`)
       expect(init?.method).toBe('POST')
-      const body = JSON.parse(String(init?.body)) as (typeof requests)[number]
+      const body = JSON.parse(jsonBody(init?.body)) as (typeof requests)[number]
       requests.push(body)
       return { ...message, client_message_id: body.client_message_id, content: body.content } as T
     }
@@ -531,7 +536,7 @@ describe('Project HTTP contract', () => {
       expect(path.split('/').at(-1)).toMatch(uuid)
       if (init) {
         expect(init.method).toBe('PUT')
-        expect(JSON.parse(String(init.body))).toMatchObject({ expected_revision: 0, content: 'New note' })
+        expect(JSON.parse(jsonBody(init.body))).toMatchObject({ expected_revision: 0, content: 'New note' })
         if (++writes === 2)
           throw Object.assign(new ClientError('conflict', 'Changed'), {
             status: 409,
@@ -602,7 +607,7 @@ describe('Project HTTP contract', () => {
       { path: '/api/v1/projects', method: 'POST', body, response: project },
       { path: `${base}/status`, response: status },
     ])
-    const request = h.ctx.request
+    const request = h.ctx.request.bind(h.ctx)
     let first = true
     h.ctx.request = async <T>(path: string, init?: RequestInit): Promise<T> => {
       const result = await request<T>(path, init)
@@ -745,7 +750,7 @@ describe('Inbox HTTP contract', () => {
     h.ctx.request = async <T>(path: string, init?: RequestInit): Promise<T> => {
       paths.push(path)
       if (!init) return item as T
-      const body = JSON.parse(String(init.body)) as { client_request_id: string }
+      const body = JSON.parse(jsonBody(init.body)) as { client_request_id: string }
       return {
         ...item,
         state: 'answered',

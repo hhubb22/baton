@@ -1,9 +1,0 @@
-**/node_modules
-**/dist
-**/_generated
-pnpm-lock.yaml
-packages/protocol/fixtures/
-*.md
-# 上游文件保留原格式；生成器使用包内格式配置。
-packages/effect-acp
-packages/effect-codex-app-server

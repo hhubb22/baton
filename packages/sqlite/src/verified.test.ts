@@ -7,7 +7,7 @@ import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
 import * as SqlClient from 'effect/sql/SqlClient'
-import { vi } from 'vitest'
+import { vi } from 'vite-plus/test'
 import { CommitUnknown, layer, type CommitVerification } from './index.ts'
 
 const writeSql = 'UPDATE meta SET commit_token = ?'
@@ -45,6 +45,8 @@ const database = <A, E, R>(body: (fixture: Fixture) => Effect.Effect<A, E, R | S
         yield* sql.unsafe("INSERT INTO meta VALUES ('')")
         yield* sql.unsafe('CREATE TABLE entries (id INTEGER)')
         const capturedWriters: DatabaseSync[] = []
+        // 保留原方法，替身通过 .call(this, ...) 指定真实数据库实例。
+        // oxlint-disable-next-line typescript/unbound-method
         const prepare = DatabaseSync.prototype.prepare
         const capture = vi.spyOn(DatabaseSync.prototype, 'prepare').mockImplementation(function (
           this: DatabaseSync,
@@ -64,6 +66,8 @@ const database = <A, E, R>(body: (fixture: Fixture) => Effect.Effect<A, E, R | S
           commit: 'normal',
           commits: 0,
         }
+        // 关闭替身也需要对原始方法指定实际接收者。
+        // oxlint-disable-next-line typescript/unbound-method
         const close = DatabaseSync.prototype.close
         const prepareSpy = vi.spyOn(DatabaseSync.prototype, 'prepare').mockImplementation(function (
           this: DatabaseSync,
@@ -87,7 +91,9 @@ const database = <A, E, R>(body: (fixture: Fixture) => Effect.Effect<A, E, R | S
             const run = statement.run.bind(statement)
             vi.spyOn(statement, 'run').mockImplementationOnce((...params) => {
               expect(nativeWriter.isTransaction).toBe(true)
-              fixture.tokens.push(String(params[0]))
+              const token = params[0]
+              if (typeof token !== 'string') throw new TypeError('Commit token must be a string')
+              fixture.tokens.push(token)
               return run(...params)
             })
           }

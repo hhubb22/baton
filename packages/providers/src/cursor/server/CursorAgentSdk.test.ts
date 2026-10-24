@@ -6,7 +6,7 @@ import * as Layer from 'effect/Layer'
 import * as Fiber from 'effect/Fiber'
 import { TestClock } from 'effect/testing'
 import { makeBatonCursorAgentSdkRunner } from '../index.ts'
-import { vi } from 'vitest'
+import { vi } from 'vite-plus/test'
 
 import * as ProviderEventLoggers from '../../upstream/ProviderEventLoggers.ts'
 import * as CursorAgentSdk from './CursorAgentSdk.ts'

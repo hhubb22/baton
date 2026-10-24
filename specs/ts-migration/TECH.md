@@ -33,13 +33,14 @@ provider 按“直接接入原模块及测试 → 补宿主实现与事件映射
 | 位置 | 技术 | 说明 |
 |---|---|---|
 | 运行时 | Node 26（2026 年 10 月下旬进入 LTS） | 设备端由 SEA 携带，不依赖设备上安装的 Node |
-| 语言 | TypeScript 6.0，与 `web/` 相同 | Effect 4 要求 5.9+。TS 7 原生编译器已 GA，但 typescript-eslint 的类型检查依赖 TS 的 JS API，是否支持 TS 7 未核实，第一版之后再评估 |
-| 框架 | `effect` 4.0.6，`@effect/platform-node`、`@effect/sql-pg`、`@effect/vitest` 同版本 | pnpm catalog 统一锁定。HTTP 用 `effect/http`，子进程用 `effect/process`，Worker 与 cursor-host 之间用 `effect/rpc` |
+| 语言 | TypeScript 6.0，与 `web/` 相同 | 包内构建使用现有 TypeScript 编译器；Vite+ 的类型检查使用 TypeScript Go 工具链 |
+| 框架 | `effect` 4.0.6，`@effect/platform-node`、`@effect/sql-pg`、`@effect/vitest` 同版本 | pnpm catalog 统一锁定。HTTP 用 `effect/http-api` 共享端点契约，底层使用 `effect/http`；子进程用 `effect/process`，Worker 与 cursor-host 之间用 `effect/rpc` |
+| 追踪 | `effect/observability` 原生 OTLP/HTTP | HTTP、outbox、WSS、daemon、IPC 与 Worker 关联持久 trace context；保留 SQL 耗时与连接等待，过滤查询文本、参数和错误详情；默认不导出 |
 | WebSocket | `ws` | 中心的节点与浏览器两个端点，以及 batond 的出站连接；需要自定义握手头和 TLS 参数 |
-| 中心存储 | PostgreSQL 16+，`@effect/sql-pg`，手写 SQL | 沿用 `migrations/0001_initial.sql`，不引入 ORM |
+| 中心存储 | PostgreSQL 16+，`@effect/sql-pg`，参数化 SQL | 沿用根目录 SQL 迁移与 Effect 事务。Drizzle、Prisma 与原生 SQL 的适用性和本地验证见 [数据库访问方案](DATABASE.md) |
 | 设备存储 | `node:sqlite`，WAL + `synchronous=FULL` | 复用已有 `packages/sqlite` Effect `SqlClient`，包含提交结果核查 |
-| 测试 | Vitest + `@effect/vitest` | PostgreSQL 集成测试沿用 `BATON_TEST_DATABASE_URL` 和自动拉起本机实例的逻辑 |
-| 静态检查 | ESLint + typescript-eslint，Prettier | 与 `web/` 共用配置 |
+| 测试 | Vite+ 内置 Vitest + `@effect/vitest` | 工作区串行执行，不缓存数据库与进程测试；沿用本地 PostgreSQL 和自动启动逻辑 |
+| 静态检查 | Vite+：Oxlint、Oxfmt、TypeScript Go | 根目录配置推荐规则，Web 与 Node 包共用；各包编译器检查继续保留 |
 | 打包 | esbuild 产出单文件 JS；batond 再打成 Node SEA | 服务端在 Docker 中直接用 Node 运行 bundle |
 | Agent 接入 | t3code provider / runtime、`effect-acp`、`effect-codex-app-server`、`@cursor/sdk` | 优先复用实现及测试，Baton 提供宿主、可靠性和领域事件映射 |
 
@@ -154,7 +155,7 @@ T2 只完成远程 Thread 主链路；T3 补齐 Project、事项、目录、附�
 | Pi、Codex、Kiro 的现有交付系统组合及 Cursor 拟支持组合（T4、T5） | 既有组合回归失败，或新增组合缺少离线行为与本地安装包检查却标为 available | 静态转录回放、本地替身与安装包检查 |
 | 中心重启、batond 重启、Worker 被杀、PostgreSQL 短停（T1～T3、T5） | 消息重发、回复重复、同步前设备显示可用 | 进程测试 |
 
-切换提交前执行 `pnpm -r typecheck`、`pnpm -r lint`、`pnpm -r test`、`pnpm --dir web build` 和 SEA 打包检查。
+切换提交前执行 `pnpm check`、`pnpm typecheck`、`pnpm test`、`pnpm --dir web build` 和 SEA 打包检查。
 
 ## 第一版之后
 
@@ -162,7 +163,7 @@ T2 只完成远程 Thread 主链路；T3 补齐 Project、事项、目录、附�
 |---|---|
 | Windows Job Object 与逐句柄 DACL 检查 | 需要原生模块；第一版用 taskkill 和目录 ACL |
 | Windows 命名管道限定当前用户 | 同上 |
-| TS 7 原生编译器 | 先确认 typescript-eslint 支持 |
+| 包内编译升级到 TS 7 | Vite+ 已使用 TypeScript Go 检查；包内输出和生成器继续使用其现有编译器 |
 | Worker 账本移到 `worker_threads` | 测量或实际账本的命令接收延迟超标时提前 |
 
 ## 待验证与批准事项

@@ -21,7 +21,15 @@ yield* worker.failed
 - `abort` records cancellation independently of a pending open or send. `reap` confirms the whole process tree and excludes late resource creation from cancelled startup.
 - Reply identity and the native session, input and execution IDs determine event ownership. Old instance events and ended-turn events cannot become output for a new turn.
 
-T1 supports queued messages. `steer` receives an explicit unsupported response. A failed open or resume runs bounded close/reap cleanup before its failure is completed. Confirmed cleanup retires the instance; retries obtain a fresh instance. Unconfirmed cleanup leaves the Thread unknown and prevents execution until process reaping is confirmed.
+The Worker supports queued messages. `steer` receives an explicit unsupported response. A failed open or resume runs bounded close/reap cleanup before its failure is completed. Confirmed cleanup retires the instance; retries obtain a fresh instance. Unconfirmed cleanup leaves the Thread unknown and prevents execution until process reaping is confirmed.
+
+## Real-time output
+
+An Agent can expose an optional `output` stream of `{ nativeSessionId, messageId, executionId, text, gap? }`. Text is consumed outside the serial state queue and never written to the ledger or outbox. The Worker checks the current Agent instance and active input/execution before accepting each delta, including text arriving before native input acceptance. Replies and lifecycle events retain their durable path.
+
+`handle({ type: "session_request", ok: true, session_request: { type: "session.request", operation_id, session_id, action: "output", cursor? } })` returns `{ type: "result", ok, session_result }`. The nested `SessionResult` echoes the operation and session IDs and includes `ok`, `state`, `text`, `cursor` and `gap` on success. A busy Worker reports `state: "running"`. History continues to use `native_history`.
+
+The current Turn retains at most 256 KiB of UTF-8 text. Each read returns at most 16 KiB and advances an `epoch:byteOffset` cursor on a character boundary. Old epochs, offsets outside retained text and upstream text loss resume at the retained start with `gap: true`; malformed cursors or offsets inside a retained UTF-8 character return `invalid_cursor`. Starting or ending a Turn clears text and changes the epoch; a Worker restart also starts a new epoch. Output requests do not enqueue a state transition.
 
 ## Process records
 
@@ -48,9 +56,9 @@ Each accepted Turn uses `execution_timeout_seconds` from the open configuration.
 Run from the repository root:
 
 ```sh
-pnpm --dir apps/batond exec vitest run --config ../../vitest.config.ts src/worker/index.test.ts
+pnpm --dir apps/batond exec vitest run --config ../../vitest.config.ts src/worker
 pnpm --dir apps/batond typecheck
 pnpm exec eslint apps/batond/src/worker
 ```
 
-The tests use real temporary SQLite files and controllable Agents. They cover receipts and conflicts, queued turns, cancellation, event ownership, Scope recovery, process record recovery, bounded outbox delivery, Turn timeouts, explicit continuation after uncertainty and commit uncertainty. Platform process-tree behavior, authenticated IPC and real Cursor execution are exercised by their integration owners.
+The tests use real temporary SQLite files and controllable Agents. They cover receipts and conflicts, queued turns, cancellation, event ownership, Scope recovery, process record recovery, bounded outbox delivery, Turn timeouts, explicit continuation after uncertainty, commit uncertainty, UTF-8 cursors, bounded output, upstream gaps and stop responsiveness during output floods. Platform process-tree behavior, authenticated IPC and real Cursor execution are exercised by their integration owners.

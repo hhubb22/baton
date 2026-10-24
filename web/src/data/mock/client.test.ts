@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vite-plus/test'
 import type { ChangeEvent } from '../client'
 import { assistantWait, previewProblem, projectAgentStatus, threadView } from '../derive'
 import type { ItemDecision } from '../types'

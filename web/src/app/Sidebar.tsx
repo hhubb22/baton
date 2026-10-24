@@ -252,7 +252,7 @@ export function Sidebar() {
       {collapsed ? (
         <div {...stylex.props(styles.spacer)} />
       ) : (
-        <ProjectList projects={visibleProjects} loaded={projects.data !== undefined} />
+        <ProjectList projects={visibleProjects} loaded={projects.data !== undefined} unavailable={projects.isError} />
       )}
 
       {account && (
@@ -299,7 +299,15 @@ export function Sidebar() {
   )
 }
 
-function ProjectList({ projects, loaded }: { projects: Project[]; loaded: boolean }) {
+function ProjectList({
+  projects,
+  loaded,
+  unavailable,
+}: {
+  projects: Project[]
+  loaded: boolean
+  unavailable: boolean
+}) {
   const inbox = useInbox()
   const { newProject } = useWorkspace()
   return (
@@ -317,6 +325,7 @@ function ProjectList({ projects, loaded }: { projects: Project[]; loaded: boolea
         </button>
       </div>
       <div {...stylex.props(styles.projects)}>
+        {unavailable && <span {...stylex.props(text.caption, styles.empty)}>Projects unavailable</span>}
         {loaded && projects.length === 0 && <span {...stylex.props(text.caption, styles.empty)}>No projects yet</span>}
         {projects.map((project) => (
           <ProjectRow key={project.id} project={project} pending={pendingInbox(inbox.data ?? [], project.id).length} />

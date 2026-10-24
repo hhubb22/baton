@@ -1,5 +1,5 @@
 import { ClientError, type BatonClient, type ChangeEvent, type Topic } from '../client'
-import type { Device, Enrollment, Operation, OperationPhase, Session } from '../types'
+import type { AgentKind, Device, Enrollment, Operation, OperationPhase, Session } from '../types'
 import type { HttpContext } from './context'
 import { apiPath, timestamp } from './context'
 import { createProjectAPI } from './projects'
@@ -12,9 +12,17 @@ interface RuntimeReport {
     agent_type: string
     version: string
     status: string
+    reason?: string
     default_model: string
     models: { id: string }[]
-    capabilities: { queue: boolean; steer: boolean; stop: boolean; resume: boolean; switch_model: boolean }
+    capabilities: {
+      create?: boolean
+      queue: boolean
+      steer: boolean
+      stop: boolean
+      resume: boolean
+      switch_model: boolean
+    }
   }[]
   project_runtime?: { providers: { provider: string; status: string; models?: { id: string }[] }[] }
   exec?: { enabled: boolean; shell: string; user?: string }
@@ -68,13 +76,16 @@ export function mapDevice(node: NodeDTO): Device {
     lastSeenAt: timestamp(node.last_contact_at ?? node.registered_at),
     registeredAt: timestamp(node.registered_at),
     agents: (report?.agents ?? [])
-      .filter((agent) => ['codex', 'kiro', 'pi'].includes(agent.agent_type))
+      .filter((agent) => ['codex', 'kiro', 'pi', 'cursor'].includes(agent.agent_type))
       .map((agent) => ({
-        kind: agent.agent_type as 'codex' | 'kiro' | 'pi',
+        kind: agent.agent_type as AgentKind,
+        status: agent.status,
+        reason: agent.reason ?? null,
         version: agent.version === 'unknown' ? null : agent.version,
         models: (agent.models ?? []).map((model) => model.id),
         defaultModel: agent.default_model || null,
         abilities: {
+          create: agent.capabilities?.create === true,
           queue: !!agent.capabilities.queue,
           steer: !!agent.capabilities.steer,
           stop: !!agent.capabilities.stop,
@@ -82,7 +93,7 @@ export function mapDevice(node: NodeDTO): Device {
           switchModel: !!agent.capabilities.switch_model,
         },
         account: agent.agent_type === 'codex' ? 'ChatGPT' : null,
-        problem: agent.status === 'unavailable' ? ('unavailable' as const) : null,
+        problem: agent.status === 'available' ? null : ('unavailable' as const),
       })),
     subscriptions: (report?.project_runtime?.providers ?? []).map((item) => ({
       provider: subscriptionName(item.provider),
@@ -138,10 +149,12 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
   const request = transport.request
   const output = createOutputAPI(request)
   const nodes = () => {
-    if (!nodeRead)
-      nodeRead = request<NodesDTO>('/nodes').finally(() => {
-        nodeRead = null
+    if (!nodeRead) {
+      const pending = request<NodesDTO>('/nodes').finally(() => {
+        if (nodeRead === pending) nodeRead = null
       })
+      nodeRead = pending
+    }
     return nodeRead
   }
   const listDevices = async () =>
@@ -186,7 +199,7 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
     socket = next
     next.onmessage = (event) => {
       if (socket !== next) return
-      let message: OutputResult & { type?: string; thread_id?: string }
+      let message: OutputResult & { type?: string; thread_id?: string; node_id?: string; report_version?: number }
       try {
         message = JSON.parse(String(event.data))
       } catch {
@@ -196,6 +209,16 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
         output.setConnection((subscription) => {
           if (socket === next && next.readyState === 1) next.send(JSON.stringify(subscription))
         })
+      }
+      if (
+        message.type === 'devices.changed' &&
+        typeof message.node_id === 'string' &&
+        message.node_id.length > 0 &&
+        Number.isSafeInteger(message.report_version) &&
+        (message.report_version ?? -1) >= 0
+      ) {
+        nodeRead = null
+        emit('devices', 'files')
       }
       if (message.type === 'thread.changed') emit('threads', 'messages', 'operations')
       if (message.type === 'thread.output' && message.thread_id) output.receive(message.thread_id, message)
@@ -239,7 +262,7 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
   return {
     mode: 'http',
     ...createThreadAPI(ctx, output),
-    subscribeOutput: output.subscribeOutput,
+    subscribeOutput: (id, listener) => output.subscribeOutput(id, listener),
     ...createProjectAPI(ctx),
     getSession,
     async signIn(username, password) {

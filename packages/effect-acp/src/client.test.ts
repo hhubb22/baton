@@ -1087,7 +1087,7 @@ it.layer(NodeServices.layer)("effect-acp client", (it) => {
         Queue.take(output).pipe(Effect.flatMap(decodeResponse)),
         Queue.take(output).pipe(Effect.flatMap(decodeResponse)),
       ]);
-      assert.deepEqual(responses.map((response) => response.id).toSorted(), [
+      assert.deepEqual(responses.map((response) => response.id).toSorted((left, right) => String(left).localeCompare(String(right))), [
         "permission-a",
         "permission-b",
       ]);
