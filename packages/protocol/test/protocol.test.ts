@@ -3,12 +3,9 @@ import { Schema, SchemaAST } from 'effect'
 import { describe, expect, it } from 'vite-plus/test'
 import {
   CommandOutcome,
-  Cursor,
-  HistoryEntry,
   Reason,
   RuntimeAgent,
   RuntimeReport,
-  SessionHistoryPage,
   ThreadReport,
   WorkerAuth,
   WorkerIPCMessage,
@@ -25,8 +22,6 @@ import {
   WorkerCommandReceipt,
   WorkerCommandStatus,
   WorkerCommandResult,
-  HistoryResult,
-  canCreateAgent,
 } from '../src/index.ts'
 
 type Shape = {
@@ -63,7 +58,6 @@ const codecs: Record<string, Schema.Codec<unknown>> = {
   WorkerCommandResult,
   CommandCompleted,
   ThreadOpenCommandResult,
-  HistoryResult,
 }
 const additions: Record<string, string[]> = {
   RuntimeAgent: ['reason'],
@@ -99,7 +93,7 @@ function fixtureValue(name: string): Record<string, unknown> {
 describe('Go JSON 字段与 Effect Schema', () => {
   it('每个 Go 类型均有独立的 Schema 与往返样例', () => {
     expect(Object.keys(dtoSchemas).sort()).toEqual(Object.keys(go.schemas).sort())
-    expect(Object.keys(go.schemas)).toHaveLength(117)
+    expect(Object.keys(go.schemas)).toHaveLength(115)
     for (const name of Object.keys(go.schemas)) {
       expect(go.cases.filter((item) => item.schema === name).length).toBeGreaterThanOrEqual(2)
     }
@@ -246,29 +240,6 @@ describe('协议边界', () => {
     }
     expect(Schema.is(RuntimeAgent)({ ...fixtureValue('RuntimeAgent'), reason: '界'.repeat(342) })).toBe(false)
   })
-  it('统一历史保留空时间和纳秒时间原文', () => {
-    const entry = fixtureValue('HistoryEntry')
-    for (const timestamp of [null, '2026-10-23T12:34:56.123456789Z']) {
-      const value = { ...entry, timestamp }
-      expect(Schema.encodeSync(HistoryEntry)(Schema.decodeUnknownSync(HistoryEntry)(value))).toEqual(value)
-    }
-    expect(Schema.is(HistoryEntry)({ ...entry, role: 'tool' })).toBe(false)
-    expect(Schema.is(HistoryEntry)({ ...entry, timestamp: undefined })).toBe(false)
-    expect(Schema.is(HistoryEntry)({ ...entry, bytes: 0 })).toBe(false)
-    expect(Schema.is(HistoryEntry)({ ...entry, text: '\ud800' })).toBe(false)
-  })
-  it('历史正文、条数、编码后大小与游标分别受限', () => {
-    const entry = fixtureValue('HistoryEntry')
-    expect(Schema.is(HistoryEntry)({ ...entry, text: '界'.repeat(1366), bytes: 4098 })).toBe(false)
-    const page = fixtureValue('SessionHistoryPage')
-    expect(Schema.is(SessionHistoryPage)({ ...page, entries: Array(17).fill(entry) })).toBe(false)
-    const large = { ...entry, text: 'a'.repeat(4096), bytes: 4096 }
-    expect(
-      Schema.is(SessionHistoryPage)({ ...page, entries: [{ ...entry, text: '<'.repeat(4096), bytes: 4096 }] }),
-    ).toBe(false)
-    expect(Schema.is(SessionHistoryPage)({ ...page, entries: Array(4).fill(large) })).toBe(false)
-    expect(Schema.is(Cursor)('界'.repeat(34))).toBe(false)
-  })
   it('能力报告检测嵌套原因、重复标识和整体容量', () => {
     const report = fixtureValue('RuntimeReport')
     const agent = fixtureValue('RuntimeAgent')
@@ -332,20 +303,6 @@ describe('协议边界', () => {
         thread_id: '22345678-1234-4234-8234-123456789abc',
       }),
     ).toBe(false)
-  })
-  it('历史读取中返回失败状态并省略成功页', () => {
-    const base = fixtureValue('SessionResult')
-    expect(Schema.is(HistoryResult)({ ...base, ok: false, code: 'history_loading' })).toBe(false)
-    delete base.history
-    expect(Schema.is(HistoryResult)({ ...base, ok: false, code: 'history_loading' })).toBe(true)
-    expect(Schema.is(HistoryResult)({ ...base, ok: true })).toBe(false)
-  })
-  it('创建准入同时要求 available 和 create=true', () => {
-    for (const status of ['unverified', 'unavailable', 'future']) {
-      expect(canCreateAgent({ status, capabilities: { create: true } })).toBe(false)
-    }
-    expect(canCreateAgent({ status: 'available', capabilities: { create: false } })).toBe(false)
-    expect(canCreateAgent({ status: 'available', capabilities: { create: true } })).toBe(true)
   })
   it('拒绝 reply 附件与元数据的错误结构和超限数据', () => {
     const base = fixtureValue('ThreadReport')

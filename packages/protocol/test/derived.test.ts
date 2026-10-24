@@ -54,16 +54,26 @@ describe('派生协议保留整体校验', () => {
   for (const [name, codec, value] of workerCases) {
     it(`${name} 保留 IPC 容量与 ready 关系限制`, () => {
       expect(Schema.is(codec)(value)).toBe(true)
-      expect(Schema.is(codec)({ ...value, history: { data: 'x'.repeat(300000) } })).toBe(false)
       expect(Schema.is(codec)({ ...value, worker_ready: false, agent_ready: true })).toBe(false)
     })
   }
   it('IPC 的 256 KiB 边界按完整 JSON 计量', () => {
-    const base = { type: 'status', ok: false, history: { data: '' } }
+    const report = {
+      type: 'thread.report',
+      thread_id: '12345678-1234-4234-8234-123456789abc',
+      event_id: '22345678-1234-4234-8234-123456789abc',
+      worker_seq: 1,
+      kind: 'reply',
+      content: '',
+    }
+    const base = { type: 'status', ok: false, thread_reports: [report] }
     const overhead = Buffer.byteLength(JSON.stringify(base))
-    const exact = { ...base, history: { data: 'x'.repeat(Protocol.MaxMessageBytes - overhead) } }
+    const exact = { ...base, thread_reports: [{ ...report, content: 'x'.repeat(Protocol.MaxMessageBytes - overhead) }] }
     expect(Schema.is(Protocol.WorkerStatus)(exact)).toBe(true)
-    expect(Schema.is(Protocol.WorkerStatus)({ ...exact, history: { data: exact.history.data + 'x' } })).toBe(false)
+    const grown = exact.thread_reports[0]!
+    expect(
+      Schema.is(Protocol.WorkerStatus)({ ...exact, thread_reports: [{ ...grown, content: grown.content + 'x' }] }),
+    ).toBe(false)
   })
   it('CommandCompleted 继续验证完成报告身份字段', () => {
     const value = sample(migration, 'CommandCompleted', 'completion_before_ack')
@@ -71,7 +81,7 @@ describe('派生协议保留整体校验', () => {
     expect(Schema.is(Protocol.CommandCompleted)({ ...value, command_id: undefined })).toBe(false)
     expect(Schema.is(Protocol.CommandCompleted)({ ...value, storage_generation: '' })).toBe(false)
   })
-  it('open 回执和历史结果保留各自的跨字段限制', () => {
+  it('open 回执保留跨字段限制', () => {
     expect(
       Schema.is(Protocol.ThreadOpenCommandResult)({
         type: 'thread.command_result',
@@ -79,8 +89,5 @@ describe('派生协议保留整体校验', () => {
         ok: true,
       }),
     ).toBe(false)
-    const history = sample(go, 'HistoryResult', 'history_loading')
-    expect(Schema.is(Protocol.HistoryResult)(history)).toBe(true)
-    expect(Schema.is(Protocol.HistoryResult)({ ...history, ok: true })).toBe(false)
   })
 })

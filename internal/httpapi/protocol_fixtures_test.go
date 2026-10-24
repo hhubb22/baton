@@ -187,8 +187,6 @@ func TestExportProtocolFixtures(t *testing.T) {
 		"FileEntry":                 {Value: protocol.FileEntry{}, Source: "internal/protocol/files.go", GoName: "FileEntry"},
 		"FileRemainder":             {Value: protocol.FileRemainder{}, Source: "internal/protocol/files.go", GoName: "FileRemainder"},
 		"FileResult":                {Value: protocol.FileResult{}, Source: "internal/protocol/files.go", GoName: "FileResult"},
-		"HistoryEntry":              {Value: protocol.HistoryEntry{}, Source: "internal/protocol/history.go", GoName: "HistoryEntry"},
-		"SessionHistoryPage":        {Value: protocol.SessionHistoryPage{}, Source: "internal/protocol/history.go", GoName: "SessionHistoryPage"},
 		"ProjectExecRequest":        {Value: protocol.ProjectExecRequest{}, Source: "internal/protocol/node_settings.go", GoName: "ProjectExecRequest"},
 		"ProjectExecResult":         {Value: protocol.ProjectExecResult{}, Source: "internal/protocol/node_settings.go", GoName: "ProjectExecResult"},
 		"BrowseRootsRequest":        {Value: protocol.BrowseRootsRequest{}, Source: "internal/protocol/node_settings.go", GoName: "BrowseRootsRequest"},
@@ -301,19 +299,6 @@ func TestExportProtocolFixtures(t *testing.T) {
 	exportProtocolFixtures(t, types)
 }
 
-// migrationHistoryEntry 是适配器规格的统一消息；Go 生产协议保持冻结。
-type migrationHistoryEntry struct {
-	ID              string     `json:"id"`
-	Ordinal         int64      `json:"ordinal"`
-	Role            string     `json:"role"`
-	Text            string     `json:"text"`
-	Timestamp       *time.Time `json:"timestamp"`
-	ClientMessageID string     `json:"client_message_id,omitempty"`
-	Reference       string     `json:"reference"`
-	Bytes           int64      `json:"bytes"`
-	Truncated       bool       `json:"truncated"`
-}
-
 type fixtureField struct {
 	Name     string       `json:"name"`
 	Optional bool         `json:"optional"`
@@ -339,6 +324,25 @@ type exportedFixtureSchema struct {
 
 const fixtureUUID = "12345678-1234-4234-8234-123456789abc"
 
+// History pages are no longer part of the TS contract; the frozen Go release
+// entry keeps them until the release switch.
+var removedHistoryFields = map[string]bool{"SessionResult": true, "BrowserThreadOutput": true}
+
+var removedHistoryTypes = map[string]bool{
+	"internal/protocol/history.go:HistoryEntry":       true,
+	"internal/protocol/history.go:SessionHistoryPage": true,
+}
+
+func dropFixtureField(fields []fixtureField, name string) []fixtureField {
+	kept := fields[:0]
+	for _, field := range fields {
+		if field.Name != name {
+			kept = append(kept, field)
+		}
+	}
+	return kept
+}
+
 func exportProtocolFixtures(t *testing.T, types map[string]protocolFixtureType) {
 	t.Helper()
 	checkFixtureInventory(t, types)
@@ -346,12 +350,8 @@ func exportProtocolFixtures(t *testing.T, types map[string]protocolFixtureType) 
 	for name, entry := range types {
 		names[reflect.TypeOf(entry.Value)] = name
 	}
-	names[reflect.TypeOf(migrationHistoryEntry{})] = "HistoryEntry"
 	var describe func(reflect.Type, bool) fixtureShape
 	describe = func(typ reflect.Type, root bool) fixtureShape {
-		if typ == reflect.TypeOf(protocol.HistoryEntry{}) {
-			typ = reflect.TypeOf(migrationHistoryEntry{})
-		}
 		if typ == reflect.TypeOf(time.Time{}) {
 			return fixtureShape{Kind: "timestamp"}
 		}
@@ -433,7 +433,11 @@ func exportProtocolFixtures(t *testing.T, types map[string]protocolFixtureType) 
 	for _, name := range keys {
 		entry := types[name]
 		typ := reflect.TypeOf(entry.Value)
-		schemas[name] = exportedFixtureSchema{entry.Source, entry.GoName, describe(typ, true)}
+		shape := describe(typ, true)
+		if removedHistoryFields[name] {
+			shape.Fields = dropFixtureField(shape.Fields, "history")
+		}
+		schemas[name] = exportedFixtureSchema{entry.Source, entry.GoName, shape}
 		for _, full := range []bool{true, false} {
 			v := fixtureSample(typ, "", full).Interface()
 			raw, err := json.Marshal(v)
@@ -445,6 +449,11 @@ func exportProtocolFixtures(t *testing.T, types map[string]protocolFixtureType) 
 				t.Fatal(err)
 			}
 			value = fixtureMigrationValue(value)
+			if removedHistoryFields[name] {
+				if object, ok := value.(map[string]any); ok {
+					delete(object, "history")
+				}
+			}
 			mode := "full"
 			if !full {
 				mode = "sparse"
@@ -529,24 +538,6 @@ func exportProtocolFixtures(t *testing.T, types map[string]protocolFixtureType) 
 	for _, operation := range []string{"bootstrap", "read_events", "renew", "started", "stopped", "wake_received", "claim_inputs", "wait_tool", "call_tool", "append_event", "commit_compaction", "finish", "exited", "start_failed", "report_failure", "preview"} {
 		cases = append(cases, exportedFixture{"ProjectRuntimeRequest", operation, protocol.ProjectRuntimeRequest{Type: protocol.BodyProjectRuntimeRequest, RunID: fixtureUUID, LeaseEpoch: 1, Operation: operation}})
 	}
-	for _, code := range []string{"history_loading", "history_changed", "history_missing", "history_unavailable", "invalid_cursor"} {
-		cases = append(cases, exportedFixture{"HistoryResult", code, protocol.SessionResult{Type: protocol.BodySessionResult, OperationID: fixtureUUID, SessionID: fixtureUUID, Code: code}})
-	}
-	historyTime := time.Date(2026, 10, 23, 12, 34, 56, 123456789, time.UTC)
-	type unifiedPage struct {
-		Entries []migrationHistoryEntry `json:"entries"`
-		Cursor  string                  `json:"cursor"`
-		HasMore bool                    `json:"has_more"`
-		Gap     bool                    `json:"gap"`
-	}
-	entries := []migrationHistoryEntry{
-		{ID: "kiro-user-1", Ordinal: 0, Role: "user", Text: "运行检查", Timestamp: &historyTime, ClientMessageID: "input-1", Reference: "native:kiro-session-1:0", Bytes: int64(len("运行检查"))},
-		{ID: "kiro-assistant-1", Ordinal: 1, Role: "assistant", Text: "检查已完成。", Reference: "native:kiro-session-1:1", Bytes: int64(len("检查已完成。"))},
-	}
-	cases = append(cases, exportedFixture{"HistoryResult", "kiro.logical_messages", struct {
-		protocol.SessionResult
-		History unifiedPage `json:"history"`
-	}{protocol.SessionResult{Type: protocol.BodySessionResult, OperationID: fixtureUUID, SessionID: fixtureUUID, OK: true}, unifiedPage{Entries: entries, Cursor: "snapshot:2"}}})
 	appendHTTPQueryFixtures(t, &cases)
 	document := struct {
 		Schemas map[string]exportedFixtureSchema `json:"schemas"`
@@ -892,6 +883,9 @@ func checkFixtureInventory(t *testing.T, types map[string]protocolFixtureType) {
 						if ts, ok := spec.(*ast.TypeSpec); ok {
 							if st, ok := ts.Type.(*ast.StructType); ok && tagged(st) {
 								if (dir == "store" || dir == "inbox") && !ast.IsExported(ts.Name.Name) {
+									continue
+								}
+								if removedHistoryTypes[source+":"+ts.Name.Name] {
 									continue
 								}
 								if registered[source+":"+ts.Name.Name] == "" {

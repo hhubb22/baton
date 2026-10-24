@@ -83,7 +83,6 @@ const replay: AgentFactory = (config) => {
     abort: () => cancel,
     close: () => cancel,
     reap: () => cancel.pipe(Effect.as({ processTreeStopped: true })),
-    readHistory: () => Effect.succeed({ entries: [] }),
   }
 }
 

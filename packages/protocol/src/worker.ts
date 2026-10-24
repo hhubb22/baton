@@ -4,7 +4,6 @@ import {
   AgentType,
   ClientMessageID,
   CommandOutcome,
-  Cursor,
   Integer,
   PositiveInteger,
   StorageGeneration,
@@ -80,8 +79,6 @@ export const WorkerIPCMessage = Schema.Struct({
   thread_reports: Schema.optionalKey(Schema.NullOr(Schema.Array(ThreadReport))),
   session_request: Schema.optionalKey(Schema.NullOr(SessionRequest)),
   session_result: Schema.optionalKey(Schema.NullOr(SessionResult)),
-  history: Schema.optionalKey(Schema.Json),
-  history_cursor: Schema.optionalKey(Cursor),
   stop_reason: Schema.optionalKey(boundedText(4096)),
   type: Schema.Literals([
     'auth',

@@ -76,7 +76,6 @@ func TestExportWorkerProtocolFixtures(t *testing.T) {
 	add("result.error", ipcMessage{Type: "result", Code: "thread_rejected", Message: "尚未实现的 Thread 适配器"})
 	add("result.pending", ipcMessage{Type: "result", OK: true, ThreadReports: []protocol.ThreadReport{{Type: protocol.BodyThreadReport, ThreadID: id, EventID: id, WorkerSeq: 1, Kind: "thread.opened", StorageGeneration: id, NativeSessionID: "native-session-1"}}})
 	add("result.output", ipcMessage{Type: "result", OK: true, SessionResult: &protocol.SessionResult{Type: protocol.BodySessionResult, OperationID: id, SessionID: id, OK: true, State: "idle", Text: "检查通过", Cursor: id + ":12", Gap: true}})
-	add("result.native_history", ipcMessage{Type: "result", OK: true, History: json.RawMessage(`{"messages":[{"role":"assistant","text":"检查通过"}]}`), HistoryCursor: "native-cursor"})
 	for _, c := range calls {
 		if !strings.HasPrefix(c.name, "thread_") || c.name == "thread_pending" || c.name == "thread_ack" {
 			continue
@@ -104,6 +103,9 @@ func TestExportWorkerProtocolFixtures(t *testing.T) {
 	for i := 0; i < typ.NumField(); i++ {
 		f := typ.Field(i)
 		tag := strings.Split(f.Tag.Get("json"), ",")
+		if tag[0] == "history" || tag[0] == "history_cursor" {
+			continue
+		}
 		fields = append(fields, map[string]any{"name": tag[0], "optional": len(tag) > 1 && tag[1] == "omitempty", "go_type": f.Type.String()})
 	}
 	doc := struct {

@@ -131,7 +131,6 @@ it('restarts an acknowledged Worker from its existing SQLite ledger and obtains 
         reaped++
         return { processTreeStopped: true }
       }),
-    readHistory: () => Effect.succeed(null),
   }
   await run(
     Effect.scoped(

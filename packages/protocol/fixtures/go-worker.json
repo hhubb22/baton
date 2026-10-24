@@ -42,16 +42,6 @@
       "optional": true
     },
     {
-      "go_type": "jsontext.Value",
-      "name": "history",
-      "optional": true
-    },
-    {
-      "go_type": "string",
-      "name": "history_cursor",
-      "optional": true
-    },
-    {
       "go_type": "string",
       "name": "stop_reason",
       "optional": true
@@ -270,23 +260,6 @@
           "cursor": "12345678-1234-4234-8234-123456789abc:12",
           "gap": true
         },
-        "type": "result",
-        "ok": true
-      }
-    },
-    {
-      "schema": "WorkerIPCMessage",
-      "name": "result.native_history",
-      "value": {
-        "history": {
-          "messages": [
-            {
-              "role": "assistant",
-              "text": "检查通过"
-            }
-          ]
-        },
-        "history_cursor": "native-cursor",
         "type": "result",
         "ok": true
       }

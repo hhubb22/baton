@@ -313,15 +313,6 @@
             }
           },
           {
-            "name": "history",
-            "optional": true,
-            "shape": {
-              "kind": "ref",
-              "ref": "SessionHistoryPage",
-              "nullable": true
-            }
-          },
-          {
             "name": "operation_id",
             "optional": false,
             "shape": {
@@ -1435,79 +1426,6 @@
             "optional": true,
             "shape": {
               "kind": "string"
-            }
-          }
-        ]
-      }
-    },
-    "HistoryEntry": {
-      "source": "internal/protocol/history.go",
-      "go_name": "HistoryEntry",
-      "shape": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "id",
-            "optional": false,
-            "shape": {
-              "kind": "string"
-            }
-          },
-          {
-            "name": "ordinal",
-            "optional": false,
-            "shape": {
-              "kind": "integer"
-            }
-          },
-          {
-            "name": "role",
-            "optional": false,
-            "shape": {
-              "kind": "string"
-            }
-          },
-          {
-            "name": "text",
-            "optional": false,
-            "shape": {
-              "kind": "string"
-            }
-          },
-          {
-            "name": "timestamp",
-            "optional": false,
-            "shape": {
-              "kind": "timestamp",
-              "nullable": true
-            }
-          },
-          {
-            "name": "client_message_id",
-            "optional": true,
-            "shape": {
-              "kind": "string"
-            }
-          },
-          {
-            "name": "reference",
-            "optional": false,
-            "shape": {
-              "kind": "string"
-            }
-          },
-          {
-            "name": "bytes",
-            "optional": false,
-            "shape": {
-              "kind": "integer"
-            }
-          },
-          {
-            "name": "truncated",
-            "optional": false,
-            "shape": {
-              "kind": "boolean"
             }
           }
         ]
@@ -4141,55 +4059,6 @@
         ]
       }
     },
-    "SessionHistoryPage": {
-      "source": "internal/protocol/history.go",
-      "go_name": "SessionHistoryPage",
-      "shape": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "entries",
-            "optional": false,
-            "shape": {
-              "kind": "array",
-              "nullable": true,
-              "element": {
-                "kind": "ref",
-                "ref": "HistoryEntry"
-              }
-            }
-          },
-          {
-            "name": "cursor",
-            "optional": false,
-            "shape": {
-              "kind": "string"
-            }
-          },
-          {
-            "name": "has_more",
-            "optional": false,
-            "shape": {
-              "kind": "boolean"
-            }
-          },
-          {
-            "name": "gap",
-            "optional": false,
-            "shape": {
-              "kind": "boolean"
-            }
-          },
-          {
-            "name": "code",
-            "optional": true,
-            "shape": {
-              "kind": "string"
-            }
-          }
-        ]
-      }
-    },
     "SessionRequest": {
       "source": "internal/protocol/session.go",
       "go_name": "SessionRequest",
@@ -4278,15 +4147,6 @@
       "shape": {
         "kind": "struct",
         "fields": [
-          {
-            "name": "history",
-            "optional": true,
-            "shape": {
-              "kind": "ref",
-              "ref": "SessionHistoryPage",
-              "nullable": true
-            }
-          },
           {
             "name": "type",
             "optional": false,
@@ -6386,24 +6246,6 @@
         "code": "unavailable",
         "cursor": "fixture-cursor",
         "gap": true,
-        "history": {
-          "code": "unavailable",
-          "cursor": "fixture-cursor",
-          "entries": [
-            {
-              "bytes": 18,
-              "id": "12345678-1234-4234-8234-123456789abc",
-              "ordinal": 1,
-              "reference": "native:session-1:0:12",
-              "role": "assistant",
-              "text": "检查已完成。",
-              "timestamp": null,
-              "truncated": true
-            }
-          ],
-          "gap": true,
-          "has_more": true
-        },
         "ok": true,
         "operation_id": "12345678-1234-4234-8234-123456789abc",
         "session_id": "12345678-1234-4234-8234-123456789abc",
@@ -6948,34 +6790,6 @@
       "value": {
         "client_request_id": "input-1",
         "expected_version": 1
-      }
-    },
-    {
-      "schema": "HistoryEntry",
-      "name": "full",
-      "value": {
-        "bytes": 18,
-        "id": "12345678-1234-4234-8234-123456789abc",
-        "ordinal": 1,
-        "reference": "native:session-1:0:12",
-        "role": "assistant",
-        "text": "检查已完成。",
-        "timestamp": null,
-        "truncated": true
-      }
-    },
-    {
-      "schema": "HistoryEntry",
-      "name": "sparse",
-      "value": {
-        "bytes": 18,
-        "id": "native-message-1",
-        "ordinal": 1,
-        "reference": "native:session-1:0:12",
-        "role": "assistant",
-        "text": "检查已完成。",
-        "timestamp": null,
-        "truncated": false
       }
     },
     {
@@ -8865,38 +8679,6 @@
       }
     },
     {
-      "schema": "SessionHistoryPage",
-      "name": "full",
-      "value": {
-        "code": "unavailable",
-        "cursor": "fixture-cursor",
-        "entries": [
-          {
-            "bytes": 18,
-            "id": "12345678-1234-4234-8234-123456789abc",
-            "ordinal": 1,
-            "reference": "native:session-1:0:12",
-            "role": "assistant",
-            "text": "检查已完成。",
-            "timestamp": null,
-            "truncated": true
-          }
-        ],
-        "gap": true,
-        "has_more": true
-      }
-    },
-    {
-      "schema": "SessionHistoryPage",
-      "name": "sparse",
-      "value": {
-        "cursor": "fixture-cursor",
-        "entries": null,
-        "gap": false,
-        "has_more": false
-      }
-    },
-    {
       "schema": "SessionRequest",
       "name": "full",
       "value": {
@@ -8955,24 +8737,6 @@
         "code": "unavailable",
         "cursor": "fixture-cursor",
         "gap": true,
-        "history": {
-          "code": "unavailable",
-          "cursor": "fixture-cursor",
-          "entries": [
-            {
-              "bytes": 18,
-              "id": "12345678-1234-4234-8234-123456789abc",
-              "ordinal": 1,
-              "reference": "native:session-1:0:12",
-              "role": "assistant",
-              "text": "检查已完成。",
-              "timestamp": null,
-              "truncated": true
-            }
-          ],
-          "gap": true,
-          "has_more": true
-        },
         "ok": true,
         "operation_id": "12345678-1234-4234-8234-123456789abc",
         "session_id": "12345678-1234-4234-8234-123456789abc",
@@ -10408,105 +10172,6 @@
         "run_id": "12345678-1234-4234-8234-123456789abc",
         "lease_epoch": 1,
         "operation": "preview"
-      }
-    },
-    {
-      "schema": "HistoryResult",
-      "name": "history_loading",
-      "value": {
-        "type": "session.result",
-        "operation_id": "12345678-1234-4234-8234-123456789abc",
-        "session_id": "12345678-1234-4234-8234-123456789abc",
-        "ok": false,
-        "code": "history_loading",
-        "gap": false
-      }
-    },
-    {
-      "schema": "HistoryResult",
-      "name": "history_changed",
-      "value": {
-        "type": "session.result",
-        "operation_id": "12345678-1234-4234-8234-123456789abc",
-        "session_id": "12345678-1234-4234-8234-123456789abc",
-        "ok": false,
-        "code": "history_changed",
-        "gap": false
-      }
-    },
-    {
-      "schema": "HistoryResult",
-      "name": "history_missing",
-      "value": {
-        "type": "session.result",
-        "operation_id": "12345678-1234-4234-8234-123456789abc",
-        "session_id": "12345678-1234-4234-8234-123456789abc",
-        "ok": false,
-        "code": "history_missing",
-        "gap": false
-      }
-    },
-    {
-      "schema": "HistoryResult",
-      "name": "history_unavailable",
-      "value": {
-        "type": "session.result",
-        "operation_id": "12345678-1234-4234-8234-123456789abc",
-        "session_id": "12345678-1234-4234-8234-123456789abc",
-        "ok": false,
-        "code": "history_unavailable",
-        "gap": false
-      }
-    },
-    {
-      "schema": "HistoryResult",
-      "name": "invalid_cursor",
-      "value": {
-        "type": "session.result",
-        "operation_id": "12345678-1234-4234-8234-123456789abc",
-        "session_id": "12345678-1234-4234-8234-123456789abc",
-        "ok": false,
-        "code": "invalid_cursor",
-        "gap": false
-      }
-    },
-    {
-      "schema": "HistoryResult",
-      "name": "kiro.logical_messages",
-      "value": {
-        "type": "session.result",
-        "operation_id": "12345678-1234-4234-8234-123456789abc",
-        "session_id": "12345678-1234-4234-8234-123456789abc",
-        "ok": true,
-        "gap": false,
-        "history": {
-          "entries": [
-            {
-              "id": "kiro-user-1",
-              "ordinal": 0,
-              "role": "user",
-              "text": "运行检查",
-              "timestamp": "2026-10-23T12:34:56.123456789Z",
-              "client_message_id": "input-1",
-              "reference": "native:kiro-session-1:0",
-              "bytes": 12,
-              "truncated": false
-            },
-            {
-              "id": "kiro-assistant-1",
-              "ordinal": 1,
-              "role": "assistant",
-              "text": "检查已完成。",
-              "timestamp": null,
-              "reference": "native:kiro-session-1:1",
-              "bytes": 18,
-              "truncated": false
-            }
-          ],
-          "cursor": "snapshot:2",
-          "has_more": false,
-          "gap": false
-        }
       }
     },
     {

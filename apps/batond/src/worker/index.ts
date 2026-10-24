@@ -39,7 +39,6 @@ export interface WorkerOptions {
   readonly recoverProcesses?: (
     records: readonly ProcessRecord[],
   ) => Effect.Effect<{ readonly processTreeStopped: boolean }, AgentError>
-  readonly historyTimeoutMs?: number
   readonly attachments?: (
     config: WorkerOpenConfig,
     text: string,
@@ -127,7 +126,6 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
   const prepareMs = options.prepareTimeoutMs ?? 10_000
   const sendMs = options.sendTimeoutMs ?? 35_000
   const stopMs = options.stopTimeoutMs ?? 60_000
-  const historyMs = options.historyTimeoutMs ?? 30_000
 
   function report(draft: State, kind: ThreadReport['kind'], fields: Partial<ThreadReport> = {}) {
     const config = draft.config
@@ -582,7 +580,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
       return (yield* options.recoverProcesses(records)).processTreeStopped
     }).pipe(Effect.catch(() => Effect.succeed(false)))
   }
-  function recoverInput(current: ThreadAgent, message: Message, timeoutMs = historyMs) {
+  function recoverInput(current: ThreadAgent, message: Message, timeoutMs = sendMs) {
     return Effect.gen(function* () {
       if (!message.preparation) return undefined
       yield* current.restoreInput(message.input, message.preparation)
@@ -604,7 +602,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         Effect.forEach(pending, (message) =>
           (remaining() <= 0
             ? Effect.succeed(undefined)
-            : recoverInput(reader, message, Math.min(historyMs, remaining()))
+            : recoverInput(reader, message, Math.min(sendMs, remaining()))
           ).pipe(Effect.map((acceptance) => [message.input.id, acceptance] as const)),
         ),
       (reader) =>
@@ -753,7 +751,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
                 Effect.timeout(stopMs),
                 Effect.catch(() => Effect.succeed(false)),
               )
-              const recovered = yield* recoverWithFreshAgent(config, pending, () => historyMs)
+              const recovered = yield* recoverWithFreshAgent(config, pending, () => sendMs)
               yield* post(
                 Effect.gen(function* () {
                   unknownRecoveryRunning = false
@@ -1337,28 +1335,13 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         }
         return { type: 'result', ok: result.ok, session_result: result }
       }
-      if (decoded.type === 'native_history') {
-        if (closed) return yield* Effect.fail(new WorkerFailure('worker_closed', 'Worker scope has closed'))
-        if (frozen) return yield* Effect.fail(frozen)
-        // Obtain a stable adapter reference in the short queue; history I/O runs outside it.
-        const current = yield* submit(
-          Effect.gen(function* () {
-            if (closing) return yield* Effect.fail(new WorkerFailure('worker_closed', 'Worker scope has closed'))
-            if (!state.config) return undefined
-            return yield* ensureAgent()
-          }),
-        )
-        if (!current) return { type: 'result', ok: false, code: 'not_open' }
-        const historyFiber = yield* Effect.forkIn(
-          current.readHistory(decoded.history_cursor).pipe(
-            Effect.timeout(historyMs),
-            Effect.mapError((cause) => new WorkerFailure('history_error', reasonOf(cause), cause)),
-          ),
-          scope,
-        )
-        const history = yield* Fiber.join(historyFiber)
-        return { type: 'result', ok: true, history }
-      }
+      if (decoded.type === 'native_history')
+        return {
+          type: 'result',
+          ok: false,
+          code: 'history_unavailable',
+          message: 'Native history is not kept on this device',
+        }
       const trace = commandAction(decoded.type) ? yield* captureTrace : undefined
       return yield* submit(shortRequest({ ...decoded, ...(trace ? { trace_context: trace } : {}) })).pipe(
         Effect.catch((error) =>

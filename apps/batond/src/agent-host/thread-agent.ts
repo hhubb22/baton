@@ -292,7 +292,6 @@ function makeAgent(config: WorkerOpenConfig, options: AgentHostOptions): ThreadA
         yield* Scope.close(scope, Exit.void)
         return { processTreeStopped }
       }),
-    readHistory: () => Effect.fail(new AgentError('Native history is unavailable on this device')),
   }
   return agent
 }

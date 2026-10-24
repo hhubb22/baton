@@ -25,7 +25,6 @@ import {
   nonemptyText,
   jsonLimit,
   uniqueBy,
-  utf8Bytes,
 } from './common.ts'
 
 // internal/inbox/inbox.go · Option
@@ -117,41 +116,10 @@ export const BrowserSubscription = Schema.Struct({
 })
 export type BrowserSubscription = typeof BrowserSubscription.Type
 
-// internal/protocol/history.go · HistoryEntry
-export const HistoryEntry = Schema.Struct({
-  id: nonemptyText(512),
-  ordinal: NonNegativeInteger,
-  role: Schema.Literals(['user', 'assistant']),
-  text: boundedText(4096),
-  timestamp: Schema.NullOr(Timestamp),
-  client_message_id: Schema.optionalKey(ClientMessageID),
-  reference: boundedText(4096),
-  bytes: NonNegativeInteger,
-  truncated: Schema.Boolean,
-}).check(
-  Schema.makeFilter(
-    (value) =>
-      (value.bytes >= utf8Bytes(value.text) && (value.truncated || value.bytes === utf8Bytes(value.text))) ||
-      '正文长度与截断标记不符',
-  ),
-)
-export type HistoryEntry = typeof HistoryEntry.Type
-
-// internal/protocol/history.go · SessionHistoryPage
-export const SessionHistoryPage = Schema.Struct({
-  entries: Schema.NullOr(Schema.Array(HistoryEntry).check(Schema.isMaxLength(16))),
-  cursor: Cursor,
-  has_more: Schema.Boolean,
-  gap: Schema.Boolean,
-  code: Schema.optionalKey(boundedText(64)),
-}).check(jsonLimit(14 * 1024, undefined, true))
-export type SessionHistoryPage = typeof SessionHistoryPage.Type
-
 // internal/httpapi/events.go · events1
 export const BrowserThreadOutput = Schema.Struct({
   type: Schema.Literal('thread.output'),
   thread_id: Schema.optionalKey(UUID),
-  history: Schema.optionalKey(Schema.NullOr(SessionHistoryPage)),
   operation_id: UUID,
   session_id: UUID,
   ok: Schema.Boolean,
@@ -1023,7 +991,6 @@ export type SessionResponse = typeof SessionResponse.Type
 
 // internal/protocol/session.go · SessionResult
 export const SessionResult = Schema.Struct({
-  history: Schema.optionalKey(Schema.NullOr(SessionHistoryPage)),
   type: Schema.Literal('session.result'),
   operation_id: UUID,
   session_id: UUID,
@@ -1436,7 +1403,6 @@ export const dtoSchemas = {
   FileView,
   Frame,
   HandleAttentionInput,
-  HistoryEntry,
   InboxAsk,
   InboxConflictResponse,
   InboxOption,
@@ -1495,7 +1461,6 @@ export const dtoSchemas = {
   RuntimeReportResult,
   RuntimeRoot,
   SavedDefaultDevice,
-  SessionHistoryPage,
   SessionRequest,
   SessionResponse,
   SessionResult,

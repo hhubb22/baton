@@ -87,7 +87,6 @@ export interface ThreadAgent {
   readonly abort: () => Effect.Effect<void, AgentError>
   readonly close: () => Effect.Effect<void, AgentError>
   readonly reap: () => Effect.Effect<{ readonly processTreeStopped: boolean }, AgentError>
-  readonly readHistory: (cursor?: string) => Effect.Effect<JsonValue, AgentError>
 }
 
 /** Each call returns a fresh instance; construction must not create processes or perform I/O. */

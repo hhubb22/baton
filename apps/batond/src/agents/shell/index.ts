@@ -302,12 +302,6 @@ function makeShellAgent(config: WorkerOpenConfig, options: ShellAgentOptions): T
         if (finishing) await finishing
         return { processTreeStopped }
       }),
-    readHistory: (cursor) =>
-      io(async () => {
-        if (cursor !== undefined) throw new AgentError('shell history does not support cursors')
-        const record = await loadCompletion(await native())
-        return [{ ...record.result }]
-      }),
   }
   return agent
 }

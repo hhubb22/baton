@@ -67,7 +67,7 @@ withdraw 在撤回事实持久保存后以 succeeded 结束；已经无法撤回
 
 ## 设备能力与浏览器事件
 
-`RuntimeAgent` 正式保留 `reason`、`status` 和全部 capability，包括 `create`。reason 最多 1024 UTF-8 字节，拒绝 NUL、控制字符及常见 token/API key/Bearer/JWT 格式。生产者负责从诊断输出提取脱敏摘要；格式检查无法识别任意上下文中的秘密。完整报告仍受 64 KiB 限制。`canCreateAgent` 同时要求 `status === available` 和 `capabilities.create === true`，未知状态返回 false。
+`RuntimeAgent` 正式保留 `reason`、`status` 和全部 capability，包括 `create`。reason 最多 1024 UTF-8 字节，拒绝 NUL、控制字符及常见 token/API key/Bearer/JWT 格式。生产者负责从诊断输出提取脱敏摘要；格式检查无法识别任意上下文中的秘密。完整报告仍受 64 KiB 限制。
 
 `DevicesChanged` 的 wire 结构为：
 
@@ -81,20 +81,9 @@ withdraw 在撤回事实持久保存后以 succeeded 结束；已经无法撤回
 
 `node_id` 是本人设备，`report_version` 是已经保存的非负能力报告版本，与节点报告 ACK 的同名字段一致；nodes DTO 中对应 `runtime_report_version`。中心在 reason-only 等设备报告变更持久保存后发送此事件。浏览器收到后重新读取设备报告，避免凭事件推测能力或解析 reason。该事件是刷新提示；重复或相同版本不构成新的执行事实。C 负责发送，W 负责消费。
 
-## 统一历史
+## 原生历史
 
-`HistoryEntry` 只有统一消息字段，不再接受 parent_id/kind 或原生 JSON 正文：
-
-- id 是稳定消息标识，非空，最多 512 UTF-8 字节；ordinal 从 0 开始，使用非负安全整数。
-- role 仅 user/assistant；text 最多 4 KiB，必须在有效 UTF-8 边界截断。
-- timestamp 必须出现，缺失的原生时间使用 null；已知时间保留原始 RFC 3339 字符串。
-- client_message_id 可省略，只有原生确定提供时携带。
-- reference 是节点本地来源引用，最多 4096 字节；它不是任意文件读取凭据。
-- bytes 是完整正文的 UTF-8 字节数，必须至少等于展示正文长度；未截断时必须相等。
-
-`SessionHistoryPage` 最多 16 条、cursor 最多 100 字节，完整页 JSON 最多 14 KiB。容量校验保留 Go `ValidHistoryPage` 的 HTML/U+2028/U+2029 转义计量。`validHistoryPage` 提供同一 Schema 的布尔检查。
-
-`HistoryResult` 的成功结果必须有带游标的页面；失败结果必须有 code 并省略 history。`HistoryCode` 明确列出 history_loading、history_changed、history_missing、history_unavailable、invalid_cursor。loading 使用 `ok: false`，不能返回空成功页。快照构建、身份校验、分块合并、稳定 ID 推导、分页摘要和引用授权由 W 的历史实现负责。
+`native_history` 请求类型保留在 Worker IPC 中；设备不再保留原生历史，直接返回 `ok: false`、`code: history_unavailable` 和固定原因。`HistoryEntry`、`SessionHistoryPage` 与成功历史页字段已删除，`SessionResult` 不再携带历史页。
 
 ## 夹具来源与漂移检查
 

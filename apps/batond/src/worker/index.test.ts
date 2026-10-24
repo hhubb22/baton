@@ -158,7 +158,6 @@ const fake = Effect.gen(function* () {
           if (result.reapTask) yield* result.reapTask
           return { processTreeStopped: true }
         }),
-      readHistory: () => Effect.succeed({ entries: [] }),
     },
   }
   return result
@@ -213,6 +212,26 @@ const readyWorker = Effect.fnUntraced(function* (dbPath: string) {
 })
 
 describe('reliable Worker', () => {
+  describe('native history', () => {
+    it.effect('reports a fixed unavailable reason without involving the Agent', () =>
+      fixture((dbPath) =>
+        Effect.gen(function* () {
+          const { f, worker } = yield* readyWorker(dbPath)
+          const before = f.calls.length
+          const response = yield* worker.handle({ type: 'native_history', ok: false })
+          expect(Schema.is(WorkerIPCMessageSchema)(response)).toBe(true)
+          expect(response).toMatchObject({
+            type: 'result',
+            ok: false,
+            code: 'history_unavailable',
+            message: 'Native history is not kept on this device',
+          })
+          expect(f.calls).toHaveLength(before)
+        }),
+      ),
+    )
+  })
+
   describe('attachments and live output', () => {
     it.effect('persists attachment references while parsing outside the command queue', () =>
       fixture((dbPath) =>
