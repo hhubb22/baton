@@ -32,12 +32,9 @@ if (role === 'watchdog') {
     if (role === 'orphan-branch') process.exit(0)
   })
   keepAlive()
-} else if (role === 'worker' || role === 'worker-controlled-tree') {
+} else if (role === 'worker-controlled-tree') {
   const watchdog = await startProcessWatchdog({ file: process.execPath, args: [self, 'watchdog'] })
-  const owned = await spawnOwnedProcess(
-    { file: process.execPath, args: [self, role === 'worker' ? 'tree' : 'controlled-tree'] },
-    { watchdog },
-  )
+  const owned = await spawnOwnedProcess({ file: process.execPath, args: [self, 'controlled-tree'] }, { watchdog })
   createInterface({ input: owned.stdout }).once('line', (line) =>
     console.log(JSON.stringify({ ...JSON.parse(line), watchdog: watchdog.pid })),
   )

@@ -67,31 +67,6 @@ async function watchdog() {
 }
 
 describe.skipIf(process.platform === 'win32')('owned POSIX processes', () => {
-  it('reaps an independently grouped child, child and grandchild with positive group confirmation', async () => {
-    const guard = await watchdog()
-    const owned = await spawnOwnedProcess(command('tree'), { watchdog: guard })
-    ownedProcesses.push(owned)
-    const pids = await firstLine(owned.stdout)
-    expect(pids.root).toBe(owned.pid)
-    expect(await readProcessIdentity(pids.leaf)).not.toBeNull()
-    expect(await owned.reap()).toEqual({ reaped: true })
-    expect(await owned.exited).toEqual({ code: null, signal: 'SIGKILL' })
-    await gone([pids.root, pids.branch, pids.leaf])
-    expect(await owned.close()).toEqual({ reaped: true })
-  })
-
-  it('watchdog EOF reaps the Agent grandchild when its Worker is SIGKILLed', async () => {
-    const worker = spawn(command('worker').file, command('worker').args, { stdio: ['pipe', 'pipe', 'pipe'] })
-    children.push(worker)
-    const pids = await firstLine(worker.stdout)
-    await trackSurvivors([pids.root, pids.branch, pids.leaf, pids.watchdog])
-    expect(await readProcessIdentity(pids.leaf)).not.toBeNull()
-    const exited = once(worker, 'exit')
-    worker.kill('SIGKILL')
-    await exited
-    await gone([pids.root, pids.branch, pids.leaf, pids.watchdog])
-  })
-
   it.each(['reap', 'worker-kill', 'root-exit'] as const)(
     '%s reaps controlled SDK descendants without killing another Thread',
     async (mode) => {
@@ -116,6 +91,8 @@ describe.skipIf(process.platform === 'win32')('owned POSIX processes', () => {
             expect(await readProcessIdentity(pids.leaf)).not.toBeNull()
           }
           expect(await owned.reap()).toEqual({ reaped: true })
+          if (mode === 'reap') expect(await owned.exited).toEqual({ code: null, signal: 'SIGKILL' })
+          expect(await owned.close()).toEqual({ reaped: true })
         }
       } else {
         const worker = spawn(command('worker-controlled-tree').file, command('worker-controlled-tree').args, {
