@@ -27,17 +27,6 @@ const settingsFor = (launchArgs: string) =>
     launchArgs,
   })
 
-const summarize = (message: string | undefined) => {
-  if (message === undefined) return undefined
-  let text = ''
-  for (const char of message) {
-    const code = char.codePointAt(0) ?? 0
-    text += code <= 0x1f ? ' ' : char
-  }
-  const trimmed = text.trim().slice(0, 240)
-  return trimmed === '' ? undefined : trimmed
-}
-
 /** Upstream install, version and auth check. It does not send a prompt or open a browser. */
 export const piProbe = (launchArgs = '') =>
   Effect.gen(function* () {
@@ -48,8 +37,21 @@ export const piProbe = (launchArgs = '') =>
     const auth = status.auth.status
     const authenticated: ProbeResult['authenticated'] =
       auth === 'authenticated' ? 'valid' : auth === 'unauthenticated' ? 'missing' : 'unknown'
-    const models = status.models.map((model) => model.slug)
-    const reason = summarize(status.message)
+    const models = [
+      ...status.models.filter((model) => model.isDefault),
+      ...status.models.filter((model) => !model.isDefault),
+    ].map((model) => model.slug)
+    const reason = !status.installed
+      ? 'Pi CLI 未安装或不可执行'
+      : authenticated === 'missing'
+        ? 'Pi CLI 尚未认证'
+        : authenticated === 'unknown'
+          ? 'Pi 认证状态尚未确认'
+          : models.length === 0
+            ? 'Pi 模型目录暂不可读，可使用默认模型'
+            : status.message
+              ? 'Pi 探测报告了配置或模型目录问题'
+              : undefined
     const result: ProbeResult = {
       authenticated,
       models,
@@ -87,8 +89,8 @@ export const piHostDriver = (input: {
         label: 'Pi',
         instanceId,
         adapter,
-        // Upstream reports active steering. The worker command path still rejects steer.
         steer: true,
+        bindSnapshot: true,
         runtimeMode: 'approval-required',
         interactionMode: 'default',
         runtimePolicy: (cwd) => ({

@@ -1,40 +1,11 @@
-import { readFile } from 'node:fs/promises'
 import { parseArgs } from 'node:util'
-import { Effect, Predicate, Schema } from 'effect'
-import {
-  decodePiRpcReplayTranscript,
-  layerPiReplaySpawner,
-  type PiRpcReplayTranscript,
-} from '@t3tools/provider-pi/testing'
+import { Effect, Predicate } from 'effect'
+import { layerPiReplaySpawner, type PiRpcReplayTranscript } from '@t3tools/provider-pi/testing'
 import { runAgentHost, type AgentHostModule } from '../../agent-host/host.ts'
 import { piHostDriver } from '../../agents/pi/host-driver.ts'
+import { readPiTranscript } from './transcripts.ts'
 
-const Header = Schema.Struct({
-  type: Schema.Literal('transcript_start'),
-  provider: Schema.String,
-  protocol: Schema.String,
-  version: Schema.String,
-  scenario: Schema.String,
-  metadata: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
-})
-
-export const readPiTranscript = async (path: string): Promise<PiRpcReplayTranscript> => {
-  const lines = (await readFile(path, 'utf8')).split('\n').filter((line) => line.trim() !== '')
-  const header = Schema.decodeUnknownSync(Header)(JSON.parse(lines[0] ?? 'null'))
-  return Effect.runPromise(
-    decodePiRpcReplayTranscript({
-      provider: header.provider,
-      protocol: header.protocol,
-      version: header.version,
-      scenario: header.scenario,
-      ...(header.metadata ? { metadata: header.metadata } : {}),
-      entries: lines.slice(1).map((line) => {
-        const parsed: unknown = JSON.parse(line)
-        return parsed
-      }),
-    }),
-  )
-}
+export { readPiTranscript } from './transcripts.ts'
 
 const sessionTitle = (transcript: PiRpcReplayTranscript) => {
   for (const entry of transcript.entries) {

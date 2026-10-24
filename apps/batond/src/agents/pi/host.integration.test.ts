@@ -1,29 +1,35 @@
-import { mkdtemp } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
-import { mkdir } from 'node:fs/promises'
-import { Effect, Fiber, Stream } from 'effect'
+import { Deferred, Effect, Fiber, Predicate, Stream } from 'effect'
 import { build } from 'esbuild'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vite-plus/test'
-import type { WorkerOpenConfig } from '@baton/protocol'
+import type { ThreadReport, WorkerOpenConfig } from '@baton/protocol'
+import type { PiRpcReplayTranscript } from '@t3tools/provider-pi/testing'
 import { startProcessWatchdog, type ProcessWatchdog } from '../../platform/process.ts'
 import { makePiAgentFactory } from './index.ts'
-import type { AgentEvent, AgentMessage, ThreadAgent } from '../../worker/agent.ts'
+import { AgentError, type AgentEvent, type AgentMessage, type ThreadAgent } from '../../worker/agent.ts'
+import { connectAgentHost } from '../../agent-host/transport.ts'
+import { makeWorker, type Worker } from '../../worker/index.ts'
+import {
+  firstTurnOnly,
+  piFixturePath,
+  readPiTranscript,
+  resumedOnly,
+  sentOnly,
+  withQueuedFollowUp,
+  writePiTranscript,
+} from '../../testing/pi/transcripts.ts'
 
-const fixture = (name: string) =>
-  fileURLToPath(
-    new URL(
-      `../../../../../upstream/t3code/apps/server/src/orchestration-v2/testkit/fixtures/${name}/pi_transcript.ndjson`,
-      import.meta.url,
-    ),
-  )
 const source = fileURLToPath(new URL('../../testing/pi/replay-host.ts', import.meta.url))
 const watchdogSource = fileURLToPath(new URL('../../testing/cursor/watchdog-entry.ts', import.meta.url))
 const bundle = fileURLToPath(new URL('../../../dist/test/pi-replay-host.mjs', import.meta.url))
 const watchdogBundle = fileURLToPath(new URL('../../../dist/test/watchdog.mjs', import.meta.url))
 const agents: ThreadAgent[] = []
+const directories: string[] = []
 const fibers: Fiber.Fiber<unknown, unknown>[] = []
 let watchdog: ProcessWatchdog | undefined
 
@@ -62,6 +68,7 @@ afterEach(async () => {
   for (const agent of agents.splice(0)) {
     await Effect.runPromise(agent.reap().pipe(Effect.catch(() => Effect.succeed({ processTreeStopped: false }))))
   }
+  for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true })
 })
 
 const waitFor = async (predicate: () => boolean) => {
@@ -72,8 +79,9 @@ const waitFor = async (predicate: () => boolean) => {
   }
 }
 
-const start = async (name: string) => {
+const workspace = async () => {
   const directory = await mkdtemp(join(tmpdir(), 'baton-pi-thread-'))
+  directories.push(directory)
   const config: WorkerOpenConfig = {
     thread_id: '11111111-1111-4111-8111-111111111111',
     node_id: '22222222-2222-4222-8222-222222222222',
@@ -84,20 +92,76 @@ const start = async (name: string) => {
     model: 'openrouter/deepseek/deepseek-v4-flash',
     adapter_config: { state_path: join(directory, 'private', 'native.json') },
   }
-  const agent = makePiAgentFactory({
-    command: { file: process.execPath, args: [bundle, '--transcript', fixture(name)] },
+  return config
+}
+
+const replayFactory = (transcriptFile: string, loseSteerReply = false, beforeSteerResponse?: Effect.Effect<void>) =>
+  makePiAgentFactory({
+    command: { file: process.execPath, args: [bundle, '--transcript', transcriptFile] },
     ...(watchdog ? { watchdog } : {}),
+    ...(loseSteerReply || beforeSteerResponse
+      ? ({
+          connect: (options, signal) =>
+            Effect.gen(function* () {
+              const host = yield* connectAgentHost(options, signal)
+              return {
+                ...host,
+                send: (message, preparation) =>
+                  host
+                    .send(message, preparation)
+                    .pipe(
+                      Effect.flatMap((acceptance) =>
+                        message.mode === 'steer'
+                          ? loseSteerReply
+                            ? Effect.fail(new AgentError('Replay host lost the steering response'))
+                            : (beforeSteerResponse ?? Effect.void).pipe(Effect.as(acceptance))
+                          : Effect.succeed(acceptance),
+                      ),
+                    ),
+              }
+            }),
+        } satisfies Partial<import('../../agent-host/thread-agent.ts').AgentHostOptions>)
+      : {}),
     paths: (value) => {
       const statePath = value.adapter_config.state_path
       if (statePath === undefined) throw new Error('Pi replay requires state_path')
       return { workingDirectory: value.working_directory, privateDirectory: dirname(statePath) }
     },
-  })(config)
+  })
+
+const startTranscript = (config: WorkerOpenConfig, transcriptFile: string) => {
+  const agent = replayFactory(transcriptFile)(config)
   agents.push(agent)
   const events: AgentEvent[] = []
   fibers.push(Effect.runFork(Stream.runForEach(agent.events, (event) => Effect.sync(() => void events.push(event)))))
   return { agent, events, config }
 }
+
+const start = async (name: string) => startTranscript(await workspace(), piFixturePath(name))
+
+const writeTranscript = async (transcript: PiRpcReplayTranscript) => {
+  const directory = await mkdtemp(join(tmpdir(), 'baton-pi-replay-'))
+  directories.push(directory)
+  const path = join(directory, 'transcript.ndjson')
+  await writePiTranscript(path, transcript)
+  return path
+}
+
+const workerReports = (worker: Worker) =>
+  worker.handle({ type: 'thread_pending', ok: true }).pipe(Effect.map((response) => response.thread_reports ?? []))
+
+const waitForReports = Effect.fnUntraced(function* (
+  worker: Worker,
+  predicate: (reports: readonly ThreadReport[]) => boolean,
+) {
+  while (true) {
+    const reports = yield* workerReports(worker)
+    if (predicate(reports)) return reports
+    const failure = reports.find((report) => report.kind === 'thread.open_failed' || report.kind === 'thread.unknown')
+    if (failure) return yield* Effect.fail(new Error(`Pi Worker ${failure.kind}: ${failure.reason ?? ''}`))
+    yield* Effect.sleep('20 millis')
+  }
+}, Effect.timeout('10 seconds'))
 
 const message = (id: string, text: string): AgentMessage => ({
   id,
@@ -152,4 +216,334 @@ describe('Pi Agent host', () => {
     await waitFor(() => events.some((event) => event.type === 'end'))
     expect(events.find((event) => event.type === 'end')).toMatchObject({ outcome: 'cancelled' })
   })
+
+  it('resumes the native session in a fresh host and continues its conversation', async () => {
+    const transcript = await readPiTranscript(piFixturePath('provider_thread_resume'))
+    const first = await writeTranscript(firstTurnOnly(transcript))
+    const second = await writeTranscript(resumedOnly(transcript))
+    const config = await workspace()
+    const { agent, events } = startTranscript(config, first)
+    const opened = await Effect.runPromise(agent.open(config))
+    const input = message('resume-1', 'Respond with exactly: provider thread resume fixture first turn complete')
+    await Effect.runPromise(agent.send(input, await Effect.runPromise(agent.prepareInput(input, 0))))
+    await waitFor(() => events.some((event) => event.type === 'end'))
+    await Effect.runPromise(agent.close())
+    expect((await Effect.runPromise(agent.reap())).processTreeStopped).toBe(true)
+
+    const resumed = startTranscript(config, second)
+    expect(await Effect.runPromise(resumed.agent.resume(opened.nativeSessionId, config))).toEqual(opened)
+    const next = message(
+      'resume-2',
+      'Using the conversation history available in this resumed thread, first repeat the exact final answer you gave in the previous turn. Then on a new line write exactly: provider thread resume fixture second turn complete',
+    )
+    const accepted = await Effect.runPromise(
+      resumed.agent.send(next, await Effect.runPromise(resumed.agent.prepareInput(next, 1))),
+    )
+    await waitFor(() => resumed.events.some((event) => event.type === 'end'))
+    expect(accepted.nativeSessionId).toBe(opened.nativeSessionId)
+    expect(resumed.events.some((event) => event.type === 'uncertain')).toBe(false)
+    const replies = resumed.events.flatMap((event) => (event.type === 'reply' ? [event.text] : [])).join('\n')
+    expect(replies).toContain('provider thread resume fixture first turn complete')
+    expect(replies).toContain('provider thread resume fixture second turn complete')
+    expect(resumed.events.find((event) => event.type === 'end')).toMatchObject({
+      outcome: 'completed',
+      messageId: next.id,
+      nativeSessionId: opened.nativeSessionId,
+    })
+    await Effect.runPromise(resumed.agent.close())
+  }, 20_000)
+
+  it('confirms sent only for the next matching native user message before resume', async () => {
+    const simple = await readPiTranscript(piFixturePath('simple'))
+    const { agent, events, config } = await start('simple')
+    const opened = await Effect.runPromise(agent.open(config))
+    const input = message('sent-1', 'Respond with the following text: fixture simple ok')
+    const preparation = await Effect.runPromise(agent.prepareInput(input, 0))
+    await Effect.runPromise(agent.send(input, preparation))
+    await waitFor(() => events.some((event) => event.type === 'end'))
+    await Effect.runPromise(agent.close())
+    expect((await Effect.runPromise(agent.reap())).processTreeStopped).toBe(true)
+
+    const snapshot = await writeTranscript(sentOnly(simple))
+    const reader = startTranscript(config, snapshot)
+    expect(await Effect.runPromise(reader.agent.sent(input, preparation))).toMatchObject({
+      nativeSessionId: opened.nativeSessionId,
+      executionId: expect.any(String),
+    })
+    expect(await Effect.runPromise(reader.agent.sent(input, { ...preparation, confirmedSends: 1 }))).toBeUndefined()
+    expect(
+      await Effect.runPromise(reader.agent.sent({ ...input, text: 'an unsent input' }, preparation)),
+    ).toBeUndefined()
+    expect(reader.events.filter((event) => event.type === 'reply' || event.type === 'end')).toEqual([])
+    expect((await Effect.runPromise(reader.agent.reap())).processTreeStopped).toBe(true)
+  }, 20_000)
+
+  it('records an unconfirmed steering input as unknown and keeps its receipt on retry', async () => {
+    const transcript = await readPiTranscript(piFixturePath('message_steering'))
+    const index = transcript.entries.findIndex(
+      (entry) =>
+        entry.type === 'expect_outbound' &&
+        Predicate.hasProperty(entry.frame, 'streamingBehavior') &&
+        entry.frame.streamingBehavior === 'steer' &&
+        Predicate.hasProperty(entry.frame, 'message') &&
+        entry.frame.message === 'Actually, respond with exactly: steering fixture observed',
+    )
+    if (index < 0) throw new Error('Upstream steering transcript has no steering request')
+    // Pi sends steer without awaiting its native ack. Drop the host response through the connection seam,
+    // while the upstream transcript closes native stdout after the write.
+    const file = await writeTranscript({
+      ...transcript,
+      scenario: `${transcript.scenario}-unconfirmed`,
+      entries: [...transcript.entries.slice(0, index + 1), { type: 'runtime_exit', status: 'error' }],
+    })
+    const config = await workspace()
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const worker = yield* makeWorker({
+            dbPath: join(config.working_directory, 'thread.db'),
+            agentFactory: replayFactory(file, true),
+            sendTimeoutMs: 1000,
+          })
+          yield* worker.handle({
+            type: 'thread_open',
+            ok: true,
+            thread_id: config.thread_id,
+            storage_generation: config.storage_generation,
+            command_id: randomUUID(),
+            open_config: config,
+          })
+          yield* waitForReports(worker, (reports) => reports.some((report) => report.kind === 'thread.opened'))
+          const first = {
+            type: 'thread_message',
+            ok: true,
+            thread_id: config.thread_id,
+            storage_generation: config.storage_generation,
+            command_id: randomUUID(),
+            client_message_id: randomUUID(),
+            payload: 'Respond with exactly: steering fixture initial response',
+          } satisfies Parameters<Worker['handle']>[0]
+          yield* worker.handle(first)
+          yield* waitForReports(worker, (reports) => reports.some((report) => report.kind === 'message.sent'))
+          const steer = {
+            ...first,
+            command_id: randomUUID(),
+            client_message_id: randomUUID(),
+            mode: 'steer',
+            payload: 'Actually, respond with exactly: steering fixture observed',
+          } satisfies Parameters<Worker['handle']>[0]
+          expect(yield* worker.handle(steer)).toMatchObject({ ok: true })
+          const reports = yield* Effect.gen(function* () {
+            while (true) {
+              const reports = yield* workerReports(worker)
+              if (
+                reports.some(
+                  (report) => report.kind === 'message.unknown' && report.client_message_id === steer.client_message_id,
+                )
+              )
+                return reports
+              yield* Effect.sleep('20 millis')
+            }
+          }).pipe(Effect.timeout('10 seconds'))
+          expect(reports.some((report) => report.kind === 'thread.unknown')).toBe(true)
+          expect(reports.filter((report) => report.kind === 'turn.started')).toHaveLength(1)
+          expect(yield* worker.handle(steer)).toMatchObject({
+            ok: true,
+            command_status: { state: 'unknown', command_outcome: 'unknown' },
+          })
+          expect(
+            (yield* workerReports(worker)).filter(
+              (report) => report.kind === 'message.queued' && report.client_message_id === steer.client_message_id,
+            ),
+          ).toHaveLength(1)
+        }),
+      ),
+    )
+  }, 20_000)
+
+  it('persists steering acceptance before a terminal event that overtakes its host response', async () => {
+    const config = await workspace()
+    const file = piFixturePath('message_steering')
+    const terminal = Effect.runSync(Deferred.make<void>())
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const worker = yield* makeWorker({
+            dbPath: join(config.working_directory, 'thread.db'),
+            agentFactory: (config) => {
+              const agent = replayFactory(file, false, Deferred.await(terminal))(config)
+              return {
+                ...agent,
+                events: agent.events.pipe(
+                  Stream.flatMap((event): Stream.Stream<AgentEvent> =>
+                    event.type === 'end'
+                      ? Stream.concat(
+                          Stream.succeed(event),
+                          Stream.fromEffect(Deferred.succeed(terminal, undefined)).pipe(Stream.drain),
+                        )
+                      : Stream.succeed(event),
+                  ),
+                ),
+              }
+            },
+          })
+          yield* worker.handle({
+            type: 'thread_open',
+            ok: true,
+            thread_id: config.thread_id,
+            storage_generation: config.storage_generation,
+            command_id: randomUUID(),
+            open_config: config,
+          })
+          yield* waitForReports(worker, (reports) => reports.some((report) => report.kind === 'thread.opened'))
+          const first = {
+            type: 'thread_message',
+            ok: true,
+            thread_id: config.thread_id,
+            storage_generation: config.storage_generation,
+            command_id: randomUUID(),
+            client_message_id: randomUUID(),
+            payload: 'Respond with exactly: steering fixture initial response',
+          } satisfies Parameters<Worker['handle']>[0]
+          yield* worker.handle(first)
+          yield* waitForReports(worker, (reports) => reports.some((report) => report.kind === 'message.sent'))
+          const steer = {
+            ...first,
+            command_id: randomUUID(),
+            client_message_id: randomUUID(),
+            mode: 'steer',
+            payload: 'Actually, respond with exactly: steering fixture observed',
+          } satisfies Parameters<Worker['handle']>[0]
+          yield* worker.handle(steer)
+          const reports = yield* waitForReports(
+            worker,
+            (reports) =>
+              reports.some((report) => report.kind === 'turn.ended') &&
+              reports.some((report) => report.kind === 'command.completed' && report.command_id === steer.command_id),
+          )
+          const acceptance = reports.findIndex(
+            (report) => report.kind === 'message.sent' && report.client_message_id === steer.client_message_id,
+          )
+          const ended = reports.findIndex((report) => report.kind === 'turn.ended')
+          expect(acceptance).toBeGreaterThanOrEqual(0)
+          expect(acceptance).toBeLessThan(ended)
+          expect(reports.filter((report) => report.kind === 'thread.unknown')).toEqual([])
+        }),
+      ),
+    )
+  }, 20_000)
+
+  it('sends Worker steering on the active turn before a queued follow-up', async () => {
+    const steering = await readPiTranscript(piFixturePath('message_steering'))
+    const multiTurn = await readPiTranscript(piFixturePath('multi_turn'))
+    const transcriptFile = await writeTranscript(withQueuedFollowUp(steering, multiTurn))
+    const config = await workspace()
+    const first = {
+      type: 'thread_message',
+      ok: true,
+      thread_id: config.thread_id,
+      storage_generation: config.storage_generation,
+      command_id: randomUUID(),
+      client_message_id: randomUUID(),
+      payload: 'Respond with exactly: steering fixture initial response',
+    } satisfies Parameters<Worker['handle']>[0]
+    const queued = {
+      ...first,
+      command_id: randomUUID(),
+      client_message_id: randomUUID(),
+      payload: 'Respond with exactly: second fixture turn complete',
+    }
+    const steer = {
+      ...first,
+      command_id: randomUUID(),
+      client_message_id: randomUUID(),
+      payload: 'Actually, respond with exactly: steering fixture observed',
+      mode: 'steer',
+    } satisfies Parameters<Worker['handle']>[0]
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const worker = yield* makeWorker({
+            dbPath: join(config.working_directory, 'thread.db'),
+            agentFactory: replayFactory(transcriptFile),
+          })
+          expect(
+            yield* worker.handle({
+              type: 'thread_open',
+              ok: true,
+              thread_id: config.thread_id,
+              storage_generation: config.storage_generation,
+              command_id: randomUUID(),
+              open_config: config,
+            }),
+          ).toMatchObject({ ok: true })
+          yield* waitForReports(worker, (reports) => reports.some((report) => report.kind === 'thread.opened'))
+          expect(yield* worker.handle(first)).toMatchObject({ ok: true, receipt: { command_id: first.command_id } })
+          yield* waitForReports(worker, (reports) =>
+            reports.some(
+              (report) => report.kind === 'message.sent' && report.client_message_id === first.client_message_id,
+            ),
+          )
+          expect(yield* worker.handle(queued)).toMatchObject({ ok: true, receipt: { command_id: queued.command_id } })
+          const pending = yield* workerReports(worker)
+          expect(
+            pending.some(
+              (report) => report.kind === 'message.queued' && report.client_message_id === queued.client_message_id,
+            ),
+          ).toBe(true)
+          expect(
+            pending.some(
+              (report) => report.kind === 'message.sent' && report.client_message_id === queued.client_message_id,
+            ),
+          ).toBe(false)
+          expect(yield* worker.handle(steer)).toMatchObject({ ok: true, receipt: { command_id: steer.command_id } })
+          const reports = yield* waitForReports(worker, (reports) =>
+            reports.some(
+              (report) => report.kind === 'turn.ended' && report.client_message_id === queued.client_message_id,
+            ),
+          )
+          expect(
+            reports
+              .filter((report) => report.kind === 'message.sent')
+              .map((report) => [report.client_message_id, report.worker_turn_seq]),
+          ).toEqual([
+            [first.client_message_id, 1],
+            [steer.client_message_id, 1],
+            [queued.client_message_id, 2],
+          ])
+          for (const kind of ['turn.started', 'turn.ended']) {
+            expect(
+              reports
+                .filter((report) => report.kind === kind)
+                .map((report) => [report.client_message_id, report.worker_turn_seq]),
+            ).toEqual([
+              [first.client_message_id, 1],
+              [queued.client_message_id, 2],
+            ])
+          }
+          expect(
+            reports
+              .filter((report) => report.kind === 'reply')
+              .map((report) => [report.client_message_id, report.worker_turn_seq, report.content]),
+          ).toEqual([
+            [first.client_message_id, 1, 'steering fixture initial response'],
+            [first.client_message_id, 1, 'steering fixture observed'],
+            [queued.client_message_id, 2, 'second fixture turn complete'],
+          ])
+          expect(reports.filter((report) => report.kind === 'turn.ended').map((report) => report.queue_empty)).toEqual([
+            false,
+            true,
+          ])
+          for (const input of [first, steer, queued]) {
+            expect(
+              reports.find((report) => report.kind === 'command.completed' && report.command_id === input.command_id),
+            ).toMatchObject({ command_outcome: 'succeeded' })
+          }
+          expect(
+            reports.filter((report) => report.kind === 'thread.unknown' || report.kind === 'message.unknown'),
+          ).toEqual([])
+        }),
+      ),
+    )
+  }, 20_000)
 })
