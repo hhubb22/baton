@@ -3,6 +3,7 @@ import { promisify } from 'node:util'
 import { Effect } from 'effect'
 import { currentBatondCommand } from '../daemon/host.ts'
 import { readProcessIdentity, type ProcessIdentity } from '../platform/identity.ts'
+import { reapProcessTree } from '../platform/process-tree.ts'
 import type { ProcessWatchdog } from '../platform/process-types.ts'
 import { startProcessWatchdog } from '../platform/watchdog.ts'
 import { AgentHostError } from './protocol.ts'
@@ -10,11 +11,10 @@ import { AgentHostError } from './protocol.ts'
 /**
  * Process groups an upstream adapter created outside the host's own group.
  *
- * The host already leads its own group and `installHostProcessGroup` folds
- * ordinary detached spawns back into it, so most spawns need no separate
- * registration: killing the host group covers them. A child that still ends up
- * in another group is registered with a watchdog owned by this host process, so
- * a crashed host cannot leave it behind.
+ * The host already leads its own group. Cursor folds detached spawns back into
+ * that group, so killing the host group covers them. Pi and ACP keep their own
+ * process group; those groups are registered here and reaped on release, and a
+ * crashed host cannot leave them behind because the watchdog still owns them.
  */
 export interface ProcessRegistrar {
   /** Returns true when the process groups of `pid` were registered separately. */
@@ -89,14 +89,15 @@ export const makeProcessRegistrar = () =>
       release: (pid) =>
         Effect.gen(function* () {
           const group = yield* Effect.promise(() => readGroup(pid))
-          if (group === undefined || watchdog === undefined) return
-          const identity = separate.get(group)
-          if (!identity) return
+          const identity = (group === undefined ? undefined : separate.get(group)) ?? separate.get(pid)
+          if (!identity || watchdog === undefined) return
+          // The adapter's own kill runs first. This still ends a group it missed.
+          yield* Effect.promise(() => reapProcessTree(identity, 5000)).pipe(Effect.catch(() => Effect.void))
+          separate.delete(identity.pid)
           yield* Effect.tryPromise({
             try: () => watchdog!.unregister(identity),
             catch: (cause) => fail('release a process group', cause),
           }).pipe(Effect.catch(() => Effect.void))
-          separate.delete(group)
         }),
       close: Effect.suspend(() => {
         const started = watchdog

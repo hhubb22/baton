@@ -19,6 +19,13 @@ export interface AgentHostModule {
     readonly agentType: string
     readonly paths: AgentHostPaths
   }) => Layer.Layer<AgentHostDriver, unknown, AgentHostEnvironment>
+  /**
+   * Cursor folds detached SDK children into the host group. Agents that signal
+   * their own process group, such as Pi, leave `foldDetached` false.
+   */
+  readonly foldDetached?: boolean
+  /** Inner process spawner. Production uses Node; replay passes an upstream testkit. */
+  readonly spawner?: Parameters<typeof agentHostLayer>[0]['spawner']
 }
 
 export interface AgentHostOptions {
@@ -41,7 +48,9 @@ export const runAgentHost = (module: AgentHostModule, options: AgentHostOptions)
         globalThis.console = originalConsole
       }),
     )
-    const processGroup = yield* Effect.sync(installHostProcessGroup)
+    const processGroup = yield* Effect.sync(() =>
+      installHostProcessGroup({ foldDetached: module.foldDetached !== false }),
+    )
     const registrar = yield* makeProcessRegistrar()
     yield* Effect.addFinalizer(() =>
       Effect.gen(function* () {
@@ -62,9 +71,18 @@ export const runAgentHost = (module: AgentHostModule, options: AgentHostOptions)
       }),
     )
     const environment = yield* Layer.build(
-      module
-        .driver({ agentType: options.agentType, paths: options.paths })
-        .pipe(Layer.provide(Layer.mergeAll(agentHostLayer({ paths: options.paths, registrar }), processGroupLayer))),
+      module.driver({ agentType: options.agentType, paths: options.paths }).pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            agentHostLayer({
+              paths: options.paths,
+              registrar,
+              ...(module.spawner ? { spawner: module.spawner } : {}),
+            }),
+            processGroupLayer,
+          ),
+        ),
+      ),
     )
     const driver = yield* AgentHostDriver.pipe(Effect.provideContext(environment))
     const handlers = yield* makeAgentHostHandlers(driver)

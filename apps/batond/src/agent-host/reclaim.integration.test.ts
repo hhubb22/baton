@@ -58,4 +58,20 @@ describe.skipIf(process.platform === 'win32')('Agent host process reclamation', 
     expect(stopped).toEqual({ quiet: true })
     await gone([started.spawned.pid, started.spawned.grandchild])
   })
+
+  it('keeps a detached Pi-style process group and reaps it with kill(-pid)', async () => {
+    host = childProcess.spawn(process.execPath, [bundle, stub, 'own-group'], {
+      detached: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+    host.stderr?.resume()
+    const started = JSON.parse((await once(host.stdout!, 'data').then(([chunk]) => chunk.toString())).trim())
+    expect(started.spawnedPid).toBe(started.spawned.pid)
+    expect(started.stubPgid).toBe(started.spawned.pid)
+    expect(started.stubPgid).not.toBe(started.host)
+    host.stdin!.write('stop\n')
+    const stopped = JSON.parse((await once(host.stdout!, 'data').then(([chunk]) => chunk.toString())).trim())
+    expect(stopped).toEqual({ quiet: true })
+    await gone([started.spawned.pid, started.spawned.grandchild])
+  })
 })

@@ -6,11 +6,30 @@
  * the Worker.
  */
 
-const systemNames = ['PATH', 'HOME', 'USERPROFILE', 'SystemRoot', 'COMSPEC', 'TEMP', 'TMP', 'TMPDIR', 'LANG', 'LC_ALL']
+const systemNames = [
+  'PATH',
+  'HOME',
+  'USER',
+  'LOGNAME',
+  'SHELL',
+  'USERPROFILE',
+  'SystemRoot',
+  'COMSPEC',
+  'TEMP',
+  'TMP',
+  'TMPDIR',
+  'LANG',
+  'LC_ALL',
+]
 
-/** Provider-specific variables an Agent needs to reach its own account. */
+/**
+ * Provider-specific variables an Agent needs to reach its own account.
+ * Pi reads `PI_CODING_AGENT_DIR` for its config directory. Codex reads `CODEX_HOME`.
+ */
 const agentNames: Readonly<Record<string, readonly string[]>> = {
   cursor: ['CURSOR_API_KEY'],
+  pi: ['PI_CODING_AGENT_DIR', 'PI_CODING_AGENT_SESSION_DIR'],
+  codex: ['CODEX_HOME'],
 }
 
 export function agentEnvironment(agentType: string, source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {

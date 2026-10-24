@@ -80,7 +80,7 @@ const providerHost = (paths: AgentHostPaths) =>
   )
 
 /** Register upstream-created process groups before the adapter can use them. */
-const registeredSpawner = (registrar: ProcessRegistrar) =>
+const registeredSpawner = (registrar: ProcessRegistrar, spawner?: Layer.Layer<ChildProcessSpawner>) =>
   Layer.effect(
     ChildProcessSpawner,
     Effect.gen(function* () {
@@ -97,11 +97,13 @@ const registeredSpawner = (registrar: ProcessRegistrar) =>
           }),
       })
     }),
-  ).pipe(Layer.provide(childProcessSpawnerLayer), Layer.provide(fileSystemLayer), Layer.provide(pathLayer))
+  ).pipe(Layer.provide(spawner ?? childProcessSpawnerLayer), Layer.provide(fileSystemLayer), Layer.provide(pathLayer))
 
 export interface AgentHostLayerOptions {
   readonly paths: AgentHostPaths
   readonly registrar: ProcessRegistrar
+  /** Replaces the Node spawner. Replay hosts pass an upstream testkit spawner. */
+  readonly spawner?: Layer.Layer<ChildProcessSpawner>
 }
 
 /**
@@ -110,7 +112,7 @@ export interface AgentHostLayerOptions {
  */
 export const agentHostLayer = (options: AgentHostLayerOptions) =>
   Layer.mergeAll(
-    registeredSpawner(options.registrar),
+    registeredSpawner(options.registrar, options.spawner),
     hostAgentScope,
     providerHost(options.paths),
     McpProviderSessions.layer,

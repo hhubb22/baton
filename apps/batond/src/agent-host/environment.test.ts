@@ -23,3 +23,32 @@ it('passes only runtime essentials and the Agent own configuration', () => {
 it('keeps another Agent from seeing the Cursor key', () => {
   expect(agentEnvironment('shell', { PATH: '/usr/bin', CURSOR_API_KEY: 'cursor-key' })).toEqual({ PATH: '/usr/bin' })
 })
+
+it('passes the account directory only to the Agent that reads it', () => {
+  const source = {
+    PATH: '/usr/bin',
+    USER: 'employee',
+    LOGNAME: 'employee',
+    SHELL: '/bin/zsh',
+    PI_CODING_AGENT_DIR: '/pi',
+    PI_CODING_AGENT_SESSION_DIR: '/pi/sessions',
+    CODEX_HOME: '/codex',
+    CURSOR_API_KEY: 'cursor-key',
+    OPENAI_API_KEY: 'other-provider-key',
+  }
+  expect(agentEnvironment('pi', source)).toEqual({
+    PATH: '/usr/bin',
+    USER: 'employee',
+    LOGNAME: 'employee',
+    SHELL: '/bin/zsh',
+    PI_CODING_AGENT_DIR: '/pi',
+    PI_CODING_AGENT_SESSION_DIR: '/pi/sessions',
+  })
+  expect(agentEnvironment('codex', source)).toEqual({
+    PATH: '/usr/bin',
+    USER: 'employee',
+    LOGNAME: 'employee',
+    SHELL: '/bin/zsh',
+    CODEX_HOME: '/codex',
+  })
+})

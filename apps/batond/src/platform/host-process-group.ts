@@ -27,8 +27,18 @@ interface Member {
 
 let installed = false
 
+export interface HostProcessGroupInstallOptions {
+  /**
+   * Fold `detached: true` spawns back into the host group. Cursor's SDK does
+   * not kill its own process group. Pi and ACP do `kill(-pid)` and must keep
+   * the group they created.
+   */
+  readonly foldDetached?: boolean
+}
+
 /** Install only in an exclusive Agent host, before loading its SDK. */
-export function installHostProcessGroup(): HostProcessGroupPolicy {
+export function installHostProcessGroup(options?: HostProcessGroupInstallOptions): HostProcessGroupPolicy {
+  const foldDetached = options?.foldDetached !== false
   const posix = process.platform !== 'win32'
   if (posix && installed) throw new Error('Host process group guard is already installed')
   const pgid = process.pid
@@ -62,7 +72,7 @@ export function installHostProcessGroup(): HostProcessGroupPolicy {
         return Reflect.apply(target, receiver, inherited)
       },
     })
-  if (posix) {
+  if (posix && foldDetached) {
     childProcess.spawn = inheritGroup(originalSpawn)
     childProcess.fork = inheritGroup(originalFork)
     installed = true

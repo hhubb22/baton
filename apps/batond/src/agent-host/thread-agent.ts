@@ -34,6 +34,8 @@ export interface AgentHostOptions extends Omit<AgentHostProcessOptions, 'paths'>
     signal: AbortSignal,
   ) => Effect.Effect<AgentHostConnection, AgentError>
   readonly eventCapacity?: number
+  /** Upstream active steering. Queue-only agents leave this unset. */
+  readonly steer?: boolean
 }
 
 const fixedModel = (config: WorkerOpenConfig) => config.model ?? config.adapter_config.model ?? 'default'
@@ -207,9 +209,13 @@ function makeAgent(config: WorkerOpenConfig, options: AgentHostOptions): ThreadA
     resume: (native, openConfig) => start(openConfig, native),
     prepareInput: (message, confirmedSends) =>
       Effect.gen(function* () {
-        if (!live || broken || stopped || (active && !active.ended))
+        if (!live || broken || stopped)
           return yield* Effect.fail(new AgentError('Agent cannot prepare an input in its current state'))
-        if (message.mode === 'steer') return yield* Effect.fail(new AgentError('Agent does not support steer'))
+        if (message.mode === 'steer') {
+          if (!options.steer) return yield* Effect.fail(new AgentError('Agent does not support steer'))
+          if (!active || active.ended) return yield* Effect.fail(new AgentError('Agent has no active turn to steer'))
+        } else if (active && !active.ended)
+          return yield* Effect.fail(new AgentError('Agent cannot prepare an input in its current state'))
         if (message.model !== undefined && message.model !== fixedModel(config))
           return yield* Effect.fail(new AgentError('Agent does not support changing the model of an open Thread'))
         if (!nativeSessionId) return yield* Effect.fail(new AgentError('Agent has no native session identity'))
@@ -229,20 +235,28 @@ function makeAgent(config: WorkerOpenConfig, options: AgentHostOptions): ThreadA
       }),
     send: (message, preparation) =>
       Effect.gen(function* () {
-        if (!live || broken || stopped || (active && !active.ended))
+        if (!live || broken || stopped)
+          return yield* Effect.fail(new AgentError('Agent execution channel is not available'))
+        if (message.mode === 'steer') {
+          if (!options.steer) return yield* Effect.fail(new AgentError('Agent does not support steer'))
+          if (!active || active.ended) return yield* Effect.fail(new AgentError('Agent has no active turn to steer'))
+        } else if (active && !active.ended)
           return yield* Effect.fail(new AgentError('Agent execution channel is not available'))
         if (!prepared || !samePreparation(prepared.preparation, preparation) || prepared.message.id !== message.id)
           return yield* Effect.fail(new AgentError('Agent input was not prepared or restored'))
-        active = { messageId: message.id, ended: false }
+        // Steer stays on the active turn. Upstream decides which native turn receives it.
+        const turn = message.mode === 'steer' ? active : { messageId: message.id, ended: false }
+        if (!turn) return yield* Effect.fail(new AgentError('Agent has no active turn to steer'))
+        active = turn
         const accepted = yield* live
           .send(message, preparation as Preparation)
           .pipe(Effect.tapError((error) => uncertain(error.message)))
         if (
           accepted.nativeSessionId !== nativeSessionId ||
-          (active.executionId && active.executionId !== accepted.executionId)
+          (turn.executionId && turn.executionId !== accepted.executionId)
         )
           return yield* Effect.fail(new AgentError('Agent acceptance identity mismatch'))
-        active.executionId = accepted.executionId
+        turn.executionId = accepted.executionId
         prepared = undefined
         return accepted
       }),

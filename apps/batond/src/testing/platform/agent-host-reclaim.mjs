@@ -7,15 +7,23 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { Effect } from 'effect'
 import { ChildProcess } from 'effect/process'
 import { ChildProcessSpawner } from 'effect/process/ChildProcessSpawner'
+import { signalProcessGroup } from '@t3tools/provider-core/server/processGroup'
 import { installHostProcessGroup } from '../../platform/host-process-group.ts'
 import { agentHostLayer } from '../../agent-host/host-layer.ts'
 import { makeProcessRegistrar } from '../../agent-host/process-registrar.ts'
+import { runWatchdogCommand } from '../../platform/watchdog.ts'
+
+if (process.argv[2] === 'watchdog') {
+  await runWatchdogCommand()
+  process.exit(0)
+}
 
 const stub = process.argv[2]
+const ownGroup = process.argv[3] === 'own-group'
 if (!stub) throw new Error('Missing upstream stub path')
 const directory = await mkdtemp(join(tmpdir(), 'baton-agent-host-reclaim-'))
 const pidFile = join(directory, 'pids.json')
-const policy = installHostProcessGroup()
+const policy = installHostProcessGroup({ foldDetached: !ownGroup })
 const registrar = await Effect.runPromise(makeProcessRegistrar())
 const layer = agentHostLayer({
   paths: { workingDirectory: directory, privateDirectory: directory },
@@ -76,8 +84,14 @@ await Effect.runPromise(
           spawnedPid: Number(handle.pid),
         })
         yield* waitForStop()
-        yield* Effect.promise(() => policy.terminateChildren({ timeoutMs: 5000 }))
-        yield* Effect.promise(() => policy.waitQuiescent({ timeoutMs: 2000 }))
+        if (ownGroup) {
+          // Same signal Pi uses on its detached process group.
+          signalProcessGroup(Number(handle.pid), 'SIGKILL')
+          yield* registrar.release(Number(handle.pid))
+        } else {
+          yield* Effect.promise(() => policy.terminateChildren({ timeoutMs: 5000 }))
+          yield* Effect.promise(() => policy.waitQuiescent({ timeoutMs: 2000 }))
+        }
         emit({ quiet: true })
       }),
       layer,
