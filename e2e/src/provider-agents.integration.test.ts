@@ -18,18 +18,44 @@ import { initializeBrowseRoots } from '@baton/batond/daemon/roots'
 import { LocalWorkerHost } from '@baton/batond/daemon/host'
 import * as Pi from '@baton/batond/testing/pi/transcripts'
 import * as Codex from '@baton/batond/testing/codex/transcripts'
+import * as Kiro from '@baton/batond/testing/kiro/transcripts'
 
 const LoginResponse = Schema.Struct({ csrf_token: Schema.String })
 
-const cases: ReadonlyArray<{ agentType: 'pi' | 'codex'; model: string; version: string }> = [
-  { agentType: 'pi', model: 'openrouter/deepseek/deepseek-v4-flash', version: '1.0.0' },
-  { agentType: 'codex', model: 'gpt-6-luna', version: '0.156.1' },
+const cases: ReadonlyArray<{
+  agentType: 'pi' | 'codex' | 'kiro'
+  model: string
+  version: string
+  firstReply: string
+  secondReply: string
+}> = [
+  {
+    agentType: 'pi',
+    model: 'openrouter/deepseek/deepseek-v4-flash',
+    version: '1.0.0',
+    firstReply: 'provider thread resume fixture first turn complete',
+    secondReply: 'provider thread resume fixture second turn complete',
+  },
+  {
+    agentType: 'codex',
+    model: 'gpt-6-luna',
+    version: '0.156.1',
+    firstReply: 'provider thread resume fixture first turn complete',
+    secondReply: 'provider thread resume fixture second turn complete',
+  },
+  {
+    agentType: 'kiro',
+    model: 'qwen3-coder-next',
+    version: '2.32.0',
+    firstReply: 'baton-kiro-ok',
+    secondReply: 'kiwi-saved-history',
+  },
 ]
 
 // The HTTP, registration, daemon and independent Worker path follows remote.integration.test.ts.
 test.each(cases)(
   '$agentType: browser API receives a reply, stops and resumes the native thread',
-  async ({ agentType, model, version }) => {
+  async ({ agentType, model, version, firstReply, secondReply }) => {
     const database = await openTestDatabase()
     const directory = await realpath(await mkdtemp(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'bpa-')))
     await chmod(directory, 0o700)
@@ -43,10 +69,9 @@ test.each(cases)(
     try {
       const entries: ReadonlyArray<readonly [URL, string]> = [
         [new URL('./testing/provider-replay-worker.ts', import.meta.url), bundle],
-        [new URL('../../apps/batond/src/testing/pi/replay-host.ts', import.meta.url), join(directory, 'pi-host.mjs')],
         [
-          new URL('../../apps/batond/src/testing/codex/replay-host.ts', import.meta.url),
-          join(directory, 'codex-host.mjs'),
+          new URL(`../../apps/batond/src/testing/${agentType}/replay-host.ts`, import.meta.url),
+          join(directory, `${agentType}-host.mjs`),
         ],
       ]
       for (const [source, outfile] of entries) {
@@ -62,10 +87,32 @@ test.each(cases)(
           logLevel: 'silent',
         })
       }
+      if (agentType === 'kiro') {
+        await build({
+          entryPoints: [
+            fileURLToPath(
+              new URL(
+                '../../upstream/t3code/packages/provider-acp-registry/src/testing/acp-replay-agent.ts',
+                import.meta.url,
+              ),
+            ),
+          ],
+          outfile: join(directory, 'kiro-replay-agent.mjs'),
+          bundle: true,
+          platform: 'node',
+          format: 'esm',
+          target: 'node26',
+          logLevel: 'silent',
+        })
+      }
       if (agentType === 'pi') {
         const transcript = await Pi.readPiTranscript(Pi.piFixturePath('provider_thread_resume'))
         await Pi.writePiTranscript(join(directory, 'pi-first.ndjson'), Pi.firstTurnOnly(transcript))
         await Pi.writePiTranscript(join(directory, 'pi-resumed.ndjson'), Pi.resumedOnly(transcript))
+      } else if (agentType === 'kiro') {
+        const transcript = await Kiro.readKiroTranscript(Kiro.kiroFixturePath('restore_recall'))
+        await Kiro.writeKiroTranscript(join(directory, 'kiro-first.ndjson'), Kiro.firstTurnOnly(transcript))
+        await Kiro.writeKiroTranscript(join(directory, 'kiro-resumed.ndjson'), Kiro.resumedOnly(transcript))
       } else {
         const transcript = await Codex.readCodexTranscript(Codex.codexFixturePath('provider_thread_resume'))
         await Codex.writeCodexTranscript(join(directory, 'codex-first.ndjson'), Codex.firstTurnOnly(transcript))
@@ -138,7 +185,14 @@ test.each(cases)(
         status: 'available',
         models: [{ id: model, name: model }],
         default_model: model,
-        capabilities: { create: true, queue: true, steer: true, stop: true, resume: true, switch_model: false },
+        capabilities: {
+          create: true,
+          queue: true,
+          steer: agentType !== 'kiro',
+          stop: true,
+          resume: true,
+          switch_model: false,
+        },
       }
       daemon = Effect.runPromiseExit(
         Effect.scoped(
@@ -196,7 +250,7 @@ test.each(cases)(
       await expect.poll(async () => (await view()).status, { timeout: 10_000 }).toBe('idle')
       const nativeSessionId = (await view()).native_session_id
       expect(nativeSessionId).toBeTruthy()
-      expect(JSON.stringify(await replies())).toContain('provider thread resume fixture first turn complete')
+      expect(JSON.stringify(await replies())).toContain(firstReply)
       expect((await request(`${threadPath}/stop`, 'POST', {})).status).toBe(202)
       await expect.poll(async () => (await view()).stop_confirmed_at, { timeout: 10_000 }).toBeTruthy()
       expect((await view()).status).toBe('stopped')
@@ -222,7 +276,7 @@ test.each(cases)(
         ).status,
       ).toBe(202)
       await expect.poll(async () => (await replies()).length, { timeout: 15_000 }).toBe(2)
-      expect(JSON.stringify(await replies())).toContain('provider thread resume fixture second turn complete')
+      expect(JSON.stringify(await replies())).toContain(secondReply)
       await expect.poll(async () => (await view()).status, { timeout: 10_000 }).toBe('idle')
     } finally {
       controller.abort()
