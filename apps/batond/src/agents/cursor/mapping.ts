@@ -2,7 +2,7 @@ import { Schema } from 'effect'
 import type { WorkerOpenConfig } from '@baton/protocol'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { realpath } from 'node:fs/promises'
-import { ensurePrivateDirectory, readPrivateFile, writePrivateFile } from '../../platform/private.ts'
+import { ensurePrivateDirectory, readPrivateFile, writePrivateFileAtomic } from '../../platform/private.ts'
 import { AgentError } from '../../worker/agent.ts'
 import { NativeMapping, type NativeMapping as Mapping } from './protocol.ts'
 
@@ -37,5 +37,5 @@ export async function loadMapping(config: WorkerOpenConfig, nativeSessionId?: st
 
 export async function persistMapping(mapping: Mapping): Promise<void> {
   await ensurePrivateDirectory(dirname(mapping.statePath))
-  await writePrivateFile(mapping.statePath, JSON.stringify(mapping))
+  await writePrivateFileAtomic(mapping.statePath, JSON.stringify(mapping))
 }

@@ -28,13 +28,16 @@
     "test:integration": "vp test run --config ../../vitest.config.ts --project integration"
   },
   "dependencies": {
-    "@baton/telemetry": "workspace:*",
     "@baton/protocol": "workspace:*",
-    "@baton/sqlite": "workspace:*",
     "@baton/providers": "workspace:*",
+    "@baton/sqlite": "workspace:*",
+    "@baton/telemetry": "workspace:*",
     "@cursor/sdk": "1.0.35",
-    "effect": "catalog:",
     "@effect/platform-node": "catalog:",
+    "@t3tools/contracts": "workspace:*",
+    "@t3tools/provider-core": "workspace:*",
+    "@t3tools/shared": "workspace:*",
+    "effect": "catalog:",
     "ws": "8.22.0"
   },
   "optionalDependencies": {

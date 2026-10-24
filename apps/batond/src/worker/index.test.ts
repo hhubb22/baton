@@ -121,7 +121,7 @@ const fake = Effect.gen(function* () {
         Effect.gen(function* () {
           record(`prepare:${input.id}`)
           if (result.prepareTask) yield* result.prepareTask
-          return { nativeSessionId: 'native', preparationId: `prep:${input.id}`, userCount: 0, prefixDigest: 'prefix' }
+          return { nativeSessionId: 'native', preparationId: `prep:${input.id}`, confirmedSends: 0 }
         }),
       restoreInput: (_, preparation) =>
         Effect.sync(() => {

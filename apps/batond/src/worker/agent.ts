@@ -29,9 +29,8 @@ export interface AgentMessage {
 export interface InputPreparation {
   readonly nativeSessionId: string
   readonly preparationId: string
-  readonly userCount: number
-  readonly prefixDigest: string
-  readonly evidence?: JsonValue
+  /** Native user messages the Worker already saw accepted before this input. */
+  readonly confirmedSends: number
 }
 
 export interface InputAcceptance {
@@ -73,7 +72,7 @@ export interface ThreadAgent {
     nativeSessionId: string,
     config: WorkerOpenConfig,
   ) => Effect.Effect<{ readonly nativeSessionId: string }, AgentError>
-  readonly prepareInput: (message: AgentMessage) => Effect.Effect<InputPreparation, AgentError>
+  readonly prepareInput: (message: AgentMessage, confirmedSends: number) => Effect.Effect<InputPreparation, AgentError>
   readonly restoreInput: (message: AgentMessage, preparation: InputPreparation) => Effect.Effect<void, AgentError>
   readonly send: (message: AgentMessage, preparation: InputPreparation) => Effect.Effect<InputAcceptance, AgentError>
   /** Read-only evidence lookup; must also work before resume and after a broken execution channel. */

@@ -176,10 +176,10 @@ function makeShellAgent(config: WorkerOpenConfig, options: ShellAgentOptions): T
         opened = true
         return { nativeSessionId }
       }),
-    prepareInput: (message) =>
+    prepareInput: (message, confirmedSends) =>
       io(async () => {
         if (!opened || stopped || submitted) throw new AgentError('shell Thread accepts only one command')
-        prepared = prepare(message, await native())
+        prepared = prepare(message, await native(), confirmedSends)
         return prepared
       }),
     restoreInput: (message, preparation) =>

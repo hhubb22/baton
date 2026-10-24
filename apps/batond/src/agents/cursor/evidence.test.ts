@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vite-plus/test'
-import { prepare, findSent } from './evidence.ts'
+import type { WorkerOpenConfig } from '@baton/protocol'
+import { findSent, validatePreparation } from './evidence.ts'
 import type { NativeMapping, NativeMessage } from './protocol.ts'
 import type { AgentMessage } from '../../worker/agent.ts'
+import { preparationFor } from '../../agent-host/preparation.ts'
 
+const config = { thread_id: 'thread' } as WorkerOpenConfig
 const mapping: NativeMapping = {
   version: 1,
   threadId: 'thread',
@@ -17,38 +20,29 @@ const history: NativeMessage[] = [
   { id: 'old-reply', role: 'assistant', text: 'previous answer' },
 ]
 
-describe('Cursor durable input evidence', () => {
-  it('matches the first user record after the complete unchanged prefix', () => {
-    const baseline = prepare(message, mapping, history)
-    expect(findSent(message, mapping, baseline, history)).toBeUndefined()
+describe('Cursor input evidence', () => {
+  it('confirms only the next user record after the confirmed sends', () => {
+    const baseline = preparationFor(config, mapping.nativeSessionId, message, 1)
+    expect(findSent(config, message, mapping, baseline, history)).toBeUndefined()
     expect(
-      findSent(message, mapping, baseline, [...history, { id: 'accepted', role: 'user', text: 'repeat' }]),
+      findSent(config, message, mapping, baseline, [...history, { id: 'accepted', role: 'user', text: 'repeat' }]),
     ).toEqual({ nativeSessionId: 'native', executionId: 'accepted' })
     expect(
-      findSent(message, mapping, baseline, [
+      findSent(config, message, mapping, baseline, [
         ...history,
         { id: 'other', role: 'user', text: 'different' },
         { id: 'accepted', role: 'user', text: 'repeat' },
       ]),
     ).toBeUndefined()
-    expect(
-      findSent(message, mapping, baseline, [
-        { ...history[0]!, text: 'changed' },
-        history[1]!,
-        { id: 'accepted', role: 'user', text: 'repeat' },
-      ]),
-    ).toBeUndefined()
-    expect(findSent(message, mapping, baseline, [{ id: 'accepted', role: 'user', text: 'repeat' }])).toBeUndefined()
+    // An already confirmed input is not evidence again.
+    expect(findSent(config, message, mapping, baseline, [history[0]!, history[1]!])).toBeUndefined()
   })
-  it('binds native identity, cwd, full input and control epoch', () => {
-    const baseline = prepare(message, mapping, history)
-    for (const other of [
-      { ...mapping, cwd: '/other' },
-      { ...mapping, nativeSessionId: 'another' },
-      { ...mapping, storePath: '/other' },
-    ]) {
-      expect(() => findSent(message, other, baseline, history)).toThrow(/preparation/)
+  it('binds the native session, input document and control epoch', () => {
+    const baseline = preparationFor(config, mapping.nativeSessionId, message, 0)
+    for (const other of [{ ...mapping, nativeSessionId: 'another' }]) {
+      expect(() => validatePreparation(config, message, other, baseline)).toThrow(/preparation/)
     }
-    expect(() => findSent({ ...message, epoch: 3 }, mapping, baseline, history)).toThrow(/preparation/)
+    expect(() => validatePreparation(config, { ...message, epoch: 3 }, mapping, baseline)).toThrow(/preparation/)
+    expect(() => validatePreparation(config, { ...message, text: 'other' }, mapping, baseline)).toThrow(/preparation/)
   })
 })

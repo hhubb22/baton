@@ -903,7 +903,11 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
       if (!message) return
       yield* launch(
         newOperation('prepare', message.input.id),
-        current.prepareInput(message.input).pipe(Effect.timeout(prepareMs)),
+        Effect.suspend(() => {
+          // The ledger knows how many inputs the native Agent already accepted.
+          const confirmedSends = Object.values(state.messages).filter((item) => item.state === 'sent').length
+          return current.prepareInput(message.input, confirmedSends).pipe(Effect.timeout(prepareMs))
+        }),
         (result) =>
           Effect.gen(function* () {
             if (Exit.isFailure(result)) {
@@ -923,9 +927,8 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
               preparation.nativeSessionId !== state.nativeId ||
               Buffer.byteLength(JSON.stringify(preparation)) > 4096 ||
               !preparation.preparationId ||
-              !Number.isSafeInteger(preparation.userCount) ||
-              preparation.userCount < 0 ||
-              !preparation.prefixDigest
+              !Number.isSafeInteger(preparation.confirmedSends) ||
+              preparation.confirmedSends < 0
             ) {
               yield* commit((draft) =>
                 settleMessage(draft, draft.messages[message.input.id]!, 'cancelled', 'Invalid input preparation'),

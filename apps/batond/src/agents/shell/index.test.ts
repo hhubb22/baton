@@ -112,7 +112,7 @@ describe.skipIf(process.platform === 'win32')('restricted shell Thread', () => {
     const agent = f.create()
     await run(agent.open(f.config))
     const input = message(`printf ran >> ${quote(join(f.cwd, 'effects'))}; printf out; printf err >&2; exit 7`)
-    const prep = await run(agent.prepareInput(input))
+    const prep = await run(agent.prepareInput(input, 0))
     const events = takeEvents(agent)
     const acceptance = await run(agent.send(input, prep))
     const result = await events
@@ -123,7 +123,7 @@ describe.skipIf(process.platform === 'win32')('restricted shell Thread', () => {
     expect(record.result.output).toContain('out')
     expect(record.result.output).toContain('err')
     expect(result[0]).toMatchObject({ metadata: { exit_code: 7 }, original_bytes: 6, truncated: false })
-    await expect(run(agent.prepareInput(message('echo second')))).rejects.toThrow('only one')
+    await expect(run(agent.prepareInput(message('echo second'), 0))).rejects.toThrow('only one')
     const recovered = f.create()
     await run(recovered.restoreInput(input, prep))
     const replay = takeEvents(recovered)
@@ -153,7 +153,7 @@ describe.skipIf(process.platform === 'win32')('restricted shell Thread', () => {
     agents.push(agent)
     await run(agent.open(f.config))
     const input = message('printf immediate')
-    const prep = await run(agent.prepareInput(input))
+    const prep = await run(agent.prepareInput(input, 0))
     const events = takeEvents(agent)
     await run(agent.send(input, prep))
     expect((await events)[0]).toMatchObject({ type: 'reply', text: 'immediate', original_bytes: 9 })
@@ -166,7 +166,7 @@ describe.skipIf(process.platform === 'win32')('restricted shell Thread', () => {
     const agent = f.create()
     await run(agent.open(f.config))
     const input = message(`touch ${quote(join(f.cwd, 'effect'))}`)
-    const prep = await run(agent.prepareInput(input))
+    const prep = await run(agent.prepareInput(input, 0))
     await writePrivateFileAtomic(
       join(f.root, 'project-exec.json'),
       JSON.stringify({ enabled: false, shell: '/bin/sh' }),
@@ -192,7 +192,7 @@ describe.skipIf(process.platform === 'win32')('restricted shell Thread', () => {
     await run(agent.open(f.config))
     const pidfile = join(f.cwd, 'child.pid')
     const input = message(`sleep 60 & echo $! > ${quote(pidfile)}; wait`)
-    const prep = await run(agent.prepareInput(input))
+    const prep = await run(agent.prepareInput(input, 0))
     const events = takeEvents(agent)
     await run(agent.send(input, prep))
     await vi.waitFor(async () => expect(await exists(pidfile)).toBe(true))

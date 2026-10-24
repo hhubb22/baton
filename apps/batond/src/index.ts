@@ -27,7 +27,7 @@ async function main() {
     await runWatchdogCommand()
     return
   }
-  if (action === 'worker' || action === 'cursor-host') {
+  if (action === 'worker' || action === 'agent-host') {
     const controller = new AbortController()
     const stop = () => controller.abort()
     process.once('SIGINT', stop)
@@ -47,8 +47,21 @@ async function main() {
           { signal: controller.signal },
         )
       } else {
-        const { runCursorHost } = await import('./agents/cursor/host.ts')
-        await Effect.runPromise(Effect.scoped(runCursorHost()), { signal: controller.signal })
+        const { values, positionals } = parseArgs({
+          args,
+          allowPositionals: true,
+          options: { cwd: { type: 'string' }, state: { type: 'string' } },
+        })
+        const agentType = positionals[0]
+        if (!agentType || !values.cwd || !values.state)
+          throw new Error('Agent host needs an Agent type, --cwd and --state')
+        const { runAgentHostCommand } = await import('./agent-host/index.ts')
+        await Effect.runPromise(
+          Effect.scoped(
+            runAgentHostCommand(agentType, { workingDirectory: values.cwd, privateDirectory: values.state }),
+          ),
+          { signal: controller.signal },
+        )
       }
     } catch (error) {
       if (!controller.signal.aborted) throw error
@@ -70,7 +83,7 @@ void main().catch((error: unknown) => {
       ok: false,
       code: 'batond_failed',
       message:
-        action === 'worker' || action === 'cursor-host' || action === 'watchdog'
+        action === 'worker' || action === 'agent-host' || action === 'watchdog'
           ? `${action} failed`
           : error instanceof Error
             ? error.message

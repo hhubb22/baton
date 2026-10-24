@@ -1,6 +1,10 @@
 import { expect, it } from 'vite-plus/test'
+import type { WorkerOpenConfig } from '@baton/protocol'
 import { nativeMessagesFromSdk } from './history.ts'
-import { findSent, prepare } from './evidence.ts'
+import { findSent } from './evidence.ts'
+import { preparationFor } from '../../agent-host/preparation.ts'
+
+const config = { thread_id: 'thread' } as WorkerOpenConfig
 import type { NativeMapping } from './protocol.ts'
 
 it('splits the SDK ConversationTurn into stable user and assistant records', () => {
@@ -34,10 +38,12 @@ it('splits the SDK ConversationTurn into stable user and assistant records', () 
       storePath: '/state/cursor-store',
     }
     const input = { id: 'input', text: 'hello', epoch: 1, operationId: 'op', mode: 'queue' as const }
-    expect(findSent(input, mapping, prepare(input, mapping, []), history)).toEqual({
+    expect(
+      findSent(config, input, mapping, preparationFor(config, mapping.nativeSessionId, input, 0), history),
+    ).toEqual({
       nativeSessionId: 'native',
       executionId: 'turn-id:user',
     })
-    expect(prepare({ ...input, id: 'next' }, mapping, history).userCount).toBe(1)
+    expect(preparationFor(config, mapping.nativeSessionId, { ...input, id: 'next' }, 1).confirmedSends).toBe(1)
   }
 })

@@ -110,20 +110,18 @@ export async function persistMapping(mapping: ShellMapping): Promise<void> {
   await writePrivateFileAtomic(mapping.statePath, JSON.stringify(mapping))
 }
 
-export function prepare(message: AgentMessage, mapping: ShellMapping): InputPreparation {
+export function prepare(message: AgentMessage, mapping: ShellMapping, confirmedSends: number): InputPreparation {
   if (message.mode !== 'queue' || message.model || !message.id || !message.text)
     throw new AgentError('shell only accepts one queued command without a model')
-  const prefixDigest = digest(mapping)
   return {
     nativeSessionId: mapping.nativeSessionId,
     preparationId: digest({ mapping, message }),
-    userCount: 0,
-    prefixDigest,
+    confirmedSends,
   }
 }
 
 export function validatePreparation(message: AgentMessage, mapping: ShellMapping, preparation: InputPreparation): void {
-  if (JSON.stringify(preparation) !== JSON.stringify(prepare(message, mapping)))
+  if (JSON.stringify(preparation) !== JSON.stringify(prepare(message, mapping, preparation.confirmedSends)))
     throw new AgentError('shell input preparation identity mismatch')
 }
 

@@ -1,12 +1,27 @@
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Effect } from 'effect'
-import { connectCursorHost, type CursorProcessOptions } from './transport.ts'
+import { connectAgentHost, type AgentHostProcessOptions } from '../../agent-host/transport.ts'
 
-/** Read-only authentication/catalog probe; never creates or resumes an SDK Agent. */
-export const probeCursor = (options: CursorProcessOptions) =>
+/**
+ * Read-only probe in its own Agent host with an empty temporary workspace.
+ * It never opens or resumes an Agent and never sends a prompt.
+ */
+export const probeCursor = (
+  options: Omit<AgentHostProcessOptions, 'agentType' | 'paths' | 'command'> & {
+    command: AgentHostProcessOptions['command']
+  },
+) =>
   Effect.scoped(
     Effect.gen(function* () {
+      const temporary = yield* Effect.promise(() => mkdtemp(join(tmpdir(), 'baton-cursor-probe-workspace-')))
+      yield* Effect.addFinalizer(() => Effect.promise(() => rm(temporary, { recursive: true, force: true })))
       const controller = new AbortController()
-      const host = yield* connectCursorHost(options, controller.signal)
+      const host = yield* connectAgentHost(
+        { ...options, agentType: 'cursor', paths: { workingDirectory: temporary, privateDirectory: temporary } },
+        controller.signal,
+      )
       yield* Effect.addFinalizer(() =>
         Effect.gen(function* () {
           controller.abort()

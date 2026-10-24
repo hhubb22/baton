@@ -304,6 +304,15 @@ importers:
       '@effect/platform-node':
         specifier: 'catalog:'
         version: 4.0.6(effect@4.0.6)(redis@6.3.0)
+      '@t3tools/contracts':
+        specifier: workspace:*
+        version: link:../../upstream/t3code/packages/contracts
+      '@t3tools/provider-core':
+        specifier: workspace:*
+        version: link:../../upstream/t3code/packages/provider-core
+      '@t3tools/shared':
+        specifier: workspace:*
+        version: link:../../upstream/t3code/packages/shared
       effect:
         specifier: 'catalog:'
         version: 4.0.6

@@ -9,21 +9,29 @@ import type {
   ProcessCommand,
   ProcessRecordCallbacks,
   ProcessWatchdog,
-} from '../../platform/process-types.ts'
-import { spawnOwnedProcessEffect } from '../../platform/process.ts'
-import { AgentError } from '../../worker/agent.ts'
-import type { AgentMessage, InputAcceptance, InputPreparation } from '../../worker/agent.ts'
-import { CursorHostRpc, type HostEvent, type NativeMapping, type NativeMessage, type ProbeResult } from './protocol.ts'
+} from '../platform/process-types.ts'
+import { spawnOwnedProcessEffect } from '../platform/process.ts'
+import { AgentError } from '../worker/agent.ts'
+import type { AgentMessage } from '../worker/agent.ts'
+import { hostEnvironment } from './environment.ts'
+import type { AgentHostPaths } from './host-layer.ts'
+import type { Preparation } from './protocol.ts'
+import { AgentHostRpc, type Acceptance, type HostEvent, type ProbeResult, type SessionIdentity } from './protocol.ts'
 
-export interface CursorHostConnection {
+export interface AgentHostConnection {
   readonly probe: Effect.Effect<ProbeResult, AgentError>
-  readonly open: (
+  readonly open: (config: WorkerOpenConfig, generation: string) => Effect.Effect<SessionIdentity, AgentError>
+  readonly resume: (
     config: WorkerOpenConfig,
     generation: string,
-    mapping?: NativeMapping,
-  ) => Effect.Effect<NativeMapping, AgentError>
-  readonly send: (message: AgentMessage, preparation: InputPreparation) => Effect.Effect<InputAcceptance, AgentError>
-  readonly history: (mapping: NativeMapping) => Effect.Effect<ReadonlyArray<NativeMessage>, AgentError>
+    nativeSessionId: string,
+  ) => Effect.Effect<SessionIdentity, AgentError>
+  readonly send: (message: AgentMessage, preparation: Preparation) => Effect.Effect<Acceptance, AgentError>
+  readonly sent: (
+    config: WorkerOpenConfig,
+    message: AgentMessage,
+    preparation: Preparation,
+  ) => Effect.Effect<Acceptance | undefined, AgentError>
   readonly events: Stream.Stream<HostEvent, AgentError>
   readonly abort: Effect.Effect<void, AgentError>
   readonly close: Effect.Effect<void, AgentError>
@@ -33,41 +41,30 @@ export interface CursorHostConnection {
   readonly exited: Effect.Effect<void, AgentError>
 }
 
-export interface CursorProcessOptions {
-  /** batond invocation before the cursor-host subcommand. */
+export interface AgentHostProcessOptions {
+  /** batond invocation before the agent-host subcommand. */
   readonly command: ProcessCommand
+  readonly agentType: string
+  readonly paths: AgentHostPaths
   readonly watchdog?: ProcessWatchdog
   readonly records?: ProcessRecordCallbacks
-  readonly apiKey?: string
   /** Local diagnostics contain only error class/tag/code names, never SDK payloads. */
   readonly onDiagnostic?: (diagnostic: { readonly tags: ReadonlyArray<string> }) => void
 }
 
-/** Do not inherit unrelated provider credentials or Node injection flags. */
-function hostEnvironment(apiKey: string | undefined): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {}
-  for (const name of [
-    'PATH',
-    'HOME',
-    'USERPROFILE',
-    'SystemRoot',
-    'COMSPEC',
-    'TEMP',
-    'TMP',
-    'TMPDIR',
-    'LANG',
-    'LC_ALL',
-  ]) {
-    if (process.env[name] !== undefined) env[name] = process.env[name]
-  }
-  if (apiKey !== undefined) env.CURSOR_API_KEY = apiKey
-  return env
-}
+export const agentHostArguments = (agentType: string, paths: AgentHostPaths): string[] => [
+  'agent-host',
+  agentType,
+  '--cwd',
+  paths.workingDirectory,
+  '--state',
+  paths.privateDirectory,
+]
 
-export const connectCursorHost = (
-  options: CursorProcessOptions,
+export const connectAgentHost = (
+  options: AgentHostProcessOptions,
   signal: AbortSignal,
-): Effect.Effect<CursorHostConnection, AgentError> =>
+): Effect.Effect<AgentHostConnection, AgentError> =>
   Effect.gen(function* () {
     const scope = yield* Scope.make()
     let owned: OwnedProcess | undefined
@@ -94,7 +91,7 @@ export const connectCursorHost = (
         cause &&
         typeof cause === 'object' &&
         '_tag' in cause &&
-        cause._tag === 'CursorHostError' &&
+        cause._tag === 'AgentHostError' &&
         'message' in cause &&
         typeof cause.message === 'string'
       )
@@ -112,16 +109,21 @@ export const connectCursorHost = (
               '_tag' in cause.reason
             ? String(cause.reason._tag)
             : 'transport failure'
-      return new AgentError(`Cursor host operation failed (${detail})`, cause)
+      return new AgentError(`Agent host operation failed (${detail})`, cause)
     }
     const connected = Effect.gen(function* () {
       owned = yield* spawnOwnedProcessEffect(
         {
           ...options.command,
-          args: [...(options.command.args ?? []), 'cursor-host'],
-          env: hostEnvironment(options.apiKey),
+          args: [...(options.command.args ?? []), ...agentHostArguments(options.agentType, options.paths)],
+          env: hostEnvironment(options.agentType),
         },
-        { watchdog: options.watchdog, records: options.records, role: 'cursor-host', signal },
+        {
+          watchdog: options.watchdog,
+          records: options.records,
+          role: `${options.agentType}-host`,
+          signal,
+        },
       ).pipe(Effect.mapError(fail))
       // Drain SDK diagnostics without forwarding credentials or unbounded output.
       owned.stderr.resume()
@@ -134,7 +136,7 @@ export const connectCursorHost = (
         retryPolicy: Schedule.recurs(0),
         retryTransientErrors: false,
       }).pipe(Effect.provideService(Socket.Socket, socket), Effect.provide(RpcSerialization.layerNdjson))
-      const client = yield* RpcClient.make(CursorHostRpc).pipe(Effect.provideService(RpcClient.Protocol, protocol))
+      const client = yield* RpcClient.make(AgentHostRpc).pipe(Effect.provideService(RpcClient.Protocol, protocol))
       const disconnect = Scope.close(scope, Exit.void)
       const call = <A, E>(effect: Effect.Effect<A, E>): Effect.Effect<A, AgentError> =>
         effect.pipe(
@@ -150,10 +152,12 @@ export const connectCursorHost = (
       const processHandle = owned
       return {
         probe: call(client.probe()),
-        open: (config: WorkerOpenConfig, generation: string, mapping?: NativeMapping) =>
-          call(client.open({ config, generation, ...(mapping ? { mapping } : {}) })),
-        send: (message: AgentMessage, preparation: InputPreparation) => call(client.send({ message, preparation })),
-        history: (mapping: NativeMapping) => call(client.history(mapping)),
+        open: (config: WorkerOpenConfig, generation: string) => call(client.open({ config, generation })),
+        resume: (config: WorkerOpenConfig, generation: string, nativeSessionId: string) =>
+          call(client.resume({ config, generation, nativeSessionId })),
+        send: (message: AgentMessage, preparation: Preparation) => call(client.send({ message, preparation })),
+        sent: (config: WorkerOpenConfig, message: AgentMessage, preparation: Preparation) =>
+          call(client.sent({ config, message, preparation })).pipe(Effect.map((value) => value ?? undefined)),
         events: client.events().pipe(Stream.mapError((cause) => channelFailure ?? fail(cause))),
         abort: call(client.abort()),
         close: call(client.close()).pipe(Effect.ensuring(disconnect)),
@@ -162,7 +166,7 @@ export const connectCursorHost = (
           Effect.map((result) => ({ processTreeStopped: result.reaped })),
         ),
         exited: Effect.tryPromise({ try: () => processHandle.exited.then(() => undefined), catch: fail }),
-      } satisfies CursorHostConnection
+      } satisfies AgentHostConnection
     }).pipe(Scope.provide(scope))
     return yield* connected.pipe(
       Effect.onError(() =>

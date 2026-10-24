@@ -1,14 +1,22 @@
 import { Effect } from 'effect'
-import type { RuntimeAgent } from '@baton/protocol'
+import { dirname, isAbsolute } from 'node:path'
+import type { RuntimeAgent, WorkerOpenConfig } from '@baton/protocol'
 import { inspectCursorSdk } from '@baton/providers/cursor'
-import { makeCursorAgentFactory } from './cursor/index.ts'
+import { makeCursorAgentFactory, probeCursor } from './cursor/index.ts'
 import { makeShellAgentFactory } from './shell/index.ts'
-import { probeCursor } from './cursor/probe.ts'
 import { startProcessWatchdog } from '../platform/process.ts'
 import { currentBatondCommand } from '../daemon/host.ts'
+import { AgentError } from '../worker/agent.ts'
 
 /** Delivery combinations are enabled only after real send, cancellation, history and resume validation. */
 const verifiedCombinations = new Set(['darwin-arm64'])
+
+/** The Thread working directory and the private directory beside the native mapping. */
+const cursorPaths = (config: WorkerOpenConfig) => {
+  const statePath = config.adapter_config.state_path
+  if (!statePath || !isAbsolute(statePath)) throw new AgentError('Cursor requires an absolute private state_path')
+  return { workingDirectory: config.working_directory, privateDirectory: dirname(statePath) }
+}
 
 export async function probeLocalCursor(): Promise<RuntimeAgent> {
   const platform = `${process.platform}-${process.arch}`
@@ -50,22 +58,24 @@ export async function probeLocalCursor(): Promise<RuntimeAgent> {
           return yield* probeCursor({
             command: { file: invocation.executable, args: invocation.args },
             watchdog,
-            apiKey: process.env.CURSOR_API_KEY!,
           }).pipe(Effect.timeout('30 seconds'))
         }),
       ),
     )
+    const version = typeof result.details.version === 'string' ? result.details.version : 'unknown'
+    const integrity = result.details.integrity === true
+    const sandboxHelper = result.details.sandboxHelper === true
     const report = {
       ...base,
-      version: result.sdkVersion,
+      version,
       default_model: result.authenticated === 'valid' ? 'default' : '',
       models: [...new Set(result.models)].map((id) => ({ id, name: id })),
     }
-    if (!result.integrity || !result.sandboxHelper)
+    if (!integrity || !sandboxHelper)
       return {
         ...report,
         status: 'unavailable',
-        reason: result.integrity ? 'Cursor SDK 的本机辅助程序不可用' : 'Cursor SDK 安装不完整',
+        reason: integrity ? 'Cursor SDK 的本机辅助程序不可用' : 'Cursor SDK 安装不完整',
       }
     if (result.authenticated !== 'valid')
       return {
@@ -73,8 +83,8 @@ export async function probeLocalCursor(): Promise<RuntimeAgent> {
         status: result.authenticated === 'missing' ? 'unavailable' : 'unverified',
         reason: result.authenticated === 'missing' ? '需要显式配置 CURSOR_API_KEY' : 'Cursor 认证状态尚未确认',
       }
-    if (result.sdkVersion !== '1.0.35' || !verifiedCombinations.has(platform))
-      return { ...report, reason: `Cursor SDK ${result.sdkVersion} / ${platform} 尚未通过执行、停止、历史与恢复验证` }
+    if (version !== '1.0.35' || !verifiedCombinations.has(platform))
+      return { ...report, reason: `Cursor SDK ${version} / ${platform} 尚未通过执行、停止、历史与恢复验证` }
     return {
       ...report,
       status: 'available',
@@ -87,6 +97,11 @@ export async function probeLocalCursor(): Promise<RuntimeAgent> {
 }
 
 export const agentRegistry = {
-  cursor: { type: 'cursor', makeFactory: makeCursorAgentFactory, probe: probeLocalCursor },
+  cursor: {
+    type: 'cursor',
+    makeFactory: makeCursorAgentFactory,
+    probe: probeLocalCursor,
+    paths: cursorPaths,
+  },
   shell: { type: 'shell', makeFactory: makeShellAgentFactory },
 } as const

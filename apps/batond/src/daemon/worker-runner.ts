@@ -62,7 +62,7 @@ export const runWorker = (options: {
       command: { file: invocation.executable, args: invocation.args },
       records,
       ...(watchdog ? { watchdog } : {}),
-      ...(process.env.CURSOR_API_KEY ? { apiKey: process.env.CURSOR_API_KEY } : {}),
+      paths: registry.cursor.paths,
     })
     const shellFactory = registry.shell.makeFactory({
       dataDirectory: options.dataDirectory,

@@ -62,18 +62,20 @@ const replay: AgentFactory = (config) => {
   return {
     open: () => Effect.succeed({ nativeSessionId }),
     resume: () => Effect.succeed({ nativeSessionId }),
-    prepareInput: (message) =>
-      io(async () => ({
+    prepareInput: (message, confirmedSends) =>
+      Effect.succeed({
         nativeSessionId,
         preparationId: message.id,
-        userCount: (await history()).length,
-        prefixDigest: 'replay-prefix',
-      })),
+        confirmedSends,
+      }),
     restoreInput: () => Effect.void,
     send,
-    sent: (message) =>
+    sent: (message, preparation) =>
       io(async () => {
-        const input = (await history()).find((item) => item.id === message.id)
+        const entries = await history()
+        const input = entries
+          .filter((_, index) => index >= preparation.confirmedSends)
+          .find((item) => item.id === message.id)
         return input ? { nativeSessionId, executionId: input.executionId } : undefined
       }),
     events: Stream.fromQueue(events),
