@@ -29,7 +29,7 @@ Coordinator：Thread 命令、报告与历史记录
 | 位置 | 职责 | 对应需求 |
 |---|---|---|
 | `vendor/t3code` | Baton fork 的 git submodule，固定提交；pnpm workspace 收录其中用到的 `@t3tools/*` 包 | R-04～R-11 |
-| `packages/effect-acp`、`packages/effect-codex-app-server` | 删除本地副本，改用 fork 中的同名包 | R-04、R-08、R-11 |
+| `vendor/t3code/packages/effect-acp`、`vendor/t3code/packages/effect-codex-app-server` | fork 中的 ACP 与 Codex app-server 客户端，由 workspace 直接收录 | R-04、R-08、R-11 |
 | `packages/providers`、`packages/provider-testing` | 删除；由 fork 的 `provider-cursor` 与 `provider-testing` 取代 | R-04～R-12 |
 | `packages/protocol` | Worker IPC、ThreadReport 和 RuntimeAgent 的 Effect Schema；删除原生历史条目 `HistoryEntry` | R-01、R-10 |
 | `apps/batond/src/worker` | 沿用 T1～T3 的接收、执行、停止裁决与 outbox；`ThreadAgent` 契约按下文简化 | R-01、R-04、R-05、R-08 |

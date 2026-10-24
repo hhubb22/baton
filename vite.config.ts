@@ -11,8 +11,7 @@ export default defineConfig({
       '**/_generated/**',
       'packages/provider-testing/test/fixtures/**',
       'packages/protocol/fixtures/**',
-      'packages/effect-acp/test/fixtures/*.json',
-      'packages/effect-codex-app-server/test/fixtures/*.json',
+      'vendor/**',
       '.agents/**',
       '.claude/**',
       'internal/**',
@@ -27,16 +26,6 @@ export default defineConfig({
           'typescript/no-floating-promises': [
             'warn',
             { allowForKnownSafeCalls: [{ from: 'package', package: 'node:test', name: 'test' }] },
-          ],
-        },
-      },
-      {
-        files: ['packages/effect-acp/scripts/generate.ts', 'packages/effect-codex-app-server/scripts/generate.ts'],
-        // JSON Schema 来自 JSON 解码，JsonObject 按普通记录展开。
-        rules: {
-          'typescript/no-misused-spread': [
-            'warn',
-            { allow: [{ from: 'package', package: 'effect', name: 'JsonObject' }] },
           ],
         },
       },
@@ -57,8 +46,7 @@ export default defineConfig({
       '**/_generated/**',
       'packages/provider-testing/test/fixtures/**',
       'packages/protocol/fixtures/**',
-      'packages/effect-acp/test/fixtures/*.json',
-      'packages/effect-codex-app-server/test/fixtures/*.json',
+      'vendor/**',
       '**/pnpm-lock.yaml',
       '**/package-lock.json',
       'skills-lock.json',
@@ -68,11 +56,6 @@ export default defineConfig({
       'internal/**',
       'design/**',
       'third_party/**',
-      'packages/effect-acp/src/**',
-      'packages/effect-acp/scripts/**',
-      'packages/effect-codex-app-server/src/**',
-      'packages/effect-codex-app-server/scripts/**',
-      'packages/effect-codex-app-server/test/examples/**',
     ],
   },
 })

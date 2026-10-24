@@ -5,6 +5,17 @@ packages:
   - runtimes/project-agent
   - runtimes/shared
   - web
+  - vendor/t3code/packages/provider-core
+  - vendor/t3code/packages/provider-pi
+  - vendor/t3code/packages/provider-acp
+  - vendor/t3code/packages/provider-acp-registry
+  - vendor/t3code/packages/provider-cursor
+  - vendor/t3code/packages/provider-codex
+  - vendor/t3code/packages/provider-testing
+  - vendor/t3code/packages/contracts
+  - vendor/t3code/packages/shared
+  - vendor/t3code/packages/effect-acp
+  - vendor/t3code/packages/effect-codex-app-server
 
 catalog:
   effect: 4.0.6
@@ -19,6 +30,21 @@ catalog:
   esbuild: 0.28.2
   vite: npm:@voidzero-dev/vite-plus-core@1.4.0
   vite-plus: 1.4.0
+  '@noble/curves': 1.9.1
+  '@noble/hashes': 1.8.0
+  jose: 6.2.2
+  mdast-util-directive: 3.1.0
+  micromark-extension-directive: 4.0.0
+  micromark-util-character: 2.1.1
+  micromark-util-types: 2.0.2
+  rehype-raw: 7.0.0
+  rehype-sanitize: 6.0.0
+  remark-breaks: 4.0.0
+  remark-gfm: 4.0.1
+  remark-parse: 11.0.0
+  remark-rehype: 11.1.2
+  unified: 11.0.5
+  yaml: ^2.9.0
 
 allowBuilds:
   esbuild: true
@@ -35,6 +61,14 @@ minimumReleaseAgeExclude:
 overrides:
   vite@*: 'catalog:'
   vitest@*: 'catalog:'
+  # t3code 的数学解析测试依赖这份 tokenizer，以及下面三个补丁。
+  'remark-math>micromark-extension-math': npm:micromark-extension-llm-math@3.1.0
+  micromark-extension-gfm-table: 2.1.1
+  micromark-util-types: 2.0.2
+patchedDependencies:
+  mdast-util-math@3.0.0: vendor/t3code/patches/mdast-util-math@3.0.0.patch
+  micromark-extension-llm-math@3.1.0: vendor/t3code/patches/micromark-extension-llm-math@3.1.0.patch
+  micromark-extension-gfm-table@2.1.1: vendor/t3code/patches/micromark-extension-gfm-table@2.1.1.patch
 peerDependencyRules:
   allowAny:
     - vite
