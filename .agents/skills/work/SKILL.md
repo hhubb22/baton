@@ -35,6 +35,8 @@ license: MIT
 ## Guardrails
 
 - 读取仓库 `AGENTS.md` 与 `.agents/PROJECT.md`（模板见 [PROJECT.template.md](assets/PROJECT.template.md)）获取验证命令与项目约定。
+- 淘汰旧实现时先确定废弃资产清单，不为被替换的代码补测或维护兼容。
+- 排错遇到同类故障连续 3 次未解时主动向用户汇报并停下，禁止无休止盲改。
 - 不要为简单改动强行走全套文档与拆卡流程。
 
 ## Stop Rules
