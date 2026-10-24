@@ -7,7 +7,8 @@ import type { AgentFactory, AgentEvent, AgentMessage, AgentEventIdentity } from 
 import { AgentError } from '../../../batond/src/worker/agent.ts'
 import { makeOutputMailbox } from '../../../batond/src/worker/output.ts'
 import { runWorker } from '../../../batond/src/daemon/worker-runner.ts'
-import { runWatchdogCommand } from '../../../batond/src/platform/process.ts'
+import { runWatchdogCommand, startProcessWatchdog } from '../../../batond/src/platform/process.ts'
+import { makeShellAgentFactory } from '../../../batond/src/agents/shell/index.ts'
 
 type Input = { id: string; text: string; executionId: string }
 // Derived from ThreadAgent's documented acceptance and event contract; no native service is called.
@@ -97,11 +98,18 @@ async function main() {
   const controller = new AbortController()
   process.once('SIGTERM', () => controller.abort())
   process.once('SIGINT', () => controller.abort())
+  const dataDirectory = values['data-dir'], threadId = values['thread-id']
+  const program = Effect.gen(function* () {
+    const watchdog = process.platform === 'win32' ? undefined : yield* Effect.acquireRelease(
+      Effect.promise(() => startProcessWatchdog({ file: process.execPath, args: [process.argv[1]!, 'watchdog'] })),
+      (owned) => Effect.promise(() => owned.close()),
+    )
+    const shell = makeShellAgentFactory({ dataDirectory, ...(watchdog ? { watchdog } : {}) })
+    return yield* runWorker({ dataDirectory, threadId, agentFactory: (config) => config.agent_type === 'shell' ? shell(config) : replay(config) })
+  })
   try {
     await Effect.runPromise(
-      Effect.scoped(
-        runWorker({ dataDirectory: values['data-dir'], threadId: values['thread-id'], agentFactory: replay }),
-      ).pipe(Effect.provide(telemetryLayer('baton-worker'))),
+      Effect.scoped(program).pipe(Effect.provide(telemetryLayer('baton-worker'))),
       { signal: controller.signal },
     )
   } catch {

@@ -55,6 +55,9 @@ export const WorkerAdapterConfig = Schema.Struct({
   session_dir: Schema.optionalKey(boundedText(4096)),
 })
 export const WorkerOpenConfig = Schema.Struct({
+  project_id: Schema.optionalKey(UUID),
+  origin_conversation_id: Schema.optionalKey(UUID),
+  origin_tool_call_id: Schema.optionalKey(ClientMessageID),
   thread_id: UUID,
   node_id: UUID,
   storage_generation: StorageGeneration,

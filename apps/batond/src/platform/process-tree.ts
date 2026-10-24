@@ -38,7 +38,10 @@ export async function reapProcessTree(identity: ProcessIdentity, timeoutMs = 200
   try {
     process.kill(-identity.pid, 'SIGKILL')
   } catch (error) {
-    if (!hasCode(error, 'ESRCH')) throw error
+    // The final member can exit between identity lookup and signalling; EPERM still requires an empty group.
+    if (hasCode(error, 'EPERM')) {
+      if (await groupIsAlive(identity.pid)) throw error
+    } else if (!hasCode(error, 'ESRCH')) throw error
   }
   const deadline = performance.now() + timeoutMs
   while (await groupIsAlive(identity.pid)) {

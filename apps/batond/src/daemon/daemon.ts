@@ -18,7 +18,10 @@ import { acquireProcessLock } from '../platform/lock.ts'
 import { ensurePrivateDirectory, openPrivateFile, writePrivateFileAtomic } from '../platform/private.ts'
 import { LocalWorkerHost } from './host.ts'
 import { isMissing, loadIdentity, relayURL as normalizeRelay, coordinatorURL } from './identity.ts'
-import { initializeBrowseRoots, loadBrowseRoots, browseDirectories } from './roots.ts'
+import { initializeBrowseRoots, loadBrowseRoots } from './roots.ts'
+import { makeDeviceService, boundRuntimeReport, type DeviceService } from '../devices/index.ts'
+import { makeProjectManager, type ProjectManager, type ProjectManagerOptions } from '../project/index.ts'
+import { ProjectRPC } from './project-rpc.ts'
 import { makeNodeLedger, contentHash, type NodeLedger } from './ledger.ts'
 import { makeThreadService, WorkerHistoryUnavailable, type DaemonWorkerHost } from './threads.ts'
 import { connectWebSocket, reconnectDelay, type DaemonTransport, type DaemonConnection } from './transport.ts'
@@ -43,6 +46,7 @@ export interface RunDaemonOptions {
   readonly probe?: (signal: AbortSignal) => Promise<RuntimeAgent>
   readonly host?: DaemonWorkerHost
   readonly random?: () => number
+  readonly project?: Omit<ProjectManagerOptions, 'dataDir'>
 }
 export class DaemonServices extends Context.Service<
   DaemonServices,
@@ -103,7 +107,9 @@ async function connected(options: {
   threads: ReturnType<typeof makeThreadService>
   host: DaemonWorkerHost
   report: () => Promise<RuntimeReport>
-  identityDirectory: string
+  projects: ProjectManager
+  devices: DeviceService
+  refreshDevices: () => void
 }) {
   const { connection, identity, signal } = options
   const controller = new AbortController()
@@ -136,6 +142,7 @@ async function connected(options: {
     })
     await send({ kind: 'envelope', envelope: env })
   }
+  const projectRPC = new ProjectRPC((request, id) => envelope(request, undefined, id))
   const sync = () =>
     envelope(
       {
@@ -244,8 +251,11 @@ async function connected(options: {
       switch (body.type) {
         case 'node.sync_result':
           if (env.correlation_id === syncId) {
-            if (body.ok) synced = true
-            else if (terminal(body.code)) throw new NeedsReauthentication()
+            if (body.ok) {
+              synced = true
+              options.projects.setTransport(projectRPC.request)
+              options.refreshDevices()
+            } else if (terminal(body.code)) throw new NeedsReauthentication()
           }
           break
         case 'node.runtime_report_result':
@@ -253,6 +263,14 @@ async function connected(options: {
             reportAcked = reportPending.hash
             reportPending = undefined
           }
+          break
+        case 'project_runtime.result':
+          if (synced) projectRPC.receive(env.correlation_id, body)
+          break
+        case 'project_run_start':
+        case 'project_run_stop':
+        case 'project_run_wake':
+          if (synced) schedule(() => options.projects.command(body))
           break
         case 'thread.command':
           if (synced)
@@ -279,9 +297,12 @@ async function connected(options: {
           }
           break
         case 'files.browse':
+        case 'node.browse_roots_set':
+        case 'node.project_exec_set':
+        case 'node.subscription_login':
           if (synced)
             schedule(async () => {
-              await envelope(await browseDirectories(options.identityDirectory ?? '', body), env.message_id)
+              await envelope(await options.devices.handle(body, controller.signal), env.message_id)
             })
           break
         case 'session.request':
@@ -317,6 +338,8 @@ async function connected(options: {
     if (!signal.aborted) throw new Error('节点连接已断开')
   } finally {
     abort()
+    projectRPC.close()
+    options.projects.onDisconnect()
     signal.removeEventListener('abort', abort)
     await ticking
     await Promise.allSettled(requests)
@@ -362,6 +385,27 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
     const ledger = yield* makeNodeLedger(join(options.dataDirectory, 'node.db')).pipe(
       Effect.mapError(() => new DaemonStorageFailure()),
     )
+    let devicesDirty = true
+    const projects = yield* makeProjectManager({
+      ...options.project,
+      dataDir: options.dataDirectory,
+      onReportChanged: () => {
+        devicesDirty = true
+        options.project?.onReportChanged?.()
+      },
+    })
+    const devices = yield* Effect.acquireRelease(
+      attempt(() =>
+        makeDeviceService({
+          dataDirectory: options.dataDirectory,
+          runtime: projects,
+          onChanged: () => {
+            devicesDirty = true
+          },
+        }),
+      ),
+      (service) => Effect.promise(() => service.close()),
+    )
     let capability = pendingCapability()
     const threads = makeThreadService({
       dataDirectory: options.dataDirectory,
@@ -372,13 +416,39 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
       tracer: yield* Tracer.Tracer,
     })
     yield* controlAttempt((signal) => threads.discover(signal))
-    const report = async (): Promise<RuntimeReport> => ({
-      batond_version: '0.0.0',
-      user: userInfo().username,
-      agents: [capability],
-      exec: { enabled: false, shell: process.platform === 'win32' ? 'cmd.exe' : '/bin/sh' },
-      roots: (await loadBrowseRoots(options.dataDirectory)).map((r) => ({ root_id: r.id, path: r.path })),
+    let deviceReport: Pick<RuntimeReport, 'exec' | 'roots' | 'repos' | 'project_runtime' | 'truncated'> = {
+      exec: { enabled: false, shell: process.platform === 'win32' ? 'pwsh' : '/bin/sh' },
+      roots: (yield* attempt(() => loadBrowseRoots(options.dataDirectory))).map((r) => ({
+        root_id: r.id,
+        path: r.path,
+      })),
       repos: [],
+    }
+    let username: string | undefined
+    try {
+      username = userInfo().username
+    } catch {
+      /* The operating system may not provide a user name. */
+    }
+    const report = async (): Promise<RuntimeReport> =>
+      boundRuntimeReport({
+        batond_version: '0.0.0',
+        ...(username ? { user: username } : {}),
+        agents: [capability],
+        ...deviceReport,
+      })
+    const collectDevices = Effect.gen(function* () {
+      let collectedAt = -Infinity
+      while (true) {
+        if (devicesDirty || performance.now() - collectedAt >= 5000) {
+          devicesDirty = false
+          yield* controlAttempt(async (signal) => {
+            deviceReport = await devices.collect(signal)
+          })
+          collectedAt = performance.now()
+        }
+        yield* Effect.sleep(100)
+      }
     })
     const collect = Effect.gen(function* () {
       yield* controlAttempt((signal) => threads.recover(signal))
@@ -419,7 +489,11 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
               threads,
               host: services.host,
               report,
-              identityDirectory: options.dataDirectory,
+              projects,
+              devices,
+              refreshDevices: () => {
+                devicesDirty = true
+              },
             })
           } finally {
             connection?.close()
@@ -434,7 +508,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
         yield* Effect.sleep(reconnectDelay(retry++, options.random))
       }
     })
-    yield* Effect.all([connect, collect, probe], { concurrency: 'unbounded' })
+    yield* Effect.all([connect, collect, probe, collectDevices], { concurrency: 'unbounded' })
   })
   return program.pipe(
     Effect.provideService(DaemonServices, {

@@ -12,6 +12,13 @@ export const webSocketText = (data: RawData): string =>
 
 type PSubscription = typeof BrowserSubscription.Type
 type Body = Record<string, unknown>
+const rpcResponses = new Map([
+  ['files.browse', 'files.browse_result'],
+  ['session.request', 'session.result'],
+  ['node.project_exec_set', 'node.project_exec_result'],
+  ['node.browse_roots_set', 'node.browse_roots_result'],
+  ['node.subscription_login', 'node.subscription_login_result'],
+])
 export interface GatewayHandlers {
   authenticate(token: string, incarnation: string, connectionId: string): Promise<NodeSource>
   validate(source: NodeSource): Promise<void>
@@ -49,6 +56,7 @@ interface BrowserConnection {
 interface PendingRPC {
   source: NodeSource
   operationId: string
+  responseType: string
   sessionId?: string
   resolve(body: Body): void
   reject(error: Error): void
@@ -306,18 +314,29 @@ export class Gateway {
               'thread.report',
               'session.result',
               'files.browse_result',
+              'node.project_exec_result',
+              'node.browse_roots_result',
+              'node.subscription_login_result',
+              'project_runtime.request',
             ].includes(body.type)
           )
             throw new AppError(400, 'unsupported_message')
           // Source is always obtained from the authenticated connection.
           const authenticatedEnvelope = { ...envelope, source: { kind: 'node' as const, ...current.source } }
-          if (body.type === 'session.result' || body.type === 'files.browse_result') {
+          if (
+            body.type === 'session.result' ||
+            body.type === 'files.browse_result' ||
+            body.type === 'node.project_exec_result' ||
+            body.type === 'node.browse_roots_result' ||
+            body.type === 'node.subscription_login_result'
+          ) {
             await this.handlers.validate(current.source)
             const pending = this.rpc.get(envelope.correlation_id ?? '')
             if (
               !pending ||
               pending.source.conn_id !== current.source.conn_id ||
               pending.operationId !== body.operation_id ||
+              pending.responseType !== body.type ||
               (body.type === 'session.result' && pending.sessionId !== body.session_id)
             )
               return
@@ -347,6 +366,10 @@ export class Gateway {
     if (!connection || connection.source.employee_id !== employeeId)
       return Promise.reject(new AppError(503, 'node_offline'))
     if (!connection.synced) return Promise.reject(new AppError(503, 'node_syncing'))
+    const responseType = typeof body.type === 'string' ? rpcResponses.get(body.type) : undefined
+    if (!responseType || typeof body.operation_id !== 'string')
+      return Promise.reject(new AppError(400, 'invalid_request'))
+    const operationId = body.operation_id
     const active = [...this.rpc.values()].filter((pending) => pending.source.node_id === nodeId).length
     if (active >= 2) return Promise.reject(new AppError(503, 'node_busy'))
     const messageId = randomUUID()
@@ -357,7 +380,8 @@ export class Gateway {
       }, timeoutMs)
       this.rpc.set(messageId, {
         source: connection.source,
-        operationId: String(body.operation_id),
+        operationId,
+        responseType,
         ...(typeof body.session_id === 'string' ? { sessionId: body.session_id } : {}),
         resolve,
         reject,

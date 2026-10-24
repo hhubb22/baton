@@ -91,6 +91,7 @@ export async function spawnOwnedProcess(
     }))
   }
   try {
+    options.onSpawn?.(child)
     await new Promise<void>((resolve, reject) => {
       child.once('spawn', resolve)
       child.once('error', reject)

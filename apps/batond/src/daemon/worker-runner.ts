@@ -1,7 +1,8 @@
 import { chmod, lstat, unlink } from 'node:fs/promises'
 import { Deferred, Effect } from 'effect'
 import type * as Scope from 'effect/Scope'
-import type { AgentFactory } from '../worker/agent.ts'
+import { AgentError, type AgentFactory } from '../worker/agent.ts'
+import { parseThreadAttachments } from '../devices/attachments.ts'
 import { makeWorker, type Worker } from '../worker/index.ts'
 import { acquireProcessLockScoped } from '../platform/lock.ts'
 import { openPrivateFile, readPrivateFile, writePrivateFileAtomic } from '../platform/private.ts'
@@ -56,17 +57,46 @@ export const runWorker = (options: {
       remove: (record) =>
         Effect.runPromise(Deferred.await(workerReady).pipe(Effect.flatMap((worker) => worker.records.remove(record)))),
     }
-    const agentFactory =
+    const registry = (yield* Effect.promise(() => import('../agents/registry.ts'))).agentRegistry
+    const cursorFactory = registry.cursor.makeFactory({
+      command: { file: invocation.executable, args: invocation.args },
+      records,
+      ...(watchdog ? { watchdog } : {}),
+      ...(process.env.CURSOR_API_KEY ? { apiKey: process.env.CURSOR_API_KEY } : {}),
+    })
+    const shellFactory = registry.shell.makeFactory({
+      dataDirectory: options.dataDirectory,
+      records,
+      ...(watchdog ? { watchdog } : {}),
+    })
+    const agentFactory: AgentFactory =
       options.agentFactory ??
-      (yield* Effect.promise(() => import('../agents/registry.ts'))).agentRegistry.cursor.makeFactory({
-        command: { file: invocation.executable, args: invocation.args },
-        records,
-        ...(watchdog ? { watchdog } : {}),
-        ...(process.env.CURSOR_API_KEY ? { apiKey: process.env.CURSOR_API_KEY } : {}),
+      ((config) => {
+        if (config.agent_type === 'cursor') return cursorFactory(config)
+        if (config.agent_type === 'shell') return shellFactory(config)
+        throw new Error(`Unsupported Thread agent_type: ${config.agent_type}`)
       })
+    let parsingAttachments = false
     const worker = yield* makeWorker({
       dbPath: paths.ledger,
       agentFactory,
+      attachments: (config, text) =>
+        Effect.suspend(() => {
+          if (parsingAttachments) return Effect.succeed([])
+          parsingAttachments = true
+          const pending = parseThreadAttachments(
+            options.dataDirectory,
+            config.node_id,
+            config.working_directory,
+            text,
+          ).finally(() => {
+            parsingAttachments = false
+          })
+          return Effect.tryPromise({
+            try: () => pending,
+            catch: (cause) => new AgentError('无法解析附件引用', cause),
+          })
+        }),
       recoverProcesses: (previous) =>
         Effect.promise(async () => {
           let processTreeStopped = true

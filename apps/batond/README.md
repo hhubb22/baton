@@ -1,8 +1,8 @@
 # TypeScript 节点与 Thread
 
-`@baton/batond` 通过出站 WSS 连接 [TypeScript 开发中心](../server/README.md)，提供 Cursor 远程 Thread。节点守护进程保存设备身份、命令与报告账本，网页可发送排队消息、撤回、停止、恢复并读取实时输出。每个 Thread 使用独立 Worker，每个 Cursor Thread 独占一个 cursor-host；Worker 管理 SQLite、Turn、回复和报告，cursor-host 通过复用的 SDK/runtime 执行本机 Cursor。本地调用方也可直接通过认证 IPC 使用 Worker。
+`@baton/batond` 通过出站 WSS 连接 [TypeScript 开发中心](../server/README.md)，提供 Cursor 远程 Thread、Project Runtime、设备目录和订阅管理。节点守护进程保存设备身份、命令与报告账本，网页可发送排队消息、撤回、停止、恢复并读取实时输出。每个 Thread 使用独立 Worker，每个 Cursor Thread 独占一个 cursor-host；Worker 管理 SQLite、Turn、回复和报告，cursor-host 通过复用的 SDK/runtime 执行本机 Cursor。本地调用方也可直接通过认证 IPC 使用 Worker。
 
-Go 的 `cmd/baton-server`、`cmd/batond` 和根目录构建脚本仍是发布入口，TypeScript 发布切换在迁移 T5 进行。TS 当前开放 Cursor 远程 Thread，Project、设备管理、其他 Agent 与统一历史的范围和实际拒绝响应见 [中心能力表](../server/README.md#当前能力范围)。
+Go 的 `cmd/baton-server`、`cmd/batond` 和根目录构建脚本仍是发布入口，TypeScript 发布切换在迁移 T5 进行。TS 提供 Cursor 远程 Thread、Project 协同和受限 shell；其他 Agent 与统一历史的范围和实际拒绝响应见 [中心能力表](../server/README.md#当前能力范围)。
 
 ## 开发入口
 
@@ -39,9 +39,29 @@ pnpm --filter @baton/batond dev run --relay wss://localhost:8443/v1/node --ca-fi
 
 `--ca-file` 同时供 HTTPS 注册和 WSS 连接校验证书，使用系统已信任证书时可省略；该路径不会保存在身份中。中心地址必须为 HTTPS，Relay 必须为 WSS，证书需匹配访问主机名。
 
-所有节点命令支持 `--data-dir`，默认 `~/.baton-ts`。仅在授权配置不存在时登记用户主目录，已有配置包括空列表都会保留；`--workspace` 在连接前按真实绝对路径幂等登记工作目录。当前目录选择器只读取授权根及子目录，网页增删根尚未开放。节点锁、身份与报告恢复细节见 [远程节点模块](src/daemon/README.md)，实时输出的游标和缓冲规则见 [Worker 文档](src/worker/README.md#real-time-output)。
+所有节点命令支持 `--data-dir`，默认 `~/.baton-ts`。仅在授权配置不存在时登记用户主目录，已有配置包括空列表都会保留；`--workspace` 在连接前按真实绝对路径幂等登记工作目录。网页设备详情与本地 `files` 命令可以增删授权根；目录选择与附件预览使用同一真实路径边界。节点锁、身份与报告恢复细节见 [远程节点模块](src/daemon/README.md)，实时输出的游标和缓冲规则见 [Worker 文档](src/worker/README.md#real-time-output)。
 
 节点连接和能力探测分别进行。Cursor 探测完成前上报 `unverified`，创建 Thread 需等待 `available`；设备进程需显式配置 `CURSOR_API_KEY`。节点退出不结束独立 Worker，重启后从账本重新发现存活 Worker；未确认命令继续使用原 ID，已接收输入不会因为重连再次发送。
+
+## 设备目录与模型订阅
+
+```sh
+pnpm --filter @baton/batond dev files add --id dev --path /绝对路径/工作目录
+pnpm --filter @baton/batond dev files list
+pnpm --filter @baton/batond dev files remove --id dev
+pnpm --filter @baton/batond dev subscriptions
+pnpm --filter @baton/batond dev login openai-codex
+pnpm --filter @baton/batond dev project-exec --enabled=true --shell /bin/sh
+pnpm --filter @baton/batond dev project-exec --enabled=false
+```
+
+目录和执行开关使用与 daemon 相同的 `--data-dir`，配置通过私有文件锁与原子替换保存。重复添加同一真实目录返回已有记录；移除全部目录后保留空列表。在线设备也可在网页保存这些设置，中心等待本机确认后才显示成功。
+
+命令执行默认关闭。开启后，Project Agent 以设备用户身份执行任意命令；Baton 不提供沙箱，目录授权限制命令启动位置。每条命令和输出保存在 Thread 中。受限 shell 只允许 `nodes.exec` 创建一个 Turn，默认执行时限 7200 秒，等待结果的时间与命令时限分别计算。完成记录、未知结果及输出编码见 [shell 文档](src/agents/shell/README.md)。
+
+订阅凭据使用 `BATON_PROJECT_RUNTIME_DATA_DIR`，默认 `~/.baton/project-runtime`，登录与 daemon 使用相同的系统用户和目录。`subscriptions` 只读取本地凭据和静态模型目录；终端登录支持 `openai-codex`、`xai`。网页设备码登录在取码后继续后台等待，最多 15 分钟，同服务的新请求替换旧登录，退出后刷新能力报告。凭据留在设备。
+
+Project Runtime 按需启动，默认最多同时占用四个运行名额，WSS 重连保留现有进程。节点退出或租约失效时结束 Runtime，Thread Worker 继续独立运行。Runtime 宿主使用 `project-runtime.db` 保存启动意图、进程身份和清理证据；未确认清理持续补送，旧运行不重新启动。源码开发、租约和 stdio 说明见 [Runtime 宿主文档](src/project/README.md)。
 
 ## 本地 Thread 命令
 
@@ -60,7 +80,7 @@ pnpm --filter @baton/batond dev resume --thread-id <UUID>
 
 ## 持久化与恢复
 
-默认数据目录为 `~/.baton-ts`，所有命令支持 `--data-dir`。POSIX 目录权限为 0700、文件为 0600；已有权限不符合要求时拒绝使用。UDS 路径超过系统限制时，使用更短的数据目录。Windows 使用令牌认证的命名管道和私有目录 ACL，平台限制见 [platform 文档](src/platform/README.md)。
+默认数据目录为 `~/.baton-ts`，设备和 Thread 命令支持 `--data-dir`。POSIX 目录权限为 0700、文件为 0600；已有权限不符合要求时拒绝使用。UDS 路径超过系统限制时，使用更短的数据目录。Windows 使用令牌认证的命名管道和私有目录 ACL，平台限制见 [platform 文档](src/platform/README.md)。
 
 每个 Thread 的目录包含 Worker 独占锁、IPC 令牌、`thread.db`、原生会话映射和 SDK store。账本使用 WAL 与 `synchronous=FULL`。命令回执与排队状态原子提交；原生发送前把一次采集的历史基准和 intent 原子提交。提交结果无法核查时，Worker 停止执行并关闭本次运行资源。
 

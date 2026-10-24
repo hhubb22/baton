@@ -1,6 +1,6 @@
 # Baton — Agent Guide
 
-Baton 是跨设备 AI Agent 协同系统，由中心服务（`baton-server`）、节点守护进程（`batond`）、本地会话执行器（Session Worker）、Project Agent Runtime（`runtimes/project-agent`）和 Web UI（`web/`）组成。Go 的 `cmd/baton-server`、`cmd/batond`、根构建脚本与 Docker 镜像仍是发布入口，发布切换在 TypeScript 迁移 T5 进行；`apps/server` 与 `apps/batond` 提供独立的 Cursor 远程 Thread 开发入口。
+Baton 是跨设备 AI Agent 协同系统，由中心服务（`baton-server`）、节点守护进程（`batond`）、本地会话执行器（Session Worker）、Project Agent Runtime（`runtimes/project-agent`）和 Web UI（`web/`）组成。Go 的 `cmd/baton-server`、`cmd/batond`、根构建脚本与 Docker 镜像仍是发布入口，发布切换在 TypeScript 迁移 T5 进行；`apps/server` 与 `apps/batond` 提供独立的 Cursor 远程 Thread、Project 与设备管理开发入口。
 
 ## 核心架构与目录
 
@@ -10,8 +10,8 @@ Baton 是跨设备 AI Agent 协同系统，由中心服务（`baton-server`）�
 | `cmd/batond`                                  | 节点守护进程：节点注册、出站 TLS WebSocket 连接、本地 SQLite 账本（`node.db`）、Session Worker 与 Project Runtime 管理                                                 |
 | `internal/session`                            | Session Worker 生命周期、本地认证 IPC、Thread 消息队列与 Turn 账本                                                                                                     |
 | `internal/agent/{pi,codex,kiro,shell,replay}` | 统一 `agent.Adapter` 接口实现（Pi RPC、Codex app-server、Kiro ACP V3）与确定性录制回放                                                                                 |
-| `apps/server`                                 | TypeScript 开发中心：本地员工账号、设备身份与能力、Cursor 远程 Thread、持久命令与回复、Gateway 和实时输出；构建时自动生成网页静态目录，见 `apps/server/README.md`      |
-| `apps/batond`                                 | TypeScript 节点与本地 Thread：HTTPS 注册、出站 WSS、节点命令和报告账本、认证 IPC、持久 Worker、Cursor SDK host、有界实时输出与平台进程回收，见 `apps/batond/README.md` |
+| `apps/server` | TypeScript 开发中心：账号、设备、Cursor 远程 Thread、Project 租约调度、主对话、事项和记忆、持久命令与回复、Gateway 和实时输出；见 `apps/server/README.md` |
+| `apps/batond` | TypeScript 节点与本地 Thread：注册和 WSS、认证 IPC、持久 Worker、Cursor SDK host、受限 shell、Project Runtime 宿主、目录和订阅管理；见 `apps/batond/README.md` |
 | `packages/telemetry`                          | Effect 原生 OTLP/HTTP 追踪、标准上下文传播与导出字段过滤，默认不连接采集端                                                                                             |
 | `packages/{protocol,sqlite}`                  | TypeScript 协议 Schema 与 WAL/FULL SQLite 客户端、提交结果核查                                                                                                         |
 | `packages/{providers,provider-testing}`       | 从固定 t3code 提交复用的 Cursor SDK/runtime、上游测试和确定性回放                                                                                                      |
@@ -70,7 +70,7 @@ Baton 是跨设备 AI Agent 协同系统，由中心服务（`baton-server`）�
 
 ## 部署与设备接入
 
-以下二进制与容器命令使用 Go 发布入口。TS 开发中心使用 `pnpm --filter @baton/server dev` 运行账号管理、迁移和 `serve`，节点使用 `pnpm --filter @baton/batond dev <命令>` 运行 `up`、`register` 或 `run`；本机 HTTPS、CA 与 `--workspace` 配置见 [开发接入说明](apps/server/README.md#设备接入与远程-thread)。TS 的 Project、目录增删、订阅登录、其他 Agent 与统一历史尚未开放，实际拒绝响应见 [能力表](apps/server/README.md#当前能力范围)。
+以下二进制与容器命令使用 Go 发布入口。TS 开发中心使用 `pnpm --filter @baton/server dev` 运行账号管理、迁移和 `serve`，节点使用 `pnpm --filter @baton/batond dev <命令>` 运行 `up`、`register` 或 `run`；本机 HTTPS、CA 与 `--workspace` 配置见 [开发接入说明](apps/server/README.md#设备接入与远程-thread)。TS 已提供 Project、事项、记忆、目录增删、设备执行授权、附件文本预览及订阅登录；其他 Agent 与统一历史的范围和实际响应见 [能力表](apps/server/README.md#当前能力范围)。Project Runtime 从源码与已安装依赖启动，完整安装包仍归 T5。
 
 - `baton-server serve` 自动执行数据库迁移，再检查迁移状态；签名密钥默认使用工作目录下的 `node-signing.key`，不存在时生成 `0600` 文件，也可用 `BATON_NODE_SIGNING_KEY` 指定。已有密钥的权限、类型和内容仍须通过校验。
 - `Dockerfile` 构建内嵌 Web UI 的服务端镜像，使用非 root 用户运行。`compose.yaml` 编排 PostgreSQL 16 与 `baton-server`，数据库及 `/var/lib/baton` 分别持久化；需配置 `BATON_POSTGRES_PASSWORD` 和 `BATON_ALLOWED_ORIGINS`，默认通过本机端口交给 HTTPS 反向代理。

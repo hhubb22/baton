@@ -10,6 +10,7 @@ import * as P from '@baton/protocol'
 import * as Auth from './auth.ts'
 import * as Nodes from './nodes.ts'
 import * as Threads from './threads.ts'
+import * as Projects from './projects.ts'
 import { AppError, type NodeSource } from './errors.ts'
 import { Gateway } from './gateway.ts'
 import { createRevocationCompensator } from './control-maintenance.ts'
@@ -26,6 +27,7 @@ export interface ServerOptions {
   readonly tls?: TLSOptions
   readonly webDirectory?: string
   readonly dispatchMs?: number
+  readonly projectDispatchMs?: number
   readonly heartbeatMs?: number
   readonly offlineMs?: number
 }
@@ -127,6 +129,23 @@ export const startServer = (
                     })
                     return { type: 'node.runtime_report_result', ok: true, report_version: version }
                   }
+                  case 'project_runtime.request': {
+                    try {
+                      const data = await run(Projects.runtimeRequest(source, body))
+                      gateway.notify(source.employee_id, { type: 'thread.changed' })
+                      return Schema.decodeUnknownSync(P.ProjectRuntimeResult)({
+                        type: 'project_runtime.result',
+                        ok: true,
+                        ...(data === undefined ? {} : { data }),
+                      })
+                    } catch (error) {
+                      return {
+                        type: 'project_runtime.result',
+                        ok: false,
+                        code: error instanceof AppError ? error.code : 'unavailable',
+                      }
+                    }
+                  }
                   case 'thread.command_result':
                     if (!envelope.correlation_id) throw new AppError(400, 'missing_correlation')
                     await run(Threads.processReceipt(source, envelope.correlation_id, body))
@@ -196,6 +215,54 @@ export const startServer = (
         dispatching = false
       }
     }
+    let placing = false
+    let placementCursor = ''
+    const placeProjects = async () => {
+      if (placing || controller.signal.aborted) return
+      placing = true
+      try {
+        const candidates = await run(Projects.listProjectRunCandidates(placementCursor, 32))
+        for (const agentId of candidates) {
+          if (controller.signal.aborted) break
+          try {
+            await run(Projects.scheduleProjectRun(agentId))
+          } catch {
+            // Each candidate has its own database budget; a busy Agent does not hold up later candidates.
+          }
+          placementCursor = agentId
+        }
+        if (candidates.length < 32) placementCursor = ''
+      } catch {
+        // Committed leases and persistent due times are revisited after recovery.
+      } finally {
+        placing = false
+      }
+    }
+    const projectKinds = ['project_run_start', 'project_run_stop', 'project_run_wake'] as const
+    const sendingProjects = new Set<(typeof projectKinds)[number]>()
+    const dispatchProjects = async (kind: (typeof projectKinds)[number]) => {
+      if (sendingProjects.has(kind) || controller.signal.aborted) return
+      sendingProjects.add(kind)
+      try {
+        const deliveries = await run(Projects.claimProjectCommands(kind))
+        for (const delivery of deliveries)
+          gateway.send(delivery.node_id, delivery.employee_id, delivery.command.run_id, delivery.command)
+      } catch {
+        // Each command class retains its own retry progress and sending quota.
+      } finally {
+        sendingProjects.delete(kind)
+      }
+    }
+    const projectTimers = [
+      setInterval(() => {
+        void placeProjects()
+      }, options.projectDispatchMs ?? 1000),
+      ...projectKinds.map((kind) =>
+        setInterval(() => {
+          void dispatchProjects(kind)
+        }, options.projectDispatchMs ?? 1000),
+      ),
+    ]
     const timer = setInterval(() => {
       void dispatch()
     }, options.dispatchMs ?? 200)
@@ -205,14 +272,18 @@ export const startServer = (
     }, 200)
     timer.unref()
     maintenanceTimer.unref()
+    for (const projectTimer of projectTimers) projectTimer.unref()
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
         clearInterval(timer)
         clearInterval(maintenanceTimer)
+        for (const projectTimer of projectTimers) clearInterval(projectTimer)
       }),
     )
     void compensate().catch(() => undefined)
     void dispatch()
+    void placeProjects()
+    for (const kind of projectKinds) void dispatchProjects(kind)
     const address = http.address() as AddressInfo
     return { host: address.address, port: address.port, gateway }
   })

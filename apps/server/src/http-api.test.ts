@@ -61,29 +61,46 @@ beforeAll(async () => {
   await database.run(Auth.changePassword(employee.id, password, readyPassword))
   const enrollment = await database.run(Nodes.issueEnrollment(employee.id))
   const signer = Nodes.CredentialSigner.generate()
-  nodeId = (
-    await database.run(
-      Nodes.registerNode(
-        {
-          enrollment_token: String(enrollment.enrollment_token),
-          display_name: 'Local node',
-          system: 'linux',
-          capabilities: [],
-        },
-        signer,
-      ),
-    )
-  ).node_id
+  const identity = await database.run(
+    Nodes.registerNode(
+      {
+        enrollment_token: String(enrollment.enrollment_token),
+        display_name: 'Local node',
+        system: 'linux',
+        capabilities: [],
+      },
+      signer,
+    ),
+  )
+  nodeId = identity.node_id
+  const source = {
+    employee_id: employee.id,
+    node_id: nodeId,
+    credential_id: identity.credential.id,
+    incarnation: randomUUID(),
+    conn_id: randomUUID(),
+  }
+  await database.run(Nodes.claimConnection(source))
+  await database.run(Nodes.syncNode(source, { display_name: 'Local node', system: 'linux', capabilities: [] }))
   const gateway = {
     disconnectBrowsers: () => {},
     notify: () => {},
-    disconnect: async () => {},
+    disconnect: async () => {
+      await database.run(Nodes.disconnectNode(source))
+    },
     request: async (_nodeId: string, _employeeId: string, input: Record<string, unknown>) => {
       if (input.path === 'hold') {
         heldStarted?.()
         await new Promise<never>(() => {})
       }
-      return { type: 'files.browse_result', operation_id: randomUUID(), ok: true, entries: [], kind: 'directory' }
+      return {
+        type: 'files.browse_result',
+        operation_id: input.operation_id,
+        ok: true,
+        ...(typeof input.root_id === 'string'
+          ? { kind: 'directory', root_id: input.root_id, path: input.path ?? '', entries: [] }
+          : { kind: 'roots', roots: [] }),
+      }
     },
     diagnostics: () => ({
       nodes: 0,
@@ -141,7 +158,7 @@ it('preserves login, password, origin and CSRF gates before decoding endpoint re
   await login('http-replacement-password-456')
 })
 
-it('validates payloads, queries, paths, response shapes and explicit unavailable features', async () => {
+it('validates payloads, queries, paths, response shapes and available feature routes', async () => {
   await login(readyPassword, 'httpready')
   const extra = await request('/api/v1/node-enrollments', 'POST', { extra: true })
   expect(extra.status).toBe(400)
@@ -168,11 +185,11 @@ it('validates payloads, queries, paths, response shapes and explicit unavailable
   expect((await request('/api/v1/me/default-device', 'PUT', { node_id: nodeId })).status).toBe(200)
   expect((await request('/api/v1/diagnostics')).status).toBe(200)
   expect((await request('/api/v1/threads')).status).toBe(200)
-  for (const path of ['/api/v1/projects', '/api/v1/inbox', `/api/v1/nodes/${nodeId}/roots`]) {
+  for (const path of ['/api/v1/projects', '/api/v1/inbox']) {
     const response = await request(path)
-    expect(response.status).toBe(501)
-    expect(await response.json()).toMatchObject({ code: 'feature_unavailable' })
+    expect(response.status).toBe(200)
   }
+  expect((await request(`/api/v1/nodes/${nodeId}/roots`)).status).toBe(404)
   for (const path of ['/api/v1/missing', '/api/v1/threads/', '/api/v1//threads', '/api/v1/Threads'])
     expect((await request(path)).status, path).toBe(404)
   expect((await request('/api/v1/me', 'HEAD')).status).toBe(404)
@@ -185,8 +202,6 @@ it('validates payloads, queries, paths, response shapes and explicit unavailable
     paths: { '/api/v1/threads': { post: { responses: { '201': expect.anything() } } } },
   })
   expect((await request('/api/v1/openapi.json', 'GET', undefined, { cookie: '' })).status).toBe(401)
-  const revoked = await request(`/api/v1/nodes/${nodeId}/revoke`, 'POST', {})
-  expect(revoked.status).toBe(200)
 })
 
 it('propagates request cancellation and clears the session on logout', async () => {
@@ -200,7 +215,9 @@ it('propagates request cancellation and clears the session on logout', async () 
       Effect.provideService(
         ServerRequest.HttpServerRequest,
         ServerRequest.fromWeb(
-          new Request(`http://localhost/api/v1/nodes/${nodeId}/files?path=hold`, { headers: { cookie: token } }),
+          new Request(`http://localhost/api/v1/nodes/${nodeId}/files?root_id=home&path=hold`, {
+            headers: { cookie: token },
+          }),
         ),
       ),
       Effect.provideService(Scope.Scope, scope),
@@ -211,6 +228,7 @@ it('propagates request cancellation and clears the session on logout', async () 
   controller.abort()
   const exit = await result
   expect(Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)).toBe(true)
+  expect((await request(`/api/v1/nodes/${nodeId}/revoke`, 'POST', {})).status).toBe(200)
   const response = await request('/api/v1/logout', 'POST', {})
   expect(response.status).toBe(204)
   expect(response.headers.get('set-cookie')).toContain('Max-Age=0')
@@ -225,4 +243,65 @@ it('serves SPA and assets with HEAD while enforcing real directory boundaries', 
   expect((await request('/assets/app.js')).headers.get('cache-control')).toContain('immutable')
   for (const path of ['/escape.txt', '/assets/missing.js', '/%2e%2e%2fsecret.txt'])
     expect((await request(path)).status).toBe(404)
+})
+
+it('preserves Project and memory writes, conflict bodies and employee isolation through the HTTP contracts', async () => {
+  await login(readyPassword, 'httpready')
+  const input = {
+    client_project_id: randomUUID(),
+    title: 'Local coordination',
+    goal: 'Restore the Project workflow',
+    provider: 'openai-codex',
+    model: 'fake-model',
+  }
+  const created = await request('/api/v1/projects', 'POST', input)
+  expect(created.status).toBe(201)
+  const project = Schema.decodeUnknownSync(P.Project)(await created.json())
+  const path = `/api/v1/projects/${project.id}`
+  for (const field of ['provider', 'model']) {
+    for (const invalid of ['invalid\nlabel', 'x'.repeat(1025)]) {
+      expect((await request('/api/v1/projects', 'POST', { ...input, [field]: invalid })).status).toBe(400)
+      expect((await request(path, 'PATCH', { [field]: invalid })).status).toBe(400)
+    }
+  }
+  const replay = await request('/api/v1/projects', 'POST', input)
+  expect(replay.status).toBe(201)
+  expect(await replay.json()).toMatchObject({ id: project.id })
+  expect((await request('/api/v1/projects', 'POST', { ...input, goal: 'Other goal' })).status).toBe(409)
+  expect((await request(path, 'PATCH', { title: 'Updated coordination' })).status).toBe(200)
+  const message = { client_message_id: randomUUID(), content: 'Inspect and coordinate' }
+  const accepted = await request(`${path}/messages`, 'POST', message)
+  expect(accepted.status).toBe(202)
+  const original = Schema.decodeUnknownSync(P.ProjectMessage)(await accepted.json())
+  expect(await (await request(`${path}/messages`, 'POST', message)).json()).toMatchObject({ id: original.id })
+  expect((await request(`${path}/messages`, 'POST', { ...message, content: 'Other message' })).status).toBe(409)
+  expect(await (await request(`${path}/messages?client_message_id=${message.client_message_id}`)).json()).toMatchObject(
+    {
+      messages: [{ id: original.id, content: message.content }],
+    },
+  )
+  const memoryPath = `${path}/memory/${randomUUID()}`
+  const memory = { title: 'Plan', content: 'Inspect the first device', expected_revision: 0 }
+  expect((await request(memoryPath, 'PUT', memory)).status).toBe(200)
+  const conflict = await request(memoryPath, 'PUT', { ...memory, content: 'Stale replacement' })
+  expect(conflict.status).toBe(409)
+  expect(await conflict.json()).toMatchObject({
+    current_revision: 1,
+    current: { title: memory.title, content: memory.content, revision: 1 },
+  })
+  expect(await (await request(`${memoryPath}/revisions`)).json()).toMatchObject({
+    revisions: [{ revision: 1, title: memory.title, content: memory.content, author: 'user' }],
+  })
+  for (const operation of ['stop', 'retry']) {
+    expect((await request(`${path}/${operation}?extra=1`, 'POST', {})).status).toBe(400)
+    expect((await request(`${path}/${operation}`, 'POST', { extra: true })).status).toBe(400)
+    expect((await request(`${path}/${operation}`, 'POST', {})).status).toBe(200)
+  }
+  expect((await request(`${path}/status`)).status).toBe(200)
+  expect((await request(`${path}/events`)).status).toBe(200)
+  await login('http-replacement-password-456')
+  for (const resource of [path, `${path}/messages`, memoryPath, `${memoryPath}/revisions`])
+    expect((await request(resource)).status).toBe(404)
+  expect((await request(path, 'PATCH', { title: 'Other employee' })).status).toBe(404)
+  expect((await request(memoryPath, 'PUT', memory)).status).toBe(404)
 })

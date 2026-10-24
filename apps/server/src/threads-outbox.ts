@@ -5,6 +5,7 @@ import { ThreadCommandResult as ResultSchema } from '@baton/protocol'
 import { captureTrace, withTraceSpan, type TraceContext } from '@baton/telemetry'
 import type { NodeSource } from './errors.ts'
 import { lockNodeSource, revalidateNodeSource } from './nodes.ts'
+import { notifyProjectThread } from './thread-project-inputs.ts'
 import { audit, canonical, decode, failure, readThread, transaction, type DB } from './threads-core.ts'
 
 export interface ClaimedCommand {
@@ -64,6 +65,13 @@ export const claimCommands = (): DB<ClaimedCommand[]> =>
                 model: o.payload.model || '',
                 working_directory: t.working_directory,
                 execution_timeout_seconds: t.execution_timeout_seconds,
+                ...(t.project_id
+                  ? {
+                      project_id: t.project_id,
+                      origin_conversation_id: t.origin_conversation_id!,
+                      origin_tool_call_id: t.origin_tool_call_id!,
+                    }
+                  : {}),
               }
             : {}),
         }
@@ -116,12 +124,13 @@ export const processReceipt = (
       const sql = yield* SqlClient.SqlClient
       const result = yield* decode(ResultSchema, input)
       yield* lockNodeSource(source)
+      const t = yield* readThread(source.employee_id, result.thread_id, true)
+      if (t.node_id !== source.node_id) return yield* Effect.fail(failure('not_found', 404))
       const rows = yield* sql<{
         value: Outbox
       }>`SELECT to_jsonb(o) AS value FROM thread_outbox o WHERE message_id=${correlationCommandID} AND employee_id=${source.employee_id} AND node_id=${source.node_id} AND thread_id=${result.thread_id} FOR UPDATE`
       if (!rows.length) return yield* Effect.fail(failure('not_found', 404))
       const o = rows[0]!.value
-      const t = yield* readThread(source.employee_id, result.thread_id, true)
       yield* revalidateNodeSource(source)
       if (o.acked_at) {
         if (canonical(o.result) !== canonical(result)) return yield* Effect.fail(failure())
@@ -146,6 +155,7 @@ export const processReceipt = (
       } else if (result.ok && o.action === 'message' && !o.completed_at) {
         yield* sql`UPDATE thread_messages SET status='queued' WHERE employee_id=${source.employee_id} AND thread_id=${t.id} AND client_message_id=${o.payload.client_message_id!} AND status='accepted'`
       }
+      yield* notifyProjectThread(t)
       yield* audit(t, 'command.received', { command_id: correlationCommandID, ...result }, 'device', source.node_id)
       yield* revalidateNodeSource(source)
     }),

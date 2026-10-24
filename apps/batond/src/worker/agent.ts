@@ -46,7 +46,15 @@ export interface AgentEventIdentity {
 }
 
 export type AgentEvent =
-  | (AgentEventIdentity & { readonly type: 'reply'; readonly id: string; readonly text: string })
+  | (AgentEventIdentity & {
+      readonly type: 'reply'
+      readonly id: string
+      readonly text: string
+      readonly attachments?: readonly JsonValue[]
+      readonly metadata?: NonNullable<import('@baton/protocol').ThreadReport['metadata']>
+      readonly original_bytes?: number
+      readonly truncated?: boolean
+    })
   | (AgentEventIdentity & { readonly type: 'end'; readonly outcome: 'completed' | 'cancelled' })
   | { readonly type: 'uncertain'; readonly reason: string }
   | { readonly type: 'exited'; readonly reason: string; readonly processTreeStopped: boolean }

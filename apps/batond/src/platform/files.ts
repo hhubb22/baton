@@ -1,5 +1,5 @@
 import { constants } from 'node:fs'
-import { lstat, mkdir, mkdtemp, open, rename, rm, unlink, type FileHandle } from 'node:fs/promises'
+import { chmod, lstat, mkdir, mkdtemp, open, rename, rm, unlink, type FileHandle } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -59,6 +59,33 @@ export async function validatePrivateDirectory(path: string): Promise<void> {
   if (process.platform === 'win32') await checkDirectoryAcl(path)
 }
 
+async function setDirectoryAcl(path: string, reset: boolean): Promise<void> {
+  const sid = await currentSid()
+  if (reset) await systemCommand(windowsTool('icacls.exe'), [resolve(path), '/reset', '/Q'])
+  await systemCommand(windowsTool('icacls.exe'), [
+    resolve(path),
+    '/inheritance:r',
+    '/grant:r',
+    `*${sid}:(OI)(CI)F`,
+    '/Q',
+  ])
+}
+
+/** 显式保护操作收紧当前用户已有目录；普通验证不会修改权限。 */
+export async function protectPrivateDirectory(path: string): Promise<void> {
+  const before = await lstat(path)
+  if (!before.isDirectory() || before.isSymbolicLink()) throw new Error('Invalid private directory type')
+  if (process.platform === 'win32') await setDirectoryAcl(path, true)
+  else {
+    if (before.uid !== process.getuid?.()) throw new Error('Private directory has a different owner')
+    await chmod(path, 0o700)
+  }
+  const after = await lstat(path)
+  if (before.dev !== after.dev || before.ino !== after.ino)
+    throw new Error('Private directory changed during protection')
+  await validatePrivateDirectory(path)
+}
+
 /** Creates one directory; its parent must already exist. Existing unsafe paths are rejected. */
 export async function ensurePrivateDirectory(path: string): Promise<void> {
   let created = false
@@ -68,16 +95,7 @@ export async function ensurePrivateDirectory(path: string): Promise<void> {
   } catch (error) {
     if (!hasCode(error, 'EEXIST')) throw error
   }
-  if (created && process.platform === 'win32') {
-    const sid = await currentSid()
-    await systemCommand(windowsTool('icacls.exe'), [
-      resolve(path),
-      '/inheritance:r',
-      '/grant:r',
-      `*${sid}:(OI)(CI)F`,
-      '/Q',
-    ])
-  }
+  if (created && process.platform === 'win32') await setDirectoryAcl(path, false)
   await validatePrivateDirectory(path)
 }
 

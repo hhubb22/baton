@@ -12,6 +12,7 @@ import { traceFromHeaders, withTraceSpan } from '@baton/telemetry'
 import { UUID } from '@baton/protocol'
 import * as Nodes from './nodes.ts'
 import * as Threads from './threads.ts'
+import * as Projects from './projects.ts'
 import { AppError } from './errors.ts'
 import type { Gateway } from './gateway.ts'
 import type { CredentialSigner } from './nodes.ts'
@@ -84,15 +85,19 @@ const staticResponse = (options: HTTPOptions) =>
     })
   })
 
-// Unimplemented routes retain authentication and ownership checks before refusing the feature.
-const unavailableRoute = Effect.gen(function* () {
+// Unknown API routes retain authentication and resource ownership checks.
+const missingRoute = Effect.gen(function* () {
   const request = yield* Request.HttpServerRequest
   const path = new URL(request.url, 'http://localhost').pathname
   const session = yield* authorizeBrowser(false)
   const segments = path.split('/')
   if (segments[1] === 'api' && segments[2] === 'v1') {
-    if (segments[3] === 'projects' || segments[3] === 'inbox')
-      return yield* Effect.fail(new AppError(501, 'feature_unavailable'))
+    if (segments[3] === 'projects' && segments[4]) {
+      const projectId = yield* Schema.decodeUnknownEffect(UUID)(segments[4]).pipe(
+        Effect.mapError(() => new AppError(400, 'invalid_request', '请求格式无效')),
+      )
+      yield* Projects.getProject(session.employee.id, projectId)
+    }
     if (
       segments[3] === 'threads' &&
       segments[4] &&
@@ -118,7 +123,6 @@ const unavailableRoute = Effect.gen(function* () {
         Effect.mapError(() => new AppError(400, 'invalid_request', '请求格式无效')),
       )
       yield* Nodes.getNode(session.employee.id, nodeId)
-      return yield* Effect.fail(new AppError(501, 'feature_unavailable'))
     }
   }
   return yield* notFound()
@@ -178,10 +182,10 @@ export const httpApplication = (options: HTTPOptions) =>
           yield* authorizeBrowser(false)
           return json(httpOpenApi())
         }
-        if (request.method === 'HEAD' || path.endsWith('/') || path.includes('//')) return yield* unavailableRoute
+        if (request.method === 'HEAD' || path.endsWith('/') || path.includes('//')) return yield* missingRoute
         return yield* router.pipe(
           Effect.catchTag('HttpServerError', (error) =>
-            error.reason._tag === 'RouteNotFound' ? unavailableRoute : Effect.fail(new AppError(503, 'unavailable')),
+            error.reason._tag === 'RouteNotFound' ? missingRoute : Effect.fail(new AppError(503, 'unavailable')),
           ),
           Effect.map((response) => Response.setHeader(response, 'cache-control', 'no-store')),
         )

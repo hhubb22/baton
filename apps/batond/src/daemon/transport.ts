@@ -27,6 +27,7 @@ export const connectWebSocket: DaemonTransport = (url, options) =>
     let wake: (() => void) | undefined
     let ended = false
     let opened = false
+    let pendingWrites = 0
     const end = () => {
       ended = true
       wake?.()
@@ -71,11 +72,21 @@ export const connectWebSocket: DaemonTransport = (url, options) =>
         send: (frame) =>
           new Promise<void>((sent, failed) => {
             const text = JSON.stringify(frame)
-            if (ended || socket.readyState !== WebSocket.OPEN || Buffer.byteLength(text) > MaxMessageBytes) {
+            const bytes = Buffer.byteLength(text)
+            if (ended || socket.readyState !== WebSocket.OPEN || bytes > MaxMessageBytes) {
               failed(new Error('节点连接已断开'))
               return
             }
-            socket.send(text, (error) => (error ? failed(new Error('节点发送失败')) : sent()))
+            if (pendingWrites >= 64 || socket.bufferedAmount + bytes > 4 * MaxMessageBytes) {
+              failed(new Error('节点发送队列已满'))
+              return
+            }
+            pendingWrites++
+            socket.send(text, (error) => {
+              pendingWrites--
+              if (error) failed(new Error('节点发送失败'))
+              else sent()
+            })
           }),
         close: () => {
           socket.terminate()

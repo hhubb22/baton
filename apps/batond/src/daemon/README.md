@@ -9,7 +9,7 @@ pnpm --filter @baton/batond dev run
 
 所有命令支持 `--data-dir`，默认 `~/.baton-ts`。注册凭据来自 `BATON_ENROLLMENT_TOKEN` 或 `--enrollment-file` 指定的私有文件。`--ca-file` 设置额外的 TLS 信任根；TLS 验证始终启用。连接地址默认从身份文件中的 HTTPS 中心地址推导，也可由 `run --relay wss://主机/v1/node` 指定。CLI 只打印公开身份摘要。
 
-私有目录中的 `identity.json` 保存中心签发的 JWT；`browse-roots.json` 使用 `{ "roots": [{ "id": "home", "path": "/真实路径" }] }`。仅配置文件不存在时登记用户主目录，已有空列表保留。`up --workspace` 按真实路径幂等添加目录。open、message 和 resume 下发前复核工作目录的真实路径与授权根；stop、withdraw 使用已登记的 Thread 身份与代次，撤销授权或删除工作目录后仍可停止和撤回。目录浏览仅返回根与子目录名称。
+私有目录中的 `identity.json` 保存中心签发的 JWT；`browse-roots.json` 使用 `{ "roots": [{ "id": "home", "path": "/真实路径" }] }`。仅配置文件不存在时登记用户主目录，已有空列表保留。`up --workspace` 按真实路径幂等添加目录。open、message 和 resume 下发前复核工作目录的真实路径与授权根；stop、withdraw 使用已登记的 Thread 身份与代次，撤销授权或删除工作目录后仍可停止和撤回。目录和文件预览由 `devices/` 提供，使用同一授权根；目录符号链接解析后须仍在该根内，文件预览保留字节上限与分页信息。
 
 每个数据目录由进程锁保证只有一个 daemon。Worker 使用独立进程锁和账本，daemon 退出保留 Worker。启动和周期采集都会核查已登记 Worker，先通过认证 IPC 连接存活进程；进程不可达且没有活动进程锁时，才检查原 SQLite 账本并恢复 Worker。首次启动前在 node.db 持久标记启动尝试；已有尝试后账本缺失、为空或损坏时，永久保存并上报 `thread.unknown` 和 `history_unavailable:true`，阻止再次启动空 Worker。历史缺失不作为 Agent 已停止的证据，网页保持未知结果。已接收的命令由原 Worker 继续执行，未收到持久接收回执的命令使用原 command ID 查询或重试。
 
@@ -21,12 +21,16 @@ Worker 报告先写入 node.db outbox，再确认 Worker。单连接最多保留
 
 `session.request` 的输出读取原样转发为 Worker 的 `session_request`；实时输出不写入节点报告账本。网页原生历史由统一历史实现提供，当前中心对该接口返回明确的不可用结果，本地 `native_history` 入口保持可用。
 
+Project manager 在 WSS 连接循环外构造，连接同步后绑定当前 RPC transport，断线时取消旧请求并保留运行中的 Runtime。每条连接最多 64 个 Project 请求在途，响应只匹配本连接的 correlation ID。start、stop、wake 在独立任务中处理，Runtime 的节点管理操作与业务 stdio 请求分开授权。租约、持久清理事实和 Thread 版本等待见 [Project Runtime 宿主](../project/README.md)。
+
+设备目录、仓库、执行授权和订阅报告在独立采集循环中更新，每轮完成后等待五秒；连接建立或配置变化触发刷新。目录扫描和 Runtime probe 共享两秒预算，Cursor 探测继续独立运行。最终报告按带缩进 JSON 计量并裁剪至 64 KiB，先裁仓库和模型，再裁目录；控制连接和 Worker 报告不等待文件扫描。
+
 ## 嵌入接口
 
 `index.ts` 导出：
 
 - `registerNode(options): Promise<NodeIdentity>`，选项为 `dataDirectory`、`coordinatorURL`、可选的 `enrollmentFile`、`displayName`、`caFile`、`signal`、`transport`。
-- `runDaemon(options): Effect.Effect<void, Error, Scope.Scope>`，选项为 `dataDirectory`，可选的 `identity`、`relayURL`、`caFile`、`heartbeatMs`、`pollIntervalMs`、`probeIntervalMs`、`transport`、`probe`、`host`、`random`。
+- `runDaemon(options): Effect.Effect<void, Error, Scope.Scope>`，选项为 `dataDirectory`，可选的 `identity`、`relayURL`、`caFile`、`heartbeatMs`、`pollIntervalMs`、`probeIntervalMs`、`transport`、`probe`、`host`、`random`、`project`。`project` 可注入源码 Runtime 命令、时钟和租约时序，默认使用现有 Runtime 实现。
 
 运行方使用 `Effect.runPromise(Effect.scoped(runDaemon(options)), { signal })` 管理退出。`DaemonServices` 通过 Effect Context 提供 Host、传输与探测实现；连接、后台任务、SQLite 和进程锁由 Scope 管理。
 

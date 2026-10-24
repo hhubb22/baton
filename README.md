@@ -135,7 +135,7 @@ BATON_ENROLLMENT_TOKEN='<网页提供的一次性注册凭据>' \
 
 ### TypeScript 远程与本地 Thread
 
-`apps/server` 与 `apps/batond` 提供 Cursor 远程 Thread：员工登录网页、注册设备后，可以新建会话、排队、撤回、停止、恢复、归档并读取回复和实时输出。中心使用 PostgreSQL 保存账号、设备、命令与回复；节点通过出站 WSS 连接，使用私有 SQLite 保存投递事实，再通过认证 IPC 连接独立 Worker。本地 CLI 也可直接调用同一 Worker。发布构建仍使用 Go 入口，TS 使用独立开发命令：
+`apps/server` 与 `apps/batond` 提供 Cursor 远程 Thread、Project 协同与设备管理：员工登录网页、注册设备后，可以新建会话、排队、撤回、停止、恢复、归档并读取回复和实时输出，也可管理 Project 主对话、事项、记忆、授权目录和模型订阅。中心使用 PostgreSQL 保存账号、设备、命令、回复与 Project 状态；节点通过出站 WSS 连接，使用私有 SQLite 保存投递和 Runtime 生命周期事实，再通过认证 IPC 连接独立 Worker。本地 CLI 也可直接调用同一 Worker。发布构建仍使用 Go 入口，TS 使用独立开发命令：
 
 ```sh
 pnpm install --frozen-lockfile --ignore-scripts
@@ -146,7 +146,7 @@ pnpm --filter @baton/batond dev help
 pnpm --filter @baton/batond dev probe
 ```
 
-中心构建包含网页和 SQL 迁移。账号初始化、HTTPS 配置和设备接入见 [中心文档](apps/server/README.md)；节点与本地命令、恢复语义见 [Thread 文档](apps/batond/README.md)。Cursor 使用设备上显式配置的 `CURSOR_API_KEY`；后台探测只查询认证和模型、检查本机依赖，不发送推理请求。仅 `available` 且声明创建能力的 SDK / 系统组合允许新建。TS 的 Project、设备目录管理和统一原生历史按后续迁移切片交付。
+中心构建包含网页和 SQL 迁移。账号初始化、HTTPS 配置和设备接入见 [中心文档](apps/server/README.md)；节点与本地命令、恢复语义见 [Thread 文档](apps/batond/README.md)。Cursor 使用设备上显式配置的 `CURSOR_API_KEY`；后台探测只查询认证和模型、检查本机依赖，不发送推理请求。仅 `available` 且声明创建能力的 SDK / 系统组合允许新建。Project 使用设备本地的 ChatGPT 或 xAI 订阅，提供带租约的独立 Runtime 和受限 shell Thread；目录与执行开关默认遵守本机配置。Runtime 从源码与已安装依赖启动，完整安装包和发布切换归迁移 T5；其他 Agent 与统一原生历史归 T4。
 
 验证使用本机 PostgreSQL、确定性回放和本地替身，无需真实模型凭据；包括独立 Worker、中心与节点重启、ACK 丢失、数据库连接中断和跨员工隔离。Node 26、pnpm 12 的工作区检查为：
 

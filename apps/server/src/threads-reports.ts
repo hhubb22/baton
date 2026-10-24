@@ -3,6 +3,7 @@ import * as SqlClient from 'effect/sql/SqlClient'
 import * as P from '@baton/protocol'
 import type { NodeSource } from './errors.ts'
 import { lockNodeSource, revalidateNodeSource } from './nodes.ts'
+import { notifyProjectThread } from './thread-project-inputs.ts'
 import { audit, canonical, decode, digest, failure, readThread, transaction, uuid, type DB } from './threads-core.ts'
 
 const status = (t: P.Thread, next: P.Thread['status'], reason = '') =>
@@ -43,7 +44,13 @@ const finishArchive = (t: P.Thread) =>
     AND archive_requested_at IS NOT NULL AND stop_confirmed_at IS NOT NULL AND status IN ('idle','stopped')
     AND NOT EXISTS(SELECT 1 FROM thread_turns WHERE thread_id=${t.id} AND ended_at IS NULL)
     AND NOT EXISTS(SELECT 1 FROM thread_messages WHERE thread_id=${t.id} AND status IN ('accepted','queued','unknown')) AND archived_at IS NULL RETURNING id`
-    if (rows.length) yield* audit(t, 'thread.archived', {})
+    if (rows.length) {
+      const [request] = yield* sql<{
+        actor: string
+        actor_id: string
+      }>`SELECT actor,actor_id FROM thread_events WHERE employee_id=${t.employee_id} AND thread_id=${t.id} AND kind='archive.requested' ORDER BY id DESC LIMIT 1`
+      yield* audit(t, 'thread.archived', {}, request?.actor ?? 'employee', request?.actor_id ?? t.employee_id)
+    }
   })
 function boundedReply(content: string, max = 32768): string {
   const bytes = Buffer.from(content)
@@ -107,6 +114,8 @@ const apply = (t: P.Thread, r: P.ThreadReport) =>
         break
       }
       case 'turn.started': {
+        if (t.agent_type === 'shell' && r.worker_turn_seq !== 1)
+          return yield* Effect.fail(failure('shell_single_turn', 422))
         if (!t.opened_at || !['idle', 'stopped', 'unknown', 'running'].includes(t.status))
           return yield* Effect.fail(failure())
         yield* noActiveTurn(t.id)
@@ -118,7 +127,7 @@ const apply = (t: P.Thread, r: P.ThreadReport) =>
         if (r.worker_turn_seq !== next[0]!.seq) return yield* Effect.fail(failure())
         const id = uuid()
         const model = r.model || m.model || t.model
-        yield* sql`INSERT INTO thread_turns(id,employee_id,thread_id,worker_turn_seq,initiator,started_at,model) VALUES(${id},${t.employee_id},${t.id},${r.worker_turn_seq},${m.sender},clock_timestamp(),${model})`
+        yield* sql`INSERT INTO thread_turns(id,employee_id,thread_id,worker_turn_seq,initiator,origin_tool_call_id,started_at,model) VALUES(${id},${t.employee_id},${t.id},${r.worker_turn_seq},${m.sender},${m.origin_tool_call_id ?? null},clock_timestamp(),${model})`
         yield* sql`UPDATE thread_messages SET turn_id=${id},worker_turn_seq=${r.worker_turn_seq} WHERE id=${m.id}`
         yield* sql`UPDATE threads SET model=${model} WHERE id=${t.id}`
         yield* status(t, 'running')
@@ -153,7 +162,7 @@ const apply = (t: P.Thread, r: P.ThreadReport) =>
         yield* sql`UPDATE thread_turns SET ended_at=clock_timestamp(),end_reason=${r.reason!},model=${r.model || turn.model} WHERE id=${turn.id}`
         if (t.stop_requested_at && ['stopped', 'timeout'].includes(r.reason!))
           yield* sql`UPDATE threads SET stop_confirmed_at=clock_timestamp() WHERE id=${t.id}`
-        yield* status(t, r.queue_empty ? 'idle' : 'running')
+        yield* status(t, t.agent_type === 'shell' ? 'stopped' : r.queue_empty ? 'idle' : 'running')
         break
       }
       case 'thread.stopped':
@@ -194,9 +203,8 @@ export const processReport = (source: NodeSource, input: P.ThreadReport): DB<P.T
       if (r.history_unavailable && !['thread.stopped', 'thread.unknown'].includes(r.kind))
         return yield* Effect.fail(failure('invalid_report', 422))
       yield* lockNodeSource(source)
-      // 完成、历史缺失和接收回执沿同一个方向取得 Outbox 与 Thread 锁。
-      yield* sql`SELECT id FROM thread_outbox WHERE employee_id=${source.employee_id} AND thread_id=${r.thread_id} AND (completed_at IS NULL OR message_id=${r.command_id ?? null}::uuid) ORDER BY id FOR UPDATE`
       const t = yield* readThread(source.employee_id, r.thread_id, true)
+      yield* sql`SELECT id FROM thread_outbox WHERE employee_id=${source.employee_id} AND thread_id=${r.thread_id} AND (completed_at IS NULL OR message_id=${r.command_id ?? null}::uuid) ORDER BY id FOR UPDATE`
       if (t.node_id !== source.node_id) return yield* Effect.fail(failure('not_found', 404))
       yield* revalidateNodeSource(source)
       const hash = digest(r)
@@ -240,6 +248,7 @@ export const processReport = (source: NodeSource, input: P.ThreadReport): DB<P.T
       if (t.status === 'archived' && !['command.completed', 'message.withdrawn', 'thread.stopped'].includes(r.kind))
         return yield* Effect.fail(failure('thread_archived'))
       yield* apply(t, r)
+      yield* notifyProjectThread(t, r)
       yield* finishArchive(t)
       yield* sql`UPDATE threads SET last_worker_seq=${r.worker_seq},last_reported_at=clock_timestamp(),last_activity_at=clock_timestamp(),version=version+1 WHERE id=${t.id}`
       if (r.kind !== 'reply') yield* audit(t, r.kind, r, 'device', source.node_id)

@@ -1,21 +1,59 @@
 import { promises as fs, constants } from 'node:fs'
-import { join } from 'node:path'
+import { isAbsolute, join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { existsSync } from 'node:fs'
 import lockfile from 'proper-lockfile'
 import { randomUUID } from 'node:crypto'
 
-function native(operation: string, directory: string, file?: string, input?: string): string | undefined {
+const nativeEnabled = () => process.platform === 'win32' || process.env.BATON_SIDECAR_HOST_COMMAND !== undefined
+
+function nativeHost(): { file: string; args: string[]; timeout: number } {
+  const configured = process.env.BATON_SIDECAR_HOST_COMMAND
+  if (configured !== undefined) {
+    try {
+      if (Buffer.byteLength(configured) > 64 * 1024) throw new Error()
+      const host = JSON.parse(configured)
+      if (
+        !host ||
+        typeof host !== 'object' ||
+        Array.isArray(host) ||
+        typeof host.file !== 'string' ||
+        !isAbsolute(host.file) ||
+        host.file.includes('\0') ||
+        !Array.isArray(host.args) ||
+        host.args.length > 64 ||
+        host.args.some((argument: unknown) => typeof argument !== 'string' || argument.includes('\0')) ||
+        Object.keys(host).some((key) => key !== 'file' && key !== 'args')
+      )
+        throw new Error()
+      return { file: host.file, args: host.args, timeout: 5000 }
+    } catch {
+      throw new Error('credential_private_file_failed')
+    }
+  }
   const adjacent = fileURLToPath(new URL('../../../../../batond.exe', import.meta.url))
-  const host = process.env.BATON_SIDECAR_HOST ?? (existsSync(adjacent) ? adjacent : 'batond')
-  const result = spawnSync(host, ['sidecar-file', operation, directory, ...(file ? [file] : [])], {
-    input,
-    encoding: 'utf8',
-    windowsHide: true,
+  return {
+    file: process.env.BATON_SIDECAR_HOST ?? (existsSync(adjacent) ? adjacent : 'batond'),
+    args: [],
     timeout: 500,
-    maxBuffer: 64 * 1024,
-  })
+  }
+}
+
+function native(operation: string, directory: string, file?: string, input?: string): string | undefined {
+  const host = nativeHost()
+  if (input !== undefined && Buffer.byteLength(input) > 64 * 1024) throw new Error('credential_private_file_failed')
+  const result = spawnSync(
+    host.file,
+    [...host.args, 'sidecar-file', operation, resolve(directory), ...(file ? [resolve(file)] : [])],
+    {
+      input,
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: host.timeout,
+      maxBuffer: 64 * 1024,
+    },
+  )
   if (result.status === 3 && operation === 'read') return undefined
   if (result.status !== 0) throw new Error('credential_private_file_failed')
   return result.stdout
@@ -25,7 +63,7 @@ export async function protect(path: string, directory: boolean): Promise<void> {
   const stat = await fs.lstat(path)
   if (stat.isSymbolicLink() || (directory ? !stat.isDirectory() : !stat.isFile()))
     throw new Error('credential_path_invalid')
-  if (process.platform === 'win32') {
+  if (nativeEnabled()) {
     if (!directory) throw new Error('credential_use_native_write')
     native('protect-dir', path)
   } else {
@@ -44,7 +82,7 @@ export class FileCredentials {
   async read(provider: string): Promise<any> {
     const path = this.file(provider)
     try {
-      if (process.platform === 'win32') {
+      if (nativeEnabled()) {
         const raw = native('read', this.directory, path)
         return raw === undefined ? undefined : JSON.parse(raw)
       }
@@ -115,7 +153,7 @@ export class FileCredentials {
         const current = await this.read(provider),
           next = await fn(current)
         if (next === undefined) return current
-        if (process.platform === 'win32') {
+        if (nativeEnabled()) {
           native('write', this.directory, this.file(provider), JSON.stringify(next))
           return next
         }

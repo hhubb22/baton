@@ -17,6 +17,8 @@ import { UUID } from '@baton/protocol'
 import * as Auth from './auth.ts'
 import * as Nodes from './nodes.ts'
 import * as Threads from './threads.ts'
+import * as Projects from './projects.ts'
+import * as Inbox from './inbox.ts'
 import { AppError } from './errors.ts'
 import type { HTTPOptions } from './http.ts'
 
@@ -42,7 +44,14 @@ export const httpFailure = (error: unknown, requestId: string): HttpFailure => {
       ? error
       : new AppError(503, 'unavailable', '暂时无法处理请求')
   const status = Schema.is(HttpErrorStatus)(appError.status) ? appError.status : 503
-  return { status, code: appError.code, message: appError.message, request_id: requestId }
+  return {
+    status,
+    code: appError.code,
+    message: appError.message,
+    request_id: requestId,
+    ...(status === 409 ? appError.details : {}),
+    ...(status === 409 && appError.code === 'inbox_conflict' ? { error: appError.code } : {}),
+  }
 }
 export const httpBusiness = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(Effect.catch((error) => Effect.flatMap(HttpRequestId, (id) => Effect.fail(httpFailure(error, id)))))
@@ -86,7 +95,7 @@ const checkJson = Effect.gen(function* () {
   if (!/^application\/json(?:;|$)/i.test(request.headers['content-type'] ?? ''))
     return yield* Effect.fail(new AppError(415, 'json_required'))
   yield* request.json.pipe(
-    Effect.provideService(Incoming.MaxBodySize, ByteSize.kibibytes(256)),
+    Effect.provideService(Incoming.MaxBodySize, ByteSize.kibibytes(512)),
     Effect.mapError(() => new AppError(400, 'invalid_json')),
   )
 })
@@ -122,11 +131,23 @@ export const httpSecurity = () =>
                     if ('nodeId' in params) yield* Nodes.getNode(session.employee.id, id)
                     else yield* Threads.view(session.employee.id, id)
                   }
+                  if (endpoint.params && 'projectId' in params) {
+                    const id = yield* Schema.decodeUnknownEffect(UUID)(params.projectId).pipe(
+                      Effect.mapError(() => new AppError(400, 'invalid_request', '请求格式无效')),
+                    )
+                    yield* Projects.getProject(session.employee.id, id)
+                  }
+                  if (endpoint.params && 'requestId' in params) {
+                    const id = yield* Schema.decodeUnknownEffect(UUID)(params.requestId).pipe(
+                      Effect.mapError(() => new AppError(400, 'invalid_request', '请求格式无效')),
+                    )
+                    yield* Inbox.getAttentionRequest(session.employee.id, id)
+                  }
                   if (endpoint.payload.size > 0) yield* checkJson
                   const seen = new Set<string>()
                   const request = yield* HttpServerRequest.HttpServerRequest
                   for (const key of new URL(request.url, 'http://localhost').searchParams.keys()) {
-                    if (endpoint.query && seen.has(key)) return yield* Effect.fail(new AppError(400, 'invalid_query'))
+                    if (!endpoint.query || seen.has(key)) return yield* Effect.fail(new AppError(400, 'invalid_query'))
                     seen.add(key)
                   }
                   return session

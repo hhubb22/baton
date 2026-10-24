@@ -8,7 +8,7 @@ import { WorkerOpen, type WorkerRequest } from '@baton/protocol'
 import { LocalWorkerHost, initializeWorkerDirectory } from './daemon/host.ts'
 import { readPrivateFile, writePrivateFileAtomic } from './platform/private.ts'
 
-const usage = `Baton Thread（TypeScript 开发入口）
+const usage = `Baton 节点（TypeScript 开发入口）
 
   up --coordinator <https://中心> [--workspace <绝对目录>]
   register --coordinator <https://中心> [--enrollment-file <私有文件>]
@@ -17,7 +17,16 @@ const usage = `Baton Thread（TypeScript 开发入口）
 注册凭据来自 BATON_ENROLLMENT_TOKEN 或 --enrollment-file。
 up 复用已有身份，首次运行登记主目录；--workspace 可额外登记目录。
 
-本地命令：
+设备管理：
+
+  files add --id <标识> --path <绝对目录>
+  files remove --id <标识>
+  files list
+  project-exec --enabled=true|false [--shell <程序>]
+  login <openai-codex|xai>
+  subscriptions
+
+本地 Thread：
 
   open --cwd <目录> [--thread-id <UUID>] [--model <模型>]
   message --thread-id <UUID> --text <正文> [--message-id <ID>]
@@ -27,7 +36,8 @@ up 复用已有身份，首次运行登记主目录；--workspace 可额外登�
   ack --thread-id <UUID> --event-id <UUID> --worker-seq <序号>
   probe
 
-所有命令支持 --data-dir <私有目录>，默认 ~/.baton-ts。
+设备与 Thread 命令支持 --data-dir <私有目录>，默认 ~/.baton-ts。
+订阅凭据目录使用 BATON_PROJECT_RUNTIME_DATA_DIR，默认 ~/.baton/project-runtime。
 执行命令支持 --command-id <UUID>；重试时使用同一个 ID。
 open 返回持久接收回执，实际结果通过 command 或 reports 查询。`
 

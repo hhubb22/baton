@@ -1,0 +1,146 @@
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { setTimeout as delay } from 'node:timers/promises'
+import { Effect, Scope, Exit } from 'effect'
+import { afterEach, expect, it } from 'vite-plus/test'
+import { makeProjectManager } from './index.ts'
+import { RuntimeRunner, defaultRuntimeCommand } from './runner.ts'
+import { LeaseClock, success } from './types.ts'
+import { serveRuntime } from './stdio.ts'
+
+const cleanups: (() => Promise<void>)[] = []
+afterEach(async () => {
+  for (const close of cleanups.splice(0).reverse()) await close()
+})
+const open = async (mode = 'idle', real = false) => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'baton-runtime-probe-'))
+  cleanups.push(() => rm(dataDir, { recursive: true, force: true }))
+  const scope = Scope.makeUnsafe()
+  const base = real
+    ? defaultRuntimeCommand()
+    : { file: process.execPath, args: [fileURLToPath(new URL('./fixtures/runtime.mjs', import.meta.url)), mode] }
+  const manager = await Effect.runPromise(
+    makeProjectManager({
+      dataDir,
+      runtimeCommand: { ...base, env: { BATON_PROJECT_RUNTIME_DATA_DIR: join(dataDir, 'credentials') } },
+    }).pipe(Effect.provideService(Scope.Scope, scope)),
+  )
+  cleanups.push(() => Effect.runPromise(Scope.close(scope, Exit.void)))
+  return manager
+}
+const quickRunner = async (program: string) => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'baton-early-output-'))
+  cleanups.push(() => rm(dataDir, { recursive: true, force: true }))
+  const runner = new RuntimeRunner(
+    { dataDir, runtimeCommand: { file: process.execPath, args: ['-e', program] } },
+    {
+      pid: process.pid,
+      register: async () => {
+        await delay(200)
+      },
+      unregister: async () => {},
+      close: async () => {},
+    },
+    { add: async () => {}, remove: async () => {} },
+  )
+  cleanups.push(() => runner.close())
+  return runner
+}
+it.each(['probe', 'login-device'] as const)(
+  'captures fast %s output while watchdog registration is delayed',
+  async (operation) => {
+    const value =
+      operation === 'probe'
+        ? { version: '0.1.0', providers: [{ provider: 'openai-codex', status: 'available' }] }
+        : {
+            type: 'device_code',
+            provider: 'openai-codex',
+            verification_uri: 'https://login.invalid/device',
+            user_code: 'FAST-CODE',
+            expires_in_seconds: 600,
+          }
+    const runner = await quickRunner(`console.log(JSON.stringify(${JSON.stringify(value)}))`)
+    const result = operation === 'probe' ? await runner.probe() : await runner.startDeviceLogin('openai-codex')
+    expect(result).toMatchObject(value)
+  },
+)
+it.each(['probe', 'login-device'] as const)('bounds %s output during delayed registration', async (operation) => {
+  const runner = await quickRunner('process.stdout.write("x".repeat(17000)); setInterval(() => {}, 1000)')
+  await expect(operation === 'probe' ? runner.probe() : runner.startDeviceLogin('openai-codex')).rejects.toThrow(
+    '输出超限',
+  )
+})
+it('captures stdio frames before a fast Runtime exits during registration', async () => {
+  const runner = await quickRunner('console.log(JSON.stringify({id:1,request:{operation:"bootstrap"}}))')
+  const cancel = new AbortController()
+  let serving: Promise<void> | undefined,
+    requests = 0
+  const owned = await runner.spawn(['run'], cancel.signal, undefined, undefined, undefined, (child) => {
+    serving = serveRuntime(
+      child.stdout,
+      child.stdin,
+      async (request) => {
+        expect(request.operation).toBe('bootstrap')
+        requests++
+        return success({})
+      },
+      cancel.signal,
+    )
+    void serving.catch(() => {})
+  })
+  await serving
+  expect(requests).toBe(1)
+  await runner.reap(owned)
+  cancel.abort()
+})
+
+it('uses max(hrtime,wall) for sleep, backward wall clock and forward clock jumps', () => {
+  let wall = 100,
+    mono = 100
+  const clock = new LeaseClock({ wall: () => wall, monotonic: () => mono })
+  wall += 5000
+  mono += 50
+  expect(clock.now()).toBe(5000)
+  mono += 6000
+  wall -= 10000
+  expect(clock.now()).toBe(6050)
+  wall = Number.NaN
+  expect(() => clock.now()).toThrow('时钟不可用')
+})
+it('probes the existing Runtime source CLI using only an empty local credential directory', async () => {
+  const manager = await open('idle', true)
+  const report = await manager.probe()
+  expect(report.version).toBe('0.1.0')
+  expect(report.providers?.map((p) => [p.provider, p.status])).toEqual([
+    ['openai-codex', 'login_required'],
+    ['xai', 'login_required'],
+  ])
+})
+it('rejects incompatible probes and omits invalid runtime reports', async () => {
+  const manager = await open('bad-probe')
+  await expect(manager.probe()).rejects.toThrow('版本不匹配')
+  expect(await manager.report()).toBeUndefined()
+})
+it('keeps device login running after code delivery, replaces the same provider and refreshes on exit', async () => {
+  const manager = await open()
+  let done = 0
+  const cancel = new AbortController()
+  const code = await manager.startDeviceLogin('ChatGPT', cancel.signal, () => done++)
+  expect(code).toMatchObject({
+    provider: 'openai-codex',
+    user_code: 'LOCAL-CODE',
+    verification_uri: 'https://login.invalid/device',
+  })
+  cancel.abort()
+  await delay(20)
+  expect(done).toBe(0)
+  await Promise.all([
+    manager.startDeviceLogin('openai-codex', undefined, () => done++),
+    manager.startDeviceLogin('openai-codex', undefined, () => done++),
+  ])
+  expect(done).toBe(2)
+  await manager.close()
+  expect(done).toBe(3)
+})

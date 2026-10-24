@@ -1,0 +1,482 @@
+import { randomUUID } from 'node:crypto'
+import { execFile } from 'node:child_process'
+import { request as httpsRequest } from 'node:https'
+import { mkdtemp, realpath, readFile, writeFile, mkdir, readdir, rm, symlink } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
+import { promisify } from 'node:util'
+import { build } from 'esbuild'
+import { Effect, Scope, Exit, Schema } from 'effect'
+import * as SqlClient from 'effect/sql/SqlClient'
+import { expect, test } from 'vite-plus/test'
+import * as P from '@baton/protocol'
+import * as Auth from './auth.ts'
+import * as Nodes from './nodes.ts'
+import { startServer } from './server.ts'
+import { openTestDatabase } from './test-database.ts'
+import { registerNode } from '../../batond/src/daemon/identity.ts'
+import { initializeBrowseRoots } from '../../batond/src/daemon/roots.ts'
+import { LocalWorkerHost } from '../../batond/src/daemon/host.ts'
+import { runDaemon } from '../../batond/src/daemon/daemon.ts'
+
+const origin = 'https://baton.local'
+function browser(base: string, ca: string) {
+  let cookie = '',
+    csrf = ''
+  return async <A = unknown>(path: string, method = 'GET', data?: unknown): Promise<{ status: number; body: A }> => {
+    const content = data === undefined ? undefined : JSON.stringify(data)
+    const response = await new Promise<{ status: number; body: unknown; cookie?: string }>((resolve, reject) => {
+      const request = httpsRequest(
+        `${base}/api/v1${path}`,
+        {
+          method,
+          ca,
+          signal: AbortSignal.timeout(12000),
+          headers: {
+            Origin: origin,
+            'content-type': 'application/json',
+            Cookie: cookie,
+            'X-CSRF-Token': csrf,
+            ...(content === undefined ? {} : { 'Content-Length': Buffer.byteLength(content) }),
+          },
+        },
+        (response) => {
+          const chunks: Buffer[] = []
+          response.on('data', (chunk: Buffer) => {
+            chunks.push(chunk)
+          })
+          response.on('error', reject)
+          response.on('end', () => {
+            try {
+              const body = Buffer.concat(chunks).toString('utf8')
+              resolve({
+                status: response.statusCode!,
+                body: body ? JSON.parse(body) : null,
+                ...(response.headers['set-cookie']?.[0]
+                  ? { cookie: response.headers['set-cookie'][0].split(';')[0] }
+                  : {}),
+              })
+            } catch (error) {
+              reject(error)
+            }
+          })
+        },
+      )
+      request.on('error', reject)
+      request.end(content)
+    })
+    if (response.cookie) cookie = response.cookie
+    const token = Schema.decodeUnknownOption(Schema.Struct({ csrf_token: Schema.String }))(response.body)
+    if (token._tag === 'Some') csrf = token.value.csrf_token
+    return { status: response.status, body: response.body as A }
+  }
+}
+async function signIn(client: ReturnType<typeof browser>, username: string) {
+  const initial = 'local-t3-initial-password-123',
+    updated = 'local-t3-updated-password-456'
+  expect((await client('/login', 'POST', { username, password: initial })).status).toBe(200)
+  expect((await client('/me/password', 'POST', { current_password: initial, new_password: updated })).status).toBe(204)
+  expect((await client('/login', 'POST', { username, password: updated })).status).toBe(200)
+}
+const Payload = Schema.Struct({
+  message: Schema.Struct({
+    role: Schema.String,
+    content: Schema.Array(Schema.Json),
+    toolName: Schema.optionalKey(Schema.String),
+    isError: Schema.optionalKey(Schema.Boolean),
+  }),
+})
+const ToolCall = Schema.Struct({ type: Schema.Literal('toolCall'), id: Schema.String, name: Schema.String })
+const quote = (text: string) =>
+  process.platform === 'win32' ? `'${text.replaceAll("'", "''")}'` : `'${text.replaceAll("'", "'\\''")}'`
+
+test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates replay Cursor, shell, memory and Inbox', async () => {
+  const database = await openTestDatabase()
+  const directory = await realpath(await mkdtemp(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'bt3-')))
+  const nodeDirectory = join(directory, 'node'),
+    workspace = join(directory, 'workspace'),
+    extraRoot = join(directory, 'extra')
+  const bundle = join(directory, 'replay-worker.cjs'),
+    runtimeDirectory = join(directory, 'runtime-auth')
+  const caFile = join(directory, 'server.crt'),
+    keyFile = join(directory, 'server.key')
+  const host = new LocalWorkerHost(nodeDirectory, { executable: process.execPath, args: [bundle] })
+  const scope = Scope.makeUnsafe()
+  const controller = new AbortController()
+  let daemon: Promise<unknown> | undefined
+  let projectId = ''
+  try {
+    await Promise.all([mkdir(workspace), mkdir(extraRoot), mkdir(runtimeDirectory, { mode: 0o700 })])
+    await promisify(execFile)('openssl', [
+      'req',
+      '-x509',
+      '-newkey',
+      'ec',
+      '-pkeyopt',
+      'ec_paramgen_curve:prime256v1',
+      '-nodes',
+      '-days',
+      '1',
+      '-subj',
+      '/CN=localhost',
+      '-addext',
+      'subjectAltName=IP:127.0.0.1,DNS:localhost',
+      '-keyout',
+      keyFile,
+      '-out',
+      caFile,
+    ])
+    const ca = await readFile(caFile, 'utf8')
+    await build({
+      entryPoints: [fileURLToPath(new URL('./fixtures/replay-worker.ts', import.meta.url))],
+      outfile: bundle,
+      bundle: true,
+      platform: 'node',
+      format: 'cjs',
+      target: 'node26',
+      external: ['@cursor/sdk', '@cursor/sdk/*'],
+      define: { 'import.meta.url': '__baton_import_meta_url__' },
+      banner: { js: 'const __baton_import_meta_url__ = require("node:url").pathToFileURL(__filename).href;' },
+      logLevel: 'silent',
+    })
+    const server = await database.runtime.runPromise(
+      startServer({
+        allowedOrigins: [origin],
+        signer: Nodes.CredentialSigner.generate(),
+        tls: { cert: ca, key: await readFile(keyFile) },
+        dispatchMs: 20,
+        projectDispatchMs: 25,
+        heartbeatMs: 1000,
+        offlineMs: 5000,
+      }).pipe(Effect.provideService(Scope.Scope, scope)),
+    )
+    const base = `https://127.0.0.1:${server.port}`
+    await database.run(Auth.createEmployee('t3alice', 'Alice', 'local-t3-initial-password-123'))
+    await database.run(Auth.createEmployee('t3bob', 'Bob', 'local-t3-initial-password-123'))
+    const alice = browser(base, ca),
+      bob = browser(base, ca)
+    await signIn(alice, 't3alice')
+    await signIn(bob, 't3bob')
+    const enrollment = await alice<P.EnrollmentResponse>('/node-enrollments', 'POST', {})
+    expect(enrollment.status).toBe(201)
+    const enrollmentFile = join(directory, 'enrollment')
+    await writeFile(enrollmentFile, enrollment.body.enrollment_token, { mode: 0o600 })
+    const identity = await registerNode({
+      dataDirectory: nodeDirectory,
+      coordinatorURL: base,
+      caFile,
+      enrollmentFile,
+      displayName: 'T3 local workstation',
+    })
+    await writeFile(join(nodeDirectory, 'browse-roots.json'), '{"roots":[]}', { mode: 0o600 })
+    await initializeBrowseRoots(nodeDirectory, workspace)
+    await writeFile(join(workspace, 'artifact.log'), 'T3 local artifact preview\n')
+    await writeFile(join(extraRoot, 'private.log'), 'outside-authorized-root\n')
+    await symlink(join(extraRoot, 'private.log'), join(workspace, 'escape.log'))
+    const script = join(workspace, 'shell-task.cjs')
+    await writeFile(
+      script,
+      "require('node:fs').appendFileSync('shell-runs.txt', 'once\\n'); process.stdout.write('t3-shell-output\\n');\n",
+    )
+    const runtimeEntry = new URL('../../../runtimes/project-agent/test/t3-worker.ts', import.meta.url)
+    const loader = createRequire(runtimeEntry).resolve('tsx')
+    const capability: P.RuntimeAgent = {
+      agent_type: 'cursor',
+      version: '1.0.35',
+      status: 'available',
+      models: [{ id: 'default', name: 'Offline default' }],
+      default_model: 'default',
+      capabilities: { create: true, queue: true, steer: false, stop: true, resume: true, switch_model: false },
+    }
+    daemon = Effect.runPromiseExit(
+      Effect.scoped(
+        runDaemon({
+          dataDirectory: nodeDirectory,
+          identity,
+          caFile,
+          host,
+          probe: async () => capability,
+          heartbeatMs: 1000,
+          pollIntervalMs: 20,
+          probeIntervalMs: 60000,
+          project: {
+            runtimeCommand: {
+              file: process.execPath,
+              args: ['--import', loader, fileURLToPath(runtimeEntry)],
+              env: {
+                T3_FIXTURE_RUNTIME_DIRECTORY: runtimeDirectory,
+                T3_FIXTURE_NODE_ID: identity.node_id,
+                T3_FIXTURE_WORKSPACE: workspace,
+                T3_FIXTURE_SHELL_COMMAND: `${process.platform === 'win32' ? '& ' : ''}${quote(process.execPath)} ${quote(script)}`,
+              },
+            },
+            watchdogCommand: { file: process.execPath, args: [bundle, 'watchdog'] },
+          },
+        }),
+      ),
+      { signal: controller.signal },
+    )
+    const device = () =>
+      alice<P.NodeStatus>(`/nodes/${identity.node_id}`).then((r) => Schema.decodeUnknownSync(P.NodeStatus)(r.body))
+    await expect
+      .poll(
+        async () => {
+          const node = await device()
+          return (
+            node.synced &&
+            node.runtime_report?.agents?.[0]?.status === 'available' &&
+            node.runtime_report?.project_runtime?.providers?.[0]?.status
+          )
+        },
+        { timeout: 10000 },
+      )
+      .toBe('login_required')
+    expect((await bob<P.NodesResponse>('/nodes')).body.nodes).toEqual([])
+    expect((await bob(`/nodes/${identity.node_id}/project-exec`, 'PUT', { enabled: true })).status).toBe(403)
+    expect(
+      (await bob(`/nodes/${identity.node_id}/subscriptions/login`, 'POST', { provider: 'openai-codex' })).status,
+    ).toBe(403)
+    const added = await alice<P.NodeStatus>(`/nodes/${identity.node_id}/roots`, 'POST', { path: extraRoot })
+    expect(added.status, JSON.stringify(added.body)).toBe(200)
+    expect(added.body.runtime_report?.roots?.some((r) => r.path === extraRoot)).toBe(true)
+    expect((await alice(`/nodes/${identity.node_id}/roots`, 'DELETE', { path: extraRoot })).status).toBe(200)
+    await expect.poll(async () => (await device()).runtime_report?.roots?.some((r) => r.path === extraRoot)).toBe(false)
+    expect((await device()).runtime_report?.roots?.map((r) => r.path)).toContain(workspace)
+    const enabled = await alice<P.NodeStatus>(`/nodes/${identity.node_id}/project-exec`, 'PUT', { enabled: true })
+    expect(enabled.status, JSON.stringify(enabled.body)).toBe(200)
+    expect(enabled.body.runtime_report?.exec?.enabled).toBe(true)
+    const created = await alice<P.Project>('/projects', 'POST', {
+      client_project_id: randomUUID(),
+      title: 'T3 local project',
+      goal: '验证本地跨进程工具调用',
+      provider: 'openai-codex',
+      model: 't3-faux',
+    })
+    expect(created.status, JSON.stringify(created.body)).toBe(201)
+    const project = Schema.decodeUnknownSync(P.Project)(created.body)
+    projectId = project.id
+    const status = () => alice<P.ProjectStatus>(`/projects/${project.id}/status`).then((r) => r.body)
+    const input = { client_message_id: randomUUID(), content: '保存记忆，提出确认事项，并运行 Cursor 和 shell 任务。' }
+    expect((await alice(`/projects/${project.id}/messages`, 'POST', input)).status).toBe(202)
+    expect((await alice(`/projects/${project.id}/messages`, 'POST', input)).status).toBe(202)
+    expect((await alice(`/projects/${project.id}/messages`, 'POST', { ...input, content: 'conflict' })).status).toBe(
+      409,
+    )
+    await expect.poll(async () => (await status()).waiting_reason).toBe('login_required')
+    expect((await bob(`/projects/${project.id}`)).status).toBe(404)
+    expect(
+      (await bob(`/projects/${project.id}/messages`, 'POST', { ...input, client_message_id: randomUUID() })).status,
+    ).toBe(404)
+    const login = await alice<P.SubscriptionLoginResponse>(`/nodes/${identity.node_id}/subscriptions/login`, 'POST', {
+      provider: 'ChatGPT',
+    })
+    expect(login.status, JSON.stringify(login.body)).toBe(200)
+    expect(login.body).toEqual({
+      provider: 'openai-codex',
+      verification_uri: 'https://login.invalid/local-device',
+      user_code: 'T3-LOCAL-CODE',
+      expires_in_seconds: 600,
+    })
+    await expect
+      .poll(async () => (await device()).runtime_report?.project_runtime?.providers?.[0]?.status, { timeout: 10000 })
+      .toBe('available')
+    let inbox: P.AttentionRequest | undefined
+    await expect
+      .poll(
+        async () => {
+          const page = await alice<P.InboxPage>(`/inbox?project_id=${project.id}`)
+          inbox = page.body.requests?.find((r) => r.title === '确认继续验证')
+          return inbox?.state
+        },
+        { timeout: 10000 },
+      )
+      .toBe('open')
+    const memories = await alice<P.MemoriesResponse>(`/projects/${project.id}/memory`)
+    expect(memories.status).toBe(200)
+    const memory = memories.body.entries![0]!
+    expect(memory).toMatchObject({
+      title: 'T3 运行记录',
+      revision: 1,
+      author: 'agent',
+      content: '通过真实 Runtime 保存的项目记忆',
+    })
+    expect((await bob(`/projects/${project.id}/memory/${memory.id}`)).status).toBe(404)
+    expect((await bob(`/attention-requests/${inbox!.id}`)).status).toBe(404)
+    const answer = {
+      expected_version: inbox!.version,
+      client_request_id: randomUUID(),
+      option_id: 'continue',
+      text: '由用户补充的验证说明',
+    }
+    expect((await bob(`/attention-requests/${inbox!.id}/answer`, 'POST', answer)).status).toBe(404)
+    const updated = await alice<P.ProjectMemory>(`/projects/${project.id}/memory/${memory.id}`, 'PUT', {
+      expected_revision: 1,
+      title: memory.title,
+      content: memory.content + '；用户已核对',
+    })
+    expect(updated.status, JSON.stringify(updated.body)).toBe(200)
+    expect(updated.body).toMatchObject({ revision: 2, author: 'user' })
+    const answered = await alice<P.AttentionRequest>(`/attention-requests/${inbox!.id}/answer`, 'POST', answer)
+    expect(answered.status, JSON.stringify(answered.body)).toBe(200)
+    expect(answered.body).toMatchObject({ state: 'answered', resolution: { option_id: 'continue', text: answer.text } })
+    const events = async () => {
+      const page = await alice<P.ProjectEventPage>(`/projects/${project.id}/events?limit=100`)
+      expect(page.status, JSON.stringify(page.body)).toBe(200)
+      return Schema.decodeUnknownSync(P.ProjectEventPage)(page.body).events ?? []
+    }
+    await expect
+      .poll(async () => JSON.stringify(await events()).includes('已读取用户回答'), { timeout: 15000 })
+      .toBe(true)
+    await expect.poll(async () => (await status()).run?.stop_acked_at, { timeout: 10000 }).toBeTruthy()
+    const starts = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ pid: P.PositiveInteger, run_id: P.UUID })))(
+      (await readFile(join(runtimeDirectory, 'runtime-starts.jsonl'), 'utf8'))
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line)),
+    )
+    expect(starts).toHaveLength(1)
+    expect(starts[0]!.pid).not.toBe(process.pid)
+    expect(starts[0]!.run_id).toBe((await status()).run?.id)
+    const saved = await events()
+    const messages = saved
+      .filter((event) => event.kind !== 'compaction')
+      .map((event) => ({ event, message: Schema.decodeUnknownSync(Payload)(event.payload).message }))
+    const toolResults = messages.filter((entry) => entry.message.role === 'toolResult')
+    expect(toolResults.map((entry) => entry.message.toolName)).toEqual([
+      'memory.write',
+      'inbox.ask',
+      'threads.create',
+      'nodes.exec',
+    ])
+    expect(toolResults.every((entry) => entry.message.isError === false)).toBe(true)
+    const shellResult = toolResults.find((entry) => entry.message.toolName === 'nodes.exec')!
+    const output = Schema.decodeUnknownSync(
+      Schema.Array(Schema.Struct({ type: Schema.Literal('text'), text: Schema.String })),
+    )(shellResult.message.content)
+    expect(
+      Schema.decodeUnknownSync(
+        Schema.Struct({ command_result: Schema.Struct({ exit_code: Schema.Literal(0), output: Schema.String }) }),
+      )(JSON.parse(output[0]!.text)).command_result.output,
+    ).toBe('t3-shell-output\n')
+    const calls = messages
+      .filter((entry) => entry.message.role === 'assistant')
+      .flatMap((entry) =>
+        entry.message.content.flatMap((block) => {
+          const call = Schema.decodeUnknownOption(ToolCall)(block)
+          return call._tag === 'Some' ? [{ ...call.value, seq: entry.event.seq }] : []
+        }),
+      )
+    expect(calls.map((call) => call.name)).toEqual(toolResults.map((entry) => entry.message.toolName))
+    for (const result of toolResults)
+      expect(calls.find((call) => call.id === result.event.tool_call_id)!.seq).toBeLessThan(result.event.seq)
+    expect(JSON.stringify(saved)).toContain('已读取 Cursor 回复')
+    expect(JSON.stringify(saved)).toContain('t3-shell-output')
+    const threadPage = await alice<P.ThreadPage>(`/threads?project_id=${project.id}`)
+    expect(threadPage.body.threads).toHaveLength(2)
+    expect(threadPage.body.threads?.map((t) => t.agent_type).sort()).toEqual(['cursor', 'shell'])
+    const cursor = threadPage.body.threads!.find((thread) => thread.agent_type === 'cursor')!
+    const timeline = await alice<P.ThreadTimeline>(`/threads/${cursor.id}/timeline?limit=100`)
+    const reply = timeline.body.events!.find((event) => event.kind === 'reply')!
+    const attachments = Schema.decodeUnknownSync(
+      Schema.Struct({
+        attachments: Schema.Array(
+          Schema.Struct({
+            kind: Schema.Literal('file'),
+            node_id: P.UUID,
+            root_id: P.RootID,
+            path: Schema.String,
+            access_status: Schema.Literal('available'),
+          }),
+        ),
+      }),
+    )(reply.payload).attachments
+    const artifact = attachments.find((attachment) => attachment.path === 'artifact.log')!
+    expect(artifact).toMatchObject({ node_id: identity.node_id, access_status: 'available' })
+    const query = new URLSearchParams({ root_id: artifact.root_id, path: artifact.path }).toString()
+    const preview = await alice<P.FileView>(`/nodes/${identity.node_id}/files?${query}`)
+    expect(preview.status, JSON.stringify(preview.body)).toBe(200)
+    expect(preview.body).toMatchObject({ kind: 'file', content: 'T3 local artifact preview\n', truncated: false })
+    const escaped = await alice<{ code: string }>(
+      `/nodes/${identity.node_id}/files?${new URLSearchParams({ root_id: artifact.root_id, path: 'escape.log' }).toString()}`,
+    )
+    expect(escaped.status).toBe(403)
+    expect(escaped.body.code).toBe('path_escaped')
+    expect((await bob(`/nodes/${identity.node_id}/files?${query}`)).status).toBe(403)
+    for (const thread of threadPage.body.threads ?? []) expect((await bob(`/threads/${thread.id}`)).status).toBe(404)
+    expect(await readFile(join(workspace, 'shell-runs.txt'), 'utf8')).toBe('once\n')
+    expect(
+      (await readFile(join(workspace, 'submissions.jsonl'), 'utf8'))
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line).text),
+    ).toEqual(['t3 replay task `artifact.log`'])
+    const revisions = await alice<P.MemoryRevisionsResponse>(`/projects/${project.id}/memory/${memory.id}/revisions`)
+    expect(revisions.body.revisions?.map((r) => [r.revision, r.author])).toEqual([
+      [1, 'agent'],
+      [2, 'user'],
+    ])
+    const facts = await database.run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        return yield* sql<{
+          source_type: string
+          source_key: string
+          delivered_seq: string | null
+        }>`SELECT source_type,source_key,delivered_seq FROM project_agent_input_queue WHERE agent_id=${project.agent.id} ORDER BY id`
+      }),
+    )
+    expect(facts.filter((f) => f.source_type === 'user_message')).toHaveLength(1)
+    for (const source of ['thread_reply', 'turn_ended', 'attention_answer', 'memory_updated'])
+      expect(facts.some((f) => f.source_type === source && f.delivered_seq !== null)).toBe(true)
+    expect(new Set(facts.map((f) => f.source_key)).size).toBe(facts.length)
+    expect((await bob<P.InboxPage>('/inbox?state=all')).body.requests).toEqual([])
+    expect((await bob<P.ProjectsResponse>('/projects')).body.projects).toEqual([])
+    expect(await readFile(join(runtimeDirectory, 'local-subscription'), 'utf8')).toBe('local-login-complete')
+    expect(JSON.stringify((await device()).runtime_report)).not.toContain('local-login-complete')
+  } catch (error) {
+    if (projectId) {
+      const diagnostic = await database
+        .run(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            return {
+              runs: yield* sql`SELECT r.state,r.end_reason,r.stop_acked_at FROM agent_runs r JOIN project_agents a ON a.id=r.agent_id WHERE a.project_id=${projectId}`,
+              events:
+                yield* sql`SELECT e.seq::float8 AS seq,e.kind,e.tool_call_id,e.payload FROM conversation_events e JOIN conversations c ON c.id=e.conversation_id JOIN project_agents a ON a.id=c.agent_id WHERE a.project_id=${projectId} ORDER BY e.seq`,
+              reports: yield* sql`SELECT report FROM node_runtime_reports`,
+              threads: yield* sql`SELECT status,status_reason,agent_type FROM threads WHERE project_id=${projectId}`,
+            }
+          }),
+        )
+        .catch(() => undefined)
+      console.error('T3 local integration state', JSON.stringify(diagnostic))
+    }
+    throw error
+  } finally {
+    controller.abort()
+    await daemon
+    for (const threadId of await readdir(join(nodeDirectory, 'threads')).catch(() => [])) {
+      try {
+        const worker = await host.request(threadId, { type: 'status', ok: false })
+        if (worker.pid) process.kill(worker.pid, 'SIGTERM')
+        await expect
+          .poll(
+            async () =>
+              host.request(threadId, { type: 'status', ok: false }).then(
+                () => false,
+                () => true,
+              ),
+            { timeout: 5000 },
+          )
+          .toBe(true)
+      } catch {
+        /* 启动失败的 Worker 可能已退出。 */
+      }
+    }
+    await database.runtime.runPromise(Scope.close(scope, Exit.void))
+    await database.close()
+    await rm(directory, { recursive: true, force: true })
+  }
+}, 45000)

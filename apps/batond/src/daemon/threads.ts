@@ -164,7 +164,11 @@ export function makeThreadService(options: {
       if (cmd.action === 'open') {
         const capability = options.capability()
         if (previous) throw new AdmissionRejected('thread_already_exists')
-        if (cmd.agent_type !== 'cursor' || capability.status !== 'available' || !capability.capabilities.create)
+        const shell = cmd.agent_type === 'shell'
+        if (shell) {
+          if (!cmd.project_id || !cmd.origin_conversation_id || !cmd.origin_tool_call_id)
+            throw new AdmissionRejected('project_required')
+        } else if (cmd.agent_type !== 'cursor' || capability.status !== 'available' || !capability.capabilities.create)
           throw new AdmissionRejected('agent_unavailable')
         if (!cmd.working_directory) throw new AdmissionRejected('invalid_working_directory')
         let cwd: string
@@ -175,7 +179,7 @@ export function makeThreadService(options: {
         }
         const generation = cmd.storage_generation ?? randomUUID()
         const paths = workerPaths(options.dataDirectory, cmd.thread_id)
-        const model = cmd.model ?? capability.default_model
+        const model = shell ? '' : (cmd.model ?? capability.default_model)
         request = {
           type: 'thread_open',
           ok: false,
@@ -186,11 +190,17 @@ export function makeThreadService(options: {
             thread_id: cmd.thread_id,
             node_id: options.identity.node_id,
             storage_generation: generation,
-            agent_type: 'cursor',
+            agent_type: shell ? 'shell' : 'cursor',
+            ...(cmd.project_id ? { project_id: cmd.project_id } : {}),
+            ...(cmd.origin_conversation_id ? { origin_conversation_id: cmd.origin_conversation_id } : {}),
+            ...(cmd.origin_tool_call_id ? { origin_tool_call_id: cmd.origin_tool_call_id } : {}),
             working_directory: cwd,
             execution_timeout_seconds: cmd.execution_timeout_seconds ?? 7200,
             ...(model ? { model } : {}),
-            adapter_config: { state_path: join(paths.threadDirectory, 'native.json') },
+            adapter_config: {
+              state_path: join(paths.threadDirectory, 'native.json'),
+              ...(shell ? { home: options.dataDirectory } : {}),
+            },
           },
         }
       } else {

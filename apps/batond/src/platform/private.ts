@@ -1,5 +1,6 @@
 export {
   ensurePrivateDirectory,
+  protectPrivateDirectory,
   validatePrivateDirectory,
   openPrivateFile,
   readPrivateFile,

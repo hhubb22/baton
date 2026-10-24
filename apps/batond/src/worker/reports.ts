@@ -40,7 +40,10 @@ export const boundReport = (report: ThreadReport): ThreadReport => {
   const original = bounded.content
   const contentBytes = Buffer.byteLength(original)
   const isReply = bounded.kind === 'reply'
-  if (bytes(bounded) <= reportBudget && (!isReply || contentBytes <= 2 * replyHalfBudget)) return bounded
+  const shellBase64 =
+    isReply && bounded.metadata?.encoding === 'base64' && typeof bounded.metadata.exit_code === 'number'
+  const contentBudget = shellBase64 ? 4 * Math.ceil((2 * replyHalfBudget) / 3) : 2 * replyHalfBudget
+  if (bytes(bounded) <= reportBudget && (!isReply || contentBytes <= contentBudget)) return bounded
   const originalBytes = bounded.original_bytes ?? contentBytes
   const base = { ...bounded, truncated: true, original_bytes: originalBytes }
   const content =

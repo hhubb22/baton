@@ -36,6 +36,8 @@ export interface ProcessWatchdog {
 }
 
 export interface SpawnOwnedProcessOptions {
+  /** Attach output consumers synchronously, before a fast child can exit and Node drains its pipes. */
+  readonly onSpawn?: (child: ChildProcessWithoutNullStreams) => void
   /** Mandatory on POSIX. Start once per Worker; never attach a detached Worker here. */
   readonly watchdog?: ProcessWatchdog | undefined
   /** Mandatory on Windows so crash recovery has durable PID + creation time. */

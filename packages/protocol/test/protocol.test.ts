@@ -68,7 +68,7 @@ const codecs: Record<string, Schema.Codec<unknown>> = {
 const additions: Record<string, string[]> = {
   RuntimeAgent: ['reason'],
   ThreadReport: ['command_id', 'command_outcome'],
-  ThreadCommand: ['trace_context'],
+  ThreadCommand: ['trace_context', 'project_id', 'origin_conversation_id', 'origin_tool_call_id'],
   ThreadCommandResult: ['storage_generation'],
 }
 const inputOptional = new Set([
@@ -180,6 +180,34 @@ describe('Go 导出样例往返', () => {
     for (const item of worker.cases.filter((item) => item.name.endsWith('.command_id'))) {
       expect(Schema.encodeSync(WorkerRequest)(Schema.decodeUnknownSync(WorkerRequest)(item.value))).toEqual(item.value)
     }
+  })
+  it('Project 来源在 Thread 命令和 Worker 配置中保留', () => {
+    const origin = {
+      project_id: '98cb5d71-7e45-49c5-a6dc-e4d181516521',
+      origin_conversation_id: 'a15294ed-09f1-46eb-81da-8ed1f705e282',
+      origin_tool_call_id: 'exec-tool-1',
+    }
+    const command = { ...fixtureValue('ThreadCommand'), ...origin }
+    const commandSchema = dtoSchemas.ThreadCommand
+    expect(
+      Schema.encodeSync(commandSchema)(Schema.decodeUnknownSync(commandSchema, { onExcessProperty: 'error' })(command)),
+    ).toEqual(command)
+    const config = {
+      ...origin,
+      thread_id: 'd7f96538-39af-4c55-be65-0135ef097d36',
+      node_id: '390dbfed-3e99-4140-afde-accefe209326',
+      storage_generation: 'shell-generation',
+      agent_type: 'shell',
+      working_directory: '/workspace',
+      execution_timeout_seconds: 7200,
+      adapter_config: {},
+    }
+    expect(
+      Schema.encodeSync(WorkerOpenConfig)(
+        Schema.decodeUnknownSync(WorkerOpenConfig, { onExcessProperty: 'error' })(config),
+      ),
+    ).toEqual(config)
+    expect(Schema.is(commandSchema)({ ...command, project_id: 'invalid' })).toBe(false)
   })
   it('接收方忽略未知可选字段', () => {
     const original = fixtureValue('RuntimeAgent')

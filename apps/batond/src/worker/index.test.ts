@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import {
   WorkerIPCMessage as WorkerIPCMessageSchema,
+  ThreadReport as ThreadReportSchema,
   type ThreadReport,
   type WorkerOpenConfig,
   type WorkerRequest,
@@ -194,6 +195,53 @@ const delta = (id: string, text: string) => ({
 })
 
 describe('reliable Worker', () => {
+  it('persists attachment references while parsing outside the command queue', async () =>
+    fixture(async (dbPath) => {
+      const attachments = [
+        { kind: 'file', node_id: randomUUID(), root_id: 'workspace', path: 'artifact.log', access_status: 'available' },
+      ]
+      await run(
+        Effect.gen(function* () {
+          const cfg = config(),
+            f = yield* fake
+          const started = yield* Deferred.make<void>()
+          const release = yield* Deferred.make<void>()
+          const worker = yield* makeWorker({
+            dbPath,
+            agentFactory: () => f.agent,
+            attachments: () =>
+              Effect.gen(function* () {
+                yield* Deferred.succeed(started, undefined)
+                yield* Deferred.await(release)
+                return attachments
+              }),
+          })
+          yield* worker.handle(request(cfg, 'thread_open'))
+          yield* opened(worker)
+          const input = message(cfg)
+          yield* worker.handle(input)
+          yield* completed(worker, input.command_id!)
+          yield* Queue.offer(f.events, event(input.client_message_id!, 'reply'))
+          yield* Deferred.await(started)
+          expect((yield* worker.handle({ type: 'status', ok: true }).pipe(Effect.timeout(1000))).ok).toBe(true)
+          yield* Deferred.succeed(release, undefined)
+          const output = yield* until(reports(worker), (rows) => rows.some((row) => row.kind === 'reply'))
+          expect(output.find((row) => row.kind === 'reply')?.attachments).toEqual(attachments)
+        }),
+      )
+      const reader = new DatabaseSync(dbPath, { readOnly: true })
+      try {
+        const row = reader
+          .prepare("SELECT payload FROM thread_outbox WHERE json_extract(payload,'$.report.kind')='reply'")
+          .get()
+        expect(typeof row?.payload).toBe('string')
+        if (typeof row?.payload !== 'string') throw new Error('Expected a persisted reply')
+        const saved = Schema.decodeUnknownSync(Schema.Struct({ report: ThreadReportSchema }))(JSON.parse(row.payload))
+        expect(saved.report.attachments).toEqual(attachments)
+      } finally {
+        reader.close()
+      }
+    }))
   it('serves fresh output before acceptance without ledger writes and clears it between turns', () =>
     fixture(async (dbPath) => {
       await run(

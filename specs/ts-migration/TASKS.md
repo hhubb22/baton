@@ -40,6 +40,9 @@ Status: complete
 
 ## T3 交付 Project 与设备管理
 
+Status: complete
+实现与验证入口：[Project 中心](../../apps/server/README.md#project-与设备管理)、[Runtime 宿主](../../apps/batond/src/project/README.md)、[shell Thread](../../apps/batond/src/agents/shell/README.md)、[设备管理](../../apps/batond/README.md#设备目录与模型订阅)。真实 PostgreSQL、HTTPS/WSS、独立 Runtime 和 Worker 与本地模型替身贯穿 Project 工具、Thread、事项、记忆和设备确认。Runtime 保留源码开发入口；Windows 凭据操作通过 TS helper 接入，原生系统矩阵与 SEA 总装仍归 T5。
+
 - 依据：[Project Agent TECH](../project-agent/TECH.md)、[控制面调度 TECH](../control-dispatch-reliability/TECH.md)、[Agent Inbox TECH](../agent-inbox/TECH.md)、Baton PRODUCT R-06、R-17～R-23。
 - 依赖：T2 的员工、设备与 Thread 链路；使用其公开契约，不依赖 T4 的其他 Agent。
 - 交付：现有 TS Project Runtime 在 TS batond 上启动、续租并使用 Thread、事项和记忆工具；网页可管理 Project、设备目录、设置、附件及模型订阅。

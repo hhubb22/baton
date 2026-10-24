@@ -9,6 +9,19 @@ async function main() {
     await runDaemonCLI(action, args)
     return
   }
+  if (action === 'files' || action === 'project-exec') {
+    const { runDeviceCLI } = await import('./devices/cli.ts')
+    await runDeviceCLI(action, args)
+    return
+  }
+  if (action === 'login' || action === 'subscriptions') {
+    const { positionals } = parseArgs({ args, allowPositionals: true, options: {} })
+    if ((action === 'login' && positionals.length !== 1) || (action === 'subscriptions' && positionals.length !== 0))
+      throw new Error('用法：login <openai-codex|xai> 或 subscriptions')
+    const { runProjectCLI } = await import('./project/index.ts')
+    await runProjectCLI(action, positionals[0])
+    return
+  }
   if (action === 'watchdog') {
     const { runWatchdogCommand } = await import('./platform/process.ts')
     await runWatchdogCommand()

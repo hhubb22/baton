@@ -21,10 +21,16 @@ export class CurrentBrowserSession extends Context.Service<CurrentBrowserSession
   'baton/http/CurrentBrowserSession',
 ) {}
 
+const errorBody = Schema.Struct({
+  ...D.ErrorResponse.fields,
+  current_revision: Schema.optionalKey(NonNegativeInteger),
+  current: Schema.optionalKey(Schema.NullOr(Schema.Union([D.ProjectMemory, D.AttentionRequest]))),
+  error: Schema.optionalKey(Schema.String),
+})
 const failure = <const Status extends number>(status: Status) =>
-  D.ErrorResponse.pipe(
+  errorBody.pipe(
     Schema.decodeTo(
-      Schema.Struct({ ...D.ErrorResponse.fields, status: Schema.Literal(status) }),
+      Schema.Struct({ ...errorBody.fields, status: Schema.Literal(status) }),
       SchemaTransformation.transform({
         decode: (body) => ({ ...body, status }),
         encode: ({ status: _status, ...body }) => body,
@@ -51,6 +57,8 @@ const EmptyInput = Schema.Record(Schema.String, Schema.Never)
 const cookie = { 'set-cookie': Schema.String }
 const nodeParams = { nodeId: UUID }
 const threadParams = { threadId: UUID }
+const projectParams = { projectId: UUID }
+const memoryParams = { ...projectParams, memoryId: UUID }
 export const EnrollmentResponse = Schema.Struct({ ...D.EnrollmentResponse.fields, expires_at: Timestamp })
 const FileView = Schema.Struct({
   ...D.FileView.fields,
@@ -139,6 +147,26 @@ const Nodes = HttpApiGroup.make('nodes')
       payload: EmptyInput,
       success: D.RevokeNodeResponse,
     }),
+    Endpoint.post('addRoot', '/api/v1/nodes/:nodeId/roots', {
+      params: nodeParams,
+      payload: D.UpdateBrowseRootsInput,
+      success: D.NodeStatus,
+    }),
+    Endpoint.delete('removeRoot', '/api/v1/nodes/:nodeId/roots', {
+      params: nodeParams,
+      payload: D.UpdateBrowseRootsInput,
+      success: D.NodeStatus,
+    }),
+    Endpoint.put('setProjectExec', '/api/v1/nodes/:nodeId/project-exec', {
+      params: nodeParams,
+      payload: D.SetProjectExecInput,
+      success: D.NodeStatus,
+    }),
+    Endpoint.post('subscriptionLogin', '/api/v1/nodes/:nodeId/subscriptions/login', {
+      params: nodeParams,
+      payload: D.SubscriptionLoginInput,
+      success: D.SubscriptionLoginResponse,
+    }),
     Endpoint.get('files', '/api/v1/nodes/:nodeId/files', {
       params: nodeParams,
       query: Q.FilesQuery,
@@ -208,12 +236,96 @@ const Threads = HttpApiGroup.make('threads')
   )
   .middleware(BrowserRequest)
 
+const Projects = HttpApiGroup.make('projects')
+  .add(
+    Endpoint.get('list', '/api/v1/projects', { query: Q.ProjectListQuery, success: D.ProjectsResponse }),
+    Endpoint.post('create', '/api/v1/projects', {
+      payload: D.CreateProjectInput,
+      success: D.Project.pipe(HttpApiSchema.status(201)),
+    }),
+    Endpoint.get('get', '/api/v1/projects/:projectId', { params: projectParams, success: D.Project }),
+    Endpoint.patch('update', '/api/v1/projects/:projectId', {
+      params: projectParams,
+      payload: D.PatchProjectInput,
+      success: D.Project,
+    }),
+    Endpoint.get('status', '/api/v1/projects/:projectId/status', { params: projectParams, success: D.ProjectStatus }),
+    Endpoint.get('messages', '/api/v1/projects/:projectId/messages', {
+      params: projectParams,
+      query: Q.ProjectMessagesQuery,
+      success: D.ProjectMessagePage,
+    }),
+    Endpoint.post('addMessage', '/api/v1/projects/:projectId/messages', {
+      params: projectParams,
+      payload: D.ProjectMessageInput,
+      success: D.ProjectMessage.pipe(HttpApiSchema.status(202)),
+    }),
+    Endpoint.get('events', '/api/v1/projects/:projectId/events', {
+      params: projectParams,
+      query: Q.ProjectEventsQuery,
+      success: D.ProjectEventPage,
+    }),
+    Endpoint.post('stop', '/api/v1/projects/:projectId/stop', {
+      params: projectParams,
+      payload: EmptyInput,
+      success: D.OKResponse,
+    }),
+    Endpoint.post('retry', '/api/v1/projects/:projectId/retry', {
+      params: projectParams,
+      payload: EmptyInput,
+      success: D.OKResponse,
+    }),
+    Endpoint.get('memory', '/api/v1/projects/:projectId/memory', {
+      params: projectParams,
+      query: Q.ProjectListQuery,
+      success: D.MemoriesResponse,
+    }),
+    Endpoint.get('getMemory', '/api/v1/projects/:projectId/memory/:memoryId', {
+      params: memoryParams,
+      success: D.ProjectMemory,
+    }),
+    Endpoint.put('writeMemory', '/api/v1/projects/:projectId/memory/:memoryId', {
+      params: memoryParams,
+      payload: D.WriteMemoryInput,
+      success: D.ProjectMemory,
+    }),
+    Endpoint.get('memoryRevisions', '/api/v1/projects/:projectId/memory/:memoryId/revisions', {
+      params: memoryParams,
+      query: Q.MemoryRevisionsQuery,
+      success: D.MemoryRevisionsResponse,
+    }),
+  )
+  .middleware(BrowserRequest)
+
+const Inbox = HttpApiGroup.make('inbox')
+  .add(
+    Endpoint.get('list', '/api/v1/inbox', { query: Q.InboxQuery, success: D.InboxPage }),
+    Endpoint.get('get', '/api/v1/attention-requests/:requestId', {
+      params: { requestId: UUID },
+      success: D.AttentionRequest,
+    }),
+    Endpoint.post('answer', '/api/v1/attention-requests/:requestId/answer', {
+      params: { requestId: UUID },
+      payload: D.HandleAttentionInput,
+      success: D.AttentionRequest,
+    }),
+    Endpoint.post('close', '/api/v1/attention-requests/:requestId/close', {
+      params: { requestId: UUID },
+      payload: Schema.Struct({
+        expected_version: D.HandleAttentionInput.fields.expected_version,
+        client_request_id: D.HandleAttentionInput.fields.client_request_id,
+      }),
+      success: D.AttentionRequest,
+    }),
+  )
+  .middleware(BrowserRequest)
+
 const System = HttpApiGroup.make('system')
   .add(Endpoint.get('diagnostics', '/api/v1/diagnostics', { success: Diagnostics }))
   .middleware(BrowserRequest)
 
 export const BatonHttpApi = HttpApi.make('baton')
-  .add(Public, Account, Nodes, Threads, System)
+  .add(Public, Account, Nodes, Threads, Projects, Inbox, System)
   .annotate(HttpApi.PayloadParseOptions, { onExcessProperty: 'error' })
   .annotate(HttpApi.QueryParseOptions, { onExcessProperty: 'error' })
   .annotateMerge(
@@ -221,7 +333,7 @@ export const BatonHttpApi = HttpApi.make('baton')
       title: 'Baton HTTP API',
       version: '0.0.0',
       description:
-        'TypeScript center HTTP endpoints. Mutations require an allowed Origin and, for cookie sessions, X-CSRF-Token. Project and other unavailable features return feature_unavailable.',
+        'TypeScript center HTTP endpoints for accounts, devices, Threads, Projects, memory and Inbox. Mutations require an allowed Origin and, for cookie sessions, X-CSRF-Token.',
     }),
   )
 

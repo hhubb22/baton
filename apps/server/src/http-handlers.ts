@@ -14,6 +14,8 @@ import * as Nodes from './nodes.ts'
 import * as Threads from './threads.ts'
 import type { HTTPOptions } from './http.ts'
 import { AppError } from './errors.ts'
+import { projectHttpHandlers } from './http-projects.ts'
+import * as DeviceManagement from './device-management.ts'
 import { cookieToken, httpBusiness, decodeResponse } from './http-security.ts'
 
 export const httpHandlers = (options: HTTPOptions) => {
@@ -41,6 +43,7 @@ export const httpHandlers = (options: HTTPOptions) => {
     gap: false,
   })
   return Layer.mergeAll(
+    projectHttpHandlers(),
     HttpApiBuilder.group(BatonHttpApi, 'public', (handlers) =>
       handlers
         .handle('login', ({ payload }) =>
@@ -148,33 +151,65 @@ export const httpHandlers = (options: HTTPOptions) => {
             }),
           ),
         )
+        .handle('addRoot', ({ params, payload }) =>
+          httpBusiness(
+            Effect.gen(function* () {
+              const { employee } = yield* CurrentBrowserSession
+              return yield* DeviceManagement.updateBrowseRoots(
+                employee.id,
+                params.nodeId,
+                'add',
+                payload.path,
+                options.gateway(),
+              )
+            }),
+          ),
+        )
+        .handle('removeRoot', ({ params, payload }) =>
+          httpBusiness(
+            Effect.gen(function* () {
+              const { employee } = yield* CurrentBrowserSession
+              return yield* DeviceManagement.updateBrowseRoots(
+                employee.id,
+                params.nodeId,
+                'remove',
+                payload.path,
+                options.gateway(),
+              )
+            }),
+          ),
+        )
+        .handle('setProjectExec', ({ params, payload }) =>
+          httpBusiness(
+            Effect.gen(function* () {
+              const { employee } = yield* CurrentBrowserSession
+              return yield* DeviceManagement.setProjectExec(
+                employee.id,
+                params.nodeId,
+                payload.enabled,
+                options.gateway(),
+              )
+            }),
+          ),
+        )
+        .handle('subscriptionLogin', ({ params, payload }) =>
+          httpBusiness(
+            Effect.gen(function* () {
+              const { employee } = yield* CurrentBrowserSession
+              return yield* DeviceManagement.startSubscriptionLogin(
+                employee.id,
+                params.nodeId,
+                payload.provider,
+                options.gateway(),
+              )
+            }),
+          ),
+        )
         .handle('files', ({ params, query }) =>
           httpBusiness(
             Effect.gen(function* () {
               const { employee } = yield* CurrentBrowserSession
-              const result = yield* Effect.tryPromise({
-                try: () =>
-                  options.gateway().request(params.nodeId, employee.id, {
-                    type: 'files.browse',
-                    operation_id: randomUUID(),
-                    ...query,
-                  }),
-                catch: (error) => (error instanceof AppError ? error : new AppError(503, 'files_unavailable')),
-              })
-              const valid = yield* Schema.decodeUnknownEffect(P.FileResult, { onExcessProperty: 'error' })(result).pipe(
-                Effect.mapError(() => new AppError(400, 'invalid_request', '请求格式无效')),
-              )
-              if (!valid.ok)
-                return yield* Effect.fail(
-                  new AppError(valid.code === 'not_found' ? 404 : 422, valid.code ?? 'files_unavailable'),
-                )
-              const { type: _type, ok: _ok, ...file } = valid
-              return {
-                ...file,
-                node_id: params.nodeId,
-                kind: valid.kind ?? 'directory',
-                truncated: valid.truncated ?? false,
-              }
+              return yield* DeviceManagement.browse(employee.id, params.nodeId, query, options.gateway())
             }),
           ),
         ),

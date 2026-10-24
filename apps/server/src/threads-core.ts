@@ -112,6 +112,11 @@ export const admission = (
     const row = rows[0]!
     if (!directoryAllowed(row.system_name, directory, row.report?.roots))
       return yield* Effect.fail(failure('directory_not_allowed', 422))
+    if (agent === 'shell') {
+      if (operation !== 'create' && operation !== 'queue') return yield* Effect.fail(failure('shell_single_turn', 422))
+      if (!row.report?.exec?.enabled) return yield* Effect.fail(failure('exec_disabled', 422))
+      return ''
+    }
     const capability = row.report?.agents?.find((a) => a.agent_type === agent && a.status === 'available')
     if (!capability || !capability.capabilities[operation])
       return yield* Effect.fail(
@@ -159,7 +164,17 @@ export const normalizeMessage = (input: ThreadMessageInput) =>
       return yield* Effect.fail(failure('message_too_large', 413))
     return normalized
   })
-export const insertMessage = (t: Thread, input: ThreadMessageInput) =>
+export interface ProjectThreadSource {
+  agentId: string
+  projectId: string
+  conversationId: string
+  toolCallId: string
+  executionTimeoutSeconds?: number
+  shellExec?: boolean
+  waitSeconds?: number
+}
+
+export const insertMessage = (t: Thread, input: ThreadMessageInput, source?: ProjectThreadSource) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const m = yield* normalizeMessage(input)
@@ -174,13 +189,23 @@ export const insertMessage = (t: Thread, input: ThreadMessageInput) =>
     }
     if (t.status === 'archived' || t.archive_requested_at) return yield* Effect.fail(failure('thread_archived'))
     if (t.status === 'stopped' && !t.opened_at) return yield* Effect.fail(failure('thread_not_opened', 422))
+    if (t.agent_type === 'shell') {
+      const existing = yield* sql`SELECT id FROM thread_messages WHERE thread_id=${t.id}`
+      if (!source?.shellExec || existing.length) return yield* Effect.fail(failure('shell_single_turn', 422))
+    }
     const selected = m.model || t.next_model || ''
     yield* admission(t.employee_id, t.node_id, t.agent_type, t.working_directory, selected, m.mode)
     const rows = yield* sql<{
       value: ThreadMessage
-    }>`INSERT INTO thread_messages(id,employee_id,thread_id,client_message_id,sender,content,mode,model,requested_model) VALUES(${uuid()},${t.employee_id},${t.id},${m.client_message_id},'employee',${m.content},${m.mode},${selected},${m.model}) RETURNING jsonb_strip_nulls(to_jsonb(thread_messages)-'employee_id') AS value`
+    }>`INSERT INTO thread_messages(id,employee_id,thread_id,client_message_id,sender,origin_tool_call_id,content,mode,model,requested_model) VALUES(${uuid()},${t.employee_id},${t.id},${m.client_message_id},${source ? 'project_agent' : 'employee'},${source?.toolCallId ?? null},${m.content},${m.mode},${selected},${m.model}) RETURNING jsonb_strip_nulls(to_jsonb(thread_messages)-'employee_id') AS value`
     yield* enqueue(t, 'message', { client_message_id: m.client_message_id })
-    yield* audit(t, 'message.accepted', rows[0]!.value)
+    yield* audit(
+      t,
+      'message.accepted',
+      rows[0]!.value,
+      source ? 'project_agent' : 'employee',
+      source?.agentId ?? t.employee_id,
+    )
     yield* touch(t.id)
     return rows[0]!.value
   })

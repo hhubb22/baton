@@ -3,7 +3,7 @@ import { once } from 'node:events'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
-import { afterEach, describe, expect, it } from 'vite-plus/test'
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
 import { identityMatches, readProcessIdentity, type ProcessIdentity } from './identity.ts'
@@ -11,6 +11,7 @@ import {
   spawnOwnedProcess,
   spawnOwnedProcessScoped,
   startProcessWatchdog,
+  reapProcessTree,
   type OwnedProcess,
   type ProcessWatchdog,
 } from './process.ts'
@@ -67,6 +68,25 @@ async function watchdog() {
 }
 
 describe.skipIf(process.platform === 'win32')('owned POSIX processes', () => {
+  it.each(['exited', 'running'] as const)('verifies %s groups when signalling is denied', async (state) => {
+    const owned = await spawnOwnedProcess(
+      { file: process.execPath, args: ['-e', state === 'exited' ? '' : 'setInterval(() => {}, 1000)'] },
+      { watchdog: await watchdog() },
+    )
+    ownedProcesses.push(owned)
+    if (state === 'exited') await owned.exited
+    const kill = process.kill.bind(process)
+    const denied = vi.spyOn(process, 'kill').mockImplementation((pid, signal) => {
+      if (pid === -owned.pid) throw Object.assign(new Error('Group signal denied'), { code: 'EPERM' })
+      return kill(pid, signal)
+    })
+    try {
+      if (state === 'exited') expect(await reapProcessTree(owned.record)).toEqual({ reaped: true })
+      else await expect(reapProcessTree(owned.record)).rejects.toMatchObject({ code: 'EPERM' })
+    } finally {
+      denied.mockRestore()
+    }
+  })
   it.each(['reap', 'worker-kill', 'root-exit'] as const)(
     '%s reaps controlled SDK descendants without killing another Thread',
     async (mode) => {

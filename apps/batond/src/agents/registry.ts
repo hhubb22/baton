@@ -2,6 +2,7 @@ import { Effect } from 'effect'
 import type { RuntimeAgent } from '@baton/protocol'
 import { inspectCursorSdk } from '@baton/providers/cursor'
 import { makeCursorAgentFactory } from './cursor/index.ts'
+import { makeShellAgentFactory } from './shell/index.ts'
 import { probeCursor } from './cursor/probe.ts'
 import { startProcessWatchdog } from '../platform/process.ts'
 import { currentBatondCommand } from '../daemon/host.ts'
@@ -87,4 +88,5 @@ export async function probeLocalCursor(): Promise<RuntimeAgent> {
 
 export const agentRegistry = {
   cursor: { type: 'cursor', makeFactory: makeCursorAgentFactory, probe: probeLocalCursor },
+  shell: { type: 'shell', makeFactory: makeShellAgentFactory },
 } as const

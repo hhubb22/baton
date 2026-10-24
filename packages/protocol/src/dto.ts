@@ -215,8 +215,8 @@ export const CreateProjectInput = Schema.Struct({
     Schema.makeFilter((value) => value.trim().length > 0),
   ),
   goal: Schema.optionalKey(boundedText(64 * 1024)),
-  provider: Text,
-  model: Text,
+  provider: summary(1024),
+  model: summary(1024),
 })
 export type CreateProjectInput = typeof CreateProjectInput.Type
 
@@ -686,8 +686,8 @@ export const PatchProjectInput = Schema.Struct({
   ),
   goal: Schema.optionalKey(Schema.NullOr(boundedText(64 * 1024))),
   status: Schema.optionalKey(Schema.NullOr(Schema.Literals(['active', 'paused', 'archived']))),
-  provider: Schema.optionalKey(Schema.NullOr(Text)),
-  model: Schema.optionalKey(Schema.NullOr(Text)),
+  provider: Schema.optionalKey(Schema.NullOr(summary(1024))),
+  model: Schema.optionalKey(Schema.NullOr(summary(1024))),
 }).check(
   Schema.makeFilter(
     (value) => Object.values(value).some((field) => field !== null && field !== undefined) || '至少修改一个字段',
@@ -710,8 +710,8 @@ export type Presence = typeof Presence.Type
 // internal/projectagent/project.go · Agent
 export const ProjectAgent = Schema.Struct({
   id: UUID,
-  provider: Text,
-  model: Text,
+  provider: summary(1024),
+  model: summary(1024),
 })
 export type ProjectAgent = typeof ProjectAgent.Type
 
@@ -1135,6 +1135,9 @@ export type Thread = typeof Thread.Type
 
 // internal/protocol/thread.go · ThreadCommand
 export const ThreadCommand = Schema.Struct({
+  project_id: Schema.optionalKey(UUID),
+  origin_conversation_id: Schema.optionalKey(UUID),
+  origin_tool_call_id: Schema.optionalKey(ClientMessageID),
   trace_context: Schema.optionalKey(TraceContext),
   type: Schema.Literal('thread.command'),
   thread_id: UUID,

@@ -16,6 +16,7 @@ import {
   transaction,
   uuid,
   type DB,
+  type ProjectThreadSource,
 } from './threads-core.ts'
 export { claimCommands, processReceipt } from './threads-outbox.ts'
 export { processReport } from './threads-reports.ts'
@@ -23,6 +24,7 @@ export { processReport } from './threads-reports.ts'
 export const create = (
   employeeID: string,
   input: P.CreateBrowserThreadInput,
+  source?: ProjectThreadSource,
 ): DB<{ thread: P.Thread; created: boolean }> =>
   transaction(
     Effect.gen(function* () {
@@ -36,6 +38,7 @@ export const create = (
         model: valid.model || '',
         working_directory: valid.working_directory,
         message,
+        ...(source ? { source } : {}),
       }
       const hash = digest(normalized)
       yield* sql`SELECT pg_advisory_xact_lock(hashtextextended(${employeeID + ':' + valid.client_thread_id},0))`
@@ -63,7 +66,13 @@ export const create = (
           yield* sql`UPDATE employee_settings SET default_device_node_id=${node},updated_at=clock_timestamp() WHERE employee_id=${employeeID}`
         }
       }
-      if (valid.agent_type === 'shell') return yield* Effect.fail(failure('agent_unavailable', 422))
+      if (valid.agent_type === 'shell' && !source?.shellExec)
+        return yield* Effect.fail(failure('agent_unavailable', 422))
+      if (source) {
+        const binding =
+          yield* sql`SELECT c.id FROM conversations c JOIN project_agents a ON a.id=c.agent_id AND a.employee_id=c.employee_id WHERE a.employee_id=${employeeID} AND a.id=${source.agentId} AND a.project_id=${source.projectId} AND c.id=${source.conversationId}`
+        if (!binding.length) return yield* Effect.fail(failure('not_found', 404))
+      }
       const model = yield* admission(
         employeeID,
         node,
@@ -73,21 +82,33 @@ export const create = (
         'create',
       )
       const id = uuid()
-      yield* sql`INSERT INTO threads(id,employee_id,client_thread_id,request_hash,node_id,agent_type,model,working_directory,created_by) VALUES(${id},${employeeID},${valid.client_thread_id},${hash},${node},${valid.agent_type},${model},${valid.working_directory},'employee')`
+      yield* sql`INSERT INTO threads(id,employee_id,client_thread_id,request_hash,node_id,agent_type,model,working_directory,created_by,project_id,origin_conversation_id,origin_tool_call_id,execution_timeout_seconds,exec_wait_until) VALUES(${id},${employeeID},${valid.client_thread_id},${hash},${node},${valid.agent_type},${model},${valid.working_directory},${source ? 'project_agent' : 'employee'},${source?.projectId ?? null},${source?.conversationId ?? null},${source?.toolCallId ?? null},${source?.executionTimeoutSeconds ?? 7200},CASE WHEN ${source?.shellExec ?? false} THEN clock_timestamp()+${source?.waitSeconds ?? 30}*interval '1 second' ELSE NULL END)`
       const thread = yield* readThread(employeeID, id)
-      yield* audit(thread, 'thread.created', { node_id: node })
+      yield* audit(
+        thread,
+        'thread.created',
+        { node_id: node },
+        source ? 'project_agent' : 'employee',
+        source?.agentId ?? employeeID,
+      )
       yield* enqueue(thread, 'open', { model })
-      yield* insertMessage(thread, message)
+      yield* insertMessage(thread, message, source)
       return { thread: yield* readThread(employeeID, id), created: true }
     }),
   )
 
-export const addMessage = (employeeID: string, threadID: string, input: P.ThreadMessageInput): DB<P.ThreadMessage> =>
+export const addMessage = (
+  employeeID: string,
+  threadID: string,
+  input: P.ThreadMessageInput,
+  source?: ProjectThreadSource,
+): DB<P.ThreadMessage> =>
   transaction(
     Effect.gen(function* () {
       const valid = yield* decode(P.ThreadMessageInput, input)
       const t = yield* readThread(employeeID, threadID, true)
-      return yield* insertMessage(t, valid)
+      if (source && t.project_id !== source.projectId) return yield* Effect.fail(failure('not_found', 404))
+      return yield* insertMessage(t, valid, source)
     }),
   )
 
@@ -96,11 +117,15 @@ const action = (
   threadID: string,
   kind: 'withdraw' | 'stop' | 'archive',
   messageID = '',
+  source?: ProjectThreadSource,
 ): DB<P.Thread> =>
   transaction(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const t = yield* readThread(employeeID, threadID, true)
+      if (source && t.project_id !== source.projectId) return yield* Effect.fail(failure('not_found', 404))
+      const actor = source ? 'project_agent' : 'employee',
+        actorID = source?.agentId ?? employeeID
       if (t.status === 'archived') {
         if (kind === 'archive') return t
         return yield* Effect.fail(failure('thread_archived'))
@@ -128,7 +153,7 @@ const action = (
           (!t.stop_requested_at || t.stop_confirmed_at)
         ) {
           yield* sql`UPDATE threads SET status='archived',archive_requested_at=COALESCE(archive_requested_at,clock_timestamp()),archived_at=clock_timestamp() WHERE id=${threadID}`
-          yield* audit(t, 'thread.archived', {})
+          yield* audit(t, 'thread.archived', {}, actor, actorID)
         } else {
           if (kind === 'archive')
             yield* sql`UPDATE threads SET archive_requested_at=COALESCE(archive_requested_at,clock_timestamp()) WHERE id=${threadID}`
@@ -138,15 +163,17 @@ const action = (
           }
         }
       }
-      yield* audit(t, kind + '.requested', kind === 'withdraw' ? { message_id: messageID } : {})
+      yield* audit(t, kind + '.requested', kind === 'withdraw' ? { message_id: messageID } : {}, actor, actorID)
       yield* touch(threadID)
       return yield* readThread(employeeID, threadID)
     }),
   )
 export const withdraw = (employeeID: string, threadID: string, messageID: string) =>
   action(employeeID, threadID, 'withdraw', messageID)
-export const stop = (employeeID: string, threadID: string) => action(employeeID, threadID, 'stop')
-export const archive = (employeeID: string, threadID: string) => action(employeeID, threadID, 'archive')
+export const stop = (employeeID: string, threadID: string, source?: ProjectThreadSource) =>
+  action(employeeID, threadID, 'stop', '', source)
+export const archive = (employeeID: string, threadID: string, source?: ProjectThreadSource) =>
+  action(employeeID, threadID, 'archive', '', source)
 export const resume = (employeeID: string, threadID: string): DB<P.Thread> =>
   transaction(
     Effect.gen(function* () {
@@ -156,6 +183,7 @@ export const resume = (employeeID: string, threadID: string): DB<P.Thread> =>
       const pending =
         yield* sql`SELECT id FROM thread_outbox WHERE employee_id=${employeeID} AND thread_id=${threadID} AND action='resume' AND completed_at IS NULL`
       if (pending.length) return t
+      if (t.agent_type === 'shell') return yield* Effect.fail(failure('shell_single_turn', 422))
       if (!t.opened_at || !t.storage_generation) return yield* Effect.fail(failure('thread_not_opened', 422))
       if (!['idle', 'stopped', 'unknown'].includes(t.status)) return yield* Effect.fail(failure())
       if (t.stop_requested_at && !t.stop_confirmed_at) return yield* Effect.fail(failure('stop_pending'))

@@ -1,6 +1,6 @@
 # TypeScript 开发中心
 
-`@baton/server` 提供员工登录、设备身份与能力管理、Cursor 远程 Thread、持久命令调度、回复时间线和实时输出。它与 [`apps/batond`](../batond/README.md) 的出站 WSS 节点连接配合，网页静态目录由中心构建脚本生成并由中心提供。
+`@baton/server` 提供员工登录、设备管理、Cursor 远程 Thread、Project 调度、主对话、事项和记忆，以及持久命令、回复时间线和实时输出。它与 [`apps/batond`](../batond/README.md) 的出站 WSS 节点连接配合，网页静态目录由中心构建脚本生成并由中心提供。
 
 Go 的 `cmd/baton-server`、`cmd/batond`、根构建脚本和 Docker 镜像仍是发布入口；TypeScript 开发入口独立构建，发布切换在迁移 T5 进行。TS 的当前能力范围见下表，完整迁移边界见 [迁移设计](../../specs/ts-migration/TECH.md)。
 
@@ -92,9 +92,19 @@ Cursor 设备运行进程需显式配置 `CURSOR_API_KEY`，能力探测成功�
 
 实时输出由 Worker 保留当前 Turn 最近 256 KiB，每次读取最多 16 KiB，游标为 `epoch:字节偏移`。Turn 结束和切换时清空；淘汰、旧 epoch 或上游丢失输出时返回 `gap:true`。HTTP 输出查询和浏览器 WebSocket 复用设备临时 RPC，中心不持久化实时输出。回复时间线读取中心已保存的回复；它与设备原生历史是不同接口。
 
+## Project 与设备管理
+
+网页可创建、配置、暂停和归档 Project，发送主对话消息、处理事项、查看和编辑记忆及其历史版本。输入、对话事件、工具结果和记忆都保存在 PostgreSQL；Runtime 使用设备本地订阅，按需启动。默认设备符合在线、同步、订阅和名额条件时优先使用，否则选择同一员工的其他合格设备。没有可用设备时保留输入并显示等待原因。
+
+中心按独立额度处理 Thread 命令和 Project 的 start、stop、wake，发送前持久保存重试时间。Project 租约为 60 秒，节点每 20 秒续租，58 秒未成功续租即停止 Runtime。暂停或停止 Project 作废租约；已创建的 Thread 按各自生命周期继续运行。事项处理携带版本与请求标识，记忆写入携带 `expected_revision`，冲突响应返回当前记录。
+
+在线且已同步的设备支持目录增删、命令执行授权和订阅设备码登录；HTTP 在设备确认操作标识及保存值后才返回成功。目录、仓库、shell 与订阅状态通过能力报告刷新。文件预览仅返回授权根内的受限文本，符号链接越界、二进制内容和无效游标均被拒绝。
+
+`nodes.exec` 仅由已保存的 Project 工具调用创建单轮 shell Thread，本机开关默认关闭。执行前重新读取本机授权和开关；等待工具结果结束不会停止命令。命令退出后先保存完成证据，再报告输出；缺少可信证据时标记 unknown，保持原命令未重发。设备配置与登录命令见 [节点文档](../batond/README.md#设备目录与模型订阅)。
+
 ## HTTP 契约与追踪
 
-`packages/protocol/src/http-api.ts` 使用 Effect `HttpApi` 定义现有登录、账号、设备、Thread 和诊断接口的路径、入参、响应与错误。服务端通过同一声明构建路由并验证请求和返回值。已登录且完成改密的员工可读取 `GET /api/v1/openapi.json`；文档由契约生成，写请求继续要求允许的 Origin 和会话 CSRF token。
+`packages/protocol/src/http-api.ts` 使用 Effect `HttpApi` 定义登录、账号、设备、Thread、Project、事项、记忆和诊断接口的路径、入参、响应与错误。服务端通过同一声明构建路由并验证请求和返回值。已登录且完成改密的员工可读取 `GET /api/v1/openapi.json`；文档由契约生成，写请求继续要求允许的 Origin 和会话 CSRF token。
 
 中心、节点和 Worker 使用 Effect 原生 tracing，默认服务名分别为 `baton-server`、`batond`、`baton-worker`。设置 `OTEL_EXPORTER_OTLP_ENDPOINT` 后，通过 OTLP/HTTP JSON 导出到其 `/v1/traces`；也可用 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` 指定完整地址。未配置地址时不发起导出请求。`OTEL_TRACES_EXPORTER=none` 可显式关闭，`OTEL_RESOURCE_ATTRIBUTES` 可附加部署属性。
 
@@ -116,17 +126,18 @@ docker run --rm --name baton-tracing \
 
 | 功能                                             | TS 当前响应                                                                                          |
 | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
-| Project、Inbox 及其子路由                        | HTTP 501，`code:"feature_unavailable"`                                                               |
-| 在线设备授权目录增删、Project 执行授权、订阅登录 | HTTP 501，`code:"feature_unavailable"`；目录选择仅支持读取本机登记的根和子目录名称                   |
-| 文件和附件预览                                   | `/nodes/{id}/files` 仅读取目录；请求文件路径返回 HTTP 422，`code:"path_forbidden"`                   |
-| Pi、Codex、Kiro、受限 shell Thread               | 当前节点只上报 Cursor；在目录等校验通过后，新建返回 HTTP 422，`code:"agent_unavailable"`             |
+| Project、Inbox、记忆及历史版本 | 提供 Project 创建与配置、主对话、运行状态、事项处理和版本冲突响应 |
+| 在线设备授权目录增删、Project 执行授权、订阅登录 | 等待设备保存确认，订阅凭据留在设备 |
+| 文件和附件预览 | 授权根内目录分页和受限文本预览；越界与二进制内容拒绝 |
+| 受限 shell Thread | 仅供 Project `nodes.exec` 使用，要求目标设备本机已开启执行授权 |
+| Pi、Codex、Kiro | 当前节点只上报 Cursor；新建返回 HTTP 422，`code:"agent_unavailable"` |
 | Cursor steer                                     | HTTP 422，`code:"steer_unsupported"`；同时传模型时为 `model_with_steer`                              |
 | Cursor 轮间模型切换                              | HTTP 422，`code:"model_switch_unsupported"`                                                          |
 | 网页原生历史 `/threads/{id}/history`             | HTTP 200 的 `SessionResult`，`ok:false`；在线设备为 `history_unavailable`，离线设备为 `node_offline` |
 | 过程 `/threads/{id}/trace`                       | 合法查询返回 HTTP 200，`{ok:false,code:"trace_missing",steps:[]}`                                    |
 | 实时输出时设备离线或尚未同步                     | HTTP 200 的 `SessionResult`，`ok:false`，分别为 `node_offline` 或 `node_syncing`                     |
 
-Project、事项、设备管理、附件与受限 shell 属于迁移 T3，其他 Agent 与统一历史属于 T4。当前 TS 开发入口提供上表中的可用行为和明确拒绝；Go 发布入口保留其已有功能。
+其他 Agent 与统一历史属于迁移 T4；完整安装包和发布切换属于 T5。Project Runtime 从当前源码仓库与已安装的依赖启动，开发 bundle 需要保留该仓库布局。Go 发布入口保留其已有功能。
 
 ## 验证
 

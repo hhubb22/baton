@@ -44,7 +44,7 @@ provider 按“直接接入原模块及测试 → 补宿主实现与事件映射
 | 打包 | esbuild 产出单文件 JS；batond 再打成 Node SEA | 服务端在 Docker 中直接用 Node 运行 bundle |
 | Agent 接入 | t3code provider / runtime、`effect-acp`、`effect-codex-app-server`、`@cursor/sdk` | 优先复用实现及测试，Baton 提供宿主、可靠性和领域事件映射 |
 
-Web 保持 React + Vite，不引入 Effect。Project Agent Runtime 保持现有实现，只改为 batond 的子命令（见下文打包）。
+Web 保持 React + Vite，不引入 Effect。Project Agent Runtime 保持现有模型、工具、压缩和恢复实现。TS 开发节点通过源码 CLI 启动它，并在宿主中接入 stdio、租约、订阅登录和私有凭据文件操作；发布时改为 batond 子命令（见下文打包）。
 
 ## 仓库结构
 
@@ -81,6 +81,8 @@ third_party/t3code/          MIT 许可与来源记录
 
 签名密钥沿用当前规则：`lstat` 确认不存在才生成 Ed25519 私钥并以 `0600` 原子写入，已有文件校验权限、类型和内容。`node:crypto` 提供 Ed25519。
 
+Project 核心位于 `projects.ts` 与 `project-*.ts`，事项和记忆位于 `inbox.ts`、`project-memory.ts`，设备确认位于 `device-management.ts`。共享 `HttpApi` 同时声明这些功能与 Thread 接口。放置循环逐候选取得数据库名额和期限，start、stop、wake 各自领取持久工作；工具业务变更、结果事件和 shell 等待输入消费在同一事务提交。
+
 ### batond（`apps/batond`）
 
 | 职责 | 建议位置 | 实现约束与现有查阅入口 |
@@ -92,7 +94,7 @@ third_party/t3code/          MIT 许可与来源记录
 | 私有文件、时钟与进程 | `src/platform` | 平台差异集中管理，见下文平台实现 |
 | Project 执行与订阅 | `src/project` | Runtime 启停、续租、受限 shell 与订阅登录；复用现有 TS Runtime |
 
-Project Runtime 与 cursor-host 都作为可执行文件的子命令分发。现有 `internal/sidecar` 的发现机制由子命令调用替代，设备使用时无需安装系统 Node。
+Project Runtime 与 cursor-host 在发布形态中作为可执行文件的子命令分发。TS 开发入口的 `src/project` 在 WSS 连接循环外拥有 Runtime，`project-runtime.db` 保存启动意图、所属进程和清理证据，断线只替换 RPC transport。`src/devices` 提供目录、文本预览、仓库扫描、执行授权和订阅管理，`src/agents/shell` 使用相同 Worker 保存命令 intent 和完成证据。开发 bundle 仍依赖源码 Runtime 入口与已安装依赖；T5 的 SEA 集成替换该定位方式，设备使用时无需安装系统 Node。
 
 ## 平台相关实现
 
