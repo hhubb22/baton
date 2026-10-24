@@ -18,7 +18,7 @@ import * as IdAllocator from '@t3tools/provider-core/server/IdAllocator'
 import * as ProviderAdapter from '@t3tools/provider-core/server/ProviderAdapter'
 import { makeOutputMailbox } from '../worker/output.ts'
 import { ensurePrivateDirectory, readPrivateFile } from '../platform/private.ts'
-import { findSent, validatePreparation } from './evidence.ts'
+import { findSent, validatePreparation, type SnapshotMessage } from './evidence.ts'
 import { loadMapping, mappingFor, mappingThread, persistMapping, statePath } from './mapping.ts'
 import type { NativeMapping } from './mapping.ts'
 import {
@@ -37,6 +37,11 @@ export interface ProviderHostDriverOptions {
   readonly adapter: ProviderAdapter.ProviderAdapterV2['Service']
   /** Upstream `supportsActiveSteering`. Queue-only agents reject steer here. */
   readonly steer: boolean
+  /** Pi requires binding the native thread before its active-branch snapshot can be read. */
+  readonly bindSnapshot?: boolean
+  readonly snapshotMessages?: (
+    snapshot: ProviderAdapter.ProviderAdapterV2ThreadSnapshot,
+  ) => ReadonlyArray<SnapshotMessage>
   readonly runtimeMode: RuntimeMode
   readonly interactionMode: ProviderInteractionMode
   readonly runtimePolicy: (cwd: string) => ProviderAdapter.ProviderAdapterV2RuntimePolicy
@@ -111,7 +116,11 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
         if (!session || decision === undefined || answered.has(request.id)) return
         answered.add(request.id)
         yield* session
-          .respondToRuntimeRequest({ requestId: request.id, decision })
+          .respondToRuntimeRequest({
+            requestId: request.id,
+            decision,
+            ...(request.kind === 'user_input' ? { answers: {} } : {}),
+          })
           .pipe(
             Effect.catch(() =>
               stopped || closed
@@ -300,7 +309,7 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
             return yield* error(`${label} host cannot open another session`)
           const stored = yield* Effect.tryPromise({
             try: () => loadMapping(input, nativeSessionId, label),
-            catch: () => error(`${label} native mapping identity or working directory mismatch`),
+            catch: () => error(`${label} native mapping identity, working directory or profile mismatch`),
           })
           const authorized = yield* authorize(input)
           const runtime = yield* options.adapter
@@ -406,7 +415,7 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
         Effect.gen(function* () {
           const stored = yield* Effect.tryPromise({
             try: () => loadMapping(input, preparation.nativeSessionId, label),
-            catch: () => error(`${label} native mapping identity or working directory mismatch`),
+            catch: () => error(`${label} native mapping identity, working directory or profile mismatch`),
           })
           const authorized = yield* authorize(input)
           const snapshot = yield* Effect.scoped(
@@ -417,16 +426,25 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
                 modelSelection: authorized.selection,
                 runtimePolicy: authorized.policy,
               })
-              return yield* runtime
-                .readThreadSnapshot({ providerThread: mappingThread(stored) })
-                .pipe(Effect.timeout('30 seconds'))
+              const storedThread = mappingThread(stored)
+              const thread = options.bindSnapshot
+                ? yield* runtime.resumeThread({
+                    providerThread: storedThread,
+                    threadId: authorized.threadId,
+                    modelSelection: authorized.selection,
+                    runtimePolicy: authorized.policy,
+                  })
+                : storedThread
+              return yield* runtime.readThreadSnapshot({ providerThread: thread }).pipe(Effect.timeout('30 seconds'))
             }),
           ).pipe(Effect.mapError((cause) => fail('read snapshot', cause)))
-          const messages = snapshot.messages.flatMap((entry) =>
-            entry.role === 'user' || entry.role === 'assistant'
-              ? [{ id: entry.id, role: entry.role, text: entry.text }]
-              : [],
-          )
+          const messages =
+            options.snapshotMessages?.(snapshot) ??
+            snapshot.messages.flatMap((entry) =>
+              entry.role === 'user' || entry.role === 'assistant'
+                ? [{ id: entry.id, role: entry.role, text: entry.text }]
+                : [],
+            )
           return yield* Effect.try({
             try: () => findSent(message, preparation, messages),
             catch: (cause) => (cause instanceof AgentHostError ? cause : error(`${label} input evidence is invalid`)),

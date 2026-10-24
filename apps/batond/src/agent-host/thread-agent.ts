@@ -142,7 +142,6 @@ function makeAgent(config: WorkerOpenConfig, options: AgentHostOptions): ThreadA
       if (broken) return
       broken = true
       yield* emit({ type: 'uncertain', reason })
-      if (live) yield* live.disconnect
     })
   const receive = (frame: import('./protocol.ts').HostEvent) => receiveEvent(hostState(), frame)
   const hostState = () => ({

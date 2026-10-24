@@ -3,6 +3,7 @@ import { OrchestrationV2ProviderThread, OrchestrationV2ProviderThreadJson } from
 import type { WorkerOpenConfig } from '@baton/protocol'
 import { dirname, isAbsolute, resolve } from 'node:path'
 import { realpath } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { ensurePrivateDirectory, readPrivateFile, writePrivateFileAtomic } from '../platform/private.ts'
 import { AgentError } from '../worker/agent.ts'
 
@@ -13,6 +14,8 @@ export const NativeMapping = Schema.Struct({
   nativeSessionId: Schema.String,
   cwd: Schema.String,
   statePath: Schema.String,
+  agentType: Schema.String,
+  profile: Schema.Record(Schema.String, Schema.String),
   /** Upstream `OrchestrationV2ProviderThread`, kept opaque here and decoded by the driver. */
   providerThread: Schema.Json,
 })
@@ -22,6 +25,22 @@ export function statePath(config: WorkerOpenConfig, label = 'Agent'): string {
   const path = config.adapter_config.state_path
   if (!path || !isAbsolute(path)) throw new AgentError(`${label} requires an absolute private state_path`)
   return resolve(path)
+}
+
+/** Non-secret profile locations must remain the same across host lifetimes. */
+const profileFor = (agentType: string): Record<string, string> => {
+  const profile: Record<string, string> = { home: homedir() }
+  const names =
+    agentType === 'pi'
+      ? ['PI_CODING_AGENT_DIR', 'PI_CODING_AGENT_SESSION_DIR']
+      : agentType === 'codex'
+        ? ['CODEX_HOME']
+        : []
+  for (const name of names) {
+    const value = process.env[name]?.trim()
+    if (value) profile[name] = value
+  }
+  return profile
 }
 
 /** The mapping file stores Thread attribution next to the native session. */
@@ -38,6 +57,8 @@ export async function mappingFor(
     nativeSessionId,
     cwd: await realpath(config.working_directory),
     statePath: path,
+    agentType: config.agent_type,
+    profile: profileFor(config.agent_type),
     providerThread: Schema.encodeSync(OrchestrationV2ProviderThreadJson)(providerThread),
   })
 }
@@ -53,11 +74,13 @@ export async function loadMapping(
   const mapping = Schema.decodeUnknownSync(NativeMapping)(JSON.parse(bytes.toString('utf8')))
   if (
     mapping.threadId !== config.thread_id ||
+    mapping.agentType !== config.agent_type ||
+    JSON.stringify(mapping.profile) !== JSON.stringify(profileFor(config.agent_type)) ||
     mapping.statePath !== path ||
     mapping.cwd !== (await realpath(config.working_directory)) ||
     (nativeSessionId !== undefined && mapping.nativeSessionId !== nativeSessionId)
   )
-    throw new AgentError(`${label} native mapping identity or working directory mismatch`)
+    throw new AgentError(`${label} native mapping identity, working directory or profile mismatch`)
   return mapping
 }
 

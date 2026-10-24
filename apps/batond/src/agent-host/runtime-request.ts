@@ -1,7 +1,7 @@
 import type { OrchestrationV2RuntimeRequest, ProviderApprovalDecision } from '@t3tools/contracts'
 
 /** Kinds that grant one execution. Session-wide and permanent decisions are never used. */
-const permissionKinds = new Set(['command', 'file-read', 'file-change', 'mcp-elicitation', 'permission'])
+const permissionKinds = new Set(['command', 'file-read', 'file-change', 'permission'])
 
 /**
  * Permission prompts are allowed once for the current turn. Questions and any

@@ -117,6 +117,7 @@ export const connectAgentHost = (
           ...options.command,
           args: [...(options.command.args ?? []), ...agentHostArguments(options.agentType, options.paths)],
           env: hostEnvironment(options.agentType),
+          cwd: options.paths.workingDirectory,
         },
         {
           watchdog: options.watchdog,
@@ -138,6 +139,7 @@ export const connectAgentHost = (
       }).pipe(Effect.provideService(Socket.Socket, socket), Effect.provide(RpcSerialization.layerNdjson))
       const client = yield* RpcClient.make(AgentHostRpc).pipe(Effect.provideService(RpcClient.Protocol, protocol))
       const disconnect = Scope.close(scope, Exit.void)
+      // The owner closes this scope after an RPC error; closing it from a client fiber can await that same fiber.
       const call = <A, E>(effect: Effect.Effect<A, E>): Effect.Effect<A, AgentError> =>
         effect.pipe(
           Effect.timeout('32 seconds'),
@@ -147,7 +149,6 @@ export const connectAgentHost = (
               channelFailure = error
             }),
           ),
-          Effect.onError(() => disconnect),
         )
       const processHandle = owned
       return {
