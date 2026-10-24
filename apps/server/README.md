@@ -133,14 +133,14 @@ docker run --rm --name baton-tracing \
 | 文件和附件预览 | 授权根内目录分页和受限文本预览；越界与二进制内容拒绝 |
 | 受限 shell Thread | 仅供 Project `nodes.exec` 使用，要求目标设备本机已开启执行授权 |
 | Pi、Codex | 节点完成只读认证、版本与模型探测后上报；支持新建、排队、插入、停止、恢复。macOS arm64 的 Pi 1.0.0、Codex 0.156.1 通过上游转录回放，其余版本或系统组合为 `unverified`，新建返回 HTTP 422，`code:"agent_unavailable"` |
-| Kiro | 尚未接入当前节点；新建返回 HTTP 422，`code:"agent_unavailable"` |
-| Cursor steer                                     | HTTP 422，`code:"steer_unsupported"`；同时传模型时为 `model_with_steer`                              |
-| Cursor、Pi、Codex 轮间模型切换                              | HTTP 422，`code:"model_switch_unsupported"`                                                          |
+| Kiro | 已接入 fork ACP adapter 与节点 agent-host；上游发现成功仍为 `auth: unknown`、本地 `version: null`，节点报告 `unverified`、`create: false`、`resume: false`。网页尚不能新建，新建返回 HTTP 422，`code:"agent_unavailable"`；离线回放及注入已验证 capability 的 e2e 仅验证行为，不证明认证有效 |
+| Cursor、Kiro steer                                     | HTTP 422，`code:"steer_unsupported"`；同时传模型时为 `model_with_steer`                              |
+| Cursor、Pi、Codex、Kiro 轮间模型切换                              | HTTP 422，`code:"model_switch_unsupported"`                                                          |
 | Thread 历史                                      | 时间线返回中心保存的输入和回复，设备离线时仍可分页读取。`/threads/{id}/history` 在权限检查后返回 HTTP 200 的 `SessionResult`，`ok:false`、`code:"history_unavailable"`，不向设备发送 `native_history` |
 | 过程 `/threads/{id}/trace`                       | 合法查询返回 HTTP 200，`{ok:false,code:"trace_missing",steps:[]}`                                    |
 | 实时输出时设备离线或尚未同步                     | HTTP 200 的 `SessionResult`，`ok:false`，分别为 `node_offline` 或 `node_syncing`                     |
 
-Kiro 与后续 Agent 的接入范围见适配规格；完整安装包和发布切换属于 T5。Project Runtime 从当前源码仓库与已安装的依赖启动，开发 bundle 需要保留该仓库布局。Go 发布入口保留其已有功能。
+Kiro 的配置、原生恢复和生产探测限制见 [节点接入说明](../batond/src/agents/kiro/README.md)，后续 Agent 的范围见适配规格；完整安装包和发布切换属于 T5。Project Runtime 从当前源码仓库与已安装的依赖启动，开发 bundle 需要保留该仓库布局。Go 发布入口保留其已有功能。
 
 ## 验证
 

@@ -11,7 +11,7 @@ Basis: 已确认的 Agent 接入范围；整包依赖 t3code fork 的决定；Ba
 | Agent | 本期工作 |
 |---|---|
 | Pi、Codex、Cursor | 改用 t3code 的完整 provider，替换现有接入 |
-| Kiro | 在 fork 中按 t3code 的 ACP registry 写法新增接入，保持原生会话恢复 |
+| Kiro | 已接入 fork 的 ACP provider 与节点 agent-host；认证与本地版本探测尚未验证，生产报告关闭新建与恢复 |
 | Grok、Antigravity | 切换后接入，使用设备上已经安装、配置并完成认证的原生程序 |
 
 Claude、OpenCode、Muse、通用 ACP Agent 目录接入均不在本期。既有 shell Thread 继续用于 Project Agent 命令执行。原生 fork、rollback、计划卡片、独立子 Agent 界面、自动续跑、多账号选择，以及 Agent 安装更新和登录托管均不在本期。
@@ -36,11 +36,15 @@ Claude、OpenCode、Muse、通用 ACP Agent 目录接入均不在本期。既有
 
 Cursor 缺少随设备分发的运行依赖时显示安装不完整；设备使用时不临时联网安装依赖。Grok、Antigravity 缺少原生运行环境时提供本机配置指引。
 
+Kiro 已接入节点，但上游 `checkAcpRegistryProviderStatus` 发现成功仍返回认证 `unknown`、本地版本 `null`；节点报告 `unverified`、`create: false`、`resume: false`，原因为“Kiro 上游只读探测尚不能确认认证与版本”。网页尚不能新建 Kiro，中心新建请求返回 HTTP 422、`agent_unavailable`。Kiro 2.32.0 的离线回放和注入已验证 capability 的 e2e 只验证自动化行为，不能证明本机认证或生产可用性。
+
 ### R-03｜认证与会话归属
 
 每台设备上的每种 Agent 使用一份本机认证上下文。本期不提供网页多账号切换。Thread 记录所用 Agent、原生会话和认证配置位置的关联；恢复只能使用这份关联。
 
 执行 Agent 的凭据与 Project Agent 模型订阅分别管理。`batond login openai-codex|xai` 的成功不代表 Codex 或 Grok Thread 已可用。凭据不进入中心、消息正文、历史或诊断日志。
+
+Kiro 从 PATH 查找 `kiro-cli`，沿用设备用户的原生认证配置；节点不提供 `BATON_KIRO_*` 或 `KIRO_HOME` 配置入口，profile 关联保存用户主目录 `homedir()`。
 
 认证失效、配置位置变化或账号不能访问原会话时，停止创建或恢复并说明原因，不能新建空会话来冒充恢复。
 
@@ -52,6 +56,8 @@ Cursor 缺少随设备分发的运行依赖时显示安装不完整；设备使�
 
 首次创建 Thread 时，原生会话归属必须先保存，再发送第一条消息。恢复时核对原生会话与工作目录，Thread ID 保持不变，历史中的工具调用不再次执行。
 
+Kiro 的恢复与发送核对从打开 adapter 起就指定既有原生会话，先以 `session/list` 核对会话 ID 与 cwd，再 `session/load`；缺失或 load 失败时明确失败，整个路径不创建替代会话。
+
 原生会话或本地映射缺失、历史不匹配时，返回历史缺失或不可用原因。网页仍能查看中心已经保存的回复；员工可以自行新建 Thread。
 
 ### R-05｜输入与重复确认
@@ -62,11 +68,11 @@ Cursor 缺少随设备分发的运行依赖时显示安装不完整；设备使�
 
 ### R-06｜插入
 
-插入只在 Agent 报告支持时提供，归属判断以上游实现为准；不支持插入的 Agent 执行中只提供排队。需要改变方向时，员工先停止当前一轮再发送新消息。插入结果无法确认时显示状态未知。
+插入只在 Agent 报告支持时提供，归属判断以上游实现为准；不支持插入的 Agent 执行中只提供排队。Kiro 不支持插入。需要改变方向时，员工先停止当前一轮再发送新消息。插入结果无法确认时显示状态未知。
 
 ### R-07｜模型
 
-模型列表和标识来自实际 Agent。未指定模型时使用该认证上下文的默认模型；界面里的“默认”不能作为虚构模型标识发送。
+模型列表和标识来自实际 Agent。未指定模型时使用该认证上下文的默认模型；界面里的“默认”不能作为虚构模型标识发送。Kiro 的模型取 Thread `model`、`adapter_config.model` 或 `default`；`default` 在原生 `session/new` 中省略，具体 ID 经 `_meta.kiro.modelId` 传递，整个 Thread 固定该选择，不支持轮间换模型。
 
 开启新一轮前才允许切换模型。模型不支持、配置未就绪或切换被拒绝时，若能确认消息尚未提交，就撤回该条消息并显示原因，继续处理后续排队消息；不能确认是否已提交时按 R-05 处理。没有实际切换能力时隐藏换模型操作，整个 Thread 使用创建时的模型。
 
@@ -126,7 +132,7 @@ Thread 历史是中心保存的输入和回复记录，所有 Agent 格式相同
 | 项目 | 缺少的证据 | 阻塞范围 |
 |---|---|---|
 | Cursor 认证 | 沿用上游 credential 流程还是员工显式配置的 API key | Cursor 认证入口 |
-| Kiro | fork 中新增的 ACP 接入能否完成恢复与模型选择 | Kiro 标为可用 |
+| Kiro | 生产探测仍不能确认认证与本地版本；2.32.0 离线夹具已覆盖 host 生命周期，独立进程组及后代回收、本地 API 链路均通过 | 生产保持 unverified、create=false、resume=false；离线行为验证不解除该限制 |
 | Grok、Antigravity | 安装、认证与恢复行为 | 各自交付 |
 | 系统矩阵 | Windows、macOS、Linux 上的原生程序和进程树回收验证 | 相应系统组合的交付声明 |
 
