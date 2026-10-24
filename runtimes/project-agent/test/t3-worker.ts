@@ -1,16 +1,9 @@
 import { readFile, writeFile, mkdir, appendFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import {
-  createModels,
-  fauxProvider,
-  fauxAssistantMessage,
-  fauxToolCall,
-  type TranscriptContext,
-} from '@earendil-works/pi-ai'
+import type { TranscriptContext } from '@earendil-works/pi-ai'
 import { StdioClient } from '../../shared/stdio.js'
 import { checkedRPC } from '../src/protocol.js'
-import { ProjectRuntime } from '../src/runtime.js'
 
 // 本地集成夹具：认证、模型和时间均为替身；Runtime 与工具 RPC 使用实际实现。
 const directory = process.env.T3_FIXTURE_RUNTIME_DIRECTORY!
@@ -52,6 +45,11 @@ if (command === 'probe') {
   await writeFile(marker, 'local-login-complete', { mode: 0o600 })
   process.stdin.destroy()
 } else if (command === 'run') {
+  // probe 和设备登录有独立的短时限，模型与 Runtime 仅在运行任务时加载。
+  const [{ createModels, fauxProvider, fauxAssistantMessage, fauxToolCall }, { ProjectRuntime }] = await Promise.all([
+    import('@earendil-works/pi-ai'),
+    import('../src/runtime.js'),
+  ])
   await appendFile(
     join(directory, 'runtime-starts.jsonl'),
     JSON.stringify({ pid: process.pid, run_id: process.env.BATON_PROJECT_RUN_ID }) + '\n',

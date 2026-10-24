@@ -224,15 +224,15 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
       .poll(
         async () => {
           const node = await device()
-          return (
-            node.synced &&
-            node.runtime_report?.agents?.[0]?.status === 'available' &&
-            node.runtime_report?.project_runtime?.providers?.[0]?.status
-          )
+          return {
+            synced: node.synced,
+            cursor: node.runtime_report?.agents?.[0]?.status,
+            subscription: node.runtime_report?.project_runtime?.providers?.[0]?.status,
+          }
         },
         { timeout: 10000 },
       )
-      .toBe('login_required')
+      .toEqual({ synced: true, cursor: 'available', subscription: 'login_required' })
     expect((await bob<P.NodesResponse>('/nodes')).body.nodes).toEqual([])
     expect((await bob(`/nodes/${identity.node_id}/project-exec`, 'PUT', { enabled: true })).status).toBe(403)
     expect(
