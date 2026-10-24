@@ -27,11 +27,16 @@ const settingsFor = (launchArgs: string) =>
     launchArgs,
   })
 
-const summarize = (message: string | undefined) =>
-  message
-    ?.replace(/[\u0000-\u001f]/g, ' ')
-    .trim()
-    .slice(0, 240) || undefined
+const summarize = (message: string | undefined) => {
+  if (message === undefined) return undefined
+  let text = ''
+  for (const char of message) {
+    const code = char.codePointAt(0) ?? 0
+    text += code <= 0x1f ? ' ' : char
+  }
+  const trimmed = text.trim().slice(0, 240)
+  return trimmed === '' ? undefined : trimmed
+}
 
 /** Upstream install, version and auth check. It does not send a prompt or open a browser. */
 export const piProbe = (launchArgs = '') =>

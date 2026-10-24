@@ -30,7 +30,12 @@ it('keeps an authenticated Pi unavailable until its platform is in the verified 
 it('reports a missing Pi install as unavailable', () => {
   const report = hostedAgentReport(
     'codex',
-    { authenticated: 'missing', models: [], reason: 'Codex CLI is not authenticated', details: { installed: false, version: 'unknown', platform: 'darwin-arm64' } },
+    {
+      authenticated: 'missing',
+      models: [],
+      reason: 'Codex CLI is not authenticated',
+      details: { installed: false, version: 'unknown', platform: 'darwin-arm64' },
+    },
     'Codex CLI 未安装或尚未认证',
   )
   expect(report).toMatchObject({ status: 'unavailable', reason: 'Codex CLI is not authenticated' })
