@@ -3,6 +3,8 @@ import * as SqlClient from 'effect/sql/SqlClient'
 import * as P from '@baton/protocol'
 import { AppError } from './errors.ts'
 import { canRetryOpen } from './threads-open-retry.ts'
+import { pendingQuestions, questionAnswers } from './threads-questions.ts'
+export { answer } from './threads-questions.ts'
 import {
   admission,
   audit,
@@ -265,6 +267,8 @@ export const view = (employeeID: string, threadID: string): DB<P.ThreadView> =>
         ...t,
         retry_open_allowed: yield* canRetryOpen(t),
         current_turn: turns[0]?.value ?? null,
+        pending_questions: yield* pendingQuestions(t),
+        question_answers: yield* questionAnswers(t),
         pending_messages: messages.map((x) => x.value).filter((x) => x.status !== 'withdrawn'),
         failed_messages: messages.map((x) => x.value).filter((x) => x.status === 'withdrawn'),
         resume_pending: pending.length > 0,

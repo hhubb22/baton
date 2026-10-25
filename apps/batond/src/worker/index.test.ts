@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite'
 import {
   WorkerIPCMessage as WorkerIPCMessageSchema,
   ThreadReport as ThreadReportSchema,
+  type ThreadAnswerInput,
   type ThreadReport,
   type WorkerOpenConfig,
   type WorkerRequest,
@@ -38,7 +39,7 @@ const config = (): WorkerOpenConfig => ({
 })
 const request = (
   cfg: WorkerOpenConfig,
-  type: 'thread_open' | 'thread_message' | 'thread_stop' | 'thread_resume',
+  type: 'thread_open' | 'thread_message' | 'thread_stop' | 'thread_resume' | 'thread_answer',
   fields: Partial<WorkerRequest> = {},
 ): WorkerRequest =>
   ({
@@ -296,6 +297,183 @@ describe('reliable Worker', () => {
         }),
       ),
   )
+
+  describe('Agent questions', () => {
+    it.effect('persists questions and answers once, rejects changed or stale answers, and cancels on stop', () =>
+      fixture((dbPath) =>
+        Effect.gen(function* () {
+          const cfg = config()
+          const f = yield* fake
+          const answers: ThreadAnswerInput[] = []
+          const worker = yield* makeWorker({
+            dbPath,
+            agentFactory: () => ({
+              ...f.agent,
+              answer: (answer) =>
+                Effect.sync(() => {
+                  answers.push(answer)
+                }),
+            }),
+          })
+          yield* worker.handle(request(cfg, 'thread_open'))
+          yield* opened(worker)
+          const input = message(cfg)
+          yield* worker.handle(input)
+          yield* completed(worker, input.command_id ?? '')
+          const identity = {
+            nativeSessionId: 'native',
+            messageId: input.client_message_id ?? '',
+            executionId: `exec:${input.client_message_id}`,
+          }
+          const question = {
+            request_id: 'question-1',
+            kind: 'user_input',
+            questions: [{ id: 'choice', header: 'Choice', question: 'Which folder?', options: [] }],
+          } satisfies import('@baton/protocol').ThreadQuestion
+          yield* Queue.offer(f.events, { ...identity, type: 'question', question })
+          yield* until(reports(worker), (items) => items.some((r) => r.kind === 'question.pending'))
+          const answer = request(cfg, 'thread_answer', {
+            answer: { request_id: question.request_id, decision: 'accept', answers: { choice: 'src' } },
+          })
+          const receipt = yield* worker.handle(answer)
+          yield* completed(worker, answer.command_id ?? '')
+          expect((yield* worker.handle(answer)).receipt).toEqual(receipt.receipt)
+          expect(
+            (yield* worker.handle({ ...answer, answer: { request_id: question.request_id, decision: 'cancel' } })).code,
+          ).toBe('command_conflict')
+          expect(answers).toEqual([answer.answer])
+          const pending = { ...question, request_id: 'question-2' }
+          yield* Queue.offer(f.events, { ...identity, type: 'question', question: pending })
+          yield* until(reports(worker), (items) => items.some((r) => r.question?.request_id === pending.request_id))
+          const stop = request(cfg, 'thread_stop')
+          yield* worker.handle(stop)
+          expect(
+            (yield* worker.handle(
+              request(cfg, 'thread_answer', { answer: { request_id: pending.request_id, decision: 'cancel' } }),
+            )).code,
+          ).toBe('invalid_state')
+          yield* Queue.offer(f.events, event(identity.messageId, 'end'))
+          yield* completed(worker, stop.command_id ?? '')
+          const saved = yield* (yield* makeLedger(dbPath)).load
+          expect(saved.questions?.map((q) => [q.question.request_id, q.state])).toEqual([
+            ['question-1', 'resolved'],
+            ['question-2', 'cancelled'],
+          ])
+          expect(f.sentInputs).toHaveLength(1)
+        }),
+      ),
+    )
+    it.effect('keeps answer failure when the native question closes before the response returns', () =>
+      fixture((dbPath) =>
+        Effect.gen(function* () {
+          const cfg = config()
+          const f = yield* fake
+          const release = yield* Deferred.make<void>()
+          const input = message(cfg)
+          const worker = yield* makeWorker({
+            dbPath,
+            agentFactory: () => ({
+              ...f.agent,
+              answer: () =>
+                Effect.gen(function* () {
+                  yield* Queue.offer(f.events, {
+                    type: 'question.resolved',
+                    requestId: 'expiring-question',
+                    nativeSessionId: 'native',
+                    messageId: input.client_message_id ?? '',
+                    executionId: `exec:${input.client_message_id}`,
+                  })
+                  yield* Deferred.await(release)
+                  return yield* Effect.fail(new AgentError('Native request expired'))
+                }),
+            }),
+          })
+          yield* worker.handle(request(cfg, 'thread_open'))
+          yield* opened(worker)
+          yield* worker.handle(input)
+          yield* completed(worker, input.command_id ?? '')
+          yield* Queue.offer(f.events, {
+            type: 'question',
+            nativeSessionId: 'native',
+            messageId: input.client_message_id ?? '',
+            executionId: `exec:${input.client_message_id}`,
+            question: { request_id: 'expiring-question', kind: 'user_input', questions: [] },
+          })
+          yield* until(reports(worker), (items) => items.some((r) => r.kind === 'question.pending'))
+          const answer = request(cfg, 'thread_answer', {
+            answer: { request_id: 'expiring-question', decision: 'accept', answers: {} },
+          })
+          yield* worker.handle(answer)
+          yield* until(reports(worker), (items) => items.some((r) => r.kind === 'question.resolved'))
+          yield* Deferred.succeed(release, undefined)
+          const items = yield* completed(worker, answer.command_id ?? '')
+          expect(findCompletion(items, answer.command_id ?? '')?.command_outcome).toBe('unknown')
+          expect((yield* worker.handle(answer)).command_status?.command_outcome).toBe('unknown')
+          expect(f.sentInputs).toHaveLength(1)
+        }),
+      ),
+    )
+    it.effect('never replays an answer whose delivery was interrupted by Worker restart', () =>
+      fixture((dbPath) =>
+        Effect.gen(function* () {
+          const cfg = config()
+          const answer = request(cfg, 'thread_answer', {
+            answer: { request_id: 'interrupted-question', decision: 'accept', answers: { choice: 'src' } },
+          })
+          let answered = 0
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const f = yield* fake
+              const started = yield* Deferred.make<void>()
+              const worker = yield* makeWorker({
+                dbPath,
+                agentFactory: () => ({
+                  ...f.agent,
+                  answer: () =>
+                    Effect.gen(function* () {
+                      answered++
+                      yield* Deferred.succeed(started, undefined)
+                      yield* Effect.never
+                    }),
+                }),
+              })
+              yield* worker.handle(request(cfg, 'thread_open'))
+              yield* opened(worker)
+              const input = message(cfg)
+              yield* worker.handle(input)
+              yield* completed(worker, input.command_id ?? '')
+              yield* Queue.offer(f.events, {
+                type: 'question',
+                nativeSessionId: 'native',
+                messageId: input.client_message_id ?? '',
+                executionId: `exec:${input.client_message_id}`,
+                question: { request_id: 'interrupted-question', kind: 'user_input', questions: [] },
+              })
+              yield* until(reports(worker), (items) => items.some((r) => r.kind === 'question.pending'))
+              yield* worker.handle(answer)
+              yield* Deferred.await(started)
+            }),
+          )
+          const f = yield* fake
+          const worker = yield* makeWorker({
+            dbPath,
+            agentFactory: () => ({
+              ...f.agent,
+              answer: () =>
+                Effect.sync(() => {
+                  answered++
+                }),
+            }),
+          })
+          const items = yield* completed(worker, answer.command_id ?? '')
+          expect(findCompletion(items, answer.command_id ?? '')?.command_outcome).toBe('unknown')
+          expect((yield* worker.handle(answer)).command_status?.command_outcome).toBe('unknown')
+          expect(answered).toBe(1)
+          expect(f.sentInputs).toHaveLength(0)
+        }),
+      ),
+    )
+  })
 
   describe('attachments and live output', () => {
     it.effect('persists attachment references while parsing outside the command queue', () =>

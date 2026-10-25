@@ -86,9 +86,9 @@ export const resumedOnly = (transcript: Transcript): Transcript => {
 /**
  * Command permission comes from tool_call_read_only_on_request; the question is
  * from plan_questions. MCP form fields mirror upstream CodexMcpElicitation.test.ts.
- * Strict outbound responses require accept once and cancellation of the question.
+ * Outbound responses require accept once and the explicit answer to the question.
  */
-export const withRuntimeQuestions = (permission: Transcript, questions?: Transcript): Transcript => {
+export const withRuntimeQuestions = (permission: Transcript, questions?: Transcript, accept = false): Transcript => {
   const approval = permission.entries.find(
     (entry) => entry.type === 'emit_inbound' && entry.label === 'item/commandExecution/requestApproval',
   )
@@ -117,7 +117,11 @@ export const withRuntimeQuestions = (permission: Transcript, questions?: Transcr
           label: 'item/tool/requestUserInput',
           frame: { id: 101, method: 'item/tool/requestUserInput', params: { ...questionParams, ...identity } },
         },
-        { type: 'expect_outbound', label: 'question cancelled', frame: { id: 101, result: { answers: {} } } },
+        {
+          type: 'expect_outbound',
+          label: 'question answered',
+          frame: { id: 101, result: { answers: accept ? { schema_preference: { answers: ['UI flexibility'] } } : {} } },
+        },
       ]
     : [
         {
@@ -140,7 +144,14 @@ export const withRuntimeQuestions = (permission: Transcript, questions?: Transcr
             },
           },
         },
-        { type: 'expect_outbound', label: 'mcp cancelled', frame: { id: 100, result: { action: 'cancel' } } },
+        {
+          type: 'expect_outbound',
+          label: 'mcp answered',
+          frame: {
+            id: 100,
+            result: accept ? { action: 'accept', content: { approval: 'once' } } : { action: 'cancel' },
+          },
+        },
       ]
   return {
     ...permission,

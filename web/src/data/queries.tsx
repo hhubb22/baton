@@ -19,6 +19,7 @@ import type {
   SaveMemoryInput,
   SendMode,
   Session,
+  ThreadAnswerInput,
 } from './types'
 
 // 查询键的第一段是数据主题，收到某个主题的变化时刷新以它开头的全部查询。
@@ -268,6 +269,13 @@ export function useSetThreadExecutionLimit() {
 export function useSetThreadModel() {
   const client = useClient()
   return useMutation({ mutationFn: (input: { threadId: ID; model: string }) => client.setThreadModel(input) })
+}
+
+export function useAnswerThreadQuestion() {
+  const client = useClient()
+  return useMutation({
+    mutationFn: (input: { threadId: ID; answer: ThreadAnswerInput }) => client.answerThreadQuestion(input),
+  })
 }
 
 export function useStopThread() {

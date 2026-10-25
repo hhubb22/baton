@@ -60,7 +60,7 @@ export interface Worker {
 interface Operation {
   readonly id: string
   readonly epoch: number
-  readonly kind: 'open' | 'resume' | 'prepare' | 'send' | 'recover' | 'cleanup'
+  readonly kind: 'open' | 'resume' | 'prepare' | 'send' | 'recover' | 'cleanup' | 'answer'
   readonly messageId?: string
   fiber?: Fiber.Fiber<void>
 }
@@ -196,7 +196,22 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
       if (message.state === 'queued') settleMessage(draft, message, 'cancelled', reason)
     }
   }
+  function cancelQuestions(draft: State, reason: string) {
+    for (const question of draft.questions ?? []) {
+      if (question.state === 'resolved' || question.state === 'cancelled') continue
+      const outcome = question.state === 'intent' ? 'unknown' : 'cancelled'
+      question.state = 'cancelled'
+      report(draft, 'question.resolved', {
+        request_id: question.question.request_id,
+        worker_turn_seq: question.turn,
+        reason,
+      })
+      const command = question.commandId ? draft.commands[question.commandId] : undefined
+      if (command) finish(draft, command, outcome, reason)
+    }
+  }
   function endActive(draft: State, reason: string) {
+    cancelQuestions(draft, reason)
     const active = draft.activeMessage ? draft.messages[draft.activeMessage] : undefined
     if (active?.state !== 'sent' || active.ended) return
     active.ended = true
@@ -211,6 +226,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
     draft.phase = draft.phase === 'unknown' ? 'unknown' : 'stopping'
     draft.resumeRequested = false
     withdrawQueued(draft, reason === 'timeout' ? 'timeout' : 'Stopped before input intent')
+    cancelQuestions(draft, reason)
     for (const previous of Object.values(draft.commands)) {
       if (!isPending(previous)) continue
       if (previous.receipt.action === 'open') {
@@ -577,7 +593,30 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
       }
       yield* commit((draft) => {
         const current = draft.messages[event.messageId]!
-        if (event.type === 'reply') {
+        if (event.type === 'question') {
+          if (draft.phase !== 'busy' || current.turn === undefined) return
+          draft.questions ??= []
+          if (draft.questions.some((q) => q.question.request_id === event.question.request_id)) return
+          draft.questions.push({
+            question: event.question,
+            messageId: event.messageId,
+            executionId: event.executionId,
+            turn: current.turn,
+            state: 'pending',
+          })
+          report(draft, 'question.pending', { question: event.question, worker_turn_seq: current.turn })
+        } else if (event.type === 'question.resolved') {
+          const question = draft.questions?.find(
+            (q) => q.question.request_id === event.requestId && q.messageId === event.messageId,
+          )
+          if (!question || question.state === 'resolved' || question.state === 'cancelled') return
+          const awaitingDelivery = question.state === 'queued'
+          if (question.state !== 'intent') question.state = 'resolved'
+          report(draft, 'question.resolved', { request_id: event.requestId, worker_turn_seq: question.turn })
+          const command = question.commandId ? draft.commands[question.commandId] : undefined
+          if (command && awaitingDelivery)
+            finish(draft, command, 'cancelled', 'Agent closed the question before answer delivery')
+        } else if (event.type === 'reply') {
           if (
             draft.outbox.some(
               (entry) =>
@@ -618,6 +657,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
             repaired ? event : undefined,
           )
         } else {
+          cancelQuestions(draft, 'Current reply ended')
           current.ended = true
           report(draft, 'turn.ended', {
             worker_turn_seq: current.turn!,
@@ -974,6 +1014,40 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         return
       }
       if (state.phase !== 'idle' && state.phase !== 'busy') return
+      const question = state.questions?.find((q) => q.state === 'queued')
+      if (question?.answer && question.commandId) {
+        const answer = question.answer
+        const commandId = question.commandId
+        yield* commit((draft) => {
+          const pending = draft.questions?.find((q) => q.commandId === commandId)
+          const command = draft.commands[commandId]
+          if (pending) pending.state = 'intent'
+          if (command) command.status = { ...command.status, state: 'running' }
+        })
+        yield* launch(
+          newOperation('answer'),
+          (current.answer ? current.answer(answer) : Effect.fail(new Error('Agent does not support questions'))).pipe(
+            Effect.timeout(sendMs),
+          ),
+          (result) =>
+            commit((draft) => {
+              const pending = draft.questions?.find((q) => q.commandId === commandId)
+              const command = draft.commands[commandId]
+              if (!pending || !command || !isPending(command) || pending.state === 'cancelled') return
+              pending.state = Exit.isSuccess(result) ? 'resolved' : 'cancelled'
+              const reason = Exit.isSuccess(result)
+                ? ''
+                : 'Answer delivery could not be confirmed; check the current reply'
+              report(draft, 'question.resolved', {
+                request_id: answer.request_id,
+                worker_turn_seq: pending.turn,
+                reason,
+              })
+              finish(draft, command, Exit.isSuccess(result) ? 'succeeded' : 'unknown', reason)
+            }),
+        )
+        return
+      }
       const active = state.activeMessage ? state.messages[state.activeMessage] : undefined
       const queued = Object.values(state.messages).filter((item) => item.state === 'queued')
       const stale = queued.find(
@@ -991,8 +1065,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
       if (!message) return
       const inherited = modelConfig(state.config, Object.values(state.messages))
       const model = message.input.model ?? inherited.model ?? inherited.adapter_config.model
-      const input =
-        message.input.mode === 'steer' || model === undefined ? message.input : { ...message.input, model }
+      const input = message.input.mode === 'steer' || model === undefined ? message.input : { ...message.input, model }
       yield* launch(
         newOperation('prepare', message.input.id),
         Effect.suspend(() => {
@@ -1124,6 +1197,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
           : {}),
         ...(action === 'withdraw' ? { id: request.client_message_id } : {}),
         ...(action === 'stop' ? { reason: request.stop_reason ?? '' } : {}),
+        ...(action === 'answer' ? { answer: request.answer } : {}),
         ...(action === 'settings' ? { execution_timeout_seconds: request.execution_timeout_seconds } : {}),
       }
       const contentDigest = digest(content)
@@ -1251,6 +1325,29 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
           draft.resumeRequested = true
           break
         }
+        case 'answer': {
+          const answer = request.answer
+          const question = answer
+            ? draft.questions?.find((q) => q.question.request_id === answer.request_id)
+            : undefined
+          const active = draft.activeMessage ? draft.messages[draft.activeMessage] : undefined
+          if (
+            !answer ||
+            !question ||
+            question.state !== 'pending' ||
+            recovering ||
+            draft.phase !== 'busy' ||
+            !active ||
+            active.ended ||
+            question.messageId !== active.input.id ||
+            question.executionId !== active.executionId
+          )
+            return reject('invalid_state', 'Question is no longer pending')
+          question.answer = answer
+          question.commandId = request.command_id
+          question.state = 'queued'
+          break
+        }
         case 'settings': {
           if (!draft.config || request.execution_timeout_seconds === undefined)
             return reject('invalid_request', 'Execution timeout is required')
@@ -1364,6 +1461,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         recovering = false
         return
       }
+      yield* commit((draft) => cancelQuestions(draft, 'Agent restarted; question is no longer available'))
       const current = yield* ensureAgent()
       if (state.config.agent_type === 'shell' && state.opened && state.nativeId && state.phase !== 'unknown') {
         const active = state.activeMessage ? structuredClone(state.messages[state.activeMessage]) : undefined

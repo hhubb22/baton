@@ -116,6 +116,50 @@ function setup(handler: Handler, devices: Device[] = [device()]) {
 const rootResponse = { kind: 'roots', roots: [{ id: 'root-id', path: '/work' }], truncated: false }
 
 describe('HTTP thread contracts', () => {
+  it('loads questions and submits answers through the answer endpoint while preserving durable unknown results', async () => {
+    const question = {
+      request_id: 'targets',
+      kind: 'user_input',
+      questions: [{ id: 'platform', header: 'Platforms', question: 'Which?', options: [], multiSelect: true }],
+    }
+    let current = thread({ status: 'running', node_online: false, pending_questions: [question], question_answers: [] })
+    const writes: string[] = []
+    const { api } = setup((url, init) => {
+      if (url.pathname.endsWith('/timeline')) return { events: [] }
+      if (init.method === 'POST') {
+        writes.push(url.pathname)
+        expect(JSON.parse(jsonBody(init.body))).toEqual({
+          request_id: 'targets',
+          decision: 'accept',
+          answers: { platform: ['linux', 'macos'] },
+        })
+        current = thread({
+          status: 'running',
+          pending_questions: [],
+          question_answers: [{ request_id: 'targets', decision: 'accept', outcome: 'pending' }],
+        })
+      }
+      return current
+    })
+    expect((await api.getThread(threadId)).pendingQuestions).toEqual([question])
+    expect(
+      (
+        await api.answerThreadQuestion({
+          threadId,
+          answer: { request_id: 'targets', decision: 'accept', answers: { platform: ['linux', 'macos'] } },
+        })
+      ).questionAnswers?.[0]?.outcome,
+    ).toBe('pending')
+    current = thread({
+      status: 'running',
+      question_answers: [
+        { request_id: 'targets', decision: 'accept', outcome: 'unknown', reason: 'answer_delivery_uncertain' },
+      ],
+    })
+    expect((await api.getThread(threadId)).questionAnswers?.[0]?.outcome).toBe('unknown')
+    expect(writes).toEqual([`/api/v1/threads/${threadId}/answer`])
+  })
+
   it('keeps Cursor startup separate from saved, accepted and actually opened execution', async () => {
     const cursorDevice = device()
     cursorDevice.agents[0].kind = 'cursor'

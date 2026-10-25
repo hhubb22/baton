@@ -1,6 +1,6 @@
 import { Context, Effect, Schema, Stream } from 'effect'
 import { Rpc, RpcGroup } from 'effect/rpc'
-import { WorkerOpenConfig } from '@baton/protocol'
+import { ThreadAnswerInput, ThreadQuestion, WorkerOpenConfig } from '@baton/protocol'
 
 /** One input submitted to the native Agent. */
 export const AgentMessage = Schema.Struct({
@@ -31,6 +31,8 @@ export type SessionIdentity = typeof SessionIdentity.Type
 
 const identity = { nativeSessionId: Schema.String, messageId: Schema.String, executionId: Schema.String }
 export const ExecutionEvent = Schema.Union([
+  Schema.Struct({ ...identity, type: Schema.Literal('question'), question: ThreadQuestion }),
+  Schema.Struct({ ...identity, type: Schema.Literal('question.resolved'), requestId: Schema.String }),
   Schema.Struct({ ...identity, type: Schema.Literal('reply'), id: Schema.String, text: Schema.String }),
   Schema.Struct({
     ...identity,
@@ -95,6 +97,7 @@ export interface AgentHostDriverShape {
     message: AgentMessage
     preparation: Preparation
   }) => Effect.Effect<Acceptance | undefined, AgentHostError>
+  readonly answer?: (input: ThreadAnswerInput) => Effect.Effect<void, AgentHostError>
   /** Reply, end and uncertain events; deltas are merged in by the same stream. */
   readonly events: Stream.Stream<ExecutionEvent, AgentHostError>
   readonly abort: Effect.Effect<void, AgentHostError>
@@ -136,6 +139,7 @@ export const AgentHostRpc = RpcGroup.make(
     success: Schema.NullOr(Acceptance),
     error: AgentHostError,
   }),
+  Rpc.make('answer', { payload: { answer: ThreadAnswerInput }, error: AgentHostError }),
   Rpc.make('events', { success: HostEvent, stream: true, error: AgentHostError }),
   Rpc.make('abort', { error: AgentHostError }),
   Rpc.make('close', { error: AgentHostError }),

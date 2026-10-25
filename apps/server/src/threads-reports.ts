@@ -136,6 +136,22 @@ const apply = (t: P.Thread, r: P.ThreadReport) =>
         yield* status(t, 'running')
         break
       }
+      case 'question.pending': {
+        if (!r.question || !r.worker_turn_seq) return yield* Effect.fail(failure('invalid_question', 422))
+        const turn = yield* getTurn(t, r.worker_turn_seq)
+        if (turn.ended_at) return yield* Effect.fail(failure('question_closed'))
+        const old = yield* sql`SELECT id FROM thread_events WHERE thread_id=${t.id} AND kind='question.pending'
+          AND payload->'question'->>'request_id'=${r.question.request_id}`
+        if (old.length) return yield* Effect.fail(failure('question_conflict'))
+        break
+      }
+      case 'question.resolved': {
+        if (!r.request_id) return yield* Effect.fail(failure('invalid_question', 422))
+        const old = yield* sql`SELECT id FROM thread_events WHERE thread_id=${t.id} AND kind='question.pending'
+          AND payload->'question'->>'request_id'=${r.request_id}`
+        if (!old.length) return yield* Effect.fail(failure('question_closed'))
+        break
+      }
       case 'reply': {
         const turn = yield* getTurn(t, r.worker_turn_seq)
         if (turn.ended_at) return yield* Effect.fail(failure())
@@ -251,7 +267,10 @@ export const processReport = (source: NodeSource, input: P.ThreadReport): DB<P.T
         }
         yield* sql`UPDATE threads SET storage_generation=${r.storage_generation} WHERE id=${t.id}`
       }
-      if (t.status === 'archived' && !['command.completed', 'message.withdrawn', 'thread.stopped'].includes(r.kind))
+      if (
+        t.status === 'archived' &&
+        !['command.completed', 'message.withdrawn', 'thread.stopped', 'question.resolved'].includes(r.kind)
+      )
         return yield* Effect.fail(failure('thread_archived'))
       yield* apply(t, r)
       yield* notifyProjectThread(t, r)

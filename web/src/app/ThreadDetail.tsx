@@ -13,6 +13,7 @@ import {
 import {
   newClientId,
   useArchiveThread,
+  useAnswerThreadQuestion,
   useCancelMessage,
   useDevices,
   useMessages,
@@ -44,6 +45,8 @@ import { Page } from './Page'
 import { ActivityTrace, Attachments, LiveOutput } from './ReplyParts'
 import { copySelection, SelectionArea } from './SelectionMenu'
 import { ThreadExecutionLimit } from './ThreadExecutionLimit'
+import { ThreadQuestionForm } from './ThreadQuestionForm'
+import { ThreadQuestionAnswerStatus } from './ThreadQuestionAnswerStatus'
 import { ThreadModelMenu } from './ThreadModelMenu'
 import { useNow } from './useNow'
 import { useWorkspace } from './workspace'
@@ -382,6 +385,7 @@ export function ThreadDetail({
   const send = useSendMessage()
   const cancelMessage = useCancelMessage()
   const setModel = useSetThreadModel()
+  const answerQuestion = useAnswerThreadQuestion()
   const stop = useStopThread()
   const archive = useArchiveThread()
   const resume = useResumeThread()
@@ -647,6 +651,18 @@ export function ThreadDetail({
           </SelectionArea>
         </div>
         <div {...stylex.props(styles.dock, layout === 'panel' && styles.dockPanel)}>
+          {thread.pendingQuestions?.map((question) => (
+            <ThreadQuestionForm
+              key={`${thread.id}:${question.request_id}`}
+              question={question}
+              onAnswer={async (answer) => {
+                await answerQuestion.mutateAsync({ threadId: thread.id, answer })
+              }}
+            />
+          ))}
+          {thread.questionAnswers?.[0] && (
+            <ThreadQuestionAnswerStatus answer={thread.questionAnswers[0]} offline={device?.connection !== 'online'} />
+          )}
           {view.notice && (
             <NoticeCard
               notice={view.notice}

@@ -1,6 +1,6 @@
 import { Effect } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
-import type { Thread, ThreadCommand, ThreadCommandResult } from '@baton/protocol'
+import type { Thread, ThreadCommand, ThreadCommandResult, ThreadAnswerInput } from '@baton/protocol'
 import { ThreadCommandResult as ResultSchema } from '@baton/protocol'
 import { captureTrace, withTraceSpan, type TraceContext } from '@baton/telemetry'
 import type { NodeSource } from './errors.ts'
@@ -22,7 +22,13 @@ interface Outbox {
   message_id: string
   action: ThreadCommand['action']
   trace_context: TraceContext | null
-  payload: { client_message_id?: string; model?: string; execution_timeout_seconds?: number }
+  payload: {
+    client_message_id?: string
+    model?: string
+    execution_timeout_seconds?: number
+    answer?: ThreadAnswerInput
+    worker_turn_seq?: number
+  }
   acked_at: string | null
   completed_at: string | null
   result: ThreadCommandResult | null
@@ -31,11 +37,28 @@ export const claimCommands = (): DB<ClaimedCommand[]> =>
   transaction(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
+      // 已结束的问题不再阻塞停止或下一轮；未派发的回答直接取消。
+      // 已尝试的回答继续以原命令 ID 核对 Worker 回执，保留迟到的完成报告。
+      yield* sql`UPDATE thread_outbox o SET completed_at=clock_timestamp(),
+        completion=jsonb_build_object('command_outcome','cancelled','reason','question_closed')
+        FROM threads t WHERE o.thread_id=t.id AND o.action='answer' AND o.attempts=0
+        AND o.acked_at IS NULL AND o.completed_at IS NULL AND (t.status<>'running' OR t.stop_requested_at IS NOT NULL
+          OR t.archive_requested_at IS NOT NULL OR NOT EXISTS(SELECT 1 FROM thread_turns v
+            WHERE v.thread_id=t.id AND v.worker_turn_seq=(o.payload->>'worker_turn_seq')::bigint AND v.ended_at IS NULL)
+          OR EXISTS(SELECT 1 FROM thread_events e WHERE e.thread_id=t.id AND e.kind='question.resolved'
+            AND e.payload->>'request_id'=o.payload->'answer'->>'request_id'))`
+      const answerDue = (alias: string) => `(${alias}.action<>'answer' OR (eligible.status='running'
+        AND eligible.stop_requested_at IS NULL AND eligible.archive_requested_at IS NULL
+        AND EXISTS(SELECT 1 FROM thread_turns v WHERE v.thread_id=eligible.id
+          AND v.worker_turn_seq=(${alias}.payload->>'worker_turn_seq')::bigint AND v.ended_at IS NULL)
+        AND NOT EXISTS(SELECT 1 FROM thread_events e WHERE e.thread_id=eligible.id AND e.kind='question.resolved'
+          AND e.payload->>'request_id'=${alias}.payload->'answer'->>'request_id')))`
       const due = `o.acked_at IS NULL AND o.completed_at IS NULL AND o.next_attempt_at<=statement_timestamp()
     AND EXISTS(SELECT 1 FROM threads eligible WHERE eligible.id=o.thread_id
-      AND (eligible.status<>'archived' OR o.action IN ('stop','withdraw'))
+      AND (${answerDue('o')} OR (o.action='answer' AND o.attempts>0))
+      AND (eligible.status<>'archived' OR o.action IN ('stop','withdraw') OR (o.action='answer' AND o.attempts>0))
       AND (o.action IN ('open','stop') OR (eligible.opened_at IS NOT NULL AND eligible.storage_generation IS NOT NULL))
-      AND NOT EXISTS(SELECT 1 FROM thread_outbox older WHERE older.thread_id=o.thread_id AND older.acked_at IS NULL AND older.completed_at IS NULL AND older.id<o.id
+      AND NOT EXISTS(SELECT 1 FROM thread_outbox older WHERE older.thread_id=o.thread_id AND older.acked_at IS NULL AND older.completed_at IS NULL AND older.id<o.id AND ${answerDue('older')}
         AND (eligible.status<>'archived' OR older.action IN ('stop','withdraw'))
         AND (older.action IN ('open','stop') OR eligible.opened_at IS NOT NULL)))`
       const rows = yield* sql.unsafe<{ command: Outbox; thread: Thread }>(`WITH candidates AS MATERIALIZED (
@@ -45,7 +68,7 @@ export const claimCommands = (): DB<ClaimedCommand[]> =>
   ) SELECT command.* FROM candidates p CROSS JOIN LATERAL (
     SELECT to_jsonb(o) AS command,jsonb_strip_nulls(to_jsonb(t)-'request_hash') AS thread
     FROM (SELECT o.* FROM thread_outbox o WHERE o.node_id=p.node_id AND ${due} ORDER BY o.next_attempt_at,o.id FOR UPDATE OF o SKIP LOCKED) o
-    CROSS JOIN LATERAL (SELECT t.* FROM threads t WHERE t.id=o.thread_id AND (t.status<>'archived' OR o.action IN ('stop','withdraw'))
+    CROSS JOIN LATERAL (SELECT t.* FROM threads t WHERE t.id=o.thread_id AND (t.status<>'archived' OR o.action IN ('stop','withdraw') OR (o.action='answer' AND o.attempts>0))
       AND (o.action IN ('open','stop') OR (t.opened_at IS NOT NULL AND t.storage_generation IS NOT NULL)) FOR UPDATE OF t SKIP LOCKED) t LIMIT 4
   ) command LIMIT 32`)
       const commands: ClaimedCommand[] = []
@@ -59,6 +82,7 @@ export const claimCommands = (): DB<ClaimedCommand[]> =>
           action: o.action,
           ...(o.action !== 'open' && t.storage_generation ? { storage_generation: t.storage_generation } : {}),
           ...(o.payload.client_message_id ? { client_message_id: o.payload.client_message_id } : {}),
+          ...(o.action === 'answer' ? { answer: o.payload.answer } : {}),
           ...(o.action === 'settings' ? { execution_timeout_seconds: o.payload.execution_timeout_seconds } : {}),
           ...(o.action === 'open'
             ? {

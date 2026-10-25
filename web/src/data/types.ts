@@ -118,7 +118,11 @@ export interface ThreadStop {
   detail: string | null
 }
 
+export type { ThreadQuestion, ThreadAnswerInput } from '@baton/protocol'
+
 export interface Thread {
+  pendingQuestions?: import('@baton/protocol').ThreadQuestion[]
+  questionAnswers?: import('@baton/protocol').ThreadQuestionAnswer[]
   id: ID
   title: string
   deviceId: ID

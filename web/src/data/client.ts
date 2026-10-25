@@ -23,6 +23,7 @@ import type {
   Session,
   SubscriptionLoginChallenge,
   Thread,
+  ThreadAnswerInput,
   Trace,
 } from './types'
 
@@ -87,6 +88,7 @@ export interface BatonClient {
   // 换模型从下一轮开始生效，Agent 不支持换模型时返回 invalid。
   setThreadExecutionLimit(input: { threadId: ID; executionTimeoutSeconds: number }): Promise<Thread>
   setThreadModel(input: { threadId: ID; model: string }): Promise<Thread>
+  answerThreadQuestion(input: { threadId: ID; answer: ThreadAnswerInput }): Promise<Thread>
   stopThread(threadId: ID): Promise<Operation>
   // 执行中的 Thread 先停止，设备确认后才归档。
   archiveThread(threadId: ID): Promise<Operation>

@@ -12,6 +12,7 @@ import type {
   Message,
   OperationPhase,
   Thread,
+  ThreadQuestion,
   ThreadStop,
   Trace,
   TraceStep,
@@ -45,6 +46,8 @@ type ThreadDTO = {
   node_online: boolean
   node_synced: boolean
   current_turn?: { worker_turn_seq: number; started_at: string } | null
+  question_answers?: import('@baton/protocol').ThreadQuestionAnswer[]
+  pending_questions?: ThreadQuestion[]
   pending_messages?: MessageDTO[]
   failed_messages?: MessageDTO[]
 }
@@ -115,6 +118,7 @@ type ThreadAPI = Pick<
   | 'createThread'
   | 'sendMessage'
   | 'cancelMessage'
+  | 'answerThreadQuestion'
   | 'setThreadModel'
   | 'setThreadExecutionLimit'
   | 'stopThread'
@@ -217,6 +221,8 @@ function mapThread(t: ThreadDTO, events: EventDTO[]): Thread {
   )
   const canceled = latestStop < 0 ? [] : events.slice(latestStop).filter((event) => event.kind === 'message.withdrawn')
   return {
+    pendingQuestions: t.pending_questions ?? [],
+    questionAnswers: t.question_answers ?? [],
     id: t.id,
     title: t.title || first?.split('\n')[0].slice(0, 120) || t.working_directory || t.id,
     deviceId: t.node_id,
@@ -535,6 +541,11 @@ export function createThreadAPI(
     }
   }
   const api: ThreadAPI = {
+    async answerThreadQuestion({ threadId, answer }) {
+      const updated = await ctx.request<ThreadDTO>(`${threadPath(threadId)}/answer`, post(answer))
+      ctx.emit('threads', 'messages')
+      return mapThread(updated, await timeline(threadId))
+    },
     async listThreads() {
       const all: ThreadDTO[] = []
       const cursors = new Set<string>()

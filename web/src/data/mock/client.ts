@@ -147,6 +147,11 @@ export function createMockClient(
       signedIn()
       return structuredClone(store.sendMessage(threadId, body, clientId, mode))
     },
+    async answerThreadQuestion({ threadId, answer }) {
+      await connect(latency.save)
+      signedIn()
+      return structuredClone(store.answerThreadQuestion(threadId, answer))
+    },
     async cancelMessage(messageId) {
       await connect(latency.save)
       signedIn()

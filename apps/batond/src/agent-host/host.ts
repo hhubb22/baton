@@ -134,6 +134,12 @@ export const makeAgentHostHandlers = <Services>(driver: AgentHostDriverShape, co
             ),
           ),
         ),
+      answer: ({ answer }) =>
+        regular.withPermit(
+          driver.answer
+            ? hosted(driver.answer(answer))
+            : Effect.fail(new AgentHostError({ message: 'Agent does not support answering questions' })),
+        ),
       send: ({ message, preparation }) => regular.withPermit(hosted(driver.send({ message, preparation }))),
       sent: ({ config, message, preparation }) =>
         regular.withPermit(

@@ -269,6 +269,16 @@ export const httpHandlers = (options: HTTPOptions) => {
             }),
           ),
         )
+        .handle('answer', ({ params, payload }) =>
+          httpBusiness(
+            Effect.gen(function* () {
+              const { employee } = yield* CurrentBrowserSession
+              yield* Threads.answer(employee.id, params.threadId, payload)
+              changed(employee.id)
+              return yield* Threads.view(employee.id, params.threadId)
+            }),
+          ),
+        )
         .handle('withdraw', ({ params }) =>
           httpBusiness(
             Effect.gen(function* () {

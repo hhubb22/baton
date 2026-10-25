@@ -1,6 +1,7 @@
 import { Schema } from 'effect'
 import { TraceContext } from './trace.ts'
 import { FullOutputPage } from './full-output.ts'
+import { ThreadQuestion, ThreadAnswerInput, ThreadQuestionAnswer } from './thread-question.ts'
 import {
   AgentType,
   AgentStatus,
@@ -1166,7 +1167,8 @@ export const ThreadCommand = Schema.Struct({
   trace_context: Schema.optionalKey(TraceContext),
   type: Schema.Literal('thread.command'),
   thread_id: UUID,
-  action: Schema.Literals(['open', 'message', 'withdraw', 'stop', 'resume', 'settings']),
+  action: Schema.Literals(['open', 'message', 'withdraw', 'stop', 'resume', 'settings', 'answer']),
+  answer: Schema.optionalKey(ThreadAnswerInput),
   storage_generation: Schema.optionalKey(StorageGeneration),
   agent_type: Schema.optionalKey(AgentType),
   model: Schema.optionalKey(summary(512)),
@@ -1175,7 +1177,7 @@ export const ThreadCommand = Schema.Struct({
   client_message_id: Schema.optionalKey(ClientMessageID),
   content: Schema.optionalKey(boundedText(64 * 1024)),
   mode: Schema.optionalKey(MessageMode),
-})
+}).check(Schema.makeFilter((value) => value.action !== 'answer' || value.answer !== undefined || '回答命令缺少答案'))
 export type ThreadCommand = typeof ThreadCommand.Type
 
 // internal/protocol/thread.go · ThreadCommandResult
@@ -1314,7 +1316,11 @@ export const ThreadReport = Schema.Struct({
     'thread.stopped',
     'thread.unknown',
     'command.completed',
+    'question.pending',
+    'question.resolved',
   ]),
+  question: Schema.optionalKey(ThreadQuestion),
+  request_id: Schema.optionalKey(nonemptyText(512)),
   worker_turn_seq: Schema.optionalKey(NonNegativeInteger),
   client_message_id: Schema.optionalKey(ClientMessageID),
   storage_generation: Schema.optionalKey(StorageGeneration),
@@ -1331,6 +1337,15 @@ export const ThreadReport = Schema.Struct({
   command_id: Schema.optionalKey(UUID),
   command_outcome: Schema.optionalKey(CommandOutcome),
 }).check(
+  Schema.makeFilter(
+    (value) =>
+      value.kind !== 'question.pending' ||
+      (value.question !== undefined && value.worker_turn_seq !== undefined && value.worker_turn_seq > 0) ||
+      '提问报告缺少问题或回合',
+  ),
+  Schema.makeFilter(
+    (value) => value.kind !== 'question.resolved' || value.request_id !== undefined || '提问结束报告缺少请求标识',
+  ),
   Schema.makeFilter(
     (value) =>
       value.kind !== 'command.completed' ||
@@ -1381,6 +1396,8 @@ export type ThreadTrace = typeof ThreadTrace.Type
 
 // internal/store/thread_types.go · ThreadView
 export const ThreadView = Schema.Struct({
+  question_answers: Schema.Array(ThreadQuestionAnswer),
+  pending_questions: Schema.Array(Schema.Struct({ ...ThreadQuestion.fields, worker_turn_seq: PositiveInteger })),
   resume_pending: Schema.Boolean,
   retry_open_allowed: Schema.optionalKey(Schema.Boolean),
   next_model: Schema.optionalKey(summary(512)),

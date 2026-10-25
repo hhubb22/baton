@@ -1,4 +1,4 @@
-import type { WorkerOpenConfig } from '@baton/protocol'
+import type { ThreadAnswerInput, ThreadQuestion, WorkerOpenConfig } from '@baton/protocol'
 import type { Effect, Schema, Stream } from 'effect'
 import type { AgentOutput } from './output.ts'
 export type { AgentOutput } from './output.ts'
@@ -46,6 +46,8 @@ export interface AgentEventIdentity {
 }
 
 export type AgentEvent =
+  | (AgentEventIdentity & { readonly type: 'question'; readonly question: ThreadQuestion })
+  | (AgentEventIdentity & { readonly type: 'question.resolved'; readonly requestId: string })
   | (AgentEventIdentity & {
       readonly type: 'reply'
       readonly id: string
@@ -82,6 +84,7 @@ export interface ThreadAgent {
     message: AgentMessage,
     preparation: InputPreparation,
   ) => Effect.Effect<InputAcceptance | undefined, AgentError>
+  readonly answer?: (answer: ThreadAnswerInput) => Effect.Effect<void, AgentError>
   readonly events: Stream.Stream<AgentEvent, AgentError>
   /** Best-effort fresh text; bounded separately from durable reply and lifecycle events. */
   readonly output?: Stream.Stream<AgentOutput, AgentError>

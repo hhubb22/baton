@@ -1,5 +1,6 @@
 import { Schema } from 'effect'
 import { TraceContext } from './trace.ts'
+import { ThreadAnswerInput } from './thread-question.ts'
 import {
   AgentType,
   ClientMessageID,
@@ -15,7 +16,15 @@ import {
 } from './common.ts'
 import { SessionRequest, SessionResult, ThreadReport } from './dto.ts'
 
-export const WorkerCommandAction = Schema.Literals(['open', 'message', 'withdraw', 'resume', 'stop', 'settings'])
+export const WorkerCommandAction = Schema.Literals([
+  'open',
+  'message',
+  'withdraw',
+  'resume',
+  'stop',
+  'settings',
+  'answer',
+])
 export const WorkerCommandState = Schema.Literals([
   'accepted',
   'running',
@@ -80,6 +89,7 @@ export const WorkerIPCMessage = Schema.Struct({
   thread_reports: Schema.optionalKey(Schema.NullOr(Schema.Array(ThreadReport))),
   session_request: Schema.optionalKey(Schema.NullOr(SessionRequest)),
   session_result: Schema.optionalKey(Schema.NullOr(SessionResult)),
+  answer: Schema.optionalKey(ThreadAnswerInput),
   stop_reason: Schema.optionalKey(boundedText(4096)),
   execution_timeout_seconds: Schema.optionalKey(ExecutionTimeoutSeconds),
   type: Schema.Literals([
@@ -92,6 +102,7 @@ export const WorkerIPCMessage = Schema.Struct({
     'thread_resume',
     'thread_stop',
     'thread_settings',
+    'thread_answer',
     'thread_pending',
     'thread_ack',
     'session_request',
@@ -211,6 +222,12 @@ export const WorkerSettings = WorkerIPCMessage.mapFields(
   }),
   preserveChecks,
 )
+export const WorkerAnswer = WorkerIPCMessage.mapFields(
+  (fields) => ({ ...fields, ...executionIdentity, type: Schema.Literal('thread_answer'), answer: ThreadAnswerInput }),
+  preserveChecks,
+)
+export type WorkerAnswer = typeof WorkerAnswer.Type
+
 export const WorkerCommandStatusQuery = WorkerIPCMessage.mapFields(
   (fields) => ({ ...fields, ...executionIdentity, type: Schema.Literal('thread_command_status') }),
   preserveChecks,
@@ -236,6 +253,7 @@ export const WorkerRequest = Schema.Union([
   WorkerResume,
   WorkerStop,
   WorkerSettings,
+  WorkerAnswer,
   WorkerCommandStatusQuery,
   WorkerPending,
   WorkerAck,

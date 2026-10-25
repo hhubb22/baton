@@ -34,18 +34,19 @@ host 进程的环境变量只包含系统必需项（`PATH`、`HOME`、`USER`、
 | `resume` | 读取映射后恢复原生会话 |
 | `send` | 排队消息调用 `startTurn`；Pi、Codex 的插入调用 `steerTurn`，成功表示原生接受；Cursor、Kiro 不支持插入 |
 | `sent` | 只读核对，由独立 host 进程执行 |
-| `events` | 订阅 reply、end、uncertain 和合并后的文本增量 |
+| `answer` | 将显式答案或取消返回原提问请求 |
+| `events` | 订阅 reply、end、question、question.resolved、uncertain 和合并后的文本增量 |
 | `abort`、`close` | 停止当前回合或关闭 host |
 
 普通请求共用七个额度，`abort` 和 `close` 单独一个额度。RPC 调用有 32 秒预算，adapter 内的原生调用预算是 30 秒。RPC 失败和 uncertain 事件只记录错误并通知 Worker；连接 Scope 由拥有者在清理时关闭，避免客户端 fiber 同步关闭其自身所在的 Scope。
 
 事件流带 host 本地 `generation` 和递增 `sequence`。Worker 在 generation 变化或序号不连续时报 `uncertain`，不会把重连前后的帧拼在一起。文本增量进入 Worker 侧的有界环形缓冲，控制事件进入有界队列，反压时不丢控制事件。
 
-`driver.ts` 的 `makeProviderHostDriver` 统一处理会话映射、事件归属、迟到事件过滤和发送确认；各 Agent 只构造 adapter、配置策略和只读探测。`runtime_request.updated` 中的 `command`、`file-read`、`file-change`、`permission` 当次 `accept`，提问（包括 `mcp-elicitation`）与其他请求 `cancel`；user input 取消时同时传空 `answers`。停止或关闭后的 pending 请求一律取消，不写永久授权。
+`driver.ts` 的 `makeProviderHostDriver` 统一处理会话映射、事件归属、迟到事件过滤和发送确认；各 Agent 只构造 adapter、配置策略和只读探测。`runtime_request.updated` 中的 `command`、`file-read`、`file-change`、`permission` 当次 `accept`；`user_input`、`mcp-elicitation` 与 `turn_item.updated` 里的问题按请求 ID 关联，通过 host 事件、Worker 账本和中心送到网页等待回答。网页回答经持久 `answer` 命令和 host RPC 返回原请求；Codex MCP 请求保留上游的确认语义，普通问题传入用户答案。停止或关闭后的 pending 请求取消，其他请求取消，不写永久授权。
 
 Kiro 的版本命令使用 host 的 Node Effect spawner 和 process registrar，4 秒超时，stdout/stderr 各最多收集 4096 字节，由 Scope 与进程回收路径清理。探测只返回版本号，诊断不外传。注册表对 macOS arm64 / CLI 精确版本 2.32.0、程序已安装且认证未明确缺失的组合报告 `available` 并开放 create/resume；认证 `unknown` 保留首次执行由原生程序检查的 reason，明确 `missing` 拒绝。其他系统或版本（含预发布、构建后缀）、版本超时或不可解析保持 `unverified`，缺程序为 `unavailable`。Pi、Codex 的认证准入规则保持原样。
 
-上游 `turn.terminal` 的 `failed` 映射为带原生会话、输入和执行身份的 `end` 事件，`outcome: failed`，并附安全原因。Worker 以现有 `turn.ended` 报告的 `reason: failed` 与 `content` 保存结果，输入保持 sent，队列继续执行；没有排队消息时 Thread 回到 idle，host 和原生会话保留。运行时请求无法应答、事件流断开、发送结果无法确认，以及 host 崩溃或连接丢失仍走 uncertain 路径。
+上游 `turn.terminal` 的 `failed` 映射为带原生会话、输入和执行身份的 `end` 事件，`outcome: failed`，并附安全原因。Worker 以现有 `turn.ended` 报告的 `reason: failed` 与 `content` 保存结果，输入保持 sent，队列继续执行；没有排队消息时 Thread 回到 idle，host 和原生会话保留。回答投递无法确认时保留命令的 unknown 结果；事件流断开、输入发送结果无法确认，以及 host 崩溃或连接丢失仍走 Thread uncertain 路径。
 
 Kiro 通过通用 driver 的 `turnFailure` 回调将明确的回合认证失败映射为“Sign in to Kiro CLI and try again.”，其他 provider 错误使用“Check Kiro CLI on this device and try again.”；其他 Agent 使用固定的 `Send your message again or check <Agent> on this device.`。这些原因不透传原始错误，不自动登录或重发输入。
 

@@ -123,7 +123,9 @@ pnpm --filter @baton/batond dev up \
 
 Cursor 设备运行进程需显式配置 `CURSOR_API_KEY`，能力探测成功并上报 `available` 后才允许创建 Thread。Pi、Codex 使用设备上原生 CLI 的认证配置，分别通过 `PI_CODING_AGENT_DIR`、`PI_CODING_AGENT_SESSION_DIR` 和 `CODEX_HOME` 指定目录。四个 Agent 在程序或 SDK 已安装且认证为 valid 或 unknown 时报告 `available`；系统和版本不设白名单。缺程序、明确缺少认证或已确认的运行依赖缺失时报告 `unavailable`，整次探测未能确认安装时报告 `unverified`。版本、系统和认证未知保留在 reason 中。凭据保留在设备端。设备接入、连接恢复及本地命令见 [batond 文档](../batond/README.md)。
 
-网页支持 Cursor、Pi、Codex、Kiro 新建、排队消息、撤回、停止、恢复、归档和时间线，按节点能力报告准入；四个 Agent 的认证状态未知时均由首次原生执行检查，版本和系统不限。Pi 与 Codex 还支持活动回合插入。命令的持久接收与实际完成分别报告；daemon 或中心重启后，存活 Worker 继续执行，重连时按原命令和报告身份恢复。模型在新建时选择，Thread 内固定。设备历史缺失时，从未派发的输入撤回并保留原文，可能执行过的输入保留 unknown；设备确认停止后可带着历史 unknown 记录归档。在 Worker 创建前因 Agent 不可用或目录授权被明确拒绝、没有任何输入派发的 Thread，可通过网页或 `POST /threads/{id}/resume` 重试打开；新命令保留原 Thread ID，原消息由用户再次发送。Worker 已接收 open 或原生创建结果不明时继续禁止重建。
+网页支持 Cursor、Pi、Codex、Kiro 新建、排队消息、撤回、停止、恢复、归档和时间线，按节点能力报告准入；四个 Agent 的认证状态未知时均由首次原生执行检查，版本和系统不限。Pi 与 Codex 还支持活动回合插入。命令的持久接收与实际完成分别报告；daemon 或中心重启后，存活 Worker 继续执行，重连时按原命令和报告身份恢复。模型在新建时选择；Pi、Codex、Cursor 支持在同一 Thread 为后续回合换模型，省略时沿用最近确认提交的选择；Kiro 保持创建时模型。设备历史缺失时，从未派发的输入撤回并保留原文，可能执行过的输入保留 unknown；设备确认停止后可带着历史 unknown 记录归档。在 Worker 创建前因 Agent 不可用或目录授权被明确拒绝、没有任何输入派发的 Thread，可通过网页或 `POST /threads/{id}/resume` 重试打开；新命令保留原 Thread ID，原消息由用户再次发送。Worker 已接收 open 或原生创建结果不明时继续禁止重建。
+
+Agent 的普通提问和 MCP 确认显示在 Thread 输入区上方，支持单选、多选、文本回答和关闭问题。`POST /api/v1/threads/{threadId}/answer` 接收 `request_id`、`decision: accept | cancel` 和可选 JSON 答案记录；请求与回答分别限制为 64 KiB。中心将问题及回答保存在 `thread_events`，通过持久 outbox 投递回答；设备离线时保留排队。`ThreadView.pending_questions` 返回当前回合的未回答问题，`question_answers` 返回最近十条回答的投递结果。员工归属、请求身份和活动回合均须匹配；停止、归档或回合结束后关闭问题。相同请求的相同回答幂等，不同回答冲突。网页显示等待发送、已送达、取消、失败或结果未知；无法确认回答结果时，原输入和答案均不自动重发。
 
 Thread 历史是中心保存的输入和回复，所有 Agent 格式相同。上游明确回合失败时，中心保存 `end_reason: failed`，安全原因随 `turn.ended` 报告的 `content` 保存在时间线事件中。输入保持 sent；没有排队消息时 Thread 回到 idle，有排队消息时继续 running 并执行下一条，沿用 `queue_empty` 规则。网页在对应回合显示 `<Agent> could not finish this reply` 和原因，原生会话与进程保留。运行时请求无法应答、事件流断开、发送结果无法确认、host 崩溃或连接丢失仍按 unknown 处理。
 

@@ -69,7 +69,7 @@ agent-host 把 `ProviderAdapterV2` 映射到 Worker 现有的 `ThreadAgent`：
 
 `agent-host/driver.ts` 的通用驱动负责上述映射、持久原生映射、迟到事件过滤和 sent 判定。映射还保存 Agent 类型与非敏感的本机 profile 目录，恢复时核对它们；目录变化直接拒绝。Pi、Codex、Kiro 使用原生 CLI 的认证，Cursor 使用显式 `CURSOR_API_KEY`。Kiro 的 profile 只记录 `homedir()`，没有专有环境变量目录映射。
 
-`prepareInput` 与 `restoreInput` 不再读取原生历史，InputPreparation 只保存原生会话、准备标识和 Worker 已确认的发送数。运行时请求（权限、提问）由宿主按 Agent 配置的策略自动应答：`command`、`file-read`、`file-change`、`permission` 选择当次允许，提问（含 `mcp-elicitation`）及其他请求返回取消，停止后到达的请求一律取消，Worker 中不会出现等待人工确认的回合。上游的 `rollbackThread`、`forkThread`、`compactThread` 与 `uploadFeedback` 不接入。
+`prepareInput` 与 `restoreInput` 不读取原生历史，InputPreparation 只保存原生会话、准备标识和 Worker 已确认的发送数。运行时权限请求中的 `command`、`file-read`、`file-change`、`permission` 选择当次允许。`user_input` 和 `mcp-elicitation` 通过 `turn_item.updated` 的问题内容和 `runtime_request.updated` 的请求身份关联，保存到 Worker 账本并报告中心，网页提供选项、文本回答和取消。Codex 的 MCP elicitation 按上游提供的确认语义回答；ACP 表单由上游转换为结构化问题。其他请求返回取消。停止后的请求取消，执行结束或 Worker 恢复时关闭旧问题；提问期间继续计入本轮执行时限。回答命令与原请求及执行身份绑定，在调用上游前持久保存 intent；结果不确定时保留诊断并禁止自动重发。上游的 `rollbackThread`、`forkThread`、`compactThread` 与 `uploadFeedback` 不接入。
 
 ## 运行时与进程模型（R-08、R-12）
 

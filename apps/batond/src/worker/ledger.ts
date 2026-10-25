@@ -1,4 +1,6 @@
 import type {
+  ThreadAnswerInput,
+  ThreadQuestion,
   ThreadReport,
   WorkerCommandAction,
   WorkerCommandReceipt,
@@ -45,7 +47,17 @@ export interface OutboxEntry {
   /** JSON 保留原始 UTF-16 字符串和执行身份，与展示报告一同提交。 */
   replyEvidence?: Extract<AgentEvent, { readonly type: 'reply' }>
 }
+export interface PendingQuestion {
+  question: ThreadQuestion
+  messageId: string
+  executionId: string
+  turn: number
+  state: 'pending' | 'queued' | 'intent' | 'resolved' | 'cancelled'
+  answer?: ThreadAnswerInput
+  commandId?: string
+}
 export interface Meta {
+  questions?: PendingQuestion[]
   config?: WorkerOpenConfig
   phase: Phase
   epoch: number
@@ -98,6 +110,8 @@ export const commandAction = (type: string): WorkerCommandAction | undefined => 
       return 'resume'
     case 'thread_message':
       return 'message'
+    case 'thread_answer':
+      return 'answer'
     case 'thread_settings':
       return 'settings'
     case 'thread_stop':

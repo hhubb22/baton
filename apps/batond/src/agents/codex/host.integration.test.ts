@@ -261,23 +261,40 @@ describe('Codex Agent host', () => {
     await effect(resumed.agent.close())
   })
 
-  it.each(['MCP elicitation', 'user input'])(
-    'accepts one command permission and cancels %s through the adapter',
-    async (kind) => {
-      const config = { ...(await workspace()), model: 'gpt-6-sol' }
-      const transcript = withRuntimeQuestions(
-        await readCodexTranscript(fixture('tool_call_read_only_on_request')),
-        kind === 'user input' ? await readCodexTranscript(fixture('plan_questions')) : undefined,
-      )
-      const { agent, events } = start(config, await writeTranscript(config, 'runtime-requests', transcript))
-      await effect(agent.open(config))
-      await submit(agent, messages(transcript)[0])
-      await completed(events)
-      expect(events.find((event) => event.type === 'end')).toMatchObject({ outcome: 'completed' })
-      expect(events.some((event) => event.type === 'reply')).toBe(true)
-      await effect(agent.close())
-    },
-  )
+  it.each([
+    { kind: 'MCP elicitation', accept: false },
+    { kind: 'MCP elicitation', accept: true },
+    { kind: 'user input', accept: false },
+    { kind: 'user input', accept: true },
+  ])('waits for the explicit $kind answer (accept: $accept) through the adapter', async ({ kind, accept }) => {
+    const config = { ...(await workspace()), model: 'gpt-6-sol' }
+    const transcript = withRuntimeQuestions(
+      await readCodexTranscript(fixture('tool_call_read_only_on_request')),
+      kind === 'user input' ? await readCodexTranscript(fixture('plan_questions')) : undefined,
+      accept,
+    )
+    const { agent, events } = start(config, await writeTranscript(config, 'runtime-requests', transcript))
+    await effect(agent.open(config))
+    await submit(agent, messages(transcript)[0])
+    await expect.poll(() => events.some((event) => event.type === 'question'), { timeout: 10_000 }).toBe(true)
+    const question = events.find((event) => event.type === 'question')
+    if (!question || question.type !== 'question' || !agent.answer) throw new Error('Expected an answerable question')
+    expect(events.some((event) => event.type === 'end')).toBe(false)
+    expect(question.question.kind).toBe(kind === 'user input' ? 'user_input' : 'mcp-elicitation')
+    if (kind === 'user input') expect(question.question.questions[0]?.question).toContain('strict schemas')
+    else expect(question.question.prompt).toBe('Allow ChatGPT to use Safari?')
+    await effect(
+      agent.answer({
+        request_id: question.question.request_id,
+        decision: accept ? 'accept' : 'cancel',
+        ...(accept && kind === 'user input' ? { answers: { schema_preference: 'UI flexibility' } } : {}),
+      }),
+    )
+    await completed(events)
+    expect(events.find((event) => event.type === 'end')).toMatchObject({ outcome: 'completed' })
+    expect(events.some((event) => event.type === 'reply')).toBe(true)
+    await effect(agent.close())
+  })
 
   it.each(['matching input', 'already confirmed', 'different text'])(
     'checks Codex sent evidence for %s',

@@ -3,7 +3,7 @@ import { NodeSocket } from '@effect/platform-node'
 import { Effect, Exit, Schedule, Scope, Stream } from 'effect'
 import { RpcClient, RpcSerialization } from 'effect/rpc'
 import { Socket } from 'effect/socket'
-import type { WorkerOpenConfig } from '@baton/protocol'
+import type { ThreadAnswerInput, WorkerOpenConfig } from '@baton/protocol'
 import type {
   OwnedProcess,
   ProcessCommand,
@@ -32,6 +32,7 @@ export interface AgentHostConnection {
     message: AgentMessage,
     preparation: Preparation,
   ) => Effect.Effect<Acceptance | undefined, AgentError>
+  readonly answer?: (answer: ThreadAnswerInput) => Effect.Effect<void, AgentError>
   readonly events: Stream.Stream<HostEvent, AgentError>
   readonly abort: Effect.Effect<void, AgentError>
   readonly close: Effect.Effect<void, AgentError>
@@ -156,6 +157,7 @@ export const connectAgentHost = (
         open: (config: WorkerOpenConfig, generation: string) => call(client.open({ config, generation })),
         resume: (config: WorkerOpenConfig, generation: string, nativeSessionId: string) =>
           call(client.resume({ config, generation, nativeSessionId })),
+        answer: (answer: ThreadAnswerInput) => call(client.answer({ answer })),
         send: (message: AgentMessage, preparation: Preparation) => call(client.send({ message, preparation })),
         sent: (config: WorkerOpenConfig, message: AgentMessage, preparation: Preparation) =>
           call(client.sent({ config, message, preparation })).pipe(Effect.map((value) => value ?? undefined)),

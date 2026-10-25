@@ -1,6 +1,6 @@
 import { realpath } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import { DateTime, Deferred, Effect, Queue, Scope, Stream } from 'effect'
+import { DateTime, Deferred, Effect, Queue, Schema, Scope, Stream } from 'effect'
 import type {
   ModelSelection,
   OrchestrationV2AppThread,
@@ -14,7 +14,7 @@ import type {
   RuntimeMode,
 } from '@t3tools/contracts'
 import { MessageId as MessageIdSchema, ProjectId, ThreadId } from '@t3tools/contracts'
-import type { WorkerOpenConfig } from '@baton/protocol'
+import { ThreadQuestion, type WorkerOpenConfig } from '@baton/protocol'
 import * as IdAllocator from '@t3tools/provider-core/server/IdAllocator'
 import * as ProviderAdapter from '@t3tools/provider-core/server/ProviderAdapter'
 import { makeOutputMailbox } from '../worker/output.ts'
@@ -99,6 +99,10 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
     const streams = new Map<string, string>()
     const replied = new Set<string>()
     const answered = new Set<string>()
+    const requests = new Map<string, OrchestrationV2RuntimeRequest>()
+    const questions = new Map<string, ThreadQuestion>()
+    const questionTurns = new Map<string, ActiveTurn>()
+    const published = new Set<string>()
     const error = (message: string) => new AgentHostError({ message })
     const fail = (operation: string, cause: unknown) =>
       cause instanceof AgentHostError ? cause : operationError(label, operation, cause)
@@ -115,16 +119,47 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
       messageId: turn.messageId,
       executionId: turn.runId,
     })
+    const publishQuestion = (id: string) =>
+      Effect.gen(function* () {
+        const request = requests.get(id)
+        const question = questions.get(id)
+        if (
+          !request ||
+          !question ||
+          !active ||
+          questionTurns.get(id) !== active ||
+          active.ended ||
+          stopped ||
+          closed ||
+          published.has(id)
+        )
+          return
+        published.add(id)
+        yield* emit({ ...identity(active), type: 'question', question })
+      })
     const answer = (request: OrchestrationV2RuntimeRequest) =>
       Effect.gen(function* () {
-        const decision = runtimeRequestDecision(request, stopped || closed)
+        if (request.status !== 'pending') {
+          const owner = questionTurns.get(request.id)
+          if (published.has(request.id) && owner && owner === active && !owner.ended)
+            yield* emit({ ...identity(owner), type: 'question.resolved', requestId: request.id })
+          requests.delete(request.id)
+          questions.delete(request.id)
+          return
+        }
+        if (request.kind === 'user_input' || request.kind === 'mcp-elicitation') requests.set(request.id, request)
+        const decision = runtimeRequestDecision(request, stopped || closed || !active || active.ended)
+        if (decision === undefined) {
+          yield* publishQuestion(request.id)
+          return
+        }
         if (!session || decision === undefined || answered.has(request.id)) return
         answered.add(request.id)
         yield* session
           .respondToRuntimeRequest({
             requestId: request.id,
             decision,
-            ...(request.kind === 'user_input' ? { answers: {} } : {}),
+            ...(request.kind === 'user_input' && label === 'Codex' ? { answers: {} } : {}),
           })
           .pipe(
             Effect.catch(() =>
@@ -142,6 +177,25 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
         }
         if (closed) return
         switch (event.type) {
+          case 'turn_item.updated': {
+            const item = event.turnItem
+            if (!active || active.ended || item.runId !== active.runId) return
+            if (
+              item.type !== 'user_input_request' &&
+              !(item.type === 'approval_request' && item.requestKind === 'mcp-elicitation')
+            )
+              return
+            const question = yield* Schema.decodeUnknownEffect(ThreadQuestion)({
+              request_id: item.requestId,
+              kind: item.type === 'user_input_request' ? 'user_input' : 'mcp-elicitation',
+              questions: item.type === 'user_input_request' ? item.questions : [],
+              ...(item.type === 'approval_request' ? { prompt: item.prompt ?? item.reason ?? 'Continue?' } : {}),
+            }).pipe(Effect.mapError(() => error(`${label} question exceeds the supported format`)))
+            questions.set(item.requestId, question)
+            questionTurns.set(item.requestId, active)
+            yield* publishQuestion(item.requestId)
+            return
+          }
           case 'provider_turn.updated': {
             const turn = event.providerTurn
             if (!active || turn.runAttemptId !== active.attemptId) return
@@ -347,6 +401,37 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
           yield* consumeEvents(runtime)
           return result
         }),
+      answer: (input) =>
+        Effect.gen(function* () {
+          const request = requests.get(input.request_id)
+          if (
+            !session ||
+            stopped ||
+            closed ||
+            !active ||
+            active.ended ||
+            !request ||
+            questionTurns.get(input.request_id) !== active ||
+            !published.has(input.request_id) ||
+            answered.has(input.request_id)
+          )
+            return yield* error(`${label} question is no longer pending`)
+          answered.add(input.request_id)
+          yield* session
+            .respondToRuntimeRequest({
+              requestId: request.id,
+              decision: input.decision,
+              ...(request.kind === 'user_input'
+                ? input.decision === 'accept'
+                  ? { answers: input.answers ?? {} }
+                  : label === 'Codex'
+                    ? { answers: {} }
+                    : {}
+                : {}),
+            })
+            .pipe(Effect.mapError((cause) => fail('answer question', cause)))
+          yield* emit({ ...identity(active), type: 'question.resolved', requestId: request.id })
+        }),
       send: ({ message, preparation }) =>
         Effect.gen(function* () {
           if (!session || !providerThread || !mapping || !config || !appThread || closed || stopped)
@@ -484,6 +569,10 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
       ),
       abort: Effect.gen(function* () {
         stopped = true
+        yield* Effect.forEach(requests.values(), (request) => answer(request), {
+          concurrency: 'unbounded',
+          discard: true,
+        }).pipe(Effect.timeout('1 second'), Effect.ignore)
         const turn = active
         if (!session || !providerThread || !turn || turn.ended) return
         const turnId =
@@ -503,6 +592,10 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
       close: Effect.gen(function* () {
         closed = true
         stopped = true
+        yield* Effect.forEach(requests.values(), (request) => answer(request), {
+          concurrency: 'unbounded',
+          discard: true,
+        }).pipe(Effect.timeout('1 second'), Effect.ignore)
         const turn = active
         if (!session || !providerThread || !turn || turn.ended) return
         if (!turn.providerTurnId) return

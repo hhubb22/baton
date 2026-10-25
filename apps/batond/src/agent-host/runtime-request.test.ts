@@ -18,13 +18,13 @@ const request = (kind: OrchestrationV2RuntimeRequest['kind'], status: 'pending' 
     resolvedAt: null,
   })
 
-it('allows a permission once and cancels a question', () => {
+it('allows a permission once and waits for an explicit question answer', () => {
   expect(runtimeRequestDecision(request('permission'), false)).toBe('accept')
   expect(runtimeRequestDecision(request('command'), false)).toBe('accept')
   expect(runtimeRequestDecision(request('file-read'), false)).toBe('accept')
   expect(runtimeRequestDecision(request('file-change'), false)).toBe('accept')
-  expect(runtimeRequestDecision(request('user_input'), false)).toBe('cancel')
-  expect(runtimeRequestDecision(request('mcp-elicitation'), false)).toBe('cancel')
+  expect(runtimeRequestDecision(request('user_input'), false)).toBeUndefined()
+  expect(runtimeRequestDecision(request('mcp-elicitation'), false)).toBeUndefined()
 })
 
 it('cancels a permission that arrives after stop', () => {

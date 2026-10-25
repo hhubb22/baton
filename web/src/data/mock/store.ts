@@ -40,6 +40,7 @@ import type {
   Reference,
   SendMode,
   Thread,
+  ThreadAnswerInput,
   SubscriptionLoginChallenge,
   Trace,
 } from '../types'
@@ -592,6 +593,19 @@ export class MockStore {
     if (thread.status === 'waiting') this.startNext(thread)
     this.emit('threads', 'messages', 'operations')
     return message
+  }
+
+  answerThreadQuestion(threadId: ID, answer: ThreadAnswerInput): Thread {
+    const thread = this.thread(threadId)
+    if (
+      thread.status !== 'running' ||
+      thread.pending ||
+      !thread.pendingQuestions?.some((item) => item.request_id === answer.request_id)
+    )
+      throw new ClientError('conflict', 'This question is closed.')
+    thread.pendingQuestions = thread.pendingQuestions.filter((item) => item.request_id !== answer.request_id)
+    this.emit('threads')
+    return thread
   }
 
   setThreadExecutionLimit(threadId: ID, executionTimeoutSeconds: number): Thread {

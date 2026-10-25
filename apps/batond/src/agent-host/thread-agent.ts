@@ -255,18 +255,16 @@ function makeAgent(config: WorkerOpenConfig, options: AgentHostOptions): ThreadA
         const turn = message.mode === 'steer' ? active : { messageId: message.id, ended: false }
         if (!turn) return yield* Effect.fail(new AgentError('Agent has no active turn to steer'))
         active = turn
-        const accepted = yield* live
-          .send(message, preparation as Preparation)
-          .pipe(
-            Effect.tapError((error) =>
-              error.modelRejected
-                ? Effect.sync(() => {
-                    turn.ended = true
-                    prepared = undefined
-                  })
-                : uncertain(error.message),
-            ),
-          )
+        const accepted = yield* live.send(message, preparation as Preparation).pipe(
+          Effect.tapError((error) =>
+            error.modelRejected
+              ? Effect.sync(() => {
+                  turn.ended = true
+                  prepared = undefined
+                })
+              : uncertain(error.message),
+          ),
+        )
         if (
           accepted.nativeSessionId !== nativeSessionId ||
           (turn.executionId && turn.executionId !== accepted.executionId)
@@ -290,6 +288,12 @@ function makeAgent(config: WorkerOpenConfig, options: AgentHostOptions): ThreadA
             }),
           ),
         )
+      }),
+    answer: (answer) =>
+      Effect.gen(function* () {
+        if (!live?.answer || broken || stopped || !active || active.ended)
+          return yield* Effect.fail(new AgentError('Agent question is no longer available'))
+        yield* live.answer(answer)
       }),
     events: Stream.fromQueue(queue),
     output: output.stream,

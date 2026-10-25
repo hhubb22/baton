@@ -10,6 +10,7 @@ import {
 } from 'effect/http-api'
 import * as D from './dto.ts'
 import * as Q from './http.ts'
+import { ThreadAnswerInput } from './thread-question.ts'
 import { UUID, Timestamp, NonNegativeInteger, ThreadStatus } from './common.ts'
 
 export const SessionResponse = Schema.Struct({
@@ -197,6 +198,11 @@ const Threads = HttpApiGroup.make('threads')
       params: threadParams,
       payload: D.ThreadMessageInput,
       success: D.ThreadMessage.pipe(HttpApiSchema.status(202)),
+    }),
+    Endpoint.post('answer', '/api/v1/threads/:threadId/answer', {
+      params: threadParams,
+      payload: ThreadAnswerInput,
+      success: D.ThreadView.pipe(HttpApiSchema.status(202)),
     }),
     Endpoint.post('withdraw', '/api/v1/threads/:threadId/messages/:messageId/withdraw', {
       params: { ...threadParams, messageId: Schema.String },

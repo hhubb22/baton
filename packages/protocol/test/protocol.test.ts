@@ -63,10 +63,10 @@ const additions: Record<string, string[]> = {
   RuntimeAgent: ['reason'],
   RuntimeProvider: ['reason', 'login_methods'],
   ProjectRuntime: ['max_concurrent_projects', 'probed_at', 'stale', 'probe_error'],
-  ThreadReport: ['command_id', 'command_outcome'],
-  ThreadCommand: ['trace_context', 'project_id', 'origin_conversation_id', 'origin_tool_call_id'],
+  ThreadReport: ['command_id', 'command_outcome', 'question', 'request_id'],
+  ThreadCommand: ['trace_context', 'project_id', 'origin_conversation_id', 'origin_tool_call_id', 'answer'],
   ThreadCommandResult: ['storage_generation'],
-  ThreadView: ['retry_open_allowed'],
+  ThreadView: ['retry_open_allowed', 'pending_questions', 'question_answers'],
   CreateBrowserThreadInput: ['execution_timeout_seconds'],
   SessionRequest: ['output_id', 'storage_generation'],
   SessionResult: ['full_output'],
@@ -165,6 +165,7 @@ describe('Go JSON 字段与 Effect Schema', () => {
         'open_config',
         'trace_context',
         'execution_timeout_seconds',
+        'answer',
       ].sort(),
     )
     for (const field of worker.fields) {
@@ -183,9 +184,13 @@ describe('Go 导出样例往返', () => {
     it(`${item.schema} · ${item.name}`, () => {
       const codec = codecs[item.schema]
       expect(codec).toBeDefined()
-      const decoded = Schema.decodeUnknownSync(codec, { onExcessProperty: 'error' })(item.value)
+      const value =
+        item.schema === 'ThreadView'
+          ? { ...Schema.decodeUnknownSync(Schema.JsonObject)(item.value), pending_questions: [], question_answers: [] }
+          : item.value
+      const decoded = Schema.decodeUnknownSync(codec, { onExcessProperty: 'error' })(value)
       const encoded = Schema.encodeSync(codec)(decoded)
-      expect(encoded).toEqual(item.value)
+      expect(encoded).toEqual(value)
     })
   }
   for (const item of migration.invalid) {

@@ -1,0 +1,191 @@
+import * as stylex from '@stylexjs/stylex'
+import { useState } from 'react'
+import type { ThreadAnswerInput, ThreadQuestion } from '../data/types'
+import { text } from '../theme/text'
+import { colors, size, space } from '../theme/tokens.stylex'
+import { Button } from '../ui/Button'
+import { Field, TextArea } from '../ui/Field'
+
+type AnswerValue = NonNullable<ThreadAnswerInput['answers']>[string]
+const styles = stylex.create({
+  form: { display: 'flex', flexDirection: 'column', gap: space.md, width: '100%', maxWidth: size.measure },
+  question: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space.sm,
+    borderWidth: 0,
+    padding: 0,
+    margin: 0,
+    minWidth: 0,
+  },
+  options: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space.sm,
+    paddingLeft: space.md,
+    borderLeft: `1px solid ${colors.borderSoft}`,
+  },
+  option: { display: 'flex', alignItems: 'flex-start', gap: space.sm, cursor: 'pointer' },
+  description: { color: colors.muted, display: 'block', whiteSpace: 'pre-wrap' },
+  actions: { display: 'flex', gap: space.sm },
+  error: { color: colors.danger },
+})
+
+export function ThreadQuestionForm({
+  question,
+  onAnswer,
+}: {
+  question: ThreadQuestion
+  onAnswer: (answer: ThreadAnswerInput) => Promise<void>
+}) {
+  const [values, setValues] = useState<Record<string, AnswerValue>>(() =>
+    Object.fromEntries(
+      question.questions.flatMap((item) => (item.initialAnswer === undefined ? [] : [[item.id, item.initialAnswer]])),
+    ),
+  )
+  const [custom, setCustom] = useState<Record<string, string>>({})
+  const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  async function submit(decision: ThreadAnswerInput['decision']) {
+    if (saving || saved) return
+    const answers: Record<string, AnswerValue> = { ...values }
+    for (const item of question.questions) {
+      const extra = Object.hasOwn(custom, item.id) ? custom[item.id]?.trim() : undefined
+      if (extra) {
+        const previous = Object.hasOwn(answers, item.id) ? answers[item.id] : undefined
+        answers[item.id] = item.multiSelect ? [...(Array.isArray(previous) ? previous : []), extra] : extra
+      }
+      const value = Object.hasOwn(answers, item.id) ? answers[item.id] : undefined
+      if (
+        decision === 'accept' &&
+        item.required !== false &&
+        (value === undefined || value === '' || (Array.isArray(value) && value.length === 0))
+      ) {
+        setError(`Answer “${item.header || item.question}” to continue.`)
+        return
+      }
+    }
+    const answer: ThreadAnswerInput = {
+      request_id: question.request_id,
+      decision,
+      ...(decision === 'accept' ? { answers } : {}),
+    }
+    if (new TextEncoder().encode(JSON.stringify(answer)).length > 64 * 1024) {
+      setError('Keep your answers within 64 KB of text.')
+      return
+    }
+    setSaving(true)
+    setError(null)
+    try {
+      await onAnswer(answer)
+      setSaved(true)
+    } catch {
+      setError('Your answer could not be saved. Your choices and text are kept. Try again.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <form
+      aria-label="Agent question"
+      {...stylex.props(styles.form)}
+      onSubmit={(event) => {
+        event.preventDefault()
+        void submit('accept')
+      }}
+    >
+      {question.prompt && <p {...stylex.props(text.small)}>{question.prompt}</p>}
+      {question.questions.map((item) => {
+        const selected = Object.hasOwn(values, item.id) ? values[item.id] : undefined
+        const matches = (value: AnswerValue) => JSON.stringify(value) === JSON.stringify(selected)
+        return (
+          <fieldset key={item.id} {...stylex.props(styles.question)}>
+            <legend {...stylex.props(text.label)}>{item.header}</legend>
+            <p {...stylex.props(text.small)}>{item.question}</p>
+            <div {...stylex.props(styles.options)}>
+              {item.options.map((option, index) => {
+                const value = option.value ?? option.label
+                const checked = item.multiSelect
+                  ? Array.isArray(selected) && selected.some((entry) => JSON.stringify(entry) === JSON.stringify(value))
+                  : matches(value)
+                return (
+                  <label key={index} {...stylex.props(styles.option, text.small)}>
+                    <input
+                      type={item.multiSelect ? 'checkbox' : 'radio'}
+                      name={`${question.request_id}:${item.id}`}
+                      checked={checked}
+                      onChange={() => {
+                        const previous = Array.isArray(selected) ? selected : []
+                        setValues({
+                          ...values,
+                          [item.id]: item.multiSelect
+                            ? checked
+                              ? previous.filter((entry) => JSON.stringify(entry) !== JSON.stringify(value))
+                              : [...previous, value]
+                            : value,
+                        })
+                        if (!item.multiSelect) setCustom({ ...custom, [item.id]: '' })
+                      }}
+                    />
+                    <span>
+                      {option.label}
+                      {option.description && (
+                        <span {...stylex.props(text.caption, styles.description)}>{option.description}</span>
+                      )}
+                    </span>
+                  </label>
+                )
+              })}
+              {(item.options.length === 0 || item.allowCustomAnswer !== false) && (
+                <Field label={item.options.length ? 'Other answer' : 'Your answer'} optional={item.required === false}>
+                  {(props) => (
+                    <TextArea
+                      {...props}
+                      value={
+                        (Object.hasOwn(custom, item.id) ? custom[item.id] : undefined) ??
+                        (typeof selected === 'string' &&
+                        !item.options.some((option) => matches(option.value ?? option.label))
+                          ? selected
+                          : '')
+                      }
+                      onChange={(event) => {
+                        setCustom({ ...custom, [item.id]: event.target.value })
+                        if (!item.multiSelect)
+                          setValues(Object.fromEntries(Object.entries(values).filter(([id]) => id !== item.id)))
+                      }}
+                    />
+                  )}
+                </Field>
+              )}
+            </div>
+          </fieldset>
+        )
+      })}
+      {error && (
+        <p role="alert" {...stylex.props(text.caption, styles.error)}>
+          {error}
+        </p>
+      )}
+      <div {...stylex.props(styles.actions)}>
+        <Button type="submit" variant="secondary" disabled={saving || saved}>
+          {saving
+            ? 'Saving…'
+            : question.kind === 'mcp-elicitation' && question.questions.length === 0
+              ? 'Continue'
+              : 'Send answer'}
+        </Button>
+        <Button variant="ghost" disabled={saving || saved} onClick={() => void submit('cancel')}>
+          Close question
+        </Button>
+      </div>
+      {saved && (
+        <p role="status" {...stylex.props(text.caption)}>
+          Answer saved
+        </p>
+      )}
+    </form>
+  )
+}
