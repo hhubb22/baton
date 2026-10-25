@@ -93,7 +93,8 @@ it('captures stdio frames before a fast Runtime exits during registration', asyn
     )
     void serving.catch(() => {})
   })
-  await serving
+  // Runtime may exit before the response is written; this test verifies input capture.
+  await serving?.catch(() => {})
   expect(requests).toBe(1)
   await runner.reap(owned)
   cancel.abort()
