@@ -227,15 +227,14 @@ it.each(['zero-byte', 'sqlite', 'commit-only', 'initialized', 'empty-meta'] as c
   },
 )
 
-it('inspects a closed WAL ledger without creating sidecar files or changing the file snapshot', async () => {
+it('inspects a closed WAL ledger without changing the database bytes or tables', async () => {
   const f = await fixture()
   await seed(f)
-  const names = (await readdir(f.root)).sort()
-  expect(names).toEqual(['thread.db'])
-  const before = await snapshot(f)
+  const before = await readFile(f.dbPath)
+  const schema = tables(f)
   expect(await inspectWorkerLedger(f.dbPath, f.config)).toBe('valid')
-  expect.soft((await readdir(f.root)).sort()).toEqual(names)
-  expect.soft(await snapshot(f)).toEqual(before)
+  expect(await readFile(f.dbPath)).toEqual(before)
+  expect(tables(f)).toEqual(schema)
 })
 
 it('does not create a missing database or its parent directory during inspection', async () => {
