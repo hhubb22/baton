@@ -308,10 +308,10 @@ export const runtimeRequest = Effect.fn('projectRuntimeRequest')(function* (
           const reason = boundedProjectText(request.reason ?? '', 1024)
           if (request.operation === 'report_failure') {
             const [conversation] = yield* sql<{
-              state: string
-            }>`UPDATE conversations SET failure_count=failure_count+1,next_attempt_at=clock_timestamp()+CASE WHEN failure_count=0 THEN interval '1 minute' WHEN failure_count=1 THEN interval '5 minutes' ELSE interval '15 minutes' END,
- state=CASE WHEN failure_count>=2 THEN 'needs_attention' ELSE 'active' END,attention_reason=${reason} WHERE id=${b.conversationId} RETURNING state`
-            if (conversation?.state === 'needs_attention')
+              failure_count: number
+            }>`UPDATE conversations SET failure_count=LEAST(failure_count::bigint+1,2147483647)::integer,next_attempt_at=clock_timestamp()+CASE WHEN failure_count=0 THEN interval '1 minute' WHEN failure_count=1 THEN interval '5 minutes' ELSE interval '15 minutes' END,
+ state='active',attention_reason=${reason} WHERE id=${b.conversationId} RETURNING failure_count`
+            if (conversation?.failure_count === 3)
               yield* sql`INSERT INTO attention_requests(id,employee_id,project_id,agent_id,conversation_id,source,condition_type,condition_object_id,title,content)
  VALUES(${randomUUID()},${b.employeeId},${b.projectId},${b.agentId},${b.conversationId},'system','project_needs_attention',${b.projectId},'Project 需要处理',${reason}) ON CONFLICT DO NOTHING`
           }

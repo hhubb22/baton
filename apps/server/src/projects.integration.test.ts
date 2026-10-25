@@ -406,17 +406,39 @@ describe('input notification and batching', () => {
 
 describe('failure recovery and suspension', () => {
   it(
-    'persists failure backoff, creates one system request, retries and archives open requests',
+    'keeps retrying after repeated failures and lets only new input bypass backoff',
     async () =>
       withTestDatabase(async ({ run }) => {
         const a = await fixture(run),
           p = await a.create()
-        for (let i = 0; i < 3; i++) {
+        const message = { client_message_id: 'retry-input', content: 'try again' }
+        for (let i = 0; i < 4; i++) {
           const r = await a.start(p)
           await r.rpc('report_failure', { reason: 'model failed' })
+          await r.rpc('stopped')
           const status = await run(projects.projectStatus(a.employee, p.id))
-          expect(status.state).toBe(i === 2 ? 'needs_attention' : 'waiting')
+          expect(status.state).toBe('waiting')
+          expect(status.waiting_reason).toBe('retry_backoff')
           expect(status.last_error).toBe('model failed')
+          expect((await run(projects.getProject(a.employee, p.id))).conversation.state).toBe('active')
+          const [delay] = await run(
+            Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              return yield* sql<{
+                seconds: number
+              }>`SELECT extract(epoch FROM next_attempt_at-clock_timestamp())::float8 AS seconds FROM conversations WHERE id=${p.conversation.id}`
+            }),
+          )
+          expect(delay?.seconds).toBeGreaterThan([55, 295, 895, 895][i] ?? 895)
+          await run(projects.scheduleProjectRun(p.agent.id))
+          expect(await run(projects.claimProjectCommands('project_run_start'))).toEqual([])
+          if (i === 2) {
+            await run(projects.acceptProjectMessage(a.employee, p.id, message))
+            expect((await run(projects.projectStatus(a.employee, p.id))).waiting_reason).not.toBe('retry_backoff')
+          } else if (i === 3) {
+            await run(projects.acceptProjectMessage(a.employee, p.id, message))
+            expect((await run(projects.projectStatus(a.employee, p.id))).waiting_reason).toBe('retry_backoff')
+          }
           await run(
             Effect.gen(function* () {
               const sql = yield* SqlClient.SqlClient
@@ -424,6 +446,36 @@ describe('failure recovery and suspension', () => {
             }),
           )
         }
+        await run(projects.scheduleProjectRun(p.agent.id))
+        const commands = await run(projects.claimProjectCommands('project_run_start'))
+        expect(commands).toHaveLength(1)
+        const command = commands[0]?.command
+        if (!command) throw new Error('Expected an automatic retry after backoff')
+        await run(
+          projects.runtimeRequest(a.source, {
+            type: 'project_runtime.request',
+            operation: 'started',
+            run_id: command.run_id,
+            lease_epoch: command.lease_epoch,
+          }),
+        )
+        await run(
+          projects.runtimeRequest(a.source, {
+            type: 'project_runtime.request',
+            operation: 'report_failure',
+            run_id: command.run_id,
+            lease_epoch: command.lease_epoch,
+            reason: 'model failed',
+          }),
+        )
+        await run(
+          projects.runtimeRequest(a.source, {
+            type: 'project_runtime.request',
+            operation: 'stopped',
+            run_id: command.run_id,
+            lease_epoch: command.lease_epoch,
+          }),
+        )
         const [count] = await run(
           Effect.gen(function* () {
             const sql = yield* SqlClient.SqlClient
@@ -433,10 +485,9 @@ describe('failure recovery and suspension', () => {
           }),
         )
         expect(Number(count!.n)).toBe(1)
-        await run(projects.retryProject(a.employee, p.id))
-        expect((await run(projects.getProject(a.employee, p.id))).conversation.state).toBe('active')
-        await a.start(p)
-        await run(projects.patchProject(a.employee, p.id, { status: 'archived' }))
+        const recovered = await a.start(p)
+        await recovered.rpc('append_event', { last_seq: 0, client_event_id: randomUUID(), payload: assistant() })
+        expect((await run(projects.projectStatus(a.employee, p.id))).last_error).toBeNull()
         const [open] = await run(
           Effect.gen(function* () {
             const sql = yield* SqlClient.SqlClient
@@ -446,6 +497,9 @@ describe('failure recovery and suspension', () => {
           }),
         )
         expect(Number(open!.n)).toBe(0)
+        await run(projects.retryProject(a.employee, p.id))
+        expect((await run(projects.getProject(a.employee, p.id))).conversation.state).toBe('active')
+        await run(projects.patchProject(a.employee, p.id, { status: 'archived' }))
       }),
     30_000,
   )

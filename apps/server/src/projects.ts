@@ -134,11 +134,15 @@ export const acceptProjectMessage = Effect.fn('acceptProjectMessage')(function* 
   return yield* projectTransaction(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
+      yield* lockProjectAgent(employee, project)
       const payload = { content: value.content },
         key = 'user:' + value.client_message_id
       yield* checkPayloadSize(payload, 72 * 1024)
-      yield* sql`INSERT INTO project_agent_input_queue(employee_id,agent_id,source_type,source_key,payload,payload_hash,wake_required)
- VALUES(${employee},${p.agent.id},'user_message',${key},${JSON.stringify(payload)}::jsonb,${createHash('sha256').update(value.content).digest()},true) ON CONFLICT(agent_id,source_key) DO NOTHING`
+      const inserted =
+        yield* sql`INSERT INTO project_agent_input_queue(employee_id,agent_id,source_type,source_key,payload,payload_hash,wake_required)
+ VALUES(${employee},${p.agent.id},'user_message',${key},${JSON.stringify(payload)}::jsonb,${createHash('sha256').update(value.content).digest()},true) ON CONFLICT(agent_id,source_key) DO NOTHING RETURNING id`
+      if (inserted.length)
+        yield* sql`UPDATE conversations SET next_attempt_at=NULL WHERE agent_id=${p.agent.id} AND state='active'`
       const [row] = yield* sql<{
         value: P.ProjectMessage
       }>`SELECT jsonb_build_object('id',id,'client_message_id',${value.client_message_id}::text,'content',payload->>'content','created_at',created_at) AS value
