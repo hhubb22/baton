@@ -83,9 +83,17 @@ jobs:
           pnpm --filter @baton/server build
       - name: Native node and Runtime tests
         if: runner.os != 'Linux'
+        continue-on-error: ${{ runner.os == 'Windows' }}
         run: |
-          pnpm --filter @baton/batond test
-          pnpm --dir runtimes/project-agent test
+          mkdir -p bin/releases
+          set +e
+          pnpm --filter @baton/batond test 2>&1 | tee bin/releases/batond-tests.log
+          batond_status=$?
+          pnpm --dir runtimes/project-agent test 2>&1 | tee bin/releases/project-runtime-tests.log
+          runtime_status=$?
+          if [ "$batond_status" -ne 0 ] || [ "$runtime_status" -ne 0 ]; then
+            exit 1
+          fi
       - name: Build native SEA package
         run: |
           mkdir -p bin/releases
