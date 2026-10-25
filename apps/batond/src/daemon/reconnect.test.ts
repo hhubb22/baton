@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import { Effect } from 'effect'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import type WebSocket from 'ws'
 import type { Envelope, Frame, ThreadReport, RuntimeAgent, WorkerRequest, WorkerIPCMessage } from '@baton/protocol'
@@ -9,6 +10,27 @@ import { IPCError } from './ipc.ts'
 import { webSocketText } from './transport.ts'
 import type { DaemonWorkerHost } from './threads.ts'
 import { setupDaemon } from '../testing/daemon.ts'
+import type { ProjectManager } from '../project/types.ts'
+
+vi.mock('../project/index.ts', () => ({
+  makeProjectManager: () => {
+    const unused = async (): Promise<never> => {
+      throw new Error('Project operations are outside the daemon reconnect fixture')
+    }
+    const probe = async () => ({ version: '0.1.0', providers: [] })
+    return Effect.succeed<ProjectManager>({
+      setTransport() {},
+      onDisconnect() {},
+      command: unused,
+      probe,
+      report: probe,
+      login: unused,
+      subscriptions: probe,
+      startDeviceLogin: unused,
+      async close() {},
+    })
+  },
+}))
 
 it('decodes WebSocket data with UTF-8 characters split across buffers', () => {
   const text = '{"text":"你好🙂"}'
@@ -129,8 +151,9 @@ it('reconnects with the same incarnation, retains reports before Worker ACK, and
   }
   const incarnations: string[] = [],
     reportDeliveries: string[] = []
-  let accepted = 0,
-    completed = 0,
+  let received = Promise.withResolvers<void>()
+  const outputRead = Promise.withResolvers<void>()
+  let completed = 0,
     output = ''
   let sessions = 0
   const command = {
@@ -143,6 +166,7 @@ it('reconnects with the same incarnation, retains reports before Worker ACK, and
   wss.on('connection', (socket) => {
     sessions++
     const session = sessions
+    let sent = false
     socket.on('message', (raw) => {
       const frame = JSON.parse(webSocketText(raw)) as Frame
       if (frame.kind === 'auth') {
@@ -159,10 +183,13 @@ it('reconnects with the same incarnation, retains reports before Worker ACK, and
       } else if (body.type === 'node.runtime_report') {
         control(socket, { type: 'node.runtime_report_result', ok: true, report_version: 1 }, env.message_id)
         const report = body.report as { agents: RuntimeAgent[] }
-        if (report.agents[0]?.status === 'available') control(socket, command, undefined, commandId)
+        if (!sent && report.agents[0]?.status === 'available') {
+          sent = true
+          control(socket, command, undefined, commandId)
+        }
       } else if (body.type === 'thread.command_result') {
         expect(body.ok).toBe(true)
-        accepted++
+        received.resolve()
       } else if (body.type === 'thread.report') {
         reportDeliveries.push(String(body.event_id))
         if (session === 1) {
@@ -188,30 +215,29 @@ it('reconnects with the same incarnation, retains reports before Worker ACK, and
             session_id: threadId,
             action: 'output',
           })
-      } else if (body.type === 'session.result') output = String(body.text)
+      } else if (body.type === 'session.result') {
+        output = String(body.text)
+        outputRead.resolve()
+      }
     })
   })
   const first = start({ host })
-  await vi.waitFor(() => expect(accepted).toBeGreaterThan(0), { timeout: 4000 })
+  await received.promise
   expect(completed).toBe(0)
   expect(openCount).toBe(1)
   releaseReports = true
-  await vi.waitFor(
-    () => {
-      expect(completed).toBeGreaterThan(0)
-      expect(output).toBe('local output')
-    },
-    { timeout: 6000 },
-  )
+  await outputRead.promise
+  expect(completed).toBeGreaterThan(0)
+  expect(output).toBe('local output')
   expect(first.failure()).toBeUndefined()
   expect(new Set(incarnations)).toHaveLength(1)
   expect(reportDeliveries.filter((e) => e === reports[0]!.event_id).length).toBeGreaterThan(1)
   expect(workerAcks.size).toBe(2)
   expect(forwarded[0]?.session_request?.action).toBe('output')
   await first.stop()
-  const before = accepted
+  received = Promise.withResolvers<void>()
   const second = start({ host })
-  await vi.waitFor(() => expect(accepted).toBeGreaterThan(before), { timeout: 4000 })
+  await received.promise
   expect(openCount).toBe(1)
   expect(statusCount).toBeGreaterThan(0)
   expect(new Set(incarnations)).toHaveLength(2)
@@ -226,8 +252,12 @@ it.each(['dropped_reply', 'worker_unavailable'])(
       commandId = randomUUID()
     let deliveries = 0,
       connections = 0,
-      allowQuery = false,
       releaseReports = false
+    const accepted = Promise.withResolvers<void>()
+    const releaseHandoff = Promise.withResolvers<void>()
+    const reportRetried = Promise.withResolvers<void>()
+    const received = Promise.withResolvers<void>()
+    const completed = Promise.withResolvers<void>()
     let receipt: WorkerIPCMessage['receipt']
     const queried: string[] = []
     const acks: boolean[] = []
@@ -256,12 +286,14 @@ it.each(['dropped_reply', 'worker_unavailable'])(
             command_outcome: 'succeeded',
             reason: '',
           })
+          accepted.resolve()
+          await releaseHandoff.promise
           if (failure === 'dropped_reply') throw new IPCError('timeout', 'Reply was lost after durable acceptance')
           return { type: 'result', ok: false, code: 'worker_unavailable' }
         }
         if (request.type === 'thread_command_status') {
           queried.push(request.command_id)
-          if (!allowQuery) throw new IPCError('closed', 'Receipt query is temporarily unreachable')
+          await reportRetried.promise
           return {
             type: 'result',
             ok: true,
@@ -288,7 +320,9 @@ it.each(['dropped_reply', 'worker_unavailable'])(
       },
     }
     wss.on('connection', (socket) => {
-      connections++
+      const connection = ++connections
+      let sent = false,
+        reconnectReports = 0
       socket.on('message', (raw) => {
         const frame = JSON.parse(webSocketText(raw)) as Frame
         if (frame.kind === 'auth') {
@@ -299,21 +333,31 @@ it.each(['dropped_reply', 'worker_unavailable'])(
           env = frame.envelope as unknown as Envelope
         if (body?.type === 'node.sync') control(socket, { type: 'node.sync_result', ok: true }, env.message_id)
         if (body?.type === 'node.runtime_report') {
-          control(socket, { type: 'node.runtime_report_result', ok: true, report_version: 1 }, env.message_id)
-          control(
-            socket,
-            {
-              type: 'thread.command',
-              thread_id: threadId,
-              action: 'open',
-              agent_type: 'cursor',
-              working_directory: path,
-            },
-            undefined,
-            commandId,
-          )
+          // Hold the receipt query until an unacknowledged capability report is redelivered.
+          if (connection > 1 && ++reconnectReports > 1) reportRetried.resolve()
+          if (connection === 1 || reconnectReports > 1)
+            control(socket, { type: 'node.runtime_report_result', ok: true, report_version: 1 }, env.message_id)
+          const report = body.report as { agents: RuntimeAgent[] }
+          if (!sent && report.agents[0]?.status === 'available') {
+            sent = true
+            control(
+              socket,
+              {
+                type: 'thread.command',
+                thread_id: threadId,
+                action: 'open',
+                agent_type: 'cursor',
+                working_directory: path,
+              },
+              undefined,
+              commandId,
+            )
+          }
         }
-        if (body?.type === 'thread.command_result') acks.push(Boolean(body.ok))
+        if (body?.type === 'thread.command_result') {
+          acks.push(Boolean(body.ok))
+          received.resolve()
+        }
         if (body?.type === 'thread.report') {
           completion = body.kind === 'command.completed'
           control(
@@ -327,11 +371,17 @@ it.each(['dropped_reply', 'worker_unavailable'])(
             },
             env.message_id,
           )
+          if (completion) completed.resolve()
         }
       })
     })
     const daemon = start({ host })
-    await vi.waitFor(() => expect(deliveries).toBe(1), { timeout: 2000 })
+    cleanup.push(async () => {
+      releaseHandoff.resolve()
+      reportRetried.resolve()
+    })
+    await accepted.promise
+    expect(deliveries).toBe(1)
     const db = new DatabaseSync(join(path, 'node.db'), { readOnly: true })
     try {
       const row = db.prepare('SELECT payload FROM node_commands WHERE id=?').get(commandId)
@@ -340,19 +390,18 @@ it.each(['dropped_reply', 'worker_unavailable'])(
       db.close()
     }
     expect(acks).toEqual([])
-    allowQuery = true
-    await vi.waitFor(
-      () => {
-        expect(connections).toBeGreaterThan(1)
-        expect(acks).toEqual([true])
-      },
-      { timeout: 4000 },
-    )
+    releaseHandoff.resolve()
+    await received.promise
+    expect(connections).toBe(2)
+    expect(acks).toEqual([true])
     expect(queried).toEqual([commandId])
     expect(deliveries).toBe(1)
     expect(completion).toBe(false)
     releaseReports = true
-    await vi.waitFor(() => expect(completion).toBe(true), { timeout: 2000 })
+    await completed.promise
+    await daemon.stop()
+    expect(acks).toEqual([true])
+    expect(queried).toEqual([commandId])
     expect(workerAcks.size).toBe(1)
     expect(daemon.failure()).toBeUndefined()
     const recovered = new DatabaseSync(join(path, 'node.db'), { readOnly: true })
@@ -378,6 +427,7 @@ it('reports lost Worker history while keeping control connected and withholding 
     launches = 0,
     connections = 0
   let historyLost = false
+  const historyReported = Promise.withResolvers<void>()
   const delivered: string[] = [],
     receipts: string[] = []
   const host: DaemonWorkerHost = {
@@ -427,7 +477,8 @@ it('reports lost Worker history while keeping control connected and withholding 
       if (body?.type === 'node.sync') control(socket, { type: 'node.sync_result', ok: true }, env.message_id)
       if (body?.type === 'node.runtime_report') {
         control(socket, { type: 'node.runtime_report_result', ok: true, report_version: 1 }, env.message_id)
-        if (!sent) {
+        const report = body.report as { agents: RuntimeAgent[] }
+        if (!sent && report.agents[0]?.status === 'available') {
           sent = true
           control(
             socket,
@@ -457,6 +508,7 @@ it('reports lost Worker history while keeping control connected and withholding 
       }
       if (body?.type === 'thread.report') {
         historyLost = body.history_unavailable === true
+        if (historyLost) historyReported.resolve()
         control(
           socket,
           {
@@ -472,7 +524,8 @@ it('reports lost Worker history while keeping control connected and withholding 
     })
   })
   const daemon = start({ host })
-  await vi.waitFor(() => expect(historyLost).toBe(true), { timeout: 3000 })
+  await historyReported.promise
+  expect(historyLost).toBe(true)
   expect(delivered).toEqual(['thread_open'])
   expect(receipts).toEqual([openId])
   expect(launches).toBe(1)
@@ -487,9 +540,9 @@ describe('daemon admission and ownership', () => {
     const worker = vi.fn(async () => {
       throw new Error('Worker must not start before capability admission')
     })
-    let response: Record<string, unknown> | undefined
-    let sentAt = 0
-    let elapsed = 0
+    const received = Promise.withResolvers<Record<string, unknown>>()
+    const connected = Promise.withResolvers<WebSocket>()
+    const probing = Promise.withResolvers<void>()
     let probeFinished = false
     wss.on('connection', (socket) =>
       socket.on('message', (raw) => {
@@ -501,31 +554,18 @@ describe('daemon admission and ownership', () => {
         const body = bodyOf(frame)
         const env = frame.envelope as unknown as Envelope
         if (body?.type === 'node.sync') control(socket, { type: 'node.sync_result', ok: true }, env.message_id)
-        if (body?.type === 'node.runtime_report' && !sentAt) {
-          sentAt = performance.now()
-          control(
-            socket,
-            {
-              type: 'thread.command',
-              thread_id: randomUUID(),
-              action: 'open',
-              agent_type: 'cursor',
-              working_directory: path,
-            },
-            undefined,
-            commandId,
-          )
+        if (body?.type === 'node.runtime_report') {
+          control(socket, { type: 'node.runtime_report_result', ok: true, report_version: 1 }, env.message_id)
+          connected.resolve(socket)
         }
-        if (body?.type === 'thread.command_result') {
-          response = body
-          elapsed = performance.now() - sentAt
-        }
+        if (body?.type === 'thread.command_result') received.resolve(body)
       }),
     )
     const first = start({
       host: { ensureWorker: worker, request: worker },
       probe: (signal) =>
-        new Promise((_resolve, reject) =>
+        new Promise((_resolve, reject) => {
+          probing.resolve()
           signal.addEventListener(
             'abort',
             () => {
@@ -533,11 +573,23 @@ describe('daemon admission and ownership', () => {
               reject(new Error('cancelled'))
             },
             { once: true },
-          ),
-        ),
+          )
+        }),
     })
-    await vi.waitFor(() => expect(response?.code).toBe('agent_unavailable'), { timeout: 2000 })
-    expect(elapsed).toBeLessThan(1000)
+    await probing.promise
+    control(
+      await connected.promise,
+      {
+        type: 'thread.command',
+        thread_id: randomUUID(),
+        action: 'open',
+        agent_type: 'cursor',
+        working_directory: path,
+      },
+      undefined,
+      commandId,
+    )
+    expect((await received.promise).code).toBe('agent_unavailable')
     expect(probeFinished).toBe(false)
     expect(worker).not.toHaveBeenCalled()
     expect(first.failure()).toBeUndefined()
@@ -549,7 +601,8 @@ describe('daemon admission and ownership', () => {
     const first = start()
     await connected
     const duplicate = start()
-    await vi.waitFor(() => expect(duplicate.failure()).toBeDefined(), { timeout: 2000 })
+    await duplicate.running
+    expect(duplicate.failure()).toBeDefined()
     expect(String(duplicate.failure())).toContain('Process lock')
     expect(first.failure()).toBeUndefined()
   })
@@ -560,10 +613,10 @@ describe('daemon admission and ownership', () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve
     })
-    let starting = false
+    const starting = Promise.withResolvers<void>()
     const host: DaemonWorkerHost = {
       async ensureWorker() {
-        starting = true
+        starting.resolve()
         await gate
       },
       async request(_threadId, request) {
@@ -582,6 +635,7 @@ describe('daemon admission and ownership', () => {
         return { type: 'result', ok: true, thread_reports: [] }
       },
     }
+    let sent = false
     wss.on('connection', (socket) =>
       socket.on('message', (raw) => {
         const frame = JSON.parse(webSocketText(raw)) as Frame
@@ -592,7 +646,11 @@ describe('daemon admission and ownership', () => {
         const body = bodyOf(frame),
           env = frame.envelope as unknown as Envelope
         if (body?.type === 'node.sync') control(socket, { type: 'node.sync_result', ok: true }, env.message_id)
-        if (body?.type === 'node.runtime_report')
+        if (body?.type === 'node.runtime_report') {
+          control(socket, { type: 'node.runtime_report_result', ok: true, report_version: 1 }, env.message_id)
+          const report = body.report as { agents: RuntimeAgent[] }
+          if (sent || report.agents[0]?.status !== 'available') return
+          sent = true
           control(socket, {
             type: 'thread.command',
             thread_id: randomUUID(),
@@ -600,17 +658,20 @@ describe('daemon admission and ownership', () => {
             agent_type: 'cursor',
             working_directory: path,
           })
+        }
       }),
     )
     const first = start({ host })
+    cleanup.push(async () => release())
     try {
-      await vi.waitFor(() => expect(starting).toBe(true), { timeout: 2000 })
+      await starting.promise
       let stopped = false
       const stopping = first.stop().then(() => {
         stopped = true
       })
       const duplicate = start({ host })
-      await vi.waitFor(() => expect(duplicate.failure()).toBeDefined(), { timeout: 2000 })
+      await duplicate.running
+      expect(duplicate.failure()).toBeDefined()
       expect(String(duplicate.failure())).toContain('Process lock')
       expect(stopped).toBe(false)
       release()
@@ -628,8 +689,8 @@ it.each(['unavailable', undefined, 'incarnation_conflict'])(
     const { id, wss, start } = await setup()
     const incarnations: string[] = [],
       tokens: string[] = []
-    let connections = 0,
-      synced = false
+    let connections = 0
+    const synced = Promise.withResolvers<void>()
     wss.on('connection', (socket) => {
       const connection = ++connections
       socket.on('message', (raw) => {
@@ -649,13 +710,13 @@ it.each(['unavailable', undefined, 'incarnation_conflict'])(
         const body = bodyOf(frame),
           env = frame.envelope as unknown as Envelope
         if (body?.type === 'node.sync') {
-          synced = true
+          synced.resolve()
           control(socket, { type: 'node.sync_result', ok: true }, env.message_id)
         }
       })
     })
     const daemon = start()
-    await vi.waitFor(() => expect(synced).toBe(true), { timeout: 4000 })
+    await synced.promise
     expect(connections).toBe(2)
     expect(new Set(incarnations).size).toBe(1)
     expect(tokens).toEqual([id.credential.token, id.credential.token])
@@ -676,7 +737,8 @@ it.each(['invalid_node_credential', 'node_source_rejected', 'credential_revoked'
       })
     })
     const daemon = start()
-    await vi.waitFor(() => expect(daemon.failure()).toBeDefined(), { timeout: 2000 })
+    await daemon.running
+    expect(daemon.failure()).toBeDefined()
     expect(String(daemon.failure())).toContain('需要重新认证')
     expect(connections).toBe(1)
   },
@@ -695,7 +757,8 @@ it.each(['invalid_node_credential', 'node_source_rejected', 'credential_revoked'
       })
     })
     const daemon = start()
-    await vi.waitFor(() => expect(daemon.failure()).toBeDefined(), { timeout: 2000 })
+    await daemon.running
+    expect(daemon.failure()).toBeDefined()
     expect(String(daemon.failure())).toContain('需要重新认证')
     expect(connections).toBe(1)
   },
