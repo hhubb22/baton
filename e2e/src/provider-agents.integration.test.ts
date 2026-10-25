@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { chmod, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -17,6 +17,7 @@ import { runDaemon } from '@baton/batond/daemon/daemon'
 import { connectWebSocket } from '@baton/batond/daemon/transport'
 import { initializeBrowseRoots } from '@baton/batond/devices/roots'
 import { LocalWorkerHost } from '@baton/batond/daemon/host'
+import * as Cursor from '@baton/batond/testing/cursor/transcripts'
 import * as Pi from '@baton/batond/testing/pi/transcripts'
 import * as Codex from '@baton/batond/testing/codex/transcripts'
 import * as Kiro from '@baton/batond/testing/kiro/transcripts'
@@ -24,7 +25,7 @@ import * as Kiro from '@baton/batond/testing/kiro/transcripts'
 const LoginResponse = Schema.Struct({ csrf_token: Schema.String })
 
 interface ProviderThreadOptions {
-  agentType: 'pi' | 'codex' | 'kiro'
+  agentType: 'cursor' | 'pi' | 'codex' | 'kiro'
   model: string
   version: string
   prepareTranscripts?: (directory: string) => Promise<void>
@@ -47,6 +48,14 @@ const cases: ReadonlyArray<
     secondReply: string
   }
 > = [
+  {
+    agentType: 'cursor',
+    model: 'composer-2.5',
+    version: '1.0.35',
+    firstReply: 'provider thread resume fixture first turn complete',
+    secondReply:
+      'provider thread resume fixture first turn complete\nprovider thread resume fixture second turn complete',
+  },
   {
     agentType: 'pi',
     model: 'openrouter/deepseek/deepseek-v4-flash',
@@ -85,6 +94,14 @@ async function withProviderThread(
   let daemon: Promise<unknown> | undefined
   let threadId: string | undefined
   try {
+    if (agentType === 'cursor') {
+      // Cursor host 从 bundle 旁加载已安装的 SDK 及其原生资源。
+      await symlink(
+        await realpath(fileURLToPath(new URL('../../apps/batond/node_modules', import.meta.url))),
+        join(directory, 'node_modules'),
+        'junction',
+      )
+    }
     const entries: ReadonlyArray<readonly [URL, string]> = [
       [new URL('./testing/provider-replay-worker.ts', import.meta.url), bundle],
       [
@@ -125,6 +142,42 @@ async function withProviderThread(
     }
     if (prepareTranscripts) {
       await prepareTranscripts(directory)
+    } else if (agentType === 'cursor') {
+      const transcript = Cursor.withRuntimeInstructions(
+        Cursor.sandboxed(
+          await Cursor.readTranscript(
+            fileURLToPath(
+              new URL(
+                '../../upstream/t3code/packages/provider-cursor/src/testing/fixtures/provider_thread_resume.ndjson',
+                import.meta.url,
+              ),
+            ),
+          ),
+        ),
+        model,
+      )
+      // 上游转录跨两个 host，拆分后保留原生会话 ID 和录制消息。
+      for (const [name, part] of [
+        ['first', Cursor.firstTurnOnly(transcript)],
+        ['resumed', Cursor.resumedOnly(transcript)],
+      ] as const) {
+        const { entries, ...header } = part
+        await writeFile(
+          join(directory, `cursor-${name}.ndjson`),
+          [
+            JSON.stringify({
+              type: 'transcript_start',
+              ...header,
+              metadata: {
+                ...header.metadata,
+                derivedFrom: 'provider-cursor/src/testing/fixtures/provider_thread_resume.ndjson',
+              },
+            }),
+            ...entries.map((entry) => JSON.stringify(entry)),
+            '',
+          ].join('\n'),
+        )
+      }
     } else if (agentType === 'pi') {
       const transcript = await Pi.readPiTranscript(Pi.piFixturePath('provider_thread_resume'))
       await Pi.writePiTranscript(join(directory, 'pi-first.ndjson'), Pi.firstTurnOnly(transcript))
@@ -206,7 +259,7 @@ async function withProviderThread(
       capabilities: {
         create: true,
         queue: true,
-        steer: agentType !== 'kiro',
+        steer: agentType === 'pi' || agentType === 'codex',
         stop: true,
         resume: true,
         switch_model: false,
@@ -321,7 +374,9 @@ test.each(cases)(
         ).status,
       ).toBe(202)
       await expect.poll(async () => (await replies()).length, { timeout: 15_000 }).toBe(2)
-      expect(JSON.stringify(await replies())).toContain(provider.secondReply)
+      expect((await replies()).at(-1)?.payload).toMatchObject({
+        content: expect.stringContaining(provider.secondReply),
+      })
       await expect.poll(async () => (await view()).status, { timeout: 10_000 }).toBe('idle')
     })
   },

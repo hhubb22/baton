@@ -1,11 +1,16 @@
 # 跨 app 集成测试
 
-`@baton/e2e` 通过声明的 workspace 依赖启动 TypeScript 中心、节点和本地 Worker，验证远程 Thread、Project、数据库中断恢复及 Gateway 报告流控。模型行为使用上游静态转录、确定性回放和本地替身，不调用在线模型。Pi、Codex、Kiro 的 provider 链路复用节点包导出的转录辅助模块，Cursor 由独立 Worker 回放入口覆盖；数据来源与适配边界见 [回放测试设计](../specs/agent-replay/TECH.md)。
+`@baton/e2e` 通过声明的 workspace 依赖启动 TypeScript 中心、节点和本地 Worker，验证远程 Thread、Project、数据库中断恢复及 Gateway 报告流控。模型行为使用上游静态转录、确定性回放和本地替身，不调用在线模型。
+
+`src/provider-agents.integration.test.ts` 通过网页使用的 HTTP API 创建 Thread、接收回复、停止、恢复原生会话并再次发送，覆盖 Cursor、Pi、Codex、Kiro 的独立 Worker 与真实 provider host。`src/testing/provider-replay-worker.ts` 复用生产 Worker 的 Agent factory，只按本地原生状态文件选择首次或恢复转录。Cursor 使用 `apps/batond/src/testing/cursor/replay-host.ts` 与上游 `provider-cursor/src/testing/fixtures/provider_thread_resume.ndjson`，保留录制的会话 ID 和消息，沿用节点包的 sandbox 与 runtime instructions 转换，再按 host 生命周期拆为两段。其他 provider 复用节点包导出的转录辅助模块；数据来源与适配边界见[回放测试设计](../specs/agent-replay/TECH.md)。
+
+`src/remote.integration.test.ts` 与 `src/project.integration.test.ts` 使用 `src/testing/replay-worker.ts` 的本地 ThreadAgent 替身，分别验证重连、命令与报告去重、追踪，以及 Project Runtime 的协调行为。
 
 在仓库根目录运行：
 
 ```sh
 pnpm test:e2e
+pnpm --dir e2e exec vp test run --config vitest.config.ts src/provider-agents.integration.test.ts -t 'cursor:'
 pnpm --filter @baton/e2e typecheck
 pnpm --filter @baton/e2e lint
 ```

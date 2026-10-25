@@ -16,6 +16,7 @@
     "./worker/output": "./src/worker/output.ts",
     "./platform/process": "./src/platform/process.ts",
     "./agents/shell/index": "./src/agents/shell/index.ts",
+    "./testing/cursor/transcripts": "./src/testing/cursor/transcripts.ts",
     "./testing/pi/transcripts": "./src/testing/pi/transcripts.ts",
     "./testing/codex/transcripts": "./src/testing/codex/transcripts.ts",
     "./testing/kiro/transcripts": "./src/testing/kiro/transcripts.ts",

@@ -16,7 +16,8 @@ async function main() {
   }
   if (command === 'agent-host') {
     const agentType = process.argv[3]
-    if (agentType !== 'pi' && agentType !== 'codex' && agentType !== 'kiro') throw new Error('Unsupported replay Agent')
+    if (agentType !== 'cursor' && agentType !== 'pi' && agentType !== 'codex' && agentType !== 'kiro')
+      throw new Error('Unsupported replay Agent')
     const { values } = parseArgs({
       args: process.argv.slice(4),
       options: { cwd: { type: 'string' }, state: { type: 'string' } },
