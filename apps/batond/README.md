@@ -2,7 +2,7 @@
 
 `@baton/batond` 通过出站 WSS 连接 [TypeScript 开发中心](../server/README.md)，提供 Cursor、Pi、Codex、Kiro 远程 Thread、Project Runtime、设备目录和订阅管理。节点守护进程保存设备身份、命令与报告账本，网页可发送排队消息、撤回、停止、恢复并读取实时输出。每个 Thread 使用独立 Worker，每个执行中的 Agent Thread 独占一个 agent-host；Worker 管理 SQLite、Turn、回复和报告，agent-host 用 fork 的完整 adapter 执行本机 Agent。本地调用方也可直接通过认证 IPC 使用 Worker。
 
-Go 的 `cmd/baton-server`、`cmd/batond` 和根目录构建脚本仍是发布入口，TypeScript 发布切换在迁移 T5 进行。TS 提供 Cursor、Pi、Codex、Kiro 远程 Thread、Project 协同和受限 shell；四个 Agent 在程序或 SDK 已安装且认证为 valid 或 unknown 时报告 `available`，开放网页新建与恢复。缺程序或明确 `missing` 时报告 `unavailable`；系统与版本不设白名单，未知版本、其他系统和认证 unknown 保留在 reason 中。配置、恢复和离线验证范围见 [Kiro 文档](src/agents/kiro/README.md)；Pi、Codex、Kiro、Cursor 的能力及中心历史读取范围见 [中心能力表](../server/README.md#当前能力范围)。
+设备安装包使用单一 Node SEA 可执行文件，附带 `node_modules/` 提供 Cursor SDK、Project Runtime 模型库与原生依赖。设备无需安装 Node 或 pnpm。TS 提供 Cursor、Pi、Codex、Kiro 远程 Thread、Project 协同和受限 shell；四个 Agent 在程序或 SDK 已安装且认证为 valid 或 unknown 时报告 `available`，开放网页新建与恢复。缺程序或明确 `missing` 时报告 `unavailable`；系统与版本不设白名单，未知版本、其他系统和认证 unknown 保留在 reason 中。配置、恢复和离线验证范围见 [Kiro 文档](src/agents/kiro/README.md)；Pi、Codex、Kiro、Cursor 的能力及中心历史读取范围见 [中心能力表](../server/README.md#当前能力范围)。
 
 ## 开发入口
 
@@ -14,9 +14,24 @@ pnpm --filter @baton/batond dev help
 pnpm --filter @baton/batond dev probe
 ```
 
-`dev` 构建独立的 `dist/batond.cjs` 后运行。也可以运行 `pnpm --filter @baton/batond build`，再直接调用 `node apps/batond/dist/batond.cjs`。中心账号初始化、数据库迁移、TLS 配置和服务启动见 [中心文档](../server/README.md#本地账号迁移与启动)。`pnpm --filter @baton/server build` 和 `dev` 会自动将网页构建到中心 bundle 旁的 `web/`，默认无需单独构建前端。
+`dev` 构建独立的 `dist/batond.cjs` 后运行。统一入口为 `src/index.ts`，调用 `src/cli.ts` 导出的 `runBatondCLI(args)`；源码开发的 Project Runtime 与辅助进程通过已安装的 tsx loader 启动。也可以运行 `pnpm --filter @baton/batond build`，再直接调用 `node apps/batond/dist/batond.cjs`。中心账号初始化、数据库迁移、TLS 配置和服务启动见 [中心文档](../server/README.md#本地账号迁移与启动)。`pnpm --filter @baton/server build` 和 `dev` 会自动将网页构建到中心 bundle 旁的 `web/`，默认无需单独构建前端。
 
 显式设置 `CURSOR_API_KEY` 后运行 probe。它在独立 host 中核查 SDK 与辅助程序，调用公开的认证、模型查询接口，不建立执行会话、不发送 prompt、不打开登录浏览器。SDK 安装完整且认证未明确缺失时报告 `available`，版本和系统不限制新建；平台资产不完整、辅助程序不可执行或 sandbox 检查明确失败时报告不可用原因。只有 `available` 且 `capabilities.create` 为 true 时，CLI 才允许新建。凭据只经子进程环境传递，不写入配置、命令、报告或日志。
+
+## 安装包入口
+
+安装目录包含 `batond`（Windows 为 `batond.exe`）、旁置的 `node_modules/` 和许可文件。升级时整体替换安装包。SEA 中 Worker、watchdog、agent-host、Project Runtime 与私有文件 helper 均使用当前可执行文件加子命令启动，不解析源码目录。管理命令与开发入口相同。
+
+```sh
+./batond --version
+./batond agent-host --probe
+./batond project-runtime probe
+./batond project-runtime login-api-key anthropic < key-file
+```
+
+`--version` 输出 JSON，包含 `sea`、`platform`、`arch`、`node`。`agent-host --probe` 加载四个 host 模块，SEA 中同时加载 keyring 和 Cursor 的 tree-sitter 原生扩展，输出 `agents` 与 `nativeModules`；不读取系统钥匙串、不进行认证或模型请求。模块加载失败时非零退出并提示检查安装包的 `node_modules` 与平台依赖。`project-runtime` 后的参数直接传给 Runtime，支持 `run`、`probe`、`login`、`login-device`、`login-api-key` 和 `--version`。
+
+`worker`、`watchdog`、`agent-host <类型> --cwd <目录> --state <目录>` 和 `sidecar-file` 是内部进程入口，由宿主管理生命周期。POSIX 使用 watchdog 回收已登记的进程组，依赖系统 `/bin/ps`；Linux 的最小容器需要安装 `procps`。Windows 使用持久进程身份与 taskkill 回收。
 
 ## 远程节点
 

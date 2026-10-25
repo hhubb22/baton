@@ -4,34 +4,34 @@
 
 ## 安装与登录
 
-使用随 batond 分发的固定版本 Node bundle，构建和进程约定见 [Node sidecar 约定](../README.md)。在解压后的安装目录运行：
+Runtime 编入 batond 的单一 SEA，以 `batond project-runtime` 子命令运行，设备无需安装 Node。构建和进程约定见 [Runtime 子命令约定](../README.md)。在解压后的安装目录运行：
 
 ```sh
 ./batond login openai-codex
 ./batond subscriptions
 ```
 
-Runtime 使用同一份 provider 注册表生成执行实例、模型目录、认证探测和登录入口，当前注册 `openai-codex`（ChatGPT）、`xai`（xAI）和 `anthropic`（Claude）。ChatGPT 仅支持 OAuth；xAI 和 Claude 支持 OAuth 或 API key。TypeScript 节点可通过 `pnpm --filter @baton/batond dev login anthropic` 登录 Claude；独立 Runtime 使用 `baton-project-runtime login anthropic`。登录 ChatGPT 时，终端显示浏览器登录和设备码登录选项；输入编号或选项 ID，回车选择第一项。浏览器登录支持粘贴回调地址；无浏览器的设备可选择设备码登录，在另一台设备的浏览器中输入终端显示的验证码。按 Ctrl+C 取消登录。
+Runtime 使用同一份 provider 注册表生成执行实例、模型目录、认证探测和登录入口，当前注册 `openai-codex`（ChatGPT）、`xai`（xAI）和 `anthropic`（Claude）。ChatGPT 仅支持 OAuth；xAI 和 Claude 支持 OAuth 或 API key。TypeScript 节点可通过 `pnpm --filter @baton/batond dev login anthropic` 登录 Claude；安装包也可使用 `batond project-runtime login anthropic`。登录 ChatGPT 时，终端显示浏览器登录和设备码登录选项；输入编号或选项 ID，回车选择第一项。浏览器登录支持粘贴回调地址；无浏览器的设备可选择设备码登录，在另一台设备的浏览器中输入终端显示的验证码。按 Ctrl+C 取消登录。
 
 API key 从设备本地标准输入保存，命令行参数只包含 provider。将 key 保存在仅自己可读的文件后运行：
 
 ```sh
-baton-project-runtime login-api-key anthropic < key-file
+./batond project-runtime login-api-key anthropic < key-file
 # 源码开发入口
 pnpm --dir runtimes/project-agent exec tsx src/cli.ts login-api-key xai < key-file
 ```
 
-输入须为非空单行文本，最多 16 KiB，允许末尾换行。Windows PowerShell 使用 `Get-Content -Raw key-file | baton-project-runtime login-api-key anthropic`。保存完成后删除输入文件。每个 provider 保存一份凭据，API key 配置会替换该 provider 的 OAuth 登录，使用相同的私有权限检查、原子写入和跨进程锁。Runtime 只读取自己的凭据目录，不自动读取环境 API key 或其他 CLI 的账号。探测只确认对应 provider 支持该认证类型且本地凭据完整，真实请求决定授权是否有效。
+输入须为非空单行文本，最多 16 KiB，允许末尾换行。Windows PowerShell 使用 `Get-Content -Raw key-file | .\batond.exe project-runtime login-api-key anthropic`。保存完成后删除输入文件。每个 provider 保存一份凭据，API key 配置会替换该 provider 的 OAuth 登录，使用相同的私有权限检查、原子写入和跨进程锁。Runtime 只读取自己的凭据目录，不自动读取环境 API key 或其他 CLI 的账号。探测只确认对应 provider 支持该认证类型且本地凭据完整，真实请求决定授权是否有效。
 
 设备设置 API 可发起在线设备的非交互登录，支持 ChatGPT 和 xAI 的设备码流程；Claude 的 OAuth 使用终端交互。设备报告的 `login_methods` 来自已注册 provider 的认证实现和设备码能力，网页据此显示设备码登录或本地配置命令。API key 始终从设备本地输入，不经过网页和中心。Runtime 的 `login-device <provider>` 自动选择设备码方式，stdout 首行返回 `{type:"device_code",provider,verification_uri,user_code,expires_in_seconds}`，随后继续轮询直到凭据保存完成；未提供有效期时使用 900 秒。SIGINT、SIGTERM 或标准输入关闭取消登录，其他交互输入返回错误。batond 取得设备码后让进程在后台继续等待，结束时立即刷新订阅报告。
 
-`batond` 优先定位同目录的 Runtime bundle；没有 bundle 时通过 PATH 查找独立安装的 `baton-project-runtime`。无需进入 bundle 或手动寻找 JS 入口。
+`batond` 在 SEA 中通过自身可执行文件启动 `project-runtime`，加载可执行文件旁 `node_modules/` 中的固定依赖。源码开发仍可通过 `pnpm --dir runtimes/project-agent exec tsx src/cli.ts <命令>` 或编译后的 `baton-project-runtime` 入口运行；两种入口共用导出的 `runProjectRuntimeCLI(args)`。
 
 使用运行 `batond run` 的同一个系统用户登录。凭据默认保存在用户主目录下的 `.baton/project-runtime`；可用 `BATON_PROJECT_RUNTIME_DATA_DIR` 指定 Runtime 专用的私有目录，登录和守护进程须使用相同配置。凭据与 Pi、Codex CLI 的登录记录分别保存，不上传 Coordinator。
 
 `batond subscriptions` 显示各 provider 的已登录、需要登录或无法读取状态，并在需要登录时给出命令。它调用 Runtime 的 `probe`，只检查本地凭据，不刷新 token，不请求模型，不输出 token。已登录表示本地存在所需凭据；实际授权是否有效由后续请求确认。过期但带有刷新凭据的订阅会在下一次真实请求时刷新。
 
-在线的 batond 会在下一轮能力采集后自动上报登录状态，无需重新注册或重启；刷新网页即可查看。Runtime 缺失、版本不匹配或探测失败时，命令返回错误。
+在线的 batond 会在下一轮能力采集后自动上报登录状态，无需重新注册或重启；刷新网页即可查看。安装包依赖缺失、版本不匹配或探测失败时，命令返回错误。
 
 batond 检查版本 `0.1.0`、登录状态和租约后，在空控制目录启动 `run`。正常安装使用 stdio；独立运行也支持 TECH 规定的本地 IPC 环境变量。Runtime 从不加载项目目录中的 AGENTS.md、skills、扩展或 MCP。
 
@@ -70,12 +70,6 @@ pnpm --dir runtimes/project-agent test
 node tools/package-batond.mjs
 ```
 
-测试包括请求前与收尾压缩、旧工具结果保护、前缀与签名复用、超限恢复、重复压缩、提交冲突与丢失回执、无效摘要拒绝、结尾表四种情况、部分工具已有结果、真实子进程在保存和工具事务前后被杀、失败屏障禁止工具执行、模型失败与超限输出、虚拟时钟下的 180 秒与 15 分钟边界、OAuth 文件权限与锁、无网络 probe。跨系统请求测试用超过 1 MiB 的历史验证分页和 provider 扩展字段的保留；CI 上传三个系统的请求文件并逐字节比较。
+测试包括请求前与收尾压缩、旧工具结果保护、前缀与签名复用、超限恢复、重复压缩、提交冲突与丢失回执、无效摘要拒绝、结尾表四种情况、部分工具已有结果、真实子进程在保存和工具事务前后被杀、失败屏障禁止工具执行、模型失败与超限输出、虚拟时钟下的 180 秒与 15 分钟边界、OAuth 文件权限与锁、无网络 probe。跨系统请求测试用超过 1 MiB 的历史验证分页和 provider 扩展字段的保留。
 
-faux 恢复测试的 Coordinator 替身负责持久化和事务去重。真实 Node Runtime、batond、Gateway、Coordinator 与 PostgreSQL 的连接由以下集成测试覆盖，需先设置项目约定的 `BATON_TEST_DATABASE_URL`：
-
-```sh
-BATON_TEST_NODE_PROJECT_RUNTIME=1 go test -v -count=1 ./internal/gateway -run '^TestProjectRuntimePiFauxRealCoordinator$'
-```
-
-该测试通过实际 Runtime 保存 assistant、调用 `memory.write`，用长回复触发收尾摘要，检查工具结果、记忆、压缩事件与读取起点在 Coordinator 保存，原始消息保留，运行正常结束。事务故障注入测试继续验证服务端去重。Runtime、跨设备调度和恢复的自动验收使用本地模型替身及离线录制；真实订阅检查仅在显式手动运行冒烟时执行。
+faux 恢复测试的 Coordinator 替身负责持久化和事务去重。真实 Runtime、batond、Gateway、Coordinator 与 PostgreSQL 的跨 app 集成测试位于 `e2e/`，运行 `pnpm test:e2e`。测试检查工具结果、记忆、压缩事件与读取起点在 Coordinator 保存，原始消息保留，运行正常结束。事务故障注入测试验证服务端去重。Runtime、跨设备调度和恢复的自动验收使用本地模型替身及离线录制；真实订阅检查仅在显式手动运行冒烟时执行。

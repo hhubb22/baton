@@ -1,14 +1,14 @@
 # 安装 Baton
 
-安装包包含中心服务 `baton-server`、设备守护进程 `batond` 和 Project Agent Runtime。`release.json` 记录版本、源码提交及目标平台。
+设备安装包包含 `batond` SEA 可执行文件、旁置 `node_modules/` 和许可文件，Project Runtime 编入同一个可执行文件。中心服务通过 Node 镜像部署。`release.json` 记录版本、源码提交及目标平台。
 
 ## 环境要求
 
-- 设备运行 Project assistant 需要 Node.js 22.19.0 或更高版本，并能在终端中执行 `node`。目标设备无需 Go 或 pnpm。
-- 部署 `baton-server` 需要 PostgreSQL 16+ 和 HTTPS 配置。服务端已嵌入网页，部署中心服务无需 Node.js；也可使用 Docker Compose 部署中心服务和数据库。
+- 设备无需安装 Node.js 或 pnpm，须保留完整安装包中的运行时依赖。
+- 部署中心服务需要 PostgreSQL 16+ 和 HTTPS 配置。Docker 镜像包含 Node 与网页，可使用 Docker Compose 部署中心服务和数据库。
 - Pi、Codex、Kiro Thread 需要在对应设备上另行安装和配置相应 Agent 程序。
 
-选择与系统及 CPU 架构对应的安装包：Linux x64、Apple Silicon Mac 或 Windows x64。保留 `batond` 与同目录的整个 `sidecars/`，包括依赖目录和链接。
+选择与系统及 CPU 架构对应的安装包：Linux x64、Linux arm64、Apple Silicon Mac 或 Windows x64。保留 `batond` 与同目录的整个 `node_modules/` 及许可文件。
 
 ## 校验安装包
 
@@ -48,7 +48,7 @@ try {
 
 ## 订阅登录
 
-在网页 Devices 展开在线设备，点击 `Sign in to ChatGPT` 或 `Sign in to xAI`。复制弹窗中的设备码，打开授权页并确认登录。设备报告已登录后，弹窗显示 `Signed in`，点击 `Done` 关闭。设备上需要安装包中的 Project Agent Runtime。
+在网页 Devices 展开在线设备，点击 `Sign in to ChatGPT` 或 `Sign in to xAI`。复制弹窗中的设备码，打开授权页并确认登录。设备报告已登录后，弹窗显示 `Signed in`，点击 `Done` 关闭。设备使用 `batond project-runtime` 运行包内的 Project Runtime。
 
 终端也可登录：ChatGPT 使用 `batond login openai-codex`，xAI 使用 `batond login xai`。ChatGPT 支持浏览器和设备码两种方式；没有浏览器的设备可选择设备码，在另一台电脑的浏览器中完成授权。Ctrl+C 取消终端登录。
 
@@ -64,4 +64,4 @@ try {
 
 数据库迁移、账号管理和 HTTPS 配置见仓库 [README](https://github.com/hhubb22/baton/blob/main/README.md)。核对 `release.json` 中的提交，可查看该提交对应的文档。
 
-Alpha 阶段数据库和设备账本结构可能变化，升级可能需要重建本地数据。升级前备份所需数据，停止正在运行的程序，再整体替换二进制和 `sidecars/`。本地账号、节点身份和模型订阅凭据位于各自的数据目录，不应放入安装包。
+Alpha 阶段数据库和设备账本结构可能变化，升级可能需要重建本地数据。升级前备份所需数据，停止正在运行的程序，再整体替换可执行文件、`node_modules/` 和许可文件。本地账号、节点身份和模型订阅凭据位于各自的数据目录，不应放入安装包。

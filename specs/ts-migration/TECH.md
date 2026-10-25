@@ -114,7 +114,13 @@ Project Runtime 的租约要计入系统睡眠：设备睡眠期间中心可能�
 | `batond` | 每个目标系统一个 Node SEA 可执行文件，入口按 argv 分派到 `up`、`register`、`run`、`worker`、`watchdog`、`agent-host`、`project-runtime` |
 | `batond` 附带目录 | 在可执行文件旁的 `node_modules` 中外置完整 `@cursor/sdk`（含 JavaScript）、全部生产依赖、当前系统/架构的平台包，以及 t3code 依赖中的原生模块（如 `@napi-rs/keyring`）；SEA 经 `createRequire` 从该目录加载。此方案已通过 macOS arm64 加载检查；Linux arm64 的 Cursor sandbox helper 要求 glibc 2.39+ |
 
-目标系统为 macOS arm64、Linux x64 与 arm64、Windows x64。SEA 交叉构建用 Node 25.7+ 的 `--build-sea`，需要各目标的官方 Node 二进制；发布脚本从本地缓存目录读取，缓存缺失时报错并给出下载命令，不在构建中隐式联网。Project Agent 不再要求设备自装 Node 22.19+，`runtimes/README.md` 的 sidecar 约定改写为子命令约定。
+目标系统为 macOS arm64、Linux x64 与 arm64、Windows x64。`node tools/package-batond.mjs --out bin/package` 使用执行脚本的官方 Node 26 原生构建 SEA；`--node <路径>` 可指定 `cache-node.mjs` 已校验并解包的官方 Node，跨系统构建由宿主 Node 的 `--build-sea` 注入目标可执行文件。构建不下载依赖或 Node；缺少目标平台依赖时直接报告缺失模块。macOS 产物使用 ad-hoc 签名，Windows 产物名为 `batond.exe`。
+
+Project Runtime 的业务代码与 batond 打在同一个 SEA 中，通过 `project-runtime` 子命令启动。Worker、watchdog、agent-host 与私有凭据文件 helper 同样使用自身可执行文件和子命令；开发入口保留源码和已安装 Node 的启动方式。Pi 库的模型数据与 OAuth 动态模块保留在附带目录中，构建时解析其 ESM 入口，运行时从可执行文件旁加载。附带依赖按已安装的生产依赖图复制，冲突版本保留在调用方自己的 `node_modules`，不保留指向源码或 pnpm store 的链接。安装包包含 `package-manifest.json`、Cursor 来源说明、Node 与依赖许可。
+
+`check-sidecar-package.mjs <目录>` 将安装包搬到临时目录，在空 PATH、临时 HOME 下检查帮助、SEA 平台信息、完整 Worker 到认证 IPC 就绪的 3 秒预算、四个 Agent 模块加载、Project Runtime stdio 握手，以及移走依赖目录后的明确错误。`worker-startup.mjs 100 --package <目录> --ledger 2000` 复用该安装包测量冷启动和真实 Worker WAL/FULL 账本；Windows 另运行 `windows-processes.mjs`。这些命令输出 JSON，发布工作流上传检查、测量和构建结果。
+
+发布工作流在 `macos-15`、`ubuntu-24.04`、`ubuntu-24.04-arm`、`windows-2025` 上原生构建。Linux 运行包含 PostgreSQL 的工作区测试，其他平台运行节点和 Project Runtime 测试。`package-release.mjs` 校验 SEA 与附带目录，将解压后的最终归档再次执行安装检查，并生成 SHA-256 文件。中心镜像使用 Node 26 slim，包含 server bundle、网页及 SQL 迁移，以非 root 用户在 `/var/lib/baton` 运行；Compose 的配置与环境变量保持一致。
 
 ## 实施切片
 

@@ -1,6 +1,6 @@
 # Cursor SDK
 
-P0 打包检查使用 npm 公开发布的 `@cursor/sdk@1.0.35`。这里只保存来源和许可说明，SDK 与平台二进制通过隔离依赖目录安装，仓库不保存这些文件。
+安装包使用 npm 公开发布的 `@cursor/sdk@1.0.35`。这里只保存来源和许可说明，SDK 与平台二进制从已安装依赖复制到可执行文件旁的 `node_modules`，仓库不保存这些文件。`package-batond.mjs` 随包复制本目录到 `licenses/cursor-sdk`，并保留各生产依赖的许可文件。
 
 | 包 | 来源 | npm integrity |
 |---|---|---|

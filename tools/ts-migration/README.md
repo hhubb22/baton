@@ -1,10 +1,10 @@
 # TypeScript 开发与测量
 
-这里包含 TS 开发中心、远程节点与本地 Thread 的构建入口、完整 Worker 测量，以及 P0 阶段的独立测量脚本。TS 开发入口独立于 Go 发布入口；根构建和 Docker 镜像继续发布 Go，迁移 T5 负责发布切换。测量结果输出为 JSON，包含 Node、系统和架构。请在目标系统本机执行；容器结果必须注明宿主虚拟机和数据库所在文件系统。
+这里包含 TS 开发中心、远程节点与本地 Thread 的构建入口、安装包检查、完整 Worker 测量，以及 P0 阶段的独立测量脚本。发布节点使用 SEA 和旁置 `node_modules`；开发入口使用 workspace 依赖。检查与测量结果输出为 JSON，包含 Node、系统和架构。请在目标系统本机执行；容器结果必须注明宿主虚拟机和数据库所在文件系统。
 
 ## 本地开发
 
-`build-server.mjs`、`run-server.mjs`、`build-batond.mjs`、`run-batond.mjs` 和 `worker-startup.mjs` 使用 workspace 依赖。在仓库根目录准备 Node 26 和 pnpm 12，然后安装依赖：
+`build-server.mjs`、`run-server.mjs`、`build-batond.mjs` 和 `run-batond.mjs` 使用 workspace 依赖；`worker-startup.mjs` 可用 `--prepared` 读取预打包驱动。在仓库根目录准备 Node 26 和 pnpm 12，然后安装依赖：
 
 ```sh
 pnpm install --frozen-lockfile --ignore-scripts
@@ -74,24 +74,33 @@ macOS 的默认 `fullfsync=0` 也记录在输出中。这里检查的是 SQLite 
 
 未清空系统页缓存。首次启动单独报告，其余样本也都新建进程和 SQLite 文件。它只衡量最小入口，生产 Worker 的锁、完整迁移、恢复和其他模块加载仍需再次验收。任一样本超过 3 秒输出 `exceeds3Seconds: true`；10 秒未就绪会杀掉测量进程并报错。
 
-## 完整 Worker 启动
+## 安装包检查与完整 Worker 测量
 
 ```sh
-"$BATON_MEASURE_NODE" tools/ts-migration/worker-startup.mjs 100
-"$BATON_MEASURE_NODE" tools/ts-migration/worker-startup.mjs 100 --ledger 2000
+node tools/package-batond.mjs
+node tools/check-sidecar-package.mjs bin
+node tools/ts-migration/worker-startup.mjs 100 --ledger 2000 --package bin
 ```
 
-`worker-startup.mjs [样本数=100] [--ledger 事务数]` 使用 workspace 已安装的依赖，通过 `build-batond.mjs` 的 `buildBatond` 构建真实 batond，再用 `common.mjs` 的 `buildSea` 生成完整 SEA。请使用上文缓存中的官方 Node 26；Homebrew Node 可能禁用 SEA 构建。此脚本不需要 `BATON_MEASURE_DEPS`。
+`check-sidecar-package.mjs [安装目录=bin] [--prepared 驱动目录]` 将完整安装包复制到临时目录，检查符号链接没有指向包外，再以空 PATH、临时 HOME 和包外工作目录执行 SEA。检查内容包括 `--help`、`--version` 的 SEA/平台/架构/Node 信息、真实 Worker 的认证 IPC 就绪、`agent-host --probe` 加载 Cursor/Pi/Codex/Kiro 四个模块及 keyring、tree-sitter 原生扩展、`project-runtime run` 的 stdio 握手、私有文件 helper 与只读订阅探测，以及移走旁置 `node_modules` 后的明确失败。Runtime 握手成功回应 `bootstrap` 和空 `read_events`，收到 `claim_inputs` 后由本地协调者返回结束错误，确认进程以非零状态退出；不交付输入、不调用模型。检查以一个 JSON 对象报告各项结果，任一项失败即非零退出。
 
-离线容器缺少目标系统 esbuild 二进制时，可在开发机运行 `worker-startup.mjs --prepare <目录>`，预打包平台无关的 batond 与测量入口 JS，再在目标系统运行 `worker-startup.mjs 100 --prepared <目录>`。SEA 仍由目标系统的缓存 Node 生成，测量与就绪判定使用相同入口。`--ledger` 可与 `--prepared` 一起使用；整个过程无需安装依赖。
+`worker-startup.mjs [样本数=100] [--ledger 事务数] --package <安装目录> [--prepared 驱动目录]` 直接测量该安装包，保留可执行文件旁的完整依赖。每个样本启动新 Worker、新建 Thread 与 SQLite 账本，Worker 及子进程继承空 PATH 和临时 HOME。工具本身需要 Node 26；被测 SEA 不依赖系统 Node、源码或提供商凭据。省略 `--package` 时使用 workspace 依赖构建开发 SEA，用于本地诊断；发布验收应传入实际安装包。
 
-测量入口由 esbuild 打包，调用真实 `LocalWorkerHost` 新建 Worker 并请求认证 status。计时从 Host 实际调用 spawn 前开始，到外部调用方收到 `worker_ready=true` 的认证 status 为止，包含 Host 的就绪轮询、launch lock 释放及最后一次 status 往返；另报含目录与令牌准备的 Host 总耗时。Worker 使用实际独占锁、SQLite 迁移与恢复调度、Agent 接入模块及 watchdog。每个样本使用新 Thread 和新数据库，初始恢复队列为空，不覆盖已有执行会话的恢复耗时。
+检查与测量共用 esbuild 打包的驱动，调用真实 `LocalWorkerHost` 新建 Worker 并请求认证 status。计时从 Host 实际调用 spawn 前开始，到外部调用方收到 `worker_ready=true` 的认证 status 为止，包含 Host 的就绪轮询、launch lock 释放及最后一次 status 往返；另报含目录与令牌准备的 Host 总耗时。Worker 使用实际独占锁、SQLite 迁移与恢复调度及 Agent 注册模块。初始恢复队列为空，不覆盖已有执行会话的恢复耗时；就绪时 `agent_ready=false`，不打开 Agent 会话。驱动另发错误令牌，确认 IPC 拒绝未认证请求。
 
-安装目录仅保留 SEA；无 SDK 附带目录、系统 Node 或提供商凭据，Worker 和 watchdog 继承空 PATH 与临时 HOME。只验证 Worker 就绪，`agent_ready=false`，不打开原生 Agent。macOS 使用短 `/tmp/bw-*` 路径，避免 UDS 路径超过 103 字节。逐次核对进程锁、watchdog 身份和实际数据库表，发送 SIGTERM 后等待 Worker 正常退出、watchdog 清理及锁释放，再删除样本目录。3 秒预算保持不变，任一样本达到 3 秒、Host 就绪超时或清理失败均以非零状态退出。输出第一样本、p50、p99、max；不清空系统页缓存。
+macOS 使用短 `/tmp/bw-*` 路径，避免 UDS 路径超过 103 字节。每次核对进程锁、实际数据库表和 WAL 模式。POSIX 上核对 watchdog 身份，发送 SIGTERM 后等待 Worker 正常退出、watchdog 清理及锁释放。Windows Worker 当前不创建 watchdog；驱动通过 CIM 创建时间核对 Worker 身份，再用 `taskkill /T /F` 终止，确认进程退出且锁不再由存活进程持有。Windows 报告明确标记 `graceful=false`，不把此过程计为正常退出。CIM 检查与终止之间仍有竞争窗口。
 
-可选 `--ledger` 在真实 `makeWorker` 串行队列中交替调用 `records.add/remove`，预热 200 次后测量指定事务数。测量入口仅包装 Node SQLite 的 COMMIT 执行计时，不修改业务代码或事务路径，输出实际 WAL/FULL PRAGMA、COMMIT、队列操作及 1 ms 分辨率的事件循环延迟。该负载用于检查真实账本和队列开销，不代表 prompt、intent 或 IPC 负载；`fullfsync` 使用默认值，未验证断电持久性。提交 p99 超过 50 ms 时以非零状态退出。
+3 秒预算保持不变，任一样本达到 3 秒、Host 就绪超时或清理失败均以非零状态退出。报告第一样本、p50、p99、max，以及平台对应的清理方式。每次删除样本目录；不清空系统页缓存。
 
-当前清理验证依赖 POSIX 进程检查；Windows 尚未实现此测量入口。
+可选 `--ledger` 在驱动所包含的真实 `makeWorker` 串行队列中交替调用 `records.add/remove`，预热 200 次后测量指定事务数。驱动使用当前 workspace 的 Worker 实现，与被测 SEA 分别运行；该项没有通过 SEA 的 IPC 执行。驱动仅包装 Node SQLite 的 COMMIT 执行计时，保留实际账本保存、提交核查和队列路径，输出实际 WAL/FULL PRAGMA、COMMIT、队列操作及 1 ms 分辨率的事件循环延迟。该负载用于检查真实账本和队列开销，不代表 prompt、intent 或 IPC 负载；`fullfsync` 使用默认值，未验证断电持久性。提交 p99 超过 50 ms 时以非零状态退出。
+
+离线容器缺少目标系统 esbuild 二进制时，先在开发机运行：
+
+```sh
+node tools/ts-migration/worker-startup.mjs --prepare /tmp/baton-drivers
+```
+
+`--prepare` 只生成平台无关的 `measurement.cjs`，安装包另由 `package-batond.mjs` 构建。将驱动和目标系统安装包挂入容器后，两种检查均可使用 `--prepared /prepared`，此时不导入 esbuild、不构建 SEA、不安装依赖。驱动应与安装包使用同一源码版本。
 
 ## Windows 进程
 
@@ -113,24 +122,30 @@ node tools/ts-migration/windows-processes.mjs
 
 ## 本机 Linux 容器
 
-完整 Worker 可使用已有镜像、只读 workspace 和 Node 缓存运行。先在开发机预打包，再在 Linux 构建 SEA；数据放在 VM named volume 中：
+完整安装包可使用已有镜像、预打包驱动和目标平台的 Node 缓存运行。先准备 Linux 安装包 `bin-linux` 和驱动；数据放在 VM named volume 中：
 
 ```sh
-worker_measure_bundle="$(mktemp -d /tmp/baton-worker-linux.XXXXXX)"
-"$BATON_MEASURE_NODE" tools/ts-migration/worker-startup.mjs --prepare "$worker_measure_bundle"
+node tools/ts-migration/worker-startup.mjs --prepare /tmp/baton-drivers
 docker volume create baton-worker-measure
 docker run --rm --init --pull=never --network none --read-only \
   --entrypoint /node-cache/v26.11.1/node-v26.11.1-linux-arm64/bin/node \
   -w /repo -e TMPDIR=/measure \
   -v "$PWD:/repo:ro" -v "$HOME/.cache/baton/node:/node-cache:ro" \
-  -v "$worker_measure_bundle:/prepared:ro" -v baton-worker-measure:/measure \
+  -v /tmp/baton-drivers:/prepared:ro -v baton-worker-measure:/measure \
+  baton-cursor-env:latest /repo/tools/check-sidecar-package.mjs \
+  /repo/bin-linux --prepared /prepared
+docker run --rm --init --pull=never --network none --read-only \
+  --entrypoint /node-cache/v26.11.1/node-v26.11.1-linux-arm64/bin/node \
+  -w /repo -e TMPDIR=/measure \
+  -v "$PWD:/repo:ro" -v "$HOME/.cache/baton/node:/node-cache:ro" \
+  -v /tmp/baton-drivers:/prepared:ro -v baton-worker-measure:/measure \
   baton-cursor-env:latest /repo/tools/ts-migration/worker-startup.mjs \
-  100 --ledger 2000 --prepared /prepared
+  100 --ledger 2000 --package /repo/bin-linux --prepared /prepared
 docker volume rm baton-worker-measure
-rm -rf "$worker_measure_bundle"
+rm -rf /tmp/baton-drivers
 ```
 
-命令要求本机已有 `baton-cursor-env:latest` Linux arm64 镜像，`--pull=never` 和 `--network none` 禁止拉取或联网。只读挂载的 workspace 提供脚本与纯 JS 依赖，预打包入口在容器内不调用 esbuild。Worker 的临时安装目录仍仅含 Linux SEA。该测量只验证 Worker；SDK helper 的 glibc 要求由本地加载检查验证，适配器行为由离线转录与本地替身验证。
+命令要求本机已有 `baton-cursor-env:latest` Linux arm64 镜像；安装包内的原生依赖也必须为 Linux arm64。`--pull=never` 和 `--network none` 禁止拉取或联网。只读 workspace 挂载提供脚本，驱动从 `/prepared` 读取；被测进程的工作目录和 HOME 位于临时卷，不从 workspace 解析模块。SDK helper 的 glibc 要求由本地加载检查验证，适配器会话行为由离线转录与本地替身验证。
 
 P0 的 Linux arm64 测量运行于本机 OrbStack 的 Linux 虚拟机，数据库放在 Docker named volume，而非 macOS bind mount。以下可在相同环境复现；`baton-cursor-env:latest` 为本机已有 Debian 容器镜像，其他环境可显式拉取官方 `node:26.11.1-bookworm-slim` 作为运行底座。运行时仍使用上文缓存的官方 Node。
 
@@ -148,4 +163,4 @@ docker run --rm --network none --entrypoint /bin/sh \
 docker volume rm baton-p0-measure-node26
 ```
 
-Windows 和 Linux x64 没有本次本机执行环境，不能由上述 arm64 容器结果推导通过。
+Windows 和 Linux x64 需在目标系统原生执行检查与测量；arm64 容器结果不能代替其他系统和架构的验证。
