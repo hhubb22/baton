@@ -5,6 +5,7 @@ import type * as Scope from 'effect/Scope'
 import { AgentError, type AgentFactory } from '../worker/agent.ts'
 import { parseThreadAttachments } from '../devices/attachments.ts'
 import { makeWorker, type Worker } from '../worker/index.ts'
+import { makeThreadAgentFactory } from '../agents/thread-agents.ts'
 import { acquireProcessLockScoped } from '../platform/lock.ts'
 import { openPrivateFile, readPrivateFile, writePrivateFileAtomic } from '../platform/private.ts'
 import { reapProcessTree, startProcessWatchdog, type ProcessRecordCallbacks } from '../platform/process.ts'
@@ -59,46 +60,13 @@ export const runWorker = (options: {
       remove: (record) =>
         Effect.runPromise(Deferred.await(workerReady).pipe(Effect.flatMap((worker) => worker.records.remove(record)))),
     }
-    const registry = (yield* Effect.promise(() => import('../agents/registry.ts'))).agentRegistry
-    const hostCommand = { file: invocation.executable, args: invocation.args }
-    const cursorFactory = registry.cursor.makeFactory({
-      command: hostCommand,
-      records,
-      ...(watchdog ? { watchdog } : {}),
-      paths: registry.cursor.paths,
-    })
-    const codexFactory = registry.codex.makeFactory({
-      command: hostCommand,
-      records,
-      ...(watchdog ? { watchdog } : {}),
-      paths: registry.codex.paths,
-    })
-    const piFactory = registry.pi.makeFactory({
-      command: hostCommand,
-      records,
-      ...(watchdog ? { watchdog } : {}),
-      paths: registry.pi.paths,
-    })
-    const kiroFactory = registry.kiro.makeFactory({
-      command: hostCommand,
-      records,
-      ...(watchdog ? { watchdog } : {}),
-      paths: registry.kiro.paths,
-    })
-    const shellFactory = registry.shell.makeFactory({
-      dataDirectory: options.dataDirectory,
-      records,
-      ...(watchdog ? { watchdog } : {}),
-    })
-    const agentFactory: AgentFactory =
+    const agentFactory =
       options.agentFactory ??
-      ((config) => {
-        if (config.agent_type === 'cursor') return cursorFactory(config)
-        if (config.agent_type === 'pi') return piFactory(config)
-        if (config.agent_type === 'codex') return codexFactory(config)
-        if (config.agent_type === 'kiro') return kiroFactory(config)
-        if (config.agent_type === 'shell') return shellFactory(config)
-        throw new Error(`Unsupported Thread agent_type: ${config.agent_type}`)
+      makeThreadAgentFactory({
+        dataDirectory: options.dataDirectory,
+        command: { file: invocation.executable, args: invocation.args },
+        records,
+        ...(watchdog ? { watchdog } : {}),
       })
     let parsingAttachments = false
     const nodeLedger = yield* makeNodeLedger(join(options.dataDirectory, 'node.db'))

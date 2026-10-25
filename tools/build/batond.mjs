@@ -2,10 +2,13 @@ import { build } from 'esbuild'
 import { resolve, dirname, join, relative } from 'node:path'
 import { packageDirectory } from '../package-dependencies.mjs'
 import { fileURLToPath } from 'node:url'
+import { assertWorkerDependencies } from './worker-dependencies.mjs'
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
+const external = ['@cursor/sdk', '@cursor/sdk/*', '@napi-rs/keyring']
 
 export async function buildBatond(output = join(repository, 'apps/batond/dist/batond.cjs'), { onMetafile } = {}) {
+  await assertWorkerDependencies({ external })
   const result = await build({
     entryPoints: [join(repository, 'apps/batond/src/index.ts')],
     outfile: output,
@@ -13,7 +16,7 @@ export async function buildBatond(output = join(repository, 'apps/batond/dist/ba
     platform: 'node',
     target: 'node26',
     format: 'cjs',
-    external: ['@cursor/sdk', '@cursor/sdk/*', '@napi-rs/keyring'],
+    external,
     plugins: [
       {
         name: 'disk-pi-modules',

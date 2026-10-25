@@ -15,7 +15,7 @@ import {
 import { NoOpProviderEventLoggers, ProviderEventLoggers } from '@t3tools/provider-core/server/ProviderEventLoggers'
 import { resolveSelfInvocation } from '@t3tools/shared/nodeRuntime'
 import { makeProviderHostDriver } from '../../agent-host/driver.ts'
-import type { AgentHostPaths } from '../../agent-host/host-layer.ts'
+import type { AgentHostPaths } from '../../agent-host/paths.ts'
 import { AgentHostDriver, AgentHostError, type ProbeResult } from '../../agent-host/protocol.ts'
 import { kiroVersion, type KiroVersionResult } from './version.ts'
 import { kiroTurnFailure } from './failure.ts'

@@ -14,7 +14,7 @@ import { makeWorker, type Worker } from '../../worker/index.ts'
 import type { ProcessRecordCallbacks } from '../../platform/process-types.ts'
 import { makePrivateTempDirectory } from '../../testing/private.ts'
 import { replayProcessRecords, workerProcessRecords } from '../../testing/platform/process-records.ts'
-import { makeKiroAgentFactory } from './index.ts'
+import { makeThreadAgentFactory } from '../thread-agents.ts'
 import { kiroTurnFailure } from './failure.ts'
 import {
   authenticationFailure,
@@ -109,15 +109,11 @@ const writeTranscript = async (config: WorkerOpenConfig, name: string, transcrip
 }
 
 const factoryFor = (path: string, records?: ProcessRecordCallbacks) => (config: WorkerOpenConfig) =>
-  makeKiroAgentFactory({
+  makeThreadAgentFactory({
+    dataDirectory: config.working_directory,
     command: { file: process.execPath, args: [bundle, '--transcript', path] },
     records: records ?? replayProcessRecords(config.working_directory),
     ...(watchdog ? { watchdog } : {}),
-    paths: (value) => {
-      const statePath = value.adapter_config.state_path
-      if (statePath === undefined) throw new Error('Kiro replay requires state_path')
-      return { workingDirectory: value.working_directory, privateDirectory: dirname(statePath) }
-    },
   })(config)
 
 const start = (config: WorkerOpenConfig, path: string) => {

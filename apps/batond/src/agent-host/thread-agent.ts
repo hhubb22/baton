@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { Effect, Exit, Queue, Scope, Stream } from 'effect'
-import type { WorkerOpenConfig } from '@baton/protocol'
+import type { RuntimeAgent, WorkerOpenConfig } from '@baton/protocol'
+import { dirname, isAbsolute } from 'node:path'
 import {
   AgentError,
   type AgentEvent,
@@ -10,8 +11,7 @@ import {
   type ThreadAgent,
 } from '../worker/agent.ts'
 import { makeOutputMailbox } from '../worker/output.ts'
-import { capabilitiesFor } from '../agents/capabilities.ts'
-import type { AgentHostPaths } from './host-layer.ts'
+import type { AgentHostPaths } from './paths.ts'
 import { preparationFor, samePreparation } from './preparation.ts'
 import type { Preparation } from './protocol.ts'
 import { connectAgentHost, type AgentHostConnection, type AgentHostProcessOptions } from './transport.ts'
@@ -26,27 +26,29 @@ interface AgentDelta {
   readonly gap?: boolean
 }
 
-export interface AgentHostOptions extends Omit<AgentHostProcessOptions, 'paths'> {
+export interface HostedAgentOptions extends Omit<AgentHostProcessOptions, 'paths'> {
   /** Receives validated live text. The sink must return immediately. */
   readonly onDelta?: (event: AgentDelta) => void
-  readonly paths: (config: WorkerOpenConfig) => AgentHostPaths
   readonly connect?: (
     options: AgentHostProcessOptions,
     signal: AbortSignal,
   ) => Effect.Effect<AgentHostConnection, AgentError>
   readonly eventCapacity?: number
-  /** Upstream active steering. Queue-only agents leave this unset. */
-  readonly steer?: boolean
+  readonly capabilities: Pick<RuntimeAgent['capabilities'], 'steer' | 'switch_model'>
 }
 
 const fixedModel = (config: WorkerOpenConfig) => config.model ?? config.adapter_config.model ?? 'default'
 
 export const makeAgentHostFactory =
-  (options: AgentHostOptions): AgentFactory =>
+  (options: HostedAgentOptions): AgentFactory =>
   (config) =>
     makeAgent(config, options)
 
-function makeAgent(config: WorkerOpenConfig, options: AgentHostOptions): ThreadAgent {
+function makeAgent(config: WorkerOpenConfig, options: HostedAgentOptions): ThreadAgent {
+  const statePath = config.adapter_config.state_path
+  if (!statePath || !isAbsolute(statePath) || !isAbsolute(config.working_directory))
+    throw new AgentError('Agent host requires absolute working_directory and private state_path')
+  const paths: AgentHostPaths = { workingDirectory: config.working_directory, privateDirectory: dirname(statePath) }
   // These allocations only establish local state; host and filesystem work starts inside Effects.
   const scope = Scope.makeUnsafe()
   const queue = Effect.runSync(Queue.bounded<AgentEvent>(options.eventCapacity ?? 256))
@@ -75,7 +77,7 @@ function makeAgent(config: WorkerOpenConfig, options: AgentHostOptions): ThreadA
   const hostOptions = (): AgentHostProcessOptions => ({
     command: options.command,
     agentType: options.agentType,
-    paths: options.paths(config),
+    paths,
     ...(options.watchdog ? { watchdog: options.watchdog } : {}),
     ...(options.records ? { records: options.records } : {}),
     ...(options.onDiagnostic ? { onDiagnostic: options.onDiagnostic } : {}),
@@ -212,17 +214,13 @@ function makeAgent(config: WorkerOpenConfig, options: AgentHostOptions): ThreadA
         if (!live || broken || stopped)
           return yield* Effect.fail(new AgentError('Agent cannot prepare an input in its current state'))
         if (message.mode === 'steer') {
-          if (!options.steer) return yield* Effect.fail(new AgentError('Agent does not support steer'))
+          if (!options.capabilities.steer) return yield* Effect.fail(new AgentError('Agent does not support steer'))
           if (!active || active.ended) return yield* Effect.fail(new AgentError('Agent has no active turn to steer'))
         } else if (active && !active.ended)
           return yield* Effect.fail(new AgentError('Agent cannot prepare an input in its current state'))
         if (message.mode === 'steer' && message.model !== undefined)
           return yield* Effect.fail(new AgentError('Steering cannot change the model'))
-        if (
-          !capabilitiesFor(config.agent_type)?.switch_model &&
-          message.model !== undefined &&
-          message.model !== fixedModel(config)
-        )
+        if (!options.capabilities.switch_model && message.model !== undefined && message.model !== fixedModel(config))
           return yield* Effect.fail(new AgentError('Agent does not support changing the model of an open Thread'))
         if (!nativeSessionId) return yield* Effect.fail(new AgentError('Agent has no native session identity'))
         const preparation = preparationFor(config, nativeSessionId, message, confirmedSends)
@@ -245,7 +243,7 @@ function makeAgent(config: WorkerOpenConfig, options: AgentHostOptions): ThreadA
         if (!live || broken || stopped)
           return yield* Effect.fail(new AgentError('Agent execution channel is not available'))
         if (message.mode === 'steer') {
-          if (!options.steer) return yield* Effect.fail(new AgentError('Agent does not support steer'))
+          if (!options.capabilities.steer) return yield* Effect.fail(new AgentError('Agent does not support steer'))
           if (!active || active.ended) return yield* Effect.fail(new AgentError('Agent has no active turn to steer'))
         } else if (active && !active.ended)
           return yield* Effect.fail(new AgentError('Agent execution channel is not available'))

@@ -9,7 +9,9 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vite-plus/
 import type { ThreadReport, WorkerOpenConfig } from '@baton/protocol'
 import type { PiRpcReplayTranscript } from '@t3tools/provider-pi/testing'
 import { startProcessWatchdog, type ProcessWatchdog } from '../../platform/process.ts'
-import { makePiAgentFactory } from './index.ts'
+import { makeThreadAgentFactory } from '../thread-agents.ts'
+import { agentCatalog } from '../catalog.ts'
+import { makeAgentHostFactory } from '../../agent-host/thread-agent.ts'
 import { AgentError, type AgentEvent, type AgentMessage, type ThreadAgent } from '../../worker/agent.ts'
 import { connectAgentHost } from '../../agent-host/transport.ts'
 import { makeWorker, type Worker } from '../../worker/index.ts'
@@ -108,7 +110,10 @@ const replayFactory =
     records?: ProcessRecordCallbacks,
   ) =>
   (config: WorkerOpenConfig) =>
-    makePiAgentFactory({
+    (loseSteerReply || beforeSteerResponse ? makeAgentHostFactory : makeThreadAgentFactory)({
+      dataDirectory: config.working_directory,
+      agentType: 'pi',
+      capabilities: agentCatalog.pi.capabilities,
       command: { file: process.execPath, args: [bundle, '--transcript', transcriptFile] },
       records: records ?? replayProcessRecords(config.working_directory),
       ...(watchdog ? { watchdog } : {}),
@@ -133,13 +138,8 @@ const replayFactory =
                       ),
                 }
               }),
-          } satisfies Partial<import('../../agent-host/thread-agent.ts').AgentHostOptions>)
+          } satisfies Partial<import('../../agent-host/thread-agent.ts').HostedAgentOptions>)
         : {}),
-      paths: (value) => {
-        const statePath = value.adapter_config.state_path
-        if (statePath === undefined) throw new Error('Pi replay requires state_path')
-        return { workingDirectory: value.working_directory, privateDirectory: dirname(statePath) }
-      },
     })(config)
 
 const startTranscript = (config: WorkerOpenConfig, transcriptFile: string) => {

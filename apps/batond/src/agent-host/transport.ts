@@ -14,7 +14,7 @@ import { spawnOwnedProcessEffect } from '../platform/process.ts'
 import { AgentError } from '../worker/agent.ts'
 import type { AgentMessage } from '../worker/agent.ts'
 import { agentEnvironment } from './environment.ts'
-import type { AgentHostPaths } from './host-layer.ts'
+import type { AgentHostPaths } from './paths.ts'
 import type { Preparation } from './protocol.ts'
 import { AgentHostRpc, type Acceptance, type HostEvent, type ProbeResult, type SessionIdentity } from './protocol.ts'
 

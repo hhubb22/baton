@@ -12,7 +12,7 @@ import { CommitUnknown } from '@baton/sqlite'
 import { captureTrace, traceParent, withTraceSpan } from '@baton/telemetry'
 import { Cause, Deferred, Effect, Exit, Fiber, Queue, Schema, Scope, Stream } from 'effect'
 import type { ProcessRecord } from '../platform/process-types.ts'
-import { capabilitiesFor } from '../agents/capabilities.ts'
+import { agentCatalog } from '../agents/catalog.ts'
 import {
   AgentError,
   type AgentEvent,
@@ -1294,7 +1294,11 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
           }
           const target = draft.activeMessage ? draft.messages[draft.activeMessage] : undefined
           if (request.mode === 'steer') {
-            if (!draft.config || !capabilitiesFor(draft.config.agent_type)?.steer)
+            if (
+              !draft.config ||
+              !Object.hasOwn(agentCatalog, draft.config.agent_type) ||
+              !agentCatalog[draft.config.agent_type as keyof typeof agentCatalog].capabilities.steer
+            )
               return reject('unsupported', 'This Agent does not support steer')
             if (request.model) return reject('model_with_steer', 'Steering cannot change the model')
             if (draft.phase !== 'busy' || !target || target.ended || target.turn === undefined)

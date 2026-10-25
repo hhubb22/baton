@@ -3,7 +3,8 @@ import { Cause, Context, Effect, Exit, Fiber, Layer, Semaphore, Stream } from 'e
 import { RpcServer, RpcSerialization } from 'effect/rpc'
 import { NodeStdio } from '@effect/platform-node'
 import { installHostProcessGroup } from '../platform/host-process-group.ts'
-import { agentHostLayer, type AgentHostEnvironment, type AgentHostPaths } from './host-layer.ts'
+import { agentHostLayer, type AgentHostEnvironment } from './host-layer.ts'
+import type { AgentHostPaths } from './paths.ts'
 import { makeProcessRegistrar } from './process-registrar.ts'
 import {
   AgentHostDriver,
@@ -28,7 +29,7 @@ export interface AgentHostModule {
   readonly spawner?: Parameters<typeof agentHostLayer>[0]['spawner']
 }
 
-export interface AgentHostOptions {
+export interface HostRunOptions {
   readonly agentType: string
   readonly paths: AgentHostPaths
 }
@@ -38,7 +39,7 @@ export interface AgentHostOptions {
  * only RPC, whose Scope owns the Agent session, and whose child processes are
  * reaped with the group.
  */
-export const runAgentHost = (module: AgentHostModule, options: AgentHostOptions) =>
+export const runAgentHost = (module: AgentHostModule, options: HostRunOptions) =>
   Effect.gen(function* () {
     if (process.platform !== 'win32') process.umask(0o077)
     const originalConsole = globalThis.console

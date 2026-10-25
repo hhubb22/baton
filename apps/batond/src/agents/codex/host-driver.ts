@@ -21,7 +21,7 @@ import {
 import { checkCodexProviderStatus } from '@t3tools/provider-codex/server/status'
 import type { SnapshotMessage } from '../../agent-host/evidence.ts'
 import { makeProviderHostDriver } from '../../agent-host/driver.ts'
-import type { AgentHostPaths } from '../../agent-host/host-layer.ts'
+import type { AgentHostPaths } from '../../agent-host/paths.ts'
 import { AgentHostDriver, AgentHostError, type ProbeResult } from '../../agent-host/protocol.ts'
 
 const settingsFor = () =>

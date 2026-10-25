@@ -1,6 +1,6 @@
 # Agent host
 
-`agent-host` 是 batond 可执行文件的子命令，在一个独立进程里运行 t3code 的 `ProviderAdapterV2`。执行 host 的实际 cwd 为 Thread 工作目录，只读探测 host 的实际 cwd 为临时空目录。Worker 通过 stdio NDJSON RPC 驱动它；registry 会加载 `@t3tools/contracts` 的 `DEFAULT_MODEL` 等协议常量，安装检查只读取 SDK 元数据与资产路径。Worker 不加载 SDK、provider adapter 或 host driver；执行 host 按 Agent 类型加载对应模块，Cursor SDK 只在 Cursor host 内执行。安装包的 `agent-host --probe` 会加载四个 Agent 模块以检查完整性。
+`agent-host` 是 batond 可执行文件的子命令，在一个独立进程里运行 t3code 的 `ProviderAdapterV2`。执行 host 的实际 cwd 为 Thread 工作目录，只读探测 host 的实际 cwd 为临时空目录。Worker 通过 stdio NDJSON RPC 驱动它。`agents/thread-agents.ts` 只装配执行工厂，能力来自纯数据的 `agents/catalog.ts`；daemon 与普通 CLI 通过 `agents/probe.ts` 探测。`cli/agent-host.ts` 持有逐项动态加载表，执行时只加载选中的 host module，`agent-host --probe` 实际加载全部模块并检查安装包原生依赖。Worker 不加载 SDK、provider adapter 或 host driver；构建从两个 Worker 入口检查运行时依赖图，拒绝绕入 CLI、探测、host 实现或 SDK 的依赖。
 
 ## 进程模型
 
@@ -44,7 +44,7 @@ host 进程的环境变量只包含系统必需项（`PATH`、`HOME`、`USER`、
 
 `driver.ts` 的 `makeProviderHostDriver` 统一处理会话映射、事件归属、迟到事件过滤和发送确认；各 Agent 只构造 adapter、配置策略和只读探测。`runtime_request.updated` 中的 `command`、`file-read`、`file-change`、`permission` 当次 `accept`；`user_input`、`mcp-elicitation` 与 `turn_item.updated` 里的问题按请求 ID 关联，通过 host 事件、Worker 账本和中心送到网页等待回答。网页回答经持久 `answer` 命令和 host RPC 返回原请求；Codex MCP 请求保留上游的确认语义，普通问题传入用户答案。停止或关闭后的 pending 请求取消，其他请求取消，不写永久授权。
 
-Kiro 的版本命令使用 host 的 Node Effect spawner 和 process registrar，4 秒超时，stdout/stderr 各最多收集 4096 字节，由 Scope 与进程回收路径清理。探测只返回版本号，诊断不外传。注册表对 macOS arm64 / CLI 精确版本 2.32.0、程序已安装且认证未明确缺失的组合报告 `available` 并开放 create/resume；认证 `unknown` 保留首次执行由原生程序检查的 reason，明确 `missing` 拒绝。其他系统或版本（含预发布、构建后缀）、版本超时或不可解析保持 `unverified`，缺程序为 `unavailable`。Pi、Codex 的认证准入规则保持原样。
+Kiro 的版本命令使用 host 的 Node Effect spawner 和 process registrar，4 秒超时，stdout/stderr 各最多收集 4096 字节，由 Scope 与进程回收路径清理。探测只返回版本号，诊断不外传。公共探测对程序已安装且认证为 valid 或 unknown 的组合报告 `available` 并开放 create/resume，版本与系统不设白名单。认证 `unknown` 保留首次执行由原生程序检查的 reason，明确 `missing` 或缺程序时报告 `unavailable`；整次 host 探测失败且安装状态未确认时报告 `unverified`。
 
 上游 `turn.terminal` 的 `failed` 映射为带原生会话、输入和执行身份的 `end` 事件，`outcome: failed`，并附安全原因。Worker 以现有 `turn.ended` 报告的 `reason: failed` 与 `content` 保存结果，输入保持 sent，队列继续执行；没有排队消息时 Thread 回到 idle，host 和原生会话保留。回答投递无法确认时保留命令的 unknown 结果；事件流断开、输入发送结果无法确认，以及 host 崩溃或连接丢失仍走 Thread uncertain 路径。
 
@@ -58,4 +58,4 @@ Worker 将插入固定到接收时的活动回合，目标结束后仍未写入 
 
 ## 验证
 
-包内测试覆盖环境白名单、宿主路径与只读凭据，以及用本地替身拉起 detached 子进程和后代后的整树回收。各 Agent 的 stdio/RPC 回放说明见 [Cursor](../agents/cursor/README.md)、[Pi](../agents/pi/README.md)、[Codex](../agents/codex/README.md)、[Kiro](../agents/kiro/README.md) 文档，均使用 fork 的 testkit 和离线转录。Kiro 2.32.0 夹具是授权保留的旧录制转换，README 与 metadata 明确原生版本；`provider_error` 及派生认证失败夹具与 `simple` 的成功回合组成同会话转录，驱动真实 adapter、host 与 Worker，核对失败结束、安全原因持久化、输入保持 sent、排队消息执行和进程保留。版本探测使用本地可执行替身验证解析、失败、缺程序与超时回收，不启动真实 CLI。离线验证不能证明真实账号授权有效，节点按版本、系统和认证规则报告可用性。
+包内测试覆盖环境白名单、宿主路径与只读凭据，以及用本地替身拉起 detached 子进程和后代后的整树回收。各 Agent 的 stdio/RPC 回放说明见 [Cursor](../agents/cursor/README.md)、[Pi](../agents/pi/README.md)、[Codex](../agents/codex/README.md)、[Kiro](../agents/kiro/README.md) 文档，均使用 fork 的 testkit 和离线转录。Kiro 2.32.0 夹具是授权保留的旧录制转换，README 与 metadata 明确原生版本；`provider_error` 及派生认证失败夹具与 `simple` 的成功回合组成同会话转录，驱动真实 adapter、host 与 Worker，核对失败结束、安全原因持久化、输入保持 sent、排队消息执行和进程保留。版本探测使用本地可执行替身验证解析、失败、缺程序与超时回收，不启动真实 CLI。离线验证不能证明真实账号授权有效，节点按安装与认证结果报告可用性，版本和系统保留为诊断信息。

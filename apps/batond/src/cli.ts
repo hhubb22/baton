@@ -2,8 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { createRequire } from 'node:module'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { isSea } from 'node:sea'
 import { Effect, Schema } from 'effect'
@@ -54,25 +53,8 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
   }
   if (action === 'agent-host' && args.length === 1 && args[0] === '--probe') {
     try {
-      const { agentHostModule, agentHostModuleNames } = await import('./agent-host/index.ts')
-      const agents = agentHostModuleNames()
-      await Promise.all(agents.map((agentType) => agentHostModule(agentType)))
-      const nativeModules: string[] = []
-      if (isSea()) {
-        const load = createRequire(join(dirname(process.execPath), 'package.json'))
-        const keyring = load('@napi-rs/keyring') as { AsyncEntry?: unknown }
-        if (typeof keyring.AsyncEntry !== 'function') throw new Error('keyring native module is incomplete')
-        nativeModules.push('@napi-rs/keyring')
-        const { inspectCursorSdk } = await import('./agents/cursor/sdk-inspection.ts')
-        const sdk = inspectCursorSdk()
-        if (sdk.missingAssets.length) throw new Error('Cursor platform assets are incomplete')
-        const Parser = load(sdk.treeSitter)
-        const parser = new Parser()
-        parser.setLanguage(load(sdk.treeSitterBash))
-        if (parser.parse('echo baton').rootNode.type !== 'program') throw new Error('Cursor parser failed')
-        nativeModules.push('cursor/tree-sitter', 'cursor/tree-sitter-bash')
-      }
-      console.log(JSON.stringify({ agents, nativeModules }))
+      const { inspectAgentHostModules } = await import('./cli/agent-host.ts')
+      console.log(JSON.stringify(await inspectAgentHostModules()))
     } catch {
       console.error(
         JSON.stringify({
@@ -170,7 +152,7 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
         const agentType = positionals[0]
         if (!agentType || !values.cwd || !values.state)
           throw new Error('Agent host needs an Agent type, --cwd and --state')
-        const { runAgentHostCommand } = await import('./agent-host/index.ts')
+        const { runAgentHostCommand } = await import('./cli/agent-host.ts')
         await Effect.runPromise(
           Effect.scoped(
             runAgentHostCommand(agentType, { workingDirectory: values.cwd, privateDirectory: values.state }),
@@ -243,8 +225,9 @@ export async function runLocalCLI(
     return value
   }
   if (action === 'probe') {
-    const { probeLocalCursor } = await import('./agents/registry.ts')
-    console.log(JSON.stringify(await probeLocalCursor(), null, 2))
+    const { probeAgents } = await import('./agents/probe.ts')
+    const [cursor] = await probeAgents({ dataDirectory, agentTypes: ['cursor'] })
+    console.log(JSON.stringify(cursor, null, 2))
     return
   }
   const timeout =
@@ -270,7 +253,9 @@ export async function runLocalCLI(
     )
     const capability = await (dependencies.probeAgent
       ? dependencies.probeAgent(agent)
-      : import('./agents/registry.ts').then(({ agentRegistry }) => agentRegistry[agent].probe()))
+      : import('./agents/probe.ts').then(
+          async ({ probeAgents }) => (await probeAgents({ dataDirectory, agentTypes: [agent] }))[0]!,
+        ))
     if (capability.status !== 'available' || !capability.capabilities.create)
       throw new Error(capability.reason ?? `${agent} 尚不可用`)
     const cwd = values.cwd ? await realpath(values.cwd) : saved?.open_config.working_directory

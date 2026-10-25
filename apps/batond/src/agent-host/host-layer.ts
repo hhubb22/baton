@@ -14,12 +14,7 @@ import { join } from 'node:path'
 import type { AgentHostProcessGroup } from './protocol.ts'
 import type { ProcessRegistrar } from './process-registrar.ts'
 
-export interface AgentHostPaths {
-  /** Thread working directory, the Agent's `cwd`. */
-  readonly workingDirectory: string
-  /** Private per-Thread directory holding the native mapping and SDK state. */
-  readonly privateDirectory: string
-}
+import type { AgentHostPaths } from './paths.ts'
 
 /**
  * Host execution scope. The Agent host process already leads the group that

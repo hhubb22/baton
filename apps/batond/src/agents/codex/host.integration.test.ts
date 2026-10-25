@@ -6,7 +6,7 @@ import { build } from 'esbuild'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vite-plus/test'
 import type { WorkerOpenConfig } from '@baton/protocol'
 import { startProcessWatchdog, type ProcessWatchdog } from '../../platform/process.ts'
-import { makeCodexAgentFactory } from './index.ts'
+import { makeThreadAgentFactory } from '../thread-agents.ts'
 import { makePrivateTempDirectory } from '../../testing/private.ts'
 import { replayProcessRecords } from '../../testing/platform/process-records.ts'
 import type { AgentEvent, AgentMessage, ThreadAgent } from '../../worker/agent.ts'
@@ -91,15 +91,11 @@ const writeTranscript = async (config: WorkerOpenConfig, name: string, transcrip
 }
 
 const start = (config: WorkerOpenConfig, path: string) => {
-  const agent = makeCodexAgentFactory({
+  const agent = makeThreadAgentFactory({
+    dataDirectory: config.working_directory,
     command: { file: process.execPath, args: [bundle, '--transcript', path] },
     records: replayProcessRecords(config.working_directory),
     ...(watchdog ? { watchdog } : {}),
-    paths: (value) => {
-      const statePath = value.adapter_config.state_path
-      if (statePath === undefined) throw new Error('Codex replay requires state_path')
-      return { workingDirectory: value.working_directory, privateDirectory: dirname(statePath) }
-    },
   })(config)
   agents.push(agent)
   const events: AgentEvent[] = []

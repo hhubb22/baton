@@ -1,7 +1,7 @@
 import { expect, it } from 'vite-plus/test'
-import { findSent, validatePreparation, type SnapshotMessage } from '../../agent-host/evidence.ts'
-import type { AgentMessage } from '../../worker/agent.ts'
-import { preparationFor } from '../../agent-host/preparation.ts'
+import { findSent, validatePreparation, type SnapshotMessage } from './evidence.ts'
+import type { AgentMessage } from '../worker/agent.ts'
+import { preparationFor } from './preparation.ts'
 import type { WorkerOpenConfig } from '@baton/protocol'
 
 const config = { thread_id: 'thread' } as WorkerOpenConfig

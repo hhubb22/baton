@@ -8,7 +8,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vite-plus/
 import { CURSOR_REPLAY_FIXTURES } from '@t3tools/provider-cursor/testing'
 import type { WorkerOpenConfig } from '@baton/protocol'
 import { startProcessWatchdog, type ProcessWatchdog } from '../../platform/process.ts'
-import { makeCursorAgentFactory } from './index.ts'
+import { makeThreadAgentFactory } from '../thread-agents.ts'
 import { makePrivateTempDirectory } from '../../testing/private.ts'
 import { replayProcessRecords } from '../../testing/platform/process-records.ts'
 import type { AgentEvent, ThreadAgent } from '../../worker/agent.ts'
@@ -106,15 +106,11 @@ const workspace = async () => {
 }
 
 const start = (config: WorkerOpenConfig, transcriptFile: string) =>
-  makeCursorAgentFactory({
+  makeThreadAgentFactory({
+    dataDirectory: config.working_directory,
     command: { file: process.execPath, args: [bundle, '--transcript', transcriptFile] },
     records: replayProcessRecords(config.working_directory),
     ...(watchdog ? { watchdog } : {}),
-    paths: (value) => ({
-      workingDirectory: value.working_directory,
-      privateDirectory: dirname(value.adapter_config.state_path!),
-    }),
-    eventCapacity: 2048,
   })(config)
 
 const collect = (agent: ThreadAgent) => {

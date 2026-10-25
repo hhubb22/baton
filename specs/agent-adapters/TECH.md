@@ -34,11 +34,12 @@ Coordinator：Thread 命令、报告与历史记录
 | `packages/protocol` | Worker IPC、ThreadReport 和 RuntimeAgent 的 Effect Schema；原生历史条目与历史页字段已删除 | R-01、R-10 |
 | `apps/batond/src/worker` | 沿用 T1～T3 的接收、执行、停止裁决与 outbox；`ThreadAgent` 契约按下文简化 | R-01、R-04、R-05、R-08 |
 | `apps/batond/src/agent-host` | Agent host 子命令：宿主层、事件映射，经 stdio `effect/rpc` 与 Worker 通信 | R-04～R-11 |
-| `apps/batond/src/agents/registry.ts` | Agent 类型到 t3code driver、设置、探测和静态能力上限的唯一注册描述 | R-01～R-03、R-07 |
+| `apps/batond/src/agents/catalog.ts` | Agent 类型、名称、能力和限制文案的纯数据目录 | R-01～R-03、R-07 |
+| `apps/batond/src/agents/thread-agents.ts`、`agents/probe.ts`、`cli/agent-host.ts` | 分别装配 Worker 工厂、daemon/CLI 只读探测和 host 动态加载 | R-01～R-03、R-07 |
 | `apps/batond/src/platform/process` | 进程组、POSIX watchdog、Windows 进程账本；登记上游新建的进程组 | R-08 |
 | `apps/server`、Web 数据层 | 正式 reason 字段、status/create 准入；历史使用中心记录，删除前端原生解析 | R-01、R-10 |
 
-Worker 的 registry 会加载 `@t3tools/contracts` 的 `DEFAULT_MODEL` 等协议常量，SDK 安装检查通过 `sdk-inspection.ts` 读取元数据与资产路径，不执行 SDK。Worker 不加载 SDK、provider adapter 或 host driver，保持 3 秒就绪预算；执行 agent-host 按 Agent 类型加载对应模块，Cursor SDK 只在 Cursor host 内执行。安装包的 `agent-host --probe` 会加载四个 Agent 模块以检查完整性。每个执行 Thread 一个 agent-host，它是 POSIX 进程组组长或 Windows 账本登记的根进程，Worker 回收整棵进程树即可结束 adapter 及其后代。探测在 batond 拉起的只读 agent-host 中执行，用同一套 `src/platform/process` 回收。
+Worker 通过 `agents/thread-agents.ts` 和纯数据 catalog 装配执行工厂，不加载探测、SDK、provider adapter 或 host driver，保持 3 秒就绪预算。`buildBatond` 检查 Worker 运行时依赖图，覆盖静态导入、再导出和字面量动态加载，禁止绕入 host 实现或不可解析的动态加载。daemon 与普通 CLI 通过 `agents/probe.ts` 探测，Cursor 安装预检只通过 `sdk-inspection.ts` 读取元数据与资产路径。执行 agent-host 由 `cli/agent-host.ts` 按类型动态加载对应模块，Cursor SDK 只在 Cursor host 内执行。安装包的 `agent-host --probe` 会加载四个 Agent 模块以检查完整性。每个执行 Thread 一个 agent-host，它是 POSIX 进程组组长或 Windows 账本登记的根进程，Worker 回收整棵进程树即可结束 adapter 及其后代。探测在 batond 拉起的只读 agent-host 中执行，用同一套 `src/platform/process` 回收。
 
 ### 宿主层
 
@@ -182,7 +183,7 @@ Thread 历史使用中心已保存的记录：`thread_messages` 保存员工和 
 
 ## 注册、配置与设备能力（R-01～R-03、R-07、R-12）
 
-执行与探测共用 `src/agents/registry.ts` 中的无状态注册描述。描述包含类型、对应的 t3code driver 与设置、探测和静态能力上限；不保存 live adapter 或凭据。未知类型一律拒绝，不退回 shell。
+`src/agents/catalog.ts` 是能力和限制文案的唯一来源，只保存字面量与类型。Worker 的 `makeThreadAgentFactory` 将 hosted 类型交给通用 host factory，shell 交给受限 shell factory；工厂内部推导并验证工作目录和私有状态绝对路径。daemon/CLI 的 `probeAgents` 在启动前验证类型，按请求顺序去重，并行探测并保持结果顺序。CLI 的 `agent-host` 分支动态导入 `cli/agent-host.ts`，其穷尽 loader 表只加载选中模块。未知类型在加载或启动前拒绝。
 
 | Agent | Binary / 配置入口 | 能力 |
 |---|---|---|
@@ -192,7 +193,7 @@ Thread 历史使用中心已保存的记录：`thread_messages` 保存员工和 
 | Cursor | 随 batond 分发的 SDK、平台辅助包与本机 shell | 按上游 driver 报告的能力 |
 | Grok、Antigravity | 切换后接入时确定 | 切换后接入时确定 |
 
-`agents/capabilities.ts` 按固定上游 adapter 的能力与 Baton 已实现的执行路径报告：Pi、Codex 支持 steer，Cursor、Kiro 上游不支持；四个 Agent 均支持新建、排队、停止与恢复。Pi、Codex、Cursor 开放 `switch_model`。Worker 在准备输入时解析逐消息模型，省略时取账本中最近 `sent` 的 queue 输入模型或创建配置，并在 intent 中持久保存；失败或撤回的输入不改变继承模型。通用 driver 把该选择同时传入 `startTurn.modelSelection` 和 `appThread.modelSelection`。Pi adapter 在 prompt 前调用 `set_model`，Codex 在每次 `turn/start` 传模型，Cursor 在恢复会话和 SDK send 时传模型；steer 不接受模型。Kiro 的 fork adapter 在 `kiroAcp.ts` 的 `kiroCapabilityOverrides` 中明确关闭 `supportsActiveSteering`、`supportsSteeringByInterruptRestart` 和 `supportsModelSwitchInSession`；Baton 按该固定实现报告能力。该覆盖不证明 Kiro CLI 的所有版本都缺少对应协议方法。`capabilityLimitations` 将这些原因写入报告。仅存在明确的数据丢失、越权或重复副作用风险时进一步限制已实现能力。
+`agents/catalog.ts` 按固定上游 adapter 的能力与 Baton 已实现的执行路径报告：Pi、Codex 支持 steer，Cursor、Kiro 上游不支持；四个 Agent 均支持新建、排队、停止与恢复。Pi、Codex、Cursor 开放 `switch_model`。Worker 在准备输入时解析逐消息模型，省略时取账本中最近 `sent` 的 queue 输入模型或创建配置，并在 intent 中持久保存；失败或撤回的输入不改变继承模型。通用 driver 把该选择同时传入 `startTurn.modelSelection` 和 `appThread.modelSelection`。Pi adapter 在 prompt 前调用 `set_model`，Codex 在每次 `turn/start` 传模型，Cursor 在恢复会话和 SDK send 时传模型；steer 不接受模型。Kiro 的 fork adapter 在 `kiroAcp.ts` 的 `kiroCapabilityOverrides` 中明确关闭 `supportsActiveSteering`、`supportsSteeringByInterruptRestart` 和 `supportsModelSwitchInSession`；Baton 按该固定实现报告能力。该覆盖不证明 Kiro CLI 的所有版本都缺少对应协议方法。catalog 的 `limitation` 将这些原因写入报告。仅存在明确的数据丢失、越权或重复副作用风险时进一步限制已实现能力。
 
 Kiro settings 固定为 `source: local`，不拉取 registry 包；上游 Kiro driver 不读取专有环境变量，host 只继承系统项，不提供 `BATON_KIRO_*` 或 `KIRO_HOME` 配置入口。Pi、Codex 的配置目录分别按各自原生变量传递，不改写系统 HOME。Antigravity 需要额外启动路径时增加结构化、非敏感本机配置，先通过验证再固定其字段。
 

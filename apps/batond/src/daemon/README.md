@@ -17,17 +17,17 @@ pnpm --filter @baton/batond dev run
 
 Worker 报告先写入 node.db outbox，再确认 Worker。单连接最多保留 8 条未确认报告，每秒最多尝试发送 32 条，中心 ACK 释放发送窗口；超时按原事件身份补送，为心跳和命令回执保留处理余量。中心确认按 Thread、event ID 和 Worker 序号核对；已确认报告保留，收到 `expected_worker_seq` 时重新发送该序号起的报告。连接断开后按 1～30 秒指数退避并加入 jitter，同一次 daemon 运行沿用 incarnation。明确的凭据拒绝立即停止；认证临时不可用或没有明确拒绝码时继续重连。后续启动继续使用原身份，不自动注册新节点。
 
-认证成功后发送 `node.sync` 与心跳；匹配的同步回执成功后发送 Thread 和能力报告。`up`、`run` 的 `--control-timeout-seconds` 设置认证与同步各自的等待预算，默认 370 秒，范围 1～3600 秒的整数；嵌入调用对应 `controlTimeoutSeconds`。认证从连接建立起计时，同步从认证成功起重新计时，任一阶段超时均断开并退避重连。中心默认握手期限为 15 秒，可配置上限为 361 秒，默认节点预算覆盖中心期限。中心以合法入站帧维护传输活性，慢业务处理期间收到的心跳仍保持连接，数据库身份校验在心跳与业务处理时执行。Cursor 探测独立运行，命令读取最近完成的能力快照。探测未完成时上报 `unverified`、`create:false` 和原因。命令接收复用外层 4.5 秒预算，Worker 启动至多 3 秒，随后 IPC 至多 1 秒，并服从剩余预算。
+认证成功后发送 `node.sync` 与心跳；匹配的同步回执成功后发送 Thread 和能力报告。`up`、`run` 的 `--control-timeout-seconds` 设置认证与同步各自的等待预算，默认 370 秒，范围 1～3600 秒的整数；嵌入调用对应 `controlTimeoutSeconds`。认证从连接建立起计时，同步从认证成功起重新计时，任一阶段超时均断开并退避重连。中心默认握手期限为 15 秒，可配置上限为 361 秒，默认节点预算覆盖中心期限。中心以合法入站帧维护传输活性，慢业务处理期间收到的心跳仍保持连接，数据库身份校验在心跳与业务处理时执行。公共 `agents/probe.ts` 按 catalog 中的 Cursor、Pi、Codex、Kiro 顺序并发探测，命令读取最近完成的能力快照。每次探测有 30 秒预算，取消会等待 host 断开、进程回收和临时目录清理；Windows 的登记锁覆盖恢复至清理，回收未确认时保留登记。探测未完成时上报 `unverified`、`create:false` 和原因。命令接收复用外层 4.5 秒预算，Worker 启动至多 3 秒，随后 IPC 至多 1 秒，并服从剩余预算。
 
 `session.request` 的输出读取原样转发为 Worker 的 `session_request`；实时输出不写入节点报告账本。网页时间线与 Project 工具从中心读取已保存的 Thread 输入、回复和事件，设备不保存原生历史。
 
 Project manager 在 WSS 连接循环外构造，连接同步后绑定当前 RPC transport，断线时取消旧请求并保留运行中的 Runtime。每条连接最多 64 个 Project 请求在途，响应只匹配本连接的 correlation ID。start、stop、wake 在独立任务中处理，Runtime 的节点管理操作与业务 stdio 请求分开授权。租约、持久清理事实和 Thread 版本等待见 [Project Runtime 宿主](../project/README.md)。
 
-设备目录、仓库、执行授权和订阅报告在独立采集循环中更新，每轮完成后等待五秒；连接建立或配置变化触发刷新。目录扫描和 Runtime probe 共享两秒预算，Cursor 探测继续独立运行。最终报告按带缩进 JSON 计量并裁剪至 64 KiB，先裁仓库和模型，再裁目录；控制连接和 Worker 报告不等待文件扫描。
+设备目录、仓库、执行授权和订阅报告在独立采集循环中更新，每轮完成后等待五秒；连接建立或配置变化触发刷新。目录扫描和 Runtime probe 共享两秒预算，Agent 探测继续独立运行。最终报告按带缩进 JSON 计量并裁剪至 64 KiB，先裁仓库和模型，再裁目录；控制连接和 Worker 报告不等待文件扫描。
 
 ## 嵌入接口
 
-`index.ts` 导出：
+`identity.ts` 和 `daemon.ts` 分别导出：
 
 - `registerNode(options): Promise<NodeIdentity>`，选项为 `dataDirectory`、`coordinatorURL`、可选的 `enrollmentFile`、`displayName`、`caFile`、`signal`、`transport`。
 - `runDaemon(options): Effect.Effect<void, Error, Scope.Scope>`，选项为 `dataDirectory`，可选的 `identity`、`relayURL`、`caFile`、`controlTimeoutSeconds`、`heartbeatMs`、`pollIntervalMs`、`probeIntervalMs`、`transport`、`probe`、`host`、`random`、`project`。`project` 可注入源码 Runtime 命令、时钟和租约时序，默认使用现有 Runtime 实现。
