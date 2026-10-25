@@ -30,19 +30,21 @@ import { text } from '../theme/text'
 import { colors, radius, size, space } from '../theme/tokens.stylex'
 import { Banner } from '../ui/Banner'
 import { Button, focusRing, IconButton } from '../ui/Button'
-import { Chip } from '../ui/Chip'
 import { Composer } from '../ui/Composer'
 import { Dialog, DialogClose } from '../ui/Dialog'
 import { Icon } from '../ui/Icon'
-import { Menu, MenuHeading, MenuOption } from '../ui/Menu'
+import { Menu, MenuOption } from '../ui/Menu'
 import { StatusDot, type Tone } from '../ui/Status'
 import { AttentionCard } from './AttentionCard'
 import { InboxFeedback } from './InboxFeedback'
 import { FilePreview } from './FilePreview'
 import { MessageBody } from './MessageBody'
+import { FullOutput } from './FullOutput'
 import { Page } from './Page'
 import { ActivityTrace, Attachments, LiveOutput } from './ReplyParts'
 import { copySelection, SelectionArea } from './SelectionMenu'
+import { ThreadExecutionLimit } from './ThreadExecutionLimit'
+import { ThreadModelMenu } from './ThreadModelMenu'
 import { useNow } from './useNow'
 import { useWorkspace } from './workspace'
 
@@ -171,7 +173,6 @@ const styles = stylex.create({
     borderColor: colors.border,
     borderRadius: radius.pill,
   },
-  menuNote: { maxWidth: '280px', paddingBlock: '6px', paddingInline: space.sm, color: colors.muted },
   empty: { padding: space.xl, color: colors.muted },
 })
 
@@ -248,6 +249,7 @@ function MessageItem({
         <div data-reply={reply}>
           <MessageBody body={message.body} onOpenPath={onOpenPath} />
         </div>
+        {message.fullOutput && <FullOutput threadId={message.threadId} reference={message.fullOutput} />}
         <Attachments attachments={message.attachments} devices={devices} onOpen={onOpen} />
       </article>
     )
@@ -337,26 +339,19 @@ function ModelMenu({
 }) {
   const name = thread.agent ? agentNames[thread.agent] : 'Command'
   return (
-    <Menu side="top" trigger={<Chip icon="sparkle">{thread.model || 'Default model'}</Chip>}>
-      {agent?.abilities.switchModel ? (
-        <>
-          <MenuHeading>{name}</MenuHeading>
-          {agent.models.length === 0 && <MenuOption selected>Default model</MenuOption>}
-          {agent.models.map((model) => (
-            <MenuOption key={model} selected={model === thread.model} onSelect={() => onSelect(model)}>
-              {model}
-            </MenuOption>
-          ))}
-        </>
-      ) : (
-        <>
-          <p {...stylex.props(text.caption, styles.menuNote)}>
-            {name} cannot switch models in this chat. Start a new chat to choose another.
-          </p>
-          <MenuOption selected>{thread.model || 'Default model'}</MenuOption>
-        </>
-      )}
-    </Menu>
+    <ThreadModelMenu
+      side="top"
+      mode="switch"
+      agents={agent ? [agent] : []}
+      choice={thread.agent ? { agent: thread.agent, model: thread.model } : null}
+      label={thread.model || 'Default model'}
+      lockedReason={
+        agent?.abilities.switchModel
+          ? undefined
+          : `${name} cannot switch models in this chat. Start a new chat to choose another.`
+      }
+      onSelect={(choice) => onSelect(choice.model)}
+    />
   )
 }
 
@@ -675,7 +670,12 @@ export function ThreadDetail({
               onSend={onSend}
               placeholder={`Message ${agentName} on ${device?.name ?? 'this device'}…`}
               style={styles.composer}
-              chips={<ModelMenu thread={thread} agent={agent} onSelect={onModel} />}
+              chips={
+                <>
+                  <ModelMenu thread={thread} agent={agent} onSelect={onModel} />
+                  <ThreadExecutionLimit key={thread.id} thread={thread} />
+                </>
+              }
               actions={
                 running && (
                   <>

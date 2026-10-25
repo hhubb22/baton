@@ -97,7 +97,7 @@ export function makeThreadService(options: {
     const req = saved.request
     const config = req.open_config ?? (await io(ledger.worker(req.thread_id!)))?.config
     if (!config) throw new CommandDeliveryUncertain()
-    if (req.type !== 'thread_stop' && req.type !== 'thread_withdraw')
+    if (!['thread_stop', 'thread_withdraw', 'thread_settings'].includes(req.type))
       await authorizeDirectory(options.dataDirectory, config.working_directory)
     if (performance.now() >= deadline) throw new CommandDeliveryUncertain()
     const readiness = await recovery.ensure(req.thread_id!)
@@ -222,6 +222,9 @@ export function makeThreadService(options: {
           ...(cmd.content !== undefined ? { payload: cmd.content } : {}),
           ...(cmd.mode ? { mode: cmd.mode } : {}),
           ...(cmd.model ? { model: cmd.model } : {}),
+          ...(cmd.execution_timeout_seconds !== undefined
+            ? { execution_timeout_seconds: cmd.execution_timeout_seconds }
+            : {}),
         })
       }
       request = { ...request, ...(cmd.trace_context ? { trace_context: cmd.trace_context } : {}) }

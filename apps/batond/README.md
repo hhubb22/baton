@@ -39,6 +39,8 @@ pnpm --filter @baton/batond dev run --relay wss://localhost:8443/v1/node --ca-fi
 
 `--ca-file` 同时供 HTTPS 注册和 WSS 连接校验证书，使用系统已信任证书时可省略；该路径不会保存在身份中。中心地址必须为 HTTPS，Relay 必须为 WSS，证书需匹配访问主机名。
 
+`up` 和 `run` 支持 `--control-timeout-seconds <秒>`，取 1～3600 秒的整数，默认 370 秒。认证等待从 WSS 连接建立起计算；认证成功后，同步另有完整的同等预算。到期后断开并按原身份重连。中心默认 15 秒裁决认证握手，其可配置最大期限为 361 秒；节点默认的 370 秒作为等待兜底。
+
 所有节点命令支持 `--data-dir`，默认 `~/.baton-ts`。仅在授权配置不存在时登记用户主目录，已有配置包括空列表都会保留；`--workspace` 在连接前按真实绝对路径幂等登记工作目录。网页设备详情与本地 `files` 命令可以增删授权根；目录选择与附件预览使用同一真实路径边界。节点锁、身份与报告恢复细节见 [远程节点模块](src/daemon/README.md)，实时输出的游标和缓冲规则见 [Worker 文档](src/worker/README.md#real-time-output)。
 
 节点连接和能力探测分别进行。Cursor、Pi、Codex、Kiro 探测完成前上报 `unverified`，创建 Thread 需等待 `available` 且 `capabilities.create: true`；Kiro 另以限时 4 秒、stdout/stderr 各最多 4096 字节的 `kiro-cli --version` 获取版本，只上报版本号，诊断不外传，超时或不可解析记入 reason，已安装时仍允许新建，缺程序报告 `unavailable`。四个 Agent 认证 unknown 均允许新建；整次 host 探测失败且安装状态未确认时报告 `unverified`。Pi、Codex 支持 steer，Cursor、Kiro 上游不支持；Thread 内换模型保持关闭，Pi、Codex、Cursor 的 Worker 固定模型且 host 尚未传递逐消息模型，Kiro 上游不支持，原因写入报告。设备进程需显式配置 `CURSOR_API_KEY`。节点退出不结束独立 Worker，重启后从账本重新发现存活 Worker；未确认命令继续使用原 ID，已接收输入不会因为重连再次发送。

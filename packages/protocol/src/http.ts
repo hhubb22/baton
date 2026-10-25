@@ -1,5 +1,5 @@
 import { Schema } from 'effect'
-import { Cursor, NonNegativeInteger, ThreadStatus, UUID, boundedText } from './common.ts'
+import { Cursor, NonNegativeInteger, StorageGeneration, ThreadStatus, UUID, boundedText } from './common.ts'
 import { BrowserThreadOutput } from './dto.ts'
 
 export const EmptyInput = Schema.Struct({}).check(Schema.makeFilter((value) => !Array.isArray(value)))
@@ -34,7 +34,12 @@ export const ThreadListQuery = Schema.Struct({
   limit: pageLimit,
 })
 export const ThreadTimelineQuery = Schema.Struct({ cursor: Schema.optionalKey(boundedText(4096)), limit: pageLimit })
-export const ThreadOutputQuery = Schema.Struct({ cursor: Schema.optionalKey(Cursor) })
+export const ThreadOutputQuery = Schema.Struct({
+  cursor: Schema.optionalKey(Cursor),
+  action: Schema.optionalKey(Schema.Literals(['output', 'full_output'])),
+  output_id: Schema.optionalKey(UUID),
+  storage_generation: Schema.optionalKey(StorageGeneration),
+})
 export const ThreadTraceQuery = Schema.Struct({ worker_turn_seq: decimal(1, Number.MAX_SAFE_INTEGER) })
 export const FilesQuery = Schema.Struct({
   root_id: Schema.optionalKey(boundedText(64)),

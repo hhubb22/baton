@@ -19,6 +19,12 @@ const deviceId = '729f92e9-e68c-4a30-817a-0adb2da87b51'
 const messageId = 'c6559d72-c581-4f4d-bef0-3f80724d1856'
 const at = '2026-10-23T02:00:00Z'
 const later = '2026-10-23T02:01:00Z'
+const fullOutputReference = {
+  id: '25689309-82b9-4cf7-8cba-7e84d7d30236',
+  storage_generation: 'local-generation',
+  total_bytes: 100000,
+  expires_at: '2099-01-01T00:00:00.000Z',
+}
 const thread = (overrides: Record<string, unknown> = {}) => ({
   id: threadId,
   node_id: deviceId,
@@ -249,14 +255,53 @@ describe('HTTP thread contracts', () => {
       accepted(),
       event(2, 'message.queued', { client_message_id: 'client-message' }),
       event(3, 'message.sent', { client_message_id: 'client-message', worker_turn_seq: 4 }),
-      event(4, 'reply', { event_id: 'reply-report', worker_turn_seq: 4, content: 'Actual reply' }, later),
+      event(
+        4,
+        'reply',
+        {
+          event_id: 'reply-report',
+          worker_turn_seq: 4,
+          content: 'Actual reply',
+          metadata: { full_output: fullOutputReference },
+        },
+        later,
+      ),
     ]
     const { api } = setup((url) => (url.pathname.endsWith('/timeline') ? { events } : thread()))
     expect(await api.listMessages(threadId)).toMatchObject([
       { id: messageId, sender: 'you', body: 'Inspect this repository', delivery: 'delivered' },
-      { id: `reply:${threadId}:reply-report`, body: 'Actual reply', activity: null, attachments: [] },
+      {
+        id: `reply:${threadId}:reply-report`,
+        body: 'Actual reply',
+        activity: null,
+        fullOutput: fullOutputReference,
+        attachments: [],
+      },
     ])
     expect((await api.listMessages(threadId))[1].id).toBe(`reply:${threadId}:reply-report`)
+  })
+
+  it('keeps reply summaries readable when full-output metadata is missing or malformed', async () => {
+    const references: unknown[] = [
+      undefined,
+      null,
+      [],
+      { ...fullOutputReference, id: 'invalid-id' },
+      { ...fullOutputReference, storage_generation: 42 },
+      { ...fullOutputReference, total_bytes: -1 },
+      { ...fullOutputReference, expires_at: 'invalid-date' },
+    ]
+    const events = references.map((full_output, index) =>
+      event(index + 1, 'reply', {
+        event_id: `reply-${index}`,
+        content: `Summary ${index}`,
+        metadata: { full_output },
+      }),
+    )
+    const { api } = setup((url) => (url.pathname.endsWith('/timeline') ? { events } : thread()))
+    expect(
+      (await api.listMessages(threadId)).map((reply) => ({ body: reply.body, fullOutput: reply.fullOutput })),
+    ).toEqual(references.map((_, index) => ({ body: `Summary ${index}`, fullOutput: null })))
   })
 
   it.each([false, true])(
@@ -375,14 +420,94 @@ describe('HTTP thread contracts', () => {
     expect(bodies[1].message.content).toBe('Hello')
   })
 
-  it('rejects unavailable models using device capabilities before creating', async () => {
-    const { api, fetcher } = setup(() => {
-      throw new Error('Unexpected write')
+  it('sends a creation budget and saves an existing reply limit without resetting its start', async () => {
+    const started = at
+    const { api, fetcher } = setup((url, init) => {
+      if (url.pathname.endsWith('/timeline')) return { events: [] }
+      const execution_timeout_seconds = init.method === 'PATCH' ? 14400 : 3600
+      return thread({
+        execution_timeout_seconds,
+        status: 'running',
+        current_turn: { started_at: started, worker_turn_seq: 1 },
+      })
     })
-    await expect(
-      api.createThread({ deviceId, folder: '/work', agent: 'codex', model: 'invented', body: 'Hi', clientId: 'id' }),
-    ).rejects.toMatchObject({ code: 'invalid' })
-    expect(fetcher).not.toHaveBeenCalled()
+    await api.createThread({
+      deviceId,
+      folder: '/work',
+      agent: 'codex',
+      model: 'reported-model',
+      executionTimeoutSeconds: 3600,
+      body: 'Long task',
+      clientId: 'budget-client',
+    })
+    const creation = fetcher.mock.calls.find(([, init]) => init?.method === 'POST')
+    expect(JSON.parse(jsonBody(creation?.[1]?.body))).toMatchObject({ execution_timeout_seconds: 3600 })
+    const updated = await api.setThreadExecutionLimit({ threadId, executionTimeoutSeconds: 14400 })
+    const patch = fetcher.mock.calls.find(([, init]) => init?.method === 'PATCH')
+    expect(patch?.[0]).toBe(`/api/v1/threads/${threadId}/settings`)
+    expect(JSON.parse(jsonBody(patch?.[1]?.body))).toEqual({ execution_timeout_seconds: 14400 })
+    expect(updated.executionTimeoutSeconds).toBe(14400)
+    expect(updated.runStartedAt).toBe(Date.parse(started))
+  })
+
+  it('passes an explicit model ID outside the reported catalog when creating', async () => {
+    const { api, fetcher } = setup(() => thread({ model: 'custom-model' }))
+    await api.createThread({
+      deviceId,
+      folder: '/work',
+      agent: 'codex',
+      model: 'custom-model',
+      body: 'Hi',
+      clientId: 'id',
+    })
+    const request = fetcher.mock.calls.find(([, init]) => init?.method === 'POST')
+    expect(JSON.parse(jsonBody(request?.[1]?.body))).toMatchObject({ model: 'custom-model' })
+  })
+
+  it('passes a custom model ID for switching and preserves the unsupported capability check', async () => {
+    const d = device()
+    const { api, fetcher } = setup(
+      (url) => (url.pathname.endsWith('/timeline') ? { events: [] } : thread({ model: 'custom-model' })),
+      [d],
+    )
+    expect((await api.setThreadModel({ threadId, model: 'custom-model' })).model).toBe('custom-model')
+    const request = fetcher.mock.calls.find(([, init]) => init?.method === 'POST')
+    expect(JSON.parse(jsonBody(request?.[1]?.body))).toEqual({ model: 'custom-model' })
+    d.agents = d.agents.map((agent) => ({ ...agent, abilities: { ...agent.abilities, switchModel: false } }))
+    fetcher.mockClear()
+    await expect(api.setThreadModel({ threadId, model: 'other-custom-model' })).rejects.toThrow(
+      'does not support changing models',
+    )
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false)
+  })
+
+  it('passes execution limits when creating and maps settings updates', async () => {
+    const writes: { path: string; method: string; body: unknown }[] = []
+    const { api } = setup((url, init) => {
+      if (url.pathname.endsWith('/timeline')) return { events: [] }
+      if (init.method === 'POST' || init.method === 'PATCH')
+        writes.push({ path: url.pathname, method: init.method, body: JSON.parse(jsonBody(init.body)) })
+      return thread({ execution_timeout_seconds: url.pathname.endsWith('/settings') ? 14400 : 3600 })
+    })
+    await api.createThread({
+      deviceId,
+      folder: '/work',
+      agent: 'codex',
+      model: '',
+      body: 'Hi',
+      clientId: 'limit',
+      executionTimeoutSeconds: 3600,
+    })
+    expect(writes[0]).toMatchObject({ method: 'POST', body: { execution_timeout_seconds: 3600 } })
+    expect((await api.getThread(threadId)).executionTimeoutSeconds).toBe(3600)
+    expect(
+      (await api.setThreadExecutionLimit({ threadId, executionTimeoutSeconds: 14400 })).executionTimeoutSeconds,
+    ).toBe(14400)
+    expect(writes[1]).toEqual({
+      path: `/api/v1/threads/${threadId}/settings`,
+      method: 'PATCH',
+      body: { execution_timeout_seconds: 14400 },
+    })
   })
 
   it('maps next/now to queue/steer and completes sending only after the real turn ends', async () => {
@@ -693,18 +818,30 @@ describe('HTTP thread contracts', () => {
     expect((await api.readOutput(threadId)).chunks).toEqual([{ kind: 'text', text: 'shell-output' }])
   })
 
-  it('rejects truncated trace and represents truly empty output without generated text', async () => {
+  it('preserves truncated trace fragments and complete steps and represents empty output', async () => {
     let gap = false
     const { api } = setup((url) => {
       if (url.pathname.endsWith('/timeline'))
         return { events: [event(1, 'reply', { event_id: 'report', worker_turn_seq: 1, content: 'Reply' })] }
       if (url.pathname.endsWith('/trace'))
-        return { ok: true, steps: [{ kind: 'command', command: 'printf', output: 'partial', truncated: true }] }
+        return {
+          ok: true,
+          steps: [
+            { kind: 'command', command: 'printf', output: 'partial', truncated: true },
+            { kind: 'tool', name: 'Read', detail: 'Complete content', truncated: false },
+          ],
+        }
       if (url.pathname.endsWith('/output')) return { ok: true, state: 'running', cursor: 'epoch:0', gap }
       return thread({ status: 'running', current_turn: { worker_turn_seq: 1, started_at: at } })
     })
     const reply = (await api.listMessages(threadId))[0]
-    await expect(api.readTrace(reply.id)).rejects.toThrow('incomplete')
+    expect(await api.readTrace(reply.id)).toMatchObject({
+      state: 'ready',
+      steps: [
+        { kind: 'command', command: 'printf', output: 'partial', truncated: true },
+        { kind: 'tool', name: 'Read', detail: 'Complete content', truncated: false },
+      ],
+    })
     expect((await api.readOutput(threadId)).chunks).toEqual([])
     gap = true
     expect((await api.readOutput(threadId)).chunks).toEqual([{ kind: 'gap' }])

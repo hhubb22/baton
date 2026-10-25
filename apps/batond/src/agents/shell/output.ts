@@ -1,4 +1,5 @@
 import { isUtf8 } from 'node:buffer'
+import type { FullOutputReference } from '@baton/protocol'
 
 export const outputBytes = 32 * 1024
 const half = outputBytes / 2
@@ -9,6 +10,7 @@ export interface CommandOutput {
   readonly exit_code: number
   readonly total_bytes: number
   readonly truncated: boolean
+  readonly full_output?: FullOutputReference
 }
 
 /** Retains the first and last 16 KiB of combined stdout/stderr. */
@@ -17,7 +19,10 @@ export class BoundedOutput {
   private tail = Buffer.alloc(0)
   private total = 0
 
+  constructor(private readonly retain?: (bytes: Buffer) => void) {}
+
   write(bytes: Buffer): void {
+    this.retain?.(bytes)
     this.total += bytes.length
     const take = Math.min(half - this.head.length, bytes.length)
     if (take > 0) this.head = Buffer.concat([this.head, bytes.subarray(0, take)])

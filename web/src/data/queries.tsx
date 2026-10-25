@@ -229,6 +229,7 @@ export function useCreateThread() {
       folder: string
       agent: AgentKind
       model: string
+      executionTimeoutSeconds?: number
       body: string
       clientId: string
     }) => client.createThread(input),
@@ -245,6 +246,13 @@ export function useSendMessage() {
 export function useCancelMessage() {
   const client = useClient()
   return useMutation({ mutationFn: (messageId: ID) => client.cancelMessage(messageId) })
+}
+
+export function useSetThreadExecutionLimit() {
+  const client = useClient()
+  return useMutation({
+    mutationFn: (input: { threadId: ID; executionTimeoutSeconds: number }) => client.setThreadExecutionLimit(input),
+  })
 }
 
 export function useSetThreadModel() {

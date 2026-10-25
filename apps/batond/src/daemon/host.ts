@@ -15,6 +15,7 @@ import {
 import { acquireProcessLock, processLockIsHeld, ProcessLockBusy } from '../platform/lock.ts'
 import { IPCError, requestWorker } from './ipc.ts'
 import { workerPaths } from './paths.ts'
+import { FullOutputStore } from '../worker/full-output.ts'
 
 export interface BatondCommand {
   readonly executable: string
@@ -61,6 +62,12 @@ export class LocalWorkerHost {
     } = {},
   ): Promise<WorkerIPCMessage> {
     const paths = workerPaths(this.dataDirectory, threadId)
+    if (request.type === 'session_request' && request.session_request.action === 'full_output') {
+      const body = request.session_request
+      if (body.session_id !== threadId) return { type: 'result', ok: false, code: 'invalid_request' }
+      const result = await new FullOutputStore(paths.threadDirectory).read(body)
+      return { type: 'result', ok: result.ok, session_result: result }
+    }
     if (options.start) await this.ensureWorker(threadId)
     return requestWorker({
       endpoint: paths.endpoint,

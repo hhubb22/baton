@@ -1,5 +1,4 @@
-import { randomUUID } from 'node:crypto'
-import { Effect, Layer, Schema } from 'effect'
+import { Effect, Layer } from 'effect'
 import { HttpApiBuilder, HttpApiSchema } from 'effect/http-api'
 import * as SqlClient from 'effect/sql/SqlClient'
 import * as P from '@baton/protocol'
@@ -15,6 +14,8 @@ import * as Threads from './threads.ts'
 import type { HTTPOptions } from './http.ts'
 import { AppError } from './errors.ts'
 import { projectHttpHandlers } from './http-projects.ts'
+import { setThreadSettings } from './http-thread-settings.ts'
+import { readThreadOutput } from './full-output.ts'
 import * as DeviceManagement from './device-management.ts'
 import { cookieToken, httpBusiness, decodeResponse } from './http-security.ts'
 
@@ -34,14 +35,6 @@ export const httpHandlers = (options: HTTPOptions) => {
       changed(employee.id)
       return yield* Threads.view(employee.id, threadId)
     })
-  const sessionResult = (threadId: string, code: string): P.SessionResult => ({
-    type: 'session.result',
-    operation_id: randomUUID(),
-    session_id: threadId,
-    ok: false,
-    code,
-    gap: false,
-  })
   return Layer.mergeAll(
     projectHttpHandlers(),
     HttpApiBuilder.group(BatonHttpApi, 'public', (handlers) =>
@@ -282,26 +275,19 @@ export const httpHandlers = (options: HTTPOptions) => {
             }),
           ),
         )
+        .handle('setSettings', ({ params, payload }) =>
+          Effect.gen(function* () {
+            const { employee } = yield* CurrentBrowserSession
+            const result = yield* setThreadSettings(params.threadId, payload)
+            changed(employee.id)
+            return result
+          }),
+        )
         .handle('output', ({ params, query }) =>
           httpBusiness(
             Effect.gen(function* () {
               const { employee } = yield* CurrentBrowserSession
-              const thread = yield* Threads.view(employee.id, params.threadId)
-              if (!thread.node_online || !thread.node_synced)
-                return sessionResult(params.threadId, thread.node_online ? 'node_syncing' : 'node_offline')
-              return yield* Effect.tryPromise({
-                try: async () =>
-                  Schema.decodeUnknownSync(P.SessionResult)(
-                    await options.gateway().request(thread.node_id, employee.id, {
-                      type: 'session.request',
-                      operation_id: randomUUID(),
-                      session_id: params.threadId,
-                      action: 'output',
-                      ...query,
-                    }),
-                  ),
-                catch: (error) => (error instanceof AppError ? error : new AppError(503, 'output_unavailable')),
-              })
+              return yield* readThreadOutput(options, employee.id, params.threadId, query)
             }),
           ),
         )

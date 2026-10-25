@@ -3,7 +3,7 @@ import { mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it, vi } from 'vite-plus/test'
-import type { RuntimeAgent, WorkerRequest } from '@baton/protocol'
+import type { RuntimeAgent, WorkerIPCMessage, WorkerRequest } from '@baton/protocol'
 import { runLocalCLI } from './cli.ts'
 
 it('opens each local Agent with a custom model and budget and reuses its saved configuration', async () => {
@@ -30,7 +30,7 @@ it('opens each local Agent with a custom model and budget and reuses its saved c
     const dependencies = {
       probeAgent,
       host: {
-        request: async (_id: string, request: WorkerRequest) => {
+        request: async (_id: string, request: WorkerRequest): Promise<WorkerIPCMessage> => {
           requests.push(request)
           return { type: 'result', ok: true }
         },
@@ -80,7 +80,7 @@ it('sends a steer message and rejects a model change with steer before handing i
   const output = vi.spyOn(console, 'log').mockImplementation(() => undefined)
   const dependencies = {
     host: {
-      request: async (_id: string, request: WorkerRequest) => {
+      request: async (_id: string, request: WorkerRequest): Promise<WorkerIPCMessage> => {
         requests.push(request)
         return { type: 'result', ok: true, storage_generation: generation }
       },
@@ -99,6 +99,7 @@ it('sends a steer message and rejects a model change with steer before handing i
     await expect(runLocalCLI([...args, '--model', 'custom'], dependencies)).rejects.toThrow('插入消息不能更换模型')
     expect(requests).toEqual([])
     await expect(runLocalCLI(['open', '--execution-timeout-seconds', '0'], dependencies)).rejects.toThrow()
+    await expect(runLocalCLI(['open', '--execution-timeout-seconds', '2147483648'], dependencies)).rejects.toThrow()
     expect(requests).toEqual([])
   } finally {
     output.mockRestore()

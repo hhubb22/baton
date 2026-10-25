@@ -1,5 +1,6 @@
 import { Schema } from 'effect'
 import { TraceContext } from './trace.ts'
+import { FullOutputPage } from './full-output.ts'
 import {
   AgentType,
   AgentStatus,
@@ -13,6 +14,7 @@ import {
   Integer,
   NonNegativeInteger,
   PositiveInteger,
+  ExecutionTimeoutSeconds,
   RuntimeName,
   RootID,
   ClientMessageID,
@@ -171,6 +173,7 @@ export const CreateBrowserThreadInput = Schema.Struct({
   agent_type: AgentType,
   model: Schema.optionalKey(summary(512)),
   working_directory: boundedText(4096).check(Schema.isMinLength(1)),
+  execution_timeout_seconds: Schema.optionalKey(ExecutionTimeoutSeconds),
   message: Schema.Struct({
     client_message_id: ClientMessageID,
     content: boundedText(64 * 1024).check(Schema.isMinLength(1)),
@@ -212,7 +215,7 @@ export const CreateThreadInput = Schema.Struct({
   model: summary(512),
   working_directory: boundedText(4096).check(Schema.isMinLength(1)),
   project_id: Schema.optionalKey(UUID),
-  execution_timeout_seconds: Schema.optionalKey(Integer),
+  execution_timeout_seconds: Schema.optionalKey(ExecutionTimeoutSeconds),
   message: ThreadMessageInput,
 })
 export type CreateThreadInput = typeof CreateThreadInput.Type
@@ -983,7 +986,9 @@ export const SessionRequest = Schema.Struct({
   type: Schema.Literal('session.request'),
   operation_id: UUID,
   session_id: UUID,
-  action: Schema.Literal('output'),
+  action: Schema.Literals(['output', 'full_output']),
+  output_id: Schema.optionalKey(UUID),
+  storage_generation: Schema.optionalKey(StorageGeneration),
   cursor: Schema.optionalKey(Cursor),
   limit: Schema.optionalKey(Integer.check(Schema.isBetween({ minimum: 0, maximum: 16 }))),
 })
@@ -1007,6 +1012,7 @@ export const SessionResult = Schema.Struct({
   state: Schema.optionalKey(Text),
   text: Schema.optionalKey(boundedText(16 * 1024)),
   cursor: Schema.optionalKey(Cursor),
+  full_output: Schema.optionalKey(FullOutputPage),
   gap: Schema.Boolean,
 })
 export type SessionResult = typeof SessionResult.Type
@@ -1031,6 +1037,11 @@ export const SetProjectExecInput = Schema.Struct({
 export type SetProjectExecInput = typeof SetProjectExecInput.Type
 
 // internal/httpapi/threads.go · routeThread2
+export const SetThreadSettingsInput = Schema.Struct({
+  execution_timeout_seconds: ExecutionTimeoutSeconds,
+})
+export type SetThreadSettingsInput = typeof SetThreadSettingsInput.Type
+
 export const SetThreadModelInput = Schema.Struct({
   model: summary(512),
 })
@@ -1116,12 +1127,12 @@ export const ThreadCommand = Schema.Struct({
   trace_context: Schema.optionalKey(TraceContext),
   type: Schema.Literal('thread.command'),
   thread_id: UUID,
-  action: Schema.Literals(['open', 'message', 'withdraw', 'stop', 'resume']),
+  action: Schema.Literals(['open', 'message', 'withdraw', 'stop', 'resume', 'settings']),
   storage_generation: Schema.optionalKey(StorageGeneration),
   agent_type: Schema.optionalKey(AgentType),
   model: Schema.optionalKey(summary(512)),
   working_directory: Schema.optionalKey(boundedText(4096).check(Schema.isMinLength(1))),
-  execution_timeout_seconds: Schema.optionalKey(Integer),
+  execution_timeout_seconds: Schema.optionalKey(ExecutionTimeoutSeconds),
   client_message_id: Schema.optionalKey(ClientMessageID),
   content: Schema.optionalKey(boundedText(64 * 1024)),
   mode: Schema.optionalKey(MessageMode),
@@ -1475,6 +1486,7 @@ export const dtoSchemas = {
   SessionView,
   SetDefaultDeviceInput,
   SetProjectExecInput,
+  SetThreadSettingsInput,
   SetThreadModelInput,
   Source,
   SubscriptionLoginInput,

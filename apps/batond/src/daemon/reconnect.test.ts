@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { Effect } from 'effect'
+import { setTimeout as delay } from 'node:timers/promises'
+import { Effect, Schema } from 'effect'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import type WebSocket from 'ws'
 import type { Envelope, Frame, ThreadReport, RuntimeAgent, WorkerRequest, WorkerIPCMessage } from '@baton/protocol'
@@ -243,6 +244,69 @@ it('reconnects with the same incarnation, retains reports before Worker ACK, and
   expect(new Set(incarnations)).toHaveLength(2)
   expect(second.failure()).toBeUndefined()
 }, 15_000)
+
+it('keeps the default authentication budget and starts a separate synchronization budget after auth', async () => {
+  const { wss, start } = await setup()
+  let now = 0
+  const clock = vi.spyOn(performance, 'now').mockImplementation(() => now)
+  cleanup.push(async () => {
+    clock.mockRestore()
+  })
+  const connected = Promise.withResolvers<WebSocket>()
+  const authSent = Promise.withResolvers<void>()
+  const syncSent = Promise.withResolvers<void>()
+  const shape = Schema.Struct({
+    kind: Schema.String,
+    envelope: Schema.optionalKey(Schema.Struct({ body: Schema.Struct({ type: Schema.String }) })),
+  })
+  wss.on('connection', (socket) => {
+    connected.resolve(socket)
+    socket.on('message', (raw) => {
+      const frame = Schema.decodeUnknownSync(shape)(JSON.parse(webSocketText(raw)))
+      if (frame.kind === 'auth') authSent.resolve()
+      if (frame.envelope?.body.type === 'node.sync') syncSent.resolve()
+    })
+  })
+  const daemon = start()
+  const socket = await connected.promise
+  await authSent.promise
+  now = 369_000
+  await delay(60)
+  expect(socket.readyState).toBe(socket.OPEN)
+  socket.send(JSON.stringify({ kind: 'auth_result', ok: true }))
+  await syncSent.promise
+  now = 738_999
+  await delay(60)
+  expect(socket.readyState).toBe(socket.OPEN)
+  const closed = once(socket, 'close')
+  now = 739_000
+  await closed
+  expect(daemon.failure()).toBeUndefined()
+})
+
+it('expires authentication after the configured control budget', async () => {
+  const { wss, start } = await setup()
+  let now = 0
+  const clock = vi.spyOn(performance, 'now').mockImplementation(() => now)
+  cleanup.push(async () => {
+    clock.mockRestore()
+  })
+  const connected = Promise.withResolvers<WebSocket>()
+  const authSent = Promise.withResolvers<void>()
+  wss.on('connection', (socket) => {
+    connected.resolve(socket)
+    socket.once('message', () => authSent.resolve())
+  })
+  start({ controlTimeoutSeconds: 1 })
+  const socket = await connected.promise
+  await authSent.promise
+  now = 999
+  await delay(60)
+  expect(socket.readyState).toBe(socket.OPEN)
+  const closed = once(socket, 'close')
+  now = 1000
+  await closed
+})
 
 it.each(['dropped_reply', 'worker_unavailable'])(
   'keeps an accepted command pending after %s and queries the same ID on reconnect',

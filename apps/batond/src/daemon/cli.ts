@@ -17,6 +17,7 @@ export async function runDaemonCLI(action: 'up' | 'register' | 'run', args: stri
           'enrollment-file': { type: 'string' },
           'display-name': { type: 'string' },
           'ca-file': { type: 'string' },
+          'control-timeout-seconds': { type: 'string' },
           workspace: { type: 'string' },
         },
       })
@@ -24,6 +25,9 @@ export async function runDaemonCLI(action: 'up' | 'register' | 'run', args: stri
       throw new Error('节点命令参数无效；注册凭据仅支持环境变量或私有文件')
     }
   })()
+  const controlTimeoutSeconds = Number(values['control-timeout-seconds'] ?? 370)
+  if (!Number.isInteger(controlTimeoutSeconds) || controlTimeoutSeconds < 1 || controlTimeoutSeconds > 3600)
+    throw new Error('--control-timeout-seconds 需要 1～3600 秒的整数')
   const controller = new AbortController()
   const stop = () => controller.abort()
   process.once('SIGINT', stop)
@@ -64,6 +68,7 @@ export async function runDaemonCLI(action: 'up' | 'register' | 'run', args: stri
         runDaemon({
           dataDirectory,
           identity,
+          controlTimeoutSeconds,
           ...(values.relay ? { relayURL: values.relay } : {}),
           ...(values['ca-file'] ? { caFile: values['ca-file'] } : {}),
         }),

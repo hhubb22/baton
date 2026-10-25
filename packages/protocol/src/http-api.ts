@@ -213,6 +213,11 @@ const Threads = HttpApiGroup.make('threads')
       payload: EmptyInput,
       success: D.ThreadView.pipe(HttpApiSchema.status(202)),
     }),
+    Endpoint.patch('setSettings', '/api/v1/threads/:threadId/settings', {
+      params: threadParams,
+      payload: D.SetThreadSettingsInput,
+      success: D.ThreadView,
+    }),
     Endpoint.post('setModel', '/api/v1/threads/:threadId/model', {
       params: threadParams,
       payload: D.SetThreadModelInput,

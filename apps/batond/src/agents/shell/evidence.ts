@@ -3,7 +3,7 @@ import { isUtf8 } from 'node:buffer'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { Schema } from 'effect'
 import type { WorkerOpenConfig } from '@baton/protocol'
-import { UUID, PositiveInteger } from '@baton/protocol'
+import { UUID, PositiveInteger, FullOutputReference } from '@baton/protocol'
 import { ensurePrivateDirectory, openPrivateFile, writePrivateFileAtomic } from '../../platform/private.ts'
 import { AgentError, type AgentMessage, type InputPreparation } from '../../worker/agent.ts'
 import { outputBytes, type CommandOutput } from './output.ts'
@@ -31,6 +31,7 @@ const Result = Schema.Struct({
   exit_code: Schema.Int.check(Schema.isGreaterThanOrEqualTo(-1)),
   total_bytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   truncated: Schema.Boolean,
+  full_output: Schema.optionalKey(FullOutputReference),
 })
 const Completion = Schema.Struct({
   version: Schema.Literal(1),

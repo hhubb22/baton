@@ -27,7 +27,14 @@ const accepted = (request: WorkerRequest): WorkerCommandResult => ({
     command_id: request.command_id!,
     thread_id: request.thread_id!,
     storage_generation: request.storage_generation!,
-    action: request.type === 'thread_stop' ? 'stop' : request.type === 'thread_withdraw' ? 'withdraw' : 'open',
+    action:
+      request.type === 'thread_settings'
+        ? 'settings'
+        : request.type === 'thread_stop'
+          ? 'stop'
+          : request.type === 'thread_withdraw'
+            ? 'withdraw'
+            : 'open',
   },
   command_status: { command_id: request.command_id!, state: 'accepted' },
 })
@@ -208,7 +215,7 @@ it('retains the original trace across daemon ledger restart and accepts a retry 
   )
 })
 
-it('delivers stop and withdraw after roots are revoked and the working directory is removed', async () => {
+it('delivers settings, stop and withdraw after roots are revoked and the working directory is removed', async () => {
   await withService(({ commandId, command, host, path, setHandler }) =>
     Effect.gen(function* () {
       const cwd = join(path, 'workspace')
@@ -232,19 +239,26 @@ it('delivers stop and withdraw after roots are revoked and the working directory
         await writePrivateFileAtomic(join(path, 'browse-roots.json'), '{"roots":[]}')
         await rm(cwd, { recursive: true })
       })
-      for (const action of ['stop', 'withdraw'] as const) {
+      const actions: ThreadCommand['action'][] = ['settings', 'stop', 'withdraw']
+      for (const action of actions) {
         const result = yield* Effect.promise(() =>
           service.command(randomUUID(), {
             type: 'thread.command',
             thread_id: command.thread_id,
             action,
             storage_generation: opened.storage_generation!,
+            ...(action === 'settings' ? { execution_timeout_seconds: 14400 } : {}),
             ...(action === 'withdraw' ? { client_message_id: randomUUID() } : {}),
           }),
         )
         expect(result).toMatchObject({ ok: true, storage_generation: opened.storage_generation })
       }
-      expect(delivered.map((req) => req.type)).toEqual(['thread_open', 'thread_stop', 'thread_withdraw'])
+      expect(delivered.map((req) => req.type)).toEqual([
+        'thread_open',
+        'thread_settings',
+        'thread_stop',
+        'thread_withdraw',
+      ])
       for (const action of ['message', 'resume'] as const) {
         yield* Effect.promise(async () => {
           await expect(
@@ -258,36 +272,39 @@ it('delivers stop and withdraw after roots are revoked and the working directory
           ).rejects.toBeInstanceOf(CommandDeliveryUncertain)
         })
       }
-      expect(delivered).toHaveLength(3)
+      expect(delivered).toHaveLength(4)
     }),
   )
 })
 
-it.each(['unsupported', 'model_with_steer'])('persists and reuses Worker rejection %s without retrying it', async (code) => {
-  await withService(({ commandId, command, host, path, setHandler }) =>
-    Effect.gen(function* () {
-      const ledger = yield* makeNodeLedger(join(path, 'node.db'))
-      let deliveries = 0
-      setHandler(async () => {
-        deliveries++
-        return { type: 'result', ok: false, code }
-      })
-      const service = makeThreadService({
-        dataDirectory: path,
-        identity: { node_id: randomUUID() } as NodeIdentity,
-        ledger,
-        host,
-        capability: () => capability,
-      })
-      const result = yield* Effect.promise(() => service.command(commandId, command))
-      expect(result).toMatchObject({ ok: false, code })
-      expect(yield* Effect.promise(() => service.command(commandId, command))).toEqual(result)
-      expect(deliveries).toBe(1)
-      expect((yield* ledger.command(commandId))?.result).toEqual(result)
-      expect(yield* ledger.pendingCommands()).toEqual([])
-    }),
-  )
-})
+it.each(['unsupported', 'model_with_steer'])(
+  'persists and reuses Worker rejection %s without retrying it',
+  async (code) => {
+    await withService(({ commandId, command, host, path, setHandler }) =>
+      Effect.gen(function* () {
+        const ledger = yield* makeNodeLedger(join(path, 'node.db'))
+        let deliveries = 0
+        setHandler(async () => {
+          deliveries++
+          return { type: 'result', ok: false, code }
+        })
+        const service = makeThreadService({
+          dataDirectory: path,
+          identity: { node_id: randomUUID() } as NodeIdentity,
+          ledger,
+          host,
+          capability: () => capability,
+        })
+        const result = yield* Effect.promise(() => service.command(commandId, command))
+        expect(result).toMatchObject({ ok: false, code })
+        expect(yield* Effect.promise(() => service.command(commandId, command))).toEqual(result)
+        expect(deliveries).toBe(1)
+        expect((yield* ledger.command(commandId))?.result).toEqual(result)
+        expect(yield* ledger.pendingCommands()).toEqual([])
+      }),
+    )
+  },
+)
 
 it('keeps a command pending when an apparent success carries a conflicting receipt', async () => {
   await withService(({ commandId, command, host, path, setHandler }) =>

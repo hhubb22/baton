@@ -4,7 +4,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { Schema } from 'effect'
-import { PositiveInteger, WorkerOpen, type RuntimeAgent, type WorkerRequest } from '@baton/protocol'
+import { ExecutionTimeoutSeconds, WorkerOpen, type RuntimeAgent, type WorkerRequest } from '@baton/protocol'
 import { LocalWorkerHost, initializeWorkerDirectory } from './daemon/host.ts'
 import { readPrivateFile, writePrivateFileAtomic } from './platform/private.ts'
 
@@ -16,6 +16,7 @@ const usage = `Baton 节点（TypeScript 开发入口）
 
 注册凭据来自 BATON_ENROLLMENT_TOKEN 或 --enrollment-file。
 up 复用已有身份，首次运行登记主目录；--workspace 可额外登记目录。
+up/run 支持 --control-timeout-seconds <秒>，认证与同步各默认等待 370 秒，范围 1～3600。
 
 设备管理：
 
@@ -85,9 +86,7 @@ export async function runLocalCLI(
   const timeout =
     values['execution-timeout-seconds'] === undefined
       ? undefined
-      : Schema.decodeUnknownSync(PositiveInteger.check(Schema.isLessThanOrEqualTo(2147483647)))(
-          Number(values['execution-timeout-seconds']),
-        )
+      : Schema.decodeUnknownSync(ExecutionTimeoutSeconds)(Number(values['execution-timeout-seconds']))
   const mode = Schema.decodeUnknownSync(Schema.Literals(['queue', 'steer']))(values.mode ?? 'queue')
   if (action === 'message' && mode === 'steer' && values.model) throw new Error('插入消息不能更换模型')
   const threadId = values['thread-id'] ?? (action === 'open' ? randomUUID() : requireValue('thread-id'))

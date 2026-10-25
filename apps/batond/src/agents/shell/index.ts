@@ -3,7 +3,8 @@ import { dirname, join } from 'node:path'
 import { realpath } from 'node:fs/promises'
 import { setTimeout as delay } from 'node:timers/promises'
 import { Effect, Queue, Stream } from 'effect'
-import type { WorkerOpenConfig } from '@baton/protocol'
+import type { WorkerOpenConfig, FullOutputReference } from '@baton/protocol'
+import { FullOutputStore, readOutputRetentionDays } from '../../worker/full-output.ts'
 import {
   AgentError,
   type AgentEvent,
@@ -15,7 +16,7 @@ import {
 import { authorizeDirectory } from '../../daemon/roots.ts'
 import { readProjectExec } from '../../devices/config.ts'
 import { acquireProcessLock } from '../../platform/lock.ts'
-import { writePrivateFileAtomic } from '../../platform/private.ts'
+import { ensurePrivateDirectory, writePrivateFileAtomic } from '../../platform/private.ts'
 import { spawnOwnedProcess, type OwnedProcess, type SpawnOwnedProcessOptions } from '../../platform/process.ts'
 import { BoundedOutput } from './output.ts'
 import {
@@ -77,7 +78,7 @@ function makeShellAgent(config: WorkerOpenConfig, options: ShellAgentOptions): T
       executionId: record.executionId,
     }
     const reply: AgentEvent & {
-      metadata: { exit_code: number; encoding?: string }
+      metadata: { exit_code: number; encoding?: string; full_output?: FullOutputReference }
       original_bytes: number
       truncated: boolean
     } = {
@@ -87,6 +88,7 @@ function makeShellAgent(config: WorkerOpenConfig, options: ShellAgentOptions): T
       text: record.result.output,
       metadata: {
         exit_code: record.result.exit_code,
+        ...(record.result.full_output ? { full_output: record.result.full_output } : {}),
         ...(record.result.encoding ? { encoding: record.result.encoding } : {}),
       },
       original_bytes: record.result.total_bytes,
@@ -108,6 +110,7 @@ function makeShellAgent(config: WorkerOpenConfig, options: ShellAgentOptions): T
     message: AgentMessage,
     preparation: InputPreparation,
     output: BoundedOutput,
+    retained: Awaited<ReturnType<FullOutputStore['begin']>>,
     pipes: Promise<unknown>,
     pipeFailed: () => boolean,
   ) => {
@@ -124,7 +127,9 @@ function makeShellAgent(config: WorkerOpenConfig, options: ShellAgentOptions): T
       processTreeStopped = reaped.reaped
       if (!reaped.reaped || pipeFailed())
         throw new AgentError('shell output or process-tree termination could not be confirmed')
-      const record = completionFor(mapping!, message, preparation, output.result(exit.code ?? -1), aborted)
+      const full_output = await retained.finish()
+      const result = { ...output.result(exit.code ?? -1), full_output }
+      const record = completionFor(mapping!, message, preparation, result, aborted)
       await persistCompletion(record)
       await emitCompletion(record)
     } catch {
@@ -132,6 +137,8 @@ function makeShellAgent(config: WorkerOpenConfig, options: ShellAgentOptions): T
         type: 'uncertain',
         reason: 'shell command completion could not be saved or verified; it will not be retried',
       })
+    } finally {
+      await retained.close()
     }
   }
   const agent: ThreadAgent = {
@@ -215,7 +222,12 @@ function makeShellAgent(config: WorkerOpenConfig, options: ShellAgentOptions): T
             JSON.stringify({ preparationId: preparation.preparationId }),
           )
           linked.throwIfAborted()
-          const output = new BoundedOutput()
+          const threadDirectory = join(options.dataDirectory, 'threads', config.thread_id)
+          await ensurePrivateDirectory(join(options.dataDirectory, 'threads'))
+          await ensurePrivateDirectory(threadDirectory)
+          const store = new FullOutputStore(threadDirectory)
+          const retained = await store.begin(config, await readOutputRetentionDays(options.dataDirectory))
+          const output = new BoundedOutput((bytes) => retained.write(bytes))
           let failed = false
           let pipes: Promise<unknown> = Promise.resolve()
           processTreeStopped = false
@@ -248,9 +260,14 @@ function makeShellAgent(config: WorkerOpenConfig, options: ShellAgentOptions): T
               },
             },
           )
-          owned = await startup
+          try {
+            owned = await startup
+          } catch (error) {
+            await retained.close()
+            throw error
+          }
           owned.stdin.end()
-          finishing = finish(owned, message, preparation, output, pipes, () => failed)
+          finishing = finish(owned, message, preparation, output, retained, pipes, () => failed)
           linked.throwIfAborted()
           return { nativeSessionId: nativeMapping.nativeSessionId, executionId: preparation.preparationId }
         } finally {

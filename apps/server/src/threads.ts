@@ -31,12 +31,14 @@ export const create = (
       const sql = yield* SqlClient.SqlClient
       const valid = yield* decode(P.CreateBrowserThreadInput, input)
       const message = yield* normalizeMessage(valid.message)
+      const executionTimeoutSeconds = source?.executionTimeoutSeconds ?? valid.execution_timeout_seconds ?? 7200
       const normalized = {
         client_thread_id: valid.client_thread_id,
         node_id: valid.node_id || '',
         agent_type: valid.agent_type,
         model: valid.model || '',
         working_directory: valid.working_directory,
+        execution_timeout_seconds: executionTimeoutSeconds,
         message,
         ...(source ? { source } : {}),
       }
@@ -82,7 +84,7 @@ export const create = (
         'create',
       )
       const id = uuid()
-      yield* sql`INSERT INTO threads(id,employee_id,client_thread_id,request_hash,node_id,agent_type,model,working_directory,created_by,project_id,origin_conversation_id,origin_tool_call_id,execution_timeout_seconds,exec_wait_until) VALUES(${id},${employeeID},${valid.client_thread_id},${hash},${node},${valid.agent_type},${model},${valid.working_directory},${source ? 'project_agent' : 'employee'},${source?.projectId ?? null},${source?.conversationId ?? null},${source?.toolCallId ?? null},${source?.executionTimeoutSeconds ?? 7200},CASE WHEN ${source?.shellExec ?? false} THEN clock_timestamp()+${source?.waitSeconds ?? 30}*interval '1 second' ELSE NULL END)`
+      yield* sql`INSERT INTO threads(id,employee_id,client_thread_id,request_hash,node_id,agent_type,model,working_directory,created_by,project_id,origin_conversation_id,origin_tool_call_id,execution_timeout_seconds,exec_wait_until) VALUES(${id},${employeeID},${valid.client_thread_id},${hash},${node},${valid.agent_type},${model},${valid.working_directory},${source ? 'project_agent' : 'employee'},${source?.projectId ?? null},${source?.conversationId ?? null},${source?.toolCallId ?? null},${executionTimeoutSeconds},CASE WHEN ${source?.shellExec ?? false} THEN clock_timestamp()+${source?.waitSeconds ?? 30}*interval '1 second' ELSE NULL END)`
       const thread = yield* readThread(employeeID, id)
       yield* audit(
         thread,
@@ -91,7 +93,7 @@ export const create = (
         source ? 'project_agent' : 'employee',
         source?.agentId ?? employeeID,
       )
-      yield* enqueue(thread, 'open', { model })
+      yield* enqueue(thread, 'open', { model, execution_timeout_seconds: executionTimeoutSeconds })
       yield* insertMessage(thread, message, source)
       return { thread: yield* readThread(employeeID, id), created: true }
     }),
@@ -191,6 +193,22 @@ export const resume = (employeeID: string, threadID: string): DB<P.Thread> =>
       yield* enqueue(t, 'resume')
       yield* audit(t, 'resume.requested', {})
       yield* touch(threadID)
+      return yield* readThread(employeeID, threadID)
+    }),
+  )
+
+export const setSettings = (employeeID: string, threadID: string, input: P.SetThreadSettingsInput): DB<P.Thread> =>
+  transaction(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const valid = yield* decode(P.SetThreadSettingsInput, input)
+      const t = yield* readThread(employeeID, threadID, true)
+      if (t.status === 'archived' || t.archive_requested_at) return yield* Effect.fail(failure('thread_archived'))
+      if (t.execution_timeout_seconds === valid.execution_timeout_seconds) return t
+      yield* sql`UPDATE threads SET execution_timeout_seconds=${valid.execution_timeout_seconds} WHERE id=${t.id}`
+      yield* enqueue(t, 'settings', valid)
+      yield* audit(t, 'settings.updated', valid)
+      yield* touch(t.id)
       return yield* readThread(employeeID, threadID)
     }),
   )

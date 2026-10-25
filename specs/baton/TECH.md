@@ -97,7 +97,7 @@ Turn 由 Worker 定义：从一条消息被 Agent 接受开始，到适配器报
 
 结束原因写入 `turn.ended`：`completed`（Agent 停下等待输入）、`stopped`（员工或 Project Agent 停止）、`timeout`（到达执行时限）、`agent_exited`（进程退出）、`failed`（Agent 报告错误，例如 Codex 的 failed、Pi 的 error）。原因只用于展示和给 Project Agent 阅读，Baton 不据此判断任务成败（R-09）。
 
-执行时限由 Worker 用包含休眠的单调时钟计时，从 Turn 开始算起。到期时 Worker 按下面的停止流程结束这一轮，原因为 `timeout`。
+执行时限从 Turn 开始算起，默认 7200 秒，`ExecutionTimeoutSeconds` 接受 1～2,147,483,647 秒的整数。Worker 取单调时钟与墙上时钟的已用时最大值，包含休眠且避免时钟回退延长预算；定时器每次最多等待 1 秒，再核对剩余预算。`thread_settings` 命令以固定身份和内容持久化，将配置与完成回执写入同一事务，重复投递返回原回执。修改后从原 Turn 开始时间计算新的总预算，后续 Turn 也采用新配置。已进入停止流程的一轮继续停止。到期时 Worker 按下面的停止流程结束这一轮，原因为 `timeout`。
 
 ### 停止
 
@@ -290,19 +290,20 @@ URL 相对 `/api/v1`。读取检查员工会话与资源归属，写入另检查
 | `POST /nodes/{id}/roots`、`DELETE /nodes/{id}/roots` | `{path}`；通过 Gateway 等待本人在线且已同步设备保存目录设置，返回含最新 `roots`、`repos` 的 Node DTO。添加支持真实路径幂等登记，移除支持路径或目录标识；无效路径返回 400，节点离线返回 503 `node_offline` |
 | `POST /nodes/{id}/subscriptions/login` | `{provider}`；通过 Gateway 启动设备端 OAuth 设备码登录，返回 `{provider, verification_uri, user_code, expires_in_seconds}`，凭据留在设备。支持 `openai-codex` / `ChatGPT` 和 `xai` / `xAI`，未取得设备码返回 503 |
 | `PUT /nodes/{id}/project-exec` | `{enabled}`；通过 Gateway 等待在线且已同步设备原子保存并回读本机开关，确认后返回 Node DTO，报告中的 `exec` 使用设备确认值；未确认返回 503，客户端重新读取状态。协议与 `exec.user` 见 Project Agent TECH「节点能力报告」 |
-| `POST /threads` | `client_thread_id`、可选 `node_id`（缺省为默认设备）、`agent_type`、可选 `model`（缺省为该 Agent 的 `default_model`）、`working_directory`、第一条消息 `message:{client_message_id, content}`。浏览器新建的 Thread 不属于 Project，执行时限取默认 2 小时。新建返回 201，幂等重发返回 200，内容冲突返回 409 |
+| `POST /threads` | `client_thread_id`、可选 `node_id`（缺省为默认设备）、`agent_type`、可选 `model`（缺省为该 Agent 的 `default_model`）、`working_directory`、可选 `execution_timeout_seconds`（1～2,147,483,647 的整数，默认 7200）、第一条消息 `message:{client_message_id, content}`。浏览器新建的 Thread 不属于 Project。预算参与创建幂等内容，并固定存入 open 命令的 outbox payload；以后修改 Thread 设置不会改变原 open 命令的重试内容。新建返回 201，幂等重发返回 200，内容冲突返回 409 |
 | `GET /threads` | 可按 `project_id`、`node_id`、`status` 筛选，按 `(last_activity_at, id)` 倒序分页；`limit` 默认 50、最多 100，续页使用 `next_cursor`。每条记录包含 Thread 基础字段、`title`、可空 `current_turn` 和 `stop_canceled`，供列表直接展示 |
 | `GET /threads/{id}` | Thread、状态、当前 Turn、待发消息、失败消息和 `resume_pending`；`model` 为实际模型，`next_model` 为后续排队消息的默认模型 |
 | `GET /threads/{id}/timeline` | 按审计事件 ID 顺序返回消息、Turn 边界、回复和操作；`limit` 默认 20、最多 100，续页使用 `next_cursor` |
 | `POST /threads/{id}/messages` | `{client_message_id, content, mode, model?}`，返回 202；`mode` 缺省为 `queue`，`steer` 在 Agent 不支持时返回 422；Agent 不支持换模型或 `model` 与 `steer` 同时出现时返回 422。模型目录不限制显式 ID |
 | `POST /threads/{id}/messages/{mid}/withdraw` | 撤回排队消息；已发出返回 409 和当前状态 |
 | `POST /threads/{id}/stop` | 返回 202，保存停止及撤回排队消息的意图，状态等待设备报告确认 |
+| `PATCH /threads/{id}/settings` | `{execution_timeout_seconds}`；范围与新建相同，更新本人未归档 Thread 并返回 200 和 ThreadView。中心将预算和固定内容的 `settings` 命令一起持久化；相同设置重试不重复入队，命令按顺序送往设备。200 表示已保存，设备收到后更新 Worker 配置和当前 Turn 的总预算；离线期间等待投递，已开始停止的 Turn 不会恢复运行。无效参数返回 422，已归档或请求归档返回 409 |
 | `POST /threads/{id}/model` | `{model}`；校验切换能力，显式 ID 交给原生 Agent 判定，保存 `next_model` 并返回 200 和 ThreadView。后续接受的 `queue` 消息未指定模型时采用该值；已有消息和当前 Turn 沿用原配置，实际模型由 `turn.started` 确认 |
 | `POST /threads/{id}/resume` | `{}`；Thread 已打开、处于 `stopped` / `idle`、无待确认停止或归档且 Agent 报告恢复能力时，保存恢复命令并返回 202 和 ThreadView；`resume_pending` 表示未确认的恢复命令，同一待恢复请求不重复入队。不支持返回 422，状态冲突返回 409 |
 | `POST /threads/{id}/archive` | 返回 202；有进行中的 Turn、待发消息或不确定状态时先发停止，设备确认后归档；空闲或已停止且无待发消息时直接归档 |
 | `GET /threads/{id}/history` | 从设备分页读取原生历史，见「历史读取与实时输出」 |
-| `GET /threads/{id}/output` | 可选 `cursor`，经设备临时 RPC 返回 `{ok, code?, state?, text?, cursor?, gap}` 等查询结果；游标包含输出 epoch 与字节偏移，详见「历史读取与实时输出」 |
-| `GET /threads/{id}/trace` | 必填 `worker_turn_seq`，返回 `{ok, code?, steps}`。shell 的步骤取自中心已保存的命令和文本输出，含 `kind:"command"`、`command`、`output`、可选 `truncated`；无可用过程时返回 `ok:false, code:"trace_missing"`，指定 Turn 不存在返回 404 |
+| `GET /threads/{id}/output` | 默认经设备临时 RPC 读取实时输出；`action=full_output&output_id=...&storage_generation=...` 按可选字节游标读取设备保存的完整回复或 shell 输出，每页最多 12 KiB 原始字节，以 Base64 返回，详见「历史读取与实时输出」 |
+| `GET /threads/{id}/trace` | 必填 `worker_turn_seq`，返回 `{ok, code?, steps}`。shell 的步骤取自中心已保存的命令和文本输出，含 `kind:"command"`、`command`、`output`、可选 `truncated`；网页保留已有步骤和输出，在 `truncated:true` 的步骤旁显示截断提示，继续使用现有传输大小边界；无可用过程时返回 `ok:false, code:"trace_missing"`，指定 Turn 不存在返回 404 |
 | `/events` | 浏览器 WebSocket，订阅 Thread 的实时输出与状态变化 |
 
 登录、默认设备、文件浏览和 Inbox 沿用各自接口；Project 创建、对话与记忆修订契约见 Project Agent TECH。Thread 使用独立的 Store 和协议；`/tasks*`、`/sessions*`、`/acceptances` 业务接口已移除。
@@ -349,6 +350,8 @@ Thread 没有排队期限，消息由员工明确发出，设备收到即可执�
 
 ### 凭据与吊销
 
+TS 中心的控制操作分别计算排队和执行预算。默认排队 2 秒，执行按操作为 3～15 秒；Thread 报告为 15 秒，命令接收回执为 10 秒。通过 `BATON_CONTROL_<操作名>_QUEUE_TIMEOUT` 和 `BATON_CONTROL_<操作名>_EXECUTION_TIMEOUT` 调整。持久报告或命令回执暂时超时后保留连接，节点用原身份继续恢复；明确的身份或协议错误仍关闭连接。全部操作名和 RPC 并发、排队配置见 [中心配置说明](../../apps/server/README.md)。
+
 节点凭据为 Ed25519 签名 JWT，受众 `baton-node`，绑定节点、员工、credential_id 与有效期。吊销顺序：PostgreSQL 提交 → 本地认证与分派拒绝该凭据 → 关闭活动连接 → 保存已生效事实；只有完成后 API 才返回 effective（R-04）。
 
 节点上线附带每次 batond 启动生成的 incarnation；已有不同 incarnation 活动时拒绝接管（R-02）。新连接完成 `node.sync` 后才标为可用（R-03）。
@@ -366,13 +369,17 @@ Thread 没有排队期限，消息由员工明确发出，设备收到即可执�
 | 心跳 / 离线判定 | 10 秒 / 30 秒 |
 | 重连退避 | 1～30 秒带抖动 |
 
-输出超限时丢弃并标出缺口，控制消息不丢（R-16）。Worker 持续读取 Agent 的 stdout 和 stderr，避免管道反压。
+输出超限时丢弃实时缓冲中的旧片段并标出缺口，控制消息不丢（R-16）。Worker 持续读取 Agent 的 stdout 和 stderr，避免管道反压；回复全文与 shell 原始输出另存设备私有文件，传输摘要预算不影响已保存的全文。
 
 ## 历史读取与实时输出
 
+TS Worker 在裁剪普通回复报告前保存 UTF-8 全文；shell 从 stdout/stderr 原始数据块开始写入完整内容。文件位于 Thread 私有目录的 `full-output/`，回复 metadata 保存 `{id, storage_generation, total_bytes, expires_at}` 引用，中心的有界回复和时间线保留该引用。`GET /threads/{id}/output?action=full_output` 经员工与 Thread 归属检查转发到原设备，节点核对 Thread、输出 ID 和存储代次，验证私有目录与普通文件，不接受符号链接。读取无需启动 Worker。
+
+完整输出按字节偏移分页，每页最多 12 KiB 原始数据，以 Base64 返回 `full_output:{output_id,storage_generation,offset,next_offset,total_bytes,expires_at,encoding,data,done}`，下一游标为 `next_offset` 的十进制字符串。网页逐段解码，保留跨页 UTF-8 字符，只显示当前页，并支持继续读取、从头读取和下载当前片段。默认保留 30 天，可在设备 `--data-dir/output-retention.json` 设置 `retention_days`（1～3650）；daemon 启动时及每小时清理过期内容，读取过期内容时立即删除并返回 `output_expired`。无元数据的未完成文件在 Worker 不运行且 24 小时未写入后清理。原生 Agent 历史的保留由员工管理。
+
 `GET /threads/{id}/history` 接受可选 `cursor` 和 `limit`（默认及上限均为 16），校验归属后经 `session.request` 读取设备上的原生历史。响应为 `SessionResult`，成功时包含 `history:{entries,cursor,has_more,gap,code?}`；条目携带 `id`、`parent_id`、`kind`、`text`、本地 `reference`、原字节数 `bytes` 和 `truncated`。调用方按返回游标续读到 `has_more:false`。响应为 `Cache-Control: no-store`，正文不进入 PostgreSQL 或日志。每页最多 16 条、14 KiB，单条 JSON 编码后最多 4 KiB，超出时保留截断标记和 `<agent>:<id>:<偏移>` 形式的本地引用，并设置缺口。
 
-Pi 读取原生 JSONL，Codex 读取 thread 文件并核对 thread ID、cwd 和 CLI 版本；文件读取用 `os.OpenRoot` 限制边界，只接受普通文件。Kiro 通过独立 ACP 连接加载已保存会话，收集原生记录，不发送 prompt，也不触碰执行连接。游标绑定原生会话与已读前缀摘要，前缀被删除、重排或改写时返回 `history_changed`。离线返回 `node_offline`，历史缺失返回 `history_missing`，其他读取错误返回 `history_unavailable`。单节点最多同时 2 次历史查询。历史读取不依赖 Worker 存活。
+Pi 读取原生 JSONL，Codex 读取 thread 文件并核对 thread ID、cwd 和 CLI 版本；文件读取用 `os.OpenRoot` 限制边界，只接受普通文件。Kiro 通过独立 ACP 连接加载已保存会话，收集原生记录，不发送 prompt，也不触碰执行连接。游标绑定原生会话与已读前缀摘要，前缀被删除、重排或改写时返回 `history_changed`。离线返回 `node_offline`，历史缺失返回 `history_missing`，其他读取错误返回 `history_unavailable`。TS 中心按设备为临时读取保留默认 4 个在途名额，为管理操作另留 2 个名额；每类最多排队 8 个请求，默认排队 2 秒，参数可由中心环境配置调整。排队超时的请求不会发送，已发送的管理请求超时后不自动重发。历史读取不依赖 Worker 存活。
 
 实时输出由 Worker 保留当前 Turn 最近 256 KiB 纯文本，`GET /threads/{id}/output?cursor=...` 每次最多读取 16 KiB。游标为 `epoch:字节偏移`，Turn 切换或 Worker 重启更换 epoch；旧 epoch、超出保留范围或上游输出已丢失时返回 `gap:true` 并从当前保留起点续读。格式错误或偏移落在 UTF-8 字符中间时返回 `invalid_cursor`。查询结果包含当前设备报告的状态与下一游标，成功与设备不可用结果均通过 `ok`、`code` 区分（R-16）。
 
@@ -386,7 +393,7 @@ Pi 读取原生 JSONL，Codex 读取 thread 文件并核对 thread ID、cwd 和 
 
 本地员工账号由管理员创建，Argon2id 口令摘要，服务端登录会话；改密和重置注销既有会话。会话 Cookie 固定使用 Secure、HttpOnly、SameSite=Strict。`GET /me` 从当前会话令牌经固定域前缀隔离的 SHA-256 摘要派生稳定 CSRF token，并以 URL-safe Base64 返回；同一 Cookie 在页面刷新及 Coordinator 重启后得到相同 token，读取不续期或轮换会话。数据库仅保存会话令牌摘要与派生 token 的摘要，写请求用 `X-CSRF-Token` 校验。JSON 响应和日志不得暴露 Cookie 原值，也不以会话令牌或其存储摘要直接充当 CSRF token。注册凭据 10 分钟单次使用，节点凭据 30 天（D2）。
 
-中心记录默认长期保留，没有自动清理；回复正文已限长。设备本地历史由员工自己管理。设备账本与待补报数据设 1 GiB 预算，达到预警水位后拒绝新 Thread 和新消息，不删除未确认的报告（D4）。
+中心记录默认长期保留，没有自动清理；回复正文已限长。设备上 Baton 保存的完整回复与 shell 输出默认保留 30 天，原生 Agent 历史由员工自己管理。设备账本与待补报数据设 1 GiB 预算，达到预警水位后拒绝新 Thread 和新消息，不删除未确认的报告（D4）。
 
 ## 敏感数据
 

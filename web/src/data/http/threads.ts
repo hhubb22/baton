@@ -5,6 +5,7 @@ import type {
   Delivery,
   FilePreview,
   FolderListing,
+  FullOutputReference,
   Message,
   OperationPhase,
   Thread,
@@ -23,6 +24,7 @@ type ThreadDTO = {
   node_id: string
   agent_type: string
   model: string
+  execution_timeout_seconds: number
   next_model?: string
   working_directory: string
   project_id?: string
@@ -65,7 +67,7 @@ type EventDTO = {
     content?: string
     count?: number
     attachments?: AttachmentDTO[]
-    metadata?: { activity?: Message['activity'] }
+    metadata?: { activity?: Message['activity']; full_output?: unknown }
   } & Partial<MessageDTO>
 }
 type AttachmentDTO = {
@@ -107,6 +109,7 @@ type ThreadAPI = Pick<
   | 'sendMessage'
   | 'cancelMessage'
   | 'setThreadModel'
+  | 'setThreadExecutionLimit'
   | 'stopThread'
   | 'archiveThread'
   | 'resumeThread'
@@ -131,6 +134,38 @@ const unavailableReason = (code?: string): 'offline' | 'missing' | null => {
   if (code === 'node_offline') return 'offline'
   if (code === 'history_missing' || code === 'trace_missing') return 'missing'
   return null
+}
+
+function fullOutputOf(value: unknown): FullOutputReference | null {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    Array.isArray(value) ||
+    !('id' in value) ||
+    typeof value.id !== 'string' ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.id) ||
+    !('storage_generation' in value) ||
+    typeof value.storage_generation !== 'string' ||
+    value.storage_generation.length === 0 ||
+    new TextEncoder().encode(value.storage_generation).length > 256 ||
+    /[\p{Cc}]/u.test(value.storage_generation) ||
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(value.storage_generation) ||
+    !('total_bytes' in value) ||
+    typeof value.total_bytes !== 'number' ||
+    !Number.isSafeInteger(value.total_bytes) ||
+    value.total_bytes < 0 ||
+    !('expires_at' in value) ||
+    typeof value.expires_at !== 'string' ||
+    !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?(?:Z|[+-]\d\d:\d\d)$/.test(value.expires_at) ||
+    !Number.isFinite(Date.parse(value.expires_at))
+  )
+    return null
+  return {
+    id: value.id,
+    storage_generation: value.storage_generation,
+    total_bytes: value.total_bytes,
+    expires_at: value.expires_at,
+  }
 }
 
 function stopOf(t: ThreadDTO): ThreadStop | null {
@@ -181,6 +216,7 @@ function mapThread(t: ThreadDTO, events: EventDTO[]): Thread {
     folder: t.working_directory,
     agent: t.agent_type === 'shell' ? null : t.agent_type,
     model: t.next_model || t.model,
+    executionTimeoutSeconds: t.execution_timeout_seconds,
     projectId: t.project_id || null,
     status: statuses[t.status] ?? 'unknown',
     stop: stopOf(t),
@@ -263,13 +299,11 @@ export function createThreadAPI(
     return events
   }
   const view = (id: string) => ctx.request<ThreadDTO>(threadPath(id))
-  async function agentFor(t: Pick<ThreadDTO, 'node_id' | 'agent_type'>, model?: string) {
+  async function agentFor(t: Pick<ThreadDTO, 'node_id' | 'agent_type'>) {
     const device = (await ctx.devices()).find((device) => device.id === t.node_id)
     const agent = device?.agents.find((agent) => agent.kind === t.agent_type)
     if (!agent) throw new ClientError('invalid', 'The device has not reported this agent as available.')
     if (agent.status !== 'available' || agent.problem) throw new ClientError('invalid', agentUnavailableReason(agent))
-    if (model && !agent.models.includes(model))
-      throw new ClientError('invalid', 'The device has not reported this model as available.')
     return agent
   }
   async function roots(deviceId: string) {
@@ -367,6 +401,7 @@ export function createThreadAPI(
           createdAt: timestamp(event.created_at),
           delivery: 'delivered',
           activity: event.payload.metadata?.activity ?? null,
+          fullOutput: fullOutputOf(event.payload.metadata?.full_output),
           attachments: attachmentsOf(event.payload.attachments),
         })
       }
@@ -489,7 +524,7 @@ export function createThreadAPI(
       return readMessages(t, events)
     },
     async createThread(input) {
-      const agent = await agentFor({ node_id: input.deviceId, agent_type: input.agent }, input.model)
+      const agent = await agentFor({ node_id: input.deviceId, agent_type: input.agent })
       if (!canCreateAgent(agent)) throw new ClientError('invalid', agentUnavailableReason(agent))
       const messageId = uuid('create-message', input.clientId)
       const t = await ctx.request<ThreadDTO>(
@@ -499,6 +534,7 @@ export function createThreadAPI(
           node_id: input.deviceId,
           agent_type: input.agent,
           model: input.model,
+          execution_timeout_seconds: input.executionTimeoutSeconds,
           working_directory: input.folder,
           message: { client_message_id: messageId, content: input.body },
         }),
@@ -543,9 +579,17 @@ export function createThreadAPI(
     },
     async setThreadModel({ threadId, model }) {
       const t = await view(threadId)
-      const agent = await agentFor(t, model)
+      const agent = await agentFor(t)
       if (!agent.abilities.switchModel) throw new ClientError('invalid', 'This agent does not support changing models.')
       const updated = await ctx.request<ThreadDTO>(`${threadPath(threadId)}/model`, post({ model }))
+      ctx.emit('threads')
+      return mapThread(updated, await timeline(threadId))
+    },
+    async setThreadExecutionLimit({ threadId, executionTimeoutSeconds }) {
+      const updated = await ctx.request<ThreadDTO>(`${threadPath(threadId)}/settings`, {
+        method: 'PATCH',
+        body: JSON.stringify({ execution_timeout_seconds: executionTimeoutSeconds }),
+      })
       ctx.emit('threads')
       return mapThread(updated, await timeline(threadId))
     },
@@ -569,16 +613,15 @@ export function createThreadAPI(
       const result = await sessionResult<{
         ok: boolean
         code?: string
-        steps?: (TraceStep & { truncated?: boolean })[]
+        steps?: TraceStep[]
       }>(`${threadPath(reply.threadId)}/trace?${query}`)
       if (!result.ok) {
         const reason = unavailableReason(result.code)
         if (reason) return { state: 'unavailable', messageId, reason }
         unavailable('The device could not read this trace.')
       }
-      if (!result.steps) unavailable('The device returned an incomplete trace.')
-      if (result.steps!.some((step) => step.truncated)) unavailable('The stored trace is incomplete.')
-      return { state: 'ready', messageId, steps: result.steps! }
+      const steps = result.steps ?? unavailable('The device returned an incomplete trace.')
+      return { state: 'ready', messageId, steps }
     },
     readOutput: (id) => output.readOutput(id),
     async listFolders(deviceId, path): Promise<FolderListing> {

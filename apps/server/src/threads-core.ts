@@ -129,8 +129,6 @@ export const admission = (
           422,
         ),
       )
-    if (model && !capability.models?.some((m) => m.id === model))
-      return yield* Effect.fail(failure('model_unavailable', 422))
     if (operation !== 'create' && model && !capability.capabilities.switch_model)
       return yield* Effect.fail(failure('model_switch_unsupported', 422))
     return model || (operation === 'create' ? capability.default_model : '')

@@ -6,6 +6,7 @@ import {
   CommandOutcome,
   Integer,
   PositiveInteger,
+  ExecutionTimeoutSeconds,
   StorageGeneration,
   UUID,
   boundedText,
@@ -14,7 +15,7 @@ import {
 } from './common.ts'
 import { SessionRequest, SessionResult, ThreadReport } from './dto.ts'
 
-export const WorkerCommandAction = Schema.Literals(['open', 'message', 'withdraw', 'resume', 'stop'])
+export const WorkerCommandAction = Schema.Literals(['open', 'message', 'withdraw', 'resume', 'stop', 'settings'])
 export const WorkerCommandState = Schema.Literals([
   'accepted',
   'running',
@@ -63,7 +64,7 @@ export const WorkerOpenConfig = Schema.Struct({
   agent_type: AgentType,
   model: Schema.optionalKey(summary(512)),
   working_directory: boundedText(4096).check(Schema.isMinLength(1)),
-  execution_timeout_seconds: PositiveInteger,
+  execution_timeout_seconds: ExecutionTimeoutSeconds,
   adapter_config: WorkerAdapterConfig,
 })
 export type WorkerOpenConfig = typeof WorkerOpenConfig.Type
@@ -80,6 +81,7 @@ export const WorkerIPCMessage = Schema.Struct({
   session_request: Schema.optionalKey(Schema.NullOr(SessionRequest)),
   session_result: Schema.optionalKey(Schema.NullOr(SessionResult)),
   stop_reason: Schema.optionalKey(boundedText(4096)),
+  execution_timeout_seconds: Schema.optionalKey(ExecutionTimeoutSeconds),
   type: Schema.Literals([
     'auth',
     'result',
@@ -89,6 +91,7 @@ export const WorkerIPCMessage = Schema.Struct({
     'thread_withdraw',
     'thread_resume',
     'thread_stop',
+    'thread_settings',
     'thread_pending',
     'thread_ack',
     'session_request',
@@ -199,6 +202,15 @@ export const WorkerStop = WorkerIPCMessage.mapFields(
   (fields) => ({ ...fields, ...executionIdentity, type: Schema.Literal('thread_stop') }),
   preserveChecks,
 )
+export const WorkerSettings = WorkerIPCMessage.mapFields(
+  (fields) => ({
+    ...fields,
+    ...executionIdentity,
+    type: Schema.Literal('thread_settings'),
+    execution_timeout_seconds: ExecutionTimeoutSeconds,
+  }),
+  preserveChecks,
+)
 export const WorkerCommandStatusQuery = WorkerIPCMessage.mapFields(
   (fields) => ({ ...fields, ...executionIdentity, type: Schema.Literal('thread_command_status') }),
   preserveChecks,
@@ -223,6 +235,7 @@ export const WorkerRequest = Schema.Union([
   WorkerWithdraw,
   WorkerResume,
   WorkerStop,
+  WorkerSettings,
   WorkerCommandStatusQuery,
   WorkerPending,
   WorkerAck,
@@ -238,6 +251,7 @@ export type WorkerOpen = typeof WorkerOpen.Type
 export type WorkerMessage = typeof WorkerMessage.Type
 export type WorkerWithdraw = typeof WorkerWithdraw.Type
 export type WorkerResume = typeof WorkerResume.Type
+export type WorkerSettings = typeof WorkerSettings.Type
 export type WorkerStop = typeof WorkerStop.Type
 export type WorkerCommandStatusQuery = typeof WorkerCommandStatusQuery.Type
 export type WorkerPending = typeof WorkerPending.Type

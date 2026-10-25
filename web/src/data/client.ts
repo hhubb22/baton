@@ -75,6 +75,7 @@ export interface BatonClient {
     folder: string
     agent: AgentKind
     model: string
+    executionTimeoutSeconds?: number
     body: string
     clientId: string
   }): Promise<Operation>
@@ -82,6 +83,7 @@ export interface BatonClient {
   // 撤回还没发给 Agent 的消息；已经发出时返回 conflict。
   cancelMessage(messageId: ID): Promise<Message>
   // 换模型从下一轮开始生效，Agent 不支持换模型时返回 invalid。
+  setThreadExecutionLimit(input: { threadId: ID; executionTimeoutSeconds: number }): Promise<Thread>
   setThreadModel(input: { threadId: ID; model: string }): Promise<Thread>
   stopThread(threadId: ID): Promise<Operation>
   // 执行中的 Thread 先停止，设备确认后才归档。

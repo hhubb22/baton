@@ -7,7 +7,11 @@ import type {
 } from '@baton/protocol'
 import * as Sqlite from '@baton/sqlite'
 import type { TraceContext } from '@baton/telemetry'
-import { Effect } from 'effect'
+import { Effect, Schema } from 'effect'
+import { FullOutputReference } from '@baton/protocol'
+import { dirname } from 'node:path'
+import { FullOutputStore, readOutputRetentionDays } from './full-output.ts'
+import { boundReport } from './reports.ts'
 import * as Reactivity from 'effect/reactivity/Reactivity'
 import type { ProcessRecord } from '../platform/process-types.ts'
 import type { AgentMessage, InputPreparation } from './agent.ts'
@@ -92,6 +96,8 @@ export const commandAction = (type: string): WorkerCommandAction | undefined => 
       return 'resume'
     case 'thread_message':
       return 'message'
+    case 'thread_settings':
+      return 'settings'
     case 'thread_stop':
       return 'stop'
     case 'thread_withdraw':
@@ -102,7 +108,7 @@ export const commandAction = (type: string): WorkerCommandAction | undefined => 
 }
 
 /** Only the Worker owns this database. All state and outbox changes share one FULL transaction. */
-export const makeLedger = Effect.fn('Worker.makeLedger')(function* (dbPath: string) {
+export const makeLedger = Effect.fn('Worker.makeLedger')(function* (dbPath: string, dataDirectory?: string) {
   const sql = yield* Sqlite.make({
     filename: dbPath,
     commitVerification: {
@@ -155,8 +161,30 @@ export const makeLedger = Effect.fn('Worker.makeLedger')(function* (dbPath: stri
     })
   })
 
-  const save = (state: State, previous: State) =>
-    sql.withTransaction(
+  const fullOutput = new FullOutputStore(dirname(dbPath))
+  const save = Effect.fn('Worker.save')(function* (state: State, previous: State) {
+    const savedEvents = new Set(previous.outbox.map((saved) => saved.report.event_id))
+    for (const entry of state.outbox) {
+      if (savedEvents.has(entry.report.event_id)) continue
+      const report = entry.report
+      const config = state.config
+      if (report.kind === 'reply' && config && report.content !== undefined) {
+        const existing = report.metadata?.full_output
+        const reference = Schema.is(FullOutputReference)(existing)
+          ? existing
+          : yield* Effect.tryPromise({
+              try: async () =>
+                fullOutput.put(
+                  config,
+                  Buffer.from(report.content ?? '', report.metadata?.encoding === 'base64' ? 'base64' : 'utf8'),
+                  await readOutputRetentionDays(dataDirectory),
+                ),
+              catch: (cause) => new WorkerFailure('storage_error', 'Cannot save full reply', cause),
+            })
+        entry.report = boundReport({ ...report, metadata: { ...report.metadata, full_output: reference } })
+      } else entry.report = boundReport(report)
+    }
+    yield* sql.withTransaction(
       Effect.gen(function* () {
         const { commands, messages, outbox, processes, ...meta } = state
         yield* sql.unsafe(
@@ -202,5 +230,6 @@ export const makeLedger = Effect.fn('Worker.makeLedger')(function* (dbPath: stri
         }
       }),
     )
+  })
   return { load, save }
 })

@@ -123,6 +123,7 @@ export interface Thread {
   folder: string
   agent: AgentKind | null
   model: string
+  executionTimeoutSeconds?: number
   projectId: ID | null
   status: ThreadStatus
   stop: ThreadStop | null
@@ -145,6 +146,13 @@ export type Delivery = 'submitted' | 'saved' | 'waitingDevice' | 'queued' | 'del
 // next 等当前回复结束后发送；now 在 Agent 支持时插入当前回复。
 export type SendMode = 'next' | 'now'
 
+export interface FullOutputReference {
+  id: string
+  storage_generation: string
+  total_bytes: number
+  expires_at: string
+}
+
 export interface Message {
   id: ID
   threadId: ID
@@ -156,6 +164,7 @@ export interface Message {
   delivery: Delivery
   // Agent 回复这一轮做过的事的计数，完整过程留在设备上，展开时读取；没有过程为 null。
   activity: ActivitySummary | null
+  fullOutput?: FullOutputReference | null
   attachments: Attachment[]
 }
 
@@ -171,10 +180,11 @@ export type Attachment =
   | { kind: 'commit'; repo: string; sha: string; subject: string }
 
 // 一轮回复的过程：命令和输出、工具调用、文件改动。
-export type TraceStep =
+export type TraceStep = (
   | { kind: 'command'; command: string; output: string }
   | { kind: 'tool'; name: string; detail: string }
   | { kind: 'file'; action: 'wrote' | 'edited' | 'deleted'; path: string }
+) & { truncated?: boolean }
 
 // 过程从设备读取。offline：设备离线，暂时读不到；missing：设备上的对话记录已经删除。
 export type Trace =

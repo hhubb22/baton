@@ -107,7 +107,7 @@ const styles = stylex.create({
   liveFoot: { display: 'inline-flex', alignItems: 'center', gap: '6px', color: colors.faint },
 })
 
-// 回复上方的一行过程摘要，展开后从设备读取完整过程。
+// 回复上方的一行过程摘要，展开后从设备读取已保存的过程。
 export function ActivityTrace({
   message,
   device,
@@ -143,7 +143,12 @@ export function ActivityTrace({
       </p>
     )
   } else {
-    content = trace.data.steps.map((step, index) => <Step key={index} step={step} />)
+    content = trace.data.steps.map((step, index) => (
+      <div key={index} {...stylex.props(styles.step)}>
+        <Step step={step} />
+        {step.truncated && <span {...stylex.props(text.caption, styles.muted)}>Activity truncated</span>}
+      </div>
+    ))
   }
 
   return (

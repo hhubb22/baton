@@ -40,6 +40,7 @@ export const Timestamp = Schema.String.check(
 export const Integer = Schema.Int.check(Schema.makeFilter((value) => Number.isSafeInteger(value)))
 export const NonNegativeInteger = Integer.check(Schema.isGreaterThanOrEqualTo(0))
 export const PositiveInteger = Integer.check(Schema.isGreaterThan(0))
+export const ExecutionTimeoutSeconds = PositiveInteger.check(Schema.isLessThanOrEqualTo(2147483647))
 export const RuntimeName = Schema.String.check(Schema.isPattern(/^[a-zA-Z0-9][a-zA-Z0-9._+-]{0,127}$/))
 export const RootID = Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9._-]{0,63}$/))
 export const ClientMessageID = nonemptyText(256)

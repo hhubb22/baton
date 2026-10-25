@@ -332,7 +332,14 @@ export class MockStore {
   }
 
   createThread(
-    input: { deviceId: ID; folder: string; agent: AgentKind; model: string; body: string },
+    input: {
+      deviceId: ID
+      folder: string
+      agent: AgentKind
+      model: string
+      executionTimeoutSeconds?: number
+      body: string
+    },
     clientId: string,
   ) {
     const { deviceId, folder, agent: kind, model, body } = input
@@ -357,6 +364,7 @@ export class MockStore {
       folder,
       agent: kind,
       model,
+      executionTimeoutSeconds: input.executionTimeoutSeconds ?? 7200,
       projectId: null,
       status: 'idle',
       stop: null,
@@ -586,6 +594,21 @@ export class MockStore {
     if (thread.status === 'waiting') this.startNext(thread)
     this.emit('threads', 'messages', 'operations')
     return message
+  }
+
+  setThreadExecutionLimit(threadId: ID, executionTimeoutSeconds: number): Thread {
+    const thread = this.thread(threadId)
+    this.ensureWritable(thread)
+    if (
+      !Number.isInteger(executionTimeoutSeconds) ||
+      executionTimeoutSeconds <= 0 ||
+      executionTimeoutSeconds > 2147483647
+    )
+      throw new ClientError('invalid', 'Enter a whole number from 1 to 2147483647.')
+    thread.executionTimeoutSeconds = executionTimeoutSeconds
+    thread.updatedAt = this.scheduler.now()
+    this.emit('threads')
+    return thread
   }
 
   setThreadModel(threadId: ID, model: string): Thread {

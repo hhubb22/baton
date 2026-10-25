@@ -1104,6 +1104,72 @@ describe('reliable Worker', () => {
     ),
   )
 
+  it.effect('persists an idempotent budget extension and times out from the original Turn start', () =>
+    fixture((dbPath) =>
+      Effect.gen(function* () {
+        const cfg = { ...config(), execution_timeout_seconds: 1 }
+        const settings: WorkerRequest = {
+          type: 'thread_settings',
+          ok: false,
+          command_id: randomUUID(),
+          thread_id: cfg.thread_id,
+          storage_generation: cfg.storage_generation,
+          execution_timeout_seconds: 2,
+        }
+        let wall = Date.now()
+        yield* Effect.acquireRelease(
+          Effect.sync(() => vi.spyOn(Date, 'now').mockImplementation(() => wall)),
+          (spy) => Effect.sync(() => spy.mockRestore()),
+        )
+        const receipt = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const f = yield* fake
+            const worker = yield* makeWorker({ dbPath, agentFactory: () => f.agent, stopTimeoutMs: 10 })
+            yield* worker.handle(request(cfg, 'thread_open'))
+            yield* opened(worker)
+            const input = message(cfg)
+            yield* worker.handle(input)
+            yield* completed(worker, input.command_id ?? '')
+            wall += 500
+            yield* TestClock.adjust(500)
+            const first = yield* worker.handle(settings)
+            expect(first.command_status?.state).toBe('succeeded')
+            expect(yield* worker.handle(settings)).toEqual(first)
+            expect((yield* worker.handle({ ...settings, execution_timeout_seconds: 3 })).code).toBe('command_conflict')
+            wall += 600
+            yield* TestClock.adjust(600)
+            expect(f.calls.includes('abort')).toBe(false)
+            expect((yield* worker.handle({ type: 'status', ok: true })).agent_ready).toBe(true)
+            wall += 901
+            yield* TestClock.adjust(901)
+            yield* TestClock.adjust(10)
+            const items = yield* until(reports(worker), (items) => items.some((item) => item.kind === 'turn.ended'))
+            expect(items.find((item) => item.kind === 'turn.ended')?.reason).toBe('timeout')
+            expect(f.calls.includes('abort')).toBe(true)
+            return first
+          }),
+        )
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const f = yield* fake
+            const worker = yield* makeWorker({
+              dbPath,
+              agentFactory: (restored) => {
+                expect(restored.execution_timeout_seconds).toBe(2)
+                return f.agent
+              },
+            })
+            expect(yield* worker.handle(settings)).toEqual(receipt)
+            const items = yield* reports(worker)
+            expect(
+              items.filter((item) => item.kind === 'command.completed' && item.command_id === settings.command_id),
+            ).toHaveLength(1)
+          }),
+        )
+      }),
+    ),
+  )
+
   it.effect('times out a Turn through stop and records timeout even when process-tree termination is unknown', () =>
     fixture((dbPath) =>
       Effect.gen(function* () {

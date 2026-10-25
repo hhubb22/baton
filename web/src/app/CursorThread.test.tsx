@@ -152,6 +152,30 @@ function mount(options: { existing?: boolean; resumePending?: boolean; status?: 
 beforeEach(() => localStorage.clear())
 
 describe('remote Cursor threads', () => {
+  it('shows full-output reading after a reply mapped from the HTTP timeline', async () => {
+    const { state } = mount({ existing: true, status: 'idle' })
+    state.thread.opened_at = at
+    state.events.push({
+      id: 1,
+      kind: 'reply',
+      created_at: at,
+      payload: {
+        event_id: 'long-reply',
+        content: 'Saved reply summary',
+        metadata: {
+          full_output: {
+            id: '25689309-82b9-4cf7-8cba-7e84d7d30236',
+            storage_generation: 'local-generation',
+            total_bytes: 100000,
+            expires_at: '2099-01-01T00:00:00.000Z',
+          },
+        },
+      },
+    })
+    expect(await screen.findByText('Saved reply summary')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Read full output' })).toBeInTheDocument()
+  })
+
   it('creates, opens and sends over HTTP while Project and Inbox endpoints return 501', async () => {
     const user = userEvent.setup()
     const { state, fetcher } = mount()
@@ -185,6 +209,28 @@ describe('remote Cursor threads', () => {
         ),
       ).toBe(true),
     )
+  })
+
+  it('keeps a manually entered model when composing and sends it in the create request', async () => {
+    const user = userEvent.setup()
+    const { fetcher } = mount()
+    await user.click(await screen.findByRole('button', { name: 'Cursor · Default model' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Enter model ID…' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Choose Cursor model' })
+    await user.type(within(dialog).getByLabelText('Model ID'), '  custom-model  ')
+    await user.click(within(dialog).getByRole('button', { name: 'Use model' }))
+    expect(await screen.findByRole('button', { name: 'Cursor · custom-model' })).toBeInTheDocument()
+    await user.type(screen.getByLabelText('New chat message'), 'Hello')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() => {
+      const request = fetcher.mock.calls.find(
+        ([url, init]) => requestURL(url) === '/api/v1/threads' && init?.method === 'POST',
+      )
+      expect(JSON.parse(jsonBody(request?.[1]?.body))).toMatchObject({
+        model: 'custom-model',
+        execution_timeout_seconds: 7200,
+      })
+    })
   })
 
   it('keeps resume pending after reload until execution completion is reported', async () => {

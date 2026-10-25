@@ -152,6 +152,11 @@ export function createMockClient(
       signedIn()
       return structuredClone(store.cancelMessage(messageId))
     },
+    async setThreadExecutionLimit({ threadId, executionTimeoutSeconds }) {
+      await connect(latency.save)
+      signedIn()
+      return structuredClone(store.setThreadExecutionLimit(threadId, executionTimeoutSeconds))
+    },
     async setThreadModel({ threadId, model }) {
       await connect(latency.save)
       signedIn()

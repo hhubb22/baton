@@ -5,12 +5,12 @@ import { FolderDialog } from '../app/FolderDialog'
 import { Page } from '../app/Page'
 import type { ThreadsSearch } from '../app/router'
 import { statusTextStyle, ThreadDetail, type RecoverAction } from '../app/ThreadDetail'
+import { NewThreadExecutionLimit } from '../app/ThreadExecutionLimit'
+import { ThreadModelMenu, type ThreadModelChoice } from '../app/ThreadModelMenu'
 import { useNow } from '../app/useNow'
 import { ClientError } from '../data/client'
 import {
   agentNames,
-  agentUnavailableReason,
-  canCreateAgent,
   defaultLocation,
   folderName,
   recentLocations,
@@ -23,7 +23,7 @@ import {
   type ThreadGroup,
 } from '../data/derive'
 import { newClientId, useCreateThread, useDevices, useProjects, useSession, useThreads } from '../data/queries'
-import type { AgentKind, Device, Project, Thread } from '../data/types'
+import type { Device, Project, Thread } from '../data/types'
 import { text } from '../theme/text'
 import { colors, radius, size, space } from '../theme/tokens.stylex'
 import { Avatar } from '../ui/Avatar'
@@ -76,18 +76,14 @@ const styles = stylex.create({
   muted: { color: colors.muted },
 })
 
-interface AgentChoice {
-  agent: AgentKind
-  model: string
-}
+type AgentChoice = ThreadModelChoice
 
-// 所选 Agent 在这台设备上不能用时，换成第一个能用的；所选模型不在列表里时用 Agent 的默认模型。
+// 所选 Agent 在这台设备上不能用时，换成第一个能用的；同一 Agent 保留手填的模型 ID。
 function resolveAgent(device: Device | undefined, choice: AgentChoice | null): AgentChoice | null {
   const agents = usableAgents(device)
   const agent = agents.find((item) => item.kind === choice?.agent) ?? agents[0]
   if (!agent) return null
-  const model =
-    choice && agent.models.includes(choice.model) ? choice.model : (agent.defaultModel ?? agent.models[0] ?? '')
+  const model = choice?.agent === agent.kind ? choice.model : (agent.defaultModel ?? agent.models[0] ?? '')
   return { agent: agent.kind, model }
 }
 
@@ -161,31 +157,13 @@ function ModelMenu({
 }) {
   const label = choice ? `${agentNames[choice.agent]} · ${choice.model || 'Default model'}` : 'No agent'
   return (
-    <Menu side="bottom" trigger={<Chip icon="sparkle">{label}</Chip>}>
-      {(device?.agents ?? []).map((agent) => (
-        <div key={agent.kind}>
-          <MenuHeading>{agentNames[agent.kind]}</MenuHeading>
-          {!canCreateAgent(agent) ? (
-            <MenuOption
-              note={agentUnavailableReason(agent)}
-              onSelect={() => onUnavailable(agentUnavailableReason(agent))}
-            >
-              {agentNames[agent.kind]}
-            </MenuOption>
-          ) : (
-            (agent.models.length ? agent.models : ['']).map((model) => (
-              <MenuOption
-                key={model}
-                selected={choice?.agent === agent.kind && choice.model === model}
-                onSelect={() => onSelect({ agent: agent.kind, model })}
-              >
-                {model || 'Default model'}
-              </MenuOption>
-            ))
-          )}
-        </div>
-      ))}
-    </Menu>
+    <ThreadModelMenu
+      agents={device?.agents ?? []}
+      choice={choice}
+      label={label}
+      onSelect={onSelect}
+      onUnavailable={onUnavailable}
+    />
   )
 }
 
@@ -261,6 +239,7 @@ export function ThreadsPage() {
   const [error, setError] = useState<string | null>(null)
   const [location, setLocation] = useState<Location | null>(null)
   const [agentChoice, setAgentChoice] = useState<AgentChoice | null>(null)
+  const [executionTimeoutSeconds, setExecutionTimeoutSeconds] = useState(7200)
   const [browseDevice, setBrowseDevice] = useState<string | null>(null)
 
   const allThreads = threads.data ?? []
@@ -321,6 +300,14 @@ export function ThreadsPage() {
       setError(`No agent is ready on ${device.name}. Set one up on the device, or choose another folder.`)
       return
     }
+    if (
+      !Number.isInteger(executionTimeoutSeconds) ||
+      executionTimeoutSeconds < 1 ||
+      executionTimeoutSeconds > 2147483647
+    ) {
+      setError('Enter a whole number of seconds from 1 to 2147483647.')
+      return
+    }
     setError(null)
     create.mutate(
       {
@@ -328,6 +315,7 @@ export function ThreadsPage() {
         folder: current.folder,
         agent: choice.agent,
         model: choice.model,
+        executionTimeoutSeconds,
         body,
         clientId: newClientId(),
       },
@@ -491,6 +479,7 @@ export function ThreadsPage() {
                       }}
                       onUnavailable={setError}
                     />
+                    <NewThreadExecutionLimit value={executionTimeoutSeconds} onChange={setExecutionTimeoutSeconds} />
                   </>
                 }
               />

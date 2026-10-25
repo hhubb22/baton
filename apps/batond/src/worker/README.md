@@ -32,6 +32,18 @@ An Agent can expose an optional `output` stream of `{ nativeSessionId, messageId
 
 The current Turn retains at most 256 KiB of UTF-8 text. Each read returns at most 16 KiB and advances an `epoch:byteOffset` cursor on a character boundary. Old epochs, offsets outside retained text and upstream text loss resume at the retained start with `gap: true`; malformed cursors or offsets inside a retained UTF-8 character return `invalid_cursor`. Starting or ending a Turn clears text and changes the epoch; a Worker restart also starts a new epoch. Output requests do not enqueue a state transition.
 
+## Full output
+
+Ordinary Agent replies are saved before report clipping. Shell stdout and stderr are written from their original chunks in arrival order, before the first/last 16 KB summary is formed. The default report budgets remain 32 KB of reply text and 120 KB of encoded report JSON. Reports and center timeline events retain `metadata.full_output` with the output ID, storage generation, original byte count and expiration time. Full bytes stay on the device under `threads/<thread-id>/full-output/`; the Worker ledger and center retain the bounded reply and reference.
+
+The device configuration file `<data-directory>/output-retention.json` accepts `{ "retention_days": 30 }`. The default is **30 days**; allowed values are integers from 1 to 3650. New outputs use the value when saved; existing outputs keep their recorded expiration. The file must have the same private permissions as other device configuration files. An invalid configuration fails saving new output with a storage error.
+
+The daemon deletes expired files on startup and every hour, including for inactive Threads. Reads reject expired content immediately and delete it. Incomplete writes without published metadata are removed after 24 hours without writes once the Worker is no longer running. Cleanup requires the daemon to be running; after an offline period it resumes at startup.
+
+`GET /api/v1/threads/:threadId/output?action=full_output&output_id=<id>&storage_generation=<generation>&cursor=<byte-offset>` performs an authenticated, on-demand read. The center checks employee ownership and routes the request to the Thread's device. The daemon checks Thread ID, storage generation, output ID, expiration, private directory/file ownership and permissions, and rejects symbolic links and POSIX hard links. The daemon reads directly from saved files, so a stopped Worker can still serve output. The device must be online and synchronized.
+
+Each response contains at most **12 KB of original bytes**, base64 encoded in `session.result.full_output.data`, plus `offset`, `next_offset`, `total_bytes`, `done`, and the output identity and expiration. `cursor` is a decimal byte offset starting at `0`; malformed or out-of-range offsets fail. Base64 preserves binary data and UTF-8 characters split across pages. Consumers decode UTF-8 with a streaming decoder. The web reader retains one page, supports reading the next part and restarting, and downloads the current part as raw bytes.
+
 ## Process records
 
 `worker.records.add(record)`, `remove(record)` and `list()` return Effects. Records use the platform `ProcessRecord` type with `pid`, `creationTime` and `role`; `thread_processes.created_at` stores `creationTime`. Removal checks the complete identity so a stale cleanup cannot delete a reused PID's record.
@@ -52,7 +64,7 @@ An explicit failed turn does not enter unknown or trigger process reaping. Unans
 
 A new message on a stopped Thread requests resume of its existing native session. On uncertainty, the Worker withdraws the previous queued inputs, reaps the old execution tree and checks pending intent through a separate read-only instance. A subsequent explicit new message or resume may restore the same native session after reaping is confirmed. Existing unknown inputs keep their result; old queue entries and intents are never revived. Missing native mappings and failed process recovery reject continuation with a reason.
 
-Each accepted Turn uses `execution_timeout_seconds` from the open configuration. Elapsed time is the maximum of the monotonic interval and wall-clock interval, so sleep counts and a clock rollback cannot extend the limit. A scoped timer records a durable timeout stop and uses the same cancellation/reaping path as an explicit stop. The Turn ends with reason `timeout`, including when reaping produces an unknown execution outcome.
+Each accepted Turn uses `execution_timeout_seconds`, initially 7200 seconds unless configured otherwise. `ExecutionTimeoutSeconds` accepts integers from 1 to 2147483647. A durable `thread_settings` command updates the stored configuration and records its completion in the same transaction; retries return the original receipt. Active Turns use the new total budget from their original start, and future Turns inherit it. A Turn already stopping continues to stop. Elapsed time is the maximum of the monotonic interval and wall-clock interval, so sleep counts and a clock rollback cannot extend the limit. The scoped timer sleeps at most one second at a time, records a durable timeout stop and uses the same cancellation/reaping path as an explicit stop. The Turn ends with reason `timeout`, including when reaping produces an unknown execution outcome.
 
 ## Verification
 

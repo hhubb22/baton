@@ -101,6 +101,7 @@ export const runWorker = (options: {
     let parsingAttachments = false
     const worker = yield* makeWorker({
       dbPath: paths.ledger,
+      dataDirectory: options.dataDirectory,
       agentFactory,
       attachments: (config, text) =>
         Effect.suspend(() => {

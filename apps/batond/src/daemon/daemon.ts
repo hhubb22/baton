@@ -26,6 +26,7 @@ import { makeNodeLedger, contentHash, type NodeLedger } from './ledger.ts'
 import { makeThreadService, WorkerHistoryUnavailable, type DaemonWorkerHost } from './threads.ts'
 import { connectWebSocket, reconnectDelay, type DaemonTransport, type DaemonConnection } from './transport.ts'
 import { DaemonStorageFailure, ledgerPromise } from './storage.ts'
+import { pruneDeviceOutputs } from '../worker/full-output.ts'
 export { DaemonStorageFailure } from './storage.ts'
 
 export class NeedsReauthentication extends Error {
@@ -39,6 +40,7 @@ export interface RunDaemonOptions {
   readonly identity?: NodeIdentity
   readonly relayURL?: string
   readonly caFile?: string
+  readonly controlTimeoutSeconds?: number
   readonly heartbeatMs?: number
   readonly pollIntervalMs?: number
   readonly probeIntervalMs?: number
@@ -102,6 +104,7 @@ async function connected(options: {
   identity: NodeIdentity
   incarnation: string
   heartbeatMs: number
+  controlTimeoutMs: number
   pollMs: number
   ledger: NodeLedger
   threads: ReturnType<typeof makeThreadService>
@@ -120,6 +123,7 @@ async function connected(options: {
   signal.addEventListener('abort', abort, { once: true })
   let synced = false
   let authenticated = false
+  let authenticatedAt: number | undefined
   const syncId = randomUUID()
   const started = performance.now()
   let reportPending: { id: string; hash: string; sent: number } | undefined
@@ -185,8 +189,9 @@ async function connected(options: {
     let heartbeatAt = 0
     while (!controller.signal.aborted) {
       const now = performance.now()
-      if (!authenticated && now - started > 10_000) throw new Error('节点认证超时')
-      if (authenticated && !synced && now - started > 10_000 + options.heartbeatMs * 2) throw new Error('节点同步超时')
+      if (!authenticated && now - started >= options.controlTimeoutMs) throw new Error('节点认证超时')
+      if (authenticatedAt !== undefined && !synced && now - authenticatedAt >= options.controlTimeoutMs)
+        throw new Error('节点同步超时')
       if (authenticated && now >= heartbeatAt) {
         await send({ kind: 'heartbeat' })
         if (!synced) await sync()
@@ -235,6 +240,7 @@ async function connected(options: {
           throw new Error('节点认证暂不可用')
         }
         authenticated = true
+        authenticatedAt = performance.now()
         await sync()
         await send({ kind: 'heartbeat' })
         continue
@@ -353,6 +359,9 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
     const heartbeatMs = options.heartbeatMs ?? 15_000
     const pollMs = options.pollIntervalMs ?? 250
     const probeMs = options.probeIntervalMs ?? 30_000
+    const controlTimeoutSeconds = options.controlTimeoutSeconds ?? 370
+    if (!Number.isInteger(controlTimeoutSeconds) || controlTimeoutSeconds < 1 || controlTimeoutSeconds > 3600)
+      return yield* Effect.fail(new Error('控制等待时限需要 1～3600 秒的整数'))
     if (heartbeatMs < 100 || heartbeatMs > 120_000 || pollMs < 10 || probeMs < 100)
       return yield* Effect.fail(new Error('节点轮询或心跳间隔无效'))
     if (process.platform !== 'win32') process.umask(0o077)
@@ -437,6 +446,14 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
         agents,
         ...deviceReport,
       })
+    const pruneOutputs = Effect.gen(function* () {
+      while (true) {
+        yield* attempt(() => pruneDeviceOutputs(options.dataDirectory)).pipe(
+          Effect.catch((error) => Effect.logWarning('Full output cleanup failed', error)),
+        )
+        yield* Effect.sleep('1 hour')
+      }
+    })
     const collectDevices = Effect.gen(function* () {
       let collectedAt = -Infinity
       while (true) {
@@ -485,6 +502,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
               identity,
               incarnation,
               heartbeatMs,
+              controlTimeoutMs: controlTimeoutSeconds * 1000,
               pollMs,
               ledger,
               threads,
@@ -509,7 +527,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
         yield* Effect.sleep(reconnectDelay(retry++, options.random))
       }
     })
-    yield* Effect.all([connect, collect, probe, collectDevices], { concurrency: 'unbounded' })
+    yield* Effect.all([connect, collect, probe, collectDevices, pruneOutputs], { concurrency: 'unbounded' })
   })
   return program.pipe(
     Effect.provideService(DaemonServices, {

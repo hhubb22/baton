@@ -15,7 +15,7 @@ import type { ProcessRecord } from '../platform/process-types.ts'
 import { capabilitiesFor } from '../agents/capabilities.ts'
 import type { AgentError, AgentEvent, AgentFactory, InputAcceptance, ThreadAgent } from './agent.ts'
 import { OutputBuffer, type AgentOutput } from './output.ts'
-import { boundReason, boundReport, pendingResult } from './reports.ts'
+import { boundReason, pendingResult } from './reports.ts'
 import {
   commandAction,
   isPending,
@@ -32,6 +32,7 @@ export { WorkerFailure } from './ledger.ts'
 
 export interface WorkerOptions {
   readonly dbPath: string
+  readonly dataDirectory?: string
   readonly agentFactory: AgentFactory
   readonly openTimeoutMs?: number
   readonly prepareTimeoutMs?: number
@@ -95,7 +96,7 @@ const reject = (code: string, message: string): never => {
 export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOptions) {
   const parentScope = yield* Effect.scope
   const scope = yield* Scope.make()
-  const ledger = yield* makeLedger(options.dbPath).pipe(
+  const ledger = yield* makeLedger(options.dbPath, options.dataDirectory).pipe(
     Effect.mapError((cause) => new WorkerFailure('storage_error', 'Cannot open Worker ledger', cause)),
   )
   let state = yield* ledger.load.pipe(
@@ -119,7 +120,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
   let recovering = true
   let uncertaintyCleanup = false
   let unknownRecoveryRunning = false
-  let turnTimer: { messageId: string; turn: number; fiber: Fiber.Fiber<void> } | undefined
+  let turnTimer: { messageId: string; turn: number; budget: number; fiber: Fiber.Fiber<void> } | undefined
   let reclaimedOnRecovery = false
   const buffered: AgentEvent[] = []
   const waiting = new Set<(failure: WorkerFailure) => Effect.Effect<void>>()
@@ -133,7 +134,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
     if (!config) return
     draft.outbox.push({
       acked: false,
-      report: boundReport({
+      report: {
         type: 'thread.report',
         thread_id: config.thread_id,
         storage_generation: config.storage_generation,
@@ -144,7 +145,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
           ? { queue_empty: !Object.values(draft.messages).some((message) => message.state === 'queued') }
           : {}),
         ...fields,
-      }),
+      },
     })
   }
   function finish(draft: State, command: Command, outcome: Outcome, reason = '') {
@@ -457,22 +458,34 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
     return Effect.gen(function* () {
       const active = state.activeMessage ? state.messages[state.activeMessage] : undefined
       const running = !recovering && state.phase === 'busy' && active?.state === 'sent' && !active.ended
-      if (!running || turnTimer?.messageId !== active?.input.id || turnTimer?.turn !== active?.turn) {
+      const budget = state.config?.execution_timeout_seconds ?? 7200
+      if (
+        !running ||
+        turnTimer?.messageId !== active?.input.id ||
+        turnTimer?.turn !== active?.turn ||
+        turnTimer?.budget !== budget
+      ) {
         if (turnTimer) yield* Effect.forkIn(Fiber.interrupt(turnTimer.fiber), scope)
         turnTimer = undefined
       }
-      if (!running || turnTimer || active?.startedAtNs === undefined || active.startedAtMs === undefined) return
+      if (
+        !running ||
+        turnTimer ||
+        active?.turn === undefined ||
+        active.startedAtNs === undefined ||
+        active.startedAtMs === undefined
+      )
+        return
       const messageId = active.input.id
-      const turn = active.turn!
+      const turn = active.turn
       const epoch = state.epoch
       const startedNs = BigInt(active.startedAtNs)
       const startedMs = active.startedAtMs
-      const budget = state.config!.execution_timeout_seconds * 1000
       const fiber = yield* Effect.forkIn(
         Effect.gen(function* () {
           while (true) {
             const elapsed = Math.max(Number(process.hrtime.bigint() - startedNs) / 1_000_000, Date.now() - startedMs)
-            const remaining = budget - elapsed
+            const remaining = (budget - elapsed / 1000) * 1000
             if (remaining <= 0) break
             yield* Effect.sleep(Math.min(1000, remaining))
           }
@@ -482,7 +495,8 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
                 state.epoch !== epoch ||
                 state.phase !== 'busy' ||
                 state.activeMessage !== messageId ||
-                state.messages[messageId]?.turn !== turn
+                state.messages[messageId]?.turn !== turn ||
+                (state.config?.execution_timeout_seconds ?? 7200) !== budget
               )
                 return Effect.void
               return commit((draft) => requestStop(draft, 'timeout')).pipe(Effect.asVoid)
@@ -491,7 +505,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         }),
         scope,
       )
-      turnTimer = { messageId, turn, fiber }
+      turnTimer = { messageId, turn, budget, fiber }
     })
   }
   function flushBuffered(): Effect.Effect<void, WorkerFailure> {
@@ -1049,6 +1063,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
           : {}),
         ...(action === 'withdraw' ? { id: request.client_message_id } : {}),
         ...(action === 'stop' ? { reason: request.stop_reason ?? '' } : {}),
+        ...(action === 'settings' ? { execution_timeout_seconds: request.execution_timeout_seconds } : {}),
       }
       const contentDigest = digest(content)
       const existing = draft.commands[request.command_id]
@@ -1173,6 +1188,13 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
           )
             return reject('invalid_state', 'Only a previously opened Thread with a native mapping can resume')
           draft.resumeRequested = true
+          break
+        }
+        case 'settings': {
+          if (!draft.config || request.execution_timeout_seconds === undefined)
+            return reject('invalid_request', 'Execution timeout is required')
+          draft.config = { ...draft.config, execution_timeout_seconds: request.execution_timeout_seconds }
+          finish(draft, command, 'succeeded')
           break
         }
         case 'stop': {

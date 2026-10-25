@@ -22,7 +22,7 @@ interface Outbox {
   message_id: string
   action: ThreadCommand['action']
   trace_context: TraceContext | null
-  payload: { client_message_id?: string; model?: string }
+  payload: { client_message_id?: string; model?: string; execution_timeout_seconds?: number }
   acked_at: string | null
   completed_at: string | null
   result: ThreadCommandResult | null
@@ -59,12 +59,13 @@ export const claimCommands = (): DB<ClaimedCommand[]> =>
           action: o.action,
           ...(o.action !== 'open' && t.storage_generation ? { storage_generation: t.storage_generation } : {}),
           ...(o.payload.client_message_id ? { client_message_id: o.payload.client_message_id } : {}),
+          ...(o.action === 'settings' ? { execution_timeout_seconds: o.payload.execution_timeout_seconds } : {}),
           ...(o.action === 'open'
             ? {
                 agent_type: t.agent_type,
                 model: o.payload.model || '',
                 working_directory: t.working_directory,
-                execution_timeout_seconds: t.execution_timeout_seconds,
+                execution_timeout_seconds: o.payload.execution_timeout_seconds,
                 ...(t.project_id
                   ? {
                       project_id: t.project_id,

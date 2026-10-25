@@ -125,6 +125,88 @@ it('persists request trace separately from business identity and dispatches it a
     expect(Option.getOrUndefined(dispatch.parent)?.spanId).toBe(records[0]!.trace_context.traceparent.split('-')[2])
   }))
 
+it('persists browser execution limits and dispatches idempotent settings with their original budgets', () =>
+  withTestDatabase(async ({ run, restart }) => {
+    const f = await fixture(run)
+    const { thread } = await run(threads.create(f.employee, { ...f.input, execution_timeout_seconds: 3600 }))
+    expect(thread.execution_timeout_seconds).toBe(3600)
+    await expect(
+      run(threads.create(f.employee, { ...f.input, execution_timeout_seconds: 3601 })),
+    ).rejects.toMatchObject({ status: 409 })
+    const commands = await run(threads.claimCommands())
+    const opened = commands.find((item) => item.body.action === 'open')
+    expect(opened?.body.execution_timeout_seconds).toBe(3600)
+    if (!opened) throw new Error('Missing open command')
+    await run(threads.setSettings(f.employee, thread.id, { execution_timeout_seconds: 7200 }))
+    await run(
+      query('UPDATE thread_outbox SET next_attempt_at=clock_timestamp() WHERE message_id=$1', opened.message_id),
+    )
+    const retried = await run(threads.claimCommands())
+    const { trace_context: _trace, ...original } = opened.body
+    expect(retried.find((item) => item.message_id === opened.message_id)?.body).toMatchObject(original)
+    await run(
+      threads.processReceipt(f.source, opened.message_id, {
+        type: 'thread.command_result',
+        thread_id: thread.id,
+        ok: true,
+        storage_generation: 'generation',
+      }),
+    )
+    await run(threads.processReport(f.source, report(thread.id, 1, 'thread.opened', { native_session_id: 'native' })))
+    const limit = 2147483647
+    await run(threads.setSettings(f.employee, thread.id, { execution_timeout_seconds: 7200 }))
+    await run(threads.setSettings(f.employee, thread.id, { execution_timeout_seconds: 7200 }))
+    await run(threads.setSettings(f.employee, thread.id, { execution_timeout_seconds: limit }))
+    const rows = await run(
+      query<{ count: number }>(
+        "SELECT count(*)::int AS count FROM thread_outbox WHERE thread_id=$1 AND action='settings'",
+        thread.id,
+      ),
+    )
+    expect(rows[0]?.count).toBe(2)
+    const recovered = await restart()
+    expect((await recovered(threads.view(f.employee, thread.id))).execution_timeout_seconds).toBe(limit)
+    const initialMessages = await recovered(threads.claimCommands())
+    const initialMessage = initialMessages.find((item) => item.body.action === 'message')
+    if (!initialMessage) throw new Error('Missing initial message command')
+    await recovered(
+      threads.processReceipt(f.source, initialMessage.message_id, {
+        type: 'thread.command_result',
+        thread_id: thread.id,
+        ok: true,
+        storage_generation: 'generation',
+      }),
+    )
+    const dispatched = await recovered(threads.claimCommands())
+    const settings = dispatched.find((item) => item.body.action === 'settings')
+    expect(settings?.body.execution_timeout_seconds).toBe(7200)
+    if (!settings) throw new Error('Missing settings command')
+    await recovered(
+      threads.processReceipt(f.source, settings.message_id, {
+        type: 'thread.command_result',
+        thread_id: thread.id,
+        ok: true,
+        storage_generation: 'generation',
+      }),
+    )
+    await recovered(
+      threads.processReceipt(f.source, settings.message_id, {
+        type: 'thread.command_result',
+        thread_id: thread.id,
+        ok: true,
+        storage_generation: 'generation',
+      }),
+    )
+    const next = await recovered(threads.claimCommands())
+    expect(next.find((item) => item.body.action === 'settings')?.body.execution_timeout_seconds).toBe(limit)
+    for (const invalid of [0, -1, 1.5, 2147483648]) {
+      await expect(
+        recovered(threads.setSettings(f.employee, thread.id, { execution_timeout_seconds: invalid })),
+      ).rejects.toMatchObject({ code: 'invalid_request', status: 422 })
+      expect(Schema.is(P.CreateBrowserThreadInput)({ ...f.input, execution_timeout_seconds: invalid })).toBe(false)
+    }
+  }))
+
 it('normalizes browser retries, isolates employees, admits saved roots and keeps DTOs', () =>
   withTestDatabase(async ({ run }) => {
     const f = await fixture(run)
@@ -176,6 +258,27 @@ it('normalizes browser retries, isolates employees, admits saved roots and keeps
       ),
     )
     expect(counts[0]).toEqual({ threads: '1', messages: '2', commands: '3' })
+  }))
+
+it('admits explicit model IDs outside the catalog and keeps unsupported switching rejected', () =>
+  withTestDatabase(async ({ run }) => {
+    const f = await fixture(run)
+    const { thread } = await run(threads.create(f.employee, { ...f.input, model: 'custom-model' }))
+    expect(thread.model).toBe('custom-model')
+    const commands = await run(threads.claimCommands())
+    expect(commands.find((command) => command.body.action === 'open')?.body.model).toBe('custom-model')
+    await expect(run(threads.setModel(f.employee, thread.id, { model: 'another-custom-model' }))).rejects.toMatchObject(
+      { code: 'model_switch_unsupported' },
+    )
+    await run(
+      query(
+        `UPDATE node_runtime_reports SET report=jsonb_set(report,'{agents,0,capabilities,switch_model}','true'::jsonb) WHERE node_id=$1`,
+        f.node,
+      ),
+    )
+    expect((await run(threads.setModel(f.employee, thread.id, { model: 'another-custom-model' }))).next_model).toBe(
+      'another-custom-model',
+    )
   }))
 
 it('persists bounded fair claims before send and survives coordinator restart', () =>

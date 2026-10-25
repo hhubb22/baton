@@ -17,6 +17,7 @@ import { makeWorker, type AgentMessage, type ThreadAgent, type Worker } from '..
 import { completionPath, loadCompletion, loadMapping } from './evidence.ts'
 import { makeShellAgentFactory } from './index.ts'
 import { BoundedOutput } from './output.ts'
+import { FullOutputStore } from '../../worker/full-output.ts'
 
 const run = Effect.runPromise
 const roots: string[] = []
@@ -157,6 +158,43 @@ describe.skipIf(process.platform === 'win32')('restricted shell Thread', () => {
     const events = takeEvents(agent)
     await run(agent.send(input, prep))
     expect((await events)[0]).toMatchObject({ type: 'reply', text: 'immediate', original_bytes: 9 })
+  })
+
+  it('spools raw command output before summary clipping and recovers its omitted middle', async () => {
+    const f = await fixture()
+    const agent = f.create()
+    await run(agent.open(f.config))
+    const input = message(
+      `printf HEAD; i=0; while [ "$i" -lt 12000 ]; do printf 'MIDDLE🙂'; i=$((i + 1)); done; printf TAIL`,
+    )
+    const prep = await run(agent.prepareInput(input, 0))
+    const events = takeEvents(agent)
+    await run(agent.send(input, prep))
+    await events
+    const completion = await loadCompletion(await loadMapping(f.config))
+    expect(completion.result.truncated).toBe(true)
+    const reference = completion.result.full_output
+    if (!reference) throw new Error('Expected a full shell output reference')
+    const store = new FullOutputStore(join(f.root, 'threads', f.config.thread_id))
+    const pages: Buffer[] = []
+    let cursor: string | undefined
+    for (let count = 0; count < 100; count++) {
+      const result = await store.read({
+        type: 'session.request',
+        action: 'full_output',
+        operation_id: randomUUID(),
+        session_id: f.config.thread_id,
+        storage_generation: reference.storage_generation,
+        output_id: reference.id,
+        ...(cursor === undefined ? {} : { cursor }),
+      })
+      expect(result.ok).toBe(true)
+      if (!result.full_output) throw new Error('Expected a full shell output page')
+      pages.push(Buffer.from(result.full_output.data, 'base64'))
+      cursor = result.cursor
+      if (result.full_output.done) break
+    }
+    expect(Buffer.concat(pages).toString('utf8')).toBe('HEAD' + 'MIDDLE🙂'.repeat(12000) + 'TAIL')
   })
 
   it('rechecks local permission immediately before launch and refuses absent Project origin', async () => {
