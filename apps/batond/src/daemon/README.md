@@ -11,7 +11,7 @@ pnpm --filter @baton/batond dev run
 
 私有目录中的 `identity.json` 保存中心签发的 JWT；`browse-roots.json` 使用 `{ "roots": [{ "id": "home", "path": "/真实路径" }] }`。仅配置文件不存在时登记用户主目录，已有空列表保留。`up --workspace` 按真实路径幂等添加目录。open、message 和 resume 下发前复核工作目录的真实路径与授权根；stop、withdraw 使用已登记的 Thread 身份与代次，撤销授权或删除工作目录后仍可停止和撤回。目录和文件预览由 `devices/` 提供，使用同一授权根；目录符号链接解析后须仍在该根内，文件预览保留字节上限与分页信息。
 
-每个数据目录由进程锁保证只有一个 daemon。Worker 使用独立进程锁和账本，daemon 退出保留 Worker。启动和周期采集都会核查已登记 Worker，先通过认证 IPC 连接存活进程；进程不可达且没有活动进程锁时，才检查原 SQLite 账本并恢复 Worker。首次启动前在 node.db 持久标记启动尝试；已有尝试后账本缺失、为空或损坏时，永久保存并上报 `thread.unknown` 和 `history_unavailable:true`，阻止再次启动空 Worker。历史缺失不作为 Agent 已停止的证据，网页保持未知结果。已接收的命令由原 Worker 继续执行，未收到持久接收回执的命令使用原 command ID 查询或重试。
+每个数据目录由进程锁保证只有一个 daemon。Worker 使用独立进程锁和账本，daemon 退出保留 Worker。启动和周期采集都会核查已登记 Worker，先通过认证 IPC 连接存活进程；进程不可达且没有活动进程锁时，才检查原 SQLite 账本并恢复 Worker。`node.db` 分别保存启动尝试和 `startup_phase`：新配置为 `awaiting_open`；daemon 或本地 IPC 在交付 open 前先提交 `open_attempted`，收到绑定身份的状态、回执或报告也保留该事实。仍为 `awaiting_open`、账本缺失或经检查为空且没有命令、消息、进程及报告记录时，可重试启动 Worker，并继续使用原 command ID、配置及代次。已经可能交付 open 后，账本缺失或为空，以及任意阶段的账本损坏，都会保存并上报 `thread.unknown` 和 `history_unavailable:true`，阻止启动空 Worker。历史缺失不作为 Agent 已停止的证据，网页保持未知结果。已接收的命令由原 Worker 继续执行，未收到持久接收回执的命令使用原 command ID 查询或重试。
 
 `node.db` 通过 `@baton/sqlite` 使用 WAL、`synchronous=FULL` 和提交结果核查。命令以中心 envelope 的 `message_id` 作为 Worker `command_id`，持久保存内容 hash、请求、open 配置、存储代次和接收回执。接收回执表示 Worker 已持久接收；实际完成由 `command.completed` 报告。能力或目录等接入条件明确不满足、Worker 明确拒绝命令时，才返回失败回执。IPC 超时、断线、通用 `worker_unavailable` 和无法核对的成功回包保留为待确认命令，断开中心连接后重连；中心重发原 command ID 时先查询 Worker 回执，确认命令不存在才以原配置和代次重发。查询与重发共享剩余 IPC 预算。
 

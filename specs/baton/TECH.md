@@ -159,7 +159,7 @@ Thread、消息和 Turn 直接包含模型字段，消息保存 `status_reason`�
 
 `thread_outbox` 沿用[控制面调度设计](../control-dispatch-reliability/TECH.md)的规则：短事务领取并保存下一次尝试时间，提交后入队，不等待回包；每节点额度在全局 LIMIT 前应用；回包按 `message_id` 独立幂等保存。设备离线时意图一直保留，没有排队期限（R-14）。
 
-同一 Thread 的命令按 outbox `id` 顺序投递，前一条未确认时不发下一条，保证 `thread.open` 先于第一条消息、消息之间顺序不变。message 和 withdraw 还要等 `thread.opened` 保存存储代次，后续命令携带该代次。归档后只领取仍需发送的 stop、withdraw，过时的 open、message 保留原记录，不再阻塞清理命令。首次启动失败时，尚未尝试投递的消息撤回，Thread 保留停止原因并允许归档；员工另开 Thread 重试。
+同一 Thread 的命令按 outbox `id` 顺序投递，前一条未确认时不发下一条，保证 `thread.open` 先于第一条消息、消息之间顺序不变。message 和 withdraw 还要等 `thread.opened` 保存存储代次，后续命令携带该代次。归档后只领取仍需发送的 stop、withdraw，过时的 open、message 保留原记录，不再阻塞清理命令。首次启动失败时，尚未尝试投递的消息撤回，对应未投递命令结束为 cancelled，Thread 保留停止原因并允许归档。没有存储代次、Worker 报告或 Turn，全部 open 均以无存储代次的 `agent_unavailable`、`invalid_working_directory` 或 `working_directory_forbidden` 拒绝，且所有消息均撤回、投递次数为 0、没有接收回执时，允许原 Thread 显式重试打开。重试使用新的 open 命令 ID，保留旧输入和失败记录，不重发原消息。已接收 open 或原生创建结果不明时禁止重建。
 
 ### 上行报告
 
@@ -178,7 +178,7 @@ Worker 的报告类型：
 
 每个报告带 `event_id` 和 Worker 序号。中心在一个事务里保存报告、更新状态，并按消息或 Turn 的归属写入 Project Agent 输入队列（Project Agent TECH 第 9 节），提交后返回 ACK；Worker 收到 ACK 才确认本地 outbox。重复报告按 `event_id` 返回原 ACK。中心按 Worker 序号处理，序号跳跃时拒绝并要求补报，保证 `turn.ended` 不会早于这一轮的回复入库。
 
-原 Worker 账本缺失、损坏或结构不匹配时，batond 先补送节点账本中尚未确认的 Worker 报告，再发送带 `history_unavailable:true` 的 `thread.unknown` 恢复报告。暂时无法读取时继续有界重试，保留原 Worker 的报告序列。中心在同一报告事务内，将已有活动 Turn 以 `agent_exited` 结束，将待完成命令结束为 unknown，保存审计并写入对应 Project 输入，再更新 Thread 状态。历史缺失本身不证明 Agent 已退出，不能设置停止确认或完成等待停止的归档；停止确认仍须有 Turn 终止或进程树回收证据。重复恢复报告沿用原 ACK；普通状态报告仍须在 Turn 结束后提交。
+原 Worker 账本缺失、损坏或结构不匹配时，batond 先补送节点账本中尚未确认的 Worker 报告，再发送带 `history_unavailable:true` 的 `thread.unknown` 恢复报告。暂时无法读取时继续有界重试，保留原 Worker 的报告序列。中心在同一报告事务内，将已有活动 Turn 以 `agent_exited` 结束。仍为 accepted、尚未关联 Turn，且对应的全部 message 命令 `attempts=0`、没有接收回执的输入撤回并保留原文；其他 accepted/queued 输入改为 unknown。未完成命令按派发事实结束：`attempts=0` 且无接收回执为 cancelled，其余为 unknown。事务同时保存审计、对应 Project 输入及 Thread 状态。历史缺失本身不证明 Agent 已退出，不能设置停止确认或完成等待停止的归档；停止确认仍须有 Turn 终止或进程树回收证据。设备确认停止、没有活动 Turn 和 accepted/queued 输入后，允许保留历史 unknown 输入并归档，不重发历史命令。领取新的 open、resume 或 message 命令时，在递增派发次数的同一事务内废弃旧停止确认；新的恢复或回合开始报告也废弃旧确认，避免用上一次停止的证据归档当前执行。重复恢复报告沿用原 ACK；普通状态报告仍须在 Turn 结束后提交。
 
 ## 设备与 Worker 数据
 
@@ -189,12 +189,13 @@ Worker 的报告类型：
 | `meta` | 存储代次 |
 | `threads` | 中心 Thread ID 到本地 Session 目录的映射、Agent 类型、工作目录；`thread.open` 的接收记录 |
 | `workers` | Worker 进程索引 |
+| `node_open_attempts`（TS） | 本地 IPC 和 daemon 的 open 交付事实，即使尚未登记 Worker 也先记录，后续登记不能覆盖 |
 | `thread_command_receipts` | 命令 ID、请求摘要及原回执 |
 | `thread_worker_reports` | 节点已读到、中心尚未确认的 Worker 报告；保留原事件身份、序号和正文 |
 | `thread_node_reports`、`thread_report_progress` | 本地恢复报告及已发送序号，支持 Worker 账本不可读时补报 |
 | `project_runtime_runs` | Project Runtime 的启动去重与清理确认，见 Project Agent TECH |
 
-`thread.open` 先写 `threads` 再回执，重复命令返回同一映射。`thread.opened` 带上存储代次，中心保存在 `threads` 上，之后的命令都携带它。设备重装或 `node.db` 丢失后代次改变，batond 拒绝旧代次的命令，Thread 进入 `stopped`，原因为本地历史缺失，不会用同一个 Thread ID 新开一个空会话。设备账本按当前 schema 创建，只保存 Thread 与 Project Runtime 所需状态。
+`thread.open` 先写 `threads` 再回执，重复命令返回同一映射。`thread.opened` 带上存储代次，中心保存在 `threads` 上，之后的命令都携带它。设备重装或 `node.db` 丢失后代次改变，batond 拒绝旧代次的命令，Thread 进入 `stopped`，原因为本地历史缺失，不会用同一个 Thread ID 新开一个空会话。设备账本按当前 schema 创建，只保存 Thread 与 Project Runtime 所需状态。TS 节点账本将 Worker 启动尝试与 open 交付阶段分开保存：登记配置时为 `startup_phase: awaiting_open`，daemon 和 Worker 的本地 IPC 入口在交付 open 前提交 `open_attempted`，收到绑定身份的状态、回执或报告也保留该事实。未交付 open、原账本缺失或确认为空且无执行记录时，允许用原命令 ID 和配置重试启动；可能交付后缺失或为空，以及账本损坏时，继续上报历史不可用。
 
 ### Worker 账本
 
@@ -217,12 +218,14 @@ Worker 的报告类型：
 
 `Send` 明确返回模型选择失败时，消息确定未发出，Worker 将它记为 `withdrawn`，清除预留的 Turn 序号，把原因保存到该消息的 `status_reason` 并通过 `message.withdrawn` 报告，不开启 Turn。原因摘要最多 4 KiB，替换无效 UTF-8 和 NUL，截断时保留完整字符并加省略号。Thread 保持 `idle`，保留 Agent 进程和当前模型，继续发送下一条排队消息。中心在同一事务保存消息原因；浏览器 Thread 详情和 Project Agent 的 `threads.get` 通过 `failed_messages` 读取这些失败消息。Project Agent 发起的失败消息另形成一条主动 `thread_message_failed` 输入，员工消息不写输入队列。无法确认消息是否发出的错误仍按发送意图恢复规则处理。Worker 在开始和结束报告中携带该 Turn 使用的模型，中心在 `turn.started` 时更新 Thread 当前模型。
 
-完整原生历史由 Agent 保存在自己的文件里，Worker 账本不复制。
+完整原生历史由 Agent 保存在自己的文件里。TS Worker 对超出 512 字节、包含无效展示字符或占用保留前缀的回复 ID，稳定映射为 `baton:reply:sha256:…`；去重仍按原始 ID。正文中的 NUL 和孤立 UTF-16 代理项在中心报告、完整输出和实时输出中替换为 `�`。原始 ID、正文和执行身份以 JSON 保存在 `thread_outbox.payload.replyEvidence`，与安全展示报告同一事务提交，ACK 后继续保留；报告元数据标注 `reply_id_mapped`、`reply_text_sanitized` 和证据位置。显示字段异常不改变执行状态，Worker 继续核对回合终态；会话、输入或执行身份不匹配仍按 unknown 处理。
 
 ### 崩溃与恢复
 
 | 位置 | 已知事实 | 恢复 |
 |---|---|---|
+| Worker 启动失败，open 尚未交付 | node.db 为 `awaiting_open`，Worker 无命令、输入、进程及报告记录 | 可重试启动，原 open 命令 ID、配置及存储代次不变 |
+| open 可能已交付，Worker 账本缺失或为空 | node.db 为 `open_attempted`，可能已创建原生会话 | 上报历史不可用，禁止自动重建 |
 | 消息已入 Worker 队列，未提交 `intent` | 尚未发出 | 按队列顺序继续发送 |
 | `intent` 已提交，适配器确认未记录 | 可能已发出 | 查原生历史中的 `client_message_id`；找到则记 `sent`，否则 `unknown`，不重发 |
 | Turn 进行中，Worker 崩溃 | Agent 可能仍在运行 | 新 Worker 连接原生会话；能确认这一轮已结束则补报 `turn.ended`，否则 Thread `unknown` 并以 `agent_exited` 结束这一轮 |
@@ -293,15 +296,15 @@ URL 相对 `/api/v1`。读取检查员工会话与资源归属，写入另检查
 | `PUT /nodes/{id}/project-exec` | `{enabled}`；通过 Gateway 等待在线且已同步设备原子保存并回读本机开关，确认后返回 Node DTO，报告中的 `exec` 使用设备确认值；未确认返回 503，客户端重新读取状态。协议与 `exec.user` 见 Project Agent TECH「节点能力报告」 |
 | `POST /threads` | `client_thread_id`、可选 `node_id`（缺省为默认设备）、`agent_type`、可选 `model`（缺省为该 Agent 的 `default_model`）、`working_directory`、可选 `execution_timeout_seconds`（1～2,147,483,647 的整数，默认 7200）、第一条消息 `message:{client_message_id, content}`。浏览器新建的 Thread 不属于 Project。预算参与创建幂等内容，并固定存入 open 命令的 outbox payload；以后修改 Thread 设置不会改变原 open 命令的重试内容。新建返回 201，幂等重发返回 200，内容冲突返回 409 |
 | `GET /threads` | 可按 `project_id`、`node_id`、`status` 筛选，按 `(last_activity_at, id)` 倒序分页；`limit` 默认 50、最多 100，续页使用 `next_cursor`。每条记录包含 Thread 基础字段、`title`、可空 `current_turn` 和 `stop_canceled`，供列表直接展示 |
-| `GET /threads/{id}` | Thread、状态、当前 Turn、待发消息、失败消息和 `resume_pending`；`model` 为实际模型，`next_model` 为后续排队消息的默认模型 |
+| `GET /threads/{id}` | Thread、状态、当前 Turn、待发消息、失败消息、`resume_pending` 和 `retry_open_allowed`；后者由持久拒绝及投递记录计算，表示可在原 Thread 重试打开；`model` 为实际模型，`next_model` 为后续排队消息的默认模型 |
 | `GET /threads/{id}/timeline` | 按审计事件 ID 顺序返回消息、Turn 边界、回复和操作；`limit` 默认 20、最多 100，续页使用 `next_cursor` |
 | `POST /threads/{id}/messages` | `{client_message_id, content, mode, model?}`，返回 202；`mode` 缺省为 `queue`，`steer` 在 Agent 不支持时返回 422；Agent 不支持换模型或 `model` 与 `steer` 同时出现时返回 422。模型目录不限制显式 ID |
 | `POST /threads/{id}/messages/{mid}/withdraw` | 撤回排队消息；已发出返回 409 和当前状态 |
 | `POST /threads/{id}/stop` | 返回 202，保存停止及撤回排队消息的意图，状态等待设备报告确认 |
 | `PATCH /threads/{id}/settings` | `{execution_timeout_seconds}`；范围与新建相同，更新本人未归档 Thread 并返回 200 和 ThreadView。中心将预算和固定内容的 `settings` 命令一起持久化；相同设置重试不重复入队，命令按顺序送往设备。200 表示已保存，设备收到后更新 Worker 配置和当前 Turn 的总预算；离线期间等待投递，已开始停止的 Turn 不会恢复运行。无效参数返回 422，已归档或请求归档返回 409 |
 | `POST /threads/{id}/model` | `{model}`；校验切换能力，显式 ID 交给原生 Agent 判定，保存 `next_model` 并返回 200 和 ThreadView。后续接受的 `queue` 消息未指定模型时采用该值；已有消息和当前 Turn 沿用原配置，实际模型由 `turn.started` 确认 |
-| `POST /threads/{id}/resume` | `{}`；Thread 已打开、处于 `stopped` / `idle`、无待确认停止或归档且 Agent 报告恢复能力时，保存恢复命令并返回 202 和 ThreadView；`resume_pending` 表示未确认的恢复命令，同一待恢复请求不重复入队。不支持返回 422，状态冲突返回 409 |
-| `POST /threads/{id}/archive` | 返回 202；有进行中的 Turn、待发消息或不确定状态时先发停止，设备确认后归档；空闲或已停止且无待发消息时直接归档 |
+| `POST /threads/{id}/resume` | `{}`；Thread 已打开、处于 `stopped` / `idle` / `unknown`、无待确认停止或归档且 Agent 报告恢复能力时，保存恢复命令并返回 202 和 ThreadView。尚未打开且 `retry_open_allowed` 为 true 时，改为保存新身份的 open 命令；原消息保持撤回。`resume_pending` 表示未完成的恢复或重试打开命令，同一待完成请求不重复入队。不支持返回 422，状态冲突返回 409 |
+| `POST /threads/{id}/archive` | 返回 202；有进行中的 Turn、待发消息或尚未确认停止的不确定状态时先发停止，设备确认后归档。停止已确认且无活动 Turn 或待发消息时，历史 unknown 输入保留并允许归档；空闲或已停止、无不确定输入与待发消息时直接归档 |
 | `GET /threads/{id}/history` | 从设备分页读取原生历史，见「历史读取与实时输出」 |
 | `GET /threads/{id}/output` | 默认经设备临时 RPC 读取实时输出；`action=full_output&output_id=...&storage_generation=...` 按可选字节游标读取设备保存的完整回复或 shell 输出，每页最多 12 KiB 原始字节，以 Base64 返回，详见「历史读取与实时输出」 |
 | `GET /threads/{id}/trace` | 必填 `worker_turn_seq`，返回 `{ok, code?, steps}`。shell 的步骤取自中心已保存的命令和文本输出，含 `kind:"command"`、`command`、`output`、可选 `truncated`；网页保留已有步骤和输出，在 `truncated:true` 的步骤旁显示截断提示，继续使用现有传输大小边界；无可用过程时返回 `ok:false, code:"trace_missing"`，指定 Turn 不存在返回 404 |

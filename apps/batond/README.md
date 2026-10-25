@@ -105,7 +105,7 @@ Kiro 的 local settings 使用 `agentId: kiro`、`commandPath: kiro-cli`，从 P
 
 每个 Thread 的目录包含 Worker 独占锁、IPC 令牌、`thread.db`、原生会话映射和 SDK store。账本使用 WAL 与 `synchronous=FULL`。命令回执与排队状态原子提交；原生发送前把本地准备文档和 intent 原子提交。提交结果无法核查时，Worker 停止执行并关闭本次运行资源。
 
-Worker 重启后，queued 输入可继续调度；已有 intent 只用新的只读 host 核对原生快照，无法证明已接收时标记 unknown，保留原消息结果。员工显式发送新输入或 resume 时，Worker 先确认旧进程树已回收，再恢复既有原生会话，旧 queued 撤回、旧 unknown 输入保持终态。恢复绑定原生会话、工作目录和私有 store，不重发输入、不新建空会话代替恢复。batond 或本地 CLI 退出后，存活 Worker 继续执行，后续调用通过原 IPC 重连。
+Worker 重启后，queued 输入可继续调度；已有 intent 只用新的只读 host 核对原生快照，无法证明已接收时标记 unknown，保留原消息结果。员工显式发送新输入或 resume 时，Worker 先确认旧进程树已回收，再恢复既有原生会话，旧 queued 撤回、旧 unknown 输入保持终态。恢复绑定原生会话、工作目录和私有 store，不重发输入、不新建空会话代替恢复。batond 或本地 CLI 退出后，存活 Worker 继续执行，后续调用通过原 IPC 重连。回复 ID 超过 512 字节时使用稳定映射，NUL 和无效 Unicode 文本以 `�` 展示；原始回复与执行身份保存在本地 Worker 账本，ACK 后保留，用于去重和核对。显示字段异常继续关联原回合终态，执行身份不匹配仍进入 unknown。
 
 停止先持久登记，再中断启动、准备或发送，撤回 queued 输入；已提交的 intent 通过只读快照核对裁决。取消响应与真实终止分别处理，最多一分钟后回收所属进程树。POSIX 的 Cursor SDK spawn/fork 并入 agent-host 组；Pi、Codex、Kiro 使用 `foldDetached: false` 保留原生进程组，经 registrar 登记给 Worker 和 watchdog，释放登记前回收后代。Worker 崩溃时 watchdog 回收已登记的组，宿主 Scope 结束时终止剩余子进程。首次打开被取消时，迟到的 SDK 实例会被回收，该命令不会补报打开成功。
 
