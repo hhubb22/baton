@@ -67,7 +67,7 @@ const snapshotMessages = (
   )
 }
 
-export const codexProbe = Effect.gen(function* () {
+const codexProbe = Effect.gen(function* () {
   const status = yield* checkCodexProviderStatus(settingsFor(), undefined, process.env).pipe(
     Effect.mapError((cause) => new AgentHostError({ message: `Codex probe failed (${String(cause)})` })),
   )

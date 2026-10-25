@@ -13,7 +13,7 @@ import {
 } from './project-store.ts'
 
 const objectRest = [Schema.Record(Schema.String, Schema.Json)] as const
-export const ToolCall = Schema.StructWithRest(
+const ToolCall = Schema.StructWithRest(
   Schema.Struct({ type: Schema.Literal('toolCall'), id: Schema.String, name: Schema.String, arguments: Schema.Json }),
   objectRest,
 )
@@ -53,7 +53,7 @@ export const previousClientEvent = Effect.fn('previousProjectClientEvent')(funct
   if (event.kind !== kind || canonical(event.payload) !== canonical(payload)) return yield* Effect.fail(projectError())
   return event
 })
-export const assertToolsResolved = Effect.fn('assertProjectToolsResolved')(function* (binding: ProjectBinding) {
+const assertToolsResolved = Effect.fn('assertProjectToolsResolved')(function* (binding: ProjectBinding) {
   const sql = yield* SqlClient.SqlClient
   const unresolved =
     yield* sql`SELECT 1 FROM conversation_events a CROSS JOIN LATERAL jsonb_array_elements(a.payload->'message'->'content') block

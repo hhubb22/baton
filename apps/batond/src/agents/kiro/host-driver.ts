@@ -36,7 +36,7 @@ const modelSelection = (config: WorkerOpenConfig): ModelSelection =>
   })
 
 /** Upstream discovery creates an empty session; the separate version command never prompts. */
-export const kiroProbe = (paths: AgentHostPaths, versionProbe = kiroVersion({ cwd: paths.workingDirectory })) =>
+const kiroProbe = (paths: AgentHostPaths, versionProbe = kiroVersion({ cwd: paths.workingDirectory })) =>
   Effect.gen(function* () {
     const [status, version] = yield* Effect.all(
       [

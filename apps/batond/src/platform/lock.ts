@@ -63,7 +63,7 @@ export async function readProcessLock(path: string): Promise<ProcessLockRecord |
   }
 }
 
-export const isProcessAlive = (record: ProcessIdentity): Promise<boolean> => identityMatches(record)
+const isProcessAlive = (record: ProcessIdentity): Promise<boolean> => identityMatches(record)
 
 export async function processLockIsHeld(path: string): Promise<boolean> {
   const record = await readProcessLock(path)

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { Stats } from 'node:fs'
-import { hasCode, platformEffect } from './errors.ts'
+import { hasCode } from './errors.ts'
 import { powershell, systemCommand, windowsTool } from './identity.ts'
 
 function checkStat(path: string, stat: Stats, directory: boolean): void {
@@ -205,9 +205,3 @@ export async function writePrivateFileAtomic(path: string, data: string | Uint8A
   }
 }
 
-export const PrivateFiles = {
-  ensureDirectory: (path: string) => platformEffect('private directory', () => ensurePrivateDirectory(path)),
-  read: (path: string) => platformEffect('read private file', () => readPrivateFile(path)),
-  writeAtomic: (path: string, data: string | Uint8Array) =>
-    platformEffect('write private file', () => writePrivateFileAtomic(path, data)),
-}

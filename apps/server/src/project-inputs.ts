@@ -3,7 +3,7 @@ import { Effect, Schema } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import { activeInputSQL, checkPayloadSize, projectDecode, projectError } from './project-store.ts'
 
-export const ProjectInputType = Schema.Literals([
+const ProjectInputType = Schema.Literals([
   'user_message',
   'attention_answer',
   'turn_ended',

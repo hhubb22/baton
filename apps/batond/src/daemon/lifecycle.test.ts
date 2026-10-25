@@ -8,7 +8,7 @@ import type { NodeIdentity, ThreadReport, WorkerOpen } from '@baton/protocol'
 import { ensurePrivateDirectory, readPrivateFile, writePrivateFileAtomic } from '../platform/private.ts'
 import { makePrivateTempDirectory } from '../testing/private.ts'
 import { registerNode, loadIdentity, coordinatorURL, relayURL } from './identity.ts'
-import { authorizeDirectory, browseDirectories, initializeBrowseRoots, loadBrowseRoots } from './roots.ts'
+import { authorizeDirectory, initializeBrowseRoots, loadBrowseRoots } from './roots.ts'
 import { contentHash, makeNodeLedger } from './ledger.ts'
 import { reconnectDelay } from './transport.ts'
 import { runDaemonCLI } from './cli.ts'
@@ -178,12 +178,6 @@ describe('private registration and directory authorization', () => {
     await ensurePrivateDirectory(join(root, 'child'))
     await symlink(outside, join(root, 'escape'), process.platform === 'win32' ? 'junction' : 'dir')
     await expect(authorizeDirectory(path, join(root, 'escape'))).rejects.toThrow('授权目录')
-    const listing = await browseDirectories(path, {
-      type: 'files.browse',
-      operation_id: randomUUID(),
-      root_id: roots[0]!.id,
-    })
-    expect(listing.entries).toEqual([{ name: 'child', kind: 'directory' }])
     await expect(authorizeDirectory(path, root)).resolves.toBe(await realpath(root))
     const absent = await directory()
     expect(await initializeBrowseRoots(absent)).toEqual([{ id: 'home', path: await realpath(homedir()) }])

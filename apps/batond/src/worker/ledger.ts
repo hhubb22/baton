@@ -19,7 +19,7 @@ import type { ProcessRecord } from '../platform/process-types.ts'
 import type { AgentEvent, AgentMessage, InputPreparation } from './agent.ts'
 
 export type Outcome = 'succeeded' | 'failed' | 'cancelled' | 'unknown'
-export type Phase = 'empty' | 'opening' | 'idle' | 'busy' | 'stopping' | 'stopped' | 'unknown' | 'failed'
+type Phase = 'empty' | 'opening' | 'idle' | 'busy' | 'stopping' | 'stopped' | 'unknown' | 'failed'
 
 export interface Command {
   trace_context?: TraceContext
@@ -47,7 +47,7 @@ export interface OutboxEntry {
   /** JSON 保留原始 UTF-16 字符串和执行身份，与展示报告一同提交。 */
   replyEvidence?: Extract<AgentEvent, { readonly type: 'reply' }>
 }
-export interface PendingQuestion {
+interface PendingQuestion {
   question: ThreadQuestion
   messageId: string
   executionId: string
@@ -56,7 +56,7 @@ export interface PendingQuestion {
   answer?: ThreadAnswerInput
   commandId?: string
 }
-export interface Meta {
+interface Meta {
   questions?: PendingQuestion[]
   config?: WorkerOpenConfig
   phase: Phase

@@ -6,5 +6,4 @@ export {
   readPrivateFile,
   writePrivateFileAtomic,
   writePrivateFileAtomic as writePrivateFile,
-  PrivateFiles,
 } from './files.ts'

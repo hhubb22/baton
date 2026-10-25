@@ -57,7 +57,7 @@ export interface DeviceService {
   report(signal?: AbortSignal): Promise<DeviceReport>
   close(): Promise<void>
 }
-export const normalizeProvider = normalizeProjectProvider
+const normalizeProvider = normalizeProjectProvider
 
 function decodeRequest<A>(schema: Schema.Decoder<A>, input: unknown): A {
   try {

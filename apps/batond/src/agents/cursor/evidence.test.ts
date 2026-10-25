@@ -1,6 +1,5 @@
 import { expect, it } from 'vite-plus/test'
-import { findSent, validatePreparation } from './evidence.ts'
-import type { SnapshotMessage } from './protocol.ts'
+import { findSent, validatePreparation, type SnapshotMessage } from '../../agent-host/evidence.ts'
 import type { AgentMessage } from '../../worker/agent.ts'
 import { preparationFor } from '../../agent-host/preparation.ts'
 import type { WorkerOpenConfig } from '@baton/protocol'

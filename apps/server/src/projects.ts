@@ -22,11 +22,8 @@ export { projectStatus } from './project-view.ts'
 export {
   listProjectRunCandidates,
   scheduleProjectRun,
-  projectMaintenance,
   claimProjectCommands,
 } from './project-scheduling.ts'
-export type { ProjectCommandDelivery } from './project-scheduling.ts'
-export { insertProjectInput } from './project-inputs.ts'
 
 export const getProject = Effect.fn('getProject')(function* (employee: string, project: string) {
   yield* projectDecode(P.UUID, project)

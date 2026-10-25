@@ -3,7 +3,7 @@ import { Rpc, RpcGroup } from 'effect/rpc'
 import { ThreadAnswerInput, ThreadQuestion, WorkerOpenConfig } from '@baton/protocol'
 
 /** One input submitted to the native Agent. */
-export const AgentMessage = Schema.Struct({
+const AgentMessage = Schema.Struct({
   id: Schema.String,
   text: Schema.String,
   epoch: Schema.Number,
@@ -61,8 +61,7 @@ export class AgentHostError extends Schema.TaggedError<AgentHostError>()('AgentH
   modelRejected: Schema.optionalKey(Schema.Boolean),
 }) {}
 
-export const ProbeDetail = Schema.Union([Schema.String, Schema.Number, Schema.Boolean])
-export type ProbeDetail = typeof ProbeDetail.Type
+const ProbeDetail = Schema.Union([Schema.String, Schema.Number, Schema.Boolean])
 
 /**
  * Fixed-shape probe report. Agent-specific facts live in `details`, so the RPC

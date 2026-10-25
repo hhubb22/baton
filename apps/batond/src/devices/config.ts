@@ -22,7 +22,7 @@ export const containsControl = (value: string): boolean =>
   Array.from(value).some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)
 
 const queues = new Map<string, Promise<unknown>>()
-export async function withConfigurationLock<A>(
+async function withConfigurationLock<A>(
   dataDirectory: string,
   name: string,
   action: () => Promise<A>,

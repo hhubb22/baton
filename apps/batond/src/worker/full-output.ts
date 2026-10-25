@@ -21,7 +21,7 @@ import { hasCode } from '../platform/errors.ts'
 import { processLockIsHeld } from '../platform/lock.ts'
 
 export const fullOutputPageBytes = 12 * 1024
-export const defaultOutputRetentionDays = 30
+const defaultOutputRetentionDays = 30
 const dayMs = 24 * 60 * 60 * 1000
 const Config = Schema.Struct({ retention_days: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 3650 })) })
 const Record = Schema.Struct({

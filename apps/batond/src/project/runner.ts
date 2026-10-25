@@ -55,7 +55,7 @@ export const defaultRuntimeCommand = (): ProcessCommand => {
     ...(process.platform === 'win32' ? { env: privateFileHostEnvironment(entry) } : {}),
   }
 }
-export const normalizeProvider = normalizeProjectProvider
+const normalizeProvider = normalizeProjectProvider
 
 export class RuntimeRunner {
   private readonly owned = new Set<OwnedProcess>()

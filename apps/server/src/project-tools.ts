@@ -145,7 +145,7 @@ const ownedThread = Effect.fnUntraced(function* (c: ProjectToolContext, id: stri
   return t
 })
 
-export const shellThreadCommandResult = Effect.fnUntraced(function* (employeeId: string, threadId: string) {
+const shellThreadCommandResult = Effect.fnUntraced(function* (employeeId: string, threadId: string) {
   const sql = yield* SqlClient.SqlClient
   const rows = yield* sql<{
     content: string
@@ -482,7 +482,7 @@ export function boundedBase64(text: string, maxBytes: number) {
     ? text
     : Buffer.concat([bytes.subarray(0, half), bytes.subarray(bytes.length - half)]).toString('base64')
 }
-export function boundedProjectText(text: string, maxBytes: number) {
+function boundedProjectText(text: string, maxBytes: number) {
   const bytes = Buffer.from(text)
   if (bytes.length <= maxBytes) return text
   let head = Math.floor(maxBytes / 2),

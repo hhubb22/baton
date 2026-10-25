@@ -16,7 +16,7 @@ import { preparationFor, samePreparation } from './preparation.ts'
 import type { Preparation } from './protocol.ts'
 import { connectAgentHost, type AgentHostConnection, type AgentHostProcessOptions } from './transport.ts'
 
-export interface AgentDelta {
+interface AgentDelta {
   readonly type: 'delta'
   readonly nativeSessionId: string
   readonly messageId: string

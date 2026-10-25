@@ -45,7 +45,7 @@ const Completion = Schema.Struct({
 })
 export type ShellCompletion = typeof Completion.Type
 
-export const digest = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex')
+const digest = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 
 export function statePath(config: WorkerOpenConfig): string {
   const path = config.adapter_config.state_path

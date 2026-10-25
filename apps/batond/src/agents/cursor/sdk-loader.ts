@@ -7,13 +7,5 @@ export { inspectCursorSdk } from './sdk-inspection.ts'
 const requireCursorSdk = NodeModule.createRequire(
   isSea() ? join(dirname(process.execPath), 'package.json') : import.meta.url,
 )
-export const {
-  Agent,
-  AuthenticationError,
-  ConfigurationError,
-  createAgentPlatform,
-  Cursor,
-  CursorSdkError,
-  InMemoryCredentialStore,
-} = requireCursorSdk('@cursor/sdk') as typeof import('@cursor/sdk')
+export const { Agent, createAgentPlatform, Cursor } = requireCursorSdk('@cursor/sdk') as typeof import('@cursor/sdk')
 export const { SqliteLocalAgentStore } = requireCursorSdk('@cursor/sdk/sqlite') as typeof import('@cursor/sdk/sqlite')

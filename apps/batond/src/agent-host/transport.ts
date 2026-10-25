@@ -13,7 +13,7 @@ import type {
 import { spawnOwnedProcessEffect } from '../platform/process.ts'
 import { AgentError } from '../worker/agent.ts'
 import type { AgentMessage } from '../worker/agent.ts'
-import { hostEnvironment } from './environment.ts'
+import { agentEnvironment } from './environment.ts'
 import type { AgentHostPaths } from './host-layer.ts'
 import type { Preparation } from './protocol.ts'
 import { AgentHostRpc, type Acceptance, type HostEvent, type ProbeResult, type SessionIdentity } from './protocol.ts'
@@ -53,7 +53,7 @@ export interface AgentHostProcessOptions {
   readonly onDiagnostic?: (diagnostic: { readonly tags: ReadonlyArray<string> }) => void
 }
 
-export const agentHostArguments = (agentType: string, paths: AgentHostPaths): string[] => [
+const agentHostArguments = (agentType: string, paths: AgentHostPaths): string[] => [
   'agent-host',
   agentType,
   '--cwd',
@@ -117,7 +117,7 @@ export const connectAgentHost = (
         {
           ...options.command,
           args: [...(options.command.args ?? []), ...agentHostArguments(options.agentType, options.paths)],
-          env: hostEnvironment(options.agentType),
+          env: agentEnvironment(options.agentType),
           cwd: options.paths.workingDirectory,
         },
         {

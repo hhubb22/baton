@@ -1,9 +1,8 @@
 import { createHash } from 'node:crypto'
-import { readdir, realpath, stat } from 'node:fs/promises'
+import { realpath, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { Schema } from 'effect'
-import { FileRequest, type FileResult } from '@baton/protocol'
 import { ensurePrivateDirectory, readPrivateFile, writePrivateFileAtomic } from '../platform/private.ts'
 import { acquireProcessLock } from '../platform/lock.ts'
 import { isMissing } from './identity.ts'
@@ -90,39 +89,3 @@ export async function authorizeDirectory(dataDirectory: string, path: string): P
   throw new Error('工作目录超出本机授权目录')
 }
 
-/** Minimal directory chooser: only roots and directory names are exposed. */
-export async function browseDirectories(dataDirectory: string, input: FileRequest): Promise<FileResult> {
-  const base = { type: 'files.browse_result' as const, operation_id: input.operation_id }
-  try {
-    const req = Schema.decodeUnknownSync(FileRequest)(input)
-    const roots = await loadBrowseRoots(dataDirectory)
-    if (!req.root_id) {
-      if (req.path || req.cursor) throw new Error()
-      return { ...base, ok: true, kind: 'roots', roots }
-    }
-    const root = roots.find((r) => r.id === req.root_id)
-    if (!root || isAbsolute(req.path ?? '')) throw new Error()
-    const path = resolve(root.path, req.path ?? '.')
-    if (!inside(root.path, path)) throw new Error()
-    const actual = await authorizeDirectory(dataDirectory, path)
-    if (!inside(root.path, actual)) throw new Error()
-    const names = (await readdir(actual, { withFileTypes: true }))
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
-      .sort()
-    const offset = req.cursor ? Number(req.cursor) : 0
-    if (!Number.isSafeInteger(offset) || offset < 0) throw new Error()
-    const next = offset + 200
-    return {
-      ...base,
-      ok: true,
-      kind: 'directory',
-      root_id: root.id,
-      path: req.path ?? '',
-      entries: names.slice(offset, next).map((name) => ({ name, kind: 'directory' })),
-      ...(next < names.length ? { next_cursor: String(next), truncated: true } : {}),
-    }
-  } catch {
-    return { ...base, ok: false, code: 'path_forbidden', message: '无法浏览该授权目录' }
-  }
-}

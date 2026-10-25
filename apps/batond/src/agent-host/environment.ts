@@ -41,6 +41,3 @@ export function agentEnvironment(agentType: string, source: NodeJS.ProcessEnv = 
   }
   return env
 }
-
-/** Host process environment: the same whitelist plus the batond command itself. */
-export const hostEnvironment = agentEnvironment

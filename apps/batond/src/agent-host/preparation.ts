@@ -8,7 +8,7 @@ import type { Preparation } from './protocol.ts'
  * Only Worker-known facts take part, so neither side reads native history to
  * rebuild it.
  */
-export function preparationId(config: WorkerOpenConfig, nativeSessionId: string, message: AgentMessage): string {
+function preparationId(config: WorkerOpenConfig, nativeSessionId: string, message: AgentMessage): string {
   return createHash('sha256')
     .update(
       JSON.stringify([

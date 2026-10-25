@@ -124,16 +124,7 @@ export const scheduleProjectRun = Effect.fn('scheduleProjectRun')(function* (age
     }),
   )
 })
-export const projectMaintenance = Effect.fn('projectMaintenance')(function* (afterId = '') {
-  const ids = yield* listProjectRunCandidates(afterId, 32)
-  for (const id of ids)
-    yield* scheduleProjectRun(id).pipe(
-      Effect.timeout('1 second'),
-      Effect.catch(() => Effect.void),
-    )
-  return { next_after_id: ids.length === 32 ? ids.at(-1)! : '' }
-})
-export interface ProjectCommandDelivery {
+interface ProjectCommandDelivery {
   employee_id: string
   node_id: string
   conn_id: string

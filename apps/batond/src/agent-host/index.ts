@@ -22,9 +22,3 @@ export const runAgentHostCommand = Effect.fn('AgentHost.runAgentHostCommand')(fu
   if (!module) return yield* Effect.fail(new Error(`Unknown Agent host type: ${agentType}`))
   return yield* runAgentHost(module, { agentType, paths })
 })
-
-export type { AgentHostModule } from './host.ts'
-export type { AgentHostPaths } from './host-layer.ts'
-export { makeAgentHostFactory, type AgentDelta, type AgentHostOptions } from './thread-agent.ts'
-export { connectAgentHost, agentHostArguments, type AgentHostConnection } from './transport.ts'
-export { AgentHostError, type HostEvent, type ProbeResult } from './protocol.ts'

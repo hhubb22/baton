@@ -99,7 +99,7 @@ export const runAgentHost = (module: AgentHostModule, options: AgentHostOptions)
     )
   })
 
-export const makeAgentHostHandlers = <Services>(driver: AgentHostDriverShape, context: Context.Context<Services>) =>
+const makeAgentHostHandlers = <Services>(driver: AgentHostDriverShape, context: Context.Context<Services>) =>
   Effect.gen(function* () {
     const regular = Semaphore.makeUnsafe(7)
     const control = Semaphore.makeUnsafe(1)

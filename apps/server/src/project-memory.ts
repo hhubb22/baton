@@ -11,7 +11,7 @@ export const strictDecode = <S extends Schema.ConstraintDecoder<unknown>>(schema
     Effect.mapError(() => new AppError(422, 'invalid')),
   )
 
-export const requireProject = Effect.fnUntraced(function* (employeeId: string, projectId: string) {
+const requireProject = Effect.fnUntraced(function* (employeeId: string, projectId: string) {
   const sql = yield* SqlClient.SqlClient
   const rows = yield* sql<{
     agent_id: string

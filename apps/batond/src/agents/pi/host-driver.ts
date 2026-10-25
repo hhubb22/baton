@@ -28,7 +28,7 @@ const settingsFor = (launchArgs: string) =>
   })
 
 /** Upstream install, version and auth check. It does not send a prompt or open a browser. */
-export const piProbe = (launchArgs = '') =>
+const piProbe = (launchArgs = '') =>
   Effect.gen(function* () {
     const status = yield* checkPiProviderStatus(settingsFor(launchArgs), process.env).pipe(
       Effect.mapError((cause) => new AgentHostError({ message: `Pi probe failed (${String(cause)})` })),

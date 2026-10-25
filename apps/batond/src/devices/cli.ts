@@ -3,7 +3,7 @@ import { defaultDataDirectory, isMissing } from '../daemon/identity.ts'
 import { loadBrowseRoots } from '../daemon/roots.ts'
 import { defaultProjectShell, updateBrowseRoots, writeProjectExec } from './config.ts'
 
-export const projectExecNotice =
+const projectExecNotice =
   '开启后，Project Agent 可以执行任意命令，以本设备用户身份运行。Baton 不提供沙箱；登记目录只限制启动位置，命令仍可访问目录之外的文件。任务结果或仓库内容中的恶意指令可能诱导执行任意命令。每条命令和输出都会保存到对话。只在信任 Project Agent 的设备上开启。'
 
 /** 本机管理命令在未注册、未连接中心时也可使用。 */
