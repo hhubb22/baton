@@ -4,6 +4,7 @@ import {
   boundedText,
   type ThreadReport,
   type WorkerCommandReceipt,
+  type WorkerCommandAction,
   type WorkerIPCMessage,
   type WorkerOpenConfig,
 } from '@baton/protocol'
@@ -23,9 +24,7 @@ import {
 import { OutputBuffer } from './output.ts'
 import { boundReason, displayText, pendingResult } from './reports.ts'
 import {
-  commandAction,
-  isPending,
-  makeLedger,
+  openWorkerLedger,
   WorkerFailure,
   type Command,
   type Message,
@@ -110,15 +109,37 @@ const reject = (code: string, message: string): never => {
   throw new WorkerFailure(code, message)
 }
 
+const isPending = (command: Command) => command.status.state === 'accepted' || command.status.state === 'running'
+
+const commandAction = (type: string): WorkerCommandAction | undefined => {
+  switch (type) {
+    case 'thread_open':
+      return 'open'
+    case 'thread_resume':
+      return 'resume'
+    case 'thread_message':
+      return 'message'
+    case 'thread_answer':
+      return 'answer'
+    case 'thread_settings':
+      return 'settings'
+    case 'thread_stop':
+      return 'stop'
+    case 'thread_withdraw':
+      return 'withdraw'
+    default:
+      return undefined
+  }
+}
+
 export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOptions) {
   const parentScope = yield* Effect.scope
   const scope = yield* Scope.make()
-  const ledger = yield* makeLedger(options.dbPath, options.dataDirectory).pipe(
-    Effect.mapError((cause) => new WorkerFailure('storage_error', 'Cannot open Worker ledger', cause)),
-  )
-  let state = yield* ledger.load.pipe(
-    Effect.mapError((cause) => new WorkerFailure('storage_error', 'Cannot load Worker ledger', cause)),
-  )
+  const ledger = yield* openWorkerLedger({
+    dbPath: options.dbPath,
+    ...(options.dataDirectory === undefined ? {} : { dataDirectory: options.dataDirectory }),
+  }).pipe(Effect.mapError((cause) => new WorkerFailure('storage_error', 'Cannot open Worker ledger', cause)))
+  let state = ledger.initial
   const jobs = yield* Queue.unbounded<Effect.Effect<void>>()
   const fatal = yield* Deferred.make<never, WorkerFailure>()
   let agent: ThreadAgent | undefined
@@ -292,9 +313,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         catch: (cause) =>
           cause instanceof WorkerFailure ? cause : new WorkerFailure('invalid_state', reasonOf(cause), cause),
       })
-      yield* ledger
-        .save(draft, state)
-        .pipe(Effect.catch((cause) => freeze(cause).pipe(Effect.andThen(Effect.fail(frozen!)))))
+      yield* ledger.save(draft).pipe(Effect.catch((cause) => freeze(cause).pipe(Effect.andThen(Effect.fail(frozen!)))))
       state = draft
       const active = state.activeMessage ? state.messages[state.activeMessage] : undefined
       const turn = active && !active.ended ? `${active.input.id}:${active.turn}` : undefined

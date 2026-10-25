@@ -15,7 +15,7 @@ import { Deferred, Effect, Fiber, Option, Queue, Schema, Stream, Tracer } from '
 import { describe, expect, it } from '@effect/vitest'
 import { vi } from 'vite-plus/test'
 import { TestClock } from 'effect/testing'
-import { makeLedger } from './ledger.ts'
+import { openWorkerLedger } from './ledger.ts'
 import { makeOutputMailbox } from './output.ts'
 import {
   AgentError,
@@ -303,63 +303,68 @@ describe('reliable Worker', () => {
       fixture((dbPath) =>
         Effect.gen(function* () {
           const cfg = config()
-          const f = yield* fake
-          const answers: ThreadAnswerInput[] = []
-          const worker = yield* makeWorker({
-            dbPath,
-            agentFactory: () => ({
-              ...f.agent,
-              answer: (answer) =>
-                Effect.sync(() => {
-                  answers.push(answer)
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const f = yield* fake
+              const answers: ThreadAnswerInput[] = []
+              const worker = yield* makeWorker({
+                dbPath,
+                agentFactory: () => ({
+                  ...f.agent,
+                  answer: (answer) =>
+                    Effect.sync(() => {
+                      answers.push(answer)
+                    }),
                 }),
+              })
+              yield* worker.handle(request(cfg, 'thread_open'))
+              yield* opened(worker)
+              const input = message(cfg)
+              yield* worker.handle(input)
+              yield* completed(worker, input.command_id ?? '')
+              const identity = {
+                nativeSessionId: 'native',
+                messageId: input.client_message_id ?? '',
+                executionId: `exec:${input.client_message_id}`,
+              }
+              const question = {
+                request_id: 'question-1',
+                kind: 'user_input',
+                questions: [{ id: 'choice', header: 'Choice', question: 'Which folder?', options: [] }],
+              } satisfies import('@baton/protocol').ThreadQuestion
+              yield* Queue.offer(f.events, { ...identity, type: 'question', question })
+              yield* until(reports(worker), (items) => items.some((r) => r.kind === 'question.pending'))
+              const answer = request(cfg, 'thread_answer', {
+                answer: { request_id: question.request_id, decision: 'accept', answers: { choice: 'src' } },
+              })
+              const receipt = yield* worker.handle(answer)
+              yield* completed(worker, answer.command_id ?? '')
+              expect((yield* worker.handle(answer)).receipt).toEqual(receipt.receipt)
+              expect(
+                (yield* worker.handle({ ...answer, answer: { request_id: question.request_id, decision: 'cancel' } }))
+                  .code,
+              ).toBe('command_conflict')
+              expect(answers).toEqual([answer.answer])
+              const pending = { ...question, request_id: 'question-2' }
+              yield* Queue.offer(f.events, { ...identity, type: 'question', question: pending })
+              yield* until(reports(worker), (items) => items.some((r) => r.question?.request_id === pending.request_id))
+              const stop = request(cfg, 'thread_stop')
+              yield* worker.handle(stop)
+              expect(
+                (yield* worker.handle(
+                  request(cfg, 'thread_answer', { answer: { request_id: pending.request_id, decision: 'cancel' } }),
+                )).code,
+              ).toBe('invalid_state')
+              yield* Queue.offer(f.events, event(identity.messageId, 'end'))
+              yield* completed(worker, stop.command_id ?? '')
+              expect(f.sentInputs).toHaveLength(1)
             }),
-          })
-          yield* worker.handle(request(cfg, 'thread_open'))
-          yield* opened(worker)
-          const input = message(cfg)
-          yield* worker.handle(input)
-          yield* completed(worker, input.command_id ?? '')
-          const identity = {
-            nativeSessionId: 'native',
-            messageId: input.client_message_id ?? '',
-            executionId: `exec:${input.client_message_id}`,
-          }
-          const question = {
-            request_id: 'question-1',
-            kind: 'user_input',
-            questions: [{ id: 'choice', header: 'Choice', question: 'Which folder?', options: [] }],
-          } satisfies import('@baton/protocol').ThreadQuestion
-          yield* Queue.offer(f.events, { ...identity, type: 'question', question })
-          yield* until(reports(worker), (items) => items.some((r) => r.kind === 'question.pending'))
-          const answer = request(cfg, 'thread_answer', {
-            answer: { request_id: question.request_id, decision: 'accept', answers: { choice: 'src' } },
-          })
-          const receipt = yield* worker.handle(answer)
-          yield* completed(worker, answer.command_id ?? '')
-          expect((yield* worker.handle(answer)).receipt).toEqual(receipt.receipt)
-          expect(
-            (yield* worker.handle({ ...answer, answer: { request_id: question.request_id, decision: 'cancel' } })).code,
-          ).toBe('command_conflict')
-          expect(answers).toEqual([answer.answer])
-          const pending = { ...question, request_id: 'question-2' }
-          yield* Queue.offer(f.events, { ...identity, type: 'question', question: pending })
-          yield* until(reports(worker), (items) => items.some((r) => r.question?.request_id === pending.request_id))
-          const stop = request(cfg, 'thread_stop')
-          yield* worker.handle(stop)
-          expect(
-            (yield* worker.handle(
-              request(cfg, 'thread_answer', { answer: { request_id: pending.request_id, decision: 'cancel' } }),
-            )).code,
-          ).toBe('invalid_state')
-          yield* Queue.offer(f.events, event(identity.messageId, 'end'))
-          yield* completed(worker, stop.command_id ?? '')
-          const saved = yield* (yield* makeLedger(dbPath)).load
+          )
+          const saved = (yield* openWorkerLedger({ dbPath })).initial
           expect(saved.questions?.map((q) => [q.question.request_id, q.state])).toEqual([
             ['question-1', 'resolved'],
             ['question-2', 'cancelled'],
           ])
-          expect(f.sentInputs).toHaveLength(1)
         }),
       ),
     )
@@ -574,7 +579,11 @@ describe('reliable Worker', () => {
               const old = yield* readOutput(worker, cfg)
               yield* Queue.offer(f.events, event(first.client_message_id!, 'reply'))
               yield* Queue.offer(f.events, event(first.client_message_id!, 'end'))
-              yield* until(readOutput(worker, cfg, old.cursor), (result) => result.state === 'idle')
+              yield* Effect.promise(() =>
+                vi.waitFor(async () => {
+                  expect((await Effect.runPromise(readOutput(worker, cfg, old.cursor))).state).toBe('idle')
+                }),
+              )
               expect(yield* readOutput(worker, cfg, old.cursor)).toMatchObject({ text: '', gap: true })
               const second = message(cfg)
               yield* worker.handle(second)
@@ -866,8 +875,7 @@ describe('reliable Worker', () => {
                 return mapped
               }),
             )
-            const ledger = yield* makeLedger(dbPath)
-            const persisted = yield* ledger.load
+            const persisted = (yield* openWorkerLedger({ dbPath })).initial
             const replies = persisted.outbox.filter((entry) => entry.report.kind === 'reply')
             expect(replies).toHaveLength(4)
             const first = replies.find(

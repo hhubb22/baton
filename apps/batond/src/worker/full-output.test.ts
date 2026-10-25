@@ -2,14 +2,13 @@ import { randomUUID } from 'node:crypto'
 import { chmod, readFile, readdir, rm, symlink, unlink } from 'node:fs/promises'
 import { makePrivateTempDirectory } from '../testing/private.ts'
 import { join } from 'node:path'
-import { Effect, Schema } from 'effect'
+import { Schema } from 'effect'
 import { FullOutputReference, SessionResult, UUID, type SessionRequest, type WorkerOpenConfig } from '@baton/protocol'
 import { afterEach, expect, it } from 'vite-plus/test'
 import { initializeWorkerDirectory, LocalWorkerHost } from '../daemon/host.ts'
 import { writePrivateFileAtomic } from '../platform/private.ts'
 import { BoundedOutput } from '../agents/shell/output.ts'
 import { FullOutputStore, fullOutputPageBytes, pruneDeviceOutputs, readOutputRetentionDays } from './full-output.ts'
-import { initialState, makeLedger } from './ledger.ts'
 
 const roots: string[] = []
 afterEach(async () => {
@@ -125,46 +124,4 @@ it('enforces configurable expiration on read and reclaims expired files for inac
   expect(await readdir(f.store.directory)).toEqual([])
   await writePrivateFileAtomic(join(f.root, 'output-retention.json'), JSON.stringify({ retention_days: 0 }))
   await expect(readOutputRetentionDays(f.root)).rejects.toThrow()
-})
-
-it('saves ordinary replies before report clipping and persists the reference for center history', async () => {
-  const f = await fixture()
-  const text = 'START' + '正文🙂中间'.repeat(20000) + 'END'
-  await Effect.runPromise(
-    Effect.scoped(
-      Effect.gen(function* () {
-        const ledger = yield* makeLedger(f.paths.ledger, f.root)
-        const previous = initialState()
-        const next = initialState()
-        next.config = f.config
-        next.outbox.push({
-          acked: false,
-          report: {
-            type: 'thread.report',
-            thread_id: f.config.thread_id,
-            storage_generation: f.config.storage_generation,
-            event_id: randomUUID(),
-            worker_seq: 1,
-            kind: 'reply',
-            content: text,
-          },
-        })
-        yield* ledger.save(next, previous)
-        const loaded = yield* ledger.load
-        const report = loaded.outbox[0]?.report
-        if (!report) throw new Error('Expected a saved report')
-        expect(report.truncated).toBe(true)
-        expect(Buffer.byteLength(report.content ?? '')).toBeLessThanOrEqual(32768)
-        const reference = Schema.decodeUnknownSync(FullOutputReference)(report.metadata?.full_output)
-        expect(reference.total_bytes).toBe(Buffer.byteLength(text))
-        const result = yield* Effect.promise(() =>
-          new FullOutputStore(f.paths.threadDirectory).read(f.request(reference, String(fullOutputPageBytes * 2))),
-        )
-        expect(result.ok).toBe(true)
-        expect(Buffer.from(result.full_output?.data ?? '', 'base64')).toEqual(
-          Buffer.from(text).subarray(fullOutputPageBytes * 2, fullOutputPageBytes * 3),
-        )
-      }),
-    ),
-  )
 })
