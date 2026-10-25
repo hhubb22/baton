@@ -1,6 +1,6 @@
 import { DateTime, Effect, Schema } from 'effect'
 import type { ProjectPreview } from '@baton/protocol'
-import { projectDecode, projectError } from './project-store.ts'
+import { projectDecode, projectError } from './store.ts'
 
 const previews = new Map<string, { value: ProjectPreview; expires: number; updated: number }>()
 const PreviewInput = Schema.Struct({ text: Schema.String, truncated: Schema.Boolean })

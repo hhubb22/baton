@@ -5,7 +5,7 @@ import { expect, it } from 'vite-plus/test'
 import type { ThreadReport } from '@baton/protocol'
 import { projectToolFixture, callProjectTool, waitForProjectTool } from '../testing/project-tools.ts'
 import { seedNode, withTestDatabase } from '../testing/database.ts'
-import { runtimeRequest } from './project-runtime.ts'
+import { runtimeRequest } from './runtime.ts'
 import * as threads from '../threads/index.ts'
 
 const unpack = (result: { value: unknown }) => JSON.parse((result.value as { text: string }).text)

@@ -4,7 +4,7 @@ import * as SqlClient from 'effect/sql/SqlClient'
 import { expect, it } from 'vite-plus/test'
 import { projectToolFixture, callProjectTool } from '../testing/project-tools.ts'
 import { withTestDatabase } from '../testing/database.ts'
-import { getProjectMemory, listProjectMemory, projectMemoryRevisions, writeProjectMemory } from './project-memory.ts'
+import { getProjectMemory, listProjectMemory, projectMemoryRevisions, writeProjectMemory } from './memory.ts'
 
 it('keeps immutable memory revisions, returns the winning version on conflict, and isolates employees and projects', async () =>
   withTestDatabase(async (db) => {

@@ -4,7 +4,7 @@ import * as SqlClient from 'effect/sql/SqlClient'
 import * as P from '@baton/protocol'
 import { AppError } from '../errors.ts'
 import { transaction } from '../database.ts'
-import { insertProjectInput } from './project-inputs.ts'
+import { insertProjectInput } from './inputs.ts'
 
 export const strictDecode = <S extends Schema.ConstraintDecoder<unknown>>(schema: S, value: unknown) =>
   Schema.decodeUnknownEffect(schema)(value, { onExcessProperty: 'error' }).pipe(

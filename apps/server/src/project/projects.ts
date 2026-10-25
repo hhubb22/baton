@@ -3,7 +3,7 @@ import { Effect } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import * as P from '@baton/protocol'
 import { dbError } from '../database.ts'
-import { insertProjectInput } from './project-inputs.ts'
+import { insertProjectInput } from './inputs.ts'
 import {
   boundedProjectText,
   checkPayloadSize,
@@ -15,11 +15,11 @@ import {
   projectTransaction,
   readProject,
   releaseProjectRun,
-} from './project-store.ts'
+} from './store.ts'
 
-export { runtimeRequest } from './project-runtime.ts'
-export { projectStatus } from './project-view.ts'
-export { listProjectRunCandidates, scheduleProjectRun, claimProjectCommands } from './project-scheduling.ts'
+export { runtimeRequest } from './runtime.ts'
+export { projectStatus } from './view.ts'
+export { listProjectRunCandidates, scheduleProjectRun, claimProjectCommands } from './scheduling.ts'
 
 export const getProject = Effect.fn('getProject')(function* (employee: string, project: string) {
   yield* projectDecode(P.UUID, project)

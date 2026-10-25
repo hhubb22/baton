@@ -4,7 +4,7 @@ import * as SqlClient from 'effect/sql/SqlClient'
 import * as P from '@baton/protocol'
 import { AppError, type NodeSource } from '../errors.ts'
 import type { SqlError } from 'effect/sql/SqlError'
-import { strictDecode, readProjectMemory, writeProjectMemoryTx } from './project-memory.ts'
+import { strictDecode, readProjectMemory, writeProjectMemoryTx } from './memory.ts'
 import { createAgentAttention, getAttentionRequest, listProjectAttention, withdrawAttention } from '../inbox.ts'
 import * as threads from '../threads/index.ts'
 import { lockNodeSource, revalidateNodeSource } from '../nodes.ts'
@@ -21,14 +21,14 @@ import {
   readProject,
   releaseProjectRun,
   type ProjectBinding,
-} from './project-store.ts'
-import { appendAssistant, claimInputs, readRuntimeEvents, savedToolCalls } from './project-events.ts'
-import { commitCompaction, projectMemoryIndex } from './project-compaction.ts'
-import { projectToolJSONPage, boundedBase64, resultBytes } from './project-tools.ts'
+} from './store.ts'
+import { appendAssistant, claimInputs, readRuntimeEvents, savedToolCalls } from './events.ts'
+import { commitCompaction, projectMemoryIndex } from './compaction.ts'
+import { projectToolJSONPage, boundedBase64, resultBytes } from './tools.ts'
 import { canonical } from '../json.ts'
 import { transaction } from '../database.ts'
 import type { ProjectThreadSource } from '../threads/index.ts'
-import { saveProjectPreview } from './project-preview.ts'
+import { saveProjectPreview } from './preview.ts'
 
 const leaseLost = () => projectError('lease_lost')
 const checkLease = Effect.fn('checkProjectLease')(function* (b: ProjectBinding) {

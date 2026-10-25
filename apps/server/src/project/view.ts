@@ -1,8 +1,8 @@
 import { Effect } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import { ProjectRunView, UUID, type ProjectStatus, type RuntimeReport } from '@baton/protocol'
-import { projectDecode, projectTransaction, readProject, recoveryWorkSQL } from './project-store.ts'
-import { readProjectPreview } from './project-preview.ts'
+import { projectDecode, projectTransaction, readProject, recoveryWorkSQL } from './store.ts'
+import { readProjectPreview } from './preview.ts'
 
 export const projectStatus = Effect.fn('projectStatus')(function* (
   employee: string,

@@ -1,7 +1,7 @@
 import { Effect } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import type { Thread, ThreadReport } from '@baton/protocol'
-import { insertProjectInput } from '../project/project-inputs.ts'
+import { insertProjectInput } from '../project/inputs.ts'
 
 function truncate(text: string, bytes: number) {
   const raw = Buffer.from(text)

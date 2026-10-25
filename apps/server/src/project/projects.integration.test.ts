@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vite-plus/test'
 import * as P from '@baton/protocol'
 import { seedNode, withTestDatabase, type TestDatabase } from '../testing/database.ts'
 import * as projects from './projects.ts'
-import { insertProjectInput } from './project-inputs.ts'
+import { insertProjectInput } from './inputs.ts'
 import * as threads from '../threads/index.ts'
 
 type Run = TestDatabase['run']

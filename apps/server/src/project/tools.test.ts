@@ -1,5 +1,5 @@
 import { expect, it } from 'vite-plus/test'
-import { projectToolJSONPage, boundedBase64 } from './project-tools.ts'
+import { projectToolJSONPage, boundedBase64 } from './tools.ts'
 
 it('preserves binary output encoding when reducing a shell tool result', () => {
   const bytes = Buffer.alloc(32768)

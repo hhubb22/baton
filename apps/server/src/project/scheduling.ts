@@ -3,13 +3,7 @@ import { Effect } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import type { ProjectRunCommand, RuntimeReport } from '@baton/protocol'
 import { dbError } from '../database.ts'
-import {
-  activeInputSQL,
-  projectError,
-  projectTransaction,
-  recoveryWorkSQL,
-  releaseProjectRun,
-} from './project-store.ts'
+import { activeInputSQL, projectError, projectTransaction, recoveryWorkSQL, releaseProjectRun } from './store.ts'
 
 const placementCandidate = (sql: SqlClient.SqlClient) => sql`(
  (a.lease_run_id IS NOT NULL AND (a.lease_until<=clock_timestamp() OR p.status<>'active' OR EXISTS(SELECT 1 FROM agent_runs r JOIN nodes n ON n.id=r.node_id WHERE r.id=a.lease_run_id AND n.revoked_at IS NOT NULL)))

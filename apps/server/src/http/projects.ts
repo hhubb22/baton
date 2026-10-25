@@ -3,7 +3,7 @@ import { HttpApiBuilder } from 'effect/http-api'
 import { BatonHttpApi, CurrentBrowserSession } from '@baton/protocol/http-api'
 import * as P from '@baton/protocol'
 import * as Projects from '../project/projects.ts'
-import * as Memory from '../project/project-memory.ts'
+import * as Memory from '../project/memory.ts'
 import * as Inbox from '../inbox.ts'
 import { decodeResponse, httpBusiness } from './security.ts'
 

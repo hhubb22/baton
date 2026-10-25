@@ -7,8 +7,8 @@ import { gfmFromMarkdown } from 'mdast-util-gfm'
 import { gfm } from 'micromark-extension-gfm'
 import { AppError } from './errors.ts'
 import { transaction } from './database.ts'
-import { strictDecode } from './project/project-memory.ts'
-import { insertProjectInput } from './project/project-inputs.ts'
+import { strictDecode } from './project/memory.ts'
+import { insertProjectInput } from './project/inputs.ts'
 
 export interface InboxBinding {
   employeeId: string

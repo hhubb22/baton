@@ -10,7 +10,7 @@ import {
   projectDecode,
   projectError,
   type ProjectBinding,
-} from './project-store.ts'
+} from './store.ts'
 
 const objectRest = [Schema.Record(Schema.String, Schema.Json)] as const
 const ToolCall = Schema.StructWithRest(

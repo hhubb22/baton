@@ -6,7 +6,7 @@ import { ProjectEvent, type ProjectRuntimeRequest, type ThreadReport } from '@ba
 import { projectToolFixture, callProjectTool, waitForProjectTool } from '../testing/project-tools.ts'
 import { withTestDatabase } from '../testing/database.ts'
 import * as threads from '../threads/index.ts'
-import { runtimeRequest } from './project-runtime.ts'
+import { runtimeRequest } from './runtime.ts'
 
 it('notifies a never-dispatched shell withdrawal once when history is unavailable', () =>
   withTestDatabase(async (db) => {

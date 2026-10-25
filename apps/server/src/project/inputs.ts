@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { Effect, Schema } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
-import { activeInputSQL, checkPayloadSize, projectDecode, projectError } from './project-store.ts'
+import { activeInputSQL, checkPayloadSize, projectDecode, projectError } from './store.ts'
 
 const ProjectInputType = Schema.Literals([
   'user_message',
