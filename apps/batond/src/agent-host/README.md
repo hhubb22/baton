@@ -1,6 +1,6 @@
 # Agent host
 
-`agent-host` 是 batond 可执行文件的子命令，在一个独立进程里运行 t3code 的 `ProviderAdapterV2`。执行 host 的实际 cwd 为 Thread 工作目录，只读探测 host 的实际 cwd 为临时空目录。Worker 通过 stdio NDJSON RPC 驱动它，不加载 t3code 包或 SDK。
+`agent-host` 是 batond 可执行文件的子命令，在一个独立进程里运行 t3code 的 `ProviderAdapterV2`。执行 host 的实际 cwd 为 Thread 工作目录，只读探测 host 的实际 cwd 为临时空目录。Worker 通过 stdio NDJSON RPC 驱动它；registry 会加载 `@t3tools/contracts` 的 `DEFAULT_MODEL` 等协议常量，安装检查只读取 SDK 元数据与资产路径。Worker 不加载 SDK、provider adapter 或 host driver；执行 host 按 Agent 类型加载对应模块，Cursor SDK 只在 Cursor host 内执行。安装包的 `agent-host --probe` 会加载四个 Agent 模块以检查完整性。
 
 ## 进程模型
 

@@ -38,7 +38,7 @@ Coordinator：Thread 命令、报告与历史记录
 | `apps/batond/src/platform/process` | 进程组、POSIX watchdog、Windows 进程账本；登记上游新建的进程组 | R-08 |
 | `apps/server`、Web 数据层 | 正式 reason 字段、status/create 准入；历史使用中心记录，删除前端原生解析 | R-01、R-10 |
 
-Worker 不加载 t3code 包和 SDK，保持 3 秒就绪预算；所有 adapter 在 agent-host 内运行。每个执行 Thread 一个 agent-host，它是 POSIX 进程组组长或 Windows 账本登记的根进程，Worker 回收整棵进程树即可结束 adapter 及其后代。探测在 batond 拉起的只读 agent-host 中执行，用同一套 `src/platform/process` 回收。
+Worker 的 registry 会加载 `@t3tools/contracts` 的 `DEFAULT_MODEL` 等协议常量，SDK 安装检查通过 `sdk-inspection.ts` 读取元数据与资产路径，不执行 SDK。Worker 不加载 SDK、provider adapter 或 host driver，保持 3 秒就绪预算；执行 agent-host 按 Agent 类型加载对应模块，Cursor SDK 只在 Cursor host 内执行。安装包的 `agent-host --probe` 会加载四个 Agent 模块以检查完整性。每个执行 Thread 一个 agent-host，它是 POSIX 进程组组长或 Windows 账本登记的根进程，Worker 回收整棵进程树即可结束 adapter 及其后代。探测在 batond 拉起的只读 agent-host 中执行，用同一套 `src/platform/process` 回收。
 
 ### 宿主层
 

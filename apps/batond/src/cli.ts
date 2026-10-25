@@ -54,7 +54,9 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
   }
   if (action === 'agent-host' && args.length === 1 && args[0] === '--probe') {
     try {
-      const { agentHostModuleNames } = await import('./agent-host/index.ts')
+      const { agentHostModule, agentHostModuleNames } = await import('./agent-host/index.ts')
+      const agents = agentHostModuleNames()
+      await Promise.all(agents.map((agentType) => agentHostModule(agentType)))
       const nativeModules: string[] = []
       if (isSea()) {
         const load = createRequire(join(dirname(process.execPath), 'package.json'))
@@ -70,7 +72,7 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
         if (parser.parse('echo baton').rootNode.type !== 'program') throw new Error('Cursor parser failed')
         nativeModules.push('cursor/tree-sitter', 'cursor/tree-sitter-bash')
       }
-      console.log(JSON.stringify({ agents: agentHostModuleNames(), nativeModules }))
+      console.log(JSON.stringify({ agents, nativeModules }))
     } catch {
       console.error(
         JSON.stringify({

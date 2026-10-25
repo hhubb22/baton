@@ -1,6 +1,6 @@
 # Cursor 接入
 
-本模块把 t3code 的 Cursor adapter 接入 batond：`index.ts` 提供 Worker 侧的 `AgentFactory` 和只读探测，`host-module.ts` 把它注册为 `agent-host cursor` 的 driver。Worker 不加载 SDK 或 t3code 包，adapter、SDK 和原生 store 都在 host 进程里运行。
+本模块把 t3code 的 Cursor adapter 接入 batond：`index.ts` 提供 Worker 侧的 `AgentFactory` 和只读探测，`host-module.ts` 把它注册为 `agent-host cursor` 的 driver。Worker 的 registry 会读取 `@t3tools/contracts` 的 `DEFAULT_MODEL` 等协议常量，并通过 `sdk-inspection.ts` 检查 SDK 元数据和资产路径；它不加载 SDK、provider adapter 或 host driver。执行 host 按 Agent 类型加载对应模块，Cursor adapter、SDK 和原生 store 在 Cursor host 内运行；安装包的 `agent-host --probe` 会加载四个 Agent 模块以检查完整性。
 
 ## 入口
 

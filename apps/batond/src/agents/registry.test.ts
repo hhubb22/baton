@@ -4,10 +4,11 @@ import { RuntimeAgent } from '@baton/protocol'
 import type { ProbeResult } from '../agent-host/protocol.ts'
 import { agentCapabilities } from './capabilities.ts'
 import { probeCursor } from './cursor/probe.ts'
+import { inspectCursorSdk } from './cursor/sdk-inspection.ts'
 import { hostedAgentReport, probeLocalCursor } from './registry.ts'
 
-vi.mock('./cursor/sdk-loader.ts', () => ({
-  inspectCursorSdk: () => ({ version: '9.0.0', platformVersion: '9.0.0', missingAssets: [] }),
+vi.mock('./cursor/sdk-inspection.ts', () => ({
+  inspectCursorSdk: vi.fn(() => ({ version: '9.0.0', platformVersion: '9.0.0', missingAssets: [] })),
 }))
 vi.mock('./cursor/probe.ts', () => ({ probeCursor: vi.fn() }))
 vi.mock('../platform/process.ts', () => ({
@@ -106,6 +107,17 @@ it.each([{ integrity: false }, { sandboxHelper: false }])(
     expect(report).toMatchObject({ status: 'unavailable', reason: '本机依赖不可用', capabilities: { create: false } })
   },
 )
+
+it('reports a missing Cursor SDK without failing registry loading', async () => {
+  vi.mocked(inspectCursorSdk).mockImplementationOnce(() => {
+    throw new Error('Cannot resolve @cursor/sdk')
+  })
+  expect(await probeLocalCursor()).toMatchObject({
+    status: 'unavailable',
+    reason: 'Cursor SDK 安装不完整',
+    capabilities: { create: false, resume: false },
+  })
+})
 
 it('allows an installed Cursor SDK when its read-only host probe times out', async () => {
   vi.stubEnv('CURSOR_API_KEY', 'offline-test-key')
