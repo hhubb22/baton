@@ -39,9 +39,24 @@ export async function reapProcessTree(identity: ProcessIdentity, timeoutMs = 200
     process.kill(-identity.pid, 'SIGKILL')
   } catch (error) {
     // The final member can exit between identity lookup and signalling; EPERM still requires an empty group.
-    if (hasCode(error, 'EPERM')) {
-      if (await groupIsAlive(identity.pid)) throw error
-    } else if (!hasCode(error, 'ESRCH')) throw error
+    const groupExited = hasCode(error, 'EPERM') && !(await groupIsAlive(identity.pid))
+    if (!groupExited && !hasCode(error, 'ESRCH')) {
+      console.error(
+        'POSIX process group signal failed',
+        {
+          operation: 'reapProcessTree.kill',
+          ownerPid: process.pid,
+          pid: identity.pid,
+          pgid: identity.pid,
+          signal: 'SIGKILL',
+          code: error instanceof Error && 'code' in error ? error.code : undefined,
+          creationTime: identity.creationTime,
+          observedCreationTime: current?.creationTime ?? null,
+        },
+        error,
+      )
+      throw error
+    }
   }
   const deadline = performance.now() + timeoutMs
   while (await groupIsAlive(identity.pid)) {

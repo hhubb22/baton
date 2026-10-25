@@ -76,15 +76,33 @@ describe.skipIf(process.platform === 'win32')('owned POSIX processes', () => {
     ownedProcesses.push(owned)
     if (state === 'exited') await owned.exited
     const kill = process.kill.bind(process)
+    const failure = Object.assign(new Error('Group signal denied'), { code: 'EPERM' })
     const denied = vi.spyOn(process, 'kill').mockImplementation((pid, signal) => {
-      if (pid === -owned.pid) throw Object.assign(new Error('Group signal denied'), { code: 'EPERM' })
+      if (pid === -owned.pid) throw failure
       return kill(pid, signal)
     })
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {})
     try {
-      if (state === 'exited') expect(await reapProcessTree(owned.record)).toEqual({ reaped: true })
-      else await expect(reapProcessTree(owned.record)).rejects.toMatchObject({ code: 'EPERM' })
+      if (state === 'exited') {
+        expect(await reapProcessTree(owned.record)).toEqual({ reaped: true })
+        expect(diagnostic).not.toHaveBeenCalled()
+      } else {
+        await expect(reapProcessTree(owned.record)).rejects.toBe(failure)
+        expect(diagnostic).toHaveBeenCalledExactlyOnceWith(
+          'POSIX process group signal failed',
+          expect.objectContaining({
+            operation: 'reapProcessTree.kill',
+            pid: owned.pid,
+            pgid: owned.pid,
+            signal: 'SIGKILL',
+            code: 'EPERM',
+          }),
+          failure,
+        )
+      }
     } finally {
       denied.mockRestore()
+      diagnostic.mockRestore()
     }
   })
   it.each(['reap', 'worker-kill', 'root-exit'] as const)(
