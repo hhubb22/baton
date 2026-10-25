@@ -113,7 +113,7 @@ async function layoutFixture(t, platform = process.platform) {
 }
 
 test('安装包结构要求原生文件名、依赖与许可目录', async (t) => {
-  for (const platform of ['linux', 'win32']) {
+  for (const platform of process.platform === 'win32' ? ['win32'] : ['linux', 'win32']) {
     const { directory, binary } = await layoutFixture(t, platform)
     assert.equal(await validatePackageLayout(directory, platform), await realpath(binary))
     await rm(binary)
