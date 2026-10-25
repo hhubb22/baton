@@ -4,21 +4,20 @@
 
 ## 覆盖范围
 
-`fixtures/go-http-node.json` 保存 115 个结构的静态字段清单，包含原始来源文件、Go 类型或匿名声明名、字段种类、可选性与可空性。`dtoSchemas` 保留这些结构，并包含 TS 新增契约。来源版本、导出方式和文件摘要见 [夹具来源](fixtures/README.md)。
-
-| 历史来源 | 结构数 | 契约 |
-| --- | ---: | --- |
-| `internal/protocol` | 38 | Frame、Envelope、Route、Source、Presence、Revocation；全部 Thread、Session、文件、设备设置、订阅登录、Runtime 报告及 Project Runtime 消息 |
-| `internal/httpapi` | 32 | 登录、员工、改密、设备注册、默认设备、吊销、目录、授权、登录码、文件预览、Thread 创建/模型、Project/记忆列表、错误与冲突；浏览器订阅和输出事件 |
-| `internal/store` | 18 | Thread、消息、Turn、列表、详情、时间线、trace；Project 状态/运行/消息页；注册状态和记忆修订 |
-| `internal/projectagent` | 16 | Project、Agent、主对话、创建/修改输入、消息、事件、记忆、bootstrap、claim、排队输入、preview、compaction |
-| `internal/inbox` | 6 | 事项、选项、回答、处理参数及列表 |
-| `internal/node` | 3 | 注册身份、凭据、保存的默认设备响应 |
-| `internal/control` | 2 | `node.sync`、`node.sync_result` |
+| 模块 | 契约 |
+| --- | --- |
+| `dto.ts` | HTTP 输入与响应、设备与 Thread 数据、Project 与事项、节点控制消息及 Project Runtime 请求与结果 |
+| `http-api.ts` | Effect HttpApi 的路径、参数、响应与错误声明，供中心路由与 OpenAPI 共用 |
+| `http.ts` | HTTP 查询参数与浏览器事件 |
+| `node.ts` | 节点 Frame、两个方向的业务消息联合类型与 `NodeBody` |
+| `worker.ts` | 认证 IPC、具体 Worker 请求、持久命令接收、状态、完成及报告读取 |
+| `commands.ts` | Thread 命令回执与完成报告的身份匹配 |
+| `thread-question.ts`、`full-output.ts` | Agent 问题与回答、设备完整输出读取 |
+| `common.ts`、`constants.ts`、`trace.ts`、`project-providers.ts` | 基础值与容量限制、追踪上下文及 provider 标识规范化 |
 
 `http.ts` 另提供空 JSON 请求、全部 HTTP 查询参数、`ready`、`thread.changed`、`devices.changed`。查询参数保留 URL 上的字符串形式；HTTP handler 在校验后将其转换为业务数值。没有 JSON 正文的 204 响应不定义虚构的响应对象。
 
-`worker.ts` 包含静态基线的 18 个 IPC 字段、认证、status、open/message/withdraw/resume/stop、pending/ack、session 输出读取，以及下述异步命令契约。`node.ts` 提供 Frame 和两个方向的业务消息联合类型。Project Runtime 的 16 种 operation 均有静态样例，包括 `started`、`stopped`、`wake_received`、`read_events`、`append_event`、`call_tool`、`wait_tool`、`commit_compaction`。
+Worker IPC 包含认证、status、open/message/withdraw/resume/stop、settings、answer、pending/ack 和 session 输出读取，以及下述异步命令契约。Project Runtime 的 operation 包含启动与租约管理、事件读取与写入、输入认领、工具调用、压缩及结束确认。
 
 动态数据使用 `Schema.Json`，例如 pi-ai 的 assistant payload、签名、usage、tool arguments/results、Project Runtime 的 `data`。它们的扩展字段不会被解释或删除。回复附件须为 JSON 数组，metadata 须为 JSON 对象。中心还需校验 PostgreSQL `jsonb::text` 的数据库容量约束。
 
@@ -37,13 +36,13 @@ const message = Schema.decodeUnknownSync(NodeBody)(nodeBody)
 
 HTTP JSON 正文和工具参数严格拒绝未知字段；跨进程消息使用默认的未知字段容忍。Gateway 校验后转发保留的原始字段，不能用丢弃未知字段后的 DTO 重建待转发信封。`Source` 来自中心认证结果，不能信任节点提交的同名字段。包内 Schema 校验数据形状，连接归属、员工权限、租约和数据库事实由相应服务校验。
 
-Schema 不填充默认值，往返时保留空串、`false`、可选字段省略、`null` 和 `[]` 的区别。HTTP 输入中的默认模型、默认设备、可省略的 goal、Patch 字段及旧 role 参数按现有 handler 的接收约定声明。时间使用 RFC 3339 字符串，保留静态基线中的九位小数，不转换为精度较低的 JavaScript Date。JSON 整数限定为 JavaScript 安全整数；数据库 bigint 超出范围时消费者必须报错，不能静默舍入。
+Schema 不填充默认值，往返时保留空串、`false`、可选字段省略、`null` 和 `[]` 的区别。HTTP 输入中的默认模型、默认设备、可省略的 goal、Patch 字段及 role 参数按现有 handler 的接收约定声明。时间使用 RFC 3339 字符串，保留小数秒精度，不转换为精度较低的 JavaScript Date。JSON 整数限定为 JavaScript 安全整数；数据库 bigint 超出范围时消费者必须报错，不能静默舍入。
 
-派生结构只追加或收窄字段，使用 `mapFields(..., { unsafePreserveChecks: true })` 保留父结构的整体容量和关系检查；不改变字段的派生契约直接在原 Schema 上增加检查。回归测试直接校验每个公开 Frame/Worker 入口，避免只有基础结构受限。
+派生结构只追加或收窄字段，使用 `mapFields(..., { unsafePreserveChecks: true })` 保留父结构的整体容量和关系检查；不改变字段的派生契约直接在原 Schema 上增加检查。
 
 ## Worker 接收、状态与完成
 
-执行请求使用 `WorkerRequest` 中的具体变体。`WorkerIPCMessage` 是完整字段集合，供夹具校验与帧检查使用；服务端处理具体操作时使用具体变体，不能只凭通用字段集合接收命令。
+执行请求使用 `WorkerRequest` 中的具体变体。`WorkerIPCMessage` 是完整字段集合，供通用帧检查使用；服务端处理具体操作时使用具体变体，不能只凭通用字段集合接收命令。
 
 | Schema | 约定 |
 | --- | --- |
@@ -79,13 +78,13 @@ withdraw 在撤回事实持久保存后以 succeeded 结束；已经无法撤回
 }
 ```
 
-`node_id` 是本人设备，`report_version` 是已经保存的非负能力报告版本，与节点报告 ACK 的同名字段一致；nodes DTO 中对应 `runtime_report_version`。中心在 reason-only 等设备报告变更持久保存后发送此事件。浏览器收到后重新读取设备报告，避免凭事件推测能力或解析 reason。该事件是刷新提示；重复或相同版本不构成新的执行事实。C 负责发送，W 负责消费。
+`node_id` 是本人设备，`report_version` 是已经保存的非负能力报告版本，与节点报告 ACK 的同名字段一致；nodes DTO 中对应 `runtime_report_version`。中心在 reason-only 等设备报告变更持久保存后发送此事件。浏览器收到后重新读取设备报告，避免凭事件推测能力或解析 reason。该事件是刷新提示；重复或相同版本不构成新的执行事实。中心负责发送，网页负责消费。
 
 ## Thread 历史与实时输出
 
-Thread 历史通过中心时间线读取已保存的输入、回复和事件，设备不保存原生历史。`SessionRequest` 仅用于实时输出，`SessionResult` 返回输出状态、正文、游标和缺口。
+Thread 历史通过中心时间线读取已保存的输入、回复和事件，原生会话记录由设备上的 Agent 管理。`SessionRequest` / `SessionResult` 用于按需读取设备实时输出或已保存的完整输出，返回状态、正文或编码字节、游标与缺口；协议不提供原生历史查询。
 
-## 静态基线与契约检查
+## 契约测试
 
 ```sh
 pnpm --dir packages/protocol run typecheck
@@ -93,8 +92,6 @@ pnpm --dir packages/protocol run lint
 pnpm --dir packages/protocol run test
 ```
 
-`fixtures/` 中的三个 JSON 是已提交的静态基线，测试直接读取，不需要生成步骤或 Go 工具链。文件保留 `go-` 前缀、原始排版及来源元数据，便于追溯；各文件的历史来源和样例性质见 [夹具来源](fixtures/README.md)。
+协议包使用少量 TS 自写样例验证命令完成身份、open 成功回执的存储代次、Worker 就绪关系、问题与回答容量，以及 Inbox 选项约束。HTTP 契约测试核对路径、参数、响应与错误声明。已有调用方覆盖的 Schema 随对应业务测试验证。
 
-TS 测试按静态字段清单核对 Schema 的字段和可选性，并显式列出允许的 TS 新增字段及输入可选性调整；逐字段拒绝错误种类，再以 `onExcessProperty: error` 解码当前 TS 契约使用的样例并重新编码比较。原生历史的 `ThreadHistoryQuery` 和 Worker `native_history` 样例保留作来源证据，测试跳过这两项。Thread 详情样例补入当前必需的 `pending_questions`、`question_answers` 空数组后校验。测试另覆盖容量、控制字符、整数、状态、完成身份、ready 区分和新增契约的无效样例。
-
-新契约及调整由 TS Schema、调用方和独立样例共同验证，静态基线用于检查保留的字段与传输值。协议测试验证传输契约；账本事务、ACK/完成到达顺序、数据库 JSONB 容量、Agent 行为、跨系统进程和安装包由各模块的测试验证。
+中心、节点、Worker 和网页的调用方测试验证这些契约在实际路由、命令接收、异步完成和事件消费中的使用。协议包只检查传输形状及局部关系；账本事务、ACK 与完成到达顺序、数据库 JSONB 容量、权限、租约、Agent 行为、跨系统进程和安装包由对应模块验证。

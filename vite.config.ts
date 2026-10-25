@@ -9,7 +9,6 @@ export default defineConfig({
     ignorePatterns: [
       '**/dist/**',
       '**/_generated/**',
-      'packages/protocol/fixtures/**',
       'upstream/**',
       '.agents/**',
       '.claude/**',
@@ -42,7 +41,6 @@ export default defineConfig({
     ignorePatterns: [
       '**/dist/**',
       '**/_generated/**',
-      'packages/protocol/fixtures/**',
       'upstream/**',
       '**/pnpm-lock.yaml',
       '**/package-lock.json',

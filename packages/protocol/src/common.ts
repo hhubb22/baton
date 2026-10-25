@@ -34,7 +34,7 @@ export const summary = (maximum: number) =>
 export const nonemptyText = (maximum: number) => summary(maximum).check(Schema.isMinLength(1))
 
 export const UUID = Schema.String.check(Schema.isGUID())
-// 时间保留 RFC 3339 原文，避免 Date 丢失 Go 的纳秒精度。
+// 时间保留 RFC 3339 原文，避免 Date 丢失纳秒精度。
 export const Timestamp = Schema.String.check(
   Schema.isPattern(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?(?:Z|[+-]\d\d:\d\d)$/),
   Schema.makeFilter((value) => Number.isFinite(Date.parse(value))),

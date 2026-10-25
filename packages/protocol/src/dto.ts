@@ -30,7 +30,6 @@ import {
   uniqueBy,
 } from './common.ts'
 
-// 静态字段基线与历史来源见 ../fixtures/README.md。
 export const InboxOption = Schema.Struct({
   id: Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_-]{0,31}$/)),
   label: Text.check(Schema.isBetweenCodePoints(1, 40)),
