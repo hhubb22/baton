@@ -1,7 +1,7 @@
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import type { Json } from 'effect/Schema'
 import { loadBrowseRoots } from './roots.ts'
-import { inside, openAuthorized } from './files.ts'
+import { inside, withAuthorizedRead } from './files.ts'
 import { repositoryOrigin } from './scan.ts'
 import { lstat } from 'node:fs/promises'
 
@@ -28,16 +28,14 @@ export async function parseThreadAttachments(
       const key = `${root.id}:${path}`
       if (seen.has(key)) break
       try {
-        const opened = await openAuthorized(root, path)
-        try {
-          if (!opened.info.isFile()) break
-          const attachment: Json = { kind: 'file', node_id: nodeId, root_id: root.id, path, access_status: 'available' }
-          if (Buffer.byteLength(JSON.stringify([...result, attachment])) + 512 > 4096) break
-          result.push(attachment)
-          seen.add(key)
-        } finally {
-          await opened.handle.close()
-        }
+        const attachment = await withAuthorizedRead<Json | undefined>(root, path, async (opened) =>
+          opened.info.isFile()
+            ? { kind: 'file', node_id: nodeId, root_id: root.id, path, access_status: 'available' }
+            : undefined,
+        )
+        if (!attachment || Buffer.byteLength(JSON.stringify([...result, attachment])) + 512 > 4096) break
+        result.push(attachment)
+        seen.add(key)
       } catch {
         continue
       }

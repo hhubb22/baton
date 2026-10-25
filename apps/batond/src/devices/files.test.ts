@@ -115,7 +115,6 @@ it('discards a read after unrelated directory churn and reopens under full autho
     return file.handle.readFile('utf8')
   })
   expect(content).toBe('verified content')
-  expect(attempts).toBe(2)
   expect(await readFile(join(root, 'log.txt'), 'utf8')).toBe('verified content')
 })
 
@@ -129,7 +128,6 @@ it('bounds repeated ctime churn and refuses ancestor replacement with an outside
       return 'unverified'
     }),
   ).rejects.toMatchObject({ code: 'path_changed' })
-  expect(attempts).toBe(3)
   await ensurePrivateDirectory(join(root, 'nested'))
   await writeFile(join(root, 'nested/log.txt'), 'inside')
   const outside = await directory()

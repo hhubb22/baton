@@ -715,6 +715,10 @@ it('commits ordered turns and replies once, rolls back invalid reports, and requ
       status: 409,
     })
     expect((await run(query<{ n: string }>('SELECT count(*)::text AS n FROM thread_replies')))[0]!.n).toBe('1')
+    const timeline = await run(threads.timeline(f.employee, t.id))
+    expect(timeline.events?.find((event) => event.kind === 'reply')?.payload).toMatchObject({ attachments: [] })
+    const history = await run(threads.readTurns({ employeeId: f.employee }, t.id))
+    expect(history.turns[0]?.replies[0]?.attachments).toEqual([])
     expect((await run(threads.archive(f.employee, t.id))).status).toBe('running')
     await run(
       threads.processReport(

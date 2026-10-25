@@ -11,7 +11,7 @@ import {
   type WorkerOpenConfig,
   type WorkerRequest,
 } from '@baton/protocol'
-import { Deferred, Effect, Fiber, Option, Queue, Schema, Stream, Tracer } from 'effect'
+import { Deferred, Effect, Fiber, Logger, Option, Queue, Schema, Stream, Tracer } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { vi } from 'vite-plus/test'
 import { TestClock } from 'effect/testing'
@@ -481,6 +481,47 @@ describe('reliable Worker', () => {
   })
 
   describe('attachments and live output', () => {
+    it.effect.each([false, true])('delivers the reply and logs failed attachment extraction (timeout: %s)', (timeout) =>
+      fixture((dbPath) => {
+        const diagnostics: unknown[] = []
+        return Effect.gen(function* () {
+          const cfg = config()
+          const f = yield* fake
+          const started = yield* Deferred.make<void>()
+          const worker = yield* makeWorker({
+            dbPath,
+            agentFactory: () => f.agent,
+            attachments: () =>
+              Effect.gen(function* () {
+                yield* Deferred.succeed(started, undefined)
+                if (timeout) return yield* Effect.never
+                return yield* Effect.fail(new AgentError('private attachment error'))
+              }),
+          })
+          yield* worker.handle(request(cfg, 'thread_open'))
+          yield* opened(worker)
+          const input = message(cfg)
+          yield* worker.handle(input)
+          yield* completed(worker, input.command_id!)
+          yield* Queue.offer(f.events, event(input.client_message_id!, 'reply'))
+          yield* Deferred.await(started)
+          if (timeout) yield* TestClock.adjust('1 second')
+          const output = yield* until(reports(worker), (rows) => rows.some((row) => row.kind === 'reply'))
+          expect(output.find((row) => row.kind === 'reply')?.content).toBe('answer')
+          expect(diagnostics).toEqual([
+            [
+              'Attachment extraction failed',
+              { thread_id: cfg.thread_id, code: timeout ? 'TimeoutError' : 'AgentError' },
+            ],
+          ])
+        }).pipe(
+          Effect.provideService(
+            Logger.CurrentLoggers,
+            new Set([Logger.make(({ message }) => diagnostics.push(message))]),
+          ),
+        )
+      }),
+    )
     it.effect('persists attachment references while parsing outside the command queue', () =>
       fixture((dbPath) =>
         Effect.gen(function* () {

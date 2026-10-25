@@ -8,7 +8,7 @@
 
 `scanRuntimeRoots` 扫描登记根内最多 4 层、4096 个条目及 128 个仓库，不跟随遍历中的符号链接。Git 配置只读取至多 16 KiB，经本地 `git config --no-includes --file -` 解析，不读取 include 或全局配置。worktree 元数据也必须位于同一登记根。origin 只包含主机和仓库路径。每次 `collect` 先启动 Runtime 探测，再与本轮唯一的目录扫描并发等待。目录扫描使用独立的 2 秒预算，Runtime probe 使用自己的配置预算（默认 5 秒），两者都受调用方与服务生命周期的取消约束；收集扫描、执行配置与探测结果后返回。Runtime `report` 可在命令与凭据元数据未变时返回带 stale 标记的成功缓存；没有可用缓存时省略 `project_runtime`。
 
-`boundRuntimeReport` 在合入执行 Agent 目录后再次计量报告，以带缩进的 JSON 保证 64 KiB 预算；依次删除末尾仓库、多余模型和末尾目录，并保留执行 Agent 默认模型。目录增删的确认响应使用 48 KiB 摘要预算并标记 `truncated`。`node.browse_roots_get` 直接读取本地完整清单，按 JSON 字节切成最多 48 KiB 的 `page:{roots,next_cursor?}`，管理响应最多 64 KiB；读取不扫描仓库。游标包含完整清单的 SHA-256 和下一项位置，清单变化返回 `roots_changed`，网页重读第一页。Devices 展开设备时加载全部页，保存目录后刷新，读取失败时提供重试。`parseThreadAttachments` 只生成能在授权根内打开的普通文件引用，以及有脱敏仓库地址的完整 commit SHA 引用；附件元数据限制在 4 KiB 内。
+`boundRuntimeReport` 在合入执行 Agent 目录后再次计量报告，以带缩进的 JSON 保证 64 KiB 预算；依次删除末尾仓库、多余模型和末尾目录，并保留执行 Agent 默认模型。目录增删的确认响应使用 48 KiB 摘要预算并标记 `truncated`。`node.browse_roots_get` 直接读取本地完整清单，按 JSON 字节切成最多 48 KiB 的 `page:{roots,next_cursor?}`，管理响应最多 64 KiB；读取不扫描仓库。游标包含完整清单的 SHA-256 和下一项位置，清单变化返回 `roots_changed`，网页重读第一页。Devices 展开设备时加载全部页，保存目录后刷新，读取失败时提供重试。`parseThreadAttachments` 通过 `withAuthorizedRead` 完整校验后生成普通文件引用，目录 ctime 变化时重新授权并打开，最多尝试 3 次；越界或路径替换仍拒绝生成引用。重试耗尽或其他读取失败时记录授权根 ID 和错误码，不记录文件内容，失败候选不加入附件。解析也支持有脱敏仓库地址的完整 commit SHA 引用，附件元数据限制在 4 KiB 内。Worker 的附件提取预算为 1 秒，超时或整体失败时记录 Thread ID 和错误类型；中心将缺失的附件列表统一保存为 `[]`，时间线和回复历史返回相同字段。
 
 本机管理入口由 `runDeviceCLI(command, args, dataDirectory, output?)` 提供，顶层 CLI 负责分派数据目录；命令用法见根 README。
 

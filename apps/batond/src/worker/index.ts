@@ -439,7 +439,15 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
             ) {
               const attachments = yield* options.attachments(state.config, event.text).pipe(
                 Effect.timeout('1 second'),
-                Effect.catch(() => Effect.succeed([])),
+                Effect.catch((error) =>
+                  Effect.as(
+                    Effect.logWarning('Attachment extraction failed', {
+                      thread_id: state.config?.thread_id,
+                      code: error._tag,
+                    }),
+                    [],
+                  ),
+                ),
               )
               if (attachments.length) enriched = { ...event, attachments }
             }

@@ -3,7 +3,7 @@ import { constants, type Stats } from 'node:fs'
 import { lstat, open, opendir, realpath, type FileHandle } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { FileRequest, type FileResult } from '@baton/protocol'
-import { Schema } from 'effect'
+import { Effect, Schema } from 'effect'
 import { loadBrowseRoots, type BrowseRoot } from './roots.ts'
 import { hasCode } from '../platform/errors.ts'
 import { containsControl, DeviceError } from './errors.ts'
@@ -107,7 +107,19 @@ export async function withAuthorizedRead<T>(
         await file.handle.close()
       }
     } catch (error) {
-      if (!(error instanceof DeviceError) || error.code !== 'path_changed' || attempt >= 2) throw error
+      if (error instanceof DeviceError && error.code === 'path_changed' && attempt < 2) continue
+      Effect.runSync(
+        Effect.logWarning('Authorized read failed', {
+          root_id: root.id,
+          code:
+            error instanceof DeviceError
+              ? error.code
+              : error instanceof Error && 'code' in error && typeof error.code === 'string'
+                ? error.code
+                : 'unavailable',
+        }),
+      )
+      throw error
     }
   }
 }

@@ -170,10 +170,17 @@ const apply = (t: P.Thread, r: P.ThreadReport) =>
           original >
             (r.metadata?.encoding === 'base64' ? Buffer.from(content, 'base64').length : Buffer.byteLength(content)),
         )
+        const attachments = r.attachments ?? []
         yield* sql`INSERT INTO thread_replies(id,employee_id,thread_id,worker_seq,turn_id,worker_turn_seq,content,truncated,original_bytes,attachments,metadata)
-        VALUES(${uuid()},${t.employee_id},${t.id},${r.worker_seq},${turn.id},${turn.worker_turn_seq},${content},${truncated},${original},${JSON.stringify(r.attachments || [])}::jsonb,${JSON.stringify(r.metadata || {})}::jsonb)`
+        VALUES(${uuid()},${t.employee_id},${t.id},${r.worker_seq},${turn.id},${turn.worker_turn_seq},${content},${truncated},${original},${JSON.stringify(attachments)}::jsonb,${JSON.stringify(r.metadata || {})}::jsonb)`
         // 时间线只保存中心的有界回复。
-        yield* audit(t, 'reply', { ...r, content, truncated, original_bytes: original }, 'device', t.node_id)
+        yield* audit(
+          t,
+          'reply',
+          { ...r, content, truncated, original_bytes: original, attachments },
+          'device',
+          t.node_id,
+        )
         break
       }
       case 'turn.ended': {
