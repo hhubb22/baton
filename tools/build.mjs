@@ -1,10 +1,7 @@
 import { spawnSync } from 'node:child_process'
-import { mkdirSync } from 'node:fs'
-import { join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
-const output = join(root, 'bin')
 
 function runCommand(command, args) {
   const result = spawnSync(command, args, {
@@ -19,17 +16,11 @@ function runCommand(command, args) {
 }
 
 export function build(run = runCommand) {
-  run('pnpm', ['--dir', 'web', 'install', '--frozen-lockfile'])
-  run('pnpm', ['--dir', 'web', 'build'])
-  run('pnpm', ['--dir', 'runtimes/project-agent', 'install', '--frozen-lockfile', '--ignore-scripts'])
-  mkdirSync(output, { recursive: true })
-  run('go', ['build', '-o', 'bin' + sep, './cmd/...'])
-  run(process.execPath, [
-    'tools/package-sidecar.mjs',
-    'runtimes/project-agent',
-    join('bin', 'sidecars', 'project-agent'),
-    'project-agent',
-  ])
+  run('pnpm', ['install', '--frozen-lockfile', '--ignore-scripts'])
+  run('pnpm', ['--dir', 'web', 'typecheck'])
+  // 中心构建同时生成 bundle 旁的 web/ 和 migrations/。
+  run('pnpm', ['--filter', '@baton/server', 'build'])
+  run('pnpm', ['--filter', '@baton/batond', 'build'])
 }
 
 if (import.meta.main) {

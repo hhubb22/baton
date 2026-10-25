@@ -38,10 +38,6 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check out t3code submodule
         run: git submodule update --init --depth 1 upstream/t3code
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
       - uses: pnpm/action-setup@v4
         with:
           version: '12.11.2'
@@ -63,20 +59,6 @@ jobs:
         run: |
           node --test tools/*.test.mjs
           node tools/build.mjs
-      - name: Check sidecar package
-        run: node tools/check-sidecar-package.mjs
-      - name: Go vet
-        run: go vet ./...
-      - name: Go tests
-        env:
-          BATON_TEST_BIN_DIR: ${{ github.workspace }}/bin
-          BATON_TEST_NODE_PROJECT_RUNTIME: '1'
-        run: go test ./...
-      - name: Verify exported protocol fixtures
-        run: |
-          pnpm --filter @baton/protocol fixtures:export
-          pnpm --filter @baton/protocol test
-          git diff --exit-code -- packages/protocol/fixtures
       - name: Runtime tests
         run: pnpm --dir runtimes/project-agent test
       - name: Web format

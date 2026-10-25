@@ -127,7 +127,7 @@ export threadMessage = frame {
 
       content = text : t.body {
         width: 300px,
-        contents: "In D:\\src\\baton-ps160, run go test ./internal/gateway -run Reconnect -count=1, suspend the machine for 1 minute, and check if it reconnects after waking. Save the log as an attachment."
+        contents: "In D:\\src\\baton-ps160, run pnpm --filter @baton/server test reconnect, suspend the machine for 1 minute, and check if it reconnects after waking. Save the log as an attachment."
       }
     }
   }
@@ -199,7 +199,7 @@ export threadReply = frame {
 
   content = text : t.body {
     width: 100%,
-    contents: "47 of 48 tests passed. TestReconnectAfterSleep did not reconnect within 30s after waking from sleep; log attached."
+    contents: "47 of 48 tests passed. The reconnect test did not reconnect within 30s after waking from sleep; log attached."
   }
 
   attachments = frame {
@@ -260,14 +260,14 @@ export threadTrace = frame : conv.activityLog {
 
           stepLead {
             stepLabel {
-              contents: "go test -run Reconnect ./internal/gateway"
+              contents: "pnpm --filter @baton/server test reconnect"
             }
           }
         }
 
         stepOutput {
           stepResult {
-            contents: "=== RUN   TestReconnectAfterSleep\nreconnect_test.go:88: did not reconnect within 30s after wake\n--- FAIL: TestReconnectAfterSleep (92.41s)\nFAIL"
+            contents: "FAIL src/reconnect.test.ts > reconnects after sleep\nError: did not reconnect within 30s after wake\nTests  1 failed | 47 passed (48)"
           }
         }
       }
@@ -395,7 +395,7 @@ export liveOutput = frame {
 
         output = text : t.mono {
           width: 100%,
-          contents: "$ go test ./internal/gateway -run Reconnect -count=1\n=== RUN   TestReconnectAfterSleep\n    sleeping host for 180s…"
+          contents: "$ pnpm --filter @baton/server test reconnect\nRUN src/reconnect.test.ts\n    sleeping host for 180s…"
         }
 
         gap = frame {
@@ -421,7 +421,7 @@ export liveOutput = frame {
         tail = text : t.mono {
           width: 100%,
           display: .none,
-          contents: "    reconnected after 41.2s\n--- PASS: TestReconnectAfterSleep (221.07s)"
+          contents: "    reconnected after 41.2s\nPASS src/reconnect.test.ts > reconnects after sleep"
         }
       }
     }
@@ -928,7 +928,7 @@ export threadDetailWaiting = frame : threadDetail {
 
         bubble {
           content {
-            contents: "In ~/src/baton, run go test ./internal/gateway -run Reconnect, suspend the machine for 1 minute, and check if it reconnects after waking."
+            contents: "In ~/src/baton, run pnpm --filter @baton/server test reconnect, suspend the machine for 1 minute, and check if it reconnects after waking."
           }
         }
       }

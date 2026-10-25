@@ -40,7 +40,7 @@ export default defineConfig({
     fs: { allow: ['..'] },
   },
   build: {
-    outDir: '../internal/webui/dist',
+    outDir: '../apps/server/dist/web',
     emptyOutDir: true,
     sourcemap: false,
     assetsDir: 'assets',

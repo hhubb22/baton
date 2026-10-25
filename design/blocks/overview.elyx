@@ -584,7 +584,7 @@ export overviewMemory = frame : overview {
     width: 100%,
 
     content {
-      contents: "Run node tools/build.mjs before go test; frontend build artifacts are not committed."
+      contents: "Run pnpm test to check the workspace. Build artifacts are not committed."
     }
 
     meta {

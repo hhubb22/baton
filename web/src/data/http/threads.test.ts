@@ -713,7 +713,7 @@ describe('HTTP thread contracts', () => {
   })
 
   it('reads the actual trace for the reply turn and reports missing history honestly', async () => {
-    let result: Record<string, unknown> = { ok: true, steps: [{ kind: 'command', command: 'go test', output: 'ok' }] }
+    let result: Record<string, unknown> = { ok: true, steps: [{ kind: 'command', command: 'pnpm test', output: 'ok' }] }
     const { api, fetcher } = setup((url) =>
       url.pathname.endsWith('/trace')
         ? result
@@ -724,7 +724,7 @@ describe('HTTP thread contracts', () => {
     const replyId = (await api.listMessages(threadId))[0].id
     expect(await api.readTrace(replyId)).toMatchObject({
       state: 'ready',
-      steps: [{ kind: 'command', command: 'go test', output: 'ok' }],
+      steps: [{ kind: 'command', command: 'pnpm test', output: 'ok' }],
     })
     expect(requestURL(fetcher.mock.calls.at(-1)![0])).toBe(`/api/v1/threads/${threadId}/trace?worker_turn_seq=3`)
     result = { ok: false, code: 'trace_missing' }

@@ -826,7 +826,7 @@ describe('execution details', () => {
 
     await user.click(within(attachments).getByRole('button', { name: 'View reconnect.log' }))
     const preview = await screen.findByRole('dialog', { name: 'logs/reconnect.log' })
-    expect(await within(preview).findByText(/FAIL TestReconnectAfterSleep/)).toBeInTheDocument()
+    expect(await within(preview).findByText(/FAIL reconnects after sleep/)).toBeInTheDocument()
   })
 
   it('marks lost live output after the device reconnects', async () => {
@@ -854,14 +854,16 @@ describe('execution details', () => {
     expect(await within(preview).findByText('Showing first 64 KB')).toBeInTheDocument()
 
     await user.click(within(folders).getByRole('button', { name: 'Parent folder' }))
-    await user.click(await within(folders).findByRole('button', { name: /^internal/ }))
-    await user.click(await within(folders).findByRole('button', { name: /^gateway/ }))
-    await user.click(await within(folders).findByRole('button', { name: /reconnect_test.go/ }))
+    await user.click(await within(folders).findByRole('button', { name: /^apps/ }))
+    await user.click(await within(folders).findByRole('button', { name: /^server/ }))
+    await user.click(await within(folders).findByRole('button', { name: /^src/ }))
+    await user.click(await within(folders).findByRole('button', { name: /gateway\.test\.ts/ }))
     expect(await within(preview).findByText(/did not return/)).toBeInTheDocument()
     await user.click(within(preview).getByRole('button', { name: 'Retry' }))
-    expect(await within(preview).findByText(/func TestReconnectAfterSleep/)).toBeInTheDocument()
+    expect(await within(preview).findByText(/test\('decodes WebSocket data'/)).toBeInTheDocument()
 
-    await user.click(await within(folders).findByRole('button', { name: /^testdata/ }))
+    await user.click(await within(folders).findByRole('button', { name: /^testing/ }))
+    await user.click(await within(folders).findByRole('button', { name: /^data/ }))
     await user.click(await within(folders).findByRole('button', { name: /capture.bin/ }))
     expect(await within(preview).findByText(/binary/i)).toBeInTheDocument()
     expect(within(preview).queryByRole('region', { name: /Contents of/ })).not.toBeInTheDocument()

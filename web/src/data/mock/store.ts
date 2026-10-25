@@ -481,7 +481,7 @@ export class MockStore {
   private scheduleRunEnd(threadId: ID) {
     this.runs.get(threadId)?.()
     const cancelOutput = this.schedule(this.latency.run / 2, () => {
-      this.appendOutput(threadId, '$ go test ./...\nok  \tgithub.com/hhubb22/baton/internal/gateway\t2.314s\n')
+      this.appendOutput(threadId, '$ pnpm test\nPASS src/gateway.test.ts (48 tests)\nDuration  2.314s\n')
     })
     const cancelEnd = this.schedule(this.latency.run, () => {
       this.runs.delete(threadId)
@@ -528,7 +528,7 @@ export class MockStore {
     this.world.messages.push(reply)
     // 实时输出整理进这一轮的过程，中心不再保留。
     const output = (this.world.outputs[threadId] ?? []).flatMap((chunk) => (chunk.kind === 'text' ? [chunk.text] : []))
-    this.world.traces[reply.id] = [{ kind: 'command', command: 'go test ./...', output: output.join('').trimEnd() }]
+    this.world.traces[reply.id] = [{ kind: 'command', command: 'pnpm test', output: output.join('').trimEnd() }]
     delete this.world.outputs[threadId]
     this.endRunningSends(thread, 'done')
     thread.status = 'idle'

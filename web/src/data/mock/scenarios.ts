@@ -226,7 +226,7 @@ function projectEntries(now: number): ProjectEntry[] {
       id: 'ent-baton-2',
       projectId: 'prj-baton',
       kind: 'assistant',
-      process: [{ kind: 'note', body: 'Gateway code is in `/home/kaken/work/baton/internal/gateway` on Ubuntu Dev.' }],
+      process: [{ kind: 'note', body: 'Gateway code is in `/home/kaken/work/baton/apps/server/src` on Ubuntu Dev.' }],
       threads: { action: 'opened', threadIds: ['thr-gateway'] },
       body: "Opened a chat on Ubuntu Dev to reproduce the race and fix it. I'll report back when Codex finishes.",
       createdAt: now - 4 * minute,
@@ -265,7 +265,7 @@ function projectEntries(now: number): ProjectEntry[] {
       kind: 'assistant',
       process: [],
       threads: { action: 'replies', threadIds: ['thr-compat'] },
-      body: 'The suite finished with 2 failures in `path_test.go`. Both come from Windows drive letters. I asked in your inbox whether to skip them for now, and which runner should run the nightly suite.',
+      body: 'The suite finished with 2 failures in `path.test.ts`. Both come from Windows drive letters. I asked in your inbox whether to skip them for now, and which runner should run the nightly suite.',
       createdAt: now - 2 * hour,
     },
   ]
@@ -276,13 +276,13 @@ function memory(now: number): MemoryNote[] {
     {
       id: 'mem-baton-1',
       projectId: 'prj-baton',
-      body: 'Gateway code is in `/home/kaken/work/baton/internal/gateway` on Ubuntu Dev.',
+      body: 'Gateway code is in `/home/kaken/work/baton/apps/server/src` on Ubuntu Dev.',
       updatedAt: now - 4 * minute,
     },
     {
       id: 'mem-baton-2',
       projectId: 'prj-baton',
-      body: 'Run `go test ./internal/gateway/...` before reporting a fix.',
+      body: 'Run `pnpm --filter @baton/server test:unit src/gateway.test.ts` before reporting a fix.',
       updatedAt: now - 2 * 24 * hour,
     },
     {
@@ -419,7 +419,7 @@ function messages(now: number): Message[] {
       threadId: 'thr-gateway',
       role: 'user',
       sender: 'projectAgent',
-      body: 'Run `go test -run Reconnect ./internal/gateway` and attach the log.',
+      body: 'Run `pnpm --filter @baton/server test:unit src/gateway.test.ts` and attach the log.',
       createdAt: now - 12 * minute,
       delivery: 'delivered',
     },
@@ -428,7 +428,7 @@ function messages(now: number): Message[] {
       threadId: 'thr-gateway',
       role: 'agent',
       sender: 'agent',
-      body: '47 of 48 tests passed. `TestReconnectAfterSleep` did not reconnect within 30s after waking from sleep; log attached.',
+      body: '47 of 48 tests passed. `reconnects after sleep` did not reconnect within 30s after waking from sleep; log attached.',
       createdAt: now - 6 * minute,
       delivery: 'delivered',
       activity: { commands: 1, tools: 0, files: 1 },
@@ -448,7 +448,7 @@ function messages(now: number): Message[] {
       threadId: 'thr-gateway',
       role: 'user',
       sender: 'projectAgent',
-      body: 'Reproduce the reconnect race in `/home/kaken/work/baton/internal/gateway/conn.go` and fix it.',
+      body: 'Reproduce the reconnect race in `/home/kaken/work/baton/apps/server/src/gateway.ts` and fix it.',
       createdAt: now - 4 * minute,
       delivery: 'delivered',
     },
@@ -494,7 +494,7 @@ function messages(now: number): Message[] {
       threadId: 'thr-compat',
       role: 'agent',
       sender: 'agent',
-      body: '2 failures in `path_test.go`. See the report in `C:\\src\\compat-suite\\report.md`.',
+      body: '2 failures in `path.test.ts`. See the report in `C:\\src\\compat-suite\\report.md`.',
       createdAt: now - 3 * hour + 10 * minute,
       delivery: 'delivered',
       activity: { commands: 1, tools: 0, files: 1 },
@@ -522,7 +522,7 @@ function messages(now: number): Message[] {
       threadId: 'thr-unit',
       role: 'user',
       sender: 'you',
-      body: 'Run go test ./... and summarize the failures.',
+      body: 'Run pnpm test and summarize the failures.',
       createdAt: now - 30 * minute,
       delivery: 'delivered',
     },
@@ -611,9 +611,11 @@ function directories(): Record<string, string[]> {
     'dev-ubuntu': [
       '/home/kaken/work',
       '/home/kaken/work/baton',
-      '/home/kaken/work/baton/internal',
-      '/home/kaken/work/baton/internal/gateway',
-      '/home/kaken/work/baton/internal/gateway/testdata',
+      '/home/kaken/work/baton/apps',
+      '/home/kaken/work/baton/apps/server',
+      '/home/kaken/work/baton/apps/server/src',
+      '/home/kaken/work/baton/apps/server/src/testing',
+      '/home/kaken/work/baton/apps/server/src/testing/data',
       '/home/kaken/work/baton/logs',
       '/home/kaken/work/switch-patrol',
       '/home/kaken/work/netops',
@@ -657,118 +659,10 @@ function inbox(now: number): InboxItem[] {
   ]
 }
 
-const connGo = `package gateway
+const gatewayTs = `import type { RawData } from 'ws'
 
-import (
-	"context"
-	"errors"
-	"sync"
-	"time"
-)
-
-// Conn 是设备的一条出站连接。重连时旧连接的读循环可能还在运行。
-type Conn struct {
-	mu       sync.Mutex
-	deviceID string
-	session  *Session
-	closed   chan struct{}
-	lastSeen time.Time
-}
-
-var errClosed = errors.New("gateway: connection closed")
-
-func newConn(deviceID string, session *Session) *Conn {
-	return &Conn{
-		deviceID: deviceID,
-		session:  session,
-		closed:   make(chan struct{}),
-		lastSeen: time.Now(),
-	}
-}
-
-func (c *Conn) DeviceID() string {
-	return c.deviceID
-}
-
-func (c *Conn) Touch() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.lastSeen = time.Now()
-}
-
-func (c *Conn) LastSeen() time.Time {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.lastSeen
-}
-
-func (c *Conn) Close() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	select {
-	case <-c.closed:
-	default:
-		close(c.closed)
-	}
-}
-
-func (c *Conn) Done() <-chan struct{} {
-	return c.closed
-}
-
-// Replace 把会话交给新连接。旧连接关闭前，新连接不接收消息。
-func (c *Conn) Replace(ctx context.Context, next *Conn) error {
-	c.mu.Lock()
-	session := c.session
-	c.session = nil
-	c.mu.Unlock()
-	if session == nil {
-		return errClosed
-	}
-	c.Close()
-	select {
-	case <-c.Done():
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-	next.mu.Lock()
-	next.session = session
-	next.mu.Unlock()
-	return nil
-}
-
-func (c *Conn) Send(ctx context.Context, frame []byte) error {
-	c.mu.Lock()
-	session := c.session
-	c.mu.Unlock()
-	if session == nil {
-		return errClosed
-	}
-	return session.Write(ctx, frame)
-}
-
-func (c *Conn) readLoop(ctx context.Context, frames <-chan []byte) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-c.closed:
-			return
-		case frame, ok := <-frames:
-			if !ok {
-				c.Close()
-				return
-			}
-			c.Touch()
-			c.mu.Lock()
-			session := c.session
-			c.mu.Unlock()
-			if session != nil {
-				session.Deliver(frame)
-			}
-		}
-	}
-}
+export const webSocketText = (data: RawData): string =>
+  (Buffer.isBuffer(data) ? data : Array.isArray(data) ? Buffer.concat(data) : Buffer.from(data)).toString('utf8')
 `
 
 const readme = `# Baton
@@ -787,8 +681,8 @@ The mock backend runs in the browser. Pick a scenario with ?scenario=offline.
 
 const reconnectLog = Array.from({ length: 48 }, (_, index) => {
   const seconds = String(index).padStart(2, '0')
-  if (index === 41) return `14:31:${seconds} FAIL TestReconnectAfterSleep (30.02s): no reconnect after resume`
-  return `14:31:${seconds} ok   TestReconnect/case-${index + 1} (${(index * 0.07).toFixed(2)}s)`
+  if (index === 41) return `14:31:${seconds} FAIL reconnects after sleep (30.02s): no reconnect after resume`
+  return `14:31:${seconds} ok   reconnect/case-${index + 1} (${(index * 0.07).toFixed(2)}s)`
 }).join('\n')
 
 // 超过单片读取上限的完整日志。
@@ -808,26 +702,23 @@ function files(): Record<string, DeviceFile> {
     [fileKey('dev-mac', '~/src/baton/docs/batond.md')]: file(
       '# batond on macOS\n\n1. Install with Homebrew.\n2. Run `batond enroll` and enter the code from the web page.\n3. Run `brew services start batond`.\n',
     ),
-    [fileKey('dev-ubuntu', `${ubuntuRepo}/internal/gateway/conn.go`)]: file(connGo),
-    [fileKey('dev-ubuntu', `${ubuntuRepo}/internal/gateway/reconnect.go`)]: file(
-      'package gateway\n\n// reconnect 在设备恢复连接后接回原来的会话。\nfunc (g *Gateway) reconnect(deviceID string, next *Conn) error {\n\treturn g.conns[deviceID].Replace(g.ctx, next)\n}\n',
+    [fileKey('dev-ubuntu', `${ubuntuRepo}/apps/server/src/gateway.ts`)]: file(gatewayTs),
+    [fileKey('dev-ubuntu', `${ubuntuRepo}/apps/server/src/gateway.test.ts`)]: file(
+      "import { expect, test } from 'vite-plus/test'\nimport { webSocketText } from './gateway.ts'\n\ntest('decodes WebSocket data', () => {\n  expect(webSocketText(Buffer.from('你好🙂'))).toBe('你好🙂')\n})\n",
     ),
-    [fileKey('dev-ubuntu', `${ubuntuRepo}/internal/gateway/reconnect_test.go`)]: file(
-      'package gateway\n\nimport "testing"\n\nfunc TestReconnectAfterSleep(t *testing.T) {\n\tt.Parallel()\n}\n',
+    [fileKey('dev-ubuntu', `${ubuntuRepo}/apps/server/src/nodes.ts`)]: file(
+      'export interface NodeSource {\n  employee_id: string\n  node_id: string\n  conn_id: string\n}\n',
     ),
-    [fileKey('dev-ubuntu', `${ubuntuRepo}/internal/gateway/session.go`)]: file(
-      'package gateway\n\n// Session 保存设备在中心的会话状态，换连接时保留。\ntype Session struct{}\n',
+    [fileKey('dev-ubuntu', `${ubuntuRepo}/apps/server/src/server.ts`)]: file(
+      "import { createServer } from 'node:http'\n\nexport const server = createServer()\n",
     ),
-    [fileKey('dev-ubuntu', `${ubuntuRepo}/internal/gateway/testdata/capture.bin`)]: file(null, 2.4 * mb),
+    [fileKey('dev-ubuntu', `${ubuntuRepo}/apps/server/src/testing/data/capture.bin`)]: file(null, 2.4 * mb),
     [fileKey('dev-ubuntu', `${ubuntuRepo}/logs/reconnect.log`)]: file(reconnectLog, 48 * kb),
     [fileKey('dev-ubuntu', `${ubuntuRepo}/logs/gateway-soak.log`)]: file(soakLog),
     [fileKey('dev-windows', 'C:\\src\\compat-suite\\report.md')]: file(
-      '# Compat report\n\n- path_test.go: 2 failures\n  - TestJoinDrive: got C:foo, want C:\\foo\n  - TestRelDrive: different volumes\n',
+      '# Compat report\n\n- path.test.ts: 2 failures\n  - join drive letters: got C:foo, want C:\\foo\n  - relative paths across drives: different volumes\n',
     ),
-    [fileKey('dev-windows', 'C:\\src\\baton\\logs\\windows-reconnect.log')]: file(
-      '14:30:02 ok TestReconnect\n',
-      52 * kb,
-    ),
+    [fileKey('dev-windows', 'C:\\src\\baton\\logs\\windows-reconnect.log')]: file('14:30:02 ok reconnect\n', 52 * kb),
   }
 }
 
@@ -837,9 +728,9 @@ function traces(): Record<string, TraceStep[]> {
     'msg-gateway-r1': [
       {
         kind: 'command',
-        command: 'go test -run Reconnect ./internal/gateway',
+        command: 'pnpm --filter @baton/server test:unit src/gateway.test.ts',
         output:
-          '--- FAIL: TestReconnectAfterSleep (30.02s)\n    reconnect_test.go:41: no reconnect after resume\nFAIL\nFAIL\tgithub.com/hhubb22/baton/internal/gateway\t31.408s',
+          'FAIL src/gateway.test.ts > reconnects after sleep (30020ms)\nError: no reconnect after resume\n    at src/gateway.test.ts:41\nTests  1 failed | 47 passed (48)',
       },
       { kind: 'file', action: 'wrote', path: `${ubuntuRepo}/logs/reconnect.log` },
     ],
@@ -861,9 +752,9 @@ function traces(): Record<string, TraceStep[]> {
     'msg-compat-2': [
       {
         kind: 'command',
-        command: 'go test ./...',
+        command: 'pnpm test',
         output:
-          '--- FAIL: TestJoinDrive (0.00s)\n--- FAIL: TestRelDrive (0.00s)\nFAIL\tgithub.com/hhubb22/compat-suite/path\t0.212s',
+          'FAIL src/path.test.ts > join drive letters\nFAIL src/path.test.ts > relative paths across drives\nTests  2 failed',
       },
       { kind: 'file', action: 'wrote', path: 'C:\\src\\compat-suite\\report.md' },
     ],
@@ -884,7 +775,7 @@ function outputs(): Record<string, OutputChunk[]> {
     'thr-gateway': [
       {
         kind: 'text',
-        text: '$ go test -run TestReconnectAfterSleep -count=5 ./internal/gateway\n=== RUN   TestReconnectAfterSleep\n    reconnect_test.go:41: waiting for resume\n',
+        text: '$ pnpm --filter @baton/server test:unit src/gateway.test.ts\nRUN src/gateway.test.ts > reconnects after sleep\n    src/gateway.test.ts:41: waiting for resume\n',
       },
     ],
     'thr-patrol': [{ kind: 'text', text: '$ ls scripts/\npatrol.sh  backup.sh  collect.py\n' }],
@@ -1191,7 +1082,7 @@ export function createWorld(id: ScenarioId, now: number): World {
       // 这些内容第一次读取失败，重试成功。
       world.failingReads.push(
         'trace:msg-webui-2',
-        fileKey('file:dev-ubuntu', `${ubuntuRepo}/internal/gateway/reconnect_test.go`),
+        fileKey('file:dev-ubuntu', `${ubuntuRepo}/apps/server/src/gateway.test.ts`),
       )
       world.inbox.push({
         id: 'itm-baton-signin',

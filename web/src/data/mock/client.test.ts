@@ -136,7 +136,7 @@ describe('device connection', () => {
     expect(baton.agent.state).toBe('waitingDevice')
     expect(projectAgentStatus(baton, devices).label).toBe('Waiting for device')
 
-    const preview = await client.readFile('dev-ubuntu', '/home/kaken/work/baton/internal/gateway/conn.go')
+    const preview = await client.readFile('dev-ubuntu', '/home/kaken/work/baton/apps/server/src/gateway.ts')
     expect(preview.state).toBe('unavailable')
     expect(previewProblem(preview, ubuntu)?.title).toBe('Ubuntu Dev is offline')
 
@@ -148,7 +148,9 @@ describe('device connection', () => {
       state: 'running',
       deviceId: 'dev-ubuntu',
     })
-    expect((await client.readFile('dev-ubuntu', '/home/kaken/work/baton/internal/gateway/conn.go')).state).toBe('ready')
+    expect((await client.readFile('dev-ubuntu', '/home/kaken/work/baton/apps/server/src/gateway.ts')).state).toBe(
+      'ready',
+    )
   })
 
   it('moves the project agent to another eligible device', async () => {

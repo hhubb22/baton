@@ -295,7 +295,7 @@ describe('Project and Inbox DTO mapping', () => {
           type: 'toolCall',
           id: 'exec',
           name: 'nodes.exec',
-          arguments: { node_id: threadId, command: 'go test ./...' },
+          arguments: { node_id: threadId, command: 'pnpm test' },
         },
       ]),
       event(
@@ -431,11 +431,11 @@ describe('Project HTTP contract', () => {
   it('sends stable UUIDs and persists complete references in ordinary message content', async () => {
     const reference: Reference = {
       kind: 'file',
-      title: 'server.go',
+      title: 'server.ts',
       threadId,
       reply: null,
       deviceId: itemId,
-      path: '/src/server.go',
+      path: '/src/apps/server/src/server.ts',
       lines: { from: 10, to: 12 },
       itemId: null,
       excerpt: '汉'.repeat(4000),

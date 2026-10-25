@@ -24,7 +24,7 @@ export entryRow = frame {
 
   name = text : t.mono {
     width: 100%,
-    contents: "gateway.go",
+    contents: "gateway.ts",
     line-height: 1
   }
 
@@ -61,7 +61,7 @@ export entrySelected = frame : entryRow {
   fill[0].color: c.colors.selected,
 
   name {
-    contents: "reconnect_test.go"
+    contents: "reconnect.test.ts"
   }
 
   size {
@@ -111,7 +111,7 @@ export filePreview = frame {
       children: [path, meta],
 
       path = text : t.mono {
-        contents: "internal/gateway/reconnect_test.go",
+        contents: "apps/server/src/reconnect.test.ts",
         font-size: 13,
         fill[0].color: c.colors.text
       }
@@ -182,7 +182,7 @@ export filePreview = frame {
         }
 
         folder = text : t.captionMedium {
-          contents: "internal/gateway",
+          contents: "apps/server/src",
           line-height: 1,
           fill[0].color: c.colors.muted
         }
@@ -207,7 +207,7 @@ export filePreview = frame {
         width: 100%,
 
         name {
-          contents: "client.go"
+          contents: "client.ts"
         }
 
         size {
@@ -223,7 +223,7 @@ export filePreview = frame {
         width: 100%,
 
         name {
-          contents: "reconnect.go"
+          contents: "reconnect.ts"
         }
 
         size {
@@ -239,7 +239,7 @@ export filePreview = frame {
         width: 100%,
 
         name {
-          contents: "session.go"
+          contents: "session.ts"
         }
 
         size {
@@ -267,7 +267,7 @@ export filePreview = frame {
         children: [gutter, source],
 
         gutter = text : t.mono {
-          contents: "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21",
+          contents: "1\n2\n3\n4\n5\n6\n7\n8",
           line-height: 1.7,
           align: .right,
           fill[0].color: c.colors.faint
@@ -275,7 +275,7 @@ export filePreview = frame {
 
         source = text : t.mono {
           width: 100%,
-          contents: "package gateway\n\nimport (\n    \"context\"\n    \"testing\"\n    \"time\"\n)\n\n// The node must reconnect within a minute after waking up.\nfunc TestReconnectAfterSleep(t *testing.T) {\n    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)\n    defer cancel()\n\n    node := startTestNode(t, ctx)\n    node.Suspend(60 * time.Second)\n\n    if err := node.WaitConnected(ctx, time.Minute); err != nil {\n        t.Fatalf(\"reconnect: %v\", err)\n    }\n    t.Logf(\"reconnected after %s\", node.Downtime())\n}",
+          contents: "import { expect, it } from \"vitest\"\n\nit(\"reconnects after sleep\", async () => {\n  const node = await startTestNode()\n  await node.suspend(60_000)\n  await node.waitConnected(30_000)\n  expect(node.connected).toBe(true)\n})",
           line-height: 1.7,
           fill[0].color: c.colors.text
         }
@@ -531,7 +531,7 @@ export filePreviewDenied = frame : filePreview {
       }
 
       path {
-        contents: "internal/gateway/testdata/certs"
+        contents: "apps/server/src/testdata/certs"
       }
     }
   }
@@ -557,7 +557,7 @@ export filePreviewMissing = frame : filePreview {
 
       emptyDetail {
         width: 420px,
-        contents: "reconnect_test.go was moved or deleted. Go back to the folder and choose another file.",
+        contents: "reconnect.test.ts was moved or deleted. Go back to the folder and choose another file.",
         align: .center
       }
 
@@ -603,7 +603,7 @@ export filePreviewLoading = frame : filePreviewMissing {
       }
 
       emptyDetail {
-        contents: "Reading reconnect_test.go from Windows Desktop."
+        contents: "Reading reconnect.test.ts from Windows Desktop."
       }
 
       emptyHeading {
@@ -626,7 +626,7 @@ export filePreviewBinary = frame : filePreviewMissing {
   head {
     location {
       path {
-        contents: "internal/gateway/testdata/capture.bin"
+        contents: "apps/server/src/testdata/capture.bin"
       }
 
       meta {
@@ -715,7 +715,7 @@ export filePreviewFailed = frame : filePreviewMissing {
       }
 
       emptyDetail {
-        contents: "Could not read reconnect_test.go from Windows Desktop. Try again, or choose another file."
+        contents: "Could not read reconnect.test.ts from Windows Desktop. Try again, or choose another file."
       }
 
       emptyHeading {
