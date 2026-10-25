@@ -48,7 +48,7 @@ export const notifyProjectThread = Effect.fnUntraced(function* (t: Thread, r?: T
   }>`SELECT id FROM project_agents WHERE employee_id=${t.employee_id} AND project_id=${t.project_id}`
   const agentId = agents[0]?.id
   if (!agentId) return
-  if (!r || ['message.withdrawn', 'thread.open_failed'].includes(r.kind)) {
+  if (!r || r.history_unavailable || ['message.withdrawn', 'thread.open_failed'].includes(r.kind)) {
     const failed = yield* sql<{
       id: string
       client_message_id: string

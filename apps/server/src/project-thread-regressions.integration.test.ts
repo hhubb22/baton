@@ -9,6 +9,63 @@ import { executeProjectTool, waitProjectTool, consumeProjectExecInputs } from '.
 import * as threads from './threads.ts'
 import { runtimeRequest } from './project-runtime.ts'
 
+it('notifies a never-dispatched shell withdrawal once when history is unavailable', () =>
+  withTestDatabase(async (db) => {
+    const { context, nodeId, source } = await projectToolFixture(db)
+    const result = await db.run(
+      executeProjectTool(context, 'nodes.exec', {
+        node_id: nodeId,
+        working_directory: '/work',
+        command: 'printf done',
+        wait_seconds: 0,
+      }),
+    )
+    const { thread_id: id } = Schema.decodeUnknownSync(Schema.Struct({ thread_id: Schema.String }))(result.value)
+    await db.run(waitProjectTool(context))
+    await db.run(
+      threads.processReport(source, {
+        type: 'thread.report',
+        thread_id: id,
+        event_id: randomUUID(),
+        worker_seq: 1,
+        kind: 'thread.opened',
+        storage_generation: 'generation',
+      }),
+    )
+    const lost: ThreadReport = {
+      type: 'thread.report',
+      thread_id: id,
+      event_id: randomUUID(),
+      worker_seq: 2,
+      kind: 'thread.unknown',
+      storage_generation: 'generation',
+      history_unavailable: true,
+    }
+    await db.run(threads.processReport(source, lost))
+    await db.run(threads.processReport(source, lost))
+    const state = await db.run(threads.view(context.employeeId, id))
+    expect(state.pending_messages).toEqual([])
+    expect(state.failed_messages?.[0]).toMatchObject({
+      status: 'withdrawn',
+      status_reason: 'history_unavailable_before_dispatch',
+    })
+    const notifications = await db.run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        return yield* sql<{
+          source_type: string
+          payload: Record<string, unknown>
+        }>`SELECT source_type,payload FROM project_agent_input_queue WHERE agent_id=${context.agentId} AND payload->>'thread_id'=${id}`
+      }),
+    )
+    expect(notifications).toEqual([
+      expect.objectContaining({
+        source_type: 'thread_message_failed',
+        payload: expect.objectContaining({ reason: 'history_unavailable_before_dispatch' }),
+      }),
+    ])
+  }))
+
 it('notifies an unknown shell result without a Turn once after its tool wait has ended', async () =>
   withTestDatabase(async (db) => {
     const { context: c, nodeId, source } = await projectToolFixture(db)
@@ -30,7 +87,21 @@ it('notifies an unknown shell result without a Turn once after its tool wait has
         storage_generation: 'generation',
         ...extra,
       })
+      const [opening] = (await db.run(threads.claimCommands())).filter((command) => command.body.thread_id === id)
+      if (!opening) throw new Error('Missing open command')
+      await db.run(
+        threads.processReceipt(source, opening.message_id, {
+          type: 'thread.command_result',
+          thread_id: id,
+          ok: true,
+          storage_generation: 'generation',
+        }),
+      )
       await db.run(threads.processReport(source, report('thread.opened')))
+      const dispatched = await db.run(threads.claimCommands())
+      expect(dispatched.some((command) => command.body.thread_id === id && command.body.action === 'message')).toBe(
+        true,
+      )
       const unknown = () =>
         report('message.unknown', {
           client_message_id: `pa:${c.conversationId}:${mode}:0`,
