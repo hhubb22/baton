@@ -17,6 +17,15 @@ import { IPCError, requestWorker } from './ipc.ts'
 import { workerPaths } from './paths.ts'
 import { FullOutputStore } from '../worker/full-output.ts'
 
+export interface DaemonWorkerHost {
+  ensureWorker(threadId: string): Promise<void>
+  request(
+    threadId: string,
+    request: WorkerRequest,
+    options?: { readonly start?: boolean; readonly timeoutMs?: number },
+  ): Promise<WorkerIPCMessage>
+}
+
 export interface BatondCommand {
   readonly executable: string
   readonly args: ReadonlyArray<string>
@@ -47,7 +56,7 @@ function isMissing(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'ENOENT'
 }
 
-export class LocalWorkerHost {
+export class LocalWorkerHost implements DaemonWorkerHost {
   constructor(
     readonly dataDirectory: string,
     readonly command: BatondCommand = currentBatondCommand(),

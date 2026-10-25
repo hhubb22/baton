@@ -17,15 +17,7 @@ import { workerPaths } from './paths.ts'
 import { contentHash, type NodeLedger, type NodeCommand } from './ledger.ts'
 import { DaemonStorageFailure, ledgerPromise as io } from './storage.ts'
 import { makeWorkerRecovery } from './recovery.ts'
-
-export interface DaemonWorkerHost {
-  ensureWorker(threadId: string): Promise<void>
-  request(
-    threadId: string,
-    request: WorkerRequest,
-    options?: { readonly start?: boolean; readonly timeoutMs?: number },
-  ): Promise<WorkerIPCMessage>
-}
+import type { DaemonWorkerHost } from './host.ts'
 
 class AdmissionRejected extends Error {
   constructor(readonly code: string) {

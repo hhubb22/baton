@@ -20,7 +20,7 @@ import * as Threads from './threads.ts'
 import * as Projects from './projects.ts'
 import * as Inbox from './inbox.ts'
 import { AppError } from './errors.ts'
-import type { HTTPOptions } from './http.ts'
+import type { HTTPOptions } from './http/options.ts'
 
 export const HttpRequestId = Context.Reference<string>('baton/http/RequestId', { defaultValue: () => randomUUID() })
 

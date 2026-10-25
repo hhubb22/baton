@@ -9,7 +9,7 @@ import type WebSocket from 'ws'
 import type { Envelope, Frame, ThreadReport, RuntimeAgent, WorkerRequest, WorkerIPCMessage } from '@baton/protocol'
 import { IPCError } from './ipc.ts'
 import { webSocketText } from './transport.ts'
-import type { DaemonWorkerHost } from './threads.ts'
+import type { DaemonWorkerHost } from './host.ts'
 import { setupDaemon } from '../testing/daemon.ts'
 import type { ProjectManager } from '../project/types.ts'
 

@@ -11,7 +11,7 @@ import {
 import * as Auth from './auth.ts'
 import * as Nodes from './nodes.ts'
 import * as Threads from './threads.ts'
-import type { HTTPOptions } from './http.ts'
+import type { HTTPOptions } from './http/options.ts'
 import { AppError } from './errors.ts'
 import { projectHttpHandlers } from './http-projects.ts'
 import { setThreadSettings } from './http-thread-settings.ts'

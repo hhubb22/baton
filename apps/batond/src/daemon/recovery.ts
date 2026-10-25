@@ -5,7 +5,7 @@ import { openPrivateFile } from '../platform/private.ts'
 import { processLockIsHeld } from '../platform/lock.ts'
 import { contentHash, type DiscoveredWorker, type NodeLedger } from './ledger.ts'
 import { workerPaths } from './paths.ts'
-import type { DaemonWorkerHost } from './threads.ts'
+import type { DaemonWorkerHost } from './host.ts'
 import { DaemonStorageFailure, ledgerPromise as io } from './storage.ts'
 
 export type WorkerRecoveryResult = 'ready' | 'lost' | 'retry'

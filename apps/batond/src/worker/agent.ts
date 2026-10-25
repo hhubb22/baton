@@ -1,7 +1,5 @@
 import type { ThreadAnswerInput, ThreadQuestion, WorkerOpenConfig } from '@baton/protocol'
 import type { Effect, Schema, Stream } from 'effect'
-import type { AgentOutput } from './output.ts'
-export type { AgentOutput } from './output.ts'
 
 export type JsonValue = typeof Schema.Json.Type
 
@@ -43,6 +41,11 @@ export interface AgentEventIdentity {
   readonly nativeSessionId: string
   readonly messageId: string
   readonly executionId: string
+}
+
+export interface AgentOutput extends AgentEventIdentity {
+  readonly text: string
+  readonly gap?: boolean
 }
 
 export type AgentEvent =

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { Effect, Queue, Stream } from 'effect'
-import type { AgentEventIdentity } from './agent.ts'
+import type { AgentEventIdentity, AgentOutput } from './agent.ts'
 import { displayText } from './reports.ts'
 
 export const outputCapacity = 256 * 1024
@@ -65,11 +65,6 @@ export class OutputBuffer {
     this.bytes.copy(result, first, 0, length - first)
     return { ok: true, text: result.toString('utf8'), cursor: `${this.epoch}:${end}`, gap }
   }
-}
-
-export interface AgentOutput extends AgentEventIdentity {
-  readonly text: string
-  readonly gap?: boolean
 }
 
 /** One wake-up and one byte buffer, independent of the number of incoming deltas. */

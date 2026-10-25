@@ -14,8 +14,7 @@ import * as Nodes from './nodes.ts'
 import * as Threads from './threads.ts'
 import * as Projects from './projects.ts'
 import { AppError } from './errors.ts'
-import type { Gateway } from './gateway.ts'
-import type { CredentialSigner } from './nodes.ts'
+import type { HTTPOptions } from './http/options.ts'
 import { httpHandlers } from './http-handlers.ts'
 import {
   authorizeBrowser,
@@ -26,16 +25,6 @@ import {
   newRequestId,
 } from './http-security.ts'
 export { cookieToken } from './http-security.ts'
-
-export interface HTTPOptions {
-  readonly allowedOrigins: ReadonlyArray<string>
-  readonly signer: CredentialSigner
-  readonly sessionTTLSeconds?: number
-  readonly enrollmentTTLSeconds?: number
-  readonly nodeCredentialTTLSeconds?: number
-  readonly webDirectory?: string
-  readonly gateway: () => Gateway
-}
 
 const json = (value: unknown, status = 200) =>
   Response.jsonUnsafe(value, { status, headers: { 'cache-control': 'no-store' } })

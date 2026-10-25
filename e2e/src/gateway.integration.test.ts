@@ -10,7 +10,7 @@ import type { Envelope, Frame, ThreadReport } from '@baton/protocol'
 import { Gateway } from '@baton/server/gateway'
 import { connectWebSocket } from '@baton/batond/daemon/transport'
 import { makeNodeLedger } from '@baton/batond/daemon/ledger'
-import type { DaemonWorkerHost } from '@baton/batond/daemon/threads'
+import type { DaemonWorkerHost } from '@baton/batond/daemon/host'
 import { setupDaemon } from '@baton/batond/testing/daemon'
 
 const cleanup: Array<() => Promise<unknown>> = []

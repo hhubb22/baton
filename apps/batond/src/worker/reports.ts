@@ -1,5 +1,4 @@
 import type { ThreadReport, WorkerIPCMessage } from '@baton/protocol'
-import type { OutboxEntry } from './ledger.ts'
 
 const reportBudget = 120 * 1024
 const replyHalfBudget = 16 * 1024
@@ -59,7 +58,10 @@ export const boundReport = (report: ThreadReport): ThreadReport => {
   }
 }
 
-export const pendingResult = (outbox: readonly OutboxEntry[], after: number): WorkerIPCMessage => {
+export const pendingResult = (
+  outbox: readonly { readonly report: ThreadReport; readonly acked: boolean }[],
+  after: number,
+): WorkerIPCMessage => {
   const reports: ThreadReport[] = []
   for (const entry of outbox) {
     if (entry.acked || entry.report.worker_seq <= after) continue

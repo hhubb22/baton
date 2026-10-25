@@ -15,7 +15,7 @@ import { initialState, makeLedger, type State } from '../worker/ledger.ts'
 import { initializeWorkerDirectory, LocalWorkerHost } from './host.ts'
 import { contentHash, makeNodeLedger, type DiscoveredWorker, type NodeLedger } from './ledger.ts'
 import { inspectWorkerLedger, makeWorkerRecovery } from './recovery.ts'
-import type { DaemonWorkerHost } from './threads.ts'
+import type { DaemonWorkerHost } from './host.ts'
 import { runWorker } from './worker-runner.ts'
 
 const temporary: string[] = []

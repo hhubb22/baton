@@ -12,8 +12,8 @@ import { captureTrace, traceParent, withTraceSpan } from '@baton/telemetry'
 import { Cause, Deferred, Effect, Exit, Fiber, Queue, Schema, Scope, Stream } from 'effect'
 import type { ProcessRecord } from '../platform/process-types.ts'
 import { capabilitiesFor } from '../agents/capabilities.ts'
-import { AgentError, type AgentEvent, type AgentFactory, type InputAcceptance, type ThreadAgent } from './agent.ts'
-import { OutputBuffer, type AgentOutput } from './output.ts'
+import { AgentError, type AgentEvent, type AgentFactory, type AgentOutput, type InputAcceptance, type ThreadAgent } from './agent.ts'
+import { OutputBuffer } from './output.ts'
 import { boundReason, displayText, pendingResult } from './reports.ts'
 import {
   commandAction,
