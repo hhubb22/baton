@@ -3,7 +3,7 @@
 bin
 **/node_modules
 runtimes/project-agent/dist
-internal/webui/dist
+apps/*/dist
 design/renders
 **/.DS_Store
 *.log

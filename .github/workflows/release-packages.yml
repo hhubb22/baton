@@ -91,7 +91,7 @@ jobs:
           mkdir -p bin/releases
           node tools/package-batond.mjs --out bin/package > bin/releases/package-build.json
       - name: Check installed package
-        run: node tools/check-sidecar-package.mjs bin/package > bin/releases/package-check.json
+        run: node tools/check-package.mjs bin/package > bin/releases/package-check.json
       - name: Measure Worker startup and FULL ledger
         run: node tools/ts-migration/worker-startup.mjs 100 --package bin/package --ledger 2000 > bin/releases/worker-startup.json
       - name: Check Windows process recovery

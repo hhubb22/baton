@@ -168,7 +168,7 @@ export async function packageRelease(version, source = resolve(root, 'bin'), out
     await validatePackageLayout(installed)
     validatePackageManifest(await readFile(join(installed, 'package-manifest.json'), 'utf8'), batondVersion)
     const check = JSON.parse(
-      run(process.execPath, [join(root, 'tools/check-sidecar-package.mjs'), installed], { capture: true }),
+      run(process.execPath, [join(root, 'tools/check-package.mjs'), installed], { capture: true }),
     )
     const metadata = JSON.parse(await readFile(join(installed, 'release.json'), 'utf8'))
     if (JSON.stringify(metadata) !== JSON.stringify(release)) throw new Error('解压后的发布信息不匹配')

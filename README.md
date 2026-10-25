@@ -38,7 +38,7 @@ node tools/build.mjs
 
 Coordinator 嵌入 `internal/webui/dist` 中的静态文件，部署中心服务只需 `baton-server`，无需 Node.js、pnpm 或独立前端服务。设备端须保留 `batond` 与同目录的 `sidecars/`，并安装 Node.js 22.19.0 或更高版本；目标设备无需 pnpm 或联网安装 npm 依赖。登录及安装说明见 [Runtime 文档](runtimes/project-agent/README.md)。
 
-`node tools/check-sidecar-package.mjs` 检查统一构建的设备产物：搬到临时目录、隔离 PATH 后验证 Runtime 定位、版本、订阅状态与私有文件读写，并确认缺少 bundle 时返回安装错误。CI 在统一构建后直接执行该检查，同时运行 Web 格式、lint、typecheck 和单元测试。
+`node tools/check-package.mjs` 检查统一构建的设备产物：搬到临时目录、隔离 PATH 后验证 Runtime 定位、版本、订阅状态与私有文件读写，并确认缺少 bundle 时返回安装错误。CI 在统一构建后直接执行该检查，同时运行 Web 格式、lint、typecheck 和单元测试。
 
 发布包使用原生构建产物。运行 `node tools/package-release.mjs v0.1.0-alpha.1`，在 `bin/releases/` 生成当前平台的压缩包及 `.sha256` 校验文件；打包脚本会解压最终附件，再检查 Runtime 定位、订阅状态和私有文件读写。包内含 `baton-server`、`batond`、`sidecars/`、[安装说明](runtimes/INSTALL.md)及记录源码提交的 `release.json`。
 

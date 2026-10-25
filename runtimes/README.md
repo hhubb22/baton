@@ -59,7 +59,7 @@ POSIX 使用私有目录和 `0600` 文件，读取检查所有者、类型和权
 pnpm --filter @baton/batond typecheck
 pnpm --filter '...@baton/batond' --workspace-concurrency=1 test
 pnpm --dir runtimes/project-agent test
-node tools/check-sidecar-package.mjs
+node tools/check-package.mjs
 ```
 
 安装包检查在无源码、空 PATH 和临时 HOME 中运行，覆盖帮助、版本、完整 Worker 到认证 IPC 就绪、四个 Agent 模块加载、Project Runtime stdio 握手与旁置依赖缺失。适配器与模型行为使用本地替身和离线转录验证，不要求真实 API key。

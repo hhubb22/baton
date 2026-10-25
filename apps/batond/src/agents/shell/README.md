@@ -14,7 +14,7 @@ Shell 只用于 Project 的 `nodes.exec`。中心验证工具调用来源，Work
 
 stdout 和 stderr 合并保留开头、结尾各 16 KiB。回复的 `original_bytes` 是合并输出的原始字节数，`truncated` 表示输出是否超过 32 KiB，`metadata.exit_code` 为进程退出码。保留字节含无效 UTF-8、不可展示控制字符或 JSON 转义容量过大时整体以 base64 编码，`metadata.encoding` 为 `base64`。Worker 报告保留完整 base64 文本，不再按编码后的长度裁剪；历史读取返回同一份本机完成结果。
 
-实现和测试依据 Baton `b15fde0` 的 `internal/agent/shell/{adapter,thread,completion}.go`、Go shell 的完成证据与进程回收测试，以及 `specs/project-agent/TECH.md` 第 10 节。此目录没有外部模型转录；测试使用本机 shell、确定性命令、受控事件交付和真实 SQLite。覆盖完成保存后尚未报告的 sent / intent 恢复、证据缺失或不匹配不重发、快命令输出、目录授权、开关重读、进程组取消和 base64 报告。
+测试依据当前 TypeScript 的 shell、Worker、输出与进程回收测试（`index.test.ts`、`../../worker/{index,output}.test.ts`、`../../platform/process.test.ts`），以及 `specs/project-agent/TECH.md` 第 10 节。此目录没有外部模型转录；测试使用本机 shell、确定性命令、受控事件交付和真实 SQLite。覆盖完成保存后尚未报告的 sent / intent 恢复、证据缺失或不匹配不重发、快命令输出、目录授权、开关重读、进程组取消和 base64 报告。
 
 ```sh
 pnpm --dir apps/batond exec vp test run --config ../../vitest.config.ts src/agents/shell/index.test.ts src/worker/index.test.ts src/worker/output.test.ts src/platform/process.test.ts

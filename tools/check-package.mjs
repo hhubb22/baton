@@ -110,7 +110,7 @@ async function runtimeHandshake(executable, options) {
 
 async function main() {
   const args = process.argv.slice(2)
-  const usage = 'Usage: node tools/check-sidecar-package.mjs [installation=bin] [--prepared driver-directory]'
+  const usage = 'Usage: node tools/check-package.mjs [installation=bin] [--prepared driver-directory]'
   if (args.length === 1 && args[0] === '--help') {
     console.log(usage)
     return

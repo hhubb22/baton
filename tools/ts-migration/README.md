@@ -78,11 +78,11 @@ macOS 的默认 `fullfsync=0` 也记录在输出中。这里检查的是 SQLite 
 
 ```sh
 node tools/package-batond.mjs
-node tools/check-sidecar-package.mjs bin
+node tools/check-package.mjs bin
 node tools/ts-migration/worker-startup.mjs 100 --ledger 2000 --package bin
 ```
 
-`check-sidecar-package.mjs [安装目录=bin] [--prepared 驱动目录]` 将完整安装包复制到临时目录，检查符号链接没有指向包外，再以空 PATH、临时 HOME 和包外工作目录执行 SEA。检查内容包括 `--help`、`--version` 的 SEA/平台/架构/Node 信息、真实 Worker 的认证 IPC 就绪、`agent-host --probe` 加载 Cursor/Pi/Codex/Kiro 四个模块及 keyring、tree-sitter 原生扩展、`project-runtime run` 的 stdio 握手、私有文件 helper 与只读订阅探测，以及移走旁置 `node_modules` 后的明确失败。Runtime 握手成功回应 `bootstrap` 和空 `read_events`，收到 `claim_inputs` 后由本地协调者返回结束错误，确认进程以非零状态退出；不交付输入、不调用模型。检查以一个 JSON 对象报告各项结果，任一项失败即非零退出。
+`check-package.mjs [安装目录=bin] [--prepared 驱动目录]` 将完整安装包复制到临时目录，检查符号链接没有指向包外，再以空 PATH、临时 HOME 和包外工作目录执行 SEA。检查内容包括 `--help`、`--version` 的 SEA/平台/架构/Node 信息、真实 Worker 的认证 IPC 就绪、`agent-host --probe` 加载 Cursor/Pi/Codex/Kiro 四个模块及 keyring、tree-sitter 原生扩展、`project-runtime run` 的 stdio 握手、私有文件 helper 与只读订阅探测，以及移走旁置 `node_modules` 后的明确失败。Runtime 握手成功回应 `bootstrap` 和空 `read_events`，收到 `claim_inputs` 后由本地协调者返回结束错误，确认进程以非零状态退出；不交付输入、不调用模型。检查以一个 JSON 对象报告各项结果，任一项失败即非零退出。
 
 `worker-startup.mjs [样本数=100] [--ledger 事务数] --package <安装目录> [--prepared 驱动目录]` 直接测量该安装包，保留可执行文件旁的完整依赖。每个样本启动新 Worker、新建 Thread 与 SQLite 账本，Worker 及子进程继承空 PATH 和临时 HOME。工具本身需要 Node 26；被测 SEA 不依赖系统 Node、源码或提供商凭据。省略 `--package` 时使用 workspace 依赖构建开发 SEA，用于本地诊断；发布验收应传入实际安装包。
 
@@ -132,7 +132,7 @@ docker run --rm --init --pull=never --network none --read-only \
   -w /repo -e TMPDIR=/measure \
   -v "$PWD:/repo:ro" -v "$HOME/.cache/baton/node:/node-cache:ro" \
   -v /tmp/baton-drivers:/prepared:ro -v baton-worker-measure:/measure \
-  baton-cursor-env:latest /repo/tools/check-sidecar-package.mjs \
+  baton-cursor-env:latest /repo/tools/check-package.mjs \
   /repo/bin-linux --prepared /prepared
 docker run --rm --init --pull=never --network none --read-only \
   --entrypoint /node-cache/v26.11.1/node-v26.11.1-linux-arm64/bin/node \

@@ -12,7 +12,7 @@
 ## 本地开发与验证环境
 
 - 所有开发与验证均在本地环境完成，不使用云端开发环境或外部密码管理器依赖。
-- 完整构建与安装包验证：`node --test tools/build.test.mjs`、`node tools/build.mjs`、`node tools/check-sidecar-package.mjs`；统一构建包含前端、Go 二进制和 Project Runtime bundle。
+- 完整构建与安装包验证：`node --test tools/build.test.mjs`、`node tools/build.mjs`、`node tools/check-package.mjs`；统一构建包含前端、Go 二进制和 Project Runtime bundle。
 - Go 验证：`go build ./...`、`go vet ./...`、`go test ./...`（默认使用本地 PostgreSQL 17 测试库 `postgres://postgres:baton@127.0.0.1:5432/baton_test?sslmode=disable`，也可通过 `BATON_TEST_DATABASE_URL` 覆盖）。
 - Project Agent Runtime 验证：在 `runtimes/project-agent/` 运行 `pnpm test`。
 - Web 验证：改动 `web/` 时运行 `pnpm --dir web lint`、`pnpm --dir web typecheck`、`pnpm --dir web test`、`pnpm --dir web build`，构建生成 Go 嵌入所需的静态文件。
