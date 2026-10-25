@@ -1,6 +1,7 @@
 import { mkdir } from 'node:fs/promises'
 import { dirname, isAbsolute, resolve } from 'node:path'
 import { createRequire } from 'node:module'
+import { isSea } from 'node:sea'
 import { fileURLToPath } from 'node:url'
 import { Schema } from 'effect'
 import { hasCode } from './errors.ts'
@@ -13,8 +14,10 @@ const Arguments = Schema.Union([
 const maximum = 64 * 1024
 const failed = () => new Error('credential_private_file_failed')
 
-/** Runtime 源码子进程显式接收 host argv，路径与参数不经过 shell。 */
-export function privateFileHostEnvironment(runtimeEntry: URL): NodeJS.ProcessEnv {
+/** Runtime 子进程显式接收 host argv，路径与参数不经过 shell。 */
+export function privateFileHostEnvironment(runtimeEntry?: URL): NodeJS.ProcessEnv {
+  if (isSea()) return { BATON_SIDECAR_HOST_COMMAND: JSON.stringify({ file: process.execPath, args: [] }) }
+  if (!runtimeEntry) throw new Error('Project Runtime 源码入口未指定')
   const require = createRequire(runtimeEntry)
   return {
     BATON_SIDECAR_HOST_COMMAND: JSON.stringify({
@@ -26,6 +29,11 @@ export function privateFileHostEnvironment(runtimeEntry: URL): NodeJS.ProcessEnv
       ],
     }),
   }
+}
+
+export async function runPrivateFileHostCommand(args: readonly string[]): Promise<void> {
+  process.exitCode = await runPrivateFileHost(args)
+  if (process.exitCode !== 0 && process.exitCode !== 3) process.stderr.write('credential_private_file_failed\n')
 }
 
 export async function runPrivateFileHost(

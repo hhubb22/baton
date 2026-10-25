@@ -204,7 +204,7 @@ export class ProjectRuntime {
           maxRetries: 0,
           sessionId: this.boot.project.conversation.id,
           toolChoice: 'none',
-          signal,
+          ...(signal ? { signal } : {}),
         })
         for await (const _ of stream) {
           /* 等待完整摘要，部分输出不能替换历史。 */
@@ -271,8 +271,10 @@ export class ProjectRuntime {
       if (page.next_after_seq !== after || !page.events?.length) throw new RuntimeError('invalid_event_page')
     }
     this.seq = Math.max(this.boot.last_seq, after)
-    if (!this.boot.compaction && this.boot.compaction_seq)
-      this.boot.compaction = this.events.find((e) => e.seq === this.boot.compaction_seq)
+    if (!this.boot.compaction && this.boot.compaction_seq) {
+      const compaction = this.events.find((e) => e.seq === this.boot.compaction_seq)
+      if (compaction) this.boot.compaction = compaction
+    }
     this.results.clear()
     for (const event of this.events)
       if (event.kind === 'tool_result') {

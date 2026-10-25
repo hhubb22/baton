@@ -7,7 +7,7 @@ export function createDeviceCodeLoginInteraction(
   signal?: AbortSignal,
 ): LoginInteraction {
   return {
-    signal,
+    ...(signal ? { signal } : {}),
     async prompt(question) {
       signal?.throwIfAborted()
       question.signal?.throwIfAborted()
@@ -21,7 +21,7 @@ export function createDeviceCodeLoginInteraction(
         onDeviceCode({
           verificationUri: event.verificationUri,
           userCode: event.userCode,
-          expiresInSeconds: event.expiresInSeconds,
+          ...(event.expiresInSeconds === undefined ? {} : { expiresInSeconds: event.expiresInSeconds }),
         })
       }
     },
@@ -34,7 +34,7 @@ export function createLoginInteraction(
   signal?: AbortSignal,
 ): LoginInteraction {
   return {
-    signal,
+    ...(signal ? { signal } : {}),
     async prompt(question) {
       const promptSignal =
         question.signal && signal ? AbortSignal.any([question.signal, signal]) : (question.signal ?? signal)

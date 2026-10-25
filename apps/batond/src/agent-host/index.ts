@@ -6,11 +6,13 @@ import { runAgentHost, type AgentHostModule } from './host.ts'
 import type { AgentHostPaths } from './host-layer.ts'
 
 const modules: Readonly<Record<string, AgentHostModule>> = {
-  codex: codexAgentHostModule,
   cursor: cursorAgentHostModule,
   pi: piAgentHostModule,
+  codex: codexAgentHostModule,
   kiro: kiroAgentHostModule,
 }
+
+export const agentHostModuleNames = (): string[] => Object.keys(modules)
 
 export const agentHostModule = (agentType: string): AgentHostModule | undefined => modules[agentType]
 

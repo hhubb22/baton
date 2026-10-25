@@ -1,22 +1,61 @@
 import { build } from 'esbuild'
-import { resolve, dirname, join } from 'node:path'
+import { resolve, dirname, join, relative } from 'node:path'
+import { packageDirectory } from '../package-dependencies.mjs'
 import { fileURLToPath } from 'node:url'
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 
-export async function buildBatond(output = join(repository, 'apps/batond/dist/batond.cjs')) {
-  await build({
+export async function buildBatond(output = join(repository, 'apps/batond/dist/batond.cjs'), { onMetafile } = {}) {
+  const result = await build({
     entryPoints: [join(repository, 'apps/batond/src/index.ts')],
     outfile: output,
     bundle: true,
     platform: 'node',
     target: 'node26',
     format: 'cjs',
-    external: ['@cursor/sdk', '@cursor/sdk/*'],
+    external: ['@cursor/sdk', '@cursor/sdk/*', '@napi-rs/keyring'],
+    plugins: [
+      {
+        name: 'disk-pi-modules',
+        setup(builder) {
+          builder.onResolve({ filter: /^@earendil-works\/pi-(ai|agent-core)(\/|$)/ }, async (args) => {
+            if (args.pluginData?.diskPiResolution) return
+            const result = await builder.resolve(args.path, {
+              kind: 'import-statement',
+              resolveDir: join(repository, 'runtimes/project-agent'),
+              pluginData: { diskPiResolution: true },
+            })
+            if (result.errors.length) return { errors: result.errors }
+            const name = args.path.split('/').slice(0, 2).join('/')
+            const root = await packageDirectory(name, join(repository, 'runtimes/project-agent'))
+            return {
+              path: args.path,
+              namespace: 'disk-pi',
+              pluginData: {
+                name,
+                entry: relative(root, result.path).replaceAll('\\', '/'),
+                developmentEntry: result.path,
+              },
+            }
+          })
+          builder.onLoad({ filter: /.*/, namespace: 'disk-pi' }, ({ pluginData }) => ({
+            // Pi exposes import-only entrypoints. Load the resolved ESM file through Node's require(esm),
+            // retaining its on-disk relative imports and model assets in both development and SEA builds.
+            contents: `const entry = require('node:sea').isSea() ? require('node:path').join(require('node:path').dirname(process.execPath), 'node_modules', ${JSON.stringify(pluginData.name)}, ${JSON.stringify(pluginData.entry)}) : ${JSON.stringify(pluginData.developmentEntry)}; module.exports = require(entry);`,
+            loader: 'js',
+          }))
+        },
+      },
+    ],
     define: { 'import.meta.url': '__baton_import_meta_url__' },
-    banner: { js: 'const __baton_import_meta_url__ = require("node:url").pathToFileURL(__filename).href;' },
+    banner: {
+      js: `require = require('node:module').createRequire(require('node:sea').isSea() ? require('node:path').join(require('node:path').dirname(process.execPath), 'package.json') : __filename);
+const __baton_import_meta_url__ = require('node:url').pathToFileURL(__filename).href;`,
+    },
+    metafile: Boolean(onMetafile),
     logLevel: 'silent',
   })
+  if (onMetafile) await onMetafile(result.metafile)
   return output
 }
 

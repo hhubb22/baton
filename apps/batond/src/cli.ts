@@ -1,14 +1,18 @@
 import { randomUUID } from 'node:crypto'
+import { spawn } from 'node:child_process'
 import { realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { createRequire } from 'node:module'
+import { dirname, join } from 'node:path'
 import { parseArgs } from 'node:util'
-import { Schema } from 'effect'
+import { isSea } from 'node:sea'
+import { Effect, Schema } from 'effect'
+import { telemetryLayer } from '@baton/telemetry'
 import { ExecutionTimeoutSeconds, WorkerOpen, type RuntimeAgent, type WorkerRequest } from '@baton/protocol'
 import { LocalWorkerHost, initializeWorkerDirectory } from './daemon/host.ts'
 import { readPrivateFile, writePrivateFileAtomic } from './platform/private.ts'
 
-const usage = `Baton 节点（TypeScript 开发入口）
+const usage = `Baton 节点
 
   up --coordinator <https://中心> [--workspace <绝对目录>]
   register --coordinator <https://中心> [--enrollment-file <私有文件>]
@@ -41,6 +45,164 @@ up/run 支持 --control-timeout-seconds <秒>，认证与同步各默认等待 3
 订阅凭据目录使用 BATON_PROJECT_RUNTIME_DATA_DIR，默认 ~/.baton/project-runtime。
 执行命令支持 --command-id <UUID>；重试时使用同一个 ID。
 open 返回持久接收回执，实际结果通过 command 或 reports 查询。`
+
+export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Promise<void> {
+  const [action, ...args] = argv
+  if (action === '--version') {
+    console.log(JSON.stringify({ sea: isSea(), platform: process.platform, arch: process.arch, node: process.version }))
+    return
+  }
+  if (action === 'agent-host' && args.length === 1 && args[0] === '--probe') {
+    try {
+      const { agentHostModuleNames } = await import('./agent-host/index.ts')
+      const nativeModules: string[] = []
+      if (isSea()) {
+        const load = createRequire(join(dirname(process.execPath), 'package.json'))
+        const keyring = load('@napi-rs/keyring') as { AsyncEntry?: unknown }
+        if (typeof keyring.AsyncEntry !== 'function') throw new Error('keyring native module is incomplete')
+        nativeModules.push('@napi-rs/keyring')
+        const { inspectCursorSdk } = await import('./agents/cursor/sdk-inspection.ts')
+        const sdk = inspectCursorSdk()
+        if (sdk.missingAssets.length) throw new Error('Cursor platform assets are incomplete')
+        const Parser = load(sdk.treeSitter)
+        const parser = new Parser()
+        parser.setLanguage(load(sdk.treeSitterBash))
+        if (parser.parse('echo baton').rootNode.type !== 'program') throw new Error('Cursor parser failed')
+        nativeModules.push('cursor/tree-sitter', 'cursor/tree-sitter-bash')
+      }
+      console.log(JSON.stringify({ agents: agentHostModuleNames(), nativeModules }))
+    } catch {
+      console.error(
+        JSON.stringify({
+          ok: false,
+          code: 'installation_incomplete',
+          message: '无法加载 Agent 模块，请检查安装包旁的 node_modules 目录及其平台依赖。',
+        }),
+      )
+      process.exitCode = 1
+    }
+    return
+  }
+  if (action === 'up' || action === 'register' || action === 'run') {
+    const { runDaemonCLI } = await import('./daemon/cli.ts')
+    await runDaemonCLI(action, args)
+    return
+  }
+  if (action === 'files' || action === 'project-exec') {
+    const { runDeviceCLI } = await import('./devices/cli.ts')
+    await runDeviceCLI(action, args)
+    return
+  }
+  if (action === 'login' || action === 'subscriptions') {
+    const { positionals } = parseArgs({ args, allowPositionals: true, options: {} })
+    if ((action === 'login' && positionals.length !== 1) || (action === 'subscriptions' && positionals.length !== 0))
+      throw new Error('用法：login <openai-codex|xai> 或 subscriptions')
+    const { runProjectCLI } = await import('./project/index.ts')
+    await runProjectCLI(action, positionals[0])
+    return
+  }
+  if (action === 'project-runtime') {
+    if (!isSea()) {
+      const { defaultRuntimeCommand } = await import('./project/runner.ts')
+      const command = defaultRuntimeCommand()
+      const child = spawn(command.file, [...(command.args ?? []), ...args], {
+        stdio: 'inherit',
+        env: { ...process.env, ...command.env },
+        windowsHide: true,
+      })
+      const interrupt = () => child.kill('SIGINT')
+      const terminate = () => child.kill('SIGTERM')
+      process.once('SIGINT', interrupt)
+      process.once('SIGTERM', terminate)
+      try {
+        process.exitCode = await new Promise<number>((resolve, reject) => {
+          child.once('error', reject)
+          child.once('close', (code) => resolve(code ?? 1))
+        })
+      } finally {
+        process.removeListener('SIGINT', interrupt)
+        process.removeListener('SIGTERM', terminate)
+      }
+      return
+    }
+    const { runProjectRuntimeCLI, reportProjectRuntimeError } =
+      await import('../../../runtimes/project-agent/src/command.js')
+    await runProjectRuntimeCLI(args).catch(reportProjectRuntimeError)
+    return
+  }
+  if (action === 'sidecar-file') {
+    const { runPrivateFileHostCommand } = await import('./platform/private-file-host.ts')
+    await runPrivateFileHostCommand(argv)
+    return
+  }
+  if (action === 'watchdog') {
+    const { runWatchdogCommand } = await import('./platform/process.ts')
+    await runWatchdogCommand()
+    return
+  }
+  if (action === 'worker' || action === 'agent-host') {
+    const controller = new AbortController()
+    const stop = () => controller.abort()
+    process.once('SIGINT', stop)
+    process.once('SIGTERM', stop)
+    try {
+      if (action === 'worker') {
+        const { values } = parseArgs({
+          args,
+          options: { 'data-dir': { type: 'string' }, 'thread-id': { type: 'string' } },
+        })
+        if (!values['data-dir'] || !values['thread-id']) throw new Error('Worker needs --data-dir and --thread-id')
+        const { runWorker } = await import('./daemon/worker-runner.ts')
+        await Effect.runPromise(
+          Effect.scoped(runWorker({ dataDirectory: values['data-dir'], threadId: values['thread-id'] })).pipe(
+            Effect.provide(telemetryLayer('baton-worker')),
+          ),
+          { signal: controller.signal },
+        )
+      } else {
+        const { values, positionals } = parseArgs({
+          args,
+          allowPositionals: true,
+          options: { cwd: { type: 'string' }, state: { type: 'string' } },
+        })
+        const agentType = positionals[0]
+        if (!agentType || !values.cwd || !values.state)
+          throw new Error('Agent host needs an Agent type, --cwd and --state')
+        const { runAgentHostCommand } = await import('./agent-host/index.ts')
+        await Effect.runPromise(
+          Effect.scoped(
+            runAgentHostCommand(agentType, { workingDirectory: values.cwd, privateDirectory: values.state }),
+          ),
+          { signal: controller.signal },
+        )
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) throw error
+    } finally {
+      process.removeListener('SIGINT', stop)
+      process.removeListener('SIGTERM', stop)
+    }
+    return
+  }
+  await runLocalCLI(argv)
+}
+
+export function reportBatondError(error: unknown, action = process.argv[2]): void {
+  // SDK diagnostics remain in the isolated host; public errors contain no raw SDK output.
+  console.error(
+    JSON.stringify({
+      ok: false,
+      code: 'batond_failed',
+      message:
+        action === 'worker' || action === 'agent-host' || action === 'watchdog'
+          ? `${action} failed`
+          : error instanceof Error
+            ? error.message
+            : 'Baton 本地命令失败',
+    }),
+  )
+  process.exitCode = 1
+}
 
 export async function runLocalCLI(
   args: string[],

@@ -4,7 +4,7 @@
 
 manager 支持 `command(project_run_start|stop|wake)`、`probe()`、`report()`、`subscriptions()`、`login(provider)`、`startDeviceLogin(provider, signal?, onDone?)` 和幂等 `close()`。连接替换会取消旧请求并清除控制回执能力，现有 Runtime 保留到退出或租约失效。manager 关闭时等待进程树回收及后台操作，随后 Scope 关闭 watchdog 与数据库。
 
-默认命令通过 Runtime 包的 tsx loader 启动 `runtimes/project-agent/src/cli.ts`，支持源码与开发 bundle 两种布局。Windows 默认命令通过结构化 `BATON_SIDECAR_HOST_COMMAND` 调用 TS 私有文件宿主，凭据读写使用 `platform/private-file-host`。`runtimeCommand` 可提供其他本地入口，宿主追加 `probe`、`run`、`login` 或 `login-device`；环境与当前进程合并。业务 Runtime 的模型、工具、恢复与压缩逻辑继续使用原实现。源码入口需要已安装该包的锁定依赖；SEA 子命令分发由安装包阶段完成。
+SEA 默认命令为当前可执行文件加 `project-runtime` 子命令，watchdog 使用同一可执行文件的 `watchdog` 子命令；选择 SEA 分支后不再查找源码或 tsx。源码开发命令通过 Runtime 包的 tsx loader 启动 `runtimes/project-agent/src/cli.ts`，支持源码与开发 bundle 两种布局，需要已安装的锁定依赖。SEA 与 Windows 源码入口通过结构化 `BATON_SIDECAR_HOST_COMMAND` 调用 TS 私有文件宿主，凭据读写使用 `platform/private-file-host`；SEA 凭据实现也可直接用当前可执行文件调用 `sidecar-file`。`runtimeCommand` 可提供其他本地入口，宿主追加 `probe`、`run`、`login` 或 `login-device`；环境与当前进程合并。Runtime 的命令处理导出为 `runProjectRuntimeCLI(args)`，模型、工具、恢复与压缩逻辑保持在 Runtime 内。
 
 Runtime 通过专用 stdio 交换逐行 JSON，每帧最多 192 KiB、最多 8 个在途请求。stdout 消费者在 spawn 后同步挂接；probe 和设备码最多保留 16 KiB，stdio 在进程登记期间有界读取，登记与 SQLite 状态提交完成后才转发业务请求。宿主覆盖 run 和 epoch，只转发业务操作；续租、启动、停止和通知回执由宿主发起。普通 `poll_wake` 合并通用通知；Thread 等待只能使用中心 pending 响应建立的绑定，每 run 最多 64 个绑定。结果返回后删除绑定，并保留同一调用在途响应的最终结果，避免迟到的 pending 恢复绑定。
 

@@ -5,10 +5,13 @@ import { fileURLToPath } from 'node:url'
 import { existsSync } from 'node:fs'
 import lockfile from 'proper-lockfile'
 import { randomUUID } from 'node:crypto'
+import { isSea } from 'node:sea'
 
-const nativeEnabled = () => process.platform === 'win32' || process.env.BATON_SIDECAR_HOST_COMMAND !== undefined
+const nativeEnabled = () =>
+  isSea() || process.platform === 'win32' || process.env.BATON_SIDECAR_HOST_COMMAND !== undefined
 
 function nativeHost(): { file: string; args: string[]; timeout: number } {
+  if (isSea()) return { file: process.execPath, args: [], timeout: 5000 }
   const configured = process.env.BATON_SIDECAR_HOST_COMMAND
   if (configured !== undefined) {
     try {

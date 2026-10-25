@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url'
 import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { randomUUID } from 'node:crypto'
+import { isSea } from 'node:sea'
 import { Schema } from 'effect'
 import { ProjectRuntime, normalizeProjectProvider } from '@baton/protocol'
 import {
@@ -27,6 +28,7 @@ const runtimeEntry = (): URL => {
   return entry
 }
 export const defaultWatchdogCommand = (): ProcessCommand => {
+  if (isSea()) return { file: process.execPath, args: ['watchdog'] }
   const entry = runtimeEntry()
   const require = createRequire(entry)
   return {
@@ -39,6 +41,12 @@ export const defaultWatchdogCommand = (): ProcessCommand => {
   }
 }
 export const defaultRuntimeCommand = (): ProcessCommand => {
+  if (isSea())
+    return {
+      file: process.execPath,
+      args: ['project-runtime'],
+      env: privateFileHostEnvironment(),
+    }
   const entry = runtimeEntry()
   const require = createRequire(entry)
   return {
