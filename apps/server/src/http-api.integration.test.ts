@@ -93,6 +93,9 @@ beforeAll(async () => {
         heldStarted?.()
         await new Promise<never>(() => {})
       }
+      if (input.type === 'node.browse_roots_get') {
+        return { type: 'node.browse_roots_get_result', operation_id: input.operation_id, ok: true, page: { roots: [] } }
+      }
       return {
         type: 'files.browse_result',
         operation_id: input.operation_id,
@@ -189,7 +192,7 @@ it('validates payloads, queries, paths, response shapes and available feature ro
     const response = await request(path)
     expect(response.status).toBe(200)
   }
-  expect((await request(`/api/v1/nodes/${nodeId}/roots`)).status).toBe(404)
+  expect((await request(`/api/v1/nodes/${nodeId}/roots`)).status).toBe(200)
   for (const path of ['/api/v1/missing', '/api/v1/threads/', '/api/v1//threads', '/api/v1/Threads'])
     expect((await request(path)).status, path).toBe(404)
   expect((await request('/api/v1/me', 'HEAD')).status).toBe(404)

@@ -1,18 +1,19 @@
 import { Dialog as BaseDialog } from '@base-ui/react/dialog'
 import * as stylex from '@stylexjs/stylex'
 import { useState, type ReactNode } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { ClientError } from '../data/client'
 import {
-  baseName,
-  fileSize,
-  folderName,
-  parentFolder,
-  previewProblem,
-  readFailure,
-  shortenExcerpt,
-  type PreviewView,
-} from '../data/derive'
-import { useDevices, useFile, useFolders, useProjects, useThreads } from '../data/queries'
-import { previewLimit, type Device, type ID, type Reference } from '../data/types'
+  fileName as baseName,
+  fileName as folderName,
+  fileParent as parentFolder,
+  insideFileFolder,
+  joinFilePath,
+  normalizeFilePath,
+} from '../data/file-paths'
+import { fileSize, previewProblem, readFailure, shortenExcerpt, type PreviewView } from '../data/derive'
+import { useClient, useDevices, useFile, useFolders, useProjects, useThreads } from '../data/queries'
+import type { Device, FilePreview as FilePreviewData, FileReadOptions, ID, Reference } from '../data/types'
 import { fonts, shadow } from '../theme/base.stylex'
 import { text } from '../theme/text'
 import { colors, radius, space } from '../theme/tokens.stylex'
@@ -161,16 +162,10 @@ const styles = stylex.create({
   muted: { color: colors.muted },
 })
 
-function inside(path: string, root: string) {
-  if (path === root) return true
-  const separator = root.includes('\\') ? '\\' : '/'
-  return path.startsWith(root.endsWith(separator) ? root : root + separator)
-}
-
 // 浏览的起点：文件在 Thread 目录里时用 Thread 目录，否则用包含它的允许目录。
-function rootFor(path: string, device: Device | undefined, folder: string | null) {
-  if (folder && inside(path, folder)) return folder
-  return device?.folders.find((root) => inside(path, root)) ?? null
+function rootFor(path: string, roots: string[], folder: string | null) {
+  if (folder && insideFileFolder(path, folder)) return folder
+  return roots.find((root) => insideFileFolder(path, root)) ?? null
 }
 
 export interface PreviewSource {
@@ -197,13 +192,20 @@ export function FilePreview({
   const devices = useDevices()
   const threads = useThreads()
   const device = devices.data?.find((item) => item.id === deviceId)
+  const allowed = useFolders(deviceId, null)
+  const roots = allowed.data?.state === 'ready' ? allowed.data.folders : (device?.folders ?? [])
   const thread = source ? threads.data?.find((item) => item.id === source.threadId) : undefined
   const [file, setFile] = useState<string | null>(path)
   const [dir, setDir] = useState<string | null>(() => parentFolder(path))
-  const root = dir ? rootFor(dir, device, thread?.folder ?? null) : null
+  const root = dir ? rootFor(dir, roots, thread?.folder ?? null) : null
   const current = file ?? dir ?? path
-  const fileRoot = file ? rootFor(file, device, thread?.folder ?? null) : root
-  const shown = fileRoot && current !== fileRoot ? current.slice(fileRoot.length).replace(/^[\\/]/, '') : current
+  const fileRoot = file ? rootFor(file, roots, thread?.folder ?? null) : root
+  const shown =
+    fileRoot && current !== fileRoot
+      ? normalizeFilePath(current, fileRoot)
+          .slice(normalizeFilePath(fileRoot).replace(/\/$/, '').length)
+          .replace(/^\//, '')
+      : current
   const preview = useFile(deviceId, file)
   const size = file && preview.data ? preview.data.size : null
   const meta = [device?.name ?? 'Removed device', fileRoot, size !== null ? fileSize(size) : null].filter(Boolean)
@@ -242,7 +244,7 @@ export function FilePreview({
             />
             {file ? (
               <FileContent
-                key={file}
+                key={`${deviceId}:${file}:${preview.dataUpdatedAt}`}
                 deviceId={deviceId}
                 path={file}
                 device={device}
@@ -286,10 +288,10 @@ function FolderPane({
   const crumbs: { label: string; path: string | null }[] = [{ label: 'Allowed folders', path: null }]
   if (root && dir) {
     crumbs.splice(0, 1, { label: folderName(root), path: root })
-    const rest = dir.slice(root.length).split(/[\\/]/).filter(Boolean)
+    const rest = normalizeFilePath(dir, root).slice(normalizeFilePath(root).length).split('/').filter(Boolean)
     let at = root
     for (const part of rest) {
-      at = `${at}${at.includes('\\') ? '\\' : '/'}${part}`
+      at = joinFilePath(at, part)
       crumbs.push({ label: part, path: at })
     }
   }
@@ -380,7 +382,19 @@ function FolderPane({
                 <span {...stylex.props(text.caption, styles.rowSize)}>{fileSize(entry.size)}</span>
               </button>
             ))}
-            {data.folders.length === 0 && data.files.length === 0 && (
+            {data.scanLimited && (
+              <p role="status" {...stylex.props(text.caption, styles.navNote)}>
+                Folder scan limited. Some entries may be missing.{' '}
+                <button
+                  type="button"
+                  onClick={() => void listing.refetch()}
+                  {...stylex.props(text.caption, styles.crumb, focusRing.ring)}
+                >
+                  Retry
+                </button>
+              </p>
+            )}
+            {!data.scanLimited && data.folders.length === 0 && data.files.length === 0 && (
               <p {...stylex.props(text.caption, styles.navNote)}>This folder is empty</p>
             )}
           </>
@@ -442,6 +456,21 @@ function FileContent({
   const projects = useProjects()
   const canAsk = !!projectId && projects.data?.find((item) => item.id === projectId)?.status !== 'archived'
   const [selected, setSelected] = useState<{ from: number; to: number } | null>(null)
+  const client = useClient()
+  const [appended, setAppended] = useState<FilePreviewData | null>(null)
+  const current = appended ?? preview.data
+  const continuation = useMutation({
+    mutationFn: async (options: FileReadOptions) => {
+      const next = await client.readFile(deviceId, path, options)
+      if (next.state !== 'ready' || current?.state !== 'ready') return next
+      if (next.version !== current.version)
+        throw new ClientError('conflict', 'The file changed. Reload it to continue reading.')
+      if (next.offset !== options.offset)
+        throw new ClientError('unavailable', 'The device returned an invalid file fragment.')
+      return { ...next, offset: 0, content: current.content + next.content }
+    },
+    onSuccess: setAppended,
+  })
 
   const failed = (view: PreviewView, icon: 'alert' | 'offline' | 'file' | 'lock') => (
     <State
@@ -467,10 +496,24 @@ function FileContent({
     body = <State icon="file" title={`Loading ${baseName(path)}…`} />
   } else if (preview.isError) {
     body = failed(readFailure(path, device), 'alert')
-  } else if (preview.data.state === 'unavailable') {
-    body = failed(previewProblem(preview.data, device)!, problemIcons[preview.data.reason])
-  } else {
-    const data = preview.data
+  } else if (continuation.error instanceof ClientError && continuation.error.code === 'conflict') {
+    body = (
+      <State
+        icon="alert"
+        title="File changed"
+        detail="Reload this file to continue reading its latest version."
+        action={
+          <Button small onClick={() => void preview.refetch()}>
+            Reload file
+          </Button>
+        }
+      />
+    )
+  } else if (current?.state === 'unavailable') {
+    const problem = previewProblem(current, device)
+    body = problem && failed(problem, problemIcons[current.reason])
+  } else if (current?.state === 'ready') {
+    const data = current
     const lines = data.content.replace(/\n$/, '').split('\n')
     const describe = (range: Range) => {
       const lineOf = (node: Node) => {
@@ -528,7 +571,26 @@ function FileContent({
             })}
           </div>
           {data.truncated && (
-            <div {...stylex.props(text.caption, styles.divider)}>Showing first {fileSize(previewLimit)}</div>
+            <div {...stylex.props(text.caption, styles.divider)}>
+              Showing first {fileSize(new TextEncoder().encode(data.content).length)}
+            </div>
+          )}
+          {continuation.isError && (
+            <p role="alert" {...stylex.props(text.caption, styles.navNote)}>
+              Could not read more of this file. Try again.
+            </p>
+          )}
+          {data.nextOffset != null && (
+            <Button
+              small
+              aria-disabled={continuation.isPending || undefined}
+              onClick={() => {
+                if (!continuation.isPending && data.nextOffset != null)
+                  continuation.mutate({ offset: data.nextOffset, version: data.version })
+              }}
+            >
+              {continuation.isPending ? 'Reading…' : 'Continue reading'}
+            </Button>
           )}
         </SelectionArea>
         {selected && (

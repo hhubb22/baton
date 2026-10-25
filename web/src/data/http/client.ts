@@ -292,6 +292,23 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
       return { account: null, defaultDeviceId: null, ended: null }
     },
     listDevices,
+    async listDeviceFolders(deviceId) {
+      const folders: string[] = []
+      const cursors = new Set<string>()
+      let cursor: string | undefined
+      do {
+        const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''
+        const page = await request<{ roots: { root_id: string; path: string }[]; next_cursor?: string }>(
+          `/nodes/${apiPath(deviceId)}/roots${query}`,
+        )
+        folders.push(...page.roots.map((root) => root.path))
+        cursor = page.next_cursor
+        if (cursor && (cursors.has(cursor) || !page.roots.length))
+          throw new ClientError('unavailable', 'Could not read all allowed folders. Try again.')
+        if (cursor) cursors.add(cursor)
+      } while (cursor)
+      return folders
+    },
     async getOperation(id) {
       const found = operations.get(id)
       if (!found)

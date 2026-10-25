@@ -4,7 +4,7 @@ import { BatonHttpApi, HttpErrors, httpOpenApi } from '../src/http-api.ts'
 
 it('generates schemas, statuses and cookie security for every implemented HTTP endpoint', () => {
   const endpoints = Object.values(BatonHttpApi.groups).flatMap((group) => Object.values(group.endpoints))
-  expect(endpoints).toHaveLength(49)
+  expect(endpoints).toHaveLength(50)
   const document = httpOpenApi()
   expect(document.info.title).toBe('Baton HTTP API')
   expect(document.paths['/api/v1/login']?.post?.requestBody).toMatchObject({ required: true })
@@ -16,6 +16,8 @@ it('generates schemas, statuses and cookie security for every implemented HTTP e
   expect(document.paths['/api/v1/projects']?.post?.responses).toHaveProperty('201')
   expect(document.paths['/api/v1/projects/{projectId}/messages']?.post?.responses).toHaveProperty('202')
   expect(document.paths['/api/v1/attention-requests/{requestId}/answer']?.post?.responses).toHaveProperty('409')
+  expect(document.paths['/api/v1/nodes/{nodeId}/roots']?.get?.responses).toHaveProperty('200')
+  expect(document.paths['/api/v1/nodes/{nodeId}/roots']?.get?.security).toEqual([{ session: [] }])
   expect(document.paths['/api/v1/nodes/{nodeId}/roots']?.delete?.requestBody).toMatchObject({ required: true })
   expect(document.paths['/api/v1/nodes']?.get?.security).toEqual([{ session: [] }])
   expect(document.components.securitySchemes.session).toMatchObject({

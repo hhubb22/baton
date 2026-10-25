@@ -4,6 +4,8 @@ import { MaxMessageBytes } from './constants.ts'
 import {
   BrowseRootsRequest,
   BrowseRootsResult,
+  BrowseRootsGetRequest,
+  BrowseRootsGetResult,
   Envelope,
   FileRequest,
   FileResult,
@@ -60,6 +62,7 @@ export const NodeToControlBody = Schema.Union([
   SessionResult,
   ProjectExecResult,
   BrowseRootsResult,
+  BrowseRootsGetResult,
   SubscriptionLoginResult,
   ProjectRuntimeRequest,
 ])
@@ -73,6 +76,7 @@ export const ControlToNodeBody = Schema.Union([
   SessionRequest,
   ProjectExecRequest,
   BrowseRootsRequest,
+  BrowseRootsGetRequest,
   SubscriptionLoginRequest,
   ProjectRunCommand,
   ProjectRuntimeResult,

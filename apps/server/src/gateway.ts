@@ -17,6 +17,7 @@ const rpcResponses = new Map([
   ['session.request', 'session.result'],
   ['node.project_exec_set', 'node.project_exec_result'],
   ['node.browse_roots_set', 'node.browse_roots_result'],
+  ['node.browse_roots_get', 'node.browse_roots_get_result'],
   ['node.subscription_login', 'node.subscription_login_result'],
 ])
 const defaultRPCTimeouts: Readonly<Record<string, number>> = {
@@ -337,6 +338,7 @@ export class Gateway {
               'files.browse_result',
               'node.project_exec_result',
               'node.browse_roots_result',
+              'node.browse_roots_get_result',
               'node.subscription_login_result',
               'project_runtime.request',
             ].includes(body.type)
@@ -369,6 +371,7 @@ export class Gateway {
             body.type === 'files.browse_result' ||
             body.type === 'node.project_exec_result' ||
             body.type === 'node.browse_roots_result' ||
+            body.type === 'node.browse_roots_get_result' ||
             body.type === 'node.subscription_login_result'
           ) {
             await this.handlers.validate(current.source)

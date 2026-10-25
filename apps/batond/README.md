@@ -57,7 +57,7 @@ pnpm --filter @baton/batond dev project-exec --enabled=true --shell /bin/sh
 pnpm --filter @baton/batond dev project-exec --enabled=false
 ```
 
-目录和执行开关使用与 daemon 相同的 `--data-dir`，配置通过私有文件锁与原子替换保存。重复添加同一真实目录返回已有记录；移除全部目录后保留空列表。在线设备也可在网页保存这些设置，中心等待本机确认后才显示成功。`browse-roots.json` 的 `maxRoots` 默认 256，可配置为 1～4096 的整数；修改目录时保留该设置。例如 `{"maxRoots":512,"roots":[{"id":"dev","path":"/绝对路径/工作目录"}]}`。每个目录仍须逐项授权，设备报告仍保留 64 KiB 总容量限制，超限时裁剪仓库、模型和目录并标记 `truncated`；本地授权清单保留全部目录。网页依赖报告的目录列表可能缺项，完整清单可用本地 `files list` 查询，目录清单尚不支持传输分页。
+目录和执行开关使用与 daemon 相同的 `--data-dir`，配置通过私有文件锁与原子替换保存。重复添加同一真实目录返回已有记录；移除全部目录后保留空列表。在线设备也可在网页保存这些设置，中心等待本机确认后才显示成功。`browse-roots.json` 的 `maxRoots` 默认 256，可配置为 1～4096 的整数；修改目录时保留该设置。例如 `{"maxRoots":512,"roots":[{"id":"dev","path":"/绝对路径/工作目录"}]}`。每个目录仍须逐项授权，设备报告仍保留 64 KiB 总容量限制，超限时裁剪仓库、模型和目录并标记 `truncated`；本地授权清单保留全部目录。网页 Devices 展开设备后通过独立管理请求分页读取全部授权目录，每页 JSON 不超过 48 KiB；本地 `files list` 也可查询完整清单。翻页期间清单变化会提示重新读取。目录增删的确认响应返回有界摘要，随后刷新完整清单。
 
 命令执行默认关闭。开启后，Project Agent 以设备用户身份执行任意命令；Baton 不提供沙箱，目录授权限制命令启动位置。每条命令和输出保存在 Thread 中。受限 shell 只允许 `nodes.exec` 创建一个 Turn，默认执行时限 7200 秒，等待结果的时间与命令时限分别计算。完成记录、未知结果及输出编码见 [shell 文档](src/agents/shell/README.md)。
 

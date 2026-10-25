@@ -41,7 +41,7 @@ export interface World {
   messages: Message[]
   inbox: InboxItem[]
   operations: Operation[]
-  // 设备上的文件，键为 `设备 ID:路径`。text 为 null 表示二进制文件；大文件只存开头，size 是完整大小。
+  // 设备上的文件，键为 `设备 ID:路径`。text 为 null 表示二进制文件，文本文件保存完整内容。
   files: Record<string, DeviceFile>
   // 设备上保存的每轮回复过程，键为回复的消息 ID。
   traces: Record<ID, TraceStep[]>

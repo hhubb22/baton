@@ -245,6 +245,8 @@ Project 标题或目标被修改后，新的系统提示词从下一次压缩起
 | `devices.list` | 只读 | 列出本人设备、在线状态和能力报告 | 自身 |
 | `threads.create` | 写入 | 新建一个 Thread 并发出第一条消息，参数见第 9 节 | `threads.list`、`threads.get` |
 | `threads.send` | 写入 | 向本 Project 的一个 Thread 发消息，选择排队或插入 | `threads.get` |
+| `threads.withdraw` | 写入 | 撤回本 Project Thread 中尚未发送的消息 | `threads.get` |
+| `threads.resume` | 写入 | 显式恢复本 Project 已打开的 Thread | `threads.get` |
 | `threads.stop` | 写入 | 停止一个 Thread 当前的一轮 | `threads.get` |
 | `threads.archive` | 写入 | 归档一个 Thread | `threads.get` |
 | `threads.list` | 只读 | 列出本 Project 的 Thread，可按状态筛选 | 自身 |
@@ -280,7 +282,8 @@ Project 标题或目标被修改后，新的系统提示词从下一次压缩起
 | `devices.list` | 可选 `after_id` |
 | `threads.create` | `node_id`、`agent_type`、`working_directory`、`message`；可选 `model`、`execution_timeout_seconds` |
 | `threads.send` | `thread_id`、`message`；可选 `mode`（`queue` / `steer`，默认 `queue`）、`model` |
-| `threads.stop`、`threads.archive`、`threads.get` | `thread_id` |
+| `threads.withdraw` | `thread_id`、`message_id`（消息记录 UUID，从 `threads.get.pending_messages` 取得） |
+| `threads.resume`、`threads.stop`、`threads.archive`、`threads.get` | `thread_id` |
 | `threads.list` | 可选 `status`、`after_id` |
 | `threads.read` | `thread_id`；可选 `after_turn`、`through_turn` |
 | `nodes.exec` | 第 10 节 |
@@ -311,7 +314,7 @@ batond 在连接时和能力变化时上报 `node_runtime_reports.report`，结�
 }
 ```
 
-`exec.enabled` 来自 batond 本地配置里的「允许 Project Agent 执行命令」开关，默认关闭；`exec.shell` 是该节点执行命令使用的 shell，`exec.user` 为采集时读取的节点运行用户，获取失败时省略。`roots` 来自用户在节点上授权的目录，沿用 `batond files` 的登记。`browse-roots.json` 的 `maxRoots` 默认 256，可设置为 1～4096，添加目录仍逐条授权；报告保留 64 KiB 总容量限制，超出时标记截断。`up` / `run` 在浏览配置文件不存在时默认登记有效的用户主目录，已有空列表保留。`node.browse_roots_set` 的 `{operation_id,action,path}` 支持 add / remove，设备解析真实路径并幂等添加或按路径、标识移除，保存成功后扫描并以 `node.browse_roots_result` 返回最新 roots / repos，同时触发能力报告刷新。`roots` 上报真实路径，因为 Thread 的 `working_directory` 本来就是目标节点上的路径；Web 文件浏览仍只用 `root_id` 和相对路径。`repos` 是在授权目录内有限深度扫描得到的 Git 仓库，上报路径和去掉凭据的 origin，不上传文件内容。`provider.status` 为 available / login_required / unknown，凭据不离开设备；可选 `reason` 只包含安全错误类别。`project_runtime` 还可包含 `max_concurrent_projects`、`probed_at`、`stale` 和 `probe_error`，用于共享有效并发配置和探测诊断。
+`exec.enabled` 来自 batond 本地配置里的「允许 Project Agent 执行命令」开关，默认关闭；`exec.shell` 是该节点执行命令使用的 shell，`exec.user` 为采集时读取的节点运行用户，获取失败时省略。`roots` 来自用户在节点上授权的目录，沿用 `batond files` 的登记。`browse-roots.json` 的 `maxRoots` 默认 256，可设置为 1～4096，添加目录仍逐条授权；报告保留 64 KiB 总容量限制，超出时标记截断。`up` / `run` 在浏览配置文件不存在时默认登记有效的用户主目录，已有空列表保留。`node.browse_roots_set` 的 `{operation_id,action,path}` 支持 add / remove，设备解析真实路径并幂等添加或按路径、标识移除，保存成功后扫描并以 `node.browse_roots_result` 返回 48 KiB 预算内的 roots / repos 摘要，省略内容时标记 `truncated`，同时触发能力报告刷新。`node.browse_roots_get` 的 `{operation_id,cursor?}` 独立读取完整授权清单；`node.browse_roots_get_result` 返回 `{operation_id,ok,page:{roots,next_cursor?}}`，每页 JSON 不超过 48 KiB，完整管理响应不超过 64 KiB。游标绑定清单内容的 SHA-256 和下一项位置，清单变化返回 `roots_changed`；网页从第一页重读。`roots` 上报真实路径，因为 Thread 的 `working_directory` 本来就是目标节点上的路径；Web 文件浏览仍只用 `root_id` 和相对路径。`repos` 是在授权目录内有限深度扫描得到的 Git 仓库，上报路径和去掉凭据的 origin，不上传文件内容。`provider.status` 为 available / login_required / unknown，凭据不离开设备；可选 `reason` 只包含安全错误类别。`project_runtime` 还可包含 `max_concurrent_projects`、`probed_at`、`stale` 和 `probe_error`，用于共享有效并发配置和探测诊断。
 
 `devices.list` 把这些报告交给 Project Agent，它据此选择工作目录。
 
@@ -330,6 +333,8 @@ batond 通过 Gateway 的控制队列传送 `node.runtime_report`，正文为 `{
 **新建。** `threads.create` 在 `call_tool` 的事务里调用与员工 API 相同的 Store 入口：`client_thread_id` 为 `pa:{conversation_id}:{tool_call_id}`，第一条消息的 `client_message_id` 为 `pa:{conversation_id}:{tool_call_id}:0`，并写入 `project_id`、`origin_conversation_id`、`origin_tool_call_id`。目标节点、目录、Agent 和模型的校验与员工新建相同（Baton R-07）；`agent_type` 不能是 `shell`，命令只能通过 `nodes.exec` 执行。事务只保存 Thread、消息意图和 outbox，设备收到后才开始执行；工具结果返回 Thread ID 和状态，不等待回复。
 
 **发消息、停止、归档。** `threads.send` 的 `client_message_id` 为 `pa:{conversation_id}:{tool_call_id}`。目标 Thread 必须属于本 Project。`mode=steer` 在 Agent 不支持时返回 `is_error`。`threads.stop`、`threads.archive` 与员工操作走同一入口，操作者记为 Project Agent。
+
+**撤回与恢复。** `threads.withdraw`、`threads.resume` 在工具事务中先按员工身份锁定目标 Thread 并校验本 Project 归属，再调用中心既有的撤回、恢复入口。撤回只接受 `accepted`、`queued`，已撤回时返回现状，已发送或 `unknown` 时拒绝；待处理的同一消息撤回命令只保存一条。工具返回 `thread_id`、`message_id`、Thread 当前 `status` 和 `read_tool: threads.get`，表示撤回请求已保存，最终消息状态由设备报告确认。恢复要求 Thread 已打开且有存储代次，状态为 `idle`、`stopped` 或 `unknown`，没有归档请求且停止已确认，并通过设备能力与目录权限检查；shell Thread 不支持恢复。已有待处理恢复命令时复用它，返回 Thread ID、当前状态及 `threads.get` 入口，不重发历史消息。两者沿用 `call_tool` 的租约、已保存调用和结果幂等校验。
 
 锁顺序为 `project_agents` → `conversations` → `threads` → `thread_outbox`。员工 API 只锁 `threads` → `thread_outbox`，不形成环。
 

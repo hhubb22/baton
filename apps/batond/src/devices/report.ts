@@ -1,7 +1,7 @@
-import type { RuntimeReport } from '@baton/protocol'
+import { jsonBytes, type RuntimeReport } from '@baton/protocol'
 
-/** 缩进 JSON 为 jsonb 空格预留容量，先裁仓库，再裁模型，最后裁目录。 */
-export function boundRuntimeReport(report: RuntimeReport): RuntimeReport {
+/** 按报告 Schema 的缩进和字符转义计量，先裁仓库，再裁模型，最后裁目录。 */
+export function boundRuntimeReport(report: RuntimeReport, maxBytes = 64 * 1024): RuntimeReport {
   const roots = [...(report.roots ?? [])],
     repos = [...(report.repos ?? [])]
   const agents = (report.agents ?? []).map((agent) => ({ ...agent, models: [...(agent.models ?? [])] }))
@@ -16,7 +16,7 @@ export function boundRuntimeReport(report: RuntimeReport): RuntimeReport {
     ...(report.agents ? { agents } : {}),
     ...(report.project_runtime ? { project_runtime: { ...report.project_runtime, providers } } : {}),
   }
-  const tooLarge = () => Buffer.byteLength(JSON.stringify(bounded, null, 1)) > 64 * 1024
+  const tooLarge = () => jsonBytes(bounded, 1, true) > maxBytes
   if (!tooLarge()) return bounded
   bounded = { ...bounded, truncated: true }
   while (tooLarge() && repos.length) repos.pop()

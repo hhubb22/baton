@@ -891,6 +891,86 @@ describe('HTTP thread contracts', () => {
 })
 
 describe('HTTP file contracts', () => {
+  it('collects all root pages before locating a file', async () => {
+    const { api } = setup((url) => {
+      if (url.searchParams.has('root_id')) {
+        expect(url.searchParams.get('root_id')).toBe('later-root')
+        return { kind: 'file', size: 4, content: 'text', offset: 0, version: 'v1', truncated: false }
+      }
+      return url.searchParams.has('cursor')
+        ? { kind: 'roots', roots: [{ id: 'later-root', path: '/later' }], truncated: false }
+        : { ...rootResponse, next_cursor: 'roots/+2', truncated: true }
+    })
+    expect(await api.listFolders(deviceId, null)).toMatchObject({ folders: ['/work', '/later'] })
+    expect(await api.readFile(deviceId, '/later/file')).toMatchObject({ state: 'ready', content: 'text' })
+  })
+
+  it('continues a file with its byte offset and version and reports changes', async () => {
+    let changed = false
+    const { api } = setup((url) => {
+      if (!url.searchParams.has('root_id')) return rootResponse
+      expect(url.searchParams.get('offset')).toBe('6')
+      expect(url.searchParams.get('version')).toBe('version/+1')
+      return changed
+        ? Response.json({ code: 'file_changed' }, { status: 409 })
+        : { kind: 'file', size: 12, content: '中文', offset: 6, version: 'version/+1', truncated: false }
+    })
+    const options = { offset: 6, version: 'version/+1' }
+    expect(await api.readFile(deviceId, '/work/file', options)).toMatchObject({
+      state: 'ready',
+      content: '中文',
+      offset: 6,
+      version: options.version,
+    })
+    changed = true
+    await expect(api.readFile(deviceId, '/work/file', options)).rejects.toMatchObject({ code: 'conflict' })
+  })
+
+  it('rejects a fragment from another version', async () => {
+    const { api } = setup((url) =>
+      url.searchParams.has('root_id')
+        ? { kind: 'file', size: 20, content: 'changed', offset: 6, version: 'v2', truncated: false }
+        : rootResponse,
+    )
+    await expect(api.readFile(deviceId, '/work/file', { offset: 6, version: 'v1' })).rejects.toMatchObject({
+      code: 'conflict',
+    })
+  })
+
+  it.each([
+    { root: '/work', path: '/work/name:part\\literal/file:part\\name', relative: 'name:part\\literal/file:part\\name' },
+    { root: 'C:\\work', path: 'C:\\work\\folder\\file', relative: 'folder/file' },
+    { root: '\\\\host\\share', path: '\\\\host\\share\\folder\\file', relative: 'folder/file' },
+    { root: '/', path: '/file:part\\name', relative: 'file:part\\name' },
+  ])('encodes paths according to the root $root', async ({ root, path, relative }) => {
+    const { api } = setup((url) => {
+      if (!url.searchParams.has('root_id')) return { ...rootResponse, roots: [{ id: 'root-id', path: root }] }
+      expect(url.searchParams.get('path')).toBe(relative)
+      return { kind: 'file', size: 4, content: 'text', offset: 0, version: 'v1', truncated: false }
+    })
+    expect(await api.readFile(deviceId, path)).toMatchObject({ state: 'ready', content: 'text' })
+  })
+
+  it('keeps entries while following a cursor past a limited scan', async () => {
+    const { api } = setup((url) => {
+      if (!url.searchParams.has('root_id')) return rootResponse
+      return url.searchParams.has('cursor')
+        ? { kind: 'directory', entries: [{ name: 'later', kind: 'directory' }], truncated: false }
+        : {
+            kind: 'directory',
+            entries: [{ name: 'first', kind: 'directory' }],
+            truncated: true,
+            next_cursor: 'scan:4096/next',
+            remainder: { scan_limited: true },
+          }
+    })
+    expect(await api.listFolders(deviceId, '/work')).toMatchObject({
+      state: 'ready',
+      folders: ['/work/first', '/work/later'],
+      scanLimited: false,
+    })
+  })
+
   it('lists real root paths and follows every directory cursor', async () => {
     const { api, fetcher } = setup((url) => {
       if (!url.searchParams.has('root_id')) return rootResponse
@@ -907,6 +987,7 @@ describe('HTTP file contracts', () => {
       path: '/work/baton',
       folders: ['/work/baton/src'],
       files: [{ path: '/work/baton/README.md', size: 31 }],
+      scanLimited: false,
     })
     expect(fetcher.mock.calls.some(([url]) => requestURL(url).includes('cursor=page%2F%2B2'))).toBe(true)
   })
@@ -914,7 +995,15 @@ describe('HTTP file contracts', () => {
   it('maps text preview size and truncation without filling content', async () => {
     const { api } = setup((url) =>
       url.searchParams.has('root_id')
-        ? { kind: 'file', size: 100000, content: 'Actual prefix', truncated: true }
+        ? {
+            kind: 'file',
+            size: 100000,
+            content: 'Actual prefix',
+            truncated: true,
+            offset: 0,
+            version: 'v1',
+            next_offset: 13,
+          }
         : rootResponse,
     )
     expect(await api.readFile(deviceId, '/work/file.txt')).toEqual({
@@ -924,6 +1013,9 @@ describe('HTTP file contracts', () => {
       size: 100000,
       content: 'Actual prefix',
       truncated: true,
+      offset: 0,
+      version: 'v1',
+      nextOffset: 13,
     })
   })
 
@@ -957,11 +1049,58 @@ describe('HTTP file contracts', () => {
     expect(fetcher.mock.calls.every(([url]) => !requestURL(url).includes('root_id='))).toBe(true)
   })
 
-  it('preserves transient failures and refuses an incomplete directory scan', async () => {
+  it.each(['directory_changed', 'node_unavailable'])('keeps earlier directory pages after %s', async (code) => {
+    const { api } = setup((url) => {
+      if (!url.searchParams.has('root_id')) return rootResponse
+      return url.searchParams.has('cursor')
+        ? Response.json({ code }, { status: 409 })
+        : {
+            kind: 'directory',
+            entries: [{ name: 'kept', kind: 'directory' }],
+            truncated: true,
+            next_cursor: 'v1:4096:hash',
+          }
+    })
+    expect(await api.listFolders(deviceId, '/work')).toMatchObject({
+      state: 'ready',
+      folders: ['/work/kept'],
+      scanLimited: true,
+    })
+  })
+
+  it('keeps earlier roots when a later root page fails', async () => {
+    const { api } = setup((url) =>
+      url.searchParams.has('cursor')
+        ? Response.json({ code: 'roots_changed' }, { status: 409 })
+        : { ...rootResponse, next_cursor: 'v1:200:hash', truncated: true },
+    )
+    expect(await api.listFolders(deviceId, null)).toMatchObject({
+      state: 'ready',
+      folders: ['/work'],
+      scanLimited: true,
+    })
+  })
+
+  it('preserves transient failures and keeps entries from an incomplete directory scan', async () => {
     let response: unknown = Response.json({ code: 'node_unavailable' }, { status: 503 })
     const { api } = setup((url) => (url.searchParams.has('root_id') ? response : rootResponse))
     await expect(api.readFile(deviceId, '/work/file')).rejects.toMatchObject({ code: 'unavailable' })
-    response = { kind: 'directory', entries: [], truncated: true, remainder: { scan_limited: true } }
-    await expect(api.listFolders(deviceId, '/work/baton')).rejects.toMatchObject({ code: 'unavailable' })
+    response = { kind: 'directory', entries: [{ name: 'kept', kind: 'directory' }], truncated: true }
+    expect(await api.listFolders(deviceId, '/work/baton')).toMatchObject({
+      state: 'ready',
+      folders: ['/work/baton/kept'],
+      scanLimited: true,
+    })
+    response = {
+      kind: 'directory',
+      entries: [{ name: 'kept', kind: 'directory' }],
+      truncated: false,
+      remainder: { scan_limited: true },
+    }
+    expect(await api.listFolders(deviceId, '/work/baton')).toMatchObject({
+      state: 'ready',
+      folders: ['/work/baton/kept'],
+      scanLimited: true,
+    })
   })
 })

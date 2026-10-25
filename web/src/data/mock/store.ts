@@ -1,5 +1,6 @@
 import { ClientError, type ChangeEvent, type Topic } from '../client'
 import { subscriptionName } from '../http/client'
+import { insideFileFolder, fileParent } from '../file-paths'
 import {
   agentNames,
   assistantBlock,
@@ -26,6 +27,7 @@ import type {
   MemoryNote,
   ProcessStep,
   FilePreview,
+  FileReadOptions,
   ItemDecision,
   InboxItem,
   LiveOutput,
@@ -87,10 +89,6 @@ function separator(path: string) {
 
 export function insideFolder(path: string, root: string) {
   return path === root || path.startsWith(root.endsWith(separator(root)) ? root : root + separator(root))
-}
-
-function parentFolder(path: string) {
-  return path.slice(0, path.lastIndexOf(separator(path)))
 }
 
 // 新对话的标题取第一条消息的第一行。
@@ -1773,19 +1771,19 @@ ${response}`,
   listFolders(deviceId: ID, path: string | null): FolderListing {
     const device = this.device(deviceId)
     if (device.connection !== 'online') return { state: 'unavailable', deviceId, path, reason: device.connection }
-    if (path === null) return { state: 'ready', deviceId, path, folders: device.folders, files: [] }
-    if (!device.folders.some((root) => insideFolder(path, root))) {
+    if (path === null) return { state: 'ready', deviceId, path, folders: device.folders, files: [], scanLimited: false }
+    if (!device.folders.some((root) => insideFileFolder(path, root))) {
       return { state: 'unavailable', deviceId, path, reason: 'outsideFolders' }
     }
     const existing = this.world.directories[deviceId] ?? []
     if (!existing.includes(path)) return { state: 'unavailable', deviceId, path, reason: 'missing' }
-    const folders = existing.filter((item) => parentFolder(item) === path).sort()
+    const folders = existing.filter((item) => fileParent(item) === path).sort()
     const prefix = `${deviceId}:`
     const files = Object.entries(this.world.files)
-      .filter(([key]) => key.startsWith(prefix) && parentFolder(key.slice(prefix.length)) === path)
+      .filter(([key]) => key.startsWith(prefix) && fileParent(key.slice(prefix.length)) === path)
       .map(([key, file]) => ({ path: key.slice(prefix.length), size: file.size }))
       .sort((a, b) => a.path.localeCompare(b.path))
-    return { state: 'ready', deviceId, path, folders, files }
+    return { state: 'ready', deviceId, path, folders, files, scanLimited: false }
   }
 
   // 场景里标记为读取失败的内容第一次读取时失败，之后正常返回。
@@ -1795,23 +1793,48 @@ ${response}`,
     throw new ClientError('unavailable', 'The device did not return this content')
   }
 
-  // 文件预览只读允许的目录，超过 previewLimit 只返回开头，二进制文件不传内容。
-  readFile(deviceId: ID, path: string): FilePreview {
+  // 文件预览只读允许的目录，每片最多 previewLimit 字节，二进制文件不传内容。
+  readFile(deviceId: ID, path: string, continuation?: FileReadOptions): FilePreview {
     const device = this.device(deviceId)
     const unavailable = (
       reason: Extract<FilePreview, { state: 'unavailable' }>['reason'],
       size: number | null = null,
-    ) => ({ state: 'unavailable', deviceId, path, reason, size }) as const
+    ): Extract<FilePreview, { state: 'unavailable' }> => ({ state: 'unavailable', deviceId, path, reason, size })
     if (device.connection !== 'online') return unavailable(device.connection)
-    if (!device.folders.some((root) => insideFolder(path, root))) return unavailable('outsideFolders')
+    if (!device.folders.some((root) => insideFileFolder(path, root))) return unavailable('outsideFolders')
     this.failOnce(`file:${fileKey(deviceId, path)}`)
     const file = this.world.files[fileKey(deviceId, path)]
     if (!file) return unavailable('missing')
     if (file.text === null) return unavailable('binary', file.size)
     const bytes = new TextEncoder().encode(file.text)
-    const truncated = file.size > previewLimit
-    const content = bytes.length > previewLimit ? new TextDecoder().decode(bytes.slice(0, previewLimit)) : file.text
-    return { state: 'ready', deviceId, path, size: file.size, content, truncated }
+    let hash = 0
+    for (const byte of bytes) hash = (Math.imul(hash, 31) + byte) | 0
+    const version = `${bytes.length}:${hash}`
+    if (continuation && continuation.version !== version)
+      throw new ClientError('conflict', 'The file changed. Reload it to continue reading.')
+    const offset = continuation?.offset ?? 0
+    if (
+      !Number.isSafeInteger(offset) ||
+      offset < 0 ||
+      offset > bytes.length ||
+      (offset < bytes.length && (bytes[offset] & 0xc0) === 0x80)
+    )
+      throw new ClientError('invalid', 'The file offset must be at a complete text character.')
+    let end = Math.min(offset + previewLimit, bytes.length)
+    while (end < bytes.length && (bytes[end] & 0xc0) === 0x80) end -= 1
+    const content = new TextDecoder().decode(bytes.slice(offset, end))
+    const truncated = end < bytes.length
+    return {
+      state: 'ready',
+      deviceId,
+      path,
+      size: file.size,
+      content,
+      truncated,
+      offset,
+      version,
+      nextOffset: truncated ? end : undefined,
+    }
   }
 
   // 回复的过程保存在 Thread 所在设备上，设备离线或对话记录已删除时读不到。

@@ -115,6 +115,28 @@ describe('HTTP account and devices', () => {
     if (!enabled) expect(capabilityLines(device)[0]).toMatchObject({ ok: false, detail: 'Local sandbox needs setup.' })
   })
 
+  it('loads all allowed folders from management pages independently of reports', async () => {
+    const fetch = fetcher()
+      .mockResolvedValueOnce(response({ roots: [{ root_id: 'one', path: '/one' }], next_cursor: 'version:1' }))
+      .mockResolvedValueOnce(response({ roots: [{ root_id: 'two', path: '/two' }] }))
+    const client = createHttpClient({ fetch, WebSocket: null })
+    expect(await client.listDeviceFolders('node/id')).toEqual(['/one', '/two'])
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+      '/api/v1/nodes/node%2Fid/roots',
+      '/api/v1/nodes/node%2Fid/roots?cursor=version%3A1',
+    ])
+  })
+
+  it('fails a changed roots list so retry starts from its first page', async () => {
+    const fetch = fetcher()
+      .mockResolvedValueOnce(response({ roots: [{ root_id: 'old', path: '/old' }], next_cursor: 'version:1' }))
+      .mockResolvedValueOnce(response({ code: 'roots_changed' }, 409))
+      .mockResolvedValueOnce(response({ roots: [{ root_id: 'new', path: '/new' }] }))
+    const client = createHttpClient({ fetch, WebSocket: null })
+    await expect(client.listDeviceFolders('desk')).rejects.toMatchObject({ code: 'conflict' })
+    expect(await client.listDeviceFolders('desk')).toEqual(['/new'])
+  })
+
   it('adds and removes shared folders and notifies device and file queries', async () => {
     const node = {
       id: 'node/id',

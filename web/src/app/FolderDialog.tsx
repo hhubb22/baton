@@ -1,6 +1,7 @@
 import * as stylex from '@stylexjs/stylex'
 import { useState } from 'react'
-import { folderName, parentFolder, type Location } from '../data/derive'
+import type { Location } from '../data/derive'
+import { fileName as folderName, fileParent as parentFolder } from '../data/file-paths'
 import { useDevices, useFolders } from '../data/queries'
 import type { Device, FolderListing, ID } from '../data/types'
 import { text } from '../theme/text'
@@ -89,10 +90,12 @@ export function FolderDialog({
   const [selectedDevice, setSelectedDevice] = useState(deviceId)
   const [path, setPath] = useState<string | null>(null)
   const folders = useFolders(selectedDevice, path)
+  const allowed = useFolders(selectedDevice, null)
   const device = devices.data?.find((item) => item.id === selectedDevice)
   const listing = folders.data
   const parent = path === null ? null : parentFolder(path)
-  const atRoot = path !== null && device?.folders.includes(path)
+  const roots = allowed.data?.state === 'ready' ? allowed.data.folders : (device?.folders ?? [])
+  const atRoot = path !== null && roots.includes(path)
   const problem = listing?.state === 'unavailable' ? unavailableText(listing, device) : null
 
   return (
@@ -184,7 +187,15 @@ export function FolderDialog({
               }
             />
           )}
-          {listing?.state === 'ready' && listing.folders.length === 0 && (
+          {listing?.state === 'ready' && listing.scanLimited && (
+            <span role="status" {...stylex.props(text.caption, styles.status)}>
+              Folder scan limited. Some entries may be missing.{' '}
+              <Button small onClick={() => void folders.refetch()}>
+                Retry
+              </Button>
+            </span>
+          )}
+          {listing?.state === 'ready' && !listing.scanLimited && listing.folders.length === 0 && (
             <span {...stylex.props(text.caption, styles.status)}>No subfolders</span>
           )}
           {listing?.state === 'ready' &&

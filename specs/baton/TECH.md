@@ -287,7 +287,8 @@ URL 相对 `/api/v1`。读取检查员工会话与资源归属，写入另检查
 | `POST /node-enrollments` | 创建一次性注册凭据，返回 `enrollment_id`、`enrollment_token`、`expires_at` 和非负的 `expires_in_ms`；凭据仅在创建时返回 |
 | `GET /node-enrollments/{id}` | 仅查询本人记录，其他员工的记录返回 404；返回 `enrollment_id`、`state`、可空 `device_id`、`expires_at`、`expires_in_ms`。未使用时按期限显示 `pending` / `expired`；已使用且关联设备未吊销、在线并已同步时为 `connected`，其余已使用记录为 `used` |
 | `GET /nodes`、`GET /nodes/{id}` | 返回本人设备状态。Node DTO 包含 `registered_at`、可空 `runtime_report`、`runtime_report_version`、可空 `runtime_reported_at`，以及报告中的 `batond_version`、`user`；在线状态和最后联系时间独立返回 |
-| `POST /nodes/{id}/roots`、`DELETE /nodes/{id}/roots` | `{path}`；通过 Gateway 等待本人在线且已同步设备保存目录设置，返回含最新 `roots`、`repos` 的 Node DTO。添加支持真实路径幂等登记，移除支持路径或目录标识；无效路径返回 400，节点离线返回 503 `node_offline` |
+| `GET /nodes/{id}/roots` | 通过 `node.browse_roots_get` 从本人在线且已同步设备分页读取完整授权目录，返回 `{roots,next_cursor?}`，续页传 `cursor`。单页 JSON 最多 48 KiB，独立于能力报告的 64 KiB 摘要；清单变化返回 409 `roots_changed`，从第一页重读。每次请求在设备响应后复查授权 |
+| `POST /nodes/{id}/roots`、`DELETE /nodes/{id}/roots` | `{path}`；通过 Gateway 等待本人在线且已同步设备保存目录设置，返回含最新 `roots`、`repos` 摘要的 Node DTO，超限标记 `truncated`；网页另行读取完整目录清单。添加支持真实路径幂等登记，移除支持路径或目录标识；无效路径返回 400，节点离线返回 503 `node_offline` |
 | `POST /nodes/{id}/subscriptions/login` | `{provider}`；通过 Gateway 启动设备端 OAuth 设备码登录，返回 `{provider, verification_uri, user_code, expires_in_seconds}`，凭据留在设备。支持 `openai-codex` / `ChatGPT` 和 `xai` / `xAI`，未取得设备码返回 503 |
 | `PUT /nodes/{id}/project-exec` | `{enabled}`；通过 Gateway 等待在线且已同步设备原子保存并回读本机开关，确认后返回 Node DTO，报告中的 `exec` 使用设备确认值；未确认返回 503，客户端重新读取状态。协议与 `exec.user` 见 Project Agent TECH「节点能力报告」 |
 | `POST /threads` | `client_thread_id`、可选 `node_id`（缺省为默认设备）、`agent_type`、可选 `model`（缺省为该 Agent 的 `default_model`）、`working_directory`、可选 `execution_timeout_seconds`（1～2,147,483,647 的整数，默认 7200）、第一条消息 `message:{client_message_id, content}`。浏览器新建的 Thread 不属于 Project。预算参与创建幂等内容，并固定存入 open 命令的 outbox payload；以后修改 Thread 设置不会改变原 open 命令的重试内容。新建返回 201，幂等重发返回 200，内容冲突返回 409 |
@@ -362,7 +363,7 @@ TS 中心的控制操作分别计算排队和执行预算。默认排队 2 秒�
 |---|---|
 | 单条传输消息 | 256 KiB |
 | 输出片段与历史页 | 16 KiB |
-| 文本文件预览 | 64 KiB |
+| 文本文件预览单片 | 64 KiB |
 | 单连接控制队列 | 32 条且 1 MiB |
 | 单节点输出待发送量、单订阅待发送量 | 各 256 KiB |
 | 中心输出缓存总量 | 32 MiB |
@@ -387,7 +388,11 @@ Pi 读取原生 JSONL，Codex 读取 thread 文件并核对 thread ID、cwd 和 
 
 ## 文件浏览
 
-设备本地定义可浏览的 `root_id` 和真实路径，浏览器只提交 `root_id` 和相对路径。实际打开时用 `os.Root` 验证边界，覆盖符号链接、junction 和 reparse point。附件预览复用这条路径（R-18）。Coordinator 不代取任意 URL，不提供文件存储。
+设备本地定义可浏览的 `root_id` 和真实路径，浏览器只提交 `root_id` 和相对路径。Go 节点用 `os.Root` 验证边界；TypeScript 节点校验授权根、realpath、祖先目录和已打开句柄的设备与 inode 身份，覆盖符号链接和路径替换。仅祖先 ctime 变化时丢弃本次结果，完整重新授权并读取，最多尝试 3 次；持续变化返回 `path_changed`，身份或边界变化返回 `path_escaped`。附件预览复用同一授权边界（R-18）。中心不代取任意 URL，不提供文件存储。
+
+TypeScript 的 `GET /nodes/{id}/files` 通过 `root_id`、`path` 浏览目录和文件。POSIX 路径保留冒号和反斜杠的字面含义；Windows 相对路径拒绝冒号、反斜杠、驱动器与 ADS，所有系统拒绝绝对路径、控制字符和 `..` 路径段。目录每页最多返回 200 项、处理 4096 个新条目，`next_cursor` 携带扫描位置和目录版本；续页重新打开目录并跳过已读位置，可继续读取整个目录；目录变化返回 `directory_changed`，网页保留已取得的条目并提示重新读取。未指定根时复用授权根管理接口的分页，每页 JSON 不超过 48 KiB，游标绑定清单版本和下一项位置。
+
+文本文件每片最多 64 KiB，响应包含 `offset`、`version`，以及有后文时的 `next_offset`。续读必须同时提交返回的字节偏移和版本；版本绑定真实路径、设备、inode、大小、mtime 和 ctime，读取前后核对，文件变化返回 `file_changed`。分片止于完整 UTF-8 字符，网页通过继续读取追加内容，变化时提示重新打开文件。二进制和特殊文件继续拒绝。
 
 ## 账号与保留
 

@@ -3,6 +3,7 @@ import type {
   Device,
   Enrollment,
   FilePreview,
+  FileReadOptions,
   FolderListing,
   ID,
   InboxItem,
@@ -51,6 +52,7 @@ export interface BatonClient {
   changePassword(currentPassword: string, newPassword: string): Promise<Session>
 
   listDevices(): Promise<Device[]>
+  listDeviceFolders(deviceId: ID): Promise<string[]>
   listProjects(): Promise<Project[]>
   // Project 主对话：你的消息、助手的回复和系统说明，按时间排列。
   listProjectEntries(projectId: ID): Promise<ProjectEntry[]>
@@ -59,7 +61,7 @@ export interface BatonClient {
   getThread(threadId: ID): Promise<Thread>
   listMessages(threadId: ID): Promise<Message[]>
   listInbox(): Promise<InboxItem[]>
-  readFile(deviceId: ID, path: string): Promise<FilePreview>
+  readFile(deviceId: ID, path: string, continuation?: FileReadOptions): Promise<FilePreview>
   // 回复的完整过程留在设备上，展开时读取。
   readTrace(messageId: ID): Promise<Trace>
   // 执行中的一轮的实时输出，这一轮结束后为空。

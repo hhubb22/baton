@@ -17,6 +17,10 @@ const messages: Record<string, string> = {
   origin_rejected: 'This address is not allowed to access Baton.',
   forbidden: 'You do not have access to this resource.',
   revoked: 'This device was disconnected from Baton.',
+  path_changed: 'The folder is changing. Retry when it settles.',
+  directory_changed: 'The folder changed. Reload it to see all entries.',
+  roots_changed: 'Allowed folders changed. Reload the list.',
+  file_changed: 'The file changed. Reload it to continue reading.',
 }
 
 export class HttpError extends ClientError {

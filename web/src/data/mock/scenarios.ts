@@ -791,10 +791,11 @@ const reconnectLog = Array.from({ length: 48 }, (_, index) => {
   return `14:31:${seconds} ok   TestReconnect/case-${index + 1} (${(index * 0.07).toFixed(2)}s)`
 }).join('\n')
 
-// 超过预览上限的日志：预览只取开头 64 KB。
+// 超过单片读取上限的完整日志。
 const soakLog = Array.from(
   { length: 1600 },
-  (_, index) => `soak ${String(index + 1).padStart(5, '0')} reconnect ok rtt=${12 + (index % 9)}ms frames=${index * 3}`,
+  (_, index) =>
+    `soak ${String(index + 1).padStart(5, '0')} reconnect ok rtt=${12 + (index % 9)}ms frames=${index * 3} 状态=在线`,
 ).join('\n')
 
 function file(text: string | null, size = text === null ? 0 : new TextEncoder().encode(text).length): DeviceFile {
@@ -819,7 +820,7 @@ function files(): Record<string, DeviceFile> {
     ),
     [fileKey('dev-ubuntu', `${ubuntuRepo}/internal/gateway/testdata/capture.bin`)]: file(null, 2.4 * mb),
     [fileKey('dev-ubuntu', `${ubuntuRepo}/logs/reconnect.log`)]: file(reconnectLog, 48 * kb),
-    [fileKey('dev-ubuntu', `${ubuntuRepo}/logs/gateway-soak.log`)]: file(soakLog, 2.4 * mb),
+    [fileKey('dev-ubuntu', `${ubuntuRepo}/logs/gateway-soak.log`)]: file(soakLog),
     [fileKey('dev-windows', 'C:\\src\\compat-suite\\report.md')]: file(
       '# Compat report\n\n- path_test.go: 2 failures\n  - TestJoinDrive: got C:foo, want C:\\foo\n  - TestRelDrive: different volumes\n',
     ),

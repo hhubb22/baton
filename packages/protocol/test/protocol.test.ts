@@ -69,6 +69,10 @@ const additions: Record<string, string[]> = {
   CreateBrowserThreadInput: ['execution_timeout_seconds'],
   SessionRequest: ['output_id', 'storage_generation'],
   SessionResult: ['full_output'],
+  BrowseRootsResult: ['truncated'],
+  FileRequest: ['offset', 'version'],
+  FileResult: ['offset', 'next_offset', 'version'],
+  FileView: ['offset', 'next_offset', 'version'],
 }
 const inputOptional = new Set([
   'ThreadMessageInput.model',
@@ -97,7 +101,16 @@ function fixtureValue(name: string): Record<string, unknown> {
 // 字段清单独立来自 Go 的反射；匿名结构另由 Go AST 比对 handler 原声明。
 describe('Go JSON 字段与 Effect Schema', () => {
   it('每个 Go 类型均有独立的 Schema 与往返样例', () => {
-    expect(Object.keys(dtoSchemas).sort()).toEqual([...Object.keys(go.schemas), 'SetThreadSettingsInput'].sort())
+    expect(Object.keys(dtoSchemas).sort()).toEqual(
+      [
+        ...Object.keys(go.schemas),
+        'SetThreadSettingsInput',
+        'BrowseRootsGetRequest',
+        'BrowseRootsGetResult',
+        'BrowseRootsQuery',
+        'BrowseRootsPage',
+      ].sort(),
+    )
     expect(Object.keys(go.schemas)).toHaveLength(115)
     for (const name of Object.keys(go.schemas)) {
       expect(go.cases.filter((item) => item.schema === name).length).toBeGreaterThanOrEqual(2)

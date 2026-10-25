@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vite-plus/test'
 import type { ChangeEvent } from '../client'
 import { assistantWait, previewProblem, projectAgentStatus, threadView } from '../derive'
-import type { ItemDecision } from '../types'
+import { previewLimit, type ItemDecision } from '../types'
 import { createMockClient } from './client'
 import { scenarioIds } from './scenarios'
 import { manualScheduler } from './scheduler'
@@ -89,6 +89,34 @@ describe('device settings', () => {
       status: 'available',
     })
     expect(events.at(-1)?.topics).toEqual(['devices', 'projects'])
+  })
+})
+
+describe('file preview chunks', () => {
+  it('reads the complete mock file in UTF-8 fragments and requires the same version', async () => {
+    const { client } = setup()
+    const path = '/home/kaken/work/baton/logs/gateway-soak.log'
+    let chunk = await client.readFile('dev-ubuntu', path)
+    if (chunk.state !== 'ready') throw new Error('Expected a text preview')
+    const version = chunk.version
+    const size = chunk.size
+    let content = chunk.content
+    expect(chunk.nextOffset).toBeGreaterThan(0)
+    while (chunk.nextOffset != null) {
+      const offset = chunk.nextOffset
+      expect(new TextEncoder().encode(chunk.content).length).toBeLessThanOrEqual(previewLimit)
+      expect(chunk.content).not.toContain('�')
+      chunk = await client.readFile('dev-ubuntu', path, { offset, version })
+      if (chunk.state !== 'ready') throw new Error('Expected the next text fragment')
+      expect(chunk.offset).toBe(offset)
+      content += chunk.content
+    }
+    expect(new TextEncoder().encode(content).length).toBe(size)
+    expect(content).not.toContain('�')
+    expect(content).toContain('soak 01600')
+    await expect(client.readFile('dev-ubuntu', path, { offset: 1, version: 'different' })).rejects.toMatchObject({
+      code: 'conflict',
+    })
   })
 })
 

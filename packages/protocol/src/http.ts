@@ -45,6 +45,8 @@ export const FilesQuery = Schema.Struct({
   root_id: Schema.optionalKey(boundedText(64)),
   path: Schema.optionalKey(boundedText(4096)),
   cursor: Schema.optionalKey(boundedText(4096)),
+  offset: Schema.optionalKey(decimal(0, Number.MAX_SAFE_INTEGER)),
+  version: Schema.optionalKey(boundedText(128)),
 })
 export const ProjectListQuery = Schema.Struct({ after_id: afterID, limit: pageLimit })
 export const ProjectMessagesQuery = Schema.Struct({

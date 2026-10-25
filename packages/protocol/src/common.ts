@@ -7,17 +7,19 @@ export const utf8Bytes = (value: string): number => encoder.encode(value).length
 export const byteLimit = (maximum: number) =>
   Schema.makeFilter<string>((value) => utf8Bytes(value) <= maximum || `UTF-8 正文超过 ${maximum} 字节`)
 
+export const jsonBytes = (value: unknown, indent?: number, escapeHTML = false): number => {
+  let encoded = JSON.stringify(value, null, indent)
+  if (escapeHTML) {
+    encoded = encoded.replace(
+      /[<>&\u2028\u2029]/g,
+      (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`,
+    )
+  }
+  return utf8Bytes(encoded)
+}
+
 export const jsonLimit = (maximum: number, indent?: number, escapeHTML = false) =>
-  Schema.makeFilter<unknown>((value) => {
-    let encoded = JSON.stringify(value, null, indent)
-    if (escapeHTML) {
-      encoded = encoded.replace(
-        /[<>&\u2028\u2029]/g,
-        (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`,
-      )
-    }
-    return utf8Bytes(encoded) <= maximum || `JSON 超过 ${maximum} 字节`
-  })
+  Schema.makeFilter<unknown>((value) => jsonBytes(value, indent, escapeHTML) <= maximum || `JSON 超过 ${maximum} 字节`)
 
 export const Text = Schema.String.check(
   Schema.makeFilter(

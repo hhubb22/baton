@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test'
-import type { RuntimeReport } from '@baton/protocol'
+import { RuntimeReport } from '@baton/protocol'
+import { Schema } from 'effect'
 import * as Auth from './auth.ts'
 import * as Nodes from './nodes.ts'
 import * as Devices from './device-management.ts'
@@ -120,6 +121,66 @@ describe('authenticated device management confirmation', () => {
       run(Devices.updateBrowseRoots(alice.id, identity.node_id, 'remove', '/workspace', transport)),
     ).rejects.toMatchObject({ code: 'invalid_node_response' })
   })
+  it('bounds escaped roots in the confirmed report after a directory save', async () => {
+    const { identity } = await node()
+    const path = `/workspace/${'&'.repeat(200)}`
+    const roots = Array.from({ length: 100 }, (_, index) => ({ root_id: `root-${index}`, path: `${path}/${index}` }))
+    const transport = gateway(async (body) => ({
+      type: 'node.browse_roots_result',
+      operation_id: body.operation_id,
+      ok: true,
+      roots,
+      repos: [],
+    }))
+    const confirmed = await run(Devices.updateBrowseRoots(alice.id, identity.node_id, 'add', `${path}/0`, transport))
+    expect(Schema.is(RuntimeReport)(confirmed.runtime_report)).toBe(true)
+    expect(confirmed.runtime_report?.truncated).toBe(true)
+    expect(confirmed.runtime_report?.roots?.length).toBeGreaterThan(0)
+    expect(confirmed.runtime_report?.roots?.length).toBeLessThan(roots.length)
+  })
+  it('reads roots missing from the report and rechecks ownership after the reply', async () => {
+    const { identity } = await node()
+    const page = { roots: [{ root_id: 'other', path: '/other' }], next_cursor: `${'a'.repeat(64)}:1` }
+    let requests = 0
+    const transport = gateway(async (body) => {
+      requests++
+      return { type: 'node.browse_roots_get_result', operation_id: body.operation_id, ok: true, page }
+    })
+    await expect(run(Devices.getBrowseRoots(bob.id, identity.node_id, {}, transport))).rejects.toMatchObject({
+      code: 'forbidden',
+    })
+    expect(requests).toBe(0)
+    expect(await run(Devices.getBrowseRoots(alice.id, identity.node_id, {}, transport))).toEqual(page)
+    const revoked = gateway(async (body) => {
+      await run(Nodes.revokeNode(alice.id, identity.node_id))
+      return { type: 'node.browse_roots_get_result', operation_id: body.operation_id, ok: true, page }
+    })
+    await expect(run(Devices.getBrowseRoots(alice.id, identity.node_id, {}, revoked))).rejects.toMatchObject({
+      code: 'forbidden',
+    })
+  })
+  it('rejects inconsistent roots cursors and exposes a list change as a conflict', async () => {
+    const { identity } = await node()
+    const inconsistent = gateway(async (body) => ({
+      type: 'node.browse_roots_get_result',
+      operation_id: body.operation_id,
+      ok: true,
+      page: { roots: [{ root_id: 'other', path: '/other' }], next_cursor: `${'a'.repeat(64)}:1` },
+    }))
+    await expect(
+      run(Devices.getBrowseRoots(alice.id, identity.node_id, { cursor: `${'a'.repeat(64)}:1` }, inconsistent)),
+    ).rejects.toMatchObject({ code: 'invalid_node_response' })
+    const changed = gateway(async (body) => ({
+      type: 'node.browse_roots_get_result',
+      operation_id: body.operation_id,
+      ok: false,
+      code: 'roots_changed',
+    }))
+    await expect(run(Devices.getBrowseRoots(alice.id, identity.node_id, {}, changed))).rejects.toMatchObject({
+      status: 409,
+      code: 'roots_changed',
+    })
+  })
   it('returns only device login codes and preserves rejected-device reasons', async () => {
     const { identity } = await node()
     const transport = gateway(async (body) => ({
@@ -174,6 +235,40 @@ describe('authenticated device management confirmation', () => {
       { code: 'node_timeout' },
     )
   })
+  it('preserves POSIX names and file offsets while keeping Windows path checks', async () => {
+    const { identity, source } = await node()
+    const path = 'literal\\name:12.txt'
+    const version = 'b'.repeat(64)
+    let requests = 0
+    const transport = gateway(async (body) => {
+      requests++
+      if (body.type !== 'files.browse') throw new Error('unexpected request')
+      expect(body).toMatchObject({ path, offset: 3, version })
+      return {
+        type: 'files.browse_result',
+        operation_id: body.operation_id,
+        ok: true,
+        kind: 'file',
+        root_id: 'workspace',
+        path,
+        content: 'tail',
+        offset: 3,
+        size: 7,
+        version,
+        truncated: false,
+      }
+    })
+    const query = { root_id: 'workspace', path, offset: 3, version }
+    expect(await run(Devices.browse(alice.id, identity.node_id, query, transport))).toMatchObject({
+      content: 'tail',
+      offset: 3,
+    })
+    await run(Nodes.syncNode(source, { display_name: 'Windows device', system: 'windows', capabilities: [] }))
+    await expect(run(Devices.browse(alice.id, identity.node_id, query, transport))).rejects.toMatchObject({
+      code: 'invalid_path',
+    })
+    expect(requests).toBe(1)
+  })
   it('validates file response identity and refuses unsuccessful previews', async () => {
     const { identity } = await node()
     const transport = gateway(async (body) => ({
@@ -184,6 +279,9 @@ describe('authenticated device management confirmation', () => {
       root_id: 'workspace',
       path: 'log.txt',
       content: 'local text',
+      offset: 0,
+      version: 'a'.repeat(64),
+      size: 10,
       truncated: false,
     }))
     expect(

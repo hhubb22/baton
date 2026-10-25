@@ -351,12 +351,28 @@ export interface Operation {
   updatedAt: number
 }
 
-// 预览最多读取这么多字节，更大的文件只显示开头。
+// 文件预览每次最多读取的字节数。
 export const previewLimit = 64 * 1024
 
-// 文件的文本预览。truncated 表示文件超过 previewLimit，content 只有开头；二进制文件不传内容。
+// 续读同时携带偏移和版本，避免拼接不同版本的文件。
+export interface FileReadOptions {
+  offset: number
+  version: string
+}
+
+// 文件的文本片段；nextOffset 表示同一版本下一片的 UTF-8 字节偏移。
 export type FilePreview =
-  | { state: 'ready'; deviceId: ID; path: string; size: number; content: string; truncated: boolean }
+  | {
+      state: 'ready'
+      deviceId: ID
+      path: string
+      size: number
+      content: string
+      truncated: boolean
+      offset: number
+      version: string
+      nextOffset?: number
+    }
   | {
       state: 'unavailable'
       deviceId: ID
@@ -372,7 +388,7 @@ export interface FileEntry {
 
 // 设备上某个目录的子目录和文件。path 为 null 时列出允许 Agent 访问的目录。
 export type FolderListing =
-  | { state: 'ready'; deviceId: ID; path: string | null; folders: string[]; files: FileEntry[] }
+  | { state: 'ready'; deviceId: ID; path: string | null; folders: string[]; files: FileEntry[]; scanLimited: boolean }
   | {
       state: 'unavailable'
       deviceId: ID

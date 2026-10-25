@@ -86,6 +86,15 @@ export const BrowseRootsRequest = Schema.Struct({
 })
 export type BrowseRootsRequest = typeof BrowseRootsRequest.Type
 
+export const BrowseRootsCursor = boundedText(80).check(Schema.isPattern(/^[a-f0-9]{64}:[1-9][0-9]{0,3}$/))
+export const BrowseRootsQuery = Schema.Struct({ cursor: Schema.optionalKey(BrowseRootsCursor) })
+export const BrowseRootsGetRequest = Schema.Struct({
+  type: Schema.Literal('node.browse_roots_get'),
+  operation_id: UUID,
+  cursor: Schema.optionalKey(BrowseRootsCursor),
+})
+export type BrowseRootsGetRequest = typeof BrowseRootsGetRequest.Type
+
 // internal/protocol/runtime_report.go · RuntimeRoot
 export const RuntimeRoot = Schema.Struct({
   root_id: RootID,
@@ -111,8 +120,24 @@ export const BrowseRootsResult = Schema.Struct({
   message: Schema.optionalKey(Text),
   roots: Schema.optionalKey(Schema.NullOr(Schema.Array(RuntimeRoot))),
   repos: Schema.optionalKey(Schema.NullOr(Schema.Array(RuntimeRepo))),
+  truncated: Schema.optionalKey(Schema.Boolean),
 })
 export type BrowseRootsResult = typeof BrowseRootsResult.Type
+
+export const BrowseRootsPage = Schema.Struct({
+  roots: Schema.Array(RuntimeRoot).check(uniqueBy((value) => value.root_id)),
+  next_cursor: Schema.optionalKey(BrowseRootsCursor),
+}).check(jsonLimit(48 * 1024))
+export type BrowseRootsPage = typeof BrowseRootsPage.Type
+export const BrowseRootsGetResult = Schema.Struct({
+  type: Schema.Literal('node.browse_roots_get_result'),
+  operation_id: UUID,
+  ok: Schema.Boolean,
+  code: Schema.optionalKey(Text),
+  message: Schema.optionalKey(Text),
+  page: Schema.optionalKey(BrowseRootsPage),
+}).check(jsonLimit(64 * 1024))
+export type BrowseRootsGetResult = typeof BrowseRootsGetResult.Type
 
 // internal/httpapi/events.go · browserSubscription
 export const BrowserSubscription = Schema.Struct({
@@ -329,6 +354,8 @@ export const FileRequest = Schema.Struct({
   root_id: Schema.optionalKey(Text),
   path: Schema.optionalKey(Text),
   cursor: Schema.optionalKey(Text),
+  offset: Schema.optionalKey(NonNegativeInteger),
+  version: Schema.optionalKey(Text),
 })
 export type FileRequest = typeof FileRequest.Type
 
@@ -356,6 +383,9 @@ export const FileResult = Schema.Struct({
   truncated: Schema.optionalKey(Schema.Boolean),
   remainder: Schema.optionalKey(Schema.NullOr(FileRemainder)),
   next_cursor: Schema.optionalKey(Text),
+  offset: Schema.optionalKey(NonNegativeInteger),
+  next_offset: Schema.optionalKey(NonNegativeInteger),
+  version: Schema.optionalKey(Text),
 })
 export type FileResult = typeof FileResult.Type
 
@@ -373,6 +403,9 @@ export const FileView = Schema.Struct({
   truncated: Schema.Boolean,
   remainder: Schema.optionalKey(Schema.NullOr(FileRemainder)),
   next_cursor: Schema.optionalKey(Text),
+  offset: Schema.optionalKey(NonNegativeInteger),
+  next_offset: Schema.optionalKey(NonNegativeInteger),
+  version: Schema.optionalKey(Text),
 })
 export type FileView = typeof FileView.Type
 
@@ -1400,6 +1433,10 @@ export const dtoSchemas = {
   AttentionRequest,
   BrowseRootsRequest,
   BrowseRootsResult,
+  BrowseRootsGetRequest,
+  BrowseRootsGetResult,
+  BrowseRootsQuery,
+  BrowseRootsPage,
   BrowserSubscription,
   BrowserThreadOutput,
   ChangePasswordInput,

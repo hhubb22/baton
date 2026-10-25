@@ -147,6 +147,11 @@ const Nodes = HttpApiGroup.make('nodes')
       payload: EmptyInput,
       success: D.RevokeNodeResponse,
     }),
+    Endpoint.get('getRoots', '/api/v1/nodes/:nodeId/roots', {
+      params: nodeParams,
+      query: D.BrowseRootsQuery,
+      success: D.BrowseRootsPage,
+    }),
     Endpoint.post('addRoot', '/api/v1/nodes/:nodeId/roots', {
       params: nodeParams,
       payload: D.UpdateBrowseRootsInput,

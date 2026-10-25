@@ -35,7 +35,8 @@ it.skipIf(process.platform === 'win32')(
   async () => {
     const directory = await realpath(await mkdtemp(join(tmpdir(), 'baton-scan-budget-')))
     try {
-      for (const name of ['omitted:a', 'omitted:b', 'omitted:c']) await writeFile(join(directory, name), '')
+      for (const name of ['omitted\u0001a', 'omitted\u0001b', 'omitted\u0001c'])
+        await writeFile(join(directory, name), '')
       const listing = await boundedDirectory({ id: 'workspace', path: directory }, '', 2)
       expect(listing).toEqual({ names: [], limited: true, scanned: 2 })
     } finally {

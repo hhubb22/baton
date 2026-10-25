@@ -304,6 +304,7 @@ async function connected(options: {
           break
         case 'files.browse':
         case 'node.browse_roots_set':
+        case 'node.browse_roots_get':
         case 'node.project_exec_set':
         case 'node.subscription_login':
           if (synced)

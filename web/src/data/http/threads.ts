@@ -1,9 +1,12 @@
 import { ClientError, type BatonClient } from '../client'
+import { insideFileFolder, joinFilePath, normalizeFilePath } from '../file-paths'
+import { previewLimit } from '../types'
 import { agentUnavailableReason, canCreateAgent } from '../derive'
 import type {
   Attachment,
   Delivery,
   FilePreview,
+  FileReadOptions,
   FolderListing,
   FullOutputReference,
   Message,
@@ -87,6 +90,9 @@ type FileDTO = {
   entries?: { name: string; kind: string; size?: number }[]
   content?: string
   size?: number
+  offset?: number
+  version?: string
+  next_offset?: number
   truncated: boolean
   next_cursor?: string
   remainder?: { scan_limited?: boolean }
@@ -307,24 +313,51 @@ export function createThreadAPI(
     return agent
   }
   async function roots(deviceId: string) {
-    const result = await ctx.request<FileDTO>(`/nodes/${apiPath(deviceId)}/files`)
-    return result.roots ?? []
+    const entries: { id: string; path: string }[] = []
+    const cursors = new Set<string>()
+    let cursor = ''
+    let scanLimited = false
+    do {
+      const query = cursor ? `?${new URLSearchParams({ cursor })}` : ''
+      let result: FileDTO
+      try {
+        result = await ctx.request<FileDTO>(`/nodes/${apiPath(deviceId)}/files${query}`)
+      } catch (error) {
+        if (!cursor) throw error
+        scanLimited = true
+        break
+      }
+      entries.push(...(result.roots ?? []))
+      cursor = result.next_cursor ?? ''
+      if (cursor && cursors.has(cursor)) {
+        scanLimited = true
+        break
+      }
+      cursors.add(cursor)
+      scanLimited ||= result.truncated && !cursor
+    } while (cursor)
+    return { entries, scanLimited }
   }
   async function locate(deviceId: string, path: string) {
-    const entries = await roots(deviceId)
-    const normalized = path.replaceAll('\\', '/')
-    return entries
-      .map((root) => ({ ...root, normalized: root.path.replaceAll('\\', '/').replace(/\/$/, '') }))
+    const result = await roots(deviceId)
+    const found = result.entries
+      .map((root) => ({ ...root, normalized: normalizeFilePath(root.path).replace(/\/$/, '') }))
       .sort((a, b) => b.normalized.length - a.normalized.length)
-      .find((root) => normalized === root.normalized || normalized.startsWith(`${root.normalized}/`))
+      .find((root) => insideFileFolder(path, root.path))
+    if (!found && result.scanLimited) unavailable('The device could not list all allowed folders.')
+    return found
   }
-  async function browse(deviceId: string, path: string, cursor = '') {
+  async function browse(deviceId: string, path: string, cursor = '', continuation?: FileReadOptions) {
     const root = await locate(deviceId, path)
     if (!root) return null
-    const relative = path.replaceAll('\\', '/').slice(root.normalized.length).replace(/^\//, '')
+    const relative = normalizeFilePath(path, root.path).slice(root.normalized.length).replace(/^\//, '')
     if (relative.split('/').some((part) => part === '..' || part === '.')) return null
     const query = new URLSearchParams({ root_id: root.id, path: relative })
     if (cursor) query.set('cursor', cursor)
+    if (continuation) {
+      query.set('offset', String(continuation.offset))
+      query.set('version', continuation.version)
+    }
     return ctx.request<FileDTO>(`/nodes/${apiPath(deviceId)}/files?${query}`)
   }
   function attachmentsOf(items: AttachmentDTO[] = []): Attachment[] {
@@ -629,61 +662,97 @@ export function createThreadAPI(
         const connection = (await ctx.devices()).find((device) => device.id === deviceId)?.connection
         if (connection === 'offline' || connection === 'syncing')
           return { state: 'unavailable', deviceId, path, reason: connection }
-        if (path == null)
+        if (path == null) {
+          const result = await roots(deviceId)
           return {
             state: 'ready',
             deviceId,
             path,
-            folders: (await roots(deviceId)).map((root) => root.path),
+            folders: result.entries.map((root) => root.path),
             files: [],
+            scanLimited: result.scanLimited,
           }
+        }
         const folders: string[] = []
         const files: { path: string; size: number }[] = []
+        let scanLimited = false
         const cursors = new Set<string>()
         let cursor = ''
         do {
-          const result = await browse(deviceId, path, cursor)
+          let result: FileDTO | null
+          try {
+            result = await browse(deviceId, path, cursor)
+          } catch (error) {
+            if (!cursor) throw error
+            scanLimited = true
+            break
+          }
+          if (cursor && (!result || result.kind !== 'directory')) {
+            scanLimited = true
+            break
+          }
           if (!result) return { state: 'unavailable', deviceId, path, reason: 'outsideFolders' }
           if (result.kind !== 'directory') return { state: 'unavailable', deviceId, path, reason: 'missing' }
           for (const entry of result.entries ?? []) {
-            const child = `${path.replace(/[\\/]$/, '')}/${entry.name}`
+            const child = joinFilePath(path, entry.name)
             if (entry.kind === 'directory') folders.push(child)
             else if (entry.kind === 'file' && entry.size != null) files.push({ path: child, size: entry.size })
           }
           cursor = result.next_cursor ?? ''
-          if (cursor && cursors.has(cursor)) unavailable('The folder cursor did not advance.')
+          if (cursor && cursors.has(cursor)) {
+            scanLimited = true
+            break
+          }
           cursors.add(cursor)
-          if (result.remainder?.scan_limited && !cursor)
-            unavailable('The device could not list the complete directory.')
+          scanLimited ||= !cursor && (result.remainder?.scan_limited === true || result.truncated)
         } while (cursor)
-        return { state: 'ready', deviceId, path, folders, files }
+        return { state: 'ready', deviceId, path, folders, files, scanLimited }
       } catch (error) {
         const reason = fileReason(error)
         if (reason && reason !== 'binary') return { state: 'unavailable', deviceId, path, reason }
         throw error
       }
     },
-    async readFile(deviceId, path): Promise<FilePreview> {
+    async readFile(deviceId, path, continuation): Promise<FilePreview> {
       try {
         const connection = (await ctx.devices()).find((device) => device.id === deviceId)?.connection
         if (connection === 'offline' || connection === 'syncing')
           return { state: 'unavailable', deviceId, path, reason: connection, size: null }
-        const result = await browse(deviceId, path)
+        if (
+          continuation &&
+          (!Number.isSafeInteger(continuation.offset) || continuation.offset < 0 || !continuation.version)
+        )
+          throw new ClientError('invalid', 'Continue reading with a valid offset and file version.')
+        const result = await browse(deviceId, path, '', continuation)
         if (!result) return { state: 'unavailable', deviceId, path, reason: 'outsideFolders', size: null }
         if (result.kind !== 'file')
           return { state: 'unavailable', deviceId, path, reason: 'missing', size: result.size ?? null }
-        if (result.size == null || result.content == null)
-          unavailable('The device returned an incomplete file preview.')
+        if (result.size == null || result.content == null || result.offset == null || !result.version)
+          return unavailable('The device returned an incomplete file preview.')
+        if (continuation && result.version !== continuation.version)
+          throw new ClientError('conflict', 'The file changed. Reload it to continue reading.')
+        const bytes = new TextEncoder().encode(result.content).length
+        if (
+          result.offset !== (continuation?.offset ?? 0) ||
+          bytes > previewLimit ||
+          (result.next_offset != null && (bytes === 0 || result.next_offset !== result.offset + bytes))
+        )
+          return unavailable('The device returned an invalid file fragment.')
         return {
           state: 'ready',
           deviceId,
           path,
-          size: result.size!,
-          content: result.content!,
+          size: result.size,
+          content: result.content,
           truncated: result.truncated,
+          offset: result.offset,
+          version: result.version,
+          nextOffset: result.next_offset,
         }
       } catch (error) {
         const reason = fileReason(error)
+        if (errorCode(error) === 'file_changed')
+          throw new ClientError('conflict', 'The file changed. Reload it to continue reading.')
         if (reason) return { state: 'unavailable', deviceId, path, reason, size: null }
         throw error
       }

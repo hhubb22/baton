@@ -144,6 +144,14 @@ export const httpHandlers = (options: HTTPOptions) => {
             }),
           ),
         )
+        .handle('getRoots', ({ params, query }) =>
+          httpBusiness(
+            Effect.gen(function* () {
+              const { employee } = yield* CurrentBrowserSession
+              return yield* DeviceManagement.getBrowseRoots(employee.id, params.nodeId, query, options.gateway())
+            }),
+          ),
+        )
         .handle('addRoot', ({ params, payload }) =>
           httpBusiness(
             Effect.gen(function* () {
@@ -202,7 +210,13 @@ export const httpHandlers = (options: HTTPOptions) => {
           httpBusiness(
             Effect.gen(function* () {
               const { employee } = yield* CurrentBrowserSession
-              return yield* DeviceManagement.browse(employee.id, params.nodeId, query, options.gateway())
+              const { offset, ...rest } = query
+              return yield* DeviceManagement.browse(
+                employee.id,
+                params.nodeId,
+                { ...rest, ...(offset == null ? {} : { offset: Number(offset) }) },
+                options.gateway(),
+              )
             }),
           ),
         ),

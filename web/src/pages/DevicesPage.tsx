@@ -18,6 +18,7 @@ import {
 } from '../data/derive'
 import {
   useDevices,
+  useDeviceFolders,
   useProjects,
   useRemoveDevice,
   useRemoveDeviceFolder,
@@ -331,6 +332,7 @@ function DeviceDetails({
   const [loginProvider, setLoginProvider] = useState<string | null>(null)
   // 离线或同步中的设备只显示提示和操作，Agent 与文件夹信息要等设备同步完才准确。
   const connected = device.connection === 'online'
+  const folders = useDeviceFolders(device.id, connected)
   let defaultLabel = 'Set as default'
   if (isDefault) defaultLabel = 'Default device'
   else if (savingDefault) defaultLabel = 'Saving…'
@@ -374,19 +376,31 @@ function DeviceDetails({
           </div>
           <div {...stylex.props(styles.group)}>
             <span {...stylex.props(text.caption, text.muted)}>Allowed folders</span>
-            {device.folders.map((folder) => (
-              <div key={folder} {...stylex.props(styles.folder)}>
-                <span {...stylex.props(text.mono, styles.folderPath)}>{folder}</span>
-                <IconButton
-                  icon="close"
-                  label={`Remove ${folder}`}
-                  aria-disabled={removeFolder.isPending || undefined}
-                  onClick={() => {
-                    if (!removeFolder.isPending) removeFolder.mutate({ deviceId: device.id, path: folder })
-                  }}
-                />
-              </div>
-            ))}
+            {folders.isPending && <span {...stylex.props(text.small, text.muted)}>Loading folders…</span>}
+            {folders.isError && (
+              <>
+                <p role="alert" {...stylex.props(text.caption, styles.attention)}>
+                  Could not load allowed folders. Check the device connection, then try again.
+                </p>
+                <Button small onClick={() => void folders.refetch()}>
+                  Try again
+                </Button>
+              </>
+            )}
+            {!folders.isError &&
+              folders.data?.map((folder) => (
+                <div key={folder} {...stylex.props(styles.folder)}>
+                  <span {...stylex.props(text.mono, styles.folderPath)}>{folder}</span>
+                  <IconButton
+                    icon="close"
+                    label={`Remove ${folder}`}
+                    aria-disabled={removeFolder.isPending || undefined}
+                    onClick={() => {
+                      if (!removeFolder.isPending) removeFolder.mutate({ deviceId: device.id, path: folder })
+                    }}
+                  />
+                </div>
+              ))}
             {repos.length > 0 && (
               <span {...stylex.props(text.caption, text.muted)}>
                 {repos.length} {repos.length === 1 ? 'repository' : 'repositories'} discovered: {repos.join(', ')}

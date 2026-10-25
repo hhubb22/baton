@@ -131,7 +131,7 @@ export function createMockClient(
     },
     listMessages: (threadId) => guarded(() => store.snapshot().messages.filter((item) => item.threadId === threadId)),
     listInbox: () => guarded(() => store.snapshot().inbox),
-    readFile: (deviceId, path) => guarded(() => store.readFile(deviceId, path)),
+    readFile: (deviceId, path, continuation) => guarded(() => store.readFile(deviceId, path, continuation)),
     listFolders: (deviceId, path) => guarded(() => store.listFolders(deviceId, path)),
     readTrace: (messageId) => guarded(() => store.readTrace(messageId)),
     readOutput: (threadId) => guarded(() => store.readOutput(threadId)),
@@ -225,6 +225,14 @@ export function createMockClient(
       signedIn()
       store.setDefaultDevice(deviceId)
       return structuredClone(store.snapshot().session)
+    },
+    async listDeviceFolders(deviceId) {
+      await connect(latency.read)
+      signedIn()
+      const device = store.snapshot().devices.find((item) => item.id === deviceId)
+      if (!device) throw new ClientError('notFound', 'Device not found.')
+      if (device.connection !== 'online') throw new ClientError('unavailable', 'Device is offline.')
+      return [...device.folders]
     },
     async addDeviceFolder({ deviceId, path }) {
       await connect(latency.save)

@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { posix, win32 } from 'node:path'
 import {
+  jsonBytes,
   BrowseRootsRequest,
+  BrowseRootsGetRequest,
+  BrowseRootsGetResult,
+  BrowseRootsQuery,
   BrowseRootsResult,
   FileRequest,
   FileResult,
@@ -55,13 +59,15 @@ function checkedResult(
     throw new AppError(
       result.code === 'not_found'
         ? 404
-        : ['invalid_path', 'invalid_request'].includes(result.code ?? '')
-          ? 400
-          : ['path_escaped', 'root_forbidden'].includes(result.code ?? '')
-            ? 403
-            : ['not_text', 'unsupported_type'].includes(result.code ?? '')
-              ? 415
-              : 503,
+        : ['roots_changed', 'file_changed', 'directory_changed'].includes(result.code ?? '')
+          ? 409
+          : ['invalid_path', 'invalid_request'].includes(result.code ?? '')
+            ? 400
+            : ['path_escaped', 'root_forbidden'].includes(result.code ?? '')
+              ? 403
+              : ['not_text', 'unsupported_type'].includes(result.code ?? '')
+                ? 415
+                : 503,
       result.code ?? 'node_unavailable',
       result.message ?? '设备未确认请求',
     )
@@ -79,7 +85,15 @@ const overlay = Effect.fn('DeviceManagement.overlay')(function* (
   const current = yield* authorize(employeeId, nodeId)
   if (!current.runtime_report)
     return yield* Effect.fail(new AppError(503, 'runtime_report_unavailable', '设备尚未报告完整能力'))
-  return yield* decode(NodeStatus, { ...current, runtime_report: { ...current.runtime_report, ...fields } })
+  const report = { ...current.runtime_report, ...fields }
+  const roots = [...(report.roots ?? [])]
+  const repos = [...(report.repos ?? [])]
+  const bounded = { ...report, roots, repos }
+  const tooLarge = () => jsonBytes(bounded, 1, true) > 64 * 1024
+  if (tooLarge()) bounded.truncated = true
+  while (tooLarge() && repos.length) repos.pop()
+  while (tooLarge() && roots.length) roots.pop()
+  return yield* decode(NodeStatus, { ...current, runtime_report: bounded })
 })
 
 export const setProjectExec = Effect.fn('DeviceManagement.setProjectExec')(function* (
@@ -105,6 +119,45 @@ export const setProjectExec = Effect.fn('DeviceManagement.setProjectExec')(funct
   if (result.type !== 'node.project_exec_result' || !result.exec || result.exec.enabled !== enabled)
     return yield* Effect.fail(invalidResponse())
   return yield* overlay(employeeId, nodeId, { exec: result.exec })
+})
+
+export const getBrowseRoots = Effect.fn('DeviceManagement.getBrowseRoots')(function* (
+  employeeId: string,
+  nodeId: string,
+  query: typeof BrowseRootsQuery.Type,
+  gateway: DeviceGateway,
+) {
+  const node = yield* authorize(employeeId, nodeId)
+  const body = yield* Effect.try({
+    try: () =>
+      Schema.decodeUnknownSync(BrowseRootsGetRequest)({
+        type: 'node.browse_roots_get',
+        operation_id: randomUUID(),
+        ...query,
+      }),
+    catch: () => new AppError(400, 'invalid_request'),
+  })
+  const result = yield* decode(BrowseRootsGetResult, yield* request(gateway, employeeId, nodeId, body, 5000))
+  yield* confirm(result, body.operation_id)
+  const page = result.page
+  if (
+    !page ||
+    page.roots.some((root) => !directoryAllowed(node.system, root.path, [root])) ||
+    new Set(page.roots.map((root) => root.path)).size !== page.roots.length
+  )
+    return yield* Effect.fail(invalidResponse())
+  if (page.next_cursor) {
+    const [version, position] = page.next_cursor.split(':')
+    const [previousVersion, previousPosition] = body.cursor?.split(':') ?? []
+    if (
+      !page.roots.length ||
+      Number(position) !== Number(previousPosition ?? 0) + page.roots.length ||
+      (previousVersion && version !== previousVersion)
+    )
+      return yield* Effect.fail(invalidResponse())
+  }
+  yield* authorize(employeeId, nodeId)
+  return page
 })
 
 export const updateBrowseRoots = Effect.fn('DeviceManagement.updateBrowseRoots')(function* (
@@ -149,7 +202,7 @@ export const updateBrowseRoots = Effect.fn('DeviceManagement.updateBrowseRoots')
     (action === 'add' && roots.length === 0)
   )
     return yield* Effect.fail(invalidResponse())
-  return yield* overlay(employeeId, nodeId, { roots, repos })
+  return yield* overlay(employeeId, nodeId, { roots, repos, ...(result.truncated ? { truncated: true } : {}) })
 })
 
 export const startSubscriptionLogin = Effect.fn('DeviceManagement.startSubscriptionLogin')(function* (
@@ -200,10 +253,10 @@ export const startSubscriptionLogin = Effect.fn('DeviceManagement.startSubscript
 export const browse = Effect.fn('DeviceManagement.browse')(function* (
   employeeId: string,
   nodeId: string,
-  query: { root_id?: string; path?: string; cursor?: string },
+  query: { root_id?: string; path?: string; cursor?: string; offset?: number; version?: string },
   gateway: DeviceGateway,
 ) {
-  yield* authorize(employeeId, nodeId)
+  const node = yield* authorize(employeeId, nodeId)
   const operationId = randomUUID()
   const body = yield* Effect.try({
     try: () => Schema.decodeUnknownSync(FileRequest)({ type: 'files.browse', operation_id: operationId, ...query }),
@@ -211,15 +264,16 @@ export const browse = Effect.fn('DeviceManagement.browse')(function* (
   })
   const path = (body.path ?? '').replace(/^\.\//, '').replace(/\/$/, '')
   if (
-    (!body.root_id && (path || body.cursor)) ||
+    (!body.root_id && (path || body.offset != null || body.version)) ||
     (body.root_id && !/^[a-z][a-z0-9._-]{0,63}$/.test(body.root_id)) ||
     Buffer.byteLength(path) > 4096 ||
     posix.isAbsolute(path) ||
-    /[\\:]/.test(path) ||
+    (node.system === 'windows' && /[\\:]/.test(path)) ||
     hasControlCharacters(path) ||
     path.split('/').includes('..') ||
     (body.cursor &&
-      (Buffer.byteLength(body.cursor) > 4096 || /[/\\]/.test(body.cursor) || hasControlCharacters(body.cursor)))
+      (Buffer.byteLength(body.cursor) > 4096 ||
+        !(body.root_id ? /^v1:\d+:[a-f0-9]{64}$/ : /^[a-f0-9]{64}:\d+$/).test(body.cursor)))
   )
     return yield* Effect.fail(new AppError(400, 'invalid_path'))
   const result = yield* decode(FileResult, yield* request(gateway, employeeId, nodeId, body, 12000))
@@ -233,6 +287,21 @@ export const browse = Effect.fn('DeviceManagement.browse')(function* (
     (result.kind === 'file' && typeof result.content !== 'string')
   )
     return yield* Effect.fail(invalidResponse())
+  if (result.kind === 'file') {
+    const end = (result.offset ?? 0) + Buffer.byteLength(result.content ?? '')
+    if (
+      result.offset !== (body.offset ?? 0) ||
+      !result.version ||
+      !/^[a-f0-9]{64}$/.test(result.version) ||
+      (body.version && result.version !== body.version) ||
+      result.size == null ||
+      end > result.size ||
+      (result.truncated
+        ? result.next_offset !== end || end >= result.size || end <= result.offset
+        : result.next_offset != null || end !== result.size)
+    )
+      return yield* Effect.fail(invalidResponse())
+  }
   if (
     result.kind === 'file' &&
     (result.content?.includes('\0') || Buffer.from(result.content ?? '').toString('utf8') !== result.content)

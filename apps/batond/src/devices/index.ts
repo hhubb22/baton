@@ -1,5 +1,7 @@
 import {
   BrowseRootsRequest,
+  BrowseRootsGetRequest,
+  type BrowseRootsGetResult,
   ProjectExecRequest,
   SubscriptionLoginRequest,
   SubscriptionLoginResponse,
@@ -17,6 +19,7 @@ import { DeviceError, defaultProjectShell, readProjectExec, setProjectExec, upda
 import { boundRuntimeReport } from './report.ts'
 import { browseFiles } from './files.ts'
 import { scanRuntimeRoots } from './scan.ts'
+import { readBrowseRootsPage } from './roots-page.ts'
 
 export * from './config.ts'
 export { boundRuntimeReport } from './report.ts'
@@ -24,8 +27,18 @@ export { parseThreadAttachments } from './attachments.ts'
 export { runDeviceCLI } from './cli.ts'
 export { browseFiles } from './files.ts'
 export { scanRuntimeRoots, sanitizeOrigin } from './scan.ts'
-export type DeviceRequest = FileRequest | BrowseRootsRequest | ProjectExecRequest | SubscriptionLoginRequest
-export type DeviceResult = FileResult | BrowseRootsResult | ProjectExecResult | SubscriptionLoginResult
+export type DeviceRequest =
+  | FileRequest
+  | BrowseRootsRequest
+  | BrowseRootsGetRequest
+  | ProjectExecRequest
+  | SubscriptionLoginRequest
+export type DeviceResult =
+  | FileResult
+  | BrowseRootsResult
+  | BrowseRootsGetResult
+  | ProjectExecResult
+  | SubscriptionLoginResult
 export interface DeviceRuntime {
   probe(signal?: AbortSignal): Promise<ProjectRuntime>
   report?(signal?: AbortSignal): Promise<ProjectRuntime | undefined>
@@ -98,17 +111,31 @@ export async function makeDeviceService(options: DeviceServiceOptions): Promise<
           changed()
           return { ...base, type: 'node.project_exec_result', ok: true, exec }
         }
+        if (body.type === 'node.browse_roots_get') {
+          const req = decodeRequest(BrowseRootsGetRequest, body)
+          const page = await readBrowseRootsPage(options.dataDirectory, req.cursor)
+          return { ...base, type: 'node.browse_roots_get_result', ok: true, page }
+        }
         if (body.type === 'node.browse_roots_set') {
           const req = decodeRequest(BrowseRootsRequest, body)
           const roots = await updateBrowseRoots(options.dataDirectory, req.action, req.path)
           const scan = await scanRuntimeRoots(options.dataDirectory, combined)
+          const report = boundRuntimeReport(
+            {
+              ...scan,
+              roots: roots.map((root) => ({ root_id: root.id, path: root.path })),
+              exec: { enabled: false, shell: defaultProjectShell() },
+            },
+            48 * 1024,
+          )
           changed()
           return {
             ...base,
             type: 'node.browse_roots_result',
             ok: true,
-            roots: roots.map((root) => ({ root_id: root.id, path: root.path })),
-            repos: scan.repos,
+            roots: report.roots,
+            repos: report.repos,
+            ...(report.truncated !== undefined ? { truncated: report.truncated } : {}),
           }
         }
         const req = decodeRequest(SubscriptionLoginRequest, body)
@@ -153,9 +180,11 @@ export async function makeDeviceService(options: DeviceServiceOptions): Promise<
         const type =
           body.type === 'node.project_exec_set'
             ? 'node.project_exec_result'
-            : body.type === 'node.browse_roots_set'
-              ? 'node.browse_roots_result'
-              : 'node.subscription_login_result'
+            : body.type === 'node.browse_roots_get'
+              ? 'node.browse_roots_get_result'
+              : body.type === 'node.browse_roots_set'
+                ? 'node.browse_roots_result'
+                : 'node.subscription_login_result'
         const code =
           error instanceof DeviceError
             ? error.code

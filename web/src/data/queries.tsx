@@ -96,6 +96,16 @@ export function useDevices() {
   return useQuery({ queryKey: keys.devices, queryFn: () => client.listDevices() })
 }
 
+export function useDeviceFolders(deviceId: ID, connected: boolean) {
+  const client = useClient()
+  return useQuery({
+    queryKey: ['devices', 'allowedFolders', deviceId],
+    queryFn: () => client.listDeviceFolders(deviceId),
+    enabled: connected,
+    refetchOnMount: 'always',
+  })
+}
+
 export function useEnrollment(id: ID | null) {
   const client = useClient()
   return useQuery({
