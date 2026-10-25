@@ -141,6 +141,37 @@ export const probeOnly = (transcript: Transcript): Transcript => {
   }
 }
 
+/** Derived provider_error response isolates authentication failure after successful session creation. */
+export const authenticationFailure = (transcript: Transcript): Transcript => {
+  const first = segment(transcript, 0)
+  const prompt = first.entries.findIndex(
+    (entry) => entry.type === 'expect_outbound' && frameMethod(entry) === 'session/prompt',
+  )
+  if (prompt < 0) throw new Error('Kiro transcript has no prompt')
+  return {
+    ...first,
+    scenario: `${transcript.scenario}-authentication-required`,
+    metadata: {
+      ...transcript.metadata,
+      derivedFrom: transcript.scenario,
+      purpose: 'Baton authentication failure reaches the durable Thread report without upstream diagnostics',
+    },
+    entries: [
+      ...first.entries.slice(0, prompt + 1),
+      {
+        type: 'emit_inbound',
+        label: 'response:session/prompt:authentication-required',
+        frame: {
+          kind: 'response',
+          method: 'session/prompt',
+          error: { code: -32000, message: 'Authentication required: private-auth-diagnostic' },
+        },
+      },
+      { type: 'runtime_exit', status: 'success' },
+    ],
+  }
+}
+
 /** Reuse simple's completed turn twice, with distinct native message identities. */
 export const twoTurns = (transcript: Transcript): Transcript => {
   const first = segment(transcript, 0)

@@ -1,8 +1,8 @@
 # TypeScript 节点与 Thread
 
-`@baton/batond` 通过出站 WSS 连接 [TypeScript 开发中心](../server/README.md)，提供 Cursor、Pi、Codex 远程 Thread、Project Runtime、设备目录和订阅管理。节点守护进程保存设备身份、命令与报告账本，网页可发送排队消息、撤回、停止、恢复并读取实时输出。每个 Thread 使用独立 Worker，每个执行中的 Agent Thread 独占一个 agent-host；Worker 管理 SQLite、Turn、回复和报告，agent-host 用 fork 的完整 adapter 执行本机 Agent。本地调用方也可直接通过认证 IPC 使用 Worker。
+`@baton/batond` 通过出站 WSS 连接 [TypeScript 开发中心](../server/README.md)，提供 Cursor、Pi、Codex、Kiro 远程 Thread、Project Runtime、设备目录和订阅管理。节点守护进程保存设备身份、命令与报告账本，网页可发送排队消息、撤回、停止、恢复并读取实时输出。每个 Thread 使用独立 Worker，每个执行中的 Agent Thread 独占一个 agent-host；Worker 管理 SQLite、Turn、回复和报告，agent-host 用 fork 的完整 adapter 执行本机 Agent。本地调用方也可直接通过认证 IPC 使用 Worker。
 
-Go 的 `cmd/baton-server`、`cmd/batond` 和根目录构建脚本仍是发布入口，TypeScript 发布切换在迁移 T5 进行。TS 提供 Cursor、Pi、Codex 远程 Thread、Project 协同和受限 shell；Kiro 已接入 agent-host，但生产探测尚不能确认认证与本地版本，保持 `unverified`、`create: false`、`resume: false`，网页与 CLI 尚不能新建。配置、恢复和离线验证范围见 [Kiro 文档](src/agents/kiro/README.md)；其他 Agent 与统一历史的范围和实际拒绝响应见 [中心能力表](../server/README.md#当前能力范围)。
+Go 的 `cmd/baton-server`、`cmd/batond` 和根目录构建脚本仍是发布入口，TypeScript 发布切换在迁移 T5 进行。TS 提供 Cursor、Pi、Codex、Kiro 远程 Thread、Project 协同和受限 shell；Kiro 在 macOS arm64 / CLI 精确版本 2.32.0、程序已安装且认证未明确缺失时报告 `available` 并开放网页新建与恢复。认证 `unknown` 时 reason 提示首次执行由原生程序检查，明确 `missing` 拒绝；其他系统或版本（含预发布、构建后缀）保持 `unverified`。配置、恢复和离线验证范围见 [Kiro 文档](src/agents/kiro/README.md)；其他 Agent 与统一历史的范围和实际拒绝响应见 [中心能力表](../server/README.md#当前能力范围)。
 
 ## 开发入口
 
@@ -41,7 +41,7 @@ pnpm --filter @baton/batond dev run --relay wss://localhost:8443/v1/node --ca-fi
 
 所有节点命令支持 `--data-dir`，默认 `~/.baton-ts`。仅在授权配置不存在时登记用户主目录，已有配置包括空列表都会保留；`--workspace` 在连接前按真实绝对路径幂等登记工作目录。网页设备详情与本地 `files` 命令可以增删授权根；目录选择与附件预览使用同一真实路径边界。节点锁、身份与报告恢复细节见 [远程节点模块](src/daemon/README.md)，实时输出的游标和缓冲规则见 [Worker 文档](src/worker/README.md#real-time-output)。
 
-节点连接和能力探测分别进行。Cursor、Pi、Codex、Kiro 探测完成前上报 `unverified`，创建 Thread 需等待 `available` 且 `capabilities.create: true`；Kiro 当前上游探测成功也保持未验证。设备进程需显式配置 `CURSOR_API_KEY`。节点退出不结束独立 Worker，重启后从账本重新发现存活 Worker；未确认命令继续使用原 ID，已接收输入不会因为重连再次发送。
+节点连接和能力探测分别进行。Cursor、Pi、Codex、Kiro 探测完成前上报 `unverified`，创建 Thread 需等待 `available` 且 `capabilities.create: true`；Kiro 另以限时 4 秒、stdout/stderr 各最多 4096 字节的 `kiro-cli --version` 获取版本，只上报版本号，诊断不外传，超时或不可解析保持 `unverified`，缺程序报告 `unavailable`。设备进程需显式配置 `CURSOR_API_KEY`。节点退出不结束独立 Worker，重启后从账本重新发现存活 Worker；未确认命令继续使用原 ID，已接收输入不会因为重连再次发送。
 
 ## 设备目录与模型订阅
 
@@ -74,7 +74,7 @@ pnpm --filter @baton/batond dev history --thread-id <UUID>
 pnpm --filter @baton/batond dev resume --thread-id <UUID>
 ```
 
-`open` 可用 `--model` 选择模型；未指定时使用 SDK 原生的 `default`。Thread 内固定该选择，轮间切换暂未开放。Pi、Codex 支持向活动回合插入，Cursor、Kiro 只接受排队消息。
+本地 CLI 的 `open` 目前仅创建 Cursor Thread，可用 `--model` 选择模型；未指定时使用 SDK 原生的 `default`。Thread 内固定该选择，轮间切换暂未开放。远程 Thread 中 Pi、Codex 支持向活动回合插入，Cursor、Kiro 只接受排队消息。
 
 Kiro 的 local settings 使用 `agentId: kiro`、`commandPath: kiro-cli`，从 PATH 查找程序；host 仅继承系统必要环境变量，不提供 `BATON_KIRO_*` 或 `KIRO_HOME` 入口。Kiro 模型取 `model ?? adapter_config.model ?? 'default'`；`default` 在原生 `session/new` 中省略，具体 ID 经 `_meta.kiro.modelId` 传递，整个 Thread 固定该选择。
 
@@ -113,6 +113,6 @@ pnpm test:e2e
 
 适配器行为验证仅使用上游 SDK 静态转录、确定性回放和本地替身，驱动实际 SDK 封装、RPC、Worker 和 SQLite。
 
-Kiro CLI 2.32.0 夹具经用户授权由旧 Go 录制转换，host 回放使用 fork 的 ACP replay testkit；e2e 注入已验证 capability 驱动真实 adapter，验证发送、回复、中心 idle、停止与恢复。该注入仅用于自动化行为验证，不构成认证或生产可用性的证明，生产 Kiro 仍不可创建。
+Kiro CLI 2.32.0 夹具经用户授权由旧 Go 录制转换，host 回放使用 fork 的 ACP replay testkit；e2e 注入已验证 capability 驱动真实 adapter，验证发送、回复、中心 idle、停止与恢复。该注入验证自动化行为，不能证明真实账号授权有效；生产可用性按节点的版本、系统和认证规则判断。认证失败派生夹具基于 `provider_error`，通过真实 host 与 Worker 核对固定安全文案进入 Thread 报告、原始错误不外传和输入不重发。版本探测使用本地可执行替身测试，不启动真实 `kiro-cli`。
 
 测试覆盖输入不重发、命令去重、停止竞态、未知终态、只读发送核对、跨进程恢复、提交核查、输出字节游标与洪泛，以及 daemon 断线、持久报告和存活 Worker 重发现，禁止依赖真实 API Key、在线模型推理或外部真实服务。中心与独立 Worker 的完整远程链路验证见 [中心文档](../server/README.md#验证)。完整入口、SQLite 与本地进程测量见 [迁移工具](../../tools/ts-migration/README.md)。

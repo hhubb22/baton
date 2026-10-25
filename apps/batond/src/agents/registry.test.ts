@@ -41,36 +41,77 @@ it('reports a missing Pi install as unavailable', () => {
   expect(report).toMatchObject({ status: 'unavailable', reason: 'Codex CLI is not authenticated' })
 })
 
-it('keeps Kiro discovery unverified when upstream cannot confirm its account or version', () => {
+it('keeps Kiro unverified when its executable version cannot be confirmed', () => {
   const report = hostedAgentReport(
     'kiro',
     {
       authenticated: 'unknown',
       models: ['qwen3-coder-next'],
-      reason: 'Kiro 上游只读探测尚不能确认认证与版本',
+      reason: 'Kiro 版本暂不可确认',
       details: { installed: true, version: 'unknown', platform: 'darwin-arm64' },
     },
     'Kiro CLI 未安装或尚未认证',
   )
   expect(report).toMatchObject({
     status: 'unverified',
-    reason: 'Kiro 上游只读探测尚不能确认认证与版本',
+    reason: 'Kiro 版本暂不可确认',
     capabilities: { create: false, steer: false, resume: false, switch_model: false },
   })
 })
 
-it('exposes only Kiro queue, stop and restore when its account and combination are verified', () => {
+it('allows the recorded Kiro combination with unknown authentication and a native default model', () => {
   const report = hostedAgentReport(
     'kiro',
     {
-      authenticated: 'valid',
-      models: ['qwen3-coder-next'],
+      authenticated: 'unknown',
+      models: [],
       details: { installed: true, version: '2.32.0', platform: 'darwin-arm64' },
     },
     'Kiro CLI 未安装或尚未认证',
   )
   expect(report).toMatchObject({
     status: 'available',
+    default_model: 'default',
+    reason: 'Kiro 认证状态未知，首次执行时由原生程序检查',
     capabilities: { create: true, queue: true, stop: true, resume: true, steer: false, switch_model: false },
   })
+})
+
+it.each([
+  { version: '2.32.0', platform: 'linux-x64' },
+  { version: '2.33.0', platform: 'darwin-arm64' },
+  { version: '2.32.0-preview.1', platform: 'darwin-arm64' },
+])('keeps Kiro $version / $platform unverified', ({ version, platform }) => {
+  const report = hostedAgentReport(
+    'kiro',
+    { authenticated: 'unknown', models: [], details: { installed: true, version, platform } },
+    'missing',
+  )
+  expect(report).toMatchObject({ status: 'unverified', capabilities: { create: false, resume: false } })
+})
+
+it('rejects Kiro when upstream confirms that authentication is missing', () => {
+  const report = hostedAgentReport(
+    'kiro',
+    {
+      authenticated: 'missing',
+      models: [],
+      details: { installed: true, version: '2.32.0', platform: 'darwin-arm64' },
+    },
+    'Kiro CLI 尚未认证',
+  )
+  expect(report).toMatchObject({ status: 'unavailable', capabilities: { create: false, resume: false } })
+})
+
+it.each(['pi', 'codex'] satisfies Array<'pi' | 'codex'>)('%s still requires confirmed authentication', (agentType) => {
+  const report = hostedAgentReport(
+    agentType,
+    {
+      authenticated: 'unknown',
+      models: [],
+      details: { installed: true, version: agentType === 'pi' ? '1.0.0' : '0.156.1', platform: 'darwin-arm64' },
+    },
+    'missing',
+  )
+  expect(report).toMatchObject({ status: 'unverified', capabilities: { create: false, resume: false } })
 })

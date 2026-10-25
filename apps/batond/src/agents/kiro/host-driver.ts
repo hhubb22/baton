@@ -17,6 +17,8 @@ import { resolveSelfInvocation } from '@t3tools/shared/nodeRuntime'
 import { makeProviderHostDriver } from '../../agent-host/driver.ts'
 import type { AgentHostPaths } from '../../agent-host/host-layer.ts'
 import { AgentHostDriver, AgentHostError, type ProbeResult } from '../../agent-host/protocol.ts'
+import { kiroVersion, type KiroVersionResult } from './version.ts'
+import { kiroTurnFailure } from './failure.ts'
 
 const instanceId = ProviderInstanceId.make('kiro')
 const settingsFor = () =>
@@ -33,33 +35,44 @@ const modelSelection = (config: WorkerOpenConfig): ModelSelection =>
     model: config.model ?? config.adapter_config.model ?? 'default',
   })
 
-/** Upstream discovery creates an empty session without prompting or authenticating. */
-export const kiroProbe = (paths: AgentHostPaths) =>
+/** Upstream discovery creates an empty session; the separate version command never prompts. */
+export const kiroProbe = (paths: AgentHostPaths, versionProbe = kiroVersion({ cwd: paths.workingDirectory })) =>
   Effect.gen(function* () {
-    const status = yield* checkAcpRegistryProviderStatus(
-      {
-        instanceId,
-        displayName: 'Kiro',
-        accentColor: undefined,
-        continuationKey: 'kiro',
-        settings: settingsFor(),
-        cwd: paths.workingDirectory,
-        environment: process.env,
-      },
-      probeAcpRegistryConfiguration,
+    const [status, version] = yield* Effect.all(
+      [
+        checkAcpRegistryProviderStatus(
+          {
+            instanceId,
+            displayName: 'Kiro',
+            accentColor: undefined,
+            continuationKey: 'kiro',
+            settings: settingsFor(),
+            cwd: paths.workingDirectory,
+            environment: process.env,
+          },
+          probeAcpRegistryConfiguration,
+        ),
+        versionProbe,
+      ],
+      { concurrency: 'unbounded' },
     )
     const auth = status.auth.status
     const authenticated: ProbeResult['authenticated'] =
       auth === 'authenticated' ? 'valid' : auth === 'unauthenticated' ? 'missing' : 'unknown'
-    const reason = !status.installed
-      ? 'Kiro CLI 未安装或不可执行'
-      : authenticated === 'missing'
-        ? 'Kiro CLI 尚未认证'
-        : authenticated === 'unknown'
-          ? 'Kiro 上游只读探测尚不能确认认证与版本'
-          : status.models.length === 0
-            ? 'Kiro 模型目录暂不可读，可使用默认模型'
-            : undefined
+    const reason =
+      !status.installed || version.state === 'missing'
+        ? 'Kiro CLI 未安装或不可执行'
+        : authenticated === 'missing'
+          ? 'Kiro CLI 尚未认证'
+          : version.state === 'timeout'
+            ? 'Kiro 版本探测超时'
+            : version.state !== 'ready'
+              ? 'Kiro 版本暂不可确认'
+              : authenticated === 'unknown'
+                ? 'Kiro 认证状态未知，首次执行时由原生程序检查'
+                : status.models.length === 0
+                  ? 'Kiro 模型目录暂不可读，可使用默认模型'
+                  : undefined
     const result: ProbeResult = {
       authenticated,
       models: [
@@ -68,9 +81,9 @@ export const kiroProbe = (paths: AgentHostPaths) =>
       ].map((model) => model.slug),
       ...(reason ? { reason } : {}),
       details: {
-        version: status.version ?? 'unknown',
+        version: version.version,
         platform: `${process.platform}-${process.arch}`,
-        installed: Boolean(status.installed),
+        installed: Boolean(status.installed) && version.state !== 'missing',
       },
     }
     return result
@@ -80,6 +93,7 @@ export const kiroHostDriver = (input: {
   readonly agentType: string
   readonly paths: AgentHostPaths
   readonly sessionTitle?: string
+  readonly versionProbe?: Effect.Effect<KiroVersionResult, never, ChildProcessSpawner>
 }) =>
   Layer.effect(
     AgentHostDriver,
@@ -89,7 +103,7 @@ export const kiroHostDriver = (input: {
       const spawner = yield* ChildProcessSpawner
       const crypto = yield* Crypto
       const catalog = yield* AcpRegistryCatalog
-      const probe: Effect.Effect<ProbeResult, AgentHostError> = kiroProbe(input.paths).pipe(
+      const probe: Effect.Effect<ProbeResult, AgentHostError> = kiroProbe(input.paths, input.versionProbe).pipe(
         Effect.provideService(ChildProcessSpawner, spawner),
         Effect.provideService(Crypto, crypto),
         Effect.provideService(AcpRegistryCatalog, catalog),
@@ -104,6 +118,7 @@ export const kiroHostDriver = (input: {
         label: 'Kiro',
         instanceId,
         adapter,
+        turnFailure: kiroTurnFailure,
         steer: false,
         resumeOnOpen: true,
         runtimeMode: 'approval-required',

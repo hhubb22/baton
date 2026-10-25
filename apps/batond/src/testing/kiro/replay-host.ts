@@ -17,7 +17,7 @@ export const kiroReplayModule = (transcript: Transcript, statusPath: string): Ag
     scriptPath: fileURLToPath(new URL('./kiro-replay-agent.mjs', import.meta.url)),
   }),
   driver: (input) =>
-    kiroHostDriver(input).pipe(
+    kiroHostDriver({ ...input, versionProbe: Effect.succeed({ state: 'ready', version: '2.32.0' }) }).pipe(
       Layer.provide(
         Layer.mock(AcpRegistryCatalog)({
           inspect: () => Effect.succeed({ status: 'ready', agentId: 'kiro', version: null, distribution: 'local' }),

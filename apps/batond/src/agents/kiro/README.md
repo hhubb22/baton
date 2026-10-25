@@ -18,12 +18,20 @@ Thread 模型取 `model ?? adapter_config.model ?? 'default'`。fork 在 `sessio
 
 ## 生产能力报告
 
-探测在临时空工作目录的独立 host 中调用 `checkAcpRegistryProviderStatus` 与 `probeAcpRegistryConfiguration`。上游会建立空的发现会话以读取能力和模型，不发送 prompt，不打开登录流程；结束后关闭 host 并回收进程树。
+探测在临时空工作目录的独立 host 中调用 `checkAcpRegistryProviderStatus` 与 `probeAcpRegistryConfiguration`。上游会建立空的发现会话以读取能力和模型，不发送 prompt，不调用 auth/login 或打开登录流程；结束后关闭 host 并回收进程树。
 
-当前上游检查成功仍只报告 `auth.status: unknown`，本地 executable 的 `version` 为 `null`。Baton 将版本映射为 `unknown`，上报 `status: unverified`、`capabilities.create: false`、`capabilities.resume: false`，原因为“Kiro 上游只读探测尚不能确认认证与版本”。缺程序或明确未认证时报告 `unavailable`。因此生产网页与 CLI 尚不能新建 Kiro Thread，中心新建请求返回 HTTP 422、`code: "agent_unavailable"`。注册表中的 adapter 能力上限和 Kiro 2.32.0 回放版本不会绕过认证与版本检查。
+Baton 在上游 status 之外运行 `kiro-cli --version`，使用 host 提供的 Node Effect `ChildProcessSpawner` 和 process registrar，由 Scope 与进程回收路径管理生命周期。版本命令限时 4 秒，stdout、stderr 各最多收集 4096 字节；只返回解析出的版本号，原始输出与诊断留在 host 内，不进入能力报告。命令超时、失败、输出超限或无法解析时，版本为 `unknown`，状态保持 `unverified`；缺少程序时报告 `unavailable`。
+
+macOS arm64（`darwin-arm64`）与精确版本 `2.32.0` 的组合，在程序已安装且认证未明确缺失时报告 `available`，开放 `capabilities.create` 和 `capabilities.resume`。其他系统或版本（包括 `2.32.0` 的预发布、构建后缀）保持 `unverified`，关闭 create/resume。上游认证 `unknown` 允许该已验证组合新建与恢复，并保留 reason“Kiro 认证状态未知，首次执行时由原生程序检查”；明确 `missing` 则报告 `unavailable` 并拒绝。模型目录不可读时可使用原生默认模型。此规则仅适用于 Kiro，Pi、Codex 仍要求认证有效。
+
+网页按节点报告开放 Kiro 的新建与恢复；不满足准入条件的新建请求返回 HTTP 422、`code: "agent_unavailable"`。本地 CLI 的 `open` 目前仅创建 Cursor Thread。
+
+实际回合中的明确认证失败向 Thread 返回固定文案“Kiro CLI 认证失败，请在设备上登录 Kiro CLI 后重试”；其他 provider 错误返回“Kiro 执行失败，请检查设备上的 Kiro CLI 状态后重试”。原始错误不透传，Baton 不自动登录或重发输入。
 
 ## 离线验证
 
 回放使用 fork 的 `@t3tools/provider-acp-registry/testing/replay` testkit 驱动真实 adapter 与 agent-host 子进程。Kiro CLI 2.32.0 夹具由旧 Go 录制转换，转换脚本位于 fork 的 `packages/provider-acp-registry/scripts/convert-kiro-replay.mjs`，夹具说明见 [fork README](../../../../../upstream/t3code/packages/provider-acp-registry/src/testing/fixtures/kiro/README.md)。转换保留协议响应、通知和权限结果，调整 initialize 协商请求与 prompt 形状，丢弃 version 探测和 stderr。这些夹具是用户授权保留旧资产的唯一例外；旧 Go 实现与测试不作为行为参照。
 
-host 回放的验证范围为新建、两轮、停止（含工具执行中）、恢复与 `restore_missing` 失败，以及 `sent` 的确认和未确认。`interrupt_mid_tool` 夹具中的真实权限请求经 adapter 返回 `allow_once`，随后完成取消。进程回收测试以真实 Kiro adapter 配合本地 ACP 协议替身，确认 ACP 为独立进程组、grandchild 与 ACP 同组；正常关闭及只对 host 发 SIGKILL 后，三个进程均退出，强杀路径由 registrar watchdog 回收独立组。跨 app 的 `e2e/src/provider-agents.integration.test.ts` 通过依赖注入提供已验证 capability，驱动真实 adapter，核对网页 API 发送、回复、中心 idle、停止与恢复。回放与 e2e 验证自动化行为，不能证明本机认证有效，也不能将生产报告提升为 `available`。全部验证仅使用离线夹具和本地替身，不启动真实 `kiro-cli` 或调用在线模型。
+host 回放的验证范围为新建、两轮、停止（含工具执行中）、恢复与 `restore_missing` 失败，以及 `sent` 的确认和未确认。认证失败场景由 `provider_error` 派生夹具驱动真实 adapter、agent-host 与 Worker，核对 Thread 持久报告中的固定安全文案、原始诊断不外传和输入不重发。`interrupt_mid_tool` 夹具中的真实权限请求经 adapter 返回 `allow_once`，随后完成取消。进程回收测试以真实 Kiro adapter 配合本地 ACP 协议替身，确认 ACP 为独立进程组、grandchild 与 ACP 同组；正常关闭及只对 host 发 SIGKILL 后，三个进程均退出，强杀路径由 registrar watchdog 回收独立组。跨 app 的 `e2e/src/provider-agents.integration.test.ts` 通过依赖注入提供已验证 capability，驱动真实 adapter，核对网页 API 发送、回复、中心 idle、停止与恢复。
+
+版本探测测试使用本地可执行替身，覆盖版本解析、预发布后缀保留、诊断不外传、非零退出、缺少程序，以及超时后回收进程；注册表测试核对精确版本与系统组合、认证 unknown 放行和明确 missing 拒绝。夹具 README 与 metadata 的 `agentVersion` 明确记录 Kiro CLI `2.32.0`，转录协议的 `version: "1"` 是协议格式版本。离线回放与 e2e 验证自动化行为，不能证明设备上真实账号的授权有效；节点按上述版本、系统和认证规则报告可用性。全部验证仅使用离线夹具和本地替身，不启动真实 `kiro-cli` 或调用在线模型。

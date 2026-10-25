@@ -50,14 +50,25 @@ export function hostedAgentReport(
     return { ...base, status: 'unavailable', reason: result.reason ?? missingReason }
   if (result.authenticated === 'missing')
     return { ...base, status: 'unavailable', reason: result.reason ?? missingReason }
-  if (result.authenticated !== 'valid') return { ...base, reason: result.reason ?? `${agentType} 认证状态尚未确认` }
+  if (result.authenticated !== 'valid' && agentType !== 'kiro')
+    return { ...base, reason: result.reason ?? `${agentType} 认证状态尚未确认` }
   const ready = {
     ...base,
     default_model: models[0]?.id || (agentType === 'codex' ? DEFAULT_MODEL : 'default'),
-    ...(result.models.length === 0 ? { reason: result.reason ?? '模型目录暂不可读，可使用默认模型' } : {}),
+    ...(agentType === 'kiro' && result.authenticated === 'unknown'
+      ? { reason: result.reason ?? 'Kiro 认证状态未知，首次执行时由原生程序检查' }
+      : result.models.length === 0
+        ? { reason: result.reason ?? '模型目录暂不可读，可使用默认模型' }
+        : {}),
   }
   if (version !== verifiedProviderVersions[agentType] || !verifiedCombinations.has(platform))
-    return { ...ready, reason: `${agentType} ${version} / ${platform} 尚未通过执行、停止与恢复验证` }
+    return {
+      ...ready,
+      reason:
+        agentType === 'kiro' && version === 'unknown' && result.reason
+          ? result.reason
+          : `${agentType} ${version} / ${platform} 尚未通过执行、停止与恢复验证`,
+    }
   return {
     ...ready,
     status: 'available',

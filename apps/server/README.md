@@ -1,6 +1,6 @@
 # TypeScript 开发中心
 
-`@baton/server` 提供员工登录、设备管理、Cursor / Pi / Codex 远程 Thread、Project 调度、主对话、事项和记忆，以及持久命令、回复时间线和实时输出。它与 [`apps/batond`](../batond/README.md) 的出站 WSS 节点连接配合，网页静态目录由中心构建脚本生成并由中心提供。
+`@baton/server` 提供员工登录、设备管理、Cursor / Pi / Codex / Kiro 远程 Thread、Project 调度、主对话、事项和记忆，以及持久命令、回复时间线和实时输出。它与 [`apps/batond`](../batond/README.md) 的出站 WSS 节点连接配合，网页静态目录由中心构建脚本生成并由中心提供。
 
 Go 的 `cmd/baton-server`、`cmd/batond`、根构建脚本和 Docker 镜像仍是发布入口；TypeScript 开发入口独立构建，发布切换在迁移 T5 进行。TS 的当前能力范围见下表，完整迁移边界见 [迁移设计](../../specs/ts-migration/TECH.md)。
 
@@ -88,7 +88,7 @@ pnpm --filter @baton/batond dev up \
 
 Cursor 设备运行进程需显式配置 `CURSOR_API_KEY`，能力探测成功并上报 `available` 后才允许创建 Thread。Pi、Codex 使用设备上原生 CLI 的认证配置，分别通过 `PI_CODING_AGENT_DIR`、`PI_CODING_AGENT_SESSION_DIR` 和 `CODEX_HOME` 指定目录。当前启用 macOS arm64 / SDK 1.0.35；其他组合保持 `unverified` 或报告具体不可用原因。凭据保留在设备端。设备接入、连接恢复及本地命令见 [batond 文档](../batond/README.md)。
 
-网页支持 Cursor、Pi、Codex 新建、排队消息、撤回、停止、恢复、归档和时间线；Pi 与 Codex 还支持活动回合插入。命令的持久接收与实际完成分别报告；daemon 或中心重启后，存活 Worker 继续执行，重连时按原命令和报告身份恢复。模型在新建时选择，Thread 内固定。
+网页支持 Cursor、Pi、Codex、Kiro 新建、排队消息、撤回、停止、恢复、归档和时间线，按节点能力报告准入；Kiro 开放 macOS arm64 / CLI 2.32.0，认证状态未知时由首次原生执行检查。Pi 与 Codex 还支持活动回合插入。命令的持久接收与实际完成分别报告；daemon 或中心重启后，存活 Worker 继续执行，重连时按原命令和报告身份恢复。模型在新建时选择，Thread 内固定。
 
 Thread 历史是中心保存的输入和回复，所有 Agent 格式相同。网页时间线按事件游标分页读取这些记录，设备离线时仍可查看。在 Baton 之外继续同一原生会话产生的消息不会出现。Project 工具 `threads.read` 读取同一份输入和回复。`history.read` 与 `history.search` 读取 Project 主对话已经保存在中心的事件，不访问设备。
 
@@ -133,7 +133,7 @@ docker run --rm --name baton-tracing \
 | 文件和附件预览 | 授权根内目录分页和受限文本预览；越界与二进制内容拒绝 |
 | 受限 shell Thread | 仅供 Project `nodes.exec` 使用，要求目标设备本机已开启执行授权 |
 | Pi、Codex | 节点完成只读认证、版本与模型探测后上报；支持新建、排队、插入、停止、恢复。macOS arm64 的 Pi 1.0.0、Codex 0.156.1 通过上游转录回放，其余版本或系统组合为 `unverified`，新建返回 HTTP 422，`code:"agent_unavailable"` |
-| Kiro | 已接入 fork ACP adapter 与节点 agent-host；上游发现成功仍为 `auth: unknown`、本地 `version: null`，节点报告 `unverified`、`create: false`、`resume: false`。网页尚不能新建，新建返回 HTTP 422，`code:"agent_unavailable"`；离线回放及注入已验证 capability 的 e2e 仅验证行为，不证明认证有效 |
+| Kiro | 节点在上游空会话发现之外运行 `kiro-cli --version`。macOS arm64 / CLI 精确版本 2.32.0 在程序已安装且认证未明确缺失时报告 `available`、`create: true`、`resume: true`，网页开放新建与恢复；认证 `unknown` 的 reason 提示首次执行由原生程序检查，明确 `missing` 拒绝。其他系统或版本（含预发布、构建后缀）、版本超时或不可解析为 `unverified`，缺程序为 `unavailable`；不满足准入条件的新建返回 HTTP 422、`code:"agent_unavailable"`。实际回合认证失败只向 Thread 返回固定安全文案，不自动登录、不透传原始错误、不重发；离线验证不证明真实账号授权有效 |
 | Cursor、Kiro steer                                     | HTTP 422，`code:"steer_unsupported"`；同时传模型时为 `model_with_steer`                              |
 | Cursor、Pi、Codex、Kiro 轮间模型切换                              | HTTP 422，`code:"model_switch_unsupported"`                                                          |
 | Thread 历史                                      | 时间线返回中心保存的输入和回复，设备离线时仍可分页读取。`/threads/{id}/history` 在权限检查后返回 HTTP 200 的 `SessionResult`，`ok:false`、`code:"history_unavailable"`，不向设备发送 `native_history` |

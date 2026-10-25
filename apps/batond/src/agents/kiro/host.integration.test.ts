@@ -1,16 +1,21 @@
+import { randomUUID } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { Effect, Fiber, Schema, Stream } from 'effect'
+import { DatabaseSync } from 'node:sqlite'
+import { Effect, Exit, Fiber, Schema, Scope, Stream } from 'effect'
 import { build } from 'esbuild'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vite-plus/test'
-import type { WorkerOpenConfig } from '@baton/protocol'
+import { ThreadReport as ThreadReportSchema, type WorkerOpenConfig, type WorkerRequest } from '@baton/protocol'
 import { connectAgentHost } from '../../agent-host/transport.ts'
 import { startProcessWatchdog, type ProcessWatchdog } from '../../platform/process.ts'
 import type { AgentEvent, AgentMessage, ThreadAgent } from '../../worker/agent.ts'
+import { makeWorker } from '../../worker/index.ts'
 import { makeKiroAgentFactory } from './index.ts'
+import { kiroTurnFailure } from './failure.ts'
 import {
+  authenticationFailure,
   firstTurnOnly,
   frameMethod,
   kiroFixturePath,
@@ -97,8 +102,8 @@ const writeTranscript = async (config: WorkerOpenConfig, name: string, transcrip
   return path
 }
 
-const start = (config: WorkerOpenConfig, path: string) => {
-  const agent = makeKiroAgentFactory({
+const factoryFor = (path: string) =>
+  makeKiroAgentFactory({
     command: { file: process.execPath, args: [bundle, '--transcript', path] },
     ...(watchdog ? { watchdog } : {}),
     paths: (value) => {
@@ -106,7 +111,10 @@ const start = (config: WorkerOpenConfig, path: string) => {
       if (statePath === undefined) throw new Error('Kiro replay requires state_path')
       return { workingDirectory: value.working_directory, privateDirectory: dirname(statePath) }
     },
-  })(config)
+  })
+
+const start = (config: WorkerOpenConfig, path: string) => {
+  const agent = factoryFor(path)(config)
   agents.push(agent)
   const events: AgentEvent[] = []
   fibers.push(Effect.runFork(Stream.runForEach(agent.events, (event) => Effect.sync(() => void events.push(event)))))
@@ -161,7 +169,137 @@ const close = async (agent: ThreadAgent, path: string, transcript: Transcript) =
 }
 
 describe('Kiro Agent host', () => {
-  it('probes an empty session without prompting and preserves unknown authentication and version', async () => {
+  it.each([
+    { code: 'AuthenticationError', message: 'private-auth-diagnostic', authentication: true },
+    { code: '-32000', message: 'Authentication required: private-auth-diagnostic', authentication: true },
+    { code: '-32000', message: 'The selected model is not available', authentication: false },
+    { code: null, message: 'Could not fetch authentication documentation', authentication: false },
+  ])('maps authentication failures safely: $message', ({ code, message, authentication }) => {
+    expect(kiroTurnFailure({ class: 'provider_error', code, message, retryable: null })).toBe(
+      authentication
+        ? 'Kiro CLI 认证失败，请在设备上登录 Kiro CLI 后重试'
+        : 'Kiro 执行失败，请检查设备上的 Kiro CLI 状态后重试',
+    )
+  })
+
+  it.each(['authentication required', 'provider error'])(
+    'persists %s through the real host and Worker without successful output or resending',
+    async (scenario) => {
+      const config = { ...(await workspace()), model: 'baton-nonexistent-model' }
+      const recording = await readKiroTranscript(kiroFixturePath('provider_error'))
+      const transcript =
+        scenario === 'authentication required' ? authenticationFailure(recording) : segment(recording, 0)
+      const path = await writeTranscript(config, 'failure', transcript)
+      const dbPath = join(config.working_directory, 'thread.db')
+      const events: AgentEvent[] = []
+      const scope = await effect(Scope.make())
+      let createdAgents = 0
+      const worker = await effect(
+        makeWorker({
+          dbPath,
+          agentFactory: (input) => {
+            createdAgents++
+            const agent = factoryFor(path)(input)
+            agents.push(agent)
+            return {
+              ...agent,
+              events: agent.events.pipe(Stream.tap((event) => Effect.sync(() => void events.push(event)))),
+            }
+          },
+        }).pipe(Effect.provideService(Scope.Scope, scope)),
+      )
+      const reports = async () =>
+        (await effect(worker.handle({ type: 'thread_pending', ok: true }))).thread_reports ?? []
+      const expectedReason =
+        scenario === 'authentication required'
+          ? 'Kiro CLI 认证失败，请在设备上登录 Kiro CLI 后重试'
+          : 'Kiro 执行失败，请检查设备上的 Kiro CLI 状态后重试'
+      let persistedReports: Awaited<ReturnType<typeof reports>> = []
+      try {
+        await effect(
+          worker.handle({
+            type: 'thread_open',
+            ok: true,
+            thread_id: config.thread_id,
+            storage_generation: config.storage_generation,
+            command_id: randomUUID(),
+            open_config: config,
+          }),
+        )
+        await expect
+          .poll(async () => (await reports()).some((report) => report.kind === 'thread.opened'), { timeout: 10_000 })
+          .toBe(true)
+        const request: WorkerRequest = {
+          type: 'thread_message',
+          ok: true,
+          thread_id: config.thread_id,
+          storage_generation: config.storage_generation,
+          command_id: randomUUID(),
+          client_message_id: randomUUID(),
+          payload: 'Complete the offline Kiro fixture turn',
+        }
+        await effect(worker.handle(request))
+        await expect
+          .poll(async () => (await reports()).find((report) => report.kind === 'thread.unknown')?.reason, {
+            timeout: 10_000,
+          })
+          .toBe(expectedReason)
+        await consumed(path, transcript)
+        await expect
+          .poll(
+            () => {
+              const database = new DatabaseSync(dbPath, { readOnly: true })
+              try {
+                const row = Schema.decodeUnknownSync(Schema.Struct({ payload: Schema.String }))(
+                  database.prepare('SELECT payload FROM thread_meta WHERE id = 1').get(),
+                )
+                return Schema.decodeUnknownSync(
+                  Schema.fromJsonString(Schema.Struct({ processTreeStopped: Schema.optional(Schema.Boolean) })),
+                )(row.payload).processTreeStopped
+              } finally {
+                database.close()
+              }
+            },
+            { timeout: 10_000 },
+          )
+          .toBe(true)
+        await effect(worker.handle(request))
+        persistedReports = await reports()
+        expect(events.filter((event) => event.type === 'reply' || event.type === 'end')).toEqual([])
+        expect(persistedReports.filter((report) => report.kind === 'reply')).toEqual([])
+        expect(
+          persistedReports.filter((report) => report.kind === 'turn.ended' && report.reason === 'completed'),
+        ).toEqual([])
+        expect(JSON.stringify(persistedReports)).not.toContain('private-auth-diagnostic')
+        expect(JSON.stringify(persistedReports)).not.toContain('Request ID:')
+        expect(createdAgents).toBe(1)
+      } finally {
+        await effect(Scope.close(scope, Exit.void))
+      }
+      const database = new DatabaseSync(dbPath, { readOnly: true })
+      try {
+        const rows = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ payload: Schema.String })))(
+          database.prepare('SELECT payload FROM thread_outbox ORDER BY seq').all(),
+        )
+        const stored = rows.map(
+          (row) =>
+            Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Struct({ report: ThreadReportSchema })))(row.payload)
+              .report,
+        )
+        expect(stored).toEqual(persistedReports)
+        expect(stored.filter((report) => report.kind === 'thread.unknown')).toEqual([
+          expect.objectContaining({ thread_id: config.thread_id, reason: expectedReason }),
+        ])
+        await consumed(path, transcript)
+        expect(createdAgents).toBe(1)
+      } finally {
+        database.close()
+      }
+    },
+    20_000,
+  )
+
+  it('probes an empty session without prompting and preserves unknown authentication', async () => {
     const config = await workspace()
     const transcript = probeOnly(await readKiroTranscript(kiroFixturePath('simple')))
     const path = await writeTranscript(config, 'probe', transcript)
@@ -183,7 +321,7 @@ describe('Kiro Agent host', () => {
     try {
       expect(await effect(host.probe)).toMatchObject({
         authenticated: 'unknown',
-        details: { installed: true, version: 'unknown' },
+        details: { installed: true, version: '2.32.0' },
       })
       await consumed(path, transcript)
     } finally {

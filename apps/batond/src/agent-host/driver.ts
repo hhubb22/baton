@@ -4,6 +4,7 @@ import { DateTime, Deferred, Effect, Queue, Scope, Stream } from 'effect'
 import type {
   ModelSelection,
   OrchestrationV2AppThread,
+  OrchestrationV2ProviderFailure,
   OrchestrationV2ProviderThread,
   OrchestrationV2RuntimeRequest,
   ProviderInstanceId,
@@ -37,6 +38,7 @@ export interface ProviderHostDriverOptions {
   readonly adapter: ProviderAdapter.ProviderAdapterV2['Service']
   /** Upstream `supportsActiveSteering`. Queue-only agents reject steer here. */
   readonly steer: boolean
+  readonly turnFailure?: (failure: OrchestrationV2ProviderFailure) => string
   /** Pi requires binding the native thread before its active-branch snapshot can be read. */
   readonly bindSnapshot?: boolean
   /** ACP must load the native session during openSession, before resumeThread or snapshot reads. */
@@ -177,7 +179,7 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
             if (!active || event.runOrdinal !== active.ordinal) return
             active.ended = true
             if (event.status === 'failed') {
-              yield* emit({ type: 'uncertain', reason: `${label} turn failed` })
+              yield* emit({ type: 'uncertain', reason: options.turnFailure?.(event.failure) ?? `${label} turn failed` })
               return
             }
             yield* emit({
