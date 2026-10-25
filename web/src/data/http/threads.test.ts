@@ -150,6 +150,27 @@ describe('HTTP thread contracts', () => {
     })
   })
 
+  it('offers reopening only when the server proves startup was rejected before Worker delivery', async () => {
+    let t = thread({ opened_at: null, status: 'stopped', retry_open_allowed: true, resume_pending: false })
+    const { api, refreshes } = setup((url, init) => {
+      if (url.pathname.endsWith('/timeline')) return { events: [accepted()] }
+      if (url.pathname.endsWith('/resume') && init?.method === 'POST')
+        t = thread({ opened_at: null, status: 'waiting_device', resume_pending: true })
+      return t
+    })
+    const stopped = await api.getThread(threadId)
+    expect(threadView(stopped, device()).notice).toMatchObject({ action: 'resume' })
+    expect(threadView(stopped, device()).composer).toBe(false)
+    const op = await api.resumeThread(threadId)
+    const refresh = refreshes.get(op.id)
+    if (!refresh) throw new Error('Missing operation refresh')
+    expect((await refresh()).phase).toBe('saved')
+    t = thread({ resume_pending: false })
+    expect((await refresh()).phase).toBe('done')
+    t = thread({ opened_at: null, status: 'stopped', retry_open_allowed: false, resume_pending: false })
+    expect(threadView(await api.getThread(threadId), device()).notice).toMatchObject({ action: 'newChat' })
+  })
+
   it('rejects Cursor creation without explicit create capability', async () => {
     const cursorDevice = device()
     cursorDevice.agents[0] = {

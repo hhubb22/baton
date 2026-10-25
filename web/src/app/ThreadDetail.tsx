@@ -657,7 +657,9 @@ export function ThreadDetail({
                     disabled={view.notice.action === 'resume' && (resuming || resume.isPending)}
                     onClick={() => onAction(view.notice!.action!)}
                   >
-                    {actionLabels[view.notice.action]}
+                    {view.notice.action === 'resume' && thread.retryOpenAllowed
+                      ? 'Retry opening'
+                      : actionLabels[view.notice.action]}
                   </Button>
                 )
               }

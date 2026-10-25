@@ -66,6 +66,7 @@ const additions: Record<string, string[]> = {
   ThreadReport: ['command_id', 'command_outcome'],
   ThreadCommand: ['trace_context', 'project_id', 'origin_conversation_id', 'origin_tool_call_id'],
   ThreadCommandResult: ['storage_generation'],
+  ThreadView: ['retry_open_allowed'],
   CreateBrowserThreadInput: ['execution_timeout_seconds'],
   SessionRequest: ['output_id', 'storage_generation'],
   SessionResult: ['full_output'],

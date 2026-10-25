@@ -132,6 +132,7 @@ export interface Thread {
   // 尚未收到实际打开或恢复完成的执行结果。
   starting?: boolean
   resumePending?: boolean
+  retryOpenAllowed?: boolean
   // 最近一次停止或归档撤回的排队消息条数。
   stopCanceled: number
   createdAt: number

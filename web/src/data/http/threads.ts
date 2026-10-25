@@ -38,6 +38,7 @@ type ThreadDTO = {
   native_session_id?: string
   opened_at?: string | null
   resume_pending?: boolean
+  retry_open_allowed?: boolean
   stop_requested_at?: string
   stop_confirmed_at?: string
   archive_requested_at?: string
@@ -236,6 +237,7 @@ function mapThread(t: ThreadDTO, events: EventDTO[]): Thread {
             : null,
     starting: !t.opened_at && !['stopped', 'unknown', 'archived'].includes(t.status),
     resumePending: t.resume_pending,
+    retryOpenAllowed: t.retry_open_allowed,
     stopCanceled: t.stop_canceled ?? canceled.length,
     createdAt: timestamp(t.created_at),
     updatedAt: timestamp(t.last_activity_at),

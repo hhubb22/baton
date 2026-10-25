@@ -2,6 +2,7 @@ import { Effect, Schema } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import * as P from '@baton/protocol'
 import { AppError } from './errors.ts'
+import { canRetryOpen } from './threads-open-retry.ts'
 import {
   admission,
   audit,
@@ -147,11 +148,14 @@ const action = (
       } else {
         const rows = yield* sql<{
           active: boolean
-        }>`SELECT EXISTS(SELECT 1 FROM thread_turns WHERE thread_id=${threadID} AND ended_at IS NULL) OR EXISTS(SELECT 1 FROM thread_messages WHERE thread_id=${threadID} AND status IN ('accepted','queued','unknown')) AS active`
+          uncertain: boolean
+        }>`SELECT EXISTS(SELECT 1 FROM thread_turns WHERE thread_id=${threadID} AND ended_at IS NULL) OR EXISTS(SELECT 1 FROM thread_messages WHERE thread_id=${threadID} AND status IN ('accepted','queued')) AS active,
+        EXISTS(SELECT 1 FROM thread_messages WHERE thread_id=${threadID} AND status='unknown') AS uncertain`
         if (
           kind === 'archive' &&
-          !rows[0]!.active &&
-          ['idle', 'stopped'].includes(t.status) &&
+          !rows[0]?.active &&
+          (!rows[0]?.uncertain || !!t.stop_confirmed_at) &&
+          (['idle', 'stopped'].includes(t.status) || (t.status === 'unknown' && !!t.stop_confirmed_at)) &&
           (!t.stop_requested_at || t.stop_confirmed_at)
         ) {
           yield* sql`UPDATE threads SET status='archived',archive_requested_at=COALESCE(archive_requested_at,clock_timestamp()),archived_at=clock_timestamp() WHERE id=${threadID}`
@@ -183,8 +187,16 @@ export const resume = (employeeID: string, threadID: string): DB<P.Thread> =>
       const t = yield* readThread(employeeID, threadID, true)
       if (t.status === 'archived' || t.archive_requested_at) return yield* Effect.fail(failure('thread_archived'))
       const pending =
-        yield* sql`SELECT id FROM thread_outbox WHERE employee_id=${employeeID} AND thread_id=${threadID} AND action='resume' AND completed_at IS NULL`
+        yield* sql`SELECT id FROM thread_outbox WHERE employee_id=${employeeID} AND thread_id=${threadID} AND (action='resume' OR (action='open' AND payload->>'retry_open'='true')) AND completed_at IS NULL`
       if (pending.length) return t
+      if (yield* canRetryOpen(t)) {
+        const model = yield* admission(employeeID, t.node_id, t.agent_type, t.working_directory, t.model, 'create')
+        yield* sql`UPDATE threads SET status='waiting_device',status_reason='',stop_requested_at=NULL,stop_confirmed_at=NULL WHERE id=${t.id}`
+        yield* enqueue(t, 'open', { model, execution_timeout_seconds: t.execution_timeout_seconds, retry_open: true })
+        yield* audit(t, 'open.retry_requested', {})
+        yield* touch(t.id)
+        return yield* readThread(employeeID, threadID)
+      }
       if (t.agent_type === 'shell') return yield* Effect.fail(failure('shell_single_turn', 422))
       if (!t.opened_at || !t.storage_generation) return yield* Effect.fail(failure('thread_not_opened', 422))
       if (!['idle', 'stopped', 'unknown'].includes(t.status)) return yield* Effect.fail(failure())
@@ -245,9 +257,10 @@ export const view = (employeeID: string, threadID: string): DB<P.ThreadView> =>
         value: P.ThreadMessage
       }>`SELECT jsonb_strip_nulls(to_jsonb(m)-'employee_id') AS value FROM thread_messages m WHERE employee_id=${employeeID} AND thread_id=${threadID} AND (status IN ('accepted','queued','unknown') OR (status='withdrawn' AND status_reason<>'')) ORDER BY created_at,id`
       const pending =
-        yield* sql`SELECT id FROM thread_outbox WHERE employee_id=${employeeID} AND thread_id=${threadID} AND action='resume' AND completed_at IS NULL`
+        yield* sql`SELECT id FROM thread_outbox WHERE employee_id=${employeeID} AND thread_id=${threadID} AND (action='resume' OR (action='open' AND payload->>'retry_open'='true')) AND completed_at IS NULL`
       return {
         ...t,
+        retry_open_allowed: yield* canRetryOpen(t),
         current_turn: turns[0]?.value ?? null,
         pending_messages: messages.map((x) => x.value).filter((x) => x.status !== 'withdrawn'),
         failed_messages: messages.map((x) => x.value).filter((x) => x.status === 'withdrawn'),

@@ -282,6 +282,16 @@ function stoppedNotice(
         false,
       ]
     case 'startFailed':
+      if (thread.retryOpenAllowed)
+        return [
+          notice(
+            `${agent} could not start`,
+            `Fix the reported issue on ${name}, then retry opening this chat. Your saved message is kept for you to send again.`,
+            'resume',
+            'danger',
+          ),
+          false,
+        ]
       return [
         notice(
           `${agent} could not start`,

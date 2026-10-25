@@ -107,6 +107,9 @@ export const claimCommands = (): DB<ClaimedCommand[]> =>
           256 * 1024
         )
           return yield* Effect.fail(failure('message_too_large', 413))
+        // 新的执行可能开始后，旧的停止确认不能用于归档。
+        if (['open', 'resume', 'message'].includes(o.action) && t.stop_confirmed_at)
+          yield* sql`UPDATE threads SET stop_requested_at=NULL,stop_confirmed_at=NULL WHERE id=${t.id}`
         yield* sql`UPDATE thread_outbox SET attempts=LEAST(attempts::bigint+1,2147483647)::integer,
       next_attempt_at=clock_timestamp()+make_interval(secs=>LEAST(30.0,power(2.0,LEAST(attempts,5)))*(0.8+random()*0.2)) WHERE id=${o.id}`
         commands.push({ message_id: o.message_id, node_id: o.node_id, employee_id: o.employee_id, body })
@@ -151,7 +154,9 @@ export const processReceipt = (
           yield* sql`UPDATE thread_messages SET status='withdrawn',status_reason=${result.code || 'command_rejected'} WHERE employee_id=${source.employee_id} AND thread_id=${t.id} AND client_message_id=${o.payload.client_message_id!} AND status IN ('accepted','queued')`
         if (o.action === 'open') {
           yield* sql`UPDATE threads SET status='stopped',status_reason=${result.code || 'open_rejected'},version=version+1 WHERE id=${t.id} AND opened_at IS NULL`
-          yield* sql`UPDATE thread_messages SET status='withdrawn',status_reason=${result.code || 'open_rejected'} WHERE thread_id=${t.id} AND status='accepted'`
+          yield* sql`UPDATE thread_messages SET status='withdrawn',status_reason=${result.code || 'open_rejected'} WHERE thread_id=${t.id} AND status='accepted'
+          AND EXISTS(SELECT 1 FROM thread_outbox o WHERE o.thread_id=${t.id} AND o.action='message' AND o.payload->>'client_message_id'=thread_messages.client_message_id AND o.attempts=0 AND o.acked_at IS NULL)`
+          yield* sql`UPDATE thread_outbox SET completed_at=clock_timestamp(),completion=${JSON.stringify({ command_outcome: 'cancelled', reason: result.code || 'open_rejected' })}::jsonb WHERE thread_id=${t.id} AND action='message' AND attempts=0 AND acked_at IS NULL AND completed_at IS NULL`
         }
       } else if (result.ok && o.action === 'message' && !o.completed_at) {
         yield* sql`UPDATE thread_messages SET status='queued' WHERE employee_id=${source.employee_id} AND thread_id=${t.id} AND client_message_id=${o.payload.client_message_id!} AND status='accepted'`

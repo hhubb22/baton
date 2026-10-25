@@ -41,9 +41,9 @@ const finishArchive = (t: P.Thread) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const rows = yield* sql`UPDATE threads SET status='archived',archived_at=clock_timestamp() WHERE id=${t.id}
-    AND archive_requested_at IS NOT NULL AND stop_confirmed_at IS NOT NULL AND status IN ('idle','stopped')
+    AND archive_requested_at IS NOT NULL AND stop_confirmed_at IS NOT NULL AND status IN ('idle','stopped','unknown')
     AND NOT EXISTS(SELECT 1 FROM thread_turns WHERE thread_id=${t.id} AND ended_at IS NULL)
-    AND NOT EXISTS(SELECT 1 FROM thread_messages WHERE thread_id=${t.id} AND status IN ('accepted','queued','unknown')) AND archived_at IS NULL RETURNING id`
+    AND NOT EXISTS(SELECT 1 FROM thread_messages WHERE thread_id=${t.id} AND status IN ('accepted','queued')) AND archived_at IS NULL RETURNING id`
     if (rows.length) {
       const [request] = yield* sql<{
         actor: string
@@ -77,13 +77,15 @@ const apply = (t: P.Thread, r: P.ThreadReport) =>
         if (t.opened_at) return yield* Effect.fail(failure())
         yield* noActiveTurn(t.id)
         yield* sql`UPDATE thread_messages SET status='withdrawn',status_reason=${r.reason || ''} WHERE thread_id=${t.id} AND status='accepted'
-        AND EXISTS(SELECT 1 FROM thread_outbox o WHERE o.thread_id=${t.id} AND o.action='message' AND o.payload->>'client_message_id'=thread_messages.client_message_id AND o.attempts=0)`
+        AND EXISTS(SELECT 1 FROM thread_outbox o WHERE o.thread_id=${t.id} AND o.action='message' AND o.payload->>'client_message_id'=thread_messages.client_message_id AND o.attempts=0 AND o.acked_at IS NULL)`
+        yield* sql`UPDATE thread_outbox SET completed_at=clock_timestamp(),completion=${JSON.stringify({ command_outcome: 'cancelled', reason: r.reason || 'open_failed' })}::jsonb WHERE thread_id=${t.id} AND action='message' AND attempts=0 AND acked_at IS NULL AND completed_at IS NULL`
         yield* status(t, 'stopped', r.reason)
         break
       }
       case 'thread.resumed': {
         if (!t.opened_at || !['idle', 'stopped', 'unknown'].includes(t.status)) return yield* Effect.fail(failure())
         yield* noActiveTurn(t.id)
+        yield* sql`UPDATE threads SET stop_requested_at=NULL,stop_confirmed_at=NULL WHERE id=${t.id} AND stop_confirmed_at IS NOT NULL`
         yield* status(t, 'idle')
         break
       }
@@ -130,6 +132,7 @@ const apply = (t: P.Thread, r: P.ThreadReport) =>
         yield* sql`INSERT INTO thread_turns(id,employee_id,thread_id,worker_turn_seq,initiator,origin_tool_call_id,started_at,model) VALUES(${id},${t.employee_id},${t.id},${r.worker_turn_seq},${m.sender},${m.origin_tool_call_id ?? null},clock_timestamp(),${model})`
         yield* sql`UPDATE thread_messages SET turn_id=${id},worker_turn_seq=${r.worker_turn_seq} WHERE id=${m.id}`
         yield* sql`UPDATE threads SET model=${model} WHERE id=${t.id}`
+        yield* sql`UPDATE threads SET stop_requested_at=NULL,stop_confirmed_at=NULL WHERE id=${t.id} AND stop_confirmed_at IS NOT NULL`
         yield* status(t, 'running')
         break
       }
@@ -169,8 +172,11 @@ const apply = (t: P.Thread, r: P.ThreadReport) =>
       case 'thread.unknown': {
         if (r.history_unavailable) {
           yield* sql`UPDATE thread_turns SET ended_at=clock_timestamp(),end_reason='agent_exited' WHERE thread_id=${t.id} AND ended_at IS NULL`
+          yield* sql`UPDATE thread_messages m SET status='withdrawn',status_reason='history_unavailable_before_dispatch' WHERE thread_id=${t.id} AND status='accepted' AND worker_turn_seq IS NULL
+          AND EXISTS(SELECT 1 FROM thread_outbox o WHERE o.thread_id=m.thread_id AND o.action='message' AND o.payload->>'client_message_id'=m.client_message_id)
+          AND NOT EXISTS(SELECT 1 FROM thread_outbox o WHERE o.thread_id=m.thread_id AND o.action='message' AND o.payload->>'client_message_id'=m.client_message_id AND (o.attempts<>0 OR o.acked_at IS NOT NULL))`
           yield* sql`UPDATE thread_messages SET status='unknown',status_reason=${r.reason || 'history_unavailable'} WHERE thread_id=${t.id} AND status IN ('accepted','queued')`
-          yield* sql`UPDATE thread_outbox SET completed_at=clock_timestamp(),completion=${JSON.stringify({ command_outcome: 'unknown', reason: r.reason || 'history_unavailable' })}::jsonb WHERE thread_id=${t.id} AND completed_at IS NULL`
+          yield* sql`UPDATE thread_outbox SET completed_at=clock_timestamp(),completion=jsonb_build_object('command_outcome',CASE WHEN attempts=0 AND acked_at IS NULL THEN 'cancelled' ELSE 'unknown' END,'reason',${r.reason || 'history_unavailable'}::text) WHERE thread_id=${t.id} AND completed_at IS NULL`
         } else yield* noActiveTurn(t.id)
         if (!r.history_unavailable && r.kind === 'thread.stopped' && t.stop_requested_at)
           yield* sql`UPDATE threads SET stop_confirmed_at=clock_timestamp() WHERE id=${t.id}`

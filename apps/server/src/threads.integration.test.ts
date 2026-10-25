@@ -365,6 +365,84 @@ it('binds startup generation without opening and delivers early stop before queu
     expect((await run(threads.archive(f.employee, thread.id))).status).toBe('archived')
   }))
 
+it('retries opening after a durable pre-Worker rejection without replaying the original input', () =>
+  withTestDatabase(async ({ run, restart }) => {
+    const f = await fixture(run)
+    const { thread: t } = await f.create()
+    const [initial] = await run(threads.claimCommands())
+    if (!initial) throw new Error('Missing initial open command')
+    await run(
+      threads.processReceipt(f.source, initial.message_id, {
+        type: 'thread.command_result',
+        thread_id: t.id,
+        ok: false,
+        code: 'agent_unavailable',
+      }),
+    )
+    const stopped = await run(threads.view(f.employee, t.id))
+    expect(stopped.retry_open_allowed).toBe(true)
+    expect(stopped.failed_messages?.[0]?.content).toBe(f.input.message.content)
+    const resumed = await restart()
+    await resumed(threads.resume(f.employee, t.id))
+    await resumed(threads.resume(f.employee, t.id))
+    expect((await resumed(threads.view(f.employee, t.id))).resume_pending).toBe(true)
+    const [retry] = await resumed(threads.claimCommands())
+    if (!retry) throw new Error('Missing retry open command')
+    expect(retry.body.action).toBe('open')
+    expect(retry.message_id).not.toBe(initial.message_id)
+    await resumed(
+      threads.processReceipt(f.source, retry.message_id, {
+        type: 'thread.command_result',
+        thread_id: t.id,
+        ok: true,
+        storage_generation: 'generation',
+      }),
+    )
+    await resumed(threads.processReport(f.source, report(t.id, 1, 'thread.opened', { native_session_id: 'native' })))
+    await resumed(
+      threads.processReport(
+        f.source,
+        report(t.id, 2, 'command.completed', {
+          command_id: retry.message_id,
+          command_outcome: 'succeeded',
+          reason: '',
+        }),
+      ),
+    )
+    const opened = await resumed(threads.view(f.employee, t.id))
+    expect(opened.status).toBe('idle')
+    expect(opened.resume_pending).toBe(false)
+    expect(opened.failed_messages?.[0]?.content).toBe(f.input.message.content)
+    expect(await resumed(threads.claimCommands())).toEqual([])
+    await resumed(threads.addMessage(f.employee, t.id, { client_message_id: randomUUID(), content: 'continue' }))
+    expect((await resumed(threads.claimCommands())).map((c) => c.body.action)).toEqual(['message'])
+  }))
+
+it.each(['worker-accepted', 'identity-conflict', 'message-dispatched'])(
+  'rejects reopening when persistent evidence is unsafe: %s',
+  (scenario) =>
+    withTestDatabase(async ({ run }) => {
+      const f = await fixture(run)
+      const { thread: t } = await f.create()
+      const [initial] = await run(threads.claimCommands())
+      if (!initial) throw new Error('Missing initial open command')
+      await run(
+        threads.processReceipt(f.source, initial.message_id, {
+          type: 'thread.command_result',
+          thread_id: t.id,
+          ok: false,
+          code: scenario === 'identity-conflict' ? 'thread_already_exists' : 'agent_unavailable',
+          ...(scenario === 'worker-accepted' ? { storage_generation: 'generation' } : {}),
+        }),
+      )
+      if (scenario === 'message-dispatched')
+        await run(query("UPDATE thread_outbox SET attempts=1 WHERE thread_id=$1 AND action='message'", t.id))
+      expect((await run(threads.view(f.employee, t.id))).retry_open_allowed).toBe(false)
+      await expect(run(threads.resume(f.employee, t.id))).rejects.toMatchObject({ code: 'thread_not_opened' })
+      expect(await run(threads.claimCommands())).toEqual([])
+    }),
+)
+
 it('accepts completion before ACK, rejects conflicting source/generation and keeps resume pending until completion', () =>
   withTestDatabase(async ({ run, restart }) => {
     const f = await fixture(run)
@@ -640,10 +718,14 @@ it('commits ordered turns and replies once, rolls back invalid reports, and requ
     expect((await run(threads.view(f.employee, t.id))).status).toBe('archived')
   }))
 
-it('ends pending commands unknown on missing history and rejects replaced connections', () =>
-  withTestDatabase(async ({ run }) => {
+it('classifies missing history by durable dispatch facts and rejects replaced connections', () =>
+  withTestDatabase(async ({ run, restart }) => {
     const f = await fixture(run)
     const t = await open(run, f)
+    await run(threads.claimCommands())
+    const unsent = await run(
+      threads.addMessage(f.employee, t.id, { client_message_id: randomUUID(), content: 'never dispatched' }),
+    )
     await run(threads.processReport(f.source, report(t.id, 3, 'thread.stopped', { reason: 'exited' })))
     await run(threads.resume(f.employee, t.id))
     expect((await run(threads.view(f.employee, t.id))).resume_pending).toBe(true)
@@ -663,14 +745,92 @@ it('ends pending commands unknown on missing history and rejects replaced connec
       query<{ n: string }>('SELECT count(*)::text AS n FROM thread_outbox WHERE completed_at IS NULL'),
     )
     expect(pending[0]!.n).toBe('0')
-    const messages = await run(query<{ status: string }>('SELECT status FROM thread_messages'))
-    expect(messages[0]!.status).toBe('unknown')
+    const messages = await run(
+      query<{ status: string; client_message_id: string }>('SELECT status,client_message_id FROM thread_messages'),
+    )
+    expect(messages.find((m) => m.client_message_id === f.input.message.client_message_id)?.status).toBe('unknown')
+    expect(messages.find((m) => m.client_message_id === unsent.client_message_id)?.status).toBe('withdrawn')
+    const outcomes = await run(
+      query<{ attempts: number; outcome: string }>(
+        "SELECT attempts,completion->>'command_outcome' AS outcome FROM thread_outbox WHERE action<>'open'",
+      ),
+    )
+    expect(outcomes.every((o) => o.outcome === (o.attempts === 0 ? 'cancelled' : 'unknown'))).toBe(true)
+    const resumed = await restart()
+    const restored = await resumed(threads.view(f.employee, t.id))
+    expect(restored.pending_messages?.map((m) => m.client_message_id)).toEqual([f.input.message.client_message_id])
+    expect(restored.failed_messages?.map((m) => m.client_message_id)).toContain(unsent.client_message_id)
+    expect(await resumed(threads.claimCommands())).toEqual([])
+    await resumed(threads.withdraw(f.employee, t.id, unsent.id))
     await run(query("UPDATE node_presence SET conn_id='replacement'"))
     await expect(run(threads.processReport(f.source, report(t.id, 5, 'thread.stopped')))).rejects.toMatchObject({
       status: 401,
     })
     expect((await run(threads.view(f.employee, t.id))).last_worker_seq).toBe(4)
   }))
+
+it.each([true, false])('archives unknown history only after stop confirmation (archive first: %s)', (archiveFirst) =>
+  withTestDatabase(async ({ run }) => {
+    const f = await fixture(run)
+    const t = await open(run, f)
+    await run(threads.claimCommands())
+    await run(
+      threads.processReport(
+        f.source,
+        report(t.id, 3, 'message.unknown', {
+          client_message_id: f.input.message.client_message_id,
+          reason: 'Native acceptance is uncertain',
+        }),
+      ),
+    )
+    if (archiveFirst) expect((await run(threads.archive(f.employee, t.id))).status).toBe('unknown')
+    else await run(threads.stop(f.employee, t.id))
+    await run(threads.processReport(f.source, report(t.id, 4, 'thread.unknown', { history_unavailable: true })))
+    const uncertain = await run(threads.view(f.employee, t.id))
+    expect(uncertain.status).toBe('unknown')
+    expect(uncertain.stop_confirmed_at).toBeFalsy()
+    await run(threads.processReport(f.source, report(t.id, 5, 'thread.stopped', { reason: 'Process tree reclaimed' })))
+    if (!archiveFirst) await run(threads.archive(f.employee, t.id))
+    const archived = await run(threads.view(f.employee, t.id))
+    expect(archived.status).toBe('archived')
+    expect(archived.stop_confirmed_at).toBeTruthy()
+    expect(archived.pending_messages?.[0]).toMatchObject({ status: 'unknown', content: f.input.message.content })
+    expect(await run(threads.claimCommands())).toEqual([])
+  }),
+)
+
+it.each(['resume', 'message'])('expires an earlier stop confirmation before dispatching %s', (next) =>
+  withTestDatabase(async ({ run }) => {
+    const f = await fixture(run)
+    const t = await open(run, f)
+    await run(threads.claimCommands())
+    await run(threads.processReport(f.source, report(t.id, 3, 'thread.unknown', { history_unavailable: true })))
+    await run(threads.stop(f.employee, t.id))
+    const [stop] = await run(threads.claimCommands())
+    if (!stop) throw new Error('Missing stop command')
+    await run(threads.processReport(f.source, report(t.id, 4, 'thread.stopped')))
+    await run(
+      threads.processReport(
+        f.source,
+        report(t.id, 5, 'command.completed', {
+          command_id: stop.message_id,
+          command_outcome: 'succeeded',
+          reason: '',
+        }),
+      ),
+    )
+    expect((await run(threads.view(f.employee, t.id))).stop_confirmed_at).toBeTruthy()
+    if (next === 'resume') await run(threads.resume(f.employee, t.id))
+    else await run(threads.addMessage(f.employee, t.id, { client_message_id: randomUUID(), content: 'new input' }))
+    const dispatched = await run(threads.claimCommands())
+    expect(dispatched.map((c) => c.body.action)).toEqual([next])
+    expect((await run(threads.view(f.employee, t.id))).stop_confirmed_at).toBeUndefined()
+    await run(threads.processReport(f.source, report(t.id, 6, 'thread.unknown', { history_unavailable: true })))
+    expect((await run(threads.archive(f.employee, t.id))).status).toBe('unknown')
+    await run(threads.processReport(f.source, report(t.id, 7, 'thread.stopped')))
+    expect((await run(threads.view(f.employee, t.id))).status).toBe('archived')
+  }),
+)
 
 async function holdLock(run: Run, table: 'threads' | 'thread_outbox', id: string) {
   let acquired!: () => void

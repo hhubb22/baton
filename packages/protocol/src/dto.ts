@@ -1376,6 +1376,7 @@ export type ThreadTrace = typeof ThreadTrace.Type
 // internal/store/thread_types.go · ThreadView
 export const ThreadView = Schema.Struct({
   resume_pending: Schema.Boolean,
+  retry_open_allowed: Schema.optionalKey(Schema.Boolean),
   next_model: Schema.optionalKey(summary(512)),
   id: UUID,
   employee_id: UUID,
