@@ -10,7 +10,7 @@ T1 ──┬─ T2 ── T3 ──┐
      └─ T4 ─────────┼─ T5
 ```
 
-T1～T3 已完成。任务是能力验收单位，可以由多个小提交和 PR 完成；每个任务同时交付实现、调用方与测试。T1 按复用检查点、本地可靠执行推进；T3 按设备操作、Project 协同推进；T4 按 fork 与宿主层、各 Agent 接入、历史来源推进。检查点在同一任务内逐项合入，复用检查点完成后再估算剩余工作。
+T1～T4 已完成。任务按能力验收，每项包含实现、调用方与测试；完整安装包、发布切换与系统矩阵复验由 T5 交付。
 
 ## T1 交付 Cursor 本地可靠会话
 
@@ -53,13 +53,16 @@ Status: complete
 
 ## T4 用 t3code fork 接入 Agent 并统一历史
 
+Status: complete
+实现与验证入口：[t3code fork](../../third_party/t3code/README.md)、[agent-host](../../apps/batond/src/agent-host/README.md)、[TS 中心与网页](../../apps/server/README.md)。Cursor、Pi、Codex、Kiro 共用 fork 的完整 adapter 与宿主层，Thread 历史由中心记录提供；完整安装包与系统矩阵复验归 T5。
+
 - 依据：[架构与职责](../agent-adapters/TECH.md#架构与职责)、[Worker 保证与上游行为](../agent-adapters/TECH.md#worker-保证与上游行为r-04r-09)、[各 Agent 实现](../agent-adapters/TECH.md#各-agent-实现)、[历史](../agent-adapters/TECH.md#历史r-10)。
 - 依赖：T1 的 Worker 与进程管理，T2 的远程 Thread 链路。
 - 交付：建立 t3code fork 与 `upstream/t3code` submodule，workspace 收录所需包并删除本地 `effect-acp`、`effect-codex-app-server`、`packages/providers`、`packages/provider-testing`；`cursor-host` 泛化为 agent-host，提供宿主层与事件映射；Cursor 改用完整 `provider-cursor`；接入 Pi、Codex（fork 中拆成 `provider-codex`）和 Kiro（fork 中新增 `kiroAcp`）；Thread 历史改用中心记录，删除设备原生历史与网页原生解析。
 - 边界：接受上游行为，不在接入层修改 adapter 语义；MCP 只接注入接口，不配置 endpoint；不增加 Grok、Antigravity 或上游 fork / rollback / 审批产品能力。
 - 验证：所用包的上游测试在 Baton CI 中运行；宿主层单测；用上游 testkit 替身驱动真实 adapter 验证事件映射与 `sent` 判定。
 - 验证：T2 的 Cursor 远程链路换到 agent-host 后回归通过；Pi、Codex、Kiro 各有一条网页发送、回复、停止、恢复的回放链路；Kiro 使用由 Go 录制转换的夹具。
-- 验证：Worker 的接收、intent、unknown、停止裁决与进程树回收测试换成 agent-host 替身后通过；网页与 `history.read` 读取同一份中心记录。
+- 验证：Worker 的接收、intent、unknown、停止裁决与进程树回收测试换成 agent-host 替身后通过；网页与 `threads.read` 读取同一份中心记录。
 
 ## T5 交付安装包并切换 TS 发布
 

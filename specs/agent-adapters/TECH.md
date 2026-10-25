@@ -247,21 +247,16 @@ Kiro host 回放使用上述授权转换的夹具，验证范围包括真实 ada
 | 事件映射 | 用上游 testkit 替身驱动真实 adapter，核对 reply、end、uncertain 与 `sent` 判定 | 确定性回放 |
 | Worker 保证 | 沿用 T1～T3 的接收、intent、unknown、停止裁决与回收测试，换成 agent-host 替身 | Worker 集成 |
 | 主链路 | 每种 Agent 一条网页发送到回复、停止、恢复的回放链路 | e2e |
-| 历史 | 网页与 `history.read` 读取同一份中心记录，分页与权限正确 | 中心集成与 Web 契约 |
+| 历史 | 网页与 `threads.read` 读取同一份中心 Thread 记录，分页与权限正确 | 中心集成与 Web 契约 |
 | 探测与 reason | 缺程序或明确认证缺失时 unavailable，未交付版本/系统组合及版本超时、不可解析时 unverified；Kiro 仅在精确交付组合中允许认证 unknown 并保留首次原生执行检查的 reason，Pi/Codex 规则不变 | 包内与本地可执行替身 |
 | Kiro 回合失败 | `provider_error` 与派生认证失败经真实 host/Worker 保存失败原因，输入保持 sent，后续排队消息执行并收到回复、原生会话与进程保留；中心时间线可读原因、空队列时 idle，网页在对应回合显示失败 | 确定性回放、Worker 集成、跨 app e2e 与网页数据层 |
 | 安装包 | 脱离源码运行 SEA，加载 t3code 依赖与附带目录 | 打包检查（T5） |
 
-## 实施顺序
+## 实施状态
 
-按 [迁移任务清单](../ts-migration/TASKS.md) 执行。T1～T3 已完成；T4 按以下顺序推进，每步可单独合入：
+[迁移任务清单](../ts-migration/TASKS.md) 中的 T1～T4 已完成。`upstream/t3code` 固定到 Baton fork，workspace 收录所需包及其上游离线测试；agent-host 提供共用宿主层与事件映射，Cursor、Pi、Codex、Kiro 均通过完整 adapter 接入。网页时间线与 Project 工具 `threads.read` 从中心记录读取 Thread 历史。
 
-1. 建立 fork 与 `upstream/t3code`，workspace 收录所需包，删除本地 `effect-acp`、`effect-codex-app-server` 副本，上游测试在 Baton CI 中运行。
-2. 建立 agent-host，实现宿主层与事件映射，用完整 `provider-cursor` 替换本地抽取的 runner，T2 的 Cursor 远程链路回归通过。
-3. 接入 Pi、Codex（含 fork 中拆包）和 Kiro（fork 中新增 `kiroAcp`）。
-4. 历史改用中心记录，删除设备原生历史与网页原生解析。
-
-Grok、Antigravity 在切换后接入，复用同一宿主层。
+T5 负责完整安装包、发布切换与系统矩阵复验。Grok、Antigravity 在切换后接入，复用同一宿主层。
 
 ## 上游参考
 
