@@ -60,6 +60,8 @@ const schemas = {
     mode: Schema.optionalKey(P.MessageMode),
     model: Schema.optionalKey(P.summary(512)),
   }),
+  'threads.withdraw': Schema.Struct({ thread_id: P.UUID, message_id: P.UUID }),
+  'threads.resume': Schema.Struct({ thread_id: P.UUID }),
   'threads.stop': Schema.Struct({ thread_id: P.UUID }),
   'threads.archive': Schema.Struct({ thread_id: P.UUID }),
   'threads.list': Schema.Struct({ status: Schema.optionalKey(P.ThreadStatus), ...afterId, ...pageFields }),
@@ -272,6 +274,18 @@ const executeBusiness = Effect.fnUntraced(function* (
         source(c),
       )
       return { value: { thread_id: a.thread_id, message_id: m.id, status: m.status, read_tool: 'threads.get' } }
+    }
+    case 'threads.withdraw': {
+      const a = yield* strictDecode(schemas[name], args)
+      yield* ownedThread(c, a.thread_id, true)
+      const t = yield* threads.withdraw(c.employeeId, a.thread_id, a.message_id)
+      return { value: { thread_id: t.id, message_id: a.message_id, status: t.status, read_tool: 'threads.get' } }
+    }
+    case 'threads.resume': {
+      const a = yield* strictDecode(schemas[name], args)
+      yield* ownedThread(c, a.thread_id, true)
+      const t = yield* threads.resume(c.employeeId, a.thread_id)
+      return { value: { thread_id: t.id, status: t.status, read_tool: 'threads.get' } }
     }
     case 'threads.stop':
     case 'threads.archive': {

@@ -37,6 +37,8 @@ test('固定工具顺序与 Thread、Inbox 契约一致', () => {
       'devices.list',
       'threads.create',
       'threads.send',
+      'threads.withdraw',
+      'threads.resume',
       'threads.stop',
       'threads.archive',
       'threads.list',

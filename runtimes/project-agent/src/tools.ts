@@ -80,6 +80,18 @@ export const toolDefinitions = [
     }),
   },
   {
+    name: 'threads.withdraw',
+    description:
+      '撤回本 Project 的 Thread 中尚未发送的消息。message_id 从 threads.get 的 pending_messages 读取；仅接受 accepted 或 queued，已发送或结果未知时拒绝。返回的是撤回请求，最终状态用 threads.get 查询。',
+    parameters: obj({ thread_id: str(), message_id: str() }),
+  },
+  {
+    name: 'threads.resume',
+    description:
+      '显式恢复本 Project 已打开的 Thread，沿用中心的设备能力与执行状态校验；停止尚未确认或正在执行时拒绝。重复请求复用待处理的恢复命令，不重新发送历史消息；shell Thread 不支持恢复。结果用 threads.get 查询。',
+    parameters: obj({ thread_id: str() }),
+  },
+  {
     name: 'threads.stop',
     description: '停止本 Project 的 Thread 当前一轮。',
     parameters: obj({ thread_id: str() }),

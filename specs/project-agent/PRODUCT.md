@@ -25,7 +25,7 @@ Project Agent 请用户做决定的事项见 [Agent Inbox 行为规格](../agent
 
 - PA-01：用户创建 Project 时只需提供标题，可补充目标说明。Project 可以长期存在，可以暂停或归档，没有删除流程。Project 不绑定代码仓库或设备。项目记忆里可以有「Baton 仓库在 Mac 上的路径是 ~/src/baton」这样的普通事实，但它不构成授权或配置。
 - PA-02：创建 Project 时同时创建它唯一的 Project Agent 和一个主对话，三者各有稳定 ID。修改标题、换设备运行都不改变这些 ID。
-- PA-03：Project Agent 的工具由 Baton 固定：对话历史、项目记忆、设备能力、本 Project 的 Thread 操作（新建、发消息、停止、归档、读取）、事项（Agent Inbox）、在用户开启了命令执行的设备上执行命令（PA-21）。每次调用都由后端检查权限。它不能通过 Thread 回复、记忆内容或模型输出获得额外的工具。开发工作优先交给 Thread 里的执行 Agent；必要时 Project Agent 可以自己执行命令。这是写在系统提示词里的分工，Baton 不检查命令内容。
+- PA-03：Project Agent 的工具由 Baton 固定：对话历史、项目记忆、设备能力、本 Project 的 Thread 操作（新建、发消息、撤回待发消息、恢复、停止、归档、读取）、事项（Agent Inbox）、在用户开启了命令执行的设备上执行命令（PA-21）。每次调用都由后端检查权限。它不能通过 Thread 回复、记忆内容或模型输出获得额外的工具。开发工作优先交给 Thread 里的执行 Agent；必要时 Project Agent 可以自己执行命令。这是写在系统提示词里的分工，Baton 不检查命令内容。
 - PA-04：Project Agent 使用设备上已登录的模型订阅推理，不要求用户提供 API key。Coordinator 不做模型推理，不保存订阅凭据。用户为每个 Project Agent 选择订阅和模型，修改从下一次运行起生效。
 
 ### 输入与运行
@@ -61,7 +61,7 @@ Project Agent 请用户做决定的事项见 [Agent Inbox 行为规格](../agent
 
 - PA-18：Project Agent 新建 Thread 时自己选择设备、工作目录、Agent 类型和模型，依据是设备上报的能力（登记的目录、发现的仓库、已安装的 Agent 及其模型）、用户在主对话里的要求和项目记忆。工作目录必须已经存在；需要新目录时，Project Agent 先用 PA-21 的命令执行创建它。条件不满足时新建失败并返回原因。同一次工具调用最多新建一个 Thread。
 - PA-19：Project Agent 可以向本 Project 的任何 Thread 发消息；Agent 正在处理时，它和用户一样选择排队或插入（Baton R-08）。一轮 Turn 属于发出第一条消息的一方：Project Agent 开启的，Agent 的每条回复都进入它的输入队列（PA-05），用户中途补充消息或停止这一轮，回复和结束仍然交给 Project Agent；用户开启的，不通知 Project Agent。用户想让 Project Agent 接着处理时，直接在主对话里说，Project Agent 可以读取本 Project 的所有 Thread。
-- PA-20：Project Agent 可以停止 Thread 当前的一轮、归档 Thread，规则与用户的操作相同。
+- PA-20：Project Agent 可以撤回本 Project Thread 中尚未发送的消息、显式恢复 Thread、停止当前的一轮和归档 Thread，规则与用户的操作相同。撤回仅接受待发送消息，已发送或结果未知时拒绝；恢复沿用设备能力和执行状态检查，停止尚未确认或正在执行时拒绝。重复请求复用待处理命令，恢复不会重新发送历史消息。
 
 ### 命令执行
 
