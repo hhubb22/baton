@@ -69,13 +69,13 @@ inspectWorkerLedger(dbPath: string, expected: WorkerOpenConfig): Promise<WorkerL
 
 `save(next)` 取代 `save(next, previous)`。账本内部保存上次确认提交的编码基线（序列化记录、已保存事件 ID、进程身份），不引用调用方的可变对象，只在提交确认成功后替换。一次保存的顺序保持现状：新 reply 的完整输出先写入 `FullOutputStore`，原地修改 `next.outbox` 中待发布 report 并限幅，再在一个 FULL 事务里写六张表和 `worker_commit` token。`CommitUnknown` 原样穿过，Worker 继续用 `instanceof` 识别并冻结。任何保存失败后该 handle 作废。
 
-`inspectWorkerLedger` 接受路径和完整 `WorkerOpenConfig`，不接受 `DiscoveredWorker`；路径由 daemon 用 `workerPaths` 计算，账本不依赖 daemon 的类型和 `contentHash`。检查用 `openPrivateFile` 验证权限，再以 `readOnly`、`allowExtension: false`、`timeout: 0` 打开，执行 quick check、结构识别和解码，不建目录或数据库，不执行 DDL、checkpoint、chmod，不用 `immutable` 绕开 WAL。五种结果的划分沿用现行规则：错误码 1/11/26、JSON 与 Schema 失败、配置或身份不符为 `corrupt`；BUSY、LOCKED、READONLY、IOERR、CANTOPEN、权限失败、关闭失败和原因不明为 `retry`。配置比较保持 `contentHash` 的语义（对象键排序、保留数组顺序和全部字段），规范化函数归账本私有。
+`inspectWorkerLedger` 接受路径和完整 `WorkerOpenConfig`，不接受 `DiscoveredWorker`；路径由 daemon 用 `workerPaths` 计算，账本不依赖 daemon 的类型和 `contentHash`。检查用 `openPrivateFile` 验证权限，再以 `readOnly`、`allowExtension: false`、`timeout: 0` 打开，执行 quick check、结构识别和解码，不建目录或数据库，不执行 DDL、checkpoint、chmod，不用 `immutable` 绕开 WAL。读取 WAL 数据库时 SQLite 会自行创建或保留 `-wal`、`-shm` 辅助文件，这属于引擎行为，检查不另行阻止或删除。五种结果的划分沿用现行规则：错误码 1/11/26、JSON 与 Schema 失败、配置或身份不符为 `corrupt`；BUSY、LOCKED、READONLY、IOERR、CANTOPEN、权限失败、关闭失败和原因不明为 `retry`。配置比较保持 `contentHash` 的语义（对象键排序、保留数组顺序和全部字段），规范化函数归账本私有。
 
 正常打开和检查共用一组私有解码函数，用 Effect Schema 表达现有字段规则，保留未知字段和 `replyEvidence` 原始字符串，不新增“intent 必须有完整证据”之类的约束，以免把本可进入 unknown 的状态判成损坏。`initialState` 改为私有，`commandAction`、`isPending` 收回 `worker/index.ts`，`reports.ts` 的 `pendingResult` 参数缩为 `{ report; acked }[]`，消除对账本类型的反向依赖。
 
 daemon 只做恢复裁决：`makeWorkerRecovery` 默认的 `inspect` 就是上面的路径转换，测试注入口保留。认证 status、锁检查、文件检查、回读节点账本、按 `awaiting_open/open_attempted` 裁决、持久记录启动事实、历史丢失只报一次，这些顺序和归属不变。
 
-`recovery.test.ts` 里的格式矩阵（SQLite/JSON/代次损坏、残留活动、物理空态、锁占用、权限）迁到新建的 `worker/ledger.test.ts`；daemon 侧用注入的检查结果验证裁决，并保留一例真实账本进入恢复和重启。`full-output.test.ts` 中的保存顺序案例迁入账本测试。账本测试补：保存后重开得到相同状态，修改旧对象不影响基线；同一损坏 payload 在打开和检查得到一致结论；检查前后文件和表清单不变，缺失路径未被创建；真实排他锁得到 `retry`；完整输出写入失败时数据库未推进。
+`recovery.test.ts` 里的格式矩阵（SQLite/JSON/代次损坏、残留活动、物理空态、锁占用、权限）迁到新建的 `worker/ledger.test.ts`；daemon 侧用注入的检查结果验证裁决，并保留一例真实账本进入恢复和重启。`full-output.test.ts` 中的保存顺序案例迁入账本测试。账本测试补：保存后重开得到相同状态，修改旧对象不影响基线；同一损坏 payload 在打开和检查得到一致结论；检查前后主数据库内容和表清单不变，缺失路径未被创建；真实排他锁得到 `retry`；完整输出写入失败时数据库未推进。
 
 #### 2.2 授权目录合并为一个 module
 
