@@ -1,5 +1,5 @@
 import childProcess from 'node:child_process'
-import { mkdtemp, readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -65,7 +65,9 @@ const waitForStop = () =>
   )
 await Effect.runPromise(
   Effect.scoped(
-    Effect.provide(
+    Effect.gen(function* () {
+      yield* Effect.addFinalizer(() => Effect.promise(() => rm(directory, { recursive: true, force: true })))
+      yield* Effect.provide(
       Effect.gen(function* () {
         const spawner = yield* ChildProcessSpawner
         const handle = yield* spawner.spawn(
@@ -95,7 +97,8 @@ await Effect.runPromise(
         emit({ quiet: true })
       }),
       layer,
-    ),
+      )
+    }),
   ),
 )
 await Effect.runPromise(registrar.close)

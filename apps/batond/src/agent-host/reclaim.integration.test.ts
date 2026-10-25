@@ -1,6 +1,6 @@
 import childProcess from 'node:child_process'
 import { once } from 'node:events'
-import { mkdtemp } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -11,11 +11,13 @@ import { readProcessIdentity } from '../platform/identity.ts'
 
 const fixture = fileURLToPath(new URL('../testing/platform/agent-host-reclaim.mjs', import.meta.url))
 const stub = fileURLToPath(new URL('../testing/platform/upstream-stub.mjs', import.meta.url))
+let directory = ''
 let bundle = ''
 let host: childProcess.ChildProcess | undefined
 
 beforeAll(async () => {
-  bundle = join(await mkdtemp(join(tmpdir(), 'baton-reclaim-fixture-')), 'reclaim.mjs')
+  directory = await mkdtemp(join(tmpdir(), 'baton-reclaim-fixture-'))
+  bundle = join(directory, 'reclaim.mjs')
   await build({
     entryPoints: [fixture],
     outfile: bundle,
@@ -28,12 +30,17 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
-  if (!host || host.exitCode !== null || host.signalCode !== null) return
-  const exited = once(host, 'exit')
   try {
-    if (host.pid) process.kill(-host.pid, 'SIGKILL')
-  } catch {}
-  await exited
+    if (host && host.exitCode === null && host.signalCode === null) {
+      const exited = once(host, 'exit')
+      try {
+        if (host.pid) process.kill(-host.pid, 'SIGKILL')
+      } catch {}
+      await exited
+    }
+  } finally {
+    if (directory) await rm(directory, { recursive: true, force: true })
+  }
 })
 
 const gone = async (pids: readonly number[]) => {

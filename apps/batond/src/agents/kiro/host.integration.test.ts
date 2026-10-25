@@ -13,7 +13,7 @@ import type { AgentEvent, AgentMessage, ThreadAgent } from '../../worker/agent.t
 import { makeWorker, type Worker } from '../../worker/index.ts'
 import type { ProcessRecordCallbacks } from '../../platform/process-types.ts'
 import { makePrivateTempDirectory } from '../../testing/private.ts'
-import { replayProcessRecords, workerProcessRecords } from '../../testing/cursor/process-records.ts'
+import { replayProcessRecords, workerProcessRecords } from '../../testing/platform/process-records.ts'
 import { makeKiroAgentFactory } from './index.ts'
 import { kiroTurnFailure } from './failure.ts'
 import {
@@ -40,7 +40,7 @@ const replaySource = fileURLToPath(
     import.meta.url,
   ),
 )
-const watchdogSource = fileURLToPath(new URL('../../testing/cursor/watchdog-entry.ts', import.meta.url))
+const watchdogSource = fileURLToPath(new URL('../../testing/platform/watchdog-entry.ts', import.meta.url))
 const bundle = fileURLToPath(new URL('../../../dist/test/kiro-replay-host.mjs', import.meta.url))
 const watchdogBundle = fileURLToPath(new URL('../../../dist/test/kiro-watchdog.mjs', import.meta.url))
 const agents: ThreadAgent[] = []

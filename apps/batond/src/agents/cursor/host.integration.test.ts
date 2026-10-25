@@ -10,7 +10,7 @@ import type { WorkerOpenConfig } from '@baton/protocol'
 import { startProcessWatchdog, type ProcessWatchdog } from '../../platform/process.ts'
 import { makeCursorAgentFactory } from './index.ts'
 import { makePrivateTempDirectory } from '../../testing/private.ts'
-import { replayProcessRecords } from '../../testing/cursor/process-records.ts'
+import { replayProcessRecords } from '../../testing/platform/process-records.ts'
 import type { AgentEvent, ThreadAgent } from '../../worker/agent.ts'
 import {
   firstTurnOnly,
@@ -22,7 +22,7 @@ import {
 } from '../../testing/cursor/transcripts.ts'
 
 const source = fileURLToPath(new URL('../../testing/cursor/replay-host.ts', import.meta.url))
-const watchdogSource = fileURLToPath(new URL('../../testing/cursor/watchdog-entry.ts', import.meta.url))
+const watchdogSource = fileURLToPath(new URL('../../testing/platform/watchdog-entry.ts', import.meta.url))
 const bundle = fileURLToPath(new URL('../../../dist/test/cursor-replay-host.mjs', import.meta.url))
 const watchdogBundle = fileURLToPath(new URL('../../../dist/test/watchdog.mjs', import.meta.url))
 const agents: ThreadAgent[] = []

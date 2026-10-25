@@ -15,7 +15,7 @@ import { connectAgentHost } from '../../agent-host/transport.ts'
 import { makeWorker, type Worker } from '../../worker/index.ts'
 import type { ProcessRecordCallbacks } from '../../platform/process-types.ts'
 import { makePrivateTempDirectory } from '../../testing/private.ts'
-import { replayProcessRecords, workerProcessRecords } from '../../testing/cursor/process-records.ts'
+import { replayProcessRecords, workerProcessRecords } from '../../testing/platform/process-records.ts'
 import {
   firstTurnOnly,
   piFixturePath,
@@ -27,7 +27,7 @@ import {
 } from '../../testing/pi/transcripts.ts'
 
 const source = fileURLToPath(new URL('../../testing/pi/replay-host.ts', import.meta.url))
-const watchdogSource = fileURLToPath(new URL('../../testing/cursor/watchdog-entry.ts', import.meta.url))
+const watchdogSource = fileURLToPath(new URL('../../testing/platform/watchdog-entry.ts', import.meta.url))
 const bundle = fileURLToPath(new URL('../../../dist/test/pi-replay-host.mjs', import.meta.url))
 const watchdogBundle = fileURLToPath(new URL('../../../dist/test/watchdog.mjs', import.meta.url))
 const agents: ThreadAgent[] = []
