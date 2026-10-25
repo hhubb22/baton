@@ -30,7 +30,7 @@ import {
   uniqueBy,
 } from './common.ts'
 
-// internal/inbox/inbox.go · Option
+// 静态字段基线与历史来源见 ../fixtures/README.md。
 export const InboxOption = Schema.Struct({
   id: Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_-]{0,31}$/)),
   label: Text.check(Schema.isBetweenCodePoints(1, 40)),
@@ -42,7 +42,6 @@ export const InboxOptions = Schema.NullOr(
   Schema.Array(InboxOption).check(Schema.isMaxLength(50), jsonLimit(16 * 1024)),
 ).check(uniqueBy((value) => value.id))
 
-// internal/inbox/inbox.go · Resolution
 export const InboxResolution = Schema.Struct({
   client_request_id: Text,
   employee_id: UUID,
@@ -52,7 +51,6 @@ export const InboxResolution = Schema.Struct({
 })
 export type InboxResolution = typeof InboxResolution.Type
 
-// internal/inbox/inbox.go · Request
 export const AttentionRequest = Schema.Struct({
   id: UUID,
   project_id: UUID,
@@ -78,7 +76,6 @@ export const AttentionRequest = Schema.Struct({
 })
 export type AttentionRequest = typeof AttentionRequest.Type
 
-// internal/protocol/node_settings.go · BrowseRootsRequest
 export const BrowseRootsRequest = Schema.Struct({
   type: Schema.Literal('node.browse_roots_set'),
   operation_id: UUID,
@@ -96,14 +93,12 @@ export const BrowseRootsGetRequest = Schema.Struct({
 })
 export type BrowseRootsGetRequest = typeof BrowseRootsGetRequest.Type
 
-// internal/protocol/runtime_report.go · RuntimeRoot
 export const RuntimeRoot = Schema.Struct({
   root_id: RootID,
   path: nonemptyText(4096),
 })
 export type RuntimeRoot = typeof RuntimeRoot.Type
 
-// internal/protocol/runtime_report.go · RuntimeRepo
 export const RuntimeRepo = Schema.Struct({
   path: nonemptyText(4096),
   origin: Schema.optionalKey(
@@ -112,7 +107,6 @@ export const RuntimeRepo = Schema.Struct({
 })
 export type RuntimeRepo = typeof RuntimeRepo.Type
 
-// internal/protocol/node_settings.go · BrowseRootsResult
 export const BrowseRootsResult = Schema.Struct({
   type: Schema.Literal('node.browse_roots_result'),
   operation_id: UUID,
@@ -140,14 +134,12 @@ export const BrowseRootsGetResult = Schema.Struct({
 }).check(jsonLimit(64 * 1024))
 export type BrowseRootsGetResult = typeof BrowseRootsGetResult.Type
 
-// internal/httpapi/events.go · browserSubscription
 export const BrowserSubscription = Schema.Struct({
   thread_id: Schema.Union([Schema.Literal(''), UUID]),
   cursor: Schema.optionalKey(Cursor),
 })
 export type BrowserSubscription = typeof BrowserSubscription.Type
 
-// internal/httpapi/events.go · events1
 export const BrowserThreadOutput = Schema.Struct({
   type: Schema.Literal('thread.output'),
   thread_id: Schema.optionalKey(UUID),
@@ -162,14 +154,12 @@ export const BrowserThreadOutput = Schema.Struct({
 })
 export type BrowserThreadOutput = typeof BrowserThreadOutput.Type
 
-// internal/httpapi/server.go · changePassword1
 export const ChangePasswordInput = Schema.Struct({
   current_password: Text,
   new_password: Text,
 })
 export type ChangePasswordInput = typeof ChangePasswordInput.Type
 
-// internal/projectagent/compaction.go · PromptSnapshot
 export const PromptSnapshot = Schema.Struct({
   version: Text,
   title: Text,
@@ -177,7 +167,6 @@ export const PromptSnapshot = Schema.Struct({
 })
 export type PromptSnapshot = typeof PromptSnapshot.Type
 
-// internal/projectagent/compaction.go · Compaction
 export const Compaction = Schema.Struct({
   through_seq: Integer,
   summary: Text,
@@ -192,7 +181,6 @@ export const Compaction = Schema.Struct({
 })
 export type Compaction = typeof Compaction.Type
 
-// internal/httpapi/threads.go · routeThread1
 export const CreateBrowserThreadInput = Schema.Struct({
   client_thread_id: ClientMessageID,
   node_id: Schema.optionalKey(UUID),
@@ -207,7 +195,6 @@ export const CreateBrowserThreadInput = Schema.Struct({
 })
 export type CreateBrowserThreadInput = typeof CreateBrowserThreadInput.Type
 
-// internal/projectagent/project.go · CreateInput
 export const CreateProjectInput = Schema.Struct({
   client_project_id: Schema.optionalKey(Text),
   title: summary(1024).check(
@@ -220,7 +207,6 @@ export const CreateProjectInput = Schema.Struct({
 })
 export type CreateProjectInput = typeof CreateProjectInput.Type
 
-// internal/store/thread_types.go · ThreadMessageInput
 export const ThreadMessageInput = Schema.Struct({
   client_message_id: ClientMessageID,
   content: boundedText(64 * 1024).check(Schema.isMinLength(1)),
@@ -233,7 +219,6 @@ export const ThreadMessageInput = Schema.Struct({
 )
 export type ThreadMessageInput = typeof ThreadMessageInput.Type
 
-// internal/store/thread_types.go · CreateThreadInput
 export const CreateThreadInput = Schema.Struct({
   client_thread_id: ClientMessageID,
   node_id: Schema.optionalKey(UUID),
@@ -246,7 +231,6 @@ export const CreateThreadInput = Schema.Struct({
 })
 export type CreateThreadInput = typeof CreateThreadInput.Type
 
-// internal/httpapi/nodes.go · defaultDeviceJSON
 export const DefaultDevice = Schema.Struct({
   node_id: Schema.Union([Schema.Literal(''), UUID]),
   invalid: Schema.Boolean,
@@ -255,7 +239,6 @@ export const DefaultDevice = Schema.Struct({
 })
 export type DefaultDevice = typeof DefaultDevice.Type
 
-// internal/httpapi/server.go · employeeBody
 export const Employee = Schema.Struct({
   id: Text,
   username: Text,
@@ -265,7 +248,6 @@ export const Employee = Schema.Struct({
 })
 export type Employee = typeof Employee.Type
 
-// internal/httpapi/nodes.go · issueEnrollment1
 export const EnrollmentResponse = Schema.Struct({
   enrollment_id: Text,
   enrollment_token: Text,
@@ -274,7 +256,6 @@ export const EnrollmentResponse = Schema.Struct({
 })
 export type EnrollmentResponse = typeof EnrollmentResponse.Type
 
-// internal/store/web_views.go · EnrollmentView
 export const EnrollmentView = Schema.Struct({
   enrollment_id: Text,
   state: Text,
@@ -284,13 +265,11 @@ export const EnrollmentView = Schema.Struct({
 })
 export type EnrollmentView = typeof EnrollmentView.Type
 
-// internal/protocol/protocol.go · Route
 export const Route = Schema.Struct({
   to: Text,
 })
 export type Route = typeof Route.Type
 
-// internal/protocol/protocol.go · Source
 export const Source = Schema.Struct({
   kind: Schema.Literals(['node', 'control']),
   node_id: Schema.optionalKey(UUID),
@@ -301,7 +280,6 @@ export const Source = Schema.Struct({
 })
 export type Source = typeof Source.Type
 
-// internal/protocol/protocol.go · Envelope
 export const Envelope = Schema.Struct({
   version: Schema.Literal(1),
   message_id: UUID,
@@ -313,13 +291,11 @@ export const Envelope = Schema.Struct({
 }).check(jsonLimit(256 * 1024))
 export type Envelope = typeof Envelope.Type
 
-// internal/httpapi/server.go · errorDetails
 export const ErrorDetails = Schema.Struct({
   fields: Schema.optionalKey(Schema.NullOr(Schema.Array(Text))),
 })
 export type ErrorDetails = typeof ErrorDetails.Type
 
-// internal/httpapi/server.go · errorBody
 export const ErrorResponse = Schema.Struct({
   code: Text,
   message: Text,
@@ -328,7 +304,6 @@ export const ErrorResponse = Schema.Struct({
 })
 export type ErrorResponse = typeof ErrorResponse.Type
 
-// internal/protocol/files.go · FileEntry
 export const FileEntry = Schema.Struct({
   name: Text,
   kind: Text,
@@ -336,7 +311,6 @@ export const FileEntry = Schema.Struct({
 })
 export type FileEntry = typeof FileEntry.Type
 
-// internal/protocol/files.go · FileRemainder
 export const FileRemainder = Schema.Struct({
   root_id: Text,
   path: Text,
@@ -348,7 +322,6 @@ export const FileRemainder = Schema.Struct({
 })
 export type FileRemainder = typeof FileRemainder.Type
 
-// internal/protocol/files.go · FileRequest
 export const FileRequest = Schema.Struct({
   type: Schema.Literal('files.browse'),
   operation_id: UUID,
@@ -360,14 +333,12 @@ export const FileRequest = Schema.Struct({
 })
 export type FileRequest = typeof FileRequest.Type
 
-// internal/protocol/files.go · FileRoot
 export const FileRoot = Schema.Struct({
   id: Text,
   path: Text,
 })
 export type FileRoot = typeof FileRoot.Type
 
-// internal/protocol/files.go · FileResult
 export const FileResult = Schema.Struct({
   type: Schema.Literal('files.browse_result'),
   operation_id: UUID,
@@ -390,7 +361,6 @@ export const FileResult = Schema.Struct({
 })
 export type FileResult = typeof FileResult.Type
 
-// internal/httpapi/files.go · fileView
 export const FileView = Schema.Struct({
   operation_id: UUID,
   node_id: UUID,
@@ -410,7 +380,6 @@ export const FileView = Schema.Struct({
 })
 export type FileView = typeof FileView.Type
 
-// internal/protocol/protocol.go · Frame
 export const Frame = Schema.Struct({
   kind: Schema.Literals(['auth', 'auth_result', 'heartbeat', 'envelope', 'error']),
   ok: Schema.optionalKey(Schema.Boolean),
@@ -423,7 +392,6 @@ export const Frame = Schema.Struct({
 }).check(jsonLimit(256 * 1024))
 export type Frame = typeof Frame.Type
 
-// internal/inbox/inbox.go · Handle
 export const HandleAttentionInput = Schema.Struct({
   expected_version: PositiveInteger,
   client_request_id: Text,
@@ -432,7 +400,6 @@ export const HandleAttentionInput = Schema.Struct({
 })
 export type HandleAttentionInput = typeof HandleAttentionInput.Type
 
-// internal/inbox/inbox.go · Ask
 export const InboxAsk = Schema.Struct({
   title: Text.check(Schema.isBetweenCodePoints(1, 120)),
   content: boundedText(32 * 1024),
@@ -442,14 +409,12 @@ export const InboxAsk = Schema.Struct({
 })
 export type InboxAsk = typeof InboxAsk.Type
 
-// internal/httpapi/inbox.go · writeInboxError1
 export const InboxConflictResponse = Schema.Struct({
   error: Text,
   current: AttentionRequest,
 })
 export type InboxConflictResponse = typeof InboxConflictResponse.Type
 
-// internal/inbox/requests.go · Page
 export const InboxPage = Schema.Struct({
   requests: Schema.NullOr(Schema.Array(AttentionRequest)),
   open_count: Integer,
@@ -457,14 +422,12 @@ export const InboxPage = Schema.Struct({
 })
 export type InboxPage = typeof InboxPage.Type
 
-// internal/httpapi/server.go · login1
 export const LoginInput = Schema.Struct({
   username: Text,
   password: Text,
 })
 export type LoginInput = typeof LoginInput.Type
 
-// internal/projectagent/project.go · Memory
 export const ProjectMemory = Schema.Struct({
   id: Text,
   title: summary(1024).check(
@@ -479,14 +442,12 @@ export const ProjectMemory = Schema.Struct({
 })
 export type ProjectMemory = typeof ProjectMemory.Type
 
-// internal/httpapi/projects.go · routeProject4
 export const MemoriesResponse = Schema.Struct({
   entries: Schema.NullOr(Schema.Array(ProjectMemory)),
   next_after_id: Schema.optionalKey(Text),
 })
 export type MemoriesResponse = typeof MemoriesResponse.Type
 
-// internal/httpapi/projects.go · writeProjectError1
 export const MemoryConflictResponse = Schema.Struct({
   code: Text,
   message: Text,
@@ -496,7 +457,6 @@ export const MemoryConflictResponse = Schema.Struct({
 })
 export type MemoryConflictResponse = typeof MemoryConflictResponse.Type
 
-// internal/store/web_views.go · MemoryRevision
 export const MemoryRevision = Schema.Struct({
   revision: Integer,
   content: Text,
@@ -506,14 +466,12 @@ export const MemoryRevision = Schema.Struct({
 })
 export type MemoryRevision = typeof MemoryRevision.Type
 
-// internal/httpapi/projects.go · routeProject3
 export const MemoryRevisionsResponse = Schema.Struct({
   revisions: Schema.NullOr(Schema.Array(MemoryRevision)),
   next_after_revision: Schema.optionalKey(NonNegativeInteger),
 })
 export type MemoryRevisionsResponse = typeof MemoryRevisionsResponse.Type
 
-// internal/node/identity.go · Credential
 export const NodeCredential = Schema.Struct({
   id: Text,
   version: NonNegativeInteger,
@@ -522,7 +480,6 @@ export const NodeCredential = Schema.Struct({
 })
 export type NodeCredential = typeof NodeCredential.Type
 
-// internal/node/identity.go · Identity
 export const NodeIdentity = Schema.Struct({
   coordinator_url: Schema.optionalKey(Text),
   node_id: UUID,
@@ -538,7 +495,6 @@ export const NodeIdentity = Schema.Struct({
 })
 export type NodeIdentity = typeof NodeIdentity.Type
 
-// internal/httpapi/nodes.go · revocationJSON
 export const NodeRevocation = Schema.Struct({
   status: Text,
   operator_id: UUID,
@@ -550,14 +506,12 @@ export const NodeRevocation = Schema.Struct({
 })
 export type NodeRevocation = typeof NodeRevocation.Type
 
-// internal/protocol/runtime_report.go · RuntimeModel
 export const RuntimeModel = Schema.Struct({
   id: nonemptyText(512),
   name: nonemptyText(512),
 })
 export type RuntimeModel = typeof RuntimeModel.Type
 
-// internal/protocol/runtime_report.go · ThreadCapabilities
 export const ThreadCapabilities = Schema.Struct({
   create: Schema.Boolean,
   queue: Schema.Boolean,
@@ -568,7 +522,6 @@ export const ThreadCapabilities = Schema.Struct({
 })
 export type ThreadCapabilities = typeof ThreadCapabilities.Type
 
-// internal/protocol/runtime_report.go · RuntimeAgent
 export const RuntimeAgent = Schema.Struct({
   agent_type: RuntimeName,
   version: RuntimeName,
@@ -580,7 +533,6 @@ export const RuntimeAgent = Schema.Struct({
 })
 export type RuntimeAgent = typeof RuntimeAgent.Type
 
-// internal/protocol/runtime_report.go · RuntimeProvider
 export const RuntimeProvider = Schema.Struct({
   models: Schema.optionalKey(
     Schema.NullOr(Schema.Array(RuntimeModel).check(Schema.isMaxLength(64))).check(uniqueBy((value) => value.id)),
@@ -597,7 +549,6 @@ export const RuntimeProvider = Schema.Struct({
 })
 export type RuntimeProvider = typeof RuntimeProvider.Type
 
-// internal/protocol/runtime_report.go · ProjectRuntime
 export const ProjectRuntime = Schema.Struct({
   version: RuntimeName,
   max_concurrent_projects: Schema.optionalKey(PositiveInteger),
@@ -610,7 +561,6 @@ export const ProjectRuntime = Schema.Struct({
 })
 export type ProjectRuntime = typeof ProjectRuntime.Type
 
-// internal/protocol/runtime_report.go · RuntimeExec
 export const RuntimeExec = Schema.Struct({
   user: Schema.optionalKey(nonemptyText(256)),
   enabled: Schema.Boolean,
@@ -618,7 +568,6 @@ export const RuntimeExec = Schema.Struct({
 })
 export type RuntimeExec = typeof RuntimeExec.Type
 
-// internal/protocol/runtime_report.go · RuntimeReport
 export const RuntimeReport = Schema.Struct({
   batond_version: Schema.optionalKey(nonemptyText(256)),
   user: Schema.optionalKey(nonemptyText(256)),
@@ -637,7 +586,6 @@ export const RuntimeReport = Schema.Struct({
 }).check(jsonLimit(64 * 1024, 1, true))
 export type RuntimeReport = typeof RuntimeReport.Type
 
-// internal/httpapi/nodes.go · nodeStatusJSON
 export const NodeStatus = Schema.Struct({
   registered_at: Timestamp,
   runtime_report: Schema.NullOr(RuntimeReport),
@@ -660,7 +608,6 @@ export const NodeStatus = Schema.Struct({
 })
 export type NodeStatus = typeof NodeStatus.Type
 
-// internal/control/server.go · onEnvelope2
 export const NodeSyncRequest = Schema.Struct({
   type: Schema.Literal('node.sync'),
   display_name: summary(1024).check(Schema.isBetweenCodePoints(1, 80), Schema.isTrimmed()),
@@ -670,7 +617,6 @@ export const NodeSyncRequest = Schema.Struct({
 })
 export type NodeSyncRequest = typeof NodeSyncRequest.Type
 
-// internal/control/server.go · reply1
 export const NodeSyncResult = Schema.Struct({
   type: Schema.Literal('node.sync_result'),
   ok: Schema.Boolean,
@@ -678,7 +624,6 @@ export const NodeSyncResult = Schema.Struct({
 })
 export type NodeSyncResult = typeof NodeSyncResult.Type
 
-// internal/httpapi/nodes.go · listNodes1
 export const NodesResponse = Schema.Struct({
   nodes: Schema.NullOr(Schema.Array(NodeStatus)),
   default_device: DefaultDevice,
@@ -687,13 +632,11 @@ export const NodesResponse = Schema.Struct({
 })
 export type NodesResponse = typeof NodesResponse.Type
 
-// internal/httpapi/projects.go · routeProject2
 export const OKResponse = Schema.Struct({
   ok: Schema.Boolean,
 })
 export type OKResponse = typeof OKResponse.Type
 
-// internal/projectagent/project.go · Patch
 export const PatchProjectInput = Schema.Struct({
   title: Schema.optionalKey(
     Schema.NullOr(
@@ -714,7 +657,6 @@ export const PatchProjectInput = Schema.Struct({
 )
 export type PatchProjectInput = typeof PatchProjectInput.Type
 
-// internal/protocol/protocol.go · Presence
 export const Presence = Schema.Struct({
   node_id: UUID,
   employee_id: UUID,
@@ -726,7 +668,6 @@ export const Presence = Schema.Struct({
 })
 export type Presence = typeof Presence.Type
 
-// internal/projectagent/project.go · Agent
 export const ProjectAgent = Schema.Struct({
   id: UUID,
   provider: summary(1024),
@@ -734,7 +675,6 @@ export const ProjectAgent = Schema.Struct({
 })
 export type ProjectAgent = typeof ProjectAgent.Type
 
-// internal/projectagent/project.go · Conversation
 export const ProjectConversation = Schema.Struct({
   id: UUID,
   state: Text,
@@ -742,7 +682,6 @@ export const ProjectConversation = Schema.Struct({
 })
 export type ProjectConversation = typeof ProjectConversation.Type
 
-// internal/projectagent/project.go · Project
 export const Project = Schema.Struct({
   id: UUID,
   title: summary(1024).check(
@@ -759,7 +698,6 @@ export const Project = Schema.Struct({
 })
 export type Project = typeof Project.Type
 
-// internal/projectagent/project.go · Event
 export const ProjectEvent = Schema.Struct({
   conversation_id: UUID,
   seq: NonNegativeInteger,
@@ -773,7 +711,6 @@ export const ProjectEvent = Schema.Struct({
 })
 export type ProjectEvent = typeof ProjectEvent.Type
 
-// internal/projectagent/runtime.go · Bootstrap
 export const ProjectBootstrap = Schema.Struct({
   project: Project,
   prompt_version: Text,
@@ -786,7 +723,6 @@ export const ProjectBootstrap = Schema.Struct({
 })
 export type ProjectBootstrap = typeof ProjectBootstrap.Type
 
-// internal/projectagent/runtime.go · Claim
 export const ProjectClaim = Schema.Struct({
   event: Schema.optionalKey(Schema.NullOr(ProjectEvent)),
   payload_bytes: NonNegativeInteger,
@@ -794,7 +730,6 @@ export const ProjectClaim = Schema.Struct({
 })
 export type ProjectClaim = typeof ProjectClaim.Type
 
-// internal/projectagent/project.go · EventPage
 export const ProjectEventPage = Schema.Struct({
   events: Schema.NullOr(Schema.Array(ProjectEvent)),
   last_seq: NonNegativeInteger,
@@ -803,7 +738,6 @@ export const ProjectEventPage = Schema.Struct({
 })
 export type ProjectEventPage = typeof ProjectEventPage.Type
 
-// internal/protocol/node_settings.go · ProjectExecRequest
 export const ProjectExecRequest = Schema.Struct({
   type: Schema.Literal('node.project_exec_set'),
   operation_id: UUID,
@@ -811,7 +745,6 @@ export const ProjectExecRequest = Schema.Struct({
 })
 export type ProjectExecRequest = typeof ProjectExecRequest.Type
 
-// internal/protocol/node_settings.go · ProjectExecResult
 export const ProjectExecResult = Schema.Struct({
   type: Schema.Literal('node.project_exec_result'),
   operation_id: UUID,
@@ -821,7 +754,6 @@ export const ProjectExecResult = Schema.Struct({
 })
 export type ProjectExecResult = typeof ProjectExecResult.Type
 
-// internal/projectagent/project.go · Message
 export const ProjectMessage = Schema.Struct({
   id: Integer,
   client_message_id: Text,
@@ -830,21 +762,18 @@ export const ProjectMessage = Schema.Struct({
 })
 export type ProjectMessage = typeof ProjectMessage.Type
 
-// internal/projectagent/project.go · MessageInput
 export const ProjectMessageInput = Schema.Struct({
   client_message_id: ProjectClientMessageID,
   content: MessageContent,
 })
 export type ProjectMessageInput = typeof ProjectMessageInput.Type
 
-// internal/store/project_view.go · ProjectMessagePage
 export const ProjectMessagePage = Schema.Struct({
   messages: Schema.NullOr(Schema.Array(ProjectMessage)),
   next_after_id: Schema.optionalKey(NonNegativeInteger),
 })
 export type ProjectMessagePage = typeof ProjectMessagePage.Type
 
-// internal/projectagent/preview.go · Preview
 export const ProjectPreview = Schema.Struct({
   after_seq: NonNegativeInteger,
   text: Text,
@@ -853,7 +782,6 @@ export const ProjectPreview = Schema.Struct({
 })
 export type ProjectPreview = typeof ProjectPreview.Type
 
-// internal/projectagent/runtime.go · QueuedInput
 export const ProjectQueuedInput = Schema.Struct({
   id: Integer,
   source_type: Text,
@@ -862,14 +790,12 @@ export const ProjectQueuedInput = Schema.Struct({
 })
 export type ProjectQueuedInput = typeof ProjectQueuedInput.Type
 
-// internal/protocol/project_runtime.go · ProjectThreadUpdate
 export const ProjectThreadUpdate = Schema.Struct({
   thread_id: UUID,
   version: NonNegativeInteger,
 })
 export type ProjectThreadUpdate = typeof ProjectThreadUpdate.Type
 
-// internal/protocol/project_runtime.go · ProjectRunCommand
 export const ProjectRunCommand = Schema.Struct({
   type: Schema.Literals(['project_run_start', 'project_run_stop', 'project_run_wake']),
   run_id: UUID,
@@ -883,7 +809,6 @@ export const ProjectRunCommand = Schema.Struct({
 })
 export type ProjectRunCommand = typeof ProjectRunCommand.Type
 
-// internal/store/project_view.go · ProjectRunView
 export const ProjectRunView = Schema.Struct({
   id: UUID,
   node_id: UUID,
@@ -896,7 +821,6 @@ export const ProjectRunView = Schema.Struct({
 })
 export type ProjectRunView = typeof ProjectRunView.Type
 
-// internal/protocol/project_runtime.go · ProjectRuntimeRequest
 export const ProjectRuntimeRequest = Schema.Struct({
   type: Schema.Literal('project_runtime.request'),
   run_id: UUID,
@@ -931,7 +855,6 @@ export const ProjectRuntimeRequest = Schema.Struct({
 }).check(jsonLimit(192 * 1024))
 export type ProjectRuntimeRequest = typeof ProjectRuntimeRequest.Type
 
-// internal/protocol/project_runtime.go · ProjectRuntimeResult
 export const ProjectRuntimeResult = Schema.Struct({
   type: Schema.Literal('project_runtime.result'),
   ok: Schema.Boolean,
@@ -940,7 +863,6 @@ export const ProjectRuntimeResult = Schema.Struct({
 }).check(jsonLimit(192 * 1024))
 export type ProjectRuntimeResult = typeof ProjectRuntimeResult.Type
 
-// internal/store/project_view.go · ProjectStatus
 export const ProjectStatus = Schema.Struct({
   state: Text,
   waiting_reason: Schema.optionalKey(Text),
@@ -953,14 +875,12 @@ export const ProjectStatus = Schema.Struct({
 })
 export type ProjectStatus = typeof ProjectStatus.Type
 
-// internal/httpapi/projects.go · routeProject1
 export const ProjectsResponse = Schema.Struct({
   projects: Schema.NullOr(Schema.Array(Project)),
   next_after_id: Schema.optionalKey(Text),
 })
 export type ProjectsResponse = typeof ProjectsResponse.Type
 
-// internal/httpapi/nodes.go · registerNode1
 export const RegisterNodeInput = Schema.Struct({
   enrollment_token: Text,
   display_name: summary(1024).check(Schema.isBetweenCodePoints(1, 80), Schema.isTrimmed()),
@@ -970,7 +890,6 @@ export const RegisterNodeInput = Schema.Struct({
 })
 export type RegisterNodeInput = typeof RegisterNodeInput.Type
 
-// internal/protocol/protocol.go · Revocation
 export const Revocation = Schema.Struct({
   kind: Schema.Literals(['credential', 'node']),
   id: UUID,
@@ -979,7 +898,6 @@ export const Revocation = Schema.Struct({
 })
 export type Revocation = typeof Revocation.Type
 
-// internal/httpapi/nodes.go · revokeNode1
 export const RevokeNodeResponse = Schema.Struct({
   node_id: UUID,
   status: Text,
@@ -994,14 +912,12 @@ export const RevokeNodeResponse = Schema.Struct({
 })
 export type RevokeNodeResponse = typeof RevokeNodeResponse.Type
 
-// internal/protocol/runtime_report.go · RuntimeReportRequest
 export const RuntimeReportRequest = Schema.Struct({
   type: Schema.Literal('node.runtime_report'),
   report: RuntimeReport,
 }).check(jsonLimit(64 * 1024))
 export type RuntimeReportRequest = typeof RuntimeReportRequest.Type
 
-// internal/protocol/runtime_report.go · RuntimeReportResult
 export const RuntimeReportResult = Schema.Struct({
   type: Schema.Literal('node.runtime_report_result'),
   ok: Schema.Boolean,
@@ -1010,7 +926,6 @@ export const RuntimeReportResult = Schema.Struct({
 })
 export type RuntimeReportResult = typeof RuntimeReportResult.Type
 
-// internal/node/identity.go · SavedDefault
 export const SavedDefaultDevice = Schema.Struct({
   default_device_node_id: Text,
   default_pc_node_id: Text,
@@ -1021,7 +936,6 @@ export const SavedDefaultDevice = Schema.Struct({
 })
 export type SavedDefaultDevice = typeof SavedDefaultDevice.Type
 
-// internal/protocol/session.go · SessionRequest
 export const SessionRequest = Schema.Struct({
   type: Schema.Literal('session.request'),
   operation_id: UUID,
@@ -1034,7 +948,6 @@ export const SessionRequest = Schema.Struct({
 })
 export type SessionRequest = typeof SessionRequest.Type
 
-// internal/httpapi/server.go · sessionResponse
 export const SessionResponse = Schema.Struct({
   employee: Employee,
   csrf_token: Text,
@@ -1042,7 +955,6 @@ export const SessionResponse = Schema.Struct({
 })
 export type SessionResponse = typeof SessionResponse.Type
 
-// internal/protocol/session.go · SessionResult
 export const SessionResult = Schema.Struct({
   type: Schema.Literal('session.result'),
   operation_id: UUID,
@@ -1057,26 +969,22 @@ export const SessionResult = Schema.Struct({
 })
 export type SessionResult = typeof SessionResult.Type
 
-// internal/httpapi/server.go · sessionView
 export const SessionView = Schema.Struct({
   employee: Employee,
   expires_at: Schema.optionalKey(Timestamp),
 })
 export type SessionView = typeof SessionView.Type
 
-// internal/httpapi/nodes.go · putDefaultDevice1
 export const SetDefaultDeviceInput = Schema.Struct({
   node_id: UUID,
 })
 export type SetDefaultDeviceInput = typeof SetDefaultDeviceInput.Type
 
-// internal/httpapi/node_settings.go · setProjectExec1
 export const SetProjectExecInput = Schema.Struct({
   enabled: Schema.Boolean,
 })
 export type SetProjectExecInput = typeof SetProjectExecInput.Type
 
-// internal/httpapi/threads.go · routeThread2
 export const SetThreadSettingsInput = Schema.Struct({
   execution_timeout_seconds: ExecutionTimeoutSeconds,
 })
@@ -1087,13 +995,11 @@ export const SetThreadModelInput = Schema.Struct({
 })
 export type SetThreadModelInput = typeof SetThreadModelInput.Type
 
-// internal/httpapi/node_settings_web.go · startSubscriptionLogin1
 export const SubscriptionLoginInput = Schema.Struct({
   provider: Text,
 })
 export type SubscriptionLoginInput = typeof SubscriptionLoginInput.Type
 
-// internal/protocol/node_settings.go · SubscriptionLoginRequest
 export const SubscriptionLoginRequest = Schema.Struct({
   type: Schema.Literal('node.subscription_login'),
   operation_id: UUID,
@@ -1101,7 +1007,6 @@ export const SubscriptionLoginRequest = Schema.Struct({
 })
 export type SubscriptionLoginRequest = typeof SubscriptionLoginRequest.Type
 
-// internal/httpapi/node_settings_web.go · startSubscriptionLogin2
 export const SubscriptionLoginResponse = Schema.Struct({
   provider: Text,
   verification_uri: Text,
@@ -1110,7 +1015,6 @@ export const SubscriptionLoginResponse = Schema.Struct({
 })
 export type SubscriptionLoginResponse = typeof SubscriptionLoginResponse.Type
 
-// internal/protocol/node_settings.go · SubscriptionLoginResult
 export const SubscriptionLoginResult = Schema.Struct({
   type: Schema.Literal('node.subscription_login_result'),
   operation_id: UUID,
@@ -1124,7 +1028,6 @@ export const SubscriptionLoginResult = Schema.Struct({
 })
 export type SubscriptionLoginResult = typeof SubscriptionLoginResult.Type
 
-// internal/store/thread_types.go · Thread
 export const Thread = Schema.Struct({
   next_model: Schema.optionalKey(summary(512)),
   id: UUID,
@@ -1159,7 +1062,6 @@ export const Thread = Schema.Struct({
 })
 export type Thread = typeof Thread.Type
 
-// internal/protocol/thread.go · ThreadCommand
 export const ThreadCommand = Schema.Struct({
   project_id: Schema.optionalKey(UUID),
   origin_conversation_id: Schema.optionalKey(UUID),
@@ -1180,7 +1082,6 @@ export const ThreadCommand = Schema.Struct({
 }).check(Schema.makeFilter((value) => value.action !== 'answer' || value.answer !== undefined || '回答命令缺少答案'))
 export type ThreadCommand = typeof ThreadCommand.Type
 
-// internal/protocol/thread.go · ThreadCommandResult
 export const ThreadCommandResult = Schema.Struct({
   type: Schema.Literal('thread.command_result'),
   thread_id: UUID,
@@ -1190,7 +1091,6 @@ export const ThreadCommandResult = Schema.Struct({
 })
 export type ThreadCommandResult = typeof ThreadCommandResult.Type
 
-// internal/store/thread_types.go · ThreadError
 export const ThreadError = Schema.Struct({
   code: Text,
   message: Text,
@@ -1198,7 +1098,6 @@ export const ThreadError = Schema.Struct({
 })
 export type ThreadError = typeof ThreadError.Type
 
-// internal/httpapi/threads.go · writeThreadError1
 export const ThreadErrorResponse = Schema.Struct({
   code: Text,
   message: Text,
@@ -1207,7 +1106,6 @@ export const ThreadErrorResponse = Schema.Struct({
 })
 export type ThreadErrorResponse = typeof ThreadErrorResponse.Type
 
-// internal/store/thread_types.go · ThreadEvent
 export const ThreadEvent = Schema.Struct({
   id: Integer,
   kind: Text,
@@ -1218,7 +1116,6 @@ export const ThreadEvent = Schema.Struct({
 })
 export type ThreadEvent = typeof ThreadEvent.Type
 
-// internal/store/thread_types.go · ThreadMessage
 export const ThreadMessage = Schema.Struct({
   requested_model: Schema.optionalKey(Text),
   id: Text,
@@ -1237,7 +1134,6 @@ export const ThreadMessage = Schema.Struct({
 })
 export type ThreadMessage = typeof ThreadMessage.Type
 
-// internal/store/thread_types.go · ThreadTurn
 export const ThreadTurn = Schema.Struct({
   id: Text,
   thread_id: UUID,
@@ -1251,7 +1147,6 @@ export const ThreadTurn = Schema.Struct({
 })
 export type ThreadTurn = typeof ThreadTurn.Type
 
-// internal/store/thread_types.go · ThreadSummary
 export const ThreadSummary = Schema.Struct({
   next_model: Schema.optionalKey(summary(512)),
   id: UUID,
@@ -1289,14 +1184,12 @@ export const ThreadSummary = Schema.Struct({
 })
 export type ThreadSummary = typeof ThreadSummary.Type
 
-// internal/store/thread_types.go · ThreadPage
 export const ThreadPage = Schema.Struct({
   threads: Schema.NullOr(Schema.Array(ThreadSummary)),
   next_cursor: Schema.optionalKey(Text),
 })
 export type ThreadPage = typeof ThreadPage.Type
 
-// internal/protocol/thread.go · ThreadReport
 export const ThreadReport = Schema.Struct({
   type: Schema.Literal('thread.report'),
   thread_id: UUID,
@@ -1358,7 +1251,6 @@ export const ThreadReport = Schema.Struct({
 )
 export type ThreadReport = typeof ThreadReport.Type
 
-// internal/protocol/thread.go · ThreadReportResult
 export const ThreadReportResult = Schema.Struct({
   type: Schema.Literal('thread.report_result'),
   thread_id: UUID,
@@ -1370,14 +1262,12 @@ export const ThreadReportResult = Schema.Struct({
 })
 export type ThreadReportResult = typeof ThreadReportResult.Type
 
-// internal/store/thread_types.go · ThreadTimeline
 export const ThreadTimeline = Schema.Struct({
   events: Schema.NullOr(Schema.Array(ThreadEvent)),
   next_cursor: Schema.optionalKey(Text),
 })
 export type ThreadTimeline = typeof ThreadTimeline.Type
 
-// internal/store/thread_trace.go · ThreadTraceStep
 export const ThreadTraceStep = Schema.Struct({
   kind: Text,
   command: Schema.optionalKey(Text),
@@ -1386,7 +1276,6 @@ export const ThreadTraceStep = Schema.Struct({
 })
 export type ThreadTraceStep = typeof ThreadTraceStep.Type
 
-// internal/store/thread_trace.go · ThreadTrace
 export const ThreadTrace = Schema.Struct({
   ok: Schema.Boolean,
   code: Schema.optionalKey(Text),
@@ -1394,7 +1283,6 @@ export const ThreadTrace = Schema.Struct({
 })
 export type ThreadTrace = typeof ThreadTrace.Type
 
-// internal/store/thread_types.go · ThreadView
 export const ThreadView = Schema.Struct({
   question_answers: Schema.Array(ThreadQuestionAnswer),
   pending_questions: Schema.Array(Schema.Struct({ ...ThreadQuestion.fields, worker_turn_seq: PositiveInteger })),
@@ -1436,13 +1324,11 @@ export const ThreadView = Schema.Struct({
 })
 export type ThreadView = typeof ThreadView.Type
 
-// internal/httpapi/node_settings_web.go · updateBrowseRoots1
 export const UpdateBrowseRootsInput = Schema.Struct({
   path: Text,
 })
 export type UpdateBrowseRootsInput = typeof UpdateBrowseRootsInput.Type
 
-// internal/httpapi/projects.go · routeProject5
 export const WriteMemoryInput = Schema.Struct({
   title: summary(1024).check(
     Schema.isMaxCodePoints(200),

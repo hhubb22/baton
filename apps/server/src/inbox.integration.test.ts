@@ -266,6 +266,25 @@ it('upgrades the five-choice constraint, preserves existing questions and enforc
       }),
     )
     expect(request.options).toEqual(options)
+    const limitOptions = Array.from({ length: 50 }, (_, index) => ({ id: `choice-${index}`, label: `Choice ${index}` }))
+    const atLimit = await db.run(createAgentAttention(c, 'fifty-options', { ...ask, options: limitOptions }))
+    expect(atLimit.options).toEqual(limitOptions)
+    await expect(
+      db.run(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const overflow = [...limitOptions, { id: 'choice-50', label: 'Choice 50' }]
+          yield* sql`UPDATE attention_requests SET options=${JSON.stringify(overflow)}::jsonb WHERE id=${atLimit.id}`
+        }),
+      ),
+    ).rejects.toMatchObject({
+      _tag: 'SqlError',
+      reason: {
+        _tag: 'ConstraintError',
+        cause: { code: '23514', constraint: 'attention_requests_options_check' },
+      },
+    })
+    expect((await db.run(getAttentionRequest(c.employeeId, atLimit.id))).options).toEqual(limitOptions)
     await expect(
       db.run(
         createAgentAttention(c, 'oversized-options', {

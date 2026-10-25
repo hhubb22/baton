@@ -4,11 +4,11 @@
 
 ## 覆盖范围
 
-`fixtures/go-http-node.json` 的 `schemas` 是由 Go 反射导出的逐字段清单，包含来源文件、Go 类型或匿名声明名、字段种类、可选性与可空性。`dtoSchemas` 与其中的 117 个结构逐一对应。
+`fixtures/go-http-node.json` 保存 115 个结构的静态字段清单，包含原始来源文件、Go 类型或匿名声明名、字段种类、可选性与可空性。`dtoSchemas` 保留这些结构，并包含 TS 新增契约。来源版本、导出方式和文件摘要见 [夹具来源](fixtures/README.md)。
 
-| Go 来源 | 结构数 | 契约 |
+| 历史来源 | 结构数 | 契约 |
 | --- | ---: | --- |
-| `internal/protocol` | 40 | Frame、Envelope、Route、Source、Presence、Revocation；全部 Thread、Session、文件、设备设置、订阅登录、Runtime 报告及 Project Runtime 消息 |
+| `internal/protocol` | 38 | Frame、Envelope、Route、Source、Presence、Revocation；全部 Thread、Session、文件、设备设置、订阅登录、Runtime 报告及 Project Runtime 消息 |
 | `internal/httpapi` | 32 | 登录、员工、改密、设备注册、默认设备、吊销、目录、授权、登录码、文件预览、Thread 创建/模型、Project/记忆列表、错误与冲突；浏览器订阅和输出事件 |
 | `internal/store` | 18 | Thread、消息、Turn、列表、详情、时间线、trace；Project 状态/运行/消息页；注册状态和记忆修订 |
 | `internal/projectagent` | 16 | Project、Agent、主对话、创建/修改输入、消息、事件、记忆、bootstrap、claim、排队输入、preview、compaction |
@@ -18,7 +18,7 @@
 
 `http.ts` 另提供空 JSON 请求、全部 HTTP 查询参数、`ready`、`thread.changed`、`devices.changed`。查询参数保留 URL 上的字符串形式；HTTP handler 在校验后将其转换为业务数值。没有 JSON 正文的 204 响应不定义虚构的响应对象。
 
-`worker.ts` 包含 Go `ipcMessage` 的全部 20 个字段、认证、status、open/message/withdraw/resume/stop、pending/ack、session 输出读取，以及下述异步命令契约。`node.ts` 提供 Frame 和两个方向的业务消息联合类型。Project Runtime 的 16 种 operation 均有 Go 导出样例，包括 `started`、`stopped`、`wake_received`、`read_events`、`append_event`、`call_tool`、`wait_tool`、`commit_compaction`。
+`worker.ts` 包含静态基线的 18 个 IPC 字段、认证、status、open/message/withdraw/resume/stop、pending/ack、session 输出读取，以及下述异步命令契约。`node.ts` 提供 Frame 和两个方向的业务消息联合类型。Project Runtime 的 16 种 operation 均有静态样例，包括 `started`、`stopped`、`wake_received`、`read_events`、`append_event`、`call_tool`、`wait_tool`、`commit_compaction`。
 
 动态数据使用 `Schema.Json`，例如 pi-ai 的 assistant payload、签名、usage、tool arguments/results、Project Runtime 的 `data`。它们的扩展字段不会被解释或删除。回复附件须为 JSON 数组，metadata 须为 JSON 对象。中心还需校验 PostgreSQL `jsonb::text` 的数据库容量约束。
 
@@ -37,7 +37,7 @@ const message = Schema.decodeUnknownSync(NodeBody)(nodeBody)
 
 HTTP JSON 正文和工具参数严格拒绝未知字段；跨进程消息使用默认的未知字段容忍。Gateway 校验后转发保留的原始字段，不能用丢弃未知字段后的 DTO 重建待转发信封。`Source` 来自中心认证结果，不能信任节点提交的同名字段。包内 Schema 校验数据形状，连接归属、员工权限、租约和数据库事实由相应服务校验。
 
-Schema 不填充默认值，往返时保留空串、`false`、可选字段省略、`null` 和 `[]` 的区别。HTTP 输入中的默认模型、默认设备、可省略的 goal、Patch 字段及旧 role 参数按现有 handler 的接收约定声明。时间使用 RFC 3339 字符串，保留 Go 的九位小数，不转换为精度较低的 JavaScript Date。JSON 整数限定为 JavaScript 安全整数；数据库 bigint 超出范围时消费者必须报错，不能静默舍入。
+Schema 不填充默认值，往返时保留空串、`false`、可选字段省略、`null` 和 `[]` 的区别。HTTP 输入中的默认模型、默认设备、可省略的 goal、Patch 字段及旧 role 参数按现有 handler 的接收约定声明。时间使用 RFC 3339 字符串，保留静态基线中的九位小数，不转换为精度较低的 JavaScript Date。JSON 整数限定为 JavaScript 安全整数；数据库 bigint 超出范围时消费者必须报错，不能静默舍入。
 
 派生结构只追加或收窄字段，使用 `mapFields(..., { unsafePreserveChecks: true })` 保留父结构的整体容量和关系检查；不改变字段的派生契约直接在原 Schema 上增加检查。回归测试直接校验每个公开 Frame/Worker 入口，避免只有基础结构受限。
 
@@ -85,19 +85,16 @@ withdraw 在撤回事实持久保存后以 succeeded 结束；已经无法撤回
 
 Thread 历史通过中心时间线读取已保存的输入、回复和事件，设备不保存原生历史。`SessionRequest` 仅用于实时输出，`SessionResult` 返回输出状态、正文、游标和缺口。
 
-## 夹具来源与漂移检查
+## 静态基线与契约检查
 
 ```sh
-pnpm --dir packages/protocol run fixtures:export
 pnpm --dir packages/protocol run typecheck
 pnpm --dir packages/protocol run lint
 pnpm --dir packages/protocol run test
 ```
 
-`TestExportProtocolFixtures` 用实际 Go 命名结构和匿名 DTO 编码夹具。命名类型直接引用生产类型；匿名类型由 Go AST 与 handler 原声明逐一比对，字段、类型、标签或嵌入关系漂移会失败。盘点测试还检查新增的带 JSON 字段的类型和匿名 HTTP 声明是否漏出清单，保留外层 JSON 字段覆盖嵌入字段的规则。
+`fixtures/` 中的三个 JSON 是已提交的静态基线，测试直接读取，不需要生成步骤或 Go 工具链。文件保留 `go-` 前缀、原始排版及来源元数据，便于追溯；各文件的历史来源和样例性质见 [夹具来源](fixtures/README.md)。
 
-`TestExportWorkerProtocolFixtures` 通过生产 Client 的 JSON encoder 记录请求，再用实际 ipcMessage 编码结果。`TestExportMigrationProtocolFixtures` 用测试内结构编码新增的状态、receipt、open 配置、设备事件及正负样例。Go 生产代码保持冻结，因此新增契约和统一历史投影明确属于规格样例；它们不表示冻结 Go 已执行异步命令，也不证明原生 Agent 的历史合并已经实现。
+TS 测试按静态字段清单核对 Schema 的字段和可选性，并显式列出允许的 TS 新增字段及输入可选性调整；逐字段拒绝错误种类，再以 `onExcessProperty: error` 解码当前 TS 契约使用的样例并重新编码比较。原生历史的 `ThreadHistoryQuery` 和 Worker `native_history` 样例保留作来源证据，测试跳过这两项。Thread 详情样例补入当前必需的 `pending_questions`、`question_answers` 空数组后校验。测试另覆盖容量、控制字符、整数、状态、完成身份、ready 区分和新增契约的无效样例。
 
-TS 测试按 Go 字段清单核对全部 Schema 的字段和可选性，逐字段拒绝错误种类，再以 `onExcessProperty: error` 解码当前 TS 契约使用的样例并重新编码比较。Go 发布入口的原生历史请求与查询样例保留在夹具中，TS 测试跳过这些样例。测试另覆盖容量、控制字符、整数、状态、完成身份、ready 区分和新增契约的无效样例。
-
-三个 JSON 文件都是 Go 测试的确定性输出，应保留其排版。CI 在 Go 导出后重新执行协议测试，并检查 fixtures 的 Git 差异；声明或夹具漂移会使 CI 失败。这里的测试验证传输契约；账本事务、ACK/完成到达顺序的裁决、数据库 JSONB 容量、真实 Agent、跨系统进程和安装包的执行验收分别由 C/D/W/X 完成。
+新契约及调整由 TS Schema、调用方和独立样例共同验证，静态基线用于检查保留的字段与传输值。协议测试验证传输契约；账本事务、ACK/完成到达顺序、数据库 JSONB 容量、Agent 行为、跨系统进程和安装包由各模块的测试验证。

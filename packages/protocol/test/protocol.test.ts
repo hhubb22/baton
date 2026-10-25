@@ -99,9 +99,9 @@ function fixtureValue(name: string): Record<string, unknown> {
   return structuredClone(sample.value) as Record<string, unknown>
 }
 
-// 字段清单独立来自 Go 的反射；匿名结构另由 Go AST 比对 handler 原声明。
-describe('Go JSON 字段与 Effect Schema', () => {
-  it('每个 Go 类型均有独立的 Schema 与往返样例', () => {
+// 静态清单由历史 Go 导出器生成，来源版本见 fixtures/README.md。
+describe('静态字段基线与 Effect Schema', () => {
+  it('每个基线结构均有独立的 Schema 与往返样例', () => {
     expect(Object.keys(dtoSchemas).sort()).toEqual(
       [
         ...Object.keys(go.schemas),
@@ -118,7 +118,7 @@ describe('Go JSON 字段与 Effect Schema', () => {
     }
   })
   for (const [name, descriptor] of Object.entries(go.schemas)) {
-    it(`${name} 拒绝与 Go 字段种类不符的取值`, () => {
+    it(`${name} 拒绝与静态字段种类不符的取值`, () => {
       const full = fixtureValue(name)
       for (const field of descriptor.shape.fields ?? []) {
         const bad: Record<string, unknown> = {
@@ -150,7 +150,7 @@ describe('Go JSON 字段与 Effect Schema', () => {
       }
     })
   }
-  it('Worker IPC 的全部 Go 字段和适配器新增字段均存在', () => {
+  it('Worker IPC 的静态字段和 TS 新增字段均存在', () => {
     const fields = objectAST(WorkerIPCMessage).propertySignatures
     expect(fields.map((field) => String(field.name)).sort()).toEqual(
       [
@@ -175,7 +175,7 @@ describe('Go JSON 字段与 Effect Schema', () => {
 })
 
 // 严格模式使未声明字段直接失败，避免默认忽略未知字段掩盖 Schema 漏项。
-describe('Go 导出样例往返', () => {
+describe('静态样例往返', () => {
   for (const item of [
     ...go.cases.filter((item) => item.schema !== 'ThreadHistoryQuery'),
     ...worker.cases.filter((item) => item.name !== 'native_history'),

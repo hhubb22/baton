@@ -78,7 +78,7 @@ export const WorkerOpenConfig = Schema.Struct({
 })
 export type WorkerOpenConfig = typeof WorkerOpenConfig.Type
 
-// internal/session/wire.go · ipcMessage，加上适配器规格的异步命令契约。
+// Worker IPC 字段集合，含异步命令契约；静态基线来源见 ../fixtures/README.md。
 export const WorkerIPCMessage = Schema.Struct({
   trace_context: Schema.optionalKey(TraceContext),
   client_message_id: Schema.optionalKey(ClientMessageID),
