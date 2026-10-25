@@ -147,7 +147,7 @@ export type SendMode = 'next' | 'now'
 export interface Message {
   id: ID
   threadId: ID
-  role: 'user' | 'agent'
+  role: 'user' | 'agent' | 'failure'
   // 发给 Agent 的消息可能来自你，也可能来自 Project Agent。
   sender: 'you' | 'projectAgent' | 'agent'
   body: string

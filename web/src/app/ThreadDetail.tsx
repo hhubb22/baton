@@ -2,7 +2,14 @@ import * as stylex from '@stylexjs/stylex'
 import { useNavigate } from '@tanstack/react-router'
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { ClientError } from '../data/client'
-import { agentNames, shortenExcerpt, threadView, type ThreadAction, type ThreadNotice } from '../data/derive'
+import {
+  agentNames,
+  shortenExcerpt,
+  threadMessageNotice,
+  threadView,
+  type ThreadAction,
+  type ThreadNotice,
+} from '../data/derive'
 import {
   newClientId,
   useArchiveThread,
@@ -204,6 +211,7 @@ function errorText(cause: unknown, fallback: string) {
 // reply 是 Agent 回复的序号，选中文字引用时写明来源。
 function MessageItem({
   message,
+  agent,
   deviceId,
   device,
   devices,
@@ -213,6 +221,7 @@ function MessageItem({
   onCancel,
 }: {
   message: Message
+  agent: Thread['agent']
   deviceId: ID
   device: Device | undefined
   devices: Device[]
@@ -223,6 +232,15 @@ function MessageItem({
 }) {
   // 回复里的路径指向 Thread 所在设备。
   const onOpenPath = (path: string) => onOpen(deviceId, path)
+  const notice = threadMessageNotice(message, agent)
+  if (notice) {
+    return (
+      <article id={`message-${message.id}`} {...stylex.props(styles.agent)}>
+        <h3 {...stylex.props(text.bodyMedium)}>{notice.title}</h3>
+        <p {...stylex.props(text.body, styles.muted)}>{notice.detail}</p>
+      </article>
+    )
+  }
   if (message.role === 'agent') {
     return (
       <article id={`message-${message.id}`} {...stylex.props(text.body, styles.agent)}>
@@ -619,6 +637,7 @@ export function ThreadDetail({
                   <MessageItem
                     key={message.id}
                     message={message}
+                    agent={thread.agent}
                     deviceId={thread.deviceId}
                     device={device}
                     devices={deviceList}

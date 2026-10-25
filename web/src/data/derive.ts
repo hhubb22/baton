@@ -9,6 +9,7 @@ import type {
   FilePreview,
   ID,
   InboxItem,
+  Message,
   Operation,
   Project,
   Thread,
@@ -61,6 +62,14 @@ function notice(
   tone: ThreadNotice['tone'] = 'neutral',
 ) {
   return { tone, title, detail, action }
+}
+
+export function threadMessageNotice(message: Message, agent: Thread['agent']): ThreadNotice | null {
+  if (message.role !== 'failure') return null
+  return notice(
+    agent ? `${agentNames[agent]} could not finish this reply` : 'Command could not finish',
+    message.body.trim() || 'No further details are available.',
+  )
 }
 
 function canceledNote(count: number) {

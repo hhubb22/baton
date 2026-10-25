@@ -339,6 +339,20 @@ export function createThreadAPI(
         for (const m of accepted.values()) {
           if (m.status === 'accepted' || m.status === 'queued') m.status = 'withdrawn'
         }
+      } else if (event.kind === 'turn.ended' && event.payload.reason === 'failed') {
+        const id = `turn-failed:${t.id}:${event.payload.event_id ?? event.id}`
+        order.set(id, event.id)
+        result.push({
+          id,
+          threadId: t.id,
+          role: 'failure',
+          sender: 'agent',
+          body: event.payload.content ?? '',
+          createdAt: timestamp(event.created_at),
+          delivery: 'delivered',
+          activity: null,
+          attachments: [],
+        })
       } else if (event.kind === 'reply') {
         const id = `reply:${t.id}:${event.payload.event_id ?? event.id}`
         order.set(id, event.id)
@@ -380,7 +394,8 @@ export function createThreadAPI(
       return {
         phase:
           ended.payload.reason === 'completed' ? 'done' : ended.payload.reason === 'stopped' ? 'stopped' : 'failed',
-        detail: ended.payload.reason,
+        detail:
+          ended.payload.reason === 'failed' ? ended.payload.content || ended.payload.reason : ended.payload.reason,
       }
     if (t.status === 'unknown')
       return { phase: 'failed', detail: t.status_reason || 'The device could not confirm execution.' }
