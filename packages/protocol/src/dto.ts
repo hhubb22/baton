@@ -35,6 +35,9 @@ export const InboxOption = Schema.Struct({
   recommended: Schema.optionalKey(Schema.Boolean),
 })
 export type InboxOption = typeof InboxOption.Type
+export const InboxOptions = Schema.NullOr(
+  Schema.Array(InboxOption).check(Schema.isMaxLength(50), jsonLimit(16 * 1024)),
+).check(uniqueBy((value) => value.id))
 
 // internal/inbox/inbox.go · Resolution
 export const InboxResolution = Schema.Struct({
@@ -58,7 +61,7 @@ export const AttentionRequest = Schema.Struct({
   condition_object_id: Schema.optionalKey(Text),
   title: Text.check(Schema.isBetweenCodePoints(1, 120)),
   content: boundedText(32 * 1024),
-  options: Schema.NullOr(Schema.Array(InboxOption).check(Schema.isMaxLength(5))).check(uniqueBy((value) => value.id)),
+  options: InboxOptions,
   allow_text: Schema.Boolean,
   thread_id: Schema.optionalKey(UUID),
   action_url: Schema.optionalKey(Text),
@@ -396,7 +399,7 @@ export type HandleAttentionInput = typeof HandleAttentionInput.Type
 export const InboxAsk = Schema.Struct({
   title: Text.check(Schema.isBetweenCodePoints(1, 120)),
   content: boundedText(32 * 1024),
-  options: Schema.NullOr(Schema.Array(InboxOption).check(Schema.isMaxLength(5))).check(uniqueBy((value) => value.id)),
+  options: InboxOptions,
   allow_text: Schema.Boolean,
   thread_id: Schema.optionalKey(UUID),
 })
@@ -547,12 +550,17 @@ export const RuntimeProvider = Schema.Struct({
   ),
   provider: RuntimeName,
   status: Schema.Literals(['available', 'login_required', 'unknown']),
+  reason: Schema.optionalKey(Reason),
 })
 export type RuntimeProvider = typeof RuntimeProvider.Type
 
 // internal/protocol/runtime_report.go · ProjectRuntime
 export const ProjectRuntime = Schema.Struct({
   version: RuntimeName,
+  max_concurrent_projects: Schema.optionalKey(PositiveInteger),
+  probed_at: Schema.optionalKey(Timestamp),
+  stale: Schema.optionalKey(Schema.Boolean),
+  probe_error: Schema.optionalKey(Reason),
   providers: Schema.NullOr(Schema.Array(RuntimeProvider).check(Schema.isMaxLength(32))).check(
     uniqueBy((value) => value.provider),
   ),
@@ -578,7 +586,7 @@ export const RuntimeReport = Schema.Struct({
   ),
   project_runtime: Schema.optionalKey(Schema.NullOr(ProjectRuntime)),
   exec: RuntimeExec,
-  roots: Schema.NullOr(Schema.Array(RuntimeRoot).check(Schema.isMaxLength(32))).check(
+  roots: Schema.NullOr(Schema.Array(RuntimeRoot).check(Schema.isMaxLength(4096))).check(
     uniqueBy((value) => value.root_id),
   ),
   repos: Schema.NullOr(Schema.Array(RuntimeRepo).check(Schema.isMaxLength(128))),

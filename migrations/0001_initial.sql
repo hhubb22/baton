@@ -53,7 +53,7 @@ CREATE TABLE attention_requests (
     updated_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
     thread_id uuid,
     CONSTRAINT attention_requests_content_check CHECK ((octet_length(content) <= 32768)),
-    CONSTRAINT attention_requests_options_check CHECK (((jsonb_typeof(options) = 'array'::text) AND (jsonb_array_length(options) <= 5))),
+    CONSTRAINT attention_requests_options_check CHECK (((jsonb_typeof(options) = 'array'::text) AND (jsonb_array_length(options) <= 50))),
     CONSTRAINT attention_requests_source_check CHECK ((source = ANY (ARRAY['agent'::text, 'system'::text]))),
     CONSTRAINT attention_requests_state_check CHECK ((state = ANY (ARRAY['open'::text, 'answered'::text, 'closed'::text, 'withdrawn'::text, 'resolved'::text]))),
     CONSTRAINT attention_requests_summary_check CHECK ((char_length(summary) <= 280)),

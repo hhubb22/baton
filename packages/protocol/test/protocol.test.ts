@@ -61,6 +61,8 @@ const codecs: Record<string, Schema.Codec<unknown>> = {
 }
 const additions: Record<string, string[]> = {
   RuntimeAgent: ['reason'],
+  RuntimeProvider: ['reason'],
+  ProjectRuntime: ['max_concurrent_projects', 'probed_at', 'stale', 'probe_error'],
   ThreadReport: ['command_id', 'command_outcome'],
   ThreadCommand: ['trace_context', 'project_id', 'origin_conversation_id', 'origin_tool_call_id'],
   ThreadCommandResult: ['storage_generation'],
