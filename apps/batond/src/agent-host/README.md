@@ -4,7 +4,7 @@
 
 ## 进程模型
 
-每个 Thread 的执行生命周期对应一个 host 进程。Worker 用 `spawnOwnedProcessEffect` 创建进程：POSIX 上 `detached: true`，host 成为新进程组的组长；Windows 上 host 是普通子进程，PID 与创建时间登记到 Worker 账本。Cursor SDK 的 detached 子进程并入 host 进程组；Pi、Codex、Kiro 保留上游自建的进程组，供上游的 `kill(-pid)` 使用。包装后的 `ChildProcessSpawner` 将这些独立进程组登记给 watchdog 与 Worker 进程账本，释放登记前回收整棵子树。
+每个 Thread 的执行生命周期对应一个 host 进程。Worker 用 `spawnOwnedProcessEffect` 创建进程：POSIX 上 `detached: true`，host 成为新进程组的组长；Windows 上 host 是普通子进程，PID 与创建时间登记到 Worker 账本。Cursor SDK 的 detached 子进程并入 host 进程组；Pi、Codex、Kiro 保留上游自建的进程组，供上游的 `kill(-pid)` 使用。包装后的 `ChildProcessSpawner` 将这些独立进程组登记给 watchdog 与 Worker 进程账本，释放登记前回收整棵子树。registrar 仅在回收成功或确认 PID 身份不符后注销；超时和检查失败会返回错误、记录警告并保留登记，供 watchdog 在 host 退出后继续回收。
 
 host 在加载 SDK 前设置 POSIX `umask 077`，把 `console` 定向到 stderr，stdout 只承载 RPC。Scope 结束时关闭 adapter、终止组内子进程并等待静默；进程组回收由 Worker 的整树停止路径完成，host 自己报告的退出不能代替回收证据。
 

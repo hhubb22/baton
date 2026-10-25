@@ -83,7 +83,7 @@ Worker 运行在 batond SEA 携带的 Node 26 上，依赖 `effect` 4 与 `@effe
 
 ### 进程组与停止回收
 
-每个执行 Thread 独占一个 agent-host 进程及其后代，本期不做跨 Thread 的 app-server 或 SDK host 共享。Cursor 将 SDK 的 detached 后代并入 host 进程组。Pi、Codex、Kiro 的 `foldDetached: false` 保留原生进程组供上游发送组信号，包装 spawner 用 process registrar 登记独立进程组；release 在注销前回收整树。该路径无需修改上游共享进程模块。
+每个执行 Thread 独占一个 agent-host 进程及其后代，本期不做跨 Thread 的 app-server 或 SDK host 共享。Cursor 将 SDK 的 detached 后代并入 host 进程组。Pi、Codex、Kiro 的 `foldDetached: false` 保留原生进程组供上游发送组信号，包装 spawner 用 process registrar 登记独立进程组；release 在注销前回收整树，仅在回收成功或确认 PID 身份不符时注销。超时和检查失败返回错误并记录警告，保留登记供 watchdog 在 host 退出后继续回收；watchdog 确认注销后才删除本地登记。该路径无需修改上游共享进程模块。
 
 | 系统 | 启动 | 停止超时（一分钟）后 | Worker 意外退出 |
 |---|---|---|---|

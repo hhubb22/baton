@@ -90,15 +90,21 @@ export const makeProcessRegistrar = () =>
         Effect.gen(function* () {
           const group = yield* Effect.promise(() => readGroup(pid))
           const identity = (group === undefined ? undefined : separate.get(group)) ?? separate.get(pid)
-          if (!identity || watchdog === undefined) return
+          const started = watchdog
+          if (!identity || started === undefined) return
           // The adapter's own kill runs first. This still ends a group it missed.
-          yield* Effect.promise(() => reapProcessTree(identity, 5000)).pipe(Effect.catch(() => Effect.void))
-          separate.delete(identity.pid)
+          const result = yield* Effect.tryPromise({
+            try: () => reapProcessTree(identity, 5000),
+            catch: (cause) => fail('reap a process group', cause),
+          })
+          if (!result.reaped && result.reason !== 'identity-mismatch')
+            return yield* fail('reap a process group', result.reason ?? 'cleanup was not confirmed')
           yield* Effect.tryPromise({
-            try: () => watchdog!.unregister(identity),
+            try: () => started.unregister(identity),
             catch: (cause) => fail('release a process group', cause),
-          }).pipe(Effect.catch(() => Effect.void))
-        }),
+          })
+          separate.delete(identity.pid)
+        }).pipe(Effect.tapError((error) => Effect.logWarning(error.message))),
       close: Effect.suspend(() => {
         const started = watchdog
         watchdog = undefined
