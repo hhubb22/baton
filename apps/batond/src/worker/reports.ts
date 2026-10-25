@@ -28,6 +28,8 @@ const fit = (text: string, withinBudget: (value: string) => boolean, select = pr
   return select(text, low)
 }
 
+export const displayText = (text: string) => text.toWellFormed().replaceAll('\0', '�')
+
 export const boundReason = (reason: string) => fit(reason, (value) => Buffer.byteLength(value) <= 4096)
 
 /** Report identity and sequence stay stable when text is shortened for IPC delivery. */

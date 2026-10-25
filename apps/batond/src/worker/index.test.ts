@@ -14,6 +14,7 @@ import { Deferred, Effect, Fiber, Option, Queue, Schema, Stream, Tracer } from '
 import { describe, expect, it } from '@effect/vitest'
 import { vi } from 'vite-plus/test'
 import { TestClock } from 'effect/testing'
+import { makeLedger } from './ledger.ts'
 import { makeOutputMailbox } from './output.ts'
 import {
   AgentError,
@@ -499,6 +500,164 @@ describe('reliable Worker', () => {
           const items = yield* completed(worker, next.command_id!)
           expect(items.filter((item) => item.kind === 'reply')).toHaveLength(1)
         }),
+      ),
+    )
+
+    it.effect(
+      'retains exact reply evidence and stable IDs while deduplicating, ending turns and advancing the queue',
+      () =>
+        fixture((dbPath) =>
+          Effect.gen(function* () {
+            const rawId = 'reply:长🙂'.repeat(100)
+            const rawText = 'before\0middle\uD800after\uDC00 😀 �'
+            const display = 'before�middle�after� 😀 �'
+            const firstId = randomUUID()
+            const secondId = randomUUID()
+            const mappedId = yield* Effect.scoped(
+              Effect.gen(function* () {
+                const { cfg, f, worker } = yield* readyWorker(dbPath)
+                const firstCommand = randomUUID()
+                yield* worker.handle(
+                  request(cfg, 'thread_message', {
+                    command_id: firstCommand,
+                    client_message_id: firstId,
+                    payload: 'first',
+                  }),
+                )
+                yield* completed(worker, firstCommand)
+                const secondCommand = randomUUID()
+                yield* worker.handle(
+                  request(cfg, 'thread_message', {
+                    command_id: secondCommand,
+                    client_message_id: secondId,
+                    payload: 'second',
+                  }),
+                )
+                const reply: AgentEvent = {
+                  type: 'reply',
+                  nativeSessionId: 'native',
+                  messageId: firstId,
+                  executionId: `exec:${firstId}`,
+                  id: rawId,
+                  text: rawText,
+                }
+                f.output.offer(delta(firstId, rawText))
+                expect((yield* until(readOutput(worker, cfg), (result) => result.text === display)).text).toBe(display)
+                yield* Queue.offer(f.events, reply)
+                const items = yield* until(reports(worker), (rows) => rows.some((row) => row.kind === 'reply'))
+                const saved = items.find((row) => row.kind === 'reply')
+                const mapped = saved?.metadata?.reply_id
+                if (!saved || typeof mapped !== 'string') throw new Error('Expected a mapped reply')
+                expect(mapped).toMatch(/^baton:reply:sha256:[0-9a-f]{64}$/)
+                expect(saved.content).toBe(display)
+                expect(Schema.is(ThreadReportSchema)(saved)).toBe(true)
+                expect(saved.metadata).toMatchObject({
+                  reply_id_mapped: true,
+                  reply_text_sanitized: true,
+                  reply_evidence: 'worker_ledger_json',
+                })
+                yield* worker.handle({
+                  type: 'thread_ack',
+                  ok: true,
+                  event_id: saved.event_id,
+                  worker_seq: saved.worker_seq,
+                })
+                yield* Queue.offer(f.events, reply)
+                yield* Queue.offer(f.events, { ...reply, id: mapped, text: 'native ID matching the mapped ID' })
+                yield* Queue.offer(f.events, event(firstId, 'end'))
+                yield* completed(worker, secondCommand)
+                yield* Queue.offer(f.events, reply)
+                yield* Queue.offer(f.events, {
+                  ...reply,
+                  messageId: secondId,
+                  executionId: `exec:${secondId}`,
+                  text: 'second turn',
+                })
+                yield* Queue.offer(f.events, {
+                  ...reply,
+                  messageId: secondId,
+                  executionId: `exec:${secondId}`,
+                  id: rawId + ':other',
+                  text: 'distinct reply',
+                })
+                yield* Queue.offer(f.events, event(secondId, 'end'))
+                const result = yield* until(
+                  reports(worker),
+                  (rows) => rows.filter((row) => row.kind === 'turn.ended').length === 2,
+                )
+                expect(result.every((row) => Schema.is(ThreadReportSchema)(row))).toBe(true)
+                expect(result.some((row) => row.kind === 'thread.unknown' || row.kind === 'message.withdrawn')).toBe(
+                  false,
+                )
+                const replies = result.filter((row) => row.kind === 'reply')
+                expect(replies).toHaveLength(3)
+                expect(new Set(replies.map((row) => row.metadata?.reply_id)).size).toBe(3)
+                expect(replies.find((row) => row.content === 'second turn')?.metadata?.reply_id).toBe(mapped)
+                expect(
+                  result.filter((row) => row.kind === 'turn.ended').map((row) => [row.client_message_id, row.reason]),
+                ).toEqual([
+                  [firstId, 'completed'],
+                  [secondId, 'completed'],
+                ])
+                expect(f.sentInputs.map((input) => input.id)).toEqual([firstId, secondId])
+                expect(f.calls).not.toContain('reap')
+                return mapped
+              }),
+            )
+            const ledger = yield* makeLedger(dbPath)
+            const persisted = yield* ledger.load
+            const replies = persisted.outbox.filter((entry) => entry.report.kind === 'reply')
+            expect(replies).toHaveLength(4)
+            const first = replies.find(
+              (entry) => entry.report.client_message_id === firstId && entry.report.metadata?.reply_id === mappedId,
+            )
+            expect(first?.acked).toBe(true)
+            expect(first?.replyEvidence).toMatchObject({
+              id: rawId,
+              text: rawText,
+              nativeSessionId: 'native',
+              messageId: firstId,
+              executionId: `exec:${firstId}`,
+            })
+            expect(first?.report.content).toBe(display)
+            expect(persisted.messages[firstId]?.ended).toBe(true)
+            expect(persisted.messages[secondId]?.ended).toBe(true)
+            expect(persisted.phase).toBe('idle')
+          }),
+        ),
+    )
+
+    it.effect('keeps identity mismatches unknown even when reply display fields need repair', () =>
+      Effect.forEach(['nativeSessionId', 'messageId', 'executionId'], (field) =>
+        fixture((dbPath) =>
+          Effect.gen(function* () {
+            const { cfg, f, worker } = yield* readyWorker(dbPath)
+            const inputId = randomUUID()
+            const commandId = randomUUID()
+            yield* worker.handle(
+              request(cfg, 'thread_message', { command_id: commandId, client_message_id: inputId, payload: 'first' }),
+            )
+            yield* completed(worker, commandId)
+            const queuedId = randomUUID()
+            yield* worker.handle(request(cfg, 'thread_message', { client_message_id: queuedId, payload: 'queued' }))
+            const reply: AgentEvent = {
+              type: 'reply',
+              nativeSessionId: 'native',
+              messageId: inputId,
+              executionId: `exec:${inputId}`,
+              id: 'long-id'.repeat(100),
+              text: 'bad\0\uD800',
+              [field]: 'foreign',
+            }
+            yield* Queue.offer(f.events, reply)
+            yield* Queue.offer(f.events, event(inputId, 'end'))
+            const items = yield* until(reports(worker), (rows) => rows.some((row) => row.kind === 'thread.unknown'))
+            expect(items.find((row) => row.kind === 'thread.unknown')?.reason).toMatch(/identity mismatch/)
+            expect(items.some((row) => row.kind === 'reply')).toBe(false)
+            expect(items.find((row) => row.kind === 'message.withdrawn')?.client_message_id).toBe(queuedId)
+            expect(f.sentInputs.map((input) => input.id)).toEqual([inputId])
+          }),
+        ),
       ),
     )
 

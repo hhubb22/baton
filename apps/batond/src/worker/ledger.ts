@@ -14,7 +14,7 @@ import { FullOutputStore, readOutputRetentionDays } from './full-output.ts'
 import { boundReport } from './reports.ts'
 import * as Reactivity from 'effect/reactivity/Reactivity'
 import type { ProcessRecord } from '../platform/process-types.ts'
-import type { AgentMessage, InputPreparation } from './agent.ts'
+import type { AgentEvent, AgentMessage, InputPreparation } from './agent.ts'
 
 export type Outcome = 'succeeded' | 'failed' | 'cancelled' | 'unknown'
 export type Phase = 'empty' | 'opening' | 'idle' | 'busy' | 'stopping' | 'stopped' | 'unknown' | 'failed'
@@ -42,6 +42,8 @@ export interface Message {
 export interface OutboxEntry {
   report: ThreadReport
   acked: boolean
+  /** JSON 保留原始 UTF-16 字符串和执行身份，与展示报告一同提交。 */
+  replyEvidence?: Extract<AgentEvent, { readonly type: 'reply' }>
 }
 export interface Meta {
   config?: WorkerOpenConfig

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { Effect, Queue, Stream } from 'effect'
 import type { AgentEventIdentity } from './agent.ts'
+import { displayText } from './reports.ts'
 
 export const outputCapacity = 256 * 1024
 export const outputPageBytes = 16 * 1024
@@ -22,7 +23,7 @@ export class OutputBuffer {
       // Reserve a missing byte so even a reader caught up to the old end sees the gap.
       this.base = this.end = this.end + 1
     }
-    const source = Buffer.from(text, 'utf8')
+    const source = Buffer.from(displayText(text), 'utf8')
     const end = this.end + source.length
     let skip = Math.max(0, source.length - outputCapacity)
     while (skip < source.length && (source[skip]! & 0xc0) === 0x80) skip++

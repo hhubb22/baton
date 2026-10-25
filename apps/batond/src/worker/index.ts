@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import {
   WorkerRequest,
-  Text,
   boundedText,
   type ThreadReport,
   type WorkerCommandReceipt,
@@ -15,7 +14,7 @@ import type { ProcessRecord } from '../platform/process-types.ts'
 import { capabilitiesFor } from '../agents/capabilities.ts'
 import type { AgentError, AgentEvent, AgentFactory, InputAcceptance, ThreadAgent } from './agent.ts'
 import { OutputBuffer, type AgentOutput } from './output.ts'
-import { boundReason, pendingResult } from './reports.ts'
+import { boundReason, displayText, pendingResult } from './reports.ts'
 import {
   commandAction,
   isPending,
@@ -24,6 +23,7 @@ import {
   type Command,
   type Message,
   type Outcome,
+  type OutboxEntry,
   type State,
 } from './ledger.ts'
 
@@ -129,11 +129,17 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
   const sendMs = options.sendTimeoutMs ?? 35_000
   const stopMs = options.stopTimeoutMs ?? 60_000
 
-  function report(draft: State, kind: ThreadReport['kind'], fields: Partial<ThreadReport> = {}) {
+  function report(
+    draft: State,
+    kind: ThreadReport['kind'],
+    fields: Partial<ThreadReport> = {},
+    replyEvidence?: OutboxEntry['replyEvidence'],
+  ) {
     const config = draft.config
     if (!config) return
     draft.outbox.push({
       acked: false,
+      ...(replyEvidence ? { replyEvidence } : {}),
       report: {
         type: 'thread.report',
         thread_id: config.thread_id,
@@ -534,12 +540,9 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         yield* uncertain(event.reason || 'Agent exited without a confirmed turn end')
         return
       }
-      if (event.type === 'reply' && (Buffer.byteLength(event.id) > 512 || !Schema.is(Text)(event.text))) {
-        yield* uncertain('Agent reply violates the text or identifier contract')
-        return
-      }
       const message = state.messages[event.messageId]
-      if (message?.ended && message.executionId === event.executionId) return
+      if (message?.ended && state.nativeId === event.nativeSessionId && message.executionId === event.executionId)
+        return
       if (state.phase === 'unknown' || state.phase === 'stopped' || state.phase === 'failed') return
       if (state.nativeId !== event.nativeSessionId || state.activeMessage !== event.messageId || !message) {
         yield* uncertain('Agent event identity mismatch')
@@ -569,20 +572,41 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
             draft.outbox.some(
               (entry) =>
                 entry.report.kind === 'reply' &&
-                entry.report.metadata?.reply_id === event.id &&
+                (entry.replyEvidence?.id ?? entry.report.metadata?.reply_id) === event.id &&
                 entry.report.client_message_id === event.messageId,
             )
           )
             return
-          report(draft, 'reply', {
-            client_message_id: event.messageId,
-            worker_turn_seq: current.turn!,
-            content: event.text,
-            ...(event.attachments ? { attachments: event.attachments } : {}),
-            metadata: { ...event.metadata, reply_id: event.id },
-            ...(event.original_bytes === undefined ? {} : { original_bytes: event.original_bytes }),
-            ...(event.truncated === undefined ? {} : { truncated: event.truncated }),
-          })
+          if (current.turn === undefined) return reject('invalid_state', 'Reply has no Worker turn')
+          // 保留映射前缀，避免原生 ID 与映射结果占用同一个展示 ID。
+          const id =
+            Buffer.byteLength(event.id) > 512 ||
+            event.id.startsWith('baton:reply:sha256:') ||
+            displayText(event.id) !== event.id
+              ? `baton:reply:sha256:${digest(event.id)}`
+              : event.id
+          const text = displayText(event.text)
+          const repaired = id !== event.id || text !== event.text
+          report(
+            draft,
+            'reply',
+            {
+              client_message_id: event.messageId,
+              worker_turn_seq: current.turn,
+              content: text,
+              ...(event.attachments ? { attachments: event.attachments } : {}),
+              metadata: {
+                ...event.metadata,
+                reply_id: id,
+                ...(id === event.id ? {} : { reply_id_mapped: true }),
+                ...(text === event.text ? {} : { reply_text_sanitized: true }),
+                ...(repaired ? { reply_evidence: 'worker_ledger_json' } : {}),
+              },
+              ...(event.original_bytes === undefined ? {} : { original_bytes: event.original_bytes }),
+              ...(event.truncated === undefined ? {} : { truncated: event.truncated }),
+            },
+            repaired ? event : undefined,
+          )
         } else {
           current.ended = true
           report(draft, 'turn.ended', {
