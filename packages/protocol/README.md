@@ -18,9 +18,9 @@
 
 `http.ts` 另提供空 JSON 请求、全部 HTTP 查询参数、`ready`、`thread.changed`、`devices.changed`。查询参数保留 URL 上的字符串形式；HTTP handler 在校验后将其转换为业务数值。没有 JSON 正文的 204 响应不定义虚构的响应对象。
 
-`worker.ts` 包含 Go `ipcMessage` 的全部 20 个字段、认证、status、open/message/withdraw/resume/stop、pending/ack、session/native history，以及下述异步命令契约。`node.ts` 提供 Frame 和两个方向的业务消息联合类型。Project Runtime 的 16 种 operation 均有 Go 导出样例，包括 `started`、`stopped`、`wake_received`、`read_events`、`append_event`、`call_tool`、`wait_tool`、`commit_compaction`。
+`worker.ts` 包含 Go `ipcMessage` 的全部 20 个字段、认证、status、open/message/withdraw/resume/stop、pending/ack、session 输出读取，以及下述异步命令契约。`node.ts` 提供 Frame 和两个方向的业务消息联合类型。Project Runtime 的 16 种 operation 均有 Go 导出样例，包括 `started`、`stopped`、`wake_received`、`read_events`、`append_event`、`call_tool`、`wait_tool`、`commit_compaction`。
 
-动态数据使用 `Schema.Json`，例如 pi-ai 的 assistant payload、签名、usage、tool arguments/results、Project Runtime 的 `data` 和原生历史读取结果。它们的扩展字段不会被解释或删除。回复附件须为 JSON 数组，metadata 须为 JSON 对象。中心还需校验 PostgreSQL `jsonb::text` 的数据库容量约束。
+动态数据使用 `Schema.Json`，例如 pi-ai 的 assistant payload、签名、usage、tool arguments/results、Project Runtime 的 `data`。它们的扩展字段不会被解释或删除。回复附件须为 JSON 数组，metadata 须为 JSON 对象。中心还需校验 PostgreSQL `jsonb::text` 的数据库容量约束。
 
 ## 解码与编码
 
@@ -81,9 +81,9 @@ withdraw 在撤回事实持久保存后以 succeeded 结束；已经无法撤回
 
 `node_id` 是本人设备，`report_version` 是已经保存的非负能力报告版本，与节点报告 ACK 的同名字段一致；nodes DTO 中对应 `runtime_report_version`。中心在 reason-only 等设备报告变更持久保存后发送此事件。浏览器收到后重新读取设备报告，避免凭事件推测能力或解析 reason。该事件是刷新提示；重复或相同版本不构成新的执行事实。C 负责发送，W 负责消费。
 
-## 原生历史
+## Thread 历史与实时输出
 
-`native_history` 请求类型保留在 Worker IPC 中；设备不再保留原生历史，直接返回 `ok: false`、`code: history_unavailable` 和固定原因。`HistoryEntry`、`SessionHistoryPage` 与成功历史页字段已删除，`SessionResult` 不再携带历史页。
+Thread 历史通过中心时间线读取已保存的输入、回复和事件，设备不保存原生历史。`SessionRequest` 仅用于实时输出，`SessionResult` 返回输出状态、正文、游标和缺口。
 
 ## 夹具来源与漂移检查
 
@@ -98,6 +98,6 @@ pnpm --dir packages/protocol run test
 
 `TestExportWorkerProtocolFixtures` 通过生产 Client 的 JSON encoder 记录请求，再用实际 ipcMessage 编码结果。`TestExportMigrationProtocolFixtures` 用测试内结构编码新增的状态、receipt、open 配置、设备事件及正负样例。Go 生产代码保持冻结，因此新增契约和统一历史投影明确属于规格样例；它们不表示冻结 Go 已执行异步命令，也不证明原生 Agent 的历史合并已经实现。
 
-TS 测试按 Go 字段清单核对全部 Schema 的字段和可选性，逐字段拒绝错误种类，再以 `onExcessProperty: error` 解码所有样例并重新编码比较。测试另覆盖容量、控制字符、整数、状态、完成身份、ready 区分和新增契约的无效样例。
+TS 测试按 Go 字段清单核对全部 Schema 的字段和可选性，逐字段拒绝错误种类，再以 `onExcessProperty: error` 解码当前 TS 契约使用的样例并重新编码比较。Go 发布入口的原生历史请求与查询样例保留在夹具中，TS 测试跳过这些样例。测试另覆盖容量、控制字符、整数、状态、完成身份、ready 区分和新增契约的无效样例。
 
 三个 JSON 文件都是 Go 测试的确定性输出，应保留其排版。CI 在 Go 导出后重新执行协议测试，并检查 fixtures 的 Git 差异；声明或夹具漂移会使 CI 失败。这里的测试验证传输契约；账本事务、ACK/完成到达顺序的裁决、数据库 JSONB 容量、真实 Agent、跨系统进程和安装包的执行验收分别由 C/D/W/X 完成。

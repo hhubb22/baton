@@ -223,11 +223,6 @@ const Threads = HttpApiGroup.make('threads')
       query: Q.ThreadOutputQuery,
       success: D.SessionResult,
     }),
-    Endpoint.get('history', '/api/v1/threads/:threadId/history', {
-      params: threadParams,
-      query: Q.ThreadHistoryQuery,
-      success: D.SessionResult,
-    }),
     Endpoint.get('trace', '/api/v1/threads/:threadId/trace', {
       params: threadParams,
       query: Q.ThreadTraceQuery,

@@ -30,7 +30,7 @@ up 复用已有身份，首次运行登记主目录；--workspace 可额外登�
 
   open --cwd <目录> [--thread-id <UUID>] [--model <模型>]
   message --thread-id <UUID> --text <正文> [--message-id <ID>]
-  status | stop | resume | history | reports --thread-id <UUID>
+  status | stop | resume | reports --thread-id <UUID>
   command --thread-id <UUID> --command-id <UUID>
   withdraw --thread-id <UUID> --message-id <ID>
   ack --thread-id <UUID> --event-id <UUID> --worker-seq <序号>
@@ -121,7 +121,6 @@ export async function runLocalCLI(args: string[]): Promise<void> {
   } else if (action === 'status') request = { type: 'status', ok: false }
   else if (action === 'reports')
     request = { type: 'thread_pending', ok: false, after_worker_seq: Number(values['after-worker-seq'] ?? 0) }
-  else if (action === 'history') request = { type: 'native_history', ok: false }
   else if (action === 'ack')
     request = {
       type: 'thread_ack',
@@ -155,7 +154,7 @@ export async function runLocalCLI(args: string[]): Promise<void> {
   }
   const result = await host.request(threadId, request, {
     start: action !== 'status',
-    timeoutMs: action === 'history' ? 10_000 : 1000,
+    timeoutMs: 1000,
   })
   console.log(
     JSON.stringify(

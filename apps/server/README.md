@@ -138,7 +138,7 @@ docker run --rm --name baton-tracing \
 | Kiro | 节点在上游空会话发现之外运行 `kiro-cli --version`。macOS arm64 / CLI 精确版本 2.32.0 在程序已安装且认证未明确缺失时报告 `available`、`create: true`、`resume: true`，网页开放新建与恢复；认证 `unknown` 的 reason 提示首次执行由原生程序检查，明确 `missing` 拒绝。其他系统或版本（含预发布、构建后缀）、版本超时或不可解析为 `unverified`，缺程序为 `unavailable`；不满足准入条件的新建返回 HTTP 422、`code:"agent_unavailable"`。实际回合认证失败以失败结束并向时间线返回固定安全文案，输入保持 sent，Thread 可继续使用；不自动登录、不透传原始错误、不重发；离线验证不证明真实账号授权有效 |
 | Cursor、Kiro steer                                     | HTTP 422，`code:"steer_unsupported"`；同时传模型时为 `model_with_steer`                              |
 | Cursor、Pi、Codex、Kiro 轮间模型切换                              | HTTP 422，`code:"model_switch_unsupported"`                                                          |
-| Thread 历史                                      | 时间线返回中心保存的输入和回复，设备离线时仍可分页读取。`/threads/{id}/history` 在权限检查后返回 HTTP 200 的 `SessionResult`，`ok:false`、`code:"history_unavailable"`，不向设备发送 `native_history` |
+| Thread 历史                                      | 时间线返回中心保存的输入、回复和事件，设备离线时仍可分页读取；网页与 Project 工具 `threads.read` 使用同一份记录 |
 | 过程 `/threads/{id}/trace`                       | 合法查询返回 HTTP 200，`{ok:false,code:"trace_missing",steps:[]}`                                    |
 | 实时输出时设备离线或尚未同步                     | HTTP 200 的 `SessionResult`，`ok:false`，分别为 `node_offline` 或 `node_syncing`                     |
 

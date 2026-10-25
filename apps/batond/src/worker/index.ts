@@ -1387,26 +1387,17 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
           operation_id: request.operation_id,
           session_id: request.session_id,
           state: stateName,
-          ...(request.action !== 'output'
-            ? { ok: false, code: 'unsupported', gap: false }
-            : !state.config || frozen || recovering
-              ? { ok: false, code: 'unavailable', gap: false }
-              : request.session_id !== state.config.thread_id ||
-                  (decoded.thread_id !== undefined && decoded.thread_id !== state.config.thread_id) ||
-                  (decoded.storage_generation !== undefined &&
-                    decoded.storage_generation !== state.config.storage_generation)
-                ? { ok: false, code: 'invalid_request', gap: false }
-                : output.read(request.cursor)),
+          ...(!state.config || frozen || recovering
+            ? { ok: false, code: 'unavailable', gap: false }
+            : request.session_id !== state.config.thread_id ||
+                (decoded.thread_id !== undefined && decoded.thread_id !== state.config.thread_id) ||
+                (decoded.storage_generation !== undefined &&
+                  decoded.storage_generation !== state.config.storage_generation)
+              ? { ok: false, code: 'invalid_request', gap: false }
+              : output.read(request.cursor)),
         }
         return { type: 'result', ok: result.ok, session_result: result }
       }
-      if (decoded.type === 'native_history')
-        return {
-          type: 'result',
-          ok: false,
-          code: 'history_unavailable',
-          message: 'Native history is not kept on this device',
-        }
       const trace = commandAction(decoded.type) ? yield* captureTrace : undefined
       return yield* submit(shortRequest({ ...decoded, ...(trace ? { trace_context: trace } : {}) })).pipe(
         Effect.catch((error) =>

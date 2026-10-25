@@ -4,7 +4,7 @@ import { BatonHttpApi, HttpErrors, httpOpenApi } from '../src/http-api.ts'
 
 it('generates schemas, statuses and cookie security for every implemented HTTP endpoint', () => {
   const endpoints = Object.values(BatonHttpApi.groups).flatMap((group) => Object.values(group.endpoints))
-  expect(endpoints).toHaveLength(49)
+  expect(endpoints).toHaveLength(48)
   const document = httpOpenApi()
   expect(document.info.title).toBe('Baton HTTP API')
   expect(document.paths['/api/v1/login']?.post?.requestBody).toMatchObject({ required: true })

@@ -69,7 +69,7 @@ agent-host 把 `ProviderAdapterV2` 映射到 Worker 现有的 `ThreadAgent`：
 
 `agent-host/driver.ts` 的通用驱动负责上述映射、持久原生映射、迟到事件过滤和 sent 判定。映射还保存 Agent 类型与非敏感的本机 profile 目录，恢复时核对它们；目录变化直接拒绝。Pi、Codex、Kiro 使用原生 CLI 的认证，Cursor 使用显式 `CURSOR_API_KEY`。Kiro 的 profile 只记录 `homedir()`，没有专有环境变量目录映射。
 
-`prepareInput` 与 `restoreInput` 不再读取原生历史，InputPreparation 只保存原生会话、准备标识和 Worker 已确认的发送数；`readHistory` 从契约中删除，`native_history` 请求固定返回 `history_unavailable`。运行时请求（权限、提问）由宿主按 Agent 配置的策略自动应答：`command`、`file-read`、`file-change`、`permission` 选择当次允许，提问（含 `mcp-elicitation`）及其他请求返回取消，停止后到达的请求一律取消，Worker 中不会出现等待人工确认的回合。上游的 `rollbackThread`、`forkThread`、`compactThread` 与 `uploadFeedback` 不接入。
+`prepareInput` 与 `restoreInput` 不再读取原生历史，InputPreparation 只保存原生会话、准备标识和 Worker 已确认的发送数。运行时请求（权限、提问）由宿主按 Agent 配置的策略自动应答：`command`、`file-read`、`file-change`、`permission` 选择当次允许，提问（含 `mcp-elicitation`）及其他请求返回取消，停止后到达的请求一律取消，Worker 中不会出现等待人工确认的回合。上游的 `rollbackThread`、`forkThread`、`compactThread` 与 `uploadFeedback` 不接入。
 
 ## 运行时与进程模型（R-08、R-12）
 
@@ -172,9 +172,9 @@ Kiro 的离线行为验证使用 fork 的 ACP replay testkit 与 2.32.0 夹具�
 
 ## 历史（R-10）
 
-Thread 历史使用中心已保存的记录：`thread_messages` 保存员工和 Project Agent 发出的输入，`thread_replies` 保存 Worker 上报的回复。网页时间线与 Project 工具的 `history.read`、`history.search` 读取同一份数据，中心按 worker_seq 分页。这与 t3code 用自身事件投影提供历史的方式一致。
+Thread 历史使用中心已保存的记录：`thread_messages` 保存员工和 Project Agent 发出的输入，`thread_replies` 保存 Worker 上报的回复。网页时间线与 Project 工具 `threads.read` 读取同一份数据，中心按 worker_seq 分页。`history.read`、`history.search` 读取保存在中心的 Project 主对话事件。这与 t3code 用自身事件投影提供历史的方式一致。
 
-设备端原生历史读取、HistoryPager、只读快照缓存、前缀摘要游标和 `history_loading` 均已删除。Worker 的 `native_history` 请求固定返回 `history_unavailable`；网页时间线已改为按中心记录分页，`/threads/{id}/history` 保留路由并固定返回失败结果。在 Baton 之外继续同一原生会话产生的消息不显示。
+设备不保存原生历史，`session.request` 仅用于实时输出读取。网页时间线按中心记录分页。在 Baton 之外继续同一原生会话产生的消息不显示。
 
 ## MCP 注入
 

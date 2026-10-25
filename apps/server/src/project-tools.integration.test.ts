@@ -446,7 +446,6 @@ it('reads the same center thread records from the web timeline and history tools
     expect(messages.map((item) => item.body)).toEqual(saved)
     expect(messages.every((item) => item.delivery === 'delivered')).toBe(true)
     expect(paths.some((path) => path.includes('cursor='))).toBe(true)
-    expect(paths.every((path) => !path.includes('/history'))).toBe(true)
 
     const turnsOf = (value: {
       turns: Array<{ messages: Array<{ content: string }>; replies: Array<{ content: string }> }>

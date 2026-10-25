@@ -313,7 +313,7 @@ async function connected(options: {
                 const reply = await options.host.request(
                   body.session_id,
                   { type: 'session_request', ok: false, session_request: body },
-                  { timeoutMs: body.action === 'history' ? 10_000 : 1000 },
+                  { timeoutMs: 1000 },
                 )
                 result = reply.session_result
               } catch {

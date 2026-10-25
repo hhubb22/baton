@@ -92,7 +92,6 @@ export const WorkerIPCMessage = Schema.Struct({
     'thread_pending',
     'thread_ack',
     'session_request',
-    'native_history',
     'thread_command_status',
   ]),
   token: Schema.optionalKey(Schema.String),
@@ -216,10 +215,6 @@ export const WorkerSessionRequest = WorkerIPCMessage.mapFields(
   (fields) => ({ ...fields, type: Schema.Literal('session_request'), session_request: SessionRequest }),
   preserveChecks,
 )
-export const WorkerNativeHistory = WorkerIPCMessage.mapFields(
-  (fields) => ({ ...fields, type: Schema.Literal('native_history') }),
-  preserveChecks,
-)
 export const WorkerRequest = Schema.Union([
   WorkerAuth,
   WorkerStatus,
@@ -232,7 +227,6 @@ export const WorkerRequest = Schema.Union([
   WorkerPending,
   WorkerAck,
   WorkerSessionRequest,
-  WorkerNativeHistory,
 ]).check(jsonLimit(256 * 1024))
 export type WorkerRequest = typeof WorkerRequest.Type
 export type WorkerCommandAction = typeof WorkerCommandAction.Type
@@ -249,4 +243,3 @@ export type WorkerCommandStatusQuery = typeof WorkerCommandStatusQuery.Type
 export type WorkerPending = typeof WorkerPending.Type
 export type WorkerAck = typeof WorkerAck.Type
 export type WorkerSessionRequest = typeof WorkerSessionRequest.Type
-export type WorkerNativeHistory = typeof WorkerNativeHistory.Type

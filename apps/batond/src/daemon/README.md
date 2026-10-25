@@ -19,7 +19,7 @@ Worker 报告先写入 node.db outbox，再确认 Worker。单连接最多保留
 
 认证成功后发送 `node.sync` 与心跳；匹配的同步回执成功后发送 Thread 和能力报告。Cursor 探测独立运行，命令读取最近完成的能力快照。探测未完成时上报 `unverified`、`create:false` 和原因。命令接收复用外层 4.5 秒预算，Worker 启动至多 3 秒，随后 IPC 至多 1 秒，并服从剩余预算。
 
-`session.request` 的输出读取原样转发为 Worker 的 `session_request`；实时输出不写入节点报告账本。网页原生历史由统一历史实现提供，当前中心对该接口返回明确的不可用结果，本地 `native_history` 入口保持可用。
+`session.request` 的输出读取原样转发为 Worker 的 `session_request`；实时输出不写入节点报告账本。网页时间线与 Project 工具从中心读取已保存的 Thread 输入、回复和事件，设备不保存原生历史。
 
 Project manager 在 WSS 连接循环外构造，连接同步后绑定当前 RPC transport，断线时取消旧请求并保留运行中的 Runtime。每条连接最多 64 个 Project 请求在途，响应只匹配本连接的 correlation ID。start、stop、wake 在独立任务中处理，Runtime 的节点管理操作与业务 stdio 请求分开授权。租约、持久清理事实和 Thread 版本等待见 [Project Runtime 宿主](../project/README.md)。
 

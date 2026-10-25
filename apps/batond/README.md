@@ -2,7 +2,7 @@
 
 `@baton/batond` 通过出站 WSS 连接 [TypeScript 开发中心](../server/README.md)，提供 Cursor、Pi、Codex、Kiro 远程 Thread、Project Runtime、设备目录和订阅管理。节点守护进程保存设备身份、命令与报告账本，网页可发送排队消息、撤回、停止、恢复并读取实时输出。每个 Thread 使用独立 Worker，每个执行中的 Agent Thread 独占一个 agent-host；Worker 管理 SQLite、Turn、回复和报告，agent-host 用 fork 的完整 adapter 执行本机 Agent。本地调用方也可直接通过认证 IPC 使用 Worker。
 
-Go 的 `cmd/baton-server`、`cmd/batond` 和根目录构建脚本仍是发布入口，TypeScript 发布切换在迁移 T5 进行。TS 提供 Cursor、Pi、Codex、Kiro 远程 Thread、Project 协同和受限 shell；Kiro 在 macOS arm64 / CLI 精确版本 2.32.0、程序已安装且认证未明确缺失时报告 `available` 并开放网页新建与恢复。认证 `unknown` 时 reason 提示首次执行由原生程序检查，明确 `missing` 拒绝；其他系统或版本（含预发布、构建后缀）保持 `unverified`。配置、恢复和离线验证范围见 [Kiro 文档](src/agents/kiro/README.md)；其他 Agent 与统一历史的范围和实际拒绝响应见 [中心能力表](../server/README.md#当前能力范围)。
+Go 的 `cmd/baton-server`、`cmd/batond` 和根目录构建脚本仍是发布入口，TypeScript 发布切换在迁移 T5 进行。TS 提供 Cursor、Pi、Codex、Kiro 远程 Thread、Project 协同和受限 shell；Kiro 在 macOS arm64 / CLI 精确版本 2.32.0、程序已安装且认证未明确缺失时报告 `available` 并开放网页新建与恢复。认证 `unknown` 时 reason 提示首次执行由原生程序检查，明确 `missing` 拒绝；其他系统或版本（含预发布、构建后缀）保持 `unverified`。配置、恢复和离线验证范围见 [Kiro 文档](src/agents/kiro/README.md)；Pi、Codex、Kiro、Cursor 的能力及中心历史读取范围见 [中心能力表](../server/README.md#当前能力范围)。
 
 ## 开发入口
 
@@ -70,7 +70,6 @@ pnpm --filter @baton/batond dev open --cwd /绝对路径/工作目录
 pnpm --filter @baton/batond dev message --thread-id <UUID> --text '需要执行的内容'
 pnpm --filter @baton/batond dev reports --thread-id <UUID>
 pnpm --filter @baton/batond dev stop --thread-id <UUID>
-pnpm --filter @baton/batond dev history --thread-id <UUID>
 pnpm --filter @baton/batond dev resume --thread-id <UUID>
 ```
 
@@ -80,7 +79,7 @@ Kiro 的 local settings 使用 `agentId: kiro`、`commandPath: kiro-cli`，从 P
 
 `open` 返回 Thread ID 和持久接收回执。启动、发送、恢复和停止的实际终态通过 `command --command-id <UUID>` 或 `reports` 查询；Worker 就绪与 Agent 就绪分别报告。`message` 支持 `--message-id`，执行命令支持 `--command-id`，重试时保留原标识。相同命令 ID、相同内容复用回执和结果，内容冲突会被拒绝。
 
-`withdraw --message-id <ID>` 撤回尚未提交的输入。`reports --after-worker-seq <序号>` 顺序读取有界报告，`ack --event-id <UUID> --worker-seq <序号>` 确认已消费报告。设备不再保存原生历史，本地 `history` 和 `/threads/{id}/history` 都返回 `ok:false` / `history_unavailable`。网页时间线按中心保存的 Thread 消息、回复和实时输出分页。
+`withdraw --message-id <ID>` 撤回尚未提交的输入。`reports --after-worker-seq <序号>` 顺序读取有界报告，`ack --event-id <UUID> --worker-seq <序号>` 确认已消费报告。设备不保存原生历史。网页时间线按中心保存的 Thread 输入、回复和事件分页，实时输出通过输出接口读取。
 
 ## 持久化与恢复
 

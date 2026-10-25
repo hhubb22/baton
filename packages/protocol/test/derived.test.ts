@@ -40,7 +40,6 @@ const workerCases: Array<[string, Schema.Codec<unknown>, Record<string, unknown>
   ['WorkerPending', Protocol.WorkerPending, sample(worker, 'WorkerIPCMessage', 'thread_pending')],
   ['WorkerAck', Protocol.WorkerAck, sample(worker, 'WorkerIPCMessage', 'thread_ack')],
   ['WorkerSessionRequest', Protocol.WorkerSessionRequest, sample(worker, 'WorkerIPCMessage', 'session_request')],
-  ['WorkerNativeHistory', Protocol.WorkerNativeHistory, sample(worker, 'WorkerIPCMessage', 'native_history')],
   ['WorkerRequest', Protocol.WorkerRequest, sample(migration, 'WorkerRequest', 'open')],
 ]
 

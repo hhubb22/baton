@@ -975,7 +975,7 @@ export const SessionRequest = Schema.Struct({
   type: Schema.Literal('session.request'),
   operation_id: UUID,
   session_id: UUID,
-  action: Schema.Literals(['history', 'output']),
+  action: Schema.Literal('output'),
   cursor: Schema.optionalKey(Cursor),
   limit: Schema.optionalKey(Integer.check(Schema.isBetween({ minimum: 0, maximum: 16 }))),
 })

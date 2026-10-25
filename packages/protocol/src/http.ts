@@ -34,10 +34,6 @@ export const ThreadListQuery = Schema.Struct({
   limit: pageLimit,
 })
 export const ThreadTimelineQuery = Schema.Struct({ cursor: Schema.optionalKey(boundedText(4096)), limit: pageLimit })
-export const ThreadHistoryQuery = Schema.Struct({
-  cursor: Schema.optionalKey(Cursor),
-  limit: Schema.optionalKey(decimal(1, 16)),
-})
 export const ThreadOutputQuery = Schema.Struct({ cursor: Schema.optionalKey(Cursor) })
 export const ThreadTraceQuery = Schema.Struct({ worker_turn_seq: decimal(1, Number.MAX_SAFE_INTEGER) })
 export const FilesQuery = Schema.Struct({
@@ -66,7 +62,6 @@ export const httpSchemas = {
   DevicesChanged,
   ThreadListQuery,
   ThreadTimelineQuery,
-  ThreadHistoryQuery,
   ThreadOutputQuery,
   ThreadTraceQuery,
   FilesQuery,
@@ -81,7 +76,6 @@ export type BrowserReady = typeof BrowserReady.Type
 export type BrowserThreadChanged = typeof BrowserThreadChanged.Type
 export type ThreadListQuery = typeof ThreadListQuery.Type
 export type ThreadTimelineQuery = typeof ThreadTimelineQuery.Type
-export type ThreadHistoryQuery = typeof ThreadHistoryQuery.Type
 export type ThreadOutputQuery = typeof ThreadOutputQuery.Type
 export type ThreadTraceQuery = typeof ThreadTraceQuery.Type
 export type FilesQuery = typeof FilesQuery.Type

@@ -43,7 +43,7 @@ host 消费 `ProviderAdapterV2` 的事件并映射为 `agent-host` 协议：
 
 ## 发送确认
 
-`sent` 在独立只读 host 里用映射恢复 provider thread，调用 `readThreadSnapshot`，把消息投影成 `{ id, role, text }`。`evidence.ts` 用 Worker 账本里的已确认发送数定位下一条 user 消息，只有正文相同才返回确认；准备文档不合法或数量对不上时返回未确认或错误。设备不再保存原生历史，Worker 的 `native_history` 请求直接返回 `history_unavailable`。
+`sent` 在独立只读 host 里用映射恢复 provider thread，调用 `readThreadSnapshot`，把消息投影成 `{ id, role, text }`。`evidence.ts` 用 Worker 账本里的已确认发送数定位下一条 user 消息，只有正文相同才返回确认；准备文档不合法或数量对不上时返回未确认或错误。设备不保存原生历史，Thread 历史从中心记录读取。
 
 ## 验证
 

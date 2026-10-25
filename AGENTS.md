@@ -74,7 +74,7 @@ Baton 是跨设备 AI Agent 协同系统，由中心服务（`baton-server`）�
 
 ## 部署与设备接入
 
-以下二进制与容器命令使用 Go 发布入口。TS 开发中心使用 `pnpm --filter @baton/server dev` 运行账号管理、迁移和 `serve`，节点使用 `pnpm --filter @baton/batond dev <命令>` 运行 `up`、`register` 或 `run`；本机 HTTPS、CA 与 `--workspace` 配置见 [开发接入说明](apps/server/README.md#设备接入与远程-thread)。TS 已提供 Project、事项、记忆、目录增删、设备执行授权、附件文本预览及订阅登录；其他 Agent 与统一历史的范围和实际响应见 [能力表](apps/server/README.md#当前能力范围)。Project Runtime 从源码与已安装依赖启动，完整安装包仍归 T5。
+以下二进制与容器命令使用 Go 发布入口。TS 开发中心使用 `pnpm --filter @baton/server dev` 运行账号管理、迁移和 `serve`，节点使用 `pnpm --filter @baton/batond dev <命令>` 运行 `up`、`register` 或 `run`；本机 HTTPS、CA 与 `--workspace` 配置见 [开发接入说明](apps/server/README.md#设备接入与远程-thread)。TS 已提供 Project、事项、记忆、目录增删、设备执行授权、附件文本预览及订阅登录；Pi、Codex、Kiro、Cursor 均已接入，Agent 能力和中心历史读取范围见 [能力表](apps/server/README.md#当前能力范围)。Project Runtime 从源码与已安装依赖启动，完整安装包仍归 T5。
 
 - `baton-server serve` 自动执行数据库迁移，再检查迁移状态；签名密钥默认使用工作目录下的 `node-signing.key`，不存在时生成 `0600` 文件，也可用 `BATON_NODE_SIGNING_KEY` 指定。已有密钥的权限、类型和内容仍须通过校验。
 - `Dockerfile` 构建内嵌 Web UI 的服务端镜像，使用非 root 用户运行。`compose.yaml` 编排 PostgreSQL 16 与 `baton-server`，数据库及 `/var/lib/baton` 分别持久化；需配置 `BATON_POSTGRES_PASSWORD` 和 `BATON_ALLOWED_ORIGINS`，默认通过本机端口交给 HTTPS 反向代理。
