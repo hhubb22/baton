@@ -29,7 +29,9 @@ batond 检查版本 `0.1.0`、登录状态和租约后，在空控制目录启�
 
 `prompt_version=1` 选择固定的角色提示词，标题和目标来自当前对话的提示词快照。快照随 assistant 的 `pi-ai/1` payload 一起保存；恢复时复用最早保留的快照。生成压缩摘要并写入新快照时才采用新的标题和目标；只清理工具结果时沿用原快照。未知版本拒绝运行。
 
-每次模型请求都根据 Coordinator 的事件重建历史，保留 provider 的签名、reasoning 和扩展字段，递归排序对象键。`sessionId` 为主对话 ID，`maxTokens=32000`，关闭 provider 内部重试。错误或超过 160 KiB 的回复不保存，分别等待 5、15、45 秒重试，仍失败时调用 `report_failure`。
+每次模型请求都根据 Coordinator 的事件重建历史，保留 provider 的签名、reasoning 和扩展字段，递归排序对象键。`sessionId` 为主对话 ID，关闭 provider 内部重试。`run --max-output-tokens <正整数>` 设置普通回复和摘要的输出预算，默认 32000，实际传给 provider 的值不超过模型的 `maxTokens`；`run --max-model-calls <正整数>` 设置单次运行的模型调用总预算，默认 64 次，普通生成、失败重试和摘要请求都计入。宿主可通过 `ProjectRuntime` 第五个构造参数的 `maxOutputTokens`、`maxModelCalls` 设置相同预算。provider 是否执行 token 上限取决于其 API；固定版本的 Codex 请求体不传输出 token 上限，Runtime 仍检查完整回复的容量。batond 从设备数据目录的 `project-runtime.json` 读取同名的 `maxOutputTokens`、`maxModelCalls`，启动 Runtime 时传入上述 CLI 参数。
+
+完整 assistant payload 的 JSON 超过 160 KiB 时不保存、不执行其中的工具，立即降低下一次请求的输出预算，并反馈容量和精简要求，最多恢复三次。`length` 终态包含工具调用时，工具参数可能被截断；Runtime 丢弃该回复并要求减少或缩短完整调用；容量超限与工具截断共用每次请求最多三次的恢复额度。恢复耗尽分别以 `model_output_too_large`、`model_output_truncated_tools` 调用 `report_failure`，不会截取半条工具调用保存。普通模型错误按 5、15、45 秒退避重试，耗尽后报告 `model_request_failed`；模型调用总预算耗尽报告 `model_call_budget_exhausted`。
 
 assistant 的 `message_end` 监听器先等待 `append_event` 提交，再按消息内的顺序发出 `call_tool`。每个工具结果由 Coordinator 保存；后续模型请求使用中心保存的结果。Runtime 的工具执行模式为 `sequential`。恢复时读取已有结果，只为缺少结果的工具调用发送原 ID；最后一条非压缩事件为 input 或 tool_result 时调用 `continue()`，为无工具 assistant 时领取下一批输入；压缩事件不改变未完成轮次的恢复位置。
 
@@ -37,7 +39,7 @@ assistant 的 `message_end` 监听器先等待 `append_event` 提交，再按消
 
 `nodes.exec` 的 pending 响应携带 `thread_id`；`wait_protocol=1` 时还携带非负安全整数 `version` 和 `wait_remaining_ms`。batond 声明 `local_wait_protocol=1` 时，Runtime 用 `{thread_id, after_version, wait_ms}` 本地等待最多 25 秒，然后通过 `wait_tool` 查询中心保存的状态。未声明协议时每 250ms 查询一次；运行期限到达时用 `finish_wait=true` 保存当前状态。等待结束后命令继续执行，输出可通过 `threads.read` 获取。
 
-闲置 180 秒，或运行满 15 分钟并处理完当前轮次后，先检查是否需要压缩，再调用 `finish`。收尾只释放 Project Agent 租约，已开启的 Thread 继续执行。
+闲置 180 秒，或运行满 15 分钟并处理完当前轮次后，先检查是否需要压缩，再调用 `finish`。收尾摘要生成失败、没有有效缩减或模型调用预算耗尽时保留原始历史，将 `finish_compaction_failed` 和具体错误码写入 stderr，仍正常 `finish`。下一次请求按窗口占用重新判断是否必须压缩；租约丢失、提交错误等仍立即退出。收尾只释放 Project Agent 租约，已开启的 Thread 继续执行。
 
 ## 上下文压缩
 
@@ -45,9 +47,11 @@ assistant 的 `message_end` 监听器先等待 `append_event` 提交，再按消
 
 仍需缩减时，优先保留最近两批输入对应的对话及窗口 15% 的最近内容。长单轮可以在完整工具批次之间切分。摘要请求重放原系统提示词、工具声明、provider 签名和待压缩消息前缀，沿用对话 `sessionId`，最后追加协调角色的摘要指令并禁止工具调用。摘要保留用户要求、准确 Thread ID、设备、目录、当前状态、最后的结论、决定和未完成事项。缓存能否命中取决于模型服务。
 
-空白、截断、工具调用、超限或没有缩短上下文的摘要不会提交。Coordinator 校验租约、历史序号、工具配对和范围，在同一事务里保存压缩事件并更新读取起点。回执丢失后重发同一事件标识；历史或配置变化时丢弃旧摘要，重新读取。生成失败按 5、15、45 秒重试，仍失败时报告模型请求失败。普通模型请求明确超限后，可在有效缩减上下文后重试一次。
+空白、截断、工具调用、超限或没有缩短上下文的摘要不会提交。Coordinator 校验租约、历史序号、工具配对和范围，在同一事务里保存压缩事件并更新读取起点。回执丢失后重发同一事件标识；历史或配置变化时丢弃旧摘要，重新读取。摘要生成失败按 5、15、45 秒重试，请求前必需的压缩失败仍报告模型请求失败。
 
-压缩结果只改变发给模型的视图，原始历史完整保留，可以通过 `history.search/read` 找回。默认预算位于 `src/compaction.ts`，宿主可用 `ProjectRuntime` 第四个构造参数覆盖，CLI 使用默认值。
+普通请求明确上下文溢出后，只要压缩持续减少估算 token、运行未满 15 分钟且模型调用总预算有剩余，就可以多次压缩并恢复。同一请求连续溢出时，逐次将保留 token 比例减半，始终只在完整工具批次之间切分。没有可继续缩减的历史或压缩未减少 token 时报告 `context_overflow_no_progress`；时间或调用预算耗尽时报告 `context_overflow_budget_exhausted`。失败回复不保存、不执行工具。
+
+压缩结果只改变发给模型的视图，原始历史完整保留，可以通过 `history.search/read` 找回。压缩比例等默认值位于 `src/compaction.ts`，宿主可用 `ProjectRuntime` 第四个构造参数覆盖，CLI 使用这些默认压缩设置。
 
 ## 验收证据
 
@@ -64,4 +68,4 @@ faux 恢复测试的 Coordinator 替身负责持久化和事务去重。真实 N
 BATON_TEST_NODE_PROJECT_RUNTIME=1 go test -v -count=1 ./internal/gateway -run '^TestProjectRuntimePiFauxRealCoordinator$'
 ```
 
-该测试通过实际 Runtime 保存 assistant、调用 `memory.write`，用长回复触发收尾摘要，检查工具结果、记忆、压缩事件与读取起点在 Coordinator 保存，原始消息保留，运行正常结束。PS-157 的事务故障注入测试继续验证服务端去重。真实订阅及三设备端到端场景由 PA-W08 验证。
+该测试通过实际 Runtime 保存 assistant、调用 `memory.write`，用长回复触发收尾摘要，检查工具结果、记忆、压缩事件与读取起点在 Coordinator 保存，原始消息保留，运行正常结束。事务故障注入测试继续验证服务端去重。Runtime、跨设备调度和恢复的自动验收使用本地模型替身及离线录制；真实订阅检查仅在显式手动运行冒烟时执行。

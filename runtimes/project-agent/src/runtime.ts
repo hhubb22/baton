@@ -31,6 +31,23 @@ export { modelMessages } from './context.js'
 export const IDLE_MS = 180_000
 export const RUN_MS = 900_000
 export const RETRIES = [5_000, 15_000, 45_000]
+const EVENT_BYTES = 160 * 1024
+export interface ModelBudget {
+  maxOutputTokens: number
+  maxModelCalls: number
+}
+export const DEFAULT_MODEL_BUDGET: Readonly<ModelBudget> = Object.freeze({
+  maxOutputTokens: 32000,
+  maxModelCalls: 64,
+})
+const modelFailureCodes = new Set([
+  'model_request_failed',
+  'model_output_too_large',
+  'model_output_truncated_tools',
+  'model_call_budget_exhausted',
+  'context_overflow_no_progress',
+  'context_overflow_budget_exhausted',
+])
 export interface Clock {
   now(): number
   sleep(ms: number): Promise<void>
@@ -44,13 +61,26 @@ export class ProjectRuntime {
   private started = 0
   private stopAfterWait = false
   private compaction: CompactionSettings
+  private budget: ModelBudget
+  private modelCalls = 0
   constructor(
     private rpc: RPC,
     private models: Models,
     private timer: Clock = clock,
     compaction: Partial<CompactionSettings> = {},
+    budget: Partial<ModelBudget> = {},
   ) {
     this.compaction = compactionSettings(compaction)
+    this.budget = { ...DEFAULT_MODEL_BUDGET, ...budget }
+    for (const [name, value] of Object.entries(this.budget))
+      if (!Number.isSafeInteger(value) || value < 1) throw new Error(`invalid_model_budget_${name}`)
+  }
+  private takeModelCall() {
+    if (this.modelCalls >= this.budget.maxModelCalls) throw new RuntimeError('model_call_budget_exhausted')
+    this.modelCalls++
+  }
+  private canRecover() {
+    return this.modelCalls < this.budget.maxModelCalls && this.timer.now() - this.started < RUN_MS
   }
   private model() {
     const model = this.models.getModel(this.boot.project.agent.provider, this.boot.project.agent.model)
@@ -97,26 +127,26 @@ export class ProjectRuntime {
         this.results.set(message.toolCallId, message)
       }
   }
-  private async compact(ratio: number, signal?: AbortSignal, force = false): Promise<boolean> {
+  private async compact(ratio: number, signal?: AbortSignal, force = false, retentionScale = 1): Promise<boolean> {
     // 序号冲突会丢弃旧摘要，从中心的新快照重新选取范围。
     let changed = false,
       conflicts = 0
-    for (let pass = 0; pass < 3;) {
+    while (true) {
       try {
-        if (!(await this.compactOnce(ratio, signal, force && !changed))) return changed
+        const before = estimateMessages(modelMessages(this.boot, this.events))
+        if (!(await this.compactOnce(ratio, signal, force && !changed, retentionScale))) return changed
         changed = true
-        pass++
+        if (estimateMessages(modelMessages(this.boot, this.events)) >= before) return changed
       } catch (error) {
         if (!(error instanceof RuntimeError) || error.code !== 'conflict' || conflicts++ === 1) throw error
         await this.reload()
       }
     }
-    return changed
   }
-  private async compactOnce(ratio: number, signal?: AbortSignal, force = false): Promise<boolean> {
+  private async compactOnce(ratio: number, signal?: AbortSignal, force = false, retentionScale = 1): Promise<boolean> {
     const model = this.model(),
       window = model.contextWindow
-    const outputReserve = Math.min(32000, model.maxTokens)
+    const outputReserve = Math.min(this.budget.maxOutputTokens, model.maxTokens)
     const threshold = Math.min(window * ratio, window - outputReserve)
     if (!force && contextTokens(this.boot, this.events) <= threshold) return false
     signal?.throwIfAborted()
@@ -144,7 +174,7 @@ export class ProjectRuntime {
       this.boot,
       this.events,
       window,
-      this.compaction,
+      { ...this.compaction, retainRatio: this.compaction.retainRatio * retentionScale },
       window - outputReserve - instructionTokens,
     )
     if (through === undefined) return changed
@@ -165,10 +195,12 @@ export class ProjectRuntime {
     }
     for (let attempt = 0; ; attempt++) {
       signal?.throwIfAborted()
+      if (!this.canRecover()) throw new RuntimeError('model_call_budget_exhausted')
+      this.takeModelCall()
       let payload: CompactionPayload
       try {
         const stream = this.models.streamSimple(model, modelContext({ messages }), {
-          maxTokens: Math.min(32000, model.maxTokens, available),
+          maxTokens: Math.min(this.budget.maxOutputTokens, model.maxTokens, available),
           maxRetries: 0,
           sessionId: this.boot.project.conversation.id,
           toolChoice: 'none',
@@ -343,13 +375,27 @@ export class ProjectRuntime {
     const streamFn: StreamFn = async (requestModel, context, options) => {
       const output = createAssistantMessageEventStream()
       // 缓冲一条完成的回复后再交给 Agent，失败和超限输出不能进入持久化或工具执行。
-      let recoveredOverflow = false
-      for (let attempt = 0; ; attempt++) {
+      let outputTokens = Math.min(this.budget.maxOutputTokens, requestModel.maxTokens)
+      let outputRecoveries = 0
+      let overflowRecoveries = 0
+      let outputFeedback = ''
+      let attempt = 0
+      while (true) {
         let message: AssistantMessage | undefined
         try {
-          const stream = this.models.streamSimple(requestModel, modelContext(context), {
+          this.takeModelCall()
+          const requestContext = outputFeedback
+            ? {
+                ...context,
+                messages: [
+                  ...context.messages,
+                  { role: 'user', content: outputFeedback, timestamp: 0 } satisfies Message,
+                ],
+              }
+            : context
+          const stream = this.models.streamSimple(requestModel, modelContext(requestContext), {
             ...options,
-            maxTokens: Math.min(32000, requestModel.maxTokens),
+            maxTokens: outputTokens,
             maxRetries: 0,
           })
           let preview = ''
@@ -382,24 +428,31 @@ export class ProjectRuntime {
           }
           message = batonMessage(await stream.result())
           if (message.stopReason === 'error' && isContextOverflow(message, requestModel.contextWindow)) {
-            let compacted = false
-            if (!recoveredOverflow) {
-              try {
-                compacted = await this.compact(this.compaction.requestRatio, options?.signal, true)
-              } catch (error) {
-                fatal = error
-                throw error
-              }
+            if (!this.canRecover()) throw new RuntimeError('context_overflow_budget_exhausted')
+            const before = estimateMessages(modelMessages(this.boot, this.events))
+            let compacted: boolean
+            try {
+              compacted = await this.compact(
+                this.compaction.requestRatio,
+                options?.signal,
+                true,
+                0.5 ** overflowRecoveries++,
+              )
+            } catch (error) {
+              fatal =
+                error instanceof RuntimeError && error.code === 'model_call_budget_exhausted'
+                  ? new RuntimeError('context_overflow_budget_exhausted')
+                  : error
+              throw fatal
             }
-            if (compacted) {
-              recoveredOverflow = true
-              context = {
-                ...context,
-                messages: modelMessages(this.boot, this.events),
-              }
-              continue
+            if (!compacted || estimateMessages(modelMessages(this.boot, this.events)) >= before)
+              throw new RuntimeError('context_overflow_no_progress')
+            if (!this.canRecover()) throw new RuntimeError('context_overflow_budget_exhausted')
+            context = {
+              ...context,
+              messages: modelMessages(this.boot, this.events),
             }
-            throw new RuntimeError('context_overflow')
+            continue
           }
           if (message.stopReason === 'error' || message.stopReason === 'aborted')
             throw new Error('model_request_failed')
@@ -409,11 +462,29 @@ export class ProjectRuntime {
             prompt: promptFor(this.boot, this.events),
           }
           // 带缩进表示为 PostgreSQL jsonb 的空格预留容量。
-          if (Buffer.byteLength(JSON.stringify(payload, null, 1)) > 160 * 1024)
-            throw new Error('model_output_too_large')
+          const payloadBytes = Buffer.byteLength(JSON.stringify(payload, null, 1))
+          const truncatedTools =
+            message.stopReason === 'length' && message.content.some((block) => block.type === 'toolCall')
+          if (payloadBytes > EVENT_BYTES || truncatedTools) {
+            const code = truncatedTools ? 'model_output_truncated_tools' : 'model_output_too_large'
+            if (outputRecoveries++ >= RETRIES.length || outputTokens <= 1 || !this.canRecover())
+              throw new RuntimeError(code)
+            if (payloadBytes > EVENT_BYTES)
+              outputTokens = Math.max(1, Math.floor(outputTokens * Math.min(0.5, (EVENT_BYTES / payloadBytes) * 0.8)))
+            outputFeedback = truncatedTools
+              ? '上一条回复因输出 token 上限截断了工具参数，未保存且工具未执行。请缩短或减少本次工具调用，保证每个调用参数完整。'
+              : '上一条回复的完整 JSON 超过 160 KiB 保存容量，未保存且工具未执行。请精简回复和工具参数，减少重复内容；每个工具调用必须完整。'
+            console.warn(`${code}: ${payloadBytes} bytes; retry_max_output_tokens=${outputTokens}`)
+            await this.rpc
+              .call({ operation: 'preview', last_seq: this.seq, payload: { text: '', truncated: false } })
+              .catch(() => {})
+            continue
+          }
+          if (message.stopReason !== 'stop' && message.stopReason !== 'length' && message.stopReason !== 'toolUse')
+            throw new RuntimeError('model_request_failed')
           output.push({
             type: 'done',
-            reason: message.stopReason as 'stop' | 'length' | 'toolUse',
+            reason: message.stopReason,
             message,
           })
           output.end(message)
@@ -428,8 +499,6 @@ export class ProjectRuntime {
             .catch(() => {})
           if (options?.signal?.aborted) throw new RuntimeError('aborted')
           if (fatal !== undefined && fatal === error) throw error
-          if (error instanceof RuntimeError && error.code === 'context_overflow')
-            throw new RuntimeError('model_request_failed')
           if (
             error instanceof RuntimeError &&
             !['model_request_failed', 'invalid_compaction_summary'].includes(error.code)
@@ -438,7 +507,7 @@ export class ProjectRuntime {
             throw error
           }
           if (attempt === RETRIES.length) throw new RuntimeError('model_request_failed')
-          await this.timer.sleep(RETRIES[attempt])
+          await this.timer.sleep(RETRIES[attempt++])
         }
       }
     }
@@ -512,6 +581,7 @@ export class ProjectRuntime {
   }
   async run(): Promise<void> {
     this.started = this.timer.now()
+    this.modelCalls = 0
     const started = this.started
     this.stopAfterWait = false
     let idleSince = this.timer.now()
@@ -553,7 +623,12 @@ export class ProjectRuntime {
         },
       })
     }
-    await this.compact(this.compaction.finishRatio)
+    try {
+      await this.compact(this.compaction.finishRatio)
+    } catch (error) {
+      if (!(error instanceof RuntimeError) || !modelFailureCodes.has(error.code)) throw error
+      console.warn(`finish_compaction_failed: ${error.code}; original history retained`)
+    }
     await this.rpc.call({
       operation: 'finish',
       last_seq: this.seq,
@@ -564,10 +639,10 @@ export class ProjectRuntime {
     try {
       await this.run()
     } catch (error) {
-      if (error instanceof RuntimeError && error.code === 'model_request_failed') {
+      if (error instanceof RuntimeError && modelFailureCodes.has(error.code)) {
         await this.rpc.call({
           operation: 'report_failure',
-          reason: 'model_request_failed',
+          reason: error.code,
         })
         return
       }

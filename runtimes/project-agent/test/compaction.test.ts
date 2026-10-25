@@ -243,7 +243,7 @@ test('长单轮在请求前自动压缩，保留未分析的工具批次，不�
   }
 })
 
-test('空、截断、工具调用和未缩短的摘要不替换历史，耗尽重试后报告失败', async () => {
+test('收尾的空、截断、工具调用和未缩短摘要不替换历史，耗尽重试后正常结束', async () => {
   const invalid = [
     () => fauxAssistantMessage('  '),
     () => fauxAssistantMessage('未完成', { stopReason: 'length' }),
@@ -263,7 +263,8 @@ test('空、截断、工具调用和未缩短的摘要不替换历史，耗尽�
     await fixture.runtime.start()
     assert.deepEqual(b.events, before)
     assert.equal(fixture.requests.length, 4)
-    assert.equal(b.calls.at(-1), 'report_failure')
+    assert.equal(b.calls.at(-1), 'finish')
+    assert.ok(!b.calls.includes('report_failure'))
     assert.equal(b.effects, 0)
   }
 })
@@ -331,7 +332,7 @@ test('超过窗口的恢复历史分批生成摘要，每次请求均留出输�
   assert.match(JSON.stringify(fixture.requests[1].context.messages), /thread-123/)
 })
 
-test('模型确认上下文溢出时压缩后重试一次，不保存失败回复', async () => {
+test('模型确认上下文溢出时有效压缩后重试，无进展时结束且不保存失败回复', async () => {
   for (const failAgain of [false, true]) {
     const b = new Backend()
     b.queue = false

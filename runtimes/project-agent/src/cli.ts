@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createConnection } from 'node:net'
 import { createInterface } from 'node:readline/promises'
+import { parseArgs } from 'node:util'
 import { StdioClient, frames, writeFrame } from '../../shared/stdio.js'
 import { probe, runtimeModels, VERSION, PROVIDERS } from './auth.js'
 import { checkedRPC, type Request } from './protocol.js'
@@ -95,6 +96,17 @@ async function main() {
   }
   if (command !== 'run')
     throw new Error('usage: baton-project-runtime run|probe|login <provider>|login-device <provider>|--version')
+  const { values } = parseArgs({
+    args: process.argv.slice(3),
+    options: {
+      'max-output-tokens': { type: 'string' },
+      'max-model-calls': { type: 'string' },
+    },
+  })
+  const budget = {
+    ...(values['max-output-tokens'] === undefined ? {} : { maxOutputTokens: Number(values['max-output-tokens']) }),
+    ...(values['max-model-calls'] === undefined ? {} : { maxModelCalls: Number(values['max-model-calls']) }),
+  }
   const models = await runtimeModels()
   const { ProjectRuntime } = await import('./runtime.js')
   if (process.env.BATON_SIDECAR_TRANSPORT === 'stdio') {
@@ -102,9 +114,12 @@ async function main() {
     await new ProjectRuntime(
       checkedRPC((request) => client.call(request)),
       models,
+      undefined,
+      undefined,
+      budget,
     ).start()
     process.stdin.destroy()
-  } else await new ProjectRuntime(checkedRPC(ipc), models).start()
+  } else await new ProjectRuntime(checkedRPC(ipc), models, undefined, undefined, budget).start()
 }
 main().catch(() => {
   console.error('Project Runtime 执行失败，请检查版本、登录状态和节点连接。')

@@ -8,7 +8,7 @@ import {
 } from '@earendil-works/pi-ai'
 import type { Bootstrap, Event, RPC } from '../src/protocol.js'
 import { RuntimeError } from '../src/protocol.js'
-import { ProjectRuntime, type Clock } from '../src/runtime.js'
+import { ProjectRuntime, type Clock, type ModelBudget } from '../src/runtime.js'
 import type { CompactionSettings } from '../src/compaction.js'
 
 export const assistant = (tools = false, threadTool: 'threads.create' | 'threads.send' = 'threads.create') =>
@@ -167,6 +167,8 @@ export function setup(
   options: {
     contextWindow?: number
     compaction?: Partial<CompactionSettings>
+    budget?: Partial<ModelBudget>
+    maxTokens?: number
   } = {},
 ) {
   const faux = fauxProvider({
@@ -174,7 +176,7 @@ export function setup(
     models: [
       {
         id: 'faux-model',
-        maxTokens: 32000,
+        maxTokens: options.maxTokens ?? 32000,
         contextWindow: options.contextWindow ?? 1_000_000,
       },
     ],
@@ -200,7 +202,7 @@ export function setup(
     }),
   )
   return {
-    runtime: new ProjectRuntime(backend, models, backend.timer(), options.compaction),
+    runtime: new ProjectRuntime(backend, models, backend.timer(), options.compaction, options.budget),
     faux,
     requests,
   }
