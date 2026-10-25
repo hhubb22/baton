@@ -7,7 +7,7 @@
     "./daemon/daemon": "./src/daemon/daemon.ts",
     "./daemon/identity": "./src/daemon/identity.ts",
     "./daemon/transport": "./src/daemon/transport.ts",
-    "./daemon/roots": "./src/daemon/roots.ts",
+    "./devices/roots": "./src/devices/roots.ts",
     "./daemon/host": "./src/daemon/host.ts",
     "./daemon/worker-runner": "./src/daemon/worker-runner.ts",
     "./daemon/ledger": "./src/daemon/ledger.ts",

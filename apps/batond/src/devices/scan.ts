@@ -2,9 +2,9 @@ import { execFile } from 'node:child_process'
 import { lstat } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import type { RuntimeRepo, RuntimeRoot } from '@baton/protocol'
-import { loadBrowseRoots, type BrowseRoot } from '../daemon/roots.ts'
+import { loadBrowseRoots, type BrowseRoot } from './roots.ts'
 import { boundedDirectory, inside, openAuthorized, readBounded } from './files.ts'
-import { containsControl } from './config.ts'
+import { containsControl } from './errors.ts'
 
 /** origin 只公开主机和仓库路径，去掉账号、口令、查询与片段。 */
 export function sanitizeOrigin(value: string): string | undefined {

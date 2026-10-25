@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto'
 import { BrowseRootsCursor, BrowseRootsPage } from '@baton/protocol'
 import { Schema } from 'effect'
-import { loadBrowseRoots } from '../daemon/roots.ts'
-import { DeviceError } from './config.ts'
+import { loadBrowseRoots } from './roots.ts'
+import { DeviceError } from './errors.ts'
 
 export async function readBrowseRootsPage(dataDirectory: string, cursor?: string): Promise<BrowseRootsPage> {
   if (cursor !== undefined && !Schema.is(BrowseRootsCursor)(cursor))

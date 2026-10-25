@@ -13,7 +13,7 @@ import {
   type InputPreparation,
   type ThreadAgent,
 } from '../../worker/agent.ts'
-import { authorizeDirectory } from '../../daemon/roots.ts'
+import { authorizeDirectory } from '../../devices/roots.ts'
 import { readProjectExec } from '../../devices/config.ts'
 import { acquireProcessLock } from '../../platform/lock.ts'
 import { ensurePrivateDirectory, writePrivateFileAtomic } from '../../platform/private.ts'

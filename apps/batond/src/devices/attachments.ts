@@ -1,6 +1,6 @@
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import type { Json } from 'effect/Schema'
-import { loadBrowseRoots } from '../daemon/roots.ts'
+import { loadBrowseRoots } from './roots.ts'
 import { inside, openAuthorized } from './files.ts'
 import { repositoryOrigin } from './scan.ts'
 import { lstat } from 'node:fs/promises'

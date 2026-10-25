@@ -4,7 +4,7 @@ import type { NodeIdentity } from '@baton/protocol'
 import { runDaemonCLI } from './cli.ts'
 import { runDaemon } from './daemon.ts'
 import { loadIdentity } from './identity.ts'
-import { initializeBrowseRoots } from './roots.ts'
+import { initializeBrowseRoots } from '../devices/roots.ts'
 
 vi.mock('./daemon.ts', () => ({ runDaemon: vi.fn(() => Effect.void) }))
 vi.mock('./identity.ts', () => ({
@@ -13,7 +13,7 @@ vi.mock('./identity.ts', () => ({
   loadIdentity: vi.fn(),
   registerNode: vi.fn(),
 }))
-vi.mock('./roots.ts', () => ({ initializeBrowseRoots: vi.fn() }))
+vi.mock('../devices/roots.ts', () => ({ initializeBrowseRoots: vi.fn() }))
 
 const identity: NodeIdentity = {
   node_id: '729f92e9-e68c-4a30-817a-0adb2da87b51',

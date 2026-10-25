@@ -92,7 +92,7 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
   }
   if (action === 'files' || action === 'project-exec') {
     const { runDeviceCLI } = await import('./devices/cli.ts')
-    await runDeviceCLI(action, args)
+    await runDeviceCLI(action, args, join(homedir(), '.baton-ts'))
     return
   }
   if (action === 'login' || action === 'subscriptions') {

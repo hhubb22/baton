@@ -12,7 +12,7 @@ import {
   type ThreadCommandResult,
   type WorkerIPCMessage,
 } from '@baton/protocol'
-import { authorizeDirectory } from './roots.ts'
+import { authorizeDirectory } from '../devices/roots.ts'
 import { workerPaths } from './paths.ts'
 import { contentHash, type NodeLedger, type NodeCommand } from './ledger.ts'
 import { DaemonStorageFailure, ledgerPromise as io } from './storage.ts'

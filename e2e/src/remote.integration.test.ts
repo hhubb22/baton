@@ -18,7 +18,7 @@ import * as Nodes from '@baton/server/nodes'
 import { registerNode } from '@baton/batond/daemon/identity'
 import { runDaemon } from '@baton/batond/daemon/daemon'
 import { connectWebSocket } from '@baton/batond/daemon/transport'
-import { initializeBrowseRoots } from '@baton/batond/daemon/roots'
+import { initializeBrowseRoots } from '@baton/batond/devices/roots'
 import { LocalWorkerHost } from '@baton/batond/daemon/host'
 
 test('HTTP → TS center → batond → independent Worker survives reconnects without resending input', async () => {

@@ -4,9 +4,9 @@ import { lstat, open, opendir, realpath, type FileHandle } from 'node:fs/promise
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { FileRequest, type FileResult } from '@baton/protocol'
 import { Schema } from 'effect'
-import { loadBrowseRoots, type BrowseRoot } from '../daemon/roots.ts'
+import { loadBrowseRoots, type BrowseRoot } from './roots.ts'
 import { hasCode } from '../platform/errors.ts'
-import { containsControl, DeviceError } from './config.ts'
+import { containsControl, DeviceError } from './errors.ts'
 import { readBrowseRootsPage } from './roots-page.ts'
 
 export const inside = (root: string, path: string): boolean => {

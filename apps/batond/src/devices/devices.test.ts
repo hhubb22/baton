@@ -1,12 +1,11 @@
 import { randomUUID } from 'node:crypto'
-import { rename, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { rename, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vite-plus/test'
 import type { SubscriptionLoginResponse } from '@baton/protocol'
 import { ensurePrivateDirectory, readPrivateFile } from '../platform/private.ts'
 import { makePrivateTempDirectory } from '../testing/private.ts'
 import { acquireProcessLock } from '../platform/lock.ts'
-import { loadBrowseRoots } from '../daemon/roots.ts'
 import {
   browseFiles,
   makeDeviceService,
@@ -38,28 +37,6 @@ const request = (root_id?: string, path?: string) => ({
   ...(path ? { path } : {}),
 })
 
-it('serializes canonical-root add/remove and preserves an explicitly empty configuration', async () => {
-  const data = await directory(),
-    root = await directory(),
-    second = await directory()
-  const alias = join(await directory(), 'alias')
-  await symlink(root, alias, process.platform === 'win32' ? 'junction' : 'dir')
-  await Promise.all([
-    updateBrowseRoots(data, 'add', root),
-    updateBrowseRoots(data, 'add', alias),
-    updateBrowseRoots(data, 'add', second),
-  ])
-  const roots = await loadBrowseRoots(data)
-  expect(roots).toHaveLength(2)
-  expect(new Set(roots.map((root) => root.path))).toEqual(new Set([root, second]))
-  await Promise.all([updateBrowseRoots(data, 'remove', alias), updateBrowseRoots(data, 'remove', alias)])
-  expect(await loadBrowseRoots(data)).toHaveLength(1)
-  await updateBrowseRoots(data, 'remove', roots.find((entry) => entry.path === second)!.id)
-  expect(await loadBrowseRoots(data)).toEqual([])
-  // Windows 的私有文件由父目录 ACL 保护，mode 不表示 DACL。
-  if (process.platform !== 'win32') expect((await stat(join(data, 'browse-roots.json'))).mode & 0o777).toBe(0o600)
-})
-
 it('keeps shell configuration under concurrent toggles and fails closed on invalid files or held locks', async () => {
   const data = await directory()
   expect(await readProjectExec(data)).toMatchObject({ enabled: false })
@@ -87,7 +64,7 @@ describe('bounded authorized file previews', () => {
     await writeFile(join(root, 'nested/log.txt'), 'permitted log')
     await symlink(join(root, 'nested'), join(root, 'inside-link'), process.platform === 'win32' ? 'junction' : 'dir')
     await symlink(outside, join(root, 'escape'), process.platform === 'win32' ? 'junction' : 'dir')
-    const [registered] = await updateBrowseRoots(data, 'add', root)
+    const [registered] = await updateBrowseRoots(data, { action: 'add', path: root })
     expect(await browseFiles(data, request(registered!.id, 'inside-link/log.txt'))).toMatchObject({
       ok: true,
       kind: 'file',
@@ -126,7 +103,7 @@ describe('bounded authorized file previews', () => {
   it('pages directory entries, preserves UTF-8 truncation and rejects images and special files', async () => {
     const data = await directory(),
       root = await directory()
-    const [registered] = await updateBrowseRoots(data, 'add', root)
+    const [registered] = await updateBrowseRoots(data, { action: 'add', path: root })
     await Promise.all(
       Array.from({ length: 205 }, (_, i) => writeFile(join(root, `item-${String(i).padStart(3, '0')}`), 'x')),
     )
@@ -159,7 +136,7 @@ it('scans bounded local Git metadata and removes credentials from origins', asyn
   const data = await directory(),
     root = await directory(),
     outside = await directory()
-  await updateBrowseRoots(data, 'add', root)
+  await updateBrowseRoots(data, { action: 'add', path: root })
   await ensurePrivateDirectory(join(root, '.git'))
   await writeFile(
     join(root, '.git/config'),
@@ -186,7 +163,7 @@ it('scans bounded local Git metadata and removes credentials from origins', asyn
 it('confirms persisted device settings and reports unavailable login without fabricated runtime', async () => {
   const data = await directory(),
     root = await directory()
-  await updateBrowseRoots(data, 'add', root)
+  await updateBrowseRoots(data, { action: 'add', path: root })
   let changes = 0
   const service = await makeDeviceService({
     dataDirectory: data,
@@ -215,7 +192,7 @@ it('confirms persisted device settings and reports unavailable login without fab
 it('uses local Runtime processes for concurrent same-provider login, cancellation and report refresh', async () => {
   const data = await directory(),
     root = await directory()
-  await updateBrowseRoots(data, 'add', root)
+  await updateBrowseRoots(data, { action: 'add', path: root })
   const watchdog = process.platform === 'win32' ? undefined : await startProcessWatchdog(defaultWatchdogCommand())
   if (watchdog) services.push(watchdog)
   const runner = new RuntimeRunner(

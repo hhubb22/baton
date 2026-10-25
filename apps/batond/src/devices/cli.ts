@@ -1,7 +1,7 @@
 import { parseArgs } from 'node:util'
-import { defaultDataDirectory, isMissing } from '../daemon/identity.ts'
-import { loadBrowseRoots } from '../daemon/roots.ts'
-import { defaultProjectShell, updateBrowseRoots, writeProjectExec } from './config.ts'
+import { hasCode } from '../platform/errors.ts'
+import { loadBrowseRoots, updateBrowseRoots } from './roots.ts'
+import { defaultProjectShell, writeProjectExec } from './config.ts'
 
 const projectExecNotice =
   '开启后，Project Agent 可以执行任意命令，以本设备用户身份运行。Baton 不提供沙箱；登记目录只限制启动位置，命令仍可访问目录之外的文件。任务结果或仓库内容中的恶意指令可能诱导执行任意命令。每条命令和输出都会保存到对话。只在信任 Project Agent 的设备上开启。'
@@ -10,6 +10,7 @@ const projectExecNotice =
 export async function runDeviceCLI(
   command: 'files' | 'project-exec',
   args: string[],
+  dataDirectory: string,
   output: (text: string) => void = console.log,
 ): Promise<void> {
   if (command === 'files') {
@@ -18,7 +19,7 @@ export async function runDeviceCLI(
       args: flags,
       allowPositionals: true,
       options: {
-        'data-dir': { type: 'string', default: defaultDataDirectory() },
+        'data-dir': { type: 'string', default: dataDirectory },
         id: { type: 'string' },
         path: { type: 'string' },
       },
@@ -28,7 +29,7 @@ export async function runDeviceCLI(
     const directory = values['data-dir']!
     if (action === 'list' && !values.id && !values.path) {
       const roots = await loadBrowseRoots(directory).catch((error) => {
-        if (isMissing(error)) return []
+        if (hasCode(error, 'ENOENT')) return []
         throw error
       })
       if (!roots.length) output('还没有浏览目录')
@@ -36,12 +37,12 @@ export async function runDeviceCLI(
       return
     }
     if (action === 'add' && values.id && values.path) {
-      await updateBrowseRoots(directory, 'add', values.path, values.id)
+      await updateBrowseRoots(directory, { action: 'add', path: values.path, id: values.id })
       output(`已登记浏览目录 ${values.id}`)
       return
     }
     if (action === 'remove' && values.id && !values.path) {
-      await updateBrowseRoots(directory, 'remove', values.id)
+      await updateBrowseRoots(directory, { action: 'remove', path: values.id })
       output(`已移除浏览目录 ${values.id}`)
       return
     }
@@ -51,7 +52,7 @@ export async function runDeviceCLI(
     args,
     allowPositionals: true,
     options: {
-      'data-dir': { type: 'string', default: defaultDataDirectory() },
+      'data-dir': { type: 'string', default: dataDirectory },
       shell: { type: 'string', default: defaultProjectShell() },
       enabled: { type: 'string' },
     },

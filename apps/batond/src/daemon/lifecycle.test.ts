@@ -1,14 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import { rm, symlink, stat, realpath } from 'node:fs/promises'
-import { homedir } from 'node:os'
+import { rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Effect } from 'effect'
 import { afterEach, describe, expect, it } from 'vite-plus/test'
 import type { NodeIdentity, ThreadReport, WorkerOpen } from '@baton/protocol'
-import { ensurePrivateDirectory, readPrivateFile, writePrivateFileAtomic } from '../platform/private.ts'
+import { readPrivateFile, writePrivateFileAtomic } from '../platform/private.ts'
 import { makePrivateTempDirectory } from '../testing/private.ts'
 import { registerNode, loadIdentity, coordinatorURL, relayURL } from './identity.ts'
-import { authorizeDirectory, initializeBrowseRoots, loadBrowseRoots } from './roots.ts'
 import { contentHash, makeNodeLedger } from './ledger.ts'
 import { reconnectDelay } from './transport.ts'
 import { runDaemonCLI } from './cli.ts'
@@ -137,7 +135,7 @@ describe('node.db durable handoff', () => {
   })
 })
 
-describe('private registration and directory authorization', () => {
+describe('private registration', () => {
   it('saves the issued credential and canonical coordinator once without replacing an identity', async () => {
     const path = await directory(),
       tokenFile = join(path, 'enrollment')
@@ -163,25 +161,6 @@ describe('private registration and directory authorization', () => {
     await expect(registerNode(options)).rejects.toThrow('节点身份已存在')
     expect(calls).toBe(1)
     expect((await readPrivateFile(join(path, 'identity.json'))).toString()).not.toContain('offline-enrollment')
-  })
-
-  it('preserves empty roots, adds an explicit workspace and rejects symlink escapes', async () => {
-    const path = await directory(),
-      root = await directory(),
-      outside = await directory()
-    await writePrivateFileAtomic(join(path, 'browse-roots.json'), '{"roots":[]}')
-    expect(await initializeBrowseRoots(path)).toEqual([])
-    await expect(authorizeDirectory(path, homedir())).rejects.toThrow('授权目录')
-    const roots = await initializeBrowseRoots(path, root)
-    expect(roots).toHaveLength(1)
-    expect(await initializeBrowseRoots(path, root)).toEqual(roots)
-    await ensurePrivateDirectory(join(root, 'child'))
-    await symlink(outside, join(root, 'escape'), process.platform === 'win32' ? 'junction' : 'dir')
-    await expect(authorizeDirectory(path, join(root, 'escape'))).rejects.toThrow('授权目录')
-    await expect(authorizeDirectory(path, root)).resolves.toBe(await realpath(root))
-    const absent = await directory()
-    expect(await initializeBrowseRoots(absent)).toEqual([{ id: 'home', path: await realpath(homedir()) }])
-    expect(await loadBrowseRoots(absent)).toHaveLength(1)
   })
 
   it('rejects secret CLI arguments without echoing their values', async () => {

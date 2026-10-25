@@ -2,7 +2,7 @@
 
 Shell 只用于 Project 的 `nodes.exec`。中心验证工具调用来源，Worker open 配置携带 `project_id`、`origin_conversation_id`、`origin_tool_call_id`，设备和 Worker 都要求三项齐全。员工创建和 `threads.create` 工具的 shell 禁令由中心准入执行。
 
-`makeShellAgentFactory({dataDirectory,watchdog,records})` 接入与其他 Agent 相同的 ThreadAgent 和 Worker。`dataDirectory` 由本机 Worker 启动参数注入；远端的 shell、目录权限和命令执行开关不能代替本地配置。打开和实际发送前都重新读取 `devices/config.ts` 的 `readProjectExec`，并用 `daemon/roots.ts` 解析真实目录、检查授权根。shell 路径使用本机 `project-exec.json`，命令以设备运行用户的权限执行。
+`makeShellAgentFactory({dataDirectory,watchdog,records})` 接入与其他 Agent 相同的 ThreadAgent 和 Worker。`dataDirectory` 由本机 Worker 启动参数注入；远端的 shell、目录权限和命令执行开关不能代替本地配置。打开和实际发送前都重新读取 `devices/config.ts` 的 `readProjectExec`，并用 `devices/roots.ts` 解析真实目录、检查授权根。shell 路径使用本机 `project-exec.json`，命令以设备运行用户的权限执行。
 
 `execution_timeout_seconds` 由 Worker 的执行计时器处理，计入睡眠。`nodes.exec` 默认 7200 秒；可接受范围沿用现有 Thread 的 1～2147483647 秒。工具的 `wait_seconds` 与命令执行时限分别处理，等待结束不会停止命令。
 

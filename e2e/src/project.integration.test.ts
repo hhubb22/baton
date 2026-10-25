@@ -17,7 +17,7 @@ import * as Nodes from '@baton/server/nodes'
 import { startServer } from '@baton/server/server'
 import { openTestDatabase } from '@baton/server/testing/database'
 import { registerNode } from '@baton/batond/daemon/identity'
-import { initializeBrowseRoots } from '@baton/batond/daemon/roots'
+import { initializeBrowseRoots } from '@baton/batond/devices/roots'
 import { LocalWorkerHost } from '@baton/batond/daemon/host'
 import { runDaemon } from '@baton/batond/daemon/daemon'
 

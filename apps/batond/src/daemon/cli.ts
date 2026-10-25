@@ -2,7 +2,7 @@ import { parseArgs } from 'node:util'
 import { Effect } from 'effect'
 import { telemetryLayer } from '@baton/telemetry'
 import { defaultDataDirectory, isMissing, loadIdentity, registerNode } from './identity.ts'
-import { initializeBrowseRoots } from './roots.ts'
+import { initializeBrowseRoots } from '../devices/roots.ts'
 import { runDaemon } from './daemon.ts'
 
 export async function runDaemonCLI(action: 'up' | 'register' | 'run', args: string[]): Promise<void> {

@@ -3,7 +3,7 @@ import { homedir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ProcessCommand } from '../platform/process.ts'
-import { isMissing } from '../daemon/identity.ts'
+import { hasCode } from '../platform/errors.ts'
 
 /** 只记录文件元数据；凭据内容不进入报告缓存。 */
 export async function probeFingerprint(command: ProcessCommand): Promise<string | undefined> {
@@ -12,7 +12,7 @@ export async function probeFingerprint(command: ProcessCommand): Promise<string 
       const info = await (follow ? stat(path) : lstat(path))
       return [info.dev, info.ino, info.mode, info.uid, info.size, info.mtimeMs, info.ctimeMs]
     } catch (error) {
-      if (isMissing(error)) return 'missing'
+      if (hasCode(error, 'ENOENT')) return 'missing'
       throw error
     }
   }
@@ -22,7 +22,7 @@ export async function probeFingerprint(command: ProcessCommand): Promise<string 
       process.env.BATON_PROJECT_RUNTIME_DATA_DIR ??
       join(homedir(), '.baton', 'project-runtime')
     const files = await readdir(directory).catch((error: unknown) => {
-      if (isMissing(error)) return []
+      if (hasCode(error, 'ENOENT')) return []
       throw error
     })
     const paths = [

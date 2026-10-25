@@ -16,13 +16,16 @@ import {
 } from '@baton/protocol'
 import { Schema } from 'effect'
 import { ensurePrivateDirectory } from '../platform/private.ts'
-import { DeviceError, defaultProjectShell, readProjectExec, setProjectExec, updateBrowseRoots } from './config.ts'
+import { defaultProjectShell, readProjectExec, setProjectExec } from './config.ts'
+import { DeviceError } from './errors.ts'
+import { updateBrowseRoots } from './roots.ts'
 import { boundRuntimeReport } from './report.ts'
 import { browseFiles } from './files.ts'
 import { scanRuntimeRoots } from './scan.ts'
 import { readBrowseRootsPage } from './roots-page.ts'
 
 export * from './config.ts'
+export { updateBrowseRoots } from './roots.ts'
 export { boundRuntimeReport } from './report.ts'
 export { parseThreadAttachments } from './attachments.ts'
 export { runDeviceCLI } from './cli.ts'
@@ -115,7 +118,7 @@ export async function makeDeviceService(options: DeviceServiceOptions): Promise<
         }
         if (body.type === 'node.browse_roots_set') {
           const req = decodeRequest(BrowseRootsRequest, body)
-          const roots = await updateBrowseRoots(options.dataDirectory, req.action, req.path)
+          const roots = await updateBrowseRoots(options.dataDirectory, { action: req.action, path: req.path })
           const scan = await scanRuntimeRoots(options.dataDirectory, combined)
           const report = boundRuntimeReport(
             {

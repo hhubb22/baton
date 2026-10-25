@@ -9,7 +9,7 @@ pnpm --filter @baton/batond dev run
 
 所有命令支持 `--data-dir`，默认 `~/.baton-ts`。注册凭据来自 `BATON_ENROLLMENT_TOKEN` 或 `--enrollment-file` 指定的私有文件。`--ca-file` 设置额外的 TLS 信任根；TLS 验证始终启用。连接地址默认从身份文件中的 HTTPS 中心地址推导，也可由 `run --relay wss://主机/v1/node` 指定。CLI 只打印公开身份摘要。
 
-私有目录中的 `identity.json` 保存中心签发的 JWT；`browse-roots.json` 使用 `{ "roots": [{ "id": "home", "path": "/真实路径" }] }`。仅配置文件不存在时登记用户主目录，已有空列表保留。`up --workspace` 按真实路径幂等添加目录。open、message 和 resume 下发前复核工作目录的真实路径与授权根；stop、withdraw 使用已登记的 Thread 身份与代次，撤销授权或删除工作目录后仍可停止和撤回。目录和文件预览由 `devices/` 提供，使用同一授权根；目录符号链接解析后须仍在该根内，文件预览保留字节上限与分页信息。
+私有目录中的 `identity.json` 保存中心签发的 JWT；授权目录由 [`devices/roots.ts`](../devices/roots.ts) 统一读写和检查，配置格式、数量上限与加锁规则见 [设备管理与文件访问](../devices/README.md)。仅配置文件不存在时登记用户主目录，已有空列表保留。`up --workspace` 按真实路径幂等添加目录。open、message 和 resume 下发前复核工作目录的真实路径与授权根；stop、withdraw 使用已登记的 Thread 身份与代次，撤销授权或删除工作目录后仍可停止和撤回。目录和文件预览由 `devices/` 提供，使用同一授权根；目录符号链接解析后须仍在该根内，文件预览保留字节上限与分页信息。
 
 每个数据目录由进程锁保证只有一个 daemon。Worker 使用独立进程锁和账本，daemon 退出保留 Worker。启动和周期采集都会核查已登记 Worker，先通过认证 IPC 连接存活进程；进程不可达且没有活动进程锁时，才检查原 SQLite 账本并恢复 Worker。`node.db` 分别保存启动尝试和 `startup_phase`：新配置为 `awaiting_open`；daemon 或本地 IPC 在交付 open 前先提交 `open_attempted`，收到绑定身份的状态、回执或报告也保留该事实。仍为 `awaiting_open`、账本缺失或经检查为空且没有命令、消息、进程及报告记录时，可重试启动 Worker，并继续使用原 command ID、配置及代次。已经可能交付 open 后，账本缺失或为空，以及任意阶段的账本损坏，都会保存并上报 `thread.unknown` 和 `history_unavailable:true`，阻止启动空 Worker。历史缺失不作为 Agent 已停止的证据，网页保持未知结果。已接收的命令由原 Worker 继续执行，未收到持久接收回执的命令使用原 command ID 查询或重试。
 
@@ -34,4 +34,4 @@ Project manager 在 WSS 连接循环外构造，连接同步后绑定当前 RPC 
 
 运行方使用 `Effect.runPromise(Effect.scoped(runDaemon(options)), { signal })` 管理退出。`DaemonServices` 通过 Effect Context 提供 Host、传输与探测实现；连接、后台任务、SQLite 和进程锁由 Scope 管理。
 
-离线测试注入本地 WebSocket 传输、能力探测和 Worker Host 替身。测试覆盖持久接收、报告先落盘再确认、回执丢失重连、存活 Worker 重发现、报告去重与缺口重放、空授权列表、符号链接越界和独占锁，不调用在线模型或外部 API。
+离线测试注入本地 WebSocket 传输、能力探测和 Worker Host 替身。测试覆盖持久接收、报告先落盘再确认、回执丢失重连、存活 Worker 重发现、报告去重与缺口重放、目录授权拒绝和独占锁，不调用在线模型或外部 API。

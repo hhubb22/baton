@@ -3,7 +3,7 @@ import { readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/prom
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vite-plus/test'
 import type { FileRequest, FileResult } from '@baton/protocol'
-import { updateBrowseRoots } from './config.ts'
+import { updateBrowseRoots } from './roots.ts'
 import { browseFiles, relativePath, withAuthorizedRead } from './files.ts'
 import { ensurePrivateDirectory } from '../platform/private.ts'
 import { makePrivateTempDirectory } from '../testing/private.ts'
@@ -20,7 +20,7 @@ afterEach(async () => {
 async function setup() {
   const data = await directory()
   const root = await directory()
-  const [registered] = await updateBrowseRoots(data, 'add', root)
+  const [registered] = await updateBrowseRoots(data, { action: 'add', path: root })
   if (!registered) throw new Error('missing root')
   const request = (query: Partial<FileRequest> = {}): FileRequest => ({
     type: 'files.browse',
