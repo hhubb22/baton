@@ -150,6 +150,24 @@ Windows 第一版按账本保存的 PID 与创建时间核对身份，再用 `ta
 
 附件不复制文件内容，中心只存引用（R-18）。
 
+### 过程记录
+
+过程记录（R-09）来自 t3code 的 `OrchestrationV2TurnItem`。agent-host 的 driver 订阅 `turn_item.updated`，只处理当前 run 的项。adapter 事件携带完整输出；`outputOmitted` 只出现在 t3code 服务端的 wire 投影中，Baton 不经过那一层。
+
+| 环节 | 规则 |
+|---|---|
+| host 上报 | 某项第一次进入终态（completed、failed、cancelled、interrupted）时，发出 host `item` 事件，之后同一项的更新忽略。driver 保留本轮尚未终态的项的最新版本，`turn.terminal` 或停止时，在 `end` 之前按 `ordinal` 补发，状态保留最后一次看到的值。`assistant_message`、`user_message` 已由回复和消息保存，不作为过程项；用户提问和 MCP elicitation 仍形成问题事件，进入终态时也作为过程项上报；其余类型原样上报。`item` 属于控制事件，进入有界控制队列，不丢弃 |
+| Worker 截断 | 把项编码为 JSON。超过 192 KiB 时，先将全文写入 `full-output/`（与回复全文共用存储和保留期），再反复把当前最长的字符串字段截成首尾两段，直到编码后不超过 192 KiB；记录 `truncated`、原字节数和完整输出引用 |
+| Worker 账本 | 截断结果与 outbox `turn.item` 事件在同一事务提交。同一 Turn 的 `turn.item` 都在 `turn.ended` 之前（Worker 账本不变量 3） |
+| shell | 命令结束时，在写回复之前生成一个 `command_execution` 项：`id` 为 `shell:<worker_turn_seq>`，`input` 为命令，`output` 为合并输出，附 `exitCode`；截断规则相同，全文引用沿用 shell 已保存的完整输出 |
+| token 用量 | driver 记下本轮最后一次 `provider_turn.updated` 的 `tokenUsage`，随 `end` 事件交给 Worker，再由 `turn.ended` 报告的 `token_usage` 字段原样送到中心 |
+
+`turn.item` 报告携带 `worker_turn_seq` 和 `item:{id, type, status, ordinal, parent_id?, title?, started_at?, completed_at?, data}`。`data` 是上游 TurnItem 的 JSON，shell 只填同名字段的子集；另附 `truncated`、`original_bytes`，`metadata.full_output` 保存完整输出引用。中心不深度解码 `data`，它的结构跟随 submodule 固定的上游版本，实验室阶段不做跨版本兼容（R-25）。
+
+中心把每一项写入 `thread_turn_items`，以 `(employee_id, thread_id, worker_turn_seq, item_id)` 为主键，冲突时保留首次写入的版本，报告照常 ACK。`turn.item` 不写 Project Agent 输入队列，也不进入 `thread_events` 时间线；时间线的 Turn 结束事件附带该轮的过程项数量，网页据此显示过程记录这一行。
+
+浏览器 trace 接口和 Project Agent 的 `threads.trace` 读取同一份数据：按 `(ordinal, worker_seq)` 排序，每页最多 50 项、1 MiB，用 `next_cursor` 续读。被截断步骤的全文经现有 `full_output` 路径从设备读取。
+
 ## 中心数据
 
 ### 表
@@ -160,8 +178,9 @@ Windows 第一版按账本保存的 PID 与创建时间核对身份，再用 `ta
 | `nodes`、`node_credentials`、`node_enrollments`、`employee_settings`、`node_presence`、`node_revocations`、`node_runtime_reports` | 设备身份、凭据、默认设备、在线状态、吊销、能力报告 |
 | `threads` | 一个 Thread：员工、可选 Project、设备、Agent 类型、当前模型与后续消息默认模型 `next_model`、工作目录、执行时限、状态与原因、创建者（员工或 Project Agent 及工具调用）、`client_thread_id`、`opened_at`、`archived_at`、版本 |
 | `thread_messages` | 消息：Thread、`client_message_id`、发送方、方式、可选模型、正文（≤ 64 KiB）、状态（accepted / queued / sent / withdrawn / unknown）、状态原因 `status_reason`（≤ 4 KiB）、所属 Turn |
-| `thread_turns` | Turn：Thread、`worker_turn_seq`、发起方（员工或 Project Agent）、使用的模型、开始与结束时间、结束原因 |
+| `thread_turns` | Turn：Thread、`worker_turn_seq`、发起方（员工或 Project Agent）、使用的模型、开始与结束时间、结束原因、上游原样的 `token_usage` JSON |
 | `thread_replies` | 回复：Thread、Turn、`worker_seq`、正文、截断标记与原字节数、附件 JSON、元数据（shell 的退出码） |
+| `thread_turn_items` | 过程项：Thread、Turn、`item_id`、`worker_seq`、`ordinal`、父项、类型、状态、标题、开始与结束时间、`data` JSON（编码后 ≤ 192 KiB）、截断标记与原字节数、完整输出引用 |
 | `thread_events` | 只追加的审计事件：新建、消息接受、停止请求、归档、状态变化，附操作者与时间（R-23） |
 | `thread_outbox` | open、message、withdraw、stop、resume、settings、answer 的下行命令意图；下一次尝试时间、尝试次数、接收确认与完成结果 |
 | Project 相关表 | 见 Project Agent TECH 与 Agent Inbox TECH |
@@ -198,12 +217,13 @@ Worker 的报告类型：
 | `message.queued` / `message.sent` / `message.withdrawn` / `message.unknown` | 更新消息状态、状态原因与所属 Turn；模型选择失败的撤回不关联 Turn，Thread → `idle` |
 | `turn.started` | 插入 `thread_turns`，Thread → `running` |
 | `reply` | 插入 `thread_replies` |
-| `turn.ended` | 写结束时间与原因；Worker 队列为空时 Thread → `idle` |
+| `turn.item` | 插入 `thread_turn_items`，主键冲突时保留原记录 |
+| `turn.ended` | 写结束时间、原因与 `token_usage`；Worker 队列为空时 Thread → `idle` |
 | `thread.stopped` / `thread.unknown` | → `stopped` / `unknown`，附原因 |
 | `command.completed` | 按命令身份与存储代次保存执行结果，与接收 ACK 分开 |
 | `question.pending` / `question.resolved` | 保存问题或关闭对应请求，关联本轮输入与执行身份 |
 
-每个报告带 `event_id` 和 Worker 序号。中心在一个事务里保存报告、更新状态，并按消息或 Turn 的归属写入 Project Agent 输入队列（Project Agent TECH 第 9 节），提交后返回 ACK；Worker 收到 ACK 才确认本地 outbox。重复报告按 `event_id` 返回原 ACK。中心按 Worker 序号处理，序号跳跃时拒绝并要求补报，保证 `turn.ended` 不会早于这一轮的回复入库。
+每个报告带 `event_id` 和 Worker 序号。中心在一个事务里保存报告、更新状态，并按消息或 Turn 的归属写入 Project Agent 输入队列（Project Agent TECH 第 9 节），提交后返回 ACK；Worker 收到 ACK 才确认本地 outbox。重复报告按 `event_id` 返回原 ACK。中心按 Worker 序号处理，序号跳跃时拒绝并要求补报，保证 `turn.ended` 不会早于这一轮的回复和过程项入库。
 
 原 Worker 账本缺失、损坏或结构不匹配时，batond 先补送节点账本中尚未确认的 Worker 报告，再发送带 `history_unavailable:true` 的 `thread.unknown` 恢复报告。暂时无法读取时继续有界重试，保留原 Worker 的报告序列。中心在同一报告事务内，将已有活动 Turn 以 `agent_exited` 结束。仍为 accepted、尚未关联 Turn，且对应的全部 message 命令 `attempts=0`、没有接收回执的输入撤回并保留原文；其他 accepted/queued 输入改为 unknown。未完成命令按派发事实结束：`attempts=0` 且无接收回执为 cancelled，其余为 unknown。事务同时保存审计、对应 Project 输入及 Thread 状态。历史缺失本身不证明 Agent 已退出，不能设置停止确认或完成等待停止的归档；停止确认仍须有 Turn 终止或进程树回收证据。设备确认停止、没有活动 Turn 和 accepted/queued 输入后，允许保留历史 unknown 输入并归档，不重发历史命令。领取新的 open、resume 或 message 命令时，在递增派发次数的同一事务内废弃旧停止确认；新的恢复或回合开始报告也废弃旧确认，避免用上一次停止的证据归档当前执行。重复恢复报告沿用原 ACK；普通状态报告仍须在 Turn 结束后提交。
 
@@ -244,7 +264,7 @@ Turn 边界与回复保存在上述消息状态和报告中，没有独立的 tu
 
 1. 一条消息在 `intent` 之后不再自动发出第二次。
 2. 同一时刻最多一个 Turn 处于开始而未结束的状态。
-3. `turn.ended` 的 outbox 事件在这一轮所有 `reply` 事件之后写入。
+3. `turn.ended` 的 outbox 事件在这一轮所有 `reply` 和 `turn.item` 事件之后写入。
 4. 回复与对应 outbox 事件在同一事务提交；提交状态不明时由 `packages/sqlite` 从独立连接读回确认。
 
 `Send` 明确返回模型选择失败时，消息确定未发出，Worker 将它记为 `withdrawn`，清除预留的 Turn 序号，把原因保存到该消息的 `status_reason` 并通过 `message.withdrawn` 报告，不开启 Turn。原因摘要最多 4 KiB，替换无效 UTF-8 和 NUL，截断时保留完整字符并加省略号。Thread 保持 `idle`，保留 Agent 进程和当前模型，继续发送下一条排队消息。中心在同一事务保存消息原因；浏览器 Thread 详情和 Project Agent 的 `threads.get` 通过 `failed_messages` 读取这些失败消息。Project Agent 发起的失败消息另形成一条主动 `thread_message_failed` 输入，员工消息不写输入队列。无法确认消息是否发出的错误仍按发送意图恢复规则处理。Worker 在开始和结束报告中携带该 Turn 使用的模型，中心在 `turn.started` 时更新 Thread 当前模型。
@@ -279,7 +299,7 @@ Worker 的 Effect 接口为 `apps/batond/src/worker/agent.ts` 中的 `ThreadAgen
 | `send` | 提交 queue 或 steer 输入，返回原生接受证据 |
 | `sent` | 只读核对原生快照，不发送输入或启动执行会话 |
 | `answer` | 可选方法，将问题回答绑定到活动请求 |
-| `events`、`output` | 持久回复、回合终态、问题和不确定事件；独立的有界实时输出 |
+| `events`、`output` | 持久回复、过程项、回合终态（含 token 用量）、问题和不确定事件；独立的有界实时输出 |
 | `abort`、`close`、`reap` | 取消、关闭和进程树回收，取消响应本身不证明停止 |
 
 输入的 `id` 是 `client_message_id`。Worker 与 agent-host 通过 fork 的 `ProviderAdapterV2` 执行 Agent，具体映射见 [Agent 适配设计](../agent-adapters/TECH.md)。Pi、Codex、Cursor 开放 Thread 内逐轮换模型，Worker 在 intent 中保存每轮选择，host 同时传入 `startTurn.modelSelection` 和 `appThread.modelSelection`；省略模型时沿用最近确认提交的回合模型，首次使用创建配置。恢复从输入账本取得最近确认提交的模型，保留原生会话身份。Steer 沿用活动回合模型，不接受显式模型。Kiro 的 fork adapter 通过能力覆盖明确关闭会话内换模型，Thread 固定创建时的选择。Pi 的 `set_model` 明确拒绝和 Cursor SDK 明确拒绝模型时，输入持久撤回并继续队列；不能确认是否提交的错误按 unknown 恢复，不重发旧输入。
@@ -337,7 +357,7 @@ URL 相对 `/api/v1`。读取检查员工会话与资源归属，写入另检查
 | `POST /threads/{id}/archive` | 返回 202；有进行中的 Turn、待发消息或尚未确认停止的不确定状态时先发停止，设备确认后归档。停止已确认且无活动 Turn 或待发消息时，历史 unknown 输入保留并允许归档；空闲或已停止、无不确定输入与待发消息时直接归档 |
 | `GET /threads/{id}/history` | 从设备分页读取原生历史，见「历史读取与实时输出」 |
 | `GET /threads/{id}/output` | 默认经设备临时 RPC 读取实时输出；`action=full_output&output_id=...&storage_generation=...` 按可选字节游标读取设备保存的完整回复或 shell 输出，每页最多 12 KiB 原始字节，以 Base64 返回，详见「历史读取与实时输出」 |
-| `GET /threads/{id}/trace` | 必填 `worker_turn_seq`，返回 `{ok, code?, steps}`。shell 的步骤取自中心已保存的命令和文本输出，含 `kind:"command"`、`command`、`output`、可选 `truncated`；网页保留已有步骤和输出，在 `truncated:true` 的步骤旁显示截断提示，继续使用现有传输大小边界；无可用过程时返回 `ok:false, code:"trace_missing"`，指定 Turn 不存在返回 404 |
+| `GET /threads/{id}/trace` | 必填 `worker_turn_seq`，可选 `cursor`，返回 `{ok, code?, steps, next_cursor?}`，数据取自 `thread_turn_items`，不访问设备。每个步骤含 `item_id`、`type`、`status`、`ordinal`、`parent_id`、`title`、起止时间、`truncated`、`original_bytes`、可选 `full_output` 引用和上游 `data`；分页规则见「过程记录」。该 Turn 没有过程项时返回 `ok:false, code:"trace_missing"`，指定 Turn 不存在返回 404 |
 | `/events` | 浏览器 WebSocket，订阅 Thread 的实时输出与状态变化 |
 
 登录、默认设备、文件浏览和 Inbox 沿用各自接口；Project 创建、对话与记忆修订契约见 Project Agent TECH。Thread 使用独立的 Store 和协议；`/tasks*`、`/sessions*`、`/acceptances` 业务接口已移除。
@@ -431,11 +451,11 @@ TypeScript 的 `GET /nodes/{id}/files` 通过 `root_id`、`path` 浏览目录和
 
 本地员工账号由管理员创建，Argon2id 口令摘要，服务端登录会话；改密和重置注销既有会话。会话 Cookie 固定使用 Secure、HttpOnly、SameSite=Strict。`GET /me` 从当前会话令牌经固定域前缀隔离的 SHA-256 摘要派生稳定 CSRF token，并以 URL-safe Base64 返回；同一 Cookie 在页面刷新及 Coordinator 重启后得到相同 token，读取不续期或轮换会话。数据库仅保存会话令牌摘要与派生 token 的摘要，写请求用 `X-CSRF-Token` 校验。JSON 响应和日志不得暴露 Cookie 原值，也不以会话令牌或其存储摘要直接充当 CSRF token。注册凭据 10 分钟单次使用，节点凭据 30 天（D2）。
 
-中心记录默认长期保留，没有自动清理；回复正文已限长。设备上 Baton 保存的完整回复与 shell 输出默认保留 30 天，原生 Agent 历史由员工自己管理。设备账本与待补报数据设 1 GiB 预算，达到预警水位后拒绝新 Thread 和新消息，不删除未确认的报告（D4）。
+中心记录默认长期保留，没有自动清理；回复正文和过程项已限长，过程项随 Thread 保留。设备上 Baton 保存的完整回复与 shell 输出默认保留 30 天，原生 Agent 历史由员工自己管理。设备账本与待补报数据设 1 GiB 预算，达到预警水位后拒绝新 Thread 和新消息，不删除未确认的报告（D4）。
 
 ## 敏感数据
 
-设备密码、模型订阅凭据、节点私钥只存在设备上，POSIX 文件权限为当前用户 `0600`；Windows 第一版在数据目录上移除继承并校验当前用户 ACL，命名管道使用 Node 默认安全描述符与私有令牌认证，逐句柄 DACL 检查留待原生模块接入。节点凭据和注册凭据不进日志、URL 或命令行。中心不持久化实时输出和原生历史（R-22）。
+设备密码、模型订阅凭据、节点私钥只存在设备上，POSIX 文件权限为当前用户 `0600`；Windows 第一版在数据目录上移除继承并校验当前用户 ACL，命名管道使用 Node 默认安全描述符与私有令牌认证，逐句柄 DACL 检查留待原生模块接入。节点凭据和注册凭据不进日志、URL 或命令行。中心不持久化实时输出和原生历史（R-22）。过程项按原文存入 PostgreSQL，命令输出里可能带有密钥；读取时按员工和 Project 归属检查，Project Agent 读取时不脱敏。追踪导出只带 span 元数据，不导出过程项正文；向观测或分析平台导出过程数据的导出器必须先脱敏。
 
 ## 部署
 
@@ -459,12 +479,15 @@ TypeScript 的 `GET /nodes/{id}/files` 通过 `root_id`、`path` 浏览目录和
 | R-08 | 执行中排队 3 条、插入 1 条、撤回 1 条；Kiro 请求插入 | 排队顺序错误；撤回的消息被发出；Kiro 接受插入 | Worker 回放 |
 | R-08、R-13 | 排队 2 条后在 Turn 结束前、`intent` 后、适配器确认后分别杀 Worker | 任一消息发出两次或丢失；无法确认时没有进入 unknown | Worker 故障注入 |
 | R-09 | 一轮 3 条回复，中心在第 2 条后重启；超过 32 KiB 的回复 | 中心回复重复、缺失或乱序；`turn.ended` 早于回复入库；超长正文未截断 | Store + 假节点 |
+| R-09 | driver 回放：项先 running 后 completed、同一项重复终态、本轮结束时仍有 running 项；Worker 截断：一项超过 192 KiB，多个大字段 | 未终态项提前上报；同一项上报两次；补发项排在 `end` 之后；截断后编码超过 192 KiB 或缺少全文引用 | driver 与 Worker 单元测试 |
+| R-09、R-15 | 中心在第 2 个 `turn.item` 后重启并收到重复报告；序号跳跃；两名员工交叉请求 trace；一轮 120 项分页 | 过程项重复、缺失或乱序；`turn.ended` 早于过程项入库；跨员工或跨 Project 返回内容；分页漏项 | PostgreSQL 集成 |
+| R-09 | Codex、Cursor、Pi、Kiro 现有离线转录各跑一轮，shell 执行一条命令；之后让设备离线 | 中心缺少转录中的命令、文件修改或工具调用；`token_usage` 缺失（转录未提供的除外）；离线后 trace 不可读 | e2e |
 | R-09、R-14 | 执行时限 2 秒，Agent 不停；`Abort` 无法确认 | 没有 `turn.ended`；原因不是 timeout；无法确认时状态不是 unknown | Worker 回放 |
 | R-11、R-14 | Pi 执行 `sleep 600` 时停止，等待上限设为 2 秒；子进程再 fork 一个子进程 | 超过上限后 Agent 进程组仍有存活进程；Thread 不是 stopped；Worker 被一起结束 | Worker 进程测试，三类系统 |
 | R-10 | 设备离线后查看执行中的 Thread | 界面显示执行中但没有最后报告时间和离线标记 | Web 测试 |
 | R-11 | 在 Turn 开始前、执行中、刚结束时停止，各有 2 条排队消息 | 排队消息被发出；未确认就显示已停止 | Worker 回放 |
 | R-12 | Agent 进程退出后发消息；删除原生历史后发消息 | 恢复时 Thread ID 改变；历史缺失时新建了空会话 | Worker 回放 |
-| R-15、R-22 | 一轮结束后让设备离线，检索中心数据库与日志中的随机标记 | 回复不可见；原生历史或实时输出出现在中心 | 集成 |
+| R-15、R-22 | 一轮结束后让设备离线，检索中心数据库与日志中的随机标记 | 回复或过程项不可见；原生历史或实时输出出现在中心；过程项正文出现在日志或追踪导出中 | 集成 |
 | R-16 | 设备 A 持续输出，设备 B 同时收消息和停止 | 缓冲无界增长；跨设备命令延迟阈值在第一版之后确定与验证 | Gateway 本地流控测试；负载阈值为第一版之后 |
 | R-18 | 回复里写登记目录内路径、目录外路径、`commit <SHA>` | 目录外路径生成附件；commit 缺少仓库 | 单元测试 |
 | R-19、R-20 | 执行中重启 Coordinator、batond、Worker，短停 PostgreSQL | 消息重发；回复重复；同步前设备显示可用 | 进程测试 |

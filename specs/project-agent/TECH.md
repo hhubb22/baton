@@ -251,7 +251,8 @@ Project 标题或目标被修改后，新的系统提示词从下一次压缩起
 | `threads.archive` | 写入 | 归档一个 Thread | `threads.get` |
 | `threads.list` | 只读 | 列出本 Project 的 Thread，可按状态筛选 | 自身 |
 | `threads.get` | 只读 | 读取一个 Thread 的状态、当前 Turn 和待发消息 | 自身 |
-| `threads.read` | 只读 | 按 Turn 读取消息和回复正文 | 自身 |
+| `threads.read` | 只读 | 按 Turn 读取消息和回复正文，每个 Turn 附过程项数量 | 自身 |
+| `threads.trace` | 只读 | 按 `thread_id`、`worker_turn_seq` 和可选 `cursor` 读取一轮的过程项，与浏览器 trace 接口的数据和分页相同，不脱敏（Baton TECH「过程记录」） | 自身 |
 | `nodes.exec` | 写入 | 在开启了命令执行的节点上执行一条命令，参数见第 10 节 | `threads.read` |
 | `inbox.ask` | 写入 | 创建一个请用户处理的事项（Agent Inbox IB-01） | `inbox.list`、`inbox.get` |
 | `inbox.list` | 只读 | 列出本 Project 的事项及其状态 | 自身 |
