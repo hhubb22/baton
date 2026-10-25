@@ -133,7 +133,7 @@ export function createMockClient(
     listInbox: () => guarded(() => store.snapshot().inbox),
     readFile: (deviceId, path, continuation) => guarded(() => store.readFile(deviceId, path, continuation)),
     listFolders: (deviceId, path) => guarded(() => store.listFolders(deviceId, path)),
-    readTrace: (messageId) => guarded(() => store.readTrace(messageId)),
+    readTrace: (messageId, cursor) => guarded(() => store.readTrace(messageId, cursor)),
     readOutput: (threadId) => guarded(() => store.readOutput(threadId)),
     getOperation: (id) => guarded(() => store.operation(id)),
 

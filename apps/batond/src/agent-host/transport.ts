@@ -34,6 +34,7 @@ export interface AgentHostConnection {
   ) => Effect.Effect<Acceptance | undefined, AgentError>
   readonly answer?: (answer: ThreadAnswerInput) => Effect.Effect<void, AgentError>
   readonly events: Stream.Stream<HostEvent, AgentError>
+  readonly flushEvents: (id: string) => Effect.Effect<void, AgentError>
   readonly abort: Effect.Effect<void, AgentError>
   readonly close: Effect.Effect<void, AgentError>
   /** Closes transport without claiming that execution has stopped. */
@@ -162,6 +163,7 @@ export const connectAgentHost = (
         sent: (config: WorkerOpenConfig, message: AgentMessage, preparation: Preparation) =>
           call(client.sent({ config, message, preparation })).pipe(Effect.map((value) => value ?? undefined)),
         events: client.events().pipe(Stream.mapError((cause) => channelFailure ?? fail(cause))),
+        flushEvents: (id: string) => call(client.flushEvents({ id })),
         abort: call(client.abort()),
         close: call(client.close()).pipe(Effect.ensuring(disconnect)),
         disconnect,

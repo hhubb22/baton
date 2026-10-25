@@ -35,9 +35,14 @@ const getTurn = (t: P.Thread, seq: number | undefined) =>
     const sql = yield* SqlClient.SqlClient
     const rows = yield* sql<{
       value: P.ThreadTurn
-    }>`SELECT jsonb_strip_nulls(to_jsonb(v)-'employee_id') AS value FROM thread_turns v WHERE employee_id=${t.employee_id} AND thread_id=${t.id} AND worker_turn_seq=${seq || 0}`
+    }>`SELECT row_to_json(v) AS value FROM thread_turns v WHERE employee_id=${t.employee_id} AND thread_id=${t.id} AND worker_turn_seq=${seq || 0}`
     if (!rows.length) return yield* Effect.fail(failure())
-    return rows[0]!.value
+    return yield* decode(
+      P.ThreadTurn,
+      Object.fromEntries(
+        Object.entries(rows[0]!.value).filter(([key, value]) => value !== null || key === 'token_usage'),
+      ),
+    )
   })
 const finishArchive = (t: P.Thread) =>
   Effect.gen(function* () {
@@ -54,6 +59,15 @@ const finishArchive = (t: P.Thread) =>
       yield* audit(t, 'thread.archived', {}, request?.actor ?? 'employee', request?.actor_id ?? t.employee_id)
     }
   })
+const auditTurnEnded = Effect.fnUntraced(function* (t: P.Thread, r: P.ThreadReport) {
+  const sql = yield* SqlClient.SqlClient
+  const [count] = yield* sql<{
+    item_count: number
+  }>`SELECT count(*)::integer AS item_count FROM thread_turn_items WHERE employee_id=${t.employee_id} AND thread_id=${t.id} AND worker_turn_seq=${r.worker_turn_seq!}`
+  const { token_usage: _usage, ...event } = r
+  yield* audit(t, 'turn.ended', { ...event, item_count: count!.item_count }, 'device', t.node_id)
+})
+
 function boundedReply(content: string, max = 32768): string {
   const bytes = Buffer.from(content)
   if (bytes.length <= max) return content
@@ -183,11 +197,29 @@ const apply = (t: P.Thread, r: P.ThreadReport) =>
         )
         break
       }
+      case 'turn.item': {
+        if (!r.item) return yield* Effect.fail(failure('invalid_item', 422))
+        const turn = yield* getTurn(t, r.worker_turn_seq)
+        if (turn.ended_at) return yield* Effect.fail(failure())
+        const item = r.item
+        if (Buffer.byteLength(JSON.stringify(item)) > 192 * 1024)
+          return yield* Effect.fail(failure('invalid_item', 422))
+        const fullOutput =
+          r.metadata?.full_output === undefined
+            ? undefined
+            : yield* decode(P.FullOutputReference, r.metadata.full_output)
+        if (fullOutput && fullOutput.storage_generation !== t.storage_generation)
+          return yield* Effect.fail(failure('storage_generation_mismatch'))
+        yield* sql`INSERT INTO thread_turn_items(employee_id,thread_id,worker_turn_seq,item_id,worker_seq,ordinal,parent_id,type,status,title,started_at,completed_at,data,truncated,original_bytes,full_output)
+          VALUES(${t.employee_id},${t.id},${turn.worker_turn_seq},${item.id},${r.worker_seq},${item.ordinal},${item.parent_id ?? null},${item.type},${item.status},${item.title ?? null},${item.started_at ?? null}::timestamptz,${item.completed_at ?? null}::timestamptz,${JSON.stringify(item.data)}::json,${r.truncated!},${r.original_bytes!},${fullOutput === undefined ? null : JSON.stringify(fullOutput)}::json)
+          ON CONFLICT (employee_id,thread_id,worker_turn_seq,item_id) DO NOTHING`
+        break
+      }
       case 'turn.ended': {
         const turn = yield* getTurn(t, r.worker_turn_seq)
         if (turn.ended_at || !['completed', 'stopped', 'timeout', 'agent_exited', 'failed'].includes(r.reason || ''))
           return yield* Effect.fail(failure())
-        yield* sql`UPDATE thread_turns SET ended_at=clock_timestamp(),end_reason=${r.reason!},model=${r.model || turn.model} WHERE id=${turn.id}`
+        yield* sql`UPDATE thread_turns SET ended_at=clock_timestamp(),end_reason=${r.reason!},model=${r.model || turn.model},token_usage=${r.token_usage === undefined ? null : JSON.stringify(r.token_usage)}::json WHERE id=${turn.id}`
         if (t.stop_requested_at && ['stopped', 'timeout'].includes(r.reason!))
           yield* sql`UPDATE threads SET stop_confirmed_at=clock_timestamp() WHERE id=${t.id}`
         yield* status(t, t.agent_type === 'shell' ? 'stopped' : r.queue_empty ? 'idle' : 'running')
@@ -196,7 +228,21 @@ const apply = (t: P.Thread, r: P.ThreadReport) =>
       case 'thread.stopped':
       case 'thread.unknown': {
         if (r.history_unavailable) {
-          yield* sql`UPDATE thread_turns SET ended_at=clock_timestamp(),end_reason='agent_exited' WHERE thread_id=${t.id} AND ended_at IS NULL`
+          const ended = yield* sql<{
+            worker_turn_seq: number
+            model: string
+          }>`UPDATE thread_turns SET ended_at=clock_timestamp(),end_reason='agent_exited'
+            WHERE employee_id=${t.employee_id} AND thread_id=${t.id} AND ended_at IS NULL
+            RETURNING worker_turn_seq::float8 AS worker_turn_seq,model`
+          for (const turn of ended) {
+            yield* auditTurnEnded(t, {
+              ...r,
+              kind: 'turn.ended',
+              worker_turn_seq: turn.worker_turn_seq,
+              model: turn.model,
+              reason: 'agent_exited',
+            })
+          }
           yield* sql`UPDATE thread_messages m SET status='withdrawn',status_reason='history_unavailable_before_dispatch' WHERE thread_id=${t.id} AND status='accepted' AND worker_turn_seq IS NULL
           AND EXISTS(SELECT 1 FROM thread_outbox o WHERE o.thread_id=m.thread_id AND o.action='message' AND o.payload->>'client_message_id'=m.client_message_id)
           AND NOT EXISTS(SELECT 1 FROM thread_outbox o WHERE o.thread_id=m.thread_id AND o.action='message' AND o.payload->>'client_message_id'=m.client_message_id AND (o.attempts<>0 OR o.acked_at IS NOT NULL))`
@@ -282,10 +328,11 @@ export const processReport = (source: NodeSource, input: P.ThreadReport): DB<P.T
       )
         return yield* Effect.fail(failure('thread_archived'))
       yield* apply(t, r)
-      yield* notifyProjectThread(t, r)
+      if (r.kind !== 'turn.item') yield* notifyProjectThread(t, r)
       yield* finishArchive(t)
       yield* sql`UPDATE threads SET last_worker_seq=${r.worker_seq},last_reported_at=clock_timestamp(),last_activity_at=clock_timestamp(),version=version+1 WHERE id=${t.id}`
-      if (r.kind !== 'reply') yield* audit(t, r.kind, r, 'device', source.node_id)
+      if (r.kind === 'turn.ended') yield* auditTurnEnded(t, r)
+      else if (r.kind !== 'reply' && r.kind !== 'turn.item') yield* audit(t, r.kind, r, 'device', source.node_id)
       const savedAck: P.ThreadReportResult = { ...ack, ok: true }
       yield* sql`INSERT INTO thread_reports(employee_id,thread_id,event_id,worker_seq,payload_hash,ack) VALUES(${t.employee_id},${t.id},${r.event_id},${r.worker_seq},${hash},${JSON.stringify(savedAck)}::jsonb)`
       yield* revalidateNodeSource(source)

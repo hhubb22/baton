@@ -113,11 +113,23 @@ export const toolDefinitions = [
   },
   {
     name: 'threads.read',
-    description: '按 Turn 读取本 Project 的 Thread 消息和回复正文；续读时固定 through_turn。',
+    description:
+      '按 Turn 读取本 Project 的 Thread 消息、回复正文和过程项数量；续读时固定 through_turn，过程项用 threads.trace 读取。',
     parameters: obj({
       thread_id: str(),
       after_turn: Type.Optional(Type.Integer({ minimum: 0 })),
       through_turn: Type.Optional(Type.Integer({ minimum: 1 })),
+      ...page,
+    }),
+  },
+  {
+    name: 'threads.trace',
+    description:
+      '读取本 Project 的 Thread 一轮的过程记录，包括命令、文件修改和工具调用的原文；设备离线时仍可读取中心保存的内容。按 next_cursor 续页，单页较大时，将结果外层的 page_cursor 作为 cursor，配合 next_offset 读取剩余 JSON 片段；读完一页再用页内的 next_cursor 翻页并将 offset 归零。省略 cursor 从最新记录重新读取。',
+    parameters: obj({
+      thread_id: str(),
+      worker_turn_seq: Type.Integer({ minimum: 1 }),
+      cursor: opt(),
       ...page,
     }),
   },

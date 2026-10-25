@@ -15,7 +15,11 @@ export function resultBytes(value: unknown, callId = 'x'.repeat(128)) {
     }),
   )
 }
-export function projectToolJSONPage(value: unknown, options: { offset?: number; max_bytes?: number } = {}) {
+export function projectToolJSONPage(
+  value: unknown,
+  options: { offset?: number; max_bytes?: number } = {},
+  pagination: { page_cursor?: string } = {},
+) {
   const raw = Buffer.from(JSON.stringify(value))
   const offset = options.offset ?? 0
   if (offset > raw.length || (offset < raw.length && (raw[offset]! & 0xc0) === 0x80))
@@ -24,6 +28,7 @@ export function projectToolJSONPage(value: unknown, options: { offset?: number; 
   const make = () => {
     while (end > offset && end < raw.length && (raw[end]! & 0xc0) === 0x80) end--
     return {
+      ...pagination,
       encoding: 'json',
       text: raw.subarray(offset, end).toString(),
       offset,
@@ -37,7 +42,8 @@ export function projectToolJSONPage(value: unknown, options: { offset?: number; 
     end = offset + Math.floor((end - offset) * 0.75)
     out = make()
   }
-  if (end === offset && offset < raw.length) throw new AppError(422, 'max_bytes_too_small')
+  if (resultBytes(out) > 30000 || (end === offset && offset < raw.length))
+    throw new AppError(422, 'max_bytes_too_small')
   return out
 }
 export function boundedBase64(text: string, maxBytes: number) {

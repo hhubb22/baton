@@ -44,6 +44,7 @@ test('固定工具顺序与 Thread、Inbox 契约一致', () => {
       'threads.list',
       'threads.get',
       'threads.read',
+      'threads.trace',
       'nodes.exec',
       'inbox.ask',
       'inbox.list',
@@ -64,6 +65,8 @@ test('固定工具顺序与 Thread、Inbox 契约一致', () => {
     ['threads.list', { status: 'running', after_id: 'thread-1', offset: 0, max_bytes: 32768 }],
     ['threads.get', { thread_id: 'thread-1', offset: 0, max_bytes: 1 }],
     ['threads.read', { thread_id: 'thread-1', after_turn: 0, through_turn: 1, offset: 0, max_bytes: 32768 }],
+    ['threads.trace', { thread_id: 'thread-1', worker_turn_seq: 1 }],
+    ['threads.trace', { thread_id: 'thread-1', worker_turn_seq: 1, cursor: 'page-2', offset: 1, max_bytes: 32768 }],
     ['inbox.ask', ask],
     ['inbox.ask', { ...ask, thread_id: 'thread-1' }],
   ] as const) {
@@ -85,6 +88,10 @@ test('Thread 工具拒绝旧参数、缺少必填字段及无效模式和读取�
     ['threads.read', { thread_id: 'thread-1', after_turn: -1 }],
     ['threads.read', { thread_id: 'thread-1', through_turn: 0 }],
     ['threads.read', { thread_id: 'thread-1', max_bytes: 32769 }],
+    ['threads.trace', { thread_id: 'thread-1' }],
+    ['threads.trace', { thread_id: 'thread-1', worker_turn_seq: 0 }],
+    ['threads.trace', { thread_id: 'thread-1', worker_turn_seq: 1, max_bytes: 32769 }],
+    ['threads.trace', { thread_id: 'thread-1', worker_turn_seq: 1, employee_id: 'other' }],
     ['inbox.ask', { ...ask, summary: '旧摘要' }],
     ['inbox.ask', { ...ask, task_id: 'task-1' }],
   ] as const) {

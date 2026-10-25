@@ -2,6 +2,7 @@ import { createMemoryHistory } from '@tanstack/react-router'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
+import type { ThreadTrace, ThreadTraceStep } from '@baton/protocol'
 import { createHttpClient } from '../data/http/client'
 import { App } from './App'
 import { createAppRouter } from './router'
@@ -37,7 +38,9 @@ class Socket {
   }
 }
 
-function mount(options: { existing?: boolean; resumePending?: boolean; status?: string; create?: boolean } = {}) {
+function mount(
+  options: { existing?: boolean; resumePending?: boolean; status?: string; create?: boolean; offline?: boolean } = {},
+) {
   const state = {
     exists: options.existing ?? false,
     reason: 'Local sandbox needs setup.',
@@ -52,7 +55,7 @@ function mount(options: { existing?: boolean; resumePending?: boolean; status?: 
       status_reason: '',
       created_at: at,
       last_activity_at: at,
-      node_online: true,
+      node_online: !options.offline,
       node_synced: true,
       opened_at: options.resumePending ? at : (null as string | null),
       resume_pending: options.resumePending ?? false,
@@ -60,6 +63,7 @@ function mount(options: { existing?: boolean; resumePending?: boolean; status?: 
       pending_messages: [],
       failed_messages: [],
     },
+    traceSteps: [] as ThreadTraceStep[],
     events: [] as { id: number; kind: string; created_at: string; payload: Record<string, unknown> }[],
   }
   const fetcher = vi.fn<typeof fetch>(async (input, init) => {
@@ -77,7 +81,7 @@ function mount(options: { existing?: boolean; resumePending?: boolean; status?: 
             id: deviceId,
             display_name: 'Desk',
             system: 'linux',
-            online: true,
+            online: !options.offline,
             synced: true,
             revocation_status: 'none',
             runtime_report: {
@@ -128,6 +132,12 @@ function mount(options: { existing?: boolean; resumePending?: boolean; status?: 
     }
     if (path === `/threads/${threadId}`) return Response.json(state.thread)
     if (path === `/threads/${threadId}/timeline`) return Response.json({ events: state.events })
+    if (path === `/threads/${threadId}/trace`)
+      return Response.json({
+        ok: true,
+        page_cursor: url.searchParams.get('cursor') ?? 'snapshot:start',
+        steps: state.traceSteps,
+      } satisfies ThreadTrace)
     if (path === `/threads/${threadId}/messages`) {
       const body = JSON.parse(jsonBody(init?.body))
       return Response.json(
@@ -152,6 +162,76 @@ function mount(options: { existing?: boolean; resumePending?: boolean; status?: 
 beforeEach(() => localStorage.clear())
 
 describe('remote Cursor threads', () => {
+  it.each([
+    { reason: 'completed', replies: 2, count: 2 },
+    { reason: 'failed', replies: 0, count: 1 },
+    { reason: 'stopped', replies: 0, count: 1 },
+    { reason: 'completed', replies: 0, count: 1 },
+    { reason: 'completed', replies: 0, count: 0 },
+    { reason: 'completed', replies: 1, count: 0 },
+  ])(
+    'opens one saved activity entry from an offline HTTP timeline: $reason, $replies replies, $count steps',
+    async ({ reason, replies, count }) => {
+      const user = userEvent.setup()
+      const { state, fetcher } = mount({
+        existing: true,
+        status: reason === 'completed' ? 'idle' : 'stopped',
+        offline: true,
+      })
+      state.thread.opened_at = at
+      for (let index = 0; index < replies; index++)
+        state.events.push({
+          id: index + 1,
+          kind: 'reply',
+          created_at: at,
+          payload: { event_id: `reply-${index}`, worker_turn_seq: 9, content: `Saved reply ${index}` },
+        })
+      state.events.push({
+        id: 10,
+        kind: 'turn.ended',
+        created_at: at,
+        payload: {
+          worker_turn_seq: 9,
+          reason,
+          item_count: count,
+          content: reason === 'failed' ? 'The command was interrupted.' : undefined,
+        },
+      })
+      state.traceSteps = Array.from({ length: count }, (_, ordinal) => ({
+        item_id: `item-${ordinal}`,
+        type: 'command_execution',
+        status: 'completed',
+        ordinal,
+        data: { input: `command-${ordinal}`, output: `Saved output ${ordinal}`, exitCode: 0 },
+        truncated: false,
+        original_bytes: 100,
+      }))
+      const detail = await screen.findByRole('region', { name: 'Messages' })
+      await waitFor(() => expect(within(detail).queryByText('Loading messages…')).not.toBeInTheDocument())
+      if (count === 0) {
+        expect(within(detail).queryByRole('button', { name: /Activity/ })).not.toBeInTheDocument()
+        return
+      }
+      const toggle = await within(detail).findByRole('button', {
+        name: `Activity · ${count} ${count === 1 ? 'step' : 'steps'}`,
+      })
+      expect(within(detail).getAllByRole('button', { name: /Activity/ })).toHaveLength(1)
+      if (replies > 0) {
+        expect(within(detail).getByText('Saved reply 0')).toBeInTheDocument()
+        expect(within(detail).getByText('Saved reply 1')).toBeInTheDocument()
+      }
+      if (reason === 'failed')
+        expect(within(detail).getByText('Cursor could not finish this reply')).toBeInTheDocument()
+      await user.click(toggle)
+      expect(await within(detail).findByText('Saved output 0')).toBeInTheDocument()
+      const requests = fetcher.mock.calls
+        .map(([input]) => new URL(requestURL(input), 'https://baton.test'))
+        .filter((url) => url.pathname.endsWith('/trace'))
+      expect(requests).toHaveLength(1)
+      expect(requests[0].searchParams.get('worker_turn_seq')).toBe('9')
+    },
+  )
+
   it('shows full-output reading after a reply mapped from the HTTP timeline', async () => {
     const { state } = mount({ existing: true, status: 'idle' })
     state.thread.opened_at = at

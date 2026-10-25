@@ -178,6 +178,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
     draft.outbox.push({
       acked: false,
       ...(replyEvidence ? { replyEvidence } : {}),
+      ...(kind === 'turn.item' && fields.item ? { itemId: fields.item.id } : {}),
       report: {
         type: 'thread.report',
         thread_id: config.thread_id,
@@ -243,8 +244,20 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
     const active = draft.activeMessage ? draft.messages[draft.activeMessage] : undefined
     if (active?.state !== 'sent' || active.ended) return
     active.ended = true
-    report(draft, 'turn.ended', { client_message_id: active.input.id, worker_turn_seq: active.turn!, reason })
+    report(draft, 'turn.ended', {
+      client_message_id: active.input.id,
+      worker_turn_seq: active.turn!,
+      reason,
+      ...(active.tokenUsage === undefined ? {} : { token_usage: active.tokenUsage }),
+    })
     delete draft.activeMessage
+  }
+  function finishUnknown(draft: State) {
+    endActive(draft, draft.stopReason ?? 'agent_exited')
+    if (draft.unknownReason !== undefined) {
+      report(draft, 'thread.unknown', { reason: draft.unknownReason })
+      delete draft.unknownReason
+    }
   }
   function requestStop(draft: State, reason: 'stopped' | 'timeout') {
     if (draft.phase === 'stopping') return
@@ -275,8 +288,14 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
       draft.resumeRequested = false
       draft.processTreeStopped = false
       withdrawQueued(draft, 'Execution became uncertain before input intent')
-      endActive(draft, draft.stopReason ?? 'agent_exited')
-      report(draft, 'thread.unknown', { reason })
+      cancelQuestions(draft, reason)
+      const active = draft.activeMessage ? draft.messages[draft.activeMessage] : undefined
+      if (active && !active.ended && (active.state === 'sent' || active.state === 'intent'))
+        draft.unknownReason = boundReason(reason)
+      else {
+        endActive(draft, draft.stopReason ?? 'agent_exited')
+        report(draft, 'thread.unknown', { reason })
+      }
     }
     for (const command of Object.values(draft.commands)) {
       if (command.receipt.action !== 'message') finish(draft, command, 'unknown', reason)
@@ -581,6 +600,10 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
   }
   function onEvent(event: AgentEvent): Effect.Effect<void, WorkerFailure> {
     return Effect.gen(function* () {
+      if (event.type === 'barrier') {
+        yield* event.acknowledge
+        return
+      }
       if (recovering && state.config?.agent_type === 'shell') {
         if (buffered.length >= 256) return yield* uncertain('shell recovery event buffer overflow')
         buffered.push(event)
@@ -603,7 +626,14 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
       const message = state.messages[event.messageId]
       if (message?.ended && state.nativeId === event.nativeSessionId && message.executionId === event.executionId)
         return
-      if (state.phase === 'unknown' || state.phase === 'stopped' || state.phase === 'failed') return
+      if (state.phase === 'stopped' || state.phase === 'failed') return
+      if (
+        state.phase === 'unknown' &&
+        (message?.state !== 'sent' ||
+          !message.executionId ||
+          (event.type !== 'item' && event.type !== 'reply' && event.type !== 'end'))
+      )
+        return
       if (state.nativeId !== event.nativeSessionId || state.activeMessage !== event.messageId || !message) {
         yield* uncertain('Agent event identity mismatch')
         return
@@ -615,6 +645,13 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
       }
       if (message.executionId !== event.executionId) {
         yield* uncertain('Agent execution identity mismatch')
+        return
+      }
+      if (event.type === 'end' && state.phase === 'unknown') {
+        if (event.tokenUsage !== undefined)
+          yield* commit((draft) => {
+            draft.messages[event.messageId]!.tokenUsage = event.tokenUsage!
+          })
         return
       }
       const submitting =
@@ -650,6 +687,26 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
           const command = question.commandId ? draft.commands[question.commandId] : undefined
           if (command && awaitingDelivery)
             finish(draft, command, 'cancelled', 'Agent closed the question before answer delivery')
+        } else if (event.type === 'item') {
+          if (current.turn === undefined) return reject('invalid_state', 'Item has no Worker turn')
+          if (
+            draft.outbox.some(
+              (entry) =>
+                entry.report.kind === 'turn.item' &&
+                entry.report.worker_turn_seq === current.turn &&
+                (entry.itemId ?? entry.report.item?.id) ===
+                  (draft.config?.agent_type === 'shell' ? `shell:${current.turn}` : event.item.id),
+            )
+          )
+            return
+          report(draft, 'turn.item', {
+            client_message_id: event.messageId,
+            worker_turn_seq: current.turn,
+            item: draft.config?.agent_type === 'shell' ? { ...event.item, id: `shell:${current.turn}` } : event.item,
+            truncated: event.truncated ?? false,
+            original_bytes: event.original_bytes ?? Buffer.byteLength(JSON.stringify(event.item.data)),
+            ...(event.metadata ? { metadata: event.metadata } : {}),
+          })
         } else if (event.type === 'reply') {
           if (
             draft.outbox.some(
@@ -705,6 +762,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
                     ? 'failed'
                     : 'completed',
             ...(event.outcome === 'failed' ? { content: event.reason } : {}),
+            ...(event.tokenUsage === undefined ? {} : { token_usage: event.tokenUsage }),
           })
           delete draft.activeMessage
           if (draft.phase !== 'stopping') {
@@ -780,7 +838,6 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
       const current = yield* ensureAgent()
       const interrupted = operation?.fiber
       operation = undefined
-      buffered.length = 0
       stopEvidence = yield* Deferred.make<void>()
       const evidence = stopEvidence
       const epoch = state.epoch
@@ -794,26 +851,23 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         if (interrupted) yield* Fiber.interrupt(interrupted)
         if (state.config?.agent_type === 'shell') return (yield* current.reap()).processTreeStopped
         if (reclaimedOnRecovery) return true
-        if (!active || active.state === 'queued') {
-          return (yield* current.reap()).processTreeStopped
-        }
+        if (!active || active.state === 'queued') return true
         yield* Deferred.await(evidence)
         return true
       }).pipe(
         Effect.timeout(graceMs),
-        Effect.catch(() =>
-          current.reap().pipe(
-            Effect.timeout(Math.max(1, remaining())),
-            Effect.map((result) => result.processTreeStopped),
-            Effect.catch(() => Effect.succeed(false)),
-          ),
-        ),
+        Effect.catch(() => Effect.succeed(true)),
       )
       const config = state.config!
       const pending = Object.values(state.messages).filter((message) => message.state === 'intent')
       stopFiber = yield* Effect.forkIn(
         Effect.gen(function* () {
           let stopped = yield* graceful
+          // Wait outside jobs: the event consumer posts the durable barrier back onto jobs.
+          const flushed = yield* (active ? (current.flushEvents?.() ?? Effect.void) : Effect.void).pipe(
+            Effect.timeout(Math.max(1, remaining())),
+            Effect.exit,
+          )
           // A stopped execution instance is never reused for resume or read-only recovery.
           const reaped = yield* current.reap().pipe(
             Effect.timeout(Math.max(1, remaining())),
@@ -824,11 +878,21 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
             Effect.catch(() => Effect.succeed(false)),
           )
           stopped &&= reaped.processTreeStopped && recordsReaped
+          if (Exit.isFailure(flushed)) {
+            yield* post(
+              Effect.fail(
+                new WorkerFailure(
+                  'agent_event_flush_failed',
+                  'Agent control events could not be durably drained before stop',
+                ),
+              ),
+            )
+            return
+          }
           const recovered = yield* recoverWithFreshAgent(config, pending, remaining)
           yield* post(
             Effect.gen(function* () {
               stopFiber = undefined
-              if (reaped.processTreeStopped) yield* retireAgent(current)
               if (state.epoch !== epoch) return
               yield* commit((draft) => {
                 for (const [id, acceptance] of recovered) {
@@ -837,6 +901,10 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
                   if (acceptance) accepted(draft, id, acceptance)
                   else settleMessage(draft, message, 'unknown', 'Input acceptance could not be established after stop')
                 }
+              })
+              yield* flushBuffered()
+              if (reaped.processTreeStopped) yield* retireAgent(current)
+              yield* commit((draft) => {
                 const unknown =
                   (config.agent_type === 'shell' &&
                     !!active &&
@@ -888,11 +956,15 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
           const pending = Object.values(state.messages).filter((message) => message.state === 'intent')
           const previous = operation?.fiber
           operation = undefined
-          buffered.length = 0
+          const active = state.activeMessage ? state.messages[state.activeMessage] : undefined
           yield* Effect.forkIn(
             Effect.gen(function* () {
               yield* current.abort().pipe(Effect.timeout(5000), Effect.ignore)
               if (previous) yield* Fiber.interrupt(previous).pipe(Effect.timeout(stopMs), Effect.ignore)
+              const flushed = yield* (active ? (current.flushEvents?.() ?? Effect.void) : Effect.void).pipe(
+                Effect.timeout(stopMs),
+                Effect.exit,
+              )
               const reaped = yield* current.reap().pipe(
                 Effect.timeout(stopMs),
                 Effect.catch(() => Effect.succeed({ processTreeStopped: false })),
@@ -901,11 +973,21 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
                 Effect.timeout(stopMs),
                 Effect.catch(() => Effect.succeed(false)),
               )
+              if (Exit.isFailure(flushed)) {
+                yield* post(
+                  Effect.fail(
+                    new WorkerFailure(
+                      'agent_event_flush_failed',
+                      'Agent control events could not be durably drained during unknown cleanup',
+                    ),
+                  ),
+                )
+                return
+              }
               const recovered = yield* recoverWithFreshAgent(config, pending, () => sendMs)
               yield* post(
                 Effect.gen(function* () {
                   unknownRecoveryRunning = false
-                  if (reaped.processTreeStopped) yield* retireAgent(current)
                   yield* commit((draft) => {
                     draft.processTreeStopped = reaped.processTreeStopped && recordsReaped
                     for (const [id, acceptance] of recovered) {
@@ -920,7 +1002,11 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
                           'Native acceptance could not be established after execution became uncertain',
                         )
                     }
-                    endActive(draft, draft.stopReason ?? 'agent_exited')
+                  })
+                  yield* flushBuffered()
+                  if (reaped.processTreeStopped) yield* retireAgent(current)
+                  yield* commit((draft) => {
+                    finishUnknown(draft)
                     if (
                       reaped.processTreeStopped &&
                       draft.activeMessage &&
@@ -1565,6 +1651,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
             else {
               reclaimedOnRecovery = true
               draft.processTreeStopped = !Object.values(draft.messages).some((message) => message.state === 'intent')
+              if (draft.phase === 'unknown' && draft.processTreeStopped) finishUnknown(draft)
               if (draft.phase === 'idle' || draft.phase === 'busy') {
                 draft.phase = 'stopped'
                 const active = draft.activeMessage ? draft.messages[draft.activeMessage] : undefined

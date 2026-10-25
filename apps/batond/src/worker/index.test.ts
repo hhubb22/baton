@@ -1075,35 +1075,60 @@ describe('reliable Worker', () => {
     ),
   )
 
-  it.effect('attributes reply/end arriving before the send acceptance without losing the turn', () =>
-    fixture((dbPath) =>
-      Effect.gen(function* () {
-        yield* Effect.scoped(
-          Effect.gen(function* () {
-            const cfg = config()
-            const f = yield* fake
-            f.duringSend = (input) =>
-              Effect.gen(function* () {
-                yield* Queue.offer(f.events, event(input.id, 'reply'))
-                yield* Queue.offer(f.events, event(input.id, 'end'))
-                yield* Effect.yieldNow
+  it.effect(
+    'persists and deduplicates items before reply/end and preserves token usage across early acceptance events',
+    () =>
+      fixture((dbPath) =>
+        Effect.gen(function* () {
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const cfg = config()
+              const f = yield* fake
+              f.duringSend = (input) =>
+                Effect.gen(function* () {
+                  const item: AgentEvent = {
+                    ...delta(input.id, ''),
+                    type: 'item',
+                    item: {
+                      id: 'native\\0',
+                      type: 'command_execution',
+                      status: 'completed',
+                      ordinal: 0,
+                      data: { output: 'first' },
+                    },
+                  }
+                  yield* Queue.offer(f.events, item)
+                  yield* Queue.offer(f.events, { ...item, item: { ...item.item, data: { output: 'duplicate' } } })
+                  yield* Queue.offer(f.events, event(input.id, 'reply'))
+                  yield* Queue.offer(f.events, {
+                    ...delta(input.id, ''),
+                    type: 'end',
+                    outcome: 'completed',
+                    tokenUsage: { usedTokens: 42, outputTokens: 12 },
+                  })
+                  yield* Effect.yieldNow
+                })
+              const worker = yield* makeWorker({ dbPath, agentFactory: () => f.agent })
+              yield* worker.handle(request(cfg, 'thread_open'))
+              yield* opened(worker)
+              const input = message(cfg)
+              yield* worker.handle(input)
+              const items = yield* until(reports(worker), (items) => items.some((item) => item.kind === 'turn.ended'))
+              expect(
+                items
+                  .filter((item) => ['turn.started', 'turn.item', 'reply', 'turn.ended'].includes(item.kind))
+                  .map((item) => item.kind),
+              ).toEqual(['turn.started', 'turn.item', 'reply', 'turn.ended'])
+              expect(items.find((item) => item.kind === 'turn.item')?.item?.data).toEqual({ output: 'first' })
+              expect(items.find((item) => item.kind === 'turn.ended')?.token_usage).toEqual({
+                usedTokens: 42,
+                outputTokens: 12,
               })
-            const worker = yield* makeWorker({ dbPath, agentFactory: () => f.agent })
-            yield* worker.handle(request(cfg, 'thread_open'))
-            yield* opened(worker)
-            const input = message(cfg)
-            yield* worker.handle(input)
-            const items = yield* until(reports(worker), (items) => items.some((item) => item.kind === 'turn.ended'))
-            expect(
-              items
-                .filter((item) => ['turn.started', 'reply', 'turn.ended'].includes(item.kind))
-                .map((item) => item.kind),
-            ).toEqual(['turn.started', 'reply', 'turn.ended'])
-            expect(items.some((item) => item.kind === 'thread.unknown')).toBe(false)
-          }),
-        )
-      }),
-    ),
+              expect(items.some((item) => item.kind === 'thread.unknown')).toBe(false)
+            }),
+          )
+        }),
+      ),
   )
 
   describe('recovery after reopening', () => {
@@ -1568,6 +1593,282 @@ describe('reliable Worker', () => {
               expect(Buffer.byteLength(JSON.stringify(reply))).toBeLessThanOrEqual(120 * 1024)
             }
             expect(delivered.some((item) => item.kind === 'turn.ended')).toBe(true)
+          }),
+        )
+      }),
+    ),
+  )
+
+  it.effect('durably drains forced-stop items behind reply attachment extraction before retiring the Agent', () =>
+    fixture((dbPath) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const cfg = config()
+          const f = yield* fake
+          const extracting = yield* Deferred.make<void>()
+          const release = yield* Deferred.make<void>()
+          const barrierOffered = yield* Deferred.make<void>()
+          const input = message(cfg)
+          const agent: ThreadAgent = {
+            ...f.agent,
+            abort: () =>
+              Effect.gen(function* () {
+                yield* f.agent.abort()
+                yield* Queue.offer(f.events, {
+                  ...delta(input.client_message_id!, ''),
+                  type: 'item',
+                  item: {
+                    id: 'unfinished',
+                    type: 'command_execution',
+                    status: 'running',
+                    ordinal: 0,
+                    data: { output: 'retained' },
+                  },
+                })
+              }),
+            flushEvents: () =>
+              Effect.gen(function* () {
+                const done = yield* Deferred.make<void>()
+                yield* Queue.offer(f.events, {
+                  type: 'barrier',
+                  acknowledge: Deferred.succeed(done, undefined).pipe(Effect.asVoid),
+                })
+                yield* Deferred.succeed(barrierOffered, undefined)
+                yield* Deferred.await(done)
+              }),
+          }
+          const worker = yield* makeWorker({
+            dbPath,
+            agentFactory: () => agent,
+            stopTimeoutMs: 10,
+            attachments: () =>
+              Effect.gen(function* () {
+                yield* Deferred.succeed(extracting, undefined)
+                yield* Deferred.await(release)
+                return []
+              }),
+          })
+          yield* worker.handle(request(cfg, 'thread_open'))
+          yield* opened(worker)
+          yield* worker.handle(input)
+          yield* completed(worker, input.command_id!)
+          yield* Queue.offer(f.events, event(input.client_message_id!, 'reply'))
+          yield* Deferred.await(extracting)
+          const stop = request(cfg, 'thread_stop')
+          yield* worker.handle(stop)
+          yield* called(f, 'abort')
+          yield* TestClock.adjust(10)
+          yield* Deferred.await(barrierOffered)
+          expect((yield* reports(worker)).some((item) => item.kind === 'turn.ended')).toBe(false)
+          expect(f.calls.includes('reap')).toBe(false)
+          yield* Deferred.succeed(release, undefined)
+          const items = yield* completed(worker, stop.command_id!)
+          expect(
+            items.filter((item) => ['reply', 'turn.item', 'turn.ended'].includes(item.kind)).map((item) => item.kind),
+          ).toEqual(['reply', 'turn.item', 'turn.ended'])
+          expect(findCompletion(items, stop.command_id!)?.command_outcome).toBe('succeeded')
+          expect(items.find((item) => item.kind === 'turn.item')?.item?.data).toEqual({ output: 'retained' })
+        }),
+      ),
+    ),
+  )
+
+  it.effect.each([false, true])(
+    'drains unknown cleanup items before ending an accepted Turn (native end: %s)',
+    (nativeEnd) =>
+      fixture((dbPath) =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const cfg = config()
+            const f = yield* fake
+            const aborted = yield* Deferred.make<void>()
+            const flushing = yield* Deferred.make<void>()
+            const release = yield* Deferred.make<void>()
+            const input = message(cfg)
+            const agent: ThreadAgent = {
+              ...f.agent,
+              abort: () =>
+                Effect.gen(function* () {
+                  yield* f.agent.abort()
+                  yield* Queue.offer(f.events, {
+                    ...delta(input.client_message_id!, ''),
+                    type: 'item',
+                    item: {
+                      id: 'pending-on-unknown',
+                      type: 'command_execution',
+                      status: 'running',
+                      ordinal: 0,
+                      data: { output: 'preserved during cleanup' },
+                    },
+                  })
+                  if (nativeEnd)
+                    yield* Queue.offer(f.events, {
+                      ...delta(input.client_message_id!, ''),
+                      type: 'end',
+                      outcome: 'cancelled',
+                      tokenUsage: { usedTokens: 27 },
+                    })
+                  yield* Deferred.succeed(aborted, undefined)
+                }),
+              flushEvents: () =>
+                Effect.gen(function* () {
+                  yield* Deferred.succeed(flushing, undefined)
+                  yield* Deferred.await(release)
+                  const done = yield* Deferred.make<void>()
+                  yield* Queue.offer(f.events, {
+                    type: 'barrier',
+                    acknowledge: Deferred.succeed(done, undefined).pipe(Effect.asVoid),
+                  })
+                  yield* Deferred.await(done)
+                }),
+            }
+            const worker = yield* makeWorker({ dbPath, agentFactory: () => agent })
+            yield* worker.handle(request(cfg, 'thread_open'))
+            yield* opened(worker)
+            yield* worker.handle(input)
+            yield* completed(worker, input.command_id!)
+            yield* Queue.offer(f.events, { type: 'uncertain', reason: 'provider transport became uncertain' })
+            yield* Deferred.await(aborted)
+            expect((yield* reports(worker)).some((row) => row.kind === 'turn.ended')).toBe(false)
+            yield* Deferred.await(flushing)
+            const draining = yield* until(reports(worker), (rows) => rows.some((row) => row.kind === 'turn.item'))
+            expect(draining.some((row) => row.kind === 'turn.ended' || row.kind === 'thread.unknown')).toBe(false)
+            expect(f.calls.includes('reap')).toBe(false)
+            const db = new DatabaseSync(dbPath, { readOnly: true })
+            try {
+              const stored = JSON.parse(
+                String(
+                  db.prepare('SELECT payload FROM thread_messages WHERE id=?').get(input.client_message_id!)?.payload,
+                ),
+              )
+              expect(stored.state).toBe('sent')
+              expect(stored.ended).not.toBe(true)
+              const meta = JSON.parse(String(db.prepare('SELECT payload FROM thread_meta WHERE id=1').get()?.payload))
+              expect(meta.phase).toBe('unknown')
+              expect(meta.unknownReason).toBe('provider transport became uncertain')
+            } finally {
+              db.close()
+            }
+            yield* Deferred.succeed(release, undefined)
+            const result = yield* until(reports(worker), (rows) => rows.some((row) => row.kind === 'thread.unknown'))
+            expect(
+              result
+                .filter((row) => ['turn.item', 'turn.ended', 'thread.unknown'].includes(row.kind))
+                .map((row) => row.kind),
+            ).toEqual(['turn.item', 'turn.ended', 'thread.unknown'])
+            expect(result.find((row) => row.kind === 'turn.item')?.item?.data).toEqual({
+              output: 'preserved during cleanup',
+            })
+            expect(result.find((row) => row.kind === 'turn.ended')).toMatchObject({
+              reason: 'agent_exited',
+              ...(nativeEnd ? { token_usage: { usedTokens: 27 } } : {}),
+            })
+            expect((yield* worker.handle({ type: 'status', ok: true })).agent_ready).toBe(false)
+            expect(f.calls.includes('reap')).toBe(true)
+          }),
+        ),
+      ),
+  )
+
+  it.effect('finishes a pending unknown Turn after restart without replaying input or returning to idle', () =>
+    fixture((dbPath) =>
+      Effect.gen(function* () {
+        const cfg = config()
+        const input = message(cfg)
+        const nativeEnd = {
+          ...delta(input.client_message_id!, ''),
+          type: 'end' as const,
+          outcome: 'cancelled' as const,
+          tokenUsage: { usedTokens: 31 },
+        }
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const f = yield* fake
+            const drained = yield* Deferred.make<void>()
+            const agent: ThreadAgent = {
+              ...f.agent,
+              abort: () =>
+                Effect.gen(function* () {
+                  yield* f.agent.abort()
+                  yield* Queue.offer(f.events, {
+                    ...delta(input.client_message_id!, ''),
+                    type: 'item',
+                    item: {
+                      id: 'before-restart',
+                      type: 'command_execution',
+                      status: 'running',
+                      ordinal: 0,
+                      data: { output: 'durable' },
+                    },
+                  })
+                  yield* Queue.offer(f.events, nativeEnd)
+                }),
+              flushEvents: () =>
+                Effect.gen(function* () {
+                  const done = yield* Deferred.make<void>()
+                  yield* Queue.offer(f.events, {
+                    type: 'barrier',
+                    acknowledge: Deferred.succeed(done, undefined).pipe(Effect.asVoid),
+                  })
+                  yield* Deferred.await(done)
+                  yield* Deferred.succeed(drained, undefined)
+                  yield* Effect.never
+                }),
+            }
+            const worker = yield* makeWorker({ dbPath, agentFactory: () => agent })
+            yield* worker.handle(request(cfg, 'thread_open'))
+            yield* opened(worker)
+            yield* worker.handle(input)
+            yield* completed(worker, input.command_id!)
+            yield* Queue.offer(f.events, { type: 'uncertain', reason: 'unknown cleanup interrupted by restart' })
+            yield* Deferred.await(drained)
+            expect((yield* reports(worker)).some((row) => row.kind === 'turn.ended')).toBe(false)
+          }),
+        )
+        const saved = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const f = yield* fake
+            const worker = yield* makeWorker({ dbPath, agentFactory: () => f.agent })
+            const rows = yield* until(reports(worker), (items) => items.some((row) => row.kind === 'thread.unknown'))
+            expect(
+              rows
+                .filter((row) => ['turn.item', 'turn.ended', 'thread.unknown'].includes(row.kind))
+                .map((row) => row.kind),
+            ).toEqual(['turn.item', 'turn.ended', 'thread.unknown'])
+            expect(rows.find((row) => row.kind === 'turn.ended')).toMatchObject({
+              reason: 'agent_exited',
+              token_usage: { usedTokens: 31 },
+            })
+            expect(rows.find((row) => row.kind === 'thread.unknown')?.reason).toBe(
+              'unknown cleanup interrupted by restart',
+            )
+            expect(f.calls).toEqual(['reap'])
+            const db = new DatabaseSync(dbPath, { readOnly: true })
+            try {
+              const meta = JSON.parse(String(db.prepare('SELECT payload FROM thread_meta WHERE id=1').get()?.payload))
+              expect(meta.phase).toBe('unknown')
+              expect(meta.unknownReason).toBeUndefined()
+              expect(meta.activeMessage).toBeUndefined()
+              expect(meta.processTreeStopped).toBe(true)
+              const message = JSON.parse(
+                String(
+                  db.prepare('SELECT payload FROM thread_messages WHERE id=?').get(input.client_message_id!)?.payload,
+                ),
+              )
+              expect(message.ended).toBe(true)
+            } finally {
+              db.close()
+            }
+            return rows
+          }),
+        )
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const f = yield* fake
+            const worker = yield* makeWorker({ dbPath, agentFactory: () => f.agent })
+            yield* called(f, 'reap')
+            expect(yield* reports(worker)).toEqual(saved)
+            expect(f.sentInputs).toHaveLength(0)
           }),
         )
       }),

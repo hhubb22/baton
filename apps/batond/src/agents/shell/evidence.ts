@@ -6,6 +6,7 @@ import type { WorkerOpenConfig } from '@baton/protocol'
 import { UUID, PositiveInteger, FullOutputReference } from '@baton/protocol'
 import { ensurePrivateDirectory, openPrivateFile, writePrivateFileAtomic } from '../../platform/private.ts'
 import { AgentError, type AgentMessage, type InputPreparation } from '../../worker/agent.ts'
+import type { CommandTraceOutput } from './trace-output.ts'
 import { outputBytes, type CommandOutput } from './output.ts'
 
 const Origin = Schema.Struct({
@@ -25,18 +26,23 @@ const Mapping = Schema.Struct({
   origin: Origin,
 })
 export type ShellMapping = typeof Mapping.Type
-const Result = Schema.Struct({
+const Output = Schema.Struct({
   output: Schema.String,
   encoding: Schema.optionalKey(Schema.Literal('base64')),
   exit_code: Schema.Int.check(Schema.isGreaterThanOrEqualTo(-1)),
   total_bytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   truncated: Schema.Boolean,
+})
+const Result = Schema.Struct({
+  ...Output.fields,
   full_output: Schema.optionalKey(FullOutputReference),
+  trace: Schema.Struct({ ...Output.fields, original_output_json_bytes: Schema.Number }),
 })
 const Completion = Schema.Struct({
   version: Schema.Literal(1),
   mapping: Mapping,
   messageId: Schema.String,
+  command: Schema.String,
   preparationId: Schema.String,
   executionId: Schema.String,
   completionKind: Schema.Literals(['exited', 'stopped']),
@@ -131,7 +137,7 @@ export const submissionPath = (mapping: ShellMapping): string =>
   join(dirname(mapping.statePath), 'shell-submission.json')
 
 export async function loadCompletion(mapping: ShellMapping): Promise<ShellCompletion> {
-  const record = Schema.decodeUnknownSync(Completion)(await readJson(completionPath(mapping), 192 * 1024))
+  const record = Schema.decodeUnknownSync(Completion)(await readJson(completionPath(mapping), 2 * 1024 * 1024))
   if (JSON.stringify(record.mapping) !== JSON.stringify(mapping))
     throw new AgentError('shell completion identity mismatch')
   const result = record.result
@@ -154,13 +160,14 @@ export function completionFor(
   mapping: ShellMapping,
   message: AgentMessage,
   preparation: InputPreparation,
-  result: CommandOutput,
+  result: CommandOutput & { readonly trace: CommandTraceOutput },
   stopped: boolean,
 ): ShellCompletion {
   return {
     version: 1,
     mapping,
     messageId: message.id,
+    command: message.text,
     preparationId: preparation.preparationId,
     executionId: preparation.preparationId,
     completionKind: stopped ? 'stopped' : 'exited',

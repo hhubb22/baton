@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vite-plus/test'
 import { threadMessageNotice, threadView } from '../derive'
-import type { Device, OperationPhase } from '../types'
+import type { Device, OperationPhase, TraceStep } from '../types'
 import type { HttpContext } from './context'
 import { createThreadAPI } from './threads'
 import { createTransport, HttpError } from './transport'
@@ -25,6 +25,16 @@ const fullOutputReference = {
   total_bytes: 100000,
   expires_at: '2099-01-01T00:00:00.000Z',
 }
+const traceStep = (overrides: Partial<TraceStep> = {}): TraceStep => ({
+  item_id: 'command-1',
+  type: 'command_execution',
+  status: 'completed',
+  ordinal: 1,
+  data: { input: 'pnpm test', output: 'ok' },
+  truncated: false,
+  original_bytes: 42,
+  ...overrides,
+})
 const thread = (overrides: Record<string, unknown> = {}) => ({
   id: threadId,
   node_id: deviceId,
@@ -713,7 +723,7 @@ describe('HTTP thread contracts', () => {
   })
 
   it('reads the actual trace for the reply turn and reports missing history honestly', async () => {
-    let result: Record<string, unknown> = { ok: true, steps: [{ kind: 'command', command: 'pnpm test', output: 'ok' }] }
+    let result: Record<string, unknown> = { ok: true, page_cursor: 'snapshot:start', steps: [traceStep()] }
     const { api, fetcher } = setup((url) =>
       url.pathname.endsWith('/trace')
         ? result
@@ -724,11 +734,78 @@ describe('HTTP thread contracts', () => {
     const replyId = (await api.listMessages(threadId))[0].id
     expect(await api.readTrace(replyId)).toMatchObject({
       state: 'ready',
-      steps: [{ kind: 'command', command: 'pnpm test', output: 'ok' }],
+      steps: [traceStep()],
     })
     expect(requestURL(fetcher.mock.calls.at(-1)![0])).toBe(`/api/v1/threads/${threadId}/trace?worker_turn_seq=3`)
-    result = { ok: false, code: 'trace_missing' }
+    result = { ok: false, code: 'trace_missing', page_cursor: 'snapshot:start', steps: null }
     expect(await api.readTrace(replyId)).toEqual({ state: 'unavailable', messageId: replyId, reason: 'missing' })
+  })
+
+  it('reads all trace pages with opaque cursors while the device is offline and preserves raw JSON', async () => {
+    const raw = 'Saved\u0000\ud800<img src=x> https://example.test'
+    const steps = Array.from({ length: 120 }, (_, ordinal) =>
+      traceStep({
+        item_id: `step-${ordinal}`,
+        ordinal,
+        parent_id: ordinal ? 'step-0' : undefined,
+        started_at: at,
+        completed_at: later,
+        title: `Saved step ${ordinal}`,
+        data: { text: raw },
+        truncated: ordinal === 119,
+        original_bytes: ordinal === 119 ? 100000 : 100,
+        ...(ordinal === 119 ? { full_output: fullOutputReference } : {}),
+      }),
+    )
+    const cursors = ['page:50/+', 'page:100/=']
+    const { api, fetcher } = setup(
+      (url) => {
+        if (url.pathname.endsWith('/timeline'))
+          return { events: [event(1, 'reply', { worker_turn_seq: 3, content: 'Reply' })] }
+        if (url.pathname.endsWith('/trace')) {
+          const cursor = url.searchParams.get('cursor')
+          const start = cursor === cursors[0] ? 50 : cursor === cursors[1] ? 100 : 0
+          return {
+            ok: true,
+            page_cursor: cursor ?? 'snapshot:start',
+            steps: steps.slice(start, start + 50),
+            next_cursor: start < 100 ? cursors[start / 50] : undefined,
+          }
+        }
+        return thread({ node_online: false })
+      },
+      [device('offline')],
+    )
+    const replyId = (await api.listMessages(threadId))[0].id
+    const saved: TraceStep[] = []
+    let cursor: string | undefined
+    do {
+      const page = await api.readTrace(replyId, cursor)
+      if (page.state !== 'ready') throw new Error('Expected saved activity')
+      saved.push(...page.steps)
+      cursor = page.nextCursor
+    } while (cursor)
+    expect(saved).toEqual(steps)
+    const requests = fetcher.mock.calls
+      .map(([input]) => new URL(requestURL(input), 'https://baton.test'))
+      .filter((url) => url.pathname.endsWith('/trace'))
+    expect(requests.map((url) => url.searchParams.get('cursor'))).toEqual([null, ...cursors])
+    expect(requests.every((url) => url.searchParams.get('worker_turn_seq') === '3')).toBe(true)
+  })
+
+  it('reports an incomplete or non-advancing trace page as a read error', async () => {
+    let result: Record<string, unknown> = { ok: true, page_cursor: 'snapshot:start', steps: null }
+    const { api } = setup((url) =>
+      url.pathname.endsWith('/trace')
+        ? result
+        : url.pathname.endsWith('/timeline')
+          ? { events: [event(1, 'reply', { worker_turn_seq: 1, content: 'Reply' })] }
+          : thread(),
+    )
+    const id = (await api.listMessages(threadId))[0].id
+    await expect(api.readTrace(id)).rejects.toThrow('incomplete')
+    result = { ok: true, page_cursor: 'same', steps: [traceStep()], next_cursor: 'same' }
+    await expect(api.readTrace(id, 'same')).rejects.toThrow('next activity page')
   })
 
   it('shows the saved next model while the running turn keeps its reported model', async () => {
@@ -812,7 +889,7 @@ describe('HTTP thread contracts', () => {
     expect(fetcher.mock.calls.some(([url]) => requestURL(url).includes('/files'))).toBe(false)
   })
 
-  it('maps an HTTP offline trace response and does not hide a permission failure', async () => {
+  it('keeps trace read failures retryable and does not hide a permission failure', async () => {
     let status = 409
     const { api } = setup((url) =>
       url.pathname.endsWith('/trace')
@@ -822,7 +899,7 @@ describe('HTTP thread contracts', () => {
           : thread(),
     )
     const id = (await api.listMessages(threadId))[0].id
-    expect(await api.readTrace(id)).toMatchObject({ state: 'unavailable', reason: 'offline' })
+    await expect(api.readTrace(id)).rejects.toMatchObject({ status: 409 })
     status = 403
     await expect(api.readTrace(id)).rejects.toMatchObject({ status: 403 })
   })
@@ -869,7 +946,11 @@ describe('HTTP thread contracts', () => {
           ],
         }
       if (url.pathname.endsWith('/trace'))
-        return { ok: true, steps: [{ kind: 'command', command: 'printf shell-output', output: 'shell-output' }] }
+        return {
+          ok: true,
+          page_cursor: 'snapshot:start',
+          steps: [traceStep({ data: { input: 'printf shell-output', output: 'shell-output' } })],
+        }
       if (url.pathname.endsWith('/output'))
         return { ok: true, state: 'running', text: 'shell-output', cursor: 'shell-epoch:12', gap: false }
       return t
@@ -878,7 +959,7 @@ describe('HTTP thread contracts', () => {
     const reply = (await api.listMessages(threadId)).find((m) => m.role === 'agent')!
     expect(await api.readTrace(reply.id)).toMatchObject({
       state: 'ready',
-      steps: [{ kind: 'command', command: 'printf shell-output', output: 'shell-output' }],
+      steps: [traceStep({ data: { input: 'printf shell-output', output: 'shell-output' } })],
     })
     expect((await api.readOutput(threadId)).chunks).toEqual([{ kind: 'text', text: 'shell-output' }])
   })
@@ -891,9 +972,20 @@ describe('HTTP thread contracts', () => {
       if (url.pathname.endsWith('/trace'))
         return {
           ok: true,
+          page_cursor: 'snapshot:start',
           steps: [
-            { kind: 'command', command: 'printf', output: 'partial', truncated: true },
-            { kind: 'tool', name: 'Read', detail: 'Complete content', truncated: false },
+            traceStep({
+              data: { input: 'printf', output: 'partial' },
+              truncated: true,
+              original_bytes: 100000,
+              full_output: fullOutputReference,
+            }),
+            traceStep({
+              item_id: 'tool-2',
+              type: 'dynamic_tool',
+              ordinal: 2,
+              data: { toolName: 'Read', output: 'Complete content' },
+            }),
           ],
         }
       if (url.pathname.endsWith('/output')) return { ok: true, state: 'running', cursor: 'epoch:0', gap }
@@ -903,8 +995,18 @@ describe('HTTP thread contracts', () => {
     expect(await api.readTrace(reply.id)).toMatchObject({
       state: 'ready',
       steps: [
-        { kind: 'command', command: 'printf', output: 'partial', truncated: true },
-        { kind: 'tool', name: 'Read', detail: 'Complete content', truncated: false },
+        traceStep({
+          data: { input: 'printf', output: 'partial' },
+          truncated: true,
+          original_bytes: 100000,
+          full_output: fullOutputReference,
+        }),
+        traceStep({
+          item_id: 'tool-2',
+          type: 'dynamic_tool',
+          ordinal: 2,
+          data: { toolName: 'Read', output: 'Complete content' },
+        }),
       ],
     })
     expect((await api.readOutput(threadId)).chunks).toEqual([])

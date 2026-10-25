@@ -1,6 +1,8 @@
 // 界面使用的业务对象。字段按 specs/baton、specs/project-agent、specs/agent-inbox 的行为规格取名，
 // 对象之间只用稳定 ID 关联，派生状态见 derive.ts。
 
+import type { ThreadTraceStep } from '@baton/protocol'
+
 export type ID = string
 
 export type AgentKind = 'codex' | 'kiro' | 'pi' | 'cursor'
@@ -163,14 +165,16 @@ export interface FullOutputReference {
 export interface Message {
   id: ID
   threadId: ID
-  role: 'user' | 'agent' | 'failure'
+  role: 'user' | 'agent' | 'failure' | 'activity'
   // 发给 Agent 的消息可能来自你，也可能来自 Project Agent。
   sender: 'you' | 'projectAgent' | 'agent'
   body: string
   createdAt: number
   delivery: Delivery
-  // Agent 回复这一轮做过的事的计数，完整过程留在设备上，展开时读取；没有过程为 null。
+  // 一轮实际做过的事的摘要；过程从中心读取。
   activity: ActivitySummary | null
+  // 结束记录的步骤数。0 表示此消息不承载过程入口，同轮只在一条消息上展示。
+  traceItemCount?: number
   fullOutput?: FullOutputReference | null
   attachments: Attachment[]
 }
@@ -186,17 +190,12 @@ export type Attachment =
   | { kind: 'file'; deviceId: ID; path: string; size: number }
   | { kind: 'commit'; repo: string; sha: string; subject: string }
 
-// 一轮回复的过程：命令和输出、工具调用、文件改动。
-export type TraceStep = (
-  | { kind: 'command'; command: string; output: string }
-  | { kind: 'tool'; name: string; detail: string }
-  | { kind: 'file'; action: 'wrote' | 'edited' | 'deleted'; path: string }
-) & { truncated?: boolean }
+// 中心保存的上游步骤，截断内容的全文引用指向设备。
+export type TraceStep = ThreadTraceStep
 
-// 过程从设备读取。offline：设备离线，暂时读不到；missing：设备上的对话记录已经删除。
 export type Trace =
-  | { state: 'ready'; messageId: ID; steps: TraceStep[] }
-  | { state: 'unavailable'; messageId: ID; reason: 'offline' | 'missing' }
+  | { state: 'ready'; messageId: ID; steps: TraceStep[]; nextCursor?: string }
+  | { state: 'unavailable'; messageId: ID; reason: 'missing' }
 
 // 执行中的一轮的实时输出。gap 表示设备已经丢掉、补不回来的一段。
 export type OutputChunk = { kind: 'text'; text: string } | { kind: 'gap' }

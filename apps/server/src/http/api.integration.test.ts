@@ -207,6 +207,62 @@ it('validates payloads, queries, paths, response shapes and available feature ro
   expect((await request('/api/v1/openapi.json', 'GET', undefined, { cookie: '' })).status).toBe(401)
 })
 
+it('serves persisted trace pages with raw JSON and distinguishes missing Turns from missing trace', async () => {
+  const { employee } = await login(readyPassword, 'httpready')
+  const threadId = randomUUID()
+  const data = { output: 'raw\u0000\ud800', nested: { value: null } }
+  await database.run(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`INSERT INTO threads(id,employee_id,node_id,client_thread_id,request_hash,agent_type,working_directory,created_by)
+      VALUES(${threadId},${employee.id},${nodeId},${threadId},${Buffer.alloc(32)},'cursor','/work','employee')`
+      for (const seq of [1, 2]) {
+        yield* sql`INSERT INTO thread_turns(id,employee_id,thread_id,worker_turn_seq,initiator,started_at,ended_at,end_reason)
+        VALUES(${randomUUID()},${employee.id},${threadId},${seq},'employee',now(),now(),'completed')`
+      }
+      yield* sql`INSERT INTO thread_turn_items(employee_id,thread_id,worker_turn_seq,item_id,worker_seq,ordinal,type,status,data,truncated,original_bytes)
+      SELECT ${employee.id},${threadId},1,'item-'||n,n,n,'tool_call','completed',${JSON.stringify(data)}::json,false,100 FROM generate_series(1,60) n`
+      yield* sql`UPDATE threads SET last_worker_seq=60 WHERE id=${threadId}`
+    }),
+  )
+  const path = `/api/v1/threads/${threadId}/trace`
+  const first = await request(`${path}?worker_turn_seq=1`)
+  expect(first.status).toBe(200)
+  const page = Schema.decodeUnknownSync(P.ThreadTrace)(await first.json())
+  expect(page.steps).toHaveLength(50)
+  expect(page.steps![0]!.data).toEqual(data)
+  expect(page.next_cursor).toBeTruthy()
+  expect(page.page_cursor).toBeTruthy()
+  await database.run(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`INSERT INTO thread_turn_items(employee_id,thread_id,worker_turn_seq,item_id,worker_seq,ordinal,type,status,data,truncated,original_bytes)
+      VALUES(${employee.id},${threadId},1,'late-item',61,0,'tool_call','completed','{}'::json,false,2)`
+      yield* sql`UPDATE threads SET last_worker_seq=61 WHERE id=${threadId}`
+    }),
+  )
+  const replay = await request(`${path}?worker_turn_seq=1&cursor=${page.page_cursor}`)
+  expect(replay.status).toBe(200)
+  expect(await replay.json()).toEqual(page)
+  const fresh = await request(`${path}?worker_turn_seq=1`)
+  expect(Schema.decodeUnknownSync(P.ThreadTrace)(await fresh.json()).steps![0]!.item_id).toBe('late-item')
+  const next = await request(`${path}?worker_turn_seq=1&cursor=${page.next_cursor}`)
+  expect(next.status).toBe(200)
+  expect(Schema.decodeUnknownSync(P.ThreadTrace)(await next.json()).steps).toHaveLength(10)
+  expect(await (await request(`${path}?worker_turn_seq=2`)).json()).toEqual({
+    ok: false,
+    code: 'trace_missing',
+    steps: [],
+    page_cursor: expect.any(String),
+  })
+  expect((await request(`${path}?worker_turn_seq=3`)).status).toBe(404)
+  expect((await request(`${path}?worker_turn_seq=1&cursor=bad`)).status).toBe(422)
+  expect((await request(path)).status).toBe(400)
+  expect((await request(`/api/v1/threads/${randomUUID()}/trace?worker_turn_seq=1`)).status).toBe(404)
+  await login('http-replacement-password-456')
+  expect((await request(`${path}?worker_turn_seq=1`)).status).toBe(404)
+})
+
 it('propagates request cancellation and clears the session on logout', async () => {
   await login(readyPassword, 'httpready')
   const controller = new AbortController()

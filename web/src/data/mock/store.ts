@@ -526,9 +526,20 @@ export class MockStore {
       attachments: [],
     }
     this.world.messages.push(reply)
-    // 实时输出整理进这一轮的过程，中心不再保留。
+    // 一轮结束后，命令和输出作为过程步骤保存在中心。
     const output = (this.world.outputs[threadId] ?? []).flatMap((chunk) => (chunk.kind === 'text' ? [chunk.text] : []))
-    this.world.traces[reply.id] = [{ kind: 'command', command: 'pnpm test', output: output.join('').trimEnd() }]
+    const data = { input: 'pnpm test', output: output.join('').trimEnd(), exitCode: 0 }
+    this.world.traces[reply.id] = [
+      {
+        item_id: `${reply.id}:command`,
+        type: 'command_execution',
+        status: 'completed',
+        ordinal: 0,
+        data,
+        truncated: false,
+        original_bytes: new TextEncoder().encode(JSON.stringify(data)).length,
+      },
+    ]
     delete this.world.outputs[threadId]
     this.endRunningSends(thread, 'done')
     thread.status = 'idle'
@@ -1851,15 +1862,21 @@ ${response}`,
     }
   }
 
-  // 回复的过程保存在 Thread 所在设备上，设备离线或对话记录已删除时读不到。
-  readTrace(messageId: ID): Trace {
-    const message = this.world.messages.find((item) => item.id === messageId)
-    if (!message) throw new ClientError('notFound', `Message ${messageId} not found`)
-    const thread = this.thread(message.threadId)
-    if (!this.online(thread.deviceId)) return { state: 'unavailable', messageId, reason: 'offline' }
-    if (this.world.lostHistory.includes(thread.id)) return { state: 'unavailable', messageId, reason: 'missing' }
+  // 中心保存的过程与设备连接和本地历史无关。
+  readTrace(messageId: ID, cursor?: string): Trace {
+    if (!this.world.messages.some((item) => item.id === messageId))
+      throw new ClientError('notFound', `Message ${messageId} not found`)
     this.failOnce(`trace:${messageId}`)
-    return { state: 'ready', messageId, steps: this.world.traces[messageId] ?? [] }
+    const steps = this.world.traces[messageId] ?? []
+    if (steps.length === 0) return { state: 'unavailable', messageId, reason: 'missing' }
+    const start = Number(cursor ?? 0)
+    const end = start + 50
+    return {
+      state: 'ready',
+      messageId,
+      steps: steps.slice(start, end),
+      nextCursor: end < steps.length ? String(end) : undefined,
+    }
   }
 
   // 只有执行中的一轮有实时输出。

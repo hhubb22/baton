@@ -462,13 +462,18 @@ describe('Pi Agent host', () => {
               if (
                 reports.some(
                   (report) => report.kind === 'message.unknown' && report.client_message_id === steer.client_message_id,
-                )
+                ) &&
+                reports.some((report) => report.kind === 'thread.unknown')
               )
                 return reports
               yield* Effect.sleep('20 millis')
             }
           }).pipe(Effect.timeout('10 seconds'))
-          expect(reports.some((report) => report.kind === 'thread.unknown')).toBe(true)
+          expect(
+            reports
+              .filter((report) => ['turn.ended', 'thread.unknown'].includes(report.kind))
+              .map((report) => report.kind),
+          ).toEqual(['turn.ended', 'thread.unknown'])
           expect(reports.filter((report) => report.kind === 'turn.started')).toHaveLength(1)
           expect(yield* worker.handle(steer)).toMatchObject({
             ok: true,

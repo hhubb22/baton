@@ -237,9 +237,17 @@ function MessageItem({
   // 回复里的路径指向 Thread 所在设备。
   const onOpenPath = (path: string) => onOpen(deviceId, path)
   const notice = threadMessageNotice(message, agent)
+  if (message.role === 'activity') {
+    return (
+      <article id={`message-${message.id}`} {...stylex.props(styles.agent)}>
+        <ActivityTrace message={message} device={device} command={command} />
+      </article>
+    )
+  }
   if (notice) {
     return (
       <article id={`message-${message.id}`} {...stylex.props(styles.agent)}>
+        <ActivityTrace message={message} device={device} command={command} />
         <h3 {...stylex.props(text.bodyMedium)}>{notice.title}</h3>
         <p {...stylex.props(text.body, styles.muted)}>{notice.detail}</p>
       </article>

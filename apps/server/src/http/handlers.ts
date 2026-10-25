@@ -317,12 +317,14 @@ export const httpHandlers = (options: HTTPOptions) => {
             }),
           ),
         )
-        .handle('trace', ({ params }) =>
+        .handle('trace', ({ params, query }) =>
           httpBusiness(
             Effect.gen(function* () {
               const { employee } = yield* CurrentBrowserSession
-              yield* Threads.view({ employeeId: employee.id }, params.threadId)
-              return { ok: false, code: 'trace_missing', steps: [] }
+              return yield* Threads.trace({ employeeId: employee.id }, params.threadId, {
+                worker_turn_seq: Number(query.worker_turn_seq),
+                ...(query.cursor !== undefined ? { cursor: query.cursor } : {}),
+              })
             }),
           ),
         ),

@@ -724,49 +724,53 @@ function files(): Record<string, DeviceFile> {
 
 // 设备上保存的回复过程，只在展开时按需读取。
 function traces(): Record<string, TraceStep[]> {
-  return {
+  const command = (input: string, output: string) => ({ type: 'command_execution', data: { input, output } })
+  const file = (fileName: string) => ({ type: 'file_change', data: { fileName } })
+  const tool = (toolName: string, input: string) => ({ type: 'dynamic_tool', data: { toolName, input } })
+  const records = {
     'msg-gateway-r1': [
-      {
-        kind: 'command',
-        command: 'pnpm --filter @baton/server test:unit src/gateway.test.ts',
-        output:
-          'FAIL src/gateway.test.ts > reconnects after sleep (30020ms)\nError: no reconnect after resume\n    at src/gateway.test.ts:41\nTests  1 failed | 47 passed (48)',
-      },
-      { kind: 'file', action: 'wrote', path: `${ubuntuRepo}/logs/reconnect.log` },
+      command(
+        'pnpm --filter @baton/server test:unit src/gateway.test.ts',
+        'FAIL src/gateway.test.ts > reconnects after sleep (30020ms)\nError: no reconnect after resume\n    at src/gateway.test.ts:41\nTests  1 failed | 47 passed (48)',
+      ),
+      file(ubuntuRepo + '/logs/reconnect.log'),
     ],
     'msg-webui-2': [
-      {
-        kind: 'command',
-        command: 'pnpm create vite web --template react-ts',
-        output: 'Scaffolding project in ~/src/baton/web...\nDone.',
-      },
-      { kind: 'tool', name: 'Read', detail: '~/src/baton/specs/web-ui/PLAN.md' },
-      { kind: 'file', action: 'wrote', path: '~/src/baton/web/vite.config.ts' },
-      {
-        kind: 'command',
-        command: 'pnpm --dir web build',
-        output: 'vite v7.1.4 building for production...\n✓ 42 modules transformed.\n✓ built in 1.84s',
-      },
-      { kind: 'file', action: 'edited', path: '~/src/baton/README.md' },
+      command('pnpm create vite web --template react-ts', 'Scaffolding project in ~/src/baton/web...\nDone.'),
+      tool('Read', '~/src/baton/specs/web-ui/PLAN.md'),
+      file('~/src/baton/web/vite.config.ts'),
+      command(
+        'pnpm --dir web build',
+        'vite v7.1.4 building for production...\n✓ 42 modules transformed.\n✓ built in 1.84s',
+      ),
+      file('~/src/baton/README.md'),
     ],
     'msg-compat-2': [
-      {
-        kind: 'command',
-        command: 'pnpm test',
-        output:
-          'FAIL src/path.test.ts > join drive letters\nFAIL src/path.test.ts > relative paths across drives\nTests  2 failed',
-      },
-      { kind: 'file', action: 'wrote', path: 'C:\\src\\compat-suite\\report.md' },
+      command(
+        'pnpm test',
+        'FAIL src/path.test.ts > join drive letters\nFAIL src/path.test.ts > relative paths across drives\nTests  2 failed',
+      ),
+      file('C:\\src\\compat-suite\\report.md'),
     ],
     'msg-upgrade-2': [
-      { kind: 'command', command: 'batond upgrade --version 0.9.2', output: 'Downloaded batond 0.9.2 (18.4 MB)' },
-      { kind: 'command', command: 'Restart-Service batond', output: '' },
+      command('batond upgrade --version 0.9.2', 'Downloaded batond 0.9.2 (18.4 MB)'),
+      command('Restart-Service batond', ''),
     ],
-    'msg-guide-2': [
-      { kind: 'tool', name: 'Search', detail: 'batond enroll' },
-      { kind: 'file', action: 'wrote', path: '~/src/baton/docs/batond.md' },
-    ],
+    'msg-guide-2': [tool('Search', 'batond enroll'), file('~/src/baton/docs/batond.md')],
   }
+  return Object.fromEntries(
+    Object.entries(records).map(([messageId, steps]) => [
+      messageId,
+      steps.map((step, ordinal) => ({
+        ...step,
+        item_id: messageId + ':' + ordinal,
+        ordinal,
+        status: 'completed',
+        truncated: false,
+        original_bytes: new TextEncoder().encode(JSON.stringify(step.data)).length,
+      })),
+    ]),
+  )
 }
 
 // 执行中 Thread 已经收到的实时输出。

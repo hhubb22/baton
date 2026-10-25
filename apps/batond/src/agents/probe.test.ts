@@ -30,6 +30,7 @@ const host = (probe: AgentHostConnection['probe'] = Effect.succeed(result)): Age
   send: () => Effect.die('Probe must not send a prompt'),
   sent: () => Effect.die('Probe must not inspect a submission'),
   events: Stream.empty,
+  flushEvents: () => Effect.die('Probe must not flush session events'),
   abort: Effect.die('Probe must not call session abort'),
   close: Effect.die('Probe must not close a session'),
   exited: Effect.never,

@@ -29,11 +29,26 @@ export type Acceptance = typeof Acceptance.Type
 export const SessionIdentity = Schema.Struct({ nativeSessionId: Schema.String })
 export type SessionIdentity = typeof SessionIdentity.Type
 
+// Host events carry the complete item; the Worker applies report budgets before persistence.
+export const HostTurnItem = Schema.Struct({
+  id: Schema.String,
+  type: Schema.String,
+  status: Schema.String,
+  ordinal: Schema.Number,
+  parent_id: Schema.optionalKey(Schema.String),
+  title: Schema.optionalKey(Schema.String),
+  started_at: Schema.optionalKey(Schema.String),
+  completed_at: Schema.optionalKey(Schema.String),
+  data: Schema.Json,
+})
+
 const identity = { nativeSessionId: Schema.String, messageId: Schema.String, executionId: Schema.String }
 export const ExecutionEvent = Schema.Union([
+  Schema.Struct({ type: Schema.Literal('barrier'), id: Schema.String }),
   Schema.Struct({ ...identity, type: Schema.Literal('question'), question: ThreadQuestion }),
   Schema.Struct({ ...identity, type: Schema.Literal('question.resolved'), requestId: Schema.String }),
   Schema.Struct({ ...identity, type: Schema.Literal('reply'), id: Schema.String, text: Schema.String }),
+  Schema.Struct({ ...identity, type: Schema.Literal('item'), item: HostTurnItem }),
   Schema.Struct({
     ...identity,
     type: Schema.Literal('delta'),
@@ -41,12 +56,18 @@ export const ExecutionEvent = Schema.Union([
     text: Schema.String,
     gap: Schema.optionalKey(Schema.Boolean),
   }),
-  Schema.Struct({ ...identity, type: Schema.Literal('end'), outcome: Schema.Literals(['completed', 'cancelled']) }),
+  Schema.Struct({
+    ...identity,
+    type: Schema.Literal('end'),
+    outcome: Schema.Literals(['completed', 'cancelled']),
+    tokenUsage: Schema.optionalKey(Schema.Json),
+  }),
   Schema.Struct({
     ...identity,
     type: Schema.Literal('end'),
     outcome: Schema.Literal('failed'),
     reason: Schema.String,
+    tokenUsage: Schema.optionalKey(Schema.Json),
   }),
   Schema.Struct({ type: Schema.Literal('uncertain'), reason: Schema.String }),
 ])
@@ -99,6 +120,7 @@ export interface AgentHostDriverShape {
   readonly answer?: (input: ThreadAnswerInput) => Effect.Effect<void, AgentHostError>
   /** Reply, end and uncertain events; deltas are merged in by the same stream. */
   readonly events: Stream.Stream<ExecutionEvent, AgentHostError>
+  readonly flushEvents: (id: string) => Effect.Effect<void, AgentHostError>
   readonly abort: Effect.Effect<void, AgentHostError>
   readonly close: Effect.Effect<void, AgentHostError>
 }
@@ -140,6 +162,7 @@ export const AgentHostRpc = RpcGroup.make(
   }),
   Rpc.make('answer', { payload: { answer: ThreadAnswerInput }, error: AgentHostError }),
   Rpc.make('events', { success: HostEvent, stream: true, error: AgentHostError }),
+  Rpc.make('flushEvents', { payload: { id: Schema.String }, error: AgentHostError }),
   Rpc.make('abort', { error: AgentHostError }),
   Rpc.make('close', { error: AgentHostError }),
 )
