@@ -19,6 +19,10 @@ afterEach(async () => {
 const open = async (mode = 'idle', real = false) => {
   const dataDir = await makePrivateTempDirectory('baton-runtime-probe-')
   cleanups.push(() => rm(dataDir, { recursive: true, force: true }))
+  if (real) {
+    // 源码 CLI 通过 tsx 加载依赖，为并行测试下的冷启动预留时间。
+    await writePrivateFileAtomic(join(dataDir, 'project-runtime.json'), JSON.stringify({ probeTimeoutMs: 20000 }))
+  }
   const scope = Scope.makeUnsafe()
   const base = real
     ? defaultRuntimeCommand()
@@ -228,7 +232,7 @@ it('probes the existing Runtime source CLI using only an empty local credential 
     ['openai-codex', 'login_required'],
     ['xai', 'login_required'],
   ])
-})
+}, 30000)
 it('rejects incompatible probes and omits invalid runtime reports', async () => {
   const manager = await open('bad-probe')
   await expect(manager.probe()).rejects.toThrow('版本不匹配')
