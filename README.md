@@ -22,7 +22,7 @@ Agent 接入使用 [`upstream/t3code`](third_party/t3code/README.md) 中的完�
 
 ## 环境要求
 
-- Node.js 26+、pnpm 12+，用于工作区开发和 bundle 运行。
+- 官方 Node.js 26+、pnpm 12+，用于工作区开发和构建。SEA 打包要求 Node 支持 `--build-sea`，并保留官方归档中的 LICENSE。
 - PostgreSQL 16+，用于中心数据与本地集成测试。
 - Agent 所需原生 CLI 或 SDK 及设备本地认证。Cursor 使用显式配置的 `CURSOR_API_KEY`；Pi、Codex、Kiro 使用原生 CLI 配置。
 
@@ -34,16 +34,21 @@ Agent 接入使用 [`upstream/t3code`](third_party/t3code/README.md) 中的完�
 git submodule update --init
 pnpm install --frozen-lockfile --ignore-scripts
 node tools/build.mjs
+node tools/check-package.mjs bin
 ```
 
-统一构建从根 workspace 按锁文件安装依赖，然后构建 `@baton/server` 和 `@baton/batond`，产物位于 `apps/server/dist` 与 `apps/batond/dist`。也可分别运行：
+统一构建从根 workspace 按锁文件安装依赖，构建中心和节点 bundle，再生成 `bin/` 中当前平台的 batond SEA 安装包。安装包包含 `batond`（Windows 为 `batond.exe`）、旁置 `node_modules/`、许可、安装说明及 `package-manifest.json`。设备运行无需安装 Node 或 pnpm，须保留整个安装目录。安装包检查会搬迁产物，在空 PATH 和临时 HOME 下验证 Worker、Agent host、Project Runtime、私有文件及缺失依赖的错误。
+
+中心和节点 bundle 分别位于 `apps/server/dist` 与 `apps/batond/dist`。也可单独构建、打包和检查：
 
 ```sh
 pnpm --filter @baton/server build
 pnpm --filter @baton/batond build
+node tools/package-batond.mjs --out bin
+node tools/check-package.mjs bin
 ```
 
-中心构建自动生成 `server.cjs`、相邻的 `web/` 和 `migrations/`；启动中心时须保留这三个部分。节点 bundle 为 `apps/batond/dist/batond.cjs`，开发运行仍使用 workspace 依赖，Project Runtime 从源码入口启动。产物不提交 Git。容器与 batond SEA 的发布布局、附带依赖和系统验证范围见 [迁移设计的打包与发布](specs/ts-migration/TECH.md#打包与发布)。
+中心构建自动生成 `server.cjs`、相邻的 `web/` 和 `migrations/`；启动中心时须保留这三个部分。节点 bundle 为 `apps/batond/dist/batond.cjs`，开发运行仍使用 workspace 依赖，Project Runtime 从源码入口启动。SEA 安装包将 Project Runtime 编入同一个可执行文件，以 `project-runtime` 子命令运行；设备接入命令见 [安装说明](runtimes/INSTALL.md)。产物不提交 Git。容器与 batond SEA 的发布布局、附带依赖和系统验证范围见 [迁移设计的打包与发布](specs/ts-migration/TECH.md#打包与发布)。
 
 ### 中心服务与员工账号
 
@@ -136,7 +141,7 @@ pnpm --filter @baton/batond dev probe
 pnpm check
 pnpm typecheck
 pnpm test
-node --test tools/build.test.mjs
+node --test tools/*.test.mjs
 ```
 
 `pnpm test` 按依赖顺序串行执行，包含上游包和 [`e2e`](e2e/README.md)，数据库与进程测试不缓存。测试会构建 Runtime，须与统一构建分开执行，避免争用产物目录。适配器、跨 app 与 Runtime 验证使用离线转录和本地模型替身，不需要真实模型凭据。

@@ -12,7 +12,7 @@
 ## 本地开发与验证环境
 
 - 所有开发与验证均在本地环境完成，不使用云端开发环境或外部密码管理器依赖。
-- 统一构建：`pnpm install --frozen-lockfile --ignore-scripts` 从根 workspace 安装依赖，`node --test tools/build.test.mjs` 验证构建脚本，`node tools/build.mjs` 构建 `@baton/server` 与 `@baton/batond`。产物在 `apps/{server,batond}/dist`，中心自动包含网页和 SQL 迁移；SEA 安装包见 `specs/ts-migration/TECH.md` 的「打包与发布」。
+- 统一构建：`pnpm install --frozen-lockfile --ignore-scripts` 从根 workspace 安装依赖，`node --test tools/*.test.mjs` 验证构建与打包脚本，`node tools/build.mjs` 构建中心和节点 bundle，并生成 `bin/` 中当前平台的 SEA 安装包。`node tools/check-package.mjs bin` 验证搬迁后的安装包。bundle 在 `apps/{server,batond}/dist`，中心自动包含网页和 SQL 迁移；单独打包使用 `node tools/package-batond.mjs --out bin`，官方 Node 与 SEA 安装包要求见 `specs/ts-migration/TECH.md` 的「打包与发布」。
 - 工作区验证：`pnpm check`、`pnpm typecheck`、`pnpm test`。数据库测试默认使用本机 PostgreSQL 测试库 `postgres://postgres:baton@127.0.0.1:5432/baton_test?sslmode=disable`，可通过 `BATON_TEST_DATABASE_URL` 覆盖。适配器使用上游离线转录与本地替身。
 - Project Agent Runtime 验证：在 `runtimes/project-agent/` 运行 `pnpm test`。
 - Web 验证：改动 `web/` 时运行 `pnpm --dir web lint`、`pnpm --dir web typecheck`、`pnpm --dir web test`、`pnpm --dir web build`，构建生成 `apps/server/dist/web` 中的静态文件。

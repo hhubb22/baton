@@ -35,18 +35,19 @@ pnpm test
 统一构建与构建脚本验证：
 
 ```sh
-node --test tools/build.test.mjs
+node --test tools/*.test.mjs
 node tools/build.mjs
+node tools/check-package.mjs bin
 ```
 
-统一构建使用根 workspace 安装命令，并构建 `@baton/server` 与 `@baton/batond`，产物分别位于 `apps/server/dist` 和 `apps/batond/dist`。中心的 `build` 和 `dev` 自动构建网页并复制 SQL 迁移，生成 `server.cjs` 及相邻的 `web/`、`migrations/`。可分别运行：
+统一构建从根 workspace 安装依赖，构建中心和节点 bundle，再调用 `tools/package-batond.mjs --out bin` 生成当前平台的 SEA 安装包。bundle 分别位于 `apps/server/dist` 和 `apps/batond/dist`；`bin/` 包含 `batond`（Windows 为 `batond.exe`）、旁置 `node_modules/`、许可和安装包清单。打包使用支持 `--build-sea` 且保留 LICENSE 的官方 Node 26，设备运行无需安装 Node。中心的 `build` 和 `dev` 自动构建网页并复制 SQL 迁移，生成 `server.cjs` 及相邻的 `web/`、`migrations/`。可分别运行：
 
 ```sh
 pnpm --filter @baton/server build
 pnpm --filter @baton/batond build
 ```
 
-bundle 与 SEA 安装包的布局、附带依赖和验证范围见 [迁移设计](specs/ts-migration/TECH.md#打包与发布)。开发 bundle 的 Project Runtime 仍从源码与已安装依赖启动。
+单独打包使用 `node tools/package-batond.mjs --out bin`，随后运行 `node tools/check-package.mjs bin`，在搬迁目录、空 PATH 和临时 HOME 下检查 Worker、Agent host、Project Runtime 和私有文件。bundle 与 SEA 安装包的布局、附带依赖和验证范围见 [迁移设计](specs/ts-migration/TECH.md#打包与发布)。开发 bundle 的 Project Runtime 仍从源码与已安装依赖启动。
 
 仅验证远程开发链路时：
 

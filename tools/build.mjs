@@ -21,6 +21,7 @@ export function build(run = runCommand) {
   // 中心构建同时生成 bundle 旁的 web/ 和 migrations/。
   run('pnpm', ['--filter', '@baton/server', 'build'])
   run('pnpm', ['--filter', '@baton/batond', 'build'])
+  run(process.execPath, ['tools/package-batond.mjs', '--out', 'bin'])
 }
 
 if (import.meta.main) {

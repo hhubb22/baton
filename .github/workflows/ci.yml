@@ -59,6 +59,8 @@ jobs:
         run: |
           node --test tools/*.test.mjs
           node tools/build.mjs
+      - name: Check package
+        run: node tools/check-package.mjs bin
       - name: Runtime tests
         run: pnpm --dir runtimes/project-agent test
       - name: Web format

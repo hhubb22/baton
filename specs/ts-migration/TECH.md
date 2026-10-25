@@ -8,7 +8,7 @@ Basis: [Baton PRODUCT](../baton/PRODUCT.md)；[Baton TECH](../baton/TECH.md)；[
 
 Coordinator、batond 和 Session Worker 使用 TypeScript + Effect 4，Agent 接入整包依赖 t3code fork 的 provider 并接受上游行为。行为依据为 Baton 与 Agent 适配 PRODUCT，服务边界、并发模型和内部接口按 Node 运行时设计。
 
-根构建入口从 workspace 执行 `pnpm install --frozen-lockfile --ignore-scripts`，构建 `@baton/server` 和 `@baton/batond`，产物分别位于 `apps/server/dist` 与 `apps/batond/dist`。中心自动包含网页和 SQL 迁移；SEA 安装包的入口与依赖布局见「打包与发布」。
+根构建入口从 workspace 执行 `pnpm install --frozen-lockfile --ignore-scripts`，构建 `@baton/server` 和 `@baton/batond`，bundle 分别位于 `apps/server/dist` 与 `apps/batond/dist`，随后调用 `tools/package-batond.mjs --out bin` 生成当前平台的 SEA 安装包。中心自动包含网页和 SQL 迁移；安装包的入口与依赖布局见「打包与发布」。
 
 | 规则 | 内容 |
 |---|---|
