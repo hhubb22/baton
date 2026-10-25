@@ -1,6 +1,6 @@
 # 跨 app 集成测试
 
-`@baton/e2e` 通过声明的 workspace 依赖启动 TypeScript 中心、节点和本地 Worker，验证远程 Thread、Project、数据库中断恢复及 Gateway 报告流控。模型行为使用确定性回放和本地替身。
+`@baton/e2e` 通过声明的 workspace 依赖启动 TypeScript 中心、节点和本地 Worker，验证远程 Thread、Project、数据库中断恢复及 Gateway 报告流控。模型行为使用上游静态转录、确定性回放和本地替身，不调用在线模型。Pi、Codex、Kiro 的 provider 链路复用节点包导出的转录辅助模块，Cursor 由独立 Worker 回放入口覆盖；数据来源与适配边界见 [回放测试设计](../specs/agent-replay/TECH.md)。
 
 在仓库根目录运行：
 

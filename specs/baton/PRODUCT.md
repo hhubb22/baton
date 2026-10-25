@@ -72,7 +72,7 @@ batond 主动建立到中心的 TLS WebSocket 连接，断线后自动退避重�
 
 **R-06｜设备能力**
 
-设备上报已接入的 Agent 类型、版本、可用模型和默认模型，以及可用能力（新建、排队、插入、停止、恢复、换模型），缺少程序、认证或配置时显示具体缺项。设备还上报：是否装有 Project Agent Runtime、各模型 provider 的认证状态与登录方式、员工登记的目录、这些目录中发现的代码仓库、是否允许 Project Agent 执行命令及使用的 shell。模型凭据不离开设备。Project Runtime 注册 ChatGPT、xAI 和 Claude；ChatGPT 使用订阅登录，xAI 和 Claude 还支持设备本地配置 API key。员工在设备使用 `batond login <provider>` 登录订阅，Go 发布入口接受 `openai-codex|xai`，TypeScript 节点还接受 `anthropic`；API key 使用 `baton-project-runtime login-api-key <provider>` 从标准输入保存。网页按设备报告的认证方式提供设备码登录或本地配置命令，API key 只绑定指定 provider，不读取环境认证或其他 CLI 账号。使用 `batond subscriptions` 查看本地状态及登录指引；命令无需先注册或连接中心。网页设备详情支持为在线且已同步的本人设备发起设备码登录，显示授权网址、验证码和有效期，支持复制验证码；用户在授权网址完成确认，设备后台轮询并在结束后立即刷新订阅状态。网页在设备报告已登录后显示 `Signed in`，取码失败或验证码过期时支持重新获取。同一订阅服务的新登录会取消旧登录，后台登录最长等待 15 分钟。登录与守护进程使用相同的系统用户和 Runtime 凭据目录，在线设备自动上报状态。状态查询不刷新凭据或请求模型，Runtime 缺失或探测失败时返回错误。选择设备不支持的 Agent 或操作时，在执行前返回原因。
+设备上报已接入的 Agent 类型、版本、可用模型和默认模型，以及可用能力（新建、排队、插入、停止、恢复、换模型），缺少程序、认证或配置时显示具体缺项。设备还上报：是否装有 Project Agent Runtime、各模型 provider 的认证状态与登录方式、员工登记的目录、这些目录中发现的代码仓库、是否允许 Project Agent 执行命令及使用的 shell。模型凭据不离开设备。Project Runtime 注册 ChatGPT、xAI 和 Claude；ChatGPT 使用订阅登录，xAI 和 Claude 还支持设备本地配置 API key。员工在设备使用 `batond login <provider>` 登录订阅，节点接受 provider ID 及 ChatGPT、xAI、Claude 别名，由 Runtime 注册表决定支持范围；API key 使用 `baton-project-runtime login-api-key <provider>` 从标准输入保存。网页按设备报告的认证方式提供设备码登录或本地配置命令，API key 只绑定指定 provider，不读取环境认证或其他 CLI 账号。使用 `batond subscriptions` 查看本地状态及登录指引；命令无需先注册或连接中心。网页设备详情支持为在线且已同步的本人设备发起设备码登录，显示授权网址、验证码和有效期，支持复制验证码；用户在授权网址完成确认，设备后台轮询并在结束后立即刷新订阅状态。网页在设备报告已登录后显示 `Signed in`，取码失败或验证码过期时支持重新获取。同一订阅服务的新登录会取消旧登录，后台登录最长等待 15 分钟。登录与守护进程使用相同的系统用户和 Runtime 凭据目录，在线设备自动上报状态。状态查询不刷新凭据或请求模型，Runtime 缺失或探测失败时返回错误。选择设备不支持的 Agent 或操作时，在执行前返回原因。
 
 ### Thread
 

@@ -6,7 +6,7 @@ Basis: [行为规格](PRODUCT.md)；[TypeScript 迁移 TECH](../ts-migration/TEC
 
 ## 现有实现与设计边界
 
-TS 版已交付 T1～T3：Worker 的认证 IPC、持久命令回执、intent 账本、停止裁决与 outbox，batond 的注册、WSS 和 Worker 管理，中心与网页的远程 Thread、Project 和设备管理。Cursor、Pi、Codex、Kiro 经 `agent-host` 子进程使用 fork 的完整 provider adapter，不再保留本地抽取的 SDK runner。Kiro 在程序已安装且认证 valid/unknown 时报告可用，版本和系统不限，开放网页新建与恢复。Go 版 Session Worker 与 Pi、Codex、Kiro 适配器在切换时删除，不再作为行为基准或验收对照；Kiro 2.32.0 的旧录制经用户授权转换为 fork 的 ACP 回放夹具，是旧资产保留的唯一例外。
+当前实现包含 Worker 的认证 IPC、持久命令回执、intent 账本、停止裁决与 outbox，batond 的注册、WSS 和 Worker 管理，中心与网页的远程 Thread、Project 和设备管理。Cursor、Pi、Codex、Kiro 经 `agent-host` 子进程使用 fork 的完整 provider adapter，不再保留本地抽取的 SDK runner。Kiro 在程序已安装且认证 valid/unknown 时报告可用，版本和系统不限，开放网页新建与恢复。适配器行为以完整上游实现和当前 PRODUCT 为依据，离线验证复用 fork 的测试与转录；Kiro 夹具说明见 [fork README](../../upstream/t3code/packages/provider-acp-registry/src/testing/fixtures/kiro/README.md)。
 
 Agent 接入整包依赖 Baton 维护的 t3code fork，使用其完整 provider 包和 `ProviderAdapterV2` 接口，接受上游的协议处理、重试、重连、steer、取消和事件归一化行为。Baton 不为产品差异修改上游 adapter；上游缺少的能力（如 Kiro）在 fork 中按上游写法补齐。包体积和依赖范围在第一版接受现状，之后再按需要逐步转写为自实现。
 
@@ -92,7 +92,7 @@ Worker 运行在 batond SEA 携带的 Node 26 上，依赖 `effect` 4 与 `@effe
 
 POSIX 的 watchdog 是 batond 可执行文件的 `watchdog` 子命令：Worker 被强杀时内核关闭管道写端，watchdog 不依赖 Worker 配合。Worker 把每个新建的进程组 ID 通过该管道登记给 watchdog。
 
-Windows 第一版接受两个已知缺口。`taskkill /T` 按父 PID 向下查找，中间进程先退出时，其后代会漏掉；Worker 被强杀后，到下次 Worker 启动之间 Agent 进程会继续运行。Windows 进程创建时间在恢复时通过 PowerShell `Get-CimInstance Win32_Process` 读取，用于排除 PID 复用。kill-on-close Job Object 推到第一版之后，届时以一个原生模块接入 `src/platform/process`，其余代码不变。`specs/baton/TECH.md` 的停止一节在切换提交中改写为 Windows 的当前保证。
+Windows 第一版接受两个已知缺口。`taskkill /T` 按父 PID 向下查找，中间进程先退出时，其后代会漏掉；Worker 被强杀后，到下次 Worker 启动之间 Agent 进程会继续运行。Windows 进程创建时间在恢复时通过 PowerShell `Get-CimInstance Win32_Process` 读取，用于排除 PID 复用。kill-on-close Job Object 推到第一版之后，届时以一个原生模块接入 `src/platform/process`，其余代码不变。全局停止与恢复规则见 `specs/baton/TECH.md`，两处采用相同的 Windows 边界。
 
 停止确认仍以 Turn 终止事件或进程树回收结果为证据。回收测试用本地替身创建 detached 后代，核对整棵进程树退出，不能只看 agent-host PID 已消失。batond 重启仍通过已有认证 IPC 连接存活的 Worker，不因重连重开 Agent。
 
@@ -168,7 +168,7 @@ open 的成功 `ThreadCommandResult` 增加当前 `storage_generation`，中心�
 
 程序、认证、协议与模型发现使用上游 driver 的检查结果，Baton 不另设系统或版本白名单。程序或 SDK 已安装、认证 valid/unknown 时报告 available，未知版本、其他系统、版本探测失败或超时均不阻止创建；缺程序或明确认证 missing 时报告 unavailable。离线回放覆盖的版本和系统范围保留在夹具与验证文档中，缺少验证证据的组合照常开放。
 
-Kiro 的离线行为验证使用 fork 的 ACP replay testkit 与 2.32.0 夹具，验证 adapter 行为；真实账号授权由原生程序在实际执行时检查。夹具由旧 Go 录制转换，是用户授权的唯一例外；旧 Go 实现与测试不读取、不作为行为参照。转换脚本位于 fork 的 `packages/provider-acp-registry/scripts/convert-kiro-replay.mjs`，夹具位于同包 `src/testing/fixtures/kiro/`。转换保留协议响应、通知和权限结果，调整 initialize 协商请求及 prompt 形状，丢弃 version 探测与 stderr。夹具 README 与 metadata 的 `agentVersion` 明确记录 `2.32.0`，转录的 `version: "1"` 是协议格式版本。
+Kiro 的离线行为验证使用 fork 的 ACP replay testkit 与夹具，验证 adapter 行为；真实账号授权由原生程序在实际执行时检查。转录说明见 [fork README](../../upstream/t3code/packages/provider-acp-registry/src/testing/fixtures/kiro/README.md)。
 
 ## 历史（R-10）
 

@@ -27,9 +27,9 @@ flowchart LR
 
 ## 2. 现有依据与借鉴
 
-Thread 命令派发（`internal/control/thread.go`）只执行有界派发，`internal/store/thread_outbox.go` 从各节点到期候选中领取记录；回包按持久化关联 ID 独立保存。吊销补偿独立运行。
+Thread 命令派发由 `apps/server/src/server.ts` 的独立循环执行，`threads-outbox.ts` 从各节点到期候选中领取记录；接收与完成由 `threads-reports.ts` 按持久命令身份保存。`control-maintenance.ts` 独立处理吊销补偿与断线重试。
 
-[Project 命令领取](../../internal/store/project_delivery.go) 分别处理 start、stop 和 wake，按节点应用额度并跳过被锁定的候选。业务结束保存停止意图，进程清理完成由节点确认。输入的通知接收进度与业务认领进度分别保存。
+[Project 命令领取](../../apps/server/src/project-scheduling.ts) 分别处理 start、stop 和 wake，按节点应用额度并跳过被锁定的候选。业务结束保存停止意图，进程清理完成由节点确认。输入的通知接收进度与业务认领进度分别保存。
 
 | 上游机制 | 本方案采用的部分 |
 |---|---|
@@ -54,7 +54,7 @@ Thread 命令派发（`internal/control/thread.go`）只执行有界派发，`in
 
 按节点限制在领取阶段应用，不能先取出全局最早 32 条再丢掉超额节点，否则会挡住后页节点。查询从在线且同步的节点出发，利用节点到期索引取得少量候选，不对一个节点的全部历史积压做窗口排序。
 
-后台 Store 操作共用有界并发门，默认最多 4 个；数据库连接池较小时，门限不超过 `max(1, MaxConns/2)`。等待门和数据库操作都受上下文限制，单次数据库调用默认最多 1 秒。每个循环不重叠执行，不为每个待确认对象创建 goroutine。Gateway 入队失败立即返回，继续处理其他节点。
+控制操作共用 4 个数据库执行名额，排队与执行分别限时。排队默认 2 秒，Thread / Project 派发和调度默认执行预算 10 秒，维护默认 5 秒；各类可通过 `BATON_CONTROL_<操作>_QUEUE_TIMEOUT` 与 `BATON_CONTROL_<操作>_EXECUTION_TIMEOUT` 配置，范围见中心 README。每个循环防止自身重叠执行，Gateway 入队失败立即返回，继续处理其他节点。
 
 所有领取、身份校验和状态更新都在短事务完成；网络调用、等待和退避不持有事务或业务行锁。数据库整体故障时不能承诺正常派发延迟，但循环、连接等待与内存仍有界。
 
@@ -125,7 +125,7 @@ batond 在 Runtime 进程树回收及本地收尾完成后，先在现有 projec
 2. 发送已有 stopped 确认。只有中心明确 OK，才标记本地清理确认已交付。
 3. 暂时失败保留本地记录，按到期时间重试；重连后继续补送。
 
-本地行增加 `cleanup_complete`、`cleanup_acked`、`cleanup_next_at`、`cleanup_attempts`。补送调用有 5 秒期限，领取时先为这 5 秒调用及后续退避预留时间，失败项不会因调用耗时而立即重新占据队首。一个固定补送循环即可，不在 m.mu 或本地事务内等待 RPC。共享 WebSocket writer 通过可取消的串行入口等待写入，RPC 的期限包含排队时间，关闭 manager 可取消两个回执 worker。
+本地行增加 `cleanup_complete`、`cleanup_acked`、`cleanup_next_at`、`cleanup_attempts`。补送调用有 5 秒期限，领取时先为这 5 秒调用及后续退避预留时间，失败项不会因调用耗时而立即重新占据队首。一个固定补送循环即可，不在本地状态串行操作或事务内等待 RPC。管理请求携带包含排队、发送和等待的取消信号；关闭 manager 取消所属请求并等待进程收尾。
 
 清理事实写入失败时，已结束实例保留在管理器中，与活动实例共用 4-run 上限，由固定循环继续补写。持久化成功后才释放名额；本地账本操作限时 1 秒。再次崩溃且未落盘时，仍按缺少清理证据处理。
 
@@ -133,7 +133,7 @@ batond 在 Runtime 进程树回收及本地收尾完成后，先在现有 projec
 
 未启动的 run 收到 stop 时，节点保存不可再次启动该 run 的本地终止记录，再确认；有运行实例时，完成现有进程树停止后确认。重复 start / stop 不创建第二个进程，也不改变既有终态。
 
-确认边界沿用 sidecar.Process.Wait 所代表的进程树回收完成，不能只根据模型 finish、根进程退出或修改本地 state 字段判断。batond 重启后的旧记录没有清理证据时，不能仅因为内存 map 为空就自动确认；保持清理未确认，按现有平台进程管理机制核实。无法核实的记录保留低频重试和可见状态，不阻塞新的 Thread 命令。该平台边界必须由恢复测试验证，方案不额外建立进程守护服务。
+确认边界为 `apps/batond/src/platform/process.ts` 的进程树回收，以及 Runtime stdio 和控制目录收尾完成，不能只根据模型 finish、根进程退出或修改本地 state 字段判断。batond 重启后的旧记录没有清理证据时，不能仅因为内存 map 为空就自动确认；保持清理未确认，按现有平台进程管理机制核实。无法核实的记录保留低频重试和可见状态，不阻塞新的 Thread 命令。该平台边界必须由恢复测试验证，方案不额外建立进程守护服务。
 
 stopped 继续只确认指定 run 的清理事实，要求其原节点、员工、epoch 和当前认证连接有效；允许确认历史终态，不要求该 run 仍持有 Agent 租约。认证行按 Node → Credential → Presence 加共享锁，再锁目标 Run，全部锁取得后重新核对数据库当前时刻下的凭据期限。吊销和连接替换不能穿过这段确认事务，等待 Run 锁跨过凭据期限则拒绝确认。不得修改新 run、恢复旧租约或改变已经保存的 finished / failed / lost 及结束原因。
 
@@ -159,7 +159,7 @@ project_agent_input_queue 增加：
 
 project_run_wake 增加可选 `input_ids: int64[]`，每条最多 32 个正数 ID。同一个 Thread 的 thread_updates 按版本合并，每 run 最多 64 个绑定。
 
-batond 确认 run 和 epoch 后，将通用 wake 合并到已有容量为 1 的通道，并把 Thread 版本交给等待缓存。确认消息放入固定容量 64 的发送队列，由一个固定协程执行以下节点管理请求；队列满时不确认，等待中心重发。WebSocket 读循环和 Runtime 管理锁内不等待确认 RPC。
+batond 确认 run 和 epoch 后，将通用 wake 合并到已有容量为 1 的通道，并把 Thread 版本交给等待缓存。节点在本地通知状态保存后发送以下管理请求；通知失败保留诊断，中心按原输入身份重试。Runtime 业务请求和通知确认分别处理，见节点 `src/project` 的管理器实现。
 
 ```json
 {
@@ -205,35 +205,30 @@ Project 状态迁移、输入领取和 wake_received 按 Agent → Conversation�
 
 | 模块 | 职责 |
 |---|---|
-| internal/control/thread.go、background.go | Thread 命令的非阻塞发送、直接回包处理、独立维护循环及数据库并发门 |
-| internal/store/thread_outbox.go | Thread 命令到期领取、同 Thread 顺序、幂等确认 |
-| internal/control/project_runtime.go | start、stop、wake 三类发送额度，不等待回包 |
-| internal/store/project_placement.go、project_delivery.go | 放置、停止意图、三类独立到期领取及通知确认 |
-| internal/store/project_runtime.go | stopped 和 wake_received 的身份校验、确认事务 |
-| internal/store/project_inputs.go、project.go | 原子设置主动通知需求，保留去重与锁方向 |
-| internal/node/project_runtime.go | 接收通知确认、主动清理补送、本地幂等记录 |
+| `apps/server/src/server.ts`、`control-budget.ts`、`control-maintenance.ts` | 独立派发与维护循环、控制操作预算、吊销补偿 |
+| `apps/server/src/threads-outbox.ts`、`threads-reports.ts` | Thread 命令到期领取、同 Thread 顺序、接收与完成、报告幂等 |
+| `apps/server/src/project-scheduling.ts` | 放置、start / stop / wake 独立到期领取与节点额度 |
+| `apps/server/src/project-runtime.ts` | stopped、wake_received 的身份校验与确认事务 |
+| `apps/server/src/project-inputs.ts`、`projects.ts` | 主动通知需求、输入去重与锁方向 |
+| `apps/batond/src/project` | Runtime 启动意图、通知合并、进程回收和清理补送 |
 
 started / renew 返回的数据带 `control_receipts:1`，batond 看到后才发送 wake_received。
 
 ## 9. 验证
 
-| 依据 | 设置与观察 | 失败条件 | 位置 | 状态 |
-|---|---|---|---|---|
-| 慢节点隔离，R-16 | A 不确认 Thread 命令，B 同轮获得投递 | 派发等待 A 的回包；B 被延迟 | `control/thread_reliability_test.go` | passed |
-| 同 Thread 顺序，R-08 | 同一 Thread 连续 open、3 条 message、withdraw，每条命令丢失首次回包 | 后一条命令越过未确认的前一条；重发身份改变 | `store/thread_outbox_test.go` | passed |
-| 跳锁公平性 | 同节点分别锁住 Outbox、Thread，另一节点有到期命令 | 后续可用记录或另一节点无法领取 | `store/thread_test.go` | passed |
-| 模糊发送，R-19 | 更新重试进度时注入事务失败；发送失败后收到迟到确认 | 领取失败仍返回命令；合法确认丢失 | Store / Control Thread 回归 | passed |
-| 晚到回包 | 无 waiter 的合法回包；错误节点、员工、连接和锁等待后过期的凭据 | 合法回包丢失；非法回包写入 | Control / Store Thread 认证回归 | passed |
-| 维护隔离 | 慢维护项运行期间派发继续；取消释放数据库名额 | 维护挡住派发 | `control/background_test.go` | passed |
-| 分类和节点额度，PA-08 | 单节点 1000 条旧 stop，其他节点及新 start / wake 仍可领取 | 其他工作被饿死；已确认记录重开 | `store/project_delivery_test.go` | passed |
-| 跳锁与锁数量 | 三类命令跳过节点队首锁；Run / Agent 行锁不超过 32 个 | 超过额度或锁数 | `store/project_delivery_concurrency_test.go` | passed |
-| 清理确认，PA-08 | 自然退出、stop、未启动终止记录、回执丢失、重启 | 重复启动；伪造清理证据 | Node cleanup / receipt replay 回归 | passed |
-| 本地存储故障 | SQLite 拒绝保存清理事实，之后恢复 | 名额泄漏；恢复后未补送 | `node/project_runtime_cleanup_test.go` | passed |
-| wake 接收与认领 | 接收确认清除通知需求，`delivered_seq` 仍为空；新输入再次提示 | 确认被当作认领；重复来源重新打开 | Store / Node wake receipt 回归 | passed |
-| 提交顺序 | 低 ID 输入晚于高 ID 提交并确认 | 低 ID 输入不再提示 | `TestProjectWakeReceiptDoesNotCoverLowerIDCommittedLater` | passed |
-| 运行更换，PA-12 | 旧 run 确认与新 run 竞争 | 旧 run 清除新 run 的通知 | Store / Node 并发回归 | passed |
-| 停止确认身份 | 吊销和连接替换与确认并发 | 已吊销凭据确认成功 | `store/project_delivery_concurrency_test.go` | passed |
-| 协议兼容，R-25 | 未知字段、缺失能力标记、连接切换 | 未知字段导致拒绝；能力未重置 | 协议与兼容夹具 | passed |
-| 核心主链路 | 真实进程验证 wake 确认先于认领、重连不重启、finish 后主动清理确认 | 任一顺序被破坏 | `TestProjectRuntimeRealProcessesPlacementPagingAndWake` | passed |
+下表列出 TS 测试入口及其覆盖范围；运行结果由当次验证报告记录。
+
+| 范围 | 可观察行为 | 当前入口 |
+|---|---|---|
+| Thread 领取、顺序与跳锁 | 发送前持久保存重试时间，同 Thread 顺序，跳过被锁 Outbox / Thread，另一设备仍可领取 | `apps/server/src/threads.integration.test.ts` |
+| 接收、完成与来源 | 完成可先于 ACK 到达，报告按序去重；错误员工、连接、代次及等待锁后过期的凭据被拒绝 | 同上 |
+| 维护与数据库预算 | 断线意图重试、吊销补偿、批次与并发有界；排队超时移除等待者，执行超时释放名额 | `apps/server/src/control-maintenance.integration.test.ts`、`control-budget.test.ts` |
+| Project 命令与租约 | start / stop / wake 独立额度，唤醒确认与输入认领分离，清理确认幂等，锁等待后重查租约与凭据 | `apps/server/src/projects.integration.test.ts` |
+| Project 放置 | 使用设备上报容量，清理尚未确认时保留名额，凭据安全失败给出具体原因 | `apps/server/src/project-scheduling.integration.test.ts` |
+| 节点进程与持久清理 | 重复启动、重连保留进程，回执丢失后补送，重启核实旧进程，SQLite 拒绝保存时保留清理事实，stop-before-start 阻止后续启动 | `apps/batond/src/project/manager.test.ts` |
+| 跨 app 主链路 | 真实本机中心、WSS、Runtime 与 Worker，离线 Cursor 和模型替身贯穿工具、回复与停止确认 | `e2e/src/project.integration.test.ts` |
+| 连接与数据库中断 | Gateway 报告流控、中心与节点重启、数据库短停恢复，持久命令和回复不重复 | `e2e/src/{remote,gateway,database-outage}.integration.test.ts` |
+
+专项验证仍需逐项补齐低 ID 输入晚提交、Project 领取的锁数上限与大规模旧 stop 积压等场景；现有 TS 用例不继承旧实现的通过结论。
 
 R-24 的容量负载仍待压测；Windows / Linux 的原生进程树和崩溃恢复测试需要在对应系统上运行。

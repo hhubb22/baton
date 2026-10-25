@@ -34,7 +34,7 @@ pi-agent-core 只包含 Agent Loop、工具执行和事件流（`packages/agent/
         Session Worker（执行 Agent，现有）
 ```
 
-`baton-project-runtime` 是一个独立的 Node.js 程序，采用固定版本 Node bundle，随 batond 的安装包分发。设备需要安装 Node.js 22.19.0 或更高版本，才能承载 Project Agent；只运行执行 Agent 的设备不需要 Node.js。batond 负责发现它、上报能力、启动和停止进程、代为续租。Runtime 不直接连 Coordinator，所有请求经本地 IPC 交给 batond，再沿 Gateway 通道送到 Coordinator，复用节点认证。这样不需要为节点新开一条访问 Coordinator 的数据通道。
+Project Runtime 是独立进程，业务实现位于 `runtimes/project-agent`。开发节点使用 Node 26，通过该包的 tsx loader 启动源码 CLI；SEA 安装包将其作为 `project-runtime` 子命令分发，布局见迁移设计的「打包与发布」。batond 负责上报能力、启动和停止进程、代为续租。Runtime 不直接连 Coordinator，所有请求经本地 IPC 交给 batond，再沿 Gateway 通道送到 Coordinator，复用节点认证。这样不需要为节点新开一条访问 Coordinator 的数据通道。
 
 Gateway 消息类型 `ProjectRuntimeRequest` / `ProjectRuntimeResult`：batond 附上运行身份 `(run_id, lease_epoch)`，Coordinator 校验节点与运行记录一致、租约有效。每个请求和响应不超过 192 KiB，留出信封余量；每条对话事件写入时不超过 160 KiB（第 3 节），所以分页读取每页至少能取到一条。Runtime 经这条通道发出的请求只有下面几种：
 
@@ -53,28 +53,28 @@ Gateway 消息类型 `ProjectRuntimeRequest` / `ProjectRuntimeResult`：batond �
 
 当前控制消息正文的 `type` 为 `project_runtime.request` / `project_runtime.result`。请求含 `run_id`、`lease_epoch`、`operation`；分页使用 `after_seq` / `max_bytes`，写入使用 `last_seq`，assistant 另带 `client_event_id` 和 `payload`。响应为 `{type, ok, code?, data?}`。`bootstrap` 返回 `{project, prompt_version, memory_index?, compaction?, compaction_seq?, goal_utf8_base64?, after_seq, last_seq}`；配置与最新 compaction 合计超过单帧时，bootstrap 返回 compaction_seq，完整 compaction 随后由 read_events 取回。目标含大量控制字符导致 JSON 转义超过单帧时，bootstrap 的 project.goal 留空，完整目标通过 goal_utf8_base64 以 UTF-8 base64 返回，Runtime 解码后构造配置；Project API 中的原目标保持完整。`read_events` 返回 `{events, last_seq, next_after_seq, has_more}`，默认每页 128 KiB，单条大事件可单独返回，响应仍不超过 192 KiB。`claim_inputs` 返回 `{event?, payload_bytes, input_count}`，要求 `last_seq` 等于当前最后序号；事件 payload 为 `{format:"pi-ai/1", message, input_ids}`，消息的文本块保存输入条目 JSON。调用方收到序号冲突或丢失领取响应时，重新读取中心事件后继续。
 
-batond 启动命令为 `baton-project-runtime run`，工作目录是私有空目录。环境中的 `BATON_PROJECT_RUNTIME_ENDPOINT`、`BATON_PROJECT_RUNTIME_TOKEN`、`BATON_PROJECT_RUN_ID`、`BATON_PROJECT_LEASE_EPOCH` 只用于本次运行。本地 IPC 每个连接发送一条 `{token, request}` JSON，响应为 `ProjectRuntimeResult`；batond 校验 token 后覆盖请求的运行身份，Runtime 不能自行发送续租或启动回执。`poll_wake` 最长等待 25 秒，返回 `{wake:true|false}`；Runtime 闲置时可重复调用。
+batond 通过 Runtime 命令追加 `run` 启动进程，工作目录是私有空目录。请求经专用 stdio 管道交给宿主，宿主覆盖运行身份；Runtime 不能自行发送续租或启动回执。`poll_wake` 最长等待 25 秒，返回 `{wake:true|false}`；Runtime 闲置时可重复调用。
 
 节点管理请求为 `started`、`renew`、`start_failed`、`exited`、`stopped`、`wake_received`，Runtime IPC 不能调用这些操作。`started` / `renew` 成功返回 `{lease_seconds:60,control_receipts:1}`；能力字段缺失时，batond 不发送 `wake_received` 确认。`stopped` 只确认已结束运行的进程清理，重复回执幂等；它不能恢复租约或修改对话。进程树回收、本地 IPC 和目录收尾结束后，batond 在 SQLite 保存清理事实，再主动补送 `exited` / `stopped`，失败保留到期重试。暂时写入失败时保留有界本机清理事实继续补写；重启后账本缺少清理证据时保持未确认。
 
-启动前先检查 provider，再向中心确认租约；启动意图先写入 SQLite，同一 run 在 batond 重启后不会重启进程。Unix 使用随 batond 管道关闭而停止进程组的守护，Windows 使用关闭时终止整个组的 Job Object。连接重建保留当前 Runtime，续租仍受 58 秒期限限制。期限使用包含系统休眠的单调时钟，最多每秒检查一次；机器唤醒后先核对旧期限，再发送或接受续租。读取时钟失败时停止进程。
+启动前先检查 provider，再向中心确认租约；启动意图先写入 SQLite，同一 run 在 batond 重启后不会重启进程。POSIX 使用随 batond 管道关闭而停止进程组的 watchdog，Windows 使用 PID／创建时间账本与 `taskkill /T /F`，保留父进程先退出和崩溃后延迟回收的已知边界。连接重建保留当前 Runtime，续租仍受 58 秒期限限制。期限使用包含系统休眠的单调时钟，最多每秒检查一次；机器唤醒后先核对旧期限，再发送或接受续租。读取时钟失败时停止进程。
 
 控制帧 JSON 采用 UTF-8 编码，容量不包含 HTML 页面转义。每批同时检查数据库规范文本、消息拼接后的传输字节及事件上限，因此含引号、反斜线等字符时可能提前结束一批。Thread 回复文本按 UTF-8 边界保留首尾，并注明原字节数；元数据与 JSON 编码后的条目限制为 40 KiB。长 Project 目标的通知在 4 KiB 内保留首尾并标明截断，完整目标由 Project API 返回。
 
 
-#### 2.1 Node sidecar 分发与 stdio
+#### 2.1 Runtime 定位与 stdio
 
-Runtime 以带生产依赖与锁文件的 Node bundle 发布，位置为 batond 同目录的 `sidecars/project-agent/`。通用打包工具、manifest 校验、stdio 容量、进程树回收和崩溃后重新启动的职责见 [Node sidecar 约定](../../runtimes/README.md)。`node tools/build.mjs` 统一构建前端、Go 程序和 Runtime bundle；仅构建设备安装包可运行 `node tools/package-batond.mjs`。两个入口共用 sidecar 打包脚本，安装锁定的 Runtime 构建依赖，统一构建不重复编译 batond。CI 直接验证统一构建产物的搬迁、隔离 PATH 后的 Runtime 定位及缺包错误，不另行打包来补齐产物。登录命令见 [Runtime 安装说明](../../runtimes/project-agent/README.md)。
+开发入口由 `apps/batond/src/project/runner.ts` 定位 `runtimes/project-agent/src/cli.ts`，通过该包安装的 tsx loader 启动；源码与开发 bundle 均须保留仓库布局和依赖。宿主可注入 `runtimeCommand` 与 `watchdogCommand`；`probe` 要求 Runtime 版本 `0.1.0`。Windows 私有凭据操作通过 TS helper 进入节点的私有文件宿主。SEA 分派与安装包检查见 [迁移设计](../ts-migration/TECH.md#打包与发布)。
 
-batond 优先使用 bundle，通过 Node 直接运行 manifest 中的入口，要求 Runtime 版本 `0.1.0`、stdio 协议版本 1。没有 bundle 时仍可通过 PATH 发现 `baton-project-runtime`。启动前 `probe` 的版本须匹配。bundle 存在但版本不兼容时拒绝启动。
+统一构建从根 workspace 按锁文件安装依赖，构建中心与节点到 `apps/{server,batond}/dist`，中心自动包含网页与 SQL 迁移。Runtime 的模型、工具和恢复逻辑由原包维护，源码开发与安装包共用这些业务实现。
 
-batond 设置 `BATON_SIDECAR_TRANSPORT=stdio` 后，Runtime 在 stdout 发送 `{id, request}`，在 stdin 接收 `{id, result}`，每个对象占一行 UTF-8 JSON，单帧最多 192 KiB，最多 8 个请求在途。运行身份由专用管道绑定，batond 继续覆盖请求身份。带 token 的本地 IPC 继续兼容。`poll_wake` 可在 payload 中指定 `wait_ms`（1～25000），使 180 秒闲置和 15 分钟上限在最后一次等待时准确结束。
+Runtime 与宿主通过专用 stdio 交换逐行 JSON：Runtime 在 stdout 发送 `{id, request}`，在 stdin 接收 `{id, result}`，单帧最多 192 KiB，最多 8 个请求在途。运行身份由专用管道绑定，batond 覆盖请求身份。`poll_wake` 的 `wait_ms` 为 1～25000，使 180 秒闲置和 15 分钟上限在最后一次等待时准确结束。
 
 bootstrap 顶层的 `local_wait_protocol:1` 表示 batond 支持按 Thread 版本等待。等待的 payload 为 `{thread_id,after_version,wait_ms}`，仅允许该 run 已从中心响应绑定的 Thread；返回 `{reason:"thread_changed"|"timeout",version}`。版本提示通过 `project_run_wake.thread_updates` 传送，相同版本、旧 epoch 和无关输入不唤醒等待者。版本缓存与广播通道由同一互斥区保护，每个 run 最多保留 64 个绑定，工具结果返回后释放。普通闲置 `poll_wake` 继续使用原有通用通知。
 
 `call_tool` 的请求字段为 `tool_call_id`、`tool_name`、`arguments` 和 `last_seq`，成功返回保存的 `tool_result` Event。工具定义见第 7 节，工具状态不存于本地控制目录。
 
-用户在设备上执行 `batond login <provider>`。Go 发布入口支持 `openai-codex`（ChatGPT）和 `xai`；TypeScript 节点接受 provider ID 及 ChatGPT、xAI、Claude 别名，由 Runtime 的注册实现决定是否支持。Runtime 当前注册 `openai-codex`、`xai`、`anthropic`，执行实例、模型目录、认证探测及登录均使用同一份注册表。命令使用与守护进程相同的 Runtime 定位逻辑，调用 `login <provider>` 并继承当前终端的标准输入、输出和错误流；Ctrl+C 取消子进程，登录失败返回非零退出码。Runtime 走 pi-ai 的 OAuth 流程，登录方式可通过编号、选项 ID 或回车选择默认项。`baton-project-runtime login-api-key <provider>` 从标准输入接受非空单行 API key，最多 16 KiB，支持 `xai`、`anthropic`；它调用 provider 的 `api_key` 登录实现，保存的凭据只绑定该 provider，替换同 provider 的 OAuth 登录。Runtime 不读取环境认证或其他 CLI 账号。凭据默认保存在 `~/.baton/project-runtime`，可用 `BATON_PROJECT_RUNTIME_DATA_DIR` 指定；登录和守护进程须使用相同的系统用户及目录配置，文件权限和锁沿用 batond 的私有文件约定。
+用户在设备上执行 `batond login <provider>`。节点接受 provider ID 及 ChatGPT、xAI、Claude 别名，由 Runtime 的注册实现决定是否支持。Runtime 当前注册 `openai-codex`、`xai`、`anthropic`，执行实例、模型目录、认证探测及登录均使用同一份注册表。命令使用与守护进程相同的 Runtime 定位逻辑，调用 `login <provider>` 并继承当前终端的标准输入、输出和错误流；Ctrl+C 取消子进程，登录失败返回非零退出码。Runtime 走 pi-ai 的 OAuth 流程，登录方式可通过编号、选项 ID 或回车选择默认项。`baton-project-runtime login-api-key <provider>` 从标准输入接受非空单行 API key，最多 16 KiB，支持 `xai`、`anthropic`；它调用 provider 的 `api_key` 登录实现，保存的凭据只绑定该 provider，替换同 provider 的 OAuth 登录。Runtime 不读取环境认证或其他 CLI 账号。凭据默认保存在 `~/.baton/project-runtime`，可用 `BATON_PROJECT_RUNTIME_DATA_DIR` 指定；登录和守护进程须使用相同的系统用户及目录配置，文件权限和锁沿用 batond 的私有文件约定。
 
 设备设置 API 经 `node.subscription_login` / `node.subscription_login_result` 请求本人在线且已同步设备启动 `baton-project-runtime login-device <provider>`。中心和节点只转换别名、校验 ID 格式，不维护独立的 provider 白名单。设备报告的 `login_methods` 包括 `oauth`、`api_key`、`device_code`；前两者由 provider 认证实现生成，设备码能力由注册表按实际 OAuth 流程声明。ChatGPT 和 xAI 支持设备码，Anthropic 的 OAuth 使用终端交互；网页按报告显示相应入口和本地 API key 配置命令。API key 不通过中心或设备管理 RPC 传输。Runtime 自动选择 `device_code`，只在 stdout 写入一行 `{type:"device_code",provider,verification_uri,user_code,expires_in_seconds}`，其他交互输入返回错误；SIGINT、SIGTERM 或标准输入关闭取消轮询。batond 保持标准输入打开，最多等待 10 秒取得设备码；失败或请求取消时结束进程。返回设备码后轮询使用独立的 15 分钟后台上下文，同 provider 的新请求先取消旧进程，进程退出触发能力采集刷新。控制面用消息关联、操作标识和当前节点连接核对响应，等待时限为 12 秒。
 
@@ -372,7 +372,7 @@ batond 通过 Gateway 的控制队列传送 `node.runtime_report`，正文为 `{
 
 **恢复。** Runtime 在等待期间崩溃时，对话结尾是一个没有结果的 `nodes.exec` 调用。恢复时再次 `call_tool`，Coordinator 按 `(origin_conversation_id, origin_tool_call_id)` 找到已有的 Thread，返回 `pending`。命令不会再执行一次。
 
-**节点上的执行。** shell 适配器实现 Baton TECH 的 `Adapter`：`Send` 在提交 `intent` 之后启动命令（例如 `zsh -lc <command>`、`pwsh -NoProfile -Command <command>`），POSIX 上使用独立进程组，Windows 上使用 Job Object；`Abort` 终止整个进程组，返回已停止且副作用未知。Worker 收到 shell Thread 时再读一次本地开关，关闭就以 `thread.open_failed` 拒绝，所以 Coordinator 的能力报告过期也不会执行。
+**节点上的执行。** `apps/batond/src/agents/shell` 实现 Worker 的 `ThreadAgent`。`send` 在提交 `intent` 之后启动命令（例如 `zsh -lc <command>`、`pwsh -NoProfile -Command <command>`），POSIX 使用独立进程组/watchdog，Windows 使用 PID／创建时间账本与 `taskkill /T /F`。取消与进程树回收分别处理，已发生的副作用不会撤销。Worker 收到 shell Thread 时再读一次本地开关，关闭就以 `thread.open_failed` 拒绝，所以 Coordinator 的能力报告过期也不会执行。
 
 命令退出后，适配器先把完成记录写入私有 `output.json`（Thread、Turn、退出码、输出，原子替换，读取上限 192 KiB），再交出回复。Worker 崩溃后恢复时，有身份匹配的完成记录就补报回复和 `turn.ended`；没有则 Thread 进入 `unknown`，这一轮以 `agent_exited` 结束。命令退出与完成记录保存之间崩溃仍会落到 `unknown`。完成记录保留到 Session 目录回收。
 

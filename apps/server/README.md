@@ -2,7 +2,7 @@
 
 `@baton/server` 提供员工登录、设备管理、Cursor / Pi / Codex / Kiro 远程 Thread、Project 调度、主对话、事项和记忆，以及持久命令、回复时间线和实时输出。它与 [`apps/batond`](../batond/README.md) 的出站 WSS 节点连接配合，网页静态目录由中心构建脚本生成并由中心提供。
 
-Go 的 `cmd/baton-server`、`cmd/batond`、根构建脚本和 Docker 镜像仍是发布入口；TypeScript 开发入口独立构建，发布切换在迁移 T5 进行。TS 的当前能力范围见下表，完整迁移边界见 [迁移设计](../../specs/ts-migration/TECH.md)。
+中心与节点的构建入口分别为 `@baton/server` 和 `@baton/batond`，根 `node tools/build.mjs` 从 workspace 安装锁定依赖并构建两者，产物位于 `apps/{server,batond}/dist`。当前能力范围见下表，容器与 SEA 安装包布局见 [迁移设计](../../specs/ts-migration/TECH.md#打包与发布)。
 
 ## 构建与网页
 
@@ -14,7 +14,7 @@ pnpm --filter @baton/server build
 pnpm --filter @baton/batond build
 ```
 
-中心构建先调用 Vite，将网页生成到 `apps/server/dist/web/`，再打包 `apps/server/dist/server.cjs`，并将数据库迁移复制到相邻的 `migrations/`。`build` 和 `dev` 都包含网页构建，默认即可提供网页。自定义 bundle 输出路径时，网页生成到该 bundle 旁的 `web/`。Web 的普通构建命令仍输出到 Go 使用的 `internal/webui/dist/`；若只需重建 TS 中心网页，可单独运行：
+中心构建先调用 Vite，将网页生成到 `apps/server/dist/web/`，再打包 `apps/server/dist/server.cjs`，并将数据库迁移复制到相邻的 `migrations/`。`build` 和 `dev` 都包含网页构建，默认即可提供网页。自定义 bundle 输出路径时，网页生成到该 bundle 旁的 `web/`。Web 的普通构建命令也输出到 `apps/server/dist/web/`；若只需重建中心网页，可单独运行：
 
 ```sh
 pnpm --dir web build --outDir ../apps/server/dist/web
@@ -39,7 +39,7 @@ pnpm --dir web build --outDir ../apps/server/dist/web
 | `BATON_ENROLLMENT_TTL`                      | 默认 `10m`，一次性设备注册凭据有效期，范围 1 分钟至 24 小时                                                       |
 | `BATON_NODE_CREDENTIAL_TTL`                 | 默认 `720h`（30 天），设备连接凭据有效期，范围 1 小时至 90 天                                                     |
 
-时间配置接受整数加 `ms`、`s`、`m`、`h`，各项范围见上表；TTL 推荐使用整秒、分钟或小时。TS 开发建议使用独立的本地数据库或 schema，避免与 Go 运行实例共用开发状态。
+时间配置接受整数加 `ms`、`s`、`m`、`h`，各项范围见上表；TTL 推荐使用整秒、分钟或小时。开发与测试使用独立数据库或 schema，各实例保留自己的迁移和业务状态。
 
 控制操作共用 4 个数据库执行名额。等待名额与开始执行分别计时，排队不会消耗执行预算。每项操作可通过 `BATON_CONTROL_<操作>_QUEUE_TIMEOUT` 和 `BATON_CONTROL_<操作>_EXECUTION_TIMEOUT` 单独配置，例如 `BATON_CONTROL_REPORT_EXECUTION_TIMEOUT=30s`。排队默认均为 `2s`，可设为 100 ms 至 60 秒；执行可设为 100 ms 至 120 秒，默认如下：
 
@@ -174,12 +174,12 @@ docker run --rm --name baton-tracing \
 | Pi、Codex | 节点完成只读认证、版本与模型探测后上报；支持新建、排队、插入、停止、恢复。程序已安装且认证为 valid 或 unknown 时为 `available`，版本未知或其他系统也开放；缺程序或明确未认证时为 `unavailable`，新建返回 HTTP 422，`code:"agent_unavailable"` |
 | Kiro | 节点在上游空会话发现之外运行 `kiro-cli --version`。程序已安装且认证为 valid 或 unknown 时报告 `available`、`create: true`、`resume: true`，网页开放新建与恢复；认证 unknown 提示首次执行由原生程序检查，明确 missing 拒绝。系统、版本、版本超时或不可解析只记入 reason，缺程序为 `unavailable`；不满足准入条件的新建返回 HTTP 422、`code:"agent_unavailable"`。实际回合认证失败以失败结束并向时间线返回固定安全文案，输入保持 sent，Thread 可继续使用；不自动登录、不透传原始错误、不重发；离线验证不证明真实账号授权有效 |
 | Cursor、Kiro steer                                     | HTTP 422，`code:"steer_unsupported"`；同时传模型时为 `model_with_steer`                              |
-| Cursor、Pi、Codex、Kiro 轮间模型切换 | HTTP 422，`code:"model_switch_unsupported"`。Pi、Codex、Cursor 上游支持，但 Worker 固定模型且 host 尚未传递逐消息模型；Kiro 上游不支持。缺少的实现写入节点 reason |
+| 轮间模型切换 | Pi、Codex、Cursor 支持为后续回合选择模型，省略时沿用最近确认提交的选择；Kiro 固定创建时模型，返回 HTTP 422、`code:"model_switch_unsupported"`。Steer 同时指定模型返回 `model_with_steer` |
 | Thread 历史                                      | 时间线返回中心保存的输入、回复和事件，设备离线时仍可分页读取；网页与 Project 工具 `threads.read` 使用同一份记录 |
 | 过程 `/threads/{id}/trace`                       | 合法查询返回 HTTP 200，`{ok:false,code:"trace_missing",steps:[]}`                                    |
 | 实时输出时设备离线或尚未同步                     | HTTP 200 的 `SessionResult`，`ok:false`，分别为 `node_offline` 或 `node_syncing`                     |
 
-Kiro 的配置、原生恢复和生产探测限制见 [节点接入说明](../batond/src/agents/kiro/README.md)，后续 Agent 的范围见适配规格；完整安装包和发布切换属于 T5。Project Runtime 从当前源码仓库与已安装的依赖启动，开发 bundle 需要保留该仓库布局。Go 发布入口保留其已有功能。
+Kiro 的配置、原生恢复和生产探测限制见 [节点接入说明](../batond/src/agents/kiro/README.md)，后续 Agent 的范围见适配规格。中心 bundle 使用 `node apps/server/dist/server.cjs <命令>`，须保留相邻的 `web/` 和 `migrations/`。Project Runtime 在节点开发 bundle 中从源码仓库与已安装依赖启动；SEA 集成及附带依赖见迁移设计的「打包与发布」。
 
 ## 验证
 

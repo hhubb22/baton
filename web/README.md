@@ -17,7 +17,7 @@
 
 ## 运行方式
 
-默认使用 HTTP 客户端，向同源 `/api/v1` 发出 JSON 请求。生产环境由 Coordinator 提供嵌入式页面与 API；开发环境也默认连接真实后端。开发服务器只有在地址中显式添加 `?mock=1` 或 `?scenario=<id>` 时才启用模拟客户端和场景面板。生产构建始终使用 HTTP 客户端。
+默认使用 HTTP 客户端，向同源 `/api/v1` 发出 JSON 请求。生产环境由 TypeScript 中心提供静态页面与 API；开发环境也默认连接真实后端。网页构建默认输出到 `apps/server/dist/web`，中心的 `build` 和 `dev` 会自动构建网页，SQL 迁移随中心 bundle 一同复制。开发服务器只有在地址中显式添加 `?mock=1` 或 `?scenario=<id>` 时才启用模拟客户端和场景面板。生产构建始终使用 HTTP 客户端。
 
 使用 Vite 开发服务器连接 Coordinator 时，可设置 `BATON_DEV_BACKEND` 为后端地址。代理转发 `/api` 下的 HTTP 和 WebSocket 请求，并将 Origin 调整为后端来源；浏览器仍访问开发服务器的同源路径。该配置仅用于开发服务器，生产构建使用页面所在的来源。
 
@@ -65,13 +65,13 @@ Memory 展示最新内容、版本、来源和时间，可添加、编辑并查�
 
 | 场景 | 内容 |
 |---|---|
-| `normal` | 三台设备、四个 Project、进行中的 Thread 和待处理事项。Baton Dev 的助手开了一个 Thread 正在等回复，Compatibility 的助手已经汇报结果。回复带执行过程、文件和提交附件；Ubuntu Dev 的 `logs` 目录里有超过 64 KB 的日志，`internal/gateway/testdata` 里有二进制文件 |
+| `normal` | 三台设备、四个 Project、进行中的 Thread 和待处理事项。Baton Dev 的助手开了一个 Thread 正在等回复，Compatibility 的助手已经汇报结果。回复带执行过程、文件和提交附件；Ubuntu Dev 的 `logs` 目录里有超过 64 KB 的日志，模拟文件树的 `apps/server/src/testing/data` 中有二进制样本 |
 | `empty` | 已登录但还没有设备，显示首次使用引导 |
 | `noChats` | 设备已接入但还没有对话，Threads 页显示空列表，可以从顶部输入区开始第一个对话 |
 | `signedOut` | 未登录，打开任何页面都进入登录页 |
 | `offline` | Ubuntu Dev 和 MacBook Pro 离线：执行中的 Thread 只显示最后报告的状态，停止请求等设备连上再发出，Project 助手等待可用设备，发给它的消息已保存；Ubuntu Dev 重新连上后，Fix gateway reconnect race 的实时输出标出断开期间丢失的一段 |
 | `waiting` | Windows Desktop 同步中，发给它的消息已保存等待发送；另一条消息排在执行中的 Thread 后面；Kiro 收到停止后没有停下，一分钟后由设备结束进程；Docs Cleanup 的模拟订阅尚未在在线设备上登录，消息保存后等待设备 |
-| `error` | Thread 的各种停止原因：目录不存在、设备重启打断（Kiro 不能恢复，Pi 恢复时找不到对话记录）、Agent 启动失败；另一个 Thread 状态未知，不会自动重发；ChatGPT 登录过期导致 Project 助手需要处理，并生成系统事项；第一次新建 Project 和第一次处理事项保存失败，重试可再次提交；Rebuild web UI foundation 的回复过程和 `reconnect_test.go` 预览第一次读取失败，重试成功；Write batond setup guide 的对话记录已删除，回复过程读不到 |
+| `error` | Thread 的各种停止原因：目录不存在、设备重启打断（Kiro 不能恢复，Pi 恢复时找不到对话记录）、Agent 启动失败；另一个 Thread 状态未知，不会自动重发；ChatGPT 登录过期导致 Project 助手需要处理，并生成系统事项；第一次新建 Project 和第一次处理事项保存失败，重试可再次提交；Rebuild web UI foundation 的回复过程和 模拟文件 `gateway.test.ts` 的预览第一次读取失败，重试成功；Write batond setup guide 的对话记录已删除，回复过程读不到 |
 | `conflict` | 事项已在别处处理，回答时提示冲突并展示生效的回答 |
 | `inbox` | 选项题、纯文字问题，以及已回答、已关闭、已撤回和已解决的历史事项 |
 | `inboxPaused` | Compatibility 暂停，保留全部问题和历史；回答和关闭成功后，项目输入等待恢复 |

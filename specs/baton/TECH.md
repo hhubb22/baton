@@ -15,7 +15,7 @@ Basis: [行为规格](PRODUCT.md) R-01～R-25；代码调查基线 `323a8a9`。P
                                   │
                             Session Worker（每个 Thread 一个）
                                   │
-                         Codex / Kiro / Pi / shell
+                         Cursor / Codex / Kiro / Pi / shell
 ```
 
 一个 Thread 在设备上对应一个 Session Worker 和一个原生 Agent 会话。Worker 拥有这个 Thread 的消息队列、Turn 边界和回复账本；Coordinator 拥有 Thread 记录、消息意图和中心保存的回复。中心不能主动连接设备，所有下行命令通过设备建立的 WSS 连接送达。
@@ -28,7 +28,7 @@ Basis: [行为规格](PRODUCT.md) R-01～R-25；代码调查基线 `323a8a9`。P
 | Session Worker | 一个 Thread 的原生 Agent 进程、消息队列、Turn 边界、回复账本、本地历史访问 | 签发身份、改派 Thread |
 | Project Runtime | 一次 Project Agent 运行，见 Project Agent TECH | 执行命令、访问文件 |
 
-Worker 由 batond 用同一可执行文件的内部子命令启动，与 batond 分开存活；batond 重启后重新连接原 Worker。POSIX 下 Worker 使用独立进程组，Windows 下持有 Agent 进程的 Job Object。Worker 与 batond 之间使用带认证的 Unix domain socket 或 named pipe。
+Worker 由 batond 用同一可执行文件的内部子命令启动，与 batond 分开存活；batond 重启后重新连接原 Worker。POSIX 下 Agent host 使用独立进程组并由 watchdog 回收；Windows 下保存 PID 与创建时间，使用 `taskkill /T /F` 回收。Worker 与 batond 之间使用带认证的 Unix domain socket 或 named pipe。
 
 中心按单个活动 Coordinator 设计，所有业务变更通过数据库事务和版本检查。
 
@@ -36,14 +36,14 @@ Worker 由 batond 用同一可执行文件的内部子命令启动，与 batond 
 
 | 位置 | 技术 |
 |---|---|
-| Coordinator、batond、Worker | Go 1.27 |
+| Coordinator、batond、Worker | TypeScript、Node 26、Effect 4 |
 | Project Runtime | Node.js，`@earendil-works/pi-agent-core` 与 `pi-ai` |
-| 中心存储 | PostgreSQL 16+，pgx，版本化 SQL 迁移 |
-| 设备账本 | SQLite（WAL、FULL 同步，纯 Go 驱动） |
-| Web | React、TypeScript、Vite，构建产物嵌入 Coordinator |
+| 中心存储 | PostgreSQL 16+，`@effect/sql-pg`，版本化 SQL 迁移 |
+| 设备账本 | `node:sqlite`，WAL、FULL 同步，`packages/sqlite` 提供事务与提交核查 |
+| Web | React、TypeScript、StyleX、Vite，从中心 bundle 旁的 `web/` 提供静态文件 |
 | 设备与中心通信 | TLS WebSocket，版本化 JSON 信封 |
 
-不解析终端画面判断 Turn 结束，也不嵌入 Agent SDK；适配器使用各 Agent 的结构化双向接口。
+Agent 的结构化接口由 t3code fork 的完整 provider adapter 实现，在 agent-host 中运行。Cursor provider 使用原生 SDK，其他执行 Agent 使用 CLI 的结构化接口。
 
 ## Thread 与 Turn
 
@@ -105,10 +105,12 @@ Turn 由 Worker 定义：从一条消息被 Agent 接受开始，到适配器报
 
 1. Worker 在一个事务里撤回队列中未发出的消息，记录停止请求和开始时间。
 2. 调用适配器的 `Abort`。Agent 在 60 秒内停下（适配器报告 `TurnEnded`），这一轮以 `stopped` 或 `timeout` 结束，Thread 回到 `idle`。
-3. 60 秒内没有停下，或 `Abort` 返回错误，Worker 结束 Agent 的整个进程树：POSIX 上向 Agent 的进程组发 SIGKILL，Windows 上终止 Agent 的 Job Object。进程树回收后，这一轮以原因结束，Thread 进入 `stopped`，原因为「Agent 没有在 1 分钟内停下，已结束进程」。下一条消息按 R-12 恢复原会话。
+3. 60 秒内没有停下，或 `Abort` 返回错误，Worker 结束 Agent 的整个进程树：POSIX 上向 Agent 的进程组发 SIGKILL，Windows 上按 PID 与创建时间记录校验身份后执行 `taskkill /T /F`。进程树回收后，这一轮以原因结束，Thread 进入 `stopped`，原因为「Agent 没有在 1 分钟内停下，已结束进程」。下一条消息按 R-12 恢复原会话。
 4. 进程树无法确认回收时，Thread 进入 `unknown`，这一轮仍以原因结束。
 
-每个 Agent 在启动时放进自己的进程组或 Job Object，与 Worker 分开，所以结束 Agent 不影响 Worker 和账本。POSIX 下，独立守护进程读取由 Worker 持有写端的私有管道；Worker 崩溃或被强制结束时，管道关闭，守护进程结束整个 Agent 进程组。守护进程不持有协议的 stdin、stdout、stderr，Agent 的实际退出码和信号保持不变。Windows 下由 Worker 持有的 Job Object 在关闭时终止 Agent 及其后代。适配器正常关闭、协议失败或 Agent 自然退出时也执行幂等的进程树清理。Agent 用 `setsid`、服务管理器等方式脱离进程组启动的后台进程不在这个范围内，强制结束不能证明这类外部动作已停止，停止也不回滚已经发生的副作用（R-11）。
+每个 Thread 的 agent-host 与 Worker 分开存活。POSIX 下 host 是独立进程组组长，上游 adapter 新建的独立进程组登记给 watchdog；Worker 崩溃或被强制结束时，私有管道关闭，watchdog 回收已登记进程组。正常关闭、协议失败或自然退出也执行幂等回收。
+
+Windows 第一版按账本保存的 PID 与创建时间核对身份，再用 `taskkill /T /F` 回收。中间父进程先退出时可能漏掉其后代；Worker 被强杀后，到下次 Worker 启动前 Agent 可能继续运行。Job Object 留待原生模块接入，当前边界和未测项见 [Agent 适配 TECH](../agent-adapters/TECH.md#进程组与停止回收)。Agent 通过服务管理器等方式脱离所属进程树的后台动作不在回收保证内，停止不回滚已有副作用（R-11）。
 
 60 秒等待期间，Thread 保持 `running`，界面显示停止请求已发送。等待上限是 Worker 配置项，默认 60 秒。
 
@@ -153,7 +155,7 @@ Thread、消息和 Turn 直接包含模型字段，消息保存 `status_reason`�
 
 `project_agent_input_queue` 的 Thread 输入为 `thread_reply`、`turn_ended`、`thread_message_failed`。`thread_reply` 为被动输入，`turn_ended` 与 `thread_message_failed` 为主动输入，参与放置、领取和重启后的通知重置。其他输入类型见 Project Agent TECH。
 
-迁移文件编号之间允许空缺，`internal/migrate` 按文件名排序执行。
+迁移文件编号之间允许空缺，`apps/server/src/database.ts` 在事务 advisory lock 内按文件名排序执行，记录并核对 `schema_migrations`。
 
 ### 下行投递
 
@@ -214,7 +216,7 @@ Worker 的报告类型：
 1. 一条消息在 `intent` 之后不再自动发出第二次。
 2. 同一时刻最多一个 Turn 处于开始而未结束的状态。
 3. `turn.ended` 的 outbox 事件在这一轮所有 `reply` 事件之后写入。
-4. 回复与对应 outbox 事件在同一事务提交；提交状态不明时从独立连接读回确认（沿用 `output_transaction.go`）。
+4. 回复与对应 outbox 事件在同一事务提交；提交状态不明时由 `packages/sqlite` 从独立连接读回确认。
 
 `Send` 明确返回模型选择失败时，消息确定未发出，Worker 将它记为 `withdrawn`，清除预留的 Turn 序号，把原因保存到该消息的 `status_reason` 并通过 `message.withdrawn` 报告，不开启 Turn。原因摘要最多 4 KiB，替换无效 UTF-8 和 NUL，截断时保留完整字符并加省略号。Thread 保持 `idle`，保留 Agent 进程和当前模型，继续发送下一条排队消息。中心在同一事务保存消息原因；浏览器 Thread 详情和 Project Agent 的 `threads.get` 通过 `failed_messages` 读取这些失败消息。Project Agent 发起的失败消息另形成一条主动 `thread_message_failed` 输入，员工消息不写输入队列。无法确认消息是否发出的错误仍按发送意图恢复规则处理。Worker 在开始和结束报告中携带该 Turn 使用的模型，中心在 `turn.started` 时更新 Thread 当前模型。
 
@@ -232,27 +234,25 @@ Worker 的报告类型：
 | 回复已保存，ACK 丢失 | 可重复上报 | 按 `event_id` 去重 |
 | batond 重启 | Worker 可能仍在 | 重新连接 Worker；连接不上时启动新 Worker 走上一行 |
 
-Worker 崩溃后 Agent 进程随进程组或 Job Object 一起退出，所以「Turn 进行中崩溃」通常落到 `agent_exited`。下一条消息触发恢复原会话（R-12）。
+Worker 崩溃后，POSIX watchdog 回收所属进程组；Windows 在下次启动时按持久进程记录核实回收。未确认回收时保持 unknown，确认后显式恢复或新消息可以继续原会话，旧 intent 不重发（R-12、R-13）。
 
 ## Agent 适配
 
 ### 接口
 
-```go
-type Adapter interface {
-    Start(ctx context.Context) error                         // 新建或恢复原生会话，使用配置里的模型
-    Send(ctx context.Context, id, text, model string) error  // 开启新 Turn；model 为空时沿用当前模型；Agent 忙时返回 ErrBusy
-    Steer(ctx context.Context, id, text string) error        // 加入当前 Turn，沿用当前模型；不支持时返回 ErrUnsupported
-    Abort() (stopped, outcomeKnown bool, err error)          // 停止当前 Turn
-    Drain() []Event                                          // 非阻塞取回 TurnStarted、Reply、TurnEnded、Exited、Uncertain
-    Sent(id string) (bool, error)                            // 在原生历史里查找这条消息
-    ReadHistory(ctx context.Context, cursor string) (HistoryPage, error)
-    Capabilities() Capabilities                              // steer、resume、switch_model
-    Close() error
-}
-```
+Worker 的 Effect 接口为 `apps/batond/src/worker/agent.ts` 中的 `ThreadAgent`，由 `AgentFactory` 为每个执行生命周期创建新实例：
 
-`id` 是 `client_message_id`。TS Worker 与 agent-host 通过 fork 的 `ProviderAdapterV2` 执行 Agent，具体映射见 [Agent 适配设计](../agent-adapters/TECH.md)。Pi、Codex、Cursor 开放 Thread 内逐轮换模型，Worker 在 intent 中保存每轮选择，host 同时传入 `startTurn.modelSelection` 和 `appThread.modelSelection`；省略模型时沿用最近确认提交的回合模型，首次使用创建配置。恢复从输入账本取得最近确认提交的模型，保留原生会话身份。Steer 沿用活动回合模型，不接受显式模型。Kiro 的 fork adapter 通过能力覆盖明确关闭会话内换模型，Thread 固定创建时的选择。Pi 的 `set_model` 明确拒绝和 Cursor SDK 明确拒绝模型时，输入持久撤回并继续队列；不能确认是否提交的错误按 unknown 恢复，不重发旧输入。
+| 方法 / 流 | 职责 |
+|---|---|
+| `open`、`resume` | 新建或恢复原生会话，返回前持久保存原生映射 |
+| `prepareInput`、`restoreInput` | 保存或恢复输入基线，包含原生会话、准备标识和已确认发送数 |
+| `send` | 提交 queue 或 steer 输入，返回原生接受证据 |
+| `sent` | 只读核对原生快照，不发送输入或启动执行会话 |
+| `answer` | 可选方法，将问题回答绑定到活动请求 |
+| `events`、`output` | 持久回复、回合终态、问题和不确定事件；独立的有界实时输出 |
+| `abort`、`close`、`reap` | 取消、关闭和进程树回收，取消响应本身不证明停止 |
+
+输入的 `id` 是 `client_message_id`。Worker 与 agent-host 通过 fork 的 `ProviderAdapterV2` 执行 Agent，具体映射见 [Agent 适配设计](../agent-adapters/TECH.md)。Pi、Codex、Cursor 开放 Thread 内逐轮换模型，Worker 在 intent 中保存每轮选择，host 同时传入 `startTurn.modelSelection` 和 `appThread.modelSelection`；省略模型时沿用最近确认提交的回合模型，首次使用创建配置。恢复从输入账本取得最近确认提交的模型，保留原生会话身份。Steer 沿用活动回合模型，不接受显式模型。Kiro 的 fork adapter 通过能力覆盖明确关闭会话内换模型，Thread 固定创建时的选择。Pi 的 `set_model` 明确拒绝和 Cursor SDK 明确拒绝模型时，输入持久撤回并继续队列；不能确认是否提交的错误按 unknown 恢复，不重发旧输入。
 
 `Sent` 用只读原生快照核对输入是否已被接收，按发送前持久记录的已确认 user 消息数量检查下一条正文，缺少证据时保持未确认；不重发可能已执行的输入。
 
@@ -391,7 +391,7 @@ Pi 读取原生 JSONL，Codex 读取 thread 文件并核对 thread ID、cwd 和 
 
 ## 文件浏览
 
-设备本地定义可浏览的 `root_id` 和真实路径，浏览器只提交 `root_id` 和相对路径。Go 节点用 `os.Root` 验证边界；TypeScript 节点校验授权根、realpath、祖先目录和已打开句柄的设备与 inode 身份，覆盖符号链接和路径替换。仅祖先 ctime 变化时丢弃本次结果，完整重新授权并读取，最多尝试 3 次；持续变化返回 `path_changed`，身份或边界变化返回 `path_escaped`。附件预览复用同一授权边界（R-18）。中心不代取任意 URL，不提供文件存储。
+设备本地定义可浏览的 `root_id` 和真实路径，浏览器只提交 `root_id` 和相对路径。节点校验授权根、realpath、祖先目录和已打开句柄的设备与 inode 身份，覆盖符号链接和路径替换。仅祖先 ctime 变化时丢弃本次结果，完整重新授权并读取，最多尝试 3 次；持续变化返回 `path_changed`，身份或边界变化返回 `path_escaped`。附件预览复用同一授权边界（R-18）。中心不代取任意 URL，不提供文件存储。
 
 TypeScript 的 `GET /nodes/{id}/files` 通过 `root_id`、`path` 浏览目录和文件。POSIX 路径保留冒号和反斜杠的字面含义；Windows 相对路径拒绝冒号、反斜杠、驱动器与 ADS，所有系统拒绝绝对路径、控制字符和 `..` 路径段。目录每页最多返回 200 项、处理 4096 个新条目，`next_cursor` 携带扫描位置和目录版本；续页重新打开目录并跳过已读位置，可继续读取整个目录；目录变化返回 `directory_changed`，网页保留已取得的条目并提示重新读取。未指定根时复用授权根管理接口的分页，每页 JSON 不超过 48 KiB，游标绑定清单版本和下一项位置。
 
@@ -405,41 +405,38 @@ TypeScript 的 `GET /nodes/{id}/files` 通过 `root_id`、`path` 浏览目录和
 
 ## 敏感数据
 
-设备密码、模型订阅凭据、节点私钥只存在设备上，文件权限为当前用户 `0600`（Windows 为受保护 DACL，只授权当前用户 SID）。节点凭据和注册凭据不进日志、URL 或命令行。中心不持久化实时输出和原生历史（R-22）。
+设备密码、模型订阅凭据、节点私钥只存在设备上，POSIX 文件权限为当前用户 `0600`；Windows 第一版在数据目录上移除继承并校验当前用户 ACL，命名管道使用 Node 默认安全描述符与私有令牌认证，逐句柄 DACL 检查留待原生模块接入。节点凭据和注册凭据不进日志、URL 或命令行。中心不持久化实时输出和原生历史（R-22）。
 
 ## 部署
 
-中心服务二进制为 `baton-server`，入口在 `cmd/baton-server`，与 PostgreSQL 部署在一处，提供静态页面、API、浏览器 WebSocket 和节点 WSS。`serve` 先执行 `migrate.Up`，再执行 `migrate.Check`；`migrate` 子命令可单独运行。签名密钥路径由 `BATON_NODE_SIGNING_KEY` 指定，默认工作目录下的 `node-signing.key`；仅在 `Lstat` 确认文件不存在时生成 Ed25519 私钥并原子写入 `0600` 文件，已有文件继续校验权限、类型和内容。升级时先停止旧实例，再启动新实例完成迁移；batond 退避重连并同步。
+中心位于 `apps/server`，构建产物为 `apps/server/dist/server.cjs` 及相邻的 `web/`、`migrations/`。与 PostgreSQL 部署后，运行 `node apps/server/dist/server.cjs serve` 提供静态页面、API、浏览器 WebSocket 和节点 WSS。`serve`、账号管理和 `migrate` 都先执行并核对迁移；`migrate` 完成后退出。
 
-`Dockerfile` 分别用 Node.js 24 构建 Web UI、Go 1.27 静态编译服务端，再放入 Debian bookworm slim 镜像，以非 root 用户运行。`compose.yaml` 等待 PostgreSQL 16 健康后启动中心服务，数据库和 `/var/lib/baton` 分别挂载数据卷，签名密钥保存在后者。容器监听 `0.0.0.0:8080`，宿主机默认绑定 `127.0.0.1:8080`，通过 HTTPS 反向代理公开 HTTP/WebSocket 服务。
+签名密钥路径由 `BATON_NODE_SIGNING_KEY` 指定，默认工作目录下的 `node-signing.key`；仅在 `lstat` 确认不存在时生成 Ed25519 私钥并原子写入 `0600` 文件，已有文件校验权限、类型、所有者和内容。升级先停止旧中心，再启动新实例完成迁移；节点退避重连并同步。中心默认监听 `127.0.0.1:8080`，通过 HTTPS 反向代理公开；也可直接配置证书提供 HTTPS/WSS。容器与设备 SEA 的发布布局见 [迁移设计](../ts-migration/TECH.md#打包与发布)。
 
-`batond register` 默认将 `runtime.GOOS` 映射为系统名，将主机名去除首尾空白和控制字符并限制到 80 个字符，空名称回退为 `Workstation`。注册成功后，`identity.json` 的可选 `coordinator_url` 保存规范化的 HTTPS 中心地址；非空时读写身份均校验地址。`batond run` 优先使用显式 `--relay`，否则从中心地址推导 `wss://主机/v1/node`。`batond up` 复用相同的注册和运行逻辑，在本地没有身份时要求中心地址和注册凭据；workspace 通过本机目录登记逻辑在连接前幂等保存。设备上 Windows 用当前员工的登录启动项，macOS 用 LaunchAgent，Linux 用 `systemd --user`，不以 root 或 LocalSystem 运行。
+节点 bundle 为 `apps/batond/dist/batond.cjs`，命令使用 `node apps/batond/dist/batond.cjs <命令>`。`register` 使用 Node 的平台标识推导系统名，显示名由主机名清理而来。注册在 `identity.json` 保存规范化 HTTPS 中心地址，`run` 优先使用显式 `--relay`，否则推导 WSS 地址。`up` 复用注册和运行逻辑，在没有身份时要求中心地址和凭据；workspace 在连接前幂等登记。默认设备数据目录为 `~/.baton-ts`。
 
-承载 Project Agent 的设备另外安装 Node.js 和 `baton-project-runtime`，见 Project Agent TECH 第 2.1 节。
+设备进程使用员工账号运行。开发 bundle 的 Project Runtime 从 `runtimes/project-agent/src/cli.ts` 与已安装依赖启动，宿主负责 stdio、订阅登录和租约；SEA 集成使用迁移设计中的子命令形态。
 
-## 模块职责与后续实施
+## 模块职责
 
 | 模块 | 职责 |
 |---|---|
-| `internal/gateway`、`internal/protocol` | 节点认证、版本化信封、有界队列、Thread 命令与报告、临时查询 |
-| `internal/node` | 设备身份、注册与连接、能力报告、文件浏览、Thread Worker 与 Project Runtime 管理、本地节点账本 |
-| `internal/session` | Thread 消息队列、发送意图、Turn、回复与 outbox、Worker 进程、本地认证 IPC、原生历史和实时输出 |
-| `internal/agent/{pi,codex,kiro,shell}` | 原生 Agent 的 Thread 接口、模型选择、停止、恢复和历史查询 |
-| `internal/agent/replay` | 录制、规范化、协议回放与故障派生 |
-| `internal/store` | 设备与连接、Thread、消息与报告、Project、对话、记忆、放置、租约、投递、输入和 Inbox 事务 |
-| `internal/control` | Thread 命令派发、报告回执、节点同步、Project 放置与 Runtime 命令、临时文件和历史查询 |
-| `internal/monotime` | 包含系统休眠的单调时钟，供 Turn 执行时限与 Project Runtime 租约使用 |
-| `internal/fileaccess` | 登记根内的受限浏览与 Thread 附件解析 |
-| `internal/httpapi` | 员工、设备、Thread、Project、Inbox 与浏览器事件 API |
-| `migrations` | 当前数据库 schema 基线与迁移执行器 |
-| `web/src` | 按 `design/` 实现的页面，经 `BatonClient` 默认使用同源 HTTP API；开发模拟场景由显式参数启用 |
+| `apps/server/src/gateway.ts`、`server.ts` | 节点与浏览器连接、认证、有界队列、控制操作预算与后台循环 |
+| `apps/server/src/threads*.ts` | Thread、消息、命令领取、接收与完成、报告去重与时间线 |
+| `apps/server/src/project-*.ts`、`projects.ts`、`inbox.ts` | Project、对话、记忆、放置、租约、工具、输入和事项事务 |
+| `apps/server/src/http*.ts`、`auth.ts`、`nodes.ts` | 共享 HTTP 契约、账号、设备与归属检查 |
+| `apps/server/src/database.ts`、`migrations/` | PostgreSQL 访问与版本化 SQL 迁移 |
+| `apps/batond/src/daemon` | 设备身份、WSS、节点账本、Worker 发现与认证 IPC |
+| `apps/batond/src/worker` | Thread 命令、消息、intent、Turn、回复、输出与恢复 |
+| `apps/batond/src/agent-host`、`src/agents` | 完整 fork provider 的宿主与事件映射，受限 shell |
+| `apps/batond/src/devices` | 授权目录、路径边界、文件预览、仓库与能力报告 |
+| `apps/batond/src/platform` | 私有文件、锁、进程组、watchdog、Windows PID 创建时间与回收 |
+| `apps/batond/src/project`、`runtimes/project-agent` | Runtime 生命周期、租约与订阅；模型、工具、压缩与恢复 |
+| `upstream/t3code`、`apps/batond/src/testing` | 上游 adapter、测试和转录；Baton 的确定性回放与本地替身 |
+| `packages/{protocol,sqlite,telemetry}` | 共享 Schema、SQLite 事务和提交核查、追踪 |
+| `e2e`、`web/src` | 跨 app 集成测试与网页 |
 
-后续实施：
-
-7. **Web。** 按 `specs/web-ui/PLAN.md` 验证页面流程、真实 HTTP 契约、错误反馈与状态同步。
-8. **端到端。** 真实 Codex、Kiro、Pi 各跑一遍 PRODUCT 验收表的多轮、排队可靠性和恢复场景。
-
-每一步结束时 `go vet ./...`、`go test ./...` 和前端测试通过。
+检查使用 `pnpm check`、`pnpm typecheck` 和按影响范围选择的 workspace 测试。前端流程见 `specs/web-ui/PLAN.md`，适配器离线验证见 [回放设计](../agent-replay/TECH.md)。
 
 ## 验证
 
@@ -463,7 +460,7 @@ TypeScript 的 `GET /nodes/{id}/files` 通过 `root_id`、`path` 浏览目录和
 | R-24 | 500 台设备、100 个执行中 Thread，24 小时 | 未达到约定阈值（D6） | 压测环境 |
 | R-25 | 当前消息带未知字段、未声明可选能力 | 未知字段导致拒绝或已知字段改变；未声明能力被启用 | 协议扩展测试 |
 
-真实 Agent 的验收只能在对应系统上进行；交叉编译不代替 Windows、Linux 原生验证。
+自动化验收使用离线转录与本地替身；进程回收、私有文件、SQLite 和安装包检查在对应系统本地运行。交叉构建不代替原生验证，未测项如实记录。真实订阅和模型调用仅用于显式手动冒烟。
 
 ## 待定
 

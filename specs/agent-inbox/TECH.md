@@ -12,7 +12,7 @@ Coordinator 在 `call_tool` 事务里执行工具并保存唯一的 `tool_result
 
 ### 1. 职责
 
-`internal/inbox` 定义事项、参数校验及事项事务操作。`internal/store` 在工具和 Project 事务中调用它，并写入用户处理产生的输入。HTTP 接口沿用员工会话、Origin 和 CSRF 检查。Runtime 的固定工具集合包含四个 `inbox.*` 工具。
+`apps/server/src/inbox.ts` 定义事项、参数校验及事项事务操作。`project-tools.ts` 在工具事务中调用它；用户处理产生的输入与事项结果在同一事务保存，Project 生命周期操作由 `projects.ts` 协调。HTTP 接口沿用员工会话、Origin 和 CSRF 检查。Runtime 的固定工具集合包含四个 `inbox.*` 工具。
 
 ### 2. 数据模型
 
