@@ -24,10 +24,12 @@ const styles = stylex.create({
 export function SubscriptionLoginDialog({
   device,
   provider,
+  localOnly = false,
   onClose,
 }: {
   device: Device
   provider: string
+  localOnly?: boolean
   onClose: () => void
 }) {
   const start = useStartSubscriptionLogin()
@@ -36,7 +38,11 @@ export function SubscriptionLoginDialog({
   const [receivedAt, setReceivedAt] = useState(0)
   const [copy, setCopy] = useState<'copied' | 'failed' | null>(null)
   const now = useNow(1000)
-  const signedIn = device.subscriptions.some((sub) => sub.provider === provider && sub.signedIn)
+  const subscription = device.subscriptions.find((sub) => sub.provider === provider)
+  const methods = subscription?.loginMethods ?? []
+  const localSetup = localOnly || !methods.includes('device_code')
+  const providerId = subscription?.providerId ?? provider
+  const signedIn = subscription?.signedIn === true
   const challenge = start.data
   const remaining = challenge
     ? Math.max(0, Math.ceil((challenge.expiresInSeconds * 1000 - Math.max(0, now - receivedAt)) / 1000))
@@ -44,10 +50,10 @@ export function SubscriptionLoginDialog({
   const expired = challenge !== undefined && remaining === 0
 
   useEffect(() => {
-    if (requested.current) return
+    if (requested.current || localSetup) return
     requested.current = true
     mutate({ deviceId: device.id, provider }, { onSuccess: () => setReceivedAt(Date.now()) })
-  }, [device.id, provider, mutate])
+  }, [device.id, provider, mutate, localSetup])
 
   const retry = () => {
     setCopy(null)
@@ -68,11 +74,13 @@ export function SubscriptionLoginDialog({
     <Dialog
       open
       onOpenChange={(open) => !open && onClose()}
-      title={`Sign in to ${provider} on ${device.name}`}
+      title={`${localSetup ? 'Set up' : 'Sign in to'} ${provider} on ${device.name}`}
       description={
-        signedIn
-          ? 'Signed in'
-          : 'Open the sign-in page and enter this code. Keep this window open to see when sign-in finishes.'
+        localSetup
+          ? `Run these commands on ${device.name} using the same account that connected it to Baton.`
+          : signedIn
+            ? 'Signed in'
+            : 'Open the sign-in page and enter this code. Keep this window open to see when sign-in finishes.'
       }
       note={
         !signedIn && challenge && !start.isPending && !start.isError && !expired
@@ -82,7 +90,31 @@ export function SubscriptionLoginDialog({
       finalFocus={() => document.getElementById(`device-row-${device.id}`)}
       actions={<Button onClick={onClose}>{signedIn ? 'Done' : 'Close'}</Button>}
     >
-      {!signedIn && (
+      {localSetup && (
+        <>
+          {methods.includes('oauth') && (
+            <>
+              <p {...stylex.props(text.small)}>Sign in with your subscription:</p>
+              <pre {...stylex.props(text.mono, styles.code)}>{`baton-project-runtime login ${providerId}`}</pre>
+            </>
+          )}
+          {methods.includes('api_key') && (
+            <>
+              <p {...stylex.props(text.small)}>Save your API key in a private file, then run:</p>
+              <pre {...stylex.props(text.mono, styles.code)}>
+                {device.os === 'Windows'
+                  ? `Get-Content -Raw key-file | baton-project-runtime login-api-key ${providerId}`
+                  : `baton-project-runtime login-api-key ${providerId} < key-file`}
+              </pre>
+              <p {...stylex.props(text.small, text.muted)}>
+                This replaces the saved sign-in for {provider}. The key stays on {device.name}. Remove the key file
+                after setup.
+              </p>
+            </>
+          )}
+        </>
+      )}
+      {!localSetup && !signedIn && (
         <>
           {start.isPending && (
             <p role="status" {...stylex.props(text.small, text.muted)}>

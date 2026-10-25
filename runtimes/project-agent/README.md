@@ -11,9 +11,19 @@
 ./batond subscriptions
 ```
 
-`openai-codex` 对应 ChatGPT，`xai` 对应 xAI。登录 ChatGPT 时，终端显示浏览器登录和设备码登录选项；输入编号或选项 ID，回车选择第一项。浏览器登录支持粘贴回调地址；无浏览器的设备可选择设备码登录，在另一台设备的浏览器中输入终端显示的验证码。按 Ctrl+C 取消登录。
+Runtime 使用同一份 provider 注册表生成执行实例、模型目录、认证探测和登录入口，当前注册 `openai-codex`（ChatGPT）、`xai`（xAI）和 `anthropic`（Claude）。ChatGPT 仅支持 OAuth；xAI 和 Claude 支持 OAuth 或 API key。TypeScript 节点可通过 `pnpm --filter @baton/batond dev login anthropic` 登录 Claude；独立 Runtime 使用 `baton-project-runtime login anthropic`。登录 ChatGPT 时，终端显示浏览器登录和设备码登录选项；输入编号或选项 ID，回车选择第一项。浏览器登录支持粘贴回调地址；无浏览器的设备可选择设备码登录，在另一台设备的浏览器中输入终端显示的验证码。按 Ctrl+C 取消登录。
 
-设备设置 API 可发起在线设备的非交互登录。Runtime 的 `login-device <provider>` 自动选择设备码方式，stdout 首行返回 `{type:"device_code",provider,verification_uri,user_code,expires_in_seconds}`，随后继续轮询直到凭据保存完成；未提供有效期时使用 900 秒。SIGINT、SIGTERM 或标准输入关闭取消登录，其他交互输入返回错误。batond 取得设备码后让进程在后台继续等待，结束时立即刷新订阅报告。
+API key 从设备本地标准输入保存，命令行参数只包含 provider。将 key 保存在仅自己可读的文件后运行：
+
+```sh
+baton-project-runtime login-api-key anthropic < key-file
+# 源码开发入口
+pnpm --dir runtimes/project-agent exec tsx src/cli.ts login-api-key xai < key-file
+```
+
+输入须为非空单行文本，最多 16 KiB，允许末尾换行。Windows PowerShell 使用 `Get-Content -Raw key-file | baton-project-runtime login-api-key anthropic`。保存完成后删除输入文件。每个 provider 保存一份凭据，API key 配置会替换该 provider 的 OAuth 登录，使用相同的私有权限检查、原子写入和跨进程锁。Runtime 只读取自己的凭据目录，不自动读取环境 API key 或其他 CLI 的账号。探测只确认对应 provider 支持该认证类型且本地凭据完整，真实请求决定授权是否有效。
+
+设备设置 API 可发起在线设备的非交互登录，支持 ChatGPT 和 xAI 的设备码流程；Claude 的 OAuth 使用终端交互。设备报告的 `login_methods` 来自已注册 provider 的认证实现和设备码能力，网页据此显示设备码登录或本地配置命令。API key 始终从设备本地输入，不经过网页和中心。Runtime 的 `login-device <provider>` 自动选择设备码方式，stdout 首行返回 `{type:"device_code",provider,verification_uri,user_code,expires_in_seconds}`，随后继续轮询直到凭据保存完成；未提供有效期时使用 900 秒。SIGINT、SIGTERM 或标准输入关闭取消登录，其他交互输入返回错误。batond 取得设备码后让进程在后台继续等待，结束时立即刷新订阅报告。
 
 `batond` 优先定位同目录的 Runtime bundle；没有 bundle 时通过 PATH 查找独立安装的 `baton-project-runtime`。无需进入 bundle 或手动寻找 JS 入口。
 

@@ -187,7 +187,7 @@ describe('authenticated device management confirmation', () => {
       type: 'node.subscription_login_result',
       operation_id: body.operation_id,
       ok: true,
-      provider: 'openai-codex',
+      provider: body.type === 'node.subscription_login' ? body.provider : '',
       verification_uri: 'https://auth.invalid/device',
       user_code: 'LOCAL-CODE',
       expires_in_seconds: 600,
@@ -199,8 +199,11 @@ describe('authenticated device management confirmation', () => {
       expires_in_seconds: 600,
     })
     await expect(
-      run(Devices.startSubscriptionLogin(alice.id, identity.node_id, 'other', transport)),
+      run(Devices.startSubscriptionLogin(alice.id, identity.node_id, '../other', transport)),
     ).rejects.toMatchObject({ code: 'invalid_provider' })
+    expect(
+      await run(Devices.startSubscriptionLogin(alice.id, identity.node_id, 'registered-provider', transport)),
+    ).toMatchObject({ provider: 'registered-provider' })
     const failed = gateway(async (body) => ({
       type: 'node.subscription_login_result',
       operation_id: body.operation_id,

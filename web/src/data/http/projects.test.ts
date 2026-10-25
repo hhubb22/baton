@@ -551,20 +551,54 @@ describe('Project HTTP contract', () => {
     expect(new Set(paths).size).toBe(1)
   })
 
-  it('rejects unsupported runtime providers before making a request', async () => {
+  it.each([
+    ['Claude', 'anthropic'],
+    ['anthropic', 'anthropic'],
+    ['registered-provider', 'registered-provider'],
+  ])('creates and updates projects with provider %s', async (subscription, provider) => {
+    const saved = { ...project, agent: { provider, model: 'local-model' } }
+    const h = setup([
+      {
+        path: '/api/v1/projects',
+        method: 'POST',
+        body: {
+          title: 'Test',
+          goal: '',
+          provider,
+          model: 'local-model',
+          client_project_id: projectId,
+        },
+        response: saved,
+      },
+      { path: `${base}/status`, response: status },
+      { path: base, method: 'PATCH', body: { provider }, response: saved },
+      { path: `${base}/status`, response: status },
+    ])
+    expect(
+      await h.api.createProject({ name: 'Test', goal: '', subscription, model: 'local-model', clientId: projectId }),
+    ).toMatchObject({ subscription: provider === 'anthropic' ? 'Claude' : provider })
+    expect(await h.api.updateProject({ projectId, patch: { subscription } })).toMatchObject({
+      subscription: provider === 'anthropic' ? 'Claude' : provider,
+    })
+    h.done()
+  })
+
+  it('rejects invalid provider IDs before making a request', async () => {
     const h = setup([])
     await expect(
       h.api.createProject({
         name: 'Test',
         goal: '',
-        subscription: 'Claude',
+        subscription: '../provider',
         model: 'claude-sonnet-4-5',
         clientId: projectId,
       }),
     ).rejects.toMatchObject({ code: 'invalid' })
-    await expect(h.api.updateProject({ projectId, patch: { subscription: 'anthropic' } })).rejects.toMatchObject({
-      code: 'invalid',
-    })
+    await expect(h.api.updateProject({ projectId, patch: { subscription: 'invalid provider' } })).rejects.toMatchObject(
+      {
+        code: 'invalid',
+      },
+    )
     expect(h.fetcher).not.toHaveBeenCalled()
   })
 

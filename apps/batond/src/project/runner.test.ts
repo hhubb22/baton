@@ -170,6 +170,7 @@ it('probes the existing Runtime source CLI using only an empty local credential 
   const report = await manager.probe()
   expect(report.version).toBe('0.1.0')
   expect(report.providers?.map((p) => [p.provider, p.status])).toEqual([
+    ['anthropic', 'login_required'],
     ['openai-codex', 'login_required'],
     ['xai', 'login_required'],
   ])

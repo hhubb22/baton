@@ -130,8 +130,8 @@ function devices(now: number): Device[] {
       registeredAt: now - 20 * 24 * hour,
       agents: [codex, kiro],
       subscriptions: [
-        { provider: 'ChatGPT', signedIn: true },
-        { provider: 'Claude', signedIn: true },
+        { provider: 'ChatGPT', providerId: 'openai-codex', loginMethods: ['oauth', 'device_code'], signedIn: true },
+        { provider: 'Claude', providerId: 'anthropic', loginMethods: ['oauth', 'api_key'], signedIn: true },
       ],
       hasRuntime: true,
       folders: ['/home/kaken/work'],

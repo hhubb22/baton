@@ -3,7 +3,7 @@ import { createConnection } from 'node:net'
 import { createInterface } from 'node:readline/promises'
 import { parseArgs } from 'node:util'
 import { StdioClient, frames, writeFrame } from '../../shared/stdio.js'
-import { probe, runtimeModels, VERSION, PROVIDERS } from './auth.js'
+import { probe, runtimeModels, VERSION, registeredProvider, loginApiKey } from './auth.js'
 import { checkedRPC, type Request } from './protocol.js'
 import { createDeviceCodeLoginInteraction, createLoginInteraction } from './login.js'
 
@@ -31,8 +31,24 @@ async function main() {
     console.log(JSON.stringify(await probe()))
     return
   }
+  if (command === 'login-api-key') {
+    const { provider: registration } = registeredProvider(provider)
+    if (!registration.auth.apiKey?.login) throw new Error('api_key_unsupported')
+    if (process.stdin.isTTY) throw new Error('api_key_stdin_required')
+    const chunks: Buffer[] = []
+    let bytes = 0
+    for await (const chunk of process.stdin) {
+      const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+      bytes += data.length
+      if (bytes > 16 * 1024) throw new Error('api_key_invalid')
+      chunks.push(data)
+    }
+    await loginApiKey(provider, new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)))
+    console.error('API key 已保存。')
+    return
+  }
   if (command === 'login-device') {
-    if (!PROVIDERS.includes(provider)) throw new Error('unsupported_provider')
+    if (!registeredProvider(provider).deviceCode) throw new Error('device_code_unsupported')
     const cancel = new AbortController()
     const abort = () => cancel.abort()
     process.on('SIGINT', abort)
@@ -66,7 +82,7 @@ async function main() {
     return
   }
   if (command === 'login') {
-    if (!PROVIDERS.includes(provider)) throw new Error('unsupported_provider')
+    if (!registeredProvider(provider).provider.auth.oauth) throw new Error('oauth_unsupported')
     const models = await runtimeModels()
     const input = createInterface({
       input: process.stdin,
@@ -95,7 +111,9 @@ async function main() {
     return
   }
   if (command !== 'run')
-    throw new Error('usage: baton-project-runtime run|probe|login <provider>|login-device <provider>|--version')
+    throw new Error(
+      'usage: baton-project-runtime run|probe|login <provider>|login-device <provider>|login-api-key <provider> < key-file|--version',
+    )
   const { values } = parseArgs({
     args: process.argv.slice(3),
     options: {
@@ -121,8 +139,18 @@ async function main() {
     process.stdin.destroy()
   } else await new ProjectRuntime(checkedRPC(ipc), models, undefined, undefined, budget).start()
 }
-main().catch(() => {
-  console.error('Project Runtime 执行失败，请检查版本、登录状态和节点连接。')
+main().catch((error: unknown) => {
+  const messages: Record<string, string> = {
+    unsupported_provider: '该 provider 未注册，请运行 probe 查看已实现的 provider。',
+    api_key_unsupported: '该 provider 不支持 API key，请使用订阅登录。',
+    api_key_stdin_required: '从标准输入读取 API key：login-api-key <provider> < 私有密钥文件。',
+    api_key_invalid: 'API key 不能为空，须为单行文本且不超过 16 KiB。',
+    device_code_unsupported: '该 provider 支持终端登录，请使用 login <provider>。',
+  }
+  console.error(
+    (error instanceof Error ? messages[error.message] : undefined) ??
+      'Project Runtime 执行失败，请检查版本、登录状态和节点连接。',
+  )
   process.exitCode = 1
   process.stdin.destroy()
 })

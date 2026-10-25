@@ -329,7 +329,7 @@ function DeviceDetails({
 }) {
   const repos = repoNames(device)
   const removeFolder = useRemoveDeviceFolder()
-  const [loginProvider, setLoginProvider] = useState<string | null>(null)
+  const [loginProvider, setLoginProvider] = useState<{ provider: string; localOnly: boolean } | null>(null)
   // 离线或同步中的设备只显示提示和操作，Agent 与文件夹信息要等设备同步完才准确。
   const connected = device.connection === 'online'
   const folders = useDeviceFolders(device.id, connected)
@@ -339,7 +339,12 @@ function DeviceDetails({
   return (
     <div id={`device-${device.id}`} {...stylex.props(styles.details)}>
       {loginProvider && (
-        <SubscriptionLoginDialog device={device} provider={loginProvider} onClose={() => setLoginProvider(null)} />
+        <SubscriptionLoginDialog
+          device={device}
+          provider={loginProvider.provider}
+          localOnly={loginProvider.localOnly}
+          onClose={() => setLoginProvider(null)}
+        />
       )}
       {notice && (
         <div {...stylex.props(styles.deviceNotice)}>
@@ -359,13 +364,21 @@ function DeviceDetails({
               </span>
             ))}
             {device.hasRuntime &&
-              device.subscriptions
-                .filter((sub) => sub.status === 'login_required' || (!sub.status && !sub.signedIn))
-                .map((sub) => (
-                  <Button key={sub.provider} small onClick={() => setLoginProvider(sub.provider)}>
-                    Sign in to {sub.provider}
-                  </Button>
-                ))}
+              device.subscriptions.map((sub) => (
+                <span key={sub.provider}>
+                  {(sub.status === 'login_required' || (!sub.status && !sub.signedIn)) && (
+                    <Button small onClick={() => setLoginProvider({ provider: sub.provider, localOnly: false })}>
+                      {sub.loginMethods?.includes('device_code') ? 'Sign in to' : 'Set up'} {sub.provider}
+                    </Button>
+                  )}
+                  {sub.loginMethods?.includes('api_key') &&
+                    (sub.signedIn || sub.loginMethods.includes('device_code')) && (
+                      <Button small onClick={() => setLoginProvider({ provider: sub.provider, localOnly: true })}>
+                        Use API key for {sub.provider}
+                      </Button>
+                    )}
+                </span>
+              ))}
             <span {...stylex.props(styles.models)}>
               {modelLines(device).map((line) => (
                 <span key={line} {...stylex.props(text.caption, text.muted)}>

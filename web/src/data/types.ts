@@ -49,6 +49,8 @@ export interface DeviceAgent {
 
 export interface Subscription {
   provider: string
+  providerId?: string
+  loginMethods?: ('oauth' | 'api_key' | 'device_code')[]
   signedIn: boolean
   status?: 'available' | 'login_required' | 'unknown'
   reason?: string | null

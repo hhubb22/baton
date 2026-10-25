@@ -1,4 +1,5 @@
 import {
+  normalizeProjectProvider,
   BrowseRootsRequest,
   BrowseRootsGetRequest,
   type BrowseRootsGetResult,
@@ -56,11 +57,7 @@ export interface DeviceService {
   report(signal?: AbortSignal): Promise<DeviceReport>
   close(): Promise<void>
 }
-const Provider = Schema.Literals(['openai-codex', 'chatgpt', 'ChatGPT', 'xai', 'xAI'])
-export function normalizeProvider(value: string): 'openai-codex' | 'xai' {
-  const provider = Schema.decodeUnknownSync(Provider)(value)
-  return provider === 'xai' || provider === 'xAI' ? 'xai' : 'openai-codex'
-}
+export const normalizeProvider = normalizeProjectProvider
 
 function decodeRequest<A>(schema: Schema.Decoder<A>, input: unknown): A {
   try {
@@ -139,7 +136,7 @@ export async function makeDeviceService(options: DeviceServiceOptions): Promise<
           }
         }
         const req = decodeRequest(SubscriptionLoginRequest, body)
-        let provider: 'openai-codex' | 'xai'
+        let provider: string
         try {
           provider = normalizeProvider(req.provider)
         } catch {

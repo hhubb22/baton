@@ -585,6 +585,12 @@ export const RuntimeProvider = Schema.Struct({
     Schema.NullOr(Schema.Array(RuntimeModel).check(Schema.isMaxLength(64))).check(uniqueBy((value) => value.id)),
   ),
   provider: RuntimeName,
+  login_methods: Schema.optionalKey(
+    Schema.Array(Schema.Literals(['oauth', 'api_key', 'device_code'])).check(
+      Schema.isMaxLength(3),
+      uniqueBy((value) => value),
+    ),
+  ),
   status: Schema.Literals(['available', 'login_required', 'unknown']),
   reason: Schema.optionalKey(Reason),
 })

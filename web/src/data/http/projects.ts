@@ -115,11 +115,10 @@ interface InboxDTO {
 const root = '/projects'
 const projectPath = (id: string) => `${root}/${apiPath(id)}`
 const json = (method: string, body: unknown): RequestInit => ({ method, body: JSON.stringify(body) })
-const subscription = (value: string) => ({ 'openai-codex': 'ChatGPT', xai: 'xAI' })[value] ?? value
+const subscription = (value: string) => ({ 'openai-codex': 'ChatGPT', xai: 'xAI', anthropic: 'Claude' })[value] ?? value
 function provider(value: string): string {
-  const id = { ChatGPT: 'openai-codex', xAI: 'xai' }[value] ?? value
-  if (!['openai-codex', 'xai'].includes(id))
-    throw new ClientError('invalid', 'This provider is not supported by the Project runtime')
+  const id = { ChatGPT: 'openai-codex', xAI: 'xai', Claude: 'anthropic' }[value] ?? value.trim()
+  if (!/^[a-z0-9-]{1,64}$/.test(id)) throw new ClientError('invalid', 'Enter a provider ID.')
   return id
 }
 

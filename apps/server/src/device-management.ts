@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { posix, win32 } from 'node:path'
 import {
   jsonBytes,
+  normalizeProjectProvider,
   BrowseRootsRequest,
   BrowseRootsGetRequest,
   BrowseRootsGetResult,
@@ -212,9 +213,10 @@ export const startSubscriptionLogin = Effect.fn('DeviceManagement.startSubscript
   gateway: DeviceGateway,
 ) {
   yield* authorize(employeeId, nodeId)
-  if (!['openai-codex', 'chatgpt', 'ChatGPT', 'xai', 'xAI'].includes(provider))
-    return yield* Effect.fail(new AppError(400, 'invalid_provider', '订阅服务无效'))
-  const normalized = provider === 'xai' || provider === 'xAI' ? 'xai' : 'openai-codex'
+  const normalized = yield* Effect.try({
+    try: () => normalizeProjectProvider(provider),
+    catch: () => new AppError(400, 'invalid_provider', '模型服务无效'),
+  })
   const operationId = randomUUID()
   const result = yield* decode(
     SubscriptionLoginResult,

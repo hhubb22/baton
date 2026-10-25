@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { randomUUID } from 'node:crypto'
 import { Schema } from 'effect'
-import { ProjectRuntime } from '@baton/protocol'
+import { ProjectRuntime, normalizeProjectProvider } from '@baton/protocol'
 import {
   spawnOwnedProcess,
   type OwnedProcess,
@@ -47,12 +47,7 @@ export const defaultRuntimeCommand = (): ProcessCommand => {
     ...(process.platform === 'win32' ? { env: privateFileHostEnvironment(entry) } : {}),
   }
 }
-export const normalizeProvider = (provider: string): 'openai-codex' | 'xai' => {
-  const name = provider.trim().toLowerCase()
-  if (name === 'chatgpt' || name === 'openai-codex') return 'openai-codex'
-  if (name === 'xai') return 'xai'
-  throw new Error('不支持该模型订阅服务')
-}
+export const normalizeProvider = normalizeProjectProvider
 
 export class RuntimeRunner {
   private readonly owned = new Set<OwnedProcess>()

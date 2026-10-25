@@ -606,6 +606,36 @@ describe('devices', () => {
     expect(screen.queryByRole('button', { name: 'Sign in to ChatGPT' })).not.toBeInTheDocument()
   })
 
+  it.each([true, false])('shows local API key setup for Claude with signedIn=%s', async (signedIn) => {
+    const user = userEvent.setup()
+    let loginCalls = 0
+    renderApp('/devices', 'normal', (client) => {
+      const list = client.listDevices.bind(client)
+      client.listDevices = async () =>
+        (await list()).map((device) => ({
+          ...device,
+          subscriptions: device.subscriptions.map((sub) =>
+            sub.provider === 'Claude' ? { ...sub, signedIn, status: signedIn ? 'available' : 'login_required' } : sub,
+          ),
+        }))
+      const login = client.startSubscriptionLogin.bind(client)
+      client.startSubscriptionLogin = async (input) => {
+        loginCalls++
+        return login(input)
+      }
+    })
+    await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
+    await user.click(screen.getByRole('button', { name: signedIn ? 'Use API key for Claude' : 'Set up Claude' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Set up Claude on Ubuntu Dev' })
+    expect(within(dialog).getByText('baton-project-runtime login anthropic')).toBeInTheDocument()
+    expect(within(dialog).getByText('baton-project-runtime login-api-key anthropic < key-file')).toBeInTheDocument()
+    expect(within(dialog).getByText(/The key stays on Ubuntu Dev/)).toBeInTheDocument()
+    expect(within(dialog).queryByText('Getting sign-in code…')).not.toBeInTheDocument()
+    expect(loginCalls).toBe(0)
+    await user.click(within(dialog).getByRole('button', { name: signedIn ? 'Done' : 'Close' }))
+    expect(deviceRow('Ubuntu Dev')).toHaveFocus()
+  })
+
   it('retries a subscription login after the device could not be reached', async () => {
     const user = userEvent.setup()
     const { client } = renderApp('/devices', 'error')
