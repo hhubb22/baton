@@ -74,9 +74,8 @@ async function withService(
             worker_ready: ready,
             ...(generation ? { storage_generation: generation } : {}),
           }
-        const result = await handler(id, req, options)
-        if (req.type === 'thread_open' && result.ok) generation = req.storage_generation
-        return result
+        if (req.type === 'thread_open') generation = req.storage_generation
+        return handler(id, req, options)
       },
     }
     await Effect.runPromise(
@@ -108,6 +107,7 @@ it('queries a prepared command and resends the identical request only when the W
           queries.push(req)
           return { type: 'result', ok: false, code: 'command_not_found' }
         }
+        expect((await Effect.runPromise(ledger.worker(command.thread_id)))?.startup_phase).toBe('open_attempted')
         delivered.push(req)
         if (delivered.length === 1) throw new IPCError('closed', 'Disconnected before command acceptance')
         return accepted(req)

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { chmod, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
 import { Cause, Effect, Exit, Stream } from 'effect'
 import type * as Scope from 'effect/Scope'
@@ -11,10 +12,11 @@ import { acquireProcessLock } from '../platform/lock.ts'
 import { writePrivateFileAtomic } from '../platform/private.ts'
 import { makeWorker, type Worker, type ThreadAgent } from '../worker/index.ts'
 import { initialState, makeLedger, type State } from '../worker/ledger.ts'
-import { initializeWorkerDirectory } from './host.ts'
+import { initializeWorkerDirectory, LocalWorkerHost } from './host.ts'
 import { contentHash, makeNodeLedger, type DiscoveredWorker, type NodeLedger } from './ledger.ts'
 import { inspectWorkerLedger, makeWorkerRecovery } from './recovery.ts'
 import type { DaemonWorkerHost } from './threads.ts'
+import { runWorker } from './worker-runner.ts'
 
 const temporary: string[] = []
 afterEach(async () => {
@@ -148,6 +150,7 @@ it('restarts an acknowledged Worker from its existing SQLite ledger and obtains 
         const localRun = Effect.runPromiseWith(context)
         const host: DaemonWorkerHost = {
           async ensureWorker() {
+            expect((await localRun(ledger.worker(f.saved.threadId)))?.startup_phase).toBe('open_attempted')
             starts++
             worker = await localRun(makeWorker({ dbPath: f.paths.ledger, agentFactory: () => agent }))
           },
@@ -223,26 +226,164 @@ it('appends one stable history-unavailable report after all durable node reports
   })
 })
 
-it('persists the launch-attempt marker before the first launch and treats a later missing ledger as unknown without starting a blank Worker', async () => {
-  const f = await fixture()
-  await withLedger(f.path, async (ledger) => {
-    await run(ledger.prepare(f.prepared))
+it.each(['missing', 'uninitialized', 'initializing', 'empty'])(
+  'retries a pre-open startup with a %s ledger across daemon restarts',
+  async (condition) => {
+    const f = await fixture()
+    if (condition === 'uninitialized') await writePrivateFileAtomic(f.paths.ledger, '')
+    if (condition === 'initializing') {
+      await writePrivateFileAtomic(f.paths.ledger, '')
+      const db = new DatabaseSync(f.paths.ledger)
+      try {
+        db.exec('CREATE TABLE worker_commit (id INTEGER PRIMARY KEY, commit_token TEXT NOT NULL)')
+      } finally {
+        db.close()
+      }
+    }
+    if (condition === 'empty') {
+      await run(Effect.scoped(makeLedger(f.paths.ledger)))
+      await chmod(f.paths.ledger, 0o600)
+    }
+    const failed = unreachableHost()
+    await withLedger(f.path, async (ledger) => {
+      await run(ledger.prepare(f.prepared))
+      const recovery = makeWorkerRecovery({ dataDirectory: f.path, ledger, host: failed })
+      expect(await recovery.ensure(f.saved.threadId)).toBe('retry')
+      expect((await run(ledger.worker(f.saved.threadId)))?.startup_phase).toBe('awaiting_open')
+    })
+    let running = false
     const host = {
       ensureWorker: vi.fn(async () => {
-        expect((await run(ledger.worker(f.saved.threadId)))?.launch_attempted).toBe(true)
-        throw new Error('Process stopped before ledger creation')
+        running = true
       }),
-      request: vi.fn(async () => {
-        throw new Error('No Worker')
+      request: vi.fn(async (): Promise<WorkerIPCMessage> => {
+        if (!running) throw new Error('Not started')
+        return { type: 'result', ok: true, worker_ready: true }
       }),
     } satisfies DaemonWorkerHost
-    const first = makeWorkerRecovery({ dataDirectory: f.path, ledger, host })
-    expect(await first.ensure(f.saved.threadId)).toBe('retry')
-    const restarted = makeWorkerRecovery({ dataDirectory: f.path, ledger, host })
-    expect(await restarted.ensure(f.saved.threadId)).toBe('lost')
-    expect(host.ensureWorker).toHaveBeenCalledTimes(1)
-    expect((await run(ledger.pendingReports()))[0]).toMatchObject({ history_unavailable: true, worker_seq: 1 })
+    await withLedger(f.path, async (ledger) => {
+      const restarted = makeWorkerRecovery({ dataDirectory: f.path, ledger, host })
+      expect((await run(ledger.worker(f.saved.threadId)))?.launch_attempted).toBe(true)
+      expect(await restarted.ensure(f.saved.threadId)).toBe('ready')
+      expect((await run(ledger.pendingCommands())).map((command) => command.id)).toEqual([f.prepared.id])
+      expect(await run(ledger.pendingReports())).toEqual([])
+    })
+    await withLedger(f.path, async (ledger) => {
+      const reconnected = makeWorkerRecovery({ dataDirectory: f.path, ledger, host })
+      expect(await reconnected.ensure(f.saved.threadId)).toBe('ready')
+      expect(host.ensureWorker).toHaveBeenCalledTimes(1)
+      expect(failed.ensureWorker).toHaveBeenCalledTimes(1)
+    })
+  },
+)
+
+it.each(['missing', 'empty'])(
+  'never recreates a %s ledger after a possible open handoff, including after stale discovery writes',
+  async (condition) => {
+    const f = await fixture(),
+      host = unreachableHost()
+    if (condition === 'empty') {
+      await run(Effect.scoped(makeLedger(f.paths.ledger)))
+      await chmod(f.paths.ledger, 0o600)
+    }
+    await withLedger(f.path, async (ledger) => {
+      await run(ledger.prepare(f.prepared))
+      await run(ledger.markWorkerLaunch(f.saved.threadId))
+      await run(ledger.markWorkerOpenAttempt(f.saved.threadId))
+      await run(ledger.saveWorker({ ...f.saved, startup_phase: 'awaiting_open' }))
+    })
+    await withLedger(f.path, async (ledger) => {
+      expect((await run(ledger.worker(f.saved.threadId)))?.startup_phase).toBe('open_attempted')
+      const recovery = makeWorkerRecovery({ dataDirectory: f.path, ledger, host })
+      expect(await recovery.ensure(f.saved.threadId)).toBe('lost')
+      expect(host.ensureWorker).not.toHaveBeenCalled()
+      expect((await run(ledger.pendingReports()))[0]).toMatchObject({ history_unavailable: true, worker_seq: 1 })
+    })
+  },
+)
+
+it('retains an IPC open attempt made before daemon registration across ledger restart', async () => {
+  const f = await fixture(),
+    host = unreachableHost()
+  await withLedger(f.path, async (ledger) => {
+    await run(ledger.markWorkerOpenAttempt(f.saved.threadId))
+    expect(await run(ledger.workers())).toEqual([])
   })
+  await withLedger(f.path, async (ledger) => {
+    await run(ledger.prepare(f.prepared))
+    expect((await run(ledger.worker(f.saved.threadId)))?.startup_phase).toBe('open_attempted')
+    const recovery = makeWorkerRecovery({ dataDirectory: f.path, ledger, host })
+    expect(await recovery.ensure(f.saved.threadId)).toBe('lost')
+    expect(host.ensureWorker).not.toHaveBeenCalled()
+  })
+})
+
+it('persists an open received directly over IPC before native session creation', async () => {
+  const f = await fixture()
+  const host = new LocalWorkerHost(f.path)
+  const previousUmask = process.umask()
+  try {
+    await run(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const ledger = yield* makeNodeLedger(join(f.path, 'node.db'))
+          yield* ledger.prepare(f.prepared)
+          yield* Effect.promise(() => writePrivateFileAtomic(f.paths.token, 'a'.repeat(64)))
+          let opened = 0
+          const agent: ThreadAgent = {
+            open: () =>
+              Effect.gen(function* () {
+                expect((yield* ledger.worker(f.saved.threadId).pipe(Effect.orDie))?.startup_phase).toBe(
+                  'open_attempted',
+                )
+                opened++
+                return { nativeSessionId: 'offline-native' }
+              }),
+            resume: () => Effect.die('Unexpected resume'),
+            prepareInput: () => Effect.die('Unexpected preparation'),
+            restoreInput: () => Effect.void,
+            send: () => Effect.die('Unexpected send'),
+            sent: () => Effect.succeed(undefined),
+            events: Stream.never,
+            abort: () => Effect.void,
+            close: () => Effect.void,
+            reap: () => Effect.succeed({ processTreeStopped: true }),
+          }
+          yield* Effect.forkIn(
+            runWorker({
+              dataDirectory: f.path,
+              threadId: f.saved.threadId,
+              command: {
+                executable: process.execPath,
+                args: [fileURLToPath(new URL('../testing/platform/process.mjs', import.meta.url))],
+              },
+              agentFactory: () => agent,
+            }),
+            yield* Effect.scope,
+          )
+          yield* Effect.tryPromise({
+            try: async () => {
+              await vi.waitFor(
+                async () => {
+                  expect((await host.request(f.saved.threadId, { type: 'status', ok: false })).worker_ready).toBe(true)
+                },
+                { timeout: 5000 },
+              )
+              expect(opened).toBe(0)
+              expect((await run(ledger.worker(f.saved.threadId)))?.startup_phase).toBe('awaiting_open')
+              const reply = await host.request(f.saved.threadId, f.prepared.request)
+              expect(reply.ok).toBe(true)
+              expect((await run(ledger.worker(f.saved.threadId)))?.startup_phase).toBe('open_attempted')
+              await vi.waitFor(() => expect(opened).toBe(1))
+            },
+            catch: (error) => error,
+          })
+        }),
+      ),
+    )
+  } finally {
+    process.umask(previousUmask)
+  }
 })
 
 it('allows one legitimate first launch and coalesces concurrent requests before the first open handoff', async () => {
@@ -294,6 +435,7 @@ it.each(['sqlite', 'json', 'generation', 'empty'] as const)(
     await withLedger(f.path, async (ledger) => {
       await run(ledger.prepare(f.prepared))
       await run(ledger.markWorkerLaunch(f.saved.threadId))
+      await run(ledger.markWorkerOpenAttempt(f.saved.threadId))
       const recovery = makeWorkerRecovery({ dataDirectory: f.path, ledger, host })
       expect(await recovery.ensure(f.saved.threadId)).toBe('lost')
       expect(await recovery.ensure(f.saved.threadId)).toBe('lost')
@@ -302,6 +444,37 @@ it.each(['sqlite', 'json', 'generation', 'empty'] as const)(
     })
   },
 )
+
+it('rejects residual activity in an apparently empty ledger even before daemon open dispatch', async () => {
+  const f = await fixture(),
+    host = unreachableHost()
+  await workerLedger(f.paths.ledger, f.saved.config)
+  const db = new DatabaseSync(f.paths.ledger)
+  try {
+    db.prepare('DELETE FROM thread_meta').run()
+    db.prepare('INSERT INTO thread_messages VALUES(?,?)').run(randomUUID(), '{}')
+  } finally {
+    db.close()
+  }
+  await withLedger(f.path, async (ledger) => {
+    await run(ledger.prepare(f.prepared))
+    expect(await inspectWorkerLedger(f.path, f.saved)).toBe('corrupt')
+    const recovery = makeWorkerRecovery({ dataDirectory: f.path, ledger, host })
+    expect(await recovery.ensure(f.saved.threadId)).toBe('lost')
+    expect(host.ensureWorker).not.toHaveBeenCalled()
+  })
+})
+
+it('does not recreate a missing ledger without durable proof that open was never attempted', async () => {
+  const f = await fixture(),
+    host = unreachableHost()
+  await withLedger(f.path, async (ledger) => {
+    await run(ledger.saveWorker({ ...f.saved, launch_attempted: true }))
+    const recovery = makeWorkerRecovery({ dataDirectory: f.path, ledger, host })
+    expect(await recovery.ensure(f.saved.threadId)).toBe('lost')
+    expect(host.ensureWorker).not.toHaveBeenCalled()
+  })
+})
 
 it('keeps a locked or temporarily inaccessible ledger retryable without publishing history loss', async () => {
   const f = await fixture(),
@@ -338,6 +511,7 @@ it('does not infer ledger loss from an IPC failure while the Worker process lock
   await withLedger(f.path, async (ledger) => {
     await run(ledger.prepare(f.prepared))
     await run(ledger.markWorkerLaunch(f.saved.threadId))
+    await run(ledger.markWorkerOpenAttempt(f.saved.threadId))
     const release = await acquireProcessLock(f.paths.lock)
     const recovery = makeWorkerRecovery({ dataDirectory: f.path, ledger, host })
     try {

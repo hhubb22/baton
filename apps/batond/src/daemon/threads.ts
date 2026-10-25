@@ -129,7 +129,10 @@ export function makeThreadService(options: {
       )
         throw new CommandDeliveryUncertain()
     }
-    reply ??= await request(req)
+    if (!reply) {
+      if (req.type === 'thread_open') await io(ledger.markWorkerOpenAttempt(config.thread_id))
+      reply = await request(req)
+    }
     if (reply.ok) {
       const accepted = Schema.decodeUnknownSync(WorkerCommandResult)(reply)
       if (

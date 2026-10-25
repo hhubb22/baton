@@ -1,4 +1,5 @@
 import { chmod, lstat, unlink } from 'node:fs/promises'
+import { join } from 'node:path'
 import { Deferred, Effect } from 'effect'
 import type * as Scope from 'effect/Scope'
 import { AgentError, type AgentFactory } from '../worker/agent.ts'
@@ -9,6 +10,7 @@ import { openPrivateFile, readPrivateFile, writePrivateFileAtomic } from '../pla
 import { reapProcessTree, startProcessWatchdog, type ProcessRecordCallbacks } from '../platform/process.ts'
 import { listenWorker } from './ipc.ts'
 import { currentBatondCommand, initializeWorkerDirectory, type BatondCommand } from './host.ts'
+import { makeNodeLedger } from './ledger.ts'
 
 export const runWorker = (options: {
   readonly dataDirectory: string
@@ -99,6 +101,7 @@ export const runWorker = (options: {
         throw new Error(`Unsupported Thread agent_type: ${config.agent_type}`)
       })
     let parsingAttachments = false
+    const nodeLedger = yield* makeNodeLedger(join(options.dataDirectory, 'node.db'))
     const worker = yield* makeWorker({
       dbPath: paths.ledger,
       dataDirectory: options.dataDirectory,
@@ -138,9 +141,14 @@ export const runWorker = (options: {
       handle: (request) => {
         if (request.thread_id !== undefined && request.thread_id !== options.threadId)
           return Effect.succeed({ type: 'result', ok: false, code: 'identity_mismatch' })
-        return worker
-          .handle(request)
-          .pipe(Effect.map((result) => (request.type === 'status' ? { ...result, pid: process.pid } : result)))
+        const handle = Effect.gen(function* () {
+          // 所有 IPC 入口在交付 open 前留下持久事实，包括本地 CLI。
+          if (request.type === 'thread_open') yield* nodeLedger.markWorkerOpenAttempt(options.threadId)
+          return yield* worker.handle(request)
+        })
+        return handle.pipe(
+          Effect.map((result) => (request.type === 'status' ? { ...result, pid: process.pid } : result)),
+        )
       },
     })
     if (process.platform !== 'win32') yield* Effect.promise(() => chmod(paths.endpoint, 0o600))

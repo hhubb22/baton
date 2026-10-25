@@ -39,6 +39,7 @@ export async function inspectWorkerLedger(
         .all()
         .map((row) => row.name),
     )
+    if (tables.size === 0 || (tables.size === 1 && tables.has('worker_commit'))) return 'empty'
     for (const table of [
       'worker_commit',
       'thread_meta',
@@ -49,8 +50,12 @@ export async function inspectWorkerLedger(
     ]) {
       if (!tables.has(table)) return 'corrupt'
     }
+    let hasActivity = false
+    for (const table of ['thread_commands', 'thread_messages', 'thread_processes', 'thread_outbox']) {
+      if (db.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get()) hasActivity = true
+    }
     const rows = db.prepare('SELECT payload FROM thread_meta WHERE id=1').all()
-    if (!rows.length) return 'empty'
+    if (!rows.length) return hasActivity ? 'corrupt' : 'empty'
     const meta: unknown = JSON.parse(String(rows[0].payload))
     if (
       !record(meta) ||
@@ -61,7 +66,17 @@ export async function inspectWorkerLedger(
       typeof meta.resumeRequested !== 'boolean'
     )
       return 'corrupt'
-    if (meta.config === undefined) return 'empty'
+    if (meta.config === undefined)
+      return !hasActivity &&
+        meta.phase === 'empty' &&
+        meta.epoch === 0 &&
+        meta.turn === 0 &&
+        !meta.opened &&
+        !meta.resumeRequested &&
+        meta.nativeId === undefined &&
+        meta.activeMessage === undefined
+        ? 'empty'
+        : 'corrupt'
     const config = Schema.decodeUnknownSync(WorkerOpenConfig)(meta.config)
     if (
       contentHash(config) !== contentHash(saved.config) ||
@@ -124,8 +139,6 @@ export function makeWorkerRecovery(options: {
 }) {
   const { ledger, host, dataDirectory } = options
   const inFlight = new Map<string, Promise<WorkerRecoveryResult>>()
-  // 只在本进程亲自完成首次启动后允许尚未收到 open 的空 Worker；重启后不恢复这个许可。
-  const freshLaunches = new Set<string>()
   const inspect = options.inspect ?? ((saved: DiscoveredWorker) => inspectWorkerLedger(dataDirectory, saved))
 
   async function ensureOne(threadId: string, signal?: AbortSignal): Promise<WorkerRecoveryResult> {
@@ -137,16 +150,18 @@ export function makeWorkerRecovery(options: {
       try {
         const reply = await host.request(threadId, { type: 'status', ok: false }, { timeoutMs: 250 })
         if (!reply.ok || reply.worker_ready !== true) return false
+        const current = await io(ledger.worker(threadId))
+        if (!current || current.history_unavailable) return false
         if (
-          reply.storage_generation === saved!.config.storage_generation &&
+          reply.storage_generation === current.config.storage_generation &&
           (!reply.session_id || reply.session_id === threadId)
         ) {
-          freshLaunches.delete(threadId)
-          if (!saved!.launch_attempted) await io(ledger.markWorkerLaunch(threadId))
-          if (!saved!.ready) await io(ledger.saveWorker({ ...saved!, ready: true, launch_attempted: true }))
+          if (current.startup_phase !== 'open_attempted') await io(ledger.markWorkerOpenAttempt(threadId))
+          if (!current.launch_attempted) await io(ledger.markWorkerLaunch(threadId))
+          if (!current.ready) await io(ledger.saveWorker({ ...current, ready: true, launch_attempted: true }))
           return true
         }
-        return !reply.storage_generation && freshLaunches.has(threadId)
+        return !reply.storage_generation && !reply.session_id && current.startup_phase === 'awaiting_open'
       } catch (error) {
         // 节点账本写入失败必须由调用方停止执行。
         if (error instanceof DaemonStorageFailure) throw error
@@ -165,17 +180,19 @@ export function makeWorkerRecovery(options: {
     if (condition === 'retry' || signal?.aborted) return 'retry'
     const lost = async (reason: string): Promise<WorkerRecoveryResult> => {
       await io(ledger.markWorkerLost(threadId, reason))
-      freshLaunches.delete(threadId)
       return 'lost'
     }
+    saved = await io(ledger.worker(threadId))
+    if (!saved || signal?.aborted) return 'retry'
+    if (saved.history_unavailable) return 'lost'
+    const awaitingOpen = saved.startup_phase === 'awaiting_open'
     if (condition === 'corrupt') return lost('本地 Worker 账本损坏或结构不匹配，原会话历史不可恢复')
-    if (condition === 'empty') return lost('本地 Worker 账本缺少原会话记录，禁止重新创建会话')
-    if (condition === 'missing' && saved.launch_attempted) return lost('本地 Worker 账本缺失，原会话历史不可恢复')
-    const firstLaunch = await io(ledger.markWorkerLaunch(threadId))
-    if (condition === 'missing' && !firstLaunch) return lost('上次 Worker 启动后的本地账本缺失，无法确认原会话是否创建')
-    saved = (await io(ledger.worker(threadId)))!
-    if (saved.history_unavailable || signal?.aborted) return saved.history_unavailable ? 'lost' : 'retry'
-    if (firstLaunch && condition === 'missing') freshLaunches.add(threadId)
+    if (condition === 'empty' && !awaitingOpen) return lost('本地 Worker 账本缺少原会话记录，禁止重新创建会话')
+    if (condition === 'missing' && !awaitingOpen) return lost('本地 Worker 账本缺失，原会话历史不可恢复')
+    if (condition === 'valid' && saved.startup_phase !== 'open_attempted')
+      await io(ledger.markWorkerOpenAttempt(threadId))
+    await io(ledger.markWorkerLaunch(threadId))
+    if (signal?.aborted) return 'retry'
     try {
       await host.ensureWorker(threadId)
     } catch {
@@ -183,7 +200,7 @@ export function makeWorkerRecovery(options: {
     }
     if (signal?.aborted) return 'retry'
     if (await status()) return 'ready'
-    // 首次启动后的 IPC 暂不可用不构成历史丢失证据，下一轮重新检查进程锁和实体账本。
+    // IPC 暂不可用时，下一轮继续核对进程锁、启动阶段和实体账本。
     return 'retry'
   }
 

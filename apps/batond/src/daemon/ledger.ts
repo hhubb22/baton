@@ -38,6 +38,7 @@ export interface DiscoveredWorker {
   config: WorkerOpenConfig
   ready: boolean
   launch_attempted?: boolean
+  startup_phase?: 'awaiting_open' | 'open_attempted'
   history_unavailable?: ThreadReport
 }
 export interface NodeReport {
@@ -67,6 +68,7 @@ export const makeNodeLedger = Effect.fn('Daemon.makeNodeLedger')(function* (file
       yield* sql.unsafe(
         'CREATE TABLE IF NOT EXISTS node_workers (thread_id TEXT PRIMARY KEY, generation TEXT NOT NULL, payload TEXT NOT NULL)',
       )
+      yield* sql.unsafe('CREATE TABLE IF NOT EXISTS node_open_attempts (thread_id TEXT PRIMARY KEY)')
       yield* sql.unsafe(
         'CREATE TABLE IF NOT EXISTS node_outbox (thread_id TEXT NOT NULL, seq INTEGER NOT NULL, event_id TEXT NOT NULL UNIQUE, hash TEXT NOT NULL, payload TEXT NOT NULL, acked INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(thread_id,seq))',
       )
@@ -88,6 +90,7 @@ export const makeNodeLedger = Effect.fn('Daemon.makeNodeLedger')(function* (file
           return yield* Effect.fail(new Error('Worker 配置或存储代次不符'))
         const saved = { ...previous, ...value }
         if (previous?.launch_attempted) saved.launch_attempted = true
+        if (previous?.startup_phase === 'open_attempted') saved.startup_phase = 'open_attempted'
         if (previous?.history_unavailable) saved.history_unavailable = previous.history_unavailable
         if (saved.history_unavailable) saved.ready = false
         yield* sql.unsafe(
@@ -104,12 +107,18 @@ export const makeNodeLedger = Effect.fn('Daemon.makeNodeLedger')(function* (file
           if (existing.hash !== value.hash) return yield* Effect.fail(new Error('command_content_mismatch'))
           return existing
         }
-        if (value.request.open_config)
+        if (value.request.open_config) {
+          const previous = yield* worker(value.request.open_config.thread_id)
+          const attempted = yield* sql.unsafe('SELECT thread_id FROM node_open_attempts WHERE thread_id=?', [
+            value.request.open_config.thread_id,
+          ])
           yield* saveWorker({
             threadId: value.request.open_config.thread_id,
             config: value.request.open_config,
             ready: false,
+            ...(previous ? {} : { startup_phase: attempted.length ? 'open_attempted' : 'awaiting_open' }),
           })
+        }
         yield* sql.unsafe('INSERT INTO node_commands VALUES(?,?,?)', [value.id, value.hash, JSON.stringify(value)])
         return value
       }),
@@ -125,13 +134,16 @@ export const makeNodeLedger = Effect.fn('Daemon.makeNodeLedger')(function* (file
         ])
         if (result.ok) {
           const saved = yield* worker(result.thread_id)
-          if (saved) yield* saveWorker({ ...saved, ready: true })
+          if (saved) yield* saveWorker({ ...saved, ready: true, startup_phase: 'open_attempted' })
         }
       }),
     )
   const ingest = (report: ThreadReport) =>
     sql.withTransaction(
       Effect.gen(function* () {
+        const saved = yield* worker(report.thread_id)
+        if (saved && saved.startup_phase !== 'open_attempted')
+          yield* saveWorker({ ...saved, startup_phase: 'open_attempted' })
         const hash = contentHash(report)
         const rows = yield* sql.unsafe<{ hash: string }>(
           'SELECT hash FROM node_outbox WHERE (thread_id=? AND seq=?) OR event_id=?',
@@ -164,6 +176,18 @@ export const makeNodeLedger = Effect.fn('Daemon.makeNodeLedger')(function* (file
         if (saved.launch_attempted) return false
         yield* saveWorker({ ...saved, launch_attempted: true })
         return true
+      }),
+    )
+  // 在发送或交付 open 前提交；接收结果不确定时也不能恢复为 awaiting_open。
+  const markWorkerOpenAttempt = (threadId: string) =>
+    sql.withTransaction(
+      Effect.gen(function* () {
+        const saved = yield* worker(threadId)
+        if (saved?.history_unavailable) return yield* Effect.fail(new Error('Worker 历史已不可恢复'))
+        // 接收端也记录尚未由 daemon 登记的本地 Thread，避免并发 prepare 误判。
+        yield* sql.unsafe('INSERT OR IGNORE INTO node_open_attempts VALUES(?)', [threadId])
+        if (saved && saved.startup_phase !== 'open_attempted')
+          yield* saveWorker({ ...saved, startup_phase: 'open_attempted' })
       }),
     )
   const markWorkerLost = (threadId: string, reason: string) =>
@@ -218,6 +242,7 @@ export const makeNodeLedger = Effect.fn('Daemon.makeNodeLedger')(function* (file
     acknowledge,
     saveWorker,
     markWorkerLaunch,
+    markWorkerOpenAttempt,
     markWorkerLost,
     workers: () =>
       sql
