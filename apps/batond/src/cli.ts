@@ -4,7 +4,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { Schema } from 'effect'
-import { AgentType, PositiveInteger, WorkerOpen, type RuntimeAgent, type WorkerRequest } from '@baton/protocol'
+import { PositiveInteger, WorkerOpen, type RuntimeAgent, type WorkerRequest } from '@baton/protocol'
 import { LocalWorkerHost, initializeWorkerDirectory } from './daemon/host.ts'
 import { readPrivateFile, writePrivateFileAtomic } from './platform/private.ts'
 
@@ -85,7 +85,9 @@ export async function runLocalCLI(
   const timeout =
     values['execution-timeout-seconds'] === undefined
       ? undefined
-      : Schema.decodeUnknownSync(PositiveInteger)(Number(values['execution-timeout-seconds']))
+      : Schema.decodeUnknownSync(PositiveInteger.check(Schema.isLessThanOrEqualTo(2147483647)))(
+          Number(values['execution-timeout-seconds']),
+        )
   const mode = Schema.decodeUnknownSync(Schema.Literals(['queue', 'steer']))(values.mode ?? 'queue')
   if (action === 'message' && mode === 'steer' && values.model) throw new Error('插入消息不能更换模型')
   const threadId = values['thread-id'] ?? (action === 'open' ? randomUUID() : requireValue('thread-id'))
@@ -100,8 +102,9 @@ export async function runLocalCLI(
     } catch (error) {
       if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error
     }
-    const agent = Schema.decodeUnknownSync(AgentType)(values.agent ?? saved?.open_config.agent_type ?? 'cursor')
-    if (agent === 'shell') throw new Error('本地 open 支持 cursor、pi、codex 和 kiro')
+    const agent = Schema.decodeUnknownSync(Schema.Literals(['cursor', 'pi', 'codex', 'kiro']))(
+      values.agent ?? saved?.open_config.agent_type ?? 'cursor',
+    )
     const capability = await (dependencies.probeAgent
       ? dependencies.probeAgent(agent)
       : import('./agents/registry.ts').then(({ agentRegistry }) => agentRegistry[agent].probe()))
