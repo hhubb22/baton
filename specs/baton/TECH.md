@@ -249,15 +249,18 @@ type Adapter interface {
 }
 ```
 
-`id` 是 `client_message_id`。`Send` 收到与当前不同的 `model` 时，先切换模型再开启这一轮，切换失败时不发出消息，返回原因；Worker 只在 Turn 开始前切换，Steer 不改变模型。`Sent` 判断消息是否已被 Agent 接收：Codex 把 `id` 作为 `clientUserMessageId` 写进原生历史并按它查找；Pi 和 Kiro 没有这个字段，Worker 在 `intent` 里记下发送前原生历史中 user 消息的数量，`Sent` 检查这个位置之后是否有正文相同的 user 消息。
+`id` 是 `client_message_id`。TS Worker 与 agent-host 通过 fork 的 `ProviderAdapterV2` 执行 Agent，具体映射见 [Agent 适配设计](../agent-adapters/TECH.md)。当前四种 Agent 的 Thread 模型固定：Pi、Codex、Cursor 的上游 adapter 支持会话内换模型，但 Worker 尚未开放模型变更，host 的 `startTurn` 仍使用创建配置；Kiro 的 fork adapter 通过能力覆盖明确关闭会话内换模型。`switch_model` 均为 false，Steer 沿用当前模型。
+
+`Sent` 用只读原生快照核对输入是否已被接收，按发送前持久记录的已确认 user 消息数量检查下一条正文，缺少证据时保持未确认；不重发可能已执行的输入。
 
 ### 各 Agent
 
 | Agent | Steer | 恢复 | 模型 | 备注 |
 |---|---|---|---|---|
-| Pi | 原生 `steer` RPC | `--session` 指向原 JSONL | 启动参数 `--model`；中途用 `set_model` RPC 切换 | `Abort` 先 `clear_queue` 再 `abort`；abort 要等当前工具结束才生效，工具超过 60 秒时由 Worker 结束进程树 |
-| Codex | `turn/steer`，带 `expectedTurnId` | `thread/resume` | `thread/start` 和每次 `turn/start` 的 `model` | `approvalPolicy: never`，`sandbox: workspace-write` |
-| Kiro | 不支持。执行中再发 prompt 会打断当前这一轮 | `session/load`，先核对 ID 存在 | 新建时用 `_meta.kiro.modelId`；中途切换未验证，上报为不支持 | 能力上报为不支持 steer；界面在执行中只提供排队 |
+| Pi | 原生 `steer` RPC | 恢复原 JSONL 会话 | 上游支持 `set_model`；Baton Thread 固定创建时模型 | 使用 fork 的 `provider-pi`，停止与事件归一化沿用上游 |
+| Codex | `turn/steer`，带 `expectedTurnId` | `thread/resume` | 上游支持每次 `turn/start` 传模型；Baton 尚未接通逐消息模型 | 使用 fork 的 `provider-codex` |
+| Cursor | 不支持 | 恢复已保存会话与 SDK store | 上游支持会话内换模型；Baton 尚未接通逐消息模型 | 使用 fork 的 `provider-cursor` |
+| Kiro | fork adapter 明确关闭插入能力 | `session/list` 核对 ID 与 cwd 后 `session/load` | 新建用 `_meta.kiro.modelId`；`default` 省略；fork 的 `kiroCapabilityOverrides.sessions.supportsModelSwitchInSession` 为 false | 使用 `kiro-cli acp --agent-engine=v3`；能力覆盖按当前 adapter 实现报告 |
 | shell | 不支持 | 不支持 | 不适用 | 只供 Project Agent 的命令执行使用，一个 Thread 只有一个 Turn，见 Project Agent TECH 第 10 节 |
 
 Kiro 只提供排队。需要打断时，员工先停止这一轮再发消息。
@@ -266,9 +269,11 @@ Kiro 只提供排队。需要打断时，员工先停止这一轮再发消息。
 
 ### 能力上报
 
-batond 在 `node_runtime_reports.report.agents` 上报每种 Agent 的 `{agent_type, version, status, models:[{id, name}], default_model, capabilities:{create, queue, steer, stop, resume, switch_model}}`。模型列表来自 Agent 自己的接口：Codex 用 `model/list`，Pi 用 `get_available_models`，Kiro 取 `session/new` 返回的 `models`；取不到时 `models` 为空，只能使用默认模型。`status` 为 `available`、`unverified` 或 `unavailable`；只有 `available` 且支持 `create` 的 Agent 可新建 Thread。`queue` 和 `stop` 对已接入的 Agent 恒为真；`steer`、`resume`、`switch_model` 来自 `Capabilities()`。Pi 接受 1.3.0、Codex 接受 0.162.1、Kiro 接受 2.32.0 及各自更新的正式版本，无版本上限；构建元数据不参与比较，预发布版、无法识别和低于最低支持版本的 CLI 标为 `unverified`。能力采集和执行前检查复用适配器的版本规则，启动仍校验必需的 RPC / app-server / ACP 响应与能力；新版本协议不满足要求时明确失败（D1）。Agent 可用性来自本机探测，不受注册身份中静态 `capabilities` 列表限制；shell 仍须单独开启本机命令权限。中心检查指定的模型在上报的 `models` 内，按目标系统的路径规则检查工作目录位于上报的 `roots` 内，设备在执行前核实目录存在及解析后的边界。
+batond 在 `node_runtime_reports.report.agents` 上报每种 Agent 的 `{agent_type, version, status, reason?, models:[{id, name}], default_model, capabilities:{create, queue, steer, stop, resume, switch_model}}`。模型目录由 fork 的 driver 探测：Codex 使用 `model/list`，Pi 使用 `get_available_models`，Kiro 经 ACP 发现会话取得模型，Cursor 使用 SDK 模型查询。目录用于发现与补全，显式模型 ID 交给原生 Agent 判定；目录为空时仍可使用默认模型或手填 ID，换模型操作继续校验 `switch_model` 能力。
 
-batond 在启动后的首次采集及 Agent 可执行文件路径或版本变化时探测模型，结果在进程内缓存；探测失败同样缓存为空列表。重连和后续报告复用缓存，模型探测不发送推理请求。模型目录的探测与目录扫描分别计时，不阻塞连接、心跳和 Worker 消息。
+`status` 为 `available`、`unverified` 或 `unavailable`。程序或 SDK 已安装且认证 valid/unknown 时报告 available，开放 create/resume；缺程序或明确认证 missing 时报告 unavailable。系统与版本不设白名单，未知版本、版本探测超时、模型目录问题和能力限制记录在 reason 中；整次探测失败且安装状态未确认时报告 unverified。Cursor 的资产、辅助程序或 sandbox 明确失败时报告 unavailable。shell 须单独开启本机命令权限。中心按目标系统路径规则检查工作目录属于上报的 roots，设备在执行前核实目录存在与真实路径边界。
+
+TS daemon 在独立探测循环调用 `probeLocalAgents`，每轮结束后默认间隔 30 秒，单次 host 探测最多 30 秒。探测失败保留诊断，后续循环继续重试，不按可执行文件路径或版本永久缓存空目录。探测不发送 prompt、不发起登录；Kiro 的模型发现会建立空的 ACP 会话。能力探测与目录采集、连接、心跳和 Worker 消息分别运行。
 
 ## 接口
 
@@ -289,10 +294,10 @@ URL 相对 `/api/v1`。读取检查员工会话与资源归属，写入另检查
 | `GET /threads` | 可按 `project_id`、`node_id`、`status` 筛选，按 `(last_activity_at, id)` 倒序分页；`limit` 默认 50、最多 100，续页使用 `next_cursor`。每条记录包含 Thread 基础字段、`title`、可空 `current_turn` 和 `stop_canceled`，供列表直接展示 |
 | `GET /threads/{id}` | Thread、状态、当前 Turn、待发消息、失败消息和 `resume_pending`；`model` 为实际模型，`next_model` 为后续排队消息的默认模型 |
 | `GET /threads/{id}/timeline` | 按审计事件 ID 顺序返回消息、Turn 边界、回复和操作；`limit` 默认 20、最多 100，续页使用 `next_cursor` |
-| `POST /threads/{id}/messages` | `{client_message_id, content, mode, model?}`，返回 202；`mode` 缺省为 `queue`，`steer` 在 Agent 不支持时返回 422；`model` 不在上报列表内、Agent 不支持换模型或与 `steer` 同时出现时返回 422 |
+| `POST /threads/{id}/messages` | `{client_message_id, content, mode, model?}`，返回 202；`mode` 缺省为 `queue`，`steer` 在 Agent 不支持时返回 422；Agent 不支持换模型或 `model` 与 `steer` 同时出现时返回 422。模型目录不限制显式 ID |
 | `POST /threads/{id}/messages/{mid}/withdraw` | 撤回排队消息；已发出返回 409 和当前状态 |
 | `POST /threads/{id}/stop` | 返回 202，保存停止及撤回排队消息的意图，状态等待设备报告确认 |
-| `POST /threads/{id}/model` | `{model}`；校验设备模型目录与切换能力，保存 `next_model` 并返回 200 和 ThreadView。后续接受的 `queue` 消息未指定模型时采用该值；已有消息和当前 Turn 沿用原配置，实际模型由 `turn.started` 确认 |
+| `POST /threads/{id}/model` | `{model}`；校验切换能力，显式 ID 交给原生 Agent 判定，保存 `next_model` 并返回 200 和 ThreadView。后续接受的 `queue` 消息未指定模型时采用该值；已有消息和当前 Turn 沿用原配置，实际模型由 `turn.started` 确认 |
 | `POST /threads/{id}/resume` | `{}`；Thread 已打开、处于 `stopped` / `idle`、无待确认停止或归档且 Agent 报告恢复能力时，保存恢复命令并返回 202 和 ThreadView；`resume_pending` 表示未确认的恢复命令，同一待恢复请求不重复入队。不支持返回 422，状态冲突返回 409 |
 | `POST /threads/{id}/archive` | 返回 202；有进行中的 Turn、待发消息或不确定状态时先发停止，设备确认后归档；空闲或已停止且无待发消息时直接归档 |
 | `GET /threads/{id}/history` | 从设备分页读取原生历史，见「历史读取与实时输出」 |

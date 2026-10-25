@@ -192,7 +192,7 @@ Thread 历史使用中心已保存的记录：`thread_messages` 保存员工和 
 | Cursor | 随 batond 分发的 SDK、平台辅助包与本机 shell | 按上游 driver 报告的能力 |
 | Grok、Antigravity | 切换后接入时确定 | 切换后接入时确定 |
 
-`agents/capabilities.ts` 按固定上游 adapter 的能力与 Baton 已实现的执行路径报告：Pi、Codex 支持 steer，Cursor、Kiro 上游不支持；四个 Agent 均支持新建、排队、停止与恢复。Pi、Codex、Cursor 上游支持会话内换模型，中心已有 `setModel` 和逐消息模型入口，但 `thread-agent.ts` 拒绝改变创建时模型，通用 driver 的 `startTurn` 仍使用 Thread 配置，尚未传入逐消息模型，因此 `switch_model` 保持 false。Kiro 上游明确关闭这两项能力。`capabilityLimitations` 将这些原因写入报告。仅存在明确的数据丢失、越权或重复副作用风险时进一步限制已实现能力。
+`agents/capabilities.ts` 按固定上游 adapter 的能力与 Baton 已实现的执行路径报告：Pi、Codex 支持 steer，Cursor、Kiro 上游不支持；四个 Agent 均支持新建、排队、停止与恢复。Pi、Codex、Cursor 上游支持会话内换模型，中心已有 `setModel` 和逐消息模型入口，但 `thread-agent.ts` 拒绝改变创建时模型，通用 driver 的 `startTurn` 仍使用 Thread 配置，尚未传入逐消息模型，因此 `switch_model` 保持 false。Kiro 的 fork adapter 在 `kiroAcp.ts` 的 `kiroCapabilityOverrides` 中明确关闭 `supportsActiveSteering`、`supportsSteeringByInterruptRestart` 和 `supportsModelSwitchInSession`；Baton 按该固定实现报告能力。该覆盖不证明 Kiro CLI 的所有版本都缺少对应协议方法。`capabilityLimitations` 将这些原因写入报告。仅存在明确的数据丢失、越权或重复副作用风险时进一步限制已实现能力。
 
 Kiro settings 固定为 `source: local`，不拉取 registry 包；上游 Kiro driver 不读取专有环境变量，host 只继承系统项，不提供 `BATON_KIRO_*` 或 `KIRO_HOME` 配置入口。Pi、Codex 的配置目录分别按各自原生变量传递，不改写系统 HOME。Antigravity 需要额外启动路径时增加结构化、非敏感本机配置，先通过验证再固定其字段。
 
@@ -214,13 +214,13 @@ Web 的 NodeDTO、DeviceAgent 和 mapDevice 保留 status、create 和 reason，
 
 ### 探测
 
-探测在只读 agent-host 中调用上游 driver 的安装、认证与模型检查，版本按各 Agent 的探测路径取得，返回分开的安装/版本、认证和模型目录结果。探测不发送 prompt、不调用 authenticate/login 或打开登录浏览器，使用临时空工作目录和空 MCP 配置；Kiro 的完整探测仍调用 `checkAcpRegistryProviderStatus` 与 `probeAcpRegistryConfiguration`，由上游建立空的发现会话以读取能力与模型。其余隔离行为以上游实现为准。每个任务最多 30 秒，版本和配置一致时复用结果，结束或失败后回收进程树。
+探测在只读 agent-host 中调用上游 driver 的安装、认证与模型检查，版本按各 Agent 的探测路径取得，返回分开的安装/版本、认证和模型目录结果。探测不发送 prompt、不调用 authenticate/login 或打开登录浏览器，使用临时空工作目录和空 MCP 配置；Kiro 的完整探测仍调用 `checkAcpRegistryProviderStatus` 与 `probeAcpRegistryConfiguration`，由上游建立空的发现会话以读取能力与模型。其余隔离行为以上游实现为准。每个任务最多 30 秒；TS daemon 每轮探测结束后默认间隔 30 秒重新执行，失败结果不会因路径或版本未变而永久缓存，结束或失败后回收进程树。模型目录用于发现与补全，显式 ID 交给原生 Agent 判定，换模型继续受已实现能力限制。
 
 四个 Agent 在程序或 SDK 已安装、认证 valid/unknown 时报告 available，开放 create/resume；缺程序或明确 missing 时 unavailable。reason 记录版本、系统、认证未知、模型目录问题和未开放能力的原因；版本探测失败或超时不阻止创建。模型目录失败时可按默认模型创建。整次 host 探测失败且安装状态未确认时保持 unverified，避免将探测故障误报成程序缺失。Cursor 在主进程先检查 SDK 资产与平台包版本一致性，host 再检查辅助程序和 sandbox，明确失败时 unavailable；已确认 SDK 安装完整后，整次 host 探测失败或超时保留诊断并允许创建。
 
 Kiro 在上游 status 之外运行 `kiro-cli --version`。`src/agents/kiro/version.ts` 使用 host 提供的 Node Effect `ChildProcessSpawner`，经包装 spawner 交给 process registrar 管理，Scope 结束或超时后回收进程。版本命令限时 4 秒，stdout/stderr 各最多收集 4096 字节，只返回解析出的版本号；原始输出与诊断留在 host 内，不进入能力报告。命令超时、失败、输出超限或不可解析时，版本为 `unknown` 并记录原因；已安装时仍为 available。缺少程序时为 `unavailable`。
 
-`hostedAgentReport` 对 Cursor、Pi、Codex、Kiro 共用安装与认证规则：已安装且认证为 valid 或 unknown 时报告 `available`、`create: true`、`resume: true`。版本与系统写入 reason，认证 unknown 提示首次执行由原生程序检查；明确 missing 则为 `unavailable` 并拒绝。网页按节点报告开放新建与恢复，不符合准入条件的新建请求返回 HTTP 422、`agent_unavailable`。本地 CLI 的 `open` 目前仅创建 Cursor Thread。
+`hostedAgentReport` 对 Cursor、Pi、Codex、Kiro 共用安装与认证规则：已安装且认证为 valid 或 unknown 时报告 `available`、`create: true`、`resume: true`。版本与系统写入 reason，认证 unknown 提示首次执行由原生程序检查；明确 missing 则为 `unavailable` 并拒绝。网页按节点报告开放新建与恢复，不符合准入条件的新建请求返回 HTTP 422、`agent_unavailable`。本地 CLI 的 `open --agent cursor|pi|codex|kiro` 默认 Cursor，支持显式模型与每轮执行时限；`message --mode queue|steer` 默认排队，Worker 按实际能力校验。
 
 Kiro 的 `turnFailure` 回调处理真实回合的 provider failure：明确认证失败映射为“Sign in to Kiro CLI and try again.”，其他 provider 错误映射为“Check Kiro CLI on this device and try again.”。其他 Agent 的失败原因固定为 `Send your message again or check <Agent> on this device.`。通用 driver 将安全原因随失败结束事件交给 Worker，保存到 `turn.ended.content`；不透传原始错误，不自动登录，不重发输入。
 
