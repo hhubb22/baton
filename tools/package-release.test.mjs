@@ -1,22 +1,23 @@
 import assert from 'node:assert/strict'
+import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { test } from 'node:test'
-import { archiveArgs, releaseTarget, validateBuildInfo } from './package-release.mjs'
+import {
+  archiveArgs,
+  releaseTarget,
+  validatePackageLayout,
+  validatePackageManifest,
+  validateSeaVersion,
+} from './package-release.mjs'
 
 const version = 'v0.1.0-alpha.1'
-const commit = 'a'.repeat(40)
 
-test('Go 二进制必须与发布平台和源码提交一致，记录未提交修改', () => {
-  const info = `binary: go1.27.0\n\tbuild\tGOOS=linux\n\tbuild\tGOARCH=amd64\n\tbuild\tvcs.revision=${commit}\n\tbuild\tvcs.modified=false\n`
-  assert.equal(validateBuildInfo(info, 'linux-amd64', commit), false)
-  assert.equal(validateBuildInfo(info.replace('modified=false', 'modified=true'), 'linux-amd64', commit), true)
-  assert.throws(() => validateBuildInfo(info, 'windows-amd64', commit), /平台不匹配/)
-  assert.throws(() => validateBuildInfo(info, 'linux-amd64', 'b'.repeat(40)), /源码提交不匹配/)
-  assert.throws(() => validateBuildInfo('', 'linux-amd64', commit), /平台不匹配/)
-})
 for (const [platform, arch, target, extension] of [
-  ['linux', 'x64', 'linux-amd64', '.tar.gz'],
+  ['linux', 'x64', 'linux-x64', '.tar.gz'],
+  ['linux', 'arm64', 'linux-arm64', '.tar.gz'],
   ['darwin', 'arm64', 'darwin-arm64', '.tar.gz'],
-  ['win32', 'x64', 'windows-amd64', '.zip'],
+  ['win32', 'x64', 'win-x64', '.zip'],
 ]) {
   test(`发布包按原生平台命名：${target}`, () => {
     assert.deepEqual(releaseTarget(version, platform, arch), {
@@ -27,9 +28,39 @@ for (const [platform, arch, target, extension] of [
   })
 }
 
+test('SEA 必须报告原生目标与内置 Node，开发入口不能作为发布包', () => {
+  const info = { sea: true, platform: 'linux', arch: 'arm64', node: 'v26.11.1' }
+  assert.deepEqual(validateSeaVersion(JSON.stringify(info), 'linux', 'arm64'), info)
+  assert.throws(() => validateSeaVersion(JSON.stringify(info), 'linux', 'x64'), /平台不匹配/)
+  assert.throws(() => validateSeaVersion(JSON.stringify(info), 'darwin', 'arm64'), /平台不匹配/)
+  for (const sea of [false, undefined, 'true'])
+    assert.throws(() => validateSeaVersion(JSON.stringify({ ...info, sea }), 'linux', 'arm64'), /Node SEA/)
+  for (const node of [undefined, '', '26.11.1', 'v26.11.1\n'])
+    assert.throws(() => validateSeaVersion(JSON.stringify({ ...info, node }), 'linux', 'arm64'), /Node 版本/)
+  assert.throws(() => validateSeaVersion('v26.11.1'), SyntaxError)
+})
+
+test('安装包清单与 SEA 的实际系统、架构和 Node 一致，并携带依赖来源', () => {
+  const runtime = { sea: true, platform: 'darwin', arch: 'arm64', node: 'v26.11.1' }
+  const manifest = {
+    format: 'node-sea',
+    platform: runtime.platform,
+    arch: runtime.arch,
+    node: runtime.node,
+    dependencies: [{ name: '@cursor/sdk', version: '1.0.35', path: 'node_modules/@cursor/sdk' }],
+  }
+  assert.deepEqual(validatePackageManifest(JSON.stringify(manifest), runtime), manifest)
+  for (const field of ['format', 'platform', 'arch', 'node'])
+    assert.throws(() => validatePackageManifest(JSON.stringify({ ...manifest, [field]: 'wrong' }), runtime))
+  for (const dependencies of [undefined, [], [{}]])
+    assert.throws(() => validatePackageManifest(JSON.stringify({ ...manifest, dependencies }), runtime), /依赖/)
+})
+
 test('版本输入拒绝路径、命令及不完整版本号', () => {
   for (const value of [
     undefined,
+    null,
+    123,
     '',
     '0.1.0',
     'v0.1',
@@ -38,13 +69,14 @@ test('版本输入拒绝路径、命令及不完整版本号', () => {
     'v0.1.0;echo secret',
     '../v0.1.0',
     'v0.1.0\n',
+    'v0.1.0\r\n',
   ])
     assert.throws(() => releaseTarget(value, 'linux', 'x64'))
 })
 
 test('不把未支持的架构标成已有发布平台', () => {
   for (const [platform, arch] of [
-    ['linux', 'arm64'],
+    ['linux', 'ia32'],
     ['darwin', 'x64'],
     ['win32', 'arm64'],
   ])
@@ -66,4 +98,62 @@ test('压缩包命令将路径作为独立参数传递，Windows 由扩展名选
     'C:\\temp folder',
     'payload',
   ])
+})
+
+async function layoutFixture(t, platform = process.platform) {
+  const directory = await mkdtemp(join(tmpdir(), 'baton-release-layout-'))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const binary = join(directory, platform === 'win32' ? 'batond.exe' : 'batond')
+  await writeFile(binary, 'layout fixture', { mode: 0o755 })
+  await mkdir(join(directory, 'node_modules'))
+  await writeFile(join(directory, 'node_modules/package.json'), '{}')
+  await mkdir(join(directory, 'licenses'))
+  await writeFile(join(directory, 'licenses/LICENSE'), 'fixture license')
+  return { directory, binary }
+}
+
+test('安装包结构要求原生文件名、依赖与许可目录', async (t) => {
+  for (const platform of ['linux', 'win32']) {
+    const { directory, binary } = await layoutFixture(t, platform)
+    assert.equal(await validatePackageLayout(directory, platform), await realpath(binary))
+    await rm(binary)
+    await assert.rejects(validatePackageLayout(directory, platform), /ENOENT/)
+  }
+})
+
+test('缺少或清空附带目录时拒绝归档', async (t) => {
+  for (const entry of ['node_modules', 'licenses']) {
+    const { directory } = await layoutFixture(t)
+    const path = join(directory, entry)
+    await rm(path, { recursive: true })
+    await assert.rejects(validatePackageLayout(directory), /ENOENT/)
+    await mkdir(path)
+    await assert.rejects(validatePackageLayout(directory), new RegExp(entry))
+  }
+})
+
+test('空程序和丢失执行权限的程序不能发布', async (t) => {
+  const { directory, binary } = await layoutFixture(t)
+  await writeFile(binary, '')
+  await assert.rejects(validatePackageLayout(directory), /可执行文件/)
+  if (process.platform !== 'win32') {
+    await writeFile(binary, 'layout fixture')
+    await chmod(binary, 0o644)
+    await assert.rejects(validatePackageLayout(directory), /执行权限/)
+  }
+})
+
+test('附带目录中的链接必须在安装包内且目标存在', async (t) => {
+  const { directory } = await layoutFixture(t)
+  const link = join(directory, 'node_modules/linked-license')
+  // Windows 的目录 junction 不要求开发者模式或创建符号链接权限。
+  const linkType = process.platform === 'win32' ? 'junction' : 'dir'
+  await symlink(join(directory, 'licenses'), link, linkType)
+  await validatePackageLayout(directory)
+  await rm(link)
+  await symlink(tmpdir(), link, linkType)
+  await assert.rejects(validatePackageLayout(directory), /指向包外/)
+  await rm(link)
+  await symlink(join(directory, 'missing'), link, linkType)
+  await assert.rejects(validatePackageLayout(directory), /ENOENT/)
 })

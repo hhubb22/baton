@@ -1,19 +1,24 @@
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, join, resolve, win32 } from 'node:path'
+import { basename, isAbsolute, join, relative, resolve, win32 } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 
 export function releaseTarget(version, platform = process.platform, arch = process.arch) {
-  if (!/^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/.test(version ?? ''))
+  if (
+    typeof version !== 'string' ||
+    version !== version.trim() ||
+    !/^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/.test(version)
+  )
     throw new Error('发布版本必须是带 v 前缀的版本号，例如 v0.1.0-alpha.1')
   const target = {
-    'linux-x64': 'linux-amd64',
+    'linux-x64': 'linux-x64',
+    'linux-arm64': 'linux-arm64',
     'darwin-arm64': 'darwin-arm64',
-    'win32-x64': 'windows-amd64',
+    'win32-x64': 'win-x64',
   }[`${platform}-${arch}`]
   if (!target) throw new Error(`尚未支持的发布平台：${platform}-${arch}`)
   const name = `baton-${version}-${target}`
@@ -24,13 +29,59 @@ export function archiveArgs(archive, staging, name, platform = process.platform)
   return [platform === 'win32' ? '-acf' : '-czf', archive, '-C', staging, name]
 }
 
-export function validateBuildInfo(raw, target, commit) {
-  const info = new Map([...raw.matchAll(/^\s*build\s+(\S+)=(\S+)$/gm)].map((match) => [match[1], match[2]]))
-  const [platform, arch] = target.split('-')
-  if (info.get('GOOS') !== platform || info.get('GOARCH') !== arch)
-    throw new Error('Go 二进制与发布平台不匹配，请在目标平台重新构建')
-  if (info.get('vcs.revision') !== commit) throw new Error('Go 二进制与当前源码提交不匹配，请重新运行统一构建')
-  return info.get('vcs.modified') !== 'false'
+export function validateSeaVersion(raw, platform = process.platform, arch = process.arch) {
+  const info = JSON.parse(raw)
+  if (info?.sea !== true) throw new Error('batond 必须是 Node SEA 安装包')
+  if (info.platform !== platform || info.arch !== arch) throw new Error('SEA 与发布平台不匹配，请在目标平台重新构建')
+  if (
+    typeof info.node !== 'string' ||
+    info.node !== info.node.trim() ||
+    !/^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(info.node)
+  )
+    throw new Error('SEA 未报告有效的 Node 版本')
+  return info
+}
+
+export function validatePackageManifest(raw, runtime) {
+  const manifest = JSON.parse(raw)
+  if (manifest?.format !== 'node-sea') throw new Error('安装包清单必须声明 node-sea 格式')
+  for (const field of ['platform', 'arch', 'node']) {
+    if (manifest[field] !== runtime[field]) throw new Error(`安装包清单与 SEA 的 ${field} 不匹配`)
+  }
+  if (!Array.isArray(manifest.dependencies) || manifest.dependencies.length === 0)
+    throw new Error('安装包清单缺少生产依赖')
+  for (const dependency of manifest.dependencies) {
+    if (['name', 'version', 'path'].some((field) => typeof dependency?.[field] !== 'string' || !dependency[field]))
+      throw new Error('安装包清单的依赖需要 name、version 和 path')
+  }
+  return manifest
+}
+
+export async function validatePackageLayout(directory, platform = process.platform) {
+  const packageRoot = await realpath(directory)
+  const binary = join(packageRoot, platform === 'win32' ? 'batond.exe' : 'batond')
+  const executable = await lstat(binary)
+  if (!executable.isFile() || executable.size === 0) throw new Error('安装包缺少 batond 可执行文件')
+  if (platform !== 'win32' && !(executable.mode & 0o111)) throw new Error('batond 缺少执行权限')
+  for (const name of ['node_modules', 'licenses']) {
+    const path = join(packageRoot, name)
+    if (!(await lstat(path)).isDirectory() || !(await readdir(path)).length)
+      throw new Error(`安装包缺少完整的 ${name} 目录`)
+  }
+  async function checkLinks(directory) {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name)
+      if (entry.isSymbolicLink()) {
+        const target = relative(packageRoot, await realpath(path))
+        if (target === '..' || target.startsWith('../') || target.startsWith('..\\') || isAbsolute(target))
+          throw new Error(`安装包链接指向包外：${relative(packageRoot, path)}`)
+      } else if (entry.isDirectory()) await checkLinks(path)
+      else if (!entry.isFile()) throw new Error(`安装包包含非普通文件：${relative(packageRoot, path)}`)
+    }
+  }
+  await checkLinks(join(packageRoot, 'node_modules'))
+  await checkLinks(join(packageRoot, 'licenses'))
+  return binary
 }
 
 function run(command, args, { capture = false, ...options } = {}) {
@@ -38,50 +89,69 @@ function run(command, args, { capture = false, ...options } = {}) {
     cwd: root,
     stdio: capture ? 'pipe' : 'inherit',
     encoding: 'utf8',
+    timeout: 180_000,
+    maxBuffer: 16 * 1024 * 1024,
     ...options,
   })
   if (result.error) throw result.error
-  if (result.status !== 0) throw new Error(`${command} 执行失败：${result.signal ?? result.status}`)
+  if (result.status !== 0) {
+    const diagnostic = result.stderr?.trim() || result.stdout?.trim()
+    throw new Error(`${command} 执行失败：${result.signal ?? result.status}${diagnostic ? `\n${diagnostic}` : ''}`)
+  }
   return result.stdout?.trim()
+}
+
+async function checkCommands(binary, staging) {
+  const home = join(staging, 'home')
+  await mkdir(home)
+  const env = { HOME: home, USERPROFILE: home, TMPDIR: home, TMP: home, TEMP: home, PATH: '', NO_COLOR: '1' }
+  for (const key of ['SystemRoot', 'WINDIR', 'ComSpec', 'PATHEXT']) {
+    if (process.env[key]) env[key] = process.env[key]
+  }
+  const options = { capture: true, cwd: home, env, timeout: 10_000 }
+  if (!run(binary, ['--help'], options)) throw new Error('batond --help 输出为空')
+  const version = run(binary, ['--version'], options)
+  if (!version) throw new Error('batond --version 输出为空')
+  return validateSeaVersion(version)
 }
 
 export async function packageRelease(version, source = resolve(root, 'bin'), output = resolve(root, 'bin/releases')) {
   const { name, target, extension } = releaseTarget(version)
+  await validatePackageLayout(source)
   const commit = run('git', ['rev-parse', 'HEAD'], { capture: true })
+  const modified = Boolean(run('git', ['status', '--porcelain'], { capture: true }))
   const staging = await mkdtemp(join(tmpdir(), 'baton-release-'))
   const archive = join(staging, name + extension)
   const destination = resolve(output, name + extension)
   try {
-    // 只打包明确的程序和 Runtime，避免把 bin 中的临时文件或本地配置带入附件。
+    // 仅复制发布入口、依赖和许可，避免带入本地配置或构建中间文件。
     const payload = join(staging, name)
     await mkdir(payload)
-    const suffix = process.platform === 'win32' ? '.exe' : ''
-    let modified = false
-    for (const binary of ['baton-server', 'batond']) {
-      const path = join(source, binary + suffix)
-      const info = run('go', ['version', '-m', path], { capture: true })
-      modified = validateBuildInfo(info, target, commit) || modified
-      await cp(path, join(payload, binary + suffix))
+    const binary = process.platform === 'win32' ? 'batond.exe' : 'batond'
+    for (const entry of [binary, 'node_modules', 'licenses', 'package.json', 'package-manifest.json'])
+      await cp(join(source, entry), join(payload, entry), { recursive: true, verbatimSymlinks: true })
+    for (const entry of ['INSTALL.md']) {
+      const path = join(source, entry)
+      const info = await lstat(path).catch((error) => {
+        if (error.code !== 'ENOENT') throw error
+      })
+      if (!info) continue
+      if (!info.isFile()) throw new Error(`安装包元数据必须是普通文件：${entry}`)
+      await cp(path, join(payload, entry))
     }
-    await cp(join(source, 'sidecars'), join(payload, 'sidecars'), {
-      recursive: true,
-      verbatimSymlinks: true,
-    })
-    await cp(join(root, 'runtimes/INSTALL.md'), join(payload, 'INSTALL.md'))
-    await writeFile(
-      join(payload, 'release.json'),
-      JSON.stringify(
-        {
-          version,
-          commit,
-          modified,
-          target,
-          node: '>=22.19.0',
-        },
-        null,
-        2,
-      ) + '\n',
-    )
+    const batondVersion = await checkCommands(join(payload, binary), staging)
+    validatePackageManifest(await readFile(join(payload, 'package-manifest.json'), 'utf8'), batondVersion)
+    const release = {
+      version,
+      commit,
+      modified,
+      target,
+      runtime: 'node-sea',
+      node: batondVersion.node,
+      buildNode: process.version,
+      batondVersion,
+    }
+    await writeFile(join(payload, 'release.json'), JSON.stringify(release, null, 2) + '\n')
     await mkdir(output, { recursive: true })
     // Windows 显式使用系统 bsdtar，避免 Git Bash 的 GNU tar 生成非 zip 文件。
     const tar = process.platform === 'win32' ? win32.join(process.env.SystemRoot, 'System32', 'tar.exe') : 'tar'
@@ -90,18 +160,23 @@ export async function packageRelease(version, source = resolve(root, 'bin'), out
     const magic = extension === '.zip' ? Buffer.from([0x50, 0x4b, 0x03, 0x04]) : Buffer.from([0x1f, 0x8b])
     if (!contents.subarray(0, magic.length).equals(magic)) throw new Error('压缩包内容格式与扩展名不匹配')
 
-    // 用最终压缩包解压后的内容验证安装，覆盖压缩过程中的权限和链接变化。
+    // 验证最终解压产物，覆盖压缩过程中的权限、依赖和链接变化。
     const extracted = join(staging, 'extracted')
     await mkdir(extracted)
     run(tar, ['-xf', archive, '-C', extracted])
-    run(process.execPath, [join(root, 'tools/check-sidecar-package.mjs'), join(extracted, name)])
-    const metadata = JSON.parse(await readFile(join(extracted, name, 'release.json'), 'utf8'))
-    if (metadata.version !== version || metadata.commit !== commit || metadata.target !== target)
-      throw new Error('解压后的发布信息不匹配')
+    const installed = join(extracted, name)
+    await validatePackageLayout(installed)
+    validatePackageManifest(await readFile(join(installed, 'package-manifest.json'), 'utf8'), batondVersion)
+    const check = JSON.parse(
+      run(process.execPath, [join(root, 'tools/check-sidecar-package.mjs'), installed], { capture: true }),
+    )
+    const metadata = JSON.parse(await readFile(join(installed, 'release.json'), 'utf8'))
+    if (JSON.stringify(metadata) !== JSON.stringify(release)) throw new Error('解压后的发布信息不匹配')
     const checksum = createHash('sha256').update(contents).digest('hex')
     await cp(archive, destination)
     await writeFile(destination + '.sha256', `${checksum}  ${basename(destination)}\n`)
-    console.log(`发布包与 SHA-256 校验和已生成：${destination}`)
+    await writeFile(resolve(output, `${name}.check.json`), JSON.stringify(check, null, 2) + '\n')
+    console.log(JSON.stringify({ archive: destination, sha256: checksum, ...release }))
     return destination
   } finally {
     await rm(staging, { recursive: true, force: true })
@@ -110,7 +185,11 @@ export async function packageRelease(version, source = resolve(root, 'bin'), out
 
 if (import.meta.main) {
   try {
-    await packageRelease(process.argv[2], process.argv[3] ? resolve(process.argv[3]) : undefined)
+    await packageRelease(
+      process.argv[2],
+      process.argv[3] ? resolve(process.argv[3]) : undefined,
+      process.argv[4] ? resolve(process.argv[4]) : undefined,
+    )
   } catch (error) {
     console.error(error.message)
     process.exitCode = 1
