@@ -816,6 +816,38 @@ describe('execution details', () => {
     expect(within(preview).queryByRole('region', { name: /Contents of/ })).not.toBeInTheDocument()
   })
 
+  it('shows a failed reply in a project thread without changing reply numbering', async () => {
+    const reason = 'The agent could not complete the request. Try again.'
+    renderApp('/projects/prj-baton?thread=thr-gateway', 'normal', (client) => {
+      const read = client.listMessages.bind(client)
+      client.listMessages = async (id) => {
+        const messages = await read(id)
+        const reply = messages.find((message) => message.role === 'agent')
+        if (id !== 'thr-gateway' || !reply) return messages
+        return [
+          {
+            ...reply,
+            id: 'failed-reply',
+            role: 'failure',
+            body: reason,
+            createdAt: reply.createdAt - 1,
+            activity: null,
+            attachments: [],
+          },
+          ...messages,
+        ]
+      }
+    })
+    const detail = await screen.findByRole('complementary', { name: 'Fix gateway reconnect race' })
+    expect(
+      await within(detail).findByRole('heading', { name: 'Codex could not finish this reply' }),
+    ).toBeInTheDocument()
+    const failure = within(detail).getByText(reason)
+    expect(failure.closest('[data-reply]')).toBeNull()
+    const reply = await within(detail).findByText(/did not reconnect within 30s/)
+    expect(reply.closest('[data-reply]')).toHaveAttribute('data-reply', '1')
+  })
+
   it('asks the project assistant about a selected reply and sends the reference', async () => {
     const user = userEvent.setup()
     const { router, scheduler } = renderApp('/threads?thread=thr-gateway')

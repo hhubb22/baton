@@ -172,6 +172,35 @@ export const authenticationFailure = (transcript: Transcript): Transcript => {
   }
 }
 
+/** Replay provider_error followed by simple's reply in the same native session. */
+export const failedThenCompleted = (failure: Transcript, success: Transcript): Transcript => {
+  const failed = segment(failure, 0)
+  const completed = segment(success, 0)
+  const prompt = completed.entries.findIndex(
+    (entry) => entry.type === 'expect_outbound' && frameMethod(entry) === 'session/prompt',
+  )
+  if (prompt < 0) throw new Error('Kiro success transcript has no prompt')
+  const continuation = completed.entries
+    .slice(prompt)
+    .map((entry) =>
+      Schema.decodeUnknownSync(ProviderReplayEntry)(
+        JSON.parse(
+          JSON.stringify(entry).replace(/message-(\d+)/gu, (_match, id: string) => `message-${Number(id) + 100}`),
+        ),
+      ),
+    )
+  return {
+    ...failed,
+    scenario: `${failure.scenario}-then-completed`,
+    metadata: {
+      ...failed.metadata,
+      derivedFrom: [failure.scenario, success.scenario],
+      purpose: 'Baton failed reply followed by a completed reply without restarting the native session',
+    },
+    entries: [...failed.entries.filter((entry) => entry.type !== 'runtime_exit'), ...continuation],
+  }
+}
+
 /** Reuse simple's completed turn twice, with distinct native message identities. */
 export const twoTurns = (transcript: Transcript): Transcript => {
   const first = segment(transcript, 0)

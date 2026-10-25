@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vite-plus/test'
-import { threadView } from '../derive'
+import { threadMessageNotice, threadView } from '../derive'
 import type { Device, OperationPhase } from '../types'
 import type { HttpContext } from './context'
 import { createThreadAPI } from './threads'
@@ -258,6 +258,86 @@ describe('HTTP thread contracts', () => {
     ])
     expect((await api.listMessages(threadId))[1].id).toBe(`reply:${threadId}:reply-report`)
   })
+
+  it.each([false, true])(
+    'shows a failed reply in its timeline position and keeps delivery confirmed (partial reply: %s)',
+    async (partialReply) => {
+      const reason = 'The agent could not complete the request. Try again.'
+      const events = [
+        event(1, 'message.accepted', message({ client_message_id: messageId })),
+        event(2, 'message.sent', { client_message_id: messageId, worker_turn_seq: 4 }),
+        ...(partialReply ? [event(3, 'reply', { worker_turn_seq: 4, content: 'Partial reply' })] : []),
+        event(4, 'turn.ended', {
+          event_id: 'failed-report',
+          worker_turn_seq: 4,
+          reason: 'failed',
+          content: reason,
+          queue_empty: true,
+        }),
+      ]
+      const { api, refreshes } = setup((url, init) => {
+        if (init.method === 'POST') return message({ client_message_id: messageId })
+        return url.pathname.endsWith('/timeline') ? { events } : thread()
+      })
+      const op = await api.sendMessage({ threadId, body: 'Inspect this repository', clientId: messageId, mode: 'next' })
+      const refresh = refreshes.get(op.id)
+      if (!refresh) throw new Error('Expected an execution refresh')
+      expect(await refresh()).toMatchObject({ phase: 'failed', detail: reason })
+      const failedMessages = await api.listMessages(threadId)
+      expect(
+        threadView(await api.getThread(threadId), device(), {
+          unknownDelivery: failedMessages.some((item) => item.delivery === 'unknown'),
+        }),
+      ).toEqual({
+        status: { tone: 'neutral', label: 'Idle' },
+        group: 'idle',
+        notice: null,
+        composer: true,
+        live: false,
+      })
+
+      events.push(
+        event(
+          5,
+          'message.accepted',
+          message({ id: 'next-message', client_message_id: 'next-client', content: 'Continue' }),
+        ),
+        event(6, 'message.sent', { client_message_id: 'next-client', worker_turn_seq: 5 }),
+        event(7, 'reply', { event_id: 'next-reply', worker_turn_seq: 5, content: 'Next reply' }),
+        event(8, 'turn.ended', { worker_turn_seq: 5, reason: 'completed', queue_empty: true }),
+      )
+      const messages = await api.listMessages(threadId)
+      expect(messages.map((item) => item.body)).toEqual([
+        'Inspect this repository',
+        ...(partialReply ? ['Partial reply'] : []),
+        reason,
+        'Continue',
+        'Next reply',
+      ])
+      expect(messages.filter((item) => item.role === 'user').map((item) => item.delivery)).toEqual([
+        'delivered',
+        'delivered',
+      ])
+      const failure = messages.find((item) => item.role === 'failure')
+      if (!failure) throw new Error('Expected the failed reply in the timeline')
+      expect(failure).toMatchObject({
+        id: `turn-failed:${threadId}:failed-report`,
+        body: reason,
+        activity: null,
+        attachments: [],
+      })
+      const current = await api.getThread(threadId)
+      expect(threadMessageNotice(failure, current.agent)).toEqual({
+        title: 'Codex could not finish this reply',
+        detail: reason,
+        tone: 'neutral',
+        action: null,
+      })
+      expect(current.status).toBe('idle')
+      expect((await api.listMessages(threadId)).map((item) => item.id)).toEqual(messages.map((item) => item.id))
+      expect(await refresh()).toMatchObject({ phase: 'failed', detail: reason })
+    },
+  )
 
   it('shows a saved message waiting for an offline device and preserves unknown delivery', async () => {
     let events = [accepted()]

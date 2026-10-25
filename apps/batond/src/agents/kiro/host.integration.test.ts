@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
-import { Effect, Exit, Fiber, Schema, Scope, Stream } from 'effect'
+import { Deferred, Effect, Exit, Fiber, Schema, Scope, Stream } from 'effect'
 import { build } from 'esbuild'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vite-plus/test'
 import { ThreadReport as ThreadReportSchema, type WorkerOpenConfig, type WorkerRequest } from '@baton/protocol'
@@ -16,6 +16,7 @@ import { makeKiroAgentFactory } from './index.ts'
 import { kiroTurnFailure } from './failure.ts'
 import {
   authenticationFailure,
+  failedThenCompleted,
   firstTurnOnly,
   frameMethod,
   kiroFixturePath,
@@ -183,17 +184,22 @@ describe('Kiro Agent host', () => {
   })
 
   it.each(['authentication required', 'provider error'])(
-    'persists %s through the real host and Worker without successful output or resending',
+    'ends %s safely and executes the next queued message in the same host',
     async (scenario) => {
       const config = { ...(await workspace()), model: 'baton-nonexistent-model' }
       const recording = await readKiroTranscript(kiroFixturePath('provider_error'))
-      const transcript =
-        scenario === 'authentication required' ? authenticationFailure(recording) : segment(recording, 0)
+      const transcript = failedThenCompleted(
+        scenario === 'authentication required' ? authenticationFailure(recording) : segment(recording, 0),
+        await readKiroTranscript(kiroFixturePath('simple')),
+      )
       const path = await writeTranscript(config, 'failure', transcript)
       const dbPath = join(config.working_directory, 'thread.db')
       const events: AgentEvent[] = []
       const scope = await effect(Scope.make())
+      const releaseFailure = await effect(Deferred.make<void>())
       let createdAgents = 0
+      let reapedAgents = 0
+      let closedAgents = 0
       const worker = await effect(
         makeWorker({
           dbPath,
@@ -203,7 +209,22 @@ describe('Kiro Agent host', () => {
             agents.push(agent)
             return {
               ...agent,
-              events: agent.events.pipe(Stream.tap((event) => Effect.sync(() => void events.push(event)))),
+              events: agent.events.pipe(
+                Stream.tap((event) =>
+                  Effect.gen(function* () {
+                    events.push(event)
+                    if (event.type === 'end' && event.outcome === 'failed') yield* Deferred.await(releaseFailure)
+                  }),
+                ),
+              ),
+              reap: () => {
+                reapedAgents++
+                return agent.reap()
+              },
+              close: () => {
+                closedAgents++
+                return agent.close()
+              },
             }
           },
         }).pipe(Effect.provideService(Scope.Scope, scope)),
@@ -240,39 +261,97 @@ describe('Kiro Agent host', () => {
         }
         await effect(worker.handle(request))
         await expect
-          .poll(async () => (await reports()).find((report) => report.kind === 'thread.unknown')?.reason, {
-            timeout: 10_000,
-          })
-          .toBe(expectedReason)
-        await consumed(path, transcript)
+          .poll(async () => (await reports()).some((report) => report.kind === 'message.sent'), { timeout: 10_000 })
+          .toBe(true)
+        const nextRequest: WorkerRequest = {
+          ...request,
+          command_id: randomUUID(),
+          client_message_id: randomUUID(),
+          payload: 'Reply after the failed message',
+        }
+        await effect(worker.handle(nextRequest))
         await expect
           .poll(
-            () => {
-              const database = new DatabaseSync(dbPath, { readOnly: true })
-              try {
-                const row = Schema.decodeUnknownSync(Schema.Struct({ payload: Schema.String }))(
-                  database.prepare('SELECT payload FROM thread_meta WHERE id = 1').get(),
-                )
-                return Schema.decodeUnknownSync(
-                  Schema.fromJsonString(Schema.Struct({ processTreeStopped: Schema.optional(Schema.Boolean) })),
-                )(row.payload).processTreeStopped
-              } finally {
-                database.close()
-              }
-            },
+            async () =>
+              (await reports()).some(
+                (report) =>
+                  report.kind === 'message.queued' && report.client_message_id === nextRequest.client_message_id,
+              ),
             { timeout: 10_000 },
           )
           .toBe(true)
+        await effect(Deferred.succeed(releaseFailure, undefined))
+        await expect
+          .poll(async () => (await reports()).filter((report) => report.kind === 'turn.ended').length, {
+            timeout: 10_000,
+          })
+          .toBe(2)
+        await consumed(path, transcript)
         await effect(worker.handle(request))
         persistedReports = await reports()
-        expect(events.filter((event) => event.type === 'reply' || event.type === 'end')).toEqual([])
-        expect(persistedReports.filter((report) => report.kind === 'reply')).toEqual([])
-        expect(
-          persistedReports.filter((report) => report.kind === 'turn.ended' && report.reason === 'completed'),
-        ).toEqual([])
+        expect(persistedReports.filter((report) => report.kind === 'turn.ended')).toEqual([
+          expect.objectContaining({
+            client_message_id: request.client_message_id,
+            reason: 'failed',
+            content: expectedReason,
+            queue_empty: false,
+          }),
+          expect.objectContaining({
+            client_message_id: nextRequest.client_message_id,
+            reason: 'completed',
+            queue_empty: true,
+          }),
+        ])
+        expect(persistedReports.filter((report) => report.kind === 'reply')).toEqual([
+          expect.objectContaining({
+            client_message_id: nextRequest.client_message_id,
+            content: expect.stringContaining('baton-kiro-ok'),
+          }),
+        ])
+        expect(persistedReports.filter((report) => report.kind === 'message.sent')).toHaveLength(2)
+        expect(persistedReports.filter((report) => report.kind.endsWith('.unknown'))).toEqual([])
+        expect(events.filter((event) => event.type === 'end')).toEqual([
+          expect.objectContaining({ type: 'end', outcome: 'failed', reason: expectedReason }),
+          expect.objectContaining({ type: 'end', outcome: 'completed' }),
+        ])
+        const database = new DatabaseSync(dbPath, { readOnly: true })
+        try {
+          const row = Schema.decodeUnknownSync(Schema.Struct({ payload: Schema.String }))(
+            database.prepare('SELECT payload FROM thread_meta WHERE id = 1').get(),
+          )
+          const meta = Schema.decodeUnknownSync(
+            Schema.fromJsonString(
+              Schema.Struct({
+                phase: Schema.String,
+                nativeId: Schema.String,
+                processTreeStopped: Schema.optional(Schema.Boolean),
+              }),
+            ),
+          )(row.payload)
+          expect(meta.phase).toBe('idle')
+          expect(meta.nativeId).toBe('native-session-1')
+          expect(meta.processTreeStopped).not.toBe(true)
+          const messages = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ payload: Schema.String })))(
+            database.prepare('SELECT payload FROM thread_messages ORDER BY rowid').all(),
+          )
+          expect(
+            messages.map((entry) =>
+              Schema.decodeUnknownSync(
+                Schema.fromJsonString(Schema.Struct({ state: Schema.String, ended: Schema.Boolean })),
+              )(entry.payload),
+            ),
+          ).toEqual([
+            { state: 'sent', ended: true },
+            { state: 'sent', ended: true },
+          ])
+        } finally {
+          database.close()
+        }
         expect(JSON.stringify(persistedReports)).not.toContain('private-auth-diagnostic')
         expect(JSON.stringify(persistedReports)).not.toContain('Request ID:')
         expect(createdAgents).toBe(1)
+        expect(reapedAgents).toBe(0)
+        expect(closedAgents).toBe(0)
       } finally {
         await effect(Scope.close(scope, Exit.void))
       }
@@ -287,9 +366,10 @@ describe('Kiro Agent host', () => {
               .report,
         )
         expect(stored).toEqual(persistedReports)
-        expect(stored.filter((report) => report.kind === 'thread.unknown')).toEqual([
-          expect.objectContaining({ thread_id: config.thread_id, reason: expectedReason }),
-        ])
+        expect(stored.filter((report) => report.kind === 'thread.unknown')).toEqual([])
+        expect(stored.find((report) => report.kind === 'turn.ended' && report.reason === 'failed')?.content).toBe(
+          expectedReason,
+        )
         await consumed(path, transcript)
         expect(createdAgents).toBe(1)
       } finally {
