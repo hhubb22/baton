@@ -45,7 +45,9 @@ host 进程的环境变量只包含系统必需项（`PATH`、`HOME`、`USER`、
 
 Kiro 的版本命令使用 host 的 Node Effect spawner 和 process registrar，4 秒超时，stdout/stderr 各最多收集 4096 字节，由 Scope 与进程回收路径清理。探测只返回版本号，诊断不外传。注册表对 macOS arm64 / CLI 精确版本 2.32.0、程序已安装且认证未明确缺失的组合报告 `available` 并开放 create/resume；认证 `unknown` 保留首次执行由原生程序检查的 reason，明确 `missing` 拒绝。其他系统或版本（含预发布、构建后缀）、版本超时或不可解析保持 `unverified`，缺程序为 `unavailable`。Pi、Codex 的认证准入规则保持原样。
 
-Kiro 通过通用 driver 的 `turnFailure` 回调将明确的回合认证失败映射为“Kiro CLI 认证失败，请在设备上登录 Kiro CLI 后重试”，其他 provider 错误使用固定执行失败文案。该原因经 Worker 保存到 Thread 报告，不透传原始错误，不自动登录或重发输入。
+上游 `turn.terminal` 的 `failed` 映射为带原生会话、输入和执行身份的 `end` 事件，`outcome: failed`，并附安全原因。Worker 以现有 `turn.ended` 报告的 `reason: failed` 与 `content` 保存结果，输入保持 sent，队列继续执行；没有排队消息时 Thread 回到 idle，host 和原生会话保留。运行时请求无法应答、事件流断开、发送结果无法确认，以及 host 崩溃或连接丢失仍走 uncertain 路径。
+
+Kiro 通过通用 driver 的 `turnFailure` 回调将明确的回合认证失败映射为“Kiro CLI 认证失败，请在设备上登录 Kiro CLI 后重试”，其他 provider 错误使用固定执行失败文案；其他 Agent 使用固定的 `<Agent> could not complete this reply.`。这些原因不透传原始错误，不自动登录或重发输入。
 
 ## 只读核对
 
@@ -55,4 +57,4 @@ Worker 将插入固定到接收时的活动回合，目标结束后仍未写入 
 
 ## 验证
 
-包内测试覆盖环境白名单、宿主路径与只读凭据，以及用本地替身拉起 detached 子进程和后代后的整树回收。各 Agent 的 stdio/RPC 回放说明见 [Cursor](../agents/cursor/README.md)、[Pi](../agents/pi/README.md)、[Codex](../agents/codex/README.md)、[Kiro](../agents/kiro/README.md) 文档，均使用 fork 的 testkit 和离线转录。Kiro 2.32.0 夹具是授权保留的旧录制转换，README 与 metadata 明确原生版本；`provider_error` 派生认证失败夹具驱动真实 adapter、host 与 Worker，核对安全文案持久化及输入不重发。版本探测使用本地可执行替身验证解析、失败、缺程序与超时回收，不启动真实 CLI。离线验证不能证明真实账号授权有效，节点按版本、系统和认证规则报告可用性。
+包内测试覆盖环境白名单、宿主路径与只读凭据，以及用本地替身拉起 detached 子进程和后代后的整树回收。各 Agent 的 stdio/RPC 回放说明见 [Cursor](../agents/cursor/README.md)、[Pi](../agents/pi/README.md)、[Codex](../agents/codex/README.md)、[Kiro](../agents/kiro/README.md) 文档，均使用 fork 的 testkit 和离线转录。Kiro 2.32.0 夹具是授权保留的旧录制转换，README 与 metadata 明确原生版本；`provider_error` 及派生认证失败夹具与 `simple` 的成功回合组成同会话转录，驱动真实 adapter、host 与 Worker，核对失败结束、安全原因持久化、输入保持 sent、排队消息执行和进程保留。版本探测使用本地可执行替身验证解析、失败、缺程序与超时回收，不启动真实 CLI。离线验证不能证明真实账号授权有效，节点按版本、系统和认证规则报告可用性。

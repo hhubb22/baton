@@ -18,6 +18,7 @@ yield* worker.failed
 - `prepareInput` supplies one durable baseline, encoded within 4 KiB. The Worker saves it with intent and passes the same baseline to `send`.
 - `restoreInput` only restores local preparation state. `sent` reads native evidence and never submits an input or starts an execution session.
 - `send` returns native acceptance evidence. Replies and turn termination use the independent event stream; they may arrive before acceptance.
+- `end` distinguishes completed, cancelled and failed turns. Failed events carry a safe reason; the Worker persists `turn.ended` with `reason: "failed"` and the explanation in `content`. The accepted input stays sent, and the same Agent instance and native session execute queued messages. With no queued input, the Thread returns to idle.
 - `abort` records cancellation independently of a pending open or send. `reap` confirms the whole process tree and excludes late resource creation from cancelled startup.
 - Reply identity and the native session, input and execution IDs determine event ownership. Old instance events and ended-turn events cannot become output for a new turn.
 
@@ -47,6 +48,8 @@ Commands bind their ID to a content digest and immutable receipt. Distinct comma
 
 On reopen, queued inputs can resume from their durable native mapping. Persisted intent is restored and checked with read-only evidence, and is never automatically sent again. An interrupted first open without a committed Worker mapping becomes unknown. A cancelled first open cannot resume or create another native session. Stop withdraws queued messages, invalidates pending execution results and uses turn termination or process reaping as evidence. An uncertain outcome remains unknown after a later process exit.
 
+An explicit failed turn does not enter unknown or trigger process reaping. Unanswered runtime requests, broken event streams, unconfirmed sends and host crashes or connection loss still use the uncertainty path.
+
 A new message on a stopped Thread requests resume of its existing native session. On uncertainty, the Worker withdraws the previous queued inputs, reaps the old execution tree and checks pending intent through a separate read-only instance. A subsequent explicit new message or resume may restore the same native session after reaping is confirmed. Existing unknown inputs keep their result; old queue entries and intents are never revived. Missing native mappings and failed process recovery reject continuation with a reason.
 
 Each accepted Turn uses `execution_timeout_seconds` from the open configuration. Elapsed time is the maximum of the monotonic interval and wall-clock interval, so sleep counts and a clock rollback cannot extend the limit. A scoped timer records a durable timeout stop and uses the same cancellation/reaping path as an explicit stop. The Turn ends with reason `timeout`, including when reaping produces an unknown execution outcome.
@@ -61,4 +64,4 @@ pnpm --filter @baton/batond typecheck
 pnpm exec vp lint apps/batond/src/worker
 ```
 
-The tests use real temporary SQLite files and controllable Agents. They cover receipts and conflicts, queued turns, cancellation, event ownership, Scope recovery, process record recovery, bounded outbox delivery, Turn timeouts, explicit continuation after uncertainty, commit uncertainty, UTF-8 cursors, bounded output, upstream gaps and stop responsiveness during output floods. Platform process-tree behavior, authenticated IPC and real Cursor execution are exercised by their integration owners.
+The tests use real temporary SQLite files and controllable Agents. Kiro's offline provider-error and derived authentication-error transcripts also exercise the real host and Worker: failed turns retain safe reasons, inputs stay sent, queued messages receive replies, and the same process and native session remain available. The Worker tests cover receipts and conflicts, queued turns, cancellation, event ownership, Scope recovery, process record recovery, bounded outbox delivery, Turn timeouts, explicit continuation after uncertainty, commit uncertainty, UTF-8 cursors, bounded output, upstream gaps and stop responsiveness during output floods. Platform process-tree behavior, authenticated IPC and real Cursor execution are exercised by their integration owners.

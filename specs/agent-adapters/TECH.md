@@ -152,6 +152,8 @@ open 的成功 `ThreadCommandResult` 增加当前 `storage_generation`，中心�
 
 以下由 Worker 保证，与具体 adapter 无关：命令先持久接收再执行；intent 提交后才调用 `send`；`send` 结果未知时先调用 `sent`，仍无法确认则进入 unknown，Worker 不再次提交同一输入；stop 有独立登记路径，一分钟内没有终止事件就回收进程树；所有异步结果写状态前核对控制代次。
 
+通用 driver 将上游 `turn.terminal` 的 `failed` 转为带原生会话、输入与执行身份的 `end`（`outcome: failed`），并附安全原因。Worker 按正常结束路径保存 `turn.ended`，现有 `reason` 为 `failed`，`content` 为安全原因；中心将 `end_reason: failed` 写入 `thread_turns`，并把含原因的完整报告保存为时间线事件，无需扩展共享协议。输入保持 sent，Worker 保留 Agent 实例、host 进程与原生会话，继续调度队列。`queue_empty` 在结束事务中计算，中心据此选择 idle 或 running。网页在对应回合显示 `<Agent> could not finish this reply` 与原因，不为此显示 unknown 提示。运行时请求无法应答、事件流断开、发送结果无法确认、host 崩溃或连接丢失仍进入 unknown。
+
 以下按上游实现接受：adapter 内部的请求重试、断线重连和会话恢复（如 Cursor resume 冲突时取消旧 run 再发送，`enableAgentRetries`）；Pi、Codex 的 steer 归属；子任务与后台任务何时算回合结束；中断后的终态时序。T1 在本地抽取 runner 上做的输入不重放修改随 `packages/providers` 一并删除。上游行为导致的问题先在 fork 中修复并提交上游，不在 Baton 接入层另做一套等价逻辑。
 
 ## 各 Agent 实现
@@ -220,7 +222,7 @@ Kiro 在上游 status 之外运行 `kiro-cli --version`。`src/agents/kiro/versi
 
 `hostedAgentReport` 对 Kiro 精确匹配 `darwin-arm64` 与版本 `2.32.0`，程序已安装且认证为 valid 或 unknown 时报告 `available`、`create: true`、`resume: true`。预发布和构建后缀保留在版本号中，不会匹配 `2.32.0`；其他系统或版本保持 `unverified` 并关闭 create/resume。认证 unknown 的 reason 为“Kiro 认证状态未知，首次执行时由原生程序检查”，明确 missing 则为 `unavailable` 并拒绝。网页按节点报告开放新建与恢复，不符合准入条件的新建请求返回 HTTP 422、`agent_unavailable`。本地 CLI 的 `open` 目前仅创建 Cursor Thread。
 
-Kiro 的 `turnFailure` 回调处理真实回合的 provider failure：明确认证失败映射为“Kiro CLI 认证失败，请在设备上登录 Kiro CLI 后重试”，其他 provider 错误映射为“Kiro 执行失败，请检查设备上的 Kiro CLI 状态后重试”。通用 driver 将安全原因作为 uncertain 事件交给 Worker，持久保存到 Thread 报告；不透传原始错误，不自动登录，不重发输入。
+Kiro 的 `turnFailure` 回调处理真实回合的 provider failure：明确认证失败映射为“Kiro CLI 认证失败，请在设备上登录 Kiro CLI 后重试”，其他 provider 错误映射为“Kiro 执行失败，请检查设备上的 Kiro CLI 状态后重试”。其他 Agent 的失败原因固定为 `<Agent> could not complete this reply.`。通用 driver 将安全原因随失败结束事件交给 Worker，保存到 `turn.ended.content`；不透传原始错误，不自动登录，不重发输入。
 
 节点处理 open 时读取已完成的探测快照，不在 5 秒命令上下文内同步探测；尚在探测时返回明确的不可用原因，探测完成后重新上报。
 
@@ -236,7 +238,7 @@ batond bundle 直接打包用到的 `@t3tools/*` 包及其纯 JS 依赖。原生
 
 Kiro host 回放使用上述授权转换的夹具，验证范围包括真实 adapter 的新建、两轮、停止（含工具运行中）、恢复、`restore_missing` 失败和 `sent` 的确认与未确认；工具中断夹具中的权限请求经真实 adapter 返回 `allow_once`。进程回收用真实 Kiro adapter 与本地 ACP 协议替身，确认 ACP 独立进程组及同组 grandchild 在正常关闭和 host SIGKILL 后均退出，强杀路径由 registrar watchdog 回收。`e2e/src/provider-agents.integration.test.ts` 通过注入已验证 capability 驱动真实 Kiro adapter，覆盖网页 API 发送、回复、中心 idle、停止与恢复；此注入验证自动化行为，不能证明真实账号授权有效；生产报告按节点探测到的版本、系统和认证状态决定。
 
-版本探测测试使用本地可执行替身，验证 stdout/stderr 版本解析、预发布后缀保留、诊断不外传、非零退出、缺程序和超时后进程退出，不启动真实 CLI。注册表测试核对精确系统与版本组合、Kiro 认证 unknown 放行、明确 missing 拒绝，以及 Pi、Codex 认证规则不变。认证失败场景由 `provider_error` 派生夹具驱动真实 adapter、agent-host 与 Worker，核对固定安全文案进入持久 Thread 报告、原始错误不外传和输入不重发。
+版本探测测试使用本地可执行替身，验证 stdout/stderr 版本解析、预发布后缀保留、诊断不外传、非零退出、缺程序和超时后进程退出，不启动真实 CLI。注册表测试核对精确系统与版本组合、Kiro 认证 unknown 放行、明确 missing 拒绝，以及 Pi、Codex 认证规则不变。认证失败场景由 `provider_error` 派生夹具驱动真实 adapter、agent-host 与 Worker；该夹具和原始 provider 错误场景分别接上 `simple` 的成功回合，来源记录在 metadata。测试核对失败原因持久化、原始错误不外传、输入保持 sent、排队消息继续执行、最终 idle，以及原生会话和进程保留。跨 app e2e 核对中心读取失败原因和 idle 后，再发消息能收到回复。
 
 | 范围 | 验证 | 层次 |
 |---|---|---|
@@ -247,7 +249,7 @@ Kiro host 回放使用上述授权转换的夹具，验证范围包括真实 ada
 | 主链路 | 每种 Agent 一条网页发送到回复、停止、恢复的回放链路 | e2e |
 | 历史 | 网页与 `history.read` 读取同一份中心记录，分页与权限正确 | 中心集成与 Web 契约 |
 | 探测与 reason | 缺程序或明确认证缺失时 unavailable，未交付版本/系统组合及版本超时、不可解析时 unverified；Kiro 仅在精确交付组合中允许认证 unknown 并保留首次原生执行检查的 reason，Pi/Codex 规则不变 | 包内与本地可执行替身 |
-| Kiro 回合失败 | `provider_error` 派生认证失败经真实 host/Worker 进入持久 Thread 报告，固定安全文案、原始诊断不外传、输入不重发 | 确定性回放与 Worker 集成 |
+| Kiro 回合失败 | `provider_error` 与派生认证失败经真实 host/Worker 保存失败原因，输入保持 sent，后续排队消息执行并收到回复、原生会话与进程保留；中心时间线可读原因、空队列时 idle，网页在对应回合显示失败 | 确定性回放、Worker 集成、跨 app e2e 与网页数据层 |
 | 安装包 | 脱离源码运行 SEA，加载 t3code 依赖与附带目录 | 打包检查（T5） |
 
 ## 实施顺序
