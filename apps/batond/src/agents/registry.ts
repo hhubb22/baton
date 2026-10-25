@@ -1,6 +1,6 @@
 import { Effect } from 'effect'
 import { DEFAULT_MODEL } from '@t3tools/contracts'
-import { agentCapabilities } from './capabilities.ts'
+import { agentCapabilities, capabilityLimitations } from './capabilities.ts'
 import { dirname, isAbsolute } from 'node:path'
 import type { RuntimeAgent, WorkerOpenConfig } from '@baton/protocol'
 import type { ProbeResult } from '../agent-host/protocol.ts'
@@ -14,10 +14,6 @@ import { startProcessWatchdog } from '../platform/process.ts'
 import { currentBatondCommand } from '../daemon/host.ts'
 import { AgentError } from '../worker/agent.ts'
 
-/** Adapter combinations validated through the host with upstream offline transcripts. */
-const verifiedCombinations = new Set(['darwin-arm64'])
-const verifiedProviderVersions = { pi: '1.0.0', codex: '0.156.1', kiro: '2.32.0' }
-
 /** The Thread working directory and the private directory beside the native mapping. */
 const agentPaths = (label: string) => (config: WorkerOpenConfig) => {
   const statePath = config.adapter_config.state_path
@@ -28,9 +24,9 @@ const agentPaths = (label: string) => (config: WorkerOpenConfig) => {
 const cursorPaths = agentPaths('Cursor')
 const narrowed = { create: false, queue: true, steer: false, stop: true, resume: false, switch_model: false }
 
-/** Availability gates creation and resume; active steering follows the registered provider. */
+/** Installed providers accept valid or unknown authentication; diagnostics do not gate creation. */
 export function hostedAgentReport(
-  agentType: 'pi' | 'codex' | 'kiro',
+  agentType: 'cursor' | 'pi' | 'codex' | 'kiro',
   result: ProbeResult,
   missingReason: string,
 ): RuntimeAgent {
@@ -46,111 +42,72 @@ export function hostedAgentReport(
     default_model: '',
     capabilities: narrowed,
   }
-  if (result.details.installed === false)
+  if (result.details.installed === false || result.authenticated === 'missing')
     return { ...base, status: 'unavailable', reason: result.reason ?? missingReason }
-  if (result.authenticated === 'missing')
-    return { ...base, status: 'unavailable', reason: result.reason ?? missingReason }
-  if (result.authenticated !== 'valid' && agentType !== 'kiro')
-    return { ...base, reason: result.reason ?? `${agentType} 认证状态尚未确认` }
-  const ready = {
-    ...base,
-    default_model: models[0]?.id || (agentType === 'codex' ? DEFAULT_MODEL : 'default'),
-    ...(agentType === 'kiro' && result.authenticated === 'unknown'
-      ? { reason: result.reason ?? 'Kiro 认证状态未知，首次执行时由原生程序检查' }
-      : result.models.length === 0
-        ? { reason: result.reason ?? '模型目录暂不可读，可使用默认模型' }
-        : {}),
-  }
-  if (version !== verifiedProviderVersions[agentType] || !verifiedCombinations.has(platform))
-    return {
-      ...ready,
-      reason:
-        agentType === 'kiro' && version === 'unknown' && result.reason
-          ? result.reason
-          : `${agentType} ${version} / ${platform} 尚未通过执行、停止与恢复验证`,
-    }
+  if (agentType === 'cursor' && (result.details.integrity === false || result.details.sandboxHelper === false))
+    return { ...base, status: 'unavailable', reason: result.reason ?? 'Cursor SDK 安装或本机 sandbox 不可用' }
+  const reason = [
+    result.reason,
+    `${agentType} ${version} / ${platform}`,
+    ...(result.authenticated === 'unknown' ? ['认证状态未知，首次执行时由原生程序检查'] : []),
+    ...(models.length === 0 ? ['模型目录暂不可读，可使用默认模型'] : []),
+    capabilityLimitations[agentType],
+  ]
+    .filter(Boolean)
+    .join('；')
+  if (result.details.installed !== true) return { ...base, reason: `${reason}；安装状态尚未确认` }
   return {
-    ...ready,
+    ...base,
     status: 'available',
+    default_model:
+      agentType === 'cursor' ? 'default' : models[0]?.id || (agentType === 'codex' ? DEFAULT_MODEL : 'default'),
     capabilities: agentCapabilities[agentType],
+    reason,
   }
 }
 
 export async function probeLocalCursor(): Promise<RuntimeAgent> {
-  const platform = `${process.platform}-${process.arch}`
-  const disabled = { create: false, queue: true, steer: false, stop: true, resume: false, switch_model: false }
-  let base: RuntimeAgent = {
-    agent_type: 'cursor',
-    version: 'unknown',
-    status: 'unverified',
-    models: [],
-    default_model: '',
-    capabilities: disabled,
-  }
+  let version = 'unknown'
   try {
     const installed = inspectCursorSdk()
-    base = { ...base, version: installed.version }
+    version = installed.version
     if (installed.missingAssets.length || installed.version !== installed.platformVersion)
-      return {
-        ...base,
-        status: 'unavailable',
-        reason: 'Cursor SDK 安装不完整或平台包版本不符',
-      }
+      return hostedAgentReport(
+        'cursor',
+        {
+          authenticated: 'unknown',
+          models: [],
+          details: { installed: false, version },
+          reason: 'Cursor SDK 安装不完整或平台包版本不符',
+        },
+        'Cursor SDK 安装不完整',
+      )
   } catch {
-    return { ...base, status: 'unavailable', reason: 'Cursor SDK 安装不完整' }
+    return hostedAgentReport(
+      'cursor',
+      { authenticated: 'unknown', models: [], details: { installed: false }, reason: 'Cursor SDK 安装不完整' },
+      'Cursor SDK 安装不完整',
+    )
   }
   if (!process.env.CURSOR_API_KEY?.trim())
-    return { ...base, status: 'unavailable', reason: '需要显式配置 CURSOR_API_KEY' }
-  if (process.platform === 'win32') return { ...base, reason: 'Windows Cursor 执行、sandbox 与进程回收组合尚未验证' }
-  const invocation = currentBatondCommand()
-  try {
-    const result = await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const watchdog = yield* Effect.acquireRelease(
-            Effect.promise(() =>
-              startProcessWatchdog({ file: invocation.executable, args: [...invocation.args, 'watchdog'] }),
-            ),
-            (owned) => Effect.promise(() => owned.close()),
-          )
-          return yield* probeCursor({
-            command: { file: invocation.executable, args: invocation.args },
-            watchdog,
-          }).pipe(Effect.timeout('30 seconds'))
-        }),
-      ),
+    return hostedAgentReport(
+      'cursor',
+      { authenticated: 'missing', models: [], details: { installed: true, version } },
+      '需要显式配置 CURSOR_API_KEY',
     )
-    const version = typeof result.details.version === 'string' ? result.details.version : 'unknown'
-    const integrity = result.details.integrity === true
-    const sandboxHelper = result.details.sandboxHelper === true
-    const report = {
-      ...base,
-      version,
-      default_model: result.authenticated === 'valid' ? 'default' : '',
-      models: [...new Set(result.models)].map((id) => ({ id, name: id })),
-    }
-    if (!integrity || !sandboxHelper)
-      return {
-        ...report,
-        status: 'unavailable',
-        reason: integrity ? 'Cursor SDK 的本机辅助程序不可用' : 'Cursor SDK 安装不完整',
-      }
-    if (result.authenticated !== 'valid')
-      return {
-        ...report,
-        status: result.authenticated === 'missing' ? 'unavailable' : 'unverified',
-        reason: result.authenticated === 'missing' ? '需要显式配置 CURSOR_API_KEY' : 'Cursor 认证状态尚未确认',
-      }
-    if (version !== '1.0.35' || !verifiedCombinations.has(platform))
-      return { ...report, reason: `Cursor SDK ${version} / ${platform} 尚未通过执行、停止与恢复验证` }
-    return {
-      ...report,
-      status: 'available',
-      capabilities: { ...disabled, create: true, resume: true },
-      ...(result.reason ? { reason: 'Cursor 模型目录暂不可读，可使用默认模型' } : {}),
-    }
+  try {
+    return hostedAgentReport('cursor', await probeHost(probeCursor), 'Cursor SDK 未安装或尚未认证')
   } catch {
-    return { ...base, reason: 'Cursor 依赖、认证或只读探测暂不可用' }
+    return hostedAgentReport(
+      'cursor',
+      {
+        authenticated: 'unknown',
+        models: [],
+        details: { installed: true, version },
+        reason: 'Cursor 只读探测失败或超时',
+      },
+      'Cursor SDK 未安装或尚未认证',
+    )
   }
 }
 
@@ -185,8 +142,8 @@ export async function probeLocalPi(): Promise<RuntimeAgent> {
       {
         authenticated: 'unknown',
         models: [],
-        details: { installed: false, version: 'unknown', platform: `${process.platform}-${process.arch}` },
-        reason: 'Pi 依赖或只读探测暂不可用',
+        details: { version: 'unknown', platform: `${process.platform}-${process.arch}` },
+        reason: 'Pi 安装状态与只读探测暂不可确认',
       },
       'Pi CLI 未安装或尚未认证',
     )
@@ -202,8 +159,8 @@ export async function probeLocalCodex(): Promise<RuntimeAgent> {
       {
         authenticated: 'unknown',
         models: [],
-        details: { installed: false, version: 'unknown', platform: `${process.platform}-${process.arch}` },
-        reason: 'Codex 依赖或只读探测暂不可用',
+        details: { version: 'unknown', platform: `${process.platform}-${process.arch}` },
+        reason: 'Codex 安装状态与只读探测暂不可确认',
       },
       'Codex CLI 未安装或尚未认证',
     )
@@ -219,8 +176,8 @@ export async function probeLocalKiro(): Promise<RuntimeAgent> {
       {
         authenticated: 'unknown',
         models: [],
-        details: { installed: false, version: 'unknown', platform: `${process.platform}-${process.arch}` },
-        reason: 'Kiro 依赖或只读探测暂不可用',
+        details: { version: 'unknown', platform: `${process.platform}-${process.arch}` },
+        reason: 'Kiro 安装状态与只读探测暂不可确认',
       },
       'Kiro CLI 未安装或尚未认证',
     )

@@ -55,8 +55,8 @@ const cursorProbe = Effect.gen(function* () {
   const details: Record<string, string | number | boolean> = {
     version: inspected._tag === 'Some' ? inspected.value.version : 'unknown',
     platform: `${process.platform}-${process.arch}`,
+    installed: false,
     integrity: false,
-    sandboxHelper: false,
   }
   const result = (fields: { authenticated: 'valid' | 'missing' | 'unknown'; models: string[]; reason?: string }) => ({
     ...fields,
@@ -73,6 +73,7 @@ const cursorProbe = Effect.gen(function* () {
   }).pipe(Effect.match({ onFailure: () => false, onSuccess: () => true }))
   if (!helpers)
     return result({ authenticated: 'unknown', models: [], reason: 'Cursor SDK platform helpers could not be executed' })
+  details.installed = true
   details.integrity = true
   if (!key?.trim())
     return result({ authenticated: 'missing', models: [], reason: 'An explicit CURSOR_API_KEY is required' })
@@ -80,8 +81,6 @@ const cursorProbe = Effect.gen(function* () {
     try: () => Cursor.me({ apiKey: key }),
     catch: () => undefined,
   }).pipe(Effect.match({ onFailure: () => false, onSuccess: () => true }))
-  if (!authenticated)
-    return result({ authenticated: 'unknown', models: [], reason: 'Cursor authentication could not be verified' })
   const sandbox = yield* Effect.tryPromise({
     try: async () => {
       try {
@@ -122,13 +121,15 @@ const cursorProbe = Effect.gen(function* () {
     },
     catch: () => undefined,
   }).pipe(Effect.match({ onFailure: () => false, onSuccess: (supported) => supported }))
+  details.sandboxHelper = sandbox
   if (!sandbox)
     return result({
-      authenticated: 'valid',
+      authenticated: authenticated ? 'valid' : 'unknown',
       models: [],
       reason: 'Cursor native sandbox could not be verified with isolated settings',
     })
-  details.sandboxHelper = true
+  if (!authenticated)
+    return result({ authenticated: 'unknown', models: [], reason: 'Cursor authentication could not be verified' })
   const models = yield* Effect.tryPromise({
     try: () => Cursor.models.list({ apiKey: key }),
     catch: () => undefined,
