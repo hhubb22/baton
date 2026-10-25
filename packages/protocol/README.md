@@ -94,11 +94,7 @@ Thread 历史通过中心时间线读取已保存的输入、回复和事件，�
 
 ## 契约测试
 
-```sh
-pnpm --dir packages/protocol run typecheck
-pnpm --dir packages/protocol run lint
-pnpm --dir packages/protocol run test
-```
+验证命令与按包筛选方法见 [AGENTS.md](../../AGENTS.md#常用构建与验证命令)。
 
 协议包使用少量 TS 自写样例验证 Thread 派生对象往返、字段约束与未知字段容忍、命令完成身份、open 成功回执的存储代次、Worker 就绪关系、问题与回答容量，以及 Inbox 选项约束。HTTP 契约测试核对路径、参数、响应与错误声明，并验证 Session、Enrollment 在领域与 HTTP 入口的响应约束。已有调用方覆盖的 Schema 随对应业务测试验证。
 

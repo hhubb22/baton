@@ -14,7 +14,7 @@ node tools/dev/batond.mjs --help
 
 `build/server.mjs [输出路径]` 默认生成 `apps/server/dist/server.cjs`，同时构建相邻的 `web/` 并复制 SQL 迁移到 `migrations/`。`build/batond.mjs [输出路径]` 默认生成 `apps/batond/dist/batond.cjs`，SDK 从已安装依赖加载；构建前从 `daemon/worker-runner.ts` 和 `worker/index.ts` 检查运行时依赖图，禁止 Worker 引入 CLI、探测、host 实现和 SDK，并拒绝本地源码中无法静态解析的动态加载。检查只分析依赖，安装包仍使用统一 bundle。两个脚本从自身位置确定仓库根目录，可从其他工作目录调用。
 
-`dev/server.mjs [中心参数...]` 与 `dev/batond.mjs [节点参数...]` 共用 `runBundle`，先构建再运行，转发 SIGINT/SIGTERM。对应 app 命令为 `pnpm --filter @baton/server dev <参数...>`、`pnpm --filter @baton/batond dev <参数...>`；`build` 命令只构建。中心配置与账号管理见 [中心文档](../apps/server/README.md)，设备接入见 [节点文档](../apps/batond/README.md)。
+`dev/server.mjs [中心参数...]` 与 `dev/batond.mjs [节点参数...]` 共用 `runBundle`，先构建再运行，转发 SIGINT/SIGTERM。对应 app 命令为 `pnpm --filter @baton/server dev <参数...>`、`pnpm --filter @baton/batond dev <参数...>`；`build` 命令只构建。中心配置、账号管理与设备接入见 [根文档](../README.md)。
 
 ## 构建、打包与发布
 
@@ -85,8 +85,6 @@ node tools/verify/windows-processes.mjs
 
 ## 工具测试
 
-```sh
-node --test tools/*.test.mjs
-```
+测试命令见 [AGENTS.md](../AGENTS.md#常用构建与验证命令)。
 
 测试使用本地夹具，覆盖构建顺序、Worker 依赖图及绕入反例、依赖与许可复制、安装包布局、临时安装清理、发布参数及测量驱动构建。完整 SEA 安装包由 `check-package` 单独验证。

@@ -20,11 +20,7 @@ Basis: [Project Agent 行为规格](../project-agent/PRODUCT.md)；[Baton 行为
 
 ## 术语
 
-| 术语 | 含义 |
-|---|---|
-| 事项 | Project Agent 请用户处理的一件事，有稳定 ID 和状态 |
-| Agent Inbox | 列出本人所有待处理事项的界面 |
-| 展示内容 | 事项里由 Project Agent 写的一段 Markdown，默认收起 |
+术语定义与代码名见[统一术语表](../../GLOSSARY.md)。
 
 ## Behavior
 

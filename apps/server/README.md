@@ -4,44 +4,11 @@
 
 中心的 Project 实现位于 `src/project/`。`runtimeRequest` 接收节点 Runtime 请求，在一个事务内检查租约、执行工具、保存结果事件并消费对应输入；工具执行与输入消费由该入口内部处理。工具重试返回已保存的结果，失效租约会回滚本次副作用，等待 shell 工具的 pending 查询使用独立只读事务。
 
-中心与节点的构建入口分别为 `@baton/server` 和 `@baton/batond`，根 `node tools/build.mjs` 从 workspace 安装锁定依赖并构建两者，产物位于 `apps/{server,batond}/dist`。当前能力范围见下表，容器与 SEA 安装包布局见 [迁移设计](../../specs/ts-migration/TECH.md#打包与发布)。
+## 构建与配置
 
-## 构建与网页
+中心构建生成 bundle、相邻的网页和 SQL 迁移，输出布局见 [工具说明](../../tools/README.md#本地开发)。环境要求、账号、HTTPS、设备接入和通用配置见 [根文档](../../README.md)。
 
-在仓库根目录使用 Node 26、pnpm 12：
-
-```sh
-pnpm install --frozen-lockfile --ignore-scripts
-pnpm --filter @baton/server build
-pnpm --filter @baton/batond build
-```
-
-中心构建先调用 Vite，将网页生成到 `apps/server/dist/web/`，再打包 `apps/server/dist/server.cjs`，并将数据库迁移复制到相邻的 `migrations/`。`build` 和 `dev` 都包含网页构建，默认即可提供网页。自定义 bundle 输出路径时，网页生成到该 bundle 旁的 `web/`。Web 的普通构建命令也输出到 `apps/server/dist/web/`；若只需重建中心网页，可单独运行：
-
-```sh
-pnpm --dir web build --outDir ../apps/server/dist/web
-```
-
-`pnpm --filter @baton/server dev <命令>` 先构建再运行，也可以直接调用 `node apps/server/dist/server.cjs <命令>`。脚本入口和自定义输出路径见 [工具说明](../../tools/README.md#本地开发)。
-
-## 配置
-
-| 环境变量                                    | 含义与默认值                                                                                                      |
-| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `BATON_DATABASE_URL`                        | 必填，指向本机 PostgreSQL 数据库                                                                                  |
-| `BATON_DB_SCHEMA`                           | 默认 `public`；自定义 schema 需事先创建，名称只允许小写字母、数字和下划线，以字母开头，最长 63 字符               |
-| `BATON_HTTP_ADDR`                           | 默认 `127.0.0.1:8080`，支持配置 HTTPS 服务的监听地址                                                              |
-| `BATON_ALLOWED_ORIGINS`                     | `serve` 必填，以逗号分隔的完整 HTTPS Origin，含非默认端口，不带路径或末尾斜杠                                     |
-| `BATON_NODE_SIGNING_KEY`                    | Ed25519 私钥文件，默认当前工作目录的 `node-signing.key`；不存在时创建，已有文件须通过类型、权限、所有者和密钥校验 |
-| `BATON_TLS_CERT_FILE`、`BATON_TLS_KEY_FILE` | 同时配置时直接提供 HTTPS，最低 TLS 1.2；省略时监听 HTTP，由外层 HTTPS 反向代理接入                                |
-| `BATON_WEB_DIR`                             | 网页静态目录，默认 bundle 旁的 `web/`                                                                             |
-| `BATON_HEARTBEAT_INTERVAL`                  | 默认 `10s`，范围 100 ms 至 2 分钟，中心连接检查间隔                                                               |
-| `BATON_OFFLINE_AFTER`                       | 默认 `30s`，范围 200 ms 至 10 分钟，设备离线期限，必须大于心跳间隔                                                |
-| `BATON_SESSION_TTL`                         | 默认 `12h`，员工会话有效期，范围 5 分钟至 7 天                                                                    |
-| `BATON_ENROLLMENT_TTL`                      | 默认 `10m`，一次性设备注册凭据有效期，范围 1 分钟至 24 小时                                                       |
-| `BATON_NODE_CREDENTIAL_TTL`                 | 默认 `720h`（30 天），设备连接凭据有效期，范围 1 小时至 90 天                                                     |
-
-时间配置接受整数加 `ms`、`s`、`m`、`h`，各项范围见上表；TTL 推荐使用整秒、分钟或小时。开发与测试使用独立数据库或 schema，各实例保留自己的迁移和业务状态。
+数据库迁移按文件版本记录，在事务 advisory lock 内串行执行；`serve`、`migrate` 和账号管理都会先执行并核对迁移。时间配置接受整数加 `ms`、`s`、`m`、`h`。
 
 控制操作共用 4 个数据库执行名额。等待名额与开始执行分别计时，排队不会消耗执行预算。每项操作可通过 `BATON_CONTROL_<操作>_QUEUE_TIMEOUT` 和 `BATON_CONTROL_<操作>_EXECUTION_TIMEOUT` 单独配置，例如 `BATON_CONTROL_REPORT_EXECUTION_TIMEOUT=30s`。排队默认均为 `2s`，可设为 100 ms 至 60 秒；执行可设为 100 ms 至 120 秒，默认如下：
 
@@ -78,54 +45,13 @@ pnpm --dir web build --outDir ../apps/server/dist/web
 
 RPC 发送后的期限可设为 100 ms 至 120 秒。队列满或排队超时返回 `node_busy`，过期请求不会发送；已发送请求超时返回 `node_timeout`，中心不自动重发管理操作。断线、连接替换和中心关闭会清除等待队列，旧回复仍须匹配连接、请求和操作身份才能被接受。
 
-## 本地账号、迁移与启动
-
-先在本机 PostgreSQL 中建立开发数据库。以下命令均在仓库根目录执行，连接串按本机配置填写：
-
-```sh
-export BATON_DATABASE_URL='postgres://postgres:baton@127.0.0.1:5432/baton_ts_dev?sslmode=disable'
-pnpm --filter @baton/server dev migrate
-pnpm --filter @baton/server dev admin employee create --username alice --display-name Alice
-```
-
-`create` 生成并向操作者输出一次性口令。首次登录后必须修改密码，再重新登录，才能注册设备或使用 Thread。已有账号可用以下命令重置为新的一次性口令：
-
-```sh
-pnpm --filter @baton/server dev admin employee reset-password --username alice
-```
-
-`migrate`、账号管理和 `serve` 都先执行并核对数据库迁移；`migrate` 完成后退出。服务端按文件版本记录迁移，并在事务锁内串行执行。
-
-使用本机受信任证书直接启动 HTTPS：
-
-```sh
-export BATON_HTTP_ADDR='127.0.0.1:8443'
-export BATON_ALLOWED_ORIGINS='https://localhost:8443'
-export BATON_TLS_CERT_FILE='/绝对路径/localhost.crt'
-export BATON_TLS_KEY_FILE='/绝对路径/localhost.key'
-export BATON_NODE_SIGNING_KEY="$PWD/.baton-ts-dev/node-signing.key"
-pnpm --filter @baton/server dev serve
-```
-
-浏览器访问 `https://localhost:8443`。证书需匹配访问主机名，浏览器需信任其签发 CA。使用反向代理时，将 `BATON_ALLOWED_ORIGINS` 设为浏览器实际访问的 HTTPS Origin，并代理普通 HTTP 请求、`/v1/node` 和 `/api/v1/events` 的 WebSocket 升级。
-
 ## 设备接入与远程 Thread
 
-登录网页、完成首次改密后，在 Devices 中取得一次性注册凭据。在 Cursor 设备上把凭据保存到私有文件，POSIX 文件权限为 0600，然后运行：
-
-```sh
-pnpm --filter @baton/batond dev up \
-  --coordinator https://localhost:8443 \
-  --enrollment-file /绝对路径/enrollment-token \
-  --workspace /绝对路径/工作目录 \
-  --ca-file /绝对路径/local-ca.crt
-```
-
-注册也可从 `BATON_ENROLLMENT_TOKEN` 读取凭据；已有身份时 `up` 直接复用。`--workspace` 将真实绝对目录幂等登记到本机授权根，首次无配置时同时登记用户主目录。设备默认数据目录为 `~/.baton-ts`；重启和本地命令使用相同的 `--data-dir`。自建 CA 通过 `--ca-file` 供 HTTPS 注册和 WSS 连接使用，证书校验保持开启；使用系统已信任证书时可省略该选项。CA 文件路径不会写入身份，后续 `run` 仍需传入。
+账号、证书与注册步骤见 [根文档](../../README.md#中心服务与员工账号)。
 
 Cursor 设备运行进程需显式配置 `CURSOR_API_KEY`，能力探测成功并上报 `available` 后才允许创建 Thread。Pi、Codex 使用设备上原生 CLI 的认证配置，分别通过 `PI_CODING_AGENT_DIR`、`PI_CODING_AGENT_SESSION_DIR` 和 `CODEX_HOME` 指定目录。四个 Agent 在程序或 SDK 已安装且认证为 valid 或 unknown 时报告 `available`；系统和版本不设白名单。缺程序、明确缺少认证或已确认的运行依赖缺失时报告 `unavailable`，整次探测未能确认安装时报告 `unverified`。版本、系统和认证未知保留在 reason 中。凭据保留在设备端。设备接入、连接恢复及本地命令见 [batond 文档](../batond/README.md)。
 
-网页支持 Cursor、Pi、Codex、Kiro 新建、排队消息、撤回、停止、恢复、归档和时间线，按节点能力报告准入；四个 Agent 的认证状态未知时均由首次原生执行检查，版本和系统不限。Pi 与 Codex 还支持活动回合插入。命令的持久接收与实际完成分别报告；daemon 或中心重启后，存活 Worker 继续执行，重连时按原命令和报告身份恢复。模型在新建时选择；Pi、Codex、Cursor 支持在同一 Thread 为后续回合换模型，省略时沿用最近确认提交的选择；Kiro 保持创建时模型。设备历史缺失时，从未派发的输入撤回并保留原文，可能执行过的输入保留 unknown；设备确认停止后可带着历史 unknown 记录归档。在 Worker 创建前因 Agent 不可用或目录授权被明确拒绝、没有任何输入派发的 Thread，可通过网页或 `POST /threads/{id}/resume` 重试打开；新命令保留原 Thread ID，原消息由用户再次发送。Worker 已接收 open 或原生创建结果不明时继续禁止重建。
+网页支持 Cursor、Pi、Codex、Kiro 新建、排队消息、撤回、停止、恢复、归档和时间线，按节点能力报告准入；四个 Agent 的认证状态未知时均由首次原生执行检查，版本和系统不限。Pi 与 Codex 还支持活动回合插入。命令的持久接收与实际完成分别报告；daemon 或中心重启后，存活 Worker 继续执行，重连时按原命令和报告身份恢复。模型在新建时选择；Pi、Codex、Cursor 支持在同一 Thread 为后续回合换模型，省略时沿用最近确认提交的选择；Kiro 保持创建时模型。设备历史缺失时，从未派发的输入撤回并保留原文，可能执行过的输入保留 unknown；设备确认停止后可带着历史 unknown 记录归档。在 Worker 创建前因 Agent 不可用或目录授权被明确拒绝、没有任何输入派发的 Thread，可通过网页或 `POST /api/v1/threads/{threadId}/resume` 重试打开；新命令保留原 Thread ID，原消息由用户再次发送。Worker 已接收 open 或原生创建结果不明时继续禁止重建。
 
 Agent 的普通提问和 MCP 确认显示在 Thread 输入区上方，支持单选、多选、文本回答和关闭问题。`POST /api/v1/threads/{threadId}/answer` 接收 `request_id`、`decision: accept | cancel` 和可选 JSON 答案记录；请求与回答分别限制为 64 KiB。中心将问题及回答保存在 `thread_events`，通过持久 outbox 投递回答；设备离线时保留排队。`ThreadView.pending_questions` 返回当前回合的未回答问题，`question_answers` 返回最近十条回答的投递结果。员工归属、请求身份和活动回合均须匹配；停止、归档或回合结束后关闭问题。相同请求的相同回答幂等，不同回答冲突。网页显示等待发送、已送达、取消、失败或结果未知；无法确认回答结果时，原输入和答案均不自动重发。
 
@@ -181,24 +107,12 @@ docker run --rm --name baton-tracing \
 | 过程 `/threads/{id}/trace`                       | 合法查询返回 HTTP 200，`{ok:false,code:"trace_missing",steps:[]}`                                    |
 | 实时输出时设备离线或尚未同步                     | HTTP 200 的 `SessionResult`，`ok:false`，分别为 `node_offline` 或 `node_syncing`                     |
 
-Kiro 的配置、原生恢复和生产探测限制见 [节点接入说明](../batond/src/agents/kiro/README.md)，后续 Agent 的范围见适配规格。中心 bundle 使用 `node apps/server/dist/server.cjs <命令>`，须保留相邻的 `web/` 和 `migrations/`。Project Runtime 在节点开发 bundle 中从源码仓库与已安装依赖启动；SEA 集成及附带依赖见迁移设计的「打包与发布」。
+Kiro 的配置、原生恢复和生产探测限制见 [节点接入说明](../batond/src/agents/kiro/README.md)，后续 Agent 的范围见适配规格。开发 bundle 与 SEA 安装包的 Runtime 入口及附带依赖见 [发布设计](../../specs/release/TECH.md#打包与发布)。
 
 ## 验证
 
-```sh
-pnpm --filter @baton/server typecheck
-pnpm --filter @baton/server lint
-pnpm --filter @baton/server test
-pnpm --filter @baton/server test:unit
-pnpm --filter @baton/server test:integration
-pnpm test:e2e
-pnpm --filter @baton/server build
-```
-
-`test:unit` 运行无需 PostgreSQL 的包内测试；`test:integration` 运行 `*.integration.test.ts` 数据库测试；`test` 包含两组。跨 app 测试位于 [`e2e/`](../../e2e/README.md)，使用 `pnpm test:e2e` 运行。测试辅助模块位于 `src/testing/`，数据库创建、清理、连接重启和节点数据准备分别由 `withTestDatabase`、`openTestDatabase` 与 `seedNode` 提供。
-
-工作区测试会重新构建 Project Runtime，与统一构建分开执行可避免争用同一产物目录；串行工作区验证使用 `pnpm test`。
+命令与测试数据库配置见 [AGENTS.md](../../AGENTS.md#常用构建与验证命令)。单元组不需要 PostgreSQL，集成组运行数据库测试。测试辅助模块位于 `src/testing/`，数据库创建、清理、连接重启和节点数据准备分别由 `withTestDatabase`、`openTestDatabase` 与 `seedNode` 提供。
 
 `GET /api/v1/diagnostics` 返回当前员工的设备与浏览器连接数、收发字节数、控制队列占用、待完成 RPC 和 Thread 状态分布，不包含消息正文或凭据。断线状态写入失败后按原连接身份重试；未完成的凭据吊销由独立维护循环继续关闭连接并确认生效。
 
-数据库测试使用本机 PostgreSQL，为每个夹具创建和清理独立 schema；默认连接 `postgres://postgres:baton@127.0.0.1:5432/baton_test?sslmode=disable`。未启动时尝试用 `pg_ctl` 拉起 `~/.baton-postgres`，也可用 `BATON_TEST_DATABASE_URL` 覆盖。`@baton/e2e` 的远程集成测试使用本机 HTTP/WebSocket、独立 Worker 进程和确定性 replay Agent，覆盖账号、注册、远程消息、输出、停止、中心与 daemon 重启、输入不重发及设备吊销，不调用在线模型或外部 API。
+`@baton/e2e` 的远程集成测试使用本机 HTTP/WebSocket、独立 Worker 进程和确定性 replay Agent，覆盖账号、注册、远程消息、输出、停止、中心与 daemon 重启、输入不重发及设备吊销，不调用在线模型或外部 API。

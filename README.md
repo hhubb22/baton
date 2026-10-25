@@ -2,23 +2,7 @@
 
 Baton 是跨设备 AI Agent 协同系统。员工使用管理员分配的本地账号登录中心服务，注册并管理自己的设备，在指定设备和目录中使用 Cursor、Pi、Codex、Kiro Thread，也可以通过 Project Agent 主对话协调多个 Thread。中心保存输入、回复、附件引用、事项和记忆；原生会话与模型凭据保存在设备上。
 
-## 系统架构与组件
-
-| 组件 | 入口 / 目录 | 说明 |
-|---|---|---|
-| `baton-server` | `apps/server` | TypeScript + Effect 中心：员工认证、设备注册与吊销、Thread / Project / Inbox、PostgreSQL 事务、Gateway、静态网页与 API |
-| `batond` | `apps/batond` | TypeScript + Effect 节点：出站 WSS、SQLite 本地账本、认证 IPC、独立 Worker、Agent 探测、目录与订阅管理 |
-| Session Worker | `apps/batond/src/worker` | 每个 Thread 一个进程，维护命令回执、消息队列、intent、Turn、回复和 outbox |
-| agent-host | `apps/batond/src/agent-host` | 承载 t3code fork 的完整 provider adapter，将原生事件映射给 Worker |
-| Project Runtime | `runtimes/project-agent` | 基于 pi-agent-core 与 pi-ai 的项目助手，通过专用 stdio JSON-RPC 与节点交互 |
-| Web UI | `web` → `apps/server/dist/web` | React + TypeScript + StyleX + Vite 前端，由中心提供静态文件 |
-| 共享包 | `packages/{protocol,sqlite,telemetry}` | Effect Schema、WAL/FULL SQLite 与提交核查、OTLP/HTTP 追踪 |
-
-中心在同一事务保存消息与投递意图，设备持久接收后回执，命令完成独立报告。Worker 在原生提交前保存 intent；崩溃恢复通过只读快照核对是否发送，无法确认时保留 unknown，避免重复执行。节点重启后通过认证 IPC 连接存活的 Worker，未确认报告按原身份补送。
-
-Agent 接入使用 [`upstream/t3code`](third_party/t3code/README.md) 中的完整 provider。日常验证复用上游离线测试、静态转录、确定性回放和本地替身，见 [回放测试设计](specs/agent-replay/TECH.md)。
-
-浏览器默认通过同源 `/api/v1` 连接中心，节点连接 `/v1/node`，浏览器事件使用 `/api/v1/events`。页面按 `design/` 实现；模拟数据仅在显式启用的开发场景中使用，见 [Web 文档](web/README.md)。
+目录职责见 [Agent Guide](AGENTS.md#核心架构与目录)，领域名词见 [术语表](GLOSSARY.md)，执行与恢复机制见 [技术设计](specs/baton/TECH.md)。
 
 ## 环境要求
 
@@ -34,21 +18,11 @@ Agent 接入使用 [`upstream/t3code`](third_party/t3code/README.md) 中的完�
 git submodule update --init
 pnpm install --frozen-lockfile --ignore-scripts
 node tools/build.mjs
-node tools/check-package.mjs bin
 ```
 
 统一构建从根 workspace 按锁文件安装依赖，构建中心和节点 bundle，再生成 `bin/` 中当前平台的 batond SEA 安装包。安装包包含 `batond`（Windows 为 `batond.exe`）、旁置 `node_modules/`、许可、安装说明及 `package-manifest.json`。设备运行无需安装 Node 或 pnpm，须保留整个安装目录。安装包检查会搬迁产物，在空 PATH 和临时 HOME 下验证 Worker、Agent host、Project Runtime、私有文件及缺失依赖的错误。
 
-中心和节点 bundle 分别位于 `apps/server/dist` 与 `apps/batond/dist`。也可单独构建、打包和检查：
-
-```sh
-pnpm --filter @baton/server build
-pnpm --filter @baton/batond build
-node tools/package-batond.mjs --out bin
-node tools/check-package.mjs bin
-```
-
-中心构建自动生成 `server.cjs`、相邻的 `web/` 和 `migrations/`；启动中心时须保留这三个部分。节点 bundle 为 `apps/batond/dist/batond.cjs`，开发运行仍使用 workspace 依赖，Project Runtime 从源码入口启动。SEA 安装包将 Project Runtime 编入同一个可执行文件，以 `project-runtime` 子命令运行；设备接入命令见 [安装说明](runtimes/INSTALL.md)。产物不提交 Git。容器与 batond SEA 的发布布局、附带依赖和系统验证范围见 [迁移设计的打包与发布](specs/ts-migration/TECH.md#打包与发布)。
+中心和节点 bundle 分别位于 `apps/server/dist` 与 `apps/batond/dist`。中心构建生成 `server.cjs`、相邻的 `web/` 和 `migrations/`；启动时须保留这三个部分。设备运行 SEA 时须保留整个安装目录。单独构建与打包的参数见 [工具说明](tools/README.md)，发布布局和验证范围见 [发布设计](specs/release/TECH.md)。产物不提交 Git。
 
 ### 中心服务与员工账号
 
@@ -65,7 +39,7 @@ node apps/server/dist/server.cjs serve
 
 中心默认监听 `127.0.0.1:8080`，由支持 WebSocket 的 HTTPS 反向代理接入；直接 HTTPS 可同时配置 `BATON_TLS_CERT_FILE` 和 `BATON_TLS_KEY_FILE`。签名密钥默认保存在工作目录的 `node-signing.key`，可用 `BATON_NODE_SIGNING_KEY` 指定。文件不存在时生成 `0600` Ed25519 私钥，已有文件校验类型、权限、所有者与内容。部署时须持久保存数据库和密钥。
 
-实验室阶段使用当前 schema 基线，结构变化后可重建本地数据。迁移按版本记录幂等执行，正式发布后可用于增量迁移。本机证书、CA、反向代理与配置细节见 [中心文档](apps/server/README.md)。
+实验室阶段使用当前 schema 基线，结构变化后可重建本地数据。迁移按版本记录幂等执行，正式发布后可用于增量迁移。证书须匹配访问主机名，浏览器和节点须信任签发 CA。反向代理同时转发普通 HTTP 请求及 `/v1/node`、`/api/v1/events` 的 WebSocket 升级。
 
 ### 设备接入
 
@@ -100,16 +74,19 @@ node apps/batond/dist/batond.cjs run
 ```sh
 node apps/batond/dist/batond.cjs login openai-codex
 node apps/batond/dist/batond.cjs subscriptions
+node apps/batond/dist/batond.cjs project-runtime login-api-key anthropic < key-file
 ```
 
-`login` 接受 provider ID 及 ChatGPT、xAI、Claude 别名，由 Runtime 注册表决定支持范围。Runtime 当前注册 `openai-codex`、`xai`、`anthropic`。登录和守护进程须使用同一系统用户及凭据目录；这些凭据独立于执行 Agent 的原生 CLI 账号。开发 bundle 的 Runtime 依赖仓库布局，安装包入口见迁移设计。
+`login-api-key` 支持 xAI 和 Anthropic，密钥从设备本地私有文件经标准输入读取；每次输入一个非空单行密钥，最多 16 KiB，允许末尾换行。网页和中心不接收这些密钥。
+
+`login` 接受 provider ID 及 ChatGPT、xAI、Claude 别名，由 Runtime 注册表决定支持范围。Runtime 当前注册 `openai-codex`、`xai`、`anthropic`。登录和守护进程须使用同一系统用户及凭据目录；这些凭据独立于执行 Agent 的原生 CLI 账号。开发 bundle 的 Runtime 依赖仓库布局，安装包入口见 [发布设计](specs/release/TECH.md)。
 
 ## 配置参考
 
 | 环境变量 | 适用进程 | 说明 |
 |---|---|---|
 | `BATON_DATABASE_URL` | 中心 | PostgreSQL 连接串 |
-| `BATON_DB_SCHEMA` | 中心 | 数据库 schema，默认 `public` |
+| `BATON_DB_SCHEMA` | 中心 | 数据库 schema，默认 `public`；自定义 schema 须先创建，名称以小写字母开头，只含小写字母、数字、下划线，最长 63 字符 |
 | `BATON_HTTP_ADDR` | 中心 | HTTP/WebSocket 监听地址，默认 `127.0.0.1:8080` |
 | `BATON_ALLOWED_ORIGINS` | 中心 | 逗号分隔的允许 HTTPS Origin，`serve` 必填 |
 | `BATON_NODE_SIGNING_KEY` | 中心 | Ed25519 私钥路径，默认工作目录下的 `node-signing.key` |
@@ -119,7 +96,7 @@ node apps/batond/dist/batond.cjs subscriptions
 | `BATON_ENROLLMENT_TTL` | 中心 | 一次性注册凭据期限，默认 `10m`，范围 1 分钟至 24 小时 |
 | `BATON_NODE_CREDENTIAL_TTL` | 中心 | 节点凭据期限，默认 `720h`，范围 1 小时至 90 天 |
 | `BATON_HEARTBEAT_INTERVAL` | 中心 | 连接检查间隔，默认 `10s`，范围 100 ms 至 2 分钟 |
-| `BATON_OFFLINE_AFTER` | 中心 | 设备离线期限，默认 `30s`，须大于心跳间隔 |
+| `BATON_OFFLINE_AFTER` | 中心 | 设备离线期限，默认 `30s`，范围 200 ms 至 10 分钟，须大于心跳间隔 |
 | `BATON_ENROLLMENT_TOKEN` | 节点注册 | 一次性注册凭据，也可用 `--enrollment-file` |
 | `BATON_PROJECT_RUNTIME_DATA_DIR` | 节点 / Runtime | 模型凭据目录，默认 `~/.baton/project-runtime` |
 
@@ -127,39 +104,7 @@ node apps/batond/dist/batond.cjs subscriptions
 
 ## 本地开发与测试
 
-开发入口与 bundle 使用相同的 CLI 命令：
-
-```sh
-pnpm --filter @baton/server dev help
-pnpm --filter @baton/batond dev help
-pnpm --filter @baton/batond dev probe
-```
-
-工作区使用 Vite+ 1.4，根 `vite.config.ts` 统一配置 Oxlint、Oxfmt 与 TypeScript Go 检查，各包保留自己的编译检查。Node 与 pnpm 由本机环境提供，无需全局安装 `vp`。
-
-```sh
-pnpm check
-pnpm typecheck
-pnpm test
-node --test tools/*.test.mjs
-```
-
-`pnpm test` 按依赖顺序串行执行，包含上游包和 [`e2e`](e2e/README.md)，数据库与进程测试不缓存。测试会构建 Runtime，须与统一构建分开执行，避免争用产物目录。适配器、跨 app 与 Runtime 验证使用离线转录和本地模型替身，不需要真实模型凭据。
-
-数据库测试使用本机 PostgreSQL，每个夹具创建和清理独立 schema。默认测试库为 `postgres://postgres:baton@127.0.0.1:5432/baton_test?sslmode=disable`，未启动时尝试通过 `pg_ctl` 拉起 `~/.baton-postgres`；可用 `BATON_TEST_DATABASE_URL` 覆盖。
-
-Project Runtime 与网页可单独验证：
-
-```sh
-pnpm --dir runtimes/project-agent test
-pnpm --dir web format:check
-pnpm --dir web lint
-pnpm --dir web typecheck
-pnpm --dir web test
-pnpm --dir web build
-```
-
-网页开发使用 `pnpm --dir web dev`，默认连接真实后端，可用 `BATON_DEV_BACKEND` 配置代理。显式添加 `?mock=1` 或 `?scenario=<id>` 启用模拟场景。网页普通构建输出到 `apps/server/dist/web`；中心 `build` 和 `dev` 自动包含网页构建。
+开发、验证命令和测试数据库配置集中在 [AGENTS.md](AGENTS.md#常用构建与验证命令)。脚本参数见 [工具说明](tools/README.md)。适配器与 Runtime 使用离线转录和本地替身，回放范围见 [回放测试设计](specs/agent-replay/TECH.md)。网页开发与模拟场景见 [Web 文档](web/README.md)。
 
 ## 规格与设计文档
 
@@ -169,4 +114,7 @@ pnpm --dir web build
 - Project Agent：[PRODUCT](specs/project-agent/PRODUCT.md)、[TECH](specs/project-agent/TECH.md)
 - Agent Inbox：[PRODUCT](specs/agent-inbox/PRODUCT.md)、[TECH](specs/agent-inbox/TECH.md)
 - 上游转录与回放：[TECH](specs/agent-replay/TECH.md)
-- TypeScript 架构、打包与验证：[TECH](specs/ts-migration/TECH.md)
+- 术语与代码命名：[GLOSSARY](GLOSSARY.md)
+- 目录与验证入口：[AGENTS](AGENTS.md)
+- 打包、发布与平台验证：[TECH](specs/release/TECH.md)
+- 工具参数：[tools/README](tools/README.md)

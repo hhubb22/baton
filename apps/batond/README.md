@@ -6,15 +6,7 @@
 
 ## 开发入口
 
-在仓库根目录使用 Node 26 与 pnpm 12 安装依赖：
-
-```sh
-pnpm install --frozen-lockfile --ignore-scripts
-pnpm --filter @baton/batond dev help
-pnpm --filter @baton/batond dev probe
-```
-
-`dev` 构建独立的 `dist/batond.cjs` 后运行。统一入口为 `src/index.ts`，调用 `src/cli.ts` 导出的 `runBatondCLI(args)`；源码开发的 Project Runtime 与辅助进程通过已安装的 tsx loader 启动。也可以运行 `pnpm --filter @baton/batond build`，再直接调用 `node apps/batond/dist/batond.cjs`。中心账号初始化、数据库迁移、TLS 配置和服务启动见 [中心文档](../server/README.md#本地账号迁移与启动)。`pnpm --filter @baton/server build` 和 `dev` 会自动将网页构建到中心 bundle 旁的 `web/`，默认无需单独构建前端。
+环境要求、安装和构建命令见 [AGENTS.md](../../AGENTS.md#常用构建与验证命令)，参数见 [工具说明](../../tools/README.md#本地开发)。统一入口为 `src/index.ts`，调用 `src/cli.ts` 导出的 `runBatondCLI(args)`；开发 bundle 的 Project Runtime 与辅助进程使用该 Runtime 包解析的 tsx loader。
 
 显式设置 `CURSOR_API_KEY` 后运行 probe。它在独立 host 中核查 SDK 与辅助程序，调用公开的认证、模型查询接口，不建立执行会话、不发送 prompt、不打开登录浏览器。SDK 安装完整且认证未明确缺失时报告 `available`，版本和系统不限制新建；平台资产不完整、辅助程序不可执行或 sandbox 检查明确失败时报告不可用原因。只有 `available` 且 `capabilities.create` 为 true 时，CLI 才允许新建。凭据只经子进程环境传递，不写入配置、命令、报告或日志。
 
@@ -35,22 +27,7 @@ pnpm --filter @baton/batond dev probe
 
 ## 远程节点
 
-登录中心网页并完成首次改密后，从 Devices 取得一次性注册凭据。将凭据保存到私有文件，POSIX 文件权限为 0600，再接入中心：
-
-```sh
-pnpm --filter @baton/batond dev up \
-  --coordinator https://localhost:8443 \
-  --enrollment-file /绝对路径/enrollment-token \
-  --workspace /绝对路径/工作目录 \
-  --ca-file /绝对路径/local-ca.crt
-```
-
-凭据也可来自 `BATON_ENROLLMENT_TOKEN`。`up` 首次注册并保存身份，已有身份时直接连接；`register` 只注册且拒绝覆盖已有身份；`run` 读取已有身份。默认从保存的 HTTPS 中心地址推导 `/v1/node` 的 WSS 地址，`--relay` 可显式指定。后续启动示例：
-
-```sh
-pnpm --filter @baton/batond dev run --ca-file /绝对路径/local-ca.crt
-pnpm --filter @baton/batond dev run --relay wss://localhost:8443/v1/node --ca-file /绝对路径/local-ca.crt
-```
+账号、设备注册和启动命令见 [根文档](../../README.md#设备接入)。
 
 `--ca-file` 同时供 HTTPS 注册和 WSS 连接校验证书，使用系统已信任证书时可省略；该路径不会保存在身份中。中心地址必须为 HTTPS，Relay 必须为 WSS，证书需匹配访问主机名。
 
@@ -76,7 +53,7 @@ pnpm --filter @baton/batond dev project-exec --enabled=false
 
 命令执行默认关闭。开启后，Project Agent 以设备用户身份执行任意命令；Baton 不提供沙箱，目录授权限制命令启动位置。每条命令和输出保存在 Thread 中。受限 shell 只允许 `nodes.exec` 创建一个 Turn，默认执行时限 7200 秒，等待结果的时间与命令时限分别计算。完成记录、未知结果及输出编码见 [shell 文档](src/agents/shell/README.md)。
 
-订阅凭据使用 `BATON_PROJECT_RUNTIME_DATA_DIR`，默认 `~/.baton/project-runtime`，登录与 daemon 使用相同的系统用户和目录。`subscriptions` 只读取本地凭据和静态模型目录；终端登录接受 provider ID，支持 `openai-codex`、`xai`、`anthropic`，也识别 ChatGPT、xAI、Claude 别名；实际登录方式由 Runtime 注册的实现决定。API key 从 Runtime 的 `login-api-key <provider>` 标准输入配置，支持 xAI 与 Anthropic，命令和私有文件要求见 [Runtime 登录说明](../../runtimes/project-agent/README.md#安装与登录)。Runtime 不读取环境 API key 或其他 CLI 的凭据，每个 provider 的 API key 与 OAuth 登录互相替换。网页根据设备报告的 `login_methods` 提供设备码登录或设备本地配置命令。已声明 provider 的认证状态为 `unknown` 时允许启动并由实际请求检查；明确 `login_required` 时等待登录。已知凭据权限、属主或路径错误保留具体安全原因，启动失败后可从运行的 `end_reason` 查看。网页设备码登录在取码后继续后台等待，最多 15 分钟，同服务的新请求替换旧登录，退出后刷新能力报告。凭据留在设备。
+订阅凭据使用 `BATON_PROJECT_RUNTIME_DATA_DIR`，默认 `~/.baton/project-runtime`，登录与 daemon 使用相同的系统用户和目录。`subscriptions` 只读取本地凭据和静态模型目录；终端登录接受 provider ID，支持 `openai-codex`、`xai`、`anthropic`，也识别 ChatGPT、xAI、Claude 别名；实际登录方式由 Runtime 注册的实现决定。API key 从 Runtime 的 `login-api-key <provider>` 标准输入配置，支持 xAI 与 Anthropic，命令和私有文件要求见 [Runtime 登录说明](../../runtimes/project-agent/README.md#运行与凭据)。Runtime 不读取环境 API key 或其他 CLI 的凭据，每个 provider 的 API key 与 OAuth 登录互相替换。网页根据设备报告的 `login_methods` 提供设备码登录或设备本地配置命令。已声明 provider 的认证状态为 `unknown` 时允许启动并由实际请求检查；明确 `login_required` 时等待登录。已知凭据权限、属主或路径错误保留具体安全原因，启动失败后可从运行的 `end_reason` 查看。网页设备码登录在取码后继续后台等待，最多 15 分钟，同服务的新请求替换旧登录，退出后刷新能力报告。凭据留在设备。
 
 节点数据目录中的私有文件 `project-runtime.json` 配置 Project 的资源预算，POSIX 权限为 0600。各字段均可省略，修改后在下次探测或启动时生效：
 
@@ -122,7 +99,7 @@ Kiro 的 local settings 使用 `agentId: kiro`、`commandPath: kiro-cli`，从 P
 
 Worker 重启后，queued 输入可继续调度；已有 intent 只用新的只读 host 核对原生快照，无法证明已接收时标记 unknown，保留原消息结果。员工显式发送新输入或 resume 时，Worker 先确认旧进程树已回收，再恢复既有原生会话，旧 queued 撤回、旧 unknown 输入保持终态。恢复绑定原生会话、工作目录和私有 store，不重发输入、不新建空会话代替恢复。batond 或本地 CLI 退出后，存活 Worker 继续执行，后续调用通过原 IPC 重连。回复 ID 超过 512 字节时使用稳定映射，NUL 和无效 Unicode 文本以 `�` 展示；原始回复与执行身份保存在本地 Worker 账本，ACK 后保留，用于去重和核对。显示字段异常继续关联原回合终态，执行身份不匹配仍进入 unknown。
 
-停止先持久登记，再中断启动、准备或发送，撤回 queued 输入；已提交的 intent 通过只读快照核对裁决。取消响应与真实终止分别处理，最多一分钟后回收所属进程树。POSIX 的 Cursor SDK spawn/fork 并入 agent-host 组；Pi、Codex、Kiro 使用 `foldDetached: false` 保留原生进程组，经 registrar 登记给 Worker 和 watchdog，释放登记前回收后代。Worker 崩溃时 watchdog 回收已登记的组，宿主 Scope 结束时终止剩余子进程。首次打开被取消时，迟到的 SDK 实例会被回收，该命令不会补报打开成功。
+停止先持久登记，再中断启动、准备或发送，撤回 queued 输入；已提交的 intent 通过只读快照核对裁决。取消响应与真实终止分别处理，最多一分钟后回收所属进程树。POSIX 的 Cursor SDK spawn/fork 并入 agent-host 组；Pi、Codex、Kiro 使用 `foldDetached: false` 保留原生进程组，由 host 内部 registrar 和 watchdog 登记，释放登记前回收后代；Worker 账本登记 host 根进程。Windows registrar 不登记独立组。回收依靠 adapter/spawner 的 Scope、watchdog 和 Worker 外层进程树回收，确认终止后才报告 `thread.stopped`。首次打开被取消时，迟到的 SDK 实例会被回收，该命令不会补报打开成功。
 
 ## 追踪
 
@@ -132,16 +109,7 @@ Worker 重启后，queued 输入可继续调度；已有 intent 只用新的只�
 
 ## 验证
 
-```sh
-pnpm --filter @baton/batond typecheck
-pnpm --filter @baton/batond lint
-pnpm --filter @baton/batond test
-pnpm --filter @baton/batond test:unit
-pnpm --filter @baton/batond test:integration
-pnpm test:e2e
-```
-
-`test` 包含全部包内测试；`test:unit` 排除 `*.integration.test.ts`，`test:integration` 仅运行这些文件。辅助程序集中在 `src/testing/`。跨 app 测试位于 [`e2e/`](../../e2e/README.md)；验证节点改动及依赖它的 e2e 时，可运行 `pnpm --filter '...@baton/batond' --workspace-concurrency=1 test`。
+验证命令见 [AGENTS.md](../../AGENTS.md#常用构建与验证命令)。单元组排除数据库与进程集成文件，集成组仅运行这些文件。辅助程序集中在 `src/testing/`，跨 app 测试见 [e2e](../../e2e/README.md)。
 
 适配器行为验证仅使用上游 SDK 静态转录、确定性回放和本地替身，驱动实际 SDK 封装、RPC、Worker 和 SQLite。
 

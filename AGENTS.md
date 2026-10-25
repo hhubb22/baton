@@ -47,7 +47,7 @@ pnpm --filter @baton/server build
 pnpm --filter @baton/batond build
 ```
 
-单独打包使用 `node tools/package-batond.mjs --out bin`，随后运行 `node tools/check-package.mjs bin`，在搬迁目录、空 PATH 和临时 HOME 下检查 Worker、Agent host、Project Runtime 和私有文件。bundle 与 SEA 安装包的布局、附带依赖和验证范围见 [迁移设计](specs/ts-migration/TECH.md#打包与发布)。开发 bundle 的 Project Runtime 仍从源码与已安装依赖启动。
+单独打包使用 `node tools/package-batond.mjs --out bin`，随后运行 `node tools/check-package.mjs bin`，在搬迁目录、空 PATH 和临时 HOME 下检查 Worker、Agent host、Project Runtime 和私有文件。bundle 与 SEA 安装包的布局、附带依赖和验证范围见 [发布设计](specs/release/TECH.md#打包与发布)。开发 bundle 的 Project Runtime 仍从源码与已安装依赖启动。
 
 仅验证远程开发链路时：
 
@@ -71,6 +71,8 @@ pnpm --dir web test
 pnpm --dir web build
 ```
 
+包内检查使用 `pnpm --filter <包名> typecheck`、`pnpm --filter <包名> lint` 和 `pnpm --filter <包名> test`。中心及其 e2e 使用 `pnpm --filter '...@baton/server' --workspace-concurrency=1 test`；两个 app 可将 `test` 换成 `test:unit` 或 `test:integration` 选择测试组。
+
 ## Effect 与开发工具
 
 包内复用的测试辅助代码放在 `src/testing/`，静态数据放在其中的 `data/`；只供单个测试文件使用的小函数留在该文件内。跨 app 测试放在 `e2e/`，通过声明的 workspace 依赖与包导出访问源码。中心的 PostgreSQL 测试使用 `*.integration.test.ts`，根 Vitest 配置按文件名分为 `unit` 和 `integration`，两个 app 支持 `test:unit` 与 `test:integration`。`pnpm test` 包含全部组及 e2e；按包筛选受影响测试时用 `pnpm --filter '...@baton/batond' --workspace-concurrency=1 test` 包含依赖该包的 e2e。
@@ -79,26 +81,21 @@ pnpm --dir web build
 
 本仓库使用 Effect TypeScript。编写 Effect 代码前，完整阅读 `node_modules/effect/AGENTS.md`，按需阅读其中引用的示例；未覆盖的 API 查阅 `node_modules/effect/src` 中的固定版本源码。
 
-## 部署与设备接入
+## 文档入口
 
-中心 bundle 使用 `node apps/server/dist/server.cjs <命令>`，节点 bundle 使用 `node apps/batond/dist/batond.cjs <命令>`。开发入口分别为 `pnpm --filter @baton/server dev <命令>` 和 `pnpm --filter @baton/batond dev <命令>`；账号管理、HTTPS、CA 与设备接入见 [中心文档](apps/server/README.md)。容器与 SEA 发布形态见迁移设计的「打包与发布」。
-
-- 中心的 `serve`、`migrate` 和账号管理先执行并核对迁移。签名密钥默认使用工作目录下的 `node-signing.key`，不存在时生成 `0600` 文件，也可用 `BATON_NODE_SIGNING_KEY` 指定；已有文件校验权限、类型和内容。
-- `BATON_ENROLLMENT_TOKEN='...' node apps/batond/dist/batond.cjs up --coordinator https://baton.example` 首次注册并运行，已有身份时直接复用；凭据也可来自 `--enrollment-file`。显示名默认主机名，系统自动推导。首次尚无目录配置时开放当前用户主目录，已有配置（含空列表）保留；可选 `--workspace /绝对路径` 在连接前幂等登记指定目录。
-- 网页 Devices 的在线设备详情支持添加、移除允许访问的目录，并按 Runtime 报告提供订阅登录；选目录弹窗也可输入设备路径并添加。凭据保存在设备本地，登录进程退出后立即刷新订阅报告。
-- `register --coordinator https://主机` 将中心地址保存为身份文件的 `coordinator_url`；`run` 据此推导 WSS 地址，`--relay` 可显式指定。身份文件不含中心地址时需要 `--relay`。默认设备数据目录为 `~/.baton-ts`，各命令使用相同的 `--data-dir`。
+构建与部署、账号、设备接入和配置参考见 [README.md](README.md)。领域术语与代码命名见 [GLOSSARY.md](GLOSSARY.md)，系统架构见 [Baton TECH](specs/baton/TECH.md)，安装包布局与平台验证见 [发布设计](specs/release/TECH.md)。脚本参数见 [工具说明](tools/README.md)。
 
 ## 开发与演进约束（防熵增守则）
 
-1. **零外部服务与云环境依赖**：全部开发与自动化测试均在本地完成，不依赖云端开发环境（Devin / Cursor Cloud）、1Password CLI（`op`）或外部在线服务。自动化测试和 CI 不使用真实 API Key、不调用在线模型推理、不与外部真实服务联调；适配器行为用上游离线转录、确定性回放与本地替身验证，新增派生夹具注明来源。需要确认真实环境时，可以写只在手动显式运行时执行的冒烟脚本，它不进 CI，也不作为合入前提。
-2. **禁止在生产代码中埋入测试环境变量钩子**：除 `BATON_TEST_DATABASE_URL` 外，不要在业务代码中新增读取 `BATON_TEST_*` 的 `process.env` 分支；故障注入通过 Effect Layer、依赖注入或测试替身完成。
-3. **测试金字塔**：按下节原则判断是否需要补测。纯逻辑、并发竞争与存储不变量优先使用包内单元测试或确定性回放，多进程与浏览器 E2E 只覆盖必须跨进程验证的核心行为。
-4. **文档只写当前状态，不写工单流水账**：更新 `README.md`、`PRODUCT.md`、`TECH.md` 时，原地修改对应章节以反映最新架构与行为，严禁追加工单或日期历史段落。
-5. **实验室阶段统一当前结构**：产品正式发布并确定版本号前，不维护旧开发版本的数据库、设备账本、结果格式或摘要兼容分支；结构变化可重建本地数据。保留协议版本、未知字段容忍和可选能力声明等扩展机制，正式发布后再为支持的版本组合提供兼容和升级路径。
-6. **淘汰式迁移直接废弃旧资产**：替换旧实现或接入新上游库（如 upstream/t3code）时，旧模块的代码、离线录制和测试集直接废弃，严禁作为新实现的验收依据或行为参照；新实现通过上游原有测试和当前任务规定的最小端到端用例。Kiro 夹具说明见 [fork README](upstream/t3code/packages/provider-acp-registry/src/testing/fixtures/kiro/README.md)。
-7. **工作流与配置命令联动校验**：修改 `.github/workflows/` 中的构建或测试命令前，必须先在对应模块的 `package.json` 或构建脚本中核对该命令实际存在，禁止凭推测写入未定义的脚本命令。
-8. **界面设计保持克制**：设计系统仅关注排版层级、信息密度、颜色系统与基础交互。严禁在界面设计和概念探讨中引入具象叙事性插画与文学隐喻。
-9. **默认实用，能力以上游为准**：Agent 的可用性和能力按上游 adapter 与 driver 的检查和报告开放，不另设平台或版本白名单，也不把拿不准的能力报成不支持。缺少验证证据的组合照样开放，在诊断中写明验证范围，出问题再修。确定的失败按失败处理，不升级成 unknown 锁住后续流程。只有存在数据丢失、越权或重复副作用的明确风险时才收紧。
+1. 零外部服务与云环境依赖：全部开发与自动化测试均在本地完成，不依赖云端开发环境（Devin / Cursor Cloud）、1Password CLI（`op`）或外部在线服务。自动化测试和 CI 不使用真实 API Key、不调用在线模型推理、不与外部真实服务联调；适配器行为用上游离线转录、确定性回放与本地替身验证，新增派生夹具注明来源。需要确认真实环境时，可以写只在手动显式运行时执行的冒烟脚本，它不进 CI，也不作为合入前提。
+2. 禁止在生产代码中埋入测试环境变量钩子：除 `BATON_TEST_DATABASE_URL` 外，不要在业务代码中新增读取 `BATON_TEST_*` 的 `process.env` 分支；故障注入通过 Effect Layer、依赖注入或测试替身完成。
+3. 测试金字塔：按下节原则判断是否需要补测。纯逻辑、并发竞争与存储不变量优先使用包内单元测试或确定性回放，多进程与浏览器 E2E 只覆盖必须跨进程验证的核心行为。
+4. 文档只写当前状态，不写工单流水账：更新 `README.md`、`PRODUCT.md`、`TECH.md` 时，原地修改对应章节以反映最新架构与行为，严禁追加工单或日期历史段落。
+5. 实验室阶段统一当前结构：产品正式发布并确定版本号前，不维护旧开发版本的数据库、设备账本、结果格式或摘要兼容分支；结构变化可重建本地数据。保留协议版本、未知字段容忍和可选能力声明等扩展机制，正式发布后再为支持的版本组合提供兼容和升级路径。
+6. 淘汰式迁移直接废弃旧资产：替换旧实现或接入新上游库（如 upstream/t3code）时，旧模块的代码、离线录制和测试集直接废弃，严禁作为新实现的验收依据或行为参照；新实现通过上游原有测试和当前任务规定的最小端到端用例。Kiro 夹具说明见 [fork README](upstream/t3code/packages/provider-acp-registry/src/testing/fixtures/kiro/README.md)。
+7. 工作流与配置命令联动校验：修改 `.github/workflows/` 中的构建或测试命令前，必须先在对应模块的 `package.json` 或构建脚本中核对该命令实际存在，禁止凭推测写入未定义的脚本命令。
+8. 界面设计保持克制：设计系统仅关注排版层级、信息密度、颜色系统与基础交互。严禁在界面设计和概念探讨中引入具象叙事性插画与文学隐喻。
+9. 默认实用，能力以上游为准：Agent 的可用性和能力按上游 adapter 与 driver 的检查和报告开放，不另设平台或版本白名单，也不把拿不准的能力报成不支持。缺少验证证据的组合照样开放，在诊断中写明验证范围，出问题再修。确定的失败按失败处理，不升级成 unknown 锁住后续流程。只有存在数据丢失、越权或重复副作用的明确风险时才收紧。
 
 ## 测试与验证取舍
 
