@@ -8,5 +8,5 @@ export interface HTTPOptions {
   readonly enrollmentTTLSeconds?: number
   readonly nodeCredentialTTLSeconds?: number
   readonly webDirectory?: string
-  readonly gateway: () => Gateway
+  readonly gateway: () => Pick<Gateway, 'request' | 'notify' | 'disconnect' | 'disconnectBrowsers' | 'diagnostics'>
 }

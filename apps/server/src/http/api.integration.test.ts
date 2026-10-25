@@ -9,11 +9,11 @@ import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { httpApplication, httpRouteTemplate } from './http.ts'
-import * as Auth from './auth.ts'
-import * as Nodes from './nodes.ts'
-import { openTestDatabase, type TestDatabase } from './testing/database.ts'
-import type { Gateway } from './gateway.ts'
+import { httpApplication, httpRouteTemplate } from './index.ts'
+import * as Auth from '../auth.ts'
+import * as Nodes from '../nodes.ts'
+import { openTestDatabase, type TestDatabase } from '../testing/database.ts'
+import type { HTTPOptions } from './options.ts'
 
 let database: TestDatabase
 let scope: Scope.Closeable
@@ -82,7 +82,7 @@ beforeAll(async () => {
   }
   await database.run(Nodes.claimConnection(source))
   await database.run(Nodes.syncNode(source, { display_name: 'Local node', system: 'linux', capabilities: [] }))
-  const gateway = {
+  const gateway: ReturnType<HTTPOptions['gateway']> = {
     disconnectBrowsers: () => {},
     notify: () => {},
     disconnect: async () => {
@@ -116,7 +116,7 @@ beforeAll(async () => {
       queued_control_messages: 0,
       queued_control_bytes: 0,
     }),
-  } as unknown as Gateway
+  }
   application = await database.runtime.runPromise(
     httpApplication({
       allowedOrigins: [origin],

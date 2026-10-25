@@ -10,21 +10,14 @@ import { BatonHttpApi, httpOpenApi } from '@baton/protocol/http-api'
 import { Schema } from 'effect'
 import { traceFromHeaders, withTraceSpan } from '@baton/telemetry'
 import { UUID } from '@baton/protocol'
-import * as Nodes from './nodes.ts'
-import * as Threads from './threads/index.ts'
-import * as Projects from './project/projects.ts'
-import { AppError } from './errors.ts'
-import type { HTTPOptions } from './http/options.ts'
-import { httpHandlers } from './http-handlers.ts'
-import {
-  authorizeBrowser,
-  checkOrigin,
-  HttpRequestId,
-  httpFailure,
-  httpSecurity,
-  newRequestId,
-} from './http-security.ts'
-export { cookieToken } from './http-security.ts'
+import * as Nodes from '../nodes.ts'
+import * as Threads from '../threads/index.ts'
+import * as Projects from '../project/projects.ts'
+import { AppError } from '../errors.ts'
+import type { HTTPOptions } from './options.ts'
+import { httpHandlers } from './handlers.ts'
+import { authorizeBrowser, checkOrigin, HttpRequestId, httpFailure, httpSecurity, newRequestId } from './security.ts'
+export { cookieToken } from './security.ts'
 
 const json = (value: unknown, status = 200) =>
   Response.jsonUnsafe(value, { status, headers: { 'cache-control': 'no-store' } })

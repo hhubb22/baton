@@ -8,16 +8,15 @@ import {
   DefaultDeviceResponse,
   EnrollmentResponse,
 } from '@baton/protocol/http-api'
-import * as Auth from './auth.ts'
-import * as Nodes from './nodes.ts'
-import * as Threads from './threads/index.ts'
-import type { HTTPOptions } from './http/options.ts'
-import { AppError } from './errors.ts'
-import { projectHttpHandlers } from './http-projects.ts'
-import { setThreadSettings } from './http-thread-settings.ts'
-import { readThreadOutput } from './full-output.ts'
-import * as DeviceManagement from './device-management.ts'
-import { cookieToken, httpBusiness, decodeResponse } from './http-security.ts'
+import * as Auth from '../auth.ts'
+import * as Nodes from '../nodes.ts'
+import * as Threads from '../threads/index.ts'
+import type { HTTPOptions } from './options.ts'
+import { AppError } from '../errors.ts'
+import { projectHttpHandlers } from './projects.ts'
+import { readThreadOutput } from '../full-output.ts'
+import * as DeviceManagement from '../device-management.ts'
+import { cookieToken, httpBusiness, decodeResponse } from './security.ts'
 
 export const httpHandlers = (options: HTTPOptions) => {
   const changed = (employeeId: string) => options.gateway().notify(employeeId, { type: 'thread.changed' })
@@ -300,12 +299,15 @@ export const httpHandlers = (options: HTTPOptions) => {
           ),
         )
         .handle('setSettings', ({ params, payload }) =>
-          Effect.gen(function* () {
-            const { employee } = yield* CurrentBrowserSession
-            const result = yield* setThreadSettings(params.threadId, payload)
-            changed(employee.id)
-            return result
-          }),
+          httpBusiness(
+            Effect.gen(function* () {
+              const { employee } = yield* CurrentBrowserSession
+              yield* Threads.setSettings(employee.id, params.threadId, payload)
+              const result = yield* Threads.view({ employeeId: employee.id }, params.threadId)
+              changed(employee.id)
+              return result
+            }),
+          ),
         )
         .handle('output', ({ params, query }) =>
           httpBusiness(

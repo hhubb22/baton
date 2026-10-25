@@ -20,7 +20,7 @@ import {
   type ControlOperation,
 } from './control-budget.ts'
 import { createRevocationCompensator } from './control-maintenance.ts'
-import { cookieToken, httpApplication } from './http.ts'
+import { cookieToken, httpApplication } from './http/index.ts'
 
 export interface ServerOptions {
   readonly host?: string

@@ -2,10 +2,10 @@ import { Effect, Layer } from 'effect'
 import { HttpApiBuilder } from 'effect/http-api'
 import { BatonHttpApi, CurrentBrowserSession } from '@baton/protocol/http-api'
 import * as P from '@baton/protocol'
-import * as Projects from './project/projects.ts'
-import * as Memory from './project/project-memory.ts'
-import * as Inbox from './inbox.ts'
-import { decodeResponse, httpBusiness } from './http-security.ts'
+import * as Projects from '../project/projects.ts'
+import * as Memory from '../project/project-memory.ts'
+import * as Inbox from '../inbox.ts'
+import { decodeResponse, httpBusiness } from './security.ts'
 
 const current = <A, E, R>(operation: (employeeId: string) => Effect.Effect<A, E, R>) =>
   httpBusiness(

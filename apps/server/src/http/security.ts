@@ -14,13 +14,13 @@ import {
   type HttpFailure,
 } from '@baton/protocol/http-api'
 import { UUID } from '@baton/protocol'
-import * as Auth from './auth.ts'
-import * as Nodes from './nodes.ts'
-import * as Threads from './threads/index.ts'
-import * as Projects from './project/projects.ts'
-import * as Inbox from './inbox.ts'
-import { AppError } from './errors.ts'
-import type { HTTPOptions } from './http/options.ts'
+import * as Auth from '../auth.ts'
+import * as Nodes from '../nodes.ts'
+import * as Threads from '../threads/index.ts'
+import * as Projects from '../project/projects.ts'
+import * as Inbox from '../inbox.ts'
+import { AppError } from '../errors.ts'
+import type { HTTPOptions } from './options.ts'
 
 export const HttpRequestId = Context.Reference<string>('baton/http/RequestId', { defaultValue: () => randomUUID() })
 
