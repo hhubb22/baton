@@ -11,7 +11,7 @@ Baton 是跨设备 AI Agent 协同系统，由中心服务（`baton-server`）�
 | `internal/session`                            | Session Worker 生命周期、本地认证 IPC、Thread 消息队列与 Turn 账本                                                                                                     |
 | `internal/agent/{pi,codex,kiro,shell,replay}` | 统一 `agent.Adapter` 接口实现（Pi RPC、Codex app-server、Kiro ACP V3）与确定性录制回放                                                                                 |
 | `apps/server` | TypeScript 开发中心：账号、设备、Cursor / Pi / Codex / Kiro 远程 Thread、Project 租约调度、主对话、事项和记忆、持久命令与回复、Gateway 和实时输出；见 `apps/server/README.md` |
-| `apps/batond` | TypeScript 节点与本地 Thread：注册和 WSS、认证 IPC、持久 Worker、Cursor / Pi / Codex / Kiro Agent host（Kiro 在 macOS arm64 / CLI 精确版本 2.32.0 且认证未明确缺失时开放新建与恢复）、受限 shell、Project Runtime 宿主、目录和订阅管理；见 `apps/batond/README.md` |
+| `apps/batond` | TypeScript 节点与本地 Thread：注册和 WSS、认证 IPC、持久 Worker、Cursor / Pi / Codex / Kiro Agent host（四个 Agent 在程序或 SDK 已安装且认证未明确缺失时开放新建与恢复，版本和系统不设白名单）、受限 shell、Project Runtime 宿主、目录和订阅管理；见 `apps/batond/README.md` |
 | `e2e` | 中心、节点与独立 Worker 的跨 app 集成测试，显式依赖两个 app；见 `e2e/README.md` |
 | `packages/telemetry`                          | Effect 原生 OTLP/HTTP 追踪、标准上下文传播与导出字段过滤，默认不连接采集端                                                                                             |
 | `packages/{protocol,sqlite}`                  | TypeScript 协议 Schema 与 WAL/FULL SQLite 客户端、提交结果核查                                                                                                         |

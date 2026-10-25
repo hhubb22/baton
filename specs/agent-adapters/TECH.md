@@ -6,7 +6,7 @@ Basis: [行为规格](PRODUCT.md)；[TypeScript 迁移 TECH](../ts-migration/TEC
 
 ## 现有实现与设计边界
 
-TS 版已交付 T1～T3：Worker 的认证 IPC、持久命令回执、intent 账本、停止裁决与 outbox，batond 的注册、WSS 和 Worker 管理，中心与网页的远程 Thread、Project 和设备管理。Cursor、Pi、Codex、Kiro 经 `agent-host` 子进程使用 fork 的完整 provider adapter，不再保留本地抽取的 SDK runner。Kiro 在 macOS arm64 / CLI 精确版本 2.32.0、程序已安装且认证未明确缺失时报告可用，开放网页新建与恢复。Go 版 Session Worker 与 Pi、Codex、Kiro 适配器在切换时删除，不再作为行为基准或验收对照；Kiro 2.32.0 的旧录制经用户授权转换为 fork 的 ACP 回放夹具，是旧资产保留的唯一例外。
+TS 版已交付 T1～T3：Worker 的认证 IPC、持久命令回执、intent 账本、停止裁决与 outbox，batond 的注册、WSS 和 Worker 管理，中心与网页的远程 Thread、Project 和设备管理。Cursor、Pi、Codex、Kiro 经 `agent-host` 子进程使用 fork 的完整 provider adapter，不再保留本地抽取的 SDK runner。Kiro 在程序已安装且认证 valid/unknown 时报告可用，版本和系统不限，开放网页新建与恢复。Go 版 Session Worker 与 Pi、Codex、Kiro 适配器在切换时删除，不再作为行为基准或验收对照；Kiro 2.32.0 的旧录制经用户授权转换为 fork 的 ACP 回放夹具，是旧资产保留的唯一例外。
 
 Agent 接入整包依赖 Baton 维护的 t3code fork，使用其完整 provider 包和 `ProviderAdapterV2` 接口，接受上游的协议处理、重试、重连、steer、取消和事件归一化行为。Baton 不为产品差异修改上游 adapter；上游缺少的能力（如 Kiro）在 fork 中按上游写法补齐。包体积和依赖范围在第一版接受现状，之后再按需要逐步转写为自实现。
 
@@ -162,11 +162,11 @@ open 的成功 `ThreadCommandResult` 增加当前 `storage_generation`，中心�
 |---|---|---|
 | Pi | `provider-pi`（`server`、`server/status`、`testing` 导出） | 已接入注册、配置、只读探测与 host 回放；活动插入使用上游 steer |
 | Codex | `provider-codex`，依赖 `effect-codex-app-server` | 已接入注册、配置、只读探测与 host 回放；运行策略为 `approvalPolicy: never`、`sandboxPolicy: workspaceWrite`，网络关闭；活动插入使用上游 steer |
-| Kiro | `provider-acp` 与 `provider-acp-registry` | 已接入注册、配置、探测与 host；fork 的 `kiroAcp.ts` 启动 `kiro-cli acp --agent-engine=v3`，模型经 `session/new` 的 `_meta.kiro.modelId` 传递，`default` 省略；按 initialize 响应协商 v1。恢复先 `session/list` 核对 cwd/ID 再 `session/load`，失败不新建替代；不支持 steer 与换模型。macOS arm64 / CLI 精确版本 2.32.0 且认证未明确缺失时开放 create/resume |
+| Kiro | `provider-acp` 与 `provider-acp-registry` | 已接入注册、配置、探测与 host；fork 的 `kiroAcp.ts` 启动 `kiro-cli acp --agent-engine=v3`，模型经 `session/new` 的 `_meta.kiro.modelId` 传递，`default` 省略；按 initialize 响应协商 v1。恢复先 `session/list` 核对 cwd/ID 再 `session/load`，失败不新建替代；不支持 steer 与换模型。程序已安装且认证 valid/unknown 时开放 create/resume，版本和系统不限 |
 | Cursor | `provider-cursor`（完整 driver 与 adapter） | 已用 `makeCursorAdapterV2` 取代 T1 的抽取 runner；`cursor-host` 泛化为 agent-host；SDK 附带目录与平台包分发方式不变 |
 | Grok、Antigravity | `provider-grok`、`provider-acp` | 切换后接入，复用同一宿主层 |
 
-最低版本和协议要求以上游 driver 的检查为准。Pi、Codex 的交付组合分别固定为 macOS arm64 / Pi 1.0.0、Codex 0.156.1，以当前上游转录经真实 host 的离线回放为依据；其他版本或系统组合保持 unverified。
+程序、认证、协议与模型发现使用上游 driver 的检查结果，Baton 不另设系统或版本白名单。程序或 SDK 已安装、认证 valid/unknown 时报告 available，未知版本、其他系统、版本探测失败或超时均不阻止创建；缺程序或明确认证 missing 时报告 unavailable。离线回放覆盖的版本和系统范围保留在夹具与验证文档中，缺少验证证据的组合照常开放。
 
 Kiro 的离线行为验证使用 fork 的 ACP replay testkit 与 2.32.0 夹具，验证 adapter 行为；真实账号授权由原生程序在实际执行时检查。夹具由旧 Go 录制转换，是用户授权的唯一例外；旧 Go 实现与测试不读取、不作为行为参照。转换脚本位于 fork 的 `packages/provider-acp-registry/scripts/convert-kiro-replay.mjs`，夹具位于同包 `src/testing/fixtures/kiro/`。转换保留协议响应、通知和权限结果，调整 initialize 协商请求及 prompt 形状，丢弃 version 探测与 stderr。夹具 README 与 metadata 的 `agentVersion` 明确记录 `2.32.0`，转录的 `version: "1"` 是协议格式版本。
 
@@ -188,11 +188,11 @@ Thread 历史使用中心已保存的记录：`thread_messages` 保存员工和 
 |---|---|---|
 | Pi | PATH 中的 `pi`；`PI_CODING_AGENT_DIR`、`PI_CODING_AGENT_SESSION_DIR`；Thread `model` | 新建、排队、插入、停止、恢复；Thread 内固定模型 |
 | Codex | PATH 中的 `codex`；`CODEX_HOME`；Thread `model` | 新建、排队、插入、停止、恢复；Thread 内固定模型 |
-| Kiro | local settings：`agentId: kiro`、`commandPath: kiro-cli`，从 PATH 查找；profile 为 `homedir()`；模型取 `model ?? adapter_config.model ?? 'default'` | adapter 支持新建、排队、停止、恢复；不支持插入或换模型；macOS arm64 / CLI 精确版本 2.32.0、程序已安装且认证未明确缺失时开放 create/resume，其余版本或系统组合保持 unverified |
+| Kiro | local settings：`agentId: kiro`、`commandPath: kiro-cli`，从 PATH 查找；profile 为 `homedir()`；模型取 `model ?? adapter_config.model ?? 'default'` | adapter 支持新建、排队、停止、恢复；不支持插入或换模型；程序已安装且认证 valid/unknown 时开放 create/resume，版本和系统不限 |
 | Cursor | 随 batond 分发的 SDK、平台辅助包与本机 shell | 按上游 driver 报告的能力 |
 | Grok、Antigravity | 切换后接入时确定 | 切换后接入时确定 |
 
-上游 driver 报告的 steer、resume 和模型切换能力映射到 RuntimeAgent 的 capabilities，Baton 只能收窄，不扩大。
+`agents/capabilities.ts` 按固定上游 adapter 的能力与 Baton 已实现的执行路径报告：Pi、Codex 支持 steer，Cursor、Kiro 上游不支持；四个 Agent 均支持新建、排队、停止与恢复。Pi、Codex、Cursor 上游支持会话内换模型，中心已有 `setModel` 和逐消息模型入口，但 `thread-agent.ts` 拒绝改变创建时模型，通用 driver 的 `startTurn` 仍使用 Thread 配置，尚未传入逐消息模型，因此 `switch_model` 保持 false。Kiro 上游明确关闭这两项能力。`capabilityLimitations` 将这些原因写入报告。仅存在明确的数据丢失、越权或重复副作用风险时进一步限制已实现能力。
 
 Kiro settings 固定为 `source: local`，不拉取 registry 包；上游 Kiro driver 不读取专有环境变量，host 只继承系统项，不提供 `BATON_KIRO_*` 或 `KIRO_HOME` 配置入口。Pi、Codex 的配置目录分别按各自原生变量传递，不改写系统 HOME。Antigravity 需要额外启动路径时增加结构化、非敏感本机配置，先通过验证再固定其字段。
 
@@ -216,11 +216,11 @@ Web 的 NodeDTO、DeviceAgent 和 mapDevice 保留 status、create 和 reason，
 
 探测在只读 agent-host 中调用上游 driver 的安装、认证与模型检查，版本按各 Agent 的探测路径取得，返回分开的安装/版本、认证和模型目录结果。探测不发送 prompt、不调用 authenticate/login 或打开登录浏览器，使用临时空工作目录和空 MCP 配置；Kiro 的完整探测仍调用 `checkAcpRegistryProviderStatus` 与 `probeAcpRegistryConfiguration`，由上游建立空的发现会话以读取能力与模型。其余隔离行为以上游实现为准。每个任务最多 30 秒，版本和配置一致时复用结果，结束或失败后回收进程树。
 
-Pi、Codex 仍要求认证有效；认证 unknown/missing、安装不完整或版本/系统组合未交付验证时不可创建。通过认证准入但模型目录失败时可按默认模型创建，reason 说明相应原因。
+四个 Agent 在程序或 SDK 已安装、认证 valid/unknown 时报告 available，开放 create/resume；缺程序或明确 missing 时 unavailable。reason 记录版本、系统、认证未知、模型目录问题和未开放能力的原因；版本探测失败或超时不阻止创建。模型目录失败时可按默认模型创建。整次 host 探测失败且安装状态未确认时保持 unverified，避免将探测故障误报成程序缺失。Cursor 在主进程先检查 SDK 资产与平台包版本一致性，host 再检查辅助程序和 sandbox，明确失败时 unavailable；已确认 SDK 安装完整后，整次 host 探测失败或超时保留诊断并允许创建。
 
-Kiro 在上游 status 之外运行 `kiro-cli --version`。`src/agents/kiro/version.ts` 使用 host 提供的 Node Effect `ChildProcessSpawner`，经包装 spawner 交给 process registrar 管理，Scope 结束或超时后回收进程。版本命令限时 4 秒，stdout/stderr 各最多收集 4096 字节，只返回解析出的版本号；原始输出与诊断留在 host 内，不进入能力报告。命令超时、失败、输出超限或不可解析时，版本为 `unknown`，状态保持 `unverified`；缺少程序时为 `unavailable`。
+Kiro 在上游 status 之外运行 `kiro-cli --version`。`src/agents/kiro/version.ts` 使用 host 提供的 Node Effect `ChildProcessSpawner`，经包装 spawner 交给 process registrar 管理，Scope 结束或超时后回收进程。版本命令限时 4 秒，stdout/stderr 各最多收集 4096 字节，只返回解析出的版本号；原始输出与诊断留在 host 内，不进入能力报告。命令超时、失败、输出超限或不可解析时，版本为 `unknown` 并记录原因；已安装时仍为 available。缺少程序时为 `unavailable`。
 
-`hostedAgentReport` 对 Kiro 精确匹配 `darwin-arm64` 与版本 `2.32.0`，程序已安装且认证为 valid 或 unknown 时报告 `available`、`create: true`、`resume: true`。预发布和构建后缀保留在版本号中，不会匹配 `2.32.0`；其他系统或版本保持 `unverified` 并关闭 create/resume。认证 unknown 的 reason 为“Kiro 认证状态未知，首次执行时由原生程序检查”，明确 missing 则为 `unavailable` 并拒绝。网页按节点报告开放新建与恢复，不符合准入条件的新建请求返回 HTTP 422、`agent_unavailable`。本地 CLI 的 `open` 目前仅创建 Cursor Thread。
+`hostedAgentReport` 对 Cursor、Pi、Codex、Kiro 共用安装与认证规则：已安装且认证为 valid 或 unknown 时报告 `available`、`create: true`、`resume: true`。版本与系统写入 reason，认证 unknown 提示首次执行由原生程序检查；明确 missing 则为 `unavailable` 并拒绝。网页按节点报告开放新建与恢复，不符合准入条件的新建请求返回 HTTP 422、`agent_unavailable`。本地 CLI 的 `open` 目前仅创建 Cursor Thread。
 
 Kiro 的 `turnFailure` 回调处理真实回合的 provider failure：明确认证失败映射为“Sign in to Kiro CLI and try again.”，其他 provider 错误映射为“Check Kiro CLI on this device and try again.”。其他 Agent 的失败原因固定为 `Send your message again or check <Agent> on this device.`。通用 driver 将安全原因随失败结束事件交给 Worker，保存到 `turn.ended.content`；不透传原始错误，不自动登录，不重发输入。
 
@@ -236,9 +236,9 @@ batond bundle 直接打包用到的 `@t3tools/*` 包及其纯 JS 依赖。原生
 
 所有适配器行为验证仅依赖上游离线测试、上游转录与 `provider-testing` 回放、Baton 本地替身。测试与验证脚本禁止要求真实 API Key、启动真实 `kiro-cli`、调用在线模型推理或与外部真实服务联调。
 
-Kiro host 回放使用上述授权转换的夹具，验证范围包括真实 adapter 的新建、两轮、停止（含工具运行中）、恢复、`restore_missing` 失败和 `sent` 的确认与未确认；工具中断夹具中的权限请求经真实 adapter 返回 `allow_once`。进程回收用真实 Kiro adapter 与本地 ACP 协议替身，确认 ACP 独立进程组及同组 grandchild 在正常关闭和 host SIGKILL 后均退出，强杀路径由 registrar watchdog 回收。`e2e/src/provider-agents.integration.test.ts` 通过注入已验证 capability 驱动真实 Kiro adapter，覆盖网页 API 发送、回复、中心 idle、停止与恢复；此注入验证自动化行为，不能证明真实账号授权有效；生产报告按节点探测到的版本、系统和认证状态决定。
+Kiro host 回放使用上述授权转换的夹具，验证范围包括真实 adapter 的新建、两轮、停止（含工具运行中）、恢复、`restore_missing` 失败和 `sent` 的确认与未确认；工具中断夹具中的权限请求经真实 adapter 返回 `allow_once`。进程回收用真实 Kiro adapter 与本地 ACP 协议替身，确认 ACP 独立进程组及同组 grandchild 在正常关闭和 host SIGKILL 后均退出，强杀路径由 registrar watchdog 回收。`e2e/src/provider-agents.integration.test.ts` 通过注入已验证 capability 驱动真实 Kiro adapter，覆盖网页 API 发送、回复、中心 idle、停止与恢复；此注入验证自动化行为，不能证明真实账号授权有效；生产报告按节点探测到的安装与认证状态决定，版本和系统保留为诊断信息。
 
-版本探测测试使用本地可执行替身，验证 stdout/stderr 版本解析、预发布后缀保留、诊断不外传、非零退出、缺程序和超时后进程退出，不启动真实 CLI。注册表测试核对精确系统与版本组合、Kiro 认证 unknown 放行、明确 missing 拒绝，以及 Pi、Codex 认证规则不变。认证失败场景由 `provider_error` 派生夹具驱动真实 adapter、agent-host 与 Worker；该夹具和原始 provider 错误场景分别接上 `simple` 的成功回合，来源记录在 metadata。测试核对失败原因持久化、原始错误不外传、输入保持 sent、排队消息继续执行、最终 idle，以及原生会话和进程保留。跨 app e2e 核对中心读取失败原因和 idle 后，再发消息能收到回复。
+版本探测测试使用本地可执行替身，验证 stdout/stderr 版本解析、预发布后缀保留、诊断不外传、非零退出、缺程序和超时后进程退出，不启动真实 CLI。注册表测试核对四个 Agent 的未知版本、其他系统、认证 unknown 和版本超时均放行，缺程序与明确 missing 拒绝；Cursor 的只读 host 探测失败保留诊断，明确依赖或 sandbox 失败时拒绝。认证失败场景由 `provider_error` 派生夹具驱动真实 adapter、agent-host 与 Worker；该夹具和原始 provider 错误场景分别接上 `simple` 的成功回合，来源记录在 metadata。测试核对失败原因持久化、原始错误不外传、输入保持 sent、排队消息继续执行、最终 idle，以及原生会话和进程保留。跨 app e2e 核对中心读取失败原因和 idle 后，再发消息能收到回复。
 
 | 范围 | 验证 | 层次 |
 |---|---|---|
@@ -248,7 +248,7 @@ Kiro host 回放使用上述授权转换的夹具，验证范围包括真实 ada
 | Worker 保证 | 沿用 T1～T3 的接收、intent、unknown、停止裁决与回收测试，换成 agent-host 替身 | Worker 集成 |
 | 主链路 | 每种 Agent 一条网页发送到回复、停止、恢复的回放链路 | e2e |
 | 历史 | 网页与 `threads.read` 读取同一份中心 Thread 记录，分页与权限正确 | 中心集成与 Web 契约 |
-| 探测与 reason | 缺程序或明确认证缺失时 unavailable，未交付版本/系统组合及版本超时、不可解析时 unverified；Kiro 仅在精确交付组合中允许认证 unknown 并保留首次原生执行检查的 reason，Pi/Codex 规则不变 | 包内与本地可执行替身 |
+| 探测与 reason | 四个 Agent 已安装且认证 valid/unknown 时 available；未知版本、其他系统、版本失败或超时只记入诊断。缺程序、明确认证缺失或 Cursor 明确依赖/sandbox 失败时 unavailable；整次探测未确认安装时 unverified；未开放能力写明原因 | 包内与本地可执行替身 |
 | Kiro 回合失败 | `provider_error` 与派生认证失败经真实 host/Worker 保存失败原因，输入保持 sent，后续排队消息执行并收到回复、原生会话与进程保留；中心时间线可读原因、空队列时 idle，网页在对应回合显示失败 | 确定性回放、Worker 集成、跨 app e2e 与网页数据层 |
 | 安装包 | 脱离源码运行 SEA，加载 t3code 依赖与附带目录 | 打包检查（T5） |
 
@@ -277,7 +277,7 @@ T5 负责完整安装包、发布切换与系统矩阵复验。Grok、Antigravit
 | Windows 进程回收 | taskkill 有父进程先退出和 Worker 崩溃后延迟回收两个缺口 | 已接受为第一版范围；Job Object 放第一版之后 |
 | 上游进程组 | 上游 adapter 自建 detached 进程组时的登记 | `agent-host/reclaim.integration.test.ts` 验证并组与独立 pgid 回收；Kiro `reclaim.integration.test.ts` 以真实 adapter 和本地 ACP 替身验证独立组与 grandchild，正常关闭、仅强杀 host 均回收。Pi、Kiro host 回放覆盖工具中断 |
 | Cursor 认证 | 上游 driver 使用 credential store 与 keyring | 已定：只用设备显式配置的 `CURSOR_API_KEY`，经 adapter 的 `environment` 注入；`ProviderHost.credentials` 保持只读空实现 |
-| Kiro ACP | 离线验证不证明真实账号授权有效 | macOS arm64 / CLI 精确版本 2.32.0、程序已安装且认证未明确缺失时开放 create/resume；认证 unknown 提示首次原生执行检查，明确 missing 拒绝；其他系统或版本保持 unverified |
+| Kiro ACP | 离线验证不证明真实账号授权有效 | 程序已安装且认证 valid/unknown 时开放 create/resume，版本和系统不限；reason 提示首次原生执行检查，明确 missing 拒绝；上游不支持 steer 和换模型 |
 | agent-host 冷启动 | 加载 t3code 依赖后的启动耗时未测 | 不计入 Worker 3 秒预算；open 仍受 30 秒原生预算约束，T5 复验 |
 | t3code 依赖打包 | `@t3tools/shared` 的 markdown 依赖与 keyring 原生模块进 SEA 未验证 | T5 打包检查；不需要的依赖在 fork 中去掉 |
 | Grok、Antigravity | 切换后接入，安装、认证与恢复证据未核查 | 只阻塞各自交付 |

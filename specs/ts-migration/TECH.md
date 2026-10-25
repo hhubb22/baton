@@ -18,7 +18,7 @@ Coordinator、batond 和 Session Worker 按 Baton 与 Agent 适配 PRODUCT 重�
 | 契约范围 | 保留浏览器 HTTP API、节点 WSS 信封和中心 PostgreSQL schema 的已有结构，加入适配规格新增字段。Worker IPC、设备账本和进程内服务允许按 TS 重设，相关调用方与 `packages/protocol` 同步修改 |
 | 本地数据 | 按实验室阶段约定不迁移：切换后设备重新注册、Worker 账本与 node.db 重建；中心数据库可保留，因为 schema 只增加字段 |
 | 首次交付 | TS 切换覆盖现有 Pi、Codex、Kiro、shell 和新增 Cursor；Grok、Antigravity 在切换后按各自支持矩阵交付 |
-| 切换条件 | 下文验证表通过；Pi、Codex、Kiro、Cursor 以上游测试、离线回放与本地安装包检查的支持矩阵交付，未通过的组合保持 unverified |
+| 切换条件 | 下文验证表通过；Pi、Codex、Kiro、Cursor 使用上游安装与认证检查决定可用性，离线回放与本地安装包检查如实记录验证范围，缺少验证证据的系统或版本组合照常开放 |
 
 ## 实现原则
 
@@ -149,7 +149,7 @@ fork 中用到的包连同其上游离线测试、回放工具和原始静态转
 | `@cursor/sdk`、t3code 依赖与附带目录的 SEA 加载（T1、T5） | 运行时找不到模块，或需要设备上另装依赖 | 打包检查 |
 | Baton TECH 验证表 R-01～R-25 中适用各行（T2～T5） | 任一现有承诺未覆盖；已定义负载阈值未满足 | 原测试层次 |
 | Agent 适配 TECH 中 Pi、Codex、Kiro、Cursor 的验证行（T1、T4、T5） | 同该表 | 同该表 |
-| Pi、Codex、Kiro、Cursor 的拟支持系统组合（T4、T5） | 缺少离线行为与本地安装包检查却标为 available | 静态转录回放、本地替身与安装包检查 |
+| Pi、Codex、Kiro、Cursor 的可用性（T4、T5） | 已安装且认证 valid/unknown 却因版本或系统缺少验证被拒绝，或缺程序、明确未认证仍标为 available；诊断未说明版本、系统与未开放能力 | 静态转录回放、本地替身与安装包检查，分别记录验证范围 |
 | 中心重启、batond 重启、Worker 被杀、PostgreSQL 短停（T1～T3、T5） | 消息重发、回复重复、同步前设备显示可用 | 进程测试 |
 
 切换提交前执行 `pnpm check`、`pnpm typecheck`、`pnpm test`、`pnpm --dir web build` 和 SEA 打包检查。
@@ -171,5 +171,5 @@ fork 中用到的包连同其上游离线测试、回放工具和原始静态转
 | FULL 同步提交耗时 | 官方 Node 26.11.1、Effect 4.0.6，真实 `makeWorker` 串行队列预热 200 次后执行 2000 次 `records.add/remove`，每次提交后让出事件循环。macOS arm64 / Apple M4 / Darwin 27.2.0 / APFS：COMMIT p99 **0.080 ms**、最大 **0.268 ms**，队列操作 p99 **0.181 ms**，事件循环 p99 **1.656 ms**。OrbStack Linux arm64 / 内核 7.2.9 / Docker named volume（Btrfs）：COMMIT p99 **21.680 ms**、最大 **41.063 ms**，队列操作 p99 **23.595 ms**，事件循环 p99 **23.282 ms** | 两个平台此负载的提交 p99 低于 50 ms；Worker 保持逐事务让出。测量覆盖实际账本、提交核查和状态队列，不含 Agent、IPC、输入 intent 或大队列负载，不能推断全部命令接收延迟；Windows、Linux x64 未测。WAL/FULL、`fullfsync=0`，未做断电验证；Linux 为本机虚拟机结果。复现：`tools/ts-migration/worker-startup.mjs 100 --ledger 2000`；单独 SQLite 压力工具为 `sqlite-full.mjs` |
 | SEA 冷启动 | 官方 Node 26.11.1 + Effect 4.0.6 + esbuild 0.28.2，完整 Worker 每平台 100 个新进程，包含独占锁、实际 SQLite 迁移、空账本恢复调度、Agent 接入模块加载和 watchdog。macOS arm64：spawn 到认证 status p99 **225.874 ms**、最大 **2058.295 ms**，含 Host 目录与令牌准备的总耗时 p99 **236.225 ms**、最大 **2071.289 ms**。OrbStack Linux arm64：认证 status p99 **624.646 ms**、最大 **638.046 ms**，Host 总耗时 p99 **753.595 ms**、最大 **797.125 ms**。每次确认 SIGTERM 后 Worker、watchdog 退出和锁释放 | 全部样本低于 3 秒；Windows、Linux x64 未测。安装目录仅含 SEA，空 PATH、临时 HOME、每次新建数据库，不加载 Cursor SDK；未清空系统页缓存。Linux 数据位于 VM 的 Btrfs named volume，容器禁止联网。已有大量命令与 intent 的恢复耗时仍需单独验证，T5 复验完整安装包。复现：`tools/ts-migration/worker-startup.mjs`，离线 Linux 命令见工具 README |
 | Windows 进程回收实测 | 本机无 Windows / PowerShell 执行环境，`taskkill`、CIM 创建时间及真实 PID 复用均**未测**。提供 `tools/ts-migration/windows-processes.mjs`：完整父子孙进程树回收、故意过期的创建时间与无关存活进程核对、中间父进程先退出后的后代存活检查；创建时间取 `Get-CimInstance Win32_Process` 的 UTC ticks 字符串 | 在 Windows 执行脚本后补实测。过期记录检查不等于操作系统真实复用 PID；脚本不验证 Worker 崩溃至重启之间的延迟。CIM 校验与 taskkill 之间有竞争窗口，无法给出原子排除 PID 复用的保证；第一版已接受的两个进程回收缺口仍保留 |
-| `@cursor/sdk` 的原生依赖 | 实测公开包 **1.0.35**，`engines.node >=22.13`，Node 26.11.1 满足；安装禁用脚本。默认入口直接 esbuild 报动态路径解析错误，公开 `/bundled` 入口在 Node SEA 报 `bun:sqlite` 不存在。SEA 用 `createRequire` 加载旁置的完整 SDK、生产依赖和对应平台包，可导入 SDK、打开临时 SQLite store、加载 tree-sitter/Bash `.node` 并运行 ripgrep；移走附带目录时正确失败。macOS arm64 的 sandbox helper `--help` 通过；Linux arm64 helper 要求 **GLIBC_2.39**，当前 Debian 12 / glibc 2.36 无法加载 | macOS arm64 的本地加载检查通过；会话行为统一使用离线 SDK 转录、确定性回放和本地替身验证。Cursor Linux arm64 要求 glibc 2.39+，当前 Debian 12 / glibc 2.36 不满足；其他系统组合保持 unverified，Fedora 43 验证待补。需携带 SDK JS、全部生产依赖及入口可达的平台包；只有原生文件不足。SDK 许可及来源见 `third_party/cursor-sdk/`；加载检查复现 `tools/ts-migration/cursor-sea.mjs`，离线测试入口见 `apps/batond/README.md` |
+| `@cursor/sdk` 的原生依赖 | 实测公开包 **1.0.35**，`engines.node >=22.13`，Node 26.11.1 满足；安装禁用脚本。默认入口直接 esbuild 报动态路径解析错误，公开 `/bundled` 入口在 Node SEA 报 `bun:sqlite` 不存在。SEA 用 `createRequire` 加载旁置的完整 SDK、生产依赖和对应平台包，可导入 SDK、打开临时 SQLite store、加载 tree-sitter/Bash `.node` 并运行 ripgrep；移走附带目录时正确失败。macOS arm64 的 sandbox helper `--help` 通过；Linux arm64 helper 要求 **GLIBC_2.39**，当前 Debian 12 / glibc 2.36 无法加载 | macOS arm64 的本地加载检查通过；会话行为统一使用离线 SDK 转录、确定性回放和本地替身验证。Cursor Linux arm64 要求 glibc 2.39+，当前 Debian 12 / glibc 2.36 不满足；其他系统组合按本机依赖与认证检查结果开放，Fedora 43 的本地加载验证待补，缺少该证据不阻止创建。需携带 SDK JS、全部生产依赖及入口可达的平台包；只有原生文件不足。SDK 许可及来源见 `third_party/cursor-sdk/`；加载检查复现 `tools/ts-migration/cursor-sea.mjs`，离线测试入口见 `apps/batond/README.md` |
 | 发布用 Node 二进制缓存 | 缓存确定为 `~/.cache/baton/node/v<版本>/`，支持 `BATON_NODE_CACHE` 覆盖；保留官方归档与经 HTTPS 获取的 `SHASUMS256.txt`，解包前校验 SHA256。已获取 v26.11.1：darwin-arm64 tar.gz 为 `d916511b55965e91be7a88e17f88d895b6793ceaba3e6c9b194aefe51c2c65ac`；linux-arm64 tar.gz 为 `170454fb022f5e9b5f6cc76c25fa32ef5100895be44eb04e92f9780591491bbf` | `tools/ts-migration/cache-node.mjs` 仅显式 `--download` 联网，离线缺失时输出下载命令；未校验离线发布签名。Windows x64 / Linux x64 缓存尚未获取；T5 的发布打包继续采用缓存输入 |

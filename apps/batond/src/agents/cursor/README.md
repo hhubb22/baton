@@ -8,13 +8,13 @@
 - `probeCursor(options)`：在临时空工作目录的只读 host 中执行探测，不 open/resume，不发送 prompt。
 - `cursorAgentHostModule`：`agent-host` 子命令按 `cursor` 类型加载的 driver 层。
 
-`host-driver.ts` 用 fork 导出的 `makeCursorAdapterV2` 构造 adapter，会话与事件映射交给 `agent-host/driver.ts` 的通用驱动，环境取 host 进程已白名单过滤的 `process.env`。模型来自 `config.model ?? adapter_config.model ?? 'default'`；`runtimeMode` 为 `approval-required`、`approvalPolicy` 为 `never`、`interactionMode` 为 `default`，原生 sandbox 保持开启。Cursor 不支持 steer 和中途换模型，`send` 只接受队列模式。
+`host-driver.ts` 用 fork 导出的 `makeCursorAdapterV2` 构造 adapter，会话与事件映射交给 `agent-host/driver.ts` 的通用驱动，环境取 host 进程已白名单过滤的 `process.env`。模型来自 `config.model ?? adapter_config.model ?? 'default'`；`runtimeMode` 为 `approval-required`、`approvalPolicy` 为 `never`、`interactionMode` 为 `default`，原生 sandbox 保持开启。上游 Cursor adapter 不支持 steer，`send` 只接受队列模式。上游支持会话内换模型，但 Worker 固定模型且 host 尚未传递逐消息模型，因此 switch_model 保持关闭，reason 说明缺少的实现。
 
 ## 认证与探测
 
 认证只用设备上显式设置的 `CURSOR_API_KEY`。它经 host 环境传给 adapter 的 `environment`，不写入配置、映射、报告或日志；`ProviderHost.credentials` 是只读空实现，不接 keyring 或浏览器登录。
 
-`probe.ts` 在独立 host 中调用 driver 的探测：`sdk-inspection.ts` 读取磁盘 SDK 的实际版本、平台包版本、Node 要求和资产路径；宿主再执行 sandbox helper 与 `rg`，用临时空目录和关闭 ambient settings 的 SDK prewarm 验证 sandbox，最后调用 `Cursor.me` 和模型目录。`details` 里记录 `version`、`platform`、`integrity` 和 `sandboxHelper`，registry 据此给出 `available`、`unverified` 或 `unavailable` 及原因。macOS arm64 / SDK 1.0.35 已启用；其他组合保持不可创建。
+`probe.ts` 在独立 host 中调用 driver 的探测：`sdk-inspection.ts` 读取磁盘 SDK 的实际版本、平台包版本、Node 要求和资产路径；宿主再执行 sandbox helper 与 `rg`，调用 `Cursor.me`，用临时空目录和关闭 ambient settings 的 SDK prewarm 检查 sandbox，最后查询模型目录。认证查询失败时仍检查 sandbox。`details` 记录 `installed`、`version`、`platform`、`integrity` 和 `sandboxHelper`。SDK 安装完整且认证为 valid 或 unknown 时，registry 报告 available 并开放新建与恢复；缺 SDK、平台资产不完整、辅助程序不可执行、sandbox 检查明确失败或缺少显式 API key 时报告 unavailable。系统和版本不设白名单，未知认证、版本与模型目录问题保留在 reason 中。已确认 SDK 安装完整后，只读 host 探测失败或超时仍允许新建，并报告探测问题。
 
 ## 会话与映射
 

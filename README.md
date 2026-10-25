@@ -146,7 +146,7 @@ pnpm --filter @baton/batond dev help
 pnpm --filter @baton/batond dev probe
 ```
 
-中心构建包含网页和 SQL 迁移。账号初始化、HTTPS 配置和设备接入见 [中心文档](apps/server/README.md)；节点与本地命令、恢复语义见 [Thread 文档](apps/batond/README.md)。Cursor 使用设备上显式配置的 `CURSOR_API_KEY`；后台探测只查询认证和模型、检查本机依赖，不发送推理请求。仅 `available` 且声明创建能力的 SDK / 系统组合允许新建。Project 使用设备本地的 ChatGPT 或 xAI 订阅，提供带租约的独立 Runtime 和受限 shell Thread；目录与执行开关默认遵守本机配置。Thread 历史从中心记录读取。Runtime 从源码与已安装依赖启动，完整安装包和发布切换归迁移 T5。
+中心构建包含网页和 SQL 迁移。账号初始化、HTTPS 配置和设备接入见 [中心文档](apps/server/README.md)；节点与本地命令、恢复语义见 [Thread 文档](apps/batond/README.md)。Cursor 使用设备上显式配置的 `CURSOR_API_KEY`；后台探测只查询认证和模型、检查本机依赖，不发送推理请求。四个 Agent 在程序或 SDK 已安装、认证有效或未知时报告 `available`，按上游 adapter 与已实现的执行路径开放新建和恢复；版本、系统与认证未知写入诊断，不另设系统或版本白名单。缺程序、明确未认证或已确认的运行依赖缺失时报告 `unavailable`。Project 使用设备本地的 ChatGPT 或 xAI 订阅，提供带租约的独立 Runtime 和受限 shell Thread；目录与执行开关默认遵守本机配置。Thread 历史从中心记录读取。Runtime 从源码与已安装依赖启动，完整安装包和发布切换归迁移 T5。
 
 验证使用本机 PostgreSQL、确定性回放和本地替身，无需真实模型凭据；包括独立 Worker、中心与节点重启、ACK 丢失、数据库连接中断和跨员工隔离。Node 26、pnpm 12 的工作区检查为：
 

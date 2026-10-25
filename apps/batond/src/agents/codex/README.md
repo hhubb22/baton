@@ -6,7 +6,7 @@
 
 运行策略是 `approvalPolicy: never`、`sandboxPolicy: { type: workspaceWrite, networkAccess: false, writableRoots: [] }`；审批 reviewer 沿用上游 user 模式。运行时权限类请求只允许本次请求，提问（含 MCP elicitation）取消，停止后到达的请求一律取消。
 
-只读探测在临时空工作目录的 host 中执行上游 Codex 安装、版本、认证和模型检查，不发送 prompt、不打开登录。注册表启用 macOS arm64 / Codex 0.156.1 的离线验证组合，其他版本与系统报告 unverified；认证缺失不可创建。认证有效而目录不可读时使用上游默认模型并报告目录缺失。
+只读探测在临时空工作目录的 host 中执行上游 Codex 安装、版本、认证和模型检查，不发送 prompt、不打开登录。程序已安装且认证为 valid 或 unknown 时报告 available，开放新建与恢复；缺程序或明确 missing 时报告 unavailable。版本、系统、认证未知和模型目录缺失写入 reason，不另设版本或系统白名单；版本未知不阻止新建，目录不可读时使用上游默认模型。整次 host 探测失败且安装状态未确认时报告 unverified。上游支持会话内换模型，Worker 固定模型且 host 尚未传递逐消息模型，因此 switch_model 保持关闭，reason 说明缺少的实现。
 
 Codex 支持 `steerTurn`。Worker 保存接收时的活动目标回合，写 intent 前核对目标；host 保留上游的原生插入归属。提交成功时保持同一执行，结果无法确认时进入 unknown，不重发该输入。独立 app-server 子进程保留上游进程组，经 spawner 登记并在注销前回收后代。恢复核对原生映射与 profile 配置位置。
 

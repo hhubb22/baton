@@ -15,7 +15,7 @@ T1～T4 已完成。任务按能力验收，每项包含实现、调用方与测
 ## T1 交付 Cursor 本地可靠会话
 
 Status: complete
-实现与验证入口：[本地 Thread](../../apps/batond/README.md)。Cursor 启用 macOS arm64 / SDK 1.0.35；其他系统组合的验证留给 T5。
+实现与验证入口：[本地 Thread](../../apps/batond/README.md)。Cursor 按 SDK 安装、依赖与认证检查结果开放，版本和系统不设白名单；其他系统组合的安装包验证留给 T5。
 
 - 依据：[架构与职责](../agent-adapters/TECH.md#架构与职责)、[Worker 接收与异步执行](../agent-adapters/TECH.md#worker-接收与异步执行r-04r-05r-08)、[各 Agent 实现](../agent-adapters/TECH.md#各-agent-实现)。
 - 依赖：现有基础包；首先交付可运行的 provider、最小宿主及上游测试检查点，记录依赖、保留模块与修改范围。
@@ -28,7 +28,7 @@ Status: complete
 ## T2 交付网页远程 Thread
 
 Status: complete
-实现与验证入口：[TS 中心与网页](../../apps/server/README.md)、[远程节点](../../apps/batond/src/daemon/README.md)。使用真实 PostgreSQL、WSS、认证 IPC、独立 Worker 与离线回放验证远程链路；当前 Cursor 支持组合沿用 T1，完整安装包与系统矩阵复验归 T5。
+实现与验证入口：[TS 中心与网页](../../apps/server/README.md)、[远程节点](../../apps/batond/src/daemon/README.md)。使用真实 PostgreSQL、WSS、认证 IPC、独立 Worker 与离线回放验证远程链路；当前 Cursor 按安装、依赖与认证结果报告可用性，完整安装包与系统矩阵复验归 T5。
 
 - 依据：[Coordinator 与 batond 职责](TECH.md#服务职责)、[启动与命令回执](../agent-adapters/TECH.md#启动与命令回执)、Baton PRODUCT R-01～R-14、R-16、R-19、R-23。
 - 依赖：T1 的 Worker、接入契约与本地持久事实。
@@ -71,5 +71,5 @@ Status: complete
 - 交付：server Docker 镜像、四个系统 / 架构目标的 batond SEA、Cursor 与 t3code 原生依赖的附带目录及 Runtime、agent-host 子命令；切换构建发布入口并删除 Go。
 - 边界：完成打包集成、安装包缺陷修复与交付复验；不新增 Agent、补造业务模块或改变支持策略。既有交付组合的回归失败阻塞切换。
 - 验证：脱离源码、无系统 Node、无运行时依赖下载时启动安装包；缺少 SDK 附带目录会明确失败，来源、许可与静态夹具保留。
-- 验证：三类系统上运行本地故障恢复、替身进程回收、冷启动、FULL 与 Agent 离线转录回放；各 Agent 只启用已通过离线行为及本地安装包检查的组合，Go 删除后的 CI 不再调用 Go 导出器。
+- 验证：三类系统上运行本地故障恢复、替身进程回收、冷启动、FULL 与 Agent 离线转录回放；各 Agent 按安装与认证结果开放，系统与版本不设白名单，离线行为与本地安装包检查如实记录验证范围；Go 删除后的 CI 不再调用 Go 导出器。
 - 验证：工作区静态检查、测试、Web 构建和安装包检查通过，长期文档同步；Baton 验证表中的负载测试按明确阈值执行，阈值缺项须在切换前确定。
