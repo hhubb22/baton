@@ -3,10 +3,12 @@ import * as SqlClient from 'effect/sql/SqlClient'
 import type { Thread, ThreadCommand, ThreadCommandResult, ThreadAnswerInput } from '@baton/protocol'
 import { ThreadCommandResult as ResultSchema } from '@baton/protocol'
 import { captureTrace, withTraceSpan, type TraceContext } from '@baton/telemetry'
-import type { NodeSource } from './errors.ts'
-import { lockNodeSource, revalidateNodeSource } from './nodes.ts'
-import { notifyProjectThread } from './thread-project-inputs.ts'
-import { audit, canonical, decode, failure, readThread, transaction, type DB } from './threads-core.ts'
+import type { NodeSource } from '../errors.ts'
+import { lockNodeSource, revalidateNodeSource } from '../nodes.ts'
+import { notifyProjectThread } from './project-inputs.ts'
+import { audit, decode, failure, readThread, type DB } from './core.ts'
+import { canonical } from '../json.ts'
+import { transaction } from '../database.ts'
 
 export interface ClaimedCommand {
   readonly message_id: string

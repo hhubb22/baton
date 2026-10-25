@@ -1,6 +1,7 @@
 import { PgClient } from '@effect/sql-pg'
 import { Effect, Layer, ManagedRuntime, Redacted } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
+import type { SqlError } from 'effect/sql/SqlError'
 import { randomUUID } from 'node:crypto'
 import { readdir, readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
@@ -10,6 +11,12 @@ export type DatabaseEffect<A> = Effect.Effect<A, AppError, SqlClient.SqlClient>
 
 export const dbError = (error: unknown): AppError =>
   error instanceof AppError ? error : new AppError(503, 'unavailable', '暂时无法处理请求')
+
+export const transaction = <A>(effect: Effect.Effect<A, AppError | SqlError, SqlClient.SqlClient>): DatabaseEffect<A> =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    return yield* sql.withTransaction(effect)
+  }).pipe(Effect.mapError(dbError))
 
 export interface DatabaseConfig {
   readonly url: string

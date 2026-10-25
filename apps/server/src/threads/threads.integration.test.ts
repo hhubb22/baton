@@ -3,9 +3,9 @@ import { Effect, Option, Schema, Tracer } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import { expect, it } from 'vite-plus/test'
 import * as P from '@baton/protocol'
-import { seedNode, withTestDatabase, type TestDatabase } from './testing/database.ts'
+import { seedNode, withTestDatabase, type TestDatabase } from '../testing/database.ts'
 import { withTraceSpan } from '@baton/telemetry'
-import * as threads from './threads.ts'
+import * as threads from './index.ts'
 
 type Run = TestDatabase['run']
 async function fixture(run: Run) {
@@ -165,7 +165,7 @@ it('persists browser execution limits and dispatches idempotent settings with th
     )
     expect(rows[0]?.count).toBe(2)
     const recovered = await restart()
-    expect((await recovered(threads.view(f.employee, thread.id))).execution_timeout_seconds).toBe(limit)
+    expect((await recovered(threads.view({ employeeId: f.employee }, thread.id))).execution_timeout_seconds).toBe(limit)
     const initialMessages = await recovered(threads.claimCommands())
     const initialMessage = initialMessages.find((item) => item.body.action === 'message')
     if (!initialMessage) throw new Error('Missing initial message command')
@@ -218,7 +218,19 @@ it('normalizes browser retries, isolates employees, admits saved roots and keeps
       run(threads.create(f.employee, { ...f.input, message: { ...f.input.message, content: 'changed' } })),
     ).rejects.toMatchObject({ status: 409 })
     const other = await fixture(run)
-    await expect(run(threads.view(other.employee, a.thread.id))).rejects.toMatchObject({ status: 404 })
+    for (const scope of [{ employeeId: other.employee }, { employeeId: f.employee, projectId: randomUUID() }]) {
+      await expect(run(threads.view(scope, a.thread.id))).rejects.toMatchObject({ status: 404 })
+      await expect(run(threads.readTurns(scope, a.thread.id))).rejects.toMatchObject({ status: 404 })
+    }
+    expect(await run(threads.readTurns({ employeeId: f.employee }, a.thread.id))).toEqual({
+      thread_id: a.thread.id,
+      turns: [],
+      through_turn: 0,
+      next_after_turn: 0,
+    })
+    await expect(
+      run(threads.readTurns({ employeeId: f.employee }, a.thread.id, { afterTurn: 1, throughTurn: 0 })),
+    ).rejects.toMatchObject({ code: 'invalid_range', status: 422 })
     await expect(run(threads.stop(other.employee, a.thread.id))).rejects.toMatchObject({ status: 404 })
     await expect(
       run(
@@ -249,7 +261,7 @@ it('normalizes browser retries, isolates employees, admits saved roots and keeps
       status: 422,
       code: 'model_switch_unsupported',
     })
-    expect(Schema.is(P.ThreadView)(await run(threads.view(f.employee, a.thread.id)))).toBe(true)
+    expect(Schema.is(P.ThreadView)(await run(threads.view({ employeeId: f.employee }, a.thread.id)))).toBe(true)
     expect(Schema.is(P.ThreadPage)(await run(threads.list(f.employee)))).toBe(true)
     expect(Schema.is(P.ThreadTimeline)(await run(threads.timeline(f.employee, a.thread.id)))).toBe(true)
     const counts = await run(
@@ -326,7 +338,7 @@ it('binds startup generation without opening and delivers early stop before queu
         storage_generation: 'generation',
       }),
     )
-    const starting = await run(threads.view(f.employee, thread.id))
+    const starting = await run(threads.view({ employeeId: f.employee }, thread.id))
     expect(starting.status).toBe('waiting_device')
     expect(starting.opened_at).toBeUndefined()
     expect(starting.storage_generation).toBe('generation')
@@ -358,7 +370,7 @@ it('binds startup generation without opening and delivers early stop before queu
         }),
       ),
     )
-    const stopped = await run(threads.view(f.employee, thread.id))
+    const stopped = await run(threads.view({ employeeId: f.employee }, thread.id))
     expect(stopped.status).toBe('stopped')
     expect(stopped.stop_confirmed_at).toBeTruthy()
     expect(stopped.pending_messages).toEqual([])
@@ -379,13 +391,13 @@ it('retries opening after a durable pre-Worker rejection without replaying the o
         code: 'agent_unavailable',
       }),
     )
-    const stopped = await run(threads.view(f.employee, t.id))
+    const stopped = await run(threads.view({ employeeId: f.employee }, t.id))
     expect(stopped.retry_open_allowed).toBe(true)
     expect(stopped.failed_messages?.[0]?.content).toBe(f.input.message.content)
     const resumed = await restart()
     await resumed(threads.resume(f.employee, t.id))
     await resumed(threads.resume(f.employee, t.id))
-    expect((await resumed(threads.view(f.employee, t.id))).resume_pending).toBe(true)
+    expect((await resumed(threads.view({ employeeId: f.employee }, t.id))).resume_pending).toBe(true)
     const [retry] = await resumed(threads.claimCommands())
     if (!retry) throw new Error('Missing retry open command')
     expect(retry.body.action).toBe('open')
@@ -409,7 +421,7 @@ it('retries opening after a durable pre-Worker rejection without replaying the o
         }),
       ),
     )
-    const opened = await resumed(threads.view(f.employee, t.id))
+    const opened = await resumed(threads.view({ employeeId: f.employee }, t.id))
     expect(opened.status).toBe('idle')
     expect(opened.resume_pending).toBe(false)
     expect(opened.failed_messages?.[0]?.content).toBe(f.input.message.content)
@@ -437,7 +449,7 @@ it.each(['worker-accepted', 'identity-conflict', 'message-dispatched'])(
       )
       if (scenario === 'message-dispatched')
         await run(query("UPDATE thread_outbox SET attempts=1 WHERE thread_id=$1 AND action='message'", t.id))
-      expect((await run(threads.view(f.employee, t.id))).retry_open_allowed).toBe(false)
+      expect((await run(threads.view({ employeeId: f.employee }, t.id))).retry_open_allowed).toBe(false)
       await expect(run(threads.resume(f.employee, t.id))).rejects.toMatchObject({ code: 'thread_not_opened' })
       expect(await run(threads.claimCommands())).toEqual([])
     }),
@@ -468,12 +480,12 @@ it('accepts completion before ACK, rejects conflicting source/generation and kee
       }),
     )
     await run(threads.resume(f.employee, t.id))
-    expect((await run(threads.view(f.employee, t.id))).resume_pending).toBe(true)
+    expect((await run(threads.view({ employeeId: f.employee }, t.id))).resume_pending).toBe(true)
     expect(
       (await run(query<{ n: string }>("SELECT count(*)::text AS n FROM thread_outbox WHERE action='resume'")))[0]!.n,
     ).toBe('1')
     const resumed = await restart()
-    expect((await resumed(threads.view(f.employee, t.id))).resume_pending).toBe(true)
+    expect((await resumed(threads.view({ employeeId: f.employee }, t.id))).resume_pending).toBe(true)
     await resumed(threads.processReport(f.source, report(t.id, 4, 'thread.resumed')))
     await resumed(
       threads.processReport(
@@ -485,7 +497,7 @@ it('accepts completion before ACK, rejects conflicting source/generation and kee
         }),
       ),
     )
-    expect((await resumed(threads.view(f.employee, t.id))).resume_pending).toBe(false)
+    expect((await resumed(threads.view({ employeeId: f.employee }, t.id))).resume_pending).toBe(false)
     // 独立命令以完成报告先到，再补接收 ACK。
     await resumed(threads.stop(f.employee, t.id))
     const [stop] = await resumed(threads.claimCommands())
@@ -566,7 +578,7 @@ it('accepts opened and completion before startup ACK and rejects late generation
     )
     expect(rows[0]!.completion).toEqual(completion)
     expect(rows[0]!.acked_at).toBeTruthy()
-    expect((await run(threads.view(f.employee, thread.id))).native_session_id).toBe('native')
+    expect((await run(threads.view({ employeeId: f.employee }, thread.id))).native_session_id).toBe('native')
   }))
 
 it('paginates complete ascending timeline pages and binds cursors to the employee and Thread', () =>
@@ -647,12 +659,12 @@ it('preserves the first-message title and delivered messages in the existing Web
         report(t.id, 10, 'turn.ended', { worker_turn_seq: 2, reason: 'completed', queue_empty: true }),
       ),
     )
-    const webModule = new URL('../../../web/src/data/http/threads.ts', import.meta.url).href
+    const webModule = new URL('../../../../web/src/data/http/threads.ts', import.meta.url).href
     const { createThreadAPI } = await import(webModule)
     const api = createThreadAPI({
       request: async (path: string) => {
         const url = new URL(path, 'https://baton.test')
-        if (url.pathname === `/threads/${t.id}`) return run(threads.view(f.employee, t.id))
+        if (url.pathname === `/threads/${t.id}`) return run(threads.view({ employeeId: f.employee }, t.id))
         if (url.pathname === `/threads/${t.id}/timeline`) {
           const cursor = url.searchParams.get('cursor')
           return run(threads.timeline(f.employee, t.id, { limit: '2', ...(cursor ? { cursor } : {}) }))
@@ -696,7 +708,7 @@ it('commits ordered turns and replies once, rolls back invalid reports, and requ
     await expect(run(threads.processReport(f.source, { ...reply, worker_turn_seq: 99 }))).rejects.toMatchObject({
       status: 409,
     })
-    expect((await run(threads.view(f.employee, t.id))).last_worker_seq).toBe(4)
+    expect((await run(threads.view({ employeeId: f.employee }, t.id))).last_worker_seq).toBe(4)
     const ack = await run(threads.processReport(f.source, reply))
     expect(await run(threads.processReport(f.source, reply))).toEqual(ack)
     await expect(run(threads.processReport(f.source, { ...reply, content: 'conflict' }))).rejects.toMatchObject({
@@ -715,7 +727,7 @@ it('commits ordered turns and replies once, rolls back invalid reports, and requ
     )
     expect(effects[0]!.n).toBe('1')
     await run(threads.processReport(f.source, report(t.id, 7, 'thread.stopped', { reason: 'cleanup complete' })))
-    expect((await run(threads.view(f.employee, t.id))).status).toBe('archived')
+    expect((await run(threads.view({ employeeId: f.employee }, t.id))).status).toBe('archived')
   }))
 
 it('classifies missing history by durable dispatch facts and rejects replaced connections', () =>
@@ -728,7 +740,7 @@ it('classifies missing history by durable dispatch facts and rejects replaced co
     )
     await run(threads.processReport(f.source, report(t.id, 3, 'thread.stopped', { reason: 'exited' })))
     await run(threads.resume(f.employee, t.id))
-    expect((await run(threads.view(f.employee, t.id))).resume_pending).toBe(true)
+    expect((await run(threads.view({ employeeId: f.employee }, t.id))).resume_pending).toBe(true)
     await run(threads.stop(f.employee, t.id))
     await run(
       threads.processReport(
@@ -736,7 +748,7 @@ it('classifies missing history by durable dispatch facts and rejects replaced co
         report(t.id, 4, 'thread.stopped', { reason: 'history missing', history_unavailable: true }),
       ),
     )
-    const lost = await run(threads.view(f.employee, t.id))
+    const lost = await run(threads.view({ employeeId: f.employee }, t.id))
     expect(lost.resume_pending).toBe(false)
     expect(lost.status).toBe('unknown')
     expect(lost.stop_requested_at).toBeTruthy()
@@ -757,7 +769,7 @@ it('classifies missing history by durable dispatch facts and rejects replaced co
     )
     expect(outcomes.every((o) => o.outcome === (o.attempts === 0 ? 'cancelled' : 'unknown'))).toBe(true)
     const resumed = await restart()
-    const restored = await resumed(threads.view(f.employee, t.id))
+    const restored = await resumed(threads.view({ employeeId: f.employee }, t.id))
     expect(restored.pending_messages?.map((m) => m.client_message_id)).toEqual([f.input.message.client_message_id])
     expect(restored.failed_messages?.map((m) => m.client_message_id)).toContain(unsent.client_message_id)
     expect(await resumed(threads.claimCommands())).toEqual([])
@@ -766,7 +778,7 @@ it('classifies missing history by durable dispatch facts and rejects replaced co
     await expect(run(threads.processReport(f.source, report(t.id, 5, 'thread.stopped')))).rejects.toMatchObject({
       status: 401,
     })
-    expect((await run(threads.view(f.employee, t.id))).last_worker_seq).toBe(4)
+    expect((await run(threads.view({ employeeId: f.employee }, t.id))).last_worker_seq).toBe(4)
   }))
 
 it.each([true, false])('archives unknown history only after stop confirmation (archive first: %s)', (archiveFirst) =>
@@ -786,12 +798,12 @@ it.each([true, false])('archives unknown history only after stop confirmation (a
     if (archiveFirst) expect((await run(threads.archive(f.employee, t.id))).status).toBe('unknown')
     else await run(threads.stop(f.employee, t.id))
     await run(threads.processReport(f.source, report(t.id, 4, 'thread.unknown', { history_unavailable: true })))
-    const uncertain = await run(threads.view(f.employee, t.id))
+    const uncertain = await run(threads.view({ employeeId: f.employee }, t.id))
     expect(uncertain.status).toBe('unknown')
     expect(uncertain.stop_confirmed_at).toBeFalsy()
     await run(threads.processReport(f.source, report(t.id, 5, 'thread.stopped', { reason: 'Process tree reclaimed' })))
     if (!archiveFirst) await run(threads.archive(f.employee, t.id))
-    const archived = await run(threads.view(f.employee, t.id))
+    const archived = await run(threads.view({ employeeId: f.employee }, t.id))
     expect(archived.status).toBe('archived')
     expect(archived.stop_confirmed_at).toBeTruthy()
     expect(archived.pending_messages?.[0]).toMatchObject({ status: 'unknown', content: f.input.message.content })
@@ -819,16 +831,16 @@ it.each(['resume', 'message'])('expires an earlier stop confirmation before disp
         }),
       ),
     )
-    expect((await run(threads.view(f.employee, t.id))).stop_confirmed_at).toBeTruthy()
+    expect((await run(threads.view({ employeeId: f.employee }, t.id))).stop_confirmed_at).toBeTruthy()
     if (next === 'resume') await run(threads.resume(f.employee, t.id))
     else await run(threads.addMessage(f.employee, t.id, { client_message_id: randomUUID(), content: 'new input' }))
     const dispatched = await run(threads.claimCommands())
     expect(dispatched.map((c) => c.body.action)).toEqual([next])
-    expect((await run(threads.view(f.employee, t.id))).stop_confirmed_at).toBeUndefined()
+    expect((await run(threads.view({ employeeId: f.employee }, t.id))).stop_confirmed_at).toBeUndefined()
     await run(threads.processReport(f.source, report(t.id, 6, 'thread.unknown', { history_unavailable: true })))
     expect((await run(threads.archive(f.employee, t.id))).status).toBe('unknown')
     await run(threads.processReport(f.source, report(t.id, 7, 'thread.stopped')))
-    expect((await run(threads.view(f.employee, t.id))).status).toBe('archived')
+    expect((await run(threads.view({ employeeId: f.employee }, t.id))).status).toBe('archived')
   }),
 )
 
@@ -949,7 +961,7 @@ it('rechecks credential expiry after waiting for the Thread lock and commits no 
       await release()
     }
     expect((await saving).error).toMatchObject({ status: 401 })
-    const view = await run(threads.view(f.employee, t.id))
+    const view = await run(threads.view({ employeeId: f.employee }, t.id))
     expect(view.status).toBe('idle')
     expect(view.last_worker_seq).toBe(2)
     expect(
@@ -971,7 +983,7 @@ it('rejects revoked or expired source before committing business reports', () =>
     await expect(run(threads.processReport(f.source, report(t.id, 3, 'thread.stopped')))).rejects.toMatchObject({
       status: 401,
     })
-    expect((await run(threads.view(f.employee, t.id))).last_worker_seq).toBe(2)
+    expect((await run(threads.view({ employeeId: f.employee }, t.id))).last_worker_seq).toBe(2)
     await run(
       query(
         "UPDATE node_credentials SET expires_at=clock_timestamp()+interval '1 day',revoked_at=clock_timestamp() WHERE id=$1",

@@ -5,7 +5,7 @@ import { expect, it } from 'vite-plus/test'
 import { ProjectEvent, type ProjectRuntimeRequest, type ThreadReport } from '@baton/protocol'
 import { projectToolFixture, callProjectTool, waitForProjectTool } from '../testing/project-tools.ts'
 import { withTestDatabase } from '../testing/database.ts'
-import * as threads from '../threads.ts'
+import * as threads from '../threads/index.ts'
 import { runtimeRequest } from './project-runtime.ts'
 
 it('notifies a never-dispatched shell withdrawal once when history is unavailable', () =>
@@ -42,7 +42,7 @@ it('notifies a never-dispatched shell withdrawal once when history is unavailabl
     }
     await db.run(threads.processReport(source, lost))
     await db.run(threads.processReport(source, lost))
-    const state = await db.run(threads.view(context.employeeId, id))
+    const state = await db.run(threads.view({ employeeId: context.employeeId }, id))
     expect(state.pending_messages).toEqual([])
     expect(state.failed_messages?.[0]).toMatchObject({
       status: 'withdrawn',
@@ -150,7 +150,7 @@ it('notifies an unknown shell result without a Turn once after its tool wait has
       ])
       expect((await inputs())[0]!.payload).not.toHaveProperty('worker_turn_seq')
       expect((await inputs())[0]!.payload).not.toHaveProperty('command_result')
-      expect(await db.run(threads.view(c.employeeId, id))).toMatchObject({
+      expect(await db.run(threads.view({ employeeId: c.employeeId }, id))).toMatchObject({
         status: 'unknown',
         current_turn: null,
         pending_messages: [{ status: 'unknown' }],
@@ -301,7 +301,7 @@ it.each(['unknown', 'still_running'] as const)(
         { delivered_seq: status === 'unknown' ? 3 : null, wake_required: status !== 'unknown' },
       ])
       expect(await rpc('claim_inputs', { last_seq: 3 })).toMatchObject({ input_count: status === 'unknown' ? 0 : 1 })
-      expect((await db.run(threads.view(c.employeeId, id))).current_turn).toBeNull()
+      expect((await db.run(threads.view({ employeeId: c.employeeId }, id))).current_turn).toBeNull()
     }),
 )
 
@@ -335,7 +335,7 @@ it('keeps Project agent audit identity through create, messages, stop and deferr
     for (const client_message_id of [`pa:${c.conversationId}:create:0`, `pa:${c.conversationId}:send`, 'employee'])
       await db.run(threads.processReport(source, report('message.withdrawn', { client_message_id })))
     await db.run(threads.processReport(source, report('thread.stopped')))
-    expect((await db.run(threads.view(c.employeeId, id))).status).toBe('archived')
+    expect((await db.run(threads.view({ employeeId: c.employeeId }, id))).status).toBe('archived')
     const events = await db.run(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient

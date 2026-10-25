@@ -11,7 +11,7 @@ import { Schema } from 'effect'
 import { traceFromHeaders, withTraceSpan } from '@baton/telemetry'
 import { UUID } from '@baton/protocol'
 import * as Nodes from './nodes.ts'
-import * as Threads from './threads.ts'
+import * as Threads from './threads/index.ts'
 import * as Projects from './project/projects.ts'
 import { AppError } from './errors.ts'
 import type { HTTPOptions } from './http/options.ts'
@@ -99,7 +99,7 @@ const missingRoute = Effect.gen(function* () {
       const threadId = yield* Schema.decodeUnknownEffect(UUID)(segments[4]).pipe(
         Effect.mapError(() => new AppError(400, 'invalid_request', '请求格式无效')),
       )
-      yield* Threads.view(session.employee.id, threadId)
+      yield* Threads.view({ employeeId: session.employee.id }, threadId)
     }
     if (
       segments[3] === 'nodes' &&

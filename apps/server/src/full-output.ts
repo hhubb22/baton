@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { Effect, Schema } from 'effect'
 import { SessionResult, type ThreadOutputQuery } from '@baton/protocol'
-import * as Threads from './threads.ts'
+import * as Threads from './threads/index.ts'
 import type { Gateway } from './gateway.ts'
 import { AppError } from './errors.ts'
 
@@ -11,7 +11,7 @@ export const readThreadOutput = Effect.fn('Threads.readOutput')(function* (
   threadId: string,
   query: ThreadOutputQuery,
 ) {
-  const thread = yield* Threads.view(employeeId, threadId)
+  const thread = yield* Threads.view({ employeeId: employeeId }, threadId)
   const operationId = randomUUID()
   const failure = (code: string): SessionResult => ({
     type: 'session.result',

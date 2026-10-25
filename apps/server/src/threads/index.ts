@@ -1,28 +1,31 @@
 import { Effect, Schema } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import * as P from '@baton/protocol'
-import { AppError } from './errors.ts'
-import { canRetryOpen } from './threads-open-retry.ts'
-import { pendingQuestions, questionAnswers } from './threads-questions.ts'
-export { answer } from './threads-questions.ts'
+import { AppError } from '../errors.ts'
+import { canRetryOpen } from './open-retry.ts'
+import { pendingQuestions, questionAnswers } from './questions.ts'
+export { answer } from './questions.ts'
 import {
   admission,
   audit,
   decode,
-  digest,
   enqueue,
   failure,
   insertMessage,
   normalizeMessage,
   readThread,
   touch,
-  transaction,
   uuid,
   type DB,
   type ProjectThreadSource,
-} from './threads-core.ts'
-export { claimCommands, processReceipt } from './threads-outbox.ts'
-export { processReport } from './threads-reports.ts'
+  type ThreadScope,
+} from './core.ts'
+export type { ProjectThreadSource, ThreadScope } from './core.ts'
+import { digest } from '../json.ts'
+import { transaction } from '../database.ts'
+export { claimCommands, processReceipt } from './outbox.ts'
+export { processReport } from './reports.ts'
+export { readExec, waitForExec, listProjectThreads } from './project.ts'
 
 export const create = (
   employeeID: string,
@@ -249,12 +252,13 @@ export const setModel = (employeeID: string, threadID: string, input: P.SetThrea
     }),
   )
 
-export const view = (employeeID: string, threadID: string): DB<P.ThreadView> =>
+export const view = (scope: ThreadScope, threadID: string): DB<P.ThreadView> =>
   transaction(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
+      const employeeID = scope.employeeId
       // Thread 锁让状态、消息及 pending 来自同一个持久版本。
-      const t = yield* readThread(employeeID, threadID, true)
+      const t = yield* readThread(employeeID, threadID, true, scope.projectId)
       const turns = yield* sql<{
         value: P.ThreadTurn
       }>`SELECT jsonb_strip_nulls(to_jsonb(v)-'employee_id') AS value FROM thread_turns v WHERE employee_id=${employeeID} AND thread_id=${threadID} AND ended_at IS NULL`
@@ -272,6 +276,47 @@ export const view = (employeeID: string, threadID: string): DB<P.ThreadView> =>
         pending_messages: messages.map((x) => x.value).filter((x) => x.status !== 'withdrawn'),
         failed_messages: messages.map((x) => x.value).filter((x) => x.status === 'withdrawn'),
         resume_pending: pending.length > 0,
+      }
+    }),
+  )
+
+export interface ThreadHistoryPage {
+  readonly thread_id: string
+  readonly turns: ReadonlyArray<
+    P.ThreadTurn & {
+      readonly messages: ReadonlyArray<P.ThreadMessage>
+      readonly replies: ReadonlyArray<Record<string, unknown>>
+    }
+  >
+  readonly through_turn: number
+  readonly next_after_turn: number
+}
+
+export const readTurns = (
+  scope: ThreadScope,
+  threadID: string,
+  query: { afterTurn?: number; throughTurn?: number } = {},
+): DB<ThreadHistoryPage> =>
+  transaction(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const employeeID = scope.employeeId
+      yield* readThread(employeeID, threadID, false, scope.projectId)
+      const max = yield* sql<{
+        seq: number
+      }>`SELECT COALESCE(max(worker_turn_seq),0)::integer AS seq FROM thread_turns WHERE employee_id=${employeeID} AND thread_id=${threadID}`
+      const through = query.throughTurn ?? max[0]!.seq
+      const after = query.afterTurn ?? 0
+      if (after > through) return yield* Effect.fail(failure('invalid_range', 422))
+      const turns = yield* sql<{
+        value: ThreadHistoryPage['turns'][number]
+        worker_turn_seq: number
+      }>`SELECT to_jsonb(t)-'employee_id' || jsonb_build_object('messages',(SELECT COALESCE(jsonb_agg(to_jsonb(m)-'employee_id' ORDER BY m.created_at,m.id),'[]'::jsonb) FROM thread_messages m WHERE m.employee_id=${employeeID} AND m.thread_id=t.thread_id AND m.worker_turn_seq=t.worker_turn_seq),'replies',(SELECT COALESCE(jsonb_agg(to_jsonb(r)-'employee_id' ORDER BY r.worker_seq),'[]'::jsonb) FROM thread_replies r WHERE r.employee_id=${employeeID} AND r.thread_id=t.thread_id AND r.worker_turn_seq=t.worker_turn_seq)) AS value,worker_turn_seq::float8 AS worker_turn_seq FROM thread_turns t WHERE employee_id=${employeeID} AND thread_id=${threadID} AND worker_turn_seq>${after} AND worker_turn_seq<=${through} ORDER BY worker_turn_seq LIMIT 20`
+      return {
+        thread_id: threadID,
+        turns: turns.map((r) => r.value),
+        through_turn: through,
+        next_after_turn: turns.at(-1)?.worker_turn_seq ?? after,
       }
     }),
   )

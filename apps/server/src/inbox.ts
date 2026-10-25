@@ -6,7 +6,7 @@ import { fromMarkdown } from 'mdast-util-from-markdown'
 import { gfmFromMarkdown } from 'mdast-util-gfm'
 import { gfm } from 'micromark-extension-gfm'
 import { AppError } from './errors.ts'
-import { transaction } from './threads-core.ts'
+import { transaction } from './database.ts'
 import { strictDecode } from './project/project-memory.ts'
 import { insertProjectInput } from './project/project-inputs.ts'
 

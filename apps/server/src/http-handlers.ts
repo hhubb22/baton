@@ -10,7 +10,7 @@ import {
 } from '@baton/protocol/http-api'
 import * as Auth from './auth.ts'
 import * as Nodes from './nodes.ts'
-import * as Threads from './threads.ts'
+import * as Threads from './threads/index.ts'
 import type { HTTPOptions } from './http/options.ts'
 import { AppError } from './errors.ts'
 import { projectHttpHandlers } from './http-projects.ts'
@@ -33,7 +33,7 @@ export const httpHandlers = (options: HTTPOptions) => {
       const { employee } = yield* CurrentBrowserSession
       yield* operation(employee.id, threadId)
       changed(employee.id)
-      return yield* Threads.view(employee.id, threadId)
+      return yield* Threads.view({ employeeId: employee.id }, threadId)
     })
   return Layer.mergeAll(
     projectHttpHandlers(),
@@ -247,7 +247,7 @@ export const httpHandlers = (options: HTTPOptions) => {
           httpBusiness(
             Effect.gen(function* () {
               const { employee } = yield* CurrentBrowserSession
-              return yield* Threads.view(employee.id, params.threadId)
+              return yield* Threads.view({ employeeId: employee.id }, params.threadId)
             }),
           ),
         )
@@ -275,7 +275,7 @@ export const httpHandlers = (options: HTTPOptions) => {
               const { employee } = yield* CurrentBrowserSession
               yield* Threads.answer(employee.id, params.threadId, payload)
               changed(employee.id)
-              return yield* Threads.view(employee.id, params.threadId)
+              return yield* Threads.view({ employeeId: employee.id }, params.threadId)
             }),
           ),
         )
@@ -295,7 +295,7 @@ export const httpHandlers = (options: HTTPOptions) => {
             Effect.gen(function* () {
               const { employee } = yield* CurrentBrowserSession
               yield* Threads.setModel(employee.id, params.threadId, payload)
-              return yield* Threads.view(employee.id, params.threadId)
+              return yield* Threads.view({ employeeId: employee.id }, params.threadId)
             }),
           ),
         )
@@ -319,7 +319,7 @@ export const httpHandlers = (options: HTTPOptions) => {
           httpBusiness(
             Effect.gen(function* () {
               const { employee } = yield* CurrentBrowserSession
-              yield* Threads.view(employee.id, params.threadId)
+              yield* Threads.view({ employeeId: employee.id }, params.threadId)
               return { ok: false, code: 'trace_missing', steps: [] }
             }),
           ),

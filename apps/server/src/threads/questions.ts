@@ -1,7 +1,9 @@
 import { Effect } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import * as P from '@baton/protocol'
-import { audit, canonical, decode, enqueue, failure, readThread, touch, transaction, type DB } from './threads-core.ts'
+import { audit, decode, enqueue, failure, readThread, touch, type DB } from './core.ts'
+import { canonical } from '../json.ts'
+import { transaction } from '../database.ts'
 
 export type PendingQuestion = P.ThreadQuestion & { readonly worker_turn_seq: number }
 

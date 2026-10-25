@@ -6,7 +6,7 @@ import { AppError, type NodeSource } from '../errors.ts'
 import type { SqlError } from 'effect/sql/SqlError'
 import { strictDecode, readProjectMemory, writeProjectMemoryTx } from './project-memory.ts'
 import { createAgentAttention, getAttentionRequest, listProjectAttention, withdrawAttention } from '../inbox.ts'
-import * as threads from '../threads.ts'
+import * as threads from '../threads/index.ts'
 import { lockNodeSource, revalidateNodeSource } from '../nodes.ts'
 import {
   appendProjectEvent,
@@ -25,7 +25,9 @@ import {
 import { appendAssistant, claimInputs, readRuntimeEvents, savedToolCalls } from './project-events.ts'
 import { commitCompaction, projectMemoryIndex } from './project-compaction.ts'
 import { projectToolJSONPage, boundedBase64, resultBytes } from './project-tools.ts'
-import { canonical, transaction, readThread, type ProjectThreadSource } from '../threads-core.ts'
+import { canonical } from '../json.ts'
+import { transaction } from '../database.ts'
+import type { ProjectThreadSource } from '../threads/index.ts'
 import { saveProjectPreview } from './project-preview.ts'
 
 const leaseLost = () => projectError('lease_lost')
@@ -211,15 +213,12 @@ const readPendingTool = Effect.fn('readPendingProjectTool')(function* (
       }>`SELECT tool_call_id FROM conversation_events WHERE conversation_id=${binding.conversation_id} AND kind='tool_result' AND tool_call_id=ANY(${calls.map((call) => call.id)}::text[])`
       const done = new Set(results.map((row) => row.tool_call_id))
       if (done.has(id) || calls.slice(0, index).some((call) => !done.has(call.id))) return undefined
-      const [thread] = yield* sql<{
-        id: string
-        version: string
-        remaining: number
-      }>`SELECT t.id,t.version,GREATEST(0,FLOOR(EXTRACT(EPOCH FROM(t.exec_wait_until-clock_timestamp()))*1000))::float8 AS remaining
- FROM threads t WHERE t.employee_id=${source.employee_id} AND t.project_id=${binding.project_id} AND t.origin_conversation_id=${binding.conversation_id} AND t.origin_tool_call_id=${id}
- AND t.agent_type='shell' AND t.status NOT IN ('stopped','unknown','archived') AND t.exec_wait_until>clock_timestamp()
- AND NOT EXISTS(SELECT 1 FROM thread_turns v WHERE v.thread_id=t.id AND v.ended_at IS NOT NULL)`
-      if (!thread) return undefined
+      const thread = yield* threads.readExec(
+        { employeeId: source.employee_id, projectId: binding.project_id },
+        { conversationId: binding.conversation_id, toolCallId: id },
+      )
+      if (!thread || thread.ended || ['stopped', 'unknown', 'archived'].includes(thread.status) || !thread.wait_active)
+        return undefined
       yield* revalidateNodeSource(source)
       const valid =
         yield* sql`SELECT 1 FROM project_agents a JOIN agent_runs r ON r.id=a.lease_run_id WHERE r.id=${request.run_id} AND a.lease_epoch=${request.lease_epoch} AND a.lease_until>clock_timestamp()`
@@ -434,41 +433,10 @@ const source = (c: ProjectToolContext): ProjectThreadSource => ({
   conversationId: c.conversationId,
   toolCallId: c.toolCallId,
 })
-const ownedThread = Effect.fnUntraced(function* (c: ProjectToolContext, id: string, lock = false) {
-  const t = yield* readThread(c.employeeId, id, lock)
-  if (t.project_id !== c.projectId) return yield* Effect.fail(new AppError(404, 'not_found'))
-  return t
-})
-
-const shellThreadCommandResult = Effect.fnUntraced(function* (employeeId: string, threadId: string) {
-  const sql = yield* SqlClient.SqlClient
-  const rows = yield* sql<{
-    content: string
-    original_bytes: number
-    truncated: boolean
-    metadata: Record<string, unknown>
-  }>`SELECT content,original_bytes::float8 AS original_bytes,truncated,metadata FROM thread_replies WHERE employee_id=${employeeId} AND thread_id=${threadId} AND worker_turn_seq=1 ORDER BY worker_seq`
-  if (!rows.length) return undefined
-  return {
-    output: rows.map((r) => r.content).join(''),
-    total_bytes: rows.reduce((n, r) => n + r.original_bytes, 0),
-    truncated: rows.some((r) => r.truncated),
-    ...(rows.some((r) => r.metadata.encoding === 'base64') ? { encoding: 'base64' as const } : {}),
-    ...Object.fromEntries(rows.flatMap((r) => Object.entries(r.metadata).filter(([k]) => k === 'exit_code'))),
-  }
-})
 const pendingExec = Effect.fnUntraced(function* (c: ProjectToolContext) {
-  const sql = yield* SqlClient.SqlClient
-  const rows = yield* sql<{
-    id: string
-    version: number
-    status: string
-    status_reason: string
-    remaining: number
-    ended: boolean
-  }>`SELECT id,version::float8 AS version,status,status_reason,GREATEST(0,FLOOR(EXTRACT(EPOCH FROM(exec_wait_until-clock_timestamp()))*1000))::float8 AS remaining,EXISTS(SELECT 1 FROM thread_turns v WHERE v.thread_id=t.id AND v.ended_at IS NOT NULL) AS ended FROM threads t WHERE employee_id=${c.employeeId} AND project_id=${c.projectId} AND origin_conversation_id=${c.conversationId} AND origin_tool_call_id=${c.toolCallId} AND agent_type='shell'`
-  if (!rows.length) return yield* Effect.fail(new AppError(404, 'not_found'))
-  return rows[0]!
+  const thread = yield* threads.readExec(c, c)
+  if (!thread) return yield* Effect.fail(new AppError(404, 'not_found'))
+  return thread
 })
 const pendingValue = (row: { id: string; version: number; remaining: number }): ProjectToolExecution => ({
   pending: true,
@@ -556,7 +524,6 @@ const executeBusiness = Effect.fnUntraced(function* (
     }
     case 'threads.send': {
       const a = yield* strictDecode(schemas[name], args)
-      yield* ownedThread(c, a.thread_id, true)
       const m = yield* threads.addMessage(
         c.employeeId,
         a.thread_id,
@@ -572,65 +539,44 @@ const executeBusiness = Effect.fnUntraced(function* (
     }
     case 'threads.withdraw': {
       const a = yield* strictDecode(schemas[name], args)
-      yield* ownedThread(c, a.thread_id, true)
       const t = yield* threads.withdraw(c.employeeId, a.thread_id, a.message_id, source(c))
       return { value: { thread_id: t.id, message_id: a.message_id, status: t.status, read_tool: 'threads.get' } }
     }
     case 'threads.resume': {
       const a = yield* strictDecode(schemas[name], args)
-      yield* ownedThread(c, a.thread_id, true)
       const t = yield* threads.resume(c.employeeId, a.thread_id, source(c))
       return { value: { thread_id: t.id, status: t.status, read_tool: 'threads.get' } }
     }
     case 'threads.stop':
     case 'threads.archive': {
       const a = yield* strictDecode(schemas[name], args)
-      yield* ownedThread(c, a.thread_id, true)
       const t = yield* (name === 'threads.stop' ? threads.stop : threads.archive)(c.employeeId, a.thread_id, source(c))
       return { value: { thread_id: t.id, status: t.status, read_tool: 'threads.get' } }
     }
     case 'threads.list': {
       const a = yield* strictDecode(schemas[name], args)
-      const rows = yield* sql<{
-        id: string
-        value: unknown
-      }>`SELECT id,jsonb_build_object('thread_id',id,'node_id',node_id,'agent_type',agent_type,'working_directory',working_directory,'status',status,'last_activity_at',last_activity_at) AS value FROM threads WHERE employee_id=${c.employeeId} AND project_id=${c.projectId} AND (${a.after_id ?? null}::uuid IS NULL OR id>${a.after_id ?? null}) AND (${a.status ?? null}::text IS NULL OR status=${a.status ?? null}) ORDER BY id LIMIT 20`
-      return { value: yield* page({ threads: rows.map((r) => r.value), next_after_id: rows.at(-1)?.id ?? '' }, a) }
+      const result = yield* threads.listProjectThreads(c, {
+        ...(a.after_id ? { afterId: a.after_id } : {}),
+        ...(a.status ? { status: a.status } : {}),
+      })
+      return { value: yield* page(result, a) }
     }
     case 'threads.get': {
       const a = yield* strictDecode(schemas[name], args)
-      yield* ownedThread(c, a.thread_id)
-      return { value: yield* page(yield* threads.view(c.employeeId, a.thread_id), a) }
+      return { value: yield* page(yield* threads.view(c, a.thread_id), a) }
     }
     case 'threads.read': {
       const a = yield* strictDecode(schemas[name], args)
-      yield* ownedThread(c, a.thread_id)
-      const max = yield* sql<{
-        seq: number
-      }>`SELECT COALESCE(max(worker_turn_seq),0)::integer AS seq FROM thread_turns WHERE employee_id=${c.employeeId} AND thread_id=${a.thread_id}`
-      const through = a.through_turn ?? max[0]!.seq
-      if ((a.after_turn ?? 0) > through) return yield* Effect.fail(new AppError(422, 'invalid_range'))
-      const turns = yield* sql<{
-        value: unknown
-        worker_turn_seq: number
-      }>`SELECT to_jsonb(t)-'employee_id' || jsonb_build_object('messages',(SELECT COALESCE(jsonb_agg(to_jsonb(m)-'employee_id' ORDER BY m.created_at,m.id),'[]'::jsonb) FROM thread_messages m WHERE m.employee_id=${c.employeeId} AND m.thread_id=t.thread_id AND m.worker_turn_seq=t.worker_turn_seq),'replies',(SELECT COALESCE(jsonb_agg(to_jsonb(r)-'employee_id' ORDER BY r.worker_seq),'[]'::jsonb) FROM thread_replies r WHERE r.employee_id=${c.employeeId} AND r.thread_id=t.thread_id AND r.worker_turn_seq=t.worker_turn_seq)) AS value,worker_turn_seq::float8 AS worker_turn_seq FROM thread_turns t WHERE employee_id=${c.employeeId} AND thread_id=${a.thread_id} AND worker_turn_seq>${a.after_turn ?? 0} AND worker_turn_seq<=${through} ORDER BY worker_turn_seq LIMIT 20`
-      return {
-        value: yield* page(
-          {
-            thread_id: a.thread_id,
-            turns: turns.map((r) => r.value),
-            through_turn: through,
-            next_after_turn: turns.at(-1)?.worker_turn_seq ?? a.after_turn ?? 0,
-          },
-          a,
-        ),
-      }
+      const history = yield* threads.readTurns(c, a.thread_id, {
+        ...(a.after_turn !== undefined ? { afterTurn: a.after_turn } : {}),
+        ...(a.through_turn !== undefined ? { throughTurn: a.through_turn } : {}),
+      })
+      return { value: yield* page(history, a) }
     }
     case 'nodes.exec': {
       const a = yield* strictDecode(schemas[name], args)
-      const existing =
-        yield* sql`SELECT id FROM threads WHERE employee_id=${c.employeeId} AND project_id=${c.projectId} AND origin_conversation_id=${c.conversationId} AND origin_tool_call_id=${c.toolCallId} AND agent_type='shell'`
-      if (!existing.length)
+      const existing = yield* threads.readExec(c, c)
+      if (!existing)
         yield* threads.create(
           c.employeeId,
           {
@@ -724,13 +670,10 @@ const executeProjectTool = (context: ProjectToolContext, name: string, args: unk
 const waitProjectTool = (c: ProjectToolContext, finishWait = false) =>
   toolTransaction(
     Effect.gen(function* () {
-      let r = yield* pendingExec(c)
-      if (!r.ended && !['stopped', 'unknown', 'archived'].includes(r.status) && r.remaining > 0 && !finishWait)
-        return pendingValue(r)
-      yield* ownedThread(c, r.id, true)
-      r = yield* pendingExec(c)
-      const terminal = r.ended || ['stopped', 'unknown', 'archived'].includes(r.status)
-      const command = terminal ? yield* shellThreadCommandResult(c.employeeId, r.id) : undefined
+      const result = yield* threads.waitForExec(c, c, finishWait)
+      const r = result.thread
+      if (result.pending) return pendingValue(r)
+      const { terminal, command } = result
       const value = {
         thread_id: r.id,
         status: r.status,
@@ -766,7 +709,6 @@ const consumeProjectExecInputs = (c: ProjectToolContext, threadId: string, resul
   transaction(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      yield* ownedThread(c, threadId)
       yield* sql`UPDATE project_agent_input_queue SET delivered_seq=${resultSeq},wake_required=false WHERE employee_id=${c.employeeId} AND agent_id=${c.agentId} AND delivered_seq IS NULL AND payload->>'thread_id'=${threadId} AND ((source_type='turn_ended' AND source_key=${`thread:${threadId}:turn:1`}) OR (source_type='thread_reply' AND payload->>'worker_turn_seq'='1') OR (source_type='thread_message_failed' AND source_key=${`thread:${threadId}:message:unknown`}))`
     }),
   )

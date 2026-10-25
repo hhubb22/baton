@@ -9,7 +9,7 @@ import { NodeHttpServer } from '@effect/platform-node'
 import * as P from '@baton/protocol'
 import * as Auth from './auth.ts'
 import * as Nodes from './nodes.ts'
-import * as Threads from './threads.ts'
+import * as Threads from './threads/index.ts'
 import * as Projects from './project/projects.ts'
 import { AppError, type NodeSource } from './errors.ts'
 import { Gateway, type GatewayOptions } from './gateway.ts'
@@ -75,7 +75,7 @@ export const startServer = (
       return session.employee.id
     }
     const output = async (employeeId: string, threadId: string, cursor?: string): Promise<P.SessionResult> => {
-      const thread = await run('read', Threads.view(employeeId, threadId))
+      const thread = await run('read', Threads.view({ employeeId: employeeId }, threadId))
       const operationId = randomUUID()
       if (!thread.node_online || !thread.node_synced)
         return {
@@ -175,7 +175,7 @@ export const startServer = (
               },
               browser: authorizeBrowser,
               thread: async (employeeId, threadId) => {
-                await run('read', Threads.view(employeeId, threadId))
+                await run('read', Threads.view({ employeeId: employeeId }, threadId))
               },
               output,
             },

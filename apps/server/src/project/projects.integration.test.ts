@@ -6,7 +6,7 @@ import * as P from '@baton/protocol'
 import { seedNode, withTestDatabase, type TestDatabase } from '../testing/database.ts'
 import * as projects from './projects.ts'
 import { insertProjectInput } from './project-inputs.ts'
-import * as threads from '../threads.ts'
+import * as threads from '../threads/index.ts'
 
 type Run = TestDatabase['run']
 const projectRuntimeReport: P.RuntimeReport = {

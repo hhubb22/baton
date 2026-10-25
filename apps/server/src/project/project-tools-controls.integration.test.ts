@@ -4,7 +4,7 @@ import * as SqlClient from 'effect/sql/SqlClient'
 import { expect, it } from 'vite-plus/test'
 import { projectToolFixture, callProjectTool } from '../testing/project-tools.ts'
 import { withTestDatabase } from '../testing/database.ts'
-import * as threads from '../threads.ts'
+import * as threads from '../threads/index.ts'
 
 const threadResult = Schema.decodeUnknownSync(Schema.Struct({ thread_id: Schema.String }))
 const auditEvents = (threadId: string, kind: string) =>
@@ -28,7 +28,7 @@ it('withdraws only unsent messages in this Project and deduplicates concurrent r
       }),
     )
     const id = threadResult(created.value).thread_id
-    const message = (await db.run(threads.view(c.employeeId, id))).pending_messages?.at(0)
+    const message = (await db.run(threads.view({ employeeId: c.employeeId }, id))).pending_messages?.at(0)
     if (!message) throw new Error('Expected pending message')
     const args = { thread_id: id, message_id: message.id }
     const withdraw = (toolCallId: string) => db.run(callProjectTool({ ...c, toolCallId }, 'threads.withdraw', args))
@@ -147,7 +147,7 @@ it('resumes through the existing execution checks without duplicating commands o
       expect(result).toMatchObject({ value: { thread_id: id, status: 'stopped', read_tool: 'threads.get' } })
     expect(await outbox()).toEqual([...before, { action: 'resume' }])
     expect(await db.run(auditEvents(id, 'resume.requested'))).toEqual([{ actor: 'project_agent', actor_id: c.agentId }])
-    expect((await db.run(threads.view(c.employeeId, id))).resume_pending).toBe(true)
+    expect((await db.run(threads.view({ employeeId: c.employeeId }, id))).resume_pending).toBe(true)
     await db.run(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
@@ -180,7 +180,7 @@ it.each(['employee', 'project_agent'])('records %s when resume retries opening a
         code: 'agent_unavailable',
       }),
     )
-    expect((await db.run(threads.view(c.employeeId, id))).retry_open_allowed).toBe(true)
+    expect((await db.run(threads.view({ employeeId: c.employeeId }, id))).retry_open_allowed).toBe(true)
     for (let attempt = 0; attempt < 2; attempt++) {
       if (actor === 'project_agent')
         expect(

@@ -6,7 +6,7 @@ import type { ThreadReport } from '@baton/protocol'
 import { projectToolFixture, callProjectTool, waitForProjectTool } from '../testing/project-tools.ts'
 import { seedNode, withTestDatabase } from '../testing/database.ts'
 import { runtimeRequest } from './project-runtime.ts'
-import * as threads from '../threads.ts'
+import * as threads from '../threads/index.ts'
 
 const unpack = (result: { value: unknown }) => JSON.parse((result.value as { text: string }).text)
 
@@ -411,7 +411,7 @@ it('reads the same center thread records from the web timeline and history tools
         yield* sql`UPDATE node_presence SET online=false, synced=false WHERE node_id=${nodeId}`
       }),
     )
-    expect((await db.run(threads.view(c.employeeId, id))).node_online).toBe(false)
+    expect((await db.run(threads.view({ employeeId: c.employeeId }, id))).node_online).toBe(false)
 
     const paths: string[] = []
     const { createThreadAPI } = await import(new URL('../../../../web/src/data/http/threads.ts', import.meta.url).href)
@@ -419,7 +419,7 @@ it('reads the same center thread records from the web timeline and history tools
       request: async (path: string) => {
         paths.push(path)
         const url = new URL(path, 'https://baton.test')
-        if (url.pathname === `/threads/${id}`) return db.run(threads.view(c.employeeId, id))
+        if (url.pathname === `/threads/${id}`) return db.run(threads.view({ employeeId: c.employeeId }, id))
         if (url.pathname === `/threads/${id}/timeline`) {
           const cursor = url.searchParams.get('cursor') ?? undefined
           return db.run(threads.timeline(c.employeeId, id, { limit: '2', ...(cursor ? { cursor } : {}) }))
@@ -487,7 +487,7 @@ it('reads the same center thread records from the web timeline and history tools
 
     const other = await projectToolFixture(db)
     await expect(db.run(threads.timeline(other.context.employeeId, id))).rejects.toMatchObject({ code: 'not_found' })
-    await expect(db.run(threads.view(other.context.employeeId, id))).rejects.toMatchObject({
+    await expect(db.run(threads.view({ employeeId: other.context.employeeId }, id))).rejects.toMatchObject({
       code: 'not_found',
     })
     expect(await db.run(callProjectTool(other.context, 'threads.read', { thread_id: id }))).toMatchObject({
@@ -502,7 +502,7 @@ it('reads the same center thread records from the web timeline and history tools
     const foreign = createThreadAPI({
       request: async (path: string) => {
         const url = new URL(path, 'https://baton.test')
-        if (url.pathname === `/threads/${id}`) return db.run(threads.view(other.context.employeeId, id))
+        if (url.pathname === `/threads/${id}`) return db.run(threads.view({ employeeId: other.context.employeeId }, id))
         if (url.pathname === `/threads/${id}/timeline`)
           return db.run(threads.timeline(other.context.employeeId, id, { limit: '2' }))
         throw new Error(path)

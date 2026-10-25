@@ -4,7 +4,7 @@ import * as SqlClient from 'effect/sql/SqlClient'
 import { expect, it } from 'vite-plus/test'
 import type { RuntimeReport, ThreadReport, FullOutputReference } from '@baton/protocol'
 import { withTestDatabase, seedNode } from './testing/database.ts'
-import * as Threads from './threads.ts'
+import * as Threads from './threads/index.ts'
 import { readThreadOutput } from './full-output.ts'
 import type { Gateway } from './gateway.ts'
 

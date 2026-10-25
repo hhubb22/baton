@@ -16,7 +16,7 @@ import {
 import { UUID } from '@baton/protocol'
 import * as Auth from './auth.ts'
 import * as Nodes from './nodes.ts'
-import * as Threads from './threads.ts'
+import * as Threads from './threads/index.ts'
 import * as Projects from './project/projects.ts'
 import * as Inbox from './inbox.ts'
 import { AppError } from './errors.ts'
@@ -129,7 +129,7 @@ export const httpSecurity = () =>
                       Effect.mapError(() => new AppError(400, 'invalid_request', '请求格式无效')),
                     )
                     if ('nodeId' in params) yield* Nodes.getNode(session.employee.id, id)
-                    else yield* Threads.view(session.employee.id, id)
+                    else yield* Threads.view({ employeeId: session.employee.id }, id)
                   }
                   if (endpoint.params && 'projectId' in params) {
                     const id = yield* Schema.decodeUnknownEffect(UUID)(params.projectId).pipe(

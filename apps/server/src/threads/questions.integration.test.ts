@@ -3,8 +3,8 @@ import { Effect } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import { expect, it } from 'vite-plus/test'
 import type * as P from '@baton/protocol'
-import { seedNode, withTestDatabase, type TestDatabase } from './testing/database.ts'
-import * as threads from './threads.ts'
+import { seedNode, withTestDatabase, type TestDatabase } from '../testing/database.ts'
+import * as threads from './index.ts'
 
 type Run = TestDatabase['run']
 const query = (statement: string, ...parameters: ReadonlyArray<string | number | boolean>) =>
@@ -111,7 +111,7 @@ it('persists questions and offline answers across restart, enforces ownership an
     expect(await run(threads.processReport(f.source, pending))).toMatchObject({ ok: true })
     expect(await run(threads.processReport(f.source, pending))).toMatchObject({ ok: true })
     const recovered = await restart()
-    expect((await recovered(threads.view(f.employeeId, f.thread.id))).pending_questions).toEqual([
+    expect((await recovered(threads.view({ employeeId: f.employeeId }, f.thread.id))).pending_questions).toEqual([
       { ...f.question, worker_turn_seq: 1 },
     ])
     const answer: P.ThreadAnswerInput = {
@@ -134,7 +134,7 @@ it('persists questions and offline answers across restart, enforces ownership an
     ).rejects.toMatchObject({ code: 'answer_conflict' })
     expect(await recovered(threads.claimCommands())).toEqual([])
     const afterAnswer = await restart()
-    expect((await afterAnswer(threads.view(f.employeeId, f.thread.id))).question_answers).toEqual([
+    expect((await afterAnswer(threads.view({ employeeId: f.employeeId }, f.thread.id))).question_answers).toEqual([
       { request_id: answer.request_id, decision: 'accept', outcome: 'pending' },
     ])
     await afterAnswer(query('UPDATE node_presence SET online=true WHERE node_id=$1', f.nodeId))
@@ -161,7 +161,7 @@ it('persists questions and offline answers across restart, enforces ownership an
         }),
       ),
     )
-    const view = await afterAnswer(threads.view(f.employeeId, f.thread.id))
+    const view = await afterAnswer(threads.view({ employeeId: f.employeeId }, f.thread.id))
     expect(view.pending_questions).toEqual([])
     expect(view.question_answers).toEqual([
       { request_id: answer.request_id, decision: 'accept', outcome: 'unknown', reason: 'answer_delivery_uncertain' },
@@ -249,8 +249,10 @@ it('accepts MCP confirmation and cancellation, closes resolved questions, and re
     const commands = await run(threads.claimCommands())
     expect(commands.some((command) => command.body.action === 'answer')).toBe(false)
     expect(commands.some((command) => command.body.action === 'stop')).toBe(true)
-    expect((await run(threads.view(f.employeeId, f.thread.id))).pending_questions).toEqual([])
-    expect((await run(threads.view(f.employeeId, f.thread.id))).question_answers[0]?.outcome).toBe('cancelled')
+    expect((await run(threads.view({ employeeId: f.employeeId }, f.thread.id))).pending_questions).toEqual([])
+    expect((await run(threads.view({ employeeId: f.employeeId }, f.thread.id))).question_answers[0]?.outcome).toBe(
+      'cancelled',
+    )
   }))
 
 it.each(['completion', 'rejection'])(
@@ -307,7 +309,7 @@ it.each(['completion', 'rejection'])(
           }),
         )
       }
-      const view = await run(threads.view(f.employeeId, f.thread.id))
+      const view = await run(threads.view({ employeeId: f.employeeId }, f.thread.id))
       expect(view.question_answers[0]?.outcome).toBe(outcome === 'completion' ? 'unknown' : 'failed')
       expect(await run(threads.claimCommands())).toEqual([])
       expect(await run(query('SELECT content,status FROM thread_messages WHERE thread_id=$1', f.thread.id))).toEqual([
@@ -336,5 +338,5 @@ it('requires an own answer property when question IDs match Object prototype key
         answers: { toString: 'saved name' },
       }),
     )
-    expect((await run(threads.view(f.employeeId, f.thread.id))).pending_questions).toEqual([])
+    expect((await run(threads.view({ employeeId: f.employeeId }, f.thread.id))).pending_questions).toEqual([])
   }))

@@ -23,7 +23,7 @@ import { Effect, Schema } from 'effect'
 import type { Gateway } from './gateway.ts'
 import { AppError } from './errors.ts'
 import * as Nodes from './nodes.ts'
-import { directoryAllowed } from './threads-core.ts'
+import { directoryAllowed } from './directories.ts'
 import { hasControlCharacters } from './auth.ts'
 
 export type DeviceGateway = Pick<Gateway, 'request'>

@@ -1,48 +1,28 @@
-import { createHash, randomUUID } from 'node:crypto'
-import path from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { Effect, Schema } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
-import type { SqlError } from 'effect/sql/SqlError'
 import type { RuntimeReport, Thread, ThreadCommand, ThreadMessage, ThreadMessageInput } from '@baton/protocol'
 import { captureTrace, withTraceSpan } from '@baton/telemetry'
-import { AppError } from './errors.ts'
+import { AppError } from '../errors.ts'
 
-import type { DatabaseEffect } from './database.ts'
-import { dbError } from './database.ts'
+import type { DatabaseEffect } from '../database.ts'
+import { directoryAllowed } from '../directories.ts'
 
 export type DB<A> = DatabaseEffect<A>
 export const failure = (code = 'thread_conflict', status = 409) => new AppError(status, code)
-export const transaction = <A>(effect: Effect.Effect<A, AppError | SqlError, SqlClient.SqlClient>): DB<A> =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    return yield* sql.withTransaction(effect)
-  }).pipe(Effect.mapError(dbError))
 export const decode = <S extends Schema.ConstraintDecoder<unknown>>(schema: S, value: unknown) =>
   Effect.try({
     try: () => Schema.decodeUnknownSync(schema)(value),
     catch: () => failure('invalid_request', 422),
   })
-export function canonical(value: unknown): string {
-  if (Array.isArray(value)) return '[' + value.map(canonical).join(',') + ']'
-  if (value !== null && typeof value === 'object')
-    return (
-      '{' +
-      Object.entries(value)
-        .filter(([, v]) => v !== undefined)
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([k, v]) => JSON.stringify(k) + ':' + canonical(v))
-        .join(',') +
-      '}'
-    )
-  return JSON.stringify(value) ?? 'null'
-}
-export const digest = (value: unknown) => createHash('sha256').update(canonical(value)).digest()
 export const uuid = randomUUID
-export const readThread = (employee: string, id: string, lock = false) =>
+export type ThreadScope = { employeeId: string; projectId?: string }
+export const readThread = (employee: string, id: string, lock = false, projectId?: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     if (lock) {
-      const rows = yield* sql`SELECT id FROM threads WHERE employee_id=${employee} AND id=${id} FOR UPDATE`
+      const rows =
+        yield* sql`SELECT id FROM threads WHERE employee_id=${employee} AND id=${id} AND (${projectId ?? null}::uuid IS NULL OR project_id=${projectId ?? null}) FOR UPDATE`
       if (!rows.length) return yield* Effect.fail(failure('not_found', 404))
     }
     const rows = yield* sql<{
@@ -50,7 +30,7 @@ export const readThread = (employee: string, id: string, lock = false) =>
     }>`SELECT jsonb_strip_nulls(to_jsonb(t)-'request_hash'-'exec_wait_until') || jsonb_build_object(
     'node_online',COALESCE(p.online,false),'node_synced',COALESCE(p.synced,false),'node_last_contact_at',p.last_contact_at) AS value
     FROM threads t LEFT JOIN node_presence p ON p.node_id=t.node_id AND p.employee_id=t.employee_id
-    WHERE t.employee_id=${employee} AND t.id=${id}`
+    WHERE t.employee_id=${employee} AND t.id=${id} AND (${projectId ?? null}::uuid IS NULL OR t.project_id=${projectId ?? null})`
     if (!rows.length) return yield* Effect.fail(failure('not_found', 404))
     return rows[0]!.value
   })
@@ -78,22 +58,6 @@ export const enqueue = (t: Thread, action: ThreadCommand['action'], payload: unk
       attributes: { 'baton.thread.id': t.id, 'baton.command.action': action },
     },
   )
-export function directoryAllowed(system: string, directory: string, roots: RuntimeReport['roots']) {
-  const windows = system === 'windows'
-  const parser = windows ? path.win32 : path.posix
-  if (!parser.isAbsolute(directory)) return false
-  const normalize = (value: string) => (windows ? parser.resolve(value).toLowerCase() : parser.resolve(value))
-  const target = normalize(directory)
-  return (
-    roots?.some((root) => {
-      const relative = parser.relative(normalize(root.path), target)
-      return (
-        relative === '' ||
-        (!relative.startsWith('..' + parser.sep) && relative !== '..' && !parser.isAbsolute(relative))
-      )
-    }) ?? false
-  )
-}
 export const admission = (
   employee: string,
   node: string,

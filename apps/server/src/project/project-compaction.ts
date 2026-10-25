@@ -10,7 +10,7 @@ import {
   type ProjectBinding,
 } from './project-store.ts'
 import { previousClientEvent, savedToolCalls } from './project-events.ts'
-import { canonical } from '../threads-core.ts'
+import { canonical } from '../json.ts'
 
 const Prompt = Schema.Struct({ version: Schema.String, title: Schema.String, goal: Schema.String })
 const Compaction = Schema.Struct({
