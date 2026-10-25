@@ -1337,4 +1337,3 @@ export const WriteMemoryInput = Schema.Struct({
   expected_revision: NonNegativeInteger,
 })
 export type WriteMemoryInput = typeof WriteMemoryInput.Type
-

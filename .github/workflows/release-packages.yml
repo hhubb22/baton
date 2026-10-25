@@ -101,10 +101,10 @@ jobs:
       - name: Check installed package
         run: node tools/check-package.mjs bin/package > bin/releases/package-check.json
       - name: Measure Worker startup and FULL ledger
-        run: node tools/ts-migration/worker-startup.mjs 100 --package bin/package --ledger 2000 > bin/releases/worker-startup.json
+        run: node tools/measure/worker-startup.mjs 100 --package bin/package --ledger 2000 > bin/releases/worker-startup.json
       - name: Check Windows process recovery
         if: runner.os == 'Windows'
-        run: node tools/ts-migration/windows-processes.mjs > bin/releases/windows-processes.json
+        run: node tools/verify/windows-processes.mjs > bin/releases/windows-processes.json
       - name: Archive and verify extracted package
         run: node tools/package-release.mjs "$RELEASE_VERSION" bin/package
       - uses: actions/upload-artifact@v7

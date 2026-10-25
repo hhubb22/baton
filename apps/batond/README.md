@@ -147,4 +147,4 @@ pnpm test:e2e
 
 Kiro CLI 2.32.0 夹具经用户授权由旧 Go 录制转换，host 回放使用 fork 的 ACP replay testkit；e2e 注入已验证 capability 驱动真实 adapter，验证发送、回复、中心 idle、停止与恢复。该注入验证自动化行为，不能证明真实账号授权有效；生产可用性按节点的安装与认证结果判断，版本和系统只记入诊断。认证失败派生夹具基于 `provider_error`，通过真实 host 与 Worker 核对固定安全文案进入 Thread 报告、原始错误不外传和输入不重发。版本探测使用本地可执行替身测试，不启动真实 `kiro-cli`。
 
-测试覆盖输入不重发、命令去重、停止竞态、未知终态、只读发送核对、跨进程恢复、提交核查、输出字节游标与洪泛，以及 daemon 断线、持久报告和存活 Worker 重发现，禁止依赖真实 API Key、在线模型推理或外部真实服务。中心与独立 Worker 的完整远程链路验证见 [中心文档](../server/README.md#验证)。完整入口、SQLite 与本地进程测量见 [迁移工具](../../tools/ts-migration/README.md)。
+测试覆盖输入不重发、命令去重、停止竞态、未知终态、只读发送核对、跨进程恢复、提交核查、输出字节游标与洪泛，以及 daemon 断线、持久报告和存活 Worker 重发现，禁止依赖真实 API Key、在线模型推理或外部真实服务。中心与独立 Worker 的完整远程链路验证见 [中心文档](../server/README.md#验证)。完整入口、SQLite 与本地进程测量见 [工具说明](../../tools/README.md)。

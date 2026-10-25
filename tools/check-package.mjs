@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdir, rename } from 'node:fs/promises'
+import { copyFile, mkdir, rename } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { environment, isolatedEnv } from './ts-migration/common.mjs'
-import { measureWorkerStartup, withTemporaryInstallation } from './ts-migration/worker-startup.mjs'
+import { fileURLToPath } from 'node:url'
+import { environment, isolatedEnv, withTemporaryInstallation } from './lib/installation.mjs'
+import { measureWorkerStartup } from './measure/worker-startup.mjs'
 
 function run(executable, args, options) {
   const result = spawnSync(executable, args, {
@@ -24,7 +25,7 @@ async function runtimeHandshake(executable, options) {
   return new Promise((resolveHandshake, reject) => {
     const child = spawn(executable, ['project-runtime', 'run'], {
       ...options,
-      env: { ...options.env, BATON_SIDECAR_TRANSPORT: 'stdio' },
+      env: { ...options.env, BATON_PROJECT_RUNTIME_TRANSPORT: 'stdio' },
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
     })
@@ -173,6 +174,33 @@ async function main() {
       )
       return probe
     })
+    await check('cursorSqliteStore', async () => {
+      const driver = join(root, 'cursor-package.mjs')
+      await copyFile(fileURLToPath(new URL('./verify/cursor-package.mjs', import.meta.url)), driver)
+      const result = run(process.execPath, [driver, installed, home], options)
+      assert.equal(result.status, 0, result.stderr)
+      const probe = JSON.parse(result.stdout)
+      assert.equal(probe.sqliteStore, true)
+      assert.equal(probe.modelCalls, 0)
+      return { ...probe, runtime: 'Node driver with relocated installation dependencies' }
+    })
+    const cursorBin = join(installed, 'node_modules', '@cursor', `sdk-${process.platform}-${process.arch}`, 'bin')
+    await check('cursorRipgrep', () => {
+      const result = run(join(cursorBin, process.platform === 'win32' ? 'rg.exe' : 'rg'), ['--version'], options)
+      assert.equal(result.status, 0, result.stderr)
+      assert.match(result.stdout, /ripgrep/)
+      return { version: result.stdout.trim().split('\n')[0] }
+    })
+    await check('cursorSandbox', () => {
+      const result = run(
+        join(cursorBin, process.platform === 'win32' ? 'cursorsandbox.exe' : 'cursorsandbox'),
+        ['--help'],
+        options,
+      )
+      assert.equal(result.status, 0, result.stderr)
+      assert.ok(result.stdout.trim() || result.stderr.trim(), 'Sandbox helper help must not be empty')
+      return { loaded: true, exitCode: result.status }
+    })
     await check('projectRuntime', () => runtimeHandshake(executable, options))
     await check('privateFiles', () => {
       const directory = join(home, 'credentials')
@@ -187,10 +215,10 @@ async function main() {
         ['protect-dir', directory],
         ['write', directory, file],
       ]) {
-        const result = run(executable, ['sidecar-file', ...args], { ...options, input: credential })
+        const result = run(executable, ['private-file', ...args], { ...options, input: credential })
         assert.equal(result.status, 0, result.stderr)
       }
-      const read = run(executable, ['sidecar-file', 'read', directory, file], options)
+      const read = run(executable, ['private-file', 'read', directory, file], options)
       assert.equal(read.status, 0, read.stderr)
       assert.equal(read.stdout, credential)
       const subscriptions = run(executable, ['subscriptions'], {
@@ -201,9 +229,9 @@ async function main() {
       assert.match(subscriptions.stdout, /openai-codex.*已登录/)
       assert.ok(!subscriptions.stdout.includes('package-check-local'))
       assert.ok(!subscriptions.stdout.includes('package-check-refresh'))
-      const missing = run(executable, ['sidecar-file', 'read', directory, join(directory, 'missing.json')], options)
+      const missing = run(executable, ['private-file', 'read', directory, join(directory, 'missing.json')], options)
       assert.equal(missing.status, 3, missing.stderr)
-      return { helper: 'SEA sidecar-file', subscriptions: true, credentialValuesReported: false }
+      return { helper: 'SEA private-file', subscriptions: true, credentialValuesReported: false }
     })
     await check('missingDependencies', async () => {
       const dependencies = join(installed, 'node_modules')

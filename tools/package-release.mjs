@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { cp, lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, isAbsolute, join, relative, resolve, win32 } from 'node:path'
+import { basename, join, resolve, win32 } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { installedExecutable, isolatedEnv, validatePackageLayout } from './lib/installation.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 
@@ -57,33 +58,6 @@ export function validatePackageManifest(raw, runtime) {
   return manifest
 }
 
-export async function validatePackageLayout(directory, platform = process.platform) {
-  const packageRoot = await realpath(directory)
-  const binary = join(packageRoot, platform === 'win32' ? 'batond.exe' : 'batond')
-  const executable = await lstat(binary)
-  if (!executable.isFile() || executable.size === 0) throw new Error('安装包缺少 batond 可执行文件')
-  if (platform !== 'win32' && !(executable.mode & 0o111)) throw new Error('batond 缺少执行权限')
-  for (const name of ['node_modules', 'licenses']) {
-    const path = join(packageRoot, name)
-    if (!(await lstat(path)).isDirectory() || !(await readdir(path)).length)
-      throw new Error(`安装包缺少完整的 ${name} 目录`)
-  }
-  async function checkLinks(directory) {
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      const path = join(directory, entry.name)
-      if (entry.isSymbolicLink()) {
-        const target = relative(packageRoot, await realpath(path))
-        if (target === '..' || target.startsWith('../') || target.startsWith('..\\') || isAbsolute(target))
-          throw new Error(`安装包链接指向包外：${relative(packageRoot, path)}`)
-      } else if (entry.isDirectory()) await checkLinks(path)
-      else if (!entry.isFile()) throw new Error(`安装包包含非普通文件：${relative(packageRoot, path)}`)
-    }
-  }
-  await checkLinks(join(packageRoot, 'node_modules'))
-  await checkLinks(join(packageRoot, 'licenses'))
-  return binary
-}
-
 function run(command, args, { capture = false, ...options } = {}) {
   const result = spawnSync(command, args, {
     cwd: root,
@@ -104,11 +78,7 @@ function run(command, args, { capture = false, ...options } = {}) {
 async function checkCommands(binary, staging) {
   const home = join(staging, 'home')
   await mkdir(home)
-  const env = { HOME: home, USERPROFILE: home, TMPDIR: home, TMP: home, TEMP: home, PATH: '', NO_COLOR: '1' }
-  for (const key of ['SystemRoot', 'WINDIR', 'ComSpec', 'PATHEXT']) {
-    if (process.env[key]) env[key] = process.env[key]
-  }
-  const options = { capture: true, cwd: home, env, timeout: 10_000 }
+  const options = { capture: true, cwd: home, env: isolatedEnv(home), timeout: 10_000 }
   if (!run(binary, ['--help'], options)) throw new Error('batond --help 输出为空')
   const version = run(binary, ['--version'], options)
   if (!version) throw new Error('batond --version 输出为空')
@@ -127,7 +97,7 @@ export async function packageRelease(version, source = resolve(root, 'bin'), out
     // 仅复制发布入口、依赖和许可，避免带入本地配置或构建中间文件。
     const payload = join(staging, name)
     await mkdir(payload)
-    const binary = process.platform === 'win32' ? 'batond.exe' : 'batond'
+    const binary = basename(installedExecutable(payload))
     for (const entry of [binary, 'node_modules', 'licenses', 'package.json', 'package-manifest.json'])
       await cp(join(source, entry), join(payload, entry), { recursive: true, verbatimSymlinks: true })
     for (const entry of ['INSTALL.md']) {

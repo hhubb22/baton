@@ -204,4 +204,3 @@ export async function writePrivateFileAtomic(path: string, data: string | Uint8A
     })
   }
 }
-

@@ -6,7 +6,7 @@ Baton 将 Project Runtime 编入 batond 的单一 Node SEA 可执行文件。安
 node tools/package-batond.mjs
 ```
 
-构建使用本机官方 Node，目标系统为 macOS arm64、Linux x64、Linux arm64 和 Windows x64。构建和安装包检查见 [迁移工具说明](../tools/ts-migration/README.md)。升级时停止运行中的程序，整体替换可执行文件、旁置依赖与许可文件。安装步骤见 [INSTALL.md](INSTALL.md)。
+构建使用本机官方 Node，目标系统为 macOS arm64、Linux x64、Linux arm64 和 Windows x64。构建和安装包检查见 [工具说明](../tools/README.md)。升级时停止运行中的程序，整体替换可执行文件、旁置依赖与许可文件。安装步骤见 [INSTALL.md](INSTALL.md)。
 
 ## 命令入口
 

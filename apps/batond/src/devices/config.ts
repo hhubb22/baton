@@ -22,11 +22,7 @@ export const containsControl = (value: string): boolean =>
   Array.from(value).some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)
 
 const queues = new Map<string, Promise<unknown>>()
-async function withConfigurationLock<A>(
-  dataDirectory: string,
-  name: string,
-  action: () => Promise<A>,
-): Promise<A> {
+async function withConfigurationLock<A>(dataDirectory: string, name: string, action: () => Promise<A>): Promise<A> {
   const key = join(resolve(dataDirectory), `${name}.lock`)
   const previous = queues.get(key) ?? Promise.resolve()
   const next = previous

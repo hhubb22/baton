@@ -19,11 +19,7 @@ import {
 
 export { runtimeRequest } from './project-runtime.ts'
 export { projectStatus } from './project-view.ts'
-export {
-  listProjectRunCandidates,
-  scheduleProjectRun,
-  claimProjectCommands,
-} from './project-scheduling.ts'
+export { listProjectRunCandidates, scheduleProjectRun, claimProjectCommands } from './project-scheduling.ts'
 
 export const getProject = Effect.fn('getProject')(function* (employee: string, project: string) {
   yield* projectDecode(P.UUID, project)

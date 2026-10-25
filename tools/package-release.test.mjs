@@ -3,13 +3,8 @@ import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import {
-  archiveArgs,
-  releaseTarget,
-  validatePackageLayout,
-  validatePackageManifest,
-  validateSeaVersion,
-} from './package-release.mjs'
+import { archiveArgs, releaseTarget, validatePackageManifest, validateSeaVersion } from './package-release.mjs'
+import { validatePackageLayout, withTemporaryInstallation } from './lib/installation.mjs'
 
 const version = 'v0.1.0-alpha.1'
 
@@ -141,6 +136,34 @@ test('空程序和丢失执行权限的程序不能发布', async (t) => {
     await chmod(binary, 0o644)
     await assert.rejects(validatePackageLayout(directory), /执行权限/)
   }
+})
+
+test('搬迁安装包通过布局检查，使用完毕或回调失败后删除临时目录', async (t) => {
+  const { directory } = await layoutFixture(t)
+  if (process.platform !== 'win32') await symlink('../licenses', join(directory, 'node_modules/linked-license'), 'dir')
+  let temporary
+  const failure = new Error('fixture callback failure')
+  for (const fail of [false, true]) {
+    const use = withTemporaryInstallation(directory, async ({ root, installed, executable }) => {
+      temporary = root
+      assert.notEqual(installed, directory)
+      assert.equal(await validatePackageLayout(installed), executable)
+      if (fail) throw failure
+      return 'used'
+    })
+    if (fail) await assert.rejects(use, (error) => error === failure)
+    else assert.equal(await use, 'used')
+    await assert.rejects(realpath(temporary), /ENOENT/)
+  }
+})
+
+test('搬迁安装包在调用回调前拒绝包外链接', async (t) => {
+  const { directory } = await layoutFixture(t)
+  await symlink(tmpdir(), join(directory, 'external'), process.platform === 'win32' ? 'junction' : 'dir')
+  await assert.rejects(
+    withTemporaryInstallation(directory, () => assert.fail('invalid installation reached callback')),
+    /指向包外/,
+  )
 })
 
 test('附带目录中的链接必须在安装包内且目标存在', async (t) => {

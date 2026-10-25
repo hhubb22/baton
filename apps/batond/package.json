@@ -22,8 +22,8 @@
     "./testing/daemon": "./src/testing/daemon.ts"
   },
   "scripts": {
-    "dev": "node ../../tools/ts-migration/run-batond.mjs",
-    "build": "node ../../tools/ts-migration/build-batond.mjs",
+    "dev": "node ../../tools/dev/batond.mjs",
+    "build": "node ../../tools/build/batond.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "vp lint .",
     "test": "vp test run --config ../../vitest.config.ts",

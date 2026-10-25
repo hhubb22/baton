@@ -12,8 +12,8 @@
     "./testing/database": "./src/testing/database.ts"
   },
   "scripts": {
-    "dev": "node ../../tools/ts-migration/run-server.mjs",
-    "build": "node ../../tools/ts-migration/build-server.mjs",
+    "dev": "node ../../tools/dev/server.mjs",
+    "build": "node ../../tools/build/server.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "vp lint .",
     "test": "vp test run --config ../../vitest.config.ts",

@@ -68,35 +68,35 @@ await Effect.runPromise(
     Effect.gen(function* () {
       yield* Effect.addFinalizer(() => Effect.promise(() => rm(directory, { recursive: true, force: true })))
       yield* Effect.provide(
-      Effect.gen(function* () {
-        const spawner = yield* ChildProcessSpawner
-        const handle = yield* spawner.spawn(
-          ChildProcess.make(process.execPath, [stub, pidFile], {
-            detached: true,
-            stdin: 'ignore',
-            stdout: 'ignore',
-            stderr: 'ignore',
-          }),
-        )
-        const pids = yield* readPids()
-        emit({
-          spawned: pids,
-          host: process.pid,
-          stubPgid: yield* groupOf(pids.pid),
-          spawnedPid: Number(handle.pid),
-        })
-        yield* waitForStop()
-        if (ownGroup) {
-          // Same signal Pi uses on its detached process group.
-          signalProcessGroup(Number(handle.pid), 'SIGKILL')
-          yield* registrar.release(Number(handle.pid))
-        } else {
-          yield* Effect.promise(() => policy.terminateChildren({ timeoutMs: 5000 }))
-          yield* Effect.promise(() => policy.waitQuiescent({ timeoutMs: 2000 }))
-        }
-        emit({ quiet: true })
-      }),
-      layer,
+        Effect.gen(function* () {
+          const spawner = yield* ChildProcessSpawner
+          const handle = yield* spawner.spawn(
+            ChildProcess.make(process.execPath, [stub, pidFile], {
+              detached: true,
+              stdin: 'ignore',
+              stdout: 'ignore',
+              stderr: 'ignore',
+            }),
+          )
+          const pids = yield* readPids()
+          emit({
+            spawned: pids,
+            host: process.pid,
+            stubPgid: yield* groupOf(pids.pid),
+            spawnedPid: Number(handle.pid),
+          })
+          yield* waitForStop()
+          if (ownGroup) {
+            // Same signal Pi uses on its detached process group.
+            signalProcessGroup(Number(handle.pid), 'SIGKILL')
+            yield* registrar.release(Number(handle.pid))
+          } else {
+            yield* Effect.promise(() => policy.terminateChildren({ timeoutMs: 5000 }))
+            yield* Effect.promise(() => policy.waitQuiescent({ timeoutMs: 2000 }))
+          }
+          emit({ quiet: true })
+        }),
+        layer,
       )
     }),
   ),

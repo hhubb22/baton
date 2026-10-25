@@ -88,4 +88,3 @@ export async function authorizeDirectory(dataDirectory: string, path: string): P
   }
   throw new Error('工作目录超出本机授权目录')
 }
-

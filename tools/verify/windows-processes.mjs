@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { setTimeout as delay } from 'node:timers/promises'
-import { environment, isolatedEnv } from './common.mjs'
+import { environment, isolatedEnv } from '../lib/installation.mjs'
 
 const self = fileURLToPath(import.meta.url)
 const [role, recordFile, orphan] = process.argv.slice(2)

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
-import { buildBatond } from './ts-migration/build-batond.mjs'
+import { buildBatond } from './build/batond.mjs'
 import {
   bundledPackages,
   copyDependencyLicenses,

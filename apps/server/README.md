@@ -20,7 +20,7 @@ pnpm --filter @baton/batond build
 pnpm --dir web build --outDir ../apps/server/dist/web
 ```
 
-`pnpm --filter @baton/server dev <命令>` 先构建再运行，也可以直接调用 `node apps/server/dist/server.cjs <命令>`。脚本入口和自定义输出路径见 [迁移工具](../../tools/ts-migration/README.md#本地开发)。
+`pnpm --filter @baton/server dev <命令>` 先构建再运行，也可以直接调用 `node apps/server/dist/server.cjs <命令>`。脚本入口和自定义输出路径见 [工具说明](../../tools/README.md#本地开发)。
 
 ## 配置
 

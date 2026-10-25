@@ -35,7 +35,7 @@ if (mode === '--download') {
 }
 if (!existsSync(sums) || !existsSync(archivePath)) {
   throw new Error(
-    `Cache missing: ${archivePath}. Download explicitly: node tools/ts-migration/cache-node.mjs ${version} ${target} --download`,
+    `Cache missing: ${archivePath}. Download explicitly: node tools/release/cache-node.mjs ${version} ${target} --download`,
   )
 }
 const line = readFileSync(sums, 'utf8')
