@@ -21,7 +21,7 @@ test('stdio 响应按编号匹配，EOF 拒绝尚未完成的调用', async () =
   assert.deepEqual(await Promise.all([first, second]), ['first', 'second'])
   const pending = client.call({ operation: 'three' })
   input.end()
-  await assert.rejects(pending, /sidecar_closed/)
+  await assert.rejects(pending, /runtime_stdio_closed/)
 })
 
 test('stdio 忽略未知字段并保留回复内容', async () => {
@@ -40,6 +40,6 @@ test('stdio 拒绝缺少必填字段和错误编号类型', async () => {
     const client = new StdioClient(input, output)
     const pending = client.call({ operation: 'probe' })
     input.write(JSON.stringify(frame) + '\n')
-    await assert.rejects(pending, /sidecar_invalid_response/)
+    await assert.rejects(pending, /runtime_stdio_invalid_response/)
   }
 })

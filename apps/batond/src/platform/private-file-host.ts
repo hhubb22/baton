@@ -8,19 +8,19 @@ import { hasCode } from './errors.ts'
 import { openPrivateFile, protectPrivateDirectory, writePrivateFileAtomic } from './private.ts'
 
 const Arguments = Schema.Union([
-  Schema.Tuple([Schema.Literal('sidecar-file'), Schema.Literal('protect-dir'), Schema.String]),
-  Schema.Tuple([Schema.Literal('sidecar-file'), Schema.Literals(['read', 'write']), Schema.String, Schema.String]),
+  Schema.Tuple([Schema.Literal('private-file'), Schema.Literal('protect-dir'), Schema.String]),
+  Schema.Tuple([Schema.Literal('private-file'), Schema.Literals(['read', 'write']), Schema.String, Schema.String]),
 ])
 const maximum = 64 * 1024
 const failed = () => new Error('credential_private_file_failed')
 
 /** Runtime 子进程显式接收 host argv，路径与参数不经过 shell。 */
 export function privateFileHostEnvironment(runtimeEntry?: URL): NodeJS.ProcessEnv {
-  if (isSea()) return { BATON_SIDECAR_HOST_COMMAND: JSON.stringify({ file: process.execPath, args: [] }) }
+  if (isSea()) return { BATON_PRIVATE_FILE_HOST_COMMAND: JSON.stringify({ file: process.execPath, args: [] }) }
   if (!runtimeEntry) throw new Error('Project Runtime 源码入口未指定')
   const require = createRequire(runtimeEntry)
   return {
-    BATON_SIDECAR_HOST_COMMAND: JSON.stringify({
+    BATON_PRIVATE_FILE_HOST_COMMAND: JSON.stringify({
       file: process.execPath,
       args: [
         '--import',

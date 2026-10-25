@@ -11,13 +11,13 @@ import { ANTHROPIC_MODELS } from '@earendil-works/pi-ai/providers/anthropic.mode
 import { OPENAI_CODEX_MODELS } from '@earendil-works/pi-ai/providers/openai-codex.models'
 import { XAI_MODELS } from '@earendil-works/pi-ai/providers/xai.models'
 
-const previousHost = process.env.BATON_SIDECAR_HOST_COMMAND
+const previousHost = process.env.BATON_PRIVATE_FILE_HOST_COMMAND
 before(() => {
-  if (process.platform === 'win32') process.env.BATON_SIDECAR_HOST_COMMAND = JSON.stringify(privateFileHostCommand)
+  if (process.platform === 'win32') process.env.BATON_PRIVATE_FILE_HOST_COMMAND = JSON.stringify(privateFileHostCommand)
 })
 after(() => {
-  if (previousHost === undefined) delete process.env.BATON_SIDECAR_HOST_COMMAND
-  else process.env.BATON_SIDECAR_HOST_COMMAND = previousHost
+  if (previousHost === undefined) delete process.env.BATON_PRIVATE_FILE_HOST_COMMAND
+  else process.env.BATON_PRIVATE_FILE_HOST_COMMAND = previousHost
 })
 
 test('probe 只读本地凭据，不发网络请求、不刷新 OAuth、不输出凭据', async () => {

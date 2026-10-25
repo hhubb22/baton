@@ -10,7 +10,7 @@ Go → TypeScript 迁移完成后，核心 module 的 interface 已有 depth：`
 需要整理的是以下三类问题。
 
 - interface 泄漏：调用方要知道本该藏在 module 内部的事实。例如 `daemon/recovery.ts` 直接读 Worker 账本的六张表和 JSON 形状；Project 工具自己处理 `readThread` 的锁参数和 Thread 表结构；授权目录的格式、锁和数量上限同时写在 `daemon/roots.ts` 和 `devices/config.ts`。
-- 迁移遗留：`tools/ts-migration/` 实际是现行的构建与开发入口；`sidecar` 旧名还留在执行路径上（`sidecar-file` 子命令、`BATON_SIDECAR_*` 环境变量、`sidecar_*` 错误码）；P0 测量脚本仍在仓库里；`specs/ts-migration/` 被当作现行架构文档引用。
+- 迁移遗留：`tools/ts-migration/` 实际是现行的构建与开发入口；P0 测量脚本仍在仓库里；`specs/ts-migration/` 被当作现行架构文档引用。
 - 文档重复与漂移：模块职责表有 4 份，构建命令有 3 份，测试数据库默认值写在 5 处；另有约 25 处文档与代码不符，没有术语表。
 
 ## Proposed changes
@@ -24,7 +24,7 @@ Go → TypeScript 迁移完成后，核心 module 的 interface 已有 depth：`
 | 无引用文件 | 删除 `apps/batond/src/{agents,daemon,platform}/index.ts`、`agents/cursor/mapping.ts`、`platform/files.ts` 的 `PrivateFiles` 包装、`daemon/roots.ts` 的 `browseDirectories`、`project-scheduling.ts` 的 `projectMaintenance` |
 | 多余 export | 约 30 个只在定义文件内使用的符号改为不导出；`agentEnvironment` 与 `hostEnvironment` 统一为一个名字；`dtoSchemas` 在确认 web 不使用后删除 |
 | 循环依赖 | 6 处都只涉及类型：`HTTPOptions` 移到 `http/options.ts`；`AgentOutput` 与 `AgentEventIdentity` 定义在同一处；`reports.pendingResult` 的参数收窄为 `{ report, acked }[]`；`DaemonWorkerHost` 移到 `daemon/host.ts` |
-| 命名 | `sidecar-file` → `private-file`；`BATON_SIDECAR_HOST_COMMAND` → `BATON_PRIVATE_FILE_HOST_COMMAND`；`BATON_SIDECAR_TRANSPORT` → `BATON_PROJECT_RUNTIME_TRANSPORT`；`sidecar_*` → `runtime_stdio_*`。不保留旧名分支（AGENTS.md 守则 5） |
+| 命名 | 私有文件入口为 `private-file`，宿主命令使用 `BATON_PRIVATE_FILE_HOST_COMMAND`；Runtime 通道使用 `BATON_PROJECT_RUNTIME_TRANSPORT`；stdio 错误码使用 `runtime_stdio_*`。不保留旧名分支（AGENTS.md 守则 5） |
 | 依赖声明 | 删除 `apps/server` 的 `esbuild`、`packages/protocol` 的 `vitest` 与 `@effect/vitest`；`tsx` 由 Runtime 包解析，batond 不另外声明 |
 | Runtime stdio | `runtimes/shared/stdio.ts` 只有 Runtime 使用，移入 `runtimes/project-agent/src/`，删除 `runtimes/shared` workspace |
 | 测试辅助 | `testing/cursor/{process-records,watchdog-entry}.ts` 移到 `testing/platform/`；两处回收测试的临时目录在 Scope 结束时删除 |

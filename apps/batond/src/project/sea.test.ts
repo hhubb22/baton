@@ -12,7 +12,7 @@ it('starts packaged processes through the executable without a source entry or N
   const runtime = defaultRuntimeCommand()
   expect(runtime.file).toBe(command.executable)
   expect(runtime.args).toEqual(['project-runtime'])
-  expect(JSON.parse(runtime.env!.BATON_SIDECAR_HOST_COMMAND!)).toEqual({ file: command.executable, args: [] })
+  expect(JSON.parse(runtime.env!.BATON_PRIVATE_FILE_HOST_COMMAND!)).toEqual({ file: command.executable, args: [] })
 })
 
 it('reports the embedded Node and dispatches Runtime arguments independently of process argv', async () => {

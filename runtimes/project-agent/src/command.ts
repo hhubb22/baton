@@ -126,7 +126,7 @@ export async function runProjectRuntimeCLI(args: string[]): Promise<void> {
   }
   const models = await runtimeModels()
   const { ProjectRuntime } = await import('./runtime.js')
-  if (process.env.BATON_SIDECAR_TRANSPORT === 'stdio') {
+  if (process.env.BATON_PROJECT_RUNTIME_TRANSPORT === 'stdio') {
     const client = new StdioClient(process.stdin, process.stdout)
     await new ProjectRuntime(
       checkedRPC((request) => client.call(request)),

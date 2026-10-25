@@ -330,7 +330,7 @@ class Manager implements ProjectManager {
         run.command.run_id,
         run.control,
         {
-          BATON_SIDECAR_TRANSPORT: 'stdio',
+          BATON_PROJECT_RUNTIME_TRANSPORT: 'stdio',
           BATON_PROJECT_RUN_ID: run.command.run_id,
           BATON_PROJECT_LEASE_EPOCH: String(run.command.lease_epoch),
         },

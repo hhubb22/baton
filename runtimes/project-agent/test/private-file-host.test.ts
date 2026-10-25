@@ -21,8 +21,7 @@ function invoke(directory: string, script: string, host = privateFileHostCommand
       env: {
         ...process.env,
         NODE_OPTIONS: '',
-        BATON_SIDECAR_HOST: join(directory, 'missing-go-batond'),
-        BATON_SIDECAR_HOST_COMMAND: JSON.stringify(host),
+        BATON_PRIVATE_FILE_HOST_COMMAND: JSON.stringify(host),
       },
       encoding: 'utf8',
       timeout: process.platform === 'win32' ? 120000 : 30000,
@@ -56,9 +55,8 @@ for (const [layout, entry] of [
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       NODE_OPTIONS: '',
-      BATON_SIDECAR_HOST: join(parent, 'missing-legacy-batond'),
     }
-    delete env.BATON_SIDECAR_HOST_COMMAND
+    delete env.BATON_PRIVATE_FILE_HOST_COMMAND
     for (const key of Object.keys(env)) if (key.toLowerCase() === 'path') delete env[key]
     env.PATH = ''
     try {

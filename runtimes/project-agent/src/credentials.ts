@@ -9,11 +9,11 @@ import { randomUUID } from 'node:crypto'
 import { isSea } from 'node:sea'
 
 const nativeEnabled = () =>
-  isSea() || process.platform === 'win32' || process.env.BATON_SIDECAR_HOST_COMMAND !== undefined
+  isSea() || process.platform === 'win32' || process.env.BATON_PRIVATE_FILE_HOST_COMMAND !== undefined
 
 function nativeHost(): { file: string; args: string[]; timeout: number } {
   if (isSea()) return { file: process.execPath, args: [], timeout: 5000 }
-  const configured = process.env.BATON_SIDECAR_HOST_COMMAND
+  const configured = process.env.BATON_PRIVATE_FILE_HOST_COMMAND
   if (configured !== undefined) {
     try {
       if (Buffer.byteLength(configured) > 64 * 1024) throw new Error()
@@ -53,7 +53,7 @@ function native(operation: string, directory: string, file?: string, input?: str
   if (input !== undefined && Buffer.byteLength(input) > 64 * 1024) throw new Error('credential_private_file_failed')
   const result = spawnSync(
     host.file,
-    [...host.args, 'sidecar-file', operation, resolve(directory), ...(file ? [resolve(file)] : [])],
+    [...host.args, 'private-file', operation, resolve(directory), ...(file ? [resolve(file)] : [])],
     {
       input,
       encoding: 'utf8',
