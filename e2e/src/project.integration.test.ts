@@ -143,6 +143,7 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
     })
     const server = await database.runtime.runPromise(
       startServer({
+        port: 0,
         allowedOrigins: [origin],
         signer: Nodes.CredentialSigner.generate(),
         tls: { cert: ca, key: await readFile(keyFile) },
