@@ -9,6 +9,7 @@ import { initializeEmployee, resetPassword } from './auth.ts'
 import { loadSigningKey, resetConnections } from './nodes.ts'
 import { startServer } from './server.ts'
 import { AppError } from './errors.ts'
+import { controlConfiguration, duration } from './server-config.ts'
 
 const usage = `Baton Coordinator（TypeScript 开发入口）
 
@@ -19,18 +20,11 @@ const usage = `Baton Coordinator（TypeScript 开发入口）
 
 配置：BATON_DATABASE_URL、BATON_DB_SCHEMA、BATON_HTTP_ADDR、BATON_ALLOWED_ORIGINS、
 BATON_NODE_SIGNING_KEY、BATON_TLS_CERT_FILE、BATON_TLS_KEY_FILE。
-网页目录由 BATON_WEB_DIR 指定，默认使用 bundle 旁的 web 目录。`
-
-function duration(name: string, fallback: number, minimum = 100, maximum = 3_600_000): number {
-  const raw = process.env[name]
-  if (!raw) return fallback
-  const match = /^(\d+)(ms|s|m|h)$/.exec(raw)
-  const scale: Record<string, number> = { ms: 1, s: 1000, m: 60_000, h: 3_600_000 }
-  const value = match ? Number(match[1]) * scale[match[2]] : NaN
-  if (!Number.isSafeInteger(value) || value < minimum || value > maximum)
-    throw new AppError(400, 'invalid_configuration', `${name} 无效`)
-  return value
-}
+网页目录由 BATON_WEB_DIR 指定，默认使用 bundle 旁的 web 目录。
+控制预算：BATON_CONTROL_<操作>_QUEUE_TIMEOUT、BATON_CONTROL_<操作>_EXECUTION_TIMEOUT。
+临时 RPC：BATON_RPC_READ_CONCURRENCY、BATON_RPC_MANAGEMENT_CONCURRENCY、
+BATON_RPC_MAX_QUEUED、BATON_RPC_QUEUE_TIMEOUT、BATON_RPC_READ_TIMEOUT、
+BATON_RPC_MANAGEMENT_TIMEOUT、BATON_RPC_LOGIN_TIMEOUT。配置范围见 apps/server/README.md。`
 
 async function main() {
   const args = process.argv.slice(2)
@@ -107,11 +101,13 @@ async function main() {
     const nodeCredentialTTLSeconds =
       duration('BATON_NODE_CREDENTIAL_TTL', 2_592_000_000, 3_600_000, 7_776_000_000) / 1000
     if (offlineMs <= heartbeatMs) throw new AppError(400, 'invalid_configuration', '离线期限需要大于心跳间隔')
+    const budgets = controlConfiguration()
     const signer = await loadSigningKey(process.env.BATON_NODE_SIGNING_KEY || 'node-signing.key')
     await run(resetConnections())
     const program = Effect.scoped(
       Effect.gen(function* () {
         const server = yield* startServer({
+          ...budgets,
           host: address.hostname.replace(/^\[|\]$/g, ''),
           port: Number(address.port || 80),
           allowedOrigins: origins,

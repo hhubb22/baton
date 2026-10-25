@@ -19,6 +19,13 @@ const rpcResponses = new Map([
   ['node.browse_roots_set', 'node.browse_roots_result'],
   ['node.subscription_login', 'node.subscription_login_result'],
 ])
+const defaultRPCTimeouts: Readonly<Record<string, number>> = {
+  'files.browse': 12_000,
+  'session.request': 12_000,
+  'node.project_exec_set': 5000,
+  'node.browse_roots_set': 5000,
+  'node.subscription_login': 12_000,
+}
 export interface GatewayHandlers {
   authenticate(token: string, incarnation: string, connectionId: string): Promise<NodeSource>
   validate(source: NodeSource): Promise<void>
@@ -39,6 +46,7 @@ interface NodeConnection {
   receivedBytes: number
   sentBytes: number
   lastContact: number
+  rpcQueue: QueuedRPC[]
 }
 interface BrowserConnection {
   socket: WebSocket
@@ -53,7 +61,19 @@ interface BrowserConnection {
   notifying: boolean
   notifications: Map<string, unknown>
 }
+type RPCClass = 'read' | 'management'
+interface QueuedRPC {
+  body: Body
+  operationId: string
+  responseType: string
+  rpcClass: RPCClass
+  timeoutMs: number
+  resolve(body: Body): void
+  reject(error: Error): void
+  timer?: ReturnType<typeof setTimeout>
+}
 interface PendingRPC {
+  rpcClass: RPCClass
   source: NodeSource
   operationId: string
   responseType: string
@@ -69,6 +89,14 @@ export interface GatewayOptions {
   offlineMs?: number
   pollMs?: number
   maxConnections?: number
+  authenticationTimeoutMs?: number
+  rpc?: {
+    readonly readConcurrency?: number
+    readonly managementConcurrency?: number
+    readonly maxQueued?: number
+    readonly queueMs?: number
+    readonly timeouts?: Readonly<Record<string, number>>
+  }
 }
 
 /** Connections own bounded queues; durable control work remains in the database on backpressure. */
@@ -213,7 +241,7 @@ export class Gateway {
     let chain = Promise.resolve()
     let rateStart = Date.now()
     let rate = 0
-    const deadline = setTimeout(() => socket.terminate(), 5000)
+    const deadline = setTimeout(() => socket.terminate(), this.options.authenticationTimeoutMs ?? 15_000)
     const finishHandshake = () => {
       if (authenticated) return
       authenticated = true
@@ -224,6 +252,7 @@ export class Gateway {
       finishHandshake()
       if (connection) {
         if (this.nodes.get(connection.source.node_id) === connection) this.nodes.delete(connection.source.node_id)
+        this.rejectQueuedRPC(connection, new AppError(503, 'node_offline'))
         for (const [id, pending] of this.rpc) {
           if (pending.source.conn_id === connection.source.conn_id) {
             clearTimeout(pending.timer)
@@ -260,6 +289,7 @@ export class Gateway {
               receivedBytes: 0,
               sentBytes: 0,
               lastContact: Date.now(),
+              rpcQueue: [],
             }
             connection = current
             finishHandshake()
@@ -340,11 +370,27 @@ export class Gateway {
               (body.type === 'session.result' && pending.sessionId !== body.session_id)
             )
               return
+            const correlationId = envelope.correlation_id
+            if (correlationId === undefined) return
             clearTimeout(pending.timer)
-            this.rpc.delete(envelope.correlation_id!)
+            this.rpc.delete(correlationId)
             pending.resolve(body)
           } else {
-            const result = await this.handlers.handle(current.source, authenticatedEnvelope)
+            let result: Body | undefined
+            try {
+              result = await this.handlers.handle(current.source, authenticatedEnvelope)
+            } catch (error) {
+              if (
+                error instanceof AppError &&
+                error.status === 503 &&
+                ['node.sync', 'node.runtime_report', 'thread.command_result', 'thread.report'].includes(body.type)
+              ) {
+                // The node retries durable work with its original identity until it receives an acknowledgement.
+                current.lastContact = Date.now()
+                return
+              }
+              throw error
+            }
             if (body.type === 'node.sync' && result?.ok === true) current.synced = true
             if (result && !this.reply(current, randomUUID(), result, envelope.message_id)) socket.terminate()
           }
@@ -361,38 +407,119 @@ export class Gateway {
     })
   }
 
-  request(nodeId: string, employeeId: string, body: Body, timeoutMs = 12_000): Promise<Body> {
+  request(nodeId: string, employeeId: string, body: Body, timeoutMs?: number): Promise<Body> {
     const connection = this.nodes.get(nodeId)
-    if (!connection || connection.source.employee_id !== employeeId)
+    if (
+      this.closed ||
+      !connection ||
+      connection.source.employee_id !== employeeId ||
+      connection.socket.readyState !== WebSocket.OPEN
+    )
       return Promise.reject(new AppError(503, 'node_offline'))
     if (!connection.synced) return Promise.reject(new AppError(503, 'node_syncing'))
     const responseType = typeof body.type === 'string' ? rpcResponses.get(body.type) : undefined
     if (!responseType || typeof body.operation_id !== 'string')
       return Promise.reject(new AppError(400, 'invalid_request'))
     const operationId = body.operation_id
-    const active = [...this.rpc.values()].filter((pending) => pending.source.node_id === nodeId).length
-    if (active >= 2) return Promise.reject(new AppError(503, 'node_busy'))
-    const messageId = randomUUID()
+    const rpcClass: RPCClass = body.type === 'files.browse' || body.type === 'session.request' ? 'read' : 'management'
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.rpc.delete(messageId)
-        reject(new AppError(503, 'node_timeout'))
-      }, timeoutMs)
-      this.rpc.set(messageId, {
-        source: connection.source,
+      const pending: QueuedRPC = {
+        body: { ...body },
         operationId,
         responseType,
-        ...(typeof body.session_id === 'string' ? { sessionId: body.session_id } : {}),
+        rpcClass,
         resolve,
         reject,
-        timer,
-      })
-      if (!this.send(nodeId, employeeId, messageId, body)) {
-        clearTimeout(timer)
-        this.rpc.delete(messageId)
-        reject(new AppError(503, 'node_busy'))
+        timeoutMs:
+          this.options.rpc?.timeouts?.[String(body.type)] ??
+          timeoutMs ??
+          defaultRPCTimeouts[String(body.type)] ??
+          12_000,
       }
+      if (this.rpcAvailable(connection, rpcClass)) {
+        this.startRPC(connection, pending)
+        return
+      }
+      if (
+        connection.rpcQueue.filter((entry) => entry.rpcClass === rpcClass).length >= (this.options.rpc?.maxQueued ?? 8)
+      ) {
+        reject(new AppError(503, 'node_busy'))
+        return
+      }
+      pending.timer = setTimeout(() => {
+        const index = connection.rpcQueue.indexOf(pending)
+        if (index < 0) return
+        connection.rpcQueue.splice(index, 1)
+        reject(new AppError(503, 'node_busy'))
+      }, this.options.rpc?.queueMs ?? 2000)
+      connection.rpcQueue.push(pending)
     })
+  }
+
+  private rpcAvailable(connection: NodeConnection, rpcClass: RPCClass): boolean {
+    const active = [...this.rpc.values()].filter(
+      (pending) => pending.source.conn_id === connection.source.conn_id && pending.rpcClass === rpcClass,
+    ).length
+    return (
+      active <
+      (rpcClass === 'read' ? (this.options.rpc?.readConcurrency ?? 4) : (this.options.rpc?.managementConcurrency ?? 2))
+    )
+  }
+
+  private startRPC(connection: NodeConnection, queued: QueuedRPC): void {
+    clearTimeout(queued.timer)
+    const messageId = randomUUID()
+    const finish = () => {
+      clearTimeout(timer)
+      this.rpc.delete(messageId)
+      this.drainRPC(connection)
+    }
+    const timer = setTimeout(() => {
+      finish()
+      queued.reject(new AppError(503, 'node_timeout'))
+    }, queued.timeoutMs)
+    this.rpc.set(messageId, {
+      rpcClass: queued.rpcClass,
+      source: connection.source,
+      operationId: queued.operationId,
+      responseType: queued.responseType,
+      ...(typeof queued.body.session_id === 'string' ? { sessionId: queued.body.session_id } : {}),
+      resolve: (body) => {
+        finish()
+        queued.resolve(body)
+      },
+      reject: (error) => {
+        finish()
+        queued.reject(error)
+      },
+      timer,
+    })
+    if (!this.send(connection.source.node_id, connection.source.employee_id, messageId, queued.body)) {
+      finish()
+      queued.reject(new AppError(503, 'node_busy'))
+    }
+  }
+
+  private drainRPC(connection: NodeConnection): void {
+    if (
+      this.closed ||
+      this.nodes.get(connection.source.node_id) !== connection ||
+      connection.socket.readyState !== WebSocket.OPEN
+    )
+      return
+    while (true) {
+      const index = connection.rpcQueue.findIndex((queued) => this.rpcAvailable(connection, queued.rpcClass))
+      if (index < 0) return
+      const [queued] = connection.rpcQueue.splice(index, 1)
+      if (queued) this.startRPC(connection, queued)
+    }
+  }
+
+  private rejectQueuedRPC(connection: NodeConnection, error: AppError): void {
+    for (const queued of connection.rpcQueue.splice(0)) {
+      clearTimeout(queued.timer)
+      queued.reject(error)
+    }
   }
 
   private retireConnection(source: NodeSource): void {
@@ -651,6 +778,7 @@ export class Gateway {
     this.closed = true
     clearInterval(this.maintenance)
     this.server.off('upgrade', this.upgrade)
+    for (const connection of this.nodes.values()) this.rejectQueuedRPC(connection, new AppError(503, 'server_stopping'))
     for (const pending of this.rpc.values()) {
       clearTimeout(pending.timer)
       pending.reject(new AppError(503, 'server_stopping'))

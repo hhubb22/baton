@@ -41,6 +41,41 @@ pnpm --dir web build --outDir ../apps/server/dist/web
 
 时间配置接受整数加 `ms`、`s`、`m`、`h`，各项范围见上表；TTL 推荐使用整秒、分钟或小时。TS 开发建议使用独立的本地数据库或 schema，避免与 Go 运行实例共用开发状态。
 
+控制操作共用 4 个数据库执行名额。等待名额与开始执行分别计时，排队不会消耗执行预算。每项操作可通过 `BATON_CONTROL_<操作>_QUEUE_TIMEOUT` 和 `BATON_CONTROL_<操作>_EXECUTION_TIMEOUT` 单独配置，例如 `BATON_CONTROL_REPORT_EXECUTION_TIMEOUT=30s`。排队默认均为 `2s`，可设为 100 ms 至 60 秒；执行可设为 100 ms 至 120 秒，默认如下：
+
+| 操作 | 用途 | 默认执行预算 |
+| ---- | ---- | ------------ |
+| `AUTHENTICATE` | 设备凭据认证、连接登记（各自计时） | `5s` |
+| `VALIDATE` | 临时 RPC 回复的连接身份复查 | `3s` |
+| `HEARTBEAT` | 设备心跳保存 | `3s` |
+| `DISCONNECT` | 设备断线保存 | `5s` |
+| `SYNC` | 节点同步 | `10s` |
+| `RUNTIME_REPORT` | 设备能力报告 | `10s` |
+| `PROJECT_REQUEST` | Project Runtime 请求 | `15s` |
+| `RECEIPT` | Thread 命令接收确认 | `10s` |
+| `REPORT` | Thread 持久报告 | `15s` |
+| `BROWSER` | 浏览器会话复查 | `3s` |
+| `READ` | 实时输出与订阅的 Thread 归属读取 | `5s` |
+| `DISPATCH` | Thread 与 Project 持久命令领取 | `10s` |
+| `SCHEDULE` | Project 调度候选读取、单个 Project 放置（各自计时） | `10s` |
+| `MAINTENANCE` | 凭据吊销补偿的数据库操作 | `5s` |
+
+同步、能力报告、Thread 接收确认和报告遇到暂时不可用时，中心保留连接并等待节点按原身份重试；成功提交后才确认，报告继续按事件身份去重。持久命令仍按已保存的命令身份与重试时间派发。设备认证握手期限随认证的两次排队与执行预算计算，额外留 1 秒。
+
+临时 RPC 按设备分为读取与管理两类，分别使用独立名额与 FIFO 队列。文件浏览、实时输出和完整输出补读使用读取名额；目录设置、执行授权和订阅登录使用管理名额。读取满额时，管理名额仍然可用。
+
+| 环境变量 | 含义与默认值 |
+| -------- | ------------ |
+| `BATON_RPC_READ_CONCURRENCY` | 每台设备读取在途上限，默认 `4`，范围 1 至 64 |
+| `BATON_RPC_MANAGEMENT_CONCURRENCY` | 每台设备独立管理在途上限，默认 `2`，范围 1 至 64 |
+| `BATON_RPC_MAX_QUEUED` | 每台设备、每类请求的等待上限，默认 `8`，范围 1 至 128 |
+| `BATON_RPC_QUEUE_TIMEOUT` | 等待名额的期限，默认 `2s`，范围 100 ms 至 10 秒 |
+| `BATON_RPC_READ_TIMEOUT` | 文件浏览与输出请求发送后的等待期限，默认 `12s` |
+| `BATON_RPC_MANAGEMENT_TIMEOUT` | 目录设置与执行授权发送后的等待期限，默认 `5s` |
+| `BATON_RPC_LOGIN_TIMEOUT` | 订阅登录请求发送后的等待期限，默认 `12s` |
+
+RPC 发送后的期限可设为 100 ms 至 120 秒。队列满或排队超时返回 `node_busy`，过期请求不会发送；已发送请求超时返回 `node_timeout`，中心不自动重发管理操作。断线、连接替换和中心关闭会清除等待队列，旧回复仍须匹配连接、请求和操作身份才能被接受。
+
 ## 本地账号、迁移与启动
 
 先在本机 PostgreSQL 中建立开发数据库。以下命令均在仓库根目录执行，连接串按本机配置填写：

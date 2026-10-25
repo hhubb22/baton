@@ -1,13 +1,13 @@
 import { createServer } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
-import { Option, Tracer } from 'effect'
+import { Option, Schema, Tracer } from 'effect'
 import { traceParent } from '@baton/telemetry'
 import { afterEach, expect, test, vi } from 'vite-plus/test'
 import type { SessionResult } from '@baton/protocol'
 import { WebSocket } from 'ws'
 import { AppError, type NodeSource } from './errors.ts'
-import { webSocketText, Gateway, type GatewayHandlers } from './gateway.ts'
+import { webSocketText, Gateway, type GatewayHandlers, type GatewayOptions } from './gateway.ts'
 
 test('decodes WebSocket data with UTF-8 characters split across buffers', () => {
   const text = '{"text":"你好🙂"}'
@@ -38,7 +38,11 @@ const envelope = (body: unknown, correlationId?: string) => ({
   },
 })
 
-async function fixture(overrides: Partial<GatewayHandlers> = {}, tracer?: Tracer.Tracer) {
+async function fixture(
+  overrides: Partial<GatewayHandlers> = {},
+  tracer?: Tracer.Tracer,
+  options: Partial<GatewayOptions> = {},
+) {
   const employeeId = randomUUID(),
     nodeId = randomUUID()
   const seen: Array<Record<string, unknown>> = []
@@ -83,7 +87,7 @@ async function fixture(overrides: Partial<GatewayHandlers> = {}, tracer?: Tracer
       }),
       ...overrides,
     },
-    { allowedOrigins: ['https://baton.local'], pollMs: 50, ...(tracer ? { tracer } : {}) },
+    { allowedOrigins: ['https://baton.local'], pollMs: 50, ...(tracer ? { tracer } : {}), ...options },
   )
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
   const address = server.address() as import('node:net').AddressInfo
@@ -247,6 +251,191 @@ test('RPC checks current connection, operation and Thread before accepting a res
   await expect(f.gateway.request(f.nodeId, randomUUID(), { operation_id: randomUUID() })).rejects.toMatchObject({
     code: 'node_offline',
   })
+})
+
+const rpcFrameSchema = Schema.Struct({
+  message_id: Schema.String,
+  body: Schema.Struct({
+    type: Schema.String,
+    operation_id: Schema.optionalKey(Schema.String),
+    session_id: Schema.optionalKey(Schema.String),
+  }),
+})
+const rpcFrames = (frames: Array<Record<string, unknown>>) =>
+  frames
+    .filter((frame) => frame.kind === 'envelope')
+    .map((frame) => Schema.decodeUnknownSync(rpcFrameSchema)(frame.envelope))
+    .filter((frame) => frame.body.operation_id !== undefined)
+
+function replyRPC(ws: WebSocket, frame: typeof rpcFrameSchema.Type) {
+  const type =
+    frame.body.type === 'files.browse'
+      ? 'files.browse_result'
+      : frame.body.type === 'session.request'
+        ? 'session.result'
+        : 'node.project_exec_result'
+  ws.send(
+    JSON.stringify(
+      envelope(
+        {
+          type,
+          operation_id: frame.body.operation_id,
+          ok: true,
+          ...(type === 'session.result' ? { session_id: frame.body.session_id, gap: false } : {}),
+        },
+        frame.message_id,
+      ),
+    ),
+  )
+}
+
+test('reading at capacity leaves management slots available and queues reads in order', async () => {
+  const f = await fixture({}, undefined, {
+    rpc: { readConcurrency: 1, managementConcurrency: 1, maxQueued: 1, queueMs: 5000 },
+  })
+  const { ws, frames } = await f.connect()
+  const read = () => ({ type: 'files.browse', operation_id: randomUUID() })
+  const firstBody = read()
+  const secondBody = {
+    type: 'session.request',
+    action: 'full_output',
+    session_id: randomUUID(),
+    output_id: randomUUID(),
+    operation_id: randomUUID(),
+  }
+  const first = f.gateway.request(f.nodeId, f.employeeId, firstBody)
+  const second = f.gateway.request(f.nodeId, f.employeeId, secondBody)
+  await expect(f.gateway.request(f.nodeId, f.employeeId, read())).rejects.toMatchObject({ code: 'node_busy' })
+  const manageBody = { type: 'node.project_exec_set', operation_id: randomUUID(), enabled: true }
+  const management = f.gateway.request(f.nodeId, f.employeeId, manageBody)
+  await expect.poll(() => rpcFrames(frames).length).toBe(2)
+  expect(rpcFrames(frames).map((frame) => frame.body.operation_id)).toEqual([
+    firstBody.operation_id,
+    manageBody.operation_id,
+  ])
+  const [readFrame, managementFrame] = rpcFrames(frames)
+  replyRPC(ws, readFrame)
+  await first
+  await expect.poll(() => rpcFrames(frames).length).toBe(3)
+  expect(rpcFrames(frames)[2].body.operation_id).toBe(secondBody.operation_id)
+  replyRPC(ws, managementFrame)
+  replyRPC(ws, rpcFrames(frames)[2])
+  await Promise.all([second, management])
+})
+
+test('RPC execution gets its full timeout after waiting for a slot', async () => {
+  const f = await fixture({}, undefined, { rpc: { readConcurrency: 1, queueMs: 1000 } })
+  const { ws, frames } = await f.connect()
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  const received = once(ws, 'message')
+  const first = f.gateway.request(f.nodeId, f.employeeId, { type: 'files.browse', operation_id: randomUUID() }, 1000)
+  await received
+  const second = f.gateway.request(f.nodeId, f.employeeId, { type: 'files.browse', operation_id: randomUUID() }, 100)
+  await vi.advanceTimersByTimeAsync(90)
+  const secondReceived = once(ws, 'message')
+  replyRPC(ws, rpcFrames(frames)[0])
+  await first
+  await secondReceived
+  await vi.advanceTimersByTimeAsync(90)
+  replyRPC(ws, rpcFrames(frames)[1])
+  expect((await second).ok).toBe(true)
+})
+
+test('an expired queued management request is never sent when a slot becomes available', async () => {
+  const f = await fixture({}, undefined, { rpc: { managementConcurrency: 1, maxQueued: 1, queueMs: 100 } })
+  const { ws, frames } = await f.connect()
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  const received = once(ws, 'message')
+  const first = f.gateway.request(f.nodeId, f.employeeId, {
+    type: 'node.project_exec_set',
+    operation_id: randomUUID(),
+    enabled: true,
+  })
+  await received
+  const body = { type: 'node.project_exec_set', operation_id: randomUUID(), enabled: false }
+  const queued = f.gateway.request(f.nodeId, f.employeeId, body)
+  const rejected = expect(queued).rejects.toMatchObject({ code: 'node_busy' })
+  await vi.advanceTimersByTimeAsync(100)
+  await rejected
+  replyRPC(ws, rpcFrames(frames)[0])
+  await first
+  await vi.advanceTimersByTimeAsync(5000)
+  expect(rpcFrames(frames).map((frame) => frame.body.operation_id)).not.toContain(body.operation_id)
+})
+
+test('a sent management timeout does not resend its side effect or accept its late response for another request', async () => {
+  const f = await fixture({}, undefined, {
+    rpc: { managementConcurrency: 1, timeouts: { 'node.project_exec_set': 100 } },
+  })
+  const { ws, frames } = await f.connect()
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  const body = { type: 'node.project_exec_set', operation_id: randomUUID(), enabled: true }
+  const received = once(ws, 'message')
+  const pending = f.gateway.request(f.nodeId, f.employeeId, body, 5000)
+  const rejected = expect(pending).rejects.toMatchObject({ code: 'node_timeout' })
+  await received
+  const original = rpcFrames(frames)[0]
+  await vi.advanceTimersByTimeAsync(100)
+  await rejected
+  const nextBody = { ...body, operation_id: randomUUID(), enabled: false }
+  const nextReceived = once(ws, 'message')
+  let completed = false
+  const next = f.gateway.request(f.nodeId, f.employeeId, nextBody).then((result) => {
+    completed = true
+    return result
+  })
+  await nextReceived
+  replyRPC(ws, original)
+  replyRPC(ws, rpcFrames(frames)[1])
+  expect((await next).operation_id).toBe(nextBody.operation_id)
+  expect(completed).toBe(true)
+  await vi.advanceTimersByTimeAsync(30_000)
+  expect(rpcFrames(frames).filter((frame) => frame.body.operation_id === body.operation_id)).toHaveLength(1)
+  expect(f.gateway.diagnostics().pending_rpc).toBe(0)
+})
+
+test('disconnect rejects queued RPCs and a replacement connection does not send them', async () => {
+  const f = await fixture({}, undefined, { rpc: { managementConcurrency: 1 } })
+  const { ws } = await f.connect()
+  const body = { type: 'node.project_exec_set', operation_id: randomUUID(), enabled: true }
+  const first = f.gateway.request(f.nodeId, f.employeeId, body)
+  const second = f.gateway.request(f.nodeId, f.employeeId, { ...body, operation_id: randomUUID() })
+  const rejected = [first, second].map((pending) => expect(pending).rejects.toMatchObject({ code: 'node_offline' }))
+  ws.close()
+  await Promise.all(rejected)
+  const replacement = await f.connect()
+  expect(rpcFrames(replacement.frames)).toHaveLength(0)
+})
+
+test('a temporary report failure keeps the connection open and acknowledges the same report on retry', async () => {
+  const attempted = Promise.withResolvers<void>()
+  const attempts: unknown[] = []
+  const f = await fixture({
+    handle: async (_source, input) => {
+      const body = Schema.decodeUnknownSync(Schema.Struct({ type: Schema.String }))(input.body)
+      if (body.type !== 'thread.report') return { type: 'node.sync_result', ok: true }
+      attempts.push(input.body)
+      if (attempts.length === 1) {
+        attempted.resolve()
+        throw new AppError(503, 'unavailable')
+      }
+      return { type: 'thread.report_result', ok: true }
+    },
+  })
+  const { ws, frames } = await f.connect()
+  const report = {
+    type: 'thread.report',
+    thread_id: randomUUID(),
+    event_id: randomUUID(),
+    worker_seq: 1,
+    kind: 'thread.opened',
+  }
+  ws.send(JSON.stringify(envelope(report)))
+  await attempted.promise
+  ws.send(JSON.stringify(envelope(report)))
+  await expect.poll(() => frames.length).toBe(3)
+  expect(ws.readyState).toBe(WebSocket.OPEN)
+  expect(attempts).toEqual([report, report])
 })
 
 test('browser output uses the public event type and rejects another employee Thread', async () => {

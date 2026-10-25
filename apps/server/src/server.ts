@@ -12,7 +12,13 @@ import * as Nodes from './nodes.ts'
 import * as Threads from './threads.ts'
 import * as Projects from './projects.ts'
 import { AppError, type NodeSource } from './errors.ts'
-import { Gateway } from './gateway.ts'
+import { Gateway, type GatewayOptions } from './gateway.ts'
+import {
+  defaultControlBudgets,
+  withControlBudget,
+  type ControlBudgets,
+  type ControlOperation,
+} from './control-budget.ts'
 import { createRevocationCompensator } from './control-maintenance.ts'
 import { cookieToken, httpApplication } from './http.ts'
 
@@ -30,6 +36,8 @@ export interface ServerOptions {
   readonly projectDispatchMs?: number
   readonly heartbeatMs?: number
   readonly offlineMs?: number
+  readonly controlBudgets?: Partial<ControlBudgets>
+  readonly rpc?: GatewayOptions['rpc']
 }
 export interface RunningServer {
   readonly host: string
@@ -48,9 +56,13 @@ export const startServer = (
     const controller = new AbortController()
     const controlGate = yield* Semaphore.make(4)
     const httpGate = yield* Semaphore.make(16)
-    const run = async <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>, budgetMs = 1000): Promise<A> => {
+    const budgets = { ...defaultControlBudgets, ...options.controlBudgets }
+    const run = async <A, E>(
+      operation: ControlOperation,
+      effect: Effect.Effect<A, E, SqlClient.SqlClient>,
+    ): Promise<A> => {
       const result = await Effect.runPromiseExitWith(services)(
-        effect.pipe((self) => controlGate.withPermit(self), Effect.timeout(budgetMs)),
+        withControlBudget(controlGate, budgets[operation], effect),
         { signal: controller.signal },
       )
       if (Exit.isSuccess(result)) return result.value
@@ -58,12 +70,12 @@ export const startServer = (
       throw error instanceof AppError ? error : new AppError(503, 'unavailable')
     }
     const authorizeBrowser = async (cookie: string) => {
-      const session = await run(Auth.lookupSession(cookieToken(cookie)))
+      const session = await run('browser', Auth.lookupSession(cookieToken(cookie)))
       if (session.employee.must_change_password) throw new AppError(403, 'password_change_required')
       return session.employee.id
     }
     const output = async (employeeId: string, threadId: string, cursor?: string): Promise<P.SessionResult> => {
-      const thread = await run(Threads.view(employeeId, threadId))
+      const thread = await run('read', Threads.view(employeeId, threadId))
       const operationId = randomUUID()
       if (!thread.node_online || !thread.node_synced)
         return {
@@ -93,7 +105,7 @@ export const startServer = (
             http,
             {
               authenticate: async (token, incarnation, connId): Promise<NodeSource> => {
-                const claims = await run(Nodes.authenticateNode(token, options.signer))
+                const claims = await run('authenticate', Nodes.authenticateNode(token, options.signer))
                 const source = {
                   employee_id: claims.employee_id,
                   node_id: claims.node_id,
@@ -101,17 +113,18 @@ export const startServer = (
                   incarnation,
                   conn_id: connId,
                 }
-                await run(Nodes.claimConnection(source))
+                await run('authenticate', Nodes.claimConnection(source))
                 return source
               },
-              validate: (source) => run(Nodes.revalidateNodeSource(source)),
-              heartbeat: (source) => run(Nodes.touchNode(source)),
-              disconnected: (source) => run(Nodes.disconnectNode(source)),
+              validate: (source) => run('validate', Nodes.revalidateNodeSource(source)),
+              heartbeat: (source) => run('heartbeat', Nodes.touchNode(source)),
+              disconnected: (source) => run('disconnect', Nodes.disconnectNode(source)),
               handle: async (source, envelope) => {
                 const body = Schema.decodeUnknownSync(P.NodeToControlBody)(envelope.body)
                 switch (body.type) {
                   case 'node.sync':
                     await run(
+                      'sync',
                       Nodes.syncNode(source, {
                         display_name: body.display_name,
                         system: body.system,
@@ -121,7 +134,7 @@ export const startServer = (
                     gateway.notify(source.employee_id, { type: 'thread.changed' })
                     return { type: 'node.sync_result', ok: true }
                   case 'node.runtime_report': {
-                    const version = await run(Nodes.saveRuntimeReport(source, body.report))
+                    const version = await run('runtime_report', Nodes.saveRuntimeReport(source, body.report))
                     gateway.notify(source.employee_id, {
                       type: 'devices.changed',
                       node_id: source.node_id,
@@ -131,7 +144,7 @@ export const startServer = (
                   }
                   case 'project_runtime.request': {
                     try {
-                      const data = await run(Projects.runtimeRequest(source, body))
+                      const data = await run('project_request', Projects.runtimeRequest(source, body))
                       gateway.notify(source.employee_id, { type: 'thread.changed' })
                       return Schema.decodeUnknownSync(P.ProjectRuntimeResult)({
                         type: 'project_runtime.result',
@@ -148,11 +161,11 @@ export const startServer = (
                   }
                   case 'thread.command_result':
                     if (!envelope.correlation_id) throw new AppError(400, 'missing_correlation')
-                    await run(Threads.processReceipt(source, envelope.correlation_id, body))
+                    await run('receipt', Threads.processReceipt(source, envelope.correlation_id, body))
                     gateway.notify(source.employee_id, { type: 'thread.changed' })
                     return undefined
                   case 'thread.report': {
-                    const ack = await run(Threads.processReport(source, body))
+                    const ack = await run('report', Threads.processReport(source, body))
                     gateway.notify(source.employee_id, { type: 'thread.changed' })
                     return { ...ack }
                   }
@@ -162,13 +175,15 @@ export const startServer = (
               },
               browser: authorizeBrowser,
               thread: async (employeeId, threadId) => {
-                await run(Threads.view(employeeId, threadId))
+                await run('read', Threads.view(employeeId, threadId))
               },
               output,
             },
             {
               allowedOrigins: options.allowedOrigins,
               tracer,
+              authenticationTimeoutMs: 2 * (budgets.authenticate.queueMs + budgets.authenticate.executionMs) + 1000,
+              ...(options.rpc ? { rpc: options.rpc } : {}),
               ...(options.heartbeatMs !== undefined ? { heartbeatMs: options.heartbeatMs } : {}),
               ...(options.offlineMs !== undefined ? { offlineMs: options.offlineMs } : {}),
             },
@@ -206,7 +221,7 @@ export const startServer = (
       if (dispatching || controller.signal.aborted) return
       dispatching = true
       try {
-        const commands = await run(Threads.claimCommands())
+        const commands = await run('dispatch', Threads.claimCommands())
         for (const command of commands)
           gateway.send(command.node_id, command.employee_id, command.message_id, command.body)
       } catch {
@@ -221,11 +236,11 @@ export const startServer = (
       if (placing || controller.signal.aborted) return
       placing = true
       try {
-        const candidates = await run(Projects.listProjectRunCandidates(placementCursor, 32))
+        const candidates = await run('schedule', Projects.listProjectRunCandidates(placementCursor, 32))
         for (const agentId of candidates) {
           if (controller.signal.aborted) break
           try {
-            await run(Projects.scheduleProjectRun(agentId))
+            await run('schedule', Projects.scheduleProjectRun(agentId))
           } catch {
             // Each candidate has its own database budget; a busy Agent does not hold up later candidates.
           }
@@ -244,7 +259,7 @@ export const startServer = (
       if (sendingProjects.has(kind) || controller.signal.aborted) return
       sendingProjects.add(kind)
       try {
-        const deliveries = await run(Projects.claimProjectCommands(kind))
+        const deliveries = await run('dispatch', Projects.claimProjectCommands(kind))
         for (const delivery of deliveries)
           gateway.send(delivery.node_id, delivery.employee_id, delivery.command.run_id, delivery.command)
       } catch {
@@ -266,7 +281,11 @@ export const startServer = (
     const timer = setInterval(() => {
       void dispatch()
     }, options.dispatchMs ?? 200)
-    const compensate = createRevocationCompensator(run, (nodeId) => gateway.disconnect(nodeId), { concurrency: 1 })
+    const compensate = createRevocationCompensator(
+      (effect) => run('maintenance', effect),
+      (nodeId) => gateway.disconnect(nodeId),
+      { concurrency: 1 },
+    )
     const maintenanceTimer = setInterval(() => {
       void compensate().catch(() => undefined)
     }, 200)
