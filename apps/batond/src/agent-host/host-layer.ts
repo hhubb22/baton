@@ -17,9 +17,8 @@ import type { ProcessRegistrar } from './process-registrar.ts'
 import type { AgentHostPaths } from './paths.ts'
 
 /**
- * Host execution scope. The Agent host process already leads the group that
- * contains every child it starts, and its Scope kills that group on exit, so
- * `wrap` never needs a systemd unit and `stop` has nothing of its own to clean.
+ * 命令直接在 host 中执行。adapter/spawner 的 Scope 释放各自资源，
+ * 独立进程组由 registrar/watchdog 管理，Worker 负责外层进程树回收。
  */
 const hostAgentScope = Layer.succeed(
   AgentScope,

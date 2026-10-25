@@ -6,8 +6,10 @@
 
 公共 `agents/probe.ts` 的只读探测在临时空工作目录的 host 中调用上游 `checkPiProviderStatus`，检查安装、版本、认证与模型，不发送 prompt、不打开登录。程序已安装且认证为 valid 或 unknown 时报告 available，开放新建与恢复；缺程序或明确 missing 时报告 unavailable。版本、系统、认证未知和模型目录缺失写入 reason，不另设版本或系统白名单；版本探测失败或超时不阻止新建，目录不可读时可用 Pi 默认模型。整次 host 探测失败且安装状态未确认时报告 unverified。上游支持会话内换模型，`switch_model` 为 true。`set_model` 的明确拒绝发生在 prompt 提交前，该条消息持久撤回，后续消息可继续执行；选择超时或连接失败按 unknown 恢复，只查原生历史，不重发输入。
 
-Pi 支持活动回合插入：Worker 保存接收时的目标回合，在写 intent 前核对目标仍活动；host 调用上游 `steerTurn`，不创建另一执行。插入归属和提交边界以上游为准；上游发送 prompt 后即可返回，原生 ack 异步到达。host 回执丢失且无法确认目标时进入 unknown；提交成功后收到原生失败事件时，Thread 进入 unknown。权限类请求当次允许，提问（包括 elicitation）转发网页等待回答，停止后的请求全部取消。
+Pi 支持活动回合插入：Worker 保存接收时的目标回合，在写 intent 前核对目标仍活动；host 调用上游 `steerTurn`，不创建另一执行。插入归属和提交边界以上游为准；上游发送 prompt 后即可返回，原生 ack 异步到达。host 回执丢失且无法确认目标时进入 unknown；提交成功后收到明确原生回合失败时，保存 `reason: failed` 和安全原因，输入保持 sent，队列继续执行，空队列时回到 idle。权限类请求当次允许，提问（包括 elicitation）转发网页等待回答，停止后的请求全部取消。
 
-Pi 的 RPC 子进程保留 detached 进程组，供上游中断与关闭时按组发送信号。host 的 spawner 将独立组登记给 watchdog 和 Worker，注销前回收整树。恢复核对 Thread、Agent 类型、原生会话、工作目录和 profile 配置位置，不创建空会话替代恢复。
+Pi 的 RPC 子进程保留 detached 进程组，供上游中断与关闭时按组发送信号。POSIX host 的 spawner 将独立组登记给内部 registrar/watchdog，注销前回收整树；Worker 持久账本登记 host 根，Windows registrar 不另记上游子进程。恢复核对 Thread、Agent 类型、原生会话、工作目录和 profile 配置位置，不创建空会话替代恢复。
 
 `host.integration.test.ts` 用 `@t3tools/provider-pi/testing` 与上游离线转录驱动实际 host 子进程，覆盖两轮、Worker 插入与排队、插入回执丢失后的 unknown 与重试回执、工具执行中停止、原生恢复及 sent 的确认和未确认。`testing/pi/transcripts.ts` 只在测试侧拆分或派生已有转录。跨 app 的最小链路在 e2e 中验证发送、回复、停止与恢复。
+
+部署与设备接入见 [根 README](../../../../../README.md)，验证命令见 [AGENTS.md](../../../../../AGENTS.md#常用构建与验证命令)。

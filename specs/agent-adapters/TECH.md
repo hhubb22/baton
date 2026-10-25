@@ -1,12 +1,11 @@
 # Agent 适配与扩展技术设计
 
-Status: draft
-Owner: 待指定
-Basis: [行为规格](PRODUCT.md)；[TypeScript 迁移 TECH](../ts-migration/TECH.md)；Baton `4d56ae2`；t3code `9828cad49f3e1ef4f9e037b3baaca19f4e4928fc`（Baton fork 的基线）。本文为实施设计，代码核查与验证计划分开记录。
+Status: approved
+Basis: [行为规格](PRODUCT.md)；[Baton TECH](../baton/TECH.md)；[发布设计](../release/TECH.md)；fork 固定提交与补丁见 [t3code 来源](../../third_party/t3code/README.md)。
 
-## 现有实现与设计边界
+## 实现边界
 
-当前实现包含 Worker 的认证 IPC、持久命令回执、intent 账本、停止裁决与 outbox，batond 的注册、WSS 和 Worker 管理，中心与网页的远程 Thread、Project 和设备管理。Cursor、Pi、Codex、Kiro 经 `agent-host` 子进程使用 fork 的完整 provider adapter，不再保留本地抽取的 SDK runner。Kiro 在程序已安装且认证 valid/unknown 时报告可用，版本和系统不限，开放网页新建与恢复。适配器行为以完整上游实现和当前 PRODUCT 为依据，离线验证复用 fork 的测试与转录；Kiro 夹具说明见 [fork README](../../upstream/t3code/packages/provider-acp-registry/src/testing/fixtures/kiro/README.md)。
+当前实现包含 Worker 的认证 IPC、持久命令回执、intent 账本、停止裁决与 outbox，batond 的注册、WSS 和 Worker 管理，中心与网页的远程 Thread、Project 和设备管理。Cursor、Pi、Codex、Kiro 经 `agent-host` 子进程使用 fork 的完整 provider adapter。Kiro 在程序已安装且认证 valid/unknown 时报告可用，版本和系统不限，开放网页新建与恢复。适配器行为以完整上游实现和当前 PRODUCT 为依据，离线验证复用 fork 的测试与转录；Kiro 夹具说明见 [fork README](../../upstream/t3code/packages/provider-acp-registry/src/testing/fixtures/kiro/README.md)。
 
 Agent 接入整包依赖 Baton 维护的 t3code fork，使用其完整 provider 包和 `ProviderAdapterV2` 接口，接受上游的协议处理、重试、重连、steer、取消和事件归一化行为。Baton 不为产品差异修改上游 adapter；上游缺少的能力（如 Kiro）在 fork 中按上游写法补齐。包体积和依赖范围在第一版接受现状，之后再按需要逐步转写为自实现。
 
@@ -26,20 +25,9 @@ Coordinator：Thread 命令、报告与历史记录
                   └─ provider-cursor → @cursor/sdk
 ```
 
-| 位置 | 职责 | 对应需求 |
-|---|---|---|
-| `upstream/t3code` | Baton fork 的 git submodule，固定提交；pnpm workspace 收录其中用到的 `@t3tools/*` 包 | R-04～R-11 |
-| `upstream/t3code/packages/effect-acp`、`upstream/t3code/packages/effect-codex-app-server` | fork 中的 ACP 与 Codex app-server 客户端，由 workspace 直接收录 | R-04、R-08、R-11 |
-| `packages/providers`、`packages/provider-testing` | 已删除；Cursor、Pi、Codex、Kiro 直接使用 fork 的 provider 包，回放使用各包的 `./testing` 导出 | R-04～R-12 |
-| `packages/protocol` | Worker IPC、ThreadReport 和 RuntimeAgent 的 Effect Schema；原生历史条目与历史页字段已删除 | R-01、R-10 |
-| `apps/batond/src/worker` | 沿用 T1～T3 的接收、执行、停止裁决与 outbox；`ThreadAgent` 契约按下文简化 | R-01、R-04、R-05、R-08 |
-| `apps/batond/src/agent-host` | Agent host 子命令：宿主层、事件映射，经 stdio `effect/rpc` 与 Worker 通信 | R-04～R-11 |
-| `apps/batond/src/agents/catalog.ts` | Agent 类型、名称、能力和限制文案的纯数据目录 | R-01～R-03、R-07 |
-| `apps/batond/src/agents/thread-agents.ts`、`agents/probe.ts`、`cli/agent-host.ts` | 分别装配 Worker 工厂、daemon/CLI 只读探测和 host 动态加载 | R-01～R-03、R-07 |
-| `apps/batond/src/platform/process` | 进程组、POSIX watchdog、Windows 进程账本；登记上游新建的进程组 | R-08 |
-| `apps/server`、Web 数据层 | 正式 reason 字段、status/create 准入；历史使用中心记录，删除前端原生解析 | R-01、R-10 |
+目录职责与实现入口统一见 [AGENTS.md](../../AGENTS.md#核心架构与目录)。
 
-Worker 通过 `agents/thread-agents.ts` 和纯数据 catalog 装配执行工厂，不加载探测、SDK、provider adapter 或 host driver，保持 3 秒就绪预算。`buildBatond` 检查 Worker 运行时依赖图，覆盖静态导入、再导出和字面量动态加载，禁止绕入 host 实现或不可解析的动态加载。daemon 与普通 CLI 通过 `agents/probe.ts` 探测，Cursor 安装预检只通过 `sdk-inspection.ts` 读取元数据与资产路径。执行 agent-host 由 `cli/agent-host.ts` 按类型动态加载对应模块，Cursor SDK 只在 Cursor host 内执行。安装包的 `agent-host --probe` 会加载四个 Agent 模块以检查完整性。每个执行 Thread 一个 agent-host，它是 POSIX 进程组组长或 Windows 账本登记的根进程，Worker 回收整棵进程树即可结束 adapter 及其后代。探测在 batond 拉起的只读 agent-host 中执行，用同一套 `src/platform/process` 回收。
+Worker 通过 `agents/thread-agents.ts` 和纯数据 catalog 装配执行工厂，不加载探测、SDK、provider adapter 或 host driver，保持 3 秒就绪预算。`buildBatond` 检查 Worker 运行时依赖图，覆盖静态导入、再导出和字面量动态加载，禁止绕入 host 实现或不可解析的动态加载。daemon 与普通 CLI 通过 `agents/probe.ts` 探测，Cursor 安装预检只通过 `sdk-inspection.ts` 读取元数据与资产路径。执行 agent-host 由 `cli/agent-host.ts` 按类型动态加载对应模块，Cursor SDK 只在 Cursor host 内执行。安装包的 `agent-host --probe` 会加载四个 Agent 模块以检查完整性。每个执行 Thread 一个 agent-host，它是 POSIX 进程组组长或 Windows Worker 账本登记的根进程。POSIX 的上游独立组由 host 内部 registrar/watchdog 另行管理；Windows registrar 不另行登记上游子进程，回收受下文平台边界约束。探测在 batond 拉起的只读 agent-host 中执行，用同一套平台接口回收。
 
 ### 宿主层
 
@@ -47,8 +35,8 @@ agent-host 为上游 adapter 提供它要求的 Effect service：
 
 | service | Baton 提供的实现 |
 |---|---|
-| `ChildProcessSpawner`、`FileSystem` | `@effect/platform-node`；spawner 包装后把上游新建的进程组或 PID 登记给 watchdog 与 Windows 进程账本 |
-| `AgentScope` | agent-host 的执行 Scope，Scope 结束时关闭 adapter 并禁止新建进程 |
+| `ChildProcessSpawner`、`FileSystem` | `@effect/platform-node`；POSIX spawner 将上游独立组登记给 host 自己的 registrar/watchdog；Worker 账本登记 host 根进程，Windows registrar 返回 false |
+| `AgentScope` | `wrap` 透传命令，`stop`、`clear` 为空；adapter/spawner Scope 释放各自资源，Worker 执行外层整树回收 |
 | `ProviderHost` | `paths` 指向 Thread 工作目录与设备私有状态目录；`settings` 是静态快照；`credentials` 是只读空实现，认证使用设备显式配置的 `CURSOR_API_KEY`；`shouldRunBackgroundWork` 返回 false |
 | `McpProviderSessions` | 使用 provider-core 的内存实现；第一版不写入任何会话配置，Agent 不挂载 MCP 工具 |
 
@@ -78,9 +66,9 @@ agent-host 把 `ProviderAdapterV2` 映射到 Worker 现有的 `ThreadAgent`：
 
 Worker 运行在 batond SEA 携带的 Node 26 上，依赖 `effect` 4 与 `@effect/platform-node`，版本在 pnpm catalog 中统一锁定。账本复用已有 `packages/sqlite`，在现有表的数据职责基础上设计 TS schema，保存下文命令、输入基准和进程字段，不读旧账本。提交结果不确定时使用 SqlClient 的提交核查；仍无法确认则停止执行并从持久事实恢复。
 
-账本保持 `journal_mode=WAL`、`synchronous=FULL`。t3code 使用 NORMAL，因为 `node:sqlite` 在主线程同步提交，FULL 会让每次提交的 fsync 停住事件循环。Baton 的 intent 必须在调用原生提交前落盘，NORMAL 在断电时可能丢掉已提交的 intent，所以不采用。每个 Thread 一个 Worker 进程，提交卡顿只影响该 Thread；实施前测量三个系统上单次 FULL 提交的 p99，超过 50 ms 时把账本移到 `worker_threads` 再评审。
+账本保持 `journal_mode=WAL`、`synchronous=FULL`。t3code 使用 NORMAL，因为 `node:sqlite` 在主线程同步提交，FULL 会让每次提交的 fsync 停住事件循环。Baton 的 intent 必须在调用原生提交前落盘，NORMAL 在断电时可能丢掉已提交的 intent，所以不采用。每个 Thread 一个 Worker 进程，提交卡顿只影响该 Thread；已记录 macOS arm64、Linux x64 与 arm64 的实际账本测量，此负载提交 p99 均低于 50 ms；Windows 尚无数据。负载范围与数值集中在 [发布验证](../release/TECH.md)，若后续测量或实际命令接收延迟超标，再评估 `worker_threads`。
 
-账本里保存的单调时间改用 `process.hrtime.bigint()`。它在同一次开机内跨进程可比，但不计系统睡眠，所以设备睡眠期间停止计时会暂停，唤醒后才到期；这只会推迟强制回收，不影响 unknown 判定。batond 的 Project Runtime 租约需要计入睡眠，做法见迁移 TECH 的平台相关实现。
+账本里保存的单调时间使用 `process.hrtime.bigint()`。它在同一次开机内跨进程可比，但不计系统睡眠，所以设备睡眠期间停止计时会暂停，唤醒后才到期；这只会推迟强制回收，不影响 unknown 判定。batond 的 Project Runtime 租约与 Worker 的 Turn 执行时限均计入睡眠，做法见 [Baton 平台实现](../baton/TECH.md#平台相关实现)。
 
 ### 进程组与停止回收
 
@@ -93,13 +81,13 @@ Worker 运行在 batond SEA 携带的 Node 26 上，依赖 `effect` 4 与 `@effe
 
 POSIX 的 watchdog 是 batond 可执行文件的 `watchdog` 子命令：Worker 被强杀时内核关闭管道写端，watchdog 不依赖 Worker 配合。Worker 把每个新建的进程组 ID 通过该管道登记给 watchdog。
 
-Windows 第一版接受两个已知缺口。`taskkill /T` 按父 PID 向下查找，中间进程先退出时，其后代会漏掉；Worker 被强杀后，到下次 Worker 启动之间 Agent 进程会继续运行。Windows 进程创建时间在恢复时通过 PowerShell `Get-CimInstance Win32_Process` 读取，用于排除 PID 复用。kill-on-close Job Object 推到第一版之后，届时以一个原生模块接入 `src/platform/process`，其余代码不变。全局停止与恢复规则见 `specs/baton/TECH.md`，两处采用相同的 Windows 边界。
+Windows 第一版接受两个已知缺口。`taskkill /T` 按父 PID 向下查找，中间进程先退出时，其后代会漏掉；Worker 被强杀后，到下次 Worker 启动之间 Agent 进程会继续运行。Windows 进程创建时间在恢复时通过 PowerShell `Get-CimInstance Win32_Process` 读取，用于排除 PID 复用。kill-on-close Job Object 放在第一版之后，需以原生模块接入平台回收接口。全局停止与恢复规则见 `specs/baton/TECH.md`，两处采用相同的 Windows 边界。
 
-停止确认仍以 Turn 终止事件或进程树回收结果为证据。回收测试用本地替身创建 detached 后代，核对整棵进程树退出，不能只看 agent-host PID 已消失。batond 重启仍通过已有认证 IPC 连接存活的 Worker，不因重连重开 Agent。
+停止先等待 Turn 终止或回收证据，再回收执行实例与持久进程记录；全部确认后写 `thread.stopped`，未确认则 unknown。回收测试用本地替身创建 detached 后代，核对整棵进程树退出，不能只看 agent-host PID 已消失。batond 重启仍通过已有认证 IPC 连接存活的 Worker，不因重连重开 Agent。
 
 ### Worker IPC
 
-Worker IPC 使用令牌认证与固定端点：POSIX 为私有目录下的 UDS，Windows 为命名管道。Node 的 `net` 模块可直接监听两者，但不能给命名管道设置只允许当前用户的安全描述符，第一版依靠令牌认证，令牌保存在私有数据目录中（见迁移 TECH）。消息结构以 `packages/protocol` 为准，`ThreadReport` 与 `RuntimeAgent` 增加 `command_id`、`command_outcome`、`reason` 字段。Worker 以 detached 方式启动，batond 重启后通过同一端点重新连接。
+Worker IPC 使用令牌认证与固定端点：POSIX 为私有目录下的 UDS，Windows 为命名管道。Node 的 `net` 模块可直接监听两者，但不能给命名管道设置只允许当前用户的安全描述符，第一版依靠令牌认证，令牌保存在私有数据目录中（见 [Baton 平台实现](../baton/TECH.md#平台相关实现)）。消息结构以 `packages/protocol` 为准，`ThreadReport` 的 `command_id`、`command_outcome` 表达命令终态，`RuntimeAgent.reason` 保存能力诊断。Worker 以 detached 方式启动，batond 重启后通过同一端点重新连接。
 
 ## Worker 接收与异步执行（R-04、R-05、R-08）
 
@@ -107,11 +95,11 @@ Worker IPC 使用令牌认证与固定端点：POSIX 为私有目录下的 UDS�
 
 Worker 取得 Session 文件锁、打开并验证本地账本后，先建立认证 IPC，再接收或恢复持久启动意图。首次启动须先接收 thread_open 并保存回执，才调度原生初始化；重启则只恢复已有持久意图。Host 的 3 秒等待只检查 Worker 的认证就绪状态，不等待 Agent；已存在的启动中 Worker 不得被再次拉起。`status` 区分 `worker_ready` 与 `agent_ready`，节点账本中的 ready 只表示本地 Worker 已接管，不能触发中心的 thread.opened。
 
-Worker 以短事务接收命令。新增本地 `thread_commands(command_id, action, content_digest, client_message_id, control_epoch, state, receipt, outcome)`，state 为 accepted/running 或终态 succeeded/failed/cancelled/unknown；通过 IPC 传递中心原始命令 ID。接收回执与该命令的状态或队列变更在同一事务提交。相同 ID、相同内容返回原回执和已知结果，内容不同时拒绝，不因已 ACK 再次执行。消息仍按 client_message_id 唯一，不同传输命令 ID 绑定到同一消息及同一执行结果。
+Worker 以短事务接收命令。`thread_commands(id, payload)` 的 JSON 保存内容摘要、接收回执和执行结果，状态为 accepted/running 或终态 succeeded/failed/cancelled/unknown；通过 IPC 传递中心原始命令 ID。接收回执与该命令的状态或队列变更在同一事务提交。相同 ID、相同内容返回原回执和已知结果，内容不同时拒绝，不因已 ACK 再次执行。消息仍按 client_message_id 唯一，不同传输命令 ID 绑定到同一消息及同一执行结果。
 
-所有命令终态、对应业务状态和最终报告在同一个 Worker 事务写入。新增 `command.completed` 报告，携带 `command_id`、`command_outcome`、reason 和 storage_generation；同事务先写相关 thread.opened/resumed、message.sent/withdrawn/unknown 或停止报告，再写完成报告。open/resume 在实际打开或恢复后完成，message 在原生输入确认或明确撤回/未知后完成，stop 在停止证据或未知结果确定后完成。重启扫描 accepted/running 和持久意图，不能仅依赖内存任务队列；终态命令只补送 outbox，不再次调度。
+所有命令终态、对应业务状态和最终报告在同一个 Worker 事务写入。`command.completed` 报告携带 `command_id`、`command_outcome`、reason 和 storage_generation；同事务先写相关 thread.opened/resumed、message.sent/withdrawn/unknown 或停止报告，再写完成报告。open/resume 在实际打开或恢复后完成，message 在原生输入确认或明确撤回/未知后完成，stop 在停止证据或未知结果确定后完成。重启扫描 accepted/running 和持久意图，不能仅依赖内存任务队列；终态命令只补送 outbox，不再次调度。
 
-中心保留 thread_outbox.acked_at 表示设备已持久接收，新增 completed_at、completion(JSONB) 保存执行结果。正 ACK 不设置 completed_at，执行前的明确拒绝同时结束命令；command.completed 按命令 ID、Thread、节点与存储代次验证后写完成状态。完成报告先于接收 ACK 到达也有效，迟到 ACK 不能覆盖完成结果。ThreadView.resume_pending 和 ResumeThread 去重改为查询 action=resume 且 completed_at 为空，持续到成功、失败、停止取消或未知终态；期间重复恢复请求复用同一待完成命令。
+中心以 thread_outbox.acked_at 表示设备已持久接收，以 completed_at、completion(JSONB) 保存执行结果。正 ACK 不设置 completed_at，执行前的明确拒绝同时结束命令；command.completed 按命令 ID、Thread、节点与存储代次验证后写完成状态。完成报告先于接收 ACK 到达也有效，迟到 ACK 不能覆盖完成结果。ThreadView.resume_pending 和恢复请求去重查询 action=resume 且 completed_at 为空，持续到成功、失败、停止取消或未知终态；期间重复恢复请求复用同一待完成命令。
 
 本地账本丢失或旧存储代次失效时，中心的历史缺失处理同时将受影响的待完成命令结束为 unknown，不能让已无法恢复的 resume 永久保持 pending。
 
@@ -119,12 +107,12 @@ Worker 以短事务接收命令。新增本地 `thread_commands(command_id, acti
 |---|---|---|
 | open | 保存配置、启动意图与命令回执 | 原生建立及映射持久化后发 thread.opened，失败发 thread.open_failed |
 | message | 校验归属和能力，保存 queued 消息与回执；steer 同时固定当前 target_turn_seq，无活动回合则拒绝 | 必要时恢复原生会话；准备、intent、提交后发 message.sent/unknown/withdrawn |
-| resume | 校验允许恢复，保存 resume_requested 与回执 | 恢复后发 thread.resumed，失败保持 stopped 或 unknown |
-| stop | 同事务保存停止标记、撤回 queued、递增控制代次与回执 | 中断正在启动、准备或提交的任务；用终止事件或回收证据确认 |
+| resume | 校验允许恢复，保存 resumeRequested 与回执 | 恢复后发 thread.resumed，失败保持 stopped 或 unknown |
+| stop | 同事务保存停止标记、撤回 queued、递增控制代次与回执 | 中断正在启动、准备或提交的任务；等待终止证据并核实实例和持久进程回收，报告 stopped 或 unknown |
 
-open 的成功 `ThreadCommandResult` 增加当前 `storage_generation`，中心校验当前连接后将它写入 Thread 已有字段，但不设置 opened_at、native_session_id 或 idle。这样 Agent 仍在初始化时，stop 已能携带正确代次到达节点。opened 报告可能先于 ACK 到达，二者须核对同一代次；迟到旧连接或不同代次不能覆盖现有归属。网页根据在线状态、接收确认和 opened_at 展示“设备已接收，Agent 正在启动”，不把 Worker ready 显示为 Agent 空闲。
+open 的成功 `ThreadCommandResult` 携带当前 `storage_generation`，中心校验当前连接后将它写入 Thread 已有字段，但不设置 opened_at、native_session_id 或 idle。这样 Agent 仍在初始化时，stop 已能携带正确代次到达节点。opened 报告可能先于 ACK 到达，二者须核对同一代次；迟到旧连接或不同代次不能覆盖现有归属。网页根据在线状态、接收确认和 opened_at 展示“设备已接收，Agent 正在启动”，不把 Worker ready 显示为 Agent 空闲。
 
-`thread_meta` 增加 `resume_requested` 和 `control_epoch`，`thread_messages` 以 `intent_preparation` 保存准备标识，并以 `target_turn_seq` 固定异步 steer 的目标回合；Windows 另有 `thread_processes(pid, created_at, role)`。采用当前实验室 schema，不增加旧账本读取分支。
+`thread_meta.payload` 保存 `resumeRequested` 和 `epoch`；`thread_messages.payload` 以 `preparation` 保存准备证据，以 `targetTurn` 固定异步 steer 目标，并保存执行身份与结束标记。`thread_processes(pid, created_at, role)` 保存所属进程；完整物理结构见 [Worker 账本](../baton/TECH.md#worker-账本)。
 
 状态变更和 SQLite 事务由一个串行的 Effect 队列处理；原生 Start、历史读取、模型配置、Send、Abort 和进程等待作为独立 fiber 在队列外执行。每个异步结果携带控制代次、操作标识和原生会话引用，过期结果不能改变新状态。stop 有独立登记与中断路径，不能排在发送 fiber 或启动任务之后。
 
@@ -155,7 +143,7 @@ open 的成功 `ThreadCommandResult` 增加当前 `storage_generation`，中心�
 
 通用 driver 将上游 `turn.terminal` 的 `failed` 转为带原生会话、输入与执行身份的 `end`（`outcome: failed`），并附安全原因。Worker 按正常结束路径保存 `turn.ended`，现有 `reason` 为 `failed`，`content` 为安全原因；中心将 `end_reason: failed` 写入 `thread_turns`，并把含原因的完整报告保存为时间线事件，无需扩展共享协议。输入保持 sent，Worker 保留 Agent 实例、host 进程与原生会话，继续调度队列。`queue_empty` 在结束事务中计算，中心据此选择 idle 或 running。网页在对应回合显示 `<Agent> could not finish this reply` 与原因，不为此显示 unknown 提示。运行时请求无法应答、事件流断开、发送结果无法确认、host 崩溃或连接丢失仍进入 unknown。
 
-以下按上游实现接受：adapter 内部的请求重试、断线重连和会话恢复（如 Cursor resume 冲突时取消旧 run 再发送，`enableAgentRetries`）；Pi、Codex 的 steer 归属；子任务与后台任务何时算回合结束；中断后的终态时序。T1 在本地抽取 runner 上做的输入不重放修改随 `packages/providers` 一并删除。上游行为导致的问题先在 fork 中修复并提交上游，不在 Baton 接入层另做一套等价逻辑。
+以下按上游实现接受：adapter 内部的请求重试、断线重连和会话恢复（如 Cursor resume 冲突时取消旧 run 再发送，`enableAgentRetries`）；Pi、Codex 的 steer 归属；子任务与后台任务何时算回合结束；中断后的终态时序。上游行为导致的问题先在 fork 中修复并提交上游，不在 Baton 接入层另做一套等价逻辑。
 
 ## 各 Agent 实现
 
@@ -164,8 +152,8 @@ open 的成功 `ThreadCommandResult` 增加当前 `storage_generation`，中心�
 | Pi | `provider-pi`（`server`、`server/status`、`testing` 导出） | 已接入注册、配置、只读探测与 host 回放；活动插入使用上游 steer |
 | Codex | `provider-codex`，依赖 `effect-codex-app-server` | 已接入注册、配置、只读探测与 host 回放；运行策略为 `approvalPolicy: never`、`sandboxPolicy: workspaceWrite`，网络关闭；活动插入使用上游 steer |
 | Kiro | `provider-acp` 与 `provider-acp-registry` | 已接入注册、配置、探测与 host；fork 的 `kiroAcp.ts` 启动 `kiro-cli acp --agent-engine=v3`，模型经 `session/new` 的 `_meta.kiro.modelId` 传递，`default` 省略；按 initialize 响应协商 v1。恢复先 `session/list` 核对 cwd/ID 再 `session/load`，失败不新建替代；不支持 steer 与换模型。程序已安装且认证 valid/unknown 时开放 create/resume，版本和系统不限 |
-| Cursor | `provider-cursor`（完整 driver 与 adapter） | 已用 `makeCursorAdapterV2` 取代 T1 的抽取 runner；`cursor-host` 泛化为 agent-host；SDK 附带目录与平台包分发方式不变 |
-| Grok、Antigravity | `provider-grok`、`provider-acp` | 切换后接入，复用同一宿主层 |
+| Cursor | `provider-cursor`（完整 driver 与 adapter） | `makeCursorAdapterV2` 在独立 agent-host 内运行；SDK、生产依赖与平台包通过附带目录分发 |
+| Grok、Antigravity | `provider-grok`、`provider-acp` | 待接入，复用同一宿主层 |
 
 程序、认证、协议与模型发现使用上游 driver 的检查结果，Baton 不另设系统或版本白名单。程序或 SDK 已安装、认证 valid/unknown 时报告 available，未知版本、其他系统、版本探测失败或超时均不阻止创建；缺程序或明确认证 missing 时报告 unavailable。离线回放覆盖的版本和系统范围保留在夹具与验证文档中，缺少验证证据的组合照常开放。
 
@@ -191,7 +179,7 @@ Thread 历史使用中心已保存的记录：`thread_messages` 保存员工和 
 | Codex | PATH 中的 `codex`；`CODEX_HOME`；Thread `model` | 新建、排队、插入、停止、恢复；Thread 内逐轮换模型 |
 | Kiro | local settings：`agentId: kiro`、`commandPath: kiro-cli`，从 PATH 查找；profile 为 `homedir()`；模型取 `model ?? adapter_config.model ?? 'default'` | adapter 支持新建、排队、停止、恢复；不支持插入或换模型；程序已安装且认证 valid/unknown 时开放 create/resume，版本和系统不限 |
 | Cursor | 随 batond 分发的 SDK、平台辅助包与本机 shell | 按上游 driver 报告的能力 |
-| Grok、Antigravity | 切换后接入时确定 | 切换后接入时确定 |
+| Grok、Antigravity | 接入时确定 | 接入时确定 |
 
 `agents/catalog.ts` 按固定上游 adapter 的能力与 Baton 已实现的执行路径报告：Pi、Codex 支持 steer，Cursor、Kiro 上游不支持；四个 Agent 均支持新建、排队、停止与恢复。Pi、Codex、Cursor 开放 `switch_model`。Worker 在准备输入时解析逐消息模型，省略时取账本中最近 `sent` 的 queue 输入模型或创建配置，并在 intent 中持久保存；失败或撤回的输入不改变继承模型。通用 driver 把该选择同时传入 `startTurn.modelSelection` 和 `appThread.modelSelection`。Pi adapter 在 prompt 前调用 `set_model`，Codex 在每次 `turn/start` 传模型，Cursor 在恢复会话和 SDK send 时传模型；steer 不接受模型。Kiro 的 fork adapter 在 `kiroAcp.ts` 的 `kiroCapabilityOverrides` 中明确关闭 `supportsActiveSteering`、`supportsSteeringByInterruptRestart` 和 `supportsModelSwitchInSession`；Baton 按该固定实现报告能力。该覆盖不证明 Kiro CLI 的所有版本都缺少对应协议方法。catalog 的 `limitation` 将这些原因写入报告。仅存在明确的数据丢失、越权或重复副作用风险时进一步限制已实现能力。
 
@@ -206,7 +194,7 @@ Kiro 的 `beforeLoadSession` 先用 `session/list` 检查 ID 与 cwd，再 `sess
 节点报告正式采用 `{agent_type, version, status, reason, models, default_model, capabilities}`。`RuntimeAgent.reason` 为可选 UTF-8 摘要，最多 1024 字节，禁止 NUL、控制字符和凭据；协议校验同时计入现有 64 KiB 报告预算。超长或未脱敏的 SDK 原始输出不能直接写入 reason。删除节点私有包装对同名字段的补写，生产与测试统一走正式结构。
 
 ```text
-注册表探测（batond 进程内）→ RuntimeReport → Coordinator 解码及验证
+公共 probe（batond 调度、独立 host 执行）→ RuntimeReport → Coordinator 解码及验证
         → node_runtime_reports.report(JSONB)
         → GET /api/v1/nodes、devices.list → status/create/reason
 ```
@@ -233,7 +221,7 @@ Kiro 的 `turnFailure` 回调处理真实回合的 provider failure：明确认�
 
 Baton fork 托管 Baton 的改动分支，`upstream/t3code` 固定到其中一个提交，升级上游时在 fork 中合并后再移动 submodule。fork 地址、固定提交和 Baton 补丁清单记录在 `third_party/t3code/README.md`，保留上游 MIT 许可与版权。
 
-batond bundle 直接打包用到的 `@t3tools/*` 包及其纯 JS 依赖。原生模块和需要磁盘布局的依赖（`@cursor/sdk` 与平台包、`@napi-rs/keyring`）放在 SEA 旁的附带 `node_modules`，打包检查见迁移 TECH。宿主层提供凭据文件后，若 keyring 不再被调用，可在 fork 中去掉该依赖。
+batond bundle 直接打包用到的 `@t3tools/*` 包及其纯 JS 依赖。原生模块和需要磁盘布局的依赖（`@cursor/sdk` 与平台包、`@napi-rs/keyring`）放在 SEA 旁的附带 `node_modules`，打包检查见 [发布设计](../release/TECH.md)。宿主层提供凭据文件后，若 keyring 不再被调用，可在 fork 中去掉该依赖。
 
 ## 验证策略
 
@@ -248,18 +236,12 @@ Kiro host 回放使用上述授权转换的夹具，验证范围包括真实 ada
 | fork 中用到的包 | 运行各包上游测试；Codex 拆包与 `kiroAcp` 的新增测试 | 上游模块测试 |
 | 宿主层 | 各 service 的路径、凭据、环境白名单；spawner 登记进程组 | 包内单测 |
 | 事件映射 | 用上游 testkit 替身驱动真实 adapter，核对 reply、end、uncertain 与 `sent` 判定 | 确定性回放 |
-| Worker 保证 | 沿用 T1～T3 的接收、intent、unknown、停止裁决与回收测试，换成 agent-host 替身 | Worker 集成 |
-| 主链路 | 每种 Agent 一条网页发送到回复、停止、恢复的回放链路 | e2e |
+| Worker 保证 | 接收、intent、unknown、停止裁决与回收测试，使用可控 ThreadAgent 替身并补真实 host 回放 | Worker 集成 |
+| 主链路 | Cursor、Pi、Codex、Kiro 经真实 provider host 回放验证网页 API 发送、回复、停止与恢复；remote/Project 复杂场景使用本地 ThreadAgent 替身 | e2e |
 | 历史 | 网页与 `threads.read` 读取同一份中心 Thread 记录，分页与权限正确 | 中心集成与 Web 契约 |
 | 探测与 reason | 四个 Agent 已安装且认证 valid/unknown 时 available；未知版本、其他系统、版本失败或超时只记入诊断。缺程序、明确认证缺失或 Cursor 明确依赖/sandbox 失败时 unavailable；整次探测未确认安装时 unverified；未开放能力写明原因 | 包内与本地可执行替身 |
 | Kiro 回合失败 | `provider_error` 与派生认证失败经真实 host/Worker 保存失败原因，输入保持 sent，后续排队消息执行并收到回复、原生会话与进程保留；中心时间线可读原因、空队列时 idle，网页在对应回合显示失败 | 确定性回放、Worker 集成、跨 app e2e 与网页数据层 |
-| 安装包 | 脱离源码运行 SEA，加载 t3code 依赖与附带目录 | 打包检查（T5） |
-
-## 实施状态
-
-[迁移任务清单](../ts-migration/TASKS.md) 中的 T1～T4 已完成。`upstream/t3code` 固定到 Baton fork，workspace 收录所需包及其上游离线测试；agent-host 提供共用宿主层与事件映射，Cursor、Pi、Codex、Kiro 均通过完整 adapter 接入。网页时间线与 Project 工具 `threads.read` 从中心记录读取 Thread 历史。
-
-T5 负责完整安装包、发布切换与系统矩阵复验。Grok、Antigravity 在切换后接入，复用同一宿主层。
+| 安装包 | 脱离源码运行 SEA，加载 t3code 依赖与附带目录 | 打包检查 |
 
 ## 上游参考
 
@@ -272,17 +254,17 @@ T5 负责完整安装包、发布切换与系统矩阵复验。Grok、Antigravit
 | [Pi](https://github.com/pingdotgg/t3code/blob/9828cad/packages/provider-pi/src/server/adapter.ts)、[Codex](https://github.com/pingdotgg/t3code/blob/9828cad/apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts)、[共享 ACP](https://github.com/pingdotgg/t3code/blob/9828cad/packages/provider-acp/src/server/adapter.ts)、[ACP registry](https://github.com/pingdotgg/t3code/tree/9828cad/packages/provider-acp-registry/src/server)、[Cursor](https://github.com/pingdotgg/t3code/blob/9828cad/packages/provider-cursor/src/server/adapter.ts) | 各 Agent 实现 |
 | [历史分页](https://github.com/pingdotgg/t3code/blob/9828cad/apps/server/src/orchestration-v2/threadHistoryPaging.ts)、[provider-testing](https://github.com/pingdotgg/t3code/tree/9828cad/packages/provider-testing) | 历史投影与回放测试 |
 
-## 待验证与批准事项
+## 验证范围与待验证事项
 
 | 项目 | 缺口 | 处理与阻塞范围 |
 |---|---|---|
-| FULL 同步提交耗时 | 输入 intent、大队列、Windows 和 Linux x64 未测 | 复现与负载范围见迁移 TECH；p99 超过 50 ms 时改用 worker_threads |
+| FULL 同步提交耗时 | macOS arm64、Linux x64 与 arm64 的 records.add/remove 负载已有测量；输入 intent、大队列与 Windows 未测 | 测量值与限制见 [发布验证](../release/TECH.md)；后续测量超标时评估 worker_threads |
 | Windows 进程回收 | taskkill 有父进程先退出和 Worker 崩溃后延迟回收两个缺口 | 已接受为第一版范围；Job Object 放第一版之后 |
 | 上游进程组 | 上游 adapter 自建 detached 进程组时的登记 | `agent-host/reclaim.integration.test.ts` 验证并组与独立 pgid 回收；Kiro `reclaim.integration.test.ts` 以真实 adapter 和本地 ACP 替身验证独立组与 grandchild，正常关闭、仅强杀 host 均回收。Pi、Kiro host 回放覆盖工具中断 |
 | Cursor 认证 | 上游 driver 使用 credential store 与 keyring | 已定：只用设备显式配置的 `CURSOR_API_KEY`，经 adapter 的 `environment` 注入；`ProviderHost.credentials` 保持只读空实现 |
 | Kiro ACP | 离线验证不证明真实账号授权有效 | 程序已安装且认证 valid/unknown 时开放 create/resume，版本和系统不限；reason 提示首次原生执行检查，明确 missing 拒绝；上游不支持 steer 和换模型 |
-| agent-host 冷启动 | 加载 t3code 依赖后的启动耗时未测 | 不计入 Worker 3 秒预算；open 仍受 30 秒原生预算约束，T5 复验 |
-| t3code 依赖打包 | `@t3tools/shared` 的 markdown 依赖与 keyring 原生模块进 SEA 未验证 | T5 打包检查；不需要的依赖在 fork 中去掉 |
-| Grok、Antigravity | 切换后接入，安装、认证与恢复证据未核查 | 只阻塞各自交付 |
+| agent-host 冷启动 | 加载 t3code 依赖后的启动耗时未测 | 不计入 Worker 3 秒预算；open 仍受 30 秒原生预算约束，按目标系统单独测量 |
+| t3code 依赖打包 | 已有四模块与 keyring 加载检查，原生依赖放在 SEA 旁；Windows 的 Worker/私有文件仍有验证缺口 | 安装包布局、检查入口和各系统结果见 [发布设计](../release/TECH.md) |
+| Grok、Antigravity | 待接入，安装、认证与恢复证据未核查 | 只阻塞各自交付 |
 
-审批本设计不等于上述组合已通过验证。实施记录保存在测试与 fork 的补丁说明中，长期规格原地更新其最终行为。
+各组合的验证范围由测试、转录和发布检查记录，未知系统或版本仍按安装与认证结果开放。

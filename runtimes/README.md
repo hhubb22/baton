@@ -2,11 +2,7 @@
 
 Baton 将 Project Runtime 编入 batond 的单一 Node SEA 可执行文件。安装目录包含 `batond`（Windows 为 `batond.exe`）、旁置 `node_modules/` 和许可文件。旁置目录提供完整 Cursor SDK、当前系统及架构的平台包、Project Runtime 模型库及其生产依赖和 t3code 所需原生模块。设备无需安装 Node 或 pnpm，也无需联网安装 npm 依赖。
 
-```sh
-node tools/package-batond.mjs
-```
-
-构建使用本机官方 Node，目标系统为 macOS arm64、Linux x64、Linux arm64 和 Windows x64。构建和安装包检查见 [工具说明](../tools/README.md)。升级时停止运行中的程序，整体替换可执行文件、旁置依赖与许可文件。安装步骤见 [INSTALL.md](INSTALL.md)。
+发布布局与平台验证范围见 [发布设计](../specs/release/TECH.md)，部署、设备接入和登录命令见 [根 README](../README.md)。安装包完整性与升级要求见 [INSTALL.md](INSTALL.md)，开发与验证命令统一见 [AGENTS.md](../AGENTS.md#常用构建与验证命令)。
 
 ## 命令入口
 
@@ -21,17 +17,11 @@ node tools/package-batond.mjs
 | `project-runtime <命令>` | Project 的运行、能力报告与订阅登录 |
 | `private-file` | 私有凭据文件 helper |
 
-`batond --version` 返回 JSON `{sea,platform,arch,node}`。`batond agent-host --probe` 离线加载四个 Agent host 模块，输出 `{"agents":["cursor","pi","codex","kiro"]}`。这两个检查不调用模型；模块加载失败会提示检查安装包的 `node_modules` 和平台依赖并非零退出。
+`batond --version` 返回 JSON `{sea,platform,arch,node}`。`batond agent-host --probe` 离线加载四个 Agent host 模块，输出 `agents:["cursor","pi","codex","kiro"]` 和 `nativeModules` 检查清单。这两个检查不调用模型；模块加载失败会提示检查安装包的 `node_modules` 和平台依赖并非零退出。
 
 Project Runtime 支持 `run`、`probe`、`login <provider>`、`login-device <provider>`、`login-api-key <provider>` 和 `--version`。`project-runtime` 后的参数由导出的 `runProjectRuntimeCLI(args)` 处理。Runtime 的 `probe` 返回协议版本 `0.1.0` 与本地订阅状态。
 
-```sh
-./batond project-runtime probe
-./batond login openai-codex
-./batond subscriptions
-```
-
-源码开发保留 `pnpm --filter @baton/batond dev <命令>`。开发 bundle 通过已安装的 tsx loader 启动 Runtime 与辅助入口，支持源码和开发 bundle 的目录布局；独立 Runtime 也可运行 `pnpm --dir runtimes/project-agent exec tsx src/cli.ts <命令>`。SEA 在检查源码路径前选择自身子命令，不要求源码目录。
+源码和开发 bundle 通过 Runtime 包安装的 tsx loader 启动源码 CLI 与辅助入口，保留仓库布局和锁定依赖；两种入口共用 `runProjectRuntimeCLI(args)`。SEA 在检查源码路径前选择自身子命令，不要求源码目录。
 
 ## stdio
 
@@ -55,11 +45,6 @@ POSIX 使用私有目录和 `0600` 文件，读取检查所有者、类型和权
 
 ## 验证
 
-```sh
-pnpm --filter @baton/batond typecheck
-pnpm --filter '...@baton/batond' --workspace-concurrency=1 test
-pnpm --dir runtimes/project-agent test
-node tools/check-package.mjs
-```
+验证命令见 [AGENTS.md](../AGENTS.md#常用构建与验证命令)，安装包检查的范围与平台结果见 [发布设计](../specs/release/TECH.md)。
 
 安装包检查在无源码、空 PATH 和临时 HOME 中运行，覆盖帮助、版本、完整 Worker 到认证 IPC 就绪、四个 Agent 模块加载、Project Runtime stdio 握手与旁置依赖缺失。适配器与模型行为使用本地替身和离线转录验证，不要求真实 API key。

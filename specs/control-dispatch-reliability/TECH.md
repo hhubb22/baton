@@ -27,9 +27,9 @@ flowchart LR
 
 ## 2. 现有依据与借鉴
 
-Thread 命令派发由 `apps/server/src/server.ts` 的独立循环执行，`threads-outbox.ts` 从各节点到期候选中领取记录；接收与完成由 `threads-reports.ts` 按持久命令身份保存。`control-maintenance.ts` 独立处理吊销补偿与断线重试。
+Thread 命令派发由 `apps/server/src/server.ts` 的独立循环执行，`threads/outbox.ts` 从各节点到期候选中领取记录；接收与完成由 `threads/reports.ts` 按持久命令身份保存。`control-maintenance.ts` 独立处理吊销补偿与断线重试。
 
-[Project 命令领取](../../apps/server/src/project-scheduling.ts) 分别处理 start、stop 和 wake，按节点应用额度并跳过被锁定的候选。业务结束保存停止意图，进程清理完成由节点确认。输入的通知接收进度与业务认领进度分别保存。
+[Project 命令领取](../../apps/server/src/project/scheduling.ts) 分别处理 start、stop 和 wake，按节点应用额度并跳过被锁定的候选。业务结束保存停止意图，进程清理完成由节点确认。输入的通知接收进度与业务认领进度分别保存。
 
 | 上游机制 | 本方案采用的部分 |
 |---|---|
@@ -77,7 +77,7 @@ Thread 命令派发由 `apps/server/src/server.ts` 的独立循环执行，`thre
 | `id bigserial` | 投递顺序；同一 Thread 内按它发送 |
 | `employee_id`、`thread_id`、`node_id` | 归属与目标 |
 | `message_id uuid` | 稳定消息 ID，重试不变 |
-| `action` | open / message / withdraw / stop |
+| `action` | open / message / withdraw / stop / resume / settings / answer |
 | `payload jsonb` | 命令内容；message 只带 `client_message_id`，正文在发送时从 `thread_messages` 读取 |
 | `attempts`、`next_attempt_at` | 已持久化的尝试次数、下一次可领取时刻 |
 | `acked_at` | 设备持久化回执的时间 |
@@ -206,9 +206,9 @@ Project 状态迁移、输入领取和 wake_received 按 Agent → Conversation�
 | 模块 | 职责 |
 |---|---|
 | `apps/server/src/server.ts`、`control-budget.ts`、`control-maintenance.ts` | 独立派发与维护循环、控制操作预算、吊销补偿 |
-| `apps/server/src/threads-outbox.ts`、`threads-reports.ts` | Thread 命令到期领取、同 Thread 顺序、接收与完成、报告幂等 |
-| `apps/server/src/project-scheduling.ts` | 放置、start / stop / wake 独立到期领取与节点额度 |
-| `apps/server/src/project-runtime.ts` | stopped、wake_received 的身份校验与确认事务 |
+| `apps/server/src/threads-outbox.ts`、`threads/reports.ts` | Thread 命令到期领取、同 Thread 顺序、接收与完成、报告幂等 |
+| `apps/server/src/project/scheduling.ts` | 放置、start / stop / wake 独立到期领取与节点额度 |
+| `apps/server/src/project/runtime.ts` | stopped、wake_received 的身份校验与确认事务 |
 | `apps/server/src/project-inputs.ts`、`projects.ts` | 主动通知需求、输入去重与锁方向 |
 | `apps/batond/src/project` | Runtime 启动意图、通知合并、进程回收和清理补送 |
 

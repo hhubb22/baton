@@ -1,13 +1,6 @@
 # 远程节点
 
-`up` 首次通过 HTTPS 注册节点，保存中心签发的连接凭据，随后保持出站 WSS 连接。已有 `identity.json` 时复用身份。`register` 只注册，已有身份时拒绝覆盖；`run` 读取已有身份并连接。开发入口为 `pnpm --filter @baton/batond dev <命令>`。
-
-```sh
-BATON_ENROLLMENT_TOKEN='…' pnpm --filter @baton/batond dev up --coordinator https://baton.example --workspace /绝对目录
-pnpm --filter @baton/batond dev run
-```
-
-所有命令支持 `--data-dir`，默认 `~/.baton-ts`。注册凭据来自 `BATON_ENROLLMENT_TOKEN` 或 `--enrollment-file` 指定的私有文件。`--ca-file` 设置额外的 TLS 信任根；TLS 验证始终启用。连接地址默认从身份文件中的 HTTPS 中心地址推导，也可由 `run --relay wss://主机/v1/node` 指定。CLI 只打印公开身份摘要。
+`up` 首次注册并保持出站 WSS，已有身份时复用；`register` 拒绝覆盖已有身份，`run` 读取已有身份。连接地址从持久化的 HTTPS 中心地址推导，支持显式 relay 与附加 CA，TLS 验证始终开启；CLI 只打印公开身份摘要。部署和配置用法见根 README。
 
 私有目录中的 `identity.json` 保存中心签发的 JWT；授权目录由 [`devices/roots.ts`](../devices/roots.ts) 统一读写和检查，配置格式、数量上限与加锁规则见 [设备管理与文件访问](../devices/README.md)。仅配置文件不存在时登记用户主目录，已有空列表保留。`up --workspace` 按真实路径幂等添加目录。open、message 和 resume 下发前复核工作目录的真实路径与授权根；stop、withdraw 使用已登记的 Thread 身份与代次，撤销授权或删除工作目录后仍可停止和撤回。目录和文件预览由 `devices/` 提供，使用同一授权根；目录符号链接解析后须仍在该根内，文件预览保留字节上限与分页信息。
 
@@ -19,11 +12,11 @@ Worker 报告先写入 node.db outbox，再确认 Worker。单连接最多保留
 
 认证成功后发送 `node.sync` 与心跳；匹配的同步回执成功后发送 Thread 和能力报告。`up`、`run` 的 `--control-timeout-seconds` 设置认证与同步各自的等待预算，默认 370 秒，范围 1～3600 秒的整数；嵌入调用对应 `controlTimeoutSeconds`。认证从连接建立起计时，同步从认证成功起重新计时，任一阶段超时均断开并退避重连。中心默认握手期限为 15 秒，可配置上限为 361 秒，默认节点预算覆盖中心期限。中心以合法入站帧维护传输活性，慢业务处理期间收到的心跳仍保持连接，数据库身份校验在心跳与业务处理时执行。公共 `agents/probe.ts` 按 catalog 中的 Cursor、Pi、Codex、Kiro 顺序并发探测，命令读取最近完成的能力快照。每次探测有 30 秒预算，取消会等待 host 断开、进程回收和临时目录清理；Windows 的登记锁覆盖恢复至清理，回收未确认时保留登记。探测未完成时上报 `unverified`、`create:false` 和原因。命令接收复用外层 4.5 秒预算，Worker 启动至多 3 秒，随后 IPC 至多 1 秒，并服从剩余预算。
 
-`session.request` 的输出读取原样转发为 Worker 的 `session_request`；实时输出不写入节点报告账本。网页时间线与 Project 工具从中心读取已保存的 Thread 输入、回复和事件，设备不保存原生历史。
+`session.request` 的输出读取原样转发为 Worker 的 `session_request`；实时输出不写入节点报告账本。网页时间线与 Project 工具从中心读取已保存的 Thread 输入、回复和事件，设备上的原生历史仍由各 Agent 管理，Baton 不提供原生历史查询接口。
 
 Project manager 在 WSS 连接循环外构造，连接同步后绑定当前 RPC transport，断线时取消旧请求并保留运行中的 Runtime。每条连接最多 64 个 Project 请求在途，响应只匹配本连接的 correlation ID。start、stop、wake 在独立任务中处理，Runtime 的节点管理操作与业务 stdio 请求分开授权。租约、持久清理事实和 Thread 版本等待见 [Project Runtime 宿主](../project/README.md)。
 
-设备目录、仓库、执行授权和订阅报告在独立采集循环中更新，每轮完成后等待五秒；连接建立或配置变化触发刷新。目录扫描和 Runtime probe 共享两秒预算，Agent 探测继续独立运行。最终报告按带缩进 JSON 计量并裁剪至 64 KiB，先裁仓库和模型，再裁目录；控制连接和 Worker 报告不等待文件扫描。
+设备目录、仓库、执行授权和订阅报告在独立采集循环中更新，每轮完成后等待五秒；连接建立或配置变化触发刷新。目录扫描使用两秒预算，Runtime probe 使用独立配置预算（默认五秒），并发启动后等待两者；Agent 探测继续独立运行。最终报告按带缩进 JSON 计量并裁剪至 64 KiB，先裁仓库和模型，再裁目录；控制连接和 Worker 报告不等待文件扫描。
 
 ## 嵌入接口
 
@@ -35,3 +28,5 @@ Project manager 在 WSS 连接循环外构造，连接同步后绑定当前 RPC 
 运行方使用 `Effect.runPromise(Effect.scoped(runDaemon(options)), { signal })` 管理退出。`DaemonServices` 通过 Effect Context 提供 Host、传输与探测实现；连接、后台任务、SQLite 和进程锁由 Scope 管理。
 
 离线测试注入本地 WebSocket 传输、能力探测和 Worker Host 替身。测试覆盖持久接收、报告先落盘再确认、回执丢失重连、存活 Worker 重发现、报告去重与缺口重放、目录授权拒绝和独占锁，不调用在线模型或外部 API。
+
+部署与设备接入见 [根 README](../../../../README.md)，验证命令见 [AGENTS.md](../../../../AGENTS.md#常用构建与验证命令)。

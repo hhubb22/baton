@@ -4,7 +4,7 @@
 
 ## 入口
 
-- `makeThreadAgentFactory(options)`：按 `agent_type` 创建 ThreadAgent，推导绝对工作目录和私有状态目录，open/resume 后才启动 host。
+- `makeThreadAgentFactory(options)`：按 `agent_type` 创建 ThreadAgent，推导绝对工作目录和私有状态目录，调用 open/resume 时启动 host。
 - `probeAgents({ dataDirectory, agentTypes })`：在临时空工作目录的只读 host 中探测，Cursor 预检 SDK 资产和显式 API key。
 - `cursorAgentHostModule`：`agent-host` 子命令按 `cursor` 类型加载的 driver 层。
 
@@ -18,7 +18,7 @@
 
 ## 会话与映射
 
-`agent-host/mapping.ts` 在 Thread 私有目录写一个版本 2 的映射文件，内容是 `thread_id`、原生会话 ID、canonical 工作目录、映射路径和完整的 `OrchestrationV2ProviderThread`，用 JSON 编码和原子写保存。open/resume 在返回前完成映射写入；映射的 Thread、路径或工作目录不匹配时拒绝恢复。
+`agent-host/mapping.ts` 在 Thread 私有目录写一个版本 2 的映射文件，内容是 `threadId`、`nativeSessionId`、canonical `cwd`、`statePath`、`agentType`、非敏感 `profile` 和完整的 `providerThread`（`OrchestrationV2ProviderThread`），用 JSON 编码和原子写保存。open/resume 在返回前完成映射写入；映射的 Thread、路径或工作目录不匹配时拒绝恢复。
 
 - open：`openSession` 后 `ensureThread`，并把 provider thread 写入映射。
 - resume：读取映射，用保存的 provider thread 调 `resumeThread`。
@@ -49,9 +49,6 @@ host 消费 `ProviderAdapterV2` 的事件并映射为 `agent-host` 协议：
 
 `host.integration.test.ts` 用 `@t3tools/provider-cursor/testing` 的离线转录和确定性 runner 驱动真实 adapter，经实际 host 子进程的 stdio/RPC 覆盖 open、send、增量、reply、abort、end、resume、sent 的确认与未确认。`agent-host/evidence.test.ts` 覆盖确认位置和准备校验；`agent-host/environment.test.ts` 与 `host-layer.test.ts` 覆盖环境白名单、宿主路径和只读凭据。
 
-回放转录在测试侧按当前 harness 追加运行时说明，并统一原生 sandbox 开关；不改转录原文，也不调用真实 API。运行方式：
+回放转录在测试侧按当前 harness 追加运行时说明，并统一原生 sandbox 开关；不改转录原文，也不调用真实 API。
 
-```sh
-pnpm --filter @baton/batond typecheck
-pnpm --filter @baton/batond test
-```
+部署与设备接入见 [根 README](../../../../../README.md)，验证命令见 [AGENTS.md](../../../../../AGENTS.md#常用构建与验证命令)。

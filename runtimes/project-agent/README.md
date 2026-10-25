@@ -2,30 +2,15 @@
 
 `baton-project-runtime` 使用 pi-agent-core 和 pi-ai 1.3.0，在 Coordinator 保存的主对话上运行。生产工具由 Coordinator 执行并提交结果；Runtime 提供固定工具定义、顺序调用、模型重试、写入屏障、自动上下文压缩和恢复。
 
-## 安装与登录
+## 运行与凭据
 
-Runtime 编入 batond 的单一 SEA，以 `batond project-runtime` 子命令运行，设备无需安装 Node。构建和进程约定见 [Runtime 子命令约定](../README.md)。在解压后的安装目录运行：
+Runtime 编入 batond 的 SEA，通过 `project-runtime` 子命令运行；进程与 stdio 契约见 [Runtime 子命令约定](../README.md)。部署、设备接入与登录命令统一见 [根 README](../../README.md)，开发与验证入口见 [AGENTS.md](../../AGENTS.md#常用构建与验证命令)。
 
-```sh
-./batond login openai-codex
-./batond subscriptions
-```
-
-Runtime 使用同一份 provider 注册表生成执行实例、模型目录、认证探测和登录入口，当前注册 `openai-codex`（ChatGPT）、`xai`（xAI）和 `anthropic`（Claude）。ChatGPT 仅支持 OAuth；xAI 和 Claude 支持 OAuth 或 API key。TypeScript 节点可通过 `pnpm --filter @baton/batond dev login anthropic` 登录 Claude；安装包也可使用 `batond project-runtime login anthropic`。登录 ChatGPT 时，终端显示浏览器登录和设备码登录选项；输入编号或选项 ID，回车选择第一项。浏览器登录支持粘贴回调地址；无浏览器的设备可选择设备码登录，在另一台设备的浏览器中输入终端显示的验证码。按 Ctrl+C 取消登录。
-
-API key 从设备本地标准输入保存，命令行参数只包含 provider。将 key 保存在仅自己可读的文件后运行：
-
-```sh
-./batond project-runtime login-api-key anthropic < key-file
-# 源码开发入口
-pnpm --dir runtimes/project-agent exec tsx src/cli.ts login-api-key xai < key-file
-```
-
-输入须为非空单行文本，最多 16 KiB，允许末尾换行。Windows PowerShell 使用 `Get-Content -Raw key-file | .\batond.exe project-runtime login-api-key anthropic`。保存完成后删除输入文件。每个 provider 保存一份凭据，API key 配置会替换该 provider 的 OAuth 登录，使用相同的私有权限检查、原子写入和跨进程锁。Runtime 只读取自己的凭据目录，不自动读取环境 API key 或其他 CLI 的账号。探测只确认对应 provider 支持该认证类型且本地凭据完整，真实请求决定授权是否有效。
+Runtime 使用同一份 provider 注册表生成执行实例、模型目录、认证探测和登录入口，当前注册 `openai-codex`（ChatGPT）、`xai`（xAI）和 `anthropic`（Claude）。ChatGPT 使用 OAuth，xAI 与 Claude 支持 OAuth 或 API key。登录可选择已实现的交互方式，取消会结束登录进程。API key 从设备本地标准输入接受非空单行文本，最多 16 KiB，允许末尾换行；每个 provider 保存一份凭据，API key 会替换同 provider 的 OAuth 登录。Runtime 只读取自己的凭据目录，实际模型请求确认授权有效性。
 
 设备设置 API 可发起在线设备的非交互登录，支持 ChatGPT 和 xAI 的设备码流程；Claude 的 OAuth 使用终端交互。设备报告的 `login_methods` 来自已注册 provider 的认证实现和设备码能力，网页据此显示设备码登录或本地配置命令。API key 始终从设备本地输入，不经过网页和中心。Runtime 的 `login-device <provider>` 自动选择设备码方式，stdout 首行返回 `{type:"device_code",provider,verification_uri,user_code,expires_in_seconds}`，随后继续轮询直到凭据保存完成；未提供有效期时使用 900 秒。SIGINT、SIGTERM 或标准输入关闭取消登录，其他交互输入返回错误。batond 取得设备码后让进程在后台继续等待，结束时立即刷新订阅报告。
 
-`batond` 在 SEA 中通过自身可执行文件启动 `project-runtime`，加载可执行文件旁 `node_modules/` 中的固定依赖。源码开发仍可通过 `pnpm --dir runtimes/project-agent exec tsx src/cli.ts <命令>` 或编译后的 `baton-project-runtime` 入口运行；两种入口共用导出的 `runProjectRuntimeCLI(args)`。Windows 独立开发入口需要保留仓库布局和已安装依赖：凭据操作自动定位仓库中的 TS 私有文件 helper，通过当前 Node 和 file URL 形式的 tsx loader 启动。也可通过结构化 `BATON_PRIVATE_FILE_HOST_COMMAND` 指定 helper 的程序与参数；指定宿主失败或默认 helper 缺失时，凭据操作返回错误。
+`batond` 在 SEA 中通过自身可执行文件启动 `project-runtime`，加载可执行文件旁 `node_modules/` 中的固定依赖。源码 CLI 与编译入口共用导出的 `runProjectRuntimeCLI(args)`。Windows 独立开发入口需要保留仓库布局和已安装依赖：凭据操作自动定位仓库中的 TS 私有文件 helper，通过当前 Node 和 file URL 形式的 tsx loader 启动。也可通过结构化 `BATON_PRIVATE_FILE_HOST_COMMAND` 指定 helper 的程序与参数；指定宿主失败或默认 helper 缺失时，凭据操作返回错误。
 
 使用运行 `batond run` 的同一个系统用户登录。凭据默认保存在用户主目录下的 `.baton/project-runtime`；可用 `BATON_PROJECT_RUNTIME_DATA_DIR` 指定 Runtime 专用的私有目录，登录和守护进程须使用相同配置。凭据与 Pi、Codex CLI 的登录记录分别保存，不上传 Coordinator。`FileCredentials` 负责 OAuth 事务与跨进程锁，内部使用直接文件 adapter 或 private-file host adapter；两个 adapter 共用 read、write 与 protect-dir 契约测试。POSIX 目录须属于当前 UID 且权限恰为 `0700`，文件须属于当前 UID、为普通文件、权限恰为 `0600` 且只有一个硬链接；拒绝特殊权限位和符号链接，打开前后核对设备与 inode。Windows 通过 host 验证私有目录 ACL，限制见 [平台私有文件约定](../../apps/batond/src/platform/README.md#私有文件)。凭据 JSON 按 UTF-8 字节限制为 64 KiB，写入使用同目录临时文件、文件 fsync 和原子替换，POSIX 再同步目录。显式 protect-dir 可以收紧已有目录权限；普通读取拒绝不安全路径。host 的 `protect(file, false)` 保持返回 `credential_use_native_write`，文件保护由原子写入完成。
 
@@ -47,7 +32,7 @@ batond 检查版本 `0.1.0`、登录状态和租约后，在空控制目录启�
 
 assistant 的 `message_end` 监听器先等待 `append_event` 提交，再按消息内的顺序发出 `call_tool`。每个工具结果由 Coordinator 保存；后续模型请求使用中心保存的结果。Runtime 的工具执行模式为 `sequential`。恢复时读取已有结果，只为缺少结果的工具调用发送原 ID；最后一条非压缩事件为 input 或 tool_result 时调用 `continue()`，为无工具 assistant 时领取下一批输入；压缩事件不改变未完成轮次的恢复位置。
 
-开发工作通过 `threads.create` 和 `threads.send` 交给执行 Agent，使用 `threads.get/read` 查询状态和回复，`threads.stop/archive` 停止当前一轮或归档 Thread。新建时按设备能力、用户要求和项目记忆选择 Agent 与模型；`threads.create` 的 `model` 省略时使用设备上该 Agent 的默认模型。`threads.send` 可用 `model` 指定下一轮模型，省略时沿用当前模型；设备必须上报该模型且支持换模型，`steer` 沿用当前一轮模型。工具操作的 Thread 都属于本 Project，由 Project Agent 新建；用户随后可以在其中开启自己的轮次，回复按每轮第一条消息的发送方决定是否送回 Project Agent。`inbox.ask` 可用 `thread_id` 关联本 Project 的 Thread。
+开发工作通过 `threads.create` 和 `threads.send` 交给执行 Agent，使用 `threads.get/read` 查询状态和回复，`threads.stop/archive` 停止当前一轮或归档 Thread。新建时按设备能力、用户要求和项目记忆选择 Agent 与模型；`threads.create` 的 `model` 省略时使用设备上该 Agent 的默认模型。`threads.send` 可用 `model` 指定下一轮模型，省略时沿用当前模型；设备须支持换模型，模型目录用于发现与补全，显式 ID 交给原生 Agent 判定，`steer` 沿用当前一轮模型。工具操作的 Thread 都属于本 Project，由 Project Agent 新建；用户随后可以在其中开启自己的轮次，回复按每轮第一条消息的发送方决定是否送回 Project Agent。`inbox.ask` 可用 `thread_id` 关联本 Project 的 Thread。
 
 `nodes.exec` 的 pending 响应携带 `thread_id`；`wait_protocol=1` 时还携带非负安全整数 `version` 和 `wait_remaining_ms`。batond 声明 `local_wait_protocol=1` 时，Runtime 用 `{thread_id, after_version, wait_ms}` 本地等待最多 25 秒，然后通过 `wait_tool` 查询中心保存的状态。未声明协议时每 250ms 查询一次；运行期限到达时用 `finish_wait=true` 保存当前状态。等待结束后命令继续执行，输出可通过 `threads.read` 获取。
 
@@ -67,11 +52,8 @@ assistant 的 `message_end` 监听器先等待 `append_event` 提交，再按消
 
 ## 验收证据
 
-```sh
-pnpm --dir runtimes/project-agent test
-node tools/package-batond.mjs
-```
+验证命令见 [AGENTS.md](../../AGENTS.md#常用构建与验证命令)，安装包检查见 [发布设计](../../specs/release/TECH.md)。
 
 测试包括请求前与收尾压缩、旧工具结果保护、前缀与签名复用、超限恢复、重复压缩、提交冲突与丢失回执、无效摘要拒绝、结尾表四种情况、部分工具已有结果、真实子进程在保存和工具事务前后被杀、失败屏障禁止工具执行、模型失败与超限输出、虚拟时钟下的 180 秒与 15 分钟边界、两个凭据 adapter 的严格权限、属主、类型、链接、64 KiB 边界、缺失文件、原子替换与事务锁，以及无网络 probe。跨系统请求测试用超过 1 MiB 的历史验证分页和 provider 扩展字段的保留。
 
-faux 恢复测试的 Coordinator 替身负责持久化和事务去重。真实 Runtime、batond、Gateway、Coordinator 与 PostgreSQL 的跨 app 集成测试位于 `e2e/`，运行 `pnpm test:e2e`。测试检查工具结果、记忆、压缩事件与读取起点在 Coordinator 保存，原始消息保留，运行正常结束。事务故障注入测试验证服务端去重。Runtime、跨设备调度和恢复的自动验收使用本地模型替身及离线录制；真实订阅检查仅在显式手动运行冒烟时执行。
+faux 恢复测试的 Coordinator 替身负责持久化和事务去重。真实 Runtime、batond、Gateway、Coordinator 与 PostgreSQL 的跨 app 集成测试位于 [e2e/](../../e2e/README.md)。测试检查工具结果、记忆、压缩事件与读取起点在 Coordinator 保存，原始消息保留，运行正常结束。事务故障注入测试验证服务端去重。Runtime、跨设备调度和恢复的自动验收使用本地模型替身及离线录制；真实订阅检查仅在显式手动运行冒烟时执行。

@@ -23,7 +23,7 @@ yield* worker.failed
 - `abort` records cancellation independently of a pending open or send. `reap` confirms the whole process tree and excludes late resource creation from cancelled startup.
 - Reply identity and the native session, input and execution IDs determine event ownership. Old instance events and ended-turn events cannot become output for a new turn.
 
-The Worker supports queued messages and accepts `steer` when the Agent registry reports it (Pi and Codex). Steering persists the active target turn with the queued input, checks that target before writing intent, and submits through the adapter without starting another Worker turn. A terminal event that overtakes a pending steering response is buffered until acceptance is recorded, so message.sent reaches the coordinator while the target turn is still open. A failed steering submission becomes unknown because text presence in a snapshot cannot establish which native turn received it. Cursor and shell reject steering. A failed open or resume runs bounded close/reap cleanup before its failure is completed. Confirmed cleanup retires the instance; retries obtain a fresh instance. Unconfirmed cleanup leaves the Thread unknown and prevents execution until process reaping is confirmed.
+The Worker supports queued messages and accepts `steer` when the Agent catalog reports it (Pi and Codex). Steering persists the active target turn with the queued input, checks that target before writing intent, and submits through the adapter without starting another Worker turn. A terminal event that overtakes a pending steering response is buffered until acceptance is recorded, so message.sent reaches the coordinator while the target turn is still open. A failed steering submission becomes unknown because text presence in a snapshot cannot establish which native turn received it. Cursor, Kiro and shell reject steering. A failed open or resume runs bounded close/reap cleanup before its failure is completed. Confirmed cleanup retires the instance; retries obtain a fresh instance. Unconfirmed cleanup leaves the Thread unknown and prevents execution until process reaping is confirmed.
 
 ## Real-time output
 
@@ -61,7 +61,7 @@ The Worker alone owns the ledger. `openWorkerLedger({ dbPath, dataDirectory? })`
 
 Commands bind their ID to a content digest and immutable receipt. Distinct command IDs for the same message share its execution result; conflicting message content is rejected. Business reports precede `command.completed` in the same transaction. Every `turn.ended` includes `queue_empty` from that transaction: the coordinator uses it to select idle when no queued input remains, or running while another input waits. The outbox retains stable report IDs and sequences until acknowledgment. Reports fit within 120 KiB of encoded JSON and a pending response fits within 240 KiB; shortened text carries its original UTF-8 byte count and truncation flag.
 
-On reopen, queued inputs can resume from their durable native mapping. Persisted intent is restored and checked with read-only evidence, and is never automatically sent again. An interrupted first open without a committed Worker mapping becomes unknown. A cancelled first open cannot resume or create another native session. Stop withdraws queued messages, invalidates pending execution results and uses turn termination or process reaping as evidence. An uncertain outcome remains unknown after a later process exit.
+On reopen, ordinary Agents first reclaim persisted process records and the old execution instance. Confirmed recovery ends any unfinished sent input with a durable turn.ended report, then resumes the native mapping when queued inputs or an explicit request require it. Shell follows a separate path: reclaim old processes, verify the matching completion record and replay its reply and end; missing evidence leaves the outcome unknown. Persisted intent is restored and checked with read-only evidence, and is never automatically sent again. An interrupted first open without a committed Worker mapping becomes unknown. A cancelled first open cannot resume or create another native session. Stop withdraws queued messages and invalidates pending execution results. After waiting for termination evidence, it still reaps the execution instance and persisted process records; only confirmed cleanup and known input outcomes produce thread.stopped. An uncertain outcome remains unknown after a later process exit.
 
 An explicit failed turn does not enter unknown or trigger process reaping. Broken event streams, unconfirmed sends and host crashes or connection loss still use the uncertainty path. Questions wait for an explicit answer within the active Turn's execution budget. An unconfirmed answer records an unknown command outcome and closes the question without resending the original input.
 
@@ -71,12 +71,6 @@ Each accepted Turn uses `execution_timeout_seconds`, initially 7200 seconds unle
 
 ## Verification
 
-Run from the repository root:
-
-```sh
-pnpm --dir apps/batond exec vp test run --config ../../vitest.config.ts src/worker
-pnpm --filter @baton/batond typecheck
-pnpm exec vp lint apps/batond/src/worker
-```
+Deployment and device setup are documented in the [root README](../../../../README.md); verification commands are maintained in [AGENTS.md](../../../../AGENTS.md#常用构建与验证命令).
 
 The tests use real temporary SQLite files and controllable Agents. `ledger.test.ts` owns the persistent-format matrix, opening and inspection agreement, immutable save baselines, full output save ordering and read-only inspection checks. Kiro's offline provider-error and derived authentication-error transcripts also exercise the real host and Worker: failed turns retain safe reasons, inputs stay sent, queued messages receive replies, and the same process and native session remain available. The Worker tests cover receipts and conflicts, queued turns, cancellation, event ownership, Scope recovery, process record recovery, bounded outbox delivery, Turn timeouts, explicit continuation after uncertainty, commit uncertainty, UTF-8 cursors, bounded output, upstream gaps and stop responsiveness during output floods. Platform process-tree behavior, authenticated IPC and real Cursor execution are exercised by their integration owners.

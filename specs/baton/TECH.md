@@ -1,8 +1,7 @@
 # Baton 技术设计
 
 Status: approved
-Owner: 待指定
-Basis: [行为规格](PRODUCT.md) R-01～R-25；代码调查基线 `323a8a9`。Project Agent 见 [Project Agent TECH](../project-agent/TECH.md)，事项见 [Agent Inbox TECH](../agent-inbox/TECH.md)。
+Basis: [行为规格](PRODUCT.md) R-01～R-25。Project Agent 见 [Project Agent TECH](../project-agent/TECH.md)，事项见 [Agent Inbox TECH](../agent-inbox/TECH.md)。
 
 ## 全景
 
@@ -20,13 +19,7 @@ Basis: [行为规格](PRODUCT.md) R-01～R-25；代码调查基线 `323a8a9`。P
 
 一个 Thread 在设备上对应一个 Session Worker 和一个原生 Agent 会话。Worker 拥有这个 Thread 的消息队列、Turn 边界和回复账本；Coordinator 拥有 Thread 记录、消息意图和中心保存的回复。中心不能主动连接设备，所有下行命令通过设备建立的 WSS 连接送达。
 
-| 进程 | 拥有的状态与职责 | 不负责 |
-|---|---|---|
-| Coordinator | 员工、设备、Thread、消息意图、回复与附件引用、Project、对话、事项；派发与期限扫描；浏览器 API | 原生会话历史、模型推理、设备上的文件 |
-| Gateway（Coordinator 内） | 节点认证、连接代次、心跳、限流、有界队列 | 业务持久化、Thread 语义 |
-| batond | 设备身份、中心连接、能力汇总、Worker 发现与启动、Project Runtime 启停与续租 | 不在内存中保存唯一的执行事实 |
-| Session Worker | 一个 Thread 的原生 Agent 进程、消息队列、Turn 边界、回复账本、本地历史访问 | 签发身份、改派 Thread |
-| Project Runtime | 一次 Project Agent 运行，见 Project Agent TECH | 执行命令、访问文件 |
+目录职责与实现入口见根目录 [AGENTS.md](../../AGENTS.md#核心架构与目录)。
 
 Worker 由 batond 用同一可执行文件的内部子命令启动，与 batond 分开存活；batond 重启后重新连接原 Worker。POSIX 下 Agent host 使用独立进程组并由 watchdog 回收；Windows 下保存 PID 与创建时间，使用 `taskkill /T /F` 回收。Worker 与 batond 之间使用带认证的 Unix domain socket 或 named pipe。
 
@@ -34,16 +27,45 @@ Worker 由 batond 用同一可执行文件的内部子命令启动，与 batond 
 
 ### 技术选择
 
-| 位置 | 技术 |
+| 位置 | 技术与约束 |
 |---|---|
-| Coordinator、batond、Worker | TypeScript、Node 26、Effect 4 |
-| Project Runtime | Node.js，`@earendil-works/pi-agent-core` 与 `pi-ai` |
-| 中心存储 | PostgreSQL 16+，`@effect/sql-pg`，版本化 SQL 迁移 |
-| 设备账本 | `node:sqlite`，WAL、FULL 同步，`packages/sqlite` 提供事务与提交核查 |
+| Coordinator、batond、Worker | TypeScript 6.0、Node 26、Effect 4.0.6；版本由 pnpm catalog 锁定 |
+| 服务与生命周期 | Effect Context.Service、Layer、Scope；后台任务以 fiber 管理 |
+| HTTP 与 RPC | `effect/http-api` 共享 HTTP 契约，`effect/http` 提供底层服务；Worker 与 agent-host 使用 `effect/rpc` |
+| 子进程 | 节点宿主通过 Node `child_process` 启动，再提供 Effect 生命周期包装；provider 使用宿主提供的 Node Effect spawner |
+| Project Runtime | Node.js、`@earendil-works/pi-agent-core` 与 `pi-ai`；stdio 连接节点宿主 |
+| 中心存储 | PostgreSQL 16+、`@effect/sql-pg`、参数化 SQL、版本化 SQL 迁移 |
+| 设备账本 | `node:sqlite`、WAL、FULL 同步；`@baton/sqlite` 提供串行事务与独立提交核查 |
+| 追踪 | Effect 原生 OTLP/HTTP，持久 trace context 关联 HTTP、outbox、WSS、IPC 与 Worker；默认不导出，过滤 SQL 文本、参数和错误详情 |
 | Web | React、TypeScript、StyleX、Vite，从中心 bundle 旁的 `web/` 提供静态文件 |
-| 设备与中心通信 | TLS WebSocket，版本化 JSON 信封 |
+| 设备与中心通信 | `ws`、TLS WebSocket、版本化 JSON 信封 |
+| 构建与检查 | esbuild 生成 Node bundle，batond 使用 SEA；Vite+ 提供 Vitest、Oxlint、Oxfmt 与 TypeScript Go 检查，各包保留编译器检查 |
 
-Agent 的结构化接口由 t3code fork 的完整 provider adapter 实现，在 agent-host 中运行。Cursor provider 使用原生 SDK，其他执行 Agent 使用 CLI 的结构化接口。
+Agent 的结构化接口由 t3code fork 的完整 provider adapter 实现，在 agent-host 中运行。Cursor provider 使用原生 SDK，其他执行 Agent 使用 CLI 的结构化接口。fork 以 submodule 固定提交，来源见 [t3code 说明](../../third_party/t3code/README.md)；安装包布局与平台测量见 [发布设计](../release/TECH.md)。
+
+### 实现原则
+
+Worker 用串行队列提交短事务，慢 I/O 在独立 fiber 中执行，结果携带控制代次返回状态队列。取消响应、回合终态和进程回收分别核实；intent 必须先于原生提交持久化。领域状态和确定性解析使用普通 TypeScript 数据结构与函数，Web 使用 React。
+
+中心与节点保留员工隔离、事务原子性、命令幂等、租约 fencing 和恢复证据。源码开发入口、bundle 与安装包共用业务实现。实验室阶段使用当前 schema，可重建旧开发数据；正式发布后的升级使用版本化迁移。自动化验证使用离线转录与本地替身，入口见 [AGENTS.md](../../AGENTS.md#常用构建与验证命令)。
+
+### 数据库访问
+
+中心统一通过 Effect SqlClient 与 PgClient 执行 SQL，共享事务、连接、取消和追踪上下文。状态机、持久命令和锁查询使用显式 SQL；迁移以根目录 SQL 文件为唯一来源。Drizzle 的查询构造与类型推导可在有实际需求时评估，当前维护另一套表定义与版本的收益有限；Prisma 还需整合执行器、生成过程及事务上下文，因此当前保持 Effect SQL。
+
+`sql<T>` 只声明静态结果类型，关键返回值需用 Effect Schema 或 `effect/sql/SqlSchema` 校验。引入查询构造器时仍需核实实际编码、运行时解码和共享事务上下文，保留现有取消与提交语义。
+
+SQLite 在外层提交前写随机 token。COMMIT 报错且事务已结束时，从独立只读连接核对持久 token；匹配则返回原结果，核验失败返回不可重试的 `CommitUnknown` 并阻止后续查询，Worker 冻结并重新打开账本。任何查询库替换都须保留此路径、嵌套 savepoint、取消保护与 `afterCommit` 语义。
+
+### 平台相关实现
+
+| 能力 | POSIX | Windows 第一版 |
+|---|---|---|
+| 进程回收 | 独立进程组与 watchdog；host 独立组登记见 [适配设计](../agent-adapters/TECH.md#进程组与停止回收) | 持久 PID、创建时间与 `taskkill /T /F`；中间父进程先退出、Worker 崩溃后延迟回收及身份核验到终止之间的竞争仍有限制 |
+| 私有文件 | 目录 `0700`、文件 `0600`；检查属主、类型、链接数及打开前后的身份 | 显式保护目录时设置受保护 DACL，仅授权当前用户 SID；普通验证通过 `icacls /save` 核对数值 SID；未提供逐句柄 DACL 与 reparse point 校验 |
+| Worker IPC | 私有目录下的 UDS 与令牌认证 | Node 默认安全描述符的命名管道与令牌认证，令牌保存在私有目录 |
+
+平台能力集中在 `apps/batond/src/platform`，时钟与恢复裁决分别由 Project 宿主和 Worker 拥有。Project 租约与 Turn 执行时限取 `max(hrtime 经过值, Date.now 经过值)`，计入睡眠并防止时钟回拨延长预算；Worker 停止等待使用 hrtime，睡眠期间会暂停。Windows Job Object、逐句柄 DACL 与管道权限收紧列入 [第一版之后](../release/TECH.md#第一版之后)。
 
 ## Thread 与 Turn
 
@@ -77,7 +99,7 @@ Agent 的结构化接口由 t3code fork 的完整 provider adapter 实现，在 
 3. Worker 按方式处理：
    - `queue`：Agent 空闲时立即作为新 Turn 的第一条消息发出；Agent 执行中时留在 Worker 队列，Turn 结束后按 `seq` 顺序逐条发出，每条开启一个新 Turn。
    - `steer`：Agent 执行中时调用适配器的 `Steer`；Agent 已空闲时按 `queue` 处理。
-4. 发送前 Worker 同步提交 `send_intent`，再调用适配器；适配器确认后记为 `sent`，并把消息归入当前 Turn。意图已提交但确认丢失时，用 `client_message_id` 查询原生历史；查不到也无法排除已发送时，消息和 Thread 都进入 `unknown`，不重发（R-13）。
+4. 发送前 Worker 同步提交 `send_intent`，再调用适配器；适配器确认后记为 `sent`，并把消息归入当前 Turn。意图已提交但确认丢失时，用持久输入准备证据核对原生快照中已确认发送数之后的下一条 user 正文及会话身份；证据不足时，消息和 Thread 都进入 `unknown`，不重发（R-13）。
 5. 撤回只对 Worker 队列里尚未提交 `send_intent` 的消息生效；中心记录撤回请求，设备回执后标为 `withdrawn`。停止一轮时，Worker 在同一事务里撤回全部未发出的消息（R-11）。
 
 接收消息时同时检查 64 KiB 正文上限和 JSON 编码后的 256 KiB 传输上限，并为存储代次、来源和外层帧预留容量。正文因控制字符转义而超过传输上限时返回 413，不写入消息或 outbox。
@@ -103,10 +125,11 @@ Turn 由 Worker 定义：从一条消息被 Agent 接受开始，到适配器报
 
 员工停止、Project Agent 停止和执行时限到期走同一流程：
 
-1. Worker 在一个事务里撤回队列中未发出的消息，记录停止请求和开始时间。
-2. 调用适配器的 `Abort`。Agent 在 60 秒内停下（适配器报告 `TurnEnded`），这一轮以 `stopped` 或 `timeout` 结束，Thread 回到 `idle`。
-3. 60 秒内没有停下，或 `Abort` 返回错误，Worker 结束 Agent 的整个进程树：POSIX 上向 Agent 的进程组发 SIGKILL，Windows 上按 PID 与创建时间记录校验身份后执行 `taskkill /T /F`。进程树回收后，这一轮以原因结束，Thread 进入 `stopped`，原因为「Agent 没有在 1 分钟内停下，已结束进程」。下一条消息按 R-12 恢复原会话。
-4. 进程树无法确认回收时，Thread 进入 `unknown`，这一轮仍以原因结束。
+1. Worker 在一个事务里撤回尚未提交 intent 的排队消息，保存停止请求、控制代次和开始时间，关闭待回答问题。
+2. 在独立停止任务中调用适配器的 `abort`，中断原有启动、准备或发送任务，在默认 60 秒总预算内等待回合终止或回收证据，并为最终清理预留时间。取消调用错误保留在停止路径内处理，等待超时后尝试回收。
+3. 无论是否收到回合结束事件，都继续 `reap` 当前执行实例并核实持久进程记录的回收。已提交但尚未确认的 intent 使用新的只读实例核对原生证据，旧执行实例不再用于恢复。
+4. 回收和输入结果均可确认时，结束活动 Turn，原因记为 `stopped` 或 `timeout`，保存 `thread.stopped` 和 stop 命令成功结果，Thread 进入 `stopped`。下一条新消息或显式恢复请求可恢复原会话。
+5. 进程回收未确认、intent 无法核实或已有未知结果时，Thread 保持 `unknown`，stop 命令结果也为 unknown；shell 还必须取得匹配的完成证据。停止仍为活动 Turn 补结束报告，停止不回滚已有副作用。
 
 每个 Thread 的 agent-host 与 Worker 分开存活。POSIX 下 host 是独立进程组组长，上游 adapter 新建的独立进程组登记给 watchdog；Worker 崩溃或被强制结束时，私有管道关闭，watchdog 回收已登记进程组。正常关闭、协议失败或自然退出也执行幂等回收。
 
@@ -140,7 +163,7 @@ Windows 第一版按账本保存的 PID 与创建时间核对身份，再用 `ta
 | `thread_turns` | Turn：Thread、`worker_turn_seq`、发起方（员工或 Project Agent）、使用的模型、开始与结束时间、结束原因 |
 | `thread_replies` | 回复：Thread、Turn、`worker_seq`、正文、截断标记与原字节数、附件 JSON、元数据（shell 的退出码） |
 | `thread_events` | 只追加的审计事件：新建、消息接受、停止请求、归档、状态变化，附操作者与时间（R-23） |
-| `thread_outbox` | 下行命令意图：`thread.open`、`thread.message`、`thread.withdraw`、`thread.stop`、`thread.resume`；下一次尝试时间、尝试次数、确认时间 |
+| `thread_outbox` | open、message、withdraw、stop、resume、settings、answer 的下行命令意图；下一次尝试时间、尝试次数、接收确认与完成结果 |
 | Project 相关表 | 见 Project Agent TECH 与 Agent Inbox TECH |
 
 `threads` 以 `(employee_id, id)` 为复合唯一键，所有引用使用包含 `employee_id` 的复合外键。`client_thread_id` 在员工内唯一；Project Agent 创建的 Thread 另以 `(origin_conversation_id, origin_tool_call_id)` 唯一。
@@ -177,6 +200,8 @@ Worker 的报告类型：
 | `reply` | 插入 `thread_replies` |
 | `turn.ended` | 写结束时间与原因；Worker 队列为空时 Thread → `idle` |
 | `thread.stopped` / `thread.unknown` | → `stopped` / `unknown`，附原因 |
+| `command.completed` | 按命令身份与存储代次保存执行结果，与接收 ACK 分开 |
+| `question.pending` / `question.resolved` | 保存问题或关闭对应请求，关联本轮输入与执行身份 |
 
 每个报告带 `event_id` 和 Worker 序号。中心在一个事务里保存报告、更新状态，并按消息或 Turn 的归属写入 Project Agent 输入队列（Project Agent TECH 第 9 节），提交后返回 ACK；Worker 收到 ACK 才确认本地 outbox。重复报告按 `event_id` 返回原 ACK。中心按 Worker 序号处理，序号跳跃时拒绝并要求补报，保证 `turn.ended` 不会早于这一轮的回复入库。
 
@@ -188,16 +213,17 @@ Worker 的报告类型：
 
 | 表 | 内容 |
 |---|---|
-| `meta` | 存储代次 |
-| `threads` | 中心 Thread ID 到本地 Session 目录的映射、Agent 类型、工作目录；`thread.open` 的接收记录 |
-| `workers` | Worker 进程索引 |
-| `node_open_attempts`（TS） | 本地 IPC 和 daemon 的 open 交付事实，即使尚未登记 Worker 也先记录，后续登记不能覆盖 |
-| `thread_command_receipts` | 命令 ID、请求摘要及原回执 |
-| `thread_worker_reports` | 节点已读到、中心尚未确认的 Worker 报告；保留原事件身份、序号和正文 |
-| `thread_node_reports`、`thread_report_progress` | 本地恢复报告及已发送序号，支持 Worker 账本不可读时补报 |
-| `project_runtime_runs` | Project Runtime 的启动去重与清理确认，见 Project Agent TECH |
+| `node_commit` | FULL 事务的提交核验 token |
+| `node_commands` | 命令 ID、内容摘要、请求与原接收回执的 JSON payload |
+| `node_workers` | Thread、存储代次、原配置、Worker 启动阶段与报告进度的 JSON payload |
+| `node_open_attempts` | open 可能已交付的持久事实，Worker 登记不能覆盖它 |
+| `node_outbox` | Worker 与节点恢复报告，保存 Thread、连续序号、事件 ID、摘要、正文和 ACK 状态 |
 
-`thread.open` 先写 `threads` 再回执，重复命令返回同一映射。`thread.opened` 带上存储代次，中心保存在 `threads` 上，之后的命令都携带它。设备重装或 `node.db` 丢失后代次改变，batond 拒绝旧代次的命令，Thread 进入 `stopped`，原因为本地历史缺失，不会用同一个 Thread ID 新开一个空会话。设备账本按当前 schema 创建，只保存 Thread 与 Project Runtime 所需状态。TS 节点账本将 Worker 启动尝试与 open 交付阶段分开保存：登记配置时为 `startup_phase: awaiting_open`，daemon 和 Worker 的本地 IPC 入口在交付 open 前提交 `open_attempted`，收到绑定身份的状态、回执或报告也保留该事实。未交付 open、原账本缺失或确认为空且无执行记录时，允许用原命令 ID 和配置重试启动；可能交付后缺失或为空，以及账本损坏时，继续上报历史不可用。
+存储代次保存在 `node_workers.generation` 与绑定的 Worker 配置中。`thread.open` 先保存命令和 Worker 配置，再回执；重复命令返回原接收事实。成功接收和 `thread.opened` 均绑定同一代次，后续命令必须匹配。已有 Thread 不能因设备账本丢失而新建空会话。
+
+登记配置时启动阶段为 `awaiting_open`；daemon 和 Worker 本地 IPC 入口在交付 open 前提交 `open_attempted`，绑定身份的状态、回执和报告也保留该事实。未交付 open、原账本缺失或确认为空且无执行记录时，允许用原命令 ID 和配置重试启动；可能交付后缺失或为空，以及账本损坏时，上报历史不可用。Worker 原始报告先进入节点 outbox，再向 Worker 确认，中心 ACK 独立持久保存。
+
+Project Runtime 使用独立的 `project-runtime.db`。`project_runtime_runs` 保存运行与清理事实的 JSON payload，`project_processes` 保存按 role 索引的进程身份，`project_commit` 提供提交核验；它们不属于 `node.db`。
 
 ### Worker 账本
 
@@ -205,11 +231,14 @@ Worker 的报告类型：
 
 | 表 | 内容 |
 |---|---|
-| `meta` | Thread ID、Agent 类型、当前模型、适配器配置、原生会话标识、当前 Turn 序号与状态 |
-| `messages` | `client_message_id`（唯一）、seq、方式、可选模型、正文、状态（queued / intent / sent / withdrawn / unknown）、状态原因 `status_reason`、所属 Turn |
-| `turns` | Turn 序号、使用的模型、开始与结束时间、结束原因 |
-| `replies` | 回复序号、Turn、正文、附件、元数据 |
-| `outbox` | 待中心确认的报告 |
+| `thread_meta` | 单行 JSON：Thread 配置、原生身份、控制代次、Turn 序号、活动输入、停止和恢复状态 |
+| `thread_commands` | 命令 ID 与 JSON：内容摘要、固定接收回执、执行状态和结果 |
+| `thread_messages` | 消息 ID 与 JSON：seq、方式、模型、正文、准备证据、状态、Turn 与执行身份、结束标记 |
+| `thread_processes` | PID、创建时间和 role，按完整身份删除 |
+| `thread_outbox` | 连续序号与 JSON：报告、ACK 标记及原始回复证据 |
+| `worker_commit` | FULL 事务的提交核验 token |
+
+Turn 边界与回复保存在上述消息状态和报告中，没有独立的 turns 或 replies 物理表。账本模块拥有格式解码、保存基线及只读检查；daemon 根据检查结果裁决恢复。
 
 不变量：
 
@@ -229,10 +258,11 @@ Worker 的报告类型：
 | Worker 启动失败，open 尚未交付 | node.db 为 `awaiting_open`，Worker 无命令、输入、进程及报告记录 | 可重试启动，原 open 命令 ID、配置及存储代次不变 |
 | open 可能已交付，Worker 账本缺失或为空 | node.db 为 `open_attempted`，可能已创建原生会话 | 上报历史不可用，禁止自动重建 |
 | 消息已入 Worker 队列，未提交 `intent` | 尚未发出 | 按队列顺序继续发送 |
-| `intent` 已提交，适配器确认未记录 | 可能已发出 | 查原生历史中的 `client_message_id`；找到则记 `sent`，否则 `unknown`，不重发 |
-| Turn 进行中，Worker 崩溃 | Agent 可能仍在运行 | 新 Worker 连接原生会话；能确认这一轮已结束则补报 `turn.ended`，否则 Thread `unknown` 并以 `agent_exited` 结束这一轮 |
+| `intent` 已提交，适配器确认未记录 | 可能已发出 | 用持久准备证据只读核对原生快照的位置、正文和会话身份；确认则记 `sent`，否则 `unknown`，不重发；steer 无法仅凭正文确认目标回合 |
+| 普通 Agent 的 Turn 进行中，Worker 崩溃 | 旧进程与 sent 输入仍在账本中 | 先回收持久进程记录及旧执行实例，确认后为未结束的 sent 输入补 `turn.ended`；按 queued 消息或显式请求决定是否恢复原会话，回收不明则 unknown |
+| shell 的 intent / sent 尚未结束 | 可能已有本机副作用 | 先回收旧进程，再读取身份匹配的完成记录；有证据则补回复与结束报告，无证据或身份不符则 unknown，不重新执行命令 |
 | 回复已保存，ACK 丢失 | 可重复上报 | 按 `event_id` 去重 |
-| batond 重启 | Worker 可能仍在 | 重新连接 Worker；连接不上时启动新 Worker 走上一行 |
+| batond 重启 | Worker 可能仍在 | 重新连接 Worker；不可达且无活动锁时检查原账本，再按上述恢复规则处理 |
 
 Worker 崩溃后，POSIX watchdog 回收所属进程组；Windows 在下次启动时按持久进程记录核实回收。未确认回收时保持 unknown，确认后显式恢复或新消息可以继续原会话，旧 intent 不重发（R-12、R-13）。
 
@@ -276,7 +306,7 @@ batond 在 `node_runtime_reports.report.agents` 上报每种 Agent 的 `{agent_t
 
 `status` 为 `available`、`unverified` 或 `unavailable`。程序或 SDK 已安装且认证 valid/unknown 时报告 available，开放 create/resume；缺程序或明确认证 missing 时报告 unavailable。系统与版本不设白名单，未知版本、版本探测超时、模型目录问题和能力限制记录在 reason 中；整次探测失败且安装状态未确认时报告 unverified。Cursor 的资产、辅助程序或 sandbox 明确失败时报告 unavailable。shell 须单独开启本机命令权限。中心按目标系统路径规则检查工作目录属于上报的 roots，设备在执行前核实目录存在与真实路径边界。
 
-TS daemon 在独立探测循环调用 `probeLocalAgents`，每轮结束后默认间隔 30 秒，单次 host 探测最多 30 秒。探测失败保留诊断，后续循环继续重试，不按可执行文件路径或版本永久缓存空目录。探测不发送 prompt、不发起登录；Kiro 的模型发现会建立空的 ACP 会话。能力探测与目录采集、连接、心跳和 Worker 消息分别运行。
+daemon 在独立探测循环调用 `probeAgents`，每轮结束后默认间隔 30 秒，单次 host 探测最多 30 秒。探测失败保留诊断，后续循环继续重试，不按可执行文件路径或版本永久缓存空目录。探测不发送 prompt、不发起登录；Kiro 的模型发现会建立空的 ACP 会话。能力探测与目录采集、连接、心跳和 Worker 消息分别运行。
 
 ## 接口
 
@@ -411,32 +441,13 @@ TypeScript 的 `GET /nodes/{id}/files` 通过 `root_id`、`path` 浏览目录和
 
 中心位于 `apps/server`，构建产物为 `apps/server/dist/server.cjs` 及相邻的 `web/`、`migrations/`。与 PostgreSQL 部署后，运行 `node apps/server/dist/server.cjs serve` 提供静态页面、API、浏览器 WebSocket 和节点 WSS。`serve`、账号管理和 `migrate` 都先执行并核对迁移；`migrate` 完成后退出。
 
-签名密钥路径由 `BATON_NODE_SIGNING_KEY` 指定，默认工作目录下的 `node-signing.key`；仅在 `lstat` 确认不存在时生成 Ed25519 私钥并原子写入 `0600` 文件，已有文件校验权限、类型、所有者和内容。升级先停止旧中心，再启动新实例完成迁移；节点退避重连并同步。中心默认监听 `127.0.0.1:8080`，通过 HTTPS 反向代理公开；也可直接配置证书提供 HTTPS/WSS。容器与设备 SEA 的发布布局见 [迁移设计](../ts-migration/TECH.md#打包与发布)。
+签名密钥路径由 `BATON_NODE_SIGNING_KEY` 指定，默认工作目录下的 `node-signing.key`；仅在 `lstat` 确认不存在时生成 Ed25519 私钥并原子写入 `0600` 文件，已有文件校验权限、类型、所有者和内容。升级先停止旧中心，再启动新实例完成迁移；节点退避重连并同步。中心默认监听 `127.0.0.1:8080`，通过 HTTPS 反向代理公开；也可直接配置证书提供 HTTPS/WSS。容器与设备 SEA 的发布布局见 [发布设计](../release/TECH.md#打包与发布)。
 
 节点 bundle 为 `apps/batond/dist/batond.cjs`，命令使用 `node apps/batond/dist/batond.cjs <命令>`。`register` 使用 Node 的平台标识推导系统名，显示名由主机名清理而来。注册在 `identity.json` 保存规范化 HTTPS 中心地址，`run` 优先使用显式 `--relay`，否则推导 WSS 地址。`up` 复用注册和运行逻辑，在没有身份时要求中心地址和凭据；workspace 在连接前幂等登记。默认设备数据目录为 `~/.baton-ts`。
 
-设备进程使用员工账号运行。开发 bundle 的 Project Runtime 从 `runtimes/project-agent/src/cli.ts` 与已安装依赖启动，宿主负责 stdio、订阅登录和租约；SEA 集成使用迁移设计中的子命令形态。
+设备进程使用员工账号运行。开发 bundle 的 Project Runtime 从 `runtimes/project-agent/src/cli.ts` 与已安装依赖启动，宿主负责 stdio、订阅登录和租约；SEA 使用 [发布设计](../release/TECH.md#打包与发布) 中的子命令形态。
 
-## 模块职责
-
-| 模块 | 职责 |
-|---|---|
-| `apps/server/src/gateway.ts`、`server.ts` | 节点与浏览器连接、认证、有界队列、控制操作预算与后台循环 |
-| `apps/server/src/threads*.ts` | Thread、消息、命令领取、接收与完成、报告去重与时间线 |
-| `apps/server/src/project-*.ts`、`projects.ts`、`inbox.ts` | Project、对话、记忆、放置、租约、工具、输入和事项事务 |
-| `apps/server/src/http*.ts`、`auth.ts`、`nodes.ts` | 共享 HTTP 契约、账号、设备与归属检查 |
-| `apps/server/src/database.ts`、`migrations/` | PostgreSQL 访问与版本化 SQL 迁移 |
-| `apps/batond/src/daemon` | 设备身份、WSS、节点账本、Worker 发现与认证 IPC |
-| `apps/batond/src/worker` | Thread 命令、消息、intent、Turn、回复、输出与恢复 |
-| `apps/batond/src/agent-host`、`src/agents` | 完整 fork provider 的宿主与事件映射，受限 shell |
-| `apps/batond/src/devices` | 授权目录、路径边界、文件预览、仓库与能力报告 |
-| `apps/batond/src/platform` | 私有文件、锁、进程组、watchdog、Windows PID 创建时间与回收 |
-| `apps/batond/src/project`、`runtimes/project-agent` | Runtime 生命周期、租约与订阅；模型、工具、压缩与恢复 |
-| `upstream/t3code`、`apps/batond/src/testing` | 上游 adapter、测试和转录；Baton 的确定性回放与本地替身 |
-| `packages/{protocol,sqlite,telemetry}` | 共享 Schema、SQLite 事务和提交核查、追踪 |
-| `e2e`、`web/src` | 跨 app 集成测试与网页 |
-
-检查使用 `pnpm check`、`pnpm typecheck` 和按影响范围选择的 workspace 测试。前端流程见 `specs/web-ui/PLAN.md`，适配器离线验证见 [回放设计](../agent-replay/TECH.md)。
+目录职责见 [AGENTS.md](../../AGENTS.md#核心架构与目录)，开发与验证入口见 [AGENTS.md](../../AGENTS.md#常用构建与验证命令)。适配器离线验证见 [回放设计](../agent-replay/TECH.md)。
 
 ## 验证
 
@@ -454,10 +465,10 @@ TypeScript 的 `GET /nodes/{id}/files` 通过 `root_id`、`path` 浏览目录和
 | R-11 | 在 Turn 开始前、执行中、刚结束时停止，各有 2 条排队消息 | 排队消息被发出；未确认就显示已停止 | Worker 回放 |
 | R-12 | Agent 进程退出后发消息；删除原生历史后发消息 | 恢复时 Thread ID 改变；历史缺失时新建了空会话 | Worker 回放 |
 | R-15、R-22 | 一轮结束后让设备离线，检索中心数据库与日志中的随机标记 | 回复不可见；原生历史或实时输出出现在中心 | 集成 |
-| R-16 | 设备 A 持续输出，设备 B 同时收消息和停止 | B 的命令延迟超过约定值；缓冲无界增长 | Gateway 负载测试 |
+| R-16 | 设备 A 持续输出，设备 B 同时收消息和停止 | 缓冲无界增长；跨设备命令延迟阈值在第一版之后确定与验证 | Gateway 本地流控测试；负载阈值为第一版之后 |
 | R-18 | 回复里写登记目录内路径、目录外路径、`commit <SHA>` | 目录外路径生成附件；commit 缺少仓库 | 单元测试 |
 | R-19、R-20 | 执行中重启 Coordinator、batond、Worker，短停 PostgreSQL | 消息重发；回复重复；同步前设备显示可用 | 进程测试 |
-| R-24 | 500 台设备、100 个执行中 Thread，24 小时 | 未达到约定阈值（D6） | 压测环境 |
+| R-24 | 第一版之后验证 500 台设备、100 个执行中 Thread，24 小时 | 第一版之后按 D6 确定容量阈值并判定 | 第一版之后的压测环境 |
 | R-25 | 当前消息带未知字段、未声明可选能力 | 未知字段导致拒绝或已知字段改变；未声明能力被启用 | 协议扩展测试 |
 
 自动化验收使用离线转录与本地替身；进程回收、私有文件、SQLite 和安装包检查在对应系统本地运行。交叉构建不代替原生验证，未测项如实记录。真实订阅和模型调用仅用于显式手动冒烟。
@@ -467,4 +478,4 @@ TypeScript 的 `GET /nodes/{id}/files` 通过 `root_id`、`path` 浏览目录和
 | 编号 | 事项 | 阻塞范围 |
 |---|---|---|
 | Q3 | 各 Agent 在三类系统上的实际能力（D1） | 支持矩阵 |
-| Q5 | 压测阈值（D6） | 容量达标声明 |
+| Q5 | 第一版之后确定 R-16、R-24 的负载阈值（D6） | 容量达标声明；不作为第一版验收条件 |

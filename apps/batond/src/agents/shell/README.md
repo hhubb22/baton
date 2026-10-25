@@ -12,13 +12,10 @@ Shell 只用于 Project 的 `nodes.exec`。中心验证工具调用来源，Work
 
 命令退出后有界等待输出管道，回收残余进程树，再原子保存私有 `output.json`，最后产生一条回复和结束事件。完成记录包含输入准备摘要、消息标识、执行标识、结果和进程树已停止事实。恢复从该记录补报原回复，Worker 按稳定回复 ID 去重；记录缺失、损坏、来源或输入不匹配时进入 `unknown`。执行后被取消的结果保留为副作用未知。未提交 intent 的队列可以从原有映射恢复发送，已提交的命令只读取证据。
 
-stdout 和 stderr 合并保留开头、结尾各 16 KiB。回复的 `original_bytes` 是合并输出的原始字节数，`truncated` 表示输出是否超过 32 KiB，`metadata.exit_code` 为进程退出码。保留字节含无效 UTF-8、不可展示控制字符或 JSON 转义容量过大时整体以 base64 编码，`metadata.encoding` 为 `base64`。Worker 报告保留完整 base64 文本，不再按编码后的长度裁剪；历史读取返回同一份本机完成结果。
+stdout 和 stderr 合并保留开头、结尾各 16 KiB。回复的 `original_bytes` 是合并输出的原始字节数，`truncated` 表示输出是否超过 32 KiB，`metadata.exit_code` 为进程退出码。保留字节含无效 UTF-8、不可展示控制字符或 JSON 转义容量过大时整体以 base64 编码，`metadata.encoding` 为 `base64`。Worker 报告保留完整 base64 文本，不再按编码后的长度裁剪；中心历史保存同一份有界回复与元数据，原始完成记录保留在设备。
 
 测试依据当前 TypeScript 的 shell、Worker、输出与进程回收测试（`index.test.ts`、`../../worker/{index,output}.test.ts`、`../../platform/process.test.ts`），以及 `specs/project-agent/TECH.md` 第 10 节。此目录没有外部模型转录；测试使用本机 shell、确定性命令、受控事件交付和真实 SQLite。覆盖完成保存后尚未报告的 sent / intent 恢复、证据缺失或不匹配不重发、快命令输出、目录授权、开关重读、进程组取消和 base64 报告。
 
-```sh
-pnpm --dir apps/batond exec vp test run --config ../../vitest.config.ts src/agents/shell/index.test.ts src/worker/index.test.ts src/worker/output.test.ts src/platform/process.test.ts
-pnpm --dir apps/batond exec tsc --noEmit
-```
+部署与设备接入见 [根 README](../../../../../README.md)，验证命令见 [AGENTS.md](../../../../../AGENTS.md#常用构建与验证命令)。
 
 进程行为测试在 Windows 上跳过，Windows 原生进程回收和 PowerShell 命令行为需要在目标系统执行现有平台验证。

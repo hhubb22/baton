@@ -2,7 +2,7 @@
 
 Status: approved
 Owner: Baton
-Basis: [Agent 适配 TECH](../agent-adapters/TECH.md#验证策略)、[TypeScript 迁移 TECH](../ts-migration/TECH.md#测试依据)、[t3code 来源与许可](../../third_party/t3code/README.md)。
+Basis: [Agent 适配 TECH](../agent-adapters/TECH.md#验证策略)、[Baton TECH](../baton/TECH.md#验证)、[t3code 来源与许可](../../third_party/t3code/README.md)。
 
 ## 数据与执行边界
 
@@ -38,21 +38,12 @@ Kiro 转录说明见 [fork README](../../upstream/t3code/packages/provider-acp-r
 | 远程主链路 | `e2e/src/remote.integration.test.ts`、`provider-agents.integration.test.ts` | 中心、节点、独立 Worker，经网页 API 发送、回复、停止和恢复 |
 | Project | `e2e/src/project.integration.test.ts` 与 Runtime 包测试 | 本地模型替身贯穿主对话、工具、Thread、事项、记忆、租约与恢复 |
 
-跨 app 测试通过声明的 workspace 导出使用节点转录辅助模块。`e2e/src/testing/provider-replay-worker.ts` 分派 Pi、Codex、Kiro 的 Worker 与 host；Cursor 使用独立的 replay Worker 入口。数据库中断、ACK 丢失、中心与节点重启使用真实本机 PostgreSQL、HTTP、WebSocket、SQLite 和 IPC。
+跨 app 测试通过声明的 workspace 导出使用节点转录辅助模块。`e2e/src/testing/provider-replay-worker.ts` 分派 Cursor、Pi、Codex、Kiro 的真实 Worker 与 provider host 回放。Cursor 使用上游 `provider_thread_resume.ndjson`，保留原生身份与消息，应用节点测试层的运行提示和 sandbox 转换，再按 host 生命周期切段。remote 与 Project 场景使用 `e2e/src/testing/replay-worker.ts` 的本地 ThreadAgent 替身，验证协调、存储与恢复，不经过 provider host。数据库中断、ACK 丢失、中心与节点重启使用真实本机 PostgreSQL、HTTP、WebSocket、SQLite 和 IPC。
 
-回放负责验证协议与事件行为；进程回收、SQLite 提交、IPC 和安装包布局分别由本地进程、数据库与打包检查验证。Windows 的 PID／创建时间与 `taskkill` 边界、各系统未测项见 [适配设计](../agent-adapters/TECH.md#进程组与停止回收) 和 [迁移验证](../ts-migration/TECH.md#待验证与批准事项)。
+回放负责验证协议与事件行为；进程回收、SQLite 提交、IPC 和安装包布局分别由本地进程、数据库与打包检查验证。Windows 的 PID／创建时间与 `taskkill` 边界、各系统未测项见 [适配设计](../agent-adapters/TECH.md#进程组与停止回收) 和 [发布验证](../release/TECH.md)。
 
 ## 运行与维护
 
-从仓库根目录初始化 submodule、安装根 workspace 依赖，然后按影响范围执行：
-
-```sh
-git submodule update --init
-pnpm install --frozen-lockfile --ignore-scripts
-pnpm --filter @baton/batond test
-pnpm test:e2e
-```
-
-`pnpm test` 按依赖顺序串行运行整个 workspace，包含所用 fork 包的上游测试。源码修改后的静态检查使用 `pnpm check` 与 `pnpm typecheck`。
+依赖准备、静态检查和测试命令统一见 [AGENTS.md](../../AGENTS.md#常用构建与验证命令)。`pnpm test` 按依赖顺序包含所用 fork 包的上游测试；按影响范围选择 Worker、host、跨 app 或安装包验证。
 
 升级 fork 时同时复核转录格式、请求形状与 adapter 行为。Baton 只为自己的宿主映射和可靠性保证补充最小回归；新增上游协议能力先在 fork 中维护。已有转录缺少所需场景时，先查上游工具和转录；确需新增录制时，保留来源、版本、脱敏规则和派生关系。真实订阅登录与模型调用只通过显式手动冒烟检查执行，结果与离线验证范围分别记录。

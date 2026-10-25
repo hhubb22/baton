@@ -1,6 +1,6 @@
 # batond 平台接口
 
-所有导出也可从 `./index.ts` 引入。Node 接口返回 Promise；Effect 接口将失败映射为 `PlatformError`，Scope 关闭时等待资源释放，释放失败作为 defect 上报。
+调用方从具体文件导入所需接口。Node 接口返回 Promise；Effect 接口将失败映射为 `PlatformError`，Scope 关闭时等待资源释放，释放失败作为 defect 上报。
 
 ## 私有文件
 
@@ -11,7 +11,6 @@
 - `readPrivateFile(path): Promise<Buffer>`。
 - `openPrivateFile(path, flags = O_RDONLY): Promise<FileHandle>`：只打开已有文件，支持 `O_WRONLY | O_APPEND`，拒绝创建和截断。调用方关闭句柄。
 - `writePrivateFile(path, data): Promise<void>` / `writePrivateFileAtomic`：同目录临时文件、文件 fsync、rename，POSIX 再 fsync 目录。
-- `PrivateFiles.ensureDirectory/read/writeAtomic`：对应的 Effect 接口。
 
 POSIX 目录要求当前 UID、0700；文件要求当前 UID、0600、普通文件与单个硬链接。打开前后通过 lstat/fstat 核对设备与 inode，使用 O_NOFOLLOW，拒绝符号链接。文件的直接父目录也必须通过私有目录检查。调用方负责从可信父目录创建数据根目录。
 
@@ -47,15 +46,15 @@ await watchdog.close()
 
 CLI 的 `watchdog` 分支调用 `await runWatchdogCommand()`，此分支 stdout 专用于私有控制协议。每个 Worker 创建自己的 watchdog；POSIX OwnedProcess 必须传入 watchdog。watchdog 通过独占 stdin 管道接收进程组登记，stdout 返回确认，EOF 后 SIGKILL 已登记的进程组并等待检查结果。Agent 进程使用 detached 独立进程组；其子孙进程必须保留在此组内。
 
-独占 SDK 宿主在加载 SDK 前调用 `installHostProcessGroup()`，返回 `HostProcessGroupPolicy`。安装时确认自身 PGID 等于 PID，否则在修改 builtins 前拒绝。Proxy 代理 Node `child_process.spawn` 与 `fork`，将 `detached: true` 改为 false，保留其余参数、stdio 数组与 fd3/4；`syncBuiltinESMExports` 同步 ESM named bindings。每个进程只允许一个 active policy。
+独占宿主在运行 driver 前调用 `installHostProcessGroup({foldDetached?})`，返回 `HostProcessGroupPolicy`。POSIX 安装时确认自身 PGID 等于 PID。默认并组策略用于 Cursor，Proxy 代理 Node `child_process.spawn` 与 `fork`，将 `detached: true` 改为 false，保留其余参数、stdio 数组与 fd3/4；`syncBuiltinESMExports` 同步 ESM named bindings。`foldDetached: false` 用于 Pi、Codex、Kiro，保留上游进程组且不修改 builtins，独立组交给 host registrar/watchdog。
 
-`terminateChildren(options?)` 先封住本宿主后续 spawn/fork，再仅按宿主 PGID 检查、核对并 SIGKILL 除 host 自身外的非 zombie 成员，重查到空才完成。父进程退出不改变组归属。超时或取消后仍禁止新建进程，可以重试清理。`waitQuiescent(signalOrOptions?)` 只等待同组内无活动成员，不终止工具；SDK 正常 run 完成后，宿主先等待此结果再发结束事件。两者返回 `Promise<void>`，失败为 `PlatformError`；对应的 `terminateChildrenEffect` / `waitQuiescentEffect` 返回 typed Effect，并把 fiber 中断传给检查与等待。options 支持 `timeoutMs`、`signal`，默认 2000ms；wait 也接受直接的 AbortSignal。
+`terminateChildren(options?)` 先封住本宿主后续 spawn/fork，再仅按宿主 PGID 检查、核对并 SIGKILL 除 host 自身外的非 zombie 成员，重查到空才完成。父进程退出不改变组归属。超时或取消后仍禁止新建进程，可以重试清理。`waitQuiescent(signalOrOptions?)` 只等待同组内无活动成员，不终止工具；当前通用 driver 直接映射上游回合终态，不在此处调用静默检查；进程停止确认由 Worker 的回收路径负责。两者返回 `Promise<void>`，失败为 `PlatformError`；对应的 `terminateChildrenEffect` / `waitQuiescentEffect` 返回 typed Effect，并把 fiber 中断传给检查与等待。options 支持 `timeoutMs`、`signal`，默认 2000ms；wait 也接受直接的 AbortSignal。
 
 组检查排除每一条并发内部观察命令的精确 PID，每份快照保留其观察期间的检查器 PID，即使其他检查器先退出也不将其视为 SDK 进程。进程名与 PPID 不作为归属依据。
 
-生产宿主把继承组策略保持到 OS 退出。SDK 全部资源释放后，最终清理只封住创建并回收子进程，不恢复允许 detached 的 Node builtins，避免迟到 SDK 回调脱组。`hostProcessGroupScoped` 提供同一生命周期，其 finalizer 回收失败作为 defect 上报；SDK 资源在此后获取，先于它释放。policy 的同步幂等 `restore()` 供显式可逆测试使用。
+生产 host 保留所选策略到 OS 退出；`runAgentHost` 没有统一的 policy 清理 finalizer，资源释放由 driver、adapter/spawner Scope、registrar/watchdog 与 Worker 外层 reap 完成。`hostProcessGroupScoped` 是可选 Scope 接口，finalizer 封住创建并回收子进程，失败作为 defect 上报；当前生产 host 使用非 scoped 的安装入口。policy 的同步幂等 `restore()` 供显式可逆测试使用。
 
-SDK 按原选项调用 `kill(-childPid)` 时，不再有该子组，可能退回只结束直接子进程。宿主 abort 并行请求 SDK cancel 和 policy 子进程清理，Worker 仍对整个宿主组做最终回收。代理不改写 `process.kill`，也无法控制原生后代自行调用 setsid/setpgid；具体 SDK 与系统组合仍须通过真实回收验证。Windows 不修改进程创建，两个 PGID 操作显式失败为 unsupported，不能作为停止确认。
+采用默认并组策略时，SDK 按原选项调用 `kill(-childPid)` 可能找不到该子组，退回只结束直接子进程。通用 driver 的 abort 优先调用上游 interruptTurn；缺少原生 turn ID 时才尝试 policy 子进程清理，Worker 继续负责外层最终回收。代理不改写 `process.kill`，也无法控制原生后代自行调用 setsid/setpgid；具体 SDK 与系统组合仍须通过真实回收验证。Windows 不修改进程创建，两个 PGID 操作显式失败为 unsupported，不能作为停止确认。
 
 `OwnedProcess.exited` 只表示根进程 exit。`reap()` / `close()` 幂等且共享并发回收操作；POSIX 检查整个进程组，确认无可执行成员才返回 `{ reaped: true }`。僵尸进程不能执行，不视为存活。超时或发现 PID 身份不匹配时返回 false；命令、检查与持久化错误抛出。进程树回收成功后才取消 watchdog 登记、移除持久记录和关闭 stdio。
 
@@ -69,4 +68,4 @@ Windows 第一版按设计保留三个限制：taskkill 可能遗漏中间父进
 
 ## 本地验证
 
-在 `apps/batond` 下运行 `pnpm exec vitest run --config ../../vitest.config.ts src/platform`。测试覆盖私有文件原子替换、追加打开、权限和 symlink 拒绝、并发独占锁、stale 与创建时间核查、旧 release 对新所有者的保护、进程组孙进程回收、受控 SDK 派生在主动停止与 Worker SIGKILL 后的回收、root 与中间父进程提前退出后的组回收、另一 Thread 的进程树存活、spawn/fork 代理的参数与 fd3/4 保留、显式恢复、Scope 结束后持续封住创建、并发检查器排除、SDK fallback 遗留与后台 FD 持有者的静默门控、取消与超时、启动与 Effect 中断清理、detached Worker 跨父进程退出存活。POSIX 进程测试在 Windows 跳过，不能作为 Windows 回收验证。
+验证命令见 [AGENTS.md](../../../../AGENTS.md#常用构建与验证命令)，部署见 [根 README](../../../../README.md)。测试覆盖私有文件原子替换、追加打开、权限和 symlink 拒绝、并发独占锁、stale 与创建时间核查、旧 release 对新所有者的保护、进程组孙进程回收、受控 SDK 派生在主动停止与 Worker SIGKILL 后的回收、root 与中间父进程提前退出后的组回收、另一 Thread 的进程树存活、spawn/fork 代理的参数与 fd3/4 保留、显式恢复、Scope 结束后持续封住创建、并发检查器排除、SDK fallback 遗留与后台 FD 持有者的静默门控、取消与超时、启动与 Effect 中断清理、detached Worker 跨父进程退出存活。POSIX 进程测试在 Windows 跳过，不能作为 Windows 回收验证。

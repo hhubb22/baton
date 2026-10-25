@@ -1,8 +1,7 @@
 # Agent 适配与扩展行为规格
 
-Status: draft
-Owner: 待指定
-Basis: 已确认的 Agent 接入范围；整包依赖 t3code fork 的决定；Baton `4d56ae2`；配套 [技术设计](TECH.md)。本文描述拟议行为，批准并实施后同步主规格。
+Status: approved
+Basis: 已确认的 Agent 接入范围；t3code fork 的完整 provider adapter；配套 [技术设计](TECH.md)。
 
 ## 概述与范围
 
@@ -10,7 +9,7 @@ Basis: 已确认的 Agent 接入范围；整包依赖 t3code fork 的决定；Ba
 
 | Agent | 本期工作 |
 |---|---|
-| Pi、Codex、Cursor | 改用 t3code 的完整 provider，替换现有接入 |
+| Pi、Codex、Cursor | 通过 t3code 的完整 provider 与节点 agent-host 接入 |
 | Kiro | 已接入 fork 的 ACP provider 与节点 agent-host；程序已安装且认证为 valid 或 unknown 时开放网页新建与恢复，版本和系统不设白名单 |
 | Grok、Antigravity | 切换后接入，使用设备上已经安装、配置并完成认证的原生程序 |
 
@@ -36,7 +35,7 @@ Claude、OpenCode、Muse、通用 ACP Agent 目录接入均不在本期。既有
 
 Cursor 缺少随设备分发的运行依赖时显示安装不完整；设备使用时不临时联网安装依赖。Grok、Antigravity 缺少原生运行环境时提供本机配置指引。
 
-Kiro 的独立版本命令限时 4 秒，stdout/stderr 各最多收集 4096 字节，只返回版本号，诊断不外传。程序已安装且认证为有效或 `unknown` 时，节点报告 `available`、`create: true`、`resume: true`，网页开放新建与恢复。reason 记录版本、系统、认证未知和版本探测问题。系统或版本（含预发布、构建后缀）、版本超时或不可解析不限制创建；缺程序或明确认证 `missing` 为 `unavailable`；不满足准入条件的新建请求返回 HTTP 422、`agent_unavailable`。本地 CLI 的 `open` 目前仅创建 Cursor Thread。Kiro 2.32.0 的离线回放和注入已验证 capability 的 e2e 验证自动化行为，不能证明真实账号授权有效。
+Kiro 的独立版本命令限时 4 秒，stdout/stderr 各最多收集 4096 字节，只返回版本号，诊断不外传。程序已安装且认证为有效或 `unknown` 时，节点报告 `available`、`create: true`、`resume: true`，网页开放新建与恢复。reason 记录版本、系统、认证未知和版本探测问题。系统或版本（含预发布、构建后缀）、版本超时或不可解析不限制创建；缺程序或明确认证 `missing` 为 `unavailable`；不满足准入条件的新建请求返回 HTTP 422、`agent_unavailable`。本地 CLI 的 `open --agent cursor|pi|codex|kiro` 支持四个 Agent，默认 Cursor。Kiro 2.32.0 的离线回放和注入已验证 capability 的 e2e 验证自动化行为，不能证明真实账号授权有效。
 
 ### R-03｜认证与会话归属
 
@@ -78,7 +77,7 @@ Pi、Codex、Cursor 开放 `switch_model`，排队消息可为新一轮指定模
 
 ### R-08｜停止
 
-停止覆盖当前一轮及其在本机启动、由该会话拥有的工具和后台任务，并撤回尚未发送的排队消息。取消请求的响应只表示请求已处理；只有原生终止状态或进程树回收证据才能表示已停止。
+停止覆盖当前一轮及其在本机启动、由该会话拥有的工具和后台任务，并撤回尚未发送的排队消息。取消请求的响应表示请求已处理；设备继续回收执行实例与所属进程，全部确认后显示已停止，下一条消息或显式恢复可继续原会话。回收或输入结果无法确认时显示状态未知。
 
 发送后立即停止、长工具运行中停止和子任务运行中停止都必须生效。原生取消未在一分钟内完成时，结束该 Thread 的 Agent 进程树；不能误杀其他 Thread。无法确认回收结果时显示状态未知。停止不撤销已经发生的文件修改或其他动作。
 
@@ -133,7 +132,7 @@ Thread 历史是中心保存的输入和回复记录，所有 Agent 格式相同
 
 | 项目 | 缺少的证据 | 阻塞范围 |
 |---|---|---|
-| Cursor 认证 | 沿用上游 credential 流程还是员工显式配置的 API key | Cursor 认证入口 |
+| Cursor 认证 | 使用设备显式配置的 `CURSOR_API_KEY`，不读取 ambient 账号或 keyring | 按本机安装、依赖与认证结果开放 |
 | Kiro | 离线夹具与本地替身验证自动化行为，真实账号授权由原生程序在实际执行时检查 | 程序已安装且认证 valid/unknown 时开放新建与恢复，版本和系统不限；上游不支持 steer 和换模型 |
 | Grok、Antigravity | 安装、认证与恢复行为 | 各自交付 |
 | 系统矩阵 | Windows、macOS、Linux 上的原生程序和进程树回收验证范围不同 | 如实记录验证范围，缺少证据的系统组合仍按安装与认证结果开放 |

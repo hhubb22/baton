@@ -14,13 +14,6 @@ Runtime 通过专用 stdio 交换逐行 JSON，每帧最多 192 KiB、最多 8 �
 
 `runProjectCLI('probe'|'subscriptions'|'login', provider?, options?)` 显式保护新建的临时目录，在其中保存私有进程记录；POSIX 另启动 watchdog，不创建 manager 或 SQLite。终端登录转接标准输入输出，支持 SIGINT/SIGTERM 取消。probe 只读取本地凭据和静态模型目录，默认限制 5 秒及 64 KiB；设备采集可用 `report()` 在 probe 无效时省略能力。设备码登录取得首行后继续后台等待，最长 15 分钟，同 provider 的并发请求串行替换，退出时刷新能力。
 
-验证：
-
-```sh
-pnpm --filter @baton/batond typecheck
-pnpm exec vp fmt --check apps/batond/src/project
-pnpm exec vp lint apps/batond/src/project --deny-warnings
-pnpm --dir apps/batond exec vp test run --config ../../vitest.config.ts src/project
-```
+部署与设备接入见 [根 README](../../../../README.md)，验证命令见 [AGENTS.md](../../../../AGENTS.md#常用构建与验证命令)。
 
 测试使用本机进程、SQLite、注入时钟和现有 Runtime 的 faux provider，覆盖重连、重复启动、旧 epoch、睡眠、清理证据、回执丢失、进程恢复、设备码登录和 stdio 容量。平台进程回收沿用 `platform/process` 的进程组/watchdog 与 Windows PID 创建时间/taskkill 边界；Windows 原生执行尚需在对应系统验证。

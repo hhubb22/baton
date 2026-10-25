@@ -29,12 +29,12 @@ pi-agent-core 只包含 Agent Loop、工具执行和事件流（`packages/agent/
               │
             Gateway
               │
-           batond ── 本地 IPC ── baton-project-runtime（Node.js，pi-agent-core + pi-ai）
+           batond ── stdio ── baton-project-runtime（Node.js，pi-agent-core + pi-ai）
               │
         Session Worker（执行 Agent，现有）
 ```
 
-Project Runtime 是独立进程，业务实现位于 `runtimes/project-agent`。开发节点使用 Node 26，通过该包的 tsx loader 启动源码 CLI；SEA 安装包将其作为 `project-runtime` 子命令分发，布局见迁移设计的「打包与发布」。batond 负责上报能力、启动和停止进程、代为续租。Runtime 不直接连 Coordinator，所有请求经本地 IPC 交给 batond，再沿 Gateway 通道送到 Coordinator，复用节点认证。这样不需要为节点新开一条访问 Coordinator 的数据通道。
+Project Runtime 是独立进程，业务实现位于 `runtimes/project-agent`。开发节点使用 Node 26，通过该包的 tsx loader 启动源码 CLI；SEA 安装包将其作为 `project-runtime` 子命令分发，布局见 [发布设计](../release/TECH.md#打包与发布)。batond 负责上报能力、启动和停止进程、代为续租。Runtime 不直接连 Coordinator，所有请求经专用 stdio（独立源码运行也支持本地 IPC）交给 batond，再沿 Gateway 通道送到 Coordinator，复用节点认证。这样不需要为节点新开一条访问 Coordinator 的数据通道。
 
 Gateway 消息类型 `ProjectRuntimeRequest` / `ProjectRuntimeResult`：batond 附上运行身份 `(run_id, lease_epoch)`，Coordinator 校验节点与运行记录一致、租约有效。每个请求和响应不超过 192 KiB，留出信封余量；每条对话事件写入时不超过 160 KiB（第 3 节），所以分页读取每页至少能取到一条。Runtime 经这条通道发出的请求只有下面几种：
 
@@ -57,14 +57,14 @@ batond 通过 Runtime 命令追加 `run` 启动进程，工作目录是私有空
 
 节点管理请求为 `started`、`renew`、`start_failed`、`exited`、`stopped`、`wake_received`，Runtime IPC 不能调用这些操作。`started` / `renew` 成功返回 `{lease_seconds:60,control_receipts:1}`；能力字段缺失时，batond 不发送 `wake_received` 确认。`stopped` 只确认已结束运行的进程清理，重复回执幂等；它不能恢复租约或修改对话。进程树回收、本地 IPC 和目录收尾结束后，batond 在 SQLite 保存清理事实，再主动补送 `exited` / `stopped`，失败保留到期重试。暂时写入失败时保留有界本机清理事实继续补写；重启后账本缺少清理证据时保持未确认。
 
-启动前先检查 provider，再向中心确认租约；启动意图先写入 SQLite，同一 run 在 batond 重启后不会重启进程。POSIX 使用随 batond 管道关闭而停止进程组的 watchdog，Windows 使用 PID／创建时间账本与 `taskkill /T /F`，保留父进程先退出和崩溃后延迟回收的已知边界。连接重建保留当前 Runtime，续租仍受 58 秒期限限制。期限使用包含系统休眠的单调时钟，最多每秒检查一次；机器唤醒后先核对旧期限，再发送或接受续租。读取时钟失败时停止进程。
+启动前先检查 provider，再向中心确认租约；启动意图先写入 SQLite，同一 run 在 batond 重启后不会重启进程。POSIX 使用随 batond 管道关闭而停止进程组的 watchdog，Windows 使用 PID／创建时间账本与 `taskkill /T /F`，保留父进程先退出和崩溃后延迟回收的已知边界。连接重建保留当前 Runtime，续租仍受 58 秒期限限制。期限取 `max(hrtime 经过值, wall 经过值)`，计入系统休眠，默认每 200 ms 检查一次；机器唤醒后先核对旧期限，再发送或接受续租。读取时钟失败时停止进程。
 
 控制帧 JSON 采用 UTF-8 编码，容量不包含 HTML 页面转义。每批同时检查数据库规范文本、消息拼接后的传输字节及事件上限，因此含引号、反斜线等字符时可能提前结束一批。Thread 回复文本按 UTF-8 边界保留首尾，并注明原字节数；元数据与 JSON 编码后的条目限制为 40 KiB。长 Project 目标的通知在 4 KiB 内保留首尾并标明截断，完整目标由 Project API 返回。
 
 
 #### 2.1 Runtime 定位与 stdio
 
-开发入口由 `apps/batond/src/project/runner.ts` 定位 `runtimes/project-agent/src/cli.ts`，通过该包安装的 tsx loader 启动；源码与开发 bundle 均须保留仓库布局和依赖。宿主可注入 `runtimeCommand` 与 `watchdogCommand`；`probe` 要求 Runtime 版本 `0.1.0`。Windows 私有凭据操作通过 TS helper 进入节点的私有文件宿主。SEA 分派与安装包检查见 [迁移设计](../ts-migration/TECH.md#打包与发布)。
+开发入口由 `apps/batond/src/project/runner.ts` 定位 `runtimes/project-agent/src/cli.ts`，通过该包安装的 tsx loader 启动；源码与开发 bundle 均须保留仓库布局和依赖。宿主可注入 `runtimeCommand` 与 `watchdogCommand`；`probe` 要求 Runtime 版本 `0.1.0`。Windows 私有凭据操作通过 TS helper 进入节点的私有文件宿主。SEA 分派与安装包检查见 [发布设计](../release/TECH.md#打包与发布)。
 
 统一构建从根 workspace 按锁文件安装依赖，构建中心与节点到 `apps/{server,batond}/dist`，中心自动包含网页与 SQL 迁移。Runtime 的模型、工具和恢复逻辑由原包维护，源码开发与安装包共用这些业务实现。
 
@@ -137,7 +137,7 @@ Runtime 进程的工作目录是一个空的控制目录。pi-agent-core 本身�
 
 **取得租约。** 一个事务里锁定 `project_agents` 行，确认租约为空或已过期，`lease_epoch` 加一，写 `lease_run_id` 和 `lease_until = now() + 60s`，插入 `agent_runs`（`state = starting`）。`agent_runs` 自己记录启动和停止命令的投递进度。start、stop、wake 分别领取，每类每秒最多 32 条、每节点最多两条，节点额度在全局 LIMIT 前应用。领取先保存下一次尝试时间，再向 Gateway 入队，按最多 30 秒的抖动退避重试；发送循环不等待回包。处于 `starting` 的运行以 `run_id` 为稳定消息 ID 重发 `project_run_start`，直到 batond 回执。batond 在本地 SQLite 里按 `run_id` 去重，同一 run 不会启动两个进程。启动前 batond 先执行一次 `probe`：所需 provider 明确需要登录时，拒绝启动并更新能力报告，Coordinator 以 `login_required` 结束这次运行，不计入失败次数，扫描会在下一轮选择其他节点。已声明 provider 的认证为 unknown 时允许执行检查；provider 缺失与凭据权限、属主、路径错误分别保留具体原因。
 
-**续租。** Runtime 进程存活期间，batond 每 20 秒发送一次续租。Coordinator 只在 `(run_id, lease_epoch)` 仍是当前值且未过期时，把 `lease_until` 延长到 `now() + 60s`。batond 按单调时钟计时：从最后一次续租成功起超过 58 秒仍未续上，就停止 Runtime 进程。租约过期后，旧实例的任何请求都返回 `lease_lost`，Runtime 收到后立即退出。租约时长可通过 Store 的 `Options.ProjectAgentLeaseDuration` 注入，续租间隔和本地自停期限可通过 batond 的 `RunOptions.ProjectRuntimeTiming` 注入，零值使用上述默认值。
+**续租。** Runtime 进程存活期间，batond 默认每 20 秒发送一次续租。Coordinator 在 SQL 中固定使用 60 秒租约，只在 `(run_id, lease_epoch)` 仍是当前值且未过期时，把 `lease_until` 延长到 `clock_timestamp() + 60s`。batond 取 hrtime 与墙上时钟经过值的最大值，从最近一次成功续租的请求开始时刻计时，达到 58 秒未续上即停止 Runtime，默认每 200 ms 检查一次；发送前及接受响应前都核对旧期限。租约 SQL 分别位于 `apps/server/src/project/scheduling.ts` 和 `runtime.ts`，中心没有公开的租约时长注入选项。节点 `makeProjectManager` 接受 `clock` 和 `timing:{renewMs,leaseMs,checkMs}`，省略字段使用上述默认值，无效数值拒绝。租约过期后的旧请求返回 `lease_lost`，Runtime 立即退出。
 
 **停止。** Project 被暂停或归档、运行所在节点被吊销、员工在界面上停止运行时，Coordinator 在同一事务作废租约（`lease_epoch` 不变，清空 `lease_run_id`）并保存停止意图，独立发送 `project_run_stop`。batond 收到后停止 Runtime，已结束的运行补送原清理确认。自然 `finish` / `report_failure` 给节点 2 秒主动清理确认宽限；其他停止立即到期。只有 `stopped` 回执确认清理，业务终态和新运行租约保持不变。停止重试只查询待确认索引，不与 start / wake 共用批次。即使停止消息没有送达，旧实例的下一次请求也会因租约失效被拒绝。
 
@@ -320,7 +320,7 @@ batond 在连接时和能力变化时上报 `node_runtime_reports.report`，结�
 
 batond 通过 Gateway 的控制队列传送 `node.runtime_report`，正文为 `{ "type": "node.runtime_report", "report": { ... } }`。Coordinator 返回 `node.runtime_report_result`，含 `ok`、成功时的 `report_version` 或失败时的 `code`，信封 `correlation_id` 对应请求的 `message_id`。节点在 `node.sync` 成功后发送报告；未收到成功回执时，在同一进程的连接重试中保留原消息标识和报告内容；采集到的新内容在待确认报告成功后发送。重连后重新发送报告，已确认的报告使用新消息标识。回执只作用于发送该报告的当前连接，旧连接迟到的回执不能确认新连接上的报告。中心只接受当前已同步、未吊销连接的报告，并在事务内再次检查员工、节点、凭据和连接。`report_version` 从 1 开始，报告内容变化时加一；相同内容的重发只刷新 `reported_at`。这些写入不修改 `nodes.capabilities`。
 
-节点每轮采集完成后等待 5 秒再采集，连接建立时也请求刷新。采集在独立循环中串行运行，连接、心跳和 Worker 消息不等待扫描。目录与仓库扫描使用每轮 2 秒预算；Project Runtime 探测独立使用设备配置的预算，默认 5 秒。Agent 模型目录在首次采集及可执行文件路径或版本变化时单独探测并缓存，见 [Baton TECH「能力上报」](../baton/TECH.md#能力上报)。文件系统调用返回后检查期限，无法被操作系统取消的文件系统等待最多占用一个采集协程，重连不另起扫描。扫描只保存登记目录、仓库路径及 origin；目录文件内容不进入报告。
+节点每轮采集完成后等待 5 秒再采集，连接建立时也请求刷新。采集在独立循环中串行运行，连接、心跳和 Worker 消息不等待扫描。目录与仓库扫描使用每轮 2 秒预算；Project Runtime 探测独立使用设备配置的预算，默认 5 秒。执行 Agent 的模型目录由独立循环每轮重新探测，失败保留诊断并在后续重试，见 [Baton TECH「能力上报」](../baton/TECH.md#能力上报)。文件系统调用返回后检查期限，无法被操作系统取消的文件系统等待最多占用一个采集协程，重连不另起扫描。扫描只保存登记目录、仓库路径及 origin；目录文件内容不进入报告。
 
 扫描最多向下 4 层（登记根为第 0 层）、读取 4096 个目录条目、记录 128 个仓库。每批读取至多 64 个条目，不跟随遍历中的符号链接，不进入 `.git`。Git 配置最多读取 16 KiB，通过 `git config --no-includes --file - --get remote.origin.url` 解析，每次最多 200 ms，不读取 include 或全局配置。worktree 的 `.git` 和 `commondir` 只允许指向同一登记根内的元数据；指向根外时仍登记仓库路径，省略 origin。origin 仅保留主机和仓库路径，去掉用户信息、端口、查询和片段，忽略本地路径及不支持的传输格式。扫描、读取或容量受限时报告带 `truncated: true`；超出报告容量时先移除末尾仓库，再裁剪模型列表并优先保留默认模型，最后移除末尾目录。发送前采用带缩进的 JSON 计量，给 PostgreSQL `jsonb::text` 的空格留出余量，报告和数据库文本均不超过 64 KiB。
 

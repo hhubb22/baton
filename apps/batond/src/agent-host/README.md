@@ -4,9 +4,9 @@
 
 ## 进程模型
 
-每个 Thread 的执行生命周期对应一个 host 进程。Worker 用 `spawnOwnedProcessEffect` 创建进程：POSIX 上 `detached: true`，host 成为新进程组的组长；Windows 上 host 是普通子进程，PID 与创建时间登记到 Worker 账本。Cursor SDK 的 detached 子进程并入 host 进程组；Pi、Codex、Kiro 保留上游自建的进程组，供上游的 `kill(-pid)` 使用。包装后的 `ChildProcessSpawner` 将这些独立进程组登记给 watchdog 与 Worker 进程账本，释放登记前回收整棵子树。registrar 仅在回收成功或确认 PID 身份不符后注销；超时和检查失败会返回错误、记录警告并保留登记，供 watchdog 在 host 退出后继续回收。
+每个 Thread 的执行生命周期对应一个 host 进程。Worker 用 `spawnOwnedProcessEffect` 创建进程：POSIX 上 `detached: true`，host 成为新进程组的组长；Windows 上 host 是普通子进程，PID 与创建时间登记到 Worker 账本。Cursor SDK 的 detached 子进程并入 host 进程组；Pi、Codex、Kiro 保留上游自建的进程组，供上游的 `kill(-pid)` 使用。包装后的 `ChildProcessSpawner` 将 POSIX 独立组登记给 host 内部的 registrar/watchdog，Worker 的持久进程账本登记 host 根进程；Windows registrar 返回 false，不另记上游子进程。释放独立组登记前回收整棵子树。registrar 仅在回收成功或确认 PID 身份不符后注销；超时和检查失败会返回错误、记录警告并保留登记，供 watchdog 在 host 退出后继续回收。
 
-host 在加载 SDK 前设置 POSIX `umask 077`，把 `console` 定向到 stderr，stdout 只承载 RPC。Scope 结束时关闭 adapter、终止组内子进程并等待静默；进程组回收由 Worker 的整树停止路径完成，host 自己报告的退出不能代替回收证据。
+host 运行入口设置 POSIX `umask 077`，把 `console` 定向到 stderr，stdout 只承载 RPC。Scope 结束时关闭 driver，adapter/spawner 释放各自资源，registrar 关闭 watchdog；`runAgentHost` 没有统一调用进程组 policy 的终止与静默 finalizer。Worker 负责外层整树回收，host 退出本身不能代替回收证据。
 
 ## 宿主层
 
@@ -14,7 +14,7 @@ host 在加载 SDK 前设置 POSIX `umask 077`，把 `console` 定向到 stderr�
 
 | service | 实现 |
 |---|---|
-| `ChildProcessSpawner`、`FileSystem`、`Path`、`Crypto` | `@effect/platform-node`；spawner 包装后登记 detached 进程组与 Windows 进程记录 |
+| `ChildProcessSpawner`、`FileSystem`、`Path`、`Crypto` | `@effect/platform-node`；spawner 在 POSIX 登记独立组到 host registrar/watchdog；Windows 不另行登记 |
 | `AgentScope` | host 执行 Scope；`wrap` 只透传命令参数，`stop`、`clear` 为空 |
 | `ProviderHost` | `cwd` 为 Thread 工作目录，`stateDir`、缓存和附件目录在 Thread 私有目录下；settings 是 `DEFAULT_SERVER_SETTINGS` 的静态快照；`shouldRunBackgroundWork` 返回 false；凭据读取返回空，写入和删除直接失败 |
 | `McpProviderSessions` | provider-core 的内存实现，不写配置文件 |
@@ -59,3 +59,5 @@ Worker 将插入固定到接收时的活动回合，目标结束后仍未写入 
 ## 验证
 
 包内测试覆盖环境白名单、宿主路径与只读凭据，以及用本地替身拉起 detached 子进程和后代后的整树回收。各 Agent 的 stdio/RPC 回放说明见 [Cursor](../agents/cursor/README.md)、[Pi](../agents/pi/README.md)、[Codex](../agents/codex/README.md)、[Kiro](../agents/kiro/README.md) 文档，均使用 fork 的 testkit 和离线转录。Kiro 2.32.0 夹具是授权保留的旧录制转换，README 与 metadata 明确原生版本；`provider_error` 及派生认证失败夹具与 `simple` 的成功回合组成同会话转录，驱动真实 adapter、host 与 Worker，核对失败结束、安全原因持久化、输入保持 sent、排队消息执行和进程保留。版本探测使用本地可执行替身验证解析、失败、缺程序与超时回收，不启动真实 CLI。离线验证不能证明真实账号授权有效，节点按安装与认证结果报告可用性，版本和系统保留为诊断信息。
+
+部署与设备接入见 [根 README](../../../../README.md)，验证命令见 [AGENTS.md](../../../../AGENTS.md#常用构建与验证命令)。
