@@ -1,5 +1,5 @@
 import { createModels, fauxProvider, fauxAssistantMessage, fauxToolCall } from '@earendil-works/pi-ai'
-import { StdioClient } from '../../shared/stdio.js'
+import { StdioClient } from '../src/stdio.js'
 import { checkedRPC } from '../src/protocol.js'
 import { ProjectRuntime } from '../src/runtime.js'
 

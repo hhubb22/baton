@@ -2,7 +2,7 @@ import { readFile, writeFile, mkdir, appendFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { TranscriptContext } from '@earendil-works/pi-ai'
-import { StdioClient } from '../../shared/stdio.js'
+import { StdioClient } from '../src/stdio.js'
 import { checkedRPC } from '../src/protocol.js'
 
 // 本地集成夹具：认证、模型和时间均为替身；Runtime 与工具 RPC 使用实际实现。

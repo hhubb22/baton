@@ -1,7 +1,7 @@
 // Web E2E 运行真实 Runtime；模型替身依次新建 Thread、创建事项并接收用户回答。
 import { createModels, fauxProvider, fauxAssistantMessage, fauxToolCall } from '@earendil-works/pi-ai'
 import { existsSync, readFileSync } from 'node:fs'
-import { StdioClient } from '../../shared/stdio.js'
+import { StdioClient } from '../src/stdio.js'
 import { checkedRPC } from '../src/protocol.js'
 import { ProjectRuntime } from '../src/runtime.js'
 

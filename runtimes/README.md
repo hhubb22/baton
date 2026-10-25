@@ -37,7 +37,7 @@ Project Runtime 支持 `run`、`probe`、`login <provider>`、`login-device <pro
 
 `BATON_PROJECT_RUNTIME_TRANSPORT=stdio` 表示使用专用 stdin/stdout 管道。请求为一行 UTF-8 JSON：`{"id":1,"request":{...}}`；响应为 `{"id":1,"result":{...}}`。编号由 Runtime 分配，在同一个进程内递增。每行正文最多 192 KiB，换行符不计入容量，最多 8 个请求在途。请求和响应须为完整 JSON，拒绝无效 UTF-8。stdout 专用于协议，诊断写 stderr，凭据不进入诊断输出。
 
-TypeScript 宿主与 Runtime 使用 `runtimes/shared/stdio.ts`，读取时限制单帧容量，写入遵守管道背压。断开管道会拒绝未完成的调用；单次请求超时为 32 秒。上层操作须把响应控制在帧容量内，预留编号和协议包装的空间。
+Runtime 使用 `runtimes/project-agent/src/stdio.ts`，batond 宿主使用 `apps/batond/src/project/stdio.ts`；两端读取时限制单帧容量，写入遵守管道背压。断开管道会拒绝未完成的调用；单次请求超时为 32 秒。上层操作须把响应控制在帧容量内，预留编号和协议包装的空间。
 
 身份由宿主绑定。Project Runtime 的 stdio 管道绑定当前 run，batond 覆盖 `run_id` 和 `lease_epoch`。带 token 的本地 IPC 契约也可用于源码独立运行；两条通道执行相同的请求校验。Runtime 不能续租、启动或结束其他运行。
 

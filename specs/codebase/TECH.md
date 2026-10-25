@@ -26,7 +26,7 @@ Go → TypeScript 迁移完成后，核心 module 的 interface 已有 depth：`
 | 循环依赖 | 6 处都只涉及类型：`HTTPOptions` 移到 `http/options.ts`；`AgentOutput` 与 `AgentEventIdentity` 定义在同一处；`reports.pendingResult` 的参数收窄为 `{ report, acked }[]`；`DaemonWorkerHost` 移到 `daemon/host.ts` |
 | 命名 | 私有文件入口为 `private-file`，宿主命令使用 `BATON_PRIVATE_FILE_HOST_COMMAND`；Runtime 通道使用 `BATON_PROJECT_RUNTIME_TRANSPORT`；stdio 错误码使用 `runtime_stdio_*`。不保留旧名分支（AGENTS.md 守则 5） |
 | 依赖声明 | 删除 `apps/server` 的 `esbuild`、`packages/protocol` 的 `vitest` 与 `@effect/vitest`；`tsx` 由 Runtime 包解析，batond 不另外声明 |
-| Runtime stdio | `runtimes/shared/stdio.ts` 只有 Runtime 使用，移入 `runtimes/project-agent/src/`，删除 `runtimes/shared` workspace |
+| Runtime stdio | `runtimes/project-agent/src/stdio.ts` 由 Runtime 自有，Runtime workspace 只收录 `runtimes/project-agent` |
 | 测试辅助 | `testing/cursor/{process-records,watchdog-entry}.ts` 移到 `testing/platform/`；两处回收测试的临时目录在 Scope 结束时删除 |
 
 `tools/ts-migration/` 按用途拆分。根目录的 `build.mjs`、`package-batond.mjs`、`package-release.mjs`、`check-package.mjs` 保留为入口。

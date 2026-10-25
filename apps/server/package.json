@@ -33,7 +33,6 @@
   },
   "devDependencies": {
     "@types/ws": "8.18.2",
-    "esbuild": "catalog:",
     "@effect/vitest": "catalog:",
     "@types/node": "catalog:",
     "typescript": "catalog:",

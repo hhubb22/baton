@@ -3,7 +3,6 @@ packages:
   - apps/*
   - packages/*
   - runtimes/project-agent
-  - runtimes/shared
   - web
   - upstream/t3code/packages/provider-core
   - upstream/t3code/packages/provider-pi

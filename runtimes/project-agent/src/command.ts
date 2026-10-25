@@ -1,7 +1,7 @@
 import { createConnection } from 'node:net'
 import { createInterface } from 'node:readline/promises'
 import { parseArgs } from 'node:util'
-import { StdioClient, frames, writeFrame } from '../../shared/stdio.js'
+import { StdioClient, frames, writeFrame } from './stdio.js'
 import { probe, runtimeModels, VERSION, registeredProvider, loginApiKey } from './auth.js'
 import { checkedRPC, type Request } from './protocol.js'
 import { createDeviceCodeLoginInteraction, createLoginInteraction } from './login.js'

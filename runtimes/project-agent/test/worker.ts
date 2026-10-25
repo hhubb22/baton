@@ -1,4 +1,4 @@
-import { StdioClient } from '../../shared/stdio.js'
+import { StdioClient } from '../src/stdio.js'
 import { checkedRPC } from '../src/protocol.js'
 import { createModels, fauxProvider, fauxAssistantMessage, fauxToolCall } from '@earendil-works/pi-ai'
 import { assistant } from './fixture.js'
