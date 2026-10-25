@@ -89,10 +89,12 @@ const allowedElements = [
   'a',
 ]
 
-const httpsUrl: UrlTransform = (value) => {
+const safeLinkUrl: UrlTransform = (value) => {
   try {
     const url = new URL(value)
-    return url.protocol === 'https:' && url.hostname ? url.href : undefined
+    const web = (url.protocol === 'https:' || url.protocol === 'http:') && Boolean(url.hostname)
+    const email = url.protocol === 'mailto:' && Boolean(url.pathname.trim())
+    return web || email ? url.href : undefined
   } catch {
     return undefined
   }
@@ -152,7 +154,7 @@ export function RestrictedMarkdown({ body }: { body: string }) {
         allowedElements={allowedElements}
         unwrapDisallowed
         skipHtml
-        urlTransform={httpsUrl}
+        urlTransform={safeLinkUrl}
         components={components}
       >
         {body}

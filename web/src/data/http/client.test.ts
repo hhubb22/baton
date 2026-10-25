@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { createTransport, HttpError } from './transport'
 import { createHttpClient, mapDevice } from './client'
-import { capabilityLines, setupNeeded, usableAgents } from '../derive'
+import { assistantBlock, capabilityLines, setupNeeded, setupSteps, usableAgents } from '../derive'
 
 function requestURL(input: RequestInfo | URL): string {
   return input instanceof Request ? input.url : input.toString()
@@ -274,6 +274,48 @@ describe('HTTP account and devices', () => {
       ok: false,
       detail: 'Subscription sign-in needed',
     })
+  })
+
+  it('preserves unknown subscription diagnostics, permits attempts and keeps login-required blocked', () => {
+    const device = mapDevice({
+      id: 'node',
+      display_name: 'Mac',
+      system: 'macos',
+      online: true,
+      synced: true,
+      revocation_status: 'none',
+      runtime_report: {
+        project_runtime: {
+          providers: [{ provider: 'openai-codex', status: 'unknown', reason: 'credential_read_failed' }],
+        },
+      },
+    })
+    expect(device.subscriptions[0]).toMatchObject({
+      status: 'unknown',
+      reason: 'credential_read_failed',
+      signedIn: false,
+    })
+    expect(assistantBlock(device, 'ChatGPT')).toBeNull()
+    expect(setupNeeded(device)).toBe(false)
+    expect(capabilityLines(device)).toContainEqual({
+      name: 'Project assistant',
+      ok: true,
+      detail: 'ChatGPT sign-in check unavailable · can try',
+    })
+    for (const [reason, detail] of Object.entries({
+      credential_permissions_invalid: 'Credential file permissions are unsafe',
+      credential_owner_invalid: 'The credential file belongs to another user',
+      credential_path_invalid: 'The credential path is invalid',
+      credential_private_file_failed: 'The credential file could not be opened securely',
+    })) {
+      device.subscriptions = [{ provider: 'ChatGPT', signedIn: false, status: 'unknown', reason }]
+      expect(capabilityLines(device).find((line) => line.name === 'Project assistant')?.detail).toContain(detail)
+      expect(setupSteps(device)).toContain(detail)
+      expect(setupNeeded(device)).toBe(true)
+    }
+    device.subscriptions = [{ provider: 'ChatGPT', signedIn: false, status: 'login_required' }]
+    expect(assistantBlock(device, 'ChatGPT')).toBe('signedOut')
+    expect(setupNeeded(device)).toBe(true)
   })
 
   it('restores a session and its real default device after reload', async () => {

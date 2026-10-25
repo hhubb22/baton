@@ -24,7 +24,7 @@ interface RuntimeReport {
       switch_model: boolean
     }
   }[]
-  project_runtime?: { providers: { provider: string; status: string; models?: { id: string }[] }[] }
+  project_runtime?: { providers: { provider: string; status: string; reason?: string; models?: { id: string }[] }[] }
   exec?: { enabled: boolean; shell: string; user?: string }
   roots?: { path: string }[]
   repos?: { path: string }[]
@@ -99,6 +99,7 @@ export function mapDevice(node: NodeDTO): Device {
       provider: subscriptionName(item.provider),
       signedIn: item.status === 'available',
       status: item.status === 'available' || item.status === 'login_required' ? item.status : 'unknown',
+      reason: item.reason ?? null,
       models: item.models?.map((model) => model.id) ?? [],
     })),
     hasRuntime: !!report?.project_runtime,

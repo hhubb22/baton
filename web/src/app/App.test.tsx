@@ -619,7 +619,7 @@ describe('devices', () => {
     expect(await within(dialog).findByText('BATON-1234')).toBeInTheDocument()
   })
 
-  it('warns before making an offline device the default', async () => {
+  it('saves an offline default device in one click and explains the waiting behavior', async () => {
     const user = userEvent.setup()
     renderApp('/devices')
     await screen.findByRole('heading', { name: '3 devices, 2 online' })
@@ -630,12 +630,33 @@ describe('devices', () => {
     expect(within(details!).getByText('Windows Desktop is offline')).toBeInTheDocument()
     await user.click(within(details!).getByRole('button', { name: 'Set as default' }))
 
-    const dialog = await screen.findByRole('dialog', { name: 'Use Windows Desktop as default?' })
-    await user.click(within(dialog).getByRole('button', { name: 'Save default device' }))
+    expect(screen.queryByRole('dialog', { name: 'Use Windows Desktop as default?' })).not.toBeInTheDocument()
     expect(await screen.findByText('Default device saved')).toBeInTheDocument()
     expect(screen.getByText(/Windows Desktop is your default device. It is offline/)).toBeInTheDocument()
     expect(within(deviceRow('Windows Desktop')).getByText('Default device')).toBeInTheDocument()
     expect(within(deviceRow('MacBook Pro')).queryByText('Default device')).not.toBeInTheDocument()
+  })
+
+  it('shows an unknown subscription check as available to try without asking for sign-in', async () => {
+    const user = userEvent.setup()
+    renderApp('/devices', 'normal', (client) => {
+      const list = client.listDevices.bind(client)
+      client.listDevices = async () =>
+        (await list()).map((device) =>
+          device.name === 'Ubuntu Dev'
+            ? {
+                ...device,
+                subscriptions: [
+                  { provider: 'ChatGPT', signedIn: false, status: 'unknown', reason: 'credential_read_failed' },
+                ],
+              }
+            : device,
+        )
+    })
+    await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
+    expect(screen.getByText('ChatGPT sign-in check unavailable · can try')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Sign in to ChatGPT' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Finish setup on Ubuntu Dev')).not.toBeInTheDocument()
   })
 
   it('shows a syncing device notice inside its row without agent details', async () => {

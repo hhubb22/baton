@@ -55,13 +55,14 @@ describe('RestrictedMarkdown', () => {
     expect(within(table).getByText('ready').tagName).toBe('EM')
   })
 
-  it('opens valid HTTPS inline, reference and automatic links safely', () => {
+  it('opens HTTP, HTTPS and mailto inline, reference and automatic links safely', () => {
     render(
       <RestrictedMarkdown
         body={
           '[**Docs**](https://example.com/docs?q=one&x=two#part "Documentation")\n\n' +
           '[Reference][guide]\n\n[guide]: HTTPS://EXAMPLE.COM/guide\n\n' +
-          '<https://example.com/auto>\n\nhttps://example.com/plain'
+          '<https://example.com/auto>\n\nhttps://example.com/plain\n\n' +
+          '[Local](http://localhost:5173/docs)\n\n[Email](mailto:user@example.com)'
         }
       />,
     )
@@ -72,6 +73,8 @@ describe('RestrictedMarkdown', () => {
       'https://example.com/guide',
       'https://example.com/auto',
       'https://example.com/plain',
+      'http://localhost:5173/docs',
+      'mailto:user@example.com',
     ])
     for (const link of links) {
       expect(link).toHaveAttribute('target', '_blank')
@@ -82,7 +85,8 @@ describe('RestrictedMarkdown', () => {
   })
 
   it.each([
-    'http://example.com',
+    'http://',
+    'mailto:',
     'javascript:alert%281%29',
     'JaVaScRiPt:alert%281%29',
     'jav&#x61;script:alert%281%29',
@@ -92,7 +96,6 @@ describe('RestrictedMarkdown', () => {
     'vbscript:msgbox%281%29',
     'file:///etc/passwd',
     'ftp://example.com/file',
-    'mailto:user@example.com',
     '//example.com/path',
     '/relative',
     './relative',
@@ -109,7 +112,7 @@ describe('RestrictedMarkdown', () => {
     expect(container.querySelector('a, [href]')).not.toBeInTheDocument()
   })
 
-  it('applies the HTTPS boundary to reference links and GFM automatic links', () => {
+  it('applies the protocol boundary to reference links and allows GFM web and email links', () => {
     const { container } = render(
       <RestrictedMarkdown
         body={
@@ -122,7 +125,13 @@ describe('RestrictedMarkdown', () => {
     expect(screen.getByText('Reference')).toBeInTheDocument()
     expect(container).toHaveTextContent('http://example.com')
     expect(container).toHaveTextContent('user@example.com')
-    expect(container.querySelector('a, [href]')).not.toBeInTheDocument()
+    expect(screen.getByText('Reference').closest('a')).toBeNull()
+    expect(screen.getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual([
+      'http://example.com/',
+      'http://example.com/plain',
+      'http://www.example.com/',
+      'mailto:user@example.com',
+    ])
   })
 
   it('drops raw HTML, event handlers and embedded active content', () => {

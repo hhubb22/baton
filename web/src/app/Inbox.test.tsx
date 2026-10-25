@@ -28,6 +28,37 @@ const runnerQuestion = 'Which runner should run nightly?'
 beforeEach(() => localStorage.clear())
 
 describe('inbox decisions', () => {
+  it('shows a reminder at ten questions and expands options beyond the first five', async () => {
+    const user = userEvent.setup()
+    setup('/inbox', 'normal', (client) => {
+      const list = client.listInbox.bind(client)
+      vi.spyOn(client, 'listInbox').mockImplementation(async () => {
+        const items = await list()
+        const question = items.find((item) => item.title === pathsQuestion)
+        if (!question) throw new Error('Missing question fixture')
+        const options = Array.from({ length: 7 }, (_, index) => `Choice ${index + 1}`)
+        return [
+          { ...question, options },
+          ...Array.from({ length: 9 }, (_, index) => ({
+            ...question,
+            id: `extra-${index}`,
+            title: `Question ${index}`,
+            options: [],
+          })),
+        ]
+      })
+    })
+    const card = await screen.findByRole('region', { name: pathsQuestion })
+    expect(within(card).getByText(/10 questions waiting in this project/)).toBeInTheDocument()
+    expect(within(card).getByRole('button', { name: /Choice 5/ })).toBeInTheDocument()
+    expect(within(card).queryByRole('button', { name: /Choice 6/ })).not.toBeInTheDocument()
+    await user.click(within(card).getByRole('button', { name: 'Show all 7 options' }))
+    await user.click(within(card).getByRole('button', { name: /Choice 7/ }))
+    expect(within(card).getByRole('button', { name: /Choice 7/ })).toHaveAttribute('aria-pressed', 'true')
+    await user.click(within(card).getByRole('button', { name: 'Show fewer options' }))
+    expect(within(card).queryByRole('button', { name: /Choice 7/ })).not.toBeInTheDocument()
+  })
+
   it.each(['/projects/prj-compat', '/threads/thr-compat'])(
     'retries loading questions without losing the conversation at %s',
     async (path) => {

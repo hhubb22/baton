@@ -3,7 +3,7 @@ import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
 import { ClientError } from '../data/client'
 import { clockTime, shortenExcerpt } from '../data/derive'
-import { useHandleItem, useProjectEntries, useProjects, useThreads } from '../data/queries'
+import { useHandleItem, useInbox, useProjectEntries, useProjects, useThreads } from '../data/queries'
 import type { InboxItem, ItemDecision } from '../data/types'
 import { text } from '../theme/text'
 import { colors, radius, space } from '../theme/tokens.stylex'
@@ -82,6 +82,12 @@ export function AttentionCard({
   const handle = useHandleItem()
   const workspace = useWorkspace()
   const [expanded, setExpanded] = useState(false)
+  const [optionsExpanded, setOptionsExpanded] = useState(false)
+  const inbox = useInbox()
+  const pendingCount = (inbox.data ?? []).filter(
+    (value) => value.projectId === item.projectId && value.kind !== 'system' && value.status === 'pending',
+  ).length
+  const visibleOptions = optionsExpanded ? item.options : item.options.slice(0, 5)
   const [error, setError] = useState<string | null>(null)
   const project = projects.data?.find((value) => value.id === item.projectId)
   const thread = threads.data?.find((value) => value.id === item.threadId)
@@ -197,8 +203,13 @@ export function AttentionCard({
       )}
       {pending && !system && (
         <>
+          {pendingCount >= 10 && (
+            <p {...stylex.props(text.caption, styles.meta)}>
+              {pendingCount} questions waiting in this project. Consider answering or closing older questions.
+            </p>
+          )}
           <div {...stylex.props(styles.options)}>
-            {item.options.map((option, index) => (
+            {visibleOptions.map((option, index) => (
               <button
                 type="button"
                 key={option}
@@ -216,6 +227,16 @@ export function AttentionCard({
               </button>
             ))}
           </div>
+          {item.options.length > 5 && (
+            <Button
+              small
+              variant="ghost"
+              aria-expanded={optionsExpanded}
+              onClick={() => setOptionsExpanded(!optionsExpanded)}
+            >
+              {optionsExpanded ? 'Show fewer options' : `Show all ${item.options.length} options`}
+            </Button>
+          )}
           <div {...stylex.props(styles.footer)}>
             {item.allowText && (
               <Button

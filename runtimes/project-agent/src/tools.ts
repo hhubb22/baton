@@ -124,7 +124,7 @@ export const toolDefinitions = [
   {
     name: 'inbox.ask',
     description:
-      '创建请用户处理的事项，可通过 thread_id 关联本 Project 的 Thread，立即返回事项 ID。展示内容为不超过 32 KiB 的 Markdown，链接只允许 https，HTML 和图片不渲染。每个 Project 最多 10 个待处理事项；没有选项时必须允许文字回复。',
+      '创建请用户处理的事项，可通过 thread_id 关联本 Project 的 Thread，立即返回事项 ID。展示内容为不超过 32 KiB 的 Markdown，链接允许 http、https、mailto，HTML 和图片不渲染。相同待处理事项会复用；10 项起提示整理，仍可创建。建议最多 5 个选项，可展开至 50 个，选项 JSON 总计不超过 16 KiB；没有选项时必须允许文字回复。',
     parameters: obj({
       title: str(),
       content: str(),
@@ -135,7 +135,7 @@ export const toolDefinitions = [
           description: opt(),
           recommended: Type.Optional(Type.Boolean()),
         }),
-        { maxItems: 5 },
+        { maxItems: 50 },
       ),
       allow_text: Type.Boolean(),
       thread_id: opt(),

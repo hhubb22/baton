@@ -114,13 +114,10 @@ export function ProjectSettingsDialog({
     return task
   }
 
-  const close = async () => {
-    if (status.isPending) return
-    if ((await save()) && mounted.current) onClose()
-  }
+  const close = () => onClose()
   const changeStatus = async (next: 'active' | 'paused' | 'archived') => {
-    if (busy) return
-    if (!(await save())) return
+    if (status.isPending) return
+    if (next === 'archived' && !(await save())) return
     setActionError(null)
     try {
       await status.mutateAsync({ projectId: project.id, status: next })
@@ -182,7 +179,7 @@ export function ProjectSettingsDialog({
       wide
       title={`${project.name} · settings`}
       onOpenChange={(open) => {
-        if (!open) void close()
+        if (!open) close()
       }}
       finalFocus={finalFocus}
       note={
@@ -199,13 +196,29 @@ export function ProjectSettingsDialog({
           ) : archived ? (
             'Read only'
           ) : dirty ? (
-            'Unsaved changes'
+            'Unsaved changes · draft kept when closed'
           ) : (
             'Saved'
           )}
         </span>
       }
-      actions={<Button onClick={() => void close()}>Done</Button>}
+      actions={
+        <>
+          {dirty && !saving && (
+            <Button
+              variant="ghost"
+              onClick={() => {
+                pending.current = {}
+                workspace.setSettingsDraft(project.id, null)
+                setError(null)
+              }}
+            >
+              Discard changes
+            </Button>
+          )}
+          <Button onClick={close}>Done</Button>
+        </>
+      }
     >
       {archived && (
         <Banner

@@ -23,15 +23,21 @@ it('validates actual Markdown destinations including references, entities and GF
     '[ok][ref]\n\n[ref]: https://example.com',
     '`[example](http://example.com)`',
     '```\n[example](http://example.com)\n```',
+    '[local](http://localhost:3000)',
+    '[mail](mailto:user@example.com)',
+    '[ref][dev]\n\n[dev]: http://localhost:5173',
+    '<http://example.com>',
+    'www.example.com',
     'plain text',
   ])
     expect(validInboxMarkdown(text)).toBe(true)
   for (const text of [
-    '[bad](http://example.com)',
+    '[bad](data:text/html,script)',
+    '[bad](vbscript:alert)',
+    '[bad](file:///etc/passwd)',
+    '[bad](mailto:)',
     '[bad](java&#115;cript:alert)',
-    '[bad][ref]\n\n[ref]: http://example.com',
-    '<http://example.com>',
-    'www.example.com',
+    '[bad][ref]\n\n[ref]: javascript:alert',
     '[bad](//example.com)',
     'x'.repeat(32769),
   ])
@@ -135,7 +141,7 @@ it('serializes concurrent handling and withdrawal, preserves retry result and qu
     }
   }))
 
-it('enforces pending limit, thread ownership and system item rules without queuing system inputs', async () =>
+it('allows more than ten pending questions, checks thread ownership and keeps system items separate', async () =>
   withTestDatabase(async (db) => {
     const { context: c } = await projectToolFixture(db)
     await db.run(createSystemAttention(c, 'Model failed'))
@@ -160,14 +166,16 @@ it('enforces pending limit, thread ownership and system item rules without queui
     await db.run(resolveSystemAttention(c.employeeId, c.projectId))
     expect((await db.run(getAttentionRequest(c.employeeId, system.id))).state).toBe('closed')
     for (let i = 0; i < 10; i++)
-      expect(await db.run(executeProjectTool({ ...c, toolCallId: `ask-${i}` }, 'inbox.ask', ask))).not.toHaveProperty(
-        'isError',
-        true,
-      )
-    expect(await db.run(executeProjectTool({ ...c, toolCallId: 'overflow' }, 'inbox.ask', ask))).toMatchObject({
-      isError: true,
-      value: { code: 'inbox_limit' },
-    })
+      expect(
+        await db.run(
+          executeProjectTool({ ...c, toolCallId: `ask-${i}` }, 'inbox.ask', { ...ask, title: `Choose ${i}` }),
+        ),
+      ).not.toHaveProperty('isError', true)
+    expect(await db.run(executeProjectTool({ ...c, toolCallId: 'overflow' }, 'inbox.ask', ask))).not.toHaveProperty(
+      'isError',
+      true,
+    )
+    expect((await db.run(listInbox(c.employeeId))).open_count).toBe(11)
     const duplicate = await db.run(createAgentAttention(c, 'ask-0', ask))
     expect(duplicate.state).toBe('open')
     expect(
@@ -195,7 +203,7 @@ it('enforces pending limit, thread ownership and system item rules without queui
     expect(inputs).toEqual([])
   }))
 
-it('keeps the proposal limit and call identity under concurrent creation', async () =>
+it('reuses identical open questions under concurrent creation while allowing distinct questions beyond ten', async () =>
   withTestDatabase(async (db) => {
     const { context: c } = await projectToolFixture(db)
     const results = await Promise.all(
@@ -203,11 +211,52 @@ it('keeps the proposal limit and call identity under concurrent creation', async
         db.run(executeProjectTool({ ...c, toolCallId: `concurrent-${i}` }, 'inbox.ask', ask)),
       ),
     )
-    expect(results.filter((r) => !r.isError)).toHaveLength(10)
-    expect(results.filter((r) => r.isError)).toHaveLength(2)
-    const first = results.findIndex((r) => !r.isError)
-    expect(await db.run(executeProjectTool({ ...c, toolCallId: `concurrent-${first}` }, 'inbox.ask', ask))).toEqual(
-      results[first],
+    expect(results.every((r) => !r.isError)).toBe(true)
+    expect((await db.run(listInbox(c.employeeId))).open_count).toBe(1)
+    const distinct = await Promise.all(
+      Array.from({ length: 12 }, (_, i) =>
+        db.run(createAgentAttention(c, `distinct-${i}`, { ...ask, title: `Choose ${i}` })),
+      ),
     )
-    expect((await db.run(listInbox(c.employeeId))).open_count).toBe(10)
+    expect(new Set(distinct.map((r) => r.id)).size).toBe(12)
+    expect(await db.run(createAgentAttention(c, 'distinct-0', ask))).toEqual(distinct[0])
+    expect((await db.run(listInbox(c.employeeId))).open_count).toBe(13)
+    const original = distinct[0]
+    if (!original) throw new Error('Missing distinct question')
+    await db.run(
+      handleAttentionRequest(
+        c.employeeId,
+        original.id,
+        {
+          expected_version: 1,
+          client_request_id: 'close-original',
+        },
+        true,
+      ),
+    )
+    const reopened = await db.run(createAgentAttention(c, 'new-question', { ...ask, title: 'Choose 0' }))
+    expect(reopened.id).not.toBe(original.id)
+    expect(reopened.state).toBe('open')
+  }))
+
+it('round-trips more than five choices with local and email links and rejects an excessive option budget', async () =>
+  withTestDatabase(async (db) => {
+    const { context: c } = await projectToolFixture(db)
+    const options = Array.from({ length: 6 }, (_, index) => ({ id: `choice-${index}`, label: `Choice ${index}` }))
+    const request = await db.run(
+      createAgentAttention(c, 'six-options', {
+        ...ask,
+        content: '[Dev](http://localhost:5173) [Mail](mailto:user@example.com)',
+        options,
+      }),
+    )
+    expect(request.options).toEqual(options)
+    await expect(
+      db.run(
+        createAgentAttention(c, 'oversized-options', {
+          ...ask,
+          options: [{ id: 'large', label: 'Large', description: '文'.repeat(6000) }],
+        }),
+      ),
+    ).rejects.toMatchObject({ status: 422 })
   }))

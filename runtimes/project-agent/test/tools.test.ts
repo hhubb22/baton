@@ -19,6 +19,12 @@ const ask = {
   allow_text: true,
 }
 
+test('Inbox 工具允许超过五个选项并保留数量预算', () => {
+  const options = Array.from({ length: 50 }, (_, index) => ({ id: `option-${index}`, label: `选项 ${index}` }))
+  assert.deepEqual(validate('inbox.ask', { ...ask, options }), { ...ask, options })
+  assert.throws(() => validate('inbox.ask', { ...ask, options: [...options, { id: 'extra', label: '更多' }] }))
+})
+
 test('固定工具顺序与 Thread、Inbox 契约一致', () => {
   assert.deepEqual(
     toolDefinitions.map((tool) => tool.name),

@@ -289,9 +289,19 @@ export function useUpdateProject(projectId: ID) {
   return useMutation({
     scope: { id: `project-settings:${projectId}` },
     mutationFn: (input: { projectId: ID; patch: ProjectPatch }) => client.updateProject(input),
-    onSuccess: (project) =>
+    onSuccess: (project, { patch }) =>
       cache.setQueryData<Project[]>(keys.projects, (items) =>
-        items?.map((item) => (item.id === project.id ? project : item)),
+        items?.map((item) =>
+          item.id === project.id
+            ? {
+                ...item,
+                name: patch.name === undefined ? item.name : project.name,
+                goal: patch.goal === undefined ? item.goal : project.goal,
+                subscription: patch.subscription === undefined ? item.subscription : project.subscription,
+                model: patch.model === undefined ? item.model : project.model,
+              }
+            : item,
+        ),
       ),
   })
 }

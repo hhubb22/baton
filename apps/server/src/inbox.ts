@@ -22,10 +22,13 @@ interface MarkdownNode {
   identifier?: string
   children?: readonly MarkdownNode[]
 }
-const validHttps = (url: string) => {
+const validLink = (url: string) => {
   try {
     const parsed = new URL(url)
-    return parsed.protocol === 'https:' && Boolean(parsed.hostname)
+    return (
+      ((parsed.protocol === 'https:' || parsed.protocol === 'http:') && Boolean(parsed.hostname)) ||
+      (parsed.protocol === 'mailto:' && Boolean(parsed.pathname.trim()))
+    )
   } catch {
     return false
   }
@@ -44,7 +47,7 @@ export function validInboxMarkdown(content: string): boolean {
     for (const child of node.children ?? []) walk(child)
   }
   walk(root)
-  return links.every(validHttps) && refs.every((id) => validHttps(definitions.get(id) ?? ''))
+  return links.every(validLink) && refs.every((id) => validLink(definitions.get(id) ?? ''))
 }
 const validAsk = Effect.fnUntraced(function* (input: unknown) {
   const a = yield* strictDecode(P.InboxAsk, input)
@@ -98,10 +101,11 @@ const createAgentAttentionTx = Effect.fnUntraced(function* (b: InboxBinding, cal
       yield* sql`SELECT id FROM threads WHERE employee_id=${b.employeeId} AND project_id=${b.projectId} AND id=${a.thread_id}`
     if (!related.length) return yield* Effect.fail(new AppError(404, 'not_found'))
   }
-  const count = yield* sql<{
-    count: number
-  }>`SELECT count(*)::integer AS count FROM attention_requests WHERE employee_id=${b.employeeId} AND project_id=${b.projectId} AND source='agent' AND state='open'`
-  if (count[0]!.count >= 10) return yield* Effect.fail(new AppError(422, 'inbox_limit'))
+  const duplicate = yield* sql<{
+    id: string
+  }>`SELECT id FROM attention_requests WHERE employee_id=${b.employeeId} AND project_id=${b.projectId} AND source='agent' AND state='open' AND thread_id IS NOT DISTINCT FROM ${a.thread_id ?? null}::uuid AND title=${a.title} AND content=${a.content} AND options=${JSON.stringify(a.options)}::jsonb AND allow_text=${a.allow_text} ORDER BY created_at,id LIMIT 1`
+  const existing = duplicate[0]
+  if (existing) return yield* readRequest(b.employeeId, existing.id)
   const id = randomUUID()
   yield* sql`INSERT INTO attention_requests(id,employee_id,project_id,agent_id,conversation_id,origin_tool_call_id,source,thread_id,title,content,options,allow_text) VALUES(${id},${b.employeeId},${b.projectId},${b.agentId},${b.conversationId},${callId},'agent',${a.thread_id ?? null},${a.title},${a.content},${JSON.stringify(a.options)}::jsonb,${a.allow_text})`
   return yield* readRequest(b.employeeId, id)

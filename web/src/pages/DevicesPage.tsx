@@ -358,7 +358,7 @@ function DeviceDetails({
             ))}
             {device.hasRuntime &&
               device.subscriptions
-                .filter((sub) => !sub.signedIn)
+                .filter((sub) => sub.status === 'login_required' || (!sub.status && !sub.signedIn))
                 .map((sub) => (
                   <Button key={sub.provider} small onClick={() => setLoginProvider(sub.provider)}>
                     Sign in to {sub.provider}
@@ -467,7 +467,6 @@ export function DevicesPage() {
   const notify = (notice: Notice) => setFeedback({ kind: 'notice', notice })
   // 首页的「Connect a device」带 connect 参数打开这里，直接弹出接入窗口。
   const [enrolling, setEnrolling] = useState(() => Boolean(search.connect))
-  const [offlineDefault, setOfflineDefault] = useState<Device | null>(null)
   const [disconnect, setDisconnect] = useState<Disconnect | null>(null)
   const [permission, setPermission] = useState<PermissionState | null>(null)
   const headingRef = useRef<HTMLHeadingElement>(null)
@@ -488,18 +487,16 @@ export function DevicesPage() {
         notify({
           title: 'Default device saved',
           detail: offline
-            ? `${device.name} is your default device. It is offline; new chats on it wait until it reconnects.`
+            ? `${device.name} is your default device. It is offline; new chats on it wait until it reconnects. Projects can use another available device.`
             : `${device.name} is your default for new chats and the first choice for the project assistant.`,
         }),
       onError: () => notify(unreachableNotice),
-      onSettled: () => setOfflineDefault(null),
     })
   }
 
   const chooseDefault = (device: Device) => {
     if (device.id === defaultId || setDefault.isPending) return
-    if (device.connection === 'offline') setOfflineDefault(device)
-    else saveDefault(device, false)
+    saveDefault(device, device.connection === 'offline')
   }
 
   const changePermission = (device: Device, enabled: boolean) => {
@@ -651,26 +648,6 @@ export function DevicesPage() {
           finalFocus={() => headingRef.current}
         />
       )}
-
-      <Dialog
-        open={offlineDefault !== null}
-        onOpenChange={(open) => {
-          if (!open && !setDefault.isPending) setOfflineDefault(null)
-        }}
-        title={`Use ${offlineDefault?.name ?? ''} as default?`}
-        description={
-          offlineDefault &&
-          `${offlineDefault.name} is offline, last seen at ${lastSeen(offlineDefault.lastSeenAt, now)}. New chats on it wait until it reconnects. Projects can use another available computer. You can still save it as your default.`
-        }
-        actions={
-          <>
-            <Button onClick={() => setOfflineDefault(null)}>Cancel</Button>
-            <Button variant="primary" onClick={() => offlineDefault && saveDefault(offlineDefault, true)}>
-              {setDefault.isPending ? 'Saving…' : 'Save default device'}
-            </Button>
-          </>
-        }
-      />
 
       <DisconnectDialog
         state={disconnect}

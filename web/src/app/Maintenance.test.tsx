@@ -77,25 +77,29 @@ describe('project maintenance', () => {
     expect(within(reopened).getByLabelText(/^Goal/)).toHaveValue('Verify Windows and Linux before release.')
   })
 
-  it('keeps an empty name in settings until it is corrected', async () => {
+  it('closes with an invalid draft, pauses the saved project and lets the draft be discarded', async () => {
     const user = userEvent.setup()
     const { client } = setup(settingsPath)
     const update = vi.spyOn(client, 'updateProject')
     const dialog = await screen.findByRole('dialog', { name: 'Compatibility · settings' })
     await replace(user, within(dialog).getByLabelText('Project name'), '   ')
-    await user.click(within(dialog).getByRole('button', { name: 'Done' }))
-    expect(await within(dialog).findByText('Enter a project name.', { selector: 'p' })).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: 'Pause' }))
+    expect(await within(dialog).findByRole('button', { name: 'Resume' })).toBeInTheDocument()
     expect(within(dialog).getByLabelText('Project name')).toHaveValue('   ')
     expect(update).not.toHaveBeenCalled()
-    await replace(user, within(dialog).getByLabelText('Project name'), 'Valid name')
+    expect((await client.listProjects()).find((project) => project.id === 'prj-compat')?.status).toBe('paused')
     await user.click(within(dialog).getByRole('button', { name: 'Done' }))
-    expect(await screen.findByRole('heading', { name: 'Valid name' })).toBeInTheDocument()
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    const reopened = await openSettings(user)
+    expect(within(reopened).getByLabelText('Project name')).toHaveValue('   ')
+    await user.click(within(reopened).getByRole('button', { name: 'Discard changes' }))
+    expect(within(reopened).getByLabelText('Project name')).toHaveValue('Compatibility')
+    expect(update).not.toHaveBeenCalled()
   })
 
-  it('retains failed settings and saves the same edits with Retry save', async () => {
+  it('retains failed settings across closing and saves the same edits after reopening', async () => {
     const user = userEvent.setup()
-    setup(settingsPath, 'normal', (client) => {
+    const { router } = setup(settingsPath, 'normal', (client) => {
       vi.spyOn(client, 'updateProject').mockRejectedValueOnce(new ClientError('unavailable', 'Disconnected'))
     })
     const dialog = await screen.findByRole('dialog', { name: 'Compatibility · settings' })
@@ -105,12 +109,50 @@ describe('project maintenance', () => {
       await within(dialog).findByText('Could not save changes. Your edits are kept. Try again.'),
     ).toBeInTheDocument()
     expect(within(dialog).getByLabelText(/^Goal/)).toHaveValue('Keep this goal after failure.')
-    await user.click(within(dialog).getByRole('button', { name: 'Retry save' }))
-    await waitFor(() => expect(within(dialog).getByRole('status')).toHaveTextContent('Saved'))
     await user.click(within(dialog).getByRole('button', { name: 'Done' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    await act(() =>
+      router.navigate({ to: '/projects/$projectId', params: { projectId: 'prj-compat' }, search: { settings: true } }),
+    )
+    const reopened = await screen.findByRole('dialog', { name: 'Compatibility · settings' })
+    expect(within(reopened).getByLabelText(/^Goal/)).toHaveValue('Keep this goal after failure.')
+    await user.click(within(reopened).getByLabelText('Project name'))
+    await user.click(within(reopened).getByLabelText(/^Goal/))
+    await waitFor(() => expect(within(reopened).getByRole('status')).toHaveTextContent('Saved'))
+    await user.click(within(reopened).getByRole('button', { name: 'Done' }))
     expect(
       await within(screen.getByRole('complementary', { name: 'Overview' })).findByText('Keep this goal after failure.'),
     ).toBeInTheDocument()
+  })
+
+  it('keeps newer drafts and the paused status when an earlier settings response arrives later', async () => {
+    const user = userEvent.setup()
+    let release: (() => void) | undefined
+    const { client } = setup(settingsPath, 'normal', (client) => {
+      const update = client.updateProject.bind(client)
+      vi.spyOn(client, 'updateProject').mockImplementationOnce(async (input) => {
+        const saved = await update(input)
+        await new Promise<void>((resolve) => {
+          release = resolve
+        })
+        return saved
+      })
+    })
+    const dialog = await screen.findByRole('dialog', { name: 'Compatibility · settings' })
+    await replace(user, within(dialog).getByLabelText('Project name'), 'Earlier name')
+    await user.click(within(dialog).getByLabelText(/^Goal/))
+    await waitFor(() => expect(release).toBeDefined())
+    await replace(user, within(dialog).getByLabelText('Project name'), '   ')
+    await user.click(within(dialog).getByRole('button', { name: 'Pause' }))
+    expect(await within(dialog).findByRole('button', { name: 'Resume' })).toBeInTheDocument()
+    await act(async () => release?.())
+    expect(await within(dialog).findByText('Enter a project name.', { selector: 'p' })).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Project name')).toHaveValue('   ')
+    expect(within(dialog).getByRole('button', { name: 'Resume' })).toBeInTheDocument()
+    expect((await client.listProjects()).find((project) => project.id === 'prj-compat')).toMatchObject({
+      name: 'Earlier name',
+      status: 'paused',
+    })
   })
 
   it('preserves newer settings during delayed saves and after browser back and reopening', async () => {

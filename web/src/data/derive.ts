@@ -12,6 +12,7 @@ import type {
   Message,
   Operation,
   Project,
+  Subscription,
   Thread,
 } from './types'
 
@@ -328,7 +329,8 @@ export type AssistantBlock = 'noRuntime' | 'offline' | 'syncing' | 'signedOut'
 export function assistantBlock(device: Device, subscription: string): AssistantBlock | null {
   if (!device.hasRuntime) return 'noRuntime'
   if (device.connection !== 'online') return device.connection
-  if (!device.subscriptions.some((item) => item.provider === subscription && item.signedIn)) return 'signedOut'
+  if (!device.subscriptions.some((item) => item.provider === subscription && canTrySubscription(item)))
+    return 'signedOut'
   return null
 }
 
@@ -359,7 +361,7 @@ function blockStep(device: Device, block: AssistantBlock, subscription: string) 
   }
 }
 
-// 订阅已登录的设备数，新建 Project 时提示用。
+// 当前可尝试运行所选订阅的设备数，用于新建 Project 提示。
 export function subscriptionReach(devices: Device[], subscription: string) {
   return devices.filter((item) => assistantBlock(item, subscription) === null).length
 }
@@ -558,13 +560,39 @@ export function deviceConnectionView(device: Device, projects: Project[], now: n
   }
 }
 
-function subscriptionSignedIn(device: Device) {
-  return device.subscriptions.some((item) => item.signedIn)
+// 已声明但认证检查未知的订阅可尝试运行，明确缺少登录时等待登录。
+export function canTrySubscription(subscription: Subscription) {
+  if (subscription.status) return subscription.status !== 'login_required'
+  return subscription.signedIn
+}
+
+export function subscriptionCredentialIssue(subscription: Subscription): string | null {
+  switch (subscription.reason) {
+    case 'credential_permissions_invalid':
+      return 'Credential file permissions are unsafe. Allow access only for the device user.'
+    case 'credential_owner_invalid':
+      return 'The credential file belongs to another user. Restore ownership to the device user.'
+    case 'credential_path_invalid':
+      return 'The credential path is invalid. Use a regular file without symbolic links.'
+    case 'credential_private_file_failed':
+      return 'The credential file could not be opened securely. Check its path, ownership and permissions.'
+    default:
+      return null
+  }
+}
+
+function subscriptionCanRun(device: Device) {
+  return device.subscriptions.some(canTrySubscription)
 }
 
 // 设备上需要处理才能用的 Agent 和 Project 助手。
 export function setupNeeded(device: Device) {
-  return device.agents.some((agent) => !canCreateAgent(agent)) || !device.hasRuntime || !subscriptionSignedIn(device)
+  return (
+    device.agents.some((agent) => !canCreateAgent(agent)) ||
+    !device.hasRuntime ||
+    !subscriptionCanRun(device) ||
+    device.subscriptions.some((item) => subscriptionCredentialIssue(item) !== null)
+  )
 }
 
 export interface CapabilityLine {
@@ -588,13 +616,18 @@ export function capabilityLines(device: Device): CapabilityLine[] {
     return { name, ok: true, detail: [agent.account ? 'Signed in' : 'Installed', ...abilityNotes(agent)].join(' · ') }
   })
   const subscriptions = device.subscriptions.filter((item) => item.signedIn).map((item) => item.provider)
+  const diagnostics = device.subscriptions.flatMap((item) => {
+    const issue = subscriptionCredentialIssue(item)
+    if (issue) return [`${item.provider}: ${issue}`]
+    return item.status === 'unknown' ? [`${item.provider} sign-in check unavailable · can try`] : []
+  })
   let runtime: CapabilityLine = {
     name: 'Project assistant',
-    ok: true,
-    detail: `${sentenceList(subscriptions)} signed in`,
+    ok: !device.subscriptions.some((item) => subscriptionCredentialIssue(item) !== null),
+    detail: [...(subscriptions.length ? [`${sentenceList(subscriptions)} signed in`] : []), ...diagnostics].join(' · '),
   }
   if (!device.hasRuntime) runtime = { name: 'Project assistant', ok: false, detail: 'Not installed' }
-  else if (!subscriptionSignedIn(device))
+  else if (!subscriptionCanRun(device))
     runtime = {
       name: 'Project assistant',
       ok: false,
@@ -632,14 +665,18 @@ export function setupSteps(device: Device) {
   })
   if (!device.hasRuntime) steps.push('update Baton for the project assistant')
   else if (
-    !subscriptionSignedIn(device) &&
+    !subscriptionCanRun(device) &&
     !device.agents.some((agent) => agent.account === 'ChatGPT' && agent.problem)
   ) {
     const providers = device.subscriptions.map((item) => item.provider).join(' or ') || 'a supported subscription'
     steps.push(`sign in to ${providers} for the project assistant`)
   }
+  for (const subscription of device.subscriptions) {
+    const issue = subscriptionCredentialIssue(subscription)
+    if (issue) steps.push(`${subscription.provider}: ${issue}`)
+  }
   const list = sentenceList(steps)
-  return `${list.charAt(0).toUpperCase()}${list.slice(1)}.`
+  return `${list.charAt(0).toUpperCase()}${list.slice(1)}${list.endsWith('.') ? '' : '.'}`
 }
 
 // 设备行的 Agent 列。

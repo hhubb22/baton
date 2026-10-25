@@ -51,6 +51,7 @@ export interface Subscription {
   provider: string
   signedIn: boolean
   status?: 'available' | 'login_required' | 'unknown'
+  reason?: string | null
   models?: string[]
 }
 

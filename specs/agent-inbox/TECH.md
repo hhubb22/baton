@@ -6,7 +6,7 @@ Basis: [PRODUCT.md](PRODUCT.md) IB-01～IB-20；[Project Agent TECH](../project-
 
 ## Context
 
-Coordinator 在 `call_tool` 事务里执行工具并保存唯一的 `tool_result`。用户处理 Project Agent 创建的事项后，结果进入输入队列，类型为 `attention_answer`。系统事项由主对话状态变化创建和解决，不产生输入。展示内容是 Markdown，Coordinator 只检查 32 KiB 字节上限和链接的 `https` 协议。
+Coordinator 在 `call_tool` 事务里执行工具并保存唯一的 `tool_result`。用户处理 Project Agent 创建的事项后，结果进入输入队列，类型为 `attention_answer`。系统事项由主对话状态变化创建和解决，不产生输入。展示内容是 Markdown，TypeScript 中心检查 32 KiB 字节上限，链接允许有效的 `http`、`https` 和 `mailto` URL。
 
 ## Proposed changes
 
@@ -20,7 +20,7 @@ Coordinator 在 `call_tool` 事务里执行工具并保存唯一的 `tool_result
 
 - `source` 为 `agent` 或 `system`。Agent 事项的 `(conversation_id, origin_tool_call_id)` 唯一。
 - `state` 为 `open`、`answered`、`closed`、`withdrawn` 或 `resolved`；每次状态变化使 `version` 加一。
-- 系统事项只有一种：主对话进入 `needs_attention`。同一 Project 最多一个 `open` 的系统事项，由部分唯一索引 `(project_id) WHERE source='system' AND state='open'` 保证。系统事项没有选项、文字回复和工具来源。
+- 系统事项包含普通模型请求连续失败第 3 次产生的提示。主对话保持 `active`，自动尝试退避 15 分钟。同一 Project 最多一个 `open` 的系统事项，由部分唯一索引 `(project_id) WHERE source='system' AND state='open'` 保证。系统事项没有选项、文字回复和工具来源。
 - `thread_id` 可空，引用同一员工的 Thread，并检查 Thread 属于本 Project。事项不保存 Thread 内容的快照，界面打开关联 Thread 查看当前内容。
 - 所有归属引用使用复合外键。
 - Inbox 索引为 `(employee_id, created_at DESC, id DESC)`；Project 查询索引为 `(project_id, state)`；Thread 查询索引为 `(thread_id) WHERE thread_id IS NOT NULL`。
@@ -29,9 +29,9 @@ Coordinator 在 `call_tool` 事务里执行工具并保存唯一的 `tool_result
 
 沿用 `call_tool` 的租约校验、已保存 assistant 校验和唯一结果。同一调用重发直接返回已有 `tool_result`。权限取自运行记录。
 
-`inbox.ask` 参数为 `title`、`content`、`options`、`allow_text` 和可选 `thread_id`。标题 1～120 字符；0～5 个选项，ID 符合 `^[a-z][a-z0-9_-]{0,31}$` 且唯一，标签 1～40 字符，最多一个建议选项；没有选项时必须允许文字回复。Markdown 不超过 32 KiB，链接目标必须是有效 `https` URL。检查失败写 `is_error`，不创建事项。
+`inbox.ask` 参数为 `title`、`content`、`options`、`allow_text` 和可选 `thread_id`。标题 1～120 字符；0～50 个选项，推荐不超过 5 个，序列化选项 JSON 总计不超过 16 KiB；ID 符合 `^[a-z][a-z0-9_-]{0,31}$` 且唯一，标签 1～40 字符，最多一个建议选项；没有选项时必须允许文字回复。Markdown 不超过 32 KiB，链接目标必须是有效的 `http`、`https` 或 `mailto` URL。检查失败写 `is_error`，不创建事项。
 
-Agent 行锁串行化同 Project 的创建；只统计 `source=agent AND state=open`，达到 10 个时拒绝。关联 Thread 不属于本 Project 时拒绝。返回 `request_id`、状态、版本和 `read_tool`。
+Agent 行锁串行化同 Project 的创建。先按工具调用身份查找已有记录，再按标题、正文、选项 JSON、`allow_text` 与关联 Thread 精确匹配本 Project 的 `source=agent AND state=open` 事项，命中则返回已有事项。新建不同问题不受 10 项硬上限限制；界面从 10 项起提示整理。工具结果仍按原调用身份持久保存，重发沿用已有结果。关联 Thread 不属于本 Project 时拒绝。返回 `request_id`、状态、版本和 `read_tool`。
 
 `inbox.list` 读取本 Project 的事项摘要，按稳定 ID 分页，每页 20 条；`inbox.get` 返回完整事项和处理结果。两个只读工具复用 JSON 字节分页（`offset`、`max_bytes`），保证 `tool_result` 不超过 32 KiB。
 
@@ -56,13 +56,13 @@ Agent 行锁串行化同 Project 的创建；只统计 `source=agent AND state=o
 
 离线和暂停不影响处理（IB-11）。归档事务先锁 Agent，撤回该 Project 所有 open 事项，原因为「Project 已归档」，再结束运行（IB-16）。
 
-**系统事项。** 模型失败达到重试上限、把主对话改为 `needs_attention` 的同一事务创建系统事项；确认重试把主对话恢复 active 的同一事务，将仍 open 的系统事项改为 `resolved`（IB-18、IB-19）。锁顺序为 Agent → conversation → attention_request。用户关闭后条件仍在时不重新创建，只有主对话再次从 active 进入 `needs_attention` 才创建新事项。
+**系统事项。** 普通模型失败计数恰好到 3 时创建系统提示，主对话保持 `active`，之后自动尝试保持 15 分钟退避；新的用户消息清除退避，同一消息的幂等重发不清除。保存 assistant 回复成功或显式 Retry 会清零失败计数，并将仍 open 的系统提示改为 `resolved`（IB-18、IB-19）。用户关闭后同一轮持续失败不重建，计数清零后下次再次到 3 才创建。系统提示的创建、解决和关闭不进入输入队列。锁顺序为 Agent → conversation → attention_request。
 
 ### 5. Web 页面
 
 `/inbox` 列出待处理和已处理事项，`/inbox/{id}`、主对话里 `inbox.ask` 的位置和关联 Thread 里显示同一张事项卡片（IB-08）。卡片只用于等用户决定的事项，按 `design/` 实现。
 
-Markdown 使用 `react-markdown` 和 `remark-gfm` 渲染，启用 `skipHtml`，禁用图片，链接只保留有效的 `https` URL 并在新窗口打开（IB-07）。回答和关闭携带版本与请求标识；冲突后读取当前记录，响应丢失后由用户查询处理结果，不自动重发。Inbox 数量、已展开的列表和当前事项每 5 秒查询一次。
+Markdown 使用 `react-markdown` 和 `remark-gfm` 渲染，启用 `skipHtml`，禁用图片，链接只保留有效的 `http`、`https` 和 `mailto` URL 并在新窗口打开，使用 `noopener noreferrer`，不自动加载外部资源（IB-07）。选项默认显示前 5 个，其余通过按钮在原位展开；同 Project 的待处理 Agent 问题达到 10 个时显示整理提示。回答和关闭携带版本与请求标识；冲突后读取当前记录，响应丢失后由用户查询处理结果，不自动重发。Inbox 数量、已展开的列表和当前事项每 5 秒查询一次。
 
 选中文字后的「问 Project Agent」把文字和来源（Thread ID 与回复位置、文件的设备路径行号、事项 ID）预填到主对话输入框（IB-13）。引用按 UTF-8 截至 8 KiB，超限注明原始字节长度。草稿只在当前页面内存中，用户提交后才写入普通消息接口。
 
@@ -70,12 +70,12 @@ Markdown 使用 `react-markdown` 和 `remark-gfm` 渲染，启用 `skipHtml`，�
 
 | 需求 | 设置与观察 | 失败条件 | 位置 |
 |---|---|---|---|
-| IB-01～IB-04 | 工具重发、10 个上限、系统事项不计数、关联其他 Project 的 Thread | 出现第二个事项；超限仍创建；跨 Project 关联成功 | PostgreSQL 集成、模型替身进程测试 |
-| IB-07 | Markdown 超过 32 KiB；含 `http` 链接 | 创建了事项 | 单元测试、`call_tool` 进程测试 |
+| IB-01～IB-04 | 并发创建相同问题、创建超过 10 个不同问题、6～50 个选项及 16 KiB 总预算、关联其他 Project 的 Thread | 相同未处理问题重复创建；第 11 个不同问题被拒绝；超预算仍创建；跨 Project 关联成功 | PostgreSQL 集成、协议测试 |
+| IB-07 | Markdown 超过 32 KiB；危险协议；正常 HTTP、HTTPS 和邮件链接 | 超预算或危险链接被创建；正常链接被拒绝；图片或 HTML 自动加载资源 | 单元测试、Web 测试 |
 | IB-10～IB-12 | 两连接同时回答；同一请求重试 | 两次处理都生效；输入队列多于一条；重试返回 409 | PostgreSQL / HTTP 集成 |
 | IB-11 | 离线、暂停时回答，之后恢复 | 处理失败；恢复后 Project Agent 没有收到 | PostgreSQL 集成 |
 | IB-14、IB-15 | 回答与撤回并发 100 轮 | 两者都生效；撤回产生输入 | PostgreSQL 集成 |
 | IB-16 | 归档有 3 个 open 事项的 Project | 有事项仍为 open | PostgreSQL 集成 |
-| IB-18～IB-20 | 模型替身持续失败直到重试上限，用户关闭后再重试 | 没有系统事项；关闭后条件仍在时重新创建；输入队列出现系统事项 | 模型替身进程测试 |
+| IB-18～IB-20 | 模型替身连续失败 3 次后继续失败，关闭提示，发送新消息及幂等重发，再保存回复或 Retry | 第 3 次失败没有提示；主对话硬暂停；退避不为 15 分钟；关闭后持续失败重建；幂等重发清除退避；保存回复或 Retry 未清零并解决提示；系统提示产生输入 | 本地模型替身、PostgreSQL 集成 |
 | IB-08 | 主对话、Inbox、Thread 三处同时打开，在其中一处回答 | 其他两处 5 秒内未显示新状态 | Web 测试 |
 | IB-09 | 1024 像素宽窗口打开 Inbox 和事项 | 出现横向滚动 | Web 测试 |
