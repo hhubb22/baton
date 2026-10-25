@@ -263,14 +263,14 @@ it('delivers stop and withdraw after roots are revoked and the working directory
   )
 })
 
-it('persists and reuses an explicit Worker rejection without retrying it', async () => {
+it.each(['unsupported', 'model_with_steer'])('persists and reuses Worker rejection %s without retrying it', async (code) => {
   await withService(({ commandId, command, host, path, setHandler }) =>
     Effect.gen(function* () {
       const ledger = yield* makeNodeLedger(join(path, 'node.db'))
       let deliveries = 0
       setHandler(async () => {
         deliveries++
-        return { type: 'result', ok: false, code: 'unsupported' }
+        return { type: 'result', ok: false, code }
       })
       const service = makeThreadService({
         dataDirectory: path,
@@ -280,7 +280,7 @@ it('persists and reuses an explicit Worker rejection without retrying it', async
         capability: () => capability,
       })
       const result = yield* Effect.promise(() => service.command(commandId, command))
-      expect(result).toMatchObject({ ok: false, code: 'unsupported' })
+      expect(result).toMatchObject({ ok: false, code })
       expect(yield* Effect.promise(() => service.command(commandId, command))).toEqual(result)
       expect(deliveries).toBe(1)
       expect((yield* ledger.command(commandId))?.result).toEqual(result)

@@ -53,6 +53,7 @@ const workerRejections = new Set([
   'invalid_state',
   'unsupported',
   'message_conflict',
+  'model_with_steer',
   'not_queued',
 ])
 const decodeRequest = (value: unknown): WorkerRequest => {
