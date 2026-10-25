@@ -10,8 +10,13 @@ it('keeps edits made while a previous time limit is being saved', async () => {
   const client = createMockClient('normal', { latency: { read: 0, save: 0, device: 0, run: 0 } })
   const thread = (await client.listThreads()).find((item) => item.status !== 'archived')
   if (!thread) throw new Error('Expected an editable Thread')
-  const saved = Promise.withResolvers<Thread>()
-  client.setThreadExecutionLimit = () => saved.promise
+  let complete: (value: Thread) => void = () => {
+    throw new Error('Save has not started')
+  }
+  const saved = new Promise<Thread>((resolve) => {
+    complete = resolve
+  })
+  client.setThreadExecutionLimit = () => saved
   const user = userEvent.setup()
   render(
     <ClientProvider client={client}>
@@ -25,7 +30,7 @@ it('keeps edits made while a previous time limit is being saved', async () => {
   await user.click(screen.getByRole('button', { name: 'Save time limit' }))
   await user.clear(input)
   await user.type(input, '14400')
-  await act(async () => saved.resolve({ ...thread, executionTimeoutSeconds: 3600 }))
+  await act(async () => complete({ ...thread, executionTimeoutSeconds: 3600 }))
   await screen.findByRole('status')
   expect(input).toHaveValue(14400)
 })
