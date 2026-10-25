@@ -40,6 +40,12 @@ export const ExecutionEvent = Schema.Union([
     gap: Schema.optionalKey(Schema.Boolean),
   }),
   Schema.Struct({ ...identity, type: Schema.Literal('end'), outcome: Schema.Literals(['completed', 'cancelled']) }),
+  Schema.Struct({
+    ...identity,
+    type: Schema.Literal('end'),
+    outcome: Schema.Literal('failed'),
+    reason: Schema.String,
+  }),
   Schema.Struct({ type: Schema.Literal('uncertain'), reason: Schema.String }),
 ])
 export type ExecutionEvent = typeof ExecutionEvent.Type

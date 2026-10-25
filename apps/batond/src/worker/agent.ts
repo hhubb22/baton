@@ -55,6 +55,7 @@ export type AgentEvent =
       readonly truncated?: boolean
     })
   | (AgentEventIdentity & { readonly type: 'end'; readonly outcome: 'completed' | 'cancelled' })
+  | (AgentEventIdentity & { readonly type: 'end'; readonly outcome: 'failed'; readonly reason: string })
   | { readonly type: 'uncertain'; readonly reason: string }
   | { readonly type: 'exited'; readonly reason: string; readonly processTreeStopped: boolean }
 

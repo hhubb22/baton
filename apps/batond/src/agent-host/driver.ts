@@ -176,10 +176,15 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
             return
           }
           case 'turn.terminal': {
-            if (!active || event.runOrdinal !== active.ordinal) return
+            if (!active || active.ended || event.runOrdinal !== active.ordinal) return
             active.ended = true
             if (event.status === 'failed') {
-              yield* emit({ type: 'uncertain', reason: options.turnFailure?.(event.failure) ?? `${label} turn failed` })
+              yield* emit({
+                ...identity(active),
+                type: 'end',
+                outcome: 'failed',
+                reason: options.turnFailure?.(event.failure) ?? `${label} could not complete this reply.`,
+              })
               return
             }
             yield* emit({

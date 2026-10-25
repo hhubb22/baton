@@ -579,7 +579,10 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
                 ? (draft.stopReason ?? 'stopped')
                 : event.outcome === 'cancelled'
                   ? 'stopped'
-                  : 'completed',
+                  : event.outcome === 'failed'
+                    ? 'failed'
+                    : 'completed',
+            ...(event.outcome === 'failed' ? { content: event.reason } : {}),
           })
           delete draft.activeMessage
           if (draft.phase !== 'stopping') {
