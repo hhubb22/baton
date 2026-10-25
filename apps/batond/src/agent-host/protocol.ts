@@ -55,6 +55,8 @@ export type HostEvent = typeof HostEvent.Type
 
 export class AgentHostError extends Schema.TaggedError<AgentHostError>()('AgentHostError', {
   message: Schema.String,
+  /** Explicit native model rejection before input submission. */
+  modelRejected: Schema.optionalKey(Schema.Boolean),
 }) {}
 
 export const ProbeDetail = Schema.Union([Schema.String, Schema.Number, Schema.Boolean])

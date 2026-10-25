@@ -78,10 +78,10 @@ describe.each(providers)('%s availability', (agentType) => {
     )
     expect(report.status).toBe('available')
     expect(report.default_model).not.toBe('')
-    expect(report.capabilities).toMatchObject({ create: true, resume: true, switch_model: false })
+    expect(report.capabilities).toMatchObject({ create: true, resume: true, switch_model: agentType !== 'kiro' })
     expect(report.reason).toContain('版本探测超时')
     expect(report.reason).toContain('模型目录暂不可读')
-    expect(report.reason).toContain(agentType === 'kiro' ? '上游 adapter 不支持 steer' : 'Worker 固定模型')
+    if (agentType === 'kiro' || agentType === 'cursor') expect(report.reason).toContain('上游 adapter 不支持 steer')
   })
 
   it('keeps a failed host probe distinct from confirmed missing installation', () => {

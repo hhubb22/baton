@@ -10,6 +10,7 @@ export class AgentError extends Error {
   constructor(
     message: string,
     readonly cause?: unknown,
+    readonly modelRejected = false,
   ) {
     super(message)
   }

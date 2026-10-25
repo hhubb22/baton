@@ -8,7 +8,7 @@
 - `probeCursor(options)`：在临时空工作目录的只读 host 中执行探测，不 open/resume，不发送 prompt。
 - `cursorAgentHostModule`：`agent-host` 子命令按 `cursor` 类型加载的 driver 层。
 
-`host-driver.ts` 用 fork 导出的 `makeCursorAdapterV2` 构造 adapter，会话与事件映射交给 `agent-host/driver.ts` 的通用驱动，环境取 host 进程已白名单过滤的 `process.env`。模型来自 `config.model ?? adapter_config.model ?? 'default'`；`runtimeMode` 为 `approval-required`、`approvalPolicy` 为 `never`、`interactionMode` 为 `default`，原生 sandbox 保持开启。上游 Cursor adapter 不支持 steer，`send` 只接受队列模式。上游支持会话内换模型，但 Worker 固定模型且 host 尚未传递逐消息模型，因此 switch_model 保持关闭，reason 说明缺少的实现。
+`host-driver.ts` 用 fork 导出的 `makeCursorAdapterV2` 构造 adapter，会话与事件映射交给 `agent-host/driver.ts` 的通用驱动，环境取 host 进程已白名单过滤的 `process.env`。模型来自 `config.model ?? adapter_config.model ?? 'default'`；`runtimeMode` 为 `approval-required`、`approvalPolicy` 为 `never`、`interactionMode` 为 `default`，原生 sandbox 保持开启。上游 Cursor adapter 不支持 steer，`send` 只接受队列模式。`switch_model` 为 true，排队消息的逐轮模型同时传入上游 `startTurn.modelSelection` 和 `appThread.modelSelection`；adapter 在恢复会话和 SDK send 时使用该选择。SDK 明确报告模型不可用时，输入尚未提交，该条消息持久撤回并继续队列；超时、断连和其他不能证明未提交的失败保持 unknown，恢复只查证据，不重发输入。
 
 ## 认证与探测
 

@@ -252,7 +252,7 @@ type Adapter interface {
 }
 ```
 
-`id` 是 `client_message_id`。TS Worker 与 agent-host 通过 fork 的 `ProviderAdapterV2` 执行 Agent，具体映射见 [Agent 适配设计](../agent-adapters/TECH.md)。当前四种 Agent 的 Thread 模型固定：Pi、Codex、Cursor 的上游 adapter 支持会话内换模型，但 Worker 尚未开放模型变更，host 的 `startTurn` 仍使用创建配置；Kiro 的 fork adapter 通过能力覆盖明确关闭会话内换模型。`switch_model` 均为 false，Steer 沿用当前模型。
+`id` 是 `client_message_id`。TS Worker 与 agent-host 通过 fork 的 `ProviderAdapterV2` 执行 Agent，具体映射见 [Agent 适配设计](../agent-adapters/TECH.md)。Pi、Codex、Cursor 开放 Thread 内逐轮换模型，Worker 在 intent 中保存每轮选择，host 同时传入 `startTurn.modelSelection` 和 `appThread.modelSelection`；省略模型时沿用最近确认提交的回合模型，首次使用创建配置。恢复从输入账本取得最近确认提交的模型，保留原生会话身份。Steer 沿用活动回合模型，不接受显式模型。Kiro 的 fork adapter 通过能力覆盖明确关闭会话内换模型，Thread 固定创建时的选择。Pi 的 `set_model` 明确拒绝和 Cursor SDK 明确拒绝模型时，输入持久撤回并继续队列；不能确认是否提交的错误按 unknown 恢复，不重发旧输入。
 
 `Sent` 用只读原生快照核对输入是否已被接收，按发送前持久记录的已确认 user 消息数量检查下一条正文，缺少证据时保持未确认；不重发可能已执行的输入。
 
@@ -260,9 +260,9 @@ type Adapter interface {
 
 | Agent | Steer | 恢复 | 模型 | 备注 |
 |---|---|---|---|---|
-| Pi | 原生 `steer` RPC | 恢复原 JSONL 会话 | 上游支持 `set_model`；Baton Thread 固定创建时模型 | 使用 fork 的 `provider-pi`，停止与事件归一化沿用上游 |
-| Codex | `turn/steer`，带 `expectedTurnId` | `thread/resume` | 上游支持每次 `turn/start` 传模型；Baton 尚未接通逐消息模型 | 使用 fork 的 `provider-codex` |
-| Cursor | 不支持 | 恢复已保存会话与 SDK store | 上游支持会话内换模型；Baton 尚未接通逐消息模型 | 使用 fork 的 `provider-cursor` |
+| Pi | 原生 `steer` RPC | 恢复原 JSONL 会话 | 每轮 prompt 前按输入选择执行 `set_model` | 使用 fork 的 `provider-pi`，停止与事件归一化沿用上游 |
+| Codex | `turn/steer`，带 `expectedTurnId` | `thread/resume` | 每次 `turn/start` 传入该轮模型 | 使用 fork 的 `provider-codex` |
+| Cursor | 不支持 | 恢复已保存会话与 SDK store | 每轮在恢复会话和 SDK send 时传入模型 | 使用 fork 的 `provider-cursor` |
 | Kiro | fork adapter 明确关闭插入能力 | `session/list` 核对 ID 与 cwd 后 `session/load` | 新建用 `_meta.kiro.modelId`；`default` 省略；fork 的 `kiroCapabilityOverrides.sessions.supportsModelSwitchInSession` 为 false | 使用 `kiro-cli acp --agent-engine=v3`；能力覆盖按当前 adapter 实现报告 |
 | shell | 不支持 | 不支持 | 不适用 | 只供 Project Agent 的命令执行使用，一个 Thread 只有一个 Turn，见 Project Agent TECH 第 10 节 |
 

@@ -30,6 +30,7 @@ import {
   type ProbeResult,
 } from './protocol.ts'
 import { runtimeRequestDecision } from './runtime-request.ts'
+import { modelRejectedBeforeInput } from './model.ts'
 
 export interface ProviderHostDriverOptions {
   /** Shown in host errors. Credentials and SDK payloads stay out of the text. */
@@ -355,7 +356,8 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
             catch: (cause) => (cause instanceof AgentHostError ? cause : error(`Invalid ${label} preparation`)),
           })
           const threadId = ThreadId.make(config.thread_id)
-          const selection = options.model(config)
+          const agentType = config.agent_type
+          const selection = options.model(message.model === undefined ? config : { ...config, model: message.model })
           const policy = options.runtimePolicy((yield* authorize(config)).cwd)
           if (message.mode === 'steer') {
             if (!options.steer) return yield* error(`${label} does not support steer`)
@@ -393,7 +395,7 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
           replied.clear()
           yield* session
             .startTurn({
-              appThread,
+              appThread: { ...appThread, modelSelection: selection },
               threadId,
               runId,
               runOrdinal: ordinal,
@@ -413,7 +415,14 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
             })
             .pipe(
               Effect.timeout('30 seconds'),
-              Effect.mapError((cause) => fail('start turn', cause)),
+              Effect.mapError((cause) => {
+                if (!modelRejectedBeforeInput(agentType, cause)) return fail('start turn', cause)
+                turn.ended = true
+                return new AgentHostError({
+                  message: `${label} rejected the selected model before submitting the message; choose another model`,
+                  modelRejected: true,
+                })
+              }),
             )
           const turnId = yield* Deferred.await(started).pipe(
             Effect.timeout('5 seconds'),

@@ -12,7 +12,7 @@ import { captureTrace, traceParent, withTraceSpan } from '@baton/telemetry'
 import { Cause, Deferred, Effect, Exit, Fiber, Queue, Schema, Scope, Stream } from 'effect'
 import type { ProcessRecord } from '../platform/process-types.ts'
 import { capabilitiesFor } from '../agents/capabilities.ts'
-import type { AgentError, AgentEvent, AgentFactory, InputAcceptance, ThreadAgent } from './agent.ts'
+import { AgentError, type AgentEvent, type AgentFactory, type InputAcceptance, type ThreadAgent } from './agent.ts'
 import { OutputBuffer, type AgentOutput } from './output.ts'
 import { boundReason, displayText, pendingResult } from './reports.ts'
 import {
@@ -63,6 +63,16 @@ interface Operation {
   readonly kind: 'open' | 'resume' | 'prepare' | 'send' | 'recover' | 'cleanup'
   readonly messageId?: string
   fiber?: Fiber.Fiber<void>
+}
+
+/** Only confirmed queue submissions advance the inherited model. */
+const modelConfig = (config: WorkerOpenConfig, messages: readonly Message[]): WorkerOpenConfig => {
+  const latest = messages
+    .filter(
+      (message) => message.state === 'sent' && message.input.mode === 'queue' && message.input.model !== undefined,
+    )
+    .sort((left, right) => (right.turn ?? 0) - (left.turn ?? 0))[0]
+  return latest?.input.model === undefined ? config : { ...config, model: latest.input.model }
 }
 
 const terminalMessage = (message: Message): Outcome | undefined => {
@@ -909,9 +919,10 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         })
         reclaimedOnRecovery = false
         uncertaintyCleanup = false
+        const resumeConfig = modelConfig(state.config, Object.values(state.messages))
         yield* launch(
           newOperation(opening ? 'open' : 'resume'),
-          (opening ? current.open(state.config) : current.resume(state.nativeId!, state.config)).pipe(
+          (opening ? current.open(state.config) : current.resume(state.nativeId!, resumeConfig)).pipe(
             Effect.timeout(openMs),
           ),
           (result) =>
@@ -978,12 +989,16 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
       }
       const message = queued.find((item) => state.phase === 'idle' || item.input.mode === 'steer')
       if (!message) return
+      const inherited = modelConfig(state.config, Object.values(state.messages))
+      const model = message.input.model ?? inherited.model ?? inherited.adapter_config.model
+      const input =
+        message.input.mode === 'steer' || model === undefined ? message.input : { ...message.input, model }
       yield* launch(
         newOperation('prepare', message.input.id),
         Effect.suspend(() => {
           // The ledger knows how many inputs the native Agent already accepted.
           const confirmedSends = Object.values(state.messages).filter((item) => item.state === 'sent').length
-          return current.prepareInput(message.input, confirmedSends).pipe(Effect.timeout(prepareMs))
+          return current.prepareInput(input, confirmedSends).pipe(Effect.timeout(prepareMs))
         }),
         (result) =>
           Effect.gen(function* () {
@@ -1024,6 +1039,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
             }
             yield* commit((draft) => {
               const next = draft.messages[message.input.id]!
+              next.input = input
               next.state = 'intent'
               draft.processTreeStopped = false
               next.preparation = preparation
@@ -1043,12 +1059,33 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
             })
             yield* launch(
               newOperation('send', message.input.id),
-              current.send(message.input, preparation).pipe(Effect.timeout(sendMs)),
+              current.send(input, preparation).pipe(Effect.timeout(sendMs)),
               (sent) =>
                 Effect.gen(function* () {
                   if (Exit.isSuccess(sent)) {
                     yield* commit((draft) => accepted(draft, message.input.id, sent.value))
                     yield* flushBuffered()
+                  } else {
+                    const rejection = sent.cause.reasons.find(
+                      (reason) =>
+                        reason._tag === 'Fail' && reason.error instanceof AgentError && reason.error.modelRejected,
+                    )
+                    if (rejection?._tag !== 'Fail' || !(rejection.error instanceof AgentError)) return
+                    const reason = rejection.error.message
+                    yield* commit((draft) => {
+                      const rejected = draft.messages[input.id]
+                      if (!rejected || rejected.state !== 'intent') return
+                      if (rejected.input.mode === 'queue' && rejected.turn === draft.turn) {
+                        draft.turn -= 1
+                        delete rejected.turn
+                      }
+                      settleMessage(draft, rejected, 'cancelled', reason)
+                      rejected.ended = true
+                      if (draft.activeMessage === input.id) {
+                        delete draft.activeMessage
+                        if (draft.phase === 'busy') draft.phase = 'idle'
+                      }
+                    })
                   }
                 }),
             )

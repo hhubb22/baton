@@ -186,17 +186,19 @@ Thread 历史使用中心已保存的记录：`thread_messages` 保存员工和 
 
 | Agent | Binary / 配置入口 | 能力 |
 |---|---|---|
-| Pi | PATH 中的 `pi`；`PI_CODING_AGENT_DIR`、`PI_CODING_AGENT_SESSION_DIR`；Thread `model` | 新建、排队、插入、停止、恢复；Thread 内固定模型 |
-| Codex | PATH 中的 `codex`；`CODEX_HOME`；Thread `model` | 新建、排队、插入、停止、恢复；Thread 内固定模型 |
+| Pi | PATH 中的 `pi`；`PI_CODING_AGENT_DIR`、`PI_CODING_AGENT_SESSION_DIR`；Thread `model` | 新建、排队、插入、停止、恢复；Thread 内逐轮换模型 |
+| Codex | PATH 中的 `codex`；`CODEX_HOME`；Thread `model` | 新建、排队、插入、停止、恢复；Thread 内逐轮换模型 |
 | Kiro | local settings：`agentId: kiro`、`commandPath: kiro-cli`，从 PATH 查找；profile 为 `homedir()`；模型取 `model ?? adapter_config.model ?? 'default'` | adapter 支持新建、排队、停止、恢复；不支持插入或换模型；程序已安装且认证 valid/unknown 时开放 create/resume，版本和系统不限 |
 | Cursor | 随 batond 分发的 SDK、平台辅助包与本机 shell | 按上游 driver 报告的能力 |
 | Grok、Antigravity | 切换后接入时确定 | 切换后接入时确定 |
 
-`agents/capabilities.ts` 按固定上游 adapter 的能力与 Baton 已实现的执行路径报告：Pi、Codex 支持 steer，Cursor、Kiro 上游不支持；四个 Agent 均支持新建、排队、停止与恢复。Pi、Codex、Cursor 上游支持会话内换模型，中心已有 `setModel` 和逐消息模型入口，但 `thread-agent.ts` 拒绝改变创建时模型，通用 driver 的 `startTurn` 仍使用 Thread 配置，尚未传入逐消息模型，因此 `switch_model` 保持 false。Kiro 的 fork adapter 在 `kiroAcp.ts` 的 `kiroCapabilityOverrides` 中明确关闭 `supportsActiveSteering`、`supportsSteeringByInterruptRestart` 和 `supportsModelSwitchInSession`；Baton 按该固定实现报告能力。该覆盖不证明 Kiro CLI 的所有版本都缺少对应协议方法。`capabilityLimitations` 将这些原因写入报告。仅存在明确的数据丢失、越权或重复副作用风险时进一步限制已实现能力。
+`agents/capabilities.ts` 按固定上游 adapter 的能力与 Baton 已实现的执行路径报告：Pi、Codex 支持 steer，Cursor、Kiro 上游不支持；四个 Agent 均支持新建、排队、停止与恢复。Pi、Codex、Cursor 开放 `switch_model`。Worker 在准备输入时解析逐消息模型，省略时取账本中最近 `sent` 的 queue 输入模型或创建配置，并在 intent 中持久保存；失败或撤回的输入不改变继承模型。通用 driver 把该选择同时传入 `startTurn.modelSelection` 和 `appThread.modelSelection`。Pi adapter 在 prompt 前调用 `set_model`，Codex 在每次 `turn/start` 传模型，Cursor 在恢复会话和 SDK send 时传模型；steer 不接受模型。Kiro 的 fork adapter 在 `kiroAcp.ts` 的 `kiroCapabilityOverrides` 中明确关闭 `supportsActiveSteering`、`supportsSteeringByInterruptRestart` 和 `supportsModelSwitchInSession`；Baton 按该固定实现报告能力。该覆盖不证明 Kiro CLI 的所有版本都缺少对应协议方法。`capabilityLimitations` 将这些原因写入报告。仅存在明确的数据丢失、越权或重复副作用风险时进一步限制已实现能力。
 
 Kiro settings 固定为 `source: local`，不拉取 registry 包；上游 Kiro driver 不读取专有环境变量，host 只继承系统项，不提供 `BATON_KIRO_*` 或 `KIRO_HOME` 配置入口。Pi、Codex 的配置目录分别按各自原生变量传递，不改写系统 HOME。Antigravity 需要额外启动路径时增加结构化、非敏感本机配置，先通过验证再固定其字段。
 
-各 Agent 的非敏感程序、模型与状态位置按注册表配置及原生映射保存；模型在 Thread 内固定，Kiro 的 `default` 不作为模型 ID 发往原生协议。恢复核查 Thread、原生 ID、工作目录和 profile 位置；不保存 API key、token 或凭据内容的摘要。检测到账号无法访问原会话就失败，不换用 ambient 凭据。
+各 Agent 的非敏感程序、模型与状态位置按注册表配置及原生映射保存。逐轮模型保存在 Worker 输入账本，恢复使用最近确认提交的 queue 输入模型，保留创建配置用于 open 幂等校验；Kiro 的模型在 Thread 内固定，`default` 不作为模型 ID 发往原生协议。
+
+Pi 上游 `ProviderAdapterTurnStartError.cause` 为 `PiRpcError(operation: set_model)`，或 Cursor 报 `CursorModelUnavailableError` 时，错误证明 prompt 尚未提交。host 通过本地 RPC 的 `AgentHostError.modelRejected` 传递该事实，Worker 将 intent 持久撤回，清除活动输入并继续队列，不增加已确认发送数。选择超时、传输错误、Codex 的通用提交错误和其他缺少确定证据的失败保留 unknown；恢复只调用只读 `sent` 核对原生历史，不自动重发。若撤回事实尚未持久化就中断，intent 仍按不确定输入恢复。恢复核查 Thread、原生 ID、工作目录和 profile 位置；不保存 API key、token 或凭据内容的摘要。检测到账号无法访问原会话就失败，不换用 ambient 凭据。
 
 Kiro 的 `beforeLoadSession` 先用 `session/list` 检查 ID 与 cwd，再 `session/load`；通用 driver 的可选 `resumeOnOpen` 仅 Kiro 设为 `true`，resume 与 sent 均在 `openSession` 中传入 `initialNativeThreadId`，避免 ACP 先新建空会话。fork 启用 `failClosedOnSessionLoad`，会话缺失或 load 失败不退回 `session/new`。`readThreadSnapshot` 同样走核对与 load，通用 `sent` 仅匹配已确认发送数之后的下一条 user 正文，缺少证据时保持未确认。
 

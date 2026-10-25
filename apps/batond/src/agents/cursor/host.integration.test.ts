@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
-import { Effect, Fiber, Stream } from 'effect'
+import { Effect, Fiber, Schema, Stream } from 'effect'
 import { build } from 'esbuild'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vite-plus/test'
 import { CURSOR_REPLAY_FIXTURES } from '@t3tools/provider-cursor/testing'
@@ -164,10 +164,20 @@ describe('Cursor Agent host', () => {
   })
 
   it('keeps a second turn in its own execution and drops late events', async () => {
-    const transcript = withRuntimeInstructions(
-      sandboxed(await readTranscript(fileURLToPath(CURSOR_REPLAY_FIXTURES.multiTurn))),
-      'composer-2.5',
-    )
+    const original = sandboxed(await readTranscript(fileURLToPath(CURSOR_REPLAY_FIXTURES.multiTurn)))
+    const transcript = {
+      ...original,
+      metadata: { ...original.metadata, derivedFrom: original.scenario, purpose: 'per-turn model selection' },
+      entries: original.entries.map((entry) => {
+        const model =
+          entry.type === 'expect_outbound' && entry.label === 'run.start:2' ? 'custom-second-model' : 'composer-2.5'
+        const prepared = withRuntimeInstructions({ ...original, entries: [entry] }, model).entries[0] ?? entry
+        if (prepared.type !== 'expect_outbound' || prepared.label !== 'run.start:2') return prepared
+        const frame = Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.Unknown))(prepared.frame)
+        const options = Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.Unknown))(frame.options)
+        return { ...prepared, frame: { ...frame, options: { ...options, model: { id: model } } } }
+      }),
+    }
     const { file } = await writeTranscript('multi', transcript)
     const config = await workspace()
     const agent = start(config, file)
@@ -177,7 +187,10 @@ describe('Cursor Agent host', () => {
     const first = message('multi-1', 'Respond with exactly: first fixture turn complete')
     await effect(agent.send(first, await effect(agent.prepareInput(first, 0))))
     await waitFor(() => collected.events.some((event) => event.type === 'end'))
-    const second = message('multi-2', 'Respond with exactly: second fixture turn complete')
+    const second = {
+      ...message('multi-2', 'Respond with exactly: second fixture turn complete'),
+      model: 'custom-second-model',
+    }
     const preparation = await effect(agent.prepareInput(second, 1))
     const accepted = await effect(agent.send(second, preparation))
     await waitFor(() => collected.events.filter((event) => event.type === 'end').length === 2)

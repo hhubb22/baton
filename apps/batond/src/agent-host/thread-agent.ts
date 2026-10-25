@@ -10,6 +10,7 @@ import {
   type ThreadAgent,
 } from '../worker/agent.ts'
 import { makeOutputMailbox } from '../worker/output.ts'
+import { capabilitiesFor } from '../agents/capabilities.ts'
 import type { AgentHostPaths } from './host-layer.ts'
 import { preparationFor, samePreparation } from './preparation.ts'
 import type { Preparation } from './protocol.ts'
@@ -215,7 +216,13 @@ function makeAgent(config: WorkerOpenConfig, options: AgentHostOptions): ThreadA
           if (!active || active.ended) return yield* Effect.fail(new AgentError('Agent has no active turn to steer'))
         } else if (active && !active.ended)
           return yield* Effect.fail(new AgentError('Agent cannot prepare an input in its current state'))
-        if (message.model !== undefined && message.model !== fixedModel(config))
+        if (message.mode === 'steer' && message.model !== undefined)
+          return yield* Effect.fail(new AgentError('Steering cannot change the model'))
+        if (
+          !capabilitiesFor(config.agent_type)?.switch_model &&
+          message.model !== undefined &&
+          message.model !== fixedModel(config)
+        )
           return yield* Effect.fail(new AgentError('Agent does not support changing the model of an open Thread'))
         if (!nativeSessionId) return yield* Effect.fail(new AgentError('Agent has no native session identity'))
         const preparation = preparationFor(config, nativeSessionId, message, confirmedSends)
@@ -224,10 +231,11 @@ function makeAgent(config: WorkerOpenConfig, options: AgentHostOptions): ThreadA
       }),
     restoreInput: (message, preparation) =>
       Effect.gen(function* () {
-        if (!nativeSessionId) return yield* Effect.fail(new AgentError('Agent has no native session identity'))
+        if (nativeSessionId && nativeSessionId !== preparation.nativeSessionId)
+          return yield* Effect.fail(new AgentError('Agent preparation session mismatch'))
         if (Buffer.byteLength(JSON.stringify(preparation)) > 4096)
           return yield* Effect.fail(new AgentError('Agent preparation exceeds size limit'))
-        const expected = preparationFor(config, nativeSessionId, message, preparation.confirmedSends)
+        const expected = preparationFor(config, preparation.nativeSessionId, message, preparation.confirmedSends)
         if (!samePreparation(expected, preparation))
           return yield* Effect.fail(new AgentError('Agent preparation identity mismatch'))
         prepared = { message, preparation }
@@ -249,7 +257,16 @@ function makeAgent(config: WorkerOpenConfig, options: AgentHostOptions): ThreadA
         active = turn
         const accepted = yield* live
           .send(message, preparation as Preparation)
-          .pipe(Effect.tapError((error) => uncertain(error.message)))
+          .pipe(
+            Effect.tapError((error) =>
+              error.modelRejected
+                ? Effect.sync(() => {
+                    turn.ended = true
+                    prepared = undefined
+                  })
+                : uncertain(error.message),
+            ),
+          )
         if (
           accepted.nativeSessionId !== nativeSessionId ||
           (turn.executionId && turn.executionId !== accepted.executionId)

@@ -162,13 +162,34 @@ describe('Codex Agent host', () => {
 
   it('keeps two sequential turns in separate executions', async () => {
     const config = await workspace()
-    const transcript = await readCodexTranscript(fixture('multi_turn'))
-    const { agent, events } = start(config, fixture('multi_turn'))
-    await effect(agent.open(config))
+    const original = await readCodexTranscript(fixture('multi_turn'))
+    let turns = 0
+    const transcript: Transcript = {
+      ...original,
+      metadata: { ...original.metadata, derivedFrom: original.scenario, purpose: 'per-turn model selection' },
+      entries: original.entries.map((entry) => {
+        if (entry.type !== 'expect_outbound' || entry.label !== 'turn/start' || ++turns !== 2) return entry
+        const frame = Schema.decodeUnknownSync(Schema.Struct({ params: Schema.Record(Schema.String, Schema.Unknown) }))(
+          entry.frame,
+        )
+        return {
+          ...entry,
+          frame: {
+            ...Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.Unknown))(entry.frame),
+            params: { ...frame.params, model: 'custom-second-model' },
+          },
+        }
+      }),
+    }
+    const { agent, events } = start(config, await writeTranscript(config, 'multi-model', transcript))
+    const opened = await effect(agent.open(config))
     const inputs = messages(transcript)
     const first = await submit(agent, inputs[0])
     await completed(events)
-    const second = await submit(agent, inputs[1], 1)
+    const secondInput = inputs[1]
+    if (!secondInput) throw new Error('Codex transcript lacks a second turn')
+    const second = await submit(agent, { ...secondInput, model: 'custom-second-model' }, 1)
+    expect(second.nativeSessionId).toBe(opened.nativeSessionId)
     await completed(events, 2)
     expect(second.executionId).not.toBe(first.executionId)
     const replies = events.filter((event) => event.type === 'reply')

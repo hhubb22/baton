@@ -213,6 +213,90 @@ const readyWorker = Effect.fnUntraced(function* (dbPath: string) {
 })
 
 describe('reliable Worker', () => {
+  it.effect(
+    'persists accepted models across rejection, omitted selections and Worker restart without replaying input',
+    () =>
+      fixture((dbPath) =>
+        Effect.gen(function* () {
+          const cfg = { ...config(), model: 'initial-model' }
+          const rejected = request(cfg, 'thread_message', {
+            client_message_id: 'model-rejected',
+            payload: 'rejected',
+            model: 'bad-model',
+          })
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const f = yield* fake
+              f.duringSend = (input) =>
+                input.model === 'bad-model'
+                  ? Effect.fail(new AgentError('Selected model rejected before input', undefined, true))
+                  : Effect.void
+              const worker = yield* makeWorker({ dbPath, agentFactory: () => f.agent })
+              yield* worker.handle(request(cfg, 'thread_open'))
+              yield* opened(worker)
+              const first = request(cfg, 'thread_message', {
+                client_message_id: 'model-first',
+                payload: 'first',
+                model: 'selected-model',
+              })
+              yield* worker.handle(first)
+              yield* completed(worker, first.command_id ?? '')
+              yield* Queue.offer(f.events, event('model-first', 'end'))
+              const next = request(cfg, 'thread_message', { client_message_id: 'model-next', payload: 'next' })
+              yield* worker.handle(rejected)
+              yield* worker.handle(next)
+              const items = yield* completed(worker, next.command_id ?? '')
+              expect(findCompletion(items, rejected.command_id ?? '')?.command_outcome).toBe('cancelled')
+              expect(items.some((item) => item.kind === 'thread.unknown')).toBe(false)
+              expect(items.filter((item) => item.kind === 'turn.started').map((item) => item.worker_turn_seq)).toEqual([
+                1, 2,
+              ])
+              expect(f.sentInputs.map((input) => [input.id, input.model])).toEqual([
+                ['model-first', 'selected-model'],
+                ['model-rejected', 'bad-model'],
+                ['model-next', 'selected-model'],
+              ])
+              yield* Queue.offer(f.events, event('model-next', 'end'))
+              yield* until(reports(worker), (items) =>
+                items.some((item) => item.kind === 'turn.ended' && item.client_message_id === 'model-next'),
+              )
+              const stopping = request(cfg, 'thread_stop')
+              yield* worker.handle(stopping)
+              yield* completed(worker, stopping.command_id ?? '')
+            }),
+          )
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const f = yield* fake
+              const worker = yield* makeWorker({
+                dbPath,
+                agentFactory: () => ({
+                  ...f.agent,
+                  resume: (native, resumedConfig) => {
+                    expect(resumedConfig.model).toBe('selected-model')
+                    return f.agent.resume(native, resumedConfig)
+                  },
+                }),
+              })
+              const resuming = request(cfg, 'thread_resume')
+              yield* worker.handle(resuming)
+              yield* completed(worker, resuming.command_id ?? '')
+              const next = request(cfg, 'thread_message', {
+                client_message_id: 'model-after-restart',
+                payload: 'after restart',
+              })
+              yield* worker.handle(next)
+              yield* completed(worker, next.command_id ?? '')
+              expect(f.sentInputs.map((input) => [input.id, input.model])).toEqual([
+                ['model-after-restart', 'selected-model'],
+              ])
+              expect((yield* worker.handle(rejected)).command_status?.command_outcome).toBe('cancelled')
+            }),
+          )
+        }),
+      ),
+  )
+
   describe('attachments and live output', () => {
     it.effect('persists attachment references while parsing outside the command queue', () =>
       fixture((dbPath) =>
@@ -1377,7 +1461,7 @@ describe('reliable Worker', () => {
             const worker = yield* makeWorker({ dbPath, agentFactory: () => instances[factories++]!.agent })
             yield* worker.handle(request(cfg, 'thread_open'))
             yield* opened(worker)
-            const uncertainInput = message(cfg)
+            const uncertainInput = { ...message(cfg), model: 'uncertain-model' }
             const oldQueued = message(cfg, 'old queued')
             yield* worker.handle(uncertainInput)
             yield* worker.handle(oldQueued)
@@ -1389,7 +1473,7 @@ describe('reliable Worker', () => {
             expect(findCompletion(items, oldQueued.command_id!)?.command_outcome).toBe('cancelled')
             expect(factories).toBe(2)
             expect(reader.calls.includes(`sent:${uncertainInput.client_message_id}`)).toBe(true)
-            const explicitNew = message(cfg, 'continue after review')
+            const explicitNew = { ...message(cfg, 'continue after review'), model: 'corrected-model' }
             expect((yield* worker.handle(explicitNew)).ok).toBe(true)
             yield* completed(worker, explicitNew.command_id!)
             expect(next.calls.includes('resume')).toBe(true)
@@ -1411,6 +1495,9 @@ describe('reliable Worker', () => {
             })
             expect(status.command_status?.state).toBe('unknown')
             expect(old.sentInputs).toHaveLength(1)
+            expect(old.sentInputs[0]?.model).toBe('uncertain-model')
+            expect(next.sentInputs[0]?.model).toBe('corrected-model')
+            expect(reader.sentInputs).toHaveLength(0)
           }),
         )
       }),

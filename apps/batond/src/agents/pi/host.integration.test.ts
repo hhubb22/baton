@@ -147,6 +147,67 @@ const writeTranscript = async (transcript: PiRpcReplayTranscript) => {
   return path
 }
 
+const withSecondTurnModel = (
+  transcript: PiRpcReplayTranscript,
+  rejected: boolean,
+  promptIndex = 1,
+): PiRpcReplayTranscript => {
+  const prompts = transcript.entries.flatMap((entry, index) =>
+    entry.type === 'expect_outbound' && Predicate.hasProperty(entry.frame, 'type') && entry.frame.type === 'prompt'
+      ? [index]
+      : [],
+  )
+  const second = prompts[promptIndex]
+  if (second === undefined) throw new Error('Pi model replay requires the target prompt')
+  if (promptIndex === 0)
+    return {
+      ...transcript,
+      metadata: {
+        ...transcript.metadata,
+        derivedFrom: transcript.scenario,
+        purpose: 'resumed per-turn model selection',
+      },
+      entries: transcript.entries.map((entry) => {
+        if (
+          entry.type === 'expect_outbound' &&
+          Predicate.hasProperty(entry.frame, 'type') &&
+          entry.frame.type === 'set_model'
+        )
+          return { ...entry, frame: { ...entry.frame, provider: 'test-provider', modelId: 'second-model' } }
+        if (
+          entry.type === 'emit_inbound' &&
+          Predicate.hasProperty(entry.frame, 'command') &&
+          entry.frame.command === 'set_model'
+        )
+          return { ...entry, frame: { ...entry.frame, data: { provider: 'test-provider', id: 'second-model' } } }
+        return entry
+      }),
+    }
+  return {
+    ...transcript,
+    scenario: `${transcript.scenario}-model-${rejected ? 'rejected' : 'changed'}`,
+    metadata: { ...transcript.metadata, derivedFrom: transcript.scenario, purpose: 'per-turn model selection' },
+    entries: [
+      ...transcript.entries.slice(0, second),
+      {
+        type: 'expect_outbound',
+        frame: { type: 'set_model', provider: 'test-provider', modelId: 'second-model', id: 't3-100' },
+      },
+      {
+        type: 'emit_inbound',
+        frame: {
+          type: 'response',
+          command: 'set_model',
+          id: 't3-100',
+          success: !rejected,
+          ...(rejected ? { error: 'Unknown model' } : { data: { provider: 'test-provider', id: 'second-model' } }),
+        },
+      },
+      ...transcript.entries.slice(second),
+    ],
+  }
+}
+
 const workerReports = (worker: Worker) =>
   worker.handle({ type: 'thread_pending', ok: true }).pipe(Effect.map((response) => response.thread_reports ?? []))
 
@@ -203,6 +264,40 @@ describe('Pi Agent host', () => {
     await Effect.runPromise(agent.close())
   })
 
+  it.each([false, true])(
+    'selects a per-turn model with native rejection=%s without resending input',
+    async (rejected) => {
+      const transcript = withSecondTurnModel(await readPiTranscript(piFixturePath('multi_turn')), rejected)
+      const { agent, events, config } = startTranscript(await workspace(), await writeTranscript(transcript))
+      const opened = await Effect.runPromise(agent.open(config))
+      const first = message('model-first', 'Respond with exactly: first fixture turn complete')
+      await Effect.runPromise(agent.send(first, await Effect.runPromise(agent.prepareInput(first, 0))))
+      await waitFor(() => events.some((event) => event.type === 'end'))
+      const changed = {
+        ...message('model-second', 'Respond with exactly: second fixture turn complete'),
+        model: 'test-provider/second-model',
+      }
+      if (rejected) {
+        const result = await Effect.runPromise(
+          agent.send(changed, await Effect.runPromise(agent.prepareInput(changed, 1))).pipe(Effect.result),
+        )
+        expect(result._tag).toBe('Failure')
+        if (result._tag === 'Failure') expect(result.failure.modelRejected).toBe(true)
+        expect(events.some((event) => event.type === 'uncertain')).toBe(false)
+      }
+      const next = rejected ? message('corrected-model', changed.text) : changed
+      const accepted = await Effect.runPromise(agent.send(next, await Effect.runPromise(agent.prepareInput(next, 1))))
+      await waitFor(() => events.filter((event) => event.type === 'end').length === 2)
+      expect(accepted.nativeSessionId).toBe(opened.nativeSessionId)
+      expect(events.filter((event) => event.type === 'end').map((event) => event.messageId)).toEqual([
+        first.id,
+        next.id,
+      ])
+      expect(events.some((event) => event.type === 'uncertain')).toBe(false)
+      await Effect.runPromise(agent.close())
+    },
+  )
+
   it('cancels a turn while a tool is running', async () => {
     const { agent, events, config } = await start('turn_interrupt_mid_tool')
     await Effect.runPromise(agent.open(config))
@@ -220,7 +315,7 @@ describe('Pi Agent host', () => {
   it('resumes the native session in a fresh host and continues its conversation', async () => {
     const transcript = await readPiTranscript(piFixturePath('provider_thread_resume'))
     const first = await writeTranscript(firstTurnOnly(transcript))
-    const second = await writeTranscript(resumedOnly(transcript))
+    const second = await writeTranscript(withSecondTurnModel(resumedOnly(transcript), false, 0))
     const config = await workspace()
     const { agent, events } = startTranscript(config, first)
     const opened = await Effect.runPromise(agent.open(config))
@@ -232,10 +327,13 @@ describe('Pi Agent host', () => {
 
     const resumed = startTranscript(config, second)
     expect(await Effect.runPromise(resumed.agent.resume(opened.nativeSessionId, config))).toEqual(opened)
-    const next = message(
-      'resume-2',
-      'Using the conversation history available in this resumed thread, first repeat the exact final answer you gave in the previous turn. Then on a new line write exactly: provider thread resume fixture second turn complete',
-    )
+    const next = {
+      ...message(
+        'resume-2',
+        'Using the conversation history available in this resumed thread, first repeat the exact final answer you gave in the previous turn. Then on a new line write exactly: provider thread resume fixture second turn complete',
+      ),
+      model: 'test-provider/second-model',
+    }
     const accepted = await Effect.runPromise(
       resumed.agent.send(next, await Effect.runPromise(resumed.agent.prepareInput(next, 1))),
     )
@@ -266,6 +364,7 @@ describe('Pi Agent host', () => {
 
     const snapshot = await writeTranscript(sentOnly(simple))
     const reader = startTranscript(config, snapshot)
+    await Effect.runPromise(reader.agent.restoreInput(input, preparation))
     expect(await Effect.runPromise(reader.agent.sent(input, preparation))).toMatchObject({
       nativeSessionId: opened.nativeSessionId,
       executionId: expect.any(String),

@@ -95,7 +95,7 @@ export const connectAgentHost = (
         'message' in cause &&
         typeof cause.message === 'string'
       )
-        return new AgentError(cause.message, cause)
+        return new AgentError(cause.message, cause, 'modelRejected' in cause && cause.modelRejected === true)
       const detail =
         cause && typeof cause === 'object' && '_tag' in cause && cause._tag === 'TimeoutError'
           ? 'RPC timeout after 32 seconds'
