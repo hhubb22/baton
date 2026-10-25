@@ -3,10 +3,10 @@ import { Effect, Schema } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import { describe, expect, it } from 'vite-plus/test'
 import * as P from '@baton/protocol'
-import { seedNode, withTestDatabase, type TestDatabase } from './testing/database.ts'
+import { seedNode, withTestDatabase, type TestDatabase } from '../testing/database.ts'
 import * as projects from './projects.ts'
 import { insertProjectInput } from './project-inputs.ts'
-import * as threads from './threads.ts'
+import * as threads from '../threads.ts'
 
 type Run = TestDatabase['run']
 const projectRuntimeReport: P.RuntimeReport = {

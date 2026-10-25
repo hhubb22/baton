@@ -2,10 +2,9 @@ import { randomUUID } from 'node:crypto'
 import { Effect } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import { expect, it } from 'vite-plus/test'
-import { projectToolFixture } from './testing/project-tools.ts'
-import { withTestDatabase } from './testing/database.ts'
+import { projectToolFixture, callProjectTool } from '../testing/project-tools.ts'
+import { withTestDatabase } from '../testing/database.ts'
 import { getProjectMemory, listProjectMemory, projectMemoryRevisions, writeProjectMemory } from './project-memory.ts'
-import { executeProjectTool } from './project-tools.ts'
 
 it('keeps immutable memory revisions, returns the winning version on conflict, and isolates employees and projects', async () =>
   withTestDatabase(async (db) => {
@@ -53,7 +52,7 @@ it('keeps immutable memory revisions, returns the winning version on conflict, a
     expect(inputs).toHaveLength(2)
     expect(inputs.every((r) => r.source_type === 'memory_updated' && !r.wake_required)).toBe(true)
     const agent = await db.run(
-      executeProjectTool({ ...c, toolCallId: 'memory' }, 'memory.write', {
+      callProjectTool({ ...c, toolCallId: 'memory' }, 'memory.write', {
         entry_id: id,
         title: 'Agent',
         content: 'updated',
@@ -63,44 +62,49 @@ it('keeps immutable memory revisions, returns the winning version on conflict, a
     expect(agent).toMatchObject({ value: { revision: 3 } })
     expect(await db.run(getProjectMemory(c.employeeId, c.projectId, id))).toMatchObject({
       author: 'agent',
-      source_seq: 1,
+      source_seq: 2,
     })
   }))
 
 it('rolls tool side effects back if the result cannot commit and propagates database failures', async () =>
   withTestDatabase(async (db) => {
     const { context: c } = await projectToolFixture(db)
+    await db.run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql`CREATE FUNCTION reject_tool_result() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN IF NEW.kind=''tool_result'' THEN RAISE EXCEPTION ''unavailable''; END IF; RETURN NEW; END;'`
+        yield* sql`CREATE TRIGGER reject_tool_result BEFORE INSERT ON conversation_events FOR EACH ROW EXECUTE FUNCTION reject_tool_result()`
+      }),
+    )
     await expect(
       db.run(
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          return yield* sql.withTransaction(
-            Effect.gen(function* () {
-              const result = yield* executeProjectTool(c, 'memory.write', {
-                title: 'Atomic',
-                content: 'not committed',
-                expected_revision: 0,
-              })
-              expect(result.isError).toBeUndefined()
-              yield* sql`INSERT INTO conversation_events(conversation_id,seq,employee_id,kind,payload) VALUES(${c.conversationId},1,${c.employeeId},'tool_result','{}'::jsonb)`
-            }),
-          )
+        callProjectTool(c, 'memory.write', {
+          title: 'Atomic',
+          content: 'not committed',
+          expected_revision: 0,
         }),
       ),
-    ).rejects.toBeDefined()
+    ).rejects.toMatchObject({ status: 503 })
     expect((await db.run(listProjectMemory(c.employeeId, c.projectId))).entries).toEqual([])
     await db.run(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
+        expect(
+          yield* sql`SELECT 1 FROM conversation_events WHERE conversation_id=${c.conversationId} AND kind='tool_result'`,
+        ).toEqual([])
+        yield* sql`DROP TRIGGER reject_tool_result ON conversation_events`
         yield* sql`CREATE FUNCTION reject_memory() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RAISE EXCEPTION ''unavailable''; END;'`
         yield* sql`CREATE TRIGGER reject_memory BEFORE INSERT ON project_memory_revisions FOR EACH ROW EXECUTE FUNCTION reject_memory()`
       }),
     )
     await expect(
-      db.run(executeProjectTool(c, 'memory.write', { title: 'Fail', content: 'fail', expected_revision: 0 })),
+      db.run(callProjectTool(c, 'memory.write', { title: 'Atomic', content: 'not committed', expected_revision: 0 })),
     ).rejects.toMatchObject({ status: 503 })
     expect((await db.run(listProjectMemory(c.employeeId, c.projectId))).entries).toEqual([])
+    const invalid = await projectToolFixture(db)
     expect(
-      await db.run(executeProjectTool(c, 'memory.write', { title: '', content: 'bad', expected_revision: 0 })),
+      await db.run(
+        callProjectTool(invalid.context, 'memory.write', { title: '', content: 'bad', expected_revision: 0 }),
+      ),
     ).toMatchObject({ isError: true })
   }))

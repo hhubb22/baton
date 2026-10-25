@@ -2,6 +2,8 @@
 
 `@baton/server` 提供员工登录、设备管理、Cursor / Pi / Codex / Kiro 远程 Thread、Project 调度、主对话、事项和记忆，以及持久命令、回复时间线和实时输出。它与 [`apps/batond`](../batond/README.md) 的出站 WSS 节点连接配合，网页静态目录由中心构建脚本生成并由中心提供。
 
+中心的 Project 实现位于 `src/project/`。`runtimeRequest` 接收节点 Runtime 请求，在一个事务内检查租约、执行工具、保存结果事件并消费对应输入；工具执行与输入消费由该入口内部处理。工具重试返回已保存的结果，失效租约会回滚本次副作用，等待 shell 工具的 pending 查询使用独立只读事务。
+
 中心与节点的构建入口分别为 `@baton/server` 和 `@baton/batond`，根 `node tools/build.mjs` 从 workspace 安装锁定依赖并构建两者，产物位于 `apps/{server,batond}/dist`。当前能力范围见下表，容器与 SEA 安装包布局见 [迁移设计](../../specs/ts-migration/TECH.md#打包与发布)。
 
 ## 构建与网页

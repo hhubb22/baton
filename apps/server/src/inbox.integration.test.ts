@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { Effect } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import { expect, it } from 'vite-plus/test'
-import { projectToolFixture } from './testing/project-tools.ts'
+import { projectToolFixture, callProjectTool } from './testing/project-tools.ts'
 import { withTestDatabase } from './testing/database.ts'
 import {
   createAgentAttention,
@@ -15,7 +15,6 @@ import {
   withdrawAttention,
   archiveProjectAttention,
 } from './inbox.ts'
-import { executeProjectTool } from './project-tools.ts'
 import { migrateDatabase } from './database.ts'
 
 it('validates actual Markdown destinations including references, entities and GFM autolinks', () => {
@@ -149,9 +148,6 @@ it('allows more than ten pending questions, checks thread ownership and keeps sy
     await db.run(createSystemAttention(c, 'Same condition'))
     const system = (await db.run(listInbox(c.employeeId))).requests[0]!
     expect(system.source).toBe('system')
-    expect(
-      await db.run(executeProjectTool(c, 'inbox.withdraw', { request_id: system.id, reason: 'denied' })),
-    ).toMatchObject({ isError: true })
     await expect(
       db.run(
         handleAttentionRequest(c.employeeId, system.id, {
@@ -166,13 +162,14 @@ it('allows more than ten pending questions, checks thread ownership and keeps sy
     )
     await db.run(resolveSystemAttention(c.employeeId, c.projectId))
     expect((await db.run(getAttentionRequest(c.employeeId, system.id))).state).toBe('closed')
+    expect(
+      await db.run(callProjectTool(c, 'inbox.withdraw', { request_id: system.id, reason: 'denied' })),
+    ).toMatchObject({ isError: true })
     for (let i = 0; i < 10; i++)
       expect(
-        await db.run(
-          executeProjectTool({ ...c, toolCallId: `ask-${i}` }, 'inbox.ask', { ...ask, title: `Choose ${i}` }),
-        ),
+        await db.run(callProjectTool({ ...c, toolCallId: `ask-${i}` }, 'inbox.ask', { ...ask, title: `Choose ${i}` })),
       ).not.toHaveProperty('isError', true)
-    expect(await db.run(executeProjectTool({ ...c, toolCallId: 'overflow' }, 'inbox.ask', ask))).not.toHaveProperty(
+    expect(await db.run(callProjectTool({ ...c, toolCallId: 'overflow' }, 'inbox.ask', ask))).not.toHaveProperty(
       'isError',
       true,
     )
@@ -181,12 +178,12 @@ it('allows more than ten pending questions, checks thread ownership and keeps sy
     expect(duplicate.state).toBe('open')
     expect(
       await db.run(
-        executeProjectTool({ ...c, toolCallId: 'bad-thread' }, 'inbox.ask', { ...ask, thread_id: randomUUID() }),
+        callProjectTool({ ...c, toolCallId: 'bad-thread' }, 'inbox.ask', { ...ask, thread_id: randomUUID() }),
       ),
     ).toMatchObject({ isError: true })
     expect(
       await db.run(
-        executeProjectTool({ ...c, toolCallId: 'bad-options' }, 'inbox.ask', {
+        callProjectTool({ ...c, toolCallId: 'bad-options' }, 'inbox.ask', {
           ...ask,
           options: [],
           allow_text: false,
@@ -208,11 +205,14 @@ it('reuses identical open questions under concurrent creation while allowing dis
   withTestDatabase(async (db) => {
     const { context: c } = await projectToolFixture(db)
     const results = await Promise.all(
-      Array.from({ length: 12 }, (_, i) =>
-        db.run(executeProjectTool({ ...c, toolCallId: `concurrent-${i}` }, 'inbox.ask', ask)),
-      ),
+      Array.from({ length: 12 }, () => db.run(callProjectTool({ ...c, toolCallId: 'concurrent' }, 'inbox.ask', ask))),
     )
     expect(results.every((r) => !r.isError)).toBe(true)
+    expect((await db.run(listInbox(c.employeeId))).open_count).toBe(1)
+    const questions = await Promise.all(
+      Array.from({ length: 12 }, (_, i) => db.run(createAgentAttention(c, `concurrent-${i}`, ask))),
+    )
+    expect(new Set(questions.map((request) => request.id)).size).toBe(1)
     expect((await db.run(listInbox(c.employeeId))).open_count).toBe(1)
     const distinct = await Promise.all(
       Array.from({ length: 12 }, (_, i) =>

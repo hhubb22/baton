@@ -1,7 +1,7 @@
 import { Effect, Predicate, Schema } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import * as P from '@baton/protocol'
-import { canonical } from './threads-core.ts'
+import { canonical } from '../threads-core.ts'
 import {
   appendProjectEvent,
   checkPayloadSize,

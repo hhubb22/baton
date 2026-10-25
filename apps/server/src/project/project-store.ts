@@ -2,8 +2,8 @@ import { Effect, Schema } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import type { SqlError } from 'effect/sql/SqlError'
 import { Project, ProjectEvent } from '@baton/protocol'
-import { AppError } from './errors.ts'
-import { dbError, type DatabaseEffect } from './database.ts'
+import { AppError } from '../errors.ts'
+import { dbError, type DatabaseEffect } from '../database.ts'
 
 export const projectError = (code = 'conflict', status = 409) => new AppError(status, code)
 export const projectTransaction = <A>(

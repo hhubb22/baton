@@ -3,17 +3,16 @@ import { Effect, Schema } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import { expect, it } from 'vite-plus/test'
 import { ProjectEvent, type ProjectRuntimeRequest, type ThreadReport } from '@baton/protocol'
-import { projectToolFixture } from './testing/project-tools.ts'
-import { withTestDatabase } from './testing/database.ts'
-import { executeProjectTool, waitProjectTool, consumeProjectExecInputs } from './project-tools.ts'
-import * as threads from './threads.ts'
+import { projectToolFixture, callProjectTool, waitForProjectTool } from '../testing/project-tools.ts'
+import { withTestDatabase } from '../testing/database.ts'
+import * as threads from '../threads.ts'
 import { runtimeRequest } from './project-runtime.ts'
 
 it('notifies a never-dispatched shell withdrawal once when history is unavailable', () =>
   withTestDatabase(async (db) => {
     const { context, nodeId, source } = await projectToolFixture(db)
     const result = await db.run(
-      executeProjectTool(context, 'nodes.exec', {
+      callProjectTool(context, 'nodes.exec', {
         node_id: nodeId,
         working_directory: '/work',
         command: 'printf done',
@@ -21,7 +20,7 @@ it('notifies a never-dispatched shell withdrawal once when history is unavailabl
       }),
     )
     const { thread_id: id } = Schema.decodeUnknownSync(Schema.Struct({ thread_id: Schema.String }))(result.value)
-    await db.run(waitProjectTool(context))
+    await db.run(waitForProjectTool(context))
     await db.run(
       threads.processReport(source, {
         type: 'thread.report',
@@ -72,9 +71,9 @@ it('notifies an unknown shell result without a Turn once after its tool wait has
     for (const mode of ['thread-first', 'message-first', 'history-unavailable'] as const) {
       const context = { ...c, toolCallId: mode }
       const args = { node_id: nodeId, working_directory: '/work', command: 'printf done', wait_seconds: 0 }
-      const first = await db.run(executeProjectTool(context, 'nodes.exec', args))
+      const first = await db.run(callProjectTool(context, 'nodes.exec', args))
       const id = (first.value as { thread_id: string }).thread_id
-      expect(await db.run(waitProjectTool(context))).toMatchObject({
+      expect(await db.run(waitForProjectTool(context))).toMatchObject({
         value: { status: 'waiting_device', message: expect.stringContaining('仍在执行') },
       })
       let seq = 0
@@ -156,7 +155,7 @@ it('notifies an unknown shell result without a Turn once after its tool wait has
         current_turn: null,
         pending_messages: [{ status: 'unknown' }],
       })
-      expect(await db.run(executeProjectTool(context, 'nodes.exec', args))).toMatchObject({ value: { thread_id: id } })
+      expect(await db.run(callProjectTool(context, 'nodes.exec', args))).toMatchObject({ value: { thread_id: id } })
       await expect(db.run(threads.resume(c.employeeId, id))).rejects.toMatchObject({ code: 'shell_single_turn' })
       await db.run(
         Effect.gen(function* () {
@@ -165,15 +164,14 @@ it('notifies an unknown shell result without a Turn once after its tool wait has
             n: number
           }>`SELECT count(*)::integer AS n FROM threads WHERE origin_conversation_id=${c.conversationId} AND origin_tool_call_id=${mode}`
           expect(count!.n).toBe(1)
-          yield* consumeProjectExecInputs(context, id, 1)
         }),
       )
       await db.run(threads.processReport(source, threadUnknown()))
-      expect(await inputs()).toEqual([expect.objectContaining({ wake_required: false, delivered_seq: 1 })])
+      expect(await inputs()).toEqual([expect.objectContaining({ wake_required: true, delivered_seq: null })])
     }
     const context = { ...c, toolCallId: 'with-turn' }
     const first = await db.run(
-      executeProjectTool(context, 'nodes.exec', {
+      callProjectTool(context, 'nodes.exec', {
         node_id: nodeId,
         working_directory: '/work',
         command: 'printf done',
@@ -225,13 +223,6 @@ it.each(['unknown', 'still_running'] as const)(
   async (status) =>
     withTestDatabase(async (db) => {
       const { context: c, nodeId, source } = await projectToolFixture(db)
-      await db.run(
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          yield* sql`INSERT INTO agent_runs(id,employee_id,agent_id,node_id,lease_epoch,state,provider,model,placement_reason) VALUES(${c.runId},${c.employeeId},${c.agentId},${nodeId},${c.leaseEpoch},'running','test','model','test')`
-          yield* sql`UPDATE project_agents SET lease_run_id=${c.runId},lease_epoch=${c.leaseEpoch},lease_until=clock_timestamp()+interval '60 seconds' WHERE id=${c.agentId}`
-        }),
-      )
       const rpc = (operation: ProjectRuntimeRequest['operation'], extra: Partial<ProjectRuntimeRequest> = {}) =>
         db.run(
           runtimeRequest(source, {
@@ -318,7 +309,7 @@ it('keeps Project agent audit identity through create, messages, stop and deferr
   withTestDatabase(async (db) => {
     const { context: c, nodeId, source } = await projectToolFixture(db)
     const call = (toolCallId: string, name: string, args: unknown) =>
-      db.run(executeProjectTool({ ...c, toolCallId }, name, args))
+      db.run(callProjectTool({ ...c, toolCallId }, name, args))
     const created = await call('create', 'threads.create', {
       node_id: nodeId,
       agent_type: 'cursor',

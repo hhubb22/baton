@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { Effect } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import * as P from '@baton/protocol'
-import { dbError } from './database.ts'
+import { dbError } from '../database.ts'
 import { insertProjectInput } from './project-inputs.ts'
 import {
   boundedProjectText,

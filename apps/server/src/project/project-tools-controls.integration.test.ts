@@ -2,10 +2,9 @@ import { randomUUID } from 'node:crypto'
 import { Effect, Schema } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import { expect, it } from 'vite-plus/test'
-import { executeProjectTool } from './project-tools.ts'
-import { projectToolFixture } from './testing/project-tools.ts'
-import { withTestDatabase } from './testing/database.ts'
-import * as threads from './threads.ts'
+import { projectToolFixture, callProjectTool } from '../testing/project-tools.ts'
+import { withTestDatabase } from '../testing/database.ts'
+import * as threads from '../threads.ts'
 
 const threadResult = Schema.decodeUnknownSync(Schema.Struct({ thread_id: Schema.String }))
 const auditEvents = (threadId: string, kind: string) =>
@@ -21,7 +20,7 @@ it('withdraws only unsent messages in this Project and deduplicates concurrent r
   withTestDatabase(async (db) => {
     const { context: c, nodeId } = await projectToolFixture(db)
     const created = await db.run(
-      executeProjectTool(c, 'threads.create', {
+      callProjectTool(c, 'threads.create', {
         node_id: nodeId,
         agent_type: 'cursor',
         working_directory: '/work/repo',
@@ -32,7 +31,7 @@ it('withdraws only unsent messages in this Project and deduplicates concurrent r
     const message = (await db.run(threads.view(c.employeeId, id))).pending_messages?.at(0)
     if (!message) throw new Error('Expected pending message')
     const args = { thread_id: id, message_id: message.id }
-    const withdraw = (toolCallId: string) => db.run(executeProjectTool({ ...c, toolCallId }, 'threads.withdraw', args))
+    const withdraw = (toolCallId: string) => db.run(callProjectTool({ ...c, toolCallId }, 'threads.withdraw', args))
     const commands = () =>
       db.run(
         Effect.gen(function* () {
@@ -40,15 +39,15 @@ it('withdraws only unsent messages in this Project and deduplicates concurrent r
           return yield* sql`SELECT payload FROM thread_outbox WHERE thread_id=${id} AND action='withdraw'`
         }),
       )
-    for (const context of [
-      { ...c, projectId: randomUUID() },
-      { ...c, employeeId: randomUUID() },
-    ])
-      expect(await db.run(executeProjectTool(context, 'threads.withdraw', args))).toMatchObject({
+    const sameEmployee = await projectToolFixture(db, c)
+    const otherEmployee = await projectToolFixture(db)
+    for (const context of [sameEmployee.context, otherEmployee.context])
+      expect(await db.run(callProjectTool(context, 'threads.withdraw', args))).toMatchObject({
         isError: true,
         value: { code: 'not_found' },
       })
     expect(await commands()).toHaveLength(0)
+    await withdraw('withdraw-1')
     for (const result of await Promise.all([withdraw('withdraw-1'), withdraw('withdraw-2')]))
       expect(result).toMatchObject({ value: { thread_id: id, message_id: message.id, read_tool: 'threads.get' } })
     expect(await commands()).toEqual([{ payload: { client_message_id: message.client_message_id } }])
@@ -75,7 +74,12 @@ it('withdraws only unsent messages in this Project and deduplicates concurrent r
       expect(await commands()).toHaveLength(1)
     }
     expect(
-      await db.run(executeProjectTool(c, 'threads.withdraw', { thread_id: id, message_id: randomUUID() })),
+      await db.run(
+        callProjectTool({ ...c, toolCallId: 'missing-message' }, 'threads.withdraw', {
+          thread_id: id,
+          message_id: randomUUID(),
+        }),
+      ),
     ).toMatchObject({ isError: true, value: { code: 'not_found' } })
   }))
 
@@ -83,7 +87,7 @@ it('resumes through the existing execution checks without duplicating commands o
   withTestDatabase(async (db) => {
     const { context: c, nodeId } = await projectToolFixture(db)
     const created = await db.run(
-      executeProjectTool(c, 'threads.create', {
+      callProjectTool(c, 'threads.create', {
         node_id: nodeId,
         agent_type: 'cursor',
         working_directory: '/work/repo',
@@ -92,7 +96,7 @@ it('resumes through the existing execution checks without duplicating commands o
     )
     const id = threadResult(created.value).thread_id
     const args = { thread_id: id }
-    const resume = (toolCallId: string) => db.run(executeProjectTool({ ...c, toolCallId }, 'threads.resume', args))
+    const resume = (toolCallId: string) => db.run(callProjectTool({ ...c, toolCallId }, 'threads.resume', args))
     const outbox = () =>
       db.run(
         Effect.gen(function* () {
@@ -130,15 +134,15 @@ it('resumes through the existing execution checks without duplicating commands o
         yield* sql`UPDATE node_runtime_reports SET report=jsonb_set(report,'{agents,0,capabilities,resume}','true'::jsonb) WHERE node_id=${nodeId}`
       }),
     )
-    for (const context of [
-      { ...c, projectId: randomUUID() },
-      { ...c, employeeId: randomUUID() },
-    ])
-      expect(await db.run(executeProjectTool(context, 'threads.resume', args))).toMatchObject({
+    const sameEmployee = await projectToolFixture(db, c)
+    const otherEmployee = await projectToolFixture(db)
+    for (const context of [sameEmployee.context, otherEmployee.context])
+      expect(await db.run(callProjectTool(context, 'threads.resume', args))).toMatchObject({
         isError: true,
         value: { code: 'not_found' },
       })
     expect(await outbox()).toEqual(before)
+    await resume('resume-1')
     for (const result of await Promise.all([resume('resume-1'), resume('resume-2'), resume('resume-1')]))
       expect(result).toMatchObject({ value: { thread_id: id, status: 'stopped', read_tool: 'threads.get' } })
     expect(await outbox()).toEqual([...before, { action: 'resume' }])
@@ -158,7 +162,7 @@ it.each(['employee', 'project_agent'])('records %s when resume retries opening a
   withTestDatabase(async (db) => {
     const { context: c, nodeId, source } = await projectToolFixture(db)
     const created = await db.run(
-      executeProjectTool(c, 'threads.create', {
+      callProjectTool(c, 'threads.create', {
         node_id: nodeId,
         agent_type: 'cursor',
         working_directory: '/work/repo',
@@ -180,9 +184,7 @@ it.each(['employee', 'project_agent'])('records %s when resume retries opening a
     for (let attempt = 0; attempt < 2; attempt++) {
       if (actor === 'project_agent')
         expect(
-          await db.run(
-            executeProjectTool({ ...c, toolCallId: `retry-${attempt}` }, 'threads.resume', { thread_id: id }),
-          ),
+          await db.run(callProjectTool({ ...c, toolCallId: `retry-${attempt}` }, 'threads.resume', { thread_id: id })),
         ).not.toHaveProperty('isError', true)
       else await db.run(threads.resume(c.employeeId, id))
     }

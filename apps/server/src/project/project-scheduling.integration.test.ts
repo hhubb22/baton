@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { describe, expect, it } from 'vite-plus/test'
 import type { Project, RuntimeProvider, RuntimeReport } from '@baton/protocol'
-import { seedNode, withTestDatabase } from './testing/database.ts'
+import { seedNode, withTestDatabase } from '../testing/database.ts'
 import * as projects from './projects.ts'
 
 const report = (status: RuntimeProvider['status'], capacity = 4): RuntimeReport => ({

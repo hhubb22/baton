@@ -10,7 +10,7 @@ import * as P from '@baton/protocol'
 import * as Auth from './auth.ts'
 import * as Nodes from './nodes.ts'
 import * as Threads from './threads.ts'
-import * as Projects from './projects.ts'
+import * as Projects from './project/projects.ts'
 import { AppError, type NodeSource } from './errors.ts'
 import { Gateway, type GatewayOptions } from './gateway.ts'
 import {

@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { Effect, Schema } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import * as P from '@baton/protocol'
-import { AppError } from './errors.ts'
-import { transaction } from './threads-core.ts'
+import { AppError } from '../errors.ts'
+import { transaction } from '../threads-core.ts'
 import { insertProjectInput } from './project-inputs.ts'
 
 export const strictDecode = <S extends Schema.ConstraintDecoder<unknown>>(schema: S, value: unknown) =>

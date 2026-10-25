@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { Effect } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import type { ProjectRunCommand, RuntimeReport } from '@baton/protocol'
-import { dbError } from './database.ts'
+import { dbError } from '../database.ts'
 import {
   activeInputSQL,
   projectError,
