@@ -799,7 +799,7 @@ describe('execution details', () => {
     const toggle = await screen.findByRole('button', { name: /Ran 2 commands, used 1 tool, wrote 2 files/ })
     await user.click(toggle)
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
-    expect(await screen.findByText(/MacBook Pro did not return this activity/)).toBeInTheDocument()
+    expect(await screen.findByText('Could not load this activity. Try again.')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Retry' }))
     expect(await screen.findByText('pnpm --dir web build')).toBeInTheDocument()

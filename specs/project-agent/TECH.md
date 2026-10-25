@@ -287,10 +287,11 @@ Project 标题或目标被修改后，新的系统提示词从下一次压缩起
 | `threads.resume`、`threads.stop`、`threads.archive`、`threads.get` | `thread_id` |
 | `threads.list` | 可选 `status`、`after_id` |
 | `threads.read` | `thread_id`；可选 `after_turn`、`through_turn` |
+| `threads.trace` | `thread_id`、`worker_turn_seq`；可选 `cursor` |
 | `nodes.exec` | 第 10 节 |
 | `inbox.*` | 见 Agent Inbox TECH 第 3 节 |
 
-只读工具还接受 `offset`、`max_bytes`。结果采用 `{encoding:"json", text, offset, total_bytes, truncated, next_offset?}`：先把完整业务结果编码为 JSON，再按 UTF-8 字节取片段。调用方在 `truncated=true` 时以同样的业务参数和 `next_offset` 继续读取，拼接 `text` 后解析 JSON。`max_bytes` 默认 16 KiB、最大 32 KiB；中心按实际 JSON 编码后的容量进一步缩短片段，整个工具结果 payload 不超过 32 KiB。记忆续读可固定 `revision`，`threads.read` 续读固定 `through_turn`。
+只读工具还接受 `offset`、`max_bytes`。结果采用 `{encoding:"json", text, offset, total_bytes, truncated, next_offset?}`：先把完整业务结果编码为 JSON，再按 UTF-8 字节取片段。调用方在 `truncated=true` 时以同样的业务参数和 `next_offset` 继续读取，拼接 `text` 后解析 JSON。`max_bytes` 默认 16 KiB、最大 32 KiB；中心按实际 JSON 编码后的容量进一步缩短片段，整个工具结果 payload 不超过 32 KiB。记忆续读可固定 `revision`，`threads.read` 续读固定 `through_turn`。`threads.trace` 的业务 JSON 是与浏览器相同的过程项页（最多 50 项、1 MiB）；首次读取时可省略 `cursor`，工具片段外包装返回 `page_cursor`，绑定已提交报告的序号上限及本页起点。后续片段保持 `thread_id`、`worker_turn_seq` 不变，把外包装的 `page_cursor` 作为 `cursor`，配合 `next_offset` 读完这页 JSON，再以页内的 `next_cursor` 请求下一页并将 `offset` 归零。`offset > 0` 时必须提供 `cursor`，否则返回 `snapshot_cursor_required`。同一快照不包含之后到达的项；省略 `cursor` 从头刷新以读取新项。
 
 搜索和列表每页最多 20 条，业务 JSON 中用 `next_after_id` 或 `next_after_seq` 继续取得下一组；空列表表示结束。`history` 返回 `through_seq`，默认固定为本次工具调用的 assistant 序号，后续读取应保持该值，避免把续读过程新产生的事件加入范围。`history.read` 保留原事件 JSON，包括已压缩的原文。`memory.search` 返回标题、版本和正文片段，全文由 `memory.read` 取得；`threads.list` 返回 Thread 标识、设备、目录、Agent、状态和最后活动时间，内容由 `threads.read` 取得。
 

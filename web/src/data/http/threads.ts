@@ -1,3 +1,4 @@
+import type { ThreadTrace } from '@baton/protocol'
 import { ClientError, type BatonClient } from '../client'
 import { insideFileFolder, joinFilePath, normalizeFilePath } from '../file-paths'
 import { previewLimit } from '../types'
@@ -15,7 +16,6 @@ import type {
   ThreadQuestion,
   ThreadStop,
   Trace,
-  TraceStep,
 } from '../types'
 import { apiPath, timestamp, type HttpContext } from './context'
 import { HttpError } from './transport'
@@ -73,6 +73,7 @@ type EventDTO = {
     reason?: string
     content?: string
     count?: number
+    item_count?: number
     attachments?: AttachmentDTO[]
     metadata?: { activity?: Message['activity']; full_output?: unknown }
   } & Partial<MessageDTO>
@@ -100,14 +101,6 @@ type FileDTO = {
   truncated: boolean
   next_cursor?: string
   remainder?: { scan_limited?: boolean }
-}
-type SessionDTO = {
-  ok: boolean
-  code?: string
-  state?: string
-  text?: string
-  cursor?: string
-  gap?: boolean
 }
 type Phase = { phase: OperationPhase; detail?: string | null }
 type ThreadAPI = Pick<
@@ -140,11 +133,6 @@ const errorCode = (error: unknown): string | undefined => {
   if (!(error instanceof HttpError)) return undefined
   const payload = error.payload as { code?: string } | null
   return payload?.code
-}
-const unavailableReason = (code?: string): 'offline' | 'missing' | null => {
-  if (code === 'node_offline') return 'offline'
-  if (code === 'history_missing' || code === 'trace_missing') return 'missing'
-  return null
 }
 
 function fullOutputOf(value: unknown): FullOutputReference | null {
@@ -274,15 +262,6 @@ export function createThreadAPI(
   const clientIDs = new Map<string, string>()
   const messages = new Map<string, MessageDTO>()
   const replies = new Map<string, { threadId: string; seq: number }>()
-  async function sessionResult<T extends SessionDTO>(path: string): Promise<T> {
-    try {
-      return await ctx.request<T>(path)
-    } catch (error) {
-      const code = errorCode(error)
-      if (unavailableReason(code)) return { ok: false, code } as T
-      throw error
-    }
-  }
   const uuid = (scope: string, clientId: string) => {
     if (!clientId) throw new ClientError('invalid', 'A client ID is required.')
     const key = JSON.stringify([scope, clientId])
@@ -396,6 +375,7 @@ export function createThreadAPI(
   async function readMessages(t: ThreadDTO, events: EventDTO[]): Promise<Message[]> {
     const accepted = new Map<string, MessageDTO>()
     const result: Message[] = []
+    const turnReplies = new Map<number, Message[]>()
     const order = new Map<string, number>()
     for (const event of events) {
       if (event.kind === 'message.accepted') {
@@ -421,6 +401,7 @@ export function createThreadAPI(
           id,
           threadId: t.id,
           role: 'failure',
+          traceItemCount: 0,
           sender: 'agent',
           body: event.payload.content ?? '',
           createdAt: timestamp(event.created_at),
@@ -433,7 +414,7 @@ export function createThreadAPI(
         order.set(id, event.id)
         if (event.payload.worker_turn_seq != null)
           replies.set(id, { threadId: t.id, seq: event.payload.worker_turn_seq })
-        result.push({
+        const reply: Message = {
           id,
           threadId: t.id,
           role: 'agent',
@@ -444,7 +425,53 @@ export function createThreadAPI(
           activity: event.payload.metadata?.activity ?? null,
           fullOutput: fullOutputOf(event.payload.metadata?.full_output),
           attachments: attachmentsOf(event.payload.attachments),
+        }
+        result.push(reply)
+        const seq = event.payload.worker_turn_seq
+        if (seq !== undefined) {
+          const group = turnReplies.get(seq) ?? []
+          group.push(reply)
+          turnReplies.set(seq, group)
+        }
+      }
+    }
+    for (const event of events) {
+      const { worker_turn_seq: seq, item_count: count } = event.payload
+      if (
+        event.kind !== 'turn.ended' ||
+        seq === undefined ||
+        count === undefined ||
+        !Number.isSafeInteger(count) ||
+        count < 0
+      )
+        continue
+      const group = turnReplies.get(seq) ?? []
+      group.forEach((reply, index) => {
+        reply.traceItemCount = index === 0 ? count : 0
+        if (index > 0) reply.activity = null
+      })
+      if (group.length || count === 0) continue
+      const failureId = `turn-failed:${t.id}:${event.payload.event_id ?? event.id}`
+      const failure = result.find((message) => message.id === failureId)
+      if (failure) {
+        failure.traceItemCount = count
+        replies.set(failure.id, { threadId: t.id, seq })
+      } else {
+        const id = `turn-activity:${t.id}:${event.payload.event_id ?? event.id}`
+        order.set(id, event.id)
+        result.push({
+          id,
+          threadId: t.id,
+          role: 'activity',
+          sender: 'agent',
+          body: '',
+          createdAt: timestamp(event.created_at),
+          delivery: 'delivered',
+          activity: null,
+          traceItemCount: count,
+          attachments: [],
         })
+        replies.set(id, { threadId: t.id, seq })
       }
     }
     for (const m of [...(t.pending_messages ?? []), ...(t.failed_messages ?? [])]) accepted.set(m.client_message_id, m)
@@ -647,27 +674,25 @@ export function createThreadAPI(
         throw new ClientError('invalid', 'This agent does not support resuming conversations.')
       return action('resumeThread', id)
     },
-    async readTrace(messageId): Promise<Trace> {
+    async readTrace(messageId, cursor): Promise<Trace> {
       let reply = replies.get(messageId)
       if (!reply) {
         const parts = messageId.split(':')
-        if (parts[0] === 'reply' && parts[1]) await api.listMessages(parts[1])
+        if (['reply', 'turn-activity', 'turn-failed'].includes(parts[0]) && parts[1]) await api.listMessages(parts[1])
         reply = replies.get(messageId)
       }
       if (!reply) throw new ClientError('notFound', 'The reply was not found.')
       const query = new URLSearchParams({ worker_turn_seq: String(reply.seq) })
-      const result = await sessionResult<{
-        ok: boolean
-        code?: string
-        steps?: TraceStep[]
-      }>(`${threadPath(reply.threadId)}/trace?${query}`)
+      if (cursor !== undefined) query.set('cursor', cursor)
+      const result = await ctx.request<ThreadTrace>(`${threadPath(reply.threadId)}/trace?${query}`)
       if (!result.ok) {
-        const reason = unavailableReason(result.code)
-        if (reason) return { state: 'unavailable', messageId, reason }
-        unavailable('The device could not read this trace.')
+        if (result.code === 'trace_missing') return { state: 'unavailable', messageId, reason: 'missing' }
+        unavailable('Could not load this activity. Try again.')
       }
-      const steps = result.steps ?? unavailable('The device returned an incomplete trace.')
-      return { state: 'ready', messageId, steps }
+      const steps = result.steps ?? unavailable('The activity record is incomplete. Try again.')
+      if (result.next_cursor !== undefined && (!result.next_cursor || result.next_cursor === cursor))
+        unavailable('Could not load the next activity page. Try again.')
+      return { state: 'ready', messageId, steps: [...steps], nextCursor: result.next_cursor }
     },
     readOutput: (id) => output.readOutput(id),
     async listFolders(deviceId, path): Promise<FolderListing> {

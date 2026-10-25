@@ -147,6 +147,7 @@ const makeAgentHostHandlers = <Services>(driver: AgentHostDriverShape, context: 
           hosted(driver.sent({ config, message, preparation })).pipe(Effect.map((value) => value ?? null)),
         ),
       events: () => Stream.unwrap(Effect.as(regular.take(1), frames.pipe(Stream.ensuring(regular.release(1))))),
+      flushEvents: ({ id }) => regular.withPermit(hosted(driver.flushEvents(id))),
       abort: () => control.withPermit(hosted(driver.abort)),
       close: () => control.withPermit(hosted(driver.close)),
     })

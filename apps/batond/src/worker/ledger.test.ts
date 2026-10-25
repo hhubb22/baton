@@ -448,6 +448,49 @@ it('writes complete replies before clipping their reports and persists the same 
   )
 })
 
+it('saves complete item JSON before clipping and retains raw identity and references after ACK and reopening', async () => {
+  const f = await fixture()
+  const data = { input: 'start' + '中🙂'.repeat(60000) + 'end', output: '\\0\\ud800'.repeat(30000) }
+  const original = JSON.stringify(data)
+  await withLedger(f, (ledger) =>
+    Effect.gen(function* () {
+      const next: State = {
+        ...ledger.initial,
+        config: f.config,
+        outbox: [
+          {
+            acked: false,
+            itemId: 'native\\0',
+            report: report(f, {
+              kind: 'turn.item',
+              worker_turn_seq: 1,
+              truncated: false,
+              original_bytes: Buffer.byteLength(original),
+              item: { id: 'native\\0', type: 'command_execution', status: 'completed', ordinal: 0, data },
+            }),
+          },
+        ],
+      }
+      yield* ledger.save(next)
+      const item = next.outbox[0]!.report
+      expect(Buffer.byteLength(JSON.stringify(item.item))).toBeLessThanOrEqual(192 * 1024)
+      expect(item.truncated).toBe(true)
+      expect(item.original_bytes).toBe(Buffer.byteLength(original))
+      const reference = Schema.decodeUnknownSync(FullOutputReference)(item.metadata?.full_output)
+      expect(yield* Effect.promise(() => readFile(join(f.root, 'full-output', `${reference.id}.bin`), 'utf8'))).toBe(
+        original,
+      )
+      next.outbox[0]!.acked = true
+      yield* ledger.save(next)
+    }),
+  )
+  const loaded = await reopen(f)
+  expect(loaded.outbox[0]!.itemId).toBe('native\\0')
+  expect(loaded.outbox[0]!.acked).toBe(true)
+  expect(loaded.outbox[0]!.report.metadata?.full_output).toBeDefined()
+  expect((await readdir(join(f.root, 'full-output'))).length).toBe(2)
+})
+
 it('leaves the committed database unchanged when complete output cannot be written and requires reopening', async () => {
   const f = await fixture()
   await seed(f)

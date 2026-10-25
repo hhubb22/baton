@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { realpath } from 'node:fs/promises'
 import { setTimeout as delay } from 'node:timers/promises'
-import { Effect, Queue, Stream } from 'effect'
+import { Deferred, Effect, Queue, Stream } from 'effect'
 import type { WorkerOpenConfig, FullOutputReference } from '@baton/protocol'
 import { FullOutputStore, readOutputRetentionDays } from '../../worker/full-output.ts'
 import {
@@ -18,6 +18,7 @@ import { readProjectExec } from '../../devices/config.ts'
 import { acquireProcessLock } from '../../platform/lock.ts'
 import { ensurePrivateDirectory, writePrivateFileAtomic } from '../../platform/private.ts'
 import { spawnOwnedProcess, type OwnedProcess, type SpawnOwnedProcessOptions } from '../../platform/process.ts'
+import { TraceOutput } from './trace-output.ts'
 import { BoundedOutput } from './output.ts'
 import {
   completionFor,
@@ -77,6 +78,34 @@ function makeShellAgent(config: WorkerOpenConfig, options: ShellAgentOptions): T
       messageId: record.messageId,
       executionId: record.executionId,
     }
+    const trace = record.result.trace
+    const data = {
+      type: 'command_execution',
+      input: record.command,
+      output: trace.output,
+      exitCode: trace.exit_code,
+      ...(trace.encoding ? { encoding: trace.encoding } : {}),
+    }
+    await emit({
+      ...identity,
+      type: 'item',
+      item: {
+        id: `shell:${record.preparationId}`,
+        type: data.type,
+        status: record.completionKind === 'stopped' ? 'interrupted' : 'completed',
+        ordinal: 0,
+        data,
+      },
+      truncated: trace.truncated,
+      original_bytes:
+        Buffer.byteLength(JSON.stringify(data)) -
+        Buffer.byteLength(JSON.stringify(trace.output)) +
+        trace.original_output_json_bytes,
+      metadata: {
+        shell_output_bytes: trace.total_bytes,
+        ...(record.result.full_output ? { full_output: record.result.full_output } : {}),
+      },
+    })
     const reply: AgentEvent & {
       metadata: { exit_code: number; encoding?: string; full_output?: FullOutputReference }
       original_bytes: number
@@ -110,6 +139,7 @@ function makeShellAgent(config: WorkerOpenConfig, options: ShellAgentOptions): T
     message: AgentMessage,
     preparation: InputPreparation,
     output: BoundedOutput,
+    traceOutput: TraceOutput,
     retained: Awaited<ReturnType<FullOutputStore['begin']>>,
     pipes: Promise<unknown>,
     pipeFailed: () => boolean,
@@ -128,7 +158,7 @@ function makeShellAgent(config: WorkerOpenConfig, options: ShellAgentOptions): T
       if (!reaped.reaped || pipeFailed())
         throw new AgentError('shell output or process-tree termination could not be confirmed')
       const full_output = await retained.finish()
-      const result = { ...output.result(exit.code ?? -1), full_output }
+      const result = { ...output.result(exit.code ?? -1), trace: traceOutput.result(exit.code ?? -1), full_output }
       const record = completionFor(mapping!, message, preparation, result, aborted)
       await persistCompletion(record)
       await emitCompletion(record)
@@ -228,6 +258,7 @@ function makeShellAgent(config: WorkerOpenConfig, options: ShellAgentOptions): T
           const store = new FullOutputStore(threadDirectory)
           const retained = await store.begin(config, await readOutputRetentionDays(options.dataDirectory))
           const output = new BoundedOutput((bytes) => retained.write(bytes))
+          const traceOutput = new TraceOutput()
           let failed = false
           let pipes: Promise<unknown> = Promise.resolve()
           processTreeStopped = false
@@ -247,7 +278,10 @@ function makeShellAgent(config: WorkerOpenConfig, options: ShellAgentOptions): T
                   [child.stdout, child.stderr].map(
                     (stream) =>
                       new Promise<void>((resolve) => {
-                        stream.on('data', (chunk: Buffer) => output.write(chunk))
+                        stream.on('data', (chunk: Buffer) => {
+                          output.write(chunk)
+                          traceOutput.write(chunk)
+                        })
                         stream.once('end', resolve)
                         stream.once('close', resolve)
                         stream.once('error', () => {
@@ -267,7 +301,7 @@ function makeShellAgent(config: WorkerOpenConfig, options: ShellAgentOptions): T
             throw error
           }
           owned.stdin.end()
-          finishing = finish(owned, message, preparation, output, retained, pipes, () => failed)
+          finishing = finish(owned, message, preparation, output, traceOutput, retained, pipes, () => failed)
           linked.throwIfAborted()
           return { nativeSessionId: nativeMapping.nativeSessionId, executionId: preparation.preparationId }
         } finally {
@@ -295,6 +329,16 @@ function makeShellAgent(config: WorkerOpenConfig, options: ShellAgentOptions): T
         return { nativeSessionId: nativeMapping.nativeSessionId, executionId: record.executionId }
       }),
     events: Stream.fromQueue(events),
+    flushEvents: () =>
+      Effect.gen(function* () {
+        if (finishing) yield* io(() => finishing!)
+        const done = yield* Deferred.make<void>()
+        yield* Queue.offer(events, {
+          type: 'barrier',
+          acknowledge: Deferred.succeed(done, undefined).pipe(Effect.asVoid),
+        })
+        yield* Deferred.await(done)
+      }),
     abort: () =>
       io(async () => {
         stopped = true

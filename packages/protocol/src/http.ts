@@ -59,7 +59,10 @@ export const ThreadOutputQuery = Schema.Struct({
   output_id: Schema.optionalKey(UUID),
   storage_generation: Schema.optionalKey(StorageGeneration),
 })
-export const ThreadTraceQuery = Schema.Struct({ worker_turn_seq: decimal(1, Number.MAX_SAFE_INTEGER) })
+export const ThreadTraceQuery = Schema.Struct({
+  worker_turn_seq: decimal(1, Number.MAX_SAFE_INTEGER),
+  cursor: Schema.optionalKey(boundedText(4096)),
+})
 export const FilesQuery = Schema.Struct({
   root_id: Schema.optionalKey(boundedText(64)),
   path: Schema.optionalKey(boundedText(4096)),

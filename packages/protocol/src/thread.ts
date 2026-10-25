@@ -1,6 +1,6 @@
 import { Schema } from 'effect'
 import { TraceContext } from './trace.ts'
-import { FullOutputPage } from './full-output.ts'
+import { FullOutputPage, FullOutputReference } from './full-output.ts'
 import { ThreadQuestion, ThreadAnswerInput, ThreadQuestionAnswer } from './thread-question.ts'
 import {
   AgentType,
@@ -213,6 +213,7 @@ export const ThreadTurn = Schema.Struct({
   started_at: Timestamp,
   ended_at: Schema.optionalKey(Schema.NullOr(Timestamp)),
   end_reason: Schema.optionalKey(Text),
+  token_usage: Schema.optionalKey(Schema.NullOr(Schema.Json)),
 })
 export type ThreadTurn = typeof ThreadTurn.Type
 
@@ -233,6 +234,19 @@ export const ThreadPage = Schema.Struct({
 })
 export type ThreadPage = typeof ThreadPage.Type
 
+export const ThreadTurnItem = Schema.Struct({
+  id: Text,
+  type: Text,
+  status: Text,
+  ordinal: NonNegativeInteger,
+  parent_id: Schema.optionalKey(Text),
+  title: Schema.optionalKey(Text),
+  started_at: Schema.optionalKey(Timestamp),
+  completed_at: Schema.optionalKey(Timestamp),
+  data: Schema.Json,
+}).check(jsonLimit(192 * 1024))
+export type ThreadTurnItem = typeof ThreadTurnItem.Type
+
 export const ThreadReport = Schema.Struct({
   type: Schema.Literal('thread.report'),
   thread_id: UUID,
@@ -247,6 +261,7 @@ export const ThreadReport = Schema.Struct({
     'message.unknown',
     'turn.started',
     'reply',
+    'turn.item',
     'turn.ended',
     'thread.resumed',
     'thread.stopped',
@@ -255,6 +270,8 @@ export const ThreadReport = Schema.Struct({
     'question.pending',
     'question.resolved',
   ]),
+  item: Schema.optionalKey(ThreadTurnItem),
+  token_usage: Schema.optionalKey(Schema.Json),
   question: Schema.optionalKey(ThreadQuestion),
   request_id: Schema.optionalKey(nonemptyText(512)),
   worker_turn_seq: Schema.optionalKey(NonNegativeInteger),
@@ -273,6 +290,16 @@ export const ThreadReport = Schema.Struct({
   command_id: Schema.optionalKey(UUID),
   command_outcome: Schema.optionalKey(CommandOutcome),
 }).check(
+  Schema.makeFilter(
+    (value) =>
+      value.kind !== 'turn.item' ||
+      (value.item !== undefined &&
+        value.worker_turn_seq !== undefined &&
+        value.worker_turn_seq > 0 &&
+        value.truncated !== undefined &&
+        value.original_bytes !== undefined) ||
+      '过程项报告缺少步骤或回合',
+  ),
   Schema.makeFilter(
     (value) =>
       value.kind !== 'question.pending' ||
@@ -312,10 +339,18 @@ export const ThreadTimeline = Schema.Struct({
 export type ThreadTimeline = typeof ThreadTimeline.Type
 
 export const ThreadTraceStep = Schema.Struct({
-  kind: Text,
-  command: Schema.optionalKey(Text),
-  output: Schema.optionalKey(Text),
-  truncated: Schema.optionalKey(Schema.Boolean),
+  item_id: Text,
+  type: Text,
+  status: Text,
+  ordinal: NonNegativeInteger,
+  parent_id: Schema.optionalKey(Text),
+  title: Schema.optionalKey(Text),
+  started_at: Schema.optionalKey(Timestamp),
+  completed_at: Schema.optionalKey(Timestamp),
+  data: Schema.Json,
+  truncated: Schema.Boolean,
+  original_bytes: NonNegativeInteger,
+  full_output: Schema.optionalKey(FullOutputReference),
 })
 export type ThreadTraceStep = typeof ThreadTraceStep.Type
 
@@ -323,6 +358,8 @@ export const ThreadTrace = Schema.Struct({
   ok: Schema.Boolean,
   code: Schema.optionalKey(Text),
   steps: Schema.NullOr(Schema.Array(ThreadTraceStep)),
+  page_cursor: Text,
+  next_cursor: Schema.optionalKey(Text),
 })
 export type ThreadTrace = typeof ThreadTrace.Type
 

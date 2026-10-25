@@ -19,7 +19,7 @@ import { openPrivateFile } from '../platform/private.ts'
 import type { ProcessRecord } from '../platform/process-types.ts'
 import { FullOutputStore, readOutputRetentionDays } from './full-output.ts'
 import { boundReport } from './reports.ts'
-import type { AgentEvent, AgentMessage, InputPreparation } from './agent.ts'
+import type { AgentEvent, AgentMessage, InputPreparation, JsonValue } from './agent.ts'
 
 export type Outcome = 'succeeded' | 'failed' | 'cancelled' | 'unknown'
 type Phase = 'empty' | 'opening' | 'idle' | 'busy' | 'stopping' | 'stopped' | 'unknown' | 'failed'
@@ -43,12 +43,15 @@ export interface Message {
   startedAtNs?: string
   startedAtMs?: number
   reason?: string
+  tokenUsage?: JsonValue
 }
 export interface OutboxEntry {
   report: ThreadReport
   acked: boolean
   /** JSON 保留原始 UTF-16 字符串和执行身份，与展示报告一同提交。 */
   replyEvidence?: Extract<AgentEvent, { readonly type: 'reply' }>
+  /** 原生项身份独立于展示映射保存，ACK 和重启后仍用于去重。 */
+  itemId?: string
 }
 interface PendingQuestion {
   question: ThreadQuestion
@@ -72,6 +75,7 @@ interface Meta {
   stopStartedNs?: string
   stopReason?: 'stopped' | 'timeout'
   processTreeStopped?: boolean
+  unknownReason?: string
 }
 export interface State extends Meta {
   processes: Record<string, ProcessRecord>
@@ -386,6 +390,21 @@ export const openWorkerLedger = Effect.fn('Worker.openWorkerLedger')(function* (
                 catch: (cause) => new WorkerFailure('storage_error', 'Cannot save full reply', cause),
               })
           entry.report = boundReport({ ...report, metadata: { ...report.metadata, full_output: reference } })
+        } else if (report.kind === 'turn.item' && report.item && config) {
+          const bounded = boundReport(report)
+          const existing = report.metadata?.full_output
+          if (bounded.truncated && !Schema.is(FullOutputReference)(existing)) {
+            const reference = yield* Effect.tryPromise({
+              try: async () =>
+                fullOutput.put(
+                  config,
+                  Buffer.from(JSON.stringify(report.item!.data)),
+                  await readOutputRetentionDays(dataDirectory),
+                ),
+              catch: (cause) => new WorkerFailure('storage_error', 'Cannot save full turn item', cause),
+            })
+            entry.report = boundReport({ ...bounded, metadata: { ...bounded.metadata, full_output: reference } })
+          } else entry.report = bounded
         } else entry.report = boundReport(report)
       }
       const next = encode(state)

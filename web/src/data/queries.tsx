@@ -4,6 +4,7 @@ import {
   QueryClient,
   QueryClientProvider,
   useMutation,
+  useInfiniteQuery,
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query'
@@ -38,8 +39,8 @@ export const keys = {
   messages: (threadId: ID) => ['messages', threadId] as const,
   inbox: ['inbox'] as const,
   file: (deviceId: ID, path: string) => ['files', deviceId, path] as const,
-  // 过程从设备读取，设备连接变化时重读，离线后不留旧内容。
-  trace: (messageId: ID) => ['devices', 'trace', messageId] as const,
+  // 过程保存在中心，随消息更新，与设备连接状态无关。
+  trace: (messageId: ID) => ['messages', 'trace', messageId] as const,
   output: (threadId: ID) => ['messages', 'output', threadId] as const,
   operation: (id: ID) => ['operations', id] as const,
 }
@@ -169,7 +170,13 @@ export function useFile(deviceId: ID, path: string | null) {
 
 export function useTrace(messageId: ID, enabled: boolean) {
   const client = useClient()
-  return useQuery({ queryKey: keys.trace(messageId), queryFn: () => client.readTrace(messageId), enabled, gcTime: 0 })
+  return useInfiniteQuery({
+    queryKey: keys.trace(messageId),
+    queryFn: ({ pageParam }) => client.readTrace(messageId, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (page) => (page.state === 'ready' ? page.nextCursor : undefined),
+    enabled,
+  })
 }
 
 export function useLiveOutput(threadId: ID, enabled: boolean) {

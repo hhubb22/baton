@@ -18,11 +18,15 @@ test('Thread 撤回与恢复工具校验必填参数并拒绝额外身份字段'
   assert.throws(() => validate('threads.resume', { ...resume, employee_id: 'other' }))
 })
 
-for (const name of ['threads.withdraw', 'threads.resume'])
+for (const name of ['threads.withdraw', 'threads.resume', 'threads.trace'])
   test(`${name} 从模型名称转换后保存调用与结果`, async () => {
     const backend = new Backend()
     const args: Parameters<typeof fauxToolCall>[1] =
-      name === 'threads.withdraw' ? { thread_id: 'thread-1', message_id: 'message-1' } : { thread_id: 'thread-1' }
+      name === 'threads.withdraw'
+        ? { thread_id: 'thread-1', message_id: 'message-1' }
+        : name === 'threads.trace'
+          ? { thread_id: 'thread-1', worker_turn_seq: 1 }
+          : { thread_id: 'thread-1' }
     const { runtime } = setup(backend, [
       fauxAssistantMessage([fauxToolCall(name.replaceAll('.', '_'), args, { id: 'control-1' })]),
       assistant(),

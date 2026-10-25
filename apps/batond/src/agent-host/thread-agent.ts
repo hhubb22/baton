@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { Effect, Exit, Queue, Scope, Stream } from 'effect'
+import { Deferred, Effect, Exit, Queue, Scope, Stream } from 'effect'
 import type { RuntimeAgent, WorkerOpenConfig } from '@baton/protocol'
 import { dirname, isAbsolute } from 'node:path'
 import {
@@ -67,6 +67,7 @@ function makeAgent(config: WorkerOpenConfig, options: HostedAgentOptions): Threa
   const readers = new Set<AbortController>()
   let generation = ''
   let sequence = 0
+  const barriers = new Map<string, Deferred.Deferred<void>>()
   const io = <A>(work: () => Promise<A>) =>
     Effect.tryPromise({
       try: work,
@@ -162,6 +163,12 @@ function makeAgent(config: WorkerOpenConfig, options: HostedAgentOptions): Threa
       if (active) active.ended = true
     },
     uncertain,
+    barrier: (id: string) => {
+      const done = barriers.get(id)
+      return done
+        ? emit({ type: 'barrier', acknowledge: Deferred.succeed(done, undefined).pipe(Effect.asVoid) })
+        : Effect.void
+    },
     emit,
     output: (event: AgentDelta) => {
       output.offer(event)
@@ -295,6 +302,21 @@ function makeAgent(config: WorkerOpenConfig, options: HostedAgentOptions): Threa
       }),
     events: Stream.fromQueue(queue),
     output: output.stream,
+    flushEvents: () =>
+      Effect.gen(function* () {
+        if (!live) return
+        const id = randomUUID()
+        const done = yield* Deferred.make<void>()
+        barriers.set(id, done)
+        yield* live.flushEvents(id).pipe(
+          Effect.andThen(Deferred.await(done)),
+          Effect.ensuring(
+            Effect.sync(() => {
+              barriers.delete(id)
+            }),
+          ),
+        )
+      }),
     abort: () =>
       Effect.gen(function* () {
         stopped = true
@@ -336,6 +358,7 @@ interface HostState {
   readonly active: () => { messageId: string; executionId?: string; ended: boolean } | undefined
   readonly setExecutionId: (id: string) => void
   readonly markEnded: () => void
+  readonly barrier: (id: string) => Effect.Effect<void>
   readonly uncertain: (reason: string) => Effect.Effect<void>
   readonly emit: (event: AgentEvent) => Effect.Effect<void>
   readonly output: (event: AgentDelta) => void
@@ -348,6 +371,7 @@ function receiveEvent(state: HostState, frame: import('./protocol.ts').HostEvent
       return yield* state.uncertain('Agent event generation or sequence mismatch')
     state.setSequence(frame.sequence)
     const event = frame.event
+    if (event.type === 'barrier') return yield* state.barrier(event.id)
     if (event.type === 'uncertain') return yield* state.uncertain(event.reason)
     const active = state.active()
     // Delayed text from a completed input cannot belong to the next turn.

@@ -21,6 +21,7 @@ import * as Cursor from '@baton/batond/testing/cursor/transcripts'
 import * as Pi from '@baton/batond/testing/pi/transcripts'
 import * as Codex from '@baton/batond/testing/codex/transcripts'
 import * as Kiro from '@baton/batond/testing/kiro/transcripts'
+import { assertStoredTurnTrace, readTurnTrace } from './testing/turn-trace.ts'
 
 const LoginResponse = Schema.Struct({ csrf_token: Schema.String })
 
@@ -28,7 +29,7 @@ interface ProviderThreadOptions {
   agentType: 'cursor' | 'pi' | 'codex' | 'kiro'
   model: string
   version: string
-  prepareTranscripts?: (directory: string) => Promise<void>
+  prepareTranscripts?: (directory: string) => Promise<string | void>
 }
 
 interface ProviderThreadContext {
@@ -40,6 +41,7 @@ interface ProviderThreadContext {
   view: () => Promise<P.ThreadView>
   timeline: () => Promise<ReadonlyArray<P.ThreadEvent>>
   replies: () => Promise<ReadonlyArray<P.ThreadEvent>>
+  disconnect: () => Promise<void>
 }
 
 const cases: ReadonlyArray<
@@ -140,8 +142,9 @@ async function withProviderThread(
         logLevel: 'silent',
       })
     }
+    let firstContent = 'Respond with exactly: provider thread resume fixture first turn complete'
     if (prepareTranscripts) {
-      await prepareTranscripts(directory)
+      firstContent = (await prepareTranscripts(directory)) ?? firstContent
     } else if (agentType === 'cursor') {
       const transcript = Cursor.withRuntimeInstructions(
         Cursor.sandboxed(
@@ -303,7 +306,7 @@ async function withProviderThread(
       model,
       message: {
         client_message_id: firstMessageId,
-        content: 'Respond with exactly: provider thread resume fixture first turn complete',
+        content: firstContent,
       },
     } satisfies P.CreateBrowserThreadInput)
     expect(created.status, JSON.stringify(created.body)).toBe(201)
@@ -313,7 +316,21 @@ async function withProviderThread(
     const timeline = async () =>
       Schema.decodeUnknownSync(P.ThreadTimeline)((await request(`${threadPath}/timeline?limit=100`)).body).events ?? []
     const replies = async () => (await timeline()).filter((event) => event.kind === 'reply')
-    await run({ database, threadId, firstMessageId, threadPath, request, view, timeline, replies })
+    const disconnect = async () => {
+      controller.abort()
+      await daemon
+      await expect
+        .poll(
+          async () => {
+            const response = await request(`/nodes/${identity.node_id}`)
+            expect(response.status).toBe(200)
+            return Schema.decodeUnknownSync(P.NodeStatus)(response.body).online
+          },
+          { timeout: 10_000 },
+        )
+        .toBe(false)
+    }
+    await run({ database, threadId, firstMessageId, threadPath, request, view, timeline, replies, disconnect })
   } finally {
     controller.abort()
     await daemon
@@ -379,6 +396,121 @@ test.each(cases)(
       })
       await expect.poll(async () => (await view()).status, { timeout: 10_000 }).toBe('idle')
     })
+  },
+  45_000,
+)
+
+const traceCases = cases.map((provider) => ({
+  ...provider,
+  expectedItems:
+    provider.agentType === 'cursor'
+      ? [
+          { type: 'reasoning', text: 'Reading package.json' },
+          { type: 'dynamic_tool', text: 'package.json' },
+          { type: 'dynamic_tool', text: 'tsconfig.json' },
+        ]
+      : provider.agentType === 'codex'
+        ? [{ type: 'command_execution', text: '.codex-probe-write-action.txt' }]
+        : provider.agentType === 'pi'
+          ? [{ type: 'reasoning', text: 'provider thread resume fixture first turn complete' }]
+          : [
+              { type: 'command_execution', text: 'count.txt' },
+              { type: 'dynamic_tool', text: 'upToDate' },
+              // ACP adapter 的批准项最后状态仍为 waiting，host 在 Turn 结束前原样补发。
+              { type: 'approval_request', text: 'count.txt', status: 'waiting' },
+            ],
+  // Cursor adapter 的 providerTurnPayload 未映射录制的 SDK usage；Kiro 转录只有 context/credit 信息。
+  tokenUsage:
+    provider.agentType === 'codex'
+      ? { inputTokens: 21891, outputTokens: 24 }
+      : provider.agentType === 'pi'
+        ? { inputTokens: 1792, outputTokens: 85 }
+        : undefined,
+}))
+
+test.each(traceCases)(
+  '$agentType: recorded turn items persist in order and trace remains readable with the device offline',
+  async (provider) => {
+    await withProviderThread(
+      {
+        ...provider,
+        ...(provider.agentType === 'cursor'
+          ? {
+              prepareTranscripts: async (directory: string) => {
+                const original = await Cursor.readTranscript(
+                  fileURLToPath(
+                    new URL(
+                      '../../upstream/t3code/packages/provider-cursor/src/testing/fixtures/tool_call_read_only.ndjson',
+                      import.meta.url,
+                    ),
+                  ),
+                )
+                const start = original.entries.find(
+                  (entry) => entry.type === 'expect_outbound' && entry.label === 'run.start:1',
+                )
+                if (start?.type !== 'expect_outbound') throw new Error('Cursor recording has no run.start')
+                const prompt = Schema.decodeUnknownSync(Schema.Struct({ message: Schema.String }))(start.frame).message
+                const { entries, ...header } = Cursor.withRuntimeInstructions(
+                  Cursor.sandboxed(original),
+                  provider.model,
+                )
+                await writeFile(
+                  join(directory, 'cursor-first.ndjson'),
+                  [
+                    JSON.stringify({
+                      type: 'transcript_start',
+                      ...header,
+                      metadata: {
+                        ...header.metadata,
+                        derivedFrom: 'provider-cursor/src/testing/fixtures/tool_call_read_only.ndjson',
+                      },
+                    }),
+                    ...entries.map((entry) => JSON.stringify(entry)),
+                    '',
+                  ].join('\n'),
+                )
+                return prompt
+              },
+            }
+          : provider.agentType === 'codex'
+            ? {
+                prepareTranscripts: async (directory: string) => {
+                  const transcript = await Codex.readCodexTranscript(
+                    Codex.codexFixturePath('tool_call_workspace_never'),
+                  )
+                  await Codex.writeCodexTranscript(join(directory, 'codex-first.ndjson'), transcript)
+                  const start = transcript.entries.find(
+                    (entry) => entry.type === 'expect_outbound' && entry.label === 'turn/start',
+                  )
+                  if (start?.type !== 'expect_outbound') throw new Error('Codex recording has no turn/start')
+                  const { params } = Schema.decodeUnknownSync(
+                    Schema.Struct({
+                      params: Schema.Struct({ input: Schema.Array(Schema.Struct({ text: Schema.String })) }),
+                    }),
+                  )(start.frame)
+                  return params.input.map((part) => part.text).join('\n')
+                },
+              }
+            : {}),
+      },
+      async ({ database, threadId, request, view, timeline, disconnect }) => {
+        await expect
+          .poll(async () => (await timeline()).filter((event) => event.kind === 'turn.ended').length, {
+            timeout: 15_000,
+          })
+          .toBe(1)
+        await expect.poll(async () => (await view()).status, { timeout: 10_000 }).toBe('idle')
+        const steps = await assertStoredTurnTrace({
+          database,
+          threadId,
+          request,
+          expectedItems: provider.expectedItems,
+          ...(provider.tokenUsage ? { tokenUsage: provider.tokenUsage } : {}),
+        })
+        await disconnect()
+        expect(await readTurnTrace(request, threadId)).toEqual(steps)
+      },
+    )
   },
   45_000,
 )

@@ -1,4 +1,4 @@
-import type { ThreadAnswerInput, ThreadQuestion, WorkerOpenConfig } from '@baton/protocol'
+import type { ThreadAnswerInput, ThreadQuestion, ThreadTurnItem, WorkerOpenConfig } from '@baton/protocol'
 import type { Effect, Schema, Stream } from 'effect'
 
 export type JsonValue = typeof Schema.Json.Type
@@ -49,6 +49,7 @@ export interface AgentOutput extends AgentEventIdentity {
 }
 
 export type AgentEvent =
+  | { readonly type: 'barrier'; readonly acknowledge: Effect.Effect<void> }
   | (AgentEventIdentity & { readonly type: 'question'; readonly question: ThreadQuestion })
   | (AgentEventIdentity & { readonly type: 'question.resolved'; readonly requestId: string })
   | (AgentEventIdentity & {
@@ -60,8 +61,17 @@ export type AgentEvent =
       readonly original_bytes?: number
       readonly truncated?: boolean
     })
-  | (AgentEventIdentity & { readonly type: 'end'; readonly outcome: 'completed' | 'cancelled' })
-  | (AgentEventIdentity & { readonly type: 'end'; readonly outcome: 'failed'; readonly reason: string })
+  | (AgentEventIdentity & {
+      readonly type: 'item'
+      readonly item: ThreadTurnItem
+      readonly truncated?: boolean
+      readonly original_bytes?: number
+      readonly metadata?: NonNullable<import('@baton/protocol').ThreadReport['metadata']>
+    })
+  | (AgentEventIdentity & { readonly type: 'end'; readonly tokenUsage?: JsonValue } & (
+        | { readonly outcome: 'completed' | 'cancelled' }
+        | { readonly outcome: 'failed'; readonly reason: string }
+      ))
   | { readonly type: 'uncertain'; readonly reason: string }
   | { readonly type: 'exited'; readonly reason: string; readonly processTreeStopped: boolean }
 
@@ -93,6 +103,8 @@ export interface ThreadAgent {
   readonly output?: Stream.Stream<AgentOutput, AgentError>
   /** Registers cancellation immediately; its response alone does not confirm termination. */
   readonly abort: () => Effect.Effect<void, AgentError>
+  /** Waits until preceding control events have been durably handled by the Worker. */
+  readonly flushEvents?: () => Effect.Effect<void, AgentError>
   readonly close: () => Effect.Effect<void, AgentError>
   readonly reap: () => Effect.Effect<{ readonly processTreeStopped: boolean }, AgentError>
 }

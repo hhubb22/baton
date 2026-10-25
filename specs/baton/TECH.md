@@ -157,16 +157,16 @@ Windows 第一版按账本保存的 PID 与创建时间核对身份，再用 `ta
 | 环节 | 规则 |
 |---|---|
 | host 上报 | 某项第一次进入终态（completed、failed、cancelled、interrupted）时，发出 host `item` 事件，之后同一项的更新忽略。driver 保留本轮尚未终态的项的最新版本，`turn.terminal` 或停止时，在 `end` 之前按 `ordinal` 补发，状态保留最后一次看到的值。`assistant_message`、`user_message` 已由回复和消息保存，不作为过程项；用户提问和 MCP elicitation 仍形成问题事件，进入终态时也作为过程项上报；其余类型原样上报。`item` 属于控制事件，进入有界控制队列，不丢弃 |
-| Worker 截断 | 把项编码为 JSON。超过 192 KiB 时，先将全文写入 `full-output/`（与回复全文共用存储和保留期），再反复把当前最长的字符串字段截成首尾两段，直到编码后不超过 192 KiB；记录 `truncated`、原字节数和完整输出引用 |
-| Worker 账本 | 截断结果与 outbox `turn.item` 事件在同一事务提交。同一 Turn 的 `turn.item` 都在 `turn.ended` 之前（Worker 账本不变量 3） |
-| shell | 命令结束时，在写回复之前生成一个 `command_execution` 项：`id` 为 `shell:<worker_turn_seq>`，`input` 为命令，`output` 为合并输出，附 `exitCode`；截断规则相同，全文引用沿用 shell 已保存的完整输出 |
+| Worker 截断 | 整个 `JSON.stringify(item)`（索引字段和 `data`）最多 192 KiB，`original_bytes` 记录裁剪前 `data` 的 JSON 编码字节数。超限时先保存原始 `data` JSON 到 `full-output/`（与回复全文共用存储和保留期），再按当前最长字符串保留首尾裁剪，最多 256 次。结构本身仍超限、无法继续缩小或达到次数上限时，摘要 `data` 置为 `null` 并标记 `metadata.item_structure_omitted:true`，全文引用保留。发生裁剪时记录 `truncated` 和完整输出引用；字符串和对象键保留原文，仅顶层索引与展示字段按既有安全展示规则处理，并标记 `metadata.item_text_sanitized`，展示映射本身不设置 `truncated` |
+| Worker 账本 | 截断结果与 outbox `turn.item` 事件在同一事务提交。同一 Turn 的 `turn.item` 都在 `turn.ended` 之前（Worker 账本不变量 3）。停止或状态不确定后的清理在退役前，由 host 在控制事件流末尾发确认标记，Worker 持久化此前事件后才确认；清理任务在串行账本队列外等待该确认，再退役消费端，避免已入队的过程项随强制回收丢失。确认失败冻结 Worker，不报告停止成功；已确认接受的活动 Turn 在排空事件前不写结束记录，核对输入接受身份后，先处理缓冲事件，再写结束报告 |
+| shell | 命令结束时，在写回复之前生成一个 `command_execution` 项：Worker 固定 `id` 为 `shell:<worker_turn_seq>`，`input` 为命令，`output` 为合并输出，附 `exitCode`。过程输出独立保留最多 192 KiB，回复摘要仍为 32 KiB，再按项的 JSON 预算裁剪；`original_bytes` 包含完整输出在 `data` 中的 JSON 编码大小，`metadata.shell_output_bytes` 另记原始输出字节数。全文引用沿用 shell 已保存的原始输出，完成记录恢复时同样先写项、再写回复 |
 | token 用量 | driver 记下本轮最后一次 `provider_turn.updated` 的 `tokenUsage`，随 `end` 事件交给 Worker，再由 `turn.ended` 报告的 `token_usage` 字段原样送到中心 |
 
-`turn.item` 报告携带 `worker_turn_seq` 和 `item:{id, type, status, ordinal, parent_id?, title?, started_at?, completed_at?, data}`。`data` 是上游 TurnItem 的 JSON，shell 只填同名字段的子集；另附 `truncated`、`original_bytes`，`metadata.full_output` 保存完整输出引用。中心不深度解码 `data`，它的结构跟随 submodule 固定的上游版本，实验室阶段不做跨版本兼容（R-25）。
+`turn.item` 报告携带 `worker_turn_seq` 和 `item:{id, type, status, ordinal, parent_id?, title?, started_at?, completed_at?, data}`。`data` 是上游 TurnItem 的 JSON，shell 只填同名字段的子集；另附 `truncated`、`original_bytes`，`metadata.full_output` 保存完整输出引用。中心不深度解码 `data`，它的结构跟随 submodule 固定的上游版本，实验室阶段不做跨版本兼容（R-25）。`data` 和 `token_usage` 使用 PostgreSQL `json`，读取时保留原 JSON，不转换为 `jsonb`，以支持字符串中的 NUL、孤立 UTF-16 代理项转义和嵌套 `null`。这些内容按原文保存，不做脱敏。
 
 中心把每一项写入 `thread_turn_items`，以 `(employee_id, thread_id, worker_turn_seq, item_id)` 为主键，冲突时保留首次写入的版本，报告照常 ACK。`turn.item` 不写 Project Agent 输入队列，也不进入 `thread_events` 时间线；时间线的 Turn 结束事件附带该轮的过程项数量，网页据此显示过程记录这一行。
 
-浏览器 trace 接口和 Project Agent 的 `threads.trace` 读取同一份数据：按 `(ordinal, worker_seq)` 排序，每页最多 50 项、1 MiB，用 `next_cursor` 续读。被截断步骤的全文经现有 `full_output` 路径从设备读取。
+浏览器 trace 接口和 Project Agent 的 `threads.trace` 读取同一份数据：按 `(ordinal, worker_seq)` 排序，每页最多 50 项、1 MiB。首次请求以 Thread 当前已提交的 `last_worker_seq` 固定快照上限；`page_cursor` 绑定员工、Thread、Turn、该上限和本页起点，用它可重读当前页，`next_cursor` 用于续读下一页。当前快照只读取 `worker_seq` 不超过该上限的项，后到的小 ordinal 项在省略 `cursor` 从头刷新时读取。Project Agent 的 32 KiB 分片包装直接返回 `page_cursor`，分片续读必须携带它，避免执行中的新项改变正在拼接的 JSON。被截断步骤的全文经现有 `full_output` 路径从设备读取。
 
 ## 中心数据
 
@@ -225,7 +225,7 @@ Worker 的报告类型：
 
 每个报告带 `event_id` 和 Worker 序号。中心在一个事务里保存报告、更新状态，并按消息或 Turn 的归属写入 Project Agent 输入队列（Project Agent TECH 第 9 节），提交后返回 ACK；Worker 收到 ACK 才确认本地 outbox。重复报告按 `event_id` 返回原 ACK。中心按 Worker 序号处理，序号跳跃时拒绝并要求补报，保证 `turn.ended` 不会早于这一轮的回复和过程项入库。
 
-原 Worker 账本缺失、损坏或结构不匹配时，batond 先补送节点账本中尚未确认的 Worker 报告，再发送带 `history_unavailable:true` 的 `thread.unknown` 恢复报告。暂时无法读取时继续有界重试，保留原 Worker 的报告序列。中心在同一报告事务内，将已有活动 Turn 以 `agent_exited` 结束。仍为 accepted、尚未关联 Turn，且对应的全部 message 命令 `attempts=0`、没有接收回执的输入撤回并保留原文；其他 accepted/queued 输入改为 unknown。未完成命令按派发事实结束：`attempts=0` 且无接收回执为 cancelled，其余为 unknown。事务同时保存审计、对应 Project 输入及 Thread 状态。历史缺失本身不证明 Agent 已退出，不能设置停止确认或完成等待停止的归档；停止确认仍须有 Turn 终止或进程树回收证据。设备确认停止、没有活动 Turn 和 accepted/queued 输入后，允许保留历史 unknown 输入并归档，不重发历史命令。领取新的 open、resume 或 message 命令时，在递增派发次数的同一事务内废弃旧停止确认；新的恢复或回合开始报告也废弃旧确认，避免用上一次停止的证据归档当前执行。重复恢复报告沿用原 ACK；普通状态报告仍须在 Turn 结束后提交。
+原 Worker 账本缺失、损坏或结构不匹配时，batond 先补送节点账本中尚未确认的 Worker 报告，再发送带 `history_unavailable:true` 的 `thread.unknown` 恢复报告。暂时无法读取时继续有界重试，保留原 Worker 的报告序列。中心在同一报告事务内，将已有活动 Turn 以 `agent_exited` 结束，并为每轮补一条带 `worker_turn_seq` 和 `item_count` 的结束时间线记录，保留已保存过程项的查看入口。仍为 accepted、尚未关联 Turn，且对应的全部 message 命令 `attempts=0`、没有接收回执的输入撤回并保留原文；其他 accepted/queued 输入改为 unknown。未完成命令按派发事实结束：`attempts=0` 且无接收回执为 cancelled，其余为 unknown。事务同时保存审计、对应 Project 输入及 Thread 状态。历史缺失本身不证明 Agent 已退出，不能设置停止确认或完成等待停止的归档；停止确认仍须有 Turn 终止或进程树回收证据。设备确认停止、没有活动 Turn 和 accepted/queued 输入后，允许保留历史 unknown 输入并归档，不重发历史命令。领取新的 open、resume 或 message 命令时，在递增派发次数的同一事务内废弃旧停止确认；新的恢复或回合开始报告也废弃旧确认，避免用上一次停止的证据归档当前执行。重复恢复报告沿用原 ACK；普通状态报告仍须在 Turn 结束后提交。
 
 ## 设备与 Worker 数据
 
@@ -357,7 +357,7 @@ URL 相对 `/api/v1`。读取检查员工会话与资源归属，写入另检查
 | `POST /threads/{id}/archive` | 返回 202；有进行中的 Turn、待发消息或尚未确认停止的不确定状态时先发停止，设备确认后归档。停止已确认且无活动 Turn 或待发消息时，历史 unknown 输入保留并允许归档；空闲或已停止、无不确定输入与待发消息时直接归档 |
 | `GET /threads/{id}/history` | 从设备分页读取原生历史，见「历史读取与实时输出」 |
 | `GET /threads/{id}/output` | 默认经设备临时 RPC 读取实时输出；`action=full_output&output_id=...&storage_generation=...` 按可选字节游标读取设备保存的完整回复或 shell 输出，每页最多 12 KiB 原始字节，以 Base64 返回，详见「历史读取与实时输出」 |
-| `GET /threads/{id}/trace` | 必填 `worker_turn_seq`，可选 `cursor`，返回 `{ok, code?, steps, next_cursor?}`，数据取自 `thread_turn_items`，不访问设备。每个步骤含 `item_id`、`type`、`status`、`ordinal`、`parent_id`、`title`、起止时间、`truncated`、`original_bytes`、可选 `full_output` 引用和上游 `data`；分页规则见「过程记录」。该 Turn 没有过程项时返回 `ok:false, code:"trace_missing"`，指定 Turn 不存在返回 404 |
+| `GET /threads/{id}/trace` | 必填 `worker_turn_seq`，可选 `cursor`，返回 `{ok, code?, steps, page_cursor, next_cursor?}`，数据取自 `thread_turn_items`，不访问设备。每个步骤含 `item_id`、`type`、`status`、`ordinal`、`parent_id`、`title`、起止时间、`truncated`、`original_bytes`、可选 `full_output` 引用和上游 `data`；分页规则见「过程记录」。该 Turn 没有过程项时返回 `ok:false, code:"trace_missing"`，指定 Turn 不存在返回 404 |
 | `/events` | 浏览器 WebSocket，订阅 Thread 的实时输出与状态变化 |
 
 登录、默认设备、文件浏览和 Inbox 沿用各自接口；Project 创建、对话与记忆修订契约见 Project Agent TECH。Thread 使用独立的 Store 和协议；`/tasks*`、`/sessions*`、`/acceptances` 业务接口已移除。

@@ -76,7 +76,7 @@ async function fixture() {
   }
   return { root, cwd, config, factory, create, watchdog }
 }
-const takeEvents = (agent: ThreadAgent, count = 2) =>
+const takeEvents = (agent: ThreadAgent, count = 3) =>
   run(Stream.runCollect(Stream.take(agent.events, count)).pipe(Effect.timeout('5 seconds')))
 
 describe('shell output retention', () => {
@@ -117,13 +117,13 @@ describe.skipIf(process.platform === 'win32')('restricted shell Thread', () => {
     const events = takeEvents(agent)
     const acceptance = await run(agent.send(input, prep))
     const result = await events
-    expect(result.map((e) => e.type)).toEqual(['reply', 'end'])
+    expect(result.map((e) => e.type)).toEqual(['item', 'reply', 'end'])
     const record = await loadCompletion(await loadMapping(f.config))
     expect(record.result.exit_code).toBe(7)
     expect(record.result.total_bytes).toBe(6)
     expect(record.result.output).toContain('out')
     expect(record.result.output).toContain('err')
-    expect(result[0]).toMatchObject({ metadata: { exit_code: 7 }, original_bytes: 6, truncated: false })
+    expect(result[1]).toMatchObject({ metadata: { exit_code: 7 }, original_bytes: 6, truncated: false })
     await expect(run(agent.prepareInput(message('echo second'), 0))).rejects.toThrow('only one')
     const recovered = f.create()
     await run(recovered.restoreInput(input, prep))
@@ -157,7 +157,7 @@ describe.skipIf(process.platform === 'win32')('restricted shell Thread', () => {
     const prep = await run(agent.prepareInput(input, 0))
     const events = takeEvents(agent)
     await run(agent.send(input, prep))
-    expect((await events)[0]).toMatchObject({ type: 'reply', text: 'immediate', original_bytes: 9 })
+    expect((await events)[1]).toMatchObject({ type: 'reply', text: 'immediate', original_bytes: 9 })
   })
 
   it('spools raw command output before summary clipping and recovers its omitted middle', async () => {
@@ -165,12 +165,23 @@ describe.skipIf(process.platform === 'win32')('restricted shell Thread', () => {
     const agent = f.create()
     await run(agent.open(f.config))
     const input = message(
-      `printf HEAD; i=0; while [ "$i" -lt 12000 ]; do printf 'MIDDLE🙂'; i=$((i + 1)); done; printf TAIL`,
+      `printf HEAD; i=0; while [ "$i" -lt 40000 ]; do printf 'MIDDLE🙂'; i=$((i + 1)); done; printf TAIL`,
     )
     const prep = await run(agent.prepareInput(input, 0))
     const events = takeEvents(agent)
     await run(agent.send(input, prep))
-    await events
+    const emitted = await events
+    const trace = emitted.find((event) => event.type === 'item')
+    const fullData = {
+      type: 'command_execution',
+      input: input.text,
+      output: 'HEAD' + 'MIDDLE🙂'.repeat(40000) + 'TAIL',
+      exitCode: 0,
+    }
+    expect(trace?.original_bytes).toBe(Buffer.byteLength(JSON.stringify(fullData)))
+    expect(trace?.metadata?.shell_output_bytes).toBe(Buffer.byteLength(fullData.output))
+    expect(trace?.truncated).toBe(true)
+    expect(trace?.item.data).toMatchObject({ output: expect.stringMatching(/^HEAD.*TAIL$/u) })
     const completion = await loadCompletion(await loadMapping(f.config))
     expect(completion.result.truncated).toBe(true)
     const reference = completion.result.full_output
@@ -194,7 +205,7 @@ describe.skipIf(process.platform === 'win32')('restricted shell Thread', () => {
       cursor = result.cursor
       if (result.full_output.done) break
     }
-    expect(Buffer.concat(pages).toString('utf8')).toBe('HEAD' + 'MIDDLE🙂'.repeat(12000) + 'TAIL')
+    expect(Buffer.concat(pages).toString('utf8')).toBe('HEAD' + 'MIDDLE🙂'.repeat(40000) + 'TAIL')
   })
 
   it('rechecks local permission immediately before launch and refuses absent Project origin', async () => {
@@ -237,7 +248,7 @@ describe.skipIf(process.platform === 'win32')('restricted shell Thread', () => {
     const pid = Number(await readFile(pidfile, 'utf8'))
     await run(agent.abort())
     expect(await run(agent.reap())).toEqual({ processTreeStopped: true })
-    expect((await events).map((e) => e.type)).toEqual(['reply', 'uncertain'])
+    expect((await events).map((e) => e.type)).toEqual(['item', 'reply', 'uncertain'])
     await vi.waitFor(async () => expect(await readProcessIdentity(pid)).toBeNull())
     expect((await loadCompletion(await loadMapping(f.config))).completionKind).toBe('stopped')
   })
@@ -305,6 +316,14 @@ describe.skipIf(process.platform === 'win32')('shell Worker durability', () => {
           )
           const result = yield* Effect.promise(() => waitReport(worker, 'thread.stopped'))
           expect(result.filter((r) => r.kind === 'reply').map((r) => r.content)).toEqual(['restored'])
+          expect(
+            result.filter((r) => ['turn.item', 'reply', 'turn.ended'].includes(r.kind)).map((r) => r.kind),
+          ).toEqual(['turn.item', 'reply', 'turn.ended'])
+          expect(result.find((r) => r.kind === 'turn.item')?.item).toMatchObject({
+            id: 'shell:1',
+            type: 'command_execution',
+            data: { input: 'printf restored', output: 'restored', exitCode: 0 },
+          })
         }),
       ),
     )
@@ -418,7 +437,7 @@ describe.skipIf(process.platform === 'win32')('shell Worker durability', () => {
     )
   })
 
-  it.each(['sent', 'intent', 'missing', 'mismatch'] as const)(
+  it.each(['sent', 'intent', 'item', 'missing', 'mismatch'] as const)(
     'recovers %s execution without a second side effect',
     async (mode) => {
       const f = await fixture()
@@ -438,7 +457,10 @@ describe.skipIf(process.platform === 'win32')('shell Worker durability', () => {
                 const real = f.factory(config)
                 return {
                   ...real,
-                  events: Stream.unwrap(never.pipe(Effect.as(real.events))),
+                  events:
+                    mode === 'item'
+                      ? Stream.take(real.events, 1).pipe(Stream.concat(Stream.never))
+                      : Stream.unwrap(never.pipe(Effect.as(real.events))),
                   ...(mode === 'intent'
                     ? { send: (message, prep) => real.send(message, prep).pipe(Effect.andThen(never)) }
                     : {}),
@@ -457,6 +479,7 @@ describe.skipIf(process.platform === 'win32')('shell Worker durability', () => {
               ),
             )
             if (mode !== 'intent') yield* Effect.promise(() => waitReport(worker, 'message.sent'))
+            if (mode === 'item') yield* Effect.promise(() => waitReport(worker, 'turn.item'))
             expect((yield* Effect.promise(() => reports(worker))).some((r) => r.kind === 'reply')).toBe(false)
           }),
         ),
@@ -482,6 +505,10 @@ describe.skipIf(process.platform === 'win32')('shell Worker durability', () => {
             else {
               expect(result.filter((r) => r.kind === 'reply').map((r) => r.content)).toEqual(['completed'])
               expect(result.filter((r) => r.kind === 'turn.ended')).toHaveLength(1)
+              expect(result.filter((r) => r.kind === 'turn.item')).toHaveLength(1)
+              expect(
+                result.filter((r) => ['turn.item', 'reply', 'turn.ended'].includes(r.kind)).map((r) => r.kind),
+              ).toEqual(['turn.item', 'reply', 'turn.ended'])
             }
             expect((yield* worker.handle({ ...input, command_id: randomUUID() })).ok).toBe(true)
             expect(yield* Effect.promise(() => readFile(join(f.cwd, 'effects'), 'utf8'))).toBe('ran')

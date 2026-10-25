@@ -57,7 +57,13 @@ Agent 的普通提问和 MCP 确认显示在 Thread 输入区上方，支持单�
 
 Thread 历史是中心保存的输入和回复，所有 Agent 格式相同。上游明确回合失败时，中心保存 `end_reason: failed`，安全原因随 `turn.ended` 报告的 `content` 保存在时间线事件中。输入保持 sent；没有排队消息时 Thread 回到 idle，有排队消息时继续 running 并执行下一条，沿用 `queue_empty` 规则。网页在对应回合显示 `<Agent> could not finish this reply` 和原因，原生会话与进程保留。运行时请求无法应答、事件流断开、发送结果无法确认、host 崩溃或连接丢失仍按 unknown 处理。
 
-网页时间线按事件游标分页读取这些记录，设备离线时仍可查看。在 Baton 之外继续同一原生会话产生的消息不会出现。`src/threads/` 拥有 Thread 的状态、回合和持久消息读取；`view` 与 `readTurns` 接受 `{ employeeId, projectId? }`，指定 Project 时同时校验员工与 Project 归属。Project 工具 `threads.read` 读取同一份输入和回复。`history.read` 与 `history.search` 读取 Project 主对话已经保存在中心的事件，不访问设备。
+网页时间线按事件游标分页读取这些记录，设备离线时仍可查看。在 Baton 之外继续同一原生会话产生的消息不会出现。`src/threads/` 拥有 Thread 的状态、回合和持久消息读取；`view`、`readTurns` 与 `trace` 接受 `{ employeeId, projectId? }`，指定 Project 时同时校验员工与 Project 归属。Project 工具 `threads.read` 读取同一份输入和回复，每个 Turn 的 `item_count` 为过程项数量，`token_usage` 保留上游用量 JSON。`history.read` 与 `history.search` 读取 Project 主对话已经保存在中心的事件，不访问设备。
+
+`turn.item` 按连续 Worker 报告序号写入 `thread_turn_items`；同一员工、Thread、Turn 和 `item_id` 的冲突保留首个版本，重复报告返回原 ACK。过程项不进入 Project 输入队列或 `thread_events`，时间线的 `turn.ended.payload.item_count` 保存该轮数量。`data` 和 Turn 的 `token_usage` 使用 PostgreSQL `json`，读取不经过 `jsonb` 转换，保留原文中的 NUL、孤立代理项转义和嵌套 null；用量正文只保存在 Turn 中，不重复写入时间线。中心不对过程正文脱敏，也不将正文导出到追踪。
+
+`GET /api/v1/threads/{threadId}/trace` 必填 `worker_turn_seq`，可选 `cursor`，从中心数据库读取过程项，设备离线时仍可访问。按 `(ordinal, worker_seq)` 排序，每页最多 50 项且整个业务 JSON 不超过 1 MiB。首次请求以 Thread 已提交的 `last_worker_seq` 固定 highwater，后续页仅包含不超过该序号的过程项；游标同时绑定员工、Thread、Turn、highwater 和页起点。每页返回 `page_cursor` 供原样重读，用 `next_cursor` 续页。后到的过程项在不带 cursor 的新快照中读取，包括 ordinal 小于已读位置的项。存在的 Turn 没有过程项时返回 `{ok:false,code:"trace_missing",steps:[],page_cursor}`，该空快照也可稳定重读；Turn 不存在返回 404。步骤包含上游 `data`、截断信息及可选 `full_output` 引用；引用的 `storage_generation` 必须与 Thread 绑定代次一致，全文通过现有设备完整输出接口读取。
+
+Project 工具 `threads.trace` 使用相同查询，参数为 `thread_id`、`worker_turn_seq`、可选 `cursor`，并接受通用只读参数 `offset`、`max_bytes`。每个业务页先按 trace 上限生成，再包装为不超过 32 KiB 的 JSON 字节片段，外包装也返回 `page_cursor` 并计入容量预算。读取后续片段时，以外包装的 `page_cursor` 作为请求 `cursor`，配合 `next_offset` 拼完当前页；`offset > 0` 且没有 cursor 时拒绝为 422 `snapshot_cursor_required`。拼完后用页内 `next_cursor` 读取下一页，将 `offset` 归零。
 
 实时输出由 Worker 保留当前 Turn 最近 256 KiB，每次读取最多 16 KiB，游标为 `epoch:字节偏移`。Turn 结束和切换时清空；淘汰、旧 epoch 或上游丢失输出时返回 `gap:true`。HTTP 输出查询和浏览器 WebSocket 复用设备临时 RPC，中心不持久化实时输出。
 
@@ -104,7 +110,7 @@ docker run --rm --name baton-tracing \
 | Cursor、Kiro steer                                     | HTTP 422，`code:"steer_unsupported"`；同时传模型时为 `model_with_steer`                              |
 | 轮间模型切换 | Pi、Codex、Cursor 支持为后续回合选择模型，省略时沿用最近确认提交的选择；Kiro 固定创建时模型，返回 HTTP 422、`code:"model_switch_unsupported"`。Steer 同时指定模型返回 `model_with_steer` |
 | Thread 历史                                      | 时间线返回中心保存的输入、回复和事件，设备离线时仍可分页读取；网页与 Project 工具 `threads.read` 使用同一份记录 |
-| 过程 `/threads/{id}/trace`                       | 合法查询返回 HTTP 200，`{ok:false,code:"trace_missing",steps:[]}`                                    |
+| 过程 `/threads/{id}/trace`                       | 按 Turn 从中心分页读取过程项，最多 50 项／1 MiB；无记录返回 `trace_missing`，Turn 不存在返回 404，设备离线仍可读取 |
 | 实时输出时设备离线或尚未同步                     | HTTP 200 的 `SessionResult`，`ok:false`，分别为 `node_offline` 或 `node_syncing`                     |
 
 Kiro 的配置、原生恢复和生产探测限制见 [节点接入说明](../batond/src/agents/kiro/README.md)，后续 Agent 的范围见适配规格。开发 bundle 与 SEA 安装包的 Runtime 入口及附带依赖见 [发布设计](../../specs/release/TECH.md#打包与发布)。

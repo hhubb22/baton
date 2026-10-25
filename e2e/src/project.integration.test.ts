@@ -20,6 +20,7 @@ import { registerNode } from '@baton/batond/daemon/identity'
 import { initializeBrowseRoots } from '@baton/batond/devices/roots'
 import { LocalWorkerHost } from '@baton/batond/daemon/host'
 import { runDaemon } from '@baton/batond/daemon/daemon'
+import { assertStoredTurnTrace, readTurnTrace } from './testing/turn-trace.ts'
 
 const origin = 'https://baton.local'
 function browser(base: string, ca: string) {
@@ -425,13 +426,38 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
           source_type: string
           source_key: string
           delivered_seq: string | null
-        }>`SELECT source_type,source_key,delivered_seq FROM project_agent_input_queue WHERE agent_id=${project.agent.id} ORDER BY id`
+          thread_id: string | null
+        }>`SELECT source_type,source_key,delivered_seq,payload->>'thread_id' AS thread_id
+          FROM project_agent_input_queue WHERE agent_id=${project.agent.id} ORDER BY id`
       }),
     )
     expect(facts.filter((f) => f.source_type === 'user_message')).toHaveLength(1)
     for (const source of ['thread_reply', 'turn_ended', 'attention_answer', 'memory_updated'])
       expect(facts.some((f) => f.source_type === source && f.delivered_seq !== null)).toBe(true)
     expect(new Set(facts.map((f) => f.source_key)).size).toBe(facts.length)
+    const shell = threadPage.body.threads!.find((thread) => thread.agent_type === 'shell')!
+    expect(
+      facts
+        .filter((fact) => fact.thread_id === shell.id)
+        .map(({ source_type, source_key }) => ({ source_type, source_key })),
+    ).toEqual([{ source_type: 'turn_ended', source_key: `thread:${shell.id}:turn:1` }])
+    const steps = await assertStoredTurnTrace({
+      database,
+      request: alice,
+      threadId: shell.id,
+      expectedItems: [{ type: 'command_execution', text: 't3-shell-output' }],
+      beforeReply: true,
+    })
+    expect(steps).toHaveLength(1)
+    expect(steps[0]).toMatchObject({
+      item_id: 'shell:1',
+      type: 'command_execution',
+      data: { input: expect.stringContaining(script), output: 't3-shell-output\n', exitCode: 0 },
+    })
+    controller.abort()
+    await daemon
+    await expect.poll(async () => (await device()).online, { timeout: 10_000 }).toBe(false)
+    expect(await readTurnTrace(alice, shell.id)).toEqual(steps)
     expect((await bob<P.InboxPage>('/inbox?state=all')).body.requests).toEqual([])
     expect((await bob<P.ProjectsResponse>('/projects')).body.projects).toEqual([])
     expect(await readFile(join(runtimeDirectory, 'local-subscription'), 'utf8')).toBe('local-login-complete')

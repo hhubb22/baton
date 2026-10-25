@@ -25,6 +25,7 @@ import { digest } from '../json.ts'
 import { transaction } from '../database.ts'
 export { claimCommands, processReceipt } from './outbox.ts'
 export { processReport } from './reports.ts'
+export { trace } from './trace.ts'
 export { readExec, waitForExec, listProjectThreads } from './project.ts'
 
 export const create = (
@@ -286,6 +287,7 @@ export interface ThreadHistoryPage {
     P.ThreadTurn & {
       readonly messages: ReadonlyArray<P.ThreadMessage>
       readonly replies: ReadonlyArray<Record<string, unknown>>
+      readonly item_count: number
     }
   >
   readonly through_turn: number
@@ -309,12 +311,31 @@ export const readTurns = (
       const after = query.afterTurn ?? 0
       if (after > through) return yield* Effect.fail(failure('invalid_range', 422))
       const turns = yield* sql<{
-        value: ThreadHistoryPage['turns'][number]
+        value: P.ThreadTurn
+        messages: ThreadHistoryPage['turns'][number]['messages']
+        replies: ThreadHistoryPage['turns'][number]['replies']
+        item_count: number
         worker_turn_seq: number
-      }>`SELECT to_jsonb(t)-'employee_id' || jsonb_build_object('messages',(SELECT COALESCE(jsonb_agg(to_jsonb(m)-'employee_id' ORDER BY m.created_at,m.id),'[]'::jsonb) FROM thread_messages m WHERE m.employee_id=${employeeID} AND m.thread_id=t.thread_id AND m.worker_turn_seq=t.worker_turn_seq),'replies',(SELECT COALESCE(jsonb_agg(to_jsonb(r)-'employee_id' ORDER BY r.worker_seq),'[]'::jsonb) FROM thread_replies r WHERE r.employee_id=${employeeID} AND r.thread_id=t.thread_id AND r.worker_turn_seq=t.worker_turn_seq)) AS value,worker_turn_seq::float8 AS worker_turn_seq FROM thread_turns t WHERE employee_id=${employeeID} AND thread_id=${threadID} AND worker_turn_seq>${after} AND worker_turn_seq<=${through} ORDER BY worker_turn_seq LIMIT 20`
+      }>`SELECT row_to_json(t) AS value,
+        (SELECT COALESCE(jsonb_agg(to_jsonb(m)-'employee_id' ORDER BY m.created_at,m.id),'[]'::jsonb) FROM thread_messages m WHERE m.employee_id=${employeeID} AND m.thread_id=t.thread_id AND m.worker_turn_seq=t.worker_turn_seq) AS messages,
+        (SELECT COALESCE(jsonb_agg(to_jsonb(r)-'employee_id' ORDER BY r.worker_seq),'[]'::jsonb) FROM thread_replies r WHERE r.employee_id=${employeeID} AND r.thread_id=t.thread_id AND r.worker_turn_seq=t.worker_turn_seq) AS replies,
+        (SELECT count(*)::integer FROM thread_turn_items i WHERE i.employee_id=${employeeID} AND i.thread_id=t.thread_id AND i.worker_turn_seq=t.worker_turn_seq) AS item_count,
+        worker_turn_seq::float8 AS worker_turn_seq FROM thread_turns t WHERE employee_id=${employeeID} AND thread_id=${threadID} AND worker_turn_seq>${after} AND worker_turn_seq<=${through} ORDER BY worker_turn_seq LIMIT 20`
+      const history = yield* Effect.forEach(
+        turns,
+        Effect.fnUntraced(function* (r) {
+          const turn = yield* decode(
+            P.ThreadTurn,
+            Object.fromEntries(
+              Object.entries(r.value).filter(([key, value]) => value !== null || key === 'token_usage'),
+            ),
+          )
+          return { ...turn, messages: r.messages, replies: r.replies, item_count: r.item_count }
+        }),
+      )
       return {
         thread_id: threadID,
-        turns: turns.map((r) => r.value),
+        turns: history,
         through_turn: through,
         next_after_turn: turns.at(-1)?.worker_turn_seq ?? after,
       }

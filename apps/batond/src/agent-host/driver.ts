@@ -1,11 +1,12 @@
 import { realpath } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import { DateTime, Deferred, Effect, Queue, Schema, Scope, Stream } from 'effect'
+import { DateTime, Deferred, Effect, Queue, Schema, Scope, Semaphore, Stream } from 'effect'
 import type {
   ModelSelection,
   OrchestrationV2AppThread,
   OrchestrationV2ProviderFailure,
   OrchestrationV2ProviderThread,
+  OrchestrationV2TurnItem,
   OrchestrationV2RuntimeRequest,
   ProviderInstanceId,
   ProviderInteractionMode,
@@ -13,7 +14,12 @@ import type {
   RunId,
   RuntimeMode,
 } from '@t3tools/contracts'
-import { MessageId as MessageIdSchema, ProjectId, ThreadId } from '@t3tools/contracts'
+import {
+  MessageId as MessageIdSchema,
+  OrchestrationV2TurnItem as TurnItemSchema,
+  ProjectId,
+  ThreadId,
+} from '@t3tools/contracts'
 import { ThreadQuestion, type WorkerOpenConfig } from '@baton/protocol'
 import * as IdAllocator from '@t3tools/provider-core/server/IdAllocator'
 import * as ProviderAdapter from '@t3tools/provider-core/server/ProviderAdapter'
@@ -65,6 +71,9 @@ interface ActiveTurn {
   readonly started: Deferred.Deferred<ProviderTurnId>
   providerTurnId?: ProviderTurnId
   ended: boolean
+  readonly items: Map<string, OrchestrationV2TurnItem>
+  readonly emittedItems: Set<string>
+  tokenUsage?: typeof Schema.Json.Type
 }
 
 const operationError = (label: string, operation: string, cause: unknown) => {
@@ -86,6 +95,7 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
     const idAllocator = yield* IdAllocator.IdAllocatorV2
     const { label } = options
     const control = yield* Queue.bounded<ExecutionEvent, AgentHostError>(256)
+    const eventLock = yield* Semaphore.make(1)
     const output = makeOutputMailbox()
     let mapping: NativeMapping | undefined
     let config: WorkerOpenConfig | undefined
@@ -169,6 +179,31 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
             ),
           )
       })
+    const emitItem = (turn: ActiveTurn, item: OrchestrationV2TurnItem) => {
+      turn.items.delete(item.id)
+      turn.emittedItems.add(item.id)
+      return emit({
+        ...identity(turn),
+        type: 'item',
+        item: {
+          id: item.id,
+          type: item.type,
+          status: item.status,
+          ordinal: item.ordinal,
+          ...(item.parentItemId === null ? {} : { parent_id: item.parentItemId }),
+          ...(item.title === null ? {} : { title: item.title }),
+          ...(item.startedAt === null ? {} : { started_at: DateTime.formatIso(item.startedAt) }),
+          ...(item.completedAt === null ? {} : { completed_at: DateTime.formatIso(item.completedAt) }),
+          data: Schema.encodeSync(Schema.toCodecJson(TurnItemSchema))(item),
+        },
+      })
+    }
+    const flushItems = (turn: ActiveTurn) =>
+      Effect.forEach(
+        [...turn.items.values()].sort((a, b) => a.ordinal - b.ordinal),
+        (item) => emitItem(turn, item),
+        { discard: true },
+      )
     const consume = (event: ProviderAdapter.ProviderAdapterV2Event) =>
       Effect.gen(function* () {
         if (event.type === 'runtime_request.updated') {
@@ -180,6 +215,15 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
           case 'turn_item.updated': {
             const item = event.turnItem
             if (!active || active.ended || item.runId !== active.runId) return
+            if (
+              item.type !== 'assistant_message' &&
+              item.type !== 'user_message' &&
+              !active.emittedItems.has(item.id)
+            ) {
+              if (['completed', 'failed', 'cancelled', 'interrupted'].includes(item.status))
+                yield* emitItem(active, item)
+              else active.items.set(item.id, item)
+            }
             if (
               item.type !== 'user_input_request' &&
               !(item.type === 'approval_request' && item.requestKind === 'mcp-elicitation')
@@ -198,7 +242,9 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
           }
           case 'provider_turn.updated': {
             const turn = event.providerTurn
-            if (!active || turn.runAttemptId !== active.attemptId) return
+            if (!active || active.ended || turn.runAttemptId !== active.attemptId) return
+            if (turn.tokenUsage !== undefined)
+              active.tokenUsage = Schema.decodeUnknownSync(Schema.Json)(turn.tokenUsage)
             if (turn.status !== 'running') return
             active.providerTurnId = turn.id
             yield* Deferred.succeed(active.started, turn.id).pipe(Effect.ignore)
@@ -233,11 +279,13 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
           case 'turn.terminal': {
             if (!active || active.ended || event.runOrdinal !== active.ordinal) return
             active.ended = true
+            yield* flushItems(active)
             if (event.status === 'failed') {
               yield* emit({
                 ...identity(active),
                 type: 'end',
                 outcome: 'failed',
+                ...(active.tokenUsage === undefined ? {} : { tokenUsage: active.tokenUsage }),
                 reason:
                   options.turnFailure?.(event.failure) ?? `Send your message again or check ${label} on this device.`,
               })
@@ -247,6 +295,7 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
               ...identity(active),
               type: 'end',
               outcome: event.status === 'completed' ? 'completed' : 'cancelled',
+              ...(active.tokenUsage === undefined ? {} : { tokenUsage: active.tokenUsage }),
             })
             return
           }
@@ -256,7 +305,7 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
       })
     const consumeEvents = (runtime: ProviderAdapter.ProviderAdapterV2SessionRuntime) =>
       runtime.events.pipe(
-        Stream.runForEach(consume),
+        Stream.runForEach((event) => eventLock.withPermit(consume(event))),
         Effect.catchCause(() =>
           stopped || closed ? Effect.void : emit({ type: 'uncertain', reason: `${label} session event stream failed` }),
         ),
@@ -474,7 +523,16 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
           const attemptId = idAllocator.derive.runAttempt({ runId, attemptOrdinal: 1 })
           const rootNodeId = idAllocator.derive.rootNode({ runId })
           const started = yield* Deferred.make<ProviderTurnId>()
-          const turn: ActiveTurn = { messageId: message.id, runId, attemptId, ordinal, started, ended: false }
+          const turn: ActiveTurn = {
+            messageId: message.id,
+            runId,
+            attemptId,
+            ordinal,
+            started,
+            ended: false,
+            items: new Map(),
+            emittedItems: new Set(),
+          }
           active = turn
           streams.clear()
           replied.clear()
@@ -567,8 +625,16 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
           ),
         ),
       ),
+      flushEvents: (id) =>
+        eventLock.withPermit(
+          Effect.gen(function* () {
+            if (active && !active.ended) yield* flushItems(active)
+            yield* emit({ type: 'barrier', id })
+          }),
+        ),
       abort: Effect.gen(function* () {
         stopped = true
+        yield* eventLock.withPermit(Effect.suspend(() => (active && !active.ended ? flushItems(active) : Effect.void)))
         yield* Effect.forEach(requests.values(), (request) => answer(request), {
           concurrency: 'unbounded',
           discard: true,
@@ -590,6 +656,7 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
           .pipe(Effect.timeout('30 seconds'), Effect.ignore)
       }),
       close: Effect.gen(function* () {
+        yield* eventLock.withPermit(Effect.suspend(() => (active && !active.ended ? flushItems(active) : Effect.void)))
         closed = true
         stopped = true
         yield* Effect.forEach(requests.values(), (request) => answer(request), {

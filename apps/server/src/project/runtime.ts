@@ -406,6 +406,12 @@ const schemas = {
     through_turn: Schema.optionalKey(P.NonNegativeInteger),
     ...pageFields,
   }),
+  'threads.trace': Schema.Struct({
+    thread_id: P.UUID,
+    worker_turn_seq: P.PositiveInteger,
+    cursor: Schema.optionalKey(P.Text),
+    ...pageFields,
+  }),
   'nodes.exec': Schema.Struct({
     node_id: P.UUID,
     command: P.MessageContent,
@@ -422,9 +428,13 @@ const schemas = {
   }),
 }
 
-const page = (value: unknown, options: { offset?: number; max_bytes?: number }) =>
+const page = (
+  value: unknown,
+  options: { offset?: number; max_bytes?: number },
+  pagination: { page_cursor?: string } = {},
+) =>
   Effect.try({
-    try: () => projectToolJSONPage(value, options),
+    try: () => projectToolJSONPage(value, options, pagination),
     catch: (error) => (error instanceof AppError ? error : new AppError(503, 'invalid_tool_output')),
   })
 const source = (c: ProjectToolContext): ProjectThreadSource => ({
@@ -572,6 +582,16 @@ const executeBusiness = Effect.fnUntraced(function* (
         ...(a.through_turn !== undefined ? { throughTurn: a.through_turn } : {}),
       })
       return { value: yield* page(history, a) }
+    }
+    case 'threads.trace': {
+      const a = yield* strictDecode(schemas[name], args)
+      if ((a.offset ?? 0) > 0 && a.cursor === undefined)
+        return yield* Effect.fail(new AppError(422, 'snapshot_cursor_required'))
+      const result = yield* threads.trace(c, a.thread_id, {
+        worker_turn_seq: a.worker_turn_seq,
+        ...(a.cursor !== undefined ? { cursor: a.cursor } : {}),
+      })
+      return { value: yield* page(result, a, { page_cursor: result.page_cursor }) }
     }
     case 'nodes.exec': {
       const a = yield* strictDecode(schemas[name], args)

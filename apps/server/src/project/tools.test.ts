@@ -1,5 +1,5 @@
 import { expect, it } from 'vite-plus/test'
-import { projectToolJSONPage, boundedBase64 } from './tools.ts'
+import { projectToolJSONPage, boundedBase64, resultBytes } from './tools.ts'
 
 it('preserves binary output encoding when reducing a shell tool result', () => {
   const bytes = Buffer.alloc(32768)
@@ -10,6 +10,17 @@ it('preserves binary output encoding when reducing a shell tool result', () => {
   expect(output.length).toBeLessThanOrEqual(20000)
   expect(retained.subarray(0, 256)).toEqual(bytes.subarray(0, 256))
   expect(retained.subarray(-256)).toEqual(bytes.subarray(-256))
+})
+
+it('includes pagination metadata in the tool result budget', () => {
+  const value = { content: 'x'.repeat(60000) }
+  const pageCursor = '汉"\\\n'.repeat(1000)
+  const plain = projectToolJSONPage(value, { max_bytes: 32768 })
+  const wrapped = projectToolJSONPage(value, { max_bytes: 32768 }, { page_cursor: pageCursor })
+  expect(wrapped.page_cursor).toBe(pageCursor)
+  expect(wrapped.text.length).toBeLessThan(plain.text.length)
+  expect(resultBytes(wrapped)).toBeLessThanOrEqual(30000)
+  expect(() => projectToolJSONPage({}, {}, { page_cursor: 'x'.repeat(32768) })).toThrow('max_bytes_too_small')
 })
 
 it('chunks escaped UTF-8 JSON below tool result capacity without breaking characters', () => {

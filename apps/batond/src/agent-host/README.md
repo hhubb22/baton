@@ -35,12 +35,23 @@ host 进程的环境变量只包含系统必需项（`PATH`、`HOME`、`USER`、
 | `send` | 排队消息调用 `startTurn`；Pi、Codex 的插入调用 `steerTurn`，成功表示原生接受；Cursor、Kiro 不支持插入 |
 | `sent` | 只读核对，由独立 host 进程执行 |
 | `answer` | 将显式答案或取消返回原提问请求 |
-| `events` | 订阅 reply、end、question、question.resolved、uncertain 和合并后的文本增量 |
+| `events` | 订阅 item、reply、end、question、question.resolved、uncertain、barrier 和合并后的文本增量 |
+| `flushEvents` | 补发当前 run 的未终态项，并在控制队列写入 barrier；Worker 持久处理此前事件后确认 barrier |
 | `abort`、`close` | 停止当前回合或关闭 host |
 
 普通请求共用七个额度，`abort` 和 `close` 单独一个额度。RPC 调用有 32 秒预算，adapter 内的原生调用预算是 30 秒。RPC 失败和 uncertain 事件只记录错误并通知 Worker；连接 Scope 由拥有者在清理时关闭，避免客户端 fiber 同步关闭其自身所在的 Scope。
 
-事件流带 host 本地 `generation` 和递增 `sequence`。Worker 在 generation 变化或序号不连续时报 `uncertain`，不会把重连前后的帧拼在一起。文本增量进入 Worker 侧的有界环形缓冲，控制事件进入有界队列，反压时不丢控制事件。
+事件流带 host 本地 `generation` 和递增 `sequence`。Worker 在 generation 变化或序号不连续时报 `uncertain`，不会把重连前后的帧拼在一起。文本增量进入 Worker 侧的有界环形缓冲，控制事件进入有界队列，反压时不丢控制事件。停止和 unknown 清理任务在 jobs 队列外等待 `flushEvents` 的 barrier，Worker 按序处理此前事件后确认，之后才回收执行实例并写结束报告；屏障确认失败会冻结 Worker。进入 unknown 时，已接受的活动 Turn 保持未结束，只继续处理原生会话、消息和执行身份匹配的 item、reply，并暂存 end 的 tokenUsage。清理完成后依次保存 `turn.ended` 和 `thread.unknown`，清理期间到达的原生 end 不提前标记 Turn 结束，也不恢复 idle。待报告的 unknown 原因和 tokenUsage 保存在账本；Worker 重开并确认旧进程树已回收后，仍保持 unknown，补保存带 tokenUsage 的 `turn.ended` 和 `thread.unknown`，清除待报告原因。尚未取得接受证据的事件保留在输入缓冲，核对接受身份后，在结束报告之前持久处理。
+
+## 过程记录
+
+通用 driver 只接收当前 run 的 `turn_item.updated`。每项首次进入 completed、failed、cancelled 或 interrupted 时发出一次 `item`；后续更新忽略。尚未终态的项只保留最新版本，回合结束、停止或关闭时按 ordinal 补发，保留最后状态并排在 `end` 之前。assistant_message 和 user_message 不生成过程项。用户问题和 MCP elicitation 保留原问题流程，同时作为过程项保存。driver 记录本轮最后一次提供的 `provider_turn.updated.tokenUsage`，由 `end.tokenUsage` 传给 Worker，作为 `turn.ended.token_usage` 原样持久化。
+
+Worker 按 Turn 和原始项 ID 去重。原始 ID 独立保存在 outbox，ACK 和账本重开后继续保留。顶层 id、parent_id 超过 512 字节、含无效展示字符或占用映射前缀时稳定映射为 `baton:item:sha256:…`；其他顶层展示文字替换 NUL 和孤立代理，metadata 标记 `item_text_sanitized`。嵌套 data 的字符串和对象键保留原文，JSON 序列化负责转义。
+
+整项 `JSON.stringify(item)` 最多 192 KiB，包含重复的索引字段与 data。超限时保留原 data JSON 到设备的 `full-output/`，反复将最长字符串缩成首尾两段，按 JSON 编码字节计量并保留完整字符。字符串裁剪最多 256 次；结构本身仍超限或已没有可裁剪字符串时，将摘要 data 置为 null，并标记 `metadata.item_structure_omitted:true`。顶层 title 同样计入预算，完整报告另有 224 KiB 上限。`truncated` 表示容量裁剪，`original_bytes` 是原 data JSON 的 UTF-8 字节数，字符展示映射本身不改变截断标记。全文写入成功后，摘要与 `turn.item` outbox 在同一账本事务保存。
+
+shell 独立保留最多 192 KiB 的首尾输出作为 command_execution 项，回复沿用首尾合计 32 KiB 的摘要。完成记录同时保存两份有界输出和命令，先发 item 再发 reply；Worker 将项 ID 固定为 `shell:<worker_turn_seq>`。停止和完成记录恢复沿用同一顺序及去重身份。Worker 继续按整项 192 KiB 预算裁剪过程项，全文引用沿用 shell 已保存的 stdout/stderr 原始字节；文本以 UTF-8 保存，二进制输出用 base64 表示。shell 在读取输出时累计完整 JSON 编码字节数，`original_bytes` 包含未裁剪输出在 data 中的编码大小，`metadata.shell_output_bytes` 另记原始输出的真实字节数。
 
 `driver.ts` 的 `makeProviderHostDriver` 统一处理会话映射、事件归属、迟到事件过滤和发送确认；各 Agent 只构造 adapter、配置策略和只读探测。`runtime_request.updated` 中的 `command`、`file-read`、`file-change`、`permission` 当次 `accept`；`user_input`、`mcp-elicitation` 与 `turn_item.updated` 里的问题按请求 ID 关联，通过 host 事件、Worker 账本和中心送到网页等待回答。网页回答经持久 `answer` 命令和 host RPC 返回原请求；Codex MCP 请求保留上游的确认语义，普通问题传入用户答案。停止或关闭后的 pending 请求取消，其他请求取消，不写永久授权。
 

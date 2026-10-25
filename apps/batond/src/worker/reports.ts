@@ -1,4 +1,5 @@
 import type { ThreadReport, WorkerIPCMessage } from '@baton/protocol'
+import { boundItemReport } from './items.ts'
 
 const reportBudget = 120 * 1024
 const replyHalfBudget = 16 * 1024
@@ -33,6 +34,7 @@ export const boundReason = (reason: string) => fit(reason, (value) => Buffer.byt
 
 /** Report identity and sequence stay stable when text is shortened for IPC delivery. */
 export const boundReport = (report: ThreadReport): ThreadReport => {
+  if (report.kind === 'turn.item') return boundItemReport(report)
   const bounded = {
     ...report,
     ...(report.reason === undefined ? {} : { reason: boundReason(report.reason) }),

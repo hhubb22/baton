@@ -2,7 +2,7 @@ import * as stylex from '@stylexjs/stylex'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { activityLine, baseName, clockTime, fileSize, runTimer } from '../data/derive'
 import { useLiveOutput, useTrace } from '../data/queries'
-import type { Attachment, Device, Message, Thread, TraceStep } from '../data/types'
+import type { Attachment, Device, Message, Thread } from '../data/types'
 import { fonts } from '../theme/base.stylex'
 import { text } from '../theme/text'
 import { colors, radius, space } from '../theme/tokens.stylex'
@@ -10,6 +10,7 @@ import { Button, focusRing } from '../ui/Button'
 import { Icon } from '../ui/Icon'
 import { StatusDot } from '../ui/Status'
 import { copyText } from './SelectionMenu'
+import { ActivityStep } from './ActivityStep'
 
 const styles = stylex.create({
   toggle: {
@@ -33,20 +34,6 @@ const styles = stylex.create({
     borderLeftWidth: '2px',
     borderLeftStyle: 'solid',
     borderLeftColor: colors.borderSoft,
-  },
-  step: { display: 'flex', flexDirection: 'column', gap: space.xs, alignSelf: 'stretch', minWidth: 0 },
-  stepHead: { display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, color: colors.muted },
-  output: {
-    margin: 0,
-    maxHeight: '200px',
-    overflow: 'auto',
-    padding: space.sm,
-    borderRadius: radius.sm,
-    backgroundColor: colors.subtle,
-    fontFamily: fonts.mono,
-    fontSize: '12px',
-    lineHeight: 1.55,
-    whiteSpace: 'pre-wrap',
   },
   muted: { color: colors.muted },
   info: { color: colors.info },
@@ -107,7 +94,7 @@ const styles = stylex.create({
   liveFoot: { display: 'inline-flex', alignItems: 'center', gap: '6px', color: colors.faint },
 })
 
-// 回复上方的一行过程摘要，展开后从设备读取已保存的过程。
+// 回复上方的一行过程摘要，展开后分页读取中心保存的步骤。
 export function ActivityTrace({
   message,
   device,
@@ -119,36 +106,58 @@ export function ActivityTrace({
 }) {
   const [open, setOpen] = useState(false)
   const trace = useTrace(message.id, open)
-  const name = device?.name ?? 'This device'
-  if (!message.activity && !command) return null
+  if (message.traceItemCount === 0 || (!message.traceItemCount && !message.activity && !command)) return null
 
   let content: ReactNode
   if (trace.isPending) {
-    content = <p {...stylex.props(text.small, styles.muted)}>Loading activity from {name}…</p>
-  } else if (trace.isError) {
+    content = <p {...stylex.props(text.small, styles.muted)}>Loading activity…</p>
+  } else if (trace.isError && !trace.data) {
     content = (
       <>
-        <p {...stylex.props(text.small, styles.muted)}>{name} did not return this activity. Retry to read it again.</p>
+        <p role="status" {...stylex.props(text.small, styles.muted)}>
+          Could not load this activity. Try again.
+        </p>
         <Button small onClick={() => void trace.refetch()}>
           Retry
         </Button>
       </>
     )
-  } else if (trace.data.state === 'unavailable') {
-    content = (
-      <p {...stylex.props(text.small, styles.muted)}>
-        {trace.data.reason === 'offline'
-          ? `${name} is offline · activity unavailable`
-          : 'Past chat history was deleted on this computer'}
-      </p>
-    )
   } else {
-    content = trace.data.steps.map((step, index) => (
-      <div key={index} {...stylex.props(styles.step)}>
-        <Step step={step} />
-        {step.truncated && <span {...stylex.props(text.caption, styles.muted)}>Activity truncated</span>}
-      </div>
-    ))
+    const pages = trace.data?.pages ?? []
+    const steps = pages.flatMap((page) => (page.state === 'ready' ? page.steps : []))
+    content = (
+      <>
+        {steps.map((step) => (
+          <ActivityStep key={step.item_id} step={step} threadId={message.threadId} device={device} />
+        ))}
+        {steps.length === 0 && <p {...stylex.props(text.small, styles.muted)}>No saved activity for this reply.</p>}
+        {trace.isError && (
+          <p role="status" {...stylex.props(text.small, styles.muted)}>
+            Could not load {trace.isFetchNextPageError ? 'more activity' : 'this activity'}. Saved steps are still
+            shown.
+          </p>
+        )}
+        {trace.hasNextPage && (
+          <Button
+            small
+            onClick={() => {
+              if (!trace.isFetching) void trace.fetchNextPage()
+            }}
+          >
+            {trace.isFetchingNextPage
+              ? 'Loading more…'
+              : trace.isFetchNextPageError
+                ? 'Retry loading more'
+                : 'Load more activity'}
+          </Button>
+        )}
+        {trace.isError && !trace.isFetchNextPageError && (
+          <Button small onClick={() => void trace.refetch()}>
+            Retry
+          </Button>
+        )}
+      </>
+    )
   }
 
   return (
@@ -160,46 +169,15 @@ export function ActivityTrace({
         {...stylex.props(text.small, styles.toggle, focusRing.ring)}
       >
         <Icon name={open ? 'chevron-down' : 'chevron-right'} size={12} />
-        {message.activity ? activityLine(message.activity) : 'Command output'}
+        {message.activity
+          ? activityLine(message.activity)
+          : command
+            ? 'Command output'
+            : `Activity · ${message.traceItemCount} ${message.traceItemCount === 1 ? 'step' : 'steps'}`}
       </button>
       {open && <div {...stylex.props(styles.steps)}>{content}</div>}
     </div>
   )
-}
-
-const fileActions = { wrote: 'Wrote', edited: 'Edited', deleted: 'Deleted' }
-
-function Step({ step }: { step: TraceStep }) {
-  switch (step.kind) {
-    case 'command':
-      return (
-        <div {...stylex.props(styles.step)}>
-          <div {...stylex.props(styles.stepHead)}>
-            <Icon name="terminal" size={12} />
-            <code {...stylex.props(text.mono, text.truncate)}>{step.command}</code>
-          </div>
-          {step.output && <pre {...stylex.props(styles.output)}>{step.output}</pre>}
-        </div>
-      )
-    case 'tool':
-      return (
-        <div {...stylex.props(text.small, styles.stepHead)}>
-          <Icon name="settings" size={12} />
-          <span>
-            {step.name} · {step.detail}
-          </span>
-        </div>
-      )
-    case 'file':
-      return (
-        <div {...stylex.props(text.small, styles.stepHead)}>
-          <Icon name="file" size={12} />
-          <span title={step.path}>
-            {fileActions[step.action]} {baseName(step.path)}
-          </span>
-        </div>
-      )
-  }
 }
 
 // 回复附带的文件和提交。文件能否打开看它所在设备的状态；提交的完整 SHA 可以复制。

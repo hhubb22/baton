@@ -220,7 +220,7 @@ export threadReply = frame {
 }
 
 // Turn activity trace: tool calls, commands, and file edits made by the Agent, using the same collapsed-by-default style as the main conversation.
-// Full trace stays on the device and loads on demand when expanded; notes when unavailable if the device is offline while Coordinator-saved replies remain readable
+// Saved steps load from the account when expanded. Truncated steps show the gap and original size; their full output is read from the device.
 export threadTrace = frame : conv.activityLog {
   title: "Thread trace / Collapsed",
   top: 760px,
@@ -231,7 +231,7 @@ export threadTrace = frame : conv.activityLog {
       overrides: [
         insert(
           unavailable,
-          after = conv.activityLog.logBody.logSteps.stepMemory
+          after = conv.activityLog.logBody.logSteps.stepCommand
         )
       ],
 
@@ -281,8 +281,9 @@ export threadTrace = frame : conv.activityLog {
   }
 
   unavailable = text : t.small {
+    width: 100%,
     display: .none,
-    contents: "Windows Desktop is offline · activity unavailable",
+    contents: "Step truncated · original size 320 KB\nFull output is on Windows Desktop, which is offline",
     fill[0].color: c.colors.faint
   }
 }
@@ -303,11 +304,36 @@ export threadTraceOpen = frame : threadTrace {
   }
 }
 
-// Offline device: trace cannot be fetched from the device and explains why
+// Saved steps remain readable offline. The truncated command's full output is on the device.
 @variant
 export threadTraceOffline = frame : threadTraceOpen {
-  title: "Thread trace / Offline device",
+  title: "Thread trace / Truncated step on offline device",
+  left: -680px,
   top: 1100px,
+
+  logBody {
+    logSteps {
+      stepCommand {
+        stepOutput {
+          stepResult {
+            contents: "FAIL src/reconnect.test.ts > reconnects after sleep"
+          }
+        }
+      }
+
+      unavailable {
+        display: .visible
+      }
+    }
+  }
+}
+
+// No saved process steps are available for this reply.
+@variant
+export threadTraceMissing = frame : threadTraceOffline {
+  title: "Thread trace / No saved activity",
+  left: 0px,
+  top: 1180px,
 
   logBody {
     logSteps {
@@ -320,22 +346,7 @@ export threadTraceOffline = frame : threadTraceOpen {
       }
 
       unavailable {
-        display: .visible
-      }
-    }
-  }
-}
-
-// Local session history deleted on the device: trace is unavailable while Coordinator-saved replies and attachments remain intact
-@variant
-export threadTraceMissing = frame : threadTraceOffline {
-  title: "Thread trace / History missing",
-  top: 1180px,
-
-  logBody {
-    logSteps {
-      unavailable {
-        contents: "Thread history was deleted on Windows Desktop"
+        contents: "No saved activity for this reply."
       }
     }
   }
@@ -1157,7 +1168,7 @@ export threadDetailUnresumable = frame : threadDetailStopped {
     }
 
     reply1 {
-      @with-variant(threadTraceMissing)
+      @with-variant(threadTraceOpen)
       trace {}
     }
   }
@@ -1250,16 +1261,16 @@ export threadDetailFailed = frame : threadDetail {
 }
 
 @variant
-export threadTraceLoading = frame : threadTraceOffline {
+export threadTraceLoading = frame : threadTraceMissing {
   title: "Thread trace / Loading",
-  caption: "Read full activity from the device. Saved replies stay visible.",
+  caption: "Saved activity loads independently of the device connection.",
   left: 0px,
   top: 2200px,
 
   logBody {
     logSteps {
       unavailable {
-        contents: "Loading activity from Windows Desktop…"
+        contents: "Loading activity…"
       }
     }
   }
@@ -1278,7 +1289,7 @@ export threadTraceFailed = frame : threadTraceLoading {
 
       unavailable {
         width: 100%,
-        contents: "Could not read this activity from Windows Desktop."
+        contents: "Could not load this activity. Try again."
       }
     }
   }
