@@ -320,18 +320,9 @@ export class Gateway {
         rate = 0
       }
       if (++rate > 64 || queued >= 32) return socket.close(1013, 'control_limit')
-      queued++
-      const current = connection
-      current.receivedBytes += Buffer.byteLength(webSocketText(data))
-      current.pendingReads = queued
-      chain = chain
-        .then(async () => {
-          if (socket.readyState !== WebSocket.OPEN || this.nodes.get(current.source.node_id) !== current) return
-          if (frame.kind === 'heartbeat') {
-            await this.handlers.heartbeat(current.source)
-            current.lastContact = Date.now()
-            return
-          }
+      let message: { envelope: Envelope; body: typeof NodeToControlBody.Type } | undefined
+      try {
+        if (frame.kind !== 'heartbeat') {
           if (frame.kind !== 'envelope') throw new AppError(400, 'invalid_frame')
           const envelope = Schema.decodeUnknownSync(Envelope)(frame.envelope)
           if (envelope.route.to !== 'control') throw new AppError(403, 'route_forbidden')
@@ -351,6 +342,26 @@ export class Gateway {
             ].includes(body.type)
           )
             throw new AppError(400, 'unsupported_message')
+          message = { envelope, body }
+        }
+      } catch (error) {
+        if (error instanceof AppError && error.status >= 400 && error.status < 500) socket.close(1008, error.code)
+        else socket.close(1011, 'control_unavailable')
+        return
+      }
+      queued++
+      const current = connection
+      current.lastContact = Date.now()
+      current.receivedBytes += Buffer.byteLength(webSocketText(data))
+      current.pendingReads = queued
+      chain = chain
+        .then(async () => {
+          if (socket.readyState !== WebSocket.OPEN || this.nodes.get(current.source.node_id) !== current) return
+          if (!message) {
+            await this.handlers.heartbeat(current.source)
+            return
+          }
+          const { envelope, body } = message
           // Source is always obtained from the authenticated connection.
           const authenticatedEnvelope = { ...envelope, source: { kind: 'node' as const, ...current.source } }
           if (
@@ -386,7 +397,6 @@ export class Gateway {
                 ['node.sync', 'node.runtime_report', 'thread.command_result', 'thread.report'].includes(body.type)
               ) {
                 // The node retries durable work with its original identity until it receives an acknowledgement.
-                current.lastContact = Date.now()
                 return
               }
               throw error
@@ -394,7 +404,6 @@ export class Gateway {
             if (body.type === 'node.sync' && result?.ok === true) current.synced = true
             if (result && !this.reply(current, randomUUID(), result, envelope.message_id)) socket.terminate()
           }
-          current.lastContact = Date.now()
         })
         .catch((error: unknown) => {
           if (error instanceof AppError && error.status >= 400 && error.status < 500) socket.close(1008, error.code)

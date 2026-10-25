@@ -60,9 +60,17 @@ export function controlConfiguration(env: Environment = process.env) {
     schedule: budget('schedule'),
     maintenance: budget('maintenance'),
   }
+  const readConcurrency = count(env, 'BATON_RPC_READ_CONCURRENCY', 4, 23)
+  const managementConcurrency = count(env, 'BATON_RPC_MANAGEMENT_CONCURRENCY', 2, 23)
+  if (readConcurrency + managementConcurrency > 24)
+    throw new AppError(
+      400,
+      'invalid_configuration',
+      'BATON_RPC_READ_CONCURRENCY 与 BATON_RPC_MANAGEMENT_CONCURRENCY 总和不能超过 24',
+    )
   const rpc: NonNullable<GatewayOptions['rpc']> = {
-    readConcurrency: count(env, 'BATON_RPC_READ_CONCURRENCY', 4, 64),
-    managementConcurrency: count(env, 'BATON_RPC_MANAGEMENT_CONCURRENCY', 2, 64),
+    readConcurrency,
+    managementConcurrency,
     maxQueued: count(env, 'BATON_RPC_MAX_QUEUED', 8, 128),
     queueMs: duration('BATON_RPC_QUEUE_TIMEOUT', 2000, 100, 10_000, env),
     timeouts: {

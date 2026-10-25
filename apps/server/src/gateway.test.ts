@@ -198,6 +198,54 @@ test('disconnect retirement retries the same source after a transient failure', 
   expect(attempts).toHaveLength(2)
 })
 
+test('queued heartbeats keep a node connected during a slow handler and still validate when processed', async () => {
+  vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] })
+  const entered = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  const heartbeat = vi.fn(async () => undefined)
+  const f = await fixture({
+    heartbeat,
+    handle: async (_source, input) => {
+      const body = Schema.decodeUnknownSync(Schema.Struct({ type: Schema.String }))(input.body)
+      if (body.type === 'thread.report') {
+        entered.resolve()
+        await release.promise
+        return undefined
+      }
+      return { type: 'node.sync_result', ok: true }
+    },
+  })
+  cleanups.push(async () => {
+    release.resolve()
+  })
+  const { ws } = await f.connect()
+  ws.send(
+    JSON.stringify(
+      envelope({
+        type: 'thread.report',
+        thread_id: randomUUID(),
+        event_id: randomUUID(),
+        worker_seq: 1,
+        kind: 'thread.opened',
+      }),
+    ),
+  )
+  await entered.promise
+  for (let index = 0; index < 12; index++) {
+    await vi.advanceTimersByTimeAsync(10_000)
+    const bytes = f.gateway.diagnostics().received_bytes
+    ws.send(JSON.stringify({ kind: 'heartbeat' }))
+    await expect.poll(() => f.gateway.diagnostics().received_bytes).toBeGreaterThan(bytes)
+    expect(ws.readyState).toBe(WebSocket.OPEN)
+  }
+  expect(heartbeat).not.toHaveBeenCalled()
+  release.resolve()
+  await expect.poll(() => heartbeat.mock.calls.length).toBe(12)
+  const closed = once(ws, 'close')
+  await vi.advanceTimersByTimeAsync(30_100)
+  await closed
+})
+
 test('RPC checks current connection, operation and Thread before accepting a response', async () => {
   const f = await fixture()
   const { ws, frames } = await f.connect()

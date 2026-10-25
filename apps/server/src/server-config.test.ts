@@ -33,9 +33,37 @@ test('configuration changes only the selected operation and RPC class', () => {
 })
 
 test.each([
+  [23, 1],
+  [1, 23],
+  [12, 12],
+])('accepts RPC concurrency %i/%i within the 24-request budget', (read, management) => {
+  expect(
+    controlConfiguration({
+      BATON_RPC_READ_CONCURRENCY: String(read),
+      BATON_RPC_MANAGEMENT_CONCURRENCY: String(management),
+    }).rpc,
+  ).toMatchObject({ readConcurrency: read, managementConcurrency: management })
+})
+
+test.each([
+  [23, 2],
+  [2, 23],
+  [13, 12],
+])('rejects RPC concurrency %i/%i that leaves fewer than eight control slots', (read, management) => {
+  expect(() =>
+    controlConfiguration({
+      BATON_RPC_READ_CONCURRENCY: String(read),
+      BATON_RPC_MANAGEMENT_CONCURRENCY: String(management),
+    }),
+  ).toThrow('总和不能超过 24')
+})
+
+test.each([
   ['BATON_CONTROL_REPORT_QUEUE_TIMEOUT', '0ms'],
   ['BATON_CONTROL_REPORT_EXECUTION_TIMEOUT', '121s'],
   ['BATON_RPC_READ_CONCURRENCY', '0'],
+  ['BATON_RPC_READ_CONCURRENCY', '24'],
+  ['BATON_RPC_MANAGEMENT_CONCURRENCY', '24'],
   ['BATON_RPC_MANAGEMENT_CONCURRENCY', '1.5'],
   ['BATON_RPC_MAX_QUEUED', '129'],
   ['BATON_RPC_QUEUE_TIMEOUT', '11s'],
