@@ -177,9 +177,7 @@ describe('Kiro Agent host', () => {
     { code: null, message: 'Could not fetch authentication documentation', authentication: false },
   ])('maps authentication failures safely: $message', ({ code, message, authentication }) => {
     expect(kiroTurnFailure({ class: 'provider_error', code, message, retryable: null })).toBe(
-      authentication
-        ? 'Kiro CLI 认证失败，请在设备上登录 Kiro CLI 后重试'
-        : 'Kiro 执行失败，请检查设备上的 Kiro CLI 状态后重试',
+      authentication ? 'Sign in to Kiro CLI and try again.' : 'Check Kiro CLI on this device and try again.',
     )
   })
 
@@ -233,8 +231,8 @@ describe('Kiro Agent host', () => {
         (await effect(worker.handle({ type: 'thread_pending', ok: true }))).thread_reports ?? []
       const expectedReason =
         scenario === 'authentication required'
-          ? 'Kiro CLI 认证失败，请在设备上登录 Kiro CLI 后重试'
-          : 'Kiro 执行失败，请检查设备上的 Kiro CLI 状态后重试'
+          ? 'Sign in to Kiro CLI and try again.'
+          : 'Check Kiro CLI on this device and try again.'
       let persistedReports: Awaited<ReturnType<typeof reports>> = []
       try {
         await effect(

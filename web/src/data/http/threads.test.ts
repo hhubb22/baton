@@ -262,7 +262,7 @@ describe('HTTP thread contracts', () => {
   it.each([false, true])(
     'shows a failed reply in its timeline position and keeps delivery confirmed (partial reply: %s)',
     async (partialReply) => {
-      const reason = 'The agent could not complete the request. Try again.'
+      const reason = 'Send your message again or check Codex on this device.'
       const events = [
         event(1, 'message.accepted', message({ client_message_id: messageId })),
         event(2, 'message.sent', { client_message_id: messageId, worker_turn_seq: 4 }),

@@ -47,7 +47,7 @@ Kiro 的版本命令使用 host 的 Node Effect spawner 和 process registrar，
 
 上游 `turn.terminal` 的 `failed` 映射为带原生会话、输入和执行身份的 `end` 事件，`outcome: failed`，并附安全原因。Worker 以现有 `turn.ended` 报告的 `reason: failed` 与 `content` 保存结果，输入保持 sent，队列继续执行；没有排队消息时 Thread 回到 idle，host 和原生会话保留。运行时请求无法应答、事件流断开、发送结果无法确认，以及 host 崩溃或连接丢失仍走 uncertain 路径。
 
-Kiro 通过通用 driver 的 `turnFailure` 回调将明确的回合认证失败映射为“Kiro CLI 认证失败，请在设备上登录 Kiro CLI 后重试”，其他 provider 错误使用固定执行失败文案；其他 Agent 使用固定的 `<Agent> could not complete this reply.`。这些原因不透传原始错误，不自动登录或重发输入。
+Kiro 通过通用 driver 的 `turnFailure` 回调将明确的回合认证失败映射为“Sign in to Kiro CLI and try again.”，其他 provider 错误使用“Check Kiro CLI on this device and try again.”；其他 Agent 使用固定的 `Send your message again or check <Agent> on this device.`。这些原因不透传原始错误，不自动登录或重发输入。
 
 ## 只读核对
 

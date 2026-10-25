@@ -341,7 +341,7 @@ test('kiro: provider_error ends the turn with a safe reason and the native threa
       },
     },
     async ({ database, threadId, firstMessageId, threadPath, request, view, timeline, replies }) => {
-      const safeReason = 'Kiro 执行失败，请检查设备上的 Kiro CLI 状态后重试'
+      const safeReason = 'Check Kiro CLI on this device and try again.'
       await expect
         .poll(async () => (await timeline()).filter((event) => event.kind === 'turn.ended'), { timeout: 15_000 })
         .toEqual([

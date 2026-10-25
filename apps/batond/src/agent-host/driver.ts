@@ -183,7 +183,8 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
                 ...identity(active),
                 type: 'end',
                 outcome: 'failed',
-                reason: options.turnFailure?.(event.failure) ?? `${label} could not complete this reply.`,
+                reason:
+                  options.turnFailure?.(event.failure) ?? `Send your message again or check ${label} on this device.`,
               })
               return
             }

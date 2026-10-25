@@ -7,7 +7,5 @@ export const kiroTurnFailure = (failure: OrchestrationV2ProviderFailure): string
     /\b(?:authentication (?:required|failed)|not authenticated|unauthenticated|not logged in|not signed in|credentials? (?:expired|invalid)|(?:expired|invalid) credentials?)\b/iu.test(
       failure.message,
     )
-  return authenticationFailure
-    ? 'Kiro CLI 认证失败，请在设备上登录 Kiro CLI 后重试'
-    : 'Kiro 执行失败，请检查设备上的 Kiro CLI 状态后重试'
+  return authenticationFailure ? 'Sign in to Kiro CLI and try again.' : 'Check Kiro CLI on this device and try again.'
 }

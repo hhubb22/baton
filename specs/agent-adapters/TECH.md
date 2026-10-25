@@ -222,7 +222,7 @@ Kiro 在上游 status 之外运行 `kiro-cli --version`。`src/agents/kiro/versi
 
 `hostedAgentReport` 对 Kiro 精确匹配 `darwin-arm64` 与版本 `2.32.0`，程序已安装且认证为 valid 或 unknown 时报告 `available`、`create: true`、`resume: true`。预发布和构建后缀保留在版本号中，不会匹配 `2.32.0`；其他系统或版本保持 `unverified` 并关闭 create/resume。认证 unknown 的 reason 为“Kiro 认证状态未知，首次执行时由原生程序检查”，明确 missing 则为 `unavailable` 并拒绝。网页按节点报告开放新建与恢复，不符合准入条件的新建请求返回 HTTP 422、`agent_unavailable`。本地 CLI 的 `open` 目前仅创建 Cursor Thread。
 
-Kiro 的 `turnFailure` 回调处理真实回合的 provider failure：明确认证失败映射为“Kiro CLI 认证失败，请在设备上登录 Kiro CLI 后重试”，其他 provider 错误映射为“Kiro 执行失败，请检查设备上的 Kiro CLI 状态后重试”。其他 Agent 的失败原因固定为 `<Agent> could not complete this reply.`。通用 driver 将安全原因随失败结束事件交给 Worker，保存到 `turn.ended.content`；不透传原始错误，不自动登录，不重发输入。
+Kiro 的 `turnFailure` 回调处理真实回合的 provider failure：明确认证失败映射为“Sign in to Kiro CLI and try again.”，其他 provider 错误映射为“Check Kiro CLI on this device and try again.”。其他 Agent 的失败原因固定为 `Send your message again or check <Agent> on this device.`。通用 driver 将安全原因随失败结束事件交给 Worker，保存到 `turn.ended.content`；不透传原始错误，不自动登录，不重发输入。
 
 节点处理 open 时读取已完成的探测快照，不在 5 秒命令上下文内同步探测；尚在探测时返回明确的不可用原因，探测完成后重新上报。
 

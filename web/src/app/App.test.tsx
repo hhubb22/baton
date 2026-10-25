@@ -817,7 +817,7 @@ describe('execution details', () => {
   })
 
   it('shows a failed reply in a project thread without changing reply numbering', async () => {
-    const reason = 'The agent could not complete the request. Try again.'
+    const reason = 'Send your message again or check Codex on this device.'
     renderApp('/projects/prj-baton?thread=thr-gateway', 'normal', (client) => {
       const read = client.listMessages.bind(client)
       client.listMessages = async (id) => {

@@ -46,7 +46,7 @@ Kiro 的独立版本命令限时 4 秒，stdout/stderr 各最多收集 4096 字�
 
 Kiro 从 PATH 查找 `kiro-cli`，沿用设备用户的原生认证配置；节点不提供 `BATON_KIRO_*` 或 `KIRO_HOME` 配置入口，profile 关联保存用户主目录 `homedir()`。
 
-认证失效、配置位置变化或账号不能访问原会话时，停止创建或恢复并说明原因，不能新建空会话来冒充恢复。Kiro 实际回合中发生明确认证失败时，向 Thread 返回固定文案“Kiro CLI 认证失败，请在设备上登录 Kiro CLI 后重试”；其他 provider 错误返回固定执行失败提示。Baton 不自动登录、不透传原始错误、不重发输入。
+认证失效、配置位置变化或账号不能访问原会话时，停止创建或恢复并说明原因，不能新建空会话来冒充恢复。Kiro 实际回合中发生明确认证失败时，向 Thread 返回固定文案“Sign in to Kiro CLI and try again.”；其他 provider 错误返回“Check Kiro CLI on this device and try again.”。Baton 不自动登录、不透传原始错误、不重发输入。
 
 ### R-04｜新建与恢复
 

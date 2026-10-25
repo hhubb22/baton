@@ -26,7 +26,7 @@ macOS arm64（`darwin-arm64`）与精确版本 `2.32.0` 的组合，在程序已
 
 网页按节点报告开放 Kiro 的新建与恢复；不满足准入条件的新建请求返回 HTTP 422、`code: "agent_unavailable"`。本地 CLI 的 `open` 目前仅创建 Cursor Thread。
 
-实际回合中的明确认证失败向 Thread 返回固定文案“Kiro CLI 认证失败，请在设备上登录 Kiro CLI 后重试”；其他 provider 错误返回“Kiro 执行失败，请检查设备上的 Kiro CLI 状态后重试”。原始错误不透传，Baton 不自动登录或重发输入。
+实际回合中的明确认证失败向 Thread 返回固定文案“Sign in to Kiro CLI and try again.”；其他 provider 错误返回“Check Kiro CLI on this device and try again.”。原始错误不透传，Baton 不自动登录或重发输入。
 
 ## 离线验证
 
