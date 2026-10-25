@@ -24,5 +24,5 @@ func TestInboxSourcesUniquenessAndEmployeeForeignKeys(t *testing.T) {
 	execFails(t, pool, "23514", `UPDATE attention_requests SET state='answered' WHERE id=$1`, duplicate)
 	execFails(t, pool, "23514", `UPDATE attention_requests SET thread_id=$1 WHERE id=$2`, testThread, duplicate)
 	execFails(t, pool, "23514", `UPDATE attention_requests SET condition_type='task_needs_verification' WHERE id=$1`, duplicate)
-	execFails(t, pool, "23514", `UPDATE attention_requests SET options='[1,2,3,4,5,6]' WHERE id=$1`, agent)
+	execFails(t, pool, "23514", `UPDATE attention_requests SET options=(SELECT jsonb_agg(i) FROM generate_series(1,51) i) WHERE id=$1`, agent)
 }

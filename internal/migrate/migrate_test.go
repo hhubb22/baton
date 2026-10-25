@@ -154,7 +154,7 @@ func TestBaselineCreatesCurrentSchemaAndStaysStable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(want, ",") != "0001_initial.sql,0002_ts_threads.sql,0003_thread_tracing.sql" {
+	if strings.Join(want, ",") != "0001_initial.sql,0002_ts_threads.sql,0003_thread_tracing.sql,0004_inbox_options.sql" {
 		t.Fatalf("嵌入迁移 = %v", want)
 	}
 	if got := migrationVersions(t, ctx, pool); strings.Join(got, ",") != strings.Join(want, ",") {
