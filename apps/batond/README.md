@@ -87,7 +87,9 @@ pnpm --filter @baton/batond dev stop --thread-id <UUID>
 pnpm --filter @baton/batond dev resume --thread-id <UUID>
 ```
 
-本地 CLI 的 `open` 目前仅创建 Cursor Thread，可用 `--model` 选择模型；未指定时使用 SDK 原生的 `default`。Thread 内固定该选择，轮间切换暂未开放。远程 Thread 中 Pi、Codex 支持向活动回合插入，Cursor、Kiro 只接受排队消息。
+本地 CLI 的 `open` 支持 `--agent cursor|pi|codex|kiro`，默认 Cursor；`--model` 接受显式模型 ID，未指定时使用该 Agent 上报的默认模型。`--execution-timeout-seconds` 设置每轮执行时限，默认 7200 秒，范围为 1～2147483647 秒。重试同一个 Thread 时沿用保存的 Agent、模型和时限，配置冲突会被拒绝。Thread 内模型固定，轮间切换暂未开放。
+
+`message --mode queue|steer` 默认排队；Pi、Codex 支持向活动回合插入，Cursor、Kiro 只接受排队消息，最终由 Worker 按实际能力和当前回合校验。排队消息可传 `--model`，Worker 按 Thread 的换模型能力校验；插入消息不能同时指定模型。
 
 Kiro 的 local settings 使用 `agentId: kiro`、`commandPath: kiro-cli`，从 PATH 查找程序；host 仅继承系统必要环境变量，不提供 `BATON_KIRO_*` 或 `KIRO_HOME` 入口。Kiro 模型取 `model ?? adapter_config.model ?? 'default'`；`default` 在原生 `session/new` 中省略，具体 ID 经 `_meta.kiro.modelId` 传递，整个 Thread 固定该选择。
 

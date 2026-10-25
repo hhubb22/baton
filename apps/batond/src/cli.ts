@@ -4,7 +4,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { Schema } from 'effect'
-import { WorkerOpen, type WorkerRequest } from '@baton/protocol'
+import { AgentType, PositiveInteger, WorkerOpen, type RuntimeAgent, type WorkerRequest } from '@baton/protocol'
 import { LocalWorkerHost, initializeWorkerDirectory } from './daemon/host.ts'
 import { readPrivateFile, writePrivateFileAtomic } from './platform/private.ts'
 
@@ -28,8 +28,8 @@ up 复用已有身份，首次运行登记主目录；--workspace 可额外登�
 
 本地 Thread：
 
-  open --cwd <目录> [--thread-id <UUID>] [--model <模型>]
-  message --thread-id <UUID> --text <正文> [--message-id <ID>]
+  open --cwd <目录> [--thread-id <UUID>] [--agent <cursor|pi|codex|kiro>] [--model <模型>] [--execution-timeout-seconds <秒>]
+  message --thread-id <UUID> --text <正文> [--message-id <ID>] [--mode <queue|steer>] [--model <模型>]
   status | stop | resume | reports --thread-id <UUID>
   command --thread-id <UUID> --command-id <UUID>
   withdraw --thread-id <UUID> --message-id <ID>
@@ -41,7 +41,13 @@ up 复用已有身份，首次运行登记主目录；--workspace 可额外登�
 执行命令支持 --command-id <UUID>；重试时使用同一个 ID。
 open 返回持久接收回执，实际结果通过 command 或 reports 查询。`
 
-export async function runLocalCLI(args: string[]): Promise<void> {
+export async function runLocalCLI(
+  args: string[],
+  dependencies: {
+    host?: Pick<LocalWorkerHost, 'request'>
+    probeAgent?: (agent: 'cursor' | 'pi' | 'codex' | 'kiro') => Promise<RuntimeAgent>
+  } = {},
+): Promise<void> {
   const action = args[0]
   if (!action || action === '--help' || action === 'help') {
     console.log(usage)
@@ -59,6 +65,9 @@ export async function runLocalCLI(args: string[]): Promise<void> {
       'after-worker-seq': { type: 'string' },
       cwd: { type: 'string' },
       model: { type: 'string' },
+      agent: { type: 'string' },
+      mode: { type: 'string' },
+      'execution-timeout-seconds': { type: 'string' },
       text: { type: 'string' },
     },
   })
@@ -73,15 +82,16 @@ export async function runLocalCLI(args: string[]): Promise<void> {
     console.log(JSON.stringify(await probeLocalCursor(), null, 2))
     return
   }
-  if (action === 'message' && values.model) throw new Error('Cursor 当前在新建 Thread 时选择模型')
+  const timeout =
+    values['execution-timeout-seconds'] === undefined
+      ? undefined
+      : Schema.decodeUnknownSync(PositiveInteger)(Number(values['execution-timeout-seconds']))
+  const mode = Schema.decodeUnknownSync(Schema.Literals(['queue', 'steer']))(values.mode ?? 'queue')
+  if (action === 'message' && mode === 'steer' && values.model) throw new Error('插入消息不能更换模型')
   const threadId = values['thread-id'] ?? (action === 'open' ? randomUUID() : requireValue('thread-id'))
-  const host = new LocalWorkerHost(dataDirectory)
+  const host = dependencies.host ?? new LocalWorkerHost(dataDirectory)
   let request: typeof WorkerRequest.Type
   if (action === 'open') {
-    const { probeLocalCursor } = await import('./agents/registry.ts')
-    const capability = await probeLocalCursor()
-    if (capability.status !== 'available' || !capability.capabilities.create)
-      throw new Error(capability.reason ?? 'Cursor 尚不可用')
     const paths = await initializeWorkerDirectory(dataDirectory, threadId)
     const savedPath = join(paths.threadDirectory, 'local-open.json')
     let saved: typeof WorkerOpen.Type | undefined
@@ -90,11 +100,21 @@ export async function runLocalCLI(args: string[]): Promise<void> {
     } catch (error) {
       if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error
     }
+    const agent = Schema.decodeUnknownSync(AgentType)(values.agent ?? saved?.open_config.agent_type ?? 'cursor')
+    if (agent === 'shell') throw new Error('本地 open 支持 cursor、pi、codex 和 kiro')
+    const capability = await (dependencies.probeAgent
+      ? dependencies.probeAgent(agent)
+      : import('./agents/registry.ts').then(({ agentRegistry }) => agentRegistry[agent].probe()))
+    if (capability.status !== 'available' || !capability.capabilities.create)
+      throw new Error(capability.reason ?? `${agent} 尚不可用`)
     const cwd = values.cwd ? await realpath(values.cwd) : saved?.open_config.working_directory
     if (!cwd) throw new Error('新建 Thread 需要 --cwd')
     if (
       saved &&
-      (saved.open_config.working_directory !== cwd || (values.model && saved.open_config.model !== values.model))
+      (saved.open_config.working_directory !== cwd ||
+        saved.open_config.agent_type !== agent ||
+        (timeout !== undefined && saved.open_config.execution_timeout_seconds !== timeout) ||
+        (values.model && saved.open_config.model !== values.model))
     )
       throw new Error('Thread 已有不同的新建配置')
     const storageGeneration = saved?.storage_generation ?? randomUUID()
@@ -110,9 +130,9 @@ export async function runLocalCLI(args: string[]): Promise<void> {
         thread_id: threadId,
         node_id: saved?.open_config.node_id ?? randomUUID(),
         storage_generation: storageGeneration,
-        agent_type: 'cursor',
+        agent_type: agent,
         working_directory: cwd,
-        execution_timeout_seconds: 7200,
+        execution_timeout_seconds: timeout ?? saved?.open_config.execution_timeout_seconds ?? 7200,
         ...(model ? { model } : {}),
         adapter_config: { state_path: join(paths.threadDirectory, 'native.json') },
       },
@@ -144,7 +164,8 @@ export async function runLocalCLI(args: string[]): Promise<void> {
         type: 'thread_message',
         client_message_id: values['message-id'] ?? randomUUID(),
         payload: requireValue('text'),
-        mode: 'queue',
+        mode,
+        ...(values.model ? { model: values.model } : {}),
       }
     else if (action === 'withdraw')
       request = { ...identity, type: 'thread_withdraw', client_message_id: requireValue('message-id') }
