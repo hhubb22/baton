@@ -278,13 +278,13 @@ const executeBusiness = Effect.fnUntraced(function* (
     case 'threads.withdraw': {
       const a = yield* strictDecode(schemas[name], args)
       yield* ownedThread(c, a.thread_id, true)
-      const t = yield* threads.withdraw(c.employeeId, a.thread_id, a.message_id)
+      const t = yield* threads.withdraw(c.employeeId, a.thread_id, a.message_id, source(c))
       return { value: { thread_id: t.id, message_id: a.message_id, status: t.status, read_tool: 'threads.get' } }
     }
     case 'threads.resume': {
       const a = yield* strictDecode(schemas[name], args)
       yield* ownedThread(c, a.thread_id, true)
-      const t = yield* threads.resume(c.employeeId, a.thread_id)
+      const t = yield* threads.resume(c.employeeId, a.thread_id, source(c))
       return { value: { thread_id: t.id, status: t.status, read_tool: 'threads.get' } }
     }
     case 'threads.stop':

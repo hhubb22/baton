@@ -174,17 +174,20 @@ const action = (
       return yield* readThread(employeeID, threadID)
     }),
   )
-export const withdraw = (employeeID: string, threadID: string, messageID: string) =>
-  action(employeeID, threadID, 'withdraw', messageID)
+export const withdraw = (employeeID: string, threadID: string, messageID: string, source?: ProjectThreadSource) =>
+  action(employeeID, threadID, 'withdraw', messageID, source)
 export const stop = (employeeID: string, threadID: string, source?: ProjectThreadSource) =>
   action(employeeID, threadID, 'stop', '', source)
 export const archive = (employeeID: string, threadID: string, source?: ProjectThreadSource) =>
   action(employeeID, threadID, 'archive', '', source)
-export const resume = (employeeID: string, threadID: string): DB<P.Thread> =>
+export const resume = (employeeID: string, threadID: string, source?: ProjectThreadSource): DB<P.Thread> =>
   transaction(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const t = yield* readThread(employeeID, threadID, true)
+      if (source && t.project_id !== source.projectId) return yield* Effect.fail(failure('not_found', 404))
+      const actor = source ? 'project_agent' : 'employee',
+        actorID = source?.agentId ?? employeeID
       if (t.status === 'archived' || t.archive_requested_at) return yield* Effect.fail(failure('thread_archived'))
       const pending =
         yield* sql`SELECT id FROM thread_outbox WHERE employee_id=${employeeID} AND thread_id=${threadID} AND (action='resume' OR (action='open' AND payload->>'retry_open'='true')) AND completed_at IS NULL`
@@ -193,7 +196,7 @@ export const resume = (employeeID: string, threadID: string): DB<P.Thread> =>
         const model = yield* admission(employeeID, t.node_id, t.agent_type, t.working_directory, t.model, 'create')
         yield* sql`UPDATE threads SET status='waiting_device',status_reason='',stop_requested_at=NULL,stop_confirmed_at=NULL WHERE id=${t.id}`
         yield* enqueue(t, 'open', { model, execution_timeout_seconds: t.execution_timeout_seconds, retry_open: true })
-        yield* audit(t, 'open.retry_requested', {})
+        yield* audit(t, 'open.retry_requested', {}, actor, actorID)
         yield* touch(t.id)
         return yield* readThread(employeeID, threadID)
       }
@@ -203,7 +206,7 @@ export const resume = (employeeID: string, threadID: string): DB<P.Thread> =>
       if (t.stop_requested_at && !t.stop_confirmed_at) return yield* Effect.fail(failure('stop_pending'))
       yield* admission(employeeID, t.node_id, t.agent_type, t.working_directory, '', 'resume')
       yield* enqueue(t, 'resume')
-      yield* audit(t, 'resume.requested', {})
+      yield* audit(t, 'resume.requested', {}, actor, actorID)
       yield* touch(threadID)
       return yield* readThread(employeeID, threadID)
     }),

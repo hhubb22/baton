@@ -8,6 +8,14 @@ import { withTestDatabase } from './testing/database.ts'
 import * as threads from './threads.ts'
 
 const threadResult = Schema.decodeUnknownSync(Schema.Struct({ thread_id: Schema.String }))
+const auditEvents = (threadId: string, kind: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    return yield* sql<{
+      actor: string
+      actor_id: string
+    }>`SELECT actor,actor_id FROM thread_events WHERE thread_id=${threadId} AND kind=${kind} ORDER BY id`
+  })
 
 it('withdraws only unsent messages in this Project and deduplicates concurrent requests', async () =>
   withTestDatabase(async (db) => {
@@ -44,6 +52,14 @@ it('withdraws only unsent messages in this Project and deduplicates concurrent r
     for (const result of await Promise.all([withdraw('withdraw-1'), withdraw('withdraw-2')]))
       expect(result).toMatchObject({ value: { thread_id: id, message_id: message.id, read_tool: 'threads.get' } })
     expect(await commands()).toEqual([{ payload: { client_message_id: message.client_message_id } }])
+    const projectActor = { actor: 'project_agent', actor_id: c.agentId }
+    expect(await db.run(auditEvents(id, 'withdraw.requested'))).toEqual([projectActor, projectActor])
+    await db.run(threads.withdraw(c.employeeId, id, message.id))
+    expect(await db.run(auditEvents(id, 'withdraw.requested'))).toEqual([
+      projectActor,
+      projectActor,
+      { actor: 'employee', actor_id: c.employeeId },
+    ])
 
     for (const status of ['queued', 'withdrawn', 'sent', 'unknown']) {
       await db.run(
@@ -126,6 +142,7 @@ it('resumes through the existing execution checks without duplicating commands o
     for (const result of await Promise.all([resume('resume-1'), resume('resume-2'), resume('resume-1')]))
       expect(result).toMatchObject({ value: { thread_id: id, status: 'stopped', read_tool: 'threads.get' } })
     expect(await outbox()).toEqual([...before, { action: 'resume' }])
+    expect(await db.run(auditEvents(id, 'resume.requested'))).toEqual([{ actor: 'project_agent', actor_id: c.agentId }])
     expect((await db.run(threads.view(c.employeeId, id))).resume_pending).toBe(true)
     await db.run(
       Effect.gen(function* () {
@@ -136,3 +153,41 @@ it('resumes through the existing execution checks without duplicating commands o
     expect(await resume('archiving')).toMatchObject({ isError: true, value: { code: 'thread_archived' } })
     expect(await outbox()).toEqual([...before, { action: 'resume' }])
   }))
+
+it.each(['employee', 'project_agent'])('records %s when resume retries opening a rejected Thread', (actor) =>
+  withTestDatabase(async (db) => {
+    const { context: c, nodeId, source } = await projectToolFixture(db)
+    const created = await db.run(
+      executeProjectTool(c, 'threads.create', {
+        node_id: nodeId,
+        agent_type: 'cursor',
+        working_directory: '/work/repo',
+        message: 'Do work',
+      }),
+    )
+    const id = threadResult(created.value).thread_id
+    const [opening] = await db.run(threads.claimCommands())
+    if (!opening) throw new Error('Expected open command')
+    await db.run(
+      threads.processReceipt(source, opening.message_id, {
+        type: 'thread.command_result',
+        thread_id: id,
+        ok: false,
+        code: 'agent_unavailable',
+      }),
+    )
+    expect((await db.run(threads.view(c.employeeId, id))).retry_open_allowed).toBe(true)
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (actor === 'project_agent')
+        expect(
+          await db.run(
+            executeProjectTool({ ...c, toolCallId: `retry-${attempt}` }, 'threads.resume', { thread_id: id }),
+          ),
+        ).not.toHaveProperty('isError', true)
+      else await db.run(threads.resume(c.employeeId, id))
+    }
+    expect(await db.run(auditEvents(id, 'open.retry_requested'))).toEqual([
+      { actor, actor_id: actor === 'project_agent' ? c.agentId : c.employeeId },
+    ])
+  }),
+)
