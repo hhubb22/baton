@@ -2,7 +2,7 @@ import { mkdir } from 'node:fs/promises'
 import { dirname, isAbsolute, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import { isSea } from 'node:sea'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Schema } from 'effect'
 import { hasCode } from './errors.ts'
 import { openPrivateFile, protectPrivateDirectory, writePrivateFileAtomic } from './private.ts'
@@ -24,7 +24,7 @@ export function privateFileHostEnvironment(runtimeEntry?: URL): NodeJS.ProcessEn
       file: process.execPath,
       args: [
         '--import',
-        require.resolve('tsx'),
+        pathToFileURL(require.resolve('tsx')).href,
         fileURLToPath(new URL('../../../apps/batond/src/platform/private-file-host-entry.ts', runtimeEntry)),
       ],
     }),

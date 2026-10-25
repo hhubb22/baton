@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto'
-import { chmod, mkdir, mkdtemp, rename, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { rename, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vite-plus/test'
 import type { SubscriptionLoginResponse } from '@baton/protocol'
-import { readPrivateFile } from '../platform/private.ts'
+import { ensurePrivateDirectory, readPrivateFile } from '../platform/private.ts'
+import { makePrivateTempDirectory } from '../testing/private.ts'
 import { acquireProcessLock } from '../platform/lock.ts'
 import { loadBrowseRoots } from '../daemon/roots.ts'
 import {
@@ -23,8 +23,7 @@ import { startProcessWatchdog } from '../platform/process.ts'
 const temporary: string[] = []
 const services: Array<{ close(): Promise<void> }> = []
 async function directory(): Promise<string> {
-  const path = await realpath(await mkdtemp(join(tmpdir(), 'baton-devices-')))
-  await chmod(path, 0o700)
+  const path = await realpath(await makePrivateTempDirectory('baton-devices-'))
   temporary.push(path)
   return path
 }
@@ -44,7 +43,7 @@ it('serializes canonical-root add/remove and preserves an explicitly empty confi
     root = await directory(),
     second = await directory()
   const alias = join(await directory(), 'alias')
-  await symlink(root, alias, 'dir')
+  await symlink(root, alias, process.platform === 'win32' ? 'junction' : 'dir')
   await Promise.all([
     updateBrowseRoots(data, 'add', root),
     updateBrowseRoots(data, 'add', alias),
@@ -57,7 +56,8 @@ it('serializes canonical-root add/remove and preserves an explicitly empty confi
   expect(await loadBrowseRoots(data)).toHaveLength(1)
   await updateBrowseRoots(data, 'remove', roots.find((entry) => entry.path === second)!.id)
   expect(await loadBrowseRoots(data)).toEqual([])
-  expect((await stat(join(data, 'browse-roots.json'))).mode & 0o777).toBe(0o600)
+  // Windows 的私有文件由父目录 ACL 保护，mode 不表示 DACL。
+  if (process.platform !== 'win32') expect((await stat(join(data, 'browse-roots.json'))).mode & 0o777).toBe(0o600)
 })
 
 it('keeps shell configuration under concurrent toggles and fails closed on invalid files or held locks', async () => {
@@ -83,15 +83,25 @@ describe('bounded authorized file previews', () => {
       outside = await directory()
     await writeFile(join(root, 'log.txt'), 'permitted log')
     await writeFile(join(outside, 'secret.txt'), 'outside secret')
-    await mkdir(join(root, 'nested'))
-    await symlink(join(root, 'log.txt'), join(root, 'inside-link'))
-    await symlink(outside, join(root, 'escape'), 'dir')
+    await ensurePrivateDirectory(join(root, 'nested'))
+    await writeFile(join(root, 'nested/log.txt'), 'permitted log')
+    await symlink(join(root, 'nested'), join(root, 'inside-link'), process.platform === 'win32' ? 'junction' : 'dir')
+    await symlink(outside, join(root, 'escape'), process.platform === 'win32' ? 'junction' : 'dir')
     const [registered] = await updateBrowseRoots(data, 'add', root)
-    expect(await browseFiles(data, request(registered!.id, 'inside-link'))).toMatchObject({
+    expect(await browseFiles(data, request(registered!.id, 'inside-link/log.txt'))).toMatchObject({
       ok: true,
       kind: 'file',
       content: 'permitted log',
     })
+    // Windows 的文件符号链接需要额外权限；目录 junction 在上面覆盖链接内读取。
+    if (process.platform !== 'win32') {
+      await symlink(join(root, 'log.txt'), join(root, 'inside-file-link'))
+      expect(await browseFiles(data, request(registered!.id, 'inside-file-link'))).toMatchObject({
+        ok: true,
+        kind: 'file',
+        content: 'permitted log',
+      })
+    }
     expect(await browseFiles(data, request(registered!.id, 'escape/secret.txt'))).toMatchObject({
       ok: false,
       code: 'path_escaped',
@@ -107,7 +117,7 @@ describe('bounded authorized file previews', () => {
     expect(await browseFiles(data, request(registered!.id, 'missing'))).toMatchObject({ ok: false, code: 'not_found' })
     await rename(root, `${root}-moved`)
     temporary.push(`${root}-moved`)
-    await symlink(outside, root, 'dir')
+    await symlink(outside, root, process.platform === 'win32' ? 'junction' : 'dir')
     expect(await browseFiles(data, request(registered!.id, 'secret.txt'))).toMatchObject({
       ok: false,
       code: 'path_escaped',
@@ -150,20 +160,26 @@ it('scans bounded local Git metadata and removes credentials from origins', asyn
     root = await directory(),
     outside = await directory()
   await updateBrowseRoots(data, 'add', root)
-  await mkdir(join(root, '.git'))
+  await ensurePrivateDirectory(join(root, '.git'))
   await writeFile(
     join(root, '.git/config'),
     '[remote "origin"]\n url = https://local-user:local-pass@git.example/team/repo.git?token=hidden#frag\n',
   )
-  await symlink(outside, join(root, 'outside'), 'dir')
+  await symlink(outside, join(root, 'outside'), process.platform === 'win32' ? 'junction' : 'dir')
   const report = await scanRuntimeRoots(data)
   expect(report.repos).toEqual([{ path: root, origin: 'git.example/team/repo' }])
   expect(JSON.stringify(report)).not.toMatch(/local-pass|hidden/)
   expect(sanitizeOrigin('git@git.example:team/repo.git')).toBe('git.example/team/repo')
   expect(sanitizeOrigin('file:///private/repo')).toBeUndefined()
-  await rm(join(root, '.git/config'))
-  await symlink(join(outside, 'config'), join(root, '.git/config'))
   await writeFile(join(outside, 'config'), '[remote "origin"]\nurl = https://secret.invalid/private\n')
+  // Windows 用目录 junction 构造越界元数据，避免文件符号链接所需的额外权限。
+  if (process.platform === 'win32') {
+    await rm(join(root, '.git'), { recursive: true })
+    await symlink(outside, join(root, '.git'), 'junction')
+  } else {
+    await rm(join(root, '.git/config'))
+    await symlink(join(outside, 'config'), join(root, '.git/config'))
+  }
   expect(await scanRuntimeRoots(data)).toMatchObject({ repos: [{ path: root }], truncated: true })
 })
 

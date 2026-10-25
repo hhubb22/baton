@@ -1,13 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import { chmod, mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { rm } from 'node:fs/promises'
 import { Effect } from 'effect'
 import { WebSocketServer } from 'ws'
 import type { NodeIdentity, RuntimeAgent } from '@baton/protocol'
 import { initializeBrowseRoots } from '../daemon/roots.ts'
 import { runDaemon, type RunDaemonOptions } from '../daemon/daemon.ts'
 import { connectWebSocket } from '../daemon/transport.ts'
+import { makePrivateTempDirectory } from './private.ts'
 
 const capability: RuntimeAgent = {
   agent_type: 'cursor',
@@ -18,8 +17,7 @@ const capability: RuntimeAgent = {
   capabilities: { create: true, queue: true, steer: false, stop: true, resume: true, switch_model: false },
 }
 export async function setupDaemon(cleanup: Array<() => Promise<unknown>>) {
-  const path = await mkdtemp(join(tmpdir(), 'bd-'))
-  await chmod(path, 0o700)
+  const path = await makePrivateTempDirectory('bd-')
   cleanup.push(() => rm(path, { recursive: true, force: true }))
   await initializeBrowseRoots(path, path)
   const id: NodeIdentity = {

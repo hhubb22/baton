@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
@@ -13,6 +12,7 @@ import { readProcessIdentity, systemCommand, type ProcessIdentity } from '../../
 import { reapProcessTree } from '../../platform/process-tree.ts'
 import { startProcessWatchdog } from '../../platform/watchdog.ts'
 import type { ProcessWatchdog } from '../../platform/process-types.ts'
+import { makePrivateTempDirectory } from '../../testing/private.ts'
 
 const source = fileURLToPath(new URL('../../testing/platform/kiro-agent-host-reclaim.mjs', import.meta.url))
 const stub = fileURLToPath(new URL('../../testing/platform/kiro-acp-reclaim-stub.mjs', import.meta.url))
@@ -38,9 +38,10 @@ const waitForExit = async (pids: readonly number[]) => {
   }
 }
 
+// This suite asserts POSIX process group IDs and group cleanup after Unix signals.
 describe.skipIf(process.platform === 'win32')('Kiro ACP local process reclamation', () => {
   beforeAll(async () => {
-    buildDirectory = await mkdtemp(join(tmpdir(), 'baton-kiro-reclaim-build-'))
+    buildDirectory = await makePrivateTempDirectory('baton-kiro-reclaim-build-')
     bundle = join(buildDirectory, 'kiro-host.mjs')
     await build({
       entryPoints: [source],
@@ -71,7 +72,7 @@ describe.skipIf(process.platform === 'win32')('Kiro ACP local process reclamatio
 
   for (const shutdown of ['SIGTERM', 'SIGKILL']) {
     it(`reclaims the ACP process and same-group grandchild after host ${shutdown}`, async () => {
-      const directory = await mkdtemp(join(tmpdir(), 'baton-kiro-reclaim-'))
+      const directory = await makePrivateTempDirectory('baton-kiro-reclaim-')
       directories.push(directory)
       let hostPid = 0
       const connection = await Effect.runPromise(

@@ -1,16 +1,17 @@
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { rm, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
 import { createRequire } from 'node:module'
 import { Effect, Scope, Exit } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import type { ProjectRunCommand, ProjectRuntimeRequest, ProjectRuntimeResult } from '@baton/protocol'
 import { readProcessIdentity, reapProcessTree } from '../platform/process.ts'
+import { writePrivateFileAtomic } from '../platform/private.ts'
+import { makePrivateTempDirectory } from '../testing/private.ts'
 import { makeProjectManager } from './index.ts'
 import { success } from './types.ts'
 import type { ProjectManagerOptions, ProjectTransport } from './types.ts'
@@ -26,7 +27,7 @@ const open = Effect.fnUntraced(function* (options: Partial<ProjectManagerOptions
   const dataDir =
     options.dataDir ??
     (yield* Effect.acquireRelease(
-      Effect.promise(() => mkdtemp(join(tmpdir(), 'baton-pa-'))),
+      Effect.promise(() => makePrivateTempDirectory('baton-pa-')),
       (directory) => Effect.promise(() => rm(directory, { recursive: true, force: true })),
     ))
   const scope = yield* Effect.acquireRelease(Scope.make(), (scope) => Scope.close(scope, Exit.void))
@@ -81,7 +82,15 @@ describe('Project Runtime host', () => {
         yield* Effect.promise(() => Promise.all([manager.command(c), manager.command(c)]))
         yield* until(() => pid > 0)
         manager.onDisconnect()
-        expect(yield* Effect.promise(() => readProcessIdentity(pid))).not.toBeNull()
+        const identity = yield* Effect.promise(() => readProcessIdentity(pid))
+        expect(identity).not.toBeNull()
+        const records = new DatabaseSync(join(dataDir, 'project-runtime.db'), { readOnly: true })
+        try {
+          const stored = records.prepare('SELECT payload FROM project_processes WHERE role=?').get(c.run_id)
+          expect(JSON.parse(String(stored?.payload))).toEqual({ ...identity, role: c.run_id })
+        } finally {
+          records.close()
+        }
         manager.setTransport(network)
         yield* Effect.promise(() => manager.command(c))
         expect((yield* Effect.promise(() => readFile(launchLog, 'utf8'))).trim().split('\n')).toHaveLength(1)
@@ -225,14 +234,13 @@ describe('Project Runtime host', () => {
           },
         })
         yield* Effect.promise(() =>
-          writeFile(
+          writePrivateFileAtomic(
             join(dataDir, 'project-runtime.json'),
             JSON.stringify({
               maxConcurrentProjects: 1,
               maxOutputTokens: 48000,
               maxModelCalls: 128,
             }),
-            { mode: 0o600 },
           ),
         )
         const requests: ProjectRuntimeRequest[] = []
@@ -277,7 +285,7 @@ describe('Project Runtime host', () => {
       Effect.gen(function* () {
         const { manager, dataDir } = yield* open()
         yield* Effect.promise(() =>
-          writeFile(join(dataDir, 'project-runtime.json'), '{"maxConcurrentProjects":1}', { mode: 0o600 }),
+          writePrivateFileAtomic(join(dataDir, 'project-runtime.json'), '{"maxConcurrentProjects":1}'),
         )
         const old = command()
         const db = new DatabaseSync(join(dataDir, 'project-runtime.db'))
@@ -412,7 +420,10 @@ describe('Project Runtime host', () => {
           new URL('../../../../runtimes/project-agent/package.json', import.meta.url),
         ).resolve('tsx')
         const { manager, dataDir } = yield* open({
-          runtimeCommand: { file: process.execPath, args: ['--import', loader, fixture, 'real-runtime'] },
+          runtimeCommand: {
+            file: process.execPath,
+            args: ['--import', pathToFileURL(loader).href, fixture, 'real-runtime'],
+          },
         })
         const c = command()
         const events: { seq: number; kind: string; payload: unknown }[] = []

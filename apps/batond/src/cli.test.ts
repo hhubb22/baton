@@ -1,13 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import { mkdtemp, realpath, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { realpath, rm } from 'node:fs/promises'
 import { expect, it, vi } from 'vite-plus/test'
 import type { RuntimeAgent, WorkerIPCMessage, WorkerRequest } from '@baton/protocol'
 import { runLocalCLI } from './cli.ts'
+import { makePrivateTempDirectory } from './testing/private.ts'
 
 it('opens each local Agent with a custom model and budget and reuses its saved configuration', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'baton-cli-'))
+  const directory = await makePrivateTempDirectory('baton-cli-')
   const output = vi.spyOn(console, 'log').mockImplementation(() => undefined)
   try {
     const cwd = await realpath(directory)

@@ -1,5 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -10,6 +9,8 @@ import { CURSOR_REPLAY_FIXTURES } from '@t3tools/provider-cursor/testing'
 import type { WorkerOpenConfig } from '@baton/protocol'
 import { startProcessWatchdog, type ProcessWatchdog } from '../../platform/process.ts'
 import { makeCursorAgentFactory } from './index.ts'
+import { makePrivateTempDirectory } from '../../testing/private.ts'
+import { replayProcessRecords } from '../../testing/cursor/process-records.ts'
 import type { AgentEvent, ThreadAgent } from '../../worker/agent.ts'
 import {
   firstTurnOnly,
@@ -25,6 +26,7 @@ const watchdogSource = fileURLToPath(new URL('../../testing/cursor/watchdog-entr
 const bundle = fileURLToPath(new URL('../../../dist/test/cursor-replay-host.mjs', import.meta.url))
 const watchdogBundle = fileURLToPath(new URL('../../../dist/test/watchdog.mjs', import.meta.url))
 const agents: ThreadAgent[] = []
+const directories: string[] = []
 const fibers: Fiber.Fiber<unknown, unknown>[] = []
 let watchdog: ProcessWatchdog | undefined
 
@@ -58,14 +60,19 @@ afterAll(async () => {
 afterEach(async () => {
   for (const fiber of fibers.splice(0)) await Effect.runPromise(Fiber.interrupt(fiber))
   for (const agent of agents.splice(0)) {
-    await effect(agent.reap().pipe(Effect.catch(() => Effect.succeed({ processTreeStopped: false }))))
+    expect((await effect(agent.reap())).processTreeStopped).toBe(true)
+  }
+  for (const directory of directories.splice(0)) {
+    expect(replayProcessRecords(directory).list()).toEqual([])
+    await rm(directory, { recursive: true, force: true })
   }
 })
 
 const effect = <A, E>(program: Effect.Effect<A, E>) => Effect.runPromise(program)
 
 const writeTranscript = async (name: string, transcript: Awaited<ReturnType<typeof readTranscript>>) => {
-  const directory = await mkdtemp(join(tmpdir(), 'baton-cursor-replay-'))
+  const directory = await makePrivateTempDirectory('baton-cursor-replay-')
+  directories.push(directory)
   const file = join(directory, `${name}.ndjson`)
   const lines = [
     JSON.stringify({
@@ -83,7 +90,8 @@ const writeTranscript = async (name: string, transcript: Awaited<ReturnType<type
 }
 
 const workspace = async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'baton-cursor-thread-'))
+  const directory = await makePrivateTempDirectory('baton-cursor-thread-')
+  directories.push(directory)
   const config: WorkerOpenConfig = {
     thread_id: '11111111-1111-4111-8111-111111111111',
     node_id: '22222222-2222-4222-8222-222222222222',
@@ -100,6 +108,7 @@ const workspace = async () => {
 const start = (config: WorkerOpenConfig, transcriptFile: string) =>
   makeCursorAgentFactory({
     command: { file: process.execPath, args: [bundle, '--transcript', transcriptFile] },
+    records: replayProcessRecords(config.working_directory),
     ...(watchdog ? { watchdog } : {}),
     paths: (value) => ({
       workingDirectory: value.working_directory,
@@ -149,6 +158,9 @@ describe('Cursor Agent host', () => {
     const collected = collect(agent)
     const opened = await effect(agent.open(config))
     expect(opened.nativeSessionId).toMatch(/^agent-/)
+    expect(replayProcessRecords(config.working_directory).list()).toEqual([
+      { pid: expect.any(Number), creationTime: expect.any(String), role: 'cursor-host' },
+    ])
     const input = message('simple-1', 'Respond with the following text: fixture simple ok')
     const preparation = await effect(agent.prepareInput(input, 0))
     expect(preparation.confirmedSends).toBe(0)

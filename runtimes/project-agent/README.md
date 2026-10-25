@@ -25,7 +25,7 @@ pnpm --dir runtimes/project-agent exec tsx src/cli.ts login-api-key xai < key-fi
 
 设备设置 API 可发起在线设备的非交互登录，支持 ChatGPT 和 xAI 的设备码流程；Claude 的 OAuth 使用终端交互。设备报告的 `login_methods` 来自已注册 provider 的认证实现和设备码能力，网页据此显示设备码登录或本地配置命令。API key 始终从设备本地输入，不经过网页和中心。Runtime 的 `login-device <provider>` 自动选择设备码方式，stdout 首行返回 `{type:"device_code",provider,verification_uri,user_code,expires_in_seconds}`，随后继续轮询直到凭据保存完成；未提供有效期时使用 900 秒。SIGINT、SIGTERM 或标准输入关闭取消登录，其他交互输入返回错误。batond 取得设备码后让进程在后台继续等待，结束时立即刷新订阅报告。
 
-`batond` 在 SEA 中通过自身可执行文件启动 `project-runtime`，加载可执行文件旁 `node_modules/` 中的固定依赖。源码开发仍可通过 `pnpm --dir runtimes/project-agent exec tsx src/cli.ts <命令>` 或编译后的 `baton-project-runtime` 入口运行；两种入口共用导出的 `runProjectRuntimeCLI(args)`。
+`batond` 在 SEA 中通过自身可执行文件启动 `project-runtime`，加载可执行文件旁 `node_modules/` 中的固定依赖。源码开发仍可通过 `pnpm --dir runtimes/project-agent exec tsx src/cli.ts <命令>` 或编译后的 `baton-project-runtime` 入口运行；两种入口共用导出的 `runProjectRuntimeCLI(args)`。Windows 独立开发入口需要保留仓库布局和已安装依赖：凭据操作自动定位仓库中的 TS 私有文件 helper，通过当前 Node 和 file URL 形式的 tsx loader 启动。也可通过结构化 `BATON_SIDECAR_HOST_COMMAND` 指定 helper 的程序与参数；指定宿主失败或默认 helper 缺失时，凭据操作返回错误。
 
 使用运行 `batond run` 的同一个系统用户登录。凭据默认保存在用户主目录下的 `.baton/project-runtime`；可用 `BATON_PROJECT_RUNTIME_DATA_DIR` 指定 Runtime 专用的私有目录，登录和守护进程须使用相同配置。凭据与 Pi、Codex CLI 的登录记录分别保存，不上传 Coordinator。
 

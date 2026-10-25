@@ -1,5 +1,5 @@
-import { chmod, link, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { link, mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { makePrivateTempDirectory } from '../testing/private.ts'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { afterEach, expect, it } from 'vite-plus/test'
@@ -8,8 +8,7 @@ import { privateFileHostEnvironment, runPrivateFileHost } from './private-file-h
 
 const directories: string[] = []
 async function directory() {
-  const path = await mkdtemp(join(tmpdir(), 'baton-private-host-'))
-  await chmod(path, 0o700)
+  const path = await makePrivateTempDirectory('baton-private-host-')
   directories.push(path)
   return path
 }
@@ -29,7 +28,7 @@ it('distinguishes explicit directory protection from private path validation', a
   await ensurePrivateDirectory(path)
   if (process.platform !== 'win32') expect((await stat(path)).mode & 0o777).toBe(0o700)
   const alias = join(root, 'alias')
-  await symlink(path, alias, 'dir')
+  await symlink(path, alias, process.platform === 'win32' ? 'junction' : 'dir')
   await expect(protectPrivateDirectory(alias)).rejects.toThrow('type')
 })
 
@@ -40,6 +39,7 @@ it('dispatches structured source-host argv with no Go executable or shell parsin
     new URL('../../../../runtimes/project-agent/src/cli.ts', import.meta.url),
   )
   const command = JSON.parse(environment.BATON_SIDECAR_HOST_COMMAND!) as { file: string; args: string[] }
+  expect(new URL(command.args[1]).protocol).toBe('file:')
   const result = spawnSync(command.file, [...command.args, 'sidecar-file', 'write', path, file], {
     input: '{"type":"oauth"}',
     encoding: 'utf8',
@@ -75,11 +75,12 @@ it('rejects oversized or nonprivate files and paths outside the credential direc
   await rm(file)
   const outside = join(root, 'outside.json')
   await writeFile(outside, 'local-private-value', { mode: 0o600 })
-  await symlink(outside, file)
-  expect(await runPrivateFileHost(['sidecar-file', 'read', path, file], input(''), collect)).toBe(1)
-  expect(await runPrivateFileHost(['sidecar-file', 'write', path, file], input('replacement'))).toBe(1)
-  expect(await readFile(outside, 'utf8')).toBe('local-private-value')
   if (process.platform !== 'win32') {
+    // File symlinks need Windows developer mode; first-version Windows security validates the parent ACL.
+    await symlink(outside, file)
+    expect(await runPrivateFileHost(['sidecar-file', 'read', path, file], input(''), collect)).toBe(1)
+    expect(await runPrivateFileHost(['sidecar-file', 'write', path, file], input('replacement'))).toBe(1)
+    expect(await readFile(outside, 'utf8')).toBe('local-private-value')
     await rm(file)
     await link(outside, file)
     expect(await runPrivateFileHost(['sidecar-file', 'read', path, file], input(''), collect)).toBe(1)

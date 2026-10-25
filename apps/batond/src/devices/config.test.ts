@@ -1,5 +1,4 @@
-import { chmod, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { RuntimeReport } from '@baton/protocol'
 import { Schema } from 'effect'
@@ -15,11 +14,12 @@ import {
 } from './index.ts'
 import { openAuthorized } from './files.ts'
 import { initializeBrowseRoots, readBrowseRootsConfig } from '../daemon/roots.ts'
+import { ensurePrivateDirectory } from '../platform/private.ts'
+import { makePrivateTempDirectory } from '../testing/private.ts'
 
 const temporary: string[] = []
 async function directory(): Promise<string> {
-  const path = await realpath(await mkdtemp(join(tmpdir(), 'baton-device-config-')))
-  await chmod(path, 0o700)
+  const path = await realpath(await makePrivateTempDirectory('baton-device-config-'))
   temporary.push(path)
   return path
 }
@@ -77,7 +77,7 @@ it('registers more than 32 distinct roots and preserves a configured limit durin
   const workspace = await directory()
   for (let index = 0; index < 34; index++) {
     const path = join(workspace, String(index))
-    await mkdir(path)
+    await ensurePrivateDirectory(path)
     await updateBrowseRoots(data, 'add', path)
   }
   const initial = await readBrowseRootsConfig(data)
@@ -85,7 +85,7 @@ it('registers more than 32 distinct roots and preserves a configured limit durin
   expect(initial.maxRoots).toBe(256)
   await writeFile(join(data, 'browse-roots.json'), JSON.stringify({ ...initial, maxRoots: 34 }))
   const extra = join(workspace, 'extra')
-  await mkdir(extra)
+  await ensurePrivateDirectory(extra)
   await expect(updateBrowseRoots(data, 'add', extra)).rejects.toThrow('最多 34 个')
   await expect(initializeBrowseRoots(data, extra)).rejects.toThrow('最多 34 个')
   await updateBrowseRoots(data, 'remove', join(workspace, '0'))
@@ -178,9 +178,9 @@ it('fails closed in reports when the local exec configuration is malformed', asy
 it('rejects reparenting after a file was opened and authorizes file and commit attachment references', async () => {
   const data = await directory(),
     root = await directory()
-  await mkdir(join(root, 'nested'))
+  await ensurePrivateDirectory(join(root, 'nested'))
   await writeFile(join(root, 'nested', 'log.txt'), 'attachment')
-  await mkdir(join(root, '.git'))
+  await ensurePrivateDirectory(join(root, '.git'))
   await writeFile(join(root, '.git', 'config'), '[remote "origin"]\nurl = git@git.example:team/repo.git\n')
   const [registered] = await updateBrowseRoots(data, 'add', root)
   const sha = 'a'.repeat(40)
@@ -197,7 +197,7 @@ it('rejects reparenting after a file was opened and authorizes file and commit a
   const opened = await openAuthorized(registered!, 'nested/log.txt')
   try {
     await rename(join(root, 'nested'), join(root, 'moved'))
-    await mkdir(join(root, 'nested'))
+    await ensurePrivateDirectory(join(root, 'nested'))
     await writeFile(join(root, 'nested', 'log.txt'), 'replacement')
     await expect(opened.verify()).rejects.toThrow('路径超出')
   } finally {

@@ -1,7 +1,8 @@
 import { promises as fs, constants } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { createRequire } from 'node:module'
 import { existsSync } from 'node:fs'
 import lockfile from 'proper-lockfile'
 import { randomUUID } from 'node:crypto'
@@ -35,11 +36,15 @@ function nativeHost(): { file: string; args: string[]; timeout: number } {
       throw new Error('credential_private_file_failed')
     }
   }
-  const adjacent = fileURLToPath(new URL('../../../../../batond.exe', import.meta.url))
+  const entry = [
+    new URL('../../../apps/batond/src/platform/private-file-host-entry.ts', import.meta.url),
+    new URL('../../../../../apps/batond/src/platform/private-file-host-entry.ts', import.meta.url),
+  ].find((candidate) => existsSync(candidate))
+  if (!entry) throw new Error('credential_private_file_failed')
   return {
-    file: process.env.BATON_SIDECAR_HOST ?? (existsSync(adjacent) ? adjacent : 'batond'),
-    args: [],
-    timeout: 500,
+    file: process.execPath,
+    args: ['--import', pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href, fileURLToPath(entry)],
+    timeout: 5000,
   }
 }
 

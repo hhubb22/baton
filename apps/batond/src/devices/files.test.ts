@@ -1,15 +1,16 @@
 import { randomUUID } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vite-plus/test'
 import type { FileRequest, FileResult } from '@baton/protocol'
 import { updateBrowseRoots } from './config.ts'
 import { browseFiles, relativePath, withAuthorizedRead } from './files.ts'
+import { ensurePrivateDirectory } from '../platform/private.ts'
+import { makePrivateTempDirectory } from '../testing/private.ts'
 
 const temporary: string[] = []
 async function directory() {
-  const path = await realpath(await mkdtemp(join(tmpdir(), 'baton-file-pages-')))
+  const path = await realpath(await makePrivateTempDirectory('baton-file-pages-'))
   temporary.push(path)
   return path
 }
@@ -83,6 +84,7 @@ it('reads UTF-8 chunks to completion and rejects stale versions and missing vers
   })
 })
 
+// Windows 把冒号解释为 ADS、反斜杠解释为分隔符，不能创建这些 POSIX 文件名。
 it.skipIf(process.platform === 'win32')('preserves POSIX colons and backslashes in listings and reads', async () => {
   const { data, root, request } = await setup()
   for (const name of ['time:12.txt', 'literal\\name.txt']) {
@@ -128,14 +130,14 @@ it('bounds repeated ctime churn and refuses ancestor replacement with an outside
     }),
   ).rejects.toMatchObject({ code: 'path_changed' })
   expect(attempts).toBe(3)
-  await mkdir(join(root, 'nested'))
+  await ensurePrivateDirectory(join(root, 'nested'))
   await writeFile(join(root, 'nested/log.txt'), 'inside')
   const outside = await directory()
   await writeFile(join(outside, 'log.txt'), 'secret')
   await expect(
     withAuthorizedRead(registered, 'nested/log.txt', async () => {
       await rename(join(root, 'nested'), join(root, 'moved'))
-      await symlink(outside, join(root, 'nested'), 'dir')
+      await symlink(outside, join(root, 'nested'), process.platform === 'win32' ? 'junction' : 'dir')
       return 'unverified'
     }),
   ).rejects.toMatchObject({ code: 'path_escaped' })

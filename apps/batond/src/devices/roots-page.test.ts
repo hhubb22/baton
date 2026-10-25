@@ -1,18 +1,17 @@
 import { randomUUID } from 'node:crypto'
-import { mkdtemp, realpath, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { realpath, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { BrowseRootsGetResult, NodeFrame, RuntimeReport, type RuntimeRoot } from '@baton/protocol'
 import { Schema } from 'effect'
 import { expect, it } from 'vite-plus/test'
-import { ensurePrivateDirectory, writePrivateFileAtomic } from '../platform/private.ts'
+import { writePrivateFileAtomic } from '../platform/private.ts'
+import { makePrivateTempDirectory } from '../testing/private.ts'
 import { makeDeviceService } from './index.ts'
 import { boundRuntimeReport } from './report.ts'
 import { readBrowseRootsPage } from './roots-page.ts'
 
 it('reads every root across byte-bounded management pages and rejects changed lists', async () => {
-  const data = await realpath(await mkdtemp(join(tmpdir(), 'baton-roots-page-')))
-  await ensurePrivateDirectory(data)
+  const data = await realpath(await makePrivateTempDirectory('baton-roots-page-'))
   const roots = Array.from({ length: 256 }, (_, index) => ({
     id: `root-${index}`,
     path: join(data, `${index}-${'目录\\"'.repeat(120)}`),

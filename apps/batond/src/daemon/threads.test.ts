@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Effect, Option, Tracer } from 'effect'
 import type * as Scope from 'effect/Scope'
@@ -10,7 +9,8 @@ import { makeNodeLedger } from './ledger.ts'
 import { initializeBrowseRoots } from './roots.ts'
 import { CommandDeliveryUncertain, makeThreadService, type DaemonWorkerHost } from './threads.ts'
 import { IPCError } from './ipc.ts'
-import { writePrivateFileAtomic } from '../platform/private.ts'
+import { ensurePrivateDirectory, writePrivateFileAtomic } from '../platform/private.ts'
+import { makePrivateTempDirectory } from '../testing/private.ts'
 
 const capability: RuntimeAgent = {
   agent_type: 'cursor',
@@ -48,7 +48,7 @@ async function withService(
     path: string
   }) => Effect.Effect<void, unknown, Scope.Scope>,
 ) {
-  const path = await mkdtemp(join(tmpdir(), 'bh-'))
+  const path = await makePrivateTempDirectory('bh-')
   try {
     await initializeBrowseRoots(path, path)
     const commandId = randomUUID()
@@ -219,7 +219,7 @@ it('delivers settings, stop and withdraw after roots are revoked and the working
   await withService(({ commandId, command, host, path, setHandler }) =>
     Effect.gen(function* () {
       const cwd = join(path, 'workspace')
-      yield* Effect.promise(() => mkdir(cwd))
+      yield* Effect.promise(() => ensurePrivateDirectory(cwd))
       const ledger = yield* makeNodeLedger(join(path, 'node.db'))
       const delivered: WorkerRequest[] = []
       setHandler(async (_id, req) => {

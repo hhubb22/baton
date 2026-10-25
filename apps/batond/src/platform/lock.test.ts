@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { rm } from 'node:fs/promises'
+import { makePrivateTempDirectory } from '../testing/private.ts'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
@@ -22,7 +22,7 @@ afterEach(async () => {
   await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true })))
 })
 async function lockPath() {
-  const directory = await mkdtemp(join(tmpdir(), 'baton-lock-'))
+  const directory = await makePrivateTempDirectory('baton-lock-')
   directories.push(directory)
   return join(directory, 'worker.lock')
 }

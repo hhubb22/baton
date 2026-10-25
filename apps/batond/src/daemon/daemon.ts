@@ -534,7 +534,8 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
     Effect.provideService(DaemonServices, {
       host: options.host ?? new LocalWorkerHost(options.dataDirectory),
       transport: options.transport ?? connectWebSocket,
-      probe: options.probe ?? (async () => (await import('../agents/registry.ts')).probeLocalAgents()),
+      probe:
+        options.probe ?? (async () => (await import('../agents/registry.ts')).probeLocalAgents(options.dataDirectory)),
     }),
   )
 }

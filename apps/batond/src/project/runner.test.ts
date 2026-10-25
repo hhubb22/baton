@@ -1,12 +1,13 @@
-import { mkdtemp, rm, writeFile, chmod, mkdir } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { rm, writeFile, chmod } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
 import { Effect, Scope, Exit } from 'effect'
 import { afterEach, expect, it } from 'vite-plus/test'
+import { ensurePrivateDirectory, writePrivateFileAtomic } from '../platform/private.ts'
+import { makePrivateTempDirectory } from '../testing/private.ts'
 import { makeProjectManager } from './index.ts'
-import { RuntimeRunner, defaultRuntimeCommand } from './runner.ts'
+import { RuntimeRunner, defaultRuntimeCommand, defaultWatchdogCommand } from './runner.ts'
 import { LeaseClock, success } from './types.ts'
 import { serveRuntime } from './stdio.ts'
 
@@ -15,7 +16,7 @@ afterEach(async () => {
   for (const close of cleanups.splice(0).reverse()) await close()
 })
 const open = async (mode = 'idle', real = false) => {
-  const dataDir = await mkdtemp(join(tmpdir(), 'baton-runtime-probe-'))
+  const dataDir = await makePrivateTempDirectory('baton-runtime-probe-')
   cleanups.push(() => rm(dataDir, { recursive: true, force: true }))
   const scope = Scope.makeUnsafe()
   const base = real
@@ -27,14 +28,17 @@ const open = async (mode = 'idle', real = false) => {
   const manager = await Effect.runPromise(
     makeProjectManager({
       dataDir,
-      runtimeCommand: { ...base, env: { BATON_PROJECT_RUNTIME_DATA_DIR: join(dataDir, 'credentials') } },
+      runtimeCommand: {
+        ...base,
+        env: { ...base.env, BATON_PROJECT_RUNTIME_DATA_DIR: join(dataDir, 'credentials') },
+      },
     }).pipe(Effect.provideService(Scope.Scope, scope)),
   )
   cleanups.push(() => Effect.runPromise(Scope.close(scope, Exit.void)))
   return manager
 }
 const quickRunner = async (program: string, credentialsDirectory?: string) => {
-  const dataDir = await mkdtemp(join(tmpdir(), 'baton-early-output-'))
+  const dataDir = await makePrivateTempDirectory('baton-early-output-')
   cleanups.push(() => rm(dataDir, { recursive: true, force: true }))
   const runner = new RuntimeRunner(
     {
@@ -45,21 +49,36 @@ const quickRunner = async (program: string, credentialsDirectory?: string) => {
         ...(credentialsDirectory ? { env: { BATON_PROJECT_RUNTIME_DATA_DIR: credentialsDirectory } } : {}),
       },
     },
+    process.platform === 'win32'
+      ? undefined
+      : {
+          pid: process.pid,
+          register: async () => {},
+          unregister: async () => {},
+          close: async () => {},
+        },
     {
-      pid: process.pid,
-      register: async () => {
+      add: async (record) => {
         await delay(200)
+        await writePrivateFileAtomic(join(dataDir, `${record.pid}.json`), JSON.stringify(record))
       },
-      unregister: async () => {},
-      close: async () => {},
+      remove: async (record) => {
+        await rm(join(dataDir, `${record.pid}.json`), { force: true })
+      },
     },
-    { add: async () => {}, remove: async () => {} },
   )
   cleanups.push(() => runner.close())
   return { runner, dataDir }
 }
+it('uses file URLs for source Runtime and watchdog import loaders', () => {
+  for (const command of [defaultRuntimeCommand(), defaultWatchdogCommand()]) {
+    expect(command.args?.[0]).toBe('--import')
+    expect(new URL(command.args![1]!).protocol).toBe('file:')
+  }
+})
+
 it.each(['probe', 'login-device'] as const)(
-  'captures fast %s output while watchdog registration is delayed',
+  'captures fast %s output while process registration is delayed',
   async (operation) => {
     const value =
       operation === 'probe'
@@ -76,12 +95,15 @@ it.each(['probe', 'login-device'] as const)(
     expect(result).toMatchObject(value)
   },
 )
-it.each(['probe', 'login-device'] as const)('bounds %s output during delayed registration', async (operation) => {
-  const { runner } = await quickRunner('process.stdout.write("x".repeat(70 * 1024)); setInterval(() => {}, 1000)')
-  await expect(operation === 'probe' ? runner.probe() : runner.startDeviceLogin('openai-codex')).rejects.toThrow(
-    '输出超限',
-  )
-})
+it.each(['probe', 'login-device'] as const)(
+  'bounds %s output during delayed process registration',
+  async (operation) => {
+    const { runner } = await quickRunner('process.stdout.write("x".repeat(70 * 1024)); setInterval(() => {}, 1000)')
+    await expect(operation === 'probe' ? runner.probe() : runner.startDeviceLogin('openai-codex')).rejects.toThrow(
+      '输出超限',
+    )
+  },
+)
 it('captures stdio frames before a fast Runtime exits during registration', async () => {
   const { runner } = await quickRunner('console.log(JSON.stringify({id:1,request:{operation:"bootstrap"}}))')
   const cancel = new AbortController()
@@ -121,13 +143,13 @@ it('uses max(hrtime,wall) for sleep, backward wall clock and forward clock jumps
   expect(() => clock.now()).toThrow('时钟不可用')
 })
 it('retains a timestamped report after probe timeout and invalidates it when credentials change', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'baton-probe-cache-'))
+  const directory = await makePrivateTempDirectory('baton-probe-cache-')
   cleanups.push(() => rm(directory, { recursive: true, force: true }))
   const mode = join(directory, 'mode')
   const credentials = join(directory, 'credentials')
-  await mkdir(credentials, { mode: 0o700 })
+  await ensurePrivateDirectory(credentials)
   const credential = join(credentials, 'openai-codex.json')
-  await writeFile(credential, '{}', { mode: 0o600 })
+  await writePrivateFileAtomic(credential, '{}')
   const { runner, dataDir } = await quickRunner(
     `
     const fs = require('node:fs');
@@ -138,7 +160,7 @@ it('retains a timestamped report after probe timeout and invalidates it when cre
   `,
     credentials,
   )
-  await writeFile(join(dataDir, 'project-runtime.json'), JSON.stringify({ probeTimeoutMs: 2000 }), { mode: 0o600 })
+  await writePrivateFileAtomic(join(dataDir, 'project-runtime.json'), JSON.stringify({ probeTimeoutMs: 2000 }))
   const initial = await runner.report()
   expect(initial).toMatchObject({ stale: false })
   expect(initial?.probed_at).toBeDefined()
@@ -155,9 +177,16 @@ it('retains a timestamped report after probe timeout and invalidates it when cre
   await writeFile(mode, 'output')
   expect(await runner.report()).toMatchObject({ stale: true, probe_error: 'probe_output_limit' })
   await expect(runner.probe()).rejects.toThrow('输出超限')
-  await chmod(credential, 0o644)
+  if (process.platform !== 'win32') {
+    await chmod(credential, 0o644)
+    expect(await runner.report()).toBeUndefined()
+    await chmod(credential, 0o600)
+    await writeFile(mode, 'ok')
+    await runner.probe()
+    await writeFile(mode, 'output')
+  }
+  await writePrivateFileAtomic(credential, '{"updated":true}')
   expect(await runner.report()).toBeUndefined()
-  await chmod(credential, 0o600)
   await writeFile(mode, 'ok')
   await runner.probe()
   await writeFile(mode, 'output')

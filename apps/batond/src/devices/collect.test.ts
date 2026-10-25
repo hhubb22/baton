@@ -1,8 +1,7 @@
-import { chmod, mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { rm } from 'node:fs/promises'
 import { expect, it, vi } from 'vite-plus/test'
 import { makeDeviceService } from './index.ts'
+import { makePrivateTempDirectory } from '../testing/private.ts'
 
 const mocks = vi.hoisted(() => ({ scan: vi.fn() }))
 vi.mock('./scan.ts', async (importOriginal) => ({
@@ -11,8 +10,7 @@ vi.mock('./scan.ts', async (importOriginal) => ({
 }))
 
 it('preserves completed provider probes when the one filesystem scan exhausts the shared budget', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'baton-device-probe-'))
-  await chmod(directory, 0o700)
+  const directory = await makePrivateTempDirectory('baton-device-probe-')
   let scansActive = 0,
     maximumActive = 0,
     probes = 0

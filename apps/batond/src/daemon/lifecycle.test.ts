@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import { chmod, mkdtemp, rm, symlink, mkdir, stat, realpath } from 'node:fs/promises'
-import { tmpdir, homedir } from 'node:os'
+import { rm, symlink, stat, realpath } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { Effect } from 'effect'
 import { afterEach, describe, expect, it } from 'vite-plus/test'
 import type { NodeIdentity, ThreadReport, WorkerOpen } from '@baton/protocol'
-import { readPrivateFile, writePrivateFileAtomic } from '../platform/private.ts'
+import { ensurePrivateDirectory, readPrivateFile, writePrivateFileAtomic } from '../platform/private.ts'
+import { makePrivateTempDirectory } from '../testing/private.ts'
 import { registerNode, loadIdentity, coordinatorURL, relayURL } from './identity.ts'
 import { authorizeDirectory, browseDirectories, initializeBrowseRoots, loadBrowseRoots } from './roots.ts'
 import { contentHash, makeNodeLedger } from './ledger.ts'
@@ -14,8 +15,7 @@ import { runDaemonCLI } from './cli.ts'
 
 const temporary: string[] = []
 const directory = async () => {
-  const path = await mkdtemp(join(tmpdir(), 'bn-'))
-  await chmod(path, 0o700)
+  const path = await makePrivateTempDirectory('bn-')
   temporary.push(path)
   return path
 }
@@ -158,7 +158,8 @@ describe('private registration and directory authorization', () => {
     const id = await registerNode(options)
     expect(id.credential).toEqual(issued.credential)
     expect((await loadIdentity(path)).coordinator_url).toBe('https://coordinator.invalid')
-    expect((await stat(join(path, 'identity.json'))).mode & 0o777).toBe(0o600)
+    // Windows 的私有文件由父目录 ACL 保护，mode 不表示 DACL。
+    if (process.platform !== 'win32') expect((await stat(join(path, 'identity.json'))).mode & 0o777).toBe(0o600)
     await expect(registerNode(options)).rejects.toThrow('节点身份已存在')
     expect(calls).toBe(1)
     expect((await readPrivateFile(join(path, 'identity.json'))).toString()).not.toContain('offline-enrollment')
@@ -174,8 +175,8 @@ describe('private registration and directory authorization', () => {
     const roots = await initializeBrowseRoots(path, root)
     expect(roots).toHaveLength(1)
     expect(await initializeBrowseRoots(path, root)).toEqual(roots)
-    await mkdir(join(root, 'child'))
-    await symlink(outside, join(root, 'escape'))
+    await ensurePrivateDirectory(join(root, 'child'))
+    await symlink(outside, join(root, 'escape'), process.platform === 'win32' ? 'junction' : 'dir')
     await expect(authorizeDirectory(path, join(root, 'escape'))).rejects.toThrow('授权目录')
     const listing = await browseDirectories(path, {
       type: 'files.browse',

@@ -3,6 +3,7 @@ import { DEFAULT_SERVER_SETTINGS } from '@t3tools/contracts'
 import * as ProviderHost from '@t3tools/provider-core/server/ProviderHost'
 import { Effect, Exit, Option } from 'effect'
 import { expect } from 'vite-plus/test'
+import { join } from 'node:path'
 import { agentHostLayer } from './host-layer.ts'
 import type { ProcessRegistrar } from './process-registrar.ts'
 
@@ -24,8 +25,8 @@ it.effect('points the upstream host at the Thread workspace and its private dire
       cwd: '/workspace/thread',
       baseDir: '/private/thread',
       stateDir: '/private/thread',
-      providerStatusCacheDir: '/private/thread/cache',
-      attachmentsDir: '/private/thread/attachments',
+      providerStatusCacheDir: join(paths.privateDirectory, 'cache'),
+      attachmentsDir: join(paths.privateDirectory, 'attachments'),
     })
     expect(yield* host.settings.get).toEqual(DEFAULT_SERVER_SETTINGS)
     expect(yield* host.settings.withSnapshot(Effect.succeed)).toEqual(DEFAULT_SERVER_SETTINGS)

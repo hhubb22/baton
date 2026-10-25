@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Effect } from 'effect'
 import { connectAgentHost, type AgentHostProcessOptions } from '../../agent-host/transport.ts'
+import { protectPrivateDirectory } from '../../platform/private.ts'
 
 /**
  * Read-only probe in its own Agent host with an empty temporary workspace.
@@ -17,6 +18,7 @@ export const probeCursor = (
     Effect.gen(function* () {
       const temporary = yield* Effect.promise(() => mkdtemp(join(tmpdir(), 'baton-cursor-probe-workspace-')))
       yield* Effect.addFinalizer(() => Effect.promise(() => rm(temporary, { recursive: true, force: true })))
+      yield* Effect.promise(() => protectPrivateDirectory(temporary))
       const controller = new AbortController()
       const host = yield* connectAgentHost(
         { ...options, agentType: 'cursor', paths: { workingDirectory: temporary, privateDirectory: temporary } },

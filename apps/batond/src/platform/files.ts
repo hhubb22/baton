@@ -5,7 +5,7 @@ import { dirname, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { Stats } from 'node:fs'
 import { hasCode, platformEffect } from './errors.ts'
-import { systemCommand, windowsTool } from './identity.ts'
+import { powershell, systemCommand, windowsTool } from './identity.ts'
 
 function checkStat(path: string, stat: Stats, directory: boolean): void {
   if (stat.isSymbolicLink() || (directory ? !stat.isDirectory() : !stat.isFile()))
@@ -18,13 +18,17 @@ function checkStat(path: string, stat: Stats, directory: boolean): void {
   }
 }
 
+export function parseWindowsUserSid(output: string): string {
+  const sid = /,"(S-1-(?:\d+-)+\d+)"\s*$/.exec(output)?.[1]
+  if (!sid) throw new Error('Cannot determine current Windows user SID')
+  return sid
+}
+
 let sidPromise: Promise<string> | undefined
 async function currentSid(): Promise<string> {
-  return (sidPromise ??= systemCommand(windowsTool('whoami.exe'), ['/user', '/fo', 'csv', '/nh']).then((output) => {
-    const sid = /S-1-(?:\d+-)+\d+/.exec(output)?.[0]
-    if (!sid) throw new Error('Cannot determine current Windows user SID')
-    return sid
-  }))
+  return (sidPromise ??= systemCommand(windowsTool('whoami.exe'), ['/user', '/fo', 'csv', '/nh']).then(
+    parseWindowsUserSid,
+  ))
 }
 
 /** icacls has no per-handle validation. Reparse and concurrent ACL changes remain Windows limitations. */
@@ -45,7 +49,8 @@ async function checkDirectoryAcl(path: string): Promise<void> {
     const sddl = content.split(/\r?\n/).find((line) => line.startsWith('D:'))
     if (!sddl || !sddl.startsWith('D:P')) throw new Error(`Private directory inherits ACLs: ${path}`)
     const entries = [...sddl.matchAll(/\(([^()]*)\)/g)]
-    if (entries.length !== 1) throw new Error(`Private directory must grant only the current user: ${path}`)
+    if (entries.length !== 1)
+      throw new Error(`Private directory must grant only the current user (${entries.length} ACL entries): ${path}`)
     const fields = entries[0][1].split(';')
     if (fields.length !== 6 || fields[0] !== 'A' || fields[1] !== 'OICI' || fields[2] !== 'FA' || fields[5] !== sid)
       throw new Error(`Invalid private directory ACL: ${path}`)
@@ -59,23 +64,27 @@ export async function validatePrivateDirectory(path: string): Promise<void> {
   if (process.platform === 'win32') await checkDirectoryAcl(path)
 }
 
-async function setDirectoryAcl(path: string, reset: boolean): Promise<void> {
+async function setDirectoryAcl(path: string): Promise<void> {
   const sid = await currentSid()
-  if (reset) await systemCommand(windowsTool('icacls.exe'), [resolve(path), '/reset', '/Q'])
-  await systemCommand(windowsTool('icacls.exe'), [
-    resolve(path),
-    '/inheritance:r',
-    '/grant:r',
-    `*${sid}:(OI)(CI)F`,
-    '/Q',
-  ])
+  const encodedPath = Buffer.from(resolve(path), 'utf8').toString('base64')
+  // Replace the protected DACL in one operation; resetting inheritance can expose existing contents.
+  await powershell(`
+    $acl = [System.Security.AccessControl.DirectorySecurity]::new();
+    $acl.SetAccessRuleProtection($true, $false);
+    $identity = [System.Security.Principal.SecurityIdentifier]::new('${sid}');
+    $rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
+      $identity, 'FullControl', 'ContainerInherit, ObjectInherit', 'None', 'Allow');
+    $acl.AddAccessRule($rule);
+    $path = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedPath}'));
+    Set-Acl -LiteralPath $path -AclObject $acl;
+  `)
 }
 
 /** 显式保护操作收紧当前用户已有目录；普通验证不会修改权限。 */
 export async function protectPrivateDirectory(path: string): Promise<void> {
   const before = await lstat(path)
   if (!before.isDirectory() || before.isSymbolicLink()) throw new Error('Invalid private directory type')
-  if (process.platform === 'win32') await setDirectoryAcl(path, true)
+  if (process.platform === 'win32') await setDirectoryAcl(path)
   else {
     if (before.uid !== process.getuid?.()) throw new Error('Private directory has a different owner')
     await chmod(path, 0o700)
@@ -86,8 +95,26 @@ export async function protectPrivateDirectory(path: string): Promise<void> {
   await validatePrivateDirectory(path)
 }
 
+const pendingDirectories = new Map<string, Promise<void>>()
+
 /** Creates one directory; its parent must already exist. Existing unsafe paths are rejected. */
 export async function ensurePrivateDirectory(path: string): Promise<void> {
+  const key = resolve(path)
+  const pending = pendingDirectories.get(key)
+  if (pending) {
+    await pending
+    return validatePrivateDirectory(path)
+  }
+  const creating = createPrivateDirectory(path)
+  pendingDirectories.set(key, creating)
+  try {
+    await creating
+  } finally {
+    pendingDirectories.delete(key)
+  }
+}
+
+async function createPrivateDirectory(path: string): Promise<void> {
   let created = false
   try {
     await mkdir(path, { mode: 0o700 })
@@ -95,7 +122,7 @@ export async function ensurePrivateDirectory(path: string): Promise<void> {
   } catch (error) {
     if (!hasCode(error, 'EEXIST')) throw error
   }
-  if (created && process.platform === 'win32') await setDirectoryAcl(path, false)
+  if (created && process.platform === 'win32') await setDirectoryAcl(path)
   await validatePrivateDirectory(path)
 }
 

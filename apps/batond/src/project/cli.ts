@@ -1,8 +1,8 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { startProcessWatchdog } from '../platform/process.ts'
-import { ensurePrivateDirectory, writePrivateFileAtomic } from '../platform/private.ts'
+import { startProcessWatchdog, type ProcessWatchdog } from '../platform/process.ts'
+import { protectPrivateDirectory, writePrivateFileAtomic } from '../platform/private.ts'
 import { RuntimeRunner, defaultWatchdogCommand } from './runner.ts'
 import type { ProjectManagerOptions } from './types.ts'
 
@@ -12,24 +12,26 @@ export async function runProjectCLI(
   options: Pick<ProjectManagerOptions, 'runtimeCommand' | 'watchdogCommand'> = {},
 ) {
   const directory = await mkdtemp(join(tmpdir(), 'baton-project-cli-'))
-  await ensurePrivateDirectory(directory)
-  const watchdog =
-    process.platform === 'win32'
-      ? undefined
-      : await startProcessWatchdog(options.watchdogCommand ?? defaultWatchdogCommand())
-  const runner = new RuntimeRunner({ ...options, dataDir: directory }, watchdog, {
-    add: async (record) => {
-      await writePrivateFileAtomic(join(directory, `${record.pid}.json`), JSON.stringify(record))
-    },
-    remove: async (record) => {
-      await rm(join(directory, `${record.pid}.json`), { force: true })
-    },
-  })
+  let watchdog: ProcessWatchdog | undefined
+  let runner: RuntimeRunner | undefined
   const cancel = new AbortController()
   const abort = () => cancel.abort()
   process.on('SIGINT', abort)
   process.on('SIGTERM', abort)
   try {
+    await protectPrivateDirectory(directory)
+    watchdog =
+      process.platform === 'win32'
+        ? undefined
+        : await startProcessWatchdog(options.watchdogCommand ?? defaultWatchdogCommand())
+    runner = new RuntimeRunner({ ...options, dataDir: directory }, watchdog, {
+      add: async (record) => {
+        await writePrivateFileAtomic(join(directory, `${record.pid}.json`), JSON.stringify(record))
+      },
+      remove: async (record) => {
+        await rm(join(directory, `${record.pid}.json`), { force: true })
+      },
+    })
     if (command === 'login') {
       if (!provider) throw new Error('请指定模型订阅服务：openai-codex 或 xai')
       await runner.login(provider, cancel.signal)
@@ -48,7 +50,7 @@ export async function runProjectCLI(
     process.off('SIGINT', abort)
     process.off('SIGTERM', abort)
     try {
-      await runner.close()
+      await runner?.close()
     } finally {
       await watchdog?.close()
     }

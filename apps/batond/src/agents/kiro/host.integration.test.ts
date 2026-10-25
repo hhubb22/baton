@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, readFile, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
@@ -11,7 +10,10 @@ import { ThreadReport as ThreadReportSchema, type WorkerOpenConfig, type WorkerR
 import { connectAgentHost } from '../../agent-host/transport.ts'
 import { startProcessWatchdog, type ProcessWatchdog } from '../../platform/process.ts'
 import type { AgentEvent, AgentMessage, ThreadAgent } from '../../worker/agent.ts'
-import { makeWorker } from '../../worker/index.ts'
+import { makeWorker, type Worker } from '../../worker/index.ts'
+import type { ProcessRecordCallbacks } from '../../platform/process-types.ts'
+import { makePrivateTempDirectory } from '../../testing/private.ts'
+import { replayProcessRecords, workerProcessRecords } from '../../testing/cursor/process-records.ts'
 import { makeKiroAgentFactory } from './index.ts'
 import { kiroTurnFailure } from './failure.ts'
 import {
@@ -75,15 +77,18 @@ afterAll(async () => {
 afterEach(async () => {
   for (const fiber of fibers.splice(0)) await Effect.runPromise(Fiber.interrupt(fiber))
   for (const agent of agents.splice(0)) {
-    await Effect.runPromise(agent.reap().pipe(Effect.catch(() => Effect.succeed({ processTreeStopped: false }))))
+    expect((await Effect.runPromise(agent.reap())).processTreeStopped).toBe(true)
   }
-  for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true })
+  for (const directory of directories.splice(0)) {
+    expect(replayProcessRecords(directory).list()).toEqual([])
+    await rm(directory, { recursive: true, force: true })
+  }
 })
 
 const effect = <A, E>(program: Effect.Effect<A, E>) => Effect.runPromise(program)
 
 const workspace = async (): Promise<WorkerOpenConfig> => {
-  const directory = await mkdtemp(join(tmpdir(), 'baton-kiro-thread-'))
+  const directory = await makePrivateTempDirectory('baton-kiro-thread-')
   directories.push(directory)
   return {
     thread_id: '11111111-1111-4111-8111-111111111111',
@@ -103,16 +108,17 @@ const writeTranscript = async (config: WorkerOpenConfig, name: string, transcrip
   return path
 }
 
-const factoryFor = (path: string) =>
+const factoryFor = (path: string, records?: ProcessRecordCallbacks) => (config: WorkerOpenConfig) =>
   makeKiroAgentFactory({
     command: { file: process.execPath, args: [bundle, '--transcript', path] },
+    records: records ?? replayProcessRecords(config.working_directory),
     ...(watchdog ? { watchdog } : {}),
     paths: (value) => {
       const statePath = value.adapter_config.state_path
       if (statePath === undefined) throw new Error('Kiro replay requires state_path')
       return { workingDirectory: value.working_directory, privateDirectory: dirname(statePath) }
     },
-  })
+  })(config)
 
 const start = (config: WorkerOpenConfig, path: string) => {
   const agent = factoryFor(path)(config)
@@ -198,12 +204,15 @@ describe('Kiro Agent host', () => {
       let createdAgents = 0
       let reapedAgents = 0
       let closedAgents = 0
-      const worker = await effect(
+      const worker: Worker = await effect(
         makeWorker({
           dbPath,
           agentFactory: (input) => {
             createdAgents++
-            const agent = factoryFor(path)(input)
+            const agent = factoryFor(
+              path,
+              workerProcessRecords(() => worker),
+            )(input)
             agents.push(agent)
             return {
               ...agent,
@@ -248,6 +257,9 @@ describe('Kiro Agent host', () => {
         await expect
           .poll(async () => (await reports()).some((report) => report.kind === 'thread.opened'), { timeout: 10_000 })
           .toBe(true)
+        expect(await effect(worker.records.list())).toEqual([
+          { pid: expect.any(Number), creationTime: expect.any(String), role: 'kiro-host' },
+        ])
         const request: WorkerRequest = {
           type: 'thread_message',
           ok: true,
@@ -387,6 +399,7 @@ describe('Kiro Agent host', () => {
         {
           agentType: 'kiro',
           command: { file: process.execPath, args: [bundle, '--transcript', path] },
+          records: replayProcessRecords(config.working_directory),
           paths: {
             workingDirectory: config.working_directory,
             privateDirectory: join(config.working_directory, 'private'),
@@ -416,6 +429,9 @@ describe('Kiro Agent host', () => {
     const { agent, events } = start(config, path)
     const opened = await effect(agent.open(config))
     expect(opened.nativeSessionId).toBe('native-session-1')
+    expect(replayProcessRecords(config.working_directory).list()).toEqual([
+      { pid: expect.any(Number), creationTime: expect.any(String), role: 'kiro-host' },
+    ])
     const first = await submit(agent, message('first'))
     await completed(events)
     const second = await submit(agent, message('second'), 1)

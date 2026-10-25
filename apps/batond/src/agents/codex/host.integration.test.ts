@@ -1,5 +1,4 @@
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Effect, Fiber, Schema, Stream } from 'effect'
@@ -8,6 +7,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vite-plus/
 import type { WorkerOpenConfig } from '@baton/protocol'
 import { startProcessWatchdog, type ProcessWatchdog } from '../../platform/process.ts'
 import { makeCodexAgentFactory } from './index.ts'
+import { makePrivateTempDirectory } from '../../testing/private.ts'
+import { replayProcessRecords } from '../../testing/cursor/process-records.ts'
 import type { AgentEvent, AgentMessage, ThreadAgent } from '../../worker/agent.ts'
 import {
   codexFixturePath,
@@ -58,15 +59,18 @@ afterAll(async () => {
 afterEach(async () => {
   for (const fiber of fibers.splice(0)) await Effect.runPromise(Fiber.interrupt(fiber))
   for (const agent of agents.splice(0)) {
-    await Effect.runPromise(agent.reap().pipe(Effect.catch(() => Effect.succeed({ processTreeStopped: false }))))
+    expect((await Effect.runPromise(agent.reap())).processTreeStopped).toBe(true)
   }
-  for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true })
+  for (const directory of directories.splice(0)) {
+    expect(replayProcessRecords(directory).list()).toEqual([])
+    await rm(directory, { recursive: true, force: true })
+  }
 })
 
 const effect = <A, E>(program: Effect.Effect<A, E>) => Effect.runPromise(program)
 
 const workspace = async (): Promise<WorkerOpenConfig> => {
-  const directory = await mkdtemp(join(tmpdir(), 'baton-codex-thread-'))
+  const directory = await makePrivateTempDirectory('baton-codex-thread-')
   directories.push(directory)
   return {
     thread_id: '11111111-1111-4111-8111-111111111111',
@@ -89,6 +93,7 @@ const writeTranscript = async (config: WorkerOpenConfig, name: string, transcrip
 const start = (config: WorkerOpenConfig, path: string) => {
   const agent = makeCodexAgentFactory({
     command: { file: process.execPath, args: [bundle, '--transcript', path] },
+    records: replayProcessRecords(config.working_directory),
     ...(watchdog ? { watchdog } : {}),
     paths: (value) => {
       const statePath = value.adapter_config.state_path
@@ -151,6 +156,9 @@ describe('Codex Agent host', () => {
     const { agent, events } = start(config, fixture('tool_call_workspace_never'))
     const opened = await effect(agent.open(config))
     expect(opened.nativeSessionId).not.toBe('')
+    expect(replayProcessRecords(config.working_directory).list()).toEqual([
+      { pid: expect.any(Number), creationTime: expect.any(String), role: 'codex-host' },
+    ])
     const accepted = await submit(agent, messages(transcript)[0])
     expect(accepted.nativeSessionId).toBe(opened.nativeSessionId)
     await completed(events)

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { chmod, mkdtemp, readFile, readdir, rm, symlink, unlink } from 'node:fs/promises'
+import { chmod, readFile, readdir, rm, symlink, unlink } from 'node:fs/promises'
+import { makePrivateTempDirectory } from '../testing/private.ts'
 import { join } from 'node:path'
 import { Effect, Schema } from 'effect'
 import { FullOutputReference, SessionResult, UUID, type SessionRequest, type WorkerOpenConfig } from '@baton/protocol'
@@ -15,7 +16,7 @@ afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
 })
 async function fixture() {
-  const root = await mkdtemp('/tmp/baton-full-')
+  const root = await makePrivateTempDirectory('baton-full-')
   roots.push(root)
   const config: WorkerOpenConfig = {
     thread_id: randomUUID(),

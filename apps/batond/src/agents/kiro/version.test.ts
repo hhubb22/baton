@@ -1,10 +1,12 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { Effect, Schema } from 'effect'
+import { Effect, Layer, Schema } from 'effect'
+import { ChildProcess } from 'effect/process'
+import { ChildProcessSpawner } from 'effect/process/ChildProcessSpawner'
 import { NodeServices } from '@effect/platform-node'
 import { afterEach, describe, expect, it } from 'vite-plus/test'
 import { readProcessIdentity } from '../../platform/identity.ts'
+import { makePrivateTempDirectory } from '../../testing/private.ts'
 import { kiroVersion } from './version.ts'
 
 const directories: string[] = []
@@ -16,29 +18,47 @@ afterEach(async () => {
 })
 
 const executable = async (body: string) => {
-  const directory = await mkdtemp(join(tmpdir(), 'baton-kiro-version-'))
+  const directory = await makePrivateTempDirectory('baton-kiro-version-')
   directories.push(directory)
   const binary = join(directory, 'kiro-cli')
   const calls = join(directory, 'calls.json')
   await writeFile(
-    binary,
-    `#!${process.execPath}\nimport { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(calls)}, JSON.stringify({ args: process.argv.slice(2), pid: process.pid }));\nif (process.argv.length !== 3 || process.argv[2] !== '--version') process.exit(2);\n${body}\n`,
-    { mode: 0o700 },
+    `${binary}.mjs`,
+    `import { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(calls)}, JSON.stringify({ args: process.argv.slice(2), pid: process.pid }));\nif (process.argv.length !== 3 || process.argv[2] !== '--version') process.exit(2);\n${body}\n`,
   )
   return { directory, binary, calls }
 }
 
-const probe = (directory: string, binary: string, timeout?: number) =>
-  Effect.runPromise(
+const probe = (directory: string, binary: string, timeout?: number, onSpawn?: (pid: number) => void) => {
+  // Run the fixture through Node on every platform while preserving the probe's command arguments.
+  const spawner = Layer.effect(
+    ChildProcessSpawner,
+    Effect.gen(function* () {
+      const live = yield* ChildProcessSpawner
+      return ChildProcessSpawner.of({
+        ...live,
+        spawn: (command) =>
+          live
+            .spawn(
+              ChildProcess.isStandardCommand(command) && command.command === join(directory, 'kiro-cli')
+                ? ChildProcess.make(process.execPath, [`${command.command}.mjs`, ...command.args], command.options)
+                : command,
+            )
+            .pipe(Effect.tap((child) => Effect.sync(() => onSpawn?.(Number(child.pid))))),
+      })
+    }),
+  ).pipe(Layer.provide(NodeServices.layer))
+  return Effect.runPromise(
     kiroVersion({
       cwd: directory,
       binary,
       environment: { PATH: '' },
       ...(timeout === undefined ? {} : { timeout }),
-    }).pipe(Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.provide(spawner)),
   )
+}
 
-describe.skipIf(process.platform === 'win32')('Kiro version executable probe', () => {
+describe('Kiro version executable probe', () => {
   it.each([
     { output: 'kiro-cli 2.32.0\nprivate diagnostic', stream: 'stdout', version: '2.32.0' },
     { output: 'kiro-cli v2.32.0', stream: 'stderr', version: '2.32.0' },
@@ -69,8 +89,16 @@ describe.skipIf(process.platform === 'win32')('Kiro version executable probe', (
 
   it('times out and reaps a version command that never exits', async () => {
     const command = await executable('setInterval(() => {}, 1000);')
-    expect(await probe(command.directory, command.binary, 1000)).toEqual({ state: 'timeout', version: 'unknown' })
-    const { pid } = await readCalls(command.calls)
-    expect(await readProcessIdentity(pid)).toBeNull()
+    let pid: number | undefined
+    expect(
+      await probe(command.directory, command.binary, 1000, (value) => {
+        pid = value
+      }),
+    ).toEqual({
+      state: 'timeout',
+      version: 'unknown',
+    })
+    // A timeout can interrupt startup before a process handle exists.
+    if (pid !== undefined) expect(await readProcessIdentity(pid)).toBeNull()
   })
 })

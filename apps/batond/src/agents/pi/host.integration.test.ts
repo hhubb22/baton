@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -14,6 +13,9 @@ import { makePiAgentFactory } from './index.ts'
 import { AgentError, type AgentEvent, type AgentMessage, type ThreadAgent } from '../../worker/agent.ts'
 import { connectAgentHost } from '../../agent-host/transport.ts'
 import { makeWorker, type Worker } from '../../worker/index.ts'
+import type { ProcessRecordCallbacks } from '../../platform/process-types.ts'
+import { makePrivateTempDirectory } from '../../testing/private.ts'
+import { replayProcessRecords, workerProcessRecords } from '../../testing/cursor/process-records.ts'
 import {
   firstTurnOnly,
   piFixturePath,
@@ -66,9 +68,12 @@ afterAll(async () => {
 afterEach(async () => {
   for (const fiber of fibers.splice(0)) await Effect.runPromise(Fiber.interrupt(fiber))
   for (const agent of agents.splice(0)) {
-    await Effect.runPromise(agent.reap().pipe(Effect.catch(() => Effect.succeed({ processTreeStopped: false }))))
+    expect((await Effect.runPromise(agent.reap())).processTreeStopped).toBe(true)
   }
-  for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true })
+  for (const directory of directories.splice(0)) {
+    expect(replayProcessRecords(directory).list()).toEqual([])
+    await rm(directory, { recursive: true, force: true })
+  }
 })
 
 const waitFor = async (predicate: () => boolean) => {
@@ -80,7 +85,7 @@ const waitFor = async (predicate: () => boolean) => {
 }
 
 const workspace = async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'baton-pi-thread-'))
+  const directory = await makePrivateTempDirectory('baton-pi-thread-')
   directories.push(directory)
   const config: WorkerOpenConfig = {
     thread_id: '11111111-1111-4111-8111-111111111111',
@@ -95,39 +100,47 @@ const workspace = async () => {
   return config
 }
 
-const replayFactory = (transcriptFile: string, loseSteerReply = false, beforeSteerResponse?: Effect.Effect<void>) =>
-  makePiAgentFactory({
-    command: { file: process.execPath, args: [bundle, '--transcript', transcriptFile] },
-    ...(watchdog ? { watchdog } : {}),
-    ...(loseSteerReply || beforeSteerResponse
-      ? ({
-          connect: (options, signal) =>
-            Effect.gen(function* () {
-              const host = yield* connectAgentHost(options, signal)
-              return {
-                ...host,
-                send: (message, preparation) =>
-                  host
-                    .send(message, preparation)
-                    .pipe(
-                      Effect.flatMap((acceptance) =>
-                        message.mode === 'steer'
-                          ? loseSteerReply
-                            ? Effect.fail(new AgentError('Replay host lost the steering response'))
-                            : (beforeSteerResponse ?? Effect.void).pipe(Effect.as(acceptance))
-                          : Effect.succeed(acceptance),
+const replayFactory =
+  (
+    transcriptFile: string,
+    loseSteerReply = false,
+    beforeSteerResponse?: Effect.Effect<void>,
+    records?: ProcessRecordCallbacks,
+  ) =>
+  (config: WorkerOpenConfig) =>
+    makePiAgentFactory({
+      command: { file: process.execPath, args: [bundle, '--transcript', transcriptFile] },
+      records: records ?? replayProcessRecords(config.working_directory),
+      ...(watchdog ? { watchdog } : {}),
+      ...(loseSteerReply || beforeSteerResponse
+        ? ({
+            connect: (options, signal) =>
+              Effect.gen(function* () {
+                const host = yield* connectAgentHost(options, signal)
+                return {
+                  ...host,
+                  send: (message, preparation) =>
+                    host
+                      .send(message, preparation)
+                      .pipe(
+                        Effect.flatMap((acceptance) =>
+                          message.mode === 'steer'
+                            ? loseSteerReply
+                              ? Effect.fail(new AgentError('Replay host lost the steering response'))
+                              : (beforeSteerResponse ?? Effect.void).pipe(Effect.as(acceptance))
+                            : Effect.succeed(acceptance),
+                        ),
                       ),
-                    ),
-              }
-            }),
-        } satisfies Partial<import('../../agent-host/thread-agent.ts').AgentHostOptions>)
-      : {}),
-    paths: (value) => {
-      const statePath = value.adapter_config.state_path
-      if (statePath === undefined) throw new Error('Pi replay requires state_path')
-      return { workingDirectory: value.working_directory, privateDirectory: dirname(statePath) }
-    },
-  })
+                }
+              }),
+          } satisfies Partial<import('../../agent-host/thread-agent.ts').AgentHostOptions>)
+        : {}),
+      paths: (value) => {
+        const statePath = value.adapter_config.state_path
+        if (statePath === undefined) throw new Error('Pi replay requires state_path')
+        return { workingDirectory: value.working_directory, privateDirectory: dirname(statePath) }
+      },
+    })(config)
 
 const startTranscript = (config: WorkerOpenConfig, transcriptFile: string) => {
   const agent = replayFactory(transcriptFile)(config)
@@ -140,7 +153,7 @@ const startTranscript = (config: WorkerOpenConfig, transcriptFile: string) => {
 const start = async (name: string) => startTranscript(await workspace(), piFixturePath(name))
 
 const writeTranscript = async (transcript: PiRpcReplayTranscript) => {
-  const directory = await mkdtemp(join(tmpdir(), 'baton-pi-replay-'))
+  const directory = await makePrivateTempDirectory('baton-pi-replay-')
   directories.push(directory)
   const path = join(directory, 'transcript.ndjson')
   await writePiTranscript(path, transcript)
@@ -237,6 +250,9 @@ describe('Pi Agent host', () => {
     const { agent, events, config } = await start('simple')
     const opened = await Effect.runPromise(agent.open(config))
     expect(opened.nativeSessionId).not.toBe('')
+    expect(replayProcessRecords(config.working_directory).list()).toEqual([
+      { pid: expect.any(Number), creationTime: expect.any(String), role: 'pi-host' },
+    ])
     const input = message('simple-1', 'Respond with the following text: fixture simple ok')
     await Effect.runPromise(agent.send(input, await Effect.runPromise(agent.prepareInput(input, 0))))
     await waitFor(() => events.some((event) => event.type === 'end'))
@@ -399,9 +415,14 @@ describe('Pi Agent host', () => {
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const worker = yield* makeWorker({
+          const worker: Worker = yield* makeWorker({
             dbPath: join(config.working_directory, 'thread.db'),
-            agentFactory: replayFactory(file, true),
+            agentFactory: replayFactory(
+              file,
+              true,
+              undefined,
+              workerProcessRecords(() => worker),
+            ),
             sendTimeoutMs: 1000,
           })
           yield* worker.handle({
@@ -413,6 +434,9 @@ describe('Pi Agent host', () => {
             open_config: config,
           })
           yield* waitForReports(worker, (reports) => reports.some((report) => report.kind === 'thread.opened'))
+          expect(yield* worker.records.list()).toEqual([
+            { pid: expect.any(Number), creationTime: expect.any(String), role: 'pi-host' },
+          ])
           const first = {
             type: 'thread_message',
             ok: true,
@@ -467,10 +491,15 @@ describe('Pi Agent host', () => {
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const worker = yield* makeWorker({
+          const worker: Worker = yield* makeWorker({
             dbPath: join(config.working_directory, 'thread.db'),
             agentFactory: (config) => {
-              const agent = replayFactory(file, false, Deferred.await(terminal))(config)
+              const agent = replayFactory(
+                file,
+                false,
+                Deferred.await(terminal),
+                workerProcessRecords(() => worker),
+              )(config)
               return {
                 ...agent,
                 events: agent.events.pipe(
@@ -562,9 +591,14 @@ describe('Pi Agent host', () => {
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const worker = yield* makeWorker({
+          const worker: Worker = yield* makeWorker({
             dbPath: join(config.working_directory, 'thread.db'),
-            agentFactory: replayFactory(transcriptFile),
+            agentFactory: replayFactory(
+              transcriptFile,
+              false,
+              undefined,
+              workerProcessRecords(() => worker),
+            ),
           })
           expect(
             yield* worker.handle({

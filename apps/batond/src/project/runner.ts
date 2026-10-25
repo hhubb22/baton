@@ -1,4 +1,4 @@
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { randomUUID } from 'node:crypto'
@@ -35,7 +35,7 @@ export const defaultWatchdogCommand = (): ProcessCommand => {
     file: process.execPath,
     args: [
       '--import',
-      require.resolve('tsx'),
+      pathToFileURL(require.resolve('tsx')).href,
       fileURLToPath(new URL('../../../apps/batond/src/project/watchdog-entry.ts', entry)),
     ],
   }
@@ -51,7 +51,7 @@ export const defaultRuntimeCommand = (): ProcessCommand => {
   const require = createRequire(entry)
   return {
     file: process.execPath,
-    args: ['--import', require.resolve('tsx'), fileURLToPath(entry)],
+    args: ['--import', pathToFileURL(require.resolve('tsx')).href, fileURLToPath(entry)],
     ...(process.platform === 'win32' ? { env: privateFileHostEnvironment(entry) } : {}),
   }
 }

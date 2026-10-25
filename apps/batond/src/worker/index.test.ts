@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { rmSync } from 'node:fs'
+import { makePrivateTempDirectory } from '../testing/private.ts'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import {
@@ -169,7 +169,7 @@ const called = (fixture: Fake, call: string) =>
 const fixture = <A, E, R>(body: (filename: string) => Effect.Effect<A, E, R>) =>
   Effect.scoped(
     Effect.acquireRelease(
-      Effect.sync(() => mkdtempSync(join(tmpdir(), 'baton-worker-'))),
+      Effect.promise(() => makePrivateTempDirectory('baton-worker-')),
       (directory) => Effect.sync(() => rmSync(directory, { recursive: true, force: true })),
     ).pipe(Effect.flatMap((directory) => body(join(directory, 'thread.db')))),
   )

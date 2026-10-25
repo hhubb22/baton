@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Effect } from 'effect'
 import { connectAgentHost, type AgentHostProcessOptions } from '../../agent-host/transport.ts'
+import { protectPrivateDirectory } from '../../platform/private.ts'
 
 /** Read-only probe in an empty temporary workspace. It never opens a session or sends a prompt. */
 export const probePi = (
@@ -14,6 +15,7 @@ export const probePi = (
     Effect.gen(function* () {
       const temporary = yield* Effect.promise(() => mkdtemp(join(tmpdir(), 'baton-pi-probe-workspace-')))
       yield* Effect.addFinalizer(() => Effect.promise(() => rm(temporary, { recursive: true, force: true })))
+      yield* Effect.promise(() => protectPrivateDirectory(temporary))
       const controller = new AbortController()
       const host = yield* connectAgentHost(
         { ...options, agentType: 'pi', paths: { workingDirectory: temporary, privateDirectory: temporary } },

@@ -1,7 +1,7 @@
-import { Effect } from 'effect'
+import { Effect, Schema } from 'effect'
 import { DEFAULT_MODEL } from '@t3tools/contracts'
 import { agentCapabilities, capabilityLimitations } from './capabilities.ts'
-import { dirname, isAbsolute } from 'node:path'
+import { dirname, isAbsolute, join } from 'node:path'
 import type { RuntimeAgent, WorkerOpenConfig } from '@baton/protocol'
 import type { ProbeResult } from '../agent-host/protocol.ts'
 import { inspectCursorSdk } from './cursor/sdk-loader.ts'
@@ -10,7 +10,16 @@ import { makeCodexAgentFactory, probeCodex } from './codex/index.ts'
 import { makePiAgentFactory, probePi } from './pi/index.ts'
 import { makeKiroAgentFactory, probeKiro } from './kiro/index.ts'
 import { makeShellAgentFactory } from './shell/index.ts'
-import { startProcessWatchdog } from '../platform/process.ts'
+import {
+  startProcessWatchdog,
+  reapProcessTree,
+  type ProcessRecord,
+  type ProcessRecordCallbacks,
+} from '../platform/process.ts'
+import { acquireProcessLockScoped } from '../platform/lock.ts'
+import { ensurePrivateDirectory, readPrivateFile, writePrivateFileAtomic } from '../platform/private.ts'
+import { hasCode } from '../platform/errors.ts'
+import { defaultDataDirectory } from '../daemon/identity.ts'
 import { currentBatondCommand } from '../daemon/host.ts'
 import { AgentError } from '../worker/agent.ts'
 
@@ -66,7 +75,7 @@ export function hostedAgentReport(
   }
 }
 
-export async function probeLocalCursor(): Promise<RuntimeAgent> {
+export async function probeLocalCursor(dataDirectory?: string): Promise<RuntimeAgent> {
   let version = 'unknown'
   try {
     const installed = inspectCursorSdk()
@@ -96,7 +105,11 @@ export async function probeLocalCursor(): Promise<RuntimeAgent> {
       '需要显式配置 CURSOR_API_KEY',
     )
   try {
-    return hostedAgentReport('cursor', await probeHost(probeCursor), 'Cursor SDK 未安装或尚未认证')
+    return hostedAgentReport(
+      'cursor',
+      await probeHost('cursor', probeCursor, { dataDirectory }),
+      'Cursor SDK 未安装或尚未认证',
+    )
   } catch {
     return hostedAgentReport(
       'cursor',
@@ -111,31 +124,107 @@ export async function probeLocalCursor(): Promise<RuntimeAgent> {
   }
 }
 
-const probeHost = (probe: typeof probeCursor) =>
+const ProbeRecord = Schema.Struct({
+  pid: Schema.Int.check(Schema.isGreaterThan(1)),
+  creationTime: Schema.NonEmptyString,
+  role: Schema.NonEmptyString,
+}) satisfies Schema.Schema<ProcessRecord>
+const ProbeRecords = Schema.fromJsonString(Schema.Array(ProbeRecord))
+
+/** The lock covers recovery, host execution and cleanup; failed reaping keeps the durable record. */
+export const makeProbeProcessRecords = Effect.fn('Agents.makeProbeProcessRecords')(function* (
+  directory: string,
+  reap: typeof reapProcessTree = reapProcessTree,
+) {
+  yield* Effect.promise(() => ensurePrivateDirectory(directory))
+  yield* acquireProcessLockScoped(join(directory, 'probe.lock'))
+  const file = join(directory, 'processes.json')
+  const load = async () => {
+    try {
+      return Schema.decodeUnknownSync(ProbeRecords)((await readPrivateFile(file)).toString('utf8'))
+    } catch (error) {
+      if (hasCode(error, 'ENOENT')) return []
+      throw error
+    }
+  }
+  let writing = Promise.resolve()
+  const update = (change: (records: readonly ProcessRecord[]) => readonly ProcessRecord[]) => {
+    const next = writing.then(async () => {
+      const records = change(await load())
+      await writePrivateFileAtomic(file, JSON.stringify(records))
+    })
+    writing = next.catch(() => {})
+    return next
+  }
+  const same = (a: ProcessRecord, b: ProcessRecord) =>
+    a.pid === b.pid && a.creationTime === b.creationTime && a.role === b.role
+  const records: ProcessRecordCallbacks = {
+    add: (record) =>
+      update((previous) => {
+        Schema.decodeUnknownSync(ProbeRecord)(record)
+        const existing = previous.find((value) => value.pid === record.pid)
+        if (existing && !same(existing, record)) throw new Error('Probe process identity conflict')
+        return existing ? previous : [...previous, record]
+      }),
+    remove: (record) => update((previous) => previous.filter((value) => !same(value, record))),
+  }
+  const recover = async () => {
+    await writing
+    for (const record of await load()) {
+      const result = await reap(record)
+      if (result.reaped || result.reason === 'identity-mismatch') await records.remove(record)
+      else throw new Error('Probe process cleanup was not confirmed')
+    }
+  }
+  yield* Effect.tryPromise(recover)
+  yield* Effect.addFinalizer(() => Effect.tryPromise(recover).pipe(Effect.orDie))
+  return records
+})
+
+export const probeHost = (
+  agentType: 'cursor' | 'pi' | 'codex' | 'kiro',
+  probe: typeof probeCursor,
+  options: { readonly dataDirectory?: string | undefined; readonly platform?: NodeJS.Platform } = {},
+) =>
   Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
-        const watchdog = yield* Effect.acquireRelease(
-          Effect.promise(() =>
-            startProcessWatchdog({
-              file: currentBatondCommand().executable,
-              args: [...currentBatondCommand().args, 'watchdog'],
-            }),
-          ),
-          (owned) => Effect.promise(() => owned.close()),
-        )
         const invocation = currentBatondCommand()
+        const platform = options.platform ?? process.platform
+        const watchdog =
+          platform === 'win32'
+            ? undefined
+            : yield* Effect.acquireRelease(
+                Effect.promise(() =>
+                  startProcessWatchdog({
+                    file: invocation.executable,
+                    args: [...invocation.args, 'watchdog'],
+                  }),
+                ),
+                (owned) => Effect.promise(() => owned.close()),
+              )
+        let records: ProcessRecordCallbacks | undefined
+        if (platform === 'win32') {
+          const root = options.dataDirectory ?? defaultDataDirectory()
+          const probes = join(root, 'agent-probes')
+          yield* Effect.promise(async () => {
+            await ensurePrivateDirectory(root)
+            await ensurePrivateDirectory(probes)
+          })
+          records = yield* makeProbeProcessRecords(join(probes, agentType))
+        }
         return yield* probe({
           command: { file: invocation.executable, args: invocation.args },
-          watchdog,
+          ...(watchdog ? { watchdog } : {}),
+          ...(records ? { records } : {}),
         }).pipe(Effect.timeout('30 seconds'))
       }),
     ),
   )
 
-export async function probeLocalPi(): Promise<RuntimeAgent> {
+export async function probeLocalPi(dataDirectory?: string): Promise<RuntimeAgent> {
   try {
-    return hostedAgentReport('pi', await probeHost(probePi), 'Pi CLI 未安装或尚未认证')
+    return hostedAgentReport('pi', await probeHost('pi', probePi, { dataDirectory }), 'Pi CLI 未安装或尚未认证')
   } catch {
     return hostedAgentReport(
       'pi',
@@ -150,9 +239,13 @@ export async function probeLocalPi(): Promise<RuntimeAgent> {
   }
 }
 
-export async function probeLocalCodex(): Promise<RuntimeAgent> {
+export async function probeLocalCodex(dataDirectory?: string): Promise<RuntimeAgent> {
   try {
-    return hostedAgentReport('codex', await probeHost(probeCodex), 'Codex CLI 未安装或尚未认证')
+    return hostedAgentReport(
+      'codex',
+      await probeHost('codex', probeCodex, { dataDirectory }),
+      'Codex CLI 未安装或尚未认证',
+    )
   } catch {
     return hostedAgentReport(
       'codex',
@@ -167,9 +260,9 @@ export async function probeLocalCodex(): Promise<RuntimeAgent> {
   }
 }
 
-export async function probeLocalKiro(): Promise<RuntimeAgent> {
+export async function probeLocalKiro(dataDirectory?: string): Promise<RuntimeAgent> {
   try {
-    return hostedAgentReport('kiro', await probeHost(probeKiro), 'Kiro CLI 未安装或尚未认证')
+    return hostedAgentReport('kiro', await probeHost('kiro', probeKiro, { dataDirectory }), 'Kiro CLI 未安装或尚未认证')
   } catch {
     return hostedAgentReport(
       'kiro',
@@ -184,8 +277,13 @@ export async function probeLocalKiro(): Promise<RuntimeAgent> {
   }
 }
 
-export async function probeLocalAgents(): Promise<RuntimeAgent[]> {
-  return Promise.all([probeLocalCursor(), probeLocalPi(), probeLocalCodex(), probeLocalKiro()])
+export async function probeLocalAgents(dataDirectory?: string): Promise<RuntimeAgent[]> {
+  return Promise.all([
+    probeLocalCursor(dataDirectory),
+    probeLocalPi(dataDirectory),
+    probeLocalCodex(dataDirectory),
+    probeLocalKiro(dataDirectory),
+  ])
 }
 
 export const agentRegistry = {

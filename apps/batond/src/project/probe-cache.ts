@@ -1,6 +1,7 @@
 import { lstat, readdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { ProcessCommand } from '../platform/process.ts'
 import { isMissing } from '../daemon/identity.ts'
 
@@ -31,7 +32,12 @@ export async function probeFingerprint(command: ProcessCommand): Promise<string 
         .sort()
         .map((file) => join(directory, file)),
     ]
-    const runtimePaths = [command.file, ...(command.args ?? []).filter(isAbsolute)]
+    const runtimePaths = [
+      command.file,
+      ...(command.args ?? []).flatMap((argument) =>
+        argument.startsWith('file:') ? [fileURLToPath(argument)] : isAbsolute(argument) ? [argument] : [],
+      ),
+    ]
     return JSON.stringify([
       command,
       await Promise.all(runtimePaths.map((path) => metadata(path, true))),

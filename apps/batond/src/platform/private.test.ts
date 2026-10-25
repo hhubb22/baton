@@ -1,9 +1,18 @@
 import { constants } from 'node:fs'
-import { chmod, lstat, mkdtemp, readdir, rm, symlink } from 'node:fs/promises'
+import { chmod, lstat, mkdir, realpath, readdir, rm, symlink } from 'node:fs/promises'
+import { makePrivateTempDirectory } from '../testing/private.ts'
+import { join, relative } from 'node:path'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vite-plus/test'
-import { ensurePrivateDirectory, openPrivateFile, readPrivateFile, writePrivateFile } from './private.ts'
+import {
+  ensurePrivateDirectory,
+  openPrivateFile,
+  protectPrivateDirectory,
+  readPrivateFile,
+  validatePrivateDirectory,
+  writePrivateFile,
+} from './private.ts'
+import { systemCommand, windowsTool } from './identity.ts'
 
 const directories: string[] = []
 afterEach(async () => {
@@ -11,13 +20,22 @@ afterEach(async () => {
 })
 
 async function directory() {
-  const path = await mkdtemp(join(tmpdir(), 'baton-private-'))
+  const path = await makePrivateTempDirectory('baton-private-')
   directories.push(path)
   await ensurePrivateDirectory(path)
   return path
 }
 
 describe('private files', () => {
+  it('initializes private directories before simultaneous callers validate them', async () => {
+    const root = await directory()
+    const path = join(root, 'shared')
+    await Promise.all(Array.from({ length: 6 }, () => ensurePrivateDirectory(path)))
+    await validatePrivateDirectory(path)
+    await writePrivateFile(join(path, 'secret'), 'local-private-value')
+    expect((await readPrivateFile(join(path, 'secret'))).toString()).toBe('local-private-value')
+  })
+
   it('atomically replaces complete files and opens append without truncation', async () => {
     const path = await directory()
     const file = join(path, 'mapping.json')
@@ -38,6 +56,32 @@ describe('private files', () => {
     await expect(openPrivateFile(file, constants.O_WRONLY | constants.O_TRUNC)).rejects.toThrow('without truncation')
   })
 
+  // Windows DACL 与 junction 规则需要在 Windows 文件系统上验证。
+  it.skipIf(process.platform !== 'win32')(
+    'protects inherited ACLs, removes other grants and rejects junctions',
+    async () => {
+      const root = await directory()
+      const path = join(root, "credentials's ‘left’ ‚low‛ [目录] $literal")
+      await mkdir(path)
+      await expect(ensurePrivateDirectory(path)).rejects.toThrow('inherits ACLs')
+      await protectPrivateDirectory(path)
+      await ensurePrivateDirectory(path)
+      const temporarySpelling = join(tmpdir(), relative(await realpath(tmpdir()), path))
+      await validatePrivateDirectory(temporarySpelling)
+      await writePrivateFile(join(path, 'secret'), 'local-private-value')
+      await systemCommand(windowsTool('icacls.exe'), [path, '/grant', '*S-1-5-32-544:(OI)(CI)F', '/Q'])
+      await expect(validatePrivateDirectory(path)).rejects.toThrow('only the current user')
+      await expect(ensurePrivateDirectory(path)).rejects.toThrow('only the current user')
+      await protectPrivateDirectory(path)
+      await ensurePrivateDirectory(path)
+      expect((await readPrivateFile(join(path, 'secret'))).toString()).toBe('local-private-value')
+      const alias = join(root, 'alias')
+      await symlink(path, alias, 'junction')
+      await expect(ensurePrivateDirectory(alias)).rejects.toThrow('type')
+    },
+  )
+
+  // POSIX mode bits and file symlinks do not implement the Windows directory ACL contract.
   it.skipIf(process.platform === 'win32')(
     'rejects symlinks and unsafe existing permissions without repairing them',
     async () => {

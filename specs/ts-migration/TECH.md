@@ -100,7 +100,7 @@ Node 没有 Win32 安全描述符与 Job Object 的 API。第一版不引入原�
 | 能力 | POSIX | Windows 第一版 |
 |---|---|---|
 | Agent 进程树回收 | 独立进程组 + watchdog，保证与现在相同 | `taskkill /T /F` + Worker 账本中的 PID 与创建时间，见 Agent 适配 TECH |
-| 私有文件 | 创建时 `0600`/`0700`，打开时 `lstat` 检查所有者、权限和类型 | 数据目录创建时用 `icacls` 去掉继承并只授权当前用户，启动时用 `icacls` 输出检查目录 ACL；不再逐个句柄检查 DACL |
+| 私有文件 | 创建时 `0600`/`0700`，打开时 `lstat` 检查所有者、权限和类型 | 数据目录创建和显式保护时，通过 PowerShell 一次设置受保护的 DACL，仅授权 `whoami /user` 报告的当前用户 SID；启动时用 `icacls /save` 导出的数值 SID 检查目录 ACL，不按显示名或用户目录路径比较；不逐个句柄检查 DACL |
 | Worker IPC | 私有目录下的 UDS | 命名管道使用 Node 默认安全描述符，不能限定为当前用户；依靠现有 IPC 令牌认证，令牌存于私有数据目录 |
 | 含睡眠的单调时间 | 见下段 | 见下段 |
 

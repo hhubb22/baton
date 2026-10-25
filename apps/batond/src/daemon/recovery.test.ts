@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { chmod, mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { chmod, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
@@ -10,6 +9,7 @@ import { afterEach, expect, it, vi } from 'vite-plus/test'
 import type { ThreadReport, WorkerIPCMessage, WorkerOpenConfig } from '@baton/protocol'
 import { acquireProcessLock } from '../platform/lock.ts'
 import { writePrivateFileAtomic } from '../platform/private.ts'
+import { makePrivateTempDirectory } from '../testing/private.ts'
 import { makeWorker, type Worker, type ThreadAgent } from '../worker/index.ts'
 import { initialState, makeLedger, type State } from '../worker/ledger.ts'
 import { initializeWorkerDirectory, LocalWorkerHost } from './host.ts'
@@ -28,9 +28,8 @@ const run = async <A, E>(effect: Effect.Effect<A, E>): Promise<A> => {
   return result.value
 }
 async function fixture() {
-  const path = await mkdtemp(join(process.platform === 'win32' ? tmpdir() : '/tmp', 'br-'))
+  const path = await makePrivateTempDirectory('br-')
   temporary.push(path)
-  await chmod(path, 0o700)
   const threadId = randomUUID(),
     commandId = randomUUID()
   const paths = await initializeWorkerDirectory(path, threadId)
@@ -493,11 +492,14 @@ it('keeps a locked or temporarily inaccessible ledger retryable without publishi
       db.exec('ROLLBACK')
       db.close()
     }
-    await chmod(f.paths.ledger, 0o644)
-    try {
-      expect(await recovery.ensure(f.saved.threadId)).toBe('retry')
-    } finally {
-      await chmod(f.paths.ledger, 0o600)
+    // Windows 检查父目录 ACL，chmod 不能构造不安全的文件 DACL。
+    if (process.platform !== 'win32') {
+      await chmod(f.paths.ledger, 0o644)
+      try {
+        expect(await recovery.ensure(f.saved.threadId)).toBe('retry')
+      } finally {
+        await chmod(f.paths.ledger, 0o600)
+      }
     }
     expect(await run(ledger.pendingReports())).toEqual([])
     expect((await run(ledger.worker(f.saved.threadId)))?.history_unavailable).toBeUndefined()
