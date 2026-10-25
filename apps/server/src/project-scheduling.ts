@@ -83,7 +83,7 @@ export const scheduleProjectRun = Effect.fn('scheduleProjectRun')(function* (age
             : !node.report?.project_runtime
               ? 'runtime_missing'
               : !node.report.project_runtime.providers?.some(
-                    (p) => p.provider === a.provider && p.status === 'available',
+                    (p) => p.provider === a.provider && p.status !== 'login_required',
                   )
                 ? 'login_required'
                 : ''
@@ -95,17 +95,17 @@ export const scheduleProjectRun = Effect.fn('scheduleProjectRun')(function* (age
             report: RuntimeReport
             count: string
           }>`SELECT n.revoked_at IS NULL AND COALESCE(p.online AND p.synced,false) AS eligible,r.report,
- (SELECT count(*) FROM agent_runs ar JOIN project_agents pa ON pa.lease_run_id=ar.id WHERE ar.node_id=n.id AND pa.lease_until>clock_timestamp()) AS count
+ (SELECT count(*) FROM agent_runs ar WHERE ar.node_id=n.id AND ar.stop_acked_at IS NULL) AS count
  FROM nodes n LEFT JOIN node_presence p ON p.node_id=n.id LEFT JOIN node_runtime_reports r ON r.node_id=n.id WHERE n.id=${node.id}`
           why = !current?.eligible
             ? 'offline'
             : !current.report?.project_runtime
               ? 'runtime_missing'
               : !current.report.project_runtime.providers?.some(
-                    (p) => p.provider === a.provider && p.status === 'available',
+                    (p) => p.provider === a.provider && p.status !== 'login_required',
                   )
                 ? 'login_required'
-                : Number(current.count) >= 4
+                : Number(current.count) >= (current.report.project_runtime.max_concurrent_projects ?? 4)
                   ? 'capacity'
                   : ''
         }

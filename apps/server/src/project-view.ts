@@ -62,7 +62,7 @@ export const projectStatus = Effect.fn('projectStatus')(function* (
           report: RuntimeReport | null
           count: string
         }>`SELECT COALESCE(np.online,false) AS online,COALESCE(np.synced,false) AS synced,rr.report,
- (SELECT count(*) FROM agent_runs r JOIN project_agents pa ON pa.lease_run_id=r.id WHERE r.node_id=n.id AND pa.lease_until>clock_timestamp()) AS count
+ (SELECT count(*) FROM agent_runs r WHERE r.node_id=n.id AND r.stop_acked_at IS NULL) AS count
  FROM nodes n LEFT JOIN node_presence np ON np.node_id=n.id LEFT JOIN node_runtime_reports rr ON rr.node_id=n.id WHERE n.employee_id=${employee} AND n.revoked_at IS NULL`
         const reasons = [
           'all_devices_offline',
@@ -81,10 +81,10 @@ export const projectStatus = Effect.fn('projectStatus')(function* (
               : !node.report?.project_runtime
                 ? 2
                 : !node.report.project_runtime.providers?.some(
-                      (v) => v.provider === p.agent.provider && v.status === 'available',
+                      (v) => v.provider === p.agent.provider && v.status !== 'login_required',
                     )
                   ? 3
-                  : Number(node.count) >= 4
+                  : Number(node.count) >= (node.report.project_runtime.max_concurrent_projects ?? 4)
                     ? 4
                     : 5
           if (candidate > rank) {

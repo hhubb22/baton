@@ -4,7 +4,7 @@ import { userInfo } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 import { RuntimeExec } from '@baton/protocol'
 import { Schema } from 'effect'
-import { loadBrowseRoots, type BrowseRoot } from '../daemon/roots.ts'
+import { readBrowseRootsConfig, loadBrowseRoots, type BrowseRoot } from '../daemon/roots.ts'
 import { isMissing } from '../daemon/identity.ts'
 import { ensurePrivateDirectory, readPrivateFile, writePrivateFileAtomic } from '../platform/private.ts'
 import { acquireProcessLock } from '../platform/lock.ts'
@@ -61,8 +61,11 @@ export async function updateBrowseRoots(
   if (id && !/^[a-z][a-z0-9._-]{0,63}$/.test(id)) throw new DeviceError('invalid_path', '目录标识不正确')
   return withConfigurationLock(dataDirectory, 'browse-roots', async () => {
     let roots: BrowseRoot[]
+    let maxRoots = 256
     try {
-      roots = [...(await loadBrowseRoots(dataDirectory))]
+      const config = await readBrowseRootsConfig(dataDirectory)
+      roots = [...config.roots]
+      maxRoots = config.maxRoots
     } catch (error) {
       if (!isMissing(error)) throw error
       roots = []
@@ -79,7 +82,7 @@ export async function updateBrowseRoots(
       if (id && roots.some((root) => root.id === id && root.path !== path))
         throw new DeviceError('invalid_path', '目录标识已存在')
       if (roots.some((root) => root.path === path)) return roots
-      if (roots.length >= 32) throw new DeviceError('config_unavailable', '授权目录最多 32 个')
+      if (roots.length >= maxRoots) throw new DeviceError('config_unavailable', `授权目录最多 ${maxRoots} 个`)
       const baseId = id ?? `root-${createHash('sha256').update(path).digest('hex').slice(0, 16)}`
       let rootId = baseId
       for (let suffix = 2; roots.some((root) => root.id === rootId); suffix++) rootId = `${baseId}-${suffix}`
@@ -89,9 +92,37 @@ export async function updateBrowseRoots(
       if (isAbsolute(target)) actual = await realpath(target).catch(() => resolve(target))
       roots = roots.filter((root) => root.id !== target && root.path !== actual && root.path !== target)
     }
-    await writePrivateFileAtomic(join(dataDirectory, 'browse-roots.json'), JSON.stringify({ roots }))
+    await writePrivateFileAtomic(join(dataDirectory, 'browse-roots.json'), JSON.stringify({ roots, maxRoots }))
     return loadBrowseRoots(dataDirectory)
   })
+}
+
+const PositiveSafeInteger = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }))
+const ProjectRuntimeConfig = Schema.Struct({
+  maxOutputTokens: Schema.optionalKey(PositiveSafeInteger),
+  maxModelCalls: Schema.optionalKey(PositiveSafeInteger),
+  maxConcurrentProjects: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1024 }))),
+  probeTimeoutMs: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 300000 }))),
+  probeMaxOutputBytes: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1024, maximum: 192 * 1024 }))),
+})
+export async function readProjectRuntimeConfig(dataDirectory: string) {
+  let config: typeof ProjectRuntimeConfig.Type = {}
+  try {
+    const raw = await readPrivateFile(join(dataDirectory, 'project-runtime.json'))
+    if (raw.length > 8192) throw new Error()
+    config = Schema.decodeUnknownSync(ProjectRuntimeConfig)(JSON.parse(raw.toString('utf8')), {
+      onExcessProperty: 'error',
+    })
+  } catch (error) {
+    if (!isMissing(error)) throw new DeviceError('config_unavailable', 'Project Runtime 配置无效')
+  }
+  return {
+    maxOutputTokens: config.maxOutputTokens ?? 32000,
+    maxModelCalls: config.maxModelCalls ?? 64,
+    maxConcurrentProjects: config.maxConcurrentProjects ?? 4,
+    probeTimeoutMs: config.probeTimeoutMs ?? 5000,
+    probeMaxOutputBytes: config.probeMaxOutputBytes ?? 64 * 1024,
+  }
 }
 
 export function defaultProjectShell(): string {

@@ -3,6 +3,7 @@ import { rm, open } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { Effect, Schema, Predicate } from 'effect'
 import { ProjectRunCommand, ProjectRuntimeRequest, ProjectRuntimeResult } from '@baton/protocol'
+import { readProjectRuntimeConfig } from '../devices/config.ts'
 import { ensurePrivateDirectory, openPrivateFile } from '../platform/private.ts'
 import { hasCode } from '../platform/errors.ts'
 import { startProcessWatchdog, reapProcessTree, type OwnedProcess, type ProcessWatchdog } from '../platform/process.ts'
@@ -91,13 +92,7 @@ class Manager implements ProjectManager {
   }
   probe = (signal?: AbortSignal) => this.runner.probe(signal)
   subscriptions = (signal?: AbortSignal) => this.probe(signal)
-  async report(signal?: AbortSignal) {
-    try {
-      return await this.probe(signal)
-    } catch {
-      return undefined
-    }
-  }
+  report = (signal?: AbortSignal) => this.runner.report(signal)
   login = (provider: string, signal?: AbortSignal) => this.runner.login(provider, signal)
   startDeviceLogin = (provider: string, signal?: AbortSignal, onDone?: () => void) =>
     this.runner.startDeviceLogin(provider, signal, onDone)
@@ -247,7 +242,12 @@ class Manager implements ProjectManager {
       this.cleanup()
       return
     }
-    if (this.runs.size >= 4) {
+    const config = await readProjectRuntimeConfig(this.options.dataDir).catch(() => undefined)
+    if (!config) {
+      void this.track(this.management(command, 'start_failed', 'config_unavailable'))
+      return
+    }
+    if ((await safePromise(this.ledger.occupied())) >= config.maxConcurrentProjects) {
       void this.track(this.management(command, 'start_failed', 'capacity_exceeded'))
       return
     }
@@ -279,9 +279,22 @@ class Manager implements ProjectManager {
     })
     try {
       const report = await this.probe(run.cancel.signal)
-      if (!report.providers?.some((p) => p.provider === run.command.provider && p.status === 'available')) {
+      const provider = report.providers?.find((p) => p.provider === run.command.provider)
+      if (!provider || provider.status === 'login_required') {
         this.options.onReportChanged?.()
-        await this.failed(run, 'login_required')
+        await this.failed(run, provider ? 'login_required' : 'provider_missing')
+        return
+      }
+      if (
+        provider.reason &&
+        [
+          'credential_permissions_invalid',
+          'credential_owner_invalid',
+          'credential_path_invalid',
+          'credential_private_file_failed',
+        ].includes(provider.reason)
+      ) {
+        await this.failed(run, provider.reason)
         return
       }
       run.cancel.signal.throwIfAborted()
@@ -304,8 +317,15 @@ class Manager implements ProjectManager {
       await ensurePrivateDirectory(join(this.options.dataDir, 'project-runtimes'))
       await ensurePrivateDirectory(run.control)
       this.lease(run)
+      const config = await readProjectRuntimeConfig(this.options.dataDir)
       run.owned = await this.runner.spawn(
-        ['run'],
+        [
+          'run',
+          '--max-output-tokens',
+          String(config.maxOutputTokens),
+          '--max-model-calls',
+          String(config.maxModelCalls),
+        ],
         run.cancel.signal,
         run.command.run_id,
         run.control,

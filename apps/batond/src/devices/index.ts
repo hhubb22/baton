@@ -28,6 +28,7 @@ export type DeviceRequest = FileRequest | BrowseRootsRequest | ProjectExecReques
 export type DeviceResult = FileResult | BrowseRootsResult | ProjectExecResult | SubscriptionLoginResult
 export interface DeviceRuntime {
   probe(signal?: AbortSignal): Promise<ProjectRuntime>
+  report?(signal?: AbortSignal): Promise<ProjectRuntime | undefined>
   startDeviceLogin(provider: string, signal?: AbortSignal, onDone?: () => void): Promise<SubscriptionLoginResponse>
 }
 export interface DeviceServiceOptions {
@@ -67,10 +68,12 @@ export async function makeDeviceService(options: DeviceServiceOptions): Promise<
       .catch(() => undefined)
   }
   const collect = async (signal?: AbortSignal): Promise<DeviceReport> => {
-    const combined = AbortSignal.any([lifetime.signal, AbortSignal.timeout(2000), ...(signal ? [signal] : [])])
-    if (lifetime.signal.aborted || signal?.aborted) combined.throwIfAborted()
-    const probing = options.runtime?.probe(combined).catch(() => undefined)
-    const scan = await scanRuntimeRoots(options.dataDirectory, combined).catch(() => ({
+    const combined = AbortSignal.any([lifetime.signal, ...(signal ? [signal] : [])])
+    combined.throwIfAborted()
+    const runtime = options.runtime
+    const probing = (runtime?.report ? runtime.report(combined) : runtime?.probe(combined))?.catch(() => undefined)
+    const scanSignal = AbortSignal.any([combined, AbortSignal.timeout(2000)])
+    const scan = await scanRuntimeRoots(options.dataDirectory, scanSignal).catch(() => ({
       roots: [],
       repos: [],
       truncated: true,
@@ -79,8 +82,8 @@ export async function makeDeviceService(options: DeviceServiceOptions): Promise<
       scan.truncated = true
       return { enabled: false, shell: defaultProjectShell() }
     })
-    const runtime = await probing
-    return boundRuntimeReport({ ...scan, exec, ...(runtime ? { project_runtime: runtime } : {}) })
+    const projectRuntime = await probing
+    return boundRuntimeReport({ ...scan, exec, ...(projectRuntime ? { project_runtime: projectRuntime } : {}) })
   }
   const handle = async (body: DeviceRequest, signal?: AbortSignal): Promise<DeviceResult> => {
     const combined = signal ? AbortSignal.any([lifetime.signal, signal]) : lifetime.signal

@@ -93,6 +93,10 @@ export const makeProjectLedger = Effect.fn('Project.makeProjectLedger')(function
   }
   return {
     get,
+    occupied: () =>
+      sql<{ count: number }>`SELECT count(*) AS count FROM project_runtime_runs WHERE cleanup_complete=0`.pipe(
+        Effect.map((rows) => rows[0]?.count ?? 0),
+      ),
     insert,
     state,
     complete,

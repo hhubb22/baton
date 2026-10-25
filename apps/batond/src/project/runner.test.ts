@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile, chmod, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -33,11 +33,18 @@ const open = async (mode = 'idle', real = false) => {
   cleanups.push(() => Effect.runPromise(Scope.close(scope, Exit.void)))
   return manager
 }
-const quickRunner = async (program: string) => {
+const quickRunner = async (program: string, credentialsDirectory?: string) => {
   const dataDir = await mkdtemp(join(tmpdir(), 'baton-early-output-'))
   cleanups.push(() => rm(dataDir, { recursive: true, force: true }))
   const runner = new RuntimeRunner(
-    { dataDir, runtimeCommand: { file: process.execPath, args: ['-e', program] } },
+    {
+      dataDir,
+      runtimeCommand: {
+        file: process.execPath,
+        args: ['-e', program],
+        ...(credentialsDirectory ? { env: { BATON_PROJECT_RUNTIME_DATA_DIR: credentialsDirectory } } : {}),
+      },
+    },
     {
       pid: process.pid,
       register: async () => {
@@ -49,7 +56,7 @@ const quickRunner = async (program: string) => {
     { add: async () => {}, remove: async () => {} },
   )
   cleanups.push(() => runner.close())
-  return runner
+  return { runner, dataDir }
 }
 it.each(['probe', 'login-device'] as const)(
   'captures fast %s output while watchdog registration is delayed',
@@ -64,19 +71,19 @@ it.each(['probe', 'login-device'] as const)(
             user_code: 'FAST-CODE',
             expires_in_seconds: 600,
           }
-    const runner = await quickRunner(`console.log(JSON.stringify(${JSON.stringify(value)}))`)
+    const { runner } = await quickRunner(`console.log(JSON.stringify(${JSON.stringify(value)}))`)
     const result = operation === 'probe' ? await runner.probe() : await runner.startDeviceLogin('openai-codex')
     expect(result).toMatchObject(value)
   },
 )
 it.each(['probe', 'login-device'] as const)('bounds %s output during delayed registration', async (operation) => {
-  const runner = await quickRunner('process.stdout.write("x".repeat(17000)); setInterval(() => {}, 1000)')
+  const { runner } = await quickRunner('process.stdout.write("x".repeat(70 * 1024)); setInterval(() => {}, 1000)')
   await expect(operation === 'probe' ? runner.probe() : runner.startDeviceLogin('openai-codex')).rejects.toThrow(
     '输出超限',
   )
 })
 it('captures stdio frames before a fast Runtime exits during registration', async () => {
-  const runner = await quickRunner('console.log(JSON.stringify({id:1,request:{operation:"bootstrap"}}))')
+  const { runner } = await quickRunner('console.log(JSON.stringify({id:1,request:{operation:"bootstrap"}}))')
   const cancel = new AbortController()
   let serving: Promise<void> | undefined,
     requests = 0
@@ -113,6 +120,51 @@ it('uses max(hrtime,wall) for sleep, backward wall clock and forward clock jumps
   wall = Number.NaN
   expect(() => clock.now()).toThrow('时钟不可用')
 })
+it('retains a timestamped report after probe timeout and invalidates it when credentials change', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'baton-probe-cache-'))
+  cleanups.push(() => rm(directory, { recursive: true, force: true }))
+  const mode = join(directory, 'mode')
+  const credentials = join(directory, 'credentials')
+  await mkdir(credentials, { mode: 0o700 })
+  const credential = join(credentials, 'openai-codex.json')
+  await writeFile(credential, '{}', { mode: 0o600 })
+  const { runner, dataDir } = await quickRunner(
+    `
+    const fs = require('node:fs');
+    const mode = fs.existsSync(${JSON.stringify(mode)}) ? fs.readFileSync(${JSON.stringify(mode)}, 'utf8') : 'ok';
+    if (mode === 'timeout') setInterval(() => {}, 1000);
+    else if (mode === 'output') process.stdout.write('x'.repeat(70 * 1024));
+    else console.log(JSON.stringify({version:'0.1.0',providers:[{provider:'openai-codex',status:mode === 'ok' ? 'available' : mode}]}));
+  `,
+    credentials,
+  )
+  await writeFile(join(dataDir, 'project-runtime.json'), JSON.stringify({ probeTimeoutMs: 2000 }), { mode: 0o600 })
+  const initial = await runner.report()
+  expect(initial).toMatchObject({ stale: false })
+  expect(initial?.probed_at).toBeDefined()
+  await writeFile(mode, 'timeout')
+  expect(await runner.report()).toMatchObject({
+    stale: true,
+    probed_at: initial?.probed_at,
+    probe_error: 'probe_timeout',
+  })
+  await writeFile(mode, 'login_required')
+  expect(await runner.report()).toMatchObject({ stale: false, providers: [{ status: 'login_required' }] })
+  await writeFile(mode, 'timeout')
+  expect(await runner.report()).toMatchObject({ stale: true, providers: [{ status: 'login_required' }] })
+  await writeFile(mode, 'output')
+  expect(await runner.report()).toMatchObject({ stale: true, probe_error: 'probe_output_limit' })
+  await expect(runner.probe()).rejects.toThrow('输出超限')
+  await chmod(credential, 0o644)
+  expect(await runner.report()).toBeUndefined()
+  await chmod(credential, 0o600)
+  await writeFile(mode, 'ok')
+  await runner.probe()
+  await writeFile(mode, 'output')
+  await rm(credential)
+  expect(await runner.report()).toBeUndefined()
+}, 30000)
+
 it('probes the existing Runtime source CLI using only an empty local credential directory', async () => {
   const manager = await open('idle', true)
   const report = await manager.probe()

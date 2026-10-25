@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, realpath, rename, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { RuntimeReport } from '@baton/protocol'
@@ -9,10 +9,12 @@ import {
   makeDeviceService,
   parseThreadAttachments,
   readProjectExec,
+  readProjectRuntimeConfig,
   runDeviceCLI,
   updateBrowseRoots,
 } from './index.ts'
 import { openAuthorized } from './files.ts'
+import { initializeBrowseRoots, readBrowseRootsConfig } from '../daemon/roots.ts'
 
 const temporary: string[] = []
 async function directory(): Promise<string> {
@@ -46,6 +48,89 @@ it('preserves files and project-exec CLI flags and displays the risk before enab
   expect(await readProjectExec(data)).toMatchObject({ enabled: false })
   await runDeviceCLI('files', ['remove', '--id', 'dev', '--data-dir', data], output)
   expect(await updateBrowseRoots(data, 'remove', 'dev')).toEqual([])
+})
+
+it('loads practical Project defaults and validates configured model budgets', async () => {
+  const data = await directory()
+  expect(await readProjectRuntimeConfig(data)).toEqual({
+    maxConcurrentProjects: 4,
+    probeTimeoutMs: 5000,
+    probeMaxOutputBytes: 64 * 1024,
+    maxOutputTokens: 32000,
+    maxModelCalls: 64,
+  })
+  const config = {
+    maxConcurrentProjects: 6,
+    probeTimeoutMs: 15000,
+    probeMaxOutputBytes: 128 * 1024,
+    maxOutputTokens: 48000,
+    maxModelCalls: 128,
+  }
+  await writeFile(join(data, 'project-runtime.json'), JSON.stringify(config), { mode: 0o600 })
+  expect(await readProjectRuntimeConfig(data)).toEqual(config)
+  await writeFile(join(data, 'project-runtime.json'), JSON.stringify({ maxModelCalls: Number.MAX_SAFE_INTEGER + 1 }))
+  await expect(readProjectRuntimeConfig(data)).rejects.toThrow('配置无效')
+})
+
+it('registers more than 32 distinct roots and preserves a configured limit during edits and initialization', async () => {
+  const data = await directory()
+  const workspace = await directory()
+  for (let index = 0; index < 34; index++) {
+    const path = join(workspace, String(index))
+    await mkdir(path)
+    await updateBrowseRoots(data, 'add', path)
+  }
+  const initial = await readBrowseRootsConfig(data)
+  expect(initial.roots).toHaveLength(34)
+  expect(initial.maxRoots).toBe(256)
+  await writeFile(join(data, 'browse-roots.json'), JSON.stringify({ ...initial, maxRoots: 34 }))
+  const extra = join(workspace, 'extra')
+  await mkdir(extra)
+  await expect(updateBrowseRoots(data, 'add', extra)).rejects.toThrow('最多 34 个')
+  await expect(initializeBrowseRoots(data, extra)).rejects.toThrow('最多 34 个')
+  await updateBrowseRoots(data, 'remove', join(workspace, '0'))
+  await initializeBrowseRoots(data, extra)
+  expect(await readBrowseRootsConfig(data)).toMatchObject({ maxRoots: 34 })
+  expect(JSON.parse(await readFile(join(data, 'browse-roots.json'), 'utf8')).maxRoots).toBe(34)
+  const service = await makeDeviceService({ dataDirectory: data })
+  try {
+    const report = await service.collect()
+    expect(report.roots).toHaveLength(34)
+    expect(() => Schema.decodeUnknownSync(RuntimeReport)(report)).not.toThrow()
+  } finally {
+    await service.close()
+  }
+})
+
+it('uses the Runtime report path so probe budgets and cached diagnostics survive collection', async () => {
+  const data = await directory()
+  const service = await makeDeviceService({
+    dataDirectory: data,
+    runtime: {
+      probe: async () => {
+        throw new Error('直接 probe 不保留报告缓存')
+      },
+      report: async (signal) => {
+        await new Promise<void>((resolve) => setTimeout(resolve, 2100))
+        signal?.throwIfAborted()
+        return {
+          version: '0.1.0',
+          providers: [],
+          probed_at: '2026-01-01T00:00:00Z',
+          stale: true,
+          probe_error: 'probe_timeout',
+        }
+      },
+      startDeviceLogin: async () => {
+        throw new Error('unused')
+      },
+    },
+  })
+  try {
+    expect(await service.collect()).toMatchObject({ project_runtime: { stale: true, probe_error: 'probe_timeout' } })
+  } finally {
+    await service.close()
+  }
 })
 
 it('bounds the combined runtime report, preserves default models and leaves its input intact', () => {

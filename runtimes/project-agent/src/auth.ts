@@ -9,27 +9,32 @@ export const PROVIDERS = ['openai-codex', 'xai']
 export function credentials() {
   return new FileCredentials(process.env.BATON_PROJECT_RUNTIME_DATA_DIR ?? join(homedir(), '.baton', 'project-runtime'))
 }
-const modelCatalog = {
-  'openai-codex': OPENAI_CODEX_MODELS,
-  xai: XAI_MODELS,
-}
+const modelCatalog = new Map<string, ReadonlyArray<{ id: string; name: string }>>([
+  ['openai-codex', Object.values(OPENAI_CODEX_MODELS)],
+  ['xai', Object.values(XAI_MODELS)],
+])
+const credentialErrors = new Set([
+  'credential_permissions_invalid',
+  'credential_owner_invalid',
+  'credential_path_invalid',
+  'credential_private_file_failed',
+])
 
 // probe 只读取本地凭据和内置模型目录，不刷新 OAuth 或调用 provider。
 export async function probe(store = credentials()) {
   const providers = []
   for (const provider of PROVIDERS) {
     let status = 'login_required'
+    let reason: string | undefined
     try {
       const credential = await store.read(provider)
       if (credential?.type === 'oauth' && credential.refresh && credential.access) status = 'available'
-    } catch {
+    } catch (error) {
       status = 'unknown'
+      reason = error instanceof Error && credentialErrors.has(error.message) ? error.message : 'credential_read_failed'
     }
-    const catalog = modelCatalog[provider as keyof typeof modelCatalog]
-    const models = Object.values(catalog)
-      .slice(0, 64)
-      .map(({ id, name }) => ({ id, name }))
-    providers.push({ provider, status, models })
+    const models = (modelCatalog.get(provider) ?? []).slice(0, 64).map(({ id, name }) => ({ id, name }))
+    providers.push({ provider, status, models, ...(reason ? { reason } : {}) })
   }
   return { version: VERSION, providers }
 }

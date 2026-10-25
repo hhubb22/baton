@@ -86,7 +86,19 @@ test('凭据不可读时仍返回内置模型目录，登录状态为 unknown', 
     result.providers.map(({ status }) => status),
     ['unknown', 'unknown'],
   )
+  assert.ok(result.providers.every(({ reason }) => reason === 'credential_permissions_invalid'))
   assert.ok(result.providers.every(({ models }) => models.length > 0))
+})
+
+test('未知凭据读取错误保留 unknown，报告只含安全诊断', async () => {
+  class UnreadableCredentials extends FileCredentials {
+    async read(): Promise<never> {
+      throw new Error('opaque error with private credential content')
+    }
+  }
+  const result = await probe(new UnreadableCredentials('unused'))
+  assert.ok(result.providers.every(({ status, reason }) => status === 'unknown' && reason === 'credential_read_failed'))
+  assert.ok(!JSON.stringify(result).includes('private credential content'))
 })
 
 test('凭据刷新串行化，不丢失并发更新', async () => {

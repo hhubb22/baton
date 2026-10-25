@@ -15,6 +15,8 @@ import {
 import { captureRuntimeOutput } from './capture.ts'
 import { DeviceLoginCode, type ProjectManagerOptions } from './types.ts'
 import { privateFileHostEnvironment } from '../platform/private-file-host.ts'
+import { readProjectRuntimeConfig } from '../devices/config.ts'
+import { probeFingerprint } from './probe-cache.ts'
 
 const runtimeEntry = (): URL => {
   const entry = [
@@ -58,6 +60,7 @@ export class RuntimeRunner {
   private readonly loginStarts = new Map<string, Promise<DeviceLoginCode>>()
   private readonly logins = new Map<string, { cancel: AbortController; done: Promise<void> }>()
   private closing = false
+  private lastProbe: { report: ProjectRuntime; fingerprint: string } | undefined
   constructor(
     private readonly options: ProjectManagerOptions,
     private readonly watchdog: ProcessWatchdog | undefined,
@@ -109,12 +112,46 @@ export class RuntimeRunner {
     if (!result.reaped) throw new Error('Project Runtime 进程树清理未确认')
     this.owned.delete(owned)
   }
+  async report(signal?: AbortSignal): Promise<ProjectRuntime | undefined> {
+    try {
+      return await this.probe(signal)
+    } catch (error) {
+      if (signal?.aborted || this.closing) return undefined
+      const cached = this.lastProbe
+      const fingerprint = await probeFingerprint(this.options.runtimeCommand ?? defaultRuntimeCommand()).catch(
+        () => undefined,
+      )
+      if (!cached || !fingerprint || cached.fingerprint !== fingerprint) {
+        this.lastProbe = undefined
+        return undefined
+      }
+      const config = await readProjectRuntimeConfig(this.options.dataDir).catch(() => undefined)
+      if (!config) return undefined
+      return {
+        ...cached.report,
+        max_concurrent_projects: config.maxConcurrentProjects,
+        stale: true,
+        probe_error:
+          error instanceof Error && error.name === 'TimeoutError'
+            ? 'probe_timeout'
+            : error instanceof Error && error.message === 'Project Runtime 输出超限'
+              ? 'probe_output_limit'
+              : 'probe_failed',
+      }
+    }
+  }
   async probe(signal?: AbortSignal): Promise<ProjectRuntime> {
+    const config = await readProjectRuntimeConfig(this.options.dataDir)
+    const fingerprint = await probeFingerprint(this.options.runtimeCommand ?? defaultRuntimeCommand())
     const capture = new AbortController()
-    const bounded = AbortSignal.any([capture.signal, AbortSignal.timeout(1000), ...(signal ? [signal] : [])])
-    let output!: Promise<Buffer>
+    const bounded = AbortSignal.any([
+      capture.signal,
+      AbortSignal.timeout(config.probeTimeoutMs),
+      ...(signal ? [signal] : []),
+    ])
+    let output: Promise<Buffer> | undefined
     const owned = await this.spawn(['probe'], bounded, undefined, undefined, undefined, (child) => {
-      output = captureRuntimeOutput(child.stdout, 16 * 1024, false, bounded)
+      output = captureRuntimeOutput(child.stdout, config.probeMaxOutputBytes, false, bounded)
       void output.catch((error: unknown) => capture.abort(error))
     })
     const stop = () => {
@@ -123,6 +160,7 @@ export class RuntimeRunner {
     bounded.addEventListener('abort', stop, { once: true })
     try {
       bounded.throwIfAborted()
+      if (!output) throw new Error('Project Runtime 输出未连接')
       const bytes = await output
       const exit = await owned.exited
       bounded.throwIfAborted()
@@ -130,9 +168,20 @@ export class RuntimeRunner {
       const value = Schema.decodeUnknownSync(ProjectRuntime)(
         JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)),
       )
-      if (value.version !== '0.1.0' || value.providers === null)
+      if (value.version !== '0.1.0' || value.providers === null) {
+        this.lastProbe = undefined
         throw new Error('Project Runtime 状态报告无效或版本不匹配')
-      return { ...value, providers: [...value.providers].sort((a, b) => a.provider.localeCompare(b.provider)) }
+      }
+      const report: ProjectRuntime = {
+        ...value,
+        providers: [...value.providers].sort((a, b) => a.provider.localeCompare(b.provider)),
+        max_concurrent_projects: config.maxConcurrentProjects,
+        probed_at: new Date().toISOString(),
+        stale: false,
+      }
+      const after = await probeFingerprint(this.options.runtimeCommand ?? defaultRuntimeCommand())
+      this.lastProbe = fingerprint && fingerprint === after ? { report, fingerprint } : undefined
+      return report
     } finally {
       bounded.removeEventListener('abort', stop)
       await this.reap(owned)

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdtemp, rm, readFile } from 'node:fs/promises'
+import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -210,6 +210,95 @@ describe('Project Runtime host', () => {
   })
 
   describe('durable start and stop decisions', () => {
+    it.live('admits unknown authentication, forwards model budgets and enforces the configured node capacity', () =>
+      Effect.gen(function* () {
+        const { manager, dataDir } = yield* open({
+          runtimeCommand: {
+            file: process.execPath,
+            args: [
+              '-e',
+              `
+              if (process.argv[1] === 'probe') console.log(JSON.stringify({version:'0.1.0', providers:[{provider:'openai-codex', status:'unknown', reason:'credential_read_failed'}]}));
+              else { console.log(JSON.stringify({id:1,request:{operation:'bootstrap',payload:{args:process.argv.slice(1)}}})); setInterval(() => {},1000); }
+            `,
+            ],
+          },
+        })
+        yield* Effect.promise(() =>
+          writeFile(
+            join(dataDir, 'project-runtime.json'),
+            JSON.stringify({
+              maxConcurrentProjects: 1,
+              maxOutputTokens: 48000,
+              maxModelCalls: 128,
+            }),
+            { mode: 0o600 },
+          ),
+        )
+        const requests: ProjectRuntimeRequest[] = []
+        manager.setTransport(transport(requests))
+        yield* Effect.promise(() => manager.command(command()))
+        yield* until(() => requests.some((request) => request.operation === 'bootstrap'))
+        expect(requests.find((request) => request.operation === 'bootstrap')?.payload).toEqual({
+          args: ['run', '--max-output-tokens', '48000', '--max-model-calls', '128'],
+        })
+        const next = command()
+        yield* Effect.promise(() => manager.command(next))
+        yield* until(() =>
+          requests.some((request) => request.run_id === next.run_id && request.operation === 'start_failed'),
+        )
+        expect(requests.find((request) => request.run_id === next.run_id)?.reason).toBe('capacity_exceeded')
+      }),
+    )
+
+    it.live('reports known credential security failures without requesting login', () =>
+      Effect.gen(function* () {
+        const { manager } = yield* open({
+          runtimeCommand: {
+            file: process.execPath,
+            args: [
+              '-e',
+              `console.log(JSON.stringify({version:'0.1.0',providers:[{provider:'openai-codex',status:'unknown',reason:'credential_permissions_invalid'}]}))`,
+            ],
+          },
+        })
+        const requests: ProjectRuntimeRequest[] = []
+        manager.setTransport(transport(requests))
+        yield* Effect.promise(() => manager.command(command()))
+        yield* until(() => requests.some((request) => request.operation === 'start_failed'))
+        expect(requests.find((request) => request.operation === 'start_failed')?.reason).toBe(
+          'credential_permissions_invalid',
+        )
+        expect(requests.some((request) => request.operation === 'bootstrap')).toBe(false)
+      }),
+    )
+
+    it.live('counts persisted intents whose process cleanup is still unconfirmed', () =>
+      Effect.gen(function* () {
+        const { manager, dataDir } = yield* open()
+        yield* Effect.promise(() =>
+          writeFile(join(dataDir, 'project-runtime.json'), '{"maxConcurrentProjects":1}', { mode: 0o600 }),
+        )
+        const old = command()
+        const db = new DatabaseSync(join(dataDir, 'project-runtime.db'))
+        try {
+          db.prepare("INSERT INTO project_runtime_runs(run_id,lease_epoch,state) VALUES(?,?,'starting')").run(
+            old.run_id,
+            old.lease_epoch,
+          )
+        } finally {
+          db.close()
+        }
+        const requests: ProjectRuntimeRequest[] = []
+        manager.setTransport(transport(requests))
+        const next = command()
+        yield* Effect.promise(() => manager.command(next))
+        yield* until(() => requests.some((request) => request.run_id === next.run_id))
+        expect(requests.find((request) => request.run_id === next.run_id)?.reason).toBe('capacity_exceeded')
+        expect(row(dataDir, old.run_id)?.cleanup_complete).toBe(0)
+      }),
+    )
+
     it.live('keeps an old intent without cleanup evidence unconfirmed after reopening', () =>
       Effect.gen(function* () {
         const { dataDir, close } = yield* open()
