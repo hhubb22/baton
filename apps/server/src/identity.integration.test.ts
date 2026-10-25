@@ -69,6 +69,7 @@ describe('identity storage on local PostgreSQL', () => {
       '0001_initial.sql',
       '0002_ts_threads.sql',
       '0003_thread_tracing.sql',
+      '0004_inbox_options.sql',
     ])
     const names = await run(query<{ current: string }>('SELECT current_schema() AS current'))
     expect(names[0].current).toBe(schema)
@@ -88,7 +89,12 @@ describe('identity storage on local PostgreSQL', () => {
       await writeFile(join(directory, '0002_ts_threads.sql'), completion)
       const tracing = await readFile(new URL('../../../migrations/0003_thread_tracing.sql', import.meta.url), 'utf8')
       await writeFile(join(directory, '0003_thread_tracing.sql'), tracing)
-      await writeFile(join(directory, '0004_rollback.sql'), 'CREATE TABLE migration_rollback (id int); SELECT 1/0;')
+      const inboxOptions = await readFile(
+        new URL('../../../migrations/0004_inbox_options.sql', import.meta.url),
+        'utf8',
+      )
+      await writeFile(join(directory, '0004_inbox_options.sql'), inboxOptions)
+      await writeFile(join(directory, '0005_rollback.sql'), 'CREATE TABLE migration_rollback (id int); SELECT 1/0;')
       await expect(run(migrateDatabase(directory))).rejects.toMatchObject({ code: 'unavailable' })
       const rolledBack = await run(
         query<{ exists: boolean }>(
@@ -99,7 +105,7 @@ describe('identity storage on local PostgreSQL', () => {
       )
       expect(rolledBack[0].exists).toBe(false)
       expect(
-        await run(query('SELECT version FROM schema_migrations WHERE version=$1', ['0004_rollback.sql'])),
+        await run(query('SELECT version FROM schema_migrations WHERE version=$1', ['0005_rollback.sql'])),
       ).toHaveLength(0)
     } finally {
       await rm(directory, { recursive: true, force: true })

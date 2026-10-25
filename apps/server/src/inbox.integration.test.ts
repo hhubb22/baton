@@ -16,6 +16,7 @@ import {
   archiveProjectAttention,
 } from './inbox.ts'
 import { executeProjectTool } from './project-tools.ts'
+import { migrateDatabase } from './database.ts'
 
 it('validates actual Markdown destinations including references, entities and GFM autolinks', () => {
   for (const text of [
@@ -239,10 +240,24 @@ it('reuses identical open questions under concurrent creation while allowing dis
     expect(reopened.state).toBe('open')
   }))
 
-it('round-trips more than five choices with local and email links and rejects an excessive option budget', async () =>
+it('upgrades the five-choice constraint, preserves existing questions and enforces the option budget', async () =>
   withTestDatabase(async (db) => {
     const { context: c } = await projectToolFixture(db)
     const options = Array.from({ length: 6 }, (_, index) => ({ id: `choice-${index}`, label: `Choice ${index}` }))
+    const existing = await db.run(createAgentAttention(c, 'five-options', { ...ask, options: options.slice(0, 5) }))
+    await db.run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql`ALTER TABLE attention_requests DROP CONSTRAINT attention_requests_options_check`
+        yield* sql`ALTER TABLE attention_requests ADD CONSTRAINT attention_requests_options_check CHECK (jsonb_typeof(options) = 'array' AND jsonb_array_length(options) <= 5)`
+        yield* sql`DELETE FROM schema_migrations WHERE version='0004_inbox_options.sql'`
+      }),
+    )
+    await expect(db.run(createAgentAttention(c, 'six-options', { ...ask, options }))).rejects.toMatchObject({
+      code: 'unavailable',
+    })
+    await db.run(migrateDatabase())
+    expect(await db.run(getAttentionRequest(c.employeeId, existing.id))).toEqual(existing)
     const request = await db.run(
       createAgentAttention(c, 'six-options', {
         ...ask,
