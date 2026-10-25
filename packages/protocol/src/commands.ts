@@ -1,6 +1,6 @@
 import { Schema } from 'effect'
 import { CommandOutcome, PositiveInteger, StorageGeneration, UUID, boundedText } from './common.ts'
-import { ThreadCommand, ThreadCommandResult, ThreadReport } from './dto.ts'
+import { ThreadCommand, ThreadCommandResult, ThreadReport } from './thread.ts'
 
 export const CommandCompleted = ThreadReport.mapFields(
   (fields) => ({

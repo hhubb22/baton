@@ -68,6 +68,38 @@ export const uniqueBy = <T>(key: (value: T) => string) =>
     (items) => items === null || new Set(items.map(key)).size === items.length || '标识重复',
   )
 
+export const ErrorDetails = Schema.Struct({
+  fields: Schema.optionalKey(Schema.NullOr(Schema.Array(Text))),
+})
+export type ErrorDetails = typeof ErrorDetails.Type
+
+export const ErrorResponse = Schema.Struct({
+  code: Text,
+  message: Text,
+  request_id: UUID,
+  details: Schema.optionalKey(Schema.NullOr(ErrorDetails)),
+})
+export type ErrorResponse = typeof ErrorResponse.Type
+
+export const OKResponse = Schema.Struct({
+  ok: Schema.Boolean,
+})
+export type OKResponse = typeof OKResponse.Type
+
+export const Diagnostics = Schema.Struct({
+  nodes: NonNegativeInteger,
+  browsers: NonNegativeInteger,
+  pending_rpc: NonNegativeInteger,
+  connections: NonNegativeInteger,
+  pending_disconnects: NonNegativeInteger,
+  received_bytes: NonNegativeInteger,
+  sent_bytes: NonNegativeInteger,
+  queued_control_messages: NonNegativeInteger,
+  queued_control_bytes: NonNegativeInteger,
+  thread_statuses: Schema.Array(Schema.Struct({ status: ThreadStatus, count: NonNegativeInteger })),
+})
+export type Diagnostics = typeof Diagnostics.Type
+
 export type AgentType = typeof AgentType.Type
 export type AgentStatus = typeof AgentStatus.Type
 export type CommandOutcome = typeof CommandOutcome.Type

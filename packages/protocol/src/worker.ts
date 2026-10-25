@@ -14,7 +14,7 @@ import {
   jsonLimit,
   summary,
 } from './common.ts'
-import { SessionRequest, SessionResult, ThreadReport } from './dto.ts'
+import { SessionRequest, SessionResult, ThreadReport } from './thread.ts'
 
 export const WorkerCommandAction = Schema.Literals([
   'open',

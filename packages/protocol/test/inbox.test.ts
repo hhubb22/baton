@@ -1,6 +1,6 @@
 import { Schema } from 'effect'
 import { expect, it } from 'vite-plus/test'
-import { InboxAsk } from '../src/dto.ts'
+import { InboxAsk } from '../src/inbox.ts'
 
 it('accepts expandable options and bounds their count, JSON bytes and identities', () => {
   const options = Array.from({ length: 50 }, (_, index) => ({ id: `option-${index}`, label: `Choice ${index}` }))

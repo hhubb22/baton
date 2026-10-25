@@ -8,24 +8,30 @@ import {
   HttpApiSecurity,
   OpenApi,
 } from 'effect/http-api'
-import * as D from './dto.ts'
+import * as T from './thread.ts'
+import * as P from './project.ts'
+import * as D from './device.ts'
+import * as A from './auth.ts'
+import * as I from './inbox.ts'
+import * as C from './common.ts'
+import { SessionResponse } from './auth.ts'
+import { EnrollmentResponse, DefaultDeviceResponse } from './device.ts'
+import { Diagnostics } from './common.ts'
 import * as Q from './http.ts'
 import { ThreadAnswerInput } from './thread-question.ts'
-import { UUID, Timestamp, NonNegativeInteger, ThreadStatus } from './common.ts'
+import { UUID, NonNegativeInteger } from './common.ts'
 
-export const SessionResponse = Schema.Struct({
-  employee: D.Employee,
-  csrf_token: Schema.String,
-  expires_at: Timestamp,
-})
+export { SessionResponse } from './auth.ts'
+export { EnrollmentResponse, DefaultDeviceResponse } from './device.ts'
+export { Diagnostics } from './common.ts'
 export class CurrentBrowserSession extends Context.Service<CurrentBrowserSession, typeof SessionResponse.Type>()(
   'baton/http/CurrentBrowserSession',
 ) {}
 
 const errorBody = Schema.Struct({
-  ...D.ErrorResponse.fields,
+  ...C.ErrorResponse.fields,
   current_revision: Schema.optionalKey(NonNegativeInteger),
-  current: Schema.optionalKey(Schema.NullOr(Schema.Union([D.ProjectMemory, D.AttentionRequest]))),
+  current: Schema.optionalKey(Schema.NullOr(Schema.Union([P.ProjectMemory, I.AttentionRequest]))),
   error: Schema.optionalKey(Schema.String),
 })
 const failure = <const Status extends number>(status: Status) =>
@@ -60,37 +66,16 @@ const nodeParams = { nodeId: UUID }
 const threadParams = { threadId: UUID }
 const projectParams = { projectId: UUID }
 const memoryParams = { ...projectParams, memoryId: UUID }
-export const EnrollmentResponse = Schema.Struct({ ...D.EnrollmentResponse.fields, expires_at: Timestamp })
 const FileView = Schema.Struct({
   ...D.FileView.fields,
   code: Schema.optionalKey(Schema.String),
   message: Schema.optionalKey(Schema.String),
 })
-export const DefaultDeviceResponse = Schema.Struct({
-  default_device_node_id: UUID,
-  default_pc_node_id: UUID,
-  role: Schema.Literal('pc'),
-  display_name: Schema.String,
-  system: Schema.Literals(['macos', 'linux', 'windows']),
-  registration_seq: NonNegativeInteger,
-})
-export const Diagnostics = Schema.Struct({
-  nodes: NonNegativeInteger,
-  browsers: NonNegativeInteger,
-  pending_rpc: NonNegativeInteger,
-  connections: NonNegativeInteger,
-  pending_disconnects: NonNegativeInteger,
-  received_bytes: NonNegativeInteger,
-  sent_bytes: NonNegativeInteger,
-  queued_control_messages: NonNegativeInteger,
-  queued_control_bytes: NonNegativeInteger,
-  thread_statuses: Schema.Array(Schema.Struct({ status: ThreadStatus, count: NonNegativeInteger })),
-})
 // Creation and replay share a body; the internal discriminator selects the HTTP status.
 const threadCreation = <const Status extends number>(status: Status) =>
-  D.Thread.pipe(
+  T.Thread.pipe(
     Schema.decodeTo(
-      Schema.Struct({ status: Schema.Literal(status), thread: D.Thread }),
+      Schema.Struct({ status: Schema.Literal(status), thread: T.Thread }),
       SchemaTransformation.transform({
         decode: (thread) => ({ status, thread }),
         encode: (value) => value.thread,
@@ -102,7 +87,7 @@ const threadCreation = <const Status extends number>(status: Status) =>
 const Public = HttpApiGroup.make('public')
   .add(
     Endpoint.post('login', '/api/v1/login', {
-      payload: D.LoginInput,
+      payload: A.LoginInput,
       success: HttpApiSchema.WithHeaders(SessionResponse, cookie),
     }),
     Endpoint.post('registerNode', '/api/v1/nodes/register', { payload: D.RegisterNodeInput, success: D.NodeIdentity }),
@@ -117,7 +102,7 @@ const Account = HttpApiGroup.make('account')
       success: HttpApiSchema.WithHeaders(HttpApiSchema.NoContent, cookie),
     }),
     Endpoint.post('changePassword', '/api/v1/me/password', {
-      payload: D.ChangePasswordInput,
+      payload: A.ChangePasswordInput,
       success: HttpApiSchema.WithHeaders(HttpApiSchema.NoContent, cookie),
     }),
   )
@@ -183,150 +168,150 @@ const Nodes = HttpApiGroup.make('nodes')
 
 const Threads = HttpApiGroup.make('threads')
   .add(
-    Endpoint.get('list', '/api/v1/threads', { query: Q.ThreadListQuery, success: D.ThreadPage }),
+    Endpoint.get('list', '/api/v1/threads', { query: Q.ThreadListQuery, success: T.ThreadPage }),
     Endpoint.post('create', '/api/v1/threads', {
-      payload: D.CreateBrowserThreadInput,
+      payload: T.CreateBrowserThreadInput,
       success: [threadCreation(200), threadCreation(201)],
     }),
-    Endpoint.get('get', '/api/v1/threads/:threadId', { params: threadParams, success: D.ThreadView }),
+    Endpoint.get('get', '/api/v1/threads/:threadId', { params: threadParams, success: T.ThreadView }),
     Endpoint.get('timeline', '/api/v1/threads/:threadId/timeline', {
       params: threadParams,
       query: Q.ThreadTimelineQuery,
-      success: D.ThreadTimeline,
+      success: T.ThreadTimeline,
     }),
     Endpoint.post('addMessage', '/api/v1/threads/:threadId/messages', {
       params: threadParams,
-      payload: D.ThreadMessageInput,
-      success: D.ThreadMessage.pipe(HttpApiSchema.status(202)),
+      payload: T.ThreadMessageInput,
+      success: T.ThreadMessage.pipe(HttpApiSchema.status(202)),
     }),
     Endpoint.post('answer', '/api/v1/threads/:threadId/answer', {
       params: threadParams,
       payload: ThreadAnswerInput,
-      success: D.ThreadView.pipe(HttpApiSchema.status(202)),
+      success: T.ThreadView.pipe(HttpApiSchema.status(202)),
     }),
     Endpoint.post('withdraw', '/api/v1/threads/:threadId/messages/:messageId/withdraw', {
       params: { ...threadParams, messageId: Schema.String },
       payload: EmptyInput,
-      success: D.Thread.pipe(HttpApiSchema.status(202)),
+      success: T.Thread.pipe(HttpApiSchema.status(202)),
     }),
     Endpoint.post('stop', '/api/v1/threads/:threadId/stop', {
       params: threadParams,
       payload: EmptyInput,
-      success: D.ThreadView.pipe(HttpApiSchema.status(202)),
+      success: T.ThreadView.pipe(HttpApiSchema.status(202)),
     }),
     Endpoint.post('resume', '/api/v1/threads/:threadId/resume', {
       params: threadParams,
       payload: EmptyInput,
-      success: D.ThreadView.pipe(HttpApiSchema.status(202)),
+      success: T.ThreadView.pipe(HttpApiSchema.status(202)),
     }),
     Endpoint.post('archive', '/api/v1/threads/:threadId/archive', {
       params: threadParams,
       payload: EmptyInput,
-      success: D.ThreadView.pipe(HttpApiSchema.status(202)),
+      success: T.ThreadView.pipe(HttpApiSchema.status(202)),
     }),
     Endpoint.patch('setSettings', '/api/v1/threads/:threadId/settings', {
       params: threadParams,
-      payload: D.SetThreadSettingsInput,
-      success: D.ThreadView,
+      payload: T.SetThreadSettingsInput,
+      success: T.ThreadView,
     }),
     Endpoint.post('setModel', '/api/v1/threads/:threadId/model', {
       params: threadParams,
-      payload: D.SetThreadModelInput,
-      success: D.ThreadView,
+      payload: T.SetThreadModelInput,
+      success: T.ThreadView,
     }),
     Endpoint.get('output', '/api/v1/threads/:threadId/output', {
       params: threadParams,
       query: Q.ThreadOutputQuery,
-      success: D.SessionResult,
+      success: T.SessionResult,
     }),
     Endpoint.get('trace', '/api/v1/threads/:threadId/trace', {
       params: threadParams,
       query: Q.ThreadTraceQuery,
-      success: D.ThreadTrace,
+      success: T.ThreadTrace,
     }),
   )
   .middleware(BrowserRequest)
 
 const Projects = HttpApiGroup.make('projects')
   .add(
-    Endpoint.get('list', '/api/v1/projects', { query: Q.ProjectListQuery, success: D.ProjectsResponse }),
+    Endpoint.get('list', '/api/v1/projects', { query: Q.ProjectListQuery, success: P.ProjectsResponse }),
     Endpoint.post('create', '/api/v1/projects', {
-      payload: D.CreateProjectInput,
-      success: D.Project.pipe(HttpApiSchema.status(201)),
+      payload: P.CreateProjectInput,
+      success: P.Project.pipe(HttpApiSchema.status(201)),
     }),
-    Endpoint.get('get', '/api/v1/projects/:projectId', { params: projectParams, success: D.Project }),
+    Endpoint.get('get', '/api/v1/projects/:projectId', { params: projectParams, success: P.Project }),
     Endpoint.patch('update', '/api/v1/projects/:projectId', {
       params: projectParams,
-      payload: D.PatchProjectInput,
-      success: D.Project,
+      payload: P.PatchProjectInput,
+      success: P.Project,
     }),
-    Endpoint.get('status', '/api/v1/projects/:projectId/status', { params: projectParams, success: D.ProjectStatus }),
+    Endpoint.get('status', '/api/v1/projects/:projectId/status', { params: projectParams, success: P.ProjectStatus }),
     Endpoint.get('messages', '/api/v1/projects/:projectId/messages', {
       params: projectParams,
       query: Q.ProjectMessagesQuery,
-      success: D.ProjectMessagePage,
+      success: P.ProjectMessagePage,
     }),
     Endpoint.post('addMessage', '/api/v1/projects/:projectId/messages', {
       params: projectParams,
-      payload: D.ProjectMessageInput,
-      success: D.ProjectMessage.pipe(HttpApiSchema.status(202)),
+      payload: P.ProjectMessageInput,
+      success: P.ProjectMessage.pipe(HttpApiSchema.status(202)),
     }),
     Endpoint.get('events', '/api/v1/projects/:projectId/events', {
       params: projectParams,
       query: Q.ProjectEventsQuery,
-      success: D.ProjectEventPage,
+      success: P.ProjectEventPage,
     }),
     Endpoint.post('stop', '/api/v1/projects/:projectId/stop', {
       params: projectParams,
       payload: EmptyInput,
-      success: D.OKResponse,
+      success: C.OKResponse,
     }),
     Endpoint.post('retry', '/api/v1/projects/:projectId/retry', {
       params: projectParams,
       payload: EmptyInput,
-      success: D.OKResponse,
+      success: C.OKResponse,
     }),
     Endpoint.get('memory', '/api/v1/projects/:projectId/memory', {
       params: projectParams,
       query: Q.ProjectListQuery,
-      success: D.MemoriesResponse,
+      success: P.MemoriesResponse,
     }),
     Endpoint.get('getMemory', '/api/v1/projects/:projectId/memory/:memoryId', {
       params: memoryParams,
-      success: D.ProjectMemory,
+      success: P.ProjectMemory,
     }),
     Endpoint.put('writeMemory', '/api/v1/projects/:projectId/memory/:memoryId', {
       params: memoryParams,
-      payload: D.WriteMemoryInput,
-      success: D.ProjectMemory,
+      payload: P.WriteMemoryInput,
+      success: P.ProjectMemory,
     }),
     Endpoint.get('memoryRevisions', '/api/v1/projects/:projectId/memory/:memoryId/revisions', {
       params: memoryParams,
       query: Q.MemoryRevisionsQuery,
-      success: D.MemoryRevisionsResponse,
+      success: P.MemoryRevisionsResponse,
     }),
   )
   .middleware(BrowserRequest)
 
 const Inbox = HttpApiGroup.make('inbox')
   .add(
-    Endpoint.get('list', '/api/v1/inbox', { query: Q.InboxQuery, success: D.InboxPage }),
+    Endpoint.get('list', '/api/v1/inbox', { query: Q.InboxQuery, success: I.InboxPage }),
     Endpoint.get('get', '/api/v1/attention-requests/:requestId', {
       params: { requestId: UUID },
-      success: D.AttentionRequest,
+      success: I.AttentionRequest,
     }),
     Endpoint.post('answer', '/api/v1/attention-requests/:requestId/answer', {
       params: { requestId: UUID },
-      payload: D.HandleAttentionInput,
-      success: D.AttentionRequest,
+      payload: I.HandleAttentionInput,
+      success: I.AttentionRequest,
     }),
     Endpoint.post('close', '/api/v1/attention-requests/:requestId/close', {
       params: { requestId: UUID },
       payload: Schema.Struct({
-        expected_version: D.HandleAttentionInput.fields.expected_version,
-        client_request_id: D.HandleAttentionInput.fields.client_request_id,
+        expected_version: I.HandleAttentionInput.fields.expected_version,
+        client_request_id: I.HandleAttentionInput.fields.client_request_id,
       }),
-      success: D.AttentionRequest,
+      success: I.AttentionRequest,
     }),
   )
   .middleware(BrowserRequest)

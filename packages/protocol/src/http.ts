@@ -1,6 +1,25 @@
 import { Schema } from 'effect'
-import { Cursor, NonNegativeInteger, StorageGeneration, ThreadStatus, UUID, boundedText } from './common.ts'
-import { BrowserThreadOutput } from './dto.ts'
+import { Cursor, NonNegativeInteger, StorageGeneration, Text, ThreadStatus, UUID, boundedText } from './common.ts'
+
+export const BrowserSubscription = Schema.Struct({
+  thread_id: Schema.Union([Schema.Literal(''), UUID]),
+  cursor: Schema.optionalKey(Cursor),
+})
+export type BrowserSubscription = typeof BrowserSubscription.Type
+
+export const BrowserThreadOutput = Schema.Struct({
+  type: Schema.Literal('thread.output'),
+  thread_id: Schema.optionalKey(UUID),
+  operation_id: UUID,
+  session_id: UUID,
+  ok: Schema.Boolean,
+  code: Schema.optionalKey(Text),
+  state: Schema.optionalKey(Text),
+  text: Schema.optionalKey(boundedText(16 * 1024)),
+  cursor: Schema.optionalKey(Cursor),
+  gap: Schema.Boolean,
+})
+export type BrowserThreadOutput = typeof BrowserThreadOutput.Type
 
 export const EmptyInput = Schema.Struct({}).check(Schema.makeFilter((value) => !Array.isArray(value)))
 export const BrowserReady = Schema.Struct({ type: Schema.Literal('ready') })

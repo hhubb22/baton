@@ -6,14 +6,22 @@
 
 | 模块 | 契约 |
 | --- | --- |
-| `dto.ts` | HTTP 输入与响应、设备与 Thread 数据、Project 与事项、节点控制消息及 Project Runtime 请求与结果 |
-| `http-api.ts` | Effect HttpApi 的路径、参数、响应与错误声明，供中心路由与 OpenAPI 共用 |
+| `thread.ts` | Thread、从同一字段派生的摘要与详情、消息、回合、命令、报告及会话输出 |
+| `project.ts` | Project、对话、事件、记忆、运行与 Runtime 请求及结果 |
+| `device.ts` | 设备注册、身份、能力报告、授权目录、文件浏览和订阅登录 |
+| `auth.ts` | 员工、登录、密码与浏览器会话 |
+| `inbox.ts` | 事项、选项、处理输入与分页 |
+| `http-api.ts` | 组合领域 Schema 与 Effect HttpApi 的路径、参数、状态及响应头，供中心路由与 OpenAPI 共用 |
 | `http.ts` | HTTP 查询参数与浏览器事件 |
 | `node.ts` | 节点 Frame、两个方向的业务消息联合类型与 `NodeBody` |
 | `worker.ts` | 认证 IPC、具体 Worker 请求、持久命令接收、状态、完成及报告读取 |
 | `commands.ts` | Thread 命令回执与完成报告的身份匹配 |
 | `thread-question.ts`、`full-output.ts` | Agent 问题与回答、设备完整输出读取 |
-| `common.ts`、`constants.ts`、`trace.ts`、`project-providers.ts` | 基础值与容量限制、追踪上下文及 provider 标识规范化 |
+| `common.ts`、`constants.ts`、`trace.ts`、`project-providers.ts` | 基础值、通用响应与诊断、容量限制、追踪上下文及 provider 标识规范化 |
+
+领域模块不依赖 `node.ts`、`worker.ts`、`http.ts` 或 `http-api.ts`。传输模块直接组合领域 Schema；节点的 `Route`、`Source`、`Envelope` 和 `Frame` 定义在 `node.ts`。`SessionResponse` 统一定义在 `auth.ts`，`EnrollmentResponse` 统一定义在 `device.ts`，`http-api.ts` 重导出它们并在端点处附加状态与响应头。前者的 `csrf_token` 使用 `Schema.String`，两者的 `expires_at` 都使用 `Timestamp`。
+
+`src/index.ts` 保留包入口的公开导出名，包内代码直接导入所属领域模块。
 
 `http.ts` 另提供空 JSON 请求、全部 HTTP 查询参数、`ready`、`thread.changed`、`devices.changed`。查询参数保留 URL 上的字符串形式；HTTP handler 在校验后将其转换为业务数值。没有 JSON 正文的 204 响应不定义虚构的响应对象。
 
@@ -38,7 +46,7 @@ HTTP JSON 正文和工具参数严格拒绝未知字段；跨进程消息使用�
 
 Schema 不填充默认值，往返时保留空串、`false`、可选字段省略、`null` 和 `[]` 的区别。HTTP 输入中的默认模型、默认设备、可省略的 goal、Patch 字段及 role 参数按现有 handler 的接收约定声明。时间使用 RFC 3339 字符串，保留小数秒精度，不转换为精度较低的 JavaScript Date。JSON 整数限定为 JavaScript 安全整数；数据库 bigint 超出范围时消费者必须报错，不能静默舍入。
 
-派生结构只追加或收窄字段，使用 `mapFields(..., { unsafePreserveChecks: true })` 保留父结构的整体容量和关系检查；不改变字段的派生契约直接在原 Schema 上增加检查。
+派生结构只追加或收窄字段，使用 `mapFields(..., { unsafePreserveChecks: true })` 保留父结构的整体容量和关系检查；不改变字段的派生契约直接在原 Schema 上增加检查。`ThreadSummary`、`ThreadView` 均从 `Thread` 派生，共用其字段约束，并各自追加列表或详情字段。
 
 ## Worker 接收、状态与完成
 
@@ -92,6 +100,6 @@ pnpm --dir packages/protocol run lint
 pnpm --dir packages/protocol run test
 ```
 
-协议包使用少量 TS 自写样例验证命令完成身份、open 成功回执的存储代次、Worker 就绪关系、问题与回答容量，以及 Inbox 选项约束。HTTP 契约测试核对路径、参数、响应与错误声明。已有调用方覆盖的 Schema 随对应业务测试验证。
+协议包使用少量 TS 自写样例验证 Thread 派生对象往返、字段约束与未知字段容忍、命令完成身份、open 成功回执的存储代次、Worker 就绪关系、问题与回答容量，以及 Inbox 选项约束。HTTP 契约测试核对路径、参数、响应与错误声明，并验证 Session、Enrollment 在领域与 HTTP 入口的响应约束。已有调用方覆盖的 Schema 随对应业务测试验证。
 
 中心、节点、Worker 和网页的调用方测试验证这些契约在实际路由、命令接收、异步完成和事件消费中的使用。协议包只检查传输形状及局部关系；账本事务、ACK 与完成到达顺序、数据库 JSONB 容量、权限、租约、Agent 行为、跨系统进程和安装包由对应模块验证。

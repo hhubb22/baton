@@ -1,6 +1,7 @@
 import { expect, it } from 'vite-plus/test'
 import { Schema } from 'effect'
-import { BatonHttpApi, HttpErrors, httpOpenApi } from '../src/http-api.ts'
+import { BatonHttpApi, EnrollmentResponse, HttpErrors, SessionResponse, httpOpenApi } from '../src/http-api.ts'
+import { EnrollmentResponse as DeviceEnrollmentResponse, SessionResponse as AuthSessionResponse } from '../src/index.ts'
 
 it('generates schemas, statuses and cookie security for every implemented HTTP endpoint', () => {
   const endpoints = Object.values(BatonHttpApi.groups).flatMap((group) => Object.values(group.endpoints))
@@ -28,6 +29,38 @@ it('generates schemas, statuses and cookie security for every implemented HTTP e
     name: 'baton_session',
   })
   expect(document.paths['/api/v1/node-enrollments']?.post?.responses).toHaveProperty('501')
+})
+
+it('Session 与 Enrollment 在领域和 HTTP 入口保留实际响应约束', () => {
+  const session = {
+    employee: {
+      id: 'employee',
+      username: 'alice',
+      display_name: '',
+      auth_source: 'local',
+      must_change_password: false,
+    },
+    csrf_token: '\0',
+    expires_at: '2026-10-24T00:00:00.123456789Z',
+  }
+  for (const schema of [SessionResponse, AuthSessionResponse]) {
+    const decoded = Schema.decodeUnknownSync(schema)({ ...session, future_field: true })
+    expect(Schema.encodeSync(schema)(decoded)).toEqual(session)
+    expect(Schema.is(schema)({ ...session, csrf_token: 1 })).toBe(false)
+    expect(Schema.is(schema)({ ...session, expires_at: 'tomorrow' })).toBe(false)
+  }
+  const enrollment = {
+    enrollment_id: 'enrollment',
+    enrollment_token: 'token',
+    expires_at: '2026-10-24T00:00:00.123456789Z',
+    expires_in_ms: 60000,
+  }
+  for (const schema of [EnrollmentResponse, DeviceEnrollmentResponse]) {
+    const decoded = Schema.decodeUnknownSync(schema)({ ...enrollment, future_field: true })
+    expect(Schema.encodeSync(schema)(decoded)).toEqual(enrollment)
+    expect(Schema.is(schema)({ ...enrollment, expires_at: 0 })).toBe(false)
+    expect(Schema.is(schema)({ ...enrollment, expires_at: 'tomorrow' })).toBe(false)
+  }
 })
 
 it('round trips declared error statuses without adding internal fields to the response body', () => {

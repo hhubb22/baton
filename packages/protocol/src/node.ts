@@ -1,33 +1,69 @@
 import { Schema } from 'effect'
-import { UUID, jsonLimit, summary } from './common.ts'
+import { UUID, Text, jsonLimit, summary } from './common.ts'
 import { MaxMessageBytes } from './constants.ts'
 import {
   BrowseRootsRequest,
-  BrowseRootsResult,
   BrowseRootsGetRequest,
+  BrowseRootsResult,
   BrowseRootsGetResult,
-  Envelope,
   FileRequest,
   FileResult,
-  Frame,
   NodeSyncRequest,
   NodeSyncResult,
   ProjectExecRequest,
   ProjectExecResult,
-  ProjectRunCommand,
-  ProjectRuntimeRequest,
-  ProjectRuntimeResult,
   RuntimeReportRequest,
   RuntimeReportResult,
+  SubscriptionLoginRequest,
+  SubscriptionLoginResult,
+} from './device.ts'
+import { ProjectRunCommand, ProjectRuntimeRequest, ProjectRuntimeResult } from './project.ts'
+import {
   SessionRequest,
   SessionResult,
   ThreadCommand,
   ThreadCommandResult,
   ThreadReport,
   ThreadReportResult,
-  SubscriptionLoginRequest,
-  SubscriptionLoginResult,
-} from './dto.ts'
+} from './thread.ts'
+
+export const Route = Schema.Struct({
+  to: Text,
+})
+export type Route = typeof Route.Type
+
+export const Source = Schema.Struct({
+  kind: Schema.Literals(['node', 'control']),
+  node_id: Schema.optionalKey(UUID),
+  employee_id: Schema.optionalKey(UUID),
+  credential_id: Schema.optionalKey(UUID),
+  incarnation: Schema.optionalKey(Text),
+  conn_id: Schema.optionalKey(Text),
+})
+export type Source = typeof Source.Type
+
+export const Envelope = Schema.Struct({
+  version: Schema.Literal(1),
+  message_id: UUID,
+  route: Route,
+  priority: Schema.Literals(['control', 'output', '']),
+  correlation_id: Schema.optionalKey(summary(128)),
+  body: Schema.optionalKey(Schema.Json),
+  source: Schema.optionalKey(Schema.NullOr(Source)),
+}).check(jsonLimit(256 * 1024))
+export type Envelope = typeof Envelope.Type
+
+export const Frame = Schema.Struct({
+  kind: Schema.Literals(['auth', 'auth_result', 'heartbeat', 'envelope', 'error']),
+  ok: Schema.optionalKey(Schema.Boolean),
+  code: Schema.optionalKey(Text),
+  message: Schema.optionalKey(Text),
+  token: Schema.optionalKey(Text),
+  incarnation: Schema.optionalKey(Text),
+  correlation_id: Schema.optionalKey(Text),
+  envelope: Schema.optionalKey(Schema.Json),
+}).check(jsonLimit(256 * 1024))
+export type Frame = typeof Frame.Type
 
 // 仅收窄帧字段，父结构的整体容量检查继续适用。
 const preserveChecks = { unsafePreserveChecks: true } as const
