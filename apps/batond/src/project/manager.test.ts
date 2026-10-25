@@ -451,7 +451,7 @@ describe('Project Runtime host', () => {
                 has_more: false,
               } as never)
             case 'claim_inputs': {
-              if (!queued) return success({})
+              if (!queued) return success({ payload_bytes: 0, input_count: 0 })
               queued = false
               const event = {
                 seq: events.length + 1,
@@ -462,7 +462,7 @@ describe('Project Runtime host', () => {
                 },
               }
               events.push(event)
-              return success({ event })
+              return success({ event, payload_bytes: Buffer.byteLength(JSON.stringify(event.payload)), input_count: 1 })
             }
             case 'append_event':
             case 'commit_compaction': {

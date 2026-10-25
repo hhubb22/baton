@@ -86,12 +86,16 @@ export class Backend implements RPC {
         })
       }
       case 'claim_inputs': {
-        if (!this.queue) return {}
+        if (!this.queue) return { payload_bytes: 0, input_count: 0 }
         this.queue = false
         const event = input()
         event.seq = this.events.length + 1
         this.events.push(event)
-        return { event: structuredClone(event) }
+        return {
+          event: structuredClone(event),
+          payload_bytes: Buffer.byteLength(JSON.stringify(event.payload)),
+          input_count: 1,
+        }
       }
       case 'commit_compaction': {
         const saved = this.compactions.get(req.client_event_id)

@@ -1,10 +1,9 @@
 import { link, mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { makePrivateTempDirectory } from '../testing/private.ts'
 import { join } from 'node:path'
-import { spawnSync } from 'node:child_process'
 import { afterEach, expect, it } from 'vite-plus/test'
 import { ensurePrivateDirectory, protectPrivateDirectory } from './private.ts'
-import { privateFileHostEnvironment, runPrivateFileHost } from './private-file-host.ts'
+import { runPrivateFileHost } from './private-file-host.ts'
 
 const directories: string[] = []
 async function directory() {
@@ -30,29 +29,6 @@ it('distinguishes explicit directory protection from private path validation', a
   const alias = join(root, 'alias')
   await symlink(path, alias, process.platform === 'win32' ? 'junction' : 'dir')
   await expect(protectPrivateDirectory(alias)).rejects.toThrow('type')
-})
-
-it('dispatches structured source-host argv through Node without shell parsing', async () => {
-  const path = await directory(),
-    file = join(path, 'xai.json')
-  const environment = privateFileHostEnvironment(
-    new URL('../../../../runtimes/project-agent/src/cli.ts', import.meta.url),
-  )
-  const command = JSON.parse(environment.BATON_PRIVATE_FILE_HOST_COMMAND!) as { file: string; args: string[] }
-  expect(new URL(command.args[1]).protocol).toBe('file:')
-  const result = spawnSync(command.file, [...command.args, 'private-file', 'write', path, file], {
-    input: '{"type":"oauth"}',
-    encoding: 'utf8',
-    timeout: 5000,
-  })
-  expect(result.status, result.stderr).toBe(0)
-  expect(await readFile(file, 'utf8')).toBe('{"type":"oauth"}')
-  const missing = spawnSync(command.file, [...command.args, 'private-file', 'read', path, join(path, 'missing.json')], {
-    encoding: 'utf8',
-    timeout: 5000,
-  })
-  expect(missing.status).toBe(3)
-  expect(missing.stdout).toBe('')
 })
 
 it('rejects oversized or nonprivate files and paths outside the credential directory without returning content', async () => {

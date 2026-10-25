@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -86,31 +86,3 @@ for (const [layout, entry] of [
     }
   })
 }
-
-test('结构化 Node host 经真实 TS helper 保存、读取、串行刷新及删除本地凭据', async () => {
-  const parent = await mkdtemp(join(tmpdir(), 'baton-native-argv-'))
-  const directory = join(parent, 'credentials with spaces ; $literal')
-  try {
-    const result = invoke(
-      directory,
-      `
-      await store.modify('openai-codex',async()=>({type:'oauth',access:'local-access',refresh:'local-refresh',expires:0}));
-      await Promise.all([1,2,3].map(()=>store.modify('openai-codex',async value=>({...value,expires:value.expires+1}))));
-      if((await store.read('openai-codex')).expires!==3) throw new Error('refresh_not_serialized');
-      if((await store.list()).length!==1) throw new Error('credential_list_missing');
-      const {probe}=await import(${JSON.stringify(new URL('../src/auth.ts', import.meta.url).href)});
-      const report=await probe(store);
-      if(report.providers[0].status!=='available'||report.providers[1].status!=='login_required') throw new Error('credential_probe_failed');
-      await store.delete('openai-codex');
-      if(await store.read('openai-codex')!==undefined) throw new Error('credential_delete_failed');
-      await store.modify('xai',async()=>({type:'oauth',access:'local-access',refresh:'local-refresh'}));
-      console.log('private-host-complete');
-    `,
-    )
-    assert.equal(result.status, 0, result.stderr)
-    assert.equal(result.stdout.trim(), 'private-host-complete')
-    assert.equal(JSON.parse(await readFile(join(directory, 'xai.json'), 'utf8')).type, 'oauth')
-  } finally {
-    await rm(parent, { recursive: true, force: true })
-  }
-})

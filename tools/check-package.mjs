@@ -75,7 +75,11 @@ async function runtimeHandshake(executable, options) {
             }
           } else if (frame.request.operation === 'read_events') {
             assert.equal(frame.request.after_seq, 0)
-            result = { type: 'project_runtime.result', ok: true, data: { events: [], has_more: false } }
+            result = {
+              type: 'project_runtime.result',
+              ok: true,
+              data: { events: [], last_seq: 0, next_after_seq: 0, has_more: false },
+            }
           } else {
             assert.equal(frame.request.last_seq, 0)
             // The coordinator ends this offline handshake before any input or model call.

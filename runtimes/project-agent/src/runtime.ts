@@ -98,7 +98,7 @@ export class ProjectRuntime {
     )
       throw new RuntimeError('invalid_compaction_summary')
     const request = {
-      operation: 'commit_compaction',
+      operation: 'commit_compaction' as const,
       last_seq: this.seq,
       client_event_id: randomUUID(),
       payload,
@@ -302,8 +302,10 @@ export class ProjectRuntime {
       const versioned = response.wait_protocol === 1
       if (versioned) {
         if (
+          typeof response.version !== 'number' ||
           !Number.isSafeInteger(response.version) ||
           response.version < 0 ||
+          typeof response.wait_remaining_ms !== 'number' ||
           !Number.isSafeInteger(response.wait_remaining_ms) ||
           response.wait_remaining_ms < 0
         )

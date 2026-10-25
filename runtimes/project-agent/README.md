@@ -27,7 +27,7 @@ pnpm --dir runtimes/project-agent exec tsx src/cli.ts login-api-key xai < key-fi
 
 `batond` 在 SEA 中通过自身可执行文件启动 `project-runtime`，加载可执行文件旁 `node_modules/` 中的固定依赖。源码开发仍可通过 `pnpm --dir runtimes/project-agent exec tsx src/cli.ts <命令>` 或编译后的 `baton-project-runtime` 入口运行；两种入口共用导出的 `runProjectRuntimeCLI(args)`。Windows 独立开发入口需要保留仓库布局和已安装依赖：凭据操作自动定位仓库中的 TS 私有文件 helper，通过当前 Node 和 file URL 形式的 tsx loader 启动。也可通过结构化 `BATON_PRIVATE_FILE_HOST_COMMAND` 指定 helper 的程序与参数；指定宿主失败或默认 helper 缺失时，凭据操作返回错误。
 
-使用运行 `batond run` 的同一个系统用户登录。凭据默认保存在用户主目录下的 `.baton/project-runtime`；可用 `BATON_PROJECT_RUNTIME_DATA_DIR` 指定 Runtime 专用的私有目录，登录和守护进程须使用相同配置。凭据与 Pi、Codex CLI 的登录记录分别保存，不上传 Coordinator。
+使用运行 `batond run` 的同一个系统用户登录。凭据默认保存在用户主目录下的 `.baton/project-runtime`；可用 `BATON_PROJECT_RUNTIME_DATA_DIR` 指定 Runtime 专用的私有目录，登录和守护进程须使用相同配置。凭据与 Pi、Codex CLI 的登录记录分别保存，不上传 Coordinator。`FileCredentials` 负责 OAuth 事务与跨进程锁，内部使用直接文件 adapter 或 private-file host adapter；两个 adapter 共用 read、write 与 protect-dir 契约测试。POSIX 目录须属于当前 UID 且权限恰为 `0700`，文件须属于当前 UID、为普通文件、权限恰为 `0600` 且只有一个硬链接；拒绝特殊权限位和符号链接，打开前后核对设备与 inode。Windows 通过 host 验证私有目录 ACL，限制见 [平台私有文件约定](../../apps/batond/src/platform/README.md#私有文件)。凭据 JSON 按 UTF-8 字节限制为 64 KiB，写入使用同目录临时文件、文件 fsync 和原子替换，POSIX 再同步目录。显式 protect-dir 可以收紧已有目录权限；普通读取拒绝不安全路径。host 的 `protect(file, false)` 保持返回 `credential_use_native_write`，文件保护由原子写入完成。
 
 `batond subscriptions` 显示各 provider 的已登录、需要登录或无法读取状态，并在需要登录时给出命令。它调用 Runtime 的 `probe`，只检查本地凭据，不刷新 token，不请求模型，不输出 token。已登录表示本地存在所需凭据；实际授权是否有效由后续请求确认。过期但带有刷新凭据的订阅会在下一次真实请求时刷新。
 
@@ -38,6 +38,8 @@ batond 检查版本 `0.1.0`、登录状态和租约后，在空控制目录启�
 ## 模型请求与持久化
 
 `prompt_version=1` 选择固定的角色提示词，标题和目标来自当前对话的提示词快照。快照随 assistant 的 `pi-ai/1` payload 一起保存；恢复时复用最早保留的快照。生成压缩摘要并写入新快照时才采用新的标题和目标；只清理工具结果时沿用原快照。未知版本拒绝运行。
+
+`checkedRPC` 按 operation 关联结果类型，集中校验外层回复、bootstrap、事件分页、输入领取、事件提交、工具 pending/终态与本地等待结果。结构无效时返回 `invalid_response`，中心失败回复保留字符串错误码。校验返回原始 data，事件 payload 和 pi-ai 消息中的扩展字段完整保留。
 
 每次模型请求都根据 Coordinator 的事件重建历史，保留 provider 的签名、reasoning 和扩展字段，递归排序对象键。`sessionId` 为主对话 ID，关闭 provider 内部重试。`run --max-output-tokens <正整数>` 设置普通回复和摘要的输出预算，默认 32000，实际传给 provider 的值不超过模型的 `maxTokens`；`run --max-model-calls <正整数>` 设置单次运行的模型调用总预算，默认 64 次，普通生成、失败重试和摘要请求都计入。宿主可通过 `ProjectRuntime` 第五个构造参数的 `maxOutputTokens`、`maxModelCalls` 设置相同预算。provider 是否执行 token 上限取决于其 API；固定版本的 Codex 请求体不传输出 token 上限，Runtime 仍检查完整回复的容量。batond 从设备数据目录的 `project-runtime.json` 读取同名的 `maxOutputTokens`、`maxModelCalls`，启动 Runtime 时传入上述 CLI 参数。
 
@@ -70,6 +72,6 @@ pnpm --dir runtimes/project-agent test
 node tools/package-batond.mjs
 ```
 
-测试包括请求前与收尾压缩、旧工具结果保护、前缀与签名复用、超限恢复、重复压缩、提交冲突与丢失回执、无效摘要拒绝、结尾表四种情况、部分工具已有结果、真实子进程在保存和工具事务前后被杀、失败屏障禁止工具执行、模型失败与超限输出、虚拟时钟下的 180 秒与 15 分钟边界、OAuth 文件权限与锁、无网络 probe。跨系统请求测试用超过 1 MiB 的历史验证分页和 provider 扩展字段的保留。
+测试包括请求前与收尾压缩、旧工具结果保护、前缀与签名复用、超限恢复、重复压缩、提交冲突与丢失回执、无效摘要拒绝、结尾表四种情况、部分工具已有结果、真实子进程在保存和工具事务前后被杀、失败屏障禁止工具执行、模型失败与超限输出、虚拟时钟下的 180 秒与 15 分钟边界、两个凭据 adapter 的严格权限、属主、类型、链接、64 KiB 边界、缺失文件、原子替换与事务锁，以及无网络 probe。跨系统请求测试用超过 1 MiB 的历史验证分页和 provider 扩展字段的保留。
 
 faux 恢复测试的 Coordinator 替身负责持久化和事务去重。真实 Runtime、batond、Gateway、Coordinator 与 PostgreSQL 的跨 app 集成测试位于 `e2e/`，运行 `pnpm test:e2e`。测试检查工具结果、记忆、压缩事件与读取起点在 Coordinator 保存，原始消息保留，运行正常结束。事务故障注入测试验证服务端去重。Runtime、跨设备调度和恢复的自动验收使用本地模型替身及离线录制；真实订阅检查仅在显式手动运行冒烟时执行。

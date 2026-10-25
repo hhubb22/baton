@@ -15,7 +15,6 @@ import {
 } from '../platform/process.ts'
 import { captureRuntimeOutput } from './capture.ts'
 import { DeviceLoginCode, type ProjectManagerOptions } from './types.ts'
-import { privateFileHostEnvironment } from '../platform/private-file-host.ts'
 import { readProjectRuntimeConfig } from '../devices/config.ts'
 import { probeFingerprint } from './probe-cache.ts'
 
@@ -40,6 +39,23 @@ export const defaultWatchdogCommand = (): ProcessCommand => {
     ],
   }
 }
+/** Runtime 子进程显式接收 host argv，路径与参数不经过 shell。 */
+export function privateFileHostEnvironment(runtimeEntry?: URL): NodeJS.ProcessEnv {
+  if (isSea()) return { BATON_PRIVATE_FILE_HOST_COMMAND: JSON.stringify({ file: process.execPath, args: [] }) }
+  if (!runtimeEntry) throw new Error('Project Runtime 源码入口未指定')
+  const require = createRequire(runtimeEntry)
+  return {
+    BATON_PRIVATE_FILE_HOST_COMMAND: JSON.stringify({
+      file: process.execPath,
+      args: [
+        '--import',
+        pathToFileURL(require.resolve('tsx')).href,
+        fileURLToPath(new URL('../../../apps/batond/src/platform/private-file-host-entry.ts', runtimeEntry)),
+      ],
+    }),
+  }
+}
+
 export const defaultRuntimeCommand = (): ProcessCommand => {
   if (isSea())
     return {

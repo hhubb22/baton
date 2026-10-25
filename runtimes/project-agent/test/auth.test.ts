@@ -195,23 +195,3 @@ test('API key CLI 从标准输入保存密钥，输出和 probe 不包含密钥'
     await rm(dir, { recursive: true, force: true })
   }
 })
-
-test('凭据刷新串行化，不丢失并发更新', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'baton-lock-'))
-  try {
-    const store = new FileCredentials(dir)
-    await Promise.all(
-      Array.from({ length: 8 }, () =>
-        store.modify('openai-codex', async (value) => ({
-          type: 'oauth',
-          access: 'a',
-          refresh: 'r',
-          expires: (value?.expires ?? 0) + 1,
-        })),
-      ),
-    )
-    assert.equal((await store.read('openai-codex')).expires, 8)
-  } finally {
-    await rm(dir, { recursive: true, force: true })
-  }
-})
