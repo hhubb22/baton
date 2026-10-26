@@ -1,5 +1,5 @@
 import { constants } from 'node:fs'
-import { chmod, lstat, mkdir, realpath, readdir, rm, symlink } from 'node:fs/promises'
+import { chmod, lstat, mkdir, realpath, readdir, rename, rm, symlink } from 'node:fs/promises'
 import { makePrivateTempDirectory } from '../testing/private.ts'
 import { join, relative } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -70,13 +70,15 @@ describe('private files', () => {
       await validatePrivateDirectory(temporarySpelling)
       await writePrivateFile(join(path, 'secret'), 'local-private-value')
       await systemCommand(windowsTool('icacls.exe'), [path, '/grant', '*S-1-5-32-544:(OI)(CI)F', '/Q'])
-      await expect(validatePrivateDirectory(path)).rejects.toThrow('only the current user')
-      await expect(ensurePrivateDirectory(path)).rejects.toThrow('only the current user')
-      await protectPrivateDirectory(path)
-      await ensurePrivateDirectory(path)
-      expect((await readPrivateFile(join(path, 'secret'))).toString()).toBe('local-private-value')
+      const relocated = join(root, 'relocated')
+      await rename(path, relocated)
+      await expect(validatePrivateDirectory(relocated)).rejects.toThrow('only the current user')
+      await expect(ensurePrivateDirectory(relocated)).rejects.toThrow('only the current user')
+      await protectPrivateDirectory(relocated)
+      await ensurePrivateDirectory(relocated)
+      expect((await readPrivateFile(join(relocated, 'secret'))).toString()).toBe('local-private-value')
       const alias = join(root, 'alias')
-      await symlink(path, alias, 'junction')
+      await symlink(relocated, alias, 'junction')
       await expect(ensurePrivateDirectory(alias)).rejects.toThrow('type')
     },
   )
