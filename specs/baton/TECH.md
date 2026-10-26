@@ -1,7 +1,9 @@
 # Baton 技术设计
 
-Status: approved
+Status: draft
 Basis: [行为规格](PRODUCT.md) R-01～R-25。Project Agent 见 [Project Agent TECH](../project-agent/TECH.md)，事项见 [Agent Inbox TECH](../agent-inbox/TECH.md)。
+
+凭据闲置过期、重新认证、Thread 上游执行模式与首版遥测为待实施设计；其他章节记录现行架构。当前节点凭据仍使用固定 JWT `exp`，尚无原设备重新认证流程。后端与设备的发布基线、升级和恢复设计见 [release TECH](../release/TECH.md)。
 
 ## 全景
 
@@ -176,7 +178,7 @@ Windows 第一版按账本保存的 PID 与创建时间核对身份，再用 `ta
 |---|---|
 | `employees`、`login_sessions` | 员工与登录会话 |
 | `nodes`、`node_credentials`、`node_enrollments`、`employee_settings`、`node_presence`、`node_revocations`、`node_runtime_reports` | 设备身份、凭据、默认设备、在线状态、吊销、能力报告 |
-| `threads` | 一个 Thread：员工、可选 Project、设备、Agent 类型、当前模型与后续消息默认模型 `next_model`、工作目录、执行时限、状态与原因、创建者（员工或 Project Agent 及工具调用）、`client_thread_id`、`opened_at`、`archived_at`、版本 |
+| `threads` | 一个 Thread：员工、可选 Project、设备、Agent 类型、当前模型与后续消息默认模型 `next_model`、工作目录、执行时限、状态与原因、创建者（员工或 Project Agent 及工具调用）、`client_thread_id`、`opened_at`、`archived_at`、版本；`runtime_mode` 按下述执行模式设计增加 |
 | `thread_messages` | 消息：Thread、`client_message_id`、发送方、方式、可选模型、正文（≤ 64 KiB）、状态（accepted / queued / sent / withdrawn / unknown）、状态原因 `status_reason`（≤ 4 KiB）、所属 Turn |
 | `thread_turns` | Turn：Thread、`worker_turn_seq`、发起方（员工或 Project Agent）、使用的模型、开始与结束时间、结束原因、上游原样的 `token_usage` JSON |
 | `thread_replies` | 回复：Thread、Turn、`worker_seq`、正文、截断标记与原字节数、附件 JSON、元数据（shell 的退出码） |
@@ -189,7 +191,7 @@ Windows 第一版按账本保存的 PID 与创建时间核对身份，再用 `ta
 
 ### 迁移
 
-中心迁移从 `migrations/0001_initial.sql` 的当前 schema 基线创建员工、设备、Thread、Project、主对话、记忆和事项表。实验室阶段允许重建数据库，不提供旧开发版本的升级路径；正式发布后使用版本化增量迁移。
+中心迁移从 `migrations/0001_initial.sql` 的当前 schema 基线创建员工、设备、Thread、Project、主对话、记忆和事项表。首个内部发布前允许重建实验数据；首版起冻结已发布迁移，通过新增版本迁移保留数据。迁移校验、SQLite 格式版本与失败恢复按 [发布升级设计](../release/TECH.md#持久格式与迁移)实施。
 
 Thread、消息和 Turn 直接包含模型字段，消息保存 `status_reason`，Project 输入类型为当前七种输入。
 
@@ -320,11 +322,17 @@ Kiro 只提供排队。需要打断时，员工先停止这一轮再发消息。
 
 各 Agent 的系统提示只说明运行环境（Baton Thread、工作目录、附件写法），回复按普通文本保存。
 
+### Thread 上游执行模式
+
+Baton R-07、R-21 的待实施契约采用上游 `RuntimeMode` 与 `DEFAULT_RUNTIME_MODE`，当前默认 `full-access`。`POST /threads`、本地 `open` 与 Project `threads.create` 增加可选 `runtime_mode`；创建后在 Thread、outbox、节点/Worker 配置和原生映射保存实际值，后续回合与恢复继续使用。模式列表、按模式准入、上游 native policy、待审批请求转交和错误契约统一见 [Agent 适配设计](../agent-adapters/TECH.md#thread-执行权限r-11)，不在中心重复维护映射。
+
+当前创建与恢复尚未携带该字段，Codex 与 Cursor 仍使用固定策略。实施时整体淘汰固定 `approval-required`、`approvalPolicy: never`、Codex 沙箱/网络覆盖和按种类自动接受待审批请求的分支，不为当前默认值保留兼容层。上游已作出的自动决策继续沿用，实际 pending 请求复用 Thread 问题/回答链路交给员工。
+
 ### 能力上报
 
 batond 在 `node_runtime_reports.report.agents` 上报每种 Agent 的 `{agent_type, version, status, reason?, models:[{id, name}], default_model, capabilities:{create, queue, steer, stop, resume, switch_model}}`。模型目录由 fork 的 driver 探测：Codex 使用 `model/list`，Pi 使用 `get_available_models`，Kiro 经 ACP 发现会话取得模型，Cursor 使用 SDK 模型查询。目录用于发现与补全，显式模型 ID 交给原生 Agent 判定；目录为空时仍可使用默认模型或手填 ID，换模型操作继续校验 `switch_model` 能力。
 
-`status` 为 `available`、`unverified` 或 `unavailable`。程序或 SDK 已安装且认证 valid/unknown 时报告 available，开放 create/resume；缺程序或明确认证 missing 时报告 unavailable。系统与版本不设白名单，未知版本、版本探测超时、模型目录问题和能力限制记录在 reason 中；整次探测失败且安装状态未确认时报告 unverified。Cursor 的资产、辅助程序或 sandbox 明确失败时报告 unavailable。shell 须单独开启本机命令权限。中心按目标系统路径规则检查工作目录属于上报的 roots，设备在执行前核实目录存在与真实路径边界。
+`status` 为 `available`、`unverified` 或 `unavailable`。程序或 SDK 已安装且认证 valid/unknown 时报告 available，开放 create/resume；缺程序或明确认证 missing 时报告 unavailable。系统与版本不设白名单，未知版本、版本探测超时、模型目录问题和能力限制记录在 reason 中；整次探测失败且安装状态未确认时报告 unverified。Cursor 当前资产、辅助程序或 sandbox 明确失败时报告 unavailable；执行模式接入后区分公共失败和上游 mode 的实际依赖，见「Thread 上游执行模式」。shell 须单独开启本机命令权限。中心按目标系统路径规则检查工作目录属于上报的 roots，设备在执行前核实目录存在与真实路径边界。
 
 daemon 在独立探测循环调用 `probeAgents`，每轮结束后默认间隔 30 秒，单次 host 探测最多 30 秒。探测失败保留诊断，后续循环继续重试，不按可执行文件路径或版本永久缓存空目录。探测不发送 prompt、不发起登录；Kiro 的模型发现会建立空的 ACP 会话。能力探测与目录采集、连接、心跳和 Worker 消息分别运行。
 
@@ -344,7 +352,7 @@ URL 相对 `/api/v1`。读取检查员工会话与资源归属，写入另检查
 | `POST /nodes/{id}/roots`、`DELETE /nodes/{id}/roots` | `{path}`；通过 Gateway 等待本人在线且已同步设备保存目录设置，返回含最新 `roots`、`repos` 摘要的 Node DTO，超限标记 `truncated`；网页另行读取完整目录清单。添加支持真实路径幂等登记，移除支持路径或目录标识；无效路径返回 400，节点离线返回 503 `node_offline` |
 | `POST /nodes/{id}/subscriptions/login` | `{provider}`；通过 Gateway 启动设备端 OAuth 设备码登录，返回 `{provider, verification_uri, user_code, expires_in_seconds}`，凭据留在设备。转换 ChatGPT、xAI、Claude 别名并将 provider ID 交给设备的 Runtime 实现；当前 ChatGPT 和 xAI 支持设备码，Anthropic 使用终端 OAuth 或本地 API key 配置。网页依据设备报告的 `login_methods` 显示入口，API key 不经过此接口；未取得设备码返回 503 |
 | `PUT /nodes/{id}/project-exec` | `{enabled}`；通过 Gateway 等待在线且已同步设备原子保存并回读本机开关，确认后返回 Node DTO，报告中的 `exec` 使用设备确认值；未确认返回 503，客户端重新读取状态。协议与 `exec.user` 见 Project Agent TECH「节点能力报告」 |
-| `POST /threads` | `client_thread_id`、可选 `node_id`（缺省为默认设备）、`agent_type`、可选 `model`（缺省为该 Agent 的 `default_model`）、`working_directory`、可选 `execution_timeout_seconds`（1～2,147,483,647 的整数，默认 7200）、第一条消息 `message:{client_message_id, content}`。浏览器新建的 Thread 不属于 Project。预算参与创建幂等内容，并固定存入 open 命令的 outbox payload；以后修改 Thread 设置不会改变原 open 命令的重试内容。新建返回 201，幂等重发返回 200，内容冲突返回 409 |
+| `POST /threads` | `client_thread_id`、可选 `node_id`（缺省为默认设备）、`agent_type`、可选 `model`（缺省为该 Agent 的 `default_model`）、可选 `runtime_mode`（待实施，缺省为上游 `DEFAULT_RUNTIME_MODE`）、`working_directory`、可选 `execution_timeout_seconds`（1～2,147,483,647 的整数，默认 7200）、第一条消息 `message:{client_message_id, content}`。浏览器新建的 Thread 不属于 Project。预算参与创建幂等内容，并固定存入 open 命令的 outbox payload；以后修改 Thread 设置不会改变原 open 命令的重试内容。新建返回 201，幂等重发返回 200，内容冲突返回 409 |
 | `GET /threads` | 可按 `project_id`、`node_id`、`status` 筛选，按 `(last_activity_at, id)` 倒序分页；`limit` 默认 50、最多 100，续页使用 `next_cursor`。每条记录包含 Thread 基础字段、`title`、可空 `current_turn` 和 `stop_canceled`，供列表直接展示 |
 | `GET /threads/{id}` | Thread、状态、当前 Turn、待发消息、失败消息、`resume_pending` 和 `retry_open_allowed`；后者由持久拒绝及投递记录计算，表示可在原 Thread 重试打开；`model` 为实际模型，`next_model` 为后续排队消息的默认模型 |
 | `GET /threads/{id}/timeline` | 按审计事件 ID 顺序返回消息、Turn 边界、回复和操作；`limit` 默认 20、最多 100，续页使用 `next_cursor` |
@@ -379,7 +387,7 @@ Thread 列表摘要在一次 SQL 查询中读取。`title` 取首条已接受消
 
 Thread 命令以信封 `message_id` 作为稳定身份，`thread.command_result` 用信封 `correlation_id` 引用它，正文含 `{type, thread_id, ok, code?}`。报告正文含 `{type:"thread.report", thread_id, event_id, worker_seq, kind, ...}`，其中 `kind` 为「上行报告」表中的类型，`worker_turn_seq` 标识 Turn，`client_message_id` 标识消息。`turn.ended` 的 `queue_empty` 表示 Worker 是否还有排队消息。回执含 `{type:"thread.report_result", thread_id, event_id, worker_seq, ok, code?, expected_worker_seq?}`；序号不连续时返回 `worker_sequence_gap` 和下一条期望序号，不保存该报告。
 
-Thread 回包事务按 Node → Credential → Presence 锁定认证记录，再锁目标 Outbox 或 Thread；全部锁取得后用数据库当前时刻复核凭据期限。凭据吊销、连接替换和锁等待跨越有效期都不能写入执行事实。
+Thread 回包事务按 Node → Credential → Presence 锁定认证记录，再锁目标 Outbox 或 Thread；全部锁取得后用数据库当前时刻复核凭据闲置期限。凭据吊销、连接替换和锁等待跨越有效期都不能写入执行事实。闲置检查与业务活动延长的原子顺序见「设备凭据生命周期」。
 
 Thread 没有排队期限，消息由员工明确发出，设备收到即可执行。启动与回复通过 Thread 命令和报告确认。
 
@@ -406,9 +414,50 @@ Thread 没有排队期限，消息由员工明确发出，设备收到即可执�
 
 TS 中心的控制操作分别计算排队和执行预算。默认排队 2 秒，执行按操作为 3～15 秒；Thread 报告为 15 秒，命令接收回执为 10 秒。通过 `BATON_CONTROL_<操作名>_QUEUE_TIMEOUT` 和 `BATON_CONTROL_<操作名>_EXECUTION_TIMEOUT` 调整。持久报告或命令回执暂时超时后保留连接，节点用原身份继续恢复；明确的身份或协议错误仍关闭连接。全部操作名和 RPC 并发、排队配置见 [中心配置说明](../../apps/server/README.md)。
 
-节点凭据为 Ed25519 签名 JWT，受众 `baton-node`，绑定节点、员工、credential_id 与有效期。吊销顺序：PostgreSQL 提交 → 本地认证与分派拒绝该凭据 → 关闭活动连接 → 保存已生效事实；只有完成后 API 才返回 effective（R-04）。
+节点凭据为 Ed25519 签名 JWT，受众 `baton-node`，绑定节点、员工、credential_id 与凭据版本。闲置有效性由中心持久状态判定，见下节。吊销顺序：PostgreSQL 提交 → 本地认证与分派拒绝该凭据 → 关闭活动连接 → 保存已生效事实；只有完成后 API 才返回 effective（R-04）。
 
 节点上线附带每次 batond 启动生成的 incarnation；已有不同 incarnation 活动时拒绝接管（R-02）。新连接完成 `node.sync` 后才标为可用（R-03）。
+
+### 设备凭据生命周期
+
+本节为 R-02 的待实施设计。中心签发的设备 JWT 保留签名、issuer、audience、节点、员工、凭据 ID、版本与签发时间，移除固定 `exp`。其授权必须经过数据库当前凭据版本、吊销与闲置期限检查；不提供只验签即可授权的路径。注册和重新认证凭据仍为默认 10 分钟、单次使用的独立秘密。首版前直接调整开发协议和 DTO，不保留固定期限 JWT 的兼容分支。
+
+| 记录与入口 | 设计 |
+|---|---|
+| `nodes` | 新增 `last_business_at`；记录已验证业务活动的中心接收时间，与 `node_presence.last_contact_at` 分开 |
+| `node_credentials` | 将固定 `expires_at` 替换为 `idle_expires_at`；注册或重新认证初始化为中心当前时间加闲置期限 |
+| `node_enrollments` | 增加 `purpose=register\|reauth`、可空 `target_node_id`；重新认证凭据绑定员工和原设备 |
+| 重新认证回执 | 持久记录 `operation_id`、规范请求摘要、新 credential_id/version 与签发时间；与凭据替换同事务提交，不保存明文秘密 |
+| `NodeCredential` / 设备视图 | 本地凭据保留 ID、版本和 token；`idle_expires_at` 只作为中心响应的状态快照，节点不依据旧本地副本判定闲置期限 |
+
+新增配置 `BATON_NODE_IDLE_TTL`，默认 `720h`，范围 1 小时至 90 天；它替代固定期限配置 `BATON_NODE_CREDENTIAL_TTL`。改变配置只影响后续注册、重新认证和有效业务计算的新期限，不自行复活已过期凭据。所有比较使用 PostgreSQL `clock_timestamp()`，期限相等即过期。
+
+#### 活动认定与在途检查
+
+R-02 的活动在业务入口按固定种类认定，调用方不能通过布尔字段自行声明活跃。一次新命令的持久接收、新的 Worker 报告、Project 前台 `claim_inputs` / 工具请求，以及用户主动设备请求的成功响应可以延长期限。设备报告、轮询与文件分页须携带可关联的操作身份；自动刷新不生成可续期的用户操作。相同命令、事件、请求或分片重试只返回原结果，失败和重复投递不延长。
+
+中心仍活跃的业务采用有界存活证据：前台 Project 的有效宿主续租可算活动；Thread 由 daemon 定期查询 Worker 的认证 status，携带 Thread、存储代次、Turn 序号、实际执行身份和每次新核查的序号上报。中心验证对应未结束 Turn 和当前连接；daemon 按现有 Worker 状态查询预算有界核查。仅中心存有 `running`、节点仅发心跳、陈旧 status 或后台 memory claim 均不足以续期。设备离线期间中心不依据过去的执行中状态延长期限。
+
+允许活动的事务遵循入口既有锁顺序：Node → Credential → Presence 的相对顺序不变，Project 请求先取得既有 Agent 锁。需要延长期限的入口首次取得 Node 与 Credential 时即使用写锁，避免持有共享锁后同时升级锁造成竞争。取得全部相关锁后再次校验原闲置期限和来源，再保存首次业务事实与新的 `last_business_at`、`idle_expires_at`。锁等待跨过期限则拒绝，不能先延长再授权。多个新业务串行按当前行更新，以 `GREATEST` 保证期限不被较早结果缩短。复用已有报告去重和命令回执判定，不把重复 ACK 当作新活动。有效存活核查也必须在旧期限内提交。
+
+握手、派发、Runtime 续租、工具写入与业务回包共用闲置校验。维护循环关闭已过期连接并撤销其 Project 租约，维护延迟不能放宽事务校验。过期返回 `node_idle_expired`，daemon 停止认证重试并显示重新认证指引。Worker 按原生命周期保存结果，中心不接收过期身份的补报；重新认证并同步后沿原事件身份补报。吊销返回既有吊销错误，重新认证不能解除吊销。
+
+#### 原设备重新认证
+
+新增入口均为待实施契约，HTTP DTO 在 `packages/protocol` 的共享声明中维护。
+
+| 入口 | 输入、输出与边界 |
+|---|---|
+| `POST /api/v1/nodes/:id/reauth-enrollments` | 已登录员工、Origin 与 CSRF 校验，校验本人未吊销设备；创建绑定该设备的默认 10 分钟凭据，沿用 enrollment 响应，不需要设备在线 |
+| `batond reauth` | 使用已有 `--data-dir`、已保存中心地址与 `--ca-file`；新凭据来自 `BATON_ENROLLMENT_TOKEN` 或 `--enrollment-file`，原设备 token 由私有身份文件读取 |
+| `POST /api/v1/nodes/:id/reauth` | `operation_id, enrollment_token, previous_token`；仅用于重新认证，不授予普通节点业务权限；成功返回同一节点的新身份凭据 |
+| 节点视图 | 增加 `credential_state=active\|idle_expired\|revoked` 与 `idle_expires_at`，不包含 token |
+
+`previous_token` 验证签名、员工与节点绑定，允许闲置过期；首次执行仍要求它对应最近签发的凭据版本。中心按 Node → Credential → Presence → enrollment/回执加锁，核对归属、未吊销、目标凭据与请求摘要，在一个事务里消费 enrollment、递增凭据版本、签发新凭据并保存回执。旧连接身份立即失效；新身份成功同步后才可派发。
+
+CLI 在 `identity.lock` 下保存待提交的 operation_id 和请求摘要，再发请求；取得响应后原子替换 `identity.json`，随后清除待提交记录。旧身份与 enrollment 秘密在本地私有存储保留至替换完成，不打印到日志。响应丢失或本地保存前退出后，以相同请求重试，中心通过回执按原签发字段重建同一结果，不能再次递增版本。
+
+已提交操作的回执重取仍检查节点未吊销、新凭据仍是当前版本、原请求秘密及摘要一致；只对同一已提交操作允许旧版本证明。enrollment 的期限限制首次消费，已消费秘密只能配合原证明取回原操作结果，不能发起新替换或延长闲置期限。取回的凭据若也已闲置过期，须再以它和员工新领取的 enrollment 发起重新认证。相同 operation_id、不同请求返回 `reauth_conflict`。其他员工、错误目标、已吊销节点、缺失身份或 incarnation 冲突均拒绝；没有原操作连续证据时返回 `identity_recovery_required`，保留数据并由员工核对，不能删除身份自动重新注册。
 
 ### 容量上限
 
@@ -449,7 +498,7 @@ TypeScript 的 `GET /nodes/{id}/files` 通过 `root_id`、`path` 浏览目录和
 
 ## 账号与保留
 
-本地员工账号由管理员创建，Argon2id 口令摘要，服务端登录会话；改密和重置注销既有会话。会话 Cookie 固定使用 Secure、HttpOnly、SameSite=Strict。`GET /me` 从当前会话令牌经固定域前缀隔离的 SHA-256 摘要派生稳定 CSRF token，并以 URL-safe Base64 返回；同一 Cookie 在页面刷新及 Coordinator 重启后得到相同 token，读取不续期或轮换会话。数据库仅保存会话令牌摘要与派生 token 的摘要，写请求用 `X-CSRF-Token` 校验。JSON 响应和日志不得暴露 Cookie 原值，也不以会话令牌或其存储摘要直接充当 CSRF token。注册凭据 10 分钟单次使用，节点凭据 30 天（D2）。
+本地员工账号由管理员创建，Argon2id 口令摘要，服务端登录会话；改密和重置注销既有会话。会话 Cookie 固定使用 Secure、HttpOnly、SameSite=Strict。`GET /me` 从当前会话令牌经固定域前缀隔离的 SHA-256 摘要派生稳定 CSRF token，并以 URL-safe Base64 返回；同一 Cookie 在页面刷新及 Coordinator 重启后得到相同 token，读取不续期或轮换会话。数据库仅保存会话令牌摘要与派生 token 的摘要，写请求用 `X-CSRF-Token` 校验。JSON 响应和日志不得暴露 Cookie 原值，也不以会话令牌或其存储摘要直接充当 CSRF token。注册凭据默认 10 分钟单次使用，节点凭据连续无实际业务 30 天后闲置过期（D2），判定、重新认证和 DTO 见「设备凭据生命周期」。
 
 中心记录默认长期保留，没有自动清理；回复正文和过程项已限长，过程项随 Thread 保留。设备上 Baton 保存的完整回复与 shell 输出默认保留 30 天，原生 Agent 历史由员工自己管理。设备账本与待补报数据设 1 GiB 预算，达到预警水位后拒绝新 Thread 和新消息，不删除未确认的报告（D4）。
 
@@ -457,11 +506,19 @@ TypeScript 的 `GET /nodes/{id}/files` 通过 `root_id`、`path` 浏览目录和
 
 设备密码、模型订阅凭据、节点私钥只存在设备上，POSIX 文件权限为当前用户 `0600`；Windows 第一版沿用用户目录下数据目录继承的 ACL，不另行设置或校验，命名管道使用 Node 默认安全描述符与私有令牌认证，逐句柄 DACL 检查留待原生模块接入。节点凭据和注册凭据不进日志、URL 或命令行。中心不持久化实时输出和原生历史（R-22）。过程项按原文存入 PostgreSQL，命令输出里可能带有密钥；读取时按员工和 Project 归属检查，Project Agent 读取时不脱敏。追踪导出只带 span 元数据，不导出过程项正文；向观测或分析平台导出过程数据的导出器必须先脱敏。
 
+### 首版遥测
+
+R-23 的待实施部分复用 `packages/telemetry/src/index.ts` 的 Effect OTLP/HTTP 导出、并发与超时限制。发布版本与提交写入构建元数据，由中心、daemon、Worker、agent-host 和 Runtime 各自报告；恢复或升级时读取实际运行程序元数据，不能把新 daemon 版本套在仍存活的旧 Worker 上。
+
+资源属性包含 `service.version`、源码提交、OS 与架构；业务 span 使用有界的节点、Project、运行、命令和 Thread 标识，以及 Agent/provider/model、固定错误码、等待原因、重试次数、停止/恢复结果、耗时与可选 token 用量。沿既有 trace context 关联，不以原始错误文本充当错误码。模型未报告 token 时字段缺省并标注未知，不写成零。
+
+现有导出白名单尚未覆盖这些业务属性，实施时在 `packages/telemetry` 统一增加明确字段，并限制资源属性、事件和错误详情的内容。查询、路径、消息、记忆、证据和工具正文不进导出。记忆的工作积压、召回降级与成本字段按 [memory TECH](../project-memory/TECH.md#可见性与实施边界)维护。未配置 OTLP 时保持现有本地诊断，不连接采集端；内部部署可显式启用，导出阻塞与失败继续有界丢弃，不阻塞业务。发布与升级的版本关联验收见 RL-A09。
+
 ## 部署
 
 中心位于 `apps/server`，构建产物为 `apps/server/dist/server.cjs` 及相邻的 `web/`、`migrations/`。与 PostgreSQL 部署后，运行 `node apps/server/dist/server.cjs serve` 提供静态页面、API、浏览器 WebSocket 和节点 WSS。`serve`、账号管理和 `migrate` 都先执行并核对迁移；`migrate` 完成后退出。
 
-签名密钥路径由 `BATON_NODE_SIGNING_KEY` 指定，默认工作目录下的 `node-signing.key`；仅在 `lstat` 确认不存在时生成 Ed25519 私钥并原子写入 `0600` 文件，已有文件校验权限、类型、所有者和内容；Windows 不校验权限位和所有者，依赖目录继承的 ACL，也不对目录句柄执行 fsync。升级先停止旧中心，再启动新实例完成迁移；节点退避重连并同步。中心默认监听 `127.0.0.1:8080`，通过 HTTPS 反向代理公开；也可直接配置证书提供 HTTPS/WSS。容器与设备 SEA 的发布布局见 [发布设计](../release/TECH.md#打包与发布)。
+签名密钥路径由 `BATON_NODE_SIGNING_KEY` 指定，默认工作目录下的 `node-signing.key`；仅在 `lstat` 确认不存在时生成 Ed25519 私钥并原子写入 `0600` 文件，已有文件校验权限、类型、所有者和内容；Windows 不校验权限位和所有者，依赖目录继承的 ACL，也不对目录句柄执行 fsync。升级的迁移、备份和进程处理按 [release TECH](../release/TECH.md#升级执行与恢复)实施；普通中心重启继续按 R-19 恢复。中心默认监听 `127.0.0.1:8080`，通过 HTTPS 反向代理公开；也可直接配置证书提供 HTTPS/WSS。容器与设备 SEA 的发布布局见 [发布设计](../release/TECH.md#打包与发布)。
 
 节点 bundle 为 `apps/batond/dist/batond.cjs`，命令使用 `node apps/batond/dist/batond.cjs <命令>`。`register` 使用 Node 的平台标识推导系统名，显示名由主机名清理而来。注册在 `identity.json` 保存规范化 HTTPS 中心地址，`run` 优先使用显式 `--relay`，否则推导 WSS 地址。`up` 复用注册和运行逻辑，在没有身份时要求中心地址和凭据；workspace 在连接前幂等登记。默认设备数据目录为 `~/.baton-ts`。
 
@@ -493,6 +550,18 @@ TypeScript 的 `GET /nodes/{id}/files` 通过 `root_id`、`path` 浏览目录和
 | R-19、R-20 | 执行中重启 Coordinator、batond、Worker，短停 PostgreSQL | 消息重发；回复重复；同步前设备显示可用 | 进程测试 |
 | R-24 | 第一版之后验证 500 台设备、100 个执行中 Thread，24 小时 | 第一版之后按 D6 确定容量阈值并判定 | 第一版之后的压测环境 |
 | R-25 | 当前消息带未知字段、未声明可选能力 | 未知字段导致拒绝或已知字段改变；未声明能力被启用 | 协议扩展测试 |
+
+### 凭据与发布验收
+
+下表为待实施行为的验证计划。
+
+| 需求 | 设置与观察 | 失败条件 | 位置 |
+|---|---|---|---|
+| R-02 | 将数据库闲置期限设置在当前时刻前后；心跳、重复报告、后台整理与新业务交错，持锁跨越期限 | 无业务仍续期、过期后先续期再授权、旧执行状态永久保活 | PostgreSQL 集成，planned |
+| R-02、R-04 | 真实 Worker 替身有长回合，再让 status 陈旧或设备离线；前台与后台续租分别检查 | 无有效执行证据仍续期；后台续租延长；有效前台或 Thread 核查未保持活跃 | 包内协议替身与中心集成，planned |
+| R-01、R-02、R-13 | 重新认证响应丢失、本地身份保存前退出、重复提交、enrollment 在提交前后到期、并发吊销 | 新设备产生、凭据多次替换、越权重取、吊销复活、旧输入重发 | 节点本地替身与 HTTP 集成，planned |
+| R-22、R-23 | 不同实际版本产生诊断；向 span、resource、事件和错误注入敏感标记；导出超时 | 实际版本不符，正文泄漏，token 缺失被记作零，业务受导出阻塞 | telemetry 单测与发布验证，planned |
+| R-25 | 已发布格式增量升级与失败恢复 | 迁移、兼容与恢复结果不符合 RL-A02～08 | release 验证，planned |
 
 自动化验收使用离线转录与本地替身；进程回收、私有文件、SQLite 和安装包检查在对应系统本地运行。交叉构建不代替原生验证，未测项如实记录。真实订阅和模型调用仅用于显式手动冒烟。
 

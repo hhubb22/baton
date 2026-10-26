@@ -110,7 +110,8 @@ daemon 和 CLI 使用 `agents/probe.ts` 的 `probeAgents`。默认按 Cursor、P
 | [.agents/PROJECT.md](../../.agents/PROJECT.md) | 工单与提交约定 |
 | [GLOSSARY.md](../../GLOSSARY.md) | 领域术语、定义、代码名字与易混点 |
 | [Baton TECH](../baton/TECH.md) | 全景、技术选择、平台实现、数据、协议与行为验证 |
-| [release TECH](../release/TECH.md) | 打包发布、安装包检查、测量、Windows 待修与第一版之后事项 |
+| [release PRODUCT](../release/PRODUCT.md) | 内部首版、升级的数据保留、兼容、准备、失败恢复与验收约定 |
+| [release TECH](../release/TECH.md) | 打包发布、安装包检查、迁移与升级设计、测量、Windows 待修与第一版之后事项 |
 | [tools README](../../tools/README.md) | 脚本参数和调用方法 |
 | 各 app 与子目录 README | 本目录实现要点与测试入口链接 |
 

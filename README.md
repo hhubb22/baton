@@ -117,5 +117,5 @@ node apps/batond/dist/batond.cjs project-runtime login-api-key anthropic < key-f
 - 上游转录与回放：[TECH](specs/agent-replay/TECH.md)
 - 术语与代码命名：[GLOSSARY](GLOSSARY.md)
 - 目录与验证入口：[AGENTS](AGENTS.md)
-- 打包、发布与平台验证：[TECH](specs/release/TECH.md)
+- 打包、发布与升级：[PRODUCT](specs/release/PRODUCT.md)、[TECH](specs/release/TECH.md)
 - 工具参数：[tools/README](tools/README.md)
