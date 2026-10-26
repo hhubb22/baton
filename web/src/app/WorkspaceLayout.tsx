@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useInbox, useSession, useSignOut } from '../data/queries'
 import type { ID, ProjectPatch, Reference } from '../data/types'
 import { text } from '../theme/text'
-import { glassImage } from '../theme/backdrop'
+import { glass, sceneImage } from '../theme/backdrop'
 import { useResolvedTheme } from '../theme/ThemeProvider'
 import { colors, size, space } from '../theme/tokens.stylex'
 import { Button } from '../ui/Button'
@@ -26,7 +26,10 @@ const styles = stylex.create({
     backgroundColor: colors.canvas,
     backgroundPosition: 'center',
     backgroundSize: 'cover',
+    isolation: 'isolate',
   },
+  // 铺满视口的磨砂层，在背景图之上、侧栏和主内容之下。
+  frost: { position: 'fixed', inset: 0, zIndex: -1 },
   backdrop: (image: string) => ({ backgroundImage: image }),
   problem: {
     display: 'flex',
@@ -188,7 +191,8 @@ export function WorkspaceLayout() {
   return (
     <WorkspaceContext value={workspace}>
       <WorkspaceTitle />
-      <div {...stylex.props(styles.shell, styles.backdrop(glassImage(theme)))}>
+      <div {...stylex.props(styles.shell, styles.backdrop(sceneImage(theme)))}>
+        <div aria-hidden {...stylex.props(styles.frost, glass.layer)} />
         <Sidebar />
         <Main failedAt={failedAt} onRetry={workspace.signOut} />
       </div>

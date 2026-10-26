@@ -29,6 +29,7 @@ import {
 import type { Device, DeviceAgent, ID, Message, Reference, SendMode, Thread } from '../data/types'
 import { text } from '../theme/text'
 import { colors, radius, size, space } from '../theme/tokens.stylex'
+import { AgentMark } from '../ui/Avatar'
 import { Banner } from '../ui/Banner'
 import { Button, focusRing, IconButton } from '../ui/Button'
 import { Composer } from '../ui/Composer'
@@ -89,8 +90,10 @@ const styles = stylex.create({
   },
   messagesPanel: { paddingInline: space.lg },
   userItem: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' },
+  // Project Agent 发来的消息在气泡左下角带它的标记。
+  userLine: { display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end', gap: space.sm, maxWidth: '85%' },
   user: {
-    maxWidth: '85%',
+    minWidth: 0,
     paddingBlock: space.sm,
     paddingInline: space.md,
     borderRadius: '14px',
@@ -98,7 +101,6 @@ const styles = stylex.create({
   },
   withdrawn: { color: colors.muted },
   agent: { display: 'flex', flexDirection: 'column', gap: space.sm, alignSelf: 'stretch' },
-  sender: { color: colors.faint },
   note: { display: 'inline-flex', alignItems: 'center', gap: '4px', color: colors.faint },
   noteUnknown: { color: colors.attentionText },
   link: {
@@ -304,11 +306,11 @@ function MessageItem({
   }
   return (
     <article id={`message-${message.id}`} {...stylex.props(styles.userItem)}>
-      <div {...stylex.props(text.body, styles.user, message.delivery === 'withdrawn' && styles.withdrawn)}>
-        {message.sender === 'projectAgent' && (
-          <span {...stylex.props(text.caption, styles.sender)}>From project assistant</span>
-        )}
-        <MessageBody body={message.body} onOpenPath={onOpenPath} />
+      <div {...stylex.props(styles.userLine)}>
+        {message.sender === 'projectAgent' && <AgentMark label="From project assistant" />}
+        <div {...stylex.props(text.body, styles.user, message.delivery === 'withdrawn' && styles.withdrawn)}>
+          <MessageBody body={message.body} onOpenPath={onOpenPath} />
+        </div>
       </div>
       {message.delivery === 'unknown' ? (
         <span {...stylex.props(text.caption, styles.note, styles.noteUnknown)}>
@@ -815,15 +817,7 @@ export function ThreadDetail({
 
   if (layout === 'page') {
     return (
-      <Page
-        title={thread.title}
-        actions={
-          <>
-            {statusLabel}
-            {more}
-          </>
-        }
-      >
+      <Page title={thread.title} status={statusLabel} actions={more}>
         {body}
         {dialogs}
       </Page>

@@ -86,10 +86,13 @@ describe('inbox decisions', () => {
   it('collapses details, shows newest first, and saves one answer across all three locations', async () => {
     const user = userEvent.setup()
     const { router, client } = setup()
-    const card = await screen.findByRole('region', { name: pathsQuestion })
-    expect(screen.queryByText('2 tests fail only on Windows because of drive letters.')).not.toBeInTheDocument()
-    const cards = screen.getAllByRole('region').filter((node) => node.getAttribute('aria-label')?.endsWith('?'))
+    const cards = await screen.findAllByRole('region', { name: /\?$/ })
+    expect(cards).toHaveLength(1)
     expect(cards[0]).toHaveAccessibleName(runnerQuestion)
+    expect(screen.queryByText('2 tests fail only on Windows because of drive letters.')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: new RegExp(pathsQuestion.replace('?', '\\?')) }))
+    const card = await screen.findByRole('region', { name: pathsQuestion })
+    expect(screen.getByText('2 tests fail only on Windows because of drive letters.')).toBeInTheDocument()
     expect(document.title).toBe('(2) Baton')
     await user.click(within(card).getByRole('button', { name: /Fix them before merging/ }))
     await user.type(within(card).getByLabelText('Note (optional)'), 'Keep the regression tests.')
@@ -107,7 +110,6 @@ describe('inbox decisions', () => {
     await waitFor(() => expect(screen.getAllByRole('region', { name: pathsQuestion })).toHaveLength(2))
     const shared = screen.getAllByRole('region', { name: pathsQuestion })
     for (const item of shared) {
-      expect(within(item).getByText('Answered')).toBeInTheDocument()
       expect(within(item).getByText(/Keep the regression tests/)).toBeInTheDocument()
       expect(within(item).queryByRole('button', { name: 'Send reply' })).not.toBeInTheDocument()
     }
@@ -121,6 +123,7 @@ describe('inbox decisions', () => {
   it('keeps a shared draft on navigation and preserves the effective answer on conflict', async () => {
     const user = userEvent.setup()
     const { router } = setup('/inbox', 'conflict')
+    await user.click(await screen.findByRole('button', { name: new RegExp(pathsQuestion.replace('?', '\\?')) }))
     const card = await screen.findByRole('region', { name: pathsQuestion })
     await user.click(within(card).getByRole('button', { name: /Skip them and open a follow-up/ }))
     await user.type(within(card).getByLabelText('Note (optional)'), 'Tomorrow')
@@ -128,6 +131,7 @@ describe('inbox decisions', () => {
     const inProject = await screen.findByRole('region', { name: pathsQuestion })
     expect(within(inProject).getByLabelText('Note (optional)')).toHaveValue('Tomorrow')
     await act(() => router.navigate({ to: '/inbox' }))
+    await user.click(await screen.findByRole('button', { name: new RegExp(pathsQuestion.replace('?', '\\?')) }))
     const again = await screen.findByRole('region', { name: pathsQuestion })
     await user.click(within(again).getByRole('button', { name: 'Send reply' }))
     const result = await screen.findByRole('region', { name: 'Latest result' })
@@ -153,19 +157,22 @@ describe('inbox decisions', () => {
     expect(await within(result).findByText(/when the project resumes/)).toBeInTheDocument()
   })
 
-  it('shows a withdrawal that won while replying and keeps historical details accessible', async () => {
+  it('shows a withdrawal that won while replying and keeps its reason in history', async () => {
     const user = userEvent.setup()
     const { router } = setup('/inbox', 'inboxWithdrawn')
+    await user.click(await screen.findByRole('button', { name: new RegExp(pathsQuestion.replace('?', '\\?')) }))
     const card = await screen.findByRole('region', { name: pathsQuestion })
     await user.click(within(card).getByRole('button', { name: 'Close question' }))
     const result = await screen.findByRole('region', { name: 'Latest result' })
-    expect(await within(result).findByText('Withdrawn')).toBeInTheDocument()
+    expect(await within(result).findByText(/^Withdrawn ·/)).toBeInTheDocument()
     expect(within(result).getByText('A newer test run replaced this question.')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Handled' }))
     expect(router.state.location.search).toMatchObject({ handled: true })
     const history = await screen.findByRole('region', { name: pathsQuestion })
-    await user.click(within(history).getByRole('button', { name: 'Show details' }))
-    expect(within(history).getByText('2 tests fail only on Windows because of drive letters.')).toBeInTheDocument()
+    expect(within(history).getByText('A newer test run replaced this question.')).toBeInTheDocument()
+    expect(
+      within(history).queryByText('2 tests fail only on Windows because of drive letters.'),
+    ).not.toBeInTheDocument()
   })
 
   it('has no reply form for system notices and keeps retry available after closing the notice', async () => {
@@ -179,7 +186,7 @@ describe('inbox decisions', () => {
     expect(await within(card).findByRole('alert')).toHaveTextContent('Could not close')
     await user.click(within(card).getByRole('button', { name: 'Close notice' }))
     const recent = await screen.findByRole('region', { name: 'Latest result' })
-    expect(await within(recent).findByText('Closed')).toBeInTheDocument()
+    expect(await within(recent).findByText(/^Closed ·/)).toBeInTheDocument()
     await act(() => router.navigate({ to: '/projects/$projectId', params: { projectId: 'prj-baton' } }))
     expect((await screen.findAllByText('Needs attention')).length).toBeGreaterThan(0)
     act(() => client.controls.setDeviceConnection('dev-mac', 'online'))

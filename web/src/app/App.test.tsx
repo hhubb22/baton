@@ -940,8 +940,7 @@ describe('execution details', () => {
   it('asks the project assistant about an inbox question', async () => {
     const user = userEvent.setup()
     const { router } = renderApp('/inbox')
-    const card = await screen.findByRole('region', { name: 'Which runner should run nightly?' })
-    await user.click(within(card).getByRole('button', { name: 'Show details' }))
+    await screen.findByRole('region', { name: 'Which runner should run nightly?' })
     select(await screen.findByText('MacBook Pro sleeps at night. Ubuntu Dev is always on.'))
     await user.click(await screen.findByRole('button', { name: 'Ask project assistant' }))
     await waitFor(() => expect(router.state.location.pathname).toBe('/projects/prj-compat'))

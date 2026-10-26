@@ -37,7 +37,8 @@ const styles = stylex.create({
     borderBottomStyle: 'solid',
     borderBottomColor: colors.borderSoft,
   },
-  title: { flexGrow: 1 },
+  title: { flexShrink: 1, minWidth: 0 },
+  spacer: { flexGrow: 1 },
   body: { flexGrow: 1, minHeight: 0, overflowY: 'auto' },
   column: {
     display: 'flex',
@@ -51,8 +52,18 @@ const styles = stylex.create({
   },
 })
 
-// 工作区里的主内容卡片：48px 标题栏，最左边是收起或展开侧栏的按钮，下面是可滚动的内容。
-export function Page({ title, actions, children }: { title: ReactNode; actions?: ReactNode; children: ReactNode }) {
+// 工作区里的主内容卡片：48px 标题栏，最左边是收起或展开侧栏的按钮，名称后紧跟状态，动作靠右，下面是可滚动的内容。
+export function Page({
+  title,
+  status,
+  actions,
+  children,
+}: {
+  title: ReactNode
+  status?: ReactNode
+  actions?: ReactNode
+  children: ReactNode
+}) {
   const { collapsed, toggleSidebar } = useWorkspace()
   return (
     <section {...stylex.props(styles.page, pane.card)}>
@@ -64,6 +75,8 @@ export function Page({ title, actions, children }: { title: ReactNode; actions?:
           onClick={toggleSidebar}
         />
         <h1 {...stylex.props(text.bodyMedium, styles.title, text.truncate)}>{title}</h1>
+        {status}
+        <span {...stylex.props(styles.spacer)} />
         {actions}
       </header>
       <div {...stylex.props(styles.body)}>{children}</div>

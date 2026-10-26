@@ -186,12 +186,31 @@ const styles = stylex.create({
   assistantHead: { display: 'flex', alignItems: 'center', gap: space.sm },
   group: { display: 'flex', flexDirection: 'column' },
   groupLabel: { paddingBlock: space.xs, paddingInline: space.sm, color: colors.faint },
-  overviewRow: {
+  groupHead: {
     display: 'flex',
     alignItems: 'center',
-    gap: space.sm,
+    gap: '6px',
+    width: '100%',
+    paddingBlock: space.xs,
+    paddingInline: space.sm,
+    borderWidth: 0,
+    borderRadius: radius.sm,
+    backgroundColor: 'transparent',
+    color: { default: colors.muted, ':hover': colors.text },
+    textAlign: 'left',
+  },
+  groupCount: { color: colors.faint },
+  groupChevron: { marginLeft: 'auto', color: colors.faint },
+  // 第一行是状态点、标题和悬停时出现的时间，第二行是设备和目录名。
+  overviewRow: {
+    display: 'grid',
+    gridTemplateColumns: 'auto minmax(0, 1fr) auto',
+    alignItems: 'center',
+    columnGap: space.sm,
+    rowGap: '2px',
     width: '100%',
     minHeight: size.control,
+    paddingBlock: '6px',
     paddingInline: space.sm,
     borderWidth: 0,
     borderRadius: radius.sm,
@@ -199,6 +218,15 @@ const styles = stylex.create({
     color: colors.text,
     textAlign: 'left',
   },
+  rowTime: {
+    color: colors.faint,
+    opacity: {
+      default: 0,
+      [stylex.when.ancestor(':hover')]: 1,
+      [stylex.when.ancestor(':focus-visible')]: 1,
+    },
+  },
+  rowDetail: { gridColumn: '2 / span 2', display: 'flex', gap: '4px', minWidth: 0, color: colors.muted },
   more: {
     alignSelf: 'flex-start',
     padding: 0,
@@ -487,6 +515,7 @@ function Overview({
   onTabChange: (tab: 'threads' | 'memory') => void
 }) {
   const [showAll, setShowAll] = useState(false)
+  const [folded, setFolded] = useState<string[]>([])
   const now = useNow(60_000)
   const device = devices.find((item) => item.id === project.agent.deviceId)
   const live = threads.filter((item) => item.status !== 'archived')
@@ -507,7 +536,7 @@ function Overview({
     { label: 'Running', threads: inGroup('running', 'stopping') },
     { label: 'Waiting for device', threads: inGroup('waiting', 'stopRequested') },
     { label: 'Recent', threads: showAll ? recent : recent.slice(0, recentLimit) },
-  ]
+  ].map((group) => ({ ...group, count: group.label === 'Recent' ? recent.length : group.threads.length }))
 
   const row = (thread: Thread) => {
     const view = views.get(thread.id)!
@@ -516,12 +545,16 @@ function Overview({
         key={thread.id}
         type="button"
         onClick={() => onOpenThread(thread.id)}
-        {...stylex.props(text.small, styles.overviewRow, focusRing.ring)}
+        {...stylex.props(stylex.defaultMarker(), text.small, styles.overviewRow, focusRing.ring)}
       >
         <StatusDot tone={view.status.tone} />
         <span {...stylex.props(styles.threadTitle, text.truncate)}>{thread.title}</span>
-        <span {...stylex.props(text.caption, styles.threadMeta, statusTextStyle(view.status.tone))}>
-          {view.group === 'idle' ? relativeTime(thread.updatedAt, now) : view.status.label}
+        <span {...stylex.props(text.caption, styles.rowTime)}>{relativeTime(thread.updatedAt, now)}</span>
+        <span {...stylex.props(text.caption, styles.rowDetail)}>
+          <span {...stylex.props(text.truncate)}>
+            {devices.find((item) => item.id === thread.deviceId)?.name ?? 'Removed device'} ·
+          </span>
+          <span {...stylex.props(text.mono, text.truncate)}>{folderName(thread.folder)}</span>
         </span>
       </button>
     )
@@ -531,7 +564,7 @@ function Overview({
     <aside aria-label="Overview" {...stylex.props(styles.overview)}>
       <div {...stylex.props(styles.assistantHead)}>
         <h2 {...stylex.props(text.bodyMedium)}>Overview</h2>
-        <IconButton icon="settings" label="Project settings" onClick={onSettings} />
+        <IconButton icon="dots" label="Project settings" onClick={onSettings} />
       </div>
       {project.goal && (
         <section {...stylex.props(styles.section)}>
@@ -593,11 +626,32 @@ function Overview({
             .filter((group) => group.threads.length > 0)
             .map((group) => (
               <section key={group.label} aria-label={group.label} {...stylex.props(styles.group)}>
-                <h3 {...stylex.props(text.captionMedium, styles.groupLabel)}>{group.label}</h3>
-                {group.threads.map(row)}
+                <h3>
+                  <button
+                    type="button"
+                    aria-expanded={!folded.includes(group.label)}
+                    onClick={() =>
+                      setFolded(
+                        folded.includes(group.label)
+                          ? folded.filter((label) => label !== group.label)
+                          : [...folded, group.label],
+                      )
+                    }
+                    {...stylex.props(text.captionMedium, styles.groupHead, focusRing.ring)}
+                  >
+                    {group.label}
+                    <span {...stylex.props(styles.groupCount)}>{group.count}</span>
+                    <Icon
+                      name={folded.includes(group.label) ? 'chevron-right' : 'chevron-down'}
+                      size={12}
+                      style={styles.groupChevron}
+                    />
+                  </button>
+                </h3>
+                {!folded.includes(group.label) && group.threads.map(row)}
               </section>
             ))}
-          {!showAll && recent.length > recentLimit && (
+          {!showAll && recent.length > recentLimit && !folded.includes('Recent') && (
             <button
               type="button"
               onClick={() => setShowAll(true)}
@@ -933,7 +987,7 @@ export function ProjectPage() {
             {project.name}
           </span>
         }
-        actions={
+        status={
           <>
             <span {...stylex.props(text.caption, styles.headerStatus, headerTone(status.tone))}>
               <StatusDot tone={status.tone} />
@@ -946,6 +1000,20 @@ export function ProjectPage() {
               </Button>
             )}
             {stopping && <span {...stylex.props(text.caption, styles.muted)}>Stop requested</span>}
+          </>
+        }
+        actions={
+          <>
+            <IconButton
+              icon="panel-right"
+              label={showPanel ? 'Hide overview' : 'Show overview'}
+              active={showPanel}
+              aria-expanded={showPanel}
+              onClick={() => {
+                if (showPanel) setThread(undefined)
+                setOverviewOpen(!showPanel)
+              }}
+            />
             <Menu narrow align="end" trigger={<IconButton icon="dots" label="Project actions" />}>
               <MenuOption onSelect={() => settings(true)}>Settings</MenuOption>
               <MenuOption
@@ -966,16 +1034,6 @@ export function ProjectPage() {
                 </>
               )}
             </Menu>
-            <IconButton
-              icon="panel-right"
-              label={showPanel ? 'Hide overview' : 'Show overview'}
-              active={showPanel}
-              aria-expanded={showPanel}
-              onClick={() => {
-                if (showPanel) setThread(undefined)
-                setOverviewOpen(!showPanel)
-              }}
-            />
           </>
         }
       >
