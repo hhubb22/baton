@@ -40,7 +40,7 @@ batond 检查版本 `0.1.0`、登录状态和租约后，在空控制目录启�
 
 assistant 的 `message_end` 监听器先等待 `append_event` 提交，再按消息内的顺序发出 `call_tool`。每个工具结果由 Coordinator 保存；后续模型请求使用中心保存的结果。Runtime 的工具执行模式为 `sequential`。恢复时读取已有结果，只为缺少结果的工具调用发送原 ID；最后一条非压缩事件为 input 或 tool_result 时调用 `continue()`，为无工具 assistant 时领取下一批输入；压缩事件不改变未完成轮次的恢复位置。
 
-项目记忆使用 `memory.recall/read/remember/correct/retire/restore`。写入引用已保存的原始来源，`memory.read` 可通过主对话序号及队列 input_id 登记来源，中心决定角色、归属与可读边界。新知识合并独立证据，修改检查当前修订，停用恢复须有用户请求证据；操作标识由中心从工具调用身份生成。事实变化使用带有效时间的 supersede，普通编辑保持停用或替代关系。每次模型请求前通过 prepare_context 保存并注入当前核心要求和相关片段，assistant payload 记录 memory_context_id。知识变化或自然到期使新输出失效时，Runtime 刷新上下文并在模型调用预算内重试；恢复先完成原工具调用和 pending nodes.exec。默认关闭 Embedding。启用时 Runtime 先调用 embedding_query，使用 OpenAI 7.19.0 SDK 生成向量，再把配置和查询哈希绑定结果交给 prepare_context；显式 memory.recall 的向量放在 call_tool payload，原工具 arguments 保持不变。缺凭据或端点请求失败只降级到词法召回。压缩后失效内容刷新仍为 planned。
+项目记忆使用 `memory.recall/read/remember/correct/retire/restore`。写入引用已保存的原始来源，`memory.read` 可通过主对话序号及队列 input_id 登记来源，中心决定角色、归属与可读边界。新知识合并独立证据，修改检查当前修订，停用恢复须有用户请求证据；操作标识由中心从工具调用身份生成。事实变化使用带有效时间的 supersede，普通编辑保持停用或替代关系。每次模型请求前通过 prepare_context 保存并注入当前核心要求和相关片段，普通请求的 assistant payload 记录 memory_context_id、knowledge_epoch 和 expires_at。知识变化或自然到期使新输出失效时，Runtime 刷新上下文并在模型调用预算内重试；恢复先完成原工具调用和 pending nodes.exec。默认关闭 Embedding。启用时 Runtime 先调用 embedding_query，使用 OpenAI 7.19.0 SDK 生成向量，再把配置和查询哈希绑定结果交给 prepare_context；显式 memory.recall 的向量放在 call_tool payload，原工具 arguments 保持不变。缺凭据或端点请求失败只降级到词法召回。每次普通请求取得当前快照后，旧摘要和记忆工具正文按知识代次及有效截止整体失效，保留尾部、工具配对与原文读取入口。
 
 开发工作通过 `threads.create` 和 `threads.send` 交给执行 Agent，使用 `threads.get/read` 查询状态和回复，`threads.stop/archive` 停止当前一轮或归档 Thread。新建时按设备能力、用户要求和项目记忆选择 Agent 与模型；`threads.create` 的 `model` 省略时使用设备上该 Agent 的默认模型。`threads.send` 可用 `model` 指定下一轮模型，省略时沿用当前模型；设备须支持换模型，模型目录用于发现与补全，显式 ID 交给原生 Agent 判定，`steer` 沿用当前一轮模型。工具操作的 Thread 都属于本 Project，由 Project Agent 新建；用户随后可以在其中开启自己的轮次，回复按每轮第一条消息的发送方决定是否送回 Project Agent。`inbox.ask` 可用 `thread_id` 关联本 Project 的 Thread。
 
@@ -52,9 +52,9 @@ assistant 的 `message_end` 监听器先等待 `append_event` 提交，再按消
 
 每次模型请求前超过窗口的 80%、运行收尾超过 50% 时触发，还会为模型输出预留容量。先把较早、已被后续 assistant 分析的大工具结果替换为带原始序号的读取提示，保护最近三批输入及尚未分析的结果；降到窗口的 40% 以下即可结束，无需调用摘要模型。
 
-仍需缩减时，优先保留最近两批输入对应的对话及窗口 15% 的最近内容。长单轮可以在完整工具批次之间切分。摘要请求重放原系统提示词、工具声明、provider 签名和待压缩消息前缀，沿用对话 `sessionId`，最后追加协调角色的摘要指令并禁止工具调用。摘要保留用户要求、准确 Thread ID、设备、目录、当前状态、最后的结论、决定和未完成事项。缓存能否命中取决于模型服务。
+仍需缩减时，优先保留最近两批输入对应的对话及窗口 15% 的最近内容。长单轮可以在完整工具批次之间切分。摘要请求重放原系统提示词、工具声明、provider 签名和待压缩消息前缀，将记忆工具正文换成读取提示，不注入动态记忆快照，沿用对话 `sessionId`，最后追加协调角色的摘要指令并禁止工具调用。摘要保留用户要求、准确 Thread ID、设备、目录、当前状态、最后的结论、决定和未完成事项。缓存能否命中取决于模型服务。
 
-空白、截断、工具调用、超限或没有缩短上下文的摘要不会提交。Coordinator 校验租约、历史序号、工具配对和范围，在同一事务里保存压缩事件并更新读取起点。回执丢失后重发同一事件标识；历史或配置变化时丢弃旧摘要，重新读取。摘要生成失败按 5、15、45 秒重试，请求前必需的压缩失败仍报告模型请求失败。
+空白、截断、工具调用、超限或没有缩短上下文的摘要不会提交。Coordinator 校验租约、历史序号、工具配对、范围及新摘要关联的记忆快照，在同一事务里保存压缩事件并更新读取起点。摘要记录 `memory_context_id`、`knowledge_epoch` 和 `expires_at`；只缩减大工具结果时沿用原摘要的代次与截止时间，新摘要的 `memory_index` 为空。回执丢失后重发同一事件标识；历史或配置变化时丢弃旧摘要，重新读取。摘要生成失败按 5、15、45 秒重试，请求前必需的压缩失败仍报告模型请求失败。
 
 普通请求明确上下文溢出后，只要压缩持续减少估算 token、运行未满 15 分钟且模型调用总预算有剩余，就可以多次压缩并恢复。同一请求连续溢出时，逐次将保留 token 比例减半，始终只在完整工具批次之间切分。没有可继续缩减的历史或压缩未减少 token 时报告 `context_overflow_no_progress`；时间或调用预算耗尽时报告 `context_overflow_budget_exhausted`。失败回复不保存、不执行工具。
 

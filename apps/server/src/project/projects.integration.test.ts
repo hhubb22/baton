@@ -638,7 +638,17 @@ it(
       await r.rpc('call_tool', { last_seq: 2, tool_call_id: 'list', tool_name: 'devices.list', arguments: {} })
       await run(projects.acceptProjectMessage(a.employee, p.id, { client_message_id: 'next', content: 'continue' }))
       await r.rpc('claim_inputs', { last_seq: 3 })
+      const context = result(
+        P.MemoryContext,
+        await r.rpc('prepare_context', {
+          last_seq: 4,
+          payload: { context_id: randomUUID(), input_seq: 4, ...P.MEMORY_CONTEXT_DEFAULTS },
+        }),
+      )
       const payload = {
+        memory_context_id: context.context_id,
+        knowledge_epoch: context.knowledge_epoch,
+        expires_at: context.expires_at,
         through_seq: 3,
         summary: '已读取设备。',
         cleared_tool_result_seqs: [],

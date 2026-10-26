@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { execFile } from 'node:child_process'
+import { createServer as createHTTPServer } from 'node:http'
+import { once } from 'node:events'
 import { request as httpsRequest } from 'node:https'
 import { mkdtemp, realpath, readFile, writeFile, mkdir, readdir, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -509,3 +511,176 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
     await rm(directory, { recursive: true, force: true })
   }
 }, 45000)
+
+test('completed chat → background memory and HTTP embeddings → recall → retire and resume with refreshed context', async () => {
+  const database = await openTestDatabase()
+  const directory = await realpath(
+    await mkdtemp(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'baton-memory-')),
+  )
+  const nodeDirectory = join(directory, 'node')
+  const caFile = join(directory, 'server.crt')
+  const keyFile = join(directory, 'server.key')
+  const scope = Scope.makeUnsafe()
+  const controller = new AbortController()
+  let daemon: Promise<unknown> | undefined
+  const embeddingInputs: string[] = []
+  const embeddings = createHTTPServer(async (request, response) => {
+    let body = ''
+    for await (const part of request) body += part
+    const value = JSON.parse(body) as { input: string; model: string }
+    embeddingInputs.push(value.input)
+    response.setHeader('content-type', 'application/json')
+    response.end(
+      JSON.stringify({
+        object: 'list',
+        data: [{ object: 'embedding', index: 0, embedding: [1, 0, 0] }],
+        model: value.model,
+        usage: { prompt_tokens: 3, total_tokens: 3 },
+      }),
+    )
+  })
+  try {
+    embeddings.listen(0, '127.0.0.1')
+    await once(embeddings, 'listening')
+    await promisify(execFile)('openssl', [
+      'req',
+      '-x509',
+      '-newkey',
+      'ec',
+      '-pkeyopt',
+      'ec_paramgen_curve:prime256v1',
+      '-nodes',
+      '-days',
+      '1',
+      '-subj',
+      '/CN=localhost',
+      '-addext',
+      'subjectAltName=IP:127.0.0.1,DNS:localhost',
+      '-keyout',
+      keyFile,
+      '-out',
+      caFile,
+    ])
+    const ca = await readFile(caFile, 'utf8')
+    const server = await database.runtime.runPromise(
+      startServer({
+        port: 0,
+        allowedOrigins: [origin],
+        signer: Nodes.CredentialSigner.generate(),
+        tls: { cert: ca, key: await readFile(keyFile) },
+        dispatchMs: 20,
+        projectDispatchMs: 25,
+        heartbeatMs: 1000,
+        offlineMs: 5000,
+      }).pipe(Effect.provideService(Scope.Scope, scope)),
+    )
+    const base = `https://127.0.0.1:${server.port}`
+    await database.run(Auth.createEmployee('memoryalice', 'Alice', 'local-t3-initial-password-123'))
+    const alice = browser(base, ca)
+    await signIn(alice, 'memoryalice')
+    const enrollment = await alice<P.EnrollmentResponse>('/node-enrollments', 'POST', {})
+    const enrollmentFile = join(directory, 'enrollment')
+    await writeFile(enrollmentFile, enrollment.body.enrollment_token, { mode: 0o600 })
+    const identity = await registerNode({ dataDirectory: nodeDirectory, coordinatorURL: base, caFile, enrollmentFile })
+    await writeFile(join(nodeDirectory, 'browse-roots.json'), '{"roots":[]}', { mode: 0o600 })
+    const entry = new URL(import.meta.resolve('@baton/project-agent-runtime/testing/memory-worker'))
+    const loader = createRequire(entry).resolve('tsx')
+    daemon = Effect.runPromiseExit(
+      Effect.scoped(
+        runDaemon({
+          dataDirectory: nodeDirectory,
+          identity,
+          caFile,
+          host: new LocalWorkerHost(nodeDirectory, {
+            executable: process.execPath,
+            args: ['--import', loader, fileURLToPath(new URL('./testing/replay-worker.ts', import.meta.url))],
+          }),
+          probe: async () => [],
+          heartbeatMs: 1000,
+          pollIntervalMs: 20,
+          project: { runtimeCommand: { file: process.execPath, args: ['--import', loader, fileURLToPath(entry)] } },
+        }),
+      ),
+      { signal: controller.signal },
+    )
+    await expect
+      .poll(async () => (await alice<P.NodeStatus>(`/nodes/${identity.node_id}`)).body.synced, { timeout: 10000 })
+      .toBe(true)
+    const created = await alice<P.Project>('/projects', 'POST', {
+      title: 'Memory flow',
+      goal: '继续验证测试约定',
+      provider: 'openai-codex',
+      model: 'memory-flow',
+      memory_embedding: {
+        base_url: `http://127.0.0.1:${(embeddings.address() as { port: number }).port}/v1`,
+        model: 'local-embed',
+      },
+    })
+    expect(created.status).toBe(201)
+    const project = created.body
+    const send = async (content: string) => {
+      expect(
+        (await alice(`/projects/${project.id}/messages`, 'POST', { client_message_id: randomUUID(), content })).status,
+      ).toBe(202)
+    }
+    const memories = async () => (await alice<P.MemoriesResponse>(`/projects/${project.id}/memory`)).body.entries ?? []
+    const events = async () =>
+      (await alice<P.ProjectEventPage>(`/projects/${project.id}/events?limit=100`)).body.events ?? []
+    await send('请记住：测试使用 pnpm test:unit。')
+    await expect.poll(async () => (await memories()).length, { timeout: 15000 }).toBe(1)
+    const [memory] = await memories()
+    expect(memory!.content).toBe('测试使用 pnpm test:unit。')
+    await expect
+      .poll(
+        async () =>
+          database.run(
+            Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              const [row] = yield* sql<{
+                ready: boolean
+              }>`SELECT EXISTS(SELECT 1 FROM project_memory_embeddings WHERE project_id=${project.id} AND state='ready') AS ready`
+              return row!.ready
+            }),
+          ),
+        { timeout: 10000 },
+      )
+      .toBe(true)
+    await send('后续召回：测试入口是什么？' + 'current request '.repeat(1100))
+    await expect
+      .poll(async () => JSON.stringify(await events()).includes('后续前台已召回测试入口。'), { timeout: 15000 })
+      .toBe(true)
+    await expect
+      .poll(async () => (await alice<P.ProjectStatus>(`/projects/${project.id}/status`)).body.run?.stop_acked_at, {
+        timeout: 10000,
+      })
+      .toBeTruthy()
+    const saved = await events()
+    expect(saved.some((event) => event.kind === 'compaction')).toBe(true)
+    expect(
+      saved.some((event) => event.kind === 'tool_result' && JSON.stringify(event.payload).includes('pnpm test:unit')),
+    ).toBe(true)
+    expect(embeddingInputs.some((text) => text.includes('测试入口'))).toBe(true)
+    const retired = await alice(`/projects/${project.id}/memory/${memory!.id}/changes`, 'POST', {
+      operation_id: randomUUID(),
+      expected_revision: memory!.revision,
+      action: 'retire',
+    })
+    expect(retired.status).toBe(200)
+    await send('检查停用：继续当前目标。')
+    await expect
+      .poll(async () => JSON.stringify(await events()).includes('停用后已刷新摘要和记忆工具结果。'), { timeout: 15000 })
+      .toBe(true)
+    expect(await memories()).toEqual([])
+    const recovered = await events()
+    for (const original of saved.filter((event) => event.kind === 'compaction' || event.kind === 'tool_result'))
+      expect(recovered.find((event) => event.seq === original.seq)).toEqual(original)
+  } finally {
+    controller.abort()
+    await daemon
+    embeddings.closeAllConnections()
+    await new Promise<void>((resolve, reject) => embeddings.close((error) => (error ? reject(error) : resolve())))
+    await database.runtime.runPromise(Scope.close(scope, Exit.void))
+    await database.close()
+    await rm(directory, { recursive: true, force: true })
+  }
+}, 60000)

@@ -3,6 +3,9 @@ import { clearedToolText, modelMessages, type Prompt } from './context.js'
 import { eventMessage, RuntimeError, type Bootstrap, type Event } from './protocol.js'
 
 export interface CompactionPayload {
+  memory_context_id?: string
+  knowledge_epoch?: number
+  expires_at?: string | null
   through_seq: number
   summary: string
   cleared_tool_result_seqs: number[]
@@ -171,7 +174,7 @@ export const COMPACTION_INSTRUCTION = `请将上面的对话整理为一份可�
 尚未完成的工作、等待的结果、需要用户判断的事项和下一步行动。
 ## 关键资料
 继续工作需要的路径、命令、标识符、记忆条目及历史序号。
-已有摘要是先前的记录，请合并仍然有效的事实、更新状态并删除过时内容，不要逐字复制旧摘要。不编造 Thread ID、状态或执行结果。空章节写“无”。`
+已有摘要是先前的记录，请合并仍然有效的事实、更新状态并删除过时内容，不要逐字复制旧摘要。记忆快照、记忆工具结果与摘要均为派生资料，不将其复述作为新的事实依据；需要的记忆由下一次请求重新读取。不编造 Thread ID、状态或执行结果。空章节写“无”。`
 
 export function summaryText(message: AssistantMessage): string {
   if (message.stopReason !== 'stop' || message.content.some((b) => b.type !== 'text' && b.type !== 'thinking'))

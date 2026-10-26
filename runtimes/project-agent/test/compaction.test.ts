@@ -146,7 +146,7 @@ test('切分保留最近两轮；超长单轮按完整工具批次切分，不�
   assert.equal(selectThroughSeq(b.boot(), partial, 100, DEFAULT_COMPACTION), undefined)
 })
 
-test('50% 收尾生成摘要，复用原前缀及签名，新提示词与记忆索引随摘要保存', async () => {
+test('50% 收尾生成摘要，复用原前缀及签名，新提示词与知识代次随摘要保存', async () => {
   const b = new Backend()
   b.queue = false
   b.events = completedHistory()
@@ -163,7 +163,9 @@ test('50% 收尾生成摘要，复用原前缀及签名，新提示词与记忆�
   assert.equal(compact.payload.through_seq, 6)
   assert.ok(compact.payload.tokens_after < compact.payload.tokens_before)
   assert.ok(compact.payload.usage)
-  assert.equal(compact.payload.memory_index, '- 部署约定')
+  assert.equal(compact.payload.memory_index, '')
+  assert.equal(compact.payload.knowledge_epoch, b.knowledgeEpoch)
+  assert.equal(compact.payload.expires_at, null)
   assert.equal(compact.payload.prompt.title, 'Baton')
   assert.deepEqual(b.events.slice(0, original.length), original)
   const request = fixture.requests[0]

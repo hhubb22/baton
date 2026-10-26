@@ -10,10 +10,14 @@ import {
   type ProjectBinding,
 } from './store.ts'
 import { previousClientEvent, savedToolCalls } from './events.ts'
+import { checkMemoryContext } from './memory/index.ts'
 import { canonical } from '../json.ts'
 
 const Prompt = Schema.Struct({ version: Schema.String, title: Schema.String, goal: Schema.String })
 const Compaction = Schema.Struct({
+  memory_context_id: Schema.optionalKey(Schema.String),
+  knowledge_epoch: Schema.optionalKey(Schema.Int),
+  expires_at: Schema.optionalKey(Schema.NullOr(Schema.String)),
   through_seq: Schema.Int,
   summary: Schema.String,
   cleared_tool_result_seqs: Schema.Array(Schema.Int),
@@ -177,6 +181,9 @@ export const commitCompaction = Effect.fn('commitProjectCompaction')(function* (
     if (!prompt.version) prompt = { version: b.promptVersion, title: project!.title, goal: project!.goal }
     if (canonical(p.prompt) !== canonical(prompt)) return yield* Effect.fail(projectError())
   } else {
+    const context = yield* checkMemoryContext(b, p.memory_context_id ?? '', request.last_seq)
+    if (p.knowledge_epoch !== context.knowledge_epoch || p.expires_at !== context.expires_at)
+      return yield* Effect.fail(projectError('memory_context_changed'))
     if (frame(p).length >= prefixChars) return yield* Effect.fail(projectError('invalid', 422))
     if (p.prompt.title !== project?.title || p.prompt.goal !== project.goal) return yield* Effect.fail(projectError())
   }

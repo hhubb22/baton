@@ -77,8 +77,15 @@ export class ProjectRuntime {
     for (const [name, value] of Object.entries(this.budget))
       if (!Number.isSafeInteger(value) || value < 1) throw new Error(`invalid_model_budget_${name}`)
   }
-  private async prepareMemory(messages: Message[], outputReserve: number, signal?: AbortSignal): Promise<Message[]> {
+  private async prepareMemory(
+    outputReserve: number,
+    signal?: AbortSignal,
+    events = this.events,
+    suffix: Message[] = [],
+    forCompaction = false,
+  ): Promise<Message[]> {
     const settings = this.boot.memory_settings
+    let messages = [...modelMessages(this.boot, events, this.memoryContext, forCompaction), ...suffix]
     const available = Math.max(0, this.model().contextWindow - outputReserve - estimateMessages(messages))
     const coreTokens = Math.min(settings.core_tokens, available)
     const relatedTokens = Math.min(settings.related_tokens, Math.max(0, available - coreTokens))
@@ -98,7 +105,8 @@ export class ProjectRuntime {
         max_bytes: settings.max_bytes,
       },
     })
-    if (!this.memoryContext.content) return messages
+    messages = [...modelMessages(this.boot, events, this.memoryContext, forCompaction), ...suffix]
+    if (forCompaction || !this.memoryContext.content) return messages
     const dynamic: Message = { role: 'user', content: this.memoryContext.content, timestamp: 0 }
     return messages[0]?.role === 'system' ? [messages[0], dynamic, ...messages.slice(1)] : [dynamic, ...messages]
   }
@@ -189,6 +197,9 @@ export class ProjectRuntime {
         summary: previous?.summary ?? '',
         cleared_tool_result_seqs: cleared,
         memory_index: previous?.memory_index ?? '',
+        ...(previous?.knowledge_epoch !== undefined
+          ? { knowledge_epoch: previous.knowledge_epoch, expires_at: previous.expires_at }
+          : {}),
         prompt: promptFor(this.boot, this.events),
         tokens_before: 0,
         tokens_after: 0,
@@ -230,8 +241,11 @@ export class ProjectRuntime {
       let payload: CompactionPayload
       try {
         const memoryMessages = await this.prepareMemory(
-          messages,
           Math.min(this.budget.maxOutputTokens, model.maxTokens, available),
+          signal,
+          this.events.filter((e) => e.seq <= through),
+          [{ role: 'user', content: COMPACTION_INSTRUCTION, timestamp: 0 }],
+          true,
         )
         const stream = this.models.streamSimple(model, modelContext({ messages: memoryMessages }), {
           maxTokens: Math.min(this.budget.maxOutputTokens, model.maxTokens, available),
@@ -250,7 +264,10 @@ export class ProjectRuntime {
           cleared_tool_result_seqs: (this.boot.compaction?.payload.cleared_tool_result_seqs ?? []).filter(
             (seq: number) => seq > through,
           ),
-          memory_index: metadata.memory_index ?? '',
+          memory_index: '',
+          memory_context_id: this.memoryContext.context_id,
+          knowledge_epoch: this.memoryContext.knowledge_epoch,
+          expires_at: this.memoryContext.expires_at,
           prompt: {
             version: metadata.prompt_version,
             title: metadata.project.title,
@@ -322,7 +339,12 @@ export class ProjectRuntime {
     // Coordinator 持久化工具调用；恢复时使用原调用 ID 获取已保存的 Thread 或结果。
     const embedding =
       call.name === 'memory.recall' && this.boot.project.memory_embedding && typeof call.arguments.query === 'string'
-        ? await queryEmbedding(this.rpc, this.seq, this.memoryContext.input_seq, call.arguments.query)
+        ? await queryEmbedding(
+            this.rpc,
+            this.seq,
+            this.events.findLast((e) => e.kind === 'input')?.seq ?? this.boot.input_seq,
+            call.arguments.query,
+          )
         : {}
     let requestStarted = this.timer.now()
     let response = await this.rpc.call({
@@ -447,7 +469,12 @@ export class ProjectRuntime {
                 ],
               }
             : context
-          const memoryMessages = await this.prepareMemory(requestContext.messages, outputTokens, options?.signal)
+          const memoryMessages = await this.prepareMemory(
+            outputTokens,
+            options?.signal,
+            this.events,
+            outputFeedback ? [{ role: 'user', content: outputFeedback, timestamp: 0 }] : [],
+          )
           const stream = this.models.streamSimple(
             requestModel,
             modelContext({ ...requestContext, messages: memoryMessages }),
@@ -617,6 +644,8 @@ export class ProjectRuntime {
           payload: {
             format: 'pi-ai/1',
             memory_context_id: this.memoryContext.context_id,
+            knowledge_epoch: this.memoryContext.knowledge_epoch,
+            expires_at: this.memoryContext.expires_at,
             message: event.message,
             prompt: promptFor(this.boot, this.events),
           },

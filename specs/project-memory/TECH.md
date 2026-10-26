@@ -6,7 +6,7 @@ Basis: [行为规格 PM-01～23](PRODUCT.md)；代码基线 `35823e30cf0178be7d7
 
 ## Context
 
-条目、修订、来源、证据、操作去重与抑制记录已由 `project/memory/` 实现，员工 API 和前台工具共享事务内 `applyChange`。词法查询使用 PostgreSQL 有界候选与 Orama 3.1.18，支持状态和事实时间过滤。请求前自动保存核心要求与相关片段的不可变快照，新 assistant 和首次工具执行检查知识代次与期限。可选 Embedding 的中心配置、设备 SDK、pending/ready 记录、查询绑定和临时向量排序已实现。最终回复事务登记整理工作，受限 memory Runtime 在空闲设备处理来源分片与待生成向量；设置界面已提供公开配置。旧工具结果/摘要刷新仍为 planned。[Project Agent TECH](../project-agent/TECH.md) 记录当前主对话、租约、工具与压缩实现。
+条目、修订、来源、证据、操作去重与抑制记录已由 `project/memory/` 实现，员工 API 和前台工具共享事务内 `applyChange`。词法查询使用 PostgreSQL 有界候选与 Orama 3.1.18，支持状态和事实时间过滤。请求前自动保存核心要求与相关片段的不可变快照，新 assistant 和首次工具执行检查知识代次与期限。可选 Embedding 的中心配置、设备 SDK、pending/ready 记录、查询绑定和临时向量排序已实现。最终回复事务登记整理工作，受限 memory Runtime 在空闲设备处理来源分片与待生成向量；设置界面已提供公开配置。旧工具结果与摘要按知识代次和有效截止整体退出自动注入。[Project Agent TECH](../project-agent/TECH.md) 记录当前主对话、租约、工具与压缩实现。
 
 | 已核对的入口 | 可复用的机制 | 本次需要改变的部分 |
 | --- | --- | --- |
@@ -47,7 +47,7 @@ flowchart TD
 | Runtime `context.ts` | 依据已保存的快照构造模型视图，不重新查询数据库决定旧请求看过什么 |
 | `packages/protocol/src/project-memory.ts` | 领域 DTO 与约束；`node.ts`、`http-api.ts` 组合传输，不反向依赖传输层 |
 
-`project/memory/index.ts` 统一导出变更、读取、召回、请求快照和 Embedding 入口。`change.ts` 同事务更新检索投影与向量工作；`sources.ts` 登记原始来源并生成片段，`read.ts` 统一状态与事实时间过滤。`projection.ts` 保存词项，`recall.ts` 组织 Orama 排序、RRF 和预算，`vectors.ts` 只载入有效向量元数据。`context.ts` 提供 embeddingQuery、prepareContext 与 checkMemoryContext；`embeddings.ts` 提供配置、待生成记录、提交和有限退避。标题索引仍供现有压缩路径使用，其替换及旧派生内容刷新为 planned。后台复用普通运行的 provider、凭据、agent_runs 和进程回收实现，工具权限按 memory 模式固定。
+`project/memory/index.ts` 统一导出变更、读取、召回、请求快照和 Embedding 入口。`change.ts` 同事务更新检索投影与向量工作；`sources.ts` 登记原始来源并生成片段，`read.ts` 统一状态与事实时间过滤。`projection.ts` 保存词项，`recall.ts` 组织 Orama 排序、RRF 和预算，`vectors.ts` 只载入有效向量元数据。`context.ts` 提供 embeddingQuery、prepareContext 与 checkMemoryContext；`embeddings.ts` 提供配置、待生成记录、提交和有限退避。新摘要的 memory_index 为空，当前记忆由每次请求的快照提供。旧摘要及记忆工具正文通过模型视图整体失效，保留原始事件与读取入口。后台复用普通运行的 provider、凭据、agent_runs 和进程回收实现，工具权限按 memory 模式固定。
 
 ## 数据与知识变更
 
@@ -179,9 +179,9 @@ PostgreSQL 的 GIN 词项索引用于候选定位。tsvector 由预处理后的 
 
 恢复先确认已保存 assistant、工具结果和持久业务登记。已登记的操作即使尚无最终 tool_result，也继续查询原执行。需要继续模型请求时，无知识变化且快照未到期可复用；代次或期限变化均创建新的 context_id，不修改已保存记录。
 
-中心生成记忆工具结果时另存 `memory_refs`（条目/修订/来源范围、current/history 模式和可选 as_of）与 derived 标记。构造后续模型视图时重新验证引用的状态和事实时间；已纠正、替代、停用或自然到期的当前结果正文替换为状态说明和最新读取入口，保留 role、toolCallId、toolName 与配对。沿用已有旧工具结果清理的视图机制，不修改原始事件或 provider 签名字段。无法定位派生范围的旧记忆结果整体替换，不把原 active 标记继续注入。显式历史读取按其固定 as_of 返回原文及现时状态标注，不能被重新解释为当前事实。
+中心生成记忆工具结果时另存 `memory_refs` 与 derived 标记。Runtime 在调用所属的 assistant payload 保存 `knowledge_epoch` 和 `expires_at`，每次模型请求取得新快照后，按代次和截止时间整体替换失效的记忆工具正文；没有代次信息的旧结果同样替换。替代文本提供 memory.recall/read 与原始序号的 history.read 入口，保留 role、toolCallId、toolName 与配对。原始事件和 provider 签名不变，历史模式的结果同样整体重新读取，不跟踪逐条引用依赖。
 
-知识变化会使旧 compaction 的记忆部分失效。新压缩不把快照、记忆工具输出重新提取为事实。摘要记录知识代次、依赖条目与有效截止时间；发生 correct、supersede、retire 或跨过事实生效/失效边界后，依赖被影响或无法证明不受影响的旧摘要不再自动注入。即使没有新写入、知识代次未变，自然到期也触发此检查。替代视图使用保留尾部、当前目标/状态、核心要求和原文读取入口，必要时从可用原始范围重新生成摘要。不能用字符串未匹配到旧值来证明摘要安全。旧摘要保留历史查看，不回写原事件。
+摘要保存生成时的 `memory_context_id`、`knowledge_epoch` 和 `expires_at`，中心在新摘要提交时核对快照与历史边界。知识代次变化、截止时间到达或缺少代次信息时，旧摘要和标题索引整体退出自动注入。保留摘要覆盖范围和尾部对话，替代说明提供当前项目目标、原文和当前记忆读取入口，Thread 与设备状态通过工具重新查询。新压缩请求清除记忆工具正文，不注入动态记忆快照；生成的新摘要不保存标题索引。只缩减大工具结果时沿用原摘要的代次和截止时间。旧摘要和工具结果继续保存在原始历史中，不回写原事件，不建设细粒度依赖跟踪。
 
 ### 在途输出与操作检查
 
@@ -309,9 +309,9 @@ Project 暂停或归档在 Agent 锁下撤销后台 claim 并登记 stop。暂�
 
 追踪沿用 `packages/telemetry`，记录工作/尝试/批次 ID、策略版本、知识与索引代次、候选数量、截断、耗时、token 用量及错误码。默认追踪不包含记忆正文、原始证据、查询全文或凭据。来源正文只在授权 API 返回，日志不能成为额外副本。
 
-当前 schema 使用规范条目和修订模型，不提供旧实验数据升级或双写兼容。记忆工具、DTO 与页面使用当前结构；原始历史及通用权限、事务和进程辅助设施保留。压缩使用按当前有效性过滤的标题索引，后续请求快照将替换该索引。检索、快照和执行检查已有固定本地用例；旧派生内容的完整刷新和真实语义质量评估仍为 planned。
+当前 schema 使用规范条目和修订模型，不提供旧实验数据升级或双写兼容。记忆工具、DTO 与页面使用当前结构；原始历史及通用权限、事务和进程辅助设施保留。检索、快照和执行检查已有固定本地用例；摘要和派生记忆工具正文按代次与截止时间整体失效，真实语义质量评估仍未验证。
 
-Project Agent 行为、技术设计及 Runtime/中心 README 描述当前手动维护与前台工具。自动召回、后台整理、设备 SDK、密钥 CLI、后台向量生成和设置 UI 已实现。后台诊断保存在 project_memory_jobs 的 state、cursor_index/cursor_offset、waiting_reason、last_error、next_attempt_at 与 usage，向量失败原因保存在 project_memory_embeddings；后台不更新 conversation.failure_count。压缩与旧工具结果刷新继续保留 planned。
+Project Agent 行为、技术设计及 Runtime/中心 README 描述当前手动维护与前台工具。自动召回、后台整理、设备 SDK、密钥 CLI、后台向量生成和设置 UI 已实现。后台诊断保存在 project_memory_jobs 的 state、cursor_index/cursor_offset、waiting_reason、last_error、next_attempt_at 与 usage，向量失败原因保存在 project_memory_embeddings；后台不更新 conversation.failure_count。压缩与记忆工具视图按代次和截止时间刷新，已有摘要和工具事件保持不变。
 
 ## Testing and validation
 
@@ -321,9 +321,9 @@ Project Agent 行为、技术设计及 Runtime/中心 README 描述当前手动�
 | PM-02、05 | 最终回复登记、重复提交分片与完成游标 | 缺工作或重复知识 | 中心 PostgreSQL 集成 | partial：最终回复在 finish 前登记、重复提交返回同回执、游标与知识持久化；事务故障注入未验证 |
 | PM-06～09 | 时间变化、原始错误、条件并存、并发编辑 | 错误历史被视为事实，静默覆盖或自动恢复 | 变更单元测试 + 数据库集成 | partial：数据库验证冲突、去重、修订撤回、事实时间、显式恢复和历史 recall；后台并发编辑未单独验证 |
 | PM-10～12 | 固定中英语料、标识符、同义表达、候选截断 | 无排序、失效内容混入或未报告缺口 | 词法单测与中心固定语料集成 | verified：中英混合、技术路径、别名、长片段、候选截断和状态过滤；真实同义理解单独评估 |
-| PM-13～15 | 核心超额、多次压缩、事实自然到期、旧摘要/工具结果和请求恢复 | 要求丢失、派生内容再提取、过期副作用或重复执行 | Runtime 本地模型替身 + 中心集成 | partial：自动注入、核心预算、自然到期、失效输出、pending 恢复与首次执行检查；旧摘要/工具结果刷新 planned |
+| PM-13～15 | 核心超额、多次压缩、事实自然到期、旧摘要/工具结果和请求恢复 | 要求丢失、派生内容再提取、过期副作用或重复执行 | Runtime 本地模型替身 + 中心集成 | partial：自动注入、核心预算、自然到期、失效输出、pending 恢复与首次执行检查；本地整体流程验证停用后旧摘要和记忆工具正文退出注入，摘要自然到期未单独验证 |
 | PM-17～19 | 后台模式、无聊天登录的向量任务与停止回收 | 无法启动、占用虚报 | batond 包内进程替身 | partial：后台启动、账本种类与停止后进程回收已验证；暂停恢复、抢占竞争与断线未验证 |
-| PM-02、10、15、18 | HTTP→中心→WSS→后台 Runtime→知识→新前台 Runtime | 形成/读取链路断裂，恢复重复副作用 | 一条跨 app 本地 E2E | planned |
+| PM-02、10、15、18 | HTTP→中心→WSS→后台 Runtime→知识→新前台 Runtime | 形成/读取链路断裂，恢复重复副作用 | 一条跨 app 本地 E2E | partial：已完成对话、后台整理、HTTP 向量生成、后续召回和停用后新进程恢复已验证；其他恢复场景未扩展 |
 | PM-16、17 | 按需来源与历史、冲突草稿、停用/恢复、持续故障提示 | 列表混入修订或元信息；后台状态打扰前台 | Web 组件测试 | partial：来源按需读取、历史时间、冲突草稿、停用/恢复已验证；后台提示 planned |
 | PM-18、19 | 搬迁 SEA、空 PATH 与临时 HOME 下调用 memory 模式，检查启动、取消与私有文件 | 依赖源码路径、缺失分派或进程未回收 | 现有安装包检查 | planned |
 | PM-21～23 | 本地 Embedding HTTP 替身、配置切换、迟到提交、无凭据、关闭与端点失败 | 密钥上传、旧向量复活、关闭仍调用、降级阻塞前台 | 中心固定向量与 Runtime/跨 app 本地替身 | partial：公开配置、迟到提交、修订/查询绑定、历史向量、长片段、pending 和有限退避；Runtime 本地 SDK/HTTP 替身验证匿名端点、后台生成和查询向量绑定，SEA 实际运行未验证 |
@@ -333,7 +333,7 @@ Project Agent 行为、技术设计及 Runtime/中心 README 描述当前手动�
 
 质量报告分别记录有效事实命中、历史时间正确、过时信息误用、无依据断言、纠正后的实际动作及额外 token/延迟。固定同一模型、历史与预算比较各阶段，先取得基线再制定质量阈值。CI 只使用本地替身和固定录制；真实在线模型评估显式手动运行，不作为合入或功能开放前提。
 
-验证限于受影响代码静态检查、中心持久主链路、Runtime 本地模型/Embedding HTTP 替身与设备后台进程启动回收。安装包检查已加入 memory 模式的无模型握手；SEA 实际运行、跨平台与真实模型质量仍需单独验证。
+验证限于受影响代码静态检查、中心持久主链路、Runtime 本地模型/Embedding HTTP 替身、设备后台进程启动回收，以及一条 HTTP→中心→WSS→设备 Runtime 的整体流程。该流程验证后台记忆与向量形成、后续召回、停用后旧摘要和工具正文退出注入及原始记录保留。安装包检查已加入 memory 模式的无模型握手；SEA 实际运行、其他系统、跨设备迁移、真实模型质量与并发竞争专项未验证。
 
 ## 资料依据与取舍
 

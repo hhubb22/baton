@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     "./testing/integration-worker": "./test/integration-worker.ts",
-    "./testing/project-worker": "./test/t3-worker.ts"
+    "./testing/project-worker": "./test/t3-worker.ts",
+    "./testing/memory-worker": "./test/memory-flow-worker.ts"
   },
   "engines": {
     "node": ">=22.19.0"
