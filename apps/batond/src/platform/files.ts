@@ -31,10 +31,44 @@ async function currentSid(): Promise<string> {
   ))
 }
 
+const sddlSids = new Map<string, Promise<string>>()
+
+async function numericWindowsSid(value: string): Promise<string> {
+  if (!/^[A-Z]{2}$/.test(value)) return value
+  let pending = sddlSids.get(value)
+  if (!pending) {
+    // SDDL abbreviations (including LA) are SIDs, not localized account names.
+    pending = powershell(
+      `([System.Security.AccessControl.RawSecurityDescriptor]::new('D:(A;;FA;;;${value})')).DiscretionaryAcl[0].SecurityIdentifier.Value`,
+    )
+    sddlSids.set(value, pending)
+  }
+  return pending
+}
+
+export async function validateWindowsDirectorySddl(sddl: string | undefined, sid: string): Promise<void> {
+  const diagnostic = `current user SID ${sid}; SDDL: ${sddl ?? '<missing>'}`
+  if (!sddl || !sddl.startsWith('D:P')) throw new Error(`Private directory inherits ACLs: ${diagnostic}`)
+  const entries = [...sddl.split('S:', 1)[0].matchAll(/\(([^()]*)\)/g)]
+  if (entries.length !== 1)
+    throw new Error(`Private directory must grant only the current user (${entries.length} ACL entries): ${diagnostic}`)
+  const fields = entries[0][1].split(';')
+  if (
+    fields.length !== 6 ||
+    fields[0] !== 'A' ||
+    fields[1] !== 'OICI' ||
+    fields[2] !== 'FA' ||
+    fields[3] !== '' ||
+    fields[4] !== '' ||
+    (await numericWindowsSid(fields[5]).catch(() => '')) !== sid
+  )
+    throw new Error(`Invalid private directory ACL: ${diagnostic}`)
+}
+
 /** icacls has no per-handle validation. Reparse and concurrent ACL changes remain Windows limitations. */
 async function checkDirectoryAcl(path: string): Promise<void> {
   const sid = await currentSid()
-  // /save emits SDDL with numeric SIDs regardless of the display language.
+  // /save emits language-independent SDDL, including standard SID abbreviations.
   const temporary = await mkdtemp(join(tmpdir(), 'baton-acl-'))
   const aclFile = join(temporary, 'directory.acl')
   try {
@@ -47,13 +81,7 @@ async function checkDirectoryAcl(path: string): Promise<void> {
       await handle.close()
     }
     const sddl = content.split(/\r?\n/).find((line) => line.startsWith('D:'))
-    if (!sddl || !sddl.startsWith('D:P')) throw new Error(`Private directory inherits ACLs: ${path}`)
-    const entries = [...sddl.matchAll(/\(([^()]*)\)/g)]
-    if (entries.length !== 1)
-      throw new Error(`Private directory must grant only the current user (${entries.length} ACL entries): ${path}`)
-    const fields = entries[0][1].split(';')
-    if (fields.length !== 6 || fields[0] !== 'A' || fields[1] !== 'OICI' || fields[2] !== 'FA' || fields[5] !== sid)
-      throw new Error(`Invalid private directory ACL: ${path}`)
+    await validateWindowsDirectorySddl(sddl, sid)
   } finally {
     await rm(temporary, { recursive: true, force: true })
   }
@@ -76,7 +104,7 @@ async function setDirectoryAcl(path: string): Promise<void> {
       $identity, 'FullControl', 'ContainerInherit, ObjectInherit', 'None', 'Allow');
     $acl.AddAccessRule($rule);
     $path = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedPath}'));
-    Set-Acl -LiteralPath $path -AclObject $acl;
+    [System.IO.DirectoryInfo]::new($path).SetAccessControl($acl);
   `)
 }
 

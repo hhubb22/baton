@@ -14,7 +14,7 @@
 
 POSIX 目录要求当前 UID、0700；文件要求当前 UID、0600、普通文件与单个硬链接。打开前后通过 lstat/fstat 核对设备与 inode，使用 O_NOFOLLOW，拒绝符号链接。文件的直接父目录也必须通过私有目录检查。调用方负责从可信父目录创建数据根目录。
 
-Windows 创建目录和显式保护目录时，通过 PowerShell 一次设置受保护的 DACL，仅授予当前用户 SID 可继承的完整权限。SID 来自 `whoami /user`，普通验证使用 `icacls /save` 导出的 SDDL，拒绝继承、其他主体授权及不完整权限，不比较显示名或用户目录的长短路径。显式保护不会先恢复父目录继承权限；普通验证不修改已有权限。文件依靠私有目录保护，Node 没有逐句柄 DACL 与 reparse point 校验。
+Windows 创建目录和显式保护目录时，通过 PowerShell 的 `DirectoryInfo.SetAccessControl` 一次替换受保护的 DACL，仅授予当前用户 SID 可继承的完整权限，不写入 owner 或 SACL，不要求审计权限。SID 来自 `whoami /user`，普通验证使用 `icacls /save` 导出的 SDDL，严格要求 DACL 中唯一的 `OICI`、`FA` Allow ACE，拒绝继承、其他主体授权及不完整权限。SDDL 的标准 SID 缩写（如内置 Administrator 的 `LA`）由 Windows `RawSecurityDescriptor` 解析为数字 SID 后比较，不比较显示名或用户目录的长短路径；校验错误包含当前用户 SID 与实际 SDDL，不读取凭据内容。显式保护不会先恢复父目录继承权限；普通验证不修改已有权限。文件依靠私有目录保护，Node 没有逐句柄 DACL 与 reparse point 校验。
 
 ## 独占锁
 
