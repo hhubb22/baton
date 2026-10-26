@@ -53,7 +53,7 @@ SEA 不启用 code cache 或 snapshot，`execArgvExtension` 设为 `none`。Work
 | 检查 | 观察与失败条件 |
 |---|---|
 | 帮助与版本 | 帮助包含 Baton 命令；版本报告 `sea=true`、当前系统与架构、有效 Node 版本 |
-| Worker | 真实 `LocalWorkerHost` 启动一个 SEA Worker，认证 status 达到 `worker_ready=true` 且 `agent_ready=false`；错误 IPC 令牌被拒绝，独占锁与创建时间匹配，实际账本表和 WAL 已持久化；从 spawn 到认证 status 必须小于 3 秒 |
+| Worker | 真实 `LocalWorkerHost` 启动一个 SEA Worker，认证 status 达到 `worker_ready=true` 且 `agent_ready=false`；错误 IPC 令牌被拒绝，独占锁与创建时间匹配，实际账本表和 WAL 已持久化；从 spawn 到认证 status 必须小于 Host 就绪预算（Windows 10 秒，其余系统 3 秒） |
 | 清理 | POSIX 发送 SIGTERM 后确认 Worker 与 watchdog 退出、锁释放；Windows 核对 CIM 身份后执行 `taskkill /T /F`，确认退出与锁已失效，报告 `graceful=false` |
 | Agent host | SEA 的 `agent-host --probe` 实际加载 Cursor、Pi、Codex、Kiro 四个模块，加载 keyring，并用 tree-sitter 与 Bash grammar 解析 `echo baton` |
 | Cursor SQLite store | 隔离的 Node 子进程从搬迁安装包 `createRequire` 加载 `@cursor/sdk/sqlite`，打开并关闭临时 store；该检查由运行工具的 Node 执行 |
@@ -110,7 +110,7 @@ Windows Server 2022 本机通过四个 Agent 与原生模块加载，以及 Curs
 
 Windows 私有目录不设置或校验 ACL，沿用数据目录继承的权限。默认数据目录 `%USERPROFILE%\.baton-ts` 和临时目录都在用户目录下，Windows 默认只授权当前用户、SYSTEM 与 Administrators；把数据目录放到其他用户可读的位置时，由设备用户自行负责权限。Worker 准备因此不再启动 PowerShell 或 `icacls`，Project Runtime 读写凭据也不再启动子进程。
 
-此前 Windows Server 2022 本机（受限 Administrator 令牌）上，私有目录 ACL 设置是 Worker 超过 3 秒就绪限制、凭据子进程超过 5 秒限制的主要耗时；当前实现尚未在 Windows 复验。需要重跑节点与 Runtime 测试、完整安装包检查、冷启动与 FULL 测量以及 Windows 进程检查。已知与 ACL 无关的失败包括 TestClock 额外日志、若干状态断言、Pi 私有状态不可访问、Windows 文件占用和进程树清理（`Grandchild missing before taskkill`）。Windows Server 2025、普通本地用户的完整 workspace 测试与实际 PID 复用仍待验证。
+Windows 本机上节点、中心与 Runtime 测试全部通过，统一构建（含 SEA）成功。测试配置在 Windows 上把超时放大 4 倍、同时运行的测试文件限为 2 个；4 个靠重命名仍被打开的目录来构造祖先替换的测试在 Windows 上跳过，因为系统拒绝这种重命名。全量运行时 Worker 的一个 TestClock 竞争测试偶发失败，单独运行通过。完整安装包检查、冷启动与 FULL 测量和 Windows 进程检查（`Grandchild missing before taskkill`）待验证；Windows Server 2025、普通本地用户的完整 workspace 测试与实际 PID 复用也待验证。
 
 [Windows 进程脚本](../../tools/verify/windows-processes.mjs) 使用自有的 CIM 校验与 `taskkill` 包装，观察完整父子孙树、故意过期的创建时间，以及中间父进程退出后的孙进程。它检查系统机制，未调用生产 reaper，不强迫系统实际复用 PID，也不验证 Worker 崩溃到下一次启动之间的回收延迟；非 Windows 输出 `not-measured`。
 

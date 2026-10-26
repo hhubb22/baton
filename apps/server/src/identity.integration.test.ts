@@ -404,8 +404,11 @@ describe('signing key files', () => {
       await expect(Nodes.loadSigningKey(join(directory, 'link.key'))).rejects.toMatchObject({
         code: 'invalid_signing_key',
       })
-      await chmod(path, 0o644)
-      await expect(Nodes.loadSigningKey(path)).rejects.toMatchObject({ code: 'invalid_signing_key' })
+      // Windows 的 chmod 只切换只读位，无法表达 0644 与 0600 的差异。
+      if (process.platform !== 'win32') {
+        await chmod(path, 0o644)
+        await expect(Nodes.loadSigningKey(path)).rejects.toMatchObject({ code: 'invalid_signing_key' })
+      }
       await writeFile(join(directory, 'invalid.key'), 'invalid private key', { mode: 0o600 })
       await expect(Nodes.loadSigningKey(join(directory, 'invalid.key'))).rejects.toMatchObject({
         code: 'invalid_signing_key',

@@ -461,7 +461,7 @@ TypeScript 的 `GET /nodes/{id}/files` 通过 `root_id`、`path` 浏览目录和
 
 中心位于 `apps/server`，构建产物为 `apps/server/dist/server.cjs` 及相邻的 `web/`、`migrations/`。与 PostgreSQL 部署后，运行 `node apps/server/dist/server.cjs serve` 提供静态页面、API、浏览器 WebSocket 和节点 WSS。`serve`、账号管理和 `migrate` 都先执行并核对迁移；`migrate` 完成后退出。
 
-签名密钥路径由 `BATON_NODE_SIGNING_KEY` 指定，默认工作目录下的 `node-signing.key`；仅在 `lstat` 确认不存在时生成 Ed25519 私钥并原子写入 `0600` 文件，已有文件校验权限、类型、所有者和内容。升级先停止旧中心，再启动新实例完成迁移；节点退避重连并同步。中心默认监听 `127.0.0.1:8080`，通过 HTTPS 反向代理公开；也可直接配置证书提供 HTTPS/WSS。容器与设备 SEA 的发布布局见 [发布设计](../release/TECH.md#打包与发布)。
+签名密钥路径由 `BATON_NODE_SIGNING_KEY` 指定，默认工作目录下的 `node-signing.key`；仅在 `lstat` 确认不存在时生成 Ed25519 私钥并原子写入 `0600` 文件，已有文件校验权限、类型、所有者和内容；Windows 不校验权限位和所有者，依赖目录继承的 ACL，也不对目录句柄执行 fsync。升级先停止旧中心，再启动新实例完成迁移；节点退避重连并同步。中心默认监听 `127.0.0.1:8080`，通过 HTTPS 反向代理公开；也可直接配置证书提供 HTTPS/WSS。容器与设备 SEA 的发布布局见 [发布设计](../release/TECH.md#打包与发布)。
 
 节点 bundle 为 `apps/batond/dist/batond.cjs`，命令使用 `node apps/batond/dist/batond.cjs <命令>`。`register` 使用 Node 的平台标识推导系统名，显示名由主机名清理而来。注册在 `identity.json` 保存规范化 HTTPS 中心地址，`run` 优先使用显式 `--relay`，否则推导 WSS 地址。`up` 复用注册和运行逻辑，在没有身份时要求中心地址和凭据；workspace 在连接前幂等登记。默认设备数据目录为 `~/.baton-ts`。
 

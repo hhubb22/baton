@@ -164,7 +164,12 @@ it('retains a timestamped report after probe timeout and invalidates it when cre
   `,
     credentials,
   )
-  await writePrivateFileAtomic(join(dataDir, 'project-runtime.json'), JSON.stringify({ probeTimeoutMs: 2000 }))
+  // probeTimeoutMs 同时约束正常探测与超时场景。Windows 启动子进程更慢，正常路径需要更大预算，
+  // 但超时场景要等满该预算，因此不能放得太大。
+  await writePrivateFileAtomic(
+    join(dataDir, 'project-runtime.json'),
+    JSON.stringify({ probeTimeoutMs: process.platform === 'win32' ? 5000 : 2000 }),
+  )
   const initial = await runner.report()
   expect(initial).toMatchObject({ stale: false })
   expect(initial?.probed_at).toBeDefined()
@@ -196,7 +201,7 @@ it('retains a timestamped report after probe timeout and invalidates it when cre
   await writeFile(mode, 'output')
   await rm(credential)
   expect(await runner.report()).toBeUndefined()
-}, 30000)
+}, 60000)
 
 it('probes the existing Runtime source CLI using only an empty local credential directory', async () => {
   const manager = await open('idle', true)

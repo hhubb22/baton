@@ -163,13 +163,16 @@ it('rejects reparenting after a file was opened and authorizes file and commit a
     { kind: 'file', node_id: 'node-id', root_id: registered!.id, path: 'nested/log.txt', access_status: 'available' },
     { kind: 'commit', repo: 'git.example/team/repo', sha },
   ])
-  const opened = await openAuthorized(registered!, 'nested/log.txt')
-  try {
-    await rename(join(root, 'nested'), join(root, 'moved'))
-    await ensurePrivateDirectory(join(root, 'nested'))
-    await writeFile(join(root, 'nested', 'log.txt'), 'replacement')
-    await expect(opened.verify()).rejects.toThrow('路径超出')
-  } finally {
-    await opened.handle.close()
+  // Windows 不允许重命名仍被打开句柄占用的目录（EPERM），无法构造“打开后重挂父目录”的场景。
+  if (process.platform !== 'win32') {
+    const opened = await openAuthorized(registered!, 'nested/log.txt')
+    try {
+      await rename(join(root, 'nested'), join(root, 'moved'))
+      await ensurePrivateDirectory(join(root, 'nested'))
+      await writeFile(join(root, 'nested', 'log.txt'), 'replacement')
+      await expect(opened.verify()).rejects.toThrow('路径超出')
+    } finally {
+      await opened.handle.close()
+    }
   }
 })

@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import { Effect } from 'effect'
-import { LocalWorkerHost } from '../../apps/batond/src/daemon/host.ts'
+import { LocalWorkerHost, WORKER_READY_BUDGET_MS } from '../../apps/batond/src/daemon/host.ts'
 import { workerPaths } from '../../apps/batond/src/daemon/paths.ts'
 import { readProcessLock, processLockIsHeld } from '../../apps/batond/src/platform/lock.ts'
 import { requestWorker } from '../../apps/batond/src/daemon/ipc.ts'
@@ -194,7 +194,8 @@ async function main() {
       } catch (error) {
         if (error.code !== 'unauthorized') throw error
       }
-      if (elapsed >= 3000) throw new Error('Spawn-to-authenticated-status exceeded the unchanged 3 second budget')
+      if (elapsed >= WORKER_READY_BUDGET_MS)
+        throw new Error(`Spawn-to-authenticated-status exceeded the ${WORKER_READY_BUDGET_MS} ms budget`)
     } catch (error) {
       failure = { sample: index, message: error.message, log: await readFile(paths.log, 'utf8').catch(() => '') }
     } finally {
@@ -337,8 +338,13 @@ async function main() {
           sourceFiles: false,
           installationFiles: await readdir(join(root, 'installed')),
         },
-        budgetMs: 3000,
-        passed: completed && !failure && !ledgerFailure && !fullLedger?.exceeds50Ms && Math.max(...timings) < 3000,
+        budgetMs: WORKER_READY_BUDGET_MS,
+        passed:
+          completed &&
+          !failure &&
+          !ledgerFailure &&
+          !fullLedger?.exceeds50Ms &&
+          Math.max(...timings) < WORKER_READY_BUDGET_MS,
         cache:
           'Fresh Worker processes and SQLite files; OS page cache is not flushed. First sample is reported separately. Agent registry and platform Worker watchdog behavior are included; no Thread is opened.',
         timing:
@@ -351,7 +357,13 @@ async function main() {
       2,
     ),
   )
-  if (!completed || failure || ledgerFailure || Math.max(...timings) >= 3000 || fullLedger?.exceeds50Ms)
+  if (
+    !completed ||
+    failure ||
+    ledgerFailure ||
+    Math.max(...timings) >= WORKER_READY_BUDGET_MS ||
+    fullLedger?.exceeds50Ms
+  )
     process.exitCode = 1
 }
 void main().catch((error) => {

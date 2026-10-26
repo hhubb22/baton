@@ -27,7 +27,7 @@ Coordinator：Thread 命令、报告与历史记录
 
 目录职责与实现入口统一见 [AGENTS.md](../../AGENTS.md#核心架构与目录)。
 
-Worker 通过 `agents/thread-agents.ts` 和纯数据 catalog 装配执行工厂，不加载探测、SDK、provider adapter 或 host driver，保持 3 秒就绪预算。`buildBatond` 检查 Worker 运行时依赖图，覆盖静态导入、再导出和字面量动态加载，禁止绕入 host 实现或不可解析的动态加载。daemon 与普通 CLI 通过 `agents/probe.ts` 探测，Cursor 安装预检只通过 `sdk-inspection.ts` 读取元数据与资产路径。执行 agent-host 由 `cli/agent-host.ts` 按类型动态加载对应模块，Cursor SDK 只在 Cursor host 内执行。安装包的 `agent-host --probe` 会加载四个 Agent 模块以检查完整性。每个执行 Thread 一个 agent-host，它是 POSIX 进程组组长或 Windows Worker 账本登记的根进程。POSIX 的上游独立组由 host 内部 registrar/watchdog 另行管理；Windows registrar 不另行登记上游子进程，回收受下文平台边界约束。探测在 batond 拉起的只读 agent-host 中执行，用同一套平台接口回收。
+Worker 通过 `agents/thread-agents.ts` 和纯数据 catalog 装配执行工厂，不加载探测、SDK、provider adapter 或 host driver，保持就绪预算（Windows 10 秒，其余系统 3 秒）。`buildBatond` 检查 Worker 运行时依赖图，覆盖静态导入、再导出和字面量动态加载，禁止绕入 host 实现或不可解析的动态加载。daemon 与普通 CLI 通过 `agents/probe.ts` 探测，Cursor 安装预检只通过 `sdk-inspection.ts` 读取元数据与资产路径。执行 agent-host 由 `cli/agent-host.ts` 按类型动态加载对应模块，Cursor SDK 只在 Cursor host 内执行。安装包的 `agent-host --probe` 会加载四个 Agent 模块以检查完整性。每个执行 Thread 一个 agent-host，它是 POSIX 进程组组长或 Windows Worker 账本登记的根进程。POSIX 的上游独立组由 host 内部 registrar/watchdog 另行管理；Windows registrar 不另行登记上游子进程，回收受下文平台边界约束。探测在 batond 拉起的只读 agent-host 中执行，用同一套平台接口回收。
 
 ### 宿主层
 
@@ -93,7 +93,7 @@ Worker IPC 使用令牌认证与固定端点：POSIX 为私有目录下的 UDS�
 
 ### 启动与命令回执
 
-Worker 取得 Session 文件锁、打开并验证本地账本后，先建立认证 IPC，再接收或恢复持久启动意图。首次启动须先接收 thread_open 并保存回执，才调度原生初始化；重启则只恢复已有持久意图。Host 的 3 秒等待只检查 Worker 的认证就绪状态，不等待 Agent；已存在的启动中 Worker 不得被再次拉起。`status` 区分 `worker_ready` 与 `agent_ready`，节点账本中的 ready 只表示本地 Worker 已接管，不能触发中心的 thread.opened。
+Worker 取得 Session 文件锁、打开并验证本地账本后，先建立认证 IPC，再接收或恢复持久启动意图。首次启动须先接收 thread_open 并保存回执，才调度原生初始化；重启则只恢复已有持久意图。Host 的就绪等待只检查 Worker 的认证就绪状态，不等待 Agent；已存在的启动中 Worker 不得被再次拉起。`status` 区分 `worker_ready` 与 `agent_ready`，节点账本中的 ready 只表示本地 Worker 已接管，不能触发中心的 thread.opened。
 
 Worker 以短事务接收命令。`thread_commands(id, payload)` 的 JSON 保存内容摘要、接收回执和执行结果，状态为 accepted/running 或终态 succeeded/failed/cancelled/unknown；通过 IPC 传递中心原始命令 ID。接收回执与该命令的状态或队列变更在同一事务提交。相同 ID、相同内容返回原回执和已知结果，内容不同时拒绝，不因已 ACK 再次执行。消息仍按 client_message_id 唯一，不同传输命令 ID 绑定到同一消息及同一执行结果。
 
@@ -126,14 +126,14 @@ open 的成功 `ThreadCommandResult` 携带当前 `storage_generation`，中心�
 
 | 路径 | 预算与关系 |
 |---|---|
-| Worker 进程就绪 | Host 最多 3 秒，仅含 Node 启动、账本与认证 IPC；原生初始化在其后异步开始 |
-| 命令接收 | Worker 认证与短事务目标期限 1 秒；Host 最多 3 秒加 IPC 1 秒，小于节点 5 秒期限，复用外层剩余期限而不逐段重置；失败用相同命令 ID 查询或重试接收 |
+| Worker 进程就绪 | Host 最多 3 秒，Windows 最多 10 秒，仅含 Node 启动、账本与认证 IPC；原生初始化在其后异步开始 |
+| 命令接收 | Worker 认证与短事务目标期限 1 秒；Host 就绪等待加 IPC 1 秒，复用外层剩余期限而不逐段重置；Windows 上就绪等待可能超过节点 5 秒期限，此时命令失败，以相同命令 ID 查询或重试接收，启动中的 Worker 不会被再次拉起 |
 | 原生 open/send | SDK/原生调用预算 30 秒，agent-host 通信 32 秒，Worker 阶段预算 35 秒；逐层保留返回与清理余量 |
 | 输入准备 | 整个准备阶段最多 10 秒，历史子调用服从剩余期限；与提交合计最多 45 秒，不占命令接收期限 |
 | Stop | 从持久接收 stop 起独立计时，最长一分钟；不能等输入的 45 秒预算耗尽后才开始计时 |
 | 后台探测 | 最多 30 秒的非执行任务，服从独立并发和进程回收约束，不阻塞接收命令 |
 
-所有慢操作都是可中断的 Effect，并以 `Effect.timeout` 套上本表预算。Worker 在登记任务时为其建立独立 Scope，不能复用即将结束的 5 秒命令上下文。RestoreInput 只恢复本地基准，不发起历史查询。断开命令 IPC 不中断已经持久接收的执行，持久 stop、阶段超时和 Worker 退出负责中断任务。SEA 冷启动耗时计入 3 秒就绪预算，在三个系统上测量；超出时先缩小 Worker 入口的同步加载，不放宽 Host 期限。
+所有慢操作都是可中断的 Effect，并以 `Effect.timeout` 套上本表预算。Worker 在登记任务时为其建立独立 Scope，不能复用即将结束的 5 秒命令上下文。RestoreInput 只恢复本地基准，不发起历史查询。断开命令 IPC 不中断已经持久接收的执行，持久 stop、阶段超时和 Worker 退出负责中断任务。SEA 冷启动耗时计入就绪预算，在三个系统上测量。Windows 上新 Worker 首次读取自身创建时间要启动 PowerShell（约 2～3 秒），预算为 10 秒；其余系统为 3 秒，超出时先缩小 Worker 入口的同步加载。
 
 输入准备只在本地完成：prepareInput 生成准备标识并与 intent 原子提交，restoreInput 在进程重启后恢复它，二者都不读取原生历史。新输入、控制代次变化或原生身份变化使准备失效。接收确认与恢复核查见上文 `sent` 的映射。
 

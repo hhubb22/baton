@@ -1,5 +1,5 @@
 import { readFile, realpath } from 'node:fs/promises'
-import { resolve, relative, extname, isAbsolute } from 'node:path'
+import { resolve, relative, extname, isAbsolute, sep } from 'node:path'
 import { Cause, Effect, Layer } from 'effect'
 import { HttpRouter, HttpServer } from 'effect/http'
 import * as Request from 'effect/http/HttpServerRequest'
@@ -42,9 +42,10 @@ const staticResponse = (options: HTTPOptions) =>
       try: async () => {
         const root = await realpath(options.webDirectory!)
         let file = resolve(root, path === '/' ? 'index.html' : '.' + decodeURIComponent(path))
+        // relative() 在 Windows 上用反斜杠分隔，只比对 "../" 会漏判逃逸。
         const inside = (target: string) => {
           const rel = relative(root, target)
-          return rel !== '..' && !rel.startsWith('../') && !isAbsolute(rel)
+          return rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)
         }
         if (!inside(file)) throw new AppError(404, 'not_found')
         try {

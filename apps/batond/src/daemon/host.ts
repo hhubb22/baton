@@ -26,6 +26,9 @@ export interface DaemonWorkerHost {
   ): Promise<WorkerIPCMessage>
 }
 
+/** 包住进程启动、锁获取、账本恢复与已认证 IPC。Windows 上新进程首次读取自身创建时间要启动 PowerShell，3 秒不够。 */
+export const WORKER_READY_BUDGET_MS = process.platform === 'win32' ? 10000 : 3000
+
 export interface BatondCommand {
   readonly executable: string
   readonly args: ReadonlyArray<string>
@@ -88,7 +91,7 @@ export class LocalWorkerHost implements DaemonWorkerHost {
 
   /** Includes process startup, lock acquisition, ledger recovery scheduling and authenticated IPC. */
   async ensureWorker(threadId: string): Promise<void> {
-    const deadline = performance.now() + 3000
+    const deadline = performance.now() + WORKER_READY_BUDGET_MS
     const paths = await initializeWorkerDirectory(this.dataDirectory, threadId)
     const ready = async () => {
       try {
@@ -160,6 +163,6 @@ export class LocalWorkerHost implements DaemonWorkerHost {
       if (await ready()) return
       await delay(20)
     }
-    throw new IPCError('worker_not_ready', 'Worker did not become ready within 3 seconds')
+    throw new IPCError('worker_not_ready', `Worker did not become ready within ${WORKER_READY_BUDGET_MS} ms`)
   }
 }

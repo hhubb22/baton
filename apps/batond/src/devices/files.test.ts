@@ -132,11 +132,13 @@ it('bounds repeated ctime churn and refuses ancestor replacement with an outside
   await writeFile(join(root, 'nested/log.txt'), 'inside')
   const outside = await directory()
   await writeFile(join(outside, 'log.txt'), 'secret')
-  await expect(
-    withAuthorizedRead(registered, 'nested/log.txt', async () => {
-      await rename(join(root, 'nested'), join(root, 'moved'))
-      await symlink(outside, join(root, 'nested'), process.platform === 'win32' ? 'junction' : 'dir')
-      return 'unverified'
-    }),
-  ).rejects.toMatchObject({ code: 'path_escaped' })
+  // Windows 不允许重命名仍被打开句柄占用的目录（EPERM），无法在读取窗口内替换祖先。
+  if (process.platform !== 'win32')
+    await expect(
+      withAuthorizedRead(registered, 'nested/log.txt', async () => {
+        await rename(join(root, 'nested'), join(root, 'moved'))
+        await symlink(outside, join(root, 'nested'), 'dir')
+        return 'unverified'
+      }),
+    ).rejects.toMatchObject({ code: 'path_escaped' })
 })

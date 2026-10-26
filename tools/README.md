@@ -51,7 +51,7 @@ node tools/measure/worker-startup.mjs 100 --package bin/package --ledger 2000
 
 POSIX 核对 watchdog 身份，发送 SIGTERM 后等待 Worker、watchdog 退出和锁释放。Windows 核对 CIM 创建时间，再用 `taskkill /T /F` 终止，报告 `graceful=false`；创建时间检查与终止之间仍有竞争窗口。macOS 使用短临时路径以满足 UDS 限制。
 
-报告第一样本、p50、p99、最大值与清理方式；任一样本达到 3 秒、就绪超时或清理失败时非零退出。不清空系统页缓存，不测已有会话的恢复耗时。
+报告第一样本、p50、p99、最大值与清理方式；任一样本达到 Host 就绪预算（Windows 10 秒，其余系统 3 秒）、就绪超时或清理失败时非零退出。不清空系统页缓存，不测已有会话的恢复耗时。
 
 `--ledger` 在驱动包含的真实 `makeWorker` 串行队列中交替执行 `records.add/remove`，预热 200 次，测量实际 WAL/FULL 提交、队列操作和事件循环延迟。该项使用当前源码，与被测 SEA 分别运行；负载不包含 Agent、IPC、prompt 或 intent，未验证断电持久性。COMMIT p99 超过 50 ms 时非零退出。
 

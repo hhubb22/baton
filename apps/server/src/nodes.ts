@@ -129,6 +129,14 @@ export class CredentialSigner {
   }
 }
 
+/**
+ * Windows 只用只读位表达权限，Node 返回的 mode 恒为 0666 或 0444，chmod 也不改变组/其他位，
+ * 因此无法用 POSIX 语义校验；此时依赖安装目录的继承 ACL，其余平台要求组与其他位全空。
+ */
+function permissionBitsUnsafe(mode: number): boolean {
+  return process.platform !== 'win32' && (mode & 0o077) !== 0
+}
+
 /** 仅在路径不存在时创建密钥；已存在的路径必须通过权限和文件类型校验。 */
 export async function loadSigningKey(path: string): Promise<CredentialSigner> {
   const invalid = () => new AppError(500, 'invalid_signing_key', '无法安全读取节点签名密钥')
@@ -155,18 +163,21 @@ export async function loadSigningKey(path: string): Promise<CredentialSigner> {
       } finally {
         await unlink(temporary)
       }
-      const directoryHandle = await open(directory, constants.O_RDONLY)
-      try {
-        await directoryHandle.sync()
-      } finally {
-        await directoryHandle.close()
+      // Windows 拒绝对目录句柄执行 fsync（EPERM），目录项由 NTFS 日志保证持久化。
+      if (process.platform !== 'win32') {
+        const directoryHandle = await open(directory, constants.O_RDONLY)
+        try {
+          await directoryHandle.sync()
+        } finally {
+          await directoryHandle.close()
+        }
       }
     }
     const before = await lstat(path)
     if (
       !before.isFile() ||
       before.isSymbolicLink() ||
-      (before.mode & 0o077) !== 0 ||
+      permissionBitsUnsafe(before.mode) ||
       (process.getuid && before.uid !== process.getuid())
     )
       throw invalid()
@@ -177,7 +188,7 @@ export async function loadSigningKey(path: string): Promise<CredentialSigner> {
         !actual.isFile() ||
         actual.dev !== before.dev ||
         actual.ino !== before.ino ||
-        (actual.mode & 0o077) !== 0 ||
+        permissionBitsUnsafe(actual.mode) ||
         (process.getuid && actual.uid !== process.getuid()) ||
         actual.size > 4096
       )
