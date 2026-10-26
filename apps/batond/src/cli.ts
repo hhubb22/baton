@@ -114,11 +114,6 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
     await runProjectRuntimeCLI(args).catch(reportProjectRuntimeError)
     return
   }
-  if (action === 'private-file') {
-    const { runPrivateFileHostCommand } = await import('./platform/private-file-host.ts')
-    await runPrivateFileHostCommand(argv)
-    return
-  }
   if (action === 'watchdog') {
     const { runWatchdogCommand } = await import('./platform/process.ts')
     await runWatchdogCommand()

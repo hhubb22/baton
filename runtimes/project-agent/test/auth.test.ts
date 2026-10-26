@@ -1,24 +1,14 @@
-import { after, before, test } from 'node:test'
+import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, rm, stat, readFile, chmod } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { FileCredentials, protect } from '../src/credentials.js'
-import { privateFileHostCommand } from './private-host.js'
 import { probe, runtimeModels, loginApiKey } from '../src/auth.js'
 import { ANTHROPIC_MODELS } from '@earendil-works/pi-ai/providers/anthropic.models'
 import { OPENAI_CODEX_MODELS } from '@earendil-works/pi-ai/providers/openai-codex.models'
 import { XAI_MODELS } from '@earendil-works/pi-ai/providers/xai.models'
-
-const previousHost = process.env.BATON_PRIVATE_FILE_HOST_COMMAND
-before(() => {
-  if (process.platform === 'win32') process.env.BATON_PRIVATE_FILE_HOST_COMMAND = JSON.stringify(privateFileHostCommand)
-})
-after(() => {
-  if (previousHost === undefined) delete process.env.BATON_PRIVATE_FILE_HOST_COMMAND
-  else process.env.BATON_PRIVATE_FILE_HOST_COMMAND = previousHost
-})
 
 test('probe 只读本地凭据，不发网络请求、不刷新 OAuth、不输出凭据', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'baton-auth-'))

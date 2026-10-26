@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
-import { copyFile, mkdir, rename } from 'node:fs/promises'
+import { copyFile, mkdir, rename, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { environment, isolatedEnv, withTemporaryInstallation } from './lib/installation.mjs'
@@ -206,25 +206,16 @@ async function main() {
       return { loaded: true, exitCode: result.status }
     })
     await check('projectRuntime', () => runtimeHandshake(executable, options))
-    await check('privateFiles', () => {
+    await check('credentials', async () => {
       const directory = join(home, 'credentials')
-      const file = join(directory, 'openai-codex.json')
       const credential = JSON.stringify({
         type: 'oauth',
         access: 'package-check-local',
         refresh: 'package-check-refresh',
         expires: 0,
       })
-      for (const args of [
-        ['protect-dir', directory],
-        ['write', directory, file],
-      ]) {
-        const result = run(executable, ['private-file', ...args], { ...options, input: credential })
-        assert.equal(result.status, 0, result.stderr)
-      }
-      const read = run(executable, ['private-file', 'read', directory, file], options)
-      assert.equal(read.status, 0, read.stderr)
-      assert.equal(read.stdout, credential)
+      await mkdir(directory, { mode: 0o700 })
+      await writeFile(join(directory, 'openai-codex.json'), credential, { mode: 0o600 })
       const subscriptions = run(executable, ['subscriptions'], {
         ...options,
         env: { ...options.env, BATON_PROJECT_RUNTIME_DATA_DIR: directory },
@@ -233,9 +224,7 @@ async function main() {
       assert.match(subscriptions.stdout, /openai-codex.*已登录/)
       assert.ok(!subscriptions.stdout.includes('package-check-local'))
       assert.ok(!subscriptions.stdout.includes('package-check-refresh'))
-      const missing = run(executable, ['private-file', 'read', directory, join(directory, 'missing.json')], options)
-      assert.equal(missing.status, 3, missing.stderr)
-      return { helper: 'SEA private-file', subscriptions: true, credentialValuesReported: false }
+      return { subscriptions: true, credentialValuesReported: false }
     })
     await check('missingDependencies', async () => {
       const dependencies = join(installed, 'node_modules')

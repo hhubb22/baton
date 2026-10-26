@@ -17,7 +17,7 @@ Basis: [Baton TECH](../baton/TECH.md)；[Agent 适配 TECH](../agent-adapters/TE
 
 [统一构建入口](../../tools/build.mjs) 从根 workspace 安装锁定依赖，检查网页类型，构建中心与节点 bundle，再生成 `bin/` 安装包。[节点打包器](../../tools/package-batond.mjs) 使用支持 `--build-sea` 且保留 LICENSE 的官方 Node 26，默认使用执行脚本的 Node；也可通过 `--node` 指定目标平台的官方 Node。跨系统构建由宿主 Node 将 bundle 注入目标可执行文件，目标平台依赖必须已安装。macOS 安装包必须在 macOS 上完成 ad-hoc 签名；最终检查与归档在目标平台运行。
 
-SEA 不启用 code cache 或 snapshot，`execArgvExtension` 设为 `none`。Worker、watchdog、agent-host、Project Runtime 和私有文件 helper 都通过自身可执行文件的子命令启动，Runtime 业务代码包含在同一 bundle 中。私有文件入口为 `private-file`，Runtime stdio 使用 `BATON_PROJECT_RUNTIME_TRANSPORT=stdio`，凭据 helper 命令通过 `BATON_PRIVATE_FILE_HOST_COMMAND` 传入。
+SEA 不启用 code cache 或 snapshot，`execArgvExtension` 设为 `none`。Worker、watchdog、agent-host 和 Project Runtime 都通过自身可执行文件的子命令启动，Runtime 业务代码包含在同一 bundle 中。Runtime stdio 使用 `BATON_PROJECT_RUNTIME_TRANSPORT=stdio`，Runtime 在自身进程内读写凭据。
 
 ### 依赖与许可
 
@@ -59,7 +59,7 @@ SEA 不启用 code cache 或 snapshot，`execArgvExtension` 设为 `none`。Work
 | Cursor SQLite store | 隔离的 Node 子进程从搬迁安装包 `createRequire` 加载 `@cursor/sdk/sqlite`，打开并关闭临时 store；该检查由运行工具的 Node 执行 |
 | Cursor 程序 | 直接运行包内 ripgrep `--version` 与 sandbox helper `--help`；核对退出码和输出 |
 | Project Runtime | 通过 stdio 回应 `bootstrap`、空 `read_events`，在 `claim_inputs` 返回本地结束响应后核对 Runtime 退出码为 1；不交付输入，模型调用次数为 0 |
-| 私有文件与订阅 | SEA `private-file` 保护目录、写入并读回本地凭据样例；订阅报告识别登录状态且不泄漏凭据值，缺失文件返回约定退出码 3 |
+| 订阅凭据 | 在临时 HOME 写入本地凭据样例；订阅报告识别登录状态且不泄漏凭据值 |
 | 缺失依赖 | 临时移走 `node_modules/` 后，Agent host 检查必须非零退出、无成功输出，并明确指出安装包依赖缺失 |
 
 各项检查输出独立结果，任一失败使总结果 `passed=false` 并非零退出。调用方式及预构建驱动参数见 [安装包检查](../../tools/README.md#安装包检查)。工具与测量驱动需要 Node 26，被测 SEA 自带 Node；预构建驱动应与安装包使用同一源码版本。
@@ -108,9 +108,9 @@ Windows Server 2022 本机通过四个 Agent 与原生模块加载，以及 Curs
 
 ## Windows 待修与待验证
 
-Windows 私有目录不设置或校验 ACL，沿用数据目录继承的权限。默认数据目录 `%USERPROFILE%\.baton-ts` 和临时目录都在用户目录下，Windows 默认只授权当前用户、SYSTEM 与 Administrators；把数据目录放到其他用户可读的位置时，由设备用户自行负责权限。Worker 准备与私有文件 helper 因此不再启动 PowerShell 或 `icacls`。
+Windows 私有目录不设置或校验 ACL，沿用数据目录继承的权限。默认数据目录 `%USERPROFILE%\.baton-ts` 和临时目录都在用户目录下，Windows 默认只授权当前用户、SYSTEM 与 Administrators；把数据目录放到其他用户可读的位置时，由设备用户自行负责权限。Worker 准备因此不再启动 PowerShell 或 `icacls`，Project Runtime 读写凭据也不再启动子进程。
 
-此前 Windows Server 2022 本机（受限 Administrator 令牌）上，私有目录 ACL 设置是 Worker 超过 3 秒就绪限制、helper 超过 5 秒限制的主要耗时；当前实现尚未在 Windows 复验。需要重跑节点与 Runtime 测试、完整安装包检查、冷启动与 FULL 测量以及 Windows 进程检查。已知与 ACL 无关的失败包括 TestClock 额外日志、若干状态断言、Pi 私有状态不可访问、Windows 文件占用和进程树清理（`Grandchild missing before taskkill`）。Windows Server 2025、普通本地用户的完整 workspace 测试与实际 PID 复用仍待验证。
+此前 Windows Server 2022 本机（受限 Administrator 令牌）上，私有目录 ACL 设置是 Worker 超过 3 秒就绪限制、凭据子进程超过 5 秒限制的主要耗时；当前实现尚未在 Windows 复验。需要重跑节点与 Runtime 测试、完整安装包检查、冷启动与 FULL 测量以及 Windows 进程检查。已知与 ACL 无关的失败包括 TestClock 额外日志、若干状态断言、Pi 私有状态不可访问、Windows 文件占用和进程树清理（`Grandchild missing before taskkill`）。Windows Server 2025、普通本地用户的完整 workspace 测试与实际 PID 复用仍待验证。
 
 [Windows 进程脚本](../../tools/verify/windows-processes.mjs) 使用自有的 CIM 校验与 `taskkill` 包装，观察完整父子孙树、故意过期的创建时间，以及中间父进程退出后的孙进程。它检查系统机制，未调用生产 reaper，不强迫系统实际复用 PID，也不验证 Worker 崩溃到下一次启动之间的回收延迟；非 Windows 输出 `not-measured`。
 

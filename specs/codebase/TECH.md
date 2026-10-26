@@ -17,7 +17,7 @@ Worker 的 `handle/failed/records` 隐藏命令幂等、intent、Turn、停止�
 
 Worker 测量要求完整安装包。`measure/worker-driver.mjs` 是独立源码，由 esbuild 生成测量驱动；SQLite store、ripgrep 与 sandbox helper 的加载检查由正式安装包检查负责。构建检查与测量分别验证安装布局和实际 Worker，不依赖精简的实验 SEA。
 
-私有文件宿主命令为 `private-file`，通过 `BATON_PRIVATE_FILE_HOST_COMMAND` 指定；Runtime 通道为 `BATON_PROJECT_RUNTIME_TRANSPORT`，stdio 错误使用 `runtime_stdio_*`。Runtime 的 stdio 实现位于 `runtimes/project-agent/src/stdio.ts`，宿主拥有自己的帧读写实现。
+Runtime 通道为 `BATON_PROJECT_RUNTIME_TRANSPORT`，stdio 错误使用 `runtime_stdio_*`。Runtime 的 stdio 实现位于 `runtimes/project-agent/src/stdio.ts`，宿主拥有自己的帧读写实现。
 
 HTTP 选项、Agent 事件身份与 daemon Worker host 等共享类型放在被使用方单向引用的位置。公共进程测试辅助位于 `apps/batond/src/testing/platform/`，临时目录由测试 Scope 清理。
 
@@ -71,7 +71,7 @@ daemon 和 CLI 使用 `agents/probe.ts` 的 `probeAgents`。默认按 Cursor、P
 
 #### 2.4 Runtime 凭据与 RPC
 
-`FileCredentials` 统一提供 OAuth 事务与跨进程锁。直接文件访问和 private-file host 是内部两种 adapter，运行同一套属主、类型、权限、64 KiB 上限、链接、缺失文件与原子替换契约测试。helper 启动命令与 Runtime 定位共同位于 `project/runner.ts`。
+`FileCredentials` 统一提供 OAuth 事务与跨进程锁，在 Runtime 进程内直接读写凭据文件，契约测试覆盖属主、类型、权限修复、64 KiB 上限、符号链接、缺失文件与原子替换。Runtime 定位位于 `project/runner.ts`。
 
 `checkedRPC` 按 operation 关联结果类型，在调用边界集中做结构校验；pi-ai payload 的扩展字段原样保留。
 

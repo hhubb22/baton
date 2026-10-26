@@ -30,7 +30,7 @@
 
 | 领域术语 | 一句话定义 | 代码中的名字与入口 | 易混点 |
 | --- | --- | --- | --- |
-| daemon / 守护进程 | 在设备数据目录内持锁、连接中心并管理设备能力与独立 Worker 的进程。 | `runDaemon`，见 [daemon.ts](apps/batond/src/daemon/daemon.ts)。 | batond 是可执行程序名，还承载 worker、agent-host、private-file 等子命令。 |
+| daemon / 守护进程 | 在设备数据目录内持锁、连接中心并管理设备能力与独立 Worker 的进程。 | `runDaemon`，见 [daemon.ts](apps/batond/src/daemon/daemon.ts)。 | batond 是可执行程序名，还承载 worker、agent-host、watchdog 等子命令。 |
 | Thread Worker / Session Worker | 独占一个 Thread 账本、接收持久命令并驱动 ThreadAgent 的独立进程。 | `runWorker`、`makeWorker`，见 [worker-runner.ts](apps/batond/src/daemon/worker-runner.ts) 和 [worker/index.ts](apps/batond/src/worker/index.ts)。 | 两种叫法指同一种 Worker；它与 Project Runtime、Agent host 各有独立生命周期。 |
 | ThreadAgent / Baton 执行适配器 | Worker 驱动一个 Thread 执行实例的接口。 | `ThreadAgent`、`AgentFactory`，见 [agent.ts](apps/batond/src/worker/agent.ts)；实现见 [thread-agent.ts](apps/batond/src/agent-host/thread-agent.ts) 和 [shell/index.ts](apps/batond/src/agents/shell/index.ts)。 | 这里的「适配器」负责准备、发送、接受核对、事件与回收；t3code provider adapter 负责另一层原生协议。 |
 | Agent host | 运行 provider adapter 并通过 stdio RPC 与 Worker 交互的独立宿主进程。 | `runAgentHost`、`AgentHostRpc`，见 [host.ts](apps/batond/src/agent-host/host.ts) 和 [protocol.ts](apps/batond/src/agent-host/protocol.ts)。 | host 承载原生执行资源；Worker 负责 Thread 持久状态，probe 也可临时启动 host。 |
@@ -70,7 +70,6 @@
 | 进程登记 / Process registration | 保存所属进程或进程组身份以支持取消及崩溃清理的操作。 | `ProcessRegistrar`，见 [process-registrar.ts](apps/batond/src/agent-host/process-registrar.ts)；`ProcessRecordCallbacks`，见 [process-types.ts](apps/batond/src/platform/process-types.ts)。 | host registrar 向 watchdog 登记独立进程组；Worker records 持久保存进程身份，回收超时或失败时须保留登记。 |
 | 回收证据 / Reaping evidence | 系统已确认所属执行进程树停止的事实。 | `ReapResult.reaped`、`processTreeStopped`，见 [process-types.ts](apps/batond/src/platform/process-types.ts) 和 [agent.ts](apps/batond/src/worker/agent.ts)。 | abort/close 响应与根 PID 退出都不足以单独建立整棵树已停止的事实。 |
 | 授权目录 / Browse root | 用户授权访问的真实目录及其稳定 ID。 | `BrowseRoot`、`initializeBrowseRoots`、`authorizeDirectory`，见 [roots.ts](apps/batond/src/devices/roots.ts)。 | 配置用 `id`，设备报告用 `root_id`；数据目录另有用途，配置缺失与已保存空列表也有不同含义。 |
-| 私有文件宿主 / Private file host | 提供凭据目录保护及有界私有文件读写的本机 helper。 | `runPrivateFileHost`、`private-file`，见 [private-file-host.ts](apps/batond/src/platform/private-file-host.ts)。 | 它与 Project Runtime stdio 通道分别运行；Runtime 使用 `BATON_PRIVATE_FILE_HOST_COMMAND` 指定 helper，见 [credential-host.ts](runtimes/project-agent/src/credential-host.ts)。 |
 | 提交结果未知 / CommitUnknown | SQLite COMMIT 失败且独立读取仍无法裁决提交结果时产生的错误。 | `CommitUnknown`，见 [sqlite/index.ts](packages/sqlite/src/index.ts)。 | 它继承 `SqlError`，须按类识别；调用方须停止执行并核对持久状态，再打开新连接。 |
 | 实时输出 / 完整输出 | 通过设备请求读取的临时文本流片段或设备持久保存的完整回复正文与 shell 原始输出。 | `SessionRequest.action: output / full_output`、`SessionResult.full_output`，见 [thread.ts](packages/protocol/src/thread.ts)；`OutputBuffer` 和 `FullOutputStore`，见 [output.ts](apps/batond/src/worker/output.ts) 和 [full-output.ts](apps/batond/src/worker/full-output.ts)。 | 实时缓冲有界且可报告缺口；完整输出按存储代次定位并有保留期限，中心 Thread 回复历史另存有界正文和附件引用。 |
 | Schema / DTO | 跨模块共享的数据传输形状及其局部约束。 | `Schema.Struct`、领域 Schema 与派生类型，见 [protocol/src](packages/protocol/src/) 和 [thread.ts](packages/protocol/src/thread.ts)。 | 解码只验证结构和声明的关系；员工归属、连接身份与租约仍须由业务事务验证。 |
