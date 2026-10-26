@@ -112,6 +112,7 @@ node apps/batond/dist/batond.cjs project-runtime login-api-key anthropic < key-f
 - 全局规格：[PRODUCT](specs/baton/PRODUCT.md)、[TECH](specs/baton/TECH.md)
 - Agent 适配：[PRODUCT](specs/agent-adapters/PRODUCT.md)、[TECH](specs/agent-adapters/TECH.md)
 - Project Agent：[PRODUCT](specs/project-agent/PRODUCT.md)、[TECH](specs/project-agent/TECH.md)
+- Project 长期记忆草案：[PRODUCT](specs/project-memory/PRODUCT.md)、[TECH](specs/project-memory/TECH.md)
 - Agent Inbox：[PRODUCT](specs/agent-inbox/PRODUCT.md)、[TECH](specs/agent-inbox/TECH.md)
 - 上游转录与回放：[TECH](specs/agent-replay/TECH.md)
 - 术语与代码命名：[GLOSSARY](GLOSSARY.md)
