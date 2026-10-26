@@ -41,7 +41,7 @@ import { InboxFeedback } from './InboxFeedback'
 import { FilePreview } from './FilePreview'
 import { MessageBody } from './MessageBody'
 import { FullOutput } from './FullOutput'
-import { Page } from './Page'
+import { Page, pane } from './Page'
 import { ActivityTrace, Attachments, LiveOutput } from './ReplyParts'
 import { copySelection, SelectionArea } from './SelectionMenu'
 import { ThreadExecutionLimit } from './ThreadExecutionLimit'
@@ -59,9 +59,6 @@ const styles = stylex.create({
     width: size.detail,
     minWidth: 0,
     height: '100%',
-    borderLeftWidth: '1px',
-    borderLeftStyle: 'solid',
-    borderLeftColor: colors.borderSoft,
     backgroundColor: colors.surface,
   },
   header: {
@@ -140,7 +137,17 @@ const styles = stylex.create({
     borderRadius: '10px',
   },
   noticeDanger: { backgroundColor: colors.dangerSoft },
-  noticeAttention: { backgroundColor: colors.attentionSoft, borderColor: colors.attentionEdge },
+  noticeAttention: {
+    paddingBlock: '14px',
+    paddingLeft: '18px',
+    paddingRight: '14px',
+    backgroundColor: colors.inverse,
+    borderColor: 'transparent',
+    borderRadius: '16px',
+    boxShadow: `0 1px 3px ${colors.shadowNear}, 0 12px 32px ${colors.shadowFar}`,
+    color: colors.onInverse,
+  },
+  noticeDetailInverse: { color: colors.onInverseMuted },
   noticeBody: { display: 'flex', flexDirection: 'column', gap: '2px', flexGrow: 1, minWidth: 0 },
   composer: { maxWidth: size.measure },
   status: { width: '100%', maxWidth: size.measure, minHeight: '18px', color: colors.muted },
@@ -332,7 +339,9 @@ function NoticeCard({ notice, action }: { notice: ThreadNotice; action: ReactNod
     >
       <div {...stylex.props(styles.noticeBody)}>
         <span {...stylex.props(text.label)}>{notice.title}</span>
-        <span {...stylex.props(text.caption, styles.muted)}>{notice.detail}</span>
+        <span {...stylex.props(text.caption, styles.muted, notice.tone === 'attention' && styles.noticeDetailInverse)}>
+          {notice.detail}
+        </span>
       </div>
       {action}
     </div>
@@ -826,7 +835,7 @@ export function ThreadDetail({
   }
 
   return (
-    <aside aria-label={thread.title} {...stylex.props(styles.panel)}>
+    <aside aria-label={thread.title} {...stylex.props(styles.panel, pane.card)}>
       <div {...stylex.props(styles.header)}>
         {onBack && <IconButton icon="chevron-left" label="Back to overview" onClick={onBack} />}
         <h2 {...stylex.props(text.bodyMedium, styles.headerTitle, text.truncate)}>{thread.title}</h2>

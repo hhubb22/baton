@@ -36,7 +36,7 @@ import { Menu, MenuHeading, MenuOption, MenuRule } from '../ui/Menu'
 import { StatusDot } from '../ui/Status'
 
 const styles = stylex.create({
-  layout: { display: 'flex', flexGrow: 1, minWidth: 0, height: '100%' },
+  layout: { display: 'flex', gap: size.gutter, flexGrow: 1, minWidth: 0, height: '100%' },
   content: { display: 'flex', flexDirection: 'column', gap: space.lg, padding: '20px' },
   composerArea: { display: 'flex', flexDirection: 'column', gap: space.xs },
   status: { minHeight: '18px', paddingInline: space.xs, color: colors.muted },

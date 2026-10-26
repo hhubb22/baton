@@ -27,10 +27,6 @@ const styles = stylex.create({
     paddingTop: 0,
     paddingInline: space.sm,
     paddingBottom: space.sm,
-    backgroundColor: colors.panel,
-    borderRightWidth: '1px',
-    borderRightStyle: 'solid',
-    borderRightColor: colors.borderSoft,
   },
   sidebarCollapsed: { width: '64px' },
   brand: {
@@ -55,7 +51,8 @@ const styles = stylex.create({
   },
   projectRow: { height: '30px' },
   active: {
-    backgroundColor: { default: colors.selected, ':hover': colors.selected },
+    backgroundColor: { default: colors.raised, ':hover': colors.raised },
+    boxShadow: `0 1px 2px ${colors.shadowNear}`,
     fontWeight: weight.medium,
   },
   rowIcon: { color: colors.muted },

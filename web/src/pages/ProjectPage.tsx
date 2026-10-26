@@ -64,7 +64,7 @@ import { StatusChip, StatusDot, type Tone } from '../ui/Status'
 import { Tabs } from '../ui/Tabs'
 
 const styles = stylex.create({
-  layout: { display: 'flex', flexGrow: 1, minWidth: 0, height: '100%' },
+  layout: { display: 'flex', gap: size.gutter, flexGrow: 1, minWidth: 0, height: '100%' },
   title: { display: 'flex', alignItems: 'center', gap: space.sm },
   headerStatus: { display: 'inline-flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap' },
   agentText: { color: colors.agentText },
@@ -181,10 +181,11 @@ const styles = stylex.create({
     height: '100%',
     overflowY: 'auto',
     padding: space.lg,
-    borderLeftWidth: '1px',
-    borderLeftStyle: 'solid',
-    borderLeftColor: colors.borderSoft,
-    backgroundColor: colors.panel,
+    backgroundColor: colors.glassLift,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: colors.glassEdge,
+    borderRadius: radius.lg,
   },
   section: { display: 'flex', flexDirection: 'column', gap: space.xs },
   sectionLabel: { color: colors.faint },

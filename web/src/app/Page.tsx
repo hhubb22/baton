@@ -1,12 +1,31 @@
 import * as stylex from '@stylexjs/stylex'
 import type { ReactNode } from 'react'
 import { text } from '../theme/text'
-import { colors, size, space } from '../theme/tokens.stylex'
+import { colors, radius, size, space } from '../theme/tokens.stylex'
 import { IconButton } from '../ui/Button'
 import { useWorkspace } from './workspace'
 
+// 工作区里浮在玻璃背景上的卡片：主内容和 Thread 详情面板共用。
+export const pane = stylex.create({
+  card: {
+    overflow: 'hidden',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: colors.hairline,
+    borderRadius: radius.lg,
+    boxShadow: `0 1px 3px ${colors.shadowNear}, 0 12px 40px ${colors.shadowFar}`,
+  },
+})
+
 const styles = stylex.create({
-  page: { display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0, height: '100%' },
+  page: {
+    display: 'flex',
+    flexDirection: 'column',
+    flexGrow: 1,
+    minWidth: 0,
+    height: '100%',
+    backgroundColor: colors.canvas,
+  },
   header: {
     display: 'flex',
     alignItems: 'center',
@@ -32,11 +51,11 @@ const styles = stylex.create({
   },
 })
 
-// 工作区右侧的页面：48px 标题栏，最左边是收起或展开侧栏的按钮，下面是可滚动的内容。
+// 工作区里的主内容卡片：48px 标题栏，最左边是收起或展开侧栏的按钮，下面是可滚动的内容。
 export function Page({ title, actions, children }: { title: ReactNode; actions?: ReactNode; children: ReactNode }) {
   const { collapsed, toggleSidebar } = useWorkspace()
   return (
-    <section {...stylex.props(styles.page)}>
+    <section {...stylex.props(styles.page, pane.card)}>
       <header {...stylex.props(styles.header)}>
         <IconButton
           icon={collapsed ? 'chevron-right' : 'chevron-left'}
