@@ -56,7 +56,7 @@ import { colors, radius, size, space } from '../theme/tokens.stylex'
 import { Avatar } from '../ui/Avatar'
 import { Banner } from '../ui/Banner'
 import { Button, focusRing, IconButton } from '../ui/Button'
-import { Card } from '../ui/Card'
+import { branch } from '../ui/Branch'
 import { Composer } from '../ui/Composer'
 import { Icon } from '../ui/Icon'
 import { Menu, MenuOption, MenuRule } from '../ui/Menu'
@@ -125,21 +125,15 @@ const styles = stylex.create({
     fontSize: '12px',
     whiteSpace: 'pre-wrap',
   },
-  cardHead: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: space.sm,
-    paddingBlock: space.xs,
-    paddingInline: space.md,
-  },
-  cardTitle: { flexGrow: 1 },
+  threadGroup: { display: 'flex', flexDirection: 'column', gap: space.xs },
+  groupTitle: { flexGrow: 1 },
   threadRow: {
     display: 'flex',
     alignItems: 'center',
     gap: space.sm,
     width: '100%',
     minHeight: size.comfortable,
-    paddingInline: space.md,
+    paddingInline: space.sm,
     borderWidth: 0,
     borderRadius: radius.md,
     backgroundColor: { default: 'transparent', ':hover': colors.hover },
@@ -189,17 +183,6 @@ const styles = stylex.create({
   },
   section: { display: 'flex', flexDirection: 'column', gap: space.xs },
   sectionLabel: { color: colors.faint },
-  assistantCard: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: space.xs,
-    padding: space.md,
-    backgroundColor: colors.surface,
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: colors.hairline,
-    borderRadius: '14px',
-  },
   assistantHead: { display: 'flex', alignItems: 'center', gap: space.sm },
   group: { display: 'flex', flexDirection: 'column' },
   groupLabel: { paddingBlock: space.xs, paddingInline: space.sm, color: colors.faint },
@@ -337,7 +320,7 @@ function ThreadButton({
     >
       <StatusDot tone={view.status.tone} />
       <span {...stylex.props(styles.threadTitle, text.truncate)}>{thread.title}</span>
-      <span {...stylex.props(text.caption, styles.folderTag, text.truncate)}>{folderName(thread.folder)}</span>
+      <span {...stylex.props(text.mono, styles.folderTag, text.truncate)}>{folderName(thread.folder)}</span>
       <span {...stylex.props(text.caption, styles.threadMeta)}>
         {device?.name ?? 'Removed device'} · {thread.agent ? agentNames[thread.agent] : 'Command'}
       </span>
@@ -367,26 +350,27 @@ function ThreadCard({
   if (threads.length === 0) return null
   const status = threadCardStatus(threads)
   return (
-    <Card flush label={cardTitles[info.action](threads.length)}>
-      <div {...stylex.props(styles.cardHead)}>
-        <Icon name="message" size={14} style={styles.muted} />
-        <span {...stylex.props(text.label, styles.cardTitle)}>{cardTitles[info.action](threads.length)}</span>
+    <section aria-label={cardTitles[info.action](threads.length)} {...stylex.props(styles.threadGroup)}>
+      <div {...stylex.props(text.small, branch.title)}>
+        <span {...stylex.props(styles.groupTitle)}>{cardTitles[info.action](threads.length)}</span>
         <span {...stylex.props(text.caption, styles.headerStatus, statusTextStyle(status.tone))}>
           <StatusDot tone={status.tone} />
           {status.label}
         </span>
       </div>
-      {threads.map((thread) => (
-        <ThreadButton
-          key={thread.id}
-          thread={thread}
-          device={devices.find((item) => item.id === thread.deviceId)}
-          selected={thread.id === openThread}
-          now={now}
-          onOpen={() => onOpen(thread.id)}
-        />
-      ))}
-    </Card>
+      <div {...stylex.props(branch.line)}>
+        {threads.map((thread) => (
+          <ThreadButton
+            key={thread.id}
+            thread={thread}
+            device={devices.find((item) => item.id === thread.deviceId)}
+            selected={thread.id === openThread}
+            now={now}
+            onOpen={() => onOpen(thread.id)}
+          />
+        ))}
+      </div>
+    </section>
   )
 }
 
@@ -555,7 +539,8 @@ function Overview({
           <p {...stylex.props(text.small)}>{project.goal}</p>
         </section>
       )}
-      <section aria-label="Project assistant" {...stylex.props(styles.assistantCard)}>
+      <section aria-label="Project assistant" {...stylex.props(styles.section)}>
+        <h3 {...stylex.props(text.captionMedium, styles.sectionLabel)}>Project assistant</h3>
         <div {...stylex.props(styles.assistantHead)}>
           <Icon name="laptop" size={14} style={styles.muted} />
           <span {...stylex.props(text.label, text.truncate)}>{device?.name ?? 'No device yet'}</span>

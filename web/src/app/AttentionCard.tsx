@@ -5,11 +5,12 @@ import { ClientError } from '../data/client'
 import { clockTime, shortenExcerpt } from '../data/derive'
 import { useHandleItem, useInbox, useProjectEntries, useProjects, useThreads } from '../data/queries'
 import type { InboxItem, ItemDecision } from '../data/types'
+import { weight } from '../theme/base.stylex'
 import { text } from '../theme/text'
 import { colors, radius, space } from '../theme/tokens.stylex'
 import { Avatar } from '../ui/Avatar'
+import { branch } from '../ui/Branch'
 import { Button, focusRing } from '../ui/Button'
-import { Card } from '../ui/Card'
 import { Field, TextArea } from '../ui/Field'
 import { StatusDot } from '../ui/Status'
 import { RestrictedMarkdown } from './RestrictedMarkdown'
@@ -17,38 +18,41 @@ import { copySelection, SelectionArea } from './SelectionMenu'
 import { useWorkspace, type ItemDraft } from './workspace'
 
 const styles = stylex.create({
-  card: { minWidth: 0, overflowWrap: 'anywhere' },
+  item: { display: 'flex', flexDirection: 'column', gap: '10px', minWidth: 0, overflowWrap: 'anywhere' },
   row: { display: 'flex', alignItems: 'center', gap: space.sm, flexWrap: 'wrap' },
   meta: { color: colors.muted, textDecoration: 'none' },
   status: { display: 'inline-flex', alignItems: 'center', gap: '6px', color: colors.attentionText },
   time: { marginLeft: 'auto', color: colors.faint },
-  options: { display: 'flex', flexDirection: 'column', gap: '4px' },
   option: {
     display: 'flex',
     alignItems: 'center',
     gap: space.sm,
     width: '100%',
     minWidth: 0,
-    padding: '10px',
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: 'transparent',
-    borderRadius: radius.lg,
+    paddingBlock: '6px',
+    paddingInline: space.sm,
+    borderWidth: 0,
+    borderRadius: radius.md,
     textAlign: 'left',
     color: colors.text,
-    backgroundColor: { default: colors.subtle, ':hover': colors.hover },
+    backgroundColor: { default: 'transparent', ':hover': colors.hover },
   },
-  selected: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
-  number: { color: colors.faint },
-  optionLabel: { flexGrow: 1 },
-  recommended: {
-    color: colors.agentText,
-    fontSize: '11px',
-    backgroundColor: colors.agentSoft,
+  selected: { backgroundColor: { default: colors.accentSoft, ':hover': colors.accentSoft } },
+  // 选项序号的键帽。
+  number: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    width: '20px',
+    height: '20px',
     borderRadius: radius.sm,
-    paddingBlock: '2px',
-    paddingInline: '5px',
+    backgroundColor: colors.subtle,
+    color: colors.muted,
   },
+  optionLabel: { flexGrow: 1 },
+  suggested: { fontWeight: weight.medium },
+  recommended: { flexShrink: 0, color: colors.agentText },
   footer: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'space-between', gap: space.sm },
   form: { display: 'flex', flexDirection: 'column', gap: space.sm },
   actions: { display: 'flex', gap: space.sm, justifyContent: 'flex-end' },
@@ -148,7 +152,7 @@ export function AttentionCard({
   }
 
   return (
-    <Card label={item.title} style={styles.card}>
+    <section aria-label={item.title} {...stylex.props(styles.item)}>
       <div {...stylex.props(text.caption, styles.row)}>
         {project && (
           <>
@@ -171,7 +175,7 @@ export function AttentionCard({
           {clockTime(item.createdAt)}
         </time>
       </div>
-      <h2 {...stylex.props(text.bodyMedium)}>{item.title}</h2>
+      <h2 {...stylex.props(text.heading)}>{item.title}</h2>
       <Button
         small
         variant="ghost"
@@ -208,7 +212,7 @@ export function AttentionCard({
               {pendingCount} questions waiting in this project. Consider answering or closing older questions.
             </p>
           )}
-          <div {...stylex.props(styles.options)}>
+          <div {...stylex.props(branch.line)}>
             {visibleOptions.map((option, index) => (
               <button
                 type="button"
@@ -221,9 +225,13 @@ export function AttentionCard({
                 }}
                 {...stylex.props(text.small, styles.option, draft.option === option && styles.selected, focusRing.ring)}
               >
-                <span {...stylex.props(styles.number)}>{index + 1}</span>
-                <span {...stylex.props(styles.optionLabel)}>{option}</span>
-                {index === item.recommended && <span {...stylex.props(styles.recommended)}>Recommended</span>}
+                <span {...stylex.props(text.caption, styles.number)}>{index + 1}</span>
+                <span {...stylex.props(styles.optionLabel, index === item.recommended && styles.suggested)}>
+                  {option}
+                </span>
+                {index === item.recommended && (
+                  <span {...stylex.props(text.caption, styles.recommended)}>Recommended</span>
+                )}
               </button>
             ))}
           </div>
@@ -342,6 +350,6 @@ export function AttentionCard({
           Saving…
         </p>
       )}
-    </Card>
+    </section>
   )
 }

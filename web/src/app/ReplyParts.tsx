@@ -6,6 +6,7 @@ import type { Attachment, Device, Message, Thread } from '../data/types'
 import { fonts } from '../theme/base.stylex'
 import { text } from '../theme/text'
 import { colors, radius, space } from '../theme/tokens.stylex'
+import { branch } from '../ui/Branch'
 import { Button, focusRing } from '../ui/Button'
 import { Icon } from '../ui/Icon'
 import { StatusDot } from '../ui/Status'
@@ -44,22 +45,12 @@ const styles = stylex.create({
     color: colors.accentText,
     textDecoration: { default: 'none', ':hover': 'underline' },
   },
-  attachments: {
-    display: 'flex',
-    flexDirection: 'column',
-
-    paddingBlock: space.xs,
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: colors.borderSoft,
-    borderRadius: radius.lg,
-  },
   attachment: {
     display: 'flex',
     alignItems: 'flex-start',
     gap: space.md,
-    paddingBlock: space.sm,
-    paddingInline: space.lg,
+    paddingBlock: space.xs,
+    paddingInline: space.sm,
   },
   attachmentIcon: { flexShrink: 0, marginTop: '3px', color: colors.muted },
   attachmentBody: { display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0 },
@@ -192,7 +183,7 @@ export function Attachments({
 }) {
   if (attachments.length === 0) return null
   return (
-    <ul aria-label="Attachments" {...stylex.props(styles.attachments)}>
+    <ul aria-label="Attachments" {...stylex.props(branch.line)}>
       {attachments.map((item) =>
         item.kind === 'file' ? (
           <FileRow

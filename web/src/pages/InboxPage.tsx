@@ -6,7 +6,7 @@ import { Column, Page } from '../app/Page'
 import { pendingInbox } from '../data/derive'
 import { useInbox } from '../data/queries'
 import { text } from '../theme/text'
-import { space } from '../theme/tokens.stylex'
+import { colors, space } from '../theme/tokens.stylex'
 import { Banner } from '../ui/Banner'
 import { Button } from '../ui/Button'
 
@@ -14,6 +14,14 @@ const styles = stylex.create({
   heading: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space.sm },
   empty: { paddingBlock: space.xl, textAlign: 'center' },
   recent: { display: 'flex', flexDirection: 'column', gap: space.md },
+  // 整页的行，不画外框，靠 borderSoft 分隔线分开。
+  list: { display: 'flex', flexDirection: 'column' },
+  row: {
+    paddingBlock: space.lg,
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: colors.borderSoft,
+  },
 })
 
 // @elyx design/screens/inbox.elyx#inbox
@@ -82,9 +90,15 @@ export function InboxPage() {
             {handled ? 'No handled items yet' : 'Nothing needs your decision'}
           </p>
         )}
-        {items.map((item) => (
-          <AttentionCard key={item.id} item={item} onHandled={(id, feedback) => setRecentResult({ id, feedback })} />
-        ))}
+        {items.length > 0 && (
+          <div {...stylex.props(styles.list)}>
+            {items.map((item) => (
+              <div key={item.id} {...stylex.props(styles.row)}>
+                <AttentionCard item={item} onHandled={(id, feedback) => setRecentResult({ id, feedback })} />
+              </div>
+            ))}
+          </div>
+        )}
         {recent && (
           <div ref={recentRef} tabIndex={-1} role="region" aria-label="Latest result" {...stylex.props(styles.recent)}>
             <AttentionCard key={recent.id} item={recent} feedback={recentResult?.feedback} />

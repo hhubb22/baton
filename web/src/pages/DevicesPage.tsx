@@ -64,22 +64,20 @@ const styles = stylex.create({
     outline: 'none',
   },
   noticeActions: { display: 'flex', alignItems: 'center', gap: space.md },
+  // 整页的行，不画外框，靠 borderSoft 分隔线分开。
   list: {
     display: 'flex',
     flexDirection: 'column',
-    overflow: 'hidden',
-    backgroundColor: colors.surface,
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: colors.border,
-    borderRadius: radius.lg,
-  },
-  item: {
-    borderTopWidth: { default: '1px', ':first-child': 0 },
+    borderTopWidth: '1px',
     borderTopStyle: 'solid',
     borderTopColor: colors.borderSoft,
   },
-  itemOpen: { backgroundColor: colors.panel },
+  item: {
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: colors.borderSoft,
+  },
+  rowOpen: { backgroundColor: { default: colors.selected, ':hover': colors.selected } },
   row: {
     display: 'grid',
     gridTemplateColumns: '32px minmax(0, 1fr) 200px 170px 16px',
@@ -99,8 +97,6 @@ const styles = stylex.create({
     justifyContent: 'center',
     width: '32px',
     height: '32px',
-    borderRadius: radius.md,
-    backgroundColor: colors.subtle,
     color: colors.muted,
   },
   identity: { display: 'flex', flexDirection: 'column', minWidth: 0 },
@@ -142,26 +138,15 @@ const styles = stylex.create({
   permission: {
     display: 'flex',
     flexDirection: 'column',
-    gap: space.md,
-    padding: space.lg,
-    backgroundColor: colors.surface,
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: colors.borderSoft,
-    borderRadius: radius.lg,
+    gap: space.sm,
+    paddingTop: space.lg,
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: colors.borderSoft,
   },
   permissionHead: { display: 'flex', alignItems: 'flex-start', gap: space.lg },
   permissionText: { display: 'flex', flexDirection: 'column', gap: space.xxs, flexGrow: 1 },
-  risk: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: space.sm,
-    paddingBlock: space.sm,
-    paddingInline: space.md,
-    backgroundColor: colors.attentionSoft,
-    borderRadius: radius.md,
-    color: colors.attentionText,
-  },
+  risk: { display: 'flex', alignItems: 'center', gap: space.sm, color: colors.attentionText },
   actions: { display: 'flex', alignItems: 'center', gap: space.lg },
   textButton: {
     paddingBlock: space.xs,
@@ -229,7 +214,7 @@ function DeviceRow({
       aria-expanded={open}
       aria-controls={`device-${device.id}`}
       onClick={onToggle}
-      {...stylex.props(styles.row, focusRing.ring)}
+      {...stylex.props(styles.row, open && styles.rowOpen, focusRing.ring)}
     >
       <span {...stylex.props(styles.tile)}>
         <Icon name="laptop" size={16} />
@@ -618,7 +603,7 @@ export function DevicesPage() {
         {list.map((device) => {
           const open = device.id === expanded
           return (
-            <div key={device.id} {...stylex.props(styles.item, open && styles.itemOpen)}>
+            <div key={device.id} {...stylex.props(styles.item)}>
               <DeviceRow
                 device={device}
                 isDefault={device.id === defaultId}
