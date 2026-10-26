@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 import * as Effect from 'effect/Effect'
 import { ensurePrivateDirectory, readPrivateFile, validatePrivateDirectory, writePrivateFileAtomic } from './files.ts'
 import { hasCode, platformEffect } from './errors.ts'
-import { identityMatches, readProcessIdentity, type ProcessIdentity } from './identity.ts'
+import { identityMatches, readOwnProcessIdentity, type ProcessIdentity } from './identity.ts'
 
 export interface ProcessLockRecord extends ProcessIdentity {
   readonly token: string
@@ -91,7 +91,7 @@ async function removeRecord(path: string, record: ProcessLockRecord): Promise<vo
 /** path is a lock directory. Publish a fully initialized nonempty directory atomically. */
 export async function acquireProcessLock(path: string): Promise<ProcessLock> {
   await validatePrivateDirectory(dirname(path))
-  const identity = await readProcessIdentity(process.pid)
+  const identity = await readOwnProcessIdentity()
   if (!identity) throw new Error('Cannot read own process creation time')
   const record: ProcessLockRecord = { ...identity, token: randomUUID() }
   const candidate = join(dirname(path), `.lock-${record.token}`)

@@ -148,10 +148,8 @@ test('API key 登录、探测与请求认证使用同一个 provider，环境凭
     assert.equal(await readFile(join(dir, 'anthropic.json'), 'utf8'), before)
     if (process.platform !== 'win32') {
       await chmod(join(dir, 'anthropic.json'), 0o644)
-      assert.equal(
-        (await probe(store)).providers.find((item) => item.provider === 'anthropic')?.reason,
-        'credential_permissions_invalid',
-      )
+      assert.equal((await probe(store)).providers.find((item) => item.provider === 'anthropic')?.status, 'available')
+      assert.equal((await stat(join(dir, 'anthropic.json'))).mode & 0o777, 0o600)
     }
     await store.modify('openai-codex', async () => ({ type: 'api_key', key: 'wrong-auth-type' }))
     assert.equal(

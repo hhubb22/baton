@@ -8,15 +8,22 @@ export const maximumCredentialBytes = 64 * 1024
 function check(stat: Stats, directory: boolean): void {
   if (stat.isSymbolicLink() || (directory ? !stat.isDirectory() : !stat.isFile()))
     throw new Error('credential_path_invalid')
-  if (stat.uid !== process.getuid?.()) throw new Error('credential_owner_invalid')
-  if ((stat.mode & 0o7777) !== (directory ? 0o700 : 0o600) || (!directory && stat.nlink !== 1))
-    throw new Error('credential_permissions_invalid')
+  if (process.platform !== 'win32' && stat.uid !== process.getuid?.()) throw new Error('credential_owner_invalid')
 }
+
+/** POSIX 权限不是 0700/0600 时直接改回，不因权限不符拒绝访问。 */
+const needsMode = (stat: Stats, directory: boolean) =>
+  process.platform !== 'win32' && (stat.mode & 0o7777) !== (directory ? 0o700 : 0o600)
 
 async function validate(path: string, directory: boolean): Promise<Stats> {
   const stat = await fs.lstat(path)
   check(stat, directory)
   return stat
+}
+
+async function validateDirectory(path: string): Promise<void> {
+  const stat = await validate(path, true)
+  if (needsMode(stat, true)) await fs.chmod(path, 0o700)
 }
 
 async function existingFile(path: string): Promise<void> {
@@ -29,20 +36,18 @@ async function existingFile(path: string): Promise<void> {
 
 export const directCredentialFiles = {
   async protect(path: string, directory: boolean): Promise<void> {
-    const before = await fs.lstat(path)
-    if (before.isSymbolicLink() || (directory ? !before.isDirectory() : !before.isFile()))
-      throw new Error('credential_path_invalid')
-    if (before.uid !== process.getuid?.()) throw new Error('credential_owner_invalid')
-    if (!directory && before.nlink !== 1) throw new Error('credential_permissions_invalid')
-    await fs.chmod(path, directory ? 0o700 : 0o600)
-    const after = await validate(path, directory)
-    if (before.dev !== after.dev || before.ino !== after.ino) throw new Error('credential_path_invalid')
+    if (directory) return validateDirectory(path)
+    const stat = await validate(path, false)
+    if (needsMode(stat, false)) await fs.chmod(path, 0o600)
   },
   async read(path: string): Promise<string | undefined> {
     try {
-      await validate(dirname(path), true)
+      await validateDirectory(dirname(path))
       const before = await validate(path, false)
-      const handle = await fs.open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
+      const handle = await fs.open(
+        path,
+        constants.O_RDONLY | (process.platform === 'win32' ? 0 : constants.O_NOFOLLOW | constants.O_NONBLOCK),
+      )
       try {
         const actual = await handle.stat()
         check(actual, false)
@@ -54,6 +59,7 @@ export const directCredentialFiles = {
           actual.ino !== after.ino
         )
           throw new Error('credential_path_invalid')
+        if (needsMode(actual, false)) await handle.chmod(0o600)
         if (actual.size > maximumCredentialBytes) throw new Error('credential_permissions_invalid')
         const buffer = Buffer.alloc(maximumCredentialBytes + 1)
         let size = 0
@@ -75,7 +81,7 @@ export const directCredentialFiles = {
   async write(path: string, input: string): Promise<void> {
     if (Buffer.byteLength(input) > maximumCredentialBytes) throw new Error('credential_private_file_failed')
     const parent = dirname(path)
-    await validate(parent, true)
+    await validateDirectory(parent)
     await existingFile(path)
     const temporary = join(parent, `.credential-${randomUUID()}`)
     try {
@@ -88,11 +94,13 @@ export const directCredentialFiles = {
       }
       await existingFile(path)
       await fs.rename(temporary, path)
-      const directory = await fs.open(parent, constants.O_RDONLY)
-      try {
-        await directory.sync()
-      } finally {
-        await directory.close()
+      if (process.platform !== 'win32') {
+        const directory = await fs.open(parent, constants.O_RDONLY)
+        try {
+          await directory.sync()
+        } finally {
+          await directory.close()
+        }
       }
     } finally {
       await fs.rm(temporary, { force: true })

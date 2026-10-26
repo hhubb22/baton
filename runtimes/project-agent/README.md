@@ -12,7 +12,7 @@ Runtime 使用同一份 provider 注册表生成执行实例、模型目录、�
 
 `batond` 在 SEA 中通过自身可执行文件启动 `project-runtime`，加载可执行文件旁 `node_modules/` 中的固定依赖。源码 CLI 与编译入口共用导出的 `runProjectRuntimeCLI(args)`。Windows 独立开发入口需要保留仓库布局和已安装依赖：凭据操作自动定位仓库中的 TS 私有文件 helper，通过当前 Node 和 file URL 形式的 tsx loader 启动。也可通过结构化 `BATON_PRIVATE_FILE_HOST_COMMAND` 指定 helper 的程序与参数；指定宿主失败或默认 helper 缺失时，凭据操作返回错误。
 
-使用运行 `batond run` 的同一个系统用户登录。凭据默认保存在用户主目录下的 `.baton/project-runtime`；可用 `BATON_PROJECT_RUNTIME_DATA_DIR` 指定 Runtime 专用的私有目录，登录和守护进程须使用相同配置。凭据与 Pi、Codex CLI 的登录记录分别保存，不上传 Coordinator。`FileCredentials` 负责 OAuth 事务与跨进程锁，内部使用直接文件 adapter 或 private-file host adapter；两个 adapter 共用 read、write 与 protect-dir 契约测试。POSIX 目录须属于当前 UID 且权限恰为 `0700`，文件须属于当前 UID、为普通文件、权限恰为 `0600` 且只有一个硬链接；拒绝特殊权限位和符号链接，打开前后核对设备与 inode。Windows 通过 host 验证私有目录 ACL，限制见 [平台私有文件约定](../../apps/batond/src/platform/README.md#私有文件)。凭据 JSON 按 UTF-8 字节限制为 64 KiB，写入使用同目录临时文件、文件 fsync 和原子替换，POSIX 再同步目录。显式 protect-dir 可以收紧已有目录权限；普通读取拒绝不安全路径。host 的 `protect(file, false)` 保持返回 `credential_use_native_write`，文件保护由原子写入完成。
+使用运行 `batond run` 的同一个系统用户登录。凭据默认保存在用户主目录下的 `.baton/project-runtime`；可用 `BATON_PROJECT_RUNTIME_DATA_DIR` 指定 Runtime 专用的私有目录，登录和守护进程须使用相同配置。凭据与 Pi、Codex CLI 的登录记录分别保存，不上传 Coordinator。`FileCredentials` 负责 OAuth 事务与跨进程锁，内部使用直接文件 adapter 或 private-file host adapter；两个 adapter 共用 read、write 与 protect-dir 契约测试。POSIX 目录和文件须属于当前 UID，文件须为普通文件；权限不是 `0700`/`0600` 时读写前改回，拒绝符号链接，打开前后核对设备与 inode。Windows 通过 host 验证私有目录 ACL，限制见 [平台私有文件约定](../../apps/batond/src/platform/README.md#私有文件)。凭据 JSON 按 UTF-8 字节限制为 64 KiB，写入使用同目录临时文件、文件 fsync 和原子替换，POSIX 再同步目录。host 的 `protect(file, false)` 保持返回 `credential_use_native_write`，文件保护由原子写入完成。
 
 `batond subscriptions` 显示各 provider 的已登录、需要登录或无法读取状态，并在需要登录时给出命令。它调用 Runtime 的 `probe`，只检查本地凭据，不刷新 token，不请求模型，不输出 token。已登录表示本地存在所需凭据；实际授权是否有效由后续请求确认。过期但带有刷新凭据的订阅会在下一次真实请求时刷新。
 
@@ -54,6 +54,6 @@ assistant 的 `message_end` 监听器先等待 `append_event` 提交，再按消
 
 验证命令见 [AGENTS.md](../../AGENTS.md#常用构建与验证命令)，安装包检查见 [发布设计](../../specs/release/TECH.md)。
 
-测试包括请求前与收尾压缩、旧工具结果保护、前缀与签名复用、超限恢复、重复压缩、提交冲突与丢失回执、无效摘要拒绝、结尾表四种情况、部分工具已有结果、真实子进程在保存和工具事务前后被杀、失败屏障禁止工具执行、模型失败与超限输出、虚拟时钟下的 180 秒与 15 分钟边界、两个凭据 adapter 的严格权限、属主、类型、链接、64 KiB 边界、缺失文件、原子替换与事务锁，以及无网络 probe。跨系统请求测试用超过 1 MiB 的历史验证分页和 provider 扩展字段的保留。
+测试包括请求前与收尾压缩、旧工具结果保护、前缀与签名复用、超限恢复、重复压缩、提交冲突与丢失回执、无效摘要拒绝、结尾表四种情况、部分工具已有结果、真实子进程在保存和工具事务前后被杀、失败屏障禁止工具执行、模型失败与超限输出、虚拟时钟下的 180 秒与 15 分钟边界、两个凭据 adapter 的权限修复、属主、类型、符号链接、64 KiB 边界、缺失文件、原子替换与事务锁，以及无网络 probe。跨系统请求测试用超过 1 MiB 的历史验证分页和 provider 扩展字段的保留。
 
 faux 恢复测试的 Coordinator 替身负责持久化和事务去重。真实 Runtime、batond、Gateway、Coordinator 与 PostgreSQL 的跨 app 集成测试位于 [e2e/](../../e2e/README.md)。测试检查工具结果、记忆、压缩事件与读取起点在 Coordinator 保存，原始消息保留，运行正常结束。事务故障注入测试验证服务端去重。Runtime、跨设备调度和恢复的自动验收使用本地模型替身及离线录制；真实订阅检查仅在显式手动运行冒烟时执行。

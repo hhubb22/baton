@@ -41,7 +41,7 @@ Runtime 使用 `runtimes/project-agent/src/stdio.ts`，batond 宿主使用 `apps
 
 Runtime 的凭据使用设备专用数据目录，默认 `~/.baton/project-runtime`，可用 `BATON_PROJECT_RUNTIME_DATA_DIR` 指定。OAuth 刷新通过带心跳的跨进程锁串行化，崩溃遗留锁在 120 秒后可回收。
 
-POSIX 使用私有目录和 `0600` 文件，读取检查所有者、类型和权限并拒绝符号链接。SEA 通过当前可执行文件的 `private-file` 入口读写凭据；Windows 使用 `apps/batond/src/platform/private-file-host.ts` 的目录 ACL 与私有文件检查。文件内容只经父子进程管道传递，helper 的 read/write 限制为 64 KiB。源码 Windows 宿主通过结构化 `BATON_PRIVATE_FILE_HOST_COMMAND` 传递程序与参数，不经过 shell。
+POSIX 使用私有目录和 `0600` 文件，读取检查所有者和类型，权限不符时改回，拒绝符号链接。SEA 通过当前可执行文件的 `private-file` 入口读写凭据；Windows 使用 `apps/batond/src/platform/private-file-host.ts` 的目录 ACL 与私有文件检查。文件内容只经父子进程管道传递，helper 的 read/write 限制为 64 KiB。源码 Windows 宿主通过结构化 `BATON_PRIVATE_FILE_HOST_COMMAND` 传递程序与参数，不经过 shell。
 
 ## 验证
 

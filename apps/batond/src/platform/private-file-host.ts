@@ -2,7 +2,7 @@ import { mkdir } from 'node:fs/promises'
 import { dirname, isAbsolute, resolve } from 'node:path'
 import { Schema } from 'effect'
 import { hasCode } from './errors.ts'
-import { openPrivateFile, protectPrivateDirectory, writePrivateFileAtomic } from './private.ts'
+import { openPrivateFile, validatePrivateDirectory, writePrivateFileAtomic } from './private.ts'
 
 const Arguments = Schema.Union([
   Schema.Tuple([Schema.Literal('private-file'), Schema.Literal('protect-dir'), Schema.String]),
@@ -29,7 +29,7 @@ export async function runPrivateFileHost(
     if (!isAbsolute(directory) || directory.includes('\0')) throw failed()
     if (operation === 'protect-dir') {
       await mkdir(directory, { recursive: true, mode: 0o700 })
-      await protectPrivateDirectory(directory)
+      await validatePrivateDirectory(directory)
       return 0
     }
     if (!file || !isAbsolute(file) || file.includes('\0') || dirname(resolve(file)) !== resolve(directory))

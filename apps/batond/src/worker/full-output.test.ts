@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { chmod, readFile, readdir, rm, symlink, unlink } from 'node:fs/promises'
+import { chmod, lstat, readFile, readdir, rm, symlink, unlink } from 'node:fs/promises'
 import { makePrivateTempDirectory } from '../testing/private.ts'
 import { join } from 'node:path'
 import { Schema } from 'effect'
@@ -79,7 +79,7 @@ it('retains raw shell chunks including the omitted middle and pages exact bytes 
   expect(Buffer.concat(recovered).includes(Buffer.from('middle🙂\0'))).toBe(true)
 })
 
-it('rejects a different Thread, generation, malformed cursor, unsafe permissions and symbolic links', async () => {
+it('rejects a different Thread, generation, malformed cursor and symbolic links, and restores private permissions', async () => {
   const f = await fixture()
   const reference = await f.store.put(f.config, Buffer.from('private reply'), 30)
   const read = f.request(reference)
@@ -92,11 +92,10 @@ it('rejects a different Thread, generation, malformed cursor, unsafe permissions
   const path = join(f.store.directory, `${reference.id}.bin`)
   if (process.platform !== 'win32') {
     await chmod(path, 0o644)
-    expect((await f.store.read(read)).code).toBe('output_unavailable')
-    await chmod(path, 0o600)
     await chmod(f.store.directory, 0o755)
-    expect((await f.store.read(read)).code).toBe('output_unavailable')
-    await chmod(f.store.directory, 0o700)
+    expect((await f.store.read(read)).code).toBeUndefined()
+    expect((await lstat(path)).mode & 0o777).toBe(0o600)
+    expect((await lstat(f.store.directory)).mode & 0o777).toBe(0o700)
     const outside = join(f.root, 'secret')
     await writePrivateFileAtomic(outside, 'private reply')
     await unlink(path)

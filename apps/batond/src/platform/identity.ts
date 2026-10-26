@@ -86,6 +86,17 @@ export async function readProcessIdentity(pid: number): Promise<ProcessIdentity 
   return match[1].startsWith('Z') ? null : { pid, creationTime: match[2].trim() }
 }
 
+let ownIdentity: Promise<ProcessIdentity | null> | undefined
+
+/** 本进程的创建时间不会变，缓存后加锁不必每次查询系统（Windows 上每次都要启动 PowerShell）。 */
+export function readOwnProcessIdentity(): Promise<ProcessIdentity | null> {
+  ownIdentity ??= readProcessIdentity(process.pid).catch((error: unknown) => {
+    ownIdentity = undefined
+    throw error
+  })
+  return ownIdentity
+}
+
 export async function identityMatches(identity: ProcessIdentity): Promise<boolean> {
   return (await readProcessIdentity(identity.pid))?.creationTime === identity.creationTime
 }

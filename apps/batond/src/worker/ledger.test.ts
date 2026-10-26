@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { chmod, lstat, readFile, readdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -82,22 +82,6 @@ const message = (id: string): State['messages'][string] => ({
   state: 'intent',
   input: { id, text: 'input', epoch: 0, operationId: randomUUID(), mode: 'queue' },
 })
-async function snapshot(f: Fixture) {
-  const files = await readdir(f.root)
-  return Promise.all(
-    files.sort().map(async (name) => {
-      const path = join(f.root, name)
-      const stat = await lstat(path)
-      return {
-        name,
-        mode: stat.mode,
-        hash: createHash('sha256')
-          .update(await readFile(path))
-          .digest('hex'),
-      }
-    }),
-  )
-}
 function tables(f: Fixture) {
   const db = new DatabaseSync(f.dbPath, { readOnly: true, allowExtension: false })
   try {
@@ -395,15 +379,12 @@ it('classifies a real exclusive SQLite lock as retry and succeeds after release'
   expect(await inspectWorkerLedger(f.dbPath, f.config)).toBe('valid')
 })
 
-it.skipIf(process.platform === 'win32')('keeps unsafe file permissions retryable without chmod or repair', async () => {
+it.skipIf(process.platform === 'win32')('restores private ledger permissions during inspection', async () => {
   const f = await fixture()
   await seed(f)
   await chmod(f.dbPath, 0o644)
-  const before = await snapshot(f)
-  expect(await inspectWorkerLedger(f.dbPath, f.config)).toBe('retry')
-  expect(await snapshot(f)).toEqual(before)
-  await chmod(f.dbPath, 0o600)
   expect(await inspectWorkerLedger(f.dbPath, f.config)).toBe('valid')
+  expect((await lstat(f.dbPath)).mode & 0o777).toBe(0o600)
 })
 
 it('writes complete replies before clipping their reports and persists the same reference across saves and reopening', async () => {

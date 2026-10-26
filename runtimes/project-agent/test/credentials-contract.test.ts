@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { chmod, link, mkdir, mkdtemp, open, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, open, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { FileCredentials, protect } from '../src/credentials.js'
@@ -90,38 +90,32 @@ for (const adapter of ['direct', 'host'] as const) {
         await assert.rejects(invalid.read('xai'))
       })
 
-      test('拒绝符号链接和多重硬链接，外部目标保持原内容', { skip: process.platform === 'win32' }, async () => {
+      test('拒绝符号链接，外部目标保持原内容', { skip: process.platform === 'win32' }, async () => {
         const target = join(directory, 'target')
         await writeFile(target, JSON.stringify(value), { mode: 0o600 })
-        for (const makeLink of [symlink, link]) {
-          await makeLink(target, file())
-          await assert.rejects(store.read('xai'))
-          await assert.rejects(store.modify('xai', async () => ({ ...value, key: 'changed' })))
-          assert.equal(await readFile(target, 'utf8'), JSON.stringify(value))
-          await rm(file())
-        }
+        await symlink(target, file())
+        await assert.rejects(store.read('xai'))
+        await assert.rejects(store.modify('xai', async () => ({ ...value, key: 'changed' })))
+        assert.equal(await readFile(target, 'utf8'), JSON.stringify(value))
+        await rm(file())
         const alias = join(directory, 'alias')
         await symlink(directory, alias, 'dir')
         await assert.rejects(new FileCredentials(alias).read('xai'))
         await assert.rejects(new FileCredentials(alias).modify('xai', async () => value))
       })
 
-      test('严格要求文件 0600、目录 0700，拒绝特殊权限位', { skip: process.platform === 'win32' }, async () => {
+      test('读取时把文件改回 0600、目录改回 0700', { skip: process.platform === 'win32' }, async () => {
         await store.modify('xai', async () => value)
-        for (const mode of [0o400, 0o640, 0o644, 0o700, 0o1600]) {
+        for (const mode of [0o400, 0o644, 0o1600]) {
           await chmod(file(), mode)
-          await assert.rejects(store.read('xai'))
-          await assert.rejects(store.modify('xai', async () => value))
-          assert.equal((await stat(file())).mode & 0o7777, mode)
+          assert.deepEqual(await store.read('xai'), value)
+          assert.equal((await stat(file())).mode & 0o7777, 0o600)
         }
-        await chmod(file(), 0o600)
-        for (const mode of [0o500, 0o750, 0o1700]) {
+        for (const mode of [0o750, 0o1700]) {
           await chmod(directory, mode)
-          await assert.rejects(store.read('xai'))
-          assert.equal((await stat(directory)).mode & 0o7777, mode)
+          assert.deepEqual(await store.read('xai'), value)
+          assert.equal((await stat(directory)).mode & 0o7777, 0o700)
         }
-        await protect(directory, true)
-        assert.equal((await stat(directory)).mode & 0o7777, 0o700)
       })
 
       test('拒绝不同属主，读取不会更改凭据或权限', { skip: process.platform === 'win32' }, async () => {

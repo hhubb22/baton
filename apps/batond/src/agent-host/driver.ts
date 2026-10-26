@@ -113,7 +113,14 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
     const questions = new Map<string, ThreadQuestion>()
     const questionTurns = new Map<string, ActiveTurn>()
     const published = new Set<string>()
-    const error = (message: string) => new AgentHostError({ message })
+    // 底层原因附在消息后面，跨进程传给 Worker 后仍能看出具体失败。
+    const error = (message: string, cause?: unknown) =>
+      new AgentHostError({
+        message:
+          cause === undefined
+            ? message
+            : `${message}: ${cause instanceof Error ? cause.message : JSON.stringify(cause)}`,
+      })
     const fail = (operation: string, cause: unknown) =>
       cause instanceof AgentHostError ? cause : operationError(label, operation, cause)
     const emit = (event: ExecutionEvent) =>
@@ -315,7 +322,7 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
       Effect.gen(function* () {
         const cwd = yield* Effect.tryPromise({
           try: () => realpath(input.working_directory),
-          catch: () => error(`${label} working directory is not accessible`),
+          catch: (cause) => error(`${label} working directory is not accessible`, cause),
         })
         return {
           threadId: ThreadId.make(input.thread_id),
@@ -362,15 +369,15 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
         if (!nativeSessionId) return yield* error(`${label} provider thread has no native session id`)
         const next = yield* Effect.tryPromise({
           try: () => mappingFor(input, nativeSessionId, thread, label),
-          catch: () => error(`Invalid ${label} native mapping`),
+          catch: (cause) => error(`Invalid ${label} native mapping`, cause),
         })
         yield* Effect.tryPromise({
           try: () => ensurePrivateDirectory(dirname(statePath(input, label))),
-          catch: () => error(`${label} private state is not accessible`),
+          catch: (cause) => error(`${label} private state is not accessible`, cause),
         })
         yield* Effect.tryPromise({
           try: () => persistMapping(next),
-          catch: () => error(`${label} native mapping could not be persisted`),
+          catch: (cause) => error(`${label} native mapping could not be persisted`, cause),
         })
         mapping = next
         providerThread = thread
@@ -423,7 +430,7 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
             return yield* error(`${label} host cannot open another session`)
           const stored = yield* Effect.tryPromise({
             try: () => loadMapping(input, nativeSessionId, label),
-            catch: () => error(`${label} native mapping identity, working directory or profile mismatch`),
+            catch: (cause) => error(`${label} native mapping identity, working directory or profile mismatch`, cause),
           })
           const authorized = yield* authorize(input)
           const runtime = yield* options.adapter
@@ -578,7 +585,7 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
         Effect.gen(function* () {
           const stored = yield* Effect.tryPromise({
             try: () => loadMapping(input, preparation.nativeSessionId, label),
-            catch: () => error(`${label} native mapping identity, working directory or profile mismatch`),
+            catch: (cause) => error(`${label} native mapping identity, working directory or profile mismatch`, cause),
           })
           const authorized = yield* authorize(input)
           const snapshot = yield* Effect.scoped(

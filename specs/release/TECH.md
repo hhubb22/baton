@@ -94,11 +94,9 @@ macOS 与 Linux 数值来自发布工作流 run `40186351668`（源码提交 `3e
 | Linux arm64 | 754.205 | 996.420 | 1000.820 |
 | Windows x64 | 未测 | 未测 | 未测 |
 
-macOS 与 Linux 的全部样本低于 3 秒，每次确认 SIGTERM 后 Worker、watchdog 退出与锁释放。Windows 本机计划 100 次，首个样本在 Host 的 3 秒就绪限制处失败，完成 0/100，尚无冷启动分位数与回收达标结论。记录覆盖独占锁、实际 SQLite 建表、空账本恢复调度、该提交的 Agent 接入模块加载与 watchdog；当前构建检查强制 Worker 运行时依赖图隔离 SDK 和 host 实现，表中数值仅适用于所标明的测量提交。
+macOS 与 Linux 的全部样本低于 3 秒，每次确认 SIGTERM 后 Worker、watchdog 退出与锁释放。Windows 尚无当前实现的冷启动样本。记录覆盖独占锁、实际 SQLite 建表、空账本恢复调度、该提交的 Agent 接入模块加载与 watchdog；当前构建检查强制 Worker 运行时依赖图隔离 SDK 和 host 实现，表中数值仅适用于所标明的测量提交。
 
 系统页缓存未清空，macOS runner 为虚拟化 Apple M1。就绪状态为 `agent_ready=false`，测量没有打开 Agent 会话，也未覆盖已有大量命令或 intent 的恢复耗时。
-
-Windows Server 2022 的独立单次 profile 中，目录缓存和新建空目录的 `icacls` 快速路径将失败的 Host 准备流程从约 12.72 秒降到 3.75 秒：PowerShell 从 5 次、合计 12.51 秒降为 1 次、3.38 秒，`icacls` 从 5 次、0.13 秒变为 10 次、0.28 秒，`whoami` 均为 1 次、约 0.03 秒。首次 `LA` 解析仍耗尽 3 秒预算，Host 未 spawn Worker，这不是完整成功冷启动的样本。相同 profile 的单次 SEA `protect-dir` helper 从 5 秒超时变为 3.44 秒成功，但正式 Runtime 凭据流程和安装包 helper 检查仍超时，不能据此宣称 5 秒目标稳定达成；仅诊断允许 30 秒的 helper 从 5.31 秒变为 2.89 秒。计时代码不在生产源码中。
 
 ### Cursor 加载证据
 
@@ -106,29 +104,17 @@ Windows Server 2022 的独立单次 profile 中，目录缓存和新建空目录
 
 Linux arm64 的 SDK、store、tree-sitter 与 ripgrep 已有通过记录；Debian 12 / glibc 2.36 无法加载要求 `GLIBC_2.39` 的 sandbox helper，该组合的完整安装包检查失败。Linux arm64 的 Cursor helper 要求 glibc 2.39+。Ubuntu runner 的测量结果与 Debian 12 的 helper 失败分别属于各自环境，不能互相替代。Fedora 43 的本地加载证据待补。
 
-Windows Server 2022 本机通过四个 Agent 与原生模块加载，以及 Cursor store、ripgrep、sandbox helper 的独立检查，但完整安装包检查仍因 Worker 和私有文件 helper 超时而失败。Linux x64 的安装包检查已有通过记录；其 Cursor store、ripgrep 与 sandbox helper 的独立检查尚缺可核实的运行结果，不能由模块导入成功推断它们全部通过。Cursor 来源与加载方案的限制见 [SDK 说明](../../third_party/cursor-sdk/README.md)。
+Windows Server 2022 本机通过四个 Agent 与原生模块加载，以及 Cursor store、ripgrep、sandbox helper 的独立检查，完整安装包检查待在当前实现上复验。Linux x64 的安装包检查已有通过记录；其 Cursor store、ripgrep 与 sandbox helper 的独立检查尚缺可核实的运行结果，不能由模块导入成功推断它们全部通过。Cursor 来源与加载方案的限制见 [SDK 说明](../../third_party/cursor-sdk/README.md)。
 
 ## Windows 待修与待验证
 
-Windows 新建空目录使用 `icacls /inheritance:r /grant:r` 后严格读回；已有目录使用 `DirectoryInfo.SetAccessControl` 仅替换受保护 DACL，并在同一 PowerShell 脚本读回 Access SDDL 和 ACE 的数字 SID，保留 owner 与 SACL，不要求审计权限。`icacls /restore` 在受限令牌下缺少特权，不能替代已有目录的原子收紧。`icacls /save` 可将内置 Administrator SID 写成标准 SDDL 缩写 `LA`，校验通过 Windows 解析为数字 SID 后比较，仍严格要求唯一的当前用户 `OICI`、`FA` Allow ACE；错误包含实际 SDDL。目录成功校验按进程内的 resolved path 与 `dev/ino` 缓存，每次仍执行 `lstat` 和类型检查；同一用户的其他进程修改 ACL 而对象身份不变时可能不被重新发现。SID 解析失败会移除缓存，后续调用可以重试。普通本地用户的目录保护、私有文件读写、拒绝额外授权与重新收紧已有先前本机验证，但当前性能改动尚无该用户的完整 workspace 验证。
+Windows 私有目录不设置或校验 ACL，沿用数据目录继承的权限。默认数据目录 `%USERPROFILE%\.baton-ts` 和临时目录都在用户目录下，Windows 默认只授权当前用户、SYSTEM 与 Administrators；把数据目录放到其他用户可读的位置时，由设备用户自行负责权限。Worker 准备与私有文件 helper 因此不再启动 PowerShell 或 `icacls`。
 
-Windows Server 2022 本机使用 Node 26.11.1、pnpm 12.11.2，以下正式验证按顺序运行于受限 Administrator 令牌：Administrators 组为 deny-only，但完整性标签仍为 High，不能等同真正普通本地用户。节点为 252 通过、118 失败、44 跳过，56 个文件中 22 个失败；与上次的 205/162 相比通过增加 47、失败减少 44，其中新增 3 项纯逻辑测试。Runtime 仍为 89 通过、9 失败、3 跳过。此前带 JSON 读回的中间实现还在管理员令牌下运行过一轮，节点为 186/184/44，不能冒充最终实现或普通用户的结果。
-
-| 命令 | exit | 当前结果 |
-|---|---:|---|
-| `pnpm --filter @baton/batond test` | 1 | 252 通过、118 失败、44 跳过 |
-| `pnpm --dir runtimes/project-agent test` | 1 | 89 通过、9 失败、3 跳过，凭据 helper 超时 |
-| `pnpm check` | 0 | 格式、lint、类型检查通过 |
-| `node tools/package-batond.mjs --out bin/package` | 0 | SEA 和旁置依赖打包完成 |
-| `node tools/check-package.mjs bin/package` | 1 | 8/10 子项通过；Worker 和私有文件超时 |
-| `node tools/measure/worker-startup.mjs 100 --package bin/package --ledger 2000` | 1 | 冷启动 0/100；FULL 完成 2000 次事务 |
-| `node tools/verify/windows-processes.mjs` | 1 | 首棵树报 `Grandchild missing before taskkill`，后续场景未完成 |
-
-剩余失败包括测试/清理超时、TestClock 额外日志、状态断言、Pi 私有状态不可访问、Windows 文件占用与进程树清理。`keeps identity mismatches unknown even when reply display fields need repair` 本轮全量出现了基线没有的 10 秒超时；使用仓库配置单独选跑该项通过，根因仍未确认，不能据此判为已修复或与改动无关。ACL 与私有文件定向检查为 13 通过、1 个原有 POSIX 专用跳过，不代替全量结果。Worker 3 秒与 helper 5 秒生产预算未改，目标仍未达成。Windows Server 2025、真正普通本地用户的完整 workspace 测试，以及实际 PID 复用仍待验证。
+此前 Windows Server 2022 本机（受限 Administrator 令牌）上，私有目录 ACL 设置是 Worker 超过 3 秒就绪限制、helper 超过 5 秒限制的主要耗时；当前实现尚未在 Windows 复验。需要重跑节点与 Runtime 测试、完整安装包检查、冷启动与 FULL 测量以及 Windows 进程检查。已知与 ACL 无关的失败包括 TestClock 额外日志、若干状态断言、Pi 私有状态不可访问、Windows 文件占用和进程树清理（`Grandchild missing before taskkill`）。Windows Server 2025、普通本地用户的完整 workspace 测试与实际 PID 复用仍待验证。
 
 [Windows 进程脚本](../../tools/verify/windows-processes.mjs) 使用自有的 CIM 校验与 `taskkill` 包装，观察完整父子孙树、故意过期的创建时间，以及中间父进程退出后的孙进程。它检查系统机制，未调用生产 reaper，不强迫系统实际复用 PID，也不验证 Worker 崩溃到下一次启动之间的回收延迟；非 Windows 输出 `not-measured`。
 
-第一版的 Windows 平台边界为：`taskkill /T` 可能漏掉中间父进程先退出后的后代；Worker 崩溃后 Agent 可能运行到下一次 Worker 启动；CIM 身份核对与终止之间存在竞争窗口。私有目录使用当前用户 SID 的受保护 DACL 与 `icacls /save` 验证，逐句柄 DACL 与 reparse point 检查仍有缺口；命名管道使用 Node 默认安全描述符，依靠私有令牌认证。实现与恢复约束见 [平台实现](../../apps/batond/src/platform/README.md) 与 [进程回收设计](../agent-adapters/TECH.md#进程组与停止回收)。
+第一版的 Windows 平台边界为：`taskkill /T` 可能漏掉中间父进程先退出后的后代；Worker 崩溃后 Agent 可能运行到下一次 Worker 启动；CIM 身份核对与终止之间存在竞争窗口。私有目录沿用数据目录继承的 ACL，不做 DACL 与 reparse point 检查；命名管道使用 Node 默认安全描述符，依靠私有令牌认证。实现与恢复约束见 [平台实现](../../apps/batond/src/platform/README.md) 与 [进程回收设计](../agent-adapters/TECH.md#进程组与停止回收)。
 
 ## 第一版之后
 

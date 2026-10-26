@@ -1,8 +1,8 @@
-import { link, mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { makePrivateTempDirectory } from '../testing/private.ts'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vite-plus/test'
-import { ensurePrivateDirectory, protectPrivateDirectory } from './private.ts'
+import { ensurePrivateDirectory, validatePrivateDirectory } from './private.ts'
 import { runPrivateFileHost } from './private-file-host.ts'
 
 const directories: string[] = []
@@ -18,20 +18,19 @@ async function* input(text: string) {
   yield Buffer.from(text)
 }
 
-it('distinguishes explicit directory protection from private path validation', async () => {
+it('protects existing directories and rejects directory links', async () => {
   const root = await directory(),
     path = join(root, 'credentials')
   await mkdir(path, { mode: 0o755 })
-  if (process.platform !== 'win32') await expect(ensurePrivateDirectory(path)).rejects.toThrow('permissions')
   expect(await runPrivateFileHost(['private-file', 'protect-dir', path])).toBe(0)
   await ensurePrivateDirectory(path)
   if (process.platform !== 'win32') expect((await stat(path)).mode & 0o777).toBe(0o700)
   const alias = join(root, 'alias')
   await symlink(path, alias, process.platform === 'win32' ? 'junction' : 'dir')
-  await expect(protectPrivateDirectory(alias)).rejects.toThrow('type')
+  await expect(validatePrivateDirectory(alias)).rejects.toThrow('type')
 })
 
-it('rejects oversized or nonprivate files and paths outside the credential directory without returning content', async () => {
+it('rejects oversized files, symlinks and paths outside the credential directory without returning content', async () => {
   const root = await directory(),
     path = join(root, 'credentials'),
     file = join(path, 'xai.json')
@@ -52,17 +51,11 @@ it('rejects oversized or nonprivate files and paths outside the credential direc
   const outside = join(root, 'outside.json')
   await writeFile(outside, 'local-private-value', { mode: 0o600 })
   if (process.platform !== 'win32') {
-    // File symlinks need Windows developer mode; first-version Windows security validates the parent ACL.
+    // File symlinks need Windows developer mode.
     await symlink(outside, file)
     expect(await runPrivateFileHost(['private-file', 'read', path, file], input(''), collect)).toBe(1)
     expect(await runPrivateFileHost(['private-file', 'write', path, file], input('replacement'))).toBe(1)
     expect(await readFile(outside, 'utf8')).toBe('local-private-value')
-    await rm(file)
-    await link(outside, file)
-    expect(await runPrivateFileHost(['private-file', 'read', path, file], input(''), collect)).toBe(1)
-    await rm(file)
-    await writeFile(file, 'local-private-value', { mode: 0o644 })
-    expect(await runPrivateFileHost(['private-file', 'read', path, file], input(''), collect)).toBe(1)
   }
   expect(output).toBe('')
 })
