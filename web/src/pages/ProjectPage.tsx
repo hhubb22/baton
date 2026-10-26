@@ -252,9 +252,9 @@ function processSummary(steps: ProcessStep[]) {
 }
 
 const cardTitles: Record<EntryThreads['action'], (count: number) => string> = {
-  opened: (count) => `Opened ${plural(count, 'chat')}`,
-  messaged: (count) => `Messaged ${plural(count, 'chat')}`,
-  replies: (count) => `Replies from ${plural(count, 'chat')}`,
+  opened: (count) => `Opened ${plural(count, 'thread')}`,
+  messaged: (count) => `Messaged ${plural(count, 'thread')}`,
+  replies: (count) => `Replies from ${plural(count, 'thread')}`,
 }
 
 function ProcessLine({ steps, devices }: { steps: ProcessStep[]; devices: Device[] }) {
@@ -267,8 +267,8 @@ function ProcessLine({ steps, devices }: { steps: ProcessStep[]; devices: Device
         onClick={() => setOpen(!open)}
         {...stylex.props(text.caption, styles.processToggle, focusRing.ring)}
       >
-        {processSummary(steps)}
         <Icon name={open ? 'chevron-down' : 'chevron-right'} size={12} />
+        {processSummary(steps)}
       </button>
       {open && (
         <div {...stylex.props(styles.steps)}>
@@ -570,7 +570,7 @@ function Overview({
         <>
           {live.length === 0 && pending.length === 0 && (
             <p {...stylex.props(text.small, styles.faint)}>
-              No chats in this project yet. Ask the assistant to start work.
+              No threads in this project yet. Ask the assistant to start work.
             </p>
           )}
           {pending.length > 0 && (
@@ -631,7 +631,7 @@ function DockBanner({
       <Banner
         icon="archive"
         title="This project is archived"
-        detail="Chats and memory are kept. Existing threads can still be used."
+        detail="The main chat and memory are kept. Existing threads can still be used."
       />
     )
   if (project.status === 'paused') {

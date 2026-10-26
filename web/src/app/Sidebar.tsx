@@ -203,7 +203,7 @@ export function Sidebar() {
         {!collapsed && (
           <IconButton
             icon="pen"
-            label="New chat"
+            label="New thread"
             onClick={() => void navigate({ to: '/threads', search: { compose: 'focus' } })}
           />
         )}
@@ -213,8 +213,8 @@ export function Sidebar() {
         {collapsed && (
           <button
             type="button"
-            aria-label="New chat"
-            title="New chat"
+            aria-label="New thread"
+            title="New thread"
             onClick={() => void navigate({ to: '/threads', search: { compose: 'focus' } })}
             {...stylex.props(styles.row, styles.plainButton, focusRing.ring)}
           >

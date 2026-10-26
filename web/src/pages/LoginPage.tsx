@@ -33,10 +33,10 @@ const styles = stylex.create({
 type Notice = LoginNotice | 'unavailable'
 
 const notices: Record<Notice, { title: string; detail: string }> = {
-  signedOut: { title: 'You are signed out', detail: 'Sign in to view your devices, chats, and projects.' },
+  signedOut: { title: 'You are signed out', detail: 'Sign in to view your devices, threads, and projects.' },
   expired: {
     title: 'Your sign-in expired',
-    detail: 'Sign in again to continue. Saved chats and devices are still in your account.',
+    detail: 'Sign in again to continue. Saved threads and devices are still in your account.',
   },
   passwordReset: {
     title: 'Password reset by administrator',

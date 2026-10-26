@@ -97,7 +97,7 @@ export function PasswordPage() {
               required
               autoFocus
               value={current}
-              disabled={change.isPending}
+              readOnly={change.isPending}
               onChange={(event) => {
                 setCurrent(event.target.value)
                 setCurrentMissing(false)
@@ -119,7 +119,7 @@ export function PasswordPage() {
               autoComplete="new-password"
               required
               value={password}
-              disabled={change.isPending}
+              readOnly={change.isPending}
               onChange={(event) => {
                 setPassword(event.target.value)
                 setValidation(undefined)
@@ -138,7 +138,7 @@ export function PasswordPage() {
               autoComplete="new-password"
               required
               value={confirmation}
-              disabled={change.isPending}
+              readOnly={change.isPending}
               onChange={(event) => {
                 setConfirmation(event.target.value)
                 setMismatch(false)
@@ -152,7 +152,7 @@ export function PasswordPage() {
             {failure}
           </p>
         )}
-        <Button type="submit" variant="primary" block disabled={change.isPending}>
+        <Button type="submit" variant="primary" block>
           {change.isPending ? 'Updating…' : 'Update password'}
         </Button>
       </form>

@@ -62,12 +62,12 @@ it('explains unsupported model switching without offering a manual entry', async
       agents={[agent]}
       choice={{ agent: 'pi', model: 'provider/current' }}
       label="Current model"
-      lockedReason="Pi cannot switch models in this chat."
+      lockedReason="Pi cannot switch models in this thread."
       onSelect={onSelect}
     />,
   )
   await user.click(screen.getByRole('button', { name: 'Current model' }))
-  expect(await screen.findByText('Pi cannot switch models in this chat.')).toBeInTheDocument()
+  expect(await screen.findByText('Pi cannot switch models in this thread.')).toBeInTheDocument()
   expect(screen.queryByRole('menuitem', { name: 'Enter model ID…' })).not.toBeInTheDocument()
   expect(onSelect).not.toHaveBeenCalled()
 })

@@ -545,7 +545,7 @@ export function createThreadAPI(
       if (current.resume_pending === false) {
         if (current.opened_at && ['idle', 'running'].includes(current.status)) return { phase: 'done' }
         if (['stopped', 'unknown', 'archived'].includes(current.status))
-          return { phase: 'failed', detail: current.status_reason || 'The chat did not resume.' }
+          return { phase: 'failed', detail: current.status_reason || 'The thread did not resume.' }
       }
       return { phase: !current.node_online || !current.node_synced ? 'waitingDevice' : 'saved' }
     })

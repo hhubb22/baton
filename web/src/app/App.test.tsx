@@ -63,7 +63,7 @@ describe('app', () => {
     expect(await screen.findByRole('button', { name: 'Pi · Default model' })).toBeInTheDocument()
   })
 
-  it('renders command threads without a chat composer and keeps command output available', async () => {
+  it('renders command threads without a thread composer and keeps command output available', async () => {
     renderApp('/threads/thr-webui', 'normal', (client) => {
       const readThreads = client.listThreads.bind(client)
       const readMessages = client.listMessages.bind(client)
@@ -161,7 +161,7 @@ describe('app', () => {
     expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeInTheDocument()
     expect(within(sidebar).queryByText('Projects')).not.toBeInTheDocument()
     expect(within(sidebar).getByRole('link', { name: 'Threads' })).toHaveAttribute('aria-current', 'page')
-    expect(within(sidebar).getByRole('button', { name: 'New chat' })).toBeInTheDocument()
+    expect(within(sidebar).getByRole('button', { name: 'New thread' })).toBeInTheDocument()
     expect(localStorage.getItem('baton.sidebar.collapsed')).toBe('true')
 
     await user.click(screen.getByRole('button', { name: 'Expand sidebar' }))
@@ -250,7 +250,7 @@ describe('projects', () => {
       'placeholder',
       'Describe what you want to build or verify…',
     )
-    expect(screen.getByText('No chats in this project yet. Ask the assistant to start work.')).toBeInTheDocument()
+    expect(screen.getByText('No threads in this project yet. Ask the assistant to start work.')).toBeInTheDocument()
   })
 
   it('keeps the entries when saving fails and saves on retry', async () => {
@@ -276,15 +276,15 @@ describe('projects', () => {
       'Run the compat suite on MacBook Pro and Ubuntu Dev.{Enter}',
     )
     await advance(scheduler, browserLatency.save + browserLatency.run / 2)
-    const opened = await screen.findByRole('region', { name: 'Opened 2 chats' })
+    const opened = await screen.findByRole('region', { name: 'Opened 2 threads' })
     expect(within(opened).getByText('2 running')).toBeInTheDocument()
     const overview = screen.getByRole('complementary', { name: 'Overview' })
     expect(within(overview).getByRole('tab', { name: /Threads/ })).toHaveTextContent('2')
 
     await advance(scheduler, browserLatency.run * 2)
-    const replies = await screen.findByRole('region', { name: 'Replies from 2 chats' })
+    const replies = await screen.findByRole('region', { name: 'Replies from 2 threads' })
     expect(within(replies).getByText('All replied')).toBeInTheDocument()
-    expect(screen.getByText(/^Both chats finished\./)).toBeInTheDocument()
+    expect(screen.getByText(/^Both threads finished\./)).toBeInTheDocument()
 
     await user.click(within(replies).getAllByRole('button')[0])
     const panel = await screen.findByRole('complementary', { name: /compat/i })
@@ -314,7 +314,7 @@ describe('projects', () => {
     expect(screen.getByText('Stop requested')).toBeInTheDocument()
     await advance(scheduler, browserLatency.device + 100)
     expect(
-      await screen.findByText('You stopped the project assistant. Chats it opened keep running.'),
+      await screen.findByText('You stopped the project assistant. Threads it opened keep running.'),
     ).toBeInTheDocument()
     const overview = screen.getByRole('complementary', { name: 'Overview' })
     expect(within(within(overview).getByRole('region', { name: 'Running' })).getByText(/gateway/i)).toBeInTheDocument()
@@ -333,18 +333,18 @@ describe('threads', () => {
     return screen.findByRole('complementary', { name })
   }
 
-  it('starts a chat from an empty list, continues it and archives it', async () => {
+  it('starts a thread from an empty list, continues it and archives it', async () => {
     const user = userEvent.setup()
     const { scheduler } = renderApp('/threads', 'noChats')
-    expect(await screen.findByText('No chats yet')).toBeInTheDocument()
+    expect(await screen.findByText('No threads yet')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /baton · MacBook Pro/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Codex · gpt-6.1-sol/ })).toBeInTheDocument()
 
-    await user.type(screen.getByLabelText('New chat message'), 'Add a health check{Enter}')
+    await user.type(screen.getByLabelText('New thread message'), 'Add a health check{Enter}')
     await advance(scheduler, browserLatency.read + browserLatency.save)
     const detail = await panel('Add a health check')
     expect(await within(detail).findByText('Running')).toBeInTheDocument()
-    expect(screen.getByLabelText('New chat message')).toHaveValue('')
+    expect(screen.getByLabelText('New thread message')).toHaveValue('')
 
     await advance(scheduler, browserLatency.read + browserLatency.run)
     expect(await within(detail).findByText('Idle')).toBeInTheDocument()
@@ -354,20 +354,20 @@ describe('threads', () => {
     await advance(scheduler, browserLatency.save + browserLatency.run)
     await waitFor(() => expect(within(detail).getAllByText('Done. The change is ready for review.')).toHaveLength(2))
 
-    await user.click(within(detail).getByRole('button', { name: 'Close chat' }))
+    await user.click(within(detail).getByRole('button', { name: 'Close thread' }))
     const row = await screen.findByRole('link', { name: /Add a health check/ })
     expect(within(row).getByText('No project')).toBeInTheDocument()
 
     await user.click(row)
     const reopened = await panel('Add a health check')
-    await user.click(within(reopened).getByRole('button', { name: 'Chat actions' }))
-    await user.click(await screen.findByRole('menuitem', { name: 'Archive chat' }))
-    const dialog = await screen.findByRole('dialog', { name: 'Archive this chat?' })
-    await user.click(within(dialog).getByRole('button', { name: 'Archive chat' }))
+    await user.click(within(reopened).getByRole('button', { name: 'Thread actions' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Archive thread' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Archive this thread?' })
+    await user.click(within(dialog).getByRole('button', { name: 'Archive thread' }))
     await advance(scheduler, browserLatency.read + browserLatency.save)
     expect(
       await within(reopened).findByText(
-        'This chat is closed to new messages. Past replies and attachment links are kept.',
+        'This thread is closed to new messages. Past replies and attachment links are kept.',
       ),
     ).toBeInTheDocument()
     expect(within(reopened).queryByLabelText('Message')).not.toBeInTheDocument()
@@ -430,10 +430,10 @@ describe('threads', () => {
     expect(within(detail).getByText('Codex could not start')).toBeInTheDocument()
     expect(within(detail).queryByLabelText('Message')).not.toBeInTheDocument()
 
-    await user.click(within(detail).getByRole('button', { name: 'New chat in this folder' }))
+    await user.click(within(detail).getByRole('button', { name: 'New thread in this folder' }))
     expect(screen.getByRole('button', { name: /baton · Windows Desktop/ })).toBeInTheDocument()
-    expect(screen.getByLabelText('New chat message')).toHaveFocus()
-    expect(screen.getByLabelText('New chat message')).toHaveValue('')
+    expect(screen.getByLabelText('New thread message')).toHaveFocus()
+    expect(screen.getByLabelText('New thread message')).toHaveValue('')
   })
 
   it('adds and selects a folder path directly from the folder dialog', async () => {
@@ -467,7 +467,7 @@ describe('threads', () => {
     await user.click(await within(dialog).findByRole('button', { name: 'compat-suite' }))
     await user.click(within(dialog).getByRole('button', { name: 'Select folder' }))
     expect(await screen.findByRole('button', { name: /compat-suite · MacBook Pro/ })).toBeInTheDocument()
-    expect(screen.getByLabelText('New chat message')).toHaveFocus()
+    expect(screen.getByLabelText('New thread message')).toHaveFocus()
   })
 })
 
@@ -504,7 +504,7 @@ describe('devices', () => {
     expect(screen.getByRole('heading', { name: '1 device, 1 online' })).toHaveFocus()
     const sidebar = screen.getByRole('navigation', { name: 'Workspace' })
     expect(within(sidebar).getByText('1/1 online')).toBeInTheDocument()
-    expect(within(deviceRow('Build Server')).getByText('Default device')).toBeInTheDocument()
+    expect(within(deviceRow('Build Server')).getByText('Default')).toBeInTheDocument()
   })
 
   it('gets a new code after the old one expires and keeps the form', async () => {
@@ -663,8 +663,8 @@ describe('devices', () => {
     expect(screen.queryByRole('dialog', { name: 'Use Windows Desktop as default?' })).not.toBeInTheDocument()
     expect(await screen.findByText('Default device saved')).toBeInTheDocument()
     expect(screen.getByText(/Windows Desktop is your default device. It is offline/)).toBeInTheDocument()
-    expect(within(deviceRow('Windows Desktop')).getByText('Default device')).toBeInTheDocument()
-    expect(within(deviceRow('MacBook Pro')).queryByText('Default device')).not.toBeInTheDocument()
+    expect(within(deviceRow('Windows Desktop')).getByText('Default')).toBeInTheDocument()
+    expect(within(deviceRow('MacBook Pro')).queryByText('Default')).not.toBeInTheDocument()
   })
 
   it('shows an unknown subscription check as available to try without asking for sign-in', async () => {
@@ -751,8 +751,8 @@ describe('devices', () => {
     expect(within(sidebar).getByText('1/2 online')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Set Ubuntu Dev as default' }))
-    expect(await screen.findByText('Ubuntu Dev is your default for new chats and projects.')).toBeInTheDocument()
-    expect(within(deviceRow('Ubuntu Dev')).getByText('Default device')).toBeInTheDocument()
+    expect(await screen.findByText('Ubuntu Dev is your default for new threads and projects.')).toBeInTheDocument()
+    expect(within(deviceRow('Ubuntu Dev')).getByText('Default')).toBeInTheDocument()
   })
 
   it('moves the project assistant to another device when its device is removed', async () => {
@@ -928,7 +928,7 @@ describe('execution details', () => {
     expect(screen.getAllByRole('figure', { name: 'Reference from Fix gateway reconnect race' })).toHaveLength(1)
   })
 
-  it('copies a selection in a chat outside any project', async () => {
+  it('copies a selection in a thread outside any project', async () => {
     const user = userEvent.setup()
     renderApp('/threads/thr-webui')
     select(await screen.findByText(/Scaffold is in place/))

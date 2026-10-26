@@ -198,8 +198,8 @@ export function statusTextStyle(tone: Tone) {
 }
 
 const actionLabels: Record<ThreadAction, string> = {
-  resume: 'Resume chat',
-  newChat: 'New chat in this folder',
+  resume: 'Resume thread',
+  newChat: 'New thread in this folder',
   chooseFolder: 'Choose folder',
   viewDevices: 'View devices',
   viewActivity: 'View activity',
@@ -368,7 +368,7 @@ function ModelMenu({
       lockedReason={
         agent?.abilities.switchModel
           ? undefined
-          : `${name} cannot switch models in this chat. Start a new chat to choose another.`
+          : `${name} cannot switch models in this thread. Start a new thread to choose another.`
       }
       onSelect={(choice) => onSelect(choice.model)}
     />
@@ -438,18 +438,18 @@ export function ThreadDetail({
 
   if (threadQuery.error instanceof ClientError && threadQuery.error.code === 'notFound') {
     return (
-      <Shell layout={layout} title="Chat not found" onClose={onClose}>
-        <p {...stylex.props(text.body, styles.empty)}>This chat was deleted or you no longer have access.</p>
+      <Shell layout={layout} title="Thread not found" onClose={onClose}>
+        <p {...stylex.props(text.body, styles.empty)}>This thread was deleted or you no longer have access.</p>
       </Shell>
     )
   }
   if (threadQuery.isError) {
     return (
-      <Shell layout={layout} title="Chat" onClose={onClose}>
+      <Shell layout={layout} title="Thread" onClose={onClose}>
         <div {...stylex.props(styles.empty)}>
           <Banner
             icon="alert"
-            title="Could not load this chat"
+            title="Could not load this thread"
             action={
               <Button small onClick={() => void threadQuery.refetch()}>
                 Retry
@@ -598,12 +598,12 @@ export function ThreadDetail({
     ),
     thread.status !== 'archived' && thread.pending !== 'archive' && (
       <MenuOption key="archive" onSelect={() => setConfirm('archive')}>
-        Archive chat
+        Archive thread
       </MenuOption>
     ),
   ].filter(Boolean)
   const more = menuItems.length > 0 && (
-    <Menu align="end" narrow trigger={<IconButton icon="dots" label="Chat actions" />}>
+    <Menu align="end" narrow trigger={<IconButton icon="dots" label="Thread actions" />}>
       {menuItems}
     </Menu>
   )
@@ -685,11 +685,7 @@ export function ThreadDetail({
               notice={view.notice}
               action={
                 view.notice.action && (
-                  <Button
-                    small
-                    disabled={view.notice.action === 'resume' && (resuming || resume.isPending)}
-                    onClick={() => onAction(view.notice!.action!)}
-                  >
+                  <Button small onClick={() => onAction(view.notice!.action!)}>
                     {view.notice.action === 'resume' && thread.retryOpenAllowed
                       ? 'Retry opening'
                       : actionLabels[view.notice.action]}
@@ -846,7 +842,7 @@ export function ThreadDetail({
           onClick={() => void navigate({ to: '/threads/$threadId', params: { threadId } })}
         />
         {more}
-        {onClose && <IconButton icon="close" label="Close chat" onClick={onClose} />}
+        {onClose && <IconButton icon="close" label="Close thread" onClick={onClose} />}
       </div>
       {body}
       {dialogs}
@@ -870,7 +866,7 @@ function Shell({
     <aside aria-label={title} {...stylex.props(styles.panel)}>
       <div {...stylex.props(styles.header)}>
         <h2 {...stylex.props(text.bodyMedium, styles.headerStatus, text.truncate)}>{title}</h2>
-        {onClose && <IconButton icon="close" label="Close chat" onClick={onClose} />}
+        {onClose && <IconButton icon="close" label="Close thread" onClick={onClose} />}
       </div>
       {children}
     </aside>
@@ -908,7 +904,7 @@ function StopDialog({
         title="Stopping is unavailable"
         description={`${agentName} on ${deviceName} does not support stopping from Baton. Wait for the reply to finish, or stop it on the device.`}
         finalFocus={finalFocus}
-        actions={<DialogClose render={<Button variant="primary">Back to chat</Button>} />}
+        actions={<DialogClose render={<Button variant="primary">Back to thread</Button>} />}
       />
     )
   }
@@ -962,28 +958,28 @@ function ArchiveDialog({
         open={open}
         onOpenChange={(next) => !next && onClose()}
         title="Archiving is unavailable"
-        description={`${agentName} is still running on ${deviceName} and does not support stopping from Baton. Archive this chat after the reply finishes.`}
+        description={`${agentName} is still running on ${deviceName} and does not support stopping from Baton. Archive this thread after the reply finishes.`}
         finalFocus={finalFocus}
-        actions={<DialogClose render={<Button variant="primary">Back to chat</Button>} />}
+        actions={<DialogClose render={<Button variant="primary">Back to thread</Button>} />}
       />
     )
   }
   const canceled = waiting > 0 ? ` ${plural(waiting, 'message')} waiting to send will be canceled.` : ''
   const description = running
-    ? `${agentName} is still running on ${deviceName}. Baton stops it first and archives the chat after the device confirms.${canceled} You can still read archived chats.`
-    : `The chat stays readable but can't receive new messages.${canceled}`
+    ? `${agentName} is still running on ${deviceName}. Baton stops it first and archives the thread after the device confirms.${canceled} You can still read archived threads.`
+    : `The thread stays readable but can't receive new messages.${canceled}`
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => !next && onClose()}
-      title="Archive this chat?"
+      title="Archive this thread?"
       description={description}
       finalFocus={finalFocus}
       actions={
         <>
-          <DialogClose render={<Button>Keep chat</Button>} />
+          <DialogClose render={<Button>Keep thread</Button>} />
           <Button variant={running ? 'danger' : 'primary'} onClick={onConfirm}>
-            {submitting ? 'Archiving…' : running ? 'Stop and archive' : 'Archive chat'}
+            {submitting ? 'Archiving…' : running ? 'Stop and archive' : 'Archive thread'}
           </Button>
         </>
       }

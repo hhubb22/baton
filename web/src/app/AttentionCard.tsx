@@ -230,10 +230,30 @@ export function AttentionCard({
                   {option}
                 </span>
                 {index === item.recommended && (
-                  <span {...stylex.props(text.caption, styles.recommended)}>Recommended</span>
+                  <span {...stylex.props(text.caption, styles.recommended)}>Suggested</span>
                 )}
               </button>
             ))}
+            {item.allowText && (
+              <button
+                type="button"
+                aria-pressed={draft.replying && draft.option === null}
+                onClick={() => {
+                  if (handle.isPending) return
+                  setError(null)
+                  setDraft({ ...draft, option: null, replying: true })
+                }}
+                {...stylex.props(
+                  text.small,
+                  styles.option,
+                  draft.replying && draft.option === null && styles.selected,
+                  focusRing.ring,
+                )}
+              >
+                <span {...stylex.props(text.caption, styles.number)}>{item.options.length + 1}</span>
+                <span {...stylex.props(styles.optionLabel)}>Other…</span>
+              </button>
+            )}
           </div>
           {item.options.length > 5 && (
             <Button
@@ -246,17 +266,6 @@ export function AttentionCard({
             </Button>
           )}
           <div {...stylex.props(styles.footer)}>
-            {item.allowText && (
-              <Button
-                variant="ghost"
-                small
-                onClick={() => {
-                  if (!handle.isPending) setDraft({ ...draft, option: null, replying: true })
-                }}
-              >
-                Reply with text
-              </Button>
-            )}
             <Button variant="ghost" small onClick={() => submit({ kind: 'close' })}>
               Close question
             </Button>

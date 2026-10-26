@@ -11,7 +11,6 @@ import { Banner } from '../ui/Banner'
 import { Button } from '../ui/Button'
 
 const styles = stylex.create({
-  heading: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space.sm },
   empty: { paddingBlock: space.xl, textAlign: 'center' },
   recent: { display: 'flex', flexDirection: 'column', gap: space.md },
   // 整页的行，不画外框，靠 borderSoft 分隔线分开。
@@ -43,31 +42,23 @@ export function InboxPage() {
   }, [focusedResultId])
   return (
     <Page
-      title="Inbox"
+      title={handled ? 'Handled' : 'Inbox'}
       actions={
         <Button
           small
-          variant="ghost"
           onClick={() => {
             setRecentResult(null)
             void navigate({ to: '/inbox', search: handled ? {} : { handled: true } })
           }}
         >
-          {handled ? 'Pending items' : 'Handled items'}
+          {handled ? 'Back to inbox' : 'Handled'}
         </Button>
       }
     >
       <Column>
-        <div {...stylex.props(styles.heading)}>
-          <h2 {...stylex.props(text.title)}>
-            {handled
-              ? 'Handled items'
-              : !inbox.data
-                ? 'Inbox'
-                : `${pending.length} ${pending.length === 1 ? 'item' : 'items'} waiting for you`}
-          </h2>
-          <span {...stylex.props(text.caption, text.faint)}>Newest first</span>
-        </div>
+        {!handled && inbox.data && pending.length > 0 && (
+          <h2 {...stylex.props(text.title)}>{pending.length} waiting for you</h2>
+        )}
         {inbox.isPending && (
           <p role="status" {...stylex.props(text.small, text.muted)}>
             Loading inbox…
@@ -87,7 +78,7 @@ export function InboxPage() {
         )}
         {inbox.data && items.length === 0 && (
           <p {...stylex.props(text.body, text.muted, styles.empty)}>
-            {handled ? 'No handled items yet' : 'Nothing needs your decision'}
+            {handled ? 'Nothing handled yet' : 'Nothing waiting'}
           </p>
         )}
         {items.length > 0 && (
@@ -103,7 +94,7 @@ export function InboxPage() {
           <div ref={recentRef} tabIndex={-1} role="region" aria-label="Latest result" {...stylex.props(styles.recent)}>
             <AttentionCard key={recent.id} item={recent} feedback={recentResult?.feedback} />
             <Button small variant="ghost" onClick={() => void navigate({ to: '/inbox', search: { handled: true } })}>
-              View handled items
+              View handled
             </Button>
           </div>
         )}

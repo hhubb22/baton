@@ -80,7 +80,7 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
       open
       onOpenChange={(open) => !open && onClose()}
       title="New project"
-      description="A project has its own assistant that opens chats on your devices and reports back."
+      description="A project has its own assistant that opens threads on your devices and reports back."
       note={
         failure && (
           <span role="alert" {...stylex.props(styles.failure)}>

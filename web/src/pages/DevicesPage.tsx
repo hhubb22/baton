@@ -30,7 +30,6 @@ import type { Device, ID } from '../data/types'
 import { text } from '../theme/text'
 import { colors, radius, space } from '../theme/tokens.stylex'
 import { Button, IconButton, focusRing } from '../ui/Button'
-import { Tag } from '../ui/Badge'
 import { Dialog } from '../ui/Dialog'
 import { Icon } from '../ui/Icon'
 import { StatusDot } from '../ui/Status'
@@ -222,10 +221,10 @@ function DeviceRow({
       <span {...stylex.props(styles.identity)}>
         <span {...stylex.props(styles.nameLine)}>
           <span {...stylex.props(text.label, text.truncate)}>{device.name}</span>
-          {isDefault && <Tag>Default device</Tag>}
+          {isDefault && <span {...stylex.props(text.caption, text.faint)}>Default</span>}
         </span>
         <span {...stylex.props(text.caption, text.muted, text.truncate)}>
-          {device.system} · batond {device.batondVersion}
+          {device.system} · Baton {device.batondVersion}
         </span>
       </span>
       <span {...stylex.props(styles.status, text.caption, status.tone === 'agent' ? styles.agentStatus : text.muted)}>
@@ -318,9 +317,6 @@ function DeviceDetails({
   // 离线或同步中的设备只显示提示和操作，Agent 与文件夹信息要等设备同步完才准确。
   const connected = device.connection === 'online'
   const folders = useDeviceFolders(device.id, connected)
-  let defaultLabel = 'Set as default'
-  if (isDefault) defaultLabel = 'Default device'
-  else if (savingDefault) defaultLabel = 'Saving…'
   return (
     <div id={`device-${device.id}`} {...stylex.props(styles.details)}>
       {loginProvider && (
@@ -417,9 +413,11 @@ function DeviceDetails({
         <CommandPermission device={device} state={permission} onChange={onPermission} />
       )}
       <div {...stylex.props(styles.actions)}>
-        <Button small onClick={onDefault} aria-disabled={isDefault || undefined}>
-          {defaultLabel}
-        </Button>
+        {!isDefault && (
+          <Button small onClick={onDefault}>
+            {savingDefault ? 'Saving…' : 'Set as default'}
+          </Button>
+        )}
         <button type="button" onClick={onDisconnect} {...stylex.props(text.small, styles.textButton, focusRing.ring)}>
           Disconnect device
         </button>
@@ -432,13 +430,13 @@ function deviceNotice(device: Device, now: number): Notice | null {
   if (device.connection === 'offline') {
     return {
       title: `${device.name} is offline`,
-      detail: `Last contact at ${lastSeen(device.lastSeenAt, now)}. New chats on ${device.name} wait for it to reconnect. Wake ${device.name} and reconnect it to the network.`,
+      detail: `Last contact at ${lastSeen(device.lastSeenAt, now)}. New threads on ${device.name} wait for it to reconnect. Wake ${device.name} and reconnect it to the network.`,
     }
   }
   if (device.connection === 'syncing') {
     return {
       title: `${device.name} is syncing`,
-      detail: 'Connected just now. Chats will wait until device information is up to date.',
+      detail: 'Connected just now. Threads will wait until device information is up to date.',
     }
   }
   if (setupNeeded(device)) return { title: `Finish setup on ${device.name}`, detail: setupSteps(device) }
@@ -499,8 +497,8 @@ export function DevicesPage() {
         notify({
           title: 'Default device saved',
           detail: offline
-            ? `${device.name} is your default device. It is offline; new chats on it wait until it reconnects. Projects can use another available device.`
-            : `${device.name} is your default for new chats and the first choice for the project assistant.`,
+            ? `${device.name} is your default device. It is offline; new threads on it wait until it reconnects. Projects can use another available device.`
+            : `${device.name} is your default for new threads and the first choice for the project assistant.`,
         }),
       onError: () => notify(unreachableNotice),
     })
@@ -541,7 +539,7 @@ export function DevicesPage() {
         else {
           notify({
             title: `${device.name} disconnected`,
-            detail: `Past chats and records are kept. If ${device.name} was offline, its agents may still be running locally.`,
+            detail: `Past threads and records are kept. If ${device.name} was offline, its agents may still be running locally.`,
           })
         }
       },
@@ -556,7 +554,7 @@ export function DevicesPage() {
     const replacement = list.find((item) => item.connection === 'online') ?? list[0]
     shownFeedback = {
       title: 'Choose a new default device',
-      detail: `${feedback.removed} was your default and has been removed. No replacement has been selected. Past chats and records are kept.`,
+      detail: `${feedback.removed} was your default and has been removed. No replacement has been selected. Past threads and records are kept.`,
       action: replacement && {
         label: `Set ${replacement.name} as default`,
         run: () =>
@@ -564,7 +562,7 @@ export function DevicesPage() {
             onSuccess: () =>
               notify({
                 title: 'Default device saved',
-                detail: `${replacement.name} is your default for new chats and projects.`,
+                detail: `${replacement.name} is your default for new threads and projects.`,
               }),
             onError: () => notify(unreachableNotice),
           }),
@@ -590,7 +588,7 @@ export function DevicesPage() {
       <div {...stylex.props(styles.empty)}>
         <span {...stylex.props(text.heading)}>No devices connected</span>
         <span {...stylex.props(text.small, text.muted)}>
-          Connect a computer to start chats and run work in your projects.
+          Connect a computer to start threads and run work in your projects.
         </span>
         <Button variant="primary" icon="plus" onClick={() => setEnrolling(true)}>
           Connect a device
@@ -685,8 +683,8 @@ function DisconnectDialog({
   const name = state?.device.name ?? ''
   let title = `Disconnect “${name}”?`
   let description = state?.wasDefault
-    ? `${name} is your default device. Removing it leaves no default until you choose another. Offline agents may keep running locally. Past chats and records are kept; file changes and commands already run are not undone.`
-    : `Removes ${name} from Baton. If it is offline, agents still running on it will keep running locally. Past chats and records are kept. This does not undo file changes or commands already run.`
+    ? `${name} is your default device. Removing it leaves no default until you choose another. Offline agents may keep running locally. Past threads and records are kept; file changes and commands already run are not undone.`
+    : `Removes ${name} from Baton. If it is offline, agents still running on it will keep running locally. Past threads and records are kept. This does not undo file changes or commands already run.`
   let actions = (
     <>
       <Button onClick={onCancel}>Cancel</Button>
@@ -699,11 +697,7 @@ function DisconnectDialog({
     title = `Disconnecting ${name}…`
     description =
       'Baton is blocking new connections and closing the current connection. Wait for confirmation before treating this device as disconnected.'
-    actions = (
-      <Button variant="danger" aria-disabled>
-        Disconnecting…
-      </Button>
-    )
+    actions = <Button variant="danger">Disconnecting…</Button>
   } else if (state?.phase === 'failed') {
     title = 'Could not confirm disconnection'
     description = `Baton could not be reached while disconnecting ${name}. Its connection may still be active. Check your connection, then retry to confirm removal.`

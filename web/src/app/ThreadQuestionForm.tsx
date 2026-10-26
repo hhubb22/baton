@@ -170,14 +170,14 @@ export function ThreadQuestionForm({
         </p>
       )}
       <div {...stylex.props(styles.actions)}>
-        <Button type="submit" variant="secondary" disabled={saving || saved}>
+        <Button type="submit" variant="secondary">
           {saving
             ? 'Saving…'
             : question.kind === 'mcp-elicitation' && question.questions.length === 0
               ? 'Continue'
               : 'Send answer'}
         </Button>
-        <Button variant="ghost" disabled={saving || saved} onClick={() => void submit('cancel')}>
+        <Button variant="ghost" onClick={() => void submit('cancel')}>
           Close question
         </Button>
       </div>

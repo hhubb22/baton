@@ -343,7 +343,7 @@ describe('operations', () => {
     const { client, scheduler } = setup('error')
     const resume = await client.resumeThread('thr-guide')
     scheduler.advance(browserLatency.save + browserLatency.device)
-    expect(await client.getOperation(resume.id)).toMatchObject({ phase: 'failed', detail: 'Chat history not found' })
+    expect(await client.getOperation(resume.id)).toMatchObject({ phase: 'failed', detail: 'Thread history not found' })
     expect((await client.listThreads()).find((item) => item.id === 'thr-guide')!.stop?.kind).toBe('historyLost')
     await expect(client.resumeThread('thr-patrol')).rejects.toMatchObject({ code: 'invalid' })
   })
@@ -841,7 +841,7 @@ describe('projects', () => {
     expect(entries.at(-1)).toMatchObject({
       kind: 'assistant',
       threads: { action: 'opened', threadIds: threads.map((item) => item.id) },
-      body: "Opened 2 chats on MacBook Pro and Ubuntu Dev. I'll report back once both finish.",
+      body: "Opened 2 threads on MacBook Pro and Ubuntu Dev. I'll report back once both finish.",
     })
     expect(entries.at(-1)).toMatchObject({ process: [{ kind: 'command', deviceId: 'dev-mac' }, {}, {}] })
     expect(await client.listProjectMemory(project.id)).toHaveLength(2)
@@ -858,7 +858,7 @@ describe('projects', () => {
       kind: 'assistant',
       threads: { action: 'replies', threadIds: threads.map((item) => item.id) },
     })
-    expect(entries.at(-1)!.kind === 'assistant' && entries.at(-1)!.body).toMatch(/^Both chats finished\./)
+    expect(entries.at(-1)!.kind === 'assistant' && entries.at(-1)!.body).toMatch(/^Both threads finished\./)
     scheduler.advance(browserLatency.run)
     expect(await client.listProjectEntries(project.id)).toHaveLength(entries.length)
   })
