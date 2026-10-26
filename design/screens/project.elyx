@@ -109,7 +109,7 @@ offline = frame : page.projectPage {
       runtime {
         runtimeCard {
           runtimeNote {
-            contents: "All 3 devices are offline. Waiting for a device with ChatGPT signed in."
+            display: .none
           }
 
           runtimeLine {
@@ -136,8 +136,7 @@ offline = frame : page.projectPage {
 
     transcript {
       overrides: [
-        insert(offlineNote, after = page.projectPage.main.transcript.agent1),
-        insert(pendingMessage, after = offlineNote),
+        insert(pendingMessage, after = page.projectPage.main.transcript.agent1),
         remove(page.projectPage.main.transcript.typing),
         remove(page.projectPage.main.transcript.day)
       ],
@@ -148,11 +147,8 @@ offline = frame : page.projectPage {
             row1 {
               lineTrail {
                 lineState {
-                  fill[0].color: c.colors.faint,
-                  width: .auto,
-                  contents: "No report since 14:18",
-                  font-size: 13,
-                  font-family: "Inter"
+                  fill[0].color: c.colors.muted,
+                  contents: "Waiting for device"
                 }
               }
 
@@ -164,17 +160,6 @@ offline = frame : page.projectPage {
                   }
                 }
               }
-            }
-          }
-
-          cardHead {
-            @with-variant(status.labelQueued)
-            cardState {
-              caption {
-                contents: "Device offline"
-              }
-
-              left: .nil
             }
           }
         }
@@ -213,18 +198,6 @@ offline = frame : page.projectPage {
         }
       }
     }
-  }
-
-  offlineNote = frame : conv.systemNote {
-    width: 100%,
-    max-width: s.size.measure,
-
-    label {
-      contents: "Ubuntu Dev went offline after finishing its reply"
-    }
-
-    @with-variant(icons.offline)
-    glyph {}
   }
 
   pendingMessage = frame : conv.userMessagePending {
@@ -327,7 +300,7 @@ attention = frame : page.projectPage {
 
     meta {
       metaText {
-        contents: "Saved · sends after you sign in and retry"
+        contents: "Sends after sign-in"
       }
     }
   }
@@ -346,7 +319,7 @@ paused = frame : page.projectPage {
       runtime {
         runtimeCard {
           runtimeNote {
-            contents: "3 messages waiting until you resume."
+            display: .none
           }
 
           runtimeLine {
@@ -377,7 +350,6 @@ paused = frame : page.projectPage {
 
     transcript {
       overrides: [
-        insert(pauseNote, after = page.projectPage.main.transcript.agent1),
         remove(page.projectPage.main.transcript.typing),
         remove(page.projectPage.main.transcript.day)
       ]
@@ -413,18 +385,6 @@ paused = frame : page.projectPage {
     }
   }
 
-  pauseNote = frame : conv.systemNote {
-    width: 100%,
-    max-width: s.size.measure,
-
-    label {
-      contents: "Kaken He paused the project"
-    }
-
-    @with-variant(icons.pause)
-    glyph {}
-  }
-
   pauseBanner = frame : banners.bannerPaused {
     action {
       connections[0].target: resumed
@@ -443,7 +403,7 @@ noEligibleDevice = frame : page.projectPage {
       runtime {
         runtimeCard {
           runtimeNote {
-            contents: "ChatGPT is unavailable on all 3 devices. Messages stay saved."
+            display: .none
           }
 
           runtimeLine {
@@ -497,7 +457,7 @@ noEligibleDevice = frame : page.projectPage {
 
     meta {
       metaText {
-        contents: "Saved · waiting for a device with ChatGPT signed in"
+        contents: "Waiting for a device"
       }
     }
   }
@@ -505,11 +465,7 @@ noEligibleDevice = frame : page.projectPage {
   deviceBanner = frame : banners.banner {
     copy {
       heading {
-        contents: "No device is ready for this model"
-      }
-
-      detail {
-        contents: "Sign in to ChatGPT on Ubuntu Dev or bring MacBook Pro online to continue. Your messages are saved."
+        contents: "No device has ChatGPT signed in"
       }
     }
   }
@@ -534,7 +490,7 @@ switchedDevice = frame : page.projectPage {
     max-width: s.size.measure,
 
     label {
-      contents: "Switched to Ubuntu Dev because MacBook Pro is offline"
+      contents: "Switched to Ubuntu Dev · MacBook Pro offline"
     }
   }
 }
@@ -550,7 +506,7 @@ stopping = frame : page.projectPage {
       runtime {
         runtimeCard {
           runtimeNote {
-            contents: "Stop requested. Threads continue on their devices."
+            display: .none
           }
 
           runtimeLine {
@@ -573,7 +529,7 @@ stopping = frame : page.projectPage {
     transcript {
       typing {
         label {
-          contents: "Waiting for Ubuntu Dev to confirm the assistant has stopped…"
+          contents: "Stopping…"
         }
       }
     }
@@ -591,7 +547,7 @@ stopping = frame : page.projectPage {
           }
 
           caption {
-            contents: "Stopping on Ubuntu Dev…"
+            contents: "Stopping…"
           }
         }
       }
@@ -608,11 +564,12 @@ stopping = frame : page.projectPage {
 
     copy {
       detail {
-        contents: "Existing threads keep running. This does not undo file changes or commands already run."
+        contents: "Threads keep running.",
+        display: .visible
       }
 
       heading {
-        contents: "Waiting for the project assistant to stop"
+        contents: "Waiting for Ubuntu Dev to stop the assistant"
       }
     }
 
@@ -632,7 +589,7 @@ stopped = frame : page.projectPage {
       runtime {
         runtimeCard {
           runtimeNote {
-            contents: "Current run stopped. Existing threads continue."
+            display: .none
           }
 
           runtimeLine {
@@ -654,10 +611,7 @@ stopped = frame : page.projectPage {
     }
 
     transcript {
-      overrides: [
-        insert(stopNote, after = page.projectPage.main.transcript.agent1),
-        remove(page.projectPage.main.transcript.typing)
-      ]
+      overrides: [remove(page.projectPage.main.transcript.typing)]
     }
 
     @with-variant(headers.headerIdle)
@@ -680,30 +634,14 @@ stopped = frame : page.projectPage {
     }
   }
 
-  stopNote = frame : conv.systemNote {
-    width: 100%,
-    max-width: s.size.measure,
-
-    label {
-      contents: "You stopped the project assistant"
-    }
-
-    @with-variant(icons.stop)
-    glyph {}
-  }
-
   stoppedBanner = frame : banners.banner {
     action {
       display: .none
     }
 
     copy {
-      detail {
-        contents: "Existing threads keep running. Send a message below to start a new assistant run."
-      }
-
       heading {
-        contents: "Project assistant stopped"
+        contents: "You stopped the project assistant"
       }
     }
 
@@ -751,8 +689,8 @@ archived = frame : page.projectPage {
   overview {
     body {
       overrides: [
-        remove(overviews.overview.body.needsRow),
-        remove(overviews.overview.body.needsHead)
+        remove(overviews.overview.body.needsHead),
+        remove(overviews.overview.body.needsRow)
       ],
 
       activeRow1 {
@@ -770,7 +708,7 @@ archived = frame : page.projectPage {
       runtime {
         runtimeCard {
           runtimeNote {
-            contents: "Project assistant stopped. 1 open question closed."
+            display: .none
           }
 
           runtimeLine {
@@ -807,10 +745,7 @@ archived = frame : page.projectPage {
     }
 
     transcript {
-      overrides: [
-        insert(archiveNote, after = page.projectPage.main.transcript.agent1),
-        remove(page.projectPage.main.transcript.typing)
-      ]
+      overrides: [remove(page.projectPage.main.transcript.typing)]
     }
 
     @with-variant(headers.headerIdle)
@@ -859,18 +794,6 @@ archived = frame : page.projectPage {
     }
   }
 
-  archiveNote = frame : conv.systemNote {
-    width: 100%,
-    max-width: s.size.measure,
-
-    label {
-      contents: "You archived this project · 1 open question closed"
-    }
-
-    @with-variant(icons.archive)
-    glyph {}
-  }
-
   archiveBanner = frame : banners.banner {
     action {
       display: .none
@@ -878,11 +801,12 @@ archived = frame : page.projectPage {
 
     copy {
       detail {
-        contents: "Main chat and project memory are read-only. Work in individual threads continues."
+        contents: "Read-only. Threads keep running.",
+        display: .visible
       }
 
       heading {
-        contents: "Project is archived"
+        contents: "Project archived"
       }
     }
 
@@ -996,11 +920,11 @@ archivedProjects = frame : page.projectPage {
     transcript {
       overrides: [
         insert(archiveRow, after = .nil),
-        remove(page.projectPage.main.transcript.typing),
-        remove(page.projectPage.main.transcript.agent0),
-        remove(page.projectPage.main.transcript.user1),
-        remove(page.projectPage.main.transcript.agent1),
         remove(page.projectPage.main.transcript.user0),
+        remove(page.projectPage.main.transcript.agent1),
+        remove(page.projectPage.main.transcript.user1),
+        remove(page.projectPage.main.transcript.agent0),
+        remove(page.projectPage.main.transcript.typing),
         remove(page.projectPage.main.transcript.day)
       ],
       layout.justify-content: .start
@@ -1182,7 +1106,7 @@ reported = frame : page.projectPage {
       runtime {
         runtimeCard {
           runtimeNote {
-            contents: "Both thread replies are saved."
+            display: .none
           }
 
           runtimeLine {

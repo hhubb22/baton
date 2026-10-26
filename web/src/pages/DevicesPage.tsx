@@ -2,20 +2,10 @@ import * as stylex from '@stylexjs/stylex'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { EnrollDialog } from '../app/EnrollDialog'
-import { DeviceFolderForm } from '../app/DeviceFolderForm'
 import { SubscriptionLoginDialog } from '../app/SubscriptionLoginDialog'
 import { Page } from '../app/Page'
 import { useNow } from '../app/useNow'
-import {
-  agentSummary,
-  capabilityLines,
-  deviceConnectionView,
-  devicesHeading,
-  lastSeen,
-  modelLines,
-  setupNeeded,
-  setupSteps,
-} from '../data/derive'
+import { agentSummary, capabilityLines, deviceConnectionView, devicesHeading, systemName } from '../data/derive'
 import {
   useDevices,
   useDeviceFolders,
@@ -29,7 +19,7 @@ import {
 import type { Device, ID } from '../data/types'
 import { text } from '../theme/text'
 import { colors, radius, space } from '../theme/tokens.stylex'
-import { Button, IconButton, focusRing } from '../ui/Button'
+import { Button, focusRing } from '../ui/Button'
 import { Dialog } from '../ui/Dialog'
 import { Icon } from '../ui/Icon'
 import { StatusDot } from '../ui/Status'
@@ -46,9 +36,8 @@ const styles = stylex.create({
     paddingBlock: space.xxl,
     paddingInline: space.xl,
   },
-  intro: { display: 'flex', alignItems: 'flex-start', gap: space.xl },
-  introText: { display: 'flex', flexDirection: 'column', gap: space.xs, flexGrow: 1 },
-  heading: { outline: 'none' },
+  intro: { display: 'flex', alignItems: 'center', gap: space.xl, paddingInline: space.lg },
+  heading: { flexGrow: 1, outline: 'none' },
   notice: {
     display: 'flex',
     flexDirection: 'column',
@@ -108,51 +97,36 @@ const styles = stylex.create({
     display: 'flex',
     flexDirection: 'column',
     gap: space.lg,
-    paddingTop: space.md,
+    paddingTop: space.lg,
     paddingBottom: space.lg,
     paddingLeft: '60px',
     paddingRight: space.lg,
   },
-  // 展开行里的设备提示：离线、同步中或需要补齐时显示在详情最上方。
-  deviceNotice: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: space.xs,
-    paddingBlock: space.md,
-    paddingInline: space.lg,
-    backgroundColor: colors.surface,
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: colors.borderSoft,
-    borderRadius: radius.lg,
-  },
-  columns: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space.xl },
   group: { display: 'flex', flexDirection: 'column', gap: space.sm, minWidth: 0 },
-  folder: { display: 'flex', alignItems: 'center', gap: space.sm },
-  folderPath: { flexGrow: 1, overflowWrap: 'anywhere', minWidth: 0 },
   capability: { display: 'flex', alignItems: 'baseline', gap: space.sm },
-  ok: { color: colors.success, alignSelf: 'center' },
-  problem: { color: colors.attention, alignSelf: 'center' },
-  models: { display: 'flex', flexDirection: 'column' },
-  permission: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: space.sm,
-    paddingTop: space.lg,
-    borderTopWidth: '1px',
-    borderTopStyle: 'solid',
-    borderTopColor: colors.borderSoft,
-  },
-  permissionHead: { display: 'flex', alignItems: 'flex-start', gap: space.lg },
+  logins: { display: 'flex', flexWrap: 'wrap', gap: space.sm },
+  permission: { display: 'flex', alignItems: 'flex-start', gap: space.lg },
   permissionText: { display: 'flex', flexDirection: 'column', gap: space.xxs, flexGrow: 1 },
-  risk: { display: 'flex', alignItems: 'center', gap: space.sm, color: colors.attentionText },
-  actions: { display: 'flex', alignItems: 'center', gap: space.lg },
+  actions: { display: 'flex', alignItems: 'center', gap: space.sm },
+  disconnect: { marginInlineStart: 'auto' },
+  folders: { display: 'flex', flexDirection: 'column' },
+  folder: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space.md,
+    paddingBlock: space.md,
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: { default: colors.borderSoft, ':last-child': 'transparent' },
+  },
+  folderPath: { flexGrow: 1, overflowWrap: 'anywhere', minWidth: 0 },
   textButton: {
     paddingBlock: space.xs,
-    paddingInline: 0,
+    paddingInline: space.sm,
     borderWidth: 0,
-    backgroundColor: 'transparent',
-    color: { default: colors.danger, ':hover': colors.text },
+    borderRadius: radius.sm,
+    backgroundColor: { default: 'transparent', ':hover': colors.hover },
+    color: colors.danger,
   },
   empty: {
     display: 'flex',
@@ -172,14 +146,11 @@ const styles = stylex.create({
 
 interface Notice {
   title: string
-  detail: string
+  detail?: string
   action?: { label: string; run: () => void }
 }
 
-const unreachableNotice: Notice = {
-  title: 'Could not save default device',
-  detail: 'Baton could not be reached. Check your connection, then try again.',
-}
+const unreachableNotice: Notice = { title: "Couldn't save the default device", detail: 'Try again.' }
 
 // 操作后的提示。移除默认设备后要等用户选出替代设备，替代设备按当前列表现算。
 type Feedback = { kind: 'notice'; notice: Notice } | { kind: 'chooseDefault'; removed: string }
@@ -187,10 +158,6 @@ type Feedback = { kind: 'notice'; notice: Notice } | { kind: 'chooseDefault'; re
 type PermissionState = { deviceId: ID; phase: 'saving' | 'saved' | 'failed'; enabled: boolean }
 
 type Disconnect = { device: Device; wasDefault: boolean; phase: 'confirm' | 'pending' | 'failed' }
-
-function repoNames(device: Device) {
-  return device.repos.map((path) => path.split(/[\\/]/).pop() ?? path)
-}
 
 function DeviceRow({
   device,
@@ -223,8 +190,11 @@ function DeviceRow({
           <span {...stylex.props(text.label, text.truncate)}>{device.name}</span>
           {isDefault && <span {...stylex.props(text.caption, text.faint)}>Default</span>}
         </span>
-        <span {...stylex.props(text.caption, text.muted, text.truncate)}>
-          {device.system} · Baton {device.batondVersion}
+        <span
+          title={`${device.system} · Baton ${device.batondVersion}`}
+          {...stylex.props(text.caption, text.muted, text.truncate)}
+        >
+          {systemName(device.system)}
         </span>
       </span>
       <span {...stylex.props(styles.status, text.caption, status.tone === 'agent' ? styles.agentStatus : text.muted)}>
@@ -240,83 +210,96 @@ function DeviceRow({
 }
 
 function CommandPermission({
-  device,
   state,
+  enabled,
   onChange,
 }: {
-  device: Device
   state: PermissionState | undefined
+  enabled: boolean
   onChange: (enabled: boolean) => void
 }) {
-  const { enabled, user, shell } = device.commandAccess
   let line: { text: string; warning?: boolean } | null = null
   if (state?.phase === 'saving') line = { text: 'Saving command permission…' }
-  else if (state?.phase === 'saved') line = { text: `Saved · command permission is ${enabled ? 'on' : 'off'}` }
+  else if (state?.phase === 'saved') line = { text: 'Saved' }
   else if (state?.phase === 'failed') {
     line = {
       warning: true,
-      text: state.enabled
-        ? 'Baton could not be reached. Command permission is still off. Click the switch to try again.'
-        : 'Could not save because Baton could not be reached. Commands are still allowed. Click the switch to try again.',
+      text: state.enabled ? "Couldn't save. Commands are still off." : "Couldn't save. Commands are still allowed.",
     }
   }
   return (
     <section aria-label="Command permission" {...stylex.props(styles.permission)}>
-      <div {...stylex.props(styles.permissionHead)}>
-        <div {...stylex.props(styles.permissionText)}>
-          <span {...stylex.props(text.label)}>Allow project assistant to run commands</span>
-          <span {...stylex.props(text.caption, text.muted)}>
-            {enabled
-              ? `Lets the project assistant run shell commands in allowed folders as user “${user}” (${shell}). Commands can run for up to 2 hours.`
-              : `Commands run as user “${user}” (${shell}) in allowed folders. Turn on only if you allow direct access without a sandbox.`}
-          </span>
-        </div>
-        <Toggle
-          label="Allow project assistant to run commands"
-          checked={enabled}
-          onChange={(next) => {
-            if (state?.phase !== 'saving') onChange(next)
-          }}
-        />
-      </div>
-      <div {...stylex.props(styles.risk, text.caption)}>
-        <Icon name="shield" size={14} />
-        Commands run directly on {device.name} without a sandbox. Baton does not inspect them.
-      </div>
-      {line && (
-        <span role="status" {...stylex.props(text.caption, line.warning ? styles.attention : text.muted)}>
-          {line.text}
+      <div {...stylex.props(styles.permissionText)}>
+        <span {...stylex.props(text.label)}>Allow project assistant to run commands</span>
+        <span {...stylex.props(text.caption, text.muted)}>
+          Shell commands the project assistant runs itself. Threads set their own access.
         </span>
-      )}
+        {line && (
+          <span role="status" {...stylex.props(text.caption, line.warning ? styles.attention : text.muted)}>
+            {line.text}
+          </span>
+        )}
+      </div>
+      <Toggle
+        label="Allow project assistant to run commands"
+        checked={enabled}
+        onChange={(next) => {
+          if (state?.phase !== 'saving') onChange(next)
+        }}
+      />
     </section>
   )
 }
 
 function DeviceDetails({
   device,
-  notice,
   isDefault,
   savingDefault,
   permission,
   onPermission,
   onDefault,
+  onFolders,
   onDisconnect,
 }: {
   device: Device
-  notice: Notice | null
   isDefault: boolean
   savingDefault: boolean
   permission: PermissionState | undefined
   onPermission: (enabled: boolean) => void
   onDefault: () => void
+  onFolders: () => void
   onDisconnect: () => void
 }) {
-  const repos = repoNames(device)
-  const removeFolder = useRemoveDeviceFolder()
   const [loginProvider, setLoginProvider] = useState<{ provider: string; localOnly: boolean } | null>(null)
-  // 离线或同步中的设备只显示提示和操作，Agent 与文件夹信息要等设备同步完才准确。
+  // 离线或同步中的设备只显示操作，Agent 信息要等设备同步完才准确。
   const connected = device.connection === 'online'
-  const folders = useDeviceFolders(device.id, connected)
+  // 一切正常时不列 Agent，只列需要处理的问题。
+  const problems = connected ? capabilityLines(device).filter((line) => !line.ok) : []
+  const logins = connected && device.hasRuntime ? device.subscriptions : []
+  const loginButtons = logins.flatMap((sub) => {
+    const buttons: ReactNode[] = []
+    if (sub.status === 'login_required' || (!sub.status && !sub.signedIn))
+      buttons.push(
+        <Button
+          key={`${sub.provider}-login`}
+          small
+          onClick={() => setLoginProvider({ provider: sub.provider, localOnly: false })}
+        >
+          {sub.loginMethods?.includes('device_code') ? 'Sign in to' : 'Set up'} {sub.provider}
+        </Button>,
+      )
+    if (sub.loginMethods?.includes('api_key') && (sub.signedIn || sub.loginMethods.includes('device_code')))
+      buttons.push(
+        <Button
+          key={`${sub.provider}-key`}
+          small
+          onClick={() => setLoginProvider({ provider: sub.provider, localOnly: true })}
+        >
+          Use API key for {sub.provider}
+        </Button>,
+      )
+    return buttons
+  })
   return (
     <div id={`device-${device.id}`} {...stylex.props(styles.details)}>
       {loginProvider && (
@@ -327,90 +310,27 @@ function DeviceDetails({
           onClose={() => setLoginProvider(null)}
         />
       )}
-      {notice && (
-        <div {...stylex.props(styles.deviceNotice)}>
-          <span {...stylex.props(text.label)}>{notice.title}</span>
-          <span {...stylex.props(text.small, text.muted)}>{notice.detail}</span>
-        </div>
+      {device.connection === 'offline' && (
+        <span {...stylex.props(text.small, text.muted)}>New threads wait for it.</span>
       )}
-      {connected && (
-        <div {...stylex.props(styles.columns)}>
-          <div {...stylex.props(styles.group)}>
-            <span {...stylex.props(text.caption, text.muted)}>Agents & subscriptions</span>
-            {capabilityLines(device).map((line) => (
-              <span key={line.name} {...stylex.props(styles.capability)}>
-                <Icon name={line.ok ? 'check' : 'alert'} size={12} style={line.ok ? styles.ok : styles.problem} />
-                <span {...stylex.props(text.small)}>{line.name}</span>
-                <span {...stylex.props(text.caption, line.ok ? text.muted : styles.attention)}>{line.detail}</span>
-              </span>
-            ))}
-            {device.hasRuntime &&
-              device.subscriptions.map((sub) => (
-                <span key={sub.provider}>
-                  {(sub.status === 'login_required' || (!sub.status && !sub.signedIn)) && (
-                    <Button small onClick={() => setLoginProvider({ provider: sub.provider, localOnly: false })}>
-                      {sub.loginMethods?.includes('device_code') ? 'Sign in to' : 'Set up'} {sub.provider}
-                    </Button>
-                  )}
-                  {sub.loginMethods?.includes('api_key') &&
-                    (sub.signedIn || sub.loginMethods.includes('device_code')) && (
-                      <Button small onClick={() => setLoginProvider({ provider: sub.provider, localOnly: true })}>
-                        Use API key for {sub.provider}
-                      </Button>
-                    )}
+      {(problems.length > 0 || loginButtons.length > 0) && (
+        <div {...stylex.props(styles.group)}>
+          {problems.length > 0 && (
+            <>
+              <span {...stylex.props(text.caption, text.muted)}>Agents & subscriptions</span>
+              {problems.map((line) => (
+                <span key={line.name} {...stylex.props(styles.capability)}>
+                  <span {...stylex.props(text.small)}>{line.name}</span>
+                  <span {...stylex.props(text.caption, styles.attention)}>{line.detail}</span>
                 </span>
               ))}
-            <span {...stylex.props(styles.models)}>
-              {modelLines(device).map((line) => (
-                <span key={line} {...stylex.props(text.caption, text.muted)}>
-                  {line}
-                </span>
-              ))}
-            </span>
-          </div>
-          <div {...stylex.props(styles.group)}>
-            <span {...stylex.props(text.caption, text.muted)}>Allowed folders</span>
-            {folders.isPending && <span {...stylex.props(text.small, text.muted)}>Loading folders…</span>}
-            {folders.isError && (
-              <>
-                <p role="alert" {...stylex.props(text.caption, styles.attention)}>
-                  Could not load allowed folders. Check the device connection, then try again.
-                </p>
-                <Button small onClick={() => void folders.refetch()}>
-                  Try again
-                </Button>
-              </>
-            )}
-            {!folders.isError &&
-              folders.data?.map((folder) => (
-                <div key={folder} {...stylex.props(styles.folder)}>
-                  <span {...stylex.props(text.mono, styles.folderPath)}>{folder}</span>
-                  <IconButton
-                    icon="close"
-                    label={`Remove ${folder}`}
-                    aria-disabled={removeFolder.isPending || undefined}
-                    onClick={() => {
-                      if (!removeFolder.isPending) removeFolder.mutate({ deviceId: device.id, path: folder })
-                    }}
-                  />
-                </div>
-              ))}
-            {repos.length > 0 && (
-              <span {...stylex.props(text.caption, text.muted)}>
-                {repos.length} {repos.length === 1 ? 'repository' : 'repositories'} discovered: {repos.join(', ')}
-              </span>
-            )}
-            <DeviceFolderForm deviceId={device.id} />
-            {removeFolder.isError && (
-              <p role="alert" {...stylex.props(text.caption, styles.attention)}>
-                Could not remove folder. Check the device connection, then try again.
-              </p>
-            )}
-          </div>
+            </>
+          )}
+          {loginButtons.length > 0 && <div {...stylex.props(styles.logins)}>{loginButtons}</div>}
         </div>
       )}
       {connected && device.hasRuntime && (
-        <CommandPermission device={device} state={permission} onChange={onPermission} />
+        <CommandPermission state={permission} enabled={device.commandAccess.enabled} onChange={onPermission} />
       )}
       <div {...stylex.props(styles.actions)}>
         {!isDefault && (
@@ -418,36 +338,24 @@ function DeviceDetails({
             {savingDefault ? 'Saving…' : 'Set as default'}
           </Button>
         )}
-        <button type="button" onClick={onDisconnect} {...stylex.props(text.small, styles.textButton, focusRing.ring)}>
+        {device.connection !== 'offline' && (
+          <Button small onClick={onFolders}>
+            Folders…
+          </Button>
+        )}
+        <Button small variant="danger" style={styles.disconnect} onClick={onDisconnect}>
           Disconnect device
-        </button>
+        </Button>
       </div>
     </div>
   )
-}
-
-function deviceNotice(device: Device, now: number): Notice | null {
-  if (device.connection === 'offline') {
-    return {
-      title: `${device.name} is offline`,
-      detail: `Last contact at ${lastSeen(device.lastSeenAt, now)}. New threads on ${device.name} wait for it to reconnect. Wake ${device.name} and reconnect it to the network.`,
-    }
-  }
-  if (device.connection === 'syncing') {
-    return {
-      title: `${device.name} is syncing`,
-      detail: 'Connected just now. Threads will wait until device information is up to date.',
-    }
-  }
-  if (setupNeeded(device)) return { title: `Finish setup on ${device.name}`, detail: setupSteps(device) }
-  return null
 }
 
 function NoticeBox({ notice, children }: { notice: Notice; children?: ReactNode }) {
   return (
     <div role="status" {...stylex.props(styles.notice)}>
       <span {...stylex.props(text.label)}>{notice.title}</span>
-      <span {...stylex.props(text.small, text.muted)}>{notice.detail}</span>
+      {notice.detail && <span {...stylex.props(text.small, text.muted)}>{notice.detail}</span>}
       {(notice.action || children) && (
         <div {...stylex.props(styles.noticeActions)}>
           {notice.action && (
@@ -479,6 +387,10 @@ export function DevicesPage() {
   const [enrolling, setEnrolling] = useState(() => Boolean(search.connect))
   const [disconnect, setDisconnect] = useState<Disconnect | null>(null)
   const [permission, setPermission] = useState<PermissionState | null>(null)
+  // 打开命令权限前先确认；关闭直接保存。
+  const [allowing, setAllowing] = useState<Device | null>(null)
+  const [offlineDefault, setOfflineDefault] = useState<Device | null>(null)
+  const [folders, setFolders] = useState<Device | null>(null)
   const headingRef = useRef<HTMLHeadingElement>(null)
   const removed = useRef(false)
 
@@ -491,25 +403,19 @@ export function DevicesPage() {
   // 最后联系时间按分钟显示，每分钟刷新一次。
   const now = useNow(60_000)
 
-  const saveDefault = (device: Device, offline: boolean) => {
-    setDefault.mutate(device.id, {
-      onSuccess: () =>
-        notify({
-          title: 'Default device saved',
-          detail: offline
-            ? `${device.name} is your default device. It is offline; new threads on it wait until it reconnects. Projects can use another available device.`
-            : `${device.name} is your default for new threads and the first choice for the project assistant.`,
-        }),
-      onError: () => notify(unreachableNotice),
-    })
+  // 默认标签原地移动，不再另给提示。
+  const saveDefault = (device: Device) => {
+    setFeedback(null)
+    setDefault.mutate(device.id, { onError: () => notify(unreachableNotice) })
   }
 
   const chooseDefault = (device: Device) => {
     if (device.id === defaultId || setDefault.isPending) return
-    saveDefault(device, device.connection === 'offline')
+    if (device.connection === 'offline') setOfflineDefault(device)
+    else saveDefault(device)
   }
 
-  const changePermission = (device: Device, enabled: boolean) => {
+  const savePermission = (device: Device, enabled: boolean) => {
     setPermission({ deviceId: device.id, phase: 'saving', enabled })
     setCommandAccess.mutate(
       { deviceId: device.id, enabled },
@@ -518,6 +424,11 @@ export function DevicesPage() {
         onError: () => setPermission({ deviceId: device.id, phase: 'failed', enabled }),
       },
     )
+  }
+
+  const changePermission = (device: Device, enabled: boolean) => {
+    if (enabled) setAllowing(device)
+    else savePermission(device, false)
   }
 
   const startDisconnect = (device: Device) => {
@@ -536,12 +447,7 @@ export function DevicesPage() {
         setPermission(null)
         setDisconnect(null)
         if (wasDefault) setFeedback({ kind: 'chooseDefault', removed: device.name })
-        else {
-          notify({
-            title: `${device.name} disconnected`,
-            detail: `Past threads and records are kept. If ${device.name} was offline, its agents may still be running locally.`,
-          })
-        }
+        else notify({ title: `${device.name} disconnected`, detail: 'Its agents may still be running locally.' })
       },
       onError: () => setDisconnect({ device, wasDefault, phase: 'failed' }),
     })
@@ -554,18 +460,9 @@ export function DevicesPage() {
     const replacement = list.find((item) => item.connection === 'online') ?? list[0]
     shownFeedback = {
       title: 'Choose a new default device',
-      detail: `${feedback.removed} was your default and has been removed. No replacement has been selected. Past threads and records are kept.`,
       action: replacement && {
         label: `Set ${replacement.name} as default`,
-        run: () =>
-          setDefault.mutate(replacement.id, {
-            onSuccess: () =>
-              notify({
-                title: 'Default device saved',
-                detail: `${replacement.name} is your default for new threads and projects.`,
-              }),
-            onError: () => notify(unreachableNotice),
-          }),
+        run: () => saveDefault(replacement),
       },
     }
   }
@@ -575,9 +472,7 @@ export function DevicesPage() {
     body = <p {...stylex.props(text.small, text.muted)}>Loading devices…</p>
   } else if (devices.isError) {
     body = (
-      <NoticeBox
-        notice={{ title: 'Could not load devices', detail: 'Baton could not be reached. Check your connection.' }}
-      >
+      <NoticeBox notice={{ title: "Couldn't load devices" }}>
         <Button small icon="refresh" onClick={() => void devices.refetch()}>
           Try again
         </Button>
@@ -586,10 +481,7 @@ export function DevicesPage() {
   } else if (list.length === 0) {
     body = (
       <div {...stylex.props(styles.empty)}>
-        <span {...stylex.props(text.heading)}>No devices connected</span>
-        <span {...stylex.props(text.small, text.muted)}>
-          Connect a computer to start threads and run work in your projects.
-        </span>
+        <span {...stylex.props(text.heading)}>No devices yet</span>
         <Button variant="primary" icon="plus" onClick={() => setEnrolling(true)}>
           Connect a device
         </Button>
@@ -612,12 +504,12 @@ export function DevicesPage() {
               {open && (
                 <DeviceDetails
                   device={device}
-                  notice={deviceNotice(device, now)}
                   isDefault={device.id === defaultId}
                   savingDefault={setDefault.isPending && setDefault.variables === device.id}
                   permission={permission?.deviceId === device.id ? permission : undefined}
                   onPermission={(enabled) => changePermission(device, enabled)}
                   onDefault={() => chooseDefault(device)}
+                  onFolders={() => setFolders(device)}
                   onDisconnect={() => startDisconnect(device)}
                 />
               )}
@@ -632,15 +524,9 @@ export function DevicesPage() {
     <Page title="Devices">
       <div {...stylex.props(styles.column)}>
         <div {...stylex.props(styles.intro)}>
-          <div {...stylex.props(styles.introText)}>
-            <h2 ref={headingRef} tabIndex={-1} {...stylex.props(text.title, styles.heading)}>
-              {devicesHeading(list)}
-            </h2>
-            <p {...stylex.props(text.small, text.muted)}>
-              Connect the computers where your code lives. The project assistant uses your default device first, then
-              another available computer.
-            </p>
-          </div>
+          <h2 ref={headingRef} tabIndex={-1} {...stylex.props(text.title, styles.heading)}>
+            {devicesHeading(list)}
+          </h2>
           {list.length > 0 && (
             <Button icon="plus" onClick={() => setEnrolling(true)}>
               Connect a device
@@ -659,6 +545,54 @@ export function DevicesPage() {
         />
       )}
 
+      {folders && <FoldersDialog device={folders} onClose={() => setFolders(null)} />}
+
+      <Dialog
+        open={allowing !== null}
+        onOpenChange={(open) => {
+          if (!open) setAllowing(null)
+        }}
+        title={`Let the project assistant run commands on ${allowing?.name ?? ''}?`}
+        description={`Commands run directly as ${allowing?.commandAccess.user || 'your user'} and can reach files outside your folders.`}
+        actions={
+          <>
+            <Button onClick={() => setAllowing(null)}>Cancel</Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                if (allowing) savePermission(allowing, true)
+                setAllowing(null)
+              }}
+            >
+              Allow commands
+            </Button>
+          </>
+        }
+      />
+
+      <Dialog
+        open={offlineDefault !== null}
+        onOpenChange={(open) => {
+          if (!open) setOfflineDefault(null)
+        }}
+        title={`Use ${offlineDefault?.name ?? ''} as default?`}
+        description="It's offline. New threads on it wait until it's back."
+        actions={
+          <>
+            <Button onClick={() => setOfflineDefault(null)}>Cancel</Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                if (offlineDefault) saveDefault(offlineDefault)
+                setOfflineDefault(null)
+              }}
+            >
+              Save default device
+            </Button>
+          </>
+        }
+      />
+
       <DisconnectDialog
         state={disconnect}
         onCancel={() => setDisconnect(null)}
@@ -666,6 +600,70 @@ export function DevicesPage() {
         finalFocus={() => (removed.current ? headingRef.current : true)}
       />
     </Page>
+  )
+}
+
+// 设备上已添加的文件夹。新文件夹在新建 Thread 的文件夹选择里添加；移除后新对话和文件预览不再能用它，已在运行的对话不受影响。
+function FoldersDialog({ device, onClose }: { device: Device; onClose: () => void }) {
+  const folders = useDeviceFolders(device.id, device.connection === 'online')
+  const remove = useRemoveDeviceFolder()
+  let body: ReactNode
+  if (device.connection !== 'online') {
+    body = <p {...stylex.props(text.small, text.muted)}>Folders show when {device.name} is online.</p>
+  } else if (folders.isPending) {
+    body = <p {...stylex.props(text.small, text.muted)}>Loading folders…</p>
+  } else if (folders.isError) {
+    body = (
+      <div {...stylex.props(styles.group)}>
+        <p role="alert" {...stylex.props(text.small, styles.attention)}>
+          Couldn't load folders.
+        </p>
+        <Button small onClick={() => void folders.refetch()}>
+          Try again
+        </Button>
+      </div>
+    )
+  } else if (folders.data.length === 0) {
+    body = <p {...stylex.props(text.small, text.muted)}>No folders yet. Add one when you start a thread.</p>
+  } else {
+    body = (
+      <div {...stylex.props(styles.folders)}>
+        {folders.data.map((folder) => (
+          <div key={folder} {...stylex.props(styles.folder)}>
+            <span {...stylex.props(text.mono, styles.folderPath)}>{folder}</span>
+            <button
+              type="button"
+              aria-label={`Remove ${folder}`}
+              aria-disabled={remove.isPending || undefined}
+              onClick={() => {
+                if (!remove.isPending)
+                  remove.mutate({ deviceId: device.id, path: folder }, { onSuccess: () => void folders.refetch() })
+              }}
+              {...stylex.props(text.small, styles.textButton, focusRing.ring)}
+            >
+              Remove
+            </button>
+          </div>
+        ))}
+        {remove.isError && (
+          <p role="alert" {...stylex.props(text.caption, styles.attention)}>
+            Couldn't remove the folder. Try again.
+          </p>
+        )}
+      </div>
+    )
+  }
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      title={`Folders on ${device.name}`}
+      actions={<Button onClick={onClose}>Done</Button>}
+    >
+      {body}
+    </Dialog>
   )
 }
 
@@ -683,29 +681,27 @@ function DisconnectDialog({
   const name = state?.device.name ?? ''
   let title = `Disconnect “${name}”?`
   let description = state?.wasDefault
-    ? `${name} is your default device. Removing it leaves no default until you choose another. Offline agents may keep running locally. Past threads and records are kept; file changes and commands already run are not undone.`
-    : `Removes ${name} from Baton. If it is offline, agents still running on it will keep running locally. Past threads and records are kept. This does not undo file changes or commands already run.`
+    ? "You'll need to choose a new default. Agents already running on it keep running locally."
+    : 'Agents already running on it keep running locally.'
   let actions = (
     <>
       <Button onClick={onCancel}>Cancel</Button>
-      <Button variant="danger" onClick={onConfirm}>
+      <Button variant="dangerSolid" onClick={onConfirm}>
         Disconnect device
       </Button>
     </>
   )
   if (state?.phase === 'pending') {
     title = `Disconnecting ${name}…`
-    description =
-      'Baton is blocking new connections and closing the current connection. Wait for confirmation before treating this device as disconnected.'
-    actions = <Button variant="danger">Disconnecting…</Button>
+    actions = <Button variant="dangerSolid">Disconnecting…</Button>
   } else if (state?.phase === 'failed') {
-    title = 'Could not confirm disconnection'
-    description = `Baton could not be reached while disconnecting ${name}. Its connection may still be active. Check your connection, then retry to confirm removal.`
+    title = "Couldn't confirm disconnection"
+    description = `${name} may still be connected.`
     actions = (
       <>
         <Button onClick={onCancel}>Cancel</Button>
-        <Button variant="danger" onClick={onConfirm}>
-          Retry disconnection
+        <Button variant="dangerSolid" onClick={onConfirm}>
+          Try again
         </Button>
       </>
     )

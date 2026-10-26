@@ -314,7 +314,7 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
         folders.push(...page.roots.map((root) => root.path))
         cursor = page.next_cursor
         if (cursor && (cursors.has(cursor) || !page.roots.length))
-          throw new ClientError('unavailable', 'Could not read all allowed folders. Try again.')
+          throw new ClientError('unavailable', "Couldn't load folders. Try again.")
         if (cursor) cursors.add(cursor)
       } while (cursor)
       return folders

@@ -30,6 +30,43 @@ export const colors = stylex.defineVars({
     '@media (prefers-color-scheme: dark)': 'rgb(100% 100% 100% / 20%)',
   },
   sheen: { default: 'rgb(100% 100% 100% / 14%)', '@media (prefers-color-scheme: dark)': 'rgb(100% 100% 100% / 10%)' },
+  keyTop: { default: 'rgb(100% 100% 100% / 8%)', '@media (prefers-color-scheme: dark)': 'rgb(100% 100% 100% / 6%)' },
+  keyBottom: {
+    default: 'rgb(10.2% 12.3% 16.1% / 4%)',
+    '@media (prefers-color-scheme: dark)': 'rgb(0.4% 0.7% 1.3% / 14%)',
+  },
+  keyHighlight: {
+    default: 'rgb(100% 100% 100% / 95%)',
+    '@media (prefers-color-scheme: dark)': 'rgb(100% 100% 100% / 7%)',
+  },
+  keyShade: {
+    default: 'rgb(10.2% 12.3% 16.1% / 6%)',
+    '@media (prefers-color-scheme: dark)': 'rgb(0.4% 0.7% 1.3% / 30%)',
+  },
+  keyPress: {
+    default: 'rgb(10.2% 12.3% 16.1% / 14%)',
+    '@media (prefers-color-scheme: dark)': 'rgb(0.4% 0.7% 1.3% / 45%)',
+  },
+  keyGround: {
+    default: 'rgb(100% 100% 100% / 90%)',
+    '@media (prefers-color-scheme: dark)': 'rgb(100% 100% 100% / 4%)',
+  },
+  keyEdgeSolid: {
+    default: 'rgb(0.4% 0.7% 1.3% / 22%)',
+    '@media (prefers-color-scheme: dark)': 'rgb(0.4% 0.7% 1.3% / 45%)',
+  },
+  keyShadeSolid: {
+    default: 'rgb(0.4% 0.7% 1.3% / 22%)',
+    '@media (prefers-color-scheme: dark)': 'rgb(0.4% 0.7% 1.3% / 30%)',
+  },
+  keyPressSolid: {
+    default: 'rgb(0.4% 0.7% 1.3% / 40%)',
+    '@media (prefers-color-scheme: dark)': 'rgb(0.4% 0.7% 1.3% / 50%)',
+  },
+  keyLiftSolid: {
+    default: 'rgb(10.2% 12.3% 16.1% / 22%)',
+    '@media (prefers-color-scheme: dark)': 'rgb(0.4% 0.7% 1.3% / 45%)',
+  },
   canvas: { default: 'rgb(98.1% 98.4% 99%)', '@media (prefers-color-scheme: dark)': 'rgb(7% 7.8% 9.2%)' },
   panel: { default: 'rgb(95.8% 96.4% 97.4%)', '@media (prefers-color-scheme: dark)': 'rgb(5.3% 6.1% 7.4%)' },
   surface: { default: '#fff', '@media (prefers-color-scheme: dark)': 'rgb(10% 10.9% 12.6%)' },
@@ -85,6 +122,7 @@ export const colors = stylex.defineVars({
   },
   danger: { default: 'rgb(74.4% 18.4% 18.2%)', '@media (prefers-color-scheme: dark)': 'rgb(96.5% 42.5% 41.1%)' },
   dangerSoft: { default: 'rgb(99.8% 93.3% 93.1%)', '@media (prefers-color-scheme: dark)': 'rgb(26.9% 11.7% 11.6%)' },
+  dangerFill: { default: 'rgb(74.4% 18.4% 18.2%)', '@media (prefers-color-scheme: dark)': 'rgb(70% 20% 19.5%)' },
   inverse: { default: 'rgb(13.5% 14.6% 16.8%)', '@media (prefers-color-scheme: dark)': 'rgb(18.6% 19.9% 22.6%)' },
   onInverse: { default: 'rgb(97% 97.5% 98.2%)', '@media (prefers-color-scheme: dark)': 'rgb(93.5% 94.2% 95.2%)' },
   onInverseMuted: { default: 'rgb(68% 69.5% 72.5%)', '@media (prefers-color-scheme: dark)': 'rgb(69.3% 70.7% 73.2%)' },

@@ -31,9 +31,6 @@ export function HomePage() {
     <Page title="Workspace">
       <div {...stylex.props(styles.empty)}>
         <h2 {...stylex.props(text.title)}>Connect your first device</h2>
-        <p {...stylex.props(text.body, text.muted)}>
-          Connect the computer where your code lives to chat with Cursor, Codex, Kiro, or Pi.
-        </p>
         <Button variant="primary" onClick={() => void navigate({ to: '/devices', search: { connect: true } })}>
           Connect a device
         </Button>

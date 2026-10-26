@@ -106,7 +106,7 @@ export function ActivityTrace({
     content = (
       <>
         <p role="status" {...stylex.props(text.small, styles.muted)}>
-          Could not load this activity. Try again.
+          Couldn't load activity
         </p>
         <Button small onClick={() => void trace.refetch()}>
           Retry
@@ -124,8 +124,7 @@ export function ActivityTrace({
         {steps.length === 0 && <p {...stylex.props(text.small, styles.muted)}>No saved activity for this reply.</p>}
         {trace.isError && (
           <p role="status" {...stylex.props(text.small, styles.muted)}>
-            Could not load {trace.isFetchNextPageError ? 'more activity' : 'this activity'}. Saved steps are still
-            shown.
+            Couldn't load {trace.isFetchNextPageError ? 'more activity' : 'this activity'}.
           </p>
         )}
         {trace.hasNextPage && (
@@ -259,7 +258,7 @@ function CommitRow({ item }: { item: Extract<Attachment, { kind: 'commit' }> }) 
         </span>
         {copied === false && (
           <span role="status" {...stylex.props(text.caption, text.danger)}>
-            Could not copy. Select the SHA and copy it.
+            Clipboard blocked. Copy it manually.
           </span>
         )}
       </div>
@@ -321,7 +320,7 @@ export function LiveOutput({
             ) : (
               <span key={index} {...stylex.props(text.caption, styles.gap)}>
                 <Icon name="dots" size={12} />
-                Earlier output is no longer available on this computer
+                Earlier output not kept
               </span>
             ),
           )}
@@ -330,7 +329,7 @@ export function LiveOutput({
       {!live && (
         <span {...stylex.props(text.caption, styles.liveFoot)}>
           <Icon name="offline" size={12} />
-          Connection lost · output resumes when reconnected
+          Connection lost
         </span>
       )}
     </div>

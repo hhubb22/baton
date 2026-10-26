@@ -1,3 +1,7 @@
+use "resources/fonts/Inter-Medium.otf"
+use "resources/fonts/Inter-Regular.otf"
+use "resources/fonts/Inter-SemiBold.otf"
+
 import "tokens/colors.elyx" as c
 import "controls/button.elyx" as buttons
 import "controls/icons.elyx" as icons
@@ -67,7 +71,7 @@ signingOut = frame : shells.firstVisit {
   top: 0px,
   connections[0].label: "Session ended",
   connections[0].target: signedOut,
-  connections[1].label: "Could not sign out",
+  connections[1].label: "Couldn't sign out",
   connections[1].target: signOutFailed,
   overrides: [insert(menu, after = shells.firstVisit.main)],
 
@@ -105,16 +109,13 @@ signOutFailed = frame : shells.firstVisit {
           display: .none
         }
 
-        next {
-          display: .none
-        }
-
         detail {
-          contents: "Baton could not be reached, so you may still be signed in on this browser. Check your connection and try again."
+          contents: "You may still be signed in on this browser.",
+          display: .visible
         }
 
         title {
-          contents: "Could not sign out"
+          contents: "Couldn't sign out"
         }
       }
     }
@@ -180,18 +181,10 @@ connected = frame : shells.firstVisit {
           contents: "MacBook Pro is ready"
         }
 
-        detail {
-          contents: "Codex and Pi are available. MacBook Pro is your default device for new threads."
-        }
-
         action {
           label {
             contents: "Start a thread"
           }
-        }
-
-        next {
-          contents: "Choose a folder and model in Threads, then send your first message."
         }
       }
     }

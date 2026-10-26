@@ -1,6 +1,5 @@
 import * as stylex from '@stylexjs/stylex'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { agentNames, sentenceList } from '../data/derive'
 import { useCreateEnrollment, useDevices, useEnrollment } from '../data/queries'
 import type { Device, DeviceOS, IssuedEnrollment } from '../data/types'
 import { text } from '../theme/text'
@@ -101,10 +100,10 @@ function countdown(ms: number) {
   return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
 }
 
+// 接入后只写系统；同步中或没有可用 Agent 时补一句。
 function availability(device: Device) {
   if (device.connection === 'syncing') return 'Checking availability…'
-  const ready = device.agents.filter((agent) => !agent.problem).map((agent) => agentNames[agent.kind])
-  return ready.length > 0 ? `${sentenceList(ready)} available` : 'No agents available yet'
+  return device.agents.some((agent) => !agent.problem) ? null : 'No agents available yet'
 }
 
 type Copied = { target: 'code' | 'command'; ok: boolean }
@@ -203,7 +202,7 @@ export function EnrollDialog({
             <div {...stylex.props(styles.deviceBody)}>
               <span {...stylex.props(text.label)}>{connected.name}</span>
               <span {...stylex.props(text.caption, styles.helper)}>
-                {connected.os} · {availability(connected)}
+                {[connected.os, availability(connected)].filter(Boolean).join(' · ')}
               </span>
             </div>
           </div>
@@ -215,62 +214,32 @@ export function EnrollDialog({
   const closed = phase === 'expired' || phase === 'used'
   const codeLabels: Record<Exclude<Phase, 'connected'>, string> = {
     loading: 'Getting a setup code…',
-    failed: 'Setup code unavailable',
-    pending: 'Setup code (expires in 10 minutes)',
+    failed: 'Setup code',
+    pending: 'Setup code',
     expired: 'Setup code expired',
     used: 'Setup code already used',
   }
 
-  let codeNote = <span {...stylex.props(styles.helper)}>Use this code once to connect this computer.</span>
-  if (phase === 'loading') {
-    codeNote = <span {...stylex.props(styles.helper)}>The command will be ready when the code is issued.</span>
-  } else if (phase === 'failed') {
-    codeNote = (
-      <span {...stylex.props(styles.warning)}>
-        Baton could not be reached. Check your connection, then get a new code.
-      </span>
-    )
-  } else if (phase === 'expired') {
-    codeNote = <span {...stylex.props(styles.error)}>Get a new code, then run the command again.</span>
-  } else if (phase === 'used') {
-    codeNote = (
-      <span {...stylex.props(styles.error)}>
-        This code has already connected a device. Get a new code to connect another computer.
-      </span>
-    )
-  } else if (copied?.target === 'code') {
-    codeNote = copied.ok ? (
-      <span {...stylex.props(styles.helper)}>Setup code copied. Paste it into your terminal when prompted.</span>
-    ) : (
-      <span {...stylex.props(styles.warning)}>
-        Browser clipboard access is blocked. Select the setup code and copy it manually.
-      </span>
-    )
+  // 复制成功只换成对勾图标，不另加说明。
+  const blocked = <span {...stylex.props(styles.warning)}>Clipboard blocked. Copy it manually.</span>
+  let codeNote: ReactNode = null
+  if (phase === 'expired' || phase === 'used') {
+    codeNote = <span {...stylex.props(styles.error)}>Run the command again with a new code.</span>
+  } else if (copied?.target === 'code' && !copied.ok) {
+    codeNote = blocked
   }
 
-  let commandNote = (
-    <span {...stylex.props(styles.helper)}>
-      Paste the setup code, then press Enter. The code stays hidden as you type.
-    </span>
+  let commandNote: ReactNode = (
+    <span {...stylex.props(styles.helper)}>Paste the code and press Enter. It stays hidden.</span>
   )
-  if (copied?.target === 'command') {
-    commandNote = copied.ok ? (
-      <span {...stylex.props(styles.helper)}>
-        Command copied. Paste it into your terminal, then enter the setup code when prompted.
-      </span>
-    ) : (
-      <span {...stylex.props(styles.warning)}>
-        Browser clipboard access is blocked. Select the command and copy it manually.
-      </span>
-    )
-  }
+  if (copied?.target === 'command' && !copied.ok) commandNote = blocked
 
   const notes: Record<Exclude<Phase, 'connected'>, ReactNode> = {
     loading: <Status tone="hollow">Getting a new code…</Status>,
-    failed: <Status tone="attention">Could not get a setup code</Status>,
+    failed: <Status tone="attention">Can't reach Baton</Status>,
     pending: (
       <span {...stylex.props(styles.status)}>
-        <Status tone="hollow">Waiting for your computer to connect…</Status>
+        <Status tone="hollow">Waiting for device…</Status>
         {issued && (
           <span {...stylex.props(styles.countdown)}>
             Expires in {countdown(issued.enrollment.expiresIn - (now - issued.receivedAt))}
@@ -344,12 +313,12 @@ export function EnrollDialog({
             />
           )}
         </div>
-        <p {...stylex.props(text.caption)}>{codeNote}</p>
+        {codeNote && <p {...stylex.props(text.caption)}>{codeNote}</p>}
       </div>
       {issued && phase !== 'failed' && (
         <div {...stylex.props(styles.section)}>
           <span id="enroll-command-label" {...stylex.props(text.label)}>
-            Run this in your terminal
+            Run in terminal
           </span>
           <div {...stylex.props(styles.box)}>
             <pre aria-labelledby="enroll-command-label" {...stylex.props(text.mono, styles.boxText)}>

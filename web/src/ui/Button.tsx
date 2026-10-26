@@ -4,7 +4,17 @@ import { weight } from '../theme/base.stylex'
 import { colors, radius, size, space } from '../theme/tokens.stylex'
 import { Icon, type IconName } from './Icon'
 
-export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger'
+export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'dangerSolid'
+
+// 按键材质：从正上方打光，静止和按下都是两层内阴影加两层投影，层数一致才能平滑过渡。
+const faceGradient = `linear-gradient(180deg, ${colors.keyTop}, ${colors.keyBottom})`
+const pressedGradient = `linear-gradient(180deg, ${colors.keyBottom}, ${colors.keyTop})`
+const solidRest = `inset 0 1px 0 ${colors.highlight}, inset 0 -1px 0 ${colors.keyShadeSolid}, 0 1px 2px ${colors.shadowFar}, 0 4px 10px -3px ${colors.keyLiftSolid}`
+const solidHover = `inset 0 1px 0 ${colors.highlight}, inset 0 -1px 0 ${colors.keyShadeSolid}, 0 1px 2px ${colors.shadowFar}, 0 8px 16px -5px ${colors.keyLiftSolid}`
+const solidPressed = `inset 0 1px 2px ${colors.keyPressSolid}, inset 0 0 0 transparent, 0 1px 1px ${colors.shadowFar}, 0 0 0 transparent`
+const lightRest = `inset 0 1px 0 ${colors.keyHighlight}, inset 0 -1px 0 ${colors.keyShade}, 0 1px 2px ${colors.shadowSoft}, 0 4px 10px -3px ${colors.shadowNear}`
+const lightHover = `inset 0 1px 0 ${colors.keyHighlight}, inset 0 -1px 0 ${colors.keyShade}, 0 1px 2px ${colors.shadowSoft}, 0 8px 16px -5px ${colors.shadowNear}`
+const lightPressed = `inset 0 1px 2px ${colors.keyPress}, inset 0 0 0 transparent, 0 1px 0 ${colors.keyGround}, 0 0 0 transparent`
 
 export const focusRing = stylex.create({
   ring: {
@@ -34,13 +44,27 @@ const styles = stylex.create({
     fontWeight: weight.medium,
     whiteSpace: 'nowrap',
     userSelect: 'none',
-    transitionProperty: 'background-color, border-color, color, box-shadow',
-    transitionDuration: '120ms',
+    transform: { default: 'none', ':active': 'translateY(1px)' },
+    transitionProperty: 'background-color, border-color, color, box-shadow, transform',
+    transitionDuration: '160ms, 160ms, 160ms, 140ms, 120ms',
   },
   small: {
     height: size.compact,
     paddingInline: '10px',
     fontSize: '12px',
+  },
+  // small 系列不要抬升层，只留贴身投影
+  smallKey: {
+    boxShadow: {
+      default: `inset 0 1px 0 ${colors.keyHighlight}, inset 0 -1px 0 ${colors.keyShade}, 0 1px 2px ${colors.shadowSoft}, 0 0 0 transparent`,
+      ':active': lightPressed,
+    },
+  },
+  smallSolid: {
+    boxShadow: {
+      default: `inset 0 1px 0 ${colors.highlight}, inset 0 -1px 0 ${colors.keyShadeSolid}, 0 1px 2px ${colors.shadowFar}, 0 0 0 transparent`,
+      ':active': solidPressed,
+    },
   },
   block: { width: '100%' },
   primary: {
@@ -49,26 +73,36 @@ const styles = stylex.create({
       ':hover': colors.accentHover,
       ':active': colors.accentPressed,
     },
-    backgroundImage: `linear-gradient(180deg, ${colors.sheen}, transparent)`,
-    borderColor: 'transparent',
-    boxShadow: `inset 0 1px 0 ${colors.highlight}, 0 2px 6px ${colors.accentShadow}`,
+    backgroundImage: { default: faceGradient, ':active': pressedGradient },
+    borderColor: colors.keyEdgeSolid,
+    boxShadow: { default: solidRest, ':hover': solidHover, ':active': solidPressed },
+    color: colors.onAccent,
+  },
+  dangerSolid: {
+    backgroundColor: colors.dangerFill,
+    backgroundImage: { default: faceGradient, ':active': pressedGradient },
+    borderColor: colors.keyEdgeSolid,
+    boxShadow: { default: solidRest, ':hover': solidHover, ':active': solidPressed },
     color: colors.onAccent,
   },
   secondary: {
-    backgroundColor: { default: colors.surface, ':hover': colors.subtle },
+    backgroundColor: colors.surface,
+    backgroundImage: { default: faceGradient, ':hover': 'none', ':active': pressedGradient },
     borderColor: colors.border,
-    boxShadow: `inset 0 1px 2px ${colors.shadowNear}`,
+    boxShadow: { default: lightRest, ':hover': lightHover, ':active': lightPressed },
     color: colors.text,
   },
   ghost: {
-    backgroundColor: { default: 'transparent', ':hover': colors.hover },
+    backgroundColor: { default: 'transparent', ':hover': colors.hover, ':active': colors.selected },
     borderColor: 'transparent',
+    boxShadow: { default: 'inset 0 0 0 transparent', ':active': `inset 0 1px 2px ${colors.keyShade}` },
     color: colors.text,
   },
   danger: {
-    backgroundColor: { default: colors.surface, ':hover': colors.dangerSoft },
+    backgroundColor: colors.surface,
+    backgroundImage: { default: faceGradient, ':hover': 'none', ':active': pressedGradient },
     borderColor: colors.border,
-    boxShadow: `inset 0 1px 2px ${colors.shadowNear}`,
+    boxShadow: { default: lightRest, ':hover': lightHover, ':active': lightPressed },
     color: colors.danger,
   },
   icon: {
@@ -76,6 +110,7 @@ const styles = stylex.create({
     height: size.compact,
     padding: 0,
     borderWidth: 0,
+    transform: 'none',
     borderRadius: radius.sm,
     backgroundColor: { default: 'transparent', ':hover': colors.hover },
     color: { default: colors.muted, ':hover': colors.text },
@@ -113,6 +148,8 @@ export function Button({
         styles.base,
         styles[variant],
         small && styles.small,
+        small && (variant === 'secondary' || variant === 'danger') && styles.smallKey,
+        small && (variant === 'primary' || variant === 'dangerSolid') && styles.smallSolid,
         block && styles.block,
         focusRing.ring,
         style,

@@ -118,7 +118,7 @@ describe('app', () => {
     await user.type(await screen.findByLabelText('Username'), 'kaken')
     client.controls.setReachable(false)
     await signIn(user)
-    expect(await screen.findByText('Baton could not be reached')).toBeInTheDocument()
+    expect(await screen.findByText("Can't reach Baton")).toBeInTheDocument()
     expect(screen.getByLabelText('Username')).toHaveValue('kaken')
     expect(screen.getByLabelText('Password')).toHaveValue('sample-password')
 
@@ -144,7 +144,7 @@ describe('app', () => {
     await openAccountMenu(user)
     client.controls.setReachable(false)
     await user.click(await screen.findByRole('button', { name: 'Sign out' }))
-    expect(await screen.findByRole('heading', { name: 'Could not sign out' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: "Couldn't sign out" })).toBeInTheDocument()
 
     client.controls.setReachable(true)
     await user.click(screen.getByRole('button', { name: 'Retry sign-out' }))
@@ -196,7 +196,7 @@ describe('app', () => {
 
     act(() => client.controls.setDeviceConnection('dev-ubuntu', 'offline'))
     await act(() => router.navigate({ to: '/projects/$projectId', params: { projectId: 'prj-baton' } }))
-    expect(await screen.findByText('Waiting for a device to come online')).toBeInTheDocument()
+    expect(await screen.findByText('All devices offline')).toBeInTheDocument()
   })
 
   it('shows send phases until the agent replies', async () => {
@@ -234,7 +234,7 @@ describe('projects', () => {
     const { scheduler, router } = renderApp('/threads')
     await user.click(await screen.findByRole('button', { name: 'New project' }))
     const dialog = await screen.findByRole('dialog', { name: 'New project' })
-    expect(within(dialog).getByText('Uses your ChatGPT account. Signed in on 2 online devices.')).toBeInTheDocument()
+    expect(within(dialog).queryByText(/signed in/)).not.toBeInTheDocument()
     await user.click(within(dialog).getByRole('button', { name: 'Create project' }))
     expect(within(dialog).getByText('Enter a project name.')).toBeInTheDocument()
     expect(within(dialog).getByLabelText('Name')).toHaveFocus()
@@ -244,13 +244,12 @@ describe('projects', () => {
     await user.selectOptions(within(dialog).getByLabelText('Assistant subscription'), 'ChatGPT')
     await user.type(within(dialog).getByLabelText('Name'), 'Release{Enter}')
     await advance(scheduler, 500)
-    expect(await screen.findByText(/Ask the assistant to run tests/)).toBeInTheDocument()
+    expect(await screen.findByText('No threads')).toBeInTheDocument()
     expect(router.state.location.pathname).toMatch(/^\/projects\/prj-/)
     expect(screen.getByLabelText('Message the project assistant')).toHaveAttribute(
       'placeholder',
       'Describe what you want to build or verify…',
     )
-    expect(screen.getByText('No threads in this project yet. Ask the assistant to start work.')).toBeInTheDocument()
   })
 
   it('keeps the entries when saving fails and saves on retry', async () => {
@@ -258,7 +257,7 @@ describe('projects', () => {
     const { scheduler, router } = renderApp('/threads', 'error')
     const dialog = await createProject(user, 'Retry me')
     await advance(scheduler, 500)
-    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Baton could not save this project.')
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent("Couldn't create the project. Try again.")
     expect(within(dialog).getByLabelText('Name')).toHaveValue('Retry me')
     await user.click(within(dialog).getByRole('button', { name: 'Try again' }))
     await advance(scheduler, 500)
@@ -296,13 +295,11 @@ describe('projects', () => {
   it('saves messages while no device can run the assistant', async () => {
     const user = userEvent.setup()
     const { scheduler } = renderApp('/projects/prj-docs', 'waiting')
-    expect(await screen.findByText('No device is ready for this model')).toBeInTheDocument()
+    expect(await screen.findByText('No device has Claude signed in')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'View devices' })).toBeInTheDocument()
     await user.type(screen.getByLabelText('Message the project assistant'), 'Check the install guide.{Enter}')
     await advance(scheduler, browserLatency.save + 100)
-    await waitFor(() =>
-      expect(screen.getAllByText('Saved · waiting for a device with Claude signed in')).toHaveLength(2),
-    )
+    await waitFor(() => expect(screen.getAllByText('Waiting for a device')).toHaveLength(2))
     expect(screen.getByText(/2 messages waiting/)).toBeInTheDocument()
   })
 
@@ -310,12 +307,10 @@ describe('projects', () => {
     const user = userEvent.setup()
     const { scheduler } = renderApp('/projects/prj-baton')
     await user.click(await screen.findByRole('button', { name: 'Stop run' }))
-    expect(await screen.findByText('Waiting for the project assistant to stop')).toBeInTheDocument()
+    expect(await screen.findByText(/to stop the assistant$/)).toBeInTheDocument()
     expect(screen.getByText('Stop requested')).toBeInTheDocument()
     await advance(scheduler, browserLatency.device + 100)
-    expect(
-      await screen.findByText('You stopped the project assistant. Threads it opened keep running.'),
-    ).toBeInTheDocument()
+    expect(await screen.findByText('You stopped the project assistant')).toBeInTheDocument()
     const overview = screen.getByRole('complementary', { name: 'Overview' })
     expect(within(within(overview).getByRole('region', { name: 'Running' })).getByText(/gateway/i)).toBeInTheDocument()
   })
@@ -365,11 +360,7 @@ describe('threads', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Archive this thread?' })
     await user.click(within(dialog).getByRole('button', { name: 'Archive thread' }))
     await advance(scheduler, browserLatency.read + browserLatency.save)
-    expect(
-      await within(reopened).findByText(
-        'This thread is closed to new messages. Past replies and attachment links are kept.',
-      ),
-    ).toBeInTheDocument()
+    expect((await within(reopened).findAllByText('Archived')).length).toBeGreaterThan(0)
     expect(within(reopened).queryByLabelText('Message')).not.toBeInTheDocument()
   })
 
@@ -404,7 +395,7 @@ describe('threads', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Stop current reply?' })
     await user.click(within(dialog).getByRole('button', { name: 'Stop reply' }))
     await advance(scheduler, browserLatency.read + browserLatency.save)
-    expect(await within(detail).findByText('Stopping… (forces quit in 1m)')).toBeInTheDocument()
+    expect((await within(detail).findAllByText('Stopping…')).length).toBeGreaterThan(0)
 
     await advance(scheduler, browserLatency.read + browserLatency.device)
     expect(await within(detail).findByText('Stopped by you')).toBeInTheDocument()
@@ -442,16 +433,13 @@ describe('threads', () => {
     await user.click(await screen.findByRole('button', { name: 'Choose folder' }))
     const dialog = await screen.findByRole('dialog', { name: 'Choose folder' })
     await user.selectOptions(within(dialog).getByLabelText('Device'), 'dev-mac')
-    await user.type(within(dialog).getByLabelText('Folder path'), '  /Users/kaken/new-project  {Enter}')
-    expect(await within(dialog).findByText('No subfolders')).toBeInTheDocument()
-    expect(
-      within(dialog).getByText('Add a folder path above or choose from shared folders on this device.'),
-    ).toBeInTheDocument()
+    await user.type(within(dialog).getByLabelText('Folder path'), '  /Users/kaken/new-project  ')
+    expect(within(dialog).getByText('Adds this folder to MacBook Pro.')).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: 'Add and select' }))
+    expect(await screen.findByRole('button', { name: /new-project · MacBook Pro/ })).toBeInTheDocument()
     expect((await client.listDevices()).find((device) => device.id === 'dev-mac')?.folders).toContain(
       '/Users/kaken/new-project',
     )
-    await user.click(within(dialog).getByRole('button', { name: 'Select folder' }))
-    expect(await screen.findByRole('button', { name: /new-project · MacBook Pro/ })).toBeInTheDocument()
   })
 
   it('asks for another folder when the old one is missing', async () => {
@@ -481,24 +469,25 @@ describe('devices', () => {
     const { client, scheduler } = renderApp('/devices', 'empty')
     await user.click(await screen.findByRole('button', { name: 'Connect a device' }))
     const dialog = await screen.findByRole('dialog', { name: 'Connect a device' })
-    expect(await within(dialog).findByText('Setup code (expires in 10 minutes)')).toBeInTheDocument()
+    expect(await within(dialog).findByText('Waiting for device…')).toBeInTheDocument()
 
     await user.type(within(dialog).getByLabelText('Device name'), 'Build Server')
     await user.click(within(dialog).getByRole('radio', { name: 'Linux' }))
-    const command = within(dialog).getByLabelText('Run this in your terminal')
+    const command = within(dialog).getByLabelText('Run in terminal')
     expect(command).toHaveTextContent('read -rs BATON_ENROLLMENT_TOKEN && export BATON_ENROLLMENT_TOKEN')
     expect(command).toHaveTextContent('batond up --coordinator')
     expect(command).toHaveTextContent('--display-name "Build Server" --system linux')
     expect(command.textContent).not.toMatch(/[A-Za-z0-9]{8}-[A-Za-z0-9]{4}-/)
 
     await user.click(within(dialog).getByRole('button', { name: 'Copy command' }))
-    expect(await within(dialog).findByText(/Command copied/)).toBeInTheDocument()
+    expect(within(dialog).queryByText(/Clipboard blocked/)).not.toBeInTheDocument()
 
     act(() => client.controls.connectEnrollment('Build Server', 'Linux'))
     expect(await within(dialog).findByText('Connected')).toBeInTheDocument()
     expect(within(dialog).getByText('Linux · Checking availability…')).toBeInTheDocument()
     act(() => scheduler.advance(browserLatency.device))
-    expect(await within(dialog).findByText('Linux · Codex and Pi available')).toBeInTheDocument()
+    await waitFor(() => expect(within(dialog).queryByText(/Checking availability/)).not.toBeInTheDocument())
+    expect(within(dialog).queryByText(/No agents available/)).not.toBeInTheDocument()
 
     await user.click(within(dialog).getByRole('button', { name: 'Done' }))
     expect(screen.getByRole('heading', { name: '1 device, 1 online' })).toHaveFocus()
@@ -512,7 +501,7 @@ describe('devices', () => {
     const { client } = renderApp('/devices')
     await user.click(await screen.findByRole('button', { name: 'Connect a device' }))
     const dialog = await screen.findByRole('dialog', { name: 'Connect a device' })
-    await within(dialog).findByText('Setup code (expires in 10 minutes)')
+    await within(dialog).findByText('Waiting for device…')
     await user.type(within(dialog).getByLabelText('Device name'), 'Lab PC')
     await user.click(within(dialog).getByRole('radio', { name: 'Windows' }))
 
@@ -521,13 +510,13 @@ describe('devices', () => {
 
     client.controls.setReachable(false)
     await user.click(within(dialog).getByRole('button', { name: 'Get a new code' }))
-    expect((await within(dialog).findAllByText('Setup code unavailable')).length).toBeGreaterThan(0)
+    expect(await within(dialog).findByText("Can't reach Baton")).toBeInTheDocument()
 
     client.controls.setReachable(true)
     await user.click(within(dialog).getByRole('button', { name: 'Get a new code' }))
-    expect(await within(dialog).findByText('Setup code (expires in 10 minutes)')).toBeInTheDocument()
+    expect(await within(dialog).findByText('Waiting for device…')).toBeInTheDocument()
     expect(within(dialog).getByLabelText('Device name')).toHaveValue('Lab PC')
-    expect(within(dialog).getByLabelText('Run this in your terminal')).toHaveTextContent(
+    expect(within(dialog).getByLabelText('Run in terminal')).toHaveTextContent(
       '$env:BATON_ENROLLMENT_TOKEN = Read-Host -MaskInput',
     )
 
@@ -535,48 +524,28 @@ describe('devices', () => {
     expect((await within(dialog).findAllByText('Setup code already used')).length).toBeGreaterThan(0)
   })
 
-  it('adds and removes allowed folders on the device page', async () => {
+  it('removes device folders and keeps a folder when removal fails', async () => {
     const user = userEvent.setup()
     const { client } = renderApp('/devices')
     await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
-    const input = screen.getByLabelText('Folder path')
-    await user.type(input, '  /home/kaken/new-project  ')
-    await user.click(screen.getByRole('button', { name: 'Add folder' }))
-    expect(await screen.findByRole('button', { name: 'Remove /home/kaken/new-project' })).toBeInTheDocument()
-    expect(input).toHaveValue('')
-    await user.type(input, '/home/kaken/new-project')
-    await user.click(screen.getByRole('button', { name: 'Add folder' }))
-    await waitFor(() => expect(input).toHaveValue(''))
-    expect(screen.getAllByRole('button', { name: 'Remove /home/kaken/new-project' })).toHaveLength(1)
-    expect(await client.listFolders('dev-ubuntu', '/home/kaken/new-project')).toMatchObject({
-      state: 'ready',
-      folders: [],
-    })
-    await user.click(screen.getByRole('button', { name: 'Remove /home/kaken/new-project' }))
+    await user.click(screen.getByRole('button', { name: 'Folders…' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Folders on Ubuntu Dev' })
+    const remove = await within(dialog).findByRole('button', { name: 'Remove /home/kaken/work' })
+
+    client.controls.setReachable(false)
+    await user.click(remove)
+    expect(await within(dialog).findByText("Couldn't remove the folder. Try again.")).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Remove /home/kaken/work' })).toBeInTheDocument()
+
+    client.controls.setReachable(true)
+    await user.click(within(dialog).getByRole('button', { name: 'Remove /home/kaken/work' }))
     await waitFor(() =>
-      expect(screen.queryByRole('button', { name: 'Remove /home/kaken/new-project' })).not.toBeInTheDocument(),
+      expect(within(dialog).queryByRole('button', { name: 'Remove /home/kaken/work' })).not.toBeInTheDocument(),
     )
-    expect(await client.listFolders('dev-ubuntu', '/home/kaken/new-project')).toMatchObject({
+    expect(await client.listFolders('dev-ubuntu', '/home/kaken/work')).toMatchObject({
       state: 'unavailable',
       reason: 'outsideFolders',
     })
-  })
-
-  it('keeps the folder path when adding fails and preserves a folder when removal fails', async () => {
-    const user = userEvent.setup()
-    const { client } = renderApp('/devices')
-    await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
-    await user.type(screen.getByLabelText('Folder path'), '/home/kaken/new-project')
-    client.controls.setReachable(false)
-    await user.click(screen.getByRole('button', { name: 'Add folder' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('Could not add folder')
-    expect(screen.getByLabelText('Folder path')).toHaveValue('/home/kaken/new-project')
-    await user.click(screen.getByRole('button', { name: 'Remove /home/kaken/work' }))
-    expect(await screen.findByText(/Could not remove folder/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Remove /home/kaken/work' })).toBeInTheDocument()
-    client.controls.setReachable(true)
-    await user.click(screen.getByRole('button', { name: 'Add folder' }))
-    expect(await screen.findByRole('button', { name: 'Remove /home/kaken/new-project' })).toBeInTheDocument()
   })
 
   it('signs in to a subscription with a device code and waits for the device report', async () => {
@@ -643,13 +612,13 @@ describe('devices', () => {
     client.controls.setReachable(false)
     await user.click(screen.getByRole('button', { name: 'Sign in to ChatGPT' }))
     const dialog = await screen.findByRole('dialog', { name: 'Sign in to ChatGPT on Ubuntu Dev' })
-    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Could not start sign-in')
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent("Couldn't start sign-in")
     client.controls.setReachable(true)
     await user.click(within(dialog).getByRole('button', { name: 'Retry sign-in' }))
     expect(await within(dialog).findByText('BATON-1234')).toBeInTheDocument()
   })
 
-  it('saves an offline default device in one click and explains the waiting behavior', async () => {
+  it('confirms an offline default device before saving it', async () => {
     const user = userEvent.setup()
     renderApp('/devices')
     await screen.findByRole('heading', { name: '3 devices, 2 online' })
@@ -657,13 +626,12 @@ describe('devices', () => {
     await user.click(row)
     const details = document.getElementById(row.getAttribute('aria-controls') ?? '')
     expect(details).not.toBeNull()
-    expect(within(details!).getByText('Windows Desktop is offline')).toBeInTheDocument()
+    expect(within(details!).getByText('New threads wait for it.')).toBeInTheDocument()
     await user.click(within(details!).getByRole('button', { name: 'Set as default' }))
 
-    expect(screen.queryByRole('dialog', { name: 'Use Windows Desktop as default?' })).not.toBeInTheDocument()
-    expect(await screen.findByText('Default device saved')).toBeInTheDocument()
-    expect(screen.getByText(/Windows Desktop is your default device. It is offline/)).toBeInTheDocument()
-    expect(within(deviceRow('Windows Desktop')).getByText('Default')).toBeInTheDocument()
+    const dialog = await screen.findByRole('dialog', { name: 'Use Windows Desktop as default?' })
+    await user.click(within(dialog).getByRole('button', { name: 'Save default device' }))
+    await waitFor(() => expect(within(deviceRow('Windows Desktop')).getByText('Default')).toBeInTheDocument())
     expect(within(deviceRow('MacBook Pro')).queryByText('Default')).not.toBeInTheDocument()
   })
 
@@ -684,19 +652,19 @@ describe('devices', () => {
         )
     })
     await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
-    expect(screen.getByText('ChatGPT sign-in check unavailable · can try')).toBeInTheDocument()
+    expect(screen.queryByText('Agents & subscriptions')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Sign in to ChatGPT' })).not.toBeInTheDocument()
     expect(screen.queryByText('Finish setup on Ubuntu Dev')).not.toBeInTheDocument()
   })
 
-  it('shows a syncing device notice inside its row without agent details', async () => {
+  it('shows a syncing device in its row without agent details', async () => {
     const user = userEvent.setup()
     renderApp('/devices', 'waiting')
     const row = await screen.findByRole('button', { name: /^Windows Desktop/ })
+    expect(within(row).getByText('Syncing…')).toBeInTheDocument()
     await user.click(row)
     const details = document.getElementById(row.getAttribute('aria-controls') ?? '')
     expect(details).not.toBeNull()
-    expect(within(details!).getByText('Windows Desktop is syncing')).toBeInTheDocument()
     expect(within(details!).queryByText('Agents & subscriptions')).not.toBeInTheDocument()
     expect(within(details!).getByRole('button', { name: 'Disconnect device' })).toBeInTheDocument()
   })
@@ -717,15 +685,17 @@ describe('devices', () => {
     await user.click(deviceRow('Ubuntu Dev'))
     const toggle = screen.getByRole('switch', { name: 'Allow project assistant to run commands' })
     expect(toggle).not.toBeChecked()
-    expect(screen.getByText(/Commands run as user “kaken” \(bash\)/)).toBeInTheDocument()
 
     await user.click(toggle)
-    expect(await screen.findByText('Saved · command permission is on')).toBeInTheDocument()
+    const confirm = await screen.findByRole('dialog', { name: 'Let the project assistant run commands on Ubuntu Dev?' })
+    expect(within(confirm).getByText(/Commands run directly as kaken/)).toBeInTheDocument()
+    await user.click(within(confirm).getByRole('button', { name: 'Allow commands' }))
+    expect(await screen.findByText('Saved')).toBeInTheDocument()
     expect(toggle).toBeChecked()
 
     client.controls.setReachable(false)
     await user.click(toggle)
-    expect(await screen.findByText(/Could not save because Baton could not be reached/)).toBeInTheDocument()
+    expect(await screen.findByText("Couldn't save. Commands are still allowed.")).toBeInTheDocument()
     expect(toggle).toBeChecked()
   })
 
@@ -736,14 +706,14 @@ describe('devices', () => {
     await user.click(deviceRow('MacBook Pro'))
     await user.click(screen.getByRole('button', { name: 'Disconnect device' }))
     const dialog = await screen.findByRole('dialog', { name: 'Disconnect “MacBook Pro”?' })
-    expect(within(dialog).getByText(/MacBook Pro is your default device/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/You'll need to choose a new default/)).toBeInTheDocument()
 
     client.controls.setReachable(false)
     await user.click(within(dialog).getByRole('button', { name: 'Disconnect device' }))
-    expect(await screen.findByRole('dialog', { name: 'Could not confirm disconnection' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: "Couldn't confirm disconnection" })).toBeInTheDocument()
 
     client.controls.setReachable(true)
-    await user.click(screen.getByRole('button', { name: 'Retry disconnection' }))
+    await user.click(screen.getByRole('button', { name: 'Try again' }))
     expect(await screen.findByText('Choose a new default device')).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '2 devices, 1 online' })).toHaveFocus()
@@ -751,22 +721,22 @@ describe('devices', () => {
     expect(within(sidebar).getByText('1/2 online')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Set Ubuntu Dev as default' }))
-    expect(await screen.findByText('Ubuntu Dev is your default for new threads and projects.')).toBeInTheDocument()
-    expect(within(deviceRow('Ubuntu Dev')).getByText('Default')).toBeInTheDocument()
+    await waitFor(() => expect(within(deviceRow('Ubuntu Dev')).getByText('Default')).toBeInTheDocument())
+    expect(screen.queryByText('Choose a new default device')).not.toBeInTheDocument()
   })
 
   it('moves the project assistant to another device when its device is removed', async () => {
     const user = userEvent.setup()
     const { router } = renderApp('/devices')
     await screen.findByRole('heading', { name: '3 devices, 2 online' })
-    expect(within(deviceRow('Ubuntu Dev')).getByText('Online · running Baton Dev')).toBeInTheDocument()
+    expect(within(deviceRow('Ubuntu Dev')).getByText('Running Baton Dev')).toBeInTheDocument()
     await user.click(deviceRow('Ubuntu Dev'))
     await user.click(screen.getByRole('button', { name: 'Disconnect device' }))
     const dialog = await screen.findByRole('dialog', { name: 'Disconnect “Ubuntu Dev”?' })
-    expect(within(dialog).getByText(/agents still running on it will keep running locally/)).toBeInTheDocument()
+    expect(within(dialog).getByText('Agents already running on it keep running locally.')).toBeInTheDocument()
     await user.click(within(dialog).getByRole('button', { name: 'Disconnect device' }))
     expect(await screen.findByText('Ubuntu Dev disconnected')).toBeInTheDocument()
-    expect(within(deviceRow('MacBook Pro')).getByText('Online · running Baton Dev')).toBeInTheDocument()
+    expect(within(deviceRow('MacBook Pro')).getByText('Running Baton Dev')).toBeInTheDocument()
 
     await act(() => router.navigate({ to: '/projects/$projectId', params: { projectId: 'prj-baton' } }))
     expect(await screen.findByText('Running on MacBook Pro')).toBeInTheDocument()
@@ -799,7 +769,7 @@ describe('execution details', () => {
     const toggle = await screen.findByRole('button', { name: /Ran 2 commands, used 1 tool, wrote 2 files/ })
     await user.click(toggle)
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
-    expect(await screen.findByText('Could not load this activity. Try again.')).toBeInTheDocument()
+    expect(await screen.findByText("Couldn't load activity")).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Retry' }))
     expect(await screen.findByText('pnpm --dir web build')).toBeInTheDocument()
@@ -832,13 +802,11 @@ describe('execution details', () => {
   it('marks lost live output after the device reconnects', async () => {
     const { client } = renderApp('/threads?thread=thr-gateway', 'offline')
     const detail = await screen.findByRole('complementary', { name: 'Fix gateway reconnect race' })
-    expect(await within(detail).findByText('Connection lost · output resumes when reconnected')).toBeInTheDocument()
+    expect(await within(detail).findByText('Connection lost')).toBeInTheDocument()
     expect(within(detail).getByText(/No report since/)).toBeInTheDocument()
 
     act(() => client.controls.setDeviceConnection('dev-ubuntu', 'online'))
-    expect(
-      await within(detail).findByText('Earlier output is no longer available on this computer'),
-    ).toBeInTheDocument()
+    expect(await within(detail).findByText('Earlier output not kept')).toBeInTheDocument()
     expect(within(detail).getByLabelText('Live output')).toHaveTextContent(/waiting for resume/)
   })
 
@@ -858,7 +826,7 @@ describe('execution details', () => {
     await user.click(await within(folders).findByRole('button', { name: /^server/ }))
     await user.click(await within(folders).findByRole('button', { name: /^src/ }))
     await user.click(await within(folders).findByRole('button', { name: /gateway\.test\.ts/ }))
-    expect(await within(preview).findByText(/did not return/)).toBeInTheDocument()
+    expect(await within(preview).findByText("Couldn't read this file")).toBeInTheDocument()
     await user.click(within(preview).getByRole('button', { name: 'Retry' }))
     expect(await within(preview).findByText(/test\('decodes WebSocket data'/)).toBeInTheDocument()
 

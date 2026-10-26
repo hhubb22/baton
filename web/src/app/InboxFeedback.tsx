@@ -16,8 +16,7 @@ export function InboxFeedback() {
   return (
     <Banner
       icon="alert"
-      title="Could not load questions"
-      detail="Your conversation is still available. Try loading the questions again."
+      title="Couldn't load questions"
       action={
         <Button small onClick={() => void inbox.refetch()}>
           Retry questions

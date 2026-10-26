@@ -90,8 +90,7 @@ export function InboxPage() {
         {inbox.isError && (
           <Banner
             icon="alert"
-            title="Could not load your inbox"
-            detail="Your questions are kept. Try again."
+            title="Couldn't load inbox"
             action={
               <Button small onClick={() => void inbox.refetch()}>
                 Retry

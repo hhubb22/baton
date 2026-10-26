@@ -81,12 +81,10 @@ export function ProjectModelFields({
     <div {...stylex.props(styles.section)}>
       {!readOnly && catalog.length === 0 && (
         <p {...stylex.props(text.caption, text.muted)}>
-          {loading ? 'Loading device models…' : 'No models available from your devices.'}{' '}
+          {loading ? 'Loading models…' : 'No models from your devices.'}{' '}
           <Link to="/devices" search={{ connect: true }} {...stylex.props(styles.link)}>
             Connect a device
-          </Link>{' '}
-          and sign in to a model subscription on that device to load its models. You can also enter a provider and model
-          manually.
+          </Link>
         </p>
       )}
       {(readOnly || custom || catalog.length > 0) && (

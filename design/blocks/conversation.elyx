@@ -51,7 +51,7 @@ export userMessage = frame {
     }
 
     metaText = text : t.caption {
-      contents: "Saved · sends when a device is available",
+      contents: "Sends when online",
       fill[0].color: c.colors.faint
     }
   }
@@ -159,7 +159,7 @@ export systemNote = frame {
   }
 
   label = text : t.caption {
-    contents: "Switched to Ubuntu Dev because MacBook Pro is offline",
+    contents: "Switched to Ubuntu Dev · MacBook Pro offline",
     fill[0].color: c.colors.faint
   }
 }

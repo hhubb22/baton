@@ -85,7 +85,7 @@ export threadRowHover = frame : threadRow {
   }
 }
 
-// Memory entry: content, version, author, and timestamp
+// Memory entry: the current text only; source and history open on demand from the edit dialog
 export memoryRow = frame {
   title: "Memory entry",
   top: 128px,
@@ -93,16 +93,11 @@ export memoryRow = frame {
   layout: {direction: .column, item-gap: s.space.xxs},
   border: {color: c.colors.borderSoft, sides: .bottom},
   padding: [10px, s.space.sm],
-  children: [content, meta],
+  children: content,
 
   content = text : t.small {
     width: 100%,
     contents: "Baton repo path is ~/src/baton on MacBook and ~/work/baton on Ubuntu."
-  }
-
-  meta = text : t.caption {
-    contents: "v2 · project assistant · today 14:05",
-    fill[0].color: c.colors.faint
   }
 }
 
@@ -262,7 +257,7 @@ export overview = frame {
     width: 100%,
     layout: {direction: .column, item-gap: s.space.xxs},
     slot: .true,
-    padding: [s.space.sm, s.space.md],
+    padding: s.space.sm,
     children: [
       needsHead,
       needsRow,
@@ -512,16 +507,16 @@ export overviewMemory = frame : overview {
       insert(mem3, after = mem2),
       insert(mem4, after = mem3),
       insert(addMemory, after = mem4),
+      remove(overview.body.recentMore),
       remove(overview.body.recentRow2),
-      remove(overview.body.recentHead),
       remove(overview.body.queuedRow),
       remove(overview.body.queuedHead),
-      remove(overview.body.activeRow2),
-      remove(overview.body.recentMore),
-      remove(overview.body.activeHead),
       remove(overview.body.activeRow1),
+      remove(overview.body.activeHead),
       remove(overview.body.recentRow1),
+      remove(overview.body.recentHead),
       remove(overview.body.needsRow),
+      remove(overview.body.activeRow2),
       remove(overview.body.needsHead)
     ]
   }
@@ -562,10 +557,6 @@ export overviewMemory = frame : overview {
     content {
       contents: "PS-160 worktree on Windows is at D:\\src\\baton-ps160."
     }
-
-    meta {
-      contents: "v1 · project assistant · today 14:03"
-    }
   }
 
   mem3 = frame : memoryRow {
@@ -574,10 +565,6 @@ export overviewMemory = frame : overview {
     content {
       contents: "Verification must use a real subscription; test doubles do not count."
     }
-
-    meta {
-      contents: "v3 · You · Yesterday 21:40"
-    }
   }
 
   mem4 = frame : memoryRow {
@@ -585,10 +572,6 @@ export overviewMemory = frame : overview {
 
     content {
       contents: "Run pnpm test to check the workspace. Build artifacts are not committed."
-    }
-
-    meta {
-      contents: "v1 · project assistant · Oct 18"
     }
   }
 

@@ -21,7 +21,8 @@ export notice = frame {
 
   detail = text : t.small {
     width: 100%,
-    contents: "Your default device was disconnected. Choose another device for new threads and projects.",
+    display: .none,
+    contents: "",
     fill[0].color: c.colors.muted
   }
 
@@ -39,10 +40,6 @@ export deviceNotice = frame {
   top: 480px,
   width: 680px,
   layout: {direction: .column, item-gap: s.space.xs},
-  fill: c.colors.surface,
-  border: c.colors.borderSoft,
-  corner-radius: s.radius.md,
-  padding: [12px, 16px],
   children: [heading, detail],
 
   heading = text : t.label {
@@ -51,7 +48,7 @@ export deviceNotice = frame {
 
   detail = text : t.small {
     width: 100%,
-    contents: "Last contact at 13:52. New threads on MacBook Pro wait for it to reconnect. Wake MacBook Pro and reconnect it to the network.",
+    contents: "New threads wait for it.",
     fill[0].color: c.colors.muted
   }
 }
@@ -66,17 +63,10 @@ export emptyDevices = frame {
   border: c.colors.borderSoft,
   corner-radius: 10px,
   padding: [64px, 32px],
-  children: [heading, detail, action],
+  children: [heading, action],
 
   heading = text : t.heading {
-    contents: "No devices connected"
-  }
-
-  detail = text : t.small {
-    width: 480px,
-    contents: "Connect a device to start threads and run work in your projects.",
-    align: .center,
-    fill[0].color: c.colors.muted
+    contents: "No devices yet"
   }
 
   action = frame : buttons.button {

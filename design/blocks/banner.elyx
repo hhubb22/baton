@@ -4,7 +4,7 @@ import "foundations/typography.elyx" as t
 import "controls/icons.elyx" as icons
 import "controls/button.elyx" as buttons
 
-// Status banner above the composer: one heading, one explanation, one action
+// Status banner above the composer: one heading and one action. The detail line stays hidden unless messages or changes are kept or lost.
 export banner = frame {
   title: "Banner / Waiting for device",
   width: s.size.measure,
@@ -28,12 +28,13 @@ export banner = frame {
 
     heading = text : t.label {
       width: 100%,
-      contents: "Waiting for a device to come online"
+      contents: "All devices offline"
     }
 
     detail = text : t.caption {
       width: 100%,
-      contents: "All 3 devices are offline. Your messages are saved and will send when a device with ChatGPT signed in is available.",
+      display: .none,
+      contents: "Messages send when a device is back.",
       fill[0].color: c.colors.muted
     }
   }
@@ -58,11 +59,12 @@ export bannerPaused = frame : banner {
 
   copy {
     detail {
-      contents: "Automatic replies are paused. You can still use individual threads. Messages and replies here are saved until you resume."
+      contents: "New messages wait until you resume.",
+      display: .visible
     }
 
     heading {
-      contents: "Project is paused"
+      contents: "Project paused"
     }
   }
 
@@ -91,8 +93,7 @@ export bannerAttention = frame : banner {
 
   copy {
     detail {
-      fill[0].color: c.colors.onInverseMuted,
-      contents: "Sign in to ChatGPT on Ubuntu Dev to continue. Your messages and replies are saved."
+      fill[0].color: c.colors.onInverseMuted
     }
 
     heading {

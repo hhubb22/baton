@@ -16,13 +16,6 @@ const styles = stylex.create({
   failure: { color: colors.danger },
 })
 
-function reachHint(subscription: string, ready: number) {
-  if (ready === 0) {
-    return `No online device has ${subscription} signed in. You can create this project now; messages wait until a device is ready.`
-  }
-  return `Uses your ${subscription} account. Signed in on ${ready} online ${ready === 1 ? 'device' : 'devices'}.`
-}
-
 // 订阅和模型属于这个 Project，之后每次运行助手都用它们。
 export function NewProjectDialog({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate()
@@ -69,7 +62,7 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
           setFailure(
             error instanceof ClientError && error.code === 'invalid'
               ? error.message
-              : 'Baton could not save this project. Your entries are kept. Try again.',
+              : "Couldn't create the project. Try again.",
           ),
       },
     )
@@ -119,7 +112,7 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
           )}
         </Field>
       </form>
-      <Field label="Goal" optional helper="The assistant reads this at the start of every run.">
+      <Field label="Goal" optional>
         {(props) => (
           <TextArea
             {...props}
@@ -136,8 +129,10 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
         creating
         loading={devices.isPending}
       />
-      {devices.data && subscription && (
-        <p {...stylex.props(text.caption, styles.hint)}>{reachHint(subscriptionLabel, ready)}</p>
+      {devices.data && subscription && ready === 0 && (
+        <p {...stylex.props(text.caption, styles.hint)}>
+          No online device has {subscriptionLabel} signed in. Messages wait until one does.
+        </p>
       )}
     </Dialog>
   )

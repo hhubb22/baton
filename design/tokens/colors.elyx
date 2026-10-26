@@ -1,3 +1,5 @@
+import "./colors@dark.elyx" as dark
+
 export primary = tokens {
   white: .white,
   black: .black
@@ -6,6 +8,7 @@ export primary = tokens {
 // Light is the default theme. Components read only from colors; dark overrides live in colors@dark.elyx.
 // Values come from OKLCH: neutrals share hue 262 at low chroma so surfaces, borders, shadows, and the scrim match the backdrop's cool tone.
 // Text colors used for reading (text, muted, faint, *Text, danger, success) reach 4.5:1 on canvas, surface, and subtle.
+@variants(dark.colors)
 export colors = tokens {
   // Shell: the backdrop image sits under glass; the sidebar reads directly on glass, glassLift raises the overview, raised marks the selected row
   glass: rgb(100%, 100%, 100%, 66%),
@@ -18,6 +21,17 @@ export colors = tokens {
   shadowFar: rgb(10.2%, 12.3%, 16.1%, 14%),
   highlight: rgb(100%, 100%, 100%, 28%),
   sheen: rgb(100%, 100%, 100%, 14%),
+  // Keys: button material lit from above. keyTop and keyBottom tint the face gradient; Solid tokens serve accent and danger faces, the rest serve surface faces
+  keyTop: rgb(100%, 100%, 100%, 8%),
+  keyBottom: rgb(10.2%, 12.3%, 16.1%, 4%),
+  keyHighlight: rgb(100%, 100%, 100%, 95%),
+  keyShade: rgb(10.2%, 12.3%, 16.1%, 6%),
+  keyPress: rgb(10.2%, 12.3%, 16.1%, 14%),
+  keyGround: rgb(100%, 100%, 100%, 90%),
+  keyEdgeSolid: rgb(0.4%, 0.7%, 1.3%, 22%),
+  keyShadeSolid: rgb(0.4%, 0.7%, 1.3%, 22%),
+  keyPressSolid: rgb(0.4%, 0.7%, 1.3%, 40%),
+  keyLiftSolid: rgb(10.2%, 12.3%, 16.1%, 22%),
   // Surfaces: canvas for content cards, panel for notices and inset areas, surface for cards/composers/popovers, subtle for hover and pill backgrounds
   canvas: rgb(98.1%, 98.4%, 99%),
   panel: rgb(95.8%, 96.4%, 97.4%),
@@ -55,6 +69,8 @@ export colors = tokens {
   attentionEdge: rgb(93%, 43%, 7.1%, 22%),
   danger: rgb(74.4%, 18.4%, 18.2%),
   dangerSoft: rgb(99.8%, 93.3%, 93.1%),
+  // Fill behind onAccent text on destructive confirm buttons
+  dangerFill: rgb(74.4%, 18.4%, 18.2%),
   // Inverse: the one floating notice that must stand out on a page (dark in light theme, light in dark theme)
   inverse: rgb(13.5%, 14.6%, 16.8%),
   onInverse: rgb(97%, 97.5%, 98.2%),

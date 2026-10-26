@@ -217,7 +217,7 @@ describe('password change', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Check your current password')
     fail('offline')
     await user.click(screen.getByRole('button', { name: 'Update password' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('Baton could not be reached.')
+    expect(await screen.findByRole('alert')).toHaveTextContent("Can't reach Baton. Try again.")
     expect(screen.getByLabelText('Current password')).toHaveValue('initial-password')
     expect(screen.getByLabelText('New password')).toHaveValue('updated-password')
     expect(screen.getByLabelText('Confirm new password')).toHaveValue('updated-password')

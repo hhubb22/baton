@@ -49,7 +49,7 @@ function MemoryEditor({ project, note, onClose }: { project: Project; note: Memo
   const key = note?.id ?? `new:${project.id}`
   const [draft, setDraft] = useState<MemoryDraft>(
     () =>
-      workspace.memoryDrafts[key] ?? {
+      workspace.memoryDrafts.get(key) ?? {
         body: note?.body ?? '',
         version: note?.version ?? null,
         clientId: newClientId(),
@@ -62,11 +62,11 @@ function MemoryEditor({ project, note, onClose }: { project: Project; note: Memo
   const archived = project.status === 'archived'
   const update = (next: MemoryDraft) => {
     setDraft(next)
-    workspace.setMemoryDraft(key, next)
+    workspace.memoryDrafts.set(key, next)
   }
   const cancel = () => {
     if (!saving.current) {
-      workspace.setMemoryDraft(key, null)
+      workspace.memoryDrafts.set(key, null)
       onClose()
     }
   }
@@ -84,13 +84,11 @@ function MemoryEditor({ project, note, onClose }: { project: Project; note: Memo
         setLatest(result.note)
         return
       }
-      workspace.setMemoryDraft(key, (current) => (current?.clientId === draft.clientId ? null : (current ?? null)))
+      workspace.memoryDrafts.set(key, (current) => (current?.clientId === draft.clientId ? null : (current ?? null)))
       onClose()
     } catch (cause) {
       setError(
-        cause instanceof ClientError && cause.code === 'invalid'
-          ? cause.message
-          : 'Could not save this memory. Your draft is kept. Try again.',
+        cause instanceof ClientError && cause.code === 'invalid' ? cause.message : 'Not saved. Your draft is kept.',
       )
     } finally {
       saving.current = false
@@ -106,13 +104,7 @@ function MemoryEditor({ project, note, onClose }: { project: Project; note: Memo
       finalFocus={() => document.querySelector<HTMLButtonElement>(`[data-memory-id="${note?.id ?? 'new'}"]`)}
       note={
         <span role="status">
-          {save.isPending
-            ? 'Saving…'
-            : latest
-              ? 'Your draft is kept'
-              : note
-                ? `Editing v${draft.version}`
-                : 'New memory'}
+          {save.isPending ? 'Saving…' : latest ? 'Updated while you edited. Your draft is kept.' : null}
         </span>
       }
       actions={
@@ -138,16 +130,8 @@ function MemoryEditor({ project, note, onClose }: { project: Project; note: Memo
         </>
       }
     >
-      {archived && <Banner icon="archive" title="This project is archived" detail="Project memory is read only." />}
-      <Field
-        label="Memory"
-        error={error}
-        helper={
-          note
-            ? `${metadata(note)}. Save creates a new version; the assistant reads it with your next message.`
-            : 'The project assistant reads this memory with your next message.'
-        }
-      >
+      {archived && <Banner icon="archive" title="Project archived" detail="Read-only. Threads keep running." />}
+      <Field label="Memory" error={error} helper="Read with your next message.">
         {(props) => (
           <TextArea
             {...props}
@@ -166,10 +150,20 @@ function MemoryEditor({ project, note, onClose }: { project: Project; note: Memo
         <div {...stylex.props(styles.latest)}>
           <p {...stylex.props(text.caption, text.muted)}>Latest · {metadata(latest)}</p>
           <p {...stylex.props(text.small)}>{latest.body}</p>
-          <p {...stylex.props(text.caption, text.muted)}>
-            Your edit was based on v{draft.version}. Review v{latest.version} and update your draft before saving again.
-          </p>
         </div>
+      )}
+      {note && (
+        <details>
+          <summary {...stylex.props(text.caption, text.muted, focusRing.ring)}>View source and history</summary>
+          <div {...stylex.props(styles.history)}>
+            {note.versions.toReversed().map((version) => (
+              <div key={version.version}>
+                <p {...stylex.props(text.caption, text.muted)}>{metadata(version)}</p>
+                <p {...stylex.props(text.small)}>{version.body}</p>
+              </div>
+            ))}
+          </div>
+        </details>
       )}
     </Dialog>
   )
@@ -190,7 +184,7 @@ export function ProjectMemory({ project }: { project: Project }) {
       {memory.isError && (
         <Banner
           icon="alert"
-          title="Could not load project memory"
+          title="Couldn't load project memory"
           action={
             <Button small onClick={() => void memory.refetch()}>
               Retry memory
@@ -198,10 +192,7 @@ export function ProjectMemory({ project }: { project: Project }) {
           }
         />
       )}
-      {memory.data?.length === 0 && (
-        <p {...stylex.props(text.small, text.muted)}>The assistant saves notes here as it learns about this project.</p>
-      )}
-      {archived && <p {...stylex.props(text.caption, text.muted)}>Project memory is read only.</p>}
+      {memory.data?.length === 0 && <p {...stylex.props(text.small, text.muted)}>No memory yet</p>}
       {memory.data?.map((note) => (
         <article key={note.id} aria-label={`Memory v${note.version}`} {...stylex.props(styles.row)}>
           {archived ? (
@@ -215,23 +206,6 @@ export function ProjectMemory({ project }: { project: Project }) {
             >
               {note.body}
             </button>
-          )}
-          <span {...stylex.props(text.caption, text.faint)}>{metadata(note)}</span>
-          {note.versions.length > 1 && (
-            <details>
-              <summary {...stylex.props(text.caption, text.muted, focusRing.ring)}>Version history</summary>
-              <div {...stylex.props(styles.history)}>
-                {note.versions
-                  .slice(0, -1)
-                  .toReversed()
-                  .map((version) => (
-                    <div key={version.version}>
-                      <p {...stylex.props(text.caption, text.muted)}>{metadata(version)}</p>
-                      <p {...stylex.props(text.small)}>{version.body}</p>
-                    </div>
-                  ))}
-              </div>
-            </details>
           )}
         </article>
       ))}

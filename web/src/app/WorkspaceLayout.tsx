@@ -8,6 +8,7 @@ import { glass, sceneImage } from '../theme/backdrop'
 import { useResolvedTheme } from '../theme/ThemeProvider'
 import { colors, size, space } from '../theme/tokens.stylex'
 import { Button } from '../ui/Button'
+import { createDraftStore } from './drafts'
 import { NewProjectDialog } from './NewProjectDialog'
 import { Page } from './Page'
 import type { LoginNotice } from './router'
@@ -66,11 +67,8 @@ function SignOutFailed({ onRetry }: { onRetry: () => void }) {
   return (
     <Page title="Workspace">
       <div {...stylex.props(styles.problem)}>
-        <h2 {...stylex.props(text.title)}>Could not sign out</h2>
-        <p {...stylex.props(text.small, text.muted, styles.detail)}>
-          Baton could not be reached to confirm sign-out. Your browser may still be signed in. Check your connection and
-          try again.
-        </p>
+        <h2 {...stylex.props(text.title)}>Couldn't sign out</h2>
+        <p {...stylex.props(text.small, text.muted, styles.detail)}>You may still be signed in on this browser.</p>
         <Button variant="primary" onClick={onRetry}>
           Retry sign-out
         </Button>
@@ -106,9 +104,11 @@ export function WorkspaceLayout() {
   const [failedAt, setFailedAt] = useState<string | null>(null)
   const [creatingProject, setCreatingProject] = useState(false)
   const [references, setReferences] = useState<Record<ID, Reference>>({})
-  const [itemDrafts, setItemDrafts] = useState<Record<ID, ItemDraft>>({})
-  const [settingsDrafts, setSettingsDrafts] = useState<Record<ID, ProjectPatch>>({})
-  const [memoryDrafts, setMemoryDrafts] = useState<Record<ID, MemoryDraft>>({})
+  const [drafts] = useState(() => ({
+    itemDrafts: createDraftStore<ItemDraft>(),
+    settingsDrafts: createDraftStore<ProjectPatch>(),
+    memoryDrafts: createDraftStore<MemoryDraft>(),
+  }))
 
   const workspace = useMemo<Workspace>(
     () => ({
@@ -126,35 +126,7 @@ export function WorkspaceLayout() {
       newProject() {
         setCreatingProject(true)
       },
-      itemDrafts,
-      setItemDraft(itemId, draft) {
-        setItemDrafts((current) => {
-          const next = { ...current }
-          if (draft) next[itemId] = draft
-          else delete next[itemId]
-          return next
-        })
-      },
-      settingsDrafts,
-      setSettingsDraft(projectId, draft) {
-        setSettingsDrafts((current) => {
-          const next = { ...current }
-          const value = typeof draft === 'function' ? draft(current[projectId]) : draft
-          if (value) next[projectId] = value
-          else delete next[projectId]
-          return next
-        })
-      },
-      memoryDrafts,
-      setMemoryDraft(key, draft) {
-        setMemoryDrafts((current) => {
-          const next = { ...current }
-          const value = typeof draft === 'function' ? draft(current[key]) : draft
-          if (value) next[key] = value
-          else delete next[key]
-          return next
-        })
-      },
+      ...drafts,
       references,
       askProject(projectId, reference) {
         setReferences((current) => ({ ...current, [projectId]: reference }))
@@ -169,7 +141,7 @@ export function WorkspaceLayout() {
         })
       },
     }),
-    [collapsed, signOut, router, references, itemDrafts, settingsDrafts, memoryDrafts],
+    [collapsed, signOut, router, references, drafts],
   )
 
   if (session.isPending) return null

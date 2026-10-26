@@ -495,15 +495,111 @@ export threadModelMenuFixed = frame : menu {
 
     reasonText = text : t.caption {
       width: 100%,
-      contents: "Kiro cannot switch models in this thread. Start a new thread to choose another.",
+      contents: "Kiro can't switch models in this thread.",
       fill[0].color: c.colors.muted
+    }
+  }
+}
+
+// Access option: name with a selected checkmark, and one line on what the Agent may touch
+export accessOption = frame {
+  title: "Access option",
+  left: 1360px,
+  top: 0px,
+  width: 288px,
+  layout: {direction: .column, item-gap: 2px},
+  corner-radius: s.radius.sm,
+  padding: [7px, s.space.sm],
+  children: [line, detail],
+
+  line = frame {
+    width: 100%,
+    layout: {align-items: .center, item-gap: s.space.sm},
+    children: [name, picked],
+
+    name = text : t.small {
+      width: 100%,
+      contents: "Sandboxed",
+      line-height: 1
+    }
+
+    picked = asset : icons.check {
+      width: 14px,
+      height: 14px,
+      display: .none,
+      fill[0].color: c.colors.text
+    }
+  }
+
+  detail = text : t.caption {
+    width: 100%,
+    contents: "Edits files in this folder. No network.",
+    fill[0].color: c.colors.muted
+  }
+}
+
+// Access menu on a new Thread. Lists only the modes the selected Agent supports; access is fixed once the Thread starts
+export accessMenu = frame : menu {
+  title: "Access menu / Codex",
+  left: 1360px,
+  top: 280px,
+  overrides: [insert(sandboxed, after = .nil), insert(full, after = sandboxed)],
+
+  sandboxed = frame : accessOption {
+    width: 100%,
+    fill[0].color: c.colors.hover,
+
+    line {
+      picked {
+        display: .visible
+      }
+    }
+  }
+
+  full = frame : accessOption {
+    width: 100%,
+
+    line {
+      name {
+        contents: "Full access"
+      }
+    }
+
+    detail {
+      contents: "Reads and writes any file as kaken and uses the network."
+    }
+  }
+}
+
+// Agent with one mode, or an existing Thread: shows the current access without choices
+export accessMenuFixed = frame : menu {
+  title: "Access menu / Fixed",
+  left: 1760px,
+  top: 280px,
+  overrides: [insert(current, after = .nil)],
+
+  current = frame : accessOption {
+    width: 100%,
+
+    line {
+      name {
+        contents: "No sandbox"
+      }
+
+      picked {
+        display: .visible
+      }
+    }
+
+    detail {
+      contents: "Pi runs commands as kaken and can reach files outside this folder."
     }
   }
 }
 
 export folderPicker = frame : dialogs.dialog {
   title: "Choose another folder",
-  caption: "Replaces the location menu. Cancel returns to the unchanged draft.",
+  caption: "Replaces the location menu. Pick a folder or type a path. Cancel returns to the unchanged draft.",
   left: 0px,
   top: 1100px,
   width: 600px,
@@ -517,18 +613,17 @@ export folderPicker = frame : dialogs.dialog {
         }
       }
     }
-
-    note {
-      contents: "Choose an allowed folder."
-    }
   }
 
   content {
-    overrides: [insert(device, after = .nil), insert(browser, after = device)],
+    overrides: [
+      insert(device, after = .nil),
+      insert(browser, after = device),
+      insert(path, after = browser)
+    ],
 
     message {
-      contents: "Folder access is managed on this device.",
-      font-size: 12
+      display: .none
     }
   }
 
@@ -555,7 +650,7 @@ export folderPicker = frame : dialogs.dialog {
 
     rootsHead = text : t.captionMedium {
       width: 100%,
-      contents: "Allowed folders",
+      contents: "Folders",
       fill[0].color: c.colors.muted
     }
 
@@ -564,7 +659,7 @@ export folderPicker = frame : dialogs.dialog {
       display: .none,
 
       name {
-        contents: "Back to allowed folders"
+        contents: "Back to folders"
       }
 
       @with-variant(icons.chevronLeft)
@@ -573,7 +668,7 @@ export folderPicker = frame : dialogs.dialog {
 
     first = frame : files.entryFolder {
       width: 100%,
-      connections[0].label: "Open allowed folder",
+      connections[0].label: "Open folder",
       connections[0].target: folderPickerBrowse,
 
       name {
@@ -596,11 +691,54 @@ export folderPicker = frame : dialogs.dialog {
       fill[0].color: c.colors.muted
     }
   }
+
+  path = frame : inputs.input {
+    width: 100%,
+
+    value {
+      contents: "Or type a path, e.g. ~/work/app"
+    }
+  }
+}
+
+// Typing a path that isn't in the list adds it to the device when selected
+@variant
+export folderPickerPath = frame : folderPicker {
+  title: "Choose folder / Typed path",
+  caption: "A typed path is checked on the device, added, and selected for the draft.",
+  left: 2280px,
+  top: 1780px,
+
+  footer {
+    actions {
+      @with-variant(buttons.button)
+      confirm {
+        label {
+          contents: "Add and select"
+        }
+      }
+    }
+
+    note {
+      contents: "Adds this folder to MacBook Pro."
+    }
+  }
+
+  content {
+    @with-variant(inputs.focus)
+    path {
+      value {
+        contents: "~/work/baton-release"
+      }
+
+      top: .nil
+    }
+  }
 }
 
 @variant
 export folderPickerBrowse = frame : folderPicker {
-  title: "Choose folder / Inside allowed folder",
+  title: "Choose folder / Inside a folder",
   caption: "Open subfolders or select the current folder. The draft stays in place.",
   left: 760px,
   top: 1100px,
@@ -770,11 +908,10 @@ export folderPickerOffline = frame : folderPicker {
       rootsHead {
         contents: "Ubuntu Dev is offline"
       }
+    }
 
-      feedback {
-        contents: "Reconnect Ubuntu Dev to browse its folders, or choose another device.",
-        display: .visible
-      }
+    path {
+      display: .none
     }
 
     device {
@@ -786,7 +923,7 @@ export folderPickerOffline = frame : folderPicker {
 
   footer {
     note {
-      contents: "Folders cannot be read yet."
+      display: .none
     }
 
     actions {
@@ -815,11 +952,7 @@ export folderPickerFailed = frame : folderPickerOffline {
 
     browser {
       rootsHead {
-        contents: "Could not read ~/src"
-      }
-
-      feedback {
-        contents: "Could not read this folder on MacBook Pro."
+        contents: "Couldn't read ~/src"
       }
 
       parent {
@@ -827,18 +960,12 @@ export folderPickerFailed = frame : folderPickerOffline {
       }
     }
   }
-
-  footer {
-    note {
-      contents: "Location is unchanged."
-    }
-  }
 }
 
 @variant
 export folderPickerNoRoots = frame : folderPickerOffline {
-  title: "Choose folder / No allowed folders",
-  caption: "No folder is allowed on this device yet. Add one in Devices.",
+  title: "Choose folder / No folders yet",
+  caption: "Nothing has been added on this device yet. Type a path to add the first folder.",
   left: 1520px,
   top: 1780px,
 
@@ -851,11 +978,26 @@ export folderPickerNoRoots = frame : folderPickerOffline {
 
     browser {
       rootsHead {
-        contents: "No allowed folders on MacBook Pro"
+        contents: "No folders on MacBook Pro yet"
       }
 
       feedback {
-        contents: "Add a folder for MacBook Pro in Devices."
+        contents: "Type a path below to add one.",
+        display: .visible
+      }
+    }
+
+    path {
+      display: .visible
+    }
+  }
+
+  footer {
+    actions {
+      confirm {
+        label {
+          contents: "Select folder"
+        }
       }
     }
   }

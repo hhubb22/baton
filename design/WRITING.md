@@ -32,7 +32,7 @@ Baton 的底层跨越了中心服务、节点守护进程、项目代理和多�
 | `System attention item` / `Created by Baton` | 运行出错暂停了，需要你处理 | 直接写具体故障（如 `ChatGPT sign-in expired`） | 直接写具体故障（如 `ChatGPT 登录已过期`） |
 | `Enroll device` / `Enrollment token` | 把一台电脑连进 Baton / 连接用的临时口令 | `Connect a device` / `Setup code` | 连接新设备 / 接入口令 |
 | `Revoke device`（吊销凭据） | 断开并移除这台电脑 | `Disconnect device` | 断开并移除设备 |
-| `Registered directories`（登记目录） | 这台电脑上允许 Baton 访问的文件夹 | `Allowed folders` | 允许访问的文件夹 |
+| `Registered directories`（登记目录） | 这台电脑上允许 Baton 访问的文件夹 | `Folders`（`Folders on Ubuntu Dev`） | 文件夹 |
 
 ---
 
@@ -48,17 +48,29 @@ Baton 的底层跨越了中心服务、节点守护进程、项目代理和多�
 
 不可用的操作保持可点击，在用户点击或打开菜单时就地说明原因，不用沉默的灰色禁用态让用户猜。
 
-### 2. 以用户的任务为中心（Task-oriented）
+### 2. 少说：每个字都要换来一个用户还不知道的事实（Brevity）
+
+写完一屏后从上往下读一遍，删掉用户已经从别处知道的字。
+
+1. 一个事实一屏只说一次。完整的话只放在一处，通常是输入区上方的横幅；标题栏、侧栏、概览栏、Thread 行和消息下方只用状态点、图标和一到三个词的状态名。横幅已经说明设备离线时，对话里不再插 `went offline` 系统提示，分组标题不再写 `Device offline`，概览栏不再重复原因。
+2. 只显示异常。在线、已登录、已安装、支持的能力、成功保存这类正常状态不写，只写缺了什么、哪里不对（`Pi not signed in`、`Can't stop`）。能力列表、版本号和发现的仓库放进详情或悬停。
+3. 上下文在容器上写一次。设备、Agent 和目录写在标题栏或输入区下方那一行，行内、提示文字和状态里不再重复；一组 Thread 共用同一台设备或同一个 Agent 时，组里的行省略它。
+4. 横幅以标题为主。标题一句话写清哪个对象出了什么事；说明只在补充标题没交代、又影响下一步的事实时才写，例如什么会保留、什么会丢，最多一句；动作按钮自己说明怎么恢复，正文不再复述。
+5. 说明文字（Helper text）只给不可逆或有安全后果的操作：归档、断开、停止、开放命令权限、重置口令。其余字段、开关和按钮靠标签自己说清，不在下面加一段解释何时生效。
+6. 页面和空状态不写介绍段。页面标题用事实（`3 devices, 2 online`、`3 waiting for you`），空状态写一句短语（`No threads yet`）加一个起步动作，不写这个页面是做什么的。
+7. 字数上限：状态名三个词以内；横幅标题十个词以内，说明一句、十五个词以内；按钮两三个词。超出时先删重复，再删正常状态，最后才压缩措辞。
+
+### 3. 以用户的任务为中心（Task-oriented）
 
 文案围绕用户手头要完成的事（写代码、跑测试、看日志、换电脑继续）来写，不向用户汇报软件内部是怎么运转的。
 
 | 场景 | 推荐写法（用户任务视角） | 避免写法（内部架构视角） |
 |---|---|---|
-| 新建项目后的空状态 | `Assign work across your devices. Ask the assistant to run tests, fix bugs, or check logs on any connected device.`<br>跨电脑安排工作。你可以让助手在任意已连接的电脑上跑测试、修问题或查日志。 | `Conversation, memory, and Thread records are stored on the Coordinator. If the Project Agent runs on your Mac now, it can pick right up on Windows next time.` |
-| 设备页顶部说明 | `Connect the computers where your code lives. Baton uses your default device first, and switches to another online device if it's asleep.`<br>连接存放代码的电脑。Baton 优先使用默认设备；默认设备休眠时，自动换用其他在线电脑。 | `Project Agent runs on any eligible device: online, synced, with the Runtime installed and the required subscription available. Your default device is preferred when eligible.` |
-| 项目助手正在工作 | `Reading Codex's reply from Ubuntu Dev…`<br>正在读取 Ubuntu Dev 上 Codex 的回复…… | `Processing 1 input: Codex reply from Ubuntu Dev` |
+| 新建项目后的空状态 | 只显示项目目标和输入框提示 `Describe what you want to build or verify…`，不加介绍段 | `Conversation, memory, and Thread records are stored on the Coordinator. If the Project Agent runs on your Mac now, it can pick right up on Windows next time.` |
+| 设备页顶部 | 标题 `3 devices, 2 online` 加 `Connect a device` 按钮；默认设备在行内标 `Default`，不写说明段 | `Project Agent runs on any eligible device: online, synced, with the Runtime installed and the required subscription available. Your default device is preferred when eligible.` |
+| 项目助手正在工作 | `Reading Codex's reply`，后面跟秒数<br>正在读取 Codex 的回复 | `Processing 1 input: Codex reply from Ubuntu Dev` |
 
-### 3. 让操作结果可以预测（Predictability）
+### 4. 让操作结果可以预测（Predictability）
 
 按钮、菜单和切换项写清楚点击后会发生什么动作，让不看说明书的人也能猜准结果。不用 `OK`、`Confirm`、`Yes`，也不用内部协议代号。
 
@@ -70,58 +82,58 @@ Baton 的底层跨越了中心服务、节点守护进程、项目代理和多�
 | 报错横幅里跳转到项目 | `Go to project` 或直接提供 `Retry`（前往项目 / 重试） | `Open Project to retry` |
 | 撤回还在排队的已发消息 | `Sending next · Cancel`（等待发送 · 取消） | `Queued · Withdraw` |
 
-### 4. 优先提供决策所需的信息（Information Relevance）
+### 5. 优先提供决策所需的信息（Information Relevance）
 
-常规操作尽量少写字；一旦涉及停止进程、断开电脑、开放命令权限或归档项目，必须把影响判断的事实一次说清：什么会停、什么会保留、什么不会自动回滚。
+常规操作不写说明；只有停止进程、断开电脑、开放命令权限或归档项目这类操作，才把影响判断的事实写出来：什么会停、什么会保留、什么不会自动回滚。只写会让用户改变决定的事实，一到两句。
 
 | 场景 | 推荐写法 | 避免写法 |
 |---|---|---|
-| 归档项目确认弹窗 | `Stops the project assistant and closes 1 open question. The main chat and project memory are kept. Work in individual threads continues.`<br>停止项目助手，并关闭 1 个待回答的问题。已有对话和项目记忆保留，各个 Thread 中的工作继续执行。 | `The Project Agent will stop its current run and will not start again. 1 open attention item will be withdrawn as Project archived. Conversation history, memory, and Threads are preserved.` |
-| 断开并移除电脑 | `Disconnects this device from Baton. If it is offline, any agents still running on it will keep running locally.`<br>将该电脑从 Baton 断开。如果电脑当前离线，上面正在运行的助手仍会在本地继续执行。 | `Disconnects immediately; running Agents on an offline device will not be stopped.` |
-| 开启命令行执行权限 | `Lets the project assistant run shell commands in allowed folders as user "kaken" (zsh). Commands run directly on your machine without a sandbox.`<br>允许项目助手以 kaken 账号（zsh）在授权文件夹内运行终端命令。命令直接在宿主机上执行，无沙箱隔离。 | `Project Agent can run arbitrary commands inside registered directories as kaken via zsh. Baton does not sandbox or inspect these commands.` |
+| 归档项目确认弹窗 | `Stops the project assistant and closes 1 open question. Chat, memory, and threads are kept.`<br>停止项目助手，并关闭 1 个待回答的问题。对话、记忆和 Thread 都保留。 | `The Project Agent will stop its current run and will not start again. 1 open attention item will be withdrawn as Project archived. Conversation history, memory, and Threads are preserved.` |
+| 断开并移除电脑 | `Agents already running on it keep running locally.`<br>上面正在运行的助手会在本地继续执行。 | `Disconnects immediately; running Agents on an offline device will not be stopped.` |
+| 开启命令行执行权限 | 开关标签 `Allow project assistant to run commands`，下方一行 `Shell commands the project assistant runs itself. Threads set their own access.`；打开时弹窗确认，正文一句 `Commands run directly as kaken and can reach files outside your folders.`<br>只管项目助手自己的命令，Thread 的权限在新建时设置。打开前说清实际影响：以 kaken 身份直接运行，能访问文件夹之外的文件。 | `Project Agent can run arbitrary commands inside registered directories as kaken via zsh. Baton does not sandbox or inspect these commands.` |
 
-### 5. 在恰当的时机和位置提供信息（Contextual Communication）
+### 6. 在恰当的时机和位置提供信息（Contextual Communication）
 
 把信息放在用户正盯着的控件旁边，只在状态真的影响当前操作时才提醒。
 
-1. 输入框占位符只写发送对象（`Message Codex on Windows Desktop`），不放使用规则。
-2. 只有当目标电脑离线或助手正忙时，才在输入框工具栏显示简短状态（`MacBook Pro is offline · sends when back online`）。电脑在线且空闲时，工具栏保持干净，不写状态字样。
-3. 字段格式或权限说明固定写在输入框下方（Helper text），不在用户填写中途弹警告。
+1. 输入框占位符只写发送对象的 Agent（`Message Codex…`），设备和目录写在输入区下方那一行，不在占位符里重复，也不放使用规则。
+2. 目标电脑离线或助手正忙时，原因写在输入区上方的横幅里一次；工具栏和消息下方只留短状态（`Sends when online`、`Sending next · Cancel`）。电脑在线且空闲时，工具栏保持干净，不写状态字样。
+3. 字段格式或权限说明只在第 2 条第 5 款允许的场景写在输入框下方，不在用户填写中途弹警告。
 4. 跨页面的阻塞问题（如某台电脑上的登录过期导致项目停摆）同时显示在对应项目输入区上方和 Inbox 里，在任一处解决即同步消失。
 
-### 6. 准确表达系统状态（Accurate Feedback）
+### 7. 准确表达系统状态（Accurate Feedback）
 
-如实区分“已保存”“等待发送”“正在运行”“正在停止”和“失去联系”，不把“消息发到了服务器”说成“助手已经收到”，也不替用户判断代码改对了没有。
+如实区分“已保存”“等待发送”“正在运行”“正在停止”和“失去联系”，不把“消息发到了服务器”说成“助手已经收到”，也不替用户判断代码改对了没有。准确靠选对词，不靠多写字。
 
-1. 电脑离线时发出消息：气泡下方写 `Saved · sends when MacBook Pro is online`（已保存 · MacBook Pro 上线后发送）。
-2. 点击停止按钮后：在电脑确认进程退出前，显示 `Stopping… (forces quit in 1m)`（正在停止……1 分钟后强制退出），确认退出后才变为 `Stopped`。
-3. 电脑中途重启导致不确定消息有没有送达：直说事实，不自动重发避免重复执行命令。
-   - 推荐写法：`Not sure if Codex received your last message — Windows Desktop restarted while sending. Check the output above before sending it again.`（无法确认 Codex 是否收到了上一条消息。发送期间 Windows Desktop 重启了，请先核对上方输出再决定是否重发。）
+1. 电脑离线时发出消息：气泡下方写 `Sends when online`（上线后发送），设备名和原因留在横幅里。
+2. 点击停止按钮后：在电脑确认进程退出前，显示 `Stopping…`，强制退出的倒计时悬停显示；确认退出后才变为 `Stopped`。
+3. 电脑中途重启导致不确定消息有没有送达：直说事实，不自动重发避免重复执行命令。气泡下方只放一个警示图标，完整的话放在横幅标题里。
+   - 推荐写法：标题 `Codex may have missed your last message`，动作 `View activity`。（Codex 可能没收到你的上一条消息。）
    - 避免写法：`Message delivery unconfirmed — The Worker on the device restarted before delivery could be confirmed. Baton will not resend automatically.`
 4. 助手回复完毕后状态统一为 `Idle`（空闲），命令执行只标退出码（如 `exit 0`），不显示“任务成功”或“执行失败”的绿勾红叉。测试通没通过由回复正文陈述。
 
-### 7. 帮助用户预防和恢复错误（Error Prevention & Recovery）
+### 8. 帮助用户预防和恢复错误（Error Prevention & Recovery）
 
 先用默认值和输入容错减少报错：新建对话自动带出上次用过的电脑、文件夹和模型；口令和路径输入框自动去除首尾多余空格。
 
 报错时，区分用户输入问题与环境问题：
 
 1. 表单校验错误：紧贴出错字段下方，复用字段名直接说怎么改（如 `Enter a project name.`），绝不清空用户已经填好的内容。
-2. 环境与运行故障：标题写清楚哪个对象出了什么问题，正文写清楚怎么恢复以及已发的消息是否安全。不抛原始错误码，也不用内部组件名。
+2. 环境与运行故障：标题写清楚哪个对象出了什么问题，动作按钮写怎么恢复；只有已发的消息或改动会保留或丢失时，才加一句说明。不抛原始错误码，也不用内部组件名。
 
 | 场景 | 推荐写法 | 避免写法 |
 |---|---|---|
-| 模型订阅登录过期 | 标题：`ChatGPT sign-in expired on Ubuntu Dev`<br>说明：`Sign in to ChatGPT on Ubuntu Dev to continue. Your recent messages are saved and will run once you're signed back in.`<br>按钮：`Retry` | 标题：`Project Agent paused: 5 consecutive model request failures`<br>说明：`ChatGPT subscription on Ubuntu Dev needs a new sign-in. Incoming messages stay saved and resume from where it stopped.` |
-| 工作目录不存在 | 标题：`Folder not found on MacBook Pro`<br>说明：`~/src/baton-old no longer exists on MacBook Pro. Choose another folder to start a new thread.`<br>按钮：`Choose folder` | 标题：`Could not start Codex`<br>说明：`Directory ~/src/baton-old does not exist.`<br>按钮：`View devices` |
-| 历史文件被删无法恢复会话 | 标题：`Thread history was deleted on MacBook Pro`<br>说明：`Codex can't continue this conversation because its local session files were removed. Start a new thread to keep working.`<br>按钮：`New thread in this folder` | 标题：`Cannot resume original session`<br>说明：`Session history on the device was deleted.` |
-| 访问授权目录外的软链接 | 标题：`Folder is outside allowed paths`<br>说明：`This link points to C:\Users\dev\certs, which isn't shared with Baton on Windows Desktop.`<br>按钮：`Go back` | 标题：`Outside registered directories`<br>说明：`This symlink points to C:\Users\dev\certs. Only registered directories on the device can be browsed.` |
+| 模型订阅登录过期 | 标题：`ChatGPT sign-in expired on Ubuntu Dev`<br>说明：`Messages wait until you sign in.`<br>按钮：`Retry` | 标题：`Project Agent paused: 5 consecutive model request failures`<br>说明：`ChatGPT subscription on Ubuntu Dev needs a new sign-in. Incoming messages stay saved and resume from where it stopped.` |
+| 工作目录不存在 | 标题：`~/src/baton-old no longer exists`<br>按钮：`Choose folder` | 标题：`Could not start Codex`<br>说明：`Directory ~/src/baton-old does not exist.`<br>按钮：`View devices` |
+| 历史文件被删无法恢复会话 | 标题：`Thread history was deleted on MacBook Pro`<br>按钮：`New thread in this folder` | 标题：`Cannot resume original session`<br>说明：`Session history on the device was deleted.` |
+| 访问授权目录外的软链接 | 标题：`Link points outside the device's folders`<br>说明：等宽路径 `C:\Users\dev\certs`<br>按钮：`Go back` | 标题：`Outside registered directories`<br>说明：`This symlink points to C:\Users\dev\certs. Only registered directories on the device can be browsed.` |
 
-### 8. 尊重用户的注意力与自主权（Respect for User Agency）
+### 9. 尊重用户的注意力与自主权（Respect for User Agency）
 
 按事情的轻重缓急决定提示强度，把控制权交给用户：
 
 - 高频日常动作（发消息、改项目名、切换模型、回答问题）直接在原位更新状态，不弹 Toast 或通知横幅。
-- 默认电脑离线而项目助手自动换到另一台在线电脑运行时，不弹窗打断，只在对话流里留一行浅色小字：`Switched to Ubuntu Dev because MacBook Pro is offline`（MacBook Pro 离线，已换在 Ubuntu Dev 上继续）。
+- 默认电脑离线而项目助手自动换到另一台在线电脑运行时，不弹窗打断，只在对话流里留一行浅色小字：`Switched to Ubuntu Dev · MacBook Pro offline`（MacBook Pro 离线，已换到 Ubuntu Dev）。
 - 用户明确指定在某台电脑上开的独立对话（Thread），如果那台电脑离线，就留在原电脑等待上线（`Waiting for MacBook Pro to come online`），绝不擅自改派到别的电脑。
 
 ---
@@ -131,13 +143,13 @@ Baton 的底层跨越了中心服务、节点守护进程、项目代理和多�
 | 界面场景 | 核心要求 | 正面示例 |
 |---|---|---|
 | 侧栏与导航 | 用简短复数名词，不加 `My` / `Your` | `Inbox`、`Threads`、`Devices`、`Projects` |
-| 输入框占位符 | 直接点明对话对象和所在电脑 | 主对话：`Ask the project assistant…`<br>独立对话：`Message Codex on Windows Desktop…` |
+| 输入框占位符 | 只写对话对象，电脑写在输入区下方 | 主对话：`Ask the project assistant…`<br>独立对话：`Message Codex…` |
 | 过程记录折叠行 | 用过去式动词短语汇总实际做过的事，不写“思考完成” | `Ran 1 command, saved 1 note`<br>`Ran 1 command, edited 1 file` |
-| 暂停横幅 | 说明谁停了、什么还能用、怎么恢复 | 标题：`Project is paused`<br>说明：`Automatic replies are paused. You can still use individual threads, and new messages here will wait until you resume.`<br>按钮：`Resume` |
-| 超时停止横幅 | 说明为什么停、本地改动还在、怎么接着聊 | 标题：`Stopped after reaching the 2-hour limit`<br>说明：`Files already changed on Windows Desktop were kept. Send a message below to continue where it left off.` |
+| 暂停横幅 | 标题说谁停了，说明只写会保留什么，按钮负责恢复 | 标题：`Project paused`<br>说明：`New messages wait until you resume.`<br>按钮：`Resume` |
+| 超时停止横幅 | 标题说为什么停，说明只写本地改动还在；接着聊靠输入框本身 | 标题：`Stopped at the 2-hour limit`<br>说明：`Changed files were kept.` |
 | 待决定问题卡片 | 标题直接提问，选项是具体行动动词短语，不用内部状态词 | 标题：`1 reconnect test failed on Windows. What should we do next?`<br>选项 1：`Find the cause and fix it`（标 `Recommended`）<br>选项 2：`Run the test once more`<br>选项 3：`Skip for now and test Ubuntu` |
-| 空状态 | 一句话说清这里放什么 + 一句话或一个按钮指明第一步怎么开始 | `No threads in this project yet. Ask the project assistant in the main chat to start work, or open a thread yourself.` |
-| 连接新电脑弹窗 | 按步骤写清：选系统、运行命令、粘贴口令 | 标题：`Connect a device`<br>口令标签：`Setup code (expires in 10 minutes)`<br>命令标签：`Run this in your terminal`<br>底部状态：`Waiting for your computer to connect…` |
+| 空状态 | 一个短语说这里还没有什么，加一个起步动作；不解释页面用途 | `No threads yet` |
+| 连接新电脑弹窗 | 按步骤写清：选系统、运行命令、粘贴口令 | 标题：`Connect a device`<br>口令标签：`Setup code`，有效期写在旁边 `10 min`<br>命令标签：`Run in terminal`<br>底部状态：`Waiting for device…` |
 
 ---
 

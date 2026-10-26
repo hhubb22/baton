@@ -73,9 +73,10 @@ export function threadMessageNotice(message: Message, agent: Thread['agent']): T
   )
 }
 
+// 带尾随空格，直接拼在下一句前面。
 function canceledNote(count: number) {
   if (count === 0) return ''
-  return count === 1 ? ' 1 waiting message was canceled.' : ` ${count} waiting messages were canceled.`
+  return count === 1 ? '1 waiting message was canceled. ' : `${count} waiting messages were canceled. `
 }
 
 // unknownDelivery：Thread 里有一条不确定是否送达的消息。
@@ -106,19 +107,14 @@ export function threadView(
   })
 
   if (thread.status === 'archived') {
-    return view(
-      { tone: 'hollow', label: 'Archived' },
-      'archived',
-      notice('Archived', 'This thread is closed to new messages. Past replies and attachment links are kept.'),
-      false,
-    )
+    return view({ tone: 'hollow', label: 'Archived' }, 'archived', notice('Archived', ''), false)
   }
   if (thread.pending === 'archive') {
     if (reachable) {
       return view(
         { tone: 'info', label: 'Archiving…' },
         'stopping',
-        notice('Stopping before archiving…', `Waiting for ${name} to confirm ${agent} has stopped.`),
+        notice('Stopping before archiving…', canceledNote(thread.stopCanceled).trim()),
         false,
         true,
       )
@@ -128,7 +124,7 @@ export function threadView(
       'stopRequested',
       notice(
         `Waiting for ${name}`,
-        `${name} is ${away} and may still be running ${agent}. Reconnect it to confirm stopping and finish archiving.`,
+        `${canceledNote(thread.stopCanceled)}${agent} may still be running.`,
         'viewDevices',
       ),
       false,
@@ -141,7 +137,7 @@ export function threadView(
       'stopRequested',
       notice(
         `Stop is waiting for ${name}`,
-        `The stop request is saved.${canceledNote(thread.stopCanceled)} Reconnect ${name} to send it and confirm stopping. ${agent} may still be running.`,
+        `${canceledNote(thread.stopCanceled)}${agent} may still be running.`,
         'viewDevices',
       ),
       false,
@@ -180,12 +176,7 @@ export function threadView(
         { tone: 'attention', label: 'Status unknown' },
         'attention',
         options.unknownDelivery
-          ? notice(
-              `Not sure if ${agent} received your message`,
-              `${agent} restarted while sending. Check the activity before sending your message again. Baton will not resend it automatically.`,
-              'viewActivity',
-              'attention',
-            )
+          ? notice(`${agent} may have missed your last message`, '', 'viewActivity', 'attention')
           : notice(
               'Status unknown',
               `${name} has not reported this thread since it reconnected. Check the activity before sending more messages.`,
@@ -198,11 +189,7 @@ export function threadView(
         return view(
           { tone: 'hollow', label: 'Last seen running' },
           'running',
-          notice(
-            `${name} is ${away}`,
-            'The reply may still be running on the device. Updates appear after it reconnects.',
-            'viewDevices',
-          ),
+          notice(`${name} is ${away}`, `${agent} may still be running.`, 'viewDevices'),
         )
       }
       return view({ tone: 'info', label: 'Running' }, 'running', null, true, true)
@@ -210,11 +197,7 @@ export function threadView(
       return view(
         { tone: 'neutral', label: 'Waiting for device' },
         'waiting',
-        notice(
-          `Waiting for ${name} to come online`,
-          `Your message is saved and will send when ${name} is online. This thread stays on ${name}.`,
-          'viewDevices',
-        ),
+        notice(`${name} is ${away}`, '', 'viewDevices'),
       )
     case 'idle':
       return view(
@@ -232,18 +215,12 @@ function stoppedNotice(
   options: { resume?: boolean },
 ): [ThreadNotice, boolean] {
   const stop = thread.stop ?? { kind: 'byYou', detail: null }
-  const keep = 'File changes are kept. Send a message below to continue.'
+  const keep = `${canceledNote(thread.stopCanceled)}Changed files were kept.`
   switch (stop.kind) {
     case 'byYou':
-      return [notice('Stopped by you', `${name} confirmed stopping.${canceledNote(thread.stopCanceled)} ${keep}`), true]
+      return [notice('Stopped by you', keep), true]
     case 'forced':
-      return [
-        notice(
-          'Stopped by you',
-          `${agent} did not stop within 1 minute, so ${name} ended it.${canceledNote(thread.stopCanceled)} ${keep}`,
-        ),
-        true,
-      ]
+      return [notice('Stopped by you', `${agent} didn't stop within 1 minute, so ${name} ended it. ${keep}`), true]
     case 'interrupted':
       if (options.resume) {
         return [
@@ -256,35 +233,11 @@ function stoppedNotice(
           true,
         ]
       }
-      return [
-        notice(
-          'This agent cannot resume past threads',
-          `The agent on ${name} does not support resuming. Start a new thread in this folder to continue.`,
-          'newChat',
-          'danger',
-        ),
-        false,
-      ]
+      return [notice(`${agent} can't resume this thread`, '', 'newChat', 'danger'), false]
     case 'historyLost':
-      return [
-        notice(
-          'Thread history not found',
-          `${name} no longer has the history of this thread, so ${agent} cannot resume it. Start a new thread in this folder to continue.`,
-          'newChat',
-          'danger',
-        ),
-        false,
-      ]
+      return [notice(`Thread history was deleted on ${name}`, '', 'newChat', 'danger'), false]
     case 'folderMissing':
-      return [
-        notice(
-          'Folder not found',
-          `${stop.detail ?? thread.folder} no longer exists on ${name}. Choose a folder to start a new thread.`,
-          'chooseFolder',
-          'danger',
-        ),
-        false,
-      ]
+      return [notice(`${stop.detail ?? thread.folder} no longer exists`, '', 'chooseFolder', 'danger'), false]
     case 'startFailed':
       if (thread.retryOpenAllowed)
         return [
@@ -348,17 +301,17 @@ export function assistantBlock(device: Device, subscription: string): AssistantB
   return null
 }
 
-// 切换设备说明里的原因，例如 `MacBook Pro is offline`。
+// 切换设备说明里的原因，例如 `MacBook Pro offline`。
 export function blockReason(device: Device, block: AssistantBlock, subscription: string) {
   switch (block) {
     case 'noRuntime':
-      return `the project assistant is not installed on ${device.name}`
+      return `project assistant not installed on ${device.name}`
     case 'offline':
-      return `${device.name} is offline`
+      return `${device.name} offline`
     case 'syncing':
-      return `${device.name} is syncing`
+      return `${device.name} syncing`
     case 'signedOut':
-      return `${subscription} is not signed in on ${device.name}`
+      return `${subscription} not signed in on ${device.name}`
   }
 }
 
@@ -393,9 +346,9 @@ export function assistantWait(project: Project, devices: Device[]): AssistantWai
   const count = `${devices.length} ${devices.length === 1 ? 'device' : 'devices'}`
   if (devices.length > 0 && devices.every((item) => item.connection !== 'online')) {
     return {
-      title: 'Waiting for a device to come online',
-      detail: `${devices.length === 1 ? 'Your device is' : `All ${count} are`} offline. Your messages are saved and will send when a device with ${subscription} signed in is available.`,
-      overview: `${devices.length === 1 ? 'Your device is' : `All ${count} are`} offline. Waiting for a computer with ${subscription} signed in.`,
+      title: devices.length === 1 ? 'Your device is offline' : 'All devices offline',
+      detail: 'Messages send when a device is back.',
+      overview: 'Waiting for device',
     }
   }
   const steps = devices.flatMap((device) => {
@@ -403,9 +356,9 @@ export function assistantWait(project: Project, devices: Device[]): AssistantWai
     return block ? [blockStep(device, block, subscription)] : []
   })
   return {
-    title: 'No device is ready for this model',
-    detail: [...(devices.length === 0 ? ['Connect a device first.'] : steps), 'Your message stays saved.'].join(' '),
-    overview: `${subscription} is unavailable on ${devices.length === 1 ? 'your device' : `all ${count}`}. Messages stay saved.`,
+    title: devices.length === 0 ? 'No devices yet' : `No device has ${subscription} signed in`,
+    detail: (devices.length === 0 ? ['Connect a device first.'] : steps).join(' '),
+    overview: `${subscription} is unavailable on ${devices.length === 1 ? 'your device' : `all ${count}`}.`,
   }
 }
 
@@ -437,42 +390,21 @@ export function previewProblem(preview: FilePreview, device: Device | undefined)
   const file = baseName(preview.path)
   switch (preview.reason) {
     case 'offline':
-      return {
-        title: `${name} is offline`,
-        detail: `Reconnect ${name}, then retry to view this file.`,
-        action: 'retry',
-      }
+      return { title: `${name} is offline`, detail: '', action: 'retry' }
     case 'syncing':
-      return { title: `${name} is syncing`, detail: 'Retry when it finishes syncing.', action: 'retry' }
+      return { title: `${name} is syncing`, detail: '', action: 'retry' }
     case 'outsideFolders':
-      return {
-        title: 'Folder is outside allowed paths',
-        detail: `This link points to ${preview.path}, which is not shared with Baton on ${name}.`,
-        action: 'back',
-      }
+      return { title: "Link points outside the device's folders", detail: preview.path, action: 'back' }
     case 'missing':
-      return {
-        title: `File not found on ${name}`,
-        detail: `${file} was moved or deleted. Go back to the folder and choose another file.`,
-        action: 'back',
-      }
+      return { title: `${file} was moved or deleted`, detail: '', action: 'back' }
     case 'binary':
-      return {
-        title: 'Binary file cannot be previewed',
-        detail: `Baton only reads limited text previews. Open ${file} on ${name}, or choose a text file.`,
-        action: 'back',
-      }
+      return { title: "Can't preview binary files", detail: '', action: 'back' }
   }
 }
 
 // 读取失败（设备没有返回）时的说明。
-export function readFailure(path: string, device: Device | undefined): PreviewView {
-  const name = device?.name ?? 'This device'
-  return {
-    title: 'Could not read this file',
-    detail: `${name} did not return ${baseName(path)}. Retry to read it again, or choose another file.`,
-    action: 'retry',
-  }
+export function readFailure(): PreviewView {
+  return { title: "Couldn't read this file", detail: '', action: 'retry' }
 }
 
 export function fileSize(bytes: number) {
@@ -535,7 +467,7 @@ export function devicesHeading(devices: Device[]) {
   if (devices.length === 0) return 'Your devices'
   const { online, syncing } = connectionCounts(devices)
   const count = `${devices.length} ${devices.length === 1 ? 'device' : 'devices'}`
-  if (syncing > 0) return `${count} · ${online} online · ${syncing} syncing`
+  if (syncing > 0) return `${count}, ${online} online, ${syncing} syncing`
   return `${count}, ${online} online`
 }
 
@@ -562,14 +494,12 @@ export function deviceConnectionView(device: Device, projects: Project[], now: n
     case 'offline':
       return { tone: 'neutral', label: `Offline · last seen ${lastSeen(device.lastSeenAt, now)}` }
     case 'syncing':
-      return { tone: 'hollow', label: `Syncing · last seen ${lastSeen(device.lastSeenAt, now)}` }
+      return { tone: 'hollow', label: 'Syncing…' }
     case 'online': {
       const running = projects.find(
         (item) => item.status === 'active' && item.agent.state === 'running' && item.agent.deviceId === device.id,
       )
-      return running
-        ? { tone: 'agent', label: `Online · running ${running.name}` }
-        : { tone: 'success', label: 'Online' }
+      return running ? { tone: 'agent', label: `Running ${running.name}` } : { tone: 'success', label: 'Online' }
     }
   }
 }
@@ -652,15 +582,13 @@ export function capabilityLines(device: Device): CapabilityLine[] {
   return [...lines, runtime]
 }
 
-// Agent 版本和模型；不可用的 Agent 说明什么时候能用。
-export function modelLines(device: Device) {
-  return device.agents.flatMap((agent) => {
-    const name = agentNames[agent.kind]
-    if (!canCreateAgent(agent)) return [`${name} · ${agentUnavailableReason(agent)}`]
-    const models = agent.models.map((model) => (model === agent.defaultModel ? `${model} (default)` : model))
-    const line = [`${name} ${agent.version ?? ''}`.trim(), models.join(', ')].filter(Boolean).join(' · ')
-    return [line]
-  })
+// 设备行只写系统名，去掉版本号，例如 `macOS 15.0.1` 显示为 `macOS`，`Windows 11 24H2` 显示为 `Windows 11`。
+export function systemName(system: string) {
+  const windows = /^Windows \d+/.exec(system)
+  if (windows) return windows[0]
+  const parts = system.split(' ')
+  const version = parts.findIndex((part) => /^\d/.test(part))
+  return version > 0 ? parts.slice(0, version).join(' ') : system
 }
 
 // 英文并列：a and b；a, b, and c。
@@ -813,6 +741,6 @@ export function operationLabel(operation: Operation, device: Device | undefined)
     case 'conflict':
       return operation.detail ?? 'Already handled'
     case 'failed':
-      return operation.detail ?? 'Could not save'
+      return operation.detail ?? "Couldn't save"
   }
 }

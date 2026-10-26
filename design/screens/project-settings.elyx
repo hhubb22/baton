@@ -98,7 +98,7 @@ settings = frame : page.projectPage {
           }
 
           helper {
-            contents: "The project assistant reads goal changes with your next message."
+            display: .none
           }
         }
       }
@@ -140,7 +140,7 @@ settings = frame : page.projectPage {
 
         agentHelp = text : t.caption {
           width: 100%,
-          contents: "Applies to the next run. The current run on Ubuntu Dev keeps its model.",
+          contents: "Applies from the next run.",
           fill[0].color: c.colors.muted
         }
       }
@@ -173,7 +173,7 @@ settings = frame : page.projectPage {
 
           copy {
             rowText {
-              contents: "Stops the project assistant and closes open questions. The main chat and memory are kept. Existing threads continue."
+              contents: "Chat, memory, and threads are kept."
             }
 
             rowTitle {
@@ -218,7 +218,7 @@ archiveConfirm = frame : page.projectPage {
 
       content {
         message {
-          contents: "Stops the project assistant and closes 1 open question. The main chat and memory are kept. Existing threads continue."
+          contents: "Stops the project assistant and closes 1 open question. Chat, memory, and threads are kept."
         }
       }
 
@@ -282,7 +282,7 @@ saveFailed = frame : settings {
           titleField {
             @with-variant(t.captionDanger)
             helper {
-              contents: "Could not save the project name. Check your connection and try again.",
+              contents: "Couldn't save the name. Try again.",
               display: .visible
             }
 
@@ -386,11 +386,11 @@ pausedSettings = frame : settings {
 
             copy {
               rowText {
-                contents: "3 messages are waiting. You can still use individual threads and answer questions."
+                contents: "3 messages waiting"
               }
 
               rowTitle {
-                contents: "Project is paused"
+                contents: "Project paused"
               }
             }
           }
@@ -404,7 +404,7 @@ pausedSettings = frame : settings {
       runtime {
         runtimeCard {
           runtimeNote {
-            contents: "3 messages waiting until you resume."
+            display: .none
           }
 
           runtimeLine {
@@ -467,7 +467,7 @@ resumedSettings = frame : settings {
           pauseRow {
             copy {
               rowText {
-                contents: "Project resumed. The project assistant will read the 3 waiting messages on an available device."
+                contents: "Resumed · reading 3 waiting messages"
               }
             }
           }
@@ -524,7 +524,7 @@ archiveFailed = frame : archiveConfirm {
 
         @with-variant(t.captionDanger)
         note {
-          contents: "Could not archive this project. Check your connection and try again."
+          contents: "Couldn't archive. Try again."
         }
       }
     }
@@ -560,7 +560,7 @@ archivedSettings = frame : settings {
           }
 
           agentHelp {
-            contents: "Project assistant stopped. Existing threads remain available."
+            display: .none
           }
         }
 
@@ -568,10 +568,6 @@ archivedSettings = frame : settings {
           goalField {
             input {
               border[0].width: 0px
-            }
-
-            helper {
-              contents: "Project settings are read-only while archived."
             }
           }
 
@@ -589,7 +585,7 @@ archivedSettings = frame : settings {
 
       footer {
         note {
-          contents: "Read-only · project archived"
+          contents: "Read-only"
         }
       }
 
@@ -611,7 +607,7 @@ archivedSettings = frame : settings {
       runtime {
         runtimeCard {
           runtimeNote {
-            contents: "Project assistant stopped. 1 open question closed."
+            display: .none
           }
 
           runtimeLine {

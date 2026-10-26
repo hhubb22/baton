@@ -117,7 +117,8 @@ export inboxPage = frame {
 
         explanation = text : t.small {
           width: 100%,
-          contents: "Questions and notices from your project assistants appear here.",
+          display: .none,
+          contents: "",
           fill[0].color: c.colors.muted
         }
 

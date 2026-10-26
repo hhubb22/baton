@@ -205,6 +205,6 @@ export function copyText(value: string) {
 export function copySelection(value: string) {
   return copyText(value).then(
     () => 'Copied',
-    () => 'Could not copy. Press ⌘C to copy.',
+    () => 'Clipboard blocked. Press ⌘C to copy.',
   )
 }

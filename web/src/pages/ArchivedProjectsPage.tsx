@@ -37,7 +37,7 @@ export function ArchivedProjectsPage() {
         {projects.isError && (
           <Banner
             icon="alert"
-            title="Could not load archived projects"
+            title="Couldn't load archived projects"
             action={
               <Button small onClick={() => void projects.refetch()}>
                 Retry

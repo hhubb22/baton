@@ -1,5 +1,5 @@
 import "blocks/dialog.elyx" as dialogs
-import "tokens/colors.elyx" as c
+import "controls/button.elyx" as buttons
 import "blocks/new-thread.elyx" as menus
 
 export threadActions = frame : menus.menu {
@@ -54,7 +54,7 @@ export stopThread = frame : dialogs.dialog {
 
   content {
     message {
-      contents: "Stops Codex on Windows Desktop and cancels 1 message waiting to send. File changes and commands already run will not be undone. If Codex does not stop within 1 minute, Baton ends its process."
+      contents: "Cancels 1 waiting message. Changes already made stay."
     }
   }
 
@@ -88,7 +88,7 @@ export archiveThread = frame : stopThread {
 
   content {
     message {
-      contents: "Stops the current reply and cancels 1 message waiting to send. Once stopping is confirmed, this thread will no longer accept messages. Past replies and attachment links stay available. File changes and commands already run will not be undone."
+      contents: "Stops the current reply and cancels 1 waiting message. Replies and files are kept."
     }
   }
 
@@ -118,7 +118,7 @@ export archiveIdleThread = frame : archiveThread {
 
   content {
     message {
-      contents: "This thread will no longer accept messages. Past replies and attachment links stay available. Files on Windows Desktop are kept."
+      contents: "Replies and files are kept."
     }
   }
 
@@ -142,11 +142,9 @@ export stopUnavailable = frame : stopThread {
 
   footer {
     actions {
+      @with-variant(buttons.secondary)
       confirm {
-        fill[0].color: c.colors.subtle,
-
         label {
-          fill[0].color: c.colors.text,
           contents: "Back to thread"
         }
       }
@@ -157,14 +155,14 @@ export stopUnavailable = frame : stopThread {
     }
   }
 
-  heading {
-    contents: "Stopping is unavailable"
-  }
-
   content {
     message {
-      contents: "This agent on Windows Desktop does not support stopping from Baton. Stop it on Windows Desktop, or wait for the reply to finish."
+      contents: "Stop it on Windows Desktop, or wait for the reply."
     }
+  }
+
+  heading {
+    contents: "Can't stop Codex from Baton"
   }
 }
 
@@ -181,7 +179,7 @@ export archiveUnavailable = frame : stopUnavailable {
 
   content {
     message {
-      contents: "This agent cannot be stopped from Baton, so the running thread cannot be archived yet. Stop it on Windows Desktop, or wait for the reply to finish, then archive again."
+      contents: "Stop it on Windows Desktop, or wait for the reply."
     }
   }
 }

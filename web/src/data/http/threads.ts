@@ -687,11 +687,11 @@ export function createThreadAPI(
       const result = await ctx.request<ThreadTrace>(`${threadPath(reply.threadId)}/trace?${query}`)
       if (!result.ok) {
         if (result.code === 'trace_missing') return { state: 'unavailable', messageId, reason: 'missing' }
-        unavailable('Could not load this activity. Try again.')
+        unavailable("Couldn't load this activity. Try again.")
       }
       const steps = result.steps ?? unavailable('The activity record is incomplete. Try again.')
       if (result.next_cursor !== undefined && (!result.next_cursor || result.next_cursor === cursor))
-        unavailable('Could not load the next activity page. Try again.')
+        unavailable("Couldn't load more activity. Try again.")
       return { state: 'ready', messageId, steps: [...steps], nextCursor: result.next_cursor }
     },
     readOutput: (id) => output.readOutput(id),

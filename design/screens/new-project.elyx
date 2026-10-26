@@ -131,7 +131,8 @@ create = frame : page.projectPage {
 
         modelHelp = text : t.caption {
           width: 100%,
-          contents: "Uses your ChatGPT account. Signed in on 2 online devices.",
+          display: .none,
+          contents: "",
           fill[0].color: c.colors.muted
         }
       }
@@ -149,17 +150,17 @@ created = frame : page.projectPage {
     body {
       overrides: [
         insert(noTasks, after = .nil),
-        remove(overviews.overview.body.recentMore),
-        remove(overviews.overview.body.queuedRow),
-        remove(overviews.overview.body.queuedHead),
-        remove(overviews.overview.body.recentHead),
-        remove(overviews.overview.body.activeRow2),
         remove(overviews.overview.body.recentRow2),
-        remove(overviews.overview.body.needsHead),
-        remove(overviews.overview.body.needsRow),
-        remove(overviews.overview.body.activeHead),
         remove(overviews.overview.body.recentRow1),
-        remove(overviews.overview.body.activeRow1)
+        remove(overviews.overview.body.recentHead),
+        remove(overviews.overview.body.recentMore),
+        remove(overviews.overview.body.queuedHead),
+        remove(overviews.overview.body.activeRow1),
+        remove(overviews.overview.body.queuedRow),
+        remove(overviews.overview.body.activeRow2),
+        remove(overviews.overview.body.activeHead),
+        remove(overviews.overview.body.needsRow),
+        remove(overviews.overview.body.needsHead)
       ]
     }
 
@@ -214,12 +215,12 @@ created = frame : page.projectPage {
     transcript {
       overrides: [
         insert(empty, after = .nil),
-        remove(page.projectPage.main.transcript.user0),
-        remove(page.projectPage.main.transcript.agent1),
-        remove(page.projectPage.main.transcript.user1),
-        remove(page.projectPage.main.transcript.agent0),
         remove(page.projectPage.main.transcript.typing),
-        remove(page.projectPage.main.transcript.day)
+        remove(page.projectPage.main.transcript.day),
+        remove(page.projectPage.main.transcript.user1),
+        remove(page.projectPage.main.transcript.agent1),
+        remove(page.projectPage.main.transcript.agent0),
+        remove(page.projectPage.main.transcript.user0)
       ],
       layout.justify-content: .center
     }
@@ -307,7 +308,8 @@ created = frame : page.projectPage {
 
     emptyHint = text : t.caption {
       width: 100%,
-      contents: "Assign work across your devices. Ask the project assistant to run tests, fix bugs, or check logs on any connected device.",
+      display: .none,
+      contents: "",
       align: .center,
       fill[0].color: c.colors.faint
     }
@@ -315,7 +317,7 @@ created = frame : page.projectPage {
 
   noTasks = text : t.small {
     width: 100%,
-    contents: "No threads in this project yet. Ask the project assistant to start work.",
+    contents: "No threads",
     fill[0].color: c.colors.muted
   }
 }
@@ -373,7 +375,7 @@ creating = frame : create {
 }
 
 creationFailed = frame : create {
-  title: "New project / Could not save",
+  title: "New project / Couldn't save",
   caption: "Creation failed. Keep the entered name, goal and model, then retry.",
   left: 1728px,
   top: 1080px,
@@ -395,7 +397,7 @@ creationFailed = frame : create {
         @with-variant(t.captionDanger)
         note {
           display: .visible,
-          contents: "Could not create this project. Check your connection and try again."
+          contents: "Couldn't create the project. Try again."
         }
       }
     }
@@ -427,7 +429,8 @@ noReadyDevice = frame : create {
           }
 
           modelHelp {
-            contents: "No online device has Claude signed in. You can create this project now; messages wait until a device is ready."
+            display: .visible,
+            contents: "No online device has Claude signed in. Messages wait until one does."
           }
         }
       }

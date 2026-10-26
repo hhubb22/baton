@@ -116,12 +116,8 @@ loadFailed = frame : pages.inboxPage {
           display: .visible
         }
 
-        explanation {
-          contents: "Check your connection. Past decisions are still saved in their projects."
-        }
-
         noticeTitle {
-          contents: "Could not load inbox"
+          contents: "Couldn't load inbox"
         }
 
         display: .visible

@@ -12,7 +12,7 @@ import "controls/badge.elyx" as badges
 import "controls/avatar.elyx" as avatars
 import "blocks/attention-reply.elyx" as replies
 
-// Option row: one choice offered by the Project Agent, hung on the branch rail. Keycap number, no outline; hover adds a soft fill. The suggested option has a medium label and teal "Suggested" text
+// Option row: one choice offered by the Project Agent, hung on the branch rail. Keycap number, no outline; hover adds a soft fill and selection fills the keycap with accent. The suggested option has a medium label and teal "Suggested" text right after it
 export option = frame {
   title: "Attention option",
   left: 0px,
@@ -43,7 +43,6 @@ export option = frame {
   }
 
   label = text : t.small {
-    width: 100%,
     contents: "Find the cause and fix it",
     line-height: 1.4
   }
@@ -317,7 +316,7 @@ export attentionCard = frame {
   resultNote = text : t.small {
     width: 100%,
     display: .none,
-    contents: "Your reply is saved. The project assistant will read it next.",
+    contents: "Reply saved",
     fill[0].color: c.colors.muted
   }
 
@@ -462,7 +461,7 @@ export systemItem = frame : attentionCard {
   }
 
   summary {
-    contents: "Sign in to ChatGPT on Ubuntu Dev, then retry in the project. Your messages and replies are saved."
+    contents: "Messages wait until you sign in."
   }
 
   heading {
@@ -523,7 +522,13 @@ export attentionReply = frame : attentionCard {
 
   options {
     first {
-      fill[0].color: c.colors.accentSoft
+      key {
+        fill[0].color: c.colors.accent,
+
+        index {
+          fill[0].color: c.colors.onAccent
+        }
+      }
     }
   }
 
@@ -615,7 +620,7 @@ export attentionAnsweredPaused = frame : attentionAnswered {
 
   resultNote {
     display: .visible,
-    contents: "Reply saved. The project is paused; the assistant will read it after you resume."
+    contents: "Reply saved · read after you resume"
   }
 }
 
@@ -627,7 +632,7 @@ export attentionAnsweredOffline = frame : attentionAnsweredPaused {
   top: 2140px,
 
   resultNote {
-    contents: "Reply saved. All devices are offline; the assistant will read it when a device is available."
+    contents: "Reply saved · read when a device is online"
   }
 }
 
@@ -659,7 +664,7 @@ export attentionWithdrawalWins = frame : attentionWithdrawn {
 
   resultNote {
     display: .visible,
-    contents: "The question was withdrawn before your reply was saved. You can continue in the linked thread."
+    contents: "Withdrawn before your reply was saved."
   }
 }
 
@@ -678,7 +683,7 @@ export attentionAnswerWins = frame : attentionAnswered {
 
   resultNote {
     display: .visible,
-    contents: "Your reply was saved before the question could be withdrawn. The assistant will read this reply."
+    contents: "Your reply arrived first and will be read."
   }
 }
 
@@ -713,7 +718,7 @@ export systemRetrying = frame : systemRetry {
   connections[1].target: systemRetryFailed,
 
   resultNote {
-    contents: "Saving your retry request. Wait for this to finish.",
+    contents: "Requesting retry…",
     display: .visible
   }
 
@@ -735,7 +740,7 @@ export systemRetryFailed = frame : systemRetry {
 
   resultNote {
     display: .visible,
-    contents: "Could not retry. Check your connection and try again."
+    contents: "Couldn't retry. Try again."
   }
 }
 
@@ -747,7 +752,7 @@ export systemResolved = frame : systemItem {
   top: 4120px,
 
   resultNote {
-    contents: "Retry requested. Go to the project to check progress.",
+    contents: "Retry requested",
     display: .visible
   }
 
@@ -795,7 +800,7 @@ export systemClosed = frame : systemResolved {
   }
 
   resultNote {
-    contents: "The project still needs attention. Go to the project when you are ready to retry."
+    contents: "Retry from the project when ready."
   }
 }
 
@@ -825,7 +830,7 @@ export attentionClosedConflict = frame : attentionClosed {
 
   resultNote {
     display: .visible,
-    contents: "This question was already closed in another window. You can continue in the linked thread."
+    contents: "Already closed in another window."
   }
 }
 
@@ -838,7 +843,7 @@ export attentionCloseFailed = frame : attentionCard {
 
   resultNote {
     display: .visible,
-    contents: "Could not close this question. Check your connection and try again."
+    contents: "Couldn't close this question. Try again."
   }
 }
 
@@ -851,7 +856,7 @@ export systemCloseFailed = frame : systemItem {
 
   resultNote {
     display: .visible,
-    contents: "The notice could not be closed. Check your connection and try Close notice again."
+    contents: "Couldn't close this notice. Try again."
   }
 }
 

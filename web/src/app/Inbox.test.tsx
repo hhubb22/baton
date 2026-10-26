@@ -70,7 +70,7 @@ describe('inbox decisions', () => {
           failing ? Promise.reject(new ClientError('unavailable', 'Could not load')) : list(),
         )
       })
-      expect(await screen.findByText('Could not load questions')).toBeInTheDocument()
+      expect(await screen.findByText("Couldn't load questions")).toBeInTheDocument()
       const conversation = screen.getByRole('region', {
         name: path.startsWith('/projects') ? 'Conversation' : 'Messages',
       })
@@ -145,16 +145,16 @@ describe('inbox decisions', () => {
     const card = await screen.findByRole('region', { name: 'What should the release notes mention?' })
     await user.click(within(card).getByRole('button', { name: /Other…/ }))
     await user.click(within(card).getByRole('button', { name: 'Send reply' }))
-    expect(within(card).getByText('Enter a reply.')).toBeInTheDocument()
+    expect(within(card).getByText('Choose an option or write a reply.')).toBeInTheDocument()
     await user.type(within(card).getByLabelText('Your reply'), 'Mention Windows support.')
     act(() => client.controls.setReachable(false))
     await user.click(within(card).getByRole('button', { name: 'Send reply' }))
-    expect(await within(card).findByText(/Your reply could not be saved/)).toBeInTheDocument()
+    expect(await within(card).findByText("Couldn't send. Try again.")).toBeInTheDocument()
     expect(within(card).getByLabelText('Your reply')).toHaveValue('Mention Windows support.')
     act(() => client.controls.setReachable(true))
     await user.click(within(card).getByRole('button', { name: 'Send reply' }))
     const result = await screen.findByRole('region', { name: 'Latest result' })
-    expect(await within(result).findByText(/when the project resumes/)).toBeInTheDocument()
+    expect(await within(result).findByText('Reply saved · read after you resume')).toBeInTheDocument()
   })
 
   it('shows a withdrawal that won while replying and keeps its reason in history', async () => {
@@ -183,7 +183,7 @@ describe('inbox decisions', () => {
     expect(within(card).queryByRole('button', { name: /Other…/ })).not.toBeInTheDocument()
     await user.click(within(card).getByRole('button', { name: 'Close notice' }))
     // 场景的第一次保存失败，通知和入口保留。
-    expect(await within(card).findByRole('alert')).toHaveTextContent('Could not close')
+    expect(await within(card).findByRole('alert')).toHaveTextContent("Couldn't close this notice. Try again.")
     await user.click(within(card).getByRole('button', { name: 'Close notice' }))
     const recent = await screen.findByRole('region', { name: 'Latest result' })
     expect(await within(recent).findByText(/^Closed ·/)).toBeInTheDocument()
