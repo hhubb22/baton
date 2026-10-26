@@ -1,3 +1,5 @@
+import { Schema } from 'effect'
+import { MemoryRevisionsResponse, type ProjectMemory } from '@baton/protocol'
 import { createTransport } from './transport'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import { ClientError } from '../client'
@@ -29,7 +31,25 @@ const project = {
   updated_at: at,
 }
 const status = { state: 'idle', pending_inputs: 0, last_seq: 4 }
-const memory = {
+const memory: ProjectMemory = {
+  status: 'active',
+  effective: true,
+  kind: 'fact',
+  basis: 'inferred',
+  topic: '',
+  conditions: '',
+  semantic_key: '',
+  core: false,
+  valid_from: null,
+  valid_until: null,
+  time_precision: 'unknown',
+  action: 'add',
+  reason: '',
+  retracted: false,
+  source_seq: null,
+  successor_id: null,
+  suppression_id: null,
+  evidence: [],
   id: noteId,
   title: 'Release policy',
   content: 'Run local tests',
@@ -371,24 +391,44 @@ describe('Project HTTP contract', () => {
 
   it('reads all memory pages and only includes revisions returned by the server', async () => {
     const h = setup([
-      { path: `${base}/memory?limit=100`, response: { entries: [memory], next_after_id: noteId } },
-      { path: `${base}/memory?limit=100&after_id=${noteId}`, response: { entries: null } },
+      {
+        path: `${base}/memory?include_inactive=true&limit=100`,
+        response: { entries: [memory], next_after_id: noteId },
+      },
+      { path: `${base}/memory?include_inactive=true&limit=100&after_id=${noteId}`, response: { entries: null } },
       {
         path: `${base}/memory/${noteId}/revisions?limit=100&after_revision=0`,
         response: {
-          revisions: [{ revision: 1, content: 'Old policy', author: 'user', created_at: at }],
+          revisions: Schema.decodeUnknownSync(MemoryRevisionsResponse)({
+            revisions: [
+              {
+                ...memory,
+                revision: 1,
+                content: 'Old policy',
+                author: 'user',
+                updated_at: '2026-06-01T10:00:00Z',
+                retracted: true,
+              },
+            ],
+          }).revisions,
           next_after_revision: 1,
         },
       },
       {
         path: `${base}/memory/${noteId}/revisions?limit=100&after_revision=1`,
-        response: { revisions: [{ revision: 3, content: memory.content, author: 'agent', created_at: at }] },
+        response: Schema.decodeUnknownSync(MemoryRevisionsResponse)({ revisions: [memory] }),
       },
     ])
     const [note] = await h.api.listProjectMemory(projectId)
     expect(note).toMatchObject({ id: noteId, body: memory.content, version: 3, source: 'assistant' })
-    expect(note.versions).toEqual([
-      { version: 1, body: 'Old policy', source: 'you', updatedAt: Date.parse(at) },
+    expect(note.versions).toMatchObject([
+      {
+        version: 1,
+        body: 'Old policy',
+        source: 'you',
+        updatedAt: Date.parse('2026-06-01T10:00:00Z'),
+        details: { retracted: true },
+      },
       { version: 3, body: memory.content, source: 'assistant', updatedAt: Date.parse(at) },
     ])
     h.done()
@@ -507,21 +547,18 @@ describe('Project HTTP contract', () => {
       {
         path: `${base}/memory/${noteId}`,
         method: 'PUT',
-        body: { title: memory.title, content: 'New policy', expected_revision: 3 },
+        body: { title: memory.title, content: 'New policy', expected_revision: 3, operation_id: noteId },
         response: { ...memory, content: 'New policy', revision: 4, author: 'user' },
       },
       {
         path: `${base}/memory/${noteId}/revisions?limit=100&after_revision=0`,
         response: {
-          revisions: [
-            { revision: 3, content: memory.content, author: 'agent', created_at: at },
-            { revision: 4, content: 'New policy', author: 'user', created_at: at },
-          ],
+          revisions: [memory, { ...memory, revision: 4, content: 'New policy', author: 'user' }],
         },
       },
     ])
     expect(
-      await h.api.saveMemory({ projectId, noteId, body: 'New policy', version: 3, clientId: 'web-memory-1' }),
+      await h.api.saveMemory({ projectId, noteId, body: 'New policy', version: 3, clientId: noteId }),
     ).toMatchObject({ state: 'saved', note: { version: 4, source: 'you' } })
     h.done()
   })

@@ -6,29 +6,79 @@ const page = {
   max_bytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 32768 })),
 }
 const obj = (properties: Record<string, any>) => Type.Object(properties, { additionalProperties: false })
+const evidence = Type.Array(
+  obj({
+    source_id: str(),
+    start_byte: Type.Integer({ minimum: 0 }),
+    end_byte: Type.Integer({ minimum: 1 }),
+    source_hash: str(),
+  }),
+  { minItems: 1, maxItems: 32 },
+)
+const memoryContent = {
+  title: str(),
+  content: str(),
+  kind: Type.Optional(Type.Union(['preference', 'fact', 'decision', 'lesson'].map((v) => Type.Literal(v)))),
+  topic: opt(),
+  conditions: opt(),
+  semantic_key: opt(),
+  core: Type.Optional(Type.Boolean()),
+  valid_from: Type.Optional(Type.Union([str(), Type.Null()])),
+  valid_until: Type.Optional(Type.Union([str(), Type.Null()])),
+  time_precision: Type.Optional(Type.Union(['unknown', 'instant', 'day', 'range'].map((v) => Type.Literal(v)))),
+}
 export const toolDefinitions = [
   {
-    name: 'memory.search',
-    description: '按关键字搜索本 Project 的记忆，最多 20 条。',
+    name: 'memory.recall',
+    description: '查找本 Project 当前有效的记忆，最多 20 条。',
     parameters: obj({ query: str(), after_id: opt(), ...page }),
   },
   {
     name: 'memory.read',
-    description: '读取本 Project 的一条记忆。',
+    description:
+      '读取记忆或原始来源。item_id/source_id/source_seq 三选一。用 source_seq 与 input_id 登记已读用户输入的来源，返回 source_hash 和 UTF-8 字节范围供写入引用；input_id 从 history.read 获取。来源分页保持原文哈希。',
     parameters: obj({
-      entry_id: str(),
+      item_id: opt(),
+      source_id: opt(),
+      source_seq: Type.Optional(Type.Integer({ minimum: 1 })),
+      input_id: Type.Optional(Type.Integer({ minimum: 1 })),
       revision: Type.Optional(Type.Integer({ minimum: 1 })),
       ...page,
+      max_bytes: Type.Optional(Type.Integer({ minimum: 4, maximum: 32768 })),
     }),
   },
   {
-    name: 'memory.write',
-    description: '保存记忆；新建时 expected_revision 为 0，修改时填写当前版本。',
+    name: 'memory.remember',
+    description:
+      '保存有原始证据的知识，等价知识合并独立证据。先用 memory.read 登记来源；助手报告只能支持推断。保留条件、否定和例外。',
+    parameters: obj({ ...memoryContent, evidence }),
+  },
+  {
+    name: 'memory.correct',
+    description:
+      '纠正知识、补充证据、标记争议或登记事实变化。correct 撤回旧错误；supersede 必须提供同一 semantic_key 和 conditions、明确 valid_from 的后继；support 保持结论与时间一致。编辑不恢复停用条目。',
     parameters: obj({
-      entry_id: opt(),
-      title: str(),
-      content: str(),
-      expected_revision: Type.Integer({ minimum: 0 }),
+      item_id: str(),
+      expected_revision: Type.Integer({ minimum: 1 }),
+      action: Type.Union(['correct', 'supersede', 'support', 'dispute'].map((v) => Type.Literal(v))),
+      content: Type.Optional(obj(memoryContent)),
+      evidence,
+      reason: opt(),
+    }),
+  },
+  {
+    name: 'memory.retire',
+    description: '根据用户明确请求停用知识，保留原始历史。须引用用户请求证据。',
+    parameters: obj({ item_id: str(), expected_revision: Type.Integer({ minimum: 1 }), evidence, reason: opt() }),
+  },
+  {
+    name: 'memory.restore',
+    description: '根据用户明确请求恢复停用知识，须引用用户新请求证据及条目的 suppression_id。存在互斥后继时返回冲突。',
+    parameters: obj({
+      item_id: str(),
+      expected_revision: Type.Integer({ minimum: 1 }),
+      suppression_id: str(),
+      evidence,
     }),
   },
   {

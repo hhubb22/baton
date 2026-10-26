@@ -351,6 +351,19 @@ export function useSaveMemory() {
   return useMutation({ mutationFn: (input: SaveMemoryInput) => client.saveMemory(input) })
 }
 
+export function useChangeMemory() {
+  const client = useClient()
+  return useMutation({ mutationFn: (input: import('./types').ChangeMemoryInput) => client.changeMemory(input) })
+}
+export function useMemorySources(projectId: ID, note: import('./types').MemoryNote | null, enabled: boolean) {
+  const client = useClient()
+  return useQuery({
+    queryKey: ['memory-sources', projectId, note?.id, note?.version],
+    queryFn: () => client.memorySources(projectId, note!),
+    enabled: enabled && note !== null,
+  })
+}
+
 export function useStopProjectRun() {
   const client = useClient()
   return useMutation({ mutationFn: (projectId: ID) => client.stopProjectRun(projectId) })

@@ -1,6 +1,6 @@
 # Project 长期记忆行为规格
 
-Status: draft
+Status: partially implemented
 Owner: Asa
 Basis: [Project Agent 行为规格](../project-agent/PRODUCT.md)、[技术设计与资料依据](TECH.md)。
 
@@ -8,7 +8,7 @@ Basis: [Project Agent 行为规格](../project-agent/PRODUCT.md)、[技术设计
 
 Project Agent 从已完成的工作中自动保留有依据的知识，吸收用户纠正，并在后续任务中主动找回相关内容。默认检索在本地完成，不要求 embedding API、额外模型或独立搜索服务。
 
-本文描述待审阅设计，尚未实施。实现后的记忆行为以本文为准；当前实现见 [Project Agent 规格](../project-agent/PRODUCT.md)。员工隔离、执行授权、原始历史持久化和 Thread 生命周期继续遵循 Baton 与 Project Agent 的既有规格。
+手动维护、员工 API 与前台记忆工具已实现条目修订、来源证据、事实时间、纠正/替代、停用恢复、操作去重与隔离。Memory 页面支持编辑、按需来源与历史、冲突草稿和「不再使用」分组。自动召回、词法索引、请求快照与后台整理仍为 planned。员工隔离、执行授权、原始历史持久化和 Thread 生命周期继续遵循 Baton 与 Project Agent 的既有规格。
 
 ## 范围与概念
 

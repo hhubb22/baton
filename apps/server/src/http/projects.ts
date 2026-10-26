@@ -3,7 +3,7 @@ import { HttpApiBuilder } from 'effect/http-api'
 import { BatonHttpApi, CurrentBrowserSession } from '@baton/protocol/http-api'
 import * as P from '@baton/protocol'
 import * as Projects from '../project/projects.ts'
-import * as Memory from '../project/memory.ts'
+import * as Memory from '../project/memory/index.ts'
 import * as Inbox from '../inbox.ts'
 import { decodeResponse, httpBusiness } from './security.ts'
 
@@ -77,8 +77,26 @@ export const projectHttpHandlers = () =>
         .handle('retry', ({ params }) => current((employee) => Projects.retryProject(employee, params.projectId)))
         .handle('memory', ({ params, query }) =>
           current((employee) =>
-            Memory.listProjectMemory(employee, params.projectId, query.after_id, limit(query.limit)).pipe(
-              Effect.flatMap(decodeResponse(P.MemoriesResponse)),
+            Memory.listProjectMemory(
+              employee,
+              params.projectId,
+              query.after_id,
+              query.limit,
+              query.include_inactive === 'true',
+            ).pipe(Effect.flatMap(decodeResponse(P.MemoriesResponse))),
+          ),
+        )
+        .handle('memorySource', ({ params, query }) =>
+          current((employee) =>
+            Memory.getMemorySource(employee, params.projectId, params.sourceId, query.offset, query.max_bytes).pipe(
+              Effect.flatMap(decodeResponse(P.MemorySourcePage)),
+            ),
+          ),
+        )
+        .handle('changeMemory', ({ params, payload }) =>
+          current((employee) =>
+            Memory.changeProjectMemory(employee, params.projectId, params.memoryId, payload).pipe(
+              Effect.flatMap(decodeResponse(P.ProjectMemory)),
             ),
           ),
         )
@@ -102,8 +120,8 @@ export const projectHttpHandlers = () =>
               employee,
               params.projectId,
               params.memoryId,
-              sequence(query.after_revision),
-              limit(query.limit),
+              query.after_revision,
+              query.limit,
             ).pipe(Effect.flatMap(decodeResponse(P.MemoryRevisionsResponse))),
           ),
         ),

@@ -264,29 +264,61 @@ CREATE TABLE project_agents (
     CONSTRAINT project_agents_lease_epoch_check CHECK ((lease_epoch >= 0))
 );
 
-CREATE TABLE project_memory_entries (
-    id uuid NOT NULL,
-    employee_id uuid NOT NULL,
-    project_id uuid NOT NULL,
-    title text NOT NULL,
-    current_revision bigint NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT project_memory_entries_current_revision_check CHECK ((current_revision > 0)),
-    CONSTRAINT project_memory_entries_title_check CHECK (((char_length(title) >= 1) AND (char_length(title) <= 200) AND (title !~ '[[:cntrl:]]'::text)))
+CREATE TABLE project_memory_state (
+ employee_id uuid NOT NULL, project_id uuid NOT NULL, knowledge_epoch bigint NOT NULL DEFAULT 0,
+ search_generation bigint NOT NULL DEFAULT 0, PRIMARY KEY(employee_id,project_id)
 );
-
+CREATE TABLE project_memory_items (
+ id uuid PRIMARY KEY, employee_id uuid NOT NULL, project_id uuid NOT NULL,
+ title text NOT NULL CHECK(char_length(title) BETWEEN 1 AND 200), current_revision bigint NOT NULL CHECK(current_revision>0),
+ status text NOT NULL CHECK(status IN ('candidate','active','superseded','disputed','retired')),
+ successor_id uuid, updated_at timestamptz NOT NULL DEFAULT now(),
+ UNIQUE(employee_id,id), UNIQUE(employee_id,project_id,id)
+);
 CREATE TABLE project_memory_revisions (
-    entry_id uuid NOT NULL,
-    employee_id uuid NOT NULL,
-    revision bigint NOT NULL,
-    title text,
-    content text NOT NULL,
-    author text NOT NULL,
-    source_seq bigint,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT project_memory_revisions_author_check CHECK ((author = ANY (ARRAY['agent'::text, 'user'::text]))),
-    CONSTRAINT project_memory_revisions_revision_check CHECK ((revision > 0)),
-    CONSTRAINT project_memory_revisions_source_seq_check CHECK ((source_seq > 0))
+ item_id uuid NOT NULL, employee_id uuid NOT NULL, project_id uuid NOT NULL, revision bigint NOT NULL CHECK(revision>0),
+ title text NOT NULL, content text NOT NULL CHECK(octet_length(content)<=65536),
+ kind text NOT NULL CHECK(kind IN ('preference','fact','decision','lesson')),
+ topic text NOT NULL DEFAULT '', conditions text NOT NULL DEFAULT '', semantic_key text NOT NULL DEFAULT '',
+ core boolean NOT NULL DEFAULT false, basis text NOT NULL CHECK(basis IN ('explicit','observed','inferred')),
+ valid_from timestamptz, valid_until timestamptz, time_precision text NOT NULL DEFAULT 'unknown',
+ author text NOT NULL CHECK(author IN ('user','agent','background')), source_seq bigint,
+ action text NOT NULL, reason text NOT NULL DEFAULT '', status text NOT NULL,
+ created_at timestamptz NOT NULL DEFAULT now(),
+ CHECK(valid_from IS NULL OR valid_until IS NULL OR valid_from<valid_until),
+ PRIMARY KEY(item_id,revision), UNIQUE(employee_id,project_id,item_id,revision),
+ FOREIGN KEY(employee_id,project_id,item_id) REFERENCES project_memory_items(employee_id,project_id,id)
+);
+CREATE TABLE project_memory_sources (
+ id uuid PRIMARY KEY, employee_id uuid NOT NULL, project_id uuid NOT NULL, source_key text NOT NULL,
+ source_type text NOT NULL, role text NOT NULL, text text NOT NULL, source_hash text NOT NULL,
+ source_seq bigint, input_id bigint, created_at timestamptz NOT NULL DEFAULT now(),
+ UNIQUE(employee_id,project_id,source_key), UNIQUE(employee_id,project_id,id)
+);
+CREATE TABLE project_memory_evidence (
+ employee_id uuid NOT NULL, project_id uuid NOT NULL, item_id uuid NOT NULL, revision bigint NOT NULL,
+ source_id uuid NOT NULL, start_byte bigint NOT NULL, end_byte bigint NOT NULL, source_hash text NOT NULL,
+ CHECK(start_byte>=0 AND end_byte>start_byte),
+ PRIMARY KEY(item_id,revision,source_id,start_byte,end_byte),
+ FOREIGN KEY(employee_id,project_id,item_id,revision) REFERENCES project_memory_revisions(employee_id,project_id,item_id,revision),
+ FOREIGN KEY(employee_id,project_id,source_id) REFERENCES project_memory_sources(employee_id,project_id,id)
+);
+CREATE TABLE project_memory_changes (
+ employee_id uuid NOT NULL, project_id uuid NOT NULL, operation_id uuid NOT NULL, request_hash text NOT NULL,
+ action text NOT NULL, item_id uuid NOT NULL, before_item_id uuid, before_revision bigint NOT NULL, after_revision bigint NOT NULL,
+ result jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now(),
+ PRIMARY KEY(employee_id,project_id,operation_id),
+ FOREIGN KEY(employee_id,project_id,before_item_id) REFERENCES project_memory_items(employee_id,project_id,id),
+ FOREIGN KEY(employee_id,project_id,item_id) REFERENCES project_memory_items(employee_id,project_id,id)
+);
+CREATE TABLE project_memory_suppressions (
+ id uuid PRIMARY KEY, employee_id uuid NOT NULL, project_id uuid NOT NULL, item_id uuid NOT NULL,
+ revision bigint NOT NULL, kind text NOT NULL CHECK(kind IN ('retired','retracted')), retirement_id uuid,
+ UNIQUE(employee_id,project_id,id),
+ FOREIGN KEY(employee_id,project_id,retirement_id) REFERENCES project_memory_suppressions(employee_id,project_id,id),
+ semantic_key text NOT NULL, value_hash text NOT NULL, evidence jsonb NOT NULL,
+ released_at timestamptz, created_at timestamptz NOT NULL DEFAULT now(),
+ FOREIGN KEY(employee_id,project_id,item_id,revision) REFERENCES project_memory_revisions(employee_id,project_id,item_id,revision)
 );
 
 CREATE TABLE projects (
@@ -574,15 +606,6 @@ ALTER TABLE ONLY project_agents
 ALTER TABLE ONLY project_agents
     ADD CONSTRAINT project_agents_project_id_key UNIQUE (project_id);
 
-ALTER TABLE ONLY project_memory_entries
-    ADD CONSTRAINT project_memory_entries_employee_id_id_key UNIQUE (employee_id, id);
-
-ALTER TABLE ONLY project_memory_entries
-    ADD CONSTRAINT project_memory_entries_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY project_memory_revisions
-    ADD CONSTRAINT project_memory_revisions_pkey PRIMARY KEY (entry_id, revision);
-
 ALTER TABLE ONLY projects
     ADD CONSTRAINT projects_employee_id_id_key UNIQUE (employee_id, id);
 
@@ -680,7 +703,7 @@ CREATE INDEX project_agent_pending_inputs ON project_agent_input_queue USING btr
 
 CREATE INDEX project_inputs_wake_due ON project_agent_input_queue USING btree (agent_id, wake_next_at, id) WHERE ((delivered_seq IS NULL) AND wake_required);
 
-CREATE INDEX project_memory_project ON project_memory_entries USING btree (employee_id, project_id, id);
+CREATE INDEX project_memory_project ON project_memory_items (employee_id, project_id, id);
 
 CREATE INDEX thread_events_timeline ON thread_events USING btree (employee_id, thread_id, id);
 
@@ -697,6 +720,9 @@ CREATE INDEX threads_project ON threads USING btree (employee_id, project_id, la
 CREATE TRIGGER conversation_events_append_only BEFORE DELETE OR UPDATE ON conversation_events FOR EACH ROW EXECUTE FUNCTION reject_project_history_mutation();
 
 CREATE TRIGGER project_memory_revisions_append_only BEFORE DELETE OR UPDATE ON project_memory_revisions FOR EACH ROW EXECUTE FUNCTION reject_project_history_mutation();
+CREATE TRIGGER project_memory_sources_append_only BEFORE DELETE OR UPDATE ON project_memory_sources FOR EACH ROW EXECUTE FUNCTION reject_project_history_mutation();
+CREATE TRIGGER project_memory_changes_append_only BEFORE DELETE OR UPDATE ON project_memory_changes FOR EACH ROW EXECUTE FUNCTION reject_project_history_mutation();
+CREATE TRIGGER project_memory_evidence_append_only BEFORE DELETE OR UPDATE ON project_memory_evidence FOR EACH ROW EXECUTE FUNCTION reject_project_history_mutation();
 
 CREATE TRIGGER thread_events_append_only BEFORE DELETE OR UPDATE ON thread_events FOR EACH ROW EXECUTE FUNCTION reject_project_history_mutation();
 
@@ -769,14 +795,11 @@ ALTER TABLE ONLY project_agent_input_queue
 ALTER TABLE ONLY project_agents
     ADD CONSTRAINT project_agents_employee_id_project_id_fkey FOREIGN KEY (employee_id, project_id) REFERENCES projects(employee_id, id);
 
-ALTER TABLE ONLY project_memory_entries
-    ADD CONSTRAINT project_memory_current_revision_fk FOREIGN KEY (id, current_revision) REFERENCES project_memory_revisions(entry_id, revision) DEFERRABLE INITIALLY DEFERRED;
-
-ALTER TABLE ONLY project_memory_entries
-    ADD CONSTRAINT project_memory_entries_employee_id_project_id_fkey FOREIGN KEY (employee_id, project_id) REFERENCES projects(employee_id, id);
-
-ALTER TABLE ONLY project_memory_revisions
-    ADD CONSTRAINT project_memory_revisions_employee_id_entry_id_fkey FOREIGN KEY (employee_id, entry_id) REFERENCES project_memory_entries(employee_id, id);
+ALTER TABLE ONLY project_memory_items ADD CONSTRAINT project_memory_current_revision_fk FOREIGN KEY (employee_id,project_id,id,current_revision) REFERENCES project_memory_revisions(employee_id,project_id,item_id,revision) DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE ONLY project_memory_items ADD FOREIGN KEY(employee_id,project_id) REFERENCES projects(employee_id,id);
+ALTER TABLE ONLY project_memory_items ADD FOREIGN KEY(employee_id,project_id,successor_id) REFERENCES project_memory_items(employee_id,project_id,id);
+ALTER TABLE ONLY project_memory_state ADD FOREIGN KEY(employee_id,project_id) REFERENCES projects(employee_id,id);
+ALTER TABLE ONLY project_memory_sources ADD FOREIGN KEY(employee_id,project_id) REFERENCES projects(employee_id,id);
 
 ALTER TABLE ONLY projects
     ADD CONSTRAINT projects_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES employees(id);

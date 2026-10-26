@@ -13,6 +13,8 @@ import type {
   MemoryNote,
   MemorySave,
   SaveMemoryInput,
+  ChangeMemoryInput,
+  MemorySourceView,
   ProjectPatch,
   Message,
   Operation,
@@ -112,6 +114,8 @@ export interface BatonClient {
   updateProject(input: { projectId: ID; patch: ProjectPatch }): Promise<Project>
   setProjectStatus(input: { projectId: ID; status: 'active' | 'paused' | 'archived' }): Promise<Project>
   saveMemory(input: SaveMemoryInput): Promise<MemorySave>
+  changeMemory(input: ChangeMemoryInput): Promise<MemorySave>
+  memorySources(projectId: ID, note: MemoryNote): Promise<MemorySourceView[]>
   // 只停止助手这一次运行，它开的 Thread 继续执行。
   stopProjectRun(projectId: ID): Promise<Project>
   handleItem(input: { itemId: ID; decision: ItemDecision; revision: number }): Promise<Operation>

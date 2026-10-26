@@ -94,8 +94,8 @@ Runtime 进程的工作目录是一个空的控制目录。pi-agent-core 本身�
 | `conversation_events` | conversation_id, seq, employee_id, kind, client_event_id, tool_call_id, run_id, lease_epoch, payload, created_at | 主键 `(conversation_id, seq)`；`(conversation_id, client_event_id)` 唯一；`kind=tool_result` 时 `(conversation_id, tool_call_id)` 唯一；只允许 INSERT |
 | `project_agent_input_queue` | id, employee_id, agent_id, source_type, source_key, payload, payload_hash, delivered_seq, created_at | 输入队列；`(agent_id, source_key)` 唯一；`delivered_seq` 为空表示待处理；领取后保留 |
 | `agent_runs` | id, employee_id, agent_id, node_id, lease_epoch, state, placement_reason, started_at, ended_at, end_reason | 每次运行一行；运行位置只记在这里 |
-| `project_memory_entries` | id, employee_id, project_id, title, current_revision, updated_at | 记忆条目 |
-| `project_memory_revisions` | entry_id, employee_id, revision, title, content, author, source_seq, created_at | 只追加，保存每次修订的标题与正文；`author` 为 agent 或 user，`source_seq` 关联 Agent 修改所依据的主对话事件 |
+| `project_memory_items` | id, employee_id, project_id, title, current_revision, updated_at | 记忆条目 |
+| `project_memory_revisions` | item_id, employee_id, project_id, revision, title, content, conditions, valid_from/until, basis, author, action, created_at | 只追加；员工和前台工具共享 `project/memory.applyChange`，来源、证据、操作去重、抑制及代次见 [长期记忆](../project-memory/TECH.md#数据与知识变更) |
 | `node_runtime_reports` | node_id, employee_id, report_version, reported_at, report | 节点能力的结构化报告（第 8 节）；现有 `nodes.capabilities` 是最多 32 项的字符串数组，装不下目录和仓库信息 |
 
 `threads` 带可空列 `project_id`、`origin_conversation_id`、`origin_tool_call_id`，后两列唯一。只有 Project Agent 新建的 Thread 填写这三列；员工新建的 Thread 三列都为空。`thread_turns.initiator` 记录这一轮由员工还是 Project Agent 开启，Project Agent 开启时另记 `origin_tool_call_id`。
@@ -155,7 +155,7 @@ Runtime 进程的工作目录是一个空的控制目录。pi-agent-core 本身�
    - 同一条记忆有多条待处理的 `memory_updated` 时，只把版本号最大的一条写进 `input`，其余一起标为已投递。
 
    每条输入在写入时已经限长，所以一批不会超过事件上限。这个上限只针对传输：128 KiB 约合 3～4 万个 token，低于常见窗口的压缩阈值；上下文用量由第 6.2 节单独检查。
-4. 把 `input` 消息交给 Agent。调用模型前，Runtime 将固定工具名中的点号替换为下划线，例如 `memory.search` 转为 `memory_search`，符合 provider 的函数名约束。转换覆盖系统工具声明、历史调用和工具结果；正常回复与压缩请求使用同一规则。收到 assistant 后按固定映射还原工具名，再交给 Agent、保存历史和执行中心 RPC；参数、调用 ID、签名与其他字段保持不变。未知名称不自动改写为已知工具，仍由工具校验拒绝。模型回复的 assistant 消息在 `message_end` 监听器里通过 `append_event` 保存；保存返回之前，pi-agent-core 不会执行工具。
+4. 把 `input` 消息交给 Agent。调用模型前，Runtime 将固定工具名中的点号替换为下划线，例如 `memory.recall` 转为 `memory_recall`，符合 provider 的函数名约束。转换覆盖系统工具声明、历史调用和工具结果；正常回复与压缩请求使用同一规则。收到 assistant 后按固定映射还原工具名，再交给 Agent、保存历史和执行中心 RPC；参数、调用 ID、签名与其他字段保持不变。未知名称不自动改写为已知工具，仍由工具校验拒绝。模型回复的 assistant 消息在 `message_end` 监听器里通过 `append_event` 保存；保存返回之前，pi-agent-core 不会执行工具。
 5. 每个工具调用通过 `call_tool` 交给 Coordinator 执行（第 7 节），Coordinator 在同一事务里写入 `tool_result` 事件。工具设为顺序执行（`toolExecution: "sequential"`），结果事件的顺序和调用顺序一致。
 6. 模型给出不含工具调用的回复后，这一轮结束，回到第 3 步。
 7. 闲置 180 秒内没有新输入，或单次运行满 15 分钟，就进入收尾：需要时压缩（第 6.3 节），然后调用 `finish`，Coordinator 清空租约并记录结束原因，batond 停止进程。收尾压缩的模型请求失败只记录诊断，保留原始历史并正常结束；租约失效和持久化错误仍按原错误处理。
@@ -227,19 +227,19 @@ Project 标题或目标被修改后，新的系统提示词从下一次压缩起
 
 #### 6.4 项目记忆不放进前缀
 
-项目记忆可能在一轮中被修改。如果把它放进系统提示词，每次修改都会让缓存失效。所以系统提示词只告诉模型有哪些记忆工具；记忆索引在每次压缩时写进开头消息，平时通过 `memory.search` 和 `memory.read` 获取。
+项目记忆可能在一轮中被修改。如果把它放进系统提示词，每次修改都会让缓存失效。所以系统提示词只告诉模型有哪些记忆工具；记忆索引在每次压缩时写进开头消息，平时通过 `memory.recall` 和 `memory.read` 获取。
 
-两次压缩之间的记忆修改有两种来源。Project Agent 自己用 `memory.write` 修改时，结果已经以工具结果的形式出现在对话里，不再发通知。用户在界面上新建或修改记忆时，Coordinator 在保存新版本的同一个事务里写一条 `memory_updated` 被动输入，`source_key = memory:{entry_id}:rev:{revision}`，内容是记忆 ID、标题、版本号和「由用户修改」。正文不放进通知，Project Agent 需要时用 `memory.read` 读取。
+两次压缩之间的记忆修改有两种来源。Project Agent 自己用 `memory.remember/correct/retire/restore` 修改时，结果已经以工具结果的形式出现在对话里，不再发通知。用户在界面上新建或修改记忆时，Coordinator 在保存新版本的同一个事务里写一条 `memory_updated` 被动输入，`source_key = memory:{entry_id}:rev:{revision}`，内容是记忆 ID、标题、版本号和「由用户修改」。正文不放进通知，Project Agent 需要时用 `memory.read` 读取。
 
-这条通知不触发运行：用户改一条记忆，不值得为此启动 Runtime、花一次模型调用。它随下一批主动输入交给模型，所以 Project Agent 在处理用户下一条消息或下一轮 Thread 结束时，一定已经知道记忆变了。Project Agent 正在运行时，通知同样等到下一轮。本期没有删除记忆的功能；以后增加时，删除也走这条通知。
+这条通知不触发运行：用户改一条记忆，不值得为此启动 Runtime、花一次模型调用。它随下一批主动输入交给模型，所以 Project Agent 在处理用户下一条消息或下一轮 Thread 结束时，一定已经知道记忆变了。Project Agent 正在运行时，通知同样等到下一轮。停用和恢复同样发送状态通知，归档 Project 只读。自动召回、旧摘要/工具结果刷新和后台整理仍为 planned。
 
 ### 7. 工具
 
 | 工具 | 类型 | 作用 | 输出可以从哪里重新拿到 |
 |---|---|---|---|
-| `memory.search` | 只读 | 按关键字搜索记忆标题和正文，最多 20 条 | 自身 |
+| `memory.recall` | 只读 | 按关键字搜索记忆标题和正文，最多 20 条 | 自身 |
 | `memory.read` | 只读 | 读取一条记忆的当前版本 | 自身 |
-| `memory.write` | 写入 | 新建或修改一条记忆，带 `expected_revision`，冲突时返回当前版本 | `memory.read` |
+| `memory.remember/correct/retire/restore` | 写入 | 经统一变更入口维护条目、证据、修订与停用状态；已有条目检查 expected_revision，操作标识去重 | `memory.read` |
 | `history.search` | 只读 | 在主对话原文里按关键字搜索，返回序号和片段 | 自身 |
 | `history.read` | 只读 | 按序号范围读取原文 | 自身 |
 | `devices.list` | 只读 | 列出本人设备、在线状态和能力报告 | 自身 |
@@ -275,9 +275,9 @@ Project 标题或目标被修改后，新的系统提示词从下一次压缩起
 
 | 工具 | 参数 |
 |---|---|
-| `memory.search` | 可选 `query`、`after_id` |
-| `memory.read` | `entry_id`；可选 `revision`，省略时读取当前版本 |
-| `memory.write` | `title`、`content`、`expected_revision`；可选 `entry_id`，新建时可由中心生成 |
+| `memory.recall` | 可选 `query`、`after_id` |
+| `memory.read` | `item_id`、`source_id` 或 `source_seq` 三选一；可选 `revision`、`input_id` 和来源字节分页 |
+| `memory.remember`、`memory.correct`、`memory.retire`、`memory.restore` | 来源、动作和字段见 [长期记忆技术设计](../project-memory/TECH.md#前台工具与-runtime-操作)；操作标识由 conversation_id 与 tool_call_id 确定 |
 | `history.search` | 可选 `query`、`after_seq`、`through_seq` |
 | `history.read` | 可选 `after_seq`、`through_seq`，读取 `(after_seq, through_seq]` |
 | `devices.list` | 可选 `after_id` |
@@ -293,7 +293,7 @@ Project 标题或目标被修改后，新的系统提示词从下一次压缩起
 
 只读工具还接受 `offset`、`max_bytes`。结果采用 `{encoding:"json", text, offset, total_bytes, truncated, next_offset?}`：先把完整业务结果编码为 JSON，再按 UTF-8 字节取片段。调用方在 `truncated=true` 时以同样的业务参数和 `next_offset` 继续读取，拼接 `text` 后解析 JSON。`max_bytes` 默认 16 KiB、最大 32 KiB；中心按实际 JSON 编码后的容量进一步缩短片段，整个工具结果 payload 不超过 32 KiB。记忆续读可固定 `revision`，`threads.read` 续读固定 `through_turn`。`threads.trace` 的业务 JSON 是与浏览器相同的过程项页（最多 50 项、1 MiB）；首次读取时可省略 `cursor`，工具片段外包装返回 `page_cursor`，绑定已提交报告的序号上限及本页起点。后续片段保持 `thread_id`、`worker_turn_seq` 不变，把外包装的 `page_cursor` 作为 `cursor`，配合 `next_offset` 读完这页 JSON，再以页内的 `next_cursor` 请求下一页并将 `offset` 归零。`offset > 0` 时必须提供 `cursor`，否则返回 `snapshot_cursor_required`。同一快照不包含之后到达的项；省略 `cursor` 从头刷新以读取新项。
 
-搜索和列表每页最多 20 条，业务 JSON 中用 `next_after_id` 或 `next_after_seq` 继续取得下一组；空列表表示结束。`history` 返回 `through_seq`，默认固定为本次工具调用的 assistant 序号，后续读取应保持该值，避免把续读过程新产生的事件加入范围。`history.read` 保留原事件 JSON，包括已压缩的原文。`memory.search` 返回标题、版本和正文片段，全文由 `memory.read` 取得；`threads.list` 返回 Thread 标识、设备、目录、Agent、状态和最后活动时间，内容由 `threads.read` 取得。
+搜索和列表每页最多 20 条，业务 JSON 中用 `next_after_id` 或 `next_after_seq` 继续取得下一组；空列表表示结束。`history` 返回 `through_seq`，默认固定为本次工具调用的 assistant 序号，后续读取应保持该值，避免把续读过程新产生的事件加入范围。`history.read` 保留原事件 JSON，包括已压缩的原文。`memory.recall` 返回当前有效条目、事实时间与证据引用，全文由 `memory.read` 取得；`threads.list` 返回 Thread 标识、设备、目录、Agent、状态和最后活动时间，内容由 `threads.read` 取得。
 
 写工具返回资源 ID、版本或状态及 `read_tool`。记忆冲突返回当前版本和内容，超限时返回截断标记及 `memory.read` 入口。
 

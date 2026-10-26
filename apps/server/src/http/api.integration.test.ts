@@ -340,9 +340,18 @@ it('preserves Project and memory writes, conflict bodies and employee isolation 
     },
   )
   const memoryPath = `${path}/memory/${randomUUID()}`
-  const memory = { title: 'Plan', content: 'Inspect the first device', expected_revision: 0 }
+  const memory = {
+    operation_id: randomUUID(),
+    title: 'Plan',
+    content: 'Inspect the first device',
+    expected_revision: 0,
+  }
   expect((await request(memoryPath, 'PUT', memory)).status).toBe(200)
-  const conflict = await request(memoryPath, 'PUT', { ...memory, content: 'Stale replacement' })
+  const conflict = await request(memoryPath, 'PUT', {
+    ...memory,
+    operation_id: randomUUID(),
+    content: 'Stale replacement',
+  })
   expect(conflict.status).toBe(409)
   expect(await conflict.json()).toMatchObject({
     current_revision: 1,
@@ -351,6 +360,14 @@ it('preserves Project and memory writes, conflict bodies and employee isolation 
   expect(await (await request(`${memoryPath}/revisions`)).json()).toMatchObject({
     revisions: [{ revision: 1, title: memory.title, content: memory.content, author: 'user' }],
   })
+  const savedMemory = Schema.decodeUnknownSync(P.ProjectMemory)(await (await request(memoryPath)).json())
+  const sourcePath = path + '/memory/sources/' + savedMemory.evidence[0]!.source_id
+  for (const query of ['max_bytes=abc', 'offset=abc', 'max_bytes=0', 'offset=-1', 'max_bytes=Infinity']) {
+    expect((await request(sourcePath + '?' + query)).status).toBe(400)
+  }
+  for (const endpoint of [path + '/memory?limit=abc', memoryPath + '/revisions?after_revision=abc'])
+    expect((await request(endpoint)).status).toBe(400)
+  expect((await request(sourcePath + '?max_bytes=100')).status).toBe(200)
   for (const operation of ['stop', 'retry']) {
     expect((await request(`${path}/${operation}?extra=1`, 'POST', {})).status).toBe(400)
     expect((await request(`${path}/${operation}`, 'POST', { extra: true })).status).toBe(400)

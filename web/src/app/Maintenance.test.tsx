@@ -325,13 +325,42 @@ describe('project maintenance', () => {
     const edit = await screen.findByRole('dialog', { name: 'Edit memory' })
     await replace(user, within(edit).getByLabelText('Memory'), 'The Windows suite lives in C:\\src\\compat-suite.')
     await user.click(within(edit).getByRole('button', { name: 'Save memory' }))
-    await within(memory).findByRole('article', { name: 'Memory v2' })
+    await within(memory).findByRole('button', { name: 'The Windows suite lives in C:\\src\\compat-suite.' })
     await user.click(within(memory).getByRole('button', { name: 'The Windows suite lives in C:\\src\\compat-suite.' }))
     const version = await screen.findByRole('dialog', { name: 'Edit memory' })
     await user.click(within(version).getByText('View source and history'))
     expect(within(version).getByText(/^v2 · You ·/)).toBeVisible()
     expect(within(version).getByText(originalMemory)).toBeVisible()
     expect(within(version).getByText(/^v1 · Project assistant ·/)).toBeVisible()
+  })
+
+  it('opens sources on demand, retires an entry and explicitly restores it from No longer used', async () => {
+    const user = userEvent.setup()
+    let readSources!: ReturnType<typeof vi.fn>
+    const { client } = setup(memoryPath, 'normal', (client) => {
+      readSources = vi
+        .spyOn(client, 'memorySources')
+        .mockResolvedValue([
+          { id: 'source', role: 'user', text: 'Keep Windows coverage.', source_seq: 12, suppressed: false },
+        ])
+    })
+    await user.click(await screen.findByRole('button', { name: originalMemory }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit memory' })
+    expect(readSources).not.toHaveBeenCalled()
+    await user.click(within(dialog).getByText('View source and history'))
+    expect(await within(dialog).findByText('Keep Windows coverage.')).toBeVisible()
+    await user.click(within(dialog).getByRole('button', { name: 'Stop using' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect((await client.listProjectMemory('prj-compat')).find((n) => n.body === originalMemory)?.status).toBe(
+      'retired',
+    )
+    await user.click(screen.getByText('No longer used'))
+    await user.click(screen.getByRole('button', { name: originalMemory }))
+    const retired = await screen.findByRole('dialog', { name: 'Edit memory' })
+    await user.click(within(retired).getByRole('button', { name: 'Restore memory' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect((await client.listProjectMemory('prj-compat')).find((n) => n.body === originalMemory)?.status).toBe('active')
+    expect(screen.queryByText('No longer used')).not.toBeInTheDocument()
   })
 
   it('keeps a memory draft after validation and save failure, then retries without duplication', async () => {
@@ -372,7 +401,9 @@ describe('project maintenance', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Review latest' }))
     expect(within(dialog).getByLabelText('Memory')).toHaveValue('Run all Windows path regressions before release.')
     await user.click(within(dialog).getByRole('button', { name: 'Save memory' }))
-    const note = await screen.findByRole('article', { name: 'Memory v3' })
+    const note = (
+      await screen.findByRole('button', { name: 'Run all Windows path regressions before release.' })
+    ).closest('article')!
     await user.click(within(note).getByRole('button', { name: 'Run all Windows path regressions before release.' }))
     const history = await screen.findByRole('dialog', { name: 'Edit memory' })
     await user.click(within(history).getByText('View source and history'))
@@ -517,7 +548,7 @@ describe('project maintenance', () => {
     await user.click(screen.getByRole('tab', { name: /Memory/ }))
     const memory = await screen.findByRole('region', { name: 'Project memory' })
     expect(within(memory).getByText(originalMemory)).toBeInTheDocument()
-    expect(within(memory).queryByRole('button')).not.toBeInTheDocument()
+    expect(within(memory).queryByRole('button', { name: 'Add memory' })).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Message the project assistant')).not.toBeInTheDocument()
   })
 })

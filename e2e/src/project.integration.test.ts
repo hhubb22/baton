@@ -314,6 +314,7 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
     }
     expect((await bob(`/attention-requests/${inbox!.id}/answer`, 'POST', answer)).status).toBe(404)
     const updated = await alice<P.ProjectMemory>(`/projects/${project.id}/memory/${memory.id}`, 'PUT', {
+      operation_id: randomUUID(),
       expected_revision: 1,
       title: memory.title,
       content: memory.content + '；用户已核对',
@@ -347,7 +348,8 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
       .map((event) => ({ event, message: Schema.decodeUnknownSync(Payload)(event.payload).message }))
     const toolResults = messages.filter((entry) => entry.message.role === 'toolResult')
     expect(toolResults.map((entry) => entry.message.toolName)).toEqual([
-      'memory.write',
+      'memory.read',
+      'memory.remember',
       'inbox.ask',
       'threads.create',
       'nodes.exec',

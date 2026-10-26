@@ -1,16 +1,16 @@
 # Project 长期记忆技术设计
 
-Status: draft
+Status: partially implemented
 Owner: Asa
 Basis: [行为规格 PM-01～20](PRODUCT.md)；代码基线 `35823e30cf0178be7d720fa9a70d079a52d5191c`。
 
 ## Context
 
-本文描述待审阅设计，尚未实施。[Project Agent TECH](../project-agent/TECH.md) 记录当前主对话、租约、工具与压缩实现；本文约定实施后的记忆存储、检索与后台工作。
+条目、修订、来源、证据、操作去重与抑制记录已由 `project/memory/` 实现，员工 API 和前台工具共享事务内 `applyChange`。当前查询按状态及事实时间过滤，仍使用有界子串搜索与有效条目标题索引。词法检索、自动召回、请求快照、旧工具结果/摘要刷新和后台整理仍为 planned。[Project Agent TECH](../project-agent/TECH.md) 记录当前主对话、租约、工具与压缩实现。
 
 | 已核对的入口 | 可复用的机制 | 本次需要改变的部分 |
 | --- | --- | --- |
-| `apps/server/src/project/memory.ts` | PostgreSQL 修订、条目锁、冲突返回 | 来源证据、知识状态、有效时间、停用与统一变更入口 |
+| `apps/server/src/project/memory/` | 统一变更入口、修订/操作去重、来源证据、事实时间、停用与恢复 | 词法检索、自动召回与请求快照 planned |
 | `apps/server/src/project/events.ts` | 输入批次领取、assistant 保存、事件标识去重 | 最终回复事务内登记整理工作，关联请求上下文 |
 | `apps/server/src/project/runtime.ts` | 节点身份、主租约、工具结果与副作用同事务 | 自动召回、知识代次检查；后台使用独立授权 |
 | `runtimes/project-agent/src/context.ts`、`runtime.ts` | 确定性历史构造、模型预算、顺序工具、保存屏障 | 注入本次有效记忆，后台受限运行模式 |
@@ -47,7 +47,7 @@ flowchart TD
 | Runtime `context.ts` | 依据已保存的快照构造模型视图，不重新查询数据库决定旧请求看过什么 |
 | `packages/protocol/src/project-memory.ts` | 领域 DTO 与约束；`node.ts`、`http-api.ts` 组合传输，不反向依赖传输层 |
 
-上述为目标模块边界。现有 `memory.ts` 替换为目录入口并更新所有调用方，不保留旧内部入口兼容层。普通运行与后台共享 provider、凭据和进程回收实现，工具权限按模式固定。
+`project/memory/index.ts` 导出 `applyChange`、读列表/修订/来源和有效标题索引。`change.ts` 负责事务内变更，`sources.ts` 从已保存且前台可读的原位置登记来源，`read.ts` 统一状态和时间过滤。其余模块边界为 planned。后台将复用普通运行的 provider、凭据和进程回收实现，工具权限按模式固定。
 
 ## 数据与知识变更
 
@@ -63,10 +63,12 @@ flowchart TD
 | `project_memory_sources` | 稳定来源键、原始记录定位、角色、来源种类、规范文本及 SHA-256；同一原始位置只登记一次 |
 | `project_memory_evidence` | 条目修订、来源 ID、UTF-8 字节范围、证据关系；同一修订不重复引用同一来源范围 |
 | `project_memory_changes` | `operation_id`、规范请求哈希、动作、前后条目/修订、依据与结果；重试返回原结果 |
-| `project_memory_suppressions` | 停用或纠正所否定的断言、条目/替代链、语义键与值指纹、来源范围；区分 retired/retracted，恢复只解除指定停用记录 |
+| `project_memory_suppressions` | 停用或纠正所否定的断言、条目/替代链、语义键与值指纹、来源范围；区分 retired/retracted，恢复只解除指定停用记录及同次停用期间编辑派生的抑制组 |
 | `project_memory_jobs` | 来源批次与边界、处理游标、状态、重试、attempt/claim 身份、provider/model 与策略版本 |
 | `project_memory_contexts` | 请求 ID、历史边界、知识代次、实际正文及引用、查询与算法版本、预算、有效截止时间、降级标记和内容哈希；不可变 |
 | `project_memory_search_documents` | 条目修订或原始来源分片、字段文本/长度、词项频次和候选索引；属于可重建数据 |
+
+现有规范表为 state、items、revisions、sources、evidence、changes 和 suppressions。jobs、contexts 与 search_documents 仍为 planned；state 目前推进 knowledge_epoch，search_generation 预留给检索实现。修订响应统一使用 updated_at 表示该次修订的记录时间；effective 表示该修订是否为当前有效知识，retracted 标明被纠正的断言。来源文本、修订、证据与操作结果只追加，停用组用 retirement_id 关联；显式恢复只解除该组的 retired 抑制，不解除 retracted 抑制。
 
 主题视图由当前条目按主题确定性分组，携带条目 ID 与修订。首期不再维护可独立编辑、可与条目冲突的主题正文。需要压缩展示时只生成带引用的预览，预览不作为新证据。
 
@@ -106,7 +108,7 @@ flowchart TD
 
 语义键包含实体、属性和范围，用于寻找冲突候选。键相同、正文相似、出现同名实体均不能单独决定覆盖。多值属性和条件不同的要求允许并存。没有可信事实时间时，不用处理时间伪造历史区间。
 
-变更入口由 `actor` 决定允许的动作：员工可直接编辑/停用/恢复；前台运行须引用实际用户要求或执行证据；后台只能提案和整理，不能解除用户抑制或自行恢复停用知识。作者与执行者均由认证身份生成。
+变更入口由 `actor` 决定允许的动作：员工可直接编辑/停用/恢复；前台运行须引用实际用户要求或执行证据；后台只能提案和整理，不能解除用户抑制或自行恢复停用知识。作者与执行者均由认证身份生成。统一入口拒绝以 inferred 依据 correct/supersede 已明确的用户偏好，用户明确纠正可以立即生效。
 
 `revision` 继续做乐观并发检查，`operation_id` 做请求去重；两者不能互相替代。相同 ID、相同规范请求返回原结果；相同 ID、不同请求返回冲突。内容、状态和证据均未变时不增加修订或知识代次。
 
@@ -250,7 +252,7 @@ Project 暂停或归档在 Agent 锁下撤销后台 claim 并登记 stop。暂�
 
 ### 员工 API
 
-沿用 `/api/v1/projects/:projectId/memory` 与员工认证、Origin、CSRF、强制改密和资源隔离。HTTP DTO 在同一 Effect HttpApi 声明中生成路由与 OpenAPI。归档只读检查放入公共变更入口。
+沿用 `/api/v1/projects/:projectId/memory` 与员工认证、Origin、CSRF、强制改密和资源隔离。HTTP DTO 在同一 Effect HttpApi 声明中生成路由与 OpenAPI。归档只读检查放入公共变更入口。GET 列表、详情、修订、来源和 PUT/POST changes 已实现；recall、topics 与 status HTTP 端点仍为 planned。列表 include_inactive=true 用于页面管理停用条目；默认列表和 memory.recall 只返回当前有效知识。分页数字在 HTTP Schema 内按安全整数和范围解码，来源按 UTF-8 字节分页。
 
 | 路径 | 请求/响应要点 |
 | --- | --- |
@@ -270,14 +272,14 @@ Project 暂停或归档在 Agent 锁下撤销后台 claim 并登记 stop。暂�
 | 接口 | 契约 |
 | --- | --- |
 | `memory.recall` | 与员工 recall 相同的查询、时间模式及预算；返回有来源候选及缺口，不强制调用综合模型 |
-| `memory.read` | item_id 或 source_id，二者选一；可选 revision 或来源字节分页；返回内容、状态、条件与来源 |
+| `memory.read` | item_id、source_id 或 source_seq 三选一；可选 revision 或来源字节分页；source_seq 与 input_id 可登记已领取的原始队列条目，不带 input_id 时只登记 assistant 正文；返回内容、状态、条件与来源 |
 | `memory.remember` | 新知识、类型、条件、证据引用；服务端寻找等价条目，返回新增/合并/no-op |
-| `memory.correct` | item_id、expected_revision、correction/state_change、内容、证据与可选事实时间；区分纠正与后继状态 |
+| `memory.correct` | item_id、expected_revision、action=correct/supersede/support/dispute、content、evidence 与可选 reason；supersede 通过新条目表达事实变化 |
 | `memory.retire` | item_id、expected_revision、用户请求证据；自动整理不具有该权限 |
 | `memory.restore` | item_id、expected_revision、待解除抑制记录及用户明确恢复证据；仅前台或员工入口可用 |
 | `prepare_context` | context_id、last_seq、input_seq、预算；返回已保存的快照，超大内容通过分页读取 |
 
-恢复停用条目只由员工 API 或带用户明确恢复依据的前台操作执行；后台协议没有 restore。现有 memory.search/write 工具及 DTO 直接替换，更新工具名映射、provider 回放和 UI 调用，不维护旧开发协议别名。history.search/read 保留，并复用来源索引与抑制状态，权限和序号边界保持原约束。
+恢复停用条目只由员工 API 或带用户明确恢复依据的前台操作执行；后台协议没有 restore。前台工具、名称映射、provider 回放与 UI 使用统一 DTO，不保留 memory.search/write 别名。history.search/read 保持原权限和序号边界，复用来源索引与抑制状态仍为 planned。
 
 | 错误码 | 结果与调用方处理 |
 | --- | --- |
@@ -298,22 +300,22 @@ Project 暂停或归档在 Agent 锁下撤销后台 claim 并登记 stop。暂�
 
 追踪沿用 `packages/telemetry`，记录工作/尝试/批次 ID、策略版本、知识与索引代次、候选数量、截断、耗时、token 用量及错误码。默认追踪不包含记忆正文、原始证据、查询全文或凭据。来源正文只在授权 API 返回，日志不能成为额外副本。
 
-实施时直接调整当前 schema 基线，不提供旧实验数据升级与双写兼容。淘汰资产包括旧 memory.search/write 定义、单字段笔记 DTO、仅标题的压缩记忆索引、旧编辑视图和验证其旧格式的专属用例。原始历史、通用权限/事务/进程辅助设施保留；新实现按本文验收，不以复现旧检索排序或旧笔记格式为目标。
+当前 schema 使用规范条目和修订模型，不提供旧实验数据升级或双写兼容。记忆工具、DTO 与页面使用当前结构；原始历史及通用权限、事务和进程辅助设施保留。压缩使用按当前有效性过滤的标题索引，后续请求快照将替换该索引。检索排序与快照验收仍为 planned。
 
-批准后的实现还需原地同步 Project Agent PA-05、14～17 的记忆相关规则、TECH 第 3/6/7/11 节及 Runtime/中心 README，移除被替换描述。本文仍为 draft 时，这些文档继续描述当前实现。
+Project Agent 行为、技术设计及 Runtime/中心 README 描述当前手动维护与前台工具。自动召回、后台机制和相关运行控制继续保留 planned。
 
 ## Testing and validation
 
 | 需求 | 设置与观察 | 失败条件 | 位置 | Status |
 | --- | --- | --- | --- | --- |
-| PM-01、04、08 | 跨员工/Project 读取、伪造证据、停用后重提取 | 越权、来源升级、旧值复活 | 中心 PostgreSQL 集成 | planned |
+| PM-01、04、08 | 跨员工/Project 读取、伪造证据、停用后重提取 | 越权、来源升级、旧值复活 | 中心 PostgreSQL 集成 | partial：员工/Project 隔离、来源角色与范围、停用/纠正后旧证据重放已验证；后台 planned |
 | PM-02、05 | 回复/工作登记事务中断；分片回执丢失、重试 | 缺工作、重复知识或半提交 | 中心事务故障注入 | planned |
-| PM-06～09 | 时间变化、原始错误、条件并存、并发编辑 | 错误历史被视为事实，静默覆盖或自动恢复 | 变更单元测试 + 数据库集成 | planned |
+| PM-06～09 | 时间变化、原始错误、条件并存、并发编辑 | 错误历史被视为事实，静默覆盖或自动恢复 | 变更单元测试 + 数据库集成 | partial：数据库验证冲突、去重、修订撤回、事实时间和显式恢复；历史 recall planned |
 | PM-10～12 | 固定中英语料、标识符、同义表达、候选截断 | 无排序、失效内容混入或未报告缺口 | 纯检索单测与固定语料 | planned |
 | PM-13～15 | 核心超额、多次压缩、事实自然到期、旧摘要/工具结果和请求恢复 | 要求丢失、派生内容再提取、过期副作用或重复执行 | Runtime 本地模型替身 + 中心集成 | planned |
 | PM-17～19 | 断线、超时、认证失败、前台抢占和进程回收 | 前台饿死、旧 claim 可提交、占用虚报 | batond 包内进程替身 | planned |
 | PM-02、10、15、18 | HTTP→中心→WSS→后台 Runtime→知识→新前台 Runtime | 形成/读取链路断裂，恢复重复副作用 | 一条跨 app 本地 E2E | planned |
-| PM-16、17 | 按需来源与历史、冲突草稿、停用/恢复、持续故障提示 | 列表混入修订或元信息；后台状态打扰前台 | Web 组件测试 | planned |
+| PM-16、17 | 按需来源与历史、冲突草稿、停用/恢复、持续故障提示 | 列表混入修订或元信息；后台状态打扰前台 | Web 组件测试 | partial：来源按需读取、历史时间、冲突草稿、停用/恢复已验证；后台提示 planned |
 | PM-18、19 | 搬迁 SEA、空 PATH 与临时 HOME 下调用 memory 模式，检查启动、取消与私有文件 | 依赖源码路径、缺失分派或进程未回收 | 现有安装包检查 | planned |
 | PM-20 | 固定模型与历史，比较原始检索、词法召回、后台整理 | 使用过时知识、来源不支持或成本无记录 | 显式手动质量评估 | planned |
 
@@ -321,7 +323,7 @@ Project 暂停或归档在 Agent 锁下撤销后台 claim 并登记 stop。暂�
 
 质量报告分别记录有效事实命中、历史时间正确、过时信息误用、无依据断言、纠正后的实际动作及额外 token/延迟。固定同一模型、历史与预算比较各阶段，先取得基线再制定质量阈值。CI 只使用本地替身和固定录制；真实在线模型评估显式手动运行，不作为合入或功能开放前提。
 
-文档检查运行格式、链接及需求/验收编号核对；实施阶段按 AGENTS.md 运行受影响包检查、Runtime 测试和所需集成验证。源代码、打包与进程行为尚未实施，不能在本阶段报告通过。
+文档检查运行格式、链接及需求/验收编号核对；实施阶段按 AGENTS.md 运行受影响包检查、Runtime 测试和所需集成验证。打包与后台进程行为仍为 planned，现有自动化结果不作为其通过证据。
 
 ## 资料依据与取舍
 

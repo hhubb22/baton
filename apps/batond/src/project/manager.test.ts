@@ -480,7 +480,7 @@ describe('Project Runtime host', () => {
             case 'call_tool': {
               expect(events.at(-1)?.kind).toBe('assistant')
               tools++
-              expect(request.tool_name).toBe('memory.write')
+              expect(request.tool_name).toBe('memory.remember')
               const event = {
                 seq: events.length + 1,
                 kind: 'tool_result',

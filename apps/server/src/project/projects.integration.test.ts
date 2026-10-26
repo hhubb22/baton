@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { readSource, registerEventSource } from './memory/index.ts'
 import { Effect, Schema } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import { describe, expect, it } from 'vite-plus/test'
@@ -245,21 +246,42 @@ describe('runtime leases and persisted requests', () => {
           p = await a.create(),
           r = await a.start(p)
         await r.rpc('claim_inputs')
+        const evidence = await run(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            const [input] = yield* sql<{
+              id: number
+            }>`SELECT id FROM project_agent_input_queue WHERE agent_id=${p.agent.id} AND delivered_seq=1 ORDER BY id LIMIT 1`
+            const source = yield* readSource(
+              a.employee,
+              p.id,
+              yield* registerEventSource(a.employee, p.id, 1, 1, Number(input!.id)),
+            )
+            return [
+              {
+                source_id: source.id,
+                source_hash: source.source_hash,
+                start_byte: 0,
+                end_byte: Buffer.byteLength(source.text),
+              },
+            ]
+          }),
+        )
         const calls = [
           {
             type: 'toolCall',
             id: 'write-1',
-            name: 'memory.write',
-            arguments: { title: 'Decision', content: 'Use SQL', expected_revision: 0 },
+            name: 'memory.remember',
+            arguments: { title: 'Decision', content: 'Use SQL', evidence },
           },
-          { type: 'toolCall', id: 'read-1', name: 'memory.search', arguments: { query: 'Decision' } },
+          { type: 'toolCall', id: 'read-1', name: 'memory.recall', arguments: { query: 'Decision' } },
         ]
         await r.rpc('append_event', { last_seq: 1, client_event_id: 'assistant-1', payload: assistant(calls) })
         await expect(
           r.rpc('call_tool', {
             last_seq: 2,
             tool_call_id: 'read-1',
-            tool_name: 'memory.search',
+            tool_name: 'memory.recall',
             arguments: { query: 'Decision' },
           }),
         ).rejects.toMatchObject({ code: 'conflict' })
@@ -267,14 +289,14 @@ describe('runtime leases and persisted requests', () => {
           r.rpc('call_tool', {
             last_seq: 2,
             tool_call_id: 'write-1',
-            tool_name: 'memory.write',
+            tool_name: 'memory.remember',
             arguments: { title: 'tampered' },
           }),
         ).rejects.toMatchObject({ code: 'invalid' })
         const request = {
           last_seq: 2,
           tool_call_id: 'write-1',
-          tool_name: 'memory.write',
+          tool_name: 'memory.remember',
           arguments: calls[0]!.arguments,
         }
         const event = result(P.ProjectEvent, await r.rpc('call_tool', request))
@@ -285,7 +307,7 @@ describe('runtime leases and persisted requests', () => {
         await r.rpc('call_tool', {
           last_seq: 3,
           tool_call_id: 'read-1',
-          tool_name: 'memory.search',
+          tool_name: 'memory.recall',
           arguments: { query: 'Decision' },
         })
         await run(

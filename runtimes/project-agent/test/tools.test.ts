@@ -29,9 +29,12 @@ test('固定工具顺序与 Thread、Inbox 契约一致', () => {
   assert.deepEqual(
     toolDefinitions.map((tool) => tool.name),
     [
-      'memory.search',
+      'memory.recall',
       'memory.read',
-      'memory.write',
+      'memory.remember',
+      'memory.correct',
+      'memory.retire',
+      'memory.restore',
       'history.search',
       'history.read',
       'devices.list',

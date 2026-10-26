@@ -209,6 +209,12 @@ export function createMockClient(
       signedIn()
       return structuredClone(store.saveMemory(savedInput))
     },
+    async changeMemory(input) {
+      await connect(latency.save)
+      signedIn()
+      return structuredClone(store.changeMemory(input))
+    },
+    memorySources: () => guarded(() => []),
     async stopProjectRun(projectId) {
       await connect(latency.read)
       signedIn()

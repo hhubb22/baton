@@ -1,3 +1,4 @@
+import type { ProjectMemory, MemoryRevision } from '@baton/protocol'
 import { ClientError, type BatonClient } from '../client'
 import { shortenExcerpt } from '../derive'
 import type { InboxItem, MemoryNote, Project, ProjectEntry, Reference } from '../types'
@@ -14,6 +15,8 @@ type ProjectAPI = Pick<
   | 'updateProject'
   | 'setProjectStatus'
   | 'saveMemory'
+  | 'changeMemory'
+  | 'memorySources'
   | 'stopProjectRun'
   | 'retryProject'
   | 'listInbox'
@@ -81,20 +84,8 @@ interface InputDTO {
   source_key: string
   payload: Record<string, unknown>
 }
-interface MemoryDTO {
-  id: string
-  title: string
-  content: string
-  revision: number
-  author: 'user' | 'agent'
-  updated_at: string
-}
-interface MemoryRevisionDTO {
-  revision: number
-  content: string
-  author: 'user' | 'agent'
-  created_at: string
-}
+type MemoryDTO = ProjectMemory
+type MemoryRevisionDTO = MemoryRevision
 interface InboxDTO {
   id: string
   project_id: string
@@ -269,7 +260,15 @@ function mapMemory(projectId: string, note: MemoryDTO, revisions: MemoryRevision
     version: revision.revision,
     body: revision.content,
     source: revision.author === 'user' ? ('you' as const) : ('assistant' as const),
-    updatedAt: timestamp(revision.created_at),
+    updatedAt: timestamp(revision.updated_at),
+    details: {
+      action: revision.action,
+      reason: revision.reason,
+      validFrom: revision.valid_from,
+      validUntil: revision.valid_until,
+      retracted: revision.retracted,
+      evidence: revision.evidence,
+    },
   }))
   if (!versions.some((version) => version.version === note.revision))
     versions.push({
@@ -277,9 +276,27 @@ function mapMemory(projectId: string, note: MemoryDTO, revisions: MemoryRevision
       body: note.content,
       source: note.author === 'user' ? 'you' : 'assistant',
       updatedAt: timestamp(note.updated_at),
+      details: {
+        action: note.action,
+        reason: note.reason,
+        validFrom: note.valid_from,
+        validUntil: note.valid_until,
+        retracted: note.retracted,
+        evidence: note.evidence,
+      },
     })
   versions.sort((a, b) => a.version - b.version)
-  return { id: note.id, projectId, ...versions[versions.length - 1], versions }
+  return {
+    id: note.id,
+    projectId,
+    ...versions[versions.length - 1],
+    versions,
+    status: note.status,
+    effective: note.effective,
+    topic: note.topic,
+    suppressionId: note.suppression_id,
+    evidence: note.evidence,
+  }
 }
 
 async function userEntry(
@@ -499,7 +516,7 @@ export function createProjectAPI(ctx: HttpContext): ProjectAPI {
       let after = ''
       do {
         const page = await ctx.request<{ entries: MemoryDTO[] | null; next_after_id?: string }>(
-          `${projectPath(projectId)}/memory?limit=100${after ? `&after_id=${apiPath(after)}` : ''}`,
+          `${projectPath(projectId)}/memory?include_inactive=true&limit=100${after ? `&after_id=${apiPath(after)}` : ''}`,
         )
         notes.push(...(page.entries ?? []))
         const next = page.next_after_id ?? ''
@@ -555,7 +572,12 @@ export function createProjectAPI(ctx: HttpContext): ProjectAPI {
       try {
         const note = await ctx.request<MemoryDTO>(
           path,
-          json('PUT', { title, content: input.body, expected_revision: input.version ?? 0 }),
+          json('PUT', {
+            title,
+            content: input.body,
+            expected_revision: input.version ?? 0,
+            operation_id: await stableId(input.clientId),
+          }),
         )
         ctx.emit('projects')
         return { state: 'saved', note: await readMemory(input.projectId, note) }
@@ -566,6 +588,56 @@ export function createProjectAPI(ctx: HttpContext): ProjectAPI {
         ctx.emit('projects')
         return { state: 'conflict', note: await readMemory(input.projectId, latest) }
       }
+    },
+    async changeMemory(input) {
+      const path = `${projectPath(input.projectId)}/memory/${apiPath(input.noteId)}`
+      try {
+        const note = await ctx.request<MemoryDTO>(
+          path + '/changes',
+          json('POST', {
+            operation_id: await stableId(input.clientId),
+            expected_revision: input.version,
+            action: input.action,
+            ...(input.action === 'restore' ? { suppression_id: input.suppressionId } : {}),
+          }),
+        )
+        ctx.emit('projects')
+        return { state: 'saved', note: await readMemory(input.projectId, note) }
+      } catch (error) {
+        const clash = conflict(error)
+        if (!clash || (clash.payload?.code && clash.payload.code !== 'memory_conflict')) throw error
+        return { state: 'conflict', note: await readMemory(input.projectId, await ctx.request<MemoryDTO>(path)) }
+      }
+    },
+    async memorySources(projectId, note) {
+      const ids = [
+        ...new Set(
+          [...note.evidence, ...note.versions.flatMap((version) => version.details?.evidence ?? [])].map(
+            (ref) => ref.source_id,
+          ),
+        ),
+      ]
+      return Promise.all(
+        ids.map(async (id) => {
+          const path = `${projectPath(projectId)}/memory/sources/${apiPath(id)}`
+          let offset = 0
+          let text = ''
+          let source: import('../types').MemorySourceView
+          let more: boolean
+          do {
+            const page = await ctx.request<
+              import('../types').MemorySourceView & { next_offset: number; has_more: boolean }
+            >(path + '?offset=' + offset + '&max_bytes=32768')
+            source = page
+            text += page.text
+            more = page.has_more
+            if (more && page.next_offset <= offset)
+              throw new ClientError('unavailable', 'Source pagination did not advance')
+            offset = page.next_offset
+          } while (more)
+          return { ...source!, text }
+        }),
+      )
     },
     stopProjectRun: (id) => runAction(id, 'stop'),
     retryProject: (id) => runAction(id, 'retry'),

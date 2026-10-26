@@ -272,7 +272,7 @@ function projectEntries(now: number): ProjectEntry[] {
 }
 
 function memory(now: number): MemoryNote[] {
-  const notes: Omit<MemoryNote, 'version' | 'source' | 'versions'>[] = [
+  const notes: Pick<MemoryNote, 'id' | 'projectId' | 'body' | 'updatedAt'>[] = [
     {
       id: 'mem-baton-1',
       projectId: 'prj-baton',
@@ -294,7 +294,16 @@ function memory(now: number): MemoryNote[] {
   ]
   return notes.map((note) => {
     const first = { version: 1, source: 'assistant' as const, body: note.body, updatedAt: note.updatedAt }
-    return { ...note, ...first, versions: [first] }
+    return {
+      ...note,
+      ...first,
+      versions: [first],
+      status: 'active',
+      effective: true,
+      topic: '',
+      suppressionId: null,
+      evidence: [],
+    }
   })
 }
 

@@ -7,7 +7,7 @@ import { gfmFromMarkdown } from 'mdast-util-gfm'
 import { gfm } from 'micromark-extension-gfm'
 import { AppError } from './errors.ts'
 import { transaction } from './database.ts'
-import { strictDecode } from './project/memory.ts'
+import { strictDecode } from './decode.ts'
 import { insertProjectInput } from './project/inputs.ts'
 
 export interface InboxBinding {

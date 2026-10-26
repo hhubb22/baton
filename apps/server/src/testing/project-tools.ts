@@ -5,6 +5,7 @@ import * as P from '@baton/protocol'
 import { seedNode, type TestDatabase } from './database.ts'
 import type { NodeSource } from '../errors.ts'
 import { runtimeRequest } from '../project/runtime.ts'
+import { registerEventSource, readSource } from '../project/memory/index.ts'
 
 interface ToolRun {
   employeeId: string
@@ -137,8 +138,24 @@ export async function projectToolFixture(db: TestDatabase, existing?: Pick<ToolR
       operation: 'append_event',
       last_seq: 0,
       client_event_id: 'fixture',
-      payload: { format: 'pi-ai/1', message: { role: 'assistant', content: [] } },
+      payload: {
+        format: 'pi-ai/1',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'Use PostgreSQL' }] },
+      },
     }),
   )
-  return { context, nodeId, source }
+  const memorySource = await db.run(
+    Effect.gen(function* () {
+      return yield* readSource(employeeId, projectId, yield* registerEventSource(employeeId, projectId, 1, 1))
+    }),
+  )
+  const memoryEvidence = [
+    {
+      source_id: memorySource.id,
+      source_hash: memorySource.source_hash,
+      start_byte: 0,
+      end_byte: Buffer.byteLength(memorySource.text),
+    },
+  ]
+  return { context, nodeId, source, memoryEvidence }
 }

@@ -1,4 +1,4 @@
-import { Schema } from 'effect'
+import { Schema, SchemaTransformation } from 'effect'
 import { Cursor, NonNegativeInteger, StorageGeneration, Text, ThreadStatus, UUID, boundedText } from './common.ts'
 
 export const BrowserSubscription = Schema.Struct({
@@ -77,7 +77,21 @@ export const ProjectMessagesQuery = Schema.Struct({
   limit: pageLimit,
 })
 export const ProjectEventsQuery = Schema.Struct({ after_seq: afterSequence, limit: pageLimit })
-export const MemoryRevisionsQuery = Schema.Struct({ after_revision: afterSequence, limit: pageLimit })
+const memoryInteger = (minimum: number, maximum: number) =>
+  decimal(minimum, maximum).pipe(Schema.decodeTo(NonNegativeInteger, SchemaTransformation.numberFromString))
+export const MemoryRevisionsQuery = Schema.Struct({
+  after_revision: Schema.optionalKey(memoryInteger(0, Number.MAX_SAFE_INTEGER)),
+  limit: Schema.optionalKey(memoryInteger(1, 100)),
+})
+export const MemoryListQuery = Schema.Struct({
+  after_id: afterID,
+  limit: Schema.optionalKey(memoryInteger(1, 100)),
+  include_inactive: Schema.optionalKey(Schema.Literals(['true', 'false'])),
+})
+export const MemorySourceQuery = Schema.Struct({
+  offset: Schema.optionalKey(memoryInteger(0, Number.MAX_SAFE_INTEGER)),
+  max_bytes: Schema.optionalKey(memoryInteger(4, 32768)),
+})
 export const InboxQuery = Schema.Struct({
   state: Schema.optionalKey(Schema.Literals(['open', 'done', 'all'])),
   cursor: Schema.optionalKey(boundedText(4096)),

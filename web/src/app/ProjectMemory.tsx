@@ -1,7 +1,7 @@
 import * as stylex from '@stylexjs/stylex'
 import { useRef, useState } from 'react'
 import { ClientError } from '../data/client'
-import { newClientId, useProjectMemory, useSaveMemory } from '../data/queries'
+import { newClientId, useProjectMemory, useSaveMemory, useChangeMemory, useMemorySources } from '../data/queries'
 import type { MemoryNote, MemoryVersion, Project } from '../data/types'
 import { text } from '../theme/text'
 import { colors, space } from '../theme/tokens.stylex'
@@ -56,6 +56,10 @@ function MemoryEditor({ project, note, onClose }: { project: Project; note: Memo
       },
   )
   const save = useSaveMemory()
+  const change = useChangeMemory()
+  const [showSources, setShowSources] = useState(false)
+  const sources = useMemorySources(project.id, note, showSources)
+  const actionId = useRef(newClientId())
   const [error, setError] = useState<string | null>(null)
   const [latest, setLatest] = useState<MemoryNote | null>(null)
   const saving = useRef(false)
@@ -94,6 +98,35 @@ function MemoryEditor({ project, note, onClose }: { project: Project; note: Memo
       saving.current = false
     }
   }
+  const changeStatus = async () => {
+    if (!note || saving.current || archived || latest) return
+    saving.current = true
+    setError(null)
+    try {
+      const result = await change.mutateAsync({
+        projectId: project.id,
+        noteId: note.id,
+        version: draft.version ?? note.version,
+        action: note.status === 'retired' ? 'restore' : 'retire',
+        suppressionId: note.suppressionId,
+        clientId: actionId.current,
+      })
+      if (result.state === 'conflict') {
+        setLatest(result.note)
+        return
+      }
+      workspace.memoryDrafts.set(key, null)
+      onClose()
+    } catch {
+      setError(
+        note.status === 'retired'
+          ? 'Could not restore memory. Check its current history.'
+          : 'Could not stop using memory. Your draft is kept.',
+      )
+    } finally {
+      saving.current = false
+    }
+  }
   return (
     <Dialog
       open
@@ -110,6 +143,11 @@ function MemoryEditor({ project, note, onClose }: { project: Project; note: Memo
       actions={
         <>
           <Button onClick={cancel}>Cancel</Button>
+          {note && !archived && !latest && (
+            <Button onClick={() => void changeStatus()}>
+              {note.status === 'retired' ? 'Restore memory' : 'Stop using'}
+            </Button>
+          )}
           {latest ? (
             <Button
               onClick={() => {
@@ -131,7 +169,7 @@ function MemoryEditor({ project, note, onClose }: { project: Project; note: Memo
       }
     >
       {archived && <Banner icon="archive" title="Project archived" detail="Read-only. Threads keep running." />}
-      <Field label="Memory" error={error} helper="Read with your next message.">
+      <Field label="Memory" error={error}>
         {(props) => (
           <TextArea
             {...props}
@@ -153,12 +191,47 @@ function MemoryEditor({ project, note, onClose }: { project: Project; note: Memo
         </div>
       )}
       {note && (
-        <details>
+        <details onToggle={(event) => setShowSources(event.currentTarget.open)}>
           <summary {...stylex.props(text.caption, text.muted, focusRing.ring)}>View source and history</summary>
           <div {...stylex.props(styles.history)}>
+            {sources.isPending && showSources && <p role="status">Loading sources…</p>}
+            {sources.isError && (
+              <Button small onClick={() => void sources.refetch()}>
+                Retry sources
+              </Button>
+            )}
+            {sources.data?.map((source) => (
+              <div key={source.id}>
+                <p {...stylex.props(text.caption, text.muted)}>
+                  {source.role === 'user'
+                    ? 'You'
+                    : source.role === 'execution'
+                      ? 'Execution result'
+                      : 'Assistant report'}
+                  {source.source_seq ? ' · Message ' + source.source_seq : ''}
+                  {source.suppressed ? ' · No longer used' : ''}
+                </p>
+                <p {...stylex.props(text.small)}>{source.text}</p>
+              </div>
+            ))}
             {note.versions.toReversed().map((version) => (
               <div key={version.version}>
-                <p {...stylex.props(text.caption, text.muted)}>{metadata(version)}</p>
+                <p {...stylex.props(text.caption, text.muted)}>
+                  {metadata(version)}
+                  {version.details?.retracted ? ' · Retracted' : ''}
+                </p>
+                {version.details?.reason && <p {...stylex.props(text.caption, text.muted)}>{version.details.reason}</p>}
+                {(version.details?.validFrom || version.details?.validUntil) && (
+                  <p {...stylex.props(text.caption, text.muted)}>
+                    Applies{' '}
+                    {version.details.validFrom
+                      ? new Date(version.details.validFrom).toLocaleString()
+                      : 'from an unknown time'}
+                    {version.details.validUntil
+                      ? ' until ' + new Date(version.details.validUntil).toLocaleString()
+                      : ''}
+                  </p>
+                )}
                 <p {...stylex.props(text.small)}>{version.body}</p>
               </div>
             ))}
@@ -174,6 +247,20 @@ export function ProjectMemory({ project }: { project: Project }) {
   const memory = useProjectMemory(project.id)
   const [editing, setEditing] = useState<MemoryNote | 'new' | null>(null)
   const archived = project.status === 'archived'
+  const active = memory.data?.filter((note) => note.effective && note.status !== 'retired') ?? []
+  const retired = memory.data?.filter((note) => note.status === 'retired') ?? []
+  const renderNote = (note: MemoryNote) => (
+    <article key={note.id} aria-label="Memory" {...stylex.props(styles.row)}>
+      <button
+        data-memory-id={note.id}
+        type="button"
+        onClick={() => setEditing(note)}
+        {...stylex.props(text.small, styles.edit, focusRing.ring)}
+      >
+        {note.body}
+      </button>
+    </article>
+  )
   return (
     <section aria-label="Project memory" {...stylex.props(styles.list)}>
       {memory.isPending && (
@@ -193,22 +280,18 @@ export function ProjectMemory({ project }: { project: Project }) {
         />
       )}
       {memory.data?.length === 0 && <p {...stylex.props(text.small, text.muted)}>No memory yet</p>}
-      {memory.data?.map((note) => (
-        <article key={note.id} aria-label={`Memory v${note.version}`} {...stylex.props(styles.row)}>
-          {archived ? (
-            <p {...stylex.props(text.small)}>{note.body}</p>
-          ) : (
-            <button
-              data-memory-id={note.id}
-              type="button"
-              onClick={() => setEditing(note)}
-              {...stylex.props(text.small, styles.edit, focusRing.ring)}
-            >
-              {note.body}
-            </button>
-          )}
-        </article>
+      {[...new Set(active.map((note) => note.topic))].map((topic) => (
+        <div key={topic}>
+          {topic && <p {...stylex.props(text.caption, text.muted)}>{topic}</p>}
+          {active.filter((note) => note.topic === topic).map(renderNote)}
+        </div>
       ))}
+      {retired.length > 0 && (
+        <details>
+          <summary {...stylex.props(text.caption, text.muted, focusRing.ring)}>No longer used</summary>
+          {retired.map(renderNote)}
+        </details>
+      )}
       {!archived && (
         <Button small data-memory-id="new" onClick={() => setEditing('new')}>
           Add memory

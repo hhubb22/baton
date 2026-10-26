@@ -276,6 +276,14 @@ export type ProjectEntry =
   | (EntryBase & { kind: 'note'; body: string })
 
 export interface MemoryVersion {
+  details?: {
+    action: string
+    reason: string
+    validFrom: string | null
+    validUntil: string | null
+    retracted: boolean
+    evidence: readonly { source_id: string; start_byte: number; end_byte: number; source_hash: string }[]
+  }
   version: number
   body: string
   source: 'you' | 'assistant'
@@ -287,6 +295,11 @@ export interface MemoryNote extends MemoryVersion {
   id: ID
   projectId: ID
   versions: MemoryVersion[]
+  status: 'candidate' | 'active' | 'superseded' | 'disputed' | 'retired'
+  effective: boolean
+  topic: string
+  suppressionId: string | null
+  evidence: readonly { source_id: string; start_byte: number; end_byte: number; source_hash: string }[]
 }
 
 export interface SaveMemoryInput {
@@ -295,6 +308,22 @@ export interface SaveMemoryInput {
   body: string
   version: number | null
   clientId: string
+}
+
+export interface ChangeMemoryInput {
+  projectId: ID
+  noteId: ID
+  version: number
+  action: 'retire' | 'restore'
+  clientId: string
+  suppressionId: string | null
+}
+export interface MemorySourceView {
+  id: string
+  role: string
+  text: string
+  source_seq: number | null
+  suppressed: boolean
 }
 
 export type MemorySave = { state: 'saved' | 'conflict'; note: MemoryNote }

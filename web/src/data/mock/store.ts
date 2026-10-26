@@ -1343,7 +1343,17 @@ ${response}`,
       this.appendMemoryVersion(note, body.trim(), 'you')
     } else {
       const first: MemoryVersion = { version: 1, body: body.trim(), source: 'you', updatedAt: this.scheduler.now() }
-      note = { id: this.nextId('mem'), projectId, ...first, versions: [first] }
+      note = {
+        id: this.nextId('mem'),
+        projectId,
+        ...first,
+        versions: [first],
+        status: 'active',
+        effective: true,
+        topic: '',
+        suppressionId: null,
+        evidence: [],
+      }
       this.world.memory.push(note)
     }
     const result: MemorySave = { state: 'saved', note }
@@ -1356,6 +1366,29 @@ ${response}`,
       body: note.body,
       updatedAt: note.updatedAt,
     })
+    this.emit('projects')
+    return result
+  }
+
+  changeMemory(input: import('../types').ChangeMemoryInput): MemorySave {
+    this.ensureProjectWritable(this.project(input.projectId))
+    const note = this.world.memory.find((n) => n.projectId === input.projectId && n.id === input.noteId)
+    if (!note) throw new ClientError('notFound', 'Memory not found.')
+    const fingerprint = JSON.stringify(input)
+    const saved = this.memoryClientIds.get(input.clientId)
+    if (saved) {
+      if (saved.fingerprint !== fingerprint) throw new ClientError('conflict', 'Request changed.')
+      return structuredClone(saved.result)
+    }
+    if (note.version !== input.version) return { state: 'conflict', note }
+    if (input.action === 'restore' && (!note.suppressionId || note.suppressionId !== input.suppressionId))
+      throw new ClientError('conflict', 'Memory changed.')
+    note.status = input.action === 'retire' ? 'retired' : 'active'
+    note.effective = input.action === 'restore'
+    note.suppressionId = input.action === 'retire' ? this.nextId('suppression') : null
+    this.appendMemoryVersion(note, note.body, 'you')
+    const result: MemorySave = { state: 'saved', note }
+    this.memoryClientIds.set(input.clientId, { fingerprint, result: structuredClone(result) })
     this.emit('projects')
     return result
   }
@@ -1746,7 +1779,17 @@ ${response}`,
       const body = `${folderName(thread.folder)} is in \`${thread.folder}\` on ${device.name}.`
       if (this.world.memory.some((item) => item.projectId === project.id && item.body === body)) continue
       const version: MemoryVersion = { version: 1, body, source: 'assistant', updatedAt: now }
-      const note: MemoryNote = { id: this.nextId('mem'), projectId: project.id, ...version, versions: [version] }
+      const note: MemoryNote = {
+        id: this.nextId('mem'),
+        projectId: project.id,
+        ...version,
+        versions: [version],
+        status: 'active',
+        effective: true,
+        topic: '',
+        suppressionId: null,
+        evidence: [],
+      }
       this.world.memory.push(note)
       process.push({ kind: 'note', body })
     }

@@ -4,6 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import type { TranscriptContext } from '@earendil-works/pi-ai'
 import { StdioClient } from '../src/stdio.js'
 import { checkedRPC } from '../src/protocol.js'
+import { memoryFixture } from './memory-fixture.js'
 
 // 本地集成夹具：认证、模型和时间均为替身；Runtime 与工具 RPC 使用实际实现。
 const directory = process.env.T3_FIXTURE_RUNTIME_DIRECTORY!
@@ -58,13 +59,16 @@ if (command === 'probe') {
   const client = new StdioClient(process.stdin, process.stdout)
   let offset = 0,
     observedAllInputs = false
+  const memory = memoryFixture()
   const rpc = checkedRPC(async (request) => {
     if (request.operation === 'poll_wake' && !(request.payload as { thread_id?: string } | undefined)?.thread_id) {
       const result = await client.call({ ...request, payload: { wait_ms: 50 } })
       if (observedAllInputs) offset += 180000
       return result
     }
-    return client.call(request)
+    const result = await client.call(request)
+    memory.observe(request, result)
+    return result
   })
   const models = createModels()
   const faux = fauxProvider({
@@ -74,12 +78,14 @@ if (command === 'probe') {
   models.setProvider(faux.provider)
   const respond = (context: TranscriptContext) => {
     const text = JSON.stringify(context.messages)
+    if (!memory.evidence)
+      return fauxAssistantMessage(fauxToolCall('memory.read', memory.input!, { id: 't3-memory-source' }))
     if (!text.includes('t3-memory-write'))
       return fauxAssistantMessage(
         [
           fauxToolCall(
-            'memory.write',
-            { title: 'T3 运行记录', content: '通过真实 Runtime 保存的项目记忆', expected_revision: 0 },
+            'memory.remember',
+            { title: 'T3 运行记录', content: '通过真实 Runtime 保存的项目记忆', evidence: memory.evidence },
             { id: 't3-memory-write' },
           ),
           fauxToolCall(

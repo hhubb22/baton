@@ -10,16 +10,20 @@ import * as threads from '../threads/index.ts'
 
 const unpack = (result: { value: unknown }) => JSON.parse((result.value as { text: string }).text)
 
-it('executes all 18 tools, bounds read results, rejects unknown arguments and prevents cross-project thread access', async () =>
+it('executes Project tools, bounds read results, rejects unknown arguments and prevents cross-project thread access', async () =>
   withTestDatabase(async (db) => {
-    const { context: c, nodeId } = await projectToolFixture(db)
+    const { context: c, nodeId, memoryEvidence } = await projectToolFixture(db)
     let n = 0
     const call = (name: string, args: unknown) =>
       db.run(callProjectTool({ ...c, toolCallId: `call-${++n}` }, name, args))
-    const written = await call('memory.write', { title: 'Decision', content: 'Use PostgreSQL', expected_revision: 0 })
-    const entry = (written.value as { entry_id: string }).entry_id
-    expect(unpack(await call('memory.search', { query: 'postgres' })).entries).toHaveLength(1)
-    expect(unpack(await call('memory.read', { entry_id: entry }))).toMatchObject({
+    const written = await call('memory.remember', {
+      title: 'Decision',
+      content: 'Use PostgreSQL',
+      evidence: memoryEvidence,
+    })
+    const entry = (written.value as { item_id: string }).item_id
+    expect(unpack(await call('memory.recall', { query: 'postgres' })).entries).toHaveLength(1)
+    expect(unpack(await call('memory.read', { item_id: entry }))).toMatchObject({
       content: 'Use PostgreSQL',
       revision: 1,
     })
@@ -91,9 +95,7 @@ it('executes all 18 tools, bounds read results, rejects unknown arguments and pr
       value: { code: 'not_found' },
     })
     expect(
-      await db.run(
-        callProjectTool({ ...other.context, toolCallId: 'read-memory' }, 'memory.read', { entry_id: entry }),
-      ),
+      await db.run(callProjectTool({ ...other.context, toolCallId: 'read-memory' }, 'memory.read', { item_id: entry })),
     ).toMatchObject({
       isError: true,
     })
@@ -123,7 +125,7 @@ it('executes all 18 tools, bounds read results, rejects unknown arguments and pr
     ).toMatchObject({ isError: true })
     expect(await call('devices.list', { employeeId: randomUUID() })).toMatchObject({ isError: true })
     expect(await call('unknown', {})).toMatchObject({ isError: true })
-    expect(await call('memory.read', { entry_id: 'invalid' })).toMatchObject({ isError: true })
+    expect(await call('memory.read', { item_id: 'invalid' })).toMatchObject({ isError: true })
     expect(await call('history.read', { through_seq: Number.MAX_SAFE_INTEGER })).toMatchObject({ isError: true })
     await db.run(
       Effect.gen(function* () {

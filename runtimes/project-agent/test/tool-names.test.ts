@@ -7,7 +7,7 @@ import { modelContext, batonMessage } from '../src/tool-names.js'
 
 test('转换覆盖工具声明、移除、历史调用与结果，保留参数、ID、签名和原始对象', () => {
   const response = fauxAssistantMessage([
-    fauxToolCall('memory.search', { query: 'memory.search' }, { id: 'stable-call' }),
+    fauxToolCall('memory.recall', { query: 'memory.recall' }, { id: 'stable-call' }),
   ])
   const context: any = {
     messages: [
@@ -31,9 +31,9 @@ test('转换覆盖工具声明、移除、历史调用与结果，保留参数�
       },
       {
         role: 'toolResult',
-        toolName: 'memory.search',
+        toolName: 'memory.recall',
         toolCallId: 'stable-call',
-        content: [{ type: 'text', text: 'memory.search' }],
+        content: [{ type: 'text', text: 'memory.recall' }],
         isError: false,
         timestamp: 0,
       },
@@ -42,12 +42,12 @@ test('转换覆盖工具声明、移除、历史调用与结果，保留参数�
   const before = structuredClone(context)
   const converted = modelContext(context)
   assert.equal(converted.messages[0].toolsRemoved[0].name, 'memory_read')
-  assert.equal(converted.messages[1].content[0].name, 'memory_search')
+  assert.equal(converted.messages[1].content[0].name, 'memory_recall')
   assert.equal(converted.messages[1].content[0].id, 'stable-call')
-  assert.equal(converted.messages[1].content[0].arguments.query, 'memory.search')
+  assert.equal(converted.messages[1].content[0].arguments.query, 'memory.recall')
   assert.deepEqual(converted.messages[1].content[1], before.messages[1].content[1])
-  assert.equal(converted.messages[2].toolName, 'memory_search')
-  assert.equal(converted.messages[2].content[0].text, 'memory.search')
+  assert.equal(converted.messages[2].toolName, 'memory_recall')
+  assert.equal(converted.messages[2].content[0].text, 'memory.recall')
   assert.deepEqual(batonMessage(converted.messages[1]), before.messages[1])
   assert.deepEqual(context, before)
   const unknown = fauxAssistantMessage([fauxToolCall('unknown_tool', {})])
@@ -62,15 +62,15 @@ test('实际模型请求的工具名符合 provider 约束，回复恢复为 Bat
       assert.equal(tools.length, toolDefinitions.length)
       assert.equal(new Set(tools.map((tool: any) => tool.name)).size, tools.length)
       assert.ok(tools.every((tool: any) => /^[a-zA-Z0-9_-]+$/.test(tool.name)))
-      assert.ok(tools.some((tool: any) => tool.name === 'memory_search'))
-      return fauxAssistantMessage([fauxToolCall('memory_search', { query: 'verification' }, { id: 'memory-1' })])
+      assert.ok(tools.some((tool: any) => tool.name === 'memory_recall'))
+      return fauxAssistantMessage([fauxToolCall('memory_recall', { query: 'verification' }, { id: 'memory-1' })])
     },
     (context: any) => {
       const call = context.messages
         .flatMap((message: any) => (message.role === 'assistant' ? message.content : []))
         .find((block: any) => block.type === 'toolCall')
-      assert.equal(call.name, 'memory_search')
-      assert.equal(context.messages.at(-1).toolName, 'memory_search')
+      assert.equal(call.name, 'memory_recall')
+      assert.equal(context.messages.at(-1).toolName, 'memory_recall')
       return assistant()
     },
   ])
@@ -79,6 +79,6 @@ test('实际模型请求的工具名符合 provider 约束，回复恢复为 Bat
   assert.ok(backend.calls.includes('finish'))
   assert.ok(!backend.calls.includes('report_failure'))
   const saved = backend.events.find((event) => event.kind === 'assistant')!.payload.message
-  assert.equal(saved.content[0].name, 'memory.search')
-  assert.equal(backend.events.find((event) => event.kind === 'tool_result')!.payload.message.toolName, 'memory.search')
+  assert.equal(saved.content[0].name, 'memory.recall')
+  assert.equal(backend.events.find((event) => event.kind === 'tool_result')!.payload.message.toolName, 'memory.recall')
 })

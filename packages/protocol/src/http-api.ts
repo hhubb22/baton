@@ -273,8 +273,18 @@ const Projects = HttpApiGroup.make('projects')
     }),
     Endpoint.get('memory', '/api/v1/projects/:projectId/memory', {
       params: projectParams,
-      query: Q.ProjectListQuery,
+      query: Q.MemoryListQuery,
       success: P.MemoriesResponse,
+    }),
+    Endpoint.get('memorySource', '/api/v1/projects/:projectId/memory/sources/:sourceId', {
+      params: { ...projectParams, sourceId: UUID },
+      query: Q.MemorySourceQuery,
+      success: P.MemorySourcePage,
+    }),
+    Endpoint.post('changeMemory', '/api/v1/projects/:projectId/memory/:memoryId/changes', {
+      params: memoryParams,
+      payload: P.ChangeMemoryInput,
+      success: P.ProjectMemory,
     }),
     Endpoint.get('getMemory', '/api/v1/projects/:projectId/memory/:memoryId', {
       params: memoryParams,

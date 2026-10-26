@@ -21,11 +21,13 @@ models.setProvider(faux.provider)
 faux.setResponses([
   fauxAssistantMessage(
     fauxToolCall(
-      'memory.write',
+      'memory.remember',
       {
         title: '运行记录',
         content: '真实 Node Runtime 经 batond 和 Gateway 提交' + 'x'.repeat(50000),
-        expected_revision: 0,
+        evidence: [
+          { source_id: '00000000-0000-4000-8000-000000000001', source_hash: 'fixture', start_byte: 0, end_byte: 1 },
+        ],
       },
       { id: 'memory-1' },
     ),

@@ -1,10 +1,18 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { Effect, Schema } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import * as P from '@baton/protocol'
 import { AppError, type NodeSource } from '../errors.ts'
 import type { SqlError } from 'effect/sql/SqlError'
-import { strictDecode, readProjectMemory, writeProjectMemoryTx } from './memory.ts'
+import { strictDecode } from '../decode.ts'
+import {
+  readProjectMemory,
+  applyChange,
+  listProjectMemory,
+  registerEventSource,
+  sourcePage,
+  projectMemoryIndex,
+} from './memory/index.ts'
 import { createAgentAttention, getAttentionRequest, listProjectAttention, withdrawAttention } from '../inbox.ts'
 import * as threads from '../threads/index.ts'
 import { lockNodeSource, revalidateNodeSource } from '../nodes.ts'
@@ -23,13 +31,29 @@ import {
   type ProjectBinding,
 } from './store.ts'
 import { appendAssistant, claimInputs, readRuntimeEvents, savedToolCalls } from './events.ts'
-import { commitCompaction, projectMemoryIndex } from './compaction.ts'
+import { commitCompaction } from './compaction.ts'
 import { projectToolJSONPage, boundedBase64, resultBytes } from './tools.ts'
 import { canonical } from '../json.ts'
 import { transaction } from '../database.ts'
 import type { ProjectThreadSource } from '../threads/index.ts'
 import { saveProjectPreview } from './preview.ts'
 
+const stableMemoryOperation = (conversationId: string, toolCallId: string) => {
+  const hex = createHash('sha256')
+    .update(conversationId + ':' + toolCallId)
+    .digest('hex')
+  return (
+    hex.slice(0, 8) +
+    '-' +
+    hex.slice(8, 12) +
+    '-5' +
+    hex.slice(13, 16) +
+    '-a' +
+    hex.slice(17, 20) +
+    '-' +
+    hex.slice(20, 32)
+  )
+}
 const leaseLost = () => projectError('lease_lost')
 const checkLease = Effect.fn('checkProjectLease')(function* (b: ProjectBinding) {
   const sql = yield* SqlClient.SqlClient
@@ -98,7 +122,7 @@ const bootstrap = Effect.fn('bootstrapProjectRun')(function* (b: ProjectBinding)
   const out: { -readonly [K in keyof P.ProjectBootstrap]: P.ProjectBootstrap[K] } = {
     project: { ...project, agent: { ...project.agent, provider: b.provider, model: b.model } },
     prompt_version: b.promptVersion,
-    memory_index: yield* projectMemoryIndex(b.projectId),
+    memory_index: yield* projectMemoryIndex(b.employeeId, b.projectId),
     after_seq: boundary?.through_seq ?? 0,
     last_seq: b.nextSeq - 1,
     ...(compaction ? { compaction, compaction_seq: compaction.seq } : {}),
@@ -370,9 +394,37 @@ const historyFields = {
   ...pageFields,
 }
 const schemas = {
-  'memory.search': Schema.Struct({ query: Schema.optionalKey(P.Text), ...afterId, ...pageFields }),
-  'memory.read': Schema.Struct({ entry_id: P.UUID, revision: Schema.optionalKey(P.PositiveInteger), ...pageFields }),
-  'memory.write': Schema.Struct({ entry_id: Schema.optionalKey(P.UUID), ...P.WriteMemoryInput.fields }),
+  'memory.recall': Schema.Struct({ query: Schema.optionalKey(P.Text), ...afterId, ...pageFields }),
+  'memory.read': Schema.Struct({
+    item_id: Schema.optionalKey(P.UUID),
+    source_id: Schema.optionalKey(P.UUID),
+    source_seq: Schema.optionalKey(P.PositiveInteger),
+    input_id: Schema.optionalKey(P.PositiveInteger),
+    revision: Schema.optionalKey(P.PositiveInteger),
+    ...pageFields,
+    max_bytes: Schema.optionalKey(P.PositiveInteger.check(Schema.isBetween({ minimum: 4, maximum: 32768 }))),
+  }),
+  'memory.remember': Schema.Struct({ ...P.MemoryContent.fields, evidence: Schema.Array(P.MemoryEvidence) }),
+  'memory.correct': Schema.Struct({
+    item_id: P.UUID,
+    expected_revision: P.PositiveInteger,
+    action: Schema.Literals(['correct', 'supersede', 'support', 'dispute']),
+    content: Schema.optionalKey(P.MemoryContent),
+    evidence: Schema.Array(P.MemoryEvidence),
+    reason: Schema.optionalKey(P.Text),
+  }),
+  'memory.retire': Schema.Struct({
+    item_id: P.UUID,
+    expected_revision: P.PositiveInteger,
+    evidence: Schema.Array(P.MemoryEvidence),
+    reason: Schema.optionalKey(P.Text),
+  }),
+  'memory.restore': Schema.Struct({
+    item_id: P.UUID,
+    expected_revision: P.PositiveInteger,
+    suppression_id: P.UUID,
+    evidence: Schema.Array(P.MemoryEvidence),
+  }),
   'history.search': Schema.Struct(historyFields),
   'history.read': Schema.Struct({
     after_seq: historyFields.after_seq,
@@ -460,29 +512,62 @@ const executeBusiness = Effect.fnUntraced(function* (
 ): Effect.fn.Return<ProjectToolExecution, AppError | SqlError, SqlClient.SqlClient> {
   const sql = yield* SqlClient.SqlClient
   switch (name) {
-    case 'memory.search': {
+    case 'memory.recall': {
       const a = yield* strictDecode(schemas[name], args)
-      const rows = yield* sql<{
-        value: unknown
-        id: string
-      }>`SELECT e.id,jsonb_build_object('entry_id',e.id,'title',e.title,'revision',e.current_revision,'snippet',left(r.content,512)) AS value FROM project_memory_entries e JOIN project_memory_revisions r ON r.employee_id=e.employee_id AND r.entry_id=e.id AND r.revision=e.current_revision WHERE e.employee_id=${c.employeeId} AND e.project_id=${c.projectId} AND (${a.after_id ?? null}::uuid IS NULL OR e.id>${a.after_id ?? null}) AND (${a.query ?? ''}='' OR strpos(lower(e.title||' '||r.content),lower(${a.query ?? ''}))>0) ORDER BY e.id LIMIT 20`
-      return { value: yield* page({ entries: rows.map((r) => r.value), next_after_id: rows.at(-1)?.id ?? '' }, a) }
+      return {
+        value: yield* page(yield* listProjectMemory(c.employeeId, c.projectId, a.after_id, 20, false, a.query), a),
+      }
     }
     case 'memory.read': {
       const a = yield* strictDecode(schemas[name], args)
-      return { value: yield* page(yield* readProjectMemory(c.employeeId, c.projectId, a.entry_id, a.revision), a) }
-    }
-    case 'memory.write': {
-      const a = yield* strictDecode(schemas[name], args)
-      const m = yield* writeProjectMemoryTx(
-        c.employeeId,
-        c.projectId,
-        a.entry_id,
-        { title: a.title, content: a.content, expected_revision: a.expected_revision },
-        'agent',
-        c.assistantSeq,
+      if (
+        [a.item_id, a.source_id, a.source_seq].filter((v) => v !== undefined).length !== 1 ||
+        (a.input_id !== undefined && a.source_seq === undefined)
       )
-      return { value: { entry_id: m.id, revision: m.revision, read_tool: 'memory.read' } }
+        return yield* Effect.fail(new AppError(422, 'invalid'))
+      if (a.item_id)
+        return { value: yield* page(yield* readProjectMemory(c.employeeId, c.projectId, a.item_id, a.revision), a) }
+      const id =
+        a.source_id ??
+        (yield* registerEventSource(c.employeeId, c.projectId, c.assistantSeq, a.source_seq!, a.input_id))
+      let maxBytes = a.max_bytes ?? 16384
+      let value = yield* sourcePage(c.employeeId, c.projectId, id, a.offset, maxBytes)
+      while (resultBytes(value) > 30000) {
+        maxBytes = Math.max(4, Math.floor(maxBytes * 0.75))
+        value = yield* sourcePage(c.employeeId, c.projectId, id, a.offset, maxBytes)
+      }
+      if (value.source_seq !== null && value.source_seq > c.assistantSeq)
+        return yield* Effect.fail(new AppError(422, 'invalid_evidence'))
+      return { value }
+    }
+    case 'memory.remember':
+    case 'memory.correct':
+    case 'memory.retire':
+    case 'memory.restore': {
+      const actor = { type: 'foreground' as const, throughSeq: c.assistantSeq }
+      const operation_id = stableMemoryOperation(c.conversationId, c.toolCallId)
+      let m: P.ProjectMemory
+      if (name === 'memory.remember') {
+        const a = yield* strictDecode(schemas[name], args)
+        m = yield* applyChange(c.employeeId, c.projectId, actor, {
+          operation_id,
+          expected_revision: 0,
+          action: 'add',
+          content: a,
+          evidence: a.evidence,
+        })
+      } else if (name === 'memory.correct') {
+        const a = yield* strictDecode(schemas[name], args)
+        m = yield* applyChange(c.employeeId, c.projectId, actor, { ...a, operation_id })
+      } else {
+        const a = yield* strictDecode(schemas[name], args)
+        m = yield* applyChange(c.employeeId, c.projectId, actor, {
+          ...a,
+          operation_id,
+          action: name === 'memory.retire' ? 'retire' : 'restore',
+        })
+      }
+      return { value: { item_id: m.id, revision: m.revision, status: m.status, read_tool: 'memory.read' } }
     }
     case 'history.search':
     case 'history.read': {

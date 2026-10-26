@@ -45,49 +45,7 @@ export const CreateProjectInput = Schema.Struct({
 })
 export type CreateProjectInput = typeof CreateProjectInput.Type
 
-export const ProjectMemory = Schema.Struct({
-  id: Text,
-  title: summary(1024).check(
-    Schema.isMaxCodePoints(200),
-    Schema.makeFilter((value) => value.trim().length > 0),
-  ),
-  content: boundedText(64 * 1024),
-  revision: Integer,
-  author: Text,
-  source_seq: Schema.NullOr(Integer),
-  updated_at: Timestamp,
-})
-export type ProjectMemory = typeof ProjectMemory.Type
-
-export const MemoriesResponse = Schema.Struct({
-  entries: Schema.NullOr(Schema.Array(ProjectMemory)),
-  next_after_id: Schema.optionalKey(Text),
-})
-export type MemoriesResponse = typeof MemoriesResponse.Type
-
-export const MemoryConflictResponse = Schema.Struct({
-  code: Text,
-  message: Text,
-  request_id: UUID,
-  current_revision: Integer,
-  current: Schema.NullOr(ProjectMemory),
-})
-export type MemoryConflictResponse = typeof MemoryConflictResponse.Type
-
-export const MemoryRevision = Schema.Struct({
-  revision: Integer,
-  content: Text,
-  title: Schema.NullOr(Text),
-  author: Text,
-  created_at: Timestamp,
-})
-export type MemoryRevision = typeof MemoryRevision.Type
-
-export const MemoryRevisionsResponse = Schema.Struct({
-  revisions: Schema.NullOr(Schema.Array(MemoryRevision)),
-  next_after_revision: Schema.optionalKey(NonNegativeInteger),
-})
-export type MemoryRevisionsResponse = typeof MemoryRevisionsResponse.Type
+export * from './project-memory.ts'
 
 export const PatchProjectInput = Schema.Struct({
   title: Schema.optionalKey(
@@ -305,13 +263,3 @@ export const ProjectsResponse = Schema.Struct({
   next_after_id: Schema.optionalKey(Text),
 })
 export type ProjectsResponse = typeof ProjectsResponse.Type
-
-export const WriteMemoryInput = Schema.Struct({
-  title: summary(1024).check(
-    Schema.isMaxCodePoints(200),
-    Schema.makeFilter((value) => value.trim().length > 0),
-  ),
-  content: boundedText(64 * 1024),
-  expected_revision: NonNegativeInteger,
-})
-export type WriteMemoryInput = typeof WriteMemoryInput.Type

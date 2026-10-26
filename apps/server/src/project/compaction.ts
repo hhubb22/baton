@@ -69,19 +69,6 @@ const contentLength = (content: typeof Content.Type) =>
                   : 0),
         0,
       )
-export const projectMemoryIndex = Effect.fn('projectMemoryIndex')(function* (projectId: string) {
-  const sql = yield* SqlClient.SqlClient
-  const rows = yield* sql<{
-    title: string
-  }>`SELECT title FROM project_memory_entries WHERE project_id=${projectId} ORDER BY id LIMIT 129`
-  let index = ''
-  for (const [i, row] of rows.entries()) {
-    const line = '- ' + row.title + '\n'
-    if (i === 128 || Buffer.byteLength(index + line) > 2044) return index + '…'
-    index += line
-  }
-  return index
-})
 export const commitCompaction = Effect.fn('commitProjectCompaction')(function* (
   b: ProjectBinding,
   request: ProjectRuntimeRequest,

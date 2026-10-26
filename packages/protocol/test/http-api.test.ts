@@ -5,7 +5,7 @@ import { EnrollmentResponse as DeviceEnrollmentResponse, SessionResponse as Auth
 
 it('generates schemas, statuses and cookie security for every implemented HTTP endpoint', () => {
   const endpoints = Object.values(BatonHttpApi.groups).flatMap((group) => Object.values(group.endpoints))
-  expect(endpoints).toHaveLength(51)
+  expect(endpoints).toHaveLength(53)
   const document = httpOpenApi()
   expect(document.info.title).toBe('Baton HTTP API')
   expect(document.paths['/api/v1/login']?.post?.requestBody).toMatchObject({ required: true })
@@ -75,6 +75,23 @@ it('round trips declared error statuses without adding internal fields to the re
 it('preserves the current memory revision in declared conflict responses', () => {
   const current = {
     id: '5c482828-b1eb-4ea3-8c86-bc447f7fc780',
+    kind: 'fact',
+    status: 'active',
+    basis: 'explicit',
+    topic: '',
+    conditions: '',
+    semantic_key: '',
+    core: false,
+    valid_from: null,
+    valid_until: null,
+    time_precision: 'unknown',
+    successor_id: null,
+    suppression_id: null,
+    action: 'correct',
+    reason: '',
+    retracted: false,
+    effective: true,
+    evidence: [],
     title: 'Project memory',
     content: 'Saved by another writer',
     revision: 2,
