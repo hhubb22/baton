@@ -68,7 +68,7 @@ Cursor store 子进程禁用 fetch 和 HTTP(S) 请求。上述加载检查不调
 
 ## 测量结果
 
-以下数值来自发布工作流 run `40186351668`（源码提交 `3eba953`），使用官方 Node 26.11.1 与 GitHub 托管 runner。原始构建产物未重新复核，数值未在当前源码上复测；复现方法见 [Worker 启动与 FULL 账本测量](../../tools/README.md#worker-启动与-full-账本测量)。
+macOS 与 Linux 数值来自发布工作流 run `40186351668`（源码提交 `3eba953`），使用官方 Node 26.11.1 与 GitHub 托管 runner，原始构建产物未重新复核。Windows 数值来自 Windows Server 2022 本机的当前源码与 Node 26.11.1，不替代 Windows Server 2025 runner 验证；复现方法见 [Worker 启动与 FULL 账本测量](../../tools/README.md#worker-启动与-full-账本测量)。
 
 ### FULL 同步账本
 
@@ -79,9 +79,9 @@ Cursor store 子进程禁用 fetch 和 HTTP(S) 请求。上述加载检查不调
 | macOS arm64，`macos-15` | 0.528 | 3.984 | 1.445 | 3.019 |
 | Linux x64，`ubuntu-24.04` | 0.579 | 5.694 | 1.297 | 2.480 |
 | Linux arm64，`ubuntu-24.04-arm` | 0.467 | 3.985 | 0.855 | 1.544 |
-| Windows x64 | 未测 | 未测 | 未测 | 未测 |
+| Windows x64，Windows Server 2022 本机 | 5.682 | 104.602 | 6.141 | 6.042 |
 
-三个已测平台在此负载下 COMMIT p99 低于 50 ms。测量使用 WAL、`synchronous=FULL`、`fullfsync=0`，未做断电验证；负载不含 Agent、IPC、prompt、输入 intent 或大队列，无法据此推断全部命令接收延迟。当前测量工具在 COMMIT p99 超过 50 ms 时非零退出；若测量或实际命令接收延迟超标，需提前评估将账本移入 `worker_threads`。
+四个已测平台在此负载下 COMMIT p99 低于 50 ms，Windows 最大值仍超过 100 ms。测量使用 WAL、`synchronous=FULL`、`fullfsync=0`，未做断电验证；负载不含 Agent、IPC、prompt、输入 intent 或大队列，无法据此推断全部命令接收延迟。当前测量工具在 COMMIT p99 超过 50 ms 时非零退出；若测量或实际命令接收延迟超标，需提前评估将账本移入 `worker_threads`。
 
 ### SEA Worker 冷启动
 
@@ -94,7 +94,7 @@ Cursor store 子进程禁用 fetch 和 HTTP(S) 请求。上述加载检查不调
 | Linux arm64 | 754.205 | 996.420 | 1000.820 |
 | Windows x64 | 未测 | 未测 | 未测 |
 
-已测平台的全部样本低于 3 秒，每次确认 SIGTERM 后 Worker、watchdog 退出与锁释放。记录覆盖独占锁、实际 SQLite 建表、空账本恢复调度、该提交的 Agent 接入模块加载与 watchdog；当前构建检查强制 Worker 运行时依赖图隔离 SDK 和 host 实现，表中数值仅适用于所标明的测量提交。
+macOS 与 Linux 的全部样本低于 3 秒，每次确认 SIGTERM 后 Worker、watchdog 退出与锁释放。Windows 本机计划 100 次，首个样本在 Host 的 3 秒就绪限制处失败，完成 0/100，尚无冷启动分位数与回收达标结论。记录覆盖独占锁、实际 SQLite 建表、空账本恢复调度、该提交的 Agent 接入模块加载与 watchdog；当前构建检查强制 Worker 运行时依赖图隔离 SDK 和 host 实现，表中数值仅适用于所标明的测量提交。
 
 系统页缓存未清空，macOS runner 为虚拟化 Apple M1。就绪状态为 `agent_ready=false`，测量没有打开 Agent 会话，也未覆盖已有大量命令或 intent 的恢复耗时。
 
@@ -104,13 +104,13 @@ Cursor store 子进程禁用 fetch 和 HTTP(S) 请求。上述加载检查不调
 
 Linux arm64 的 SDK、store、tree-sitter 与 ripgrep 已有通过记录；Debian 12 / glibc 2.36 无法加载要求 `GLIBC_2.39` 的 sandbox helper，该组合的完整安装包检查失败。Linux arm64 的 Cursor helper 要求 glibc 2.39+。Ubuntu runner 的测量结果与 Debian 12 的 helper 失败分别属于各自环境，不能互相替代。Fedora 43 的本地加载证据待补。
 
-Windows x64 在上述发布 run 中通过四个 Agent 与原生模块加载检查；Linux x64 的安装包检查已有通过记录。Cursor store、ripgrep 与 sandbox helper 的独立检查在这两个系统上尚缺可核实的运行结果，不能由模块导入成功推断它们全部通过。Cursor 来源与加载方案的限制见 [SDK 说明](../../third_party/cursor-sdk/README.md)。
+Windows Server 2022 本机通过四个 Agent 与原生模块加载，以及 Cursor store、ripgrep、sandbox helper 的独立检查，但完整安装包检查仍因 Worker 和私有文件 helper 超时而失败。Linux x64 的安装包检查已有通过记录；其 Cursor store、ripgrep 与 sandbox helper 的独立检查尚缺可核实的运行结果，不能由模块导入成功推断它们全部通过。Cursor 来源与加载方案的限制见 [SDK 说明](../../third_party/cursor-sdk/README.md)。
 
 ## Windows 待修与待验证
 
-Windows x64 已有记录中，SEA 构建、帮助、版本、四个 Agent 与原生模块加载、Project Runtime 握手、缺少附带目录时的明确失败均通过。Worker 在设置私有目录 DACL 的 PowerShell 命令处启动失败，私有凭据 helper 调用超时；节点测试有 26 个文件失败，Runtime 测试有 7 项失败。这些数量仅代表 run `40186351668` 的失败范围，当前 Windows 结果待本机复验。
+Windows 私有目录使用 `DirectoryInfo.SetAccessControl` 仅替换受保护 DACL，保留 owner 与 SACL；避免 PowerShell `Set-Acl` 再次保护含文件的目录时要求 `SeSecurityPrivilege`。`icacls /save` 可将内置 Administrator SID 写成标准 SDDL 缩写 `LA`，校验通过 Windows 解析为数字 SID 后比较，仍严格要求唯一的当前用户 `OICI`、`FA` Allow ACE；错误包含实际 SDDL。普通本地用户的目录保护、私有文件读写、拒绝额外授权与重新收紧均已有本机验证。
 
-需在 Windows 修复并验证私有目录 ACL 与凭据 helper，重跑节点和 Runtime 测试、完整安装包检查、冷启动与 FULL 测量及进程机制检查。已有 run 因 Worker 启动失败未执行后续测量和 Windows 进程检查，尚无 `taskkill`、CIM 创建时间保护或实际 PID 复用的实测结论。
+Windows Server 2022 本机的受限 Administrator 令牌下，节点全量测试为 205 通过、162 失败、44 跳过，56 个文件中 29 个失败；Runtime 为 89 通过、9 失败、3 跳过。原始 `Invalid private directory ACL` 错误已消失，仍有测试/清理超时、TestClock 额外日志、状态断言及进程树清理失败，尚不能宣称 Windows 测试通过。`pnpm check`、SEA 构建和安装包检查的 8/10 子项通过；Worker 仍未满足 3 秒就绪限制，私有文件 helper 超过 5 秒限制。独立诊断中目录准备耗时约 9.5 秒，Host 尚未 spawn Worker 即超时；source 与 SEA helper 在保留全部 ACL 校验、仅诊断允许 30 秒时分别约 6.6 与 5.7 秒成功。生产预算未改，100 次冷启动仍完成 0 次；FULL 2000 次事务已测，结果不代表端到端启动达标。Windows 进程检查在首棵树报 `Grandchild missing before taskkill` 并中止，未取得机制通过结论。Windows Server 2025、真正普通本地用户的完整 workspace 测试，以及实际 PID 复用仍待验证。
 
 [Windows 进程脚本](../../tools/verify/windows-processes.mjs) 使用自有的 CIM 校验与 `taskkill` 包装，观察完整父子孙树、故意过期的创建时间，以及中间父进程退出后的孙进程。它检查系统机制，未调用生产 reaper，不强迫系统实际复用 PID，也不验证 Worker 崩溃到下一次启动之间的回收延迟；非 Windows 输出 `not-measured`。
 
