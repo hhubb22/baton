@@ -63,16 +63,13 @@ function unavailableText(listing: Extract<FolderListing, { state: 'unavailable' 
   const name = device?.name ?? 'This device'
   switch (listing.reason) {
     case 'offline':
-      return { title: `${name} is offline`, detail: `Reconnect ${name} to browse its folders.` }
+      return { title: `${name} is offline`, detail: '' }
     case 'syncing':
-      return { title: `${name} is syncing`, detail: 'Retry when it finishes syncing.' }
+      return { title: `${name} is syncing`, detail: '' }
     case 'outsideFolders':
-      return {
-        title: 'Folder is outside allowed paths',
-        detail: `${listing.path} is not shared with Baton on ${name}.`,
-      }
+      return { title: "Link points outside the device's folders", detail: listing.path }
     case 'missing':
-      return { title: `Folder not found on ${name}`, detail: `${listing.path} may have been moved or deleted.` }
+      return { title: `Couldn't read ${listing.path}`, detail: '' }
   }
 }
 
@@ -103,8 +100,7 @@ export function FolderDialog({
       open
       onOpenChange={(open) => !open && onClose()}
       title="Choose folder"
-      description="New threads run in a folder on one device."
-      note={path ?? 'Choose an allowed folder.'}
+      note={path ?? undefined}
       actions={
         <>
           <DialogClose render={<Button>Cancel</Button>} />
@@ -136,18 +132,10 @@ export function FolderDialog({
           </select>
         )}
       </Field>
-      <DeviceFolderForm
-        key={selectedDevice}
-        deviceId={selectedDevice}
-        onAdded={(folder, updated) => {
-          const added = updated.folders.find((item) => !device?.folders.includes(item))
-          setPath(updated.folders.includes(folder) ? folder : (added ?? folder))
-        }}
-      />
       <div>
         <div role="group" aria-label="Folders" {...stylex.props(styles.box)}>
           {path === null ? (
-            <span {...stylex.props(text.captionMedium, styles.heading)}>Allowed folders</span>
+            <span {...stylex.props(text.captionMedium, styles.heading)}>Folders</span>
           ) : (
             <>
               <span title={path} {...stylex.props(text.mono, styles.path, text.truncate)}>
@@ -159,7 +147,7 @@ export function FolderDialog({
                 {...stylex.props(text.small, styles.row, styles.back, focusRing.ring)}
               >
                 <Icon name="chevron-left" size={14} />
-                {atRoot || parent === null ? 'Back to allowed folders' : `Back to ${folderName(parent)}`}
+                {atRoot || parent === null ? 'Back to folders' : `Back to ${folderName(parent)}`}
               </button>
             </>
           )}
@@ -167,7 +155,7 @@ export function FolderDialog({
           {folders.isError && (
             <Banner
               icon="alert"
-              title="Could not load folders"
+              title="Couldn't load folders"
               action={
                 <Button small onClick={() => void folders.refetch()}>
                   Retry
@@ -179,7 +167,7 @@ export function FolderDialog({
             <Banner
               icon="offline"
               title={problem.title}
-              detail={problem.detail}
+              detail={problem.detail || undefined}
               action={
                 <Button small onClick={() => void folders.refetch()}>
                   Retry
@@ -196,7 +184,11 @@ export function FolderDialog({
             </span>
           )}
           {listing?.state === 'ready' && !listing.scanLimited && listing.folders.length === 0 && (
-            <span {...stylex.props(text.caption, styles.status)}>No subfolders</span>
+            <span {...stylex.props(text.caption, styles.status)}>
+              {path === null
+                ? `No folders on ${device?.name ?? 'this device'} yet. Type a path below to add one.`
+                : 'No subfolders'}
+            </span>
           )}
           {listing?.state === 'ready' &&
             listing.folders.map((folder) => (
@@ -214,10 +206,16 @@ export function FolderDialog({
               </button>
             ))}
         </div>
-        <p {...stylex.props(text.caption, styles.hint)}>
-          Add a folder path above or choose from shared folders on this device.
-        </p>
       </div>
+      <DeviceFolderForm
+        key={selectedDevice}
+        deviceId={selectedDevice}
+        deviceName={device?.name ?? 'this device'}
+        onAdded={(folder, updated) => {
+          const added = updated.folders.find((item) => !device?.folders.includes(item))
+          onSelect({ deviceId: selectedDevice, folder: updated.folders.includes(folder) ? folder : (added ?? folder) })
+        }}
+      />
     </Dialog>
   )
 }

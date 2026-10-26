@@ -250,16 +250,16 @@ function dayLabel(at: number, now: number) {
   return new Date(at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
-function deliveryNote(delivery: Delivery, subscription: string, status: Project['status']) {
+function deliveryNote(delivery: Delivery) {
   switch (delivery) {
     case 'submitted':
       return 'Sending…'
     case 'saved':
-      return status === 'paused' ? 'Saved · the assistant reads it when the project resumes' : 'Saved'
+      return 'Saved'
     case 'queued':
-      return 'Saved · the assistant reads it after this step'
+      return 'Waiting for the assistant'
     case 'waitingDevice':
-      return `Saved · waiting for a device with ${subscription} signed in`
+      return 'Waiting for a device'
     case 'withdrawn':
       return 'Not sent · you stopped the run'
     case 'unknown':
@@ -353,7 +353,7 @@ function ThreadButton({
         {device?.name ?? 'Removed device'} · {thread.agent ? agentNames[thread.agent] : 'Command'}
       </span>
       <span {...stylex.props(text.caption, styles.threadMeta, statusTextStyle(view.status.tone))}>
-        {timer ?? view.status.label}
+        {timer ? `${view.status.label} · ${timer}` : view.status.label}
       </span>
     </button>
   )
@@ -404,7 +404,6 @@ function ThreadCard({
 
 function Entry({
   entry,
-  project,
   threads,
   devices,
   openThread,
@@ -413,7 +412,6 @@ function Entry({
   onOpenPath,
 }: {
   entry: ProjectEntry
-  project: Project
   threads: Thread[]
   devices: Device[]
   openThread: string | undefined
@@ -423,7 +421,7 @@ function Entry({
 }) {
   switch (entry.kind) {
     case 'user': {
-      const note = deliveryNote(entry.delivery, project.subscription, project.status)
+      const note = deliveryNote(entry.delivery)
       return (
         <div {...stylex.props(styles.userItem)}>
           <div {...stylex.props(text.body, styles.user, entry.delivery === 'withdrawn' && styles.withdrawn)}>
@@ -467,9 +465,6 @@ function EmptyConversation({ project }: { project: Project }) {
       <Avatar name={project.name} hue={project.hue} large />
       <span {...stylex.props(text.title)}>{project.name}</span>
       {project.goal && <span {...stylex.props(text.small, styles.emptyHint)}>{project.goal}</span>}
-      <span {...stylex.props(text.small, styles.emptyHint)}>
-        Ask the assistant to run tests, fix bugs, or check logs on your connected computers.
-      </span>
     </div>
   )
 }
@@ -481,7 +476,7 @@ function assistantLine(project: Project, devices: Device[]) {
     case 'waitingDevice':
       return assistantWait(project, devices).overview
     case 'stopping':
-      return 'Stop requested. Threads continue on their devices.'
+      return 'Stopping…'
     case 'stopped':
       return project.agent.reason ?? `${project.subscription} · ${project.model}`
     default:
@@ -601,11 +596,7 @@ function Overview({
       />
       {tab === 'threads' && (
         <>
-          {live.length === 0 && pending.length === 0 && (
-            <p {...stylex.props(text.small, styles.faint)}>
-              No threads in this project yet. Ask the assistant to start work.
-            </p>
-          )}
+          {live.length === 0 && pending.length === 0 && <p {...stylex.props(text.small, styles.faint)}>No threads</p>}
           {pending.length > 0 && (
             <section aria-label="Decisions" {...stylex.props(styles.group)}>
               <h3 {...stylex.props(text.captionMedium, styles.groupLabel)}>Needs decision</h3>
@@ -681,19 +672,13 @@ function DockBanner({
   resuming: boolean
 }) {
   if (project.status === 'archived')
-    return (
-      <Banner
-        icon="archive"
-        title="This project is archived"
-        detail="The main chat and memory are kept. Existing threads can still be used."
-      />
-    )
+    return <Banner icon="archive" title="Project archived" detail="Read-only. Threads keep running." />
   if (project.status === 'paused') {
     return (
       <Banner
         icon="pause"
-        title="This project is paused"
-        detail="Messages and replies are saved until you resume. Threads and questions remain available."
+        title="Project paused"
+        detail="New messages wait until you resume."
         action={
           <Button small onClick={onResume}>
             {resuming ? 'Resuming…' : 'Resume project'}
@@ -724,8 +709,8 @@ function DockBanner({
       return (
         <Banner
           icon="stop"
-          title="Waiting for the project assistant to stop"
-          detail="Existing threads keep running. This does not undo file changes or commands already run."
+          title={`Waiting for ${devices.find((item) => item.id === project.agent.deviceId)?.name ?? 'the device'} to stop the assistant`}
+          detail="Threads keep running."
         />
       )
     case 'stopped':
@@ -819,8 +804,7 @@ export function ProjectPage() {
           {projects.isError ? (
             <Banner
               icon="alert"
-              title="Could not load project"
-              detail="Your project and conversation are kept. Try again."
+              title="Couldn't load project"
               action={
                 <Button small onClick={() => void projects.refetch()}>
                   Retry project
@@ -870,9 +854,7 @@ export function ProjectPage() {
         onError: (cause) => {
           setFailed({ body, clientId })
           setError(
-            cause instanceof ClientError && cause.code === 'invalid'
-              ? cause.message
-              : 'Could not send. Your message is kept here. Try again.',
+            cause instanceof ClientError && cause.code === 'invalid' ? cause.message : "Couldn't send. Try again.",
           )
         },
       },
@@ -883,7 +865,8 @@ export function ProjectPage() {
     if (stop.isPending) return
     setError(null)
     stop.mutate(projectId, {
-      onError: (cause) => setError(cause instanceof ClientError ? cause.message : 'Could not stop the run. Try again.'),
+      onError: (cause) =>
+        setError(cause instanceof ClientError ? cause.message : "Couldn't stop the assistant. Try again."),
     })
   }
 
@@ -892,7 +875,7 @@ export function ProjectPage() {
     setError(null)
     changeStatus.mutate(
       { projectId, status: next },
-      { onError: () => setError(`Could not ${next === 'active' ? 'resume' : 'pause'} this project. Try again.`) },
+      { onError: () => setError(`Couldn't ${next === 'active' ? 'resume' : 'pause'} the project. Try again.`) },
     )
   }
   const settings = (open: boolean, archive = false) =>
@@ -932,7 +915,7 @@ export function ProjectPage() {
     conversation = (
       <Banner
         icon="alert"
-        title="Could not load the conversation"
+        title="Couldn't load the conversation"
         action={
           <Button small onClick={() => void entries.refetch()}>
             Retry
@@ -963,7 +946,6 @@ export function ProjectPage() {
             entry && (
               <Entry
                 entry={entry}
-                project={project}
                 threads={projectThreads}
                 devices={allDevices}
                 openThread={search.thread}

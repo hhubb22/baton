@@ -92,7 +92,7 @@ describe('device project model catalogs', () => {
     const user = userEvent.setup()
     const { createProject } = setup('/inbox', (devices) => devices.splice(0))
     const dialog = await newProject(user)
-    expect(within(dialog).getByText(/No models available from your devices/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/No models from your devices/)).toBeInTheDocument()
     expect(within(dialog).getByRole('link', { name: 'Connect a device' })).toHaveAttribute(
       'href',
       '/devices?connect=true',
@@ -121,7 +121,7 @@ describe('device project model catalogs', () => {
       devices[0].subscriptions = [{ provider: 'ChatGPT', signedIn: true }]
     })
     const dialog = await newProject(user)
-    expect(within(dialog).getByText(/No models available from your devices/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/No models from your devices/)).toBeInTheDocument()
     expect(within(dialog).queryByRole('option')).not.toBeInTheDocument()
     await user.click(within(dialog).getByRole('button', { name: 'Enter provider and model manually' }))
     expect(within(dialog).getByLabelText('Model')).toHaveValue('')
@@ -154,7 +154,7 @@ describe('device project model catalogs', () => {
       projectId: 'prj-baton',
       patch: { subscription: 'xAI', model: 'grok-4-fast' },
     })
-    expect(within(dialog).getByText('Applies to the next run. The current run keeps its model.')).toBeInTheDocument()
+    expect(within(dialog).getByText('Applies from the next run.')).toBeInTheDocument()
   })
 
   it('keeps manual provider and model drafts together, rejects empty values and saves corrected values', async () => {

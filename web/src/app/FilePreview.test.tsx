@@ -70,7 +70,7 @@ describe('folder selection', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Choose folder' })
     await user.click(await within(dialog).findByRole('button', { name: root }))
     const folder = await within(dialog).findByRole('button', { name: 'name:part\\literal' })
-    expect(within(dialog).getByRole('button', { name: 'Back to allowed folders' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Back to folders' })).toBeInTheDocument()
     expect(within(dialog).getByRole('status')).toHaveTextContent('Folder scan limited')
     reloading = true
     await user.click(within(dialog).getByRole('button', { name: 'Retry' }))
@@ -99,7 +99,7 @@ describe('file preview paging', () => {
     setup(read)
     const dialog = await openPreview(user)
     await user.click(await within(dialog).findByRole('button', { name: 'Continue reading' }))
-    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Could not read more')
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent("Couldn't read more")
     expect(within(dialog).getByRole('region')).toHaveTextContent('first')
     await user.click(within(dialog).getByRole('button', { name: 'Continue reading' }))
     expect(await within(dialog).findByText('partial')).toBeInTheDocument()

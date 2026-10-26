@@ -850,7 +850,7 @@ describe('projects', () => {
     expect((await client.listProjects()).find((item) => item.id === project.id)!.agent.state).toBe('idle')
     scheduler.advance(browserLatency.run / 2)
     expect((await client.listProjects()).find((item) => item.id === project.id)!.agent.activity).toBe(
-      "Reading Codex's reply from MacBook Pro…",
+      "Reading Codex's reply…",
     )
     scheduler.advance(browserLatency.run / 2)
     entries = await client.listProjectEntries(project.id)
@@ -900,7 +900,7 @@ describe('projects', () => {
     expect(docs.agent).toMatchObject({ state: 'waitingDevice', reason: 'An online device with Claude signed in' })
     const devices = await client.listDevices()
     expect(assistantWait(docs, devices).detail).toBe(
-      'Sign in to Claude on MacBook Pro. Sign in to Claude on Ubuntu Dev. The project assistant is not installed on Windows Desktop. Your message stays saved.',
+      'Sign in to Claude on MacBook Pro. Sign in to Claude on Ubuntu Dev. The project assistant is not installed on Windows Desktop.',
     )
     await client.sendProjectMessage({ projectId: 'prj-docs', body: 'Check the install guide.', clientId: 'm1' })
     scheduler.advance(browserLatency.run * 4)
@@ -915,7 +915,7 @@ describe('projects', () => {
     client.controls.setDeviceConnection('dev-ubuntu', 'offline')
     expect((await client.listProjectEntries('prj-baton')).at(-1)).toMatchObject({
       kind: 'note',
-      body: 'Switched to MacBook Pro because Ubuntu Dev is offline.',
+      body: 'Switched to MacBook Pro · Ubuntu Dev offline',
     })
     client.controls.setDeviceConnection('dev-mac', 'offline')
     expect((await client.listProjects()).find((item) => item.id === 'prj-baton')!.agent.state).toBe('waitingDevice')

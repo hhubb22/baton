@@ -33,17 +33,11 @@ const styles = stylex.create({
 type Notice = LoginNotice | 'unavailable'
 
 const notices: Record<Notice, { title: string; detail: string }> = {
-  signedOut: { title: 'You are signed out', detail: 'Sign in to view your devices, threads, and projects.' },
-  expired: {
-    title: 'Your sign-in expired',
-    detail: 'Sign in again to continue. Saved threads and devices are still in your account.',
-  },
-  passwordReset: {
-    title: 'Password reset by administrator',
-    detail: 'Previous sessions have been signed out. Sign in with your new password.',
-  },
+  signedOut: { title: 'You are signed out', detail: '' },
+  expired: { title: 'Your sign-in expired', detail: '' },
+  passwordReset: { title: 'Password reset by administrator', detail: 'Other sessions were signed out.' },
   passwordUpdated: { title: 'Password updated', detail: 'Sign in again with your new password.' },
-  unavailable: { title: 'Baton could not be reached', detail: 'Check your connection, then try signing in again.' },
+  unavailable: { title: "Can't reach Baton", detail: '' },
 }
 
 function unavailable(error: Error | null) {
@@ -105,7 +99,7 @@ export function LoginPage() {
       {notice && (
         <div role={notice === 'unavailable' ? 'alert' : 'status'} {...stylex.props(styles.notice)}>
           <span {...stylex.props(text.label)}>{notices[notice].title}</span>
-          <span {...stylex.props(text.caption, text.muted)}>{notices[notice].detail}</span>
+          {notices[notice].detail && <span {...stylex.props(text.caption, text.muted)}>{notices[notice].detail}</span>}
         </div>
       )}
       <form onSubmit={submit} {...stylex.props(styles.form)}>
@@ -142,9 +136,7 @@ export function LoginPage() {
           {label}
         </Button>
       </form>
-      <p {...stylex.props(text.caption, text.muted, styles.note)}>
-        Contact your administrator if you need an account or password reset.
-      </p>
+      <p {...stylex.props(text.caption, text.muted, styles.note)}>No account? Ask your administrator.</p>
     </AuthShell>
   )
 }

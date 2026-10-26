@@ -36,7 +36,7 @@ async function advance(scheduler: ReturnType<typeof manualScheduler>, ms: number
 
 async function replace(user: ReturnType<typeof userEvent.setup>, field: HTMLElement, value: string) {
   await user.clear(field)
-  if (value) await user.type(field, value)
+  if (value) await user.paste(value)
 }
 
 async function openSettings(user: ReturnType<typeof userEvent.setup>) {
@@ -105,9 +105,7 @@ describe('project maintenance', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Compatibility · settings' })
     await replace(user, within(dialog).getByLabelText(/^Goal/), 'Keep this goal after failure.')
     await user.click(within(dialog).getByLabelText('Project name'))
-    expect(
-      await within(dialog).findByText('Could not save changes. Your edits are kept. Try again.'),
-    ).toBeInTheDocument()
+    expect(await within(dialog).findByText("Couldn't save. Try again.")).toBeInTheDocument()
     expect(within(dialog).getByLabelText(/^Goal/)).toHaveValue('Keep this goal after failure.')
     await user.click(within(dialog).getByRole('button', { name: 'Done' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
@@ -247,7 +245,7 @@ describe('project maintenance', () => {
     const user = userEvent.setup()
     const { client } = setup('/projects/prj-baton?settings=true')
     const dialog = await screen.findByRole('dialog', { name: 'Baton Dev · settings' })
-    expect(within(dialog).getByText('Applies to the next run. The current run keeps its model.')).toBeInTheDocument()
+    expect(within(dialog).getByText('Applies from the next run.')).toBeInTheDocument()
     await user.selectOptions(within(dialog).getByLabelText('Subscription'), 'Claude')
     expect(within(dialog).getByLabelText('Project assistant model')).toHaveValue('claude-opus-5-5')
     await user.selectOptions(within(dialog).getByLabelText('Project assistant model'), 'claude-sonnet-5-5')
@@ -276,11 +274,11 @@ describe('project maintenance', () => {
         return notes
       })
     })
-    expect(await screen.findByText('Could not load project', { exact: true })).toBeInTheDocument()
+    expect(await screen.findByText("Couldn't load project", { exact: true })).toBeInTheDocument()
     expect(screen.queryByLabelText('Message the project assistant')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Retry project' }))
     expect(await screen.findByRole('heading', { name: 'Compatibility' })).toBeInTheDocument()
-    expect(screen.queryByText('Could not load project', { exact: true })).not.toBeInTheDocument()
+    expect(screen.queryByText("Couldn't load project", { exact: true })).not.toBeInTheDocument()
     await waitFor(() => expect(memorySpy).toHaveBeenCalledWith('prj-compat'))
     await act(async () => {
       await Promise.allSettled(memorySpy.mock.results.map((result) => result.value))
@@ -290,7 +288,7 @@ describe('project maintenance', () => {
     failing = false
     await user.click(screen.getByRole('tab', { name: /Memory/ }))
     const memory = await screen.findByRole('region', { name: 'Project memory' })
-    expect(await within(memory).findByText('Could not load project memory')).toBeInTheDocument()
+    expect(await within(memory).findByText("Couldn't load project memory")).toBeInTheDocument()
     expect(within(memory).queryByRole('article')).not.toBeInTheDocument()
     expect(memorySpy).toHaveBeenCalledTimes(1)
     expect(screen.getByRole('region', { name: 'Conversation' })).toHaveTextContent(
@@ -299,7 +297,7 @@ describe('project maintenance', () => {
 
     await user.click(within(memory).getByRole('button', { name: 'Retry memory' }))
     expect(await within(memory).findByRole('button', { name: originalMemory })).toBeInTheDocument()
-    expect(within(memory).queryByText('Could not load project memory')).not.toBeInTheDocument()
+    expect(within(memory).queryByText("Couldn't load project memory")).not.toBeInTheDocument()
     expect(within(memory).queryByRole('button', { name: 'Retry memory' })).not.toBeInTheDocument()
     expect(memorySpy).toHaveBeenCalledTimes(2)
   })
@@ -318,18 +316,20 @@ describe('project maintenance', () => {
     expect(
       await within(memory).findByRole('button', { name: 'Release only after all supported OS tests pass.' }),
     ).toBeInTheDocument()
-    const added = screen
-      .getAllByRole('article', { name: 'Memory v1' })
-      .find((item) => item.textContent?.includes('Release only'))!
-    expect(within(added).getByText(/^v1 · You ·/)).toBeInTheDocument()
+    await user.click(within(memory).getByRole('button', { name: 'Release only after all supported OS tests pass.' }))
+    const added = await screen.findByRole('dialog', { name: 'Edit memory' })
+    await user.click(within(added).getByText('View source and history'))
+    expect(within(added).getByText(/^v1 · You ·/)).toBeVisible()
+    await user.click(within(added).getByRole('button', { name: 'Cancel' }))
     await user.click(within(memory).getByRole('button', { name: originalMemory }))
     const edit = await screen.findByRole('dialog', { name: 'Edit memory' })
-    expect(within(edit).getByText(/v1 · Project assistant ·/)).toBeInTheDocument()
     await replace(user, within(edit).getByLabelText('Memory'), 'The Windows suite lives in C:\\src\\compat-suite.')
     await user.click(within(edit).getByRole('button', { name: 'Save memory' }))
-    const version = await within(memory).findByRole('article', { name: 'Memory v2' })
-    expect(within(version).getByText(/^v2 · You ·/)).toBeInTheDocument()
-    await user.click(within(version).getByText('Version history'))
+    await within(memory).findByRole('article', { name: 'Memory v2' })
+    await user.click(within(memory).getByRole('button', { name: 'The Windows suite lives in C:\\src\\compat-suite.' }))
+    const version = await screen.findByRole('dialog', { name: 'Edit memory' })
+    await user.click(within(version).getByText('View source and history'))
+    expect(within(version).getByText(/^v2 · You ·/)).toBeVisible()
     expect(within(version).getByText(originalMemory)).toBeVisible()
     expect(within(version).getByText(/^v1 · Project assistant ·/)).toBeVisible()
   })
@@ -345,9 +345,7 @@ describe('project maintenance', () => {
     expect(await within(dialog).findByText('Enter a memory.')).toBeInTheDocument()
     await user.type(within(dialog).getByLabelText('Memory'), 'Never skip Windows regressions.')
     await user.click(within(dialog).getByRole('button', { name: 'Save memory' }))
-    expect(
-      await within(dialog).findByText('Could not save this memory. Your draft is kept. Try again.'),
-    ).toBeInTheDocument()
+    expect(await within(dialog).findByText('Not saved. Your draft is kept.')).toBeInTheDocument()
     expect(within(dialog).getByLabelText('Memory')).toHaveValue('Never skip Windows regressions.')
     await user.click(within(dialog).getByRole('button', { name: 'Save memory' }))
     expect(await screen.findByRole('button', { name: 'Never skip Windows regressions.' })).toBeInTheDocument()
@@ -370,24 +368,23 @@ describe('project maintenance', () => {
     expect(within(dialog).getByText(/Latest · v2 · Project assistant/)).toBeInTheDocument()
     expect(within(dialog).getByLabelText('Memory')).toHaveValue('Run all Windows path regressions before release.')
     expect(within(dialog).queryByRole('button', { name: 'Save memory' })).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('status')).toHaveTextContent('Updated while you edited. Your draft is kept.')
     await user.click(within(dialog).getByRole('button', { name: 'Review latest' }))
-    expect(within(dialog).getByRole('status')).toHaveTextContent('Editing v2')
     expect(within(dialog).getByLabelText('Memory')).toHaveValue('Run all Windows path regressions before release.')
     await user.click(within(dialog).getByRole('button', { name: 'Save memory' }))
     const note = await screen.findByRole('article', { name: 'Memory v3' })
-    expect(
-      within(note).getByRole('button', { name: 'Run all Windows path regressions before release.' }),
-    ).toBeInTheDocument()
-    expect(within(note).getByText(/^v3 · You ·/)).toBeInTheDocument()
-    await user.click(within(note).getByText('Version history'))
-    expect(within(note).getByText('Run the Windows drive-letter tests before every release.')).toBeVisible()
-    expect(within(note).getByText(originalMemory)).toBeVisible()
+    await user.click(within(note).getByRole('button', { name: 'Run all Windows path regressions before release.' }))
+    const history = await screen.findByRole('dialog', { name: 'Edit memory' })
+    await user.click(within(history).getByText('View source and history'))
+    expect(within(history).getByText(/^v3 · You ·/)).toBeVisible()
+    expect(within(history).getByText('Run the Windows drive-letter tests before every release.')).toBeVisible()
+    expect(within(history).getByText(originalMemory)).toBeVisible()
   })
 
   it('saves messages and Inbox answers while paused, lets threads run, and reads the backlog on resume', async () => {
     const user = userEvent.setup()
     const { client, scheduler, router } = setup(projectPath, 'inboxPaused')
-    expect(await screen.findByText('This project is paused')).toBeInTheDocument()
+    expect(await screen.findByText('Project paused')).toBeInTheDocument()
     await user.type(screen.getByLabelText('Message the project assistant'), 'Read this after resuming.{Enter}')
     expect(await screen.findByText('Read this after resuming.')).toBeInTheDocument()
     await advance(scheduler, browserLatency.save)
@@ -402,7 +399,9 @@ describe('project maintenance', () => {
     await user.type(within(question).getByLabelText('Your reply'), 'Mention Windows support.')
     await user.click(within(question).getByRole('button', { name: 'Send reply' }))
     expect(
-      await within(await screen.findByRole('region', { name: 'Latest result' })).findByText(/when the project resumes/),
+      await within(await screen.findByRole('region', { name: 'Latest result' })).findByText(
+        'Reply saved · read after you resume',
+      ),
     ).toBeInTheDocument()
     await act(() =>
       router.navigate({
@@ -416,10 +415,10 @@ describe('project maintenance', () => {
     await user.type(within(thread).getByLabelText('Message'), 'Keep running the suite.{Enter}')
     await advance(scheduler, browserLatency.save + browserLatency.run)
     expect(await within(thread).findByText('Done. The change is ready for review.')).toBeInTheDocument()
-    expect(screen.getByText('This project is paused')).toBeInTheDocument()
+    expect(screen.getByText('Project paused')).toBeInTheDocument()
     expect((await client.listProjects()).find((project) => project.id === 'prj-compat')?.agent.state).toBe('idle')
     await user.click(screen.getByRole('button', { name: 'Resume project' }))
-    await waitFor(() => expect(screen.queryByText('This project is paused')).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByText('Project paused')).not.toBeInTheDocument())
     await advance(scheduler, browserLatency.run * 2)
     const entries = await client.listProjectEntries('prj-compat')
     expect(entries.find((entry) => entry.kind === 'user' && entry.body === 'Read this after resuming.')).toMatchObject({
@@ -443,7 +442,7 @@ describe('project maintenance', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Archive “Compatibility”?' })
     expect(
       within(dialog).getByText(
-        'Stops the project assistant and withdraws 2 open questions. The main chat and memory are kept. Existing threads continue.',
+        'Stops the project assistant and closes 2 open questions. Chat, memory, and threads are kept.',
       ),
     ).toBeInTheDocument()
     await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
@@ -463,13 +462,13 @@ describe('project maintenance', () => {
     })
     const dialog = await screen.findByRole('dialog', { name: 'Archive “Compatibility”?' })
     await user.click(within(dialog).getByRole('button', { name: 'Archive' }))
-    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Could not archive this project. Try again.')
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent("Couldn't archive. Try again.")
     expect((await client.listProjects()).find((project) => project.id === 'prj-compat')?.status).toBe('active')
     await user.click(within(dialog).getByRole('button', { name: 'Archive' }))
     const settings = await screen.findByRole('dialog', { name: 'Compatibility · settings' })
-    expect(within(settings).getByText('Read only')).toBeInTheDocument()
+    expect(within(settings).getByText('Read-only')).toBeInTheDocument()
     await user.click(within(settings).getByRole('button', { name: 'Done' }))
-    expect(await screen.findByText('This project is archived')).toBeInTheDocument()
+    expect((await screen.findAllByText('Project archived')).length).toBeGreaterThan(0)
     expect(screen.queryByLabelText('Message the project assistant')).not.toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Conversation' })).toHaveTextContent(
       'Run the compat suite on Windows Desktop and report failures.',
@@ -508,7 +507,7 @@ describe('project maintenance', () => {
     expect(await screen.findByRole('heading', { name: 'Archived projects' })).toBeInTheDocument()
     expect(router.state.location.pathname).toBe('/projects/archived')
     await user.click(screen.getByRole('link', { name: /Compatibility/ }))
-    expect(await screen.findByText('This project is archived')).toBeInTheDocument()
+    expect((await screen.findAllByText('Project archived')).length).toBeGreaterThan(0)
     const dialog = await openSettings(user)
     for (const label of ['Project name', 'Goal', 'Subscription', 'Project assistant model']) {
       expect(within(dialog).getByLabelText(label, { exact: false })).toHaveAttribute('readonly')
@@ -517,7 +516,6 @@ describe('project maintenance', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Done' }))
     await user.click(screen.getByRole('tab', { name: /Memory/ }))
     const memory = await screen.findByRole('region', { name: 'Project memory' })
-    expect(within(memory).getByText('Project memory is read only.')).toBeInTheDocument()
     expect(within(memory).getByText(originalMemory)).toBeInTheDocument()
     expect(within(memory).queryByRole('button')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Message the project assistant')).not.toBeInTheDocument()

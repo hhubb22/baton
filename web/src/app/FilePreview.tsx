@@ -285,7 +285,7 @@ function FolderPane({
 }) {
   // 不在允许目录里时列出允许的目录，从那里重新进入。
   const listing = useFolders(deviceId, root ? dir : null)
-  const crumbs: { label: string; path: string | null }[] = [{ label: 'Allowed folders', path: null }]
+  const crumbs: { label: string; path: string | null }[] = [{ label: 'Folders', path: null }]
   if (root && dir) {
     crumbs.splice(0, 1, { label: folderName(root), path: root })
     const rest = normalizeFilePath(dir, root).slice(normalizeFilePath(root).length).split('/').filter(Boolean)
@@ -339,7 +339,7 @@ function FolderPane({
         {listing.isPending && <p {...stylex.props(text.caption, styles.navNote)}>Loading folder…</p>}
         {listing.isError && (
           <p {...stylex.props(text.caption, styles.navNote)}>
-            Could not list this folder.{' '}
+            Couldn't list this folder.{' '}
             <button
               type="button"
               onClick={() => void listing.refetch()}
@@ -495,7 +495,7 @@ function FileContent({
   if (preview.isPending) {
     body = <State icon="file" title={`Loading ${baseName(path)}…`} />
   } else if (preview.isError) {
-    body = failed(readFailure(path, device), 'alert')
+    body = failed(readFailure(), 'alert')
   } else if (continuation.error instanceof ClientError && continuation.error.code === 'conflict') {
     body = (
       <State
@@ -577,7 +577,7 @@ function FileContent({
           )}
           {continuation.isError && (
             <p role="alert" {...stylex.props(text.caption, styles.navNote)}>
-              Could not read more of this file. Try again.
+              Couldn't read more of this file. Try again.
             </p>
           )}
           {data.nextOffset != null && (

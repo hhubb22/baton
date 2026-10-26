@@ -107,10 +107,12 @@ it('renders typed steps, gap sizes and full output actions while the device is o
   expect(screen.getByLabelText('Task progress')).toHaveTextContent('Reading source')
   expect(screen.getByLabelText('Task result')).toHaveTextContent('Found the race')
   expect(screen.getByLabelText('Error details')).toHaveTextContent('Command interrupted')
-  expect(screen.getByText('Step truncated · original size 96 KB')).toHaveAttribute('title', '98304 bytes')
-  expect(screen.getByText('Step truncated · original size 2 KB')).toBeInTheDocument()
+  expect(screen.getByText('Truncated from 96 KB · full output on Windows Desktop')).toHaveAttribute(
+    'title',
+    '98304 bytes',
+  )
+  expect(screen.getByText('Truncated from 2 KB')).toBeInTheDocument()
   expect(screen.getByText('The rest of this step is unavailable.')).toBeInTheDocument()
-  expect(screen.getByText('Full output is on Windows Desktop, which is offline')).toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: 'Read full output' }))
   expect(await screen.findByRole('status')).toHaveTextContent('The device is offline.')
   expect(read).toHaveBeenCalledWith('thread', reference, '0', expect.any(AbortSignal))
@@ -159,9 +161,7 @@ it('retains all 120 steps across pages and retries a later page without losing e
   await user.click(toggle)
   await screen.findByText('output-49')
   await user.click(screen.getByRole('button', { name: 'Load more activity' }))
-  expect(await screen.findByRole('status')).toHaveTextContent(
-    'Could not load more activity. Saved steps are still shown.',
-  )
+  expect(await screen.findByRole('status')).toHaveTextContent("Couldn't load more activity.")
   expect(screen.getByText('output-0')).toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: 'Retry loading more' }))
   await screen.findByText('output-99')
@@ -229,7 +229,7 @@ it('shows a missing record and retries an initial read error', async () => {
     .mockResolvedValue({ state: 'unavailable', messageId: message.id, reason: 'missing' })
   setup(readTrace)
   await user.click(screen.getByRole('button'))
-  expect(await screen.findByRole('status')).toHaveTextContent('Could not load this activity. Try again.')
+  expect(await screen.findByRole('status')).toHaveTextContent("Couldn't load activity")
   await user.click(screen.getByRole('button', { name: 'Retry' }))
   expect(await screen.findByText('No saved activity for this reply.')).toBeInTheDocument()
   expect(within(document.body).queryByRole('button', { name: 'Read full output' })).not.toBeInTheDocument()

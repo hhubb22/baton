@@ -38,6 +38,7 @@ import { Icon } from '../ui/Icon'
 import { Menu, MenuOption } from '../ui/Menu'
 import { StatusDot, type Tone } from '../ui/Status'
 import { AttentionCard } from './AttentionCard'
+import { ThreadAccessMenu } from './ThreadAccessMenu'
 import { InboxFeedback } from './InboxFeedback'
 import { FilePreview } from './FilePreview'
 import { MessageBody } from './MessageBody'
@@ -258,7 +259,7 @@ function MessageItem({
       <article id={`message-${message.id}`} {...stylex.props(styles.agent)}>
         <ActivityTrace message={message} device={device} command={command} />
         <h3 {...stylex.props(text.bodyMedium)}>{notice.title}</h3>
-        <p {...stylex.props(text.body, styles.muted)}>{notice.detail}</p>
+        {notice.detail && <p {...stylex.props(text.body, styles.muted)}>{notice.detail}</p>}
       </article>
     )
   }
@@ -294,11 +295,7 @@ function MessageItem({
       note = <>Sending next{cancel}</>
       break
     case 'waitingDevice':
-      note = (
-        <>
-          Saved · sends when {device?.name ?? 'the device'} is online{cancel}
-        </>
-      )
+      note = <>Sends when online{cancel}</>
       break
     case 'withdrawn':
       note = 'Not sent'
@@ -313,9 +310,13 @@ function MessageItem({
         </div>
       </div>
       {message.delivery === 'unknown' ? (
-        <span {...stylex.props(text.caption, styles.note, styles.noteUnknown)}>
+        <span
+          role="img"
+          aria-label="Delivery unknown"
+          title="Delivery unknown"
+          {...stylex.props(text.caption, styles.note, styles.noteUnknown)}
+        >
           <Icon name="alert" size={12} />
-          Delivery unknown
         </span>
       ) : (
         note && (
@@ -341,9 +342,13 @@ function NoticeCard({ notice, action }: { notice: ThreadNotice; action: ReactNod
     >
       <div {...stylex.props(styles.noticeBody)}>
         <span {...stylex.props(text.label)}>{notice.title}</span>
-        <span {...stylex.props(text.caption, styles.muted, notice.tone === 'attention' && styles.noticeDetailInverse)}>
-          {notice.detail}
-        </span>
+        {notice.detail && (
+          <span
+            {...stylex.props(text.caption, styles.muted, notice.tone === 'attention' && styles.noticeDetailInverse)}
+          >
+            {notice.detail}
+          </span>
+        )}
       </div>
       {action}
     </div>
@@ -367,11 +372,7 @@ function ModelMenu({
       agents={agent ? [agent] : []}
       choice={thread.agent ? { agent: thread.agent, model: thread.model } : null}
       label={thread.model || 'Default model'}
-      lockedReason={
-        agent?.abilities.switchModel
-          ? undefined
-          : `${name} cannot switch models in this thread. Start a new thread to choose another.`
-      }
+      lockedReason={agent?.abilities.switchModel ? undefined : `${name} can't switch models in this thread.`}
       onSelect={(choice) => onSelect(choice.model)}
     />
   )
@@ -451,7 +452,7 @@ export function ThreadDetail({
         <div {...stylex.props(styles.empty)}>
           <Banner
             icon="alert"
-            title="Could not load this thread"
+            title="Couldn't load this thread"
             action={
               <Button small onClick={() => void threadQuery.refetch()}>
                 Retry
@@ -508,7 +509,7 @@ export function ThreadDetail({
       { threadId, body, clientId: newClientId(), mode: running ? mode : 'next' },
       {
         onSuccess: () => setDraft(''),
-        onError: (cause) => setError(errorText(cause, 'Could not send. Try again.')),
+        onError: (cause) => setError(errorText(cause, "Couldn't send. Try again.")),
       },
     )
   }
@@ -526,14 +527,14 @@ export function ThreadDetail({
     setError(null)
     setModel.mutate(
       { threadId, model },
-      { onError: (cause) => setError(errorText(cause, 'Could not change the model. Try again.')) },
+      { onError: (cause) => setError(errorText(cause, "Couldn't change the model. Try again.")) },
     )
   }
 
   const onCancel = (message: Message) => {
     setError(null)
     cancelMessage.mutate(message.id, {
-      onError: (cause) => setError(errorText(cause, 'Could not cancel. Try again.')),
+      onError: (cause) => setError(errorText(cause, "Couldn't cancel. Try again.")),
     })
   }
 
@@ -542,7 +543,7 @@ export function ThreadDetail({
       onSuccess: () => setConfirm(null),
       onError: (cause) => {
         setConfirm(null)
-        setError(errorText(cause, 'Could not stop. Try again.'))
+        setError(errorText(cause, "Couldn't stop. Try again."))
       },
     })
   }
@@ -552,7 +553,7 @@ export function ThreadDetail({
       onSuccess: () => setConfirm(null),
       onError: (cause) => {
         setConfirm(null)
-        setError(errorText(cause, 'Could not archive. Try again.'))
+        setError(errorText(cause, "Couldn't archive. Try again."))
       },
     })
   }
@@ -564,7 +565,7 @@ export function ThreadDetail({
         if (resuming || resume.isPending) return
         resume.mutate(threadId, {
           onSuccess: (operation) => setResumeId(operation.id),
-          onError: (cause) => setError(errorText(cause, 'Could not resume. Try again.')),
+          onError: (cause) => setError(errorText(cause, "Couldn't resume. Try again.")),
         })
         return
       case 'newChat':
@@ -589,7 +590,7 @@ export function ThreadDetail({
   if (error) status = error
   else if (resumeFailed) status = resumeFailed
   else if (resuming || resume.isPending) status = 'Resuming…'
-  else if (thread.pending === 'stop' && view.live) status = 'Stopping… (forces quit in 1m)'
+  else if (thread.pending === 'stop' && view.live) status = 'Stopping…'
   else if (running) status = mode === 'now' ? 'Sends during the current reply' : 'Sends after current reply'
 
   const menuItems = [
@@ -632,7 +633,7 @@ export function ThreadDetail({
             {messages.isError && (
               <Banner
                 icon="alert"
-                title="Could not load messages"
+                title="Couldn't load messages"
                 action={
                   <Button small onClick={() => void messages.refetch()}>
                     Retry
@@ -701,11 +702,14 @@ export function ThreadDetail({
               value={draft}
               onChange={setDraft}
               onSend={onSend}
-              placeholder={`Message ${agentName} on ${device?.name ?? 'this device'}…`}
+              placeholder={`Message ${agentName}…`}
               style={styles.composer}
               chips={
                 <>
                   <ModelMenu thread={thread} agent={agent} onSelect={onModel} />
+                  {thread.agent && (
+                    <ThreadAccessMenu side="top" agent={thread.agent} user={device?.commandAccess.user ?? ''} />
+                  )}
                   <ThreadExecutionLimit key={thread.id} thread={thread} />
                 </>
               }
@@ -807,7 +811,6 @@ export function ThreadDetail({
         submitting={archive.isPending}
         thread={thread}
         agent={agent}
-        agentName={agentName}
         deviceName={name}
         waiting={waiting}
         finalFocus={timelineRef}
@@ -895,25 +898,25 @@ function StopDialog({
       <Dialog
         open={open}
         onOpenChange={(next) => !next && onClose()}
-        title="Stopping is unavailable"
-        description={`${agentName} on ${deviceName} does not support stopping from Baton. Wait for the reply to finish, or stop it on the device.`}
+        title={`Can't stop ${agentName} from Baton`}
+        description={`Stop it on ${deviceName}, or wait for the reply.`}
         finalFocus={finalFocus}
-        actions={<DialogClose render={<Button variant="primary">Back to thread</Button>} />}
+        actions={<DialogClose render={<Button>Back to thread</Button>} />}
       />
     )
   }
-  const canceled = waiting > 0 ? ` and cancels ${plural(waiting, 'message')} waiting to send` : ''
+  const canceled = waiting > 0 ? `Cancels ${plural(waiting, 'waiting message')}. ` : ''
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => !next && onClose()}
       title="Stop current reply?"
-      description={`Stops ${agentName} on ${deviceName}${canceled}. File changes and commands already run will not be undone. If ${agentName} does not stop within 1 minute, Baton ends its process.`}
+      description={`${canceled}Changes already made stay.`}
       finalFocus={finalFocus}
       actions={
         <>
           <DialogClose render={<Button>Keep running</Button>} />
-          <Button variant="danger" onClick={onConfirm}>
+          <Button variant="dangerSolid" onClick={onConfirm}>
             {submitting ? 'Stopping…' : 'Stop reply'}
           </Button>
         </>
@@ -929,7 +932,6 @@ function ArchiveDialog({
   submitting,
   thread,
   agent,
-  agentName,
   deviceName,
   waiting,
   finalFocus,
@@ -940,7 +942,6 @@ function ArchiveDialog({
   submitting: boolean
   thread: Thread
   agent: DeviceAgent | undefined
-  agentName: string
   deviceName: string
   waiting: number
   finalFocus: FinalFocus
@@ -951,17 +952,19 @@ function ArchiveDialog({
       <Dialog
         open={open}
         onOpenChange={(next) => !next && onClose()}
-        title="Archiving is unavailable"
-        description={`${agentName} is still running on ${deviceName} and does not support stopping from Baton. Archive this thread after the reply finishes.`}
+        title="Current reply must stop first"
+        description={`Stop it on ${deviceName}, or wait for the reply.`}
         finalFocus={finalFocus}
-        actions={<DialogClose render={<Button variant="primary">Back to thread</Button>} />}
+        actions={<DialogClose render={<Button>Back to thread</Button>} />}
       />
     )
   }
-  const canceled = waiting > 0 ? ` ${plural(waiting, 'message')} waiting to send will be canceled.` : ''
+  const canceled = waiting > 0 ? ` and cancels ${plural(waiting, 'waiting message')}` : ''
   const description = running
-    ? `${agentName} is still running on ${deviceName}. Baton stops it first and archives the thread after the device confirms.${canceled} You can still read archived threads.`
-    : `The thread stays readable but can't receive new messages.${canceled}`
+    ? `Stops the current reply${canceled}. Replies and files are kept.`
+    : waiting > 0
+      ? `Cancels ${plural(waiting, 'waiting message')}. Replies and files are kept.`
+      : 'Replies and files are kept.'
   return (
     <Dialog
       open={open}
@@ -972,7 +975,7 @@ function ArchiveDialog({
       actions={
         <>
           <DialogClose render={<Button>Keep thread</Button>} />
-          <Button variant={running ? 'danger' : 'primary'} onClick={onConfirm}>
+          <Button variant="dangerSolid" onClick={onConfirm}>
             {submitting ? 'Archiving…' : running ? 'Stop and archive' : 'Archive thread'}
           </Button>
         </>

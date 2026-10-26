@@ -16,6 +16,7 @@ import { Icon } from '../ui/Icon'
 import { StatusDot } from '../ui/Status'
 import { RestrictedMarkdown } from './RestrictedMarkdown'
 import { copySelection, SelectionArea } from './SelectionMenu'
+import { useDraft } from './drafts'
 import { useWorkspace, type ItemDraft } from './workspace'
 
 const styles = stylex.create({
@@ -99,8 +100,8 @@ export function AttentionCard({
   const [error, setError] = useState<string | null>(null)
   const project = projects.data?.find((value) => value.id === item.projectId)
   const thread = threads.data?.find((value) => value.id === item.threadId)
-  const draft = workspace.itemDrafts[item.id] ?? blankDraft
-  const setDraft = (next: ItemDraft) => workspace.setItemDraft(item.id, next)
+  const draft = useDraft(workspace.itemDrafts, item.id) ?? blankDraft
+  const setDraft = (next: ItemDraft) => workspace.itemDrafts.set(item.id, next)
   const archived = project?.status === 'archived'
   const pending = item.status === 'pending' && !archived
   const system = item.kind === 'system'
@@ -127,11 +128,11 @@ export function AttentionCard({
     setError(null)
     if (decision.kind === 'answer') {
       if (decision.option === null && !decision.note.trim()) {
-        setError('Enter a reply.')
+        setError('Choose an option or write a reply.')
         return
       }
       if (new TextEncoder().encode(decision.note).length > 4096) {
-        setError('Keep your reply within 4 KB of text.')
+        setError('Over 4 KB. Shorten it to send.')
         return
       }
     }
@@ -139,17 +140,20 @@ export function AttentionCard({
       { itemId: item.id, revision: item.revision, decision },
       {
         onSuccess: (operation) => {
-          workspace.setItemDraft(item.id, null)
+          workspace.itemDrafts.set(item.id, null)
           onHandled?.(item.id, operation.phase === 'conflict' ? operation.detail : null)
-          if (operation.phase === 'conflict') setError(operation.detail ?? 'This question was already handled.')
+          if (operation.phase === 'conflict')
+            setError(
+              operation.detail ?? `Already ${decision.kind === 'close' ? 'closed' : 'answered'} in another window.`,
+            )
         },
         onError: (cause) =>
           setError(
             cause instanceof ClientError && cause.code === 'invalid'
               ? cause.message
               : decision.kind === 'close'
-                ? `Could not close this ${system ? 'notice' : 'question'}. Try again.`
-                : 'Your reply could not be saved. Your choice and note are kept. Try again.',
+                ? `Couldn't close this ${system ? 'notice' : 'question'}. Try again.`
+                : "Couldn't send. Try again.",
           ),
       },
     )
@@ -291,7 +295,7 @@ export function AttentionCard({
                   variant="ghost"
                   onClick={() => {
                     if (!handle.isPending) {
-                      workspace.setItemDraft(item.id, null)
+                      workspace.itemDrafts.set(item.id, null)
                       setError(null)
                     }
                   }}
@@ -328,12 +332,12 @@ export function AttentionCard({
           {waiting && (
             <p>
               {project?.status === 'paused'
-                ? 'Your reply is saved. The project assistant will read it when the project resumes.'
+                ? 'Reply saved · read after you resume'
                 : project?.agent.state === 'waitingDevice'
-                  ? 'Your reply is saved. The project assistant will read it when a device is available.'
+                  ? 'Reply saved · read when a device is online'
                   : project?.agent.state === 'blocked'
-                    ? 'Your reply is saved. Retry the project to continue.'
-                    : 'Your reply is saved. The project assistant will read it next.'}
+                    ? 'Reply saved · retry from the project when ready'
+                    : 'Reply saved'}
             </p>
           )}
         </div>
@@ -345,7 +349,7 @@ export function AttentionCard({
       )}
       {handle.isPending && !draft.replying && (
         <p role="status" {...stylex.props(text.caption, styles.meta)}>
-          Saving…
+          Saving reply…
         </p>
       )}
     </section>

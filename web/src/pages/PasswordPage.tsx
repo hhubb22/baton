@@ -73,10 +73,10 @@ export function PasswordPage() {
 
   const failure = change.error
     ? change.error instanceof ClientError && change.error.code === 'unavailable'
-      ? 'Baton could not be reached. Your entries are kept. Try again.'
+      ? "Can't reach Baton. Try again."
       : change.error instanceof ClientError && change.error.code === 'invalid'
         ? change.error.message
-        : 'Could not update your password. Check your current password and try again.'
+        : "Couldn't update your password. Check your current password and try again."
     : null
 
   return (

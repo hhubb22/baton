@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { FolderDialog } from '../app/FolderDialog'
 import { Page } from '../app/Page'
 import type { ThreadsSearch } from '../app/router'
+import { ThreadAccessMenu } from '../app/ThreadAccessMenu'
 import { statusTextStyle, ThreadDetail, type RecoverAction } from '../app/ThreadDetail'
 import { NewThreadExecutionLimit } from '../app/ThreadExecutionLimit'
 import { ThreadModelMenu, type ThreadModelChoice } from '../app/ThreadModelMenu'
@@ -62,7 +63,7 @@ const styles = stylex.create({
   project: { display: 'inline-flex', alignItems: 'center', gap: '6px', flexShrink: 0, width: '140px', minWidth: 0 },
   where: { flexShrink: 0, width: '170px', color: colors.muted },
   folder: { flexShrink: 0, width: '150px', color: colors.faint },
-  rowStatus: { flexShrink: 0, width: '96px', whiteSpace: 'nowrap' },
+  rowStatus: { flexShrink: 0, width: '120px', whiteSpace: 'nowrap' },
   time: { flexShrink: 0, width: '72px', textAlign: 'right', color: colors.faint, whiteSpace: 'nowrap' },
   none: { color: colors.faint },
   empty: {
@@ -218,7 +219,13 @@ function ThreadListRow({
         </span>
       )}
       <span {...stylex.props(text.caption, styles.rowStatus, statusTextStyle(group.status.tone))}>
-        {timer ? <span {...stylex.props(text.mono)}>{timer}</span> : group.status.label}
+        {timer ? (
+          <>
+            {group.status.label} · <span {...stylex.props(text.mono)}>{timer}</span>
+          </>
+        ) : (
+          group.status.label
+        )}
       </span>
       <span {...stylex.props(text.caption, styles.time)}>{relativeTime(thread.updatedAt, now)}</span>
     </Link>
@@ -325,7 +332,7 @@ export function ThreadsPage() {
           setSearch({ thread: operation.targetId, archived: undefined })
         },
         onError: (cause) =>
-          setError(cause instanceof ClientError ? cause.message : 'Could not start the thread. Try again.'),
+          setError(cause instanceof ClientError ? cause.message : "Couldn't start the thread. Try again."),
       },
     )
   }
@@ -367,7 +374,7 @@ export function ThreadsPage() {
     list = (
       <Banner
         icon="alert"
-        title="Could not load threads"
+        title="Couldn't load threads"
         action={
           <Button small onClick={() => void threads.refetch()}>
             Retry
@@ -379,9 +386,6 @@ export function ThreadsPage() {
     list = (
       <div {...stylex.props(styles.empty)}>
         <span {...stylex.props(text.bodyMedium)}>No threads yet</span>
-        <span {...stylex.props(text.small, styles.muted)}>
-          Choose a folder and model above, then send your first message.
-        </span>
         <Button small onClick={() => inputRef.current?.focus()}>
           Write first message
         </Button>
@@ -390,7 +394,7 @@ export function ThreadsPage() {
   } else if (groups.length === 0) {
     list = (
       <div {...stylex.props(styles.empty)}>
-        <span {...stylex.props(text.bodyMedium)}>No threads match these filters</span>
+        <span {...stylex.props(text.bodyMedium)}>No matching threads</span>
         <Button small onClick={() => setSearch({ device: undefined, project: undefined, archived: undefined })}>
           Clear filters
         </Button>
@@ -423,7 +427,7 @@ export function ThreadsPage() {
           {devices.isError ? (
             <Banner
               icon="alert"
-              title="Could not load devices"
+              title="Couldn't load devices"
               action={
                 <Button small onClick={() => void devices.refetch()}>
                   Retry
@@ -454,9 +458,7 @@ export function ThreadsPage() {
                 onChange={setDraft}
                 onSend={onSend}
                 placeholder={
-                  choice && device
-                    ? `Message ${agentNames[choice.agent]} on ${device.name}…`
-                    : 'Choose a folder and model to start'
+                  choice && device ? `Message ${agentNames[choice.agent]}…` : 'Choose a folder and model to start'
                 }
                 chips={
                   <>
@@ -479,6 +481,7 @@ export function ThreadsPage() {
                       }}
                       onUnavailable={setError}
                     />
+                    {choice && device && <ThreadAccessMenu agent={choice.agent} user={device.commandAccess.user} />}
                     <NewThreadExecutionLimit value={executionTimeoutSeconds} onChange={setExecutionTimeoutSeconds} />
                   </>
                 }

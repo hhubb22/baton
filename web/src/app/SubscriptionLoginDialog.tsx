@@ -124,7 +124,7 @@ export function SubscriptionLoginDialog({
           {start.isError && (
             <>
               <p role="alert" {...stylex.props(text.small, styles.error)}>
-                Could not start sign-in. Check the device connection, then try again.
+                Couldn't start sign-in. Try again.
               </p>
               <Button onClick={retry}>Retry sign-in</Button>
             </>
@@ -157,7 +157,7 @@ export function SubscriptionLoginDialog({
                 </div>
                 {copy && (
                   <p role="status" {...stylex.props(text.caption, copy === 'failed' ? styles.error : text.muted)}>
-                    {copy === 'copied' ? 'Code copied' : 'Could not copy. Select the code and copy it manually.'}
+                    {copy === 'copied' ? 'Code copied' : 'Clipboard blocked. Copy it manually.'}
                   </p>
                 )}
                 {device.connection !== 'online' && (

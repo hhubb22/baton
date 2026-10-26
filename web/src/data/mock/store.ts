@@ -1464,7 +1464,7 @@ ${response}`,
       if (this.assistantStops.get(projectId) !== cancel || project.status !== 'active') return
       this.assistantStops.delete(projectId)
       project.agent = { state: 'stopped', deviceId: project.agent.deviceId, reason: null, activity: null }
-      this.pushNote(project, 'You stopped the project assistant. Threads it opened keep running.')
+      this.pushNote(project, 'You stopped the project assistant')
       this.wake(project)
       this.emit('projects', 'threads', 'messages', 'operations')
     })
@@ -1531,8 +1531,8 @@ ${response}`,
       this.world.devices.find((item) => item.id === previous)
     if (!from || from.id === chosen.id || chosen.id === previous) return
     const block = assistantBlock(from, project.subscription)
-    const reason = block ? blockReason(from, block, project.subscription) : `${from.name} was disconnected from Baton`
-    this.pushNote(project, `Switched to ${chosen.name} because ${reason}.`)
+    const reason = block ? blockReason(from, block, project.subscription) : `${from.name} disconnected`
+    this.pushNote(project, `Switched to ${chosen.name} · ${reason}`)
   }
 
   // 有没读的消息或 Thread 结果时开始一次运行。你停止后，Thread 结果等你下一条消息再一起读。
@@ -1590,7 +1590,7 @@ ${response}`,
     const thread = this.world.threads.find((item) => item.id === replies[0]?.threadId)
     const device = this.world.devices.find((item) => item.id === thread?.deviceId)
     if (!thread || !device) return 'Reading a reply…'
-    return `Reading ${thread.agent ? agentNames[thread.agent] : 'Command'}'s reply from ${device.name}…`
+    return `Reading ${thread.agent ? agentNames[thread.agent] : 'Command'}'s reply…`
   }
 
   private respond(project: Project, inputs: UserEntry[], replies: Reply[]) {

@@ -38,6 +38,14 @@ const styles = stylex.create({
     userSelect: 'none',
   },
   highlighted: { backgroundColor: colors.hover },
+  // 两行选项：名称和勾选在第一行，下面一行浅色说明
+  optionTall: {
+    flexWrap: 'wrap',
+    rowGap: '2px',
+    height: 'auto',
+    paddingBlock: '6px',
+  },
+  detail: { flexBasis: '100%', color: colors.muted },
   name: { flexGrow: 1 },
   note: { color: colors.faint, whiteSpace: 'nowrap' },
   check: { color: colors.text },
@@ -85,12 +93,14 @@ export function Menu({
 export function MenuOption({
   children,
   note,
+  detail,
   dot,
   selected,
   onSelect,
 }: {
   children: ReactNode
   note?: ReactNode
+  detail?: ReactNode
   dot?: Tone
   selected?: boolean
   onSelect?: () => void
@@ -100,13 +110,19 @@ export function MenuOption({
       onClick={onSelect}
       aria-checked={selected === undefined ? undefined : selected}
       className={(state) =>
-        stylex.props(text.small, styles.option, state.highlighted && styles.highlighted).className ?? ''
+        stylex.props(
+          text.small,
+          styles.option,
+          detail != null && styles.optionTall,
+          state.highlighted && styles.highlighted,
+        ).className ?? ''
       }
     >
       {dot && <StatusDot tone={dot} />}
       <span {...stylex.props(styles.name, text.truncate)}>{children}</span>
       {note && <span {...stylex.props(text.caption, styles.note)}>{note}</span>}
       {selected && <Icon name="check" size={14} style={styles.check} />}
+      {detail && <span {...stylex.props(text.caption, styles.detail)}>{detail}</span>}
     </BaseMenu.Item>
   )
 }

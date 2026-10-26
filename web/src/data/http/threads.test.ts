@@ -805,7 +805,7 @@ describe('HTTP thread contracts', () => {
     const id = (await api.listMessages(threadId))[0].id
     await expect(api.readTrace(id)).rejects.toThrow('incomplete')
     result = { ok: true, page_cursor: 'same', steps: [traceStep()], next_cursor: 'same' }
-    await expect(api.readTrace(id, 'same')).rejects.toThrow('next activity page')
+    await expect(api.readTrace(id, 'same')).rejects.toThrow("Couldn't load more activity")
   })
 
   it('shows the saved next model while the running turn keeps its reported model', async () => {

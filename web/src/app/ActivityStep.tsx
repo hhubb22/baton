@@ -248,21 +248,13 @@ export function ActivityStep({
       {step.truncated && (
         <>
           <span title={`${step.original_bytes} bytes`} {...stylex.props(text.caption, styles.muted)}>
-            Step truncated · original size {fileSize(step.original_bytes)}
+            Truncated from {fileSize(step.original_bytes)}
+            {step.full_output &&
+              device?.connection !== 'online' &&
+              ` · full output on ${device?.name ?? 'the original device'}`}
           </span>
           {step.full_output ? (
-            <>
-              {device?.connection !== 'online' && (
-                <span {...stylex.props(text.caption, styles.muted)}>
-                  {device?.connection === 'syncing'
-                    ? `${device.name} is reconnecting · full output is on this device`
-                    : device
-                      ? `Full output is on ${device.name}, which is offline`
-                      : 'Full output is on the original device'}
-                </span>
-              )}
-              <FullOutput threadId={threadId} reference={step.full_output} />
-            </>
+            <FullOutput threadId={threadId} reference={step.full_output} />
           ) : (
             <span {...stylex.props(text.caption, styles.muted)}>The rest of this step is unavailable.</span>
           )}

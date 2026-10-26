@@ -12,7 +12,7 @@ export function ProjectRecovery({ project }: { project: Project }) {
     <Banner
       icon="alert"
       title={project.agent.reason ?? 'The project assistant needs attention'}
-      detail={error ?? 'Your messages and replies are saved. Retry when a device is ready to continue.'}
+      detail={error ?? undefined}
       action={
         <Button
           small
@@ -20,8 +20,7 @@ export function ProjectRecovery({ project }: { project: Project }) {
             if (retry.isPending) return
             setError(null)
             retry.mutate(project.id, {
-              onError: (cause) =>
-                setError(cause instanceof ClientError ? cause.message : 'Could not retry. Try again.'),
+              onError: (cause) => setError(cause instanceof ClientError ? cause.message : "Couldn't retry. Try again."),
             })
           }}
         >

@@ -10,6 +10,7 @@ import { Banner } from '../ui/Banner'
 import { Button } from '../ui/Button'
 import { Dialog } from '../ui/Dialog'
 import { Field, Input, TextArea } from '../ui/Field'
+import { useDraft } from './drafts'
 import { useWorkspace } from './workspace'
 import { ProjectModelFields, useProjectModelCatalog } from './ProjectModelFields'
 
@@ -37,7 +38,8 @@ export function ProjectSettingsDialog({
   const update = useUpdateProject(project.id)
   const status = useSetProjectStatus()
   const inbox = useInbox()
-  const pending = useRef<ProjectPatch>(workspace.settingsDrafts[project.id] ?? {})
+  const draft = useDraft(workspace.settingsDrafts, project.id)
+  const pending = useRef<ProjectPatch>(draft ?? {})
   const flight = useRef<Promise<boolean> | null>(null)
   const mounted = useRef(true)
   useEffect(() => {
@@ -51,14 +53,14 @@ export function ProjectSettingsDialog({
   const [confirm, setConfirm] = useState(initialArchive)
   const [actionError, setActionError] = useState<string | null>(null)
   const archived = project.status === 'archived'
-  const patch = archived ? {} : (workspace.settingsDrafts[project.id] ?? {})
+  const patch = archived ? {} : (draft ?? {})
   const values = { ...project, ...patch }
   const dirty = Object.keys(patch).length > 0
   const busy = saving || status.isPending
 
   const change = (next: ProjectPatch) => {
     pending.current = { ...pending.current, ...next }
-    workspace.setSettingsDraft(project.id, { ...pending.current })
+    workspace.settingsDrafts.set(project.id, { ...pending.current })
     setError(null)
   }
 
@@ -87,7 +89,7 @@ export function ProjectSettingsDialog({
             if (remaining[key] === snapshot[key]) delete remaining[key]
           }
           pending.current = remaining
-          workspace.setSettingsDraft(project.id, (current) => {
+          workspace.settingsDrafts.set(project.id, (current) => {
             const next = { ...current }
             for (const key of Object.keys(snapshot) as (keyof ProjectPatch)[]) {
               if (next[key] === snapshot[key]) delete next[key]
@@ -97,11 +99,7 @@ export function ProjectSettingsDialog({
         }
         return mounted.current
       } catch (cause) {
-        setError(
-          cause instanceof ClientError && cause.code === 'invalid'
-            ? cause.message
-            : 'Could not save changes. Your edits are kept. Try again.',
-        )
+        setError(cause instanceof ClientError && cause.code === 'invalid' ? cause.message : "Couldn't save. Try again.")
         return false
       } finally {
         if (mounted.current) setSaving(false)
@@ -126,7 +124,7 @@ export function ProjectSettingsDialog({
       setActionError(
         cause instanceof ClientError && cause.code === 'invalid'
           ? cause.message
-          : `Could not ${next === 'active' ? 'resume' : next === 'paused' ? 'pause' : 'archive'} this project. Try again.`,
+          : `Couldn't ${next === 'active' ? 'resume' : next === 'paused' ? 'pause' : 'archive'}. Try again.`,
       )
     }
   }
@@ -138,7 +136,7 @@ export function ProjectSettingsDialog({
       <Dialog
         open
         title={`Archive “${project.name}”?`}
-        description={`Stops the project assistant and withdraws ${inbox.data ? `${questionCount} open ${questionCount === 1 ? 'question' : 'questions'}` : 'all open questions'}. The main chat and memory are kept. Existing threads continue.`}
+        description={`Stops the project assistant and closes ${inbox.data ? `${questionCount} open ${questionCount === 1 ? 'question' : 'questions'}` : 'all open questions'}. Chat, memory, and threads are kept.`}
         onOpenChange={(open) => {
           if (!open && !busy) {
             setConfirm(false)
@@ -165,7 +163,7 @@ export function ProjectSettingsDialog({
             >
               Cancel
             </Button>
-            <Button variant="danger" onClick={() => void changeStatus('archived')}>
+            <Button variant="dangerSolid" onClick={() => void changeStatus('archived')}>
               {status.isPending ? 'Archiving…' : 'Archive'}
             </Button>
           </>
@@ -188,15 +186,15 @@ export function ProjectSettingsDialog({
             <>
               <span {...stylex.props(styles.error)}>{error}</span>
               <Button small onClick={() => void save()}>
-                Retry save
+                Retry
               </Button>
             </>
           ) : saving ? (
             'Saving…'
           ) : archived ? (
-            'Read only'
+            'Read-only'
           ) : dirty ? (
-            'Unsaved changes · draft kept when closed'
+            'Changes not saved'
           ) : (
             'Saved'
           )}
@@ -209,7 +207,7 @@ export function ProjectSettingsDialog({
               variant="ghost"
               onClick={() => {
                 pending.current = {}
-                workspace.setSettingsDraft(project.id, null)
+                workspace.settingsDrafts.set(project.id, null)
                 setError(null)
               }}
             >
@@ -220,13 +218,7 @@ export function ProjectSettingsDialog({
         </>
       }
     >
-      {archived && (
-        <Banner
-          icon="archive"
-          title="This project is archived"
-          detail="The main chat and memory are kept. Existing threads can still be used."
-        />
-      )}
+      {archived && <Banner icon="archive" title="Project archived" detail="Read-only. Threads keep running." />}
       <div {...stylex.props(styles.section)}>
         <Field label="Project name" error={error === 'Enter a project name.' ? error : undefined}>
           {(props) => (
@@ -241,7 +233,7 @@ export function ProjectSettingsDialog({
             />
           )}
         </Field>
-        <Field label="Goal" optional helper="The project assistant reads goal changes with your next message.">
+        <Field label="Goal" optional>
           {(props) => (
             <TextArea
               {...props}
@@ -264,9 +256,7 @@ export function ProjectSettingsDialog({
         readOnly={archived}
         loading={devices.isPending}
       />
-      <p {...stylex.props(text.caption, text.muted)}>
-        Applies to the next run.{project.agent.state === 'running' && ' The current run keeps its model.'}
-      </p>
+      <p {...stylex.props(text.caption, text.muted)}>Applies from the next run.</p>
       {!archived && (
         <>
           <hr {...stylex.props(styles.divider)} />
@@ -274,8 +264,7 @@ export function ProjectSettingsDialog({
             <div {...stylex.props(styles.description)}>
               <h3 {...stylex.props(text.label)}>{project.status === 'paused' ? 'Resume project' : 'Pause project'}</h3>
               <p {...stylex.props(text.caption, text.muted)}>
-                Pauses automatic replies. You can still use individual threads and answer questions. Messages and
-                replies here are saved until you resume.
+                New messages wait until you resume. Threads keep running.
               </p>
             </div>
             <Button small onClick={() => void changeStatus(project.status === 'paused' ? 'active' : 'paused')}>
@@ -285,10 +274,7 @@ export function ProjectSettingsDialog({
           <div {...stylex.props(styles.row)}>
             <div {...stylex.props(styles.description)}>
               <h3 {...stylex.props(text.label)}>Archive project</h3>
-              <p {...stylex.props(text.caption, text.muted)}>
-                Stops the project assistant and withdraws open questions. The main chat and memory are kept. Existing
-                threads continue.
-              </p>
+              <p {...stylex.props(text.caption, text.muted)}>Chat, memory, and threads are kept.</p>
             </div>
             <Button
               small
