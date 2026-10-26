@@ -79,9 +79,9 @@ macOS 与 Linux 数值来自发布工作流 run `40186351668`（源码提交 `3e
 | macOS arm64，`macos-15` | 0.528 | 3.984 | 1.445 | 3.019 |
 | Linux x64，`ubuntu-24.04` | 0.579 | 5.694 | 1.297 | 2.480 |
 | Linux arm64，`ubuntu-24.04-arm` | 0.467 | 3.985 | 0.855 | 1.544 |
-| Windows x64，Windows Server 2022 本机 | 5.682 | 104.602 | 6.141 | 6.042 |
+| Windows x64，Windows Server 2022 本机，受限 Administrator 令牌 | 5.647 | 86.447 | 6.031 | 6.038 |
 
-四个已测平台在此负载下 COMMIT p99 低于 50 ms，Windows 最大值仍超过 100 ms。测量使用 WAL、`synchronous=FULL`、`fullfsync=0`，未做断电验证；负载不含 Agent、IPC、prompt、输入 intent 或大队列，无法据此推断全部命令接收延迟。当前测量工具在 COMMIT p99 超过 50 ms 时非零退出；若测量或实际命令接收延迟超标，需提前评估将账本移入 `worker_threads`。
+四个已测平台在此负载下 COMMIT p99 低于 50 ms，Windows 最大值仍超过 50 ms。测量使用 WAL、`synchronous=FULL`、`fullfsync=0`，未做断电验证；负载不含 Agent、IPC、prompt、输入 intent 或大队列，无法据此推断全部命令接收延迟。当前测量工具在 COMMIT p99 超过 50 ms 时非零退出；若测量或实际命令接收延迟超标，需提前评估将账本移入 `worker_threads`。
 
 ### SEA Worker 冷启动
 
@@ -98,6 +98,8 @@ macOS 与 Linux 的全部样本低于 3 秒，每次确认 SIGTERM 后 Worker、
 
 系统页缓存未清空，macOS runner 为虚拟化 Apple M1。就绪状态为 `agent_ready=false`，测量没有打开 Agent 会话，也未覆盖已有大量命令或 intent 的恢复耗时。
 
+Windows Server 2022 的独立单次 profile 中，目录缓存和新建空目录的 `icacls` 快速路径将失败的 Host 准备流程从约 12.72 秒降到 3.75 秒：PowerShell 从 5 次、合计 12.51 秒降为 1 次、3.38 秒，`icacls` 从 5 次、0.13 秒变为 10 次、0.28 秒，`whoami` 均为 1 次、约 0.03 秒。首次 `LA` 解析仍耗尽 3 秒预算，Host 未 spawn Worker，这不是完整成功冷启动的样本。相同 profile 的单次 SEA `protect-dir` helper 从 5 秒超时变为 3.44 秒成功，但正式 Runtime 凭据流程和安装包 helper 检查仍超时，不能据此宣称 5 秒目标稳定达成；仅诊断允许 30 秒的 helper 从 5.31 秒变为 2.89 秒。计时代码不在生产源码中。
+
 ### Cursor 加载证据
 
 固定公开包为 `@cursor/sdk@1.0.35`，要求 Node `>=22.13`，安装禁用生命周期脚本。可行布局为完整 SDK、生产依赖与平台包旁置，由 SEA `createRequire` 加载。macOS arm64 的 SDK、SQLite store、tree-sitter/Bash 原生扩展、ripgrep 与 sandbox helper 帮助检查已有通过记录；移走附带依赖时能明确失败。
@@ -108,9 +110,21 @@ Windows Server 2022 本机通过四个 Agent 与原生模块加载，以及 Curs
 
 ## Windows 待修与待验证
 
-Windows 私有目录使用 `DirectoryInfo.SetAccessControl` 仅替换受保护 DACL，保留 owner 与 SACL；避免 PowerShell `Set-Acl` 再次保护含文件的目录时要求 `SeSecurityPrivilege`。`icacls /save` 可将内置 Administrator SID 写成标准 SDDL 缩写 `LA`，校验通过 Windows 解析为数字 SID 后比较，仍严格要求唯一的当前用户 `OICI`、`FA` Allow ACE；错误包含实际 SDDL。普通本地用户的目录保护、私有文件读写、拒绝额外授权与重新收紧均已有本机验证。
+Windows 新建空目录使用 `icacls /inheritance:r /grant:r` 后严格读回；已有目录使用 `DirectoryInfo.SetAccessControl` 仅替换受保护 DACL，并在同一 PowerShell 脚本读回 Access SDDL 和 ACE 的数字 SID，保留 owner 与 SACL，不要求审计权限。`icacls /restore` 在受限令牌下缺少特权，不能替代已有目录的原子收紧。`icacls /save` 可将内置 Administrator SID 写成标准 SDDL 缩写 `LA`，校验通过 Windows 解析为数字 SID 后比较，仍严格要求唯一的当前用户 `OICI`、`FA` Allow ACE；错误包含实际 SDDL。目录成功校验按进程内的 resolved path 与 `dev/ino` 缓存，每次仍执行 `lstat` 和类型检查；同一用户的其他进程修改 ACL 而对象身份不变时可能不被重新发现。SID 解析失败会移除缓存，后续调用可以重试。普通本地用户的目录保护、私有文件读写、拒绝额外授权与重新收紧已有先前本机验证，但当前性能改动尚无该用户的完整 workspace 验证。
 
-Windows Server 2022 本机的受限 Administrator 令牌下，节点全量测试为 205 通过、162 失败、44 跳过，56 个文件中 29 个失败；Runtime 为 89 通过、9 失败、3 跳过。原始 `Invalid private directory ACL` 错误已消失，仍有测试/清理超时、TestClock 额外日志、状态断言及进程树清理失败，尚不能宣称 Windows 测试通过。`pnpm check`、SEA 构建和安装包检查的 8/10 子项通过；Worker 仍未满足 3 秒就绪限制，私有文件 helper 超过 5 秒限制。独立诊断中目录准备耗时约 9.5 秒，Host 尚未 spawn Worker 即超时；source 与 SEA helper 在保留全部 ACL 校验、仅诊断允许 30 秒时分别约 6.6 与 5.7 秒成功。生产预算未改，100 次冷启动仍完成 0 次；FULL 2000 次事务已测，结果不代表端到端启动达标。Windows 进程检查在首棵树报 `Grandchild missing before taskkill` 并中止，未取得机制通过结论。Windows Server 2025、真正普通本地用户的完整 workspace 测试，以及实际 PID 复用仍待验证。
+Windows Server 2022 本机使用 Node 26.11.1、pnpm 12.11.2，以下正式验证按顺序运行于受限 Administrator 令牌：Administrators 组为 deny-only，但完整性标签仍为 High，不能等同真正普通本地用户。节点为 252 通过、118 失败、44 跳过，56 个文件中 22 个失败；与上次的 205/162 相比通过增加 47、失败减少 44，其中新增 3 项纯逻辑测试。Runtime 仍为 89 通过、9 失败、3 跳过。此前带 JSON 读回的中间实现还在管理员令牌下运行过一轮，节点为 186/184/44，不能冒充最终实现或普通用户的结果。
+
+| 命令 | exit | 当前结果 |
+|---|---:|---|
+| `pnpm --filter @baton/batond test` | 1 | 252 通过、118 失败、44 跳过 |
+| `pnpm --dir runtimes/project-agent test` | 1 | 89 通过、9 失败、3 跳过，凭据 helper 超时 |
+| `pnpm check` | 0 | 格式、lint、类型检查通过 |
+| `node tools/package-batond.mjs --out bin/package` | 0 | SEA 和旁置依赖打包完成 |
+| `node tools/check-package.mjs bin/package` | 1 | 8/10 子项通过；Worker 和私有文件超时 |
+| `node tools/measure/worker-startup.mjs 100 --package bin/package --ledger 2000` | 1 | 冷启动 0/100；FULL 完成 2000 次事务 |
+| `node tools/verify/windows-processes.mjs` | 1 | 首棵树报 `Grandchild missing before taskkill`，后续场景未完成 |
+
+剩余失败包括测试/清理超时、TestClock 额外日志、状态断言、Pi 私有状态不可访问、Windows 文件占用与进程树清理。`keeps identity mismatches unknown even when reply display fields need repair` 本轮全量出现了基线没有的 10 秒超时；使用仓库配置单独选跑该项通过，根因仍未确认，不能据此判为已修复或与改动无关。ACL 与私有文件定向检查为 13 通过、1 个原有 POSIX 专用跳过，不代替全量结果。Worker 3 秒与 helper 5 秒生产预算未改，目标仍未达成。Windows Server 2025、真正普通本地用户的完整 workspace 测试，以及实际 PID 复用仍待验证。
 
 [Windows 进程脚本](../../tools/verify/windows-processes.mjs) 使用自有的 CIM 校验与 `taskkill` 包装，观察完整父子孙树、故意过期的创建时间，以及中间父进程退出后的孙进程。它检查系统机制，未调用生产 reaper，不强迫系统实际复用 PID，也不验证 Worker 崩溃到下一次启动之间的回收延迟；非 Windows 输出 `not-measured`。
 

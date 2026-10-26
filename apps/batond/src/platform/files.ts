@@ -31,22 +31,35 @@ async function currentSid(): Promise<string> {
   ))
 }
 
-const sddlSids = new Map<string, Promise<string>>()
-
-async function numericWindowsSid(value: string): Promise<string> {
-  if (!/^[A-Z]{2}$/.test(value)) return value
-  let pending = sddlSids.get(value)
-  if (!pending) {
-    // SDDL abbreviations (including LA) are SIDs, not localized account names.
-    pending = powershell(
-      `([System.Security.AccessControl.RawSecurityDescriptor]::new('D:(A;;FA;;;${value})')).DiscretionaryAcl[0].SecurityIdentifier.Value`,
-    )
-    sddlSids.set(value, pending)
+export function createNumericWindowsSid(
+  resolveAlias: (alias: string) => Promise<string>,
+): (value: string) => Promise<string> {
+  const sids = new Map<string, Promise<string>>()
+  return (value) => {
+    if (!/^[A-Z]{2}$/.test(value)) return Promise.resolve(value)
+    let pending = sids.get(value)
+    if (!pending) {
+      pending = resolveAlias(value).catch((error: unknown) => {
+        sids.delete(value)
+        throw error
+      })
+      sids.set(value, pending)
+    }
+    return pending
   }
-  return pending
 }
 
-export async function validateWindowsDirectorySddl(sddl: string | undefined, sid: string): Promise<void> {
+const numericWindowsSid = createNumericWindowsSid((value) =>
+  powershell(
+    `([System.Security.AccessControl.RawSecurityDescriptor]::new('D:(A;;FA;;;${value})')).DiscretionaryAcl[0].SecurityIdentifier.Value`,
+  ),
+)
+
+export async function validateWindowsDirectorySddl(
+  sddl: string | undefined,
+  sid: string,
+  resolveAlias: (alias: string) => Promise<string> = numericWindowsSid,
+): Promise<void> {
   const diagnostic = `current user SID ${sid}; SDDL: ${sddl ?? '<missing>'}`
   if (!sddl || !sddl.startsWith('D:P')) throw new Error(`Private directory inherits ACLs: ${diagnostic}`)
   const entries = [...sddl.split('S:', 1)[0].matchAll(/\(([^()]*)\)/g)]
@@ -60,9 +73,16 @@ export async function validateWindowsDirectorySddl(sddl: string | undefined, sid
     fields[2] !== 'FA' ||
     fields[3] !== '' ||
     fields[4] !== '' ||
-    (await numericWindowsSid(fields[5]).catch(() => '')) !== sid
+    (await (/^[A-Z]{2}$/.test(fields[5]) ? resolveAlias(fields[5]).catch(() => '') : fields[5])) !== sid
   )
     throw new Error(`Invalid private directory ACL: ${diagnostic}`)
+}
+
+export async function validateWindowsDirectoryAclReadback(output: string, sid: string): Promise<void> {
+  const [sddl, trustee, ...extra] = output.split(/\r?\n/)
+  if (!sddl || !trustee || extra.length || !/^S-\d+-\d+(?:-\d+)+$/.test(trustee))
+    throw new Error(`Invalid private directory ACL readback: current user SID ${sid}; SDDL: ${sddl || '<missing>'}`)
+  await validateWindowsDirectorySddl(sddl, sid, async () => trustee)
 }
 
 /** icacls has no per-handle validation. Reparse and concurrent ACL changes remain Windows limitations. */
@@ -87,16 +107,72 @@ async function checkDirectoryAcl(path: string): Promise<void> {
   }
 }
 
-export async function validatePrivateDirectory(path: string): Promise<void> {
-  checkStat(path, await lstat(path), true)
-  if (process.platform === 'win32') await checkDirectoryAcl(path)
+export function createDirectoryAclCache(checkAcl: (path: string) => Promise<void>) {
+  const entries = new Map<string, { identity: string; pending: Promise<void> }>()
+  const identityOf = (stat: Pick<Stats, 'dev' | 'ino'>) =>
+    Number.isSafeInteger(stat.dev) && Number.isSafeInteger(stat.ino) && stat.ino > 0
+      ? `${stat.dev}:${stat.ino}`
+      : undefined
+  return {
+    async validate(path: string, stat: Pick<Stats, 'dev' | 'ino'>): Promise<void> {
+      const key = resolve(path)
+      const identity = identityOf(stat)
+      if (!identity) {
+        entries.delete(key)
+        return checkAcl(path)
+      }
+      const cached = entries.get(key)
+      if (cached?.identity === identity) return cached.pending
+      const pending = checkAcl(path)
+      entries.delete(key)
+      entries.set(key, { identity, pending })
+      if (entries.size > 1024) entries.delete(entries.keys().next().value!)
+      try {
+        await pending
+      } catch (error) {
+        if (entries.get(key)?.pending === pending) entries.delete(key)
+        throw error
+      }
+    },
+    remember(path: string, stat: Pick<Stats, 'dev' | 'ino'>): void {
+      const identity = identityOf(stat)
+      const key = resolve(path)
+      entries.delete(key)
+      if (identity) entries.set(key, { identity, pending: Promise.resolve() })
+      if (entries.size > 1024) entries.delete(entries.keys().next().value!)
+    },
+    forget(path: string): void {
+      entries.delete(resolve(path))
+    },
+  }
 }
 
-async function setDirectoryAcl(path: string): Promise<void> {
+const directoryAclCache = createDirectoryAclCache(checkDirectoryAcl)
+
+export async function validatePrivateDirectory(path: string): Promise<void> {
+  const stat = await lstat(path)
+  checkStat(path, stat, true)
+  if (process.platform === 'win32') await directoryAclCache.validate(path, stat)
+}
+
+async function setDirectoryAcl(path: string, created = false): Promise<void> {
+  const before = await lstat(path)
+  checkStat(path, before, true)
+  directoryAclCache.forget(path)
   const sid = await currentSid()
+  if (created) {
+    // Only newly created empty directories may remove inheritance before granting the current user.
+    await systemCommand(windowsTool('icacls.exe'), [path, '/inheritance:r', '/grant:r', `*${sid}:(OI)(CI)F`, '/Q'])
+    const after = await lstat(path)
+    checkStat(path, after, true)
+    if (before.dev !== after.dev || before.ino !== after.ino)
+      throw new Error('Private directory changed during protection')
+    await checkDirectoryAcl(path)
+    directoryAclCache.remember(path, after)
+    return
+  }
   const encodedPath = Buffer.from(resolve(path), 'utf8').toString('base64')
-  // Replace the protected DACL in one operation; resetting inheritance can expose existing contents.
-  await powershell(`
+  const output = await powershell(`
     $acl = [System.Security.AccessControl.DirectorySecurity]::new();
     $acl.SetAccessRuleProtection($true, $false);
     $identity = [System.Security.Principal.SecurityIdentifier]::new('${sid}');
@@ -104,8 +180,20 @@ async function setDirectoryAcl(path: string): Promise<void> {
       $identity, 'FullControl', 'ContainerInherit, ObjectInherit', 'None', 'Allow');
     $acl.AddAccessRule($rule);
     $path = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedPath}'));
-    [System.IO.DirectoryInfo]::new($path).SetAccessControl($acl);
+    $directory = [System.IO.DirectoryInfo]::new($path);
+    $directory.SetAccessControl($acl);
+    $actual = $directory.GetAccessControl([System.Security.AccessControl.AccessControlSections]::Access);
+    $sddl = $actual.GetSecurityDescriptorSddlForm([System.Security.AccessControl.AccessControlSections]::Access);
+    $trustee = ([System.Security.AccessControl.RawSecurityDescriptor]::new($sddl)).DiscretionaryAcl[0].SecurityIdentifier.Value;
+    [Console]::WriteLine($sddl);
+    [Console]::WriteLine($trustee);
   `)
+  const after = await lstat(path)
+  checkStat(path, after, true)
+  if (before.dev !== after.dev || before.ino !== after.ino)
+    throw new Error('Private directory changed during protection')
+  await validateWindowsDirectoryAclReadback(output, sid)
+  directoryAclCache.remember(path, after)
 }
 
 /** 显式保护操作收紧当前用户已有目录；普通验证不会修改权限。 */
@@ -150,7 +238,7 @@ async function createPrivateDirectory(path: string): Promise<void> {
   } catch (error) {
     if (!hasCode(error, 'EEXIST')) throw error
   }
-  if (created && process.platform === 'win32') await setDirectoryAcl(path)
+  if (created && process.platform === 'win32') await setDirectoryAcl(path, true)
   await validatePrivateDirectory(path)
 }
 

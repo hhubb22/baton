@@ -14,7 +14,9 @@
 
 POSIX 目录要求当前 UID、0700；文件要求当前 UID、0600、普通文件与单个硬链接。打开前后通过 lstat/fstat 核对设备与 inode，使用 O_NOFOLLOW，拒绝符号链接。文件的直接父目录也必须通过私有目录检查。调用方负责从可信父目录创建数据根目录。
 
-Windows 创建目录和显式保护目录时，通过 PowerShell 的 `DirectoryInfo.SetAccessControl` 一次替换受保护的 DACL，仅授予当前用户 SID 可继承的完整权限，不写入 owner 或 SACL，不要求审计权限。SID 来自 `whoami /user`，普通验证使用 `icacls /save` 导出的 SDDL，严格要求 DACL 中唯一的 `OICI`、`FA` Allow ACE，拒绝继承、其他主体授权及不完整权限。SDDL 的标准 SID 缩写（如内置 Administrator 的 `LA`）由 Windows `RawSecurityDescriptor` 解析为数字 SID 后比较，不比较显示名或用户目录的长短路径；校验错误包含当前用户 SID 与实际 SDDL，不读取凭据内容。显式保护不会先恢复父目录继承权限；普通验证不修改已有权限。文件依靠私有目录保护，Node 没有逐句柄 DACL 与 reparse point 校验。
+Windows 对本进程刚创建的空目录，用 `icacls /inheritance:r /grant:r` 去掉继承权限并仅授予当前用户 SID 可继承的完整权限，随即以 `icacls /save` 读回并严格校验。显式保护已有目录仍通过 PowerShell 的 `DirectoryInfo.SetAccessControl` 一次替换受保护 DACL，在同一个脚本中读回 Access SDDL 并校验，不写入 owner 或 SACL，也不要求审计权限；不能用需要额外令牌特权的 `icacls /restore` 替代。SID 来自 `whoami /user`，严格要求 DACL 中唯一的 `OICI`、`FA` Allow ACE，拒绝继承、其他主体授权及不完整权限。SDDL 的标准 SID 缩写（如内置 Administrator 的 `LA`）由 Windows `RawSecurityDescriptor` 解析为数字 SID 后比较，不比较显示名或用户目录的长短路径；校验错误包含当前用户 SID 与实际 SDDL，不读取凭据内容。显式保护不会先恢复父目录继承权限；普通验证不修改已有权限。
+
+Windows 目录 ACL 的成功校验只在同一进程内按 `resolve(path)` 和 `lstat` 的 `dev/ino` 缓存；每次访问仍重新 `lstat` 并检查类型、符号链接，换了目录对象就重新读取并校验 DACL，写入权限后只缓存写入后读回合格的对象。其他以同一用户身份运行的进程若之后修改同一对象的 ACL，而 `dev/ino` 不变，本进程可能不会重新发现；与现有 Windows 并发 ACL 修改限制一致。文件依靠私有目录保护，Node 没有逐句柄 DACL 与 reparse point 校验。
 
 ## 独占锁
 
