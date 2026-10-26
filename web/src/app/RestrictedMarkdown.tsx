@@ -67,7 +67,7 @@ const styles = stylex.create({
   left: { textAlign: 'left' },
   center: { textAlign: 'center' },
   right: { textAlign: 'right' },
-  link: { color: colors.link, textDecoration: 'underline' },
+  link: { color: colors.accentText, textDecoration: 'underline' },
 })
 
 const allowedElements = [

@@ -126,7 +126,7 @@ export function createMockClient(
     listThreads: () => guarded(() => store.snapshot().threads),
     async getThread(threadId) {
       const thread = (await this.listThreads()).find((item) => item.id === threadId)
-      if (!thread) throw new ClientError('notFound', 'The chat was not found.')
+      if (!thread) throw new ClientError('notFound', 'The thread was not found.')
       return thread
     },
     listMessages: (threadId) => guarded(() => store.snapshot().messages.filter((item) => item.threadId === threadId)),

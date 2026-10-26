@@ -3,6 +3,9 @@ import { createRoot } from 'react-dom/client'
 import { App } from './app/App'
 import type { BatonClient } from './data/client'
 import { createHttpClient } from './data/http/client'
+import '@fontsource/inter/400.css'
+import '@fontsource/inter/500.css'
+import '@fontsource/inter/600.css'
 import './theme/global.css'
 
 async function start() {

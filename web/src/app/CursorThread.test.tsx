@@ -50,7 +50,7 @@ function mount(
       agent_type: 'cursor',
       model: '',
       working_directory: '/work',
-      title: 'Remote Cursor chat',
+      title: 'Remote Cursor thread',
       status: options.status ?? 'waiting_device',
       status_reason: '',
       created_at: at,
@@ -259,12 +259,12 @@ describe('remote Cursor threads', () => {
   it('creates, opens and sends over HTTP while Project and Inbox endpoints return 501', async () => {
     const user = userEvent.setup()
     const { state, fetcher } = mount()
-    const input = await screen.findByLabelText('New chat message')
+    const input = await screen.findByLabelText('New thread message')
     expect(await screen.findByRole('button', { name: 'Cursor · Default model' })).toBeInTheDocument()
     expect(screen.getAllByText('Projects unavailable').length).toBeGreaterThan(0)
     await user.type(input, 'Inspect the repository')
     await user.click(within(input.parentElement!).getByRole('button', { name: 'Send' }))
-    expect(await screen.findByRole('heading', { name: 'Remote Cursor chat' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Remote Cursor thread' })).toBeInTheDocument()
     expect(await screen.findByText('Starting Cursor…')).toBeInTheDocument()
     expect(await screen.findByText('Inspect the repository')).toBeInTheDocument()
     const create = fetcher.mock.calls.find(
@@ -300,7 +300,7 @@ describe('remote Cursor threads', () => {
     await user.type(within(dialog).getByLabelText('Model ID'), '  custom-model  ')
     await user.click(within(dialog).getByRole('button', { name: 'Use model' }))
     expect(await screen.findByRole('button', { name: 'Cursor · custom-model' })).toBeInTheDocument()
-    await user.type(screen.getByLabelText('New chat message'), 'Hello')
+    await user.type(screen.getByLabelText('New thread message'), 'Hello')
     await user.click(screen.getByRole('button', { name: 'Send' }))
     await waitFor(() => {
       const request = fetcher.mock.calls.find(
@@ -315,9 +315,9 @@ describe('remote Cursor threads', () => {
 
   it('keeps resume pending after reload until execution completion is reported', async () => {
     const { state } = mount({ existing: true, resumePending: true, status: 'stopped' })
-    expect(await screen.findByRole('heading', { name: 'Remote Cursor chat' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Remote Cursor thread' })).toBeInTheDocument()
     expect(await screen.findByText('Resuming Cursor…')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Resume chat' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Resume thread' })).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Message')).not.toBeInTheDocument()
     state.thread.status = 'idle'
     act(() => Socket.current.receive({ type: 'thread.changed', thread_id: threadId }))
@@ -334,7 +334,7 @@ describe('remote Cursor threads', () => {
     await user.click(await screen.findByRole('button', { name: 'No agent' }))
     await user.click(await screen.findByRole('menuitem', { name: /Cursor.*Local sandbox needs setup/ }))
     expect(await screen.findByText('Local sandbox needs setup.')).toBeInTheDocument()
-    await user.type(screen.getByLabelText('New chat message'), 'Hello')
+    await user.type(screen.getByLabelText('New thread message'), 'Hello')
     await user.click(screen.getByRole('button', { name: 'Send' }))
     expect(
       fetcher.mock.calls.some(([url, init]) => requestURL(url) === '/api/v1/threads' && init?.method === 'POST'),

@@ -1,6 +1,7 @@
 import * as stylex from '@stylexjs/stylex'
 import { Navigate, useRouter, useSearch } from '@tanstack/react-router'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { AuthShell } from '../app/AuthShell'
 import type { LoginNotice } from '../app/router'
 import { ClientError } from '../data/client'
 import { useSession, useSignIn } from '../data/queries'
@@ -8,20 +9,10 @@ import { text } from '../theme/text'
 import { colors, space } from '../theme/tokens.stylex'
 import { BrandMark } from '../ui/BrandMark'
 import { Button } from '../ui/Button'
-import { Card } from '../ui/Card'
 import { Field, Input } from '../ui/Field'
 
 const styles = stylex.create({
-  page: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: '100vh',
-    padding: space.xl,
-    backgroundColor: colors.canvas,
-  },
-  column: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: space.xl, width: '360px' },
-  brand: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: space.lg },
+  brand: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: space.md },
   notice: {
     display: 'flex',
     flexDirection: 'column',
@@ -36,17 +27,16 @@ const styles = stylex.create({
     borderRadius: '10px',
   },
   form: { display: 'flex', flexDirection: 'column', gap: space.lg, width: '100%' },
-  card: { width: '100%' },
   note: { alignSelf: 'stretch' },
 })
 
 type Notice = LoginNotice | 'unavailable'
 
 const notices: Record<Notice, { title: string; detail: string }> = {
-  signedOut: { title: 'You are signed out', detail: 'Sign in to view your devices, chats, and projects.' },
+  signedOut: { title: 'You are signed out', detail: 'Sign in to view your devices, threads, and projects.' },
   expired: {
     title: 'Your sign-in expired',
-    detail: 'Sign in again to continue. Saved chats and devices are still in your account.',
+    detail: 'Sign in again to continue. Saved threads and devices are still in your account.',
   },
   passwordReset: {
     title: 'Password reset by administrator',
@@ -107,58 +97,54 @@ export function LoginPage() {
   else if (unreachable) label = 'Try signing in again'
 
   return (
-    <main {...stylex.props(styles.page)}>
-      <div {...stylex.props(styles.column)}>
-        <div {...stylex.props(styles.brand)}>
-          <BrandMark tone="color" size={36} />
-          <h1 {...stylex.props(text.title)}>Sign in to Baton</h1>
-        </div>
-        {notice && (
-          <div role={notice === 'unavailable' ? 'alert' : 'status'} {...stylex.props(styles.notice)}>
-            <span {...stylex.props(text.label)}>{notices[notice].title}</span>
-            <span {...stylex.props(text.caption, text.muted)}>{notices[notice].detail}</span>
-          </div>
-        )}
-        <Card style={styles.card}>
-          <form onSubmit={submit} {...stylex.props(styles.form)}>
-            <Field label="Username">
-              {(props) => (
-                <Input
-                  {...props}
-                  autoComplete="username"
-                  value={username}
-                  onChange={(event) => {
-                    setUsername(event.target.value)
-                    setInvalid(false)
-                  }}
-                />
-              )}
-            </Field>
-            <Field label="Password" error={invalid ? 'Invalid username or password.' : undefined}>
-              {(props) => (
-                <Input
-                  {...props}
-                  ref={passwordRef}
-                  type="password"
-                  autoComplete="current-password"
-                  placeholder={notice === 'passwordReset' ? 'New password' : 'Password'}
-                  value={password}
-                  onChange={(event) => {
-                    setPassword(event.target.value)
-                    setInvalid(false)
-                  }}
-                />
-              )}
-            </Field>
-            <Button type="submit" variant="primary" block>
-              {label}
-            </Button>
-          </form>
-        </Card>
-        <p {...stylex.props(text.caption, text.faint, styles.note)}>
-          Contact your administrator if you need an account or password reset.
-        </p>
+    <AuthShell>
+      <div {...stylex.props(styles.brand)}>
+        <BrandMark tone="color" size={36} />
+        <h1 {...stylex.props(text.title)}>Sign in to Baton</h1>
       </div>
-    </main>
+      {notice && (
+        <div role={notice === 'unavailable' ? 'alert' : 'status'} {...stylex.props(styles.notice)}>
+          <span {...stylex.props(text.label)}>{notices[notice].title}</span>
+          <span {...stylex.props(text.caption, text.muted)}>{notices[notice].detail}</span>
+        </div>
+      )}
+      <form onSubmit={submit} {...stylex.props(styles.form)}>
+        <Field label="Username">
+          {(props) => (
+            <Input
+              {...props}
+              autoComplete="username"
+              value={username}
+              onChange={(event) => {
+                setUsername(event.target.value)
+                setInvalid(false)
+              }}
+            />
+          )}
+        </Field>
+        <Field label="Password" error={invalid ? 'Invalid username or password.' : undefined}>
+          {(props) => (
+            <Input
+              {...props}
+              ref={passwordRef}
+              type="password"
+              autoComplete="current-password"
+              placeholder={notice === 'passwordReset' ? 'New password' : 'Password'}
+              value={password}
+              onChange={(event) => {
+                setPassword(event.target.value)
+                setInvalid(false)
+              }}
+            />
+          )}
+        </Field>
+        <Button type="submit" variant="primary" block>
+          {label}
+        </Button>
+      </form>
+      <p {...stylex.props(text.caption, text.muted, styles.note)}>
+        Contact your administrator if you need an account or password reset.
+      </p>
+    </AuthShell>
   )
 }

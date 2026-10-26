@@ -109,7 +109,7 @@ export function threadView(
     return view(
       { tone: 'hollow', label: 'Archived' },
       'archived',
-      notice('Archived', 'This chat is closed to new messages. Past replies and attachment links are kept.'),
+      notice('Archived', 'This thread is closed to new messages. Past replies and attachment links are kept.'),
       false,
     )
   }
@@ -151,7 +151,7 @@ export function threadView(
     return view(
       { tone: 'info', label: 'Resuming…' },
       'waiting',
-      notice(`Resuming ${agent}…`, `Waiting for ${name} to confirm this chat has resumed.`),
+      notice(`Resuming ${agent}…`, `Waiting for ${name} to confirm this thread has resumed.`),
       false,
     )
   }
@@ -165,7 +165,11 @@ export function threadView(
       : view(
           { tone: 'neutral', label: 'Waiting for device' },
           'waiting',
-          notice(`Waiting for ${name}`, `Your message is saved. ${agent} has not opened this chat yet.`, 'viewDevices'),
+          notice(
+            `Waiting for ${name}`,
+            `Your message is saved. ${agent} has not opened this thread yet.`,
+            'viewDevices',
+          ),
         )
   }
   switch (thread.status) {
@@ -184,7 +188,7 @@ export function threadView(
             )
           : notice(
               'Status unknown',
-              `${name} has not reported this chat since it reconnected. Check the activity before sending more messages.`,
+              `${name} has not reported this thread since it reconnected. Check the activity before sending more messages.`,
               'viewActivity',
               'attention',
             ),
@@ -208,7 +212,7 @@ export function threadView(
         'waiting',
         notice(
           `Waiting for ${name} to come online`,
-          `Your message is saved and will send when ${name} is online. This chat stays on ${name}.`,
+          `Your message is saved and will send when ${name} is online. This thread stays on ${name}.`,
           'viewDevices',
         ),
       )
@@ -245,7 +249,7 @@ function stoppedNotice(
         return [
           notice(
             `${agent} stopped before finishing`,
-            `${agent} on ${name} was interrupted, for example by a restart. Resume the chat to continue where it left off.`,
+            `${agent} on ${name} was interrupted, for example by a restart. Resume the thread to continue where it left off.`,
             'resume',
             'danger',
           ),
@@ -254,8 +258,8 @@ function stoppedNotice(
       }
       return [
         notice(
-          'This agent cannot resume past chats',
-          `The agent on ${name} does not support resuming. Start a new chat in this folder to continue.`,
+          'This agent cannot resume past threads',
+          `The agent on ${name} does not support resuming. Start a new thread in this folder to continue.`,
           'newChat',
           'danger',
         ),
@@ -264,8 +268,8 @@ function stoppedNotice(
     case 'historyLost':
       return [
         notice(
-          'Chat history not found',
-          `${name} no longer has the history of this chat, so ${agent} cannot resume it. Start a new chat in this folder to continue.`,
+          'Thread history not found',
+          `${name} no longer has the history of this thread, so ${agent} cannot resume it. Start a new thread in this folder to continue.`,
           'newChat',
           'danger',
         ),
@@ -275,7 +279,7 @@ function stoppedNotice(
       return [
         notice(
           'Folder not found',
-          `${stop.detail ?? thread.folder} no longer exists on ${name}. Choose a folder to start a new chat.`,
+          `${stop.detail ?? thread.folder} no longer exists on ${name}. Choose a folder to start a new thread.`,
           'chooseFolder',
           'danger',
         ),
@@ -286,7 +290,7 @@ function stoppedNotice(
         return [
           notice(
             `${agent} could not start`,
-            `Fix the reported issue on ${name}, then retry opening this chat. Your saved message is kept for you to send again.`,
+            `Fix the reported issue on ${name}, then retry opening this thread. Your saved message is kept for you to send again.`,
             'resume',
             'danger',
           ),
@@ -295,7 +299,7 @@ function stoppedNotice(
       return [
         notice(
           `${agent} could not start`,
-          `${stop.detail ?? `${agent} exited during startup`}. Fix it on ${name}, then start a new chat in this folder.`,
+          `${stop.detail ?? `${agent} exited during startup`}. Fix it on ${name}, then start a new thread in this folder.`,
           'newChat',
           'danger',
         ),
@@ -614,7 +618,7 @@ export interface CapabilityLine {
 function abilityNotes(agent: DeviceAgent) {
   const notes: string[] = []
   if (agent.abilities.steer) notes.push('send now')
-  if (agent.abilities.resume) notes.push('resume chat')
+  if (agent.abilities.resume) notes.push('resume thread')
   return notes
 }
 
@@ -777,7 +781,7 @@ export function agentUnavailableReason(agent: DeviceAgent) {
   if (agent.problem === 'notInstalled') return 'Program not installed'
   if (agent.problem === 'signedOut') return `${agent.account ?? agentNames[agent.kind]} sign-in expired`
   if (agent.status === 'unverified') return 'This agent has not been verified on this device.'
-  if (agent.status === 'available' && !agent.problem) return 'This agent does not support starting new chats.'
+  if (agent.status === 'available' && !agent.problem) return 'This agent does not support starting new threads.'
   return 'Agent unavailable on this device'
 }
 

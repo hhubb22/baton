@@ -103,7 +103,7 @@ export function FolderDialog({
       open
       onOpenChange={(open) => !open && onClose()}
       title="Choose folder"
-      description="New chats run in a folder on one device."
+      description="New threads run in a folder on one device."
       note={path ?? 'Choose an allowed folder.'}
       actions={
         <>

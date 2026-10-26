@@ -27,10 +27,6 @@ const styles = stylex.create({
     paddingTop: 0,
     paddingInline: space.sm,
     paddingBottom: space.sm,
-    backgroundColor: colors.panel,
-    borderRightWidth: '1px',
-    borderRightStyle: 'solid',
-    borderRightColor: colors.borderSoft,
   },
   sidebarCollapsed: { width: '64px' },
   brand: {
@@ -55,7 +51,8 @@ const styles = stylex.create({
   },
   projectRow: { height: '30px' },
   active: {
-    backgroundColor: { default: colors.selected, ':hover': colors.selected },
+    backgroundColor: { default: colors.raised, ':hover': colors.raised },
+    boxShadow: `0 1px 2px ${colors.shadowNear}`,
     fontWeight: weight.medium,
   },
   rowIcon: { color: colors.muted },
@@ -206,7 +203,7 @@ export function Sidebar() {
         {!collapsed && (
           <IconButton
             icon="pen"
-            label="New chat"
+            label="New thread"
             onClick={() => void navigate({ to: '/threads', search: { compose: 'focus' } })}
           />
         )}
@@ -216,8 +213,8 @@ export function Sidebar() {
         {collapsed && (
           <button
             type="button"
-            aria-label="New chat"
-            title="New chat"
+            aria-label="New thread"
+            title="New thread"
             onClick={() => void navigate({ to: '/threads', search: { compose: 'focus' } })}
             {...stylex.props(styles.row, styles.plainButton, focusRing.ring)}
           >

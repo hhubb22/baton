@@ -25,7 +25,6 @@ const styles = stylex.create({
     height: '14px',
     borderRadius: radius.pill,
     backgroundColor: '#fff',
-    boxShadow: '0 1px 2px rgb(0 0 0 / 20%)',
     transitionProperty: 'transform',
     transitionDuration: '120ms',
   },

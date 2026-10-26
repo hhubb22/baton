@@ -36,7 +36,7 @@ import { Menu, MenuHeading, MenuOption, MenuRule } from '../ui/Menu'
 import { StatusDot } from '../ui/Status'
 
 const styles = stylex.create({
-  layout: { display: 'flex', flexGrow: 1, minWidth: 0, height: '100%' },
+  layout: { display: 'flex', gap: size.gutter, flexGrow: 1, minWidth: 0, height: '100%' },
   content: { display: 'flex', flexDirection: 'column', gap: space.lg, padding: '20px' },
   composerArea: { display: 'flex', flexDirection: 'column', gap: space.xs },
   status: { minHeight: '18px', paddingInline: space.xs, color: colors.muted },
@@ -262,7 +262,7 @@ export function ThreadsPage() {
     if (action === 'chooseFolder') setBrowseDevice(thread?.deviceId ?? current?.deviceId ?? null)
   }
 
-  // 侧栏的 New chat 和单独页面上的恢复办法通过地址带过来，处理一次后从地址里去掉。
+  // 侧栏的 New thread 和单独页面上的恢复办法通过地址带过来，处理一次后从地址里去掉。
   const request = search.compose && threads.data ? `${search.compose}:${search.from ?? ''}` : null
   const [handled, setHandled] = useState<string | null>(null)
   if (request !== handled) {
@@ -325,7 +325,7 @@ export function ThreadsPage() {
           setSearch({ thread: operation.targetId, archived: undefined })
         },
         onError: (cause) =>
-          setError(cause instanceof ClientError ? cause.message : 'Could not start the chat. Try again.'),
+          setError(cause instanceof ClientError ? cause.message : 'Could not start the thread. Try again.'),
       },
     )
   }
@@ -358,16 +358,16 @@ export function ThreadsPage() {
   const filterDevice = allDevices.find((item) => item.id === search.device)
   const filterProject = projects.data?.find((item) => item.id === search.project)
   const filtering = search.device !== undefined || search.project !== undefined || archived
-  const statusLine = error ?? (create.isPending ? 'Saving chat…' : null)
+  const statusLine = error ?? (create.isPending ? 'Saving thread…' : null)
 
   let list
   if (threads.isPending) {
-    list = <p {...stylex.props(text.caption, styles.muted)}>Loading chats…</p>
+    list = <p {...stylex.props(text.caption, styles.muted)}>Loading threads…</p>
   } else if (threads.isError) {
     list = (
       <Banner
         icon="alert"
-        title="Could not load chats"
+        title="Could not load threads"
         action={
           <Button small onClick={() => void threads.refetch()}>
             Retry
@@ -378,7 +378,7 @@ export function ThreadsPage() {
   } else if (allThreads.length === 0) {
     list = (
       <div {...stylex.props(styles.empty)}>
-        <span {...stylex.props(text.bodyMedium)}>No chats yet</span>
+        <span {...stylex.props(text.bodyMedium)}>No threads yet</span>
         <span {...stylex.props(text.small, styles.muted)}>
           Choose a folder and model above, then send your first message.
         </span>
@@ -390,7 +390,7 @@ export function ThreadsPage() {
   } else if (groups.length === 0) {
     list = (
       <div {...stylex.props(styles.empty)}>
-        <span {...stylex.props(text.bodyMedium)}>No chats match these filters</span>
+        <span {...stylex.props(text.bodyMedium)}>No threads match these filters</span>
         <Button small onClick={() => setSearch({ device: undefined, project: undefined, archived: undefined })}>
           Clear filters
         </Button>
@@ -434,7 +434,7 @@ export function ThreadsPage() {
             <Banner
               icon="device"
               title="Connect a device first"
-              detail="Chats run on one of your devices. Connect one to start."
+              detail="Threads run on one of your devices. Connect one to start."
               action={
                 <Button
                   small
@@ -448,7 +448,7 @@ export function ThreadsPage() {
           ) : (
             <div {...stylex.props(styles.composerArea)}>
               <Composer
-                label="New chat message"
+                label="New thread message"
                 inputRef={inputRef}
                 value={draft}
                 onChange={setDraft}

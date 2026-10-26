@@ -391,13 +391,13 @@ export class MockStore {
 
   // 停止、归档或无法继续的 Thread 不再接收消息，返回给页面的原因和恢复办法一致。
   private ensureWritable(thread: Thread) {
-    if (thread.status === 'archived') throw new ClientError('invalid', "Archived chats can't receive messages")
-    if (thread.pending === 'archive') throw new ClientError('invalid', 'This chat is being archived')
+    if (thread.status === 'archived') throw new ClientError('invalid', "Archived threads can't receive messages")
+    if (thread.pending === 'archive') throw new ClientError('invalid', 'This thread is being archived')
     if (thread.status !== 'stopped' || !thread.stop) return
     const ended =
       thread.stop.kind === 'historyLost' || thread.stop.kind === 'folderMissing' || thread.stop.kind === 'startFailed'
     if (ended || (thread.stop.kind === 'interrupted' && !this.agentOf(thread)?.abilities.resume)) {
-      throw new ClientError('invalid', "This chat can't continue. Start a new chat.")
+      throw new ClientError('invalid', "This thread can't continue. Start a new thread.")
     }
   }
 
@@ -641,7 +641,10 @@ export class MockStore {
     const name = thread.agent ? agentNames[thread.agent] : 'Command'
     if (thread.model === model) return thread
     if (!agent?.abilities.switchModel) {
-      throw new ClientError('invalid', `${name} cannot switch models in this chat. Start a new chat to choose another.`)
+      throw new ClientError(
+        'invalid',
+        `${name} cannot switch models in this thread. Start a new thread to choose another.`,
+      )
     }
     if (!agent.models.includes(model)) throw new ClientError('invalid', `${model} is not available for ${name}`)
     thread.model = model
@@ -652,7 +655,7 @@ export class MockStore {
 
   stopThread(threadId: ID): Operation {
     const thread = this.thread(threadId)
-    if (thread.status === 'archived') throw new ClientError('invalid', 'This chat is archived')
+    if (thread.status === 'archived') throw new ClientError('invalid', 'This thread is archived')
     if (thread.status === 'running' && !this.agentOf(thread)?.abilities.stop) {
       throw new ClientError(
         'invalid',
@@ -682,11 +685,11 @@ export class MockStore {
 
   archiveThread(threadId: ID): Operation {
     const thread = this.thread(threadId)
-    if (thread.status === 'archived') throw new ClientError('invalid', 'This chat is already archived')
+    if (thread.status === 'archived') throw new ClientError('invalid', 'This thread is already archived')
     if (thread.status === 'running' && !this.agentOf(thread)?.abilities.stop) {
       throw new ClientError(
         'invalid',
-        `Wait for ${thread.agent ? agentNames[thread.agent] : 'Command'} to finish, then archive this chat`,
+        `Wait for ${thread.agent ? agentNames[thread.agent] : 'Command'} to finish, then archive this thread`,
       )
     }
     const operation = this.createOperation('archiveThread', threadId)
@@ -779,7 +782,7 @@ export class MockStore {
     const thread = this.thread(threadId)
     const device = this.device(thread.deviceId)
     if (thread.status !== 'stopped' || thread.stop?.kind !== 'interrupted') {
-      throw new ClientError('invalid', 'This chat does not need resuming')
+      throw new ClientError('invalid', 'This thread does not need resuming')
     }
     if (!this.agentOf(thread)?.abilities.resume) {
       throw new ClientError(
@@ -787,14 +790,14 @@ export class MockStore {
         `${thread.agent ? agentNames[thread.agent] : 'Command'} on ${device.name} does not support resuming`,
       )
     }
-    if (!this.online(device.id)) throw new ClientError('invalid', `Reconnect ${device.name} to resume this chat`)
+    if (!this.online(device.id)) throw new ClientError('invalid', `Reconnect ${device.name} to resume this thread`)
     const operation = this.createOperation('resumeThread', threadId)
     this.emit('operations')
 
     this.schedule(this.latency.save + this.latency.device, () => {
       if (this.world.lostHistory.includes(thread.id)) {
         thread.stop = { kind: 'historyLost', detail: null }
-        this.setPhase(operation, 'failed', 'Chat history not found')
+        this.setPhase(operation, 'failed', 'Thread history not found')
       } else {
         thread.status = 'idle'
         thread.stop = null
@@ -1461,7 +1464,7 @@ ${response}`,
       if (this.assistantStops.get(projectId) !== cancel || project.status !== 'active') return
       this.assistantStops.delete(projectId)
       project.agent = { state: 'stopped', deviceId: project.agent.deviceId, reason: null, activity: null }
-      this.pushNote(project, 'You stopped the project assistant. Chats it opened keep running.')
+      this.pushNote(project, 'You stopped the project assistant. Threads it opened keep running.')
       this.wake(project)
       this.emit('projects', 'threads', 'messages', 'operations')
     })
@@ -1637,7 +1640,7 @@ ${response}`,
       return { device, text: `${name} on ${device} replied: ${last.body}`, short: last.body }
     })
     if (lines.length === 1) return lines[0].text
-    const head = lines.length === 2 ? 'Both chats finished.' : `All ${lines.length} chats finished.`
+    const head = lines.length === 2 ? 'Both threads finished.' : `All ${lines.length} threads finished.`
     return [head, ...lines.map((line) => `${line.device}: ${line.short}`)].join('\n')
   }
 
@@ -1650,7 +1653,7 @@ ${response}`,
     const running = this.world.threads.filter((item) => item.projectId === project.id && item.status === 'running')
     const body =
       running.length > 0
-        ? `${running.length === 1 ? 'One chat is' : `${running.length} chats are`} still running: ${sentenceList(running.map((item) => item.title))}. I'll report back when ${running.length === 1 ? 'it finishes' : 'they finish'}.`
+        ? `${running.length === 1 ? 'One thread is' : `${running.length} threads are`} still running: ${sentenceList(running.map((item) => item.title))}. I'll report back when ${running.length === 1 ? 'it finishes' : 'they finish'}.`
         : 'Got it. Ask me to run tests, fix bugs, or check logs on your connected computers, and name the computer if it matters.'
     this.pushAssistant(project, [], null, body)
   }
@@ -1671,7 +1674,7 @@ ${response}`,
     const missing = named.filter((device) => !ready(device))
     const notes = missing.map((device) =>
       device.connection === 'online'
-        ? `${device.name} has no agent ready for new chats.`
+        ? `${device.name} has no agent ready for new threads.`
         : `${device.name} is ${device.connection}.`,
     )
     if (targets.length === 0) {
@@ -1751,8 +1754,8 @@ ${response}`,
     const names = opened.map((thread) => this.device(thread.deviceId).name)
     const summary =
       opened.length === 1
-        ? `Opened a chat on ${names[0]}. I'll report back when ${opened[0].agent ? agentNames[opened[0].agent] : 'Command'} finishes.`
-        : `Opened ${opened.length} chats on ${sentenceList(names)}. I'll report back once ${opened.length === 2 ? 'both' : 'all of them'} finish.`
+        ? `Opened a thread on ${names[0]}. I'll report back when ${opened[0].agent ? agentNames[opened[0].agent] : 'Command'} finishes.`
+        : `Opened ${opened.length} threads on ${sentenceList(names)}. I'll report back once ${opened.length === 2 ? 'both' : 'all of them'} finish.`
     this.pushAssistant(
       project,
       process,

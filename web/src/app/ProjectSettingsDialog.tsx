@@ -138,7 +138,7 @@ export function ProjectSettingsDialog({
       <Dialog
         open
         title={`Archive “${project.name}”?`}
-        description={`Stops the project assistant and withdraws ${inbox.data ? `${questionCount} open ${questionCount === 1 ? 'question' : 'questions'}` : 'all open questions'}. Chats and memory are kept. Existing threads continue.`}
+        description={`Stops the project assistant and withdraws ${inbox.data ? `${questionCount} open ${questionCount === 1 ? 'question' : 'questions'}` : 'all open questions'}. The main chat and memory are kept. Existing threads continue.`}
         onOpenChange={(open) => {
           if (!open && !busy) {
             setConfirm(false)
@@ -224,7 +224,7 @@ export function ProjectSettingsDialog({
         <Banner
           icon="archive"
           title="This project is archived"
-          detail="Chats and memory are kept. Existing threads can still be used."
+          detail="The main chat and memory are kept. Existing threads can still be used."
         />
       )}
       <div {...stylex.props(styles.section)}>
@@ -286,8 +286,8 @@ export function ProjectSettingsDialog({
             <div {...stylex.props(styles.description)}>
               <h3 {...stylex.props(text.label)}>Archive project</h3>
               <p {...stylex.props(text.caption, text.muted)}>
-                Stops the project assistant and withdraws open questions. Chats and memory are kept. Existing threads
-                continue.
+                Stops the project assistant and withdraws open questions. The main chat and memory are kept. Existing
+                threads continue.
               </p>
             </div>
             <Button

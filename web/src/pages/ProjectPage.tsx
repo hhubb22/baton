@@ -56,7 +56,7 @@ import { colors, radius, size, space } from '../theme/tokens.stylex'
 import { Avatar } from '../ui/Avatar'
 import { Banner } from '../ui/Banner'
 import { Button, focusRing, IconButton } from '../ui/Button'
-import { Card } from '../ui/Card'
+import { branch } from '../ui/Branch'
 import { Composer } from '../ui/Composer'
 import { Icon } from '../ui/Icon'
 import { Menu, MenuOption, MenuRule } from '../ui/Menu'
@@ -64,7 +64,7 @@ import { StatusChip, StatusDot, type Tone } from '../ui/Status'
 import { Tabs } from '../ui/Tabs'
 
 const styles = stylex.create({
-  layout: { display: 'flex', flexGrow: 1, minWidth: 0, height: '100%' },
+  layout: { display: 'flex', gap: size.gutter, flexGrow: 1, minWidth: 0, height: '100%' },
   title: { display: 'flex', alignItems: 'center', gap: space.sm },
   headerStatus: { display: 'inline-flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap' },
   agentText: { color: colors.agentText },
@@ -125,21 +125,15 @@ const styles = stylex.create({
     fontSize: '12px',
     whiteSpace: 'pre-wrap',
   },
-  cardHead: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: space.sm,
-    paddingBlock: space.xs,
-    paddingInline: space.md,
-  },
-  cardTitle: { flexGrow: 1 },
+  threadGroup: { display: 'flex', flexDirection: 'column', gap: space.xs },
+  groupTitle: { flexGrow: 1 },
   threadRow: {
     display: 'flex',
     alignItems: 'center',
     gap: space.sm,
     width: '100%',
     minHeight: size.comfortable,
-    paddingInline: space.md,
+    paddingInline: space.sm,
     borderWidth: 0,
     borderRadius: radius.md,
     backgroundColor: { default: 'transparent', ':hover': colors.hover },
@@ -181,33 +175,42 @@ const styles = stylex.create({
     height: '100%',
     overflowY: 'auto',
     padding: space.lg,
-    borderLeftWidth: '1px',
-    borderLeftStyle: 'solid',
-    borderLeftColor: colors.borderSoft,
-    backgroundColor: colors.panel,
+    backgroundColor: colors.glassLift,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: colors.glassEdge,
+    borderRadius: radius.lg,
   },
   section: { display: 'flex', flexDirection: 'column', gap: space.xs },
   sectionLabel: { color: colors.faint },
-  assistantCard: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: space.xs,
-    padding: space.md,
-    backgroundColor: colors.surface,
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: colors.hairline,
-    borderRadius: '14px',
-  },
   assistantHead: { display: 'flex', alignItems: 'center', gap: space.sm },
   group: { display: 'flex', flexDirection: 'column' },
   groupLabel: { paddingBlock: space.xs, paddingInline: space.sm, color: colors.faint },
-  overviewRow: {
+  groupHead: {
     display: 'flex',
     alignItems: 'center',
-    gap: space.sm,
+    gap: '6px',
+    width: '100%',
+    paddingBlock: space.xs,
+    paddingInline: space.sm,
+    borderWidth: 0,
+    borderRadius: radius.sm,
+    backgroundColor: 'transparent',
+    color: { default: colors.muted, ':hover': colors.text },
+    textAlign: 'left',
+  },
+  groupCount: { color: colors.faint },
+  groupChevron: { marginLeft: 'auto', color: colors.faint },
+  // 第一行是状态点、标题和悬停时出现的时间，第二行是设备和目录名。
+  overviewRow: {
+    display: 'grid',
+    gridTemplateColumns: 'auto minmax(0, 1fr) auto',
+    alignItems: 'center',
+    columnGap: space.sm,
+    rowGap: '2px',
     width: '100%',
     minHeight: size.control,
+    paddingBlock: '6px',
     paddingInline: space.sm,
     borderWidth: 0,
     borderRadius: radius.sm,
@@ -215,13 +218,22 @@ const styles = stylex.create({
     color: colors.text,
     textAlign: 'left',
   },
+  rowTime: {
+    color: colors.faint,
+    opacity: {
+      default: 0,
+      [stylex.when.ancestor(':hover')]: 1,
+      [stylex.when.ancestor(':focus-visible')]: 1,
+    },
+  },
+  rowDetail: { gridColumn: '2 / span 2', display: 'flex', gap: '4px', minWidth: 0, color: colors.muted },
   more: {
     alignSelf: 'flex-start',
     padding: 0,
     paddingInline: space.sm,
     borderWidth: 0,
     backgroundColor: 'transparent',
-    color: colors.link,
+    color: colors.accentText,
   },
 })
 
@@ -268,9 +280,9 @@ function processSummary(steps: ProcessStep[]) {
 }
 
 const cardTitles: Record<EntryThreads['action'], (count: number) => string> = {
-  opened: (count) => `Opened ${plural(count, 'chat')}`,
-  messaged: (count) => `Messaged ${plural(count, 'chat')}`,
-  replies: (count) => `Replies from ${plural(count, 'chat')}`,
+  opened: (count) => `Opened ${plural(count, 'thread')}`,
+  messaged: (count) => `Messaged ${plural(count, 'thread')}`,
+  replies: (count) => `Replies from ${plural(count, 'thread')}`,
 }
 
 function ProcessLine({ steps, devices }: { steps: ProcessStep[]; devices: Device[] }) {
@@ -283,8 +295,8 @@ function ProcessLine({ steps, devices }: { steps: ProcessStep[]; devices: Device
         onClick={() => setOpen(!open)}
         {...stylex.props(text.caption, styles.processToggle, focusRing.ring)}
       >
-        {processSummary(steps)}
         <Icon name={open ? 'chevron-down' : 'chevron-right'} size={12} />
+        {processSummary(steps)}
       </button>
       {open && (
         <div {...stylex.props(styles.steps)}>
@@ -336,7 +348,7 @@ function ThreadButton({
     >
       <StatusDot tone={view.status.tone} />
       <span {...stylex.props(styles.threadTitle, text.truncate)}>{thread.title}</span>
-      <span {...stylex.props(text.caption, styles.folderTag, text.truncate)}>{folderName(thread.folder)}</span>
+      <span {...stylex.props(text.mono, styles.folderTag, text.truncate)}>{folderName(thread.folder)}</span>
       <span {...stylex.props(text.caption, styles.threadMeta)}>
         {device?.name ?? 'Removed device'} · {thread.agent ? agentNames[thread.agent] : 'Command'}
       </span>
@@ -366,26 +378,27 @@ function ThreadCard({
   if (threads.length === 0) return null
   const status = threadCardStatus(threads)
   return (
-    <Card flush label={cardTitles[info.action](threads.length)}>
-      <div {...stylex.props(styles.cardHead)}>
-        <Icon name="message" size={14} style={styles.muted} />
-        <span {...stylex.props(text.label, styles.cardTitle)}>{cardTitles[info.action](threads.length)}</span>
+    <section aria-label={cardTitles[info.action](threads.length)} {...stylex.props(styles.threadGroup)}>
+      <div {...stylex.props(text.small, branch.title)}>
+        <span {...stylex.props(styles.groupTitle)}>{cardTitles[info.action](threads.length)}</span>
         <span {...stylex.props(text.caption, styles.headerStatus, statusTextStyle(status.tone))}>
           <StatusDot tone={status.tone} />
           {status.label}
         </span>
       </div>
-      {threads.map((thread) => (
-        <ThreadButton
-          key={thread.id}
-          thread={thread}
-          device={devices.find((item) => item.id === thread.deviceId)}
-          selected={thread.id === openThread}
-          now={now}
-          onOpen={() => onOpen(thread.id)}
-        />
-      ))}
-    </Card>
+      <div {...stylex.props(branch.line)}>
+        {threads.map((thread) => (
+          <ThreadButton
+            key={thread.id}
+            thread={thread}
+            device={devices.find((item) => item.id === thread.deviceId)}
+            selected={thread.id === openThread}
+            now={now}
+            onOpen={() => onOpen(thread.id)}
+          />
+        ))}
+      </div>
+    </section>
   )
 }
 
@@ -502,6 +515,7 @@ function Overview({
   onTabChange: (tab: 'threads' | 'memory') => void
 }) {
   const [showAll, setShowAll] = useState(false)
+  const [folded, setFolded] = useState<string[]>([])
   const now = useNow(60_000)
   const device = devices.find((item) => item.id === project.agent.deviceId)
   const live = threads.filter((item) => item.status !== 'archived')
@@ -522,7 +536,7 @@ function Overview({
     { label: 'Running', threads: inGroup('running', 'stopping') },
     { label: 'Waiting for device', threads: inGroup('waiting', 'stopRequested') },
     { label: 'Recent', threads: showAll ? recent : recent.slice(0, recentLimit) },
-  ]
+  ].map((group) => ({ ...group, count: group.label === 'Recent' ? recent.length : group.threads.length }))
 
   const row = (thread: Thread) => {
     const view = views.get(thread.id)!
@@ -531,12 +545,16 @@ function Overview({
         key={thread.id}
         type="button"
         onClick={() => onOpenThread(thread.id)}
-        {...stylex.props(text.small, styles.overviewRow, focusRing.ring)}
+        {...stylex.props(stylex.defaultMarker(), text.small, styles.overviewRow, focusRing.ring)}
       >
         <StatusDot tone={view.status.tone} />
         <span {...stylex.props(styles.threadTitle, text.truncate)}>{thread.title}</span>
-        <span {...stylex.props(text.caption, styles.threadMeta, statusTextStyle(view.status.tone))}>
-          {view.group === 'idle' ? relativeTime(thread.updatedAt, now) : view.status.label}
+        <span {...stylex.props(text.caption, styles.rowTime)}>{relativeTime(thread.updatedAt, now)}</span>
+        <span {...stylex.props(text.caption, styles.rowDetail)}>
+          <span {...stylex.props(text.truncate)}>
+            {devices.find((item) => item.id === thread.deviceId)?.name ?? 'Removed device'} ·
+          </span>
+          <span {...stylex.props(text.mono, text.truncate)}>{folderName(thread.folder)}</span>
         </span>
       </button>
     )
@@ -546,7 +564,7 @@ function Overview({
     <aside aria-label="Overview" {...stylex.props(styles.overview)}>
       <div {...stylex.props(styles.assistantHead)}>
         <h2 {...stylex.props(text.bodyMedium)}>Overview</h2>
-        <IconButton icon="settings" label="Project settings" onClick={onSettings} />
+        <IconButton icon="dots" label="Project settings" onClick={onSettings} />
       </div>
       {project.goal && (
         <section {...stylex.props(styles.section)}>
@@ -554,7 +572,8 @@ function Overview({
           <p {...stylex.props(text.small)}>{project.goal}</p>
         </section>
       )}
-      <section aria-label="Project assistant" {...stylex.props(styles.assistantCard)}>
+      <section aria-label="Project assistant" {...stylex.props(styles.section)}>
+        <h3 {...stylex.props(text.captionMedium, styles.sectionLabel)}>Project assistant</h3>
         <div {...stylex.props(styles.assistantHead)}>
           <Icon name="laptop" size={14} style={styles.muted} />
           <span {...stylex.props(text.label, text.truncate)}>{device?.name ?? 'No device yet'}</span>
@@ -584,7 +603,7 @@ function Overview({
         <>
           {live.length === 0 && pending.length === 0 && (
             <p {...stylex.props(text.small, styles.faint)}>
-              No chats in this project yet. Ask the assistant to start work.
+              No threads in this project yet. Ask the assistant to start work.
             </p>
           )}
           {pending.length > 0 && (
@@ -607,11 +626,32 @@ function Overview({
             .filter((group) => group.threads.length > 0)
             .map((group) => (
               <section key={group.label} aria-label={group.label} {...stylex.props(styles.group)}>
-                <h3 {...stylex.props(text.captionMedium, styles.groupLabel)}>{group.label}</h3>
-                {group.threads.map(row)}
+                <h3>
+                  <button
+                    type="button"
+                    aria-expanded={!folded.includes(group.label)}
+                    onClick={() =>
+                      setFolded(
+                        folded.includes(group.label)
+                          ? folded.filter((label) => label !== group.label)
+                          : [...folded, group.label],
+                      )
+                    }
+                    {...stylex.props(text.captionMedium, styles.groupHead, focusRing.ring)}
+                  >
+                    {group.label}
+                    <span {...stylex.props(styles.groupCount)}>{group.count}</span>
+                    <Icon
+                      name={folded.includes(group.label) ? 'chevron-right' : 'chevron-down'}
+                      size={12}
+                      style={styles.groupChevron}
+                    />
+                  </button>
+                </h3>
+                {!folded.includes(group.label) && group.threads.map(row)}
               </section>
             ))}
-          {!showAll && recent.length > recentLimit && (
+          {!showAll && recent.length > recentLimit && !folded.includes('Recent') && (
             <button
               type="button"
               onClick={() => setShowAll(true)}
@@ -645,7 +685,7 @@ function DockBanner({
       <Banner
         icon="archive"
         title="This project is archived"
-        detail="Chats and memory are kept. Existing threads can still be used."
+        detail="The main chat and memory are kept. Existing threads can still be used."
       />
     )
   if (project.status === 'paused') {
@@ -947,7 +987,7 @@ export function ProjectPage() {
             {project.name}
           </span>
         }
-        actions={
+        status={
           <>
             <span {...stylex.props(text.caption, styles.headerStatus, headerTone(status.tone))}>
               <StatusDot tone={status.tone} />
@@ -960,6 +1000,20 @@ export function ProjectPage() {
               </Button>
             )}
             {stopping && <span {...stylex.props(text.caption, styles.muted)}>Stop requested</span>}
+          </>
+        }
+        actions={
+          <>
+            <IconButton
+              icon="panel-right"
+              label={showPanel ? 'Hide overview' : 'Show overview'}
+              active={showPanel}
+              aria-expanded={showPanel}
+              onClick={() => {
+                if (showPanel) setThread(undefined)
+                setOverviewOpen(!showPanel)
+              }}
+            />
             <Menu narrow align="end" trigger={<IconButton icon="dots" label="Project actions" />}>
               <MenuOption onSelect={() => settings(true)}>Settings</MenuOption>
               <MenuOption
@@ -980,16 +1034,6 @@ export function ProjectPage() {
                 </>
               )}
             </Menu>
-            <IconButton
-              icon="panel-right"
-              label={showPanel ? 'Hide overview' : 'Show overview'}
-              active={showPanel}
-              aria-expanded={showPanel}
-              onClick={() => {
-                if (showPanel) setThread(undefined)
-                setOverviewOpen(!showPanel)
-              }}
-            />
           </>
         }
       >

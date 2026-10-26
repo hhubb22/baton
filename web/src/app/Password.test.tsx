@@ -112,7 +112,7 @@ describe('password change', () => {
     await user.type(screen.getByLabelText('Username'), 'kaken')
     await user.type(screen.getByLabelText('Password'), 'updated-password')
     await user.click(screen.getByRole('button', { name: 'Sign in' }))
-    expect(await screen.findByRole('heading', { name: 'Inbox' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Handled' })).toBeInTheDocument()
     expect(router.state.location.href).toBe('/inbox?handled=true')
   })
 
@@ -125,7 +125,7 @@ describe('password change', () => {
 
   it('opens the requested workspace page for an account that has already changed its password', async () => {
     const { router } = setup('/password?redirect=%2Finbox%3Fhandled%3Dtrue', true, { mustChange: false })
-    expect(await screen.findByRole('heading', { name: 'Inbox' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Handled' })).toBeInTheDocument()
     expect(router.state.location.href).toBe('/inbox?handled=true')
   })
 

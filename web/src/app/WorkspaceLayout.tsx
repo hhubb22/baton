@@ -4,7 +4,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { useInbox, useSession, useSignOut } from '../data/queries'
 import type { ID, ProjectPatch, Reference } from '../data/types'
 import { text } from '../theme/text'
-import { colors, space } from '../theme/tokens.stylex'
+import { glass, sceneImage } from '../theme/backdrop'
+import { useResolvedTheme } from '../theme/ThemeProvider'
+import { colors, size, space } from '../theme/tokens.stylex'
 import { Button } from '../ui/Button'
 import { NewProjectDialog } from './NewProjectDialog'
 import { Page } from './Page'
@@ -13,7 +15,22 @@ import { Sidebar } from './Sidebar'
 import { WorkspaceContext, type ItemDraft, type MemoryDraft, type Workspace } from './workspace'
 
 const styles = stylex.create({
-  shell: { display: 'flex', height: '100vh', overflow: 'hidden', backgroundColor: colors.canvas },
+  shell: {
+    display: 'flex',
+    gap: size.gutter,
+    height: '100vh',
+    overflow: 'hidden',
+    paddingBlock: size.gutter,
+    paddingRight: size.gutter,
+    paddingLeft: 0,
+    backgroundColor: colors.canvas,
+    backgroundPosition: 'center',
+    backgroundSize: 'cover',
+    isolation: 'isolate',
+  },
+  // 铺满视口的磨砂层，在背景图之上、侧栏和主内容之下。
+  frost: { position: 'fixed', inset: 0, zIndex: -1 },
+  backdrop: (image: string) => ({ backgroundImage: image }),
   problem: {
     display: 'flex',
     flexDirection: 'column',
@@ -83,6 +100,7 @@ export function WorkspaceLayout() {
   const session = useSession()
   const signOut = useSignOut()
   const router = useRouter()
+  const theme = useResolvedTheme()
   const [collapsed, setCollapsed] = useState(readCollapsed)
   // 退出失败的提示只留在发起退出的页面，切到别的页面后不再显示。
   const [failedAt, setFailedAt] = useState<string | null>(null)
@@ -173,7 +191,8 @@ export function WorkspaceLayout() {
   return (
     <WorkspaceContext value={workspace}>
       <WorkspaceTitle />
-      <div {...stylex.props(styles.shell)}>
+      <div {...stylex.props(styles.shell, styles.backdrop(sceneImage(theme)))}>
+        <div aria-hidden {...stylex.props(styles.frost, glass.layer)} />
         <Sidebar />
         <Main failedAt={failedAt} onRetry={workspace.signOut} />
       </div>

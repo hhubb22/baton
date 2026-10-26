@@ -35,7 +35,7 @@ export type ScenarioId = (typeof scenarioIds)[number]
 export const scenarioLabels: Record<ScenarioId, string> = {
   normal: 'Normal',
   empty: 'Empty',
-  noChats: 'No chats',
+  noChats: 'No threads',
   offline: 'Offline',
   waiting: 'Waiting',
   error: 'Error',
@@ -228,7 +228,7 @@ function projectEntries(now: number): ProjectEntry[] {
       kind: 'assistant',
       process: [{ kind: 'note', body: 'Gateway code is in `/home/kaken/work/baton/apps/server/src` on Ubuntu Dev.' }],
       threads: { action: 'opened', threadIds: ['thr-gateway'] },
-      body: "Opened a chat on Ubuntu Dev to reproduce the race and fix it. I'll report back when Codex finishes.",
+      body: "Opened a thread on Ubuntu Dev to reproduce the race and fix it. I'll report back when Codex finishes.",
       createdAt: now - 4 * minute,
     },
     {
@@ -256,7 +256,7 @@ function projectEntries(now: number): ProjectEntry[] {
         { kind: 'note', body: 'Compat suite is in `C:\\src\\compat-suite` on Windows Desktop.' },
       ],
       threads: { action: 'opened', threadIds: ['thr-compat'] },
-      body: "Opened a chat on Windows Desktop. I'll report back once the suite finishes.",
+      body: "Opened a thread on Windows Desktop. I'll report back once the suite finishes.",
       createdAt: now - 3 * hour,
     },
     {

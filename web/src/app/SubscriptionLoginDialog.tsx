@@ -17,7 +17,7 @@ const styles = stylex.create({
     userSelect: 'all',
   },
   actions: { display: 'flex', alignItems: 'center', gap: space.md },
-  link: { color: colors.link },
+  link: { color: colors.accentText },
   error: { color: colors.danger },
 })
 

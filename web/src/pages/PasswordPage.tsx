@@ -2,27 +2,18 @@ import * as stylex from '@stylexjs/stylex'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Navigate, useSearch } from '@tanstack/react-router'
 import { useRef, useState, type FormEvent } from 'react'
+import { AuthShell } from '../app/AuthShell'
 import { ClientError } from '../data/client'
 import { keys, useClient, useSession } from '../data/queries'
 import { text } from '../theme/text'
 import { colors, space } from '../theme/tokens.stylex'
 import { BrandMark } from '../ui/BrandMark'
 import { Button } from '../ui/Button'
-import { Card } from '../ui/Card'
 import { Field, Input } from '../ui/Field'
 
 const styles = stylex.create({
-  page: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: '100vh',
-    padding: space.xl,
-    backgroundColor: colors.canvas,
-  },
-  column: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: space.lg, width: '380px' },
-  card: { width: '100%' },
-  form: { display: 'flex', flexDirection: 'column', gap: space.lg },
+  brand: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: space.md, textAlign: 'center' },
+  form: { display: 'flex', flexDirection: 'column', gap: space.lg, width: '100%' },
   error: { color: colors.danger },
 })
 
@@ -89,84 +80,82 @@ export function PasswordPage() {
     : null
 
   return (
-    <main {...stylex.props(styles.page)}>
-      <div {...stylex.props(styles.column)}>
+    <AuthShell>
+      <div {...stylex.props(styles.brand)}>
         <BrandMark tone="color" size={36} />
         <h1 {...stylex.props(text.title)}>Change your password</h1>
         <p {...stylex.props(text.small, text.muted)}>Update your password before opening your workspace.</p>
-        <Card style={styles.card}>
-          <form onSubmit={submit} noValidate {...stylex.props(styles.form)}>
-            <Field label="Current password" error={currentMissing ? 'Enter your current password.' : undefined}>
-              {(props) => (
-                <Input
-                  {...props}
-                  ref={currentRef}
-                  type="password"
-                  autoComplete="current-password"
-                  required
-                  autoFocus
-                  value={current}
-                  disabled={change.isPending}
-                  onChange={(event) => {
-                    setCurrent(event.target.value)
-                    setCurrentMissing(false)
-                    change.reset()
-                  }}
-                />
-              )}
-            </Field>
-            <Field
-              label="New password"
-              helper="Use 12 to 128 characters. Avoid control characters and spaces at the start or end. Choose a password different from your username."
-              error={validation}
-            >
-              {(props) => (
-                <Input
-                  {...props}
-                  ref={passwordRef}
-                  type="password"
-                  autoComplete="new-password"
-                  required
-                  value={password}
-                  disabled={change.isPending}
-                  onChange={(event) => {
-                    setPassword(event.target.value)
-                    setValidation(undefined)
-                    setMismatch(false)
-                    change.reset()
-                  }}
-                />
-              )}
-            </Field>
-            <Field label="Confirm new password" error={mismatch ? 'Passwords do not match.' : undefined}>
-              {(props) => (
-                <Input
-                  {...props}
-                  ref={confirmationRef}
-                  type="password"
-                  autoComplete="new-password"
-                  required
-                  value={confirmation}
-                  disabled={change.isPending}
-                  onChange={(event) => {
-                    setConfirmation(event.target.value)
-                    setMismatch(false)
-                    change.reset()
-                  }}
-                />
-              )}
-            </Field>
-            {failure && (
-              <p role="alert" {...stylex.props(text.small, styles.error)}>
-                {failure}
-              </p>
-            )}
-            <Button type="submit" variant="primary" block disabled={change.isPending}>
-              {change.isPending ? 'Updating…' : 'Update password'}
-            </Button>
-          </form>
-        </Card>
       </div>
-    </main>
+      <form onSubmit={submit} noValidate {...stylex.props(styles.form)}>
+        <Field label="Current password" error={currentMissing ? 'Enter your current password.' : undefined}>
+          {(props) => (
+            <Input
+              {...props}
+              ref={currentRef}
+              type="password"
+              autoComplete="current-password"
+              required
+              autoFocus
+              value={current}
+              readOnly={change.isPending}
+              onChange={(event) => {
+                setCurrent(event.target.value)
+                setCurrentMissing(false)
+                change.reset()
+              }}
+            />
+          )}
+        </Field>
+        <Field
+          label="New password"
+          helper="Use 12 to 128 characters. Avoid control characters and spaces at the start or end. Choose a password different from your username."
+          error={validation}
+        >
+          {(props) => (
+            <Input
+              {...props}
+              ref={passwordRef}
+              type="password"
+              autoComplete="new-password"
+              required
+              value={password}
+              readOnly={change.isPending}
+              onChange={(event) => {
+                setPassword(event.target.value)
+                setValidation(undefined)
+                setMismatch(false)
+                change.reset()
+              }}
+            />
+          )}
+        </Field>
+        <Field label="Confirm new password" error={mismatch ? 'Passwords do not match.' : undefined}>
+          {(props) => (
+            <Input
+              {...props}
+              ref={confirmationRef}
+              type="password"
+              autoComplete="new-password"
+              required
+              value={confirmation}
+              readOnly={change.isPending}
+              onChange={(event) => {
+                setConfirmation(event.target.value)
+                setMismatch(false)
+                change.reset()
+              }}
+            />
+          )}
+        </Field>
+        {failure && (
+          <p role="alert" {...stylex.props(text.small, styles.error)}>
+            {failure}
+          </p>
+        )}
+        <Button type="submit" variant="primary" block>
+          {change.isPending ? 'Updating…' : 'Update password'}
+        </Button>
+      </form>
+    </AuthShell>
   )
 }

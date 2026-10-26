@@ -1,7 +1,6 @@
 import { Dialog as BaseDialog } from '@base-ui/react/dialog'
 import * as stylex from '@stylexjs/stylex'
 import type { ComponentProps, ReactNode } from 'react'
-import { shadow } from '../theme/base.stylex'
 import { text } from '../theme/text'
 import { colors, space } from '../theme/tokens.stylex'
 
@@ -31,7 +30,7 @@ const styles = stylex.create({
     borderStyle: 'solid',
     borderColor: colors.border,
     borderRadius: '14px',
-    boxShadow: shadow.dialog,
+    boxShadow: `0 12px 32px ${colors.shadowFar}, 0 2px 6px ${colors.shadowNear}`,
     color: colors.text,
     outline: 'none',
   },

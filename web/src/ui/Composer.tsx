@@ -1,6 +1,5 @@
 import * as stylex from '@stylexjs/stylex'
 import { useRef, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
-import { shadow } from '../theme/base.stylex'
 import { text } from '../theme/text'
 import { colors, radius, size, space } from '../theme/tokens.stylex'
 import { focusRing } from './Button'
@@ -22,7 +21,7 @@ const styles = stylex.create({
     borderStyle: 'solid',
     borderColor: colors.hairline,
     borderRadius: '20px',
-    boxShadow: shadow.composer,
+    boxShadow: `0 1px 2px ${colors.shadowSoft}, 0 8px 24px ${colors.shadowNear}`,
     cursor: 'text',
   },
   header: { cursor: 'auto' },

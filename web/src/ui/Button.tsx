@@ -28,13 +28,13 @@ const styles = stylex.create({
     paddingInline: space.md,
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderRadius: radius.sm,
+    borderRadius: radius.md,
     fontSize: '13px',
     lineHeight: 1.45,
     fontWeight: weight.medium,
     whiteSpace: 'nowrap',
     userSelect: 'none',
-    transitionProperty: 'background-color, border-color, color',
+    transitionProperty: 'background-color, border-color, color, box-shadow',
     transitionDuration: '120ms',
   },
   small: {
@@ -49,12 +49,15 @@ const styles = stylex.create({
       ':hover': colors.accentHover,
       ':active': colors.accentPressed,
     },
+    backgroundImage: `linear-gradient(180deg, ${colors.sheen}, transparent)`,
     borderColor: 'transparent',
+    boxShadow: `inset 0 1px 0 ${colors.highlight}, 0 2px 6px ${colors.accentShadow}`,
     color: colors.onAccent,
   },
   secondary: {
     backgroundColor: { default: colors.surface, ':hover': colors.subtle },
     borderColor: colors.border,
+    boxShadow: `inset 0 1px 2px ${colors.shadowNear}`,
     color: colors.text,
   },
   ghost: {
@@ -65,6 +68,7 @@ const styles = stylex.create({
   danger: {
     backgroundColor: { default: colors.surface, ':hover': colors.dangerSoft },
     borderColor: colors.border,
+    boxShadow: `inset 0 1px 2px ${colors.shadowNear}`,
     color: colors.danger,
   },
   icon: {

@@ -49,7 +49,7 @@ const styles = stylex.create({
   segmentActive: {
     backgroundColor: colors.surface,
     color: colors.text,
-    boxShadow: '0 1px 2px rgb(0 0 0 / 8%), 0 1px 6px rgb(0 0 0 / 4%)',
+    boxShadow: `0 1px 2px ${colors.shadowNear}, 0 1px 6px ${colors.shadowSoft}`,
   },
 })
 
