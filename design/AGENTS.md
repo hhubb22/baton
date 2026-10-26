@@ -34,7 +34,7 @@
 - 不可用的操作保持可点，点击后说明原因，不用禁用态表达。
 - 工作区分三层。最底层是磨砂背景：模糊过的背景图叠 `glass` 色，侧栏直接放在上面，没有底色和边框。中间是内容卡片：主内容区和 Thread 详情用实色 `canvas`（详情用 `surface`），`hairline` 外框、12px 圆角、`shadowNear` 与 `shadowFar` 两层阴影，和页面边缘、侧栏之间留 8px（`gutter`）。概览栏用半透明的 `glassLift` 配 `glassEdge` 外框。最上层是卡片、输入区和弹窗，用 `surface`。`panel` 只给提示条和内嵌区域，`subtle` 给悬停与标签底色。侧栏和按钮的选中态用 `raised` 配 1px `shadowNear` 阴影。边框用 `borderSoft`、`border`、`borderStrong`，卡片和输入区外框用更浅的 `hairline`。
 - 背景图只出现在磨砂背景层和登录页。正文、Thread 卡片、输入区和弹窗都是实色，图像不透到文字下面。登录页显示清晰的背景图，表单放在居中的磨砂面板上。深色主题由 `glass` 等颜色 token 切换，工作区共用同一张模糊图；登录页的深色画板改用夜景图。设计稿用预先模糊的图片模拟磨砂，网页实现用原图加 `backdrop-filter`。动画只用于登录页和空状态的背景，周期不短于 20 秒，系统开启减少动态效果时停用。
-- 主按钮在 `accent` 底上叠一层由上往下渐隐的 `sheen`，顶边 1px `highlight` 内阴影，下方 `accentShadow` 投影；secondary 和 danger 只有 1px `shadowNear` 投影，ghost 没有阴影。
+- 主按钮在 `accent` 底上叠一层由上往下渐隐的 `sheen`，顶边 1px `highlight` 内阴影，下方 `accentShadow` 投影；secondary 和 danger 只有一层向下 1px、模糊 2px 的 `shadowNear` 内阴影，ghost 没有阴影。
 - 颜色在 OKLCH 里取值，中性色统一用色相 262、低彩度的冷灰，表面、边框、阴影和遮罩都从它派生，和背景图同一色温。用来阅读的文字（`text`、`muted`、`faint`、各 `*Text`、`danger`、`success`）在 `canvas`、`surface`、`subtle` 上都达到 4.5:1。阴影只用 `shadowSoft`（控件和行）、`shadowNear` 与 `shadowFar`（卡片、输入区、弹窗的两层），遮罩用 `overlay`。组件和画板里不写原始 `rgb()`，新颜色先加进 `tokens/colors.elyx` 和 `colors@dark.elyx`。
 - 实例不改组件内部图层的颜色。按钮、状态标签、横幅、输入框这类组件的每种用法都做成变体，实例用 `@with-variant` 选择，例如弹窗的确认按钮在 `buttons.button` 和 `buttons.danger` 之间选，状态文字用 `status.label*`，危险的小按钮用 `buttons.smallDanger` 或 `smallGhostDanger`。文字颜色随用途变化时换文字样式：输入框占位符 `t.smallPlaceholder`，有值后换成 `t.small`；错误说明 `t.captionDanger`，需要处理的提醒 `t.captionAttention`。声明文字或图标图层时用颜色 token 定颜色是正常写法。行的选中、展开这类和状态无关的底色可以在实例根上设 `selected` 或 `panel`，因为一个变体只能表达一个维度。需要新的颜色组合时新增变体。
 - Agent 的官方标识（Codex、Kiro、Pi、Cursor 等）只出现在选择 Agent 或模型的菜单、设备详情的 Agent 列表这类正在选择或配置的地方。列表行、卡片、标题栏和概览栏不放官方标识，用文字名称，并且同一屏能推断出来时省略。
