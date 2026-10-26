@@ -100,6 +100,145 @@ export const MemoryConflictResponse = Schema.Struct({
   current: Schema.NullOr(ProjectMemory),
 })
 export type MemoryConflictResponse = typeof MemoryConflictResponse.Type
+export const MemoryEmbeddingConfigInput = Schema.Struct({
+  base_url: summary(2048).check(
+    Schema.makeFilter((value) => {
+      try {
+        const url = new URL(value)
+        return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password
+      } catch {
+        return false
+      }
+    }),
+  ),
+  model: summary(1024).check(Schema.makeFilter((v) => v.trim().length > 0)),
+  credential_profile: Schema.optionalKey(summary(64).check(Schema.isPattern(/^[a-z0-9-]{1,64}$/))),
+})
+export type MemoryEmbeddingConfigInput = typeof MemoryEmbeddingConfigInput.Type
+export const MemoryEmbeddingConfig = Schema.Struct({ ...MemoryEmbeddingConfigInput.fields, config_id: UUID })
+export type MemoryEmbeddingConfig = typeof MemoryEmbeddingConfig.Type
+export const EmbeddingVector = Schema.Array(Schema.Finite).check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(8192),
+  Schema.makeFilter((v) => v.some((n) => Math.fround(n) !== 0) && v.every((n) => Number.isFinite(Math.fround(n)))),
+)
+export const MemoryQueryVector = Schema.Struct({ config_id: UUID, query_hash: Text, vector: EmbeddingVector })
+export type MemoryQueryVector = typeof MemoryQueryVector.Type
+export const MemoryEmbeddingQuery = Schema.Struct({
+  query: Text,
+  query_hash: Text,
+  input_seq: NonNegativeInteger,
+  last_seq: NonNegativeInteger,
+  query_truncated: Schema.Boolean,
+  memory_embedding: Schema.NullOr(MemoryEmbeddingConfig),
+})
+export type MemoryEmbeddingQuery = typeof MemoryEmbeddingQuery.Type
+export const MemoryEmbeddingCommit = Schema.Struct({
+  item_id: UUID,
+  revision: Integer,
+  config_id: UUID,
+  embedding_text_hash: Text,
+  vector: EmbeddingVector,
+})
+export type MemoryEmbeddingCommit = typeof MemoryEmbeddingCommit.Type
+
+export const MEMORY_CONTEXT_DEFAULTS = { core_tokens: 1500, related_tokens: 3500, max_bytes: 40 * 1024 } as const
+export const MemoryRecallInput = Schema.Struct({
+  query: boundedText(64 * 1024),
+  mode: Schema.optionalKey(Schema.Literals(['current', 'history'])),
+  as_of: Schema.optionalKey(Timestamp),
+  include_inactive: Schema.optionalKey(Schema.Boolean),
+  max_results: Schema.optionalKey(NonNegativeInteger.check(Schema.isBetween({ minimum: 1, maximum: 20 }))),
+  max_bytes: Schema.optionalKey(NonNegativeInteger.check(Schema.isBetween({ minimum: 1024, maximum: 32768 }))),
+}).check(Schema.makeFilter((v) => v.mode === 'history' || (v.as_of === undefined && v.include_inactive === undefined)))
+export type MemoryRecallInput = typeof MemoryRecallInput.Type
+export const MemoryReference = Schema.Union([
+  Schema.Struct({
+    item_id: UUID,
+    revision: Integer,
+    mode: Schema.Literals(['current', 'history']),
+    as_of: Schema.optionalKey(Timestamp),
+  }),
+  Schema.Struct({
+    ...MemoryEvidence.fields,
+    mode: Schema.Literals(['current', 'history']),
+    as_of: Schema.optionalKey(Timestamp),
+  }),
+])
+export const MemoryRecallHit = Schema.Struct({
+  document_id: Text,
+  item: Schema.optionalKey(
+    Schema.Struct({
+      id: UUID,
+      revision: Integer,
+      status: MemoryStatus,
+      effective: Schema.Boolean,
+      retracted: Schema.Boolean,
+      evidence: Schema.Array(MemoryEvidence),
+      evidence_count: NonNegativeInteger,
+      read_tool: Schema.Literal('memory.read'),
+    }),
+  ),
+  snippet_truncated: Schema.Boolean,
+  source: Schema.optionalKey(
+    Schema.Struct({
+      source_id: UUID,
+      source_hash: Text,
+      start_byte: NonNegativeInteger,
+      end_byte: NonNegativeInteger,
+      source_seq: Schema.NullOr(Integer),
+      role: Text,
+      suppressed: Schema.Boolean,
+      related_items: Schema.Array(Schema.Struct({ item_id: UUID, status: MemoryStatus, effective: Schema.Boolean })),
+    }),
+  ),
+  snippet: Text,
+  score: Schema.Number,
+})
+export type MemoryRecallHit = typeof MemoryRecallHit.Type
+export const MemoryRecallResult = Schema.Struct({
+  entries: Schema.Array(MemoryRecallHit),
+  memory_refs: Schema.Array(MemoryReference),
+  derived: Schema.Literal(true),
+  query_truncated: Schema.Boolean,
+  candidate_truncated: Schema.Boolean,
+  result_truncated: Schema.Boolean,
+  no_match: Schema.Boolean,
+  degraded: Schema.Array(Text),
+  algorithm: Text,
+})
+export const PrepareMemoryContext = Schema.Struct({
+  context_id: UUID,
+  input_seq: NonNegativeInteger,
+  core_tokens: NonNegativeInteger.check(Schema.isLessThanOrEqualTo(1500)),
+  related_tokens: NonNegativeInteger.check(Schema.isLessThanOrEqualTo(3500)),
+  max_bytes: NonNegativeInteger.check(Schema.isBetween({ minimum: 1024, maximum: 40960 })),
+  query_vector: Schema.optionalKey(MemoryQueryVector),
+  embedding_diagnostic: Schema.optionalKey(
+    Schema.Literals(['credential_missing', 'embedding_request_failed', 'embedding_timeout', 'embedding_unavailable']),
+  ),
+})
+export type PrepareMemoryContext = typeof PrepareMemoryContext.Type
+export const MemoryContext = Schema.Struct({
+  context_id: UUID,
+  last_seq: NonNegativeInteger,
+  input_seq: NonNegativeInteger,
+  budget: Schema.Struct({
+    core_tokens: NonNegativeInteger,
+    related_tokens: NonNegativeInteger,
+    max_bytes: NonNegativeInteger,
+  }),
+  knowledge_epoch: NonNegativeInteger,
+  expires_at: Schema.NullOr(Timestamp),
+  content: Text,
+  memory_refs: Schema.Array(MemoryReference),
+  degraded: Schema.Array(Text),
+  core_complete: Schema.Boolean,
+  query: Text,
+  algorithm: Text,
+})
+export type MemoryContext = typeof MemoryContext.Type
+
 export const MemorySourcePage = Schema.Struct({
   ...MemorySource.fields,
   offset: NonNegativeInteger,

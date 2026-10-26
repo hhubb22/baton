@@ -51,7 +51,7 @@ Gateway 消息类型 `ProjectRuntimeRequest` / `ProjectRuntimeResult`：batond �
 
 续租、启动和停止由 batond 处理，不经 Runtime。
 
-当前控制消息正文的 `type` 为 `project_runtime.request` / `project_runtime.result`。请求含 `run_id`、`lease_epoch`、`operation`；分页使用 `after_seq` / `max_bytes`，写入使用 `last_seq`，assistant 另带 `client_event_id` 和 `payload`。响应为 `{type, ok, code?, data?}`。`bootstrap` 返回 `{project, prompt_version, memory_index?, compaction?, compaction_seq?, goal_utf8_base64?, after_seq, last_seq}`；配置与最新 compaction 合计超过单帧时，bootstrap 返回 compaction_seq，完整 compaction 随后由 read_events 取回。目标含大量控制字符导致 JSON 转义超过单帧时，bootstrap 的 project.goal 留空，完整目标通过 goal_utf8_base64 以 UTF-8 base64 返回，Runtime 解码后构造配置；Project API 中的原目标保持完整。`read_events` 返回 `{events, last_seq, next_after_seq, has_more}`，默认每页 128 KiB，单条大事件可单独返回，响应仍不超过 192 KiB。`claim_inputs` 返回 `{event?, payload_bytes, input_count}`，要求 `last_seq` 等于当前最后序号；事件 payload 为 `{format:"pi-ai/1", message, input_ids}`，消息的文本块保存输入条目 JSON。调用方收到序号冲突或丢失领取响应时，重新读取中心事件后继续。
+当前控制消息正文的 `type` 为 `project_runtime.request` / `project_runtime.result`。请求含 `run_id`、`lease_epoch`、`operation`；分页使用 `after_seq` / `max_bytes`，写入使用 `last_seq`，assistant 另带 `client_event_id` 和 `payload`。响应为 `{type, ok, code?, data?}`。`bootstrap` 返回 `{project, prompt_version, input_seq, memory_settings, memory_index?, compaction?, compaction_seq?, goal_utf8_base64?, after_seq, last_seq}`；配置与最新 compaction 合计超过单帧时，bootstrap 返回 compaction_seq，完整 compaction 随后由 read_events 取回。目标含大量控制字符导致 JSON 转义超过单帧时，bootstrap 的 project.goal 留空，完整目标通过 goal_utf8_base64 以 UTF-8 base64 返回，Runtime 解码后构造配置；Project API 中的原目标保持完整。`read_events` 返回 `{events, last_seq, next_after_seq, has_more}`，默认每页 128 KiB，单条大事件可单独返回，响应仍不超过 192 KiB。`claim_inputs` 返回 `{event?, payload_bytes, input_count}`，要求 `last_seq` 等于当前最后序号；事件 payload 为 `{format:"pi-ai/1", message, input_ids}`，消息的文本块保存输入条目 JSON。调用方收到序号冲突或丢失领取响应时，重新读取中心事件后继续。
 
 batond 通过 Runtime 命令追加 `run` 启动进程，工作目录是私有空目录。请求经专用 stdio 管道交给宿主，宿主覆盖运行身份；Runtime 不能自行发送续租或启动回执。`poll_wake` 最长等待 25 秒，返回 `{wake:true|false}`；Runtime 闲置时可重复调用。
 
@@ -155,7 +155,7 @@ Runtime 进程的工作目录是一个空的控制目录。pi-agent-core 本身�
    - 同一条记忆有多条待处理的 `memory_updated` 时，只把版本号最大的一条写进 `input`，其余一起标为已投递。
 
    每条输入在写入时已经限长，所以一批不会超过事件上限。这个上限只针对传输：128 KiB 约合 3～4 万个 token，低于常见窗口的压缩阈值；上下文用量由第 6.2 节单独检查。
-4. 把 `input` 消息交给 Agent。调用模型前，Runtime 将固定工具名中的点号替换为下划线，例如 `memory.recall` 转为 `memory_recall`，符合 provider 的函数名约束。转换覆盖系统工具声明、历史调用和工具结果；正常回复与压缩请求使用同一规则。收到 assistant 后按固定映射还原工具名，再交给 Agent、保存历史和执行中心 RPC；参数、调用 ID、签名与其他字段保持不变。未知名称不自动改写为已知工具，仍由工具校验拒绝。模型回复的 assistant 消息在 `message_end` 监听器里通过 `append_event` 保存；保存返回之前，pi-agent-core 不会执行工具。
+4. 把 `input` 消息交给 Agent。调用模型前，Runtime 将固定工具名中的点号替换为下划线，例如 `memory.recall` 转为 `memory_recall`，符合 provider 的函数名约束。转换覆盖系统工具声明、历史调用和工具结果；正常回复与压缩请求使用同一规则。收到 assistant 后按固定映射还原工具名，再交给 Agent、保存历史和执行中心 RPC；参数、调用 ID、签名与其他字段保持不变。未知名称不自动改写为已知工具，仍由工具校验拒绝。每次模型请求前，Runtime 调用 prepare_context，将当前核心要求和相关片段作为独立动态资料消息放在固定系统提示词之后，保留其余 provider 消息与签名。模型回复的 assistant 消息在 `message_end` 监听器里通过 append_event 保存，payload 关联 memory_context_id；中心拒绝知识代次变化或自然到期的新输出，Runtime 在原模型预算内刷新重试。保存返回之前，pi-agent-core 不会执行工具。
 5. 每个工具调用通过 `call_tool` 交给 Coordinator 执行（第 7 节），Coordinator 在同一事务里写入 `tool_result` 事件。工具设为顺序执行（`toolExecution: "sequential"`），结果事件的顺序和调用顺序一致。
 6. 模型给出不含工具调用的回复后，这一轮结束，回到第 3 步。
 7. 闲置 180 秒内没有新输入，或单次运行满 15 分钟，就进入收尾：需要时压缩（第 6.3 节），然后调用 `finish`，Coordinator 清空租约并记录结束原因，batond 停止进程。收尾压缩的模型请求失败只记录诊断，保留原始历史并正常结束；租约失效和持久化错误仍按原错误处理。
@@ -227,17 +227,17 @@ Project 标题或目标被修改后，新的系统提示词从下一次压缩起
 
 #### 6.4 项目记忆不放进前缀
 
-项目记忆可能在一轮中被修改。如果把它放进系统提示词，每次修改都会让缓存失效。所以系统提示词只告诉模型有哪些记忆工具；记忆索引在每次压缩时写进开头消息，平时通过 `memory.recall` 和 `memory.read` 获取。
+项目记忆可能在一轮中被修改。如果把它放进系统提示词，每次修改都会让缓存失效。系统提示词说明记忆工具和权限规则；每次模型请求的动态快照提供完整核心要求及有来源的相关片段。旧压缩路径仍保存标题索引，旧摘要和工具结果的完整失效刷新为 planned。
 
 两次压缩之间的记忆修改有两种来源。Project Agent 自己用 `memory.remember/correct/retire/restore` 修改时，结果已经以工具结果的形式出现在对话里，不再发通知。用户在界面上新建或修改记忆时，Coordinator 在保存新版本的同一个事务里写一条 `memory_updated` 被动输入，`source_key = memory:{entry_id}:rev:{revision}`，内容是记忆 ID、标题、版本号和「由用户修改」。正文不放进通知，Project Agent 需要时用 `memory.read` 读取。
 
-这条通知不触发运行：用户改一条记忆，不值得为此启动 Runtime、花一次模型调用。它随下一批主动输入交给模型，所以 Project Agent 在处理用户下一条消息或下一轮 Thread 结束时，一定已经知道记忆变了。Project Agent 正在运行时，通知同样等到下一轮。停用和恢复同样发送状态通知，归档 Project 只读。自动召回、旧摘要/工具结果刷新和后台整理仍为 planned。
+这条通知不触发运行：用户改一条记忆，不值得为此启动 Runtime、花一次模型调用。它随下一批主动输入交给模型，所以 Project Agent 在处理用户下一条消息或下一轮 Thread 结束时，一定已经知道记忆变了。Project Agent 正在运行时，通知同样等到下一轮。停用和恢复同样发送状态通知，归档 Project 只读。自动召回、不可变快照与执行前检查已实现。已有结果或持久 nodes.exec 登记优先于快照检查；尚未提交的调用失效后保存无副作用错误，再由新上下文决定。中心的 Embedding 配置、向量记录、embedding_query 和绑定查询已提供；设备 SDK、后台生成、设置 UI 及旧摘要/工具结果刷新仍为 planned。
 
 ### 7. 工具
 
 | 工具 | 类型 | 作用 | 输出可以从哪里重新拿到 |
 |---|---|---|---|
-| `memory.recall` | 只读 | 按关键字搜索记忆标题和正文，最多 20 条 | 自身 |
+| `memory.recall` | 只读 | Orama 排序的当前/历史记忆和来源片段，最多 20 条，明确截断与降级 | memory.read |
 | `memory.read` | 只读 | 读取一条记忆的当前版本 | 自身 |
 | `memory.remember/correct/retire/restore` | 写入 | 经统一变更入口维护条目、证据、修订与停用状态；已有条目检查 expected_revision，操作标识去重 | `memory.read` |
 | `history.search` | 只读 | 在主对话原文里按关键字搜索，返回序号和片段 | 自身 |
@@ -275,7 +275,7 @@ Project 标题或目标被修改后，新的系统提示词从下一次压缩起
 
 | 工具 | 参数 |
 |---|---|
-| `memory.recall` | 可选 `query`、`after_id` |
+| `memory.recall` | query、可选 mode=current/history、as_of、include_inactive、max_results、max_bytes |
 | `memory.read` | `item_id`、`source_id` 或 `source_seq` 三选一；可选 `revision`、`input_id` 和来源字节分页 |
 | `memory.remember`、`memory.correct`、`memory.retire`、`memory.restore` | 来源、动作和字段见 [长期记忆技术设计](../project-memory/TECH.md#前台工具与-runtime-操作)；操作标识由 conversation_id 与 tool_call_id 确定 |
 | `history.search` | 可选 `query`、`after_seq`、`through_seq` |
@@ -291,9 +291,9 @@ Project 标题或目标被修改后，新的系统提示词从下一次压缩起
 | `nodes.exec` | 第 10 节 |
 | `inbox.*` | 见 Agent Inbox TECH 第 3 节 |
 
-只读工具还接受 `offset`、`max_bytes`。结果采用 `{encoding:"json", text, offset, total_bytes, truncated, next_offset?}`：先把完整业务结果编码为 JSON，再按 UTF-8 字节取片段。调用方在 `truncated=true` 时以同样的业务参数和 `next_offset` 继续读取，拼接 `text` 后解析 JSON。`max_bytes` 默认 16 KiB、最大 32 KiB；中心按实际 JSON 编码后的容量进一步缩短片段，整个工具结果 payload 不超过 32 KiB。记忆续读可固定 `revision`，`threads.read` 续读固定 `through_turn`。`threads.trace` 的业务 JSON 是与浏览器相同的过程项页（最多 50 项、1 MiB）；首次读取时可省略 `cursor`，工具片段外包装返回 `page_cursor`，绑定已提交报告的序号上限及本页起点。后续片段保持 `thread_id`、`worker_turn_seq` 不变，把外包装的 `page_cursor` 作为 `cursor`，配合 `next_offset` 读完这页 JSON，再以页内的 `next_cursor` 请求下一页并将 `offset` 归零。`offset > 0` 时必须提供 `cursor`，否则返回 `snapshot_cursor_required`。同一快照不包含之后到达的项；省略 `cursor` 从头刷新以读取新项。
+memory.recall 直接返回有界片段、条目/修订/来源引用、得分与截断/降级标识；全文通过 memory.read 读取。其他只读工具接受 offset、max_bytes，结果采用 `{encoding:"json", text, offset, total_bytes, truncated, next_offset?}`：先把完整业务结果编码为 JSON，再按 UTF-8 字节取片段。调用方在 `truncated=true` 时以同样的业务参数和 `next_offset` 继续读取，拼接 `text` 后解析 JSON。`max_bytes` 默认 16 KiB、最大 32 KiB；中心按实际 JSON 编码后的容量进一步缩短片段，整个工具结果 payload 不超过 32 KiB。记忆续读可固定 `revision`，`threads.read` 续读固定 `through_turn`。`threads.trace` 的业务 JSON 是与浏览器相同的过程项页（最多 50 项、1 MiB）；首次读取时可省略 `cursor`，工具片段外包装返回 `page_cursor`，绑定已提交报告的序号上限及本页起点。后续片段保持 `thread_id`、`worker_turn_seq` 不变，把外包装的 `page_cursor` 作为 `cursor`，配合 `next_offset` 读完这页 JSON，再以页内的 `next_cursor` 请求下一页并将 `offset` 归零。`offset > 0` 时必须提供 `cursor`，否则返回 `snapshot_cursor_required`。同一快照不包含之后到达的项；省略 `cursor` 从头刷新以读取新项。
 
-搜索和列表每页最多 20 条，业务 JSON 中用 `next_after_id` 或 `next_after_seq` 继续取得下一组；空列表表示结束。`history` 返回 `through_seq`，默认固定为本次工具调用的 assistant 序号，后续读取应保持该值，避免把续读过程新产生的事件加入范围。`history.read` 保留原事件 JSON，包括已压缩的原文。`memory.recall` 返回当前有效条目、事实时间与证据引用，全文由 `memory.read` 取得；`threads.list` 返回 Thread 标识、设备、目录、Agent、状态和最后活动时间，内容由 `threads.read` 取得。
+搜索和列表每页最多 20 条，业务 JSON 中用 `next_after_id` 或 `next_after_seq` 继续取得下一组；空列表表示结束。`history` 返回 `through_seq`，默认固定为本次工具调用的 assistant 序号，后续读取应保持该值，避免把续读过程新产生的事件加入范围。`history.read` 保留原事件 JSON，包括已压缩的原文。memory.recall 返回与 current/history/as_of 匹配的条目片段、有效状态与证据引用；已停用或替代的旧索引不能输出为当前知识。中心仅在该工具消费 call_tool payload 中的绑定查询向量，原始 arguments 保持不变；`threads.list` 返回 Thread 标识、设备、目录、Agent、状态和最后活动时间，内容由 `threads.read` 取得。
 
 写工具返回资源 ID、版本或状态及 `read_tool`。记忆冲突返回当前版本和内容，超限时返回截断标记及 `memory.read` 入口。
 

@@ -8,7 +8,10 @@ import { strictDecode } from '../decode.ts'
 import {
   readProjectMemory,
   applyChange,
-  listProjectMemory,
+  recall,
+  prepareContext,
+  embeddingQuery,
+  checkMemoryContext,
   registerEventSource,
   sourcePage,
   projectMemoryIndex,
@@ -111,7 +114,8 @@ const bootstrap = Effect.fn('bootstrapProjectRun')(function* (b: ProjectBinding)
   const project = yield* readProject(b.employeeId, b.projectId)
   const [row] = yield* sql<{
     compaction_seq: string | null
-  }>`SELECT compaction_seq FROM conversations WHERE id=${b.conversationId}`
+    input_seq: number
+  }>`SELECT compaction_seq,(SELECT COALESCE(max(seq),0)::float8 FROM conversation_events WHERE conversation_id=conversations.id AND kind='input') AS input_seq FROM conversations WHERE id=${b.conversationId}`
   const compaction = row?.compaction_seq ? yield* readEvent(b.conversationId, Number(row.compaction_seq)) : undefined
   const boundary = compaction
     ? yield* projectDecode(
@@ -122,6 +126,8 @@ const bootstrap = Effect.fn('bootstrapProjectRun')(function* (b: ProjectBinding)
   const out: { -readonly [K in keyof P.ProjectBootstrap]: P.ProjectBootstrap[K] } = {
     project: { ...project, agent: { ...project.agent, provider: b.provider, model: b.model } },
     prompt_version: b.promptVersion,
+    input_seq: row!.input_seq,
+    memory_settings: P.MEMORY_CONTEXT_DEFAULTS,
     memory_index: yield* projectMemoryIndex(b.employeeId, b.projectId),
     after_seq: boundary?.through_seq ?? 0,
     last_seq: b.nextSeq - 1,
@@ -145,7 +151,7 @@ const toolRequest = Effect.fn('callProjectTool')(function* (b: ProjectBinding, r
   if ((request.last_seq ?? 0) !== b.nextSeq - 1) return yield* Effect.fail(projectError())
   const [assistant] = yield* sql<{
     seq: string
-    payload: unknown
+    payload: { memory_context_id: string }
   }>`SELECT seq,payload FROM conversation_events WHERE conversation_id=${b.conversationId} AND kind='assistant' ORDER BY seq DESC LIMIT 1`
   if (!assistant) return yield* Effect.fail(projectError('invalid', 422))
   const calls = yield* savedToolCalls(assistant.payload),
@@ -170,6 +176,8 @@ const toolRequest = Effect.fn('callProjectTool')(function* (b: ProjectBinding, r
     runId: b.runId,
     leaseEpoch: b.leaseEpoch,
     assistantSeq: Number(assistant.seq),
+    nextSeq: b.nextSeq,
+    inputSeq: 0,
     toolCallId: id,
   }
   if (request.operation === 'wait_tool' && call.name !== 'nodes.exec')
@@ -178,13 +186,57 @@ const toolRequest = Effect.fn('callProjectTool')(function* (b: ProjectBinding, r
     request.operation === 'wait_tool'
       ? yield* projectDecode(Schema.Struct({ finish_wait: Schema.optionalKey(Schema.Boolean) }), request.payload ?? {})
       : { finish_wait: false }
-  const result =
-    request.operation === 'wait_tool'
-      ? yield* waitProjectTool(ctx, finish.finish_wait ?? false)
-      : yield* executeProjectTool(ctx, call.name, call.arguments)
+  // nodes.exec 的 Thread 登记先于上下文校验；已提交执行继续原等待。
+  const existingExec = call.name === 'nodes.exec' ? yield* threads.readExec(ctx, ctx) : undefined
+  const readOnly = [
+    'memory.recall',
+    'memory.read',
+    'history.search',
+    'history.read',
+    'devices.list',
+    'threads.list',
+    'threads.get',
+    'threads.read',
+    'threads.trace',
+    'inbox.list',
+    'inbox.get',
+  ].includes(call.name)
+  const result = existingExec
+    ? yield* waitProjectTool(ctx, finish.finish_wait ?? false)
+    : yield* toolTransaction(
+        Effect.gen(function* () {
+          const context = yield* checkMemoryContext(
+            b,
+            assistant.payload.memory_context_id,
+            Number(assistant.seq) - 1,
+            !readOnly,
+          )
+          ctx.inputSeq = context.input_seq
+          if (call.name === 'memory.recall') {
+            const extras = yield* projectDecode(
+              Schema.Struct({
+                query_vector: Schema.optionalKey(P.MemoryQueryVector),
+                embedding_diagnostic: Schema.optionalKey(
+                  Schema.Literals([
+                    'credential_missing',
+                    'embedding_request_failed',
+                    'embedding_timeout',
+                    'embedding_unavailable',
+                  ]),
+                ),
+              }),
+              request.payload ?? {},
+            )
+            ctx.queryVector = extras.query_vector
+            ctx.embeddingDiagnostic = extras.embedding_diagnostic
+          }
+          return yield* executeBusiness(ctx, call.name, call.arguments)
+        }),
+      )
   if (result.pending) return result.value
   const payload = {
     format: 'pi-ai/1',
+    ...(result.memoryRefs ? { memory_refs: result.memoryRefs, derived: true } : {}),
     ...(result.consumeThreadId ? { consumed_thread_id: result.consumeThreadId } : {}),
     message: {
       role: 'toolResult',
@@ -283,6 +335,21 @@ export const runtimeRequest = Effect.fn('projectRuntimeRequest')(function* (
         case 'read_events':
           data = yield* readRuntimeEvents(b, request.after_seq ?? 0, request.max_bytes ?? 128 * 1024)
           break
+        case 'embedding_query': {
+          const payload = yield* projectDecode(
+            Schema.Struct({ input_seq: P.NonNegativeInteger, query: Schema.optionalKey(P.boundedText(64 * 1024)) }),
+            request.payload,
+          )
+          data = yield* embeddingQuery(b, request.last_seq ?? 0, payload.input_seq, payload.query)
+          break
+        }
+        case 'prepare_context':
+          data = yield* prepareContext(
+            b,
+            request.last_seq ?? 0,
+            yield* projectDecode(P.PrepareMemoryContext, request.payload),
+          )
+          break
         case 'append_event':
           data = yield* appendAssistant(b, request)
           break
@@ -374,12 +441,17 @@ interface ProjectToolContext {
   runId: string
   leaseEpoch: number
   assistantSeq: number
+  nextSeq: number
+  inputSeq: number
+  queryVector?: P.MemoryQueryVector | undefined
+  embeddingDiagnostic?: string | undefined
   toolCallId: string
 }
 interface ProjectToolExecution {
   value: unknown
   isError?: boolean
   pending?: boolean
+  memoryRefs?: readonly (typeof P.MemoryReference.Type)[]
   consumeThreadId?: string
 }
 const pageFields = {
@@ -394,7 +466,7 @@ const historyFields = {
   ...pageFields,
 }
 const schemas = {
-  'memory.recall': Schema.Struct({ query: Schema.optionalKey(P.Text), ...afterId, ...pageFields }),
+  'memory.recall': P.MemoryRecallInput,
   'memory.read': Schema.Struct({
     item_id: Schema.optionalKey(P.UUID),
     source_id: Schema.optionalKey(P.UUID),
@@ -514,8 +586,23 @@ const executeBusiness = Effect.fnUntraced(function* (
   switch (name) {
     case 'memory.recall': {
       const a = yield* strictDecode(schemas[name], args)
+      const selection = yield* embeddingQuery(c, c.nextSeq - 1, c.inputSeq, a.query)
+      let vector = c.queryVector
+      const mismatch =
+        vector &&
+        (vector.config_id !== selection.memory_embedding?.config_id || vector.query_hash !== selection.query_hash)
+      if (mismatch) vector = undefined
+      const value = yield* recall(c.employeeId, c.projectId, a, false, c.assistantSeq, vector)
       return {
-        value: yield* page(yield* listProjectMemory(c.employeeId, c.projectId, a.after_id, 20, false, a.query), a),
+        value: {
+          ...value,
+          degraded: [
+            ...value.degraded,
+            ...(mismatch ? ['embedding_query_changed'] : []),
+            ...(selection.memory_embedding && c.embeddingDiagnostic ? [c.embeddingDiagnostic] : []),
+          ],
+        },
+        memoryRefs: value.memory_refs,
       }
     }
     case 'memory.read': {
@@ -525,8 +612,15 @@ const executeBusiness = Effect.fnUntraced(function* (
         (a.input_id !== undefined && a.source_seq === undefined)
       )
         return yield* Effect.fail(new AppError(422, 'invalid'))
-      if (a.item_id)
-        return { value: yield* page(yield* readProjectMemory(c.employeeId, c.projectId, a.item_id, a.revision), a) }
+      if (a.item_id) {
+        const item = yield* readProjectMemory(c.employeeId, c.projectId, a.item_id, a.revision)
+        return {
+          value: yield* page(item, a),
+          memoryRefs: [
+            { item_id: item.id, revision: item.revision, mode: a.revision === undefined ? 'current' : 'history' },
+          ],
+        }
+      }
       const id =
         a.source_id ??
         (yield* registerEventSource(c.employeeId, c.projectId, c.assistantSeq, a.source_seq!, a.input_id))
@@ -538,7 +632,18 @@ const executeBusiness = Effect.fnUntraced(function* (
       }
       if (value.source_seq !== null && value.source_seq > c.assistantSeq)
         return yield* Effect.fail(new AppError(422, 'invalid_evidence'))
-      return { value }
+      return {
+        value,
+        memoryRefs: [
+          {
+            source_id: value.id,
+            source_hash: value.source_hash,
+            start_byte: value.offset,
+            end_byte: value.next_offset,
+            mode: 'history',
+          },
+        ],
+      }
     }
     case 'memory.remember':
     case 'memory.correct':
@@ -770,8 +875,6 @@ const toolTransaction = (body: Effect.Effect<ProjectToolExecution, AppError | Sq
   transaction(body).pipe(
     Effect.catch((error) => (error.status < 500 ? Effect.succeed(rejected(error)) : Effect.fail(error))),
   )
-const executeProjectTool = (context: ProjectToolContext, name: string, args: unknown) =>
-  toolTransaction(executeBusiness(context, name, args))
 const waitProjectTool = (c: ProjectToolContext, finishWait = false) =>
   toolTransaction(
     Effect.gen(function* () {

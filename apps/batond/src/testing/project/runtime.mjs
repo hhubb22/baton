@@ -46,6 +46,26 @@ if (command === 'probe') {
         lease_epoch: 999,
         payload: { pid: process.pid, branch: branch.pid, denied },
       })
+      await call({
+        operation: 'embedding_query',
+        run_id: 'forged',
+        lease_epoch: 999,
+        last_seq: 0,
+        payload: { input_seq: 0, query: 'technical query' },
+      })
+      await call({
+        operation: 'prepare_context',
+        run_id: 'forged',
+        lease_epoch: 999,
+        last_seq: 0,
+        payload: {
+          context_id: 'local-context',
+          input_seq: 0,
+          core_tokens: 1500,
+          related_tokens: 3500,
+          max_bytes: 40960,
+        },
+      })
       const pending = await call({
         operation: 'call_tool',
         tool_call_id: 'exec-1',

@@ -1,3 +1,6 @@
 export * from './read.ts'
 export * from './sources.ts'
 export * from './change.ts'
+export * from './recall.ts'
+export * from './context.ts'
+export * from './embeddings.ts'

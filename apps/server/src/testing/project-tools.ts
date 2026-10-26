@@ -4,7 +4,7 @@ import * as SqlClient from 'effect/sql/SqlClient'
 import * as P from '@baton/protocol'
 import { seedNode, type TestDatabase } from './database.ts'
 import type { NodeSource } from '../errors.ts'
-import { runtimeRequest } from '../project/runtime.ts'
+import { contextualRuntimeRequest as runtimeRequest } from './project-context.ts'
 import { registerEventSource, readSource } from '../project/memory/index.ts'
 
 interface ToolRun {

@@ -276,6 +276,11 @@ const Projects = HttpApiGroup.make('projects')
       query: Q.MemoryListQuery,
       success: P.MemoriesResponse,
     }),
+    Endpoint.post('recallMemory', '/api/v1/projects/:projectId/memory/recall', {
+      params: projectParams,
+      payload: P.MemoryRecallInput,
+      success: P.MemoryRecallResult,
+    }),
     Endpoint.get('memorySource', '/api/v1/projects/:projectId/memory/sources/:sourceId', {
       params: { ...projectParams, sourceId: UUID },
       query: Q.MemorySourceQuery,

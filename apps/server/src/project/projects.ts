@@ -4,6 +4,7 @@ import * as SqlClient from 'effect/sql/SqlClient'
 import * as P from '@baton/protocol'
 import { dbError } from '../database.ts'
 import { insertProjectInput } from './inputs.ts'
+import { embeddingConfiguration, queueEmbeddings, lockMemoryState } from './memory/index.ts'
 import {
   boundedProjectText,
   checkPayloadSize,
@@ -36,8 +37,10 @@ export const createProject = Effect.fn('createProject')(function* (employee: str
       const id = randomUUID(),
         agent = randomUUID(),
         conversation = randomUUID()
-      const rows = yield* sql`INSERT INTO projects(id,employee_id,title,goal,client_project_id,create_request)
- VALUES(${id},${employee},${decoded.title},${decoded.goal ?? ''},${clientId},${JSON.stringify(decoded)}::jsonb)
+      const memoryEmbedding = embeddingConfiguration(null, decoded.memory_embedding ?? null)
+      const rows =
+        yield* sql`INSERT INTO projects(id,employee_id,title,goal,memory_embedding,client_project_id,create_request)
+ VALUES(${id},${employee},${decoded.title},${decoded.goal ?? ''},${memoryEmbedding ? JSON.stringify(memoryEmbedding) : null}::jsonb,${clientId},${JSON.stringify(decoded)}::jsonb)
  ON CONFLICT(employee_id,client_project_id) DO NOTHING RETURNING id`
       if (!rows.length) {
         const [old] = yield* sql<{
@@ -78,6 +81,10 @@ export const patchProject = Effect.fn('patchProject')(function* (
       const old = yield* readProject(employee, id)
       const value = yield* projectDecode(P.Project, {
         ...old,
+        memory_embedding:
+          patch.memory_embedding === undefined
+            ? old.memory_embedding
+            : embeddingConfiguration(old.memory_embedding, patch.memory_embedding),
         title: patch.title ?? old.title,
         goal: patch.goal ?? old.goal,
         status: patch.status ?? old.status,
@@ -85,8 +92,13 @@ export const patchProject = Effect.fn('patchProject')(function* (
       })
       yield* projectDecode(P.summary(1024), value.agent.provider)
       yield* projectDecode(P.summary(1024), value.agent.model)
-      yield* sql`UPDATE projects SET title=${value.title},goal=${value.goal},status=${value.status},version=version+1,updated_at=clock_timestamp() WHERE id=${id} AND employee_id=${employee}`
+      yield* sql`UPDATE projects SET memory_embedding=${value.memory_embedding ? JSON.stringify(value.memory_embedding) : null}::jsonb,title=${value.title},goal=${value.goal},status=${value.status},version=version+1,updated_at=clock_timestamp() WHERE id=${id} AND employee_id=${employee}`
       yield* sql`UPDATE project_agents SET provider=${value.agent.provider},model=${value.agent.model} WHERE id=${agent}`
+      if (old.memory_embedding?.config_id !== value.memory_embedding?.config_id) {
+        yield* lockMemoryState(employee, id)
+        yield* queueEmbeddings(employee, id)
+        yield* sql`UPDATE project_memory_state SET search_generation=search_generation+1 WHERE employee_id=${employee} AND project_id=${id}`
+      }
       const updated = yield* readProject(employee, id)
       if (updated.title !== old.title || updated.goal !== old.goal) {
         let limit = Math.min(Buffer.byteLength(updated.goal), 3 * 1024)

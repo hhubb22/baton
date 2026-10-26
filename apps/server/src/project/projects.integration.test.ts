@@ -7,6 +7,7 @@ import * as P from '@baton/protocol'
 import { seedNode, withTestDatabase, type TestDatabase } from '../testing/database.ts'
 import * as projects from './projects.ts'
 import { insertProjectInput } from './inputs.ts'
+import { contextualRuntimeRequest } from '../testing/project-context.ts'
 import * as threads from '../threads/index.ts'
 
 type Run = TestDatabase['run']
@@ -36,7 +37,7 @@ async function fixture(run: Run) {
     expect(deliveries.filter((d) => d.command.project_id === p.id)).toHaveLength(1)
     const identity = { run_id: delivery.command.run_id, lease_epoch: delivery.command.lease_epoch }
     const rpc = (operation: P.ProjectRuntimeRequest['operation'], extra: Partial<P.ProjectRuntimeRequest> = {}) =>
-      run(projects.runtimeRequest(source, { type: 'project_runtime.request', ...identity, operation, ...extra }))
+      run(contextualRuntimeRequest(source, { type: 'project_runtime.request', ...identity, operation, ...extra }))
     await rpc('started')
     return { rpc, identity, delivery }
   }

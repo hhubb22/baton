@@ -3,7 +3,15 @@ import assert from 'node:assert/strict'
 import { checkedRPC, eventMessage, RuntimeError, type Bootstrap, type Event, type Operation } from '../src/protocol.js'
 
 const bootstrap: Bootstrap = {
-  project: { title: 'Baton', goal: '验证', agent: { provider: 'faux', model: 'local' }, conversation: { id: 'local' } },
+  project: {
+    memory_embedding: null,
+    title: 'Baton',
+    goal: '验证',
+    agent: { provider: 'faux', model: 'local' },
+    conversation: { id: 'local' },
+  },
+  input_seq: 0,
+  memory_settings: { core_tokens: 1500, related_tokens: 3500, max_bytes: 40960 },
   prompt_version: '1',
   after_seq: 0,
   last_seq: 0,
@@ -40,6 +48,34 @@ test('所有 Runtime operation 接受现行结果形状', async () => {
     ['read_events', { events: null, last_seq: 0, next_after_seq: 0, has_more: false }],
     ['claim_inputs', { payload_bytes: 0, input_count: 0 }],
     ['claim_inputs', { event: event('input'), payload_bytes: 100, input_count: 1 }],
+    [
+      'embedding_query',
+      {
+        query: 'original text',
+        query_hash: 'hash',
+        query_truncated: false,
+        last_seq: 0,
+        input_seq: 0,
+        memory_embedding: null,
+      },
+    ],
+    [
+      'prepare_context',
+      {
+        context_id: 'context',
+        last_seq: 0,
+        input_seq: 0,
+        knowledge_epoch: 0,
+        budget: { core_tokens: 1500, related_tokens: 3500, max_bytes: 40960 },
+        expires_at: null,
+        content: 'core requirements',
+        memory_refs: [],
+        degraded: [],
+        core_complete: true,
+        query: 'original text',
+        algorithm: 'orama-3.1.18-nfkc-v1',
+      },
+    ],
     ['append_event', event('assistant')],
     ['commit_compaction', { seq: 2, kind: 'compaction', payload: { through_seq: 1, future: true } }],
     ['call_tool', event('tool_result')],

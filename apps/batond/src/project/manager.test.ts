@@ -411,6 +411,12 @@ describe('Project Runtime host', () => {
           return requests.some((r) => r.operation === 'finish')
         })
         yield* until(() => row(dataDir, c.run_id)?.cleanup_acked === 1)
+        for (const operation of ['embedding_query', 'prepare_context']) {
+          const request = requests.find((r) => r.operation === operation)!
+          expect(request.run_id).toBe(c.run_id)
+          expect(request.lease_epoch).toBe(c.lease_epoch)
+          expect(request.payload).toMatchObject({ input_seq: 0 })
+        }
         expect(requests.some((r) => r.operation === 'wake_received')).toBe(true)
         expect(requests.filter((r) => r.operation === 'renew')).toHaveLength(1)
       }),
@@ -436,11 +442,14 @@ describe('Project Runtime host', () => {
             case 'bootstrap':
               return success({
                 project: {
+                  memory_embedding: null,
                   title: 'Local',
                   goal: '',
                   agent: { provider: 'openai-codex', model: 'fake-model' },
                   conversation: { id: randomUUID() },
                 },
+                input_seq: 0,
+                memory_settings: { core_tokens: 1500, related_tokens: 3500, max_bytes: 40960 },
                 prompt_version: '1',
                 after_seq: 0,
                 last_seq: events.length,
@@ -465,6 +474,33 @@ describe('Project Runtime host', () => {
               }
               events.push(event)
               return success({ event, payload_bytes: Buffer.byteLength(JSON.stringify(event.payload)), input_count: 1 })
+            }
+            case 'prepare_context': {
+              const payload = request.payload as {
+                context_id: string
+                input_seq: number
+                core_tokens: number
+                related_tokens: number
+                max_bytes: number
+              }
+              return success({
+                context_id: payload.context_id,
+                last_seq: request.last_seq!,
+                input_seq: payload.input_seq,
+                knowledge_epoch: 0,
+                budget: {
+                  core_tokens: payload.core_tokens,
+                  related_tokens: payload.related_tokens,
+                  max_bytes: payload.max_bytes,
+                },
+                expires_at: null,
+                content: '',
+                memory_refs: [],
+                degraded: [],
+                core_complete: true,
+                query: '',
+                algorithm: 'orama-3.1.18-nfkc-v1',
+              })
             }
             case 'append_event':
             case 'commit_compaction': {

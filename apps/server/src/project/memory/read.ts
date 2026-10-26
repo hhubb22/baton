@@ -41,6 +41,16 @@ export const getProjectMemory = (employeeId: string, projectId: string, itemId: 
 export const currentMemorySQL = (sql: SqlClient.SqlClient) =>
   sql`e.status IN ('active','superseded') AND (r.valid_from IS NULL OR r.valid_from<=now()) AND (r.valid_until IS NULL OR r.valid_until>now())`
 
+export const memoryValiditySQL = (
+  sql: SqlClient.SqlClient,
+  input: Pick<P.MemoryRecallInput, 'mode' | 'as_of' | 'include_inactive'>,
+) =>
+  input.include_inactive
+    ? sql`true`
+    : input.mode === 'history'
+      ? sql`e.status IN ('active','superseded') AND (${input.as_of ?? null}::timestamptz IS NULL OR ((r.valid_from IS NULL OR r.valid_from<=${input.as_of ?? null}::timestamptz) AND (r.valid_until IS NULL OR r.valid_until>${input.as_of ?? null}::timestamptz)))`
+      : currentMemorySQL(sql)
+
 export const listProjectMemory = (
   employeeId: string,
   projectId: string,

@@ -2,15 +2,15 @@
 
 Status: partially implemented
 Owner: Asa
-Basis: [行为规格 PM-01～20](PRODUCT.md)；代码基线 `35823e30cf0178be7d720fa9a70d079a52d5191c`。
+Basis: [行为规格 PM-01～23](PRODUCT.md)；代码基线 `35823e30cf0178be7d720fa9a70d079a52d5191c`。
 
 ## Context
 
-条目、修订、来源、证据、操作去重与抑制记录已由 `project/memory/` 实现，员工 API 和前台工具共享事务内 `applyChange`。当前查询按状态及事实时间过滤，仍使用有界子串搜索与有效条目标题索引。词法检索、自动召回、请求快照、旧工具结果/摘要刷新和后台整理仍为 planned。[Project Agent TECH](../project-agent/TECH.md) 记录当前主对话、租约、工具与压缩实现。
+条目、修订、来源、证据、操作去重与抑制记录已由 `project/memory/` 实现，员工 API 和前台工具共享事务内 `applyChange`。词法查询使用 PostgreSQL 有界候选与 Orama 3.1.18，支持状态和事实时间过滤。请求前自动保存核心要求与相关片段的不可变快照，新 assistant 和首次工具执行检查知识代次与期限。可选 Embedding 的中心配置、pending/ready 记录、查询绑定和临时向量排序已实现；设备 SDK、后台生成、设置界面、旧工具结果/摘要刷新和后台整理仍为 planned。[Project Agent TECH](../project-agent/TECH.md) 记录当前主对话、租约、工具与压缩实现。
 
 | 已核对的入口 | 可复用的机制 | 本次需要改变的部分 |
 | --- | --- | --- |
-| `apps/server/src/project/memory/` | 统一变更入口、修订/操作去重、来源证据、事实时间、停用与恢复 | 词法检索、自动召回与请求快照 planned |
+| `apps/server/src/project/memory/` | 统一变更入口、修订/操作去重、来源证据、事实时间、停用与恢复 | 词法检索、自动召回、请求快照和可选向量记录/排序；后台生成 planned |
 | `apps/server/src/project/events.ts` | 输入批次领取、assistant 保存、事件标识去重 | 最终回复事务内登记整理工作，关联请求上下文 |
 | `apps/server/src/project/runtime.ts` | 节点身份、主租约、工具结果与副作用同事务 | 自动召回、知识代次检查；后台使用独立授权 |
 | `runtimes/project-agent/src/context.ts`、`runtime.ts` | 确定性历史构造、模型预算、顺序工具、保存屏障 | 注入本次有效记忆，后台受限运行模式 |
@@ -18,7 +18,7 @@ Basis: [行为规格 PM-01～20](PRODUCT.md)；代码基线 `35823e30cf0178be7d7
 | `packages/protocol/src/{project,node,http-api}.ts` | Effect Schema、WSS 与 HTTP 契约、容量约束 | 记忆 DTO、后台协议、请求上下文标识 |
 | `web/src/app/ProjectMemory.tsx` | 编辑草稿、冲突反馈、修订历史 | 主题、来源、状态、停用/恢复和整理状态 |
 
-默认使用加权 BM25 与文本规范化。生成式提取继续在设备上使用 Project 配置的 provider/model，中心不持有模型凭据，也不发起模型推理。主题、检索辅助词和索引可重建；规范结论与原始依据保存在 PostgreSQL。
+默认使用 Orama 的 BM25 与文本规范化；用户可为 Project 选配 Embedding，启用后由 Orama 进行向量排序并融合候选。生成式提取和 Embedding 调用都在设备进行，中心不持有模型凭据，也不发起模型推理。主题、检索辅助词和索引可重建；规范结论与原始依据保存在 PostgreSQL。
 
 ## 架构与模块职责
 
@@ -47,7 +47,7 @@ flowchart TD
 | Runtime `context.ts` | 依据已保存的快照构造模型视图，不重新查询数据库决定旧请求看过什么 |
 | `packages/protocol/src/project-memory.ts` | 领域 DTO 与约束；`node.ts`、`http-api.ts` 组合传输，不反向依赖传输层 |
 
-`project/memory/index.ts` 导出 `applyChange`、读列表/修订/来源和有效标题索引。`change.ts` 负责事务内变更，`sources.ts` 从已保存且前台可读的原位置登记来源，`read.ts` 统一状态和时间过滤。其余模块边界为 planned。后台将复用普通运行的 provider、凭据和进程回收实现，工具权限按模式固定。
+`project/memory/index.ts` 统一导出变更、读取、召回、请求快照和 Embedding 入口。`change.ts` 同事务更新检索投影与向量工作；`sources.ts` 登记原始来源并生成片段，`read.ts` 统一状态与事实时间过滤。`projection.ts` 保存词项，`recall.ts` 组织 Orama 排序、RRF 和预算，`vectors.ts` 只载入有效向量元数据。`context.ts` 提供 embeddingQuery、prepareContext 与 checkMemoryContext；`embeddings.ts` 提供配置、待生成记录、提交和有限退避。标题索引仍供现有压缩路径使用，其替换及旧派生内容刷新为 planned。后台将复用普通运行的 provider、凭据和进程回收实现，工具权限按模式固定。
 
 ## 数据与知识变更
 
@@ -64,11 +64,12 @@ flowchart TD
 | `project_memory_evidence` | 条目修订、来源 ID、UTF-8 字节范围、证据关系；同一修订不重复引用同一来源范围 |
 | `project_memory_changes` | `operation_id`、规范请求哈希、动作、前后条目/修订、依据与结果；重试返回原结果 |
 | `project_memory_suppressions` | 停用或纠正所否定的断言、条目/替代链、语义键与值指纹、来源范围；区分 retired/retracted，恢复只解除指定停用记录及同次停用期间编辑派生的抑制组 |
-| `project_memory_jobs` | 来源批次与边界、处理游标、状态、重试、attempt/claim 身份、provider/model 与策略版本 |
+| `project_memory_jobs` | 整理或向量生成的工作种类、来源批次/条目修订、处理游标、状态、重试、attempt/claim 身份、provider/model 与策略版本 |
 | `project_memory_contexts` | 请求 ID、历史边界、知识代次、实际正文及引用、查询与算法版本、预算、有效截止时间、降级标记和内容哈希；不可变 |
-| `project_memory_search_documents` | 条目修订或原始来源分片、字段文本/长度、词项频次和候选索引；属于可重建数据 |
+| `project_memory_search_documents` | 条目修订或原始来源分片、检索字段文本与候选词项索引；属于可重建数据 |
+| `project_memory_embeddings` | 条目修订、Embedding 配置身份、文本哈希、状态、维度与向量；只读当前有效组合 |
 
-现有规范表为 state、items、revisions、sources、evidence、changes 和 suppressions。jobs、contexts 与 search_documents 仍为 planned；state 目前推进 knowledge_epoch，search_generation 预留给检索实现。修订响应统一使用 updated_at 表示该次修订的记录时间；effective 表示该修订是否为当前有效知识，retracted 标明被纠正的断言。来源文本、修订、证据与操作结果只追加，停用组用 retirement_id 关联；显式恢复只解除该组的 retired 抑制，不解除 retracted 抑制。
+现有表包含 state、items、revisions、sources、evidence、changes、suppressions、contexts、search_documents 和 embeddings；后台 jobs 仍为 planned。知识变更推进 knowledge_epoch，词项投影、配置或向量变化推进 search_generation。修订响应统一使用 updated_at 表示该次修订的记录时间；effective 表示该修订是否为当前有效知识，retracted 标明被纠正的断言。来源文本、修订、证据与操作结果只追加，停用组用 retirement_id 关联；显式恢复只解除该组的 retired 抑制，不解除 retracted 抑制。
 
 主题视图由当前条目按主题确定性分组，携带条目 ID 与修订。首期不再维护可独立编辑、可与条目冲突的主题正文。需要压缩展示时只生成带引用的预览，预览不作为新证据。
 
@@ -126,40 +127,47 @@ flowchart TD
 
 索引分为当前记忆和原始来源两类语料。记忆文档包含 title、search_terms、content、实体与主题；来源按完整段落或有明确字节边界的片段组织，保留父来源和邻接位置。
 
-查询和文档采用同一版本的规范化：Unicode NFKC、大小写归一、英文 camelCase/snake_case/点号/连字符拆分，原技术标识符同时保留为精确项。中文首期采用连续汉字二元组，索引同时保留单字项供单汉字查询；多字查询只使用二元组，避免高频单字放大噪声。原文不被规范化结果覆盖，引用和命令仍返回原字符串。
+查询和文档采用同一版本的规范化：Unicode NFKC、大小写归一、英文 camelCase/snake_case/点号/连字符拆分，原技术标识符同时保留为精确项。相邻中英文本按汉字/非汉字边界拆开，例如 Baton长期记忆 与 Baton 长期记忆 使用相同查询词项。中文首期采用连续汉字二元组，索引同时保留单字项供单汉字查询；多字查询只使用二元组，避免高频单字放大噪声。原文不被规范化结果覆盖，引用和命令仍返回原字符串。
 
-标题、正文和辅助词分字段记录词频。辅助词由已有后台提取请求顺带生成，最多 16 项、每项最多 80 个字符，必须与正文主题有关。它们不进入证据或核心正文，也不自动改变事实有效性。初期不使用向量索引、pgvector、外部词库 API 或必经的模型查询改写。
+title、search_terms、content 分字段保存规范化词项，词频由 Orama 维护。search_terms 当前来自主题和 semantic_key，可提供显式别名；后台额外生成辅助词仍为 planned，预算为最多 16 项、每项最多 80 个字符。辅助词不进入证据或核心正文，也不改变事实有效性。默认词法检索不使用外部词库 API 或模型查询改写；可选向量路径见下节。
 
 ### 候选、评分与合并
 
-按员工、Project、查询模式及知识有效性过滤，再生成主题/实体精确匹配、记忆词项和来源词项三路候选。原始片段命中被替代、纠正或停用的知识时，返回状态与当前条目引用；默认自动上下文不得将其作为有效旧值注入。
+按员工、Project、查询模式及知识有效性过滤，生成记忆与来源的联合词法候选，主题/语义键精确匹配优先预选。原始片段命中被替代、纠正或停用的知识时，返回状态与当前条目引用；默认自动上下文不得将其作为有效旧值注入。
 
-PostgreSQL 的 GIN 词项索引用于候选定位。tsvector 由预处理后的 lexeme 构造；查询词按 OR 生成候选，不把整句转换成必须全部命中的条件。用户输入不作为 SQL 或 tsquery 语法执行，规范化词项通过受控构造和参数传入。query 最多 2 KiB，最多使用 128 个不同词项，截断明确返回。完整词频和字段长度另存，避免依赖 tsvector 位置截断来计算 BM25。`ts_rank` 可用于候选预选，不能当作 BM25 分数。
+PostgreSQL 的 GIN 词项索引用于候选定位。tsvector 由预处理后的 lexeme 构造；查询词按 OR 生成候选，不把整句转换成必须全部命中的条件。用户输入不作为 SQL 或 tsquery 语法执行，规范化词项通过受控构造和参数传入。query 最多 2 KiB，最多使用 128 个不同词项，截断明确返回。原始检索字段另存，Orama 使用同一套规范化词项评分；不让 PostgreSQL 再次拆分技术标识符。`ts_rank` 可用于候选预选，不能当作 BM25 分数。
 
-应用层使用分字段 BM25 的加权和：
+应用层通过 Orama 公共 API 对联合有界候选建立请求内索引并执行字段加权 BM25，title/search_terms/content 初始权重为 3/2/1，其他评分参数使用库默认值。词频、文档频率和平均长度由库在该候选集合内计算，不复制评分公式，也不桥接一套全项目统计来修改库内部状态。候选范围与算法版本进入诊断，参数效果通过固定语料和独立质量评估验证。
 
-```text
-score(q,d) = Σfield weight(field) × Σterm∈q IDF(term)
-             × tf(term,d,field) × (k1+1)
-             / (tf(term,d,field) + k1 × (1-b+b×length(d,field)/avgLength(field)))
-IDF(term) = ln(1 + (N-df(term)+0.5)/(df(term)+0.5))
-```
+词法候选上限 512、向量候选最多 20 条，最终显式工具结果最多 20 条。词法超限时按主题/语义键匹配、ts_rank、记录时间和稳定 ID 预选，并返回 `candidate_truncated=true`，不宣称得到全库精确前 20。词法与可用向量结果按 RRF 合并，常数为 60；同一条目/来源范围去重，等分按记录时间、稳定 ID 排序。普通 recall 在 repeatable-read 事务中获取候选与状态；prepare_context 在 Project Agent 与 memory_state 锁保护下保存快照。返回候选的归属、状态与修订都在该一致边界内验证。
 
-起始 `k1=1.2`、`b=0.75`，title/search_terms/content 权重分别为 3/2/1，属于待验证默认值，不归因为 Zed 的实现。N、df 和平均长度按同一 Project 的相应可检索语料计算，记忆与原始来源分别统计。空字段长度不参与其平均值，重复查询词不增加权重。
-
-单路候选初始上限 512、最终显式工具结果最多 20 条。超限时使用固定预选顺序并返回 `candidate_truncated=true`，不宣称得到全库精确前 20。前三路按 RRF 合并，常数初始为 60；同一条目/来源范围去重，等分按记录时间、稳定 ID 排序。普通 recall 在 repeatable-read 事务中获取词项统计、候选与状态；prepare_context 在 Project Agent 与 memory_state 锁保护下保存快照。返回候选的归属、状态与修订都在该一致边界内验证。
-
-来源历史较大时不加载全部原文进入内存。先取匹配片段，再按预算读取相邻段落；来源通路的预算不挤掉核心要求。查询不匹配、候选被截断、来源受抑制和检索失败分别表示。
+来源历史较大时不加载全部原文进入内存。来源按段落或最多 4 KiB 的 UTF-8 片段保存，只取有界候选和命中范围。记忆返回围绕命中词的有界原文片段、条目修订和来源引用，长正文保留 memory.read 入口与 snippet_truncated。自动上下文直接预算这些片段，不因完整正文超限丢弃唯一命中；核心要求独立完整提供。查询不匹配、候选被截断、来源受抑制和检索失败分别表示。
 
 核心记忆按作用范围独立选取，不参与 BM25 淘汰。当前事实模式排除 retired 与撤回断言，并按有效区间选择 active 或仍在适用区间内的 superseded 前驱；未来后继尚未生效时仍返回前驱。历史模式同样按所问时间选择替代链，未知时间区间如实标识；显式 include_inactive 用于用户历史查看，不进入普通自动注入。
 
 ### 一致性与成本
 
-知识变更和对应记忆搜索文档的失效/更新在同一事务完成；来源词项由保存事件时的确定性投影生成。整库重建按 generation 写临时集合，完整后切换，不影响前台读取旧的完整索引。旧索引候选仍通过规范记录校验，不能复活旧值。
+知识变更和对应记忆搜索文档的失效/更新在同一事务完成；来源词项由保存事件时的确定性投影生成。整库 generation 重建仍为 planned；当前逐条同步投影不依赖异步刷新。旧索引候选仍通过规范记录校验，不能复活旧值。
 
 索引辅助词、规范化规则或重建仅推进 `search_generation`；内容、来源有效性、条件、状态和核心要求的变化推进 `knowledge_epoch`。只有前者变化时无需丢弃在途模型输出。
 
-自动召回不发模型请求。主 Agent 仍可在依据不足时改写查询或深查，这些请求计入原有前台预算。索引失败时保留核心要求及本批原始输入，返回显式降级标记；无法获取必需依据的操作等待补查，不能默认成功或编造知识。
+默认词法召回不发模型请求。选配 Embedding 的请求与用量单独记录；主 Agent 在依据不足时改写查询或深查的请求计入原有前台预算。索引失败时保留核心要求及本批原始输入，返回显式降级标记；无法获取必需依据的操作等待补查，不能默认成功或编造知识。
+
+## 可选 Embedding 与混合检索（PM-21～23）
+
+中心配置、向量持久记录、绑定查询和 Orama 融合入口已实现；设备 SDK、后台生成与设置界面仍为 planned。Project 的 `memory_embedding` 默认为 null；用户设置 `base_url`、`model` 和可选 `credential_profile`。中心对实际配置变化生成新的 `config_id`，相同配置重存保留原 ID；关闭设 null。公开配置不包含 API key，URL 只接受 HTTP(S) 且不接收 userinfo 凭据。credential_profile 使用现有 FileCredentials 的小写字母、数字和连字符名称，长度 1～64。模型 ID 不设目录或版本白名单。
+
+设备通过 `batond project-runtime embedding-key <profile>` 从标准输入保存密钥，复用私有凭据存储的 embeddings 子目录。未指定 profile 表示用户明确选择无密钥端点；配置了 profile 而设备没有它时，仅向量路径报告缺凭据。主对话 OAuth 与 Embedding 密钥分别使用。Runtime 通过 OpenAI SDK 调用用户配置的 OpenAI-compatible embeddings 端点，中心不发起模型请求。
+
+`project_memory_embeddings` 保存员工、Project、item/revision、config_id、嵌入文本 SHA-256、pending/ready 状态、维度、向量与有限诊断。嵌入文本包含标题、正文与适用条件。改内容或配置时在同一事务登记待生成工作，后台受限 Runtime 按当前设备容量生成；迟到提交核对归属、修订、配置与文本哈希，不覆盖新值。向量使用 PostgreSQL 内置数组保存，不增加 pgvector 或 pg_textsearch 作为部署前提。
+
+前台先通过只读 `embedding_query` 取得最近三批真实输入的 content/title 与项目目标构造的 query、query_hash 和当前公开配置。显式 memory.recall 可传可选 query，避免将 payload JSON 字段名和 UUID 用作查询；query_hash 同时绑定 Project、conversation、last_seq、input_seq、配置和实际查询。设备取得查询向量后，将 config_id、query_hash 和向量交给 `prepare_context`；中心核对绑定后生成最终不可变快照。call_tool 可在 payload 中携带绑定向量及固定失败原因，仅 memory.recall 消费，保存的工具 arguments 保持原样。关闭时不调用 Embedding。没有可用查询向量、绑定变化或维度不符时返回词法结果并标明原因。
+
+向量召回在一致边界内只读取当前 Project、当前配置和所查询 current/history/as_of 区间内条目修订的 ready 向量与必要元数据，通过 Orama 公共向量 API 建立请求内临时索引并取前 20，正文只读取命中部分。与词法候选按 RRF 融合，核心要求独立提供。不维护跨进程内存索引缓存，也不新增独立搜索服务或空的 Retriever 插件框架。
+
+缺凭据、待生成、端点失败和无向量命中分别记录。失败保留工作并采用有界退避，不增加前台 failure_count 或重复 Inbox；向量不可用时词法与主对话继续。配置关闭或改变后，不开始旧配置的新请求，不再采用其在途结果。用量未提供时标未知，正文、查询、端点与凭据不进入追踪导出。
+
+固定向量与本地 HTTP 替身验证两路召回、融合、修订绑定与降级；真实模型的 Recall@10、过时知识误用和额外成本单独显式评估。本期不增加 reranker 或在线质量阈值作为首版前提。
 
 ## 前台请求上下文与压缩（PM-13～15）
 
@@ -252,7 +260,7 @@ Project 暂停或归档在 Agent 锁下撤销后台 claim 并登记 stop。暂�
 
 ### 员工 API
 
-沿用 `/api/v1/projects/:projectId/memory` 与员工认证、Origin、CSRF、强制改密和资源隔离。HTTP DTO 在同一 Effect HttpApi 声明中生成路由与 OpenAPI。归档只读检查放入公共变更入口。GET 列表、详情、修订、来源和 PUT/POST changes 已实现；recall、topics 与 status HTTP 端点仍为 planned。列表 include_inactive=true 用于页面管理停用条目；默认列表和 memory.recall 只返回当前有效知识。分页数字在 HTTP Schema 内按安全整数和范围解码，来源按 UTF-8 字节分页。
+沿用 `/api/v1/projects/:projectId/memory` 与员工认证、Origin、CSRF、强制改密和资源隔离。HTTP DTO 在同一 Effect HttpApi 声明中生成路由与 OpenAPI。归档只读检查放入公共变更入口。GET 列表、详情、修订、来源、PUT/POST changes 和 POST recall 已实现；topics 与 status HTTP 端点仍为 planned。列表 include_inactive=true 用于页面管理停用条目；默认列表和 memory.recall 只返回当前有效知识。分页数字在 HTTP Schema 内按安全整数和范围解码，来源按 UTF-8 字节分页。
 
 | 路径 | 请求/响应要点 |
 | --- | --- |
@@ -277,7 +285,8 @@ Project 暂停或归档在 Agent 锁下撤销后台 claim 并登记 stop。暂�
 | `memory.correct` | item_id、expected_revision、action=correct/supersede/support/dispute、content、evidence 与可选 reason；supersede 通过新条目表达事实变化 |
 | `memory.retire` | item_id、expected_revision、用户请求证据；自动整理不具有该权限 |
 | `memory.restore` | item_id、expected_revision、待解除抑制记录及用户明确恢复证据；仅前台或员工入口可用 |
-| `prepare_context` | context_id、last_seq、input_seq、预算；返回已保存的快照，超大内容通过分页读取 |
+| `embedding_query` | last_seq、input_seq、可选 query；返回 query、query_hash 与当前公开 Embedding 配置，不发模型请求 |
+| `prepare_context` | context_id、last_seq、input_seq、预算与可选的配置绑定查询向量；返回已保存的快照，超大内容通过分页读取 |
 
 恢复停用条目只由员工 API 或带用户明确恢复依据的前台操作执行；后台协议没有 restore。前台工具、名称映射、provider 回放与 UI 使用统一 DTO，不保留 memory.search/write 别名。history.search/read 保持原权限和序号边界，复用来源索引与抑制状态仍为 planned。
 
@@ -300,9 +309,9 @@ Project 暂停或归档在 Agent 锁下撤销后台 claim 并登记 stop。暂�
 
 追踪沿用 `packages/telemetry`，记录工作/尝试/批次 ID、策略版本、知识与索引代次、候选数量、截断、耗时、token 用量及错误码。默认追踪不包含记忆正文、原始证据、查询全文或凭据。来源正文只在授权 API 返回，日志不能成为额外副本。
 
-当前 schema 使用规范条目和修订模型，不提供旧实验数据升级或双写兼容。记忆工具、DTO 与页面使用当前结构；原始历史及通用权限、事务和进程辅助设施保留。压缩使用按当前有效性过滤的标题索引，后续请求快照将替换该索引。检索排序与快照验收仍为 planned。
+当前 schema 使用规范条目和修订模型，不提供旧实验数据升级或双写兼容。记忆工具、DTO 与页面使用当前结构；原始历史及通用权限、事务和进程辅助设施保留。压缩使用按当前有效性过滤的标题索引，后续请求快照将替换该索引。检索、快照和执行检查已有固定本地用例；旧派生内容的完整刷新和真实语义质量评估仍为 planned。
 
-Project Agent 行为、技术设计及 Runtime/中心 README 描述当前手动维护与前台工具。自动召回、后台机制和相关运行控制继续保留 planned。
+Project Agent 行为、技术设计及 Runtime/中心 README 描述当前手动维护与前台工具。自动召回与中心可选向量入口已实现；后台机制、设备 SDK、设置 UI、压缩与旧工具结果刷新继续保留 planned。
 
 ## Testing and validation
 
@@ -310,14 +319,15 @@ Project Agent 行为、技术设计及 Runtime/中心 README 描述当前手动�
 | --- | --- | --- | --- | --- |
 | PM-01、04、08 | 跨员工/Project 读取、伪造证据、停用后重提取 | 越权、来源升级、旧值复活 | 中心 PostgreSQL 集成 | partial：员工/Project 隔离、来源角色与范围、停用/纠正后旧证据重放已验证；后台 planned |
 | PM-02、05 | 回复/工作登记事务中断；分片回执丢失、重试 | 缺工作、重复知识或半提交 | 中心事务故障注入 | planned |
-| PM-06～09 | 时间变化、原始错误、条件并存、并发编辑 | 错误历史被视为事实，静默覆盖或自动恢复 | 变更单元测试 + 数据库集成 | partial：数据库验证冲突、去重、修订撤回、事实时间和显式恢复；历史 recall planned |
-| PM-10～12 | 固定中英语料、标识符、同义表达、候选截断 | 无排序、失效内容混入或未报告缺口 | 纯检索单测与固定语料 | planned |
-| PM-13～15 | 核心超额、多次压缩、事实自然到期、旧摘要/工具结果和请求恢复 | 要求丢失、派生内容再提取、过期副作用或重复执行 | Runtime 本地模型替身 + 中心集成 | planned |
+| PM-06～09 | 时间变化、原始错误、条件并存、并发编辑 | 错误历史被视为事实，静默覆盖或自动恢复 | 变更单元测试 + 数据库集成 | partial：数据库验证冲突、去重、修订撤回、事实时间、显式恢复和历史 recall；后台 planned |
+| PM-10～12 | 固定中英语料、标识符、同义表达、候选截断 | 无排序、失效内容混入或未报告缺口 | 词法单测与中心固定语料集成 | verified：中英混合、技术路径、别名、长片段、候选截断和状态过滤；真实同义理解单独评估 |
+| PM-13～15 | 核心超额、多次压缩、事实自然到期、旧摘要/工具结果和请求恢复 | 要求丢失、派生内容再提取、过期副作用或重复执行 | Runtime 本地模型替身 + 中心集成 | partial：自动注入、核心预算、自然到期、失效输出、pending 恢复与首次执行检查；旧摘要/工具结果刷新 planned |
 | PM-17～19 | 断线、超时、认证失败、前台抢占和进程回收 | 前台饿死、旧 claim 可提交、占用虚报 | batond 包内进程替身 | planned |
 | PM-02、10、15、18 | HTTP→中心→WSS→后台 Runtime→知识→新前台 Runtime | 形成/读取链路断裂，恢复重复副作用 | 一条跨 app 本地 E2E | planned |
 | PM-16、17 | 按需来源与历史、冲突草稿、停用/恢复、持续故障提示 | 列表混入修订或元信息；后台状态打扰前台 | Web 组件测试 | partial：来源按需读取、历史时间、冲突草稿、停用/恢复已验证；后台提示 planned |
 | PM-18、19 | 搬迁 SEA、空 PATH 与临时 HOME 下调用 memory 模式，检查启动、取消与私有文件 | 依赖源码路径、缺失分派或进程未回收 | 现有安装包检查 | planned |
-| PM-20 | 固定模型与历史，比较原始检索、词法召回、后台整理 | 使用过时知识、来源不支持或成本无记录 | 显式手动质量评估 | planned |
+| PM-21～23 | 本地 Embedding HTTP 替身、配置切换、迟到提交、无凭据、关闭与端点失败 | 密钥上传、旧向量复活、关闭仍调用、降级阻塞前台 | 中心固定向量与 Runtime/跨 app 本地替身 | partial：公开配置、迟到提交、修订/查询绑定、历史向量、长片段、pending 和有限退避；SDK、HTTP 替身、UI 与 SEA 验证 planned |
+| PM-20 | 固定模型与历史，比较原始检索、词法召回、可选混合召回与后台整理 | 使用过时知识、来源不支持或成本无记录 | 显式手动质量评估 | planned |
 
 已有诊断原型用六份仓库文档的 295 个段落、八条人工查询验证分字段 BM25 和中文二元组可生成相关候选。它没有独立保留集或向量对照；未证明真实记忆质量，不作为上述验收通过证据。正式夹具需入库、注明来源，并将开发调参样本与保留评估样本分开。
 

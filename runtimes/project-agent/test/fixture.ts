@@ -52,17 +52,23 @@ export class Backend implements RPC {
   failAt = ''
   pageSize = 2
   compactions = new Map<string, Event>()
+  memory = ''
+  knowledgeEpoch = 0
+  contexts = new Map<string, { knowledge_epoch: number; content: string }>()
   boot(): Bootstrap {
     const compaction = this.events.findLast((e) => e.kind === 'compaction')
     return {
       compaction: compaction ? structuredClone(compaction) : undefined,
       compaction_seq: compaction?.seq,
       project: {
+        memory_embedding: null,
         title: 'Baton',
         goal: '跨设备接续 🐈',
         agent: { provider: 'faux', model: 'faux-model' },
         conversation: { id: 'conversation-stable' },
       },
+      input_seq: this.events.findLast((e) => e.kind === 'input')?.seq ?? 0,
+      memory_settings: { core_tokens: 1500, related_tokens: 3500, max_bytes: 40960 },
       prompt_version: '1',
       after_seq: compaction?.payload.through_seq ?? 0,
       last_seq: this.events.length,
@@ -110,7 +116,41 @@ export class Backend implements RPC {
         this.compactions.set(req.client_event_id, event)
         return structuredClone(event)
       }
+      case 'embedding_query':
+        return {
+          query: req.payload.query ?? '',
+          query_hash: 'faux-query',
+          query_truncated: false,
+          last_seq: req.last_seq,
+          input_seq: req.payload.input_seq,
+          memory_embedding: null,
+        }
+      case 'prepare_context': {
+        const snapshot = {
+          context_id: req.payload.context_id,
+          last_seq: req.last_seq,
+          input_seq: req.payload.input_seq,
+          knowledge_epoch: this.knowledgeEpoch,
+          budget: {
+            core_tokens: req.payload.core_tokens,
+            related_tokens: req.payload.related_tokens,
+            max_bytes: req.payload.max_bytes,
+          },
+          expires_at: null,
+          content: this.memory,
+          memory_refs: [],
+          degraded: [],
+          core_complete: true,
+          query: '',
+          algorithm: 'orama-3.1.18-nfkc-v1',
+        }
+        this.contexts.set(snapshot.context_id, snapshot)
+        return structuredClone(snapshot)
+      }
       case 'append_event': {
+        const context = this.contexts.get(req.payload.memory_context_id)
+        if (!context || context.knowledge_epoch !== this.knowledgeEpoch)
+          throw new RuntimeError('memory_context_changed')
         if (req.last_seq !== this.events.length) throw new RuntimeError('conflict')
         const event: Event = {
           seq: this.events.length + 1,

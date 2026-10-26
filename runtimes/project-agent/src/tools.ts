@@ -30,8 +30,16 @@ const memoryContent = {
 export const toolDefinitions = [
   {
     name: 'memory.recall',
-    description: '查找本 Project 当前有效的记忆，最多 20 条。',
-    parameters: obj({ query: str(), after_id: opt(), ...page }),
+    description:
+      '在本 Project 本地按相关性检索记忆与来源片段，最多 20 条。current 返回当前有效知识；history 可按 as_of 查询事实区间。未命中可改写查询或读取来源；结果明确标识截断、抑制和降级。',
+    parameters: obj({
+      query: str(),
+      mode: Type.Optional(Type.Union(['current', 'history'].map((v) => Type.Literal(v)))),
+      as_of: opt(),
+      include_inactive: Type.Optional(Type.Boolean()),
+      max_results: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
+      max_bytes: Type.Optional(Type.Integer({ minimum: 1024, maximum: 32768 })),
+    }),
   },
   {
     name: 'memory.read',

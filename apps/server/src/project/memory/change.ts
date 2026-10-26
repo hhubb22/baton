@@ -8,6 +8,9 @@ import { transaction } from '../../database.ts'
 import { insertProjectInput } from '../inputs.ts'
 import { readProjectMemory, requireProject } from './read.ts'
 import { hashText, saveSource, validateEvidence } from './sources.ts'
+import { projectMemoryDocument } from './projection.ts'
+import { queueEmbeddings } from './embeddings.ts'
+import { estimatedTokens, MEMORY_HEADER, renderMemory } from './lexical.ts'
 
 type Content = typeof P.MemoryContent.Type
 export type MemoryActor = { type: 'employee' } | { type: 'foreground'; throughSeq: number }
@@ -245,11 +248,25 @@ export const applyChange = Effect.fn('applyMemoryChange')(function* (
   } else if (previous && !['correct', 'supersede'].includes(change.action))
     evidence = uniqueEvidence([...previous.evidence, ...evidence])
   if (content.core) {
-    const [budget] = yield* sql<{
-      chars: number
-    }>`SELECT COALESCE(sum(char_length(r.title)+char_length(r.content)+char_length(r.conditions)+160),0)::float8 AS chars FROM project_memory_items e JOIN project_memory_revisions r ON r.item_id=e.id AND r.revision=e.current_revision WHERE e.employee_id=${employeeId} AND e.project_id=${projectId} AND e.id<>${id} AND e.status IN ('active','superseded') AND r.core`
-    if ((budget?.chars ?? 0) + content.title.length + content.content.length + content.conditions.length + 160 > 6000)
-      return yield* Effect.fail(new AppError(422, 'core_budget_exceeded'))
+    const others = yield* sql<{
+      id: string
+    }>`SELECT e.id FROM project_memory_items e JOIN project_memory_revisions r ON r.item_id=e.id AND r.revision=e.current_revision WHERE e.employee_id=${employeeId} AND e.project_id=${projectId} AND e.id<>${id} AND e.status IN ('active','superseded') AND r.core`
+    const existingCore = yield* Effect.forEach(others, ({ id: otherId }) =>
+      readProjectMemory(employeeId, projectId, otherId),
+    )
+    const tokens =
+      estimatedTokens(
+        MEMORY_HEADER +
+          [...existingCore.map(renderMemory), renderMemory({ ...content, id, revision, evidence })].join('\n'),
+      ) + 4
+    if (tokens > P.MEMORY_CONTEXT_DEFAULTS.core_tokens)
+      return yield* Effect.fail(
+        new AppError(
+          422,
+          'core_budget_exceeded',
+          `核心要求需要约 ${tokens} token，预算为 ${P.MEMORY_CONTEXT_DEFAULTS.core_tokens}；已保存内容保持不变`,
+        ),
+      )
   }
   let changed = true
   const same =
@@ -306,7 +323,11 @@ export const applyChange = Effect.fn('applyMemoryChange')(function* (
       yield* suppress(employeeId, projectId, yield* readProjectMemory(employeeId, projectId, id), 'retired')
     if (change.action === 'correct' && status === 'retired')
       yield* suppress(employeeId, projectId, yield* readProjectMemory(employeeId, projectId, id), 'retired')
-    yield* sql`UPDATE project_memory_state SET knowledge_epoch=knowledge_epoch+1 WHERE employee_id=${employeeId} AND project_id=${projectId}`
+    yield* projectMemoryDocument(employeeId, projectId, id)
+    if (change.action === 'supersede' && previous) yield* projectMemoryDocument(employeeId, projectId, previous.id)
+    yield* queueEmbeddings(employeeId, projectId, id)
+    if (change.action === 'supersede' && previous) yield* queueEmbeddings(employeeId, projectId, previous.id)
+    yield* sql`UPDATE project_memory_state SET knowledge_epoch=knowledge_epoch+1,search_generation=search_generation+1 WHERE employee_id=${employeeId} AND project_id=${projectId}`
   }
   const result = yield* readProjectMemory(employeeId, projectId, id)
   yield* sql`INSERT INTO project_memory_changes(employee_id,project_id,operation_id,request_hash,action,item_id,before_item_id,before_revision,after_revision,result) VALUES(${employeeId},${projectId},${change.operation_id},${requestHash},${change.action},${id},${previous?.id ?? null},${previous?.revision ?? 0},${result.revision},${JSON.stringify(result)}::jsonb)`

@@ -5,14 +5,29 @@ export interface Event {
   kind: 'input' | 'assistant' | 'tool_result' | 'compaction'
   payload: any
 }
+export interface MemoryEmbeddingConfig {
+  base_url: string
+  model: string
+  credential_profile?: string
+  config_id: string
+}
+const embeddingConfigSchema = Schema.Struct({
+  base_url: Schema.String,
+  model: Schema.String,
+  credential_profile: Schema.optionalKey(Schema.String),
+  config_id: Schema.String,
+})
 export interface Bootstrap {
   project: {
+    memory_embedding: MemoryEmbeddingConfig | null
     title: string
     goal: string
     agent: { provider: string; model: string }
     conversation: { id: string }
   }
   prompt_version: string
+  input_seq: number
+  memory_settings: { core_tokens: number; related_tokens: number; max_bytes: number }
   memory_index?: string
   compaction?: Event | null
   compaction_seq?: number
@@ -20,6 +35,20 @@ export interface Bootstrap {
   local_wait_protocol?: number
   after_seq: number
   last_seq: number
+}
+export interface MemoryContext {
+  context_id: string
+  last_seq: number
+  input_seq: number
+  budget: { core_tokens: number; related_tokens: number; max_bytes: number }
+  knowledge_epoch: number
+  expires_at: string | null
+  content: string
+  memory_refs: readonly { item_id: string; revision: number; mode: 'current' | 'history'; as_of?: string }[]
+  degraded: readonly string[]
+  core_complete: boolean
+  query: string
+  algorithm: string
 }
 export interface Request<O extends Operation = Operation> {
   operation: O
@@ -46,12 +75,15 @@ const eventOfKind = <K extends Event['kind']>(kind: K) =>
   })
 const bootstrapSchema = Schema.Struct({
   project: Schema.Struct({
+    memory_embedding: Schema.NullOr(embeddingConfigSchema),
     title: Schema.String,
     goal: Schema.String,
     agent: Schema.Struct({ provider: Schema.String, model: Schema.String }),
     conversation: Schema.Struct({ id: Schema.String }),
   }),
   prompt_version: Schema.String,
+  input_seq: sequence,
+  memory_settings: Schema.Struct({ core_tokens: sequence, related_tokens: sequence, max_bytes: sequence }),
   memory_index: Schema.optionalKey(Schema.String),
   compaction: Schema.optionalKey(Schema.NullOr(eventOfKind('compaction'))),
   compaction_seq: Schema.optionalKey(sequence),
@@ -93,6 +125,35 @@ const resultSchemas = {
     event: Schema.optionalKey(Schema.NullOr(eventOfKind('input'))),
     payload_bytes: sequence,
     input_count: sequence,
+  }),
+  embedding_query: Schema.Struct({
+    query: Schema.String,
+    query_hash: Schema.String,
+    query_truncated: Schema.Boolean,
+    input_seq: sequence,
+    last_seq: sequence,
+    memory_embedding: Schema.NullOr(embeddingConfigSchema),
+  }),
+  prepare_context: Schema.Struct({
+    context_id: Schema.String,
+    last_seq: sequence,
+    input_seq: sequence,
+    knowledge_epoch: sequence,
+    budget: Schema.Struct({ core_tokens: sequence, related_tokens: sequence, max_bytes: sequence }),
+    expires_at: Schema.NullOr(Schema.String),
+    content: Schema.String,
+    memory_refs: Schema.Array(
+      Schema.Struct({
+        item_id: Schema.String,
+        revision: sequence,
+        mode: Schema.Literals(['current', 'history']),
+        as_of: Schema.optionalKey(Schema.String),
+      }),
+    ),
+    degraded: Schema.Array(Schema.String),
+    core_complete: Schema.Boolean,
+    query: Schema.String,
+    algorithm: Schema.String,
   }),
   append_event: eventOfKind('assistant'),
   commit_compaction: eventOfKind('compaction'),

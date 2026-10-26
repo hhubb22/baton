@@ -131,6 +131,59 @@ class LocalWaitBackend extends ExecBackend {
 
 const execResponses = () => [() => fauxAssistantMessage([execCall()]), () => assistant()]
 
+test('每次模型请求自动注入当前快照，失效输出刷新后重试且不执行旧工具', async () => {
+  const backend = new Backend()
+  backend.memory = '用户要求：不要跳过测试，纯文档改动可以例外。'
+  const fixture = setup(backend, [
+    () => {
+      backend.memory = '用户要求：不要跳过测试，纯文档也要检查格式。'
+      backend.knowledgeEpoch++
+      return assistant(true)
+    },
+    () => assistant(true),
+    () => assistant(),
+  ])
+  await fixture.runtime.start()
+  assert.equal(fixture.requests.length, 3)
+  assert.match(JSON.stringify(fixture.requests[0].context), /纯文档改动可以例外/)
+  for (const request of fixture.requests.slice(1)) {
+    const memories = request.context.messages.filter(
+      (message: any) => typeof message.content === 'string' && message.content.startsWith('用户要求：'),
+    )
+    assert.equal(memories.length, 1)
+    assert.match(memories[0].content, /纯文档也要检查格式/)
+    assert.doesNotMatch(JSON.stringify(request.context), /纯文档改动可以例外/)
+  }
+  assert.equal(backend.effects, 1)
+  assert.equal(backend.events.filter((e) => e.kind === 'assistant').length, 2)
+  for (const event of backend.events.filter((e) => e.kind === 'assistant')) {
+    assert.equal(backend.contexts.get(event.payload.memory_context_id)?.knowledge_epoch, backend.knowledgeEpoch)
+  }
+})
+
+test('pending 执行跨记忆变化和 Runtime 恢复先续查原 Thread，再请求新上下文', async () => {
+  const backend = new LocalWaitBackend()
+  backend.memory = '原要求'
+  backend.onPoll = async () => {
+    backend.memory = '新要求'
+    backend.knowledgeEpoch++
+    throw new RuntimeError('unavailable')
+  }
+  await assert.rejects(setup(backend, [() => fauxAssistantMessage([execCall()])]).runtime.start(), {
+    code: 'unavailable',
+  })
+  assert.equal(backend.effects, 1)
+  assert.equal(backend.contexts.size, 1)
+  backend.onPoll = undefined
+  const recovered = setup(backend, [() => assistant()])
+  await recovered.runtime.start()
+  assert.equal(backend.effects, 1)
+  assert.equal(backend.events.filter((e) => e.kind === 'tool_result').length, 1)
+  assert.equal(backend.contexts.size, 2)
+  assert.match(JSON.stringify(recovered.requests[0].context), /新要求/)
+  assert.ok(backend.waits.every((request) => request.tool_call_id === 'exec-1'))
+})
+
 test('本地等待丢失全部通知，30 秒 pending 仅做初始、周期和截止三次状态查询', async () => {
   const backend = new LocalWaitBackend()
   backend.resultStatus = 'running'

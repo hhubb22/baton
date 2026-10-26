@@ -433,6 +433,8 @@ class Manager implements ProjectManager {
           'bootstrap',
           'read_events',
           'claim_inputs',
+          'embedding_query',
+          'prepare_context',
           'append_event',
           'commit_compaction',
           'preview',

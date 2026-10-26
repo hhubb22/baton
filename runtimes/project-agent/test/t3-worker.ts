@@ -82,12 +82,15 @@ if (command === 'probe') {
       return fauxAssistantMessage(fauxToolCall('memory.read', memory.input!, { id: 't3-memory-source' }))
     if (!text.includes('t3-memory-write'))
       return fauxAssistantMessage(
+        fauxToolCall(
+          'memory.remember',
+          { title: 'T3 运行记录', content: '通过真实 Runtime 保存的项目记忆', evidence: memory.evidence },
+          { id: 't3-memory-write' },
+        ),
+      )
+    if (!text.includes('t3-inbox-ask'))
+      return fauxAssistantMessage(
         [
-          fauxToolCall(
-            'memory.remember',
-            { title: 'T3 运行记录', content: '通过真实 Runtime 保存的项目记忆', evidence: memory.evidence },
-            { id: 't3-memory-write' },
-          ),
           fauxToolCall(
             'inbox.ask',
             {

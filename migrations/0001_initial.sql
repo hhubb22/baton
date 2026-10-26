@@ -321,7 +321,37 @@ CREATE TABLE project_memory_suppressions (
  FOREIGN KEY(employee_id,project_id,item_id,revision) REFERENCES project_memory_revisions(employee_id,project_id,item_id,revision)
 );
 
+CREATE TABLE project_memory_search_documents (
+ employee_id uuid NOT NULL, project_id uuid NOT NULL, document_id text NOT NULL,
+ item_id uuid, revision bigint, source_id uuid, start_byte bigint, end_byte bigint,
+ fields jsonb NOT NULL, terms tsvector NOT NULL, snippet text NOT NULL,
+ created_at timestamptz NOT NULL DEFAULT now(),
+ PRIMARY KEY(employee_id,project_id,document_id),
+ CHECK((item_id IS NULL) <> (source_id IS NULL)),
+ FOREIGN KEY(employee_id,project_id,item_id,revision) REFERENCES project_memory_revisions(employee_id,project_id,item_id,revision),
+ FOREIGN KEY(employee_id,project_id,source_id) REFERENCES project_memory_sources(employee_id,project_id,id)
+);
+CREATE INDEX project_memory_search_terms ON project_memory_search_documents USING gin(terms);
+CREATE TABLE project_memory_embeddings (
+ employee_id uuid NOT NULL, project_id uuid NOT NULL, item_id uuid NOT NULL, revision bigint NOT NULL, config_id uuid NOT NULL,
+ embedding_text_hash text NOT NULL, state text NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','ready')),
+ dimensions integer CHECK(dimensions BETWEEN 1 AND 8192), vector double precision[],
+ diagnostic text NOT NULL DEFAULT '' CHECK(octet_length(diagnostic)<=256), attempts integer NOT NULL DEFAULT 0,
+ next_attempt_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+ PRIMARY KEY(employee_id,project_id,item_id,revision,config_id),
+ CHECK((state='ready')=(vector IS NOT NULL AND dimensions IS NOT NULL)),
+ CHECK(vector IS NULL OR (array_ndims(vector)=1 AND array_length(vector,1)=dimensions)),
+ FOREIGN KEY(employee_id,project_id,item_id,revision) REFERENCES project_memory_revisions(employee_id,project_id,item_id,revision)
+);
+CREATE TABLE project_memory_contexts (
+ context_id uuid PRIMARY KEY, employee_id uuid NOT NULL, project_id uuid NOT NULL,
+ conversation_id uuid NOT NULL, last_seq bigint NOT NULL, input_seq bigint NOT NULL,
+ knowledge_epoch bigint NOT NULL, expires_at timestamptz, request_hash text NOT NULL,
+ snapshot jsonb NOT NULL, content_hash text NOT NULL, created_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE projects (
+    memory_embedding jsonb,
     client_project_id uuid,
     create_request jsonb,
     UNIQUE(employee_id, client_project_id),
@@ -799,6 +829,10 @@ ALTER TABLE ONLY project_memory_items ADD CONSTRAINT project_memory_current_revi
 ALTER TABLE ONLY project_memory_items ADD FOREIGN KEY(employee_id,project_id) REFERENCES projects(employee_id,id);
 ALTER TABLE ONLY project_memory_items ADD FOREIGN KEY(employee_id,project_id,successor_id) REFERENCES project_memory_items(employee_id,project_id,id);
 ALTER TABLE ONLY project_memory_state ADD FOREIGN KEY(employee_id,project_id) REFERENCES projects(employee_id,id);
+ALTER TABLE ONLY project_memory_search_documents ADD FOREIGN KEY(employee_id,project_id) REFERENCES projects(employee_id,id);
+ALTER TABLE ONLY project_memory_contexts ADD FOREIGN KEY(employee_id,conversation_id) REFERENCES conversations(employee_id,id);
+ALTER TABLE ONLY project_memory_contexts ADD FOREIGN KEY(employee_id,project_id) REFERENCES projects(employee_id,id);
+CREATE TRIGGER project_memory_contexts_append_only BEFORE DELETE OR UPDATE ON project_memory_contexts FOR EACH ROW EXECUTE FUNCTION reject_project_history_mutation();
 ALTER TABLE ONLY project_memory_sources ADD FOREIGN KEY(employee_id,project_id) REFERENCES projects(employee_id,id);
 
 ALTER TABLE ONLY projects

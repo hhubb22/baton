@@ -5,7 +5,7 @@ import { expect, it } from 'vite-plus/test'
 import type { ThreadReport } from '@baton/protocol'
 import { projectToolFixture, callProjectTool, waitForProjectTool } from '../testing/project-tools.ts'
 import { seedNode, withTestDatabase } from '../testing/database.ts'
-import { runtimeRequest } from './runtime.ts'
+import { contextualRuntimeRequest as runtimeRequest } from '../testing/project-context.ts'
 import * as threads from '../threads/index.ts'
 
 const unpack = (result: { value: unknown }) => JSON.parse((result.value as { text: string }).text)
@@ -22,7 +22,10 @@ it('executes Project tools, bounds read results, rejects unknown arguments and p
       evidence: memoryEvidence,
     })
     const entry = (written.value as { item_id: string }).item_id
-    expect(unpack(await call('memory.recall', { query: 'postgres' })).entries).toHaveLength(1)
+    const recalled = (await call('memory.recall', { query: 'PostgreSQL' })).value as {
+      entries: { item?: { id: string } }[]
+    }
+    expect(recalled.entries.filter((hit) => hit.item?.id === entry)).toHaveLength(1)
     expect(unpack(await call('memory.read', { item_id: entry }))).toMatchObject({
       content: 'Use PostgreSQL',
       revision: 1,

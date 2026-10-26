@@ -21,22 +21,23 @@
     "test:integration": "vp test run --config ../../vitest.config.ts --project integration"
   },
   "dependencies": {
-    "@baton/telemetry": "workspace:*",
     "@baton/protocol": "workspace:*",
-    "ws": "8.22.0",
-    "effect": "catalog:",
+    "@baton/telemetry": "workspace:*",
     "@effect/platform-node": "catalog:",
     "@effect/sql-pg": "catalog:",
+    "@orama/orama": "3.1.18",
+    "effect": "catalog:",
     "mdast-util-from-markdown": "2.1.0",
     "mdast-util-gfm": "3.1.0",
-    "micromark-extension-gfm": "3.0.0"
+    "micromark-extension-gfm": "3.0.0",
+    "ws": "8.22.0"
   },
   "devDependencies": {
-    "@types/ws": "8.18.2",
     "@effect/vitest": "catalog:",
     "@types/node": "catalog:",
+    "@types/ws": "8.18.2",
     "typescript": "catalog:",
-    "vitest": "catalog:",
-    "vite-plus": "catalog:"
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
   }
 }

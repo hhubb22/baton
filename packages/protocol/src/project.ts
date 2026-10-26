@@ -1,4 +1,5 @@
 import { Schema } from 'effect'
+import { MemoryEmbeddingConfig, MemoryEmbeddingConfigInput } from './project-memory.ts'
 import {
   UUID,
   Timestamp,
@@ -42,12 +43,14 @@ export const CreateProjectInput = Schema.Struct({
   goal: Schema.optionalKey(boundedText(64 * 1024)),
   provider: summary(1024),
   model: summary(1024),
+  memory_embedding: Schema.optionalKey(Schema.NullOr(MemoryEmbeddingConfigInput)),
 })
 export type CreateProjectInput = typeof CreateProjectInput.Type
 
 export * from './project-memory.ts'
 
 export const PatchProjectInput = Schema.Struct({
+  memory_embedding: Schema.optionalKey(Schema.NullOr(MemoryEmbeddingConfigInput)),
   title: Schema.optionalKey(
     Schema.NullOr(
       summary(1024).check(
@@ -62,7 +65,10 @@ export const PatchProjectInput = Schema.Struct({
   model: Schema.optionalKey(Schema.NullOr(summary(1024))),
 }).check(
   Schema.makeFilter(
-    (value) => Object.values(value).some((field) => field !== null && field !== undefined) || '至少修改一个字段',
+    (value) =>
+      Object.entries(value).some(
+        ([key, field]) => field !== undefined && (key === 'memory_embedding' || field !== null),
+      ) || '至少修改一个字段',
   ),
 )
 export type PatchProjectInput = typeof PatchProjectInput.Type
@@ -82,6 +88,7 @@ export const ProjectConversation = Schema.Struct({
 export type ProjectConversation = typeof ProjectConversation.Type
 
 export const Project = Schema.Struct({
+  memory_embedding: Schema.NullOr(MemoryEmbeddingConfig),
   id: UUID,
   title: summary(1024).check(
     Schema.isMaxCodePoints(200),
@@ -113,6 +120,12 @@ export type ProjectEvent = typeof ProjectEvent.Type
 export const ProjectBootstrap = Schema.Struct({
   project: Project,
   prompt_version: Text,
+  input_seq: NonNegativeInteger,
+  memory_settings: Schema.Struct({
+    core_tokens: NonNegativeInteger,
+    related_tokens: NonNegativeInteger,
+    max_bytes: NonNegativeInteger,
+  }),
   memory_index: Schema.optionalKey(Text),
   compaction: Schema.optionalKey(Schema.NullOr(ProjectEvent)),
   compaction_seq: Schema.optionalKey(Integer),
@@ -218,6 +231,8 @@ export const ProjectRuntimeRequest = Schema.Struct({
     'claim_inputs',
     'wait_tool',
     'call_tool',
+    'embedding_query',
+    'prepare_context',
     'append_event',
     'commit_compaction',
     'finish',

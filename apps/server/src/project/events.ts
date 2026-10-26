@@ -1,6 +1,7 @@
 import { Effect, Predicate, Schema } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import * as P from '@baton/protocol'
+import { checkMemoryContext, registerEventSource, saveSource } from './memory/index.ts'
 import { canonical } from '../json.ts'
 import {
   appendProjectEvent,
@@ -20,6 +21,7 @@ const ToolCall = Schema.StructWithRest(
 const Assistant = Schema.StructWithRest(
   Schema.Struct({
     format: Schema.Literal('pi-ai/1'),
+    memory_context_id: P.UUID,
     message: Schema.StructWithRest(
       Schema.Struct({ role: Schema.Literal('assistant'), content: Schema.Array(Schema.Json) }),
       objectRest,
@@ -71,6 +73,7 @@ export const appendAssistant = Effect.fn('appendProjectAssistant')(function* (
   if (old) return old
   if ((request.last_seq ?? 0) !== binding.nextSeq - 1) return yield* Effect.fail(projectError())
   yield* assertToolsResolved(binding)
+  yield* checkMemoryContext(binding, payload.memory_context_id, request.last_seq ?? 0)
   const sql = yield* SqlClient.SqlClient,
     calls = yield* savedToolCalls(payload),
     ids = new Set<string>()
@@ -84,6 +87,27 @@ export const appendAssistant = Effect.fn('appendProjectAssistant')(function* (
     if (used.length) return yield* Effect.fail(projectError())
   }
   const event = yield* appendProjectEvent(binding, 'assistant', payload, request.client_event_id!)
+  const text = payload.message.content
+    .flatMap((block) =>
+      Predicate.isObject(block) &&
+      'type' in block &&
+      block.type === 'text' &&
+      'text' in block &&
+      typeof block.text === 'string'
+        ? [block.text]
+        : [],
+    )
+    .join('\n')
+  if (text.trim())
+    yield* saveSource(
+      binding.employeeId,
+      binding.projectId,
+      `assistant:${binding.conversationId}:${event.seq}`,
+      'assistant',
+      'agent_report',
+      text,
+      event.seq,
+    )
   yield* sql`UPDATE conversations SET failure_count=0,next_attempt_at=NULL,attention_reason=NULL WHERE id=${binding.conversationId}`
   yield* sql`UPDATE attention_requests SET state='resolved',version=version+1,resolved_at=clock_timestamp(),updated_at=clock_timestamp() WHERE project_id=${binding.projectId} AND source='system' AND state='open'`
   return event
@@ -159,5 +183,9 @@ export const claimInputs = Effect.fn('claimProjectInputs')(function* (binding: P
   yield* sql`UPDATE project_agent_input_queue q SET delivered_seq=${event.seq} WHERE q.agent_id=${binding.agentId} AND q.delivered_seq IS NULL AND
  (q.id=ANY(${ids}::bigint[]) OR (q.source_type='memory_updated' AND EXISTS(SELECT 1 FROM project_agent_input_queue s
  WHERE s.id=ANY(${ids}::bigint[]) AND s.source_type='memory_updated' AND s.payload->>'entry_id'=q.payload->>'entry_id' AND (s.payload->>'revision')::bigint>=(q.payload->>'revision')::bigint)))`
+  for (const item of chosen) {
+    if (['user_message', 'attention_answer', 'thread_reply', 'turn_ended'].includes(item.source_type))
+      yield* registerEventSource(binding.employeeId, binding.projectId, event.seq, event.seq, item.id)
+  }
   return { event, payload_bytes: size, input_count: chosen.length }
 })

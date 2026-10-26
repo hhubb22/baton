@@ -10,7 +10,7 @@ import {
 } from '@earendil-works/pi-ai'
 import { randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
-import { eventMessage, RuntimeError, type Bootstrap, type Event, type RPC } from './protocol.js'
+import { eventMessage, RuntimeError, type Bootstrap, type Event, type RPC, type MemoryContext } from './protocol.js'
 import { toolDefinitions } from './tools.js'
 import { batonMessage, modelContext } from './tool-names.js'
 import { modelMessages, promptFor } from './context.js'
@@ -62,6 +62,7 @@ export class ProjectRuntime {
   private stopAfterWait = false
   private compaction: CompactionSettings
   private budget: ModelBudget
+  private memoryContext!: MemoryContext
   private modelCalls = 0
   constructor(
     private rpc: RPC,
@@ -74,6 +75,26 @@ export class ProjectRuntime {
     this.budget = { ...DEFAULT_MODEL_BUDGET, ...budget }
     for (const [name, value] of Object.entries(this.budget))
       if (!Number.isSafeInteger(value) || value < 1) throw new Error(`invalid_model_budget_${name}`)
+  }
+  private async prepareMemory(messages: Message[], outputReserve: number): Promise<Message[]> {
+    const settings = this.boot.memory_settings
+    const available = Math.max(0, this.model().contextWindow - outputReserve - estimateMessages(messages))
+    const coreTokens = Math.min(settings.core_tokens, available)
+    const relatedTokens = Math.min(settings.related_tokens, Math.max(0, available - coreTokens))
+    this.memoryContext = await this.rpc.call({
+      operation: 'prepare_context',
+      last_seq: this.seq,
+      payload: {
+        context_id: randomUUID(),
+        input_seq: this.events.findLast((e) => e.kind === 'input')?.seq ?? this.boot.input_seq,
+        core_tokens: coreTokens,
+        related_tokens: relatedTokens,
+        max_bytes: settings.max_bytes,
+      },
+    })
+    if (!this.memoryContext.content) return messages
+    const dynamic: Message = { role: 'user', content: this.memoryContext.content, timestamp: 0 }
+    return messages[0]?.role === 'system' ? [messages[0], dynamic, ...messages.slice(1)] : [dynamic, ...messages]
   }
   private takeModelCall() {
     if (this.modelCalls >= this.budget.maxModelCalls) throw new RuntimeError('model_call_budget_exhausted')
@@ -147,7 +168,10 @@ export class ProjectRuntime {
     const model = this.model(),
       window = model.contextWindow
     const outputReserve = Math.min(this.budget.maxOutputTokens, model.maxTokens)
-    const threshold = Math.min(window * ratio, window - outputReserve)
+    const threshold = Math.min(
+      window * ratio,
+      window - outputReserve - this.boot.memory_settings.core_tokens - this.boot.memory_settings.related_tokens,
+    )
     if (!force && contextTokens(this.boot, this.events) <= threshold) return false
     signal?.throwIfAborted()
     let changed = false
@@ -199,7 +223,11 @@ export class ProjectRuntime {
       this.takeModelCall()
       let payload: CompactionPayload
       try {
-        const stream = this.models.streamSimple(model, modelContext({ messages }), {
+        const memoryMessages = await this.prepareMemory(
+          messages,
+          Math.min(this.budget.maxOutputTokens, model.maxTokens, available),
+        )
+        const stream = this.models.streamSimple(model, modelContext({ messages: memoryMessages }), {
           maxTokens: Math.min(this.budget.maxOutputTokens, model.maxTokens, available),
           maxRetries: 0,
           sessionId: this.boot.project.conversation.id,
@@ -369,6 +397,17 @@ export class ProjectRuntime {
     )
   }
   private async respond() {
+    while (true) {
+      try {
+        return await this.respondOnce()
+      } catch (error) {
+        if (!(error instanceof RuntimeError) || error.code !== 'memory_context_changed') throw error
+        if (!this.canRecover()) throw new RuntimeError('model_call_budget_exhausted')
+        await this.reload()
+      }
+    }
+  }
+  private async respondOnce() {
     for (const call of this.pendingCalls()) {
       await this.execute(call)
       if (this.stopAfterWait) return
@@ -397,11 +436,16 @@ export class ProjectRuntime {
                 ],
               }
             : context
-          const stream = this.models.streamSimple(requestModel, modelContext(requestContext), {
-            ...options,
-            maxTokens: outputTokens,
-            maxRetries: 0,
-          })
+          const memoryMessages = await this.prepareMemory(requestContext.messages, outputTokens)
+          const stream = this.models.streamSimple(
+            requestModel,
+            modelContext({ ...requestContext, messages: memoryMessages }),
+            {
+              ...options,
+              maxTokens: outputTokens,
+              maxRetries: 0,
+            },
+          )
           let preview = ''
           let lastPreview = -Infinity
           const publishPreview = async (text: string) => {
@@ -561,6 +605,7 @@ export class ProjectRuntime {
           client_event_id: randomUUID(),
           payload: {
             format: 'pi-ai/1',
+            memory_context_id: this.memoryContext.context_id,
             message: event.message,
             prompt: promptFor(this.boot, this.events),
           },

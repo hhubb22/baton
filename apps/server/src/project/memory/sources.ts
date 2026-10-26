@@ -6,6 +6,7 @@ import { AppError } from '../../errors.ts'
 import { transaction } from '../../database.ts'
 import { strictDecode } from '../../decode.ts'
 import { requireProject } from './read.ts'
+import { projectSourceDocuments } from './projection.ts'
 
 export const hashText = (text: string) => createHash('sha256').update(text).digest('hex')
 export const saveSource = Effect.fnUntraced(function* (
@@ -22,7 +23,10 @@ export const saveSource = Effect.fnUntraced(function* (
   const [row] = yield* sql<{
     id: string
   }>`INSERT INTO project_memory_sources(id,employee_id,project_id,source_key,source_type,role,text,source_hash,source_seq,input_id) VALUES(${randomUUID()},${employeeId},${projectId},${key},${sourceType},${role},${text},${hashText(text)},${sourceSeq ?? null},${inputId ?? null}) ON CONFLICT(employee_id,project_id,source_key) DO NOTHING RETURNING id`
-  if (row) return row.id
+  if (row) {
+    yield* projectSourceDocuments(employeeId, projectId, row.id, text)
+    return row.id
+  }
   const [existing] = yield* sql<{
     id: string
   }>`SELECT id FROM project_memory_sources WHERE employee_id=${employeeId} AND project_id=${projectId} AND source_key=${key}`

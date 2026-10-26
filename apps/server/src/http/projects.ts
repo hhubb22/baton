@@ -86,6 +86,13 @@ export const projectHttpHandlers = () =>
             ).pipe(Effect.flatMap(decodeResponse(P.MemoriesResponse))),
           ),
         )
+        .handle('recallMemory', ({ params, payload }) =>
+          current((employee) =>
+            Memory.recallProjectMemory(employee, params.projectId, payload).pipe(
+              Effect.flatMap(decodeResponse(P.MemoryRecallResult)),
+            ),
+          ),
+        )
         .handle('memorySource', ({ params, query }) =>
           current((employee) =>
             Memory.getMemorySource(employee, params.projectId, params.sourceId, query.offset, query.max_bytes).pipe(
