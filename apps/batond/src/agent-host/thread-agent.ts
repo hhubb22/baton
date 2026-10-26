@@ -390,7 +390,7 @@ function receiveEvent(state: HostState, frame: import('./protocol.ts').HostEvent
     if (event.type === 'delta') {
       yield* Effect.try({
         try: () => state.output(event),
-        catch: () => new AgentError('Agent live text sink failed'),
+        catch: (cause) => new AgentError('Agent live text sink failed', cause),
       }).pipe(Effect.catch(() => state.uncertain('Agent live text sink failed')))
     } else yield* state.emit(event)
   })

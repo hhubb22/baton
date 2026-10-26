@@ -11,8 +11,8 @@ import { hasCode } from '../platform/errors.ts'
 import { acquireProcessLockScoped } from '../platform/lock.ts'
 import {
   ensurePrivateDirectory,
-  protectPrivateDirectory,
   readPrivateFile,
+  validatePrivateDirectory,
   writePrivateFileAtomic,
 } from '../platform/private.ts'
 import { reapProcessTree, startProcessWatchdog } from '../platform/process.ts'
@@ -130,7 +130,7 @@ const probeWorkspace = Effect.fn('Agents.probeWorkspace')(function* (options: Om
     Effect.promise(() => mkdtemp(join(tmpdir(), `baton-${options.agentType}-probe-workspace-`))),
     (directory) => Effect.promise(() => rm(directory, { recursive: true, force: true })),
   )
-  yield* Effect.promise(() => protectPrivateDirectory(temporary))
+  yield* Effect.promise(() => validatePrivateDirectory(temporary))
   const controller = new AbortController()
   yield* Effect.addFinalizer(() => Effect.sync(() => controller.abort()))
   const host = yield* Effect.acquireRelease(

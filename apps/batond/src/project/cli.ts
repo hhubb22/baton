@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { startProcessWatchdog, type ProcessWatchdog } from '../platform/process.ts'
-import { protectPrivateDirectory, writePrivateFileAtomic } from '../platform/private.ts'
+import { validatePrivateDirectory, writePrivateFileAtomic } from '../platform/private.ts'
 import { RuntimeRunner, defaultWatchdogCommand } from './runner.ts'
 import type { ProjectManagerOptions } from './types.ts'
 
@@ -19,7 +19,7 @@ export async function runProjectCLI(
   process.on('SIGINT', abort)
   process.on('SIGTERM', abort)
   try {
-    await protectPrivateDirectory(directory)
+    await validatePrivateDirectory(directory)
     watchdog =
       process.platform === 'win32'
         ? undefined

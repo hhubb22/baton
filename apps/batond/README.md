@@ -12,7 +12,7 @@
 
 ## 安装包入口
 
-安装目录包含 `batond`（Windows 为 `batond.exe`）、旁置的 `node_modules/` 和许可文件。升级时整体替换安装包。SEA 中 Worker、watchdog、agent-host、Project Runtime 与私有文件 helper 均使用当前可执行文件加子命令启动，不解析源码目录。管理命令与开发入口相同。
+安装目录包含 `batond`（Windows 为 `batond.exe`）、旁置的 `node_modules/` 和许可文件。升级时整体替换安装包。SEA 中 Worker、watchdog、agent-host 与 Project Runtime 均使用当前可执行文件加子命令启动，不解析源码目录。管理命令与开发入口相同。
 
 ```sh
 ./batond --version
@@ -23,7 +23,7 @@
 
 `--version` 输出 JSON，包含 `sea`、`platform`、`arch`、`node`。`agent-host --probe` 加载四个 host 模块，SEA 中同时加载 keyring 和 Cursor 的 tree-sitter 原生扩展，输出 `agents` 与 `nativeModules`；不读取系统钥匙串、不进行认证或模型请求。模块加载失败时非零退出并提示检查安装包的 `node_modules` 与平台依赖。`project-runtime` 后的参数直接传给 Runtime，支持 `run`、`probe`、`login`、`login-device`、`login-api-key` 和 `--version`。
 
-`worker`、`watchdog`、`agent-host <类型> --cwd <目录> --state <目录>` 和 `private-file` 是内部进程入口，由宿主管理生命周期。POSIX 使用 watchdog 回收已登记的进程组，依赖系统 `/bin/ps`；Linux 的最小容器需要安装 `procps`。Windows 使用持久进程身份与 taskkill 回收。
+`worker`、`watchdog`、和 `agent-host <类型> --cwd <目录> --state <目录>` 是内部进程入口，由宿主管理生命周期。POSIX 使用 watchdog 回收已登记的进程组，依赖系统 `/bin/ps`；Linux 的最小容器需要安装 `procps`。Windows 使用持久进程身份与 taskkill 回收。
 
 ## 远程节点
 

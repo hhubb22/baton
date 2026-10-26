@@ -2,9 +2,8 @@ import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import lockfile from 'proper-lockfile'
 import { directCredentialFiles } from './credential-files.js'
-import { credentialHostEnabled, hostedCredentialFiles } from './credential-host.js'
 
-const files = () => (credentialHostEnabled() ? hostedCredentialFiles : directCredentialFiles)
+const files = () => directCredentialFiles
 
 export async function protect(path: string, directory: boolean): Promise<void> {
   await files().protect(path, directory)

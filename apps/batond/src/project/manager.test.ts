@@ -39,7 +39,9 @@ const open = Effect.fnUntraced(function* (options: Partial<ProjectManagerOptions
   }).pipe(Effect.provideService(Scope.Scope, scope))
   return { manager, dataDir, launchLog, close: () => Scope.close(scope, Exit.void) }
 })
-const until = Effect.fnUntraced(function* (check: () => boolean | Promise<boolean>, timeout = 6000) {
+// Windows 启动并回收子进程明显更慢，轮询预算按平台放宽。
+const PROCESS_WAIT_MS = process.platform === 'win32' ? 24000 : 6000
+const until = Effect.fnUntraced(function* (check: () => boolean | Promise<boolean>, timeout = PROCESS_WAIT_MS) {
   yield* Effect.gen(function* () {
     while (!(yield* Effect.promise(async () => check()))) yield* Effect.sleep(10)
   }).pipe(Effect.timeout(timeout))

@@ -1,219 +1,47 @@
 import { constants } from 'node:fs'
-import { chmod, lstat, mkdir, mkdtemp, open, rename, rm, unlink, type FileHandle } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { chmod, lstat, mkdir, open, rename, unlink, type FileHandle } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { Stats } from 'node:fs'
+import { setTimeout as sleep } from 'node:timers/promises'
 import { hasCode } from './errors.ts'
-import { powershell, systemCommand, windowsTool } from './identity.ts'
+
+/** Windows 上目标文件被其他句柄打开时 rename 返回 EPERM、EACCES 或 EBUSY，句柄通常很快关闭，按递增间隔重试约 1 秒。 */
+async function replaceFile(from: string, to: string): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await rename(from, to)
+    } catch (error) {
+      const busy = ['EPERM', 'EACCES', 'EBUSY'].some((code) => hasCode(error, code))
+      if (process.platform !== 'win32' || !busy || attempt > 10) throw error
+      await sleep(attempt * 20)
+    }
+  }
+}
 
 function checkStat(path: string, stat: Stats, directory: boolean): void {
   if (stat.isSymbolicLink() || (directory ? !stat.isDirectory() : !stat.isFile()))
     throw new Error(`Invalid private ${directory ? 'directory' : 'file'} type: ${path}`)
-  if (process.platform !== 'win32') {
-    if (stat.uid !== process.getuid?.()) throw new Error(`Private path has a different owner: ${path}`)
-    if ((stat.mode & 0o7777) !== (directory ? 0o700 : 0o600))
-      throw new Error(`Invalid private path permissions: ${path}`)
-    if (!directory && stat.nlink !== 1) throw new Error(`Private file has multiple hard links: ${path}`)
-  }
+  if (process.platform !== 'win32' && stat.uid !== process.getuid?.())
+    throw new Error(`Private path has a different owner: ${path}`)
 }
 
-export function parseWindowsUserSid(output: string): string {
-  const sid = /,"(S-1-(?:\d+-)+\d+)"\s*$/.exec(output)?.[1]
-  if (!sid) throw new Error('Cannot determine current Windows user SID')
-  return sid
-}
+/** POSIX 权限不是 0700/0600 时直接改回，不因权限不符拒绝访问。 */
+const needsMode = (stat: Stats, mode: number) => process.platform !== 'win32' && (stat.mode & 0o7777) !== mode
 
-let sidPromise: Promise<string> | undefined
-async function currentSid(): Promise<string> {
-  return (sidPromise ??= systemCommand(windowsTool('whoami.exe'), ['/user', '/fo', 'csv', '/nh']).then(
-    parseWindowsUserSid,
-  ))
-}
-
-export function createNumericWindowsSid(
-  resolveAlias: (alias: string) => Promise<string>,
-): (value: string) => Promise<string> {
-  const sids = new Map<string, Promise<string>>()
-  return (value) => {
-    if (!/^[A-Z]{2}$/.test(value)) return Promise.resolve(value)
-    let pending = sids.get(value)
-    if (!pending) {
-      pending = resolveAlias(value).catch((error: unknown) => {
-        sids.delete(value)
-        throw error
-      })
-      sids.set(value, pending)
-    }
-    return pending
-  }
-}
-
-const numericWindowsSid = createNumericWindowsSid((value) =>
-  powershell(
-    `([System.Security.AccessControl.RawSecurityDescriptor]::new('D:(A;;FA;;;${value})')).DiscretionaryAcl[0].SecurityIdentifier.Value`,
-  ),
-)
-
-export async function validateWindowsDirectorySddl(
-  sddl: string | undefined,
-  sid: string,
-  resolveAlias: (alias: string) => Promise<string> = numericWindowsSid,
-): Promise<void> {
-  const diagnostic = `current user SID ${sid}; SDDL: ${sddl ?? '<missing>'}`
-  if (!sddl || !sddl.startsWith('D:P')) throw new Error(`Private directory inherits ACLs: ${diagnostic}`)
-  const entries = [...sddl.split('S:', 1)[0].matchAll(/\(([^()]*)\)/g)]
-  if (entries.length !== 1)
-    throw new Error(`Private directory must grant only the current user (${entries.length} ACL entries): ${diagnostic}`)
-  const fields = entries[0][1].split(';')
-  if (
-    fields.length !== 6 ||
-    fields[0] !== 'A' ||
-    fields[1] !== 'OICI' ||
-    fields[2] !== 'FA' ||
-    fields[3] !== '' ||
-    fields[4] !== '' ||
-    (await (/^[A-Z]{2}$/.test(fields[5]) ? resolveAlias(fields[5]).catch(() => '') : fields[5])) !== sid
-  )
-    throw new Error(`Invalid private directory ACL: ${diagnostic}`)
-}
-
-export async function validateWindowsDirectoryAclReadback(output: string, sid: string): Promise<void> {
-  const [sddl, trustee, ...extra] = output.split(/\r?\n/)
-  if (!sddl || !trustee || extra.length || !/^S-\d+-\d+(?:-\d+)+$/.test(trustee))
-    throw new Error(`Invalid private directory ACL readback: current user SID ${sid}; SDDL: ${sddl || '<missing>'}`)
-  await validateWindowsDirectorySddl(sddl, sid, async () => trustee)
-}
-
-/** icacls has no per-handle validation. Reparse and concurrent ACL changes remain Windows limitations. */
-async function checkDirectoryAcl(path: string): Promise<void> {
-  const sid = await currentSid()
-  // /save emits language-independent SDDL, including standard SID abbreviations.
-  const temporary = await mkdtemp(join(tmpdir(), 'baton-acl-'))
-  const aclFile = join(temporary, 'directory.acl')
-  try {
-    await systemCommand(windowsTool('icacls.exe'), [path, '/save', aclFile, '/Q'])
-    const handle = await open(aclFile, 'r')
-    let content: string
-    try {
-      content = (await handle.readFile()).toString('utf16le')
-    } finally {
-      await handle.close()
-    }
-    const sddl = content.split(/\r?\n/).find((line) => line.startsWith('D:'))
-    await validateWindowsDirectorySddl(sddl, sid)
-  } finally {
-    await rm(temporary, { recursive: true, force: true })
-  }
-}
-
-export function createDirectoryAclCache(checkAcl: (path: string) => Promise<void>) {
-  const entries = new Map<string, { identity: string; pending: Promise<void> }>()
-  const identityOf = (stat: Pick<Stats, 'dev' | 'ino'>) =>
-    Number.isSafeInteger(stat.dev) && Number.isSafeInteger(stat.ino) && stat.ino > 0
-      ? `${stat.dev}:${stat.ino}`
-      : undefined
-  return {
-    async validate(path: string, stat: Pick<Stats, 'dev' | 'ino'>): Promise<void> {
-      const key = resolve(path)
-      const identity = identityOf(stat)
-      if (!identity) {
-        entries.delete(key)
-        return checkAcl(path)
-      }
-      const cached = entries.get(key)
-      if (cached?.identity === identity) return cached.pending
-      const pending = checkAcl(path)
-      entries.delete(key)
-      entries.set(key, { identity, pending })
-      if (entries.size > 1024) entries.delete(entries.keys().next().value!)
-      try {
-        await pending
-      } catch (error) {
-        if (entries.get(key)?.pending === pending) entries.delete(key)
-        throw error
-      }
-    },
-    remember(path: string, stat: Pick<Stats, 'dev' | 'ino'>): void {
-      const identity = identityOf(stat)
-      const key = resolve(path)
-      entries.delete(key)
-      if (identity) entries.set(key, { identity, pending: Promise.resolve() })
-      if (entries.size > 1024) entries.delete(entries.keys().next().value!)
-    },
-    forget(path: string): void {
-      entries.delete(resolve(path))
-    },
-  }
-}
-
-const directoryAclCache = createDirectoryAclCache(checkDirectoryAcl)
-
+/**
+ * 检查目录类型与属主，POSIX 权限不符时改回 0700。
+ * Windows 沿用数据目录继承的 ACL；默认数据目录位于用户目录下，只授权当前用户、SYSTEM 与 Administrators。
+ */
 export async function validatePrivateDirectory(path: string): Promise<void> {
   const stat = await lstat(path)
   checkStat(path, stat, true)
-  if (process.platform === 'win32') await directoryAclCache.validate(path, stat)
-}
-
-async function setDirectoryAcl(path: string, created = false): Promise<void> {
-  const before = await lstat(path)
-  checkStat(path, before, true)
-  directoryAclCache.forget(path)
-  const sid = await currentSid()
-  if (created) {
-    // Only newly created empty directories may remove inheritance before granting the current user.
-    await systemCommand(windowsTool('icacls.exe'), [path, '/inheritance:r', '/grant:r', `*${sid}:(OI)(CI)F`, '/Q'])
-    const after = await lstat(path)
-    checkStat(path, after, true)
-    if (before.dev !== after.dev || before.ino !== after.ino)
-      throw new Error('Private directory changed during protection')
-    await checkDirectoryAcl(path)
-    directoryAclCache.remember(path, after)
-    return
-  }
-  const encodedPath = Buffer.from(resolve(path), 'utf8').toString('base64')
-  const output = await powershell(`
-    $acl = [System.Security.AccessControl.DirectorySecurity]::new();
-    $acl.SetAccessRuleProtection($true, $false);
-    $identity = [System.Security.Principal.SecurityIdentifier]::new('${sid}');
-    $rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
-      $identity, 'FullControl', 'ContainerInherit, ObjectInherit', 'None', 'Allow');
-    $acl.AddAccessRule($rule);
-    $path = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedPath}'));
-    $directory = [System.IO.DirectoryInfo]::new($path);
-    $directory.SetAccessControl($acl);
-    $actual = $directory.GetAccessControl([System.Security.AccessControl.AccessControlSections]::Access);
-    $sddl = $actual.GetSecurityDescriptorSddlForm([System.Security.AccessControl.AccessControlSections]::Access);
-    $trustee = ([System.Security.AccessControl.RawSecurityDescriptor]::new($sddl)).DiscretionaryAcl[0].SecurityIdentifier.Value;
-    [Console]::WriteLine($sddl);
-    [Console]::WriteLine($trustee);
-  `)
-  const after = await lstat(path)
-  checkStat(path, after, true)
-  if (before.dev !== after.dev || before.ino !== after.ino)
-    throw new Error('Private directory changed during protection')
-  await validateWindowsDirectoryAclReadback(output, sid)
-  directoryAclCache.remember(path, after)
-}
-
-/** 显式保护操作收紧当前用户已有目录；普通验证不会修改权限。 */
-export async function protectPrivateDirectory(path: string): Promise<void> {
-  const before = await lstat(path)
-  if (!before.isDirectory() || before.isSymbolicLink()) throw new Error('Invalid private directory type')
-  if (process.platform === 'win32') await setDirectoryAcl(path)
-  else {
-    if (before.uid !== process.getuid?.()) throw new Error('Private directory has a different owner')
-    await chmod(path, 0o700)
-  }
-  const after = await lstat(path)
-  if (before.dev !== after.dev || before.ino !== after.ino)
-    throw new Error('Private directory changed during protection')
-  await validatePrivateDirectory(path)
+  if (needsMode(stat, 0o700)) await chmod(path, 0o700)
 }
 
 const pendingDirectories = new Map<string, Promise<void>>()
 
-/** Creates one directory; its parent must already exist. Existing unsafe paths are rejected. */
+/** Creates one directory; its parent must already exist. Existing symlinks, wrong types and other owners are rejected. */
 export async function ensurePrivateDirectory(path: string): Promise<void> {
   const key = resolve(path)
   const pending = pendingDirectories.get(key)
@@ -231,14 +59,11 @@ export async function ensurePrivateDirectory(path: string): Promise<void> {
 }
 
 async function createPrivateDirectory(path: string): Promise<void> {
-  let created = false
   try {
     await mkdir(path, { mode: 0o700 })
-    created = true
   } catch (error) {
     if (!hasCode(error, 'EEXIST')) throw error
   }
-  if (created && process.platform === 'win32') await setDirectoryAcl(path, true)
   await validatePrivateDirectory(path)
 }
 
@@ -263,6 +88,7 @@ export async function openPrivateFile(path: string, flags: number = constants.O_
     const after = await validateFile(path)
     if (actual.dev !== before.dev || actual.ino !== before.ino || actual.dev !== after.dev || actual.ino !== after.ino)
       throw new Error(`Private file changed during open: ${path}`)
+    if (needsMode(actual, 0o600)) await handle.chmod(0o600)
     return handle
   } catch (error) {
     await handle.close()
@@ -279,7 +105,7 @@ export async function readPrivateFile(path: string): Promise<Buffer> {
   }
 }
 
-/** Same-directory rename, file fsync, then POSIX directory fsync. Does not repair unsafe existing paths. */
+/** Same-directory rename, file fsync, then POSIX directory fsync. The replacement file is created with 0600. */
 export async function writePrivateFileAtomic(path: string, data: string | Uint8Array): Promise<void> {
   const parent = dirname(path)
   await validatePrivateDirectory(parent)
@@ -305,7 +131,7 @@ export async function writePrivateFileAtomic(path: string, data: string | Uint8A
     } catch (error) {
       if (!hasCode(error, 'ENOENT')) throw error
     }
-    await rename(temporary, path)
+    await replaceFile(temporary, path)
     if (process.platform !== 'win32') {
       const directory = await open(parent, constants.O_RDONLY)
       try {

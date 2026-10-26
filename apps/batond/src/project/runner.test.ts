@@ -1,5 +1,4 @@
-import { rm, readFile, writeFile, chmod } from 'node:fs/promises'
-import { spawnSync } from 'node:child_process'
+import { rm, writeFile, chmod } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -8,7 +7,7 @@ import { afterEach, expect, it } from 'vite-plus/test'
 import { ensurePrivateDirectory, writePrivateFileAtomic } from '../platform/private.ts'
 import { makePrivateTempDirectory } from '../testing/private.ts'
 import { makeProjectManager } from './index.ts'
-import { RuntimeRunner, defaultRuntimeCommand, defaultWatchdogCommand, privateFileHostEnvironment } from './runner.ts'
+import { RuntimeRunner, defaultRuntimeCommand, defaultWatchdogCommand } from './runner.ts'
 import { LeaseClock, success } from './types.ts'
 import { serveRuntime } from './stdio.ts'
 
@@ -80,30 +79,6 @@ it('uses file URLs for source Runtime and watchdog import loaders', () => {
     expect(command.args?.[0]).toBe('--import')
     expect(new URL(command.args![1]!).protocol).toBe('file:')
   }
-})
-
-it('dispatches structured private-file host argv through Node without shell parsing', async () => {
-  const path = await makePrivateTempDirectory('baton-runtime-private-host-'),
-    file = join(path, 'xai.json')
-  cleanups.push(() => rm(path, { recursive: true, force: true }))
-  const environment = privateFileHostEnvironment(
-    new URL('../../../../runtimes/project-agent/src/cli.ts', import.meta.url),
-  )
-  const command = JSON.parse(environment.BATON_PRIVATE_FILE_HOST_COMMAND!) as { file: string; args: string[] }
-  expect(new URL(command.args[1]).protocol).toBe('file:')
-  const result = spawnSync(command.file, [...command.args, 'private-file', 'write', path, file], {
-    input: '{"type":"oauth"}',
-    encoding: 'utf8',
-    timeout: 5000,
-  })
-  expect(result.status, result.stderr).toBe(0)
-  expect(await readFile(file, 'utf8')).toBe('{"type":"oauth"}')
-  const missing = spawnSync(command.file, [...command.args, 'private-file', 'read', path, join(path, 'missing.json')], {
-    encoding: 'utf8',
-    timeout: 5000,
-  })
-  expect(missing.status).toBe(3)
-  expect(missing.stdout).toBe('')
 })
 
 it.each(['probe', 'login-device'] as const)(
@@ -189,7 +164,12 @@ it('retains a timestamped report after probe timeout and invalidates it when cre
   `,
     credentials,
   )
-  await writePrivateFileAtomic(join(dataDir, 'project-runtime.json'), JSON.stringify({ probeTimeoutMs: 2000 }))
+  // probeTimeoutMs 同时约束正常探测与超时场景。Windows 启动子进程更慢，正常路径需要更大预算，
+  // 但超时场景要等满该预算，因此不能放得太大。
+  await writePrivateFileAtomic(
+    join(dataDir, 'project-runtime.json'),
+    JSON.stringify({ probeTimeoutMs: process.platform === 'win32' ? 5000 : 2000 }),
+  )
   const initial = await runner.report()
   expect(initial).toMatchObject({ stale: false })
   expect(initial?.probed_at).toBeDefined()
@@ -221,7 +201,7 @@ it('retains a timestamped report after probe timeout and invalidates it when cre
   await writeFile(mode, 'output')
   await rm(credential)
   expect(await runner.report()).toBeUndefined()
-}, 30000)
+}, 60000)
 
 it('probes the existing Runtime source CLI using only an empty local credential directory', async () => {
   const manager = await open('idle', true)

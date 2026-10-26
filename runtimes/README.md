@@ -15,7 +15,6 @@ Baton 将 Project Runtime 编入 batond 的单一 Node SEA 可执行文件。安
 | `watchdog` | POSIX 所属进程组监控与回收 |
 | `agent-host <类型> --cwd <目录> --state <目录>` | 独占 Cursor、Pi、Codex 或 Kiro 执行宿主 |
 | `project-runtime <命令>` | Project 的运行、能力报告与订阅登录 |
-| `private-file` | 私有凭据文件 helper |
 
 `batond --version` 返回 JSON `{sea,platform,arch,node}`。`batond agent-host --probe` 离线加载四个 Agent host 模块，输出 `agents:["cursor","pi","codex","kiro"]` 和 `nativeModules` 检查清单。这两个检查不调用模型；模块加载失败会提示检查安装包的 `node_modules` 和平台依赖并非零退出。
 
@@ -41,7 +40,7 @@ Runtime 使用 `runtimes/project-agent/src/stdio.ts`，batond 宿主使用 `apps
 
 Runtime 的凭据使用设备专用数据目录，默认 `~/.baton/project-runtime`，可用 `BATON_PROJECT_RUNTIME_DATA_DIR` 指定。OAuth 刷新通过带心跳的跨进程锁串行化，崩溃遗留锁在 120 秒后可回收。
 
-POSIX 使用私有目录和 `0600` 文件，读取检查所有者、类型和权限并拒绝符号链接。SEA 通过当前可执行文件的 `private-file` 入口读写凭据；Windows 使用 `apps/batond/src/platform/private-file-host.ts` 的目录 ACL 与私有文件检查。文件内容只经父子进程管道传递，helper 的 read/write 限制为 64 KiB。源码 Windows 宿主通过结构化 `BATON_PRIVATE_FILE_HOST_COMMAND` 传递程序与参数，不经过 shell。
+POSIX 使用私有目录和 `0600` 文件，读取检查所有者和类型，权限不符时改回，拒绝符号链接。Runtime 在自身进程内读写凭据，SEA、源码入口和各平台使用同一实现；Windows 沿用数据目录继承的 ACL，只检查类型与符号链接。凭据文件限制为 64 KiB。
 
 ## 验证
 

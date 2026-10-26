@@ -1,24 +1,14 @@
-import { after, before, test } from 'node:test'
+import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, rm, stat, readFile, chmod } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { FileCredentials, protect } from '../src/credentials.js'
-import { privateFileHostCommand } from './private-host.js'
 import { probe, runtimeModels, loginApiKey } from '../src/auth.js'
 import { ANTHROPIC_MODELS } from '@earendil-works/pi-ai/providers/anthropic.models'
 import { OPENAI_CODEX_MODELS } from '@earendil-works/pi-ai/providers/openai-codex.models'
 import { XAI_MODELS } from '@earendil-works/pi-ai/providers/xai.models'
-
-const previousHost = process.env.BATON_PRIVATE_FILE_HOST_COMMAND
-before(() => {
-  if (process.platform === 'win32') process.env.BATON_PRIVATE_FILE_HOST_COMMAND = JSON.stringify(privateFileHostCommand)
-})
-after(() => {
-  if (previousHost === undefined) delete process.env.BATON_PRIVATE_FILE_HOST_COMMAND
-  else process.env.BATON_PRIVATE_FILE_HOST_COMMAND = previousHost
-})
 
 test('probe 只读本地凭据，不发网络请求、不刷新 OAuth、不输出凭据', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'baton-auth-'))
@@ -148,10 +138,8 @@ test('API key 登录、探测与请求认证使用同一个 provider，环境凭
     assert.equal(await readFile(join(dir, 'anthropic.json'), 'utf8'), before)
     if (process.platform !== 'win32') {
       await chmod(join(dir, 'anthropic.json'), 0o644)
-      assert.equal(
-        (await probe(store)).providers.find((item) => item.provider === 'anthropic')?.reason,
-        'credential_permissions_invalid',
-      )
+      assert.equal((await probe(store)).providers.find((item) => item.provider === 'anthropic')?.status, 'available')
+      assert.equal((await stat(join(dir, 'anthropic.json'))).mode & 0o777, 0o600)
     }
     await store.modify('openai-codex', async () => ({ type: 'api_key', key: 'wrong-auth-type' }))
     assert.equal(

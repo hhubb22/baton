@@ -64,7 +64,7 @@ batond 通过 Runtime 命令追加 `run` 启动进程，工作目录是私有空
 
 #### 2.1 Runtime 定位与 stdio
 
-开发入口由 `apps/batond/src/project/runner.ts` 定位 `runtimes/project-agent/src/cli.ts`，通过该包安装的 tsx loader 启动；源码与开发 bundle 均须保留仓库布局和依赖。宿主可注入 `runtimeCommand` 与 `watchdogCommand`；`probe` 要求 Runtime 版本 `0.1.0`。Windows 私有凭据操作通过 TS helper 进入节点的私有文件宿主。SEA 分派与安装包检查见 [发布设计](../release/TECH.md#打包与发布)。
+开发入口由 `apps/batond/src/project/runner.ts` 定位 `runtimes/project-agent/src/cli.ts`，通过该包安装的 tsx loader 启动；源码与开发 bundle 均须保留仓库布局和依赖。宿主可注入 `runtimeCommand` 与 `watchdogCommand`；`probe` 要求 Runtime 版本 `0.1.0`。Runtime 在自身进程内读写私有凭据。SEA 分派与安装包检查见 [发布设计](../release/TECH.md#打包与发布)。
 
 统一构建从根 workspace 按锁文件安装依赖，构建中心与节点到 `apps/{server,batond}/dist`，中心自动包含网页与 SQL 迁移。Runtime 的模型、工具和恢复逻辑由原包维护，源码开发与安装包共用这些业务实现。
 

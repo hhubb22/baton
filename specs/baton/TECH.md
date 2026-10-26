@@ -62,7 +62,7 @@ SQLite 在外层提交前写随机 token。COMMIT 报错且事务已结束时，
 | 能力 | POSIX | Windows 第一版 |
 |---|---|---|
 | 进程回收 | 独立进程组与 watchdog；host 独立组登记见 [适配设计](../agent-adapters/TECH.md#进程组与停止回收) | 持久 PID、创建时间与 `taskkill /T /F`；中间父进程先退出、Worker 崩溃后延迟回收及身份核验到终止之间的竞争仍有限制 |
-| 私有文件 | 目录 `0700`、文件 `0600`；检查属主、类型、链接数及打开前后的身份 | 显式保护目录时设置受保护 DACL，仅授权当前用户 SID；普通验证通过 `icacls /save` 核对数值 SID；未提供逐句柄 DACL 与 reparse point 校验 |
+| 私有文件 | 目录 `0700`、文件 `0600`，权限不符时改回；检查属主、类型及打开前后的身份 | 沿用数据目录继承的 ACL（默认位于用户目录下），只检查类型、链接与打开前后的身份；未提供逐句柄 DACL 与 reparse point 校验 |
 | Worker IPC | 私有目录下的 UDS 与令牌认证 | Node 默认安全描述符的命名管道与令牌认证，令牌保存在私有目录 |
 
 平台能力集中在 `apps/batond/src/platform`，时钟与恢复裁决分别由 Project 宿主和 Worker 拥有。Project 租约与 Turn 执行时限取 `max(hrtime 经过值, Date.now 经过值)`，计入睡眠并防止时钟回拨延长预算；Worker 停止等待使用 hrtime，睡眠期间会暂停。Windows Job Object、逐句柄 DACL 与管道权限收紧列入 [第一版之后](../release/TECH.md#第一版之后)。
@@ -455,13 +455,13 @@ TypeScript 的 `GET /nodes/{id}/files` 通过 `root_id`、`path` 浏览目录和
 
 ## 敏感数据
 
-设备密码、模型订阅凭据、节点私钥只存在设备上，POSIX 文件权限为当前用户 `0600`；Windows 第一版在数据目录上移除继承并校验当前用户 ACL，命名管道使用 Node 默认安全描述符与私有令牌认证，逐句柄 DACL 检查留待原生模块接入。节点凭据和注册凭据不进日志、URL 或命令行。中心不持久化实时输出和原生历史（R-22）。过程项按原文存入 PostgreSQL，命令输出里可能带有密钥；读取时按员工和 Project 归属检查，Project Agent 读取时不脱敏。追踪导出只带 span 元数据，不导出过程项正文；向观测或分析平台导出过程数据的导出器必须先脱敏。
+设备密码、模型订阅凭据、节点私钥只存在设备上，POSIX 文件权限为当前用户 `0600`；Windows 第一版沿用用户目录下数据目录继承的 ACL，不另行设置或校验，命名管道使用 Node 默认安全描述符与私有令牌认证，逐句柄 DACL 检查留待原生模块接入。节点凭据和注册凭据不进日志、URL 或命令行。中心不持久化实时输出和原生历史（R-22）。过程项按原文存入 PostgreSQL，命令输出里可能带有密钥；读取时按员工和 Project 归属检查，Project Agent 读取时不脱敏。追踪导出只带 span 元数据，不导出过程项正文；向观测或分析平台导出过程数据的导出器必须先脱敏。
 
 ## 部署
 
 中心位于 `apps/server`，构建产物为 `apps/server/dist/server.cjs` 及相邻的 `web/`、`migrations/`。与 PostgreSQL 部署后，运行 `node apps/server/dist/server.cjs serve` 提供静态页面、API、浏览器 WebSocket 和节点 WSS。`serve`、账号管理和 `migrate` 都先执行并核对迁移；`migrate` 完成后退出。
 
-签名密钥路径由 `BATON_NODE_SIGNING_KEY` 指定，默认工作目录下的 `node-signing.key`；仅在 `lstat` 确认不存在时生成 Ed25519 私钥并原子写入 `0600` 文件，已有文件校验权限、类型、所有者和内容。升级先停止旧中心，再启动新实例完成迁移；节点退避重连并同步。中心默认监听 `127.0.0.1:8080`，通过 HTTPS 反向代理公开；也可直接配置证书提供 HTTPS/WSS。容器与设备 SEA 的发布布局见 [发布设计](../release/TECH.md#打包与发布)。
+签名密钥路径由 `BATON_NODE_SIGNING_KEY` 指定，默认工作目录下的 `node-signing.key`；仅在 `lstat` 确认不存在时生成 Ed25519 私钥并原子写入 `0600` 文件，已有文件校验权限、类型、所有者和内容；Windows 不校验权限位和所有者，依赖目录继承的 ACL，也不对目录句柄执行 fsync。升级先停止旧中心，再启动新实例完成迁移；节点退避重连并同步。中心默认监听 `127.0.0.1:8080`，通过 HTTPS 反向代理公开；也可直接配置证书提供 HTTPS/WSS。容器与设备 SEA 的发布布局见 [发布设计](../release/TECH.md#打包与发布)。
 
 节点 bundle 为 `apps/batond/dist/batond.cjs`，命令使用 `node apps/batond/dist/batond.cjs <命令>`。`register` 使用 Node 的平台标识推导系统名，显示名由主机名清理而来。注册在 `identity.json` 保存规范化 HTTPS 中心地址，`run` 优先使用显式 `--relay`，否则推导 WSS 地址。`up` 复用注册和运行逻辑，在没有身份时要求中心地址和凭据；workspace 在连接前幂等登记。默认设备数据目录为 `~/.baton-ts`。
 
