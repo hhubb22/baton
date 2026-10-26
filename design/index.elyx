@@ -522,7 +522,7 @@ controlSection = frame : section {
 
       copy {
         helper {
-          contents: "Runs shell commands in allowed folders as your user account. Baton does not sandbox commands."
+          contents: "Shell commands the project assistant runs itself. Threads set their own access."
         }
       }
     }

@@ -329,7 +329,8 @@ export filePreview = frame {
       }
 
       emptyDetail = text : t.caption {
-        contents: "Reconnect Windows Desktop, then retry to view this file.",
+        display: .none,
+        contents: "",
         fill[0].color: c.colors.muted
       }
 
@@ -479,7 +480,7 @@ export filePreviewOffline = frame : filePreview {
 // Out of bounds: path or symlink resolves outside registered directories and is denied
 @variant
 export filePreviewDenied = frame : filePreview {
-  title: "File preview / Outside allowed folders",
+  title: "File preview / Outside added folders",
   left: 1200px,
   top: 900px,
 
@@ -492,11 +493,12 @@ export filePreviewDenied = frame : filePreview {
       }
 
       emptyDetail {
-        contents: "This link points to C:\\Users\\dev\\certs, which is not shared with Baton on Windows Desktop."
+        contents: "C:\\Users\\dev\\certs",
+        display: .visible
       }
 
       emptyHeading {
-        contents: "Folder is outside allowed folders"
+        contents: "Link points outside the device's folders"
       }
 
       display: .visible,
@@ -555,14 +557,8 @@ export filePreviewMissing = frame : filePreview {
         }
       }
 
-      emptyDetail {
-        width: 420px,
-        contents: "reconnect.test.ts was moved or deleted. Go back to the folder and choose another file.",
-        align: .center
-      }
-
       emptyHeading {
-        contents: "File not found on Windows Desktop"
+        contents: "reconnect.test.ts was moved or deleted"
       }
 
       display: .visible,
@@ -600,10 +596,6 @@ export filePreviewLoading = frame : filePreviewMissing {
     empty {
       emptyAction {
         display: .none
-      }
-
-      emptyDetail {
-        contents: "Reading reconnect.test.ts from Windows Desktop."
       }
 
       emptyHeading {
@@ -686,11 +678,7 @@ export filePreviewBinary = frame : filePreviewMissing {
 
     empty {
       emptyHeading {
-        contents: "Binary file cannot be previewed"
-      }
-
-      emptyDetail {
-        contents: "Open capture.bin directly on Windows Desktop, or choose a text file."
+        contents: "Can't preview binary files"
       }
     }
   }
@@ -714,12 +702,8 @@ export filePreviewFailed = frame : filePreviewMissing {
         }
       }
 
-      emptyDetail {
-        contents: "Could not read reconnect.test.ts from Windows Desktop. Try again, or choose another file."
-      }
-
       emptyHeading {
-        contents: "Could not read this file"
+        contents: "Couldn't read this file"
       }
 
       @with-variant(icons.alert)

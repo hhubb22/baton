@@ -108,7 +108,7 @@ export headerWaiting = frame : projectHeader {
       }
 
       caption {
-        contents: "Waiting for device · 1 message waiting"
+        contents: "Waiting for a device"
       }
     }
   }

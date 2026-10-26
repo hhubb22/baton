@@ -6,6 +6,7 @@ import "controls/status.elyx" as status
 import "tokens/colors.elyx" as c
 import "foundations/typography.elyx" as t
 import "blocks/project-page.elyx" as page
+import "controls/icons.elyx" as icons
 import "controls/button.elyx" as buttons
 import "blocks/project-header.elyx" as headers
 import "blocks/overview.elyx" as overviews
@@ -47,9 +48,9 @@ emptyMemory = frame : memory {
     body {
       overrides: [
         insert(empty, after = .nil),
-        remove(overviews.overviewMemory.mem4),
         remove(overviews.overviewMemory.mem3),
         remove(overviews.overviewMemory.mem2),
+        remove(overviews.overviewMemory.mem4),
         remove(overviews.overviewMemory.mem1)
       ]
     }
@@ -65,14 +66,14 @@ emptyMemory = frame : memory {
 
   empty = text : t.small {
     width: 100%,
-    contents: "No project memory yet. Add a note for the project assistant to use with your next message.",
+    contents: "No memory yet",
     fill[0].color: c.colors.muted
   }
 }
 
 addMemory = frame : memory {
   title: "Project memory / Add",
-  caption: "Add memory opens a note editor. Save adds a versioned note; Cancel returns without saving.",
+  caption: "Add memory opens a note editor. Save adds the note; Cancel returns without saving.",
   left: 3456px,
   top: 0px,
   overrides: [insert(scrim, after = page.projectPage.overview)],
@@ -105,10 +106,6 @@ addMemory = frame : memory {
             connections[0].target: memory
           }
         }
-
-        note {
-          contents: "New note"
-        }
       }
 
       content {
@@ -135,7 +132,7 @@ addMemory = frame : memory {
 
       helper = text : t.caption {
         width: 100%,
-        contents: "Saved notes are read with your next message. Adding a note does not start the assistant.",
+        contents: "Read with your next message.",
         fill[0].color: c.colors.muted
       }
     }
@@ -144,27 +141,27 @@ addMemory = frame : memory {
 
 editMemory = frame : addMemory {
   title: "Project memory / Edit",
-  caption: "Choose a note in Memory. Edit its text and save a new version.",
+  caption: "Choose a note in Memory to correct it or stop using it. Source and history open on demand.",
   left: 0px,
   top: 1080px,
 
   scrim {
     form {
       footer {
+        overrides: [insert(stopUsing, after = .nil)],
+
         actions {
           confirm {
             connections[0].target: savingMemory
           }
         }
-
-        note {
-          contents: "Editing v2"
-        }
       }
 
       content {
+        overrides: [insert(source, after = addMemory.scrim.form.helper)],
+
         helper {
-          contents: "v2 · project assistant · Today 14:05\nSave creates a new version; the project assistant reads it with your next message."
+          display: .none
         }
 
         editor {
@@ -179,11 +176,22 @@ editMemory = frame : addMemory {
       }
     }
   }
+
+  stopUsing = text : t.caption {
+    contents: "Stop using",
+    connections[0].target: stoppedMemory,
+    fill[0].color: c.colors.danger
+  }
+
+  source = text : t.caption {
+    contents: "View source and history",
+    fill[0].color: c.colors.accentText
+  }
 }
 
 savingMemory = frame : editMemory {
   title: "Project memory / Saving",
-  caption: "Save keeps the note visible until a new version is confirmed.",
+  caption: "Save keeps the note visible until the change is stored.",
   left: 1728px,
   top: 1080px,
 
@@ -198,10 +206,6 @@ savingMemory = frame : editMemory {
               contents: "Saving…"
             }
           }
-        }
-
-        note {
-          contents: "Saving…"
         }
       }
     }
@@ -224,17 +228,13 @@ saveFailedMemory = frame : editMemory {
             }
           }
         }
-
-        @with-variant(t.captionDanger)
-        note {
-          contents: "Not saved"
-        }
       }
 
       content {
         @with-variant(t.captionDanger)
         helper {
-          contents: "Could not save this note. Check your connection and try again."
+          display: .visible,
+          contents: "Not saved. Your draft is kept."
         }
       }
     }
@@ -243,7 +243,7 @@ saveFailedMemory = frame : editMemory {
 
 conflictMemory = frame : editMemory {
   title: "Project memory / Save conflict",
-  caption: "A newer version arrived. Keep your draft while reviewing the latest note before saving again.",
+  caption: "The note changed while you edited. Your draft is kept; review the latest text before saving.",
   left: 0px,
   top: 2160px,
 
@@ -262,19 +262,20 @@ conflictMemory = frame : editMemory {
             left: .nil
           }
         }
-
-        note {
-          contents: "Your draft is kept"
-        }
       }
 
       content {
-        overrides: [insert(latest, after = addMemory.scrim.form.editor)],
+        overrides: [insert(latest, after = addMemory.scrim.form.helper)],
+
+        source {
+          display: .none
+        }
 
         @with-variant(t.captionAttention)
         helper {
           left: .nil,
-          contents: "Your edit was based on v2. Review v3 and update your draft before saving again."
+          display: .visible,
+          contents: "Updated while you edited. Your draft is kept."
         }
       }
     }
@@ -282,15 +283,14 @@ conflictMemory = frame : editMemory {
 
   latest = frame {
     width: 100%,
-    layout: {direction: .column, item-gap: 6px},
-    fill: c.colors.subtle,
-    corner-radius: 8px,
-    padding: 12px,
+    layout: {direction: .column, item-gap: 4px},
+    border: {color: c.colors.borderSoft, sides: .left},
+    padding: [0px, 0px, 0px, 12px],
     children: [meta, note],
 
     meta = text : t.caption {
       width: 100%,
-      contents: "Latest · v3 · project assistant · Today 14:08",
+      contents: "Latest",
       fill[0].color: c.colors.muted
     }
 
@@ -303,7 +303,7 @@ conflictMemory = frame : editMemory {
 
 reviewMemory = frame : conflictMemory {
   title: "Project memory / Review latest",
-  caption: "Review the latest version beside your retained draft, then save your revised note against v3.",
+  caption: "Compare the latest text with your draft, then save.",
   left: 1728px,
   top: 2160px,
 
@@ -319,15 +319,11 @@ reviewMemory = frame : conflictMemory {
             }
           }
         }
-
-        note {
-          contents: "Editing v3"
-        }
       }
 
       content {
         helper {
-          contents: "Editing from v3. Your revised note becomes v4 when saved."
+          display: .none
         }
 
         editor {
@@ -342,7 +338,7 @@ reviewMemory = frame : conflictMemory {
 
 savedMemory = frame : memory {
   title: "Project memory / Saved",
-  caption: "The editor closes after saving. The note shows its updated version, source and time.",
+  caption: "The editor closes after saving and the note shows the new text.",
   left: 3456px,
   top: 2160px,
 
@@ -352,10 +348,6 @@ savedMemory = frame : memory {
         content {
           contents: "Baton repo is ~/src/baton on MacBook Pro and ~/work/baton-release on Ubuntu Dev. Verify both before merging."
         }
-
-        meta {
-          contents: "v4 · You · Today 14:10"
-        }
       }
     }
   }
@@ -363,7 +355,7 @@ savedMemory = frame : memory {
 
 archivedMemory = frame : memory {
   title: "Archived project / Memory",
-  caption: "Read retained notes with their versions and sources. Archived projects have no memory editor.",
+  caption: "Read retained notes. Archived projects have no memory editor.",
   left: 0px,
   top: 3240px,
 
@@ -384,7 +376,7 @@ archivedMemory = frame : memory {
       runtime {
         runtimeCard {
           runtimeNote {
-            contents: "Project assistant stopped. Threads remain available."
+            display: .none
           }
 
           runtimeLine {
@@ -471,11 +463,12 @@ archivedMemory = frame : memory {
 
     copy {
       heading {
-        contents: "Project is archived"
+        contents: "Project archived"
       }
 
       detail {
-        contents: "The main chat and memory are read-only. Existing threads remain usable."
+        display: .visible,
+        contents: "Read-only. Threads keep running."
       }
     }
   }
@@ -483,7 +476,7 @@ archivedMemory = frame : memory {
 
 addingMemory = frame : addMemory {
   title: "Project memory / Adding",
-  caption: "Saving a new note keeps the draft visible until v1 is stored.",
+  caption: "Saving a new note keeps the draft visible until it is stored.",
   left: 1728px,
   top: 3240px,
 
@@ -499,10 +492,6 @@ addingMemory = frame : addMemory {
             }
           }
         }
-
-        note {
-          contents: "Saving…"
-        }
       }
     }
   }
@@ -510,7 +499,7 @@ addingMemory = frame : addMemory {
 
 addedMemory = frame : memory {
   title: "Project memory / Added",
-  caption: "The new note appears as v1 with its author and time. Memory changes wait for the next message.",
+  caption: "The new note joins the list. The assistant reads it with the next message.",
   left: 3456px,
   top: 3240px,
 
@@ -532,12 +521,52 @@ addedMemory = frame : memory {
     width: 100%,
     connections[0].target: editMemory,
 
-    meta {
-      contents: "v1 · You · Today 14:12"
-    }
-
     content {
       contents: "Release verification runs on Windows and Ubuntu before merging."
+    }
+  }
+}
+
+stoppedMemory = frame : memory {
+  title: "Project memory / Stopped using",
+  caption: "A stopped note leaves the list and the assistant no longer reads it. Open Not in use to restore it.",
+  left: 0px,
+  top: 4320px,
+
+  overview {
+    body {
+      overrides: [
+        insert(stoppedHead, after = overviews.overviewMemory.addMemory),
+        remove(overviews.overviewMemory.mem1)
+      ]
+    }
+
+    tabBar {
+      memoryTab {
+        count {
+          contents: "3"
+        }
+      }
+    }
+  }
+
+  stoppedHead = frame : overviews.groupHead {
+    width: 100%,
+    padding-top: 6px,
+    padding-left: 8px,
+    padding-right: 8px,
+
+    @with-variant(icons.chevronRight)
+    extra {}
+
+    lead {
+      count {
+        contents: "1"
+      }
+
+      label {
+        contents: "Not in use"
+      }
     }
   }
 }

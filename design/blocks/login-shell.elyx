@@ -71,7 +71,7 @@ export loginPage = frame {
 
       noticeDetail = text : t.caption {
         width: 100%,
-        contents: "Previous sessions have been signed out. Sign in with your new password.",
+        contents: "Other sessions were signed out.",
         fill[0].color: c.colors.muted
       }
     }
@@ -138,7 +138,7 @@ export loginPage = frame {
 
     note = text : t.caption {
       width: 100%,
-      contents: "Contact your administrator if you need an account or password reset.",
+      contents: "No account? Ask your administrator.",
       fill[0].color: c.colors.muted
     }
   }
@@ -168,6 +168,18 @@ export signedOutPage = frame : loginPage {
   top: 1080px,
 
   column {
+    notice {
+      noticeDetail {
+        display: .none
+      }
+
+      noticeHeading {
+        contents: "You are signed out"
+      }
+
+      display: .visible
+    }
+
     card {
       secret {
         input {
@@ -176,18 +188,6 @@ export signedOutPage = frame : loginPage {
           }
         }
       }
-    }
-
-    notice {
-      noticeHeading {
-        contents: "You are signed out"
-      }
-
-      noticeDetail {
-        contents: "Sign in to view your devices, threads, and projects."
-      }
-
-      display: .visible
     }
   }
 }

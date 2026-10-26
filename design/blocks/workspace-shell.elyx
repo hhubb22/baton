@@ -80,7 +80,7 @@ export firstVisit = frame {
       welcome = frame {
         width: 520px,
         layout: {direction: .column, align-items: .center, item-gap: 16px},
-        children: [title, detail, action, next, otherActions],
+        children: [title, detail, action, otherActions],
 
         title = text : t.title {
           contents: "Connect your first device"
@@ -88,7 +88,8 @@ export firstVisit = frame {
 
         detail = text : t.small {
           width: 100%,
-          contents: "Connect the computer where your code lives to chat with Codex, Kiro, or Pi.",
+          display: .none,
+          contents: "",
           align: .center,
           fill[0].color: c.colors.muted
         }
@@ -97,13 +98,6 @@ export firstVisit = frame {
           label {
             contents: "Connect a device"
           }
-        }
-
-        next = text : t.caption {
-          width: 100%,
-          contents: "Once connected, open Threads to start a thread.",
-          align: .center,
-          fill[0].color: c.colors.faint
         }
 
         otherActions = frame {

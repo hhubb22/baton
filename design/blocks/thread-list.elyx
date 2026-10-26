@@ -801,7 +801,8 @@ export listFeedback = frame {
 
   description = text : t.small {
     width: 380px,
-    contents: "Choose a folder and model above, then send your first message.",
+    display: .none,
+    contents: "",
     align: .center,
     fill[0].color: c.colors.muted
   }
@@ -872,11 +873,7 @@ export threadsPageNoResults = frame : threadsPageEmpty {
 
     feedback {
       heading {
-        contents: "No threads match these filters"
-      }
-
-      description {
-        contents: "Try another device, project, or archive filter."
+        contents: "No matching threads"
       }
 
       action {
@@ -904,10 +901,6 @@ export threadsPageLoading = frame : threadsPageEmpty {
       heading {
         contents: "Loading threads…"
       }
-
-      description {
-        contents: "Your list will appear here."
-      }
     }
 
     filters {
@@ -934,11 +927,7 @@ export threadsPageFailed = frame : threadsPageEmpty {
 
     feedback {
       heading {
-        contents: "Could not load threads"
-      }
-
-      description {
-        contents: "Check your connection and try again."
+        contents: "Couldn't load threads"
       }
 
       action {

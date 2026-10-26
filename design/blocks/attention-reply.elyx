@@ -28,6 +28,7 @@ export replyForm = frame {
   }
 
   limit = text : t.caption {
+    display: .none,
     contents: "Up to 4 KB of text",
     fill[0].color: c.colors.faint
   }
@@ -35,7 +36,7 @@ export replyForm = frame {
   feedback = text : t.small {
     width: 100%,
     display: .none,
-    contents: "Could not send your reply. Check your connection and try again.",
+    contents: "Couldn't send. Try again.",
     fill[0].color: c.colors.muted
   }
 
@@ -83,7 +84,7 @@ export sending = frame : replyForm {
 
   feedback {
     display: .visible,
-    contents: "Saving your reply. Wait for this to finish."
+    contents: "Saving reply…"
   }
 }
 
@@ -139,6 +140,6 @@ export tooLong = frame : replyForm {
 
   feedback {
     display: .visible,
-    contents: "Your note is over 4 KB. Shorten it before sending."
+    contents: "Over 4 KB. Shorten it to send."
   }
 }

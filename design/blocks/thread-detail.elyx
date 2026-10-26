@@ -283,7 +283,7 @@ export threadTrace = frame : conv.activityLog {
   unavailable = text : t.small {
     width: 100%,
     display: .none,
-    contents: "Step truncated · original size 320 KB\nFull output is on Windows Desktop, which is offline",
+    contents: "Truncated from 320 KB · full output on Windows Desktop",
     fill[0].color: c.colors.faint
   }
 }
@@ -423,7 +423,7 @@ export liveOutput = frame {
           }
 
           gapText = text : t.caption {
-            contents: "Connection lost · output resumes when reconnected",
+            contents: "Connection lost",
             line-height: 1,
             fill[0].color: c.colors.faint
           }
@@ -481,7 +481,7 @@ export liveOutputGap = frame : liveOutput {
       lines {
         gap {
           gapText {
-            contents: "Earlier output is no longer available on Windows Desktop"
+            contents: "Earlier output not kept"
           }
 
           display: .visible,
@@ -838,7 +838,8 @@ export threadDetailOffline = frame : threadDetailRunning {
     notice {
       copy {
         detail {
-          contents: "Codex may still be running on Windows Desktop. Output will update when it reconnects."
+          contents: "Codex may still be running.",
+          display: .visible
         }
 
         heading {
@@ -882,10 +883,6 @@ export threadDetailArchived = frame : threadDetail {
       }
 
       copy {
-        detail {
-          contents: "This thread is closed to new messages. Past replies and attachment links are kept."
-        }
-
         heading {
           contents: "Archived"
         }
@@ -946,7 +943,7 @@ export threadDetailWaiting = frame : threadDetail {
 
       meta {
         metaText {
-          contents: "Saved · sends when MacBook Pro is online ·"
+          contents: "Sends when online ·"
         }
 
         display: .visible
@@ -969,20 +966,10 @@ export threadDetailWaiting = frame : threadDetail {
       }
     }
 
-    composer {
-      prompt {
-        contents: "Message Codex on MacBook Pro…"
-      }
-    }
-
     notice {
       copy {
-        detail {
-          contents: "Your message is saved and will send when MacBook Pro is online. This thread stays on MacBook Pro."
-        }
-
         heading {
-          contents: "Waiting for MacBook Pro to come online"
+          contents: "MacBook Pro is offline"
         }
       }
 
@@ -1012,19 +999,15 @@ export threadDetailUnknown = frame : threadDetail {
   footer {
     @with-variant(banners.bannerAttention)
     notice {
-      action {
-        label {
-          contents: "View activity"
+      copy {
+        heading {
+          contents: "Codex may have missed your last message"
         }
       }
 
-      copy {
-        detail {
-          contents: "Codex restarted while sending. Check the output above before sending your message again."
-        }
-
-        heading {
-          contents: "Not sure if Codex received your last message"
+      action {
+        label {
+          contents: "View activity"
         }
       }
 
@@ -1037,7 +1020,7 @@ export threadDetailUnknown = frame : threadDetail {
     message2 {
       meta {
         metaText {
-          contents: "Delivery unknown"
+          display: .none
         }
 
         display: .visible,
@@ -1085,11 +1068,12 @@ export threadDetailStopped = frame : threadDetail {
 
       copy {
         detail {
-          contents: "Files already changed on Windows Desktop are kept. Send a message below to continue."
+          contents: "Changed files were kept.",
+          display: .visible
         }
 
         heading {
-          contents: "Stopped after reaching the 2-hour limit"
+          contents: "Stopped at the 2-hour limit"
         }
       }
 
@@ -1139,22 +1123,22 @@ export threadDetailUnresumable = frame : threadDetailStopped {
     }
 
     notice {
+      copy {
+        detail {
+          display: .none
+        }
+
+        heading {
+          contents: "Thread history was deleted on Windows Desktop"
+        }
+      }
+
       action {
         label {
           contents: "New thread in this folder"
         }
 
         display: .visible
-      }
-
-      copy {
-        detail {
-          contents: "Codex cannot continue because its local history was deleted. Start a new thread in this folder."
-        }
-
-        heading {
-          contents: "Thread history was deleted on Windows Desktop"
-        }
       }
 
       @with-variant(icons.alert)
@@ -1208,12 +1192,8 @@ export threadDetailFailed = frame : threadDetail {
       }
 
       copy {
-        detail {
-          contents: "~/src/baton-old no longer exists on Ubuntu Dev. Choose another folder to start a new thread."
-        }
-
         heading {
-          contents: "Folder not found on Ubuntu Dev"
+          contents: "~/src/baton-old no longer exists"
         }
       }
 
@@ -1289,7 +1269,7 @@ export threadTraceFailed = frame : threadTraceLoading {
 
       unavailable {
         width: 100%,
-        contents: "Could not load this activity. Try again."
+        contents: "Couldn't load activity"
       }
     }
   }
@@ -1383,7 +1363,7 @@ export threadDetailHistoryLoading = frame : threadDetailHistory {
       }
 
       note {
-        contents: "Loading earlier history from Windows Desktop…"
+        contents: "Loading earlier history…"
       }
     }
   }
@@ -1406,7 +1386,7 @@ export threadDetailHistoryFailed = frame : threadDetailHistory {
 
     pager {
       note {
-        contents: "Could not load earlier history from Windows Desktop."
+        contents: "Couldn't load earlier history"
       }
 
       action {
@@ -1488,12 +1468,12 @@ export threadDetailResumeUnsupported = frame : threadDetailStopped {
 
     notice {
       copy {
-        heading {
-          contents: "This agent cannot resume past threads"
+        detail {
+          display: .none
         }
 
-        detail {
-          contents: "The agent on Windows Desktop does not support resuming. Start a new thread in this folder to continue."
+        heading {
+          contents: "Codex can't resume this thread"
         }
       }
 
@@ -1539,7 +1519,8 @@ export threadDetailArchivePending = frame : threadDetailStopping {
         }
 
         detail {
-          contents: "Stop requested on Windows Desktop. 1 waiting message was canceled. This thread will archive after the device confirms stopping."
+          contents: "1 waiting message was canceled.",
+          display: .visible
         }
       }
 
@@ -1567,7 +1548,7 @@ export threadDetailArchiveOffline = frame : threadDetailArchivePending {
     notice {
       copy {
         detail {
-          contents: "Windows Desktop is offline and may still be running Codex. Reconnect it to confirm stopping and finish archiving."
+          contents: "Codex may still be running."
         }
 
         heading {
@@ -1611,7 +1592,7 @@ export threadDetailStopOffline = frame : threadDetailArchiveOffline {
         }
 
         detail {
-          contents: "The stop request is saved and 1 waiting message was canceled. Reconnect Windows Desktop to send it and confirm stopping. Codex may still be running."
+          contents: "1 waiting message was canceled. Codex may still be running."
         }
       }
     }
@@ -1658,7 +1639,7 @@ export threadDetailStoppedByUser = frame : threadDetailStopped {
         }
 
         detail {
-          contents: "Windows Desktop confirmed stopping. 1 waiting message was canceled. File changes are kept. Send a message below to continue."
+          contents: "1 waiting message was canceled. Changed files were kept."
         }
       }
     }

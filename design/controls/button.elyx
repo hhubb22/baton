@@ -1,10 +1,16 @@
+use "resources/fonts/Inter-Regular.otf"
+use "resources/fonts/Inter-Medium.otf"
+
 import "tokens/colors.elyx" as c
 import "tokens/spacing.elyx" as s
 import "foundations/typography.elyx" as t
 import "controls/icons.elyx" as icons
 
 // At most one solid primary button per screen; use secondary or ghost for the rest.
-// Primary carries a top sheen, a 1px highlight, and an accent-tinted shadow; secondary and danger keep a 1px neutral shadow; ghost is flat.
+// Filled buttons are keys lit from above, built from the same layers: a face color under a top-light gradient, a 1px edge,
+// a 1px top highlight, a 1px bottom shade, a contact shadow and a soft lift. Variants change only the values. Ghost is flat until pressed.
+// Pressed flips the gradient, turns the highlight into an inner shadow and collapses the lift; code also moves the button down 1px.
+// Small buttons drop the lift. Confirm dialogs for destructive actions use dangerSolid; entry points to those dialogs use danger.
 // Leading icon is hidden by default; set lead.display and select an icon with @with-variant in instances.
 export button = frame {
   title: "Button / Primary",
@@ -16,10 +22,11 @@ export button = frame {
     {
       linear-gradient: {
         angle: 180deg,
-        stops: [stop(0%, c.colors.sheen), stop(100%, c.colors.transparent)]
+        stops: [stop(0%, c.colors.keyTop), stop(100%, c.colors.keyBottom)]
       }
     }
   ],
+  border: c.colors.keyEdgeSolid,
   shadow: [
     {
       inner-shadow: {
@@ -29,10 +36,25 @@ export button = frame {
       }
     },
     {
+      inner-shadow: {
+        color: c.colors.keyShadeSolid,
+        offset: point(0px, -1px),
+        blur-radius: 0px
+      }
+    },
+    {
       drop-shadow: {
-        color: c.colors.accentShadow,
-        offset: point(0px, 2px),
-        blur-radius: 6px
+        color: c.colors.shadowFar,
+        offset: point(0px, 1px),
+        blur-radius: 2px
+      }
+    },
+    {
+      drop-shadow: {
+        color: c.colors.keyLiftSolid,
+        offset: point(0px, 4px),
+        blur-radius: 10px,
+        spread: -3px
       }
     }
   ],
@@ -59,10 +81,10 @@ export secondary = frame : button {
   left: 160px,
   border[0].color: c.colors.border,
   fill[0].color: c.colors.surface,
-  shadow[0].drop-shadow.blur-radius: 2px,
-  shadow[0].drop-shadow.color: c.colors.shadowNear,
-  shadow[0].inner-shadow.color: c.colors.shadowNear,
-  shadow[1]: .nil,
+  shadow[0].inner-shadow.color: c.colors.keyHighlight,
+  shadow[1].inner-shadow.color: c.colors.keyShade,
+  shadow[2].drop-shadow.color: c.colors.shadowSoft,
+  shadow[3].drop-shadow.color: c.colors.shadowNear,
 
   label {
     fill[0].color: c.colors.text,
@@ -78,9 +100,13 @@ export secondary = frame : button {
 export ghost = frame : button {
   title: "Button / Ghost",
   left: 320px,
+  border[0].visible: .false,
   fill[0].color: c.colors.transparent,
-  shadow[0]: .nil,
-  shadow[1]: .nil,
+  fill[1].visible: .false,
+  shadow[0].inner-shadow.visible: .false,
+  shadow[1].inner-shadow.visible: .false,
+  shadow[2].drop-shadow.visible: .false,
+  shadow[3].drop-shadow.visible: .false,
 
   label {
     fill[0].color: c.colors.text,
@@ -98,10 +124,10 @@ export danger = frame : button {
   left: 480px,
   border[0].color: c.colors.border,
   fill[0].color: c.colors.surface,
-  shadow[0].drop-shadow.blur-radius: 2px,
-  shadow[0].drop-shadow.color: c.colors.shadowNear,
-  shadow[0].inner-shadow.color: c.colors.shadowNear,
-  shadow[1]: .nil,
+  shadow[0].inner-shadow.color: c.colors.keyHighlight,
+  shadow[1].inner-shadow.color: c.colors.keyShade,
+  shadow[2].drop-shadow.color: c.colors.shadowSoft,
+  shadow[3].drop-shadow.color: c.colors.shadowNear,
 
   label {
     fill[0].color: c.colors.danger,
@@ -114,10 +140,25 @@ export danger = frame : button {
 }
 
 @variant
+export dangerSolid = frame : button {
+  title: "Button / Danger solid",
+  left: 320px,
+  top: 192px,
+  fill[0].color: c.colors.dangerFill,
+
+  label {
+    contents: "Archive"
+  }
+}
+
+@variant
 export hover = frame : button {
   title: "Button / Primary hover",
   top: 64px,
-  fill[0].color: c.colors.accentHover
+  fill[0].color: c.colors.accentHover,
+  shadow[3].drop-shadow.blur-radius: 16px,
+  shadow[3].drop-shadow.offset: [0px, 8px],
+  shadow[3].drop-shadow.spread: -5px
 }
 
 @variant
@@ -125,7 +166,12 @@ export pressed = frame : button {
   title: "Button / Primary pressed",
   left: 160px,
   top: 64px,
-  fill[0].color: c.colors.accentPressed
+  fill[0].color: c.colors.accentPressed,
+  shadow[0].inner-shadow.blur-radius: 2px,
+  shadow[0].inner-shadow.color: c.colors.keyPressSolid,
+  shadow[1].inner-shadow.color: c.colors.transparent,
+  shadow[2].drop-shadow.blur-radius: 1px,
+  shadow[3].drop-shadow.color: c.colors.transparent
 }
 
 @variant
@@ -143,7 +189,43 @@ export secondaryHover = frame : secondary {
   title: "Button / Secondary hover",
   left: 480px,
   top: 64px,
-  fill[0].color: c.colors.subtle
+  fill[1].visible: .false,
+  shadow[3].drop-shadow.blur-radius: 16px,
+  shadow[3].drop-shadow.offset: [0px, 8px],
+  shadow[3].drop-shadow.spread: -5px
+}
+
+// Pressed into the page: darker top, inner shadow, and a light line below like a key pressed into paper
+@variant
+export secondaryPressed = frame : secondary {
+  title: "Button / Secondary pressed",
+  top: 256px,
+  shadow[0].inner-shadow.blur-radius: 2px,
+  shadow[0].inner-shadow.color: c.colors.keyPress,
+  shadow[1].inner-shadow.color: c.colors.transparent,
+  shadow[2].drop-shadow.blur-radius: 0px,
+  shadow[2].drop-shadow.color: c.colors.keyGround,
+  shadow[3].drop-shadow.color: c.colors.transparent
+}
+
+@variant
+export ghostHover = frame : ghost {
+  title: "Button / Ghost hover",
+  left: 160px,
+  top: 256px,
+  fill[0].color: c.colors.hover
+}
+
+// Ghost pressed: a recessed well
+@variant
+export ghostPressed = frame : ghost {
+  title: "Button / Ghost pressed",
+  left: 320px,
+  top: 256px,
+  fill[0].color: c.colors.selected,
+  shadow[0].inner-shadow.blur-radius: 2px,
+  shadow[0].inner-shadow.color: c.colors.keyShade,
+  shadow[0].inner-shadow.visible: .true
 }
 
 @variant
@@ -155,6 +237,7 @@ export small = frame : button {
   padding-left: 10px,
   padding-bottom: 0px,
   padding-right: 10px,
+  shadow[3].drop-shadow.visible: .false,
 
   label {
     font-size: 12
@@ -171,6 +254,7 @@ export smallSecondary = frame : secondary {
   padding-left: 10px,
   padding-bottom: 0px,
   padding-right: 10px,
+  shadow[3].drop-shadow.visible: .false,
 
   label {
     font-size: 12
@@ -203,6 +287,7 @@ export smallDanger = frame : danger {
   padding-left: 10px,
   padding-bottom: 0px,
   padding-right: 10px,
+  shadow[3].drop-shadow.visible: .false,
 
   label {
     contents: "Remove",

@@ -133,7 +133,7 @@ export enrollDialog = frame : dialogs.dialog {
     waitDot = shape : status.dotQueued {}
 
     waitText = text : t.caption {
-      contents: "Waiting for your computer to connect…",
+      contents: "Waiting for device…",
       fill[0].color: c.colors.muted
     }
 
@@ -212,7 +212,7 @@ export enrollDialog = frame : dialogs.dialog {
 
     tokenLabel = frame : labels.label {
       labelText {
-        contents: "Setup code (expires in 10 minutes)"
+        contents: "Setup code"
       }
     }
 
@@ -229,7 +229,8 @@ export enrollDialog = frame : dialogs.dialog {
 
     tokenNote = text : t.caption {
       width: 100%,
-      contents: "Use this code once to connect this computer.",
+      display: .none,
+      contents: "",
       fill[0].color: c.colors.muted
     }
   }
@@ -241,7 +242,7 @@ export enrollDialog = frame : dialogs.dialog {
 
     commandLabel = frame : labels.label {
       labelText {
-        contents: "Run this in your terminal"
+        contents: "Run in terminal"
       }
     }
 
@@ -262,7 +263,7 @@ export enrollDialog = frame : dialogs.dialog {
 
     commandNote = text : t.caption {
       width: 100%,
-      contents: "Paste the setup code, then press Enter. The code stays hidden as you type.",
+      contents: "Paste the code and press Enter. It stays hidden.",
       fill[0].color: c.colors.muted
     }
   }
@@ -388,7 +389,7 @@ export enrollConnected = frame : enrollDialog {
 
       doneMeta = text : t.caption {
         width: 100%,
-        contents: "macOS · Codex and Pi available",
+        contents: "macOS",
         fill[0].color: c.colors.muted
       }
     }
@@ -425,7 +426,8 @@ export enrollExpired = frame : enrollDialog {
     tokenField {
       @with-variant(t.captionDanger)
       tokenNote {
-        contents: "Get a new code, then run the command again."
+        contents: "Run the command again with a new code.",
+        display: .visible
       }
 
       token {
@@ -533,10 +535,6 @@ export enrollCodeLoading = frame : enrollDialog {
         }
       }
 
-      tokenNote {
-        contents: "The command will be ready when the code is issued."
-      }
-
       tokenLabel {
         labelText {
           contents: "Getting a setup code…"
@@ -548,21 +546,16 @@ export enrollCodeLoading = frame : enrollDialog {
 
 @variant
 export enrollCodeFailed = frame : enrollCodeLoading {
-  title: "Connect device / Could not get a code",
+  title: "Connect device / Couldn't get a code",
   caption: "Check the connection and retry without re-entering the device name.",
   left: 720px,
   top: 1080px,
 
   content {
     tokenField {
-      tokenNote {
-        fill[0].color: c.colors.attentionText,
-        contents: "Baton could not be reached. Check your connection, then get a new code."
-      }
-
       tokenLabel {
         labelText {
-          contents: "Setup code unavailable"
+          contents: "Setup code"
         }
       }
 
@@ -577,7 +570,7 @@ export enrollCodeFailed = frame : enrollCodeLoading {
   footer {
     waiting {
       waitText {
-        contents: "Could not get a setup code"
+        contents: "Can't reach Baton"
       }
     }
 
@@ -604,10 +597,6 @@ export enrollCopied = frame : enrollDialog {
 
   content {
     tokenField {
-      tokenNote {
-        contents: "Setup code copied. Paste it into your terminal when prompted."
-      }
-
       token {
         copy {
           @with-variant(icons.check)
@@ -629,7 +618,8 @@ export enrollCopyFailed = frame : enrollDialog {
     tokenField {
       tokenNote {
         fill[0].color: c.colors.attentionText,
-        contents: "Browser clipboard access is blocked. Select the setup code and copy it manually."
+        display: .visible,
+        contents: "Clipboard blocked. Copy it manually."
       }
     }
   }
@@ -641,20 +631,6 @@ export enrollRejected = frame : enrollExpired {
   caption: "Issue a fresh setup code for this computer.",
   left: 2880px,
   top: 1080px,
-
-  content {
-    tokenField {
-      tokenLabel {
-        labelText {
-          contents: "Setup code already used"
-        }
-      }
-
-      tokenNote {
-        contents: "This code has already connected a device. Get a new code to connect another computer."
-      }
-    }
-  }
 
   footer {
     waiting {
@@ -674,10 +650,6 @@ export enrollCommandCopied = frame : enrollDialog {
 
   content {
     commandField {
-      commandNote {
-        contents: "Command copied. Paste it into your terminal, then enter the setup code when prompted."
-      }
-
       command {
         copy {
           @with-variant(icons.check)
@@ -699,7 +671,7 @@ export enrollCommandCopyFailed = frame : enrollDialog {
     commandField {
       commandNote {
         fill[0].color: c.colors.attentionText,
-        contents: "Browser clipboard access is blocked. Select the command and copy it manually."
+        contents: "Clipboard blocked. Copy it manually."
       }
     }
   }

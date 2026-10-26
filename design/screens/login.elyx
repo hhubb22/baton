@@ -91,7 +91,7 @@ loginSubmitting = frame : auth.loginPage {
   connections[1].target: loginExpired,
   connections[2].label: "Password reset",
   connections[2].target: loginReset,
-  connections[3].label: "Could not reach Baton",
+  connections[3].label: "Can't reach Baton",
   connections[3].target: loginUnavailable,
 
   column {
@@ -132,7 +132,7 @@ loginExpired = frame : auth.loginPage {
 
     notice {
       noticeDetail {
-        contents: "Sign in again to continue. Saved threads, projects, and devices are still in your account."
+        display: .none
       }
 
       noticeHeading {
@@ -178,11 +178,11 @@ loginUnavailable = frame : auth.loginPage {
 
     notice {
       noticeDetail {
-        contents: "Check your connection, then try signing in again."
+        display: .none
       }
 
       noticeHeading {
-        contents: "Baton could not be reached"
+        contents: "Can't reach Baton"
       }
 
       display: .visible

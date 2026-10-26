@@ -117,7 +117,7 @@ export projectPage = frame {
         max-width: s.size.measure,
 
         label {
-          contents: "Reading Codex's reply from Ubuntu Dev…"
+          contents: "Reading Codex's reply…"
         }
       }
     }

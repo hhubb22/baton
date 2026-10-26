@@ -1,3 +1,5 @@
+use "resources/fonts/Inter-Regular.otf"
+
 import "tokens/colors.elyx" as c
 import "tokens/spacing.elyx" as s
 import "foundations/typography.elyx" as t
@@ -43,6 +45,21 @@ export chipModel = frame : chip {
   }
 
   @with-variant(icons.sparkle)
+  glyph {}
+}
+
+// Access chip: what the Thread's Agent may touch. Options follow what that Agent supports
+@variant
+export chipAccess = frame : chip {
+  title: "Picker chip / Access",
+  left: 560px,
+  top: 0px,
+
+  label {
+    contents: "Sandboxed"
+  }
+
+  @with-variant(icons.shield)
   glyph {}
 }
 

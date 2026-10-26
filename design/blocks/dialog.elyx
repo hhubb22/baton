@@ -44,7 +44,7 @@ export dialog = frame {
 
     message = text : t.small {
       width: 100%,
-      contents: "Stops the project assistant and closes 3 open questions. The main chat and project memory are kept. Work in individual threads continues.",
+      contents: "Stops the project assistant and closes 3 open questions. Chat, memory, and threads are kept.",
       fill[0].color: c.colors.muted
     }
   }
@@ -71,7 +71,7 @@ export dialog = frame {
 
       cancel = frame : buttons.secondary {}
 
-      confirm = frame : buttons.danger {}
+      confirm = frame : buttons.dangerSolid {}
     }
   }
 }
@@ -99,7 +99,7 @@ export settingRow = frame {
 
     rowText = text : t.caption {
       width: 100%,
-      contents: "Pauses automatic replies. You can still use individual threads and answer questions. Messages and replies here are saved until you resume.",
+      contents: "New messages wait until you resume. Threads keep running.",
       fill[0].color: c.colors.muted
     }
   }

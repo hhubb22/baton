@@ -18,7 +18,7 @@ import "blocks/device-feedback.elyx" as feedback
 
 export devices = frame {
   title: "Devices",
-  caption: "Manage connected computers, assistants, allowed folders, and command permissions. Add folder opens the folder picker for this device; hovering a folder shows Remove.",
+  caption: "Manage connected computers, assistants, and command permissions. Folders are added when choosing a location for a new chat; Folders… removes them.",
   left: 0px,
   top: 0px,
   width: s.size.screenWidth,
@@ -107,6 +107,7 @@ export devices = frame {
       intro = frame {
         width: 100%,
         layout: {justify-content: .space-between, item-gap: s.space.xl},
+        padding: [0px, s.space.lg],
         children: [introCopy, enroll],
 
         introCopy = frame {
@@ -120,7 +121,8 @@ export devices = frame {
 
           introText = text : t.small {
             width: 100%,
-            contents: "Connect the computers where your code lives. The project assistant uses your default device first, then another online device.",
+            display: .none,
+            contents: "",
             fill[0].color: c.colors.muted
           }
         }
@@ -155,29 +157,44 @@ export devices = frame {
         macDetail = frame {
           width: 100%,
           display: .none,
-          layout: {direction: .column, item-gap: 20px},
+          layout: {direction: .column, item-gap: 12px},
           border: {color: c.colors.borderSoft, sides: .bottom},
-          padding: [s.space.xs, s.space.lg, 20px, 60px],
+          padding: [12px, s.space.lg, 20px, 44px],
           children: [macNotice, macActions],
 
           macNotice = frame : feedback.deviceNotice {
-            width: 100%
+            width: 100%,
+
+            heading {
+              display: .none
+            }
           }
 
           macActions = frame {
             width: 100%,
-            layout: {align-items: .center, item-gap: s.space.sm},
-            children: [macDefault, macRevoke],
+            layout: {
+              justify-content: .space-between,
+              align-items: .center,
+              item-gap: s.space.sm
+            },
+            overflow: .visible,
+            children: [macMain, macRevoke],
 
-            macDefault = frame : buttons.smallSecondary {
-              display: .none,
+            macMain = frame {
+              layout: {align-items: .center, item-gap: s.space.sm},
+              overflow: .visible,
+              children: macDefault,
 
-              label {
-                contents: "Default device"
+              macDefault = frame : buttons.smallSecondary {
+                display: .none,
+
+                label {
+                  contents: "Default device"
+                }
               }
             }
 
-            macRevoke = frame : buttons.smallGhostDanger {
+            macRevoke = frame : buttons.smallDanger {
               connections[0].target: devicesDisconnect,
 
               label {
@@ -202,18 +219,17 @@ export devices = frame {
           width: 100%,
           layout: {direction: .column, item-gap: 20px},
           border: {color: c.colors.borderSoft, sides: .bottom},
-          padding: [s.space.lg, s.space.lg, 20px, 60px],
-          children: [deviceNotice, columns, exec, detailActions],
+          padding: [s.space.lg, s.space.lg, 20px, 44px],
+          children: [columns, exec, detailActions],
 
-          deviceNotice = frame : feedback.deviceNotice {
-            width: 100%,
-            display: .none
-          }
-
+          // Agent list appears only when an Agent is missing or needs sign-in; the row already lists working Agents
           columns = frame {
             width: 100%,
+            display: .none,
             layout: {item-gap: s.space.xxl},
-            children: [agentsCol, dirsCol],
+            border: {color: c.colors.borderSoft, sides: .bottom},
+            padding: [0px, 0px, s.space.lg],
+            children: agentsCol,
 
             agentsCol = frame {
               width: 100%,
@@ -228,7 +244,8 @@ export devices = frame {
 
               capabilityNote = text : t.caption {
                 width: 100%,
-                contents: "Codex 0.42 · GPT-5 (default), GPT-5 mini\nNew thread · send next · send now · stop\nResume thread · change model",
+                display: .none,
+                contents: "",
                 fill[0].color: c.colors.muted
               }
 
@@ -237,19 +254,11 @@ export devices = frame {
                 fill[0].color: c.colors.faint
               }
 
-              agentLine1 = frame : rows.capabilityLine {
-                note {
-                  contents: "Signed in · send now · resume thread"
-                }
-              }
+              agentLine1 = frame : rows.capabilityLine {}
 
               agentLine2 = frame : rows.capabilityLine {
                 name {
                   contents: "Pi"
-                }
-
-                note {
-                  contents: "Installed · send now · resume thread"
                 }
               }
 
@@ -259,60 +268,14 @@ export devices = frame {
                 name {
                   contents: "Project assistant"
                 }
-
-                note {
-                  contents: "ChatGPT signed in"
-                }
-              }
-            }
-
-            dirsCol = frame {
-              width: 100%,
-              layout: {direction: .column, item-gap: s.space.sm},
-              children: [dirsLabel, dir1, dir2, repos, dirsNote],
-
-              dirsLabel = text : t.captionMedium {
-                contents: "Allowed folders",
-                fill[0].color: c.colors.faint
-              }
-
-              dir1 = text : t.mono {
-                contents: "~/work/baton"
-              }
-
-              dir2 = text : t.mono {
-                contents: "~/work/docs"
-              }
-
-              repos = text : t.caption {
-                width: 100%,
-                contents: "2 repositories discovered: baton, baton-docs",
-                fill[0].color: c.colors.muted
-              }
-
-              dirsNote = frame : buttons.smallGhost {
-                padding-left: 6px,
-                padding-right: 6px,
-
-                lead {
-                  width: 13px,
-                  height: 13px,
-                  display: .visible
-                }
-
-                label {
-                  contents: "Add folder"
-                }
               }
             }
           }
 
           exec = frame {
             width: 100%,
-            layout: {direction: .column, item-gap: 10px},
-            border: {color: c.colors.borderSoft, sides: .top},
-            padding: [s.space.lg, 0px, 0px],
-            children: [execToggle, warning, permissionFeedback],
+            layout: {direction: .column, item-gap: 6px},
+            children: [execToggle, permissionFeedback],
 
             permissionFeedback = text : t.caption {
               width: 100%,
@@ -328,26 +291,8 @@ export devices = frame {
 
               copy {
                 helper {
-                  contents: "Lets the project assistant run shell commands in allowed folders as user “kaken” (zsh). Commands can run for up to 2 hours."
+                  contents: "Shell commands the project assistant runs itself. Threads set their own access."
                 }
-              }
-            }
-
-            warning = frame {
-              width: 100%,
-              layout: {item-gap: s.space.sm},
-              children: [warnGlyph, warnText],
-
-              warnGlyph = asset : icons.shield {
-                width: 14px,
-                height: 14px,
-                fill[0].color: c.colors.attentionText
-              }
-
-              warnText = text : t.caption {
-                width: 100%,
-                contents: "Commands run directly on Ubuntu Dev without a sandbox.",
-                fill[0].color: c.colors.attentionText
               }
             }
           }
@@ -355,34 +300,41 @@ export devices = frame {
           detailActions = frame {
             width: 100%,
             layout: {
+              justify-content: .space-between,
               align-items: .center,
-              item-gap: s.space.sm,
-              wrap: .true,
-              line-gap: 8px
+              item-gap: s.space.sm
             },
-            children: [makeDefault, revoke, revokeNote],
+            overflow: .visible,
+            children: [detailMain, revoke],
 
-            makeDefault = frame : buttons.smallSecondary {
-              connections[0].target: devicesDefaultSaved,
+            detailMain = frame {
+              layout: {align-items: .center, item-gap: s.space.sm},
+              overflow: .visible,
+              children: [makeDefault, folders],
 
-              label {
-                contents: "Set as default"
+              makeDefault = frame : buttons.smallSecondary {
+                connections[0].target: devicesDefaultSaved,
+
+                label {
+                  contents: "Set as default"
+                }
+              }
+
+              folders = frame : buttons.smallSecondary {
+                connections[0].target: devicesFolders,
+
+                label {
+                  contents: "Folders…"
+                }
               }
             }
 
-            revoke = frame : buttons.smallGhostDanger {
+            revoke = frame : buttons.smallDanger {
               connections[0].target: devicesDisconnect,
 
               label {
                 contents: "Disconnect device"
               }
-            }
-
-            revokeNote = text : t.caption {
-              width: 100%,
-              display: .none,
-              contents: "Disconnects this device from Baton. If it is offline, agents still running on it keep running locally. Past threads are kept.",
-              fill[0].color: c.colors.faint
             }
           }
         }
@@ -456,7 +408,7 @@ devicesDisconnect = frame : devices {
 
       content {
         message {
-          contents: "Disconnects Ubuntu Dev from Baton. If it is offline, agents still running on it will keep running locally. Past threads and records are kept. This does not undo file changes or commands already run."
+          contents: "Agents already running on it keep running locally."
         }
       }
 
@@ -525,22 +477,6 @@ devicesSyncing = frame : devices {
           exec {
             display: .none
           }
-
-          columns {
-            display: .none
-          }
-
-          deviceNotice {
-            detail {
-              contents: "Connected just now. Threads will wait until device information is up to date."
-            }
-
-            heading {
-              contents: "Ubuntu Dev is syncing"
-            }
-
-            display: .visible
-          }
         }
 
         ubuntu {
@@ -597,11 +533,11 @@ devicesMissing = frame : devices {
           }
 
           columns {
-            agentsCol {
-              capabilityNote {
-                contents: "Codex 0.42 · GPT-5 (default)\nNew threads unavailable until signed in.\nPi models unavailable until installed."
-              }
+            display: .visible,
+            padding-bottom: 0px,
+            border[0].color: c.colors.transparent,
 
+            agentsCol {
               @with-variant(rows.capabilityMissing)
               agentLine3 {
                 note {
@@ -629,18 +565,6 @@ devicesMissing = frame : devices {
                 left: .nil
               }
             }
-          }
-
-          deviceNotice {
-            detail {
-              contents: "Sign in to ChatGPT for Codex, install Pi, and update Baton for the project assistant. Make these changes on Ubuntu Dev."
-            }
-
-            heading {
-              contents: "Finish setup on Ubuntu Dev"
-            }
-
-            display: .visible
           }
         }
 
@@ -685,7 +609,7 @@ devicesDefaultOffline = frame : devicesDisconnect {
 
       content {
         message {
-          contents: "MacBook Pro is offline (last seen 13:52). New threads on it wait until it reconnects; projects can use another online device."
+          contents: "It's offline. New threads on it wait until it's back."
         }
       }
 
@@ -748,8 +672,10 @@ devicesDefaultSaved = frame : devices {
               connections[0].target: devicesDefaultDisconnect
             }
 
-            makeDefault {
-              display: .none
+            detailMain {
+              makeDefault {
+                display: .none
+              }
             }
           }
         }
@@ -795,7 +721,7 @@ devicesPermissionSaving = frame : devices {
   top: 3240px,
   connections[0].label: "Saved",
   connections[0].target: devicesPermissionSaved,
-  connections[1].label: "Could not save",
+  connections[1].label: "Couldn't save",
   connections[1].target: devicesPermissionFailed,
 
   main {
@@ -826,18 +752,12 @@ devicesPermissionSaved = frame : devices {
           exec {
             permissionFeedback {
               display: .visible,
-              contents: "Saved · command permission is off"
+              contents: "Saved"
             }
 
             @with-variant(toggles.toggle)
             execToggle {
-              connections[0].target: devicesPermissionEnabling,
-
-              copy {
-                helper {
-                  contents: "Commands run as user “kaken” (zsh) in allowed folders. Turn on only if you allow direct access without a sandbox."
-                }
-              }
+              connections[0].target: devicesPermissionConfirm
             }
           }
         }
@@ -862,7 +782,7 @@ devicesPermissionFailed = frame : devices {
               connections[0].target: devicesPermissionSaving,
               left: .nil,
               display: .visible,
-              contents: "Could not save. Commands are still allowed."
+              contents: "Couldn't save. Commands are still allowed."
             }
           }
         }
@@ -878,7 +798,7 @@ devicesDisconnecting = frame : devicesDisconnect {
   top: 4320px,
   connections[0].label: "Disconnected",
   connections[0].target: devicesDisconnected,
-  connections[1].label: "Could not disconnect",
+  connections[1].label: "Couldn't disconnect",
   connections[1].target: devicesDisconnectFailed,
 
   scrim {
@@ -899,7 +819,7 @@ devicesDisconnecting = frame : devicesDisconnect {
 
       content {
         message {
-          contents: "Disconnecting Ubuntu Dev from Baton…"
+          display: .none
         }
       }
 
@@ -931,12 +851,12 @@ devicesDisconnectFailed = frame : devicesDisconnect {
       }
 
       heading {
-        contents: "Could not confirm disconnection"
+        contents: "Couldn't confirm disconnection"
       }
 
       content {
         message {
-          contents: "Baton could not be reached while disconnecting Ubuntu Dev. Its connection may still be active. Check your connection, then retry to confirm removal."
+          contents: "Ubuntu Dev may still be connected."
         }
       }
     }
@@ -961,7 +881,8 @@ devicesDisconnected = frame : devices {
         }
 
         detail {
-          contents: "Past threads and records are kept. If Ubuntu Dev was offline, its agents may still be running locally."
+          contents: "Its agents may still be running locally.",
+          display: .visible
         }
 
         display: .visible
@@ -1017,7 +938,7 @@ devicesDefaultRemoved = frame : devicesDisconnected {
         }
 
         detail {
-          contents: "Ubuntu Dev was disconnected. Choose another default device for new threads and projects."
+          display: .none
         }
 
         heading {
@@ -1105,7 +1026,7 @@ devicesDefaultDisconnect = frame : devicesDisconnect {
 
       content {
         message {
-          contents: "Ubuntu Dev is your default device. Removing it leaves no default until you choose another. Offline agents may keep running locally. Past threads and records are kept; file changes and commands already run are not undone."
+          contents: "You'll need to choose a new default. Agents already running on it keep running locally."
         }
       }
     }
@@ -1228,15 +1149,21 @@ devicesOfflineSelect = frame : devicesOfflineView {
       list {
         macDetail {
           macActions {
-            macDefault {
-              connections[0].target: devicesDefaultOffline,
+            macMain {
+              macDefault {
+                connections[0].target: devicesDefaultOffline,
 
-              label {
-                contents: "Set as default"
+                label {
+                  contents: "Set as default"
+                }
+
+                display: .visible
               }
-
-              display: .visible
             }
+          }
+
+          macNotice {
+            display: .none
           }
         }
 
@@ -1275,7 +1202,7 @@ devicesPermissionEnabling = frame : devicesPermissionSaved {
   top: 7560px,
   connections[0].label: "Saved",
   connections[0].target: devicesPermissionEnabled,
-  connections[1].label: "Could not save",
+  connections[1].label: "Couldn't save",
   connections[1].target: devicesPermissionEnableFailed,
 
   main {
@@ -1306,7 +1233,7 @@ devicesPermissionEnabled = frame : devices {
           exec {
             permissionFeedback {
               display: .visible,
-              contents: "Saved · command permission is on"
+              contents: "Saved"
             }
           }
         }
@@ -1330,7 +1257,7 @@ devicesPermissionEnableFailed = frame : devicesPermissionSaved {
             permissionFeedback {
               connections[0].target: devicesPermissionEnabling,
               left: .nil,
-              contents: "Could not save. Commands are still off."
+              contents: "Couldn't save. Commands are still off."
             }
           }
         }
@@ -1387,6 +1314,136 @@ devicesDefaultDisconnectFailed = frame : devicesDisconnectFailed {
             }
           }
         }
+      }
+    }
+  }
+}
+
+devicesFolders = frame : devices {
+  title: "Devices · Folders",
+  caption: "Folders… lists the folders added on this device. Remove stops new chats and file previews there; running chats keep going.",
+  left: 1728px,
+  top: 8640px,
+  overrides: [insert(scrim, after = devices.main)],
+
+  scrim = frame {
+    left: 0px,
+    top: 0px,
+    width: 100%,
+    height: 100%,
+    ignore-stack: .true,
+    layout: {justify-content: .center, align-items: .center},
+    fill: c.colors.overlay,
+    children: form,
+
+    form = frame : dialogs.dialog {
+      footer {
+        actions {
+          overrides: [remove(dialogs.dialog.footer.actions.confirm)],
+
+          cancel {
+            connections[0].target: devices,
+
+            label {
+              contents: "Done"
+            }
+          }
+        }
+      }
+
+      content {
+        overrides: [
+          insert(folder1, after = .nil),
+          insert(folder2, after = folder1),
+          remove(dialogs.dialog.content.message)
+        ]
+      }
+
+      heading {
+        contents: "Folders on Ubuntu Dev"
+      }
+    }
+  }
+
+  folder1 = frame {
+    width: 100%,
+    layout: {justify-content: .space-between, align-items: .center},
+    border: {color: c.colors.borderSoft, sides: .bottom},
+    padding: [0px, 0px, s.space.sm],
+    children: [path, remove],
+
+    path = text : t.mono {
+      contents: "~/work/baton"
+    }
+
+    remove = frame : buttons.smallGhostDanger {
+      label {
+        contents: "Remove"
+      }
+    }
+  }
+
+  folder2 = frame {
+    width: 100%,
+    layout: {justify-content: .space-between, align-items: .center},
+    padding: [0px, 0px, s.space.sm],
+    children: [path, remove],
+
+    path = text : t.mono {
+      contents: "~/work/docs"
+    }
+
+    remove = frame : buttons.smallGhostDanger {
+      label {
+        contents: "Remove"
+      }
+    }
+  }
+}
+
+devicesPermissionConfirm = frame : devicesPermissionSaved {
+  title: "Devices / Allow commands",
+  caption: "Turning commands on states the effect once. Threads keep their own access.",
+  left: 3456px,
+  top: 8640px,
+  overrides: [insert(scrim, after = devices.main)],
+
+  scrim = frame {
+    left: 0px,
+    top: 0px,
+    width: 100%,
+    height: 100%,
+    ignore-stack: .true,
+    layout: {justify-content: .center, align-items: .center},
+    fill: c.colors.overlay,
+    children: form,
+
+    form = frame : dialogs.dialog {
+      footer {
+        actions {
+          @with-variant(buttons.button)
+          confirm {
+            connections[0].target: devicesPermissionEnabling,
+
+            label {
+              contents: "Allow commands"
+            }
+          }
+
+          cancel {
+            connections[0].target: devicesPermissionSaved
+          }
+        }
+      }
+
+      content {
+        message {
+          contents: "Commands run directly as kaken and can reach files outside your folders."
+        }
+      }
+
+      heading {
+        contents: "Let the project assistant run commands on Ubuntu Dev?"
       }
     }
   }

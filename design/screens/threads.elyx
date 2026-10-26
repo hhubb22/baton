@@ -256,7 +256,7 @@ threadsLoading = frame : lists.threadsPageLoading {
 
 threadsFolderRoots = frame : lists.threadsPage {
   title: "Threads · Choose another folder",
-  caption: "Replace the location menu. Browse allowed folders without changing the draft.",
+  caption: "Replace the location menu. Browse folders or type a path without changing the draft.",
   left: 1728px,
   top: 4720px,
   overrides: [insert(scrim, after = lists.threadsPage.main)],
@@ -294,7 +294,7 @@ threadsFolderRoots = frame : lists.threadsPage {
         actions {
           confirm {
             connections[0].target: threadsFolderBrowse,
-            connections[0].label: "Choose an allowed folder first"
+            connections[0].label: "Choose a folder first"
           }
 
           cancel {
@@ -321,7 +321,7 @@ threadsFolderRoots = frame : lists.threadsPage {
 }
 
 threadsFolderBrowse = frame : lists.threadsPage {
-  title: "Threads · Browse allowed folder",
+  title: "Threads · Browse folder",
   caption: "Choose the current folder or navigate to a subfolder.",
   left: 3456px,
   top: 4720px,
@@ -379,7 +379,7 @@ threadsFolderBrowse = frame : lists.threadsPage {
 
           parent {
             connections[0].target: threadsFolderRoots,
-            connections[0].label: "Allowed folders"
+            connections[0].label: "Back to folders"
           }
         }
       }
@@ -482,7 +482,7 @@ threadsFolderDevices = frame : lists.threadsPage {
         actions {
           confirm {
             connections[0].target: threadsFolderBrowse,
-            connections[0].label: "Choose an allowed folder first"
+            connections[0].label: "Choose a folder first"
           }
 
           cancel {
@@ -598,8 +598,8 @@ threadsFolderRootApplied = frame : threadsFolderApplied {
 }
 
 threadsFolderWindows = frame : lists.threadsPage {
-  title: "Threads · Windows allowed folders",
-  caption: "Switching devices reads that computer’s allowed folders.",
+  title: "Threads · Windows folders",
+  caption: "Switching devices reads that computer’s folders.",
   left: 1728px,
   top: 7080px,
   overrides: [insert(scrim, after = lists.threadsPage.main)],
@@ -637,7 +637,7 @@ threadsFolderWindows = frame : lists.threadsPage {
         actions {
           confirm {
             connections[0].target: threadsFolderWindows,
-            connections[0].label: "Choose an allowed folder first"
+            connections[0].label: "Choose a folder first"
           }
 
           cancel {
@@ -1466,7 +1466,7 @@ threadsFileLoading = frame : lists.threadsPageSplit {
 
 threadsFileMissing = frame : lists.threadsPageSplit {
   title: "Threads · File not found",
-  caption: "Return to the allowed folder and choose another file.",
+  caption: "Return to the folder and choose another file.",
   left: 1728px,
   top: 14160px,
   overrides: [insert(scrim, after = lists.threadsPageSplit.detail)],
@@ -1567,7 +1567,7 @@ threadsRecoveryDraft = frame : lists.threadsPage {
     compose {
       composer {
         prompt {
-          contents: "Message Codex on Windows Desktop…"
+          contents: "Message Codex…"
         }
 
         toolbar {
@@ -1644,7 +1644,7 @@ threadsStopped = frame : lists.threadsPageSplit {
 
 threadsFolderWindowsBrowse = frame : lists.threadsPage {
   title: "Threads · Browse Windows folder",
-  caption: "Keep Windows Desktop selected while navigating within its allowed folder.",
+  caption: "Keep Windows Desktop selected while navigating within its folder.",
   left: 0px,
   top: 16520px,
   overrides: [insert(scrim, after = lists.threadsPage.main)],
@@ -1708,7 +1708,7 @@ threadsFolderWindowsBrowse = frame : lists.threadsPage {
 
           parent {
             connections[0].target: threadsFolderWindows,
-            connections[0].label: "Back to allowed folders"
+            connections[0].label: "Back to folders"
           }
 
           rootsHead {

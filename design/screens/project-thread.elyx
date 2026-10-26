@@ -572,7 +572,7 @@ referenceSent = frame : threadOpen {
     }
 
     sentStatus = text : t.caption {
-      contents: "Saved · waiting for the assistant",
+      contents: "Waiting for the assistant",
       fill[0].color: c.colors.faint
     }
   }
@@ -630,11 +630,12 @@ archivedProjectThread = frame : threadRunning {
 
     copy {
       heading {
-        contents: "Project is archived"
+        contents: "Project archived"
       }
 
       detail {
-        contents: "Main chat and project memory are read-only. Work in individual threads continues."
+        display: .visible,
+        contents: "Read-only. Threads keep running."
       }
     }
   }
