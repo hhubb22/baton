@@ -5,7 +5,14 @@ import { appendFileSync } from 'node:fs'
 const [mode, command] = process.argv.slice(2)
 if (command === 'probe') {
   if (mode === 'bad-probe') console.log('{"version":"0.0.1","providers":[]}')
-  else console.log(JSON.stringify({ version: '0.1.0', providers: [{ provider: 'openai-codex', status: 'available' }] }))
+  else
+    console.log(
+      JSON.stringify({
+        version: '0.1.0',
+        memory_protocol: 1,
+        providers: [{ provider: 'openai-codex', status: mode === 'memory-idle' ? 'login_required' : 'available' }],
+      }),
+    )
 } else if (command === 'login-device') {
   console.log(
     JSON.stringify({
@@ -19,7 +26,7 @@ if (command === 'probe') {
   process.stdin.resume()
   process.stdin.on('end', () => process.exit())
   setInterval(() => {}, 1000)
-} else if (command === 'run') {
+} else if (command === 'run' || command === 'memory') {
   if (mode === 'real-runtime') {
     await import('@baton/project-agent-runtime/testing/integration-worker')
   } else {
@@ -86,7 +93,10 @@ if (command === 'probe') {
       await call({ operation: 'finish' })
       process.exit()
     } else {
-      await call({ operation: 'bootstrap', payload: { pid: process.pid, branch: branch.pid } })
+      await call({
+        operation: command === 'memory' ? 'memory_bootstrap' : 'bootstrap',
+        payload: { pid: process.pid, branch: branch.pid },
+      })
       setInterval(() => {}, 1000)
     }
   }

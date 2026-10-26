@@ -190,7 +190,7 @@ class Manager implements ProjectManager {
       )
       this.lease(run)
       if (result.ok) run.lastRenew = started
-      else if (result.code === 'lease_lost') this.stop(run)
+      else if (result.code === 'lease_lost' || result.code === 'claim_lost') this.stop(run)
     } catch {
       this.stop(run)
     }
@@ -217,7 +217,7 @@ class Manager implements ProjectManager {
     const run = this.runs.get(command.run_id)
     if (run) {
       if (run.command.lease_epoch !== command.lease_epoch) return
-      if (command.type === 'project_run_stop') this.stop(run)
+      if (command.type === 'project_run_stop' || command.type === 'project_memory_stop') this.stop(run)
       else if (run.started && !run.cancel.signal.aborted) {
         try {
           this.lease(run)
@@ -230,14 +230,17 @@ class Manager implements ProjectManager {
     }
     const old = await safePromise(this.ledger.get(command.run_id))
     if (old) {
-      if (old.lease_epoch === command.lease_epoch && command.type === 'project_run_start')
+      if (
+        old.lease_epoch === command.lease_epoch &&
+        (command.type === 'project_run_start' || command.type === 'project_memory_start')
+      )
         this.track(
           this.management(command, old.state === 'failed' ? 'start_failed' : 'exited', old.reason || 'runtime_lost'),
         ).catch(() => {})
       this.cleanup()
       return
     }
-    if (command.type === 'project_run_stop') {
+    if (command.type === 'project_run_stop' || command.type === 'project_memory_stop') {
       await safePromise(this.ledger.insert(command, true))
       this.cleanup()
       return
@@ -280,13 +283,15 @@ class Manager implements ProjectManager {
     try {
       const report = await this.probe(run.cancel.signal)
       const provider = report.providers?.find((p) => p.provider === run.command.provider)
-      if (!provider || provider.status === 'login_required') {
+      const embeddingOnly = run.command.memory_kind === 'embedding'
+      if (!embeddingOnly && (!provider || provider.status === 'login_required')) {
         this.options.onReportChanged?.()
         await this.failed(run, provider ? 'login_required' : 'provider_missing')
         return
       }
       if (
-        provider.reason &&
+        !embeddingOnly &&
+        provider?.reason &&
         [
           'credential_permissions_invalid',
           'credential_owner_invalid',
@@ -320,7 +325,7 @@ class Manager implements ProjectManager {
       const config = await readProjectRuntimeConfig(this.options.dataDir)
       run.owned = await this.runner.spawn(
         [
-          'run',
+          run.command.type === 'project_memory_start' ? 'memory' : 'run',
           '--max-output-tokens',
           String(config.maxOutputTokens),
           '--max-model-calls',
@@ -429,20 +434,34 @@ class Manager implements ProjectManager {
       if (decoded._tag === 'None') return failure('invalid_request')
       const request = decoded.value
       if (
-        ![
-          'bootstrap',
-          'read_events',
-          'claim_inputs',
-          'embedding_query',
-          'prepare_context',
-          'append_event',
-          'commit_compaction',
-          'preview',
-          'call_tool',
-          'wait_tool',
-          'report_failure',
-          'finish',
-        ].includes(request.operation)
+        !(
+          run.command.type === 'project_memory_start'
+            ? [
+                'memory_bootstrap',
+                'read_sources',
+                'lookup_items',
+                'commit_chunk',
+                'pending_embeddings',
+                'commit_embedding',
+                'defer_embedding',
+                'finish',
+                'report_failure',
+              ]
+            : [
+                'bootstrap',
+                'read_events',
+                'claim_inputs',
+                'embedding_query',
+                'prepare_context',
+                'append_event',
+                'commit_compaction',
+                'preview',
+                'call_tool',
+                'wait_tool',
+                'report_failure',
+                'finish',
+              ]
+        ).includes(request.operation)
       )
         return failure('invalid_request')
       const call = ['call_tool', 'wait_tool'].includes(request.operation)
@@ -459,7 +478,11 @@ class Manager implements ProjectManager {
           data: { ...data.value, local_wait_protocol: 1 },
         })
       }
-      if (result.code === 'lease_lost' || (result.ok && ['finish', 'report_failure'].includes(request.operation))) {
+      if (
+        result.code === 'lease_lost' ||
+        result.code === 'claim_lost' ||
+        (result.ok && ['finish', 'report_failure'].includes(request.operation))
+      ) {
         const timer = setTimeout(() => this.stop(run), 100)
         timer.unref()
       }

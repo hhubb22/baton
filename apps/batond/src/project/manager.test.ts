@@ -67,6 +67,23 @@ const transport =
   }
 
 describe('Project Runtime host', () => {
+  it.live('runs embedding memory work without chat login and reaps it through the existing ledger', () =>
+    Effect.gen(function* () {
+      const { manager, dataDir } = yield* open({}, 'memory-idle')
+      const c: ProjectRunCommand = { ...command(), type: 'project_memory_start', memory_kind: 'embedding' }
+      let pid = 0
+      manager.setTransport(async (request) => {
+        if (request.operation === 'memory_bootstrap') pid = (request.payload as { pid: number }).pid
+        return success({})
+      })
+      yield* Effect.promise(() => manager.command(c))
+      yield* until(() => pid > 0)
+      expect(row(dataDir, c.run_id)?.kind).toBe('memory')
+      yield* Effect.promise(() => manager.command({ ...c, type: 'project_memory_stop' }))
+      yield* until(() => row(dataDir, c.run_id)?.cleanup_acked === 1)
+      expect(yield* Effect.promise(() => readProcessIdentity(pid))).toBeNull()
+    }),
+  )
   describe('process ownership and cleanup', () => {
     it.live('keeps one process across duplicate start and reconnect, then persists and retries cleanup receipts', () =>
       Effect.gen(function* () {

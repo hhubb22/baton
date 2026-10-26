@@ -21,6 +21,8 @@ import {
 export { runtimeRequest } from './runtime.ts'
 export { projectStatus } from './view.ts'
 export { listProjectRunCandidates, scheduleProjectRun, claimProjectCommands } from './scheduling.ts'
+export { scheduleMemoryJobs } from './memory-jobs.ts'
+import { stopProjectMemory } from './memory-jobs.ts'
 
 export const getProject = Effect.fn('getProject')(function* (employee: string, project: string) {
   yield* projectDecode(P.UUID, project)
@@ -124,6 +126,16 @@ export const patchProject = Effect.fn('patchProject')(function* (
       if (updated.status === 'archived')
         yield* sql`UPDATE attention_requests SET state='withdrawn',withdraw_reason='Project 已归档',version=version+1,updated_at=clock_timestamp() WHERE project_id=${id} AND employee_id=${employee} AND state='open'`
       if (updated.status !== 'active') yield* releaseProjectRun(agent, 'finished', `project_${updated.status}`)
+      if (
+        updated.status !== 'active' ||
+        updated.agent.provider !== old.agent.provider ||
+        updated.agent.model !== old.agent.model ||
+        updated.memory_embedding?.config_id !== old.memory_embedding?.config_id
+      )
+        yield* stopProjectMemory(
+          id,
+          updated.status !== 'active' ? `project_${updated.status}` : 'configuration_changed',
+        )
       return updated
     }),
   )

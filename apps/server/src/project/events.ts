@@ -3,6 +3,7 @@ import * as SqlClient from 'effect/sql/SqlClient'
 import * as P from '@baton/protocol'
 import { checkMemoryContext, registerEventSource, saveSource } from './memory/index.ts'
 import { canonical } from '../json.ts'
+import { registerMemoryJob } from './memory-jobs.ts'
 import {
   appendProjectEvent,
   checkPayloadSize,
@@ -108,6 +109,8 @@ export const appendAssistant = Effect.fn('appendProjectAssistant')(function* (
       text,
       event.seq,
     )
+  if (!calls.length && payload.message.stopReason !== 'error' && payload.message.stopReason !== 'aborted')
+    yield* registerMemoryJob(binding, event.seq)
   yield* sql`UPDATE conversations SET failure_count=0,next_attempt_at=NULL,attention_reason=NULL WHERE id=${binding.conversationId}`
   yield* sql`UPDATE attention_requests SET state='resolved',version=version+1,resolved_at=clock_timestamp(),updated_at=clock_timestamp() WHERE project_id=${binding.projectId} AND source='system' AND state='open'`
   return event

@@ -26,6 +26,7 @@ import {
   type CompactionSettings,
 } from './compaction.js'
 
+import { queryEmbedding } from './embeddings.js'
 export { modelMessages } from './context.js'
 
 export const IDLE_MS = 180_000
@@ -76,17 +77,22 @@ export class ProjectRuntime {
     for (const [name, value] of Object.entries(this.budget))
       if (!Number.isSafeInteger(value) || value < 1) throw new Error(`invalid_model_budget_${name}`)
   }
-  private async prepareMemory(messages: Message[], outputReserve: number): Promise<Message[]> {
+  private async prepareMemory(messages: Message[], outputReserve: number, signal?: AbortSignal): Promise<Message[]> {
     const settings = this.boot.memory_settings
     const available = Math.max(0, this.model().contextWindow - outputReserve - estimateMessages(messages))
     const coreTokens = Math.min(settings.core_tokens, available)
     const relatedTokens = Math.min(settings.related_tokens, Math.max(0, available - coreTokens))
+    const inputSeq = this.events.findLast((e) => e.kind === 'input')?.seq ?? this.boot.input_seq
+    const embedding = this.boot.project.memory_embedding
+      ? await queryEmbedding(this.rpc, this.seq, inputSeq, undefined, signal)
+      : {}
     this.memoryContext = await this.rpc.call({
       operation: 'prepare_context',
       last_seq: this.seq,
       payload: {
         context_id: randomUUID(),
-        input_seq: this.events.findLast((e) => e.kind === 'input')?.seq ?? this.boot.input_seq,
+        input_seq: inputSeq,
+        ...embedding,
         core_tokens: coreTokens,
         related_tokens: relatedTokens,
         max_bytes: settings.max_bytes,
@@ -314,6 +320,10 @@ export class ProjectRuntime {
     const saved = this.results.get(call.id)
     if (saved) return saved
     // Coordinator 持久化工具调用；恢复时使用原调用 ID 获取已保存的 Thread 或结果。
+    const embedding =
+      call.name === 'memory.recall' && this.boot.project.memory_embedding && typeof call.arguments.query === 'string'
+        ? await queryEmbedding(this.rpc, this.seq, this.memoryContext.input_seq, call.arguments.query)
+        : {}
     let requestStarted = this.timer.now()
     let response = await this.rpc.call({
       operation: 'call_tool',
@@ -321,6 +331,7 @@ export class ProjectRuntime {
       tool_call_id: call.id,
       tool_name: call.name,
       arguments: call.arguments,
+      payload: embedding,
     })
     let waitUntil = Infinity
     let initialCheck = true
@@ -436,7 +447,7 @@ export class ProjectRuntime {
                 ],
               }
             : context
-          const memoryMessages = await this.prepareMemory(requestContext.messages, outputTokens)
+          const memoryMessages = await this.prepareMemory(requestContext.messages, outputTokens, options?.signal)
           const stream = this.models.streamSimple(
             requestModel,
             modelContext({ ...requestContext, messages: memoryMessages }),

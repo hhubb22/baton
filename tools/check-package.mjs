@@ -19,11 +19,14 @@ function run(executable, args, options) {
   return result
 }
 
-async function runtimeHandshake(executable, options) {
-  const operations = ['bootstrap', 'read_events', 'claim_inputs']
+async function runtimeHandshake(executable, options, mode = 'run') {
+  const operations =
+    mode === 'memory'
+      ? ['memory_bootstrap', 'pending_embeddings', 'finish']
+      : ['bootstrap', 'read_events', 'claim_inputs']
   const observed = []
   return new Promise((resolveHandshake, reject) => {
-    const child = spawn(executable, ['project-runtime', 'run'], {
+    const child = spawn(executable, ['project-runtime', mode], {
       ...options,
       env: { ...options.env, BATON_PROJECT_RUNTIME_TRANSPORT: 'stdio' },
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -57,18 +60,41 @@ async function runtimeHandshake(executable, options) {
           assert.equal(frame.request?.operation, operations[observed.length], 'Unexpected Project Runtime request')
           observed.push(frame.request.operation)
           let result
-          if (frame.request.operation === 'bootstrap') {
+          if (frame.request.operation === 'memory_bootstrap') {
+            result = {
+              type: 'project_runtime.result',
+              ok: true,
+              data: {
+                job_id: 'package-memory',
+                kind: 'embedding',
+                provider: 'unused',
+                model: 'unused',
+                max_model_calls: 8,
+                max_duration_ms: 300000,
+                max_changes: 16,
+                cursor_index: 0,
+                cursor_offset: 0,
+              },
+            }
+          } else if (frame.request.operation === 'pending_embeddings') {
+            result = { type: 'project_runtime.result', ok: true, data: { memory_embedding: null, entries: [] } }
+          } else if (mode === 'memory' && frame.request.operation === 'finish') {
+            result = { type: 'project_runtime.result', ok: true, data: {} }
+          } else if (frame.request.operation === 'bootstrap') {
             result = {
               type: 'project_runtime.result',
               ok: true,
               data: {
                 project: {
+                  memory_embedding: null,
                   title: 'Package check',
                   goal: '',
                   agent: { provider: 'openai-codex', model: 'package-check-unused' },
                   conversation: { id: 'package-check' },
                 },
                 prompt_version: 'package-check',
+                input_seq: 0,
+                memory_settings: { core_tokens: 1500, related_tokens: 3500, max_bytes: 40960 },
                 after_seq: 0,
                 last_seq: 0,
               },
@@ -99,7 +125,11 @@ async function runtimeHandshake(executable, options) {
         assert.deepEqual(observed, operations, `Incomplete Project Runtime handshake: ${stderr}`)
         assert.equal(pending, '')
         assert.equal(signal, null)
-        assert.equal(code, 1, `Runtime must exit after the coordinator's completion response: ${stderr}`)
+        assert.equal(
+          code,
+          mode === 'memory' ? 0 : 1,
+          `Runtime must exit after the coordinator's completion response: ${stderr}`,
+        )
         resolveHandshake({
           operations: observed,
           modelCalls: 0,
@@ -206,6 +236,7 @@ async function main() {
       return { loaded: true, exitCode: result.status }
     })
     await check('projectRuntime', () => runtimeHandshake(executable, options))
+    await check('memoryRuntime', () => runtimeHandshake(executable, options, 'memory'))
     await check('credentials', async () => {
       const directory = join(home, 'credentials')
       const credential = JSON.stringify({

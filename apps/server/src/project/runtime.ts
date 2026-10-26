@@ -37,6 +37,7 @@ import { appendAssistant, claimInputs, readRuntimeEvents, savedToolCalls } from 
 import { commitCompaction } from './compaction.ts'
 import { projectToolJSONPage, boundedBase64, resultBytes } from './tools.ts'
 import { canonical } from '../json.ts'
+import { memoryRuntimeRequest } from './memory-jobs.ts'
 import { transaction } from '../database.ts'
 import type { ProjectThreadSource } from '../threads/index.ts'
 import { saveProjectPreview } from './preview.ts'
@@ -315,6 +316,10 @@ export const runtimeRequest = Effect.fn('projectRuntimeRequest')(function* (
 ) {
   const request = yield* projectDecode(P.ProjectRuntimeRequest, input)
   if (request.lease_epoch < 1 || request.reason?.includes('\0')) return yield* Effect.fail(projectError('invalid', 422))
+  const sql = yield* SqlClient.SqlClient
+  const memory =
+    yield* sql`SELECT 1 FROM agent_runs WHERE id=${request.run_id} AND employee_id=${source.employee_id} AND node_id=${source.node_id} AND memory_job_id IS NOT NULL`
+  if (memory.length) return yield* memoryRuntimeRequest(source, request)
   if (request.operation === 'wait_tool') {
     const pending = yield* readPendingTool(source, request).pipe(
       Effect.mapError((error) => (error.code === 'node_source_rejected' ? leaseLost() : error)),

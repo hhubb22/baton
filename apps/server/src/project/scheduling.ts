@@ -3,6 +3,7 @@ import { Effect } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import type { ProjectRunCommand, RuntimeReport } from '@baton/protocol'
 import { dbError } from '../database.ts'
+import { yieldMemoryToForeground } from './memory-jobs.ts'
 import { activeInputSQL, projectError, projectTransaction, recoveryWorkSQL, releaseProjectRun } from './store.ts'
 
 const placementCandidate = (sql: SqlClient.SqlClient) => sql`(
@@ -20,6 +21,7 @@ export const listProjectRunCandidates = Effect.fn('listProjectRunCandidates')(fu
   return rows.map((row) => row.id)
 })
 export const scheduleProjectRun = Effect.fn('scheduleProjectRun')(function* (agentId: string) {
+  yield* yieldMemoryToForeground(agentId)
   yield* projectTransaction(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -135,10 +137,11 @@ type CommandRow = {
   project_id: string
   conversation_id: string
   command_attempts: number
+  memory_kind: 'consolidation' | 'embedding' | null
   agent_id: string
 }
 const columns = (sql: SqlClient.SqlClient) =>
-  sql`r.employee_id,r.id AS run_id,r.node_id,p.conn_id,r.lease_epoch,r.provider,r.model,a.project_id,c.id AS conversation_id,r.command_attempts,a.id AS agent_id`
+  sql`r.employee_id,r.id AS run_id,r.node_id,p.conn_id,r.lease_epoch,r.provider,r.model,a.project_id,c.id AS conversation_id,r.command_attempts,a.id AS agent_id,(SELECT kind FROM project_memory_jobs WHERE id=r.memory_job_id) AS memory_kind`
 const command = (kind: ProjectRunCommand['type'], row: CommandRow): ProjectCommandDelivery => ({
   employee_id: row.employee_id,
   node_id: row.node_id,
@@ -151,6 +154,7 @@ const command = (kind: ProjectRunCommand['type'], row: CommandRow): ProjectComma
     model: row.model,
     project_id: row.project_id,
     conversation_id: row.conversation_id,
+    ...(row.memory_kind ? { memory_kind: row.memory_kind } : {}),
   },
 })
 const retrySeconds = (attempts: number, random: () => number) =>
@@ -159,16 +163,28 @@ export const claimProjectCommands = Effect.fn('claimProjectCommands')(function* 
   kind: ProjectRunCommand['type'],
   random: () => number = Math.random,
 ) {
-  if (!['project_run_start', 'project_run_stop', 'project_run_wake'].includes(kind))
+  if (
+    ![
+      'project_run_start',
+      'project_run_stop',
+      'project_run_wake',
+      'project_memory_start',
+      'project_memory_stop',
+    ].includes(kind)
+  )
     return yield* Effect.fail(projectError('invalid', 422))
   return yield* projectTransaction(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       if (kind === 'project_run_wake') return yield* claimWakes(random)
       const predicate =
-        kind === 'project_run_start'
-          ? sql`r.state='starting' AND r.stop_requested_at IS NULL AND a.lease_run_id=r.id AND a.lease_epoch=r.lease_epoch AND a.lease_until>clock_timestamp() AND pr.status='active'`
-          : sql`r.stop_requested_at IS NOT NULL AND r.stop_acked_at IS NULL`
+        kind === 'project_memory_start'
+          ? sql`r.memory_job_id IS NOT NULL AND r.state='starting' AND r.stop_requested_at IS NULL AND r.memory_claim_until>clock_timestamp() AND pr.status='active' AND EXISTS(SELECT 1 FROM project_memory_jobs j WHERE j.id=r.memory_job_id AND j.attempt_id=r.id)`
+          : kind === 'project_run_start'
+            ? sql`r.memory_job_id IS NULL AND r.state='starting' AND r.stop_requested_at IS NULL AND a.lease_run_id=r.id AND a.lease_epoch=r.lease_epoch AND a.lease_until>clock_timestamp() AND pr.status='active'`
+            : kind === 'project_memory_stop'
+              ? sql`r.memory_job_id IS NOT NULL AND r.stop_requested_at IS NOT NULL AND r.stop_acked_at IS NULL`
+              : sql`r.memory_job_id IS NULL AND r.stop_requested_at IS NOT NULL AND r.stop_acked_at IS NULL`
       const rows = yield* sql<CommandRow>`WITH candidates AS MATERIALIZED(
  SELECT p.node_id,p.conn_id FROM node_presence p JOIN nodes n ON n.id=p.node_id CROSS JOIN LATERAL(
  SELECT r.id,r.command_next_at FROM agent_runs r JOIN project_agents a ON a.id=r.agent_id JOIN projects pr ON pr.id=a.project_id

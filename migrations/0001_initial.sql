@@ -16,6 +16,8 @@ CREATE TABLE agent_runs (
     provider text NOT NULL,
     model text NOT NULL,
     placement_reason text NOT NULL,
+    memory_job_id uuid,
+    memory_claim_until timestamp with time zone,
     started_at timestamp with time zone DEFAULT now() NOT NULL,
     ended_at timestamp with time zone,
     end_reason text,
@@ -263,6 +265,39 @@ CREATE TABLE project_agents (
     CONSTRAINT project_agents_check CHECK (((lease_run_id IS NULL) = (lease_until IS NULL))),
     CONSTRAINT project_agents_lease_epoch_check CHECK ((lease_epoch >= 0))
 );
+
+CREATE TABLE project_memory_jobs (
+    id uuid PRIMARY KEY,
+    employee_id uuid NOT NULL,
+    project_id uuid NOT NULL,
+    conversation_id uuid NOT NULL,
+    kind text NOT NULL CHECK (kind IN ('consolidation','embedding')),
+    input_seq bigint NOT NULL,
+    through_seq bigint NOT NULL,
+    policy_version text NOT NULL DEFAULT '1',
+    source_ids uuid[] NOT NULL DEFAULT '{}',
+    cursor_index integer NOT NULL DEFAULT 0,
+    cursor_offset integer NOT NULL DEFAULT 0,
+    state text NOT NULL DEFAULT 'pending' CHECK (state IN ('pending','claimed','running','completed','cancelled')),
+    attempt_id uuid,
+    claim_epoch bigint NOT NULL DEFAULT 0,
+    attempts integer NOT NULL DEFAULT 0,
+    next_attempt_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    waiting_reason text NOT NULL DEFAULT '',
+    last_error text NOT NULL DEFAULT '',
+    usage jsonb,
+    updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    UNIQUE(conversation_id,kind,input_seq,policy_version)
+);
+CREATE TABLE project_memory_chunks (
+    job_id uuid NOT NULL REFERENCES project_memory_jobs(id),
+    cursor_index integer NOT NULL,
+    cursor_offset integer NOT NULL,
+    request_hash text NOT NULL,
+    result jsonb NOT NULL,
+    PRIMARY KEY(job_id,cursor_index,cursor_offset)
+);
+CREATE INDEX project_memory_jobs_due ON project_memory_jobs(next_attempt_at) WHERE state='pending';
 
 CREATE TABLE project_memory_state (
  employee_id uuid NOT NULL, project_id uuid NOT NULL, knowledge_epoch bigint NOT NULL DEFAULT 0,
@@ -543,8 +578,8 @@ ALTER TABLE ONLY thread_events ALTER COLUMN id SET DEFAULT nextval('thread_event
 
 ALTER TABLE ONLY thread_outbox ALTER COLUMN id SET DEFAULT nextval('thread_outbox_id_seq'::regclass);
 
-ALTER TABLE ONLY agent_runs
-    ADD CONSTRAINT agent_runs_agent_id_lease_epoch_key UNIQUE (agent_id, lease_epoch);
+CREATE UNIQUE INDEX agent_runs_agent_epoch ON agent_runs(agent_id,lease_epoch) WHERE memory_job_id IS NULL;
+CREATE UNIQUE INDEX agent_runs_memory_epoch ON agent_runs(memory_job_id,lease_epoch) WHERE memory_job_id IS NOT NULL;
 
 ALTER TABLE ONLY agent_runs
     ADD CONSTRAINT agent_runs_pkey PRIMARY KEY (id);
@@ -834,6 +869,9 @@ ALTER TABLE ONLY project_memory_contexts ADD FOREIGN KEY(employee_id,conversatio
 ALTER TABLE ONLY project_memory_contexts ADD FOREIGN KEY(employee_id,project_id) REFERENCES projects(employee_id,id);
 CREATE TRIGGER project_memory_contexts_append_only BEFORE DELETE OR UPDATE ON project_memory_contexts FOR EACH ROW EXECUTE FUNCTION reject_project_history_mutation();
 ALTER TABLE ONLY project_memory_sources ADD FOREIGN KEY(employee_id,project_id) REFERENCES projects(employee_id,id);
+ALTER TABLE ONLY project_memory_jobs ADD FOREIGN KEY(employee_id,project_id) REFERENCES projects(employee_id,id);
+ALTER TABLE ONLY project_memory_jobs ADD FOREIGN KEY(employee_id,conversation_id) REFERENCES conversations(employee_id,id);
+ALTER TABLE ONLY agent_runs ADD FOREIGN KEY(memory_job_id) REFERENCES project_memory_jobs(id);
 
 ALTER TABLE ONLY projects
     ADD CONSTRAINT projects_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES employees(id);

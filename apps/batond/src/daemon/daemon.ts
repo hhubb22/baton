@@ -273,6 +273,8 @@ async function connected(options: {
         case 'project_runtime.result':
           if (synced) projectRPC.receive(env.correlation_id, body)
           break
+        case 'project_memory_start':
+        case 'project_memory_stop':
         case 'project_run_start':
         case 'project_run_stop':
         case 'project_run_wake':

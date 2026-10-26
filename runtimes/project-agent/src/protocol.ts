@@ -115,6 +115,54 @@ const toolResultSchema = Schema.Union([
 const recordSchema = Schema.Record(Schema.String, Schema.Unknown)
 const resultSchemas = {
   bootstrap: bootstrapSchema,
+  memory_bootstrap: Schema.Struct({
+    job_id: Schema.String,
+    kind: Schema.Literals(['consolidation', 'embedding']),
+    provider: Schema.String,
+    model: Schema.String,
+    max_model_calls: sequence,
+    max_duration_ms: sequence,
+    max_changes: sequence,
+    cursor_index: sequence,
+    cursor_offset: sequence,
+  }),
+  read_sources: Schema.Struct({
+    done: Schema.Boolean,
+    cursor_index: sequence,
+    cursor_offset: sequence,
+    source: Schema.optionalKey(
+      Schema.Struct({
+        id: Schema.String,
+        role: Schema.String,
+        source_hash: Schema.String,
+        text: Schema.String,
+        offset: sequence,
+        next_offset: sequence,
+        has_more: Schema.Boolean,
+        suppressed: Schema.Boolean,
+      }),
+    ),
+  }),
+  lookup_items: recordSchema,
+  commit_chunk: Schema.Struct({
+    done: Schema.Boolean,
+    cursor_index: Schema.optionalKey(sequence),
+    cursor_offset: Schema.optionalKey(sequence),
+  }),
+  pending_embeddings: Schema.Struct({
+    memory_embedding: Schema.NullOr(embeddingConfigSchema),
+    entries: Schema.Array(
+      Schema.Struct({
+        item_id: Schema.String,
+        revision: sequence,
+        config_id: Schema.String,
+        embedding_text_hash: Schema.String,
+        text: Schema.String,
+      }),
+    ),
+  }),
+  commit_embedding: Schema.Struct({ accepted: Schema.Boolean }),
+  defer_embedding: recordSchema,
   read_events: Schema.Struct({
     events: Schema.NullOr(Schema.mutable(Schema.Array(eventSchema))),
     last_seq: sequence,

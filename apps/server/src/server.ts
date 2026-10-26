@@ -247,13 +247,20 @@ export const startServer = (
           placementCursor = agentId
         }
         if (candidates.length < 32) placementCursor = ''
+        await run('schedule', Projects.scheduleMemoryJobs())
       } catch {
         // Committed leases and persistent due times are revisited after recovery.
       } finally {
         placing = false
       }
     }
-    const projectKinds = ['project_run_start', 'project_run_stop', 'project_run_wake'] as const
+    const projectKinds = [
+      'project_run_start',
+      'project_run_stop',
+      'project_run_wake',
+      'project_memory_start',
+      'project_memory_stop',
+    ] as const
     const sendingProjects = new Set<(typeof projectKinds)[number]>()
     const dispatchProjects = async (kind: (typeof projectKinds)[number]) => {
       if (sendingProjects.has(kind) || controller.signal.aborted) return

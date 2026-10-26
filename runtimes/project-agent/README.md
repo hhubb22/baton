@@ -20,6 +20,14 @@ Runtime 使用同一份 provider 注册表生成执行实例、模型目录、�
 
 batond 检查版本 `0.1.0`、登录状态和租约后，在空控制目录启动 `run`。正常安装使用 stdio；独立运行也支持 TECH 规定的本地 IPC 环境变量。Runtime 从不加载项目目录中的 AGENTS.md、skills、扩展或 MCP。
 
+## 后台记忆与 Embedding
+
+`batond project-runtime embedding-key <profile>` 从 stdin 保存设备 Embedding 密钥，profile 为 1～64 位小写字母、数字或连字符，文件保存在现有 Runtime 凭据目录的 embeddings 子目录。Project 只保存端点、模型和可选 profile；省略 profile 表示明确使用匿名端点，SDK 不发送 Authorization。聊天 OAuth 不用于 Embedding。
+
+`project-runtime memory` 使用同一 stdio、私有目录、watchdog 和宿主进程账本，probe 声明 memory_protocol=1。中心按 attempt/run 身份授权，后台操作为 memory_bootstrap、read_sources、lookup_items、commit_chunk、pending_embeddings、commit_embedding、defer_embedding、finish 和 report_failure，不能调用前台业务工具。整理只读已完成批次保存的来源分片，提案经中心统一 applyChange 与修订、抑制、证据检查后提交。每次最多 8 个模型请求、5 分钟，核心或冲突提案增加一次核验；分片提交后才推进游标。当前提取只使用用户和具体执行来源，agent_report 作为历史保留，不独自形成后台知识。
+
+后台只在设备空闲时运行，前台待处理时先撤销后台 claim，实际回收后释放占用。向量生成独立于整理，不要求聊天登录；向量失败保留 pending 并按 1、5、15 分钟退避。后台状态、来源游标、等待、错误和用量保存在中心工作记录，用量未提供时为未知；请求用量另记设备 stderr，不记录查询或正文。
+
 ## 模型请求与持久化
 
 `prompt_version=1` 选择固定的角色提示词，标题和目标来自当前对话的提示词快照。快照随 assistant 的 `pi-ai/1` payload 一起保存；恢复时复用最早保留的快照。生成压缩摘要并写入新快照时才采用新的标题和目标；只清理工具结果时沿用原快照。未知版本拒绝运行。
@@ -32,7 +40,7 @@ batond 检查版本 `0.1.0`、登录状态和租约后，在空控制目录启�
 
 assistant 的 `message_end` 监听器先等待 `append_event` 提交，再按消息内的顺序发出 `call_tool`。每个工具结果由 Coordinator 保存；后续模型请求使用中心保存的结果。Runtime 的工具执行模式为 `sequential`。恢复时读取已有结果，只为缺少结果的工具调用发送原 ID；最后一条非压缩事件为 input 或 tool_result 时调用 `continue()`，为无工具 assistant 时领取下一批输入；压缩事件不改变未完成轮次的恢复位置。
 
-项目记忆使用 `memory.recall/read/remember/correct/retire/restore`。写入引用已保存的原始来源，`memory.read` 可通过主对话序号及队列 input_id 登记来源，中心决定角色、归属与可读边界。新知识合并独立证据，修改检查当前修订，停用恢复须有用户请求证据；操作标识由中心从工具调用身份生成。事实变化使用带有效时间的 supersede，普通编辑保持停用或替代关系。每次模型请求前通过 prepare_context 保存并注入当前核心要求和相关片段，assistant payload 记录 memory_context_id。知识变化或自然到期使新输出失效时，Runtime 刷新上下文并在模型调用预算内重试；恢复先完成原工具调用和 pending nodes.exec。中心提供 embedding_query 与绑定查询向量契约，默认关闭 Embedding，当前 Runtime 继续词法召回；设备 Embedding SDK、密钥 CLI、后台生成、压缩后失效内容刷新和后台整理仍为 planned。
+项目记忆使用 `memory.recall/read/remember/correct/retire/restore`。写入引用已保存的原始来源，`memory.read` 可通过主对话序号及队列 input_id 登记来源，中心决定角色、归属与可读边界。新知识合并独立证据，修改检查当前修订，停用恢复须有用户请求证据；操作标识由中心从工具调用身份生成。事实变化使用带有效时间的 supersede，普通编辑保持停用或替代关系。每次模型请求前通过 prepare_context 保存并注入当前核心要求和相关片段，assistant payload 记录 memory_context_id。知识变化或自然到期使新输出失效时，Runtime 刷新上下文并在模型调用预算内重试；恢复先完成原工具调用和 pending nodes.exec。默认关闭 Embedding。启用时 Runtime 先调用 embedding_query，使用 OpenAI 7.19.0 SDK 生成向量，再把配置和查询哈希绑定结果交给 prepare_context；显式 memory.recall 的向量放在 call_tool payload，原工具 arguments 保持不变。缺凭据或端点请求失败只降级到词法召回。压缩后失效内容刷新仍为 planned。
 
 开发工作通过 `threads.create` 和 `threads.send` 交给执行 Agent，使用 `threads.get/read` 查询状态和回复，`threads.stop/archive` 停止当前一轮或归档 Thread。新建时按设备能力、用户要求和项目记忆选择 Agent 与模型；`threads.create` 的 `model` 省略时使用设备上该 Agent 的默认模型。`threads.send` 可用 `model` 指定下一轮模型，省略时沿用当前模型；设备须支持换模型，模型目录用于发现与补全，显式 ID 交给原生 Agent 判定，`steer` 沿用当前一轮模型。工具操作的 Thread 都属于本 Project，由 Project Agent 新建；用户随后可以在其中开启自己的轮次，回复按每轮第一条消息的发送方决定是否送回 Project Agent。`inbox.ask` 可用 `thread_id` 关联本 Project 的 Thread。
 

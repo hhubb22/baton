@@ -6,11 +6,11 @@ Basis: [行为规格 PM-01～23](PRODUCT.md)；代码基线 `35823e30cf0178be7d7
 
 ## Context
 
-条目、修订、来源、证据、操作去重与抑制记录已由 `project/memory/` 实现，员工 API 和前台工具共享事务内 `applyChange`。词法查询使用 PostgreSQL 有界候选与 Orama 3.1.18，支持状态和事实时间过滤。请求前自动保存核心要求与相关片段的不可变快照，新 assistant 和首次工具执行检查知识代次与期限。可选 Embedding 的中心配置、pending/ready 记录、查询绑定和临时向量排序已实现；设备 SDK、后台生成、设置界面、旧工具结果/摘要刷新和后台整理仍为 planned。[Project Agent TECH](../project-agent/TECH.md) 记录当前主对话、租约、工具与压缩实现。
+条目、修订、来源、证据、操作去重与抑制记录已由 `project/memory/` 实现，员工 API 和前台工具共享事务内 `applyChange`。词法查询使用 PostgreSQL 有界候选与 Orama 3.1.18，支持状态和事实时间过滤。请求前自动保存核心要求与相关片段的不可变快照，新 assistant 和首次工具执行检查知识代次与期限。可选 Embedding 的中心配置、设备 SDK、pending/ready 记录、查询绑定和临时向量排序已实现。最终回复事务登记整理工作，受限 memory Runtime 在空闲设备处理来源分片与待生成向量；设置界面已提供公开配置。旧工具结果/摘要刷新仍为 planned。[Project Agent TECH](../project-agent/TECH.md) 记录当前主对话、租约、工具与压缩实现。
 
 | 已核对的入口 | 可复用的机制 | 本次需要改变的部分 |
 | --- | --- | --- |
-| `apps/server/src/project/memory/` | 统一变更入口、修订/操作去重、来源证据、事实时间、停用与恢复 | 词法检索、自动召回、请求快照和可选向量记录/排序；后台生成 planned |
+| `apps/server/src/project/memory/` | 统一变更入口、修订/操作去重、来源证据、事实时间、停用与恢复 | 词法检索、自动召回、请求快照、可选向量记录/排序与后台生成 |
 | `apps/server/src/project/events.ts` | 输入批次领取、assistant 保存、事件标识去重 | 最终回复事务内登记整理工作，关联请求上下文 |
 | `apps/server/src/project/runtime.ts` | 节点身份、主租约、工具结果与副作用同事务 | 自动召回、知识代次检查；后台使用独立授权 |
 | `runtimes/project-agent/src/context.ts`、`runtime.ts` | 确定性历史构造、模型预算、顺序工具、保存屏障 | 注入本次有效记忆，后台受限运行模式 |
@@ -47,7 +47,7 @@ flowchart TD
 | Runtime `context.ts` | 依据已保存的快照构造模型视图，不重新查询数据库决定旧请求看过什么 |
 | `packages/protocol/src/project-memory.ts` | 领域 DTO 与约束；`node.ts`、`http-api.ts` 组合传输，不反向依赖传输层 |
 
-`project/memory/index.ts` 统一导出变更、读取、召回、请求快照和 Embedding 入口。`change.ts` 同事务更新检索投影与向量工作；`sources.ts` 登记原始来源并生成片段，`read.ts` 统一状态与事实时间过滤。`projection.ts` 保存词项，`recall.ts` 组织 Orama 排序、RRF 和预算，`vectors.ts` 只载入有效向量元数据。`context.ts` 提供 embeddingQuery、prepareContext 与 checkMemoryContext；`embeddings.ts` 提供配置、待生成记录、提交和有限退避。标题索引仍供现有压缩路径使用，其替换及旧派生内容刷新为 planned。后台将复用普通运行的 provider、凭据和进程回收实现，工具权限按模式固定。
+`project/memory/index.ts` 统一导出变更、读取、召回、请求快照和 Embedding 入口。`change.ts` 同事务更新检索投影与向量工作；`sources.ts` 登记原始来源并生成片段，`read.ts` 统一状态与事实时间过滤。`projection.ts` 保存词项，`recall.ts` 组织 Orama 排序、RRF 和预算，`vectors.ts` 只载入有效向量元数据。`context.ts` 提供 embeddingQuery、prepareContext 与 checkMemoryContext；`embeddings.ts` 提供配置、待生成记录、提交和有限退避。标题索引仍供现有压缩路径使用，其替换及旧派生内容刷新为 planned。后台复用普通运行的 provider、凭据、agent_runs 和进程回收实现，工具权限按 memory 模式固定。
 
 ## 数据与知识变更
 
@@ -69,7 +69,7 @@ flowchart TD
 | `project_memory_search_documents` | 条目修订或原始来源分片、检索字段文本与候选词项索引；属于可重建数据 |
 | `project_memory_embeddings` | 条目修订、Embedding 配置身份、文本哈希、状态、维度与向量；只读当前有效组合 |
 
-现有表包含 state、items、revisions、sources、evidence、changes、suppressions、contexts、search_documents 和 embeddings；后台 jobs 仍为 planned。知识变更推进 knowledge_epoch，词项投影、配置或向量变化推进 search_generation。修订响应统一使用 updated_at 表示该次修订的记录时间；effective 表示该修订是否为当前有效知识，retracted 标明被纠正的断言。来源文本、修订、证据与操作结果只追加，停用组用 retirement_id 关联；显式恢复只解除该组的 retired 抑制，不解除 retracted 抑制。
+现有表包含 state、items、revisions、sources、evidence、changes、suppressions、contexts、search_documents 和 embeddings；后台 jobs 和分片回执已实现。知识变更推进 knowledge_epoch，词项投影、配置或向量变化推进 search_generation。修订响应统一使用 updated_at 表示该次修订的记录时间；effective 表示该修订是否为当前有效知识，retracted 标明被纠正的断言。来源文本、修订、证据与操作结果只追加，停用组用 retirement_id 关联；显式恢复只解除该组的 retired 抑制，不解除 retracted 抑制。
 
 主题视图由当前条目按主题确定性分组，携带条目 ID 与修订。首期不再维护可独立编辑、可与条目冲突的主题正文。需要压缩展示时只生成带引用的预览，预览不作为新证据。
 
@@ -155,7 +155,7 @@ PostgreSQL 的 GIN 词项索引用于候选定位。tsvector 由预处理后的 
 
 ## 可选 Embedding 与混合检索（PM-21～23）
 
-中心配置、向量持久记录、绑定查询和 Orama 融合入口已实现；设备 SDK、后台生成与设置界面仍为 planned。Project 的 `memory_embedding` 默认为 null；用户设置 `base_url`、`model` 和可选 `credential_profile`。中心对实际配置变化生成新的 `config_id`，相同配置重存保留原 ID；关闭设 null。公开配置不包含 API key，URL 只接受 HTTP(S) 且不接收 userinfo 凭据。credential_profile 使用现有 FileCredentials 的小写字母、数字和连字符名称，长度 1～64。模型 ID 不设目录或版本白名单。
+中心配置、设备 OpenAI SDK、密钥 CLI、后台生成、绑定查询、Orama 融合与设置界面已实现。Project 的 `memory_embedding` 默认为 null；用户设置 `base_url`、`model` 和可选 `credential_profile`。中心对实际配置变化生成新的 `config_id`，相同配置重存保留原 ID；关闭设 null。公开配置不包含 API key，URL 只接受 HTTP(S) 且不接收 userinfo 凭据。credential_profile 使用现有 FileCredentials 的小写字母、数字和连字符名称，长度 1～64。模型 ID 不设目录或版本白名单。
 
 设备通过 `batond project-runtime embedding-key <profile>` 从标准输入保存密钥，复用私有凭据存储的 embeddings 子目录。未指定 profile 表示用户明确选择无密钥端点；配置了 profile 而设备没有它时，仅向量路径报告缺凭据。主对话 OAuth 与 Embedding 密钥分别使用。Runtime 通过 OpenAI SDK 调用用户配置的 OpenAI-compatible embeddings 端点，中心不发起模型请求。
 
@@ -202,7 +202,7 @@ PostgreSQL 的 GIN 词项索引用于候选定位。tsvector 由预处理后的 
 
 登记以持久最终回复为准，不等待 Runtime 的 `finish`，也不要求先完成一次提取才允许 compaction。主对话原始事件保持完整，后台直接从源记录读取。
 
-每个工作保存不可变来源边界和可推进的分片游标。同一 Project 按 input_seq 顺序整理，不以模型完成顺序判断事实新旧；前序工作等待重试时，后序保留排队，直接用户修改与前台对话照常进行。初始单片规范文本最多 48 KiB，最多 16 个变更，结果 JSON 不超过 160 KiB。大事件可按文本边界分页，证据仍定位到原来源。片段必要的相邻内容标记为 context-only，不能因分片重叠增加独立证据。
+每个工作保存不可变来源边界和可推进的分片游标。同一 Project 按 input_seq 顺序整理，不以模型完成顺序判断事实新旧；前序工作等待重试时，后序保留排队，直接用户修改与前台对话照常进行。当前每片读取一个来源，规范文本最多 32 KiB，最多 16 个变更，结果 JSON 不超过 160 KiB。大事件可按文本边界分页，证据仍定位到原来源。片段必要的相邻内容标记为 context-only，不能因分片重叠增加独立证据。
 
 | 工作状态 | 进入条件 | 后续处理 |
 | --- | --- | --- |
@@ -220,12 +220,12 @@ PostgreSQL 的 GIN 词项索引用于候选定位。tsvector 由预处理后的 
 
 | 传输 | 消息与操作 | 关键约束 |
 | --- | --- | --- |
-| 中心 → batond | `project_memory_start/stop`，带 job/attempt/claim 身份 | 以 attempt_id 为稳定命令标识，先保存投递进度再发送 |
-| batond → 中心 | `project_memory.request`；`started/renew/exited` | 宿主生成管理请求，Runtime 无权续租 |
-| 后台 Runtime → 宿主 → 中心 | `bootstrap/read_sources/lookup_items/commit_chunk/finish/report_failure` | 只可读取工作范围、相关知识与提交提案，宿主覆盖运行身份 |
+| 中心 → batond | `project_memory_start/stop`，run_id 为 attempt_id、lease_epoch 为 claim_epoch，附 memory_kind | 以 attempt_id 为稳定命令标识，先保存投递进度再发送 |
+| batond → 中心 | 复用 `project_runtime.request` 包装；`started/renew/exited/stopped` | 中心从持久 run 的 memory_job_id 选择后台授权，宿主生成管理请求，Runtime 无权续租 |
+| 后台 Runtime → 宿主 → 中心 | `memory_bootstrap/read_sources/lookup_items/commit_chunk/pending_embeddings/commit_embedding/defer_embedding/finish/report_failure` | 只可读取工作范围、相关知识与提交提案，宿主覆盖运行身份 |
 | 中心 → 后台 | `{ok, code?, data?}` | 单帧不超过 192 KiB，正文分页，未知操作拒绝 |
 
-`bootstrap` 返回来源边界、游标、策略、provider/model、预算及读取入口。`lookup_items` 只读本 Project，并返回目标当前修订。`commit_chunk` 包含稳定 `commit_id`、预期游标、已读来源哈希、变更列表与证据。模型不发送 SQL 或任意业务工具调用。
+`memory_bootstrap` 返回工作身份、种类、游标、provider/model 与预算。工作保存最终回复事务内登记的不可变 source_ids；read_sources 按 cursor_index/cursor_offset 读取原来源 UTF-8 字节页。`lookup_items` 只读本 Project，并返回目标当前修订。`commit_chunk` 包含预期游标、变更列表、来源哈希和证据。中心以 job_id 与游标作为稳定分片身份，在 project_memory_chunks 保存请求哈希与结果，并从分片身份和提案序号生成 operation_id；相同请求返回已保存回执。模型不发送 SQL 或任意业务工具调用。
 
 claim 期限与现有 Project 运行一致：中心 60 秒，batond 每 20 秒续租，58 秒未成功则停止进程，计入系统休眠。续租和写入均校验当前节点连接与归属。重认领生成新的 attempt_id 和 claim_epoch，旧尝试不可提交。可能重复发生模型计算，持久知识修改通过操作标识去重。
 
@@ -233,11 +233,11 @@ claim 期限与现有 Project 运行一致：中心 60 秒，batond 每 20 秒�
 
 ### 整理流程与预算
 
-后台读取尚未处理的分片，提取结论及证据，查询相关条目，生成变更提案。普通事实允许一次模型请求完成提取和对照；改动核心要求、矛盾或大范围替代时增加独立核验。响应结构、证据范围或容量无效时不提交，按预算重新生成。
+后台读取尚未处理的分片，提取结论及证据，查询相关条目，生成变更提案。普通事实允许一次模型请求完成提取和对照；改动核心要求、纠正、争议或替代时增加独立核验。当前后台只从 user/execution 来源提取，agent_report 单独保留为历史，不作为独立支持。响应结构、证据范围或容量无效时不提交，按预算重新生成。
 
 初始每次尝试最多 8 次模型调用、5 分钟，沿用节点的输出上限；时长截止可中断正在进行的模型请求。每成功提交一个分片才推进游标；预算用尽但仍有未处理内容时释放尝试，工作回到 pending。有进展可继续认领，无进展的预算耗尽按失败退避，避免无休止地付费重算同一片段。失败按 1、5、15 分钟退避，此后上限 15 分钟；明确认证问题保持 pending 并设置等待原因，不计入模型错误重试。后台不修改前台 conversation 的 failure_count，不生成重复系统事项。
 
-每节点后台并发初始为 1。`maxConcurrentProjects > 1` 时，后台与进程清理占用计入总名额，至少保留一个前台名额；存在前台排队时不启动后台。任意容量下，若新前台因正在运行的后台而缺少名额，均撤销该后台 claim、登记 stop 并在回收后优先交付前台；容量为 1 时只允许在前台无工作时运行后台。抢占和前台派发分两个短事务，不能持有前台 Project/节点锁等待另一个 Project 的后台锁或进程回收。回收未确认前保留实际占用并显示原因，不谎报前台已启动。共享 provider 的外部限流仍可能影响两类请求，不能宣称进程名额隔离等于订阅配额隔离。
+首个内部版本只在员工没有运行中或待处理的前台工作、节点没有未确认回收的 Project 进程时启动一个后台任务。整理按输入顺序处理，向量任务独立登记，不因向量退避阻塞整理。新前台放置之前先在独立事务撤销后台 claim、登记 stop；agent_runs.stop_acked_at 确认前继续计入占用，随后前台按原容量机制派发。后台不设置额外预留名额或独立进程池。共享 provider 的外部限流仍可能影响两类请求。
 
 Project 暂停或归档在 Agent 锁下撤销后台 claim 并登记 stop。暂停保留 pending 工作；归档拒绝所有新变更。前台单次 stop 不取消已闭合批次的工作。切换 provider/model 作废后台旧尝试，后续认领使用新配置，已提交分片保留。
 
@@ -252,7 +252,7 @@ Project 暂停或归档在 Agent 锁下撤销后台 claim 并登记 stop。暂�
 | 最终回复事务提交前 | 原输入仍待完成，无半条工作 |
 | 最终回复已提交但尚未派发 | 工作已持久保存，调度继续 |
 | 分片提交前进程结束 | 游标不变，允许重复计算 |
-| 分片已提交而回执丢失 | 同 commit_id 返回原结果，不重复变更 |
+| 分片已提交而回执丢失 | 同 job_id/游标和请求哈希返回原结果，不重复变更 |
 | 用户修改后后台迟到 | 修订冲突/抑制检查失败，不能覆盖用户 |
 | claim 过期或 Project 已暂停/归档 | 旧提交拒绝，已提交知识保留 |
 
@@ -311,29 +311,29 @@ Project 暂停或归档在 Agent 锁下撤销后台 claim 并登记 stop。暂�
 
 当前 schema 使用规范条目和修订模型，不提供旧实验数据升级或双写兼容。记忆工具、DTO 与页面使用当前结构；原始历史及通用权限、事务和进程辅助设施保留。压缩使用按当前有效性过滤的标题索引，后续请求快照将替换该索引。检索、快照和执行检查已有固定本地用例；旧派生内容的完整刷新和真实语义质量评估仍为 planned。
 
-Project Agent 行为、技术设计及 Runtime/中心 README 描述当前手动维护与前台工具。自动召回与中心可选向量入口已实现；后台机制、设备 SDK、设置 UI、压缩与旧工具结果刷新继续保留 planned。
+Project Agent 行为、技术设计及 Runtime/中心 README 描述当前手动维护与前台工具。自动召回、后台整理、设备 SDK、密钥 CLI、后台向量生成和设置 UI 已实现。后台诊断保存在 project_memory_jobs 的 state、cursor_index/cursor_offset、waiting_reason、last_error、next_attempt_at 与 usage，向量失败原因保存在 project_memory_embeddings；后台不更新 conversation.failure_count。压缩与旧工具结果刷新继续保留 planned。
 
 ## Testing and validation
 
 | 需求 | 设置与观察 | 失败条件 | 位置 | Status |
 | --- | --- | --- | --- | --- |
-| PM-01、04、08 | 跨员工/Project 读取、伪造证据、停用后重提取 | 越权、来源升级、旧值复活 | 中心 PostgreSQL 集成 | partial：员工/Project 隔离、来源角色与范围、停用/纠正后旧证据重放已验证；后台 planned |
-| PM-02、05 | 回复/工作登记事务中断；分片回执丢失、重试 | 缺工作、重复知识或半提交 | 中心事务故障注入 | planned |
-| PM-06～09 | 时间变化、原始错误、条件并存、并发编辑 | 错误历史被视为事实，静默覆盖或自动恢复 | 变更单元测试 + 数据库集成 | partial：数据库验证冲突、去重、修订撤回、事实时间、显式恢复和历史 recall；后台 planned |
+| PM-01、04、08 | 跨员工/Project 读取、伪造证据、停用后重提取 | 越权、来源升级、旧值复活 | 中心 PostgreSQL 集成 | partial：员工/Project 隔离、来源角色与范围、停用/纠正后旧证据重放已验证；后台抑制重放未单独验证 |
+| PM-02、05 | 最终回复登记、重复提交分片与完成游标 | 缺工作或重复知识 | 中心 PostgreSQL 集成 | partial：最终回复在 finish 前登记、重复提交返回同回执、游标与知识持久化；事务故障注入未验证 |
+| PM-06～09 | 时间变化、原始错误、条件并存、并发编辑 | 错误历史被视为事实，静默覆盖或自动恢复 | 变更单元测试 + 数据库集成 | partial：数据库验证冲突、去重、修订撤回、事实时间、显式恢复和历史 recall；后台并发编辑未单独验证 |
 | PM-10～12 | 固定中英语料、标识符、同义表达、候选截断 | 无排序、失效内容混入或未报告缺口 | 词法单测与中心固定语料集成 | verified：中英混合、技术路径、别名、长片段、候选截断和状态过滤；真实同义理解单独评估 |
 | PM-13～15 | 核心超额、多次压缩、事实自然到期、旧摘要/工具结果和请求恢复 | 要求丢失、派生内容再提取、过期副作用或重复执行 | Runtime 本地模型替身 + 中心集成 | partial：自动注入、核心预算、自然到期、失效输出、pending 恢复与首次执行检查；旧摘要/工具结果刷新 planned |
-| PM-17～19 | 断线、超时、认证失败、前台抢占和进程回收 | 前台饿死、旧 claim 可提交、占用虚报 | batond 包内进程替身 | planned |
+| PM-17～19 | 后台模式、无聊天登录的向量任务与停止回收 | 无法启动、占用虚报 | batond 包内进程替身 | partial：后台启动、账本种类与停止后进程回收已验证；暂停恢复、抢占竞争与断线未验证 |
 | PM-02、10、15、18 | HTTP→中心→WSS→后台 Runtime→知识→新前台 Runtime | 形成/读取链路断裂，恢复重复副作用 | 一条跨 app 本地 E2E | planned |
 | PM-16、17 | 按需来源与历史、冲突草稿、停用/恢复、持续故障提示 | 列表混入修订或元信息；后台状态打扰前台 | Web 组件测试 | partial：来源按需读取、历史时间、冲突草稿、停用/恢复已验证；后台提示 planned |
 | PM-18、19 | 搬迁 SEA、空 PATH 与临时 HOME 下调用 memory 模式，检查启动、取消与私有文件 | 依赖源码路径、缺失分派或进程未回收 | 现有安装包检查 | planned |
-| PM-21～23 | 本地 Embedding HTTP 替身、配置切换、迟到提交、无凭据、关闭与端点失败 | 密钥上传、旧向量复活、关闭仍调用、降级阻塞前台 | 中心固定向量与 Runtime/跨 app 本地替身 | partial：公开配置、迟到提交、修订/查询绑定、历史向量、长片段、pending 和有限退避；SDK、HTTP 替身、UI 与 SEA 验证 planned |
+| PM-21～23 | 本地 Embedding HTTP 替身、配置切换、迟到提交、无凭据、关闭与端点失败 | 密钥上传、旧向量复活、关闭仍调用、降级阻塞前台 | 中心固定向量与 Runtime/跨 app 本地替身 | partial：公开配置、迟到提交、修订/查询绑定、历史向量、长片段、pending 和有限退避；Runtime 本地 SDK/HTTP 替身验证匿名端点、后台生成和查询向量绑定，SEA 实际运行未验证 |
 | PM-20 | 固定模型与历史，比较原始检索、词法召回、可选混合召回与后台整理 | 使用过时知识、来源不支持或成本无记录 | 显式手动质量评估 | planned |
 
 已有诊断原型用六份仓库文档的 295 个段落、八条人工查询验证分字段 BM25 和中文二元组可生成相关候选。它没有独立保留集或向量对照；未证明真实记忆质量，不作为上述验收通过证据。正式夹具需入库、注明来源，并将开发调参样本与保留评估样本分开。
 
 质量报告分别记录有效事实命中、历史时间正确、过时信息误用、无依据断言、纠正后的实际动作及额外 token/延迟。固定同一模型、历史与预算比较各阶段，先取得基线再制定质量阈值。CI 只使用本地替身和固定录制；真实在线模型评估显式手动运行，不作为合入或功能开放前提。
 
-文档检查运行格式、链接及需求/验收编号核对；实施阶段按 AGENTS.md 运行受影响包检查、Runtime 测试和所需集成验证。打包与后台进程行为仍为 planned，现有自动化结果不作为其通过证据。
+验证限于受影响代码静态检查、中心持久主链路、Runtime 本地模型/Embedding HTTP 替身与设备后台进程启动回收。安装包检查已加入 memory 模式的无模型握手；SEA 实际运行、跨平台与真实模型质量仍需单独验证。
 
 ## 资料依据与取舍
 

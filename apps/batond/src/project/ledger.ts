@@ -7,6 +7,7 @@ import type { ProcessRecord } from '../platform/process.ts'
 export interface RunRow {
   run_id: string
   lease_epoch: number
+  kind: string
   state: string
   reason: string
   cleanup_complete: number
@@ -30,7 +31,7 @@ export const makeProjectLedger = Effect.fn('Project.makeProjectLedger')(function
   yield* sql.withTransaction(
     Effect.gen(function* () {
       yield* sql.unsafe(`CREATE TABLE IF NOT EXISTS project_runtime_runs(
-      run_id TEXT PRIMARY KEY,lease_epoch INTEGER NOT NULL,state TEXT NOT NULL,reason TEXT NOT NULL DEFAULT '',
+      run_id TEXT PRIMARY KEY,lease_epoch INTEGER NOT NULL,kind TEXT NOT NULL DEFAULT 'foreground',state TEXT NOT NULL,reason TEXT NOT NULL DEFAULT '',
       cleanup_complete INTEGER NOT NULL DEFAULT 0,cleanup_acked INTEGER NOT NULL DEFAULT 0,
       cleanup_next_at INTEGER NOT NULL DEFAULT 0,cleanup_attempts INTEGER NOT NULL DEFAULT 0)`)
       yield* sql.unsafe('CREATE TABLE IF NOT EXISTS project_processes(role TEXT PRIMARY KEY,payload TEXT NOT NULL)')
@@ -46,8 +47,8 @@ export const makeProjectLedger = Effect.fn('Project.makeProjectLedger')(function
       Effect.gen(function* () {
         const old = yield* get(c.run_id)
         if (old) return { inserted: false, row: old }
-        yield* sql`INSERT INTO project_runtime_runs(run_id,lease_epoch,state,reason,cleanup_complete)
-      VALUES(${c.run_id},${c.lease_epoch},${stopped ? 'exited' : 'starting'},${stopped ? 'stopped_before_start' : ''},${stopped ? 1 : 0})`
+        yield* sql`INSERT INTO project_runtime_runs(run_id,lease_epoch,kind,state,reason,cleanup_complete)
+      VALUES(${c.run_id},${c.lease_epoch},${c.type.startsWith('project_memory_') ? 'memory' : 'foreground'},${stopped ? 'exited' : 'starting'},${stopped ? 'stopped_before_start' : ''},${stopped ? 1 : 0})`
         return { inserted: true, row: (yield* get(c.run_id))! }
       }),
     )

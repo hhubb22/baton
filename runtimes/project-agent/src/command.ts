@@ -30,9 +30,9 @@ export async function runProjectRuntimeCLI(args: string[]): Promise<void> {
     console.log(JSON.stringify(await probe()))
     return
   }
-  if (command === 'login-api-key') {
-    const { provider: registration } = registeredProvider(provider)
-    if (!registration.auth.apiKey?.login) throw new Error('api_key_unsupported')
+  if (command === 'login-api-key' || command === 'embedding-key') {
+    if (command === 'login-api-key' && !registeredProvider(provider).provider.auth.apiKey?.login)
+      throw new Error('api_key_unsupported')
     if (process.stdin.isTTY) throw new Error('api_key_stdin_required')
     const chunks: Buffer[] = []
     let bytes = 0
@@ -42,7 +42,11 @@ export async function runProjectRuntimeCLI(args: string[]): Promise<void> {
       if (bytes > 16 * 1024) throw new Error('api_key_invalid')
       chunks.push(data)
     }
-    await loginApiKey(provider, new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)))
+    const key = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks))
+    if (command === 'embedding-key') {
+      const { saveEmbeddingKey } = await import('./embeddings.js')
+      await saveEmbeddingKey(provider, key)
+    } else await loginApiKey(provider, key)
     console.error('API key 已保存。')
     return
   }
@@ -109,9 +113,9 @@ export async function runProjectRuntimeCLI(args: string[]): Promise<void> {
     console.error('登录完成。')
     return
   }
-  if (command !== 'run')
+  if (command !== 'run' && command !== 'memory')
     throw new Error(
-      'usage: baton-project-runtime run|probe|login <provider>|login-device <provider>|login-api-key <provider> < key-file|--version',
+      'usage: baton-project-runtime run|memory|probe|login <provider>|login-device <provider>|login-api-key <provider> < key-file|embedding-key <profile> < key-file|--version',
     )
   const { values } = parseArgs({
     args: args.slice(1),
@@ -123,6 +127,28 @@ export async function runProjectRuntimeCLI(args: string[]): Promise<void> {
   const budget = {
     ...(values['max-output-tokens'] === undefined ? {} : { maxOutputTokens: Number(values['max-output-tokens']) }),
     ...(values['max-model-calls'] === undefined ? {} : { maxModelCalls: Number(values['max-model-calls']) }),
+  }
+  if (command === 'memory') {
+    const { runMemory } = await import('./memory.js')
+    const client = new StdioClient(process.stdin, process.stdout)
+    const cancel = new AbortController()
+    const abort = () => cancel.abort()
+    process.on('SIGTERM', abort)
+    process.on('SIGINT', abort)
+    process.stdin.on('close', abort)
+    try {
+      await runMemory(
+        checkedRPC((request) => client.call(request)),
+        budget.maxOutputTokens,
+        cancel.signal,
+      )
+    } finally {
+      process.off('SIGTERM', abort)
+      process.off('SIGINT', abort)
+      process.stdin.off('close', abort)
+      process.stdin.destroy()
+    }
+    return
   }
   const models = await runtimeModels()
   const { ProjectRuntime } = await import('./runtime.js')

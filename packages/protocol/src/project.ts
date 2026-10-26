@@ -193,7 +193,14 @@ export const ProjectThreadUpdate = Schema.Struct({
 export type ProjectThreadUpdate = typeof ProjectThreadUpdate.Type
 
 export const ProjectRunCommand = Schema.Struct({
-  type: Schema.Literals(['project_run_start', 'project_run_stop', 'project_run_wake']),
+  type: Schema.Literals([
+    'project_run_start',
+    'project_run_stop',
+    'project_run_wake',
+    'project_memory_start',
+    'project_memory_stop',
+  ]),
+  memory_kind: Schema.optionalKey(Schema.Literals(['consolidation', 'embedding'])),
   run_id: UUID,
   lease_epoch: NonNegativeInteger,
   provider: Schema.optionalKey(Text),
@@ -224,6 +231,13 @@ export const ProjectRuntimeRequest = Schema.Struct({
   operation: Schema.Literals([
     'bootstrap',
     'read_events',
+    'memory_bootstrap',
+    'read_sources',
+    'lookup_items',
+    'commit_chunk',
+    'pending_embeddings',
+    'commit_embedding',
+    'defer_embedding',
     'renew',
     'started',
     'stopped',

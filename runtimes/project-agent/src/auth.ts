@@ -65,7 +65,7 @@ export async function probe(store = credentials()) {
       ...(reason ? { reason } : {}),
     })
   }
-  return { version: VERSION, providers }
+  return { version: VERSION, memory_protocol: 1, providers }
 }
 export async function runtimeModels(store = credentials()) {
   const models = createModels({

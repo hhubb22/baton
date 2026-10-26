@@ -13,7 +13,7 @@ import { queueEmbeddings } from './embeddings.ts'
 import { estimatedTokens, MEMORY_HEADER, renderMemory } from './lexical.ts'
 
 type Content = typeof P.MemoryContent.Type
-export type MemoryActor = { type: 'employee' } | { type: 'foreground'; throughSeq: number }
+export type MemoryActor = { type: 'employee' } | { type: 'foreground' | 'background'; throughSeq: number }
 export interface MemoryChange {
   operation_id: string
   item_id?: string | undefined
@@ -136,8 +136,13 @@ export const applyChange = Effect.fn('applyMemoryChange')(function* (
     employeeId,
     projectId,
     evidence,
-    actor.type === 'foreground' ? actor.throughSeq : undefined,
+    actor.type !== 'employee' ? actor.throughSeq : undefined,
   )
+  if (
+    actor.type === 'background' &&
+    (['retire', 'restore'].includes(change.action) || !sources.some((s) => ['user', 'execution'].includes(s.role)))
+  )
+    return yield* Effect.fail(new AppError(422, 'invalid_evidence'))
   const hasUser = sources.some((s) => s.role === 'user')
   if (['retire', 'restore'].includes(change.action) && !hasUser)
     return yield* Effect.fail(new AppError(422, 'invalid_evidence'))
@@ -159,7 +164,7 @@ export const applyChange = Effect.fn('applyMemoryChange')(function* (
     evidence: readonly P.MemoryEvidence[]
   }>`SELECT id,item_id,kind,retirement_id,value_hash,evidence FROM project_memory_suppressions WHERE employee_id=${employeeId} AND project_id=${projectId} AND released_at IS NULL`
   if (
-    actor.type === 'foreground' &&
+    actor.type !== 'employee' &&
     suppressions.some((s) =>
       s.evidence.some((old) =>
         evidence.some(
@@ -169,7 +174,7 @@ export const applyChange = Effect.fn('applyMemoryChange')(function* (
     )
   )
     return yield* Effect.fail(new AppError(409, 'source_suppressed'))
-  if (actor.type === 'foreground' && ['add', 'support'].includes(change.action)) {
+  if (actor.type !== 'employee' && ['add', 'support'].includes(change.action)) {
     const replaced = yield* sql<{
       source_id: string
       start_byte: number

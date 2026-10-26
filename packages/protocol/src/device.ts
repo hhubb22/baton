@@ -267,6 +267,7 @@ export const RuntimeProvider = Schema.Struct({
 export type RuntimeProvider = typeof RuntimeProvider.Type
 
 export const ProjectRuntime = Schema.Struct({
+  memory_protocol: Schema.optionalKey(Schema.Literal(1)),
   version: RuntimeName,
   max_concurrent_projects: Schema.optionalKey(PositiveInteger),
   probed_at: Schema.optionalKey(Timestamp),
