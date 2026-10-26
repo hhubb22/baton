@@ -19,7 +19,7 @@ const styles = stylex.create({
     borderWidth: 0,
     borderRadius: radius.sm,
     backgroundColor: { default: colors.subtle, ':hover': colors.hover },
-    color: colors.link,
+    color: colors.accentText,
     cursor: 'pointer',
   },
 })

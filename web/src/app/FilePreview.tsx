@@ -14,7 +14,7 @@ import {
 import { fileSize, previewProblem, readFailure, shortenExcerpt, type PreviewView } from '../data/derive'
 import { useClient, useDevices, useFile, useFolders, useProjects, useThreads } from '../data/queries'
 import type { Device, FilePreview as FilePreviewData, FileReadOptions, ID, Reference } from '../data/types'
-import { fonts, shadow } from '../theme/base.stylex'
+import { fonts } from '../theme/base.stylex'
 import { text } from '../theme/text'
 import { colors, radius, space } from '../theme/tokens.stylex'
 import { Button, focusRing, IconButton } from '../ui/Button'
@@ -42,7 +42,7 @@ const styles = stylex.create({
     borderStyle: 'solid',
     borderColor: colors.border,
     borderRadius: '14px',
-    boxShadow: shadow.dialog,
+    boxShadow: `0 12px 32px ${colors.shadowFar}, 0 2px 6px ${colors.shadowNear}`,
     color: colors.text,
     outline: 'none',
   },
@@ -118,7 +118,7 @@ const styles = stylex.create({
   scroll: { flexGrow: 1, minHeight: 0, overflow: 'auto' },
   lines: { paddingBlock: space.sm, fontFamily: fonts.mono, fontSize: '12px', lineHeight: 1.6 },
   line: { display: 'flex', paddingRight: space.lg },
-  lineSelected: { backgroundColor: colors.infoSoft },
+  lineSelected: { backgroundColor: colors.accentSoft },
   gutter: {
     flexShrink: 0,
     width: '56px',
@@ -145,7 +145,7 @@ const styles = stylex.create({
     borderTopWidth: '1px',
     borderTopStyle: 'solid',
     borderTopColor: colors.borderSoft,
-    color: colors.info,
+    color: colors.accentText,
   },
   state: {
     display: 'flex',

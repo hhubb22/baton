@@ -1,6 +1,5 @@
 import * as stylex from '@stylexjs/stylex'
 import type { ReactNode } from 'react'
-import { shadow } from '../theme/base.stylex'
 import { colors, space } from '../theme/tokens.stylex'
 
 const styles = stylex.create({
@@ -15,7 +14,7 @@ const styles = stylex.create({
     borderStyle: 'solid',
     borderColor: colors.hairline,
     borderRadius: '14px',
-    boxShadow: shadow.card,
+    boxShadow: `0 1px 2px ${colors.shadowSoft}, 0 8px 24px ${colors.shadowNear}`,
   },
   flush: { padding: space.xs, gap: 0 },
 })

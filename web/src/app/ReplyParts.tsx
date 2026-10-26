@@ -36,12 +36,12 @@ const styles = stylex.create({
     borderLeftColor: colors.borderSoft,
   },
   muted: { color: colors.muted },
-  info: { color: colors.info },
+  info: { color: colors.accentText },
   link: {
     padding: 0,
     borderWidth: 0,
     backgroundColor: 'transparent',
-    color: colors.link,
+    color: colors.accentText,
     textDecoration: { default: 'none', ':hover': 'underline' },
   },
   attachments: {

@@ -3,7 +3,6 @@ import { useState } from 'react'
 import type { MockControls } from '../data/mock/client'
 import { scenarioIds, scenarioLabels, type ScenarioId } from '../data/mock/scenarios'
 import { useDevices, useSession } from '../data/queries'
-import { shadow } from '../theme/base.stylex'
 import { text } from '../theme/text'
 import { colors, radius, space } from '../theme/tokens.stylex'
 import { Button, IconButton } from '../ui/Button'
@@ -26,7 +25,7 @@ const styles = stylex.create({
     borderStyle: 'solid',
     borderColor: colors.border,
     borderRadius: radius.lg,
-    boxShadow: shadow.menu,
+    boxShadow: `0 8px 24px ${colors.shadowFar}`,
   },
   collapsed: {
     position: 'fixed',

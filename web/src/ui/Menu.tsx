@@ -1,7 +1,6 @@
 import { Menu as BaseMenu } from '@base-ui/react/menu'
 import * as stylex from '@stylexjs/stylex'
 import type { ReactElement, ReactNode } from 'react'
-import { shadow } from '../theme/base.stylex'
 import { text } from '../theme/text'
 import { colors, radius, space } from '../theme/tokens.stylex'
 import { Icon } from './Icon'
@@ -22,7 +21,7 @@ const styles = stylex.create({
     borderStyle: 'solid',
     borderColor: colors.border,
     borderRadius: radius.md,
-    boxShadow: shadow.menu,
+    boxShadow: `0 8px 24px ${colors.shadowFar}`,
     color: colors.text,
     outline: 'none',
   },

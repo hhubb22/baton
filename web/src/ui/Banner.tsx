@@ -22,7 +22,7 @@ const styles = stylex.create({
   },
   attention: {
     backgroundColor: colors.attentionSoft,
-    borderColor: 'rgb(91% 41% 12% / 18%)',
+    borderColor: colors.attentionEdge,
   },
   glyph: { color: colors.muted },
   glyphAttention: { color: colors.attention },

@@ -42,7 +42,7 @@ const styles = stylex.create({
     width: size.dot,
     height: size.dot,
     borderRadius: radius.pill,
-    backgroundColor: colors.link,
+    backgroundColor: colors.accentText,
   },
 })
 

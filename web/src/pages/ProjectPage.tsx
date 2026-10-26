@@ -221,7 +221,7 @@ const styles = stylex.create({
     paddingInline: space.sm,
     borderWidth: 0,
     backgroundColor: 'transparent',
-    color: colors.link,
+    color: colors.accentText,
   },
 })
 

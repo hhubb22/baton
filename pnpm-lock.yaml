@@ -898,12 +898,15 @@ importers:
 
   web:
     dependencies:
-      '@baton/protocol':
-        specifier: workspace:*
-        version: link:../packages/protocol
       '@base-ui/react':
         specifier: ^1.9.0
         version: 1.9.0(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@baton/protocol':
+        specifier: workspace:*
+        version: link:../packages/protocol
+      '@fontsource/inter':
+        specifier: 5.3.0
+        version: 5.3.0
       '@stylexjs/stylex':
         specifier: 0.19.1
         version: 0.19.1
@@ -1667,6 +1670,9 @@ packages:
 
   '@floating-ui/utils@0.2.12':
     resolution: {integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==}
+
+  '@fontsource/inter@5.3.0':
+    resolution: {integrity: sha512-RofMylZmjlJEfELXeNHFWBRcSs75rGU/6bV2S2jfnvv/3rPXPGe0LgUJTklcHZ9lM4OZmAVFhcJPnACfb91A3g==}
 
   '@google/genai@2.21.0':
     resolution: {integrity: sha512-+PDtco2/Z0ONdzCGekCoCT+O1VJS9xJQNN4XzQpXG/t3El/SWWMkCWlFRO1KmivOHPa4Q0VjUYu1HBKCZ/v33Q==}
@@ -4551,6 +4557,8 @@ snapshots:
       react-dom: 19.3.1(react@19.3.1)
 
   '@floating-ui/utils@0.2.12': {}
+
+  '@fontsource/inter@5.3.0': {}
 
   '@google/genai@2.21.0':
     dependencies:
