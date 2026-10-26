@@ -10,6 +10,7 @@ import { Banner } from '../ui/Banner'
 import { Button } from '../ui/Button'
 import { Dialog } from '../ui/Dialog'
 import { Field, Input, TextArea } from '../ui/Field'
+import { Toggle } from '../ui/Toggle'
 import { useDraft } from './drafts'
 import { useWorkspace } from './workspace'
 import { ProjectModelFields, useProjectModelCatalog } from './ProjectModelFields'
@@ -55,6 +56,7 @@ export function ProjectSettingsDialog({
   const archived = project.status === 'archived'
   const patch = archived ? {} : (draft ?? {})
   const values = { ...project, ...patch }
+  const embedding = values.memoryEmbedding
   const dirty = Object.keys(patch).length > 0
   const busy = saving || status.isPending
 
@@ -81,6 +83,13 @@ export function ProjectSettingsDialog({
           const selected = { ...project, ...snapshot }
           if (!selected.subscription.trim() || !selected.model.trim()) {
             setError('Enter a provider and model.')
+            return false
+          }
+          if (
+            snapshot.memoryEmbedding &&
+            (!snapshot.memoryEmbedding.base_url.trim() || !snapshot.memoryEmbedding.model.trim())
+          ) {
+            setError('Enter an embedding base URL and model.')
             return false
           }
           await update.mutateAsync({ projectId: project.id, patch: snapshot })
@@ -257,6 +266,64 @@ export function ProjectSettingsDialog({
         loading={devices.isPending}
       />
       <p {...stylex.props(text.caption, text.muted)}>Applies from the next run.</p>
+      <hr {...stylex.props(styles.divider)} />
+      <div {...stylex.props(styles.section)}>
+        <div {...stylex.props(styles.row)}>
+          <h3 {...stylex.props(text.label, styles.description)}>Memory embeddings</h3>
+          {archived ? (
+            <span {...stylex.props(text.caption, text.muted)}>{embedding ? 'On' : 'Off'}</span>
+          ) : (
+            <Toggle
+              label="Memory embeddings"
+              checked={embedding !== null}
+              onChange={(enabled) => {
+                change({ memoryEmbedding: enabled ? { base_url: '', model: '' } : null })
+                if (!enabled) void save()
+              }}
+            />
+          )}
+        </div>
+        {embedding && (
+          <>
+            <p {...stylex.props(text.caption, text.muted)}>
+              Your devices send requests to this OpenAI-compatible endpoint. Configure API keys on each device.
+            </p>
+            {(
+              [
+                ['base_url', 'Embedding base URL'],
+                ['model', 'Embedding model'],
+                ['credential_profile', 'Device credential name'],
+              ] as const
+            ).map(([key, label]) => (
+              <Field key={key} label={label} optional={key === 'credential_profile'}>
+                {(props) => (
+                  <Input
+                    {...props}
+                    value={embedding[key] ?? ''}
+                    readOnly={archived}
+                    onChange={(event) => {
+                      const config = {
+                        base_url: embedding.base_url,
+                        model: embedding.model,
+                        ...(embedding.credential_profile ? { credential_profile: embedding.credential_profile } : {}),
+                        [key]: event.target.value,
+                      }
+                      change({ memoryEmbedding: config })
+                    }}
+                    onBlur={() => {
+                      if (embedding.base_url.trim() && embedding.model.trim()) void save()
+                    }}
+                  />
+                )}
+              </Field>
+            ))}
+            <p {...stylex.props(text.caption, text.muted)}>
+              Set the named key with <code>batond project-runtime embedding-key &lt;name&gt;</code>. Leave blank for a
+              keyless endpoint.
+            </p>
+          </>
+        )}
+      </div>
       {!archived && (
         <>
           <hr {...stylex.props(styles.divider)} />

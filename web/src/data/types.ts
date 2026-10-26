@@ -1,7 +1,7 @@
 // 界面使用的业务对象。字段按 specs/baton、specs/project-agent、specs/agent-inbox 的行为规格取名，
 // 对象之间只用稳定 ID 关联，派生状态见 derive.ts。
 
-import type { ThreadTraceStep } from '@baton/protocol'
+import type { MemoryEmbeddingConfig, MemoryEmbeddingConfigInput, ThreadTraceStep } from '@baton/protocol'
 
 export type ID = string
 
@@ -238,6 +238,7 @@ export interface Project {
   // Project 助手使用的订阅和模型，修改后从下一次运行开始生效。
   subscription: string
   model: string
+  memoryEmbedding: MemoryEmbeddingConfig | null
   agent: {
     state: ProjectAgentState
     // 正在运行或最近一次运行所在的设备。
@@ -250,7 +251,9 @@ export interface Project {
   createdAt: number
 }
 
-export type ProjectPatch = Partial<Pick<Project, 'name' | 'goal' | 'subscription' | 'model'>>
+export type ProjectPatch = Partial<Pick<Project, 'name' | 'goal' | 'subscription' | 'model'>> & {
+  memoryEmbedding?: MemoryEmbeddingConfigInput | null
+}
 
 // 助手一次运行中做过的事，折叠在回复上方。
 export type ProcessStep =

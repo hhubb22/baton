@@ -77,6 +77,52 @@ describe('project maintenance', () => {
     expect(within(reopened).getByLabelText(/^Goal/)).toHaveValue('Verify Windows and Linux before release.')
   })
 
+  it('saves optional memory embeddings, retains a failed draft and turns them off', async () => {
+    const user = userEvent.setup()
+    const { client } = setup(settingsPath, 'normal', (client) => {
+      vi.spyOn(client, 'updateProject').mockRejectedValueOnce(new ClientError('unavailable', 'Disconnected'))
+    })
+    const update = vi.spyOn(client, 'updateProject')
+    const dialog = await screen.findByRole('dialog', { name: 'Compatibility · settings' })
+    expect(within(dialog).getByRole('switch', { name: 'Memory embeddings' })).not.toBeChecked()
+    await user.click(within(dialog).getByRole('switch', { name: 'Memory embeddings' }))
+    await replace(user, within(dialog).getByLabelText('Embedding base URL'), 'http://localhost:11434/v1')
+    await replace(user, within(dialog).getByLabelText(/^Device credential name/), 'local-embeddings')
+    await replace(user, within(dialog).getByLabelText('Embedding model'), 'local-embed')
+    await user.click(within(dialog).getByLabelText('Project name'))
+    expect(await within(dialog).findByText("Couldn't save. Try again.")).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: 'Done' }))
+    const reopened = await openSettings(user)
+    expect(within(reopened).getByLabelText('Embedding model')).toHaveValue('local-embed')
+    await user.click(within(reopened).getByLabelText('Embedding model'))
+    await user.click(within(reopened).getByLabelText('Project name'))
+    await waitFor(() => expect(within(reopened).getByRole('status')).toHaveTextContent('Saved'))
+    expect((await client.listProjects()).find((project) => project.id === 'prj-compat')?.memoryEmbedding).toEqual({
+      base_url: 'http://localhost:11434/v1',
+      model: 'local-embed',
+      credential_profile: 'local-embeddings',
+      config_id: expect.any(String),
+    })
+    await replace(user, within(reopened).getByLabelText('Embedding model'), 'another-embed')
+    await user.click(within(reopened).getByLabelText('Project name'))
+    await waitFor(() => expect(within(reopened).getByRole('status')).toHaveTextContent('Saved'))
+    expect(update).toHaveBeenLastCalledWith({
+      projectId: 'prj-compat',
+      patch: {
+        memoryEmbedding: {
+          base_url: 'http://localhost:11434/v1',
+          model: 'another-embed',
+          credential_profile: 'local-embeddings',
+        },
+      },
+    })
+    await user.click(within(reopened).getByRole('switch', { name: 'Memory embeddings' }))
+    await waitFor(() => expect(within(reopened).getByRole('status')).toHaveTextContent('Saved'))
+    expect(update).toHaveBeenLastCalledWith({ projectId: 'prj-compat', patch: { memoryEmbedding: null } })
+    expect(within(reopened).queryByLabelText('Embedding model')).not.toBeInTheDocument()
+    expect((await client.listProjects()).find((project) => project.id === 'prj-compat')?.memoryEmbedding).toBeNull()
+  })
+
   it('closes with an invalid draft, pauses the saved project and lets the draft be discarded', async () => {
     const user = userEvent.setup()
     const { client } = setup(settingsPath)

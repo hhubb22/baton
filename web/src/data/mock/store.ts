@@ -1217,6 +1217,7 @@ ${response}`,
       goal: input.goal.trim(),
       subscription: input.subscription,
       model: input.model,
+      memoryEmbedding: null,
       agent: { state: 'notStarted', deviceId: null, reason: null, activity: null },
       createdAt: this.scheduler.now(),
     }
@@ -1233,13 +1234,41 @@ ${response}`,
   updateProject(projectId: ID, patch: ProjectPatch): Project {
     const project = this.project(projectId)
     this.ensureProjectWritable(project)
-    const fields = ['name', 'goal', 'subscription', 'model']
+    const fields = ['name', 'goal', 'subscription', 'model', 'memoryEmbedding']
     if (
-      Object.keys(patch).some((key) => !fields.includes(key)) ||
-      Object.values(patch).some((value) => typeof value !== 'string')
+      Object.entries(patch).some(
+        ([key, value]) => !fields.includes(key) || (key !== 'memoryEmbedding' && typeof value !== 'string'),
+      )
     ) {
-      throw new ClientError('invalid', 'Project settings must contain text fields.')
+      throw new ClientError('invalid', 'Invalid project settings.')
     }
+    const embedding = patch.memoryEmbedding
+    const config = embedding
+      ? {
+          base_url: embedding.base_url.trim(),
+          model: embedding.model.trim(),
+          ...(embedding.credential_profile?.trim() ? { credential_profile: embedding.credential_profile.trim() } : {}),
+        }
+      : null
+    if (config && (!config.base_url || !config.model)) {
+      throw new ClientError('invalid', 'Enter an embedding base URL and model.')
+    }
+    const previous = project.memoryEmbedding
+    const memoryEmbedding =
+      embedding === undefined
+        ? previous
+        : config
+          ? {
+              ...config,
+              config_id:
+                previous &&
+                previous.base_url === config.base_url &&
+                previous.model === config.model &&
+                previous.credential_profile === config.credential_profile
+                  ? previous.config_id
+                  : crypto.randomUUID(),
+            }
+          : null
     const next = { ...project, ...patch }
     next.name = next.name.trim()
     next.goal = next.goal.trim()
@@ -1257,7 +1286,13 @@ ${response}`,
     const passive: Pick<ProjectPatch, 'name' | 'goal'> = {}
     if (next.name !== project.name) passive.name = next.name
     if (next.goal !== project.goal) passive.goal = next.goal
-    Object.assign(project, { name: next.name, goal: next.goal, subscription: next.subscription, model: next.model })
+    Object.assign(project, {
+      name: next.name,
+      goal: next.goal,
+      subscription: next.subscription,
+      model: next.model,
+      memoryEmbedding,
+    })
     if (Object.keys(passive).length > 0) {
       this.queuePassive({ projectId, kind: 'settings', patch: passive, updatedAt: this.scheduler.now() })
     }

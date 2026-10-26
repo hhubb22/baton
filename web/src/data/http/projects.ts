@@ -31,6 +31,7 @@ interface ProjectDTO {
   created_at: string
   updated_at: string
   agent: { provider: string; model: string }
+  memory_embedding: Project['memoryEmbedding']
   conversation: { id: string; state: string; last_seq: number }
 }
 interface StatusDTO {
@@ -210,6 +211,7 @@ export function mapProject(p: ProjectDTO, status: StatusDTO): Project {
     goal: p.goal,
     subscription: subscription(p.agent.provider),
     model: p.agent.model,
+    memoryEmbedding: p.memory_embedding,
     agent: {
       state,
       deviceId: status.run?.node_id ?? null,
@@ -552,6 +554,19 @@ export function createProjectAPI(ctx: HttpContext): ProjectAPI {
         ...(changes.goal !== undefined ? { goal: changes.goal } : {}),
         ...(changes.subscription !== undefined ? { provider: provider(changes.subscription) } : {}),
         ...(changes.model !== undefined ? { model: changes.model } : {}),
+        ...(changes.memoryEmbedding !== undefined
+          ? {
+              memory_embedding: changes.memoryEmbedding
+                ? {
+                    base_url: changes.memoryEmbedding.base_url.trim(),
+                    model: changes.memoryEmbedding.model.trim(),
+                    ...(changes.memoryEmbedding.credential_profile?.trim()
+                      ? { credential_profile: changes.memoryEmbedding.credential_profile.trim() }
+                      : {}),
+                  }
+                : null,
+            }
+          : {}),
       }),
     setProjectStatus: ({ projectId, status }) => patch(projectId, { status }),
     async saveMemory(input) {

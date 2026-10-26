@@ -26,6 +26,7 @@ const project = {
   goal: 'Ship the coordinator',
   status: 'active' as const,
   agent: { provider: 'openai-codex', model: 'gpt-5.4' },
+  memory_embedding: null,
   conversation: { id: conversationId, state: 'active', last_seq: 4 },
   created_at: at,
   updated_at: at,
@@ -513,13 +514,21 @@ describe('Project HTTP contract', () => {
   })
 
   it('patches settings and status, and reads project/status after stop and retry', async () => {
+    const embedding = {
+      base_url: 'http://localhost:11434/v1',
+      model: 'local-embed',
+      credential_profile: 'local-embeddings',
+    }
+    const config = { ...embedding, config_id: noteId }
     const h = setup([
       {
         path: base,
         method: 'PATCH',
-        body: { title: 'Release', provider: 'xai', model: 'grok-4' },
-        response: { ...project, title: 'Release' },
+        body: { title: 'Release', provider: 'xai', model: 'grok-4', memory_embedding: embedding },
+        response: { ...project, title: 'Release', memory_embedding: config },
       },
+      { path: `${base}/status`, response: status },
+      { path: base, method: 'PATCH', body: { memory_embedding: null }, response: project },
       { path: `${base}/status`, response: status },
       { path: base, method: 'PATCH', body: { status: 'paused' }, response: { ...project, status: 'paused' } },
       { path: `${base}/status`, response: { ...status, state: 'paused' } },
@@ -533,7 +542,15 @@ describe('Project HTTP contract', () => {
       { path: base, response: project },
       { path: `${base}/status`, response: { ...status, state: 'waiting', waiting_reason: 'scheduling' } },
     ])
-    await h.api.updateProject({ projectId, patch: { name: 'Release', subscription: 'xAI', model: 'grok-4' } })
+    expect(
+      await h.api.updateProject({
+        projectId,
+        patch: { name: 'Release', subscription: 'xAI', model: 'grok-4', memoryEmbedding: config },
+      }),
+    ).toMatchObject({ memoryEmbedding: config })
+    expect(await h.api.updateProject({ projectId, patch: { memoryEmbedding: null } })).toMatchObject({
+      memoryEmbedding: null,
+    })
     expect(await h.api.setProjectStatus({ projectId, status: 'paused' })).toMatchObject({ status: 'paused' })
     expect((await h.api.stopProjectRun(projectId)).agent.state).toBe('stopping')
     expect((await h.api.retryProject(projectId)).agent.state).toBe('waitingDevice')
