@@ -3,7 +3,21 @@ import { chmod, lstat, mkdir, open, rename, unlink, type FileHandle } from 'node
 import { dirname, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { Stats } from 'node:fs'
+import { setTimeout as sleep } from 'node:timers/promises'
 import { hasCode } from './errors.ts'
+
+/** Windows 上目标文件被其他句柄打开时 rename 返回 EPERM、EACCES 或 EBUSY，句柄通常很快关闭，按递增间隔重试约 1 秒。 */
+async function replaceFile(from: string, to: string): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await rename(from, to)
+    } catch (error) {
+      const busy = ['EPERM', 'EACCES', 'EBUSY'].some((code) => hasCode(error, code))
+      if (process.platform !== 'win32' || !busy || attempt > 10) throw error
+      await sleep(attempt * 20)
+    }
+  }
+}
 
 function checkStat(path: string, stat: Stats, directory: boolean): void {
   if (stat.isSymbolicLink() || (directory ? !stat.isDirectory() : !stat.isFile()))
@@ -117,7 +131,7 @@ export async function writePrivateFileAtomic(path: string, data: string | Uint8A
     } catch (error) {
       if (!hasCode(error, 'ENOENT')) throw error
     }
-    await rename(temporary, path)
+    await replaceFile(temporary, path)
     if (process.platform !== 'win32') {
       const directory = await open(parent, constants.O_RDONLY)
       try {

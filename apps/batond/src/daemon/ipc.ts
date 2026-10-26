@@ -138,7 +138,7 @@ export function requestWorker(options: {
       () => finish(new IPCError('timeout', 'Worker IPC deadline exceeded')),
       options.timeoutMs ?? 1000,
     )
-    socket.once('error', () => finish(new IPCError('unreachable', 'Worker IPC is unavailable')))
+    socket.once('error', (cause) => finish(new IPCError('unreachable', `Worker IPC is unavailable: ${cause.message}`)))
     socket.once('close', () => finish(new IPCError('closed', 'Worker IPC closed before the result')))
     socket.once('connect', () => socket.write(`${JSON.stringify({ type: 'auth', ok: false, token: options.token })}\n`))
     socket.on('data', (chunk: Buffer) => {

@@ -2,8 +2,23 @@ import { constants, type Stats } from 'node:fs'
 import { promises as fs } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { setTimeout as sleep } from 'node:timers/promises'
 
 export const maximumCredentialBytes = 64 * 1024
+
+/** Windows 上目标文件被其他句柄打开时 rename 返回 EPERM、EACCES 或 EBUSY，句柄通常很快关闭，按递增间隔重试约 1 秒。 */
+async function replaceFile(from: string, to: string): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fs.rename(from, to)
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (process.platform !== 'win32' || !['EPERM', 'EACCES', 'EBUSY'].includes(code ?? '') || attempt > 10)
+        throw error
+      await sleep(attempt * 20)
+    }
+  }
+}
 
 function check(stat: Stats, directory: boolean): void {
   if (stat.isSymbolicLink() || (directory ? !stat.isDirectory() : !stat.isFile()))
@@ -93,7 +108,7 @@ export const directCredentialFiles = {
         await handle.close()
       }
       await existingFile(path)
-      await fs.rename(temporary, path)
+      await replaceFile(temporary, path)
       if (process.platform !== 'win32') {
         const directory = await fs.open(parent, constants.O_RDONLY)
         try {

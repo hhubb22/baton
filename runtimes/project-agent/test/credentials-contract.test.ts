@@ -32,25 +32,30 @@ void describe('FileCredentials', () => {
     assert.equal(await store.read('xai'), undefined)
   })
 
-  test('刷新事务串行化，原子替换保留旧句柄内容且不遗留临时文件', async () => {
+  test('刷新事务串行化且不遗留临时文件', async () => {
+    await store.modify('xai', async () => ({ ...value, generation: 0 }))
+    await Promise.all(
+      Array.from({ length: 3 }, () =>
+        store.modify('xai', async (current) => ({
+          ...current,
+          generation: current.generation + 1,
+        })),
+      ),
+    )
+    assert.equal((await store.read('xai')).generation, 3)
+    assert.deepEqual(await readdir(directory), ['xai.json'])
+  })
+
+  // Windows 的 MoveFileEx 不能替换仍被打开的文件，旧句柄语义只在 POSIX 上成立。
+  test('原子替换保留旧句柄内容并保持私有权限', { skip: process.platform === 'win32' }, async () => {
     await store.modify('xai', async () => ({ ...value, generation: 0 }))
     const handle = await open(file(), 'r')
     try {
-      await Promise.all(
-        Array.from({ length: 3 }, () =>
-          store.modify('xai', async (current) => ({
-            ...current,
-            generation: current.generation + 1,
-          })),
-        ),
-      )
-      assert.equal((await store.read('xai')).generation, 3)
+      await store.modify('xai', async (current) => ({ ...current, generation: 1 }))
       assert.equal(JSON.parse(await handle.readFile('utf8')).generation, 0)
-      assert.deepEqual(await readdir(directory), ['xai.json'])
-      if (process.platform !== 'win32') {
-        assert.equal((await stat(directory)).mode & 0o7777, 0o700)
-        assert.equal((await stat(file())).mode & 0o7777, 0o600)
-      }
+      assert.equal((await store.read('xai')).generation, 1)
+      assert.equal((await stat(directory)).mode & 0o7777, 0o700)
+      assert.equal((await stat(file())).mode & 0o7777, 0o600)
     } finally {
       await handle.close()
     }

@@ -11,7 +11,8 @@ export async function buildServer(output = join(repository, 'apps/server/dist/se
   await promisify(execFile)(
     'pnpm',
     ['--dir', join(repository, 'web'), 'exec', 'vp', 'build', '--outDir', join(dirname(output), 'web')],
-    { cwd: repository, maxBuffer: 4 * 1024 * 1024 },
+    // Windows 上 pnpm 是 pnpm.cmd，需要经 shell 启动。
+    { cwd: repository, maxBuffer: 4 * 1024 * 1024, shell: process.platform === 'win32' },
   )
   await build({
     entryPoints: [join(repository, 'apps/server/src/index.ts')],
