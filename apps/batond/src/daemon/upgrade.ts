@@ -44,15 +44,34 @@ export interface UpgradeBlocker {
   creation_time?: string
 }
 
-export async function readUpgradeState(dataDirectory: string): Promise<UpgradeState | undefined> {
-  try {
-    return Schema.decodeUnknownSync(UpgradeState)(
-      JSON.parse((await readPrivateFile(join(dataDirectory, 'upgrade.json'))).toString('utf8')),
-    )
-  } catch (error) {
-    if (isMissing(error)) return undefined
-    throw new IPCError('upgrade_state_invalid', '无法读取升级状态，执行保持暂停')
-  }
+const stateAccess = new Map<string, Promise<void>>()
+
+// 同一进程内的读取与原子替换串行执行，保留私有文件打开前后的身份校验。
+function withUpgradeStateFile<A>(directory: string, operation: () => Promise<A>): Promise<A> {
+  const key = resolve(directory)
+  const task = (stateAccess.get(key) ?? Promise.resolve()).then(operation)
+  const settled = task.then(
+    () => {},
+    () => {},
+  )
+  stateAccess.set(key, settled)
+  void settled.then(() => {
+    if (stateAccess.get(key) === settled) stateAccess.delete(key)
+  })
+  return task
+}
+
+export function readUpgradeState(dataDirectory: string): Promise<UpgradeState | undefined> {
+  return withUpgradeStateFile(dataDirectory, async () => {
+    try {
+      return Schema.decodeUnknownSync(UpgradeState)(
+        JSON.parse((await readPrivateFile(join(dataDirectory, 'upgrade.json'))).toString('utf8')),
+      )
+    } catch (error) {
+      if (isMissing(error)) return undefined
+      throw new IPCError('upgrade_state_invalid', '无法读取升级状态，执行保持暂停')
+    }
+  })
 }
 export async function upgradePaused(dataDirectory?: string): Promise<boolean> {
   if (!dataDirectory) return false
@@ -60,7 +79,7 @@ export async function upgradePaused(dataDirectory?: string): Promise<boolean> {
   return state !== undefined && !['cancelled', 'completed'].includes(state.phase)
 }
 export const saveUpgradeState = (directory: string, state: UpgradeState) =>
-  writePrivateFileAtomic(join(directory, 'upgrade.json'), JSON.stringify(state))
+  withUpgradeStateFile(directory, () => writePrivateFileAtomic(join(directory, 'upgrade.json'), JSON.stringify(state)))
 
 export async function prepareUpgrade(directory: string, target: string, ca?: string): Promise<UpgradeState> {
   const { path, release } = await readUpgradePackage(target)
