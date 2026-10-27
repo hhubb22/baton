@@ -504,7 +504,7 @@ describe('Project Runtime host', () => {
                 context_id: payload.context_id,
                 last_seq: request.last_seq!,
                 input_seq: payload.input_seq,
-                knowledge_epoch: 0,
+                core_epoch: 0,
                 budget: {
                   core_tokens: payload.core_tokens,
                   related_tokens: payload.related_tokens,
@@ -513,6 +513,7 @@ describe('Project Runtime host', () => {
                 expires_at: null,
                 content: '',
                 memory_refs: [],
+                view_refs: [],
                 degraded: [],
                 core_complete: true,
                 query: '',
