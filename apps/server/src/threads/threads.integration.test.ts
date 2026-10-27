@@ -612,6 +612,36 @@ it('paginates complete ascending timeline pages and binds cursors to the employe
     })
   }))
 
+it('accepts native resume after a turn ends with queued input on the same connection', () =>
+  withTestDatabase(async ({ run }) => {
+    const f = await fixture(run)
+    const t = await open(run, f)
+    const send = (seq: number, kind: P.ThreadReport['kind'], extra: Partial<P.ThreadReport> = {}) =>
+      run(threads.processReport(f.source, report(t.id, seq, kind, extra)))
+    await send(3, 'turn.started', { worker_turn_seq: 1, client_message_id: f.input.message.client_message_id })
+    await send(4, 'message.sent', { worker_turn_seq: 1, client_message_id: f.input.message.client_message_id })
+    const queued = { client_message_id: randomUUID(), content: 'queued' }
+    await run(threads.addMessage(f.employee, t.id, queued))
+    await send(5, 'turn.ended', { worker_turn_seq: 1, reason: 'completed', queue_empty: false })
+    expect(await run(threads.view({ employeeId: f.employee }, t.id))).toMatchObject({
+      status: 'running',
+      current_turn: null,
+    })
+    expect(await send(6, 'thread.resumed', { native_session_id: 'native' })).toMatchObject({ ok: true })
+    expect(await run(threads.view({ employeeId: f.employee }, t.id))).toMatchObject({
+      status: 'idle',
+      storage_generation: 'generation',
+      native_session_id: 'native',
+    })
+    expect(
+      await send(7, 'turn.started', { worker_turn_seq: 2, client_message_id: queued.client_message_id }),
+    ).toMatchObject({ ok: true })
+    expect(await run(threads.view({ employeeId: f.employee }, t.id))).toMatchObject({
+      status: 'running',
+      current_turn: { worker_turn_seq: 2 },
+    })
+  }))
+
 it('preserves the first-message title and delivered messages in the existing Web timeline consumer', () =>
   withTestDatabase(async ({ run }) => {
     const f = await fixture(run)

@@ -99,7 +99,8 @@ const apply = (t: P.Thread, r: P.ThreadReport) =>
         break
       }
       case 'thread.resumed': {
-        if (!t.opened_at || !['idle', 'stopped', 'unknown'].includes(t.status)) return yield* Effect.fail(failure())
+        if (!t.opened_at || !['idle', 'running', 'stopped', 'unknown'].includes(t.status))
+          return yield* Effect.fail(failure())
         yield* noActiveTurn(t.id)
         yield* sql`UPDATE threads SET stop_requested_at=NULL,stop_confirmed_at=NULL WHERE id=${t.id} AND stop_confirmed_at IS NOT NULL`
         yield* status(t, 'idle')
