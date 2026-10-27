@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
-import { copyFile, mkdir, rename, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { createServer } from 'node:http'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { environment, isolatedEnv, withTemporaryInstallation } from './lib/installation.mjs'
@@ -20,13 +21,42 @@ function run(executable, args, options) {
 }
 
 async function runtimeHandshake(executable, options, mode = 'run') {
-  const operations =
-    mode === 'memory'
-      ? ['memory_bootstrap', 'pending_embeddings', 'finish']
-      : ['bootstrap', 'read_events', 'claim_inputs']
+  const memory = mode.startsWith('memory')
+  const cancelling = mode === 'memory-cancel'
+  const operations = memory
+    ? ['memory_bootstrap', 'pending_embeddings', ...(cancelling ? [] : ['finish'])]
+    : ['bootstrap', 'read_events', 'claim_inputs']
   const observed = []
+  let child, cancellationFailure
+  let requests = 0,
+    requestClosed = false
+  // 本地端点保留请求，直到 stdio 关闭触发后台取消。
+  const server = cancelling
+    ? createServer((request, response) => {
+        response.on('close', () => {
+          requestClosed = true
+        })
+        request.resume()
+        request.on('end', () => {
+          try {
+            requests++
+            assert.equal(request.url, '/v1/embeddings')
+            assert.equal(request.headers.authorization, 'Bearer package-check-embedding')
+            child.stdin.end()
+          } catch (error) {
+            cancellationFailure = error
+            child.kill('SIGKILL')
+          }
+        })
+      })
+    : undefined
+  if (server)
+    await new Promise((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(0, '127.0.0.1', resolve)
+    })
   return new Promise((resolveHandshake, reject) => {
-    const child = spawn(executable, ['project-runtime', mode], {
+    child = spawn(executable, ['project-runtime', memory ? 'memory' : 'run'], {
       ...options,
       env: { ...options.env, BATON_PROJECT_RUNTIME_TRANSPORT: 'stdio' },
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -77,8 +107,30 @@ async function runtimeHandshake(executable, options, mode = 'run') {
               },
             }
           } else if (frame.request.operation === 'pending_embeddings') {
-            result = { type: 'project_runtime.result', ok: true, data: { memory_embedding: null, entries: [] } }
-          } else if (mode === 'memory' && frame.request.operation === 'finish') {
+            result = {
+              type: 'project_runtime.result',
+              ok: true,
+              data: cancelling
+                ? {
+                    memory_embedding: {
+                      base_url: `http://127.0.0.1:${server.address().port}/v1`,
+                      model: 'package-check',
+                      config_id: 'package-check',
+                      credential_profile: 'package-check',
+                    },
+                    entries: [
+                      {
+                        item_id: 'package-check',
+                        revision: 1,
+                        config_id: 'package-check',
+                        embedding_text_hash: 'package-check',
+                        text: 'Local cancellation check',
+                      },
+                    ],
+                  }
+                : { memory_embedding: null, entries: [] },
+            }
+          } else if (memory && frame.request.operation === 'finish') {
             result = { type: 'project_runtime.result', ok: true, data: {} }
           } else if (frame.request.operation === 'bootstrap') {
             result = {
@@ -112,7 +164,7 @@ async function runtimeHandshake(executable, options, mode = 'run') {
             result = { type: 'project_runtime.result', ok: false, code: 'package_check_complete' }
           }
           child.stdin.write(JSON.stringify({ id: frame.id, result }) + '\n')
-          if (observed.length === operations.length) child.stdin.end()
+          if (!cancelling && observed.length === operations.length) child.stdin.end()
         }
       } catch (error) {
         fail(error)
@@ -121,25 +173,31 @@ async function runtimeHandshake(executable, options, mode = 'run') {
     child.once('close', (code, signal) => {
       clearTimeout(timer)
       try {
-        if (failure) throw failure
+        if (failure || cancellationFailure) throw failure ?? cancellationFailure
         assert.deepEqual(observed, operations, `Incomplete Project Runtime handshake: ${stderr}`)
         assert.equal(pending, '')
         assert.equal(signal, null)
-        assert.equal(
-          code,
-          mode === 'memory' ? 0 : 1,
-          `Runtime must exit after the coordinator's completion response: ${stderr}`,
-        )
+        assert.equal(code, memory ? 0 : 1, `Runtime must exit after the coordinator's completion response: ${stderr}`)
+        if (cancelling) {
+          assert.equal(requests, 1, '后台取消检查只允许一个本地 Embedding 请求')
+          assert.equal(requestClosed, true, '后台退出后 Embedding 请求仍未关闭')
+        }
         resolveHandshake({
           operations: observed,
           modelCalls: 0,
+          ...(cancelling ? { localEmbeddingRequests: requests, requestClosed } : {}),
           exitCode: code,
-          shutdown: 'coordinator completion response',
+          shutdown: cancelling ? 'stdio closed during local embedding request' : 'coordinator completion response',
         })
       } catch (error) {
         reject(error)
       }
     })
+  }).finally(async () => {
+    if (server) {
+      server.closeAllConnections()
+      await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
+    }
   })
 }
 
@@ -237,6 +295,30 @@ async function main() {
     })
     await check('projectRuntime', () => runtimeHandshake(executable, options))
     await check('memoryRuntime', () => runtimeHandshake(executable, options, 'memory'))
+    await check('memoryCancellation', async () => {
+      const directory = join(home, 'memory-credentials')
+      await mkdir(directory, { mode: 0o700 })
+      const memoryOptions = { ...options, env: { ...options.env, BATON_PROJECT_RUNTIME_DATA_DIR: directory } }
+      const result = run(executable, ['project-runtime', 'embedding-key', 'package-check'], {
+        ...memoryOptions,
+        input: 'package-check-embedding\n',
+      })
+      assert.equal(result.status, 0, result.stderr)
+      assert.ok(
+        !result.stdout.includes('package-check-embedding') && !result.stderr.includes('package-check-embedding'),
+      )
+      const credentials = join(directory, 'embeddings')
+      const file = join(credentials, 'package-check.json')
+      assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), { type: 'api_key', key: 'package-check-embedding' })
+      if (process.platform !== 'win32')
+        for (const path of [directory, credentials, file]) {
+          assert.equal((await stat(path)).mode & 0o077, 0, '凭据目录和文件只能由当前用户访问')
+        }
+      return {
+        ...(await runtimeHandshake(executable, memoryOptions, 'memory-cancel')),
+        privateFiles: process.platform === 'win32' ? 'inherited permissions; ACL not checked' : 'owner-only',
+      }
+    })
     await check('credentials', async () => {
       const directory = join(home, 'credentials')
       const credential = JSON.stringify({

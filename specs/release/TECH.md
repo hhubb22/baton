@@ -61,6 +61,8 @@ SEA 不启用 code cache 或 snapshot，`execArgvExtension` 设为 `none`。Work
 | Cursor SQLite store | 隔离的 Node 子进程从搬迁安装包 `createRequire` 加载 `@cursor/sdk/sqlite`，打开并关闭临时 store；该检查由运行工具的 Node 执行 |
 | Cursor 程序 | 直接运行包内 ripgrep `--version` 与 sandbox helper `--help`；核对退出码和输出 |
 | Project Runtime | 通过 stdio 回应 `bootstrap`、空 `read_events`，在 `claim_inputs` 返回本地结束响应后核对 Runtime 退出码为 1；不交付输入，模型调用次数为 0 |
+| Memory Runtime | 通过 stdio 完成 `memory_bootstrap`、空 `pending_embeddings` 与 `finish`，核对退出码为 0，无需聊天登录；另向本地 Embedding HTTP 替身发出一个请求，关闭 stdio 后请求取消、进程退出，不发送提交或失败报告 |
+| Embedding 凭据 | SEA 的 `embedding-key` 从标准输入保存本地样例，memory 模式实际加载它访问本地替身；POSIX 校验目录与文件仅当前用户可访问，Windows 沿用继承权限、不校验 ACL |
 | 订阅凭据 | 在临时 HOME 写入本地凭据样例；订阅报告识别登录状态且不泄漏凭据值 |
 | 缺失依赖 | 临时移走 `node_modules/` 后，Agent host 检查必须非零退出、无成功输出，并明确指出安装包依赖缺失 |
 
