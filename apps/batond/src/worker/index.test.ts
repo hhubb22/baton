@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { rmSync } from 'node:fs'
 import { makePrivateTempDirectory } from '../testing/private.ts'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
+import { saveUpgradeState } from '../daemon/upgrade.ts'
 import { DatabaseSync } from 'node:sqlite'
 import {
   WorkerIPCMessage as WorkerIPCMessageSchema,
@@ -235,6 +236,72 @@ describe('reliable Worker', () => {
         expect(ended.active_turn).toBeUndefined()
       }),
     ),
+  )
+
+  it.effect(
+    'preserves queued inputs while draining, finishes the active turn and resumes only after cancellation',
+    () =>
+      fixture((dbPath) =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const cfg = config()
+            const f = yield* fake
+            const worker = yield* makeWorker({ dbPath, dataDirectory: dirname(dbPath), agentFactory: () => f.agent })
+            yield* worker.handle(request(cfg, 'thread_open'))
+            yield* opened(worker)
+            const first = message(cfg)
+            const second = message(cfg, 'queued before prepare')
+            const third = message(cfg, 'queued during prepare')
+            yield* worker.handle(first)
+            yield* completed(worker, first.command_id!)
+            yield* worker.handle(second)
+            const state = {
+              operation_id: randomUUID(),
+              source_version: 'development',
+              target_version: 'v1',
+              target_path: '/tmp/package',
+              phase: 'draining' as const,
+            }
+            yield* Effect.promise(() => saveUpgradeState(dirname(dbPath), state))
+            expect((yield* worker.handle(third)).ok).toBe(true)
+            const withdrawn = message(cfg, 'withdraw during prepare')
+            yield* worker.handle(withdrawn)
+            yield* worker.handle({
+              type: 'thread_withdraw',
+              ok: true,
+              command_id: randomUUID(),
+              thread_id: cfg.thread_id,
+              storage_generation: cfg.storage_generation,
+              client_message_id: withdrawn.client_message_id!,
+            })
+            const cancelled = yield* completed(worker, withdrawn.command_id!)
+            expect(findCompletion(cancelled, withdrawn.command_id!)?.command_outcome).toBe('cancelled')
+            expect(yield* worker.drain).toBe(false)
+            yield* Queue.offer(f.events, event(first.client_message_id!, 'end'))
+            yield* until(reports(worker), (rows) => rows.some((row) => row.kind === 'turn.ended'))
+            expect(f.sentInputs.map((input) => input.id)).toEqual([first.client_message_id])
+            const db = new DatabaseSync(dbPath, { readOnly: true })
+            try {
+              const queued = db
+                .prepare('SELECT payload FROM thread_messages WHERE id IN (?,?)')
+                .all(second.client_message_id!, third.client_message_id!)
+              expect(queued.map((row) => JSON.parse(String(row.payload)).state)).toEqual(['queued', 'queued'])
+            } finally {
+              db.close()
+            }
+            yield* Effect.promise(() => saveUpgradeState(dirname(dbPath), { ...state, phase: 'cancelled' }))
+            yield* completed(worker, second.command_id!)
+            yield* Queue.offer(f.events, event(second.client_message_id!, 'end'))
+            yield* completed(worker, third.command_id!)
+            expect(f.sentInputs.map((input) => input.id)).toEqual([
+              first.client_message_id,
+              second.client_message_id,
+              third.client_message_id,
+            ])
+            yield* Queue.offer(f.events, event(third.client_message_id!, 'end'))
+          }),
+        ),
+      ),
   )
 
   it.effect(

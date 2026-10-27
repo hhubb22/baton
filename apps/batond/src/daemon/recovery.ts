@@ -1,4 +1,5 @@
 import { inspectWorkerLedger, type WorkerLedgerInspection } from '../worker/ledger.ts'
+import { upgradePaused } from './upgrade.ts'
 import { processLockIsHeld } from '../platform/lock.ts'
 import { type DiscoveredWorker, type NodeLedger } from './ledger.ts'
 import { workerPaths } from './paths.ts'
@@ -20,7 +21,7 @@ export function makeWorkerRecovery(options: {
     ((saved: DiscoveredWorker) => inspectWorkerLedger(workerPaths(dataDirectory, saved.threadId).ledger, saved.config))
 
   async function ensureOne(threadId: string, signal?: AbortSignal): Promise<WorkerRecoveryResult> {
-    if (signal?.aborted) return 'retry'
+    if (signal?.aborted || (await upgradePaused(dataDirectory))) return 'retry'
     let saved = await io(ledger.worker(threadId))
     if (!saved) return 'retry'
     if (saved.history_unavailable) return 'lost'

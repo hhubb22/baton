@@ -14,6 +14,7 @@ import {
 } from '../platform/private.ts'
 import { acquireProcessLock, processLockIsHeld, ProcessLockBusy } from '../platform/lock.ts'
 import { IPCError, requestWorker } from './ipc.ts'
+import { readUpgradeState } from './upgrade.ts'
 import { workerPaths } from './paths.ts'
 import { FullOutputStore } from '../worker/full-output.ts'
 
@@ -80,6 +81,8 @@ export class LocalWorkerHost implements DaemonWorkerHost {
       const result = await new FullOutputStore(paths.threadDirectory).read(body)
       return { type: 'result', ok: result.ok, session_result: result }
     }
+    if ((await readUpgradeState(this.dataDirectory))?.phase === 'ready' && request.type.startsWith('thread_'))
+      return { type: 'result', ok: false, code: 'node_upgrading' }
     if (options.start) await this.ensureWorker(threadId)
     return requestWorker({
       endpoint: paths.endpoint,
@@ -91,6 +94,8 @@ export class LocalWorkerHost implements DaemonWorkerHost {
 
   /** Includes process startup, lock acquisition, ledger recovery scheduling and authenticated IPC. */
   async ensureWorker(threadId: string): Promise<void> {
+    if ((await readUpgradeState(this.dataDirectory))?.phase === 'ready')
+      throw new IPCError('node_upgrading', '设备已准备升级')
     const deadline = performance.now() + WORKER_READY_BUDGET_MS
     const paths = await initializeWorkerDirectory(this.dataDirectory, threadId)
     const ready = async () => {
@@ -117,6 +122,8 @@ export class LocalWorkerHost implements DaemonWorkerHost {
         release = await acquireProcessLock(paths.launchLock)
         if (await ready()) return
         if (!(await processLockIsHeld(paths.lock))) {
+          if ((await readUpgradeState(this.dataDirectory))?.phase === 'ready')
+            throw new IPCError('node_upgrading', '升级准备期间暂停启动 Worker')
           try {
             await readToken(paths.token)
           } catch (error) {

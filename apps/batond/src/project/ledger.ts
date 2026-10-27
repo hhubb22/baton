@@ -16,11 +16,12 @@ export interface RunRow {
   cleanup_next_at: number
   cleanup_attempts: number
 }
-const storageBaseline = [
+export const storageBaseline = [
   'CREATE TABLE project_commit(id INTEGER PRIMARY KEY CHECK(id=1),commit_token TEXT NOT NULL)',
   "INSERT INTO project_commit VALUES (1, '')",
   "CREATE TABLE project_runtime_runs(\n      run_id TEXT PRIMARY KEY,lease_epoch INTEGER NOT NULL,kind TEXT NOT NULL DEFAULT 'foreground',state TEXT NOT NULL,reason TEXT NOT NULL DEFAULT '',\n      cleanup_complete INTEGER NOT NULL DEFAULT 0,cleanup_acked INTEGER NOT NULL DEFAULT 0,\n      cleanup_next_at INTEGER NOT NULL DEFAULT 0,cleanup_attempts INTEGER NOT NULL DEFAULT 0)",
   'CREATE TABLE project_processes(role TEXT PRIMARY KEY,payload TEXT NOT NULL)',
+  'CREATE TABLE project_commands(id TEXT PRIMARY KEY,payload TEXT NOT NULL)',
   'CREATE INDEX project_cleanup_due ON project_runtime_runs(cleanup_next_at,run_id) WHERE cleanup_complete=1 AND cleanup_acked=0',
 ] as const
 
@@ -92,8 +93,14 @@ export const makeProjectLedger = Effect.fn('Project.makeProjectLedger')(function
   }
   return {
     get,
+    pending: () => sql<{ id: string; payload: string }>`SELECT * FROM project_commands ORDER BY rowid`,
+    enqueue: (id: string, command: ProjectRunCommand) =>
+      sql.withTransaction(sql`INSERT OR IGNORE INTO project_commands VALUES(${id},${JSON.stringify(command)})`),
+    delivered: (id: string) => sql.withTransaction(sql`DELETE FROM project_commands WHERE id=${id}`),
     occupied: () =>
-      sql<{ count: number }>`SELECT count(*) AS count FROM project_runtime_runs WHERE cleanup_complete=0`.pipe(
+      sql<{
+        count: number
+      }>`SELECT count(*) AS count FROM project_runtime_runs WHERE cleanup_complete=0 AND state!='queued'`.pipe(
         Effect.map((rows) => rows[0]?.count ?? 0),
       ),
     insert,

@@ -3,13 +3,15 @@ import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { isSea } from 'node:sea'
 import { Effect, Schema } from 'effect'
 import { telemetryLayer } from '@baton/telemetry'
 import { ExecutionTimeoutSeconds, WorkerOpen, type RuntimeAgent, type WorkerRequest } from '@baton/protocol'
 import { LocalWorkerHost, initializeWorkerDirectory } from './daemon/host.ts'
+import { IPCError } from './daemon/ipc.ts'
+import { readUpgradeState } from './daemon/upgrade.ts'
 import { readPrivateFile, writePrivateFileAtomic } from './platform/private.ts'
 
 const usage = `Baton 节点
@@ -27,6 +29,9 @@ up/run 支持 --control-timeout-seconds <秒>，认证与同步各默认等待 3
 
 设备管理：
 
+  upgrade prepare --package <目录>
+  upgrade status
+  upgrade cancel
   files add --id <标识> --path <绝对目录>
   files remove --id <标识>
   files list
@@ -79,6 +84,34 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
   if (action === 'up' || action === 'register' || action === 'reauth' || action === 'run') {
     const { runDaemonCLI } = await import('./daemon/cli.ts')
     await runDaemonCLI(action, args)
+    return
+  }
+  if (action === 'upgrade') {
+    const { positionals, values } = parseArgs({
+      args,
+      allowPositionals: true,
+      options: {
+        'data-dir': { type: 'string', default: join(homedir(), '.baton-ts') },
+        package: { type: 'string' },
+      },
+    })
+    const command = positionals[0]
+    if (
+      positionals.length !== 1 ||
+      !['prepare', 'status', 'cancel'].includes(command ?? '') ||
+      (command === 'prepare' ? !values.package : values.package !== undefined)
+    )
+      throw new Error('用法：upgrade prepare --package <目录> | status | cancel')
+    const { requestUpgrade } = await import('./daemon/upgrade.ts')
+    console.log(
+      JSON.stringify(
+        await requestUpgrade(
+          values['data-dir']!,
+          command === 'prepare' ? 'upgrade_prepare' : command === 'cancel' ? 'upgrade_cancel' : 'upgrade_status',
+          values.package ? resolve(values.package) : undefined,
+        ),
+      ),
+    )
     return
   }
   if (action === 'files' || action === 'project-exec') {
@@ -180,7 +213,7 @@ export function reportBatondError(error: unknown, action = process.argv[2]): voi
   console.error(
     JSON.stringify({
       ok: false,
-      code: 'batond_failed',
+      code: error instanceof IPCError ? error.code : 'batond_failed',
       message:
         action === 'worker' || action === 'agent-host' || action === 'watchdog'
           ? `${action} failed`
@@ -223,6 +256,11 @@ export async function runLocalCLI(
     },
   })
   const dataDirectory = values['data-dir']!
+  if (
+    ['open', 'message', 'resume', 'stop', 'withdraw', 'ack', 'probe'].includes(action) &&
+    (await readUpgradeState(dataDirectory))?.phase === 'ready'
+  )
+    throw new IPCError('node_upgrading', '设备已准备升级，请稍后重试原命令')
   const requireValue = (key: keyof typeof values) => {
     const value = values[key]
     if (!value) throw new Error(`缺少 --${key}`)

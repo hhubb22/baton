@@ -258,7 +258,7 @@ function decodeLedger(query: (sql: string) => readonly Row[], expected?: WorkerO
   return { initial, condition: 'valid' as const }
 }
 
-function readLedger(dbPath: string, expected?: WorkerOpenConfig) {
+export function readLedger(dbPath: string, expected?: WorkerOpenConfig) {
   checkStorageFormat(dbPath, 'thread', storageBaseline)
   const db = new DatabaseSync(dbPath, { readOnly: true, allowExtension: false, timeout: 0 })
   try {

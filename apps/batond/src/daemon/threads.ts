@@ -13,6 +13,7 @@ import {
   type WorkerIPCMessage,
 } from '@baton/protocol'
 import { authorizeDirectory } from '../devices/roots.ts'
+import { upgradePaused, readUpgradeState } from './upgrade.ts'
 import { workerPaths } from './paths.ts'
 import { contentHash, type NodeLedger, type NodeCommand } from './ledger.ts'
 import { DaemonStorageFailure, ledgerPromise as io } from './storage.ts'
@@ -94,7 +95,11 @@ export function makeThreadService(options: {
     if (performance.now() >= deadline) throw new CommandDeliveryUncertain()
     const readiness = await recovery.ensure(req.thread_id!)
     if (readiness === 'lost') throw new WorkerHistoryUnavailable()
-    if (readiness === 'retry') throw new CommandDeliveryUncertain()
+    if (readiness === 'retry') {
+      if (!(await upgradePaused(options.dataDirectory))) throw new CommandDeliveryUncertain()
+      // 排空期间仅启动受门禁限制的 Worker，接收队列和停止/撤回，不恢复原生会话。
+      await host.ensureWorker(req.thread_id!)
+    }
     const ipcDeadline = Math.min(deadline, performance.now() + 1000)
     const request = (value: WorkerRequest) => {
       const remaining = Math.floor(ipcDeadline - performance.now())
@@ -146,6 +151,8 @@ export function makeThreadService(options: {
     return result
   }
   async function execute(id: string, cmd: ThreadCommand): Promise<ThreadCommandResult> {
+    if ((await readUpgradeState(options.dataDirectory))?.phase === 'ready')
+      return { type: 'thread.command_result', thread_id: cmd.thread_id, ok: false, code: 'node_upgrading' }
     // All stages share the command's outer budget; Worker launch owns at most 3 seconds.
     const deadline = performance.now() + 4500
     if (cmd.action === 'check_activity') {

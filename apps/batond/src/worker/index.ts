@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { upgradePaused, readUpgradeState } from '../daemon/upgrade.ts'
 import {
   WorkerRequest,
   boundedText,
@@ -55,6 +56,7 @@ export interface WorkerOptions {
 export interface Worker {
   /** Authentication and the exclusive process lock belong to the IPC/platform owner. */
   readonly handle: (request: WorkerRequest) => Effect.Effect<WorkerIPCMessage, WorkerFailure>
+  readonly drain: Effect.Effect<boolean, WorkerFailure>
   /** Fails once execution is frozen; the owner must exit the Scope and release the Worker lock. */
   readonly failed: Effect.Effect<never, WorkerFailure>
   readonly records: {
@@ -165,6 +167,10 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
   const openMs = options.openTimeoutMs ?? 35_000
   const prepareMs = options.prepareTimeoutMs ?? 10_000
   const sendMs = options.sendTimeoutMs ?? 35_000
+  const paused = Effect.tryPromise({
+    try: () => upgradePaused(options.dataDirectory),
+    catch: (cause) => new WorkerFailure('upgrade_state_invalid', '无法读取升级门禁', cause),
+  })
   const stopMs = options.stopTimeoutMs ?? 60_000
 
   function report(
@@ -1031,6 +1037,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         }
         return
       }
+      if (yield* paused) return
       if (operation || state.phase === 'failed' || state.phase === 'empty') return
       const current = yield* ensureAgent()
       const intent = Object.values(state.messages).find((message) => message.state === 'intent')
@@ -1207,6 +1214,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
               )
               return
             }
+            if (yield* paused) return
             const preparation = result.value
             if (state.messages[message.input.id]?.state !== 'queued') return
             if (message.input.mode === 'steer') {
@@ -1592,6 +1600,10 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         recovering = false
         return
       }
+      if (yield* paused) {
+        recovering = false
+        return
+      }
       yield* commit((draft) => cancelQuestions(draft, 'Agent restarted; question is no longer available'))
       const current = yield* ensureAgent()
       if (state.config.agent_type === 'shell' && state.opened && state.nativeId && state.phase !== 'unknown') {
@@ -1711,6 +1723,15 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         }
         return { type: 'result', ok: result.ok, session_result: result }
       }
+      if (
+        commandAction(decoded.type) &&
+        options.dataDirectory &&
+        (yield* Effect.tryPromise({
+          try: () => readUpgradeState(options.dataDirectory!),
+          catch: (cause) => new WorkerFailure('upgrade_state_invalid', '无法读取升级状态', cause),
+        }))?.phase === 'ready'
+      )
+        return { type: 'result', ok: false, code: 'node_upgrading' }
       const trace = commandAction(decoded.type) ? yield* captureTrace : undefined
       return yield* submit(shortRequest({ ...decoded, ...(trace ? { trace_context: trace } : {}) })).pipe(
         Effect.catch((error) =>
@@ -1750,5 +1771,21 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
       ),
     list: () => submit(Effect.sync(() => structuredClone(Object.values(state.processes)))),
   }
-  return { handle, records, failed: Deferred.await(fatal) } satisfies Worker
+  const drain = submit(
+    Effect.gen(function* () {
+      if (
+        !(yield* paused) ||
+        operation ||
+        stopFiber ||
+        recovering ||
+        state.activeMessage ||
+        ['busy', 'stopping', 'unknown'].includes(state.phase)
+      )
+        return false
+      // 与 intent 共用串行队列；取消准备后也不会在关闭过程中启动下一回合。
+      closing = true
+      return true
+    }),
+  )
+  return { handle, records, drain, failed: Deferred.await(fatal) } satisfies Worker
 })

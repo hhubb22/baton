@@ -13,17 +13,20 @@ import { reapProcessTree, startProcessWatchdog, type ProcessRecordCallbacks } fr
 import { listenWorker } from './ipc.ts'
 import { currentBatondCommand, initializeWorkerDirectory, type BatondCommand } from './host.ts'
 import { makeNodeLedger } from './ledger.ts'
+import { readUpgradeState } from './upgrade.ts'
 
 export const runWorker = (options: {
   readonly dataDirectory: string
   readonly threadId: string
   readonly command?: BatondCommand
   readonly agentFactory?: AgentFactory
-}): Effect.Effect<never, unknown, Scope.Scope> =>
+}): Effect.Effect<void, unknown, Scope.Scope> =>
   Effect.gen(function* () {
+    if ((yield* Effect.tryPromise(() => readUpgradeState(options.dataDirectory)))?.phase === 'ready') return
     if (process.platform !== 'win32') process.umask(0o077)
     const paths = yield* Effect.promise(() => initializeWorkerDirectory(options.dataDirectory, options.threadId))
     yield* acquireProcessLockScoped(paths.lock)
+    if ((yield* Effect.tryPromise(() => readUpgradeState(options.dataDirectory)))?.phase === 'ready') return
     const token = (yield* Effect.promise(() => readPrivateFile(paths.token))).toString('utf8')
     if (!/^[0-9a-f]{64}$/.test(token)) return yield* Effect.fail(new Error('Invalid Worker IPC token'))
     yield* Effect.promise(async () => {
@@ -112,6 +115,8 @@ export const runWorker = (options: {
           return Effect.succeed({ type: 'result', ok: false, code: 'identity_mismatch' })
         const handle = Effect.gen(function* () {
           // 所有 IPC 入口在交付 open 前留下持久事实，包括本地 CLI。
+          if ((yield* Effect.tryPromise(() => readUpgradeState(options.dataDirectory)))?.phase === 'ready')
+            return { type: 'result' as const, ok: false, code: 'node_upgrading' }
           if (request.type === 'thread_open') yield* nodeLedger.markWorkerOpenAttempt(options.threadId)
           return yield* worker.handle(request)
         })
@@ -123,5 +128,13 @@ export const runWorker = (options: {
       },
     })
     if (process.platform !== 'win32') yield* Effect.promise(() => chmod(paths.endpoint, 0o600))
-    return yield* worker.failed
+    yield* Effect.raceFirst(
+      worker.failed,
+      Effect.gen(function* () {
+        while (true) {
+          if (yield* worker.drain) return
+          yield* Effect.sleep(100)
+        }
+      }),
+    )
   })

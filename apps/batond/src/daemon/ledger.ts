@@ -47,7 +47,7 @@ export interface NodeReport {
   acked: boolean
 }
 
-const storageBaseline = [
+export const storageBaseline = [
   'CREATE TABLE node_commit (id INTEGER PRIMARY KEY CHECK(id=1), commit_token TEXT NOT NULL)',
   "INSERT INTO node_commit VALUES (1, '')",
   'CREATE TABLE node_commands (id TEXT PRIMARY KEY, hash TEXT NOT NULL, payload TEXT NOT NULL)',

@@ -10,6 +10,7 @@ import { Effect, Scope, Exit } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import type { ProjectRunCommand, ProjectRuntimeRequest, ProjectRuntimeResult } from '@baton/protocol'
 import { readProcessIdentity, reapProcessTree } from '../platform/process.ts'
+import { saveUpgradeState, upgradeBlockers } from '../daemon/upgrade.ts'
 import { writePrivateFileAtomic } from '../platform/private.ts'
 import { makePrivateTempDirectory } from '../testing/private.ts'
 import { makeProjectManager } from './index.ts'
@@ -67,6 +68,63 @@ const transport =
   }
 
 describe('Project Runtime host', () => {
+  it.live('persists foreground and memory starts while draining and resumes them after cancellation', () =>
+    Effect.gen(function* () {
+      const { manager, dataDir, launchLog } = yield* open({}, 'upgrade-drain')
+      const requests: ProjectRuntimeRequest[] = []
+      let release!: () => void
+      const saved = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      manager.setTransport(async (request, signal) => {
+        if (request.operation === 'preview') {
+          requests.push(request)
+          await saved
+          return success({})
+        }
+        return transport(requests)(request, signal)
+      })
+      const state = {
+        operation_id: randomUUID(),
+        source_version: 'development',
+        target_version: 'v1',
+        target_path: dataDir,
+        phase: 'draining' as const,
+      }
+      yield* Effect.promise(() => saveUpgradeState(dataDir, state))
+      const foreground = command()
+      const memory: ProjectRunCommand = { ...command(), type: 'project_memory_start', memory_kind: 'embedding' }
+      yield* Effect.promise(() => manager.command(foreground))
+      yield* Effect.promise(() => manager.command(memory))
+      const db = new DatabaseSync(join(dataDir, 'project-runtime.db'), { readOnly: true })
+      try {
+        expect(db.prepare('SELECT count(*) AS n FROM project_commands').get()!.n).toBe(2)
+      } finally {
+        db.close()
+      }
+      expect(yield* Effect.promise(() => readFile(launchLog, 'utf8').catch(() => ''))).toBe('')
+      yield* Effect.promise(() => saveUpgradeState(dataDir, { ...state, phase: 'cancelled' }))
+      yield* until(
+        () =>
+          requests.some((r) => r.run_id === foreground.run_id && r.operation === 'preview') &&
+          requests.some((r) => r.run_id === memory.run_id && r.operation === 'memory_bootstrap'),
+      )
+      yield* Effect.promise(() => saveUpgradeState(dataDir, state))
+      yield* until(() => row(dataDir, memory.run_id)?.cleanup_complete === 1)
+      expect((yield* Effect.promise(() => upgradeBlockers(dataDir))).blockers).toContainEqual({
+        kind: 'runtime',
+        id: foreground.run_id,
+        reason: 'runtime_or_cleanup_pending',
+      })
+      release()
+      yield* until(() => row(dataDir, foreground.run_id)?.cleanup_complete === 1)
+      yield* Effect.promise(() => saveUpgradeState(dataDir, { ...state, phase: 'ready' }))
+      yield* Effect.promise(async () => {
+        await expect(manager.command(command())).rejects.toMatchObject({ code: 'node_upgrading' })
+      })
+    }),
+  )
+
   it.live('runs embedding memory work without chat login and reaps it through the existing ledger', () =>
     Effect.gen(function* () {
       const { manager, dataDir } = yield* open({}, 'memory-idle')

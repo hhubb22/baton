@@ -97,6 +97,11 @@ if (command === 'probe') {
         operation: command === 'memory' ? 'memory_bootstrap' : 'bootstrap',
         payload: { pid: process.pid, branch: branch.pid },
       })
+      if (mode === 'upgrade-drain' && command === 'run') {
+        await call({ operation: 'preview', payload: { saved: true } })
+        await call({ operation: 'claim_inputs', last_seq: 0 })
+        process.exit()
+      }
       setInterval(() => {}, 1000)
     }
   }

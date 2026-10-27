@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto'
+import { upgradePaused, readUpgradeState } from '../daemon/upgrade.ts'
+import { IPCError } from '../daemon/ipc.ts'
 import { join } from 'node:path'
 import { rm, open } from 'node:fs/promises'
 import { constants } from 'node:fs'
@@ -35,6 +38,7 @@ interface Run {
   cleanupPending: boolean
   cleanupReady: boolean
   cleanupUncertain: boolean
+  deferred: boolean
   control: string
 }
 const safePromise = <A>(effect: Effect.Effect<A, unknown>): Promise<A> => Effect.runPromise(effect)
@@ -160,6 +164,27 @@ class Manager implements ProjectManager {
   }
   private checkRuns() {
     if (this.cancel.signal.aborted) return
+    this.serial = this.serial
+      .then(async () => {
+        const paused = await upgradePaused(this.options.dataDir)
+        if (paused) {
+          for (const run of this.runs.values()) {
+            if (run.command.type === 'project_memory_start') this.stop(run)
+            else run.waits.notify()
+          }
+        } else {
+          for (const row of await safePromise(this.ledger.pending())) {
+            if (this.cancel.signal.aborted || (await upgradePaused(this.options.dataDir))) break
+            const command = Schema.decodeUnknownSync(ProjectRunCommand)(JSON.parse(row.payload))
+            if (command.type === 'project_run_wake') this.wake(command)
+            else await this.reserve(command)
+            const saved = await safePromise(this.ledger.get(command.run_id))
+            if (!saved || !['starting', 'queued'].includes(saved.state))
+              await safePromise(this.ledger.delivered(row.id))
+          }
+        }
+      })
+      .catch(() => {})
     for (const run of this.runs.values()) {
       if (!run.started || run.cleanupPending) continue
       try {
@@ -209,11 +234,26 @@ class Manager implements ProjectManager {
     const decoded = Schema.decodeUnknownOption(ProjectRunCommand)(input)
     if (decoded._tag === 'None' || decoded.value.lease_epoch <= 0 || this.cancel.signal.aborted) return
     const command = decoded.value
-    if (command.type === 'project_run_wake') {
-      this.wake(command)
-      return
-    }
-    const queued = this.serial.then(() => this.reserve(command))
+    if ((await readUpgradeState(this.options.dataDir))?.phase === 'ready')
+      throw new IPCError('node_upgrading', '设备已准备升级')
+    const queued = this.serial.then(async () => {
+      const id = createHash('sha256').update(JSON.stringify(command)).digest('hex')
+      await safePromise(this.ledger.enqueue(id, command))
+      if (
+        (await upgradePaused(this.options.dataDir)) &&
+        !['project_run_stop', 'project_memory_stop'].includes(command.type)
+      )
+        return
+      if (command.type === 'project_run_wake') this.wake(command)
+      else await this.reserve(command)
+      const saved = await safePromise(this.ledger.get(command.run_id))
+      if (
+        !saved ||
+        !['starting', 'queued'].includes(saved.state) ||
+        ['project_run_stop', 'project_memory_stop'].includes(command.type)
+      )
+        await safePromise(this.ledger.delivered(id))
+    })
     this.serial = queued.catch(() => {})
     await queued
   }
@@ -234,7 +274,7 @@ class Manager implements ProjectManager {
       return
     }
     const old = await safePromise(this.ledger.get(command.run_id))
-    if (old) {
+    if (old && old.state !== 'queued') {
       if (
         old.lease_epoch === command.lease_epoch &&
         (command.type === 'project_run_start' || command.type === 'project_memory_start')
@@ -247,6 +287,10 @@ class Manager implements ProjectManager {
     }
     if (command.type === 'project_run_stop' || command.type === 'project_memory_stop') {
       await safePromise(this.ledger.insert(command, true))
+      if (old?.state === 'queued') {
+        await safePromise(this.ledger.state(command.run_id, 'exited', 'stopped_before_start'))
+        await safePromise(this.ledger.complete(command.run_id))
+      }
       this.cleanup()
       return
     }
@@ -260,7 +304,10 @@ class Manager implements ProjectManager {
       return
     }
     const intent = await safePromise(this.ledger.insert(command))
-    if (!intent.inserted) return
+    if (!intent.inserted) {
+      if (intent.row.state !== 'queued') return
+      await safePromise(this.ledger.state(command.run_id, 'starting', ''))
+    }
     const pending: Run = {
       command,
       cancel: new AbortController(),
@@ -274,6 +321,7 @@ class Manager implements ProjectManager {
       cleanupPending: false,
       cleanupReady: false,
       cleanupUncertain: false,
+      deferred: false,
       control: join(this.options.dataDir, 'project-runtimes', command.run_id),
     }
     this.runs.set(command.run_id, pending)
@@ -329,6 +377,13 @@ class Manager implements ProjectManager {
       await ensurePrivateDirectory(run.control)
       this.lease(run)
       const config = await readProjectRuntimeConfig(this.options.dataDir)
+      if (await upgradePaused(this.options.dataDir)) {
+        // 尚未启动的运行回到持久命令队列，保留原租约身份。
+        run.deferred = true
+        await safePromise(this.ledger.state(run.command.run_id, 'queued', ''))
+        this.runs.delete(run.command.run_id)
+        return
+      }
       run.owned = await this.runner.spawn(
         [
           run.command.type === 'project_memory_start' ? 'memory' : 'run',
@@ -392,25 +447,27 @@ class Manager implements ProjectManager {
       if (error instanceof AggregateError) clean = false
     } finally {
       activate(false)
-      this.stop(run)
-      if (run.owned) {
+      if (!run.deferred) {
+        this.stop(run)
+        if (run.owned) {
+          try {
+            await this.runner.reap(run.owned)
+          } catch {
+            clean = false
+          }
+        }
         try {
-          await this.runner.reap(run.owned)
+          await stdio?.catch(() => {})
+          await rm(run.control, { recursive: true, force: true })
         } catch {
           clean = false
         }
-      }
-      try {
-        await stdio?.catch(() => {})
-        await rm(run.control, { recursive: true, force: true })
-      } catch {
-        clean = false
-      }
-      run.cleanupUncertain = !clean && !run.owned
-      run.cleanupReady = true
-      if (clean) {
-        run.cleanupPending = true
-        await this.persistCleanup(run)
+        run.cleanupUncertain = !clean && !run.owned
+        run.cleanupReady = true
+        if (clean) {
+          run.cleanupPending = true
+          await this.persistCleanup(run)
+        }
       }
     }
   }
@@ -429,6 +486,8 @@ class Manager implements ProjectManager {
   private async runtimeRequest(run: Run, value: Record<string, unknown>): Promise<ProjectRuntimeResult> {
     try {
       const started = this.lease(run)
+      if (value.operation === 'poll_wake' && (await upgradePaused(this.options.dataDir)))
+        return { type: 'project_runtime.result', ok: true, data: {} }
       if (value.operation === 'poll_wake')
         return await run.waits.poll(value.payload, run.cancel.signal, () => this.lease(run))
       const decoded = Schema.decodeUnknownOption(ProjectRuntimeRequest)({
@@ -439,6 +498,16 @@ class Manager implements ProjectManager {
       })
       if (decoded._tag === 'None') return failure('invalid_request')
       const request = decoded.value
+      if (
+        run.command.type !== 'project_memory_start' &&
+        request.operation === 'claim_inputs' &&
+        (await upgradePaused(this.options.dataDir))
+      ) {
+        await this.call({ ...request, operation: 'finish', reason: 'idle' }, run.cancel.signal)
+        // 领取下一批输入之前已保存当前回合，可以关闭 Runtime 而不撤回输入。
+        this.stop(run)
+        return failure('lease_lost')
+      }
       if (
         !(
           run.command.type === 'project_memory_start'

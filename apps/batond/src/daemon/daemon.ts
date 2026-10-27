@@ -1,10 +1,10 @@
 import { BUILD } from '@baton/protocol/release'
-import { randomUUID } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
+import { randomBytes, randomUUID } from 'node:crypto'
+import { readFile, unlink, chmod, lstat } from 'node:fs/promises'
 import { userInfo } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import { Context, Effect, Schema, Tracer } from 'effect'
+import { Cause, Context, Effect, Schema, Tracer } from 'effect'
 import type * as Scope from 'effect/Scope'
 import {
   ControlToNodeBody,
@@ -28,6 +28,17 @@ import { makeThreadService, WorkerHistoryUnavailable } from './threads.ts'
 import { connectWebSocket, reconnectDelay, type DaemonTransport, type DaemonConnection } from './transport.ts'
 import { DaemonStorageFailure, ledgerPromise } from './storage.ts'
 import { pruneDeviceOutputs } from '../worker/full-output.ts'
+import { readPrivateFile } from '../platform/private.ts'
+import { listenWorker, IPCError } from './ipc.ts'
+import {
+  readUpgradeState,
+  prepareUpgrade,
+  saveUpgradeState,
+  upgradeBlockers,
+  upgradePaths,
+  upgradePaused,
+  type UpgradeState,
+} from './upgrade.ts'
 export { DaemonStorageFailure } from './storage.ts'
 
 export class NeedsReauthentication extends Error {
@@ -88,6 +99,7 @@ const controlAttempt = <A>(task: (signal: AbortSignal) => Promise<A>) =>
       return yield* attempt(() => pending)
     }),
   )
+const awaitPaused = (state: UpgradeState | undefined) => state?.phase === 'ready' || state?.phase === 'failed'
 const terminal = (code?: string) =>
   [
     'invalid_credential',
@@ -108,15 +120,15 @@ async function connected(options: {
   heartbeatMs: number
   controlTimeoutMs: number
   pollMs: number
-  ledger: NodeLedger
-  threads: ReturnType<typeof makeThreadService>
+  ledger?: NodeLedger
+  threads?: ReturnType<typeof makeThreadService>
   host: DaemonWorkerHost
   report: () => Promise<RuntimeReport>
-  projects: ProjectManager
-  devices: DeviceService
+  projects?: ProjectManager
+  devices?: DeviceService
   refreshDevices: () => void
 }) {
-  const { connection, identity, signal } = options
+  const { connection, identity, signal, ledger, threads, projects, devices } = options
   const controller = new AbortController()
   const abort = () => {
     controller.abort()
@@ -215,8 +227,8 @@ async function connected(options: {
             continue
           if (!(await sendReport(entry.report))) break
         }
-        if (sentReports.size < 8) {
-          for (const report of await ledgerPromise(options.ledger.pendingReports())) {
+        if (sentReports.size < 8 && ledger) {
+          for (const report of await ledgerPromise(ledger.pendingReports())) {
             if (epoch !== reportEpoch || sentReports.size >= 8) break
             if (sentReports.has(report.event_id)) continue
             if (!(await sendReport(report))) break
@@ -256,22 +268,44 @@ async function connected(options: {
       const env = Schema.decodeUnknownSync(Envelope)(frame.envelope)
       if (env.source?.kind !== 'control') continue
       const body = Schema.decodeUnknownSync(ControlToNodeBody)(env.body)
+      if (body.type === 'node.sync_result') {
+        if (env.correlation_id === syncId) {
+          if (body.ok) {
+            synced = true
+            projects?.setTransport(projectRPC.request)
+            options.refreshDevices()
+          } else if (terminal(body.code)) throw new NeedsReauthentication()
+        }
+        continue
+      }
+      if (body.type === 'node.runtime_report_result') {
+        if (reportPending && env.correlation_id === reportPending.id && body.ok) {
+          reportAcked = reportPending.hash
+          reportPending = undefined
+        }
+        continue
+      }
+      if (!ledger || !threads || !projects || !devices) {
+        // 中心将否定命令回执视为最终失败；连接级错误保留原 outbox 供稍后重试。
+        if (body.type === 'thread.command')
+          await send({ kind: 'error', code: 'node_upgrading', message: '设备已准备升级，请稍后重试原命令' })
+        else if (body.type === 'session.request')
+          await envelope(
+            {
+              type: 'session.result',
+              operation_id: body.operation_id,
+              session_id: body.session_id,
+              ok: false,
+              code: 'node_upgrading',
+              gap: false,
+            },
+            env.message_id,
+          )
+        else if (body.type !== 'thread.report_result')
+          await send({ kind: 'error', code: 'node_upgrading', message: '设备正在准备升级' })
+        continue
+      }
       switch (body.type) {
-        case 'node.sync_result':
-          if (env.correlation_id === syncId) {
-            if (body.ok) {
-              synced = true
-              options.projects.setTransport(projectRPC.request)
-              options.refreshDevices()
-            } else if (terminal(body.code)) throw new NeedsReauthentication()
-          }
-          break
-        case 'node.runtime_report_result':
-          if (reportPending && env.correlation_id === reportPending.id && body.ok) {
-            reportAcked = reportPending.hash
-            reportPending = undefined
-          }
-          break
         case 'project_runtime.result':
           if (synced) projectRPC.receive(env.correlation_id, body)
           break
@@ -280,13 +314,13 @@ async function connected(options: {
         case 'project_run_start':
         case 'project_run_stop':
         case 'project_run_wake':
-          if (synced) schedule(() => options.projects.command(body))
+          if (synced) schedule(() => projects.command(body))
           break
         case 'thread.command':
           if (synced)
             schedule(async () => {
               try {
-                await envelope(await options.threads.command(env.message_id, body), env.message_id)
+                await envelope(await threads.command(env.message_id, body), env.message_id)
               } catch (error) {
                 if (!(error instanceof WorkerHistoryUnavailable)) throw error
               }
@@ -294,7 +328,7 @@ async function connected(options: {
           break
         case 'thread.report_result':
           if (!synced) break
-          await ledgerPromise(options.ledger.acknowledge(body))
+          await ledgerPromise(ledger.acknowledge(body))
           if (body.ok) {
             const sent = sentReports.get(body.event_id)
             if (sent?.report.thread_id === body.thread_id && sent.report.worker_seq === body.worker_seq)
@@ -313,7 +347,7 @@ async function connected(options: {
         case 'node.subscription_login':
           if (synced)
             schedule(async () => {
-              await envelope(await options.devices.handle(body, controller.signal), env.message_id)
+              await envelope(await devices.handle(body, controller.signal), env.message_id)
             })
           break
         case 'session.request':
@@ -350,7 +384,7 @@ async function connected(options: {
   } finally {
     abort()
     projectRPC.close()
-    options.projects.onDisconnect()
+    projects?.onDisconnect()
     signal.removeEventListener('abort', abort)
     await ticking
     await Promise.allSettled(requests)
@@ -385,154 +419,307 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
     }
     const url = yield* Effect.try({ try: () => normalizeRelay(address!), catch: () => new Error('Relay 地址无效') })
     const ca = options.caFile ? yield* attempt(() => readFile(options.caFile!, 'utf8')) : undefined
+    let serial: Promise<unknown> = Promise.resolve()
+    const paths = upgradePaths(options.dataDirectory)
     yield* attempt(async () => {
-      await initializeBrowseRoots(options.dataDirectory)
-      const path = join(options.dataDirectory, 'node.db')
+      await ensurePrivateDirectory(join(options.dataDirectory, 'ipc'))
       try {
-        const file = await openPrivateFile(path)
-        await file.close()
+        await readPrivateFile(paths.token)
       } catch (error) {
         if (!isMissing(error)) throw error
-        await writePrivateFileAtomic(path, '')
+        await writePrivateFileAtomic(paths.token, randomBytes(32).toString('hex'))
       }
-    })
-    const ledger = yield* makeNodeLedger(join(options.dataDirectory, 'node.db')).pipe(
-      Effect.mapError(() => new DaemonStorageFailure()),
-    )
-    let devicesDirty = true
-    const projects = yield* makeProjectManager({
-      ...options.project,
-      dataDir: options.dataDirectory,
-      onReportChanged: () => {
-        devicesDirty = true
-        options.project?.onReportChanged?.()
-      },
-    })
-    const devices = yield* Effect.acquireRelease(
-      attempt(() =>
-        makeDeviceService({
-          dataDirectory: options.dataDirectory,
-          runtime: projects,
-          onChanged: () => {
-            devicesDirty = true
-          },
-        }),
-      ),
-      (service) => Effect.promise(() => service.close()),
-    )
-    let agents: RuntimeAgent[] = [pendingCapability()]
-    const threads = makeThreadService({
-      dataDirectory: options.dataDirectory,
-      identity,
-      ledger,
-      host: services.host,
-      capability: () => agents,
-      tracer: yield* Tracer.Tracer,
-    })
-    yield* controlAttempt((signal) => threads.discover(signal))
-    let deviceReport: Pick<RuntimeReport, 'exec' | 'roots' | 'repos' | 'project_runtime' | 'truncated'> = {
-      exec: { enabled: false, shell: process.platform === 'win32' ? 'pwsh' : '/bin/sh' },
-      roots: (yield* attempt(() => loadBrowseRoots(options.dataDirectory))).map((r) => ({
-        root_id: r.id,
-        path: r.path,
-      })),
-      repos: [],
-    }
-    let username: string | undefined
-    try {
-      username = userInfo().username
-    } catch {
-      /* The operating system may not provide a user name. */
-    }
-    const report = async (): Promise<RuntimeReport> =>
-      boundRuntimeReport({
-        batond_version: BUILD.version,
-        ...(username ? { user: username } : {}),
-        agents,
-        ...deviceReport,
-      })
-    const pruneOutputs = Effect.gen(function* () {
-      while (true) {
-        yield* attempt(() => pruneDeviceOutputs(options.dataDirectory)).pipe(
-          Effect.catch((error) => Effect.logWarning('Full output cleanup failed', error)),
-        )
-        yield* Effect.sleep('1 hour')
-      }
-    })
-    const collectDevices = Effect.gen(function* () {
-      let collectedAt = -Infinity
-      while (true) {
-        if (devicesDirty || performance.now() - collectedAt >= 5000) {
-          devicesDirty = false
-          yield* controlAttempt(async (signal) => {
-            deviceReport = await devices.collect(signal)
-          })
-          collectedAt = performance.now()
+      if (process.platform !== 'win32') {
+        try {
+          const socket = await lstat(paths.endpoint)
+          if (!socket.isSocket() || socket.uid !== process.getuid?.()) throw new Error('Invalid daemon IPC endpoint')
+          await unlink(paths.endpoint)
+        } catch (error) {
+          if (!isMissing(error)) throw error
         }
-        yield* Effect.sleep(100)
       }
     })
-    const collect = Effect.gen(function* () {
-      yield* controlAttempt((signal) => threads.recover(signal))
-      while (true) {
-        yield* controlAttempt((signal) => threads.collectReports(signal))
-        yield* Effect.sleep(pollMs)
-      }
-    })
-    const probe = Effect.gen(function* () {
-      while (true) {
-        yield* attempt(async (signal) => {
+    yield* Effect.addFinalizer(() =>
+      Effect.promise(async () => {
+        await serial
+      }),
+    )
+    yield* listenWorker({
+      endpoint: paths.endpoint,
+      token: (yield* attempt(() => readPrivateFile(paths.token))).toString('utf8'),
+      handle: (request) =>
+        attempt(async () => {
+          const task = serial.then(async () => {
+            let state = await readUpgradeState(options.dataDirectory)
+            if (request.type === 'upgrade_prepare') state = await prepareUpgrade(options.dataDirectory, request.payload)
+            else if (request.type === 'upgrade_cancel') {
+              if (state) {
+                state = { ...state, phase: 'cancelled' }
+                await saveUpgradeState(options.dataDirectory, state)
+              }
+            } else if (request.type !== 'upgrade_status') throw new IPCError('unsupported', '仅支持升级管理命令')
+            return {
+              type: 'result' as const,
+              ok: true,
+              payload: JSON.stringify({ state: state ?? null, ...(await upgradeBlockers(options.dataDirectory)) }),
+            }
+          })
+          serial = task.catch(() => {})
           try {
-            const probed = await services.probe(signal)
-            agents = Array.isArray(probed) ? [...probed] : [probed]
-          } catch {
-            agents = [{ ...pendingCapability(), reason: '能力探测暂不可用' }]
+            return await task
+          } catch (error) {
+            return {
+              type: 'result' as const,
+              ok: false,
+              code: error instanceof IPCError ? error.code : 'upgrade_failed',
+              message: error instanceof Error ? error.message : '升级管理失败',
+            }
           }
-        })
-        yield* Effect.sleep(probeMs)
-      }
+        }),
     })
+    if (process.platform !== 'win32') yield* attempt(() => chmod(paths.endpoint, 0o600))
     const incarnation = randomUUID()
-    const connect = Effect.gen(function* () {
-      let retry = 0
-      while (true) {
-        const started = performance.now()
-        const outcome = yield* controlAttempt(async (signal) => {
-          let connection: DaemonConnection | undefined
-          try {
-            connection = await services.transport(url, { signal, ...(ca ? { ca } : {}) })
-            await connected({
-              connection,
-              signal,
-              identity,
-              incarnation,
-              heartbeatMs,
-              controlTimeoutMs: controlTimeoutSeconds * 1000,
-              pollMs,
-              ledger,
-              threads,
-              host: services.host,
-              report,
-              projects,
-              devices,
-              refreshDevices: () => {
-                devicesDirty = true
-              },
-            })
-          } finally {
-            connection?.close()
-          }
-        }).pipe(Effect.result)
-        if (
-          outcome._tag === 'Failure' &&
-          (outcome.failure instanceof NeedsReauthentication || outcome.failure instanceof DaemonStorageFailure)
+    const connect = (
+      runtime: Pick<
+        Parameters<typeof connected>[0],
+        'ledger' | 'threads' | 'projects' | 'devices' | 'report' | 'refreshDevices'
+      >,
+    ) =>
+      Effect.gen(function* () {
+        let retry = 0
+        while (true) {
+          const started = performance.now()
+          const outcome = yield* controlAttempt(async (signal) => {
+            let connection: DaemonConnection | undefined
+            try {
+              connection = await services.transport(url, { signal, ...(ca ? { ca } : {}) })
+              await connected({
+                connection,
+                signal,
+                identity,
+                incarnation,
+                heartbeatMs,
+                controlTimeoutMs: controlTimeoutSeconds * 1000,
+                pollMs,
+                ...runtime,
+                host: services.host,
+              })
+            } finally {
+              connection?.close()
+            }
+          }).pipe(Effect.result)
+          if (
+            outcome._tag === 'Failure' &&
+            (outcome.failure instanceof NeedsReauthentication || outcome.failure instanceof DaemonStorageFailure)
+          )
+            return yield* Effect.fail(outcome.failure)
+          if (performance.now() - started >= heartbeatMs) retry = 0
+          yield* Effect.sleep(reconnectDelay(retry++, options.random))
+        }
+      })
+
+    while (true) {
+      const state = yield* attempt(() => readUpgradeState(options.dataDirectory))
+      if (state?.phase === 'ready' || state?.phase === 'failed') {
+        yield* Effect.raceFirst(
+          connect({
+            report: async () => ({
+              batond_version: BUILD.version,
+              agents: [],
+              roots: [],
+              repos: [],
+              exec: { enabled: false, shell: '' },
+            }),
+            refreshDevices: () => {},
+          }),
+          Effect.gen(function* () {
+            while (awaitPaused(yield* attempt(() => readUpgradeState(options.dataDirectory)))) yield* Effect.sleep(100)
+          }),
         )
-          return yield* Effect.fail(outcome.failure)
-        if (performance.now() - started >= heartbeatMs) retry = 0
-        yield* Effect.sleep(reconnectDelay(retry++, options.random))
+        continue
       }
-    })
-    yield* Effect.all([connect, collect, probe, collectDevices, pruneOutputs], { concurrency: 'unbounded' })
+      let draining: UpgradeState | undefined
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* controlAttempt(async () => {
+            await initializeBrowseRoots(options.dataDirectory)
+            const path = join(options.dataDirectory, 'node.db')
+            try {
+              const file = await openPrivateFile(path)
+              await file.close()
+            } catch (error) {
+              if (!isMissing(error)) throw error
+              await writePrivateFileAtomic(path, '')
+            }
+          })
+          const ledger = yield* makeNodeLedger(join(options.dataDirectory, 'node.db')).pipe(
+            Effect.mapError(() => new DaemonStorageFailure()),
+          )
+          let devicesDirty = true
+          const projects = yield* Effect.uninterruptible(
+            makeProjectManager({
+              ...options.project,
+              dataDir: options.dataDirectory,
+              onReportChanged: () => {
+                devicesDirty = true
+                options.project?.onReportChanged?.()
+              },
+            }),
+          )
+          const devices = yield* Effect.acquireRelease(
+            attempt(() =>
+              makeDeviceService({
+                dataDirectory: options.dataDirectory,
+                runtime: projects,
+                onChanged: () => {
+                  devicesDirty = true
+                },
+              }),
+            ),
+            (service) => Effect.promise(() => service.close()),
+          )
+          let agents: RuntimeAgent[] = [pendingCapability()]
+          const threads = makeThreadService({
+            dataDirectory: options.dataDirectory,
+            identity,
+            ledger,
+            host: services.host,
+            capability: () => agents,
+            tracer: yield* Tracer.Tracer,
+          })
+          yield* controlAttempt((signal) => threads.discover(signal))
+          let deviceReport: Pick<RuntimeReport, 'exec' | 'roots' | 'repos' | 'project_runtime' | 'truncated'> = {
+            exec: { enabled: false, shell: process.platform === 'win32' ? 'pwsh' : '/bin/sh' },
+            roots: (yield* attempt(() => loadBrowseRoots(options.dataDirectory))).map((r) => ({
+              root_id: r.id,
+              path: r.path,
+            })),
+            repos: [],
+          }
+          let username: string | undefined
+          try {
+            username = userInfo().username
+          } catch {
+            /* The operating system may not provide a user name. */
+          }
+          const report = async (): Promise<RuntimeReport> =>
+            boundRuntimeReport({
+              batond_version: BUILD.version,
+              ...(username ? { user: username } : {}),
+              agents,
+              ...deviceReport,
+            })
+          const pruneOutputs = Effect.gen(function* () {
+            while (true) {
+              yield* controlAttempt(() => pruneDeviceOutputs(options.dataDirectory)).pipe(
+                Effect.catch((error) => Effect.logWarning('Full output cleanup failed', error)),
+              )
+              yield* Effect.sleep('1 hour')
+            }
+          })
+          const collectDevices = Effect.gen(function* () {
+            let collectedAt = -Infinity
+            while (true) {
+              if (devicesDirty || performance.now() - collectedAt >= 5000) {
+                devicesDirty = false
+                yield* controlAttempt(async (signal) => {
+                  deviceReport = await devices.collect(signal)
+                })
+                collectedAt = performance.now()
+              }
+              yield* Effect.sleep(100)
+            }
+          })
+          const collect = Effect.gen(function* () {
+            yield* controlAttempt((signal) => threads.recover(signal))
+            while (true) {
+              yield* controlAttempt((signal) => threads.collectReports(signal))
+              yield* Effect.sleep(pollMs)
+            }
+          })
+          const probe = Effect.gen(function* () {
+            while (true) {
+              yield* controlAttempt(async (signal) => {
+                if (await upgradePaused(options.dataDirectory)) return
+                try {
+                  const probed = await services.probe(signal)
+                  agents = Array.isArray(probed) ? [...probed] : [probed]
+                } catch {
+                  agents = [{ ...pendingCapability(), reason: '能力探测暂不可用' }]
+                }
+              })
+              yield* Effect.sleep(probeMs)
+            }
+          })
+          const drain = Effect.gen(function* () {
+            while (true) {
+              const state = yield* attempt(() => readUpgradeState(options.dataDirectory))
+              if (state && state.phase !== 'cancelled') {
+                const status = yield* attempt(() => upgradeBlockers(options.dataDirectory))
+                if (state.phase === 'draining' && status.blockers.length === 0) {
+                  draining = state
+                  return
+                }
+              }
+              yield* Effect.sleep(100)
+            }
+          })
+          yield* Effect.raceFirst(
+            Effect.all(
+              [
+                connect({
+                  ledger,
+                  threads,
+                  projects,
+                  devices,
+                  report,
+                  refreshDevices: () => {
+                    devicesDirty = true
+                  },
+                }),
+                collect,
+                probe,
+                collectDevices,
+                pruneOutputs,
+              ],
+              { concurrency: 'unbounded' },
+            ),
+            drain,
+          )
+        }),
+      ).pipe(
+        Effect.catchCause((cause) =>
+          Effect.gen(function* () {
+            const state = yield* attempt(() => readUpgradeState(options.dataDirectory))
+            if (!state || state.phase === 'cancelled') return yield* Effect.failCause(cause)
+            yield* attempt(() =>
+              saveUpgradeState(options.dataDirectory, {
+                ...state,
+                phase: 'failed',
+                reason: Cause.pretty(cause).slice(0, 2048),
+              }),
+            )
+          }),
+        ),
+      )
+      if (draining) {
+        const completed = draining as UpgradeState
+        yield* attempt(async () => {
+          const finish = serial.then(async () => {
+            const current = await readUpgradeState(options.dataDirectory)
+            const status = await upgradeBlockers(options.dataDirectory)
+            if (
+              current?.operation_id === completed.operation_id &&
+              current.phase === 'draining' &&
+              status.blockers.length === 0
+            )
+              await saveUpgradeState(options.dataDirectory, { ...current, phase: 'ready' })
+          })
+          serial = finish.catch(() => {})
+          await finish
+        })
+      }
+    }
   })
   return program.pipe(
     Effect.provideService(DaemonServices, {
@@ -540,7 +727,8 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
       transport: options.transport ?? connectWebSocket,
       probe:
         options.probe ??
-        (async () => (await import('../agents/probe.ts')).probeAgents({ dataDirectory: options.dataDirectory })),
+        (async (signal) =>
+          (await import('../agents/probe.ts')).probeAgents({ dataDirectory: options.dataDirectory, signal })),
     }),
   )
 }
