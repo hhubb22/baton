@@ -111,7 +111,7 @@ it('persists upgrade receipts without phase rollback and accepts reports only fr
     })
   }))
 
-it('keeps new Thread and Project execution queued during upgrade, sends stop and resumes delivery after cancellation', () =>
+it.each(['cancelled', 'completed'] as const)('delivers queued execution after %s', (finalPhase) =>
   withTestDatabase(async ({ run }) => {
     const node = await seedNode(run, { report })
     const createThread = () =>
@@ -211,7 +211,49 @@ it('keeps new Thread and Project execution queued during upgrade, sends stop and
     await run(Nodes.saveNodeUpgradeState(node.source, { ...state, phase: 'ready' }))
     expect(await run(Threads.claimCommands())).toEqual([])
     expect(await run(Projects.claimProjectCommands('project_memory_start'))).toEqual([])
-    await run(Nodes.saveNodeUpgradeState(node.source, { ...state, phase: 'cancelled' }))
+    if (finalPhase === 'completed') {
+      for (const phase of ['migrating', 'syncing'] as const) {
+        await run(Nodes.saveNodeUpgradeState(node.source, { ...state, phase }))
+        expect(await run(Threads.claimCommands())).toEqual([])
+        expect(await run(Projects.claimProjectCommands('project_run_start'))).toEqual([])
+        expect(await run(Projects.claimProjectCommands('project_memory_start'))).toEqual([])
+        await expect(
+          run(Nodes.saveNodeUpgradeState(node.source, { ...state, phase: 'cancelled' })),
+        ).rejects.toMatchObject({ code: 'upgrade_conflict' })
+        expect(await run(Nodes.saveNodeUpgradeState(node.source, { ...state, phase: 'ready' }))).toMatchObject({
+          phase: 'ready',
+          ok: true,
+        })
+        expect(await run(Nodes.getNode(node.employeeId, node.nodeId))).toMatchObject({
+          upgrade_state: { phase },
+          executable: false,
+        })
+        if (phase === 'migrating') {
+          await run(Nodes.saveNodeUpgradeState(node.source, { ...state, phase: 'failed' }))
+          await expect(
+            run(Nodes.saveNodeUpgradeState(node.source, { ...state, phase: 'cancelled' })),
+          ).rejects.toMatchObject({ code: 'upgrade_conflict' })
+        }
+      }
+    }
+    const final = { ...state, phase: finalPhase }
+    const receipt = await run(Nodes.saveNodeUpgradeState(node.source, final))
+    expect(await run(Nodes.saveNodeUpgradeState(node.source, final))).toEqual(receipt)
+    if (finalPhase === 'completed') {
+      await expect(
+        run(Nodes.saveNodeUpgradeState(node.source, { ...state, phase: 'cancelled' })),
+      ).rejects.toMatchObject({ code: 'upgrade_conflict' })
+      for (const phase of ['draining', 'ready', 'migrating', 'syncing', 'failed'] as const) {
+        expect(await run(Nodes.saveNodeUpgradeState(node.source, { ...state, phase }))).toMatchObject({
+          phase,
+          ok: true,
+        })
+      }
+    }
+    expect(await run(Nodes.getNode(node.employeeId, node.nodeId))).toMatchObject({
+      upgrade_state: { phase: finalPhase },
+      executable: true,
+    })
     const delivered = await run(Threads.claimCommands())
     expect(delivered).toEqual(
       expect.arrayContaining([
@@ -241,4 +283,43 @@ it('keeps new Thread and Project execution queued during upgrade, sends stop and
     ).toEqual([runId])
     await run(Projects.scheduleProjectRun(waiting.agent.id))
     expect((await run(Projects.projectStatus(node.employeeId, waiting.id))).run?.state).toBe('starting')
-  }))
+    if (finalPhase === 'completed') {
+      const skipped = { ...state, operation_id: randomUUID(), phase: 'ready' as const }
+      await run(Nodes.saveNodeUpgradeState(node.source, skipped))
+      await run(Nodes.saveNodeUpgradeState(node.source, { ...skipped, phase: 'failed' }))
+      expect(await run(Nodes.saveNodeUpgradeState(node.source, skipped))).toMatchObject({ phase: 'ready', ok: true })
+      expect(await run(Nodes.getNode(node.employeeId, node.nodeId))).toMatchObject({
+        upgrade_state: { operation_id: skipped.operation_id, phase: 'failed' },
+        executable: false,
+      })
+      await run(Nodes.saveNodeUpgradeState(node.source, { ...skipped, phase: 'syncing' }))
+      expect(await run(Nodes.saveNodeUpgradeState(node.source, { ...skipped, phase: 'failed' }))).toMatchObject({
+        phase: 'failed',
+        ok: true,
+      })
+      expect(await run(Nodes.getNode(node.employeeId, node.nodeId))).toMatchObject({
+        upgrade_state: { operation_id: skipped.operation_id, phase: 'syncing' },
+        executable: false,
+      })
+      for (const phase of ['draining', 'migrating', 'cancelled'] as const) {
+        await expect(run(Nodes.saveNodeUpgradeState(node.source, { ...skipped, phase }))).rejects.toMatchObject({
+          code: 'upgrade_conflict',
+        })
+      }
+      await run(Nodes.saveNodeUpgradeState(node.source, { ...skipped, phase: 'completed' }))
+      for (const phase of ['ready', 'failed'] as const) {
+        expect(await run(Nodes.saveNodeUpgradeState(node.source, { ...skipped, phase }))).toMatchObject({
+          phase,
+          ok: true,
+        })
+      }
+      await expect(
+        run(Nodes.saveNodeUpgradeState(node.source, { ...skipped, phase: 'migrating' })),
+      ).rejects.toMatchObject({ code: 'upgrade_conflict' })
+      expect(await run(Nodes.getNode(node.employeeId, node.nodeId))).toMatchObject({
+        upgrade_state: { operation_id: skipped.operation_id, phase: 'completed' },
+        executable: true,
+      })
+    }
+  }),
+)

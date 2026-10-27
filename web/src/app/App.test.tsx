@@ -467,6 +467,9 @@ describe('devices', () => {
   it.each([
     ['draining', 'Waiting for upgrade'],
     ['ready', 'Waiting for upgrade'],
+    ['migrating', 'Upgrading'],
+    ['syncing', 'Upgrading'],
+    ['completed', 'Running Baton Dev'],
     ['failed', 'Upgrade paused'],
     ['cancelled', 'Running Baton Dev'],
   ] as const)('shows upgrade phase %s in the existing device status row', async (phase, label) => {
@@ -492,7 +495,8 @@ describe('devices', () => {
     const row = deviceRow('Ubuntu Dev')
     expect(within(row).getByText(label)).toBeInTheDocument()
     expect(within(row).queryByText('Online')).not.toBeInTheDocument()
-    if (phase !== 'cancelled') expect(within(row).queryByText('Running Baton Dev')).not.toBeInTheDocument()
+    if (phase !== 'cancelled' && phase !== 'completed')
+      expect(within(row).queryByText('Running Baton Dev')).not.toBeInTheDocument()
     await user.click(row)
     const cancellation = screen.queryByText('Waiting for the upgrade to be cancelled.')
     if (phase === 'failed') expect(cancellation).toBeInTheDocument()

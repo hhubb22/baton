@@ -3,7 +3,7 @@
 Status: draft
 Basis: [发布行为规格](PRODUCT.md) RL-01～17；[Baton TECH](../baton/TECH.md)；[Agent 适配 TECH](../agent-adapters/TECH.md)；[构建与发布工具](../../tools/README.md)。
 
-打包、发布元数据、公开版本查询、连接版本核对、检查、测量、平台边界、持久格式基线、中心恢复后处理和本地升级准备记录现行实现；增量格式升级和安装切换流程尚待实施。凭据闲置过期与重新认证由 Baton TECH 负责，本设计引用其结果。
+打包、发布元数据、公开版本查询、连接版本核对、检查、测量、平台边界、持久格式基线、中心恢复后处理、本地升级准备与完成同步记录现行实现；增量格式升级和安装切换流程尚待实施。凭据闲置过期与重新认证由 Baton TECH 负责，本设计引用其结果。
 
 ## 打包与发布
 
@@ -72,7 +72,7 @@ Cursor store 子进程禁用 fetch 和 HTTP(S) 请求。上述加载检查不调
 
 ## 版本与兼容
 
-发布元数据、只读查询、连接版本核对、中心恢复后处理、本地升级预检、准备与离线迁移已实现；增量格式升级、安装入口切换和中心同步完成流程仍待实施。存储基线与摘要校验见「持久格式与迁移」，中心恢复后处理见「备份与恢复」，本地升级入口见「设备准备与切换」。首版允许人工停止和切换程序，升级入口负责状态、迁移与检查；安装包由管理员或设备用户取得，不在进程运行时覆盖旧目录。
+发布元数据、只读查询、连接版本核对、中心恢复后处理、本地升级预检、准备、离线迁移与中心完成同步已实现；增量格式升级和自动安装入口切换仍待实施。存储基线与摘要校验见「持久格式与迁移」，中心恢复后处理见「备份与恢复」，本地升级入口见「设备准备与切换」。首版允许人工停止和切换程序，升级入口负责状态、迁移与检查；安装包由管理员或设备用户取得，不在进程运行时覆盖旧目录。
 
 ### 模块职责
 
@@ -154,7 +154,7 @@ SQLite 在只读连接中核对格式元数据和迁移记录，通过后才打�
 
 check 读取目标 `release.json`，实际执行该目录的 `batond --version` 并核对完整发布身份；以 SQLite 只读连接核对三类账本格式及基线摘要，要求目标 `ledger_versions` 与实际支持格式一致。查询当前中心 `GET /api/v1/release` 核对版本与协议，再按备份目标文件系统的可用块估算完整目录副本空间，包含目录分配开销及 1 MiB 状态、清单余量。TLS 可复用现有 `--ca-file`；prepare 使用 daemon 已配置的 CA。check 不建立基线、不写升级状态、不启动或停止业务；SQLite 读取时可能建立 SHM 和空 WAL 辅助文件，主库、已有 WAL 内容及业务事实保持不变。
 
-状态位于数据目录的私有原子文件 `upgrade.json`，包含 `operation_id`、`source_version`、`target_version`、`target_path`、`phase`，以及 prepare 保存的完整 `checked_release`。迁移取得一致备份后附 `backup_path`、`backup_checksum`；失败附 `error_code` 和 `reason`。源版本取运行程序的 `BUILD.version`，未注入发布身份的开发程序显示 `development`。持久阶段为 `draining`、`ready`、`migrating`、`syncing`、`cancelled`、`failed`。状态读取失败返回 `upgrade_state_invalid`，执行保持暂停。
+状态位于数据目录的私有原子文件 `upgrade.json`，包含 `operation_id`、`source_version`、`target_version`、`target_path`、`phase`，以及 prepare 保存的完整 `checked_release`。迁移取得一致备份后附 `backup_path`、`backup_checksum`；失败附 `error_code` 和 `reason`。源版本取运行程序的 `BUILD.version`，未注入发布身份的开发程序显示 `development`。持久阶段为 `draining`、`ready`、`migrating`、`syncing`、`completed`、`cancelled`、`failed`。状态读取失败返回 `upgrade_state_invalid`，执行保持暂停。
 
 Thread 的新 open、message、resume、answer 通过原有节点账本与 Worker 回执持久接收。draining 允许启动只负责接收和保存队列的 Worker，以继续处理 stop、withdraw；其原生会话创建、恢复和回合执行都受门禁限制。Worker 自己在执行调度和下一轮 intent 前读取同一门禁，当前回合自然结束；空闲 Worker 在串行队列中停止新调度，再由 Scope 关闭会话、agent-host、watchdog 和 SQLite。排队输入及原生命令身份保留，取消后继续调度。Project 前后台启动和唤醒保存在 `project-runtime.db` 的 `project_commands` 中；后台整理沿用既有取消与清理，前台完成当前响应后在下一次 `claim_inputs` 前退出，已保存历史和未领取输入保留。stop、withdraw、结果补报和清理在 draining 期间继续。
 
@@ -162,23 +162,23 @@ daemon 只读检查 Worker/启动锁、Thread 活动事实、Runtime 运行和�
 
 migrate 校验当前运行程序、目标包与已保存预检的发布身份一致，持有 `daemon.lock` 及身份、浏览目录和执行配置的原有写锁，再核对所有登记进程。将私有数据目录复制到旁边的 `<目录名>.upgrade-backups/<operation_id>-<随机 ID>/data/`；保留身份、业务、SDK 状态、完整输出与 WAL，仅排除 IPC 和已知进程锁。备份目录使用现有私有目录权限，小型 `backup.json` 记录操作、源目录和目录内容 SHA-256，完成复制后比较源与副本摘要。符号链接、特殊文件或无法确认的进程会阻止迁移。数据目录以外的原生会话与模型凭据仍按「备份与恢复」单独保护。
 
-备份位置和摘要随 `migrating` 一起原子写入状态，再逐库调用现有存储初始化与事务核验；首版只有格式 1 / `0001_baseline`，无增量步骤。成功进入 `syncing`；失败保存 `upgrade_migration_failed` 并保持暂停。重跑核验原备份并依据各库实际格式继续，保留同一备份，不用外部进度跳过库，不自动恢复备份。migrating 或 syncing 缺少完整备份记录时拒绝继续。安装入口切换、中心阶段上报和 completed 仍待实施。
+备份位置和摘要随 `migrating` 一起原子写入状态，再逐库调用现有存储初始化与事务核验；首版只有格式 1 / `0001_baseline`，无增量步骤。成功进入 `syncing`；失败保存 `upgrade_migration_failed` 并保持暂停。重跑核验原备份并依据各库实际格式继续，保留同一备份，不用外部进度跳过库，不自动恢复备份。migrating 或 syncing 缺少完整备份记录时拒绝继续。安装入口仍由用户或服务管理器显式切换，目标 daemon 启动后继续中心同步与完成确认。
 
 | 阶段 | 行为与恢复依据 |
 |---|---|
 | `draining` | 禁止开始新执行；等待当前工作结束、后台停止、结果落盘及进程退出 |
 | `ready` | 所有执行与登记进程清理已确认，数据库已关闭；daemon 保持管理入口，用户可正常退出它 |
 | `migrating` | daemon 已退出，目标版本持独占升级锁并检查备份后逐库迁移，业务启动保持关闭 |
-| `syncing` | 本地格式检查通过，daemon 与独立 Worker 保持业务暂停；daemon 仅开放管理和受限连接，结果补报与完成同步待实施 |
-| `completed`（待实施） | 中心确认同步且清理义务完成，解除升级暂停并恢复原队列；持久保留最后一次升级结果 |
+| `syncing` | 本地格式检查通过，业务执行保持暂停；受限连接完成认证、初始同步与结果补报，再请求中心确认 completed |
+| `completed` | 中心先记录并回执，节点再原子保存 completed；当前 daemon 重新打开业务 Scope，按持久队列恢复执行，保留最后一次升级结果 |
 | `cancelled` | 迁移前取消准备并确认原程序仍可读取数据，清除门禁后恢复调度；保留操作结果 |
 | `failed` | 保留错误码、原因、备份与各库实际格式；保持暂停。迁移失败可重跑 migrate，迁移前失败仍可取消 |
 
-阶段上报协议在 `packages/protocol` 声明，当前支持 `draining`、`ready`、`cancelled`、`failed`。普通能力报告包含 `upgrade_protocol=1`；`node.upgrade_state` 只上传 `operation_id`、源/目标版本和阶段，不上传安装路径或原始失败诊断。daemon 读取已经原子保存的 `upgrade.json`，按现有心跳间隔重报未确认状态；初次连接和重连均重报当前状态。回执 `node.upgrade_state_result` 必须匹配原 operation ID、阶段、消息关联 ID 且 `ok=true`，否则继续重试。ready/failed 的受限连接也上报，不打开业务数据库。离线期间可以跨过中间阶段，中心接受首次直接上报 ready 或 cancelled。
+阶段上报协议在 `packages/protocol` 声明，支持 `draining`、`ready`、`migrating`、`syncing`、`completed`、`cancelled`、`failed`。普通能力报告包含 `upgrade_protocol=1`；`node.upgrade_state` 只上传 `operation_id`、源/目标版本和阶段，不上传安装路径或原始失败诊断。daemon 读取已经原子保存的 `upgrade.json`，按现有心跳间隔重报未确认状态；初次连接和重连均重报当前状态。回执 `node.upgrade_state_result` 必须匹配原 operation ID、阶段、消息关联 ID 且 `ok=true`，否则继续重试。ready、migrating、failed 的受限连接也上报，不打开业务数据库；syncing 只重开节点结果账本用于补报。离线期间可以跨过中间阶段，中心接受首次直接上报 ready、syncing 或 completed。
 
-中心在现有 Node、Credential、Presence 来源校验与事务中保存 `node_upgrades`，每个操作记录绑定设备、源/目标版本、当前阶段和已确认阶段；最近创建的操作是该设备当前操作。同一操作、同一阶段重投返回原回执，迟到回执不改变当前阶段；同 ID 改变设备、源/目标版本或提交未确认过的回退阶段返回 `upgrade_conflict`。普通能力报告和状态同步不修改升级记录。当前认证连接上报新 operation 时以新操作为准，允许离线取消旧操作后立即准备新目标；已记录旧操作的迟到报告只能重取原阶段回执，不能覆盖新操作。节点视图提供当前操作、版本和阶段，设备页显示 `Waiting for upgrade` 或 `Upgrade paused`，不暴露本地路径。没有声明该能力的组合仍按人工停机流程处理。
+中心在现有 Node、Credential、Presence 来源校验与事务中保存 `node_upgrades`，每个操作记录绑定设备、源/目标版本、当前阶段和已确认阶段；最近创建的操作是该设备当前操作。同一操作、同一阶段重投返回原回执，迟到回执不改变当前阶段；同 ID 改变设备、源/目标版本或提交未确认过的回退阶段返回 `upgrade_conflict`。migrating 及之后的已确认阶段禁止取消；迁移失败后允许同操作继续 migrating、syncing 或 completed，completed 不回退。普通能力报告和状态同步不修改升级记录。当前认证连接上报新 operation 时以新操作为准，允许离线取消旧操作后立即准备新目标；已记录旧操作的迟到报告只能重取原阶段回执，不能覆盖新操作。节点视图提供当前操作、版本和阶段，设备页显示 `Waiting for upgrade`、`Upgrading` 或 `Upgrade paused`，不暴露本地路径。没有声明该能力的组合仍按人工停机流程处理。
 
-中心保存 draining、ready 或 failed 后，停止领取该节点的 open、message、resume、Project 前台/后台启动和新输入唤醒，不向该节点放置新的 Project 运行。持久 outbox 和输入保留，等待中的新执行不阻挡后面的 stop、withdraw；结果回执、有效运行续租和必要清理继续处理。中心确认 cancelled 后恢复领取。已在途的启动或消息仍可落盘接收，本地门禁阻止新回合；接收 ACK 只表示持久保存。节点本地 CLI 与 Worker 自己的 queued 调度检查相同本地状态，中心离线时仍暂停新执行。
+中心保存 draining、ready、migrating、syncing 或 failed 后，停止领取该节点的 open、message、resume、Project 前台/后台启动和新输入唤醒，不向该节点放置新的 Project 运行。持久 outbox 和输入保留，等待中的新执行不阻挡后面的 stop、withdraw；结果回执、有效运行续租和必要清理继续处理。中心确认 completed 或 cancelled 后恢复领取。已在途的启动或消息仍可落盘接收，本地门禁阻止新回合；接收 ACK 只表示持久保存。节点本地 CLI 与 Worker 自己的 queued 调度检查相同本地状态，中心离线时仍暂停新执行。
 
 当前 Thread Turn 自然结束后，Worker 暂停在下一轮提交 intent 之前，落盘报告并关闭原生会话连接、agent-host 与自身。关闭会话连接不删除原生会话。普通升级不调用会撤回 queued 的 Thread stop；用户显式停止时继续按 R-11 撤回未发输入。Project 前台在下一持久化安全点退出：取消尚未保存的模型输出，保留已保存 assistant、工具调用、结果及已领取输入；已提交工具继续按原业务身份查询，未提交调用留待升级后恢复，不为升级制造模型失败或重新创建调用身份。中心暂停向该运行唤醒或交付下一批。后台整理取消模型请求，保留已提交分片，未提交内容按原 claim 恢复。所有停止、续租与进程清理沿用既有 fencing。
 
@@ -186,7 +186,7 @@ daemon 汇总所有已发现的 Worker、watchdog、agent-host、Runtime 与持�
 
 ready 后正常退出旧 daemon，从目标目录显式运行 `batond upgrade migrate --data-dir <原数据目录>`。迁移完成后以原 `--data-dir`、Runtime 凭据目录和启动配置启动目标 daemon；migrating、syncing 或 failed 时均保持业务 Scope 和独立 Worker 关闭，不能通过重新启动恢复执行。启动入口由用户或现有服务管理器切换为新目录的明确可执行路径；不在旧目录就地覆盖，不要求 Windows 使用符号链接。保留旧安装目录至确认升级成功，清理由用户显式发起。
 
-migrating 中断后以库内版本继续，syncing 失败时保持本地暂停。后续完成协议要求节点完成兼容检查、重新认证（如有需要）、原结果补报及同步后，先持久 completed 意图，本地执行仍保持暂停；中心确认同步与完成状态后返回回执，节点持久解除门禁再开放执行。丢失完成回执时重复查询原状态；中心仍保留该节点未完成升级记录，不能因重连或旧报告覆盖而提前派发。Worker 的升级恢复路径按持久状态继续队列，不能借用会撤回旧 queued 的显式 resume 流程。
+migrating 中断后以库内版本继续，syncing 失败时保持本地暂停。目标 daemon 在受限 Scope 内打开 `node.db`，将已退出 Worker 账本中的未确认报告按原 event ID、序号和存储代次导入节点 outbox，不启动 Worker 或 Project Runtime。认证与初始同步成功、运行能力报告获得中心确认、节点 outbox 中的原报告全部获确认后，daemon 上报 completed，本地文件仍保持 syncing。中心持久保存 completed 并回执；daemon 验证匹配回执后才原子保存本地 completed，不增加完成意图字段。丢失回执时按心跳重发 completed，重连后重新同步、补报并请求相同操作的完成回执，中心幂等返回原结果。中心先完成，节点后解除门禁；此间在途业务请求仍收到可重试的 `node_upgrading`。本地保存完成后，当前进程关闭受限连接与结果账本，再由现有外层循环打开业务 Scope，无需退出或服务管理器重启。Worker 与 Project Runtime 按持久队列恢复，Worker 报告副本沿用原补报确认流程清除，不调用会撤回 queued 输入的显式 resume。
 
 错误使用固定码：`upgrade_conflict`、`upgrade_busy`、`upgrade_backup_required`、`upgrade_migration_failed`、`upgrade_package_invalid`、`upgrade_coordinator_unavailable`、`upgrade_insufficient_space`、`storage_version_unsupported`、`migration_checksum_mismatch`、`node_upgrading`、`node_version_incompatible`。状态读取失败明确返回错误，不报告 ready 或 completed。
 

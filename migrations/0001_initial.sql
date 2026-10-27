@@ -240,7 +240,7 @@ CREATE TABLE node_upgrades (
     operation_id uuid NOT NULL UNIQUE,
     source_version text NOT NULL,
     target_version text NOT NULL,
-    phase text NOT NULL CHECK (phase IN ('draining', 'ready', 'cancelled', 'failed')),
+    phase text NOT NULL CHECK (phase IN ('draining', 'ready', 'migrating', 'syncing', 'completed', 'cancelled', 'failed')),
     reported_phases text[] NOT NULL
 );
 

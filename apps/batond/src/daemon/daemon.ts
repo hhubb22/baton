@@ -30,6 +30,8 @@ import { makeThreadService, WorkerHistoryUnavailable } from './threads.ts'
 import { connectWebSocket, reconnectDelay, type DaemonTransport, type DaemonConnection } from './transport.ts'
 import { DaemonStorageFailure, ledgerPromise } from './storage.ts'
 import { pruneDeviceOutputs } from '../worker/full-output.ts'
+import { readLedger } from '../worker/ledger.ts'
+import { workerPaths } from './paths.ts'
 import { readPrivateFile } from '../platform/private.ts'
 import { listenWorker, IPCError } from './ipc.ts'
 import {
@@ -224,7 +226,14 @@ async function connected(options: {
             operation_id: saved.operation_id,
             source_version: saved.source_version,
             target_version: saved.target_version,
-            phase: saved.phase,
+            phase:
+              saved.phase === 'syncing' &&
+              reportAcked &&
+              ledger &&
+              sentReports.size === 0 &&
+              (await ledgerPromise(ledger.pendingReports())).length === 0
+                ? 'completed'
+                : saved.phase,
           })
           const hash = contentHash(state)
           if (
@@ -328,8 +337,28 @@ async function connected(options: {
           body.phase === upgradePending.state.phase &&
           body.ok
         ) {
+          if (body.phase === 'completed') {
+            const saved = await readUpgradeState(options.dataDirectory)
+            if (saved?.operation_id === body.operation_id && saved.phase === 'syncing')
+              await saveUpgradeState(options.dataDirectory, { ...saved, phase: 'completed' })
+          }
           upgradeAcked = upgradePending.hash
           upgradePending = undefined
+        }
+        continue
+      }
+      if (body.type === 'thread.report_result') {
+        if (!synced || !ledger) continue
+        await ledgerPromise(ledger.acknowledge(body))
+        if (body.ok) {
+          const sent = sentReports.get(body.event_id)
+          if (sent?.report.thread_id === body.thread_id && sent.report.worker_seq === body.worker_seq)
+            sentReports.delete(body.event_id)
+        } else if (body.expected_worker_seq !== undefined) {
+          reportEpoch++
+          for (const [id, sent] of sentReports)
+            if (sent.report.thread_id === body.thread_id && sent.report.worker_seq >= body.expected_worker_seq)
+              sentReports.delete(id)
         }
         continue
       }
@@ -349,8 +378,7 @@ async function connected(options: {
             },
             env.message_id,
           )
-        else if (body.type !== 'thread.report_result')
-          await send({ kind: 'error', code: 'node_upgrading', message: '设备正在准备升级' })
+        else await send({ kind: 'error', code: 'node_upgrading', message: '设备正在准备升级' })
         continue
       }
       switch (body.type) {
@@ -373,20 +401,6 @@ async function connected(options: {
                 if (!(error instanceof WorkerHistoryUnavailable)) throw error
               }
             })
-          break
-        case 'thread.report_result':
-          if (!synced) break
-          await ledgerPromise(ledger.acknowledge(body))
-          if (body.ok) {
-            const sent = sentReports.get(body.event_id)
-            if (sent?.report.thread_id === body.thread_id && sent.report.worker_seq === body.worker_seq)
-              sentReports.delete(body.event_id)
-          } else if (body.expected_worker_seq !== undefined) {
-            reportEpoch++
-            for (const [id, sent] of sentReports)
-              if (sent.report.thread_id === body.thread_id && sent.report.worker_seq >= body.expected_worker_seq)
-                sentReports.delete(id)
-          }
           break
         case 'files.browse':
         case 'node.browse_roots_set':
@@ -575,21 +589,52 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
     while (true) {
       const state = yield* attempt(() => readUpgradeState(options.dataDirectory))
       if (upgradeOffline(state)) {
-        yield* Effect.raceFirst(
-          connect({
-            report: async () => ({
-              upgrade_protocol: 1,
-              batond_version: BUILD.version,
-              agents: [],
-              roots: [],
-              repos: [],
-              exec: { enabled: false, shell: process.platform === 'win32' ? 'pwsh' : '/bin/sh' },
-            }),
-            refreshDevices: () => {},
-          }),
+        yield* Effect.scoped(
           Effect.gen(function* () {
-            while (upgradeOffline(yield* attempt(() => readUpgradeState(options.dataDirectory))))
-              yield* Effect.sleep(100)
+            if (state?.phase === 'syncing')
+              yield* controlAttempt(async () => {
+                const file = await openPrivateFile(join(options.dataDirectory, 'node.db'))
+                await file.close()
+              })
+            const ledger =
+              state?.phase === 'syncing'
+                ? yield* makeNodeLedger(join(options.dataDirectory, 'node.db')).pipe(
+                    Effect.mapError(() => new DaemonStorageFailure()),
+                  )
+                : undefined
+            if (ledger)
+              yield* controlAttempt(async () => {
+                // 补齐已退出 Worker 的持久报告，不启动 Worker 或原生会话。
+                for (const worker of await ledgerPromise(ledger.workers())) {
+                  try {
+                    const path = workerPaths(options.dataDirectory, worker.threadId).ledger
+                    const file = await openPrivateFile(path)
+                    await file.close()
+                    const state = readLedger(path, worker.config).initial
+                    for (const entry of state.outbox) if (!entry.acked) await ledgerPromise(ledger.ingest(entry.report))
+                  } catch (error) {
+                    if (!isMissing(error)) throw error
+                  }
+                }
+              })
+            yield* Effect.raceFirst(
+              connect({
+                ...(ledger ? { ledger } : {}),
+                report: async () => ({
+                  upgrade_protocol: 1,
+                  batond_version: BUILD.version,
+                  agents: [],
+                  roots: [],
+                  repos: [],
+                  exec: { enabled: false, shell: process.platform === 'win32' ? 'pwsh' : '/bin/sh' },
+                }),
+                refreshDevices: () => {},
+              }),
+              Effect.gen(function* () {
+                while (upgradeOffline(yield* attempt(() => readUpgradeState(options.dataDirectory))))
+                  yield* Effect.sleep(100)
+              }),
+            )
           }),
         )
         continue
@@ -711,7 +756,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
           const drain = Effect.gen(function* () {
             while (true) {
               const state = yield* attempt(() => readUpgradeState(options.dataDirectory))
-              if (state && state.phase !== 'cancelled') {
+              if (state && !['cancelled', 'completed'].includes(state.phase)) {
                 const status = yield* attempt(() => upgradeBlockers(options.dataDirectory))
                 if (state.phase === 'draining' && status.blockers.length === 0) {
                   draining = state
@@ -748,7 +793,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
         Effect.catchCause((cause) =>
           Effect.gen(function* () {
             const state = yield* attempt(() => readUpgradeState(options.dataDirectory))
-            if (!state || state.phase === 'cancelled') return yield* Effect.failCause(cause)
+            if (!state || ['cancelled', 'completed'].includes(state.phase)) return yield* Effect.failCause(cause)
             yield* attempt(() =>
               saveUpgradeState(options.dataDirectory, {
                 ...state,

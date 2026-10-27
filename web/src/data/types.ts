@@ -78,7 +78,7 @@ export interface Device {
     operationId: string
     sourceVersion: string
     targetVersion: string
-    phase: 'draining' | 'ready' | 'cancelled' | 'failed'
+    phase: 'draining' | 'ready' | 'migrating' | 'syncing' | 'completed' | 'cancelled' | 'failed'
   } | null
   credentialState?: 'active' | 'idle_expired' | 'revoked'
   idleExpiresAt?: number

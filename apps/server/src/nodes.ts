@@ -692,8 +692,13 @@ export const saveNodeUpgradeState = (
             if (
               previous.id !== current?.id ||
               previous.phase === 'cancelled' ||
+              previous.phase === 'completed' ||
               report.phase === 'draining' ||
-              (previous.phase === 'failed' && report.phase !== 'cancelled')
+              (report.phase === 'ready' && ['migrating', 'syncing'].includes(previous.phase)) ||
+              (report.phase === 'migrating' && previous.phase === 'syncing') ||
+              (report.phase === 'cancelled' &&
+                previous.reported_phases.some((phase) => ['migrating', 'syncing'].includes(phase))) ||
+              (previous.phase === 'failed' && report.phase === 'ready')
             )
               return yield* Effect.fail(conflict())
             yield* sql`UPDATE node_upgrades SET phase=${report.phase},reported_phases=array_append(reported_phases,${report.phase}) WHERE operation_id=${report.operation_id}::uuid`
@@ -724,7 +729,7 @@ export const saveNodeUpgradeState = (
 
 /** 使用当前节点别名 n，只判断新执行是否可以交付。 */
 export const nodeAllowsNewExecutionSQL = (sql: SqlClient.SqlClient) => sql`COALESCE(
-  (SELECT u.phase='cancelled' FROM node_upgrades u WHERE u.node_id=n.id ORDER BY u.id DESC LIMIT 1),true)`
+  (SELECT u.phase IN ('completed','cancelled') FROM node_upgrades u WHERE u.node_id=n.id ORDER BY u.id DESC LIMIT 1),true)`
 
 export const localProcessNotice = '吊销连接凭据不会停止离线节点上的本地进程。重新接入需要新的连接凭据。'
 const revocationMessage = (status: string) =>
@@ -802,7 +807,7 @@ const nodeFrom = (row: NodeRow): Record<string, unknown> => ({
     row.synced &&
     !row.revoked &&
     !row.expired &&
-    (!row.upgrade_state || row.upgrade_state.phase === 'cancelled'),
+    (!row.upgrade_state || ['completed', 'cancelled'].includes(row.upgrade_state.phase)),
   upgrade_state: row.upgrade_state,
   credential_state: row.revoked ? 'revoked' : row.expired ? 'idle_expired' : 'active',
   idle_expires_at: timestamp(row.idle_expires_at),

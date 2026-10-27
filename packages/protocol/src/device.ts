@@ -290,7 +290,7 @@ export const NodeUpgradeState = Schema.Struct({
   operation_id: UUID,
   source_version: nonemptyText(256),
   target_version: nonemptyText(256),
-  phase: Schema.Literals(['draining', 'ready', 'cancelled', 'failed']),
+  phase: Schema.Literals(['draining', 'ready', 'migrating', 'syncing', 'completed', 'cancelled', 'failed']),
 })
 export type NodeUpgradeState = typeof NodeUpgradeState.Type
 

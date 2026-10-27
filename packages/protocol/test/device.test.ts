@@ -19,7 +19,7 @@ const state: NodeUpgradeState = {
 }
 
 it('升级阶段消息在各自方向及完整联合中往返，公开字段不包含本地路径或失败原因', () => {
-  for (const phase of ['draining', 'ready', 'cancelled', 'failed'] as const) {
+  for (const phase of ['draining', 'ready', 'migrating', 'syncing', 'completed', 'cancelled', 'failed'] as const) {
     const current = { ...state, phase }
     const request = { type: 'node.upgrade_state', ...current }
     const result = {
@@ -57,7 +57,7 @@ it('升级状态约束 UUID、阶段及 256 字节非空版本', () => {
     { source_version: 'v'.repeat(257) },
     { target_version: '版'.repeat(86) },
     { target_version: 'v\0' },
-    { phase: 'completed' },
+    { phase: 'unknown' },
   ]) {
     expect(Schema.is(NodeUpgradeState)({ ...state, ...patch })).toBe(false)
     expect(Schema.is(NodeToControlBody)({ ...request, ...patch })).toBe(false)
@@ -71,7 +71,7 @@ it('升级状态约束 UUID、阶段及 256 字节非空版本', () => {
     ok: true,
   }
   expect(Schema.decodeUnknownSync(NodeUpgradeStateResult)(result)).toEqual(result)
-  for (const patch of [{ operation_id: 'operation' }, { phase: 'completed' }, { ok: 1 }, { code: '\0' }]) {
+  for (const patch of [{ operation_id: 'operation' }, { phase: 'unknown' }, { ok: 1 }, { code: '\0' }]) {
     expect(Schema.is(ControlToNodeBody)({ ...result, ...patch })).toBe(false)
   }
 })

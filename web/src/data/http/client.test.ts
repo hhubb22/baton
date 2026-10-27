@@ -77,6 +77,9 @@ describe('HTTP account and devices', () => {
   it.each([
     ['draining', 'neutral', 'Waiting for upgrade'],
     ['ready', 'neutral', 'Waiting for upgrade'],
+    ['migrating', 'neutral', 'Upgrading'],
+    ['syncing', 'neutral', 'Upgrading'],
+    ['completed', 'success', 'Online'],
     ['failed', 'attention', 'Upgrade paused'],
     ['cancelled', 'success', 'Online'],
   ] as const)('preserves upgrade phase %s separately from the connection', (phase, tone, label) => {
@@ -104,7 +107,7 @@ describe('HTTP account and devices', () => {
       },
     })
     expect(deviceConnectionView(device, [], Date.now())).toEqual({ tone, label })
-    if (phase !== 'cancelled') {
+    if (phase !== 'cancelled' && phase !== 'completed') {
       for (const connection of ['offline', 'syncing'] as const) {
         expect(deviceConnectionView({ ...device, connection }, [], Date.now())).toEqual({ tone, label })
       }

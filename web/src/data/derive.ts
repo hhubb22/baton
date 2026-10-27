@@ -494,6 +494,9 @@ export function deviceConnectionView(device: Device, projects: Project[], now: n
     case 'draining':
     case 'ready':
       return { tone: 'neutral', label: 'Waiting for upgrade' }
+    case 'migrating':
+    case 'syncing':
+      return { tone: 'neutral', label: 'Upgrading' }
     case 'failed':
       return { tone: 'attention', label: 'Upgrade paused' }
   }

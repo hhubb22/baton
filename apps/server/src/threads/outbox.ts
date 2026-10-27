@@ -55,7 +55,7 @@ export const claimCommands = (): DB<ClaimedCommand[]> =>
           AND v.worker_turn_seq=(${alias}.payload->>'worker_turn_seq')::bigint AND v.ended_at IS NULL)
         AND NOT EXISTS(SELECT 1 FROM thread_events e WHERE e.thread_id=eligible.id AND e.kind='question.resolved'
           AND e.payload->>'request_id'=${alias}.payload->'answer'->>'request_id')))`
-      const acceptsWork = `COALESCE((SELECT u.phase='cancelled' FROM node_upgrades u WHERE u.node_id=eligible.node_id ORDER BY u.id DESC LIMIT 1),true)`
+      const acceptsWork = `COALESCE((SELECT u.phase IN ('completed','cancelled') FROM node_upgrades u WHERE u.node_id=eligible.node_id ORDER BY u.id DESC LIMIT 1),true)`
       // 冻结或因升级等待的新执行不阻挡停止、撤回和必要清理。
       const due = `o.acked_at IS NULL AND o.completed_at IS NULL AND o.next_attempt_at<=statement_timestamp()
     AND EXISTS(SELECT 1 FROM threads eligible WHERE eligible.id=o.thread_id

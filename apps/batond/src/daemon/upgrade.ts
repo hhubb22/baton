@@ -20,7 +20,7 @@ export const UpgradeState = Schema.Struct({
   source_version: Schema.String,
   target_version: Schema.String.check(Schema.isMinLength(1)),
   target_path: Schema.String,
-  phase: Schema.Literals(['draining', 'ready', 'cancelled', 'failed', 'migrating', 'syncing']),
+  phase: Schema.Literals(['draining', 'ready', 'cancelled', 'failed', 'migrating', 'syncing', 'completed']),
   checked_release: Schema.optionalKey(ReleaseMetadata),
   backup_path: Schema.optionalKey(Schema.String),
   backup_checksum: Schema.optionalKey(Schema.String),
@@ -49,7 +49,7 @@ export async function readUpgradeState(dataDirectory: string): Promise<UpgradeSt
 export async function upgradePaused(dataDirectory?: string): Promise<boolean> {
   if (!dataDirectory) return false
   const state = await readUpgradeState(dataDirectory)
-  return state !== undefined && state.phase !== 'cancelled'
+  return state !== undefined && !['cancelled', 'completed'].includes(state.phase)
 }
 export const saveUpgradeState = (directory: string, state: UpgradeState) =>
   writePrivateFileAtomic(join(directory, 'upgrade.json'), JSON.stringify(state))
@@ -57,7 +57,7 @@ export const saveUpgradeState = (directory: string, state: UpgradeState) =>
 export async function prepareUpgrade(directory: string, target: string, ca?: string): Promise<UpgradeState> {
   const { path, release } = await readUpgradePackage(target)
   const previous = await readUpgradeState(directory)
-  if (previous && previous.phase !== 'cancelled') {
+  if (previous && !['cancelled', 'completed'].includes(previous.phase)) {
     if (previous.target_path !== path || previous.target_version !== release.version)
       throw new IPCError('upgrade_conflict', '已有不同目标的升级准备')
     if (previous.checked_release && sameRelease(previous.checked_release, release)) return previous
@@ -68,7 +68,7 @@ export async function prepareUpgrade(directory: string, target: string, ca?: str
   if (!sameRelease(release, checked.release))
     throw new IPCError('upgrade_package_invalid', '预检期间目标安装包身份发生变化')
   const state: UpgradeState =
-    previous && previous.phase !== 'cancelled'
+    previous && !['cancelled', 'completed'].includes(previous.phase)
       ? { ...previous, checked_release: checked.release }
       : {
           operation_id: randomUUID(),
@@ -86,7 +86,7 @@ export const upgradeOffline = (state: UpgradeState | undefined) =>
   state !== undefined && ['ready', 'migrating', 'syncing', 'failed'].includes(state.phase)
 
 export function upgradeCanCancel(state: UpgradeState) {
-  return !['migrating', 'syncing'].includes(state.phase) && state.error_code !== 'upgrade_migration_failed'
+  return !['migrating', 'syncing', 'completed'].includes(state.phase) && state.error_code !== 'upgrade_migration_failed'
 }
 
 /** 只读检查持久执行事实；存活的锁或未确认的进程记录都阻止就绪。 */
