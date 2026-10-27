@@ -155,14 +155,20 @@ SQLite 在只读连接中核对格式元数据和迁移记录，通过后才打�
 | 入口 | 作用 |
 |---|---|
 | `batond upgrade check --package <目录>` | 只读验证安装包、实际版本、格式范围、当前中心兼容性及剩余空间，返回可执行与失败原因 |
-| `batond upgrade prepare --package <目录>` | 复用 check 预检，以持久 operation_id 登记源/目标与预检结果；同一路径、版本和构建身份复用当前准备，不同目标返回 `upgrade_conflict` |
+| `batond upgrade prepare --package <目录>` | 复用 check 完整预检，以持久 operation_id 登记源/目标与预检结果；同一路径、版本和构建身份复用当前准备，不同目标返回 `upgrade_conflict` |
+| `batond upgrade prepare --version <中心版本>` | 读取保存中心的公开发布信息，要求精确匹配当前中心版本与其支持范围，记录中心协议并检查备份空间；目标包尚未安装时只登记版本与 draining，不写 checked_release |
+| `batond upgrade prepare --package <本应用resources/batond> --self` | 无 daemon 时持原锁先保存暂停，再核对当前程序、目标包、已记录的中心协议、本地格式与备份空间，绑定同一操作的安装目录；不启动业务或结束现存进程 |
 | `batond upgrade migrate` | 首次仅在 ready 且 daemon 已退出时，由预检目标程序持独占锁备份并逐库核验、初始化；成功写 syncing 后退出，重跑依据库内事实继续 |
-| `batond upgrade status` | 返回持久状态、阻挡的 Thread/Runtime、进程 PID 与创建时间，以及账本内待确认报告数；检查失败显示阻挡原因 |
-| `batond upgrade cancel` | 迁移前持久写入 `cancelled` 并解除门禁，恢复保留的队列；不恢复被用户显式停止撤回的输入。迁移开始或迁移失败后拒绝取消 |
+| `batond upgrade status` | 返回持久状态、阻挡的 Thread/Runtime、进程 PID 与创建时间，以及账本内待确认报告数；无 daemon 时持原锁重查并推进 draining 到 ready，检查失败显示阻挡原因 |
+| `batond upgrade cancel` | 迁移前持久写入 `cancelled` 并解除门禁，恢复保留的队列；无 daemon 时持原锁保存取消，由正常启动继续队列，不自行启动进程或调用 resume。迁移开始或迁移失败后拒绝取消 |
 
 check 读取目标 `release.json`，实际执行该目录的 `batond --version` 并核对完整发布身份；以 SQLite 只读连接核对三类账本格式及基线摘要，要求目标 `ledger_versions` 与实际支持格式一致。查询当前中心 `GET /api/v1/release` 核对版本与协议，再按备份目标文件系统的可用块估算完整目录副本空间，包含目录分配开销及 1 MiB 状态、清单余量。TLS 可复用现有 `--ca-file`；prepare 使用 daemon 已配置的 CA。check 不建立基线、不写升级状态、不启动或停止业务；SQLite 读取时可能建立 SHM 和空 WAL 辅助文件，主库、已有 WAL 内容及业务事实保持不变。
 
-状态位于数据目录的私有原子文件 `upgrade.json`，包含 `operation_id`、`source_version`、`target_version`、`target_path`、`phase`，以及 prepare 保存的完整 `checked_release`。迁移取得一致备份后附 `backup_path`、`backup_checksum`；失败附 `error_code` 和 `reason`。源版本取运行程序的 `BUILD.version`，未注入发布身份的开发程序显示 `development`。持久阶段为 `draining`、`ready`、`migrating`、`syncing`、`completed`、`cancelled`、`failed`。状态读取失败返回 `upgrade_state_invalid`，执行保持暂停。
+状态位于数据目录的私有原子文件 `upgrade.json`，包含 `operation_id`、`source_version`、`target_version`、`phase`。完整预检后附目标 `target_path` 与 `checked_release`；按中心版本准备时先记录 `target_protocol_version`，不记录尚未安装的路径或伪造目标包预检。self 只可绑定相同目标版本、协议和构建，允许同一构建迁入新应用目录；原 operation ID、阶段及备份保持不变。迁移取得一致备份后附 `backup_path`、`backup_checksum`；失败附 `error_code` 和 `reason`。传统准备的源版本取运行程序的 `BUILD.version`；直接 self 准备优先沿用既有完成记录的目标版本或原准备的源版本，缺少证据时记录 `unknown`。未注入发布身份的开发程序显示 `development`。持久阶段为 `draining`、`ready`、`migrating`、`syncing`、`completed`、`cancelled`、`failed`。状态读取失败返回 `upgrade_state_invalid`，执行保持暂停。
+
+prepare、status、cancel 成功返回 `{ state, blockers, pending_reports }`，migrate 返回 `{ state }`。已有 daemon 时普通准备、查询与取消通过原认证 IPC 串行执行；版本准备沿用 `upgrade_prepare`，其字符串 payload 携带版本对象，原路径 payload 保持有效。无 daemon 时 CLI 在原 `daemon.lock` 内执行管理，不依赖 WSS 认证，因此旧 daemon 被中心拒绝后仍可按中心版本准备。旧程序自身协议与新中心不同不阻止版本准备；self 将实际目标协议与已保存的中心协议核对。直接 self 没有中心协议记录时，后续 syncing 认证校验协议后才开放业务。self 不连接中心，也不启动普通 daemon、Worker、Runtime 或进程回收。原锁被外部服务或迁移占用时 self 返回 `upgrade_busy`，不接管或终止占锁者。版本准备与 self 检查空间，已有备份的 self 重试不重复要求新副本空间。
+
+无 daemon 时 status 在原锁内重查持久事实，并取得身份、目录和执行配置写锁后再次核查才写 ready；持久报告已完整落盘时无需中心 ACK。启动时已经 draining 的 daemon 仅保留升级管理并轮询就绪，不打开业务数据库或恢复、回收原进程。运行中发起准备的 daemon 仍先完成原业务 Scope 的退出；准备期间中心版本拒绝不把本地 draining 改为失败。self 的新准备先保存暂停，再读取旧账本；未知格式、损坏或核验失败保留暂停与原数据。失败以 stderr JSON 返回固定码和详细原因，可再次准备或查询。
 
 Thread 的新 open、message、resume、answer 通过原有节点账本与 Worker 回执持久接收。draining 允许启动只负责接收和保存队列的 Worker，以继续处理 stop、withdraw；其原生会话创建、恢复和回合执行都受门禁限制。Worker 自己在执行调度和下一轮 intent 前读取同一门禁，当前回合自然结束；空闲 Worker 在串行队列中停止新调度，再由 Scope 关闭会话、agent-host、watchdog 和 SQLite。排队输入及原生命令身份保留，取消后继续调度。Project 前后台启动和唤醒保存在 `project-runtime.db` 的 `project_commands` 中；后台整理沿用既有取消与清理，前台完成当前响应后在下一次 `claim_inputs` 前退出，已保存历史和未领取输入保留。stop、withdraw、结果补报和清理在 draining 期间继续。
 

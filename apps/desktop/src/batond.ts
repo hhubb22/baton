@@ -6,6 +6,29 @@ import type { DeploymentConfig } from './deployment.ts'
 import { PublicIdentity } from './status.ts'
 import { lastFailure } from './supervisor.ts'
 
+const UpgradeState = Schema.Struct({
+  operation_id: Schema.String,
+  source_version: Schema.String,
+  target_version: Schema.String,
+  target_path: Schema.optionalKey(Schema.String),
+  phase: Schema.Literals(['draining', 'ready', 'migrating', 'syncing', 'completed', 'cancelled', 'failed']),
+  reason: Schema.optionalKey(Schema.String),
+  error_code: Schema.optionalKey(Schema.String),
+})
+export const UpgradeSnapshot = Schema.Struct({
+  state: Schema.NullOr(UpgradeState),
+  blockers: Schema.Array(
+    Schema.Struct({
+      kind: Schema.Literals(['thread', 'runtime', 'process']),
+      id: Schema.String,
+      reason: Schema.String,
+      pid: Schema.optionalKey(Schema.Int),
+    }),
+  ),
+  pending_reports: Schema.Number,
+})
+export type UpgradeSnapshot = typeof UpgradeSnapshot.Type
+
 export type Spawn = (file: string, args: string[], options: SpawnOptionsWithoutStdio) => ChildProcessWithoutNullStreams
 
 export class Batond {
@@ -29,7 +52,7 @@ export class Batond {
     return this.spawn(['run', '--exit-with-stdin'])
   }
 
-  private execute(args: string[], code?: string): Promise<string> {
+  private execute(args: string[], code?: string, upgrade = false): Promise<string> {
     return new Promise((resolve, reject) => {
       const child = this.spawn(args, code)
       let output = '',
@@ -42,17 +65,24 @@ export class Batond {
         if (error) reject(error)
         else resolve(output)
       }
-      const timer = setTimeout(() => {
-        child.kill()
-        finish(new Error('batond 命令超时，请检查本机设备状态后重试'))
-      }, 40_000)
+      // 迁移由持久状态和进程锁恢复，不因桌面命令超时而中断。
+      const timer =
+        args[0] === 'upgrade' && args[1] === 'migrate'
+          ? undefined
+          : setTimeout(() => {
+              child.kill()
+              finish(new Error('batond 命令超时，请检查本机设备状态后重试'))
+            }, 40_000)
       child.stdin.on('error', () => {})
       child.stdin.end()
       child.stdout.on('data', (chunk: Buffer) => {
         output += chunk.toString('utf8')
         if (output.length > 64 * 1024) {
-          child.kill()
-          finish(new Error('batond 输出超过限制'))
+          if (args[0] === 'upgrade' && args[1] === 'migrate') output = output.slice(-64 * 1024)
+          else {
+            child.kill()
+            finish(new Error('batond 输出超过限制'))
+          }
         }
       })
       child.stderr.on('data', (chunk: Buffer) => {
@@ -67,9 +97,11 @@ export class Batond {
           finish(
             Object.assign(
               new Error(
-                failure.code === 'enrollment_expired'
-                  ? '接入凭据已过期，请在中心重新领取'
-                  : 'batond 操作失败，请检查设备状态或重新领取接入凭据',
+                upgrade
+                  ? `${failure.code ?? 'upgrade_failed'}：${failure.message ?? '升级操作失败，请检查日志'}`
+                  : failure.code === 'enrollment_expired'
+                    ? '接入凭据已过期，请在中心重新领取'
+                    : 'batond 操作失败，请检查设备状态或重新领取接入凭据',
               ),
               {
                 code: failure.code ?? 'batond_failed',
@@ -79,6 +111,36 @@ export class Batond {
         }
       })
     })
+  }
+
+  async upgradeStatus(): Promise<UpgradeSnapshot> {
+    return Schema.decodeUnknownSync(UpgradeSnapshot)(
+      JSON.parse(await this.execute(['upgrade', 'status'], undefined, true)),
+    )
+  }
+
+  async prepareVersion(version: string) {
+    await this.execute(['upgrade', 'prepare', '--version', version], undefined, true)
+    return this.upgradeStatus()
+  }
+
+  async prepareSelf(packageDirectory: string) {
+    await this.execute(['upgrade', 'prepare', '--package', packageDirectory, '--self'], undefined, true)
+    return this.upgradeStatus()
+  }
+
+  async cancelUpgrade() {
+    await this.execute(['upgrade', 'cancel'], undefined, true)
+    return this.upgradeStatus()
+  }
+
+  async migrate() {
+    await this.execute(['upgrade', 'migrate'], undefined, true)
+    return this.upgradeStatus()
+  }
+
+  async stopThread(id: string) {
+    await this.execute(['stop', '--thread-id', id], undefined, true)
   }
 
   async identity(): Promise<PublicIdentity> {

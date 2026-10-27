@@ -1,4 +1,4 @@
-import { BUILD, ReleaseMetadata } from '@baton/protocol/release'
+import { BUILD, releaseMetadata, ReleaseMetadata } from '@baton/protocol/release'
 import { createHash, randomUUID } from 'node:crypto'
 import { readdir, stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
@@ -13,13 +13,21 @@ import { readLedger } from '../worker/ledger.ts'
 import { checkStorageFormat } from '../storage-format.ts'
 import { storageBaseline as nodeBaseline } from './ledger.ts'
 import { storageBaseline as projectBaseline } from '../project/ledger.ts'
-import { checkUpgrade, readUpgradePackage, sameRelease } from './upgrade-check.ts'
+import {
+  checkUpgrade,
+  checkUpgradeStorage,
+  currentCenterRelease,
+  readUpgradePackage,
+  sameRelease,
+} from './upgrade-check.ts'
+import { backupSpace } from './upgrade-backup.ts'
 
 export const UpgradeState = Schema.Struct({
   operation_id: Schema.String,
   source_version: Schema.String,
   target_version: Schema.String.check(Schema.isMinLength(1)),
-  target_path: Schema.String,
+  target_path: Schema.optionalKey(Schema.String),
+  target_protocol_version: Schema.optionalKey(Schema.Int),
   phase: Schema.Literals(['draining', 'ready', 'cancelled', 'failed', 'migrating', 'syncing', 'completed']),
   checked_release: Schema.optionalKey(ReleaseMetadata),
   backup_path: Schema.optionalKey(Schema.String),
@@ -58,7 +66,7 @@ export async function prepareUpgrade(directory: string, target: string, ca?: str
   const { path, release } = await readUpgradePackage(target)
   const previous = await readUpgradeState(directory)
   if (previous && !['cancelled', 'completed'].includes(previous.phase)) {
-    if (previous.target_path !== path || previous.target_version !== release.version)
+    if ((previous.target_path && previous.target_path !== path) || previous.target_version !== release.version)
       throw new IPCError('upgrade_conflict', '已有不同目标的升级准备')
     if (previous.checked_release && sameRelease(previous.checked_release, release)) return previous
     if (previous.checked_release) throw new IPCError('upgrade_conflict', '目标安装包身份已改变')
@@ -69,7 +77,7 @@ export async function prepareUpgrade(directory: string, target: string, ca?: str
     throw new IPCError('upgrade_package_invalid', '预检期间目标安装包身份发生变化')
   const state: UpgradeState =
     previous && !['cancelled', 'completed'].includes(previous.phase)
-      ? { ...previous, checked_release: checked.release }
+      ? { ...previous, target_path: path, checked_release: checked.release }
       : {
           operation_id: randomUUID(),
           source_version: BUILD.version,
@@ -80,6 +88,91 @@ export async function prepareUpgrade(directory: string, target: string, ca?: str
         }
   await saveUpgradeState(directory, state)
   return state
+}
+
+const VersionPreparation = Schema.Struct({
+  version: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
+})
+export type VersionPreparation = typeof VersionPreparation.Type
+
+export async function prepareUpgradeVersion(
+  directory: string,
+  target: VersionPreparation,
+  ca?: string,
+): Promise<UpgradeState> {
+  const { version } = Schema.decodeUnknownSync(VersionPreparation)(target)
+  const previous = await readUpgradeState(directory)
+  if (previous && !['cancelled', 'completed'].includes(previous.phase)) {
+    if (previous.target_version !== version) throw new IPCError('upgrade_conflict', '已有不同目标的升级准备')
+    return previous
+  }
+  const center = await currentCenterRelease(directory, ca)
+  if (center.version !== version)
+    throw new IPCError('upgrade_conflict', `当前中心版本为 ${center.version}，不能准备 ${version}`)
+  if (version !== 'development' && !center.supported_daemon_versions.includes(version))
+    throw new IPCError('node_version_incompatible', `中心不支持目标版本 ${version}`)
+  await backupSpace(directory)
+  const state: UpgradeState = {
+    operation_id: randomUUID(),
+    source_version: BUILD.version,
+    target_version: version,
+    target_protocol_version: center.protocol_version,
+    phase: 'draining',
+  }
+  await saveUpgradeState(directory, state)
+  return state
+}
+
+/** 由本应用的程序在 daemon 锁内调用；先保存暂停，再只读核验与绑定目标。 */
+export async function prepareSelfUpgrade(directory: string, target: string): Promise<UpgradeState> {
+  const running = releaseMetadata()
+  const previous = await readUpgradeState(directory)
+  const reuse =
+    previous &&
+    previous.phase !== 'cancelled' &&
+    (previous.phase !== 'completed' || previous.target_version === running.version)
+  if (reuse && previous.target_version !== running.version)
+    throw new IPCError('upgrade_conflict', '当前程序版本与已准备的目标版本不符')
+  let state: UpgradeState = reuse
+    ? previous
+    : {
+        operation_id: randomUUID(),
+        source_version:
+          previous?.phase === 'completed' ? previous.target_version : (previous?.source_version ?? 'unknown'),
+        target_version: running.version,
+        phase: 'draining',
+      }
+  if (!reuse) await saveUpgradeState(directory, state)
+  const { path, release } = await readUpgradePackage(target)
+  if (!sameRelease(running, release))
+    throw new IPCError('upgrade_package_invalid', 'self 目标必须是当前应用内的同一构建程序')
+  if (state.checked_release && !sameRelease(state.checked_release, release))
+    throw new IPCError('upgrade_conflict', '目标安装包身份已改变')
+  if (state.target_protocol_version !== undefined && state.target_protocol_version !== release.protocol_version)
+    throw new IPCError(
+      'node_version_incompatible',
+      `目标协议 ${release.protocol_version} 与准备时中心协议 ${state.target_protocol_version} 不符`,
+    )
+  await checkUpgradeStorage(directory, release)
+  if (!state.backup_path) await backupSpace(directory)
+  state = { ...state, target_path: path, checked_release: release }
+  await saveUpgradeState(directory, state)
+  return state
+}
+
+export function prepareUpgradeRequest(directory: string, payload: string, ca?: string) {
+  return payload.startsWith('{')
+    ? prepareUpgradeVersion(directory, Schema.decodeUnknownSync(VersionPreparation)(JSON.parse(payload)), ca)
+    : prepareUpgrade(directory, payload, ca)
+}
+
+export async function cancelUpgrade(directory: string): Promise<UpgradeState | undefined> {
+  const state = await readUpgradeState(directory)
+  if (!state) return undefined
+  if (!upgradeCanCancel(state)) throw new IPCError('upgrade_busy', '迁移开始后不能取消，请继续 migrate 或人工核对备份')
+  const cancelled = { ...state, phase: 'cancelled' as const }
+  await saveUpgradeState(directory, cancelled)
+  return cancelled
 }
 
 export const upgradeOffline = (state: UpgradeState | undefined) =>
@@ -206,13 +299,16 @@ export function upgradePaths(directory: string) {
 export async function requestUpgrade(
   directory: string,
   type: 'upgrade_prepare' | 'upgrade_status' | 'upgrade_cancel',
-  target?: string,
+  target?: string | VersionPreparation,
 ) {
   const paths = upgradePaths(directory)
   const result = await requestWorker({
     endpoint: paths.endpoint,
     token: (await readPrivateFile(paths.token)).toString('utf8'),
-    request: type === 'upgrade_prepare' ? { type, ok: false, payload: target! } : { type, ok: false },
+    request:
+      type === 'upgrade_prepare'
+        ? { type, ok: false, payload: typeof target === 'string' ? target : JSON.stringify(target) }
+        : { type, ok: false },
     timeoutMs: 10000,
   })
   if (!result.ok) throw new IPCError(result.code ?? 'upgrade_failed', result.message ?? '升级请求失败')

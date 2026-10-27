@@ -77,7 +77,7 @@ export async function upgradeLedgers(directory: string) {
   return files
 }
 
-function centerRelease(url: string, ca?: string): Promise<ReleaseMetadata> {
+export function centerRelease(url: string, ca?: string): Promise<ReleaseMetadata> {
   return new Promise((resolve, reject) => {
     const fail = () => reject(new IPCError('upgrade_coordinator_unavailable', '无法读取当前中心发布信息'))
     const req = request(
@@ -115,21 +115,29 @@ function centerRelease(url: string, ca?: string): Promise<ReleaseMetadata> {
   })
 }
 
+export async function checkUpgradeStorage(directory: string, release: ReleaseMetadata) {
+  for (const file of await upgradeLedgers(directory)) {
+    checkStorageFormat(file.path, file.kind, file.baseline)
+    const version = LEDGER_VERSIONS[file.kind]
+    if (release.ledger_versions[file.kind] !== version)
+      throw new IPCError(
+        'storage_version_unsupported',
+        `${file.kind} 当前格式 ${version}，目标只声明格式 ${release.ledger_versions[file.kind]}`,
+      )
+  }
+}
+
+export async function currentCenterRelease(directory: string, ca?: string) {
+  const identity = await loadIdentity(directory)
+  if (!identity.coordinator_url) throw new IPCError('upgrade_coordinator_unavailable', '身份文件缺少当前中心地址')
+  return centerRelease(identity.coordinator_url, ca ?? (await loadCoordinatorCA(directory)))
+}
+
 export async function checkUpgrade(directory: string, target: string, ca?: string) {
   try {
     const { path, release } = await readUpgradePackage(target)
-    for (const file of await upgradeLedgers(directory)) {
-      checkStorageFormat(file.path, file.kind, file.baseline)
-      const version = LEDGER_VERSIONS[file.kind]
-      if (release.ledger_versions[file.kind] !== version)
-        throw new IPCError(
-          'storage_version_unsupported',
-          `${file.kind} 当前格式 ${version}，目标只声明格式 ${release.ledger_versions[file.kind]}`,
-        )
-    }
-    const identity = await loadIdentity(directory)
-    if (!identity.coordinator_url) throw new IPCError('upgrade_coordinator_unavailable', '身份文件缺少当前中心地址')
-    const center = await centerRelease(identity.coordinator_url, ca ?? (await loadCoordinatorCA(directory)))
+    await checkUpgradeStorage(directory, release)
+    const center = await currentCenterRelease(directory, ca)
     if (
       center.protocol_version !== release.protocol_version ||
       (center.version !== 'development' &&

@@ -306,12 +306,16 @@ it('syncing 补报持久结果后重发 completed，收到完成回执才落盘�
     },
     pending.id,
   )
-  await vi.waitFor(async () => {
-    expect((await readUpgradeState(path))?.phase).toBe('completed')
-    expect(await upgradePaused(path)).toBe(false)
-    expect(host.ensureWorker).toHaveBeenCalledWith(config.thread_id)
-    expect(probe).toHaveBeenCalled()
-  })
+  await vi.waitFor(
+    async () => {
+      expect((await readUpgradeState(path))?.phase).toBe('completed')
+      expect(await upgradePaused(path)).toBe(false)
+      expect(daemon.failure()).toBeUndefined()
+      expect(host.ensureWorker).toHaveBeenCalledWith(config.thread_id)
+      expect(probe).toHaveBeenCalled()
+    },
+    { timeout: 5000 },
+  )
   expect(readLedger(paths.ledger).initial.messages[messageId]?.state).toBe('queued')
   expect(readLedger(paths.ledger).initial.nativeId).toBe('keep-native')
   await expect(requestUpgrade(path, 'upgrade_cancel')).rejects.toMatchObject({ code: 'upgrade_busy' })

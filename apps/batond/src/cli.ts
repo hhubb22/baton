@@ -12,7 +12,8 @@ import { ExecutionTimeoutSeconds, WorkerOpen, type RuntimeAgent, type WorkerRequ
 import { LocalWorkerHost, initializeWorkerDirectory } from './daemon/host.ts'
 import { IPCError } from './daemon/ipc.ts'
 import { ServiceError } from './daemon/service.ts'
-import { processLockIsHeld, ProcessLockBusy } from './platform/lock.ts'
+import { ProcessLockBusy } from './platform/lock.ts'
+import { StorageFormatError } from './storage-format.ts'
 import { loadCoordinatorCA } from './daemon/identity.ts'
 import { readUpgradeState, upgradeOffline } from './daemon/upgrade.ts'
 import { readPrivateFile, writePrivateFileAtomic } from './platform/private.ts'
@@ -38,6 +39,8 @@ up/run 支持 --control-timeout-seconds <秒>，认证与同步各默认等待 3
   service install|uninstall|status
   upgrade check --package <目录> [--ca-file <CA证书>]
   upgrade prepare --package <目录>
+  upgrade prepare --version <中心版本>
+  upgrade prepare --package <本应用resources/batond> --self
   upgrade migrate
   upgrade status
   upgrade cancel
@@ -115,18 +118,26 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
       options: {
         'data-dir': { type: 'string', default: join(homedir(), '.baton-ts') },
         package: { type: 'string' },
+        version: { type: 'string' },
+        self: { type: 'boolean' },
         'ca-file': { type: 'string' },
       },
     })
     const command = positionals[0]
-    const target = command === 'prepare' || command === 'check'
     if (
       positionals.length !== 1 ||
       !['prepare', 'status', 'cancel', 'check', 'migrate'].includes(command ?? '') ||
-      (target ? !values.package : values.package !== undefined) ||
+      (command === 'prepare'
+        ? Number(!!values.package) + Number(!!values.version) !== 1
+        : command === 'check'
+          ? !values.package || values.version !== undefined
+          : values.package !== undefined || values.version !== undefined) ||
+      (values.self !== undefined && (command !== 'prepare' || !values.package)) ||
       (values['ca-file'] && command !== 'check')
     )
-      throw new Error('用法：upgrade check|prepare --package <目录> | status | cancel | migrate')
+      throw new Error(
+        '用法：upgrade prepare (--version <中心版本> | --package <目录> [--self]) | check --package <目录> | status | cancel | migrate',
+      )
     const directory = values['data-dir']!
     if (command === 'check') {
       const { checkUpgrade } = await import('./daemon/upgrade-check.ts')
@@ -141,26 +152,20 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
       const { migrateUpgrade } = await import('./daemon/upgrade-migrate.ts')
       console.log(JSON.stringify({ state: await migrateUpgrade(directory) }))
     } else {
-      const { requestUpgrade, upgradeBlockers } = await import('./daemon/upgrade.ts')
-      const state = await readUpgradeState(directory)
-      if (
-        command === 'status' &&
-        (state?.phase === 'migrating' ||
-          state?.phase === 'syncing' ||
-          state?.error_code === 'upgrade_migration_failed' ||
-          !(await processLockIsHeld(join(directory, 'daemon.lock'))))
-      )
-        console.log(JSON.stringify({ state: state ?? null, ...(await upgradeBlockers(directory)) }))
-      else
-        console.log(
-          JSON.stringify(
-            await requestUpgrade(
-              directory,
-              command === 'prepare' ? 'upgrade_prepare' : command === 'cancel' ? 'upgrade_cancel' : 'upgrade_status',
-              values.package ? resolve(values.package) : undefined,
-            ),
+      const { manageUpgrade } = await import('./daemon/upgrade-management.ts')
+      console.log(
+        JSON.stringify(
+          await manageUpgrade(
+            directory,
+            command as 'prepare' | 'status' | 'cancel',
+            values.version
+              ? { version: values.version }
+              : values.package
+                ? { package: resolve(values.package), ...(values.self ? { self: true } : {}) }
+                : undefined,
           ),
-        )
+        ),
+      )
     }
     return
   }
@@ -275,7 +280,10 @@ export function reportBatondError(error: unknown, action = process.argv[2]): voi
     ? 'node_version_incompatible'
     : daemonRunning
       ? 'daemon_running'
-      : (knownCode ?? (error instanceof IPCError || error instanceof ServiceError ? error.code : 'batond_failed'))
+      : (knownCode ??
+        (error instanceof IPCError || error instanceof ServiceError || error instanceof StorageFormatError
+          ? error.code
+          : 'batond_failed'))
   // SDK 诊断留在隔离宿主内，公开错误不包含原始 SDK 输出。
   console.error(
     JSON.stringify({

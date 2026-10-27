@@ -36,15 +36,16 @@ import { readPrivateFile } from '../platform/private.ts'
 import { listenWorker, IPCError } from './ipc.ts'
 import {
   readUpgradeState,
-  prepareUpgrade,
+  prepareUpgradeRequest,
+  cancelUpgrade,
   saveUpgradeState,
   upgradeBlockers,
   upgradePaths,
   upgradePaused,
   upgradeOffline,
-  upgradeCanCancel,
   type UpgradeState,
 } from './upgrade.ts'
+import { upgradeStatus } from './upgrade-management.ts'
 export { DaemonStorageFailure } from './storage.ts'
 
 export class NeedsReauthentication extends Error {
@@ -552,15 +553,9 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
           const task = serial.then(async () => {
             let state = await readUpgradeState(options.dataDirectory)
             if (request.type === 'upgrade_prepare')
-              state = await prepareUpgrade(options.dataDirectory, request.payload, ca)
-            else if (request.type === 'upgrade_cancel') {
-              if (state) {
-                if (!upgradeCanCancel(state))
-                  throw new IPCError('upgrade_busy', '迁移开始后不能取消，请继续 migrate 或人工核对备份')
-                state = { ...state, phase: 'cancelled' }
-                await saveUpgradeState(options.dataDirectory, state)
-              }
-            } else if (request.type !== 'upgrade_status') throw new IPCError('unsupported', '仅支持升级管理命令')
+              state = await prepareUpgradeRequest(options.dataDirectory, request.payload, ca)
+            else if (request.type === 'upgrade_cancel') state = await cancelUpgrade(options.dataDirectory)
+            else if (request.type !== 'upgrade_status') throw new IPCError('unsupported', '仅支持升级管理命令')
             return {
               type: 'result' as const,
               ok: true,
@@ -628,6 +623,15 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
 
     while (true) {
       const state = yield* attempt(() => readUpgradeState(options.dataDirectory))
+      if (state?.phase === 'draining') {
+        yield* attempt(async () => {
+          const task = serial.then(() => upgradeStatus(options.dataDirectory, true))
+          serial = task.catch(() => {})
+          await task
+        })
+        yield* Effect.sleep(100)
+        continue
+      }
       if (upgradeOffline(state)) {
         yield* Effect.scoped(
           Effect.gen(function* () {
@@ -834,6 +838,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
           Effect.gen(function* () {
             const state = yield* attempt(() => readUpgradeState(options.dataDirectory))
             if (!state || ['cancelled', 'completed'].includes(state.phase)) return yield* Effect.failCause(cause)
+            if (state.phase === 'draining' && hasCode(Cause.squash(cause), 'node_version_incompatible')) return
             yield* attempt(() =>
               saveUpgradeState(options.dataDirectory, {
                 ...state,
@@ -849,13 +854,8 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
         yield* attempt(async () => {
           const finish = serial.then(async () => {
             const current = await readUpgradeState(options.dataDirectory)
-            const status = await upgradeBlockers(options.dataDirectory)
-            if (
-              current?.operation_id === completed.operation_id &&
-              current.phase === 'draining' &&
-              status.blockers.length === 0
-            )
-              await saveUpgradeState(options.dataDirectory, { ...current, phase: 'ready' })
+            if (current?.operation_id === completed.operation_id && current.phase === 'draining')
+              await upgradeStatus(options.dataDirectory, true)
           })
           serial = finish.catch(() => {})
           await finish

@@ -8,6 +8,8 @@ if (process.isMainFrame && origin && location.origin === origin) {
     'batonDesktop',
     Object.freeze({
       protocol: 1,
+      capabilities: Object.freeze({ update: 1 }),
+      update: (): Promise<void> => ipcRenderer.invoke('baton:update'),
       version: process.argv
         .find((argument) => argument.startsWith('--baton-version='))
         ?.slice('--baton-version='.length),

@@ -70,6 +70,7 @@ export function desktopConfig({
     },
     nsis: {
       oneClick: true,
+      runAfterFinish: true,
       perMachine: false,
       allowElevation: false,
       packElevateHelper: false,

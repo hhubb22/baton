@@ -15,6 +15,8 @@ const labels: Record<DesktopStatus['state'], string> = {
 export function createTray(actions: {
   open: () => void
   restart: () => void
+  update: () => void
+  updateLabel: () => string
   logs: () => void
   quit: () => void
   loginEnabled: () => boolean
@@ -41,6 +43,7 @@ export function createTray(actions: {
           ...(reason ? [{ label: reason.slice(0, 160), enabled: false }] : []),
           { type: 'separator' },
           { label: '打开窗口', click: actions.open },
+          { label: actions.updateLabel(), click: actions.update },
           { label: '重启 batond', click: actions.restart },
           { label: '打开日志目录', click: actions.logs },
           {
