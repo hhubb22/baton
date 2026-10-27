@@ -25,6 +25,24 @@ import { UUID, NonNegativeInteger } from './common.ts'
 export { SessionResponse } from './auth.ts'
 export { EnrollmentResponse, DefaultDeviceResponse } from './device.ts'
 export { Diagnostics } from './common.ts'
+export const DownloadItem = Schema.Struct({
+  kind: Schema.Literals(['cli', 'desktop']),
+  platform: Schema.Literals(['darwin', 'linux', 'win32']),
+  arch: Schema.Literals(['arm64', 'x64']),
+  file: Schema.String,
+  size: NonNegativeInteger,
+  sha256: Schema.String,
+})
+export type DownloadItem = typeof DownloadItem.Type
+export const DownloadsResponse = Schema.Struct({
+  enabled: Schema.Boolean,
+  version: Schema.String,
+  connect_url: Schema.NullOr(Schema.String),
+  ca_sha256: Schema.NullOr(Schema.String),
+  items: Schema.Array(DownloadItem),
+})
+export type DownloadsResponse = typeof DownloadsResponse.Type
+
 export class CurrentBrowserSession extends Context.Service<CurrentBrowserSession, typeof SessionResponse.Type>()(
   'baton/http/CurrentBrowserSession',
 ) {}
@@ -88,6 +106,7 @@ const threadCreation = <const Status extends number>(status: Status) =>
 const Public = HttpApiGroup.make('public')
   .add(
     Endpoint.get('release', '/api/v1/release', { success: ReleaseMetadata }),
+    Endpoint.get('downloads', '/api/v1/downloads', { success: DownloadsResponse }),
     Endpoint.post('login', '/api/v1/login', {
       payload: A.LoginInput,
       success: HttpApiSchema.WithHeaders(SessionResponse, cookie),

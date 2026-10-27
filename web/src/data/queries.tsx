@@ -26,6 +26,7 @@ import type {
 // 查询键的第一段是数据主题；按需设备读取只在用户操作时刷新。
 export const keys = {
   session: ['session'] as const,
+  downloads: ['downloads'] as const,
   devices: ['devices'] as const,
   // 设置码状态随设备接入变化，所以放在 devices 主题下。
   enrollment: (id: ID) => ['devices', 'enrollment', id] as const,
@@ -97,6 +98,11 @@ export function ClientProvider({ client, children }: { client: BatonClient; chil
 export function useSession() {
   const client = useClient()
   return useQuery({ queryKey: keys.session, queryFn: () => client.getSession() })
+}
+
+export function useDownloads() {
+  const client = useClient()
+  return useQuery({ queryKey: keys.downloads, queryFn: () => client.getDownloads(), refetchOnMount: 'always' })
 }
 
 export function useDevices() {

@@ -15,6 +15,8 @@ import { fileKey, type DeviceFile, type World } from './world'
 
 export const scenarioIds = [
   'normal',
+  'downloads',
+  'noDownloads',
   'empty',
   'noChats',
   'offline',
@@ -34,6 +36,8 @@ export type ScenarioId = (typeof scenarioIds)[number]
 
 export const scenarioLabels: Record<ScenarioId, string> = {
   normal: 'Normal',
+  downloads: 'Device downloads',
+  noDownloads: 'No device downloads',
   empty: 'Empty',
   noChats: 'No threads',
   offline: 'Offline',
@@ -872,6 +876,8 @@ export function createWorld(id: ScenarioId, now: number): World {
   const world = base(now)
   switch (id) {
     case 'normal':
+    case 'downloads':
+    case 'noDownloads':
     case 'maintenance':
       return world
     case 'maintenanceError':

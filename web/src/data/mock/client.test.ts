@@ -26,6 +26,35 @@ async function state(client: ReturnType<typeof createMockClient>) {
   return { session, devices, projects, threads, inbox }
 }
 
+describe('mock downloads', () => {
+  it.each(['downloads', 'noDownloads'] as const)(
+    'serves the %s manifest without a signed-in account',
+    async (scenario) => {
+      const { client } = setup(scenario)
+      await client.signOut()
+      const downloads = await client.getDownloads()
+      expect(downloads.enabled).toBe(scenario === 'downloads')
+      if (scenario === 'downloads') {
+        expect(downloads.connect_url).toMatch(/^baton:\/\/connect\?url=/)
+        expect(downloads.items.filter((item) => item.kind === 'cli').map((item) => item.platform)).toEqual([
+          'darwin',
+          'linux',
+          'linux',
+        ])
+        expect(downloads.items.filter((item) => item.kind === 'desktop').map((item) => item.platform)).toEqual([
+          'darwin',
+          'win32',
+        ])
+        expect(downloads.items.every((item) => /^[a-f0-9]{64}$/.test(item.sha256))).toBe(true)
+        Object.assign(downloads, { items: [] })
+        expect((await client.getDownloads()).items).toHaveLength(5)
+      } else {
+        expect(downloads).toMatchObject({ items: [], connect_url: null, ca_sha256: null })
+      }
+    },
+  )
+})
+
 describe('mock scenarios', () => {
   it.each(scenarioIds)('reset reproduces %s', async (id) => {
     const { client } = setup(id)

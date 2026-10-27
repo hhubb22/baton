@@ -10,8 +10,8 @@ Basis: [设备接入行为规格](PRODUCT.md) DS-01～DS-23；调查提交 `2b28
 
 - **注册：** `apps/batond/src/daemon/cli.ts` 的 `up` 和 `register` 首次注册可使用 SEA 安装目录中的 `deployment.json`，显式参数优先。`registerNode` 在私有数据目录中保存 `coordinator_url` 与本次使用的 CA。
 - **运行：** `runDaemon`、重新认证和升级检查默认使用保存的 CA，已有身份不读取安装目录的部署配置。
-- **网页：** `web/src/app/EnrollDialog.tsx:82` 生成的命令假定 `batond` 已在 PATH 上，凭据通过 `read -rs` 写进环境变量。
-- **中心：** `apps/server/src/http/index.ts` 只托管网页静态文件，匿名公开接口只有 `GET /api/v1/release`；对外地址只出现在 `BATON_ALLOWED_ORIGINS` 中，用于检查 POST 请求的 Origin。
+- **网页：** `web/src/app/EnrollDialog.tsx` 按下载清单展示 CLI 注册与服务安装命令，凭据通过 `read -rs` 写进环境变量；未配置下载时保留依赖 PATH 中 `batond` 的命令。
+- **中心：** `apps/server/src/http/index.ts` 托管网页静态文件和经核验的安装包，匿名公开接口包含 `GET /api/v1/release` 与 `GET /api/v1/downloads`；`BATON_ALLOWED_ORIGINS` 同时用于检查写请求的 Origin 和按 Host 选择部署配置中的中心地址。
 
 daemon 在私有数据目录的 `daemon-status.json` 中报告连接状态。致命失败时，`reportBatondError` 在 stderr 输出一行 JSON 后退出，凭据拒绝和版本不兼容的退出码为 78，部署配置错误与 daemon 锁占用也有独立错误码。`daemon.lock` 由 `platform/lock.ts` 管理，第二个 daemon 的 `ProcessLockBusy` 映射为 `daemon_running`。
 
@@ -63,13 +63,13 @@ CLI 用户：解压 CLI 包 → batond register（读包内 deployment.json）�
 
 **索引**
 
-中心启动时，以及清单请求发现目录的 mtime 变化时，重新扫描目录。对每个文件依次核验：文件名中的版本必须在 `release.supported_daemon_versions` 中，`.sha256` 存在，并且与按 size+mtime 缓存的实际哈希一致。不合格的文件写一条带原因的日志后跳过（DS-03）。
+中心启动时和清单请求时扫描目录与文件属性，发现新增、删除和原地替换的安装包。对每个文件依次核验：文件名中的版本必须在 `release.supported_daemon_versions` 中，`.sha256` 存在，并且与按 size+mtime 缓存的实际哈希一致。不合格的文件写一条带原因的日志后跳过（DS-03）。
 
 **注入**
 
 对通过核验的 CLI 包，中心逐个流式处理：gunzip 后按 512 字节块解析 tar，核对顶层目录名和 `release.json` 中的 version 与平台；在 tar 结束块之前插入 `<顶层目录>/deployment.json`（权限 0644，mtime 取该归档里 `release.json` 的 mtime），再写结束块，并用固定压缩级别 gzip（头部 mtime 为 0）。输出写入 `<缓存目录>/<源sha256>-<配置sha256>.tar.gz`，同时生成 `.sha256`，最后原子改名。
 
-相同输入总是产生相同字节（DS-02）。tar 解析和写入只需要 POSIX ustar 头的最小实现，不引入依赖。注入在后台串行执行，完成前该文件不出现在清单中。
+相同输入总是产生相同字节（DS-02）。tar 按原始条目边界透传，不引入依赖。PAX 扩展头（`x`、`g`）及 GNU 长名与长链接头（`L`、`K`）保留原字节，只读取名称信息用于顶层校验和定位 `release.json`；AppleDouble 的 `._` 前缀条目不参与顶层校验。新增的 `deployment.json` 使用普通 ustar 头，原有头、内容和填充字节不变。注入在后台串行执行，完成前该文件不出现在清单中；失败任务清除去重标记，下次扫描可重试。
 
 **对外地址**
 
@@ -230,13 +230,15 @@ macOS 的应用整体做临时签名，内置的 batond 保留自身的临时签
 
 | Requirement | Setup and observation | Failure condition | Where | Status |
 |---|---|---|---|---|
-| DS-02、DS-03 | 测试内用系统 tar 生成小型 CLI 归档；注入两次；目录中再放版本不符、`.sha256` 不符和顶层名不符的文件 | 两次输出字节不同，解包后缺少 `deployment.json` 或其他文件有变化，不合格的文件出现在清单中 | `apps/server` 单元 + 集成 | planned |
-| DS-01、DS-02 | 中心集成测试启用下载，匿名请求清单与文件，变换 Host | 需要登录；清单哈希与下载内容不一致；未列出的文件名能被下载；Host 不匹配时仍生成部署配置 | `apps/server` 集成 | planned |
+| DS-02、DS-03 | 使用发布脚本相同的系统 tar 参数生成归档，另测 ustar 和 GNU 长名；注入两次并比较原 tar 条目字节及解包内容；目录中放版本、哈希、顶层名和 release 平台不符的包 | 两次输出字节不同，解包后除 `deployment.json` 外有变化，不合格的包出现在清单中 | `apps/server` 单元 + 集成 | implemented |
+| DS-01、DS-02 | 中心集成测试启用下载，匿名请求清单与文件，变换 Host | 需要登录；清单哈希与下载内容不一致；未列出的文件名能被下载；Host 不匹配时仍生成部署配置 | `apps/server` 集成 | implemented |
+| 后台注入重试 | 注入函数首次报临时错误；再次扫描同一源包与部署配置 | 恢复后仍不重试或包不能进入清单 | `apps/server` 单元 | implemented |
 | DS-05～DS-07 | 用注入的 transport 注册和重新认证；SEA 场景用临时目录模拟 `deployment.json` | 未保存或未替换 CA；已有身份时读了部署配置；显式参数没有优先 | `apps/batond` 单元 | implemented |
 | DS-08～DS-10 | 生成 plist 和 unit 文本；用替身 runner 模拟命令失败 | 定义缺少参数；失败后残留或覆盖了原定义 | `apps/batond` 单元 | planned |
 | DS-11 | 持有 `daemon.lock` 时运行 `run` | 没有输出 `daemon_running` | `apps/batond` 单元 | implemented |
 | 状态文件、`--exit-with-stdin` | 复用 `reconnect.test.ts` 的协议替身检查认证、拒绝和停止状态；CLI 单元测试检查 stdin EOF 触发中止，中心 e2e 检查连接与停止状态 | 状态缺失或不准；关闭 stdin 后 daemon 不退出 | `apps/batond` 单元 + `e2e` | implemented |
-| DS-12～DS-14 | 渲染注册对话框，分别模拟有无下载、各平台、桌面桥接替身 | 命令里出现凭据或中心地址；桌面模式显示命令；凭据被渲染 | `web` 单元 | planned |
+| DS-12、DS-13 | 渲染有无下载、各平台和重新认证的注册对话框，以及 Devices 页的接入链接 | 下载命令包含凭据或部署参数；无下载时旧命令丢失；Windows 显示 CLI 命令；客户端中的页面仍显示接入链接 | `web` 单元 | implemented |
+| DS-14 | 渲染桌面桥接替身下的注册对话框与本机接入入口 | 桌面模式显示命令或凭据被渲染 | `web` 单元 | planned |
 | DS-15～DS-17 | 测试数据中固定一套 CA、叶子和其他 CA 签发的叶子（附生成命令）；测试链接解析和证书校验 | 接受 http 源或非 CA 证书；非中心 host 使用了保存的 CA；用其他 CA 签发的叶子通过校验 | `apps/desktop` 单元（Node，不启动 Electron） | planned |
 | DS-18～DS-20 | supervisor 使用替身 spawn：正常退出、78、反复崩溃、`daemon_running`、退出流程 | 终止类失败仍重启；退避或次数上限不对；退出时没有关闭 stdin | `apps/desktop` 单元 | planned |
 | CLI 全链路 | 现有 HTTPS e2e 中心，在数据目录外注入安装目录与 `deployment.json`，不带中心地址和 CA 参数注册并连接 | 必须传 `--coordinator` 或 `--ca-file` | `e2e` | implemented |

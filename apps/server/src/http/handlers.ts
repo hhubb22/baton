@@ -12,13 +12,14 @@ import * as Auth from '../auth.ts'
 import * as Nodes from '../nodes.ts'
 import * as Threads from '../threads/index.ts'
 import type { HTTPOptions } from './options.ts'
+import { disabledDownloads, type Downloads } from '../downloads.ts'
 import { AppError } from '../errors.ts'
 import { projectHttpHandlers } from './projects.ts'
 import { readThreadOutput } from '../full-output.ts'
 import * as DeviceManagement from '../device-management.ts'
 import { cookieToken, httpBusiness, decodeResponse } from './security.ts'
 
-export const httpHandlers = (options: HTTPOptions) => {
+export const httpHandlers = (options: HTTPOptions, downloads?: Downloads) => {
   const changed = (employeeId: string) => options.gateway().notify(employeeId, { type: 'thread.changed' })
   const defaultDevice = (nodeId: string) =>
     Effect.gen(function* () {
@@ -39,6 +40,16 @@ export const httpHandlers = (options: HTTPOptions) => {
     HttpApiBuilder.group(BatonHttpApi, 'public', (handlers) =>
       handlers
         .handle('release', () => Effect.succeed(P.releaseMetadata()))
+        .handle('downloads', ({ request }) =>
+          downloads
+            ? httpBusiness(
+                Effect.tryPromise({
+                  try: () => downloads.list(request.headers.host ?? ''),
+                  catch: () => new AppError(503, 'unavailable'),
+                }),
+              )
+            : Effect.succeed(disabledDownloads()),
+        )
         .handle('login', ({ payload }) =>
           httpBusiness(
             Effect.gen(function* () {

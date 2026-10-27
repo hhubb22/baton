@@ -1,6 +1,7 @@
 import { readFile, realpath } from 'node:fs/promises'
 import { resolve, relative, extname, isAbsolute, sep } from 'node:path'
 import { Cause, Effect, Layer } from 'effect'
+import { NodeHttpPlatform } from '@effect/platform-node'
 import { HttpRouter, HttpServer } from 'effect/http'
 import * as Request from 'effect/http/HttpServerRequest'
 import * as Response from 'effect/http/HttpServerResponse'
@@ -10,6 +11,7 @@ import { BatonHttpApi, httpOpenApi } from '@baton/protocol/http-api'
 import { Schema } from 'effect'
 import { traceFromHeaders, withTraceSpan } from '@baton/telemetry'
 import { UUID } from '@baton/protocol'
+import { createDownloads } from '../downloads.ts'
 import * as Nodes from '../nodes.ts'
 import * as Threads from '../threads/index.ts'
 import * as Projects from '../project/projects.ts'
@@ -140,8 +142,14 @@ export const httpRouteTemplate = (method: string, pathname: string): string => {
 export const httpApplication = (options: HTTPOptions) =>
   Effect.gen(function* () {
     const services = yield* Effect.context<SqlClient.SqlClient>()
+    const downloads = options.downloads
+      ? yield* Effect.acquireRelease(
+          Effect.tryPromise(() => createDownloads(options.downloads!, options.allowedOrigins)),
+          (owned) => Effect.promise(() => owned.close()),
+        )
+      : undefined
     const routes = HttpApiBuilder.layer(BatonHttpApi).pipe(
-      Layer.provide(httpHandlers(options)),
+      Layer.provide(httpHandlers(options, downloads)),
       Layer.provide(httpSecurity()),
       Layer.provide(Layer.succeedContext(services)),
       Layer.provide(HttpServer.layerServices),
@@ -159,6 +167,26 @@ export const httpApplication = (options: HTTPOptions) =>
       const path = new URL(request.url, 'http://localhost').pathname
       const requestId = newRequestId()
       const operation = Effect.gen(function* () {
+        if (path.startsWith('/downloads/')) {
+          if (request.method !== 'GET' || !downloads) return yield* notFound()
+          const asset = yield* Effect.tryPromise({
+            try: () => downloads.file(request.headers.host ?? '', path.slice('/downloads/'.length)),
+            catch: () => new AppError(404, 'not_found'),
+          })
+          if (!asset) return yield* notFound()
+          return yield* Response.file(asset.path, {
+            contentType: 'application/octet-stream',
+            headers: {
+              'content-length': String(asset.item.size),
+              'content-disposition': `attachment; filename="${asset.item.file}"`,
+              'cache-control': 'no-cache',
+              'x-content-type-options': 'nosniff',
+            },
+          }).pipe(
+            Effect.provide(NodeHttpPlatform.layer),
+            Effect.mapError(() => new AppError(404, 'not_found')),
+          )
+        }
         if (!path.startsWith('/api/')) return yield* staticResponse(options)
         yield* checkOrigin(options)
         if (path === '/api/v1/openapi.json' && request.method === 'GET') {

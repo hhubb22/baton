@@ -20,6 +20,7 @@ import {
   type ControlBudgets,
   type ControlOperation,
 } from './control-budget.ts'
+import type { DownloadsOptions } from './downloads.ts'
 import { createRevocationCompensator } from './control-maintenance.ts'
 import { cookieToken, httpApplication } from './http/index.ts'
 
@@ -32,6 +33,7 @@ export interface ServerOptions {
   readonly enrollmentTTLSeconds?: number
   readonly tls?: TLSOptions
   readonly webDirectory?: string
+  readonly downloads?: DownloadsOptions
   readonly dispatchMs?: number
   readonly projectDispatchMs?: number
   readonly heartbeatMs?: number

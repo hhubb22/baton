@@ -11,6 +11,7 @@ import { loadSigningKey, resetConnections } from './nodes.ts'
 import { startServer } from './server.ts'
 import { AppError } from './errors.ts'
 import { controlConfiguration, duration } from './server-config.ts'
+import { downloadsConfiguration } from './downloads.ts'
 import { finalizeRestore } from './restore.ts'
 
 const usage = `Baton Coordinator（TypeScript 开发入口）
@@ -25,6 +26,7 @@ const usage = `Baton Coordinator（TypeScript 开发入口）
 配置：BATON_DATABASE_URL、BATON_DB_SCHEMA、BATON_HTTP_ADDR、BATON_ALLOWED_ORIGINS、
 BATON_NODE_SIGNING_KEY、BATON_TLS_CERT_FILE、BATON_TLS_KEY_FILE。
 网页目录由 BATON_WEB_DIR 指定，默认使用 bundle 旁的 web 目录。
+安装包：BATON_DOWNLOADS_DIR、BATON_PUBLIC_CA_FILE、BATON_DOWNLOADS_CACHE。
 控制预算：BATON_CONTROL_<操作>_QUEUE_TIMEOUT、BATON_CONTROL_<操作>_EXECUTION_TIMEOUT。
 临时 RPC：BATON_RPC_READ_CONCURRENCY、BATON_RPC_MANAGEMENT_CONCURRENCY、
 BATON_RPC_MAX_QUEUED、BATON_RPC_QUEUE_TIMEOUT、BATON_RPC_READ_TIMEOUT、
@@ -113,12 +115,14 @@ async function main() {
     const enrollmentTTLSeconds = duration('BATON_ENROLLMENT_TTL', 600_000, 60_000, 86_400_000) / 1000
     if (offlineMs <= heartbeatMs) throw new AppError(400, 'invalid_configuration', '离线期限需要大于心跳间隔')
     const budgets = controlConfiguration()
+    const downloads = downloadsConfiguration()
     const signer = await loadSigningKey(process.env.BATON_NODE_SIGNING_KEY || 'node-signing.key')
     await run(resetConnections())
     const program = Effect.scoped(
       Effect.gen(function* () {
         const server = yield* startServer({
           ...budgets,
+          ...(downloads ? { downloads } : {}),
           host: address.hostname.replace(/^\[|\]$/g, ''),
           port: Number(address.port || 80),
           allowedOrigins: origins,

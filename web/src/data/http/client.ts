@@ -1,3 +1,4 @@
+import type { DownloadsResponse } from '@baton/protocol/http-api'
 import { ClientError, type BatonClient, type ChangeEvent, type Topic } from '../client'
 import type { AgentKind, Device, Enrollment, Operation, OperationPhase, Session } from '../types'
 import type { HttpContext } from './context'
@@ -295,6 +296,7 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
 
   return {
     mode: 'http',
+    getDownloads: () => request<DownloadsResponse>('/downloads'),
     ...createThreadAPI(ctx, output),
     subscribeOutput: (id, listener) => output.subscribeOutput(id, listener),
     ...createProjectAPI(ctx),

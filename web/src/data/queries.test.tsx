@@ -10,6 +10,7 @@ import {
   useAddDeviceFolder,
   useDeviceFolders,
   useDevices,
+  useDownloads,
   useFile,
   useFolders,
   useLiveOutput,
@@ -30,6 +31,23 @@ function setup(request: HttpContext['request']) {
   const wrapper = ({ children }: { children: ReactNode }) => <ClientProvider client={client}>{children}</ClientProvider>
   return { output, client, wrapper, listMessages }
 }
+
+describe('download queries', () => {
+  it('shares the manifest between consumers and refreshes it on request', async () => {
+    const client = createMockClient('downloads', { latency: { read: 0, save: 0, device: 0, run: 8000 } })
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <ClientProvider client={client}>{children}</ClientProvider>
+    )
+    const { result } = renderHook(() => ({ first: useDownloads(), second: useDownloads() }), { wrapper })
+    await waitFor(() => expect(result.current.first.data?.enabled).toBe(true))
+    expect(result.current.second.data).toEqual(result.current.first.data)
+    client.controls.reset('noDownloads')
+    await act(async () => {
+      await result.current.first.refetch()
+    })
+    await waitFor(() => expect(result.current.second.data?.enabled).toBe(false))
+  })
+})
 
 describe('on-demand device reads', () => {
   function deviceReads() {

@@ -5,11 +5,13 @@ import { EnrollmentResponse as DeviceEnrollmentResponse, SessionResponse as Auth
 
 it('generates schemas, statuses and cookie security for every implemented HTTP endpoint', () => {
   const endpoints = Object.values(BatonHttpApi.groups).flatMap((group) => Object.values(group.endpoints))
-  expect(endpoints).toHaveLength(59)
+  expect(endpoints).toHaveLength(60)
   const document = httpOpenApi()
   expect(document.info.title).toBe('Baton HTTP API')
   expect(document.paths['/api/v1/release']?.get?.responses).toHaveProperty('200')
   expect(document.paths['/api/v1/release']?.get?.security ?? []).toEqual([])
+  expect(document.paths['/api/v1/downloads']?.get?.responses).toHaveProperty('200')
+  expect(document.paths['/api/v1/downloads']?.get?.security ?? []).toEqual([])
   expect(document.paths['/api/v1/login']?.post?.requestBody).toMatchObject({ required: true })
   expect(document.paths['/api/v1/threads']?.post?.responses).toHaveProperty('201')
   expect(document.paths['/api/v1/threads/{threadId}/messages']?.post?.responses).toHaveProperty('202')

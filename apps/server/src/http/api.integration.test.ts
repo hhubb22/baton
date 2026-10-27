@@ -8,7 +8,9 @@ import * as HttpEffect from 'effect/http/HttpEffect'
 import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import { DownloadsResponse } from '@baton/protocol/http-api'
+import { downloadArchive, writeChecksum } from '../testing/downloads.ts'
 import { httpApplication, httpRouteTemplate } from './index.ts'
 import * as Auth from '../auth.ts'
 import * as Nodes from '../nodes.ts'
@@ -54,6 +56,12 @@ beforeAll(async () => {
   await mkdir(join(directory, 'web', 'assets'))
   await writeFile(join(directory, 'web', 'index.html'), '<title>Baton HTTP</title>')
   await writeFile(join(directory, 'web', 'assets', 'app.js'), 'console.log("Baton")')
+  await mkdir(join(directory, 'packages'))
+  await downloadArchive(join(directory, 'packages'))
+  await downloadArchive(join(directory, 'packages'), { version: 'old' })
+  await writeFile(join(directory, 'packages', 'baton-desktop-development-win32-x64.exe'), 'desktop bytes')
+  await writeChecksum(join(directory, 'packages', 'baton-desktop-development-win32-x64.exe'))
+  await writeFile(join(directory, 'packages', 'secret.txt'), 'not downloadable')
   await writeFile(join(directory, 'secret.txt'), 'outside-root')
   await symlink(join(directory, 'secret.txt'), join(directory, 'web', 'escape.txt'))
   await database.run(Auth.createEmployee('httpalice', 'Alice', password))
@@ -124,6 +132,7 @@ beforeAll(async () => {
       signer,
       gateway: () => gateway,
       webDirectory: join(directory, 'web'),
+      downloads: { directory: join(directory, 'packages'), cacheDirectory: join(directory, 'cache') },
     }).pipe(Effect.provideService(Scope.Scope, scope)),
   )
   const context = await database.runtime.runPromise(Effect.context<SqlClient.SqlClient>())
@@ -134,6 +143,70 @@ afterAll(async () => {
   if (scope) await Effect.runPromise(Scope.close(scope, Exit.void))
   await database?.close()
   if (directory) await rm(directory, { recursive: true, force: true })
+})
+
+it('serves anonymous download listings and only verified files for the matching Host', async () => {
+  const anonymous = (path: string, host = 'baton.local') =>
+    request(path, 'GET', undefined, {
+      host,
+      cookie: 'baton_session=invalid',
+      authorization: 'Bearer invalid',
+      origin: 'https://untrusted.local',
+    })
+  const listing = async (host = 'baton.local') => {
+    const response = await anonymous('/api/v1/downloads', host)
+    expect(response.status).toBe(200)
+    expect(response.headers.get('set-cookie')).toBeNull()
+    return Schema.decodeUnknownSync(DownloadsResponse)(await response.json())
+  }
+  await expect.poll(async () => (await listing()).items.length).toBe(2)
+  const result = await listing()
+  expect(result).toMatchObject({
+    enabled: true,
+    version: 'development',
+    connect_url: 'baton://connect?url=https%3A%2F%2Fbaton.local',
+    ca_sha256: null,
+  })
+  for (const item of result.items) {
+    const response = await anonymous(`/downloads/${item.file}`)
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-length')).toBe(String(item.size))
+    expect(response.headers.get('content-disposition')).toBe(`attachment; filename="${item.file}"`)
+    expect(response.headers.get('cache-control')).toBe('no-cache')
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff')
+    const content = Buffer.from(await response.arrayBuffer())
+    expect(content.length).toBe(item.size)
+    expect(createHash('sha256').update(content).digest('hex')).toBe(item.sha256)
+    if (item.kind === 'desktop') expect(content.toString()).toBe('desktop bytes')
+    else {
+      const extracted = join(directory, 'http-extracted')
+      await mkdir(extracted)
+      const { execFileSync } = await import('node:child_process')
+      const { readFile } = await import('node:fs/promises')
+      const path = join(directory, 'download.tar.gz')
+      await writeFile(path, content)
+      execFileSync('tar', ['-xf', path, '-C', extracted])
+      expect(JSON.parse(await readFile(join(extracted, item.file.slice(0, -7), 'deployment.json'), 'utf8'))).toEqual({
+        format: 1,
+        coordinator_url: origin,
+      })
+    }
+  }
+  expect(await listing('unmatched.local')).toMatchObject({
+    connect_url: null,
+    items: [expect.objectContaining({ kind: 'desktop' })],
+  })
+  expect((await listing('baton.local:443')).items.every((item) => item.kind === 'desktop')).toBe(true)
+  for (const file of [
+    'secret.txt',
+    'baton-old-linux-x64.tar.gz',
+    'baton-development-linux-x64.tar.gz.sha256',
+    '%2e%2e%2fsecret.txt',
+    'missing.tar.gz',
+  ]) {
+    expect((await anonymous(`/downloads/${file}`)).status).toBe(404)
+  }
+  expect((await anonymous('/downloads/baton-development-linux-x64.tar.gz', 'unmatched.local')).status).toBe(404)
 })
 
 it('serves only public release metadata without authentication or device credential changes', async () => {

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { createTransport, HttpError } from './transport'
+import { mockDownloads } from '../mock/downloads'
 import { createHttpClient, mapDevice } from './client'
 import { assistantBlock, capabilityLines, deviceConnectionView, setupNeeded, setupSteps, usableAgents } from '../derive'
 
@@ -70,6 +71,20 @@ describe('HTTP transport', () => {
   it('does not accept an HTML page as a successful API response', async () => {
     const fetch = fetcher().mockResolvedValueOnce(new Response('<html>not the API</html>', { status: 200 }))
     await expect(createTransport({ fetch }).request('/me')).rejects.toMatchObject({ code: 'unavailable' })
+  })
+})
+
+describe('HTTP downloads', () => {
+  it.each([true, false])('reads the anonymous manifest with enabled=%s without fetching a session', async (enabled) => {
+    const manifest = mockDownloads(enabled, 'https://baton.local')
+    const fetch = fetcher().mockResolvedValueOnce(response(manifest))
+    const client = createHttpClient({ fetch, WebSocket: null })
+    expect(await client.getDownloads()).toEqual(manifest)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    const [url, init] = fetch.mock.calls[0]
+    expect(url).toBe('/api/v1/downloads')
+    expect(init?.method ?? 'GET').toBe('GET')
+    expect(new Headers(init?.headers).has('X-CSRF-Token')).toBe(false)
   })
 })
 

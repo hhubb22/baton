@@ -43,6 +43,26 @@ node apps/server/dist/server.cjs serve
 
 实验室阶段使用当前 schema 基线，结构变化后可重建本地数据。迁移按版本记录幂等执行，正式发布后可用于增量迁移。证书须匹配访问主机名，浏览器和节点须信任签发 CA。反向代理同时转发普通 HTTP 请求及 `/v1/node`、`/api/v1/events` 的 WebSocket 升级。
 
+### 安装包下载
+
+中心可通过 `BATON_DOWNLOADS_DIR` 托管发布安装包；每个包旁须有同名 `.sha256` 文件。支持的文件名为：
+
+- CLI：`baton-<版本>-<darwin-arm64|linux-x64|linux-arm64>.tar.gz`。
+- 桌面客户端：`baton-desktop-<版本>-darwin-arm64.dmg`、`baton-desktop-<版本>-win32-x64.exe`。
+
+```sh
+export BATON_DOWNLOADS_DIR='/srv/baton/releases'
+export BATON_PUBLIC_CA_FILE='/srv/baton/ca.pem'
+export BATON_DOWNLOADS_CACHE='/srv/baton/downloads-cache'
+node apps/server/dist/server.cjs serve
+```
+
+公共 CA 签发的中心证书可省略 `BATON_PUBLIC_CA_FILE`。中心只提供受当前版本接受且 SHA-256 核验通过的包；CLI 包会在后台串行加入公开的 `deployment.json`，完成后才出现在清单中。相同源包与部署配置生成相同字节，缓存目录默认是工作目录下的 `downloads-cache`，权限为 0700。桌面安装包原样返回。
+
+`GET /api/v1/downloads` 与 `GET /downloads/<文件名>` 无需登录；未配置目录时清单返回 `enabled: false`。反向代理须转发 `/downloads/`，并保留浏览器请求的 Host，使中心能从 `BATON_ALLOWED_ORIGINS` 选择对应的 HTTPS 源。Host 无匹配时只列桌面包，不生成接入链接。
+
+网页注册对话框按平台展示下载链接、版本、大小、SHA-256 和终端命令；Windows 引导下载桌面客户端。Devices 页面提供「Open in desktop app」接入链接。未配置下载时保留原有接入命令。
+
 ### 设备接入
 
 登录网页，在 Devices 领取一次性注册凭据后，在设备上的仓库目录运行：
@@ -114,6 +134,9 @@ node apps/batond/dist/batond.cjs project-runtime login-api-key anthropic < key-f
 | `BATON_NODE_SIGNING_KEY` | 中心 | Ed25519 私钥路径，默认工作目录下的 `node-signing.key` |
 | `BATON_TLS_CERT_FILE` / `BATON_TLS_KEY_FILE` | 中心 | 直接提供 HTTPS/WSS 时的证书与私钥 |
 | `BATON_WEB_DIR` | 中心 | 网页目录，默认 bundle 旁的 `web/` |
+| `BATON_DOWNLOADS_DIR` | 中心 | 发布安装包与同名 `.sha256` 所在目录；未配置时不提供下载 |
+| `BATON_PUBLIC_CA_FILE` | 中心 | 注入 CLI 包并通过接入链接提供的公开 CA PEM 文件；公共信任证书可省略 |
+| `BATON_DOWNLOADS_CACHE` | 中心 | 注入后的 CLI 归档缓存目录，默认工作目录下的 `downloads-cache`，权限 0700 |
 | `BATON_SESSION_TTL` | 中心 | 浏览器会话期限，默认 `12h`，范围 5 分钟至 7 天 |
 | `BATON_ENROLLMENT_TTL` | 中心 | 一次性注册凭据期限，默认 `10m`，范围 1 分钟至 24 小时 |
 | `BATON_HEARTBEAT_INTERVAL` | 中心 | 连接检查间隔，默认 `10s`，范围 100 ms 至 2 分钟 |

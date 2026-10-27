@@ -1,4 +1,5 @@
 import type { MemoryWorkStatus } from '@baton/protocol'
+import type { DownloadsResponse } from '@baton/protocol/http-api'
 import type {
   AgentKind,
   Device,
@@ -50,6 +51,7 @@ export class ClientError extends Error {
 // 页面只通过这个接口读写数据。模拟实现见 mock/，接入后端时换成真实实现。
 export interface BatonClient {
   readonly mode?: 'http' | 'mock'
+  getDownloads(): Promise<DownloadsResponse>
   getSession(): Promise<Session>
   signIn(username: string, password: string): Promise<Session>
   signOut(): Promise<void>

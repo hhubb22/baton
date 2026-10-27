@@ -2,6 +2,7 @@ import type { BatonClient, ChangeEvent } from '../client'
 import { ClientError } from '../client'
 import type { DeviceConnection, DeviceOS, Enrollment, ID, SessionEnd } from '../types'
 import type { ScenarioId } from './scenarios'
+import { mockDownloads } from './downloads'
 import { realScheduler, type Scheduler } from './scheduler'
 import { browserLatency, MockStore, type Latency } from './store'
 import type { EnrollmentRecord } from './world'
@@ -100,6 +101,7 @@ export function createMockClient(
       completeSubscriptionLogin: (device, provider) => store.completeSubscriptionLogin(device, provider),
     },
 
+    getDownloads: () => read(() => mockDownloads(store.scenario === 'downloads', mockCoordinatorUrl)),
     getSession: () => read(() => store.snapshot().session),
     async signIn(username, password) {
       await connect(latency.save)

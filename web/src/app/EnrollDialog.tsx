@@ -1,10 +1,12 @@
+import type { DownloadItem } from '@baton/protocol/http-api'
 import * as stylex from '@stylexjs/stylex'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { useCreateEnrollment, useDevices, useEnrollment } from '../data/queries'
+import { fileSize } from '../data/derive'
+import { useCreateEnrollment, useDevices, useDownloads, useEnrollment } from '../data/queries'
 import type { Device, DeviceOS, IssuedEnrollment } from '../data/types'
 import { text } from '../theme/text'
 import { colors, radius, space } from '../theme/tokens.stylex'
-import { Button, IconButton } from '../ui/Button'
+import { Button, focusRing, IconButton } from '../ui/Button'
 import { Dialog } from '../ui/Dialog'
 import { Input } from '../ui/Field'
 import { Icon } from '../ui/Icon'
@@ -38,6 +40,8 @@ const styles = stylex.create({
   },
   dim: { color: colors.faint },
   helper: { color: colors.muted },
+  link: { color: colors.accentText },
+  checksum: { overflowWrap: 'anywhere', userSelect: 'all' },
   warning: { color: colors.attentionText },
   error: { color: colors.danger },
   status: { display: 'inline-flex', alignItems: 'center', gap: space.sm, color: colors.muted },
@@ -78,14 +82,31 @@ function shellQuote(value: string, os: DeviceOS) {
   return os === 'Windows' ? `'${value.replaceAll("'", "''")}'` : `'${value.replaceAll("'", "'\\''")}'`
 }
 
+function downloadUrl(file: string) {
+  return new URL(`/downloads/${encodeURIComponent(file)}`, window.location.origin).href
+}
+
 // 设置码通过环境变量交给 batond，不出现在命令行参数和 shell 历史里。
-export function registerCommand(coordinatorUrl: string, name: string, os: DeviceOS, reauth = false) {
+export function registerCommand(
+  coordinatorUrl: string,
+  name: string,
+  os: DeviceOS,
+  reauth = false,
+  download?: DownloadItem,
+) {
   const tokenInput =
     os === 'Windows'
       ? '$env:BATON_ENROLLMENT_TOKEN = Read-Host -MaskInput'
       : 'read -rs BATON_ENROLLMENT_TOKEN && export BATON_ENROLLMENT_TOKEN'
-  if (reauth) return `${tokenInput}\nbatond reauth && batond up`
   const displayName = shellQuote(name.trim() || placeholderName, os)
+  if (download) {
+    return [
+      `tar xzf ${shellQuote(download.file, os)} && cd ${shellQuote(download.file.replace(/\.tar\.gz$/, ''), os)}`,
+      tokenInput,
+      `./batond ${reauth ? 'reauth' : `register --display-name ${displayName}`} && ./batond service install`,
+    ].join(' &&\n')
+  }
+  if (reauth) return `${tokenInput}\nbatond reauth && batond up`
   if (os === 'Windows') {
     return [
       tokenInput,
@@ -111,7 +132,7 @@ function availability(device: Device) {
   return device.agents.some((agent) => !agent.problem) ? null : 'No agents available yet'
 }
 
-type Copied = { target: 'code' | 'command'; ok: boolean }
+type Copied = { target: 'code' | 'command' | 'download'; ok: boolean }
 type Phase = 'loading' | 'failed' | 'pending' | 'expired' | 'used' | 'connected'
 
 function copyText(value: string) {
@@ -140,6 +161,8 @@ export function EnrollDialog({
 }) {
   const create = useCreateEnrollment()
   const devices = useDevices()
+  const downloads = useDownloads()
+  const [arch, setArch] = useState<'arm64' | 'x64'>('x64')
   const [issued, setIssued] = useState<{ enrollment: IssuedEnrollment; receivedAt: number } | null>(null)
   const enrollment = useEnrollment(issued?.enrollment.id ?? null)
   const [name, setName] = useState('')
@@ -175,9 +198,20 @@ export function EnrollDialog({
 
   const connected = devices.data?.find((item) => item.id === enrollment.data?.deviceId)
   const code = issued?.enrollment.code ?? ''
-  const command = issued
-    ? registerCommand(issued.enrollment.coordinatorUrl, name, device?.os ?? os, device !== undefined)
-    : ''
+  const targetOS = device?.os ?? os
+  const platform = targetOS === 'macOS' ? 'darwin' : targetOS === 'Windows' ? 'win32' : 'linux'
+  const manifest = downloads.data
+  const downloadable = manifest?.enabled === true
+  const items = manifest?.enabled ? manifest.items.filter((item) => item.platform === platform) : []
+  const cliItems = items.filter((item) => item.kind === 'cli' && item.platform !== 'win32')
+  const cli = cliItems.find((item) => item.arch === arch) ?? cliItems[0]
+  const downloadCommand = cli ? `curl -fLk -O ${shellQuote(downloadUrl(cli.file), targetOS)}` : ''
+  const desktopOnly = downloadable && targetOS === 'Windows'
+  const showCommand = downloads.isSuccess && (!downloadable || cli !== undefined) && !desktopOnly
+  const command =
+    issued && showCommand
+      ? registerCommand(issued.enrollment.coordinatorUrl, name, targetOS, device !== undefined, cli)
+      : ''
   const title = device ? 'Reconnect device' : 'Connect a device'
 
   const copy = (target: Copied['target'], value: string) => {
@@ -306,30 +340,105 @@ export function EnrollDialog({
           </div>
         </div>
       )}
-      <div {...stylex.props(styles.section)}>
-        <span id="enroll-code-label" {...stylex.props(text.label)}>
-          {codeLabels[phase]}
-        </span>
-        <div {...stylex.props(styles.box)}>
-          <code
-            aria-labelledby="enroll-code-label"
-            {...stylex.props(text.mono, styles.boxText, (phase !== 'pending' || !code) && styles.dim)}
-          >
-            {phase === 'loading' && 'Waiting for Baton…'}
-            {phase === 'failed' && 'No code issued'}
-            {phase !== 'loading' && phase !== 'failed' && code}
-          </code>
-          {phase === 'pending' && (
-            <IconButton
-              icon={copied?.target === 'code' && copied.ok ? 'check' : 'copy'}
-              label="Copy setup code"
-              onClick={() => copy('code', code)}
+      {downloads.isPending && <p {...stylex.props(text.small, styles.helper)}>Loading downloads…</p>}
+      {downloads.isError && (
+        <div {...stylex.props(styles.section)}>
+          <p role="alert" {...stylex.props(text.small, styles.error)}>
+            Couldn't load downloads.
+          </p>
+          <Button small onClick={() => void downloads.refetch()}>
+            Try again
+          </Button>
+        </div>
+      )}
+      {manifest?.enabled && (
+        <div {...stylex.props(styles.section)}>
+          {items
+            .filter((item) => item.kind === 'desktop' || item.platform !== 'win32')
+            .map((item) => (
+              <div key={item.file} {...stylex.props(styles.section)}>
+                <a
+                  href={downloadUrl(item.file)}
+                  download={item.file}
+                  {...stylex.props(text.label, styles.link, focusRing.ring)}
+                >
+                  Download {item.kind === 'cli' ? 'CLI' : 'desktop app'} · {item.arch}
+                </a>
+                <span {...stylex.props(text.caption, styles.helper)}>
+                  {manifest.version} · {fileSize(item.size)}
+                </span>
+                <code {...stylex.props(text.mono, styles.checksum)}>SHA-256: {item.sha256}</code>
+              </div>
+            ))}
+          {desktopOnly && items.length > 0 ? (
+            <p {...stylex.props(text.small, styles.helper)}>
+              Install the desktop app, then choose “Open in desktop app” on Devices.
+            </p>
+          ) : (
+            !desktopOnly &&
+            !cli && <p {...stylex.props(text.small, styles.helper)}>No CLI download available for {targetOS}.</p>
+          )}
+          {items.length === 0 && desktopOnly && (
+            <p {...stylex.props(text.small, styles.helper)}>No desktop download available for Windows.</p>
+          )}
+          {cliItems.length > 1 && (
+            <Segmented
+              label="Architecture"
+              options={cliItems.map((item) => ({ value: item.arch, label: item.arch }))}
+              value={cli?.arch ?? arch}
+              onChange={setArch}
             />
           )}
+          {cli && !desktopOnly && (
+            <>
+              <span id="enroll-download-label" {...stylex.props(text.label)}>
+                Download in terminal
+              </span>
+              <div {...stylex.props(styles.box)}>
+                <pre aria-labelledby="enroll-download-label" {...stylex.props(text.mono, styles.boxText)}>
+                  {downloadCommand}
+                </pre>
+                <IconButton
+                  icon={copied?.target === 'download' && copied.ok ? 'check' : 'copy'}
+                  label="Copy download command"
+                  onClick={() => copy('download', downloadCommand)}
+                />
+              </div>
+              <p {...stylex.props(text.caption, styles.helper)}>
+                {copied?.target === 'download' && !copied.ok
+                  ? blocked
+                  : 'Check the SHA-256 before running the setup command.'}
+              </p>
+            </>
+          )}
         </div>
-        {codeNote && <p {...stylex.props(text.caption)}>{codeNote}</p>}
-      </div>
-      {issued && phase !== 'failed' && (
+      )}
+      {!desktopOnly && (
+        <div {...stylex.props(styles.section)}>
+          <span id="enroll-code-label" {...stylex.props(text.label)}>
+            {codeLabels[phase]}
+          </span>
+          <div {...stylex.props(styles.box)}>
+            <code
+              aria-labelledby="enroll-code-label"
+              {...stylex.props(text.mono, styles.boxText, (phase !== 'pending' || !code) && styles.dim)}
+            >
+              {phase === 'loading' && 'Waiting for Baton…'}
+              {phase === 'failed' && 'No code issued'}
+              {phase !== 'loading' && phase !== 'failed' && code}
+            </code>
+            {phase === 'pending' && (
+              <IconButton
+                icon={copied?.target === 'code' && copied.ok ? 'check' : 'copy'}
+                label="Copy setup code"
+                onClick={() => copy('code', code)}
+              />
+            )}
+          </div>
+          {codeNote && <p {...stylex.props(text.caption)}>{codeNote}</p>}
+        </div>
+      )}
+      {issued && showCommand && phase !== 'failed' && (
         <div {...stylex.props(styles.section)}>
           <span id="enroll-command-label" {...stylex.props(text.label)}>
             Run in terminal

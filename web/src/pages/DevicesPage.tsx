@@ -8,6 +8,7 @@ import { useNow } from '../app/useNow'
 import { agentSummary, capabilityLines, deviceConnectionView, devicesHeading, systemName } from '../data/derive'
 import {
   useDevices,
+  useDownloads,
   useDeviceFolders,
   useProjects,
   useRemoveDevice,
@@ -38,6 +39,7 @@ const styles = stylex.create({
   },
   intro: { display: 'flex', alignItems: 'center', gap: space.xl, paddingInline: space.lg },
   heading: { flexGrow: 1, outline: 'none' },
+  desktopLink: { color: colors.accentText, whiteSpace: 'nowrap' },
   notice: {
     display: 'flex',
     flexDirection: 'column',
@@ -385,6 +387,8 @@ function NoticeBox({ notice, children }: { notice: Notice; children?: ReactNode 
 
 export function DevicesPage() {
   const devices = useDevices()
+  const downloads = useDownloads()
+  const inDesktop = (window as Window & { batonDesktop?: { protocol?: number } }).batonDesktop?.protocol === 1
   const projects = useProjects()
   const session = useSession()
   const setDefault = useSetDefaultDevice()
@@ -541,6 +545,11 @@ export function DevicesPage() {
           <h2 ref={headingRef} tabIndex={-1} {...stylex.props(text.title, styles.heading)}>
             {devicesHeading(list)}
           </h2>
+          {!inDesktop && downloads.data?.enabled && downloads.data.connect_url && (
+            <a href={downloads.data.connect_url} {...stylex.props(text.small, styles.desktopLink, focusRing.ring)}>
+              Open in desktop app
+            </a>
+          )}
           {list.length > 0 && (
             <Button icon="plus" onClick={() => setEnrolling(true)}>
               Connect a device

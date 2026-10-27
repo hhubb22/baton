@@ -66,6 +66,8 @@ Memory 展示最新内容、版本、来源和时间，可添加、编辑并查�
 | 场景 | 内容 |
 |---|---|
 | `normal` | 三台设备、四个 Project、进行中的 Thread 和待处理事项。Baton Dev 的助手开了一个 Thread 正在等回复，Compatibility 的助手已经汇报结果。回复带执行过程、文件和提交附件；Ubuntu Dev 的 `logs` 目录里有超过 64 KB 的日志，模拟文件树的 `apps/server/src/testing/data` 中有二进制样本 |
+| `downloads` | 提供 macOS、Linux CLI 与 macOS、Windows 桌面下载元数据，展示安装命令和接入链接；模拟文件不可实际下载 |
+| `noDownloads` | 下载未启用，注册对话框显示原有终端命令 |
 | `empty` | 已登录但还没有设备，显示首次使用引导 |
 | `noChats` | 设备已接入但还没有对话，Threads 页显示空列表，可以从顶部输入区开始第一个对话 |
 | `signedOut` | 未登录，打开任何页面都进入登录页 |
