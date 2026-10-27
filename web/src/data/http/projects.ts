@@ -1,4 +1,4 @@
-import type { ProjectMemory, MemoryRevision } from '@baton/protocol'
+import type { ProjectMemory, MemoryRevision, MemoryWorkStatus } from '@baton/protocol'
 import { ClientError, type BatonClient } from '../client'
 import { shortenExcerpt } from '../derive'
 import type { InboxItem, MemoryNote, Project, ProjectEntry, Reference } from '../types'
@@ -10,6 +10,7 @@ type ProjectAPI = Pick<
   | 'listProjects'
   | 'listProjectEntries'
   | 'listProjectMemory'
+  | 'getMemoryStatus'
   | 'createProject'
   | 'sendProjectMessage'
   | 'updateProject'
@@ -624,6 +625,7 @@ export function createProjectAPI(ctx: HttpContext): ProjectAPI {
         return { state: 'conflict', note: await readMemory(input.projectId, await ctx.request<MemoryDTO>(path)) }
       }
     },
+    getMemoryStatus: (projectId) => ctx.request<MemoryWorkStatus>(`${projectPath(projectId)}/memory/status`),
     async memorySources(projectId, note) {
       const ids = [
         ...new Set(

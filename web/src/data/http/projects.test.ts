@@ -390,6 +390,13 @@ describe('Project HTTP contract', () => {
     h.done()
   })
 
+  it('reads memory work diagnostics independently of the foreground status', async () => {
+    const status = { pending_batches: 2, attention: ['login_required'], jobs: [], has_more: false }
+    const h = setup([{ path: `${base}/memory/status`, response: status }])
+    expect(await h.api.getMemoryStatus(projectId)).toEqual(status)
+    h.done()
+  })
+
   it('reads all memory pages and only includes revisions returned by the server', async () => {
     const h = setup([
       {

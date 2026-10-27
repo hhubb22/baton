@@ -348,6 +348,77 @@ describe('project maintenance', () => {
     expect(memorySpy).toHaveBeenCalledTimes(2)
   })
 
+  it('shows one actionable memory warning and clears it after sign-in without adding chat notices', async () => {
+    const user = userEvent.setup()
+    let attention: ('login_required' | 'credential_missing')[] = ['login_required']
+    const { client } = setup(memoryPath, 'normal', (client) => {
+      vi.spyOn(client, 'getMemoryStatus').mockImplementation(async () => ({
+        pending_batches: 2,
+        attention,
+        jobs: [],
+        has_more: false,
+      }))
+    })
+    const memory = await screen.findByRole('region', { name: 'Project memory' })
+    expect(await within(memory).findByText('Memory updates need sign-in')).toBeInTheDocument()
+    expect(screen.getAllByText('Memory updates need sign-in')).toHaveLength(1)
+    expect(screen.getByRole('region', { name: 'Conversation' })).not.toHaveTextContent('Memory updates need sign-in')
+    expect((await client.listInbox()).some((item) => item.title.includes('Memory updates'))).toBe(false)
+    attention = []
+    await user.click(screen.getByRole('tab', { name: /Threads/ }))
+    await user.click(screen.getByRole('tab', { name: /Memory/ }))
+    await waitFor(() => expect(screen.queryByText('Memory updates need sign-in')).not.toBeInTheDocument())
+    expect(within(memory).queryByText('Processing')).not.toBeInTheDocument()
+  })
+
+  it('offers settings for missing embedding credentials', async () => {
+    const user = userEvent.setup()
+    setup(memoryPath, 'normal', (client) => {
+      vi.spyOn(client, 'getMemoryStatus').mockResolvedValue({
+        pending_batches: 0,
+        attention: ['credential_missing'],
+        jobs: [],
+        has_more: false,
+      })
+    })
+    const memory = await screen.findByRole('region', { name: 'Project memory' })
+    expect(await within(memory).findByText('Memory search needs device credentials')).toBeInTheDocument()
+    await user.click(within(memory).getByRole('button', { name: 'Open settings' }))
+    expect(await screen.findByRole('dialog', { name: 'Compatibility · settings' })).toBeInTheDocument()
+  })
+
+  it('keeps routine waiting and transient memory failures out of the interface', async () => {
+    setup(memoryPath, 'normal', (client) => {
+      vi.spyOn(client, 'getMemoryStatus').mockResolvedValue({
+        pending_batches: 3,
+        attention: [],
+        has_more: false,
+        jobs: [
+          {
+            id: 'job',
+            kind: 'consolidation',
+            state: 'pending',
+            input_seq: 1,
+            through_seq: 2,
+            cursor_index: 0,
+            cursor_offset: 0,
+            source_count: 2,
+            node_id: null,
+            node_name: null,
+            waiting_reason: 'device_unavailable',
+            last_error: 'model_request_failed',
+            attempts: 1,
+            updated_at: '2026-01-01T00:00:00Z',
+          },
+        ],
+      })
+    })
+    expect(await screen.findByRole('button', { name: originalMemory })).toBeInTheDocument()
+    expect(screen.queryByText('Memory updates need sign-in')).not.toBeInTheDocument()
+    expect(screen.queryByText('device_unavailable')).not.toBeInTheDocument()
+    expect(screen.queryByText('model_request_failed')).not.toBeInTheDocument()
+  })
+
   it('adds memory and records the author and previous version when editing assistant memory', async () => {
     const user = userEvent.setup()
     const { router } = setup()

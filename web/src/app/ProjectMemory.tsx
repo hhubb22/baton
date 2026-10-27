@@ -1,7 +1,15 @@
 import * as stylex from '@stylexjs/stylex'
 import { useRef, useState } from 'react'
+import { useNavigate } from '@tanstack/react-router'
 import { ClientError } from '../data/client'
-import { newClientId, useProjectMemory, useSaveMemory, useChangeMemory, useMemorySources } from '../data/queries'
+import {
+  newClientId,
+  useProjectMemory,
+  useSaveMemory,
+  useChangeMemory,
+  useMemorySources,
+  useMemoryStatus,
+} from '../data/queries'
 import type { MemoryNote, MemoryVersion, Project } from '../data/types'
 import { text } from '../theme/text'
 import { colors, space } from '../theme/tokens.stylex'
@@ -245,6 +253,9 @@ function MemoryEditor({ project, note, onClose }: { project: Project; note: Memo
 // @elyx design/blocks/overview.elyx#overviewMemory
 export function ProjectMemory({ project }: { project: Project }) {
   const memory = useProjectMemory(project.id)
+  const status = useMemoryStatus(project.id, project.status === 'active')
+  const navigate = useNavigate()
+  const attention = project.status === 'active' ? status.data?.attention[0] : undefined
   const [editing, setEditing] = useState<MemoryNote | 'new' | null>(null)
   const archived = project.status === 'archived'
   const active = memory.data?.filter((note) => note.effective && note.status !== 'retired') ?? []
@@ -263,6 +274,35 @@ export function ProjectMemory({ project }: { project: Project }) {
   )
   return (
     <section aria-label="Project memory" {...stylex.props(styles.list)}>
+      {attention && (
+        <Banner
+          attention
+          title={
+            attention === 'login_required' ? 'Memory updates need sign-in' : 'Memory search needs device credentials'
+          }
+          detail={
+            attention === 'login_required'
+              ? 'Saved conversations will be processed after sign-in.'
+              : 'Keyword search is still available.'
+          }
+          action={
+            <Button
+              small
+              onClick={() =>
+                void (attention === 'login_required'
+                  ? navigate({ to: '/devices' })
+                  : navigate({
+                      to: '/projects/$projectId',
+                      params: { projectId: project.id },
+                      search: { view: 'memory', settings: true },
+                    }))
+              }
+            >
+              {attention === 'login_required' ? 'View devices' : 'Open settings'}
+            </Button>
+          }
+        />
+      )}
       {memory.isPending && (
         <p role="status" {...stylex.props(text.small, text.muted)}>
           Loading memory…

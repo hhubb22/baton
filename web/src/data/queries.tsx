@@ -34,6 +34,7 @@ export const keys = {
   projects: ['projects'] as const,
   projectEntries: (id: ID) => ['projects', 'entries', id] as const,
   projectMemory: (id: ID) => ['projects', 'memory', id] as const,
+  memoryStatus: (id: ID) => ['projects', 'memoryStatus', id] as const,
   threads: ['threads'] as const,
   thread: (id: ID) => ['threads', 'detail', id] as const,
   messages: (threadId: ID) => ['messages', threadId] as const,
@@ -134,6 +135,17 @@ export function useProjectMemory(projectId: ID) {
     queryFn: () => client.listProjectMemory(projectId),
     refetchOnMount: false,
     retryOnMount: false,
+  })
+}
+
+export function useMemoryStatus(projectId: ID, active: boolean) {
+  const client = useClient()
+  return useQuery({
+    queryKey: keys.memoryStatus(projectId),
+    queryFn: () => client.getMemoryStatus(projectId),
+    enabled: active,
+    refetchOnMount: 'always',
+    refetchInterval: 10000,
   })
 }
 

@@ -123,6 +123,11 @@ export function createMockClient(
     listProjects: () => guarded(() => store.listProjects()),
     listProjectEntries: (projectId) => guarded(() => store.projectEntries(projectId)),
     listProjectMemory: (projectId) => guarded(() => store.projectMemory(projectId)),
+    getMemoryStatus: (projectId) =>
+      guarded(() => {
+        store.projectMemory(projectId)
+        return { pending_batches: 0, attention: [], jobs: [], has_more: false }
+      }),
     listThreads: () => guarded(() => store.snapshot().threads),
     async getThread(threadId) {
       const thread = (await this.listThreads()).find((item) => item.id === threadId)

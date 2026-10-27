@@ -1,3 +1,4 @@
+import type { MemoryWorkStatus } from '@baton/protocol'
 import type {
   AgentKind,
   Device,
@@ -60,6 +61,7 @@ export interface BatonClient {
   // Project 主对话：你的消息、助手的回复和系统说明，按时间排列。
   listProjectEntries(projectId: ID): Promise<ProjectEntry[]>
   listProjectMemory(projectId: ID): Promise<MemoryNote[]>
+  getMemoryStatus(projectId: ID): Promise<MemoryWorkStatus>
   listThreads(): Promise<Thread[]>
   getThread(threadId: ID): Promise<Thread>
   listMessages(threadId: ID): Promise<Message[]>

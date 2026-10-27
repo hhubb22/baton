@@ -18,6 +18,7 @@ import {
   pendingEmbeddings,
   deferEmbedding,
   embeddingStatus,
+  projectMemoryStatus,
 } from './memory/index.ts'
 
 // 固定向量只指定流程中的排序事实，不代表模型对自然语言的真实语义质量。
@@ -90,6 +91,9 @@ it('stores optional public configuration, queues revisions, commits bound vector
     expect(await db.run(embeddingStatus(c.employeeId, c.projectId, changed.memory_embedding!.config_id))).toMatchObject(
       { pending: 1, diagnostic: 'embedding_timeout' },
     )
+    expect((await db.run(projectMemoryStatus(c.employeeId, c.projectId))).attention).toEqual([])
+    await db.run(transaction(deferEmbedding(c.employeeId, c.projectId, work.entries[0]!, 'credential_missing')))
+    expect((await db.run(projectMemoryStatus(c.employeeId, c.projectId))).attention).toEqual(['credential_missing'])
     const [effects] = await db.run(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
@@ -116,6 +120,7 @@ it('stores optional public configuration, queues revisions, commits bound vector
         ),
       ),
     ).toEqual({ accepted: false })
+    expect((await db.run(projectMemoryStatus(c.employeeId, c.projectId))).attention).toEqual([])
     expect(
       (await db.run(patchProject(c.employeeId, c.projectId, { memory_embedding: null }))).memory_embedding,
     ).toBeNull()
