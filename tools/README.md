@@ -29,6 +29,20 @@ node tools/package-release.mjs v0.1.0-alpha.1 bin/package
 
 `package-release.mjs <版本> [安装目录=bin] [输出目录=bin/releases]` 检查布局、帮助、SEA 版本和清单，归档后重新解压并运行 `check-package`。输出对应平台的 tar.gz 或 zip、SHA256 和检查报告。归档版本必须等于二进制内的发布版本，源码提交沿用构建输入；归档器不会给开发程序或其他版本重新贴标。`release.json` 保存版本、提交、平台、协议、中心迁移、三类账本格式和支持的 daemon 版本，并与程序输出及清单核对。应在目标平台执行发布验证。
 
+## 桌面客户端
+
+```sh
+pnpm --filter @baton/desktop build
+node tools/package-desktop.mjs --batond bin --out apps/desktop/dist/installers
+node --test tools/package-desktop.test.mjs
+```
+
+`build/desktop.mjs` 用 esbuild 构建 `apps/desktop/dist/main.cjs` 与 sandbox preload，并复制本地说明页。`package-desktop.mjs --batond <安装目录> --out <目录>` 先核对 batond 的 SEA 版本、平台与 `release.json`，再构建客户端；整个 batond 安装目录放进 `resources/batond`，其原生依赖保持独立 Node ABI，不按 Electron ABI 重建。输出目录须位于输入目录之外。
+
+macOS arm64 产出 `baton-desktop-<版本>-darwin-arm64.dmg`，Windows x64 产出按用户安装、无需提权的 `baton-desktop-<版本>-win32-x64.exe`，均附 `.sha256`。版本来自 batond 的 `release.json`；Electron 内部版本去掉 `v` 前缀，开发包内部使用 `0.0.0-development`，产物仍标记 `development`。macOS 应用使用临时签名，保留内置 SEA 的签名，不使用发布证书或公证。打包仅在对应平台执行。
+
+依赖安装沿用 `--ignore-scripts`，Node 单元测试和工具测试不下载或启动 Electron。显式打包使用 electron-builder 的 Electron 缓存和校验机制，可用 `ELECTRON_MIRROR` 指定镜像。发布工作流只在 macOS 与 Windows 的打包步骤准备 Electron 运行时，Electron 与 builder 的下载缓存限定在 runner 临时目录，上传安装包和校验文件，不上传解包中的应用目录。客户端模块与验证范围见 [桌面客户端](../apps/desktop/README.md)。
+
 ## 安装包检查
 
 ```sh

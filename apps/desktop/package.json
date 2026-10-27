@@ -1,0 +1,26 @@
+{
+  "name": "@baton/desktop",
+  "version": "0.0.0",
+  "description": "Baton 桌面客户端",
+  "author": "Baton",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.cjs",
+  "scripts": {
+    "build": "node ../../tools/build/desktop.mjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "vp lint .",
+    "test": "vp test run --config ../../vitest.config.ts"
+  },
+  "devDependencies": {
+    "@baton/protocol": "workspace:*",
+    "@types/node": "catalog:",
+    "effect": "catalog:",
+    "electron": "44.5.1",
+    "electron-builder": "26.18.0",
+    "esbuild": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
+  }
+}

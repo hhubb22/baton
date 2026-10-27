@@ -46,6 +46,7 @@ catalog:
   yaml: ^2.9.0
 
 allowBuilds:
+  electron: false
   esbuild: true
   '@google/genai': false
   protobufjs: false

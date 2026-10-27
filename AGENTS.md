@@ -8,6 +8,7 @@ Baton 是跨设备 AI Agent 协同系统，由 TypeScript 中心服务（`apps/s
 |---|---|
 | `apps/server` | 员工认证、设备、Thread、Project、事项和记忆，PostgreSQL 事务、持久命令与报告、Gateway（`/v1/node` 与 `/api/v1/events`）和网页静态服务；见 `apps/server/README.md` |
 | `apps/batond` | 注册和 WSS、设备 SQLite 账本、认证 IPC、Worker 管理、Agent 探测、文件浏览、Project Runtime 宿主和订阅登录；见 `apps/batond/README.md` |
+| `apps/desktop` | Electron 桌面客户端、接入链接与中心证书校验、受限网页桥接、batond 监管、托盘与登录启动；见 `apps/desktop/README.md` |
 | `apps/batond/src/worker` | Thread 消息队列、命令回执、intent、Turn、回复、outbox 与恢复 |
 | `apps/batond/src/agent-host`、`src/agents` | t3code provider 宿主、事件映射与受限 shell；四个 Agent 在程序或 SDK 已安装且认证未明确缺失时开放新建与恢复，版本和系统不设白名单 |
 | `e2e` | 中心、节点、独立 Worker 与 Runtime 的跨 app 集成测试，显式依赖两个 app；见 `e2e/README.md` |
@@ -72,6 +73,19 @@ pnpm --dir web build
 ```
 
 包内检查使用 `pnpm --filter <包名> typecheck`、`pnpm --filter <包名> lint` 和 `pnpm --filter <包名> test`。中心及其 e2e 使用 `pnpm --filter '...@baton/server' --workspace-concurrency=1 test`；两个 app 可将 `test` 换成 `test:unit` 或 `test:integration` 选择测试组。
+
+桌面客户端构建、离线测试与打包：
+
+```sh
+pnpm --filter @baton/desktop build
+pnpm --filter @baton/desktop typecheck
+pnpm --filter @baton/desktop lint
+pnpm --filter @baton/desktop test
+node --test tools/package-desktop.test.mjs
+node tools/package-desktop.mjs --batond bin --out apps/desktop/dist/installers
+```
+
+安装与自动化测试不下载或启动 Electron；显式打包才准备 Electron 运行时。桌面客户端只支持 macOS arm64 与 Windows x64，Windows 使用按用户安装的 NSIS。产物目录须放在输入 batond 安装目录之外。
 
 ## Effect 与开发工具
 

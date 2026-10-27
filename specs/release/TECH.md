@@ -16,6 +16,7 @@ Basis: [发布行为规格](PRODUCT.md) RL-01～17；[Baton TECH](../baton/TECH.
 | 节点开发 bundle | `apps/batond/dist/batond.cjs`；通过已安装的 Node 与 workspace 依赖运行，Project Runtime 与 watchdog 通过同一 bundle 的子命令启动 |
 | 节点安装包 | `batond`（Windows 为 `batond.exe`）、旁置 `node_modules/`、`licenses/`、`package.json`、`package-manifest.json` 与 `INSTALL.md`；设备无需另装 Node |
 | 发布归档 | `baton-<带 v 前缀的版本>-<平台>.tar.gz`（Windows 为 `.zip`），附 SHA-256 文件和安装包检查 JSON；归档内另有 `release.json` |
+| 桌面客户端 | `baton-desktop-<版本>-darwin-arm64.dmg` 与 `baton-desktop-<版本>-win32-x64.exe`，附 SHA-256；Electron 应用的 `resources/batond` 内含完整 SEA 安装包 |
 
 [统一构建入口](../../tools/build.mjs) 从根 workspace 安装锁定依赖，检查网页类型，构建中心与节点 bundle，再生成 `bin/` 安装包。[节点打包器](../../tools/package-batond.mjs) 使用支持 `--build-sea` 且保留 LICENSE 的官方 Node 26，默认使用执行脚本的 Node；也可通过 `--node` 指定目标平台的官方 Node。跨系统构建由宿主 Node 将 bundle 注入目标可执行文件，目标平台依赖必须已安装。macOS 安装包必须在 macOS 上完成 ad-hoc 签名；最终检查与归档在目标平台运行。
 
@@ -28,6 +29,12 @@ SEA 不启用 code cache 或 snapshot，`execArgvExtension` 设为 `none`。Work
 [依赖复制器](../../tools/package-dependencies.mjs) 沿已安装的生产、peer 与可选依赖图复制物理文件，按目标系统、架构及 glibc 筛选平台包；相同依赖提升复用，冲突版本保留在调用方自己的 `node_modules/`。必需依赖缺失时直接失败。节点打包器不下载 Node 或依赖，产物不依赖源码目录或 pnpm store 链接。
 
 `package-manifest.json` 记录 SEA 格式、目标平台、架构、Node 版本、附带依赖的名称、版本与相对路径，以及已打入 bundle 的包。`licenses/` 包含 Node LICENSE、t3code LICENSE、依赖包提供的许可声明和 Cursor 来源说明。Cursor 的包来源、integrity 与分发条款见 [Cursor SDK](../../third_party/cursor-sdk/README.md)。
+
+### 桌面安装包
+
+`tools/package-desktop.mjs` 核对 batond 的实际 SEA 版本与 `release.json`，将同一版本的完整安装目录复制为 Electron 资源。main 与 sandbox preload 由 esbuild 生成 CJS；禁用 Electron 原生依赖重建，内置 batond 的原生模块继续由独立 Node SEA 加载。macOS 应用使用临时签名并跳过内置 batond，Windows 使用按用户安装、无需提权的 NSIS。依赖安装与 Node 自动化测试不下载或启动 Electron；显式打包可通过 `ELECTRON_MIRROR` 获取运行时。
+
+macOS 27.2 arm64 上已使用官方 Node 26.11.1 的统一构建产物和 Electron 44.5.1 生成开发版 DMG 与 SHA-256，核对应用及内置 batond 的 `codesign --verify`，从 DMG 复制到用户应用目录后启动显示本地接入说明页。说明页不暴露 `batonDesktop` 或 Node `require`。打包后的 `resources/batond` 与输入安装目录逐项比较一致，安装副本的 Agent host 离线模块探测通过。Windows NSIS、真实中心接入、登录启动和客户端崩溃后的 Windows 进程回收未做手动验证；网页桌面接入尚未实现。
 
 ### 官方 Node 输入
 
@@ -42,9 +49,9 @@ SEA 不启用 code cache 或 snapshot，`execArgvExtension` 设为 `none`。Work
 
 ### 发布流水线与归档
 
-[发布工作流](../../.github/workflows/release-packages.yml) 由 `workflow_dispatch` 接收带 `v` 前缀的版本号，在 `macos-15`、`ubuntu-24.04`、`ubuntu-24.04-arm` 与 `windows-2025` 上原生构建，固定 Node 26.11.1 和 pnpm 12.11.2。Linux 执行包含本地 PostgreSQL 的工作区测试与中心构建；macOS、Windows 执行节点与 Project Runtime 测试。自动化验证使用离线转录、本地替身与本机资源。
+[发布工作流](../../.github/workflows/release-packages.yml) 由 `workflow_dispatch` 接收带 `v` 前缀的版本号，在 `macos-15`、`ubuntu-24.04`、`ubuntu-24.04-arm` 与 `windows-2025` 上原生构建，固定 Node 26.11.1 和 pnpm 12.11.2。Linux 执行包含本地 PostgreSQL 的工作区测试与中心构建；macOS、Windows 执行节点、Project Runtime 与桌面客户端的 Node 离线测试。自动化验证使用离线转录、本地替身与本机资源。
 
-每个平台依次执行安装包构建、搬迁检查、100 个 Worker 冷启动样本与 2000 次 FULL 账本操作，Windows 另执行进程机制检查，然后归档并验证解压产物。构建、检查、测量 JSON 与测试日志作为工作流产物上传。Windows 节点与 Runtime 测试步骤允许失败后继续打包；安装包检查失败仍会阻止后续测量与归档。工作流上传产物，不自动创建 GitHub Release。
+每个平台依次执行安装包构建、搬迁检查、100 个 Worker 冷启动样本与 2000 次 FULL 账本操作，Windows 另执行进程机制检查，然后归档并验证解压产物。macOS 与 Windows 随后生成桌面安装包和 SHA-256。安装包、构建与检查 JSON、测量结果和测试日志作为工作流产物上传，不上传 Electron 解包目录。Windows 节点与 Runtime 测试步骤允许失败后继续打包；安装包检查失败仍会阻止后续测量与归档。工作流上传产物，不自动创建 GitHub Release。
 
 [归档器](../../tools/package-release.mjs) 只复制可执行文件、附带依赖、许可及规定的元数据，校验帮助、SEA 平台与版本、安装包清单。`release.json` 由安装包构建生成，记录版本、明确输入的源码提交、目标平台、协议版本、中心迁移版本、三类账本格式版本、声明支持的 daemon 版本、构建 Node 与 SEA Node。归档器保留这些元数据，并要求归档版本与程序实际版本相同；归档时不从当前 Git 工作区重新填写身份。Unix 生成 tar.gz，Windows 使用系统 bsdtar 生成 zip，并校验文件头。最终归档重新解压后，再检查布局、清单、发布元数据并运行完整安装包检查，通过后才写出归档、SHA-256 与检查报告。
 

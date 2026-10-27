@@ -1,0 +1,88 @@
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, expect, it, vi } from 'vite-plus/test'
+import { Batond, daemonLog } from './batond.ts'
+import { fakeProcess } from './testing/process.ts'
+
+afterEach(() => vi.unstubAllEnvs())
+
+it('凭据仅通过注册子进程环境传入，命令输出只返回公开身份', async () => {
+  vi.stubEnv('BATON_ENROLLMENT_TOKEN', 'inherited-secret-must-be-removed')
+  const calls: Array<{ args: string[]; env: NodeJS.ProcessEnv | undefined }> = []
+  const identity = {
+    registered: true,
+    coordinator_url: 'https://center.test',
+    node_id: 'node',
+    display_name: 'Local',
+    system: 'macos',
+  }
+  const batond = new Batond('/resources', '/data', (_file, args, options) => {
+    calls.push({ args, env: options.env })
+    const child = fakeProcess()
+    queueMicrotask(() => {
+      child.stdout.emit('data', Buffer.from(JSON.stringify({ ...identity, credential: 'must-not-leak' })))
+      child.emit('close', 0)
+    })
+    return child
+  })
+  expect(
+    await batond.enroll(
+      { format: 1, coordinator_url: 'https://center.test', ca_pem: 'test-ca' },
+      '/user',
+      'enrollment-secret',
+      'Local',
+    ),
+  ).toEqual(identity)
+  expect(calls[0]!.args).toEqual([
+    'register',
+    '--coordinator',
+    'https://center.test',
+    '--display-name',
+    'Local',
+    '--ca-file',
+    join('/user', 'ca.pem'),
+    '--data-dir',
+    '/data',
+  ])
+  expect(calls[0]!.env?.BATON_ENROLLMENT_TOKEN).toBe('enrollment-secret')
+  expect(calls[1]!.env?.BATON_ENROLLMENT_TOKEN).toBeUndefined()
+  expect(JSON.stringify(calls.map((call) => call.args))).not.toContain('enrollment-secret')
+  const daemon = batond.run()
+  expect(calls[2]!.args).toEqual(['run', '--exit-with-stdin', '--data-dir', '/data'])
+  expect(calls[2]!.env?.BATON_ENROLLMENT_TOKEN).toBeUndefined()
+  daemon.stdin.end()
+})
+
+it('失败不向网页返回子进程原始输出或注册凭据', async () => {
+  const batond = new Batond('/resources', '/data', () => {
+    const child = fakeProcess()
+    queueMicrotask(() => {
+      child.stderr.emit('data', Buffer.from('{"code":"enrollment_expired","message":"enrollment-secret"}'))
+      child.emit('close', 1)
+    })
+    return child
+  })
+  const error = await batond
+    .reauth({ format: 1, coordinator_url: 'https://center.test' }, '/user', 'enrollment-secret')
+    .catch((error: unknown) => error)
+  expect(error).toMatchObject({ code: 'enrollment_expired' })
+  expect(String(error)).not.toContain('enrollment-secret')
+})
+
+it('运行日志超过 10MB 时只保留一份轮转文件', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'desktop-log-'))
+  try {
+    const failed = vi.fn()
+    const log = daemonLog(directory, failed)
+    log.write(Buffer.alloc(9 * 1024 * 1024, 'a'))
+    log.write(Buffer.alloc(2 * 1024 * 1024, 'b'))
+    await log.flush()
+    const file = join(directory, 'logs', 'desktop-batond.log')
+    expect((await stat(file + '.1')).size).toBe(9 * 1024 * 1024)
+    expect((await readFile(file)).length).toBe(2 * 1024 * 1024)
+    expect(failed).not.toHaveBeenCalled()
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})

@@ -1,0 +1,166 @@
+import type { ChildProcessWithoutNullStreams } from 'node:child_process'
+import type { SupervisorState } from './status.ts'
+
+export interface DaemonFailure {
+  code?: string
+  message?: string
+}
+const terminal = new Set([
+  'needs_reauth',
+  'node_version_incompatible',
+  'deployment_invalid',
+  'identity_recovery_required',
+])
+
+export function restartDecision(
+  exitCode: number | null,
+  failure: DaemonFailure,
+  failures: number[],
+  now: number,
+  attempt?: number,
+) {
+  if (failure.code === 'daemon_running') return { state: 'external' as const, delay: 30_000, failures: [] }
+  if (exitCode === 78 || (failure.code && terminal.has(failure.code)))
+    return { state: 'rejected' as const, failures: [] }
+  const recent = [...failures.filter((time) => now - time < 60_000), now]
+  if (recent.length >= 5) return { state: 'rejected' as const, failures: recent }
+  return {
+    state: 'restarting' as const,
+    delay: Math.min(30_000, 1000 * 2 ** (attempt ?? recent.length - 1)),
+    failures: recent,
+  }
+}
+
+export function lastFailure(stderr: string): DaemonFailure {
+  try {
+    const value: unknown = JSON.parse(stderr.trim().split('\n').at(-1) ?? '')
+    if (typeof value === 'object' && value !== null && 'code' in value && typeof value.code === 'string')
+      return {
+        code: value.code,
+        ...('message' in value && typeof value.message === 'string' ? { message: value.message } : {}),
+      }
+  } catch {
+    /* stderr 可能包含普通诊断行。 */
+  }
+  return {}
+}
+
+export class Supervisor {
+  state: SupervisorState = { state: 'stopped' }
+  private child: ChildProcessWithoutNullStreams | undefined
+  private timer: ReturnType<typeof setTimeout> | undefined
+  private stopped = true
+  private failures: number[] = []
+  private attempt = 0
+  private startedAt = 0
+  private closed: Promise<void> = Promise.resolve()
+
+  constructor(
+    private readonly options: {
+      spawn: () => ChildProcessWithoutNullStreams
+      changed: (state: SupervisorState) => void
+      log: (chunk: Buffer) => void
+      now?: () => number
+    },
+  ) {}
+
+  private update(state: SupervisorState) {
+    this.state = state
+    this.options.changed(state)
+  }
+
+  reject(code: string, message: string) {
+    this.update({ state: 'rejected', code, message })
+  }
+
+  start() {
+    if (this.child || this.timer) return
+    this.stopped = false
+    let child: ChildProcessWithoutNullStreams
+    try {
+      child = this.options.spawn()
+    } catch {
+      this.exited(null, { code: 'spawn_failed', message: '无法启动内置 batond' })
+      return
+    }
+    this.child = child
+    this.startedAt = (this.options.now ?? Date.now)()
+    child.stdin.on('error', () => {})
+    this.update({ state: 'connecting', ...(child.pid ? { pid: child.pid } : {}) })
+    let stderr = ''
+    const completion = Promise.withResolvers<void>()
+    this.closed = completion.promise
+    child.stdout.on('data', (chunk: Buffer) => this.options.log(chunk))
+    child.stderr.on('data', (chunk: Buffer) => {
+      this.options.log(chunk)
+      stderr = (stderr + chunk.toString('utf8')).slice(-64 * 1024)
+    })
+    child.once('error', () => {
+      stderr = JSON.stringify({ code: 'spawn_failed', message: '无法启动内置 batond' })
+    })
+    child.once('close', (code) => {
+      this.child = undefined
+      completion.resolve()
+      if (this.stopped) return
+      this.exited(code, lastFailure(stderr))
+    })
+  }
+
+  private exited(code: number | null, failure: DaemonFailure) {
+    const now = (this.options.now ?? Date.now)()
+    if (now - this.startedAt >= 60_000) this.attempt = 0
+    const decision = restartDecision(code, failure, this.failures, now, this.attempt)
+    this.attempt = decision.state === 'restarting' ? this.attempt + 1 : 0
+    this.failures = decision.failures
+    this.update({
+      state: decision.state,
+      ...(failure.code ? { code: failure.code } : {}),
+      ...(failure.message
+        ? { message: failure.message }
+        : decision.state === 'rejected'
+          ? { message: 'batond 在 60 秒内连续失败 5 次，请检查日志后重启' }
+          : {}),
+    })
+    if (decision.delay !== undefined)
+      this.timer = setTimeout(() => {
+        this.timer = undefined
+        if (!this.stopped) this.start()
+      }, decision.delay)
+  }
+
+  async stop(): Promise<void> {
+    this.stopped = true
+    if (this.timer) clearTimeout(this.timer)
+    this.timer = undefined
+    this.update({ state: 'stopping' })
+    const child = this.child
+    if (child) {
+      child.stdin.end()
+      let timeout: ReturnType<typeof setTimeout> | undefined
+      await Promise.race([
+        this.closed,
+        new Promise<void>((resolve) => {
+          timeout = setTimeout(() => {
+            child.kill('SIGKILL')
+            resolve()
+          }, 15_000)
+        }),
+      ])
+      if (timeout) clearTimeout(timeout)
+    }
+    this.update({ state: 'stopped' })
+  }
+
+  async restart() {
+    await this.stop()
+    if (this.child) {
+      this.stopped = false
+      this.failures = []
+      this.attempt = 0
+      return
+    }
+    this.failures = []
+    this.attempt = 0
+    this.start()
+  }
+}

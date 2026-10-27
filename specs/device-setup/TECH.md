@@ -197,16 +197,16 @@ read -rs BATON_ENROLLMENT_TOKEN && export BATON_ENROLLMENT_TOKEN
 | 模块 | 职责 |
 |---|---|
 | `src/deployment.ts` | 读写 `userData/deployment.json` 与 `ca.pem`（0600）；解析和校验接入链接：只接受 https 源，CA 必须可解析且 `basicConstraints` 为 CA，链接不超过 8KB |
-| `src/link.ts` | 单实例锁。macOS 处理 `open-url`，Windows 处理 `second-instance` 的 argv，`setAsDefaultProtocolClient('baton')`；用原生对话框显示源和 SHA-256 指纹，由用户确认；已有身份且源不同时拒绝替换（DS-15、DS-16） |
-| `src/trust.ts` | `session.setCertificateVerifyProc`：host 与保存的源一致时，用 Node `X509Certificate` 沿 `issuerCert` 链校验签名、有效期和 `checkHost`/`checkIP`，链最终由保存的 CA 签发才放行；其他 host 返回 `-3`，交给系统校验（DS-17） |
+| `src/main.ts` | 单实例锁。macOS 处理 `open-url`，Windows 处理 `second-instance` 的 argv，`setAsDefaultProtocolClient('baton')`；用原生对话框显示源和 SHA-256 指纹，由用户确认；已有身份且源不同时拒绝替换（DS-15、DS-16）；接入链接与注册操作串行执行 |
+| `src/trust.ts` | `session.setCertificateVerifyProc`：host 与保存的源一致时，用 Node `X509Certificate` 沿 `issuerCert` 链校验签名、有效期和 `checkHost`/`checkIP`，链最终由保存的 CA 签发才放行，检查 CA 路径长度与服务器用途；当前未支持的名称、策略约束或未知 critical 扩展拒绝自定义信任；其他 host 返回 `-3`，交给系统校验（DS-17） |
 | `src/window.ts` | `contextIsolation`、`sandbox` 开启，`nodeIntegration` 关闭。`will-navigate` 和 `setWindowOpenHandler` 把非中心源交给 `shell.openExternal`；关闭窗口改为隐藏（DS-20） |
 | `src/preload.ts` | 仅当 `location.origin` 等于保存的源时，通过 `contextBridge` 暴露 `batonDesktop`：`{ protocol: 1, version, status(), onStatus(cb), enroll(input), reauth(input) }` |
-| `src/bridge.ts` | main 端 IPC 处理；每次调用都核对 `event.senderFrame.url` 的源，不符就拒绝 |
+| `src/bridge.ts`、`src/main.ts` | 校验接入参数、身份与中心源；main 端 IPC 每次核对调用方窗口、主 frame 与 `event.senderFrame.url`，不符就拒绝 |
 | `src/batond.ts` | 解析内置 batond 的路径（`process.resourcesPath/batond/batond(.exe)`）；`identity()` 调用 `batond identity`；`enroll()` 以子进程运行 `register --coordinator <源> --ca-file <userData/ca.pem> --display-name …`，凭据只通过子进程环境变量 `BATON_ENROLLMENT_TOKEN` 传入；`reauth()` 同理 |
-| `src/supervisor.ts` | 运行 `batond run --exit-with-stdin`，stdout 和 stderr 写入 `<数据目录>/logs/desktop-batond.log`（超过 10MB 轮转一份）；退出码 78 或末行 code 为终止类时停止重启，显示原因；其他退出按 1s→30s 退避重启，60 秒内连续失败 5 次则停止。`daemon_running` 时进入「外部运行」模式，读状态文件，并每 30 秒重试接管。退出客户端时关闭 stdin，等待 15 秒 |
+| `src/supervisor.ts` | 运行 `batond run --exit-with-stdin`，stdout 和 stderr 写入 `<数据目录>/logs/desktop-batond.log`（超过 10MB 轮转一份）；退出码 78 或末行 code 为终止类时停止重启，显示原因；客户端仍在运行时其他退出（含 0）按 1s→30s 退避重启，60 秒内连续失败 5 次则停止。`daemon_running` 时进入「外部运行」模式，读状态文件，并每 30 秒重试接管。退出客户端时关闭 stdin，等待 15 秒 |
 | `src/status.ts` | 合并 supervisor 状态与 `daemon-status.json`，推送给托盘和桥接 |
 | `src/tray.ts` | 状态文本，菜单项为打开窗口、重启 batond、打开日志目录、登录时启动（勾选）、退出（DS-22） |
-| `src/autostart.ts` | `app.setLoginItemSettings`，默认开启；以登录项启动时隐藏窗口（DS-21） |
+| `src/autostart.ts` | `app.setLoginItemSettings`，默认开启，选择保存在 userData 的 `login-start.json`；以登录项启动时隐藏窗口（DS-21） |
 
 **身份规则**（DS-19）
 
@@ -240,11 +240,11 @@ macOS 的应用整体做临时签名，内置的 batond 保留自身的临时签
 | 状态文件、`--exit-with-stdin` | 复用 `reconnect.test.ts` 的协议替身检查认证、拒绝和停止状态；CLI 单元测试检查 stdin EOF 触发中止，中心 e2e 检查连接与停止状态 | 状态缺失或不准；关闭 stdin 后 daemon 不退出 | `apps/batond` 单元 + `e2e` | implemented |
 | DS-12、DS-13 | 渲染有无下载、各平台和重新认证的注册对话框，以及 Devices 页的接入链接 | 下载命令包含凭据或部署参数；无下载时旧命令丢失；Windows 显示 CLI 命令；客户端中的页面仍显示接入链接 | `web` 单元 | implemented |
 | DS-14 | 渲染桌面桥接替身下的注册对话框与本机接入入口 | 桌面模式显示命令或凭据被渲染 | `web` 单元 | planned |
-| DS-15～DS-17 | 测试数据中固定一套 CA、叶子和其他 CA 签发的叶子（附生成命令）；测试链接解析和证书校验 | 接受 http 源或非 CA 证书；非中心 host 使用了保存的 CA；用其他 CA 签发的叶子通过校验 | `apps/desktop` 单元（Node，不启动 Electron） | planned |
-| DS-18～DS-20 | supervisor 使用替身 spawn：正常退出、78、反复崩溃、`daemon_running`、退出流程 | 终止类失败仍重启；退避或次数上限不对；退出时没有关闭 stdin | `apps/desktop` 单元 | planned |
+| DS-15～DS-17 | 测试数据中固定根 CA、中间 CA、服务器与其他 CA 证书（附生成命令）；测试链接解析、证书链、源和身份检查 | 接受 http 源或非 CA 证书；非中心 host 使用了保存的 CA；用其他 CA 签发的叶子通过校验 | `apps/desktop` 单元（Node，不启动 Electron） | implemented |
+| DS-18～DS-20 | supervisor 使用替身 spawn：正常退出、78、反复崩溃、`daemon_running`、退出流程；另测凭据环境传递与状态合并 | 终止类失败仍重启；退避或次数上限不对；退出时没有关闭 stdin；凭据进入进程参数或返回错误 | `apps/desktop` 单元 | implemented |
 | CLI 全链路 | 现有 HTTPS e2e 中心，在数据目录外注入安装目录与 `deployment.json`，不带中心地址和 CA 参数注册并连接 | 必须传 `--coordinator` 或 `--ca-file` | `e2e` | implemented |
 | DS-08、DS-09 launchd | macOS arm64 上用开发 bundle、临时数据目录与离线身份执行 install → status → uninstall；连接地址仅指向本机不可用端口 | 状态未显示运行、程序或日志路径不符、卸载后仍有服务定义或 daemon、身份与日志被删除 | 手动，结果见 release TECH「验证」 | manual |
-| systemd、客户端安装与常驻 | 在 Debian 12、macOS arm64、Windows 11 上按 PRODUCT 验收表手动执行 | 任一验收行不符 | 手动，结果写入 release TECH | planned |
+| systemd、客户端安装与常驻 | macOS arm64 已验证客户端 DMG 安装与说明页启动；真实接入、系统登录、Debian 服务与 Windows 客户端仍待对应系统验收 | 任一验收行不符 | 手动，范围见 release TECH | manual |
 
 自动化测试不下载 Electron，也不访问外部服务。系统服务和桌面集成依赖真实系统，只做手动验证，未测的平台如实记录。
 
@@ -259,5 +259,5 @@ macOS 的应用整体做临时签名，内置的 batond 保留自身的临时签
 
 ## Open questions
 
-- electron-builder 在 macOS 上做临时签名后，内置 batond 的签名是否保持有效、能否正常运行，需要在第 4 步首次打包时实测。若失效，改为在打包后对 batond 重新做临时签名。不阻塞前三步。
+- macOS arm64 已核对应用整体与内置 batond 的临时签名有效，安装后能够调用 `identity` 并显示说明页。Windows NSIS、真实接入与登录启动尚待手动验证。
 - Windows 上 Electron 启动的 batond，在客户端被强制结束时，Worker 是否随 Job Object 一起退出，沿用 [发布 TECH](../release/TECH.md) 记录的 Windows 进程回收边界，手动验证时记录结果。
