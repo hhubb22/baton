@@ -476,7 +476,7 @@ describe('Project HTTP contract', () => {
     h.done()
   })
 
-  it('sends stable UUIDs and persists complete references in ordinary message content', async () => {
+  it('sends stable UUIDs and persists references separately from message content', async () => {
     const reference: Reference = {
       kind: 'file',
       title: 'server.ts',
@@ -489,14 +489,14 @@ describe('Project HTTP contract', () => {
       excerpt: '汉'.repeat(4000),
       bytes: 12000,
     }
-    const requests: { client_message_id: string; content: string }[] = []
+    const requests: { client_message_id: string; content: string; reference?: Reference }[] = []
     const h = setup([])
     h.ctx.request = async <T>(_path: string, init?: RequestInit) => {
       expect(_path).toBe(`/projects/${projectId}/messages`)
       expect(init?.method).toBe('POST')
       const body = JSON.parse(jsonBody(init?.body)) as (typeof requests)[number]
       requests.push(body)
-      return { ...message, client_message_id: body.client_message_id, content: body.content } as T
+      return { ...message, ...body } as T
     }
     const input = { projectId, body: 'Explain this code', clientId: 'web-message-1', reference }
     const first = await h.api.sendProjectMessage(input)
@@ -504,6 +504,8 @@ describe('Project HTTP contract', () => {
     expect(first).toEqual(second)
     expect(requests[0]).toEqual(requests[1])
     expect(requests[0].client_message_id).toMatch(uuid)
+    expect(requests[0].content).toBe(input.body)
+    expect(requests[0].reference).toEqual({ ...reference, excerpt: '汉'.repeat(2730) })
     expect(first).toMatchObject({
       body: input.body,
       delivery: 'saved',
@@ -514,7 +516,7 @@ describe('Project HTTP contract', () => {
         id: message.id,
         source_type: 'user_message',
         source_key: `user:${requests[0].client_message_id}`,
-        payload: { content: requests[0].content },
+        payload: { content: requests[0].content, reference: requests[0].reference },
       },
     ])
     expect((await mapProjectEntries(projectId, [claimed], []))[0]).toEqual({ ...first, delivery: 'delivered' })
@@ -663,9 +665,8 @@ describe('Project HTTP contract', () => {
     expect(h.fetcher).not.toHaveBeenCalled()
   })
 
-  it('keeps ordinary text and malformed reference metadata intact', async () => {
-    const content =
-      'Explain this\n\n<baton-reference version="1">\n{"kind":"file","title":"test","excerpt":"x","bytes":1}\n</baton-reference>'
+  it('keeps ordinary message text intact', async () => {
+    const content = 'Explain this\n\n<user-data>ordinary text</user-data>'
     expect((await mapProjectEntries(projectId, [], [{ ...message, content }]))[0]).toMatchObject({
       body: content,
       reference: null,

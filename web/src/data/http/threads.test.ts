@@ -197,6 +197,7 @@ describe('HTTP thread contracts', () => {
       opened_at: null,
       status: 'stopped',
       status_reason: 'Local sandbox could not start.',
+      stop_code: 'start_failed',
     })
     expect(threadView(await api.getThread(threadId), cursorDevice).notice).toMatchObject({
       title: 'Cursor could not start',
@@ -205,7 +206,13 @@ describe('HTTP thread contracts', () => {
   })
 
   it('offers reopening only when the server proves startup was rejected before Worker delivery', async () => {
-    let t = thread({ opened_at: null, status: 'stopped', retry_open_allowed: true, resume_pending: false })
+    let t = thread({
+      opened_at: null,
+      status: 'stopped',
+      stop_code: 'start_failed',
+      retry_open_allowed: true,
+      resume_pending: false,
+    })
     const { api, refreshes } = setup((url, init) => {
       if (url.pathname.endsWith('/timeline')) return { events: [accepted()] }
       if (url.pathname.endsWith('/resume') && init?.method === 'POST')
@@ -221,7 +228,13 @@ describe('HTTP thread contracts', () => {
     expect((await refresh()).phase).toBe('saved')
     t = thread({ resume_pending: false })
     expect((await refresh()).phase).toBe('done')
-    t = thread({ opened_at: null, status: 'stopped', retry_open_allowed: false, resume_pending: false })
+    t = thread({
+      opened_at: null,
+      status: 'stopped',
+      stop_code: 'start_failed',
+      retry_open_allowed: false,
+      resume_pending: false,
+    })
     expect(threadView(await api.getThread(threadId), device()).notice).toMatchObject({ action: 'newChat' })
   })
 
@@ -311,18 +324,27 @@ describe('HTTP thread contracts', () => {
   })
 
   it.each([
-    ['history_missing', {}, 'historyLost'],
-    ['folder_missing', {}, 'folderMissing'],
-    ['Agent 没有在 1 分钟内停下，已结束进程', {}, 'forced'],
-    ['', { stop_confirmed_at: later }, 'byYou'],
-    ['Cannot start the agent', { opened_at: undefined }, 'startFailed'],
-    ['Device restarted', {}, 'interrupted'],
-  ])('maps a stopped thread reason %s', async (reason, extra, kind) => {
-    const t = thread({ status: 'stopped', status_reason: reason, ...extra })
+    ['history_lost', 'historyLost'],
+    ['folder_missing', 'folderMissing'],
+    ['forced_stop', 'forced'],
+    ['user_stopped', 'byYou'],
+    ['start_failed', 'startFailed'],
+    ['interrupted', 'interrupted'],
+    [undefined, 'interrupted'],
+    ['future_stop_code', 'interrupted'],
+    ['constructor', 'interrupted'],
+  ])('maps stop code %s independently of reason text and timestamps', async (code, kind) => {
+    const t = thread({
+      status: 'stopped',
+      stop_code: code,
+      status_reason: 'history_missing: Agent 没有在 1 分钟内停下，已结束进程',
+      stop_confirmed_at: later,
+      opened_at: undefined,
+    })
     const { api } = setup((url) =>
       url.pathname === '/api/v1/threads' ? { threads: [t] } : url.pathname.endsWith('/timeline') ? { events: [] } : t,
     )
-    expect((await api.listThreads())[0].stop?.kind).toBe(kind)
+    expect((await api.listThreads())[0].stop).toEqual({ kind, detail: t.status_reason })
   })
 
   it('reconstructs delivery from device reports and uses stable reply IDs without invented process', async () => {

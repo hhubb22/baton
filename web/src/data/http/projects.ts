@@ -1,4 +1,4 @@
-import type { ProjectMemory, MemoryRevision, MemoryWorkStatus } from '@baton/protocol'
+import type { ProjectMemory, MemoryRevision, MemoryWorkStatus, ProjectMessageReference } from '@baton/protocol'
 import { ClientError, type BatonClient } from '../client'
 import { shortenExcerpt } from '../derive'
 import type { InboxItem, MemoryNote, Project, ProjectEntry, Reference } from '../types'
@@ -53,6 +53,7 @@ interface MessageDTO {
   id: number
   client_message_id: string
   content: string
+  reference?: ProjectMessageReference | null
   created_at: string
 }
 interface Block {
@@ -149,47 +150,10 @@ function text(content: Block[] | string | undefined): string {
         .join('\n')
 }
 
-const referenceMarker = '\n\n<baton-reference version="1">\n'
-function encodeMessage(body: string, reference?: Reference | null): string {
-  if (!reference) return body
+function messageReference(reference?: Reference | null): ProjectMessageReference | undefined {
+  if (!reference) return undefined
   const shortened = shortenExcerpt(reference.excerpt)
-  const saved = { ...reference, excerpt: shortened.excerpt, bytes: Math.max(reference.bytes, shortened.bytes) }
-  return `${body}${referenceMarker}${JSON.stringify(saved)}\n</baton-reference>`
-}
-function readReference(value: Record<string, unknown> | null): Reference | null {
-  if (!value || !['thread', 'file', 'item'].includes(String(value.kind))) return null
-  const nullableText = (field: unknown) => field === null || typeof field === 'string'
-  const positive = (field: unknown) => typeof field === 'number' && Number.isSafeInteger(field) && field > 0
-  const lines = value.lines as { from?: unknown; to?: unknown } | null
-  if (
-    typeof value.title !== 'string' ||
-    typeof value.excerpt !== 'string' ||
-    typeof value.bytes !== 'number' ||
-    !Number.isSafeInteger(value.bytes) ||
-    value.bytes < 0 ||
-    !nullableText(value.threadId) ||
-    !nullableText(value.deviceId) ||
-    !nullableText(value.path) ||
-    !nullableText(value.itemId) ||
-    !(value.reply === null || positive(value.reply)) ||
-    !(lines === null || (lines && positive(lines.from) && positive(lines.to) && Number(lines.to) >= Number(lines.from)))
-  )
-    return null
-  if (
-    new TextEncoder().encode(value.excerpt).length > 8 * 1024 ||
-    value.bytes < new TextEncoder().encode(value.excerpt).length
-  )
-    return null
-  return value as unknown as Reference
-}
-function decodeMessage(content: string): { body: string; reference: Reference | null } {
-  const index = content.lastIndexOf(referenceMarker)
-  if (index >= 0 && content.endsWith('\n</baton-reference>')) {
-    const value = parseObject(content.slice(index + referenceMarker.length, -'\n</baton-reference>'.length))
-    const reference = readReference(value)
-    if (reference) return { body: content.slice(0, index), reference }
-  }
-  return { body: content, reference: null }
+  return { ...reference, excerpt: shortened.excerpt, bytes: Math.max(reference.bytes, shortened.bytes) }
 }
 
 export function mapProject(p: ProjectDTO, status: StatusDTO): Project {
@@ -308,6 +272,7 @@ async function userEntry(
   content: string,
   createdAt: string,
   delivered: boolean,
+  reference?: ProjectMessageReference | null,
 ): Promise<ProjectEntry> {
   return {
     id: await stableId(`project-message:${projectId}:${clientId}`),
@@ -315,7 +280,8 @@ async function userEntry(
     createdAt: timestamp(createdAt),
     kind: 'user',
     delivery: delivered ? 'delivered' : 'saved',
-    ...decodeMessage(content),
+    body: content,
+    reference: reference ?? null,
   }
 }
 
@@ -348,7 +314,16 @@ export async function mapProjectEntries(
         if (input.source_type === 'user_message' && typeof input.payload.content === 'string') {
           const clientId = input.source_key.slice('user:'.length)
           delivered.add(clientId)
-          entries.push(await userEntry(projectId, clientId, input.payload.content, event.created_at, true))
+          entries.push(
+            await userEntry(
+              projectId,
+              clientId,
+              input.payload.content,
+              event.created_at,
+              true,
+              input.payload.reference as ProjectMessageReference | null | undefined,
+            ),
+          )
         } else {
           const inputBase = { ...base, id: await stableId(`project-input:${projectId}:${input.id}`) }
           if (
@@ -419,7 +394,16 @@ export async function mapProjectEntries(
   }
   for (const message of pending) {
     if (!delivered.has(message.client_message_id))
-      entries.push(await userEntry(projectId, message.client_message_id, message.content, message.created_at, false))
+      entries.push(
+        await userEntry(
+          projectId,
+          message.client_message_id,
+          message.content,
+          message.created_at,
+          false,
+          message.reference,
+        ),
+      )
   }
   return entries.sort((a, b) => a.createdAt - b.createdAt)
 }
@@ -544,10 +528,21 @@ export function createProjectAPI(ctx: HttpContext): ProjectAPI {
       const clientId = await stableId(input.clientId)
       const result = await ctx.request<MessageDTO>(
         `${projectPath(input.projectId)}/messages`,
-        json('POST', { client_message_id: clientId, content: encodeMessage(input.body, input.reference) }),
+        json('POST', {
+          client_message_id: clientId,
+          content: input.body,
+          reference: messageReference(input.reference),
+        }),
       )
       emit()
-      return userEntry(input.projectId, result.client_message_id, result.content, result.created_at, false)
+      return userEntry(
+        input.projectId,
+        result.client_message_id,
+        result.content,
+        result.created_at,
+        false,
+        result.reference,
+      )
     },
     updateProject: async ({ projectId, patch: changes }) =>
       patch(projectId, {

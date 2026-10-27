@@ -5,6 +5,8 @@ import {
   Timestamp,
   Integer,
   NonNegativeInteger,
+  PositiveInteger,
+  utf8Bytes,
   ProjectClientMessageID,
   Text,
   MessageContent,
@@ -150,10 +152,32 @@ export const ProjectEventPage = Schema.Struct({
 })
 export type ProjectEventPage = typeof ProjectEventPage.Type
 
+export const ProjectMessageReference = Schema.Struct({
+  kind: Schema.Literals(['thread', 'file', 'item']),
+  title: boundedText(4096),
+  threadId: Schema.NullOr(Text),
+  reply: Schema.NullOr(PositiveInteger),
+  deviceId: Schema.NullOr(Text),
+  path: Schema.NullOr(boundedText(4096)),
+  lines: Schema.NullOr(
+    Schema.Struct({ from: PositiveInteger, to: PositiveInteger }).check(
+      Schema.makeFilter((value) => value.to >= value.from),
+    ),
+  ),
+  itemId: Schema.NullOr(Text),
+  excerpt: boundedText(8 * 1024),
+  bytes: NonNegativeInteger,
+}).check(
+  Schema.makeFilter((value) => value.bytes >= utf8Bytes(value.excerpt)),
+  jsonLimit(24 * 1024),
+)
+export type ProjectMessageReference = typeof ProjectMessageReference.Type
+
 export const ProjectMessage = Schema.Struct({
   id: Integer,
   client_message_id: Text,
   content: Text,
+  reference: Schema.optionalKey(Schema.NullOr(ProjectMessageReference)),
   created_at: Timestamp,
 })
 export type ProjectMessage = typeof ProjectMessage.Type
@@ -161,6 +185,7 @@ export type ProjectMessage = typeof ProjectMessage.Type
 export const ProjectMessageInput = Schema.Struct({
   client_message_id: ProjectClientMessageID,
   content: MessageContent,
+  reference: Schema.optionalKey(Schema.NullOr(ProjectMessageReference)),
 })
 export type ProjectMessageInput = typeof ProjectMessageInput.Type
 

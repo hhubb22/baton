@@ -1,11 +1,16 @@
 import { randomUUID } from 'node:crypto'
-import { Effect, Option, Schema, Tracer } from 'effect'
+import { readFile } from 'node:fs/promises'
+import { Effect, Exit, Option, Schema, Scope, Tracer } from 'effect'
+import * as HttpEffect from 'effect/http/HttpEffect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import { expect, it } from 'vite-plus/test'
 import * as P from '@baton/protocol'
 import { seedNode, withTestDatabase, type TestDatabase } from '../testing/database.ts'
 import { withTraceSpan } from '@baton/telemetry'
 import * as threads from './index.ts'
+import { digest, sessionCSRF } from '../auth.ts'
+import { httpApplication } from '../http/index.ts'
+import { CredentialSigner } from '../nodes.ts'
 
 type Run = TestDatabase['run']
 async function fixture(run: Run) {
@@ -88,6 +93,157 @@ async function open(run: Run, f: Awaited<ReturnType<typeof fixture>>) {
   )
   return thread
 }
+
+it('returns persisted stop codes over HTTP and clears them after resume', () =>
+  withTestDatabase(async ({ run, runtime }) => {
+    const f = await fixture(run)
+    const t = await open(run, f)
+    const token = randomUUID()
+    await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql`INSERT INTO login_sessions(id,employee_id,token_hash,csrf_hash,created_at,expires_at)
+          VALUES(${randomUUID()},${f.employee},${digest(token)},${digest(sessionCSRF(token))},now(),now()+interval '1 hour')`
+      }),
+    )
+    const scope = await Effect.runPromise(Scope.make())
+    try {
+      const application = await runtime.runPromise(
+        httpApplication({
+          allowedOrigins: ['https://baton.local'],
+          signer: CredentialSigner.generate(),
+          gateway: () => {
+            throw new Error('Thread reads do not use the gateway')
+          },
+        }).pipe(Effect.provideService(Scope.Scope, scope)),
+      )
+      const context = await runtime.runPromise(Effect.context<SqlClient.SqlClient>())
+      const handle = HttpEffect.toWebHandler(application.pipe(Effect.provideContext(context)))
+      const get = async (path: string) => {
+        const response = await handle(
+          new Request(`https://baton.local/api/v1${path}`, {
+            headers: { cookie: `baton_session=${token}`, origin: 'https://baton.local' },
+          }),
+        )
+        expect(response.status).toBe(200)
+        return response.json()
+      }
+      const view = async () => Schema.decodeUnknownSync(P.ThreadView)(await get(`/threads/${t.id}`))
+      await run(threads.processReport(f.source, report(t.id, 3, 'thread.stopped', { reason: 'Device restarted' })))
+      expect(await view()).toMatchObject({ status_reason: 'Device restarted', stop_code: 'interrupted' })
+      await run(threads.stop(f.employee, t.id))
+      await run(threads.processReport(f.source, report(t.id, 4, 'thread.stopped', { reason: 'Cleanup complete' })))
+      expect(await view()).toMatchObject({ stop_code: 'user_stopped' })
+      await run(
+        threads.processReport(
+          f.source,
+          report(t.id, 5, 'thread.stopped', {
+            reason: 'Cleanup complete',
+            stop_code: 'forced_stop',
+          }),
+        ),
+      )
+      expect(await view()).toMatchObject({ stop_code: 'forced_stop' })
+      await run(threads.processReport(f.source, report(t.id, 6, 'thread.resumed')))
+      expect((await view()).stop_code).toBeUndefined()
+      await run(
+        threads.processReport(
+          f.source,
+          report(t.id, 7, 'thread.stopped', {
+            reason: 'history_missing is quoted in this explanation',
+            stop_code: 'folder_missing',
+          }),
+        ),
+      )
+      expect(await view()).toMatchObject({ stop_code: 'folder_missing' })
+      await run(
+        threads.processReport(
+          f.source,
+          report(t.id, 8, 'thread.unknown', {
+            reason: 'Device ledger is unavailable',
+            history_unavailable: true,
+          }),
+        ),
+      )
+      expect(await view()).toMatchObject({ stop_code: 'history_lost' })
+      expect(Schema.decodeUnknownSync(P.ThreadPage)(await get('/threads')).threads).toEqual([
+        expect.objectContaining({ id: t.id, stop_code: 'history_lost' }),
+      ])
+    } finally {
+      await Effect.runPromise(Scope.close(scope, Exit.void))
+    }
+  }))
+
+it('backfills published stop reasons and report facts without changing thread data', () =>
+  withTestDatabase(async ({ run }) => {
+    const f = await fixture(run)
+    await run(query('ALTER TABLE threads DROP COLUMN stop_code'))
+    const cases: {
+      reason: string
+      code: P.ThreadStopCode | null
+      unopened?: boolean
+      confirmed?: boolean
+      history?: boolean
+      status?: P.Thread['status']
+    }[] = [
+      { reason: 'native Agent history missing', code: 'history_lost', confirmed: true },
+      { reason: 'history_lost', code: 'history_lost' },
+      { reason: '对话记录已丢失', code: 'history_lost' },
+      { reason: 'working_directory_missing', code: 'folder_missing', unopened: true },
+      { reason: '找不到工作目录', code: 'folder_missing' },
+      { reason: 'Agent 没有在 1 分钟内停下，已结束进程', code: 'forced_stop', confirmed: true },
+      { reason: 'forced', code: 'forced_stop' },
+      { reason: '', code: 'user_stopped', confirmed: true, unopened: true },
+      { reason: 'Could not launch Agent', code: 'start_failed', unopened: true },
+      { reason: 'Unrecognized interruption', code: 'interrupted' },
+      { reason: '', code: 'interrupted' },
+      { reason: 'Ledger unavailable', code: 'history_lost', status: 'unknown', history: true },
+      { reason: 'history_missing', code: null, status: 'idle' },
+    ]
+    const expected: { id: string; status_reason: string; stop_code: P.ThreadStopCode | null }[] = []
+    for (const item of cases) {
+      const { thread: t } = await run(threads.create(f.employee, { ...f.input, client_thread_id: randomUUID() }))
+      await run(
+        query(
+          `UPDATE threads SET status=$2,status_reason=$3,
+          opened_at=CASE WHEN $4::boolean THEN NULL ELSE now() END,
+          stop_confirmed_at=CASE WHEN $5::boolean THEN now() ELSE NULL END WHERE id=$1`,
+          t.id,
+          item.status ?? 'stopped',
+          item.reason,
+          String(!!item.unopened),
+          String(!!item.confirmed),
+        ),
+      )
+      if (item.history)
+        await run(
+          query(
+            `INSERT INTO thread_events(employee_id,thread_id,kind,actor,actor_id,payload)
+          VALUES($1,$2,'thread.unknown','device',$3,$4::jsonb)`,
+            f.employee,
+            t.id,
+            f.node,
+            JSON.stringify({ reason: item.reason, history_unavailable: true }),
+          ),
+        )
+      expected.push({ id: t.id, status_reason: item.reason, stop_code: item.code })
+    }
+    const snapshot = () =>
+      run(query<{ value: object }>("SELECT to_jsonb(t)-'stop_code' AS value FROM threads t ORDER BY id"))
+    const before = await snapshot()
+    const migration = await readFile(
+      new URL('../../../../migrations/0008_thread_stop_code.sql', import.meta.url),
+      'utf8',
+    )
+    await run(query(`DO $stop_migration$ BEGIN ${migration} END $stop_migration$`))
+    expect(await snapshot()).toEqual(before)
+    const saved = await run(
+      query<{ id: string; status_reason: string; stop_code: P.ThreadStopCode | null }>(
+        'SELECT id,status_reason,stop_code FROM threads ORDER BY id',
+      ),
+    )
+    expect(saved).toEqual(expected.sort((a, b) => a.id.localeCompare(b.id)))
+  }))
 
 it('persists request trace separately from business identity and dispatches it after database runtime restart', () =>
   withTestDatabase(async ({ run, restart }) => {
@@ -373,6 +529,7 @@ it('binds startup generation without opening and delivers early stop before queu
     const stopped = await run(threads.view({ employeeId: f.employee }, thread.id))
     expect(stopped.status).toBe('stopped')
     expect(stopped.stop_confirmed_at).toBeTruthy()
+    expect(stopped.stop_code).toBe('user_stopped')
     expect(stopped.pending_messages).toEqual([])
     expect((await run(threads.archive(f.employee, thread.id))).status).toBe('archived')
   }))
@@ -393,11 +550,14 @@ it('retries opening after a durable pre-Worker rejection without replaying the o
     )
     const stopped = await run(threads.view({ employeeId: f.employee }, t.id))
     expect(stopped.retry_open_allowed).toBe(true)
+    expect(stopped.stop_code).toBe('start_failed')
     expect(stopped.failed_messages?.[0]?.content).toBe(f.input.message.content)
     const resumed = await restart()
     await resumed(threads.resume(f.employee, t.id))
     await resumed(threads.resume(f.employee, t.id))
-    expect((await resumed(threads.view({ employeeId: f.employee }, t.id))).resume_pending).toBe(true)
+    const retrying = await resumed(threads.view({ employeeId: f.employee }, t.id))
+    expect(retrying.resume_pending).toBe(true)
+    expect(retrying.stop_code).toBeUndefined()
     const [retry] = await resumed(threads.claimCommands())
     if (!retry) throw new Error('Missing retry open command')
     expect(retry.body.action).toBe('open')
@@ -785,6 +945,7 @@ it('classifies missing history by durable dispatch facts and rejects replaced co
     const lost = await run(threads.view({ employeeId: f.employee }, t.id))
     expect(lost.resume_pending).toBe(false)
     expect(lost.status).toBe('unknown')
+    expect(lost.stop_code).toBe('history_lost')
     expect(lost.stop_requested_at).toBeTruthy()
     expect(lost.stop_confirmed_at).toBeFalsy()
     const pending = await run(

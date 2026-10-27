@@ -104,13 +104,15 @@ Runtime 进程的工作目录是一个空的控制目录。pi-agent-core 本身�
 
 | source_type | 类别 | 来源 | payload 上限 |
 |---|---|---|---|
-| `user_message` | 主动 | 用户在主对话发送的消息，API 拒绝超过 64 KiB 的消息 | 64 KiB 正文加元数据 |
+| `user_message` | 主动 | 用户在主对话发送的消息，`content` 与可空的 `reference` 分开保存；API 拒绝超过 64 KiB 的正文 | 正文和引用合计的 JSON ≤ 72 KiB |
 | `thread_reply` | 被动 | Project Agent 开启的一轮里，Agent 的一条回复（第 9 节） | 40 KiB |
 | `thread_message_failed` | 主动 | Project Agent 的消息在 Turn 开始前因模型选择失败而撤回，包含 Thread ID、消息 ID、工具调用 ID 和原因（第 9 节） | 40 KiB |
 | `turn_ended` | 主动 | Project Agent 开启的一轮结束；shell Thread 的这一条带命令输出（第 9、10 节） | 4 KiB；带命令输出时 72 KiB |
 | `attention_answer` | 主动 | 用户回答或关闭一个事项（Agent Inbox IB-12），内容是事项 ID、标题、选中的选项和最多 4 KiB 的文字；上限包含 JSON 转义 | 32 KiB |
 | `memory_updated` | 被动 | 用户在界面上新建或修改记忆（第 6.4 节） | 1 KiB |
 | `project_updated` | 被动 | 用户修改 Project 标题或目标（第 6.1 节） | 4 KiB |
+
+Project 消息的 HTTP 请求、响应和输入队列 payload 使用独立的 `reference` 字段，包含来源类型（thread / file / item）、标题、Thread 与回复编号、设备与文件路径、行号、事项 ID、≤ 8 KiB 的引用文字及原始字节数。同一 `client_message_id` 的正文或引用变化返回 `message_conflict`。新消息即使没有引用也在队列 payload 保存 `reference: null`，正文中的标签作为普通文字保留。中心读取旧队列与对话输入事件时，仅将正文末尾完整且通过引用 Schema 校验的 `<baton-reference version="1">` 拆成 `content` 和 `reference`；不完整或无效的后缀保留原文，数据库里的原始事件保持不变。网页只读取结构化字段，Runtime 随输入 JSON 读取引用；`history.read` 同样返回拆分后的字段。有引用的用户消息按完整 payload 登记记忆来源，因此引用原文可被 `history.search` 检索，并供后台 `read_sources` 读取；无引用消息仍以正文登记来源。
 
 主动输入会触发放置和唤醒；被动输入只记录变化，等下一批主动输入一起交给模型（第 4 节）。`thread_reply` 条目包含 Thread ID、Turn 序号、回复序号、正文和附件，正文超过 32 KiB 时保留开头和结尾，并注明原长度和「完整内容用 `threads.read` 读取」。这些上限在写入时检查，所以每一条都能放进一次领取。
 

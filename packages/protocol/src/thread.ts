@@ -97,6 +97,16 @@ export const SetThreadModelInput = Schema.Struct({
 })
 export type SetThreadModelInput = typeof SetThreadModelInput.Type
 
+export const ThreadStopCode = Schema.Literals([
+  'user_stopped',
+  'forced_stop',
+  'interrupted',
+  'history_lost',
+  'folder_missing',
+  'start_failed',
+])
+export type ThreadStopCode = typeof ThreadStopCode.Type
+
 export const Thread = Schema.Struct({
   next_model: Schema.optionalKey(summary(512)),
   id: UUID,
@@ -112,6 +122,7 @@ export const Thread = Schema.Struct({
   execution_timeout_seconds: Integer,
   status: ThreadStatus,
   status_reason: Text,
+  stop_code: Schema.optionalKey(ThreadStopCode),
   created_by: Text,
   storage_generation: Schema.optionalKey(StorageGeneration),
   native_session_id: Schema.optionalKey(Text),
@@ -294,6 +305,7 @@ export const ThreadReport = Schema.Struct({
   attachments: Schema.optionalKey(Schema.Array(Schema.Json).check(jsonLimit(4 * 1024))),
   metadata: Schema.optionalKey(Schema.JsonObject.check(jsonLimit(4 * 1024))),
   reason: Schema.optionalKey(boundedText(4096)),
+  stop_code: Schema.optionalKey(ThreadStopCode),
   queue_empty: Schema.optionalKey(Schema.Boolean),
   history_unavailable: Schema.optionalKey(Schema.Boolean),
   command_id: Schema.optionalKey(UUID),

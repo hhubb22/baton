@@ -164,7 +164,7 @@ const action = (
           (['idle', 'stopped'].includes(t.status) || (t.status === 'unknown' && !!t.stop_confirmed_at)) &&
           (!t.stop_requested_at || t.stop_confirmed_at)
         ) {
-          yield* sql`UPDATE threads SET status='archived',archive_requested_at=COALESCE(archive_requested_at,clock_timestamp()),archived_at=clock_timestamp() WHERE id=${threadID}`
+          yield* sql`UPDATE threads SET status='archived',stop_code=NULL,archive_requested_at=COALESCE(archive_requested_at,clock_timestamp()),archived_at=clock_timestamp() WHERE id=${threadID}`
           yield* audit(t, 'thread.archived', {}, actor, actorID)
         } else {
           const frozenStop = yield* sql`SELECT id FROM thread_outbox WHERE thread_id=${threadID}
@@ -204,7 +204,7 @@ export const resume = (employeeID: string, threadID: string, source?: ProjectThr
       if (pending.length) return t
       if (yield* canRetryOpen(t)) {
         const model = yield* admission(employeeID, t.node_id, t.agent_type, t.working_directory, t.model, 'create')
-        yield* sql`UPDATE threads SET status='waiting_device',status_reason='',stop_requested_at=NULL,stop_confirmed_at=NULL WHERE id=${t.id}`
+        yield* sql`UPDATE threads SET status='waiting_device',status_reason='',stop_code=NULL,stop_requested_at=NULL,stop_confirmed_at=NULL WHERE id=${t.id}`
         yield* enqueue(t, 'open', { model, execution_timeout_seconds: t.execution_timeout_seconds, retry_open: true })
         yield* audit(t, 'open.retry_requested', {}, actor, actorID)
         yield* touch(t.id)

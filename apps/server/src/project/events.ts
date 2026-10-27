@@ -1,11 +1,13 @@
 import { Effect, Predicate, Schema } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import * as P from '@baton/protocol'
+import { normalizeProjectInput } from './message-reference.ts'
 import { checkMemoryContext, registerEventSource, saveSource } from './memory/index.ts'
 import { canonical } from '../json.ts'
 import { registerMemoryJob } from './memory-jobs.ts'
 import {
   appendProjectEvent,
+  decodeProjectEvent,
   checkPayloadSize,
   eventSelection,
   jsonBytes,
@@ -52,7 +54,7 @@ export const previousClientEvent = Effect.fn('previousProjectClientEvent')(funct
     value: unknown
   }>`SELECT ${eventSelection(sql)} AS value FROM conversation_events e WHERE conversation_id=${binding.conversationId} AND client_event_id=${clientId}`
   if (!rows[0]) return undefined
-  const event = yield* projectDecode(P.ProjectEvent, rows[0].value)
+  const event = yield* decodeProjectEvent(rows[0].value)
   if (event.kind !== kind || canonical(event.payload) !== canonical(payload)) return yield* Effect.fail(projectError())
   return event
 })
@@ -136,7 +138,7 @@ export const readRuntimeEvents = Effect.fn('readProjectRuntimeEvents')(function*
   const events: P.ProjectEvent[] = []
   let size = 0
   for (const row of rows) {
-    const event = yield* projectDecode(P.ProjectEvent, row.value),
+    const event = yield* decodeProjectEvent(row.value),
       bytes = jsonBytes(event)
     if (bytes > 192 * 1024 - 2048) return yield* Effect.fail(projectError('too_large', 413))
     if (events.length && size + bytes > maxBytes) break
@@ -165,7 +167,7 @@ export const claimInputs = Effect.fn('claimProjectInputs')(function* (binding: P
   let size = 0,
     payload: unknown
   for (const row of rows) {
-    const item = yield* projectDecode(P.ProjectQueuedInput, row.value),
+    const item = normalizeProjectInput(yield* projectDecode(P.ProjectQueuedInput, row.value)),
       bytes = Math.max(row.bytes, jsonBytes(item.payload))
     if (size + bytes > 128 * 1024) break
     const trial = {

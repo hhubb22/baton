@@ -66,7 +66,7 @@ export const registerEventSource = Effect.fnUntraced(function* (
         ? 'execution'
         : 'agent_report'
     const text =
-      typeof payload.content === 'string' && row.source_type === 'user_message'
+      typeof payload.content === 'string' && row.source_type === 'user_message' && payload.reference == null
         ? payload.content
         : JSON.stringify(payload)
     return yield* saveSource(employeeId, projectId, `input:${inputId}`, row.source_type, role, text, seq, inputId)
