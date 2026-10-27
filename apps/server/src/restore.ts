@@ -26,8 +26,8 @@ export const finalizeRestore = Effect.fn('finalizeRestore')(function* (signingKe
         yield* sql`UPDATE node_presence SET online=false,synced=false,status_updated_at=clock_timestamp() WHERE online OR synced`
 
         // 旧快照中的未派发也可能已在备份之后执行，所有待发操作均等待人工核对。
-        yield* sql`UPDATE threads t SET status='unknown',status_reason=${reason},version=version+1
-      WHERE t.status<>'archived' AND (t.status<>'unknown' OR t.status_reason<>${reason})
+        yield* sql`UPDATE threads t SET status='unknown',status_reason=${reason},stop_code='interrupted',version=version+1
+      WHERE t.status<>'archived' AND (t.status<>'unknown' OR t.status_reason<>${reason} OR t.stop_code IS DISTINCT FROM 'interrupted')
         AND (t.status IN ('waiting_device','running')
           OR EXISTS(SELECT 1 FROM thread_outbox o WHERE o.thread_id=t.id AND o.completed_at IS NULL)
           OR EXISTS(SELECT 1 FROM thread_turns v WHERE v.thread_id=t.id AND v.ended_at IS NULL))`

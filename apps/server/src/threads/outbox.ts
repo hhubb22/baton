@@ -9,6 +9,7 @@ import { notifyProjectThread } from './project-inputs.ts'
 import { audit, decode, failure, readThread, uuid, type DB } from './core.ts'
 import { canonical } from '../json.ts'
 import { transaction } from '../database.ts'
+import { legacyStopCode } from './stop-code.ts'
 
 export interface ClaimedCommand {
   readonly message_id: string
@@ -267,7 +268,7 @@ export const processReceipt = (
         if (o.action === 'message')
           yield* sql`UPDATE thread_messages SET status='withdrawn',status_reason=${result.code || 'command_rejected'} WHERE employee_id=${source.employee_id} AND thread_id=${t.id} AND client_message_id=${o.payload.client_message_id!} AND status IN ('accepted','queued')`
         if (o.action === 'open') {
-          yield* sql`UPDATE threads SET status='stopped',status_reason=${result.code || 'open_rejected'},version=version+1 WHERE id=${t.id} AND opened_at IS NULL`
+          yield* sql`UPDATE threads SET status='stopped',status_reason=${result.code || 'open_rejected'},stop_code=${legacyStopCode(result.code ?? '') ?? 'start_failed'},version=version+1 WHERE id=${t.id} AND opened_at IS NULL`
           yield* sql`UPDATE thread_messages SET status='withdrawn',status_reason=${result.code || 'open_rejected'} WHERE thread_id=${t.id} AND status='accepted'
           AND EXISTS(SELECT 1 FROM thread_outbox o WHERE o.thread_id=${t.id} AND o.action='message' AND o.payload->>'client_message_id'=thread_messages.client_message_id AND o.attempts=0 AND o.acked_at IS NULL)`
           yield* sql`UPDATE thread_outbox SET completed_at=clock_timestamp(),completion=${JSON.stringify({ command_outcome: 'cancelled', reason: result.code || 'open_rejected' })}::jsonb WHERE thread_id=${t.id} AND action='message' AND attempts=0 AND acked_at IS NULL AND completed_at IS NULL`

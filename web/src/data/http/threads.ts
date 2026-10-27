@@ -1,4 +1,4 @@
-import type { ThreadTrace } from '@baton/protocol'
+import type { ThreadStopCode, ThreadTrace } from '@baton/protocol'
 import { ClientError, type BatonClient } from '../client'
 import { insideFileFolder, joinFilePath, normalizeFilePath } from '../file-paths'
 import { previewLimit } from '../types'
@@ -34,6 +34,7 @@ type ThreadDTO = {
   project_id?: string
   status: string
   status_reason: string
+  stop_code?: ThreadStopCode
   created_at: string
   last_activity_at: string
   native_session_id?: string
@@ -171,17 +172,23 @@ function stopOf(t: ThreadDTO): ThreadStop | null {
   if (t.status !== 'stopped' && t.status !== 'unknown') return null
   const reason = t.status_reason ?? ''
   let kind: ThreadStop['kind'] = 'interrupted'
-  if (
-    /history_missing|history_lost|native Agent history missing|对话记录.*(丢失|不存在)|历史.*(丢失|找不到)/i.test(
-      reason,
-    )
-  )
-    kind = 'historyLost'
-  else if (/folder_missing|working_directory_missing|目录.*(不存在|找不到)|找不到.*目录/i.test(reason))
-    kind = 'folderMissing'
-  else if (/forced|没有在 1 分钟内停下/i.test(reason)) kind = 'forced'
-  else if (t.stop_confirmed_at) kind = 'byYou'
-  else if (!t.opened_at) kind = 'startFailed'
+  switch (t.stop_code) {
+    case 'user_stopped':
+      kind = 'byYou'
+      break
+    case 'forced_stop':
+      kind = 'forced'
+      break
+    case 'history_lost':
+      kind = 'historyLost'
+      break
+    case 'folder_missing':
+      kind = 'folderMissing'
+      break
+    case 'start_failed':
+      kind = 'startFailed'
+      break
+  }
   return { kind, detail: reason || null }
 }
 

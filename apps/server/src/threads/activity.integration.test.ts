@@ -221,7 +221,7 @@ it('migrates live and acknowledged challenges without changing business history 
     const messages = await run(query('SELECT * FROM thread_messages ORDER BY id'))
     await run(query('DROP TABLE thread_activity_probes'))
     await run(query('DROP SEQUENCE thread_activity_check_seq'))
-    await run(query("DELETE FROM schema_migrations WHERE version='0008_thread_activity_probes.sql'"))
+    await run(query("DELETE FROM schema_migrations WHERE version='0009_thread_activity_probes.sql'"))
     const commands = [randomUUID(), randomUUID(), randomUUID()]
     const checks = await run(
       Effect.gen(function* () {

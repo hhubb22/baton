@@ -84,7 +84,7 @@ SQLite 在外层提交前写随机 token。COMMIT 报错且事务已结束时，
 | `unknown` | 状态未知 | 设备报告无法确认消息是否收到或 Agent 是否仍在运行 |
 | `archived` | 已归档 | 员工归档；不再接收消息 |
 
-除 `archived` 外，状态只由设备报告驱动。中心不根据自身重启、超时或连接断开改写状态，界面另外显示设备连接状态和最后报告时间（R-10）。`stopped` 和 `unknown` 的 Thread 仍可以接收新消息：Worker 先尝试恢复原会话（R-12），无法恢复时以原因拒绝。
+除 `archived` 外，状态只由设备报告驱动。中心不根据自身重启、超时或连接断开改写状态，界面另外显示设备连接状态和最后报告时间（R-10）。`stopped` 和 `unknown` 的 Thread 仍可以接收新消息：Worker 先尝试恢复原会话（R-12），无法恢复时以原因拒绝。HTTP 的 `stop_code` 区分 `user_stopped`、`forced_stop`、`interrupted`、`history_lost`、`folder_missing` 和 `start_failed`，网页按代码选择停止与恢复提示；`status_reason` 只用于展示说明。中心同时保存代码和说明，恢复或重新打开后清除代码。已发布数据由新增迁移按原说明、停止确认时间、打开状态和历史不可用报告回填，无法识别的停止归为 `interrupted`。Worker 报告可携带同名代码，缺少代码的已发布 Worker 报告由中心兼容识别。
 
 ### 消息的生命周期
 
@@ -178,7 +178,7 @@ Windows 第一版按账本保存的 PID 与创建时间核对身份，再用 `ta
 |---|---|
 | `employees`、`login_sessions` | 员工与登录会话 |
 | `nodes`、`node_credentials`、`node_enrollments`、`employee_settings`、`node_presence`、`node_revocations`、`node_runtime_reports` | 设备身份、凭据、默认设备、在线状态、吊销、能力报告 |
-| `threads` | 一个 Thread：员工、可选 Project、设备、Agent 类型、当前模型与后续消息默认模型 `next_model`、工作目录、执行时限、状态与原因、创建者（员工或 Project Agent 及工具调用）、`client_thread_id`、`opened_at`、`archived_at`、版本；`runtime_mode` 按下述执行模式设计增加 |
+| `threads` | 一个 Thread：员工、可选 Project、设备、Agent 类型、当前模型与后续消息默认模型 `next_model`、工作目录、执行时限、状态、说明与停止代码 `stop_code`、创建者（员工或 Project Agent 及工具调用）、`client_thread_id`、`opened_at`、`archived_at`、版本；`runtime_mode` 按下述执行模式设计增加 |
 | `thread_messages` | 消息：Thread、`client_message_id`、发送方、方式、可选模型、正文（≤ 64 KiB）、状态（accepted / queued / sent / withdrawn / unknown）、状态原因 `status_reason`（≤ 4 KiB）、所属 Turn |
 | `thread_turns` | Turn：Thread、`worker_turn_seq`、发起方（员工或 Project Agent）、使用的模型、开始与结束时间、结束原因、上游原样的 `token_usage` JSON |
 | `thread_replies` | 回复：Thread、Turn、`worker_seq`、正文、截断标记与原字节数、附件 JSON、元数据（shell 的退出码） |
