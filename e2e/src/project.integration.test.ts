@@ -297,6 +297,21 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
         { timeout: 10000 },
       )
       .toBe('open')
+    const events = async () => {
+      const page = await alice<P.ProjectEventPage>(`/projects/${project.id}/events?limit=100`)
+      expect(page.status, JSON.stringify(page.body)).toBe(200)
+      return Schema.decodeUnknownSync(P.ProjectEventPage)(page.body).events ?? []
+    }
+    // 同一回复里的 nodes.exec 登记前修改记忆会按 PM-15 要求刷新依据，先等它有结果。
+    await expect
+      .poll(
+        async () =>
+          (await events()).some(
+            (event) => event.kind === 'tool_result' && JSON.stringify(event.payload).includes('t3-node-exec'),
+          ),
+        { timeout: 15000 },
+      )
+      .toBe(true)
     const memories = await alice<P.MemoriesResponse>(`/projects/${project.id}/memory`)
     expect(memories.status).toBe(200)
     const memory = memories.body.entries![0]!
@@ -326,11 +341,6 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
     const answered = await alice<P.AttentionRequest>(`/attention-requests/${inbox!.id}/answer`, 'POST', answer)
     expect(answered.status, JSON.stringify(answered.body)).toBe(200)
     expect(answered.body).toMatchObject({ state: 'answered', resolution: { option_id: 'continue', text: answer.text } })
-    const events = async () => {
-      const page = await alice<P.ProjectEventPage>(`/projects/${project.id}/events?limit=100`)
-      expect(page.status, JSON.stringify(page.body)).toBe(200)
-      return Schema.decodeUnknownSync(P.ProjectEventPage)(page.body).events ?? []
-    }
     await expect
       .poll(async () => JSON.stringify(await events()).includes('已读取用户回答'), { timeout: 15000 })
       .toBe(true)
