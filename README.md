@@ -85,6 +85,18 @@ node apps/batond/dist/batond.cjs run
 
 注册将规范化的中心 HTTPS 地址保存为 `identity.json` 的 `coordinator_url`，`run` 据此推导 WSS 地址；`--relay` 可显式指定。默认数据目录为 `~/.baton-ts`，所有命令使用相同的 `--data-dir`。注册凭据也可用 `--enrollment-file` 从私有文件读取。SEA 安装包首次执行 `up` 或 `register` 时，中心地址与 CA 可来自安装目录的 `deployment.json`，显式 `--coordinator` 和 `--ca-file` 优先；源码和 bundle 入口仍需指定中心地址。注册或重新认证成功后，CA 保存为数据目录的私有文件 `coordinator-ca.pem`，后续 `up`、`run`、`reauth` 与 `upgrade check` 默认使用它，`--ca-file` 可覆盖。已有身份不读取安装包的部署配置。`batond identity` 输出注册状态、中心地址与公开身份，不含凭据。更多本地命令和恢复语义见 [节点文档](apps/batond/README.md)。
 
+macOS 与 Linux 可以将已注册设备安装为当前用户的后台服务；先停止前台运行的 daemon，再执行：
+
+```sh
+node apps/batond/dist/batond.cjs service install
+node apps/batond/dist/batond.cjs service status
+node apps/batond/dist/batond.cjs service uninstall
+```
+
+安装包直接使用 `./batond service install|status|uninstall`。命令支持 `--data-dir`，默认 `~/.baton-ts`。每个系统用户只有一个服务，重复安装会改用当前程序路径和指定的数据目录并重启；升级后在目标安装目录再次执行 `service install` 即可切换入口。服务在登录后启动，异常退出后自动重启，日志写入数据目录下的 `logs/batond.log`。卸载停止服务并移除服务定义，保留身份、日志和其他本地数据。`status` 输出是否安装、是否运行、程序路径和日志路径，不要求传入安装时的数据目录。
+
+Linux 需要有效的 `XDG_RUNTIME_DIR` 和 systemd 用户实例；`status` 还显示 linger 状态，未开启时提示管理员为需要注销后保持运行的用户开启 linger。Windows 使用桌面客户端，不支持 CLI 用户服务。
+
 设备连接凭据在连续 30 天没有有效业务后过期。心跳、重连、能力探测和后台记忆整理不续期。过期后为原设备领取重新认证口令，停止该设备的 batond，再用同一数据目录执行 `batond reauth --enrollment-file <私有文件>`，随后运行 `batond up`。设备与 Thread ID、本地历史和待补报结果保留。
 
 四个 Agent 在程序或 SDK 已安装且认证有效或未知时报告 `available`，按上游 adapter 与已实现的执行路径开放新建与恢复。版本、系统与认证未知写入诊断，缺少某个组合的验证证据不会关闭能力。缺程序、明确未认证或已确认运行依赖失败时报告 `unavailable`。探测只检查认证、模型和依赖，不发送推理请求。

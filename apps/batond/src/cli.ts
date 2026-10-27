@@ -11,6 +11,7 @@ import { telemetryLayer } from '@baton/telemetry'
 import { ExecutionTimeoutSeconds, WorkerOpen, type RuntimeAgent, type WorkerRequest } from '@baton/protocol'
 import { LocalWorkerHost, initializeWorkerDirectory } from './daemon/host.ts'
 import { IPCError } from './daemon/ipc.ts'
+import { ServiceError } from './daemon/service.ts'
 import { processLockIsHeld, ProcessLockBusy } from './platform/lock.ts'
 import { loadCoordinatorCA } from './daemon/identity.ts'
 import { readUpgradeState, upgradeOffline } from './daemon/upgrade.ts'
@@ -34,6 +35,7 @@ up/run 支持 --control-timeout-seconds <秒>，认证与同步各默认等待 3
 
 设备管理：
 
+  service install|uninstall|status
   upgrade check --package <目录> [--ca-file <CA证书>]
   upgrade prepare --package <目录>
   upgrade migrate
@@ -91,6 +93,19 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
   if (action === 'up' || action === 'register' || action === 'reauth' || action === 'run' || action === 'identity') {
     const { runDaemonCLI } = await import('./daemon/cli.ts')
     await runDaemonCLI(action, args)
+    return
+  }
+  if (action === 'service') {
+    const { positionals, values } = parseArgs({
+      args,
+      allowPositionals: true,
+      options: { 'data-dir': { type: 'string', default: join(homedir(), '.baton-ts') } },
+    })
+    const command = positionals[0]
+    if (positionals.length !== 1 || (command !== 'install' && command !== 'uninstall' && command !== 'status'))
+      throw new Error('用法：service install|uninstall|status [--data-dir <私有目录>]')
+    const { manageService } = await import('./daemon/service.ts')
+    console.log(JSON.stringify(await manageService(command, values['data-dir']!)))
     return
   }
   if (action === 'upgrade') {
@@ -260,7 +275,7 @@ export function reportBatondError(error: unknown, action = process.argv[2]): voi
     ? 'node_version_incompatible'
     : daemonRunning
       ? 'daemon_running'
-      : (knownCode ?? (error instanceof IPCError ? error.code : 'batond_failed'))
+      : (knownCode ?? (error instanceof IPCError || error instanceof ServiceError ? error.code : 'batond_failed'))
   // SDK 诊断留在隔离宿主内，公开错误不包含原始 SDK 输出。
   console.error(
     JSON.stringify({

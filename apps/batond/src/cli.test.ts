@@ -2,11 +2,49 @@ import { randomUUID } from 'node:crypto'
 import { realpath, rm } from 'node:fs/promises'
 import { expect, it, vi } from 'vite-plus/test'
 import type { RuntimeAgent, WorkerIPCMessage, WorkerRequest } from '@baton/protocol'
-import { runBatondCLI, runLocalCLI } from './cli.ts'
+import { reportBatondError, runBatondCLI, runLocalCLI } from './cli.ts'
+import { manageService, ServiceError } from './daemon/service.ts'
 import { runDaemonCLI } from './daemon/cli.ts'
 import { makePrivateTempDirectory } from './testing/private.ts'
 
 vi.mock('./daemon/cli.ts', () => ({ runDaemonCLI: vi.fn() }))
+vi.mock('./daemon/service.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./daemon/service.ts')>()),
+  manageService: vi.fn(async () => ({ installed: true })),
+}))
+
+it.each(['install', 'uninstall', 'status'])('routes service %s and prints its result', async (action) => {
+  const output = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+  try {
+    await runBatondCLI(['service', action, '--data-dir', '/offline-node'])
+    expect(manageService).toHaveBeenLastCalledWith(action, '/offline-node')
+    expect(output).toHaveBeenCalledWith(JSON.stringify({ installed: true }))
+  } finally {
+    output.mockRestore()
+  }
+})
+
+it.each([{ args: [] }, { args: ['restart'] }, { args: ['install', 'status'] }])(
+  'rejects invalid service arguments %j',
+  async ({ args }) => {
+    await expect(runBatondCLI(['service', ...args])).rejects.toThrow('用法：service')
+  },
+)
+
+it('preserves service error codes in CLI errors', () => {
+  const output = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  const previous = process.exitCode
+  try {
+    reportBatondError(new ServiceError('service_unsupported', 'Windows 请使用 Baton 桌面客户端'), 'service')
+    expect(output).toHaveBeenCalledWith(
+      JSON.stringify({ ok: false, code: 'service_unsupported', message: 'Windows 请使用 Baton 桌面客户端' }),
+    )
+    expect(process.exitCode).toBe(1)
+  } finally {
+    process.exitCode = previous
+    output.mockRestore()
+  }
+})
 
 it('routes reauth to the node CLI and documents it in help', async () => {
   const args = ['--data-dir', '/offline-node', '--enrollment-file', '/private/enrollment']
