@@ -20,6 +20,10 @@ elyx design
 | [screens/new-project.elyx](screens/new-project.elyx) | 创建、校验、提交中与失败、无可用设备时创建、创建后引导 | PA-01、PA-04、PA-07 |
 | [screens/project.elyx](screens/project.elyx) | 主对话、运行与等待原因、换设备、停止、暂停恢复、汇报、项目菜单及归档记录 | PA-07、PA-13、PA-22、PA-23、IB-16 |
 | [screens/project-thread.elyx](screens/project-thread.elyx) | 项目内 Thread 详情、实时输出、文字引用预填与发送、归档项目内继续使用 Thread | R-08～R-17、PA-19、PA-22、IB-08、IB-13 |
+| [screens/desktop-system.elyx](screens/desktop-system.elyx) | 系统通知文案、托盘菜单顺序、系统通知权限、登录启动和编辑器偏好说明 | DC-11～DC-16、DS-19～DS-22 |
+| [screens/desktop-thread.elyx](screens/desktop-thread.elyx) | 桌面 Thread 的 macOS / Windows 本机打开入口、目录不存在、原生目录选择与范围外错误、保留草稿 | DC-17～DC-19 |
+| [screens/desktop-project.elyx](screens/desktop-project.elyx) | 桌面 Project 的本机工作目录入口、新建时本机目录选择、范围外错误与保留表单 | DC-17～DC-19 |
+| [screens/desktop-device.elyx](screens/desktop-device.elyx) | 本机进程、最近退出、版本、升级准备、迁移与失败、外部服务、复制诊断摘要 | DC-20、DC-21 |
 | [screens/inbox.elyx](screens/inbox.elyx) | 待处理、空列表、加载与失败、已处理列表、1024px 回答画面 | IB-06～IB-12、IB-18～IB-20 |
 | [screens/project-settings.elyx](screens/project-settings.elyx) | 自动保存、失败重试、暂停恢复、归档确认与结果、只读设置 | PA-04、PA-23、IB-16 |
 | [screens/project-memory.elyx](screens/project-memory.elyx) | 记忆列表、添加编辑、保存与失败、版本冲突、归档后只读 | PA-17、PA-22 |
@@ -36,6 +40,8 @@ Project、Thread 和 Inbox 页面分别复用 `blocks/project-page.elyx`、`bloc
 | [blocks/project-reference.elyx](blocks/project-reference.elyx) | Thread、文件、事项和长引用的主对话输入区 |
 | [blocks/attention-card.elyx](blocks/attention-card.elyx) | 事项默认与展开、回复、终态、重复处理与撤回竞态、系统事项 |
 | [blocks/attention-reply.elyx](blocks/attention-reply.elyx) | 附言与纯文字回复、提交中、保存失败、空内容与长度校验 |
+
+桌面画板复用现有页面组件，浏览器画板保持原样。本机目录操作和诊断只在客户端声明对应能力、且目标是本机设备时出现。通知和托盘使用系统原生界面，`screens/desktop-system.elyx#systemReference` 记录文案与顺序，不定义系统控件的视觉样式。`blocks/desktop-local.elyx`、`blocks/desktop-diagnostics.elyx` 和 `blocks/desktop-system.elyx` 提供桌面组合与说明行。
 
 ## 文件组织
 

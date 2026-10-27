@@ -1,0 +1,152 @@
+import "blocks/desktop-local.elyx" as local
+import "tokens/colors.elyx" as c
+import "blocks/project-page.elyx" as pages
+
+projectLocal = frame : local.localProject {
+  title: "Desktop project / Local folder",
+  caption: "Working folder actions follow the project assistant's device in Overview. Only the local device with the declared capability shows them.",
+  left: 0px,
+  top: 0px,
+
+  overview {
+    summary {
+      localFolder {
+        actions {
+          actions {
+            editor {
+              connections[0].target: projectFolderMissing,
+              connections[0].label: "Local folder was removed"
+            }
+
+            reveal {
+              connections[0].target: projectFolderMissing,
+              connections[0].label: "Local folder was removed"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+projectFolderMissing = frame : local.localProject {
+  title: "Desktop project / Missing folder",
+  caption: "A local open action reports the missing folder without creating it. Project history and settings stay unchanged.",
+  left: 1728px,
+  top: 0px,
+
+  overview {
+    summary {
+      localFolder {
+        actions {
+          error {
+            display: .visible,
+            contents: "~/src/baton no longer exists."
+          }
+        }
+      }
+    }
+  }
+}
+
+projectCreate = frame : pages.projectPage {
+  title: "Desktop / New project",
+  caption: "Choose local folder sits below the target device and current folder. The system picker leaves this form in place.",
+  left: 0px,
+  top: 1080px,
+  overrides: [insert(scrim, after = pages.projectPage.overview)],
+
+  scrim = frame {
+    left: 0px,
+    top: 0px,
+    width: 100%,
+    height: 100%,
+    ignore-stack: .true,
+    layout: {justify-content: .center, align-items: .center},
+    fill: c.colors.overlay,
+    children: form,
+
+    form = frame : local.projectForm {
+      content {
+        location {
+          choose {
+            connections[2].target: projectCreate,
+            connections[1].target: projectCreateOutside,
+            connections[0].target: projectCreateSelected,
+            connections[2].label: "Native picker canceled; keep form",
+            connections[1].label: "Native folder outside allowed range",
+            connections[0].label: "Allowed native folder selected"
+          }
+        }
+      }
+    }
+  }
+}
+
+projectCreateOutside = frame : pages.projectPage {
+  title: "Desktop / Project folder outside allowed range",
+  caption: "The rejected folder appears beside Choose local folder. Keep the previous valid folder and every form value.",
+  left: 1728px,
+  top: 1080px,
+  overrides: [insert(scrim, after = pages.projectPage.overview)],
+
+  scrim = frame {
+    left: 0px,
+    top: 0px,
+    width: 100%,
+    height: 100%,
+    ignore-stack: .true,
+    layout: {justify-content: .center, align-items: .center},
+    fill: c.colors.overlay,
+    children: form,
+
+    form = frame : local.projectForm {
+      content {
+        location {
+          choose {
+            connections[0].target: projectCreate,
+            connections[0].label: "Choose again; keep form"
+          }
+
+          error {
+            display: .visible
+          }
+        }
+      }
+    }
+  }
+}
+
+projectCreateSelected = frame : pages.projectPage {
+  title: "Desktop / Project local folder selected",
+  caption: "An allowed folder replaces the previous selection. Native picker cancellation keeps the current value.",
+  left: 3456px,
+  top: 1080px,
+  overrides: [insert(scrim, after = pages.projectPage.overview)],
+
+  scrim = frame {
+    left: 0px,
+    top: 0px,
+    width: 100%,
+    height: 100%,
+    ignore-stack: .true,
+    layout: {justify-content: .center, align-items: .center},
+    fill: c.colors.overlay,
+    children: form,
+
+    form = frame : local.projectForm {
+      content {
+        location {
+          choose {
+            connections[0].target: projectCreateSelected,
+            connections[0].label: "Native picker canceled; keep current folder"
+          }
+
+          path {
+            contents: "~/src/release-checks"
+          }
+        }
+      }
+    }
+  }
+}

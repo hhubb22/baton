@@ -1,0 +1,507 @@
+import "blocks/desktop-diagnostics.elyx" as desktop
+import "controls/status.elyx" as status
+
+deviceLocal = frame : desktop.desktopDevicePage {
+  title: "Desktop device / Local process",
+  caption: "Local diagnostics appear only in the desktop client for this device. Normal process and connection states use dots; the most recent exit remains available.",
+  left: 0px,
+  top: 0px,
+
+  main {
+    content {
+      list {
+        macDetail {
+          local {
+            actions {
+              copy {
+                connections[0].target: deviceSummaryCopied
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+deviceStopped = frame : desktop.desktopDevicePage {
+  title: "Desktop device / Repeated exits",
+  caption: "Automatic restart stopped after repeated exits. Show the reason and time; Restart device service is an explicit retry.",
+  left: 1728px,
+  top: 0px,
+
+  main {
+    content {
+      list {
+        macDetail {
+          local {
+            actions {
+              restart {
+                connections[0].target: deviceRestarting,
+                connections[0].label: "Retry service start"
+              }
+            }
+
+            lastExit {
+              value {
+                contents: "Permission denied reading device data · Oct 27, 14:32"
+              }
+            }
+
+            process {
+              state {
+                value {
+                  contents: "Stopped · repeated exits"
+                }
+
+                @with-variant(status.dotStopped)
+                dot {}
+              }
+            }
+          }
+        }
+
+        mac {
+          @with-variant(status.labelStopped)
+          state {
+            caption {
+              display: .visible
+            }
+          }
+        }
+      }
+
+      intro {
+        introCopy {
+          introTitle {
+            contents: "3 devices, 2 online"
+          }
+        }
+      }
+    }
+  }
+
+  sidebar {
+    top {
+      nav {
+        navDevices {
+          trail {
+            note {
+              contents: "2/3 online"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+deviceRestarting = frame : desktop.desktopDevicePage {
+  title: "Desktop device / Restarting",
+  caption: "The restart action changes to Restarting… until the local process starts. Do not show an online state before the device reconnects.",
+  left: 3456px,
+  top: 0px,
+
+  main {
+    content {
+      list {
+        macDetail {
+          local {
+            actions {
+              restart {
+                label {
+                  contents: "Restarting…"
+                }
+              }
+            }
+
+            process {
+              state {
+                value {
+                  contents: "Restarting…"
+                }
+
+                @with-variant(status.dotIdle)
+                dot {}
+              }
+            }
+          }
+        }
+
+        mac {
+          @with-variant(status.labelIdle)
+          state {
+            caption {
+              contents: "Connecting…",
+              display: .visible
+            }
+          }
+        }
+      }
+
+      intro {
+        introCopy {
+          introTitle {
+            contents: "3 devices, 2 online"
+          }
+        }
+      }
+    }
+  }
+
+  sidebar {
+    top {
+      nav {
+        navDevices {
+          trail {
+            note {
+              contents: "2/3 online"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+devicePreparing = frame : desktop.desktopDevicePage {
+  title: "Desktop device / Preparing update",
+  caption: "Show outstanding local work and result uploads. The update phase remains visible in the tray when the window is hidden.",
+  left: 0px,
+  top: 1080px,
+
+  main {
+    content {
+      list {
+        macDetail {
+          local {
+            phase {
+              value {
+                contents: "Preparing · 1 reply running · 2 results to upload"
+              }
+
+              display: .visible
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+deviceMigrating = frame : desktop.desktopDevicePage {
+  title: "Desktop device / Migrating data",
+  caption: "Show migration progress and keep the service stopped. Clicking restart explains why it cannot run; it does not start or queue a restart.",
+  left: 1728px,
+  top: 1080px,
+
+  main {
+    content {
+      list {
+        macDetail {
+          local {
+            actions {
+              restart {
+                connections[0].target: deviceMigrationRestart,
+                connections[0].label: "Explain restart restriction"
+              }
+            }
+
+            phase {
+              value {
+                contents: "Device data · step 2 of 4"
+              }
+
+              label {
+                contents: "Migration"
+              }
+
+              display: .visible
+            }
+
+            versions {
+              value {
+                contents: "Baton 0.2.0 · batond 0.2.0"
+              }
+            }
+
+            process {
+              state {
+                value {
+                  contents: "Stopped for migration"
+                }
+
+                @with-variant(status.dotIdle)
+                dot {}
+              }
+            }
+          }
+        }
+
+        mac {
+          @with-variant(status.labelIdle)
+          state {
+            caption {
+              contents: "Updating",
+              display: .visible
+            }
+          }
+        }
+      }
+
+      intro {
+        introCopy {
+          introTitle {
+            contents: "3 devices, 2 online"
+          }
+        }
+      }
+    }
+  }
+
+  sidebar {
+    top {
+      nav {
+        navDevices {
+          trail {
+            note {
+              contents: "2/3 online"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+deviceMigrationRestart = frame : desktop.desktopDevicePage {
+  title: "Desktop device / Restart during migration",
+  caption: "Keep restart clickable. Explain the restriction after the click; migration and its progress continue.",
+  left: 3456px,
+  top: 1080px,
+
+  main {
+    content {
+      list {
+        macDetail {
+          local {
+            phase {
+              value {
+                contents: "Device data · step 2 of 4"
+              }
+
+              label {
+                contents: "Migration"
+              }
+
+              display: .visible
+            }
+
+            versions {
+              value {
+                contents: "Baton 0.2.0 · batond 0.2.0"
+              }
+            }
+
+            process {
+              state {
+                value {
+                  contents: "Stopped for migration"
+                }
+
+                @with-variant(status.dotIdle)
+                dot {}
+              }
+            }
+
+            problem {
+              display: .visible
+            }
+          }
+        }
+
+        mac {
+          @with-variant(status.labelIdle)
+          state {
+            caption {
+              contents: "Updating",
+              display: .visible
+            }
+          }
+        }
+      }
+
+      intro {
+        introCopy {
+          introTitle {
+            contents: "3 devices, 2 online"
+          }
+        }
+      }
+    }
+  }
+
+  sidebar {
+    top {
+      nav {
+        navDevices {
+          trail {
+            note {
+              contents: "2/3 online"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+deviceMigrationFailed = frame : desktop.desktopDevicePage {
+  title: "Desktop device / Migration failed",
+  caption: "Show the failing step and cause. Keep the device paused; Retry migration and Open logs folder are available without rebuilding or reverting data.",
+  left: 0px,
+  top: 2160px,
+
+  main {
+    content {
+      list {
+        macDetail {
+          local {
+            actions {
+              retry {
+                connections[0].target: deviceMigrating,
+                display: .visible
+              }
+
+              restart {
+                display: .none
+              }
+            }
+
+            problem {
+              contents: "Disk is full. Device data is kept.",
+              display: .visible
+            }
+
+            phase {
+              value {
+                contents: "Stopped at device ledger · step 2 of 4"
+              }
+
+              label {
+                contents: "Migration"
+              }
+
+              display: .visible
+            }
+
+            versions {
+              value {
+                contents: "Baton 0.2.0 · batond 0.2.0"
+              }
+            }
+
+            process {
+              state {
+                value {
+                  contents: "Stopped for migration"
+                }
+
+                @with-variant(status.dotIdle)
+                dot {}
+              }
+            }
+          }
+        }
+
+        mac {
+          @with-variant(status.labelIdle)
+          state {
+            caption {
+              contents: "Update paused",
+              display: .visible
+            }
+          }
+        }
+      }
+
+      intro {
+        introCopy {
+          introTitle {
+            contents: "3 devices, 2 online"
+          }
+        }
+      }
+    }
+  }
+
+  sidebar {
+    top {
+      nav {
+        navDevices {
+          trail {
+            note {
+              contents: "2/3 online"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+deviceExternal = frame : desktop.desktopDevicePage {
+  title: "Desktop device / External service",
+  caption: "The local device is managed by an external service. Omit restart; logs and the diagnostic summary remain available.",
+  left: 1728px,
+  top: 2160px,
+
+  main {
+    content {
+      list {
+        macDetail {
+          local {
+            actions {
+              restart {
+                display: .none
+              }
+            }
+
+            process {
+              state {
+                value {
+                  contents: "Managed by an external service"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+deviceSummaryCopied = frame : desktop.desktopDevicePage {
+  title: "Desktop device / Diagnostic summary copied",
+  caption: "Copy versions, platform, device state, last exit and the last 200 log lines. Exclude setup codes, model credentials and private deployment settings.",
+  left: 3456px,
+  top: 2160px,
+
+  main {
+    content {
+      list {
+        macDetail {
+          local {
+            actions {
+              copy {
+                label {
+                  contents: "Copied"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

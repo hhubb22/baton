@@ -1,0 +1,303 @@
+import "tokens/colors.elyx" as c
+import "foundations/typography.elyx" as t
+import "controls/button.elyx" as buttons
+import "controls/field.elyx" as fields
+import "controls/input.elyx" as inputs
+import "blocks/new-thread.elyx" as folders
+import "blocks/dialog.elyx" as dialogs
+import "blocks/thread-list.elyx" as lists
+import "blocks/overview.elyx" as overviews
+import "blocks/thread-detail.elyx" as details
+import "blocks/project-page.elyx" as projects
+
+// Desktop-only actions sit beside the working folder. Each action resolves the object through the local device.
+export folderActions = frame {
+  title: "Local folder actions / Windows",
+  left: 0px,
+  top: 0px,
+  width: 392px,
+  layout: {direction: .column, item-gap: 6px},
+  children: [actions, error],
+
+  actions = frame {
+    width: 100%,
+    layout: {align-items: .center, item-gap: 4px},
+    overflow: .visible,
+    children: [reveal, editor],
+
+    reveal = frame : buttons.smallGhost {
+      label {
+        contents: "Show in File Explorer"
+      }
+    }
+
+    editor = frame : buttons.smallGhost {
+      label {
+        contents: "Open in editor"
+      }
+    }
+  }
+
+  error = text : t.captionDanger {
+    width: 100%,
+    display: .none,
+    contents: "D:\\src\\baton-ps160 no longer exists."
+  }
+}
+
+@variant
+export folderActionsMac = frame : folderActions {
+  title: "Local folder actions / macOS",
+  left: 480px,
+  top: 0px,
+
+  actions {
+    reveal {
+      label {
+        contents: "Show in Finder"
+      }
+    }
+  }
+}
+
+// Shared desktop compositions keep browser screens unchanged.
+export localThread = frame : lists.threadsPageSplit {
+  title: "Desktop thread",
+  left: 0px,
+  top: 160px,
+
+  detail {
+    head {
+      lead {
+        name {
+          contents: "Review reconnect logs"
+        }
+      }
+    }
+
+    footer {
+      overrides: [
+        insert(localFolder, after = details.threadDetail.footer.context)
+      ]
+    }
+  }
+
+  localFolder = frame : folderActions {
+    width: 100%
+  }
+}
+
+export localProject = frame : projects.projectPage {
+  title: "Desktop project",
+  left: 1728px,
+  top: 160px,
+
+  main {
+    header {
+      lead {
+        state {
+          caption {
+            contents: "Running on MacBook Pro"
+          }
+        }
+      }
+    }
+  }
+
+  overview {
+    summary {
+      overrides: [
+        insert(localFolder, after = overviews.overview.summary.runtime)
+      ],
+
+      runtime {
+        runtimeCard {
+          runtimeLine {
+            runtimeDevice {
+              runtimeName {
+                contents: "MacBook Pro"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  localFolder = frame {
+    width: 100%,
+    layout: {direction: .column, item-gap: 4px},
+    children: [label, path, actions],
+
+    label = text : t.captionMedium {
+      contents: "Working folder"
+    }
+
+    path = text : t.mono {
+      contents: "~/src/baton",
+      fill[0].color: c.colors.faint
+    }
+
+    actions = frame : folderActionsMac {
+      width: 100%,
+
+      actions {
+        layout.direction: .column,
+        layout.align-items: .start,
+        layout.item-gap: 2px
+      }
+    }
+  }
+}
+
+// The native picker selects within the device's allowed folders; it never adds a new allowed root.
+export localFolderPicker = frame : folders.folderPicker {
+  title: "Desktop / Choose folder",
+  left: 0px,
+  top: 1320px,
+
+  content {
+    overrides: [
+      insert(nativePicker, after = folders.folderPicker.device),
+      insert(selectionError, after = folders.folderPicker.path)
+    ],
+
+    path {
+      @with-variant(t.small)
+      value {
+        contents: "~/src/baton"
+      }
+    }
+  }
+
+  nativePicker = frame : buttons.smallSecondary {
+    label {
+      contents: "Choose local folder"
+    }
+  }
+
+  selectionError = text : t.captionDanger {
+    width: 100%,
+    display: .none,
+    contents: "~/Desktop/private is outside this device's allowed folders."
+  }
+}
+
+export projectForm = frame : dialogs.dialog {
+  title: "Desktop / New project",
+  left: 760px,
+  top: 1320px,
+  width: 560px,
+
+  footer {
+    actions {
+      @with-variant(buttons.button)
+      confirm {
+        label {
+          contents: "Create project"
+        }
+      }
+    }
+
+    note {
+      display: .none
+    }
+  }
+
+  content {
+    overrides: [
+      insert(projectName, after = .nil),
+      insert(goal, after = projectName),
+      insert(model, after = goal),
+      insert(location, after = model),
+      remove(dialogs.dialog.content.message)
+    ]
+  }
+
+  heading {
+    contents: "New project"
+  }
+
+  projectName = frame : fields.field {
+    width: 100%,
+
+    helper {
+      display: .none
+    }
+
+    input {
+      @with-variant(t.small)
+      value {
+        contents: "Release checks"
+      }
+    }
+  }
+
+  goal = frame : fields.optionalText {
+    width: 100%,
+
+    helper {
+      display: .none
+    }
+
+    input {
+      @with-variant(t.small)
+      value {
+        contents: "Check reconnect behavior on both computers."
+      }
+    }
+  }
+
+  model = frame {
+    width: 100%,
+    layout: {direction: .column, item-gap: 6px},
+    children: [label, input],
+
+    label = text : t.label {
+      contents: "Project assistant model"
+    }
+
+    input = frame : inputs.select {
+      width: 100%,
+
+      value {
+        contents: "ChatGPT · gpt-5.1"
+      }
+    }
+  }
+
+  location = frame {
+    width: 100%,
+    layout: {direction: .column, item-gap: 8px},
+    children: [label, device, path, choose, error],
+
+    label = text : t.label {
+      contents: "Working folder"
+    }
+
+    device = frame : inputs.select {
+      width: 100%,
+
+      value {
+        contents: "MacBook Pro"
+      }
+    }
+
+    path = text : t.mono {
+      contents: "~/src/baton",
+      fill[0].color: c.colors.faint
+    }
+
+    choose = frame : buttons.smallSecondary {
+      label {
+        contents: "Choose local folder"
+      }
+    }
+
+    error = text : t.captionDanger {
+      width: 100%,
+      display: .none,
+      contents: "~/Desktop/private is outside this device's allowed folders."
+    }
+  }
+}
