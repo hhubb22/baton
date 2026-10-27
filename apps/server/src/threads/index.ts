@@ -167,9 +167,13 @@ const action = (
           yield* sql`UPDATE threads SET status='archived',archive_requested_at=COALESCE(archive_requested_at,clock_timestamp()),archived_at=clock_timestamp() WHERE id=${threadID}`
           yield* audit(t, 'thread.archived', {}, actor, actorID)
         } else {
+          const frozenStop = yield* sql`SELECT id FROM thread_outbox WHERE thread_id=${threadID}
+            AND action='stop' AND completed_at IS NULL AND next_attempt_at='infinity'
+            AND NOT EXISTS(SELECT 1 FROM thread_outbox current_stop WHERE current_stop.thread_id=${threadID}
+              AND current_stop.action='stop' AND current_stop.completed_at IS NULL AND current_stop.next_attempt_at<>'infinity') LIMIT 1`
           if (kind === 'archive')
             yield* sql`UPDATE threads SET archive_requested_at=COALESCE(archive_requested_at,clock_timestamp()) WHERE id=${threadID}`
-          if (!t.stop_requested_at || t.stop_confirmed_at) {
+          if (!t.stop_requested_at || t.stop_confirmed_at || frozenStop.length) {
             yield* sql`UPDATE threads SET stop_requested_at=clock_timestamp(),stop_confirmed_at=NULL WHERE id=${threadID}`
             yield* enqueue(t, 'stop')
           }
@@ -196,7 +200,7 @@ export const resume = (employeeID: string, threadID: string, source?: ProjectThr
         actorID = source?.agentId ?? employeeID
       if (t.status === 'archived' || t.archive_requested_at) return yield* Effect.fail(failure('thread_archived'))
       const pending =
-        yield* sql`SELECT id FROM thread_outbox WHERE employee_id=${employeeID} AND thread_id=${threadID} AND (action='resume' OR (action='open' AND payload->>'retry_open'='true')) AND completed_at IS NULL`
+        yield* sql`SELECT id FROM thread_outbox WHERE employee_id=${employeeID} AND thread_id=${threadID} AND (action='resume' OR (action='open' AND payload->>'retry_open'='true')) AND completed_at IS NULL AND next_attempt_at<>'infinity'`
       if (pending.length) return t
       if (yield* canRetryOpen(t)) {
         const model = yield* admission(employeeID, t.node_id, t.agent_type, t.working_directory, t.model, 'create')
@@ -267,7 +271,7 @@ export const view = (scope: ThreadScope, threadID: string): DB<P.ThreadView> =>
         value: P.ThreadMessage
       }>`SELECT jsonb_strip_nulls(to_jsonb(m)-'employee_id') AS value FROM thread_messages m WHERE employee_id=${employeeID} AND thread_id=${threadID} AND (status IN ('accepted','queued','unknown') OR (status='withdrawn' AND status_reason<>'')) ORDER BY created_at,id`
       const pending =
-        yield* sql`SELECT id FROM thread_outbox WHERE employee_id=${employeeID} AND thread_id=${threadID} AND (action='resume' OR (action='open' AND payload->>'retry_open'='true')) AND completed_at IS NULL`
+        yield* sql`SELECT id FROM thread_outbox WHERE employee_id=${employeeID} AND thread_id=${threadID} AND (action='resume' OR (action='open' AND payload->>'retry_open'='true')) AND completed_at IS NULL AND next_attempt_at<>'infinity'`
       return {
         ...t,
         retry_open_allowed: yield* canRetryOpen(t),

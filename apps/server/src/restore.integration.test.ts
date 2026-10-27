@@ -138,6 +138,15 @@ it('RL-A08 preserves restored history and memory, requires new authorization and
       )
       const [uncertain] = await run(Threads.claimCommands())
       expect(uncertain?.body).toMatchObject({ action: 'message', client_message_id: uncertainMessage })
+      const parkedMessage = randomUUID()
+      await run(
+        Threads.addMessage(employee.id, thread.id, {
+          client_message_id: parkedMessage,
+          content: 'Keep this restored input unknown',
+        }),
+      )
+      await run(Threads.resume(employee.id, thread.id))
+      await run(Threads.stop(employee.id, thread.id))
       const history = await run(Threads.timeline(employee.id, thread.id))
       const unusedEnrollment = await run(Nodes.issueEnrollment(employee.id))
 
@@ -237,7 +246,21 @@ it('RL-A08 preserves restored history and memory, requires new authorization and
       expect(await run(Threads.claimCommands())).toEqual([])
       await run(Projects.scheduleProjectRun(project.agent.id))
       expect(await run(Projects.claimProjectCommands('project_run_start'))).toEqual([])
-      expect(await run(Threads.view({ employeeId: employee.id }, thread.id))).toMatchObject({ status: 'unknown' })
+      expect(await run(Threads.view({ employeeId: employee.id }, thread.id))).toMatchObject({
+        status: 'unknown',
+        resume_pending: false,
+      })
+      await run(Threads.stop(employee.id, thread.id))
+      const [stop] = await run(Threads.claimCommands())
+      expect(stop?.body).toMatchObject({ action: 'stop', thread_id: thread.id })
+      await run(
+        Threads.processReceipt(connected, stop!.message_id, {
+          type: 'thread.command_result',
+          thread_id: thread.id,
+          ok: true,
+          storage_generation: 'restore-generation',
+        }),
+      )
       await report('message.queued', { client_message_id: uncertainMessage }, connected)
       expect(await run(Threads.view({ employeeId: employee.id }, thread.id))).toMatchObject({ status: 'unknown' })
       await report('turn.started', { worker_turn_seq: 2, client_message_id: uncertainMessage }, connected)
@@ -258,6 +281,37 @@ it('RL-A08 preserves restored history and memory, requires new authorization and
         ]),
       )
       expect(await run(Threads.claimCommands())).toEqual([])
+      await report('thread.stopped', {}, connected)
+      await run(Threads.resume(employee.id, thread.id))
+      const [resume] = await run(Threads.claimCommands())
+      expect(resume?.body).toMatchObject({ action: 'resume', thread_id: thread.id })
+      await run(
+        Threads.processReceipt(connected, resume!.message_id, {
+          type: 'thread.command_result',
+          thread_id: thread.id,
+          ok: true,
+          storage_generation: 'restore-generation',
+        }),
+      )
+      await report('thread.resumed', {}, connected)
+      const newMessage = randomUUID()
+      await run(
+        Threads.addMessage(employee.id, thread.id, {
+          client_message_id: newMessage,
+          content: 'Continue in the original Thread',
+        }),
+      )
+      const deliveries = await run(Threads.claimCommands())
+      expect(
+        deliveries.map(({ body }) => ({
+          action: body.action,
+          thread_id: body.thread_id,
+          client_message_id: body.client_message_id,
+        })),
+      ).toEqual([{ action: 'message', thread_id: thread.id, client_message_id: newMessage }])
+      expect((await run(Threads.view({ employeeId: employee.id }, thread.id))).pending_messages).toEqual(
+        expect.arrayContaining([expect.objectContaining({ client_message_id: parkedMessage, status: 'unknown' })]),
+      )
     } finally {
       await rm(directory, { recursive: true, force: true })
     }
