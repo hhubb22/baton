@@ -177,7 +177,7 @@ it('preserves unknown fields, incomplete intent evidence and raw UTF-16 reply ev
   expect(loaded.outbox[0]?.replyEvidence).toEqual(evidence)
 })
 
-it.each(['zero-byte', 'sqlite', 'commit-only', 'initialized', 'empty-meta'] as const)(
+it.each(['zero-byte', 'initialized', 'empty-meta'] as const)(
   'initializes a permitted %s empty ledger after inspection without changing it during inspection',
   async (kind) => {
     const f = await fixture()
@@ -186,11 +186,6 @@ it.each(['zero-byte', 'sqlite', 'commit-only', 'initialized', 'empty-meta'] as c
       await chmod(f.dbPath, 0o600)
     } else {
       await writePrivateFileAtomic(f.dbPath, '')
-      if (kind === 'sqlite') editDatabase(f, (db) => db.exec('PRAGMA user_version=1'))
-      if (kind === 'commit-only')
-        editDatabase(f, (db) =>
-          db.exec('CREATE TABLE worker_commit (id INTEGER PRIMARY KEY, commit_token TEXT NOT NULL)'),
-        )
     }
     const before = await readFile(f.dbPath)
     const schema = tables(f)

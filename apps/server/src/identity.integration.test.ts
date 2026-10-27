@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test'
 import { Effect } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { chmod, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -112,6 +112,36 @@ describe('identity storage on local PostgreSQL', () => {
         'utf8',
       )
       await writeFile(join(directory, '0007_thread_turn_items.sql'), threadItems)
+      const checksums = await run(
+        query<{ version: string; checksum: string }>(
+          'SELECT version, checksum FROM schema_migrations ORDER BY version',
+        ),
+      )
+      expect(checksums[0]!.checksum).toBe(createHash('sha256').update(initial).digest('hex'))
+      await writeFile(join(directory, '0001_initial.sql'), `${initial}\n-- changed SQL\n`)
+      await expect(run(migrateDatabase(directory))).rejects.toMatchObject({ code: 'migration_checksum_mismatch' })
+      expect(await run(query('SELECT version, checksum FROM schema_migrations ORDER BY version'))).toEqual(checksums)
+      await writeFile(join(directory, '0001_initial.sql'), initial)
+      await run(query("UPDATE schema_migrations SET checksum='tampered' WHERE version='0001_initial.sql'"))
+      await expect(run(migrateDatabase(directory))).rejects.toMatchObject({ code: 'migration_checksum_mismatch' })
+      await run(
+        query('UPDATE schema_migrations SET checksum=$1 WHERE version=$2', [
+          checksums[0]!.checksum,
+          checksums[0]!.version,
+        ]),
+      )
+      await run(query("INSERT INTO schema_migrations VALUES ('9999_future.sql', 'future', now())"))
+      await expect(run(migrateDatabase(directory))).rejects.toMatchObject({ code: 'storage_version_unsupported' })
+      expect(await run(query("SELECT version FROM schema_migrations WHERE version='9999_future.sql'"))).toHaveLength(1)
+      await run(query("DELETE FROM schema_migrations WHERE version='9999_future.sql'"))
+      await run(query("DELETE FROM schema_migrations WHERE version='0004_inbox_options.sql'"))
+      await expect(run(migrateDatabase(directory))).rejects.toMatchObject({ code: 'storage_version_unsupported' })
+      await run(
+        query('INSERT INTO schema_migrations (version, checksum, applied_at) VALUES ($1, $2, now())', [
+          checksums[3]!.version,
+          checksums[3]!.checksum,
+        ]),
+      )
       await writeFile(
         join(directory, '0008_ordered.sql'),
         "CREATE TABLE migration_order (position integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY, step text NOT NULL); INSERT INTO migration_order(step) VALUES ('first');",

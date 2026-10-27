@@ -1,5 +1,6 @@
 import { Effect } from 'effect'
 import * as Sqlite from '@baton/sqlite'
+import { checkStorageFormat, initializeStorage } from '../storage-format.ts'
 import * as Reactivity from 'effect/reactivity/Reactivity'
 import type { ProjectRunCommand } from '@baton/protocol'
 import type { ProcessRecord } from '../platform/process.ts'
@@ -15,7 +16,19 @@ export interface RunRow {
   cleanup_next_at: number
   cleanup_attempts: number
 }
+const storageBaseline = [
+  'CREATE TABLE project_commit(id INTEGER PRIMARY KEY CHECK(id=1),commit_token TEXT NOT NULL)',
+  "INSERT INTO project_commit VALUES (1, '')",
+  "CREATE TABLE project_runtime_runs(\n      run_id TEXT PRIMARY KEY,lease_epoch INTEGER NOT NULL,kind TEXT NOT NULL DEFAULT 'foreground',state TEXT NOT NULL,reason TEXT NOT NULL DEFAULT '',\n      cleanup_complete INTEGER NOT NULL DEFAULT 0,cleanup_acked INTEGER NOT NULL DEFAULT 0,\n      cleanup_next_at INTEGER NOT NULL DEFAULT 0,cleanup_attempts INTEGER NOT NULL DEFAULT 0)",
+  'CREATE TABLE project_processes(role TEXT PRIMARY KEY,payload TEXT NOT NULL)',
+  'CREATE INDEX project_cleanup_due ON project_runtime_runs(cleanup_next_at,run_id) WHERE cleanup_complete=1 AND cleanup_acked=0',
+] as const
+
 export const makeProjectLedger = Effect.fn('Project.makeProjectLedger')(function* (filename: string) {
+  yield* Effect.try({
+    try: () => checkStorageFormat(filename, 'project', storageBaseline),
+    catch: (error) => error as Error,
+  })
   const sql = yield* Sqlite.make({
     filename,
     busyTimeoutMs: 100,
@@ -24,22 +37,7 @@ export const makeProjectLedger = Effect.fn('Project.makeProjectLedger')(function
       readToken: { sql: 'SELECT commit_token FROM project_commit WHERE id=1' },
     },
   }).pipe(Effect.provide(Reactivity.layer))
-  yield* sql.unsafe(
-    'CREATE TABLE IF NOT EXISTS project_commit(id INTEGER PRIMARY KEY CHECK(id=1),commit_token TEXT NOT NULL)',
-  )
-  yield* sql.unsafe("INSERT OR IGNORE INTO project_commit VALUES(1,'')")
-  yield* sql.withTransaction(
-    Effect.gen(function* () {
-      yield* sql.unsafe(`CREATE TABLE IF NOT EXISTS project_runtime_runs(
-      run_id TEXT PRIMARY KEY,lease_epoch INTEGER NOT NULL,kind TEXT NOT NULL DEFAULT 'foreground',state TEXT NOT NULL,reason TEXT NOT NULL DEFAULT '',
-      cleanup_complete INTEGER NOT NULL DEFAULT 0,cleanup_acked INTEGER NOT NULL DEFAULT 0,
-      cleanup_next_at INTEGER NOT NULL DEFAULT 0,cleanup_attempts INTEGER NOT NULL DEFAULT 0)`)
-      yield* sql.unsafe('CREATE TABLE IF NOT EXISTS project_processes(role TEXT PRIMARY KEY,payload TEXT NOT NULL)')
-      yield* sql.unsafe(
-        'CREATE INDEX IF NOT EXISTS project_cleanup_due ON project_runtime_runs(cleanup_next_at,run_id) WHERE cleanup_complete=1 AND cleanup_acked=0',
-      )
-    }),
-  )
+  yield* initializeStorage(sql, 'project', storageBaseline)
   const get = (id: string) =>
     sql<RunRow>`SELECT * FROM project_runtime_runs WHERE run_id=${id}`.pipe(Effect.map((r) => r[0]))
   const insert = (c: ProjectRunCommand, stopped = false) =>

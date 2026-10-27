@@ -2,7 +2,7 @@ import { PgClient } from '@effect/sql-pg'
 import { Effect, Layer, ManagedRuntime, Redacted } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import type { SqlError } from 'effect/sql/SqlError'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { readdir, readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { AppError } from './errors.ts'
@@ -51,18 +51,37 @@ export const migrateDatabase = (
       try: async () => {
         const names = (await readdir(directory)).filter((name) => /^\d{4}_[a-z0-9_]+\.sql$/.test(name)).sort()
         if (names.length === 0) throw new Error('missing migrations')
-        return Promise.all(names.map(async (name) => ({ name, body: await readFile(`${directory}/${name}`, 'utf8') })))
+        return Promise.all(
+          names.map(async (name) => {
+            const body = await readFile(`${directory}/${name}`, 'utf8')
+            return { name, body, checksum: createHash('sha256').update(body).digest('hex') }
+          }),
+        )
       },
       catch: dbError,
     })
     yield* sql.withTransaction(
       Effect.gen(function* () {
         yield* sql`SELECT pg_advisory_xact_lock(4815162342)`
-        yield* sql`CREATE TABLE IF NOT EXISTS schema_migrations (version text PRIMARY KEY, applied_at timestamptz NOT NULL)`
-        const applied = yield* sql<{ version: string }>`SELECT version FROM schema_migrations ORDER BY version`
-        const known = new Set(files.map((file) => file.name))
-        if (applied.some((row) => !known.has(row.version))) {
-          return yield* Effect.fail(new AppError(503, 'migration_mismatch', '数据库迁移版本不匹配'))
+        yield* sql`CREATE TABLE IF NOT EXISTS schema_migrations (version text PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz NOT NULL)`
+        const columns = yield* sql<{
+          column_name: string
+        }>`SELECT column_name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='schema_migrations'`
+        if (!columns.some((column) => column.column_name === 'checksum'))
+          return yield* Effect.fail(
+            new AppError(503, 'storage_version_unsupported', '数据库缺少迁移摘要，实验格式需要重建'),
+          )
+        const applied = yield* sql<{
+          version: string
+          checksum: string
+        }>`SELECT version, checksum FROM schema_migrations ORDER BY version`
+        if (applied.some((row, index) => row.version !== files[index]?.name)) {
+          return yield* Effect.fail(
+            new AppError(503, 'storage_version_unsupported', '数据库迁移未知、缺失或超出程序支持范围'),
+          )
+        }
+        if (applied.some((row, index) => row.checksum !== files[index]!.checksum)) {
+          return yield* Effect.fail(new AppError(503, 'migration_checksum_mismatch', '已应用 SQL 的 SHA-256 不符'))
         }
         for (const file of files) {
           if (applied.some((row) => row.version === file.name)) continue
@@ -72,11 +91,11 @@ export const migrateDatabase = (
           yield* sql.unsafe(
             `DO $outer_${tag}$ BEGIN EXECUTE $script_${tag}$${file.body}$script_${tag}$; END $outer_${tag}$`,
           ).unprepared
-          yield* sql`INSERT INTO schema_migrations (version, applied_at) VALUES (${file.name}, now())`
+          yield* sql`INSERT INTO schema_migrations (version, checksum, applied_at) VALUES (${file.name}, ${file.checksum}, now())`
         }
         const saved = yield* sql<{ version: string }>`SELECT version FROM schema_migrations ORDER BY version`
         if (saved.length !== files.length || saved.some((row, index) => row.version !== files[index].name)) {
-          return yield* Effect.fail(new AppError(503, 'migration_mismatch', '数据库迁移未完成'))
+          return yield* Effect.fail(new AppError(503, 'storage_version_unsupported', '数据库迁移未完成'))
         }
       }),
     )

@@ -7,6 +7,7 @@ import {
 } from '@baton/protocol'
 import type { ThreadAnswerInput, ThreadQuestion } from '@baton/protocol'
 import * as Sqlite from '@baton/sqlite'
+import { checkStorageFormat, initializeStorage, StorageFormatError } from '../storage-format.ts'
 import type { TraceContext } from '@baton/telemetry'
 import { lstat } from 'node:fs/promises'
 import { dirname } from 'node:path'
@@ -83,6 +84,16 @@ export interface State extends Meta {
   messages: Record<string, Message>
   outbox: OutboxEntry[]
 }
+
+const storageBaseline = [
+  'CREATE TABLE worker_commit (id INTEGER PRIMARY KEY CHECK (id = 1), commit_token TEXT NOT NULL)',
+  "INSERT INTO worker_commit VALUES (1, '')",
+  'CREATE TABLE thread_meta (id INTEGER PRIMARY KEY CHECK (id = 1), payload TEXT NOT NULL)',
+  'CREATE TABLE thread_commands (id TEXT PRIMARY KEY, payload TEXT NOT NULL)',
+  'CREATE TABLE thread_messages (id TEXT PRIMARY KEY, payload TEXT NOT NULL)',
+  'CREATE TABLE thread_processes (pid INTEGER PRIMARY KEY, created_at TEXT NOT NULL, role TEXT NOT NULL)',
+  'CREATE TABLE thread_outbox (seq INTEGER PRIMARY KEY, payload TEXT NOT NULL)',
+] as const
 
 const initialState = (): State => ({
   phase: 'empty',
@@ -163,8 +174,7 @@ function decodeLedger(query: (sql: string) => readonly Row[], expected?: WorkerO
   const checks = query('PRAGMA quick_check(1)')
   if (checks.length !== 1 || Object.values(checks[0]!)[0] !== 'ok') corrupt()
   const found = new Set(query("SELECT name FROM sqlite_schema WHERE type='table'").map((row) => row.name))
-  if (found.size === 0 || (found.size === 1 && found.has('worker_commit')))
-    return { initial: initialState(), condition: 'empty' as const }
+  if (found.size === 0) return { initial: initialState(), condition: 'empty' as const }
   if (tables.some((table) => !found.has(table))) corrupt()
   const commands = query('SELECT id, payload FROM thread_commands ORDER BY rowid')
   const messages = query('SELECT id, payload FROM thread_messages ORDER BY rowid')
@@ -249,6 +259,7 @@ function decodeLedger(query: (sql: string) => readonly Row[], expected?: WorkerO
 }
 
 function readLedger(dbPath: string, expected?: WorkerOpenConfig) {
+  checkStorageFormat(dbPath, 'thread', storageBaseline)
   const db = new DatabaseSync(dbPath, { readOnly: true, allowExtension: false, timeout: 0 })
   try {
     return decodeLedger((sql) => db.prepare(sql).all(), expected)
@@ -283,6 +294,7 @@ export async function inspectWorkerLedger(dbPath: string, expected: WorkerOpenCo
   let db: DatabaseSync | undefined
   let result: WorkerLedgerInspection
   try {
+    checkStorageFormat(dbPath, 'thread', storageBaseline)
     db = new DatabaseSync(dbPath, { readOnly: true, allowExtension: false, timeout: 0 })
     result = decodeLedger((sql) => db!.prepare(sql).all(), expected).condition
   } catch (error) {
@@ -333,13 +345,15 @@ export const openWorkerLedger = Effect.fn('Worker.openWorkerLedger')(function* (
       return readLedger(dbPath).initial
     },
     catch: (cause) =>
-      cause instanceof WorkerFailure
-        ? cause
-        : new WorkerFailure(
-            isCorruption(cause) ? 'ledger_corrupt' : 'storage_error',
-            'Cannot read Worker ledger',
-            cause,
-          ),
+      cause instanceof StorageFormatError
+        ? new WorkerFailure(cause.code, cause.message, cause)
+        : cause instanceof WorkerFailure
+          ? cause
+          : new WorkerFailure(
+              isCorruption(cause) ? 'ledger_corrupt' : 'storage_error',
+              'Cannot read Worker ledger',
+              cause,
+            ),
   })
   const sql = yield* Sqlite.make({
     filename: dbPath,
@@ -348,22 +362,10 @@ export const openWorkerLedger = Effect.fn('Worker.openWorkerLedger')(function* (
       readToken: { sql: 'SELECT commit_token FROM worker_commit WHERE id = 1' },
     },
   }).pipe(Effect.provide(Reactivity.layer))
-  yield* sql.unsafe(
-    'CREATE TABLE IF NOT EXISTS worker_commit (id INTEGER PRIMARY KEY CHECK (id = 1), commit_token TEXT NOT NULL)',
-  )
-  yield* sql.unsafe("INSERT OR IGNORE INTO worker_commit VALUES (1, '')")
-  yield* sql.withTransaction(
-    Effect.gen(function* () {
-      yield* sql.unsafe(
-        'CREATE TABLE IF NOT EXISTS thread_meta (id INTEGER PRIMARY KEY CHECK (id = 1), payload TEXT NOT NULL)',
-      )
-      yield* sql.unsafe('CREATE TABLE IF NOT EXISTS thread_commands (id TEXT PRIMARY KEY, payload TEXT NOT NULL)')
-      yield* sql.unsafe('CREATE TABLE IF NOT EXISTS thread_messages (id TEXT PRIMARY KEY, payload TEXT NOT NULL)')
-      yield* sql.unsafe(
-        'CREATE TABLE IF NOT EXISTS thread_processes (pid INTEGER PRIMARY KEY, created_at TEXT NOT NULL, role TEXT NOT NULL)',
-      )
-      yield* sql.unsafe('CREATE TABLE IF NOT EXISTS thread_outbox (seq INTEGER PRIMARY KEY, payload TEXT NOT NULL)')
-    }),
+  yield* initializeStorage(sql, 'thread', storageBaseline).pipe(
+    Effect.mapError((error) =>
+      error instanceof StorageFormatError ? new WorkerFailure(error.code, error.message, error) : error,
+    ),
   )
   let baseline = encode(initial)
   let usable = true

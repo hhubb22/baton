@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import * as Sqlite from '@baton/sqlite'
+import { checkStorageFormat, initializeStorage } from '../storage-format.ts'
 import type {
   ThreadCommandResult,
   ThreadReport,
@@ -46,8 +47,21 @@ export interface NodeReport {
   acked: boolean
 }
 
-/** node.db retains acknowledged reports so a center sequence gap can be replayed. */
+const storageBaseline = [
+  'CREATE TABLE node_commit (id INTEGER PRIMARY KEY CHECK(id=1), commit_token TEXT NOT NULL)',
+  "INSERT INTO node_commit VALUES (1, '')",
+  'CREATE TABLE node_commands (id TEXT PRIMARY KEY, hash TEXT NOT NULL, payload TEXT NOT NULL)',
+  'CREATE TABLE node_workers (thread_id TEXT PRIMARY KEY, generation TEXT NOT NULL, payload TEXT NOT NULL)',
+  'CREATE TABLE node_open_attempts (thread_id TEXT PRIMARY KEY)',
+  'CREATE TABLE node_outbox (thread_id TEXT NOT NULL, seq INTEGER NOT NULL, event_id TEXT NOT NULL UNIQUE, hash TEXT NOT NULL, payload TEXT NOT NULL, acked INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(thread_id,seq))',
+] as const
+
+/** node.db 保留已确认报告，用于补齐中心的序号缺口。 */
 export const makeNodeLedger = Effect.fn('Daemon.makeNodeLedger')(function* (filename: string) {
+  yield* Effect.try({
+    try: () => checkStorageFormat(filename, 'node', storageBaseline),
+    catch: (error) => error as Error,
+  })
   const sql = yield* Sqlite.make({
     filename,
     busyTimeoutMs: 100,
@@ -56,24 +70,7 @@ export const makeNodeLedger = Effect.fn('Daemon.makeNodeLedger')(function* (file
       readToken: { sql: 'SELECT commit_token FROM node_commit WHERE id = 1' },
     },
   }).pipe(Effect.provide(Reactivity.layer))
-  yield* sql.unsafe(
-    'CREATE TABLE IF NOT EXISTS node_commit (id INTEGER PRIMARY KEY CHECK(id=1), commit_token TEXT NOT NULL)',
-  )
-  yield* sql.unsafe("INSERT OR IGNORE INTO node_commit VALUES (1, '')")
-  yield* sql.withTransaction(
-    Effect.gen(function* () {
-      yield* sql.unsafe(
-        'CREATE TABLE IF NOT EXISTS node_commands (id TEXT PRIMARY KEY, hash TEXT NOT NULL, payload TEXT NOT NULL)',
-      )
-      yield* sql.unsafe(
-        'CREATE TABLE IF NOT EXISTS node_workers (thread_id TEXT PRIMARY KEY, generation TEXT NOT NULL, payload TEXT NOT NULL)',
-      )
-      yield* sql.unsafe('CREATE TABLE IF NOT EXISTS node_open_attempts (thread_id TEXT PRIMARY KEY)')
-      yield* sql.unsafe(
-        'CREATE TABLE IF NOT EXISTS node_outbox (thread_id TEXT NOT NULL, seq INTEGER NOT NULL, event_id TEXT NOT NULL UNIQUE, hash TEXT NOT NULL, payload TEXT NOT NULL, acked INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(thread_id,seq))',
-      )
-    }),
-  )
+  yield* initializeStorage(sql, 'node', storageBaseline)
   const command = (id: string) =>
     sql
       .unsafe<{ payload: string }>('SELECT payload FROM node_commands WHERE id=?', [id])
