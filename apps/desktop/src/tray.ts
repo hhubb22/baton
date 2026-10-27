@@ -6,6 +6,7 @@ import { trayLabels, trayPixels, traySummary } from './tray-model.ts'
 export function createTray(actions: {
   open: () => void
   restart: () => void
+  restartAvailable: () => boolean
   update: () => void
   updateLabel: () => string
   logs: () => void
@@ -80,7 +81,9 @@ export function createTray(actions: {
           { type: 'separator' },
           { label: 'Open Baton', click: actions.open },
           { label: actions.updateLabel(), click: actions.update },
-          ...(status.state === 'external' ? [] : [{ label: 'Restart device service', click: actions.restart }]),
+          ...(status.state === 'external' || !actions.restartAvailable()
+            ? []
+            : [{ label: 'Restart device service', click: actions.restart }]),
           { label: 'Open logs folder', click: actions.logs },
           { label: 'Quit Baton', click: actions.quit },
         ]),

@@ -125,6 +125,9 @@ async function start() {
     notificationPresenter((notice) => {
       if (!Notification.isSupported() || systemNotificationsDisabled === true) return null
       const notification = new Notification({ title: notice.title, body: notice.body })
+      notification.on('show', () =>
+        console.info(JSON.stringify({ event: 'desktop.notification_shown', event_id: notice.event_id })),
+      )
       notification.on('failed', () =>
         console.warn(JSON.stringify({ event: 'desktop.notification_failed', event_id: notice.event_id })),
       )
@@ -157,6 +160,7 @@ async function start() {
         await reconcile(true)
       }).catch(reportError)
     },
+    restartAvailable: () => updater?.snapshot.status?.state?.phase !== 'migrating',
     update: () => {
       void showUpdate().catch(reportError)
     },
