@@ -111,6 +111,8 @@ const apply = (t: P.Thread, r: P.ThreadReport) =>
       case 'message.unknown': {
         const m = yield* getMessage(t, r.client_message_id)
         const next = r.kind.slice(8)
+        // 排队回执保留未知状态，后续执行证据仍沿原报告序号接收。
+        if (m.status === 'unknown' && next === 'queued') break
         const valid =
           m.status === next ||
           (m.status === 'accepted' && next === 'queued') ||

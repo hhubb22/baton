@@ -11,12 +11,14 @@ import { loadSigningKey, resetConnections } from './nodes.ts'
 import { startServer } from './server.ts'
 import { AppError } from './errors.ts'
 import { controlConfiguration, duration } from './server-config.ts'
+import { finalizeRestore } from './restore.ts'
 
 const usage = `Baton Coordinator（TypeScript 开发入口）
 
   --version
   serve
   migrate
+  admin restore-finalize
   admin employee create --username <用户名> --display-name <显示名>
   admin employee reset-password --username <用户名>
 
@@ -57,6 +59,11 @@ async function main() {
     const migrationDirectory = join(dirname(fileURLToPath(import.meta.url)), 'migrations')
     await run(migrateDatabase(migrationDirectory))
     if (args[0] === 'migrate' && args.length === 1) return
+    if (args[0] === 'admin' && args[1] === 'restore-finalize' && args.length === 2) {
+      await run(finalizeRestore(process.env.BATON_NODE_SIGNING_KEY || 'node-signing.key'))
+      console.log('恢复后处理完成：旧授权已失效，Project 已暂停；请核对设备与未知执行后再恢复业务。')
+      return
+    }
     if (args[0] === 'admin' && args[1] === 'employee' && ['create', 'reset-password'].includes(args[2])) {
       const { values } = parseArgs({
         args: args.slice(3),

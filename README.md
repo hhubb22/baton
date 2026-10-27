@@ -35,9 +35,11 @@ node apps/server/dist/server.cjs admin employee create --username alice --displa
 node apps/server/dist/server.cjs serve
 ```
 
-账号创建命令输出一次性口令，员工首次登录后须修改口令并重新登录。重置口令使用 `node apps/server/dist/server.cjs admin employee reset-password --username alice`。`serve`、账号管理和 `migrate` 都先执行并核对迁移，`migrate` 完成后退出。
+账号创建命令输出一次性口令，员工首次登录后须修改口令并重新登录。重置口令使用 `node apps/server/dist/server.cjs admin employee reset-password --username alice`。`serve`、账号管理、`migrate` 和恢复后处理都先执行并核对迁移，`migrate` 完成后退出。
 
 中心默认监听 `127.0.0.1:8080`，由支持 WebSocket 的 HTTPS 反向代理接入；直接 HTTPS 可同时配置 `BATON_TLS_CERT_FILE` 和 `BATON_TLS_KEY_FILE`。签名密钥默认保存在工作目录的 `node-signing.key`，可用 `BATON_NODE_SIGNING_KEY` 指定。文件不存在时生成 `0600` Ed25519 私钥，已有文件校验类型、权限、所有者与内容；Windows 不校验权限位和所有者，依赖目录继承的 ACL。部署时须持久保存数据库和密钥。
+
+中心数据库恢复旧备份后，在停服状态下显式运行 `node apps/server/dist/server.cjs admin restore-finalize`，再启动 `serve`。该命令要求配套的原签名密钥，注销旧会话、使旧设备凭据过期、暂停旧命令派发并将不确定输入和运行标为未知或 lost，Project 保持暂停。员工重新登录、核对原设备并重新认证后，才恢复连接与结果补报。备份材料、数据回退影响、格式兼容检查和操作步骤见 [备份与恢复](specs/release/TECH.md#备份与恢复)。
 
 实验室阶段使用当前 schema 基线，结构变化后可重建本地数据。迁移按版本记录幂等执行，正式发布后可用于增量迁移。证书须匹配访问主机名，浏览器和节点须信任签发 CA。反向代理同时转发普通 HTTP 请求及 `/v1/node`、`/api/v1/events` 的 WebSocket 升级。
 

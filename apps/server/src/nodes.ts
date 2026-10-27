@@ -145,14 +145,22 @@ function permissionBitsUnsafe(mode: number): boolean {
   return process.platform !== 'win32' && (mode & 0o077) !== 0
 }
 
-/** 仅在路径不存在时创建密钥；已存在的路径必须通过权限和文件类型校验。 */
-export async function loadSigningKey(path: string): Promise<CredentialSigner> {
-  const invalid = () => new AppError(500, 'invalid_signing_key', '无法安全读取节点签名密钥')
+/** 允许初始化时仅在路径不存在时创建密钥；恢复要求原密钥通过完整校验。 */
+export async function loadSigningKey(path: string, createIfMissing = true): Promise<CredentialSigner> {
+  const invalid = () =>
+    new AppError(
+      500,
+      'invalid_signing_key',
+      createIfMissing
+        ? '无法安全读取节点签名密钥'
+        : '恢复需要原节点签名密钥，文件缺失或无法安全读取；请恢复配套密钥并核对权限',
+    )
   try {
     try {
       await lstat(path)
     } catch (error) {
       if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error
+      if (!createIfMissing) throw invalid()
       const directory = dirname(path)
       await mkdir(directory, { recursive: true, mode: 0o700 })
       const temporary = join(directory, `.node-signing-${randomUUID()}`)
