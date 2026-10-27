@@ -43,4 +43,6 @@ Windows 使用按用户安装的 NSIS 静默更新并重新启动。macOS 打开
 
 ## 验证范围
 
-链接解析、证书链、源与身份检查、batond 凭据传递、重启策略、stdin 关闭、日志轮转和状态合并使用 Node 离线测试。证书夹具与生成命令见 [测试数据](src/testing/data/README.md)。macOS arm64 已从统一构建的 SEA 包生成 DMG，复制安装后启动显示说明页，并核对说明页无桥接与 Node API。Windows NSIS、真实中心接入、系统重启后的登录启动与 Windows 进程回收尚未手动验证。
+链接解析、证书链、源与身份检查、batond 凭据传递、重启策略、stdin 关闭、日志轮转和状态合并使用 Node 离线测试。更新测试覆盖同源下载、缓存损坏、取消恢复、直接替换、失败重试及原队列身份保留；batond 和跨 app 升级测试验证实际账本与独立进程。证书夹具与生成命令见 [测试数据](src/testing/data/README.md)。
+
+macOS arm64 已从官方 Node 26.11.1 的 SEA 包生成 Electron 44.5.1 DMG，验证说明页无桥接与 Node API；两个实际候选客户端的中心版本拒绝、下载校验、DMG 打开、退出、手动复制替换、首次启动迁移及设备恢复在线已使用本机 HTTPS/WSS 中心替身验证，原身份和数据文件摘要保持不变。平台验收边界见 [桌面客户端规格](../../specs/desktop/PRODUCT.md#验收)。Windows NSIS 自动更新与重启未测；真实中心接入、系统重启后的登录启动与 Windows 进程回收尚未手动验证。
