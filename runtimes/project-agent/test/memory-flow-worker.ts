@@ -1,16 +1,6 @@
 import assert from 'node:assert/strict'
-import {
-  createModels,
-  fauxProvider,
-  fauxAssistantMessage,
-  fauxToolCall,
-  type SimpleStreamOptions,
-  type TranscriptContext,
-} from '@earendil-works/pi-ai'
-import { StdioClient } from '../src/stdio.js'
-import { checkedRPC, type MemoryContext } from '../src/protocol.js'
-import { ProjectRuntime } from '../src/runtime.js'
-import { runMemory } from '../src/memory.js'
+import type { SimpleStreamOptions, TranscriptContext } from '@earendil-works/pi-ai'
+import type { MemoryContext } from '../src/protocol.js'
 
 // 本地整体流程使用实际 Runtime 与 RPC，模型按本次提供的来源返回固定提案。
 const command = process.argv[2]
@@ -25,6 +15,20 @@ if (command === 'probe') {
     }),
   )
 } else {
+  // 固定 probe 报告不加载模型 SDK，实际运行仍使用完整 Runtime 与本地模型。
+  const [
+    { createModels, fauxProvider, fauxAssistantMessage, fauxToolCall },
+    { StdioClient },
+    { checkedRPC },
+    { ProjectRuntime },
+    { runMemory },
+  ] = await Promise.all([
+    import('@earendil-works/pi-ai'),
+    import('../src/stdio.js'),
+    import('../src/protocol.js'),
+    import('../src/runtime.js'),
+    import('../src/memory.js'),
+  ])
   const client = new StdioClient(process.stdin, process.stdout)
   let now = 0
   let snapshot: MemoryContext | undefined
