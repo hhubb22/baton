@@ -3,7 +3,7 @@ export interface BuildInfo {
   readonly commit: string
 }
 export const PROTOCOL_VERSION: 1
-export const SCHEMA_VERSION: '0007_thread_turn_items.sql'
+export const SCHEMA_VERSION: '0008_thread_stop_code.sql'
 export const LEDGER_VERSIONS: Readonly<{ node: 1; project: 1; thread: 1 }>
 export const BUNDLED: boolean
 export const BUILD: BuildInfo
