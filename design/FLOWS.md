@@ -10,6 +10,10 @@
 |---|---|
 | 登录导航 | `screens/login.elyx#login`、`#loginExpired`；`screens/workspace.elyx#firstVisit`、`#accountOpen`、`#signOutFailed` |
 | 设备 | `screens/devices.elyx#devicesEmpty`、`#devicesSyncing`、`#devicesMissing`、`#devicesDefaultRemoved`、`#devicesPermissionEnableFailed`、`#devicesDisconnecting`；`blocks/enroll-dialog.elyx#enrollExpired` |
+| 桌面通知与托盘 | `screens/desktop-system.elyx#systemReference` |
+| 桌面 Thread | `screens/desktop-thread.elyx#threadLocalWindows`、`#threadLocalMac`、`#threadFolderMissing`、`#threadLocation`、`#threadLocationOutside`、`#threadLocationSelected`、`#threadDraft`、`#threadDraftSelected`、`#threadExplorerHover`、`#threadFinderHover` |
+| 桌面 Project | `screens/desktop-project.elyx#projectLocal`、`#projectFolderMissing`、`#projectCreate`、`#projectCreateOutside`、`#projectCreateSelected`、`#projectEditorHover` |
+| 桌面本机设备 | `screens/desktop-device.elyx#deviceLocal`、`#deviceStopped`、`#deviceRestarting`、`#devicePreparing`、`#deviceMigrating`、`#deviceMigrationRestart`、`#deviceMigrationFailed`、`#deviceExternal`、`#deviceSummaryCopied` |
 | Thread | `screens/threads.elyx#threadsEmpty`、`#threadsFolderRoots`、`#threadsFolderApplied`、`#threadsStopConfirm`、`#threadsArchivePending`、`#threadsArchived`、`#threadsLimited` |
 | 项目协同 | `screens/new-project.elyx#creationFailed`、`#created`；`screens/project.elyx#noEligibleDevice`、`#stopping`、`#reported`；`screens/project-thread.elyx#threadRunning` |
 | 查看与引用 | `screens/threads.elyx#threadsHistoryFailed`、`#threadsFileMissing`、`#threadsFileBinary`；`screens/project-thread.elyx#fileSelection`、`#questionSelection`、`#longFileSelection`、`#fileQuote`、`#longQuote`、`#referenceSent` |
@@ -33,6 +37,32 @@
 已连接但仍在同步的设备单独显示同步状态。Agent 缺失或订阅未登录时说明具体缺项，不能将它显示为可用。命令执行权限变更失败时保留已生效的状态，并提供重试。
 
 断开设备前确认影响。确认后显示处理状态，凭据吊销和连接断开完成后才显示已移除。离线设备上仍在运行的进程可能继续执行，历史记录保留。
+
+## 桌面客户端
+
+桌面客户端按声明的能力显示本机入口。目标是远程设备，或缺少相应能力时，隐藏该入口，原有网页功能保留。浏览器画板不包含这些入口。
+
+### 通知与托盘
+
+`desktop-system.elyx#systemReference` 给出四类系统通知的标题、正文写法与示例，以及托盘菜单顺序。提问和确认通知说明待回答的问题或待批准的动作；回复结束只说明回复已结束；异常停止说明中断原因。Thread 和 Project 通知使用对象名称。设备拒绝通知在画板中使用设备名称并指向本机设备详情。
+
+点击 Thread 或 Project 通知显示并聚焦窗口，打开对应对象。对象已删除或归档时回到其列表，就地显示 `This thread was deleted.` 或 `This project was archived.`，按实际对象与原因组合。聚焦窗口正在显示某个 Thread 时，抑制该 Thread 的通知；同一事件在重连和重载后仍只通知一次。
+
+托盘依次显示本机设备状态、员工所有设备上的 Thread 运行数与等待回复数、最多五个待回复 Thread、通知与登录启动偏好、窗口和设备服务操作。等待数大于零时托盘图标有标记，点等待行打开对应 Thread。通知默认开启并在本机保存；关闭通知后保留统计与等待列表。系统禁用通知时，在开关旁显示 `Disabled in system settings`，提供 `Open notification settings`。编辑器偏好位于客户端 `Settings…` 的 `Editor`，默认 `System default`。
+
+### 本机工作目录
+
+Thread 输入区下方和 Project Overview 的项目助手位置都用一行浅色小字显示 `设备 · 目录`，行末放两个 20px 图标按钮：文件夹图标打开文件管理器，编辑器图标打开编辑器。悬停或键盘聚焦时显示 `Show in Finder`（macOS）、`Show in Explorer`（Windows）或 `Open in editor`，同一文字作为按钮的无障碍名称。两个操作不另占一行；目录不存在时只在该行下方增加具体路径与原因，不创建目录，已有消息和项目设置保持不变。编辑器动作使用本机偏好；尚未选择时使用系统为文件夹关联的默认程序。
+
+新建 Thread 在位置控件打开的目录弹窗里、设备选择之后提供 `Choose local folder`；新建 Project 在工作目录的设备与当前路径之后提供同名动作。两者打开系统目录选择框，取消保留原设备、目录、模型和草稿。允许范围内的目录成为当前选择；范围外目录在入口附近显示具体路径与原因，拒绝该选择，保留上一个有效目录。选择目录不扩展中心设置的允许目录范围。
+
+### 本机设备诊断
+
+Devices 展开本机设备后增加 `On this computer`，保留其他设备管理入口。这里显示进程状态、最近退出的原因与时间、客户端和 batond 版本、平台；升级或迁移期间显示阶段。正常运行用状态点和 PID，正常无更新时不显示升级行。阶段文案按实际进度使用 `Preparing · 1 reply running · 2 results to upload`、`Downloading · 38%`、`Installing`、`Waiting for 1 running task` 或 `Device data · step 2 of 4`。
+
+`Restart device service` 发起重启后显示 `Restarting…`，连接恢复前不显示在线。迁移期间点击重启只解释限制，不启动进程或安排延迟重启。迁移失败显示失败步骤与原因，设备保持暂停，提供 `Retry migration` 和 `Open logs folder`，不回退或重建数据。外部服务运行时显示 `Managed by an external service`，隐藏重启入口，保留日志与诊断摘要。
+
+`Copy diagnostic summary` 直接复制版本、平台、设备状态、最近退出原因和时间、日志末尾 200 行，按钮短暂显示 `Copied`。复制内容须排除注册凭据、模型凭据和部署配置中的私密内容，包括日志中的这些值。画板使用示例版本、时间和退出原因；系统权限、剪贴板、脱敏、进程管理及原生目录选择的真实行为由客户端实施阶段验证。
 
 ## 独立 Thread
 

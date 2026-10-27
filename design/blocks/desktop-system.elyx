@@ -1,0 +1,58 @@
+import "tokens/colors.elyx" as c
+import "foundations/typography.elyx" as t
+
+// Native interfaces use the operating system's styles. These rows document content and order.
+export notificationExample = frame {
+  title: "Notification content",
+  left: 0px,
+  top: 0px,
+  width: 600px,
+  layout: {direction: .column, item-gap: 6px},
+  border: {color: c.colors.borderSoft, sides: .bottom},
+  padding: [0px, 0px, 20px],
+  children: [eventLabel, titleRule, bodyRule, exampleTitle, exampleBody],
+
+  eventLabel = text : t.captionMedium {
+    contents: "Question or confirmation"
+  }
+
+  titleRule = text : t.caption {
+    width: 100%,
+    contents: "Title · Thread or project name"
+  }
+
+  bodyRule = text : t.caption {
+    width: 100%,
+    contents: "Body · Name the question or the action awaiting approval."
+  }
+
+  exampleTitle = text : t.heading {
+    contents: "Review reconnect logs"
+  }
+
+  exampleBody = text : t.small {
+    width: 100%,
+    contents: "Codex needs your approval to run the reconnect test."
+  }
+}
+
+export trayGroup = frame {
+  title: "Native menu group",
+  left: 0px,
+  top: 240px,
+  width: 420px,
+  layout: {direction: .column, item-gap: 6px},
+  border: {color: c.colors.borderSoft, sides: .bottom},
+  padding: [0px, 0px, 16px],
+  children: [label, entries],
+
+  label = text : t.captionMedium {
+    contents: "Device"
+  }
+
+  entries = text : t.small {
+    width: 100%,
+    contents: "MacBook Pro · status dot",
+    line-height: 1.8
+  }
+}
