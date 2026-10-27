@@ -8,7 +8,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vite-plus/test'
 import type { NodeIdentity, ReauthNodeInput } from '@baton/protocol'
 import { readPrivateFile, writePrivateFileAtomic } from '../platform/private.ts'
 import { makePrivateTempDirectory } from '../testing/private.ts'
-import { loadIdentity, reauthNode } from './identity.ts'
+import { loadIdentity, loadCoordinatorCA, reauthNode, registerNode } from './identity.ts'
 
 vi.mock('../platform/private.ts', async (importOriginal) => {
   const files = await importOriginal<typeof import('../platform/private.ts')>()
@@ -268,4 +268,88 @@ it('preserves a malformed pending record instead of starting a different operati
   expect(f.requests).toEqual([])
   expect((await readPrivateFile(f.pendingPath)).toString()).toBe('{interrupted-record')
   expect(await loadIdentity(f.path)).toEqual(f.identity)
+})
+
+it('saves the registration CA under the identity lock, reuses it and replaces it only after successful reauthentication', async () => {
+  const f = await fixture(false)
+  const caPath = join(f.path, 'coordinator-ca.pem')
+  const explicit = join(f.path, 'explicit-ca.pem')
+  await writePrivateFileAtomic(explicit, 'replacement-ca')
+  await registerNode({
+    dataDirectory: f.path,
+    coordinatorURL: f.identity.coordinator_url!,
+    enrollmentFile: f.enrollmentFile,
+    caPem: 'deployment-ca',
+    transport: async (_url, _body, options) => {
+      expect(options.ca).toBe('deployment-ca')
+      await expect(readPrivateFile(caPath)).rejects.toMatchObject({ code: 'ENOENT' })
+      return f.identity
+    },
+  })
+  expect(await loadCoordinatorCA(f.path)).toBe('deployment-ca')
+  if (process.platform !== 'win32') expect((await stat(caPath)).mode & 0o777).toBe(0o600)
+  await reauthNode({
+    dataDirectory: f.path,
+    enrollmentFile: f.enrollmentFile,
+    transport: async (url, body, options) => {
+      expect(options.ca).toBe('deployment-ca')
+      return f.transport(url, body)
+    },
+  })
+  await expect(
+    reauthNode({
+      dataDirectory: f.path,
+      enrollmentFile: f.enrollmentFile,
+      caFile: explicit,
+      transport: async () => {
+        throw new Error('offline failure')
+      },
+    }),
+  ).rejects.toThrow('原操作已保留')
+  expect(await loadCoordinatorCA(f.path)).toBe('deployment-ca')
+  expect(await loadCoordinatorCA(f.path, explicit)).toBe('replacement-ca')
+  await reauthNode({
+    dataDirectory: f.path,
+    caFile: explicit,
+    transport: async (_url, _body, options) => {
+      expect(options.ca).toBe('replacement-ca')
+      return f.issued
+    },
+  })
+  expect(await loadCoordinatorCA(f.path)).toBe('replacement-ca')
+  const saves = vi.mocked(writePrivateFileAtomic).mock.calls.map(([path]) => path)
+  expect(saves.lastIndexOf(caPath)).toBeLessThan(saves.lastIndexOf(join(f.path, 'identity.json')))
+})
+
+it('prefers an explicit registration CA and removes a stale saved CA when registering with system trust', async () => {
+  const f = await fixture(false)
+  const explicit = join(f.path, 'explicit.pem')
+  await writePrivateFileAtomic(explicit, 'explicit-ca')
+  const options = {
+    dataDirectory: f.path,
+    coordinatorURL: f.identity.coordinator_url!,
+    enrollmentFile: f.enrollmentFile,
+  }
+  await expect(
+    registerNode({
+      ...options,
+      caFile: explicit,
+      caPem: 'ignored-ca',
+      transport: async (_url, _body, options) => {
+        expect(options.ca).toBe('explicit-ca')
+        throw new Error('offline failure')
+      },
+    }),
+  ).rejects.toThrow('无法向 Coordinator 注册节点')
+  expect(await loadCoordinatorCA(f.path)).toBeUndefined()
+  await writePrivateFileAtomic(join(f.path, 'coordinator-ca.pem'), 'stale-ca')
+  await registerNode({
+    ...options,
+    transport: async (_url, _body, options) => {
+      expect(options.ca).toBeUndefined()
+      return f.identity
+    },
+  })
+  expect(await loadCoordinatorCA(f.path)).toBeUndefined()
+  await expect(loadCoordinatorCA(f.path, join(f.path, 'missing.pem'))).rejects.toMatchObject({ code: 'ENOENT' })
 })

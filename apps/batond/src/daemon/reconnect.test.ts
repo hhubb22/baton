@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -14,6 +15,9 @@ import { setupDaemon } from '../testing/daemon.ts'
 import type { ProjectManager } from '../project/types.ts'
 import { makeNodeLedger } from './ledger.ts'
 import { reportBatondError } from '../cli.ts'
+import { acquireProcessLock } from '../platform/lock.ts'
+import { DeploymentInvalid } from './deployment.ts'
+import { NeedsReauthentication } from './daemon.ts'
 
 vi.mock('../project/index.ts', () => ({
   makeProjectManager: () => {
@@ -880,7 +884,12 @@ it('stops after version rejection, reports both versions and retains local comma
         reason: 'protocol_version_unsupported',
       },
     })
-    expect(process.exitCode).toBe(1)
+    expect(process.exitCode).toBe(78)
+    expect(JSON.parse(await readFile(join(path, 'daemon-status.json'), 'utf8'))).toMatchObject({
+      pid: process.pid,
+      state: 'rejected',
+      code: 'node_version_incompatible',
+    })
   } finally {
     output.mockRestore()
     process.exitCode = exitCode
@@ -890,7 +899,7 @@ it('stops after version rejection, reports both versions and retains local comma
 it.each(['invalid_node_credential', 'node_source_rejected', 'credential_revoked'])(
   'stops reconnecting for terminal auth_result %s',
   async (code) => {
-    const { wss, start } = await setup()
+    const { path, id, wss, start } = await setup()
     let connections = 0
     wss.on('connection', (socket) => {
       connections++
@@ -904,6 +913,9 @@ it.each(['invalid_node_credential', 'node_source_rejected', 'credential_revoked'
     expect(daemon.failure()).toBeDefined()
     expect(String(daemon.failure())).toContain('需要重新认证')
     expect(connections).toBe(1)
+    const status = await readFile(join(path, 'daemon-status.json'), 'utf8')
+    expect(JSON.parse(status)).toMatchObject({ pid: process.pid, state: 'rejected', code: 'needs_reauth' })
+    expect(status).not.toContain(id.credential.token)
   },
 )
 
@@ -926,3 +938,65 @@ it.each(['invalid_node_credential', 'node_source_rejected', 'credential_revoked'
     expect(connections).toBe(1)
   },
 )
+
+it('reports connecting, online, reconnecting and stopping while retaining the daemon lock until shutdown', async () => {
+  const { path, id, wss, start } = await setup()
+  const status = async () =>
+    JSON.parse(await readFile(join(path, 'daemon-status.json'), 'utf8')) as {
+      pid: number
+      state: string
+      updated_at: string
+    }
+  const sockets: WebSocket[] = []
+  wss.on('connection', (socket) => {
+    sockets.push(socket)
+  })
+  const daemon = start()
+  await vi.waitFor(() => expect(sockets).toHaveLength(1))
+  expect(await status()).toMatchObject({ pid: process.pid, state: 'connecting' })
+  sockets[0]!.send(JSON.stringify({ kind: 'auth_result', ok: true }))
+  await vi.waitFor(async () => expect((await status()).state).toBe('online'))
+  expect(Number.isNaN(Date.parse((await status()).updated_at))).toBe(false)
+  const second = start()
+  await second.running
+  const output = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  const previousExit = process.exitCode
+  try {
+    reportBatondError(second.failure(), 'run')
+    expect(JSON.parse(String(output.mock.calls[0]?.[0]))).toMatchObject({ code: 'daemon_running' })
+    expect(process.exitCode).toBe(1)
+    expect((await status()).state).toBe('online')
+  } finally {
+    output.mockRestore()
+    process.exitCode = previousExit
+  }
+  sockets[0]!.terminate()
+  await vi.waitFor(async () => expect((await status()).state).toBe('connecting'))
+  await daemon.stop()
+  expect(await status()).toMatchObject({ pid: process.pid, state: 'stopping' })
+  expect(await readFile(join(path, 'daemon-status.json'), 'utf8')).not.toContain(id.credential.token)
+})
+
+it('maps daemon lock contention and deployment/authentication failures to public codes and exit statuses', async () => {
+  const { path, start } = await setup()
+  const release = await acquireProcessLock(join(path, 'daemon.lock'))
+  cleanup.push(release)
+  const daemon = start()
+  await daemon.running
+  const output = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  const previousExit = process.exitCode
+  try {
+    for (const [error, code, exit] of [
+      [daemon.failure(), 'daemon_running', 1],
+      [new NeedsReauthentication(), 'needs_reauth', 78],
+      [new DeploymentInvalid(), 'deployment_invalid', 1],
+    ] as const) {
+      reportBatondError(error, 'run')
+      expect(JSON.parse(String(output.mock.lastCall?.[0]))).toMatchObject({ code })
+      expect(process.exitCode).toBe(exit)
+    }
+  } finally {
+    output.mockRestore()
+    process.exitCode = previousExit
+  }
+})

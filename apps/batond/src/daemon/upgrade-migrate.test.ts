@@ -2,6 +2,7 @@ import { randomUUID, createHash } from 'node:crypto'
 import * as fs from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import { request } from 'node:https'
 import { Effect } from 'effect'
 import { afterEach, expect, it, vi } from 'vite-plus/test'
 import { releaseMetadata } from '@baton/protocol/release'
@@ -27,7 +28,10 @@ vi.mock('node:fs/promises', async (original) => {
   const actual = await original<typeof import('node:fs/promises')>()
   return { ...actual, statfs: vi.fn(actual.statfs) }
 })
-vi.mock('node:https', async () => (await import('../testing/upgrade.ts')).upgradeHTTPSFixture())
+vi.mock('node:https', async () => {
+  const fixture = (await import('../testing/upgrade.ts')).upgradeHTTPSFixture()
+  return { request: vi.fn(fixture.request.bind(fixture)) }
+})
 vi.mock('node:child_process', async () => (await import('../testing/upgrade.ts')).upgradeProcessFixture())
 
 const cleanup: Array<() => Promise<unknown>> = []
@@ -124,6 +128,32 @@ async function snapshot(path: string) {
         .digest('hex')
   return files
 }
+
+it('uses the saved CA for upgrade checks and lets the CLI override it without changing the saved file', async () => {
+  const f = await fixture()
+  const ca = join(f.path, 'coordinator-ca.pem')
+  const explicit = join(f.path, 'explicit-ca.pem')
+  await writePrivateFileAtomic(ca, 'saved-ca')
+  await writePrivateFileAtomic(explicit, 'explicit-ca')
+  expect(await checkUpgrade(f.path, f.target)).toMatchObject({ ok: true })
+  expect(request).toHaveBeenLastCalledWith(
+    `${f.center.url}/api/v1/release`,
+    expect.objectContaining({ ca: 'saved-ca' }),
+    expect.any(Function),
+  )
+  const output = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+  try {
+    await runBatondCLI(['upgrade', 'check', '--data-dir', f.path, '--package', f.target, '--ca-file', explicit])
+    expect(request).toHaveBeenLastCalledWith(
+      `${f.center.url}/api/v1/release`,
+      expect.objectContaining({ ca: 'explicit-ca' }),
+      expect.any(Function),
+    )
+    expect(await fs.readFile(ca, 'utf8')).toBe('saved-ca')
+  } finally {
+    output.mockRestore()
+  }
+})
 
 it('checks actual package identity, local formats, center compatibility and backup space without changing data', async () => {
   const f = await fixture()

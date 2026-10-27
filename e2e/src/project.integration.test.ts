@@ -22,6 +22,7 @@ import { registerNode } from '@baton/batond/daemon/identity'
 import { initializeBrowseRoots } from '@baton/batond/devices/roots'
 import { LocalWorkerHost } from '@baton/batond/daemon/host'
 import { runDaemon } from '@baton/batond/daemon/daemon'
+import { runDaemonCLI } from '@baton/batond/daemon/cli'
 import { assertStoredTurnTrace, readTurnTrace } from './testing/turn-trace.ts'
 
 const origin = 'https://baton.local'
@@ -689,6 +690,92 @@ test('completed chat → background memory and HTTP embeddings → recall → re
     await daemon
     embeddings.closeAllConnections()
     await new Promise<void>((resolve, reject) => embeddings.close((error) => (error ? reject(error) : resolve())))
+    await database.runtime.runPromise(Scope.close(scope, Exit.void))
+    await database.close()
+    await rm(directory, { recursive: true, force: true })
+  }
+}, 60000)
+
+test('deployment outside the data directory registers without coordinator or CA arguments and connects using saved CA', async () => {
+  const database = await openTestDatabase()
+  const directory = await realpath(await mkdtemp(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'bds-')))
+  const installationDirectory = join(directory, 'installation')
+  const dataDirectory = join(directory, 'node')
+  const scope = Scope.makeUnsafe()
+  const controller = new AbortController()
+  let daemon: Promise<unknown> | undefined
+  try {
+    await mkdir(installationDirectory)
+    const keyFile = join(directory, 'server.key')
+    const caFile = join(directory, 'server.crt')
+    await promisify(execFile)('openssl', [
+      'req',
+      '-x509',
+      '-newkey',
+      'ec',
+      '-pkeyopt',
+      'ec_paramgen_curve:prime256v1',
+      '-nodes',
+      '-days',
+      '1',
+      '-subj',
+      '/CN=localhost',
+      '-addext',
+      'subjectAltName=IP:127.0.0.1,DNS:localhost',
+      '-keyout',
+      keyFile,
+      '-out',
+      caFile,
+    ])
+    const ca = await readFile(caFile, 'utf8')
+    const server = await database.run(
+      startServer({
+        port: 0,
+        allowedOrigins: [origin],
+        signer: Nodes.CredentialSigner.generate(),
+        tls: { cert: ca, key: await readFile(keyFile) },
+        heartbeatMs: 1000,
+        offlineMs: 5000,
+      }).pipe(Effect.provideService(Scope.Scope, scope)),
+    )
+    const base = `https://127.0.0.1:${server.port}`
+    await writeFile(
+      join(installationDirectory, 'deployment.json'),
+      JSON.stringify({
+        format: 1,
+        coordinator_url: base,
+        ca_pem: ca,
+      }),
+    )
+    await database.run(Auth.createEmployee('deploymentalice', 'Alice', 'local-t3-initial-password-123'))
+    const alice = browser(base, ca)
+    await signIn(alice, 'deploymentalice')
+    const enrollment = await alice<P.EnrollmentResponse>('/node-enrollments', 'POST', {})
+    expect(enrollment.status).toBe(201)
+    const enrollmentFile = join(directory, 'enrollment')
+    await writeFile(enrollmentFile, enrollment.body.enrollment_token, { mode: 0o600 })
+    await runDaemonCLI(
+      'register',
+      ['--data-dir', dataDirectory, '--enrollment-file', enrollmentFile, '--display-name', 'Deployment workstation'],
+      { installationDirectory },
+    )
+    expect(await readFile(join(dataDirectory, 'coordinator-ca.pem'), 'utf8')).toBe(ca)
+    await writeFile(join(installationDirectory, 'deployment.json'), '{invalid deployment must be ignored')
+    daemon = Effect.runPromiseExit(Effect.scoped(runDaemon({ dataDirectory, probe: async () => [] })), {
+      signal: controller.signal,
+    })
+    const status = async () =>
+      JSON.parse(await readFile(join(dataDirectory, 'daemon-status.json'), 'utf8')) as {
+        state: string
+      }
+    await expect.poll(status, { timeout: 15000 }).toMatchObject({ state: 'online' })
+    controller.abort()
+    await daemon
+    expect(await status()).toMatchObject({ state: 'stopping' })
+    expect(await readFile(join(dataDirectory, 'coordinator-ca.pem'), 'utf8')).toBe(ca)
+  } finally {
+    controller.abort()
+    await daemon
     await database.runtime.runPromise(Scope.close(scope, Exit.void))
     await database.close()
     await rm(directory, { recursive: true, force: true })

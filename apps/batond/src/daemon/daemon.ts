@@ -1,10 +1,10 @@
 import { BUILD, PROTOCOL_VERSION } from '@baton/protocol/release'
 import { randomBytes, randomUUID } from 'node:crypto'
-import { readFile, unlink, chmod, lstat } from 'node:fs/promises'
+import { unlink, chmod, lstat } from 'node:fs/promises'
 import { userInfo } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import { Cause, Context, Effect, Schema, Tracer } from 'effect'
+import { Cause, Context, Effect, Exit, Schema, Tracer } from 'effect'
 import type * as Scope from 'effect/Scope'
 import {
   ControlToNodeBody,
@@ -20,7 +20,7 @@ import { hasCode } from '../platform/errors.ts'
 import { acquireProcessLock } from '../platform/lock.ts'
 import { ensurePrivateDirectory, openPrivateFile, writePrivateFileAtomic } from '../platform/private.ts'
 import { LocalWorkerHost, type DaemonWorkerHost } from './host.ts'
-import { isMissing, loadIdentity, relayURL as normalizeRelay, coordinatorURL } from './identity.ts'
+import { isMissing, loadIdentity, loadCoordinatorCA, relayURL as normalizeRelay, coordinatorURL } from './identity.ts'
 import { initializeBrowseRoots, loadBrowseRoots } from '../devices/roots.ts'
 import { makeDeviceService, boundRuntimeReport, type DeviceService } from '../devices/index.ts'
 import { makeProjectManager, type ProjectManager, type ProjectManagerOptions } from '../project/index.ts'
@@ -299,6 +299,7 @@ async function connected(options: {
         }
         authenticated = true
         authenticatedAt = performance.now()
+        await writeDaemonStatus(options.dataDirectory, 'online')
         await sync()
         await send({ kind: 'heartbeat' })
         continue
@@ -453,7 +454,31 @@ async function connected(options: {
   }
 }
 
-/** Scope owns the connection, background tasks, node database and process lock. Workers survive it. */
+async function writeDaemonStatus(
+  directory: string,
+  state: 'connecting' | 'online' | 'rejected' | 'stopping',
+  error?: unknown,
+) {
+  await writePrivateFileAtomic(
+    join(directory, 'daemon-status.json'),
+    JSON.stringify({
+      pid: process.pid,
+      state,
+      ...(state === 'rejected'
+        ? {
+            code:
+              error instanceof Error && 'code' in error && typeof error.code === 'string'
+                ? error.code
+                : 'batond_failed',
+            message: error instanceof Error ? error.message : '节点运行失败',
+          }
+        : {}),
+      updated_at: new Date().toISOString(),
+    }),
+  )
+}
+
+/** Scope 管理连接、后台任务、节点数据库与进程锁；Worker 独立存活。 */
 export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error, Scope.Scope> => {
   const program = Effect.gen(function* () {
     const services = yield* DaemonServices
@@ -473,6 +498,19 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
       attempt(() => acquireProcessLock(join(options.dataDirectory, 'daemon.lock'))),
       (release) => Effect.orDie(attempt(release)),
     )
+    yield* Effect.addFinalizer((exit) =>
+      Effect.orDie(
+        attempt(() => {
+          const rejected = Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)
+          return writeDaemonStatus(
+            options.dataDirectory,
+            rejected ? 'rejected' : 'stopping',
+            rejected ? Cause.squash(exit.cause) : undefined,
+          )
+        }),
+      ),
+    )
+    yield* attempt(() => writeDaemonStatus(options.dataDirectory, 'connecting'))
     const identity = options.identity ?? (yield* attempt(() => loadIdentity(options.dataDirectory)))
     let address = options.relayURL
     if (!address) {
@@ -480,7 +518,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
       address = coordinatorURL(identity.coordinator_url).replace('https:', 'wss:') + '/v1/node'
     }
     const url = yield* Effect.try({ try: () => normalizeRelay(address!), catch: () => new Error('Relay 地址无效') })
-    const ca = options.caFile ? yield* attempt(() => readFile(options.caFile!, 'utf8')) : undefined
+    const ca = yield* attempt(() => loadCoordinatorCA(options.dataDirectory, options.caFile))
     let serial: Promise<unknown> = Promise.resolve()
     const paths = upgradePaths(options.dataDirectory)
     yield* attempt(async () => {
@@ -553,6 +591,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
       Effect.gen(function* () {
         let retry = 0
         while (true) {
+          yield* attempt(() => writeDaemonStatus(options.dataDirectory, 'connecting'))
           const started = performance.now()
           const outcome = yield* controlAttempt(async (signal) => {
             let connection: DaemonConnection | undefined
@@ -581,6 +620,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
               hasCode(outcome.failure, 'node_version_incompatible'))
           )
             return yield* Effect.fail(outcome.failure)
+          yield* attempt(() => writeDaemonStatus(options.dataDirectory, 'connecting'))
           if (performance.now() - started >= heartbeatMs) retry = 0
           yield* Effect.sleep(reconnectDelay(retry++, options.random))
         }

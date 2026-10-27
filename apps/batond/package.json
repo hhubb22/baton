@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./daemon/daemon": "./src/daemon/daemon.ts",
+    "./daemon/cli": "./src/daemon/cli.ts",
     "./daemon/identity": "./src/daemon/identity.ts",
     "./daemon/transport": "./src/daemon/transport.ts",
     "./devices/roots": "./src/devices/roots.ts",

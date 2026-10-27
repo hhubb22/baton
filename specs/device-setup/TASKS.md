@@ -12,12 +12,12 @@
 - 交付：解压带部署配置的安装包后，`batond register` 和 `up` 不传中心地址与 CA 即可注册，之后 `run`、`reauth`、`upgrade check` 使用保存的 CA；客户端和服务所需的 `identity` 命令、状态文件、错误码、退出码 78 和 `--exit-with-stdin` 可用
 - 依据：TECH.md「部署配置」「batond」中除 `batond service` 外的部分
 - 验证：batond 包内单元测试；e2e 增加一个从注入目录不带参数注册并连接的用例
-- 状态：待开始
+- 状态：已完成
 
 验收：
 
-- [ ] 部署配置回退、显式参数优先、已有身份不读部署配置，CA 保存与替换有单元测试
-- [ ] 持有 `daemon.lock` 时 `run` 输出 `daemon_running`；认证、拒绝和 stdin 关闭后状态文件与退出码正确
+- [x] 部署配置回退、显式参数优先、已有身份不读部署配置，CA 保存与替换有单元测试
+- [x] 持有 `daemon.lock` 时 `run` 输出 `daemon_running`；认证、拒绝和 stdin 关闭后状态文件与退出码正确
 
 ## T02 中心托管安装包，网页给出 CLI 下载与命令
 

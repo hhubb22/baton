@@ -1,3 +1,4 @@
+import { PassThrough } from 'node:stream'
 import { Effect } from 'effect'
 import { beforeEach, expect, it, vi } from 'vite-plus/test'
 import type { NodeIdentity } from '@baton/protocol'
@@ -5,11 +6,13 @@ import { runDaemonCLI } from './cli.ts'
 import { runDaemon } from './daemon.ts'
 import { loadIdentity, reauthNode, registerNode } from './identity.ts'
 import { initializeBrowseRoots } from '../devices/roots.ts'
+import { loadDeployment } from './deployment.ts'
 
 vi.mock('./daemon.ts', () => ({ runDaemon: vi.fn(() => Effect.void) }))
+vi.mock('./deployment.ts', () => ({ loadDeployment: vi.fn() }))
 vi.mock('./identity.ts', () => ({
   defaultDataDirectory: () => '/offline-node',
-  isMissing: () => false,
+  isMissing: (error: unknown) => error instanceof Error && 'code' in error && error.code === 'ENOENT',
   loadIdentity: vi.fn(),
   registerNode: vi.fn(),
   reauthNode: vi.fn(),
@@ -34,7 +37,9 @@ const identity: NodeIdentity = {
 }
 
 beforeEach(() => {
-  vi.clearAllMocks()
+  vi.resetAllMocks()
+  vi.mocked(runDaemon).mockImplementation(() => Effect.void)
+  vi.mocked(registerNode).mockResolvedValue(identity)
   vi.mocked(loadIdentity).mockResolvedValue(identity)
   vi.mocked(reauthNode).mockResolvedValue(identity)
 })
@@ -103,3 +108,98 @@ it.each(['0', '-1', '1.5', '3601', 'NaN', 'Infinity'])(
     expect(runDaemon).not.toHaveBeenCalled()
   },
 )
+
+it.each(['up', 'register'] as const)('%s uses deployment defaults only for first registration', async (action) => {
+  const output = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+  try {
+    vi.mocked(loadIdentity).mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' }))
+    vi.mocked(loadDeployment).mockResolvedValue({
+      format: 1,
+      coordinator_url: 'https://deployment.invalid',
+      ca_pem: 'deployment-ca',
+    })
+    await runDaemonCLI(action, [], { installationDirectory: '/installation' })
+    expect(loadDeployment).toHaveBeenCalledWith('/installation')
+    expect(registerNode).toHaveBeenCalledWith(
+      expect.objectContaining({
+        coordinatorURL: 'https://deployment.invalid',
+        caPem: 'deployment-ca',
+      }),
+    )
+    vi.mocked(registerNode).mockClear()
+    await runDaemonCLI(action, ['--coordinator', 'https://explicit.invalid', '--ca-file', '/explicit-ca'])
+    const options = vi.mocked(registerNode).mock.calls[0]![0]
+    expect(options).toMatchObject({ coordinatorURL: 'https://explicit.invalid', caFile: '/explicit-ca' })
+    expect(options).not.toHaveProperty('caPem')
+  } finally {
+    output.mockRestore()
+  }
+})
+
+it.each(['up', 'run', 'register', 'reauth'] as const)(
+  '%s does not read deployment for an existing identity',
+  async (action) => {
+    const output = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+    try {
+      vi.mocked(loadDeployment).mockRejectedValue(new Error('must not read deployment'))
+      if (action === 'register') await expect(runDaemonCLI(action, [])).rejects.toThrow('节点身份已存在')
+      else await runDaemonCLI(action, [])
+      expect(loadDeployment).not.toHaveBeenCalled()
+      expect(registerNode).not.toHaveBeenCalled()
+    } finally {
+      output.mockRestore()
+    }
+  },
+)
+
+it('identity reports only public identity fields and handles an unregistered directory without creating it', async () => {
+  const output = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+  try {
+    await runDaemonCLI('identity', [])
+    expect(JSON.parse(output.mock.calls[0]![0] as string)).toEqual({
+      registered: true,
+      node_id: identity.node_id,
+      display_name: identity.display_name,
+      system: identity.system,
+    })
+    expect(JSON.stringify(output.mock.calls)).not.toContain(identity.credential.token)
+    vi.mocked(loadIdentity).mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' }))
+    await runDaemonCLI('identity', [])
+    expect(output).toHaveBeenLastCalledWith(JSON.stringify({ registered: false }))
+    expect(initializeBrowseRoots).not.toHaveBeenCalled()
+    expect(loadDeployment).not.toHaveBeenCalled()
+    expect(runDaemon).not.toHaveBeenCalled()
+  } finally {
+    output.mockRestore()
+  }
+})
+
+it('run aborts on stdin EOF and removes its listener', async () => {
+  const stdin = new PassThrough()
+  const started = Promise.withResolvers<void>()
+  let aborted = false
+  vi.mocked(runDaemon).mockImplementation(() =>
+    Effect.tryPromise({
+      try: async (signal) => {
+        started.resolve()
+        await new Promise<void>((resolve) =>
+          signal.addEventListener(
+            'abort',
+            () => {
+              aborted = true
+              resolve()
+            },
+            { once: true },
+          ),
+        )
+      },
+      catch: () => new Error('unexpected stdin failure'),
+    }),
+  )
+  const running = runDaemonCLI('run', ['--exit-with-stdin'], { stdin })
+  await started.promise
+  stdin.end()
+  await running
+  expect(aborted).toBe(true)
+  expect(stdin.listenerCount('end')).toBe(0)
+})

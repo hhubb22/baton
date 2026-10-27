@@ -63,7 +63,7 @@ node apps/batond/dist/batond.cjs files add --id repo --path /你的代码目录
 node apps/batond/dist/batond.cjs run
 ```
 
-注册将规范化的中心 HTTPS 地址保存为 `identity.json` 的 `coordinator_url`，`run` 据此推导 WSS 地址；`--relay` 可显式指定。默认数据目录为 `~/.baton-ts`，所有命令使用相同的 `--data-dir`。注册凭据也可用 `--enrollment-file` 从私有文件读取；私有 CA 使用 `--ca-file`，每次运行均须提供。更多本地命令和恢复语义见 [节点文档](apps/batond/README.md)。
+注册将规范化的中心 HTTPS 地址保存为 `identity.json` 的 `coordinator_url`，`run` 据此推导 WSS 地址；`--relay` 可显式指定。默认数据目录为 `~/.baton-ts`，所有命令使用相同的 `--data-dir`。注册凭据也可用 `--enrollment-file` 从私有文件读取。SEA 安装包首次执行 `up` 或 `register` 时，中心地址与 CA 可来自安装目录的 `deployment.json`，显式 `--coordinator` 和 `--ca-file` 优先；源码和 bundle 入口仍需指定中心地址。注册或重新认证成功后，CA 保存为数据目录的私有文件 `coordinator-ca.pem`，后续 `up`、`run`、`reauth` 与 `upgrade check` 默认使用它，`--ca-file` 可覆盖。已有身份不读取安装包的部署配置。`batond identity` 输出注册状态、中心地址与公开身份，不含凭据。更多本地命令和恢复语义见 [节点文档](apps/batond/README.md)。
 
 设备连接凭据在连续 30 天没有有效业务后过期。心跳、重连、能力探测和后台记忆整理不续期。过期后为原设备领取重新认证口令，停止该设备的 batond，再用同一数据目录执行 `batond reauth --enrollment-file <私有文件>`，随后运行 `batond up`。设备与 Thread ID、本地历史和待补报结果保留。
 
@@ -85,7 +85,7 @@ node apps/batond/dist/batond.cjs run
 /目标安装目录/batond run --data-dir /原数据目录
 ```
 
-启动时保留原 Runtime 凭据目录与启动配置；私有 CA 仍须传 `--ca-file`。Windows 使用 `batond.exe`，服务管理器由用户显式改为目标程序路径。目标 daemon 补报结果并取得中心完成回执后恢复原队列；`upgrade status` 应显示 `completed`。迁移前可用 `upgrade cancel --data-dir /原数据目录` 取消准备。备份、失败重跑与未测范围见 [设备准备与切换](specs/release/TECH.md#设备准备与切换)。
+启动时保留原 Runtime 凭据目录与启动配置；私有 CA 默认使用数据目录中保存的证书，也可传 `--ca-file` 覆盖。Windows 使用 `batond.exe`，服务管理器由用户显式改为目标程序路径。目标 daemon 补报结果并取得中心完成回执后恢复原队列；`upgrade status` 应显示 `completed`。迁移前可用 `upgrade cancel --data-dir /原数据目录` 取消准备。备份、失败重跑与未测范围见 [设备准备与切换](specs/release/TECH.md#设备准备与切换)。
 
 ### Project 与模型订阅
 

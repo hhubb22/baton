@@ -9,7 +9,7 @@ import { checkStorageFormat, StorageFormatError } from '../storage-format.ts'
 import { storageBaseline as nodeBaseline } from './ledger.ts'
 import { storageBaseline as projectBaseline } from '../project/ledger.ts'
 import { storageBaseline as threadBaseline } from '../worker/ledger.ts'
-import { coordinatorURL, isMissing, loadIdentity } from './identity.ts'
+import { coordinatorURL, isMissing, loadIdentity, loadCoordinatorCA } from './identity.ts'
 import { IPCError } from './ipc.ts'
 import { backupSpace } from './upgrade-backup.ts'
 
@@ -129,7 +129,7 @@ export async function checkUpgrade(directory: string, target: string, ca?: strin
     }
     const identity = await loadIdentity(directory)
     if (!identity.coordinator_url) throw new IPCError('upgrade_coordinator_unavailable', '身份文件缺少当前中心地址')
-    const center = await centerRelease(identity.coordinator_url, ca)
+    const center = await centerRelease(identity.coordinator_url, ca ?? (await loadCoordinatorCA(directory)))
     if (
       center.protocol_version !== release.protocol_version ||
       (center.version !== 'development' &&

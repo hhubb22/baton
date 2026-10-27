@@ -1,6 +1,6 @@
 # 远程节点
 
-`up` 首次注册并保持出站 WSS，已有身份时复用；`register` 拒绝覆盖已有身份，`run` 读取已有身份。连接地址从持久化的 HTTPS 中心地址推导，支持显式 relay 与附加 CA，TLS 验证始终开启；CLI 只打印公开身份摘要。部署和配置用法见根 README。
+`up` 首次注册并保持出站 WSS，已有身份时复用；`register` 拒绝覆盖已有身份，`run` 读取已有身份。连接地址从持久化的 HTTPS 中心地址推导，支持显式 relay 与附加 CA，TLS 验证始终开启；CLI 只打印公开身份摘要。首次注册可从 SEA 安装目录读取 `deployment.json`，已有身份不读取部署配置。注册和重新认证成功后在身份锁下先保存 `coordinator-ca.pem` 再保存身份，后续连接默认读取该 CA。部署和配置用法见根 README。
 
 私有目录中的 `identity.json` 保存中心签发的 JWT；授权目录由 [`devices/roots.ts`](../devices/roots.ts) 统一读写和检查，配置格式、数量上限与加锁规则见 [设备管理与文件访问](../devices/README.md)。仅配置文件不存在时登记用户主目录，已有空列表保留。`up --workspace` 按真实路径幂等添加目录。open、message 和 resume 下发前复核工作目录的真实路径与授权根；stop、withdraw 使用已登记的 Thread 身份与代次，撤销授权或删除工作目录后仍可停止和撤回。目录和文件预览由 `devices/` 提供，使用同一授权根；目录符号链接解析后须仍在该根内，文件预览保留字节上限与分页信息。
 
@@ -22,8 +22,10 @@ Project manager 在 WSS 连接循环外构造，连接同步后绑定当前 RPC 
 
 `identity.ts` 和 `daemon.ts` 分别导出：
 
-- `registerNode(options): Promise<NodeIdentity>`，选项为 `dataDirectory`、`coordinatorURL`、可选的 `enrollmentFile`、`displayName`、`caFile`、`signal`、`transport`。
+- `registerNode(options): Promise<NodeIdentity>`，选项为 `dataDirectory`、`coordinatorURL`、可选的 `enrollmentFile`、`displayName`、`caFile`、`caPem`、`signal`、`transport`；`caFile` 优先于 `caPem`。
 - `runDaemon(options): Effect.Effect<void, Error, Scope.Scope>`，选项为 `dataDirectory`，可选的 `identity`、`relayURL`、`caFile`、`controlTimeoutSeconds`、`heartbeatMs`、`pollIntervalMs`、`probeIntervalMs`、`transport`、`probe`、`host`、`random`、`project`。`project` 可注入源码 Runtime 命令、时钟和租约时序，默认使用现有 Runtime 实现。
+
+`loadCoordinatorCA(dataDirectory, explicitFile?)` 优先读取显式 CA 文件，其次读取私有数据目录中保存的 CA，都没有时返回 undefined。`loadDeployment(installationDirectory?)` 默认只在 SEA 中读取安装目录，嵌入调用可注入目录。`runDaemonCLI(action, args, dependencies?)` 支持注入安装目录与 stdin，用于本地集成验证。
 
 运行方使用 `Effect.runPromise(Effect.scoped(runDaemon(options)), { signal })` 管理退出。`DaemonServices` 通过 Effect Context 提供 Host、传输与探测实现；连接、后台任务、SQLite 和进程锁由 Scope 管理。
 

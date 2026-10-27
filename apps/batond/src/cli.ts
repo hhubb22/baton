@@ -1,9 +1,9 @@
 import { BUNDLED, releaseMetadata, NodeVersionIncompatibility } from '@baton/protocol/release'
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { realpath, readFile } from 'node:fs/promises'
+import { realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { isSea } from 'node:sea'
 import { Effect, Schema } from 'effect'
@@ -11,21 +11,25 @@ import { telemetryLayer } from '@baton/telemetry'
 import { ExecutionTimeoutSeconds, WorkerOpen, type RuntimeAgent, type WorkerRequest } from '@baton/protocol'
 import { LocalWorkerHost, initializeWorkerDirectory } from './daemon/host.ts'
 import { IPCError } from './daemon/ipc.ts'
-import { processLockIsHeld } from './platform/lock.ts'
+import { processLockIsHeld, ProcessLockBusy } from './platform/lock.ts'
+import { loadCoordinatorCA } from './daemon/identity.ts'
 import { readUpgradeState, upgradeOffline } from './daemon/upgrade.ts'
 import { readPrivateFile, writePrivateFileAtomic } from './platform/private.ts'
 
 const usage = `Baton 节点
 
   --version
-  up --coordinator <https://中心> [--workspace <绝对目录>]
-  register --coordinator <https://中心> [--enrollment-file <私有文件>]
+  up [--coordinator <https://中心>] [--workspace <绝对目录>]
+  register [--coordinator <https://中心>] [--enrollment-file <私有文件>]
+  identity
   reauth [--enrollment-file <私有文件>] [--ca-file <CA证书>]
   run [--relay <wss://中心/v1/node>]
 
 注册与重新认证凭据来自 BATON_ENROLLMENT_TOKEN 或 --enrollment-file。
 reauth 使用已有身份和保存的中心地址；中断后再次运行沿用原操作，成功后用 up/run 连接。
 up 复用已有身份，首次运行登记主目录；--workspace 可额外登记目录。
+首次注册可使用 SEA 安装目录中的 deployment.json；显式 --coordinator / --ca-file 优先。
+注册与重新认证成功后保存 CA，后续连接默认使用保存的 CA。identity 仅输出注册状态与公开身份。
 up/run 支持 --control-timeout-seconds <秒>，认证与同步各默认等待 370 秒，范围 1～3600。
 
 设备管理：
@@ -84,7 +88,7 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
     }
     return
   }
-  if (action === 'up' || action === 'register' || action === 'reauth' || action === 'run') {
+  if (action === 'up' || action === 'register' || action === 'reauth' || action === 'run' || action === 'identity') {
     const { runDaemonCLI } = await import('./daemon/cli.ts')
     await runDaemonCLI(action, args)
     return
@@ -114,7 +118,7 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
       const result = await checkUpgrade(
         directory,
         values.package!,
-        values['ca-file'] ? await readFile(values['ca-file'], 'utf8') : undefined,
+        await loadCoordinatorCA(directory, values['ca-file']),
       )
       console.log(JSON.stringify(result))
       if (!result.ok) process.exitCode = 1
@@ -247,21 +251,33 @@ export function reportBatondError(error: unknown, action = process.argv[2]): voi
     Schema.is(NodeVersionIncompatibility)(error.version_incompatibility)
       ? error.version_incompatibility
       : undefined
-  // SDK diagnostics remain in the isolated host; public errors contain no raw SDK output.
+  const daemonRunning = error instanceof ProcessLockBusy && basename(error.path) === 'daemon.lock'
+  const knownCode =
+    error instanceof Error && 'code' in error && ['needs_reauth', 'deployment_invalid'].includes(String(error.code))
+      ? String(error.code)
+      : undefined
+  const code = incompatible
+    ? 'node_version_incompatible'
+    : daemonRunning
+      ? 'daemon_running'
+      : (knownCode ?? (error instanceof IPCError ? error.code : 'batond_failed'))
+  // SDK 诊断留在隔离宿主内，公开错误不包含原始 SDK 输出。
   console.error(
     JSON.stringify({
       ok: false,
-      code: incompatible ? 'node_version_incompatible' : error instanceof IPCError ? error.code : 'batond_failed',
+      code,
       ...(detail ? { version_incompatibility: detail } : {}),
       message:
         action === 'worker' || action === 'agent-host' || action === 'watchdog'
           ? `${action} failed`
-          : error instanceof Error
-            ? error.message
-            : 'Baton 本地命令失败',
+          : daemonRunning
+            ? '服务或桌面客户端正在运行，请先停止已有 batond 再重试'
+            : error instanceof Error
+              ? error.message
+              : 'Baton 本地命令失败',
     }),
   )
-  process.exitCode = 1
+  process.exitCode = ['needs_reauth', 'node_version_incompatible'].includes(code) ? 78 : 1
 }
 
 export async function runLocalCLI(

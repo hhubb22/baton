@@ -8,12 +8,12 @@ Basis: [设备接入行为规格](PRODUCT.md) DS-01～DS-23；调查提交 `2b28
 
 设备接入现在由四段独立的流程组成：
 
-- **注册：** `apps/batond/src/daemon/cli.ts` 的 `up` 和 `register` 必须带 `--coordinator`。`registerNode`（`daemon/identity.ts:173`）只在本次请求中读取 `--ca-file`，把 `coordinator_url` 写进私有的 `identity.json`。
-- **运行：** `runDaemon`（`daemon/daemon.ts:483`）每次启动都要重新传 `--ca-file`。
+- **注册：** `apps/batond/src/daemon/cli.ts` 的 `up` 和 `register` 首次注册可使用 SEA 安装目录中的 `deployment.json`，显式参数优先。`registerNode` 在私有数据目录中保存 `coordinator_url` 与本次使用的 CA。
+- **运行：** `runDaemon`、重新认证和升级检查默认使用保存的 CA，已有身份不读取安装目录的部署配置。
 - **网页：** `web/src/app/EnrollDialog.tsx:82` 生成的命令假定 `batond` 已在 PATH 上，凭据通过 `read -rs` 写进环境变量。
 - **中心：** `apps/server/src/http/index.ts` 只托管网页静态文件，匿名公开接口只有 `GET /api/v1/release`；对外地址只出现在 `BATON_ALLOWED_ORIGINS` 中，用于检查 POST 请求的 Origin。
 
-daemon 没有对外报告连接状态。致命失败时，`reportBatondError`（`apps/batond/src/cli.ts:242`）在 stderr 输出一行 JSON 后退出，`node_version_incompatible` 以外的失败统一报成 `batond_failed`。`daemon.lock` 由 `platform/lock.ts` 管理，第二个 daemon 会遇到 `ProcessLockBusy`。
+daemon 在私有数据目录的 `daemon-status.json` 中报告连接状态。致命失败时，`reportBatondError` 在 stderr 输出一行 JSON 后退出，凭据拒绝和版本不兼容的退出码为 78，部署配置错误与 daemon 锁占用也有独立错误码。`daemon.lock` 由 `platform/lock.ts` 管理，第二个 daemon 的 `ProcessLockBusy` 映射为 `daemon_running`。
 
 发布流水线 `.github/workflows/release-packages.yml` 已在 macos-15、ubuntu-24.04、ubuntu-24.04-arm、windows-2025 四个原生 runner 上产出 `baton-<版本>-<平台>.tar.gz|zip`，归档顶层目录同名，内含 `release.json`。
 
@@ -232,14 +232,14 @@ macOS 的应用整体做临时签名，内置的 batond 保留自身的临时签
 |---|---|---|---|---|
 | DS-02、DS-03 | 测试内用系统 tar 生成小型 CLI 归档；注入两次；目录中再放版本不符、`.sha256` 不符和顶层名不符的文件 | 两次输出字节不同，解包后缺少 `deployment.json` 或其他文件有变化，不合格的文件出现在清单中 | `apps/server` 单元 + 集成 | planned |
 | DS-01、DS-02 | 中心集成测试启用下载，匿名请求清单与文件，变换 Host | 需要登录；清单哈希与下载内容不一致；未列出的文件名能被下载；Host 不匹配时仍生成部署配置 | `apps/server` 集成 | planned |
-| DS-05～DS-07 | 用注入的 transport 注册和重新认证；SEA 场景用临时目录模拟 `deployment.json` | 未保存或未替换 CA；已有身份时读了部署配置；显式参数没有优先 | `apps/batond` 单元 | planned |
+| DS-05～DS-07 | 用注入的 transport 注册和重新认证；SEA 场景用临时目录模拟 `deployment.json` | 未保存或未替换 CA；已有身份时读了部署配置；显式参数没有优先 | `apps/batond` 单元 | implemented |
 | DS-08～DS-10 | 生成 plist 和 unit 文本；用替身 runner 模拟命令失败 | 定义缺少参数；失败后残留或覆盖了原定义 | `apps/batond` 单元 | planned |
-| DS-11 | 持有 `daemon.lock` 时运行 `run` | 没有输出 `daemon_running` | `apps/batond` 单元 | planned |
-| 状态文件、`--exit-with-stdin` | 复用 `reconnect.test.ts` 的协议替身，检查认证成功、拒绝和 stdin 关闭后的文件内容与退出 | 状态缺失或不准；关闭 stdin 后 daemon 不退出 | `apps/batond` 单元 | planned |
+| DS-11 | 持有 `daemon.lock` 时运行 `run` | 没有输出 `daemon_running` | `apps/batond` 单元 | implemented |
+| 状态文件、`--exit-with-stdin` | 复用 `reconnect.test.ts` 的协议替身检查认证、拒绝和停止状态；CLI 单元测试检查 stdin EOF 触发中止，中心 e2e 检查连接与停止状态 | 状态缺失或不准；关闭 stdin 后 daemon 不退出 | `apps/batond` 单元 + `e2e` | implemented |
 | DS-12～DS-14 | 渲染注册对话框，分别模拟有无下载、各平台、桌面桥接替身 | 命令里出现凭据或中心地址；桌面模式显示命令；凭据被渲染 | `web` 单元 | planned |
 | DS-15～DS-17 | 测试数据中固定一套 CA、叶子和其他 CA 签发的叶子（附生成命令）；测试链接解析和证书校验 | 接受 http 源或非 CA 证书；非中心 host 使用了保存的 CA；用其他 CA 签发的叶子通过校验 | `apps/desktop` 单元（Node，不启动 Electron） | planned |
 | DS-18～DS-20 | supervisor 使用替身 spawn：正常退出、78、反复崩溃、`daemon_running`、退出流程 | 终止类失败仍重启；退避或次数上限不对；退出时没有关闭 stdin | `apps/desktop` 单元 | planned |
-| CLI 全链路 | 现有 e2e 中心加注入后的归档：解包后不带参数注册并连接 | 必须传 `--coordinator` 或 `--ca-file` | `e2e` | planned |
+| CLI 全链路 | 现有 HTTPS e2e 中心，在数据目录外注入安装目录与 `deployment.json`，不带中心地址和 CA 参数注册并连接 | 必须传 `--coordinator` 或 `--ca-file` | `e2e` | implemented |
 | launchd、systemd、客户端安装与常驻 | 在 macOS arm64、Debian 12、Windows 11 上按 PRODUCT 验收表手动执行 | 任一验收行不符 | 手动，结果写入 release TECH | planned |
 
 自动化测试不下载 Electron，也不访问外部服务。系统服务和桌面集成依赖真实系统，只做手动验证，未测的平台如实记录。

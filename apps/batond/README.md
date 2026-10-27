@@ -29,7 +29,9 @@
 
 账号、设备注册和启动命令见 [根文档](../../README.md#设备接入)。
 
-`--ca-file` 同时供 HTTPS 注册、重新认证和 WSS 连接校验证书，使用系统已信任证书时可省略；该路径不会保存在身份中。中心地址必须为 HTTPS，Relay 必须为 WSS，证书需匹配访问主机名。
+SEA 安装包首次执行 `up` 或 `register` 时读取可执行文件旁的 `deployment.json`，使用其中的 `coordinator_url` 和可选的 `ca_pem`；显式 `--coordinator` 和 `--ca-file` 分别优先。部署配置缺失时仍需指定中心地址，格式错误报 `deployment_invalid`。源码与 bundle 入口不读取部署配置，已有身份的命令也不读取它。
+
+`--ca-file` 同时供 HTTPS 注册、重新认证和 WSS 连接校验证书，使用系统已信任证书时可省略。注册和重新认证成功后，在 `identity.lock` 下先原子保存 CA 内容为私有文件 `coordinator-ca.pem`，再保存身份；本次未使用 CA 时删除保存的 CA。后续 `up`、`run`、`reauth` 和 `upgrade check` 默认使用保存的 CA，显式 `--ca-file` 可覆盖；只有注册或重新认证成功才更新保存的 CA。中心地址必须为 HTTPS，Relay 必须为 WSS，证书需匹配访问主机名。
 
 员工在网页为原设备领取一次性重新认证凭据后，在设备本地执行：
 
@@ -38,13 +40,19 @@
 ./batond up --data-dir ~/.baton-ts
 ```
 
-重新认证凭据也可通过 `BATON_ENROLLMENT_TOKEN` 提供；需要自定义 CA 时，两次命令均传 `--ca-file`。`reauth` 使用 `identity.json` 保存的中心地址，忽略 `--coordinator`，保留设备 ID、注册顺序、Thread 和目录配置，只保存新身份，不启动连接。缺少本地身份或已保存中心地址时返回 `identity_recovery_required`，保留现有数据，不自动注册。
+重新认证凭据也可通过 `BATON_ENROLLMENT_TOKEN` 提供；更换自定义 CA 时向 `reauth` 传 `--ca-file`，成功后后续连接使用新 CA。`reauth` 使用 `identity.json` 保存的中心地址，忽略 `--coordinator`，保留设备 ID、注册顺序、Thread 和目录配置，保存本次 CA 与新身份，不启动连接。缺少本地身份或已保存中心地址时返回 `identity_recovery_required`，保留现有数据，不自动注册。
 
-`reauth` 在 `identity.lock` 下，先将 operation ID、请求摘要、原设备 token 和 enrollment 秘密原子保存到私有文件 `reauth-pending.json`，再向中心提交。响应丢失或保存身份前退出时，直接再次运行 `batond reauth --data-dir <原目录>`；命令优先重用待提交记录，无需重新提供秘密，也不会使用新传入的凭据替换原操作。成功后先原子替换 `identity.json`，再删除待提交记录；若在两步之间退出，下次仍以原请求取回同一响应。不要手动删除或修改待提交记录；无法恢复时保留数据并核对设备身份。`credential.expires_at` 是签发时的期限快照，CLI 不据此判断授权状态。
+`reauth` 在 `identity.lock` 下，先将 operation ID、请求摘要、原设备 token 和 enrollment 秘密原子保存到私有文件 `reauth-pending.json`，再向中心提交。响应丢失或保存身份前退出时，直接再次运行 `batond reauth --data-dir <原目录>`；命令优先重用待提交记录，无需重新提供秘密，也不会使用新传入的凭据替换原操作。成功后先保存 CA、原子替换 `identity.json`，再删除待提交记录；若在两步之间退出，下次仍以原请求取回同一响应。不要手动删除或修改待提交记录；无法恢复时保留数据并核对设备身份。`credential.expires_at` 是签发时的期限快照，CLI 不据此判断授权状态。
 
 `up` 和 `run` 支持 `--control-timeout-seconds <秒>`，取 1～3600 秒的整数，默认 370 秒。认证等待从 WSS 连接建立起计算；认证成功后，同步另有完整的同等预算。到期后断开并按原身份重连。中心默认 15 秒裁决认证握手，其可配置最大期限为 361 秒；节点默认的 370 秒作为等待兜底。
 
 所有节点命令支持 `--data-dir`，默认 `~/.baton-ts`。仅在授权配置不存在时登记用户主目录，已有配置包括空列表都会保留；`--workspace` 在连接前按真实绝对路径幂等登记工作目录。网页设备详情与本地 `files` 命令可以增删授权根；目录选择与附件预览使用同一真实路径边界。节点锁、身份与报告恢复细节见 [远程节点模块](src/daemon/README.md)，实时输出的游标和缓冲规则见 [Worker 文档](src/worker/README.md#real-time-output)。
+
+`batond identity [--data-dir <目录>]` 在已注册时输出 `{ registered: true, coordinator_url, node_id, display_name, system }`，未注册时输出 `{ registered: false }`，不含凭据，也不创建数据目录。
+
+daemon 在连接变化时原子写入私有的 `daemon-status.json`，包含 `pid`、`state`、`updated_at`；状态为 `connecting`、`online`、`rejected` 或 `stopping`，拒绝时附上 `code` 和 `message`，不含凭据。读取方需结合 PID 与 `daemon.lock` 判断状态是否过期。同一目录已有 daemon 时，第二个 `up` 或 `run` 报 `daemon_running`。`needs_reauth` 与 `node_version_incompatible` 的退出码为 78，其他失败为 1。
+
+`run --exit-with-stdin` 是供进程监管使用的内部参数：stdin EOF 与 SIGTERM 走相同停止路径，关闭连接并写入 `stopping`。
 
 节点在认证时上报实际构建版本与协议。中心明确返回 `node_version_incompatible` 时，daemon 输出包含双方版本、协议、原因与升级指引的结构化诊断并退出，等待用户升级后重新启动；本地命令、待补报结果和独立 Worker 保留。development 与发布版联调可放行版本号差异，协议仍须一致。
 

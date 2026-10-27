@@ -84,6 +84,28 @@ export async function loadIdentity(dataDirectory: string): Promise<NodeIdentity>
   }
 }
 
+export async function loadCoordinatorCA(dataDirectory: string, explicitFile?: string): Promise<string | undefined> {
+  if (explicitFile) return readFile(explicitFile, 'utf8')
+  try {
+    return (await readPrivateFile(join(dataDirectory, 'coordinator-ca.pem'))).toString('utf8')
+  } catch (error) {
+    if (isMissing(error)) return undefined
+    throw error
+  }
+}
+
+async function saveCoordinatorCA(dataDirectory: string, ca: string | undefined): Promise<void> {
+  const path = join(dataDirectory, 'coordinator-ca.pem')
+  if (ca !== undefined) await writePrivateFileAtomic(path, ca)
+  else {
+    try {
+      await unlink(path)
+    } catch (error) {
+      if (!isMissing(error)) throw error
+    }
+  }
+}
+
 export interface RegistrationTransport<Input = RegisterNodeInput> {
   (url: string, body: Input, options: { ca?: string; signal?: AbortSignal }): Promise<unknown>
 }
@@ -165,11 +187,12 @@ export interface RegisterNodeOptions {
   readonly enrollmentFile?: string
   readonly displayName?: string
   readonly caFile?: string
+  readonly caPem?: string
   readonly signal?: AbortSignal
   readonly transport?: RegistrationTransport
 }
 
-/** Exchanges enrollment material for a server-issued credential and saves it without logging it. */
+/** 用注册凭据换取中心签发的身份，在身份锁下保存 CA 和身份。 */
 export async function registerNode(options: RegisterNodeOptions): Promise<NodeIdentity> {
   await ensurePrivateDirectory(options.dataDirectory)
   const release = await acquireProcessLock(join(options.dataDirectory, 'identity.lock'))
@@ -194,16 +217,18 @@ export async function registerNode(options: RegisterNodeOptions): Promise<NodeId
     } catch {
       throw new Error('节点显示名或系统信息无效')
     }
+    const ca = options.caFile ? await readFile(options.caFile, 'utf8') : options.caPem
     let response: unknown
     try {
       response = await (options.transport ?? registerHTTPS)(`${base}/api/v1/nodes/register`, body, {
-        ...(options.caFile ? { ca: await readFile(options.caFile, 'utf8') } : {}),
+        ...(ca !== undefined ? { ca } : {}),
         ...(options.signal ? { signal: options.signal } : {}),
       })
     } catch {
       throw new Error('无法向 Coordinator 注册节点')
     }
     const id = { ...decodeIdentity(response), coordinator_url: base }
+    await saveCoordinatorCA(options.dataDirectory, ca)
     await writePrivateFileAtomic(join(options.dataDirectory, 'identity.json'), JSON.stringify(id))
     return id
   } finally {
@@ -284,13 +309,14 @@ export async function reauthNode(options: ReauthNodeOptions): Promise<NodeIdenti
       }
       await writePrivateFileAtomic(pendingPath, JSON.stringify(pending))
     }
+    const ca = await loadCoordinatorCA(options.dataDirectory, options.caFile)
     let response: unknown
     try {
       response = await (options.transport ?? registerHTTPS)(
         `${base}/api/v1/nodes/${pending.node_id}/reauth`,
         pending.request,
         {
-          ...(options.caFile ? { ca: await readFile(options.caFile, 'utf8') } : {}),
+          ...(ca !== undefined ? { ca } : {}),
           ...(options.signal ? { signal: options.signal } : {}),
         },
       )
@@ -312,6 +338,7 @@ export async function reauthNode(options: ReauthNodeOptions): Promise<NodeIdenti
         previous.credential.token !== id.credential.token)
     )
       throw recoveryRequired()
+    await saveCoordinatorCA(options.dataDirectory, ca)
     await writePrivateFileAtomic(join(options.dataDirectory, 'identity.json'), JSON.stringify(id))
     await unlink(pendingPath)
     return id
