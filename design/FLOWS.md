@@ -11,8 +11,8 @@
 | 登录导航 | `screens/login.elyx#login`、`#loginExpired`；`screens/workspace.elyx#firstVisit`、`#accountOpen`、`#signOutFailed` |
 | 设备 | `screens/devices.elyx#devicesEmpty`、`#devicesSyncing`、`#devicesMissing`、`#devicesDefaultRemoved`、`#devicesPermissionEnableFailed`、`#devicesDisconnecting`；`blocks/enroll-dialog.elyx#enrollExpired` |
 | 桌面通知与托盘 | `screens/desktop-system.elyx#systemReference` |
-| 桌面 Thread | `screens/desktop-thread.elyx#threadLocalWindows`、`#threadLocalMac`、`#threadFolderMissing`、`#threadLocation`、`#threadLocationOutside`、`#threadLocationSelected`、`#threadDraft`、`#threadDraftSelected` |
-| 桌面 Project | `screens/desktop-project.elyx#projectLocal`、`#projectFolderMissing`、`#projectCreate`、`#projectCreateOutside`、`#projectCreateSelected` |
+| 桌面 Thread | `screens/desktop-thread.elyx#threadLocalWindows`、`#threadLocalMac`、`#threadFolderMissing`、`#threadLocation`、`#threadLocationOutside`、`#threadLocationSelected`、`#threadDraft`、`#threadDraftSelected`、`#threadExplorerHover`、`#threadFinderHover` |
+| 桌面 Project | `screens/desktop-project.elyx#projectLocal`、`#projectFolderMissing`、`#projectCreate`、`#projectCreateOutside`、`#projectCreateSelected`、`#projectEditorHover` |
 | 桌面本机设备 | `screens/desktop-device.elyx#deviceLocal`、`#deviceStopped`、`#deviceRestarting`、`#devicePreparing`、`#deviceMigrating`、`#deviceMigrationRestart`、`#deviceMigrationFailed`、`#deviceExternal`、`#deviceSummaryCopied` |
 | Thread | `screens/threads.elyx#threadsEmpty`、`#threadsFolderRoots`、`#threadsFolderApplied`、`#threadsStopConfirm`、`#threadsArchivePending`、`#threadsArchived`、`#threadsLimited` |
 | 项目协同 | `screens/new-project.elyx#creationFailed`、`#created`；`screens/project.elyx#noEligibleDevice`、`#stopping`、`#reported`；`screens/project-thread.elyx#threadRunning` |
@@ -52,7 +52,7 @@
 
 ### 本机工作目录
 
-Thread 的本机打开操作位于输入区下方、设备和目录行之后。Project 的入口位于 Overview 的项目助手设备之后，列出工作目录。macOS 使用 `Show in Finder`，Windows 使用 `Show in File Explorer`，另提供 `Open in editor`。编辑器动作使用本机偏好；尚未选择时使用系统为文件夹关联的默认程序。目录已不存在时，在操作旁说明具体路径，不创建目录，已有消息和项目设置保持不变。
+Thread 输入区下方和 Project Overview 的项目助手位置都用一行浅色小字显示 `设备 · 目录`，行末放两个 20px 图标按钮：文件夹图标打开文件管理器，编辑器图标打开编辑器。悬停或键盘聚焦时显示 `Show in Finder`（macOS）、`Show in Explorer`（Windows）或 `Open in editor`，同一文字作为按钮的无障碍名称。两个操作不另占一行；目录不存在时只在该行下方增加具体路径与原因，不创建目录，已有消息和项目设置保持不变。编辑器动作使用本机偏好；尚未选择时使用系统为文件夹关联的默认程序。
 
 新建 Thread 在位置控件打开的目录弹窗里、设备选择之后提供 `Choose local folder`；新建 Project 在工作目录的设备与当前路径之后提供同名动作。两者打开系统目录选择框，取消保留原设备、目录、模型和草稿。允许范围内的目录成为当前选择；范围外目录在入口附近显示具体路径与原因，拒绝该选择，保留上一个有效目录。选择目录不扩展中心设置的允许目录范围。
 

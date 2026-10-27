@@ -4,61 +4,23 @@ import "blocks/thread-list.elyx" as lists
 
 threadLocalWindows = frame : local.localThread {
   title: "Desktop thread / Windows",
-  caption: "Local device and folder actions below the composer. Open in editor uses the chosen editor or the system folder default.",
+  caption: "Folder and editor icons end the device and folder line. Hover or focus shows the action label.",
   left: 0px,
   top: 0px,
 
   detail {
     footer {
       localFolder {
-        actions {
-          editor {
-            connections[0].target: threadFolderMissing,
-            connections[0].label: "Folder was removed"
-          }
+        row {
+          actions {
+            editor {
+              connections[0].target: threadFolderMissing,
+              connections[0].label: "Folder was removed"
+            }
 
-          reveal {
-            connections[0].target: threadFolderMissing,
-            connections[0].label: "Folder was removed"
-          }
-        }
-      }
-    }
-  }
-}
-
-threadLocalMac = frame : local.localThread {
-  title: "Desktop thread / macOS",
-  caption: "Show in Finder opens the local working folder. Local actions require the matching desktop capability.",
-  left: 1728px,
-  top: 0px,
-
-  detail {
-    footer {
-      @with-variant(local.folderActionsMac)
-      localFolder {}
-
-      context {
-        dir {
-          dirName {
-            contents: "~/src/baton"
-          }
-        }
-
-        device {
-          deviceName {
-            contents: "MacBook Pro"
-          }
-        }
-      }
-    }
-
-    body {
-      message1 {
-        line {
-          bubble {
-            content {
-              contents: "Review the reconnect logs in ~/src/baton."
+            reveal {
+              connections[0].target: threadFolderMissing,
+              connections[0].label: "Folder was removed"
             }
           }
         }
@@ -67,9 +29,16 @@ threadLocalMac = frame : local.localThread {
   }
 }
 
+threadLocalMac = frame : local.localThreadMac {
+  title: "Desktop thread / macOS",
+  caption: "Hover the folder icon for Show in Finder. The selected thread, log attachment and working folder all belong to MacBook Pro.",
+  left: 1728px,
+  top: 0px
+}
+
 threadFolderMissing = frame : local.localThread {
   title: "Desktop thread / Missing folder",
-  caption: "Either local action reports the missing folder inline. No folder is created; the thread and its messages stay unchanged.",
+  caption: "Keep both icons in the device and folder line. Report the missing folder below it without creating a folder.",
   left: 3456px,
   top: 0px,
 
@@ -78,6 +47,52 @@ threadFolderMissing = frame : local.localThread {
       localFolder {
         error {
           display: .visible
+        }
+      }
+    }
+  }
+}
+
+threadExplorerHover = frame : local.localThread {
+  title: "Desktop thread / Explorer tooltip",
+  caption: "Hover or keyboard focus shows Show in Explorer above the folder icon.",
+  left: 0px,
+  top: 3240px,
+
+  detail {
+    footer {
+      localFolder {
+        row {
+          actions {
+            reveal {
+              tooltip {
+                display: .visible
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+threadFinderHover = frame : local.localThreadMac {
+  title: "Desktop thread / Finder tooltip",
+  caption: "Hover or keyboard focus shows Show in Finder above the folder icon.",
+  left: 1728px,
+  top: 3240px,
+
+  detail {
+    footer {
+      localFolder {
+        row {
+          actions {
+            reveal {
+              tooltip {
+                display: .visible
+              }
+            }
+          }
         }
       }
     }

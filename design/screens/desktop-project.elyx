@@ -4,23 +4,27 @@ import "blocks/project-page.elyx" as pages
 
 projectLocal = frame : local.localProject {
   title: "Desktop project / Local folder",
-  caption: "Working folder actions follow the project assistant's device in Overview. Only the local device with the declared capability shows them.",
+  caption: "Folder and editor icons end the project assistant's device and folder line. Local actions require the matching desktop capability.",
   left: 0px,
   top: 0px,
 
   overview {
     summary {
-      localFolder {
-        actions {
-          actions {
-            editor {
-              connections[0].target: projectFolderMissing,
-              connections[0].label: "Local folder was removed"
-            }
+      runtime {
+        runtimeCard {
+          localFolder {
+            row {
+              actions {
+                editor {
+                  connections[0].target: projectFolderMissing,
+                  connections[0].label: "Local folder was removed"
+                }
 
-            reveal {
-              connections[0].target: projectFolderMissing,
-              connections[0].label: "Local folder was removed"
+                reveal {
+                  connections[0].target: projectFolderMissing,
+                  connections[0].label: "Local folder was removed"
+                }
+              }
             }
           }
         }
@@ -31,17 +35,46 @@ projectLocal = frame : local.localProject {
 
 projectFolderMissing = frame : local.localProject {
   title: "Desktop project / Missing folder",
-  caption: "A local open action reports the missing folder without creating it. Project history and settings stay unchanged.",
+  caption: "Keep the icons beside the device and folder. Report the missing path below that line without changing project history or settings.",
   left: 1728px,
   top: 0px,
 
   overview {
     summary {
-      localFolder {
-        actions {
-          error {
-            display: .visible,
-            contents: "~/src/baton no longer exists."
+      runtime {
+        runtimeCard {
+          localFolder {
+            error {
+              display: .visible,
+              contents: "~/src/baton no longer exists."
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+projectEditorHover = frame : local.localProject {
+  title: "Desktop project / Editor tooltip",
+  caption: "Hover or keyboard focus shows Open in editor above the editor icon.",
+  left: 0px,
+  top: 2160px,
+
+  overview {
+    summary {
+      runtime {
+        runtimeCard {
+          localFolder {
+            row {
+              actions {
+                editor {
+                  tooltip {
+                    display: .visible
+                  }
+                }
+              }
+            }
           }
         }
       }

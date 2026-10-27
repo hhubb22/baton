@@ -1,6 +1,7 @@
 import "tokens/colors.elyx" as c
 import "foundations/typography.elyx" as t
 import "controls/button.elyx" as buttons
+import "controls/icons.elyx" as icons
 import "controls/field.elyx" as fields
 import "controls/input.elyx" as inputs
 import "blocks/new-thread.elyx" as folders
@@ -10,53 +11,139 @@ import "blocks/overview.elyx" as overviews
 import "blocks/thread-detail.elyx" as details
 import "blocks/project-page.elyx" as projects
 
-// Desktop-only actions sit beside the working folder. Each action resolves the object through the local device.
+// Icon labels are tooltips on hover and keyboard focus, and accessible names.
+export folderTooltip = frame {
+  title: "Local action tooltip",
+  left: 600px,
+  top: 0px,
+  width: 136px,
+  layout: {justify-content: .center, align-items: .center},
+  fill: c.colors.inverse,
+  corner-radius: 4px,
+  padding: [5px, 8px],
+  children: label,
+
+  label = text : t.caption {
+    contents: "Show in Explorer",
+    fill[0].color: c.colors.onInverse
+  }
+}
+
 export folderActions = frame {
-  title: "Local folder actions / Windows",
+  title: "Local folder icons / Windows",
   left: 0px,
   top: 0px,
-  width: 392px,
-  layout: {direction: .column, item-gap: 6px},
-  children: [actions, error],
+  width: 44px,
+  height: 20px,
+  layout: {align-items: .center, item-gap: 4px},
+  overflow: .visible,
+  children: [reveal, editor],
 
-  actions = frame {
-    width: 100%,
-    layout: {align-items: .center, item-gap: 4px},
+  reveal = frame : buttons.iconButton {
+    title: "Show in Explorer",
+    caption: "Show this label on hover and keyboard focus.",
+    width: 20px,
+    height: 20px,
     overflow: .visible,
-    children: [reveal, editor],
+    overrides: [insert(tooltip, after = buttons.iconButton.glyph)],
 
-    reveal = frame : buttons.smallGhost {
-      label {
-        contents: "Show in File Explorer"
-      }
+    @with-variant(icons.folder)
+    glyph {
+      width: 13px,
+      height: 13px
     }
 
-    editor = frame : buttons.smallGhost {
+    tooltip = frame : folderTooltip {
+      left: -116px,
+      top: -34px,
+      display: .none,
+      ignore-stack: .true
+    }
+  }
+
+  editor = frame : buttons.iconButton {
+    title: "Open in editor",
+    caption: "Show this label on hover and keyboard focus.",
+    width: 20px,
+    height: 20px,
+    overflow: .visible,
+    overrides: [insert(tooltip, after = buttons.iconButton.glyph)],
+
+    @with-variant(icons.editor)
+    glyph {
+      width: 13px,
+      height: 13px
+    }
+
+    tooltip = frame : folderTooltip {
+      left: -116px,
+      top: -34px,
+      display: .none,
+      ignore-stack: .true,
+
       label {
         contents: "Open in editor"
       }
     }
+  }
+}
+
+@variant
+export folderActionsMac = frame : folderActions {
+  title: "Local folder icons / macOS",
+  left: 128px,
+  top: 0px,
+
+  reveal {
+    title: "Show in Finder",
+
+    tooltip {
+      label {
+        contents: "Show in Finder"
+      }
+    }
+  }
+}
+
+// Only errors add a second line. Device, folder and actions share one metadata row.
+export folderContext = frame {
+  title: "Local device and folder",
+  left: 0px,
+  top: 80px,
+  width: 392px,
+  layout: {direction: .column, item-gap: 6px},
+  overflow: .visible,
+  children: [row, error],
+
+  row = frame {
+    width: 100%,
+    layout: {align-items: .center, item-gap: 4px},
+    overflow: .visible,
+    children: [device, separator, path, actions],
+
+    device = text : t.caption {
+      contents: "Windows Desktop",
+      fill[0].color: c.colors.faint
+    }
+
+    separator = text : t.caption {
+      contents: "·",
+      fill[0].color: c.colors.faint
+    }
+
+    path = text : t.caption {
+      contents: "D:\\src\\baton-ps160",
+      font-family: "Paper Mono",
+      fill[0].color: c.colors.faint
+    }
+
+    actions = frame : folderActions {}
   }
 
   error = text : t.captionDanger {
     width: 100%,
     display: .none,
     contents: "D:\\src\\baton-ps160 no longer exists."
-  }
-}
-
-@variant
-export folderActionsMac = frame : folderActions {
-  title: "Local folder actions / macOS",
-  left: 480px,
-  top: 0px,
-
-  actions {
-    reveal {
-      label {
-        contents: "Show in Finder"
-      }
-    }
   }
 }
 
@@ -67,6 +154,14 @@ export localThread = frame : lists.threadsPageSplit {
   top: 160px,
 
   detail {
+    footer {
+      overrides: [
+        insert(localFolder, after = details.threadDetail.footer.composer),
+        remove(details.threadDetail.footer.context)
+      ],
+      overflow: .visible
+    }
+
     head {
       lead {
         name {
@@ -74,16 +169,110 @@ export localThread = frame : lists.threadsPageSplit {
         }
       }
     }
+  }
 
-    footer {
-      overrides: [
-        insert(localFolder, after = details.threadDetail.footer.context)
-      ]
+  main {
+    list {
+      runningRow {
+        lead {
+          name {
+            contents: "Review reconnect logs"
+          }
+        }
+      }
     }
   }
 
-  localFolder = frame : folderActions {
+  localFolder = frame : folderContext {
     width: 100%
+  }
+}
+
+@variant
+export localThreadMac = frame : localThread {
+  title: "Desktop thread / macOS",
+  left: 3456px,
+  top: 160px,
+
+  detail {
+    footer {
+      localFolder {
+        row {
+          @with-variant(folderActionsMac)
+          actions {}
+
+          path {
+            contents: "~/src/baton"
+          }
+
+          device {
+            contents: "MacBook Pro"
+          }
+        }
+      }
+    }
+
+    body {
+      queued {
+        line {
+          bubble {
+            content {
+              contents: "Attach the full reconnect log as well."
+            }
+          }
+        }
+      }
+
+      reply1 {
+        attachments {
+          first {
+            copy {
+              note {
+                contents: "MacBook Pro · 48 KB"
+              }
+            }
+          }
+        }
+      }
+
+      message1 {
+        line {
+          bubble {
+            content {
+              contents: "Review the reconnect logs in ~/src/baton."
+            }
+          }
+        }
+      }
+    }
+  }
+
+  main {
+    list {
+      waitingRow {
+        place {
+          contents: "Ubuntu Dev · Codex"
+        }
+
+        lead {
+          name {
+            contents: "Run reconnect tests on Ubuntu"
+          }
+        }
+      }
+
+      kiroRow {
+        place {
+          contents: "Windows Desktop · Kiro"
+        }
+      }
+
+      runningRow {
+        place {
+          contents: "MacBook Pro · Codex"
+        }
+      }
+    }
   }
 }
 
@@ -91,6 +280,34 @@ export localProject = frame : projects.projectPage {
   title: "Desktop project",
   left: 1728px,
   top: 160px,
+
+  overview {
+    body {
+      queuedRow {
+        display: .none
+      }
+
+      queuedHead {
+        display: .none
+      }
+    }
+
+    summary {
+      overflow: .visible,
+
+      runtime {
+        overflow: .visible,
+
+        runtimeCard {
+          overrides: [
+            insert(localFolder, after = .nil),
+            remove(overviews.overview.summary.runtime.runtimeCard.runtimeLine)
+          ],
+          overflow: .visible
+        }
+      }
+    }
+  }
 
   main {
     header {
@@ -104,19 +321,13 @@ export localProject = frame : projects.projectPage {
     }
   }
 
-  overview {
-    summary {
-      overrides: [
-        insert(localFolder, after = overviews.overview.summary.runtime)
-      ],
-
-      runtime {
-        runtimeCard {
-          runtimeLine {
-            runtimeDevice {
-              runtimeName {
-                contents: "MacBook Pro"
-              }
+  sidebar {
+    top {
+      nav {
+        navDevices {
+          trail {
+            note {
+              contents: "3/3 online"
             }
           }
         }
@@ -124,27 +335,19 @@ export localProject = frame : projects.projectPage {
     }
   }
 
-  localFolder = frame {
+  localFolder = frame : folderContext {
     width: 100%,
-    layout: {direction: .column, item-gap: 4px},
-    children: [label, path, actions],
 
-    label = text : t.captionMedium {
-      contents: "Working folder"
-    }
+    row {
+      @with-variant(folderActionsMac)
+      actions {}
 
-    path = text : t.mono {
-      contents: "~/src/baton",
-      fill[0].color: c.colors.faint
-    }
+      path {
+        contents: "~/src/baton"
+      }
 
-    actions = frame : folderActionsMac {
-      width: 100%,
-
-      actions {
-        layout.direction: .column,
-        layout.align-items: .start,
-        layout.item-gap: 2px
+      device {
+        contents: "MacBook Pro"
       }
     }
   }

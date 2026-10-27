@@ -21,8 +21,8 @@ elyx design
 | [screens/project.elyx](screens/project.elyx) | 主对话、运行与等待原因、换设备、停止、暂停恢复、汇报、项目菜单及归档记录 | PA-07、PA-13、PA-22、PA-23、IB-16 |
 | [screens/project-thread.elyx](screens/project-thread.elyx) | 项目内 Thread 详情、实时输出、文字引用预填与发送、归档项目内继续使用 Thread | R-08～R-17、PA-19、PA-22、IB-08、IB-13 |
 | [screens/desktop-system.elyx](screens/desktop-system.elyx) | 系统通知文案、托盘菜单顺序、系统通知权限、登录启动和编辑器偏好说明 | DC-11～DC-16、DS-19～DS-22 |
-| [screens/desktop-thread.elyx](screens/desktop-thread.elyx) | 桌面 Thread 的 macOS / Windows 本机打开入口、目录不存在、原生目录选择与范围外错误、保留草稿 | DC-17～DC-19 |
-| [screens/desktop-project.elyx](screens/desktop-project.elyx) | 桌面 Project 的本机工作目录入口、新建时本机目录选择、范围外错误与保留表单 | DC-17～DC-19 |
+| [screens/desktop-thread.elyx](screens/desktop-thread.elyx) | 桌面 Thread 的行内本机图标、macOS / Windows 悬停文案、目录不存在、原生目录选择与范围外错误、保留草稿 | DC-17～DC-19 |
+| [screens/desktop-project.elyx](screens/desktop-project.elyx) | 桌面 Project 的行内本机图标与悬停文案、新建时本机目录选择、范围外错误与保留表单 | DC-17～DC-19 |
 | [screens/desktop-device.elyx](screens/desktop-device.elyx) | 本机进程、最近退出、版本、升级准备、迁移与失败、外部服务、复制诊断摘要 | DC-20、DC-21 |
 | [screens/inbox.elyx](screens/inbox.elyx) | 待处理、空列表、加载与失败、已处理列表、1024px 回答画面 | IB-06～IB-12、IB-18～IB-20 |
 | [screens/project-settings.elyx](screens/project-settings.elyx) | 自动保存、失败重试、暂停恢复、归档确认与结果、只读设置 | PA-04、PA-23、IB-16 |

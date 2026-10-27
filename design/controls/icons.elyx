@@ -12,6 +12,7 @@ import "resources/assets/commit.svg" as commitAsset
 import "resources/assets/copy.svg" as copyAsset
 import "resources/assets/device.svg" as deviceAsset
 import "resources/assets/dots.svg" as dotsAsset
+import "resources/assets/editor.svg" as editorAsset
 import "resources/assets/external.svg" as externalAsset
 import "resources/assets/file.svg" as fileAsset
 import "resources/assets/folder.svg" as folderAsset
@@ -314,4 +315,12 @@ export lock = asset : glyph {
   left: 224px,
   top: 280px,
   contents: lockAsset
+}
+
+@variant
+export editor = asset : glyph {
+  title: "editor",
+  left: 336px,
+  top: 280px,
+  contents: editorAsset
 }
