@@ -1,11 +1,11 @@
-import { afterEach, beforeEach, describe, test } from 'node:test'
+import { afterEach, beforeEach, describe, test } from 'vitest'
 import assert from 'node:assert/strict'
 import { chmod, mkdir, mkdtemp, open, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { FileCredentials, protect } from '../src/credentials.js'
 
-void describe('FileCredentials', () => {
+describe('FileCredentials', () => {
   let directory: string
   let store: FileCredentials
   const value = { type: 'api_key', key: 'local-contract-key' }

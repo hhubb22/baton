@@ -1,4 +1,4 @@
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { Readable, PassThrough } from 'node:stream'
 import { frames, MAX_FRAME, StdioClient } from '../src/stdio.js'

@@ -17,7 +17,7 @@ export default defineConfig({
     ],
     overrides: [
       {
-        files: ['runtimes/project-agent/test/**/*.ts', 'tools/*.test.mjs'],
+        files: ['tools/*.test.mjs'],
         // Node runner 管理测试注册的 Promise；其余异步调用继续检查。
         rules: {
           'typescript/no-floating-promises': [

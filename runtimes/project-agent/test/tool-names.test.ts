@@ -1,4 +1,4 @@
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { fauxAssistantMessage, fauxToolCall } from '@earendil-works/pi-ai'
 import { Backend, setup, assistant } from './fixture.js'

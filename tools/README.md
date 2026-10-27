@@ -25,7 +25,7 @@ node tools/package-batond.mjs --out bin/package --version v0.1.0-alpha.1 --commi
 node tools/package-release.mjs v0.1.0-alpha.1 bin/package
 ```
 
-`build.mjs` 安装锁定依赖、检查网页类型、构建中心与节点，再生成 `bin/` SEA 安装包。统一构建、两个 `build/*.mjs` 与 SEA 打包均接受成对的 `--version` 和 `--commit`；提交须为完整小写 Git 哈希，未指定时版本和提交均为 `development`。身份编译进程序，运行时不通过环境变量覆盖。`package-batond.mjs` 单独构建节点安装包，包含可执行文件、旁置 `node_modules/`、许可、清单和 `release.json`；`--node <路径>` 可指定目标平台的官方 Node。
+`build.mjs` 安装根工作区的锁定依赖、检查网页类型、构建中心与节点，再生成 `bin/` SEA 安装包。Runtime 直接从源码编入节点 bundle；`pnpm --dir runtimes/project-agent test` 使用根 Vitest 配置测试源码，CLI 与恢复子进程使用根锁文件管理的 tsx loader，不依赖 Runtime 的 `dist/`，可与统一构建同时运行。统一构建、两个 `build/*.mjs` 与 SEA 打包均接受成对的 `--version` 和 `--commit`；提交须为完整小写 Git 哈希，未指定时版本和提交均为 `development`。身份编译进程序，运行时不通过环境变量覆盖。`package-batond.mjs` 单独构建节点安装包，包含可执行文件、旁置 `node_modules/`、许可、清单和 `release.json`；`--node <路径>` 可指定目标平台的官方 Node。
 
 `package-release.mjs <版本> [安装目录=bin] [输出目录=bin/releases]` 检查布局、帮助、SEA 版本和清单，归档后重新解压并运行 `check-package`。输出对应平台的 tar.gz 或 zip、SHA256 和检查报告。归档版本必须等于二进制内的发布版本，源码提交沿用构建输入；归档器不会给开发程序或其他版本重新贴标。`release.json` 保存版本、提交、平台、协议、中心迁移、三类账本格式和支持的 daemon 版本，并与程序输出及清单核对。应在目标平台执行发布验证。
 
