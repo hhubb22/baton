@@ -696,8 +696,8 @@ test('faux 恢复结尾表的四种情况和部分工具结果', async () => {
 })
 
 for (const threadTool of ['threads.create', 'threads.send']) {
-  test(`${threadTool} 在写入和工具事务前后杀掉实际子进程，恢复不重复执行副作用`, async () => {
-    for (const point of ['append-before', 'append-after', 'tool-before', 'tool-after', 'result-after']) {
+  for (const point of ['append-before', 'append-after', 'tool-before', 'tool-after', 'result-after']) {
+    test(`${threadTool} 在 ${point} 杀掉实际子进程，恢复不重复执行副作用`, async () => {
       const b = new Backend()
       let killed = false
       async function run(crash: boolean) {
@@ -755,8 +755,8 @@ for (const threadTool of ['threads.create', 'threads.send']) {
         b.events.map((e) => e.seq),
         b.events.map((_, i) => i + 1),
       )
-    }
-  })
+    })
+  }
 }
 
 test('写入屏障失败后停止，不调用工具', async () => {
