@@ -2,6 +2,7 @@ import { Effect, Schema } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import type { SqlError } from 'effect/sql/SqlError'
 import { Project, ProjectEvent } from '@baton/protocol'
+import { normalizeProjectEvent } from './message-reference.ts'
 import { AppError } from '../errors.ts'
 import { dbError, type DatabaseEffect } from '../database.ts'
 
@@ -18,6 +19,8 @@ export const projectDecode = <S extends Schema.ConstraintDecoder<unknown>>(schem
     try: () => Schema.decodeUnknownSync(schema, { onExcessProperty: 'error' })(value),
     catch: () => projectError('invalid', 422),
   })
+export const decodeProjectEvent = (value: unknown) =>
+  projectDecode(ProjectEvent, value).pipe(Effect.map(normalizeProjectEvent))
 export const jsonBytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value))
 export const projectSelection = (sql: SqlClient.SqlClient) => sql`jsonb_build_object(
  'id',p.id,'title',p.title,'goal',p.goal,'memory_embedding',p.memory_embedding,'status',p.status,'version',p.version,'created_at',p.created_at,'updated_at',p.updated_at,
@@ -46,7 +49,7 @@ export const readEvent = Effect.fn('readProjectEvent')(function* (conversation: 
     value: unknown
   }>`SELECT ${eventSelection(sql)} AS value FROM conversation_events e WHERE conversation_id=${conversation} AND seq=${seq}`
   if (!rows[0]) return yield* Effect.fail(projectError('not_found', 404))
-  return yield* projectDecode(ProjectEvent, rows[0].value)
+  return yield* decodeProjectEvent(rows[0].value)
 })
 export interface ProjectBinding {
   employeeId: string

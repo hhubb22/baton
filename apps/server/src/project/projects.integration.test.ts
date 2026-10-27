@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { readSource, registerEventSource } from './memory/index.ts'
+import { readSource, registerEventSource, searchProjectHistory } from './memory/index.ts'
 import { Effect, Schema } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import { describe, expect, it } from 'vite-plus/test'
@@ -105,6 +105,117 @@ describe('Project creation and messages', () => {
           run(projects.acceptProjectMessage(a.employee, p.id, { ...m, content: 'different' })),
         ).rejects.toMatchObject({ code: 'message_conflict' })
         expect((await run(projects.projectMessages(a.employee, p.id))).messages).toEqual([saved])
+      }),
+    30_000,
+  )
+
+  it(
+    'persists references separately, rejects changed references and reads legacy messages and events',
+    async () =>
+      withTestDatabase(async ({ run }) => {
+        const a = await fixture(run),
+          p = await a.create()
+        const reference: P.ProjectMessageReference = {
+          kind: 'file',
+          title: 'source.ts',
+          threadId: null,
+          reply: null,
+          deviceId: null,
+          path: '/workspace/source.ts',
+          lines: { from: 1, to: 2 },
+          itemId: null,
+          excerpt: 'selected code',
+          bytes: 13,
+        }
+        const input = {
+          client_message_id: 'reference-message',
+          content: 'Explain',
+          reference: { ...reference, excerpt: 'structuredNeedle', bytes: 16 },
+        }
+        const saved = await run(projects.acceptProjectMessage(a.employee, p.id, input))
+        expect(saved).toMatchObject({ content: 'Explain', reference: input.reference })
+        expect(await run(projects.acceptProjectMessage(a.employee, p.id, input))).toEqual(saved)
+        await expect(
+          run(
+            projects.acceptProjectMessage(a.employee, p.id, {
+              ...input,
+              reference: { ...reference, excerpt: 'changed' },
+            }),
+          ),
+        ).rejects.toMatchObject({ code: 'message_conflict' })
+        const oldContent =
+          'Legacy question\n\n<baton-reference version="1">\n' + JSON.stringify(reference) + '\n</baton-reference>'
+        const legacy = await run(
+          projects.acceptProjectMessage(a.employee, p.id, {
+            client_message_id: 'legacy-message',
+            content: 'Legacy question',
+          }),
+        )
+        await run(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            yield* sql`UPDATE project_agent_input_queue SET payload=${JSON.stringify({ content: oldContent })}::jsonb WHERE id=${legacy.id}`
+          }),
+        )
+        const pending = await run(projects.projectMessages(a.employee, p.id))
+        expect(pending.messages).toContainEqual(expect.objectContaining({ content: 'Legacy question', reference }))
+        expect(
+          await run(
+            projects.acceptProjectMessage(a.employee, p.id, {
+              client_message_id: 'legacy-message',
+              content: oldContent,
+            }),
+          ),
+        ).toMatchObject({ content: 'Legacy question', reference })
+        const r = await a.start(p)
+        const claim = result(P.ProjectClaim, await r.rpc('claim_inputs', { last_seq: 0 }))
+        const payload = claim.event!.payload as { message: { content: { text: string }[] } }
+        expect(JSON.parse(payload.message.content[0]!.text)).toContainEqual(
+          expect.objectContaining({
+            source_key: 'user:legacy-message',
+            payload: { content: 'Legacy question', reference },
+          }),
+        )
+        const sourceID = await run(registerEventSource(a.employee, p.id, claim.event!.seq, claim.event!.seq, saved.id))
+        const source = await run(readSource(a.employee, p.id, sourceID))
+        expect(JSON.parse(source.text)).toEqual({ content: input.content, reference: input.reference })
+        const history = await run(
+          searchProjectHistory(a.employee, p.id, p.conversation.id, {
+            query: 'structuredNeedle',
+            through_seq: claim.event!.seq,
+          }),
+        )
+        expect(history.events).toContainEqual(
+          expect.objectContaining({ snippet: expect.stringContaining('structuredNeedle') }),
+        )
+        // 旧事件保留原序号，读取时拆出引用。
+        await run(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            const legacyInputs = [
+              {
+                id: legacy.id,
+                source_type: 'user_message',
+                source_key: 'user:legacy-message',
+                payload: { content: oldContent },
+              },
+            ]
+            const eventPayload = {
+              format: 'pi-ai/1',
+              message: { role: 'user', content: [{ type: 'text', text: JSON.stringify(legacyInputs) }], timestamp: 0 },
+              input_ids: [legacy.id],
+            }
+            yield* sql`INSERT INTO conversation_events(conversation_id,seq,employee_id,kind,payload)
+          VALUES(${p.conversation.id},${claim.event!.seq + 1},${a.employee},'input',${JSON.stringify(eventPayload)}::jsonb)`
+            yield* sql`UPDATE conversations SET next_seq=next_seq+1 WHERE id=${p.conversation.id}`
+          }),
+        )
+        const event = (await run(projects.projectEvents(a.employee, p.id, claim.event!.seq))).events[0]!
+        expect(event.seq).toBe(claim.event!.seq + 1)
+        expect(JSON.stringify(event.payload)).not.toContain('<baton-reference')
+        expect(JSON.stringify(event.payload)).toContain('reference')
+        const replay = result(P.ProjectEventPage, await r.rpc('read_events', { after_seq: claim.event!.seq }))
+        expect(replay.events![0]!.payload).toEqual(event.payload)
       }),
     30_000,
   )

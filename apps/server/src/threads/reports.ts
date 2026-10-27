@@ -7,13 +7,24 @@ import { notifyProjectThread } from './project-inputs.ts'
 import { audit, decode, failure, readThread, uuid, type DB } from './core.ts'
 import { canonical, digest } from '../json.ts'
 import { transaction } from '../database.ts'
+import { reportStopCode } from './stop-code.ts'
 
-const status = (t: P.Thread, next: P.Thread['status'], reason = '') =>
+const status = (t: P.Thread, next: P.Thread['status'], reason = '', stopCode: P.ThreadStopCode | null = null) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    if (t.status === 'archived' || (t.status === next && t.status_reason === reason)) return
-    yield* sql`UPDATE threads SET status=${next},status_reason=${reason} WHERE id=${t.id}`
-    yield* audit(t, 'status.changed', { status: next, reason }, 'device', t.node_id)
+    if (
+      t.status === 'archived' ||
+      (t.status === next && t.status_reason === reason && (t.stop_code ?? null) === stopCode)
+    )
+      return
+    yield* sql`UPDATE threads SET status=${next},status_reason=${reason},stop_code=${stopCode} WHERE id=${t.id}`
+    yield* audit(
+      t,
+      'status.changed',
+      { status: next, reason, ...(stopCode ? { stop_code: stopCode } : {}) },
+      'device',
+      t.node_id,
+    )
   })
 const noActiveTurn = (id: string) =>
   Effect.gen(function* () {
@@ -47,7 +58,8 @@ const getTurn = (t: P.Thread, seq: number | undefined) =>
 const finishArchive = (t: P.Thread) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const rows = yield* sql`UPDATE threads SET status='archived',archived_at=clock_timestamp() WHERE id=${t.id}
+    const rows =
+      yield* sql`UPDATE threads SET status='archived',stop_code=NULL,archived_at=clock_timestamp() WHERE id=${t.id}
     AND archive_requested_at IS NOT NULL AND stop_confirmed_at IS NOT NULL AND status IN ('idle','stopped','unknown')
     AND NOT EXISTS(SELECT 1 FROM thread_turns WHERE thread_id=${t.id} AND ended_at IS NULL)
     AND NOT EXISTS(SELECT 1 FROM thread_messages WHERE thread_id=${t.id} AND status IN ('accepted','queued')) AND archived_at IS NULL RETURNING id`
@@ -95,7 +107,7 @@ const apply = (t: P.Thread, r: P.ThreadReport) =>
         yield* sql`UPDATE thread_messages SET status='withdrawn',status_reason=${r.reason || ''} WHERE thread_id=${t.id} AND status='accepted'
         AND EXISTS(SELECT 1 FROM thread_outbox o WHERE o.thread_id=${t.id} AND o.action='message' AND o.payload->>'client_message_id'=thread_messages.client_message_id AND o.attempts=0 AND o.acked_at IS NULL)`
         yield* sql`UPDATE thread_outbox SET completed_at=clock_timestamp(),completion=${JSON.stringify({ command_outcome: 'cancelled', reason: r.reason || 'open_failed' })}::jsonb WHERE thread_id=${t.id} AND action='message' AND attempts=0 AND acked_at IS NULL AND completed_at IS NULL`
-        yield* status(t, 'stopped', r.reason)
+        yield* status(t, 'stopped', r.reason, reportStopCode(t, r))
         break
       }
       case 'thread.resumed': {
@@ -127,7 +139,7 @@ const apply = (t: P.Thread, r: P.ThreadReport) =>
             return yield* Effect.fail(failure())
         }
         yield* sql`UPDATE thread_messages SET status=${next},turn_id=COALESCE(${turn?.id ?? null}::uuid,turn_id),worker_turn_seq=COALESCE(${turn?.worker_turn_seq ?? null}::bigint,worker_turn_seq),status_reason=${r.reason || ''} WHERE id=${m.id}`
-        if (next === 'unknown') yield* status(t, 'unknown', r.reason)
+        if (next === 'unknown') yield* status(t, 'unknown', r.reason, reportStopCode(t, r))
         if (next === 'withdrawn' && r.reason) {
           const active = yield* sql`SELECT id FROM thread_turns WHERE thread_id=${t.id} AND ended_at IS NULL`
           if (!active.length && t.opened_at && !t.stop_requested_at) yield* status(t, 'idle')
@@ -225,7 +237,14 @@ const apply = (t: P.Thread, r: P.ThreadReport) =>
         yield* sql`UPDATE thread_turns SET ended_at=clock_timestamp(),end_reason=${r.reason!},model=${r.model || turn.model},token_usage=${r.token_usage === undefined ? null : JSON.stringify(r.token_usage)}::json WHERE id=${turn.id}`
         if (t.stop_requested_at && ['stopped', 'timeout'].includes(r.reason!))
           yield* sql`UPDATE threads SET stop_confirmed_at=clock_timestamp() WHERE id=${t.id}`
-        yield* status(t, t.agent_type === 'shell' ? 'stopped' : r.queue_empty ? 'idle' : 'running')
+        yield* status(
+          t,
+          t.agent_type === 'shell' ? 'stopped' : r.queue_empty ? 'idle' : 'running',
+          '',
+          t.agent_type === 'shell'
+            ? reportStopCode(t, r, !!t.stop_requested_at && ['stopped', 'timeout'].includes(r.reason!))
+            : null,
+        )
         break
       }
       case 'thread.stopped':
@@ -254,7 +273,12 @@ const apply = (t: P.Thread, r: P.ThreadReport) =>
         } else yield* noActiveTurn(t.id)
         if (!r.history_unavailable && r.kind === 'thread.stopped' && t.stop_requested_at)
           yield* sql`UPDATE threads SET stop_confirmed_at=clock_timestamp() WHERE id=${t.id}`
-        yield* status(t, r.history_unavailable || r.kind === 'thread.unknown' ? 'unknown' : 'stopped', r.reason)
+        yield* status(
+          t,
+          r.history_unavailable || r.kind === 'thread.unknown' ? 'unknown' : 'stopped',
+          r.reason,
+          reportStopCode(t, r, r.kind === 'thread.stopped' && !!t.stop_requested_at),
+        )
         break
       }
       case 'command.completed': {

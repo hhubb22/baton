@@ -25,6 +25,7 @@ import {
   checkPayloadSize,
   boundedProjectText,
   eventSelection,
+  decodeProjectEvent,
   jsonBytes,
   projectDecode,
   projectError,
@@ -153,7 +154,7 @@ const toolRequest = Effect.fn('callProjectTool')(function* (
   const old = yield* sql<{
     value: unknown
   }>`SELECT ${eventSelection(sql)} AS value FROM conversation_events e WHERE conversation_id=${b.conversationId} AND kind='tool_result' AND tool_call_id=${id}`
-  if (old[0]) return yield* projectDecode(P.ProjectEvent, old[0].value)
+  if (old[0]) return yield* decodeProjectEvent(old[0].value)
   if ((request.last_seq ?? 0) !== b.nextSeq - 1) return yield* Effect.fail(projectError())
   const [assistant] = yield* sql<{
     seq: string
@@ -728,7 +729,7 @@ const executeBusiness = Effect.fnUntraced(function* (
       return {
         value: yield* page(
           {
-            events: rows.map((r) => r.value),
+            events: yield* Effect.forEach(rows, (r) => decodeProjectEvent(r.value)),
             through_seq: through,
             next_after_seq: rows.at(-1)?.seq ?? a.after_seq ?? 0,
           },

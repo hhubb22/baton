@@ -3,10 +3,13 @@ import { Effect } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import * as P from '@baton/protocol'
 import { dbError } from '../database.ts'
+import { canonical } from '../json.ts'
+import { normalizeProjectMessage } from './message-reference.ts'
 import { insertProjectInput } from './inputs.ts'
 import { embeddingConfiguration, queueEmbeddings, lockMemoryState } from './memory/index.ts'
 import {
   boundedProjectText,
+  decodeProjectEvent,
   checkPayloadSize,
   eventSelection,
   lockProjectAgent,
@@ -152,20 +155,27 @@ export const acceptProjectMessage = Effect.fn('acceptProjectMessage')(function* 
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       yield* lockProjectAgent(employee, project)
-      const payload = { content: value.content },
+      const payload = { content: value.content, reference: value.reference ?? null },
         key = 'user:' + value.client_message_id
       yield* checkPayloadSize(payload, 72 * 1024)
       const inserted =
         yield* sql`INSERT INTO project_agent_input_queue(employee_id,agent_id,source_type,source_key,payload,payload_hash,wake_required)
- VALUES(${employee},${p.agent.id},'user_message',${key},${JSON.stringify(payload)}::jsonb,${createHash('sha256').update(value.content).digest()},true) ON CONFLICT(agent_id,source_key) DO NOTHING RETURNING id`
+ VALUES(${employee},${p.agent.id},'user_message',${key},${JSON.stringify(payload)}::jsonb,${createHash('sha256').update(canonical(payload)).digest()},true) ON CONFLICT(agent_id,source_key) DO NOTHING RETURNING id`
       if (inserted.length)
         yield* sql`UPDATE conversations SET next_attempt_at=NULL WHERE agent_id=${p.agent.id} AND state='active'`
       const [row] = yield* sql<{
         value: P.ProjectMessage
-      }>`SELECT jsonb_build_object('id',id,'client_message_id',${value.client_message_id}::text,'content',payload->>'content','created_at',created_at) AS value
+      }>`SELECT jsonb_build_object('id',id,'client_message_id',${value.client_message_id}::text,'content',payload->>'content','created_at',created_at) || CASE WHEN payload ? 'reference' THEN jsonb_build_object('reference',payload->'reference') ELSE '{}'::jsonb END AS value
  FROM project_agent_input_queue WHERE employee_id=${employee} AND agent_id=${p.agent.id} AND source_key=${key}`
-      if (!row || row.value.content !== value.content) return yield* Effect.fail(projectError('message_conflict'))
-      return yield* projectDecode(P.ProjectMessage, row.value)
+      if (!row) return yield* Effect.fail(projectError('message_conflict'))
+      const saved = normalizeProjectMessage(row.value)
+      if (
+        (row.value.content !== value.content ||
+          canonical(row.value.reference ?? null) !== canonical(value.reference ?? null)) &&
+        (saved.content !== value.content || canonical(saved.reference ?? null) !== canonical(value.reference ?? null))
+      )
+        return yield* Effect.fail(projectError('message_conflict'))
+      return yield* projectDecode(P.ProjectMessage, saved)
     }),
   )
 })
@@ -181,11 +191,13 @@ export const projectMessages = Effect.fn('projectMessages')(function* (
   if (!Number.isSafeInteger(afterId) || afterId < 0 || !Number.isInteger(limit) || limit < 1 || limit > 100)
     return yield* Effect.fail(projectError('invalid', 422))
   const rows = yield* sql<{
-    value: unknown
-  }>`SELECT jsonb_build_object('id',id,'client_message_id',substring(source_key from 6),'content',payload->>'content','created_at',created_at) AS value
+    value: P.ProjectMessage
+  }>`SELECT jsonb_build_object('id',id,'client_message_id',substring(source_key from 6),'content',payload->>'content','created_at',created_at) || CASE WHEN payload ? 'reference' THEN jsonb_build_object('reference',payload->'reference') ELSE '{}'::jsonb END AS value
  FROM project_agent_input_queue WHERE employee_id=${employee} AND agent_id=${p.agent.id} AND source_type='user_message' AND id>${afterId}
  AND ((${clientMessageId}='' AND delivered_seq IS NULL) OR (${clientMessageId}<>'' AND source_key='user:'||${clientMessageId})) ORDER BY id LIMIT ${limit + 1}`
-  const messages = yield* Effect.forEach(rows.slice(0, limit), (row) => projectDecode(P.ProjectMessage, row.value))
+  const messages = yield* Effect.forEach(rows.slice(0, limit), (row) =>
+    projectDecode(P.ProjectMessage, normalizeProjectMessage(row.value)),
+  )
   return { messages, ...(rows.length > limit ? { next_after_id: messages.at(-1)!.id } : {}) }
 }, Effect.mapError(dbError))
 export const projectEvents = Effect.fn('projectEvents')(function* (
@@ -204,7 +216,7 @@ export const projectEvents = Effect.fn('projectEvents')(function* (
   const events: P.ProjectEvent[] = []
   let size = 0
   for (const row of rows) {
-    const event = yield* projectDecode(P.ProjectEvent, row.value),
+    const event = yield* decodeProjectEvent(row.value),
       bytes = Buffer.byteLength(JSON.stringify(event))
     if (events.length && size + bytes > 192 * 1024) break
     events.push(event)
