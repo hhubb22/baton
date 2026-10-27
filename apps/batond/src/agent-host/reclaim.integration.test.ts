@@ -3,6 +3,7 @@ import { once } from 'node:events'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
 import { build } from 'esbuild'
@@ -14,6 +15,12 @@ const stub = fileURLToPath(new URL('../testing/platform/upstream-stub.mjs', impo
 let directory = ''
 let bundle = ''
 let host: childProcess.ChildProcess | undefined
+
+// stdout 的 data 分块不按行切分，按行读取宿主输出的 JSON。
+function lines(child: childProcess.ChildProcess) {
+  const iterator = createInterface({ input: child.stdout! })[Symbol.asyncIterator]()
+  return async () => JSON.parse(((await iterator.next()).value as string).trim())
+}
 
 beforeAll(async () => {
   directory = await mkdtemp(join(tmpdir(), 'baton-reclaim-fixture-'))
@@ -55,13 +62,14 @@ describe.skipIf(process.platform === 'win32')('Agent host process reclamation', 
   it('kills a detached upstream process and its descendant with the host group', async () => {
     host = childProcess.spawn(process.execPath, [bundle, stub], { detached: true, stdio: ['pipe', 'pipe', 'pipe'] })
     host.stderr?.resume()
-    const started = JSON.parse((await once(host.stdout!, 'data').then(([chunk]) => chunk.toString())).trim())
+    const next = lines(host)
+    const started = await next()
     expect(started.spawnedPid).toBe(started.spawned.pid)
     // The host group policy turns upstream detached spawns into same-group children,
     // so the Worker's single group registration already covers the whole tree.
     expect(started.stubPgid).toBe(started.host)
     host.stdin!.write('stop\n')
-    const stopped = JSON.parse((await once(host.stdout!, 'data').then(([chunk]) => chunk.toString())).trim())
+    const stopped = await next()
     expect(stopped).toEqual({ quiet: true })
     await gone([started.spawned.pid, started.spawned.grandchild])
   })
@@ -72,12 +80,13 @@ describe.skipIf(process.platform === 'win32')('Agent host process reclamation', 
       stdio: ['pipe', 'pipe', 'pipe'],
     })
     host.stderr?.resume()
-    const started = JSON.parse((await once(host.stdout!, 'data').then(([chunk]) => chunk.toString())).trim())
+    const next = lines(host)
+    const started = await next()
     expect(started.spawnedPid).toBe(started.spawned.pid)
     expect(started.stubPgid).toBe(started.spawned.pid)
     expect(started.stubPgid).not.toBe(started.host)
     host.stdin!.write('stop\n')
-    const stopped = JSON.parse((await once(host.stdout!, 'data').then(([chunk]) => chunk.toString())).trim())
+    const stopped = await next()
     expect(stopped).toEqual({ quiet: true })
     await gone([started.spawned.pid, started.spawned.grandchild])
   })
