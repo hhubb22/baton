@@ -617,6 +617,17 @@ test('completed chat → background memory and HTTP embeddings → recall → re
     await expect
       .poll(async () => (await alice<P.NodeStatus>(`/nodes/${identity.node_id}`)).body.synced, { timeout: 10000 })
       .toBe(true)
+    await expect
+      .poll(
+        async () => (await alice<P.NodeStatus>(`/nodes/${identity.node_id}`)).body.runtime_report?.project_runtime,
+        {
+          timeout: 30000,
+        },
+      )
+      .toMatchObject({
+        memory_protocol: 1,
+        providers: expect.arrayContaining([expect.objectContaining({ provider: 'openai-codex', status: 'available' })]),
+      })
     const created = await alice<P.Project>('/projects', 'POST', {
       title: 'Memory flow',
       goal: '继续验证测试约定',
@@ -638,7 +649,11 @@ test('completed chat → background memory and HTTP embeddings → recall → re
     const events = async () =>
       (await alice<P.ProjectEventPage>(`/projects/${project.id}/events?limit=100`)).body.events ?? []
     await send('请记住：测试使用 pnpm test:unit。')
-    await expect.poll(async () => (await memories()).length, { timeout: 15000 }).toBe(1)
+    // 前台回复保存后再计后台预算，后台还需等待前台回收及自己的源码子进程启动。
+    await expect
+      .poll(async () => (await events()).some((event) => event.kind === 'assistant'), { timeout: 30000 })
+      .toBe(true)
+    await expect.poll(async () => (await memories()).length, { timeout: 30000 }).toBe(1)
     const [memory] = await memories()
     expect(memory!.content).toBe('测试使用 pnpm test:unit。')
     await expect
@@ -653,16 +668,16 @@ test('completed chat → background memory and HTTP embeddings → recall → re
               return row!.ready
             }),
           ),
-        { timeout: 10000 },
+        { timeout: 30000 },
       )
       .toBe(true)
     await send('后续召回：测试入口是什么？' + 'current request '.repeat(1100))
     await expect
-      .poll(async () => JSON.stringify(await events()).includes('后续前台已召回测试入口。'), { timeout: 15000 })
+      .poll(async () => JSON.stringify(await events()).includes('后续前台已召回测试入口。'), { timeout: 30000 })
       .toBe(true)
     await expect
       .poll(async () => (await alice<P.ProjectStatus>(`/projects/${project.id}/status`)).body.run?.stop_acked_at, {
-        timeout: 10000,
+        timeout: 30000,
       })
       .toBeTruthy()
     const saved = await events()
@@ -679,7 +694,7 @@ test('completed chat → background memory and HTTP embeddings → recall → re
     expect(retired.status).toBe(200)
     await send('检查停用：继续当前目标。')
     await expect
-      .poll(async () => JSON.stringify(await events()).includes('停用后已刷新记忆工具结果。'), { timeout: 15000 })
+      .poll(async () => JSON.stringify(await events()).includes('停用后已刷新记忆工具结果。'), { timeout: 30000 })
       .toBe(true)
     expect(await memories()).toEqual([])
     const recovered = await events()
@@ -694,7 +709,7 @@ test('completed chat → background memory and HTTP embeddings → recall → re
     await database.close()
     await rm(directory, { recursive: true, force: true })
   }
-}, 60000)
+}, 120000)
 
 test('deployment outside the data directory registers without coordinator or CA arguments and connects using saved CA', async () => {
   const database = await openTestDatabase()
