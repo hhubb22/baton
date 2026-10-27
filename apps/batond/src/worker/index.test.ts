@@ -1603,6 +1603,14 @@ describe('reliable Worker', () => {
     fixture((dbPath) =>
       Effect.scoped(
         Effect.gen(function* () {
+          const clock = yield* TestClock.testClockWith(Effect.succeed)
+          // 停止预算和 Effect 超时共用测试时钟，避免机器负载耗尽真实预算。
+          yield* Effect.acquireRelease(
+            Effect.sync(() =>
+              vi.spyOn(process.hrtime, 'bigint').mockImplementation(() => clock.monotonicTimeNanosUnsafe()),
+            ),
+            (spy) => Effect.sync(() => spy.mockRestore()),
+          )
           const cfg = config()
           const f = yield* fake
           const extracting = yield* Deferred.make<void>()
@@ -1657,7 +1665,8 @@ describe('reliable Worker', () => {
           const stop = request(cfg, 'thread_stop')
           yield* worker.handle(stop)
           yield* called(f, 'abort')
-          yield* TestClock.adjust(10)
+          // 推进 9 ms 宽限期，为 flush 留 1 ms，且不触发附件提取的 1 秒超时。
+          yield* TestClock.adjust(9)
           yield* Deferred.await(barrierOffered)
           expect((yield* reports(worker)).some((item) => item.kind === 'turn.ended')).toBe(false)
           expect(f.calls.includes('reap')).toBe(false)
