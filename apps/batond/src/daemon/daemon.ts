@@ -464,6 +464,7 @@ async function writeDaemonStatus(
     join(directory, 'daemon-status.json'),
     JSON.stringify({
       pid: process.pid,
+      batond_version: BUILD.version,
       state,
       ...(state === 'rejected'
         ? {

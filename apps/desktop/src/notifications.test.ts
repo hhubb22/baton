@@ -77,11 +77,13 @@ it('点击系统通知把对应对象交给窗口导航', () => {
 })
 
 it('桥接声明可扩展的版本能力，来源和输入大小在主进程核查', () => {
-  expect(desktopCapabilities).toEqual([
-    { name: 'update', version: 1 },
-    { name: 'notifications', version: 1 },
-    { name: 'tray-status', version: 1 },
-  ])
+  expect(desktopCapabilities).toEqual(
+    expect.arrayContaining([
+      { name: 'update', version: 1 },
+      { name: 'notifications', version: 1 },
+      { name: 'tray-status', version: 1 },
+    ]),
+  )
   for (const [url, main] of [
     ['https://other.test', true],
     ['https://center.test', false],

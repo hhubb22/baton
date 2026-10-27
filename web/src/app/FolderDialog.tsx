@@ -12,6 +12,7 @@ import { Dialog, DialogClose } from '../ui/Dialog'
 import { Field } from '../ui/Field'
 import { Icon } from '../ui/Icon'
 import { DeviceFolderForm } from './DeviceFolderForm'
+import { useLocalDirectoryPicker } from './LocalDirectoryPicker'
 
 const styles = stylex.create({
   select: {
@@ -86,6 +87,8 @@ export function FolderDialog({
   const devices = useDevices()
   const [selectedDevice, setSelectedDevice] = useState(deviceId)
   const [path, setPath] = useState<string | null>(null)
+  const [localError, setLocalError] = useState<string | null>(null)
+  const local = useLocalDirectoryPicker({ nodeId: selectedDevice, onSelect, onError: setLocalError })
   const folders = useFolders(selectedDevice, path)
   const allowed = useFolders(selectedDevice, null)
   const device = devices.data?.find((item) => item.id === selectedDevice)
@@ -121,6 +124,7 @@ export function FolderDialog({
             onChange={(event) => {
               setSelectedDevice(event.target.value)
               setPath(null)
+              setLocalError(null)
             }}
             {...stylex.props(text.small, styles.select)}
           >
@@ -132,6 +136,12 @@ export function FolderDialog({
           </select>
         )}
       </Field>
+      {local.available && (
+        <Button small icon="folder" onClick={() => void local.pick()}>
+          {local.label}
+        </Button>
+      )}
+      {localError && <Banner icon="alert" title={localError} />}
       <div>
         <div role="group" aria-label="Folders" {...stylex.props(styles.box)}>
           {path === null ? (

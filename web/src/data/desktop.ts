@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
 import type { BrowserNotification } from '@baton/protocol'
 import type { Device } from './types'
@@ -26,10 +26,26 @@ export interface DesktopActivity {
   threads: { id: string; title: string }[]
 }
 
+export interface DesktopDiagnostics {
+  clientVersion: string
+  batondVersion: string
+  platform: string
+  processState: string
+  lastExit: { at: string; reason: string } | null
+  upgradePhase: string | null
+  canRestart: boolean
+}
+
 export interface DesktopBridge {
   protocol: 1
   version?: string
   capabilities?: readonly { name: string; version: number }[]
+  openLocal?(input: { threadId: string; action: 'reveal' | 'editor' }): Promise<void>
+  pickDirectory?(input: { nodeId: string }): Promise<string | null>
+  diagnostics?(input: { nodeId: string }): Promise<DesktopDiagnostics>
+  restartDaemon?(input: { nodeId: string }): Promise<void>
+  openLogs?(input: { nodeId: string }): Promise<void>
+  copyDiagnostics?(input: { nodeId: string }): Promise<void>
   notificationCursor?(scope: string): Promise<string | null>
   deliverNotifications?(input: { scope: string; events: BrowserNotification[]; cursor: string | null }): Promise<void>
   viewingThread?(threadId: string | null): Promise<void>
@@ -48,7 +64,9 @@ declare global {
 }
 
 export const desktopBridge = () => (window.batonDesktop?.protocol === 1 ? window.batonDesktop : null)
-export function desktopCapability(name: 'notifications' | 'tray-status') {
+type DesktopCapability = 'notifications' | 'tray-status' | 'open-local' | 'pick-directory' | 'diagnostics'
+
+export function desktopCapability(name: DesktopCapability) {
   const bridge = desktopBridge()
   return bridge?.capabilities?.some((capability) => capability.name === name && capability.version === 1)
     ? bridge
@@ -56,6 +74,39 @@ export function desktopCapability(name: 'notifications' | 'tray-status') {
 }
 
 const statusKey = ['desktop', 'status'] as const
+const statusSubscriptions = new WeakMap<
+  QueryClient,
+  WeakMap<DesktopBridge, { subscribers: number; unsubscribe: () => void }>
+>()
+
+function updateDesktopStatus(cache: QueryClient, status: DesktopStatus) {
+  void cache.cancelQueries({ queryKey: statusKey })
+  cache.setQueryData(statusKey, status)
+}
+
+function subscribeDesktopStatus(cache: QueryClient, bridge: DesktopBridge) {
+  let bridges = statusSubscriptions.get(cache)
+  if (!bridges) {
+    bridges = new WeakMap()
+    statusSubscriptions.set(cache, bridges)
+  }
+  let subscription = bridges.get(bridge)
+  if (!subscription) {
+    subscription = {
+      subscribers: 0,
+      unsubscribe: bridge.onStatus((status) => updateDesktopStatus(cache, status)),
+    }
+    bridges.set(bridge, subscription)
+  }
+  subscription.subscribers++
+  return () => {
+    subscription.subscribers--
+    if (subscription.subscribers === 0) {
+      subscription.unsubscribe()
+      bridges.delete(bridge)
+    }
+  }
+}
 
 export function useDesktopStatus() {
   const bridge = desktopBridge()
@@ -66,18 +117,20 @@ export function useDesktopStatus() {
     enabled: bridge !== null,
     refetchOnMount: 'always',
   })
-  const update = (status: DesktopStatus) => {
-    void cache.cancelQueries({ queryKey: statusKey })
-    cache.setQueryData(statusKey, status)
-  }
+  const update = (status: DesktopStatus) => updateDesktopStatus(cache, status)
   useEffect(() => {
     if (!bridge) return
-    return bridge.onStatus((status) => {
-      void cache.cancelQueries({ queryKey: statusKey })
-      cache.setQueryData(statusKey, status)
-    })
+    return subscribeDesktopStatus(cache, bridge)
   }, [bridge, cache])
   return { ...query, bridge, update }
+}
+
+export function useLocalDesktop(nodeId: string | null, capability: DesktopCapability) {
+  const desktop = useDesktopStatus()
+  const status = desktop.data
+  const bridge = desktopCapability(capability)
+  const local = status?.registered && status.node_id === nodeId
+  return { bridge: local ? bridge : null, status }
 }
 
 export function needsDesktopReauth(status: DesktopStatus, devices: Device[]) {
@@ -109,7 +162,10 @@ export function desktopErrorMessage(error: unknown, secret = '') {
       : error instanceof Error
         ? error.message
         : 'Could not connect this computer. Try again.'
-  const message = raw.replace(/^Error invoking remote method 'baton:(?:enroll|reauth|status)': (?:Error: )?/, '')
+  const message = raw.replace(
+    /^Error invoking remote method 'baton:(?:enroll|reauth|status|open-local|pick-directory|diagnostics|restart-daemon|open-logs|copy-diagnostics)': (?:Error: )?/,
+    '',
+  )
   const messages: Record<string, string> = {
     '接入凭据已过期，请在中心重新领取': 'Setup code expired. Try again.',
     '接入参数无效，请重新领取接入凭据': 'Could not use this setup code. Try again.',

@@ -28,6 +28,7 @@ export type IconName =
   | 'device'
   | 'dots'
   | 'external'
+  | 'editor'
   | 'file'
   | 'folder'
   | 'inbox'

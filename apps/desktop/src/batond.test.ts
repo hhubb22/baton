@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vite-plus/test'
-import { Batond, daemonLog } from './batond.ts'
+import { Batond, daemonLog, type Spawn } from './batond.ts'
 import { fakeProcess } from './testing/process.ts'
 
 afterEach(() => {
@@ -55,6 +55,32 @@ it('凭据仅通过注册子进程环境传入，命令输出只返回公开身�
   expect(calls[2]!.args).toEqual(['run', '--exit-with-stdin', '--data-dir', '/data'])
   expect(calls[2]!.env?.BATON_ENROLLMENT_TOKEN).toBeUndefined()
   daemon.stdin.end()
+})
+
+it('目录查询只传 Thread ID，返回公开身份与可信路径，并保留目录缺失提示', async () => {
+  const saved = {
+    node_id: '11111111-1111-4111-8111-111111111111',
+    employee_id: '22222222-2222-4222-8222-222222222222',
+    coordinator_url: 'https://center.test',
+    working_directory: '/workspace',
+  }
+  let missing = false
+  const spawn = vi.fn<Spawn>((_file, _args, _options) => {
+    const child = fakeProcess()
+    queueMicrotask(() => {
+      if (missing)
+        child.stderr.emit('data', Buffer.from(JSON.stringify({ code: 'directory_missing', message: 'private-detail' })))
+      else child.stdout.emit('data', Buffer.from(JSON.stringify({ ...saved, credential: 'must-not-leak' })))
+      child.emit('close', missing ? 1 : 0)
+    })
+    return child
+  })
+  const batond = new Batond('/resources', '/data', spawn)
+  const id = '33333333-3333-4333-8333-333333333333'
+  expect(await batond.directory(id)).toEqual(saved)
+  expect(spawn.mock.calls[0]?.[1]).toEqual(['desktop-directory', '--thread-id', id, '--data-dir', '/data'])
+  missing = true
+  await expect(batond.directory(id)).rejects.toThrow('This folder no longer exists.')
 })
 
 it('失败不向网页返回子进程原始输出或注册凭据', async () => {

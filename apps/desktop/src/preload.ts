@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { DesktopStatus } from './status.ts'
 import type { Activity, NativeNotice, NotificationTarget } from './notifications.ts'
 import { desktopCapabilities } from './capabilities.ts'
+import type { DesktopDiagnostics } from './diagnostics.ts'
 
 const originArgument = process.argv.find((argument) => argument.startsWith('--baton-origin='))
 const origin = originArgument?.slice('--baton-origin='.length)
@@ -12,6 +13,16 @@ if (process.isMainFrame && origin && location.origin === origin) {
       protocol: 1,
       capabilities: desktopCapabilities,
       update: (): Promise<void> => ipcRenderer.invoke('baton:update'),
+      openLocal: (input: { threadId: string; action: 'reveal' | 'editor' }): Promise<void> =>
+        ipcRenderer.invoke('baton:open-local', input),
+      pickDirectory: (input: { nodeId: string }): Promise<string | null> =>
+        ipcRenderer.invoke('baton:pick-directory', input),
+      diagnostics: (input: { nodeId: string }): Promise<DesktopDiagnostics> =>
+        ipcRenderer.invoke('baton:diagnostics', input),
+      restartDaemon: (input: { nodeId: string }): Promise<void> => ipcRenderer.invoke('baton:restart-daemon', input),
+      openLogs: (input: { nodeId: string }): Promise<void> => ipcRenderer.invoke('baton:open-logs', input),
+      copyDiagnostics: (input: { nodeId: string }): Promise<void> =>
+        ipcRenderer.invoke('baton:copy-diagnostics', input),
       notificationCursor: (scope: string): Promise<string | null> =>
         ipcRenderer.invoke('baton:notification-cursor', scope),
       deliverNotifications: (input: { scope: string; events: NativeNotice[]; cursor: string | null }): Promise<void> =>

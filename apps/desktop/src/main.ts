@@ -1,4 +1,4 @@
-import { app, dialog, ipcMain, Menu, session, shell, Notification, type BrowserWindow } from 'electron'
+import { app, clipboard, dialog, ipcMain, Menu, session, shell, Notification, type BrowserWindow } from 'electron'
 import { mkdir, readFile } from 'node:fs/promises'
 import { homedir, hostname } from 'node:os'
 import { join } from 'node:path'
@@ -33,6 +33,9 @@ import {
   type Activity,
 } from './notifications.ts'
 import { notificationsDisabled, notificationSettingsURL } from './notification-permission.ts'
+import { LocalActions, localAccount, registerLocalBridge } from './local.ts'
+import { diagnosticSummary, readLogTail, redactDiagnostics, type DesktopDiagnostics } from './diagnostics.ts'
+import { editorPreferences, launchEditor } from './editor.ts'
 
 app.setName('Baton')
 if (process.platform === 'win32') app.setAppUserModelId('dev.baton.desktop')
@@ -149,6 +152,26 @@ async function start() {
     },
   })
   const login = await autostart(userData)
+  const editor = await editorPreferences(userData)
+  async function showSettings() {
+    const selected = await dialog.showMessageBox({
+      title: 'Baton settings',
+      message: 'Editor',
+      detail: editor.get() ?? 'System default',
+      buttons: ['Close', 'Choose editor', 'Use system default', 'Notification settings'],
+      cancelId: 0,
+      noLink: true,
+    })
+    if (selected.response === 1) {
+      const choice = await dialog.showOpenDialog({
+        title: 'Choose editor',
+        properties: ['openFile'],
+        filters: [{ name: 'Application', extensions: [process.platform === 'darwin' ? 'app' : 'exe'] }],
+      })
+      if (!choice.canceled && choice.filePaths[0]) await editor.set(choice.filePaths[0])
+    } else if (selected.response === 2) await editor.set(null)
+    else if (selected.response === 3) await shell.openExternal(notificationSettingsURL())
+  }
   const tray = createTray({
     open: show,
     restart: () => {
@@ -177,17 +200,7 @@ async function start() {
       void shell.openExternal(notificationSettingsURL()).catch(reportError)
     },
     settings: () => {
-      void dialog
-        .showMessageBox({
-          title: 'Baton settings',
-          message: 'Notifications',
-          detail: 'Notification permissions are managed in system settings.',
-          buttons: ['Open notification settings', 'Close'],
-        })
-        .then(({ response }) => {
-          if (response === 0) return shell.openExternal(notificationSettingsURL())
-        })
-        .catch(reportError)
+      void showSettings().catch(reportError)
     },
     openThread: (thread_id) => openTarget({ thread_id }),
     loginEnabled: () => login.enabled(),
@@ -320,6 +333,12 @@ async function start() {
               },
             },
             {
+              label: 'Settings…',
+              click: () => {
+                void showSettings().catch(reportError)
+              },
+            },
+            {
               label: '打开日志目录',
               click: () => {
                 void shell.openPath(join(dataDirectory, 'logs')).catch(reportError)
@@ -393,7 +412,7 @@ async function start() {
       await refresh()
       return
     }
-    if (restart) await supervisor.restart()
+    if (restart) await supervisor.restart(() => !quitting && !!updater?.allowDaemon)
     else supervisor.start()
     await refresh()
   }
@@ -429,6 +448,83 @@ async function start() {
       event.sender === window?.webContents && event.senderFrame === window?.webContents.mainFrame,
     )
   }
+  async function centerJSON(path: string) {
+    if (!configuration) throw new Error('Connect this computer first.')
+    const response = await session.defaultSession.fetch(`${configuration.coordinator_url}${path}`, {
+      credentials: 'include',
+      redirect: 'error',
+    })
+    if (!response.ok) throw new Error('Sign in to this computer’s account to use local actions.')
+    return response.json() as Promise<unknown>
+  }
+  async function localIdentity() {
+    const saved = await batond.identity()
+    if (!configuration || !saved.registered || !saved.employee_id) throw new Error('Connect this computer first.')
+    assertIdentityOrigin(saved, configuration.coordinator_url)
+    const current = Schema.decodeUnknownSync(Schema.Struct({ employee: Schema.Struct({ id: Schema.String }) }))(
+      await centerJSON('/api/v1/me'),
+    )
+    return localAccount(saved, configuration.coordinator_url, current.employee.id)
+  }
+  async function localDiagnostics(): Promise<DesktopDiagnostics> {
+    await refresh()
+    const daemon = await readDaemonStatus(dataDirectory)
+    const external = status.state === 'external' || (!!daemon && daemon.pid !== supervisor.state.pid)
+    return {
+      clientVersion: version,
+      batondVersion: daemon?.batond_version ?? (external ? 'unknown' : version),
+      platform: `${process.platform} ${process.arch}`,
+      processState: external ? 'external' : status.state,
+      lastExit: supervisor.lastExit
+        ? { ...supervisor.lastExit, reason: redactDiagnostics(supervisor.lastExit.reason) }
+        : null,
+      upgradePhase: updater?.snapshot.status?.state?.phase ?? null,
+      canRestart: !external && !!updater?.allowDaemon && !quitting,
+    }
+  }
+  const localActions = new LocalActions({
+    identity: localIdentity,
+    threadNode: async (threadId) =>
+      Schema.decodeUnknownSync(Schema.Struct({ node_id: Schema.String }))(
+        await centerJSON(`/api/v1/threads/${encodeURIComponent(threadId)}`),
+      ).node_id,
+    directory: (threadId) => batond.directory(threadId),
+    openDirectory: async (path, useEditor) => {
+      const selected = editor.get()
+      if (useEditor && selected) await launchEditor(selected, path)
+      else {
+        const error = await shell.openPath(path)
+        if (error) throw new Error('Could not open this folder.')
+      }
+    },
+    pickDirectory: async () => {
+      const selected = await dialog.showOpenDialog({ title: 'Choose local folder', properties: ['openDirectory'] })
+      return selected.canceled ? null : (selected.filePaths[0] ?? null)
+    },
+    diagnostics: localDiagnostics,
+    restart: () =>
+      serialize(async () => {
+        if (!(await localDiagnostics()).canRestart) throw new Error('The device service cannot be restarted now.')
+        await reconcile(true)
+      }),
+    openLogs: async () => {
+      const error = await shell.openPath(join(dataDirectory, 'logs'))
+      if (error) throw new Error('Could not open the logs folder.')
+    },
+    copyDiagnostics: async () => {
+      await log.flush()
+      const summary = diagnosticSummary(
+        await localDiagnostics(),
+        await readLogTail(join(dataDirectory, 'logs', 'desktop-batond.log')),
+      )
+      await clipboard.writeText(summary)
+    },
+  })
+  registerLocalBridge<Electron.IpcMainInvokeEvent>(
+    (channel, callback) => ipcMain.handle(channel, callback),
+    authorize,
+    localActions,
+  )
   ipcMain.handle('baton:update', async (event) => {
     authorize(event)
     await showUpdate(true)

@@ -5,6 +5,7 @@ import { Schema } from 'effect'
 import type { DeploymentConfig } from './deployment.ts'
 import { PublicIdentity } from './status.ts'
 import { lastFailure } from './supervisor.ts'
+import { ThreadDirectory } from './local.ts'
 
 const UpgradeState = Schema.Struct({
   operation_id: Schema.String,
@@ -111,6 +112,19 @@ export class Batond {
         }
       })
     })
+  }
+
+  async directory(threadId: string): Promise<ThreadDirectory> {
+    try {
+      return Schema.decodeUnknownSync(ThreadDirectory)(
+        JSON.parse(await this.execute(['desktop-directory', '--thread-id', threadId])),
+      )
+    } catch (error) {
+      const code = error instanceof Error && 'code' in error ? error.code : undefined
+      throw new Error(
+        code === 'directory_missing' ? 'This folder no longer exists.' : 'This thread folder is unavailable.',
+      )
+    }
   }
 
   async upgradeStatus(): Promise<UpgradeSnapshot> {

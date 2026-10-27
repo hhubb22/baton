@@ -39,6 +39,7 @@ import { Menu, MenuOption } from '../ui/Menu'
 import { StatusDot, type Tone } from '../ui/Status'
 import { AttentionCard } from './AttentionCard'
 import { ThreadAccessMenu } from './ThreadAccessMenu'
+import { LocalThreadActions } from './LocalThreadActions'
 import { InboxFeedback } from './InboxFeedback'
 import { FilePreview } from './FilePreview'
 import { MessageBody } from './MessageBody'
@@ -775,6 +776,7 @@ export function ThreadDetail({
                 {thread.folder}
               </span>
             </span>
+            <LocalThreadActions key={thread.id} thread={thread} />
           </div>
         </div>
       </div>
