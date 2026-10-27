@@ -488,8 +488,15 @@ export function lastSeen(at: number, now: number) {
   return new Date(at).toDateString() === new Date(now).toDateString() ? time : `${day.format(at)}, ${time}`
 }
 
-// 设备行的状态列：离线和同步中带最后联系时间，在线且有 Project 助手运行时写出 Project 名。
+// 设备行优先显示升级暂停；普通连接状态与 Project 助手运行信息随后显示。
 export function deviceConnectionView(device: Device, projects: Project[], now: number): StatusView {
+  switch (device.upgradeState?.phase) {
+    case 'draining':
+    case 'ready':
+      return { tone: 'neutral', label: 'Waiting for upgrade' }
+    case 'failed':
+      return { tone: 'attention', label: 'Upgrade paused' }
+  }
   if (device.credentialState === 'idle_expired') return { tone: 'attention', label: 'Needs sign-in' }
   switch (device.connection) {
     case 'offline':

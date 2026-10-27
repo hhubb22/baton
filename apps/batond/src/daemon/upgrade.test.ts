@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, expect, it, vi } from 'vite-plus/test'
+import { Schema } from 'effect'
+import { NodeToControlBody, type NodeUpgradeStateRequest, type RuntimeReport } from '@baton/protocol'
 import type WebSocket from 'ws'
 import { setupDaemon } from '../testing/daemon.ts'
 import { ensurePrivateDirectory, writePrivateFileAtomic } from '../platform/private.ts'
@@ -25,6 +27,8 @@ it('authenticates upgrade commands, blocks readiness on living or unconfirmed pr
   let socket: WebSocket | undefined
   let syncs = 0
   const replies: unknown[] = []
+  const upgrades: NodeUpgradeStateRequest[] = []
+  const runtimeReports: RuntimeReport[] = []
   const control = (body: unknown, correlation?: string) =>
     socket!.send(
       JSON.stringify({
@@ -49,6 +53,28 @@ it('authenticates upgrade commands, blocks readiness on living or unconfirmed pr
       if (body?.type === 'node.sync') {
         syncs++
         control({ type: 'node.sync_result', ok: true }, frame.envelope.message_id)
+      }
+      if (body?.type === 'node.upgrade_state') {
+        const decoded = Schema.decodeUnknownSync(NodeToControlBody)(body)
+        if (decoded.type !== 'node.upgrade_state') throw new Error('Unexpected upgrade report')
+        expect(body).toEqual(decoded)
+        upgrades.push(decoded)
+        control(
+          {
+            type: 'node.upgrade_state_result',
+            operation_id: decoded.operation_id,
+            phase: decoded.phase,
+            ok: true,
+          },
+          frame.envelope.message_id,
+        )
+      }
+      if (body?.type === 'node.runtime_report') {
+        const decoded = Schema.decodeUnknownSync(NodeToControlBody)(body)
+        if (decoded.type !== 'node.runtime_report') throw new Error('Unexpected runtime report')
+        expect(decoded.report.upgrade_protocol).toBe(1)
+        runtimeReports.push(decoded.report)
+        control({ type: 'node.runtime_report_result', ok: true }, frame.envelope.message_id)
       }
       if (body?.type === 'thread.command_result') replies.push(body)
       if (frame.kind === 'error') replies.push(frame)
@@ -88,6 +114,15 @@ it('authenticates upgrade commands, blocks readiness on living or unconfirmed pr
   const prepared = await readUpgradeState(path)
   expect(prepared?.phase).toBe('draining')
   expect(prepared?.source_version).toBe(BUILD.version)
+  await vi.waitFor(() =>
+    expect(upgrades).toContainEqual({
+      type: 'node.upgrade_state',
+      operation_id: prepared!.operation_id,
+      source_version: BUILD.version,
+      target_version: 'v1',
+      phase: 'draining',
+    }),
+  )
   await expect(requestUpgrade(path, 'upgrade_prepare', target)).resolves.toMatchObject({
     state: { operation_id: prepared!.operation_id },
   })
@@ -129,6 +164,11 @@ it('authenticates upgrade commands, blocks readiness on living or unconfirmed pr
   })
   await requestUpgrade(path, 'upgrade_cancel')
   expect((await readUpgradeState(path))?.phase).toBe('cancelled')
+  await vi.waitFor(() =>
+    expect(upgrades).toContainEqual(
+      expect.objectContaining({ operation_id: prepared!.operation_id, phase: 'cancelled' }),
+    ),
+  )
   await requestUpgrade(path, 'upgrade_prepare', target)
   const previousSyncs = syncs
   edit("DELETE FROM project_processes WHERE role='unconfirmed'")
@@ -144,6 +184,11 @@ it('authenticates upgrade commands, blocks readiness on living or unconfirmed pr
     { timeout: 10000 },
   )
   await vi.waitFor(() => expect(syncs).toBeGreaterThan(previousSyncs))
+  const ready = await readUpgradeState(path)
+  await vi.waitFor(() => {
+    expect(upgrades).toContainEqual(expect.objectContaining({ operation_id: ready!.operation_id, phase: 'ready' }))
+    expect(runtimeReports).toContainEqual(expect.objectContaining({ upgrade_protocol: 1, agents: [] }))
+  })
   await expect(runBatondCLI(['open', '--cwd', path, '--data-dir', path])).rejects.toMatchObject({
     code: 'node_upgrading',
   })
@@ -164,5 +209,9 @@ it('authenticates upgrade commands, blocks readiness on living or unconfirmed pr
   )
   await requestUpgrade(path, 'upgrade_cancel')
   expect((await readUpgradeState(path))?.phase).toBe('cancelled')
+  await vi.waitFor(() =>
+    expect(upgrades).toContainEqual(expect.objectContaining({ operation_id: ready!.operation_id, phase: 'cancelled' })),
+  )
+  expect(runtimeReports.some((report) => (report.agents?.length ?? 0) > 0)).toBe(true)
   expect(daemon.failure()).toBeUndefined()
 }, 15000)

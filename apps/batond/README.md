@@ -48,6 +48,8 @@
 
 节点在认证时上报实际构建版本与协议。中心明确返回 `node_version_incompatible` 时，daemon 输出包含双方版本、协议、原因与升级指引的结构化诊断并退出，等待用户升级后重新启动；本地命令、待补报结果和独立 Worker 保留。development 与发布版联调可放行版本号差异，协议仍须一致。
 
+升级准备通过本地 `upgrade prepare --package <目录>`、`upgrade status`、`upgrade cancel` 管理。daemon 先持久保存升级状态，再通过 `node.upgrade_state` 上报 operation_id、源版本、目标版本和 draining、ready、cancelled 或 failed 阶段；本地安装路径和原始失败原因不上传。未收到成功回执时按心跳间隔重试，回执须匹配操作、阶段及消息关联 ID；初次连接和重连均重报当前持久状态，离线期间跳过的阶段不补造。普通连接与 ready/failed 的受限连接均报告 `upgrade_protocol=1`；受限连接不打开业务数据库，仍可上报升级状态。ready 需等待执行、进程清理与数据库关闭，未获中心确认的业务报告留在原账本；取消准备后恢复保留的队列。
+
 节点连接和能力探测分别进行。Cursor、Pi、Codex、Kiro 探测完成前上报 `unverified`，创建 Thread 需等待 `available` 且 `capabilities.create: true`；Kiro 另以限时 4 秒、stdout/stderr 各最多 4096 字节的 `kiro-cli --version` 获取版本，只上报版本号，诊断不外传，超时或不可解析记入 reason，已安装时仍允许新建，缺程序报告 `unavailable`。四个 Agent 认证 unknown 均允许新建；整次 host 探测失败且安装状态未确认时报告 `unverified`。Pi、Codex 支持 steer，Cursor、Kiro 上游不支持；Pi、Codex、Cursor 支持 Thread 内逐轮换模型，插入消息沿用活动回合的模型；Kiro 上游不支持换模型，原因写入报告。设备进程需显式配置 `CURSOR_API_KEY`。节点退出不结束独立 Worker，重启后从账本重新发现存活 Worker；未确认命令继续使用原 ID，已接收输入不会因为重连再次发送。
 
 ## 设备目录与模型订阅

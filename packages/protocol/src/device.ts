@@ -286,7 +286,31 @@ export const RuntimeExec = Schema.Struct({
 })
 export type RuntimeExec = typeof RuntimeExec.Type
 
+export const NodeUpgradeState = Schema.Struct({
+  operation_id: UUID,
+  source_version: nonemptyText(256),
+  target_version: nonemptyText(256),
+  phase: Schema.Literals(['draining', 'ready', 'cancelled', 'failed']),
+})
+export type NodeUpgradeState = typeof NodeUpgradeState.Type
+
+export const NodeUpgradeStateRequest = Schema.Struct({
+  type: Schema.Literal('node.upgrade_state'),
+  ...NodeUpgradeState.fields,
+})
+export type NodeUpgradeStateRequest = typeof NodeUpgradeStateRequest.Type
+
+export const NodeUpgradeStateResult = Schema.Struct({
+  type: Schema.Literal('node.upgrade_state_result'),
+  operation_id: UUID,
+  phase: NodeUpgradeState.fields.phase,
+  ok: Schema.Boolean,
+  code: Schema.optionalKey(Text),
+})
+export type NodeUpgradeStateResult = typeof NodeUpgradeStateResult.Type
+
 export const RuntimeReport = Schema.Struct({
+  upgrade_protocol: Schema.optionalKey(Schema.Literal(1)),
   batond_version: Schema.optionalKey(nonemptyText(256)),
   user: Schema.optionalKey(nonemptyText(256)),
   agents: Schema.optionalKey(
@@ -305,6 +329,7 @@ export const RuntimeReport = Schema.Struct({
 export type RuntimeReport = typeof RuntimeReport.Type
 
 export const NodeStatus = Schema.Struct({
+  upgrade_state: Schema.optionalKey(Schema.NullOr(NodeUpgradeState)),
   registered_at: Timestamp,
   runtime_report: Schema.NullOr(RuntimeReport),
   runtime_report_version: NonNegativeInteger,

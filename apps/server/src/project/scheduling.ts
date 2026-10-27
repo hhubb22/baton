@@ -3,6 +3,7 @@ import { Effect } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import type { ProjectRunCommand, RuntimeReport } from '@baton/protocol'
 import { dbError } from '../database.ts'
+import { nodeAllowsNewExecutionSQL } from '../nodes.ts'
 import { releaseMemoryAttempt, yieldMemoryToForeground } from './memory-jobs.ts'
 import { activeInputSQL, projectError, projectTransaction, recoveryWorkSQL, releaseProjectRun } from './store.ts'
 
@@ -106,7 +107,7 @@ export const scheduleProjectRun = Effect.fn('scheduleProjectRun')(function* (age
         revoked: boolean
         report: RuntimeReport | null
       }>`SELECT n.id,COALESCE(p.online,false) AS online,COALESCE(p.synced,false) AS synced,n.revoked_at IS NOT NULL AS revoked,r.report
- FROM nodes n LEFT JOIN node_presence p ON p.node_id=n.id LEFT JOIN node_runtime_reports r ON r.node_id=n.id WHERE n.employee_id=${a.employee_id} AND ${activeCredential(sql)}
+ FROM nodes n LEFT JOIN node_presence p ON p.node_id=n.id LEFT JOIN node_runtime_reports r ON r.node_id=n.id WHERE n.employee_id=${a.employee_id} AND ${activeCredential(sql)} AND ${nodeAllowsNewExecutionSQL(sql)}
  ORDER BY CASE WHEN n.id=${preferred}::uuid THEN 0 ELSE 1 END,n.registration_seq`
       let reason = preferred ? 'default_unavailable' : 'default_not_set',
         chosen = ''
@@ -129,7 +130,7 @@ export const scheduleProjectRun = Effect.fn('scheduleProjectRun')(function* (age
             eligible: boolean
             report: RuntimeReport
             count: string
-          }>`SELECT n.revoked_at IS NULL AND ${activeCredential(sql)} AND COALESCE(p.online AND p.synced,false) AS eligible,r.report,
+          }>`SELECT n.revoked_at IS NULL AND ${activeCredential(sql)} AND ${nodeAllowsNewExecutionSQL(sql)} AND COALESCE(p.online AND p.synced,false) AS eligible,r.report,
  (SELECT count(*) FROM agent_runs ar WHERE ar.node_id=n.id AND ar.stop_acked_at IS NULL) AS count
  FROM nodes n LEFT JOIN node_presence p ON p.node_id=n.id LEFT JOIN node_runtime_reports r ON r.node_id=n.id WHERE n.id=${node.id}`
           why = !current?.eligible
@@ -224,18 +225,19 @@ export const claimProjectCommands = Effect.fn('claimProjectCommands')(function* 
             : kind === 'project_memory_stop'
               ? sql`r.memory_job_id IS NOT NULL AND r.stop_requested_at IS NOT NULL AND r.stop_acked_at IS NULL`
               : sql`r.memory_job_id IS NULL AND r.stop_requested_at IS NOT NULL AND r.stop_acked_at IS NULL`
+      const starting = kind === 'project_run_start' || kind === 'project_memory_start'
       const rows = yield* sql<CommandRow>`WITH candidates AS MATERIALIZED(
  SELECT p.node_id,p.conn_id FROM node_presence p JOIN nodes n ON n.id=p.node_id CROSS JOIN LATERAL(
  SELECT r.id,r.command_next_at FROM agent_runs r JOIN project_agents a ON a.id=r.agent_id JOIN projects pr ON pr.id=a.project_id
  WHERE r.node_id=p.node_id AND ${predicate} AND r.command_next_at<=statement_timestamp() ORDER BY r.command_next_at,r.id LIMIT 1) due
- WHERE p.online AND p.synced AND n.revoked_at IS NULL AND ${activeCredential(sql)} ORDER BY due.command_next_at,due.id)
+ WHERE p.online AND p.synced AND n.revoked_at IS NULL AND ${activeCredential(sql)} AND (NOT ${starting} OR ${nodeAllowsNewExecutionSQL(sql)}) ORDER BY due.command_next_at,due.id)
  SELECT command.* FROM candidates p CROSS JOIN LATERAL(
  SELECT ${columns(sql)} FROM agent_runs r JOIN project_agents a ON a.id=r.agent_id JOIN projects pr ON pr.id=a.project_id JOIN conversations c ON c.agent_id=a.id
  WHERE r.node_id=p.node_id AND ${predicate} AND r.command_next_at<=statement_timestamp() ORDER BY r.command_next_at,r.id LIMIT 2 FOR UPDATE OF r SKIP LOCKED) command LIMIT 32`
       const out: ProjectCommandDelivery[] = []
       for (const row of rows) {
         const valid =
-          yield* sql`SELECT 1 FROM nodes n WHERE n.id=${row.node_id} AND n.revoked_at IS NULL AND ${activeCredential(sql)}`
+          yield* sql`SELECT 1 FROM nodes n WHERE n.id=${row.node_id} AND n.revoked_at IS NULL AND ${activeCredential(sql)} AND (NOT ${starting} OR ${nodeAllowsNewExecutionSQL(sql)})`
         if (!valid.length) continue
         yield* sql`UPDATE agent_runs SET command_attempts=LEAST(command_attempts::bigint+1,2147483647)::integer,command_next_at=clock_timestamp()+${retrySeconds(row.command_attempts, random)}*interval '1 second' WHERE id=${row.run_id}`
         out.push(command(kind, row))
@@ -252,14 +254,14 @@ const claimWakes = Effect.fn('claimProjectWakes')(function* (random: () => numbe
  SELECT p.node_id,p.conn_id FROM node_presence p JOIN nodes n ON n.id=p.node_id CROSS JOIN LATERAL(
  SELECT q.wake_next_at,q.id FROM agent_runs r JOIN project_agents a ON a.lease_run_id=r.id AND a.lease_epoch=r.lease_epoch JOIN projects pr ON pr.id=a.project_id
  CROSS JOIN LATERAL(${dueInput}) q WHERE r.node_id=p.node_id AND ${eligible} ORDER BY q.wake_next_at,q.id LIMIT 1) due
- WHERE p.online AND p.synced AND n.revoked_at IS NULL AND ${activeCredential(sql)} ORDER BY due.wake_next_at,due.id)
+ WHERE p.online AND p.synced AND n.revoked_at IS NULL AND ${activeCredential(sql)} AND ${nodeAllowsNewExecutionSQL(sql)} ORDER BY due.wake_next_at,due.id)
  SELECT command.* FROM candidates p CROSS JOIN LATERAL(
  SELECT ${columns(sql)} FROM agent_runs r JOIN project_agents a ON a.lease_run_id=r.id AND a.lease_epoch=r.lease_epoch JOIN projects pr ON pr.id=a.project_id JOIN conversations c ON c.agent_id=a.id
  CROSS JOIN LATERAL(${dueInput}) q WHERE r.node_id=p.node_id AND ${eligible} ORDER BY q.wake_next_at,q.id LIMIT 2 FOR NO KEY UPDATE OF a SKIP LOCKED) command LIMIT 32`
   const out: ProjectCommandDelivery[] = []
   for (const row of rows) {
     const valid =
-      yield* sql`SELECT 1 FROM project_agents a JOIN agent_runs r ON r.id=a.lease_run_id JOIN projects pr ON pr.id=a.project_id WHERE a.id=${row.agent_id} AND r.id=${row.run_id} AND a.lease_epoch=${Number(row.lease_epoch)} AND ${eligible} AND EXISTS(SELECT 1 FROM nodes n WHERE n.id=r.node_id AND n.revoked_at IS NULL AND ${activeCredential(sql)})`
+      yield* sql`SELECT 1 FROM project_agents a JOIN agent_runs r ON r.id=a.lease_run_id JOIN projects pr ON pr.id=a.project_id WHERE a.id=${row.agent_id} AND r.id=${row.run_id} AND a.lease_epoch=${Number(row.lease_epoch)} AND ${eligible} AND EXISTS(SELECT 1 FROM nodes n WHERE n.id=r.node_id AND n.revoked_at IS NULL AND ${activeCredential(sql)} AND ${nodeAllowsNewExecutionSQL(sql)})`
     if (!valid.length) continue
     const inputs = yield* sql<{
       id: string

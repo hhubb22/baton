@@ -403,6 +403,7 @@ export class Gateway {
             ![
               'node.sync',
               'node.runtime_report',
+              'node.upgrade_state',
               'thread.command_result',
               'thread.report',
               'session.result',
@@ -472,7 +473,13 @@ export class Gateway {
               if (
                 error instanceof AppError &&
                 error.status === 503 &&
-                ['node.sync', 'node.runtime_report', 'thread.command_result', 'thread.report'].includes(body.type)
+                [
+                  'node.sync',
+                  'node.runtime_report',
+                  'node.upgrade_state',
+                  'thread.command_result',
+                  'thread.report',
+                ].includes(body.type)
               ) {
                 // The node retries durable work with its original identity until it receives an acknowledgement.
                 return

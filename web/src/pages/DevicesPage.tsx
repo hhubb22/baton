@@ -312,6 +312,9 @@ function DeviceDetails({
           onClose={() => setLoginProvider(null)}
         />
       )}
+      {device.upgradeState?.phase === 'failed' && (
+        <span {...stylex.props(text.small, text.muted)}>Waiting for the upgrade to be cancelled.</span>
+      )}
       {device.credentialState === 'idle_expired' && (
         <span {...stylex.props(text.small, styles.attention)}>Needs sign-in</span>
       )}

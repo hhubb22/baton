@@ -9,6 +9,7 @@ import type * as Scope from 'effect/Scope'
 import {
   ControlToNodeBody,
   Envelope,
+  NodeUpgradeState,
   type Frame,
   type NodeIdentity,
   type RuntimeAgent,
@@ -114,6 +115,7 @@ const terminal = (code?: string) =>
   ].includes(code ?? '')
 
 async function connected(options: {
+  dataDirectory: string
   connection: DaemonConnection
   signal: AbortSignal
   identity: NodeIdentity
@@ -143,6 +145,8 @@ async function connected(options: {
   const started = performance.now()
   let reportPending: { id: string; hash: string; sent: number } | undefined
   let reportAcked = ''
+  let upgradePending: { id: string; state: NodeUpgradeState; hash: string; sent: number } | undefined
+  let upgradeAcked = ''
   const sentReports = new Map<string, { report: ThreadReport; sentAt: number }>()
   const reportAttempts: number[] = []
   const reportRetryMs = Math.max(1000, options.heartbeatMs)
@@ -213,6 +217,24 @@ async function connected(options: {
         heartbeatAt = now + options.heartbeatMs
       }
       if (synced) {
+        const saved = await readUpgradeState(options.dataDirectory)
+        if (saved) {
+          const state = Schema.decodeUnknownSync(NodeUpgradeState)({
+            operation_id: saved.operation_id,
+            source_version: saved.source_version,
+            target_version: saved.target_version,
+            phase: saved.phase,
+          })
+          const hash = contentHash(state)
+          if (
+            hash !== upgradeAcked &&
+            (upgradePending?.hash !== hash || now - upgradePending.sent >= options.heartbeatMs)
+          ) {
+            const id = upgradePending?.hash === hash ? upgradePending.id : randomUUID()
+            upgradePending = { id, state, hash, sent: now }
+            await envelope({ type: 'node.upgrade_state', ...state }, undefined, id)
+          }
+        }
         const report = await options.report()
         const hash = contentHash(report)
         if (hash !== reportAcked && (!reportPending || now - reportPending.sent >= options.heartbeatMs)) {
@@ -294,6 +316,19 @@ async function connected(options: {
         if (reportPending && env.correlation_id === reportPending.id && body.ok) {
           reportAcked = reportPending.hash
           reportPending = undefined
+        }
+        continue
+      }
+      if (body.type === 'node.upgrade_state_result') {
+        if (
+          upgradePending &&
+          env.correlation_id === upgradePending.id &&
+          body.operation_id === upgradePending.state.operation_id &&
+          body.phase === upgradePending.state.phase &&
+          body.ok
+        ) {
+          upgradeAcked = upgradePending.hash
+          upgradePending = undefined
         }
         continue
       }
@@ -506,6 +541,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
             try {
               connection = await services.transport(url, { signal, ...(ca ? { ca } : {}) })
               await connected({
+                dataDirectory: options.dataDirectory,
                 connection,
                 signal,
                 identity,
@@ -538,11 +574,12 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
         yield* Effect.raceFirst(
           connect({
             report: async () => ({
+              upgrade_protocol: 1,
               batond_version: BUILD.version,
               agents: [],
               roots: [],
               repos: [],
-              exec: { enabled: false, shell: '' },
+              exec: { enabled: false, shell: process.platform === 'win32' ? 'pwsh' : '/bin/sh' },
             }),
             refreshDevices: () => {},
           }),
@@ -618,6 +655,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
           }
           const report = async (): Promise<RuntimeReport> =>
             boundRuntimeReport({
+              upgrade_protocol: 1,
               batond_version: BUILD.version,
               ...(username ? { user: username } : {}),
               agents,

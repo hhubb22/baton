@@ -74,6 +74,57 @@ describe('HTTP transport', () => {
 })
 
 describe('HTTP account and devices', () => {
+  it.each([
+    ['draining', 'neutral', 'Waiting for upgrade'],
+    ['ready', 'neutral', 'Waiting for upgrade'],
+    ['failed', 'attention', 'Upgrade paused'],
+    ['cancelled', 'success', 'Online'],
+  ] as const)('preserves upgrade phase %s separately from the connection', (phase, tone, label) => {
+    const device = mapDevice({
+      id: 'desk',
+      display_name: 'Desk',
+      system: 'linux',
+      online: true,
+      synced: true,
+      revocation_status: 'none',
+      upgrade_state: {
+        operation_id: 'upgrade-one',
+        source_version: '0.9.1',
+        target_version: '0.9.2',
+        phase,
+      },
+    })
+    expect(device).toMatchObject({
+      connection: 'online',
+      upgradeState: {
+        operationId: 'upgrade-one',
+        sourceVersion: '0.9.1',
+        targetVersion: '0.9.2',
+        phase,
+      },
+    })
+    expect(deviceConnectionView(device, [], Date.now())).toEqual({ tone, label })
+    if (phase !== 'cancelled') {
+      for (const connection of ['offline', 'syncing'] as const) {
+        expect(deviceConnectionView({ ...device, connection }, [], Date.now())).toEqual({ tone, label })
+      }
+    }
+  })
+
+  it.each([undefined, null])('keeps ordinary status when upgrade state is %s', (upgrade_state) => {
+    const device = mapDevice({
+      id: 'desk',
+      display_name: 'Desk',
+      system: 'linux',
+      online: true,
+      synced: true,
+      revocation_status: 'none',
+      upgrade_state,
+    })
+    expect(device.upgradeState).toBeNull()
+    expect(deviceConnectionView(device, [], Date.now())).toEqual({ tone: 'success', label: 'Online' })
+  })
+
   it.each(['active', 'idle_expired', 'revoked'] as const)('maps device credentials in state %s', (state) => {
     const expiresAt = '2026-07-01T12:00:00Z'
     const device = mapDevice({

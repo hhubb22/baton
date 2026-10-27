@@ -134,6 +134,20 @@ export const startServer = (
                     )
                     gateway.notify(source.employee_id, { type: 'thread.changed' })
                     return { type: 'node.sync_result', ok: true }
+                  case 'node.upgrade_state': {
+                    try {
+                      return { ...(await run('runtime_report', Nodes.saveNodeUpgradeState(source, body))) }
+                    } catch (error) {
+                      if (!(error instanceof AppError) || error.code !== 'upgrade_conflict') throw error
+                      return {
+                        type: 'node.upgrade_state_result',
+                        operation_id: body.operation_id,
+                        phase: body.phase,
+                        ok: false,
+                        code: error.code,
+                      }
+                    }
+                  }
                   case 'node.runtime_report': {
                     const version = await run('runtime_report', Nodes.saveRuntimeReport(source, body.report))
                     gateway.notify(source.employee_id, {

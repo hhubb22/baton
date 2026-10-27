@@ -170,9 +170,11 @@ daemon 只读检查 Worker/启动锁、Thread 活动事实、Runtime 运行和�
 | `cancelled` | 迁移前取消准备并确认原程序仍可读取数据，清除门禁后恢复调度；保留操作结果 |
 | `failed` | 保存原阶段、错误码和当前格式；保持暂停，按数据库事实判断继续或恢复路径 |
 
-待实施的阶段上报协议在 `packages/protocol` 统一声明：节点能力增加 `upgrade_protocol=1`；`node.upgrade_state` 带 operation_id、源/目标版本与阶段，中心持久保存后以原 operation_id 回执。中心只接受当前节点来源，重复同内容返回原结果，同 ID 不同目标返回 `upgrade_conflict`；普通报告不能把阶段回退。节点视图返回升级阶段与固定原因，不暴露本地路径。首次没有该能力的组合按下文人工停机流程处理。
+阶段上报协议在 `packages/protocol` 声明，当前支持 `draining`、`ready`、`cancelled`、`failed`。普通能力报告包含 `upgrade_protocol=1`；`node.upgrade_state` 只上传 `operation_id`、源/目标版本和阶段，不上传安装路径或原始失败诊断。daemon 读取已经原子保存的 `upgrade.json`，按现有心跳间隔重报未确认状态；初次连接和重连均重报当前状态。回执 `node.upgrade_state_result` 必须匹配原 operation ID、阶段、消息关联 ID 且 `ok=true`，否则继续重试。ready/failed 的受限连接也上报，不打开业务数据库。离线期间可以跨过中间阶段，中心接受首次直接上报 ready 或 cancelled。
 
-后续中心联动中，daemon 在本地先持久进入 draining，再上报升级能力与阶段；中心确认后停止领取该节点的 open、message、resume、Project 前台和后台启动，保留持久 outbox。stop、withdraw、结果回执和必要清理继续处理。已在途的启动或消息可以落盘接收，但本地执行门禁阻止新回合；接收 ACK 只表示持久保存。节点本地 CLI 与 Worker 自己的 queued 调度也检查同一升级状态，不能绕过 daemon 开始下一轮。升级期间新的业务意图仍可由中心保存，界面说明等待设备升级。
+中心在现有 Node、Credential、Presence 来源校验与事务中保存 `node_upgrades`，每个操作记录绑定设备、源/目标版本、当前阶段和已确认阶段；最近创建的操作是该设备当前操作。同一操作、同一阶段重投返回原回执，迟到回执不改变当前阶段；同 ID 改变设备、源/目标版本或提交未确认过的回退阶段返回 `upgrade_conflict`。普通能力报告和状态同步不修改升级记录。当前认证连接上报新 operation 时以新操作为准，允许离线取消旧操作后立即准备新目标；已记录旧操作的迟到报告只能重取原阶段回执，不能覆盖新操作。节点视图提供当前操作、版本和阶段，设备页显示 `Waiting for upgrade` 或 `Upgrade paused`，不暴露本地路径。没有声明该能力的组合仍按人工停机流程处理。
+
+中心保存 draining、ready 或 failed 后，停止领取该节点的 open、message、resume、Project 前台/后台启动和新输入唤醒，不向该节点放置新的 Project 运行。持久 outbox 和输入保留，等待中的新执行不阻挡后面的 stop、withdraw；结果回执、有效运行续租和必要清理继续处理。中心确认 cancelled 后恢复领取。已在途的启动或消息仍可落盘接收，本地门禁阻止新回合；接收 ACK 只表示持久保存。节点本地 CLI 与 Worker 自己的 queued 调度检查相同本地状态，中心离线时仍暂停新执行。
 
 当前 Thread Turn 自然结束后，Worker 暂停在下一轮提交 intent 之前，落盘报告并关闭原生会话连接、agent-host 与自身。关闭会话连接不删除原生会话。普通升级不调用会撤回 queued 的 Thread stop；用户显式停止时继续按 R-11 撤回未发输入。Project 前台在下一持久化安全点退出：取消尚未保存的模型输出，保留已保存 assistant、工具调用、结果及已领取输入；已提交工具继续按原业务身份查询，未提交调用留待升级后恢复，不为升级制造模型失败或重新创建调用身份。中心暂停向该运行唤醒或交付下一批。后台整理取消模型请求，保留已提交分片，未提交内容按原 claim 恢复。所有停止、续租与进程清理沿用既有 fencing。
 

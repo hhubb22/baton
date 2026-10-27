@@ -465,6 +465,41 @@ describe('devices', () => {
   }
 
   it.each([
+    ['draining', 'Waiting for upgrade'],
+    ['ready', 'Waiting for upgrade'],
+    ['failed', 'Upgrade paused'],
+    ['cancelled', 'Running Baton Dev'],
+  ] as const)('shows upgrade phase %s in the existing device status row', async (phase, label) => {
+    const user = userEvent.setup()
+    renderApp('/devices', 'normal', (client) => {
+      const read = client.listDevices.bind(client)
+      client.listDevices = async () =>
+        (await read()).map((device) =>
+          device.id === 'dev-ubuntu'
+            ? {
+                ...device,
+                upgradeState: {
+                  operationId: 'upgrade-one',
+                  sourceVersion: '0.9.1',
+                  targetVersion: '0.9.2',
+                  phase,
+                },
+              }
+            : device,
+        )
+    })
+    await screen.findByRole('button', { name: /^Ubuntu Dev/ })
+    const row = deviceRow('Ubuntu Dev')
+    expect(within(row).getByText(label)).toBeInTheDocument()
+    expect(within(row).queryByText('Online')).not.toBeInTheDocument()
+    if (phase !== 'cancelled') expect(within(row).queryByText('Running Baton Dev')).not.toBeInTheDocument()
+    await user.click(row)
+    const cancellation = screen.queryByText('Waiting for the upgrade to be cancelled.')
+    if (phase === 'failed') expect(cancellation).toBeInTheDocument()
+    else expect(cancellation).not.toBeInTheDocument()
+  })
+
+  it.each([
     ['dev-windows', 'Windows Desktop', '$env:BATON_ENROLLMENT_TOKEN = Read-Host -MaskInput'],
     ['dev-ubuntu', 'Ubuntu Dev', 'read -rs BATON_ENROLLMENT_TOKEN && export BATON_ENROLLMENT_TOKEN'],
   ])('reconnects the original device %s with a new setup code', async (id, name, tokenInput) => {

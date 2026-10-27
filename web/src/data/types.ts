@@ -74,6 +74,12 @@ export interface Device {
   system: string
   batondVersion: string
   connection: DeviceConnection
+  upgradeState?: {
+    operationId: string
+    sourceVersion: string
+    targetVersion: string
+    phase: 'draining' | 'ready' | 'cancelled' | 'failed'
+  } | null
   credentialState?: 'active' | 'idle_expired' | 'revoked'
   idleExpiresAt?: number
   lastSeenAt: number

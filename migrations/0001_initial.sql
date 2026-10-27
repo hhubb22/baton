@@ -233,6 +233,19 @@ CREATE TABLE nodes (
     CONSTRAINT nodes_system_name CHECK ((system_name = ANY (ARRAY['windows'::text, 'macos'::text, 'linux'::text])))
 );
 
+CREATE TABLE node_upgrades (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    node_id uuid NOT NULL,
+    employee_id uuid NOT NULL,
+    operation_id uuid NOT NULL UNIQUE,
+    source_version text NOT NULL,
+    target_version text NOT NULL,
+    phase text NOT NULL CHECK (phase IN ('draining', 'ready', 'cancelled', 'failed')),
+    reported_phases text[] NOT NULL
+);
+
+CREATE INDEX node_upgrades_current ON node_upgrades (node_id, id DESC);
+
 CREATE TABLE project_agent_input_queue (
     id bigint NOT NULL,
     employee_id uuid NOT NULL,
@@ -869,6 +882,9 @@ ALTER TABLE ONLY node_revocations
 
 ALTER TABLE ONLY node_runtime_reports
     ADD CONSTRAINT node_runtime_reports_node_fk FOREIGN KEY (employee_id, node_id) REFERENCES nodes(employee_id, id);
+
+ALTER TABLE ONLY node_upgrades
+    ADD CONSTRAINT node_upgrades_node_fk FOREIGN KEY (employee_id, node_id) REFERENCES nodes(employee_id, id);
 
 ALTER TABLE ONLY nodes
     ADD CONSTRAINT nodes_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES employees(id);

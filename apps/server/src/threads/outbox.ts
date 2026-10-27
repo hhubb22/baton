@@ -55,13 +55,16 @@ export const claimCommands = (): DB<ClaimedCommand[]> =>
           AND v.worker_turn_seq=(${alias}.payload->>'worker_turn_seq')::bigint AND v.ended_at IS NULL)
         AND NOT EXISTS(SELECT 1 FROM thread_events e WHERE e.thread_id=eligible.id AND e.kind='question.resolved'
           AND e.payload->>'request_id'=${alias}.payload->'answer'->>'request_id')))`
-      // 恢复后冻结的旧行保留补报入口，不占用后续显式操作的派发顺序。
+      const acceptsWork = `COALESCE((SELECT u.phase='cancelled' FROM node_upgrades u WHERE u.node_id=eligible.node_id ORDER BY u.id DESC LIMIT 1),true)`
+      // 冻结或因升级等待的新执行不阻挡停止、撤回和必要清理。
       const due = `o.acked_at IS NULL AND o.completed_at IS NULL AND o.next_attempt_at<=statement_timestamp()
     AND EXISTS(SELECT 1 FROM threads eligible WHERE eligible.id=o.thread_id
       AND (${answerDue('o')} OR (o.action='answer' AND o.attempts>0))
+      AND (o.action NOT IN ('open','message','resume') OR ${acceptsWork})
       AND (eligible.status<>'archived' OR o.action IN ('stop','withdraw') OR (o.action='answer' AND o.attempts>0))
       AND (o.action IN ('open','stop') OR (eligible.opened_at IS NOT NULL AND eligible.storage_generation IS NOT NULL))
       AND NOT EXISTS(SELECT 1 FROM thread_outbox older WHERE older.thread_id=o.thread_id AND older.acked_at IS NULL AND older.completed_at IS NULL AND older.next_attempt_at<>'infinity' AND older.id<o.id AND ${answerDue('older')}
+        AND (older.action NOT IN ('open','message','resume') OR ${acceptsWork})
         AND (eligible.status<>'archived' OR older.action IN ('stop','withdraw'))
         AND (older.action IN ('open','stop') OR eligible.opened_at IS NOT NULL)))`
       const rows = yield* sql.unsafe<{ command: Outbox; thread: Thread }>(`WITH candidates AS MATERIALIZED (

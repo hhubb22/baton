@@ -12,6 +12,8 @@ import {
   FileResult,
   NodeSyncRequest,
   NodeSyncResult,
+  NodeUpgradeStateRequest,
+  NodeUpgradeStateResult,
   ProjectExecRequest,
   ProjectExecResult,
   RuntimeReportRequest,
@@ -103,6 +105,7 @@ export type NodeFrame = typeof NodeFrame.Type
 
 export const NodeToControlBody = Schema.Union([
   NodeSyncRequest,
+  NodeUpgradeStateRequest,
   ThreadCommandResult,
   ThreadReport,
   RuntimeReportRequest,
@@ -117,6 +120,7 @@ export const NodeToControlBody = Schema.Union([
 export type NodeToControlBody = typeof NodeToControlBody.Type
 export const ControlToNodeBody = Schema.Union([
   NodeSyncResult,
+  NodeUpgradeStateResult,
   ThreadCommand,
   ThreadReportResult,
   RuntimeReportResult,

@@ -50,6 +50,12 @@ interface NodeDTO {
   registered_at?: string
   batond_version?: string
   runtime_report?: RuntimeReport | null
+  upgrade_state?: {
+    operation_id: string
+    source_version: string
+    target_version: string
+    phase: NonNullable<Device['upgradeState']>['phase']
+  } | null
 }
 interface NodesDTO {
   nodes: NodeDTO[]
@@ -88,6 +94,14 @@ export function mapDevice(node: NodeDTO): Device {
     system: node.system,
     batondVersion: node.batond_version ?? 'Not reported',
     connection: online ? (node.synced ? 'online' : 'syncing') : 'offline',
+    upgradeState: node.upgrade_state
+      ? {
+          operationId: node.upgrade_state.operation_id,
+          sourceVersion: node.upgrade_state.source_version,
+          targetVersion: node.upgrade_state.target_version,
+          phase: node.upgrade_state.phase,
+        }
+      : null,
     credentialState: node.credential_state,
     idleExpiresAt: node.idle_expires_at === undefined ? undefined : timestamp(node.idle_expires_at),
     lastSeenAt: timestamp(node.last_contact_at ?? node.registered_at),
