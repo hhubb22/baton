@@ -18,6 +18,7 @@ import {
   useSetDefaultDevice,
 } from '../data/queries'
 import type { Device, ID } from '../data/types'
+import { desktopStatusLabel, desktopStatusReason, needsDesktopReauth, useDesktopStatus } from '../data/desktop'
 import { text } from '../theme/text'
 import { colors, radius, space } from '../theme/tokens.stylex'
 import { Button, focusRing } from '../ui/Button'
@@ -388,7 +389,8 @@ function NoticeBox({ notice, children }: { notice: Notice; children?: ReactNode 
 export function DevicesPage() {
   const devices = useDevices()
   const downloads = useDownloads()
-  const inDesktop = (window as Window & { batonDesktop?: { protocol?: number } }).batonDesktop?.protocol === 1
+  const desktop = useDesktopStatus()
+  const inDesktop = desktop.bridge !== null
   const projects = useProjects()
   const session = useSession()
   const setDefault = useSetDefaultDevice()
@@ -416,6 +418,15 @@ export function DevicesPage() {
   }, [search.connect, navigate])
 
   const list = devices.data ?? []
+  const local = desktop.data
+  const localReauth = local && needsDesktopReauth(local, list)
+  const connectLabel = inDesktop
+    ? local && (!local.registered || localReauth)
+      ? local.registered
+        ? 'Reconnect this computer'
+        : 'Connect this computer'
+      : null
+    : 'Connect a device'
   const defaultId = session.data?.defaultDeviceId ?? null
   // 最后联系时间按分钟显示，每分钟刷新一次。
   const now = useNow(60_000)
@@ -499,9 +510,11 @@ export function DevicesPage() {
     body = (
       <div {...stylex.props(styles.empty)}>
         <span {...stylex.props(text.heading)}>No devices yet</span>
-        <Button variant="primary" icon="plus" onClick={() => setEnrolling(true)}>
-          Connect a device
-        </Button>
+        {connectLabel && (
+          <Button variant="primary" icon="plus" onClick={() => setEnrolling(true)}>
+            {connectLabel}
+          </Button>
+        )}
       </div>
     )
   } else {
@@ -550,12 +563,35 @@ export function DevicesPage() {
               Open in desktop app
             </a>
           )}
-          {list.length > 0 && (
+          {list.length > 0 && connectLabel && (
             <Button icon="plus" onClick={() => setEnrolling(true)}>
-              Connect a device
+              {connectLabel}
             </Button>
           )}
         </div>
+        {inDesktop && !enrolling && (
+          <section aria-label="This computer" {...stylex.props(styles.group)}>
+            <span role="status" {...stylex.props(text.small, text.muted, styles.status)}>
+              <StatusDot
+                tone={local?.state === 'online' ? 'success' : local?.state === 'rejected' ? 'attention' : 'hollow'}
+              />
+              This computer · {local ? desktopStatusLabel(local) : 'Checking…'}
+            </span>
+            {local && desktopStatusReason(local) && (
+              <p {...stylex.props(text.small, text.muted)}>{desktopStatusReason(local)}</p>
+            )}
+            {desktop.isError && (
+              <>
+                <p role="alert" {...stylex.props(text.small, text.muted)}>
+                  Couldn't read this computer's status.
+                </p>
+                <Button small onClick={() => void desktop.refetch()}>
+                  Try again
+                </Button>
+              </>
+            )}
+          </section>
+        )}
         {shownFeedback && <NoticeBox notice={shownFeedback} />}
         {body}
       </div>

@@ -2,6 +2,8 @@ import type { DownloadItem } from '@baton/protocol/http-api'
 import * as stylex from '@stylexjs/stylex'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { fileSize } from '../data/derive'
+import { desktopBridge } from '../data/desktop'
+import { DesktopEnrollDialog } from './DesktopEnrollDialog'
 import { useCreateEnrollment, useDevices, useDownloads, useEnrollment } from '../data/queries'
 import type { Device, DeviceOS, IssuedEnrollment } from '../data/types'
 import { text } from '../theme/text'
@@ -149,8 +151,16 @@ function Status({ tone, children }: { tone: Tone; children: string }) {
   )
 }
 
+export function EnrollDialog(props: {
+  device?: Device
+  onClose: () => void
+  finalFocus?: () => HTMLElement | null | boolean
+}) {
+  return desktopBridge() ? <DesktopEnrollDialog {...props} /> : <BrowserEnrollDialog {...props} />
+}
+
 // 打开时向中心要一次性设置码；设备用它连上后显示设备信息。重新取码时保留已填的名称和系统。
-export function EnrollDialog({
+function BrowserEnrollDialog({
   device,
   onClose,
   finalFocus,

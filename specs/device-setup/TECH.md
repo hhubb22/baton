@@ -177,11 +177,16 @@ read -rs BATON_ENROLLMENT_TOKEN && export BATON_ENROLLMENT_TOKEN
 
 **桌面模式**
 
-检测到 `window.batonDesktop?.protocol === 1` 时，注册对话框改为单按钮流程：
-1. 调用现有的 `useCreateEnrollment` 领取凭据（重新认证调用 `issueReauthEnrollment`，节点 ID 取自 `batonDesktop.status().node_id`）。
-2. 调用 `batonDesktop.enroll({ code, displayName })` 或 `reauth({ code })`，然后像现在一样轮询 `useEnrollment` 的状态。
+`web/src/data/desktop.ts` 在网页内声明 protocol 1 的桥接类型，不依赖 `apps/desktop` 包。检测到 `window.batonDesktop?.protocol === 1` 时启用桌面模式；其他环境沿用浏览器流程。
 
-凭据只在内存中传递，不渲染到页面。
+Devices 页读取 `status()` 并订阅 `onStatus()`，卸载时取消订阅，再次进入时重新读取；较早发起的查询不会覆盖之后的状态通知。未接入时显示 `Connect this computer`；已有身份且中心设备的凭据状态为 `idle_expired`，或客户端报告 `needs_reauth` 时显示 `Reconnect this computer`。本机状态包括外部服务管理和拒绝原因，版本不兼容时提示下载新版客户端；状态查询失败可以重试。
+
+桌面注册对话框由 `web/src/app/DesktopEnrollDialog.tsx` 实现，不显示命令、下载、系统选择或接入口令。显示名初始为空，省略 `displayName` 时由客户端使用主机名。点击接入或重新认证后：
+1. 重新读取本机身份，以当前员工的已有 `createEnrollment(nodeId?)` 接口领取凭据；重新认证的节点 ID 取自桥接状态，不能把其他设备的凭据交给本机客户端。
+2. 只在内存中将凭据交给 `batonDesktop.enroll({ code, displayName? })` 或 `reauth({ code })`，对话框仅保留凭据记录 ID，通过 `useEnrollment` 跟随中心状态更新。
+3. 操作期间阻止重复提交。失败时保留显示名并显示原因，重试重新领取凭据；领取时已过期则重新领取一次。桥接错误中出现本次口令时隐藏该口令，再显示错误。已有有效本机身份时直接沿用，不重复注册。
+
+其他设备的重新认证操作在桌面模式中提示改用浏览器。凭据不渲染到页面，也不写入日志。
 
 ## 桌面客户端 `apps/desktop`（DS-15～DS-23）
 
@@ -239,7 +244,7 @@ macOS 的应用整体做临时签名，内置的 batond 保留自身的临时签
 | DS-11 | 持有 `daemon.lock` 时运行 `run` | 没有输出 `daemon_running` | `apps/batond` 单元 | implemented |
 | 状态文件、`--exit-with-stdin` | 复用 `reconnect.test.ts` 的协议替身检查认证、拒绝和停止状态；CLI 单元测试检查 stdin EOF 触发中止，中心 e2e 检查连接与停止状态 | 状态缺失或不准；关闭 stdin 后 daemon 不退出 | `apps/batond` 单元 + `e2e` | implemented |
 | DS-12、DS-13 | 渲染有无下载、各平台和重新认证的注册对话框，以及 Devices 页的接入链接 | 下载命令包含凭据或部署参数；无下载时旧命令丢失；Windows 显示 CLI 命令；客户端中的页面仍显示接入链接 | `web` 单元 | implemented |
-| DS-14 | 渲染桌面桥接替身下的注册对话框与本机接入入口 | 桌面模式显示命令或凭据被渲染 | `web` 单元 | planned |
+| DS-14 | 桥接替身验证本机接入、显示名、闲置重新认证、失败与过期重领、状态订阅和取消订阅 | 桌面模式显示命令或下载；凭据被渲染；重新认证交给错误设备；旧查询覆盖状态通知 | `web` 单元 | implemented |
 | DS-15～DS-17 | 测试数据中固定根 CA、中间 CA、服务器与其他 CA 证书（附生成命令）；测试链接解析、证书链、源和身份检查 | 接受 http 源或非 CA 证书；非中心 host 使用了保存的 CA；用其他 CA 签发的叶子通过校验 | `apps/desktop` 单元（Node，不启动 Electron） | implemented |
 | DS-18～DS-20 | supervisor 使用替身 spawn：正常退出、78、反复崩溃、`daemon_running`、退出流程；另测凭据环境传递与状态合并 | 终止类失败仍重启；退避或次数上限不对；退出时没有关闭 stdin；凭据进入进程参数或返回错误 | `apps/desktop` 单元 | implemented |
 | CLI 全链路 | 现有 HTTPS e2e 中心，在数据目录外注入安装目录与 `deployment.json`，不带中心地址和 CA 参数注册并连接 | 必须传 `--coordinator` 或 `--ca-file` | `e2e` | implemented |
