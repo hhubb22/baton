@@ -150,8 +150,8 @@ daemon 在连接状态变化时原子写 `<数据目录>/daemon-status.json`：
 - **原子安装：** 定义文件先写临时文件再改名；systemctl 或 launchctl 失败时恢复原来的定义文件，原来没有就删除（DS-10）。
 - **单一服务：** 每个系统用户只有一个服务；用另一个数据目录安装会替换原服务。
 - **无法安装的情况：** Linux 上 `systemctl --user` 不可用，或拿不到 `XDG_RUNTIME_DIR`，就报 `service_unavailable`；Windows 上报 `service_unsupported`，并提示使用桌面客户端。
-- **状态输出：** `service status` 返回 `installed`、`running`、`program_path` 和 `log_path`，路径取自已安装的定义，不取调用时的 `--data-dir`。Linux 额外返回 `linger`（无法查询时为 null）；未开启或无法查询时在 `message` 中说明。
-- **launchd 限制：** launchd 不能按退出码阻止重启，所以 78 退出后仍会每 30 秒拉起一次。
+- **状态输出：** `service status` 返回 `installed`、`running`、`program_path`、`log_path` 和 `daemon`。路径取自已安装的定义，不取调用时的 `--data-dir`；`daemon` 从该服务数据目录的 `daemon-status.json` 读取，未安装时使用 `--data-dir`。文件缺失、不可读或内容无效时 `daemon` 为 null。有效时包含 `pid`、`state`、`updated_at` 和可选的 `code`、`message`，其中状态沿用 `connecting|online|rejected|stopping`；另附 `stale`，锁不存在、锁属主 PID 与快照不同或锁属主进程已退出时为 true，锁无法核实时也为 true。过期快照保留最后的拒绝原因，服务当前是否运行仍以 `running` 为准。Linux 额外返回 `linger`（无法查询时为 null）；未开启或无法查询时在顶层 `message` 中说明。
+- **launchd 限制：** launchd 不能按退出码阻止重启，所以 78 退出后仍会每 30 秒拉起一次；`service status` 的 `daemon` 附上最后的拒绝原因与错误码。
 
 ## 网页（DS-12～DS-14）
 
@@ -235,7 +235,7 @@ macOS 的应用整体做临时签名，内置的 batond 保留自身的临时签
 | DS-01、DS-02 | 中心集成测试启用下载，匿名请求清单与文件，变换 Host | 需要登录；清单哈希与下载内容不一致；未列出的文件名能被下载；Host 不匹配时仍生成部署配置 | `apps/server` 集成 | implemented |
 | 后台注入重试 | 注入函数首次报临时错误；再次扫描同一源包与部署配置 | 恢复后仍不重试或包不能进入清单 | `apps/server` 单元 | implemented |
 | DS-05～DS-07 | 用注入的 transport 注册和重新认证；SEA 场景用临时目录模拟 `deployment.json` | 未保存或未替换 CA；已有身份时读了部署配置；显式参数没有优先 | `apps/batond` 单元 | implemented |
-| DS-08～DS-10 | 生成 plist 和 unit 文本；用替身 runner 验证重复安装替换、命令失败回滚、状态查询和卸载保留数据 | 定义缺少参数；失败后残留或覆盖了原定义；卸载删除数据目录 | `apps/batond` 单元 | implemented |
+| DS-08～DS-10 | 生成 plist 和 unit 文本；用替身 runner 验证重复安装替换、命令失败回滚、状态查询、daemon 快照读取与过期判断、卸载保留数据 | 定义缺少参数；失败后残留或覆盖了原定义；状态遗漏拒绝原因；快照缺失或损坏导致查询失败；卸载删除数据目录 | `apps/batond` 单元 | implemented |
 | DS-11 | 持有 `daemon.lock` 时运行 `run` | 没有输出 `daemon_running` | `apps/batond` 单元 | implemented |
 | 状态文件、`--exit-with-stdin` | 复用 `reconnect.test.ts` 的协议替身检查认证、拒绝和停止状态；CLI 单元测试检查 stdin EOF 触发中止，中心 e2e 检查连接与停止状态 | 状态缺失或不准；关闭 stdin 后 daemon 不退出 | `apps/batond` 单元 + `e2e` | implemented |
 | DS-12、DS-13 | 渲染有无下载、各平台和重新认证的注册对话框，以及 Devices 页的接入链接 | 下载命令包含凭据或部署参数；无下载时旧命令丢失；Windows 显示 CLI 命令；客户端中的页面仍显示接入链接 | `web` 单元 | implemented |

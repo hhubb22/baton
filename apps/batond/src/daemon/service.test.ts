@@ -4,6 +4,7 @@ import { basename, dirname, join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vite-plus/test'
 import type { NodeIdentity } from '@baton/protocol'
 import { manageService, renderLaunchAgent, renderSystemdUnit, type ServiceRunner } from './service.ts'
+import { acquireProcessLock } from '../platform/lock.ts'
 
 const directories: string[] = []
 afterEach(async () => {
@@ -49,6 +50,75 @@ async function fixture(platform: 'darwin' | 'linux') {
   }
   return { home, data, path, runner, options }
 }
+
+async function statusFixture(platform: 'darwin' | 'linux') {
+  const f = await fixture(platform)
+  await manageService('install', f.data, f.options)
+  f.runner.mockImplementation(async (file) => ({
+    code: 0,
+    stderr: '',
+    stdout:
+      file === 'plutil'
+        ? JSON.stringify({ ProgramArguments: [process.execPath], StandardOutPath: join(f.data, 'logs', 'batond.log') })
+        : file === 'loginctl'
+          ? 'Linger=yes\n'
+          : `state = running\nActiveState=active\nMainPID=${process.pid}\n`,
+  }))
+  return f
+}
+
+it.each(['darwin', 'linux'] as const)(
+  'reports daemon states and rejection details from the installed %s data directory',
+  async (platform) => {
+    const f = await statusFixture(platform)
+    const release = await acquireProcessLock(join(f.data, 'daemon.lock'))
+    const path = join(f.data, 'daemon-status.json')
+    try {
+      for (const state of ['connecting', 'online', 'rejected', 'stopping']) {
+        const daemon = {
+          pid: process.pid,
+          state,
+          updated_at: '2026-10-28T00:00:00Z',
+          ...(state === 'rejected' ? { code: 'node_version_incompatible', message: '请从中心下载新版客户端' } : {}),
+        }
+        await writeFile(path, JSON.stringify({ ...daemon, ignored: 'not public' }), { mode: 0o600 })
+        expect(await manageService('status', '/unrelated-data', f.options)).toHaveProperty('daemon', {
+          ...daemon,
+          stale: false,
+        })
+      }
+      const daemon = { pid: process.pid + 1, state: 'online', updated_at: '2026-10-28T00:00:00Z' }
+      await writeFile(path, JSON.stringify(daemon))
+      expect(await manageService('status', f.data, f.options)).toHaveProperty('daemon', { ...daemon, stale: true })
+    } finally {
+      await release()
+    }
+    const rejected = {
+      pid: process.pid,
+      state: 'rejected',
+      code: 'needs_reauth',
+      message: '设备需要重新认证',
+      updated_at: '2026-10-28T00:00:00Z',
+    }
+    await writeFile(path, JSON.stringify(rejected))
+    expect(await manageService('status', f.data, f.options)).toHaveProperty('daemon', { ...rejected, stale: true })
+  },
+)
+
+it.each(['darwin', 'linux'] as const)('returns null for missing or corrupt %s daemon snapshots', async (platform) => {
+  const f = await statusFixture(platform)
+  expect(await manageService('status', f.data, f.options)).toHaveProperty('daemon', null)
+  for (const content of [
+    '{broken',
+    '{}',
+    JSON.stringify({ pid: '123', state: 'online', updated_at: '2026-10-28T00:00:00Z' }),
+    JSON.stringify({ pid: 123, state: 'unknown', updated_at: '2026-10-28T00:00:00Z' }),
+    JSON.stringify({ pid: 123, state: 'online', updated_at: 'invalid' }),
+  ]) {
+    await writeFile(join(f.data, 'daemon-status.json'), content, { mode: 0o600 })
+    expect(await manageService('status', f.data, f.options)).toHaveProperty('daemon', null)
+  }
+})
 
 it('renders launchd arguments, XML escaping, restart policy and combined logs', () => {
   const text = renderLaunchAgent({
@@ -183,6 +253,7 @@ it('reports launchd state and paths from the installed definition, independent o
     running: true,
     program_path: definition.ProgramArguments[0],
     log_path: definition.StandardOutPath,
+    daemon: null,
   })
   f.runner.mockResolvedValue({ code: 113, stdout: '', stderr: 'not loaded' })
   f.runner.mockImplementationOnce(async () => ({ code: 0, stdout: '', stderr: '' }))
@@ -222,6 +293,7 @@ it('reports an absent service without registering or creating any files', async 
     running: false,
     program_path: null,
     log_path: null,
+    daemon: null,
   })
   expect(await readdir(f.home)).toEqual(['private data'])
 })

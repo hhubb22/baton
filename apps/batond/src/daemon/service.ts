@@ -5,9 +5,12 @@ import { dirname, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { promisify } from 'node:util'
 import { Schema } from 'effect'
+import { PositiveInteger, Timestamp } from '@baton/protocol'
 import { currentBatondCommand, type BatondCommand } from './host.ts'
 import { isMissing, loadIdentity } from './identity.ts'
-import { ensurePrivateDirectory } from '../platform/private.ts'
+import { ensurePrivateDirectory, readPrivateFile } from '../platform/private.ts'
+import { readProcessLock } from '../platform/lock.ts'
+import { identityMatches } from '../platform/identity.ts'
 
 const label = 'dev.baton.batond'
 const unit = 'baton-batond.service'
@@ -111,11 +114,34 @@ WantedBy=default.target
 `
 }
 
+const DaemonStatus = Schema.Struct({
+  pid: PositiveInteger,
+  state: Schema.Literals(['connecting', 'online', 'rejected', 'stopping']),
+  code: Schema.optionalKey(Schema.String),
+  message: Schema.optionalKey(Schema.String),
+  updated_at: Timestamp,
+})
+
+async function readDaemonStatus(directory: string): Promise<ServiceStatus['daemon']> {
+  try {
+    const status = Schema.decodeUnknownSync(DaemonStatus)(
+      JSON.parse((await readPrivateFile(join(directory, 'daemon-status.json'))).toString('utf8')),
+    )
+    const stale = await readProcessLock(join(directory, 'daemon.lock'))
+      .then(async (lock) => !lock || lock.pid !== status.pid || !(await identityMatches(lock)))
+      .catch(() => true)
+    return { ...status, stale }
+  } catch {
+    return null
+  }
+}
+
 export interface ServiceStatus {
   installed: boolean
   running: boolean
   program_path: string | null
   log_path: string | null
+  daemon: (typeof DaemonStatus.Type & { stale: boolean }) | null
   linger?: boolean | null
   message?: string
 }
@@ -214,6 +240,7 @@ export async function manageService(
       running: false,
       program_path: null,
       log_path: null,
+      daemon: null,
     }
     if (platform === 'darwin') {
       const result = await run('launchctl', ['print', target])
@@ -249,6 +276,7 @@ export async function manageService(
         status.message = '退出登录后服务可能停止；需要持续运行时，请管理员为当前用户开启 linger'
       else if (status.linger === null) status.message = '无法查询 linger 状态，请管理员检查当前用户的登录服务'
     }
+    status.daemon = await readDaemonStatus(status.log_path ? dirname(dirname(status.log_path)) : resolve(dataDirectory))
     return status
   }
   if (action === 'uninstall') {
