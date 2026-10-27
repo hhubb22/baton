@@ -69,6 +69,24 @@ node apps/batond/dist/batond.cjs run
 
 四个 Agent 在程序或 SDK 已安装且认证有效或未知时报告 `available`，按上游 adapter 与已实现的执行路径开放新建与恢复。版本、系统与认证未知写入诊断，缺少某个组合的验证证据不会关闭能力。缺程序、明确未认证或已确认运行依赖失败时报告 `unavailable`。探测只检查认证、模型和依赖，不发送推理请求。
 
+### 设备升级
+
+先升级中心，再将完整目标安装包解压到独立目录，保留旧安装目录。用当前程序准备升级并重复查询状态：
+
+```sh
+/旧安装目录/batond upgrade prepare --package /目标安装目录 --data-dir /原数据目录
+/旧安装目录/batond upgrade status --data-dir /原数据目录
+```
+
+等 `state.phase` 为 `ready` 后正常停止旧 daemon，再用目标程序迁移并启动，始终使用原数据目录：
+
+```sh
+/目标安装目录/batond upgrade migrate --data-dir /原数据目录
+/目标安装目录/batond run --data-dir /原数据目录
+```
+
+启动时保留原 Runtime 凭据目录与启动配置；私有 CA 仍须传 `--ca-file`。Windows 使用 `batond.exe`，服务管理器由用户显式改为目标程序路径。目标 daemon 补报结果并取得中心完成回执后恢复原队列；`upgrade status` 应显示 `completed`。迁移前可用 `upgrade cancel --data-dir /原数据目录` 取消准备。备份、失败重跑与未测范围见 [设备准备与切换](specs/release/TECH.md#设备准备与切换)。
+
 ### Project 与模型订阅
 
 网页可管理 Project 主对话、事项、记忆与历史版本、目录授权、附件预览及本机命令执行开关。Project 使用设备本地的 ChatGPT、xAI 或 Claude 配置，按租约启动独立 Runtime；本机执行开关默认关闭，`nodes.exec` 通过受限 shell Thread 执行命令。
