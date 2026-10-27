@@ -4,7 +4,7 @@ import { Effect, Predicate, Schema, Tracer } from 'effect'
 import { captureTrace, withTraceSpan } from '@baton/telemetry'
 import { WebSocket, WebSocketServer, type RawData } from 'ws'
 import { AuthFrame, BrowserSubscription, Envelope, NodeToControlBody } from '@baton/protocol'
-import type { SessionResult } from '@baton/protocol'
+import type { SessionResult, AuthFrame as NodeAuth, ReleaseMetadata, NodeVersionIncompatibility } from '@baton/protocol'
 import { AppError, type NodeSource } from './errors.ts'
 
 export const webSocketText = (data: RawData): string =>
@@ -27,8 +27,43 @@ const defaultRPCTimeouts: Readonly<Record<string, number>> = {
   'node.browse_roots_set': 5000,
   'node.subscription_login': 12_000,
 }
+export const checkNodeVersion = (
+  daemon: Pick<NodeAuth, 'daemon_version' | 'protocol_version'>,
+  center: Pick<ReleaseMetadata, 'version' | 'protocol_version' | 'supported_daemon_versions'>,
+): void => {
+  const reason =
+    daemon.protocol_version !== center.protocol_version
+      ? 'protocol_version_unsupported'
+      : daemon.daemon_version !== 'development' &&
+          center.version !== 'development' &&
+          !center.supported_daemon_versions.includes(daemon.daemon_version)
+        ? 'daemon_version_unsupported'
+        : undefined
+  if (!reason) return
+  const detail: NodeVersionIncompatibility = {
+    center_version: center.version,
+    daemon_version: daemon.daemon_version,
+    center_protocol_version: center.protocol_version,
+    daemon_protocol_version: daemon.protocol_version,
+    supported_daemon_versions: center.supported_daemon_versions,
+    reason,
+    guidance: '先升级中心，再将节点升级到中心支持的版本后重新运行 batond。',
+  }
+  throw new AppError(
+    409,
+    'node_version_incompatible',
+    `中心 ${center.version}（协议 ${center.protocol_version}）与节点 ${daemon.daemon_version}（协议 ${daemon.protocol_version}）不兼容：${reason}。${detail.guidance}`,
+    { version_incompatibility: detail },
+  )
+}
+
 export interface GatewayHandlers {
-  authenticate(token: string, incarnation: string, connectionId: string): Promise<NodeSource>
+  authenticate(
+    token: string,
+    incarnation: string,
+    connectionId: string,
+    version: Pick<NodeAuth, 'daemon_version' | 'protocol_version'>,
+  ): Promise<NodeSource>
   validate(source: NodeSource): Promise<void>
   heartbeat(source: NodeSource): Promise<void>
   disconnected(source: NodeSource): Promise<void>
@@ -312,7 +347,7 @@ export class Gateway {
         void (async () => {
           try {
             const auth = Schema.decodeUnknownSync(AuthFrame)(frame)
-            const source = await this.handlers.authenticate(auth.token, auth.incarnation, randomUUID())
+            const source = await this.handlers.authenticate(auth.token, auth.incarnation, randomUUID(), auth)
             const current: NodeConnection = {
               socket,
               source,
@@ -342,6 +377,9 @@ export class Gateway {
                 kind: 'auth_result',
                 ok: false,
                 code: error instanceof AppError ? error.code : 'authentication_failed',
+                ...(error instanceof AppError && error.code === 'node_version_incompatible'
+                  ? { message: error.message, version_incompatibility: error.details?.version_incompatibility }
+                  : {}),
               }),
               () => socket.close(1008),
             )

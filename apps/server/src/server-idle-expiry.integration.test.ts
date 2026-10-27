@@ -54,6 +54,8 @@ it('the server maintenance loop closes idle credentials and revokes foreground l
       ws.send(
         JSON.stringify({
           kind: 'auth',
+          daemon_version: 'development',
+          protocol_version: 1,
           token: signer.sign({ node_id: node.nodeId, employee_id: node.employeeId, credential_id: node.credentialId }),
           incarnation: randomUUID(),
         }),

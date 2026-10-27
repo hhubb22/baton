@@ -46,6 +46,8 @@
 
 所有节点命令支持 `--data-dir`，默认 `~/.baton-ts`。仅在授权配置不存在时登记用户主目录，已有配置包括空列表都会保留；`--workspace` 在连接前按真实绝对路径幂等登记工作目录。网页设备详情与本地 `files` 命令可以增删授权根；目录选择与附件预览使用同一真实路径边界。节点锁、身份与报告恢复细节见 [远程节点模块](src/daemon/README.md)，实时输出的游标和缓冲规则见 [Worker 文档](src/worker/README.md#real-time-output)。
 
+节点在认证时上报实际构建版本与协议。中心明确返回 `node_version_incompatible` 时，daemon 输出包含双方版本、协议、原因与升级指引的结构化诊断并退出，等待用户升级后重新启动；本地命令、待补报结果和独立 Worker 保留。development 与发布版联调可放行版本号差异，协议仍须一致。
+
 节点连接和能力探测分别进行。Cursor、Pi、Codex、Kiro 探测完成前上报 `unverified`，创建 Thread 需等待 `available` 且 `capabilities.create: true`；Kiro 另以限时 4 秒、stdout/stderr 各最多 4096 字节的 `kiro-cli --version` 获取版本，只上报版本号，诊断不外传，超时或不可解析记入 reason，已安装时仍允许新建，缺程序报告 `unavailable`。四个 Agent 认证 unknown 均允许新建；整次 host 探测失败且安装状态未确认时报告 `unverified`。Pi、Codex 支持 steer，Cursor、Kiro 上游不支持；Pi、Codex、Cursor 支持 Thread 内逐轮换模型，插入消息沿用活动回合的模型；Kiro 上游不支持换模型，原因写入报告。设备进程需显式配置 `CURSOR_API_KEY`。节点退出不结束独立 Worker，重启后从账本重新发现存活 Worker；未确认命令继续使用原 ID，已接收输入不会因为重连再次发送。
 
 ## 设备目录与模型订阅

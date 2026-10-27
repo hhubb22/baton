@@ -1,4 +1,4 @@
-import { BUNDLED, releaseMetadata } from '@baton/protocol/release'
+import { BUNDLED, releaseMetadata, NodeVersionIncompatibility } from '@baton/protocol/release'
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { realpath } from 'node:fs/promises'
@@ -209,11 +209,19 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
 }
 
 export function reportBatondError(error: unknown, action = process.argv[2]): void {
+  const incompatible = error instanceof Error && 'code' in error && error.code === 'node_version_incompatible'
+  const detail =
+    incompatible &&
+    'version_incompatibility' in error &&
+    Schema.is(NodeVersionIncompatibility)(error.version_incompatibility)
+      ? error.version_incompatibility
+      : undefined
   // SDK diagnostics remain in the isolated host; public errors contain no raw SDK output.
   console.error(
     JSON.stringify({
       ok: false,
-      code: error instanceof IPCError ? error.code : 'batond_failed',
+      code: incompatible ? 'node_version_incompatible' : error instanceof IPCError ? error.code : 'batond_failed',
+      ...(detail ? { version_incompatibility: detail } : {}),
       message:
         action === 'worker' || action === 'agent-host' || action === 'watchdog'
           ? `${action} failed`

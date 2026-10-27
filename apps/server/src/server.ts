@@ -13,7 +13,7 @@ import * as Threads from './threads/index.ts'
 import * as Projects from './project/projects.ts'
 import { expireProjectNodeLeases } from './project/scheduling.ts'
 import { AppError, type NodeSource } from './errors.ts'
-import { Gateway, type GatewayOptions } from './gateway.ts'
+import { Gateway, checkNodeVersion, type GatewayOptions } from './gateway.ts'
 import {
   defaultControlBudgets,
   withControlBudget,
@@ -104,8 +104,9 @@ export const startServer = (
           new Gateway(
             http,
             {
-              authenticate: async (token, incarnation, connId): Promise<NodeSource> => {
+              authenticate: async (token, incarnation, connId, version): Promise<NodeSource> => {
                 const claims = await run('authenticate', Nodes.authenticateNode(token, options.signer))
+                checkNodeVersion(version, P.releaseMetadata())
                 const source = {
                   employee_id: claims.employee_id,
                   node_id: claims.node_id,

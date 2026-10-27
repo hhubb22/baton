@@ -1,4 +1,4 @@
-import { BUILD } from '@baton/protocol/release'
+import { BUILD, PROTOCOL_VERSION } from '@baton/protocol/release'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { readFile, unlink, chmod, lstat } from 'node:fs/promises'
 import { userInfo } from 'node:os'
@@ -15,6 +15,7 @@ import {
   type RuntimeReport,
   type ThreadReport,
 } from '@baton/protocol'
+import { hasCode } from '../platform/errors.ts'
 import { acquireProcessLock } from '../platform/lock.ts'
 import { ensurePrivateDirectory, openPrivateFile, writePrivateFileAtomic } from '../platform/private.ts'
 import { LocalWorkerHost, type DaemonWorkerHost } from './host.ts'
@@ -240,7 +241,13 @@ async function connected(options: {
   }
   let ticking: Promise<void> | undefined
   try {
-    await send({ kind: 'auth', token: identity.credential.token, incarnation: options.incarnation })
+    await send({
+      kind: 'auth',
+      token: identity.credential.token,
+      incarnation: options.incarnation,
+      daemon_version: BUILD.version,
+      protocol_version: PROTOCOL_VERSION,
+    })
     ticking = ticker().catch((error: unknown) => {
       if (!controller.signal.aborted) failure = error
       abort()
@@ -249,6 +256,11 @@ async function connected(options: {
       if (frame.kind === 'auth_result') {
         if (authenticated) throw new Error('节点认证协议错误')
         if (!frame.ok) {
+          if (frame.code === 'node_version_incompatible')
+            throw Object.assign(new Error(frame.message ?? '节点与中心版本不兼容，请升级后重新运行 batond'), {
+              code: frame.code,
+              version_incompatibility: frame.version_incompatibility,
+            })
           if (terminal(frame.code)) throw new NeedsReauthentication()
           if (frame.code === 'incarnation_conflict') throw new Error('节点身份正由另一个进程使用')
           throw new Error('节点认证暂不可用')
@@ -510,7 +522,9 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
           }).pipe(Effect.result)
           if (
             outcome._tag === 'Failure' &&
-            (outcome.failure instanceof NeedsReauthentication || outcome.failure instanceof DaemonStorageFailure)
+            (outcome.failure instanceof NeedsReauthentication ||
+              outcome.failure instanceof DaemonStorageFailure ||
+              hasCode(outcome.failure, 'node_version_incompatible'))
           )
             return yield* Effect.fail(outcome.failure)
           if (performance.now() - started >= heartbeatMs) retry = 0

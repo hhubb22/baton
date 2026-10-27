@@ -102,7 +102,15 @@ async function fixture(
     ws.on('message', (data) => frames.push(JSON.parse(webSocketText(data)) as Record<string, unknown>))
     ws.on('error', () => undefined)
     await once(ws, 'open')
-    ws.send(JSON.stringify({ kind: 'auth', token: 'local-node', incarnation: randomUUID() }))
+    ws.send(
+      JSON.stringify({
+        kind: 'auth',
+        token: 'local-node',
+        incarnation: randomUUID(),
+        daemon_version: 'development',
+        protocol_version: 1,
+      }),
+    )
     await expect.poll(() => frames.some((frame) => frame.kind === 'auth_result')).toBe(true)
     ws.send(JSON.stringify(envelope({ type: 'node.sync', display_name: 'Test', system: 'macos', capabilities: [] })))
     await expect.poll(() => frames.some((frame) => frame.kind === 'envelope')).toBe(true)

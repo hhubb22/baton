@@ -12,6 +12,8 @@ import { webSocketText } from './transport.ts'
 import type { DaemonWorkerHost } from './host.ts'
 import { setupDaemon } from '../testing/daemon.ts'
 import type { ProjectManager } from '../project/types.ts'
+import { makeNodeLedger } from './ledger.ts'
+import { reportBatondError } from '../cli.ts'
 
 vi.mock('../project/index.ts', () => ({
   makeProjectManager: () => {
@@ -787,6 +789,103 @@ it.each(['unavailable', undefined, 'incarnation_conflict'])(
     expect(daemon.failure()).toBeUndefined()
   },
 )
+
+it('stops after version rejection, reports both versions and retains local commands and unsent reports', async () => {
+  const { path, wss, start } = await setup()
+  const threadId = randomUUID(),
+    commandId = randomUUID(),
+    generation = randomUUID()
+  const report: ThreadReport = {
+    type: 'thread.report',
+    thread_id: threadId,
+    storage_generation: generation,
+    event_id: randomUUID(),
+    worker_seq: 1,
+    kind: 'thread.unknown',
+    reason: 'Retained local result',
+  }
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const ledger = yield* makeNodeLedger(join(path, 'node.db'))
+        yield* ledger.prepare({
+          id: commandId,
+          hash: 'local-command',
+          request: {
+            type: 'thread_stop',
+            ok: false,
+            command_id: commandId,
+            thread_id: threadId,
+            storage_generation: generation,
+          },
+        })
+        yield* ledger.ingest(report)
+      }),
+    ),
+  )
+  const snapshot = () => {
+    const db = new DatabaseSync(join(path, 'node.db'), { readOnly: true })
+    try {
+      return {
+        commands: db.prepare('SELECT * FROM node_commands ORDER BY id').all(),
+        reports: db.prepare('SELECT * FROM node_outbox ORDER BY seq').all(),
+      }
+    } finally {
+      db.close()
+    }
+  }
+  const before = snapshot()
+  let connections = 0
+  const sent: Frame[] = []
+  wss.on('connection', (socket) => {
+    connections++
+    socket.on('message', (raw) => {
+      const frame = JSON.parse(webSocketText(raw)) as Frame
+      sent.push(frame)
+      if (frame.kind === 'auth')
+        socket.send(
+          JSON.stringify({
+            kind: 'auth_result',
+            ok: false,
+            code: 'node_version_incompatible',
+            message: '中心 v1.0.0 协议 2 与节点 development 协议 1 不兼容，请升级后重新运行 batond。',
+            version_incompatibility: {
+              center_version: 'v1.0.0',
+              daemon_version: frame.daemon_version,
+              center_protocol_version: 2,
+              daemon_protocol_version: frame.protocol_version,
+              supported_daemon_versions: ['v1.0.0'],
+              reason: 'protocol_version_unsupported',
+              guidance: '请升级后重新运行 batond。',
+            },
+          }),
+        )
+    })
+  })
+  const daemon = start()
+  await daemon.running
+  expect(connections).toBe(1)
+  expect(sent).toMatchObject([{ kind: 'auth', daemon_version: 'development', protocol_version: 1 }])
+  expect(snapshot()).toEqual(before)
+  expect(daemon.failure()).toMatchObject({ code: 'node_version_incompatible' })
+  const output = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  const exitCode = process.exitCode
+  try {
+    reportBatondError(daemon.failure(), 'run')
+    expect(JSON.parse(String(output.mock.calls[0]?.[0]))).toMatchObject({
+      code: 'node_version_incompatible',
+      version_incompatibility: {
+        center_version: 'v1.0.0',
+        daemon_version: 'development',
+        reason: 'protocol_version_unsupported',
+      },
+    })
+    expect(process.exitCode).toBe(1)
+  } finally {
+    output.mockRestore()
+    process.exitCode = exitCode
+  }
+})
 
 it.each(['invalid_node_credential', 'node_source_rejected', 'credential_revoked'])(
   'stops reconnecting for terminal auth_result %s',

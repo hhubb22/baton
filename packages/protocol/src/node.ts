@@ -1,4 +1,5 @@
 import { Schema } from 'effect'
+import { NodeVersionIncompatibility } from './release.ts'
 import { PROTOCOL_VERSION } from './release.mjs'
 import { UUID, Text, jsonLimit, summary } from './common.ts'
 import { MaxMessageBytes } from './constants.ts'
@@ -61,6 +62,9 @@ export const Frame = Schema.Struct({
   message: Schema.optionalKey(Text),
   token: Schema.optionalKey(Text),
   incarnation: Schema.optionalKey(Text),
+  daemon_version: Schema.optionalKey(summary(128)),
+  protocol_version: Schema.optionalKey(Schema.Int),
+  version_incompatibility: Schema.optionalKey(NodeVersionIncompatibility),
   correlation_id: Schema.optionalKey(Text),
   envelope: Schema.optionalKey(Schema.Json),
 }).check(jsonLimit(256 * 1024))
@@ -69,7 +73,14 @@ export type Frame = typeof Frame.Type
 // 仅收窄帧字段，父结构的整体容量检查继续适用。
 const preserveChecks = { unsafePreserveChecks: true } as const
 export const AuthFrame = Frame.mapFields(
-  (fields) => ({ ...fields, kind: Schema.Literal('auth'), token: summary(4096), incarnation: UUID }),
+  (fields) => ({
+    ...fields,
+    kind: Schema.Literal('auth'),
+    token: summary(4096),
+    incarnation: UUID,
+    daemon_version: summary(128).check(Schema.isMinLength(1)),
+    protocol_version: Schema.Int,
+  }),
   preserveChecks,
 )
 export const AuthResultFrame = Frame.mapFields(
