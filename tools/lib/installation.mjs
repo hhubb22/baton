@@ -21,6 +21,9 @@ export function installedExecutable(installed, platform = process.platform) {
 
 export async function withTemporaryInstallation(source, use) {
   if (!source) throw new Error('An installation directory is required')
+  // Windows 的 cp 不保留 junction：它会把链接目标当成普通目录展开，指向包外的链接会连同整个外部
+  // 目录树一起复制进来，直到路径超长或磁盘耗尽。复制前先核对源布局，让包外链接按常规错误报告。
+  await validatePackageLayout(resolve(source))
   // Short paths keep Darwin UDS endpoints below 103 bytes.
   const root = await mkdtemp(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'bw-'))
   const installed = join(root, 'installed')

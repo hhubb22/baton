@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, writeFile, rm, realpath } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join, relative } from 'node:path'
+import { dirname, join, relative, sep } from 'node:path'
 import { test } from 'node:test'
 import { assertWorkerDependencies } from './build/worker-dependencies.mjs'
 
@@ -33,8 +33,10 @@ test('运行时图保留静态导入、re-export、字面量 import 和 require�
     [`${source}worker/cycle.mjs`]: "import './index.ts'",
   })
   const graph = await assertWorkerDependencies({ root, external: ['allowed-external'] })
+  // 断言用正斜杠，Windows 的 relative() 返回反斜杠。
+  const shown = (path) => relative(root, path).split(sep).join('/')
   assert.deepEqual(
-    [...graph].map((path) => relative(root, path)).sort((a, b) => a.localeCompare(b)),
+    [...graph].map(shown).sort((a, b) => a.localeCompare(b)),
     [
       `${source}daemon/worker-runner.ts`,
       `${source}worker/index.ts`,

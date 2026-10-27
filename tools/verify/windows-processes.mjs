@@ -12,7 +12,13 @@ if (role === '--leaf') {
   process.send({ leaf: process.pid })
   setInterval(() => {}, 1000)
 } else if (role === '--branch') {
-  const leaf = spawn(process.execPath, [self, '--leaf'], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] })
+  // Windows 没有 POSIX 那样的孤儿收养：中间父进程退出时，未 detached 的子进程会被一起终止。
+  // 用 detached + unref 让 leaf 在父进程退出后继续存活，才能构造待验证的孤儿场景。
+  const leaf = spawn(process.execPath, [self, '--leaf'], {
+    stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+    detached: true,
+  })
+  leaf.unref()
   leaf.once('message', ({ leaf: leafPid }) => {
     process.send({ branch: process.pid, leaf: leafPid }, () => {
       if (orphan === 'yes') process.exit(0)

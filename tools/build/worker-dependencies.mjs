@@ -1,6 +1,6 @@
 import { context, transform } from 'esbuild'
 import { readFile, realpath } from 'node:fs/promises'
-import { dirname, extname, join, relative, resolve } from 'node:path'
+import { dirname, extname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 
@@ -103,7 +103,9 @@ async function runtimeImports(path, local) {
       imports.push({ name: argument.text, kind, optional: !local && optionalLoad(node) })
     } else if (local) {
       const { line, character } = ast.getLineAndCharacterOfPosition(node.getStart(ast))
-      throw new Error(`Worker dependency graph: non-static ${kind} in ${path}:${line + 1}:${character + 1}`)
+      // 诊断路径统一用正斜杠，避免同一处违规在 Windows 上换一种写法。
+      const shown = path.split(sep).join('/')
+      throw new Error(`Worker dependency graph: non-static ${kind} in ${shown}:${line + 1}:${character + 1}`)
     }
   }
   function visit(node) {

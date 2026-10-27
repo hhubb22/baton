@@ -50,5 +50,7 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: './src/test/setup.ts',
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    // Windows 上 jsdom 与 userEvent 的交互明显更慢，默认 5 秒不够；与根 vitest 配置保持同一倍数。
+    ...(process.platform === 'win32' ? { testTimeout: 20000 } : {}),
   },
 })
