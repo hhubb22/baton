@@ -46,11 +46,16 @@ it('persists the exact automatic context, recalls recent goals for continuation,
       insertProjectInput(c.employeeId, c.agentId, 'user_message', 'first', { content: '请检查 deployment 部署入口' }),
     )
     await rpc('claim_inputs', { last_seq: 1 })
-    const prepare = async (last_seq: number, input_seq: number, core_tokens = 1500) =>
+    const prepare = async (
+      last_seq: number,
+      input_seq: number,
+      core_tokens = 1500,
+      view_refs: P.MemoryItemVersion[] = [],
+    ) =>
       Schema.decodeUnknownSync(P.MemoryContext)(
         await rpc('prepare_context', {
           last_seq,
-          payload: { context_id: randomUUID(), input_seq, ...P.MEMORY_CONTEXT_DEFAULTS, core_tokens },
+          payload: { context_id: randomUUID(), input_seq, ...P.MEMORY_CONTEXT_DEFAULTS, core_tokens, view_refs },
         }),
       )
     const first = await prepare(2, 2)
@@ -88,12 +93,33 @@ it('persists the exact automatic context, recalls recent goals for continuation,
       rpc('append_event', { last_seq: 4, client_event_id: 'stale-output', payload: textAssistant(continuing) }),
     ).rejects.toMatchObject({ code: 'memory_context_changed' })
     const refreshed = await prepare(4, 4)
-    expect(refreshed.knowledge_epoch).toBeGreaterThan(continuing.knowledge_epoch)
+    expect(refreshed.core_epoch).toBeGreaterThan(continuing.core_epoch)
     expect(refreshed.content).not.toContain(core.content)
+    // 快照只依赖读到的条目、核心集合和时间边界；新增无关知识不使它失效。
+    await add('new knowledge', '无关的新知识不影响已有快照。')
     const payload = textAssistant(refreshed)
     const saved = await rpc('append_event', { last_seq: 4, client_event_id: 'fresh-output', payload })
-    await add('new knowledge', '无关的新知识也推进代次。')
     expect(await rpc('append_event', { last_seq: 4, client_event_id: 'fresh-output', payload })).toEqual(saved)
+    const related = await prepare(5, 4, 1500, [{ item_id: deployment.id, revision: 1 }])
+    expect(related.memory_refs).toContainEqual({ item_id: deployment.id, revision: 1, mode: 'current' })
+    expect(related.view_refs).toEqual([{ item_id: deployment.id, revision: 1 }])
+    await db.run(
+      writeProjectMemory(c.employeeId, c.projectId, deployment.id, {
+        operation_id: randomUUID(),
+        expected_revision: 1,
+        title: deployment.title,
+        content: 'deployment 使用 pnpm release。',
+      }),
+    )
+    await expect(
+      rpc('append_event', { last_seq: 5, client_event_id: 'stale-related', payload: textAssistant(related) }),
+    ).rejects.toMatchObject({ code: 'memory_context_changed' })
+    const corrected = await prepare(5, 4, 1500, [
+      { item_id: deployment.id, revision: 1 },
+      { item_id: deployment.id, revision: 2 },
+    ])
+    expect(corrected.core_epoch).toBe(related.core_epoch)
+    expect(corrected.view_refs).toEqual([{ item_id: deployment.id, revision: 2 }])
     await expect(add('核心超额', '禁止省略条件。'.repeat(1500), true)).rejects.toMatchObject({
       code: 'core_budget_exceeded',
     })
@@ -126,6 +152,7 @@ it('closes unsubmitted calls on invalid context, preserves pending exec and orig
           expected_revision: 0,
           title: '约束',
           content: randomUUID(),
+          core: true,
         }),
       )
     const args = { node_id: nodeId, working_directory: '/work', command: 'printf once', wait_seconds: 600 }
@@ -241,7 +268,7 @@ it('checks natural expiry without an epoch change and reports core capacity whil
       rpc('append_event', { last_seq: 1, client_event_id: 'expired', payload: textAssistant(complete) }),
     ).rejects.toMatchObject({ code: 'memory_context_changed' })
     const after = await prepare()
-    expect(after.knowledge_epoch).toBe(complete.knowledge_epoch)
+    expect(after.core_epoch).toBe(complete.core_epoch)
     expect(after.content).not.toContain('到期前禁止发布')
     // 容量不足只阻止提交操作；读取设备以诊断容量仍可完成。
     await db.run(

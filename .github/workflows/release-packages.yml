@@ -35,7 +35,7 @@ jobs:
             target: win-x64
     services:
       postgres:
-        image: ${{ startsWith(matrix.runner, 'ubuntu-') && 'postgres:16' || '' }}
+        image: ${{ startsWith(matrix.runner, 'ubuntu-') && 'pgvector/pgvector:pg16' || '' }}
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: baton

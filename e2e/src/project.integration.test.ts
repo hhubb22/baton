@@ -668,7 +668,7 @@ test('completed chat → background memory and HTTP embeddings → recall → re
     expect(retired.status).toBe(200)
     await send('检查停用：继续当前目标。')
     await expect
-      .poll(async () => JSON.stringify(await events()).includes('停用后已刷新摘要和记忆工具结果。'), { timeout: 15000 })
+      .poll(async () => JSON.stringify(await events()).includes('停用后已刷新记忆工具结果。'), { timeout: 15000 })
       .toBe(true)
     expect(await memories()).toEqual([])
     const recovered = await events()

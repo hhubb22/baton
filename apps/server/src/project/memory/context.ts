@@ -22,10 +22,27 @@ export const lockMemoryState = Effect.fnUntraced(function* (employeeId: string, 
   const sql = yield* SqlClient.SqlClient
   yield* sql`INSERT INTO project_memory_state(employee_id,project_id) VALUES(${employeeId},${projectId}) ON CONFLICT DO NOTHING`
   const [state] = yield* sql<{
-    knowledge_epoch: number
-  }>`SELECT knowledge_epoch::float8 AS knowledge_epoch FROM project_memory_state WHERE employee_id=${employeeId} AND project_id=${projectId} FOR UPDATE`
+    core_epoch: number
+  }>`SELECT core_epoch::float8 AS core_epoch FROM project_memory_state WHERE employee_id=${employeeId} AND project_id=${projectId} FOR UPDATE`
   return state!
 })
+// 返回仍是条目当前版本的引用；条目的任何变更都会产生新版本。
+const currentVersions = Effect.fnUntraced(function* (
+  employeeId: string,
+  projectId: string,
+  refs: readonly P.MemoryItemVersion[],
+) {
+  const sql = yield* SqlClient.SqlClient
+  if (!refs.length) return []
+  const rows = yield* sql<{
+    id: string
+    revision: number
+  }>`SELECT id,current_revision::float8 AS revision FROM project_memory_items WHERE employee_id=${employeeId} AND project_id=${projectId} AND id=ANY(${[...new Set(refs.map((r) => r.item_id))]}::uuid[])`
+  const current = new Map(rows.map((r) => [r.id, r.revision]))
+  return refs.filter((r) => current.get(r.item_id) === r.revision)
+})
+const itemVersions = (refs: readonly (typeof P.MemoryReference.Type)[]): P.MemoryItemVersion[] =>
+  refs.flatMap((r) => ('item_id' in r && r.mode === 'current' ? [{ item_id: r.item_id, revision: r.revision }] : []))
 export const embeddingQuery = Effect.fn('projectMemoryEmbeddingQuery')(function* (
   b: Pick<ProjectBinding, 'employeeId' | 'projectId' | 'agentId' | 'conversationId' | 'nextSeq'>,
   lastSeq: number,
@@ -86,9 +103,6 @@ export const prepareContext = Effect.fn('prepareProjectMemoryContext')(function*
   const selection = yield* embeddingQuery(b, lastSeq, request.input_seq)
   const query = selection.query
   const normalizedQuery = queryTerms(query).terms
-  const [expiry] = yield* sql<{
-    expires_at: string | null
-  }>`SELECT to_jsonb(min(t)) AS expires_at FROM project_memory_items e JOIN project_memory_revisions r ON r.item_id=e.id AND r.revision=e.current_revision CROSS JOIN LATERAL (VALUES(r.valid_from),(r.valid_until)) boundary(t) WHERE e.employee_id=${b.employeeId} AND e.project_id=${b.projectId} AND e.status IN ('active','superseded') AND t>now()`
   const ids = yield* sql<{
     id: string
   }>`SELECT e.id FROM project_memory_items e JOIN project_memory_revisions r ON r.item_id=e.id AND r.revision=e.current_revision WHERE e.employee_id=${b.employeeId} AND e.project_id=${b.projectId} AND r.core AND ${currentMemorySQL(sql)} ORDER BY e.id`
@@ -115,9 +129,9 @@ export const prepareContext = Effect.fn('prepareProjectMemoryContext')(function*
     context_id: request.context_id,
     last_seq: lastSeq,
     input_seq: request.input_seq,
-    knowledge_epoch: state.knowledge_epoch,
+    core_epoch: state.core_epoch,
     budget: { core_tokens: request.core_tokens, related_tokens: request.related_tokens, max_bytes: request.max_bytes },
-    expires_at: expiry!.expires_at,
+    expires_at: expiresAt,
     core_complete: coreComplete,
     query,
     algorithm: SEARCH_VERSION,
@@ -133,7 +147,10 @@ export const prepareContext = Effect.fn('prepareProjectMemoryContext')(function*
       ...(coreComplete ? core.map((i) => ({ item_id: i.id, revision: i.revision, mode: 'current' as const })) : []),
       ...relatedBlocks.map((b) => b.ref),
     ],
+    view_refs: [],
   })
+  // 失效时间在选定相关条目后计算，容量按最长的时间戳文本预留。
+  let expiresAt: string | null = '0000-00-00T00:00:00.000000+00:00'
   const fits = () => Buffer.byteLength(JSON.stringify(snapshot(), null, 1)) <= request.max_bytes
   if (!fits()) {
     coreComplete = false
@@ -201,12 +218,22 @@ export const prepareContext = Effect.fn('prepareProjectMemoryContext')(function*
   }
   if (!fits())
     return yield* Effect.fail(new AppError(422, 'core_budget_exceeded', '请求快照容量不足，无法保存完整核心要求与来源'))
-  const result = snapshot()
-  yield* sql`INSERT INTO project_memory_contexts(context_id,employee_id,project_id,conversation_id,last_seq,input_seq,knowledge_epoch,expires_at,request_hash,snapshot,content_hash) VALUES(${request.context_id},${b.employeeId},${b.projectId},${b.conversationId},${lastSeq},${request.input_seq},${state.knowledge_epoch},${expiry!.expires_at}::timestamptz,${requestHash},${JSON.stringify(result)}::jsonb,${hashText(result.content)})`
+  // 核心集合在时间边界上变化，快照中的相关条目在失效时间到达时退出；新条目生效不影响已有快照。
+  const relatedIds = relatedBlocks.flatMap((b) => ('item_id' in b.ref ? [b.ref.item_id] : []))
+  const [expiry] = yield* sql<{
+    expires_at: string | null
+  }>`SELECT to_jsonb(min(t)) AS expires_at FROM project_memory_items e JOIN project_memory_revisions r ON r.item_id=e.id AND r.revision=e.current_revision CROSS JOIN LATERAL (VALUES(CASE WHEN r.core THEN r.valid_from END),(r.valid_until)) boundary(t) WHERE e.employee_id=${b.employeeId} AND e.project_id=${b.projectId} AND e.status IN ('active','superseded') AND (r.core OR e.id=ANY(${relatedIds}::uuid[])) AND t>now()`
+  expiresAt = expiry!.expires_at
+  const result = {
+    ...snapshot(),
+    view_refs: yield* currentVersions(b.employeeId, b.projectId, request.view_refs ?? []),
+  }
+  yield* sql`INSERT INTO project_memory_contexts(context_id,employee_id,project_id,conversation_id,last_seq,input_seq,core_epoch,expires_at,request_hash,snapshot,content_hash) VALUES(${request.context_id},${b.employeeId},${b.projectId},${b.conversationId},${lastSeq},${request.input_seq},${state.core_epoch},${expiresAt}::timestamptz,${requestHash},${JSON.stringify(result)}::jsonb,${hashText(result.content)})`
   return result
 })
 
 // 已保存结果和持久执行登记须由调用方先查；只对首次保存/提交检查。
+// 快照读到的条目版本、核心集合和时间边界都未变化时仍然有效，其他条目的增改不影响它。
 export const checkMemoryContext = Effect.fn('checkProjectMemoryContext')(function* (
   b: Pick<ProjectBinding, 'employeeId' | 'projectId' | 'conversationId'>,
   contextId: string,
@@ -217,8 +244,11 @@ export const checkMemoryContext = Effect.fn('checkProjectMemoryContext')(functio
   yield* lockMemoryState(b.employeeId, b.projectId)
   const [context] = yield* sql<{
     snapshot: P.MemoryContext
-  }>`SELECT c.snapshot FROM project_memory_contexts c JOIN project_memory_state s ON s.employee_id=c.employee_id AND s.project_id=c.project_id WHERE c.context_id=${contextId} AND c.employee_id=${b.employeeId} AND c.project_id=${b.projectId} AND c.conversation_id=${b.conversationId} AND c.knowledge_epoch=s.knowledge_epoch AND (c.expires_at IS NULL OR c.expires_at>clock_timestamp()) AND (${lastSeq ?? null}::bigint IS NULL OR c.last_seq=${lastSeq ?? null})`
+  }>`SELECT c.snapshot FROM project_memory_contexts c JOIN project_memory_state s ON s.employee_id=c.employee_id AND s.project_id=c.project_id WHERE c.context_id=${contextId} AND c.employee_id=${b.employeeId} AND c.project_id=${b.projectId} AND c.conversation_id=${b.conversationId} AND c.core_epoch=s.core_epoch AND (c.expires_at IS NULL OR c.expires_at>clock_timestamp()) AND (${lastSeq ?? null}::bigint IS NULL OR c.last_seq=${lastSeq ?? null})`
   if (!context) return yield* Effect.fail(new AppError(409, 'memory_context_changed'))
+  const read = [...itemVersions(context.snapshot.memory_refs), ...context.snapshot.view_refs]
+  if ((yield* currentVersions(b.employeeId, b.projectId, read)).length !== read.length)
+    return yield* Effect.fail(new AppError(409, 'memory_context_changed'))
   if (requireCore && !context.snapshot.core_complete)
     return yield* Effect.fail(new AppError(422, 'core_budget_exceeded'))
   return context.snapshot

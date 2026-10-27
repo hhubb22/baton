@@ -53,7 +53,7 @@ export const queueEmbeddings = Effect.fn('queueProjectMemoryEmbeddings')(functio
   }>`SELECT e.id AS item_id,r.revision::float8 AS revision,r.title,r.content,r.conditions FROM project_memory_items e JOIN project_memory_revisions r ON r.item_id=e.id AND r.revision=e.current_revision WHERE e.employee_id=${employeeId} AND e.project_id=${projectId} AND e.status IN ('active','superseded') AND (${itemId ?? null}::uuid IS NULL OR e.id=${itemId ?? null})`
   for (const item of rows) {
     const textHash = hashText(embeddingText(item))
-    yield* sql`INSERT INTO project_memory_embeddings(employee_id,project_id,item_id,revision,config_id,embedding_text_hash,state,dimensions,vector) SELECT ${employeeId},${projectId},${item.item_id},${item.revision},${configId},${textHash},CASE WHEN prior.vector IS NULL THEN 'pending' ELSE 'ready' END,prior.dimensions,prior.vector FROM (SELECT 1) seed LEFT JOIN LATERAL (SELECT dimensions,vector FROM project_memory_embeddings WHERE employee_id=${employeeId} AND project_id=${projectId} AND item_id=${item.item_id} AND config_id=${configId} AND embedding_text_hash=${textHash} AND state='ready' ORDER BY revision DESC LIMIT 1) prior ON true ON CONFLICT DO NOTHING`
+    yield* sql`INSERT INTO project_memory_embeddings(employee_id,project_id,item_id,revision,config_id,embedding_text_hash,state,dimensions,embedding) SELECT ${employeeId},${projectId},${item.item_id},${item.revision},${configId},${textHash},CASE WHEN prior.embedding IS NULL THEN 'pending' ELSE 'ready' END,prior.dimensions,prior.embedding FROM (SELECT 1) seed LEFT JOIN LATERAL (SELECT dimensions,embedding FROM project_memory_embeddings WHERE employee_id=${employeeId} AND project_id=${projectId} AND item_id=${item.item_id} AND config_id=${configId} AND embedding_text_hash=${textHash} AND state='ready' ORDER BY revision DESC LIMIT 1) prior ON true ON CONFLICT DO NOTHING`
   }
 })
 
@@ -71,12 +71,13 @@ export const commitEmbedding = Effect.fn('commitProjectMemoryEmbedding')(functio
     matches: boolean
   }>`SELECT true AS matches FROM project_memory_embeddings v JOIN projects p ON p.employee_id=v.employee_id AND p.id=v.project_id JOIN project_memory_items e ON e.employee_id=v.employee_id AND e.project_id=v.project_id AND e.id=v.item_id WHERE v.employee_id=${employeeId} AND v.project_id=${projectId} AND v.item_id=${input.item_id} AND v.revision=${input.revision} AND v.config_id=${input.config_id} AND v.embedding_text_hash=${input.embedding_text_hash} AND p.memory_embedding->>'config_id'=${input.config_id} AND e.current_revision=v.revision AND e.status IN ('active','superseded')`
   if (!current) return { accepted: false }
-  const dimensions = input.vector.length
+  const dimensions = input.vector.length,
+    embedding = JSON.stringify(input.vector)
   const other =
     yield* sql`SELECT 1 FROM project_memory_embeddings WHERE employee_id=${employeeId} AND project_id=${projectId} AND config_id=${input.config_id} AND state='ready' AND dimensions<>${dimensions} LIMIT 1`
   if (other.length) return yield* Effect.fail(new AppError(422, 'embedding_dimension_mismatch'))
   const changed =
-    yield* sql`UPDATE project_memory_embeddings SET state='ready',dimensions=${dimensions},vector=${input.vector}::float8[],diagnostic='',updated_at=clock_timestamp() WHERE employee_id=${employeeId} AND project_id=${projectId} AND item_id=${input.item_id} AND revision=${input.revision} AND config_id=${input.config_id} AND embedding_text_hash=${input.embedding_text_hash} AND (state<>'ready' OR vector IS DISTINCT FROM ${input.vector}::float8[]) RETURNING item_id`
+    yield* sql`UPDATE project_memory_embeddings SET state='ready',dimensions=${dimensions},embedding=${embedding}::vector,diagnostic='',updated_at=clock_timestamp() WHERE employee_id=${employeeId} AND project_id=${projectId} AND item_id=${input.item_id} AND revision=${input.revision} AND config_id=${input.config_id} AND embedding_text_hash=${input.embedding_text_hash} AND (state<>'ready' OR embedding IS DISTINCT FROM ${embedding}::vector) RETURNING item_id`
   if (changed.length)
     yield* sql`UPDATE project_memory_state SET search_generation=search_generation+1 WHERE employee_id=${employeeId} AND project_id=${projectId}`
   return { accepted: true }

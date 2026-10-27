@@ -13,7 +13,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { eventMessage, RuntimeError, type Bootstrap, type Event, type RPC, type MemoryContext } from './protocol.js'
 import { toolDefinitions } from './tools.js'
 import { batonMessage, modelContext } from './tool-names.js'
-import { modelMessages, promptFor } from './context.js'
+import { modelMessages, promptFor, viewRefs } from './context.js'
 import {
   clearedToolResults,
   compactionSettings,
@@ -63,7 +63,7 @@ export class ProjectRuntime {
   private stopAfterWait = false
   private compaction: CompactionSettings
   private budget: ModelBudget
-  private memoryContext!: MemoryContext
+  private memoryContext?: MemoryContext
   private modelCalls = 0
   constructor(
     private rpc: RPC,
@@ -77,15 +77,17 @@ export class ProjectRuntime {
     for (const [name, value] of Object.entries(this.budget))
       if (!Number.isSafeInteger(value) || value < 1) throw new Error(`invalid_model_budget_${name}`)
   }
-  private async prepareMemory(
-    outputReserve: number,
-    signal?: AbortSignal,
-    events = this.events,
-    suffix: Message[] = [],
-    forCompaction = false,
-  ): Promise<Message[]> {
+  private async prepareMemory(outputReserve: number, signal?: AbortSignal, suffix: Message[] = []): Promise<Message[]> {
     const settings = this.boot.memory_settings
-    let messages = [...modelMessages(this.boot, events, this.memoryContext, forCompaction), ...suffix]
+    const refs = viewRefs(this.boot, this.events)
+    const messages = [
+      ...modelMessages(
+        this.boot,
+        this.events,
+        this.memoryContext ? { view_refs: this.memoryContext.view_refs } : undefined,
+      ),
+      ...suffix,
+    ]
     const available = Math.max(0, this.model().contextWindow - outputReserve - estimateMessages(messages))
     const coreTokens = Math.min(settings.core_tokens, available)
     const relatedTokens = Math.min(settings.related_tokens, Math.max(0, available - coreTokens))
@@ -99,16 +101,14 @@ export class ProjectRuntime {
       payload: {
         context_id: randomUUID(),
         input_seq: inputSeq,
+        view_refs: refs,
         ...embedding,
         core_tokens: coreTokens,
         related_tokens: relatedTokens,
         max_bytes: settings.max_bytes,
       },
     })
-    messages = [...modelMessages(this.boot, events, this.memoryContext, forCompaction), ...suffix]
-    if (forCompaction || !this.memoryContext.content) return messages
-    const dynamic: Message = { role: 'user', content: this.memoryContext.content, timestamp: 0 }
-    return messages[0]?.role === 'system' ? [messages[0], dynamic, ...messages.slice(1)] : [dynamic, ...messages]
+    return [...modelMessages(this.boot, this.events, this.memoryContext), ...suffix]
   }
   private takeModelCall() {
     if (this.modelCalls >= this.budget.maxModelCalls) throw new RuntimeError('model_call_budget_exhausted')
@@ -197,9 +197,6 @@ export class ProjectRuntime {
         summary: previous?.summary ?? '',
         cleared_tool_result_seqs: cleared,
         memory_index: previous?.memory_index ?? '',
-        ...(previous?.knowledge_epoch !== undefined
-          ? { knowledge_epoch: previous.knowledge_epoch, expires_at: previous.expires_at }
-          : {}),
         prompt: promptFor(this.boot, this.events),
         tokens_before: 0,
         tokens_after: 0,
@@ -240,14 +237,17 @@ export class ProjectRuntime {
       this.takeModelCall()
       let payload: CompactionPayload
       try {
-        const memoryMessages = await this.prepareMemory(
-          Math.min(this.budget.maxOutputTokens, model.maxTokens, available),
-          signal,
-          this.events.filter((e) => e.seq <= through),
-          [{ role: 'user', content: COMPACTION_INSTRUCTION, timestamp: 0 }],
-          true,
-        )
-        const stream = this.models.streamSimple(model, modelContext({ messages: memoryMessages }), {
+        // 摘要不读取记忆上下文和记忆工具结果，记忆变化后摘要仍然有效。
+        const summaryMessages = [
+          ...modelMessages(
+            this.boot,
+            this.events.filter((e) => e.seq <= through),
+            undefined,
+            true,
+          ),
+          { role: 'user', content: COMPACTION_INSTRUCTION, timestamp: 0 } satisfies Message,
+        ]
+        const stream = this.models.streamSimple(model, modelContext({ messages: summaryMessages }), {
           maxTokens: Math.min(this.budget.maxOutputTokens, model.maxTokens, available),
           maxRetries: 0,
           sessionId: this.boot.project.conversation.id,
@@ -265,9 +265,6 @@ export class ProjectRuntime {
             (seq: number) => seq > through,
           ),
           memory_index: '',
-          memory_context_id: this.memoryContext.context_id,
-          knowledge_epoch: this.memoryContext.knowledge_epoch,
-          expires_at: this.memoryContext.expires_at,
           prompt: {
             version: metadata.prompt_version,
             title: metadata.project.title,
@@ -472,7 +469,6 @@ export class ProjectRuntime {
           const memoryMessages = await this.prepareMemory(
             outputTokens,
             options?.signal,
-            this.events,
             outputFeedback ? [{ role: 'user', content: outputFeedback, timestamp: 0 }] : [],
           )
           const stream = this.models.streamSimple(
@@ -643,9 +639,7 @@ export class ProjectRuntime {
           client_event_id: randomUUID(),
           payload: {
             format: 'pi-ai/1',
-            memory_context_id: this.memoryContext.context_id,
-            knowledge_epoch: this.memoryContext.knowledge_epoch,
-            expires_at: this.memoryContext.expires_at,
+            memory_context_id: this.memoryContext!.context_id,
             message: event.message,
             prompt: promptFor(this.boot, this.events),
           },

@@ -280,7 +280,7 @@ it('keeps a unique long lexical hit in automatic context without Embedding', asy
     expect(snapshot.content).not.toContain(item.content)
   }))
 
-it('fuses independent Orama vector hits, preserves a unique long automatic snippet and validates query/config bindings', async () =>
+it('fuses independent pgvector hits, preserves a unique long automatic snippet and validates query/config bindings', async () =>
   withTestDatabase(async (db) => {
     const { context: c } = await projectToolFixture(db)
     const rpc = (operation: P.ProjectRuntimeRequest['operation'], extra: Partial<P.ProjectRuntimeRequest> = {}) =>

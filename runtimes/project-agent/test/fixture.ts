@@ -6,7 +6,7 @@ import {
   fauxText,
   type TranscriptContext,
 } from '@earendil-works/pi-ai'
-import type { Bootstrap, Event, RPC } from '../src/protocol.js'
+import type { Bootstrap, Event, MemoryItemVersion, RPC } from '../src/protocol.js'
 import { RuntimeError } from '../src/protocol.js'
 import { ProjectRuntime, type Clock, type ModelBudget } from '../src/runtime.js'
 import type { CompactionSettings } from '../src/compaction.js'
@@ -53,8 +53,9 @@ export class Backend implements RPC {
   pageSize = 2
   compactions = new Map<string, Event>()
   memory = ''
-  knowledgeEpoch = 0
-  contexts = new Map<string, { knowledge_epoch: number; content: string }>()
+  coreEpoch = 0
+  revisions = new Map<string, number>()
+  contexts = new Map<string, { core_epoch: number; content: string; view_refs: MemoryItemVersion[] }>()
   boot(): Bootstrap {
     const compaction = this.events.findLast((e) => e.kind === 'compaction')
     return {
@@ -130,7 +131,7 @@ export class Backend implements RPC {
           context_id: req.payload.context_id,
           last_seq: req.last_seq,
           input_seq: req.payload.input_seq,
-          knowledge_epoch: this.knowledgeEpoch,
+          core_epoch: this.coreEpoch,
           budget: {
             core_tokens: req.payload.core_tokens,
             related_tokens: req.payload.related_tokens,
@@ -139,6 +140,9 @@ export class Backend implements RPC {
           expires_at: null,
           content: this.memory,
           memory_refs: [],
+          view_refs: ((req.payload.view_refs ?? []) as MemoryItemVersion[]).filter(
+            (r) => this.revisions.get(r.item_id) === r.revision,
+          ),
           degraded: [],
           core_complete: true,
           query: '',
@@ -149,7 +153,11 @@ export class Backend implements RPC {
       }
       case 'append_event': {
         const context = this.contexts.get(req.payload.memory_context_id)
-        if (!context || context.knowledge_epoch !== this.knowledgeEpoch)
+        if (
+          !context ||
+          context.core_epoch !== this.coreEpoch ||
+          context.view_refs.some((r) => this.revisions.get(r.item_id) !== r.revision)
+        )
           throw new RuntimeError('memory_context_changed')
         if (req.last_seq !== this.events.length) throw new RuntimeError('conflict')
         const event: Event = {

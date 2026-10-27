@@ -76,14 +76,15 @@ if (command === 'probe') {
         return fauxAssistantMessage('summary-old-fact：测试使用 pnpm test:unit；继续处理当前用户目标。')
       const text = JSON.stringify(context.messages)
       if (text.includes('检查停用')) {
-        assert.ok(!text.includes('summary-old-fact'))
+        // 摘要不读取记忆，停用条目后保留；读到旧版本的召回结果被替换。
+        assert.ok(text.includes('summary-old-fact'))
         const results = context.messages.filter(
           (message) => message.role === 'toolResult' && message.toolName === 'memory_recall',
         )
         assert.ok(results.length > 0)
         assert.ok(results.every((message) => JSON.stringify(message.content).includes('记忆工具结果已退出当前上下文')))
         assert.equal(snapshot?.memory_refs.length, 0)
-        return fauxAssistantMessage('停用后已刷新摘要和记忆工具结果。')
+        return fauxAssistantMessage('停用后已刷新记忆工具结果。')
       }
       if (text.includes('后续召回')) {
         if (!context.messages.some((message) => message.role === 'toolResult' && message.toolName === 'memory_recall'))

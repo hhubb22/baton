@@ -36,15 +36,22 @@ export interface Bootstrap {
   after_seq: number
   last_seq: number
 }
+// 与中心 PrepareMemoryContext.view_refs 的上限一致。
+export const MEMORY_VIEW_REFS_MAX = 512
+export interface MemoryItemVersion {
+  item_id: string
+  revision: number
+}
 export interface MemoryContext {
   context_id: string
   last_seq: number
   input_seq: number
   budget: { core_tokens: number; related_tokens: number; max_bytes: number }
-  knowledge_epoch: number
+  core_epoch: number
   expires_at: string | null
   content: string
   memory_refs: readonly { item_id: string; revision: number; mode: 'current' | 'history'; as_of?: string }[]
+  view_refs: readonly MemoryItemVersion[]
   degraded: readonly string[]
   core_complete: boolean
   query: string
@@ -142,12 +149,25 @@ const resultSchemas = {
         suppressed: Schema.Boolean,
       }),
     ),
+    context: Schema.optionalKey(
+      Schema.Array(
+        Schema.Struct({
+          id: Schema.String,
+          role: Schema.String,
+          source_type: Schema.String,
+          source_hash: Schema.String,
+          text: Schema.String,
+          truncated: Schema.Boolean,
+        }),
+      ),
+    ),
   }),
   lookup_items: recordSchema,
   commit_chunk: Schema.Struct({
     done: Schema.Boolean,
     cursor_index: Schema.optionalKey(sequence),
     cursor_offset: Schema.optionalKey(sequence),
+    outcomes: Schema.optionalKey(Schema.Array(recordSchema)),
   }),
   pending_embeddings: Schema.Struct({
     memory_embedding: Schema.NullOr(embeddingConfigSchema),
@@ -186,7 +206,7 @@ const resultSchemas = {
     context_id: Schema.String,
     last_seq: sequence,
     input_seq: sequence,
-    knowledge_epoch: sequence,
+    core_epoch: sequence,
     budget: Schema.Struct({ core_tokens: sequence, related_tokens: sequence, max_bytes: sequence }),
     expires_at: Schema.NullOr(Schema.String),
     content: Schema.String,
@@ -198,6 +218,7 @@ const resultSchemas = {
         as_of: Schema.optionalKey(Schema.String),
       }),
     ),
+    view_refs: Schema.Array(Schema.Struct({ item_id: Schema.String, revision: sequence })),
     degraded: Schema.Array(Schema.String),
     core_complete: Schema.Boolean,
     query: Schema.String,

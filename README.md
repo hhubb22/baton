@@ -7,7 +7,7 @@ Baton 是跨设备 AI Agent 协同系统。员工使用管理员分配的本地�
 ## 环境要求
 
 - 官方 Node.js 26+、pnpm 12+，用于工作区开发和构建。SEA 打包要求 Node 支持 `--build-sea`，并保留官方归档中的 LICENSE。
-- PostgreSQL 16+，用于中心数据与本地集成测试。
+- PostgreSQL 16+ 与 pgvector 0.5+，用于中心数据与本地集成测试。macOS 可用 `brew install pgvector`，容器可用 `pgvector/pgvector:pg16` 镜像。
 - Agent 所需原生 CLI 或 SDK 及设备本地认证。Cursor 使用显式配置的 `CURSOR_API_KEY`；Pi、Codex、Kiro 使用原生 CLI 配置。
 
 ## 构建与运行
@@ -26,7 +26,7 @@ node tools/build.mjs
 
 ### 中心服务与员工账号
 
-先建立 PostgreSQL 数据库，并在仓库根目录配置连接和公开 HTTPS Origin：
+先建立 PostgreSQL 数据库并安装 pgvector。迁移在 `public` 执行 `CREATE EXTENSION IF NOT EXISTS vector`；连接用户没有建扩展权限时，由管理员先在该库执行这条语句。然后在仓库根目录配置连接和公开 HTTPS Origin：
 
 ```sh
 export BATON_DATABASE_URL='postgres://用户:口令@127.0.0.1:5432/baton?sslmode=disable'

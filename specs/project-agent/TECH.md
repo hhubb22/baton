@@ -95,7 +95,7 @@ Runtime 进程的工作目录是一个空的控制目录。pi-agent-core 本身�
 | `project_agent_input_queue` | id, employee_id, agent_id, source_type, source_key, payload, payload_hash, delivered_seq, created_at | 输入队列；`(agent_id, source_key)` 唯一；`delivered_seq` 为空表示待处理；领取后保留 |
 | `agent_runs` | id, employee_id, agent_id, node_id, lease_epoch, state, placement_reason, started_at, ended_at, end_reason | 每次运行一行；运行位置只记在这里 |
 | `project_memory_items` | id, employee_id, project_id, title, current_revision, updated_at | 记忆条目 |
-| `project_memory_revisions` | item_id, employee_id, project_id, revision, title, content, conditions, valid_from/until, basis, author, action, created_at | 只追加；员工和前台工具共享 `project/memory.applyChange`，来源、证据、操作去重、抑制及代次见 [长期记忆](../project-memory/TECH.md#数据与知识变更) |
+| `project_memory_revisions` | item_id, employee_id, project_id, revision, title, content, conditions, valid_from/until, basis, author, action, created_at | 只追加；员工、前台工具和后台整理共享 `project/memory` 的 `planChange`/`executeChange`，author 为 user、agent 或 background；来源、证据、操作去重、抑制及代次见 [长期记忆](../project-memory/TECH.md#数据与知识变更) |
 | `node_runtime_reports` | node_id, employee_id, report_version, reported_at, report | 节点能力的结构化报告（第 8 节）；现有 `nodes.capabilities` 是最多 32 项的字符串数组，装不下目录和仓库信息 |
 
 `threads` 带可空列 `project_id`、`origin_conversation_id`、`origin_tool_call_id`，后两列唯一。只有 Project Agent 新建的 Thread 填写这三列；员工新建的 Thread 三列都为空。`thread_turns.initiator` 记录这一轮由员工还是 Project Agent 开启，Project Agent 开启时另记 `origin_tool_call_id`。
@@ -121,7 +121,7 @@ Runtime 进程的工作目录是一个空的控制目录。pi-agent-core 本身�
 | `input` | 一条 pi-ai user 消息，内容由本轮领取的输入队列条目拼成；附带这些条目的 ID | Coordinator，在领取输入的事务里 |
 | `assistant` | 一条 pi-ai assistant 消息，原样保存，包括 thinking 签名、usage、stopReason | Runtime |
 | `tool_result` | 一条 pi-ai toolResult 消息 | Coordinator，在执行工具的事务里 |
-| `compaction` | `through_seq`、摘要文本、被清除的工具结果序号、知识代次与有效截止 | Runtime 生成，Coordinator 校验后写入 |
+| `compaction` | `through_seq`、摘要文本、被清除的工具结果序号 | Runtime 生成，Coordinator 校验后写入 |
 
 每条事件的 payload 不超过 160 KiB。`input` 由领取规则保证；`tool_result` 受单个工具输出 32 KiB 的限制。`assistant` 和 `compaction` 的回答预算取配置的 `maxOutputTokens`（默认 32000）与模型输出上限的较小值。完整 assistant JSON 超限时不保存、不执行其中的工具调用，按实际大小至少减半输出预算，并向模型说明容量限制，最多恢复 3 次；仍超限以 `model_output_too_large` 报告。消息与工具调用完整保存，不拆分半条调用；`length` 导致工具参数截断时同样丢弃该回复并要求缩短完整调用，恢复耗尽时报告 `model_output_truncated_tools`。
 
@@ -155,7 +155,7 @@ Runtime 进程的工作目录是一个空的控制目录。pi-agent-core 本身�
    - 同一条记忆有多条待处理的 `memory_updated` 时，只把版本号最大的一条写进 `input`，其余一起标为已投递。
 
    每条输入在写入时已经限长，所以一批不会超过事件上限。这个上限只针对传输：128 KiB 约合 3～4 万个 token，低于常见窗口的压缩阈值；上下文用量由第 6.2 节单独检查。
-4. 把 `input` 消息交给 Agent。调用模型前，Runtime 将固定工具名中的点号替换为下划线，例如 `memory.recall` 转为 `memory_recall`，符合 provider 的函数名约束。转换覆盖系统工具声明、历史调用和工具结果；正常回复与压缩请求使用同一规则。收到 assistant 后按固定映射还原工具名，再交给 Agent、保存历史和执行中心 RPC；参数、调用 ID、签名与其他字段保持不变。未知名称不自动改写为已知工具，仍由工具校验拒绝。每次模型请求前，Runtime 调用 prepare_context，将当前核心要求和相关片段作为独立动态资料消息放在固定系统提示词之后，保留其余 provider 消息与签名。模型回复的 assistant 消息在 `message_end` 监听器里通过 append_event 保存，payload 关联 memory_context_id，并保存 knowledge_epoch 与 expires_at 供后续派生工具结果的视图检查；中心拒绝知识代次变化或自然到期的新输出，Runtime 在原模型预算内刷新重试。保存返回之前，pi-agent-core 不会执行工具。
+4. 把 `input` 消息交给 Agent。调用模型前，Runtime 将固定工具名中的点号替换为下划线，例如 `memory.recall` 转为 `memory_recall`，符合 provider 的函数名约束。转换覆盖系统工具声明、历史调用和工具结果；正常回复与压缩请求使用同一规则。收到 assistant 后按固定映射还原工具名，再交给 Agent、保存历史和执行中心 RPC；参数、调用 ID、签名与其他字段保持不变。未知名称不自动改写为已知工具，仍由工具校验拒绝。每次模型请求前，Runtime 调用 prepare_context 并传入当前视图中记忆工具结果读到的条目版本，将当前核心要求和相关片段作为独立动态资料消息放在本批输入之前，保留其余 provider 消息与签名。模型回复的 assistant 消息在 `message_end` 监听器里通过 append_event 保存，payload 关联 memory_context_id；中心在核心代次、快照读到的条目版本变化或自然到期时拒绝新输出，Runtime 在原模型预算内刷新重试。保存返回之前，pi-agent-core 不会执行工具。
 5. 每个工具调用通过 `call_tool` 交给 Coordinator 执行（第 7 节），Coordinator 在同一事务里写入 `tool_result` 事件。工具设为顺序执行（`toolExecution: "sequential"`），结果事件的顺序和调用顺序一致。
 6. 模型给出不含工具调用的回复后，这一轮结束，回到第 3 步。
 7. 闲置 180 秒内没有新输入，或单次运行满 15 分钟，就进入收尾：需要时压缩（第 6.3 节），然后调用 `finish`，Coordinator 清空租约并记录结束原因，batond 停止进程。收尾压缩的模型请求失败只记录诊断，保留原始历史并正常结束；租约失效和持久化错误仍按原错误处理。
@@ -192,7 +192,7 @@ Runtime 按以下顺序构造请求：
 3. 最新 `compaction` 事件生成的开头消息（如果有）。
 4. `compaction.through_seq` 之后的全部事件，按 `seq` 排列；被清除的工具结果替换为占位文字。
 
-事件在知识代次相同且未过有效截止时生成一致的消息列表。知识变化或事实自然到期后，旧摘要与派生记忆工具正文整体替换为重新读取提示，原始事件、provider 字段和工具配对保留。系统提示词或工具定义的版本变化会使缓存失效，属于预期行为。Agent 的 `sessionId` 使用对话 ID，跨设备不变。
+动态记忆消息位于本批输入之前，系统提示词、摘要和更早的对话构成稳定前缀。记忆变化后，只有读到的条目版本已不是当前修订的记忆工具结果替换为重新读取提示，摘要和其他工具结果不变，原始事件、provider 字段和工具配对保留。系统提示词或工具定义的版本变化会使缓存失效，属于预期行为。Agent 的 `sessionId` 使用对话 ID，跨设备不变。
 
 Project 标题或目标被修改后，新的系统提示词从下一次压缩起才生效。在此之前，Coordinator 在修改的事务里写一条 `project_updated` 被动输入，内容是新的标题和目标，随下一批主动输入告诉模型。这样标题改动不会让整段上下文的缓存失效，也不会为了这个改动单独启动一次运行。
 
@@ -209,7 +209,7 @@ Project 标题或目标被修改后，新的系统提示词从下一次压缩起
 
 1. **清除旧工具结果。** 默认只选择最近 3 批输入以前、已有后续 assistant 分析、内容估算超过 8192 字符的 `tool_result`，替换成占位文字：`[工具结果已清除，原文为第 123 条。需要时用 history.read 读取，或重新调用工具获取最新状态]`。最近尚未分析的结果保留。这一步不调用模型，清除集合立即通过 `commit_compaction` 保存；没有摘要时 `through_seq=0`、`summary=""`，视图不添加空摘要消息。后续清除沿用旧摘要和提示词快照。按 PA-16，清除后的信息都能重新拿到。清除后用量降到窗口的 40% 以下（且满足回答预算），就到此为止。
 2. **生成摘要。** 把最早的一段对话换成摘要。优先保留最近 2 批输入对应的对话，并保留至少占窗口 15% 的最近内容；单轮或最近几轮过长、没有可用切点时，允许在已完成的工具批次之间切分。切点不会把一条 assistant 消息和它的工具结果分开，也不会吞掉最后一个保留单元。摘要请求沿用原模型、系统提示词、工具定义、消息格式、provider 签名与 `sessionId`，重放待压缩的消息前缀及旧摘要，在最后追加一条 user 压缩指令，并设置 `toolChoice: "none"`。这参考 DSH 的前缀复用方式；Pi 的默认摘要器把旧对话序列化成文本，使用独立系统提示词，无法沿用原对话的整段缓存前缀。实际命中取决于 provider、路由和缓存有效期，工具结果清除也会影响前缀。恢复的历史已超过窗口时，先选择一次摘要请求能容纳的较短前缀，并为输出留出容量；一次检查在上下文持续缩短、仍有运行时间和模型调用预算时继续压缩。
-3. **验证并写入。** Runtime 拒绝空白、被截断、含工具调用或非文本输出的摘要，检查完整模型视图的估算用量确实下降，并检查事件 JSON 容量。`commit_compaction` 带 `last_seq`、稳定的 `client_event_id` 和生成时的 `memory_context_id`、`knowledge_epoch`、`expires_at`；Coordinator 在运行租约与对话锁保护下检查序号未变化、范围单调前进、工具配对、清除集合没有丢失、被替换内容确实缩短及记忆快照仍有效，再在同一事务里追加事件并更新 `compaction_seq`。清除集合为有序、无重复的保留区工具结果序号。事件保存 `through_seq`、`summary`、`cleared_tool_result_seqs`、`memory_index`、`prompt`、`tokens_before`、`tokens_after`、`provider`、`model` 和可选 `usage`；前后用量为同一字符估算单位，新摘要的 memory_index 为空，当前记忆由每次请求的动态快照提供。只清除工具结果时沿用旧摘要及其知识代次、有效截止；生成新摘要时记录当前代次、有效截止和最新标题、目标快照。相同标识和相同内容的重发返回原事件；不同内容复用标识返回冲突。序号或配置冲突时丢弃摘要，重新读取中心状态，最多重试 2 次；提交失败不应用本地替换。
+3. **验证并写入。** Runtime 拒绝空白、被截断、含工具调用或非文本输出的摘要，检查完整模型视图的估算用量确实下降，并检查事件 JSON 容量。`commit_compaction` 带 `last_seq` 和稳定的 `client_event_id`；Coordinator 在运行租约与对话锁保护下检查序号未变化、范围单调前进、工具配对、清除集合没有丢失、被替换内容确实缩短，再在同一事务里追加事件并更新 `compaction_seq`。清除集合为有序、无重复的保留区工具结果序号。事件保存 `through_seq`、`summary`、`cleared_tool_result_seqs`、`memory_index`、`prompt`、`tokens_before`、`tokens_after`、`provider`、`model` 和可选 `usage`；前后用量为同一字符估算单位，新摘要的 memory_index 为空，当前记忆由每次请求的动态快照提供。只清除工具结果时沿用旧摘要；生成新摘要时记录最新标题、目标快照。摘要请求不注入动态记忆、记忆工具正文换成读取入口，因此摘要不依赖记忆状态。相同标识和相同内容的重发返回原事件；不同内容复用标识返回冲突。序号或配置冲突时丢弃摘要，重新读取中心状态，最多重试 2 次；提交失败不应用本地替换。
 
 压缩指令针对协调角色编写，要求摘要保留：用户的目标和偏好、纠正与明确指令、做过的决定及理由、开过的 Thread（准确 Thread ID、设备、目录、当前状态和最后的结论）、尚未完成的事项及下一步。上一次的摘要也在被压缩的范围里，指令要求合并有效事实并更新状态，不编造标识符或执行结果。摘要请求失败按 5、15、45 秒重试；请求前必需的压缩失败走模型失败流程，收尾压缩失败保留诊断并正常 `finish`，已提交的工具清除仍然有效。普通请求明确上下文超限时，记录压缩前后的估算用量；只要完整视图缩短且仍有时间和模型调用预算，就重建上下文并继续尝试，多次超限时逐步减少保留比例。没有缩减空间返回 `context_overflow_no_progress`，恢复耗尽预算返回 `context_overflow_budget_exhausted`，失败回复不进入历史。轮内压缩后的崩溃恢复和调度都查看最后一条非压缩事件，压缩记录不会遮蔽待执行工具或待分析的结果。
 
@@ -227,11 +227,11 @@ Project 标题或目标被修改后，新的系统提示词从下一次压缩起
 
 #### 6.4 项目记忆不放进前缀
 
-项目记忆可能在一轮中被修改。如果把它放进系统提示词，每次修改都会让缓存失效。系统提示词说明记忆工具和权限规则；每次模型请求的动态快照提供完整核心要求及有来源的相关片段。新摘要请求不注入动态记忆快照，记忆工具正文先替换为读取入口。旧摘要与记忆工具结果按知识代次和有效截止整体退出自动注入，原始历史保留。
+项目记忆可能在一轮中被修改。如果把它放进系统提示词，每次修改都会让缓存失效。系统提示词说明记忆工具和权限规则；每次模型请求的动态快照提供完整核心要求及有来源的相关片段。动态快照放在本批输入之前，同一批次内的多次请求共享前缀。新摘要请求不注入动态记忆快照，记忆工具正文先替换为读取入口，摘要因此不随记忆失效。记忆工具结果只在读到的条目版本过时后替换，原始历史保留。
 
 两次压缩之间的记忆修改有两种来源。Project Agent 自己用 `memory.remember/correct/retire/restore` 修改时，结果已经以工具结果的形式出现在对话里，不再发通知。用户在界面上新建或修改记忆时，Coordinator 在保存新版本的同一个事务里写一条 `memory_updated` 被动输入，`source_key = memory:{entry_id}:rev:{revision}`，内容是记忆 ID、标题、版本号和「由用户修改」。正文不放进通知，Project Agent 需要时用 `memory.read` 读取。
 
-这条通知不触发运行：用户改一条记忆，不值得为此启动 Runtime、花一次模型调用。它随下一批主动输入交给模型，所以 Project Agent 在处理用户下一条消息或下一轮 Thread 结束时，一定已经知道记忆变了。Project Agent 正在运行时，通知同样等到下一轮。停用和恢复同样发送状态通知，归档 Project 只读。自动召回、不可变快照与执行前检查已实现。已有结果或持久 nodes.exec 登记优先于快照检查；尚未提交的调用失效后保存无副作用错误，再由新上下文决定。中心配置、设备 SDK、密钥 CLI、查询绑定、后台生成、设置 UI 及旧摘要和工具结果的整体失效已接通；真实模型质量、SEA、其他系统和并发竞争专项未验证。
+这条通知不触发运行：用户改一条记忆，不值得为此启动 Runtime、花一次模型调用。它随下一批主动输入交给模型，所以 Project Agent 在处理用户下一条消息或下一轮 Thread 结束时，一定已经知道记忆变了。Project Agent 正在运行时，通知同样等到下一轮。停用和恢复同样发送状态通知，归档 Project 只读。自动召回、不可变快照与执行前检查已实现。已有结果或持久 nodes.exec 登记优先于快照检查；尚未提交的调用失效后保存无副作用错误，再由新上下文决定。中心配置、设备 SDK、密钥 CLI、查询绑定、后台生成、设置 UI 及按读取版本替换记忆工具结果已接通；真实模型质量、SEA、其他系统和并发竞争专项未验证。
 
 ### 7. 工具
 

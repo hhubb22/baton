@@ -3,9 +3,6 @@ import { clearedToolText, modelMessages, type Prompt } from './context.js'
 import { eventMessage, RuntimeError, type Bootstrap, type Event } from './protocol.js'
 
 export interface CompactionPayload {
-  memory_context_id?: string
-  knowledge_epoch?: number
-  expires_at?: string | null
   through_seq: number
   summary: string
   cleared_tool_result_seqs: number[]

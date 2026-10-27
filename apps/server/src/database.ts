@@ -33,7 +33,8 @@ export const databaseLayer = (config: DatabaseConfig) => {
     maxConnections: config.maxConnections ?? 10,
     connectTimeout: '5 seconds',
     acquireTimeout: '10 seconds',
-    ...(config.schema ? { startupParameters: { search_path: config.schema } } : {}),
+    // pgvector 的类型和运算符位于 public。
+    ...(config.schema ? { startupParameters: { search_path: `${config.schema},public` } } : {}),
   })
 }
 

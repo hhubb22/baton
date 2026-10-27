@@ -8,9 +8,9 @@ import { contextualRuntimeRequest } from '../testing/project-context.ts'
 import * as projects from './projects.ts'
 import { runtimeRequest } from './runtime.ts'
 import { scheduleMemoryJobs } from './memory-jobs.ts'
-import { listProjectMemory } from './memory/index.ts'
+import { changeProjectMemory, listProjectMemory, writeProjectMemory } from './memory/index.ts'
 
-it('registers the final reply before finish and commits source-bound background progress independently', async () => {
+it('registers the final reply before finish, backs off attempts without progress and commits proposals independently', async () => {
   await withTestDatabase(async ({ run }) => {
     const node = await seedNode(run, {
       report: {
@@ -45,6 +45,22 @@ it('registers the final reply before finish and commits source-bound background 
     const rpc = (operation: P.ProjectRuntimeRequest['operation'], extra: Partial<P.ProjectRuntimeRequest> = {}) =>
       run(contextualRuntimeRequest(node.source, { type: 'project_runtime.request', ...identity, operation, ...extra }))
     await rpc('claim_inputs', { last_seq: 0 })
+    // 停用发生在用户消息之后，后台不能凭这条旧消息把停用的断言写回。
+    const retired = await run(
+      writeProjectMemory(node.employeeId, project.id, undefined, {
+        operation_id: randomUUID(),
+        expected_revision: 0,
+        title: '旧入口',
+        content: '测试使用 npm test。',
+      }),
+    )
+    await run(
+      changeProjectMemory(node.employeeId, project.id, retired.id, {
+        operation_id: randomUUID(),
+        expected_revision: 1,
+        action: 'retire',
+      }),
+    )
     const response = {
       last_seq: 1,
       client_event_id: 'final',
@@ -67,19 +83,39 @@ it('registers the final reply before finish and commits source-bound background 
     expect(jobs).toEqual([{ state: 'pending', through_seq: 2 }])
     await rpc('finish')
     await rpc('stopped')
-    await run(scheduleMemoryJobs())
-    const [background] = await run(projects.claimProjectCommands('project_memory_start'))
-    expect(background?.command.memory_kind).toBe('consolidation')
-    const memory = (operation: P.ProjectRuntimeRequest['operation'], payload?: P.ProjectRuntimeRequest['payload']) =>
-      run(
-        runtimeRequest(node.source, {
-          type: 'project_runtime.request',
-          run_id: background!.command.run_id,
-          lease_epoch: background!.command.lease_epoch,
-          operation,
-          ...(payload ? { payload } : {}),
-        }),
-      )
+    const sqlRun = <A, E>(query: (sql: SqlClient.SqlClient) => Effect.Effect<A, E>) =>
+      run(Effect.flatMap(SqlClient.SqlClient, query))
+    const claim = async () => {
+      await run(scheduleMemoryJobs())
+      const [background] = await run(projects.claimProjectCommands('project_memory_start'))
+      expect(background?.command.memory_kind).toBe('consolidation')
+      return (operation: P.ProjectRuntimeRequest['operation'], payload?: P.ProjectRuntimeRequest['payload']) =>
+        run(
+          runtimeRequest(node.source, {
+            type: 'project_runtime.request',
+            run_id: background!.command.run_id,
+            lease_epoch: background!.command.lease_epoch,
+            operation,
+            ...(payload ? { payload } : {}),
+          }),
+        )
+    }
+    const idle = await claim()
+    await idle('finish')
+    await idle('stopped')
+    const [waiting] = await sqlRun(
+      (sql) =>
+        sql<{
+          attempts: number
+          last_error: string
+          due: boolean
+        }>`SELECT attempts,last_error,next_attempt_at<=clock_timestamp() AS due FROM project_memory_jobs WHERE project_id=${project.id}`,
+    )
+    expect(waiting).toEqual({ attempts: 1, last_error: 'no_progress', due: false })
+    await sqlRun(
+      (sql) => sql`UPDATE project_memory_jobs SET next_attempt_at=clock_timestamp() WHERE project_id=${project.id}`,
+    )
+    const memory = await claim()
     const page = Schema.decodeUnknownSync(
       Schema.Struct({
         cursor_index: Schema.Int,
@@ -92,9 +128,22 @@ it('registers the final reply before finish and commits source-bound background 
           text: Schema.String,
           role: Schema.String,
         }),
+        context: Schema.Array(Schema.Struct({ id: Schema.String, source_hash: Schema.String, text: Schema.String })),
       }),
     )(await memory('read_sources'))
     expect(page.source.role).toBe('user')
+    expect(page.context.map((c) => c.text)).toEqual(['已确认测试入口。'])
+    const reply = page.context[0]!
+    const lookup = Schema.decodeUnknownSync(
+      Schema.Struct({ suppressed: Schema.Array(Schema.Struct({ item_id: Schema.String, kind: Schema.String })) }),
+    )(await memory('lookup_items', { query: '入口', max_results: 8, max_bytes: 32 * 1024 }))
+    expect(lookup.suppressed).toEqual([{ item_id: retired.id, kind: 'retired' }])
+    const evidence = {
+      source_id: page.source.id,
+      source_hash: page.source.source_hash,
+      start_byte: page.source.offset,
+      end_byte: page.source.next_offset,
+    }
     const commit = {
       cursor_index: page.cursor_index,
       cursor_offset: page.cursor_offset,
@@ -104,24 +153,44 @@ it('registers the final reply before finish and commits source-bound background 
           expected_revision: 0,
           content: { title: '测试入口', content: page.source.text, kind: 'lesson' },
           evidence: [
+            evidence,
             {
-              source_id: page.source.id,
-              source_hash: page.source.source_hash,
-              start_byte: page.source.offset,
-              end_byte: page.source.next_offset,
+              source_id: reply.id,
+              source_hash: reply.source_hash,
+              start_byte: 0,
+              end_byte: Buffer.byteLength(reply.text),
             },
           ],
         },
+        {
+          action: 'add',
+          expected_revision: 0,
+          content: { title: '旧入口', content: '测试使用 npm test。' },
+          evidence: [evidence],
+        },
+        { action: 'add', expected_revision: 0, content: { title: '无证据', content: '只引用回复。' }, evidence: [] },
       ],
     }
     const receipt = await memory('commit_chunk', commit)
+    expect(receipt).toMatchObject({
+      cursor_index: 1,
+      outcomes: [
+        { index: 0, revision: 1 },
+        { index: 1, rejected: 'source_suppressed' },
+        { index: 2, rejected: 'invalid_evidence' },
+      ],
+    })
     expect(await memory('commit_chunk', commit)).toEqual(receipt)
     await memory('commit_chunk', { cursor_index: 1, cursor_offset: 0, changes: [] })
     await memory('finish')
     await memory('stopped')
     const entries = await run(listProjectMemory(node.employeeId, project.id))
-    expect(entries.entries).toHaveLength(1)
-    expect(entries.entries![0]!.content).toBe('测试使用 pnpm test:unit。')
+    const learned = entries.entries!.filter((e) => e.status === 'active')
+    expect(learned.map((e) => [e.content, e.evidence.length])).toEqual([['测试使用 pnpm test:unit。', 2]])
+    const [author] = await sqlRun(
+      (sql) => sql<{ author: string }>`SELECT author FROM project_memory_revisions WHERE item_id=${learned[0]!.id}`,
+    )
+    expect(author).toEqual({ author: 'background' })
     const [state] = await run(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient

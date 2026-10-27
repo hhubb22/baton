@@ -31,8 +31,13 @@ test('consolidates a source with a local model and generates background and boun
       ],
     },
   ]
-  faux.setResponses([fauxAssistantMessage(JSON.stringify({ changes }))])
-  let committed = false,
+  // 第一次提交遇到修订冲突，Runtime 重新查询并整理一次后以 final 提交。
+  faux.setResponses([
+    fauxAssistantMessage(JSON.stringify({ changes: [] })),
+    fauxAssistantMessage(JSON.stringify({ changes })),
+  ])
+  const commits: unknown[] = []
+  let lookups = 0,
     finished = false
   const rpc = checkedRPC(async (request) => {
     let data: unknown
@@ -51,15 +56,31 @@ test('consolidates a source with a local model and generates background and boun
         }
         break
       case 'read_sources':
-        data = { done: false, cursor_index: 0, cursor_offset: 0, source }
+        data = {
+          done: false,
+          cursor_index: 0,
+          cursor_offset: 0,
+          source,
+          context: [
+            {
+              id: 'reply',
+              role: 'agent_report',
+              source_type: 'assistant',
+              source_hash: 'h',
+              text: '好的',
+              truncated: false,
+            },
+          ],
+        }
         break
       case 'lookup_items':
-        data = { entries: [] }
+        lookups++
+        data = { entries: [], suppressed: [] }
         break
       case 'commit_chunk':
-        assert.deepEqual((request.payload as { changes: unknown }).changes, changes)
-        committed = true
-        data = { done: true, cursor_index: 1, cursor_offset: 0 }
+        commits.push(request.payload)
+        if (commits.length === 1) return { type: 'project_runtime.result', ok: false, code: 'memory_conflict' }
+        data = { done: true, cursor_index: 1, cursor_offset: 0, outcomes: [{ index: 0, item_id: 'item', revision: 1 }] }
         break
       case 'finish':
         finished = true
@@ -71,7 +92,18 @@ test('consolidates a source with a local model and generates background and boun
     return { type: 'project_runtime.result', ok: true, data }
   })
   await runMemory(rpc, 8000, undefined, models)
-  assert.ok(committed && finished)
+  assert.ok(finished)
+  assert.equal(lookups, 2)
+  assert.deepEqual(
+    commits.map((c) => {
+      const { changes: proposed, final } = c as { changes: unknown; final?: boolean }
+      return { proposed, final }
+    }),
+    [
+      { proposed: [], final: undefined },
+      { proposed: changes, final: true },
+    ],
+  )
   const inputs: string[] = []
   const server = createServer(async (req, res) => {
     assert.equal(req.headers.authorization, undefined)

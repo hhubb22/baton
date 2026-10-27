@@ -164,8 +164,7 @@ test('50% 收尾生成摘要，复用原前缀及签名，新提示词与知识�
   assert.ok(compact.payload.tokens_after < compact.payload.tokens_before)
   assert.ok(compact.payload.usage)
   assert.equal(compact.payload.memory_index, '')
-  assert.equal(compact.payload.knowledge_epoch, b.knowledgeEpoch)
-  assert.equal(compact.payload.expires_at, null)
+  assert.equal(compact.payload.memory_context_id, undefined)
   assert.equal(compact.payload.prompt.title, 'Baton')
   assert.deepEqual(b.events.slice(0, original.length), original)
   const request = fixture.requests[0]

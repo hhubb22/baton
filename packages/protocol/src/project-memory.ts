@@ -207,9 +207,14 @@ export const MemoryRecallResult = Schema.Struct({
   degraded: Schema.Array(Text),
   algorithm: Text,
 })
+// 当前视图中记忆工具结果读到的条目版本；中心返回仍是当前版本的部分。
+export const MemoryItemVersion = Schema.Struct({ item_id: UUID, revision: Integer })
+export type MemoryItemVersion = typeof MemoryItemVersion.Type
+export const MEMORY_VIEW_REFS_MAX = 512
 export const PrepareMemoryContext = Schema.Struct({
   context_id: UUID,
   input_seq: NonNegativeInteger,
+  view_refs: Schema.optionalKey(Schema.Array(MemoryItemVersion).check(Schema.isMaxLength(MEMORY_VIEW_REFS_MAX))),
   core_tokens: NonNegativeInteger.check(Schema.isLessThanOrEqualTo(1500)),
   related_tokens: NonNegativeInteger.check(Schema.isLessThanOrEqualTo(3500)),
   max_bytes: NonNegativeInteger.check(Schema.isBetween({ minimum: 1024, maximum: 40960 })),
@@ -228,10 +233,11 @@ export const MemoryContext = Schema.Struct({
     related_tokens: NonNegativeInteger,
     max_bytes: NonNegativeInteger,
   }),
-  knowledge_epoch: NonNegativeInteger,
+  core_epoch: NonNegativeInteger,
   expires_at: Schema.NullOr(Timestamp),
   content: Text,
   memory_refs: Schema.Array(MemoryReference),
+  view_refs: Schema.Array(MemoryItemVersion),
   degraded: Schema.Array(Text),
   core_complete: Schema.Boolean,
   query: Text,

@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { Effect, Schema } from 'effect'
+import { Effect, Result, Schema } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import * as P from '@baton/protocol'
-import type { NodeSource } from '../errors.ts'
+import { AppError, type NodeSource } from '../errors.ts'
 import { canonical } from '../json.ts'
 import { lockNodeSource, revalidateNodeSource } from '../nodes.ts'
 import {
@@ -14,7 +14,8 @@ import {
   type ProjectBinding,
 } from './store.ts'
 import {
-  applyChange,
+  executeChange,
+  planChange,
   recall,
   readProjectMemory,
   sourcePage,
@@ -102,9 +103,10 @@ export const scheduleMemoryJobs = Effect.fn('scheduleMemoryJobs')(function* () {
           continue
         }
         if (j.status !== 'active' || !j.due) continue
+        // 整理按批次顺序执行；永久停放的批次不阻塞后续批次。
         if (j.kind === 'consolidation') {
           const earlier =
-            yield* sql`SELECT 1 FROM project_memory_jobs WHERE project_id=${job.project_id} AND kind='consolidation' AND input_seq<(SELECT input_seq FROM project_memory_jobs WHERE id=${job.id}) AND state NOT IN ('completed','cancelled') LIMIT 1`
+            yield* sql`SELECT 1 FROM project_memory_jobs WHERE project_id=${job.project_id} AND kind='consolidation' AND input_seq<(SELECT input_seq FROM project_memory_jobs WHERE id=${job.id}) AND state NOT IN ('completed','cancelled') AND next_attempt_at<>'infinity' LIMIT 1`
           if (earlier.length) continue
         }
         const foreground =
@@ -172,8 +174,11 @@ const Proposal = Schema.Struct({
 const Chunk = Schema.Struct({
   ...Cursor,
   changes: Schema.Array(Proposal).check(Schema.isMaxLength(16)),
+  // 未置位时，任一提案遇到修订冲突会撤回整片，让 Runtime 用最新条目重新整理一次。
+  final: Schema.optionalKey(Schema.Boolean),
   usage: Schema.optionalKey(Schema.Json),
 })
+type Outcome = { index: number; item_id: string; revision: number } | { index: number; rejected: string }
 const operationId = (identity: string) => {
   const h = createHash('sha256').update(identity).digest('hex')
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-5${h.slice(13, 16)}-a${h.slice(17, 20)}-${h.slice(20, 32)}`
@@ -185,17 +190,75 @@ interface Job {
   kind: string
   provider: string
   model: string
+  input_seq: number
   through_seq: number
   cursor_index: number
   cursor_offset: number
   source_ids: string[]
   state: string
+  attempts: number
 }
 const readChunk = Effect.fnUntraced(function* (j: Job) {
   const id = j.source_ids[j.cursor_index]
   if (!id) return { done: true as const, cursor_index: j.cursor_index, cursor_offset: j.cursor_offset }
   const source = yield* sourcePage(j.employee_id, j.project_id, id, j.cursor_offset, 32 * 1024)
   return { done: false as const, cursor_index: j.cursor_index, cursor_offset: j.cursor_offset, source }
+})
+// 这些失败与分片内容有关；同一分片连续第三次失败时跳过它并记录原因，后续批次不再被它阻塞。
+const CHUNK_FAILURES = [
+  'invalid_memory_response',
+  'invalid_evidence',
+  'too_large',
+  'model_call_budget_exhausted',
+  'no_progress',
+]
+const skipChunk = Effect.fnUntraced(function* (j: Job, attemptId: string, reason: string) {
+  const sql = yield* SqlClient.SqlClient
+  const page = yield* readChunk(j)
+  if (page.done) return
+  const nextIndex = j.cursor_index + (page.source.has_more ? 0 : 1),
+    nextOffset = page.source.has_more ? page.source.next_offset : 0,
+    done = nextIndex >= j.source_ids.length
+  const result = { cursor_index: nextIndex, cursor_offset: nextOffset, done, outcomes: [], skipped: reason }
+  yield* sql`INSERT INTO project_memory_chunks(job_id,cursor_index,cursor_offset,attempt_id,request_hash,result) VALUES(${j.id},${j.cursor_index},${j.cursor_offset},${attemptId},'',${JSON.stringify(result)}::jsonb)`
+  yield* sql`UPDATE project_memory_jobs SET cursor_index=${nextIndex},cursor_offset=${nextOffset},state=CASE WHEN ${done} THEN 'completed' ELSE state END,last_error=${reason},attempts=0,updated_at=clock_timestamp() WHERE id=${j.id}`
+})
+const CONTEXT_SOURCE_BYTES = 4096,
+  CONTEXT_TOTAL_BYTES = 24 * 1024
+// 同批次的其他来源和批次前最近一条助手回复，作为当前分片的只读上下文；每条从开头截取。
+const readContext = Effect.fnUntraced(function* (j: Job, currentId: string) {
+  const sql = yield* SqlClient.SqlClient
+  const rows = yield* sql<{
+    id: string
+    role: string
+    source_type: string
+    source_hash: string
+    text: string
+  }>`SELECT id,role,source_type,source_hash,text FROM project_memory_sources WHERE employee_id=${j.employee_id} AND project_id=${j.project_id} AND id<>${currentId} AND (id=ANY(${j.source_ids}::uuid[]) OR id=(SELECT id FROM project_memory_sources WHERE employee_id=${j.employee_id} AND project_id=${j.project_id} AND source_type='assistant' AND source_seq<${j.input_seq} ORDER BY source_seq DESC LIMIT 1)) ORDER BY COALESCE(array_position(${j.source_ids}::uuid[],id),0)`
+  const context = []
+  let total = 0
+  for (const row of rows) {
+    const bytes = Buffer.from(row.text)
+    let end = Math.min(bytes.length, CONTEXT_SOURCE_BYTES, CONTEXT_TOTAL_BYTES - total)
+    while (end > 0 && end < bytes.length && (bytes[end]! & 0xc0) === 0x80) end--
+    if (end <= 0) break
+    total += end
+    context.push({ ...row, text: bytes.subarray(0, end).toString(), truncated: end < bytes.length })
+  }
+  return context
+})
+// 只返回未释放的停用和纠正断言，供整理避免重新写入。
+const suppressedAssertions = Effect.fnUntraced(function* (j: Job) {
+  const sql = yield* SqlClient.SqlClient
+  return yield* sql<{
+    item_id: string
+    revision: number
+    kind: string
+    title: string
+    content: string
+    conditions: string
+    semantic_key: string
+  }>`SELECT x.item_id,x.revision::float8 AS revision,x.kind,r.title,left(r.content,1024) AS content,r.conditions,r.semantic_key FROM project_memory_suppressions x JOIN project_memory_revisions r ON r.item_id=x.item_id AND r.revision=x.revision WHERE x.employee_id=${j.employee_id} AND x.project_id=${j.project_id} AND x.released_at IS NULL ORDER BY x.created_at DESC LIMIT 32`
 })
 export const memoryRuntimeRequest = Effect.fn('memoryRuntimeRequest')(function* (
   source: NodeSource,
@@ -223,7 +286,7 @@ export const memoryRuntimeRequest = Effect.fn('memoryRuntimeRequest')(function* 
         return {}
       }
       const [j] =
-        yield* sql<Job>`SELECT j.id,j.employee_id,j.project_id,j.kind,r.provider,r.model,j.through_seq::float8 AS through_seq,j.cursor_index,j.cursor_offset,j.source_ids,j.state FROM project_memory_jobs j JOIN agent_runs r ON r.id=j.attempt_id JOIN projects p ON p.id=j.project_id WHERE r.id=${request.run_id} AND r.lease_epoch=${request.lease_epoch} AND j.claim_epoch=${request.lease_epoch} AND r.memory_claim_until>clock_timestamp() AND r.stop_requested_at IS NULL AND p.status='active' AND j.state IN ('claimed','running','completed')`
+        yield* sql<Job>`SELECT j.id,j.employee_id,j.project_id,j.kind,r.provider,r.model,j.input_seq::float8 AS input_seq,j.through_seq::float8 AS through_seq,j.cursor_index,j.cursor_offset,j.source_ids,j.state,j.attempts FROM project_memory_jobs j JOIN agent_runs r ON r.id=j.attempt_id JOIN projects p ON p.id=j.project_id WHERE r.id=${request.run_id} AND r.lease_epoch=${request.lease_epoch} AND j.claim_epoch=${request.lease_epoch} AND r.memory_claim_until>clock_timestamp() AND r.stop_requested_at IS NULL AND p.status='active' AND j.state IN ('claimed','running','completed')`
       if (!j) return yield* Effect.fail(projectError('claim_lost'))
       let result: unknown = {}
       switch (request.operation) {
@@ -248,7 +311,8 @@ export const memoryRuntimeRequest = Effect.fn('memoryRuntimeRequest')(function* 
           break
         case 'read_sources':
           if (j.kind !== 'consolidation') return yield* Effect.fail(projectError('invalid', 422))
-          result = yield* readChunk(j)
+          const page = yield* readChunk(j)
+          result = page.done ? page : { ...page, context: yield* readContext(j, page.source.id) }
           break
         case 'lookup_items': {
           const q = yield* projectDecode(P.MemoryRecallInput, request.payload)
@@ -256,7 +320,7 @@ export const memoryRuntimeRequest = Effect.fn('memoryRuntimeRequest')(function* 
           const items = []
           for (const hit of matches.entries)
             if (hit.item) items.push(yield* readProjectMemory(j.employee_id, j.project_id, hit.item.id))
-          result = { matches, items }
+          result = { matches, items, suppressed: yield* suppressedAssertions(j) }
           break
         }
         case 'commit_chunk': {
@@ -279,32 +343,61 @@ export const memoryRuntimeRequest = Effect.fn('memoryRuntimeRequest')(function* 
             result = { done: true }
             break
           }
+          const visible = new Map([
+            [
+              page.source.id,
+              { hash: page.source.source_hash, start: page.source.offset, end: page.source.next_offset },
+            ],
+            ...(yield* readContext(j, page.source.id)).map(
+              (c) => [c.id, { hash: c.source_hash, start: 0, end: Buffer.byteLength(c.text) }] as const,
+            ),
+          ])
+          // 每条提案单独校验；被拒的提案记录原因，不阻止同片其他提案和游标推进。
+          const outcomes: Outcome[] = []
           for (const [index, change] of chunk.changes.entries()) {
-            if (
-              page.source.suppressed ||
-              !change.evidence.length ||
-              change.evidence.some(
-                (e) =>
-                  e.source_id !== page.source.id ||
-                  e.source_hash !== page.source.source_hash ||
-                  e.start_byte < page.source.offset ||
-                  e.end_byte > page.source.next_offset,
-              )
+            const rejected = page.source.suppressed
+              ? 'source_suppressed'
+              : !change.evidence.some((e) => e.source_id === page.source.id) ||
+                  change.evidence.some((e) => {
+                    const v = visible.get(e.source_id)
+                    return !v || e.source_hash !== v.hash || e.start_byte < v.start || e.end_byte > v.end
+                  })
+                ? 'invalid_evidence'
+                : change.content && Buffer.byteLength(JSON.stringify(change.content)) > 8192
+                  ? 'too_large'
+                  : undefined
+            if (rejected) {
+              outcomes.push({ index, rejected })
+              continue
+            }
+            const plan = yield* Effect.result(
+              planChange(
+                j.employee_id,
+                j.project_id,
+                { type: 'background', throughSeq: j.through_seq },
+                { ...change, operation_id: operationId(`${j.id}:${j.cursor_index}:${j.cursor_offset}:${index}`) },
+              ),
             )
-              return yield* Effect.fail(projectError('invalid_evidence', 422))
-            if (change.content && Buffer.byteLength(JSON.stringify(change.content)) > 8192)
-              return yield* Effect.fail(projectError('too_large', 413))
-            yield* applyChange(
-              j.employee_id,
-              j.project_id,
-              { type: 'background', throughSeq: j.through_seq },
-              { ...change, operation_id: operationId(`${j.id}:${j.cursor_index}:${j.cursor_offset}:${index}`) },
-            )
+            if (Result.isFailure(plan)) {
+              const error = plan.failure
+              if (!(error instanceof AppError) || error.status >= 500 || error.code === 'project_archived')
+                return yield* Effect.fail(error)
+              if (error.code === 'memory_conflict' && !chunk.final) return yield* Effect.fail(error)
+              outcomes.push({ index, rejected: error.code })
+              continue
+            }
+            const item = yield* executeChange(plan.success)
+            outcomes.push({ index, item_id: item.id, revision: item.revision })
           }
           const nextIndex = j.cursor_index + (page.source.has_more ? 0 : 1),
             nextOffset = page.source.has_more ? page.source.next_offset : 0
-          result = { cursor_index: nextIndex, cursor_offset: nextOffset, done: nextIndex >= j.source_ids.length }
-          yield* sql`INSERT INTO project_memory_chunks(job_id,cursor_index,cursor_offset,request_hash,result) VALUES(${j.id},${j.cursor_index},${j.cursor_offset},${hash},${JSON.stringify(result)}::jsonb)`
+          result = {
+            cursor_index: nextIndex,
+            cursor_offset: nextOffset,
+            done: nextIndex >= j.source_ids.length,
+            outcomes,
+          }
+          yield* sql`INSERT INTO project_memory_chunks(job_id,cursor_index,cursor_offset,attempt_id,request_hash,result) VALUES(${j.id},${j.cursor_index},${j.cursor_offset},${request.run_id},${hash},${JSON.stringify(result)}::jsonb)`
           yield* sql`UPDATE project_memory_jobs SET cursor_index=${nextIndex},cursor_offset=${nextOffset},state=CASE WHEN ${nextIndex >= j.source_ids.length} THEN 'completed' ELSE state END,usage=${chunk.usage ? JSON.stringify(chunk.usage) : null}::jsonb,last_error='',attempts=0,updated_at=clock_timestamp() WHERE id=${j.id}`
           break
         }
@@ -347,10 +440,19 @@ export const memoryRuntimeRequest = Effect.fn('memoryRuntimeRequest')(function* 
           yield* deferEmbedding(j.employee_id, j.project_id, input, input.diagnostic)
           break
         }
-        case 'finish':
-          yield* sql`UPDATE project_memory_jobs SET state=CASE WHEN kind='embedding' OR cursor_index>=cardinality(source_ids) THEN 'completed' ELSE state END WHERE id=${j.id}`
-          yield* releaseMemoryAttempt(j.id, 'attempt_finished')
+        case 'finish': {
+          // 未完成且本次尝试没有提交任何分片时退避重试，避免同一片反复失败时占住后续批次。
+          const [state] = yield* sql<{
+            completed: boolean
+            progressed: boolean
+          }>`UPDATE project_memory_jobs SET state=CASE WHEN kind='embedding' OR cursor_index>=cardinality(source_ids) THEN 'completed' ELSE state END WHERE id=${j.id} RETURNING state='completed' AS completed,EXISTS(SELECT 1 FROM project_memory_chunks WHERE job_id=${j.id} AND attempt_id=${request.run_id}) AS progressed`
+          const stalled = !state!.completed && !state!.progressed
+          if (stalled && j.kind === 'consolidation' && j.attempts >= 2) {
+            yield* skipChunk(j, request.run_id, 'no_progress')
+            yield* releaseMemoryAttempt(j.id, 'chunk_skipped')
+          } else yield* releaseMemoryAttempt(j.id, stalled ? 'no_progress' : 'attempt_finished', stalled)
           break
+        }
         case 'start_failed':
         case 'report_failure': {
           const reason = request.reason ?? 'memory_unavailable'
@@ -365,6 +467,11 @@ export const memoryRuntimeRequest = Effect.fn('memoryRuntimeRequest')(function* 
             'invalid_evidence',
             'too_large',
           ].includes(reason)
+          if (j.kind === 'consolidation' && CHUNK_FAILURES.includes(reason) && j.attempts >= 2) {
+            yield* skipChunk(j, request.run_id, reason)
+            yield* releaseMemoryAttempt(j.id, 'chunk_skipped')
+            break
+          }
           yield* releaseMemoryAttempt(j.id, reason, retry)
           if (!retry && reason !== 'login_required')
             yield* sql`UPDATE project_memory_jobs SET next_attempt_at='infinity',last_error=${reason} WHERE id=${j.id}`

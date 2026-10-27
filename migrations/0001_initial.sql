@@ -1,3 +1,6 @@
+-- 扩展是数据库级对象，固定装在 public；连接的 search_path 包含 public。
+CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
+
 CREATE FUNCTION reject_project_history_mutation() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
@@ -293,6 +296,7 @@ CREATE TABLE project_memory_chunks (
     job_id uuid NOT NULL REFERENCES project_memory_jobs(id),
     cursor_index integer NOT NULL,
     cursor_offset integer NOT NULL,
+    attempt_id uuid NOT NULL,
     request_hash text NOT NULL,
     result jsonb NOT NULL,
     PRIMARY KEY(job_id,cursor_index,cursor_offset)
@@ -301,7 +305,7 @@ CREATE INDEX project_memory_jobs_due ON project_memory_jobs(next_attempt_at) WHE
 
 CREATE TABLE project_memory_state (
  employee_id uuid NOT NULL, project_id uuid NOT NULL, knowledge_epoch bigint NOT NULL DEFAULT 0,
- search_generation bigint NOT NULL DEFAULT 0, PRIMARY KEY(employee_id,project_id)
+ core_epoch bigint NOT NULL DEFAULT 0, search_generation bigint NOT NULL DEFAULT 0, PRIMARY KEY(employee_id,project_id)
 );
 CREATE TABLE project_memory_items (
  id uuid PRIMARY KEY, employee_id uuid NOT NULL, project_id uuid NOT NULL,
@@ -370,18 +374,18 @@ CREATE INDEX project_memory_search_terms ON project_memory_search_documents USIN
 CREATE TABLE project_memory_embeddings (
  employee_id uuid NOT NULL, project_id uuid NOT NULL, item_id uuid NOT NULL, revision bigint NOT NULL, config_id uuid NOT NULL,
  embedding_text_hash text NOT NULL, state text NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','ready')),
- dimensions integer CHECK(dimensions BETWEEN 1 AND 8192), vector double precision[],
+ dimensions integer CHECK(dimensions BETWEEN 1 AND 8192), embedding vector,
  diagnostic text NOT NULL DEFAULT '' CHECK(octet_length(diagnostic)<=256), attempts integer NOT NULL DEFAULT 0,
  next_attempt_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
  PRIMARY KEY(employee_id,project_id,item_id,revision,config_id),
- CHECK((state='ready')=(vector IS NOT NULL AND dimensions IS NOT NULL)),
- CHECK(vector IS NULL OR (array_ndims(vector)=1 AND array_length(vector,1)=dimensions)),
+ CHECK((state='ready')=(embedding IS NOT NULL AND dimensions IS NOT NULL)),
+ CHECK(embedding IS NULL OR vector_dims(embedding)=dimensions),
  FOREIGN KEY(employee_id,project_id,item_id,revision) REFERENCES project_memory_revisions(employee_id,project_id,item_id,revision)
 );
 CREATE TABLE project_memory_contexts (
  context_id uuid PRIMARY KEY, employee_id uuid NOT NULL, project_id uuid NOT NULL,
  conversation_id uuid NOT NULL, last_seq bigint NOT NULL, input_seq bigint NOT NULL,
- knowledge_epoch bigint NOT NULL, expires_at timestamptz, request_hash text NOT NULL,
+ core_epoch bigint NOT NULL, expires_at timestamptz, request_hash text NOT NULL,
  snapshot jsonb NOT NULL, content_hash text NOT NULL, created_at timestamptz NOT NULL DEFAULT now()
 );
 

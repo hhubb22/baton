@@ -58,7 +58,7 @@ pnpm --filter @baton/batond test
 pnpm test:e2e
 ```
 
-中心数据库测试使用本机 PostgreSQL，默认连接 `postgres://postgres:baton@127.0.0.1:5432/baton_test?sslmode=disable`；未启动时尝试通过 `pg_ctl` 拉起 `~/.baton-postgres`，可用 `BATON_TEST_DATABASE_URL` 覆盖。各夹具创建和清理独立 schema。
+中心数据库测试使用装有 pgvector 的本机 PostgreSQL，默认连接 `postgres://postgres:baton@127.0.0.1:5432/baton_test?sslmode=disable`；未启动时尝试通过 `pg_ctl` 拉起 `~/.baton-postgres`，可用 `BATON_TEST_DATABASE_URL` 覆盖。各夹具创建和清理独立 schema，`search_path` 为夹具 schema 加 `public`，`vector` 扩展固定装在 `public`。
 
 Project Agent Runtime 与网页验证：
 

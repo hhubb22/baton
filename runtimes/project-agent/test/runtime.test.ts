@@ -7,7 +7,7 @@ import { once } from 'node:events'
 import { fauxAssistantMessage, fauxToolCall } from '@earendil-works/pi-ai'
 import { frames, writeFrame } from '../src/stdio.js'
 import { modelMessages, IDLE_MS, RUN_MS, RETRIES } from '../src/runtime.js'
-import { canonical, RuntimeError } from '../src/protocol.js'
+import { canonical, RuntimeError, type Event } from '../src/protocol.js'
 import { Backend, setup, assistant, input } from './fixture.js'
 import { toolDefinitions } from '../src/tools.js'
 
@@ -137,7 +137,7 @@ test('每次模型请求自动注入当前快照，失效输出刷新后重试�
   const fixture = setup(backend, [
     () => {
       backend.memory = '用户要求：不要跳过测试，纯文档也要检查格式。'
-      backend.knowledgeEpoch++
+      backend.coreEpoch++
       return assistant(true)
     },
     () => assistant(true),
@@ -147,17 +147,22 @@ test('每次模型请求自动注入当前快照，失效输出刷新后重试�
   assert.equal(fixture.requests.length, 3)
   assert.match(JSON.stringify(fixture.requests[0].context), /纯文档改动可以例外/)
   for (const request of fixture.requests.slice(1)) {
-    const memories = request.context.messages.filter(
-      (message: any) => typeof message.content === 'string' && message.content.startsWith('用户要求：'),
+    const texts = request.context.messages.flatMap((message: any) =>
+      typeof message.content === 'string'
+        ? [message.content]
+        : message.content.flatMap((c: any) => (c.type === 'text' ? [c.text] : [])),
     )
+    const memories = texts.filter((text: string) => text.startsWith('用户要求：'))
     assert.equal(memories.length, 1)
-    assert.match(memories[0].content, /纯文档也要检查格式/)
+    assert.match(memories[0], /纯文档也要检查格式/)
+    // 记忆放在本批输入之前，系统提示和更早的历史保持同一前缀。
+    assert.equal(request.context.messages[1].content[0].text, memories[0])
     assert.doesNotMatch(JSON.stringify(request.context), /纯文档改动可以例外/)
   }
   assert.equal(backend.effects, 1)
   assert.equal(backend.events.filter((e) => e.kind === 'assistant').length, 2)
   for (const event of backend.events.filter((e) => e.kind === 'assistant')) {
-    assert.equal(backend.contexts.get(event.payload.memory_context_id)?.knowledge_epoch, backend.knowledgeEpoch)
+    assert.equal(backend.contexts.get(event.payload.memory_context_id)?.core_epoch, backend.coreEpoch)
   }
 })
 
@@ -166,7 +171,7 @@ test('pending 执行跨记忆变化和 Runtime 恢复先续查原 Thread，再�
   backend.memory = '原要求'
   backend.onPoll = async () => {
     backend.memory = '新要求'
-    backend.knowledgeEpoch++
+    backend.coreEpoch++
     throw new RuntimeError('unavailable')
   }
   await assert.rejects(setup(backend, [() => fauxAssistantMessage([execCall()])]).runtime.start(), {
@@ -895,6 +900,69 @@ test('已保存的提示词快照跨标题变更保持稳定，未知版本拒�
   assert.deepEqual(before, modelMessages(boot, events))
   boot.prompt_version = '99'
   assert.throws(() => modelMessages(boot, []))
+})
+
+test('记忆变化只替换读到旧版本的记忆工具结果，摘要保留，记忆块位于本批输入之前', () => {
+  const b = new Backend(),
+    boot = b.boot()
+  boot.compaction = {
+    seq: 1,
+    kind: 'compaction',
+    payload: { through_seq: 0, summary: '已确认部署目录。', cleared_tool_result_seqs: [], memory_index: '' },
+  }
+  const recall = (seq: number, id: string, revision: number, mode = 'current'): Event => ({
+    seq,
+    kind: 'tool_result',
+    payload: {
+      format: 'pi-ai/1',
+      derived: true,
+      memory_refs: [{ item_id: id, revision, mode }],
+      message: {
+        role: 'toolResult',
+        toolCallId: `call-${seq}`,
+        toolName: 'memory.recall',
+        content: [{ type: 'text', text: `结果 ${seq}` }],
+        isError: false,
+        timestamp: 0,
+      },
+    },
+  })
+  const call = (seq: number): Event => ({
+    seq,
+    kind: 'assistant',
+    payload: {
+      format: 'pi-ai/1',
+      message: fauxAssistantMessage([fauxToolCall('memory.recall', { query: 'deploy' }, { id: `call-${seq + 1}` })]),
+    },
+  })
+  const later: Event = { ...input(), seq: 8 }
+  const events = [
+    { ...input(), seq: 2 },
+    call(3),
+    recall(4, 'a', 1),
+    call(5),
+    recall(6, 'b', 1, 'history'),
+    call(7),
+    later,
+  ]
+  const text = (messages: ReturnType<typeof modelMessages>) => JSON.stringify(messages)
+  const fresh = modelMessages(boot, events, {
+    view_refs: [{ item_id: 'a', revision: 1 }],
+    content: '记忆块',
+    input_seq: 8,
+  })
+  assert.match(text(fresh), /已确认部署目录/)
+  assert.match(text(fresh), /结果 4/)
+  const last = fresh.at(-1) as { content: { text: string }[] }
+  assert.deepEqual(
+    last.content.map((c) => c.text),
+    ['记忆块', '请开启 Thread 并验证结果'],
+  )
+  const stale = modelMessages(boot, events, { view_refs: [], content: '记忆块', input_seq: 8 })
+  assert.match(text(stale), /已确认部署目录/)
+  assert.doesNotMatch(text(stale), /结果 4/)
+  assert.match(text(stale), /结果 6/)
+  assert.deepEqual(fresh.slice(0, 3), stale.slice(0, 3))
 })
 
 test('模型文本先形成临时预览，完整回复保存后才进入历史', async () => {
