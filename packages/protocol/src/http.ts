@@ -23,14 +23,31 @@ export type BrowserThreadOutput = typeof BrowserThreadOutput.Type
 
 export const EmptyInput = Schema.Struct({}).check(Schema.makeFilter((value) => !Array.isArray(value)))
 export const BrowserReady = Schema.Struct({ type: Schema.Literal('ready') })
-export const BrowserThreadChanged = Schema.Struct({ type: Schema.Literal('thread.changed') })
+export const BrowserThreadChanged = Schema.Struct({
+  type: Schema.Literal('thread.changed'),
+  thread_id: UUID,
+  change: Schema.Literal('detail'),
+})
+export const BrowserProjectChanged = Schema.Struct({
+  type: Schema.Literal('project.changed'),
+  project_id: UUID,
+  change: Schema.Literal('detail'),
+})
+export const NodesChanged = Schema.Struct({ type: Schema.Literal('nodes.changed'), node_id: UUID })
 export const DevicesChanged = Schema.Struct({
   type: Schema.Literal('devices.changed'),
   node_id: UUID,
   report_version: NonNegativeInteger,
 })
 export type DevicesChanged = typeof DevicesChanged.Type
-export const BrowserEvent = Schema.Union([BrowserReady, BrowserThreadChanged, DevicesChanged, BrowserThreadOutput])
+export const BrowserEvent = Schema.Union([
+  BrowserReady,
+  BrowserThreadChanged,
+  BrowserProjectChanged,
+  NodesChanged,
+  DevicesChanged,
+  BrowserThreadOutput,
+])
 export type BrowserEvent = typeof BrowserEvent.Type
 
 // 查询参数保留 URL 上的字符串表示，转换为业务数值由 HTTP handler 完成。
@@ -102,6 +119,8 @@ export const httpSchemas = {
   EmptyInput,
   BrowserReady,
   BrowserThreadChanged,
+  BrowserProjectChanged,
+  NodesChanged,
   DevicesChanged,
   ThreadListQuery,
   ThreadTimelineQuery,

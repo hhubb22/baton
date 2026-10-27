@@ -23,6 +23,7 @@ import {
 import type { DownloadsOptions } from './downloads.ts'
 import { createRevocationCompensator } from './control-maintenance.ts'
 import { cookieToken, httpApplication } from './http/index.ts'
+import { notifyThreadChanged } from './notifications.ts'
 
 export interface ServerOptions {
   readonly host?: string
@@ -134,7 +135,7 @@ export const startServer = (
                         capabilities: body.capabilities ?? [],
                       }),
                     )
-                    gateway.notify(source.employee_id, { type: 'thread.changed' })
+                    gateway.notify(source.employee_id, { type: 'nodes.changed', node_id: source.node_id })
                     return { type: 'node.sync_result', ok: true }
                   case 'node.upgrade_state': {
                     try {
@@ -161,8 +162,10 @@ export const startServer = (
                   }
                   case 'project_runtime.request': {
                     try {
-                      const data = await run('project_request', Projects.runtimeRequest(source, body))
-                      gateway.notify(source.employee_id, { type: 'thread.changed' })
+                      const data = await run(
+                        'project_request',
+                        Projects.runtimeRequest(source, body, (event) => gateway.notify(source.employee_id, event)),
+                      )
                       return Schema.decodeUnknownSync(P.ProjectRuntimeResult)({
                         type: 'project_runtime.result',
                         ok: true,
@@ -178,12 +181,28 @@ export const startServer = (
                   }
                   case 'thread.command_result':
                     if (!envelope.correlation_id) throw new AppError(400, 'missing_correlation')
-                    await run('receipt', Threads.processReceipt(source, envelope.correlation_id, body))
-                    gateway.notify(source.employee_id, { type: 'thread.changed' })
+                    await run(
+                      'receipt',
+                      Threads.processReceipt(source, envelope.correlation_id, body).pipe(
+                        Effect.tap(() =>
+                          notifyThreadChanged(source.employee_id, body.thread_id, (event) =>
+                            gateway.notify(source.employee_id, event),
+                          ),
+                        ),
+                      ),
+                    )
                     return undefined
                   case 'thread.report': {
-                    const ack = await run('report', Threads.processReport(source, body))
-                    gateway.notify(source.employee_id, { type: 'thread.changed' })
+                    const ack = await run(
+                      'report',
+                      Threads.processReport(source, body).pipe(
+                        Effect.tap(() =>
+                          notifyThreadChanged(source.employee_id, body.thread_id, (event) =>
+                            gateway.notify(source.employee_id, event),
+                          ),
+                        ),
+                      ),
+                    )
                     return { ...ack }
                   }
                   default:

@@ -147,6 +147,7 @@ const toolRequest = Effect.fn('callProjectTool')(function* (
   source: NodeSource,
   b: ProjectBinding,
   request: P.ProjectRuntimeRequest,
+  changedThreads: Set<string>,
 ) {
   const sql = yield* SqlClient.SqlClient,
     id = request.tool_call_id ?? ''
@@ -241,6 +242,7 @@ const toolRequest = Effect.fn('callProjectTool')(function* (
         }),
       )
   if (!existingExec && !result.isError) yield* recordNodeBusiness(source)
+  if (result.changedThreadId) changedThreads.add(result.changedThreadId)
   if (result.pending) return result.value
   const payload = {
     format: 'pi-ai/1',
@@ -320,13 +322,26 @@ const readPendingTool = Effect.fn('readPendingProjectTool')(function* (
 export const runtimeRequest = Effect.fn('projectRuntimeRequest')(function* (
   source: NodeSource,
   input: P.ProjectRuntimeRequest,
+  notify?: (event: P.BrowserEvent) => void,
 ) {
   const request = yield* projectDecode(P.ProjectRuntimeRequest, input)
   if (request.lease_epoch < 1 || request.reason?.includes('\0')) return yield* Effect.fail(projectError('invalid', 422))
   const sql = yield* SqlClient.SqlClient
-  const memory =
-    yield* sql`SELECT 1 FROM agent_runs WHERE id=${request.run_id} AND employee_id=${source.employee_id} AND node_id=${source.node_id} AND memory_job_id IS NOT NULL`
-  if (memory.length) return yield* memoryRuntimeRequest(source, request)
+  const [run] = yield* sql<{
+    project_id: string
+    memory: boolean
+  }>`SELECT a.project_id,r.memory_job_id IS NOT NULL AS memory
+    FROM agent_runs r JOIN project_agents a ON a.id=r.agent_id
+    WHERE r.id=${request.run_id} AND r.employee_id=${source.employee_id} AND r.node_id=${source.node_id}`
+  const projectChanged = () => {
+    if (run) notify?.({ type: 'project.changed', project_id: run.project_id, change: 'detail' })
+  }
+  if (run?.memory) {
+    const response = yield* memoryRuntimeRequest(source, request)
+    projectChanged()
+    return response
+  }
+  const changedThreads = new Set<string>()
   if (request.operation === 'wait_tool') {
     const pending = yield* readPendingTool(source, request).pipe(
       Effect.mapError((error) => (error.code === 'node_source_rejected' ? leaseLost() : error)),
@@ -376,7 +391,7 @@ export const runtimeRequest = Effect.fn('projectRuntimeRequest')(function* (
           break
         case 'call_tool':
         case 'wait_tool':
-          data = yield* toolRequest(source, b, request)
+          data = yield* toolRequest(source, b, request, changedThreads)
           break
         case 'started':
         case 'renew': {
@@ -461,6 +476,8 @@ export const runtimeRequest = Effect.fn('projectRuntimeRequest')(function* (
     }),
   ).pipe(Effect.mapError((error) => (error.code === 'node_source_rejected' ? leaseLost() : error)))
   if (request.operation === 'preview') yield* saveProjectPreview(request.run_id, request.last_seq ?? 0, request.payload)
+  for (const threadId of changedThreads) notify?.({ type: 'thread.changed', thread_id: threadId, change: 'detail' })
+  projectChanged()
   return response
 })
 
@@ -484,6 +501,7 @@ interface ProjectToolExecution {
   pending?: boolean
   memoryRefs?: readonly (typeof P.MemoryReference.Type)[]
   consumeThreadId?: string
+  changedThreadId?: string
 }
 const pageFields = {
   offset: Schema.optionalKey(P.NonNegativeInteger),
@@ -760,7 +778,10 @@ const executeBusiness = Effect.fnUntraced(function* (
         },
         { ...source(c), executionTimeoutSeconds: a.execution_timeout_seconds ?? 7200 },
       )
-      return { value: { thread_id: r.thread.id, status: r.thread.status, read_tool: 'threads.get' } }
+      return {
+        changedThreadId: r.thread.id,
+        value: { thread_id: r.thread.id, status: r.thread.status, read_tool: 'threads.get' },
+      }
     }
     case 'threads.send': {
       const a = yield* strictDecode(schemas[name], args)
@@ -775,23 +796,29 @@ const executeBusiness = Effect.fnUntraced(function* (
         },
         source(c),
       )
-      return { value: { thread_id: a.thread_id, message_id: m.id, status: m.status, read_tool: 'threads.get' } }
+      return {
+        changedThreadId: a.thread_id,
+        value: { thread_id: a.thread_id, message_id: m.id, status: m.status, read_tool: 'threads.get' },
+      }
     }
     case 'threads.withdraw': {
       const a = yield* strictDecode(schemas[name], args)
       const t = yield* threads.withdraw(c.employeeId, a.thread_id, a.message_id, source(c))
-      return { value: { thread_id: t.id, message_id: a.message_id, status: t.status, read_tool: 'threads.get' } }
+      return {
+        changedThreadId: t.id,
+        value: { thread_id: t.id, message_id: a.message_id, status: t.status, read_tool: 'threads.get' },
+      }
     }
     case 'threads.resume': {
       const a = yield* strictDecode(schemas[name], args)
       const t = yield* threads.resume(c.employeeId, a.thread_id, source(c))
-      return { value: { thread_id: t.id, status: t.status, read_tool: 'threads.get' } }
+      return { changedThreadId: t.id, value: { thread_id: t.id, status: t.status, read_tool: 'threads.get' } }
     }
     case 'threads.stop':
     case 'threads.archive': {
       const a = yield* strictDecode(schemas[name], args)
       const t = yield* (name === 'threads.stop' ? threads.stop : threads.archive)(c.employeeId, a.thread_id, source(c))
-      return { value: { thread_id: t.id, status: t.status, read_tool: 'threads.get' } }
+      return { changedThreadId: t.id, value: { thread_id: t.id, status: t.status, read_tool: 'threads.get' } }
     }
     case 'threads.list': {
       const a = yield* strictDecode(schemas[name], args)
@@ -843,7 +870,8 @@ const executeBusiness = Effect.fnUntraced(function* (
             waitSeconds: a.wait_seconds ?? 30,
           },
         )
-      return pendingValue(yield* pendingExec(c))
+      const thread = yield* pendingExec(c)
+      return { ...pendingValue(thread), changedThreadId: thread.id }
     }
     case 'inbox.ask': {
       const a = yield* strictDecode(schemas[name], args)

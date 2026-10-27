@@ -14,13 +14,15 @@ import * as Threads from '../threads/index.ts'
 import type { HTTPOptions } from './options.ts'
 import { disabledDownloads, type Downloads } from '../downloads.ts'
 import { AppError } from '../errors.ts'
+import { notifyThreadChanged } from '../notifications.ts'
 import { projectHttpHandlers } from './projects.ts'
 import { readThreadOutput } from '../full-output.ts'
 import * as DeviceManagement from '../device-management.ts'
 import { cookieToken, httpBusiness, decodeResponse } from './security.ts'
 
 export const httpHandlers = (options: HTTPOptions, downloads?: Downloads) => {
-  const changed = (employeeId: string) => options.gateway().notify(employeeId, { type: 'thread.changed' })
+  const changed = (employeeId: string, threadId: string) =>
+    notifyThreadChanged(employeeId, threadId, (event) => options.gateway().notify(employeeId, event))
   const defaultDevice = (nodeId: string) =>
     Effect.gen(function* () {
       const { employee } = yield* CurrentBrowserSession
@@ -32,11 +34,11 @@ export const httpHandlers = (options: HTTPOptions, downloads?: Downloads) => {
     Effect.gen(function* () {
       const { employee } = yield* CurrentBrowserSession
       yield* operation(employee.id, threadId)
-      changed(employee.id)
+      yield* changed(employee.id, threadId)
       return yield* Threads.view({ employeeId: employee.id }, threadId)
     })
   return Layer.mergeAll(
-    projectHttpHandlers(),
+    projectHttpHandlers(options),
     HttpApiBuilder.group(BatonHttpApi, 'public', (handlers) =>
       handlers
         .handle('release', () => Effect.succeed(P.releaseMetadata()))
@@ -262,7 +264,7 @@ export const httpHandlers = (options: HTTPOptions, downloads?: Downloads) => {
             Effect.gen(function* () {
               const { employee } = yield* CurrentBrowserSession
               const result = yield* Threads.create(employee.id, payload)
-              changed(employee.id)
+              yield* changed(employee.id, result.thread.id)
               return result.created
                 ? { status: 201 as const, thread: result.thread }
                 : { status: 200 as const, thread: result.thread }
@@ -290,7 +292,7 @@ export const httpHandlers = (options: HTTPOptions, downloads?: Downloads) => {
             Effect.gen(function* () {
               const { employee } = yield* CurrentBrowserSession
               const message = yield* Threads.addMessage(employee.id, params.threadId, payload)
-              changed(employee.id)
+              yield* changed(employee.id, params.threadId)
               return message
             }),
           ),
@@ -300,7 +302,7 @@ export const httpHandlers = (options: HTTPOptions, downloads?: Downloads) => {
             Effect.gen(function* () {
               const { employee } = yield* CurrentBrowserSession
               yield* Threads.answer(employee.id, params.threadId, payload)
-              changed(employee.id)
+              yield* changed(employee.id, params.threadId)
               return yield* Threads.view({ employeeId: employee.id }, params.threadId)
             }),
           ),
@@ -309,7 +311,9 @@ export const httpHandlers = (options: HTTPOptions, downloads?: Downloads) => {
           httpBusiness(
             Effect.gen(function* () {
               const { employee } = yield* CurrentBrowserSession
-              return yield* Threads.withdraw(employee.id, params.threadId, params.messageId)
+              const result = yield* Threads.withdraw(employee.id, params.threadId, params.messageId)
+              yield* changed(employee.id, params.threadId)
+              return result
             }),
           ),
         )
@@ -321,6 +325,7 @@ export const httpHandlers = (options: HTTPOptions, downloads?: Downloads) => {
             Effect.gen(function* () {
               const { employee } = yield* CurrentBrowserSession
               yield* Threads.setModel(employee.id, params.threadId, payload)
+              yield* changed(employee.id, params.threadId)
               return yield* Threads.view({ employeeId: employee.id }, params.threadId)
             }),
           ),
@@ -331,7 +336,7 @@ export const httpHandlers = (options: HTTPOptions, downloads?: Downloads) => {
               const { employee } = yield* CurrentBrowserSession
               yield* Threads.setSettings(employee.id, params.threadId, payload)
               const result = yield* Threads.view({ employeeId: employee.id }, params.threadId)
-              changed(employee.id)
+              yield* changed(employee.id, params.threadId)
               return result
             }),
           ),

@@ -166,9 +166,10 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
   let timer: ReturnType<typeof setInterval> | null = null
   let socket: WebSocket | null = null
   let nodeRead: Promise<NodesDTO> | null = null
-  const emit = (...topics: Topic[]) => {
-    for (const listener of listeners) listener({ topics })
+  const publish = (event: ChangeEvent) => {
+    for (const listener of listeners) listener(event)
   }
+  const emit = (...topics: Topic[]) => publish({ topics })
   const transport = createTransport({
     ...options,
     onUnauthorized: () => {
@@ -234,7 +235,14 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
     socket = next
     next.onmessage = (event) => {
       if (socket !== next) return
-      let message: OutputResult & { type?: string; thread_id?: string; node_id?: string; report_version?: number }
+      let message: OutputResult & {
+        type?: string
+        thread_id?: string
+        project_id?: string
+        change?: string
+        node_id?: string
+        report_version?: number
+      }
       try {
         message = JSON.parse(String(event.data))
       } catch {
@@ -244,6 +252,10 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
         output.setConnection((subscription) => {
           if (socket === next && next.readyState === 1) next.send(JSON.stringify(subscription))
         })
+      }
+      if (message.type === 'nodes.changed') {
+        nodeRead = null
+        emit('devices', 'projects', 'threads', 'messages', 'inbox', 'operations', 'files')
       }
       if (
         message.type === 'devices.changed' &&
@@ -255,7 +267,21 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
         nodeRead = null
         emit('devices', 'files')
       }
-      if (message.type === 'thread.changed') emit('threads', 'messages', 'operations')
+      if (message.type === 'thread.changed' || message.type === 'project.changed') {
+        const type = message.type === 'thread.changed' ? 'thread' : 'project'
+        const id = type === 'thread' ? message.thread_id : message.project_id
+        const topics: Topic[] =
+          type === 'thread' ? ['threads', 'messages', 'operations'] : ['projects', 'inbox', 'operations']
+        if (
+          message.change === 'detail' &&
+          typeof id === 'string' &&
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+        ) {
+          publish({ topics, target: { type, id } })
+        } else {
+          emit(...topics)
+        }
+      }
       if (message.type === 'thread.output' && message.thread_id) output.receive(message.thread_id, message)
     }
     next.onclose = () => {

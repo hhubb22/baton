@@ -31,11 +31,12 @@ import type {
   Trace,
 } from './types'
 
-// 数据变化按主题通知，页面据此刷新对应的查询。
+// 数据变化按主题通知；带对象的通知只刷新该对象及共享列表。
 export type Topic = 'session' | 'devices' | 'projects' | 'threads' | 'messages' | 'inbox' | 'files' | 'operations'
 
 export interface ChangeEvent {
   topics: Topic[]
+  target?: { type: 'thread' | 'project'; id: ID }
 }
 
 export class ClientError extends Error {
@@ -60,6 +61,7 @@ export interface BatonClient {
   listDevices(): Promise<Device[]>
   listDeviceFolders(deviceId: ID): Promise<string[]>
   listProjects(): Promise<Project[]>
+  getProject(projectId: ID): Promise<Project>
   // Project 主对话：你的消息、助手的回复和系统说明，按时间排列。
   listProjectEntries(projectId: ID): Promise<ProjectEntry[]>
   listProjectMemory(projectId: ID): Promise<MemoryNote[]>

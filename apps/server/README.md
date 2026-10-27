@@ -67,6 +67,8 @@ Thread 的 HTTP 响应使用结构化 `stop_code` 区分用户停止、强制停
 
 Project 工具 `threads.trace` 使用相同查询，参数为 `thread_id`、`worker_turn_seq`、可选 `cursor`，并接受通用只读参数 `offset`、`max_bytes`。每个业务页先按 trace 上限生成，再包装为不超过 32 KiB 的 JSON 字节片段，外包装也返回 `page_cursor` 并计入容量预算。读取后续片段时，以外包装的 `page_cursor` 作为请求 `cursor`，配合 `next_offset` 拼完当前页；`offset > 0` 且没有 cursor 时拒绝为 422 `snapshot_cursor_required`。拼完后用页内 `next_cursor` 读取下一页，将 `offset` 归零。
 
+浏览器通过 `/api/v1/events` 接收按员工隔离的刷新通知。`thread.changed` 携带 `thread_id`，`project.changed` 携带 `project_id`，两者的 `change: "detail"` 包含列表摘要和对应详情、消息、事件等变化。HTTP 写入、Project Runtime 工具和 Thread 回执、报告在成功保存后通知相关对象；Project 所属 Thread 的变化同时通知 Project。节点同步及断线使用携带 `node_id` 的 `nodes.changed`，设备能力报告继续使用带 `report_version` 的 `devices.changed`。Gateway 按事件类型和对象 ID 合并待发通知，保留不同对象的提示。浏览器收到旧格式或范围无法判断的通知时退回全量刷新。
+
 实时输出由 Worker 保留当前 Turn 最近 256 KiB，每次读取最多 16 KiB，游标为 `epoch:字节偏移`。Turn 结束和切换时清空；淘汰、旧 epoch 或上游丢失输出时返回 `gap:true`。HTTP 输出查询和浏览器 WebSocket 复用设备临时 RPC，中心不持久化实时输出。
 
 ## Project 与设备管理

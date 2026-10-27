@@ -4,7 +4,13 @@ import { Effect, Predicate, Schema, Tracer } from 'effect'
 import { captureTrace, withTraceSpan } from '@baton/telemetry'
 import { WebSocket, WebSocketServer, type RawData } from 'ws'
 import { AuthFrame, BrowserSubscription, Envelope, NodeToControlBody } from '@baton/protocol'
-import type { SessionResult, AuthFrame as NodeAuth, ReleaseMetadata, NodeVersionIncompatibility } from '@baton/protocol'
+import type {
+  BrowserEvent,
+  SessionResult,
+  AuthFrame as NodeAuth,
+  ReleaseMetadata,
+  NodeVersionIncompatibility,
+} from '@baton/protocol'
 import { AppError, type NodeSource } from './errors.ts'
 
 export const webSocketText = (data: RawData): string =>
@@ -95,7 +101,7 @@ interface BrowserConnection {
   reading: boolean
   checkingSession: boolean
   notifying: boolean
-  notifications: Map<string, unknown>
+  notifications: Map<string, BrowserEvent>
 }
 type RPCClass = 'read' | 'management'
 interface QueuedRPC {
@@ -330,7 +336,7 @@ export class Gateway {
           }
         }
         this.retireConnection(connection.source)
-        this.notify(connection.source.employee_id, { type: 'thread.changed' })
+        this.notify(connection.source.employee_id, { type: 'nodes.changed', node_id: connection.source.node_id })
       }
     })
     socket.on('message', (data, binary) => {
@@ -650,7 +656,7 @@ export class Gateway {
     try {
       await this.handlers.disconnected(pending.source)
       if (this.retiring.get(pending.source.conn_id) === pending) this.retiring.delete(pending.source.conn_id)
-      this.notify(pending.source.employee_id, { type: 'thread.changed' })
+      this.notify(pending.source.employee_id, { type: 'nodes.changed', node_id: pending.source.node_id })
     } catch {
       // Retry the same connection identity; a newer connection is protected by its own ID.
     } finally {
@@ -697,8 +703,17 @@ export class Gateway {
     }
   }
 
-  notify(employeeId: string, event: unknown): void {
-    const key = typeof event === 'object' && event && 'type' in event ? String(event.type) : 'changed'
+  notify(employeeId: string, event: BrowserEvent): void {
+    const key = JSON.stringify([
+      event.type,
+      'thread_id' in event
+        ? event.thread_id
+        : 'project_id' in event
+          ? event.project_id
+          : 'node_id' in event
+            ? event.node_id
+            : '',
+    ])
     for (const browser of this.browsers) {
       if (browser.employeeId !== employeeId || browser.socket.readyState !== WebSocket.OPEN) continue
       if (browser.notifications.size >= 32 && !browser.notifications.has(key)) {

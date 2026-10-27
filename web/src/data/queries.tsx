@@ -9,11 +9,14 @@ import {
   useQueryClient,
 } from '@tanstack/react-query'
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import { ClientError, type BatonClient } from './client'
+import { ClientError, type BatonClient, type ChangeEvent } from './client'
 import type {
   AgentKind,
   ID,
   ItemDecision,
+  InboxItem,
+  Message,
+  Operation,
   Project,
   ProjectPatch,
   Reference,
@@ -21,6 +24,7 @@ import type {
   SendMode,
   Session,
   ThreadAnswerInput,
+  Thread,
 } from './types'
 
 // 查询键的第一段是数据主题；按需设备读取只在用户操作时刷新。
@@ -33,9 +37,12 @@ export const keys = {
   // 文件和目录内容由设备按需返回。
   folders: (deviceId: ID, path: string | null) => ['devices', 'folders', deviceId, path] as const,
   projects: ['projects'] as const,
+  project: (id: ID) => ['projects', 'detail', id] as const,
   projectEntries: (id: ID) => ['projects', 'entries', id] as const,
   projectMemory: (id: ID) => ['projects', 'memory', id] as const,
   memoryStatus: (id: ID) => ['projects', 'memoryStatus', id] as const,
+  memorySources: (projectId: ID, noteId?: ID, version?: number) =>
+    ['projects', 'memorySources', projectId, noteId, version] as const,
   threads: ['threads'] as const,
   thread: (id: ID) => ['threads', 'detail', id] as const,
   messages: (threadId: ID) => ['messages', threadId] as const,
@@ -72,12 +79,84 @@ export function createQueryClient() {
   return queryClient
 }
 
+function refreshListItem<T extends { id: ID }>(
+  queryClient: QueryClient,
+  listKey: readonly string[],
+  detailKey: readonly string[],
+  id: ID,
+  queryFn: () => Promise<T>,
+) {
+  if (!queryClient.getQueryData<T[]>(listKey)) return
+  void queryClient
+    .fetchQuery({ queryKey: detailKey, queryFn })
+    .then((entity) => {
+      queryClient.setQueryData<T[]>(listKey, (items) =>
+        items?.some((item) => item.id === id)
+          ? items.map((item) => (item.id === id ? entity : item))
+          : items && [...items, entity],
+      )
+    })
+    .catch((error: unknown) => {
+      if (error instanceof ClientError && error.code === 'notFound') {
+        queryClient.setQueryData<T[]>(listKey, (items) => items?.filter((item) => item.id !== id))
+      } else {
+        void queryClient.invalidateQueries({ queryKey: listKey, exact: true })
+      }
+    })
+}
+
+function invalidateEntity(client: BatonClient, queryClient: QueryClient, target: NonNullable<ChangeEvent['target']>) {
+  const messages = queryClient.getQueryData<Message[]>(keys.messages(target.id)) ?? []
+  const messageIds = new Set(messages.map((message) => message.id))
+  const items = queryClient.getQueryData<InboxItem[]>(keys.inbox) ?? []
+  const itemIds = new Set(items.filter((item) => item.projectId === target.id).map((item) => item.id))
+  void queryClient.invalidateQueries({
+    predicate: ({ queryKey: [group, kind, id], state }) => {
+      if (target.type === 'thread') {
+        if (group === 'threads') return kind === 'detail' && id === target.id
+        if (group === 'messages')
+          return (
+            kind === target.id ||
+            (kind === 'output' && id === target.id) ||
+            (kind === 'trace' && typeof id === 'string' && messageIds.has(id))
+          )
+        if (group === 'operations') {
+          const operation = state.data as Operation | undefined
+          if (operation?.kind === 'sendMessage') return messageIds.has(operation.targetId)
+          return operation?.kind !== 'answerItem' && operation?.targetId === target.id
+        }
+      } else {
+        if (group === 'projects') return id === target.id
+        if (group === 'inbox') return true
+        if (group === 'operations') {
+          const operation = state.data as Operation | undefined
+          return operation?.kind === 'answerItem' && itemIds.has(operation.targetId)
+        }
+      }
+      return false
+    },
+  })
+  if (target.type === 'thread') {
+    refreshListItem<Thread>(queryClient, keys.threads, keys.thread(target.id), target.id, () =>
+      client.getThread(target.id),
+    )
+  } else {
+    refreshListItem<Project>(queryClient, keys.projects, keys.project(target.id), target.id, () =>
+      client.getProject(target.id),
+    )
+  }
+}
+
 export function ClientProvider({ client, children }: { client: BatonClient; children: ReactNode }) {
   const [queryClient] = useState(createQueryClient)
 
   useEffect(
     () =>
-      client.subscribe(({ topics }) => {
+      client.subscribe(({ topics, target }) => {
+        if (target) {
+          invalidateEntity(client, queryClient, target)
+          return
+        }
         for (const topic of topics)
           void queryClient.invalidateQueries({
             queryKey: [topic],
@@ -383,7 +462,7 @@ export function useChangeMemory() {
 export function useMemorySources(projectId: ID, note: import('./types').MemoryNote | null, enabled: boolean) {
   const client = useClient()
   return useQuery({
-    queryKey: ['memory-sources', projectId, note?.id, note?.version],
+    queryKey: keys.memorySources(projectId, note?.id, note?.version),
     queryFn: () => client.memorySources(projectId, note!),
     enabled: enabled && note !== null,
   })

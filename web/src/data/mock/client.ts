@@ -123,6 +123,7 @@ export function createMockClient(
 
     listDevices: () => guarded(() => store.snapshot().devices),
     listProjects: () => guarded(() => store.listProjects()),
+    getProject: (projectId) => guarded(() => store.project(projectId)),
     listProjectEntries: (projectId) => guarded(() => store.projectEntries(projectId)),
     listProjectMemory: (projectId) => guarded(() => store.projectMemory(projectId)),
     getMemoryStatus: (projectId) =>
