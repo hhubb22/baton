@@ -1,4 +1,5 @@
 import { build } from 'esbuild'
+import { execFileSync } from 'node:child_process'
 import { cp, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -20,3 +21,23 @@ await build({
   external: ['electron'],
 })
 await cp(join(root, 'apps/desktop/src/setup.html'), join(output, 'setup.html'))
+if (process.platform === 'darwin') {
+  execFileSync(
+    'clang',
+    [
+      '-fobjc-arc',
+      '-fblocks',
+      '-bundle',
+      '-undefined',
+      'dynamic_lookup',
+      '-framework',
+      'Foundation',
+      '-framework',
+      'UserNotifications',
+      join(root, 'apps/desktop/src/notification-permission.m'),
+      '-o',
+      join(output, 'notification-permission.node'),
+    ],
+    { stdio: 'inherit' },
+  )
+}

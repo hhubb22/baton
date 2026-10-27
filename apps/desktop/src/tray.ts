@@ -1,16 +1,7 @@
 import { Menu, Tray, nativeImage } from 'electron'
 import type { DesktopStatus } from './status.ts'
-
-const labels: Record<DesktopStatus['state'], string> = {
-  unregistered: '未接入',
-  connecting: '连接中',
-  online: '在线',
-  rejected: '已拒绝',
-  external: '由外部服务运行',
-  restarting: '等待重启',
-  stopping: '正在停止',
-  stopped: '已停止',
-}
+import { emptyActivity, type Activity } from './notifications.ts'
+import { trayLabels, trayPixels, traySummary } from './tray-model.ts'
 
 export function createTray(actions: {
   open: () => void
@@ -21,39 +12,77 @@ export function createTray(actions: {
   quit: () => void
   loginEnabled: () => boolean
   setLogin: (enabled: boolean) => void
+  notificationsEnabled: () => boolean
+  setNotifications: (enabled: boolean) => void
+  notificationSettings: () => void
+  settings: () => void
+  openThread: (id: string) => void
 }) {
-  const pixels = Buffer.alloc(16 * 16 * 4)
-  for (let y = 2; y < 14; y++)
-    for (let x = 4; x < 12; x++) {
-      if (x < 6 || ([2, 7, 13].includes(y) && x < 10) || (x >= 10 && ![2, 7, 13].includes(y)))
-        pixels[(y * 16 + x) * 4 + 3] = 255
+  const image = (waiting: boolean) => {
+    const result = nativeImage.createFromBitmap(trayPixels(waiting), { width: 16, height: 16, scaleFactor: 1 })
+    result.setTemplateImage(true)
+    return result
+  }
+  const dotPixels = Buffer.alloc(8 * 8 * 4)
+  for (let y = 0; y < 8; y++)
+    for (let x = 0; x < 8; x++) {
+      if ((x - 3.5) ** 2 + (y - 3.5) ** 2 <= 10) {
+        const offset = (y * 8 + x) * 4
+        dotPixels[offset + 1] = 150
+        dotPixels[offset + 3] = 255
+      }
     }
-  const image = nativeImage.createFromBitmap(pixels, { width: 16, height: 16, scaleFactor: 1 })
-  image.setTemplateImage(true)
-  const tray = new Tray(image)
+  const onlineIcon = nativeImage.createFromBitmap(dotPixels, { width: 8, height: 8 })
+  const tray = new Tray(image(false))
   tray.on('click', actions.open)
   return {
-    update(status: DesktopStatus) {
-      const label = labels[status.state]
-      const reason = status.code ? `${status.code}：${status.message ?? ''}` : status.message
-      tray.setToolTip(`Baton · ${label}${reason ? ` · ${reason}` : ''}`)
+    update(status: DesktopStatus, activity: Activity = emptyActivity, notificationsDisabled: boolean | null = null) {
+      const label = trayLabels[status.state]
+      const reason = status.message ?? status.code
+      const name = status.registered ? status.display_name : 'Baton'
+      const summary = traySummary(activity)
+      tray.setImage(image(activity.waiting > 0))
+      tray.setToolTip(`${name}${label ? ` · ${label}` : ''} · ${summary}${reason ? ` · ${reason}` : ''}`)
       tray.setContextMenu(
         Menu.buildFromTemplate([
-          { label, enabled: false },
+          {
+            label: `${name}${label ? ` · ${label}` : ''}`,
+            enabled: false,
+            ...(status.state === 'online' ? { icon: onlineIcon } : {}),
+          },
           ...(reason ? [{ label: reason.slice(0, 160), enabled: false }] : []),
           { type: 'separator' },
-          { label: '打开窗口', click: actions.open },
-          { label: actions.updateLabel(), click: actions.update },
-          { label: '重启 batond', click: actions.restart },
-          { label: '打开日志目录', click: actions.logs },
+          { label: summary, enabled: false },
+          ...activity.threads.slice(0, 5).map((thread) => ({
+            label: thread.title.replaceAll('&', '&&'),
+            click: () => actions.openThread(thread.id),
+          })),
+          { type: 'separator' },
           {
-            label: '登录时启动',
+            label: 'Notifications',
+            type: 'checkbox',
+            checked: actions.notificationsEnabled(),
+            click: (item) => actions.setNotifications(item.checked),
+          },
+          ...(notificationsDisabled === true
+            ? [
+                { label: 'Disabled in system settings', enabled: false },
+                { label: 'Open notification settings', click: actions.notificationSettings },
+              ]
+            : []),
+          {
+            label: 'Launch at login',
             type: 'checkbox',
             checked: actions.loginEnabled(),
             click: (item) => actions.setLogin(item.checked),
           },
+          { label: 'Settings…', click: actions.settings },
           { type: 'separator' },
-          { label: '退出', click: actions.quit },
+          { label: 'Open Baton', click: actions.open },
+          { label: actions.updateLabel(), click: actions.update },
+          ...(status.state === 'external' ? [] : [{ label: 'Restart device service', click: actions.restart }]),
+          { label: 'Open logs folder', click: actions.logs },
+          { label: 'Quit Baton', click: actions.quit },
         ]),
       )
     },

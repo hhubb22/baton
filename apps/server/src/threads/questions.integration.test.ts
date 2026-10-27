@@ -5,6 +5,7 @@ import { expect, it } from 'vite-plus/test'
 import type * as P from '@baton/protocol'
 import { seedNode, withTestDatabase, type TestDatabase } from '../testing/database.ts'
 import * as threads from './index.ts'
+import { activitySnapshot, replayNotifications } from '../desktop-notifications.ts'
 
 type Run = TestDatabase['run']
 const query = (statement: string, ...parameters: ReadonlyArray<string | number | boolean>) =>
@@ -111,6 +112,19 @@ it('persists questions and offline answers across restart, enforces ownership an
     expect(await run(threads.processReport(f.source, pending))).toMatchObject({ ok: true })
     expect(await run(threads.processReport(f.source, pending))).toMatchObject({ ok: true })
     const recovered = await restart()
+    const replay = await recovered(replayNotifications(f.employeeId, '0'))
+    expect(replay.events).toHaveLength(1)
+    expect(replay.events[0]).toMatchObject({
+      kind: 'question',
+      thread_id: f.thread.id,
+      title: 'Original input',
+      body: 'Codex has a question: Which targets?',
+    })
+    expect(await recovered(activitySnapshot(f.employeeId))).toEqual({
+      running_count: 1,
+      waiting_count: 1,
+      waiting_threads: [{ thread_id: f.thread.id, title: 'Original input' }],
+    })
     expect((await recovered(threads.view({ employeeId: f.employeeId }, f.thread.id))).pending_questions).toEqual([
       { ...f.question, worker_turn_seq: 1 },
     ])
@@ -173,6 +187,77 @@ it('persists questions and offline answers across restart, enforces ownership an
     expect(messages).toEqual([{ content: 'Original input', status: 'sent' }])
   }))
 
+it.each([
+  ['completed', 'turn_ended', 'Codex finished replying.'],
+  ['failed', 'turn_failed', 'Codex could not finish replying: Credentials expired.'],
+  ['timeout', 'turn_stopped', 'Codex stopped unexpectedly: The reply timed out.'],
+  ['agent_exited', 'turn_stopped', 'Codex stopped unexpectedly: The Agent process exited.'],
+] as const)('persists one notification for a %s reply', (reason, kind, body) =>
+  withTestDatabase(async ({ run }) => {
+    const f = await fixture(run)
+    const ended = f.report('turn.ended', {
+      worker_turn_seq: 1,
+      reason,
+      queue_empty: true,
+      ...(reason === 'failed' ? { content: 'Credentials expired.' } : {}),
+    })
+    await run(threads.processReport(f.source, ended))
+    await run(threads.processReport(f.source, ended))
+    const replay = await run(replayNotifications(f.employeeId, '0'))
+    expect(replay.events).toHaveLength(1)
+    expect(replay.events[0]).toMatchObject({ kind, body, thread_id: f.thread.id })
+    expect((await run(activitySnapshot(f.employeeId))).running_count).toBe(0)
+  }),
+)
+
+it.each(['completed', 'timeout'] as const)('notifies a shell %s reply once across terminal cleanup reports', (reason) =>
+  withTestDatabase(async ({ run }) => {
+    const f = await fixture(run)
+    await run(query("UPDATE threads SET agent_type='shell' WHERE id=$1", f.thread.id))
+    const ended = f.report('turn.ended', { worker_turn_seq: 1, reason, queue_empty: true })
+    const stopped = f.report('thread.stopped', { reason })
+    await run(threads.processReport(f.source, ended))
+    await run(threads.processReport(f.source, stopped))
+    await run(threads.processReport(f.source, stopped))
+    const { events } = await run(replayNotifications(f.employeeId, '0'))
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({
+      thread_id: f.thread.id,
+      kind: reason === 'completed' ? 'turn_ended' : 'turn_stopped',
+      body: reason === 'completed' ? 'Shell finished replying.' : 'Shell stopped unexpectedly: The reply timed out.',
+    })
+  }),
+)
+
+it('notifies a history loss once when it also ends an active reply', () =>
+  withTestDatabase(async ({ run }) => {
+    const f = await fixture(run)
+    await run(threads.processReport(f.source, f.report('thread.unknown', { history_unavailable: true })))
+    const { events } = await run(replayNotifications(f.employeeId, '0'))
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({
+      kind: 'turn_stopped',
+      body: 'Codex stopped unexpectedly: The Agent conversation history is missing.',
+    })
+  }))
+
+it('counts each waiting Thread once across multiple questions and clears answered questions', () =>
+  withTestDatabase(async ({ run }) => {
+    const f = await fixture(run)
+    for (const request_id of ['first', 'second'])
+      await run(
+        threads.processReport(
+          f.source,
+          f.report('question.pending', { worker_turn_seq: 1, question: { ...f.question, request_id } }),
+        ),
+      )
+    expect((await run(activitySnapshot(f.employeeId))).waiting_count).toBe(1)
+    await run(threads.answer(f.employeeId, f.thread.id, { request_id: 'first', decision: 'cancel' }))
+    expect((await run(activitySnapshot(f.employeeId))).waiting_count).toBe(1)
+    await run(threads.answer(f.employeeId, f.thread.id, { request_id: 'second', decision: 'cancel' }))
+    expect((await run(activitySnapshot(f.employeeId))).waiting_count).toBe(0)
+  }))
+
 it('accepts MCP confirmation and cancellation, closes resolved questions, and rejects stopped or previous-turn answers', () =>
   withTestDatabase(async ({ run }) => {
     const f = await fixture(run)
@@ -183,6 +268,7 @@ it('accepts MCP confirmation and cancellation, closes resolved questions, and re
       prompt: 'Connect to the MCP server?',
     }
     await run(threads.processReport(f.source, f.report('question.pending', { question: mcp, worker_turn_seq: 1 })))
+    expect((await run(replayNotifications(f.employeeId, '0'))).events[0]).toMatchObject({ kind: 'approval' })
     await run(threads.answer(f.employeeId, f.thread.id, { request_id: mcp.request_id, decision: 'accept' }))
     await run(threads.processReport(f.source, f.report('question.resolved', { request_id: mcp.request_id })))
     await run(

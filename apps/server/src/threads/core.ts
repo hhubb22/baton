@@ -6,6 +6,7 @@ import { captureTrace, withTraceSpan } from '@baton/telemetry'
 import { AppError } from '../errors.ts'
 
 import type { DatabaseEffect } from '../database.ts'
+import { recordThreadNotification } from '../desktop-notifications.ts'
 import { directoryAllowed } from '../directories.ts'
 
 export type DB<A> = DatabaseEffect<A>
@@ -37,7 +38,10 @@ export const readThread = (employee: string, id: string, lock = false, projectId
 export const audit = (t: Thread, kind: string, payload: unknown, actor = 'employee', actorID = t.employee_id) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    yield* sql`INSERT INTO thread_events(employee_id,thread_id,kind,actor,actor_id,payload) VALUES(${t.employee_id},${t.id},${kind},${actor},${actorID},${JSON.stringify(payload)}::jsonb)`
+    const [event] = yield* sql<{
+      id: string
+    }>`INSERT INTO thread_events(employee_id,thread_id,kind,actor,actor_id,payload) VALUES(${t.employee_id},${t.id},${kind},${actor},${actorID},${JSON.stringify(payload)}::jsonb) RETURNING id::text`
+    yield* recordThreadNotification(t, `thread-event:${event!.id}`, kind, payload)
   })
 export const touch = (id: string) =>
   Effect.gen(function* () {

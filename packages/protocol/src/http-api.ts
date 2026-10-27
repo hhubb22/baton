@@ -123,6 +123,11 @@ const Public = HttpApiGroup.make('public')
 const Account = HttpApiGroup.make('account')
   .add(
     Endpoint.get('me', '/api/v1/me', { success: SessionResponse }),
+    Endpoint.get('replayNotifications', '/api/v1/events/replay', {
+      query: Q.NotificationReplayQuery,
+      success: Q.NotificationReplay,
+    }),
+    Endpoint.get('activity', '/api/v1/activity', { success: Q.ActivitySnapshot }),
     Endpoint.post('logout', '/api/v1/logout', {
       payload: EmptyInput,
       success: HttpApiSchema.WithHeaders(HttpApiSchema.NoContent, cookie),

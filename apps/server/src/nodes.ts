@@ -23,6 +23,7 @@ import { digest, hasControlCharacters, newSecret } from './auth.ts'
 import { type DatabaseEffect, dbError } from './database.ts'
 import { AppError, type NodeSource } from './errors.ts'
 import { digest as requestDigest } from './json.ts'
+import { recordDeviceRejection } from './desktop-notifications.ts'
 
 export interface NodeClaims {
   readonly node_id: string
@@ -912,6 +913,12 @@ export const revokeNode = (employeeId: string, nodeId: string): DatabaseEffect<R
         VALUES (${randomUUID()}::uuid, ${nodeId}::uuid, ${employeeId}::uuid, ${employeeId}::uuid, ${credential.id}::uuid, clock_timestamp())
         ON CONFLICT (credential_id) DO NOTHING`
         }
+        yield* recordDeviceRejection(
+          employeeId,
+          nodeId,
+          `node-revoked:${nodeId}`,
+          'The device credential was revoked. Reconnect this device to continue.',
+        )
         const rows = yield* nodeRows(employeeId, nodeId),
           state = yield* defaultState(employeeId)
         return { ...revocationFrom(rows[0]), default_device: state, default_pc: state }

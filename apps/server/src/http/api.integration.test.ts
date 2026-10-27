@@ -16,6 +16,7 @@ import * as Auth from '../auth.ts'
 import * as Nodes from '../nodes.ts'
 import { openTestDatabase, type TestDatabase } from '../testing/database.ts'
 import type { HTTPOptions } from './options.ts'
+import { saveNotification } from '../desktop-notifications.ts'
 
 let database: TestDatabase
 let scope: Scope.Closeable
@@ -208,6 +209,35 @@ it('serves anonymous download listings and only verified files for the matching 
     expect((await anonymous(`/downloads/${file}`)).status).toBe(404)
   }
   expect((await anonymous('/downloads/baton-development-linux-x64.tar.gz', 'unmatched.local')).status).toBe(404)
+})
+
+it('authenticates replay and activity, validates cursors and isolates employee notifications', async () => {
+  const anonymous = await handle(new Request('http://localhost/api/v1/events/replay?after=0'))
+  expect(anonymous.status).toBe(401)
+  const session = await login(readyPassword, 'httpready')
+  const baseline = Schema.decodeUnknownSync(P.NotificationReplay)(await (await request('/api/v1/events/replay')).json())
+  const own = await database.run(
+    saveNotification(session.employee.id, `http:${randomUUID()}`, {
+      kind: 'question',
+      title: 'Owned',
+      body: 'Which target?',
+    }),
+  )
+  const other = await database.run(Auth.createEmployee(`other-${randomUUID()}`, 'Other', password))
+  await database.run(saveNotification(other.id, 'private', { kind: 'question', title: 'Private', body: 'Private' }))
+  const response = await request(`/api/v1/events/replay?after=${baseline.cursor}`)
+  expect(response.status).toBe(200)
+  expect(response.headers.get('cache-control')).toBe('no-store')
+  const page = Schema.decodeUnknownSync(P.NotificationReplay)(await response.json())
+  expect(page.events).toHaveLength(1)
+  expect(page.events[0]).toMatchObject({ event_id: own, kind: 'question', title: 'Owned', body: 'Which target?' })
+  expect(page.cursor).toBe(page.events[0]!.cursor)
+  expect(page.has_more).toBe(false)
+  for (const query of ['after=invalid', 'after=9223372036854775808', 'limit=101'])
+    expect((await request(`/api/v1/events/replay?${query}`)).status).toBe(400)
+  const activity = await request('/api/v1/activity')
+  expect(activity.status).toBe(200)
+  expect(Schema.is(P.ActivitySnapshot)(await activity.json())).toBe(true)
 })
 
 it('serves only public release metadata without authentication or device credential changes', async () => {

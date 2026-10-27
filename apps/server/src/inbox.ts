@@ -7,6 +7,7 @@ import { gfmFromMarkdown } from 'mdast-util-gfm'
 import { gfm } from 'micromark-extension-gfm'
 import { AppError } from './errors.ts'
 import { transaction } from './database.ts'
+import { saveProjectNotification } from './desktop-notifications.ts'
 import { strictDecode } from './decode.ts'
 import { insertProjectInput } from './project/inputs.ts'
 
@@ -108,6 +109,7 @@ const createAgentAttentionTx = Effect.fnUntraced(function* (b: InboxBinding, cal
   if (existing) return yield* readRequest(b.employeeId, existing.id)
   const id = randomUUID()
   yield* sql`INSERT INTO attention_requests(id,employee_id,project_id,agent_id,conversation_id,origin_tool_call_id,source,thread_id,title,content,options,allow_text) VALUES(${id},${b.employeeId},${b.projectId},${b.agentId},${b.conversationId},${callId},'agent',${a.thread_id ?? null},${a.title},${a.content},${JSON.stringify(a.options)}::jsonb,${a.allow_text})`
+  yield* saveProjectNotification(b.employeeId, b.projectId, `attention:${id}`, 'question', a.title, a.thread_id)
   return yield* readRequest(b.employeeId, id)
 })
 export const createAgentAttention = (b: InboxBinding, callId: string, input: unknown) =>

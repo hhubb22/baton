@@ -65,6 +65,7 @@ test('打包配置保留完整 batond 资源、原生 ABI 与 macOS 临时签名
   assert.deepEqual(config.extraResources, [
     { from: join('/tmp', 'batond input'), to: 'batond', filter: ['**/*'] },
     { from: join('/tmp', 'batond input', 'node_modules'), to: 'batond/node_modules', filter: ['**/*'] },
+    { from: join('/tmp/desktop', 'dist/notification-permission.node'), to: 'notification-permission.node' },
   ])
   assert.deepEqual(config.extraMetadata, { version: '0.1.0-alpha.1', main: 'dist/main.cjs' })
   assert.deepEqual(config.files, ['dist/main.cjs', 'dist/preload.cjs', 'dist/setup.html', 'package.json'])
@@ -95,6 +96,10 @@ test('Windows 只产出 x64 按用户安装的 NSIS，关闭提权和发布签�
     platform: 'win32',
     arch: 'x64',
   })
+  assert.equal(
+    config.extraResources.some((entry) => entry.to === 'notification-permission.node'),
+    false,
+  )
   assert.deepEqual(config.win.target, [{ target: 'nsis', arch: ['x64'] }])
   assert.equal(config.win.signAndEditExecutable, false)
   assert.deepEqual(config.nsis, {
@@ -121,6 +126,8 @@ async function fixture(t, { platform = 'darwin', arch = 'arm64', releaseVersion 
   await writeFile(executable, 'fixture executable', { mode: 0o755 })
   await writeFile(join(appDirectory, 'package.json'), JSON.stringify({ devDependencies: { electron: '44.5.1' } }))
   for (const name of ['main.cjs', 'preload.cjs', 'setup.html']) await writeFile(join(appDirectory, 'dist', name), name)
+  if (platform === 'darwin')
+    await writeFile(join(appDirectory, 'dist', 'notification-permission.node'), 'permission module')
   const contents = Buffer.from('offline installer fixture')
   const calls = []
   const options = {

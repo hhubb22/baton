@@ -75,6 +75,7 @@ describe('identity storage on local PostgreSQL', () => {
       '0007_thread_turn_items.sql',
       '0008_thread_stop_code.sql',
       '0009_thread_activity_probes.sql',
+      '0010_browser_notifications.sql',
     ])
     const names = await run(query<{ current: string }>('SELECT current_schema() AS current'))
     expect(names[0].current).toBe(schema)
@@ -124,6 +125,11 @@ describe('identity storage on local PostgreSQL', () => {
         'utf8',
       )
       await writeFile(join(directory, '0009_thread_activity_probes.sql'), activityProbes)
+      const browserNotifications = await readFile(
+        new URL('../../../migrations/0010_browser_notifications.sql', import.meta.url),
+        'utf8',
+      )
+      await writeFile(join(directory, '0010_browser_notifications.sql'), browserNotifications)
       const checksums = await run(
         query<{ version: string; checksum: string }>(
           'SELECT version, checksum FROM schema_migrations ORDER BY version',

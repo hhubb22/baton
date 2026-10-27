@@ -88,6 +88,18 @@ describe('HTTP downloads', () => {
   })
 })
 
+it('reads notification baselines and decimal cursors without losing precision', async () => {
+  const page = { events: [], cursor: '9007199254740993', has_more: false }
+  const fetch = fetcher().mockImplementation(async () => response(page))
+  const client = createHttpClient({ fetch, WebSocket: null })
+  expect(await client.replayNotifications!()).toEqual(page)
+  expect(await client.replayNotifications!(page.cursor)).toEqual(page)
+  expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+    '/api/v1/events/replay?limit=100',
+    '/api/v1/events/replay?limit=100&after=9007199254740993',
+  ])
+})
+
 describe('HTTP account and devices', () => {
   it.each([
     ['draining', 'neutral', 'Waiting for upgrade'],
@@ -532,7 +544,8 @@ describe('HTTP account and devices', () => {
       origin: 'https://baton.test',
       pollInterval: 100,
     })
-    const unsubscribe = client.subscribe(vi.fn())
+    const changes = vi.fn()
+    const unsubscribe = client.subscribe(changes)
     await client.getSession()
     const listener = vi.fn()
     const stopOutput = client.subscribeOutput!('thread', listener)
@@ -540,6 +553,19 @@ describe('HTTP account and devices', () => {
     expect(first.url).toBe('wss://baton.test/api/v1/events')
     expect(first.send).not.toHaveBeenCalled()
     first.receive({ type: 'ready' })
+    expect(changes).toHaveBeenLastCalledWith({ topics: [], browserEvent: { type: 'ready' } })
+    const notification = {
+      type: 'notification',
+      event_id: '00000000-0000-4000-8000-000000000001',
+      cursor: '12',
+      kind: 'question',
+      thread_id: '00000000-0000-4000-8000-000000000002',
+      project_id: '00000000-0000-4000-8000-000000000003',
+      title: 'Reconnect',
+      body: 'Which branch?',
+    }
+    first.receive(notification)
+    expect(changes).toHaveBeenLastCalledWith({ topics: [], browserEvent: notification })
     expect(JSON.parse(first.send.mock.calls[0][0])).toEqual({ thread_id: 'thread' })
     first.receive({ type: 'thread.output', thread_id: 'thread', ok: true, text: 'stream', cursor: 'epoch:6' })
     expect((await client.readOutput('thread')).chunks).toEqual([{ kind: 'text', text: 'stream' }])

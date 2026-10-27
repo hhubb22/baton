@@ -1,8 +1,35 @@
 import { Schema } from 'effect'
 import { expect, it } from 'vite-plus/test'
-import { BrowserEvent, BrowserProjectChanged, BrowserThreadChanged, NodesChanged } from '../src/index.ts'
+import {
+  BrowserEvent,
+  BrowserProjectChanged,
+  BrowserThreadChanged,
+  NodesChanged,
+  NotificationCursor,
+  NotificationReplayQuery,
+} from '../src/index.ts'
 
 const id = '11111111-1111-4111-8111-111111111111'
+
+it('validates durable notifications and bounded decimal replay cursors', () => {
+  const event = {
+    type: 'notification',
+    event_id: id,
+    cursor: '9007199254740993',
+    kind: 'approval',
+    thread_id: id,
+    title: 'Build',
+    body: 'Confirm deployment.',
+  }
+  expect(Schema.decodeUnknownSync(BrowserEvent)(event)).toEqual(event)
+  expect(Schema.is(NotificationCursor)('9223372036854775807')).toBe(true)
+  for (const cursor of ['', 'oops', '-1', '01', '9223372036854775808']) {
+    expect(Schema.is(NotificationCursor)(cursor)).toBe(false)
+    expect(Schema.is(NotificationReplayQuery)({ after: cursor })).toBe(false)
+  }
+  expect(Schema.is(NotificationReplayQuery)({ after: '0', limit: '100' })).toBe(true)
+  expect(Schema.is(NotificationReplayQuery)({ limit: '101' })).toBe(false)
+})
 
 it('round-trips entity-scoped detail changes through the browser event union', () => {
   for (const [schema, event] of [

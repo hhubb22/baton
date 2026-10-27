@@ -4,7 +4,8 @@ import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vite-plus/test'
 import { ClientError, type BatonClient, type ChangeEvent } from './client'
 import { createHttpClient } from './http/client'
-import { ClientProvider, keys, useMessages, useSession, useThread, useThreads } from './queries'
+import { ClientProvider, keys, useActivity, useMessages, useSession, useThread, useThreads } from './queries'
+import { desktopActivitySnapshot } from './desktop-notifications'
 
 class Socket {
   static current: Socket
@@ -30,6 +31,49 @@ function wrapperFor(client: BatonClient) {
 }
 
 describe('entity change notifications', () => {
+  it('loads all-device activity independently of summary questions and refreshes it after reconnect and changes', async () => {
+    let waiting = 1
+    const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
+      const path = new URL(requestURL(input), 'https://baton.test').pathname
+      if (path === '/api/v1/me')
+        return Response.json({ employee: { id: 'employee', display_name: 'Alice', must_change_password: false } })
+      if (path === '/api/v1/nodes') return Response.json({ nodes: [], default_device: {} })
+      if (path === '/api/v1/threads') return Response.json({ threads: [] })
+      if (path === '/api/v1/activity')
+        return Response.json({
+          running_count: 2,
+          waiting_count: waiting,
+          waiting_threads: waiting ? [{ thread_id: firstId, title: 'x'.repeat(1000), project_id: secondId }] : [],
+        })
+      throw new Error(`Unexpected request: ${path}`)
+    })
+    const client = createHttpClient({ fetch, WebSocket: Socket as unknown as typeof WebSocket, pollInterval: 60000 })
+    const { result, unmount } = renderHook(
+      () => ({ session: useSession(), threads: useThreads(), activity: useActivity() }),
+      { wrapper: wrapperFor(client) },
+    )
+    try {
+      await waitFor(() => expect(result.current.activity.isSuccess && result.current.threads.isSuccess).toBe(true))
+      expect(result.current.threads.data).toEqual([])
+      expect(desktopActivitySnapshot(result.current.activity.data!)).toEqual({
+        running: 2,
+        waiting: 1,
+        threads: [{ id: firstId, title: 'x'.repeat(512) }],
+      })
+      for (const change of [
+        { type: 'ready' },
+        { type: 'thread.changed', thread_id: firstId, change: 'detail' },
+        { type: 'project.changed', project_id: secondId, change: 'detail' },
+      ]) {
+        waiting += 1
+        act(() => Socket.current.receive(change))
+        await waitFor(() => expect(result.current.activity.data?.waiting_count).toBe(waiting))
+      }
+    } finally {
+      unmount()
+    }
+  })
+
   it('refreshes the changed thread summary and conversation without reading another thread detail or timeline', async () => {
     const revisions = new Map([
       [firstId, 1],

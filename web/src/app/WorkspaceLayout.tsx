@@ -9,6 +9,7 @@ import { useResolvedTheme } from '../theme/ThemeProvider'
 import { colors, size, space } from '../theme/tokens.stylex'
 import { Button } from '../ui/Button'
 import { createDraftStore } from './drafts'
+import { DesktopWorkspace } from './DesktopWorkspace'
 import { NewProjectDialog } from './NewProjectDialog'
 import { Page } from './Page'
 import type { LoginNotice } from './router'
@@ -162,13 +163,15 @@ export function WorkspaceLayout() {
 
   return (
     <WorkspaceContext value={workspace}>
-      <WorkspaceTitle />
-      <div {...stylex.props(styles.shell, styles.backdrop(sceneImage(theme)))}>
-        <div aria-hidden {...stylex.props(styles.frost, glass.layer)} />
-        <Sidebar />
-        <Main failedAt={failedAt} onRetry={workspace.signOut} />
-      </div>
-      {creatingProject && <NewProjectDialog onClose={() => setCreatingProject(false)} />}
+      <DesktopWorkspace>
+        <WorkspaceTitle />
+        <div {...stylex.props(styles.shell, styles.backdrop(sceneImage(theme)))}>
+          <div aria-hidden {...stylex.props(styles.frost, glass.layer)} />
+          <Sidebar />
+          <Main failedAt={failedAt} onRetry={workspace.signOut} />
+        </div>
+        {creatingProject && <NewProjectDialog onClose={() => setCreatingProject(false)} />}
+      </DesktopWorkspace>
     </WorkspaceContext>
   )
 }

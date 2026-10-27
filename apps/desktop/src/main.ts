@@ -1,15 +1,23 @@
-import { app, dialog, ipcMain, Menu, session, shell, type BrowserWindow } from 'electron'
+import { app, dialog, ipcMain, Menu, session, shell, Notification, type BrowserWindow } from 'electron'
 import { mkdir, readFile } from 'node:fs/promises'
 import { homedir, hostname } from 'node:os'
 import { join } from 'node:path'
 import { Schema } from 'effect'
 import { Batond, daemonLog } from './batond.ts'
-import { authorizeBridge, assertIdentityOrigin, EnrollmentInput } from './bridge.ts'
+import {
+  authorizeBridge,
+  assertIdentityOrigin,
+  EnrollmentInput,
+  NotificationBatch,
+  NotificationScope,
+  TrayActivity,
+  ViewingThread,
+} from './bridge.ts'
 import { loadDeployment, saveDeployment, parseConnectLink, caFingerprint, type DeploymentConfig } from './deployment.ts'
 import { verifyCertificate } from './trust.ts'
 import { createWindow } from './window.ts'
 import { Supervisor } from './supervisor.ts'
-import { mergeStatus, readDaemonStatus, type PublicIdentity } from './status.ts'
+import { mergeStatus, readDaemonStatus, readDaemonRejection, type PublicIdentity } from './status.ts'
 import { createTray } from './tray.ts'
 import { autostart } from './autostart.ts'
 import { DesktopUpdate } from './update.ts'
@@ -17,8 +25,17 @@ import { UpdateDownloader } from './update-download.ts'
 import { launchNSIS } from './update-install.ts'
 import { updatePresentation } from './update-ui.ts'
 import type { DownloadItem } from '@baton/protocol/http-api'
+import {
+  notificationState,
+  notificationPresenter,
+  emptyActivity,
+  type NotificationTarget,
+  type Activity,
+} from './notifications.ts'
+import { notificationsDisabled, notificationSettingsURL } from './notification-permission.ts'
 
 app.setName('Baton')
+if (process.platform === 'win32') app.setAppUserModelId('dev.baton.desktop')
 
 let configuration: DeploymentConfig | undefined
 let identity: PublicIdentity = { registered: false }
@@ -83,10 +100,48 @@ async function start() {
   }
   const reportError = (error: unknown) =>
     dialog.showErrorBox('Baton', error instanceof Error ? error.message : '操作失败')
+  let activity: Activity = emptyActivity
+  let viewingThread: string | null = null
+  let pendingTarget: NotificationTarget | undefined
+  let targetReady = false
+  let systemNotificationsDisabled: boolean | null = null
+  const openTarget = (target: NotificationTarget) => {
+    pendingTarget = target
+    show()
+    if (targetReady && window && configuration) {
+      try {
+        authorizeBridge(window.webContents.getURL(), configuration.coordinator_url, true)
+        window.webContents.send('baton:open-target', target)
+        pendingTarget = undefined
+      } catch {
+        /* 等中心页面完成加载后再导航。 */
+      }
+    } else if (window && configuration) {
+      void window.loadURL(configuration.coordinator_url).catch(reportError)
+    }
+  }
+  const notices = await notificationState(
+    userData,
+    notificationPresenter((notice) => {
+      if (!Notification.isSupported() || systemNotificationsDisabled === true) return null
+      const notification = new Notification({ title: notice.title, body: notice.body })
+      notification.on('failed', () =>
+        console.warn(JSON.stringify({ event: 'desktop.notification_failed', event_id: notice.event_id })),
+      )
+      return notification
+    }, openTarget),
+  )
+  const notificationScope = (scope: string) => JSON.stringify([configuration?.coordinator_url, scope])
+  let lastManagedPid: number | undefined
+  let managedStartedAt = 0
   const supervisor = new Supervisor({
     spawn: () => batond.run(),
     log: (chunk) => log.write(chunk),
-    changed: () => {
+    changed: (state) => {
+      if (state.pid) {
+        lastManagedPid = state.pid
+        managedStartedAt = Date.now()
+      }
       void refresh()
     },
   })
@@ -110,6 +165,27 @@ async function start() {
       void shell.openPath(join(dataDirectory, 'logs')).catch(reportError)
     },
     quit: () => app.quit(),
+    notificationsEnabled: () => notices.enabled(),
+    setNotifications: (enabled) => {
+      void notices.setEnabled(enabled).then(refresh).catch(reportError)
+    },
+    notificationSettings: () => {
+      void shell.openExternal(notificationSettingsURL()).catch(reportError)
+    },
+    settings: () => {
+      void dialog
+        .showMessageBox({
+          title: 'Baton settings',
+          message: 'Notifications',
+          detail: 'Notification permissions are managed in system settings.',
+          buttons: ['Open notification settings', 'Close'],
+        })
+        .then(({ response }) => {
+          if (response === 0) return shell.openExternal(notificationSettingsURL())
+        })
+        .catch(reportError)
+    },
+    openThread: (thread_id) => openTarget({ thread_id }),
     loginEnabled: () => login.enabled(),
     setLogin: (enabled) => {
       void login.set(enabled).then(refresh).catch(reportError)
@@ -258,8 +334,28 @@ async function start() {
       const daemon = await readDaemonStatus(dataDirectory)
       const previousCode = status.code
       status = mergeStatus(identity, supervisor.state, daemon)
-      tray.update(status)
+      tray.update(status, activity, systemNotificationsDisabled)
       updateWindowMenu()
+      const rejection =
+        daemon?.state === 'rejected'
+          ? daemon
+          : await readDaemonRejection(dataDirectory, lastManagedPid, managedStartedAt)
+      if (identity.registered && rejection) {
+        const key = `device:${identity.node_id}:${rejection.code}:${rejection.updated_at}`
+        await notices.deliver(
+          notificationScope('local-device'),
+          [
+            {
+              event_id: key,
+              title: identity.display_name,
+              body: `Connection rejected: ${rejection.message ?? rejection.code}`,
+              node_id: identity.node_id,
+            },
+          ],
+          null,
+          null,
+        )
+      }
       if (window && !window.isDestroyed()) window.webContents.send('baton:status-changed', status)
       if (status.code === 'node_version_incompatible' && previousCode !== status.code && configuration) {
         void showUpdate(true).catch(reportError)
@@ -271,7 +367,7 @@ async function start() {
         code: 'status_unavailable',
         message: '无法读取本机设备状态，请检查日志',
       }
-      tray.update(status)
+      tray.update(status, activity, systemNotificationsDisabled)
     }
     return status
   }
@@ -300,6 +396,19 @@ async function start() {
   async function replaceWindow(hidden = false) {
     window?.destroy()
     window = createWindow(__dirname, configuration?.coordinator_url, version, () => quitting)
+    targetReady = false
+    viewingThread = null
+    activity = emptyActivity
+    window.webContents.on('did-start-navigation', (_event, _url, inPlace, mainFrame) => {
+      if (mainFrame && !inPlace) {
+        targetReady = false
+        viewingThread = null
+      }
+    })
+    window.webContents.on('render-process-gone', () => {
+      viewingThread = null
+      activity = emptyActivity
+    })
     if (configuration) await window.loadURL(configuration.coordinator_url).catch(() => {})
     else await window.loadFile(join(__dirname, 'setup.html'))
     if (!hidden) show()
@@ -319,6 +428,37 @@ async function start() {
   ipcMain.handle('baton:update', async (event) => {
     authorize(event)
     await showUpdate(true)
+  })
+  ipcMain.handle('baton:notification-cursor', (event, input: unknown) => {
+    authorize(event)
+    return notices.cursor(notificationScope(Schema.decodeUnknownSync(NotificationScope)(input)))
+  })
+  ipcMain.handle('baton:notifications', (event, input: unknown) => {
+    authorize(event)
+    const batch = Schema.decodeUnknownSync(NotificationBatch)(input)
+    // 本机拒绝只从 daemon 的持久状态通知，涵盖登录前和连接被中心断开的情况。
+    const events = batch.events.filter((notice) => notice.kind !== 'device_rejected')
+    return notices.deliver(notificationScope(batch.scope), events, batch.cursor, () =>
+      window?.isVisible() && window.isFocused() ? viewingThread : null,
+    )
+  })
+  ipcMain.handle('baton:activity', (event, input: unknown) => {
+    authorize(event)
+    activity = Schema.decodeUnknownSync(TrayActivity)(input)
+    tray.update(status, activity, systemNotificationsDisabled)
+  })
+  ipcMain.handle('baton:viewing-thread', (event, input: unknown) => {
+    authorize(event)
+    viewingThread = Schema.decodeUnknownSync(ViewingThread)(input)
+  })
+  ipcMain.handle('baton:target-unready', (event) => {
+    authorize(event)
+    targetReady = false
+  })
+  ipcMain.handle('baton:target-ready', (event) => {
+    authorize(event)
+    targetReady = true
+    if (pendingTarget) openTarget(pendingTarget)
   })
   ipcMain.handle('baton:status', async (event) => {
     authorize(event)
@@ -394,12 +534,18 @@ async function start() {
   }
   let poll: ReturnType<typeof setInterval> | undefined
   let updatePoll: ReturnType<typeof setInterval> | undefined
+  let permissionPoll: ReturnType<typeof setInterval> | undefined
+  const checkNotificationPermissions = async () => {
+    systemNotificationsDisabled = await notificationsDisabled()
+    tray.update(status, activity, systemNotificationsDisabled)
+  }
   app.on('before-quit', (event) => {
     if (quitting) return
     event.preventDefault()
     quitting = true
     clearInterval(poll)
     clearInterval(updatePoll)
+    clearInterval(permissionPoll)
     void (async () => {
       await serial
       await supervisor.stop()
@@ -421,6 +567,10 @@ async function start() {
   poll = setInterval(() => {
     if (!quitting) void updater!.refresh().then(refresh).catch(reportError)
   }, 1000)
+  void checkNotificationPermissions()
+  permissionPoll = setInterval(() => {
+    if (!quitting) void checkNotificationPermissions()
+  }, 30_000)
   updatePoll = setInterval(
     () => {
       if (!quitting && configuration) void updater!.check().catch(reportError)
