@@ -381,6 +381,27 @@ it.each([undefined, '1'])('直接替换取消后保留 cancelled，轮询和重�
   expect(f.workerKill).not.toHaveBeenCalled()
 })
 
+it('无版本标记的原客户端取消自己的中心版本更新后恢复，重启依据原source_version继续', async () => {
+  const f = await fixture()
+  await f.update.initialize(true)
+  expect(f.update.allowDaemon).toBe(false)
+  await f.update.startUpdate()
+  expect(f.status.state).toMatchObject({ source_version: '1', target_version: '2', phase: 'draining' })
+  await f.update.cancel()
+  expect(f.update.allowDaemon).toBe(true)
+  expect(f.supervisor.start).toHaveBeenCalledOnce()
+  expect(f.sent).toEqual(['original-input'])
+  await rm(f.marker)
+  const restarted = f.create()
+  await restarted.initialize(true)
+  await restarted.refresh()
+  expect(restarted.allowDaemon).toBe(true)
+  expect(await readFile(f.marker, 'utf8')).toBe('1\n')
+  expect(f.batond.prepareSelf).not.toHaveBeenCalled()
+  expect(f.batond.migrate).not.toHaveBeenCalled()
+  expect(f.sent).toEqual(['original-input'])
+})
+
 it('取消占锁的 waiting 在取消成功后清除', async () => {
   const f = await fixture({ marker: '1', state: state('draining') })
   await f.update.initialize(true)

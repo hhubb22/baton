@@ -215,6 +215,7 @@ export class DesktopUpdate<Item = unknown> {
         this.error = null
         this.waiting = null
         this.halted = false
+        await this.recoverCancelledSource()
         if (this.replacement) await this.waitForPreviousVersion()
         else {
           this.activity = 'idle'
@@ -353,6 +354,19 @@ export class DesktopUpdate<Item = unknown> {
     }
   }
 
+  private async recoverCancelledSource() {
+    const state = this.status?.state
+    if (
+      this.replacement &&
+      state?.phase === 'cancelled' &&
+      state.source_version === this.options.version &&
+      state.target_version !== this.options.version
+    ) {
+      await this.saveVersion()
+      this.replacement = false
+    }
+  }
+
   private async waitForPreviousVersion() {
     this.activity = 'waiting'
     this.waiting = {
@@ -378,6 +392,7 @@ export class DesktopUpdate<Item = unknown> {
   }
 
   private async advance(retry = false): Promise<void> {
+    await this.recoverCancelledSource()
     let state = this.status?.state
     if (state?.phase === 'completed' && state.target_version === this.options.version) {
       await this.saveVersion()
