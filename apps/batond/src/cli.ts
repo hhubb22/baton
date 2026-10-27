@@ -1,3 +1,4 @@
+import { BUNDLED, releaseMetadata } from '@baton/protocol/release'
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { realpath } from 'node:fs/promises'
@@ -13,6 +14,7 @@ import { readPrivateFile, writePrivateFileAtomic } from './platform/private.ts'
 
 const usage = `Baton 节点
 
+  --version
   up --coordinator <https://中心> [--workspace <绝对目录>]
   register --coordinator <https://中心> [--enrollment-file <私有文件>]
   reauth [--enrollment-file <私有文件>] [--ca-file <CA证书>]
@@ -49,8 +51,13 @@ open 返回持久接收回执，实际结果通过 command 或 reports 查询。
 
 export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Promise<void> {
   const [action, ...args] = argv
-  if (action === '--version') {
-    console.log(JSON.stringify({ sea: isSea(), platform: process.platform, arch: process.arch, node: process.version }))
+  if (
+    action === '--version' ||
+    (['worker', 'agent-host', 'watchdog', 'project-runtime'].includes(action) &&
+      args.length === 1 &&
+      args[0] === '--version')
+  ) {
+    console.log(JSON.stringify({ ...releaseMetadata(), sea: isSea(), node: process.version }))
     return
   }
   if (action === 'agent-host' && args.length === 1 && args[0] === '--probe') {
@@ -88,7 +95,7 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
     return
   }
   if (action === 'project-runtime') {
-    if (!isSea()) {
+    if (!isSea() && !BUNDLED) {
       const { defaultRuntimeCommand } = await import('./project/runner.ts')
       const command = defaultRuntimeCommand()
       const child = spawn(command.file, [...(command.args ?? []), ...args], {

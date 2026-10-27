@@ -4,7 +4,7 @@
 
 manager 支持 `command(project_run_start|stop|wake)`、`command(project_memory_start|stop)`、`probe()`、`report()`、`subscriptions()`、`login(provider)`、`startDeviceLogin(provider, signal?, onDone?)` 和幂等 `close()`。连接替换会取消旧请求并清除控制回执能力，现有 Runtime 保留到退出或租约失效。manager 关闭时等待进程树回收及后台操作，随后 Scope 关闭 watchdog 与数据库。
 
-SEA 默认命令为当前可执行文件加 `project-runtime` 子命令，watchdog 使用同一可执行文件的 `watchdog` 子命令；选择 SEA 分支后不再查找源码或 tsx。源码开发命令通过 Runtime 包的 tsx loader 启动 `runtimes/project-agent/src/cli.ts`，`--import` 使用 loader 的 file URL，支持 Windows 盘符及包含空格的路径。支持源码与开发 bundle 两种布局，需要已安装的锁定依赖。Runtime 在自身进程内直接读写凭据文件。`runtimeCommand` 可提供其他本地入口，宿主追加 `probe`、`run`、`memory`、`login` 或 `login-device`；环境与当前进程合并。Runtime 的命令处理导出为 `runProjectRuntimeCLI(args)`，模型、工具、恢复与压缩逻辑保持在 Runtime 内。
+SEA 和开发 bundle 默认通过自身的 `project-runtime` 与 `watchdog` 子命令启动进程，保留同一构建身份，不再查找 Runtime 源码或 tsx。源码开发命令通过 Runtime 包的 tsx loader 启动 `runtimes/project-agent/src/cli.ts`，`--import` 使用 loader 的 file URL，支持 Windows 盘符及包含空格的路径。直接源码运行需要保留仓库布局和已安装的锁定依赖。Runtime 在自身进程内直接读写凭据文件。`runtimeCommand` 可提供其他本地入口，宿主追加 `probe`、`run`、`memory`、`login` 或 `login-device`；环境与当前进程合并。Runtime 的命令处理导出为 `runProjectRuntimeCLI(args)`，模型、工具、恢复与压缩逻辑保持在 Runtime 内。
 
 Runtime 通过专用 stdio 交换逐行 JSON，每帧最多 192 KiB、最多 8 个在途请求。stdout 消费者在 spawn 后同步挂接；probe 最多保留配置的输出预算（默认 64 KiB），设备码最多保留 16 KiB，stdio 在进程登记期间有界读取，登记与 SQLite 状态提交完成后才转发业务请求。宿主覆盖 run 和 epoch，只转发业务操作；续租、启动、停止和通知回执由宿主发起。普通 `poll_wake` 合并通用通知；Thread 等待只能使用中心 pending 响应建立的绑定，每 run 最多 64 个绑定。结果返回后删除绑定，并保留同一调用在途响应的最终结果，避免迟到的 pending 恢复绑定。
 

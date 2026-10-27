@@ -20,7 +20,7 @@ pnpm install --frozen-lockfile --ignore-scripts
 node tools/build.mjs
 ```
 
-统一构建从根 workspace 按锁文件安装依赖，构建中心和节点 bundle，再生成 `bin/` 中当前平台的 batond SEA 安装包。安装包包含 `batond`（Windows 为 `batond.exe`）、旁置 `node_modules/`、许可、安装说明及 `package-manifest.json`。设备运行无需安装 Node 或 pnpm，须保留整个安装目录。安装包检查会搬迁产物，在空 PATH 和临时 HOME 下验证 Worker、Agent host、Project Runtime、私有文件及缺失依赖的错误。
+统一构建从根 workspace 按锁文件安装依赖，构建中心和节点 bundle，再生成 `bin/` 中当前平台的 batond SEA 安装包。安装包包含 `batond`（Windows 为 `batond.exe`）、旁置 `node_modules/`、许可、安装说明、`package-manifest.json` 和 `release.json`。设备运行无需安装 Node 或 pnpm，须保留整个安装目录。安装包检查会搬迁产物，在空 PATH 和临时 HOME 下验证 Worker、Agent host、Project Runtime、私有文件及缺失依赖的错误。
 
 中心和节点 bundle 分别位于 `apps/server/dist` 与 `apps/batond/dist`。中心构建生成 `server.cjs`、相邻的 `web/` 和 `migrations/`；启动时须保留这三个部分。设备运行 SEA 时须保留整个安装目录。单独构建与打包的参数见 [工具说明](tools/README.md)，发布布局和验证范围见 [发布设计](specs/release/TECH.md)。产物不提交 Git。
 
@@ -81,7 +81,7 @@ node apps/batond/dist/batond.cjs project-runtime login-api-key anthropic < key-f
 
 `login-api-key` 支持 xAI 和 Anthropic，密钥从设备本地私有文件经标准输入读取；每次输入一个非空单行密钥，最多 16 KiB，允许末尾换行。网页和中心不接收这些密钥。
 
-`login` 接受 provider ID 及 ChatGPT、xAI、Claude 别名，由 Runtime 注册表决定支持范围。Runtime 当前注册 `openai-codex`、`xai`、`anthropic`。登录和守护进程须使用同一系统用户及凭据目录；这些凭据独立于执行 Agent 的原生 CLI 账号。开发 bundle 的 Runtime 依赖仓库布局，安装包入口见 [发布设计](specs/release/TECH.md)。
+`login` 接受 provider ID 及 ChatGPT、xAI、Claude 别名，由 Runtime 注册表决定支持范围。Runtime 当前注册 `openai-codex`、`xai`、`anthropic`。登录和守护进程须使用同一系统用户及凭据目录；这些凭据独立于执行 Agent 的原生 CLI 账号。开发 bundle 的 Runtime 使用同一 bundle 的子命令及构建身份，安装包入口见 [发布设计](specs/release/TECH.md)。
 
 ## 配置参考
 

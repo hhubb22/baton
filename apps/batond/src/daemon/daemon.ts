@@ -1,3 +1,4 @@
+import { BUILD } from '@baton/protocol/release'
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { userInfo } from 'node:os'
@@ -445,7 +446,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
     }
     const report = async (): Promise<RuntimeReport> =>
       boundRuntimeReport({
-        batond_version: '0.0.0',
+        batond_version: BUILD.version,
         ...(username ? { user: username } : {}),
         agents,
         ...deviceReport,

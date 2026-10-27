@@ -1,3 +1,4 @@
+import { BUILD, releaseMetadata } from '@baton/protocol/release.mjs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createModels } from '@earendil-works/pi-ai/models'
@@ -6,7 +7,7 @@ import { xaiProvider } from '@earendil-works/pi-ai/providers/xai'
 import { anthropicProvider } from '@earendil-works/pi-ai/providers/anthropic'
 import { FileCredentials } from './credentials.js'
 
-export const VERSION = '0.1.0'
+export const VERSION = BUILD.version
 // 设备码能力由对应 OAuth 流程决定；其余认证方式和模型直接取自 provider。
 const registrations = [
   { provider: openaiCodexProvider(), deviceCode: true },
@@ -65,7 +66,7 @@ export async function probe(store = credentials()) {
       ...(reason ? { reason } : {}),
     })
   }
-  return { version: VERSION, memory_protocol: 1, providers }
+  return { version: VERSION, release: releaseMetadata(), memory_protocol: 1, providers }
 }
 export async function runtimeModels(store = credentials()) {
   const models = createModels({

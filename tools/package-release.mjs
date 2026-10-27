@@ -4,17 +4,13 @@ import { cp, lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/prom
 import { tmpdir } from 'node:os'
 import { basename, join, resolve, win32 } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { releaseVersion, validateReleaseMetadata } from './lib/release.mjs'
 import { installedExecutable, isolatedEnv, validatePackageLayout } from './lib/installation.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 
 export function releaseTarget(version, platform = process.platform, arch = process.arch) {
-  if (
-    typeof version !== 'string' ||
-    version !== version.trim() ||
-    !/^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/.test(version)
-  )
-    throw new Error('发布版本必须是带 v 前缀的版本号，例如 v0.1.0-alpha.1')
+  releaseVersion(version)
   const target = {
     'linux-x64': 'linux-x64',
     'linux-arm64': 'linux-arm64',
@@ -49,6 +45,7 @@ export function validatePackageManifest(raw, runtime) {
   for (const field of ['platform', 'arch', 'node']) {
     if (manifest[field] !== runtime[field]) throw new Error(`安装包清单与 SEA 的 ${field} 不匹配`)
   }
+  validateReleaseMetadata(manifest.release, runtime)
   if (!Array.isArray(manifest.dependencies) || manifest.dependencies.length === 0)
     throw new Error('安装包清单缺少生产依赖')
   for (const dependency of manifest.dependencies) {
@@ -86,10 +83,8 @@ async function checkCommands(binary, staging) {
 }
 
 export async function packageRelease(version, source = resolve(root, 'bin'), output = resolve(root, 'bin/releases')) {
-  const { name, target, extension } = releaseTarget(version)
+  const { name, extension } = releaseTarget(version)
   await validatePackageLayout(source)
-  const commit = run('git', ['rev-parse', 'HEAD'], { capture: true })
-  const modified = Boolean(run('git', ['status', '--porcelain'], { capture: true }))
   const staging = await mkdtemp(join(tmpdir(), 'baton-release-'))
   const archive = join(staging, name + extension)
   const destination = resolve(output, name + extension)
@@ -98,7 +93,7 @@ export async function packageRelease(version, source = resolve(root, 'bin'), out
     const payload = join(staging, name)
     await mkdir(payload)
     const binary = basename(installedExecutable(payload))
-    for (const entry of [binary, 'node_modules', 'licenses', 'package.json', 'package-manifest.json'])
+    for (const entry of [binary, 'node_modules', 'licenses', 'package.json', 'package-manifest.json', 'release.json'])
       await cp(join(source, entry), join(payload, entry), { recursive: true, verbatimSymlinks: true })
     for (const entry of ['INSTALL.md']) {
       const path = join(source, entry)
@@ -111,17 +106,10 @@ export async function packageRelease(version, source = resolve(root, 'bin'), out
     }
     const batondVersion = await checkCommands(join(payload, binary), staging)
     validatePackageManifest(await readFile(join(payload, 'package-manifest.json'), 'utf8'), batondVersion)
-    const release = {
-      version,
-      commit,
-      modified,
-      target,
-      runtime: 'node-sea',
-      node: batondVersion.node,
-      buildNode: process.version,
-      batondVersion,
-    }
-    await writeFile(join(payload, 'release.json'), JSON.stringify(release, null, 2) + '\n')
+    const release = JSON.parse(await readFile(join(payload, 'release.json'), 'utf8'))
+    validateReleaseMetadata(release, batondVersion, version)
+    if (release.runtime !== 'node-sea' || release.node !== batondVersion.node)
+      throw new Error('发布信息与 SEA 运行时不匹配')
     await mkdir(output, { recursive: true })
     // Windows 显式使用系统 bsdtar，避免 Git Bash 的 GNU tar 生成非 zip 文件。
     const tar = process.platform === 'win32' ? win32.join(process.env.SystemRoot, 'System32', 'tar.exe') : 'tar'

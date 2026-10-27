@@ -53,7 +53,12 @@ const __baton_import_meta_url__ = require('node:url').pathToFileURL(__filename).
     })
     const host = new LocalWorkerHost(directory, { executable: process.execPath, args: [bundle] })
     const status = await host.request(threadId, { type: 'status', ok: false }, { start: true })
-    expect(status).toMatchObject({ ok: true, worker_ready: true, agent_ready: false })
+    expect(status).toMatchObject({
+      ok: true,
+      worker_ready: true,
+      agent_ready: false,
+      release: { version: 'development', commit: 'development' },
+    })
     expect(status.pid).toBeGreaterThan(1)
     worker = await readProcessIdentity(status.pid!)
     expect(worker).not.toBeNull()

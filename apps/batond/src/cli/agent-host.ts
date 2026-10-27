@@ -1,3 +1,4 @@
+import { releaseMetadata, type ReleaseMetadata } from '@baton/protocol/release'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { isSea } from 'node:sea'
@@ -23,6 +24,7 @@ export const runAgentHostCommand = Effect.fn('AgentHost.runAgentHostCommand')(fu
 })
 
 interface HostInstallation {
+  readonly release: ReleaseMetadata
   readonly agents: HostedAgentType[]
   readonly nativeModules: string[]
 }
@@ -45,5 +47,5 @@ export async function inspectAgentHostModules(): Promise<HostInstallation> {
     if (parser.parse('echo baton').rootNode.type !== 'program') throw new Error('Cursor parser failed')
     nativeModules.push('cursor/tree-sitter', 'cursor/tree-sitter-bash')
   }
-  return { agents, nativeModules }
+  return { release: releaseMetadata(), agents, nativeModules }
 }

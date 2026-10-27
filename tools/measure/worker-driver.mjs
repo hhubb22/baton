@@ -119,7 +119,7 @@ async function main() {
       throw error
     }
   }
-  function inspectLedger(path) {
+  function inspectLedger(path, release) {
     const db = new DatabaseSync(path, { readOnly: true })
     try {
       const tables = db
@@ -127,6 +127,8 @@ async function main() {
         .all()
         .map((row) => row.name)
       const expected = [
+        'storage_format',
+        'storage_migrations',
         'thread_commands',
         'thread_messages',
         'thread_meta',
@@ -141,7 +143,18 @@ async function main() {
         throw new Error('Actual Worker migration was not persisted')
       if (db.prepare('PRAGMA journal_mode').get().journal_mode !== 'wal')
         throw new Error('Actual Worker did not persist WAL mode')
-      return { tables, journalMode: 'wal' }
+      const format = db.prepare('SELECT kind,version FROM storage_format WHERE id=1').get()
+      if (format?.kind !== 'thread' || format.version !== release?.ledger_versions.thread)
+        throw new Error('Worker 报告的账本格式与实际记录不匹配')
+      if (
+        db
+          .prepare('SELECT id FROM storage_migrations')
+          .all()
+          .map((row) => row.id)
+          .join(',') !== '0001_baseline'
+      )
+        throw new Error('Worker 账本缺少基线迁移记录')
+      return { tables, journalMode: 'wal', format, release }
     } finally {
       db.close()
     }
@@ -175,6 +188,7 @@ async function main() {
         status.agent_ready === true
       )
         throw new Error('Invalid real authenticated Worker status')
+      sample.release = status.release
       const elapsed = statusAt - sample.spawnedAt
       timings.push(elapsed)
       hostTimings.push(statusAt - started)
@@ -207,7 +221,7 @@ async function main() {
       currentSample = undefined
     }
     if (failure) break
-    ledger = inspectLedger(paths.ledger)
+    ledger = inspectLedger(paths.ledger, sample.release)
     await rm(directory, { recursive: true })
     if ((index + 1) % 10 === 0) console.error('worker-startup: ' + (index + 1) + '/' + samples + ' ready and cleaned')
   }

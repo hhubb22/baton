@@ -19,15 +19,15 @@ node tools/dev/batond.mjs --help
 ## 构建、打包与发布
 
 ```sh
-node tools/build.mjs
+node tools/build.mjs --version v0.1.0-alpha.1 --commit "$(git rev-parse HEAD)"
 node tools/check-package.mjs bin
-node tools/package-batond.mjs --out bin/package
+node tools/package-batond.mjs --out bin/package --version v0.1.0-alpha.1 --commit "$(git rev-parse HEAD)"
 node tools/package-release.mjs v0.1.0-alpha.1 bin/package
 ```
 
-`build.mjs` 安装锁定依赖、检查网页类型、构建中心与节点，再生成 `bin/` SEA 安装包。`package-batond.mjs` 单独构建节点安装包，包含可执行文件、旁置 `node_modules/`、许可和清单；`--node <路径>` 可指定目标平台的官方 Node。
+`build.mjs` 安装锁定依赖、检查网页类型、构建中心与节点，再生成 `bin/` SEA 安装包。统一构建、两个 `build/*.mjs` 与 SEA 打包均接受成对的 `--version` 和 `--commit`；提交须为完整小写 Git 哈希，未指定时版本和提交均为 `development`。身份编译进程序，运行时不通过环境变量覆盖。`package-batond.mjs` 单独构建节点安装包，包含可执行文件、旁置 `node_modules/`、许可、清单和 `release.json`；`--node <路径>` 可指定目标平台的官方 Node。
 
-`package-release.mjs <版本> [安装目录=bin] [输出目录=bin/releases]` 检查布局、帮助、SEA 版本和清单，归档后重新解压并运行 `check-package`。输出对应平台的 tar.gz 或 zip、SHA256 和检查报告。应在目标平台执行发布验证。
+`package-release.mjs <版本> [安装目录=bin] [输出目录=bin/releases]` 检查布局、帮助、SEA 版本和清单，归档后重新解压并运行 `check-package`。输出对应平台的 tar.gz 或 zip、SHA256 和检查报告。归档版本必须等于二进制内的发布版本，源码提交沿用构建输入；归档器不会给开发程序或其他版本重新贴标。`release.json` 保存版本、提交、平台、协议、中心迁移、三类账本格式和支持的 daemon 版本，并与程序输出及清单核对。应在目标平台执行发布验证。
 
 ## 安装包检查
 
@@ -35,7 +35,7 @@ node tools/package-release.mjs v0.1.0-alpha.1 bin/package
 node tools/check-package.mjs bin/package
 ```
 
-`check-package.mjs [安装目录=bin] [--prepared 驱动目录]` 将完整安装包复制到临时目录，检查布局和包内链接，以空 PATH、临时 HOME 和包外工作目录运行。检查包括帮助、SEA 平台与版本、真实 Worker 的认证 IPC 就绪、四个 Agent 模块和原生扩展、Project Runtime 与 memory 模式 stdio 握手、后台请求取消、私有文件与订阅探测，以及移走 `node_modules` 后的明确失败。各项结果输出为 JSON，任一失败时非零退出。
+`check-package.mjs [安装目录=bin] [--prepared 驱动目录]` 将完整安装包复制到临时目录，检查布局和包内链接，以空 PATH、临时 HOME 和包外工作目录运行。检查包括帮助、SEA 平台与版本、发布元数据及各子进程版本/诊断一致性、真实 Worker 的认证 IPC 就绪、四个 Agent 模块和原生扩展、Project Runtime 与 memory 模式 stdio 握手、后台请求取消、私有文件与订阅探测，以及移走 `node_modules` 后的明确失败。各项结果输出为 JSON，任一失败时非零退出。
 
 Cursor 检查按执行环境分别验证：`agent-host --probe` 由 SEA 加载 SDK 及原生模块；SQLite store 检查由隔离的 Node 子进程运行 `verify/cursor-package.mjs`，通过以搬迁安装包为基准的 `createRequire` 加载 `@cursor/sdk/sqlite`，打开并关闭临时 store；ripgrep 和 sandbox helper 的 `--help` 直接执行安装包内的程序。SQLite 子进程检查使用运行工具的 Node，需要 Node 26。检查禁用网络请求，不调用模型；sandbox 的 `--help` 只验证程序能加载。
 

@@ -4,7 +4,7 @@ import { appendFileSync } from 'node:fs'
 
 const [mode, command] = process.argv.slice(2)
 if (command === 'probe') {
-  if (mode === 'bad-probe') console.log('{"version":"0.0.1","providers":[]}')
+  if (mode === 'bad-probe') console.log('{"version":"development","providers":null}')
   else
     console.log(
       JSON.stringify({

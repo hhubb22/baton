@@ -16,11 +16,11 @@ Baton 将 Project Runtime 编入 batond 的单一 Node SEA 可执行文件。安
 | `agent-host <类型> --cwd <目录> --state <目录>` | 独占 Cursor、Pi、Codex 或 Kiro 执行宿主 |
 | `project-runtime <命令>` | Project 的运行、能力报告与订阅登录 |
 
-`batond --version` 返回 JSON `{sea,platform,arch,node}`。`batond agent-host --probe` 离线加载四个 Agent host 模块，输出 `agents:["cursor","pi","codex","kiro"]` 和 `nativeModules` 检查清单。这两个检查不调用模型；模块加载失败会提示检查安装包的 `node_modules` 和平台依赖并非零退出。
+`batond --version` 返回发布版本、提交、平台、协议与存储格式、支持的 daemon 版本，以及 `sea` 和 `node`；未指定构建身份时版本和提交为 `development`。Worker、agent-host、watchdog 与 Project Runtime 的 `--version` 使用同一来源。`batond agent-host --probe` 离线加载四个 Agent host 模块，输出 `agents:["cursor","pi","codex","kiro"]` 和 `nativeModules` 检查清单。这两个检查不调用模型；模块加载失败会提示检查安装包的 `node_modules` 和平台依赖并非零退出。
 
-Project Runtime 支持 `run`、`probe`、`login <provider>`、`login-device <provider>`、`login-api-key <provider>` 和 `--version`。`project-runtime` 后的参数由导出的 `runProjectRuntimeCLI(args)` 处理。Runtime 的 `probe` 返回协议版本 `0.1.0` 与本地订阅状态。
+Project Runtime 支持 `run`、`probe`、`login <provider>`、`login-device <provider>`、`login-api-key <provider>` 和 `--version`。`project-runtime` 后的参数由导出的 `runProjectRuntimeCLI(args)` 处理。Runtime 的 `probe` 返回实际构建版本、`release` 元数据与本地订阅状态。
 
-源码和开发 bundle 通过 Runtime 包安装的 tsx loader 启动源码 CLI 与辅助入口，保留仓库布局和锁定依赖；两种入口共用 `runProjectRuntimeCLI(args)`。SEA 在检查源码路径前选择自身子命令，不要求源码目录。
+源码入口通过 Runtime 包安装的 tsx loader 启动源码 CLI 与辅助入口，保留仓库布局和锁定依赖。开发 bundle 和 SEA 均通过自身子命令启动 Runtime 与 watchdog，保留同一构建身份；源码与编译入口共用 `runProjectRuntimeCLI(args)`。
 
 ## stdio
 

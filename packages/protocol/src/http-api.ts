@@ -19,6 +19,7 @@ import { EnrollmentResponse, DefaultDeviceResponse } from './device.ts'
 import { Diagnostics } from './common.ts'
 import * as Q from './http.ts'
 import { ThreadAnswerInput } from './thread-question.ts'
+import { ReleaseMetadata } from './release.ts'
 import { UUID, NonNegativeInteger } from './common.ts'
 
 export { SessionResponse } from './auth.ts'
@@ -86,6 +87,7 @@ const threadCreation = <const Status extends number>(status: Status) =>
 
 const Public = HttpApiGroup.make('public')
   .add(
+    Endpoint.get('release', '/api/v1/release', { success: ReleaseMetadata }),
     Endpoint.post('login', '/api/v1/login', {
       payload: A.LoginInput,
       success: HttpApiSchema.WithHeaders(SessionResponse, cookie),

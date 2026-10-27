@@ -1,3 +1,4 @@
+import { LEDGER_VERSIONS } from '@baton/protocol/release'
 import { createHash } from 'node:crypto'
 import { statSync } from 'node:fs'
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite'
@@ -18,9 +19,11 @@ export class StorageFormatError extends Error {
 const unsupported = (kind: string): never => {
   throw new StorageFormatError('storage_version_unsupported', `${kind} 账本格式未知、损坏或不受支持`)
 }
+const formatVersion = (kind: string) =>
+  Object.hasOwn(LEDGER_VERSIONS, kind) ? LEDGER_VERSIONS[kind as keyof typeof LEDGER_VERSIONS] : unsupported(kind)
 const checksum = (kind: string, statements: readonly string[]) =>
   createHash('sha256')
-    .update(JSON.stringify({ kind, version: 1, payloadVersion: 1, statements }))
+    .update(JSON.stringify({ kind, version: formatVersion(kind), payloadVersion: 1, statements }))
     .digest('hex')
 
 function validate(meta: readonly Row[], migrations: readonly Row[], kind: string, statements: readonly string[]) {
@@ -28,7 +31,7 @@ function validate(meta: readonly Row[], migrations: readonly Row[], kind: string
     meta.length !== 1 ||
     meta[0]!.id !== 1 ||
     meta[0]!.kind !== kind ||
-    meta[0]!.version !== 1 ||
+    meta[0]!.version !== formatVersion(kind) ||
     migrations.length !== 1 ||
     migrations[0]!.id !== '0001_baseline'
   )
@@ -99,7 +102,7 @@ export const initializeStorage = Effect.fnUntraced(function* (
       for (const statement of statements) yield* sql.unsafe(statement)
       yield* sql`CREATE TABLE storage_format (id INTEGER PRIMARY KEY CHECK(id=1), kind TEXT NOT NULL, version INTEGER NOT NULL)`
       yield* sql`CREATE TABLE storage_migrations (id TEXT PRIMARY KEY, checksum TEXT NOT NULL, applied_at TEXT NOT NULL)`
-      yield* sql`INSERT INTO storage_format VALUES (1, ${kind}, 1)`
+      yield* sql`INSERT INTO storage_format VALUES (1, ${kind}, ${formatVersion(kind)})`
       yield* sql`INSERT INTO storage_migrations VALUES ('0001_baseline', ${checksum(kind, statements)}, strftime('%Y-%m-%dT%H:%M:%fZ','now'))`
     }),
   )

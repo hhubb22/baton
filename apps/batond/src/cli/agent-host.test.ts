@@ -1,3 +1,4 @@
+import { releaseMetadata } from '@baton/protocol/release'
 import { Effect } from 'effect'
 import { beforeEach, expect, it, vi } from 'vite-plus/test'
 
@@ -42,6 +43,6 @@ it('rejects unknown types before loading, isolates selected hosts and inspects e
   const agents = Object.entries(agentCatalog)
     .filter(([, agent]) => agent.kind === 'hosted')
     .map(([type]) => type)
-  expect(await inspectAgentHostModules()).toEqual({ agents, nativeModules: [] })
+  expect(await inspectAgentHostModules()).toEqual({ agents, nativeModules: [], release: releaseMetadata() })
   expect(loaded).toEqual(new Set(agents))
 })

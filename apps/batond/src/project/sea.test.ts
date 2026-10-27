@@ -1,3 +1,4 @@
+import { releaseMetadata } from '@baton/protocol/release'
 import { expect, it, vi } from 'vite-plus/test'
 import { currentBatondCommand } from '../daemon/host.ts'
 import { runBatondCLI } from '../cli.ts'
@@ -21,12 +22,17 @@ it('reports the embedded Node and dispatches Runtime arguments independently of 
     expect(JSON.parse(output.mock.calls[0]![0] as string)).toEqual({
       sea: true,
       node: process.version,
-      platform: process.platform,
-      arch: process.arch,
+      ...releaseMetadata(),
     })
-    output.mockClear()
-    await runBatondCLI(['project-runtime', '--version'])
-    expect(output).toHaveBeenCalledWith('0.1.0')
+    for (const role of ['worker', 'agent-host', 'watchdog', 'project-runtime']) {
+      output.mockClear()
+      await runBatondCLI([role, '--version'])
+      expect(JSON.parse(output.mock.calls[0]![0] as string)).toEqual({
+        ...releaseMetadata(),
+        sea: true,
+        node: process.version,
+      })
+    }
   } finally {
     output.mockRestore()
   }

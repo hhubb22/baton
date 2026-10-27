@@ -1,3 +1,4 @@
+import { releaseMetadata } from '@baton/protocol/release'
 import { chmod, lstat, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Deferred, Effect } from 'effect'
@@ -115,7 +116,9 @@ export const runWorker = (options: {
           return yield* worker.handle(request)
         })
         return handle.pipe(
-          Effect.map((result) => (request.type === 'status' ? { ...result, pid: process.pid } : result)),
+          Effect.map((result) =>
+            request.type === 'status' ? { ...result, pid: process.pid, release: releaseMetadata() } : result,
+          ),
         )
       },
     })

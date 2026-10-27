@@ -1,4 +1,6 @@
 import { build } from 'esbuild'
+import { parseArgs } from 'node:util'
+import { buildInfo } from '../lib/release.mjs'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { mkdir, readFile, readdir, copyFile } from 'node:fs/promises'
@@ -7,7 +9,8 @@ import { fileURLToPath } from 'node:url'
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 
-export async function buildServer(output = join(repository, 'apps/server/dist/server.cjs')) {
+export async function buildServer(output = join(repository, 'apps/server/dist/server.cjs'), release = {}) {
+  const identity = buildInfo(release)
   await promisify(execFile)(
     'pnpm',
     ['--dir', join(repository, 'web'), 'exec', 'vp', 'build', '--outDir', join(dirname(output), 'web')],
@@ -21,7 +24,7 @@ export async function buildServer(output = join(repository, 'apps/server/dist/se
     platform: 'node',
     target: 'node26',
     format: 'cjs',
-    define: { 'import.meta.url': '__baton_import_meta_url__' },
+    define: { 'import.meta.url': '__baton_import_meta_url__', __BATON_BUILD__: JSON.stringify(identity) },
     banner: { js: 'const __baton_import_meta_url__ = require("node:url").pathToFileURL(__filename).href;' },
     logLevel: 'silent',
   })
@@ -36,5 +39,11 @@ export async function buildServer(output = join(repository, 'apps/server/dist/se
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  console.log(await buildServer(process.argv[2] ? resolve(process.argv[2]) : undefined))
+  const { values, positionals } = parseArgs({
+    options: { version: { type: 'string' }, commit: { type: 'string' } },
+    allowPositionals: true,
+  })
+  if (positionals.length > 1)
+    throw new Error('用法：node tools/build/server.mjs [输出路径] [--version 版本 --commit 提交]')
+  console.log(await buildServer(positionals[0] ? resolve(positionals[0]) : undefined, values))
 }

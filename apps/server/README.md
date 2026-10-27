@@ -8,6 +8,8 @@
 
 中心构建生成 bundle、相邻的网页和 SQL 迁移，输出布局见 [工具说明](../../tools/README.md#本地开发)。环境要求、账号、HTTPS、设备接入和通用配置见 [根文档](../../README.md)。
 
+`node server.cjs --version` 无需数据库配置即可输出构建版本、提交、平台、协议与格式版本；默认身份为 `development`。公开只读的 `GET /api/v1/release` 返回相同发布元数据，无需登录，不访问或续期设备凭据；已登录诊断的 `release` 字段与其一致。构建参数见工具说明，连接时的节点版本核对尚未实现。
+
 数据库迁移按文件版本记录，在事务 advisory lock 内串行执行；`serve`、`migrate` 和账号管理都会先执行并核对迁移。时间配置接受整数加 `ms`、`s`、`m`、`h`。
 
 控制操作共用 4 个数据库执行名额。等待名额与开始执行分别计时，排队不会消耗执行预算。每项操作可通过 `BATON_CONTROL_<操作>_QUEUE_TIMEOUT` 和 `BATON_CONTROL_<操作>_EXECUTION_TIMEOUT` 单独配置，例如 `BATON_CONTROL_REPORT_EXECUTION_TIMEOUT=30s`。排队默认均为 `2s`，可设为 100 ms 至 60 秒；执行可设为 100 ms 至 120 秒，默认如下：

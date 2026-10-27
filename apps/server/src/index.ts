@@ -1,3 +1,4 @@
+import { releaseMetadata } from '@baton/protocol/release'
 import { parseArgs } from 'node:util'
 import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -13,6 +14,7 @@ import { controlConfiguration, duration } from './server-config.ts'
 
 const usage = `Baton Coordinator（TypeScript 开发入口）
 
+  --version
   serve
   migrate
   admin employee create --username <用户名> --display-name <显示名>
@@ -30,6 +32,10 @@ async function main() {
   const args = process.argv.slice(2)
   if (!args.length || ['help', '--help', '-h'].includes(args[0])) {
     console.log(usage)
+    return
+  }
+  if (args.length === 1 && args[0] === '--version') {
+    console.log(JSON.stringify({ ...releaseMetadata(), node: process.version }))
     return
   }
   const url = process.env.BATON_DATABASE_URL?.trim()
@@ -117,7 +123,9 @@ async function main() {
           webDirectory: process.env.BATON_WEB_DIR || join(dirname(fileURLToPath(import.meta.url)), 'web'),
           ...(tls ? { tls } : {}),
         })
-        console.log(JSON.stringify({ event: 'listening', host: server.host, port: server.port }))
+        console.log(
+          JSON.stringify({ event: 'listening', host: server.host, port: server.port, release: releaseMetadata() }),
+        )
         yield* Effect.never
       }),
     )

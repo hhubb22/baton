@@ -6,7 +6,7 @@
 
 ## 开发入口
 
-环境要求、安装和构建命令见 [AGENTS.md](../../AGENTS.md#常用构建与验证命令)，参数见 [工具说明](../../tools/README.md#本地开发)。统一入口为 `src/index.ts`，调用 `src/cli.ts` 导出的 `runBatondCLI(args)`；开发 bundle 的 Project Runtime 与辅助进程使用该 Runtime 包解析的 tsx loader。
+环境要求、安装和构建命令见 [AGENTS.md](../../AGENTS.md#常用构建与验证命令)，参数见 [工具说明](../../tools/README.md#本地开发)。统一入口为 `src/index.ts`，调用 `src/cli.ts` 导出的 `runBatondCLI(args)`；开发 bundle 的 Project Runtime 与 watchdog 使用同一 bundle 的子命令，直接源码运行使用 Runtime 包解析的 tsx loader。
 
 显式设置 `CURSOR_API_KEY` 后运行 probe。它在独立 host 中核查 SDK 与辅助程序，调用公开的认证、模型查询接口，不建立执行会话、不发送 prompt、不打开登录浏览器。SDK 安装完整且认证未明确缺失时报告 `available`，版本和系统不限制新建；平台资产不完整、辅助程序不可执行或 sandbox 检查明确失败时报告不可用原因。只有 `available` 且 `capabilities.create` 为 true 时，CLI 才允许新建。凭据只经子进程环境传递，不写入配置、命令、报告或日志。
 
@@ -21,7 +21,7 @@
 ./batond project-runtime login-api-key anthropic < key-file
 ```
 
-`--version` 输出 JSON，包含 `sea`、`platform`、`arch`、`node`。`agent-host --probe` 加载四个 host 模块，SEA 中同时加载 keyring 和 Cursor 的 tree-sitter 原生扩展，输出 `agents` 与 `nativeModules`；不读取系统钥匙串、不进行认证或模型请求。模块加载失败时非零退出并提示检查安装包的 `node_modules` 与平台依赖。`project-runtime` 后的参数直接传给 Runtime，支持 `run`、`probe`、`login`、`login-device`、`login-api-key` 和 `--version`。
+`--version` 输出 JSON，包含发布版本、提交、平台、协议和存储格式、支持的 daemon 版本，以及 `sea`、`node`。`worker --version`、`agent-host --version`、`watchdog --version` 和 `project-runtime --version` 返回同一份身份；未指定构建身份时为 `development`。Worker status、Agent host 和 Runtime probe 的 `release` 字段使用同一来源。`agent-host --probe` 加载四个 host 模块，SEA 中同时加载 keyring 和 Cursor 的 tree-sitter 原生扩展，输出 `agents`、`nativeModules` 与 `release`；不读取系统钥匙串、不进行认证或模型请求。模块加载失败时非零退出并提示检查安装包的 `node_modules` 与平台依赖。`project-runtime` 后的参数直接传给 Runtime，支持 `run`、`probe`、`login`、`login-device`、`login-api-key` 和 `--version`。
 
 `worker`、`watchdog`、和 `agent-host <类型> --cwd <目录> --state <目录>` 是内部进程入口，由宿主管理生命周期。POSIX 使用 watchdog 回收已登记的进程组，依赖系统 `/bin/ps`；Linux 的最小容器需要安装 `procps`。Windows 使用持久进程身份与 taskkill 回收。
 

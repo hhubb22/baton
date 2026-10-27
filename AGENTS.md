@@ -47,7 +47,7 @@ pnpm --filter @baton/server build
 pnpm --filter @baton/batond build
 ```
 
-单独打包使用 `node tools/package-batond.mjs --out bin`，随后运行 `node tools/check-package.mjs bin`，在搬迁目录、空 PATH 和临时 HOME 下检查 Worker、Agent host、Project Runtime 和私有文件。bundle 与 SEA 安装包的布局、附带依赖和验证范围见 [发布设计](specs/release/TECH.md#打包与发布)。开发 bundle 的 Project Runtime 仍从源码与已安装依赖启动。
+单独打包使用 `node tools/package-batond.mjs --out bin`，随后运行 `node tools/check-package.mjs bin`，在搬迁目录、空 PATH 和临时 HOME 下检查 Worker、Agent host、Project Runtime 和私有文件。bundle 与 SEA 安装包的布局、附带依赖和验证范围见 [发布设计](specs/release/TECH.md#打包与发布)。开发 bundle 的 Project Runtime 和 watchdog 从同一 bundle 的子命令启动；直接源码入口使用 Runtime 包的 tsx loader。发布构建在统一构建或单包构建时成对传入 `--version <版本> --commit <完整提交>`，默认身份为 `development`。
 
 仅验证远程开发链路时：
 

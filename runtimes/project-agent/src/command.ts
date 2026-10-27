@@ -1,8 +1,9 @@
+import { releaseMetadata } from '@baton/protocol/release.mjs'
 import { createConnection } from 'node:net'
 import { createInterface } from 'node:readline/promises'
 import { parseArgs } from 'node:util'
 import { StdioClient, frames, writeFrame } from './stdio.js'
-import { probe, runtimeModels, VERSION, registeredProvider, loginApiKey } from './auth.js'
+import { probe, runtimeModels, registeredProvider, loginApiKey } from './auth.js'
 import { checkedRPC, type Request } from './protocol.js'
 import { createDeviceCodeLoginInteraction, createLoginInteraction } from './login.js'
 
@@ -23,7 +24,7 @@ async function ipc(request: Request): Promise<unknown> {
 export async function runProjectRuntimeCLI(args: string[]): Promise<void> {
   const [command, provider] = args
   if (command === '--version') {
-    console.log(VERSION)
+    console.log(JSON.stringify(releaseMetadata()))
     return
   }
   if (command === 'probe') {

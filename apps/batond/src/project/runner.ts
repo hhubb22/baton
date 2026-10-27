@@ -1,3 +1,4 @@
+import { BUNDLED } from '@baton/protocol/release'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -27,7 +28,8 @@ const runtimeEntry = (): URL => {
   return entry
 }
 export const defaultWatchdogCommand = (): ProcessCommand => {
-  if (isSea()) return { file: process.execPath, args: ['watchdog'] }
+  if (isSea() || BUNDLED)
+    return { file: process.execPath, args: [...(isSea() ? [] : [fileURLToPath(import.meta.url)]), 'watchdog'] }
   const entry = runtimeEntry()
   const require = createRequire(entry)
   return {
@@ -40,10 +42,10 @@ export const defaultWatchdogCommand = (): ProcessCommand => {
   }
 }
 export const defaultRuntimeCommand = (): ProcessCommand => {
-  if (isSea())
+  if (isSea() || BUNDLED)
     return {
       file: process.execPath,
-      args: ['project-runtime'],
+      args: [...(isSea() ? [] : [fileURLToPath(import.meta.url)]), 'project-runtime'],
     }
   const entry = runtimeEntry()
   const require = createRequire(entry)
@@ -168,9 +170,9 @@ export class RuntimeRunner {
       const value = Schema.decodeUnknownSync(ProjectRuntime)(
         JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)),
       )
-      if (value.version !== '0.1.0' || value.providers === null) {
+      if (value.providers === null) {
         this.lastProbe = undefined
-        throw new Error('Project Runtime 状态报告无效或版本不匹配')
+        throw new Error('Project Runtime 状态报告无效')
       }
       const report: ProjectRuntime = {
         ...value,

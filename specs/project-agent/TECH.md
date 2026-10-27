@@ -307,7 +307,7 @@ batond 在连接时和能力变化时上报 `node_runtime_reports.report`，结�
 ```json
 {
   "project_runtime": {
-    "version": "0.1.0",
+    "version": "development",
     "providers": [{ "provider": "openai-codex", "status": "available" }]
   },
   "exec": { "enabled": true, "shell": "zsh", "user": "<节点运行用户>" },
@@ -328,7 +328,7 @@ batond 通过 Gateway 的控制队列传送 `node.runtime_report`，正文为 `{
 
 `batond project-exec --enabled=true|false [--shell 路径] [--data-dir 目录]` 原子保存本机 `project-exec.json`。必须显式给出开关，初始值为关闭；默认 shell 在 Windows 为 `pwsh`，其他系统采用 `SHELL`，未设置时为 `/bin/sh`。配置损坏或权限检查失败时上报关闭。浏览器通过 `PUT /api/v1/nodes/{id}/project-exec` 提交 `{enabled}`，Coordinator 校验归属与当前已同步连接，再经 Gateway 发送 `node.project_exec_set`。设备在同一文件锁内保留本机 shell、原子保存并回读开关，以 `node.project_exec_result` 返回 `operation_id`、`ok` 和确认后的 `exec`（含可取得的 `user`）。Coordinator 核对操作、连接、开关值及吊销状态后才返回成功；超时不记作成功，也不自动重发，客户端重新读取设备报告。配置事实随后由能力报告同步。Session Worker 在启动命令前重新读取开关。CLI 和节点页面在开启前说明当前用户权限、任意命令、没有沙箱和注入风险。
 
-`baton-project-runtime probe` 的 stdout 契约是一个 JSON 对象：`{ "version": "0.1.0", "providers": [{ "provider": "openai-codex", "status": "available", "models": [...] }] }`。每个 provider 可选上报 `login_methods:["oauth","api_key","device_code"]` 和 `models:[{id,name}]`，模型最多 64 项，ID 不重复；缺省表示未上报对应能力。Runtime 当前支持 `openai-codex`、`xai` 和 `anthropic`，目录直接来自 pi-ai 注册 provider 的 `getModels()`。OAuth 需具备 access/refresh，API key 需为非空且 provider 确实实现 API key 认证，才报告 `available`。`probe` 只读取本地凭据与目录，不刷新 OAuth、不请求在线模型列表，也不发送推理请求。状态只接受 `available`、`login_required`、`unknown`，最多 32 个 provider，provider 名称和 Runtime 版本不超过 128 个 ASCII 字符（字母、数字、点、下划线、加号、连字符）。batond 每轮调用一次 `probe`，默认时限 5 秒，stdout 缓冲最多 64 KiB，丢弃 stderr；设备私有配置 `project-runtime.json` 中的 `probeTimeoutMs`、`probeMaxOutputBytes` 可调整这两个预算，`maxConcurrentProjects` 设置本机项目并发，默认 4，并通过能力报告供中心调度使用。`maxOutputTokens` 和 `maxModelCalls` 分别设置输出 token 与每次运行的模型调用预算，默认 32000 和 64，节点启动时传给 Runtime。忽略 probe 未知字段，仍检查必填字段、版本、编码、单个 JSON 文档和容量。临时探测失败时，运行命令与凭据文件元数据未变化才复用上次成功报告，保留原 `probed_at` 并标 `stale` 与 `probe_error`；首次探测失败仍省略 `project_runtime`。运行入口缺失或变化、凭据增删和权限变化立即使缓存失效，实际启动始终重新探测。
+`baton-project-runtime probe` 的 stdout 契约是一个 JSON 对象：`{ "version": "development", "providers": [{ "provider": "openai-codex", "status": "available", "models": [...] }] }`。`version` 为实际构建版本，额外的 `release` 字段保存与中心、batond 同源的发布元数据，未指定构建身份时为 `development`。每个 provider 可选上报 `login_methods:["oauth","api_key","device_code"]` 和 `models:[{id,name}]`，模型最多 64 项，ID 不重复；缺省表示未上报对应能力。Runtime 当前支持 `openai-codex`、`xai` 和 `anthropic`，目录直接来自 pi-ai 注册 provider 的 `getModels()`。OAuth 需具备 access/refresh，API key 需为非空且 provider 确实实现 API key 认证，才报告 `available`。`probe` 只读取本地凭据与目录，不刷新 OAuth、不请求在线模型列表，也不发送推理请求。状态只接受 `available`、`login_required`、`unknown`，最多 32 个 provider，provider 名称和 Runtime 版本不超过 128 个 ASCII 字符（字母、数字、点、下划线、加号、连字符）。batond 每轮调用一次 `probe`，默认时限 5 秒，stdout 缓冲最多 64 KiB，丢弃 stderr；设备私有配置 `project-runtime.json` 中的 `probeTimeoutMs`、`probeMaxOutputBytes` 可调整这两个预算，`maxConcurrentProjects` 设置本机项目并发，默认 4，并通过能力报告供中心调度使用。`maxOutputTokens` 和 `maxModelCalls` 分别设置输出 token 与每次运行的模型调用预算，默认 32000 和 64，节点启动时传给 Runtime。忽略 probe 未知字段，仍检查必填字段、版本字段格式、编码、单个 JSON 文档和容量。临时探测失败时，运行命令与凭据文件元数据未变化才复用上次成功报告，保留原 `probed_at` 并标 `stale` 与 `probe_error`；首次探测失败仍省略 `project_runtime`。运行入口缺失或变化、凭据增删和权限变化立即使缓存失效，实际启动始终重新探测。
 
 ### 9. Thread 操作与回复回收
 

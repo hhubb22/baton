@@ -1,4 +1,5 @@
 import { Schema } from 'effect'
+import { ReleaseMetadata } from './release.ts'
 
 const encoder = new TextEncoder()
 
@@ -87,6 +88,7 @@ export const OKResponse = Schema.Struct({
 export type OKResponse = typeof OKResponse.Type
 
 export const Diagnostics = Schema.Struct({
+  release: ReleaseMetadata,
   nodes: NonNegativeInteger,
   browsers: NonNegativeInteger,
   pending_rpc: NonNegativeInteger,

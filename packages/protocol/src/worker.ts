@@ -1,4 +1,5 @@
 import { Schema } from 'effect'
+import { ReleaseMetadata } from './release.ts'
 import { TraceContext } from './trace.ts'
 import { ThreadAnswerInput } from './thread-question.ts'
 import {
@@ -115,6 +116,7 @@ export const WorkerIPCMessage = Schema.Struct({
   code: Schema.optionalKey(summary(128)),
   message: Schema.optionalKey(boundedText(4096)),
   pid: Schema.optionalKey(Integer),
+  release: Schema.optionalKey(ReleaseMetadata),
   session_id: Schema.optionalKey(UUID),
   payload: Schema.optionalKey(boundedText(64 * 1024)),
   event_id: Schema.optionalKey(UUID),

@@ -80,7 +80,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           pnpm test
-          pnpm --filter @baton/server build
+          pnpm --filter @baton/server build --version "$RELEASE_VERSION" --commit "$GITHUB_SHA"
       - name: Native node and Runtime tests
         if: runner.os != 'Linux'
         continue-on-error: ${{ runner.os == 'Windows' }}
@@ -97,7 +97,7 @@ jobs:
       - name: Build native SEA package
         run: |
           mkdir -p bin/releases
-          node tools/package-batond.mjs --out bin/package > bin/releases/package-build.json
+          node tools/package-batond.mjs --out bin/package --version "$RELEASE_VERSION" --commit "$GITHUB_SHA" > bin/releases/package-build.json
       - name: Check installed package
         run: node tools/check-package.mjs bin/package > bin/releases/package-check.json
       - name: Measure Worker startup and FULL ledger

@@ -3,6 +3,8 @@ import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
+import { releaseMetadata } from '../packages/protocol/src/release.mjs'
+import { buildInfo, validateReleaseMetadata } from './lib/release.mjs'
 import { archiveArgs, releaseTarget, validatePackageManifest, validateSeaVersion } from './package-release.mjs'
 import { validatePackageLayout, withTemporaryInstallation } from './lib/installation.mjs'
 
@@ -36,9 +38,11 @@ test('SEA 必须报告原生目标与内置 Node，开发入口不能作为发�
 })
 
 test('安装包清单与 SEA 的实际系统、架构和 Node 一致，并携带依赖来源', () => {
-  const runtime = { sea: true, platform: 'darwin', arch: 'arm64', node: 'v26.11.1' }
+  const release = releaseMetadata({ version, commit: 'a'.repeat(40) }, 'darwin', 'arm64')
+  const runtime = { ...release, sea: true, node: 'v26.11.1' }
   const manifest = {
     format: 'node-sea',
+    release,
     platform: runtime.platform,
     arch: runtime.arch,
     node: runtime.node,
@@ -49,6 +53,28 @@ test('安装包清单与 SEA 的实际系统、架构和 Node 一致，并携带
     assert.throws(() => validatePackageManifest(JSON.stringify({ ...manifest, [field]: 'wrong' }), runtime))
   for (const dependencies of [undefined, [], [{}]])
     assert.throws(() => validatePackageManifest(JSON.stringify({ ...manifest, dependencies }), runtime), /依赖/)
+})
+
+test('发布身份完整指定，元数据和程序不符或为旧程序重新贴标时拒绝发布', () => {
+  assert.deepEqual(buildInfo(), { version: 'development', commit: 'development' })
+  const identity = { version, commit: 'a'.repeat(40) }
+  assert.deepEqual(buildInfo(identity), identity)
+  for (const input of [
+    { version },
+    { commit: identity.commit },
+    { ...identity, commit: 'abc' },
+    { ...identity, commit: identity.commit + '\n' },
+  ])
+    assert.throws(() => buildInfo(input))
+  const actual = releaseMetadata(identity, 'linux', 'x64')
+  assert.deepEqual(validateReleaseMetadata({ ...actual }, actual, version), actual)
+  assert.throws(() => validateReleaseMetadata(actual, actual, 'v0.2.0'), /重新贴标/)
+  for (const field of Object.keys(actual)) {
+    assert.throws(() => validateReleaseMetadata({ ...actual, [field]: 'wrong' }, actual), /不匹配/)
+    const missing = { ...actual }
+    delete missing[field]
+    assert.throws(() => validateReleaseMetadata(missing, actual))
+  }
 })
 
 test('版本输入拒绝路径、命令及不完整版本号', () => {
@@ -65,6 +91,7 @@ test('版本输入拒绝路径、命令及不完整版本号', () => {
     '../v0.1.0',
     'v0.1.0\n',
     'v0.1.0\r\n',
+    'v0.1.0-' + 'a'.repeat(128),
   ])
     assert.throws(() => releaseTarget(value, 'linux', 'x64'))
 })

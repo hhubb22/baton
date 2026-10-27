@@ -1,4 +1,5 @@
 export * from './common.ts'
+export * from './release.ts'
 export * from './project-providers.ts'
 export * from './thread-question.ts'
 export * from './full-output.ts'

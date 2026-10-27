@@ -38,6 +38,7 @@ export const httpHandlers = (options: HTTPOptions) => {
     projectHttpHandlers(),
     HttpApiBuilder.group(BatonHttpApi, 'public', (handlers) =>
       handlers
+        .handle('release', () => Effect.succeed(P.releaseMetadata()))
         .handle('login', ({ payload }) =>
           httpBusiness(
             Effect.gen(function* () {
@@ -355,7 +356,11 @@ export const httpHandlers = (options: HTTPOptions) => {
               count: number
             }>`SELECT status,count(*)::integer AS count
         FROM threads WHERE employee_id=${employee.id}::uuid GROUP BY status ORDER BY status`
-            return { ...options.gateway().diagnostics(employee.id), thread_statuses: statuses }
+            return {
+              ...options.gateway().diagnostics(employee.id),
+              release: P.releaseMetadata(),
+              thread_statuses: statuses,
+            }
           }),
         ),
       ),

@@ -517,6 +517,9 @@ importers:
 
   runtimes/project-agent:
     dependencies:
+      '@baton/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
       '@earendil-works/pi-agent-core':
         specifier: 1.3.0
         version: 1.3.0(@aws-sdk/credential-provider-node@3.972.88)(@smithy/signature-v4@5.7.4)(undici@8.12.3)(ws@8.22.0)(zod@3.25.76)

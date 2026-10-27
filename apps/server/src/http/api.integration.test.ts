@@ -136,6 +136,30 @@ afterAll(async () => {
   if (directory) await rm(directory, { recursive: true, force: true })
 })
 
+it('serves only public release metadata without authentication or device credential changes', async () => {
+  const credentials = () =>
+    database.run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        return yield* sql`SELECT to_jsonb(c) AS value FROM node_credentials c ORDER BY id`
+      }),
+    )
+  const before = await credentials()
+  const response = await request('/api/v1/release', 'GET', undefined, {
+    cookie: 'baton_session=invalid',
+    authorization: 'Bearer invalid',
+    origin: 'https://other.local',
+  })
+  expect(response.status).toBe(200)
+  expect(response.headers.get('cache-control')).toBe('no-store')
+  expect(response.headers.get('set-cookie')).toBeNull()
+  expect(await response.json()).toEqual(P.releaseMetadata())
+  expect(await credentials()).toEqual(before)
+  await login(password)
+  expect((await request('/api/v1/release')).status).toBe(200)
+  expect(await credentials()).toEqual(before)
+})
+
 it('preserves login, password, origin and CSRF gates before decoding endpoint requests', async () => {
   const rejected = await request('/api/v1/login', 'POST', {}, { origin: 'https://other.local' })
   expect(rejected.status).toBe(403)
@@ -187,7 +211,9 @@ it('validates payloads, queries, paths, response shapes and available feature ro
   expect((await request(`/api/v1/nodes/${nodeId}`)).status).toBe(200)
   expect((await request(`/api/v1/nodes/${nodeId}/files`)).status).toBe(200)
   expect((await request('/api/v1/me/default-device', 'PUT', { node_id: nodeId })).status).toBe(200)
-  expect((await request('/api/v1/diagnostics')).status).toBe(200)
+  const diagnostics = await request('/api/v1/diagnostics')
+  expect(diagnostics.status).toBe(200)
+  expect(Schema.decodeUnknownSync(P.Diagnostics)(await diagnostics.json()).release).toEqual(P.releaseMetadata())
   expect((await request('/api/v1/threads')).status).toBe(200)
   for (const path of ['/api/v1/projects', '/api/v1/inbox']) {
     const response = await request(path)

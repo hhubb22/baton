@@ -1,4 +1,5 @@
 import { Schema } from 'effect'
+import { PROTOCOL_VERSION } from './release.mjs'
 import { UUID, Text, jsonLimit, summary } from './common.ts'
 import { MaxMessageBytes } from './constants.ts'
 import {
@@ -43,7 +44,7 @@ export const Source = Schema.Struct({
 export type Source = typeof Source.Type
 
 export const Envelope = Schema.Struct({
-  version: Schema.Literal(1),
+  version: Schema.Literal(PROTOCOL_VERSION),
   message_id: UUID,
   route: Route,
   priority: Schema.Literals(['control', 'output', '']),

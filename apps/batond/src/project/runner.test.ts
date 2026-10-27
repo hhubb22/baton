@@ -206,16 +206,16 @@ it('retains a timestamped report after probe timeout and invalidates it when cre
 it('probes the existing Runtime source CLI using only an empty local credential directory', async () => {
   const manager = await open('idle', true)
   const report = await manager.probe()
-  expect(report.version).toBe('0.1.0')
+  expect(report.version).toBe('development')
   expect(report.providers?.map((p) => [p.provider, p.status])).toEqual([
     ['anthropic', 'login_required'],
     ['openai-codex', 'login_required'],
     ['xai', 'login_required'],
   ])
 }, 30000)
-it('rejects incompatible probes and omits invalid runtime reports', async () => {
+it('rejects invalid probes and omits invalid runtime reports', async () => {
   const manager = await open('bad-probe')
-  await expect(manager.probe()).rejects.toThrow('版本不匹配')
+  await expect(manager.probe()).rejects.toThrow('状态报告无效')
   expect(await manager.report()).toBeUndefined()
 })
 it('keeps device login running after code delivery, replaces the same provider and refreshes on exit', async () => {

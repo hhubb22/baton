@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
+import { buildInfo } from './lib/release.mjs'
+import { releaseMetadata } from '../packages/protocol/src/release.mjs'
 import { buildBatond } from './build/batond.mjs'
 import {
   bundledPackages,
@@ -31,7 +33,13 @@ export async function nodeTarget(binary) {
   return { platform, arch }
 }
 
-export async function packageBatond({ output = join(repository, 'bin'), node = process.execPath } = {}) {
+export async function packageBatond({
+  output = join(repository, 'bin'),
+  node = process.execPath,
+  version: releaseVersion,
+  commit,
+} = {}) {
+  const identity = buildInfo({ version: releaseVersion, commit })
   output = resolve(output)
   node = resolve(node)
   const target = await nodeTarget(node)
@@ -47,6 +55,7 @@ export async function packageBatond({ output = join(repository, 'bin'), node = p
     const executable = join(output, target.platform === 'win32' ? 'batond.exe' : 'batond')
     let bundledDependencies
     const bundle = await buildBatond(join(buildDirectory, 'batond.cjs'), {
+      ...identity,
       onMetafile: async ({ inputs }) => {
         bundledDependencies = await bundledPackages(inputs, repository)
       },
@@ -107,6 +116,7 @@ export async function packageBatond({ output = join(repository, 'bin'), node = p
     await cp(join(repository, 'runtimes/INSTALL.md'), join(output, 'INSTALL.md'))
     const metadata = {
       format: 'node-sea',
+      release: releaseMetadata(identity, target.platform, target.arch),
       ...target,
       node: nodeVersion,
       dependencies,
@@ -114,6 +124,14 @@ export async function packageBatond({ output = join(repository, 'bin'), node = p
     }
     await writeFile(join(output, 'package.json'), JSON.stringify({ private: true, type: 'commonjs' }, null, 2) + '\n')
     await writeFile(join(output, 'package-manifest.json'), JSON.stringify(metadata, null, 2) + '\n')
+    await writeFile(
+      join(output, 'release.json'),
+      JSON.stringify(
+        { ...metadata.release, runtime: 'node-sea', node: nodeVersion, buildNode: process.version },
+        null,
+        2,
+      ) + '\n',
+    )
     return { ...metadata, executable, output }
   } finally {
     await rm(buildDirectory, { recursive: true, force: true })
@@ -122,14 +140,28 @@ export async function packageBatond({ output = join(repository, 'bin'), node = p
 
 if (import.meta.main) {
   const { values, positionals } = parseArgs({
-    options: { out: { type: 'string' }, node: { type: 'string' } },
+    options: {
+      out: { type: 'string' },
+      node: { type: 'string' },
+      version: { type: 'string' },
+      commit: { type: 'string' },
+    },
     allowPositionals: true,
   })
   if (positionals.length > 1)
     throw new Error('用法：node tools/package-batond.mjs [输出目录] [--out 目录] [--node 官方Node路径]')
   try {
     console.log(
-      JSON.stringify(await packageBatond({ output: values.out ?? positionals[0], node: values.node }), null, 2),
+      JSON.stringify(
+        await packageBatond({
+          output: values.out ?? positionals[0],
+          node: values.node,
+          version: values.version,
+          commit: values.commit,
+        }),
+        null,
+        2,
+      ),
     )
   } catch (error) {
     console.error(error.message)

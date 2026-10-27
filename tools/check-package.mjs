@@ -4,6 +4,8 @@ import { copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/prom
 import { createServer } from 'node:http'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { validatePackageManifest } from './package-release.mjs'
+import { validateReleaseMetadata } from './lib/release.mjs'
 import { environment, isolatedEnv, withTemporaryInstallation } from './lib/installation.mjs'
 import { measureWorkerStartup } from './measure/worker-startup.mjs'
 
@@ -247,15 +249,35 @@ async function main() {
       report.runtime = version
       return version
     })
+    await check('releaseMetadata', async () => {
+      const metadata = JSON.parse(await readFile(join(installed, 'release.json'), 'utf8'))
+      validateReleaseMetadata(metadata, report.runtime)
+      assert.equal(metadata.runtime, 'node-sea')
+      assert.equal(metadata.node, report.runtime.node)
+      validatePackageManifest(await readFile(join(installed, 'package-manifest.json'), 'utf8'), report.runtime)
+      for (const role of ['worker', 'agent-host', 'watchdog', 'project-runtime']) {
+        const result = run(executable, [role, '--version'], options)
+        assert.equal(result.status, 0, result.stderr)
+        assert.deepEqual(JSON.parse(result.stdout), report.runtime, `${role} 发布信息不匹配`)
+      }
+      const probe = run(executable, ['project-runtime', 'probe'], options)
+      assert.equal(probe.status, 0, probe.stderr)
+      const runtime = JSON.parse(probe.stdout)
+      assert.equal(runtime.version, report.runtime.version)
+      validateReleaseMetadata(runtime.release, report.runtime)
+      return { ...metadata, childProcesses: ['worker', 'agent-host', 'watchdog', 'project-runtime'] }
+    })
     await check('worker', async () => {
       const result = await measureWorkerStartup({ root, installed, samples: 1, preparedDirectory })
       assert.equal(result.passed, true, JSON.stringify(result.failure ?? result))
+      validateReleaseMetadata(result.ledger.release, report.runtime)
       return result
     })
     await check('agentHost', () => {
       const result = run(executable, ['agent-host', '--probe'], options)
       assert.equal(result.status, 0, result.stderr)
       const probe = JSON.parse(result.stdout)
+      validateReleaseMetadata(probe.release, report.runtime)
       assert.deepEqual(
         [...probe.agents].sort((left, right) => left.localeCompare(right)),
         ['codex', 'cursor', 'kiro', 'pi'],

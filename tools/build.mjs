@@ -1,3 +1,5 @@
+import { parseArgs } from 'node:util'
+import { buildInfo } from './lib/release.mjs'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
@@ -15,18 +17,21 @@ function runCommand(command, args) {
   }
 }
 
-export function build(run = runCommand) {
+export function build(run = runCommand, release = {}) {
+  const identity = buildInfo(release)
+  const args = identity.version === 'development' ? [] : ['--version', identity.version, '--commit', identity.commit]
   run('pnpm', ['install', '--frozen-lockfile', '--ignore-scripts'])
   run('pnpm', ['--dir', 'web', 'typecheck'])
   // 中心构建同时生成 bundle 旁的 web/ 和 migrations/。
-  run('pnpm', ['--filter', '@baton/server', 'build'])
-  run('pnpm', ['--filter', '@baton/batond', 'build'])
-  run(process.execPath, ['tools/package-batond.mjs', '--out', 'bin'])
+  run('pnpm', ['--filter', '@baton/server', 'build', ...args])
+  run('pnpm', ['--filter', '@baton/batond', 'build', ...args])
+  run(process.execPath, ['tools/package-batond.mjs', '--out', 'bin', ...args])
 }
 
 if (import.meta.main) {
   try {
-    build()
+    const { values } = parseArgs({ options: { version: { type: 'string' }, commit: { type: 'string' } } })
+    build(runCommand, values)
   } catch (error) {
     console.error(error.message)
     process.exitCode = 1

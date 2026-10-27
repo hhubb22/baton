@@ -10,15 +10,15 @@ Runtime 使用同一份 provider 注册表生成执行实例、模型目录、�
 
 设备设置 API 可发起在线设备的非交互登录，支持 ChatGPT 和 xAI 的设备码流程；Claude 的 OAuth 使用终端交互。设备报告的 `login_methods` 来自已注册 provider 的认证实现和设备码能力，网页据此显示设备码登录或本地配置命令。API key 始终从设备本地输入，不经过网页和中心。Runtime 的 `login-device <provider>` 自动选择设备码方式，stdout 首行返回 `{type:"device_code",provider,verification_uri,user_code,expires_in_seconds}`，随后继续轮询直到凭据保存完成；未提供有效期时使用 900 秒。SIGINT、SIGTERM 或标准输入关闭取消登录，其他交互输入返回错误。batond 取得设备码后让进程在后台继续等待，结束时立即刷新订阅报告。
 
-`batond` 在 SEA 中通过自身可执行文件启动 `project-runtime`，加载可执行文件旁 `node_modules/` 中的固定依赖。源码 CLI 与编译入口共用导出的 `runProjectRuntimeCLI(args)`。
+`batond` 的 SEA 和开发 bundle 均通过自身子命令启动 `project-runtime`，加载可执行文件旁 `node_modules/` 中的固定依赖。源码 CLI 与编译入口共用导出的 `runProjectRuntimeCLI(args)`。
 
 使用运行 `batond run` 的同一个系统用户登录。凭据默认保存在用户主目录下的 `.baton/project-runtime`；可用 `BATON_PROJECT_RUNTIME_DATA_DIR` 指定 Runtime 专用的私有目录，登录和守护进程须使用相同配置。凭据与 Pi、Codex CLI 的登录记录分别保存，不上传 Coordinator。`FileCredentials` 负责 OAuth 事务与跨进程锁，在 Runtime 进程内直接读写凭据文件。POSIX 目录和文件须属于当前 UID，文件须为普通文件；权限不是 `0700`/`0600` 时读写前改回，拒绝符号链接，打开前后核对设备与 inode。Windows 沿用数据目录继承的 ACL，只检查类型与符号链接，限制见 [平台私有文件约定](../../apps/batond/src/platform/README.md#私有文件)。凭据 JSON 按 UTF-8 字节限制为 64 KiB，写入使用同目录临时文件、文件 fsync 和原子替换，POSIX 再同步目录。
 
 `batond subscriptions` 显示各 provider 的已登录、需要登录或无法读取状态，并在需要登录时给出命令。它调用 Runtime 的 `probe`，只检查本地凭据，不刷新 token，不请求模型，不输出 token。已登录表示本地存在所需凭据；实际授权是否有效由后续请求确认。过期但带有刷新凭据的订阅会在下一次真实请求时刷新。
 
-在线的 batond 会在下一轮能力采集后自动上报登录状态，无需重新注册或重启；刷新网页即可查看。安装包依赖缺失、版本不匹配或探测失败时，命令返回错误。
+在线的 batond 会在下一轮能力采集后自动上报登录状态，无需重新注册或重启；刷新网页即可查看。安装包依赖缺失或探测失败时，命令返回错误。
 
-batond 检查版本 `0.1.0`、登录状态和租约后，在空控制目录启动 `run`。正常安装使用 stdio；独立运行也支持 TECH 规定的本地 IPC 环境变量。Runtime 从不加载项目目录中的 AGENTS.md、skills、扩展或 MCP。
+Runtime 的 `--version` 和 probe 中的 `release` 来自与中心、batond 共用的构建元数据；直接源码运行显示 `development`。batond 校验探测报告结构、登录状态和租约后，在空控制目录启动 `run`。正常安装使用 stdio；独立运行也支持 TECH 规定的本地 IPC 环境变量。Runtime 从不加载项目目录中的 AGENTS.md、skills、扩展或 MCP。
 
 ## 后台记忆与 Embedding
 

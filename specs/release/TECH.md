@@ -3,7 +3,7 @@
 Status: draft
 Basis: [发布行为规格](PRODUCT.md) RL-01～17；[Baton TECH](../baton/TECH.md)；[Agent 适配 TECH](../agent-adapters/TECH.md)；[构建与发布工具](../../tools/README.md)。
 
-打包、检查、测量、平台边界和持久格式基线记录现行实现；发布版本握手、增量格式升级和升级准备流程尚待实施。凭据闲置过期与重新认证由 Baton TECH 负责，本设计引用其结果。
+打包、发布元数据、公开版本查询、检查、测量、平台边界和持久格式基线记录现行实现；连接时的版本核对、增量格式升级和升级准备流程尚待实施。凭据闲置过期与重新认证由 Baton TECH 负责，本设计引用其结果。
 
 ## 打包与发布
 
@@ -13,7 +13,7 @@ Basis: [发布行为规格](PRODUCT.md) RL-01～17；[Baton TECH](../baton/TECH.
 |---|---|
 | 中心 bundle | `apps/server/dist/server.cjs`，相邻的 `web/` 与 `migrations/`；构建自动生成网页并复制根目录的 SQL 迁移 |
 | 中心镜像 | `node:26-bookworm-slim`，包含中心 bundle、网页与迁移；由非 root 的 `baton` 用户在专用数据目录运行，配置见根 README 与 `compose.yaml` |
-| 节点开发 bundle | `apps/batond/dist/batond.cjs`；通过已安装的 Node 与 workspace 依赖运行，Project Runtime 从源码入口启动 |
+| 节点开发 bundle | `apps/batond/dist/batond.cjs`；通过已安装的 Node 与 workspace 依赖运行，Project Runtime 与 watchdog 通过同一 bundle 的子命令启动 |
 | 节点安装包 | `batond`（Windows 为 `batond.exe`）、旁置 `node_modules/`、`licenses/`、`package.json`、`package-manifest.json` 与 `INSTALL.md`；设备无需另装 Node |
 | 发布归档 | `baton-<带 v 前缀的版本>-<平台>.tar.gz`（Windows 为 `.zip`），附 SHA-256 文件和安装包检查 JSON；归档内另有 `release.json` |
 
@@ -46,7 +46,7 @@ SEA 不启用 code cache 或 snapshot，`execArgvExtension` 设为 `none`。Work
 
 每个平台依次执行安装包构建、搬迁检查、100 个 Worker 冷启动样本与 2000 次 FULL 账本操作，Windows 另执行进程机制检查，然后归档并验证解压产物。构建、检查、测量 JSON 与测试日志作为工作流产物上传。Windows 节点与 Runtime 测试步骤允许失败后继续打包；安装包检查失败仍会阻止后续测量与归档。工作流上传产物，不自动创建 GitHub Release。
 
-[归档器](../../tools/package-release.mjs) 只复制可执行文件、附带依赖、许可及规定的元数据，校验帮助、SEA 平台与版本、安装包清单。`release.json` 记录版本、源码提交、工作区是否有修改、目标平台、构建 Node 与 SEA Node。Unix 生成 tar.gz，Windows 使用系统 bsdtar 生成 zip，并校验文件头。最终归档重新解压后，再检查布局、清单、发布元数据并运行完整安装包检查，通过后才写出归档、SHA-256 与检查报告。
+[归档器](../../tools/package-release.mjs) 只复制可执行文件、附带依赖、许可及规定的元数据，校验帮助、SEA 平台与版本、安装包清单。`release.json` 由安装包构建生成，记录版本、明确输入的源码提交、目标平台、协议版本、中心迁移版本、三类账本格式版本、声明支持的 daemon 版本、构建 Node 与 SEA Node。归档器保留这些元数据，并要求归档版本与程序实际版本相同；归档时不从当前 Git 工作区重新填写身份。Unix 生成 tar.gz，Windows 使用系统 bsdtar 生成 zip，并校验文件头。最终归档重新解压后，再检查布局、清单、发布元数据并运行完整安装包检查，通过后才写出归档、SHA-256 与检查报告。
 
 ## 安装包检查
 
@@ -54,8 +54,8 @@ SEA 不启用 code cache 或 snapshot，`execArgvExtension` 设为 `none`。Work
 
 | 检查 | 观察与失败条件 |
 |---|---|
-| 帮助与版本 | 帮助包含 Baton 命令；版本报告 `sea=true`、当前系统与架构、有效 Node 版本 |
-| Worker | 真实 `LocalWorkerHost` 启动一个 SEA Worker，认证 status 达到 `worker_ready=true` 且 `agent_ready=false`；错误 IPC 令牌被拒绝，独占锁与创建时间匹配，实际账本表和 WAL 已持久化；从 spawn 到认证 status 必须小于 Host 就绪预算（Windows 10 秒，其余系统 3 秒） |
+| 帮助与版本 | 帮助包含 Baton 命令；版本报告 `sea=true`、当前系统与架构、有效 Node 版本；`release.json`、安装包清单与 daemon、Worker、agent-host、watchdog、Runtime 的版本输出和诊断元数据一致 |
+| Worker | 真实 `LocalWorkerHost` 启动一个 SEA Worker，认证 status 达到 `worker_ready=true` 且 `agent_ready=false`；错误 IPC 令牌被拒绝，独占锁与创建时间匹配，业务表、格式表、迁移记录与 WAL 已持久化，账本格式与 Worker 实际诊断一致；从 spawn 到认证 status 必须小于 Host 就绪预算（Windows 10 秒，其余系统 3 秒） |
 | 清理 | POSIX 发送 SIGTERM 后确认 Worker 与 watchdog 退出、锁释放；Windows 核对 CIM 身份后执行 `taskkill /T /F`，确认退出与锁已失效，报告 `graceful=false` |
 | Agent host | SEA 的 `agent-host --probe` 实际加载 Cursor、Pi、Codex、Kiro 四个模块，加载 keyring，并用 tree-sitter 与 Bash grammar 解析 `echo baton` |
 | Cursor SQLite store | 隔离的 Node 子进程从搬迁安装包 `createRequire` 加载 `@cursor/sdk/sqlite`，打开并关闭临时 store；该检查由运行工具的 Node 执行 |
@@ -72,13 +72,13 @@ Cursor store 子进程禁用 fetch 和 HTTP(S) 请求。上述加载检查不调
 
 ## 版本与兼容
 
-本节的发布版本契约与后续升级准备流程为 RL-02、04～16 的待实施设计；存储基线与摘要校验见「持久格式与迁移」。首版允许人工停止和切换程序，升级入口负责状态、迁移与检查；安装包由管理员或设备用户取得，不在进程运行时覆盖旧目录。
+发布元数据与只读查询已实现；连接时的版本核对与后续升级准备流程仍为 RL-05、06、10～16 的待实施设计；存储基线与摘要校验见「持久格式与迁移」。首版允许人工停止和切换程序，升级入口负责状态、迁移与检查；安装包由管理员或设备用户取得，不在进程运行时覆盖旧目录。
 
 ### 模块职责
 
 | 位置 | 现有机制与拟扩展职责 |
 |---|---|
-| `tools/package-release.mjs`、`tools/lib/installation.mjs` | 已有归档、SHA-256 与搬迁复验；增加发布版本一致性与升级元数据校验 |
+| `tools/package-release.mjs`、`tools/lib/installation.mjs` | 归档、SHA-256、搬迁复验与发布身份一致性校验；升级预检尚待实施 |
 | 中心与节点构建入口、`packages/protocol` | 将同一份发布版本和提交注入各进程；声明协议、数据格式与升级能力 |
 | `apps/server/src/database.ts`、`migrations/` | 在现有事务 advisory lock 内核对已应用 SQL 的 SHA-256 和文件顺序，再执行剩余迁移 |
 | `apps/batond/src/{daemon,worker,project}/ledger.ts`、`src/storage-format.ts` | 各自声明基线 SQL；在业务解码与写连接打开前核对格式类型、版本和迁移摘要，仅为空库初始化基线 |
@@ -88,11 +88,15 @@ Cursor store 子进程禁用 fetch 和 HTTP(S) 请求。上述加载检查不调
 
 ### 发布元数据与连接
 
-构建接收明确的发布版本与提交，编译进中心、daemon、Worker、agent-host、watchdog 和 Runtime；`--version` 与运行诊断返回相同值。开发构建明确显示 `development`。`release.json` 扩展记录协议版本、中心 schema 版本、各类账本格式版本、可迁移的来源版本及允许应用回切的数据范围。包内元数据与程序输出不一致时拒绝升级，不能仅由归档器给任意旧二进制贴上新版本号。
+中心与节点构建入口、统一构建和 SEA 打包都接受 `--version <带 v 前缀的发布版本> --commit <完整小写 Git 哈希>`，两个参数一起指定；未指定时版本和提交均为 `development`。构建通过 esbuild 编译常量注入身份，不从运行环境变量读取版本。`packages/protocol/src/release.mjs` 是共享来源，中心、daemon、Worker、agent-host、watchdog 和 Runtime 的 `--version` 及诊断使用同一份元数据。中心版本查询无需数据库配置；节点及子进程另报告 SEA 和 Node 运行信息。开发 bundle 的 Runtime 与 watchdog 从同一 bundle 启动，直接源码入口仍通过 tsx 运行。
+
+`release.json` 和安装包清单保存 `version`、`commit`、`platform`、`arch`、`protocol_version`、`schema_version`、`ledger_versions` 和 `supported_daemon_versions`。当前协议版本为 1，中心迁移版本为 `0007_thread_turn_items.sql`，账本 `node`、`project`、`thread` 均为格式 1。构建核对中心迁移目录的最新文件与声明一致，账本检查直接使用共享格式常量。首版仅声明支持当前 daemon 发布版本，连接时尚未执行该声明的准入检查；增量迁移来源及应用回切范围尚待相应升级实现声明。包内元数据与程序输出不一致时，安装包检查和归档失败；归档器不能给旧二进制重新贴标。
 
 草案采用中心 N 支持 daemon N 与上一个发布版 N−1；仅包括已建立发布基线的版本。版本范围来自发布清单，不由 SemVer 大小或固定协议号推断。协议版本表达 wire 语义，可选字段表达新增能力；Agent 的 CLI 版本、模型和系统组合仍按既有准入规则处理。
 
-中心提供只读的 `GET /api/v1/release`，返回自身发布版本、提交、协议与支持的 daemon/格式范围，供升级预检读取；只含发布元数据，不返回设备、员工或部署秘密。该入口可在业务版本不兼容时访问，不延长设备闲置期限。中心在节点身份校验后、同步与派发前再次核对 daemon 版本及协议，返回中心版本、支持范围和升级原因。`upgrade check` 读取本地格式并查询该版本契约，不迁移或启动 Worker。节点闲置过期时，实际恢复连接前先重新认证。首次准备时中心不可达则保持原版本；已取得该目标的预检结果后断网，可以继续本地准备与迁移，恢复业务前仍须重新检查并同步。明确不兼容返回 `node_version_incompatible`；未知可选能力缺省关闭，兼容性拒绝不能清除 outbox。
+中心提供无需登录的只读 `GET /api/v1/release`，返回上述发布元数据，不返回设备、员工或部署秘密，不读取认证状态或写入设备凭据。已登录诊断的 `release` 字段与其一致。该入口不延长设备闲置期限。
+
+以下连接检查与升级预检仍为待实施设计：中心在节点身份校验后、同步与派发前核对 daemon 版本及协议，返回中心版本、支持范围和升级原因。`upgrade check` 读取本地格式并查询该版本契约，不迁移或启动 Worker。节点闲置过期时，实际恢复连接前先重新认证。首次准备时中心不可达则保持原版本；已取得该目标的预检结果后断网，可以继续本地准备与迁移，恢复业务前仍须重新检查并同步。明确不兼容返回 `node_version_incompatible`；未知可选能力缺省关闭，兼容性拒绝不能清除 outbox。
 
 中心优先升级，兼容的旧 daemon 正常运行，随后设备逐台升级。通信窗口与格式迁移路径分别声明；超过通信窗口的设备可以由目标包直接执行完整迁移链，或使用指定的中间包仅做离线迁移。中间包不用连接不兼容的中心，也不恢复业务；最终目标必须通过中心兼容预检。首版无需支持任何发布基线之前的开发程序。
 
@@ -186,7 +190,7 @@ prepare 之前升级未支持该能力的 daemon 时，由发布说明要求停�
 
 ### 验证
 
-持久格式基线的重复打开、SQL/摘要篡改、未知与更新版本拒绝已有包内测试；PostgreSQL 还验证迁移顺序与事务失败回滚。增量迁移链、中途中断和升级准备的跨库恢复仍为 planned。自动化只使用本机数据库、进程替身和离线录制；已有发布测量不替代新增验收。
+发布元数据已有实际开发/发布 bundle 回归、匿名 HTTP 读取与凭据不变检查，以及拒绝重新贴标和元数据篡改的工具测试；macOS arm64 已验证 SEA 搬迁、实际子进程诊断与最终归档解包复验，其他发布平台未验证本次元数据实现。持久格式基线的重复打开、SQL/摘要篡改、未知与更新版本拒绝已有包内测试；PostgreSQL 还验证迁移顺序与事务失败回滚。增量迁移链、中途中断和升级准备的跨库恢复仍为 planned。自动化只使用本机数据库、进程替身和离线录制；已有发布测量不替代新增验收。
 
 | 需求 | 设置与观察 | 失败条件 | 位置 |
 |---|---|---|---|
