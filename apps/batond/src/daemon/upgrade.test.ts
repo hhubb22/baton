@@ -98,10 +98,14 @@ it('authenticates upgrade commands, blocks readiness on living or unconfirmed pr
       },
     },
   })
-  await vi.waitFor(async () => {
-    await requestUpgrade(path, 'upgrade_status')
-    expect(syncs).toBeGreaterThan(0)
-  })
+  await vi.waitFor(
+    async () => {
+      await requestUpgrade(path, 'upgrade_status')
+      expect(daemon.failure()).toBeUndefined()
+      expect(syncs).toBeGreaterThan(0)
+    },
+    { timeout: 5000 },
+  )
   await expect(
     requestWorker({ ...upgradePaths(path), token: '0'.repeat(64), request: { type: 'upgrade_status', ok: false } }),
   ).rejects.toMatchObject({ code: 'unauthorized' })

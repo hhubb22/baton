@@ -3,7 +3,7 @@
 Status: partially implemented
 Basis: [发布行为规格](PRODUCT.md) RL-01～17；[Baton TECH](../baton/TECH.md)；[Agent 适配 TECH](../agent-adapters/TECH.md)；[构建与发布工具](../../tools/README.md)。
 
-打包、发布元数据、公开版本查询、连接版本核对、检查、测量、平台边界、持久格式基线、中心恢复后处理、本地升级预检、准备、离线迁移与完成同步记录现行实现；增量格式迁移和自动安装入口切换尚未实现，安装入口由用户或服务管理器显式切换。凭据闲置过期与重新认证由 Baton TECH 负责，本设计引用其结果。
+打包、发布元数据、公开版本查询、连接版本核对、检查、测量、平台边界、持久格式基线、中心恢复后处理、本地升级预检、准备、离线迁移与完成同步记录现行实现；增量格式迁移尚未实现，CLI 安装入口由用户或服务管理器显式切换；桌面客户端下载、安装交接与自动迁移见 [桌面设计](../desktop/TECH.md)。凭据闲置过期与重新认证由 Baton TECH 负责，本设计引用其结果。
 
 ## 打包与发布
 
@@ -79,7 +79,7 @@ Cursor store 子进程禁用 fetch 和 HTTP(S) 请求。上述加载检查不调
 
 ## 版本与兼容
 
-发布元数据、只读查询、连接版本核对、中心恢复后处理、本地升级预检、准备、离线迁移与中心完成同步已实现；增量格式升级和自动安装入口切换仍待实施。存储基线与摘要校验见「持久格式与迁移」，中心恢复后处理见「备份与恢复」，本地升级入口见「设备准备与切换」。首版允许人工停止和切换程序，升级入口负责状态、迁移与检查；安装包由管理员或设备用户取得，不在进程运行时覆盖旧目录。
+发布元数据、只读查询、连接版本核对、中心恢复后处理、本地升级预检、准备、离线迁移与中心完成同步已实现；增量格式升级仍待实施，CLI 安装入口由用户或服务管理器显式切换，桌面客户端使用 [桌面更新流程](../desktop/TECH.md)。存储基线与摘要校验见「持久格式与迁移」，中心恢复后处理见「备份与恢复」，本地升级入口见「设备准备与切换」。首版允许人工停止和切换程序，升级入口负责状态、迁移与检查；安装包由管理员或设备用户取得，不在进程运行时覆盖旧目录。
 
 ### 模块职责
 
@@ -155,14 +155,20 @@ SQLite 在只读连接中核对格式元数据和迁移记录，通过后才打�
 | 入口 | 作用 |
 |---|---|
 | `batond upgrade check --package <目录>` | 只读验证安装包、实际版本、格式范围、当前中心兼容性及剩余空间，返回可执行与失败原因 |
-| `batond upgrade prepare --package <目录>` | 复用 check 预检，以持久 operation_id 登记源/目标与预检结果；同一路径、版本和构建身份复用当前准备，不同目标返回 `upgrade_conflict` |
+| `batond upgrade prepare --package <目录>` | 复用 check 完整预检，以持久 operation_id 登记源/目标与预检结果；同一路径、版本和构建身份复用当前准备，不同目标返回 `upgrade_conflict` |
+| `batond upgrade prepare --version <中心版本>` | 读取保存中心的公开发布信息，要求精确匹配当前中心版本与其支持范围，记录中心协议并检查备份空间；目标包尚未安装时只登记版本与 draining，不写 checked_release |
+| `batond upgrade prepare --package <本应用resources/batond> --self` | 无 daemon 时持原锁先保存暂停，再核对当前程序、目标包、已记录的中心协议、本地格式与备份空间，绑定同一操作的安装目录；不启动业务或结束现存进程 |
 | `batond upgrade migrate` | 首次仅在 ready 且 daemon 已退出时，由预检目标程序持独占锁备份并逐库核验、初始化；成功写 syncing 后退出，重跑依据库内事实继续 |
-| `batond upgrade status` | 返回持久状态、阻挡的 Thread/Runtime、进程 PID 与创建时间，以及账本内待确认报告数；检查失败显示阻挡原因 |
-| `batond upgrade cancel` | 迁移前持久写入 `cancelled` 并解除门禁，恢复保留的队列；不恢复被用户显式停止撤回的输入。迁移开始或迁移失败后拒绝取消 |
+| `batond upgrade status` | 返回持久状态、阻挡的 Thread/Runtime、进程 PID 与创建时间，以及账本内待确认报告数；无 daemon 时持原锁重查并推进 draining 到 ready，检查失败显示阻挡原因 |
+| `batond upgrade cancel` | 迁移前持久写入 `cancelled` 并解除门禁，恢复保留的队列；无 daemon 时持原锁保存取消，由正常启动继续队列，不自行启动进程或调用 resume。迁移开始或迁移失败后拒绝取消 |
 
 check 读取目标 `release.json`，实际执行该目录的 `batond --version` 并核对完整发布身份；以 SQLite 只读连接核对三类账本格式及基线摘要，要求目标 `ledger_versions` 与实际支持格式一致。查询当前中心 `GET /api/v1/release` 核对版本与协议，再按备份目标文件系统的可用块估算完整目录副本空间，包含目录分配开销及 1 MiB 状态、清单余量。TLS 可复用现有 `--ca-file`；prepare 使用 daemon 已配置的 CA。check 不建立基线、不写升级状态、不启动或停止业务；SQLite 读取时可能建立 SHM 和空 WAL 辅助文件，主库、已有 WAL 内容及业务事实保持不变。
 
-状态位于数据目录的私有原子文件 `upgrade.json`，包含 `operation_id`、`source_version`、`target_version`、`target_path`、`phase`，以及 prepare 保存的完整 `checked_release`。迁移取得一致备份后附 `backup_path`、`backup_checksum`；失败附 `error_code` 和 `reason`。源版本取运行程序的 `BUILD.version`，未注入发布身份的开发程序显示 `development`。持久阶段为 `draining`、`ready`、`migrating`、`syncing`、`completed`、`cancelled`、`failed`。状态读取失败返回 `upgrade_state_invalid`，执行保持暂停。
+状态位于数据目录的私有原子文件 `upgrade.json`，包含 `operation_id`、`source_version`、`target_version`、`phase`。完整预检后附目标 `target_path` 与 `checked_release`；按中心版本准备时先记录 `target_protocol_version`，不记录尚未安装的路径或伪造目标包预检。self 只可绑定相同目标版本、协议和构建，允许同一构建迁入新应用目录；原 operation ID、阶段及备份保持不变。迁移取得一致备份后附 `backup_path`、`backup_checksum`；失败附 `error_code` 和 `reason`。传统准备的源版本取运行程序的 `BUILD.version`；直接 self 准备优先沿用既有完成记录的目标版本或原准备的源版本，缺少证据时记录 `unknown`。未注入发布身份的开发程序显示 `development`。持久阶段为 `draining`、`ready`、`migrating`、`syncing`、`completed`、`cancelled`、`failed`。状态读取失败返回 `upgrade_state_invalid`，执行保持暂停。
+
+prepare、status、cancel 成功返回 `{ state, blockers, pending_reports }`，migrate 返回 `{ state }`。已有 daemon 时普通准备、查询与取消通过原认证 IPC 串行执行；版本准备沿用 `upgrade_prepare`，其字符串 payload 携带版本对象，原路径 payload 保持有效。无 daemon 时 CLI 在原 `daemon.lock` 内执行管理，不依赖 WSS 认证，因此旧 daemon 被中心拒绝后仍可按中心版本准备。旧程序自身协议与新中心不同不阻止版本准备；self 将实际目标协议与已保存的中心协议核对。直接 self 没有中心协议记录时，后续 syncing 认证校验协议后才开放业务。self 不连接中心，也不启动普通 daemon、Worker、Runtime 或进程回收。原锁被外部服务或迁移占用时 self 返回 `upgrade_busy`，不接管或终止占锁者。版本准备与 self 检查空间，已有备份的 self 重试不重复要求新副本空间。
+
+无 daemon 时 status 在原锁内重查持久事实，并取得身份、目录和执行配置写锁后再次核查才写 ready；持久报告已完整落盘时无需中心 ACK。启动时已经 draining 的 daemon 仅保留升级管理并轮询就绪，不打开业务数据库或恢复、回收原进程。运行中发起准备的 daemon 仍先完成原业务 Scope 的退出；准备期间中心版本拒绝不把本地 draining 改为失败。self 的新准备先保存暂停，再读取旧账本；未知格式、损坏或核验失败保留暂停与原数据。失败以 stderr JSON 返回固定码和详细原因，可再次准备或查询。
 
 Thread 的新 open、message、resume、answer 通过原有节点账本与 Worker 回执持久接收。draining 允许启动只负责接收和保存队列的 Worker，以继续处理 stop、withdraw；其原生会话创建、恢复和回合执行都受门禁限制。Worker 自己在执行调度和下一轮 intent 前读取同一门禁，当前回合自然结束；空闲 Worker 在串行队列中停止新调度，再由 Scope 关闭会话、agent-host、watchdog 和 SQLite。排队输入及原生命令身份保留，取消后继续调度。Project 前后台启动和唤醒保存在 `project-runtime.db` 的 `project_commands` 中；后台整理沿用既有取消与清理，前台完成当前响应后在下一次 `claim_inputs` 前退出，已保存历史和未领取输入保留。stop、withdraw、结果补报和清理在 draining 期间继续。
 
@@ -170,7 +176,7 @@ daemon 只读检查 Worker/启动锁、Thread 活动事实、Runtime 运行和�
 
 migrate 校验当前运行程序、目标包与已保存预检的发布身份一致，持有 `daemon.lock` 及身份、浏览目录和执行配置的原有写锁，再核对所有登记进程。将私有数据目录复制到旁边的 `<目录名>.upgrade-backups/<operation_id>-<随机 ID>/data/`；保留身份、业务、SDK 状态、完整输出与 WAL，仅排除 IPC 和已知进程锁。备份目录使用现有私有目录权限，小型 `backup.json` 记录操作、源目录和目录内容 SHA-256，完成复制后比较源与副本摘要。符号链接、特殊文件或无法确认的进程会阻止迁移。数据目录以外的原生会话与模型凭据仍按「备份与恢复」单独保护。
 
-备份位置和摘要随 `migrating` 一起原子写入状态，再逐库调用现有存储初始化与事务核验；首版只有格式 1 / `0001_baseline`，无增量步骤。成功进入 `syncing`；失败保存 `upgrade_migration_failed` 并保持暂停。重跑核验原备份并依据各库实际格式继续，保留同一备份，不用外部进度跳过库，不自动恢复备份。migrating 或 syncing 缺少完整备份记录时拒绝继续。安装入口仍由用户或服务管理器显式切换，目标 daemon 启动后继续中心同步与完成确认。
+备份位置和摘要随 `migrating` 一起原子写入状态，再逐库调用现有存储初始化与事务核验；首版只有格式 1 / `0001_baseline`，无增量步骤。成功进入 `syncing`；失败保存 `upgrade_migration_failed` 并保持暂停。重跑核验原备份并依据各库实际格式继续，保留同一备份，不用外部进度跳过库，不自动恢复备份。migrating 或 syncing 缺少完整备份记录时拒绝继续。CLI 安装入口仍由用户或服务管理器显式切换；桌面客户端停止监管后交接 NSIS 或打开 DMG，目标应用绑定自身安装目录并自动迁移。目标 daemon 启动后继续中心同步与完成确认。
 
 | 阶段 | 行为与恢复依据 |
 |---|---|
@@ -238,7 +244,7 @@ prepare 之前升级未支持该能力的 daemon 时，由发布说明要求停�
 
 ### 验证
 
-发布元数据已有实际开发/发布 bundle 回归、匿名 HTTP 读取与凭据不变检查，以及拒绝重新贴标和元数据篡改的工具测试；macOS arm64 已验证 SEA 搬迁、实际子进程诊断与最终归档解包复验，其他发布平台未验证本次元数据实现。持久格式基线的重复打开、SQL/摘要篡改、未知与更新版本拒绝已有包内测试；PostgreSQL 还验证迁移顺序与事务失败回滚。本地升级准备已有包内测试覆盖当前回合结束、新执行暂停与输入保留、取消恢复、进程阻挡和 ready 拒绝新业务。`upgrade-migrate.test.ts` 验证只读预检、持锁备份、逐库失败重跑与启动门禁；`upgrade-report.test.ts` 和中心 `upgrade.integration.test.ts` 验证补报、完成回执重发及确认后恢复派发。`e2e/src/upgrade.integration.test.ts` 使用候选包和当前基线，经实际中心、WSS、daemon 与独立 Worker 验证 prepare → ready → 停 daemon → migrate → 重启 → completed，保留 Project、记忆、Thread、存储代次与原生会话 ID，已发送输入不重发、排队输入仅发送一次。增量格式迁移与自动安装入口切换尚未实现；进程强制中断、真实上一发布包升级及非 macOS 平台的本轮升级验收仍未测。自动化只使用本机数据库、进程替身和离线录制；已有发布测量不替代新增验收。
+发布元数据已有实际开发/发布 bundle 回归、匿名 HTTP 读取与凭据不变检查，以及拒绝重新贴标和元数据篡改的工具测试；macOS arm64 已验证 SEA 搬迁、实际子进程诊断与最终归档解包复验，其他发布平台未验证本次元数据实现。持久格式基线的重复打开、SQL/摘要篡改、未知与更新版本拒绝已有包内测试；PostgreSQL 还验证迁移顺序与事务失败回滚。本地升级准备已有包内测试覆盖当前回合结束、新执行暂停与输入保留、取消恢复、进程阻挡和 ready 拒绝新业务。`upgrade-migrate.test.ts` 验证只读预检、持锁备份、逐库失败重跑与启动门禁；`upgrade-report.test.ts` 和中心 `upgrade.integration.test.ts` 验证补报、完成回执重发及确认后恢复派发。`e2e/src/upgrade.integration.test.ts` 使用候选包和当前基线，经实际中心、WSS、daemon 与独立 Worker 验证 prepare → ready → 停 daemon → migrate → 重启 → completed，保留 Project、记忆、Thread、存储代次与原生会话 ID，已发送输入不重发、排队输入仅发送一次。增量格式迁移尚未实现，桌面安装与自动迁移的验证范围见 [平台验收](../desktop/PRODUCT.md#验收)；进程强制中断、真实上一发布包升级及非 macOS 平台的本轮升级验收仍未测。自动化只使用本机数据库、进程替身和离线录制；已有发布测量不替代新增验收。
 
 用户服务的 launchd 启停已在 macOS 27.2 arm64、Node 26.5.0 上用开发 bundle 验证：临时数据目录放置离线身份，中心地址仅指向本机不可用端口；`service install` 成功，`status` 显示运行、Node 的真实路径与数据目录下的日志路径，daemon 持续存活；`service uninstall` 后服务定义与 daemon 均消失，身份和日志保留。验收后已移除临时数据目录。该验证不覆盖中心注册与连接、登录自启、异常重启、SEA 安装包或 Linux systemd 真机行为。
 

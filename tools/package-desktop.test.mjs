@@ -97,7 +97,13 @@ test('Windows 只产出 x64 按用户安装的 NSIS，关闭提权和发布签�
   })
   assert.deepEqual(config.win.target, [{ target: 'nsis', arch: ['x64'] }])
   assert.equal(config.win.signAndEditExecutable, false)
-  assert.deepEqual(config.nsis, { oneClick: true, perMachine: false, allowElevation: false, packElevateHelper: false })
+  assert.deepEqual(config.nsis, {
+    oneClick: true,
+    runAfterFinish: true,
+    perMachine: false,
+    allowElevation: false,
+    packElevateHelper: false,
+  })
   assert.equal(config.artifactName, `baton-desktop-${version}-win32-x64.exe`)
 })
 

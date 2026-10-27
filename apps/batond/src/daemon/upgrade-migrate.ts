@@ -36,9 +36,17 @@ export async function migrateUpgrade(dataDirectory: string): Promise<UpgradeStat
       )
     )
       throw new IPCError('upgrade_busy', '升级尚未 ready，或失败不属于可继续的迁移')
-    if (!state.checked_release) throw new IPCError('upgrade_backup_required', '缺少目标预检记录，请重新执行 prepare')
+    if (!state.checked_release || !state.target_path)
+      throw new IPCError(
+        'upgrade_backup_required',
+        '缺少目标预检记录，请先由目标程序执行 prepare --package <目录> --self',
+      )
     const target = await readUpgradePackage(state.target_path)
-    if (!sameRelease(state.checked_release, target.release) || !sameRelease(releaseMetadata(), target.release))
+    if (
+      state.target_version !== target.release.version ||
+      !sameRelease(state.checked_release, target.release) ||
+      !sameRelease(releaseMetadata(), target.release)
+    )
       throw new IPCError(
         'upgrade_package_invalid',
         '请使用预检目标包中的 batond 执行 migrate；当前程序或安装包身份不符',

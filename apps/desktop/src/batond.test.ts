@@ -5,7 +5,10 @@ import { afterEach, expect, it, vi } from 'vite-plus/test'
 import { Batond, daemonLog } from './batond.ts'
 import { fakeProcess } from './testing/process.ts'
 
-afterEach(() => vi.unstubAllEnvs())
+afterEach(() => {
+  vi.unstubAllEnvs()
+  vi.useRealTimers()
+})
 
 it('凭据仅通过注册子进程环境传入，命令输出只返回公开身份', async () => {
   vi.stubEnv('BATON_ENROLLMENT_TOKEN', 'inherited-secret-must-be-removed')
@@ -68,6 +71,54 @@ it('失败不向网页返回子进程原始输出或注册凭据', async () => {
     .catch((error: unknown) => error)
   expect(error).toMatchObject({ code: 'enrollment_expired' })
   expect(String(error)).not.toContain('enrollment-secret')
+})
+
+it('升级命令沿用原入口，迁移超过普通命令时限仍等待并保留原因', async () => {
+  vi.useFakeTimers()
+  const calls: string[][] = []
+  const migration = fakeProcess()
+  const kill = vi.spyOn(migration, 'kill')
+  const snapshot = { state: null, blockers: [], pending_reports: 0 }
+  const batond = new Batond('/resources', '/data', (_file, args) => {
+    calls.push(args)
+    if (args[1] === 'migrate') return migration
+    const child = fakeProcess()
+    void Promise.resolve().then(() => {
+      child.stdout.emit('data', Buffer.from(JSON.stringify(snapshot)))
+      child.emit('close', 0)
+    })
+    return child
+  })
+  await batond.prepareVersion('v1.2.3')
+  await batond.prepareSelf('/new/resources/batond')
+  const migrating = batond.migrate()
+  await vi.advanceTimersByTimeAsync(120_000)
+  expect(kill).not.toHaveBeenCalled()
+  migration.emit('close', 0)
+  await expect(migrating).resolves.toEqual(snapshot)
+  expect(calls).toContainEqual(['upgrade', 'prepare', '--version', 'v1.2.3', '--data-dir', '/data'])
+  expect(calls).toContainEqual([
+    'upgrade',
+    'prepare',
+    '--package',
+    '/new/resources/batond',
+    '--self',
+    '--data-dir',
+    '/data',
+  ])
+
+  const failed = new Batond('/resources', '/data', () => {
+    const child = fakeProcess()
+    void Promise.resolve().then(() => {
+      child.stderr.emit(
+        'data',
+        Buffer.from('{"code":"upgrade_migration_failed","message":"thread.db: storage_version_unsupported"}'),
+      )
+      child.emit('close', 1)
+    })
+    return child
+  })
+  await expect(failed.migrate()).rejects.toThrow('thread.db: storage_version_unsupported')
 })
 
 it('运行日志超过 10MB 时只保留一份轮转文件', async () => {

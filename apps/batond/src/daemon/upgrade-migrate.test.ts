@@ -19,6 +19,7 @@ import { initializeWorkerDirectory } from './host.ts'
 import { checkUpgrade } from './upgrade-check.ts'
 import { dataEntries } from './upgrade-backup.ts'
 import { migrateUpgrade } from './upgrade-migrate.ts'
+import { manageUpgrade } from './upgrade-management.ts'
 import { prepareUpgrade, readUpgradeState, requestUpgrade, saveUpgradeState } from './upgrade.ts'
 import { runWorker } from './worker-runner.ts'
 import { runDaemon } from './daemon.ts'
@@ -262,6 +263,8 @@ it('backs up once, resumes a failed per-ledger pass and keeps daemon and indepen
     backup_checksum: expect.stringMatching(/^[a-f0-9]{64}$/),
   })
   expect(files.map(migrations)).toEqual(facts)
+  expect(await manageUpgrade(f.path, 'prepare', { package: f.target, self: true })).toMatchObject({ state: failed })
+  await expect(manageUpgrade(f.path, 'cancel')).rejects.toMatchObject({ code: 'upgrade_busy' })
   const output = vi.spyOn(console, 'log').mockImplementation(() => {})
   try {
     await runBatondCLI(['upgrade', 'status', '--data-dir', f.path])
