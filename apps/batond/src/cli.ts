@@ -1,7 +1,7 @@
 import { BUNDLED, releaseMetadata, NodeVersionIncompatibility } from '@baton/protocol/release'
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { realpath } from 'node:fs/promises'
+import { realpath, readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
@@ -11,7 +11,8 @@ import { telemetryLayer } from '@baton/telemetry'
 import { ExecutionTimeoutSeconds, WorkerOpen, type RuntimeAgent, type WorkerRequest } from '@baton/protocol'
 import { LocalWorkerHost, initializeWorkerDirectory } from './daemon/host.ts'
 import { IPCError } from './daemon/ipc.ts'
-import { readUpgradeState } from './daemon/upgrade.ts'
+import { processLockIsHeld } from './platform/lock.ts'
+import { readUpgradeState, upgradeOffline } from './daemon/upgrade.ts'
 import { readPrivateFile, writePrivateFileAtomic } from './platform/private.ts'
 
 const usage = `Baton 节点
@@ -29,7 +30,9 @@ up/run 支持 --control-timeout-seconds <秒>，认证与同步各默认等待 3
 
 设备管理：
 
+  upgrade check --package <目录> [--ca-file <CA证书>]
   upgrade prepare --package <目录>
+  upgrade migrate
   upgrade status
   upgrade cancel
   files add --id <标识> --path <绝对目录>
@@ -93,25 +96,53 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
       options: {
         'data-dir': { type: 'string', default: join(homedir(), '.baton-ts') },
         package: { type: 'string' },
+        'ca-file': { type: 'string' },
       },
     })
     const command = positionals[0]
+    const target = command === 'prepare' || command === 'check'
     if (
       positionals.length !== 1 ||
-      !['prepare', 'status', 'cancel'].includes(command ?? '') ||
-      (command === 'prepare' ? !values.package : values.package !== undefined)
+      !['prepare', 'status', 'cancel', 'check', 'migrate'].includes(command ?? '') ||
+      (target ? !values.package : values.package !== undefined) ||
+      (values['ca-file'] && command !== 'check')
     )
-      throw new Error('用法：upgrade prepare --package <目录> | status | cancel')
-    const { requestUpgrade } = await import('./daemon/upgrade.ts')
-    console.log(
-      JSON.stringify(
-        await requestUpgrade(
-          values['data-dir']!,
-          command === 'prepare' ? 'upgrade_prepare' : command === 'cancel' ? 'upgrade_cancel' : 'upgrade_status',
-          values.package ? resolve(values.package) : undefined,
-        ),
-      ),
-    )
+      throw new Error('用法：upgrade check|prepare --package <目录> | status | cancel | migrate')
+    const directory = values['data-dir']!
+    if (command === 'check') {
+      const { checkUpgrade } = await import('./daemon/upgrade-check.ts')
+      const result = await checkUpgrade(
+        directory,
+        values.package!,
+        values['ca-file'] ? await readFile(values['ca-file'], 'utf8') : undefined,
+      )
+      console.log(JSON.stringify(result))
+      if (!result.ok) process.exitCode = 1
+    } else if (command === 'migrate') {
+      const { migrateUpgrade } = await import('./daemon/upgrade-migrate.ts')
+      console.log(JSON.stringify({ state: await migrateUpgrade(directory) }))
+    } else {
+      const { requestUpgrade, upgradeBlockers } = await import('./daemon/upgrade.ts')
+      const state = await readUpgradeState(directory)
+      if (
+        command === 'status' &&
+        (state?.phase === 'migrating' ||
+          state?.phase === 'syncing' ||
+          state?.error_code === 'upgrade_migration_failed' ||
+          !(await processLockIsHeld(join(directory, 'daemon.lock'))))
+      )
+        console.log(JSON.stringify({ state: state ?? null, ...(await upgradeBlockers(directory)) }))
+      else
+        console.log(
+          JSON.stringify(
+            await requestUpgrade(
+              directory,
+              command === 'prepare' ? 'upgrade_prepare' : command === 'cancel' ? 'upgrade_cancel' : 'upgrade_status',
+              values.package ? resolve(values.package) : undefined,
+            ),
+          ),
+        )
+    }
     return
   }
   if (action === 'files' || action === 'project-exec') {
@@ -266,7 +297,7 @@ export async function runLocalCLI(
   const dataDirectory = values['data-dir']!
   if (
     ['open', 'message', 'resume', 'stop', 'withdraw', 'ack', 'probe'].includes(action) &&
-    (await readUpgradeState(dataDirectory))?.phase === 'ready'
+    upgradeOffline(await readUpgradeState(dataDirectory))
   )
     throw new IPCError('node_upgrading', '设备已准备升级，请稍后重试原命令')
   const requireValue = (key: keyof typeof values) => {

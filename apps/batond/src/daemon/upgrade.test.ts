@@ -1,4 +1,8 @@
 import { BUILD } from '@baton/protocol/release'
+import { writeUpgradePackage, upgradeCenter } from '../testing/upgrade.ts'
+
+vi.mock('node:https', async () => (await import('../testing/upgrade.ts')).upgradeHTTPSFixture())
+vi.mock('node:child_process', async () => (await import('../testing/upgrade.ts')).upgradeProcessFixture())
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -23,7 +27,9 @@ afterEach(async () => {
 })
 
 it('authenticates upgrade commands, blocks readiness on living or unconfirmed processes and rejects ready work', async () => {
-  const { path, wss, start } = await setupDaemon(cleanup)
+  const { path, id, wss, start } = await setupDaemon(cleanup)
+  const center = await upgradeCenter(cleanup)
+  await writePrivateFileAtomic(join(path, 'identity.json'), JSON.stringify({ ...id, coordinator_url: center.url }))
   let socket: WebSocket | undefined
   let syncs = 0
   const replies: unknown[] = []
@@ -102,8 +108,7 @@ it('authenticates upgrade commands, blocks readiness on living or unconfirmed pr
   const target = join(path, 'package')
   const other = join(path, 'other-package')
   for (const directory of [target, other]) {
-    await ensurePrivateDirectory(directory)
-    await writePrivateFileAtomic(join(directory, 'release.json'), JSON.stringify({ version: 'v1' }))
+    await writeUpgradePackage(directory)
   }
   const log = vi.spyOn(console, 'log').mockImplementation(() => {})
   try {
@@ -119,7 +124,7 @@ it('authenticates upgrade commands, blocks readiness on living or unconfirmed pr
       type: 'node.upgrade_state',
       operation_id: prepared!.operation_id,
       source_version: BUILD.version,
-      target_version: 'v1',
+      target_version: prepared!.target_version,
       phase: 'draining',
     }),
   )

@@ -39,6 +39,8 @@ import {
   upgradeBlockers,
   upgradePaths,
   upgradePaused,
+  upgradeOffline,
+  upgradeCanCancel,
   type UpgradeState,
 } from './upgrade.ts'
 export { DaemonStorageFailure } from './storage.ts'
@@ -101,7 +103,6 @@ const controlAttempt = <A>(task: (signal: AbortSignal) => Promise<A>) =>
       return yield* attempt(() => pending)
     }),
   )
-const awaitPaused = (state: UpgradeState | undefined) => state?.phase === 'ready' || state?.phase === 'failed'
 const terminal = (code?: string) =>
   [
     'invalid_credential',
@@ -498,9 +499,12 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
         attempt(async () => {
           const task = serial.then(async () => {
             let state = await readUpgradeState(options.dataDirectory)
-            if (request.type === 'upgrade_prepare') state = await prepareUpgrade(options.dataDirectory, request.payload)
+            if (request.type === 'upgrade_prepare')
+              state = await prepareUpgrade(options.dataDirectory, request.payload, ca)
             else if (request.type === 'upgrade_cancel') {
               if (state) {
+                if (!upgradeCanCancel(state))
+                  throw new IPCError('upgrade_busy', '迁移开始后不能取消，请继续 migrate 或人工核对备份')
                 state = { ...state, phase: 'cancelled' }
                 await saveUpgradeState(options.dataDirectory, state)
               }
@@ -570,7 +574,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
 
     while (true) {
       const state = yield* attempt(() => readUpgradeState(options.dataDirectory))
-      if (state?.phase === 'ready' || state?.phase === 'failed') {
+      if (upgradeOffline(state)) {
         yield* Effect.raceFirst(
           connect({
             report: async () => ({
@@ -584,7 +588,8 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
             refreshDevices: () => {},
           }),
           Effect.gen(function* () {
-            while (awaitPaused(yield* attempt(() => readUpgradeState(options.dataDirectory)))) yield* Effect.sleep(100)
+            while (upgradeOffline(yield* attempt(() => readUpgradeState(options.dataDirectory))))
+              yield* Effect.sleep(100)
           }),
         )
         continue

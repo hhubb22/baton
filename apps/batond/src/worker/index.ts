@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { upgradePaused, readUpgradeState } from '../daemon/upgrade.ts'
+import { upgradePaused, readUpgradeState, upgradeOffline } from '../daemon/upgrade.ts'
 import {
   WorkerRequest,
   boundedText,
@@ -1726,10 +1726,12 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
       if (
         commandAction(decoded.type) &&
         options.dataDirectory &&
-        (yield* Effect.tryPromise({
-          try: () => readUpgradeState(options.dataDirectory!),
-          catch: (cause) => new WorkerFailure('upgrade_state_invalid', '无法读取升级状态', cause),
-        }))?.phase === 'ready'
+        upgradeOffline(
+          yield* Effect.tryPromise({
+            try: () => readUpgradeState(options.dataDirectory!),
+            catch: (cause) => new WorkerFailure('upgrade_state_invalid', '无法读取升级状态', cause),
+          }),
+        )
       )
         return { type: 'result', ok: false, code: 'node_upgrading' }
       const trace = commandAction(decoded.type) ? yield* captureTrace : undefined

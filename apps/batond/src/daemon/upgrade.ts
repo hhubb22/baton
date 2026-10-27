@@ -1,6 +1,6 @@
-import { BUILD } from '@baton/protocol/release'
+import { BUILD, ReleaseMetadata } from '@baton/protocol/release'
 import { createHash, randomUUID } from 'node:crypto'
-import { readdir, readFile, realpath, stat } from 'node:fs/promises'
+import { readdir, stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { Schema } from 'effect'
@@ -13,13 +13,18 @@ import { readLedger } from '../worker/ledger.ts'
 import { checkStorageFormat } from '../storage-format.ts'
 import { storageBaseline as nodeBaseline } from './ledger.ts'
 import { storageBaseline as projectBaseline } from '../project/ledger.ts'
+import { checkUpgrade, readUpgradePackage, sameRelease } from './upgrade-check.ts'
 
 export const UpgradeState = Schema.Struct({
   operation_id: Schema.String,
   source_version: Schema.String,
   target_version: Schema.String.check(Schema.isMinLength(1)),
   target_path: Schema.String,
-  phase: Schema.Literals(['draining', 'ready', 'cancelled', 'failed']),
+  phase: Schema.Literals(['draining', 'ready', 'cancelled', 'failed', 'migrating', 'syncing']),
+  checked_release: Schema.optionalKey(ReleaseMetadata),
+  backup_path: Schema.optionalKey(Schema.String),
+  backup_checksum: Schema.optionalKey(Schema.String),
+  error_code: Schema.optionalKey(Schema.String),
   reason: Schema.optionalKey(Schema.String),
 })
 export type UpgradeState = typeof UpgradeState.Type
@@ -49,26 +54,39 @@ export async function upgradePaused(dataDirectory?: string): Promise<boolean> {
 export const saveUpgradeState = (directory: string, state: UpgradeState) =>
   writePrivateFileAtomic(join(directory, 'upgrade.json'), JSON.stringify(state))
 
-export async function prepareUpgrade(directory: string, target: string): Promise<UpgradeState> {
-  const path = await realpath(target)
-  const release = Schema.decodeUnknownSync(Schema.Struct({ version: Schema.String.check(Schema.isMinLength(1)) }))(
-    JSON.parse(await readFile(join(path, 'release.json'), 'utf8')),
-  )
+export async function prepareUpgrade(directory: string, target: string, ca?: string): Promise<UpgradeState> {
+  const { path, release } = await readUpgradePackage(target)
   const previous = await readUpgradeState(directory)
   if (previous && previous.phase !== 'cancelled') {
     if (previous.target_path !== path || previous.target_version !== release.version)
       throw new IPCError('upgrade_conflict', '已有不同目标的升级准备')
-    return previous
+    if (previous.checked_release && sameRelease(previous.checked_release, release)) return previous
+    if (previous.checked_release) throw new IPCError('upgrade_conflict', '目标安装包身份已改变')
   }
-  const state: UpgradeState = {
-    operation_id: randomUUID(),
-    source_version: BUILD.version,
-    target_version: release.version,
-    target_path: path,
-    phase: 'draining',
-  }
+  const checked = await checkUpgrade(directory, path, ca)
+  if (!checked.ok) throw new IPCError(checked.code, checked.reason)
+  if (!sameRelease(release, checked.release))
+    throw new IPCError('upgrade_package_invalid', '预检期间目标安装包身份发生变化')
+  const state: UpgradeState =
+    previous && previous.phase !== 'cancelled'
+      ? { ...previous, checked_release: checked.release }
+      : {
+          operation_id: randomUUID(),
+          source_version: BUILD.version,
+          target_version: release.version,
+          target_path: path,
+          phase: 'draining',
+          checked_release: checked.release,
+        }
   await saveUpgradeState(directory, state)
   return state
+}
+
+export const upgradeOffline = (state: UpgradeState | undefined) =>
+  state !== undefined && ['ready', 'migrating', 'syncing', 'failed'].includes(state.phase)
+
+export function upgradeCanCancel(state: UpgradeState) {
+  return !['migrating', 'syncing'].includes(state.phase) && state.error_code !== 'upgrade_migration_failed'
 }
 
 /** 只读检查持久执行事实；存活的锁或未确认的进程记录都阻止就绪。 */

@@ -72,7 +72,7 @@ Cursor store 子进程禁用 fetch 和 HTTP(S) 请求。上述加载检查不调
 
 ## 版本与兼容
 
-发布元数据、只读查询、连接版本核对、中心恢复后处理和本地升级准备已实现；增量格式升级与安装切换流程仍为 RL-13～16 的待实施设计。存储基线与摘要校验见「持久格式与迁移」，中心恢复后处理见「备份与恢复」，本地 prepare、status、cancel 见「设备准备与切换」。首版允许人工停止和切换程序，升级入口负责状态、迁移与检查；安装包由管理员或设备用户取得，不在进程运行时覆盖旧目录。
+发布元数据、只读查询、连接版本核对、中心恢复后处理、本地升级预检、准备与离线迁移已实现；增量格式升级、安装入口切换和中心同步完成流程仍待实施。存储基线与摘要校验见「持久格式与迁移」，中心恢复后处理见「备份与恢复」，本地升级入口见「设备准备与切换」。首版允许人工停止和切换程序，升级入口负责状态、迁移与检查；安装包由管理员或设备用户取得，不在进程运行时覆盖旧目录。
 
 ### 模块职责
 
@@ -98,7 +98,7 @@ Cursor store 子进程禁用 fetch 和 HTTP(S) 请求。上述加载检查不调
 
 节点在认证帧中上报必填的 `daemon_version` 与 `protocol_version`。中心先只读核验凭据身份和闲置期限，再调用一次版本比对；通过后才登记连接、允许 `node.sync` 及派发。拒绝返回 `auth_result`，`ok=false`、`code=node_version_incompatible`，附 `message` 和 `version_incompatibility`：双方版本与协议、`supported_daemon_versions`、固定原因 `daemon_version_unsupported` 或 `protocol_version_unsupported`、先升级中心再升级节点的指引。发送完成后通过既有 1008 关闭路径断开；不登记连接、不写业务数据、不清除 outbox，也不延长凭据闲置期限。凭据无效或过期时优先返回认证错误。
 
-daemon 收到版本拒绝后终止本次运行，等待用户升级后重新启动，不自动重连。CLI 的结构化错误诊断保留 `node_version_incompatible`、双方版本、协议、原因和指引；本地命令、账本与待补报结果保留，独立 Worker 沿用既有生命周期。升级预检尚待实施：`upgrade check` 将只读查询中心与本地格式，不迁移或启动 Worker。节点闲置过期时，实际恢复连接前先重新认证。首次准备时中心不可达则保持原版本；已取得目标预检结果后断网，可继续本地准备与迁移，恢复业务前仍须重新核对并同步。
+daemon 收到版本拒绝后终止本次运行，等待用户升级后重新启动，不自动重连。CLI 的结构化错误诊断保留 `node_version_incompatible`、双方版本、协议、原因和指引；本地命令、账本与待补报结果保留，独立 Worker 沿用既有生命周期。`upgrade check` 只读查询中心与本地格式，不迁移或启动 Worker；版本规则与连接握手一致，development 仅放宽版本号比较，协议仍须相同。查询使用原身份中的中心地址，GET 不携带设备凭据，不续期凭据。节点闲置过期时，实际恢复连接前先重新认证。首次准备时中心不可达则保持原版本；prepare 已持久保存该目标预检后，断网可继续本地准备与迁移，恢复业务前仍须重新核对并同步。
 
 中心优先升级，兼容的旧 daemon 正常运行，随后设备逐台升级。通信窗口与格式迁移路径分别声明；超过通信窗口的设备可以由目标包直接执行完整迁移链，或使用指定的中间包仅做离线迁移。中间包不用连接不兼容的中心，也不恢复业务；最终目标必须通过中心兼容预检。首版无需支持任何发布基线之前的开发程序。
 
@@ -142,33 +142,37 @@ SQLite 在只读连接中核对格式元数据和迁移记录，通过后才打�
 
 ### 设备准备与切换
 
-`prepare`、`status`、`cancel` 已通过本地认证 IPC 交由 daemon 处理，支持 `--data-dir`。它们复用节点锁、私有令牌和进程登记，不依赖中心在线；`check`、`migrate` 仍为待实施入口。
+本地升级入口均支持 `--data-dir`。`prepare`、运行中的 `status` 和迁移前 `cancel` 通过现有认证 IPC 交由 daemon 处理；daemon 已退出或处于离线迁移阶段时，`status` 直接读取私有状态和账本事实。`check` 是只读 CLI，`migrate` 是目标程序的离线 CLI，复用节点锁、配置写锁与进程登记。首次 prepare 需要中心在线，已记录的同一目标准备和本地迁移可离线继续。
 
 | 入口 | 作用 |
 |---|---|
 | `batond upgrade check --package <目录>` | 只读验证安装包、实际版本、格式范围、当前中心兼容性及剩余空间，返回可执行与失败原因 |
-| `batond upgrade prepare --package <目录>` | 读取目标目录的 `release.json.version`，以持久 operation_id 登记源/目标与升级准备；同一路径及版本复用当前准备，不同目标返回 `upgrade_conflict` |
-| `batond upgrade migrate` | 在 ready 且 daemon 已退出时，由目标或迁移链中间版本持独占锁执行本地迁移后退出；保持业务暂停 |
+| `batond upgrade prepare --package <目录>` | 复用 check 预检，以持久 operation_id 登记源/目标与预检结果；同一路径、版本和构建身份复用当前准备，不同目标返回 `upgrade_conflict` |
+| `batond upgrade migrate` | 首次仅在 ready 且 daemon 已退出时，由预检目标程序持独占锁备份并逐库核验、初始化；成功写 syncing 后退出，重跑依据库内事实继续 |
 | `batond upgrade status` | 返回持久状态、阻挡的 Thread/Runtime、进程 PID 与创建时间，以及账本内待确认报告数；检查失败显示阻挡原因 |
-| `batond upgrade cancel` | 持久写入 `cancelled` 并解除门禁，恢复保留的队列；不恢复被用户显式停止撤回的输入 |
+| `batond upgrade cancel` | 迁移前持久写入 `cancelled` 并解除门禁，恢复保留的队列；不恢复被用户显式停止撤回的输入。迁移开始或迁移失败后拒绝取消 |
 
-当前 `prepare` 仅读取目标 `release.json` 的非空 `version`，文件不可读、JSON 无效或字段缺失时直接报错；不查询中心兼容性、不检查剩余空间。状态位于数据目录的私有原子文件 `upgrade.json`，包含 `operation_id`、`source_version`、`target_version`、`target_path`、`phase`，失败时附 `reason`。源版本取运行程序的 `BUILD.version`，未注入发布身份的开发程序显示 `development`。当前阶段仅有 `draining`、`ready`、`cancelled`、`failed`；失败保持暂停，取消后才恢复。状态读取失败返回 `upgrade_state_invalid`，不猜测为空闲。
+check 读取目标 `release.json`，实际执行该目录的 `batond --version` 并核对完整发布身份；以 SQLite 只读连接核对三类账本格式及基线摘要，要求目标 `ledger_versions` 与实际支持格式一致。查询当前中心 `GET /api/v1/release` 核对版本与协议，再按备份目标文件系统的可用块估算完整目录副本空间，包含目录分配开销及 1 MiB 状态、清单余量。TLS 可复用现有 `--ca-file`；prepare 使用 daemon 已配置的 CA。check 不建立基线、不写升级状态、不启动或停止业务；SQLite 读取时可能建立 SHM 和空 WAL 辅助文件，主库、已有 WAL 内容及业务事实保持不变。
+
+状态位于数据目录的私有原子文件 `upgrade.json`，包含 `operation_id`、`source_version`、`target_version`、`target_path`、`phase`，以及 prepare 保存的完整 `checked_release`。迁移取得一致备份后附 `backup_path`、`backup_checksum`；失败附 `error_code` 和 `reason`。源版本取运行程序的 `BUILD.version`，未注入发布身份的开发程序显示 `development`。持久阶段为 `draining`、`ready`、`migrating`、`syncing`、`cancelled`、`failed`。状态读取失败返回 `upgrade_state_invalid`，执行保持暂停。
 
 Thread 的新 open、message、resume、answer 通过原有节点账本与 Worker 回执持久接收。draining 允许启动只负责接收和保存队列的 Worker，以继续处理 stop、withdraw；其原生会话创建、恢复和回合执行都受门禁限制。Worker 自己在执行调度和下一轮 intent 前读取同一门禁，当前回合自然结束；空闲 Worker 在串行队列中停止新调度，再由 Scope 关闭会话、agent-host、watchdog 和 SQLite。排队输入及原生命令身份保留，取消后继续调度。Project 前后台启动和唤醒保存在 `project-runtime.db` 的 `project_commands` 中；后台整理沿用既有取消与清理，前台完成当前响应后在下一次 `claim_inputs` 前退出，已保存历史和未领取输入保留。stop、withdraw、结果补报和清理在 draining 期间继续。
 
 daemon 只读检查 Worker/启动锁、Thread 活动事实、Runtime 运行和进程记录；存活、未知或未确认清理都阻止就绪。全部检查通过后关闭业务 Scope，等待已有控制请求、Runtime、watchdog、设备操作及数据库关闭，再次检查持久事实才写入 `ready`。本地未确认报告保留，不要求中心 ACK 才能就绪。ready 仅保留认证升级管理和受限中心连接，不开启业务数据库；本地新业务返回 `node_upgrading`，中心 Thread 来令使用连接级同码错误，保留中心 outbox，不发送会被当前中心解释为最终失败的否定接收回执。取消 ready 会重新打开业务 Scope，继续原队列。
 
-后续完整切换流程要求先解包新版本到独立目录并执行预检，保存备份位置，取得独占升级锁后迁移；这些入口、兼容性查询、备份和安装切换仍待实施。
+migrate 校验当前运行程序、目标包与已保存预检的发布身份一致，持有 `daemon.lock` 及身份、浏览目录和执行配置的原有写锁，再核对所有登记进程。将私有数据目录复制到旁边的 `<目录名>.upgrade-backups/<operation_id>-<随机 ID>/data/`；保留身份、业务、SDK 状态、完整输出与 WAL，仅排除 IPC 和已知进程锁。备份目录使用现有私有目录权限，小型 `backup.json` 记录操作、源目录和目录内容 SHA-256，完成复制后比较源与副本摘要。符号链接、特殊文件或无法确认的进程会阻止迁移。数据目录以外的原生会话与模型凭据仍按「备份与恢复」单独保护。
+
+备份位置和摘要随 `migrating` 一起原子写入状态，再逐库调用现有存储初始化与事务核验；首版只有格式 1 / `0001_baseline`，无增量步骤。成功进入 `syncing`；失败保存 `upgrade_migration_failed` 并保持暂停。重跑核验原备份并依据各库实际格式继续，保留同一备份，不用外部进度跳过库，不自动恢复备份。migrating 或 syncing 缺少完整备份记录时拒绝继续。安装入口切换、中心阶段上报和 completed 仍待实施。
 
 | 阶段 | 行为与恢复依据 |
 |---|---|
 | `draining` | 禁止开始新执行；等待当前工作结束、后台停止、结果落盘及进程退出 |
 | `ready` | 所有执行与登记进程清理已确认，数据库已关闭；daemon 保持管理入口，用户可正常退出它 |
 | `migrating` | daemon 已退出，目标版本持独占升级锁并检查备份后逐库迁移，业务启动保持关闭 |
-| `syncing` | 本地格式检查通过，目标版本以原设备身份连接中心；只补报、同步与处理必要清理，不开始新执行 |
-| `completed` | 中心确认同步且清理义务完成，解除升级暂停并恢复原队列；持久保留最后一次升级结果 |
+| `syncing` | 本地格式检查通过，daemon 与独立 Worker 保持业务暂停；daemon 仅开放管理和受限连接，结果补报与完成同步待实施 |
+| `completed`（待实施） | 中心确认同步且清理义务完成，解除升级暂停并恢复原队列；持久保留最后一次升级结果 |
 | `cancelled` | 迁移前取消准备并确认原程序仍可读取数据，清除门禁后恢复调度；保留操作结果 |
-| `failed` | 保存原阶段、错误码和当前格式；保持暂停，按数据库事实判断继续或恢复路径 |
+| `failed` | 保留错误码、原因、备份与各库实际格式；保持暂停。迁移失败可重跑 migrate，迁移前失败仍可取消 |
 
 阶段上报协议在 `packages/protocol` 声明，当前支持 `draining`、`ready`、`cancelled`、`failed`。普通能力报告包含 `upgrade_protocol=1`；`node.upgrade_state` 只上传 `operation_id`、源/目标版本和阶段，不上传安装路径或原始失败诊断。daemon 读取已经原子保存的 `upgrade.json`，按现有心跳间隔重报未确认状态；初次连接和重连均重报当前状态。回执 `node.upgrade_state_result` 必须匹配原 operation ID、阶段、消息关联 ID 且 `ok=true`，否则继续重试。ready/failed 的受限连接也上报，不打开业务数据库。离线期间可以跨过中间阶段，中心接受首次直接上报 ready 或 cancelled。
 
@@ -180,11 +184,11 @@ daemon 只读检查 Worker/启动锁、Thread 活动事实、Runtime 运行和�
 
 daemon 汇总所有已发现的 Worker、watchdog、agent-host、Runtime 与持久登记后代，逐一核实进程身份和退出，停止账本写循环并关闭数据库后才报告 ready；节点数据根目录的启动锁覆盖最后核查与禁止新进程之间的竞争。ready 仅开放查询、取消和退出管理入口，新来的业务命令返回可重试的 `node_upgrading`，不写入已关闭账本、不生成持久成功 ACK，中心保留原 outbox。本地未 ACK 报告已经完整持久化时允许离线准备，不能为了拿到中心 ACK 丢弃数据。Windows 依旧受现行回收边界限制，无法确认的进程保留为阻挡项，由用户处理或取消准备。
 
-ready 后退出旧 daemon，取得独占升级锁并做设备一致备份。目标版本从新目录启动，使用原 `--data-dir`、Runtime 凭据目录和启动配置，校验目标预检记录、备份与所有登记进程，再进入 migrating。启动入口由用户或现有服务管理器切换为新目录的明确可执行路径；不在旧目录就地覆盖，不要求 Windows 使用符号链接。保留旧安装目录至确认升级成功，清理由用户显式发起。
+ready 后正常退出旧 daemon，从目标目录显式运行 `batond upgrade migrate --data-dir <原数据目录>`。迁移完成后以原 `--data-dir`、Runtime 凭据目录和启动配置启动目标 daemon；migrating、syncing 或 failed 时均保持业务 Scope 和独立 Worker 关闭，不能通过重新启动恢复执行。启动入口由用户或现有服务管理器切换为新目录的明确可执行路径；不在旧目录就地覆盖，不要求 Windows 使用符号链接。保留旧安装目录至确认升级成功，清理由用户显式发起。
 
-migrating 中断后以库内版本继续，syncing 失败时保持本地暂停。节点完成兼容检查、重新认证（如有需要）、原结果补报及同步后，先持久 completed 意图，本地执行仍保持暂停；中心确认同步与完成状态后返回回执，节点持久解除门禁再开放执行。丢失完成回执时重复查询原状态；中心仍保留该节点未完成升级记录，不能因重连或旧报告覆盖而提前派发。Worker 的升级恢复路径按持久状态继续队列，不能借用会撤回旧 queued 的显式 resume 流程。
+migrating 中断后以库内版本继续，syncing 失败时保持本地暂停。后续完成协议要求节点完成兼容检查、重新认证（如有需要）、原结果补报及同步后，先持久 completed 意图，本地执行仍保持暂停；中心确认同步与完成状态后返回回执，节点持久解除门禁再开放执行。丢失完成回执时重复查询原状态；中心仍保留该节点未完成升级记录，不能因重连或旧报告覆盖而提前派发。Worker 的升级恢复路径按持久状态继续队列，不能借用会撤回旧 queued 的显式 resume 流程。
 
-错误使用固定码：`upgrade_conflict`、`upgrade_busy`、`upgrade_backup_required`、`upgrade_migration_failed`、`storage_version_unsupported`、`migration_checksum_mismatch`、`node_upgrading`、`node_version_incompatible`。状态读取失败明确返回错误，不报告 ready 或 completed。
+错误使用固定码：`upgrade_conflict`、`upgrade_busy`、`upgrade_backup_required`、`upgrade_migration_failed`、`upgrade_package_invalid`、`upgrade_coordinator_unavailable`、`upgrade_insufficient_space`、`storage_version_unsupported`、`migration_checksum_mismatch`、`node_upgrading`、`node_version_incompatible`。状态读取失败明确返回错误，不报告 ready 或 completed。
 
 prepare 之前升级未支持该能力的 daemon 时，由发布说明要求停服并确认全部进程退出，再由目标版本执行检查与迁移；不把旧版未知能力当成已经停止。首个发布版即应包含准备与格式检查机制，使下一次升级可沿本流程执行。
 

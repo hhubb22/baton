@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { upgradePaused, readUpgradeState } from '../daemon/upgrade.ts'
+import { upgradePaused, readUpgradeState, upgradeOffline } from '../daemon/upgrade.ts'
 import { IPCError } from '../daemon/ipc.ts'
 import { join } from 'node:path'
 import { rm, open } from 'node:fs/promises'
@@ -234,7 +234,7 @@ class Manager implements ProjectManager {
     const decoded = Schema.decodeUnknownOption(ProjectRunCommand)(input)
     if (decoded._tag === 'None' || decoded.value.lease_epoch <= 0 || this.cancel.signal.aborted) return
     const command = decoded.value
-    if ((await readUpgradeState(this.options.dataDir))?.phase === 'ready')
+    if (upgradeOffline(await readUpgradeState(this.options.dataDir)))
       throw new IPCError('node_upgrading', '设备已准备升级')
     const queued = this.serial.then(async () => {
       const id = createHash('sha256').update(JSON.stringify(command)).digest('hex')

@@ -85,7 +85,7 @@ export interface State extends Meta {
   outbox: OutboxEntry[]
 }
 
-const storageBaseline = [
+export const storageBaseline = [
   'CREATE TABLE worker_commit (id INTEGER PRIMARY KEY CHECK (id = 1), commit_token TEXT NOT NULL)',
   "INSERT INTO worker_commit VALUES (1, '')",
   'CREATE TABLE thread_meta (id INTEGER PRIMARY KEY CHECK (id = 1), payload TEXT NOT NULL)',
