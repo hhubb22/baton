@@ -1,4 +1,5 @@
 import { parseArgs } from 'node:util'
+import { existsSync } from 'node:fs'
 import { appendFile, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { telemetryLayer } from '@baton/telemetry'
@@ -41,17 +42,23 @@ const replay: AgentFactory = (config) => {
       active = { nativeSessionId, messageId: message.id, executionId }
       const identity = active
       output.offer({ ...identity, text: `working:${message.text}\n` })
-      if (message.text !== 'hold')
-        timer = setTimeout(() => {
-          Queue.offerUnsafe(events, {
-            ...identity,
-            type: 'reply',
-            id: `reply-${message.id}`,
-            text: `reply:${message.text}`,
-          })
-          Queue.offerUnsafe(events, { ...identity, type: 'end', outcome: 'completed' })
-          active = undefined
-        }, 150)
+      const finish = () => {
+        if (!active) return
+        // hold 可由用例释放，当前回合自然结束时保留 Worker 内的排队输入。
+        if (message.text === 'hold' && !existsSync(join(config.working_directory, `${config.thread_id}.release`))) {
+          timer = setTimeout(finish, 25)
+          return
+        }
+        Queue.offerUnsafe(events, {
+          ...identity,
+          type: 'reply',
+          id: `reply-${message.id}`,
+          text: `reply:${message.text}`,
+        })
+        Queue.offerUnsafe(events, { ...identity, type: 'end', outcome: 'completed' })
+        active = undefined
+      }
+      timer = setTimeout(finish, 150)
       return { nativeSessionId, executionId }
     })
   const cancel = Effect.sync(() => {
