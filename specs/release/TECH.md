@@ -233,6 +233,8 @@ prepare 之前升级未支持该能力的 daemon 时，由发布说明要求停�
 
 发布元数据已有实际开发/发布 bundle 回归、匿名 HTTP 读取与凭据不变检查，以及拒绝重新贴标和元数据篡改的工具测试；macOS arm64 已验证 SEA 搬迁、实际子进程诊断与最终归档解包复验，其他发布平台未验证本次元数据实现。持久格式基线的重复打开、SQL/摘要篡改、未知与更新版本拒绝已有包内测试；PostgreSQL 还验证迁移顺序与事务失败回滚。本地升级准备已有包内测试覆盖当前回合结束、新执行暂停与输入保留、取消恢复、进程阻挡和 ready 拒绝新业务。`upgrade-migrate.test.ts` 验证只读预检、持锁备份、逐库失败重跑与启动门禁；`upgrade-report.test.ts` 和中心 `upgrade.integration.test.ts` 验证补报、完成回执重发及确认后恢复派发。`e2e/src/upgrade.integration.test.ts` 使用候选包和当前基线，经实际中心、WSS、daemon 与独立 Worker 验证 prepare → ready → 停 daemon → migrate → 重启 → completed，保留 Project、记忆、Thread、存储代次与原生会话 ID，已发送输入不重发、排队输入仅发送一次。增量格式迁移与自动安装入口切换尚未实现；进程强制中断、真实上一发布包升级及非 macOS 平台的本轮升级验收仍未测。自动化只使用本机数据库、进程替身和离线录制；已有发布测量不替代新增验收。
 
+用户服务的 launchd 启停已在 macOS 27.2 arm64、Node 26.5.0 上用开发 bundle 验证：临时数据目录放置离线身份，中心地址仅指向本机不可用端口；`service install` 成功，`status` 显示运行、Node 的真实路径与数据目录下的日志路径，daemon 持续存活；`service uninstall` 后服务定义与 daemon 均消失，身份和日志保留。验收后已移除临时数据目录。该验证不覆盖中心注册与连接、登录自启、异常重启、SEA 安装包或 Linux systemd 真机行为。
+
 | 需求 | 设置与观察 | 失败条件 | 位置 |
 |---|---|---|---|
 | RL-02、03 | 对比归档、程序与子进程元数据，模拟不同平台检查结果 | 版本被重新贴标、未测写成通过、已接受限制被抹去 | 构建与归档工具单测 |

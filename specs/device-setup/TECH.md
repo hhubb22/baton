@@ -243,7 +243,8 @@ macOS 的应用整体做临时签名，内置的 batond 保留自身的临时签
 | DS-15～DS-17 | 测试数据中固定一套 CA、叶子和其他 CA 签发的叶子（附生成命令）；测试链接解析和证书校验 | 接受 http 源或非 CA 证书；非中心 host 使用了保存的 CA；用其他 CA 签发的叶子通过校验 | `apps/desktop` 单元（Node，不启动 Electron） | planned |
 | DS-18～DS-20 | supervisor 使用替身 spawn：正常退出、78、反复崩溃、`daemon_running`、退出流程 | 终止类失败仍重启；退避或次数上限不对；退出时没有关闭 stdin | `apps/desktop` 单元 | planned |
 | CLI 全链路 | 现有 HTTPS e2e 中心，在数据目录外注入安装目录与 `deployment.json`，不带中心地址和 CA 参数注册并连接 | 必须传 `--coordinator` 或 `--ca-file` | `e2e` | implemented |
-| launchd、systemd、客户端安装与常驻 | 在 macOS arm64、Debian 12、Windows 11 上按 PRODUCT 验收表手动执行 | 任一验收行不符 | 手动，结果写入 release TECH | planned |
+| DS-08、DS-09 launchd | macOS arm64 上用开发 bundle、临时数据目录与离线身份执行 install → status → uninstall；连接地址仅指向本机不可用端口 | 状态未显示运行、程序或日志路径不符、卸载后仍有服务定义或 daemon、身份与日志被删除 | 手动，结果见 release TECH「验证」 | manual |
+| systemd、客户端安装与常驻 | 在 Debian 12、macOS arm64、Windows 11 上按 PRODUCT 验收表手动执行 | 任一验收行不符 | 手动，结果写入 release TECH | planned |
 
 自动化测试不下载 Electron，也不访问外部服务。系统服务和桌面集成依赖真实系统，只做手动验证，未测的平台如实记录。
 

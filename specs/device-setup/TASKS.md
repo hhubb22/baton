@@ -40,13 +40,13 @@
 - 阻塞于：无，可立即开始；`service status` 显示拒绝原因需要 T01 的状态文件
 - 交付：`batond service install|uninstall|status` 在 macOS 安装 launchd 用户代理、在 Linux 安装 systemd 用户单元
 - 依据：TECH.md「`batond service install|uninstall|status`」
-- 验证：渲染与回滚用替身 runner 做单元测试；launchd 与 systemd 在真机手动验证
-- 状态：待开始
+- 验证：渲染与回滚用替身 runner 做单元测试；macOS launchd 已用开发 bundle 手动验证，Linux systemd 真机未验证
+- 状态：已完成
 
 验收：
 
-- [ ] plist 与 unit 内容、重复安装替换路径、命令失败后恢复原定义有单元测试
-- [ ] 本机 macOS 上 install → status → uninstall 手动跑通
+- [x] plist 与 unit 内容、重复安装替换路径、命令失败后恢复原定义有单元测试
+- [x] 本机 macOS 上 install → status → uninstall 手动跑通
 
 ## T04 桌面客户端接入个人电脑
 
