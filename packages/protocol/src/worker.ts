@@ -14,7 +14,7 @@ import {
   jsonLimit,
   summary,
 } from './common.ts'
-import { SessionRequest, SessionResult, ThreadReport } from './thread.ts'
+import { SessionRequest, SessionResult, ThreadReport, ThreadActiveTurn } from './thread.ts'
 
 export const WorkerCommandAction = Schema.Literals([
   'open',
@@ -87,6 +87,8 @@ export const WorkerIPCMessage = Schema.Struct({
   after_worker_seq: Schema.optionalKey(Integer),
   worker_seq: Schema.optionalKey(Integer),
   thread_reports: Schema.optionalKey(Schema.NullOr(Schema.Array(ThreadReport))),
+  activity_check_seq: Schema.optionalKey(PositiveInteger),
+  active_turn: Schema.optionalKey(ThreadActiveTurn),
   session_request: Schema.optionalKey(Schema.NullOr(SessionRequest)),
   session_result: Schema.optionalKey(Schema.NullOr(SessionResult)),
   answer: Schema.optionalKey(ThreadAnswerInput),

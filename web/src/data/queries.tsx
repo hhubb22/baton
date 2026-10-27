@@ -23,13 +23,13 @@ import type {
   ThreadAnswerInput,
 } from './types'
 
-// 查询键的第一段是数据主题，收到某个主题的变化时刷新以它开头的全部查询。
+// 查询键的第一段是数据主题；按需设备读取只在用户操作时刷新。
 export const keys = {
   session: ['session'] as const,
   devices: ['devices'] as const,
   // 设置码状态随设备接入变化，所以放在 devices 主题下。
   enrollment: (id: ID) => ['devices', 'enrollment', id] as const,
-  // 目录列表随设备连接状态变化。
+  // 文件和目录内容由设备按需返回。
   folders: (deviceId: ID, path: string | null) => ['devices', 'folders', deviceId, path] as const,
   projects: ['projects'] as const,
   projectEntries: (id: ID) => ['projects', 'entries', id] as const,
@@ -77,7 +77,12 @@ export function ClientProvider({ client, children }: { client: BatonClient; chil
   useEffect(
     () =>
       client.subscribe(({ topics }) => {
-        for (const topic of topics) void queryClient.invalidateQueries({ queryKey: [topic] })
+        for (const topic of topics)
+          void queryClient.invalidateQueries({
+            queryKey: [topic],
+            predicate: ({ queryKey: [group, kind] }) =>
+              group !== 'files' && !(group === 'devices' && (kind === 'folders' || kind === 'allowedFolders')),
+          })
       }),
     [client, queryClient],
   )
@@ -169,7 +174,7 @@ export function useInbox() {
   return useQuery({ queryKey: keys.inbox, queryFn: () => client.listInbox() })
 }
 
-// 文件内容随设备状态刷新：设备变化会发出 files 主题，旧预览不保留。
+// 文件内容按需读取；设备不可用时由预览界面隐藏旧正文。
 export function useFile(deviceId: ID, path: string | null) {
   const client = useClient()
   return useQuery({
@@ -210,6 +215,8 @@ export function useFolders(deviceId: ID | null, path: string | null) {
     queryKey: keys.folders(deviceId ?? '', path),
     queryFn: () => client.listFolders(deviceId!, path),
     enabled: deviceId !== null,
+    staleTime: 0,
+    refetchOnReconnect: false,
   })
 }
 
@@ -402,14 +409,29 @@ export function useSetDefaultDevice() {
   })
 }
 
+const refreshDeviceFolders = (cache: QueryClient, deviceId: ID) =>
+  Promise.all([
+    cache.invalidateQueries({ queryKey: ['devices', 'folders', deviceId] }),
+    cache.invalidateQueries({ queryKey: ['devices', 'allowedFolders', deviceId] }),
+    cache.invalidateQueries({ queryKey: ['files', deviceId] }),
+  ])
+
 export function useAddDeviceFolder() {
   const client = useClient()
-  return useMutation({ mutationFn: (input: { deviceId: ID; path: string }) => client.addDeviceFolder(input) })
+  const cache = useQueryClient()
+  return useMutation({
+    mutationFn: (input: { deviceId: ID; path: string }) => client.addDeviceFolder(input),
+    onSuccess: (_device, { deviceId }) => refreshDeviceFolders(cache, deviceId),
+  })
 }
 
 export function useRemoveDeviceFolder() {
   const client = useClient()
-  return useMutation({ mutationFn: (input: { deviceId: ID; path: string }) => client.removeDeviceFolder(input) })
+  const cache = useQueryClient()
+  return useMutation({
+    mutationFn: (input: { deviceId: ID; path: string }) => client.removeDeviceFolder(input),
+    onSuccess: (_device, { deviceId }) => refreshDeviceFolders(cache, deviceId),
+  })
 }
 
 export function useStartSubscriptionLogin() {
@@ -433,5 +455,5 @@ export function useRemoveDevice() {
 
 export function useCreateEnrollment() {
   const client = useClient()
-  return useMutation({ mutationFn: () => client.createEnrollment() })
+  return useMutation({ mutationFn: (nodeId?: ID) => client.createEnrollment(nodeId) })
 }

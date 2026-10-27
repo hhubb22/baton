@@ -1,7 +1,7 @@
 import { createMemoryHistory } from '@tanstack/react-router'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it } from 'vite-plus/test'
+import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import { createMockClient } from '../data/mock/client'
 import type { ScenarioId } from '../data/mock/scenarios'
 import { manualScheduler } from '../data/mock/scheduler'
@@ -463,6 +463,70 @@ describe('devices', () => {
   function deviceRow(name: string) {
     return screen.getByRole('button', { name: new RegExp(`^${name}`) })
   }
+
+  it.each([
+    ['dev-windows', 'Windows Desktop', '$env:BATON_ENROLLMENT_TOKEN = Read-Host -MaskInput'],
+    ['dev-ubuntu', 'Ubuntu Dev', 'read -rs BATON_ENROLLMENT_TOKEN && export BATON_ENROLLMENT_TOKEN'],
+  ])('reconnects the original device %s with a new setup code', async (id, name, tokenInput) => {
+    const user = userEvent.setup()
+    const { client, scheduler } = renderApp('/devices', 'normal', (client) => {
+      const read = client.listDevices.bind(client)
+      client.listDevices = async () =>
+        (await read()).map((device) =>
+          device.id === id && !device.credentialState
+            ? { ...device, connection: 'offline', credentialState: 'idle_expired' }
+            : device,
+        )
+    })
+    const create = vi.spyOn(client, 'createEnrollment')
+    await screen.findByRole('button', { name: new RegExp(`^${name}`) })
+    expect(within(deviceRow(name)).getByText('Needs sign-in')).toBeInTheDocument()
+    const before = (await client.listDevices()).find((device) => device.id === id)!
+    const defaultId = (await client.getSession()).defaultDeviceId
+    const threadIds = (await client.listThreads()).map((thread) => thread.id)
+
+    await user.click(deviceRow(name))
+    expect(screen.getAllByText('Needs sign-in')).toHaveLength(2)
+    await user.click(screen.getByRole('button', { name: 'Reconnect device' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Reconnect device' })
+    await within(dialog).findByText('Waiting for device…')
+    expect(within(dialog).getByText(name)).toBeInTheDocument()
+    expect(within(dialog).queryByLabelText('Device name')).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('radiogroup', { name: 'Operating system' })).not.toBeInTheDocument()
+    const command = within(dialog).getByLabelText('Run in terminal')
+    expect(command.textContent).toBe(`${tokenInput}\nbatond reauth && batond up`)
+    expect(command.textContent).not.toContain(within(dialog).getByLabelText('Setup code').textContent!)
+    const firstCode = within(dialog).getByLabelText('Setup code').textContent
+
+    act(() => client.controls.expireEnrollment())
+    await within(dialog).findByRole('button', { name: 'Get a new code' })
+    client.controls.setReachable(false)
+    await user.click(within(dialog).getByRole('button', { name: 'Get a new code' }))
+    expect(await within(dialog).findByText("Can't reach Baton")).toBeInTheDocument()
+    client.controls.setReachable(true)
+    await user.click(within(dialog).getByRole('button', { name: 'Get a new code' }))
+    await within(dialog).findByText('Waiting for device…')
+    expect(within(dialog).getByLabelText('Setup code').textContent).not.toBe(firstCode)
+    expect(create.mock.calls.map(([nodeId]) => nodeId)).toEqual([id, id, id])
+
+    act(() => client.controls.connectEnrollment('Another name', 'macOS'))
+    expect(await within(dialog).findByText('Connected')).toBeInTheDocument()
+    expect(within(dialog).getByText(name)).toBeInTheDocument()
+    act(() => scheduler.advance(browserLatency.device))
+    await user.click(within(dialog).getByRole('button', { name: 'Done' }))
+    await waitFor(() => expect(screen.queryByText('Needs sign-in')).not.toBeInTheDocument())
+    const devices = await client.listDevices()
+    expect(devices).toHaveLength(3)
+    expect(devices.find((device) => device.id === id)).toMatchObject({
+      ...before,
+      connection: 'online',
+      credentialState: 'active',
+      lastSeenAt: expect.any(Number),
+    })
+    expect((await client.getSession()).defaultDeviceId).toBe(defaultId)
+    expect((await client.listThreads()).map((thread) => thread.id)).toEqual(threadIds)
+    expect(screen.queryByRole('button', { name: 'Reconnect device' })).not.toBeInTheDocument()
+  })
 
   it('connects a device with a setup code and updates the counts', async () => {
     const user = userEvent.setup()

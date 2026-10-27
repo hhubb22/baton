@@ -3,7 +3,7 @@
 Status: draft
 Basis: [行为规格](PRODUCT.md) R-01～R-25。Project Agent 见 [Project Agent TECH](../project-agent/TECH.md)，事项见 [Agent Inbox TECH](../agent-inbox/TECH.md)。
 
-凭据闲置过期、重新认证、Thread 上游执行模式与首版遥测为待实施设计；其他章节记录现行架构。当前节点凭据仍使用固定 JWT `exp`，尚无原设备重新认证流程。后端与设备的发布基线、升级和恢复设计见 [release TECH](../release/TECH.md)。
+Thread 上游执行模式与首版遥测为待实施设计；其他章节记录现行架构。设备凭据按有效业务滑动计算 30 天闲置期限，原设备通过一次性凭据重新认证。后端与设备的发布基线、升级和恢复设计见 [release TECH](../release/TECH.md)。
 
 ## 全景
 
@@ -420,44 +420,44 @@ TS 中心的控制操作分别计算排队和执行预算。默认排队 2 秒�
 
 ### 设备凭据生命周期
 
-本节为 R-02 的待实施设计。中心签发的设备 JWT 保留签名、issuer、audience、节点、员工、凭据 ID、版本与签发时间，移除固定 `exp`。其授权必须经过数据库当前凭据版本、吊销与闲置期限检查；不提供只验签即可授权的路径。注册和重新认证凭据仍为默认 10 分钟、单次使用的独立秘密。首版前直接调整开发协议和 DTO，不保留固定期限 JWT 的兼容分支。
+中心签发的设备 JWT 包含签名、issuer、audience、节点、员工、凭据 ID、版本与签发时间，不带固定 `exp`。其授权必须经过数据库当前凭据版本、吊销与闲置期限检查；不提供只验签即可授权的路径。注册和重新认证凭据仍为默认 10 分钟、单次使用的独立秘密。首版前直接调整开发协议和 DTO，不保留固定期限 JWT 的兼容分支。
 
 | 记录与入口 | 设计 |
 |---|---|
-| `nodes` | 新增 `last_business_at`；记录已验证业务活动的中心接收时间，与 `node_presence.last_contact_at` 分开 |
-| `node_credentials` | 将固定 `expires_at` 替换为 `idle_expires_at`；注册或重新认证初始化为中心当前时间加闲置期限 |
-| `node_enrollments` | 增加 `purpose=register\|reauth`、可空 `target_node_id`；重新认证凭据绑定员工和原设备 |
-| 重新认证回执 | 持久记录 `operation_id`、规范请求摘要、新 credential_id/version 与签发时间；与凭据替换同事务提交，不保存明文秘密 |
-| `NodeCredential` / 设备视图 | 本地凭据保留 ID、版本和 token；`idle_expires_at` 只作为中心响应的状态快照，节点不依据旧本地副本判定闲置期限 |
+| `nodes` | 保留设备身份与当前 `credential_version`，重新认证保持 ID、注册顺序与 Thread 归属 |
+| `node_credentials` | `last_business_at` 记录最近有效业务的中心时间；`expires_at` 是动态闲置期限，注册或重新认证时初始化为中心当前时间加 30 天 |
+| `node_enrollments` | 可空 `target_node_id` 区分普通注册与绑定原设备的重新认证；使用相同的单次消费路径 |
+| 重新认证回执 | 在原 enrollment 行保存 `operation_id`、规范请求摘要、原凭据和新凭据 ID；新凭据记录提供版本与签发时间。与凭据替换同事务提交，不保存明文秘密 |
+| `NodeCredential` / 设备视图 | 本地凭据保留 ID、版本、token 和 `expires_at` 快照，节点不依据快照授权；设备视图提供 `credential_state` 与 `idle_expires_at` |
 
-新增配置 `BATON_NODE_IDLE_TTL`，默认 `720h`，范围 1 小时至 90 天；它替代固定期限配置 `BATON_NODE_CREDENTIAL_TTL`。改变配置只影响后续注册、重新认证和有效业务计算的新期限，不自行复活已过期凭据。所有比较使用 PostgreSQL `clock_timestamp()`，期限相等即过期。
+闲置期限由 `NODE_IDLE_TTL_SECONDS` 常量固定为 30 天，不提供环境变量或配置项。所有期限比较使用 PostgreSQL `clock_timestamp()`，期限相等即过期。
 
 #### 活动认定与在途检查
 
-R-02 的活动在业务入口按固定种类认定，调用方不能通过布尔字段自行声明活跃。一次新命令的持久接收、新的 Worker 报告、Project 前台 `claim_inputs` / 工具请求，以及用户主动设备请求的成功响应可以延长期限。设备报告、轮询与文件分页须携带可关联的操作身份；自动刷新不生成可续期的用户操作。相同命令、事件、请求或分片重试只返回原结果，失败和重复投递不延长。
+R-02 的活动在业务入口按固定种类认定，调用方不能通过布尔字段自行声明活跃。一次新命令的持久接收、新的 Worker 报告、Project 前台 `claim_inputs` / 工具请求，以及用户主动设备请求的成功响应可以延长期限。设备报告、轮询与文件分页须携带可关联的操作身份；自动刷新不生成可续期的用户操作。相同命令、事件、请求或分片重试只返回原结果，失败和重复投递不延长。网页的文件与目录读取按用户打开、翻页或重试发起；中心状态轮询与设备能力通知不自动重发设备读取，设备离线时直接隐藏已取回的正文。
 
-中心仍活跃的业务采用有界存活证据：前台 Project 的有效宿主续租可算活动；Thread 由 daemon 定期查询 Worker 的认证 status，携带 Thread、存储代次、Turn 序号、实际执行身份和每次新核查的序号上报。中心验证对应未结束 Turn 和当前连接；daemon 按现有 Worker 状态查询预算有界核查。仅中心存有 `running`、节点仅发心跳、陈旧 status 或后台 memory claim 均不足以续期。设备离线期间中心不依据过去的执行中状态延长期限。
+中心仍活跃的业务采用有界存活证据：前台 Project 的首次 `started` 以及有效宿主续租可算活动；宿主先核对 Runtime PID 与创建时间，再发送递增 `host_check_seq`，中心在 `agent_runs` 保存已接受序号，重复序号不续期。Thread 缺少新报告 30 秒后，中心发送绑定当前连接、命令 ID 和 Turn 的 `check_activity`，以事件序号作为 `activity_check_seq`，有效期 60 秒。daemon 在现有 1 秒预算内查询认证 Worker status，Worker 回显核查序号、当前 Turn 和实际执行 ID；中心核对 `turn.started` 中的执行身份、未结束 Turn、存储代次及去重事实后续期。仅中心存有 `running`、节点仅发心跳、陈旧 status 或后台 memory claim 均不足以续期。设备离线期间中心不依据过去的执行中状态延长期限。
 
-允许活动的事务遵循入口既有锁顺序：Node → Credential → Presence 的相对顺序不变，Project 请求先取得既有 Agent 锁。需要延长期限的入口首次取得 Node 与 Credential 时即使用写锁，避免持有共享锁后同时升级锁造成竞争。取得全部相关锁后再次校验原闲置期限和来源，再保存首次业务事实与新的 `last_business_at`、`idle_expires_at`。锁等待跨过期限则拒绝，不能先延长再授权。多个新业务串行按当前行更新，以 `GREATEST` 保证期限不被较早结果缩短。复用已有报告去重和命令回执判定，不把重复 ACK 当作新活动。有效存活核查也必须在旧期限内提交。
+允许活动的事务遵循入口既有锁顺序：Node → Credential → Presence 的相对顺序不变，Project 请求先取得既有 Agent 锁。需要延长期限的入口首次取得 Node 与 Credential 时即使用写锁，避免持有共享锁后同时升级锁造成竞争。取得全部相关锁后再次校验原闲置期限和来源，再保存首次业务事实与新的 `last_business_at`、`expires_at`。锁等待跨过期限则拒绝，不能先延长再授权。多个新业务串行按当前行更新，以 `GREATEST` 保证期限不被较早结果缩短。复用已有报告去重和命令回执判定，不把重复 ACK 当作新活动。有效存活核查也必须在旧期限内提交。
 
 握手、派发、Runtime 续租、工具写入与业务回包共用闲置校验。维护循环关闭已过期连接并撤销其 Project 租约，维护延迟不能放宽事务校验。过期返回 `node_idle_expired`，daemon 停止认证重试并显示重新认证指引。Worker 按原生命周期保存结果，中心不接收过期身份的补报；重新认证并同步后沿原事件身份补报。吊销返回既有吊销错误，重新认证不能解除吊销。
 
 #### 原设备重新认证
 
-新增入口均为待实施契约，HTTP DTO 在 `packages/protocol` 的共享声明中维护。
+HTTP DTO 在 `packages/protocol` 的共享声明中维护，重新认证复用注册 transport 与设备身份存储。
 
 | 入口 | 输入、输出与边界 |
 |---|---|
 | `POST /api/v1/nodes/:id/reauth-enrollments` | 已登录员工、Origin 与 CSRF 校验，校验本人未吊销设备；创建绑定该设备的默认 10 分钟凭据，沿用 enrollment 响应，不需要设备在线 |
 | `batond reauth` | 使用已有 `--data-dir`、已保存中心地址与 `--ca-file`；新凭据来自 `BATON_ENROLLMENT_TOKEN` 或 `--enrollment-file`，原设备 token 由私有身份文件读取 |
 | `POST /api/v1/nodes/:id/reauth` | `operation_id, enrollment_token, previous_token`；仅用于重新认证，不授予普通节点业务权限；成功返回同一节点的新身份凭据 |
-| 节点视图 | 增加 `credential_state=active\|idle_expired\|revoked` 与 `idle_expires_at`，不包含 token |
+| 节点视图 | 提供 `credential_state=active\|idle_expired\|revoked` 与 `idle_expires_at`，不包含 token |
 
 `previous_token` 验证签名、员工与节点绑定，允许闲置过期；首次执行仍要求它对应最近签发的凭据版本。中心按 Node → Credential → Presence → enrollment/回执加锁，核对归属、未吊销、目标凭据与请求摘要，在一个事务里消费 enrollment、递增凭据版本、签发新凭据并保存回执。旧连接身份立即失效；新身份成功同步后才可派发。
 
-CLI 在 `identity.lock` 下保存待提交的 operation_id 和请求摘要，再发请求；取得响应后原子替换 `identity.json`，随后清除待提交记录。旧身份与 enrollment 秘密在本地私有存储保留至替换完成，不打印到日志。响应丢失或本地保存前退出后，以相同请求重试，中心通过回执按原签发字段重建同一结果，不能再次递增版本。
+CLI 在 `identity.lock` 下将原请求和摘要写入私有 `reauth-pending.json`，再发请求；取得响应后原子替换 `identity.json`，随后清除待提交记录。旧身份与 enrollment 秘密在本地私有存储保留至替换完成，不打印到日志。响应丢失或本地保存前退出后，以相同请求重试，中心通过回执按原签发字段重建同一结果，不能再次递增版本。
 
-已提交操作的回执重取仍检查节点未吊销、新凭据仍是当前版本、原请求秘密及摘要一致；只对同一已提交操作允许旧版本证明。enrollment 的期限限制首次消费，已消费秘密只能配合原证明取回原操作结果，不能发起新替换或延长闲置期限。取回的凭据若也已闲置过期，须再以它和员工新领取的 enrollment 发起重新认证。相同 operation_id、不同请求返回 `reauth_conflict`。其他员工、错误目标、已吊销节点、缺失身份或 incarnation 冲突均拒绝；没有原操作连续证据时返回 `identity_recovery_required`，保留数据并由员工核对，不能删除身份自动重新注册。
+已提交操作的回执重取仍检查节点未吊销、新凭据仍是当前版本、原请求秘密及摘要一致；只对同一已提交操作允许旧版本证明。enrollment 的期限限制首次消费，已消费秘密只能配合原证明取回原操作结果，不能发起新替换或延长闲置期限。取回的凭据若也已闲置过期，须再以它和员工新领取的 enrollment 发起重新认证。中心明确返回 `401 enrollment_expired` 表示首次消费未提交，CLI 保留原身份并清除 pending，允许使用新口令；超时、断连或服务端故障继续保留原请求。相同 operation_id、不同请求返回 `reauth_conflict`。其他员工、错误目标、已吊销节点、缺失身份或 incarnation 冲突均拒绝；没有原操作连续证据时返回 `identity_recovery_required`，保留数据并由员工核对，不能删除身份自动重新注册。
 
 ### 容量上限
 
@@ -553,13 +553,13 @@ R-23 的待实施部分复用 `packages/telemetry/src/index.ts` 的 Effect OTLP/
 
 ### 凭据与发布验收
 
-下表为待实施行为的验证计划。
+凭据行为使用本地 PostgreSQL、协议替身与 HTTP 入口验证；遥测与发布项仍为验证计划。
 
 | 需求 | 设置与观察 | 失败条件 | 位置 |
 |---|---|---|---|
-| R-02 | 将数据库闲置期限设置在当前时刻前后；心跳、重复报告、后台整理与新业务交错，持锁跨越期限 | 无业务仍续期、过期后先续期再授权、旧执行状态永久保活 | PostgreSQL 集成，planned |
-| R-02、R-04 | 真实 Worker 替身有长回合，再让 status 陈旧或设备离线；前台与后台续租分别检查 | 无有效执行证据仍续期；后台续租延长；有效前台或 Thread 核查未保持活跃 | 包内协议替身与中心集成，planned |
-| R-01、R-02、R-13 | 重新认证响应丢失、本地身份保存前退出、重复提交、enrollment 在提交前后到期、并发吊销 | 新设备产生、凭据多次替换、越权重取、吊销复活、旧输入重发 | 节点本地替身与 HTTP 集成，planned |
+| R-02 | 将数据库闲置期限设置在当前时刻前后；心跳、重复报告、后台整理与新业务交错，持锁跨越期限 | 无业务仍续期、过期后先续期再授权、旧执行状态永久保活 | PostgreSQL 集成 |
+| R-02、R-04 | 真实 Worker 替身有长回合，再让 status 陈旧或设备离线；前台与后台续租分别检查 | 无有效执行证据仍续期；后台续租延长；有效前台或 Thread 核查未保持活跃 | 包内协议替身与中心集成 |
+| R-01、R-02、R-13 | 重新认证响应丢失、本地身份保存前退出、重复提交、enrollment 在提交前后到期、并发吊销 | 新设备产生、凭据多次替换、越权重取、吊销复活、旧输入重发 | 节点本地替身与 HTTP 集成 |
 | R-22、R-23 | 不同实际版本产生诊断；向 span、resource、事件和错误注入敏感标记；导出超时 | 实际版本不符，正文泄漏，token 缺失被记作零，业务受导出阻塞 | telemetry 单测与发布验证，planned |
 | R-25 | 已发布格式增量升级与失败恢复 | 迁移、兼容与恢复结果不符合 RL-A02～08 | release 验证，planned |
 

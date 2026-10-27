@@ -4,7 +4,18 @@ import { describe, expect, it, vi } from 'vite-plus/test'
 import type { BatonClient } from './client'
 import type { HttpContext } from './http/context'
 import { createOutputAPI } from './http/output'
-import { ClientProvider, useLiveOutput, useMessages } from './queries'
+import { createMockClient } from './mock/client'
+import {
+  ClientProvider,
+  useAddDeviceFolder,
+  useDeviceFolders,
+  useDevices,
+  useFile,
+  useFolders,
+  useLiveOutput,
+  useMessages,
+  useRemoveDeviceFolder,
+} from './queries'
 
 function setup(request: HttpContext['request']) {
   const output = createOutputAPI(request)
@@ -19,6 +30,87 @@ function setup(request: HttpContext['request']) {
   const wrapper = ({ children }: { children: ReactNode }) => <ClientProvider client={client}>{children}</ClientProvider>
   return { output, client, wrapper, listMessages }
 }
+
+describe('on-demand device reads', () => {
+  function deviceReads() {
+    const client = createMockClient('normal', { latency: { read: 0, save: 0, device: 0, run: 8000 } })
+    let publish!: Parameters<BatonClient['subscribe']>[0]
+    client.subscribe = (listener) => {
+      publish = listener
+      return () => {}
+    }
+    const readFile = vi.spyOn(client, 'readFile')
+    const listFolders = vi.spyOn(client, 'listFolders')
+    const listDeviceFolders = vi.spyOn(client, 'listDeviceFolders')
+    const listDevices = vi.spyOn(client, 'listDevices')
+    const listMessages = vi.spyOn(client, 'listMessages')
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <ClientProvider client={client}>{children}</ClientProvider>
+    )
+    const useReads = () => ({
+      file: useFile('dev-ubuntu', '/home/kaken/work/baton/logs/reconnect.log'),
+      folder: useFolders('dev-ubuntu', '/home/kaken/work/baton'),
+      roots: useFolders('dev-ubuntu', null),
+      allowed: useDeviceFolders('dev-ubuntu', true),
+      devices: useDevices(),
+      messages: useMessages('thr-gateway'),
+    })
+    return {
+      wrapper,
+      useReads,
+      readFile,
+      listFolders,
+      listDeviceFolders,
+      listDevices,
+      listMessages,
+      publish: (topics: Parameters<typeof publish>[0]['topics']) => publish({ topics }),
+    }
+  }
+
+  it('refreshes central lists on repeated subscription topics and reads devices only on explicit refetch', async () => {
+    const f = deviceReads()
+    const { result } = renderHook(f.useReads, { wrapper: f.wrapper })
+    await waitFor(() => expect(Object.values(result.current).every((query) => query.isSuccess)).toBe(true))
+    for (let round = 0; round < 3; round++) {
+      await act(async () => {
+        f.publish(['devices', 'files', 'projects', 'threads', 'messages', 'inbox', 'operations'])
+      })
+      await waitFor(() => expect(f.listDevices).toHaveBeenCalledTimes(round + 2))
+      expect(f.listMessages).toHaveBeenCalledTimes(round + 2)
+    }
+    expect(f.readFile).toHaveBeenCalledTimes(1)
+    expect(f.listFolders).toHaveBeenCalledTimes(2)
+    expect(f.listDeviceFolders).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      await Promise.all([
+        result.current.file.refetch(),
+        result.current.folder.refetch(),
+        result.current.roots.refetch(),
+        result.current.allowed.refetch(),
+      ])
+    })
+    expect(f.readFile).toHaveBeenCalledTimes(2)
+    expect(f.listFolders).toHaveBeenCalledTimes(4)
+    expect(f.listDeviceFolders).toHaveBeenCalledTimes(2)
+  })
+
+  it.each(['add', 'remove'] as const)('refreshes device reads after an explicit folder %s', async (operation) => {
+    const f = deviceReads()
+    const { result } = renderHook(
+      () => ({ reads: f.useReads(), add: useAddDeviceFolder(), remove: useRemoveDeviceFolder() }),
+      { wrapper: f.wrapper },
+    )
+    await waitFor(() => expect(Object.values(result.current.reads).every((query) => query.isSuccess)).toBe(true))
+    const path = operation === 'add' ? '/extra' : '/home/kaken/work'
+    await act(async () => {
+      await result.current[operation].mutateAsync({ deviceId: 'dev-ubuntu', path })
+    })
+    expect(f.readFile).toHaveBeenCalledTimes(2)
+    expect(f.listFolders).toHaveBeenCalledTimes(4)
+    expect(f.listDeviceFolders).toHaveBeenCalledTimes(2)
+    await waitFor(() => expect(result.current.reads.allowed.data?.includes(path)).toBe(operation === 'add'))
+  })
+})
 
 describe('live output queries', () => {
   it('updates only the output query on pushed frames and releases the subscription when disabled', async () => {

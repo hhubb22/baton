@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test'
 import { RuntimeReport } from '@baton/protocol'
-import { Schema } from 'effect'
+import { Effect, Schema } from 'effect'
+import * as SqlClient from 'effect/sql/SqlClient'
 import * as Auth from './auth.ts'
 import * as Nodes from './nodes.ts'
 import * as Devices from './device-management.ts'
@@ -11,6 +12,7 @@ import { openTestDatabase, type TestDatabase } from './testing/database.ts'
 let database: TestDatabase
 let alice: Auth.Employee, bob: Auth.Employee
 const signer = Nodes.CredentialSigner.generate()
+const sources = new Map<string, NodeSource>()
 const run: TestDatabase['run'] = (effect) => database.run(effect)
 beforeAll(async () => {
   database = await openTestDatabase()
@@ -48,13 +50,144 @@ async function node() {
     repos: [],
   }
   await run(Nodes.saveRuntimeReport(source, report))
+  sources.set(source.node_id, source)
   return { identity, source }
 }
 const gateway = (
   handler: (body: Parameters<Devices.DeviceGateway['request']>[2]) => Promise<Record<string, unknown>>,
-): Devices.DeviceGateway => ({ request: async (_node, _employee, body) => handler(body) })
+): Devices.DeviceGateway => ({
+  request: async (nodeId, _employee, body, _timeoutMs, onResponse) => {
+    const result = await handler(body)
+    onResponse?.(sources.get(nodeId)!)
+    return result
+  },
+})
 
 describe('authenticated device management confirmation', () => {
+  it.each(['files', 'roots-read', 'roots-set', 'login', 'exec'] as const)(
+    'renews the original credential only after a confirmed %s response',
+    async (kind) => {
+      const { identity, source } = await node()
+      const sqlRun = <A, E>(query: (sql: SqlClient.SqlClient) => Effect.Effect<A, E>) =>
+        run(Effect.flatMap(SqlClient.SqlClient, query))
+      await sqlRun(
+        (sql) =>
+          sql`UPDATE node_credentials SET last_business_at=clock_timestamp()-interval '1 day',expires_at=clock_timestamp()+interval '1 day' WHERE id=${source.credential_id}`,
+      )
+      const transport = gateway(async (body) => ({
+        type:
+          kind === 'files'
+            ? 'files.browse_result'
+            : kind === 'roots-read'
+              ? 'node.browse_roots_get_result'
+              : kind === 'roots-set'
+                ? 'node.browse_roots_result'
+                : kind === 'login'
+                  ? 'node.subscription_login_result'
+                  : 'node.project_exec_result',
+        operation_id: body.operation_id,
+        ok: true,
+        ...(kind === 'files'
+          ? { kind: 'roots', roots: [] }
+          : kind === 'roots-read'
+            ? { page: { roots: [] } }
+            : kind === 'roots-set'
+              ? { roots: [{ root_id: 'workspace', path: '/workspace' }], repos: [] }
+              : kind === 'login'
+                ? {
+                    provider: 'openai-codex',
+                    verification_uri: 'https://auth.example/device',
+                    user_code: 'ABCD',
+                    expires_in_seconds: 600,
+                  }
+                : { exec: { enabled: true, shell: '/bin/sh' } }),
+      }))
+      if (kind === 'files') await run(Devices.browse(alice.id, identity.node_id, {}, transport))
+      else if (kind === 'roots-read') await run(Devices.getBrowseRoots(alice.id, identity.node_id, {}, transport))
+      else if (kind === 'roots-set')
+        await run(Devices.updateBrowseRoots(alice.id, identity.node_id, 'add', '/workspace', transport))
+      else if (kind === 'login')
+        await run(Devices.startSubscriptionLogin(alice.id, identity.node_id, 'chatgpt', transport))
+      else await run(Devices.setProjectExec(alice.id, identity.node_id, true, transport))
+      const [state] = await sqlRun(
+        (sql) =>
+          sql<{
+            renewed: boolean
+          }>`SELECT last_business_at>clock_timestamp()-interval '1 minute' AND expires_at>clock_timestamp()+interval '29 days' AS renewed FROM node_credentials WHERE id=${source.credential_id}`,
+      )
+      expect(state.renewed).toBe(true)
+    },
+  )
+
+  it('does not renew failed or malformed responses, expired replies, or replies from a replaced connection', async () => {
+    const { identity, source } = await node()
+    const sqlRun = <A, E>(query: (sql: SqlClient.SqlClient) => Effect.Effect<A, E>) =>
+      run(Effect.flatMap(SqlClient.SqlClient, query))
+    await sqlRun(
+      (sql) =>
+        sql`UPDATE node_credentials SET created_at=clock_timestamp()-interval '31 days',last_business_at=clock_timestamp()-interval '31 days' WHERE id=${source.credential_id}`,
+    )
+    const [before] = await sqlRun(
+      (sql) =>
+        sql<{ value: string }>`SELECT expires_at::text AS value FROM node_credentials WHERE id=${source.credential_id}`,
+    )
+    for (const result of [
+      { ok: false, code: 'denied' },
+      { ok: true, exec: { enabled: false, shell: '/bin/sh' } },
+    ]) {
+      await expect(
+        run(
+          Devices.setProjectExec(
+            alice.id,
+            identity.node_id,
+            true,
+            gateway(async (body) => ({ type: 'node.project_exec_result', operation_id: body.operation_id, ...result })),
+          ),
+        ),
+      ).rejects.toBeInstanceOf(AppError)
+    }
+    const replaced = gateway(async (body) => {
+      const next = { ...source, conn_id: randomUUID() }
+      await run(Nodes.claimConnection(next))
+      await run(Nodes.syncNode(next, { display_name: 'Local device', system: 'linux', capabilities: [] }))
+      return {
+        type: 'node.project_exec_result',
+        operation_id: body.operation_id,
+        ok: true,
+        exec: { enabled: true, shell: '/bin/sh' },
+      }
+    })
+    await expect(run(Devices.setProjectExec(alice.id, identity.node_id, true, replaced))).rejects.toMatchObject({
+      code: 'node_source_rejected',
+    })
+    const [after] = await sqlRun(
+      (sql) =>
+        sql<{ value: string }>`SELECT expires_at::text AS value FROM node_credentials WHERE id=${source.credential_id}`,
+    )
+    expect(after.value).toBe(before.value)
+    const expired = gateway(async (body) => {
+      await sqlRun(
+        (sql) =>
+          sql`UPDATE node_credentials SET expires_at=clock_timestamp()-interval '1 second' WHERE id=${source.credential_id}`,
+      )
+      return {
+        type: 'node.project_exec_result',
+        operation_id: body.operation_id,
+        ok: true,
+        exec: { enabled: true, shell: '/bin/sh' },
+      }
+    })
+    await expect(run(Devices.setProjectExec(alice.id, identity.node_id, true, expired))).rejects.toMatchObject({
+      code: 'node_idle_expired',
+    })
+    const [state] = await sqlRun(
+      (sql) =>
+        sql<{
+          expired: boolean
+        }>`SELECT expires_at<=clock_timestamp() AS expired FROM node_credentials WHERE id=${source.credential_id}`,
+    )
+    expect(state.expired).toBe(true)
+  })
   it('rejects employee isolation violations and offline nodes before dispatch', async () => {
     const { identity, source } = await node()
     let requests = 0

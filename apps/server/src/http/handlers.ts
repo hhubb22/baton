@@ -49,11 +49,16 @@ export const httpHandlers = (options: HTTPOptions) => {
             }),
           ),
         )
-        .handle('registerNode', ({ payload }) =>
+        .handle('reauthNode', ({ params, payload }) =>
           httpBusiness(
-            Nodes.registerNode(payload, options.signer, options.nodeCredentialTTLSeconds).pipe(
+            Nodes.reauthenticateNode(params.nodeId, payload, options.signer).pipe(
               Effect.flatMap(decodeResponse(P.NodeIdentity)),
             ),
+          ),
+        )
+        .handle('registerNode', ({ payload }) =>
+          httpBusiness(
+            Nodes.registerNode(payload, options.signer).pipe(Effect.flatMap(decodeResponse(P.NodeIdentity))),
           ),
         ),
     ),
@@ -90,6 +95,16 @@ export const httpHandlers = (options: HTTPOptions) => {
     ),
     HttpApiBuilder.group(BatonHttpApi, 'nodes', (handlers) =>
       handlers
+        .handle('issueReauthEnrollment', ({ params }) =>
+          httpBusiness(
+            Effect.gen(function* () {
+              const { employee } = yield* CurrentBrowserSession
+              return yield* Nodes.issueReauthEnrollment(employee.id, params.nodeId).pipe(
+                Effect.flatMap(decodeResponse(EnrollmentResponse)),
+              )
+            }),
+          ),
+        )
         .handle('issueEnrollment', () =>
           httpBusiness(
             Effect.gen(function* () {

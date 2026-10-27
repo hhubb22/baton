@@ -72,6 +72,7 @@ export interface World {
 }
 
 export interface EnrollmentRecord {
+  targetNodeId?: ID
   id: ID
   code: string
   state: EnrollmentState

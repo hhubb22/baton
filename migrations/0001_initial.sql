@@ -28,6 +28,7 @@ CREATE TABLE agent_runs (
     stop_requested_at timestamp with time zone,
     command_next_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
     command_attempts integer DEFAULT 0 NOT NULL,
+    host_check_seq bigint DEFAULT 0 NOT NULL CHECK (host_check_seq >= 0),
     CONSTRAINT agent_runs_command_attempts_check CHECK ((command_attempts >= 0)),
     CONSTRAINT agent_runs_lease_epoch_check CHECK ((lease_epoch > 0)),
     CONSTRAINT agent_runs_state_check CHECK ((state = ANY (ARRAY['starting'::text, 'running'::text, 'finished'::text, 'lost'::text, 'failed'::text])))
@@ -143,6 +144,7 @@ CREATE TABLE node_credentials (
     employee_id uuid NOT NULL,
     version integer NOT NULL,
     created_at timestamp with time zone NOT NULL,
+    last_business_at timestamp with time zone NOT NULL DEFAULT clock_timestamp(),
     expires_at timestamp with time zone NOT NULL,
     revoked_at timestamp with time zone,
     CONSTRAINT node_credentials_expires_after_create CHECK ((expires_at > created_at)),
@@ -157,6 +159,16 @@ CREATE TABLE node_enrollments (
     expires_at timestamp with time zone NOT NULL,
     used_at timestamp with time zone,
     device_id uuid,
+    target_node_id uuid,
+    operation_id uuid UNIQUE,
+    request_hash bytea,
+    previous_credential_id uuid,
+    issued_credential_id uuid,
+    CONSTRAINT node_enrollments_reauth_receipt CHECK (
+      (operation_id IS NULL AND request_hash IS NULL AND previous_credential_id IS NULL AND issued_credential_id IS NULL)
+      OR (target_node_id IS NOT NULL AND used_at IS NOT NULL AND device_id IS NOT NULL AND device_id=target_node_id
+        AND operation_id IS NOT NULL AND request_hash IS NOT NULL AND octet_length(request_hash)=32
+        AND previous_credential_id IS NOT NULL AND issued_credential_id IS NOT NULL)),
     CONSTRAINT node_enrollments_expires_after_create CHECK ((expires_at > created_at)),
     CONSTRAINT node_enrollments_hash_length CHECK ((octet_length(token_hash) = 32))
 );
@@ -830,6 +842,9 @@ ALTER TABLE ONLY login_sessions
 
 ALTER TABLE ONLY node_credentials
     ADD CONSTRAINT node_credentials_node_fk FOREIGN KEY (employee_id, node_id) REFERENCES nodes(employee_id, id);
+
+ALTER TABLE ONLY node_enrollments
+    ADD CONSTRAINT node_enrollments_target_node_fk FOREIGN KEY (employee_id, target_node_id) REFERENCES nodes(employee_id, id);
 
 ALTER TABLE ONLY node_enrollments
     ADD CONSTRAINT node_enrollments_device_id_fkey FOREIGN KEY (employee_id, device_id) REFERENCES nodes(employee_id, id);

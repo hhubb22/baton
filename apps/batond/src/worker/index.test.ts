@@ -214,6 +214,29 @@ const readyWorker = Effect.fnUntraced(function* (dbPath: string) {
 })
 
 describe('reliable Worker', () => {
+  it.effect('returns the current execution identity only while a freshly queried turn is active', () =>
+    fixture((dbPath) =>
+      Effect.gen(function* () {
+        const { cfg, f, worker } = yield* readyWorker(dbPath)
+        expect((yield* worker.handle({ type: 'status', ok: false, activity_check_seq: 1 })).active_turn).toBeUndefined()
+        const input = message(cfg)
+        yield* worker.handle(input)
+        const items = yield* completed(worker, input.command_id!)
+        const started = items.find((item) => item.kind === 'turn.started')!
+        expect(started.execution_id).toBe(`exec:${input.client_message_id}`)
+        expect(yield* worker.handle({ type: 'status', ok: false, activity_check_seq: 2 })).toMatchObject({
+          activity_check_seq: 2,
+          active_turn: { worker_turn_seq: 1, execution_id: started.execution_id },
+        })
+        yield* Queue.offer(f.events, event(input.client_message_id!, 'end'))
+        yield* until(reports(worker), (reports) => reports.some((item) => item.kind === 'turn.ended'))
+        const ended = yield* worker.handle({ type: 'status', ok: false, activity_check_seq: 3 })
+        expect(ended.activity_check_seq).toBe(3)
+        expect(ended.active_turn).toBeUndefined()
+      }),
+    ),
+  )
+
   it.effect(
     'persists accepted models across rejection, omitted selections and Worker restart without replaying input',
     () =>

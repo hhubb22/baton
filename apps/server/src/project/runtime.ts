@@ -19,7 +19,7 @@ import {
 } from './memory/index.ts'
 import { createAgentAttention, getAttentionRequest, listProjectAttention, withdrawAttention } from '../inbox.ts'
 import * as threads from '../threads/index.ts'
-import { lockNodeSource, revalidateNodeSource } from '../nodes.ts'
+import { lockNodeSource, recordNodeBusiness, revalidateNodeSource } from '../nodes.ts'
 import {
   appendProjectEvent,
   checkPayloadSize,
@@ -142,7 +142,11 @@ const bootstrap = Effect.fn('bootstrapProjectRun')(function* (b: ProjectBinding)
   }
   return out
 })
-const toolRequest = Effect.fn('callProjectTool')(function* (b: ProjectBinding, request: P.ProjectRuntimeRequest) {
+const toolRequest = Effect.fn('callProjectTool')(function* (
+  source: NodeSource,
+  b: ProjectBinding,
+  request: P.ProjectRuntimeRequest,
+) {
   const sql = yield* SqlClient.SqlClient,
     id = request.tool_call_id ?? ''
   if (!id) return yield* Effect.fail(projectError('invalid', 422))
@@ -235,6 +239,7 @@ const toolRequest = Effect.fn('callProjectTool')(function* (b: ProjectBinding, r
           return yield* executeBusiness(ctx, call.name, call.arguments)
         }),
       )
+  if (!existingExec && !result.isError) yield* recordNodeBusiness(source)
   if (result.pending) return result.value
   const payload = {
     format: 'pi-ai/1',
@@ -359,26 +364,45 @@ export const runtimeRequest = Effect.fn('projectRuntimeRequest')(function* (
         case 'append_event':
           data = yield* appendAssistant(b, request)
           break
-        case 'claim_inputs':
-          data = yield* claimInputs(b, request.last_seq ?? 0)
+        case 'claim_inputs': {
+          const claimed = yield* claimInputs(b, request.last_seq ?? 0)
+          if (claimed.input_count > 0) yield* recordNodeBusiness(source)
+          data = claimed
           break
+        }
         case 'commit_compaction':
           data = yield* commitCompaction(b, request)
           break
         case 'call_tool':
         case 'wait_tool':
-          data = yield* toolRequest(b, request)
+          data = yield* toolRequest(source, b, request)
           break
         case 'started':
-        case 'renew':
+        case 'renew': {
           yield* checkLease(b)
-          if (request.operation === 'started')
-            yield* sql`UPDATE agent_runs SET state='running' WHERE id=${b.runId} AND state='starting'`
+          let business = false
+          if (request.operation === 'started') {
+            const started =
+              yield* sql`UPDATE agent_runs SET state='running' WHERE id=${b.runId} AND state='starting' RETURNING id`
+            business = started.length > 0
+          } else {
+            const evidence = yield* projectDecode(
+              Schema.Struct({ host_check_seq: Schema.optionalKey(P.PositiveInteger) }),
+              request.payload ?? {},
+            )
+            if (evidence.host_check_seq !== undefined) {
+              const checked = yield* sql`UPDATE agent_runs SET host_check_seq=${evidence.host_check_seq}
+                WHERE id=${b.runId} AND state='running' AND host_check_seq<${evidence.host_check_seq} RETURNING id`
+              business = checked.length > 0
+            }
+          }
           const renewed =
             yield* sql`UPDATE project_agents SET lease_until=clock_timestamp()+interval '60 seconds' WHERE id=${b.agentId} AND lease_until>clock_timestamp() RETURNING id`
           if (!renewed.length) return yield* Effect.fail(leaseLost())
+          if (business) yield* recordNodeBusiness(source)
           data = { lease_seconds: 60, control_receipts: 1 }
           break
+        }
         case 'wake_received': {
           const receipt = yield* projectDecode(Schema.Struct({ input_ids: Schema.Array(Schema.Int) }), request.payload)
           if (

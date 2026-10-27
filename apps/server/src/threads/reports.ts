@@ -2,7 +2,7 @@ import { Effect } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import * as P from '@baton/protocol'
 import type { NodeSource } from '../errors.ts'
-import { lockNodeSource, revalidateNodeSource } from '../nodes.ts'
+import { lockNodeSource, recordNodeBusiness, revalidateNodeSource } from '../nodes.ts'
 import { notifyProjectThread } from './project-inputs.ts'
 import { audit, decode, failure, readThread, uuid, type DB } from './core.ts'
 import { canonical, digest } from '../json.ts'
@@ -335,7 +335,7 @@ export const processReport = (source: NodeSource, input: P.ThreadReport): DB<P.T
       else if (r.kind !== 'reply' && r.kind !== 'turn.item') yield* audit(t, r.kind, r, 'device', source.node_id)
       const savedAck: P.ThreadReportResult = { ...ack, ok: true }
       yield* sql`INSERT INTO thread_reports(employee_id,thread_id,event_id,worker_seq,payload_hash,ack) VALUES(${t.employee_id},${t.id},${r.event_id},${r.worker_seq},${hash},${JSON.stringify(savedAck)}::jsonb)`
-      yield* revalidateNodeSource(source)
+      yield* recordNodeBusiness(source)
       return savedAck
     }),
   )

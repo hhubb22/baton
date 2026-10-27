@@ -3,7 +3,7 @@ import { beforeEach, expect, it, vi } from 'vite-plus/test'
 import type { NodeIdentity } from '@baton/protocol'
 import { runDaemonCLI } from './cli.ts'
 import { runDaemon } from './daemon.ts'
-import { loadIdentity } from './identity.ts'
+import { loadIdentity, reauthNode, registerNode } from './identity.ts'
 import { initializeBrowseRoots } from '../devices/roots.ts'
 
 vi.mock('./daemon.ts', () => ({ runDaemon: vi.fn(() => Effect.void) }))
@@ -12,6 +12,7 @@ vi.mock('./identity.ts', () => ({
   isMissing: () => false,
   loadIdentity: vi.fn(),
   registerNode: vi.fn(),
+  reauthNode: vi.fn(),
 }))
 vi.mock('../devices/roots.ts', () => ({ initializeBrowseRoots: vi.fn() }))
 
@@ -35,6 +36,49 @@ const identity: NodeIdentity = {
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(loadIdentity).mockResolvedValue(identity)
+  vi.mocked(reauthNode).mockResolvedValue(identity)
+})
+
+it('reauthenticates without starting the daemon or changing directory authorization and prints no credentials', async () => {
+  const output = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+  try {
+    await runDaemonCLI('reauth', [
+      '--data-dir',
+      '/saved-node',
+      '--enrollment-file',
+      '/private/enrollment',
+      '--ca-file',
+      '/private/ca.pem',
+      '--coordinator',
+      'https://ignored.invalid',
+    ])
+    expect(reauthNode).toHaveBeenCalledWith({
+      dataDirectory: '/saved-node',
+      enrollmentFile: '/private/enrollment',
+      caFile: '/private/ca.pem',
+      signal: expect.any(AbortSignal),
+    })
+    expect(initializeBrowseRoots).not.toHaveBeenCalled()
+    expect(registerNode).not.toHaveBeenCalled()
+    expect(runDaemon).not.toHaveBeenCalled()
+    expect(output).toHaveBeenCalledExactlyOnceWith(
+      JSON.stringify({
+        node_id: identity.node_id,
+        employee_id: identity.employee_id,
+        display_name: identity.display_name,
+        system: identity.system,
+      }),
+    )
+  } finally {
+    output.mockRestore()
+  }
+})
+
+it('rejects enrollment secrets in reauth arguments without echoing them', async () => {
+  const result = await runDaemonCLI('reauth', ['--enrollment-token=offline-secret']).catch((error: unknown) => error)
+  expect(String(result)).toContain('注册凭据仅支持环境变量或私有文件')
+  expect(String(result)).not.toContain('offline-secret')
+  expect(reauthNode).not.toHaveBeenCalled()
 })
 
 it.each(['up', 'run'])('passes the default control budget through %s', async (action) => {

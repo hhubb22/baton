@@ -97,6 +97,54 @@ async function withService(
   }
 }
 
+it('queries authenticated Worker status for every new activity challenge without saving a command receipt', async () => {
+  await withService(({ command, host, path }) =>
+    Effect.gen(function* () {
+      const ledger = yield* makeNodeLedger(join(path, 'node.db'))
+      let checks = 0
+      const service = makeThreadService({
+        dataDirectory: path,
+        identity: { node_id: randomUUID() } as NodeIdentity,
+        ledger,
+        capability: () => capability,
+        host: {
+          ...host,
+          async request(id, request) {
+            checks++
+            return {
+              type: 'result',
+              ok: true,
+              worker_ready: true,
+              agent_ready: true,
+              session_id: id,
+              storage_generation: 'generation',
+              activity_check_seq: request.activity_check_seq!,
+              ...(checks === 1 ? { active_turn: { worker_turn_seq: 1, execution_id: 'execution' } } : {}),
+            }
+          },
+        },
+      })
+      const check: ThreadCommand = {
+        type: 'thread.command',
+        action: 'check_activity',
+        thread_id: command.thread_id,
+        storage_generation: 'generation',
+        activity_check_seq: 1,
+      }
+      expect(yield* Effect.promise(() => service.command(randomUUID(), check))).toMatchObject({
+        ok: true,
+        activity_check_seq: 1,
+        active_turn: { worker_turn_seq: 1, execution_id: 'execution' },
+      })
+      expect(
+        yield* Effect.promise(() => service.command(randomUUID(), { ...check, activity_check_seq: 2 })),
+      ).toMatchObject({ ok: false, activity_check_seq: 2, code: 'activity_not_verified' })
+      expect(checks).toBe(2)
+      expect(yield* ledger.pendingCommands()).toEqual([])
+    }),
+  )
+})
+
 it('queries a prepared command and resends the identical request only when the Worker has no receipt', async () => {
   await withService(({ commandId, command, host, path, setHandler }) =>
     Effect.gen(function* () {

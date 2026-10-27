@@ -91,6 +91,11 @@ const Public = HttpApiGroup.make('public')
       success: HttpApiSchema.WithHeaders(SessionResponse, cookie),
     }),
     Endpoint.post('registerNode', '/api/v1/nodes/register', { payload: D.RegisterNodeInput, success: D.NodeIdentity }),
+    Endpoint.post('reauthNode', '/api/v1/nodes/:nodeId/reauth', {
+      params: nodeParams,
+      payload: D.ReauthNodeInput,
+      success: D.NodeIdentity,
+    }),
   )
   .middleware(PublicRequest)
 
@@ -111,6 +116,11 @@ const Account = HttpApiGroup.make('account')
 const Nodes = HttpApiGroup.make('nodes')
   .add(
     Endpoint.post('issueEnrollment', '/api/v1/node-enrollments', {
+      payload: EmptyInput,
+      success: EnrollmentResponse.pipe(HttpApiSchema.status(201)),
+    }),
+    Endpoint.post('issueReauthEnrollment', '/api/v1/nodes/:nodeId/reauth-enrollments', {
+      params: nodeParams,
       payload: EmptyInput,
       success: EnrollmentResponse.pipe(HttpApiSchema.status(201)),
     }),

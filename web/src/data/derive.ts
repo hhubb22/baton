@@ -490,6 +490,7 @@ export function lastSeen(at: number, now: number) {
 
 // 设备行的状态列：离线和同步中带最后联系时间，在线且有 Project 助手运行时写出 Project 名。
 export function deviceConnectionView(device: Device, projects: Project[], now: number): StatusView {
+  if (device.credentialState === 'idle_expired') return { tone: 'attention', label: 'Needs sign-in' }
   switch (device.connection) {
     case 'offline':
       return { tone: 'neutral', label: `Offline · last seen ${lastSeen(device.lastSeenAt, now)}` }

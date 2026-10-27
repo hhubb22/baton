@@ -259,6 +259,7 @@ function DeviceDetails({
   onPermission,
   onDefault,
   onFolders,
+  onReconnect,
   onDisconnect,
 }: {
   device: Device
@@ -268,6 +269,7 @@ function DeviceDetails({
   onPermission: (enabled: boolean) => void
   onDefault: () => void
   onFolders: () => void
+  onReconnect: () => void
   onDisconnect: () => void
 }) {
   const [loginProvider, setLoginProvider] = useState<{ provider: string; localOnly: boolean } | null>(null)
@@ -310,7 +312,10 @@ function DeviceDetails({
           onClose={() => setLoginProvider(null)}
         />
       )}
-      {device.connection === 'offline' && (
+      {device.credentialState === 'idle_expired' && (
+        <span {...stylex.props(text.small, styles.attention)}>Needs sign-in</span>
+      )}
+      {device.connection === 'offline' && device.credentialState !== 'idle_expired' && (
         <span {...stylex.props(text.small, text.muted)}>New threads wait for it.</span>
       )}
       {(problems.length > 0 || loginButtons.length > 0) && (
@@ -333,6 +338,11 @@ function DeviceDetails({
         <CommandPermission state={permission} enabled={device.commandAccess.enabled} onChange={onPermission} />
       )}
       <div {...stylex.props(styles.actions)}>
+        {device.credentialState === 'idle_expired' && (
+          <Button small onClick={onReconnect}>
+            Reconnect device
+          </Button>
+        )}
         {!isDefault && (
           <Button small onClick={onDefault}>
             {savingDefault ? 'Saving…' : 'Set as default'}
@@ -384,7 +394,7 @@ export function DevicesPage() {
   const [feedback, setFeedback] = useState<Feedback | null>(null)
   const notify = (notice: Notice) => setFeedback({ kind: 'notice', notice })
   // 首页的「Connect a device」带 connect 参数打开这里，直接弹出接入窗口。
-  const [enrolling, setEnrolling] = useState(() => Boolean(search.connect))
+  const [enrolling, setEnrolling] = useState<Device | true | null>(() => (search.connect ? true : null))
   const [disconnect, setDisconnect] = useState<Disconnect | null>(null)
   const [permission, setPermission] = useState<PermissionState | null>(null)
   // 打开命令权限前先确认；关闭直接保存。
@@ -510,6 +520,7 @@ export function DevicesPage() {
                   onPermission={(enabled) => changePermission(device, enabled)}
                   onDefault={() => chooseDefault(device)}
                   onFolders={() => setFolders(device)}
+                  onReconnect={() => setEnrolling(device)}
                   onDisconnect={() => startDisconnect(device)}
                 />
               )}
@@ -539,7 +550,8 @@ export function DevicesPage() {
 
       {enrolling && (
         <EnrollDialog
-          onClose={() => setEnrolling(false)}
+          device={enrolling === true ? undefined : enrolling}
+          onClose={() => setEnrolling(null)}
           // 空列表里的接入按钮在设备连上后就不在了，焦点回到标题。
           finalFocus={() => headingRef.current}
         />

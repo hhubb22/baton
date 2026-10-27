@@ -1080,11 +1080,14 @@ ${response}`,
     this.emit('session', 'devices', 'threads', 'messages', 'projects', 'files', 'operations')
   }
 
-  createEnrollment(): EnrollmentRecord {
+  createEnrollment(nodeId?: ID): EnrollmentRecord {
+    if (nodeId !== undefined && this.device(nodeId).credentialState === 'revoked')
+      throw new ClientError('conflict', 'Device disconnected')
     this.sequence += 1
     const record: EnrollmentRecord = {
       id: `enr-${this.sequence}`,
       code: sampleCode(this.sequence),
+      targetNodeId: nodeId,
       state: 'pending',
       expiresAt: this.scheduler.now() + enrollmentTtl,
       deviceId: null,
@@ -1115,6 +1118,16 @@ ${response}`,
   connectEnrollment(name: string, os: DeviceOS) {
     const record = this.pendingEnrollment()
     if (!record) return
+    if (record.targetNodeId !== undefined) {
+      const device = this.device(record.targetNodeId)
+      if (device.credentialState === 'revoked') throw new ClientError('conflict', 'Device disconnected')
+      device.credentialState = 'active'
+      record.state = 'connected'
+      record.deviceId = device.id
+      this.setDeviceConnection(device.id, 'syncing')
+      this.schedule(this.latency.device, () => this.setDeviceConnection(device.id, 'online'))
+      return
+    }
     const defaults = newDeviceDefaults[os]
     const world = this.world
     const device: Device = {

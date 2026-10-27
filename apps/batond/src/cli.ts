@@ -15,9 +15,11 @@ const usage = `Baton 节点
 
   up --coordinator <https://中心> [--workspace <绝对目录>]
   register --coordinator <https://中心> [--enrollment-file <私有文件>]
+  reauth [--enrollment-file <私有文件>] [--ca-file <CA证书>]
   run [--relay <wss://中心/v1/node>]
 
-注册凭据来自 BATON_ENROLLMENT_TOKEN 或 --enrollment-file。
+注册与重新认证凭据来自 BATON_ENROLLMENT_TOKEN 或 --enrollment-file。
+reauth 使用已有身份和保存的中心地址；中断后再次运行沿用原操作，成功后用 up/run 连接。
 up 复用已有身份，首次运行登记主目录；--workspace 可额外登记目录。
 up/run 支持 --control-timeout-seconds <秒>，认证与同步各默认等待 370 秒，范围 1～3600。
 
@@ -67,7 +69,7 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
     }
     return
   }
-  if (action === 'up' || action === 'register' || action === 'run') {
+  if (action === 'up' || action === 'register' || action === 'reauth' || action === 'run') {
     const { runDaemonCLI } = await import('./daemon/cli.ts')
     await runDaemonCLI(action, args)
     return

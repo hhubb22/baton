@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { createTransport, HttpError } from './transport'
 import { createHttpClient, mapDevice } from './client'
-import { assistantBlock, capabilityLines, setupNeeded, setupSteps, usableAgents } from '../derive'
+import { assistantBlock, capabilityLines, deviceConnectionView, setupNeeded, setupSteps, usableAgents } from '../derive'
 
 function requestURL(input: RequestInfo | URL): string {
   return input instanceof Request ? input.url : input.toString()
@@ -74,6 +74,60 @@ describe('HTTP transport', () => {
 })
 
 describe('HTTP account and devices', () => {
+  it.each(['active', 'idle_expired', 'revoked'] as const)('maps device credentials in state %s', (state) => {
+    const expiresAt = '2026-07-01T12:00:00Z'
+    const device = mapDevice({
+      id: 'desk',
+      display_name: 'Desk',
+      system: 'linux',
+      online: true,
+      synced: true,
+      revocation_status: 'none',
+      credential_state: state,
+      idle_expires_at: expiresAt,
+    })
+    expect(device).toMatchObject({
+      credentialState: state,
+      idleExpiresAt: Date.parse(expiresAt),
+      connection: state === 'active' ? 'online' : 'offline',
+    })
+    if (state === 'idle_expired')
+      expect(deviceConnectionView(device, [], Date.now())).toEqual({ tone: 'attention', label: 'Needs sign-in' })
+  })
+
+  it.each([undefined, 'node/id'])('issues a setup code for %s and polls its existing enrollment', async (nodeId) => {
+    const issued = {
+      enrollment_id: 'enrollment/id',
+      enrollment_token: 'sample-setup-code',
+      expires_at: '2026-07-01T12:00:00Z',
+      expires_in_ms: 600_000,
+    }
+    const fetch = fetcher()
+      .mockResolvedValueOnce(response({ employee, csrf_token: 'enrollment-csrf' }))
+      .mockResolvedValueOnce(response(issued))
+      .mockResolvedValueOnce(
+        response({ ...issued, enrollment_token: undefined, state: 'connected', node_id: 'node/id' }),
+      )
+    const client = createHttpClient({ fetch, WebSocket: null, origin: 'https://baton.local' })
+    expect(await client.createEnrollment(nodeId)).toEqual({
+      id: 'enrollment/id',
+      code: 'sample-setup-code',
+      state: 'pending',
+      coordinatorUrl: 'https://baton.local',
+      expiresIn: 600_000,
+      deviceId: null,
+    })
+    const [url, init] = fetch.mock.calls[1]
+    expect(url).toBe(nodeId === undefined ? '/api/v1/node-enrollments' : '/api/v1/nodes/node%2Fid/reauth-enrollments')
+    expect(init?.method).toBe('POST')
+    expect(init?.body).toBe('{}')
+    expect(new Headers(init?.headers).get('X-CSRF-Token')).toBe('enrollment-csrf')
+    const connected = await client.getEnrollment('enrollment/id')
+    expect(connected).toMatchObject({ state: 'connected', deviceId: 'node/id' })
+    expect(connected).not.toHaveProperty('code')
+    expect(fetch.mock.calls[2][0]).toBe('/api/v1/node-enrollments/enrollment%2Fid')
+  })
+
   it.each([
     ['available', true, true],
     ['available', false, false],

@@ -131,6 +131,11 @@ export const Thread = Schema.Struct({
 })
 export type Thread = typeof Thread.Type
 
+export const ThreadActiveTurn = Schema.Struct({
+  worker_turn_seq: PositiveInteger,
+  execution_id: boundedText(4096).check(Schema.isMinLength(1)),
+})
+
 export const ThreadCommand = Schema.Struct({
   project_id: Schema.optionalKey(UUID),
   origin_conversation_id: Schema.optionalKey(UUID),
@@ -138,7 +143,8 @@ export const ThreadCommand = Schema.Struct({
   trace_context: Schema.optionalKey(TraceContext),
   type: Schema.Literal('thread.command'),
   thread_id: UUID,
-  action: Schema.Literals(['open', 'message', 'withdraw', 'stop', 'resume', 'settings', 'answer']),
+  action: Schema.Literals(['open', 'message', 'withdraw', 'stop', 'resume', 'settings', 'answer', 'check_activity']),
+  activity_check_seq: Schema.optionalKey(PositiveInteger),
   answer: Schema.optionalKey(ThreadAnswerInput),
   storage_generation: Schema.optionalKey(StorageGeneration),
   agent_type: Schema.optionalKey(AgentType),
@@ -153,6 +159,8 @@ export type ThreadCommand = typeof ThreadCommand.Type
 
 export const ThreadCommandResult = Schema.Struct({
   type: Schema.Literal('thread.command_result'),
+  activity_check_seq: Schema.optionalKey(PositiveInteger),
+  active_turn: Schema.optionalKey(ThreadActiveTurn),
   thread_id: UUID,
   ok: Schema.Boolean,
   code: Schema.optionalKey(Text),
@@ -278,6 +286,7 @@ export const ThreadReport = Schema.Struct({
   client_message_id: Schema.optionalKey(ClientMessageID),
   storage_generation: Schema.optionalKey(StorageGeneration),
   native_session_id: Schema.optionalKey(boundedText(4096)),
+  execution_id: Schema.optionalKey(boundedText(4096).check(Schema.isMinLength(1))),
   model: Schema.optionalKey(summary(512)),
   content: Schema.optionalKey(boundedText(1024 * 1024)),
   truncated: Schema.optionalKey(Schema.Boolean),

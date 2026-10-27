@@ -1,11 +1,11 @@
 import { parseArgs } from 'node:util'
 import { Effect } from 'effect'
 import { telemetryLayer } from '@baton/telemetry'
-import { defaultDataDirectory, isMissing, loadIdentity, registerNode } from './identity.ts'
+import { defaultDataDirectory, isMissing, loadIdentity, reauthNode, registerNode } from './identity.ts'
 import { initializeBrowseRoots } from '../devices/roots.ts'
 import { runDaemon } from './daemon.ts'
 
-export async function runDaemonCLI(action: 'up' | 'register' | 'run', args: string[]): Promise<void> {
+export async function runDaemonCLI(action: 'up' | 'register' | 'reauth' | 'run', args: string[]): Promise<void> {
   const { values } = (() => {
     try {
       return parseArgs({
@@ -34,6 +34,23 @@ export async function runDaemonCLI(action: 'up' | 'register' | 'run', args: stri
   process.once('SIGTERM', stop)
   try {
     const dataDirectory = values['data-dir']!
+    if (action === 'reauth') {
+      const identity = await reauthNode({
+        dataDirectory,
+        signal: controller.signal,
+        ...(values['enrollment-file'] ? { enrollmentFile: values['enrollment-file'] } : {}),
+        ...(values['ca-file'] ? { caFile: values['ca-file'] } : {}),
+      })
+      console.log(
+        JSON.stringify({
+          node_id: identity.node_id,
+          employee_id: identity.employee_id,
+          display_name: identity.display_name,
+          system: identity.system,
+        }),
+      )
+      return
+    }
     await initializeBrowseRoots(dataDirectory, values.workspace)
     let identity
     if (action !== 'register') {

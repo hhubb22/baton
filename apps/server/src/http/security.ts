@@ -66,7 +66,11 @@ export const checkOrigin = (options: HTTPOptions) =>
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest
     const path = new URL(request.url, 'http://localhost').pathname
-    if (path === '/api/v1/nodes/register' && request.method === 'POST') return
+    if (
+      request.method === 'POST' &&
+      (path === '/api/v1/nodes/register' || /^\/api\/v1\/nodes\/[0-9a-f-]{36}\/reauth$/i.test(path))
+    )
+      return
     if (
       request.method !== 'GET' &&
       request.method !== 'HEAD' &&

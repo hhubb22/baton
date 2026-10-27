@@ -3,7 +3,7 @@
 Status: draft
 Basis: 《Baton 需求描述》及其后续讨论。Project Agent 见 [Project Agent 行为规格](../project-agent/PRODUCT.md)，事项见 [Agent Inbox 行为规格](../agent-inbox/PRODUCT.md)；那里的「用户」即本文的员工。
 
-R-02 的闲置过期与重新认证、R-07 与 R-21 的上游执行模式、R-23 的首版遥测、R-25 的发布兼容为待审阅修订，尚未实施；其余条款沿用已批准约定。发布与升级的完整行为见 [发布行为规格](../release/PRODUCT.md)。
+R-07 与 R-21 的上游执行模式、R-23 的首版遥测、R-25 的发布兼容为待审阅修订，尚未实施；其余条款沿用已批准约定。发布与升级的完整行为见 [发布行为规格](../release/PRODUCT.md)。
 
 ## 概述
 

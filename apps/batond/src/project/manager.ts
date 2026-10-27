@@ -6,6 +6,7 @@ import { ProjectRunCommand, ProjectRuntimeRequest, ProjectRuntimeResult } from '
 import { readProjectRuntimeConfig } from '../devices/config.ts'
 import { ensurePrivateDirectory, openPrivateFile } from '../platform/private.ts'
 import { hasCode } from '../platform/errors.ts'
+import { identityMatches } from '../platform/identity.ts'
 import { startProcessWatchdog, reapProcessTree, type OwnedProcess, type ProcessWatchdog } from '../platform/process.ts'
 import { makeProjectLedger, type ProjectLedger } from './ledger.ts'
 import { RuntimeRunner, defaultWatchdogCommand } from './runner.ts'
@@ -30,6 +31,7 @@ interface Run {
   lastAttempt: number
   started: boolean
   renewing: boolean
+  hostCheckSeq: number
   cleanupPending: boolean
   cleanupReady: boolean
   cleanupUncertain: boolean
@@ -179,18 +181,21 @@ class Manager implements ProjectManager {
   private async renew(run: Run, started: number) {
     try {
       this.lease(run)
+      if (!run.owned || !(await identityMatches(run.owned.record))) throw new Error('runtime_lost')
+      this.lease(run)
       const result = await this.call(
         {
           type: 'project_runtime.request',
           run_id: run.command.run_id,
           lease_epoch: run.command.lease_epoch,
           operation: 'renew',
+          payload: { host_check_seq: ++run.hostCheckSeq },
         },
         run.cancel.signal,
       )
       this.lease(run)
       if (result.ok) run.lastRenew = started
-      else if (result.code === 'lease_lost' || result.code === 'claim_lost') this.stop(run)
+      else if (['lease_lost', 'claim_lost', 'node_idle_expired'].includes(result.code ?? '')) this.stop(run)
     } catch {
       this.stop(run)
     }
@@ -265,6 +270,7 @@ class Manager implements ProjectManager {
       lastAttempt: this.clock.now(),
       started: false,
       renewing: false,
+      hostCheckSeq: 0,
       cleanupPending: false,
       cleanupReady: false,
       cleanupUncertain: false,
@@ -481,6 +487,7 @@ class Manager implements ProjectManager {
       if (
         result.code === 'lease_lost' ||
         result.code === 'claim_lost' ||
+        result.code === 'node_idle_expired' ||
         (result.ok && ['finish', 'report_failure'].includes(request.operation))
       ) {
         const timer = setTimeout(() => this.stop(run), 100)

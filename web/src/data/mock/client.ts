@@ -275,10 +275,10 @@ export function createMockClient(
       signedIn()
       store.removeDevice(deviceId)
     },
-    async createEnrollment() {
+    async createEnrollment(nodeId) {
       await connect(latency.save)
       signedIn()
-      const record = store.createEnrollment()
+      const record = store.createEnrollment(nodeId)
       return { ...enrollmentView(record), code: record.code }
     },
     getEnrollment: (id) => guarded(() => enrollmentView(store.enrollment(id))),

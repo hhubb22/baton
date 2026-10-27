@@ -63,6 +63,8 @@ node apps/batond/dist/batond.cjs run
 
 注册将规范化的中心 HTTPS 地址保存为 `identity.json` 的 `coordinator_url`，`run` 据此推导 WSS 地址；`--relay` 可显式指定。默认数据目录为 `~/.baton-ts`，所有命令使用相同的 `--data-dir`。注册凭据也可用 `--enrollment-file` 从私有文件读取；私有 CA 使用 `--ca-file`，每次运行均须提供。更多本地命令和恢复语义见 [节点文档](apps/batond/README.md)。
 
+设备连接凭据在连续 30 天没有有效业务后过期。心跳、重连、能力探测和后台记忆整理不续期。过期后为原设备领取重新认证口令，停止该设备的 batond，再用同一数据目录执行 `batond reauth --enrollment-file <私有文件>`，随后运行 `batond up`。设备与 Thread ID、本地历史和待补报结果保留。
+
 四个 Agent 在程序或 SDK 已安装且认证有效或未知时报告 `available`，按上游 adapter 与已实现的执行路径开放新建与恢复。版本、系统与认证未知写入诊断，缺少某个组合的验证证据不会关闭能力。缺程序、明确未认证或已确认运行依赖失败时报告 `unavailable`。探测只检查认证、模型和依赖，不发送推理请求。
 
 ### Project 与模型订阅
@@ -94,10 +96,9 @@ node apps/batond/dist/batond.cjs project-runtime login-api-key anthropic < key-f
 | `BATON_WEB_DIR` | 中心 | 网页目录，默认 bundle 旁的 `web/` |
 | `BATON_SESSION_TTL` | 中心 | 浏览器会话期限，默认 `12h`，范围 5 分钟至 7 天 |
 | `BATON_ENROLLMENT_TTL` | 中心 | 一次性注册凭据期限，默认 `10m`，范围 1 分钟至 24 小时 |
-| `BATON_NODE_CREDENTIAL_TTL` | 中心 | 节点凭据期限，默认 `720h`，范围 1 小时至 90 天 |
 | `BATON_HEARTBEAT_INTERVAL` | 中心 | 连接检查间隔，默认 `10s`，范围 100 ms 至 2 分钟 |
 | `BATON_OFFLINE_AFTER` | 中心 | 设备离线期限，默认 `30s`，范围 200 ms 至 10 分钟，须大于心跳间隔 |
-| `BATON_ENROLLMENT_TOKEN` | 节点注册 | 一次性注册凭据，也可用 `--enrollment-file` |
+| `BATON_ENROLLMENT_TOKEN` | 节点注册 / 重新认证 | 一次性凭据，也可用 `--enrollment-file` |
 | `BATON_PROJECT_RUNTIME_DATA_DIR` | 节点 / Runtime | 模型凭据目录，默认 `~/.baton/project-runtime` |
 
 控制操作预算、临时 RPC 名额和 OTLP 追踪配置见 [中心文档](apps/server/README.md)。

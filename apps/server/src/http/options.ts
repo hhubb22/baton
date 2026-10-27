@@ -6,7 +6,6 @@ export interface HTTPOptions {
   readonly signer: CredentialSigner
   readonly sessionTTLSeconds?: number
   readonly enrollmentTTLSeconds?: number
-  readonly nodeCredentialTTLSeconds?: number
   readonly webDirectory?: string
   readonly gateway: () => Pick<Gateway, 'request' | 'notify' | 'disconnect' | 'disconnectBrowsers' | 'diagnostics'>
 }

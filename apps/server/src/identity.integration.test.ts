@@ -394,7 +394,7 @@ describe('identity storage on local PostgreSQL', () => {
     await new Promise((resolve) => setTimeout(resolve, 400))
     release()
     await blocker
-    await expect(waiting).rejects.toMatchObject({ code: 'node_source_rejected' })
+    await expect(waiting).rejects.toMatchObject({ code: 'node_idle_expired' })
     expect((await run(query<{ changed: boolean }>('SELECT changed FROM expiry_business')))[0].changed).toBe(false)
   })
 

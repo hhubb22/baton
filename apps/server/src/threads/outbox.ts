@@ -4,9 +4,9 @@ import type { Thread, ThreadCommand, ThreadCommandResult, ThreadAnswerInput } fr
 import { ThreadCommandResult as ResultSchema } from '@baton/protocol'
 import { captureTrace, withTraceSpan, type TraceContext } from '@baton/telemetry'
 import type { NodeSource } from '../errors.ts'
-import { lockNodeSource, revalidateNodeSource } from '../nodes.ts'
+import { lockNodeSource, recordNodeBusiness, revalidateNodeSource } from '../nodes.ts'
 import { notifyProjectThread } from './project-inputs.ts'
-import { audit, decode, failure, readThread, type DB } from './core.ts'
+import { audit, decode, failure, readThread, uuid, type DB } from './core.ts'
 import { canonical } from '../json.ts'
 import { transaction } from '../database.ts'
 
@@ -65,6 +65,8 @@ export const claimCommands = (): DB<ClaimedCommand[]> =>
         AND (older.action IN ('open','stop') OR eligible.opened_at IS NOT NULL)))`
       const rows = yield* sql.unsafe<{ command: Outbox; thread: Thread }>(`WITH candidates AS MATERIALIZED (
     SELECT p.node_id FROM node_presence p JOIN nodes n ON n.id=p.node_id AND n.employee_id=p.employee_id
+    JOIN node_credentials c ON c.node_id=n.id AND c.employee_id=n.employee_id AND c.version=n.credential_version
+      AND c.revoked_at IS NULL AND c.expires_at>clock_timestamp()
     CROSS JOIN LATERAL (SELECT o.id,o.next_attempt_at FROM thread_outbox o WHERE o.node_id=p.node_id AND ${due} ORDER BY o.next_attempt_at,o.id LIMIT 1) first_due
     WHERE p.online AND p.synced AND n.revoked_at IS NULL ORDER BY first_due.next_attempt_at,first_due.id
   ) SELECT command.* FROM candidates p CROSS JOIN LATERAL (
@@ -140,6 +142,40 @@ export const claimCommands = (): DB<ClaimedCommand[]> =>
       next_attempt_at=clock_timestamp()+make_interval(secs=>LEAST(30.0,power(2.0,LEAST(attempts,5)))*(0.8+random()*0.2)) WHERE id=${o.id}`
         commands.push({ message_id: o.message_id, node_id: o.node_id, employee_id: o.employee_id, body })
       }
+      // 核查只在当前连接发起，短期 challenge 与持久业务命令使用独立身份。
+      const checks = yield* sql<{ thread: Thread; conn_id: string; worker_turn_seq: number }>`
+        SELECT jsonb_strip_nulls(to_jsonb(t)-'request_hash') AS thread,p.conn_id,v.worker_turn_seq::float8 AS worker_turn_seq
+        FROM threads t JOIN thread_turns v ON v.thread_id=t.id AND v.ended_at IS NULL
+        JOIN nodes n ON n.id=t.node_id AND n.employee_id=t.employee_id AND n.revoked_at IS NULL
+        JOIN node_credentials c ON c.node_id=n.id AND c.employee_id=n.employee_id AND c.version=n.credential_version
+          AND c.revoked_at IS NULL AND c.expires_at>clock_timestamp()
+        JOIN node_presence p ON p.node_id=n.id AND p.employee_id=n.employee_id AND p.online AND p.synced
+        WHERE t.status='running' AND t.last_reported_at<clock_timestamp()-interval '30 seconds'
+          AND EXISTS(SELECT 1 FROM thread_events e WHERE e.thread_id=t.id AND e.kind='turn.started'
+            AND (e.payload->>'worker_turn_seq')::bigint=v.worker_turn_seq AND e.payload->>'execution_id' IS NOT NULL)
+          AND NOT EXISTS(SELECT 1 FROM thread_events e WHERE e.thread_id=t.id AND e.kind='turn.activity_check'
+            AND e.payload->>'conn_id'=p.conn_id AND e.created_at>clock_timestamp()-interval '30 seconds')
+        ORDER BY t.last_reported_at,t.id LIMIT 8 FOR UPDATE OF t SKIP LOCKED`
+      for (const { thread: t, conn_id, worker_turn_seq } of checks) {
+        const message_id = uuid()
+        const [check] = yield* sql<{
+          check_seq: number
+        }>`INSERT INTO thread_events(employee_id,thread_id,kind,actor,actor_id,payload)
+          VALUES(${t.employee_id},${t.id},'turn.activity_check','system',${t.node_id},
+            ${JSON.stringify({ command_id: message_id, conn_id, worker_turn_seq })}::jsonb) RETURNING id::float8 AS check_seq`
+        commands.push({
+          message_id,
+          node_id: t.node_id,
+          employee_id: t.employee_id,
+          body: {
+            type: 'thread.command',
+            thread_id: t.id,
+            action: 'check_activity',
+            storage_generation: t.storage_generation!,
+            activity_check_seq: check!.check_seq,
+          },
+        })
+      }
       return commands
     }),
   )
@@ -156,6 +192,42 @@ export const processReceipt = (
       yield* lockNodeSource(source)
       const t = yield* readThread(source.employee_id, result.thread_id, true)
       if (t.node_id !== source.node_id) return yield* Effect.fail(failure('not_found', 404))
+      yield* revalidateNodeSource(source)
+      if (result.activity_check_seq !== undefined) {
+        const [check] = yield* sql<{ payload: { worker_turn_seq: number } }>`SELECT payload FROM thread_events
+          WHERE id=${result.activity_check_seq} AND thread_id=${t.id} AND employee_id=${source.employee_id}
+            AND kind='turn.activity_check' AND payload->>'command_id'=${correlationCommandID}
+            AND payload->>'conn_id'=${source.conn_id} AND created_at>clock_timestamp()-interval '60 seconds'`
+        if (!check) return yield* Effect.fail(failure('activity_check_rejected'))
+        const [old] = yield* sql<{ payload: ThreadCommandResult }>`SELECT payload FROM thread_events
+          WHERE thread_id=${t.id} AND kind='turn.activity_checked'
+            AND (payload->>'activity_check_seq')::bigint=${result.activity_check_seq}`
+        if (old) {
+          if (canonical(old.payload) !== canonical(result)) return yield* Effect.fail(failure())
+          return
+        }
+        const newer = yield* sql`SELECT id FROM thread_events WHERE thread_id=${t.id} AND kind='turn.activity_checked'
+          AND (payload->>'activity_check_seq')::bigint>${result.activity_check_seq}`
+        if (newer.length) return yield* Effect.fail(failure('activity_check_rejected'))
+        if (result.ok) {
+          const active = result.active_turn
+          if (
+            !active ||
+            active.worker_turn_seq !== check.payload.worker_turn_seq ||
+            result.storage_generation !== t.storage_generation
+          )
+            return yield* Effect.fail(failure('activity_check_rejected'))
+          const turns = yield* sql`SELECT v.id FROM thread_turns v JOIN thread_events e ON e.thread_id=v.thread_id
+            AND e.kind='turn.started' AND (e.payload->>'worker_turn_seq')::bigint=v.worker_turn_seq
+            AND e.payload->>'execution_id'=${active.execution_id}
+            WHERE v.thread_id=${t.id} AND v.worker_turn_seq=${active.worker_turn_seq} AND v.ended_at IS NULL`
+          if (!turns.length) return yield* Effect.fail(failure('activity_check_rejected'))
+        }
+        yield* audit(t, 'turn.activity_checked', result, 'device', source.node_id)
+        if (result.ok) yield* recordNodeBusiness(source)
+        else yield* revalidateNodeSource(source)
+        return
+      }
       const rows = yield* sql<{
         value: Outbox
       }>`SELECT to_jsonb(o) AS value FROM thread_outbox o WHERE message_id=${correlationCommandID} AND employee_id=${source.employee_id} AND node_id=${source.node_id} AND thread_id=${result.thread_id} FOR UPDATE`
@@ -189,6 +261,7 @@ export const processReceipt = (
       }
       yield* notifyProjectThread(t)
       yield* audit(t, 'command.received', { command_id: correlationCommandID, ...result }, 'device', source.node_id)
-      yield* revalidateNodeSource(source)
+      if (result.ok) yield* recordNodeBusiness(source)
+      else yield* revalidateNodeSource(source)
     }),
   )

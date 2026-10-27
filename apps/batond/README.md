@@ -29,7 +29,18 @@
 
 账号、设备注册和启动命令见 [根文档](../../README.md#设备接入)。
 
-`--ca-file` 同时供 HTTPS 注册和 WSS 连接校验证书，使用系统已信任证书时可省略；该路径不会保存在身份中。中心地址必须为 HTTPS，Relay 必须为 WSS，证书需匹配访问主机名。
+`--ca-file` 同时供 HTTPS 注册、重新认证和 WSS 连接校验证书，使用系统已信任证书时可省略；该路径不会保存在身份中。中心地址必须为 HTTPS，Relay 必须为 WSS，证书需匹配访问主机名。
+
+员工在网页为原设备领取一次性重新认证凭据后，在设备本地执行：
+
+```sh
+./batond reauth --data-dir ~/.baton-ts --enrollment-file /私有目录/重新认证凭据
+./batond up --data-dir ~/.baton-ts
+```
+
+重新认证凭据也可通过 `BATON_ENROLLMENT_TOKEN` 提供；需要自定义 CA 时，两次命令均传 `--ca-file`。`reauth` 使用 `identity.json` 保存的中心地址，忽略 `--coordinator`，保留设备 ID、注册顺序、Thread 和目录配置，只保存新身份，不启动连接。缺少本地身份或已保存中心地址时返回 `identity_recovery_required`，保留现有数据，不自动注册。
+
+`reauth` 在 `identity.lock` 下，先将 operation ID、请求摘要、原设备 token 和 enrollment 秘密原子保存到私有文件 `reauth-pending.json`，再向中心提交。响应丢失或保存身份前退出时，直接再次运行 `batond reauth --data-dir <原目录>`；命令优先重用待提交记录，无需重新提供秘密，也不会使用新传入的凭据替换原操作。成功后先原子替换 `identity.json`，再删除待提交记录；若在两步之间退出，下次仍以原请求取回同一响应。不要手动删除或修改待提交记录；无法恢复时保留数据并核对设备身份。`credential.expires_at` 是签发时的期限快照，CLI 不据此判断授权状态。
 
 `up` 和 `run` 支持 `--control-timeout-seconds <秒>`，取 1～3600 秒的整数，默认 370 秒。认证等待从 WSS 连接建立起计算；认证成功后，同步另有完整的同等预算。到期后断开并按原身份重连。中心默认 15 秒裁决认证握手，其可配置最大期限为 361 秒；节点默认的 370 秒作为等待兜底。
 

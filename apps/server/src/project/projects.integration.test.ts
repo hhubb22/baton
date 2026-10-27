@@ -825,7 +825,7 @@ describe('lease validation after lock waits', () => {
             }),
           )
         })
-        await expect(receipt).rejects.toMatchObject({ code: 'lease_lost' })
+        await expect(receipt).rejects.toMatchObject({ code: 'node_idle_expired' })
         expect((await run(projects.projectStatus(a.employee, p.id))).run?.stop_acked_at).toBeUndefined()
         await run(
           Effect.gen(function* () {

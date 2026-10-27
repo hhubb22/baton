@@ -20,8 +20,10 @@ import {
   type RuntimeReport,
 } from '@baton/protocol'
 import { Effect, Schema } from 'effect'
+import * as SqlClient from 'effect/sql/SqlClient'
+import { dbError } from './database.ts'
 import type { Gateway } from './gateway.ts'
-import { AppError } from './errors.ts'
+import { AppError, type NodeSource } from './errors.ts'
 import * as Nodes from './nodes.ts'
 import { directoryAllowed } from './directories.ts'
 import { hasControlCharacters } from './auth.ts'
@@ -36,21 +38,44 @@ const decode = <A>(schema: Schema.Decoder<A>, input: unknown) =>
 const authorize = Effect.fn('DeviceManagement.authorize')(function* (employeeId: string, nodeId: string) {
   const node = yield* decode(NodeStatus, yield* Nodes.getNode(employeeId, nodeId))
   if (node.revocation_status !== 'none') return yield* Effect.fail(new AppError(403, 'forbidden', '不能操作该设备'))
+  if (node.credential_state === 'idle_expired')
+    return yield* Effect.fail(new AppError(401, 'node_idle_expired', '设备需要重新认证'))
   if (!node.online) return yield* Effect.fail(new AppError(503, 'node_offline'))
   if (!node.synced) return yield* Effect.fail(new AppError(503, 'node_syncing'))
   return node
 })
-const request = (
+const request = Effect.fnUntraced(function* (
   gateway: DeviceGateway,
   employeeId: string,
   nodeId: string,
   body: Parameters<Gateway['request']>[2],
   timeoutMs: number,
-) =>
-  Effect.tryPromise({
-    try: () => gateway.request(nodeId, employeeId, body, timeoutMs),
+) {
+  let source: NodeSource | undefined
+  const response = yield* Effect.tryPromise({
+    try: () =>
+      gateway.request(nodeId, employeeId, body, timeoutMs, (received) => {
+        source = received
+      }),
     catch: (error) => (error instanceof AppError ? error : new AppError(503, 'node_unavailable', '设备未确认请求')),
   })
+  const business = Effect.gen(function* () {
+    yield* authorize(employeeId, nodeId)
+    if (!source || source.employee_id !== employeeId || source.node_id !== nodeId)
+      return yield* Effect.fail(invalidResponse())
+    const original = source
+    const sql = yield* SqlClient.SqlClient
+    yield* sql
+      .withTransaction(
+        Effect.gen(function* () {
+          yield* Nodes.lockNodeSource(original)
+          yield* Nodes.recordNodeBusiness(original)
+        }),
+      )
+      .pipe(Effect.mapError(dbError))
+  })
+  return { body: response, business }
+})
 function checkedResult(
   result: { ok: boolean; operation_id: string; code?: string; message?: string },
   operationId: string,
@@ -106,19 +131,18 @@ export const setProjectExec = Effect.fn('DeviceManagement.setProjectExec')(funct
   yield* authorize(employeeId, nodeId)
   if (!Schema.is(Schema.Boolean)(enabled)) return yield* Effect.fail(new AppError(400, 'invalid_request'))
   const operationId = randomUUID()
-  const result = yield* decode(
-    ProjectExecResult,
-    yield* request(
-      gateway,
-      employeeId,
-      nodeId,
-      { type: 'node.project_exec_set', operation_id: operationId, enabled },
-      5000,
-    ),
+  const response = yield* request(
+    gateway,
+    employeeId,
+    nodeId,
+    { type: 'node.project_exec_set', operation_id: operationId, enabled },
+    5000,
   )
+  const result = yield* decode(ProjectExecResult, response.body)
   yield* confirm(result, operationId)
   if (result.type !== 'node.project_exec_result' || !result.exec || result.exec.enabled !== enabled)
     return yield* Effect.fail(invalidResponse())
+  yield* response.business
   return yield* overlay(employeeId, nodeId, { exec: result.exec })
 })
 
@@ -138,7 +162,8 @@ export const getBrowseRoots = Effect.fn('DeviceManagement.getBrowseRoots')(funct
       }),
     catch: () => new AppError(400, 'invalid_request'),
   })
-  const result = yield* decode(BrowseRootsGetResult, yield* request(gateway, employeeId, nodeId, body, 5000))
+  const response = yield* request(gateway, employeeId, nodeId, body, 5000)
+  const result = yield* decode(BrowseRootsGetResult, response.body)
   yield* confirm(result, body.operation_id)
   const page = result.page
   if (
@@ -158,6 +183,7 @@ export const getBrowseRoots = Effect.fn('DeviceManagement.getBrowseRoots')(funct
       return yield* Effect.fail(invalidResponse())
   }
   yield* authorize(employeeId, nodeId)
+  yield* response.business
   return page
 })
 
@@ -188,7 +214,8 @@ export const updateBrowseRoots = Effect.fn('DeviceManagement.updateBrowseRoots')
     (action === 'remove' && !parser.isAbsolute(path) && !/^[a-z][a-z0-9._-]{0,63}$/.test(path))
   )
     return yield* Effect.fail(new AppError(400, 'invalid_path'))
-  const result = yield* decode(BrowseRootsResult, yield* request(gateway, employeeId, nodeId, body, 5000))
+  const response = yield* request(gateway, employeeId, nodeId, body, 5000)
+  const result = yield* decode(BrowseRootsResult, response.body)
   yield* confirm(result, operationId)
   if (!result.roots || !result.repos || result.roots.length > 4096 || result.repos.length > 128)
     return yield* Effect.fail(invalidResponse())
@@ -203,6 +230,7 @@ export const updateBrowseRoots = Effect.fn('DeviceManagement.updateBrowseRoots')
     (action === 'add' && roots.length === 0)
   )
     return yield* Effect.fail(invalidResponse())
+  yield* response.business
   return yield* overlay(employeeId, nodeId, { roots, repos, ...(result.truncated ? { truncated: true } : {}) })
 })
 
@@ -218,16 +246,14 @@ export const startSubscriptionLogin = Effect.fn('DeviceManagement.startSubscript
     catch: () => new AppError(400, 'invalid_provider', '模型服务无效'),
   })
   const operationId = randomUUID()
-  const result = yield* decode(
-    SubscriptionLoginResult,
-    yield* request(
-      gateway,
-      employeeId,
-      nodeId,
-      { type: 'node.subscription_login', operation_id: operationId, provider: normalized },
-      12000,
-    ),
+  const response = yield* request(
+    gateway,
+    employeeId,
+    nodeId,
+    { type: 'node.subscription_login', operation_id: operationId, provider: normalized },
+    12000,
   )
+  const result = yield* decode(SubscriptionLoginResult, response.body)
   yield* confirm(result, operationId)
   let verification: URL
   try {
@@ -249,7 +275,9 @@ export const startSubscriptionLogin = Effect.fn('DeviceManagement.startSubscript
   )
     return yield* Effect.fail(invalidResponse())
   yield* authorize(employeeId, nodeId)
-  return yield* decode(SubscriptionLoginResponse, result)
+  const confirmed = yield* decode(SubscriptionLoginResponse, result)
+  yield* response.business
+  return confirmed
 })
 
 export const browse = Effect.fn('DeviceManagement.browse')(function* (
@@ -278,7 +306,8 @@ export const browse = Effect.fn('DeviceManagement.browse')(function* (
         !(body.root_id ? /^v1:\d+:[a-f0-9]{64}$/ : /^[a-f0-9]{64}:\d+$/).test(body.cursor)))
   )
     return yield* Effect.fail(new AppError(400, 'invalid_path'))
-  const result = yield* decode(FileResult, yield* request(gateway, employeeId, nodeId, body, 12000))
+  const response = yield* request(gateway, employeeId, nodeId, body, 12000)
+  const result = yield* decode(FileResult, response.body)
   yield* confirm(result, operationId)
   if (
     !['roots', 'directory', 'file'].includes(result.kind ?? '') ||
@@ -316,10 +345,12 @@ export const browse = Effect.fn('DeviceManagement.browse')(function* (
     return yield* Effect.fail(invalidResponse())
   yield* authorize(employeeId, nodeId)
   const { content, ...metadata } = result
-  return yield* decode(FileView, {
+  const confirmed = yield* decode(FileView, {
     ...metadata,
     ...(result.kind === 'file' ? { content } : {}),
     node_id: nodeId,
     truncated: result.truncated ?? false,
   })
+  yield* response.business
+  return confirmed
 })

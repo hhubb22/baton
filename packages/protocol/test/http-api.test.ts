@@ -27,6 +27,10 @@ it('generates schemas, statuses and cookie security for every implemented HTTP e
   expect(document.paths['/api/v1/nodes/{nodeId}/roots']?.get?.security).toEqual([{ session: [] }])
   expect(document.paths['/api/v1/nodes/{nodeId}/roots']?.delete?.requestBody).toMatchObject({ required: true })
   expect(document.paths['/api/v1/nodes']?.get?.security).toEqual([{ session: [] }])
+  expect(document.paths['/api/v1/nodes/{nodeId}/reauth-enrollments']?.post?.security).toEqual([{ session: [] }])
+  expect(document.paths['/api/v1/nodes/{nodeId}/reauth-enrollments']?.post?.responses).toHaveProperty('201')
+  expect(document.paths['/api/v1/nodes/{nodeId}/reauth']?.post?.responses).toHaveProperty('200')
+  expect(document.paths['/api/v1/nodes/{nodeId}/reauth']?.post?.security ?? []).toEqual([])
   expect(document.components.securitySchemes.session).toMatchObject({
     type: 'apiKey',
     in: 'cookie',

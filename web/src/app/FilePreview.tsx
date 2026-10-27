@@ -492,7 +492,16 @@ function FileContent({
   )
 
   let body
-  if (preview.isPending) {
+  if (
+    !device ||
+    device.connection !== 'online' ||
+    device.credentialState === 'idle_expired' ||
+    device.credentialState === 'revoked'
+  ) {
+    const reason = device?.connection === 'syncing' ? 'syncing' : 'offline'
+    const problem = previewProblem({ state: 'unavailable', deviceId, path, reason, size: null }, device)
+    body = problem && failed(problem, problemIcons[reason])
+  } else if (preview.isPending) {
     body = <State icon="file" title={`Loading ${baseName(path)}…`} />
   } else if (preview.isError) {
     body = failed(readFailure(), 'alert')

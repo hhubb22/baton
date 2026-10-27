@@ -143,7 +143,30 @@ describe('file preview paging', () => {
     act(() => client.controls.setDeviceConnection(deviceId, 'offline'))
     expect(await within(dialog).findByText('Ubuntu Dev is offline')).toBeInTheDocument()
     expect(within(dialog).queryByText('partial')).not.toBeInTheDocument()
+    expect(read).toHaveBeenCalledTimes(2)
   })
+
+  it.each(['idle_expired', 'revoked'] as const)(
+    'hides retained text when the credential becomes %s without rereading the file',
+    async (credentialState) => {
+      const user = userEvent.setup()
+      const read = vi.fn<BatonClient['readFile']>(async () => first)
+      const client = setup(read)
+      let unavailable = false
+      const listDevices = client.listDevices.bind(client)
+      client.listDevices = async () =>
+        (await listDevices()).map((device) =>
+          unavailable && device.id === deviceId ? { ...device, connection: 'online', credentialState } : device,
+        )
+      const dialog = await openPreview(user)
+      expect(await within(dialog).findByText('first')).toBeInTheDocument()
+      unavailable = true
+      act(() => client.controls.setDeviceConnection(deviceId, 'offline'))
+      expect(await within(dialog).findByText('Ubuntu Dev is offline')).toBeInTheDocument()
+      expect(within(dialog).queryByRole('region', { name: 'Contents of reconnect.log' })).not.toBeInTheDocument()
+      expect(read).toHaveBeenCalledTimes(1)
+    },
+  )
 
   it('keeps retained entries while retrying an incomplete file list with literal POSIX names', async () => {
     const user = userEvent.setup()

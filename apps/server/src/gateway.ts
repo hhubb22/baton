@@ -72,6 +72,7 @@ interface QueuedRPC {
   resolve(body: Body): void
   reject(error: Error): void
   timer?: ReturnType<typeof setTimeout>
+  onResponse?: (source: NodeSource) => void
 }
 interface PendingRPC {
   rpcClass: RPCClass
@@ -215,6 +216,38 @@ export class Gateway {
           attributes: { 'baton.command.id': messageId },
         },
       ).pipe(Effect.provideService(Tracer.Tracer, tracer)),
+    )
+  }
+
+  async sendValidated(nodeId: string, employeeId: string, messageId: string, body: unknown): Promise<boolean> {
+    const connection = this.nodes.get(nodeId)
+    if (!connection || connection.source.employee_id !== employeeId || !connection.synced) return false
+    try {
+      await this.handlers.validate(connection.source)
+    } catch (error) {
+      if (error instanceof AppError && error.status === 401) return false
+      throw error
+    }
+    if (this.nodes.get(nodeId) !== connection) return false
+    return this.send(nodeId, employeeId, messageId, body)
+  }
+
+  async closeExpiredConnections(): Promise<void> {
+    await Promise.all(
+      [...this.nodes.values()].map(async (connection) => {
+        try {
+          await this.handlers.validate(connection.source)
+        } catch (error) {
+          if (
+            error instanceof AppError &&
+            error.code === 'node_idle_expired' &&
+            this.nodes.get(connection.source.node_id) === connection
+          ) {
+            this.rejectQueuedRPC(connection, error)
+            connection.socket.close(1008, 'node_idle_expired')
+          }
+        }
+      }),
     )
   }
 
@@ -379,6 +412,10 @@ export class Gateway {
             if (
               !pending ||
               pending.source.conn_id !== current.source.conn_id ||
+              pending.source.credential_id !== current.source.credential_id ||
+              pending.source.incarnation !== current.source.incarnation ||
+              pending.source.node_id !== current.source.node_id ||
+              pending.source.employee_id !== current.source.employee_id ||
               pending.operationId !== body.operation_id ||
               pending.responseType !== body.type ||
               (body.type === 'session.result' && pending.sessionId !== body.session_id)
@@ -419,7 +456,13 @@ export class Gateway {
     })
   }
 
-  request(nodeId: string, employeeId: string, body: Body, timeoutMs?: number): Promise<Body> {
+  request(
+    nodeId: string,
+    employeeId: string,
+    body: Body,
+    timeoutMs?: number,
+    onResponse?: (source: NodeSource) => void,
+  ): Promise<Body> {
     const connection = this.nodes.get(nodeId)
     if (
       this.closed ||
@@ -440,6 +483,7 @@ export class Gateway {
         operationId,
         responseType,
         rpcClass,
+        ...(onResponse ? { onResponse } : {}),
         resolve,
         reject,
         timeoutMs:
@@ -498,6 +542,7 @@ export class Gateway {
       ...(typeof queued.body.session_id === 'string' ? { sessionId: queued.body.session_id } : {}),
       resolve: (body) => {
         finish()
+        queued.onResponse?.(connection.source)
         queued.resolve(body)
       },
       reject: (error) => {
@@ -506,10 +551,21 @@ export class Gateway {
       },
       timer,
     })
-    if (!this.send(connection.source.node_id, connection.source.employee_id, messageId, queued.body)) {
-      finish()
-      queued.reject(new AppError(503, 'node_busy'))
-    }
+    // Reserve the slot before validation so concurrent requests cannot exceed the limit.
+    void (async () => {
+      try {
+        await this.handlers.validate(connection.source)
+        if (!this.rpc.has(messageId)) return
+        if (this.nodes.get(connection.source.node_id) !== connection || connection.socket.readyState !== WebSocket.OPEN)
+          throw new AppError(503, 'node_offline')
+        if (!this.send(connection.source.node_id, connection.source.employee_id, messageId, queued.body))
+          throw new AppError(503, 'node_busy')
+      } catch (error) {
+        if (!this.rpc.has(messageId)) return
+        finish()
+        queued.reject(error instanceof AppError ? error : new AppError(503, 'node_unavailable'))
+      }
+    })()
   }
 
   private drainRPC(connection: NodeConnection): void {

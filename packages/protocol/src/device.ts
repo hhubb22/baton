@@ -321,6 +321,8 @@ export const NodeStatus = Schema.Struct({
   status_updated_at: Schema.NullOr(Timestamp),
   synced: Schema.Boolean,
   executable: Schema.Boolean,
+  credential_state: Schema.optionalKey(Schema.Literals(['active', 'idle_expired', 'revoked'])),
+  idle_expires_at: Schema.optionalKey(Timestamp),
   revocation_status: Text,
   revocation: Schema.optionalKey(Schema.NullOr(NodeRevocation)),
 })
@@ -385,6 +387,13 @@ export const RegisterNodeInput = Schema.Struct({
   capabilities: Schema.Array(RootID).check(Schema.isMaxLength(32), Schema.isUnique()),
 })
 export type RegisterNodeInput = typeof RegisterNodeInput.Type
+
+export const ReauthNodeInput = Schema.Struct({
+  operation_id: UUID,
+  enrollment_token: boundedText(200).check(Schema.isPattern(/^[A-Za-z0-9_-]{20,200}$/)),
+  previous_token: boundedText(4096),
+})
+export type ReauthNodeInput = typeof ReauthNodeInput.Type
 
 export const Revocation = Schema.Struct({
   kind: Schema.Literals(['credential', 'node']),

@@ -98,8 +98,6 @@ async function main() {
     const offlineMs = duration('BATON_OFFLINE_AFTER', 30_000, 200, 600_000)
     const sessionTTLSeconds = duration('BATON_SESSION_TTL', 43_200_000, 300_000, 604_800_000) / 1000
     const enrollmentTTLSeconds = duration('BATON_ENROLLMENT_TTL', 600_000, 60_000, 86_400_000) / 1000
-    const nodeCredentialTTLSeconds =
-      duration('BATON_NODE_CREDENTIAL_TTL', 2_592_000_000, 3_600_000, 7_776_000_000) / 1000
     if (offlineMs <= heartbeatMs) throw new AppError(400, 'invalid_configuration', '离线期限需要大于心跳间隔')
     const budgets = controlConfiguration()
     const signer = await loadSigningKey(process.env.BATON_NODE_SIGNING_KEY || 'node-signing.key')
@@ -116,7 +114,6 @@ async function main() {
           offlineMs,
           sessionTTLSeconds,
           enrollmentTTLSeconds,
-          nodeCredentialTTLSeconds,
           webDirectory: process.env.BATON_WEB_DIR || join(dirname(fileURLToPath(import.meta.url)), 'web'),
           ...(tls ? { tls } : {}),
         })

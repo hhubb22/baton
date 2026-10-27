@@ -96,6 +96,7 @@ const terminal = (code?: string) =>
     'node_revoked',
     'needs_reauth',
     'credential_expired',
+    'node_idle_expired',
   ].includes(code ?? '')
 
 async function connected(options: {

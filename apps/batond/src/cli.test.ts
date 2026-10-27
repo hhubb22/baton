@@ -2,8 +2,24 @@ import { randomUUID } from 'node:crypto'
 import { realpath, rm } from 'node:fs/promises'
 import { expect, it, vi } from 'vite-plus/test'
 import type { RuntimeAgent, WorkerIPCMessage, WorkerRequest } from '@baton/protocol'
-import { runLocalCLI } from './cli.ts'
+import { runBatondCLI, runLocalCLI } from './cli.ts'
+import { runDaemonCLI } from './daemon/cli.ts'
 import { makePrivateTempDirectory } from './testing/private.ts'
+
+vi.mock('./daemon/cli.ts', () => ({ runDaemonCLI: vi.fn() }))
+
+it('routes reauth to the node CLI and documents it in help', async () => {
+  const args = ['--data-dir', '/offline-node', '--enrollment-file', '/private/enrollment']
+  await runBatondCLI(['reauth', ...args])
+  expect(runDaemonCLI).toHaveBeenCalledWith('reauth', args)
+  const output = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+  try {
+    await runBatondCLI(['--help'])
+    expect(output).toHaveBeenCalledWith(expect.stringContaining('reauth [--enrollment-file'))
+  } finally {
+    output.mockRestore()
+  }
+})
 
 it('opens each local Agent with a custom model and budget and reuses its saved configuration', async () => {
   const directory = await makePrivateTempDirectory('baton-cli-')

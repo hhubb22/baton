@@ -213,19 +213,24 @@ describe('Project Runtime host', () => {
         const c = command()
         let pid = 0,
           renewals = 0
+        const evidence: ProjectRuntimeRequest['payload'][] = []
         let release!: (result: ProjectRuntimeResult) => void
         const delayed = new Promise<ProjectRuntimeResult>((resolve) => {
           release = resolve
         })
         manager.setTransport(async (request) => {
           if (request.operation === 'bootstrap') pid = (request.payload as { pid: number }).pid
-          if (request.operation === 'renew' && ++renewals > 1) return delayed
+          if (request.operation === 'renew') {
+            evidence.push(request.payload)
+            if (++renewals > 1) return delayed
+          }
           return success({ lease_seconds: 60, control_receipts: 1 })
         })
         yield* Effect.promise(() => manager.command(c))
         yield* until(() => pid > 0)
         mono = wall = 110
         yield* until(() => renewals === 2)
+        expect(evidence).toEqual([undefined, { host_check_seq: 1 }])
         wall = 60000
         release(success({ lease_seconds: 60, control_receipts: 1 }))
         yield* until(() => row(dataDir, c.run_id)?.cleanup_complete === 1)

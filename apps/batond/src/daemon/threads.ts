@@ -148,6 +148,30 @@ export function makeThreadService(options: {
   async function execute(id: string, cmd: ThreadCommand): Promise<ThreadCommandResult> {
     // All stages share the command's outer budget; Worker launch owns at most 3 seconds.
     const deadline = performance.now() + 4500
+    if (cmd.action === 'check_activity') {
+      if (!cmd.activity_check_seq || !cmd.storage_generation) throw new AdmissionRejected('invalid_request')
+      const reply = await host.request(
+        cmd.thread_id,
+        { type: 'status', ok: false, activity_check_seq: cmd.activity_check_seq },
+        { timeoutMs: 1000 },
+      )
+      const valid =
+        reply.ok &&
+        reply.worker_ready &&
+        reply.agent_ready &&
+        reply.session_id === cmd.thread_id &&
+        reply.storage_generation === cmd.storage_generation &&
+        reply.activity_check_seq === cmd.activity_check_seq &&
+        reply.active_turn !== undefined
+      return {
+        type: 'thread.command_result',
+        thread_id: cmd.thread_id,
+        activity_check_seq: cmd.activity_check_seq,
+        storage_generation: cmd.storage_generation,
+        ok: !!valid,
+        ...(valid ? { active_turn: reply.active_turn } : { code: 'activity_not_verified' }),
+      }
+    }
     const hash = commandHash(cmd)
     let saved = await io(ledger.command(id))
     if (saved && saved.hash !== hash)

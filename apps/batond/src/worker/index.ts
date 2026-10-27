@@ -536,6 +536,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
       worker_turn_seq: message.turn!,
       client_message_id: messageId,
       native_session_id: draft.nativeId!,
+      execution_id: acceptance.executionId,
     })
     settleMessage(draft, message, 'succeeded')
   }
@@ -1491,8 +1492,13 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
   function shortRequest(request: WorkerRequest): Effect.Effect<WorkerIPCMessage, WorkerFailure> {
     if (commandAction(request.type)) return acceptCommand(request)
     return Effect.gen(function* () {
-      if (request.type === 'status')
+      if (request.type === 'status') {
+        const active = state.activeMessage ? state.messages[state.activeMessage] : undefined
         return {
+          ...(request.activity_check_seq !== undefined ? { activity_check_seq: request.activity_check_seq } : {}),
+          ...(!recovering && state.phase === 'busy' && active?.state === 'sent' && !active.ended && active.executionId
+            ? { active_turn: { worker_turn_seq: active.turn!, execution_id: active.executionId } }
+            : {}),
           type: 'result',
           ok: true,
           worker_ready: true,
@@ -1501,6 +1507,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
             ? { session_id: state.config.thread_id, storage_generation: state.config.storage_generation }
             : {}),
         }
+      }
       if (request.type === 'thread_command_status') {
         if (
           !state.config ||

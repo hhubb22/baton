@@ -79,17 +79,22 @@ function shellQuote(value: string, os: DeviceOS) {
 }
 
 // 设置码通过环境变量交给 batond，不出现在命令行参数和 shell 历史里。
-export function registerCommand(coordinatorUrl: string, name: string, os: DeviceOS) {
+export function registerCommand(coordinatorUrl: string, name: string, os: DeviceOS, reauth = false) {
+  const tokenInput =
+    os === 'Windows'
+      ? '$env:BATON_ENROLLMENT_TOKEN = Read-Host -MaskInput'
+      : 'read -rs BATON_ENROLLMENT_TOKEN && export BATON_ENROLLMENT_TOKEN'
+  if (reauth) return `${tokenInput}\nbatond reauth && batond up`
   const displayName = shellQuote(name.trim() || placeholderName, os)
   if (os === 'Windows') {
     return [
-      '$env:BATON_ENROLLMENT_TOKEN = Read-Host -MaskInput',
+      tokenInput,
       `batond up --coordinator ${coordinatorUrl} \``,
       `  --display-name ${displayName} --system windows`,
     ].join('\n')
   }
   return [
-    'read -rs BATON_ENROLLMENT_TOKEN && export BATON_ENROLLMENT_TOKEN',
+    tokenInput,
     `batond up --coordinator ${coordinatorUrl} \\`,
     `  --display-name ${displayName} --system ${os === 'macOS' ? 'macos' : 'linux'}`,
   ].join('\n')
@@ -125,9 +130,11 @@ function Status({ tone, children }: { tone: Tone; children: string }) {
 
 // 打开时向中心要一次性设置码；设备用它连上后显示设备信息。重新取码时保留已填的名称和系统。
 export function EnrollDialog({
+  device,
   onClose,
   finalFocus,
 }: {
+  device?: Device
   onClose: () => void
   finalFocus?: () => HTMLElement | null | boolean
 }) {
@@ -144,7 +151,7 @@ export function EnrollDialog({
   const request = () => {
     setCopied(null)
     setIssued(null)
-    create.mutate(undefined, { onSuccess: (result) => setIssued({ enrollment: result, receivedAt: Date.now() }) })
+    create.mutate(device?.id, { onSuccess: (result) => setIssued({ enrollment: result, receivedAt: Date.now() }) })
   }
 
   useEffect(() => {
@@ -168,7 +175,10 @@ export function EnrollDialog({
 
   const connected = devices.data?.find((item) => item.id === enrollment.data?.deviceId)
   const code = issued?.enrollment.code ?? ''
-  const command = issued ? registerCommand(issued.enrollment.coordinatorUrl, name, os) : ''
+  const command = issued
+    ? registerCommand(issued.enrollment.coordinatorUrl, name, device?.os ?? os, device !== undefined)
+    : ''
+  const title = device ? 'Reconnect device' : 'Connect a device'
 
   const copy = (target: Copied['target'], value: string) => {
     copyText(value).then(
@@ -186,7 +196,7 @@ export function EnrollDialog({
         onOpenChange={(open) => {
           if (!open) close()
         }}
-        title="Connect a device"
+        title={title}
         wide
         finalFocus={finalFocus}
         note={<Status tone="success">Connected</Status>}
@@ -259,7 +269,7 @@ export function EnrollDialog({
       onOpenChange={(open) => {
         if (!open) close()
       }}
-      title="Connect a device"
+      title={title}
       wide
       finalFocus={finalFocus}
       note={notes[phase]}
@@ -274,24 +284,28 @@ export function EnrollDialog({
         </>
       }
     >
-      <div {...stylex.props(styles.section)}>
-        <label htmlFor="enroll-name" {...stylex.props(text.label)}>
-          Device name
-        </label>
-        <div {...stylex.props(styles.nameRow)}>
-          <Input
-            id="enroll-name"
-            value={name}
-            placeholder={placeholderName}
-            autoComplete="off"
-            onChange={(event) => setName(event.target.value)}
-            style={styles.name}
-          />
-          <div {...stylex.props(styles.system)}>
-            <Segmented label="Operating system" options={systems} value={os} onChange={setOS} block />
+      {device ? (
+        <span {...stylex.props(text.label)}>{device.name}</span>
+      ) : (
+        <div {...stylex.props(styles.section)}>
+          <label htmlFor="enroll-name" {...stylex.props(text.label)}>
+            Device name
+          </label>
+          <div {...stylex.props(styles.nameRow)}>
+            <Input
+              id="enroll-name"
+              value={name}
+              placeholder={placeholderName}
+              autoComplete="off"
+              onChange={(event) => setName(event.target.value)}
+              style={styles.name}
+            />
+            <div {...stylex.props(styles.system)}>
+              <Segmented label="Operating system" options={systems} value={os} onChange={setOS} block />
+            </div>
           </div>
         </div>
-      </div>
+      )}
       <div {...stylex.props(styles.section)}>
         <span id="enroll-code-label" {...stylex.props(text.label)}>
           {codeLabels[phase]}

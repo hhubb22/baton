@@ -85,14 +85,15 @@ beforeAll(async () => {
   const gateway: ReturnType<HTTPOptions['gateway']> = {
     disconnectBrowsers: () => {},
     notify: () => {},
-    disconnect: async () => {
-      await database.run(Nodes.disconnectNode(source))
+    disconnect: async (requestedNodeId) => {
+      if (requestedNodeId === source.node_id) await database.run(Nodes.disconnectNode(source))
     },
-    request: async (_nodeId: string, _employeeId: string, input: Record<string, unknown>) => {
+    request: async (_nodeId, _employeeId, input, _timeoutMs, onResponse) => {
       if (input.path === 'hold') {
         heldStarted?.()
         await new Promise<never>(() => {})
       }
+      onResponse?.(source)
       if (input.type === 'node.browse_roots_get') {
         return { type: 'node.browse_roots_get_result', operation_id: input.operation_id, ok: true, page: { roots: [] } }
       }
@@ -205,6 +206,61 @@ it('validates payloads, queries, paths, response shapes and available feature ro
     paths: { '/api/v1/threads': { post: { responses: { '201': expect.anything() } } } },
   })
   expect((await request('/api/v1/openapi.json', 'GET', undefined, { cookie: '' })).status).toBe(401)
+})
+
+it('reauthenticates the original device through enrollment and public proof with replay-safe credentials', async () => {
+  await login(readyPassword, 'httpready')
+  const enrollment = Schema.decodeUnknownSync(P.EnrollmentResponse)(
+    await (await request('/api/v1/node-enrollments', 'POST', {})).json(),
+  )
+  const registered = await request('/api/v1/nodes/register', 'POST', {
+    enrollment_token: enrollment.enrollment_token,
+    display_name: 'Expired workstation',
+    system: 'linux',
+    capabilities: [],
+  })
+  expect(registered.status).toBe(200)
+  const identity = Schema.decodeUnknownSync(P.NodeIdentity)(await registered.json())
+  await database.run(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`UPDATE node_credentials SET created_at=clock_timestamp()-interval '31 days',last_business_at=clock_timestamp()-interval '31 days',expires_at=clock_timestamp()-interval '1 day' WHERE id=${identity.credential.id}`
+    }),
+  )
+  const path = `/api/v1/nodes/${identity.node_id}`
+  expect(await (await request(path)).json()).toMatchObject({ credential_state: 'idle_expired', executable: false })
+  expect((await request(`${path}/reauth-enrollments`, 'POST', {}, { 'x-csrf-token': 'wrong' })).status).toBe(403)
+  const issued = await request(`${path}/reauth-enrollments`, 'POST', {})
+  expect(issued.status).toBe(201)
+  const reauth = Schema.decodeUnknownSync(P.EnrollmentResponse)(await issued.json())
+  await login('http-replacement-password-456')
+  expect((await request(`${path}/reauth-enrollments`, 'POST', {})).status).toBe(403)
+  const body = {
+    operation_id: randomUUID(),
+    enrollment_token: reauth.enrollment_token,
+    previous_token: identity.credential.token,
+  }
+  const fromCLI = () =>
+    handle(
+      new Request(`http://localhost${path}/reauth`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    )
+  const response = await fromCLI()
+  expect(response.status).toBe(200)
+  expect(response.headers.get('cache-control')).toBe('no-store')
+  const fresh = Schema.decodeUnknownSync(P.NodeIdentity)(await response.json())
+  expect(fresh).toMatchObject({
+    node_id: identity.node_id,
+    registration_seq: identity.registration_seq,
+    credential: { version: 2 },
+  })
+  expect(await (await fromCLI()).json()).toEqual(fresh)
+  await login(readyPassword, 'httpready')
+  expect((await request(`${path}/revoke`, 'POST', {})).status).toBe(200)
+  expect((await request(`${path}/reauth`, 'POST', body, { cookie: '' })).status).toBe(403)
 })
 
 it('serves persisted trace pages with raw JSON and distinguishes missing Turns from missing trace', async () => {

@@ -74,6 +74,8 @@ export interface Device {
   system: string
   batondVersion: string
   connection: DeviceConnection
+  credentialState?: 'active' | 'idle_expired' | 'revoked'
+  idleExpiresAt?: number
   lastSeenAt: number
   registeredAt: number
   agents: DeviceAgent[]

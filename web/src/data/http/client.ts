@@ -44,6 +44,8 @@ interface NodeDTO {
   online: boolean
   synced: boolean
   revocation_status: string
+  credential_state?: Device['credentialState']
+  idle_expires_at?: string
   last_contact_at?: string
   registered_at?: string
   batond_version?: string
@@ -74,13 +76,20 @@ export const subscriptionName = (provider: string) =>
 export function mapDevice(node: NodeDTO): Device {
   const report = node.runtime_report
   const os = /win/i.test(node.system) ? 'Windows' : /mac|darwin/i.test(node.system) ? 'macOS' : 'Linux'
+  const online =
+    node.online &&
+    node.revocation_status !== 'pending' &&
+    node.credential_state !== 'idle_expired' &&
+    node.credential_state !== 'revoked'
   return {
     id: node.id,
     name: node.display_name,
     os,
     system: node.system,
     batondVersion: node.batond_version ?? 'Not reported',
-    connection: node.online && node.revocation_status !== 'pending' ? (node.synced ? 'online' : 'syncing') : 'offline',
+    connection: online ? (node.synced ? 'online' : 'syncing') : 'offline',
+    credentialState: node.credential_state,
+    idleExpiresAt: node.idle_expires_at === undefined ? undefined : timestamp(node.idle_expires_at),
     lastSeenAt: timestamp(node.last_contact_at ?? node.registered_at),
     registeredAt: timestamp(node.registered_at),
     agents: (report?.agents ?? [])
@@ -387,8 +396,9 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
       if (result.status !== 'effective')
         throw new ClientError('unavailable', 'Disconnect is still being confirmed. Try again.')
     },
-    async createEnrollment() {
-      const value = await request<EnrollmentDTO>('/node-enrollments', { method: 'POST', body: '{}' })
+    async createEnrollment(nodeId) {
+      const path = nodeId === undefined ? '/node-enrollments' : `/nodes/${apiPath(nodeId)}/reauth-enrollments`
+      const value = await request<EnrollmentDTO>(path, { method: 'POST', body: '{}' })
       return { ...enrollment(value), code: value.enrollment_token ?? '' }
     },
     async getEnrollment(id) {

@@ -11,6 +11,7 @@ import * as Auth from './auth.ts'
 import * as Nodes from './nodes.ts'
 import * as Threads from './threads/index.ts'
 import * as Projects from './project/projects.ts'
+import { expireProjectNodeLeases } from './project/scheduling.ts'
 import { AppError, type NodeSource } from './errors.ts'
 import { Gateway, type GatewayOptions } from './gateway.ts'
 import {
@@ -29,7 +30,6 @@ export interface ServerOptions {
   readonly signer: Nodes.CredentialSigner
   readonly sessionTTLSeconds?: number
   readonly enrollmentTTLSeconds?: number
-  readonly nodeCredentialTTLSeconds?: number
   readonly tls?: TLSOptions
   readonly webDirectory?: string
   readonly dispatchMs?: number
@@ -116,7 +116,7 @@ export const startServer = (
                 await run('authenticate', Nodes.claimConnection(source))
                 return source
               },
-              validate: (source) => run('validate', Nodes.revalidateNodeSource(source)),
+              validate: (source) => run('validate', Nodes.revalidateNodeSource(source, false)),
               heartbeat: (source) => run('heartbeat', Nodes.touchNode(source)),
               disconnected: (source) => run('disconnect', Nodes.disconnectNode(source)),
               handle: async (source, envelope) => {
@@ -223,7 +223,7 @@ export const startServer = (
       try {
         const commands = await run('dispatch', Threads.claimCommands())
         for (const command of commands)
-          gateway.send(command.node_id, command.employee_id, command.message_id, command.body)
+          await gateway.sendValidated(command.node_id, command.employee_id, command.message_id, command.body)
       } catch {
         // Persisted due times retain pending work while the database or transport is unavailable.
       } finally {
@@ -268,7 +268,7 @@ export const startServer = (
       try {
         const deliveries = await run('dispatch', Projects.claimProjectCommands(kind))
         for (const delivery of deliveries)
-          gateway.send(delivery.node_id, delivery.employee_id, delivery.command.run_id, delivery.command)
+          await gateway.sendValidated(delivery.node_id, delivery.employee_id, delivery.command.run_id, delivery.command)
       } catch {
         // Each command class retains its own retry progress and sending quota.
       } finally {
@@ -293,8 +293,22 @@ export const startServer = (
       (nodeId) => gateway.disconnect(nodeId),
       { concurrency: 1 },
     )
+    let maintaining = false
+    const maintain = async () => {
+      if (maintaining || controller.signal.aborted) return
+      maintaining = true
+      try {
+        await Promise.allSettled([
+          compensate(),
+          gateway.closeExpiredConnections(),
+          run('maintenance', expireProjectNodeLeases()),
+        ])
+      } finally {
+        maintaining = false
+      }
+    }
     const maintenanceTimer = setInterval(() => {
-      void compensate().catch(() => undefined)
+      void maintain()
     }, 200)
     timer.unref()
     maintenanceTimer.unref()
@@ -306,7 +320,7 @@ export const startServer = (
         for (const projectTimer of projectTimers) clearInterval(projectTimer)
       }),
     )
-    void compensate().catch(() => undefined)
+    void maintain()
     void dispatch()
     void placeProjects()
     for (const kind of projectKinds) void dispatchProjects(kind)

@@ -337,6 +337,90 @@ function replyRPC(ws: WebSocket, frame: typeof rpcFrameSchema.Type) {
   )
 }
 
+test('validates RPCs before sending, including queued requests crossing the idle deadline', async () => {
+  let validations = 0
+  const f = await fixture(
+    {
+      validate: async () => {
+        if (++validations === 3) throw new AppError(401, 'node_idle_expired')
+      },
+    },
+    undefined,
+    { rpc: { readConcurrency: 1 } },
+  )
+  const { ws, frames } = await f.connect()
+  const first = f.gateway.request(f.nodeId, f.employeeId, { type: 'files.browse', operation_id: randomUUID() })
+  await expect.poll(() => rpcFrames(frames).length).toBe(1)
+  const queued = f.gateway.request(f.nodeId, f.employeeId, { type: 'files.browse', operation_id: randomUUID() })
+  const rejected = expect(queued).rejects.toMatchObject({ code: 'node_idle_expired' })
+  // The first send and response are valid; the next queue validation observes expiry.
+  ws.send(
+    JSON.stringify(
+      envelope(
+        {
+          type: 'files.browse_result',
+          operation_id: rpcFrames(frames)[0].body.operation_id,
+          ok: true,
+          kind: 'roots',
+          roots: [],
+        },
+        rpcFrames(frames)[0].message_id,
+      ),
+    ),
+  )
+  await first
+  await rejected
+  expect(validations).toBe(3)
+  expect(rpcFrames(frames)).toHaveLength(1)
+})
+
+test('reserves RPC capacity during asynchronous validation and never sends from a replaced source', async () => {
+  const checking = Promise.withResolvers<void>()
+  const validated = Promise.withResolvers<void>()
+  const f = await fixture(
+    {
+      validate: async () => {
+        checking.resolve()
+        await validated.promise
+      },
+    },
+    undefined,
+    { rpc: { readConcurrency: 1 } },
+  )
+  cleanups.push(async () => {
+    validated.resolve()
+  })
+  const { frames } = await f.connect()
+  const body = { type: 'files.browse', operation_id: randomUUID() }
+  const pending = f.gateway.request(f.nodeId, f.employeeId, body)
+  const rejected = expect(pending).rejects.toMatchObject({ code: 'node_offline' })
+  await checking.promise
+  expect(rpcFrames(frames)).toHaveLength(0)
+  expect(f.gateway.diagnostics().pending_rpc).toBe(1)
+  const replacement = await f.connect()
+  validated.resolve()
+  await rejected
+  expect(rpcFrames(replacement.frames)).toHaveLength(0)
+})
+
+test('database idle expiry closes a quiet connection and rejects durable sends without a heartbeat', async () => {
+  let expired = false
+  const f = await fixture({
+    validate: async () => {
+      if (expired) throw new AppError(401, 'node_idle_expired')
+    },
+  })
+  const { ws, frames } = await f.connect()
+  expired = true
+  expect(await f.gateway.sendValidated(f.nodeId, f.employeeId, randomUUID(), { type: 'project_run_start' })).toBe(false)
+  expect(frames).toHaveLength(2)
+  const closed = once(ws, 'close')
+  await f.gateway.closeExpiredConnections()
+  const [code, reason] = await closed
+  expect(code).toBe(1008)
+  expect(String(reason)).toBe('node_idle_expired')
+})
+
 test('reading at capacity leaves management slots available and queues reads in order', async () => {
   const f = await fixture({}, undefined, {
     rpc: { readConcurrency: 1, managementConcurrency: 1, maxQueued: 1, queueMs: 5000 },
