@@ -8,6 +8,7 @@ import { HttpError } from './transport'
 type ProjectAPI = Pick<
   BatonClient,
   | 'listProjects'
+  | 'getProject'
   | 'listProjectEntries'
   | 'listProjectMemory'
   | 'getMemoryStatus'
@@ -474,6 +475,7 @@ export function createProjectAPI(ctx: HttpContext): ProjectAPI {
     return readProject(id)
   }
   return {
+    getProject: readProject,
     async listProjects() {
       const all: ProjectDTO[] = []
       let after = ''

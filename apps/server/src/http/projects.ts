@@ -6,6 +6,7 @@ import * as Projects from '../project/projects.ts'
 import * as Memory from '../project/memory/index.ts'
 import * as Inbox from '../inbox.ts'
 import { decodeResponse, httpBusiness } from './security.ts'
+import type { HTTPOptions } from './options.ts'
 
 const current = <A, E, R>(operation: (employeeId: string) => Effect.Effect<A, E, R>) =>
   httpBusiness(
@@ -17,8 +18,12 @@ const current = <A, E, R>(operation: (employeeId: string) => Effect.Effect<A, E,
 const limit = (value?: string) => (value === undefined ? 50 : Number(value))
 const sequence = (value?: string) => (value === undefined ? 0 : Number(value))
 
-export const projectHttpHandlers = () =>
-  Layer.mergeAll(
+export const projectHttpHandlers = (options: HTTPOptions) => {
+  const changed = (employeeId: string, projectId: string) =>
+    Effect.sync(() =>
+      options.gateway().notify(employeeId, { type: 'project.changed', project_id: projectId, change: 'detail' }),
+    )
+  return Layer.mergeAll(
     HttpApiBuilder.group(BatonHttpApi, 'projects', (handlers) =>
       handlers
         .handle('list', ({ query }) =>
@@ -30,7 +35,10 @@ export const projectHttpHandlers = () =>
         )
         .handle('create', ({ payload }) =>
           current((employee) =>
-            Projects.createProject(employee, payload).pipe(Effect.flatMap(decodeResponse(P.Project))),
+            Projects.createProject(employee, payload).pipe(
+              Effect.tap((project) => changed(employee, project.id)),
+              Effect.flatMap(decodeResponse(P.Project)),
+            ),
           ),
         )
         .handle('get', ({ params }) =>
@@ -40,7 +48,10 @@ export const projectHttpHandlers = () =>
         )
         .handle('update', ({ params, payload }) =>
           current((employee) =>
-            Projects.patchProject(employee, params.projectId, payload).pipe(Effect.flatMap(decodeResponse(P.Project))),
+            Projects.patchProject(employee, params.projectId, payload).pipe(
+              Effect.tap(() => changed(employee, params.projectId)),
+              Effect.flatMap(decodeResponse(P.Project)),
+            ),
           ),
         )
         .handle('status', ({ params }) =>
@@ -62,6 +73,7 @@ export const projectHttpHandlers = () =>
         .handle('addMessage', ({ params, payload }) =>
           current((employee) =>
             Projects.acceptProjectMessage(employee, params.projectId, payload).pipe(
+              Effect.tap(() => changed(employee, params.projectId)),
               Effect.flatMap(decodeResponse(P.ProjectMessage)),
             ),
           ),
@@ -73,8 +85,20 @@ export const projectHttpHandlers = () =>
             ),
           ),
         )
-        .handle('stop', ({ params }) => current((employee) => Projects.stopProject(employee, params.projectId)))
-        .handle('retry', ({ params }) => current((employee) => Projects.retryProject(employee, params.projectId)))
+        .handle('stop', ({ params }) =>
+          current((employee) =>
+            Projects.stopProject(employee, params.projectId).pipe(
+              Effect.tap(() => changed(employee, params.projectId)),
+            ),
+          ),
+        )
+        .handle('retry', ({ params }) =>
+          current((employee) =>
+            Projects.retryProject(employee, params.projectId).pipe(
+              Effect.tap(() => changed(employee, params.projectId)),
+            ),
+          ),
+        )
         .handle('memory', ({ params, query }) =>
           current((employee) =>
             Memory.listProjectMemory(
@@ -117,6 +141,7 @@ export const projectHttpHandlers = () =>
         .handle('changeMemory', ({ params, payload }) =>
           current((employee) =>
             Memory.changeProjectMemory(employee, params.projectId, params.memoryId, payload).pipe(
+              Effect.tap(() => changed(employee, params.projectId)),
               Effect.flatMap(decodeResponse(P.ProjectMemory)),
             ),
           ),
@@ -131,6 +156,7 @@ export const projectHttpHandlers = () =>
         .handle('writeMemory', ({ params, payload }) =>
           current((employee) =>
             Memory.writeProjectMemory(employee, params.projectId, params.memoryId, payload).pipe(
+              Effect.tap(() => changed(employee, params.projectId)),
               Effect.flatMap(decodeResponse(P.ProjectMemory)),
             ),
           ),
@@ -162,6 +188,7 @@ export const projectHttpHandlers = () =>
         .handle('answer', ({ params, payload }) =>
           current((employee) =>
             Inbox.handleAttentionRequest(employee, params.requestId, payload).pipe(
+              Effect.tap((request) => changed(employee, request.project_id)),
               Effect.flatMap(decodeResponse(P.AttentionRequest)),
             ),
           ),
@@ -169,9 +196,11 @@ export const projectHttpHandlers = () =>
         .handle('close', ({ params, payload }) =>
           current((employee) =>
             Inbox.handleAttentionRequest(employee, params.requestId, payload, true).pipe(
+              Effect.tap((request) => changed(employee, request.project_id)),
               Effect.flatMap(decodeResponse(P.AttentionRequest)),
             ),
           ),
         ),
     ),
   )
+}

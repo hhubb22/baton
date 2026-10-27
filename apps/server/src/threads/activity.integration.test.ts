@@ -5,9 +5,11 @@ import * as P from '@baton/protocol'
 import { expect, it } from 'vite-plus/test'
 import { seedNode, withTestDatabase, type TestDatabase } from '../testing/database.ts'
 import * as threads from './index.ts'
+import { migrateDatabase } from '../database.ts'
 
 type Run = TestDatabase['run']
-const query = (text: string, ...args: string[]) => Effect.flatMap(SqlClient.SqlClient, (sql) => sql.unsafe(text, args))
+const query = <A extends object = Record<string, unknown>>(text: string, ...args: string[]) =>
+  Effect.flatMap(SqlClient.SqlClient, (sql) => sql.unsafe<A>(text, args))
 const credential = (run: Run, id: string) =>
   run(query('SELECT expires_at::text,last_business_at::text FROM node_credentials WHERE id=$1', id))
 const reset = async (run: Run, id: string) => {
@@ -144,6 +146,7 @@ it('requires a fresh connection-bound Worker status challenge for a long turn', 
     const [check] = (await run(threads.claimCommands())).filter((c) => c.body.action === 'check_activity')
     expect(check).toBeDefined()
     expect(await credential(run, f.credentialId)).toEqual(before)
+    expect((await run(threads.claimCommands())).filter((c) => c.body.action === 'check_activity')).toEqual([])
     const result: P.ThreadCommandResult = {
       ...f.receipt,
       activity_check_seq: check!.body.activity_check_seq!,
@@ -158,8 +161,25 @@ it('requires a fresh connection-bound Worker status challenge for a long turn', 
       ),
     ).rejects.toMatchObject({ code: 'activity_check_rejected' })
     expect(await credential(run, f.credentialId)).toEqual(before)
+    await run(
+      query(
+        `UPDATE thread_activity_probes SET checks=jsonb_set(checks,
+      ARRAY[$2,'issued_at'],to_jsonb(extract(epoch FROM clock_timestamp()-interval '31 seconds')))
+      WHERE thread_id=$1`,
+        f.thread.id,
+        String(result.activity_check_seq),
+      ),
+    )
+    const [nextCheck] = (await run(threads.claimCommands())).filter((c) => c.body.action === 'check_activity')
+    expect(nextCheck!.body.activity_check_seq).toBeGreaterThan(result.activity_check_seq!)
     await run(threads.processReceipt(f.source, check!.message_id, result))
     expect(await credential(run, f.credentialId)).not.toEqual(before)
+    await run(
+      threads.processReceipt(f.source, nextCheck!.message_id, {
+        ...result,
+        activity_check_seq: nextCheck!.body.activity_check_seq!,
+      }),
+    )
     const duplicate = await reset(run, f.credentialId)
     await run(threads.processReceipt(f.source, check!.message_id, result))
     expect(await credential(run, f.credentialId)).toEqual(duplicate)
@@ -168,10 +188,11 @@ it('requires a fresh connection-bound Worker status challenge for a long turn', 
       Effect.flatMap(
         SqlClient.SqlClient,
         (sql) => sql<{ check_seq: number }>`
-      INSERT INTO thread_events(employee_id,thread_id,kind,actor,actor_id,payload,created_at)
-      VALUES(${f.employeeId},${f.thread.id},'turn.activity_check','system',${f.nodeId},
-        ${JSON.stringify({ command_id: expiredCommand, conn_id: f.source.conn_id, worker_turn_seq: 1 })}::jsonb,
-        clock_timestamp()-interval '2 minutes') RETURNING id::float8 AS check_seq`,
+      WITH seq AS (SELECT nextval('thread_activity_check_seq') AS id)
+      UPDATE thread_activity_probes SET checks=checks || jsonb_build_object(seq.id::text,
+        ${JSON.stringify({ command_id: expiredCommand, conn_id: f.source.conn_id, worker_turn_seq: 1 })}::jsonb ||
+        jsonb_build_object('issued_at',extract(epoch FROM clock_timestamp()-interval '2 minutes')))
+      FROM seq WHERE thread_id=${f.thread.id} RETURNING seq.id::float8 AS check_seq`,
       ),
     )
     await expect(
@@ -188,4 +209,66 @@ it('requires a fresh connection-bound Worker status challenge for a long turn', 
       run(threads.processReceipt({ ...f.source, conn_id: 'new-connection' }, check!.message_id, result)),
     ).rejects.toMatchObject({ code: 'activity_check_rejected' })
     expect(await credential(run, f.credentialId)).toEqual(duplicate)
+    expect(
+      await run(query("SELECT id FROM thread_events WHERE kind IN ('turn.activity_check','turn.activity_checked')")),
+    ).toEqual([])
+  }))
+
+it('migrates live and acknowledged challenges without changing business history or message bodies', () =>
+  withTestDatabase(async ({ run }) => {
+    const f = await fixture(run)
+    const history = await run(query('SELECT * FROM thread_events ORDER BY id'))
+    const messages = await run(query('SELECT * FROM thread_messages ORDER BY id'))
+    await run(query('DROP TABLE thread_activity_probes'))
+    await run(query('DROP SEQUENCE thread_activity_check_seq'))
+    await run(query("DELETE FROM schema_migrations WHERE version='0008_thread_activity_probes.sql'"))
+    const commands = [randomUUID(), randomUUID(), randomUUID()]
+    const checks = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const rows: { check_seq: number }[] = []
+        for (const command of commands) {
+          const [row] = yield* sql<{
+            check_seq: number
+          }>`INSERT INTO thread_events(employee_id,thread_id,kind,actor,actor_id,payload)
+          VALUES(${f.employeeId},${f.thread.id},'turn.activity_check','system',${f.nodeId},
+            ${JSON.stringify({ command_id: command, conn_id: f.source.conn_id, worker_turn_seq: 1 })}::jsonb)
+          RETURNING id::float8 AS check_seq`
+          rows.push(row!)
+        }
+        return rows
+      }),
+    )
+    const result: P.ThreadCommandResult = {
+      ...f.receipt,
+      ok: false,
+      code: 'worker_unavailable',
+      activity_check_seq: checks[0]!.check_seq,
+    }
+    await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql`INSERT INTO thread_events(employee_id,thread_id,kind,actor,actor_id,payload)
+        VALUES(${f.employeeId},${f.thread.id},'turn.activity_checked','device',${f.nodeId},${JSON.stringify(result)}::jsonb)`
+      }),
+    )
+    await run(migrateDatabase())
+    expect(await run(query('SELECT * FROM thread_events ORDER BY id'))).toEqual(history)
+    expect(await run(query('SELECT * FROM thread_messages ORDER BY id'))).toEqual(messages)
+    const before = await credential(run, f.credentialId)
+    await run(threads.processReceipt(f.source, commands[0]!, result))
+    await run(threads.processReceipt(f.source, commands[2]!, { ...result, activity_check_seq: checks[2]!.check_seq }))
+    await expect(
+      run(threads.processReceipt(f.source, commands[1]!, { ...result, activity_check_seq: checks[1]!.check_seq })),
+    ).rejects.toMatchObject({ code: 'activity_check_rejected' })
+    expect(await credential(run, f.credentialId)).toEqual(before)
+    const [sequence] = await run(
+      query<{ value: number }>("SELECT nextval('thread_activity_check_seq')::float8 AS value"),
+    )
+    expect(sequence!.value).toBeGreaterThan(checks[2]!.check_seq)
+    await expect(
+      run(threads.processReceipt(f.source, commands[0]!, { ...result, code: 'different' })),
+    ).rejects.toMatchObject({ code: 'thread_conflict' })
+    expect(await run(query('SELECT thread_id FROM thread_activity_probes'))).toEqual([{ thread_id: f.thread.id }])
+    await expect(run(query('DELETE FROM thread_events'))).rejects.toBeDefined()
   }))

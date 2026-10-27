@@ -157,16 +157,24 @@ export const claimCommands = (): DB<ClaimedCommand[]> =>
         WHERE t.status='running' AND t.last_reported_at<clock_timestamp()-interval '30 seconds'
           AND EXISTS(SELECT 1 FROM thread_events e WHERE e.thread_id=t.id AND e.kind='turn.started'
             AND (e.payload->>'worker_turn_seq')::bigint=v.worker_turn_seq AND e.payload->>'execution_id' IS NOT NULL)
-          AND NOT EXISTS(SELECT 1 FROM thread_events e WHERE e.thread_id=t.id AND e.kind='turn.activity_check'
-            AND e.payload->>'conn_id'=p.conn_id AND e.created_at>clock_timestamp()-interval '30 seconds')
+          AND NOT EXISTS(SELECT 1 FROM thread_activity_probes a, jsonb_each(a.checks) c
+            WHERE a.thread_id=t.id AND c.value->>'conn_id'=p.conn_id
+              AND (c.value->>'issued_at')::numeric>extract(epoch FROM clock_timestamp()-interval '30 seconds'))
         ORDER BY t.last_reported_at,t.id LIMIT 8 FOR UPDATE OF t SKIP LOCKED`
       for (const { thread: t, conn_id, worker_turn_seq } of checks) {
         const message_id = uuid()
         const [check] = yield* sql<{
           check_seq: number
-        }>`INSERT INTO thread_events(employee_id,thread_id,kind,actor,actor_id,payload)
-          VALUES(${t.employee_id},${t.id},'turn.activity_check','system',${t.node_id},
-            ${JSON.stringify({ command_id: message_id, conn_id, worker_turn_seq })}::jsonb) RETURNING id::float8 AS check_seq`
+        }>`SELECT nextval('thread_activity_check_seq')::float8 AS check_seq`
+        // 只保留 60 秒内的 challenge；重叠的核查在较新核查确认前仍可接受。
+        yield* sql`INSERT INTO thread_activity_probes(employee_id,thread_id,checks)
+          VALUES(${t.employee_id},${t.id},jsonb_build_object(${String(check!.check_seq)}::text,
+            ${JSON.stringify({ command_id: message_id, conn_id, worker_turn_seq })}::jsonb ||
+              jsonb_build_object('issued_at',extract(epoch FROM clock_timestamp()))))
+          ON CONFLICT(thread_id) DO UPDATE SET checks=COALESCE((
+            SELECT jsonb_object_agg(c.key,c.value) FROM jsonb_each(thread_activity_probes.checks) c
+            WHERE (c.value->>'issued_at')::numeric>extract(epoch FROM clock_timestamp()-interval '60 seconds')
+          ),'{}'::jsonb) || EXCLUDED.checks`
         commands.push({
           message_id,
           node_id: t.node_id,
@@ -198,21 +206,22 @@ export const processReceipt = (
       if (t.node_id !== source.node_id) return yield* Effect.fail(failure('not_found', 404))
       yield* revalidateNodeSource(source)
       if (result.activity_check_seq !== undefined) {
-        const [check] = yield* sql<{ payload: { worker_turn_seq: number } }>`SELECT payload FROM thread_events
-          WHERE id=${result.activity_check_seq} AND thread_id=${t.id} AND employee_id=${source.employee_id}
-            AND kind='turn.activity_check' AND payload->>'command_id'=${correlationCommandID}
-            AND payload->>'conn_id'=${source.conn_id} AND created_at>clock_timestamp()-interval '60 seconds'`
+        const checkKey = String(result.activity_check_seq)
+        const [check] = yield* sql<{
+          payload: { worker_turn_seq: number; result?: ThreadCommandResult }
+          acknowledged_seq: number
+        }>`SELECT checks->${checkKey} AS payload,acknowledged_seq::float8 AS acknowledged_seq
+          FROM thread_activity_probes WHERE thread_id=${t.id} AND employee_id=${source.employee_id}
+            AND checks->${checkKey}->>'command_id'=${correlationCommandID}
+            AND checks->${checkKey}->>'conn_id'=${source.conn_id}
+            AND (checks->${checkKey}->>'issued_at')::numeric>extract(epoch FROM clock_timestamp()-interval '60 seconds')`
         if (!check) return yield* Effect.fail(failure('activity_check_rejected'))
-        const [old] = yield* sql<{ payload: ThreadCommandResult }>`SELECT payload FROM thread_events
-          WHERE thread_id=${t.id} AND kind='turn.activity_checked'
-            AND (payload->>'activity_check_seq')::bigint=${result.activity_check_seq}`
-        if (old) {
-          if (canonical(old.payload) !== canonical(result)) return yield* Effect.fail(failure())
+        if (check.payload.result) {
+          if (canonical(check.payload.result) !== canonical(result)) return yield* Effect.fail(failure())
           return
         }
-        const newer = yield* sql`SELECT id FROM thread_events WHERE thread_id=${t.id} AND kind='turn.activity_checked'
-          AND (payload->>'activity_check_seq')::bigint>${result.activity_check_seq}`
-        if (newer.length) return yield* Effect.fail(failure('activity_check_rejected'))
+        if (check.acknowledged_seq > result.activity_check_seq)
+          return yield* Effect.fail(failure('activity_check_rejected'))
         if (result.ok) {
           const active = result.active_turn
           if (
@@ -227,7 +236,10 @@ export const processReceipt = (
             WHERE v.thread_id=${t.id} AND v.worker_turn_seq=${active.worker_turn_seq} AND v.ended_at IS NULL`
           if (!turns.length) return yield* Effect.fail(failure('activity_check_rejected'))
         }
-        yield* audit(t, 'turn.activity_checked', result, 'device', source.node_id)
+        yield* sql`UPDATE thread_activity_probes SET
+          checks=jsonb_set(checks,ARRAY[${checkKey}],checks->${checkKey} || jsonb_build_object(
+            'result',${JSON.stringify(result)}::jsonb,'acknowledged_at',extract(epoch FROM clock_timestamp()))),
+          acknowledged_seq=${result.activity_check_seq} WHERE thread_id=${t.id}`
         if (result.ok) yield* recordNodeBusiness(source)
         else yield* revalidateNodeSource(source)
         return

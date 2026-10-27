@@ -73,6 +73,7 @@ describe('identity storage on local PostgreSQL', () => {
       '0005_thread_settings.sql',
       '0006_thread_answers.sql',
       '0007_thread_turn_items.sql',
+      '0008_thread_activity_probes.sql',
     ])
     const names = await run(query<{ current: string }>('SELECT current_schema() AS current'))
     expect(names[0].current).toBe(schema)
@@ -112,6 +113,11 @@ describe('identity storage on local PostgreSQL', () => {
         'utf8',
       )
       await writeFile(join(directory, '0007_thread_turn_items.sql'), threadItems)
+      const activityProbes = await readFile(
+        new URL('../../../migrations/0008_thread_activity_probes.sql', import.meta.url),
+        'utf8',
+      )
+      await writeFile(join(directory, '0008_thread_activity_probes.sql'), activityProbes)
       const checksums = await run(
         query<{ version: string; checksum: string }>(
           'SELECT version, checksum FROM schema_migrations ORDER BY version',
@@ -143,10 +149,10 @@ describe('identity storage on local PostgreSQL', () => {
         ]),
       )
       await writeFile(
-        join(directory, '0008_ordered.sql'),
+        join(directory, '0009_ordered.sql'),
         "CREATE TABLE migration_order (position integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY, step text NOT NULL); INSERT INTO migration_order(step) VALUES ('first');",
       )
-      await writeFile(join(directory, '0009_ordered.sql'), "INSERT INTO migration_order(step) VALUES ('second');")
+      await writeFile(join(directory, '0010_ordered.sql'), "INSERT INTO migration_order(step) VALUES ('second');")
       await run(migrateDatabase(directory))
       const versions = await run(
         query<{ version: string; applied_at: string }>(
@@ -155,8 +161,8 @@ describe('identity storage on local PostgreSQL', () => {
       )
       expect(versions.map((row) => row.version)).toEqual([
         ...rows.map((row) => row.version),
-        '0008_ordered.sql',
         '0009_ordered.sql',
+        '0010_ordered.sql',
       ])
       await Promise.all([run(migrateDatabase(directory)), run(migrateDatabase(directory))])
       expect(await run(query('SELECT step FROM migration_order ORDER BY position'))).toEqual([
@@ -166,7 +172,7 @@ describe('identity storage on local PostgreSQL', () => {
       expect(await run(query('SELECT version, applied_at::text FROM schema_migrations ORDER BY version'))).toEqual(
         versions,
       )
-      await writeFile(join(directory, '0010_rollback.sql'), 'CREATE TABLE migration_rollback (id int); SELECT 1/0;')
+      await writeFile(join(directory, '0011_rollback.sql'), 'CREATE TABLE migration_rollback (id int); SELECT 1/0;')
       await expect(run(migrateDatabase(directory))).rejects.toMatchObject({ code: 'unavailable' })
       const rolledBack = await run(
         query<{ exists: boolean }>(
@@ -177,7 +183,7 @@ describe('identity storage on local PostgreSQL', () => {
       )
       expect(rolledBack[0].exists).toBe(false)
       expect(
-        await run(query('SELECT version FROM schema_migrations WHERE version=$1', ['0010_rollback.sql'])),
+        await run(query('SELECT version FROM schema_migrations WHERE version=$1', ['0011_rollback.sql'])),
       ).toHaveLength(0)
     } finally {
       await rm(directory, { recursive: true, force: true })

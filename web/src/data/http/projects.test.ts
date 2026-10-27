@@ -134,6 +134,15 @@ beforeEach(async () => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('Project and Inbox DTO mapping', () => {
+  it('reads one project and its status without listing or enriching unrelated projects', async () => {
+    const f = setup([
+      { path: base, response: project },
+      { path: `${base}/status`, response: status },
+    ])
+    expect(await f.api.getProject(projectId)).toMatchObject({ id: projectId, name: 'Baton' })
+    f.done()
+  })
+
   it('maps the runtime provider, placement reason and current preview', () => {
     expect(mapProject(project, { ...status, state: 'waiting', waiting_reason: 'login_required' })).toMatchObject({
       name: 'Baton',

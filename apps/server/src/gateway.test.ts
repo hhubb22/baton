@@ -4,7 +4,7 @@ import { once } from 'node:events'
 import { Option, Schema, Tracer } from 'effect'
 import { traceParent } from '@baton/telemetry'
 import { afterEach, expect, test, vi } from 'vite-plus/test'
-import type { SessionResult } from '@baton/protocol'
+import type { BrowserEvent, SessionResult } from '@baton/protocol'
 import { WebSocket } from 'ws'
 import { AppError, type NodeSource } from './errors.ts'
 import { webSocketText, Gateway, type GatewayHandlers, type GatewayOptions } from './gateway.ts'
@@ -593,6 +593,40 @@ test('browser output uses the public event type and rejects another employee Thr
   const closed = once(browser, 'close')
   browser.send(JSON.stringify({ thread_id: randomUUID() }))
   expect((await closed)[0]).toBe(1008)
+})
+
+test('queued notifications retain different entities and coalesce repeated changes to the same entity', async () => {
+  const authorization = Promise.withResolvers<void>()
+  let hold = false
+  const f = await fixture({
+    browser: async () => {
+      if (hold) await authorization.promise
+      return 'employee'
+    },
+  })
+  cleanups.push(async () => authorization.resolve())
+  const browser = new WebSocket(`${f.base}/api/v1/events`, {
+    headers: { Origin: 'https://baton.local', Cookie: 'owner' },
+  })
+  const frames: Array<Record<string, unknown>> = []
+  browser.on('message', (data) => frames.push(JSON.parse(webSocketText(data)) as Record<string, unknown>))
+  await once(browser, 'open')
+  await expect.poll(() => frames[0]?.type).toBe('ready')
+  hold = true
+  const changes: BrowserEvent[] = [
+    { type: 'thread.changed', thread_id: randomUUID(), change: 'detail' },
+    { type: 'thread.changed', thread_id: randomUUID(), change: 'detail' },
+    { type: 'project.changed', project_id: randomUUID(), change: 'detail' },
+    { type: 'project.changed', project_id: randomUUID(), change: 'detail' },
+    { type: 'devices.changed', node_id: randomUUID(), report_version: 2 },
+    { type: 'devices.changed', node_id: randomUUID(), report_version: 3 },
+    { type: 'nodes.changed', node_id: randomUUID() },
+    { type: 'nodes.changed', node_id: randomUUID() },
+  ]
+  for (const change of [...changes, changes[0]]) f.gateway.notify('employee', change)
+  f.gateway.notify('another-employee', { type: 'thread.changed', thread_id: randomUUID(), change: 'detail' })
+  authorization.resolve()
+  await expect.poll(() => frames.slice(1)).toEqual(changes)
 })
 
 test('an idle browser receives no events after its session is revoked', async () => {

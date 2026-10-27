@@ -23,7 +23,7 @@
 
 `src/index.ts` 保留包入口的公开导出名，包内代码直接导入所属领域模块。
 
-`http.ts` 另提供空 JSON 请求、全部 HTTP 查询参数、`ready`、`thread.changed`、`devices.changed`。查询参数保留 URL 上的字符串形式；HTTP handler 在校验后将其转换为业务数值。没有 JSON 正文的 204 响应不定义虚构的响应对象。
+`http.ts` 另提供空 JSON 请求、全部 HTTP 查询参数、`ready`、`thread.changed`、`project.changed`、`nodes.changed`、`devices.changed`。查询参数保留 URL 上的字符串形式；HTTP handler 在校验后将其转换为业务数值。没有 JSON 正文的 204 响应不定义虚构的响应对象。
 
 Worker IPC 包含认证、status、open/message/withdraw/resume/stop、settings、answer、pending/ack 和 session 输出读取，以及下述异步命令契约。Project Runtime 的 operation 包含启动与租约管理、事件读取与写入、输入认领、工具调用、压缩及结束确认。
 
@@ -75,6 +75,14 @@ withdraw 在撤回事实持久保存后以 succeeded 结束；已经无法撤回
 ## 设备能力与浏览器事件
 
 `RuntimeAgent` 正式保留 `reason`、`status` 和全部 capability，包括 `create`。reason 最多 1024 UTF-8 字节，拒绝 NUL、控制字符及常见 token/API key/Bearer/JWT 格式。生产者负责从诊断输出提取脱敏摘要；格式检查无法识别任意上下文中的秘密。完整报告仍受 64 KiB 限制。
+
+浏览器变更通知按员工发送，事件只提示重新读取已保存的数据：
+
+- `thread.changed` 携带 `thread_id: UUID` 和 `change: "detail"`，覆盖该 Thread 的列表摘要、详情、消息和报告。
+- `project.changed` 携带 `project_id: UUID` 和 `change: "detail"`，覆盖该 Project 的列表摘要、运行状态、消息、事件、事项和记忆。
+- `nodes.changed` 携带 `node_id: UUID`，用于节点同步及断线状态变化。浏览器刷新该节点及其关联 Thread、Project 的状态。
+
+中心发送的 Thread、Project 通知必须携带对象 ID；浏览器收到旧中心无 ID 的通知或无法判断通知范围时，退回全量刷新。通知队列按事件类型和对象 ID 合并，同一对象的重复提示可合并，不同对象的提示分别保留。Project Runtime 工具创建或修改 Thread 时同时通知该 Thread 和所属 Project；Thread 回执、报告与 HTTP 修改也通知所属 Project。
 
 `DevicesChanged` 的 wire 结构为：
 

@@ -24,6 +24,7 @@ let handle: (request: Request) => Promise<Response>
 let token = ''
 let csrf = ''
 let nodeId = ''
+const notifications: Array<{ employeeId: string; event: P.BrowserEvent }> = []
 let application: Effect.Success<ReturnType<typeof httpApplication>>
 let heldStarted: (() => void) | undefined
 const origin = 'https://baton.local'
@@ -92,7 +93,7 @@ beforeAll(async () => {
   await database.run(Nodes.syncNode(source, { display_name: 'Local node', system: 'linux', capabilities: [] }))
   const gateway: ReturnType<HTTPOptions['gateway']> = {
     disconnectBrowsers: () => {},
-    notify: () => {},
+    notify: (employeeId, event) => notifications.push({ employeeId, event }),
     disconnect: async (requestedNodeId) => {
       if (requestedNodeId === source.node_id) await database.run(Nodes.disconnectNode(source))
     },
@@ -461,6 +462,7 @@ it('serves SPA and assets with HEAD while enforcing real directory boundaries', 
 
 it('preserves Project and memory writes, conflict bodies and employee isolation through the HTTP contracts', async () => {
   await login(readyPassword, 'httpready')
+  notifications.length = 0
   const input = {
     client_project_id: randomUUID(),
     title: 'Local coordination',
@@ -472,12 +474,16 @@ it('preserves Project and memory writes, conflict bodies and employee isolation 
   expect(created.status).toBe(201)
   const project = Schema.decodeUnknownSync(P.Project)(await created.json())
   const path = `/api/v1/projects/${project.id}`
+  const projectEvent = { type: 'project.changed', project_id: project.id, change: 'detail' }
+  expect(notifications.map(({ event }) => event)).toEqual([projectEvent])
+  notifications.length = 0
   for (const field of ['provider', 'model']) {
     for (const invalid of ['invalid\nlabel', 'x'.repeat(1025)]) {
       expect((await request('/api/v1/projects', 'POST', { ...input, [field]: invalid })).status).toBe(400)
       expect((await request(path, 'PATCH', { [field]: invalid })).status).toBe(400)
     }
   }
+  expect(notifications).toEqual([])
   const replay = await request('/api/v1/projects', 'POST', input)
   expect(replay.status).toBe(201)
   expect(await replay.json()).toMatchObject({ id: project.id })
@@ -501,7 +507,27 @@ it('preserves Project and memory writes, conflict bodies and employee isolation 
     content: 'Inspect the first device',
     expected_revision: 0,
   }
+  notifications.length = 0
   expect((await request(memoryPath, 'PUT', memory)).status).toBe(200)
+  expect(notifications.map(({ event }) => event)).toEqual([projectEvent])
+  const threadId = randomUUID()
+  const { employee } = await login(readyPassword, 'httpready')
+  await database.run(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`INSERT INTO threads(id,employee_id,node_id,project_id,client_thread_id,request_hash,agent_type,working_directory,created_by,origin_conversation_id,origin_tool_call_id)
+      SELECT ${threadId},${employee.id},${nodeId},${project.id},${threadId},${Buffer.alloc(32)},'cursor','/work','project_agent',c.id,${threadId}
+      FROM conversations c JOIN project_agents a ON a.id=c.agent_id WHERE a.project_id=${project.id}`
+    }),
+  )
+  notifications.length = 0
+  expect(
+    (await request(`/api/v1/threads/${threadId}/settings`, 'PATCH', { execution_timeout_seconds: 60 })).status,
+  ).toBe(200)
+  expect(notifications).toEqual([
+    { employeeId: employee.id, event: { type: 'thread.changed', thread_id: threadId, change: 'detail' } },
+    { employeeId: employee.id, event: projectEvent },
+  ])
   const conflict = await request(memoryPath, 'PUT', {
     ...memory,
     operation_id: randomUUID(),

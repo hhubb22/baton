@@ -184,6 +184,7 @@ Windows 第一版按账本保存的 PID 与创建时间核对身份，再用 `ta
 | `thread_replies` | 回复：Thread、Turn、`worker_seq`、正文、截断标记与原字节数、附件 JSON、元数据（shell 的退出码） |
 | `thread_turn_items` | 过程项：Thread、Turn、`item_id`、`worker_seq`、`ordinal`、父项、类型、状态、标题、开始与结束时间、`data` JSON（编码后 ≤ 192 KiB）、截断标记与原字节数、完整输出引用 |
 | `thread_events` | 只追加的审计事件：新建、消息接受、停止请求、归档、状态变化，附操作者与时间（R-23） |
+| `thread_activity_probes` | 每个 Thread 一行的短期探活状态，保存 60 秒有效期内的 challenge、命令和连接身份、Turn、发出时间及确认结果；后续探活清除过期 challenge |
 | `thread_outbox` | open、message、withdraw、stop、resume、settings、answer 的下行命令意图；下一次尝试时间、尝试次数、接收确认与完成结果 |
 | Project 相关表 | 见 Project Agent TECH 与 Agent Inbox TECH |
 
@@ -372,7 +373,7 @@ URL 相对 `/api/v1`。读取检查员工会话与资源归属，写入另检查
 
 Thread 列表摘要在一次 SQL 查询中读取。`title` 取首条已接受消息的首行，最多 120 个 Unicode 字符；为空时依次使用工作目录和 Thread ID。`current_turn` 为未结束的 Turn，`stop_canceled` 为最近一次停止或归档请求之后的单条消息撤回事件数，无请求时为 0。浏览器刷新列表只请求列表分页，打开会话后才读取对应的详情和 timeline。
 
-浏览器 WebSocket 接受 `{thread_id, cursor?}` 订阅，发送 `thread.changed` 和 `thread.output`；每个连接订阅一个 Thread，新订阅替换旧订阅，`{thread_id:""}` 取消输出订阅并保留连接。Thread 的历史与输出复用 `session.request`，其中 `session_id` 为 Thread ID；正文不持久化，历史响应为 `Cache-Control: no-store`。
+浏览器 WebSocket 接受 `{thread_id, cursor?}` 订阅，发送带 `thread_id` 的 `thread.changed`、带 `project_id` 的 `project.changed` 和 `thread.output`。对象变更事件的 `change: 'detail'` 表示刷新该对象及其列表摘要、消息和报告；网页按对象 ID 更新，缺少 ID 或无法识别变更类型时全量刷新。节点同步和断线发送带 `node_id` 的 `nodes.changed`，设备能力报告发送带 `node_id` 和 `report_version` 的 `devices.changed`。Gateway 按事件类型与对象 ID 合并通知，避免不同对象的更新互相覆盖。每个连接订阅一个 Thread 的输出，新订阅替换旧订阅，`{thread_id:""}` 取消输出订阅并保留连接。Thread 的历史与输出复用 `session.request`，其中 `session_id` 为 Thread ID；正文不持久化，历史响应为 `Cache-Control: no-store`。
 
 错误对象为 `{code, message, request_id, details?}`；`details` 不回传凭据和完整工具输出。
 
@@ -436,7 +437,7 @@ TS 中心的控制操作分别计算排队和执行预算。默认排队 2 秒�
 
 R-02 的活动在业务入口按固定种类认定，调用方不能通过布尔字段自行声明活跃。一次新命令的持久接收、新的 Worker 报告、Project 前台 `claim_inputs` / 工具请求，以及用户主动设备请求的成功响应可以延长期限。设备报告、轮询与文件分页须携带可关联的操作身份；自动刷新不生成可续期的用户操作。相同命令、事件、请求或分片重试只返回原结果，失败和重复投递不延长。网页的文件与目录读取按用户打开、翻页或重试发起；中心状态轮询与设备能力通知不自动重发设备读取，设备离线时直接隐藏已取回的正文。
 
-中心仍活跃的业务采用有界存活证据：前台 Project 的首次 `started` 以及有效宿主续租可算活动；宿主先核对 Runtime PID 与创建时间，再发送递增 `host_check_seq`，中心在 `agent_runs` 保存已接受序号，重复序号不续期。Thread 缺少新报告 30 秒后，中心发送绑定当前连接、命令 ID 和 Turn 的 `check_activity`，以事件序号作为 `activity_check_seq`，有效期 60 秒。daemon 在现有 1 秒预算内查询认证 Worker status，Worker 回显核查序号、当前 Turn 和实际执行 ID；中心核对 `turn.started` 中的执行身份、未结束 Turn、存储代次及去重事实后续期。仅中心存有 `running`、节点仅发心跳、陈旧 status 或后台 memory claim 均不足以续期。设备离线期间中心不依据过去的执行中状态延长期限。
+中心仍活跃的业务采用有界存活证据：前台 Project 的首次 `started` 以及有效宿主续租可算活动；宿主先核对 Runtime PID 与创建时间，再发送递增 `host_check_seq`，中心在 `agent_runs` 保存已接受序号，重复序号不续期。Thread 缺少新报告 30 秒后，中心发送绑定当前连接、命令 ID 和 Turn 的 `check_activity`，以专用递增序列作为 `activity_check_seq`，有效期 60 秒。challenge 和确认结果存入 `thread_activity_probes`，不写入审计时间线；同一连接 30 秒内不重复发出探活，有效期内重叠的 challenge 在较新的核查确认前仍可接受。已确认的相同回执幂等，内容不同则冲突。迁移保留仍有效的旧 challenge 和确认结果，并清除两类探活审计事件。daemon 在现有 1 秒预算内查询认证 Worker status，Worker 回显核查序号、当前 Turn 和实际执行 ID；中心核对 `turn.started` 中的执行身份、未结束 Turn、存储代次及去重事实后续期。仅中心存有 `running`、节点仅发心跳、陈旧 status 或后台 memory claim 均不足以续期。设备离线期间中心不依据过去的执行中状态延长期限。
 
 允许活动的事务遵循入口既有锁顺序：Node → Credential → Presence 的相对顺序不变，Project 请求先取得既有 Agent 锁。需要延长期限的入口首次取得 Node 与 Credential 时即使用写锁，避免持有共享锁后同时升级锁造成竞争。取得全部相关锁后再次校验原闲置期限和来源，再保存首次业务事实与新的 `last_business_at`、`expires_at`。锁等待跨过期限则拒绝，不能先延长再授权。多个新业务串行按当前行更新，以 `GREATEST` 保证期限不被较早结果缩短。复用已有报告去重和命令回执判定，不把重复 ACK 当作新活动。有效存活核查也必须在旧期限内提交。
 
