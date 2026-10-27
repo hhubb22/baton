@@ -360,7 +360,57 @@ it('preserves Project and memory writes, conflict bodies and employee isolation 
   expect(await (await request(`${memoryPath}/revisions`)).json()).toMatchObject({
     revisions: [{ revision: 1, title: memory.title, content: memory.content, author: 'user' }],
   })
+  const topicsPath = path + '/memory/topics'
+  const statusPath = path + '/memory/status'
+  expect(Schema.decodeUnknownSync(P.MemoryTopicsResponse)(await (await request(topicsPath)).json())).toMatchObject({
+    topics: [{ topic: '', item_count: 1, preview: [{ content: memory.content, revision: 1 }] }],
+    has_more: false,
+  })
+  expect(Schema.decodeUnknownSync(P.MemoryWorkStatus)(await (await request(statusPath)).json())).toEqual({
+    pending_batches: 0,
+    attention: [],
+    jobs: [],
+    has_more: false,
+  })
+  const jobId = randomUUID()
+  await database.run(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`INSERT INTO project_memory_jobs(id,employee_id,project_id,conversation_id,kind,input_seq,through_seq,source_ids,cursor_index,cursor_offset,waiting_reason,last_error)
+      SELECT ${jobId},a.employee_id,a.project_id,c.id,'consolidation',1,2,ARRAY[gen_random_uuid(),gen_random_uuid()],1,12,'login_required','model_request_failed'
+      FROM project_agents a JOIN conversations c ON c.agent_id=a.id WHERE a.project_id=${project.id}`
+    }),
+  )
+  expect(Schema.decodeUnknownSync(P.MemoryWorkStatus)(await (await request(statusPath)).json())).toMatchObject({
+    pending_batches: 1,
+    attention: ['login_required'],
+    jobs: [
+      {
+        id: jobId,
+        state: 'pending',
+        input_seq: 1,
+        through_seq: 2,
+        cursor_index: 1,
+        cursor_offset: 12,
+        source_count: 2,
+        node_id: null,
+        node_name: null,
+        waiting_reason: 'login_required',
+        last_error: 'model_request_failed',
+      },
+    ],
+  })
   const savedMemory = Schema.decodeUnknownSync(P.ProjectMemory)(await (await request(memoryPath)).json())
+  expect(
+    (
+      await request(memoryPath + '/changes', 'POST', {
+        operation_id: randomUUID(),
+        expected_revision: 1,
+        action: 'retire',
+      })
+    ).status,
+  ).toBe(200)
+  expect(await (await request(topicsPath)).json()).toEqual({ topics: [], has_more: false })
   const sourcePath = path + '/memory/sources/' + savedMemory.evidence[0]!.source_id
   for (const query of ['max_bytes=abc', 'offset=abc', 'max_bytes=0', 'offset=-1', 'max_bytes=Infinity']) {
     expect((await request(sourcePath + '?' + query)).status).toBe(400)
@@ -376,7 +426,7 @@ it('preserves Project and memory writes, conflict bodies and employee isolation 
   expect((await request(`${path}/status`)).status).toBe(200)
   expect((await request(`${path}/events`)).status).toBe(200)
   await login('http-replacement-password-456')
-  for (const resource of [path, `${path}/messages`, memoryPath, `${memoryPath}/revisions`])
+  for (const resource of [path, `${path}/messages`, memoryPath, `${memoryPath}/revisions`, topicsPath, statusPath])
     expect((await request(resource)).status).toBe(404)
   expect((await request(path, 'PATCH', { title: 'Other employee' })).status).toBe(404)
   expect((await request(memoryPath, 'PUT', memory)).status).toBe(404)

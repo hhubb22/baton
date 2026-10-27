@@ -85,6 +85,41 @@ export const MemoriesResponse = Schema.Struct({
   next_after_id: Schema.optionalKey(Text),
 })
 export type MemoriesResponse = typeof MemoriesResponse.Type
+export const MemoryTopicsResponse = Schema.Struct({
+  topics: Schema.Array(
+    Schema.Struct({
+      topic: Text,
+      item_count: NonNegativeInteger,
+      preview: Schema.Array(Schema.Struct({ item_id: UUID, revision: Integer, content: Text })),
+    }),
+  ),
+  has_more: Schema.Boolean,
+})
+export type MemoryTopicsResponse = typeof MemoryTopicsResponse.Type
+export const MemoryWorkStatus = Schema.Struct({
+  pending_batches: NonNegativeInteger,
+  attention: Schema.Array(Schema.Literals(['login_required', 'credential_missing'])),
+  jobs: Schema.Array(
+    Schema.Struct({
+      id: UUID,
+      kind: Schema.Literals(['consolidation', 'embedding']),
+      state: Schema.Literals(['pending', 'claimed', 'running', 'completed', 'cancelled']),
+      input_seq: NonNegativeInteger,
+      through_seq: NonNegativeInteger,
+      cursor_index: NonNegativeInteger,
+      cursor_offset: NonNegativeInteger,
+      source_count: NonNegativeInteger,
+      node_id: Schema.NullOr(UUID),
+      node_name: Schema.NullOr(Text),
+      waiting_reason: Text,
+      last_error: Text,
+      attempts: NonNegativeInteger,
+      updated_at: Timestamp,
+    }),
+  ),
+  has_more: Schema.Boolean,
+})
+export type MemoryWorkStatus = typeof MemoryWorkStatus.Type
 export const MemoryRevision = ProjectMemory
 export type MemoryRevision = ProjectMemory
 export const MemoryRevisionsResponse = Schema.Struct({

@@ -261,7 +261,7 @@ Project 暂停或归档在 Agent 锁下撤销后台 claim 并登记 stop。暂�
 
 ### 员工 API
 
-沿用 `/api/v1/projects/:projectId/memory` 与员工认证、Origin、CSRF、强制改密和资源隔离。HTTP DTO 在同一 Effect HttpApi 声明中生成路由与 OpenAPI。归档只读检查放入公共变更入口。GET 列表、详情、修订、来源、PUT/POST changes 和 POST recall 已实现；topics 与 status HTTP 端点仍为 planned。列表 include_inactive=true 用于页面管理停用条目；默认列表和 memory.recall 只返回当前有效知识。分页数字在 HTTP Schema 内按安全整数和范围解码，来源按 UTF-8 字节分页。
+沿用 `/api/v1/projects/:projectId/memory` 与员工认证、Origin、CSRF、强制改密和资源隔离。HTTP DTO 在同一 Effect HttpApi 声明中生成路由与 OpenAPI。归档只读检查放入公共变更入口。GET 列表、详情、修订、来源、topics、status、PUT/POST changes 和 POST recall 已实现。topics 按当前有效条目分组，返回条目数及最多三个带 ID/修订的正文预览；最多返回 50 个主题并标明截断。status 返回未完成整理批次数、最近 50 个工作及截断标记，包含来源范围、分片游标、运行设备、等待原因与最近错误；需要登录和当前向量缺凭据单独汇总，不受工作列表截断影响。列表 include_inactive=true 用于页面管理停用条目；默认列表和 memory.recall 只返回当前有效知识。分页数字在 HTTP Schema 内按安全整数和范围解码，来源按 UTF-8 字节分页。
 
 | 路径 | 请求/响应要点 |
 | --- | --- |

@@ -86,6 +86,20 @@ export const projectHttpHandlers = () =>
             ).pipe(Effect.flatMap(decodeResponse(P.MemoriesResponse))),
           ),
         )
+        .handle('memoryTopics', ({ params }) =>
+          current((employee) =>
+            Memory.projectMemoryTopics(employee, params.projectId).pipe(
+              Effect.flatMap(decodeResponse(P.MemoryTopicsResponse)),
+            ),
+          ),
+        )
+        .handle('memoryStatus', ({ params }) =>
+          current((employee) =>
+            Memory.projectMemoryStatus(employee, params.projectId).pipe(
+              Effect.flatMap(decodeResponse(P.MemoryWorkStatus)),
+            ),
+          ),
+        )
         .handle('recallMemory', ({ params, payload }) =>
           current((employee) =>
             Memory.recallProjectMemory(employee, params.projectId, payload).pipe(

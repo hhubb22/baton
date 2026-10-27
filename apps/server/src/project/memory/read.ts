@@ -97,6 +97,68 @@ export const projectMemoryRevisions = (
     }),
   )
 
+export const projectMemoryTopics = (employeeId: string, projectId: string) =>
+  transaction(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* requireProject(employeeId, projectId)
+      const rows = yield* sql<P.MemoryTopicsResponse['topics'][number]>`
+      WITH current_items AS (
+        SELECT e.id,r.topic,r.revision,r.content,
+          row_number() OVER (PARTITION BY r.topic ORDER BY e.id) AS position
+        FROM project_memory_items e JOIN project_memory_revisions r
+          ON r.employee_id=e.employee_id AND r.project_id=e.project_id
+          AND r.item_id=e.id AND r.revision=e.current_revision
+        WHERE e.employee_id=${employeeId} AND e.project_id=${projectId} AND ${currentMemorySQL(sql)}
+      )
+      SELECT topic,count(*)::float8 AS item_count,
+        jsonb_agg(jsonb_build_object('item_id',id,'revision',revision,'content',left(content,240))
+          ORDER BY id) FILTER (WHERE position<=3) AS preview
+      FROM current_items GROUP BY topic ORDER BY topic COLLATE "C" LIMIT 51`
+      return { topics: rows.slice(0, 50), has_more: rows.length > 50 }
+    }),
+  )
+
+export const projectMemoryStatus = (employeeId: string, projectId: string) =>
+  transaction(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ`
+      yield* requireProject(employeeId, projectId)
+      const [summary] = yield* sql<{ pending_batches: number; login_required: boolean; credential_missing: boolean }>`
+      SELECT
+        (SELECT count(*)::float8 FROM project_memory_jobs WHERE employee_id=${employeeId}
+          AND project_id=${projectId} AND kind='consolidation' AND state IN ('pending','claimed','running')) AS pending_batches,
+        EXISTS(SELECT 1 FROM project_memory_jobs WHERE employee_id=${employeeId} AND project_id=${projectId}
+          AND state='pending' AND waiting_reason='login_required') AS login_required,
+        EXISTS(SELECT 1 FROM project_memory_embeddings v
+          JOIN project_memory_items e ON e.id=v.item_id AND e.employee_id=v.employee_id AND e.project_id=v.project_id
+          JOIN project_memory_revisions r ON r.item_id=e.id AND r.revision=e.current_revision
+            AND r.employee_id=e.employee_id AND r.project_id=e.project_id
+          JOIN projects p ON p.id=v.project_id AND p.employee_id=v.employee_id
+          WHERE v.employee_id=${employeeId} AND v.project_id=${projectId}
+            AND v.config_id::text=p.memory_embedding->>'config_id' AND v.revision=e.current_revision
+            AND v.state='pending' AND v.diagnostic='credential_missing' AND ${currentMemorySQL(sql)}) AS credential_missing`
+      const jobs = yield* sql<P.MemoryWorkStatus['jobs'][number]>`
+      SELECT j.id,j.kind,j.state,j.input_seq::float8 AS input_seq,j.through_seq::float8 AS through_seq,
+        j.cursor_index,j.cursor_offset,cardinality(j.source_ids) AS source_count,
+        n.id AS node_id,n.display_name AS node_name,j.waiting_reason,j.last_error,j.attempts,to_jsonb(j.updated_at) AS updated_at
+      FROM project_memory_jobs j LEFT JOIN agent_runs a ON a.id=j.attempt_id AND a.employee_id=j.employee_id
+        LEFT JOIN nodes n ON n.id=a.node_id AND n.employee_id=j.employee_id
+      WHERE j.employee_id=${employeeId} AND j.project_id=${projectId}
+      ORDER BY (j.state IN ('pending','claimed','running')) DESC,j.updated_at DESC,j.id LIMIT 51`
+      const attention: P.MemoryWorkStatus['attention'][number][] = []
+      if (summary!.login_required) attention.push('login_required')
+      if (summary!.credential_missing) attention.push('credential_missing')
+      return {
+        pending_batches: summary!.pending_batches,
+        attention,
+        jobs: jobs.slice(0, 50),
+        has_more: jobs.length > 50,
+      }
+    }),
+  )
+
 export const projectMemoryIndex = Effect.fnUntraced(function* (employeeId: string, projectId: string) {
   const sql = yield* SqlClient.SqlClient
   const rows = yield* sql<{
