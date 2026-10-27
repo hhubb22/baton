@@ -62,7 +62,14 @@ assistant 的 `message_end` 监听器先等待 `append_event` 提交，再按消
 
 ## 验收证据
 
-验证命令见 [AGENTS.md](../../AGENTS.md#常用构建与验证命令)，安装包检查见 [发布设计](../../specs/release/TECH.md)。
+Runtime 属于根 pnpm 工作区，依赖由根 `pnpm-lock.yaml` 和 catalog 管理。在仓库根目录执行 `pnpm install --frozen-lockfile --ignore-scripts`，随后运行：
+
+```sh
+pnpm --dir runtimes/project-agent test
+pnpm --dir runtimes/project-agent typecheck
+```
+
+测试使用根 Vitest 配置直接加载源码，CLI、恢复及 e2e 子进程使用 Runtime 包安装的 tsx loader。测试不读写 `dist/`，可与 `node tools/build.mjs` 同时运行；统一构建与 SEA 打包直接将 Runtime 源码编入 batond。`pnpm --dir runtimes/project-agent build` 可单独生成编译后的 CLI，`check` 与 `typecheck` 执行相同的类型检查。完整验证命令见 [AGENTS.md](../../AGENTS.md#常用构建与验证命令)，安装包检查见 [发布设计](../../specs/release/TECH.md)。
 
 测试包括请求前与收尾压缩、旧工具结果保护、前缀与签名复用、超限恢复、重复压缩、提交冲突与丢失回执、无效摘要拒绝、结尾表四种情况、部分工具已有结果、真实子进程在保存和工具事务前后被杀、失败屏障禁止工具执行、模型失败与超限输出、虚拟时钟下的 180 秒与 15 分钟边界、凭据文件的权限修复、属主、类型、符号链接、64 KiB 边界、缺失文件、原子替换与事务锁，以及无网络 probe。跨系统请求测试用超过 1 MiB 的历史验证分页和 provider 扩展字段的保留。
 

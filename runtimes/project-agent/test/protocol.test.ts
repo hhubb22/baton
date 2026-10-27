@@ -1,4 +1,4 @@
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { checkedRPC, eventMessage, RuntimeError, type Bootstrap, type Event, type Operation } from '../src/protocol.js'
 

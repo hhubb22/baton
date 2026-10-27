@@ -1,10 +1,12 @@
-import { test } from 'node:test'
+import { afterEach, test, vi } from 'vitest'
 import assert from 'node:assert/strict'
 import { fauxAssistantMessage, fauxToolCall, type TranscriptContext } from '@earendil-works/pi-ai'
 import { COMPACTION_INSTRUCTION, estimateMessages } from '../src/compaction.js'
 import { RUN_MS } from '../src/runtime.js'
 import { RuntimeError, type Event, type Request } from '../src/protocol.js'
 import { Backend, setup, input, assistant } from './fixture.js'
+
+afterEach(() => vi.restoreAllMocks())
 
 class ObservedBackend extends Backend {
   requests: Request[] = []
@@ -27,9 +29,11 @@ function history(rounds = 8): Event[] {
 const overflow = () => fauxAssistantMessage('', { stopReason: 'error', errorMessage: 'prompt is too long' })
 const summary = () => fauxAssistantMessage('保留用户要求与已完成的操作。')
 
-test('收尾摘要失败保留已完成回复，正常 finish 并留下诊断，下次可继续压缩', async (t) => {
+test('收尾摘要失败保留已完成回复，正常 finish 并留下诊断，下次可继续压缩', async () => {
   const warnings: unknown[][] = []
-  t.mock.method(console, 'warn', (...args: unknown[]) => warnings.push(args))
+  vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => {
+    warnings.push(args)
+  })
   const backend = new ObservedBackend()
   backend.events = history()
   const fixture = setup(
@@ -80,8 +84,8 @@ test('输出预算可提高到 32000 以上并受模型上限约束', async () =
   }
 })
 
-test('超量输出降低 token 预算并反馈容量，完整保存恢复结果，失败工具不执行', async (t) => {
-  t.mock.method(console, 'warn', () => {})
+test('超量输出降低 token 预算并反馈容量，完整保存恢复结果，失败工具不执行', async () => {
+  vi.spyOn(console, 'warn').mockImplementation(() => {})
   const backend = new ObservedBackend()
   const huge = () =>
     fauxAssistantMessage([
@@ -98,8 +102,8 @@ test('超量输出降低 token 预算并反馈容量，完整保存恢复结果�
   assert.equal(backend.calls.at(-1), 'finish')
 })
 
-test('持续超量输出有界结束，报告明确容量错误', async (t) => {
-  t.mock.method(console, 'warn', () => {})
+test('持续超量输出有界结束，报告明确容量错误', async () => {
+  vi.spyOn(console, 'warn').mockImplementation(() => {})
   const backend = new ObservedBackend()
   const fixture = setup(
     backend,
@@ -115,8 +119,8 @@ test('持续超量输出有界结束，报告明确容量错误', async (t) => {
   assert.equal(backend.events.length, 1)
 })
 
-test('输出预算造成工具参数截断时要求完整调用，原工具不执行', async (t) => {
-  t.mock.method(console, 'warn', () => {})
+test('输出预算造成工具参数截断时要求完整调用，原工具不执行', async () => {
+  vi.spyOn(console, 'warn').mockImplementation(() => {})
   const backend = new ObservedBackend()
   const fixture = setup(backend, [
     () => fauxAssistantMessage([fauxToolCall('threads.create', {}, { id: 'truncated' })], { stopReason: 'length' }),

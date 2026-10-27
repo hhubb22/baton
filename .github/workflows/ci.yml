@@ -45,9 +45,7 @@ jobs:
         with:
           node-version: '26.11.1'
           cache: pnpm
-          cache-dependency-path: |
-            pnpm-lock.yaml
-            runtimes/project-agent/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
       - name: Install workspace
         run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Workspace checks
@@ -61,8 +59,6 @@ jobs:
           node tools/build.mjs
       - name: Check package
         run: node tools/check-package.mjs bin
-      - name: Runtime tests
-        run: pnpm --dir runtimes/project-agent test
       - name: Web format
         run: pnpm --dir web format:check
       - name: Web lint

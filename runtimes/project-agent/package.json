@@ -9,7 +9,7 @@
     "./testing/memory-worker": "./test/memory-flow-worker.ts"
   },
   "engines": {
-    "node": ">=22.19.0"
+    "node": ">=26.0.0"
   },
   "bin": {
     "baton-project-runtime": "dist/project-agent/src/cli.js"
@@ -19,8 +19,10 @@
   ],
   "scripts": {
     "build": "node scripts/clean.mjs && tsc -p tsconfig.json",
-    "test": "pnpm build && node --import tsx --test test/*.test.ts",
-    "check": "tsc -p tsconfig.json --noEmit"
+    "test": "vp test run --config ../../vitest.config.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "vp lint .",
+    "check": "pnpm typecheck"
   },
   "dependencies": {
     "@baton/protocol": "workspace:*",
@@ -28,12 +30,14 @@
     "@earendil-works/pi-ai": "1.3.0",
     "proper-lockfile": "4.1.2",
     "openai": "7.19.0",
-    "effect": "4.0.6"
+    "effect": "catalog:"
   },
   "devDependencies": {
-    "@types/node": "24.10.1",
-    "tsx": "4.20.6",
-    "typescript": "5.9.3",
+    "@types/node": "catalog:",
+    "tsx": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:",
     "@types/proper-lockfile": "4.1.4"
   }
 }

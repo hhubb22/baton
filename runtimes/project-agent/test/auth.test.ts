@@ -1,4 +1,4 @@
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { mkdtemp, rm, stat, readFile, chmod } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -52,7 +52,7 @@ test('probe 只读本地凭据，不发网络请求、不刷新 OAuth、不输�
       assert.equal((await stat(dir)).mode & 0o777, 0o700)
       assert.equal((await stat(join(dir, 'openai-codex.json'))).mode & 0o777, 0o600)
     }
-    const child = spawnSync(process.execPath, ['dist/project-agent/src/cli.js', 'probe'], {
+    const child = spawnSync(process.execPath, ['--import', 'tsx', 'src/cli.ts', 'probe'], {
       env: {
         ...process.env,
         BATON_PROJECT_RUNTIME_DATA_DIR: dir,
@@ -160,7 +160,7 @@ test('API key CLI 从标准输入保存密钥，输出和 probe 不包含密钥'
   try {
     const env = { ...process.env, BATON_PROJECT_RUNTIME_DATA_DIR: dir, NODE_OPTIONS: '' }
     const cli = (args: string[], input?: string) =>
-      spawnSync(process.execPath, ['dist/project-agent/src/cli.js', ...args], {
+      spawnSync(process.execPath, ['--import', 'tsx', 'src/cli.ts', ...args], {
         env,
         input,
         encoding: 'utf8',
