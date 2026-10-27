@@ -15,6 +15,7 @@ import {
   registerEventSource,
   sourcePage,
   projectMemoryIndex,
+  searchProjectHistory,
 } from './memory/index.ts'
 import { createAgentAttention, getAttentionRequest, listProjectAttention, withdrawAttention } from '../inbox.ts'
 import * as threads from '../threads/index.ts'
@@ -686,15 +687,24 @@ const executeBusiness = Effect.fnUntraced(function* (
       const through = a.through_seq ?? c.assistantSeq
       if (through > c.assistantSeq || (a.after_seq ?? 0) > through)
         return yield* Effect.fail(new AppError(422, 'invalid_range'))
+      if (name === 'history.search')
+        return {
+          value: yield* page(
+            yield* searchProjectHistory(c.employeeId, c.projectId, c.conversationId, {
+              ...a,
+              through_seq: through,
+            }),
+            a,
+          ),
+        }
       const rows = yield* sql<{
         seq: number
         value: unknown
-        snippet: string
-      }>`SELECT seq::float8 AS seq,to_jsonb(e)-'employee_id' AS value,left(payload::text,512) AS snippet FROM conversation_events e WHERE employee_id=${c.employeeId} AND conversation_id=${c.conversationId} AND seq>${a.after_seq ?? 0} AND seq<=${through} AND (${a.query ?? ''}='' OR strpos(lower(payload::text),lower(${a.query ?? ''}))>0) ORDER BY seq LIMIT 20`
+      }>`SELECT seq::float8 AS seq,to_jsonb(e)-'employee_id' AS value FROM conversation_events e WHERE employee_id=${c.employeeId} AND conversation_id=${c.conversationId} AND seq>${a.after_seq ?? 0} AND seq<=${through} ORDER BY seq LIMIT 20`
       return {
         value: yield* page(
           {
-            events: rows.map((r) => (name === 'history.search' ? { seq: r.seq, snippet: r.snippet } : r.value)),
+            events: rows.map((r) => r.value),
             through_seq: through,
             next_after_seq: rows.at(-1)?.seq ?? a.after_seq ?? 0,
           },

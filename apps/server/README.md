@@ -57,7 +57,7 @@ Agent 的普通提问和 MCP 确认显示在 Thread 输入区上方，支持单�
 
 Thread 历史是中心保存的输入和回复，所有 Agent 格式相同。上游明确回合失败时，中心保存 `end_reason: failed`，安全原因随 `turn.ended` 报告的 `content` 保存在时间线事件中。输入保持 sent；没有排队消息时 Thread 回到 idle，有排队消息时继续 running 并执行下一条，沿用 `queue_empty` 规则。网页在对应回合显示 `<Agent> could not finish this reply` 和原因，原生会话与进程保留。运行时请求无法应答、事件流断开、发送结果无法确认、host 崩溃或连接丢失仍按 unknown 处理。
 
-网页时间线按事件游标分页读取这些记录，设备离线时仍可查看。在 Baton 之外继续同一原生会话产生的消息不会出现。`src/threads/` 拥有 Thread 的状态、回合和持久消息读取；`view`、`readTurns` 与 `trace` 接受 `{ employeeId, projectId? }`，指定 Project 时同时校验员工与 Project 归属。Project 工具 `threads.read` 读取同一份输入和回复，每个 Turn 的 `item_count` 为过程项数量，`token_usage` 保留上游用量 JSON。`history.read` 与 `history.search` 读取 Project 主对话已经保存在中心的事件，不访问设备。
+网页时间线按事件游标分页读取这些记录，设备离线时仍可查看。在 Baton 之外继续同一原生会话产生的消息不会出现。`src/threads/` 拥有 Thread 的状态、回合和持久消息读取；`view`、`readTurns` 与 `trace` 接受 `{ employeeId, projectId? }`，指定 Project 时同时校验员工与 Project 归属。Project 工具 `threads.read` 读取同一份输入和回复，每个 Turn 的 `item_count` 为过程项数量，`token_usage` 保留上游用量 JSON。`history.read` 按序号读取 Project 主对话已经保存在中心的事件；`history.search` 复用记忆来源词项索引，返回原序号、片段、来源字节范围及当前停用/纠正标识。两者均保留员工、Project 和已读序号边界，不访问设备。
 
 `turn.item` 按连续 Worker 报告序号写入 `thread_turn_items`；同一员工、Thread、Turn 和 `item_id` 的冲突保留首个版本，重复报告返回原 ACK。过程项不进入 Project 输入队列或 `thread_events`，时间线的 `turn.ended.payload.item_count` 保存该轮数量。`data` 和 Turn 的 `token_usage` 使用 PostgreSQL `json`，读取不经过 `jsonb` 转换，保留原文中的 NUL、孤立代理项转义和嵌套 null；用量正文只保存在 Turn 中，不重复写入时间线。中心不对过程正文脱敏，也不将正文导出到追踪。
 

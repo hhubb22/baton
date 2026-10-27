@@ -7,8 +7,98 @@ import { projectToolFixture, callProjectTool, waitForProjectTool } from '../test
 import { seedNode, withTestDatabase } from '../testing/database.ts'
 import { contextualRuntimeRequest as runtimeRequest } from '../testing/project-context.ts'
 import * as threads from '../threads/index.ts'
+import { changeProjectMemory, writeProjectMemory } from './memory/index.ts'
 
 const unpack = (result: { value: unknown }) => JSON.parse((result.value as { text: string }).text)
+
+it('searches indexed historical sources with suppression, sequence bounds and Project isolation', async () =>
+  withTestDatabase(async (db) => {
+    const { context: c, memoryEvidence } = await projectToolFixture(db)
+    const reference = memoryEvidence[0]!
+    await db.run(
+      runtimeRequest(c.source, {
+        type: 'project_runtime.request',
+        run_id: c.runId,
+        lease_epoch: c.leaseEpoch,
+        operation: 'append_event',
+        last_seq: 1,
+        client_event_id: randomUUID(),
+        payload: {
+          format: 'pi-ai/1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: '部署前执行 runBuildCheck，保留 /src/project_memory.ts。' }],
+          },
+        },
+      }),
+    )
+    const search = async (query: string, extra: Record<string, unknown> = {}) =>
+      unpack(
+        await db.run(
+          callProjectTool({ ...c, toolCallId: randomUUID() }, 'history.search', { query, through_seq: 2, ...extra }),
+        ),
+      )
+    expect((await search('run_build_check')).events).toMatchObject([
+      { seq: 2, snippet: expect.stringContaining('runBuildCheck') },
+    ])
+    expect((await search('部署')).events).toHaveLength(1)
+    expect((await search('run_build_check', { through_seq: 1 })).events).toEqual([])
+    expect((await search('run_build_check', { after_seq: 2 })).events).toEqual([])
+    const written = await db.run(
+      callProjectTool({ ...c, toolCallId: randomUUID() }, 'memory.remember', {
+        title: 'Database',
+        content: 'Use PostgreSQL',
+        evidence: memoryEvidence,
+      }),
+    )
+    const itemId = (written.value as { item_id: string }).item_id
+    const retired = await db.run(
+      changeProjectMemory(c.employeeId, c.projectId, itemId, {
+        operation_id: randomUUID(),
+        expected_revision: 1,
+        action: 'retire',
+      }),
+    )
+    expect(await search('POSTGRE_SQL')).toMatchObject({
+      events: [
+        {
+          seq: 1,
+          source: {
+            source_id: reference.source_id,
+            source_hash: reference.source_hash,
+            suppressed: true,
+            related_items: [{ item_id: itemId, status: 'retired', effective: false }],
+          },
+        },
+      ],
+      no_match: false,
+    })
+    await db.run(
+      changeProjectMemory(c.employeeId, c.projectId, itemId, {
+        operation_id: randomUUID(),
+        expected_revision: retired.revision,
+        action: 'restore',
+        suppression_id: retired.suppression_id!,
+      }),
+    )
+    expect((await search('PostgreSQL')).events[0].source.suppressed).toBe(false)
+    await db.run(
+      writeProjectMemory(c.employeeId, c.projectId, undefined, {
+        operation_id: randomUUID(),
+        expected_revision: 0,
+        title: 'Private edit',
+        content: 'manual-only-needle',
+      }),
+    )
+    expect((await search('manual-only-needle')).events).toEqual([])
+    const other = await projectToolFixture(db, { employeeId: c.employeeId, source: c.source })
+    const foreign = unpack(await db.run(callProjectTool(other.context, 'history.search', { query: 'run_build_check' })))
+    expect(foreign.events).toEqual([])
+    const read = unpack(
+      await db.run(callProjectTool({ ...c, toolCallId: randomUUID() }, 'history.read', { through_seq: 2 })),
+    )
+    expect(read.events.map((event: { seq: number }) => event.seq)).toEqual([1, 2])
+  }))
 
 it('executes Project tools, bounds read results, rejects unknown arguments and prevents cross-project thread access', async () =>
   withTestDatabase(async (db) => {
@@ -34,7 +124,7 @@ it('executes Project tools, bounds read results, rejects unknown arguments and p
       events: [{ seq: 1 }],
       through_seq: 1,
     })
-    expect(unpack(await call('history.search', { query: 'assistant', through_seq: 1 })).events).toHaveLength(1)
+    expect(unpack(await call('history.search', { query: 'PostgreSQL', through_seq: 1 })).events).toHaveLength(1)
     expect(unpack(await call('devices.list', {})).devices).toHaveLength(1)
     const created = await call('threads.create', {
       node_id: nodeId,

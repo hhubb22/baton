@@ -289,7 +289,7 @@ Project 暂停或归档在 Agent 锁下撤销后台 claim 并登记 stop。暂�
 | `embedding_query` | last_seq、input_seq、可选 query；返回 query、query_hash 与当前公开 Embedding 配置，不发模型请求 |
 | `prepare_context` | context_id、last_seq、input_seq、预算与可选的配置绑定查询向量；返回已保存的快照，超大内容通过分页读取 |
 
-恢复停用条目只由员工 API 或带用户明确恢复依据的前台操作执行；后台协议没有 restore。前台工具、名称映射、provider 回放与 UI 使用统一 DTO，不保留 memory.search/write 别名。history.search/read 保持原权限和序号边界，复用来源索引与抑制状态仍为 planned。
+恢复停用条目只由员工 API 或带用户明确恢复依据的前台操作执行；后台协议没有 restore。前台工具、名称映射、provider 回放与 UI 使用统一 DTO，不保留 memory.search/write 别名。history.search/read 保持原权限和序号边界。history.search 使用同一来源词项索引与查询规范化，按原始序号返回最多 20 个事件的命中片段，每个事件附一个来源的 ID、哈希、字节范围、抑制状态及关联条目的当前状态，并标明后续结果和查询截断；手动编辑、没有原始序号的来源和派生工具结果不进入历史搜索。history.read 继续按序号读取完整原始事件。来源状态读取与 memory.recall 共用同一函数。
 
 | 错误码 | 结果与调用方处理 |
 | --- | --- |
@@ -318,7 +318,7 @@ Project Agent 行为、技术设计及 Runtime/中心 README 描述当前手动�
 
 | 需求 | 设置与观察 | 失败条件 | 位置 | Status |
 | --- | --- | --- | --- | --- |
-| PM-01、04、08 | 跨员工/Project 读取、伪造证据、停用后重提取 | 越权、来源升级、旧值复活 | 中心 PostgreSQL 集成 | partial：员工/Project 隔离、来源角色与范围、停用/纠正后旧证据重放已验证；后台提案引用停用前的用户消息重提已停用断言时被拒绝 |
+| PM-01、04、08 | 跨员工/Project 读取、伪造证据、停用后重提取 | 越权、来源升级、旧值复活 | 中心 PostgreSQL 集成 | partial：员工/Project 隔离、来源角色与范围、停用/纠正后旧证据重放已验证；后台提案引用停用前的用户消息重提已停用断言时被拒绝；history.search 验证停用/恢复标识、来源范围、序号边界与同员工跨 Project 隔离 |
 | PM-02、05 | 最终回复登记、重复提交分片与完成游标 | 缺工作或重复知识 | 中心 PostgreSQL 集成 | partial：最终回复在 finish 前登记、重复提交返回同回执、逐条提案结果、无进展退避、context 引用与 background 作者、游标与知识持久化；Runtime 单测验证修订冲突后重新提取并以 final 提交；分片跳过与事务故障注入未单独验证 |
 | PM-06～09 | 时间变化、原始错误、条件并存、并发编辑 | 错误历史被视为事实，静默覆盖或自动恢复 | 变更单元测试 + 数据库集成 | partial：数据库验证冲突、去重、修订撤回、事实时间、显式恢复和历史 recall；后台并发编辑未单独验证 |
 | PM-10～12 | 固定中英语料、标识符、同义表达、候选截断 | 无排序、失效内容混入或未报告缺口 | 词法单测与中心固定语料集成 | verified：中英混合、技术路径、别名、长片段、候选截断和状态过滤；真实同义理解单独评估 |

@@ -5,7 +5,8 @@ import * as P from '@baton/protocol'
 import { transaction } from '../../database.ts'
 import { AppError } from '../../errors.ts'
 import { resultBytes } from '../tools.ts'
-import { currentMemorySQL, readProjectMemory, requireProject, memoryValiditySQL } from './read.ts'
+import { readProjectMemory, requireProject, memoryValiditySQL } from './read.ts'
+import { sourceSearchState } from './sources.ts'
 import { embeddingStatus } from './embeddings.ts'
 import { vectorCandidates } from './vectors.ts'
 import { queryTerms, SEARCH_VERSION, utf8Prefix, excerpt, type SearchFields } from './lexical.ts'
@@ -184,25 +185,12 @@ export const recall = Effect.fn('recallProjectMemory')(function* (
       }
       if (item.evidence.length > 1) result.result_truncated = true
     } else {
-      const [source] = yield* sql<{
-        source_hash: string
-        source_seq: number | null
-        role: string
-        suppressed: boolean
-      }>`SELECT s.source_hash,s.source_seq::float8 AS source_seq,s.role,EXISTS(SELECT 1 FROM project_memory_suppressions x WHERE x.employee_id=s.employee_id AND x.project_id=s.project_id AND x.released_at IS NULL AND EXISTS(SELECT 1 FROM jsonb_array_elements(x.evidence) v WHERE v->>'source_id'=s.id::text)) AS suppressed FROM project_memory_sources s WHERE s.employee_id=${employeeId} AND s.project_id=${projectId} AND s.id=${row.source_id}`
-      const related = yield* sql<{
-        item_id: string
-        status: P.ProjectMemory['status']
-        effective: boolean
-      }>`SELECT DISTINCT e.id AS item_id,e.status,(${currentMemorySQL(sql)}) AS effective FROM project_memory_evidence v JOIN project_memory_items e ON e.id=v.item_id JOIN project_memory_revisions r ON r.item_id=e.id AND r.revision=e.current_revision WHERE v.employee_id=${employeeId} AND v.project_id=${projectId} AND v.source_id=${row.source_id}`
       hit = {
         ...hit,
         source: {
-          source_id: row.source_id!,
+          ...(yield* sourceSearchState(employeeId, projectId, row.source_id!)),
           start_byte: row.start_byte,
           end_byte: row.end_byte,
-          ...source!,
-          related_items: related,
         },
       }
     }
@@ -264,6 +252,55 @@ export const recall = Effect.fn('recallProjectMemory')(function* (
   }
   return { ...result, entries, memory_refs: refs, no_match: ordered.length === 0 }
 })
+// 历史结果按原序号分页，只搜索已经登记的原文，排除手动编辑和派生工具结果。
+export const searchProjectHistory = Effect.fnUntraced(function* (
+  employeeId: string,
+  projectId: string,
+  conversationId: string,
+  input: { query?: string; after_seq?: number; through_seq: number },
+) {
+  const sql = yield* SqlClient.SqlClient
+  const query = queryTerms(input.query ?? '')
+  const tsquery = query.terms.map((t) => "'" + t.replaceAll('\\', '\\\\').replaceAll("'", "''") + "'").join(' | ')
+  const rows = yield* sql<{
+    seq: number
+    source_id: string
+    start_byte: number
+    end_byte: number
+    snippet: string
+  }>`SELECT DISTINCT ON (s.source_seq) s.source_seq::float8 AS seq,d.source_id,
+      d.start_byte::float8 AS start_byte,d.end_byte::float8 AS end_byte,d.snippet
+    FROM project_memory_search_documents d
+    JOIN project_memory_sources s ON s.id=d.source_id AND s.employee_id=d.employee_id AND s.project_id=d.project_id
+    JOIN conversation_events e ON e.employee_id=s.employee_id AND e.conversation_id=${conversationId} AND e.seq=s.source_seq
+    WHERE d.employee_id=${employeeId} AND d.project_id=${projectId}
+      AND s.source_seq>${input.after_seq ?? 0} AND s.source_seq<=${input.through_seq}
+      AND (${!input.query?.trim()} OR d.terms @@ ${tsquery}::tsquery)
+    ORDER BY s.source_seq,d.document_id LIMIT 21`
+  const events = yield* Effect.forEach(
+    rows.slice(0, 20),
+    Effect.fnUntraced(function* (row) {
+      return {
+        seq: row.seq,
+        snippet: row.snippet,
+        source: {
+          ...(yield* sourceSearchState(employeeId, projectId, row.source_id)),
+          start_byte: row.start_byte,
+          end_byte: row.end_byte,
+        },
+      }
+    }),
+  )
+  return {
+    events,
+    through_seq: input.through_seq,
+    next_after_seq: events.at(-1)?.seq ?? input.after_seq ?? 0,
+    has_more: rows.length > 20,
+    query_truncated: query.truncated,
+    no_match: events.length === 0,
+  }
+})
+
 export const recallProjectMemory = (employeeId: string, projectId: string, input: P.MemoryRecallInput) =>
   transaction(
     Effect.gen(function* () {
