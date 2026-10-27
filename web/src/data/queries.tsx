@@ -47,6 +47,7 @@ export const keys = {
   thread: (id: ID) => ['threads', 'detail', id] as const,
   messages: (threadId: ID) => ['messages', threadId] as const,
   inbox: ['inbox'] as const,
+  activity: ['activity'] as const,
   file: (deviceId: ID, path: string) => ['files', deviceId, path] as const,
   // 过程保存在中心，随消息更新，与设备连接状态无关。
   trace: (messageId: ID) => ['messages', 'trace', messageId] as const,
@@ -152,7 +153,9 @@ export function ClientProvider({ client, children }: { client: BatonClient; chil
 
   useEffect(
     () =>
-      client.subscribe(({ topics, target }) => {
+      client.subscribe(({ topics, target, browserEvent }) => {
+        if (browserEvent || target || topics.some((topic) => ['threads', 'inbox', 'projects'].includes(topic)))
+          void queryClient.invalidateQueries({ queryKey: keys.activity })
         if (target) {
           invalidateEntity(client, queryClient, target)
           return
@@ -252,6 +255,16 @@ export function useThread(threadId: ID) {
 export function useMessages(threadId: ID) {
   const client = useClient()
   return useQuery({ queryKey: keys.messages(threadId), queryFn: () => client.listMessages(threadId) })
+}
+
+export function useActivity() {
+  const client = useClient()
+  return useQuery({
+    queryKey: keys.activity,
+    queryFn: () => client.getActivity!(),
+    enabled: !!client.getActivity,
+    refetchOnMount: 'always',
+  })
 }
 
 export function useInbox() {

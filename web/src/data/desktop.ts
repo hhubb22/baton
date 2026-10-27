@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
+import type { BrowserNotification } from '@baton/protocol'
 import type { Device } from './types'
 
 // 网页只依赖 preload 的公开协议，不导入桌面进程代码。
@@ -13,9 +14,27 @@ export type DesktopStatus = (
   message?: string
 }
 
+export interface DesktopTarget {
+  thread_id?: string
+  project_id?: string
+  node_id?: string
+}
+
+export interface DesktopActivity {
+  running: number
+  waiting: number
+  threads: { id: string; title: string }[]
+}
+
 export interface DesktopBridge {
   protocol: 1
   version?: string
+  capabilities?: readonly { name: string; version: number }[]
+  notificationCursor?(scope: string): Promise<string | null>
+  deliverNotifications?(input: { scope: string; events: BrowserNotification[]; cursor: string | null }): Promise<void>
+  viewingThread?(threadId: string | null): Promise<void>
+  onOpenTarget?(callback: (target: DesktopTarget) => void): () => void
+  setActivity?(activity: DesktopActivity): Promise<void>
   status(): Promise<DesktopStatus>
   onStatus(callback: (status: DesktopStatus) => void): () => void
   enroll(input: { code: string; displayName?: string }): Promise<DesktopStatus>
@@ -29,6 +48,13 @@ declare global {
 }
 
 export const desktopBridge = () => (window.batonDesktop?.protocol === 1 ? window.batonDesktop : null)
+export function desktopCapability(name: 'notifications' | 'tray-status') {
+  const bridge = desktopBridge()
+  return bridge?.capabilities?.some((capability) => capability.name === name && capability.version === 1)
+    ? bridge
+    : null
+}
+
 const statusKey = ['desktop', 'status'] as const
 
 export function useDesktopStatus() {

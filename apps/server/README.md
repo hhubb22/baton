@@ -69,6 +69,12 @@ Project 工具 `threads.trace` 使用相同查询，参数为 `thread_id`、`wor
 
 浏览器通过 `/api/v1/events` 接收按员工隔离的刷新通知。`thread.changed` 携带 `thread_id`，`project.changed` 携带 `project_id`，两者的 `change: "detail"` 包含列表摘要和对应详情、消息、事件等变化。HTTP 写入、Project Runtime 工具和 Thread 回执、报告在成功保存后通知相关对象；Project 所属 Thread 的变化同时通知 Project。节点同步及断线使用携带 `node_id` 的 `nodes.changed`，设备能力报告继续使用带 `report_version` 的 `devices.changed`。Gateway 按事件类型和对象 ID 合并待发通知，保留不同对象的提示。浏览器收到旧格式或范围无法判断的通知时退回全量刷新。
 
+桌面通知复用 `BrowserEvent` 的 `notification` 事件，携带稳定的 `event_id`、员工内单调递增的十进制字符串 `cursor`、`kind`、对象 ID、标题和正文。问题、确认请求、回复结束、失败或异常停止，以及设备凭据吊销，在对应事实的同一事务中保存通知 intent；业务事务不获取通知游标锁，独立投递事务在提交后按员工分配游标，且不获取 Node 或 Project 锁；Project 后台记忆任务和员工主动停止不发通知。Gateway 在提交后发送，并按事件 ID 保留同一对象的不同通知。版本不兼容等本机连接拒绝由桌面客户端读取 batond 的持久状态处理。
+
+已登录员工通过 `GET /api/v1/events/replay?after=<cursor>&limit=100` 按序补读通知，响应为 `{events,cursor,has_more}`，每页最多 100 条。省略 `after` 时先为当前已提交的 intent 分配游标，再返回空事件列表和当前游标，供首次启动建立起点，后台随后投递这些历史通知也不会使客户端重复消费；传入游标后返回严格晚于该游标的已提交事件。游标按员工和中心隔离，不能超过当前员工已保存的最大值。客户端在 WebSocket ready、重连和通知到达后串行补读，持久保存处理进度；已通知、被聚焦规则抑制和关闭通知时消费的事件都应推进游标，重新加载时不会重新弹出。
+
+`GET /api/v1/activity` 从与网页相同的 Thread 和事项记录读取员工全部设备的状态。`running_count` 是 running Thread 数；`waiting_count` 是存在当前未回答问题或关联未处理 Agent 事项的非归档 Thread 数，同一 Thread 只计一次。没有关联 Thread 的 Project 问题照常通知，但不计入等待 Thread 数。`waiting_threads` 按最近活动排序，最多返回五个不同 Thread 的 ID、标题和可选 Project ID。
+
 实时输出由 Worker 保留当前 Turn 最近 256 KiB，每次读取最多 16 KiB，游标为 `epoch:字节偏移`。Turn 结束和切换时清空；淘汰、旧 epoch 或上游丢失输出时返回 `gap:true`。HTTP 输出查询和浏览器 WebSocket 复用设备临时 RPC，中心不持久化实时输出。
 
 ## Project 与设备管理

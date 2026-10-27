@@ -1,5 +1,6 @@
 import type { DownloadsResponse } from '@baton/protocol/http-api'
-import { ClientError, type BatonClient, type ChangeEvent, type Topic } from '../client'
+import type { ActivitySnapshot, BrowserEvent } from '@baton/protocol'
+import { ClientError, type BatonClient, type ChangeEvent, type NotificationReplay, type Topic } from '../client'
 import type { AgentKind, Device, Enrollment, Operation, OperationPhase, Session } from '../types'
 import type { HttpContext } from './context'
 import { apiPath, timestamp } from './context'
@@ -248,6 +249,9 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
       } catch {
         return
       }
+      if (message.type === 'ready' || message.type === 'notification') {
+        publish({ topics: [], browserEvent: message as BrowserEvent })
+      }
       if (message.type === 'ready') {
         output.setConnection((subscription) => {
           if (socket === next && next.readyState === 1) next.send(JSON.stringify(subscription))
@@ -323,6 +327,11 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
   return {
     mode: 'http',
     getDownloads: () => request<DownloadsResponse>('/downloads'),
+    getActivity: () => request<ActivitySnapshot>('/activity'),
+    replayNotifications: (after) =>
+      request<NotificationReplay>(
+        `/events/replay?limit=100${after === undefined ? '' : `&after=${encodeURIComponent(after)}`}`,
+      ),
     ...createThreadAPI(ctx, output),
     subscribeOutput: (id, listener) => output.subscribeOutput(id, listener),
     ...createProjectAPI(ctx),

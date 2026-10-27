@@ -1,4 +1,4 @@
-import type { MemoryWorkStatus } from '@baton/protocol'
+import type { ActivitySnapshot, BrowserEvent, BrowserNotification, MemoryWorkStatus } from '@baton/protocol'
 import type { DownloadsResponse } from '@baton/protocol/http-api'
 import type {
   AgentKind,
@@ -37,6 +37,13 @@ export type Topic = 'session' | 'devices' | 'projects' | 'threads' | 'messages' 
 export interface ChangeEvent {
   topics: Topic[]
   target?: { type: 'thread' | 'project'; id: ID }
+  browserEvent?: BrowserEvent
+}
+
+export interface NotificationReplay {
+  events: BrowserNotification[]
+  cursor: string
+  has_more: boolean
 }
 
 export class ClientError extends Error {
@@ -53,6 +60,8 @@ export class ClientError extends Error {
 export interface BatonClient {
   readonly mode?: 'http' | 'mock'
   getDownloads(): Promise<DownloadsResponse>
+  replayNotifications?(after?: string): Promise<NotificationReplay>
+  getActivity?(): Promise<ActivitySnapshot>
   getSession(): Promise<Session>
   signIn(username: string, password: string): Promise<Session>
   signOut(): Promise<void>

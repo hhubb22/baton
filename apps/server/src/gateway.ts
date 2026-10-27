@@ -706,13 +706,15 @@ export class Gateway {
   notify(employeeId: string, event: BrowserEvent): void {
     const key = JSON.stringify([
       event.type,
-      'thread_id' in event
-        ? event.thread_id
-        : 'project_id' in event
-          ? event.project_id
-          : 'node_id' in event
-            ? event.node_id
-            : '',
+      event.type === 'notification'
+        ? event.event_id
+        : 'thread_id' in event
+          ? event.thread_id
+          : 'project_id' in event
+            ? event.project_id
+            : 'node_id' in event
+              ? event.node_id
+              : '',
     ])
     for (const browser of this.browsers) {
       if (browser.employeeId !== employeeId || browser.socket.readyState !== WebSocket.OPEN) continue

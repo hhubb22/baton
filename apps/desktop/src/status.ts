@@ -57,6 +57,28 @@ export function mergeStatus(
   return { ...identity, state: supervisor.state, code: supervisor.code, message: supervisor.message }
 }
 
+export async function readDaemonRejection(
+  directory: string,
+  expectedPid: number | undefined,
+  startedAt = 0,
+): Promise<DaemonStatus | undefined> {
+  if (expectedPid === undefined) return undefined
+  try {
+    const status = Schema.decodeUnknownSync(DaemonStatus)(
+      JSON.parse(await readFile(join(directory, 'daemon-status.json'), 'utf8')),
+    )
+    return status.pid === expectedPid &&
+      Date.parse(status.updated_at) >= startedAt &&
+      status.state === 'rejected' &&
+      ['needs_reauth', 'node_version_incompatible'].includes(status.code ?? '')
+      ? status
+      : undefined
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code !== 'ENOENT') throw error
+    return undefined
+  }
+}
+
 export async function readDaemonStatus(
   directory: string,
   alive: (pid: number) => boolean = (pid) => {

@@ -35,6 +35,7 @@ export interface LoginSearch {
 
 export interface DevicesSearch {
   connect?: true
+  device?: string
 }
 
 export interface ThreadsSearch {
@@ -133,6 +134,7 @@ const routeTree = rootRoute.addChildren([
       // 带 connect 参数时打开接入窗口。
       validateSearch: (search: Record<string, unknown>): DevicesSearch => ({
         connect: flag(search.connect),
+        device: optionalString(search.device),
       }),
     }),
     createRoute({ getParentRoute: () => workspaceRoute, path: '/projects/archived', component: ArchivedProjectsPage }),

@@ -613,7 +613,19 @@ test('queued notifications retain different entities and coalesce repeated chang
   await once(browser, 'open')
   await expect.poll(() => frames[0]?.type).toBe('ready')
   hold = true
+  const threadId = randomUUID()
+  const notification = {
+    type: 'notification' as const,
+    event_id: randomUUID(),
+    cursor: '1',
+    kind: 'question' as const,
+    thread_id: threadId,
+    title: 'Work',
+    body: 'Which target?',
+  }
   const changes: BrowserEvent[] = [
+    notification,
+    { ...notification, event_id: randomUUID(), cursor: '2', kind: 'turn_ended' },
     { type: 'thread.changed', thread_id: randomUUID(), change: 'detail' },
     { type: 'thread.changed', thread_id: randomUUID(), change: 'detail' },
     { type: 'project.changed', project_id: randomUUID(), change: 'detail' },

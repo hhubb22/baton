@@ -40,7 +40,42 @@ export const DevicesChanged = Schema.Struct({
   report_version: NonNegativeInteger,
 })
 export type DevicesChanged = typeof DevicesChanged.Type
+export const NotificationCursor = Schema.String.check(
+  Schema.isPattern(/^(0|[1-9]\d{0,18})$/),
+  Schema.makeFilter((value) => value.length < 19 || (value.length === 19 && value <= '9223372036854775807')),
+)
+export const BrowserNotification = Schema.Struct({
+  type: Schema.Literal('notification'),
+  event_id: UUID,
+  cursor: NotificationCursor,
+  kind: Schema.Literals(['question', 'approval', 'turn_ended', 'turn_failed', 'turn_stopped', 'device_rejected']),
+  thread_id: Schema.optionalKey(UUID),
+  project_id: Schema.optionalKey(UUID),
+  node_id: Schema.optionalKey(UUID),
+  title: boundedText(4096),
+  body: boundedText(4096),
+})
+export type BrowserNotification = typeof BrowserNotification.Type
+export const NotificationReplay = Schema.Struct({
+  events: Schema.Array(BrowserNotification),
+  cursor: NotificationCursor,
+  has_more: Schema.Boolean,
+})
+export type NotificationReplay = typeof NotificationReplay.Type
+export const ActivitySnapshot = Schema.Struct({
+  running_count: NonNegativeInteger,
+  waiting_count: NonNegativeInteger,
+  waiting_threads: Schema.Array(
+    Schema.Struct({
+      thread_id: UUID,
+      title: boundedText(4096),
+      project_id: Schema.optionalKey(UUID),
+    }),
+  ),
+})
+export type ActivitySnapshot = typeof ActivitySnapshot.Type
 export const BrowserEvent = Schema.Union([
+  BrowserNotification,
   BrowserReady,
   BrowserThreadChanged,
   BrowserProjectChanged,
@@ -59,6 +94,10 @@ const decimal = (minimum: number, maximum: number) =>
     ),
   )
 const pageLimit = Schema.optionalKey(decimal(1, 100))
+export const NotificationReplayQuery = Schema.Struct({
+  after: Schema.optionalKey(NotificationCursor),
+  limit: pageLimit,
+})
 const afterID = Schema.optionalKey(UUID)
 const afterSequence = Schema.optionalKey(decimal(0, Number.MAX_SAFE_INTEGER))
 

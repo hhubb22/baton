@@ -15,6 +15,7 @@ import type { HTTPOptions } from './options.ts'
 import { disabledDownloads, type Downloads } from '../downloads.ts'
 import { AppError } from '../errors.ts'
 import { notifyThreadChanged } from '../notifications.ts'
+import { activitySnapshot, replayNotifications } from '../desktop-notifications.ts'
 import { projectHttpHandlers } from './projects.ts'
 import { readThreadOutput } from '../full-output.ts'
 import * as DeviceManagement from '../device-management.ts'
@@ -79,6 +80,22 @@ export const httpHandlers = (options: HTTPOptions, downloads?: Downloads) => {
     HttpApiBuilder.group(BatonHttpApi, 'account', (handlers) =>
       handlers
         .handle('me', () => CurrentBrowserSession)
+        .handle('replayNotifications', ({ query }) =>
+          httpBusiness(
+            Effect.gen(function* () {
+              const { employee } = yield* CurrentBrowserSession
+              return yield* replayNotifications(employee.id, query.after, Number(query.limit ?? 100))
+            }),
+          ),
+        )
+        .handle('activity', () =>
+          httpBusiness(
+            Effect.gen(function* () {
+              const { employee } = yield* CurrentBrowserSession
+              return yield* activitySnapshot(employee.id)
+            }),
+          ),
+        )
         .handle('logout', ({ request }) =>
           httpBusiness(
             Effect.gen(function* () {

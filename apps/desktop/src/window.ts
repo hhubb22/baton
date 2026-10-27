@@ -22,6 +22,7 @@ export function createWindow(directory: string, origin: string | undefined, vers
       preload: join(directory, 'preload.cjs'),
       contextIsolation: true,
       sandbox: true,
+      backgroundThrottling: false,
       nodeIntegration: false,
       webviewTag: false,
       additionalArguments: [`--baton-origin=${origin ?? ''}`, `--baton-version=${version}`],

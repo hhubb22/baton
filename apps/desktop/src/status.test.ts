@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vite-plus/test'
-import { mergeStatus, readDaemonStatus, type PublicIdentity } from './status.ts'
+import { mergeStatus, readDaemonStatus, readDaemonRejection, type PublicIdentity } from './status.ts'
 import { assertIdentityOrigin, authorizeBridge } from './bridge.ts'
 
 const identity: PublicIdentity = {
@@ -41,6 +41,26 @@ it('状态文件必须与活跃 daemon.lock 中的 PID 一致', async () => {
     expect(await readDaemonStatus(directory, () => false)).toBeUndefined()
     await writeFile(file, JSON.stringify({ pid: 43, token }))
     expect(await readDaemonStatus(directory, () => true)).toBeUndefined()
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+it('连接拒绝在 daemon 退出和释放锁后仍通知，只读取本次进程的事实', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'desktop-rejection-'))
+  try {
+    const rejected = {
+      ...online,
+      state: 'rejected',
+      code: 'node_version_incompatible',
+      message: 'Requires Baton 0.2.0',
+    }
+    await writeFile(join(directory, 'daemon-status.json'), JSON.stringify(rejected))
+    expect(await readDaemonStatus(directory, () => false)).toBeUndefined()
+    expect(await readDaemonRejection(directory, 42)).toEqual(rejected)
+    expect(await readDaemonRejection(directory, 43)).toBeUndefined()
+    expect(await readDaemonRejection(directory, undefined)).toBeUndefined()
+    expect(await readDaemonRejection(directory, 42, Date.parse(rejected.updated_at) + 1)).toBeUndefined()
   } finally {
     await rm(directory, { recursive: true, force: true })
   }

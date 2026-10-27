@@ -46,6 +46,14 @@ export function desktopConfig({
     extraResources: [
       { from: resolve(batond), to: 'batond', filter: ['**/*'] },
       { from: join(resolve(batond), 'node_modules'), to: 'batond/node_modules', filter: ['**/*'] },
+      ...(platform === 'darwin'
+        ? [
+            {
+              from: join(resolve(appDirectory), 'dist/notification-permission.node'),
+              to: 'notification-permission.node',
+            },
+          ]
+        : []),
     ],
     artifactName,
     asar: true,
@@ -155,6 +163,7 @@ export async function packageDesktop({
 
   run(process.execPath, ['../../tools/build/desktop.mjs'], { cwd: appDirectory })
   for (const name of ['main.cjs', 'preload.cjs', 'setup.html']) await requireFile(join(appDirectory, 'dist', name))
+  if (platform === 'darwin') await requireFile(join(appDirectory, 'dist', 'notification-permission.node'))
   await mkdir(output, { recursive: true })
   const artifacts = await builder({ appDirectory, config, platform, arch })
   const artifact = join(output, config.artifactName)

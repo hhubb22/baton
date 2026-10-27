@@ -4,6 +4,7 @@ import { text } from '../theme/text'
 import { colors, radius, size, space } from '../theme/tokens.stylex'
 import { IconButton } from '../ui/Button'
 import { useWorkspace } from './workspace'
+import { DesktopTargetNotice } from './DesktopWorkspace'
 
 // 工作区里浮在玻璃背景上的卡片：主内容和 Thread 详情面板共用。
 export const pane = stylex.create({
@@ -40,6 +41,7 @@ const styles = stylex.create({
   title: { flexShrink: 1, minWidth: 0 },
   spacer: { flexGrow: 1 },
   body: { flexGrow: 1, minHeight: 0, overflowY: 'auto' },
+  notice: { paddingBlock: space.md, paddingInline: space.xl, ':empty': { display: 'none' } },
   column: {
     display: 'flex',
     flexDirection: 'column',
@@ -79,7 +81,12 @@ export function Page({
         <span {...stylex.props(styles.spacer)} />
         {actions}
       </header>
-      <div {...stylex.props(styles.body)}>{children}</div>
+      <div {...stylex.props(styles.body)}>
+        <div {...stylex.props(styles.notice)}>
+          <DesktopTargetNotice />
+        </div>
+        {children}
+      </div>
     </section>
   )
 }

@@ -24,6 +24,7 @@ import type { DownloadsOptions } from './downloads.ts'
 import { createRevocationCompensator } from './control-maintenance.ts'
 import { cookieToken, httpApplication } from './http/index.ts'
 import { notifyThreadChanged } from './notifications.ts'
+import { claimNotificationBroadcasts } from './desktop-notifications.ts'
 
 export interface ServerOptions {
   readonly host?: string
@@ -252,6 +253,19 @@ export const startServer = (
           controller.abort()
         }),
     )
+    let broadcasting = false
+    const broadcastNotifications = async () => {
+      if (broadcasting || controller.signal.aborted) return
+      broadcasting = true
+      try {
+        const rows = await run('dispatch', claimNotificationBroadcasts())
+        for (const row of rows) gateway.notify(row.employee_id, row.event)
+      } catch {
+        // The replay endpoint retains committed events through transport or database failures.
+      } finally {
+        broadcasting = false
+      }
+    }
     let dispatching = false
     const dispatch = async () => {
       if (dispatching || controller.signal.aborted) return
@@ -323,6 +337,7 @@ export const startServer = (
     ]
     const timer = setInterval(() => {
       void dispatch()
+      void broadcastNotifications()
     }, options.dispatchMs ?? 200)
     const compensate = createRevocationCompensator(
       (effect) => run('maintenance', effect),
@@ -358,6 +373,7 @@ export const startServer = (
     )
     void maintain()
     void dispatch()
+    void broadcastNotifications()
     void placeProjects()
     for (const kind of projectKinds) void dispatchProjects(kind)
     const address = http.address() as AddressInfo

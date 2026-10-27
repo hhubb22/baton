@@ -399,7 +399,10 @@ export function DevicesPage() {
   const search = useSearch({ from: '/workspace/devices' })
   const navigate = useNavigate()
 
-  const [expanded, setExpanded] = useState<ID | null>(null)
+  const expanded = search.device ?? null
+  const setExpanded = (device: ID | null) => {
+    void navigate({ to: '/devices', search: { ...search, device: device ?? undefined }, replace: true })
+  }
   const [feedback, setFeedback] = useState<Feedback | null>(null)
   const notify = (notice: Notice) => setFeedback({ kind: 'notice', notice })
   // 首页的「Connect a device」带 connect 参数打开这里，直接弹出接入窗口。

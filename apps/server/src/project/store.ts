@@ -5,6 +5,7 @@ import { Project, ProjectEvent } from '@baton/protocol'
 import { normalizeProjectEvent } from './message-reference.ts'
 import { AppError } from '../errors.ts'
 import { dbError, type DatabaseEffect } from '../database.ts'
+import { notificationCause, saveProjectNotification } from '../desktop-notifications.ts'
 
 export const projectError = (code = 'conflict', status = 409) => new AppError(status, code)
 export const projectTransaction = <A>(
@@ -91,10 +92,29 @@ export const releaseProjectRun = Effect.fn('releaseProjectRun')(function* (
   graceSeconds = 0,
 ) {
   const sql = yield* SqlClient.SqlClient
-  yield* sql`UPDATE agent_runs r SET state=${state},ended_at=clock_timestamp(),end_reason=${reason},stop_requested_at=clock_timestamp(),
+  const ended = yield* sql<{
+    id: string
+    employee_id: string
+    project_id: string
+    memory_job_id: string | null
+  }>`UPDATE agent_runs r SET state=${state},ended_at=clock_timestamp(),end_reason=${reason},stop_requested_at=clock_timestamp(),
  command_next_at=clock_timestamp()+${graceSeconds}*interval '1 second',command_attempts=0
- FROM project_agents a WHERE a.id=${agent} AND r.id=a.lease_run_id AND r.state IN ('starting','running')`
+ FROM project_agents a WHERE a.id=${agent} AND r.id=a.lease_run_id AND r.state IN ('starting','running')
+ RETURNING r.id,r.employee_id,a.project_id,r.memory_job_id`
   yield* sql`UPDATE project_agents SET lease_run_id=NULL,lease_until=NULL WHERE id=${agent}`
+  for (const run of ended) {
+    if (run.memory_job_id || ['user_stopped', 'project_paused', 'project_archived'].includes(reason)) continue
+    const cause = notificationCause(boundedProjectText(reason, 2048))
+    yield* saveProjectNotification(
+      run.employee_id,
+      run.project_id,
+      `project-run:${run.id}`,
+      state === 'finished' ? 'turn_ended' : state === 'failed' ? 'turn_failed' : 'turn_stopped',
+      state === 'finished'
+        ? 'Project assistant finished replying.'
+        : `Project assistant ${state === 'failed' ? 'could not finish replying' : 'stopped unexpectedly'}${cause ? `: ${cause}` : '.'}`,
+    )
+  }
 })
 export const activeInputSQL = (sql: SqlClient.SqlClient) =>
   sql`('user_message','attention_answer','turn_ended','thread_message_failed')`
