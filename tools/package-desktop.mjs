@@ -151,7 +151,8 @@ export async function packageDesktop({
   })
   if (!config.electronVersion) throw new Error('apps/desktop/package.json 缺少 Electron 版本')
   const executable = join(batond, platform === 'win32' ? 'batond.exe' : 'batond')
-  await requireFile(executable, platform !== 'win32')
+  // Windows 文件系统没有 POSIX 执行位，宿主为 Windows 时不检查。
+  await requireFile(executable, platform !== 'win32' && process.platform !== 'win32')
   const runtime = validateSeaVersion(
     run(executable, ['--version'], { capture: true, timeout: 30_000, cwd: batond }),
     platform,

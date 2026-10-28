@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, join } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import { test } from 'node:test'
 import { releaseMetadata } from '../packages/protocol/src/release.mjs'
@@ -63,9 +63,9 @@ test('打包配置保留完整 batond 资源、原生 ABI 与 macOS 临时签名
     arch: 'arm64',
   })
   assert.deepEqual(config.extraResources, [
-    { from: join('/tmp', 'batond input'), to: 'batond', filter: ['**/*'] },
-    { from: join('/tmp', 'batond input', 'node_modules'), to: 'batond/node_modules', filter: ['**/*'] },
-    { from: join('/tmp/desktop', 'dist/notification-permission.node'), to: 'notification-permission.node' },
+    { from: resolve('/tmp/batond input'), to: 'batond', filter: ['**/*'] },
+    { from: resolve('/tmp/batond input/node_modules'), to: 'batond/node_modules', filter: ['**/*'] },
+    { from: resolve('/tmp/desktop/dist/notification-permission.node'), to: 'notification-permission.node' },
   ])
   assert.deepEqual(config.extraMetadata, { version: '0.1.0-alpha.1', main: 'dist/main.cjs' })
   assert.deepEqual(config.files, ['dist/main.cjs', 'dist/preload.cjs', 'dist/setup.html', 'package.json'])
