@@ -6,7 +6,7 @@ import { createMockClient } from '../data/mock/client'
 import type { BatonClient } from '../data/client'
 import type { Device, FullOutputReference, Message, TraceStep } from '../data/types'
 import { readFullOutput } from '../data/http/full-output'
-import { ActivityTrace } from './ReplyParts'
+import { ActivityTrace, LiveOutput } from './ReplyParts'
 
 vi.mock('../data/http/full-output', () => ({ readFullOutput: vi.fn() }))
 
@@ -36,6 +36,30 @@ const step = (type: string, data: TraceStep['data'], extra: Partial<TraceStep> =
   truncated: false,
   original_bytes: 100,
   ...extra,
+})
+
+it('renders live reply Markdown and hides it when the same reply is saved', async () => {
+  const client = createMockClient('normal', { latency: { read: 0, save: 0, device: 0, run: 8000 } })
+  const thread = (await client.listThreads()).find((item) => item.id === 'thr-gateway')!
+  const device = (await client.listDevices()).find((item) => item.id === thread.deviceId)
+  client.readOutput = async () => ({
+    threadId: thread.id,
+    replyId: 'native-reply',
+    workerTurnSeq: 3,
+    chunks: [{ kind: 'text', text: '**Streaming**' }],
+  })
+  client.subscribeOutput = undefined
+  const view = (messages: Message[]) => (
+    <ClientProvider client={client}>
+      <LiveOutput thread={thread} device={device} live now={Date.now()} messages={messages} onOpenPath={() => {}} />
+    </ClientProvider>
+  )
+  const { rerender } = render(view([]))
+  expect((await screen.findByText('Streaming')).tagName).toBe('STRONG')
+  rerender(view([{ ...message, replyId: 'native-reply', workerTurnSeq: 2 }]))
+  expect(screen.getByText('Streaming')).toBeInTheDocument()
+  rerender(view([{ ...message, replyId: 'native-reply', workerTurnSeq: 3 }]))
+  expect(screen.queryByText('Streaming')).not.toBeInTheDocument()
 })
 
 function setup(readTrace: BatonClient['readTrace'], device?: Device, reply: Message = message) {

@@ -652,11 +652,12 @@ describe('project maintenance', () => {
     expect(screen.queryByLabelText('Message the project assistant')).not.toBeInTheDocument()
   })
 
-  it('opens archived projects from the sidebar with read-only settings and memory', async () => {
+  it('opens archived projects from the account menu with read-only settings and memory', async () => {
     const user = userEvent.setup()
     const { router } = setup('/threads', 'archived')
     const sidebar = await screen.findByRole('navigation', { name: 'Workspace' })
-    await user.click(within(sidebar).getByRole('link', { name: 'Archived projects' }))
+    await user.click(within(sidebar).getByRole('button', { name: /Kaken He/ }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Archived projects' }))
     expect(await screen.findByRole('heading', { name: 'Archived projects' })).toBeInTheDocument()
     expect(router.state.location.pathname).toBe('/projects/archived')
     await user.click(screen.getByRole('link', { name: /Compatibility/ }))

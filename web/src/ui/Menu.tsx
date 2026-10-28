@@ -71,15 +71,17 @@ export function Menu({
   narrow,
   align = 'start',
   side = 'bottom',
+  onOpenChange,
 }: {
   trigger: ReactElement
   children: ReactNode
   narrow?: boolean
   align?: 'start' | 'center' | 'end'
   side?: 'top' | 'bottom' | 'left' | 'right'
+  onOpenChange?: (open: boolean) => void
 }) {
   return (
-    <BaseMenu.Root>
+    <BaseMenu.Root onOpenChange={onOpenChange}>
       <BaseMenu.Trigger render={trigger} />
       <BaseMenu.Portal>
         <BaseMenu.Positioner side={side} align={align} sideOffset={6} {...stylex.props(styles.positioner)}>

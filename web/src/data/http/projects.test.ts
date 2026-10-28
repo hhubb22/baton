@@ -454,15 +454,16 @@ describe('Project HTTP contract', () => {
   it('creates a project using a stable client_project_id across client instances', async () => {
     const body = {
       title: 'Baton',
+      emoji: '🚀',
       goal: project.goal,
       provider: 'openai-codex',
       model: 'gpt-5.4',
       client_project_id: '66666666-6666-4666-8666-666666666666',
     }
     const h = setup([
-      { path: '/api/v1/projects', method: 'POST', body, response: project },
+      { path: '/api/v1/projects', method: 'POST', body, response: { ...project, emoji: '🚀' } },
       { path: `${base}/status`, response: status },
-      { path: '/api/v1/projects', method: 'POST', body, response: project },
+      { path: '/api/v1/projects', method: 'POST', body, response: { ...project, emoji: '🚀' } },
       { path: `${base}/status`, response: status },
       {
         path: '/api/v1/projects',
@@ -474,12 +475,13 @@ describe('Project HTTP contract', () => {
     ])
     const input = {
       name: 'Baton',
+      emoji: '🚀',
       goal: project.goal,
       subscription: 'ChatGPT',
       model: 'gpt-5.4',
       clientId: body.client_project_id,
     }
-    expect(await h.api.createProject(input)).toMatchObject({ id: projectId })
+    expect(await h.api.createProject(input)).toMatchObject({ id: projectId, emoji: '🚀' })
     expect(await createProjectAPI(h.ctx).createProject(input)).toMatchObject({ id: projectId })
     await expect(h.api.createProject({ ...input, name: 'Changed' })).rejects.toMatchObject({ code: 'conflict' })
     h.done()

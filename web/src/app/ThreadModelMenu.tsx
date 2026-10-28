@@ -53,7 +53,14 @@ export function ThreadModelMenu({
   }
   return (
     <>
-      <Menu side={side} trigger={<Chip icon="sparkle">{label}</Chip>}>
+      <Menu
+        side={side}
+        trigger={
+          <Chip icon="sparkle" composer>
+            {label}
+          </Chip>
+        }
+      >
         {lockedReason ? (
           <>
             <p {...stylex.props(text.caption, styles.note)}>{lockedReason}</p>

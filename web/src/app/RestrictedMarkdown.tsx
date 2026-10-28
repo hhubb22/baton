@@ -89,7 +89,7 @@ const allowedElements = [
   'a',
 ]
 
-const safeLinkUrl: UrlTransform = (value) => {
+export const safeLinkUrl: UrlTransform = (value) => {
   try {
     const url = new URL(value)
     const web = (url.protocol === 'https:' || url.protocol === 'http:') && Boolean(url.hostname)
@@ -104,7 +104,7 @@ function alignment(align: string | null | undefined) {
   return align === 'left' ? styles.left : align === 'center' ? styles.center : align === 'right' ? styles.right : null
 }
 
-const components: Components = {
+export const markdownComponents: Components = {
   p: ({ children }) => <p {...stylex.props(styles.paragraph)}>{children}</p>,
   strong: ({ children }) => <strong {...stylex.props(styles.strong)}>{children}</strong>,
   code: ({ children }) => <code {...stylex.props(styles.code)}>{children}</code>,
@@ -155,7 +155,7 @@ export function RestrictedMarkdown({ body }: { body: string }) {
         unwrapDisallowed
         skipHtml
         urlTransform={safeLinkUrl}
-        components={components}
+        components={markdownComponents}
       >
         {body}
       </ReactMarkdown>

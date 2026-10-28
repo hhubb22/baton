@@ -78,6 +78,8 @@ export interface BatonClient {
   listThreads(): Promise<Thread[]>
   getThread(threadId: ID): Promise<Thread>
   listMessages(threadId: ID): Promise<Message[]>
+  // 客户端支持已读状态时，在消息显示后清除未读标记。
+  markThreadRead?(threadId: ID): void
   listInbox(): Promise<InboxItem[]>
   readFile(deviceId: ID, path: string, continuation?: FileReadOptions): Promise<FilePreview>
   // 按中心返回的游标读取过程，设备离线时仍可读取。
@@ -113,6 +115,7 @@ export interface BatonClient {
   // 同一个 clientId 重试时返回第一次新建的 Project。
   createProject(input: {
     name: string
+    emoji?: string
     goal: string
     subscription: string
     model: string

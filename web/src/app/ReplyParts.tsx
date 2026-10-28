@@ -12,6 +12,7 @@ import { Icon } from '../ui/Icon'
 import { StatusDot } from '../ui/Status'
 import { copyText } from './SelectionMenu'
 import { ActivityStep } from './ActivityStep'
+import { MessageBody } from './MessageBody'
 
 const styles = stylex.create({
   toggle: {
@@ -280,16 +281,29 @@ export function LiveOutput({
   device,
   live,
   now,
+  messages,
+  onOpenPath,
 }: {
   thread: Thread
   device: Device | undefined
   live: boolean
   now: number
+  messages: Message[]
+  onOpenPath: (path: string) => void
 }) {
   const running = thread.status === 'running' && thread.runStartedAt !== null
   const output = useLiveOutput(thread.id, running)
   const boxRef = useRef<HTMLPreElement | null>(null)
   const chunks = output.data?.chunks ?? []
+  const replyId = output.data?.replyId
+  const isReply = thread.agent !== null && replyId !== undefined
+  const saved =
+    isReply &&
+    output.data?.workerTurnSeq !== undefined &&
+    messages.some(
+      (message) =>
+        message.role === 'agent' && message.replyId === replyId && message.workerTurnSeq === output.data?.workerTurnSeq,
+    )
 
   // 新输出到达时滚到最后。
   useEffect(() => {
@@ -312,7 +326,22 @@ export function LiveOutput({
           No report since {device ? clockTime(device.lastSeenAt) : 'the device was removed'}
         </span>
       )}
-      {chunks.length > 0 && (
+      {isReply && !saved && chunks.length > 0 && (
+        <div>
+          {chunks.some((chunk) => chunk.kind === 'gap') && (
+            <span {...stylex.props(text.caption, styles.gap)}>Earlier output not kept</span>
+          )}
+          <MessageBody
+            body={chunks
+              .filter((chunk) => chunk.kind === 'text')
+              .map((chunk) => chunk.text)
+              .join('')}
+            onOpenPath={onOpenPath}
+            streaming
+          />
+        </div>
+      )}
+      {!isReply && chunks.length > 0 && (
         <pre ref={boxRef} aria-label="Live output" tabIndex={0} {...stylex.props(styles.liveBox, focusRing.ring)}>
           {chunks.map((chunk, index) =>
             chunk.kind === 'text' ? (

@@ -56,6 +56,21 @@ describe('mock downloads', () => {
 })
 
 describe('mock scenarios', () => {
+  it('streams Markdown and restarts it on reset', async () => {
+    const { client, scheduler } = setup('streamingMarkdown')
+    expect((await client.listMessages('thr-webui'))[0]).toMatchObject({ body: '', streaming: true })
+    scheduler.advance(1600)
+    const partial = (await client.listMessages('thr-webui'))[0]
+    expect(partial.body).toContain('检查结果')
+    expect(partial.streaming).toBe(true)
+    scheduler.advance(60000)
+    const complete = (await client.listMessages('thr-webui'))[0]
+    expect(complete.body).toContain('```sh')
+    expect(complete.streaming).toBe(false)
+    client.controls.reset()
+    expect((await client.listMessages('thr-webui'))[0]).toMatchObject({ body: '', streaming: true })
+  })
+
   it.each(scenarioIds)('reset reproduces %s', async (id) => {
     const { client } = setup(id)
     const first = await state(client)

@@ -131,20 +131,20 @@ describe('native folder selection', () => {
     const list = vi.spyOn(f.client, 'listFolders')
     const add = vi.spyOn(f.client, 'addDeviceFolder')
     f.show()
-    const location = await screen.findByRole('button', { name: 'baton · MacBook Pro' })
+    const location = await screen.findByRole('button', { name: 'Folder: baton' })
     const pick = async () => {
       await f.user.click(location)
       await f.user.click(await screen.findByRole('menuitem', { name: 'Choose local folder…' }))
     }
     await pick()
     await waitFor(() => expect(f.desktop.bridge.pickDirectory).toHaveBeenCalledWith({ nodeId: 'dev-mac' }))
-    expect(location).toHaveTextContent('baton · MacBook Pro')
+    expect(location).toHaveAccessibleName('Folder: baton')
     expect(list).not.toHaveBeenCalled()
 
     f.desktop.bridge.pickDirectory.mockResolvedValueOnce('/private')
     await pick()
     expect(await screen.findByText("Selected folder is outside this device's folders.")).toBeInTheDocument()
-    expect(location).toHaveTextContent('baton · MacBook Pro')
+    expect(location).toHaveAccessibleName('Folder: baton')
     expect(add).not.toHaveBeenCalled()
 
     f.desktop.bridge.pickDirectory.mockResolvedValueOnce('~/src/compat-suite')
@@ -157,7 +157,7 @@ describe('native folder selection', () => {
     )
     await pick()
     await waitFor(() => expect(list).toHaveBeenLastCalledWith('dev-mac', '~/src/compat-suite'))
-    expect(location).toHaveTextContent('baton · MacBook Pro')
+    expect(location).toHaveAccessibleName('Folder: baton')
     await act(async () =>
       finish({
         state: 'ready',
@@ -168,7 +168,7 @@ describe('native folder selection', () => {
         scanLimited: false,
       }),
     )
-    expect(await screen.findByRole('button', { name: 'compat-suite · MacBook Pro' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Folder: compat-suite' })).toBeInTheDocument()
     expect(screen.queryByText("Selected folder is outside this device's folders.")).not.toBeInTheDocument()
     expect(add).not.toHaveBeenCalled()
   })
@@ -213,7 +213,7 @@ describe('native folder selection', () => {
     if (mode === 'browser') vi.stubGlobal('batonDesktop', undefined)
     if (mode === 'old client') f.desktop.bridge.capabilities = []
     f.show()
-    await f.user.click(await screen.findByRole('button', { name: 'baton · MacBook Pro' }))
+    await f.user.click(await screen.findByRole('button', { name: 'Folder: baton' }))
     await screen.findByRole('menuitem', { name: 'Choose another folder…' })
     expect(screen.queryByRole('menuitem', { name: 'Choose local folder…' })).not.toBeInTheDocument()
   })

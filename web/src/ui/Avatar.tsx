@@ -1,30 +1,22 @@
 import * as stylex from '@stylexjs/stylex'
 import { weight } from '../theme/base.stylex'
-import { colors, hues, radius } from '../theme/tokens.stylex'
+import { colors, radius } from '../theme/tokens.stylex'
 
 export type Hue = 'slate' | 'amber' | 'violet' | 'green' | 'blue' | 'rose'
 
 const styles = stylex.create({
-  avatar: {
+  projectEmoji: {
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
     width: '20px',
     height: '20px',
-    borderRadius: '5px',
-    color: '#fff',
-    fontSize: '11px',
+    fontSize: '16px',
     lineHeight: 1,
-    fontWeight: weight.semibold,
   },
-  large: { width: '40px', height: '40px', borderRadius: '10px', fontSize: '18px' },
-  slate: { backgroundColor: hues.slate },
-  amber: { backgroundColor: hues.amber },
-  violet: { backgroundColor: hues.violet },
-  green: { backgroundColor: hues.green },
-  blue: { backgroundColor: hues.blue },
-  rose: { backgroundColor: hues.rose },
+  projectEmojiSmall: { width: '14px', height: '14px', fontSize: '14px' },
+  projectEmojiLarge: { width: '40px', height: '40px', fontSize: '32px' },
   agentMark: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -59,11 +51,24 @@ function initial(name: string) {
   return name.trim().charAt(0).toUpperCase() || '?'
 }
 
-// Project 头像：名称首字母配按创建顺序轮换的底色。
-export function Avatar({ name, hue, large }: { name: string; hue: Hue; large?: boolean }) {
+// Project 图标使用项目保存的 emoji。
+export function Avatar({
+  emoji = '📁',
+  large,
+  small,
+}: {
+  name: string
+  hue: Hue
+  emoji?: string
+  large?: boolean
+  small?: boolean
+}) {
   return (
-    <span {...stylex.props(styles.avatar, styles[hue], large && styles.large)} aria-hidden>
-      {initial(name)}
+    <span
+      {...stylex.props(styles.projectEmoji, small && styles.projectEmojiSmall, large && styles.projectEmojiLarge)}
+      aria-hidden
+    >
+      {emoji}
     </span>
   )
 }

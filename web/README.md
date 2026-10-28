@@ -7,7 +7,7 @@
 | 目录 | 内容 |
 |---|---|
 | `src/theme` | 设计 token、字体、浅色和深色主题；新颜色在 `tokens.stylex.ts` 声明，在 `themes.ts` 补上两套主题的取值 |
-| `src/assets` | 图标 SVG、品牌标识、favicon 和背景图；黑色单色图标在 `Icon` 里换成 `currentColor` |
+| `src/assets` | 品牌标识、favicon 和背景图；通用图标使用 Phosphor Icons，由 `Icon` 统一尺寸、颜色和语义 |
 | `src/ui` | 通用组件：按钮、状态点、横幅、卡片、输入区、菜单、弹窗等 |
 | `src/app` | 路由、侧栏和页面框架，以及多个页面共用的 Thread 行、Thread 详情、事项卡片、受限 Markdown、项目设置与记忆编辑、文件预览和选择目录弹窗 |
 | `src/pages` | 各路由的页面 |
@@ -18,6 +18,8 @@
 
 ## 运行方式
 
+工作区侧栏、Project 和 Thread 的右侧面板以及文件预览列表可拖动边界调整宽度；聚焦边界后可用左右方向键调整，按住 Shift 加快调整，Home 和 End 跳到两端。宽度保存在本机浏览器中，并随窗口大小限制。
+
 默认使用 HTTP 客户端，向同源 `/api/v1` 发出 JSON 请求。生产环境由 TypeScript 中心提供静态页面与 API；开发环境也默认连接真实后端。网页构建默认输出到 `apps/server/dist/web`，中心的 `build` 和 `dev` 会自动构建网页，SQL 迁移随中心 bundle 一同复制。开发服务器只有在地址中显式添加 `?mock=1` 或 `?scenario=<id>` 时才启用模拟客户端和场景面板。生产构建始终使用 HTTP 客户端。
 
 使用 Vite 开发服务器连接 Coordinator 时，可设置 `BATON_DEV_BACKEND` 为后端地址。代理转发 `/api` 下的 HTTP 和 WebSocket 请求，并将 Origin 调整为后端来源；浏览器仍访问开发服务器的同源路径。该配置仅用于开发服务器，生产构建使用页面所在的来源。
@@ -25,6 +27,8 @@
 Vite 代理保持后端 TLS 证书验证。后端使用私有 CA 时，在启动开发服务器前设置 `NODE_EXTRA_CA_CERTS`，指向签发该证书的 CA PEM 文件，让 Node.js 信任证书链。
 
 ## 数据
+
+Thread 和 Project 的聊天正文使用 Streamdown 渲染 Markdown；Thread 的 Agent 回复在生成时逐段显示，保存的同一条回复出现后替换实时内容。行内代码中的绝对路径可打开文件预览。图片和原始 HTML 不渲染，链接只允许 HTTP、HTTPS 和 mailto。shell 实时输出以纯文本显示。
 
 页面只通过 `BatonClient` 读写数据。对象之间用稳定 ID 关联，客户端按主题（devices、threads、files 等）和可选的变更对象发出通知，`ClientProvider` 收到后刷新对应查询，所以设备状态变化会同时反映到 Thread、Project 和文件预览。
 
@@ -78,7 +82,8 @@ Memory 展示最新内容、版本、来源和时间，可添加、编辑并查�
 
 | 场景 | 内容 |
 |---|---|
-| `normal` | 三台设备、四个 Project、进行中的 Thread 和待处理事项。Baton Dev 的助手开了一个 Thread 正在等回复，Compatibility 的助手已经汇报结果。回复带执行过程、文件和提交附件；Ubuntu Dev 的 `logs` 目录里有超过 64 KB 的日志，模拟文件树的 `apps/server/src/testing/data` 中有二进制样本 |
+| `normal` | 三台设备、四个 Project、进行中的 Thread 和待处理事项。Baton Dev 的助手开了一个 Thread 正在等回复，Compatibility 的助手已经汇报结果。`Rebuild web UI foundation` 的回复包含 Markdown 示例、执行过程、文件和提交附件；Ubuntu Dev 的 `logs` 目录里有超过 64 KB 的日志，模拟文件树的 `apps/server/src/testing/data` 中有二进制样本 |
+| `streamingMarkdown` | `Streaming Markdown demo` 逐段生成包含表格、代码块和链接的回复；通过场景面板的重置按钮重新播放 |
 | `downloads` | 提供 macOS、Linux CLI 与 macOS、Windows 桌面下载元数据，展示安装命令和接入链接；模拟文件不可实际下载 |
 | `noDownloads` | 下载未启用，注册对话框显示原有终端命令 |
 | `empty` | 已登录但还没有设备，显示首次使用引导 |

@@ -6,9 +6,9 @@ import { useLocalDirectoryPicker } from '../app/LocalDirectoryPicker'
 import { Page } from '../app/Page'
 import type { ThreadsSearch } from '../app/router'
 import { ThreadAccessMenu } from '../app/ThreadAccessMenu'
-import { statusTextStyle, ThreadDetail, type RecoverAction } from '../app/ThreadDetail'
-import { NewThreadExecutionLimit } from '../app/ThreadExecutionLimit'
+import { ThreadDetail, type RecoverAction } from '../app/ThreadDetail'
 import { ThreadModelMenu, type ThreadModelChoice } from '../app/ThreadModelMenu'
+import { ResizablePane } from '../ui/ResizablePane'
 import { useNow } from '../app/useNow'
 import { ClientError } from '../data/client'
 import {
@@ -34,8 +34,8 @@ import { Banner } from '../ui/Banner'
 import { Button, focusRing } from '../ui/Button'
 import { Chip } from '../ui/Chip'
 import { Composer } from '../ui/Composer'
+import { Icon } from '../ui/Icon'
 import { Menu, MenuHeading, MenuOption, MenuRule } from '../ui/Menu'
-import { StatusDot } from '../ui/Status'
 
 const styles = stylex.create({
   layout: { display: 'flex', gap: size.gutter, flexGrow: 1, minWidth: 0, height: '100%' },
@@ -43,10 +43,24 @@ const styles = stylex.create({
   composerArea: { display: 'flex', flexDirection: 'column', gap: space.xs },
   status: { minHeight: '18px', paddingInline: space.xs, color: colors.muted },
   danger: { color: colors.danger },
-  filters: { display: 'flex', alignItems: 'center', gap: space.xs },
+  filters: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: space.xs, paddingLeft: space.xs },
   count: { marginLeft: 'auto', color: colors.faint },
   group: { display: 'flex', flexDirection: 'column' },
-  groupLabel: { paddingBlock: space.xs, paddingInline: space.md, color: colors.faint },
+  groupLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space.sm,
+    minHeight: '36px',
+    width: '100%',
+    paddingInline: space.md,
+    borderWidth: 0,
+    borderRadius: radius.md,
+    textAlign: 'left',
+    color: colors.text,
+    backgroundColor: { default: colors.subtle, ':hover': colors.hover, ':active': colors.selected },
+  },
+  groupChevron: { color: colors.muted },
+  groupCount: { color: colors.muted },
   row: {
     display: 'flex',
     alignItems: 'center',
@@ -59,14 +73,21 @@ const styles = stylex.create({
     backgroundColor: { default: 'transparent', ':hover': colors.hover },
   },
   rowSelected: { backgroundColor: { default: colors.selected, ':hover': colors.selected } },
+  unreadSlot: { display: 'inline-flex', flexShrink: 0, width: size.dot, height: size.dot },
   title: { display: 'inline-flex', alignItems: 'center', gap: space.xs, flexGrow: 1, flexBasis: 0, minWidth: 0 },
   titleText: { minWidth: 0 },
-  project: { display: 'inline-flex', alignItems: 'center', gap: '6px', flexShrink: 0, width: '140px', minWidth: 0 },
-  where: { flexShrink: 0, width: '170px', color: colors.muted },
-  folder: { flexShrink: 0, width: '150px', color: colors.faint },
-  rowStatus: { flexShrink: 0, width: '120px', whiteSpace: 'nowrap' },
+  project: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, width: '20px' },
+  timer: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px',
+    flexShrink: 0,
+    color: colors.muted,
+    whiteSpace: 'nowrap',
+    '@media (max-width: 700px)': { display: 'none' },
+  },
+  rowStatus: { flexShrink: 0, maxWidth: '120px', color: colors.muted },
   time: { flexShrink: 0, width: '72px', textAlign: 'right', color: colors.faint, whiteSpace: 'nowrap' },
-  none: { color: colors.faint },
   empty: {
     display: 'flex',
     flexDirection: 'column',
@@ -76,6 +97,21 @@ const styles = stylex.create({
     textAlign: 'center',
   },
   muted: { color: colors.muted },
+  locationPath: { display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  locationSearch: {
+    width: '100%',
+    minHeight: '32px',
+    paddingInline: space.sm,
+    borderWidth: 0,
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: colors.borderSoft,
+    outline: 'none',
+    backgroundColor: 'transparent',
+    color: colors.text,
+    '::placeholder': { color: colors.faint },
+  },
+  locationEmpty: { padding: space.sm, color: colors.muted },
 })
 
 type AgentChoice = ThreadModelChoice
@@ -93,7 +129,7 @@ function sameLocation(a: Location | null, b: Location) {
   return a !== null && a.deviceId === b.deviceId && a.folder === b.folder
 }
 
-function LocationMenu({
+function LocationMenus({
   location,
   threads,
   devices,
@@ -110,43 +146,94 @@ function LocationMenu({
 }) {
   const local = useLocalDirectoryPicker({ nodeId: location?.deviceId ?? null, onSelect, onError })
   const device = devices.find((item) => item.id === location?.deviceId)
-  const recent = recentLocations(threads, devices)
-  const label = location && device ? `${folderName(location.folder)} · ${device.name}` : 'Choose folder'
+  const [search, setSearch] = useState('')
+  const recent = device
+    ? recentLocations(
+        threads.filter((item) => item.deviceId === device.id),
+        devices,
+      )
+    : []
+  const folders = [
+    ...new Set([
+      ...recent.map((item) => item.folder),
+      ...(location?.folder ? [location.folder] : []),
+      ...(device?.repos ?? []),
+    ]),
+  ].filter((folder) => folder.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))
   return (
-    <Menu side="bottom" trigger={<Chip icon="folder">{label}</Chip>}>
-      {recent.length > 0 && <MenuHeading>Recent</MenuHeading>}
-      {recent.map((item) => (
-        <MenuOption
-          key={`recent:${item.deviceId}:${item.folder}`}
-          note={devices.find((entry) => entry.id === item.deviceId)?.name}
-          selected={sameLocation(location, item)}
-          onSelect={() => onSelect(item)}
-        >
-          {folderName(item.folder)}
-        </MenuOption>
-      ))}
-      {devices.map((entry) => (
-        <div key={entry.id}>
-          <MenuHeading>
+    <>
+      <Menu
+        side="bottom"
+        trigger={
+          <Chip icon="device" composer aria-label={device ? `Device: ${device.name}` : 'Choose device'}>
+            {device?.name ?? 'Choose device'}
+          </Chip>
+        }
+      >
+        <MenuHeading>Device</MenuHeading>
+        {devices.map((entry) => (
+          <MenuOption
+            key={entry.id}
+            note={entry.connection === 'offline' ? 'Offline' : entry.connection === 'syncing' ? 'Syncing' : undefined}
+            selected={entry.id === device?.id}
+            onSelect={() => {
+              if (entry.id === location?.deviceId) return
+              const next = defaultLocation(threads, devices, entry.id)
+              if (next) onSelect(next)
+            }}
+          >
             {entry.name}
-            {entry.connection === 'offline' && ' · Offline'}
-          </MenuHeading>
-          {entry.repos.map((folder) => (
-            <MenuOption
-              key={folder}
-              note={folder}
-              selected={sameLocation(location, { deviceId: entry.id, folder })}
-              onSelect={() => onSelect({ deviceId: entry.id, folder })}
-            >
-              {folderName(folder)}
-            </MenuOption>
-          ))}
-        </div>
-      ))}
-      <MenuRule />
-      {local.available && <MenuOption onSelect={() => void local.pick()}>{local.label}</MenuOption>}
-      <MenuOption onSelect={onBrowse}>Choose another folder…</MenuOption>
-    </Menu>
+          </MenuOption>
+        ))}
+      </Menu>
+      <Menu
+        side="bottom"
+        onOpenChange={(open) => {
+          if (!open) setSearch('')
+        }}
+        trigger={
+          <Chip
+            icon="folder"
+            composer
+            aria-label={location?.folder ? `Folder: ${folderName(location.folder)}` : 'Choose folder'}
+          >
+            {location?.folder ? folderName(location.folder) : 'Choose folder'}
+          </Chip>
+        }
+      >
+        <input
+          autoFocus
+          aria-label="Search folders"
+          placeholder="Search folders…"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          onKeyDown={(event) => {
+            if (!['Escape', 'Tab', 'ArrowDown'].includes(event.key)) event.stopPropagation()
+          }}
+          {...stylex.props(text.small, styles.locationSearch)}
+        />
+        {folders.length === 0 && <p {...stylex.props(text.caption, styles.locationEmpty)}>No matching folders</p>}
+        {folders.map((folder) => (
+          <MenuOption
+            key={folder}
+            detail={
+              <span title={folder} {...stylex.props(styles.locationPath)}>
+                {folder}
+              </span>
+            }
+            selected={device !== undefined && sameLocation(location, { deviceId: device.id, folder })}
+            onSelect={() => {
+              if (device) onSelect({ deviceId: device.id, folder })
+            }}
+          >
+            {folderName(folder)}
+          </MenuOption>
+        ))}
+        <MenuRule />
+        {local.available && <MenuOption onSelect={() => void local.pick()}>{local.label}</MenuOption>}
+        <MenuOption onSelect={onBrowse}>Choose another folder…</MenuOption>
+      </Menu>
+    </>
   )
 }
 
@@ -175,64 +262,47 @@ function ModelMenu({
 
 function ThreadListRow({
   thread,
-  device,
   project,
   group,
   selected,
-  split,
   now,
 }: {
   thread: Thread
-  device: Device | undefined
   project: Project | undefined
   group: ReturnType<typeof threadView>
   selected: boolean
-  split: boolean
   now: number
 }) {
   const timer = group.live && thread.runStartedAt !== null ? runTimer(thread.runStartedAt, now) : null
+  const groupLabel = threadGroups.find((item) => item.id === group.group)?.label
+  const showStatus = group.status.label.replace(/…$/, '') !== groupLabel
   return (
     <Link
       to="/threads"
       search={(prev: ThreadsSearch) => ({ ...prev, thread: thread.id })}
       aria-current={selected ? 'true' : undefined}
+      aria-label={`${thread.title}, ${group.status.label}, ${project?.name ?? 'No project'}${thread.unread ? ', Unread' : ''}${timer ? `, Running time ${timer}` : ''}, Last activity ${relativeTime(thread.updatedAt, now)}`}
       {...stylex.props(text.small, styles.row, selected && styles.rowSelected, focusRing.ring)}
     >
-      <StatusDot tone={group.status.tone} />
+      <span {...stylex.props(styles.unreadSlot)}>{thread.unread && <UnreadDot />}</span>
       <span {...stylex.props(styles.title)}>
         <span {...stylex.props(styles.titleText, text.truncate)}>{thread.title}</span>
-        {thread.unread && <UnreadDot />}
-      </span>
-      {!split && (
-        <span {...stylex.props(styles.project)}>
-          {project ? (
-            <>
-              <Avatar name={project.name} hue={project.hue} />
-              <span {...stylex.props(text.truncate)}>{project.name}</span>
-            </>
-          ) : (
-            <span {...stylex.props(styles.none)}>No project</span>
-          )}
-        </span>
-      )}
-      <span {...stylex.props(text.caption, styles.where, text.truncate)}>
-        {device?.name ?? 'Removed device'} · {thread.agent ? agentNames[thread.agent] : 'Command'}
-      </span>
-      {!split && (
-        <span title={thread.folder} {...stylex.props(text.mono, styles.folder, text.truncate)}>
-          {thread.folder}
-        </span>
-      )}
-      <span {...stylex.props(text.caption, styles.rowStatus, statusTextStyle(group.status.tone))}>
-        {timer ? (
-          <>
-            {group.status.label} · <span {...stylex.props(text.mono)}>{timer}</span>
-          </>
-        ) : (
-          group.status.label
+        {showStatus && (
+          <span {...stylex.props(text.caption, styles.rowStatus, text.truncate)}>{group.status.label}</span>
+        )}
+        {timer && (
+          <span title={`Running time: ${timer}`} {...stylex.props(text.caption, styles.timer)}>
+            <Icon name="clock" size={12} />
+            {timer}
+          </span>
         )}
       </span>
-      <span {...stylex.props(text.caption, styles.time)}>{relativeTime(thread.updatedAt, now)}</span>
+      <span title={project?.name} {...stylex.props(styles.project)}>
+        {project && <Avatar name={project.name} hue={project.hue} emoji={project.emoji} />}
+      </span>
+      <span title="Last activity" {...stylex.props(text.caption, styles.time)}>
+        {relativeTime(thread.updatedAt, now)}
+      </span>
     </Link>
   )
 }
@@ -251,8 +321,8 @@ export function ThreadsPage() {
   const [error, setError] = useState<string | null>(null)
   const [location, setLocation] = useState<Location | null>(null)
   const [agentChoice, setAgentChoice] = useState<AgentChoice | null>(null)
-  const [executionTimeoutSeconds, setExecutionTimeoutSeconds] = useState(7200)
   const [browseDevice, setBrowseDevice] = useState<string | null>(null)
+  const [collapsedGroups, setCollapsedGroups] = useState<ThreadGroup[]>([])
 
   const allThreads = threads.data ?? []
   const allDevices = devices.data ?? []
@@ -304,20 +374,12 @@ export function ThreadsPage() {
   const onSend = () => {
     const body = draft.trim()
     if (!body || create.isPending) return
-    if (!current || !device) {
+    if (!current?.folder || !device) {
       setError('Choose a folder first.')
       return
     }
     if (!choice) {
       setError(`No agent is ready on ${device.name}. Set one up on the device, or choose another folder.`)
-      return
-    }
-    if (
-      !Number.isInteger(executionTimeoutSeconds) ||
-      executionTimeoutSeconds < 1 ||
-      executionTimeoutSeconds > 2147483647
-    ) {
-      setError('Enter a whole number of seconds from 1 to 2147483647.')
       return
     }
     setError(null)
@@ -327,7 +389,6 @@ export function ThreadsPage() {
         folder: current.folder,
         agent: choice.agent,
         model: choice.model,
-        executionTimeoutSeconds,
         body,
         clientId: newClientId(),
       },
@@ -366,7 +427,6 @@ export function ThreadsPage() {
     }))
     .filter((group) => group.threads.length > 0)
 
-  const split = search.thread !== undefined
   const filterDevice = allDevices.find((item) => item.id === search.device)
   const filterProject = projects.data?.find((item) => item.id === search.project)
   const filtering = search.device !== undefined || search.project !== undefined || archived
@@ -408,19 +468,36 @@ export function ThreadsPage() {
   } else {
     list = groups.map((group) => (
       <section key={group.id} aria-label={group.label} {...stylex.props(styles.group)}>
-        <h2 {...stylex.props(text.captionMedium, styles.groupLabel)}>{group.label}</h2>
-        {group.threads.map((thread) => (
-          <ThreadListRow
-            key={thread.id}
-            thread={thread}
-            device={allDevices.find((item) => item.id === thread.deviceId)}
-            project={projects.data?.find((item) => item.id === thread.projectId)}
-            group={views.get(thread.id)!}
-            selected={thread.id === search.thread}
-            split={split}
-            now={now}
-          />
-        ))}
+        <h2>
+          <button
+            type="button"
+            aria-expanded={!collapsedGroups.includes(group.id)}
+            onClick={() =>
+              setCollapsedGroups((current) =>
+                current.includes(group.id) ? current.filter((id) => id !== group.id) : [...current, group.id],
+              )
+            }
+            {...stylex.props(text.captionMedium, styles.groupLabel, focusRing.ring)}
+          >
+            <Icon
+              name={collapsedGroups.includes(group.id) ? 'chevron-right' : 'chevron-down'}
+              size={12}
+              style={styles.groupChevron}
+            />
+            {group.label} <span {...stylex.props(styles.groupCount)}>{group.threads.length}</span>
+          </button>
+        </h2>
+        {!collapsedGroups.includes(group.id) &&
+          group.threads.map((thread) => (
+            <ThreadListRow
+              key={thread.id}
+              thread={thread}
+              project={projects.data?.find((item) => item.id === thread.projectId)}
+              group={views.get(thread.id)!}
+              selected={thread.id === search.thread}
+              now={now}
+            />
+          ))}
       </section>
     ))
   }
@@ -467,7 +544,7 @@ export function ThreadsPage() {
                 }
                 chips={
                   <>
-                    <LocationMenu
+                    <LocationMenus
                       location={current}
                       threads={allThreads}
                       devices={allDevices}
@@ -488,7 +565,6 @@ export function ThreadsPage() {
                       onUnavailable={setError}
                     />
                     {choice && device && <ThreadAccessMenu agent={choice.agent} user={device.commandAccess.user} />}
-                    <NewThreadExecutionLimit value={executionTimeoutSeconds} onChange={setExecutionTimeoutSeconds} />
                   </>
                 }
               />
@@ -517,7 +593,7 @@ export function ThreadsPage() {
             ) : (
               <Menu
                 trigger={
-                  <Chip icon="tasks">
+                  <Chip icon="projects">
                     {search.project === 'none' ? 'No project' : (filterProject?.name ?? 'All projects')}
                   </Chip>
                 }
@@ -558,13 +634,23 @@ export function ThreadsPage() {
         </div>
       </Page>
       {search.thread && (
-        <ThreadDetail
-          key={search.thread}
-          threadId={search.thread}
-          layout="panel"
-          onClose={() => setSearch({ thread: undefined })}
-          onRecover={onRecover}
-        />
+        <ResizablePane
+          label="Resize thread panel"
+          storageKey="baton.width.thread-panel"
+          defaultWidth={440}
+          min={280}
+          max={800}
+          reserve={400}
+          edge="left"
+        >
+          <ThreadDetail
+            key={search.thread}
+            threadId={search.thread}
+            layout="panel"
+            onClose={() => setSearch({ thread: undefined })}
+            onRecover={onRecover}
+          />
+        </ResizablePane>
       )}
       {browseDevice && (
         <FolderDialog

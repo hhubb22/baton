@@ -12,30 +12,33 @@ import {
 } from '../data/queries'
 import type { MemoryNote, MemoryVersion, Project } from '../data/types'
 import { text } from '../theme/text'
-import { colors, space } from '../theme/tokens.stylex'
+import { colors, radius, size, space } from '../theme/tokens.stylex'
 import { Banner } from '../ui/Banner'
 import { Button, focusRing } from '../ui/Button'
 import { Dialog } from '../ui/Dialog'
 import { Field, TextArea } from '../ui/Field'
+import { Icon } from '../ui/Icon'
 import { useWorkspace, type MemoryDraft } from './workspace'
 
 const styles = stylex.create({
   list: { display: 'flex', flexDirection: 'column', gap: space.md, minWidth: 0 },
   row: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '6px',
-    paddingBlock: space.sm,
     minWidth: 0,
-    overflowWrap: 'anywhere',
   },
   edit: {
-    backgroundColor: 'transparent',
+    display: 'flex',
+    alignItems: 'center',
+    gap: space.sm,
+    width: '100%',
+    minHeight: size.control,
+    minWidth: 0,
+    backgroundColor: { default: 'transparent', ':hover': colors.hover },
     borderWidth: 0,
-    padding: 0,
+    borderRadius: radius.sm,
+    paddingBlock: '6px',
+    paddingInline: space.sm,
     color: colors.text,
     textAlign: 'left',
-    whiteSpace: 'pre-wrap',
     cursor: 'pointer',
   },
   history: { display: 'flex', flexDirection: 'column', gap: space.sm, paddingBlock: space.sm },
@@ -264,10 +267,12 @@ export function ProjectMemory({ project }: { project: Project }) {
       <button
         data-memory-id={note.id}
         type="button"
+        title={note.body}
         onClick={() => setEditing(note)}
         {...stylex.props(text.small, styles.edit, focusRing.ring)}
       >
-        {note.body}
+        <Icon name="memory" size={16} style={text.muted} />
+        <span {...stylex.props(text.truncate)}>{note.body}</span>
       </button>
     </article>
   )

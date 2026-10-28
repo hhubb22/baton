@@ -46,6 +46,70 @@ describe('app', () => {
     expect(router.state.location.pathname).toBe('/threads')
   })
 
+  it('clears an unread thread after its messages are opened', async () => {
+    const user = userEvent.setup()
+    renderApp('/threads')
+    const row = await screen.findByRole('link', { name: /Rebuild web UI foundation.*Unread/ })
+    expect(within(row).getByRole('img', { name: 'Unread' })).toBeInTheDocument()
+    await user.click(row)
+    await screen.findByText(/Scaffold is in place/)
+    await waitFor(() => expect(within(row).queryByRole('img', { name: 'Unread' })).not.toBeInTheDocument())
+  })
+
+  it('keeps the unread marker when messages fail to load', async () => {
+    const user = userEvent.setup()
+    renderApp('/threads', 'normal', (client) => {
+      client.listMessages = async () => {
+        throw new Error('Cannot load messages')
+      }
+    })
+    const row = await screen.findByRole('link', { name: /Rebuild web UI foundation.*Unread/ })
+    await user.click(row)
+    expect(await screen.findByText("Couldn't load messages")).toBeInTheDocument()
+    expect(within(row).getByRole('img', { name: 'Unread' })).toBeInTheDocument()
+  })
+
+  it('collapses and expands each thread group', async () => {
+    const user = userEvent.setup()
+    renderApp('/threads')
+    const group = await screen.findByRole('button', { name: /Needs attention/ })
+    const row = await screen.findByRole('link', { name: /Run unit tests on Ubuntu/ })
+    expect(group).toHaveAttribute('aria-expanded', 'true')
+    await user.click(group)
+    expect(group).toHaveAttribute('aria-expanded', 'false')
+    expect(row).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Rebuild web UI foundation/ })).toBeInTheDocument()
+    group.focus()
+    await user.keyboard('{Enter}')
+    expect(group).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('link', { name: /Run unit tests on Ubuntu/ })).toBeInTheDocument()
+  })
+
+  it('keeps thread rows concise while retaining status and project names for assistive technology', async () => {
+    renderApp('/threads')
+    const row = await screen.findByRole('link', { name: /Fix gateway reconnect race/ })
+    expect(row).toHaveAccessibleName(/Running, Baton Dev/)
+    expect(within(row).queryByText('Ubuntu Dev · Codex')).not.toBeInTheDocument()
+    expect(within(row).queryByText('/home/kaken/work/baton')).not.toBeInTheDocument()
+  })
+
+  it('selects a device and searches its folders', async () => {
+    const user = userEvent.setup()
+    renderApp('/threads')
+    await user.click(await screen.findByRole('button', { name: 'Device: MacBook Pro' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Ubuntu Dev' }))
+    expect(screen.getByRole('button', { name: 'Device: Ubuntu Dev' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /Folder:/ }))
+    const menu = await screen.findByRole('menu')
+    await user.type(within(menu).getByRole('textbox', { name: 'Search folders' }), 'switch')
+    expect(within(menu).queryByText('/home/kaken/work/baton')).not.toBeInTheDocument()
+    expect(
+      within(menu).getByRole('menuitem', { name: /switch-patrol.*\/home\/kaken\/work\/switch-patrol/ }),
+    ).toBeInTheDocument()
+    await user.keyboard('{ArrowDown}{Enter}')
+    expect(screen.getByRole('button', { name: 'Folder: switch-patrol' })).toBeInTheDocument()
+  })
+
   it('offers the real empty model ID as Default model when switching back to Pi', async () => {
     const user = userEvent.setup()
     renderApp('/threads', 'normal', (client) => {
@@ -132,7 +196,7 @@ describe('app', () => {
     const user = userEvent.setup()
     const { router } = renderApp('/threads')
     await openAccountMenu(user)
-    await user.click(await screen.findByRole('button', { name: 'Sign out' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Sign out' }))
     expect(await screen.findByText('You are signed out')).toBeInTheDocument()
     expect(screen.getByLabelText('Password')).toHaveValue('')
     expect(router.state.location.search).toEqual({ notice: 'signedOut' })
@@ -143,7 +207,7 @@ describe('app', () => {
     const { client } = renderApp('/threads')
     await openAccountMenu(user)
     client.controls.setReachable(false)
-    await user.click(await screen.findByRole('button', { name: 'Sign out' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Sign out' }))
     expect(await screen.findByRole('heading', { name: "Couldn't sign out" })).toBeInTheDocument()
 
     client.controls.setReachable(true)
@@ -161,7 +225,11 @@ describe('app', () => {
     expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeInTheDocument()
     expect(within(sidebar).queryByText('Projects')).not.toBeInTheDocument()
     expect(within(sidebar).getByRole('link', { name: 'Threads' })).toHaveAttribute('aria-current', 'page')
-    expect(within(sidebar).getByRole('button', { name: 'New thread' })).toBeInTheDocument()
+    expect(within(sidebar).queryByRole('button', { name: 'New thread' })).not.toBeInTheDocument()
+    expect(within(sidebar).getByRole('button', { name: 'Kaken He' })).toBeInTheDocument()
+    await user.click(within(sidebar).getByRole('button', { name: 'Kaken He' }))
+    expect(await screen.findByRole('menuitem', { name: 'Dark' })).toBeInTheDocument()
+    await user.keyboard('{Escape}')
     expect(localStorage.getItem('baton.sidebar.collapsed')).toBe('true')
 
     await user.click(screen.getByRole('button', { name: 'Expand sidebar' }))
@@ -332,7 +400,8 @@ describe('threads', () => {
     const user = userEvent.setup()
     const { scheduler } = renderApp('/threads', 'noChats')
     expect(await screen.findByText('No threads yet')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /baton · MacBook Pro/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Folder: baton' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Device: MacBook Pro' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Codex · gpt-6.1-sol/ })).toBeInTheDocument()
 
     await user.type(screen.getByLabelText('New thread message'), 'Add a health check{Enter}')
@@ -344,6 +413,9 @@ describe('threads', () => {
     await advance(scheduler, browserLatency.read + browserLatency.run)
     expect(await within(detail).findByText('Idle')).toBeInTheDocument()
     expect(within(detail).getByText('Done. The change is ready for review.')).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: /Add a health check/ })).not.toHaveAccessibleName(/Unread/),
+    )
 
     await user.type(within(detail).getByLabelText('Message'), 'Also document it{Enter}')
     await advance(scheduler, browserLatency.save + browserLatency.run)
@@ -351,7 +423,7 @@ describe('threads', () => {
 
     await user.click(within(detail).getByRole('button', { name: 'Close thread' }))
     const row = await screen.findByRole('link', { name: /Add a health check/ })
-    expect(within(row).getByText('No project')).toBeInTheDocument()
+    expect(row).toHaveAccessibleName(/No project/)
 
     await user.click(row)
     const reopened = await panel('Add a health check')
@@ -422,7 +494,8 @@ describe('threads', () => {
     expect(within(detail).queryByLabelText('Message')).not.toBeInTheDocument()
 
     await user.click(within(detail).getByRole('button', { name: 'New thread in this folder' }))
-    expect(screen.getByRole('button', { name: /baton · Windows Desktop/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Folder: baton' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Device: Windows Desktop' })).toBeInTheDocument()
     expect(screen.getByLabelText('New thread message')).toHaveFocus()
     expect(screen.getByLabelText('New thread message')).toHaveValue('')
   })
@@ -436,7 +509,7 @@ describe('threads', () => {
     await user.type(within(dialog).getByLabelText('Folder path'), '  /Users/kaken/new-project  ')
     expect(within(dialog).getByText('Adds this folder to MacBook Pro.')).toBeInTheDocument()
     await user.click(within(dialog).getByRole('button', { name: 'Add and select' }))
-    expect(await screen.findByRole('button', { name: /new-project · MacBook Pro/ })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Folder: new-project' })).toBeInTheDocument()
     expect((await client.listDevices()).find((device) => device.id === 'dev-mac')?.folders).toContain(
       '/Users/kaken/new-project',
     )
@@ -454,7 +527,7 @@ describe('threads', () => {
     await user.click(await within(dialog).findByRole('button', { name: '~/src' }))
     await user.click(await within(dialog).findByRole('button', { name: 'compat-suite' }))
     await user.click(within(dialog).getByRole('button', { name: 'Select folder' }))
-    expect(await screen.findByRole('button', { name: /compat-suite · MacBook Pro/ })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Folder: compat-suite' })).toBeInTheDocument()
     expect(screen.getByLabelText('New thread message')).toHaveFocus()
   })
 })
@@ -594,8 +667,6 @@ describe('devices', () => {
 
     await user.click(within(dialog).getByRole('button', { name: 'Done' }))
     expect(screen.getByRole('heading', { name: '1 device, 1 online' })).toHaveFocus()
-    const sidebar = screen.getByRole('navigation', { name: 'Workspace' })
-    expect(within(sidebar).getByText('1/1 online')).toBeInTheDocument()
     expect(within(deviceRow('Build Server')).getByText('Default')).toBeInTheDocument()
   })
 
@@ -820,8 +891,6 @@ describe('devices', () => {
     expect(await screen.findByText('Choose a new default device')).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '2 devices, 1 online' })).toHaveFocus()
-    const sidebar = screen.getByRole('navigation', { name: 'Workspace' })
-    expect(within(sidebar).getByText('1/2 online')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Set Ubuntu Dev as default' }))
     await waitFor(() => expect(within(deviceRow('Ubuntu Dev')).getByText('Default')).toBeInTheDocument())
@@ -1006,6 +1075,17 @@ describe('execution details', () => {
     await user.click(await screen.findByRole('button', { name: 'Copy selection' }))
     expect(await screen.findByText('Copied')).toBeInTheDocument()
     expect(await navigator.clipboard.readText()).toMatch(/Scaffold is in place/)
+  })
+
+  it('switches the selected inbox question in the detail pane', async () => {
+    const user = userEvent.setup()
+    renderApp('/inbox')
+    expect(await screen.findByRole('region', { name: 'Which runner should run nightly?' })).toBeInTheDocument()
+    const other = await screen.findByRole('button', { name: /Skip Windows path tests for now\?/ })
+    await user.click(other)
+    expect(other).toHaveAttribute('aria-pressed', 'true')
+    expect(await screen.findByRole('region', { name: 'Skip Windows path tests for now?' })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Which runner should run nightly?' })).not.toBeInTheDocument()
   })
 
   it('asks the project assistant about an inbox question', async () => {

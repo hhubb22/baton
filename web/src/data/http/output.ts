@@ -8,6 +8,8 @@ export type OutputResult = {
   code?: string
   state?: string
   text?: string
+  reply_id?: string
+  worker_turn_seq?: number
   cursor?: string
   gap?: boolean
 }
@@ -15,6 +17,7 @@ type OutputState = {
   seq?: number
   cursor: string
   chunks: LiveOutput['chunks']
+  replyId?: string
   error?: ClientError
 }
 type Subscription = { thread_id: string; cursor?: string }
@@ -67,7 +70,12 @@ export function createOutputAPI(request: HttpContext['request']) {
   const snapshot = (id: string): LiveOutput => {
     const value = current(id)
     if (value.error) throw value.error
-    return { threadId: id, chunks: structuredClone(value.chunks) }
+    return {
+      threadId: id,
+      chunks: structuredClone(value.chunks),
+      ...(value.replyId === undefined ? {} : { replyId: value.replyId }),
+      ...(value.seq === undefined ? {} : { workerTurnSeq: value.seq }),
+    }
   }
   const notify = (id: string) => {
     const value = send && selected === id && !current(id).error ? snapshot(id) : null
@@ -77,6 +85,7 @@ export function createOutputAPI(request: HttpContext['request']) {
 
   function apply(id: string, result: OutputResult, seq?: number) {
     const previous = current(id)
+    seq = result.worker_turn_seq ?? seq
     if (!result.ok || (!result.cursor && !['idle', 'stopped', 'unknown'].includes(result.state ?? ''))) {
       output.set(id, {
         ...previous,
@@ -96,7 +105,11 @@ export function createOutputAPI(request: HttpContext['request']) {
     output.set(id, {
       seq: seq ?? previous.seq,
       cursor: result.cursor!,
-      chunks: appendOutput(epochChanged || turnChanged ? [] : previous.chunks, result),
+      replyId: result.reply_id,
+      chunks: appendOutput(
+        epochChanged || turnChanged || previous.replyId !== result.reply_id ? [] : previous.chunks,
+        result,
+      ),
     })
   }
 

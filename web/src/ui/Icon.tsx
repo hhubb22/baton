@@ -1,56 +1,110 @@
 import * as stylex from '@stylexjs/stylex'
+import {
+  Archive,
+  ArrowBendUpLeft,
+  ArrowClockwise,
+  ArrowSquareOut,
+  ArrowUp,
+  BookmarkSimple,
+  Brain,
+  CaretDown,
+  CaretLeft,
+  CaretRight,
+  ChatCircle,
+  ChatDots,
+  Check,
+  Clock,
+  Code,
+  Coins,
+  Copy,
+  DotsThree,
+  File,
+  Folder,
+  Folders,
+  GearSix,
+  GitCommit,
+  Globe,
+  Laptop,
+  ListBullets,
+  ListChecks,
+  Lock,
+  MagnifyingGlass,
+  Monitor,
+  Pause,
+  PencilSimple,
+  Plus,
+  Robot,
+  ShieldCheck,
+  SidebarSimple,
+  Sparkle,
+  Stop,
+  TerminalWindow,
+  Tray,
+  Warning,
+  WifiSlash,
+  Wrench,
+  X,
+} from '@phosphor-icons/react'
+import batonMark from '../assets/baton-mark.svg?raw'
+import batonMarkDark from '../assets/baton-mark-dark.svg?raw'
+import batonMarkMono from '../assets/baton-mark-mono.svg?raw'
 
-// 图标取自 src/assets，黑色描边或填充换成 currentColor，颜色跟随文字。
-const sources = import.meta.glob<string>('../assets/*.svg', {
-  query: '?raw',
-  import: 'default',
-  eager: true,
-})
+const icons = {
+  alert: Warning,
+  archive: Archive,
+  'arrow-up': ArrowUp,
+  check: Check,
+  'chevron-down': CaretDown,
+  'chevron-left': CaretLeft,
+  'chevron-right': CaretRight,
+  clock: Clock,
+  close: X,
+  commit: GitCommit,
+  copy: Copy,
+  device: Monitor,
+  details: ListBullets,
+  dots: DotsThree,
+  external: ArrowSquareOut,
+  editor: Code,
+  file: File,
+  folder: Folder,
+  inbox: Tray,
+  laptop: Laptop,
+  lock: Lock,
+  memory: BookmarkSimple,
+  message: ChatCircle,
+  offline: WifiSlash,
+  'panel-right': SidebarSimple,
+  sidebar: SidebarSimple,
+  pause: Pause,
+  pen: PencilSimple,
+  plus: Plus,
+  refresh: ArrowClockwise,
+  reply: ArrowBendUpLeft,
+  settings: GearSix,
+  shield: ShieldCheck,
+  sparkle: Sparkle,
+  stop: Stop,
+  tasks: ListChecks,
+  terminal: TerminalWindow,
+  threads: ChatDots,
+  projects: Folders,
+  tool: Wrench,
+  reasoning: Brain,
+  'file-search': MagnifyingGlass,
+  'web-search': Globe,
+  subagent: Robot,
+  usage: Coins,
+} as const
 
-const glyphs: Record<string, string> = {}
-for (const [file, svg] of Object.entries(sources)) {
-  const name = file.slice(file.lastIndexOf('/') + 1, -'.svg'.length)
-  glyphs[name] = svg.replaceAll('"#000"', '"currentColor"').replace('<svg ', '<svg width="100%" height="100%" ')
+const brands = {
+  'baton-mark': batonMark,
+  'baton-mark-dark': batonMarkDark,
+  'baton-mark-mono': batonMarkMono,
 }
 
-export type IconName =
-  | 'alert'
-  | 'archive'
-  | 'arrow-up'
-  | 'check'
-  | 'chevron-down'
-  | 'chevron-left'
-  | 'chevron-right'
-  | 'clock'
-  | 'close'
-  | 'commit'
-  | 'copy'
-  | 'device'
-  | 'dots'
-  | 'external'
-  | 'editor'
-  | 'file'
-  | 'folder'
-  | 'inbox'
-  | 'laptop'
-  | 'lock'
-  | 'memory'
-  | 'message'
-  | 'offline'
-  | 'panel-right'
-  | 'pause'
-  | 'pen'
-  | 'plus'
-  | 'refresh'
-  | 'reply'
-  | 'settings'
-  | 'shield'
-  | 'sparkle'
-  | 'stop'
-  | 'tasks'
-  | 'terminal'
-
-export type BrandName = 'baton-mark' | 'baton-mark-dark' | 'baton-mark-mono'
+export type IconName = keyof typeof icons
+export type BrandName = keyof typeof brands
 
 const styles = stylex.create({
   root: { display: 'inline-flex', flexShrink: 0 },
@@ -75,17 +129,22 @@ export function Icon({
   label?: string
   style?: stylex.StyleXStyles
 }) {
+  const props = {
+    ...stylex.props(styles.root, sizes[size], style),
+    role: label ? 'img' : undefined,
+    'aria-label': label,
+    'aria-hidden': label ? undefined : true,
+  }
+  if (name in brands) {
+    const svg = brands[name as BrandName]
+      .replaceAll('"#000"', '"currentColor"')
+      .replace('<svg ', '<svg width="100%" height="100%" ')
+    return <span {...props} dangerouslySetInnerHTML={{ __html: svg }} />
+  }
+  const Glyph = icons[name as IconName]
   return (
-    <span
-      {...stylex.props(styles.root, sizes[size], style)}
-      role={label ? 'img' : undefined}
-      aria-label={label}
-      aria-hidden={label ? undefined : true}
-      dangerouslySetInnerHTML={{ __html: glyphs[name] ?? '' }}
-    />
+    <span {...props}>
+      <Glyph size="100%" weight="regular" />
+    </span>
   )
-}
-
-export function hasIcon(name: string) {
-  return name in glyphs
 }

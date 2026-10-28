@@ -179,6 +179,10 @@ export interface Message {
   // 发给 Agent 的消息可能来自你，也可能来自 Project Agent。
   sender: 'you' | 'projectAgent' | 'agent'
   body: string
+  // 模拟场景中标记正在生成的回复。
+  streaming?: boolean
+  replyId?: string
+  workerTurnSeq?: number
   createdAt: number
   delivery: Delivery
   // 一轮实际做过的事的摘要；过程从中心读取。
@@ -213,6 +217,8 @@ export type OutputChunk = { kind: 'text'; text: string } | { kind: 'gap' }
 export interface LiveOutput {
   threadId: ID
   chunks: OutputChunk[]
+  replyId?: string
+  workerTurnSeq?: number
 }
 
 // 选中一段内容去问 Project 助手时带上的来源。Thread 回复写 Thread 和第几条回复；文件再写设备、路径和行号；事项写事项 ID。
@@ -241,6 +247,7 @@ export type ProjectAgentState = 'notStarted' | 'idle' | 'running' | 'waitingDevi
 export interface Project {
   id: ID
   name: string
+  emoji?: string
   hue: 'slate' | 'amber' | 'violet' | 'green' | 'blue' | 'rose'
   status: ProjectStatus
   archivedAt: number | null
@@ -261,7 +268,7 @@ export interface Project {
   createdAt: number
 }
 
-export type ProjectPatch = Partial<Pick<Project, 'name' | 'goal' | 'subscription' | 'model'>> & {
+export type ProjectPatch = Partial<Pick<Project, 'name' | 'emoji' | 'goal' | 'subscription' | 'model'>> & {
   memoryEmbedding?: MemoryEmbeddingConfigInput | null
 }
 

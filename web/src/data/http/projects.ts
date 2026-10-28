@@ -28,6 +28,7 @@ type ProjectAPI = Pick<
 interface ProjectDTO {
   id: string
   title: string
+  emoji?: string
   goal: string
   status: Project['status']
   created_at: string
@@ -171,6 +172,7 @@ export function mapProject(p: ProjectDTO, status: StatusDTO): Project {
   return {
     id: p.id,
     name: p.title,
+    emoji: p.emoji ?? '📁',
     hue: 'slate',
     status: p.status,
     archivedAt: p.status === 'archived' ? timestamp(p.updated_at) : null,
@@ -517,6 +519,7 @@ export function createProjectAPI(ctx: HttpContext): ProjectAPI {
     async createProject(input) {
       const body = {
         title: input.name,
+        ...(input.emoji ? { emoji: input.emoji } : {}),
         goal: input.goal,
         provider: provider(input.subscription),
         model: input.model,
@@ -549,6 +552,7 @@ export function createProjectAPI(ctx: HttpContext): ProjectAPI {
     updateProject: async ({ projectId, patch: changes }) =>
       patch(projectId, {
         ...(changes.name !== undefined ? { title: changes.name } : {}),
+        ...(changes.emoji !== undefined ? { emoji: changes.emoji } : {}),
         ...(changes.goal !== undefined ? { goal: changes.goal } : {}),
         ...(changes.subscription !== undefined ? { provider: provider(changes.subscription) } : {}),
         ...(changes.model !== undefined ? { model: changes.model } : {}),

@@ -158,6 +158,7 @@ export class MockStore {
     this.scenarioId = scenarioId
     this.world = createWorld(scenarioId, scheduler.now())
     this.startExistingRuns()
+    this.startStreamingDemo()
   }
 
   get scenario() {
@@ -217,7 +218,27 @@ export class MockStore {
     this.scenarioId = scenarioId
     this.world = createWorld(scenarioId, this.scheduler.now())
     this.startExistingRuns()
+    this.startStreamingDemo()
     this.emit('session', 'devices', 'projects', 'threads', 'messages', 'inbox', 'files', 'operations')
+  }
+
+  private startStreamingDemo() {
+    if (this.scenarioId !== 'streamingMarkdown') return
+    const reply = this.world.messages.find((item) => item.id === 'msg-stream-demo')!
+    const content =
+      '## 检查结果\n\n已经完成 **网关重连** 的检查，下面是测试结果。\n\n' +
+      '| 项目 | 结果 |\n| --- | --- |\n| 重连 | 通过 |\n| 消息恢复 | 通过 |\n\n' +
+      '运行以下命令可以再次验证：\n\n```sh\npnpm --filter @baton/server test:unit\n```\n\n' +
+      '相关文件：`~/src/baton/README.md`。\n\n- 保留原有连接状态\n- 断线后重新订阅\n- 记录无法补齐的输出缺口\n\n更多信息见 [React 文档](https://react.dev/)。'
+    const characters = Array.from(content)
+    const step = 3
+    for (let end = step; end < characters.length + step; end += step) {
+      this.schedule((end / step) * 160, () => {
+        reply.body = characters.slice(0, end).join('')
+        reply.streaming = end < characters.length
+        this.emit('messages')
+      })
+    }
   }
 
   // ---- 查询辅助 ----
@@ -549,6 +570,13 @@ export class MockStore {
     this.notifyProject(thread, 'replied')
     this.startNext(thread)
     this.emit('threads', 'messages', 'operations')
+  }
+
+  markThreadRead(threadId: ID) {
+    const thread = this.thread(threadId)
+    if (!thread.unread) return
+    thread.unread = false
+    this.emit('threads')
   }
 
   private endRunningSends(thread: Thread, phase: 'done' | 'stopped') {
@@ -1206,7 +1234,10 @@ ${response}`,
 
   // ---- Project ----
 
-  createProject(input: { name: string; goal: string; subscription: string; model: string }, clientId: string) {
+  createProject(
+    input: { name: string; emoji?: string; goal: string; subscription: string; model: string },
+    clientId: string,
+  ) {
     const existing = this.projectClientIds.get(clientId)
     if (existing) return this.project(existing.id)
     const name = input.name.trim()
@@ -1225,6 +1256,7 @@ ${response}`,
     const project: Project = {
       id: this.nextId('prj'),
       name,
+      emoji: input.emoji ?? '📁',
       hue: projectHues.find((hue) => !used.has(hue)) ?? projectHues[this.world.projects.length % projectHues.length],
       status: 'active',
       archivedAt: null,
@@ -1248,7 +1280,7 @@ ${response}`,
   updateProject(projectId: ID, patch: ProjectPatch): Project {
     const project = this.project(projectId)
     this.ensureProjectWritable(project)
-    const fields = ['name', 'goal', 'subscription', 'model', 'memoryEmbedding']
+    const fields = ['name', 'emoji', 'goal', 'subscription', 'model', 'memoryEmbedding']
     if (
       Object.entries(patch).some(
         ([key, value]) => !fields.includes(key) || (key !== 'memoryEmbedding' && typeof value !== 'string'),
@@ -1302,6 +1334,7 @@ ${response}`,
     if (next.goal !== project.goal) passive.goal = next.goal
     Object.assign(project, {
       name: next.name,
+      emoji: next.emoji,
       goal: next.goal,
       subscription: next.subscription,
       model: next.model,

@@ -6,6 +6,7 @@ import type { ID, ProjectPatch, Reference } from '../data/types'
 import { text } from '../theme/text'
 import { colors, size, space } from '../theme/tokens.stylex'
 import { Button } from '../ui/Button'
+import { ResizablePane } from '../ui/ResizablePane'
 import { createDraftStore } from './drafts'
 import { DesktopWorkspace } from './DesktopWorkspace'
 import { NewProjectDialog } from './NewProjectDialog'
@@ -39,6 +40,7 @@ const collapsedKey = 'baton.sidebar.collapsed'
 
 function readCollapsed() {
   try {
+    if (typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 700px)').matches) return true
     return localStorage.getItem(collapsedKey) === 'true'
   } catch {
     return false
@@ -155,7 +157,18 @@ export function WorkspaceLayout() {
       <DesktopWorkspace>
         <WorkspaceTitle />
         <div {...stylex.props(styles.shell)}>
-          <Sidebar />
+          <ResizablePane
+            acrossGutter
+            label="Resize sidebar"
+            storageKey="baton.width.sidebar"
+            defaultWidth={228}
+            min={200}
+            max={400}
+            reserve={480}
+            collapsed={collapsed}
+          >
+            <Sidebar />
+          </ResizablePane>
           <Main failedAt={failedAt} onRetry={workspace.signOut} />
         </div>
         {creatingProject && <NewProjectDialog onClose={() => setCreatingProject(false)} />}

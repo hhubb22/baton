@@ -308,8 +308,8 @@ describe('remote Cursor threads', () => {
       )
       expect(JSON.parse(jsonBody(request?.[1]?.body))).toMatchObject({
         model: 'custom-model',
-        execution_timeout_seconds: 7200,
       })
+      expect(JSON.parse(jsonBody(request?.[1]?.body))).not.toHaveProperty('execution_timeout_seconds')
     })
   })
 

@@ -5,10 +5,10 @@ import { ProjectRecovery } from '../app/ProjectRecovery'
 import { ProjectMemory } from '../app/ProjectMemory'
 import { ArchivedNotice, ProjectSettings } from '../app/ProjectSettings'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type UIEvent } from 'react'
 import { FilePreview } from '../app/FilePreview'
 import { MessageBody } from '../app/MessageBody'
-import { Page } from '../app/Page'
+import { Page, pane } from '../app/Page'
 import { ReferenceBlock } from '../app/ReferenceBlock'
 import type { ProjectSearch } from '../app/router'
 import { statusTextStyle, ThreadDetail, type RecoverAction } from '../app/ThreadDetail'
@@ -20,6 +20,7 @@ import { desktopCapability, useDesktopStatus, useLocalDesktop } from '../data/de
 import {
   agentNames,
   assistantWait,
+  deviceConnectionView,
   folderName,
   pendingInbox,
   projectAgentStatus,
@@ -27,7 +28,6 @@ import {
   runTimer,
   threadCardStatus,
   threadView,
-  type StatusView,
 } from '../data/derive'
 import {
   newClientId,
@@ -62,19 +62,34 @@ import { branch } from '../ui/Branch'
 import { Composer } from '../ui/Composer'
 import { Icon } from '../ui/Icon'
 import { Menu, MenuOption, MenuRule } from '../ui/Menu'
+import { ResizablePane } from '../ui/ResizablePane'
 import { StatusChip, StatusDot, type Tone } from '../ui/Status'
 import { Tabs } from '../ui/Tabs'
 
 const styles = stylex.create({
-  layout: { display: 'flex', gap: size.gutter, flexGrow: 1, minWidth: 0, height: '100%' },
+  layout: {
+    position: 'relative',
+    display: 'flex',
+    gap: size.gutter,
+    flexGrow: 1,
+    minWidth: 0,
+    height: '100%',
+    backgroundColor: colors.canvas,
+  },
   title: { display: 'flex', alignItems: 'center', gap: space.sm },
   headerStatus: { display: 'inline-flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap' },
   agentText: { color: colors.agentText },
   muted: { color: colors.muted },
   faint: { color: colors.faint },
   danger: { color: colors.danger },
-  main: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 },
-  timeline: { flexGrow: 1, minHeight: 0, overflowY: 'auto', outline: 'none' },
+  main: { position: 'relative', display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 },
+  timeline: {
+    flexGrow: 1,
+    minHeight: 0,
+    overflowY: 'auto',
+    outline: 'none',
+  },
+  timelineWithOverview: { paddingRight: 'var(--project-panel-width, 0px)' },
   entries: {
     display: 'flex',
     flexDirection: 'column',
@@ -83,6 +98,7 @@ const styles = stylex.create({
     maxWidth: size.measure,
     marginInline: 'auto',
     padding: space.xl,
+    paddingBottom: 'calc(var(--project-dock-height, 160px) + 16px)',
   },
   day: { alignSelf: 'center', color: colors.faint },
   userItem: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' },
@@ -155,7 +171,6 @@ const styles = stylex.create({
     color: 'inherit',
     textAlign: 'left',
   },
-  overviewOpen: { gridColumn: '1 / -1', width: '100%' },
   threadTitle: { flexGrow: 1, flexBasis: 0, minWidth: 0 },
   folderTag: { flexShrink: 1, minWidth: 0, color: colors.faint },
   threadMeta: { flexShrink: 0, color: colors.muted, whiteSpace: 'nowrap' },
@@ -171,34 +186,62 @@ const styles = stylex.create({
   },
   emptyHint: { maxWidth: '420px', color: colors.muted },
   dock: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    zIndex: 1,
+    pointerEvents: 'none',
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     gap: space.sm,
-    flexShrink: 0,
+    paddingTop: '24px',
+    backgroundImage: `linear-gradient(to bottom, transparent, color-mix(in srgb, ${colors.canvas} 70%, transparent))`,
     paddingInline: space.xl,
     paddingBottom: space.md,
+    opacity: 1,
+    transform: 'translateY(0)',
+    transition: 'opacity 180ms cubic-bezier(0.23, 1, 0.32, 1), transform 180ms cubic-bezier(0.23, 1, 0.32, 1)',
+    '@media (prefers-reduced-motion: reduce)': { transition: 'opacity 120ms ease', transform: 'none' },
   },
+  dockHidden: {
+    opacity: 0,
+    transform: 'translateY(12px)',
+    transition: 'opacity 280ms ease, transform 280ms cubic-bezier(0.23, 1, 0.32, 1)',
+    '@media (prefers-reduced-motion: reduce)': { transition: 'opacity 120ms ease', transform: 'none' },
+  },
+  dockInteractive: { pointerEvents: 'auto' },
+  dockBanner: { width: '100%', maxWidth: size.measure, pointerEvents: 'auto', ':empty': { display: 'none' } },
   chips: { display: 'flex', flexWrap: 'wrap', gap: space.xs, width: '100%', maxWidth: size.measure },
   status: { width: '100%', maxWidth: size.measure, minHeight: '18px', color: colors.muted },
   overview: {
     display: 'flex',
+    pointerEvents: 'auto',
     flexDirection: 'column',
     gap: space.lg,
     flexShrink: 0,
-    width: size.overview,
-    height: '100%',
+    width: 'calc(100% - 8px)',
+    maxHeight: 'calc(100% - 56px)',
+    marginTop: '56px',
     overflowY: 'auto',
     padding: space.lg,
-    backgroundColor: colors.glassLift,
+    backgroundColor: colors.surface,
     borderWidth: '1px',
     borderStyle: 'solid',
     borderColor: colors.glassEdge,
     borderRadius: radius.lg,
+    boxShadow: `0 8px 24px ${colors.shadowSoft}, 0 2px 6px ${colors.shadowNear}`,
   },
   section: { display: 'flex', flexDirection: 'column', gap: space.xs },
   sectionLabel: { color: colors.faint },
-  assistantHead: { display: 'flex', alignItems: 'center', gap: space.sm },
+  assistantDevice: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space.md,
+    minWidth: 0,
+  },
+  assistantDeviceText: { display: 'flex', flexDirection: 'column', gap: space.xxs, minWidth: 0 },
   group: { display: 'flex', flexDirection: 'column' },
   groupLabel: { paddingBlock: space.xs, paddingInline: space.sm, color: colors.faint },
   groupHead: {
@@ -216,13 +259,10 @@ const styles = stylex.create({
   },
   groupCount: { color: colors.faint },
   groupChevron: { marginLeft: 'auto', color: colors.faint },
-  // 第一行是状态点、标题和悬停时出现的时间，第二行是设备和目录名。
   overviewRow: {
-    display: 'grid',
-    gridTemplateColumns: 'auto minmax(0, 1fr) auto',
+    display: 'flex',
     alignItems: 'center',
-    columnGap: space.sm,
-    rowGap: '2px',
+    gap: space.sm,
     width: '100%',
     minHeight: size.control,
     paddingBlock: '6px',
@@ -235,13 +275,12 @@ const styles = stylex.create({
   },
   rowTime: {
     color: colors.faint,
-    opacity: {
-      default: 0,
-      [stylex.when.ancestor(':hover')]: 1,
-      [stylex.when.ancestor(':focus-visible')]: 1,
+    display: {
+      default: 'none',
+      [stylex.when.ancestor(':hover')]: 'inline',
+      [stylex.when.ancestor(':focus-visible')]: 'inline',
     },
   },
-  rowDetail: { gridColumn: '2 / span 2', display: 'flex', gap: '4px', minWidth: 0, color: colors.muted },
   more: {
     alignSelf: 'flex-start',
     padding: 0,
@@ -496,7 +535,7 @@ function Entry({
 function EmptyConversation({ project }: { project: Project }) {
   return (
     <div {...stylex.props(styles.empty)}>
-      <Avatar name={project.name} hue={project.hue} large />
+      <Avatar name={project.name} hue={project.hue} emoji={project.emoji} large />
       <span {...stylex.props(text.title)}>{project.name}</span>
       {project.goal && <span {...stylex.props(text.small, styles.emptyHint)}>{project.goal}</span>}
     </div>
@@ -520,26 +559,22 @@ function assistantLine(project: Project, devices: Device[]) {
 
 function Overview({
   project,
-  status,
   devices,
   threads,
   pending,
   memory,
   onOpenThread,
   onOpenInbox,
-  onSettings,
   tab,
   onTabChange,
 }: {
   project: Project
-  status: StatusView
   devices: Device[]
   threads: Thread[]
   pending: InboxItem[]
   memory: MemoryNote[] | undefined
   onOpenThread: (threadId: string) => void
   onOpenInbox: () => void
-  onSettings: () => void
   tab: 'threads' | 'memory'
   onTabChange: (tab: 'threads' | 'memory') => void
 }) {
@@ -549,6 +584,7 @@ function Overview({
   const localNode = desktopCapability('open-local')?.openLocal && desktop.data?.registered ? desktop.data.node_id : null
   const now = useNow(60_000)
   const device = devices.find((item) => item.id === project.agent.deviceId)
+  const deviceStatus = device ? deviceConnectionView(device, [], now) : null
   const live = threads.filter((item) => item.status !== 'archived')
   const views = new Map(
     live.map((thread) => [
@@ -573,76 +609,55 @@ function Overview({
     const view = views.get(thread.id)!
     const lead = (
       <>
-        <StatusDot tone={view.status.tone} />
+        <Icon name="message" size={16} style={styles.muted} />
         <span {...stylex.props(styles.threadTitle, text.truncate)}>{thread.title}</span>
+        <StatusDot tone={view.status.tone} label={view.status.label} />
         <span {...stylex.props(text.caption, styles.rowTime)}>{relativeTime(thread.updatedAt, now)}</span>
-      </>
-    )
-    const metadata = (
-      <>
-        <span {...stylex.props(text.truncate)}>
-          {devices.find((item) => item.id === thread.deviceId)?.name ?? 'Removed device'} ·
-        </span>
-        <span {...stylex.props(text.mono, text.truncate)}>{folderName(thread.folder)}</span>
       </>
     )
     return localNode === thread.deviceId ? (
       <div key={thread.id} {...stylex.props(stylex.defaultMarker(), text.small, styles.overviewRow)}>
         <button
           type="button"
+          title={thread.title}
           onClick={() => onOpenThread(thread.id)}
-          {...stylex.props(text.small, styles.threadOpen, styles.overviewOpen, focusRing.ring)}
+          {...stylex.props(text.small, styles.threadOpen, focusRing.ring)}
         >
           {lead}
         </button>
-        <span {...stylex.props(text.caption, styles.rowDetail)}>
-          {metadata}
-          <LocalThreadActions thread={thread} />
-        </span>
+        <LocalThreadActions thread={thread} />
       </div>
     ) : (
       <button
         key={thread.id}
         type="button"
+        title={thread.title}
         onClick={() => onOpenThread(thread.id)}
         {...stylex.props(stylex.defaultMarker(), text.small, styles.overviewRow, focusRing.ring)}
       >
         {lead}
-        <span {...stylex.props(text.caption, styles.rowDetail)}>{metadata}</span>
       </button>
     )
   }
 
   return (
     <aside aria-label="Overview" {...stylex.props(styles.overview)}>
-      <div {...stylex.props(styles.assistantHead)}>
-        <h2 {...stylex.props(text.bodyMedium)}>Overview</h2>
-        <IconButton icon="dots" label="Project settings" onClick={onSettings} />
-      </div>
+      <section aria-label="Project assistant" {...stylex.props(styles.assistantDevice)}>
+        <Icon name="laptop" size={24} style={styles.muted} />
+        <div {...stylex.props(styles.assistantDeviceText)}>
+          <span {...stylex.props(text.small, text.truncate)}>
+            {device?.name ?? 'No device yet'}
+            {deviceStatus && ` · ${deviceStatus.label}`}
+          </span>
+          <span {...stylex.props(text.caption, styles.muted)}>{assistantLine(project, devices)}</span>
+        </div>
+      </section>
       {project.goal && (
         <section {...stylex.props(styles.section)}>
           <h3 {...stylex.props(text.captionMedium, styles.sectionLabel)}>Goal</h3>
           <p {...stylex.props(text.small)}>{project.goal}</p>
         </section>
       )}
-      <section aria-label="Project assistant" {...stylex.props(styles.section)}>
-        <h3 {...stylex.props(text.captionMedium, styles.sectionLabel)}>Project assistant</h3>
-        <div {...stylex.props(styles.assistantHead)}>
-          <Icon name="laptop" size={14} style={styles.muted} />
-          <span {...stylex.props(text.label, text.truncate)}>{device?.name ?? 'No device yet'}</span>
-        </div>
-        <span
-          {...stylex.props(
-            text.caption,
-            styles.headerStatus,
-            status.tone === 'agent' ? styles.agentText : statusTextStyle(status.tone),
-          )}
-        >
-          <StatusDot tone={status.tone} />
-          {project.agent.state === 'stopping' ? 'Stopping' : status.label.replace(/ on .*$/, '')}
-        </span>
-        <span {...stylex.props(text.caption, styles.muted)}>{assistantLine(project, devices)}</span>
-      </section>
       <Tabs
         label="Overview lists"
         value={tab}
@@ -821,11 +836,23 @@ export function ProjectPage() {
   const changeStatus = useSetProjectStatus()
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const timelineRef = useRef<HTMLDivElement>(null)
+  const dockRef = useRef<HTMLDivElement>(null)
+  const scrollAnchor = useRef(0)
+  const [dockState, setDockState] = useState({ projectId, hidden: false })
+  if (dockState.projectId !== projectId) setDockState({ projectId, hidden: false })
+  const dockHidden = dockState.projectId === projectId && dockState.hidden
+  const setDockHidden = (hidden: boolean) =>
+    setDockState((current) =>
+      current.projectId === projectId && current.hidden === hidden ? current : { projectId, hidden },
+    )
   const [draft, setDraft] = useState('')
   const [error, setError] = useState<string | null>(null)
   // 发送失败后正文没改就沿用同一个 clientId，重试不会多出一条消息。
   const [failed, setFailed] = useState<{ body: string; clientId: string } | null>(null)
-  const [overviewOpen, setOverviewOpen] = useState(true)
+  const [overviewState, setOverviewState] = useState({ projectId, open: true })
+  if (overviewState.projectId !== projectId) setOverviewState({ projectId, open: true })
+  const overviewOpen = overviewState.projectId === projectId ? overviewState.open : true
+  const setOverviewOpen = (open: boolean) => setOverviewState({ projectId, open })
   const [previewPath, setPreviewPath] = useState<string | null>(null)
   const workspace = useWorkspace()
   const reference = workspace.references[projectId] ?? null
@@ -838,7 +865,10 @@ export function ProjectPage() {
   // 新记录到达时滚到底部。
   useEffect(() => {
     const timeline = timelineRef.current
-    if (timeline) timeline.scrollTop = timeline.scrollHeight
+    if (timeline) {
+      timeline.scrollTop = timeline.scrollHeight
+      scrollAnchor.current = timeline.scrollTop
+    }
   }, [list.length, projectId])
 
   // 从别处选中内容带过来时，把焦点放到输入区。
@@ -847,6 +877,38 @@ export function ProjectPage() {
   }, [reference])
 
   const project = projects.data?.find((item) => item.id === projectId)
+  function onTimelineScroll(event: UIEvent<HTMLDivElement>) {
+    const timeline = event.currentTarget
+    const top = timeline.scrollTop
+    const delta = top - scrollAnchor.current
+    if (timeline.scrollHeight - timeline.clientHeight - top <= 2) {
+      scrollAnchor.current = top
+      setDockHidden(false)
+    } else if (Math.abs(delta) >= 12) {
+      scrollAnchor.current = top
+      if (delta > 0) setDockHidden(false)
+      else if (
+        project?.status === 'active' &&
+        !['blocked', 'waitingDevice', 'stopping', 'stopped'].includes(project.agent.state) &&
+        !error &&
+        !dockRef.current?.contains(document.activeElement)
+      )
+        setDockHidden(true)
+    }
+  }
+  useLayoutEffect(() => {
+    const dock = dockRef.current
+    const main = dock?.parentElement
+    if (!dock || !main) return
+    const update = () => main.style.setProperty('--project-dock-height', `${dock.offsetHeight}px`)
+    update()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update)
+    observer?.observe(dock)
+    return () => {
+      observer?.disconnect()
+      main.style.removeProperty('--project-dock-height')
+    }
+  }, [project?.id, search.settings])
   if (projects.data && !project) {
     return (
       <Page title="Project not found">
@@ -956,6 +1018,11 @@ export function ProjectPage() {
   const running = project.status === 'active' && project.agent.state === 'running'
   const stopping = project.agent.state === 'stopping'
   const showPanel = overviewOpen || search.thread !== undefined
+  const hideDock =
+    dockHidden &&
+    project.status === 'active' &&
+    !['blocked', 'waitingDevice', 'stopping', 'stopped'].includes(project.agent.state) &&
+    !error
   const statusLine =
     error ??
     (send.isPending
@@ -1032,11 +1099,12 @@ export function ProjectPage() {
   }
 
   return (
-    <div {...stylex.props(styles.layout)}>
+    <div {...stylex.props(styles.layout, pane.card)}>
       <Page
+        embedded
         title={
           <span {...stylex.props(styles.title)}>
-            <Avatar name={project.name} hue={project.hue} />
+            <Avatar name={project.name} hue={project.hue} emoji={project.emoji} />
             {project.name}
           </span>
         }
@@ -1057,16 +1125,6 @@ export function ProjectPage() {
         }
         actions={
           <>
-            <IconButton
-              icon="panel-right"
-              label={showPanel ? 'Hide overview' : 'Show overview'}
-              active={showPanel}
-              aria-expanded={showPanel}
-              onClick={() => {
-                if (showPanel) setThread(undefined)
-                setOverviewOpen(!showPanel)
-              }}
-            />
             <Menu narrow align="end" trigger={<IconButton icon="dots" label="Project actions" />}>
               <MenuOption onSelect={() => settings(true)}>Settings</MenuOption>
               <MenuOption
@@ -1087,11 +1145,27 @@ export function ProjectPage() {
                 </>
               )}
             </Menu>
+            <IconButton
+              icon="details"
+              label={showPanel ? 'Hide overview' : 'Show overview'}
+              active={showPanel}
+              aria-expanded={showPanel}
+              onClick={() => {
+                if (showPanel) setThread(undefined)
+                setOverviewOpen(!showPanel)
+              }}
+            />
           </>
         }
       >
         <div {...stylex.props(styles.main)}>
-          <div ref={timelineRef} role="region" aria-label="Conversation" {...stylex.props(styles.timeline)}>
+          <div
+            ref={timelineRef}
+            role="region"
+            aria-label="Conversation"
+            onScroll={onTimelineScroll}
+            {...stylex.props(styles.timeline, overviewOpen && !search.thread && styles.timelineWithOverview)}
+          >
             <div {...stylex.props(styles.entries)}>
               <InboxFeedback />
               {conversation}
@@ -1103,15 +1177,22 @@ export function ProjectPage() {
               )}
             </div>
           </div>
-          <div {...stylex.props(styles.dock)}>
-            <DockBanner
-              project={project}
-              devices={allDevices}
-              threads={projectThreads}
-              onViewDevices={() => void navigate({ to: '/devices' })}
-              onResume={() => onStatus('active')}
-              resuming={changeStatus.isPending}
-            />
+          <div
+            ref={dockRef}
+            inert={hideDock || undefined}
+            aria-hidden={hideDock || undefined}
+            {...stylex.props(styles.dock, hideDock && styles.dockHidden)}
+          >
+            <div {...stylex.props(styles.dockBanner)}>
+              <DockBanner
+                project={project}
+                devices={allDevices}
+                threads={projectThreads}
+                onViewDevices={() => void navigate({ to: '/devices' })}
+                onResume={() => onStatus('active')}
+                resuming={changeStatus.isPending}
+              />
+            </div>
             {search.thread && (counts.running > 0 || counts.waiting > 0 || pending.length > 0) && (
               <div aria-label="Project threads" {...stylex.props(styles.chips)}>
                 {counts.running > 0 && <StatusChip tone="info" label="Running" count={counts.running} />}
@@ -1122,6 +1203,7 @@ export function ProjectPage() {
             {project.status !== 'archived' && (
               <Composer
                 label="Message the project assistant"
+                style={styles.dockInteractive}
                 inputRef={inputRef}
                 header={
                   reference && (
@@ -1148,41 +1230,52 @@ export function ProjectPage() {
           </div>
         </div>
       </Page>
-      {search.thread ? (
-        <ThreadDetail
-          key={search.thread}
-          threadId={search.thread}
-          layout="panel"
-          onBack={() => setThread(undefined)}
-          onClose={() => {
-            setOverviewOpen(false)
-            setThread(undefined)
-          }}
-          onRecover={onRecover}
-        />
-      ) : (
-        showPanel && (
-          <Overview
-            project={project}
-            status={status}
-            devices={allDevices}
-            threads={projectThreads}
-            pending={pending}
-            memory={memory.data}
-            onOpenThread={onOpenThread}
-            onOpenInbox={() => void navigate({ to: '/inbox' })}
-            onSettings={() => settings(true)}
-            tab={search.view === 'memory' ? 'memory' : 'threads'}
-            onTabChange={(tab) =>
-              void navigate({
-                to: '/projects/$projectId',
-                params: { projectId },
-                search: (prev: ProjectSearch) => ({ ...prev, view: tab === 'memory' ? 'memory' : undefined }),
-              })
-            }
-          />
-        )
-      )}
+      {
+        <ResizablePane
+          key={search.thread ? 'thread' : 'overview'}
+          label="Resize project panel"
+          storageKey="baton.width.project-panel"
+          defaultWidth={search.thread ? 440 : 320}
+          min={280}
+          max={800}
+          reserve={400}
+          edge="left"
+          floating={!search.thread}
+          open={Boolean(search.thread) || overviewOpen}
+        >
+          {search.thread ? (
+            <ThreadDetail
+              key={search.thread}
+              threadId={search.thread}
+              layout="panel"
+              onBack={() => setThread(undefined)}
+              onClose={() => {
+                setOverviewOpen(false)
+                setThread(undefined)
+              }}
+              onRecover={onRecover}
+            />
+          ) : (
+            <Overview
+              project={project}
+              devices={allDevices}
+              threads={projectThreads}
+              pending={pending}
+              memory={memory.data}
+              onOpenThread={onOpenThread}
+              onOpenInbox={() => void navigate({ to: '/inbox' })}
+              tab={search.view === 'memory' ? 'memory' : 'threads'}
+              onTabChange={(tab) =>
+                void navigate({
+                  to: '/projects/$projectId',
+                  params: { projectId },
+                  search: (prev: ProjectSearch) => ({ ...prev, view: tab === 'memory' ? 'memory' : undefined }),
+                })
+              }
+            />
+          )}
+        </ResizablePane>
+      }
       {previewPath && previewDevice && (
         <FilePreview
           key={previewPath}

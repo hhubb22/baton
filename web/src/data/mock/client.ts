@@ -138,6 +138,7 @@ export function createMockClient(
       return thread
     },
     listMessages: (threadId) => guarded(() => store.snapshot().messages.filter((item) => item.threadId === threadId)),
+    markThreadRead: (threadId) => store.markThreadRead(threadId),
     listInbox: () => guarded(() => store.snapshot().inbox),
     readFile: (deviceId, path, continuation) => guarded(() => store.readFile(deviceId, path, continuation)),
     listFolders: (deviceId, path) => guarded(() => store.listFolders(deviceId, path)),

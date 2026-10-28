@@ -13,6 +13,18 @@ const setup = () => {
 }
 
 describe('live output subscription', () => {
+  it('separates output from consecutive replies', async () => {
+    const { api, send, listener } = setup()
+    api.setConnection(send)
+    api.subscribeOutput('one', listener)
+    api.receive('one', { ...chunk('first', 'one:5'), reply_id: 'reply-one' })
+    api.receive('one', { ...chunk('second', 'two:6'), reply_id: 'reply-two' })
+    expect(await api.readOutput('one')).toEqual({
+      threadId: 'one',
+      replyId: 'reply-two',
+      chunks: [{ kind: 'text', text: 'second' }],
+    })
+  })
   it('reads pushed output without HTTP and keeps each epoch separate', async () => {
     const { api, request, send, listener } = setup()
     api.setConnection(send)

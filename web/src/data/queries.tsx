@@ -383,13 +383,6 @@ export function useCancelMessage() {
   return useMutation({ mutationFn: (messageId: ID) => client.cancelMessage(messageId) })
 }
 
-export function useSetThreadExecutionLimit() {
-  const client = useClient()
-  return useMutation({
-    mutationFn: (input: { threadId: ID; executionTimeoutSeconds: number }) => client.setThreadExecutionLimit(input),
-  })
-}
-
 export function useSetThreadModel() {
   const client = useClient()
   return useMutation({ mutationFn: (input: { threadId: ID; model: string }) => client.setThreadModel(input) })
@@ -420,8 +413,14 @@ export function useResumeThread() {
 export function useCreateProject() {
   const client = useClient()
   return useMutation({
-    mutationFn: (input: { name: string; goal: string; subscription: string; model: string; clientId: string }) =>
-      client.createProject(input),
+    mutationFn: (input: {
+      name: string
+      emoji?: string
+      goal: string
+      subscription: string
+      model: string
+      clientId: string
+    }) => client.createProject(input),
   })
 }
 

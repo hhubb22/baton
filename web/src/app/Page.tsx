@@ -59,18 +59,20 @@ export function Page({
   status,
   actions,
   children,
+  embedded = false,
 }: {
   title: ReactNode
   status?: ReactNode
   actions?: ReactNode
   children: ReactNode
+  embedded?: boolean
 }) {
   const { collapsed, toggleSidebar } = useWorkspace()
   return (
-    <section {...stylex.props(styles.page, pane.card)}>
+    <section {...stylex.props(styles.page, !embedded && pane.card)}>
       <header {...stylex.props(styles.header)}>
         <IconButton
-          icon={collapsed ? 'chevron-right' : 'chevron-left'}
+          icon="sidebar"
           label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           aria-expanded={!collapsed}
           onClick={toggleSidebar}

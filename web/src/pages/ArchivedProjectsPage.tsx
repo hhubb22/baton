@@ -54,7 +54,7 @@ export function ArchivedProjectsPage() {
             params={{ projectId: project.id }}
             {...stylex.props(styles.row, focusRing.ring)}
           >
-            <Avatar name={project.name} hue={project.hue} />
+            <Avatar name={project.name} hue={project.hue} emoji={project.emoji} />
             <span {...stylex.props(styles.content)}>
               <span {...stylex.props(text.bodyMedium, text.truncate)}>{project.name}</span>
               <span {...stylex.props(text.caption, text.muted)}>
