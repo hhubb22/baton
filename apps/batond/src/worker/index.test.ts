@@ -701,6 +701,15 @@ describe('reliable Worker', () => {
                 f.output.offer({ ...delta(first.client_message_id!, 'lost'), gap: true })
                 const lost = yield* until(readOutput(worker, cfg, live.cursor), (result) => result.gap)
                 expect(lost.text).toBe('lost')
+                f.output.offer({ ...delta(first.client_message_id!, 'first reply'), replyId: 'reply-one' })
+                const reply = yield* until(readOutput(worker, cfg), (result) => result.reply_id === 'reply-one')
+                expect(reply).toMatchObject({ text: 'first reply', reply_id: 'reply-one', worker_turn_seq: 1 })
+                f.output.offer({ ...delta(first.client_message_id!, 'second reply'), replyId: 'reply-two' })
+                const nextReply = yield* until(
+                  readOutput(worker, cfg, reply.cursor),
+                  (result) => result.reply_id === 'reply-two',
+                )
+                expect(nextReply.text).toBe('second reply')
                 expect(db.prepare('SELECT commit_token FROM worker_commit').get()?.commit_token).toBe(token)
               } finally {
                 db.close()

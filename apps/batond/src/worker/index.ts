@@ -106,6 +106,10 @@ const canonical = (value: unknown): string => {
     .join(',')}}`
 }
 const digest = (value: unknown) => createHash('sha256').update(canonical(value)).digest('hex')
+const safeReplyId = (id: string) =>
+  Buffer.byteLength(id) > 512 || id.startsWith('baton:reply:sha256:') || displayText(id) !== id
+    ? `baton:reply:sha256:${digest(id)}`
+    : id
 const reasonOf = (value: unknown) => boundReason(value instanceof Error ? value.message : String(value))
 const reject = (code: string, message: string): never => {
   throw new WorkerFailure(code, message)
@@ -153,6 +157,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
   const output = new OutputBuffer()
   let outputTurn: string | undefined
   let outputExecution: string | undefined
+  let outputReplyId: string | undefined
   let stopEvidence: Deferred.Deferred<void> | undefined
   let frozen: WorkerFailure | undefined
   let closed = false
@@ -346,10 +351,12 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         output.reset()
         outputTurn = turn
         outputExecution = undefined
+        outputReplyId = undefined
       }
       if (active?.executionId && outputExecution && active.executionId !== outputExecution) {
         output.reset()
         outputExecution = active.executionId
+        outputReplyId = undefined
       }
       return value
     }).pipe(Effect.uninterruptible)
@@ -426,6 +433,11 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
     )
       return
     outputExecution = event.executionId
+    const replyId = event.replyId === undefined ? undefined : safeReplyId(event.replyId)
+    if (replyId !== outputReplyId) {
+      output.reset()
+      outputReplyId = replyId
+    }
     output.append(event.text, event.gap)
   }
   function ensureAgent(): Effect.Effect<ThreadAgent> {
@@ -726,12 +738,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
             return
           if (current.turn === undefined) return reject('invalid_state', 'Reply has no Worker turn')
           // 保留映射前缀，避免原生 ID 与映射结果占用同一个展示 ID。
-          const id =
-            Buffer.byteLength(event.id) > 512 ||
-            event.id.startsWith('baton:reply:sha256:') ||
-            displayText(event.id) !== event.id
-              ? `baton:reply:sha256:${digest(event.id)}`
-              : event.id
+          const id = safeReplyId(event.id)
           const text = displayText(event.text)
           const repaired = id !== event.id || text !== event.text
           report(
@@ -1712,6 +1719,9 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
           operation_id: request.operation_id,
           session_id: request.session_id,
           state: stateName,
+          ...(state.activeMessage && state.messages[state.activeMessage]?.turn !== undefined
+            ? { worker_turn_seq: state.messages[state.activeMessage]!.turn }
+            : {}),
           ...(!state.config || frozen || recovering
             ? { ok: false, code: 'unavailable', gap: false }
             : request.session_id !== state.config.thread_id ||
@@ -1719,7 +1729,10 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
                 (decoded.storage_generation !== undefined &&
                   decoded.storage_generation !== state.config.storage_generation)
               ? { ok: false, code: 'invalid_request', gap: false }
-              : output.read(request.cursor)),
+              : {
+                  ...output.read(request.cursor),
+                  ...(outputReplyId === undefined ? {} : { reply_id: outputReplyId }),
+                }),
         }
         return { type: 'result', ok: result.ok, session_result: result }
       }

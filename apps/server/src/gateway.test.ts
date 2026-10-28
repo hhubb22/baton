@@ -686,6 +686,8 @@ test('switching subscriptions while output is pending replaces the old Thread', 
         session_id: threadId,
         ok: true,
         text: 'new Thread',
+        reply_id: 'native-reply',
+        worker_turn_seq: 2,
         gap: false,
       }
     },
@@ -714,6 +716,10 @@ test('switching subscriptions while output is pending replaces the old Thread', 
     .poll(() => frames.some((frame) => frame.thread_id === secondThread && frame.text === 'new Thread'))
     .toBe(true)
   expect(browser.readyState).toBe(WebSocket.OPEN)
+  expect(frames.find((frame) => frame.thread_id === secondThread && frame.text === 'new Thread')).toMatchObject({
+    reply_id: 'native-reply',
+    worker_turn_seq: 2,
+  })
   expect(frames.some((frame) => frame.text === 'old Thread')).toBe(false)
 })
 

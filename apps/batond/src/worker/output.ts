@@ -72,16 +72,19 @@ export const makeOutputMailbox = () => {
   const wake = Effect.runSync(Queue.dropping<void>(1))
   const buffer = new OutputBuffer()
   let identity: AgentEventIdentity | undefined
+  let replyId: string | undefined
   let cursor: string | undefined
   const offer = (event: AgentOutput) => {
     if (
       !identity ||
       event.nativeSessionId !== identity.nativeSessionId ||
       event.messageId !== identity.messageId ||
-      event.executionId !== identity.executionId
+      event.executionId !== identity.executionId ||
+      event.replyId !== replyId
     ) {
       buffer.reset()
       cursor = undefined
+      replyId = event.replyId
       identity = {
         nativeSessionId: event.nativeSessionId,
         messageId: event.messageId,
@@ -99,7 +102,7 @@ export const makeOutputMailbox = () => {
         cursor = page.cursor
         const next = buffer.read(cursor)
         if (next.ok && next.text.length > 0) Queue.offerUnsafe(wake, undefined)
-        return { ...identity, text: page.text, gap: page.gap }
+        return { ...identity, text: page.text, gap: page.gap, ...(replyId === undefined ? {} : { replyId }) }
       }),
     ),
   )

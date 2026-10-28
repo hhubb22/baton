@@ -171,7 +171,7 @@ function makeAgent(config: WorkerOpenConfig, options: HostedAgentOptions): Threa
     },
     emit,
     output: (event: AgentDelta) => {
-      output.offer(event)
+      output.offer({ ...event, replyId: event.id })
       options.onDelta?.(event)
     },
   })

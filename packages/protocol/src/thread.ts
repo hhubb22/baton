@@ -81,6 +81,8 @@ export const SessionResult = Schema.Struct({
   code: Schema.optionalKey(Text),
   state: Schema.optionalKey(Text),
   text: Schema.optionalKey(boundedText(16 * 1024)),
+  reply_id: Schema.optionalKey(boundedText(512)),
+  worker_turn_seq: Schema.optionalKey(NonNegativeInteger),
   cursor: Schema.optionalKey(Cursor),
   full_output: Schema.optionalKey(FullOutputPage),
   gap: Schema.Boolean,
