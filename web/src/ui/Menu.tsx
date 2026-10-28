@@ -94,6 +94,7 @@ export function Menu({
 
 export function MenuOption({
   children,
+  leading,
   note,
   detail,
   dot,
@@ -101,6 +102,7 @@ export function MenuOption({
   onSelect,
 }: {
   children: ReactNode
+  leading?: ReactNode
   note?: ReactNode
   detail?: ReactNode
   dot?: Tone
@@ -120,6 +122,7 @@ export function MenuOption({
         ).className ?? ''
       }
     >
+      {leading}
       {dot && <StatusDot tone={dot} />}
       <span {...stylex.props(styles.name, text.truncate)}>{children}</span>
       {note && <span {...stylex.props(text.caption, styles.note)}>{note}</span>}
