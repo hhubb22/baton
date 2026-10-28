@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vite-plus/test'
 import { createDownloads, downloadsConfiguration, injectDeployment, type Downloads } from './downloads.ts'
-import { downloadArchive, downloadCA, writeChecksum } from './testing/downloads.ts'
+import { downloadArchive, downloadCA, tarCommand, writeChecksum } from './testing/downloads.ts'
 
 const directories: string[] = []
 const downloads: Downloads[] = []
@@ -39,6 +39,8 @@ it('only configures downloads when a directory is provided', () => {
 it.each([undefined, 'ustar', 'gnu'] as const)(
   'injects deterministic deployment bytes while preserving original tar entries (%s)',
   async (format) => {
+    // Windows 的 bsdtar 不支持 --format=gnu，也不产生 GNU 长文件名扩展（L/K），该用例无法在 Windows 验证。
+    if (format === 'gnu' && process.platform === 'win32') return
     const directory = await fixture()
     const archive = await downloadArchive(directory, format ? { format } : {})
     const config = { format: 1 as const, coordinator_url: 'https://baton.local', ca_pem: 'public-test-ca' }
@@ -85,17 +87,19 @@ it.each([undefined, 'ustar', 'gnu'] as const)(
       [extracted, first],
     ]) {
       await mkdir(destination)
-      execFileSync('tar', ['-xf', source, '-C', destination])
+      execFileSync(tarCommand(), ['-xf', source, '-C', destination])
     }
     const root = join(extracted, archive.name)
     expect(JSON.parse(await readFile(join(root, 'deployment.json'), 'utf8'))).toEqual(config)
-    expect((await stat(join(root, 'deployment.json'))).mode & 0o777).toBe(0o644)
+    // Windows 不表达 POSIX 权限位，stat().mode 恒为 0666。
+    if (process.platform !== 'win32') expect((await stat(join(root, 'deployment.json'))).mode & 0o777).toBe(0o644)
     expect((await stat(join(root, 'deployment.json'))).mtimeMs).toBe(
       Math.floor((await stat(join(root, 'release.json'))).mtimeMs / 1000) * 1000,
     )
     const originals = await readdir(original, { recursive: true })
+    // readdir 在 Windows 返回反斜杠分隔的路径，拼接 deployment.json 时也要用同一分隔符。
     expect((await readdir(extracted, { recursive: true })).sort()).toEqual(
-      [...originals, `${archive.name}/deployment.json`].sort(),
+      [...originals, join(archive.name, 'deployment.json')].sort(),
     )
     for (const file of originals) {
       const before = await stat(join(original, file))
@@ -152,7 +156,8 @@ it('filters incomplete, unsupported and malformed packages and reuses per-origin
       .update(await readFile(output!.path))
       .digest('hex'),
   )
-  expect((await stat(cache)).mode & 0o777).toBe(0o700)
+  // Windows 不表达 POSIX 权限位。
+  if (process.platform !== 'win32') expect((await stat(cache)).mode & 0o777).toBe(0o700)
   await expect
     .poll(async () => ({ files: (await server.list('other.local:8443')).items.map((item) => item.file), reasons }))
     .toMatchObject({ files: expect.arrayContaining([archive.file]) })

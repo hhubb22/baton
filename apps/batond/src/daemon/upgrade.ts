@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { Schema } from 'effect'
 import { readPrivateFile, writePrivateFileAtomic } from '../platform/private.ts'
 import { processLockIsHeld } from '../platform/lock.ts'
+import { readProcessIdentity } from '../platform/identity.ts'
 import { isMissing } from './identity.ts'
 import { IPCError, requestWorker } from './ipc.ts'
 import { workerPaths } from './paths.ts'
@@ -263,6 +264,18 @@ export async function upgradeBlockers(
           const record = Schema.decodeUnknownSync(Schema.Struct({ pid: Schema.Int, creationTime: Schema.String }))(
             JSON.parse(String(row.payload)),
           )
+          // 记录只说明“曾启动过”。心跳探测每轮都登记短命进程，Windows 上探测要 1～3 秒，
+          // 只按表判断会把正在运行的探测报成未确认清理，升级因此永远无法就绪。
+          // 只有在登记时拿到了确切创建时间、且该进程已确认退出（或 pid 已被复用）时才不再阻碍；
+          // creationTime 为 unknown 表示登记时就没拿到身份，无法核实，保持保守仍报为阻碍。
+          // 查询失败（如 Windows CIM 超时）不能当作已退出，否则仍在写账本的 Runtime 会被放行迁移。
+          if (record.creationTime !== 'unknown') {
+            const identity = await readProcessIdentity(record.pid).then(
+              (value) => value,
+              () => undefined,
+            )
+            if (identity === null || (identity && identity.creationTime !== record.creationTime)) continue
+          }
           blockers.push({
             kind: 'process',
             id: String(row.role),

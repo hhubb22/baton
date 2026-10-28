@@ -92,7 +92,11 @@ export async function readLogTail(path: string): Promise<string> {
   let handle
   try {
     handle = await open(path, 'r')
-    const { size } = await handle.stat()
+    const info = await handle.stat()
+    // Windows 允许以读方式打开目录，POSIX 会抛 EISDIR；显式拒绝，避免把目录当成空日志。
+    if (info.isDirectory())
+      throw Object.assign(new Error(`Cannot read a directory as a log: ${path}`), { code: 'EISDIR' })
+    const size = info.size
     const chunks: Buffer[] = []
     let position = size
     let bytesRead = 0

@@ -1,8 +1,18 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { chmod, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, win32 } from 'node:path'
 import { releaseMetadata } from '@baton/protocol/release'
+
+/**
+ * Windows 上 Git 的 GNU tar 会把 `C:\...` 的盘符当作 POSIX 的远程主机语法（host:path），
+ * 报 Cannot execute remote shell。与 tools/package-release.mjs 一致，显式使用系统 bsdtar。
+ */
+export function tarCommand(): string {
+  return process.platform === 'win32'
+    ? win32.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe')
+    : 'tar'
+}
 
 export async function writeChecksum(path: string) {
   const content = await readFile(path)
@@ -48,7 +58,7 @@ export async function downloadArchive(
   }
   const path = join(directory, name + '.tar.gz')
   // 默认参数与 tools/package-release.mjs 的非 Windows 发布归档一致。
-  execFileSync('tar', [
+  execFileSync(tarCommand(), [
     ...(format ? [`--format=${format === 'gnu' && process.platform === 'darwin' ? 'gnutar' : format}`] : []),
     '-czf',
     path,

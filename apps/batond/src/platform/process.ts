@@ -70,7 +70,10 @@ export async function spawnOwnedProcess(
     return (reapInFlight ??= (async () => {
       if (!record) throw new Error('Owned process has not been registered')
       const result = await reapProcessTree(record, options.reapTimeoutMs)
-      if (result.reaped) {
+      // pid 已被复用说明记录指向的进程早已退出；与 process-tree 的独立回收路径一致，记录必须清掉，
+      // 否则升级前检查会一直报未确认的 runtime 清理。
+      const settled = result.reaped || result.reason === 'identity-mismatch'
+      if (settled) {
         await exited
         if (registrationAttempted) {
           await options.watchdog!.unregister(record)
