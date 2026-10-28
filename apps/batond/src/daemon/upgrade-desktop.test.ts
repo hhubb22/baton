@@ -108,7 +108,8 @@ it('运行中的 daemon 通过原认证 IPC 接收版本准备并保留同一操
     }),
   )
   f.start()
-  await vi.waitFor(() => requestUpgrade(f.path, 'upgrade_status'))
+  // Windows 上 daemon 启动到写出 token 可能超过 waitFor 默认的 1 秒。
+  await vi.waitFor(() => requestUpgrade(f.path, 'upgrade_status'), { timeout: 20000 })
   const prepared = await cli(['upgrade', 'prepare', '--version', releaseMetadata().version, '--data-dir', f.path])
   expect(prepared).toMatchObject({
     state: { phase: 'draining' },

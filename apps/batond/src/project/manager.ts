@@ -661,7 +661,8 @@ class Manager implements ProjectManager {
   async recover() {
     for (const record of await safePromise(this.ledger.processes())) {
       const result = await reapProcessTree(record)
-      if (!result.reaped) continue
+      // pid 已被复用说明记录指向的进程早已退出，与 Worker 账本的处理一致：清掉记录而不是永久保留。
+      if (!result.reaped && result.reason !== 'identity-mismatch') continue
       await this.ledger.records.remove(record)
       const row = await safePromise(this.ledger.get(record.role))
       if (row) {

@@ -185,9 +185,10 @@ it('serves anonymous download listings and only verified files for the matching 
       await mkdir(extracted)
       const { execFileSync } = await import('node:child_process')
       const { readFile } = await import('node:fs/promises')
+      const { tarCommand } = await import('../testing/downloads.ts')
       const path = join(directory, 'download.tar.gz')
       await writeFile(path, content)
-      execFileSync('tar', ['-xf', path, '-C', extracted])
+      execFileSync(tarCommand(), ['-xf', path, '-C', extracted])
       expect(JSON.parse(await readFile(join(extracted, item.file.slice(0, -7), 'deployment.json'), 'utf8'))).toEqual({
         format: 1,
         coordinator_url: origin,
