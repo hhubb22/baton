@@ -66,13 +66,14 @@ export const scheduleProjectRun = Effect.fn('scheduleProjectRun')(function* (age
         status: string
         conversation_state: string
         provider: string
+        source_node_id: string | null
         model: string
         lease_run_id: string | null
         lease_epoch: string
         valid: boolean
         ready: boolean
         work: boolean
-      }>`SELECT a.employee_id,a.project_id,p.status,c.state AS conversation_state,a.provider,a.model,a.lease_run_id,a.lease_epoch,
+      }>`SELECT a.employee_id,a.project_id,p.status,c.state AS conversation_state,a.provider,a.model,a.source_node_id,a.lease_run_id,a.lease_epoch,
  COALESCE(a.lease_until>clock_timestamp(),false) AS valid,c.next_attempt_at IS NULL OR c.next_attempt_at<=clock_timestamp() AS ready,${recoveryWorkSQL(sql)} AS work
  FROM project_agents a JOIN projects p ON p.id=a.project_id JOIN conversations c ON c.agent_id=a.id WHERE a.id=${agentId}`
       if (!a) return
@@ -112,6 +113,7 @@ export const scheduleProjectRun = Effect.fn('scheduleProjectRun')(function* (age
       let reason = preferred ? 'default_unavailable' : 'default_not_set',
         chosen = ''
       for (const node of nodes) {
+        if (a.source_node_id && node.id !== a.source_node_id) continue
         let why = node.revoked
           ? 'revoked'
           : !node.online || !node.synced

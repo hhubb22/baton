@@ -44,6 +44,7 @@ export const CreateProjectInput = Schema.Struct({
   ),
   goal: Schema.optionalKey(boundedText(64 * 1024)),
   provider: summary(1024),
+  source_node_id: Schema.optionalKey(Schema.NullOr(UUID)),
   model: summary(1024),
   memory_embedding: Schema.optionalKey(Schema.NullOr(MemoryEmbeddingConfigInput)),
 })
@@ -52,6 +53,7 @@ export type CreateProjectInput = typeof CreateProjectInput.Type
 export * from './project-memory.ts'
 
 export const PatchProjectInput = Schema.Struct({
+  source_node_id: Schema.optionalKey(Schema.NullOr(UUID)),
   memory_embedding: Schema.optionalKey(Schema.NullOr(MemoryEmbeddingConfigInput)),
   title: Schema.optionalKey(
     Schema.NullOr(
@@ -78,6 +80,7 @@ export type PatchProjectInput = typeof PatchProjectInput.Type
 export const ProjectAgent = Schema.Struct({
   id: UUID,
   provider: summary(1024),
+  source_node_id: Schema.optionalKey(Schema.NullOr(UUID)),
   model: summary(1024),
 })
 export type ProjectAgent = typeof ProjectAgent.Type

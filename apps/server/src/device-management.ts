@@ -17,6 +17,9 @@ import {
   RuntimeRepo,
   SubscriptionLoginResult,
   SubscriptionLoginResponse,
+  ModelConnectionResult,
+  SubscriptionLogoutResult,
+  type ModelConnectionInput,
   type RuntimeReport,
 } from '@baton/protocol'
 import { Effect, Schema } from 'effect'
@@ -103,6 +106,60 @@ const confirm = (result: Parameters<typeof checkedResult>[0], operationId: strin
     try: () => checkedResult(result, operationId),
     catch: (error) => (error instanceof AppError ? error : invalidResponse()),
   })
+export const configureModelConnection = Effect.fn('DeviceManagement.configureModelConnection')(function* (
+  employeeId: string,
+  nodeId: string,
+  input: typeof ModelConnectionInput.Type,
+  gateway: DeviceGateway,
+) {
+  yield* authorize(employeeId, nodeId)
+  const operationId = randomUUID()
+  const response = yield* request(
+    gateway,
+    employeeId,
+    nodeId,
+    {
+      type: 'node.model_connection',
+      operation_id: operationId,
+      ...input,
+    },
+    10_000,
+  )
+  const result = yield* decode(ModelConnectionResult, response.body)
+  yield* confirm(result, operationId)
+  if (input.action === 'get' && result.connection?.id !== input.connection.id)
+    return yield* Effect.fail(invalidResponse())
+  yield* response.business
+  return result.connection ? { connection: result.connection } : {}
+})
+export const logoutSubscription = Effect.fn('DeviceManagement.logoutSubscription')(function* (
+  employeeId: string,
+  nodeId: string,
+  provider: string,
+  gateway: DeviceGateway,
+) {
+  yield* authorize(employeeId, nodeId)
+  const normalized = yield* Effect.try({
+    try: () => normalizeProjectProvider(provider),
+    catch: () => new AppError(400, 'invalid_request'),
+  })
+  const operationId = randomUUID()
+  const response = yield* request(
+    gateway,
+    employeeId,
+    nodeId,
+    {
+      type: 'node.subscription_logout',
+      operation_id: operationId,
+      provider: normalized,
+    },
+    10_000,
+  )
+  const result = yield* decode(SubscriptionLogoutResult, response.body)
+  yield* confirm(result, operationId)
+  yield* response.business
+  return {}
+})
 const overlay = Effect.fn('DeviceManagement.overlay')(function* (
   employeeId: string,
   nodeId: string,

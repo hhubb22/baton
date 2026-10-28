@@ -25,7 +25,7 @@ export const decodeProjectEvent = (value: unknown) =>
 export const jsonBytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value))
 export const projectSelection = (sql: SqlClient.SqlClient) => sql`jsonb_build_object(
  'id',p.id,'title',p.title,'goal',p.goal,'memory_embedding',p.memory_embedding,'status',p.status,'version',p.version,'created_at',p.created_at,'updated_at',p.updated_at,
- 'agent',jsonb_build_object('id',a.id,'provider',a.provider,'model',a.model),
+ 'agent',jsonb_strip_nulls(jsonb_build_object('id',a.id,'provider',a.provider,'model',a.model,'source_node_id',a.source_node_id)),
  'conversation',jsonb_build_object('id',c.id,'state',c.state,'last_seq',c.next_seq-1))`
 export const readProject = Effect.fn('readProject')(function* (employee: string, id: string) {
   const sql = yield* SqlClient.SqlClient

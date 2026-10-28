@@ -57,11 +57,12 @@ export const projectStatus = Effect.fn('projectStatus')(function* (
         out.state = 'waiting'
         out.waiting_reason = 'all_devices_offline'
         const nodes = yield* sql<{
+          id: string
           online: boolean
           synced: boolean
           report: RuntimeReport | null
           count: string
-        }>`SELECT COALESCE(np.online,false) AS online,COALESCE(np.synced,false) AS synced,rr.report,
+        }>`SELECT n.id,COALESCE(np.online,false) AS online,COALESCE(np.synced,false) AS synced,rr.report,
  (SELECT count(*) FROM agent_runs r WHERE r.node_id=n.id AND r.stop_acked_at IS NULL) AS count
  FROM nodes n LEFT JOIN node_presence np ON np.node_id=n.id LEFT JOIN node_runtime_reports rr ON rr.node_id=n.id WHERE n.employee_id=${employee} AND n.revoked_at IS NULL`
         const reasons = [
@@ -74,6 +75,7 @@ export const projectStatus = Effect.fn('projectStatus')(function* (
         ]
         let rank = 0
         for (const node of nodes) {
+          if (p.agent.source_node_id && node.id !== p.agent.source_node_id) continue
           const candidate = !node.online
             ? 0
             : !node.synced

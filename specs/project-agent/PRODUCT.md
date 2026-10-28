@@ -26,7 +26,7 @@ Project Agent 请用户做决定的事项见 [Agent Inbox 行为规格](../agent
 - PA-01：用户创建 Project 时只需提供标题，可补充目标说明。Project 可以长期存在，可以暂停或归档，没有删除流程。Project 不绑定代码仓库或设备。项目记忆里可以有「Baton 仓库在 Mac 上的路径是 ~/src/baton」这样的普通事实，但它不构成授权或配置。
 - PA-02：创建 Project 时同时创建它唯一的 Project Agent 和一个主对话，三者各有稳定 ID。修改标题、换设备运行都不改变这些 ID。
 - PA-03：Project Agent 的工具由 Baton 固定：对话历史、项目记忆、设备能力、本 Project 的 Thread 操作（新建、发消息、撤回待发消息、恢复、停止、归档、读取）、事项（Agent Inbox）、在用户开启了命令执行的设备上执行命令（PA-21）。每次调用都由后端检查权限。它不能通过 Thread 回复、记忆内容或模型输出获得额外的工具。开发工作优先交给 Thread 里的执行 Agent；必要时 Project Agent 可以自己执行命令。这是写在系统提示词里的分工，Baton 不检查命令内容。
-- PA-04：Project Agent 使用设备上配置的模型认证推理，支持 ChatGPT、xAI 和 Claude。ChatGPT 使用订阅登录，xAI 和 Claude 可选择订阅或 API key。用户为每个 Project Agent 选择 provider 和模型，也可以输入已实现 provider 的 ID，修改从下一次运行起生效。设备页依据设备报告显示登录或本地配置入口；API key 从设备本地命令的标准输入保存，只替换同一 provider 的凭据，不读取环境认证或其他 CLI 账号。Coordinator 不做模型推理，不保存模型凭据。
+- PA-04：Project Agent 使用设备上的订阅或 API 连接推理。用户为 Project 选择模型来源和模型，修改从下一次运行起生效。订阅可由多个已登录设备承接；API 连接绑定具体设备，离线或缺少密钥时等待。API 连接支持 OpenAI Responses、OpenAI Chat Completions 和 Anthropic Messages，每条连接独立保存名称、URL、模型列表及设备本地密钥。桌面客户端可通过本机桥接保存密钥，其他设备使用本地 CLI；Coordinator 只保存来源引用和非秘密元数据，不做模型推理或保存密钥。
 
 ### 输入与运行
 

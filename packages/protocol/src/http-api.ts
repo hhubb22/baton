@@ -194,6 +194,16 @@ const Nodes = HttpApiGroup.make('nodes')
       payload: D.SubscriptionLoginInput,
       success: D.SubscriptionLoginResponse,
     }),
+    Endpoint.post('modelConnection', '/api/v1/nodes/:nodeId/model-connections', {
+      params: nodeParams,
+      payload: D.ModelConnectionInput,
+      success: Schema.Struct({ connection: Schema.optionalKey(D.ModelConnection) }),
+    }),
+    Endpoint.post('subscriptionLogout', '/api/v1/nodes/:nodeId/subscriptions/logout', {
+      params: nodeParams,
+      payload: D.SubscriptionLoginInput,
+      success: EmptyInput,
+    }),
     Endpoint.get('files', '/api/v1/nodes/:nodeId/files', {
       params: nodeParams,
       query: Q.FilesQuery,

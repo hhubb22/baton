@@ -5,4 +5,5 @@ export const desktopCapabilities = Object.freeze([
   Object.freeze({ name: 'open-local', version: 1 }),
   Object.freeze({ name: 'pick-directory', version: 1 }),
   Object.freeze({ name: 'diagnostics', version: 1 }),
+  Object.freeze({ name: 'model-connection-key', version: 1 }),
 ])

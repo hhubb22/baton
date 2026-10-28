@@ -4,11 +4,13 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { EnrollDialog } from '../app/EnrollDialog'
 import { LocalDeviceDiagnostics } from '../app/LocalDeviceDiagnostics'
 import { SubscriptionLoginDialog } from '../app/SubscriptionLoginDialog'
+import { ModelConnectionEditor } from '../app/ModelConnectionEditor'
 import { Page } from '../app/Page'
 import { useNow } from '../app/useNow'
 import { agentSummary, capabilityLines, deviceConnectionView, devicesHeading, systemName } from '../data/derive'
 import {
   useDevices,
+  useClient,
   useDownloads,
   useDeviceFolders,
   useProjects,
@@ -18,13 +20,14 @@ import {
   useSetCommandAccess,
   useSetDefaultDevice,
 } from '../data/queries'
-import type { Device, ID } from '../data/types'
+import type { Device, ID, ModelConnection } from '../data/types'
 import { desktopStatusLabel, desktopStatusReason, needsDesktopReauth, useDesktopStatus } from '../data/desktop'
 import { text } from '../theme/text'
 import { colors, radius, space } from '../theme/tokens.stylex'
 import { Button, focusRing } from '../ui/Button'
 import { Dialog } from '../ui/Dialog'
 import { Icon } from '../ui/Icon'
+import { Menu, MenuOption } from '../ui/Menu'
 import { StatusDot } from '../ui/Status'
 import { Toggle } from '../ui/Toggle'
 
@@ -107,6 +110,15 @@ const styles = stylex.create({
     paddingRight: space.lg,
   },
   group: { display: 'flex', flexDirection: 'column', gap: space.sm, minWidth: 0 },
+  sourceHeading: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  sourceRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space.md,
+    paddingBlock: space.xs,
+  },
+  sourceInfo: { display: 'flex', flexDirection: 'column', gap: space.xxs, minWidth: 0 },
   capability: { display: 'flex', alignItems: 'baseline', gap: space.sm },
   logins: { display: 'flex', flexWrap: 'wrap', gap: space.sm },
   permission: { display: 'flex', alignItems: 'flex-start', gap: space.lg },
@@ -155,6 +167,18 @@ interface Notice {
 }
 
 const unreachableNotice: Notice = { title: "Couldn't save the default device", detail: 'Try again.' }
+const connectionProtocol = {
+  'openai-responses': 'OpenAI Responses',
+  'openai-completions': 'OpenAI Chat Completions',
+  'anthropic-messages': 'Anthropic Messages',
+} as const
+function connectionHost(value: string) {
+  try {
+    return new URL(value).host
+  } catch {
+    return value
+  }
+}
 
 // 操作后的提示。移除默认设备后要等用户选出替代设备，替代设备按当前列表现算。
 type Feedback = { kind: 'notice'; notice: Notice } | { kind: 'chooseDefault'; removed: string }
@@ -277,38 +301,93 @@ function DeviceDetails({
   onDisconnect: () => void
 }) {
   const [loginProvider, setLoginProvider] = useState<{ provider: string; localOnly: boolean } | null>(null)
+  const client = useClient()
+  const [editing, setEditing] = useState<ModelConnection | 'new' | null>(null)
+  const [logoutError, setLogoutError] = useState(false)
   // 离线或同步中的设备只显示操作，Agent 信息要等设备同步完才准确。
   const connected = device.connection === 'online'
   // 一切正常时不列 Agent，只列需要处理的问题。
   const problems = connected ? capabilityLines(device).filter((line) => !line.ok) : []
-  const logins = connected && device.hasRuntime ? device.subscriptions : []
-  const loginButtons = logins.flatMap((sub) => {
-    const buttons: ReactNode[] = []
-    if (sub.status === 'login_required' || (!sub.status && !sub.signedIn))
-      buttons.push(
-        <Button
-          key={`${sub.provider}-login`}
-          small
-          onClick={() => setLoginProvider({ provider: sub.provider, localOnly: false })}
-        >
-          {sub.loginMethods?.includes('device_code') ? 'Sign in to' : 'Set up'} {sub.provider}
-        </Button>,
-      )
-    if (sub.loginMethods?.includes('api_key') && (sub.signedIn || sub.loginMethods.includes('device_code')))
-      buttons.push(
-        <Button
-          key={`${sub.provider}-key`}
-          small
-          onClick={() => setLoginProvider({ provider: sub.provider, localOnly: true })}
-        >
-          Use API key for {sub.provider}
-        </Button>,
-      )
-    return buttons
-  })
+  if (editing)
+    return (
+      <div {...stylex.props(styles.details)}>
+        <ModelConnectionEditor
+          device={device}
+          initial={editing === 'new' ? undefined : editing}
+          onBack={() => setEditing(null)}
+        />
+      </div>
+    )
   return (
     <div id={`device-${device.id}`} {...stylex.props(styles.details)}>
       <LocalDeviceDiagnostics nodeId={device.id} />
+      <div {...stylex.props(styles.group)}>
+        <span {...stylex.props(text.label)}>Subscriptions</span>
+        {device.subscriptions.map((sub) => (
+          <div key={sub.provider} {...stylex.props(styles.sourceRow)}>
+            <div {...stylex.props(styles.sourceInfo)}>
+              <span {...stylex.props(text.small)}>{sub.provider}</span>
+              <span {...stylex.props(text.caption, text.muted)}>{sub.signedIn ? 'Signed in' : 'Sign-in needed'}</span>
+            </div>
+            {connected && (
+              <Menu
+                narrow
+                align="end"
+                trigger={
+                  <Button small aria-label={`Manage ${sub.provider}`}>
+                    Manage…
+                  </Button>
+                }
+              >
+                {sub.loginMethods?.includes('oauth') && (
+                  <MenuOption onSelect={() => setLoginProvider({ provider: sub.provider, localOnly: false })}>
+                    {sub.signedIn ? 'Sign in again' : 'Sign in'}
+                  </MenuOption>
+                )}
+                {sub.signedIn && (
+                  <MenuOption
+                    onSelect={() => {
+                      setLogoutError(false)
+                      void client
+                        .logoutSubscription({ deviceId: device.id, provider: sub.providerId ?? sub.provider })
+                        .catch(() => setLogoutError(true))
+                    }}
+                  >
+                    Sign out
+                  </MenuOption>
+                )}
+              </Menu>
+            )}
+          </div>
+        ))}
+        {logoutError && (
+          <p role="alert" {...stylex.props(text.small, styles.attention)}>
+            Couldn't sign out. Try again.
+          </p>
+        )}
+      </div>
+      <div {...stylex.props(styles.group)}>
+        <div {...stylex.props(styles.sourceHeading)}>
+          <span {...stylex.props(text.label)}>API connections</span>
+          <Button small onClick={() => setEditing('new')}>
+            Add connection
+          </Button>
+        </div>
+        {(device.modelConnections ?? []).map((connection) => (
+          <div key={connection.id} {...stylex.props(styles.sourceRow)}>
+            <div {...stylex.props(styles.sourceInfo)}>
+              <span {...stylex.props(text.small)}>{connection.name}</span>
+              <span {...stylex.props(text.caption, text.muted)}>
+                {connectionProtocol[connection.protocol]} · {connectionHost(connection.base_url)}
+                {connection.keyNeeded ? ' · Key needed' : ''}
+              </span>
+            </div>
+            <Button small aria-label={`Edit ${connection.name}`} onClick={() => setEditing(connection)}>
+              Edit
+            </Button>
+          </div>
+        ))}
+      </div>
       {loginProvider && (
         <SubscriptionLoginDialog
           device={device}
@@ -326,7 +405,7 @@ function DeviceDetails({
       {device.connection === 'offline' && device.credentialState !== 'idle_expired' && (
         <span {...stylex.props(text.small, text.muted)}>New threads wait for it.</span>
       )}
-      {(problems.length > 0 || loginButtons.length > 0) && (
+      {problems.length > 0 && (
         <div {...stylex.props(styles.group)}>
           {problems.length > 0 && (
             <>
@@ -339,7 +418,6 @@ function DeviceDetails({
               ))}
             </>
           )}
-          {loginButtons.length > 0 && <div {...stylex.props(styles.logins)}>{loginButtons}</div>}
         </div>
       )}
       {connected && device.hasRuntime && (

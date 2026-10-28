@@ -53,7 +53,7 @@ export class Batond {
     return this.spawn(['run', '--exit-with-stdin'])
   }
 
-  private execute(args: string[], code?: string, upgrade = false): Promise<string> {
+  private execute(args: string[], code?: string, upgrade = false, stdin?: string): Promise<string> {
     return new Promise((resolve, reject) => {
       const child = this.spawn(args, code)
       let output = '',
@@ -75,7 +75,7 @@ export class Batond {
               finish(new Error('batond 命令超时，请检查本机设备状态后重试'))
             }, 40_000)
       child.stdin.on('error', () => {})
-      child.stdin.end()
+      child.stdin.end(stdin)
       child.stdout.on('data', (chunk: Buffer) => {
         output += chunk.toString('utf8')
         if (output.length > 64 * 1024) {
@@ -112,6 +112,10 @@ export class Batond {
         }
       })
     })
+  }
+
+  async setModelConnectionKey(connectionId: string, key: string): Promise<void> {
+    await this.execute(['project-runtime', 'connection-key', connectionId], undefined, false, key)
   }
 
   async directory(threadId: string): Promise<ThreadDirectory> {

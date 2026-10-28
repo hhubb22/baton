@@ -420,8 +420,14 @@ export function useResumeThread() {
 export function useCreateProject() {
   const client = useClient()
   return useMutation({
-    mutationFn: (input: { name: string; goal: string; subscription: string; model: string; clientId: string }) =>
-      client.createProject(input),
+    mutationFn: (input: {
+      name: string
+      goal: string
+      subscription: string
+      sourceNodeId?: string | null
+      model: string
+      clientId: string
+    }) => client.createProject(input),
   })
 }
 
@@ -448,6 +454,7 @@ export function useUpdateProject(projectId: ID) {
                 name: patch.name === undefined ? item.name : project.name,
                 goal: patch.goal === undefined ? item.goal : project.goal,
                 subscription: patch.subscription === undefined ? item.subscription : project.subscription,
+                sourceNodeId: patch.sourceNodeId === undefined ? item.sourceNodeId : project.sourceNodeId,
                 model: patch.model === undefined ? item.model : project.model,
               }
             : item,

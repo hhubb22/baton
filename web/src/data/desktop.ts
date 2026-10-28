@@ -46,6 +46,7 @@ export interface DesktopBridge {
   restartDaemon?(input: { nodeId: string }): Promise<void>
   openLogs?(input: { nodeId: string }): Promise<void>
   copyDiagnostics?(input: { nodeId: string }): Promise<void>
+  setModelConnectionKey?(input: { nodeId: string; connectionId: string; key: string }): Promise<void>
   notificationCursor?(scope: string): Promise<string | null>
   deliverNotifications?(input: { scope: string; events: BrowserNotification[]; cursor: string | null }): Promise<void>
   viewingThread?(threadId: string | null): Promise<void>
@@ -64,7 +65,13 @@ declare global {
 }
 
 export const desktopBridge = () => (window.batonDesktop?.protocol === 1 ? window.batonDesktop : null)
-type DesktopCapability = 'notifications' | 'tray-status' | 'open-local' | 'pick-directory' | 'diagnostics'
+type DesktopCapability =
+  | 'notifications'
+  | 'tray-status'
+  | 'open-local'
+  | 'pick-directory'
+  | 'diagnostics'
+  | 'model-connection-key'
 
 export function desktopCapability(name: DesktopCapability) {
   const bridge = desktopBridge()

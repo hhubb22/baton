@@ -32,7 +32,14 @@ interface RuntimeReport {
       status: string
       reason?: string
       models?: { id: string }[]
+      connection?: {
+        id: string
+        name: string
+        protocol: 'openai-responses' | 'openai-completions' | 'anthropic-messages'
+        base_url: string
+      }
       login_methods?: ('oauth' | 'api_key' | 'device_code')[]
+      models_truncated?: boolean
     }[]
   }
   exec?: { enabled: boolean; shell: string; user?: string }
@@ -128,15 +135,29 @@ export function mapDevice(node: NodeDTO): Device {
         account: agent.agent_type === 'codex' ? 'ChatGPT' : null,
         problem: agent.status === 'available' ? null : ('unavailable' as const),
       })),
-    subscriptions: (report?.project_runtime?.providers ?? []).map((item) => ({
-      provider: subscriptionName(item.provider),
-      providerId: item.provider,
-      loginMethods: item.login_methods ?? [],
-      signedIn: item.status === 'available',
-      status: item.status === 'available' || item.status === 'login_required' ? item.status : 'unknown',
-      reason: item.reason ?? null,
-      models: item.models?.map((model) => model.id) ?? [],
-    })),
+    subscriptions: (report?.project_runtime?.providers ?? [])
+      .filter((item) => !item.connection)
+      .map((item) => ({
+        provider: subscriptionName(item.provider),
+        providerId: item.provider,
+        loginMethods: item.login_methods ?? [],
+        signedIn: item.status === 'available',
+        status: item.status === 'available' || item.status === 'login_required' ? item.status : 'unknown',
+        reason: item.reason ?? null,
+        models: item.models?.map((model) => model.id) ?? [],
+      })),
+    modelConnections: (report?.project_runtime?.providers ?? []).flatMap((item) =>
+      item.connection
+        ? [
+            {
+              ...item.connection,
+              models: item.models?.map((model) => model.id) ?? [],
+              keyNeeded: item.status === 'login_required',
+              modelsTruncated: item.models_truncated,
+            },
+          ]
+        : [],
+    ),
     hasRuntime: !!report?.project_runtime,
     folders: (report?.roots ?? []).map((root) => root.path),
     repos: (report?.repos ?? []).map((repo) => repo.path),
@@ -424,6 +445,25 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
         userCode: value.user_code,
         expiresInSeconds: value.expires_in_seconds,
       }
+    },
+    async configureModelConnection({ deviceId, action, connection }) {
+      const { keyNeeded: _keyNeeded, modelsTruncated: _modelsTruncated, ...metadata } = connection
+      const result = await request<{ connection?: Omit<typeof connection, 'keyNeeded' | 'modelsTruncated'> }>(
+        `/nodes/${apiPath(deviceId)}/model-connections`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ action, connection: metadata }),
+        },
+      )
+      if (action !== 'get') emit('devices')
+      return result.connection ? { ...result.connection, keyNeeded: connection.keyNeeded } : undefined
+    },
+    async logoutSubscription({ deviceId, provider }) {
+      await request(`/nodes/${apiPath(deviceId)}/subscriptions/logout`, {
+        method: 'POST',
+        body: JSON.stringify({ provider }),
+      })
+      emit('devices')
     },
     async setCommandAccess({ deviceId, enabled }) {
       const value = await request<NodeDTO>(`/nodes/${apiPath(deviceId)}/project-exec`, {

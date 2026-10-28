@@ -136,10 +136,10 @@ Linux 需要有效的 `XDG_RUNTIME_DIR` 和 systemd 用户实例；`status` 还�
 ```sh
 node apps/batond/dist/batond.cjs login openai-codex
 node apps/batond/dist/batond.cjs subscriptions
-node apps/batond/dist/batond.cjs project-runtime login-api-key anthropic < key-file
+node apps/batond/dist/batond.cjs project-runtime connection-key <连接 ID> < key-file
 ```
 
-`login-api-key` 支持 xAI 和 Anthropic，密钥从设备本地私有文件经标准输入读取；每次输入一个非空单行密钥，最多 16 KiB，允许末尾换行。网页和中心不接收这些密钥。
+在设备详情新增 API 连接并填写模型 ID 后，在目标设备使用 `connection-key` 从私有文件经标准输入保存密钥。桌面客户端可在本机直接填写；中心只接收连接元数据。密钥为非空单行文本，最多 16 KiB。配置保存不代表在线验证成功。
 
 `login` 接受 provider ID 及 ChatGPT、xAI、Claude 别名，由 Runtime 注册表决定支持范围。Runtime 当前注册 `openai-codex`、`xai`、`anthropic`。登录和守护进程须使用同一系统用户及凭据目录；这些凭据独立于执行 Agent 的原生 CLI 账号。开发 bundle 的 Runtime 使用同一 bundle 的子命令及构建身份，安装包入口见 [发布设计](specs/release/TECH.md)。
 

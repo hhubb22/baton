@@ -17,6 +17,49 @@ const report = (status: RuntimeProvider['status'], capacity = 4): RuntimeReport 
 
 const statuses: RuntimeProvider['status'][] = ['unknown', 'login_required']
 describe('Project provider admission and capacity', () => {
+  it('binds an API connection to its owning device and rejects another employee’s device', async () => {
+    await withTestDatabase(async ({ run }) => {
+      const provider = `api-${randomUUID()}`
+      const apiReport: RuntimeReport = {
+        ...report('available'),
+        project_runtime: { version: '0.1.0', providers: [{ provider, status: 'available' }] },
+      }
+      const owner = await seedNode(run, { report: apiReport, online: false })
+      await seedNode(run, { employeeId: owner.employeeId, report: apiReport })
+      const other = await seedNode(run, { report: apiReport })
+      await expect(
+        run(
+          projects.createProject(owner.employeeId, {
+            title: 'Foreign',
+            provider,
+            model: 'test',
+            source_node_id: other.nodeId,
+          }),
+        ),
+      ).rejects.toBeDefined()
+      const project = await run(
+        projects.createProject(owner.employeeId, {
+          title: 'Local',
+          provider,
+          model: 'test',
+          source_node_id: owner.nodeId,
+        }),
+      )
+      await run(
+        projects.acceptProjectMessage(owner.employeeId, project.id, {
+          client_message_id: randomUUID(),
+          content: 'start',
+        }),
+      )
+      await run(projects.scheduleProjectRun(project.agent.id))
+      const state = await run(projects.projectStatus(owner.employeeId, project.id))
+      expect(state.run).toBeUndefined()
+      expect(state.waiting_reason).toBe('all_devices_offline')
+      await expect(
+        run(projects.patchProject(owner.employeeId, project.id, { source_node_id: other.nodeId })),
+      ).rejects.toBeDefined()
+    })
+  })
   it.each(statuses)('uses the declared provider authentication state %s', async (status) => {
     await withTestDatabase(async ({ run }) => {
       const node = await seedNode(run, { report: report(status) })

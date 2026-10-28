@@ -94,8 +94,9 @@ export const scheduleMemoryJobs = Effect.fn('scheduleMemoryJobs')(function* () {
           valid: boolean
           configured: boolean
           provider: string
+          source_node_id: string | null
           model: string
-        }>`SELECT j.kind,j.state,p.status,j.next_attempt_at<=clock_timestamp() AS due,COALESCE(r.memory_claim_until>clock_timestamp() AND r.provider=a.provider AND r.model=a.model AND EXISTS(SELECT 1 FROM nodes n JOIN node_credentials nc ON nc.node_id=n.id AND nc.version=n.credential_version WHERE n.id=r.node_id AND n.revoked_at IS NULL AND nc.revoked_at IS NULL AND nc.expires_at>clock_timestamp()),false) AS valid,p.memory_embedding IS NOT NULL AS configured,a.provider,a.model FROM project_memory_jobs j JOIN projects p ON p.id=j.project_id JOIN project_agents a ON a.project_id=p.id LEFT JOIN agent_runs r ON r.id=j.attempt_id WHERE j.id=${job.id}`
+        }>`SELECT j.kind,j.state,p.status,j.next_attempt_at<=clock_timestamp() AS due,COALESCE(r.memory_claim_until>clock_timestamp() AND r.provider=a.provider AND r.model=a.model AND (j.kind<>'consolidation' OR a.source_node_id IS NULL OR r.node_id=a.source_node_id) AND EXISTS(SELECT 1 FROM nodes n JOIN node_credentials nc ON nc.node_id=n.id AND nc.version=n.credential_version WHERE n.id=r.node_id AND n.revoked_at IS NULL AND nc.revoked_at IS NULL AND nc.expires_at>clock_timestamp()),false) AS valid,p.memory_embedding IS NOT NULL AS configured,a.provider,a.model,a.source_node_id FROM project_memory_jobs j JOIN projects p ON p.id=j.project_id JOIN project_agents a ON a.project_id=p.id LEFT JOIN agent_runs r ON r.id=j.attempt_id WHERE j.id=${job.id}`
         if (!j) continue
         if (j.state !== 'pending') {
           if (j.status !== 'active' || !j.valid || (j.kind === 'embedding' && !j.configured))
@@ -125,6 +126,7 @@ export const scheduleMemoryJobs = Effect.fn('scheduleMemoryJobs')(function* () {
         let chosen = '',
           waiting = 'device_unavailable'
         for (const node of nodes) {
+          if (j.kind === 'consolidation' && j.source_node_id && node.id !== j.source_node_id) continue
           const valid =
             yield* sql`SELECT 1 FROM node_credentials nc JOIN nodes n ON n.id=nc.node_id WHERE n.id=${node.id} AND n.revoked_at IS NULL AND ${nodeAllowsNewExecutionSQL(sql)} AND nc.version=n.credential_version AND nc.revoked_at IS NULL AND nc.expires_at>clock_timestamp()`
           if (!valid.length) continue

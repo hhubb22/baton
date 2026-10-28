@@ -216,7 +216,7 @@ prepare 之前升级未支持该能力的 daemon 时，由发布说明要求停�
 | 中心签名密钥 | `BATON_NODE_SIGNING_KEY` 指定的原文件，默认中心工作目录的 `node-signing.key`。与数据库配套保存，恢复原权限和所有者；缺失或无效时停止恢复后处理 |
 | 中心部署配置 | 实际服务管理器、容器或启动脚本中的环境变量与配置文件，包括数据库与 schema、密钥路径、公开 Origin、监听地址、TLS 证书和私钥、反向代理配置及使用的程序版本。恢复数据库不恢复这些文件 |
 | 设备私有数据 | `--data-dir`，默认 `~/.baton-ts`，Windows 为 `%USERPROFILE%\.baton-ts`。整体保留 `identity.json`、`reauth-pending.json`（存在时）、目录和执行授权配置、`node.db`、`project-runtime.db`、`threads/<Thread ID>/thread.db`、原生映射和 SDK 状态、`full-output/`，以及存在的 SQLite WAL。不能只复制主数据库文件或只保存身份文件 |
-| Project 模型凭据 | `BATON_PROJECT_RUNTIME_DATA_DIR`，默认 `~/.baton/project-runtime`；保存 provider 的 OAuth/API key 文件及 `embeddings/` 中的 Embedding 凭据。它不在默认设备数据目录内，须单独保护和恢复 |
+| Project 模型凭据 | `BATON_PROJECT_RUNTIME_DATA_DIR`，默认 `~/.baton/project-runtime`；保存订阅 OAuth、按连接 ID 隔离的 API 配置和密钥及 `embeddings/` 中的 Embedding 凭据。它不在默认设备数据目录内，须单独保护和恢复 |
 | Pi 原生会话与认证 | 默认 `~/.pi/agent`，配置了 `PI_CODING_AGENT_DIR` 时使用该目录；会话默认在其 `sessions/`，`PI_CODING_AGENT_SESSION_DIR` 可单独指定会话目录。目录与外部会话目录一并保留 |
 | Codex 原生会话与认证 | `CODEX_HOME`，默认 `~/.codex`；包括 `sessions/`、`archived_sessions/`、SQLite 状态、`auth.json` 等。只恢复 Baton 的原生会话 ID 不能恢复这些内容 |
 | Cursor、Kiro 及其他外部配置 | 保存启动用户的 `HOME`（Windows 为 `%USERPROFILE%`）及原生 CLI/SDK 配置明确指定的外部存储。Baton 未固定 Cursor SDK、Kiro CLI 的全部内部目录，须在实际备份清单中列出；不能确定子目录时保留完整用户配置目录和系统凭据库。Cursor 的 `CURSOR_API_KEY` 来自设备启动配置，须按秘密单独保管；跨系统不能直接复制的认证材料需要重新登录 |

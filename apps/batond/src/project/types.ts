@@ -1,5 +1,11 @@
 import { Schema } from 'effect'
-import type { ProjectRunCommand, ProjectRuntime, ProjectRuntimeRequest, ProjectRuntimeResult } from '@baton/protocol'
+import type {
+  ModelConnection,
+  ProjectRunCommand,
+  ProjectRuntime,
+  ProjectRuntimeRequest,
+  ProjectRuntimeResult,
+} from '@baton/protocol'
 import type { ProcessCommand } from '../platform/process.ts'
 
 export type ProjectTransport = (request: ProjectRuntimeRequest, signal: AbortSignal) => Promise<ProjectRuntimeResult>
@@ -31,6 +37,12 @@ export interface ProjectManager {
   report(signal?: AbortSignal): Promise<ProjectRuntime | undefined>
   login(provider: string, signal?: AbortSignal): Promise<void>
   subscriptions(signal?: AbortSignal): Promise<ProjectRuntime>
+  configureConnection?(
+    action: 'save' | 'delete' | 'get',
+    connection: ModelConnection,
+    signal?: AbortSignal,
+  ): Promise<ModelConnection | undefined>
+  logout?(provider: string, signal?: AbortSignal): Promise<void>
   startDeviceLogin(provider: string, signal?: AbortSignal, onDone?: () => void): Promise<DeviceLoginCode>
   close(): Promise<void>
 }

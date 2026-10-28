@@ -43,6 +43,7 @@ export function SubscriptionLoginDialog({
   const localSetup = localOnly || !methods.includes('device_code')
   const providerId = subscription?.providerId ?? provider
   const signedIn = subscription?.signedIn === true
+  const [initiallySignedIn] = useState(signedIn)
   const challenge = start.data
   const remaining = challenge
     ? Math.max(0, Math.ceil((challenge.expiresInSeconds * 1000 - Math.max(0, now - receivedAt)) / 1000))
@@ -95,26 +96,12 @@ export function SubscriptionLoginDialog({
           {methods.includes('oauth') && (
             <>
               <p {...stylex.props(text.small)}>Sign in with your subscription:</p>
-              <pre {...stylex.props(text.mono, styles.code)}>{`baton-project-runtime login ${providerId}`}</pre>
-            </>
-          )}
-          {methods.includes('api_key') && (
-            <>
-              <p {...stylex.props(text.small)}>Save your API key in a private file, then run:</p>
-              <pre {...stylex.props(text.mono, styles.code)}>
-                {device.os === 'Windows'
-                  ? `Get-Content -Raw key-file | baton-project-runtime login-api-key ${providerId}`
-                  : `baton-project-runtime login-api-key ${providerId} < key-file`}
-              </pre>
-              <p {...stylex.props(text.small, text.muted)}>
-                This replaces the saved sign-in for {provider}. The key stays on {device.name}. Remove the key file
-                after setup.
-              </p>
+              <pre {...stylex.props(text.mono, styles.code)}>{`batond login ${providerId}`}</pre>
             </>
           )}
         </>
       )}
-      {!localSetup && !signedIn && (
+      {!localSetup && (!signedIn || initiallySignedIn) && (
         <>
           {start.isPending && (
             <p role="status" {...stylex.props(text.small, text.muted)}>

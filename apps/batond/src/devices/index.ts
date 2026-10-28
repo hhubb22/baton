@@ -6,6 +6,11 @@ import {
   ProjectExecRequest,
   SubscriptionLoginRequest,
   SubscriptionLoginResponse,
+  ModelConnectionRequest,
+  type ModelConnectionResult,
+  type ModelConnection,
+  SubscriptionLogoutRequest,
+  type SubscriptionLogoutResult,
   type BrowseRootsResult,
   type FileRequest,
   type FileResult,
@@ -37,16 +42,26 @@ export type DeviceRequest =
   | BrowseRootsGetRequest
   | ProjectExecRequest
   | SubscriptionLoginRequest
+  | ModelConnectionRequest
+  | SubscriptionLogoutRequest
 export type DeviceResult =
   | FileResult
   | BrowseRootsResult
   | BrowseRootsGetResult
   | ProjectExecResult
   | SubscriptionLoginResult
+  | ModelConnectionResult
+  | SubscriptionLogoutResult
 export interface DeviceRuntime {
   probe(signal?: AbortSignal): Promise<ProjectRuntime>
   report?(signal?: AbortSignal): Promise<ProjectRuntime | undefined>
   startDeviceLogin(provider: string, signal?: AbortSignal, onDone?: () => void): Promise<SubscriptionLoginResponse>
+  configureConnection?(
+    action: 'save' | 'delete' | 'get',
+    connection: ModelConnection,
+    signal?: AbortSignal,
+  ): Promise<ModelConnection | undefined>
+  logout?(provider: string, signal?: AbortSignal): Promise<void>
 }
 export interface DeviceServiceOptions {
   readonly dataDirectory: string
@@ -110,6 +125,23 @@ export async function makeDeviceService(options: DeviceServiceOptions): Promise<
           const exec = await setProjectExec(options.dataDirectory, req.enabled)
           changed()
           return { ...base, type: 'node.project_exec_result', ok: true, exec }
+        }
+        if (body.type === 'node.model_connection') {
+          const req = decodeRequest(ModelConnectionRequest, body)
+          if (!options.runtime?.configureConnection)
+            throw new DeviceError('config_unavailable', 'Project Runtime 不可用')
+          const connection = await options.runtime.configureConnection(req.action, req.connection, combined)
+          if (req.action === 'get' && (!connection || connection.id !== req.connection.id))
+            throw new DeviceError('config_unavailable', '连接不存在')
+          if (req.action !== 'get') changed()
+          return { ...base, type: 'node.model_connection_result', ok: true, ...(connection ? { connection } : {}) }
+        }
+        if (body.type === 'node.subscription_logout') {
+          const req = decodeRequest(SubscriptionLogoutRequest, body)
+          if (!options.runtime?.logout) throw new DeviceError('config_unavailable', 'Project Runtime 不可用')
+          await options.runtime.logout(normalizeProvider(req.provider), combined)
+          changed()
+          return { ...base, type: 'node.subscription_logout_result', ok: true }
         }
         if (body.type === 'node.browse_roots_get') {
           const req = decodeRequest(BrowseRootsGetRequest, body)
@@ -180,11 +212,15 @@ export async function makeDeviceService(options: DeviceServiceOptions): Promise<
         const type =
           body.type === 'node.project_exec_set'
             ? 'node.project_exec_result'
-            : body.type === 'node.browse_roots_get'
-              ? 'node.browse_roots_get_result'
-              : body.type === 'node.browse_roots_set'
-                ? 'node.browse_roots_result'
-                : 'node.subscription_login_result'
+            : body.type === 'node.model_connection'
+              ? 'node.model_connection_result'
+              : body.type === 'node.subscription_logout'
+                ? 'node.subscription_logout_result'
+                : body.type === 'node.browse_roots_get'
+                  ? 'node.browse_roots_get_result'
+                  : body.type === 'node.browse_roots_set'
+                    ? 'node.browse_roots_result'
+                    : 'node.subscription_login_result'
         const code =
           error instanceof DeviceError
             ? error.code

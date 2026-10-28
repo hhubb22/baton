@@ -409,6 +409,8 @@ async function connected(options: {
         case 'node.browse_roots_get':
         case 'node.project_exec_set':
         case 'node.subscription_login':
+        case 'node.model_connection':
+        case 'node.subscription_logout':
           if (synced)
             schedule(async () => {
               await envelope(await devices.handle(body, controller.signal), env.message_id)

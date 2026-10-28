@@ -345,6 +345,38 @@ function replyRPC(ws: WebSocket, frame: typeof rpcFrameSchema.Type) {
   )
 }
 
+test('routes model connection save, read and delete acknowledgements over the node gateway', async () => {
+  const f = await fixture()
+  const { ws, frames } = await f.connect()
+  const connection = {
+    id: randomUUID(),
+    name: 'Local',
+    protocol: 'openai-responses',
+    base_url: 'http://127.0.0.1:1234/v1',
+    models: ['test'],
+  }
+  for (const action of ['save', 'get', 'delete'] as const) {
+    const operation_id = randomUUID()
+    const pending = f.gateway.request(f.nodeId, f.employeeId, {
+      type: 'node.model_connection',
+      operation_id,
+      action,
+      connection,
+    })
+    await expect.poll(() => rpcFrames(frames).some((frame) => frame.body.operation_id === operation_id)).toBe(true)
+    const frame = rpcFrames(frames).find((item) => item.body.operation_id === operation_id)!
+    ws.send(
+      JSON.stringify(
+        envelope(
+          { type: 'node.model_connection_result', operation_id, ok: true, ...(action === 'get' ? { connection } : {}) },
+          frame.message_id,
+        ),
+      ),
+    )
+    expect(await pending).toMatchObject({ type: 'node.model_connection_result', operation_id, ok: true })
+  }
+})
+
 test('validates RPCs before sending, including queued requests crossing the idle deadline', async () => {
   let validations = 0
   const f = await fixture(

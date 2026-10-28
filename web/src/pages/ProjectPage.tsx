@@ -504,6 +504,13 @@ function EmptyConversation({ project }: { project: Project }) {
 }
 
 function assistantLine(project: Project, devices: Device[]) {
+  const device = project.sourceNodeId ? devices.find((item) => item.id === project.sourceNodeId) : undefined
+  const connection = device?.modelConnections?.find((item) => `api-${item.id}` === project.subscription)
+  const source = project.sourceNodeId
+    ? connection
+      ? `${connection.name} · ${device!.name}`
+      : 'API connection unavailable'
+    : project.subscription
   switch (project.agent.state) {
     case 'blocked':
       return project.agent.reason ?? 'Needs attention'
@@ -512,9 +519,9 @@ function assistantLine(project: Project, devices: Device[]) {
     case 'stopping':
       return 'Stopping…'
     case 'stopped':
-      return project.agent.reason ?? `${project.subscription} · ${project.model}`
+      return project.agent.reason ?? `${source} · ${project.model}`
     default:
-      return `${project.subscription} · ${project.model}`
+      return `${source} · ${project.model}`
   }
 }
 

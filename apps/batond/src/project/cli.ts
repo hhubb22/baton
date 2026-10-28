@@ -39,7 +39,7 @@ export async function runProjectCLI(
       const report = await runner.probe(cancel.signal)
       if (command === 'probe') process.stdout.write(JSON.stringify(report) + '\n')
       else
-        for (const item of report.providers ?? []) {
+        for (const item of (report.providers ?? []).filter((provider) => !provider.connection)) {
           const state = { available: '已登录', login_required: '需要登录', unknown: '无法读取' }[item.status]
           process.stdout.write(
             `${item.provider}: ${state}${item.status === 'available' ? '' : `，运行 batond login ${item.provider}`}\n`,

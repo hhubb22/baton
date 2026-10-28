@@ -9,6 +9,79 @@ import { createDesktopBridge, registeredDesktop } from '../test/desktop'
 
 afterEach(() => vi.unstubAllGlobals())
 
+it('adds, edits and deletes a device API connection without sending a key to the center', async () => {
+  const user = userEvent.setup()
+  const client = createMockClient('modelSources', { latency: { read: 0, save: 0, device: 0, run: 8000 } })
+  const configure = vi.spyOn(client, 'configureModelConnection')
+  const router = createAppRouter({ history: createMemoryHistory({ initialEntries: ['/devices'] }) })
+  render(<App client={client} router={router} />)
+  await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
+  expect(screen.getByText('Local gateway')).toBeInTheDocument()
+  expect(screen.getByText(/Key needed/)).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Add connection' }))
+  await user.type(screen.getByLabelText('Name'), 'Custom')
+  await user.clear(screen.getByLabelText('Base URL'))
+  await user.type(screen.getByLabelText('Base URL'), 'http://localhost:9999/v1')
+  await user.selectOptions(screen.getByLabelText('Protocol'), 'anthropic-messages')
+  expect(screen.getByLabelText('Base URL')).toHaveValue('http://localhost:9999/v1')
+  expect(screen.getByText(/localhost:9999\/v1\/messages\?beta=true/)).toBeInTheDocument()
+  await user.type(screen.getByLabelText('Model IDs'), 'model-id')
+  expect(screen.getByText(/connection-key/)).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Save connection' }))
+  await screen.findByText('Custom')
+  expect(configure).toHaveBeenCalledWith(
+    expect.objectContaining({
+      action: 'save',
+      connection: expect.objectContaining({ name: 'Custom', models: ['model-id'] }),
+    }),
+  )
+  expect(JSON.stringify(configure.mock.calls)).not.toContain('key-file contents')
+  await user.click(screen.getByRole('button', { name: 'New project' }))
+  await user.type(screen.getByLabelText('Name'), 'API project')
+  await user.selectOptions(
+    screen.getByLabelText('Model source'),
+    screen.getByRole('option', { name: 'Custom · Ubuntu Dev' }),
+  )
+  expect(screen.getByText(/connection needs its device online and an API key/)).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Create project' }))
+  await waitFor(async () =>
+    expect(
+      (await client.listProjects()).some(
+        (item) => item.name === 'API project' && item.sourceNodeId === 'dev-ubuntu' && item.model === 'model-id',
+      ),
+    ).toBe(true),
+  )
+  expect(await screen.findByText('Custom · Ubuntu Dev · model-id')).toBeInTheDocument()
+  await user.click(screen.getByRole('link', { name: /Devices/ }))
+  await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
+  await user.click(screen.getByRole('button', { name: 'Edit Custom' }))
+  await user.click(screen.getByRole('button', { name: 'Delete connection' }))
+  expect(screen.getByText(/Deleting this connection will leave API project/)).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Confirm delete' }))
+  await waitFor(() => expect(screen.queryByText('Custom')).not.toBeInTheDocument())
+})
+
+it('loads the complete model list before editing a truncated device report', async () => {
+  const user = userEvent.setup()
+  const client = createMockClient('modelSources', { latency: { read: 0, save: 0, device: 0, run: 8000 } })
+  const list = client.listDevices.bind(client)
+  client.listDevices = async () =>
+    (await list()).map((device) => ({
+      ...device,
+      modelConnections: device.modelConnections?.map((connection) =>
+        connection.name === 'Local gateway' ? { ...connection, models: [], modelsTruncated: true } : connection,
+      ),
+    }))
+  const configure = vi.spyOn(client, 'configureModelConnection')
+  const router = createAppRouter({ history: createMemoryHistory({ initialEntries: ['/devices'] }) })
+  render(<App client={client} router={router} />)
+  await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
+  await user.click(screen.getByRole('button', { name: 'Edit Local gateway' }))
+  await waitFor(() => expect(screen.getByLabelText('Model IDs')).toHaveValue('local-model'))
+  expect(configure).toHaveBeenCalledWith(expect.objectContaining({ action: 'get' }))
+  expect(screen.getByRole('button', { name: 'Save connection' })).toBeEnabled()
+})
+
 describe('desktop app link', () => {
   it.each([
     [undefined, true, true, true],

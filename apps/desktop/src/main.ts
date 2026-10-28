@@ -484,6 +484,7 @@ async function start() {
   }
   const localActions = new LocalActions({
     identity: localIdentity,
+    setModelConnectionKey: (connectionId, key) => batond.setModelConnectionKey(connectionId, key),
     threadNode: async (threadId) =>
       Schema.decodeUnknownSync(Schema.Struct({ node_id: Schema.String }))(
         await centerJSON(`/api/v1/threads/${encodeURIComponent(threadId)}`),

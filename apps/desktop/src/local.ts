@@ -7,6 +7,11 @@ import type { PublicIdentity } from './status.ts'
 
 export const LocalDeviceInput = Schema.Struct({ nodeId: UUID })
 export const OpenLocalInput = Schema.Struct({ threadId: UUID, action: Schema.Literals(['reveal', 'editor']) })
+export const ModelConnectionKeyInput = Schema.Struct({
+  nodeId: UUID,
+  connectionId: UUID,
+  key: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(16 * 1024)),
+})
 export interface LocalIdentity {
   node_id: string
   employee_id: string
@@ -37,6 +42,7 @@ export interface LocalDependencies {
   restart: () => Promise<void>
   openLogs: () => Promise<void>
   copyDiagnostics: () => Promise<void>
+  setModelConnectionKey?: (connectionId: string, key: string) => Promise<void>
 }
 
 function parse<A>(schema: Schema.ConstraintDecoder<A, never>, input: unknown): A {
@@ -118,6 +124,13 @@ export class LocalActions {
     await this.device(input)
     await this.dependencies.copyDiagnostics()
   }
+
+  async setModelConnectionKey(input: unknown) {
+    const value = parse(ModelConnectionKeyInput, input)
+    await this.device({ nodeId: value.nodeId })
+    if (!this.dependencies.setModelConnectionKey) throw new Error('Local model configuration is unavailable.')
+    await this.dependencies.setModelConnectionKey(value.connectionId, value.key)
+  }
 }
 
 // 每个入口都在解析参数和执行本机动作之前核查窗口、中心源和主 frame。
@@ -133,6 +146,7 @@ export function registerLocalBridge<E>(
     'restart-daemon': (input: unknown) => actions.restartDaemon(input),
     'open-logs': (input: unknown) => actions.openLogs(input),
     'copy-diagnostics': (input: unknown) => actions.copyDiagnostics(input),
+    'model-connection-key': (input: unknown) => actions.setModelConnectionKey(input),
   }
   for (const [name, operation] of Object.entries(methods))
     handle(`baton:${name}`, async (event, input) => {

@@ -24,10 +24,15 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
   const nameRef = useRef<HTMLInputElement>(null)
   const [name, setName] = useState('')
   const [goal, setGoal] = useState('')
-  const [selection, setSelection] = useState<{ subscription: string; model: string } | null>(null)
-  const { subscription, model } = selection ?? {
+  const [selection, setSelection] = useState<{
+    subscription: string
+    model: string
+    sourceNodeId?: string | null
+  } | null>(null)
+  const { subscription, model, sourceNodeId } = selection ?? {
     subscription: catalog[0]?.provider ?? '',
     model: catalog[0]?.models[0] ?? '',
+    sourceNodeId: catalog[0]?.sourceNodeId ?? null,
   }
   const [nameError, setNameError] = useState<string | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
@@ -37,7 +42,18 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
   const subscriptionLabel =
     ({ 'openai-codex': 'ChatGPT', xai: 'xAI', anthropic: 'Claude' } as Record<string, string>)[subscription] ??
     subscription
-  const ready = subscriptionReach(devices.data ?? [], subscriptionLabel)
+  const ready = sourceNodeId
+    ? (devices.data ?? []).some(
+        (device) =>
+          device.id === sourceNodeId &&
+          device.connection === 'online' &&
+          device.modelConnections?.some(
+            (connection) => `api-${connection.id}` === subscription && !connection.keyNeeded,
+          ),
+      )
+      ? 1
+      : 0
+    : subscriptionReach(devices.data ?? [], subscriptionLabel)
 
   const submit = () => {
     if (create.isPending) return
@@ -52,7 +68,7 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
     }
     setFailure(null)
     create.mutate(
-      { name, goal, subscription: subscription.trim(), model: model.trim(), clientId },
+      { name, goal, subscription: subscription.trim(), model: model.trim(), sourceNodeId, clientId },
       {
         onSuccess: (project) => {
           onClose()
@@ -124,14 +140,17 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
       </Field>
       <ProjectModelFields
         catalog={catalog}
-        value={{ subscription, model }}
+        value={{ subscription, model, sourceNodeId }}
         onChange={setSelection}
         creating
         loading={devices.isPending}
       />
       {devices.data && subscription && ready === 0 && (
         <p {...stylex.props(text.caption, styles.hint)}>
-          No online device has {subscriptionLabel} signed in. Messages wait until one does.
+          {sourceNodeId
+            ? 'This connection needs its device online and an API key.'
+            : `No online device has ${subscriptionLabel} signed in.`}{' '}
+          Messages wait until it is available.
         </p>
       )}
     </Dialog>

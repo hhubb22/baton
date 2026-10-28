@@ -1,6 +1,6 @@
 import * as stylex from '@stylexjs/stylex'
 import { Link } from '@tanstack/react-router'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { assistantModels } from '../data/derive'
 import { useClient, useDevices } from '../data/queries'
 import { text } from '../theme/text'
@@ -8,8 +8,8 @@ import { colors, radius, size, space } from '../theme/tokens.stylex'
 import { Button, focusRing } from '../ui/Button'
 import { Field, Input } from '../ui/Field'
 
-type Catalog = { provider: string; models: string[] }[]
-type Selection = { subscription: string; model: string }
+type Catalog = { provider: string; models: string[]; sourceNodeId?: string | null; label?: string }[]
+type Selection = { subscription: string; model: string; sourceNodeId?: string | null }
 
 const styles = stylex.create({
   fields: { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: space.md },
@@ -33,6 +33,30 @@ const styles = stylex.create({
 export function useProjectModelCatalog() {
   const client = useClient()
   const devices = useDevices()
+  const [completeModels, setCompleteModels] = useState<Record<string, string[]>>({})
+  useEffect(() => {
+    let active = true
+    const truncated = (devices.data ?? []).flatMap((device) =>
+      (device.modelConnections ?? [])
+        .filter((connection) => connection.modelsTruncated && device.connection === 'online')
+        .map((connection) => ({ device, connection })),
+    )
+    void Promise.all(
+      truncated.map(async ({ device, connection }) => {
+        try {
+          const complete = await client.configureModelConnection({ deviceId: device.id, action: 'get', connection })
+          return complete ? ([`${device.id}|${connection.id}`, complete.models] as const) : null
+        } catch {
+          return null
+        }
+      }),
+    ).then((results) => {
+      if (active) setCompleteModels(Object.fromEntries(results.filter((item) => item !== null)))
+    })
+    return () => {
+      active = false
+    }
+  }, [client, devices.data])
   const providers = new Map<string, Set<string>>()
   for (const device of devices.data ?? []) {
     if (!device.hasRuntime) continue
@@ -50,6 +74,16 @@ export function useProjectModelCatalog() {
   const catalog: Catalog = [...providers]
     .filter(([, models]) => models.size > 0)
     .map(([provider, models]) => ({ provider, models: [...models] }))
+  for (const device of devices.data ?? []) {
+    for (const connection of device.modelConnections ?? []) {
+      catalog.push({
+        provider: `api-${connection.id}`,
+        sourceNodeId: device.id,
+        label: `${connection.name} · ${device.name}`,
+        models: completeModels[`${device.id}|${connection.id}`] ?? connection.models,
+      })
+    }
+  }
   return { catalog, devices }
 }
 
@@ -71,11 +105,23 @@ export function ProjectModelFields({
   loading?: boolean
 }) {
   const [manual, setManual] = useState(false)
-  const listed = catalog.some((item) => item.provider === value.subscription && item.models.includes(value.model))
+  const listed = catalog.some(
+    (item) =>
+      item.provider === value.subscription &&
+      (item.sourceNodeId ?? null) === (value.sourceNodeId ?? null) &&
+      item.models.includes(value.model),
+  )
   const custom = manual || (!listed && Boolean(value.subscription || value.model))
-  const providerLabel = creating ? 'Assistant subscription' : 'Subscription'
+  const missingConnection = !!value.sourceNodeId && value.subscription.startsWith('api-') && !listed
+  const connectionLabel = catalog.find(
+    (item) => item.provider === value.subscription && item.sourceNodeId === value.sourceNodeId,
+  )?.label
+  const providerLabel = 'Model source'
   const modelLabel = creating ? 'Model' : 'Project assistant model'
-  const models = catalog.find((item) => item.provider === value.subscription)?.models ?? []
+  const models =
+    catalog.find(
+      (item) => item.provider === value.subscription && (item.sourceNodeId ?? null) === (value.sourceNodeId ?? null),
+    )?.models ?? []
 
   return (
     <div {...stylex.props(styles.section)}>
@@ -85,6 +131,11 @@ export function ProjectModelFields({
           <Link to="/devices" search={{ connect: true }} {...stylex.props(styles.link)}>
             Connect a device
           </Link>
+        </p>
+      )}
+      {missingConnection && (
+        <p {...stylex.props(text.caption, text.muted)}>
+          This API connection is unavailable on its device. Choose another model source to resume.
         </p>
       )}
       {(readOnly || custom || catalog.length > 0) && (
@@ -102,31 +153,58 @@ export function ProjectModelFields({
               readOnly || custom ? (
                 <Input
                   {...props}
-                  value={value.subscription}
-                  readOnly={readOnly}
+                  value={
+                    missingConnection
+                      ? 'API connection unavailable'
+                      : readOnly && value.sourceNodeId
+                        ? (connectionLabel ?? 'API connection unavailable')
+                        : value.subscription
+                  }
+                  readOnly={readOnly || missingConnection}
                   placeholder="Provider ID"
                   onChange={(event) => {
                     setManual(true)
-                    onChange({ ...value, subscription: event.target.value })
+                    onChange({ ...value, subscription: event.target.value, sourceNodeId: null })
                   }}
                 />
               ) : (
                 <select
                   {...props}
-                  value={value.subscription}
+                  value={`${value.sourceNodeId ?? ''}|${value.subscription}`}
                   onChange={(event) => {
-                    const subscription = event.target.value
-                    onChange({ subscription, model: catalog.find((item) => item.provider === subscription)!.models[0] })
+                    const item = catalog.find(
+                      (entry) => `${entry.sourceNodeId ?? ''}|${entry.provider}` === event.target.value,
+                    )!
+                    onChange({
+                      subscription: item.provider,
+                      sourceNodeId: item.sourceNodeId ?? null,
+                      model: item.models[0],
+                    })
                     onCommit?.()
                   }}
                   {...stylex.props(text.small, styles.select, focusRing.ring)}
                 >
-                  {catalog.map((item) => (
-                    <option key={item.provider} value={item.provider}>
-                      {item.provider}
-                      {creating ? ' subscription' : ''}
-                    </option>
-                  ))}
+                  <optgroup label="Subscriptions">
+                    {catalog
+                      .filter((item) => !item.sourceNodeId)
+                      .map((item) => (
+                        <option key={item.provider} value={`|${item.provider}`}>
+                          {item.provider}
+                        </option>
+                      ))}
+                  </optgroup>
+                  <optgroup label="API connections">
+                    {catalog
+                      .filter((item) => item.sourceNodeId)
+                      .map((item) => (
+                        <option
+                          key={`${item.sourceNodeId}|${item.provider}`}
+                          value={`${item.sourceNodeId}|${item.provider}`}
+                        >
+                          {item.label}
+                        </option>
+                      ))}
+                  </optgroup>
                 </select>
               )
             }
@@ -170,7 +248,11 @@ export function ProjectModelFields({
               small
               onClick={() => {
                 setManual(false)
-                onChange({ subscription: catalog[0].provider, model: catalog[0].models[0] })
+                onChange({
+                  subscription: catalog[0].provider,
+                  sourceNodeId: catalog[0].sourceNodeId ?? null,
+                  model: catalog[0].models[0],
+                })
                 onCommit?.()
               }}
             >

@@ -13,6 +13,7 @@ import {
 import type {
   AgentKind,
   Device,
+  ModelConnection,
   DeviceAgent,
   DeviceConnection,
   DeviceOS,
@@ -1055,6 +1056,26 @@ ${response}`,
     }
   }
 
+  configureModelConnection(deviceId: ID, action: 'save' | 'delete' | 'get', connection: ModelConnection) {
+    const device = this.onlineDevice(deviceId)
+    const connections = (device.modelConnections ??= [])
+    const index = connections.findIndex((item) => item.id === connection.id)
+    if (action === 'get') return connections[index]
+    if (action === 'delete') {
+      if (index >= 0) connections.splice(index, 1)
+    } else if (index >= 0) connections[index] = { ...connection, keyNeeded: connections[index].keyNeeded }
+    else connections.push({ ...connection, keyNeeded: true })
+    this.emit('devices', 'projects')
+    return undefined
+  }
+
+  logoutSubscription(deviceId: ID, provider: string) {
+    const device = this.onlineDevice(deviceId)
+    const subscription = device.subscriptions.find((item) => item.provider === subscriptionName(provider))
+    if (subscription) Object.assign(subscription, { signedIn: false, status: 'login_required' })
+    this.emit('devices', 'projects')
+  }
+
   completeSubscriptionLogin(deviceNameOrId: string, provider: string) {
     const device = this.world.devices.find((item) => item.id === deviceNameOrId || item.name === deviceNameOrId)
     if (!device) throw new ClientError('notFound', 'Device not found')
@@ -1206,14 +1227,21 @@ ${response}`,
 
   // ---- Project ----
 
-  createProject(input: { name: string; goal: string; subscription: string; model: string }, clientId: string) {
+  createProject(
+    input: { name: string; goal: string; subscription: string; sourceNodeId?: string | null; model: string },
+    clientId: string,
+  ) {
     const existing = this.projectClientIds.get(clientId)
     if (existing) return this.project(existing.id)
     const name = input.name.trim()
     if (name === '') throw new ClientError('invalid', 'Enter a project name.')
     if (
-      !Object.hasOwn(assistantModels, input.subscription) ||
-      !assistantModels[input.subscription].includes(input.model)
+      input.sourceNodeId
+        ? !this.world.devices.some((device) => device.id === input.sourceNodeId) ||
+          !input.subscription.startsWith('api-') ||
+          !input.model.trim()
+        : !Object.hasOwn(assistantModels, input.subscription) ||
+          !assistantModels[input.subscription].includes(input.model)
     ) {
       throw new ClientError('invalid', `${input.model} is not available with ${input.subscription}`)
     }
@@ -1230,6 +1258,7 @@ ${response}`,
       archivedAt: null,
       goal: input.goal.trim(),
       subscription: input.subscription,
+      sourceNodeId: input.sourceNodeId ?? null,
       model: input.model,
       memoryEmbedding: null,
       agent: { state: 'notStarted', deviceId: null, reason: null, activity: null },
@@ -1248,10 +1277,11 @@ ${response}`,
   updateProject(projectId: ID, patch: ProjectPatch): Project {
     const project = this.project(projectId)
     this.ensureProjectWritable(project)
-    const fields = ['name', 'goal', 'subscription', 'model', 'memoryEmbedding']
+    const fields = ['name', 'goal', 'subscription', 'model', 'memoryEmbedding', 'sourceNodeId']
     if (
       Object.entries(patch).some(
-        ([key, value]) => !fields.includes(key) || (key !== 'memoryEmbedding' && typeof value !== 'string'),
+        ([key, value]) =>
+          !fields.includes(key) || (key !== 'memoryEmbedding' && key !== 'sourceNodeId' && typeof value !== 'string'),
       )
     ) {
       throw new ClientError('invalid', 'Invalid project settings.')
@@ -1288,8 +1318,11 @@ ${response}`,
     next.goal = next.goal.trim()
     if (!next.name) throw new ClientError('invalid', 'Enter a project name.')
     if (
-      !Object.hasOwn(assistantModels, next.subscription) ||
-      !assistantModels[next.subscription].includes(next.model)
+      next.sourceNodeId
+        ? !this.world.devices.some((device) => device.id === next.sourceNodeId) ||
+          !next.subscription.startsWith('api-') ||
+          !next.model.trim()
+        : !Object.hasOwn(assistantModels, next.subscription) || !assistantModels[next.subscription].includes(next.model)
     ) {
       throw new ClientError('invalid', `${next.model} is not available with ${next.subscription}`)
     }
@@ -1304,6 +1337,7 @@ ${response}`,
       name: next.name,
       goal: next.goal,
       subscription: next.subscription,
+      sourceNodeId: next.sourceNodeId ?? null,
       model: next.model,
       memoryEmbedding,
     })
@@ -1577,6 +1611,12 @@ ${response}`,
 
   // 设备能运行 Project 助手：在线、装了 Runtime、助手用的订阅已登录。
   private eligible(device: Device, project: Project) {
+    if (project.sourceNodeId)
+      return (
+        device.id === project.sourceNodeId &&
+        device.connection === 'online' &&
+        !!device.modelConnections?.some((item) => `api-${item.id}` === project.subscription && !item.keyNeeded)
+      )
     return assistantBlock(device, project.subscription) === null
   }
 
@@ -1591,6 +1631,11 @@ ${response}`,
   }
 
   private waitReason(project: Project) {
+    if (project.sourceNodeId) {
+      const device = this.world.devices.find((item) => item.id === project.sourceNodeId)
+      const connection = device?.modelConnections?.find((item) => `api-${item.id}` === project.subscription)
+      return connection ? `Waiting for ${connection.name} on ${device!.name}` : 'Choose another model source'
+    }
     return `An online device with ${project.subscription} signed in`
   }
 
@@ -1627,6 +1672,7 @@ ${response}`,
 
   // 助手没在默认设备（或上次的设备）上运行时，在主对话里说明换到了哪台、为什么。
   private switchNote(project: Project, chosen: Device, skipped?: Device) {
+    if (project.sourceNodeId) return
     const previous = project.agent.deviceId
     const from =
       skipped ??
