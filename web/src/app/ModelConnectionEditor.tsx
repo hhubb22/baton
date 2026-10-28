@@ -64,7 +64,7 @@ export function ModelConnectionEditor({
       .then((complete) => {
         if (!active) return
         if (!complete) throw new Error('connection_missing')
-        setConnection({ ...complete, modelsTruncated: false })
+        setConnection((current) => ({ ...current, models: complete.models, modelsTruncated: false }))
         setModels(complete.models.join('\n'))
       })
       .catch(() => {
@@ -167,7 +167,14 @@ export function ModelConnectionEditor({
       </Field>
       <p {...stylex.props(text.caption, text.muted)}>Request URL: {path}</p>
       <Field label="Model IDs" helper="One model ID per line.">
-        {(props) => <TextArea {...props} value={models} onChange={(event) => setModels(event.target.value)} />}
+        {(props) => (
+          <TextArea
+            {...props}
+            value={models}
+            readOnly={connection.modelsTruncated}
+            onChange={(event) => setModels(event.target.value)}
+          />
+        )}
       </Field>
       {connection.modelsTruncated && (
         <p role="alert" {...stylex.props(text.small, styles.error)}>

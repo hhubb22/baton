@@ -330,7 +330,7 @@ batond 通过 Gateway 的控制队列传送 `node.runtime_report`，正文为 `{
 
 `batond project-exec --enabled=true|false [--shell 路径] [--data-dir 目录]` 原子保存本机 `project-exec.json`。必须显式给出开关，初始值为关闭；默认 shell 在 Windows 为 `pwsh`，其他系统采用 `SHELL`，未设置时为 `/bin/sh`。配置损坏或权限检查失败时上报关闭。浏览器通过 `PUT /api/v1/nodes/{id}/project-exec` 提交 `{enabled}`，Coordinator 校验归属与当前已同步连接，再经 Gateway 发送 `node.project_exec_set`。设备在同一文件锁内保留本机 shell、原子保存并回读开关，以 `node.project_exec_result` 返回 `operation_id`、`ok` 和确认后的 `exec`（含可取得的 `user`）。Coordinator 核对操作、连接、开关值及吊销状态后才返回成功；超时不记作成功，也不自动重发，客户端重新读取设备报告。配置事实随后由能力报告同步。Session Worker 在启动命令前重新读取开关。CLI 和节点页面在开启前说明当前用户权限、任意命令、没有沙箱和注入风险。
 
-`baton-project-runtime probe` 返回 Runtime 版本、订阅和 API 连接状态及模型目录。订阅 OAuth 具备 access/refresh 时报告 available；API 连接有非空密钥时报告 available，缺密钥时报告 login_required。探测只读取本机配置，不请求在线目录或验证授权。单台设备最多报告 3 个订阅和 29 个 API 连接。Runtime 将报告限制在 48 KiB，batond 按 64 KiB 设备报告预算继续裁剪模型并设置 `models_truncated`；网页编辑被裁剪连接时通过设备管理 RPC 读取完整元数据，密钥不进入回执。batond 的探测时限、输出容量和项目并发预算由设备的 `project-runtime.json` 设置；临时探测失败且运行入口、凭据文件元数据不变时可复用上次报告，并标记 stale 与 probe_error。
+`baton-project-runtime probe` 返回 Runtime 版本、订阅和 API 连接状态及模型目录。订阅 OAuth 具备 access/refresh 时报告 available；API 连接有非空密钥时报告 available，缺密钥时报告 login_required。探测只读取本机配置，不请求在线目录或验证授权。单台设备最多报告 3 个订阅和 29 个 API 连接。Runtime 将报告限制在 48 KiB，batond 按 64 KiB 设备报告预算继续裁剪模型并设置 `models_truncated`；网页编辑被裁剪连接时通过设备管理 RPC 读取完整元数据，密钥不进入回执。设备私有配置 `project-runtime.json` 的 `probeTimeoutMs` 默认 5000 毫秒，`probeMaxOutputBytes` 默认 64 KiB，`maxConcurrentProjects` 默认 4；`maxOutputTokens` 和 `maxModelCalls` 分别默认为 32000 和 64，限制输出 token 与每次运行的模型调用次数。临时探测失败且运行入口、凭据文件元数据不变时可复用上次报告，并标记 stale 与 probe_error。
 
 ### 9. Thread 操作与回复回收
 

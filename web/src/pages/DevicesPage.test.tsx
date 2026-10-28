@@ -72,12 +72,29 @@ it('loads the complete model list before editing a truncated device report', asy
         connection.name === 'Local gateway' ? { ...connection, models: [], modelsTruncated: true } : connection,
       ),
     }))
-  const configure = vi.spyOn(client, 'configureModelConnection')
+  const original = client.configureModelConnection.bind(client)
+  let release!: () => void
+  const delayed = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const configure = vi.spyOn(client, 'configureModelConnection').mockImplementation(async (input) => {
+    if (input.action === 'get') await delayed
+    return original(input)
+  })
   const router = createAppRouter({ history: createMemoryHistory({ initialEntries: ['/devices'] }) })
   render(<App client={client} router={router} />)
   await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
   await user.click(screen.getByRole('button', { name: 'Edit Local gateway' }))
+  expect(screen.getByLabelText('Model IDs')).toHaveAttribute('readonly')
+  await user.clear(screen.getByLabelText('Name'))
+  await user.type(screen.getByLabelText('Name'), 'Edited while loading')
+  await user.clear(screen.getByLabelText('Base URL'))
+  await user.type(screen.getByLabelText('Base URL'), 'http://localhost:9999/v1')
+  await act(async () => release())
   await waitFor(() => expect(screen.getByLabelText('Model IDs')).toHaveValue('local-model'))
+  expect(screen.getByLabelText('Name')).toHaveValue('Edited while loading')
+  expect(screen.getByLabelText('Base URL')).toHaveValue('http://localhost:9999/v1')
+  expect(screen.getByLabelText('Model IDs')).not.toHaveAttribute('readonly')
   expect(configure).toHaveBeenCalledWith(expect.objectContaining({ action: 'get' }))
   expect(screen.getByRole('button', { name: 'Save connection' })).toBeEnabled()
 })

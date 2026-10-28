@@ -1333,6 +1333,10 @@ ${response}`,
     const passive: Pick<ProjectPatch, 'name' | 'goal'> = {}
     if (next.name !== project.name) passive.name = next.name
     if (next.goal !== project.goal) passive.goal = next.goal
+    const modelChanged =
+      next.subscription !== project.subscription ||
+      next.sourceNodeId !== project.sourceNodeId ||
+      next.model !== project.model
     Object.assign(project, {
       name: next.name,
       goal: next.goal,
@@ -1344,6 +1348,7 @@ ${response}`,
     if (Object.keys(passive).length > 0) {
       this.queuePassive({ projectId, kind: 'settings', patch: passive, updatedAt: this.scheduler.now() })
     }
+    if (modelChanged && project.agent.state === 'waitingDevice') this.wake(project)
     this.emit('projects')
     return project
   }
