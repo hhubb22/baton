@@ -13,7 +13,8 @@ function run(executable, args, options) {
   const result = spawnSync(executable, args, {
     ...options,
     encoding: 'utf8',
-    timeout: 15_000,
+    // Windows runner 上进程启动和 PowerShell 调用明显更慢。
+    timeout: process.platform === 'win32' ? 60_000 : 15_000,
     maxBuffer: 256 * 1024,
     windowsHide: true,
   })
