@@ -112,11 +112,20 @@ const styles = stylex.create({
   s14: { width: '14px', height: '14px' },
   s15: { width: '15px', height: '15px' },
   s16: { width: '16px', height: '16px' },
+  s18: { width: '18px', height: '18px' },
   s24: { width: '24px', height: '24px' },
   s36: { width: '36px', height: '36px' },
 })
 
-const sizes = { 12: styles.s12, 14: styles.s14, 15: styles.s15, 16: styles.s16, 24: styles.s24, 36: styles.s36 }
+const sizes = {
+  12: styles.s12,
+  14: styles.s14,
+  15: styles.s15,
+  16: styles.s16,
+  18: styles.s18,
+  24: styles.s24,
+  36: styles.s36,
+}
 
 export function Icon({
   name,

@@ -4,6 +4,11 @@ import { colors, radius, size } from '../theme/tokens.stylex'
 
 const styles = stylex.create({
   pane: { position: 'relative', flexShrink: 0, height: '100%', minWidth: 0 },
+  animatedWidth: {
+    transition: 'width 220ms cubic-bezier(0.32, 0.72, 0, 1)',
+    '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
+  },
+  draggingWidth: { transition: 'none' },
   floating: {
     position: 'absolute',
     top: 0,
@@ -98,6 +103,7 @@ export function ResizablePane({
   acrossGutter = false,
   floating = false,
   open = true,
+  animateCollapse = false,
 }: {
   children: ReactNode
   label: string
@@ -112,6 +118,7 @@ export function ResizablePane({
   acrossGutter?: boolean
   floating?: boolean
   open?: boolean
+  animateCollapse?: boolean
 }) {
   const pane = useRef<HTMLDivElement>(null)
   const line = useRef<HTMLDivElement>(null)
@@ -133,7 +140,7 @@ export function ResizablePane({
         : max
       const upper = Math.min(max, available)
       const lower = Math.min(min, upper)
-      const next = collapsed ? 64 : Math.max(lower, Math.min(preferred, upper))
+      const next = collapsed ? 52 : Math.max(lower, Math.min(preferred, upper))
       element.style.width = `${next}px`
       if (floating) parent.style.setProperty('--project-panel-width', `${next}px`)
       setWidth(next)
@@ -198,6 +205,8 @@ export function ResizablePane({
       aria-hidden={!open || undefined}
       {...stylex.props(
         styles.pane,
+        animateCollapse && styles.animatedWidth,
+        dragging && styles.draggingWidth,
         floating && styles.floating,
         floating && !open && styles.floatingClosed,
         stackOnNarrow && styles.paneStack,

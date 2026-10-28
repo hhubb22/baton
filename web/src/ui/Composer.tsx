@@ -28,6 +28,7 @@ const styles = stylex.create({
     padding: '8px',
     borderRadius: '28px',
   },
+  roomy: { maxWidth: '840px' },
   header: { cursor: 'auto' },
   compactHeader: { gridColumn: '1 / -1' },
   input: {
@@ -49,6 +50,7 @@ const styles = stylex.create({
     '::placeholder': { color: colors.faint },
   },
   compactInput: { paddingLeft: '8px' },
+  roomyInput: { minHeight: '96px' },
   toolbar: {
     display: 'flex',
     alignItems: 'center',
@@ -99,6 +101,7 @@ export function Composer({
   label = 'Message',
   inputRef,
   style,
+  roomy = false,
 }: {
   value: string
   onChange: (value: string) => void
@@ -112,6 +115,7 @@ export function Composer({
   label?: string
   inputRef?: RefObject<HTMLTextAreaElement | null>
   style?: stylex.StyleXStyles
+  roomy?: boolean
 }) {
   const localRef = useRef<HTMLTextAreaElement | null>(null)
   const empty = value.trim() === ''
@@ -127,7 +131,7 @@ export function Composer({
       input.style.transition = 'none'
       input.style.height = '0px'
       const contentHeight = input.scrollHeight
-      const next = `${Math.max(24, Math.min(contentHeight, 240))}px`
+      const next = `${Math.max(roomy ? 96 : 24, Math.min(contentHeight, 240))}px`
       input.style.overflowY = contentHeight > 240 ? 'auto' : 'hidden'
       input.style.height = previous
       void input.offsetHeight
@@ -145,7 +149,7 @@ export function Composer({
           })
     observer?.observe(input)
     return () => observer?.disconnect()
-  }, [ref, value])
+  }, [ref, roomy, value])
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
@@ -154,7 +158,10 @@ export function Composer({
   }
 
   return (
-    <div {...stylex.props(styles.composer, compact && styles.compact, style)} onClick={() => ref.current?.focus()}>
+    <div
+      {...stylex.props(styles.composer, compact && styles.compact, roomy && styles.roomy, style)}
+      onClick={() => ref.current?.focus()}
+    >
       {header && (
         <div
           onClick={(event) => event.stopPropagation()}
@@ -171,7 +178,7 @@ export function Composer({
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={onKeyDown}
-        {...stylex.props(text.body, styles.input, compact && styles.compactInput)}
+        {...stylex.props(text.body, styles.input, compact && styles.compactInput, roomy && styles.roomyInput)}
       />
       <div
         {...stylex.props(styles.toolbar, compact && styles.compactToolbar)}

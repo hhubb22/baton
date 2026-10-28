@@ -24,6 +24,7 @@ const styles = stylex.create({
     padding: size.gutter,
     backgroundColor: colors.panel,
   },
+  shellCollapsed: { gap: '2px' },
   problem: {
     display: 'flex',
     flexDirection: 'column',
@@ -156,9 +157,10 @@ export function WorkspaceLayout() {
     <WorkspaceContext value={workspace}>
       <DesktopWorkspace>
         <WorkspaceTitle />
-        <div {...stylex.props(styles.shell)}>
+        <div {...stylex.props(styles.shell, collapsed && styles.shellCollapsed)}>
           <ResizablePane
             acrossGutter
+            animateCollapse
             label="Resize sidebar"
             storageKey="baton.width.sidebar"
             defaultWidth={228}

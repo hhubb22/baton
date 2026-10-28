@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from 'react'
 import { AttentionCard } from '../app/AttentionCard'
 import { DesktopTargetNotice } from '../app/DesktopWorkspace'
 import { pane } from '../app/Page'
-import { useWorkspace } from '../app/workspace'
 import { pendingInbox } from '../data/derive'
 import type { InboxItem, Project } from '../data/types'
 import { useInbox, useProjects } from '../data/queries'
@@ -12,7 +11,7 @@ import { text } from '../theme/text'
 import { colors, radius, size, space } from '../theme/tokens.stylex'
 import { Avatar } from '../ui/Avatar'
 import { Banner } from '../ui/Banner'
-import { Button, focusRing, IconButton } from '../ui/Button'
+import { Button, focusRing } from '../ui/Button'
 import { ResizablePane } from '../ui/ResizablePane'
 
 const styles = stylex.create({
@@ -99,7 +98,6 @@ const styles = stylex.create({
 export function InboxPage() {
   const inbox = useInbox()
   const projects = useProjects()
-  const workspace = useWorkspace()
   const [openId, setOpenId] = useState<string | null>(null)
   const { handled } = useSearch({ from: '/workspace/inbox' })
   const navigate = useNavigate()
@@ -131,12 +129,6 @@ export function InboxPage() {
       >
         <div {...stylex.props(styles.listPane)}>
           <header {...stylex.props(styles.header)}>
-            <IconButton
-              icon="sidebar"
-              label={workspace.collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              aria-expanded={!workspace.collapsed}
-              onClick={workspace.toggleSidebar}
-            />
             <h1 {...stylex.props(text.bodyMedium, styles.headerTitle)}>{handled ? 'Handled' : 'Inbox'}</h1>
           </header>
           <div {...stylex.props(styles.notice)}>

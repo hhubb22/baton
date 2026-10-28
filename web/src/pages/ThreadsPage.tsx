@@ -1,6 +1,6 @@
 import * as stylex from '@stylexjs/stylex'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type UIEvent } from 'react'
 import { FolderDialog } from '../app/FolderDialog'
 import { useLocalDirectoryPicker } from '../app/LocalDirectoryPicker'
 import { Page } from '../app/Page'
@@ -40,12 +40,53 @@ import { Menu, MenuHeading, MenuOption, MenuRule } from '../ui/Menu'
 const styles = stylex.create({
   layout: { display: 'flex', gap: size.gutter, flexGrow: 1, minWidth: 0, height: '100%' },
   content: { display: 'flex', flexDirection: 'column', gap: space.lg, padding: '20px' },
-  composerArea: { display: 'flex', flexDirection: 'column', gap: space.xs },
-  status: { minHeight: '18px', paddingInline: space.xs, color: colors.muted },
+  composerArea: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 'max(320px, calc(100cqh - 120px))',
+    gap: space.xs,
+    paddingBottom: space.xl,
+  },
+  composerGroup: { width: '100%', maxWidth: '840px' },
+  threadList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space.lg,
+    minHeight: 'calc(100cqh - 40px)',
+    opacity: 0.65,
+    '@media (prefers-reduced-motion: reduce)': { opacity: 1 },
+  },
+  composerFrame: { position: 'relative', zIndex: 1 },
+  locationBar: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: '2px',
+    marginInline: '12px',
+    marginTop: '-8px',
+    paddingTop: '12px',
+    paddingBottom: '4px',
+    paddingInline: '8px',
+    borderBottomLeftRadius: '16px',
+    borderBottomRightRadius: '16px',
+    backgroundColor: colors.subtle,
+  },
+  status: { width: '100%', maxWidth: '840px', minHeight: '18px', paddingInline: space.xs, color: colors.muted },
   danger: { color: colors.danger },
-  filters: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: space.xs, paddingLeft: space.xs },
+  filters: {
+    display: 'flex',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: space.xs,
+    width: '100%',
+    maxWidth: '960px',
+    marginInline: 'auto',
+    paddingLeft: space.xs,
+  },
   count: { marginLeft: 'auto', color: colors.faint },
-  group: { display: 'flex', flexDirection: 'column' },
+  group: { display: 'flex', flexDirection: 'column', width: '100%', maxWidth: '960px', marginInline: 'auto' },
   groupLabel: {
     display: 'flex',
     alignItems: 'center',
@@ -65,8 +106,9 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     gap: space.md,
-    minHeight: size.comfortable,
+    minHeight: '48px',
     paddingInline: space.md,
+    paddingLeft: '24px',
     borderRadius: radius.md,
     color: colors.text,
     textDecoration: 'none',
@@ -74,6 +116,17 @@ const styles = stylex.create({
   },
   rowSelected: { backgroundColor: { default: colors.selected, ':hover': colors.selected } },
   unreadSlot: { display: 'inline-flex', flexShrink: 0, width: size.dot, height: size.dot },
+  rowIcon: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    width: '24px',
+    height: '24px',
+    color: colors.muted,
+  },
+  rowIconAttention: { color: colors.attentionText },
+  rowIconRunning: { color: colors.agentText },
   title: { display: 'inline-flex', alignItems: 'center', gap: space.xs, flexGrow: 1, flexBasis: 0, minWidth: 0 },
   titleText: { minWidth: 0 },
   project: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, width: '20px' },
@@ -86,7 +139,6 @@ const styles = stylex.create({
     whiteSpace: 'nowrap',
     '@media (max-width: 700px)': { display: 'none' },
   },
-  rowStatus: { flexShrink: 0, maxWidth: '120px', color: colors.muted },
   time: { flexShrink: 0, width: '72px', textAlign: 'right', color: colors.faint, whiteSpace: 'nowrap' },
   empty: {
     display: 'flex',
@@ -248,12 +300,13 @@ function ModelMenu({
   onSelect: (choice: AgentChoice) => void
   onUnavailable: (message: string) => void
 }) {
-  const label = choice ? `${agentNames[choice.agent]} · ${choice.model || 'Default model'}` : 'No agent'
+  const label = choice ? choice.model || 'Default model' : 'No agent'
   return (
     <ThreadModelMenu
       agents={device?.agents ?? []}
       choice={choice}
       label={label}
+      accessibleLabel={choice ? `${agentNames[choice.agent]} · ${label}` : label}
       onSelect={onSelect}
       onUnavailable={onUnavailable}
     />
@@ -274,8 +327,16 @@ function ThreadListRow({
   now: number
 }) {
   const timer = group.live && thread.runStartedAt !== null ? runTimer(thread.runStartedAt, now) : null
-  const groupLabel = threadGroups.find((item) => item.id === group.group)?.label
-  const showStatus = group.status.label.replace(/…$/, '') !== groupLabel
+  const statusIcon =
+    group.group === 'attention'
+      ? group.status.label === 'Stopped'
+        ? 'stop'
+        : 'alert'
+      : group.group === 'waiting' || group.group === 'stopRequested'
+        ? 'offline'
+        : group.group === 'archived'
+          ? 'archive'
+          : 'message'
   return (
     <Link
       to="/threads"
@@ -285,11 +346,18 @@ function ThreadListRow({
       {...stylex.props(text.small, styles.row, selected && styles.rowSelected, focusRing.ring)}
     >
       <span {...stylex.props(styles.unreadSlot)}>{thread.unread && <UnreadDot />}</span>
+      <span
+        title={group.status.label}
+        {...stylex.props(
+          styles.rowIcon,
+          group.group === 'attention' && group.status.label !== 'Stopped' && styles.rowIconAttention,
+          group.group === 'running' && styles.rowIconRunning,
+        )}
+      >
+        <Icon name={statusIcon} size={16} />
+      </span>
       <span {...stylex.props(styles.title)}>
         <span {...stylex.props(styles.titleText, text.truncate)}>{thread.title}</span>
-        {showStatus && (
-          <span {...stylex.props(text.caption, styles.rowStatus, text.truncate)}>{group.status.label}</span>
-        )}
         {timer && (
           <span title={`Running time: ${timer}`} {...stylex.props(text.caption, styles.timer)}>
             <Icon name="clock" size={12} />
@@ -317,12 +385,41 @@ export function ThreadsPage() {
   const projects = useProjects()
   const create = useCreateThread()
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  const composerGroupRef = useRef<HTMLDivElement>(null)
+  const threadListRef = useRef<HTMLDivElement>(null)
   const [draft, setDraft] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [location, setLocation] = useState<Location | null>(null)
   const [agentChoice, setAgentChoice] = useState<AgentChoice | null>(null)
   const [browseDevice, setBrowseDevice] = useState<string | null>(null)
   const [collapsedGroups, setCollapsedGroups] = useState<ThreadGroup[]>([])
+
+  const listScrollPosition = (body: HTMLDivElement) => {
+    const list = threadListRef.current
+    if (!list) return 0
+    return Math.min(
+      body.scrollHeight - body.clientHeight,
+      list.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop,
+    )
+  }
+
+  const onPageScroll = (event: UIEvent<HTMLDivElement>) => {
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    const target = listScrollPosition(event.currentTarget)
+    const progress = reduceMotion || target <= 0 ? 0 : Math.min(1, event.currentTarget.scrollTop / target)
+    if (composerGroupRef.current) {
+      composerGroupRef.current.style.opacity = reduceMotion ? '' : String(1 - progress)
+      composerGroupRef.current.style.pointerEvents = progress >= 1 ? 'none' : ''
+    }
+    if (threadListRef.current) threadListRef.current.style.opacity = reduceMotion ? '' : String(0.65 + progress * 0.35)
+  }
+
+  const onPageScrollEnd = (body: HTMLDivElement) => {
+    const target = listScrollPosition(body)
+    if (body.scrollTop <= 1 || body.scrollTop >= target - 1) return
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    body.scrollTo({ top: body.scrollTop < target / 2 ? 0 : target, behavior: reduceMotion ? 'instant' : 'smooth' })
+  }
 
   const allThreads = threads.data ?? []
   const allDevices = devices.data ?? []
@@ -504,7 +601,7 @@ export function ThreadsPage() {
 
   return (
     <div {...stylex.props(styles.layout)}>
-      <Page title="Threads">
+      <Page title="Threads" sizedBody bottomFade onBodyScroll={onPageScroll} onBodyScrollEnd={onPageScrollEnd}>
         <div {...stylex.props(styles.content)}>
           {devices.isError ? (
             <Banner
@@ -533,104 +630,123 @@ export function ThreadsPage() {
             />
           ) : (
             <div {...stylex.props(styles.composerArea)}>
-              <Composer
-                label="New thread message"
-                inputRef={inputRef}
-                value={draft}
-                onChange={setDraft}
-                onSend={onSend}
-                placeholder={
-                  choice && device ? `Message ${agentNames[choice.agent]}…` : 'Choose a folder and model to start'
-                }
-                chips={
-                  <>
-                    <LocationMenus
-                      location={current}
-                      threads={allThreads}
-                      devices={allDevices}
-                      onSelect={(next) => {
-                        setError(null)
-                        setLocation(next)
-                      }}
-                      onBrowse={() => setBrowseDevice(current?.deviceId ?? allDevices[0]?.id ?? null)}
-                      onError={setError}
-                    />
-                    <ModelMenu
-                      device={device}
-                      choice={choice}
-                      onSelect={(next) => {
-                        setError(null)
-                        setAgentChoice(next)
-                      }}
-                      onUnavailable={setError}
-                    />
-                    {choice && device && <ThreadAccessMenu agent={choice.agent} user={device.commandAccess.user} />}
-                  </>
-                }
-              />
+              <div ref={composerGroupRef} {...stylex.props(styles.composerGroup)}>
+                <div {...stylex.props(styles.composerFrame)}>
+                  <Composer
+                    roomy
+                    label="New thread message"
+                    inputRef={inputRef}
+                    value={draft}
+                    onChange={setDraft}
+                    onSend={onSend}
+                    placeholder={
+                      choice && device ? `Message ${agentNames[choice.agent]}…` : 'Choose a folder and model to start'
+                    }
+                    chips={
+                      <>
+                        <ModelMenu
+                          device={device}
+                          choice={choice}
+                          onSelect={(next) => {
+                            setError(null)
+                            setAgentChoice(next)
+                          }}
+                          onUnavailable={setError}
+                        />
+                        <Chip
+                          icon="reasoning"
+                          composer
+                          caret={false}
+                          disabled
+                          aria-label="Reasoning: agent default"
+                          title="Reasoning uses the agent's default setting"
+                        >
+                          Default
+                        </Chip>
+                        {choice && device && <ThreadAccessMenu agent={choice.agent} user={device.commandAccess.user} />}
+                      </>
+                    }
+                  />
+                </div>
+                <div {...stylex.props(styles.locationBar)}>
+                  <LocationMenus
+                    location={current}
+                    threads={allThreads}
+                    devices={allDevices}
+                    onSelect={(next) => {
+                      setError(null)
+                      setLocation(next)
+                    }}
+                    onBrowse={() => setBrowseDevice(current?.deviceId ?? allDevices[0]?.id ?? null)}
+                    onError={setError}
+                  />
+                </div>
+              </div>
               <span role="status" {...stylex.props(text.caption, styles.status, error !== null && styles.danger)}>
                 {statusLine}
               </span>
             </div>
           )}
-          <div {...stylex.props(styles.filters)}>
-            <Menu trigger={<Chip icon="laptop">{filterDevice?.name ?? 'All devices'}</Chip>}>
-              <MenuOption selected={!search.device} onSelect={() => setSearch({ device: undefined })}>
-                All devices
-              </MenuOption>
-              {allDevices.map((item) => (
-                <MenuOption
-                  key={item.id}
-                  selected={search.device === item.id}
-                  onSelect={() => setSearch({ device: item.id })}
-                >
-                  {item.name}
+          <div ref={threadListRef} {...stylex.props(styles.threadList)}>
+            <div {...stylex.props(styles.filters)}>
+              <Menu trigger={<Chip icon="laptop">{filterDevice?.name ?? 'All devices'}</Chip>}>
+                <MenuOption selected={!search.device} onSelect={() => setSearch({ device: undefined })}>
+                  All devices
                 </MenuOption>
-              ))}
-            </Menu>
-            {projects.isError ? (
-              <span {...stylex.props(text.caption, styles.muted)}>Projects unavailable</span>
-            ) : (
-              <Menu
-                trigger={
-                  <Chip icon="projects">
-                    {search.project === 'none' ? 'No project' : (filterProject?.name ?? 'All projects')}
-                  </Chip>
-                }
-              >
-                <MenuOption selected={!search.project} onSelect={() => setSearch({ project: undefined })}>
-                  All projects
-                </MenuOption>
-                <MenuOption selected={search.project === 'none'} onSelect={() => setSearch({ project: 'none' })}>
-                  No project
-                </MenuOption>
-                {projects.data?.map((item) => (
+                {allDevices.map((item) => (
                   <MenuOption
                     key={item.id}
-                    selected={search.project === item.id}
-                    onSelect={() => setSearch({ project: item.id })}
+                    selected={search.device === item.id}
+                    onSelect={() => setSearch({ device: item.id })}
                   >
                     {item.name}
                   </MenuOption>
                 ))}
               </Menu>
-            )}
-            <Menu trigger={<Chip icon="archive">{archived ? 'Archived' : 'Active'}</Chip>}>
-              <MenuOption selected={!archived} onSelect={() => setSearch({ archived: undefined })}>
-                Active
-              </MenuOption>
-              <MenuOption selected={archived} onSelect={() => setSearch({ archived: true })}>
-                Archived
-              </MenuOption>
-            </Menu>
-            {threads.data && (
-              <span {...stylex.props(text.caption, styles.count)}>
-                {filtered.length === 1 ? '1 thread' : `${filtered.length} threads`}
-                {filtering && ' shown'}
-              </span>
-            )}
+              {projects.isError ? (
+                <span {...stylex.props(text.caption, styles.muted)}>Projects unavailable</span>
+              ) : (
+                <Menu
+                  trigger={
+                    <Chip icon="projects">
+                      {search.project === 'none' ? 'No project' : (filterProject?.name ?? 'All projects')}
+                    </Chip>
+                  }
+                >
+                  <MenuOption selected={!search.project} onSelect={() => setSearch({ project: undefined })}>
+                    All projects
+                  </MenuOption>
+                  <MenuOption selected={search.project === 'none'} onSelect={() => setSearch({ project: 'none' })}>
+                    No project
+                  </MenuOption>
+                  {projects.data?.map((item) => (
+                    <MenuOption
+                      key={item.id}
+                      selected={search.project === item.id}
+                      onSelect={() => setSearch({ project: item.id })}
+                    >
+                      {item.name}
+                    </MenuOption>
+                  ))}
+                </Menu>
+              )}
+              <Menu trigger={<Chip icon="archive">{archived ? 'Archived' : 'Active'}</Chip>}>
+                <MenuOption selected={!archived} onSelect={() => setSearch({ archived: undefined })}>
+                  Active
+                </MenuOption>
+                <MenuOption selected={archived} onSelect={() => setSearch({ archived: true })}>
+                  Archived
+                </MenuOption>
+              </Menu>
+              {threads.data && (
+                <span {...stylex.props(text.caption, styles.count)}>
+                  {filtered.length === 1 ? '1 thread' : `${filtered.length} threads`}
+                  {filtering && ' shown'}
+                </span>
+              )}
+            </div>
+            {list}
           </div>
-          {list}
         </div>
       </Page>
       {search.thread && (

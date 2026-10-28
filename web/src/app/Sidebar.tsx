@@ -10,7 +10,7 @@ import { text } from '../theme/text'
 import { colors, radius, size, space } from '../theme/tokens.stylex'
 import { Avatar, PersonAvatar } from '../ui/Avatar'
 import { Count } from '../ui/Badge'
-import { focusRing } from '../ui/Button'
+import { focusRing, IconButton } from '../ui/Button'
 import { Icon, type IconName } from '../ui/Icon'
 import { Menu, MenuHeading, MenuOption, MenuRule } from '../ui/Menu'
 import { StatusDot } from '../ui/Status'
@@ -23,17 +23,25 @@ const styles = stylex.create({
     flexShrink: 0,
     width: '100%',
     height: '100%',
+    overflow: 'hidden',
     paddingTop: 0,
     paddingInline: space.sm,
     paddingBottom: space.sm,
   },
-  sidebarCollapsed: { width: '64px' },
+  sidebarCollapsed: { width: '52px' },
   header: {
     display: 'flex',
     alignItems: 'center',
+    flexShrink: 0,
     gap: space.xs,
     height: size.header,
     paddingInline: space.xs,
+  },
+  headerCollapsed: {
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    height: '76px',
+    paddingTop: '10px',
   },
   nav: { display: 'flex', flexDirection: 'column', gap: space.xxs, marginTop: space.md },
   row: {
@@ -42,12 +50,14 @@ const styles = stylex.create({
     gap: space.sm,
     height: size.row,
     paddingInline: space.sm,
+    paddingLeft: '9px',
     borderRadius: radius.sm,
     color: colors.muted,
     fontWeight: weight.medium,
     lineHeight: 'normal',
     letterSpacing: 'normal',
     textDecoration: 'none',
+    whiteSpace: 'nowrap',
     backgroundColor: { default: 'transparent', ':hover': colors.hover },
   },
   projectRow: { height: size.row, gap: '6px' },
@@ -98,17 +108,20 @@ const styles = stylex.create({
   account: {
     display: 'flex',
     alignItems: 'center',
+    justifyContent: 'flex-end',
     gap: space.sm,
     flexGrow: 1,
     minWidth: 0,
     height: size.row,
     paddingInline: space.xs,
+    paddingLeft: '2px',
     borderWidth: 0,
     borderRadius: radius.sm,
     backgroundColor: { default: 'transparent', ':hover': colors.hover },
     color: colors.text,
     textAlign: 'start',
   },
+  accountCollapsed: { flexGrow: 0, width: '28px' },
   accountMenu: {
     display: 'flex',
     flexDirection: 'column',
@@ -144,7 +157,7 @@ function NavRow({
       title={collapsed ? label : undefined}
       {...stylex.props(text.small, styles.row, active && styles.active, focusRing.ring)}
     >
-      <Icon name={icon} size={14} style={styles.rowIcon} />
+      <Icon name={icon} size={18} style={styles.rowIcon} />
       {!collapsed && <span {...stylex.props(styles.rowLabel)}>{label}</span>}
       {!collapsed && trailing}
     </Link>
@@ -189,7 +202,7 @@ export function Sidebar() {
   const projects = useProjects()
   const threads = useThreads()
   const inbox = useInbox()
-  const { collapsed, signingOut, signOut } = useWorkspace()
+  const { collapsed, toggleSidebar, signingOut, signOut } = useWorkspace()
   const { mode, setMode } = useTheme()
 
   const account = session.data?.account
@@ -199,7 +212,14 @@ export function Sidebar() {
 
   return (
     <nav aria-label="Workspace" {...stylex.props(styles.sidebar, collapsed && styles.sidebarCollapsed)}>
-      <div {...stylex.props(styles.header)}>
+      <div {...stylex.props(styles.header, collapsed && styles.headerCollapsed)}>
+        <IconButton
+          icon="sidebar"
+          iconSize={18}
+          label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-expanded={!collapsed}
+          onClick={toggleSidebar}
+        />
         {account && (
           <Menu
             narrow
@@ -209,7 +229,7 @@ export function Sidebar() {
                 type="button"
                 aria-label={collapsed ? account.name : undefined}
                 title={collapsed ? account.name : undefined}
-                {...stylex.props(text.small, styles.account, focusRing.ring)}
+                {...stylex.props(text.small, styles.account, collapsed && styles.accountCollapsed, focusRing.ring)}
               >
                 <PersonAvatar name={account.name} />
                 {!collapsed && <span {...stylex.props(text.truncate, styles.accountLabel)}>{account.name}</span>}
@@ -238,7 +258,6 @@ export function Sidebar() {
           </Menu>
         )}
       </div>
-
       <div {...stylex.props(styles.nav)}>
         <NavRow
           to="/inbox"

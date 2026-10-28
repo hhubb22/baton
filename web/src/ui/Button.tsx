@@ -129,12 +129,13 @@ export function Button({
 type IconButtonProps = Omit<ComponentProps<'button'>, 'className' | 'style' | 'children'> & {
   icon: IconName
   label: string
+  iconSize?: ComponentProps<typeof Icon>['size']
   active?: boolean
   style?: stylex.StyleXStyles
   children?: ReactNode
 }
 
-export function IconButton({ icon, label, active, style, type = 'button', ...rest }: IconButtonProps) {
+export function IconButton({ icon, label, iconSize = 16, active, style, type = 'button', ...rest }: IconButtonProps) {
   return (
     <button
       type={type}
@@ -143,7 +144,7 @@ export function IconButton({ icon, label, active, style, type = 'button', ...res
       {...rest}
       {...stylex.props(styles.base, styles.icon, active && styles.iconActive, focusRing.ring, style)}
     >
-      <Icon name={icon} size={16} />
+      <Icon name={icon} size={iconSize} />
     </button>
   )
 }
