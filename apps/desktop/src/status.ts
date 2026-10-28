@@ -8,6 +8,7 @@ export const PublicIdentity = Schema.Union([
     registered: Schema.Literal(true),
     coordinator_url: Schema.String,
     node_id: Schema.String,
+    employee_id: Schema.optionalKey(Schema.String),
     display_name: Schema.String,
     system: Schema.String,
   }),
@@ -16,6 +17,7 @@ export type PublicIdentity = typeof PublicIdentity.Type
 
 export const DaemonStatus = Schema.Struct({
   pid: Schema.Int.check(Schema.isGreaterThan(0)),
+  batond_version: Schema.optionalKey(Schema.String),
   state: Schema.Literals(['connecting', 'online', 'rejected', 'stopping']),
   code: Schema.optional(Schema.String),
   message: Schema.optional(Schema.String),

@@ -2,6 +2,7 @@ import * as stylex from '@stylexjs/stylex'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { FolderDialog } from '../app/FolderDialog'
+import { useLocalDirectoryPicker } from '../app/LocalDirectoryPicker'
 import { Page } from '../app/Page'
 import type { ThreadsSearch } from '../app/router'
 import { ThreadAccessMenu } from '../app/ThreadAccessMenu'
@@ -98,13 +99,16 @@ function LocationMenu({
   devices,
   onSelect,
   onBrowse,
+  onError,
 }: {
   location: Location | null
   threads: Thread[]
   devices: Device[]
   onSelect: (location: Location) => void
   onBrowse: () => void
+  onError: (error: string | null) => void
 }) {
+  const local = useLocalDirectoryPicker({ nodeId: location?.deviceId ?? null, onSelect, onError })
   const device = devices.find((item) => item.id === location?.deviceId)
   const recent = recentLocations(threads, devices)
   const label = location && device ? `${folderName(location.folder)} · ${device.name}` : 'Choose folder'
@@ -140,6 +144,7 @@ function LocationMenu({
         </div>
       ))}
       <MenuRule />
+      {local.available && <MenuOption onSelect={() => void local.pick()}>{local.label}</MenuOption>}
       <MenuOption onSelect={onBrowse}>Choose another folder…</MenuOption>
     </Menu>
   )
@@ -471,6 +476,7 @@ export function ThreadsPage() {
                         setLocation(next)
                       }}
                       onBrowse={() => setBrowseDevice(current?.deviceId ?? allDevices[0]?.id ?? null)}
+                      onError={setError}
                     />
                     <ModelMenu
                       device={device}

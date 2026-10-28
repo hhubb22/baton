@@ -42,6 +42,7 @@ export async function runDaemonCLI(
       console.log(
         JSON.stringify({
           registered: true,
+          employee_id: identity.employee_id,
           coordinator_url: identity.coordinator_url,
           node_id: identity.node_id,
           display_name: identity.display_name,

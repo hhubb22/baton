@@ -158,6 +158,7 @@ it('identity reports only public identity fields and handles an unregistered dir
     await runDaemonCLI('identity', [])
     expect(JSON.parse(output.mock.calls[0]![0] as string)).toEqual({
       registered: true,
+      employee_id: identity.employee_id,
       node_id: identity.node_id,
       display_name: identity.display_name,
       system: identity.system,

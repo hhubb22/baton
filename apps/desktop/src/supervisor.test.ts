@@ -1,9 +1,10 @@
 import { afterEach, expect, it, vi } from 'vite-plus/test'
 import { Supervisor, restartDecision } from './supervisor.ts'
 import { fakeProcess } from './testing/process.ts'
+import { redactDiagnostics } from './diagnostics.ts'
 
 afterEach(() => vi.useRealTimers())
-function fixture() {
+function fixture(now?: () => number) {
   vi.useFakeTimers()
   const children: ReturnType<typeof fakeProcess>[] = []
   const spawn = vi.fn(() => {
@@ -12,7 +13,7 @@ function fixture() {
     return child
   })
   const changed = vi.fn()
-  const supervisor = new Supervisor({ spawn, changed, log: vi.fn() })
+  const supervisor = new Supervisor({ spawn, changed, log: vi.fn(), ...(now ? { now } : {}) })
   return { children, spawn, supervisor }
 }
 
@@ -117,6 +118,170 @@ it('重启等待超时后仍会在旧进程 close 后拉起新进程', async () 
   const stopping = f.supervisor.stop()
   f.children[1]!.emit('close', 0)
   await stopping
+})
+
+it('最近退出使用注入时间，保留 code、signal 和固定失败说明，并跨自动重启保留', async () => {
+  let now = Date.parse('2026-06-01T12:00:00.000Z')
+  const f = fixture(() => now)
+  expect(f.supervisor.lastExit).toBeNull()
+  f.supervisor.start()
+  const message = 'connection refused; token=offline-diagnostic-value'
+  f.children[0]!.stderr.emit('data', Buffer.from(JSON.stringify({ code: 'transport_failed', message })))
+  now += 500
+  f.children[0]!.emit('close', 17, 'SIGTERM')
+  expect(f.supervisor.lastExit).toEqual({
+    at: '2026-06-01T12:00:00.500Z',
+    reason: 'batond exited (code: 17, signal: SIGTERM); batond reported a failure; check logs',
+  })
+  const exit = f.supervisor.lastExit
+  await vi.advanceTimersByTimeAsync(1000)
+  expect(f.spawn).toHaveBeenCalledTimes(2)
+  expect(f.supervisor.lastExit).toEqual(exit)
+  const stopping = f.supervisor.stop()
+  f.children[1]!.emit('close', 0, null)
+  await stopping
+})
+
+it('正常退出、信号退出及普通 stderr 均记录实际结果，停止空监管不覆盖最近退出', async () => {
+  const f = fixture()
+  f.supervisor.start()
+  f.children[0]!.emit('close', 0, null)
+  expect(f.supervisor.lastExit?.reason).toBe('batond exited (code: 0, signal: none)')
+  await vi.advanceTimersByTimeAsync(1000)
+  f.children[1]!.stderr.emit('data', Buffer.from('ordinary diagnostic\nlast failure line\n'))
+  f.children[1]!.emit('close', null, 'SIGABRT')
+  expect(f.supervisor.lastExit?.reason).toBe(
+    'batond exited (code: none, signal: SIGABRT); batond reported a failure; check logs',
+  )
+  const exit = f.supervisor.lastExit
+  await f.supervisor.stop()
+  expect(f.supervisor.lastExit).toEqual(exit)
+})
+
+it('主动停止和手动重启保留有意义的退出原因，超时后的 close 仍记录重启意图', async () => {
+  const f = fixture()
+  f.supervisor.start()
+  const stopping = f.supervisor.stop()
+  f.children[0]!.emit('close', 0, null)
+  await stopping
+  expect(f.supervisor.lastExit?.reason).toBe('batond stopped by client (code: 0, signal: none)')
+  f.supervisor.start()
+  const child = f.children[1]!
+  vi.spyOn(child, 'kill').mockImplementation(() => true)
+  const restarting = f.supervisor.restart()
+  await vi.advanceTimersByTimeAsync(15_000)
+  await restarting
+  child.emit('close', null, 'SIGKILL')
+  expect(f.supervisor.lastExit?.reason).toBe('batond stopped for restart (code: none, signal: SIGKILL)')
+  const exit = f.supervisor.lastExit
+  await vi.advanceTimersByTimeAsync(1000)
+  expect(f.spawn).toHaveBeenCalledTimes(3)
+  expect(f.supervisor.lastExit).toEqual(exit)
+  const finalStop = f.supervisor.stop()
+  f.children[2]!.emit('close', 0, null)
+  await finalStop
+})
+
+it('同步和异步启动失败均记录可诊断原因', async () => {
+  const f = fixture(() => Date.parse('2026-06-01T12:00:00.000Z'))
+  f.spawn.mockImplementationOnce(() => {
+    throw new Error('offline-spawn-detail')
+  })
+  f.supervisor.start()
+  expect(f.supervisor.lastExit).toEqual({
+    at: '2026-06-01T12:00:00.000Z',
+    reason: 'batond exited (code: none, signal: none); spawn_failed; 无法启动内置 batond',
+  })
+  await vi.advanceTimersByTimeAsync(1000)
+  f.children[0]!.emit('error', new Error('offline-spawn-detail'))
+  f.children[0]!.emit('close', -2, null)
+  expect(f.supervisor.lastExit?.reason).toBe(
+    'batond exited (code: -2, signal: none); spawn_failed; 无法启动内置 batond',
+  )
+  await f.supervisor.stop()
+})
+
+it('普通多行 stderr 和结构化错误的私有 message、未知 code 不进入最近退出原因', async () => {
+  for (const stderr of [
+    'API_KEY:\noffline-value-without-label\n',
+    JSON.stringify({
+      code: 'deployment_invalid',
+      deployment: { private_content: 'offline-context-value' },
+      message: 'offline-unlabelled-message',
+    }),
+    JSON.stringify({ code: 'offline-untrusted-code', message: 'offline-untrusted-message' }),
+  ]) {
+    const f = fixture()
+    f.supervisor.start()
+    f.children[0]!.stderr.emit('data', Buffer.from(stderr))
+    f.children[0]!.emit('close', 78, null)
+    expect(f.supervisor.lastExit?.reason).not.toContain('offline-')
+    expect(f.supervisor.lastExit?.reason).toContain('code: 78, signal: none')
+    expect(f.supervisor.lastExit?.reason).toContain('batond reported a failure; check logs')
+    if (stderr.includes('deployment_invalid'))
+      expect(f.supervisor.lastExit?.reason).toContain('Invalid connection settings')
+    await f.supervisor.stop()
+  }
+})
+
+it('后发停止取消仍在等待旧进程关闭的重启', async () => {
+  const f = fixture()
+  f.supervisor.start()
+  const restarting = f.supervisor.restart()
+  const stopping = f.supervisor.stop()
+  f.children[0]!.emit('close', 0, null)
+  await Promise.all([restarting, stopping])
+  await vi.advanceTimersByTimeAsync(120_000)
+  expect(f.spawn).toHaveBeenCalledTimes(1)
+  expect(f.supervisor.state.state).toBe('stopped')
+})
+
+it('旧停止的异步完成不会覆盖新进程的状态', async () => {
+  const f = fixture()
+  f.supervisor.start()
+  const stopping = f.supervisor.stop()
+  f.children[0]!.once('close', () => f.supervisor.start())
+  f.children[0]!.emit('close', 0, null)
+  await stopping
+  expect(f.spawn).toHaveBeenCalledTimes(2)
+  expect(f.supervisor.state.state).toBe('connecting')
+  const finalStop = f.supervisor.stop()
+  f.children[1]!.emit('close', 0, null)
+  await finalStop
+})
+
+it.each(['close', 'timeout'])('重启等待 %s 后重新检查启动许可，不恢复已取消的运行', async (completion) => {
+  const f = fixture()
+  f.supervisor.start()
+  let permitted = true
+  const restarting = f.supervisor.restart(() => permitted)
+  permitted = false
+  if (completion === 'timeout') {
+    vi.spyOn(f.children[0]!, 'kill').mockImplementation(() => true)
+    await vi.advanceTimersByTimeAsync(15_000)
+  } else f.children[0]!.emit('close', 0, null)
+  await restarting
+  if (completion === 'timeout') f.children[0]!.emit('close', null, 'SIGKILL')
+  await vi.advanceTimersByTimeAsync(120_000)
+  expect(f.spawn).toHaveBeenCalledTimes(1)
+  expect(f.supervisor.state.state).toBe('stopped')
+})
+
+it('已知退出原因使用固定公开说明，诊断脱敏后仍可读', async () => {
+  for (const [code, reason] of [
+    ['needs_reauth', 'Sign-in expired'],
+    ['deployment_invalid', 'Invalid connection settings'],
+  ]) {
+    const f = fixture()
+    f.supervisor.start()
+    f.children[0]!.stderr.emit('data', Buffer.from(JSON.stringify({ code, message: 'offline-private-message' })))
+    f.children[0]!.emit('close', 78, null)
+    const safe = redactDiagnostics(f.supervisor.lastExit!.reason)
+    expect(safe).toContain(reason)
+    expect(safe).toContain('code: 78')
+    expect(safe).not.toContain('offline-private-message')
+    await f.supervisor.stop()
+  }
 })
 
 it('只计算最近 60 秒的连续故障', () => {

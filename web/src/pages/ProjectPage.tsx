@@ -13,8 +13,10 @@ import { ReferenceBlock } from '../app/ReferenceBlock'
 import type { ProjectSearch } from '../app/router'
 import { statusTextStyle, ThreadDetail, type RecoverAction } from '../app/ThreadDetail'
 import { useNow } from '../app/useNow'
+import { LocalThreadActions } from '../app/LocalThreadActions'
 import { useWorkspace } from '../app/workspace'
 import { ClientError } from '../data/client'
+import { desktopCapability, useDesktopStatus, useLocalDesktop } from '../data/desktop'
 import {
   agentNames,
   assistantWait,
@@ -141,6 +143,19 @@ const styles = stylex.create({
     textAlign: 'left',
   },
   threadSelected: { backgroundColor: { default: colors.selected, ':hover': colors.selected } },
+  threadOpen: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space.sm,
+    flexGrow: 1,
+    minWidth: 0,
+    padding: 0,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    color: 'inherit',
+    textAlign: 'left',
+  },
+  overviewOpen: { gridColumn: '1 / -1', width: '100%' },
   threadTitle: { flexGrow: 1, flexBasis: 0, minWidth: 0 },
   folderTag: { flexShrink: 1, minWidth: 0, color: colors.faint },
   threadMeta: { flexShrink: 0, color: colors.muted, whiteSpace: 'nowrap' },
@@ -339,12 +354,24 @@ function ThreadButton({
 }) {
   const view = threadView(thread, device)
   const timer = view.live && thread.runStartedAt !== null ? runTimer(thread.runStartedAt, now) : null
-  return (
+  const desktop = useLocalDesktop(thread.deviceId, 'open-local')
+  const local = !!desktop.bridge?.openLocal
+  const status = (
+    <span {...stylex.props(text.caption, styles.threadMeta, statusTextStyle(view.status.tone))}>
+      {timer ? `${view.status.label} · ${timer}` : view.status.label}
+    </span>
+  )
+  const button = (
     <button
       type="button"
       aria-current={selected || undefined}
       onClick={onOpen}
-      {...stylex.props(text.small, styles.threadRow, selected && styles.threadSelected, focusRing.ring)}
+      {...stylex.props(
+        text.small,
+        local ? styles.threadOpen : styles.threadRow,
+        !local && selected && styles.threadSelected,
+        focusRing.ring,
+      )}
     >
       <StatusDot tone={view.status.tone} />
       <span {...stylex.props(styles.threadTitle, text.truncate)}>{thread.title}</span>
@@ -352,10 +379,17 @@ function ThreadButton({
       <span {...stylex.props(text.caption, styles.threadMeta)}>
         {device?.name ?? 'Removed device'} · {thread.agent ? agentNames[thread.agent] : 'Command'}
       </span>
-      <span {...stylex.props(text.caption, styles.threadMeta, statusTextStyle(view.status.tone))}>
-        {timer ? `${view.status.label} · ${timer}` : view.status.label}
-      </span>
+      {!local && status}
     </button>
+  )
+  return local ? (
+    <div {...stylex.props(text.small, styles.threadRow, selected && styles.threadSelected)}>
+      {button}
+      <LocalThreadActions thread={thread} />
+      {status}
+    </div>
+  ) : (
+    button
   )
 }
 
@@ -511,6 +545,8 @@ function Overview({
 }) {
   const [showAll, setShowAll] = useState(false)
   const [folded, setFolded] = useState<string[]>([])
+  const desktop = useDesktopStatus()
+  const localNode = desktopCapability('open-local')?.openLocal && desktop.data?.registered ? desktop.data.node_id : null
   const now = useNow(60_000)
   const device = devices.find((item) => item.id === project.agent.deviceId)
   const live = threads.filter((item) => item.status !== 'archived')
@@ -535,22 +571,44 @@ function Overview({
 
   const row = (thread: Thread) => {
     const view = views.get(thread.id)!
-    return (
+    const lead = (
+      <>
+        <StatusDot tone={view.status.tone} />
+        <span {...stylex.props(styles.threadTitle, text.truncate)}>{thread.title}</span>
+        <span {...stylex.props(text.caption, styles.rowTime)}>{relativeTime(thread.updatedAt, now)}</span>
+      </>
+    )
+    const metadata = (
+      <>
+        <span {...stylex.props(text.truncate)}>
+          {devices.find((item) => item.id === thread.deviceId)?.name ?? 'Removed device'} ·
+        </span>
+        <span {...stylex.props(text.mono, text.truncate)}>{folderName(thread.folder)}</span>
+      </>
+    )
+    return localNode === thread.deviceId ? (
+      <div key={thread.id} {...stylex.props(stylex.defaultMarker(), text.small, styles.overviewRow)}>
+        <button
+          type="button"
+          onClick={() => onOpenThread(thread.id)}
+          {...stylex.props(text.small, styles.threadOpen, styles.overviewOpen, focusRing.ring)}
+        >
+          {lead}
+        </button>
+        <span {...stylex.props(text.caption, styles.rowDetail)}>
+          {metadata}
+          <LocalThreadActions thread={thread} />
+        </span>
+      </div>
+    ) : (
       <button
         key={thread.id}
         type="button"
         onClick={() => onOpenThread(thread.id)}
         {...stylex.props(stylex.defaultMarker(), text.small, styles.overviewRow, focusRing.ring)}
       >
-        <StatusDot tone={view.status.tone} />
-        <span {...stylex.props(styles.threadTitle, text.truncate)}>{thread.title}</span>
-        <span {...stylex.props(text.caption, styles.rowTime)}>{relativeTime(thread.updatedAt, now)}</span>
-        <span {...stylex.props(text.caption, styles.rowDetail)}>
-          <span {...stylex.props(text.truncate)}>
-            {devices.find((item) => item.id === thread.deviceId)?.name ?? 'Removed device'} ·
-          </span>
-          <span {...stylex.props(text.mono, text.truncate)}>{folderName(thread.folder)}</span>
-        </span>
+        {lead}
+        <span {...stylex.props(text.caption, styles.rowDetail)}>{metadata}</span>
       </button>
     )
   }

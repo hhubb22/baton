@@ -11,6 +11,7 @@ import { telemetryLayer } from '@baton/telemetry'
 import { ExecutionTimeoutSeconds, WorkerOpen, type RuntimeAgent, type WorkerRequest } from '@baton/protocol'
 import { LocalWorkerHost, initializeWorkerDirectory } from './daemon/host.ts'
 import { IPCError } from './daemon/ipc.ts'
+import { desktopDirectory, DesktopDirectoryError } from './daemon/desktop-directory.ts'
 import { ServiceError } from './daemon/service.ts'
 import { ProcessLockBusy } from './platform/lock.ts'
 import { StorageFormatError } from './storage-format.ts'
@@ -24,6 +25,7 @@ const usage = `Baton 节点
   up [--coordinator <https://中心>] [--workspace <绝对目录>]
   register [--coordinator <https://中心>] [--enrollment-file <私有文件>]
   identity
+  desktop-directory --thread-id <UUID> --data-dir <已有数据目录>
   reauth [--enrollment-file <私有文件>] [--ca-file <CA证书>]
   run [--relay <wss://中心/v1/node>]
 
@@ -91,6 +93,10 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
       )
       process.exitCode = 1
     }
+    return
+  }
+  if (action === 'desktop-directory') {
+    console.log(JSON.stringify(await desktopDirectory(args)))
     return
   }
   if (action === 'up' || action === 'register' || action === 'reauth' || action === 'run' || action === 'identity') {
@@ -281,7 +287,10 @@ export function reportBatondError(error: unknown, action = process.argv[2]): voi
     : daemonRunning
       ? 'daemon_running'
       : (knownCode ??
-        (error instanceof IPCError || error instanceof ServiceError || error instanceof StorageFormatError
+        (error instanceof IPCError ||
+        error instanceof ServiceError ||
+        error instanceof StorageFormatError ||
+        error instanceof DesktopDirectoryError
           ? error.code
           : 'batond_failed'))
   // SDK 诊断留在隔离宿主内，公开错误不包含原始 SDK 输出。
@@ -293,11 +302,13 @@ export function reportBatondError(error: unknown, action = process.argv[2]): voi
       message:
         action === 'worker' || action === 'agent-host' || action === 'watchdog'
           ? `${action} failed`
-          : daemonRunning
-            ? '服务或桌面客户端正在运行，请先停止已有 batond 再重试'
-            : error instanceof Error
-              ? error.message
-              : 'Baton 本地命令失败',
+          : action === 'desktop-directory' && !(error instanceof DesktopDirectoryError)
+            ? '无法查询 Thread 工作目录'
+            : daemonRunning
+              ? '服务或桌面客户端正在运行，请先停止已有 batond 再重试'
+              : error instanceof Error
+                ? error.message
+                : 'Baton 本地命令失败',
     }),
   )
   process.exitCode = ['needs_reauth', 'node_version_incompatible'].includes(code) ? 78 : 1

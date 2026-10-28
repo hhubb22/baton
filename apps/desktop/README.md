@@ -1,6 +1,6 @@
 # Baton 桌面客户端
 
-Electron 客户端加载一个 Baton 中心，使用内置 batond 管理本机连接。支持 macOS arm64 与 Windows x64，数据目录沿用 CLI 的 `~/.baton-ts`。网页的桌面接入按钮尚未接入桥接；已有同一中心的 CLI 身份可直接沿用。
+Electron 客户端加载一个 Baton 中心，使用内置 batond 管理本机连接。支持 macOS arm64 与 Windows x64，数据目录沿用 CLI 的 `~/.baton-ts`。中心网页通过受限桥接接入和重新认证本机；已有同一中心的 CLI 身份可直接沿用。
 
 ## 构建与验证
 
@@ -21,7 +21,7 @@ node --test tools/package-desktop.test.mjs
 
 部署配置位于 Electron `userData` 的 `deployment.json`，CA 镜像为 `ca.pem`，POSIX 文件权限为 0600。macOS 默认目录为 `~/Library/Application Support/Baton`，Windows 为 `%APPDATA%\Baton`。客户端不把凭据放入接入链接、进程参数或日志；注册和重新认证凭据只通过子进程环境变量 `BATON_ENROLLMENT_TOKEN` 交给 batond。外部 batond 仍在运行时须先停止该服务再重新认证。
 
-本地说明页不暴露桥接。中心主页面通过 `window.batonDesktop` 使用 `protocol: 1`、`version`、`capabilities: [{ name, version }]`、`update()`、`status()`、`onStatus(callback)`、`enroll({ code, displayName? })` 与 `reauth({ code })`。能力列表声明 `update`、`notifications`、`tray-status`，版本均为 1；网页忽略未知名称或版本，缺少某项能力时不调用对应接口。`update()` 打开原生更新对话框，不接收下载地址、本机路径或命令。订阅返回取消函数；成功注册或重新认证返回公开设备状态，失败抛出不含凭据的错误。main 每次核查调用方窗口、主 frame 与源。证书验证执行签名、有效期、主机名、CA 路径长度与服务器用途检查；包含当前未支持的名称或策略约束、未知 critical 扩展时拒绝自定义信任。远程页面开启 sandbox 和 context isolation，禁用 Node integration 与 webview；非中心的 HTTP(S) 导航交给系统浏览器，其他协议不打开。
+本地说明页不暴露桥接。中心主页面通过 `window.batonDesktop` 使用 `protocol: 1`、`version`、`capabilities: [{ name, version }]`、`update()`、`status()`、`onStatus(callback)`、`enroll({ code, displayName? })` 与 `reauth({ code })`。能力列表声明 `update`、`notifications`、`tray-status`、`open-local`、`pick-directory`、`diagnostics`，版本均为 1；网页忽略未知名称或版本，缺少某项能力时不调用对应接口。`update()` 打开原生更新对话框，不接收下载地址、本机路径或命令。订阅返回取消函数；成功注册或重新认证返回公开设备状态，失败抛出不含凭据的错误。main 每次核查调用方窗口、主 frame 与源。证书验证执行签名、有效期、主机名、CA 路径长度与服务器用途检查；包含当前未支持的名称或策略约束、未知 critical 扩展时拒绝自定义信任。远程页面开启 sandbox 和 context isolation，禁用 Node integration 与 webview；非中心的 HTTP(S) 导航交给系统浏览器，其他协议不打开。
 
 ## 运行与退出
 
@@ -41,6 +41,16 @@ node --test tools/package-desktop.test.mjs
 
 通知默认开启，开关保存在 `notifications.json`，关闭通知保留计数和等待菜单。macOS 通过 UserNotifications、Windows 通过本机通知注册表设置检查系统权限，禁用时显示原因和系统通知设置入口；查询失败保留未知状态，不据此禁用通知。Windows 使用固定 AppUserModelID `dev.baton.desktop`。通知正文和凭据不写入本机去重文件。
 
+## 本机目录与诊断
+
+本机 Thread 的设备·目录行末尾提供打开图标，Project 页中的本机 Thread 也有同样入口。可在访达或资源管理器中打开目录，或使用客户端 Settings 中选择的编辑器；未设置编辑器时使用系统默认程序。网页只传 Thread ID，客户端通过当前登录员工核查中心对象和本机身份，再由 batond 从已有账本取得并校验授权目录。目录不存在时提示，不创建目录。其他设备的 Thread、浏览器和缺少对应能力的旧客户端不显示入口。
+
+新建 Thread 且目标为本机时可以选择本机目录，取消保留原选择；所选路径仍须通过中心与设备的可用目录范围校验。Project 保持跨设备调度，新建 Project 不选择设备或目录。
+
+本机设备详情显示进程状态、最近退出时间与原因、客户端与 batond 版本和已有升级阶段，可打开日志目录、复制诊断摘要。自动重启后仍保留本次客户端运行期间的最近退出事实。外部服务运行时说明由外部服务管理，不提供重启；升级或迁移阻止监管时也不能重启。旧外部服务未报告版本时显示未知。
+
+复制摘要由主进程完成，包含设备状态、版本、平台、退出原因和当前日志末尾最多 200 行。凭据、部署配置、私钥及其续行被隐藏，URL 用户信息、查询和片段被移除。日志不通过桥接返回网页，摘要不附带身份或模型凭据文件。路径授权与桥接字段见 [桌面客户端设计](../../specs/desktop/TECH.md#本机目录与诊断桥接)。
+
 ## 更新与数据迁移
 
 启动及每 6 小时从保存中心查询公开发布信息和下载列表。客户端以中心版本为目标，精确比较版本字符串，支持升到或退到中心托管的版本。原生窗口菜单和托盘提供更新入口、目标版本、当前阶段及原因；中心拒绝设备版本时直接提供该入口。中心没有当前平台的安装包时说明缺包原因，可重新检查。
@@ -56,3 +66,5 @@ Windows 使用按用户安装的 NSIS 静默更新并重新启动。macOS 打开
 链接解析、证书链、源与身份检查、batond 凭据传递、重启策略、stdin 关闭、日志轮转和状态合并使用 Node 离线测试。通知离线测试覆盖持久去重、并发重复提交、聚焦抑制、关闭后消费、点击目标和退出后的拒绝事实；网页测试覆盖浏览器与能力缺失、通知重放、对象删除或归档跳转及员工计数。更新测试覆盖同源下载、缓存损坏、取消恢复、直接替换、失败重试及原队列身份保留；batond 和跨 app 升级测试验证实际账本与独立进程。证书夹具与生成命令见 [测试数据](src/testing/data/README.md)。
 
 macOS arm64 已从官方 Node 26.11.1 的 SEA 包生成 Electron 44.5.1 DMG，验证说明页无桥接与 Node API；两个实际候选客户端的中心版本拒绝、下载校验、DMG 打开、退出、手动复制替换、首次启动迁移及设备恢复在线已使用本机 HTTPS/WSS 中心替身验证，原身份和数据文件摘要保持不变。平台验收边界见 [桌面客户端规格](../../specs/desktop/PRODUCT.md#验收)。macOS arm64 的隔离应用和本地 HTTPS 页面已验证窗口隐藏后 Electron `show` 事件与系统 `banner` 投递记录、重新加载不重复弹出，以及托盘的 `2 running · 1 waiting for you` 摘要和等待 Thread 点击目标。系统通知横幅与通知点击尚未目视验证，通知点击目标由离线测试覆盖。Windows 系统通知、权限设置、NSIS 自动更新与重启未测；真实中心接入、系统重启后的登录启动与 Windows 进程回收尚未手动验证。
+
+本机目录与诊断的 macOS arm64 隔离原生冒烟使用 Electron 44.5.1、实际 preload/IPC 和 batond bundle、本机 HTTPS 夹具，验证可信目录查询、Finder 目标目录、终止自有 batond 后读取退出事实，以及真实剪贴板复制与脱敏。编辑器启动命令成功，但未确认可见窗口；真实目录选择框已调用，未能完成选择。本轮没有完成人工手动验收，也未验证完整安装包与真实账号联调。Windows 的本机打开、目录选择和诊断原生交互未测。

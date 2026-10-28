@@ -2,6 +2,7 @@ import * as stylex from '@stylexjs/stylex'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { EnrollDialog } from '../app/EnrollDialog'
+import { LocalDeviceDiagnostics } from '../app/LocalDeviceDiagnostics'
 import { SubscriptionLoginDialog } from '../app/SubscriptionLoginDialog'
 import { Page } from '../app/Page'
 import { useNow } from '../app/useNow'
@@ -307,6 +308,7 @@ function DeviceDetails({
   })
   return (
     <div id={`device-${device.id}`} {...stylex.props(styles.details)}>
+      <LocalDeviceDiagnostics nodeId={device.id} />
       {loginProvider && (
         <SubscriptionLoginDialog
           device={device}

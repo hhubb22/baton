@@ -48,9 +48,11 @@ SEA 安装包首次执行 `up` 或 `register` 时读取可执行文件旁的 `de
 
 所有节点命令支持 `--data-dir`，默认 `~/.baton-ts`。仅在授权配置不存在时登记用户主目录，已有配置包括空列表都会保留；`--workspace` 在连接前按真实绝对路径幂等登记工作目录。网页设备详情与本地 `files` 命令可以增删授权根；目录选择与附件预览使用同一真实路径边界。节点锁、身份与报告恢复细节见 [远程节点模块](src/daemon/README.md)，实时输出的游标和缓冲规则见 [Worker 文档](src/worker/README.md#real-time-output)。
 
-`batond identity [--data-dir <目录>]` 在已注册时输出 `{ registered: true, coordinator_url, node_id, display_name, system }`，未注册时输出 `{ registered: false }`，不含凭据，也不创建数据目录。
+`batond identity [--data-dir <目录>]` 在已注册时输出 `{ registered: true, coordinator_url, node_id, employee_id, display_name, system }`，未注册时输出 `{ registered: false }`，不含凭据，也不创建数据目录。
 
-daemon 在连接变化时原子写入私有的 `daemon-status.json`，包含 `pid`、`state`、`updated_at`；状态为 `connecting`、`online`、`rejected` 或 `stopping`，拒绝时附上 `code` 和 `message`，不含凭据。读取方需结合 PID 与 `daemon.lock` 判断状态是否过期。同一目录已有 daemon 时，第二个 `up` 或 `run` 报 `daemon_running`。`needs_reauth` 与 `node_version_incompatible` 的退出码为 78，其他失败为 1。
+`batond desktop-directory --thread-id <UUID> --data-dir <已有数据目录>` 为桌面客户端查询中心分配的 Thread 工作目录，成功时 stdout 输出一行 `{ node_id, employee_id, coordinator_url, working_directory }`，退出码为 0。身份通过 `loadIdentity` 读取，Thread 配置只取 `node.db` 的 `node_workers`，不读取本地 `local-open.json`，也不接受调用方传入工作路径。查询以只读连接打开已有账本，不建库、不迁移、不启动 daemon 或 Worker；目录须存在并通过当前授权根的真实路径和符号链接检查，返回 canonical 路径。失败时 stderr 输出 `{ ok: false, code, message }`，退出码为 1：目录已删除为 `directory_missing`，越界或不可访问为 `path_denied`，未知、本地独有或节点身份不匹配的 Thread 为 `thread_unknown`；参数错误、身份不可读、账本不可读分别为 `invalid_arguments`、`identity_unavailable`、`ledger_unavailable`。错误消息不包含凭据或底层异常。
+
+daemon 在连接变化时原子写入私有的 `daemon-status.json`，包含 `pid`、`batond_version`、`state`、`updated_at`；`batond_version` 为当前运行程序的 `BUILD.version`，旧状态文件可能缺失该字段。状态为 `connecting`、`online`、`rejected` 或 `stopping`，拒绝时附上 `code` 和 `message`，不含凭据。读取方需结合 PID 与 `daemon.lock` 判断状态是否过期。同一目录已有 daemon 时，第二个 `up` 或 `run` 报 `daemon_running`。`needs_reauth` 与 `node_version_incompatible` 的退出码为 78，其他失败为 1。
 
 `run --exit-with-stdin` 是供进程监管使用的内部参数：stdin EOF 与 SIGTERM 走相同停止路径，关闭连接并写入 `stopping`。
 

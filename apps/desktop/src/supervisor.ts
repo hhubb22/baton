@@ -47,9 +47,12 @@ export function lastFailure(stderr: string): DaemonFailure {
 
 export class Supervisor {
   state: SupervisorState = { state: 'stopped' }
+  lastExit: { at: string; reason: string } | null = null
   private child: ChildProcessWithoutNullStreams | undefined
   private timer: ReturnType<typeof setTimeout> | undefined
   private stopped = true
+  private generation = 0
+  private stopReason: string | undefined
   private failures: number[] = []
   private attempt = 0
   private startedAt = 0
@@ -75,12 +78,16 @@ export class Supervisor {
 
   start() {
     if (this.child || this.timer) return
+    this.generation++
     this.stopped = false
+    this.stopReason = undefined
     let child: ChildProcessWithoutNullStreams
     try {
       child = this.options.spawn()
     } catch {
-      this.exited(null, { code: 'spawn_failed', message: '无法启动内置 batond' })
+      const failure = { code: 'spawn_failed', message: '无法启动内置 batond' }
+      this.recordExit(null, null, failure)
+      this.exited(null, failure)
       return
     }
     this.child = child
@@ -98,12 +105,44 @@ export class Supervisor {
     child.once('error', () => {
       stderr = JSON.stringify({ code: 'spawn_failed', message: '无法启动内置 batond' })
     })
-    child.once('close', (code) => {
+    child.once('close', (code, signal) => {
+      const failure = lastFailure(stderr)
+      this.recordExit(code, signal, failure, stderr)
       this.child = undefined
       completion.resolve()
       if (this.stopped) return
-      this.exited(code, lastFailure(stderr))
+      this.exited(code, failure)
     })
+  }
+
+  private recordExit(code: number | null, signal: NodeJS.Signals | null, failure: DaemonFailure, stderr = '') {
+    const knownCode =
+      failure.code && (terminal.has(failure.code) || ['daemon_running', 'spawn_failed'].includes(failure.code))
+        ? failure.code
+        : undefined
+    const publicReason =
+      knownCode === 'needs_reauth'
+        ? 'Sign-in expired'
+        : knownCode === 'deployment_invalid'
+          ? 'Invalid connection settings'
+          : knownCode
+    // stderr 的字段名和敏感值可能分行；最近退出只保留已知错误码与固定说明。
+    const detail =
+      knownCode === 'spawn_failed'
+        ? '无法启动内置 batond'
+        : stderr.trim()
+          ? 'batond reported a failure; check logs'
+          : undefined
+    this.lastExit = {
+      at: new Date((this.options.now ?? Date.now)()).toISOString(),
+      reason: [
+        `batond ${this.stopReason ?? 'exited'} (code: ${code ?? 'none'}, signal: ${signal ?? 'none'})`,
+        publicReason,
+        detail,
+      ]
+        .filter(Boolean)
+        .join('; '),
+    }
   }
 
   private exited(code: number | null, failure: DaemonFailure) {
@@ -128,13 +167,15 @@ export class Supervisor {
       }, decision.delay)
   }
 
-  async stop(): Promise<void> {
+  async stop(reason = 'stopped by client'): Promise<void> {
+    const generation = ++this.generation
     this.stopped = true
     if (this.timer) clearTimeout(this.timer)
     this.timer = undefined
     this.update({ state: 'stopping' })
     const child = this.child
     if (child) {
+      this.stopReason = reason
       child.stdin.end()
       let timeout: ReturnType<typeof setTimeout> | undefined
       await Promise.race([
@@ -148,11 +189,14 @@ export class Supervisor {
       ])
       if (timeout) clearTimeout(timeout)
     }
-    this.update({ state: 'stopped' })
+    if (generation === this.generation) this.update({ state: 'stopped' })
   }
 
-  async restart() {
-    await this.stop()
+  async restart(shouldStart: () => boolean = () => true) {
+    const stopping = this.stop('stopped for restart')
+    const generation = this.generation
+    await stopping
+    if (generation !== this.generation || !shouldStart()) return
     if (this.child) {
       this.stopped = false
       this.failures = []

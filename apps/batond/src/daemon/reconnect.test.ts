@@ -1,3 +1,4 @@
+import { BUILD } from '@baton/protocol/release'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { readFile } from 'node:fs/promises'
@@ -888,6 +889,7 @@ it('stops after version rejection, reports both versions and retains local comma
     expect(JSON.parse(await readFile(join(path, 'daemon-status.json'), 'utf8'))).toMatchObject({
       pid: process.pid,
       state: 'rejected',
+      batond_version: BUILD.version,
       code: 'node_version_incompatible',
     })
   } finally {
