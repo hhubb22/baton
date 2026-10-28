@@ -41,6 +41,8 @@ node apps/server/dist/server.cjs serve
 
 中心数据库恢复旧备份后，在停服状态下显式运行 `node apps/server/dist/server.cjs admin restore-finalize`，再启动 `serve`。该命令要求配套的原签名密钥，注销旧会话、使旧设备凭据过期、暂停旧命令派发并将不确定输入和运行标为未知或 lost，Project 保持暂停。员工重新登录、核对原设备并重新认证后，才恢复连接与结果补报。备份材料、数据回退影响、格式兼容检查和操作步骤见 [备份与恢复](specs/release/TECH.md#备份与恢复)。
 
+也可用容器部署中心。根目录的 `Dockerfile` 以 `node:26-bookworm-slim` 构建中心 bundle，由非 root 的 `baton` 用户在 `/var/lib/baton` 运行，签名密钥保存在该目录。`compose.yaml` 同时启动带 pgvector 的 PostgreSQL 16，须设置 `BATON_POSTGRES_PASSWORD` 与 `BATON_ALLOWED_ORIGINS`；中心默认映射到 `127.0.0.1:8080`，可用 `BATON_BIND_ADDR` 和 `BATON_PORT` 修改。账号管理通过 `docker compose exec baton-server node /opt/baton/server.cjs admin employee create …` 执行。
+
 实验室阶段使用当前 schema 基线，结构变化后可重建本地数据。迁移按版本记录幂等执行，正式发布后可用于增量迁移。证书须匹配访问主机名，浏览器和节点须信任签发 CA。反向代理同时转发普通 HTTP 请求及 `/v1/node`、`/api/v1/events` 的 WebSocket 升级。
 
 ### 安装包下载
@@ -105,7 +107,7 @@ Linux 需要有效的 `XDG_RUNTIME_DIR` 和 systemd 用户实例；`status` 还�
 
 `apps/desktop` 提供 macOS arm64 和 Windows x64 客户端，内置 batond。首次启动显示本地说明页，收到 `baton://connect` 接入链接后显示中心地址与 CA 指纹，经确认才保存并打开中心页面。已有同一中心的 CLI 身份直接沿用，已有外部 daemon 时显示由外部服务运行。
 
-客户端关闭窗口后留在托盘，默认登录启动，可从托盘关闭该选项或退出。数据目录与 CLI 共用 `~/.baton-ts`，替换应用保留身份与配置。网页的桌面接入按钮尚未提供；客户端桥接、构建和验证范围见 [桌面客户端文档](apps/desktop/README.md)，DMG/NSIS 打包见 [工具说明](tools/README.md#桌面客户端)。
+客户端关闭窗口后留在托盘，默认登录启动，可从托盘关闭该选项或退出。数据目录与 CLI 共用 `~/.baton-ts`，替换应用保留身份与配置。Devices 页面的「Open in desktop app」生成接入链接；客户端桥接、构建和验证范围见 [桌面客户端文档](apps/desktop/README.md)，DMG/NSIS 打包见 [工具说明](tools/README.md#桌面客户端)。
 
 ### 设备升级
 

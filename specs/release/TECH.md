@@ -34,7 +34,7 @@ SEA 不启用 code cache 或 snapshot，`execArgvExtension` 设为 `none`。Work
 
 `tools/package-desktop.mjs` 核对 batond 的实际 SEA 版本与 `release.json`，将同一版本的完整安装目录复制为 Electron 资源。main 与 sandbox preload 由 esbuild 生成 CJS；禁用 Electron 原生依赖重建，内置 batond 的原生模块继续由独立 Node SEA 加载。macOS 应用使用临时签名并跳过内置 batond，Windows 使用按用户安装、无需提权的 NSIS。依赖安装与 Node 自动化测试不下载或启动 Electron；显式打包可通过 `ELECTRON_MIRROR` 获取运行时。
 
-macOS 27.2 arm64 上已使用官方 Node 26.11.1 的统一构建产物和 Electron 44.5.1 生成开发版 DMG 与 SHA-256，核对应用及内置 batond 的 `codesign --verify`，从 DMG 复制到用户应用目录后启动显示本地接入说明页。说明页不暴露 `batonDesktop` 或 Node `require`。打包后的 `resources/batond` 与输入安装目录逐项比较一致，安装副本的 Agent host 离线模块探测通过。Windows NSIS、真实中心接入、登录启动和客户端崩溃后的 Windows 进程回收未做手动验证；网页桌面接入尚未实现。
+macOS 27.2 arm64 上已使用官方 Node 26.11.1 的统一构建产物和 Electron 44.5.1 生成开发版 DMG 与 SHA-256，核对应用及内置 batond 的 `codesign --verify`，从 DMG 复制到用户应用目录后启动显示本地接入说明页。说明页不暴露 `batonDesktop` 或 Node `require`。打包后的 `resources/batond` 与输入安装目录逐项比较一致，安装副本的 Agent host 离线模块探测通过。Windows NSIS、真实中心接入、登录启动和客户端崩溃后的 Windows 进程回收未做手动验证。
 
 ### 官方 Node 输入
 
