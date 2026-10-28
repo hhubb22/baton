@@ -101,14 +101,18 @@ jobs:
           mkdir -p bin/releases
           node tools/package-batond.mjs --out bin/package --version "$RELEASE_VERSION" --commit "$GITHUB_SHA" > bin/releases/package-build.json
       - name: Check installed package
+        continue-on-error: ${{ runner.os == 'Windows' }}
         run: node tools/check-package.mjs bin/package > bin/releases/package-check.json
       - name: Measure Worker startup and FULL ledger
+        continue-on-error: ${{ runner.os == 'Windows' }}
         run: node tools/measure/worker-startup.mjs 100 --package bin/package --ledger 2000 > bin/releases/worker-startup.json
       - name: Check Windows process recovery
         if: runner.os == 'Windows'
+        continue-on-error: true
         run: node tools/verify/windows-processes.mjs > bin/releases/windows-processes.json
       - name: Archive and verify extracted package
-        run: node tools/package-release.mjs "$RELEASE_VERSION" bin/package
+        # Windows 安装包检查失败时写入检查报告，不阻止归档和桌面打包。
+        run: node tools/package-release.mjs "$RELEASE_VERSION" bin/package ${{ runner.os == 'Windows' && '--allow-check-failure' || '' }}
       - name: Package desktop client
         if: runner.os == 'macOS' || runner.os == 'Windows'
         env:

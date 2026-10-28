@@ -51,9 +51,9 @@ macOS 27.2 arm64 上已使用官方 Node 26.11.1 的统一构建产物和 Electr
 
 [发布工作流](../../.github/workflows/release-packages.yml) 由 `workflow_dispatch` 接收带 `v` 前缀的版本号，在 `macos-15`、`ubuntu-24.04`、`ubuntu-24.04-arm` 与 `windows-2025` 上原生构建，固定 Node 26.11.1 和 pnpm 12.11.2。Linux 执行包含本地 PostgreSQL 的工作区测试与中心构建；macOS、Windows 执行节点、Project Runtime 与桌面客户端的 Node 离线测试。自动化验证使用离线转录、本地替身与本机资源。
 
-每个平台依次执行安装包构建、搬迁检查、100 个 Worker 冷启动样本与 2000 次 FULL 账本操作，Windows 另执行进程机制检查，然后归档并验证解压产物。macOS 与 Windows 随后生成桌面安装包和 SHA-256。安装包、构建与检查 JSON、测量结果和测试日志作为工作流产物上传，不上传 Electron 解包目录。Windows 节点与 Runtime 测试步骤允许失败后继续打包；安装包检查失败仍会阻止后续测量与归档。工作流上传产物，不自动创建 GitHub Release。
+每个平台依次执行安装包构建、搬迁检查、100 个 Worker 冷启动样本与 2000 次 FULL 账本操作，Windows 另执行进程机制检查，然后归档并验证解压产物。macOS 与 Windows 随后生成桌面安装包和 SHA-256。安装包、构建与检查 JSON、测量结果和测试日志作为工作流产物上传，不上传 Electron 解包目录。Windows 的节点与 Runtime 测试、安装包检查、测量和进程机制检查允许失败后继续，归档器以 `--allow-check-failure` 运行，检查失败也写出 zip 与失败报告，桌面安装包照常生成。其他平台任一检查失败都会阻止归档。工作流上传产物，不自动创建 GitHub Release。
 
-[归档器](../../tools/package-release.mjs) 只复制可执行文件、附带依赖、许可及规定的元数据，校验帮助、SEA 平台与版本、安装包清单。`release.json` 由安装包构建生成，记录版本、明确输入的源码提交、目标平台、协议版本、中心迁移版本、三类账本格式版本、声明支持的 daemon 版本、构建 Node 与 SEA Node。归档器保留这些元数据，并要求归档版本与程序实际版本相同；归档时不从当前 Git 工作区重新填写身份。Unix 生成 tar.gz，Windows 使用系统 bsdtar 生成 zip，并校验文件头。最终归档重新解压后，再检查布局、清单、发布元数据并运行完整安装包检查，通过后才写出归档、SHA-256 与检查报告。
+[归档器](../../tools/package-release.mjs) 只复制可执行文件、附带依赖、许可及规定的元数据，校验帮助、SEA 平台与版本、安装包清单。`release.json` 由安装包构建生成，记录版本、明确输入的源码提交、目标平台、协议版本、中心迁移版本、三类账本格式版本、声明支持的 daemon 版本、构建 Node 与 SEA Node。归档器保留这些元数据，并要求归档版本与程序实际版本相同；归档时不从当前 Git 工作区重新填写身份。Unix 生成 tar.gz，Windows 使用系统 bsdtar 生成 zip，并校验文件头。最终归档重新解压后，再检查布局、清单、发布元数据并运行完整安装包检查，通过后才写出归档、SHA-256 与检查报告；指定 `--allow-check-failure` 时检查失败也写出这三项。
 
 ## 安装包检查
 

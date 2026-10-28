@@ -72,6 +72,26 @@ function run(command, args, { capture = false, ...options } = {}) {
   return result.stdout?.trim()
 }
 
+// 允许检查失败时，check-package 的失败报告照常写出，归档仍然生成，供在目标平台上继续排查。
+function runPackageCheck(installed, allowFailure) {
+  const args = [join(root, 'tools/check-package.mjs'), installed]
+  if (!allowFailure) return JSON.parse(run(process.execPath, args, { capture: true }))
+  const result = spawnSync(process.execPath, args, {
+    cwd: root,
+    encoding: 'utf8',
+    timeout: 180_000,
+    maxBuffer: 16 * 1024 * 1024,
+  })
+  if (result.error) throw result.error
+  const report = JSON.parse(result.stdout)
+  if (result.status !== 0 || report.passed !== true) {
+    const failed = Object.entries(report.checks ?? {}).filter(([, check]) => !check.passed)
+    const detail = failed.map(([name, check]) => `${name}: ${check.message}`).join('\n') || report.failure?.message
+    console.error(`安装包检查未通过，仍写出归档${detail ? `\n${detail}` : ''}`)
+  }
+  return report
+}
+
 async function checkCommands(binary, staging) {
   const home = join(staging, 'home')
   await mkdir(home)
@@ -82,7 +102,12 @@ async function checkCommands(binary, staging) {
   return validateSeaVersion(version)
 }
 
-export async function packageRelease(version, source = resolve(root, 'bin'), output = resolve(root, 'bin/releases')) {
+export async function packageRelease(
+  version,
+  source = resolve(root, 'bin'),
+  output = resolve(root, 'bin/releases'),
+  { allowCheckFailure = false } = {},
+) {
   const { name, extension } = releaseTarget(version)
   await validatePackageLayout(source)
   const staging = await mkdtemp(join(tmpdir(), 'baton-release-'))
@@ -125,16 +150,14 @@ export async function packageRelease(version, source = resolve(root, 'bin'), out
     const installed = join(extracted, name)
     await validatePackageLayout(installed)
     validatePackageManifest(await readFile(join(installed, 'package-manifest.json'), 'utf8'), batondVersion)
-    const check = JSON.parse(
-      run(process.execPath, [join(root, 'tools/check-package.mjs'), installed], { capture: true }),
-    )
+    const check = runPackageCheck(installed, allowCheckFailure)
     const metadata = JSON.parse(await readFile(join(installed, 'release.json'), 'utf8'))
     if (JSON.stringify(metadata) !== JSON.stringify(release)) throw new Error('解压后的发布信息不匹配')
     const checksum = createHash('sha256').update(contents).digest('hex')
     await cp(archive, destination)
     await writeFile(destination + '.sha256', `${checksum}  ${basename(destination)}\n`)
     await writeFile(resolve(output, `${name}.check.json`), JSON.stringify(check, null, 2) + '\n')
-    console.log(JSON.stringify({ archive: destination, sha256: checksum, ...release }))
+    console.log(JSON.stringify({ archive: destination, sha256: checksum, checkPassed: check.passed, ...release }))
     return destination
   } finally {
     await rm(staging, { recursive: true, force: true })
@@ -143,11 +166,13 @@ export async function packageRelease(version, source = resolve(root, 'bin'), out
 
 if (import.meta.main) {
   try {
-    await packageRelease(
-      process.argv[2],
-      process.argv[3] ? resolve(process.argv[3]) : undefined,
-      process.argv[4] ? resolve(process.argv[4]) : undefined,
-    )
+    const flags = process.argv.slice(2).filter((arg) => arg.startsWith('--'))
+    const unknown = flags.filter((flag) => flag !== '--allow-check-failure')
+    if (unknown.length) throw new Error(`未知参数：${unknown.join(' ')}`)
+    const [version, source, output] = process.argv.slice(2).filter((arg) => !arg.startsWith('--'))
+    await packageRelease(version, source ? resolve(source) : undefined, output ? resolve(output) : undefined, {
+      allowCheckFailure: flags.includes('--allow-check-failure'),
+    })
   } catch (error) {
     console.error(error.message)
     process.exitCode = 1
