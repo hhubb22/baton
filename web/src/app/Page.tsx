@@ -6,15 +6,14 @@ import { IconButton } from '../ui/Button'
 import { useWorkspace } from './workspace'
 import { DesktopTargetNotice } from './DesktopWorkspace'
 
-// 工作区里浮在玻璃背景上的卡片：主内容和 Thread 详情面板共用。
+// 主内容和 Thread 详情面板共用的圆角细边框。
 export const pane = stylex.create({
   card: {
     overflow: 'hidden',
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: colors.hairline,
+    borderColor: colors.borderSoft,
     borderRadius: radius.lg,
-    boxShadow: `0 1px 3px ${colors.shadowNear}, 0 12px 40px ${colors.shadowFar}`,
   },
 })
 
