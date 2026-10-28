@@ -45,8 +45,8 @@ export const createProject = Effect.fn('createProject')(function* (employee: str
         conversation = randomUUID()
       const memoryEmbedding = embeddingConfiguration(null, decoded.memory_embedding ?? null)
       const rows =
-        yield* sql`INSERT INTO projects(id,employee_id,title,goal,memory_embedding,client_project_id,create_request)
- VALUES(${id},${employee},${decoded.title},${decoded.goal ?? ''},${memoryEmbedding ? JSON.stringify(memoryEmbedding) : null}::jsonb,${clientId},${JSON.stringify(decoded)}::jsonb)
+        yield* sql`INSERT INTO projects(id,employee_id,title,emoji,goal,memory_embedding,client_project_id,create_request)
+ VALUES(${id},${employee},${decoded.title},${decoded.emoji ?? '📁'},${decoded.goal ?? ''},${memoryEmbedding ? JSON.stringify(memoryEmbedding) : null}::jsonb,${clientId},${JSON.stringify(decoded)}::jsonb)
  ON CONFLICT(employee_id,client_project_id) DO NOTHING RETURNING id`
       if (!rows.length) {
         const [old] = yield* sql<{
@@ -92,13 +92,14 @@ export const patchProject = Effect.fn('patchProject')(function* (
             ? old.memory_embedding
             : embeddingConfiguration(old.memory_embedding, patch.memory_embedding),
         title: patch.title ?? old.title,
+        emoji: patch.emoji ?? old.emoji,
         goal: patch.goal ?? old.goal,
         status: patch.status ?? old.status,
         agent: { ...old.agent, provider: patch.provider ?? old.agent.provider, model: patch.model ?? old.agent.model },
       })
       yield* projectDecode(P.summary(1024), value.agent.provider)
       yield* projectDecode(P.summary(1024), value.agent.model)
-      yield* sql`UPDATE projects SET memory_embedding=${value.memory_embedding ? JSON.stringify(value.memory_embedding) : null}::jsonb,title=${value.title},goal=${value.goal},status=${value.status},version=version+1,updated_at=clock_timestamp() WHERE id=${id} AND employee_id=${employee}`
+      yield* sql`UPDATE projects SET memory_embedding=${value.memory_embedding ? JSON.stringify(value.memory_embedding) : null}::jsonb,title=${value.title},emoji=${value.emoji},goal=${value.goal},status=${value.status},version=version+1,updated_at=clock_timestamp() WHERE id=${id} AND employee_id=${employee}`
       yield* sql`UPDATE project_agents SET provider=${value.agent.provider},model=${value.agent.model} WHERE id=${agent}`
       if (old.memory_embedding?.config_id !== value.memory_embedding?.config_id) {
         yield* lockMemoryState(employee, id)
