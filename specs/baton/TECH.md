@@ -139,6 +139,8 @@ Windows 第一版按账本保存的 PID 与创建时间核对身份，再用 `ta
 
 60 秒等待期间，Thread 保持 `running`，界面显示停止请求已发送。等待上限是 Worker 配置项，默认 60 秒。
 
+中心的 Thread 记录用 `stop_requested_at` 和 `stop_confirmed_at` 表示停止请求和设备确认。停止请求未确认、也没有待发的 stop 命令时，`stop_failure` 给出最近一条 stop 命令没有生效的原因：设备拒绝命令或报告失败时取设备给的原因，恢复备份后冻结的命令为 `stop_suspended`；设备已接受、还在等停止报告时为空。网页据此显示停止失败并允许再停一次，再次停止会新建 stop 命令。
+
 因此每个已开始的 Turn 都会产生一次 `turn.ended`，Project Agent 不会一直等待（Project Agent PA-19）。
 
 ### 回复与附件

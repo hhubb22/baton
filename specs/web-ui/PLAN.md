@@ -6,14 +6,12 @@ Web UI 默认通过 HTTP 客户端连接 Coordinator，覆盖登录、设备、T
 
 范围包含桌面浏览器的英文界面、浅色与深色主题、真实后端接入，以及 Coordinator 嵌入式页面的部署验收。模拟场景可在未启动 Coordinator、batond 和真实 Agent 时开发交互；真实链路与部署验收使用实际服务、设备和 Agent。手机和窄屏布局、浏览器推送不在本计划范围内。
 
-本文件用于安排实现和验收。产品行为以以下规格为准，页面与组件按 `design/` 实现：
+本文件用于安排实现和验收。产品行为以以下规格为准，页面与组件按设计稿实现：
 
 - [Baton 行为规格](../baton/PRODUCT.md)
 - [Project Agent 行为规格](../project-agent/PRODUCT.md)
 - [Agent Inbox 行为规格](../agent-inbox/PRODUCT.md)
-- [设计目录说明](../../design/README.md)
-- [设计规则](../../design/AGENTS.md)
-- [界面文案规范](../../design/WRITING.md)
+- [界面文案规范](../../web/WRITING.md)
 
 发现设计与规格冲突时，先确认对应行为，再实现。设计中已有入口但缺少完整交互的部分，归入对应流程补足。
 
@@ -59,9 +57,6 @@ Web UI 默认通过 HTTP 客户端连接 Coordinator，覆盖登录、设备、T
 - 账号菜单和退出登录。
 
 验收：新用户能找到连接设备、创建项目和新建对话入口；已有数据的用户能在页面之间往返。刷新页面后恢复有效会话与真实记录；要求改密时先完成改密和重新登录，再进入工作区。登录或改密失败保留必要的表单上下文。
-
-设计：`design/screens/login.elyx`、`design/blocks/sidebar.elyx`。
-
 ## 2. 连接并管理设备
 
 路径：Devices → 连接设备 → 选择系统、获取命令和口令 → 等待接入 → 查看能力 → 配置使用方式。
@@ -78,9 +73,6 @@ Web UI 默认通过 HTTP 客户端连接 Coordinator，覆盖登录、设备、T
 - 断开设备确认、处理中和完成反馈；默认设备被移除后的提示。
 
 验收：连接或移除设备后，侧栏数量、Thread 位置选择和项目运行条件同步变化；断开设备时明确说明离线设备上的进程可能继续运行，历史记录保留。
-
-设计：`design/screens/devices.elyx`、`design/blocks/enroll-dialog.elyx`、`design/blocks/device-row.elyx`。
-
 ## 3. 直接使用一个 Thread
 
 路径：Threads → 选择位置、Agent 和模型 → 发送第一条消息 → 持续对话 → 停止、恢复或归档。
@@ -98,9 +90,6 @@ Web UI 默认通过 HTTP 客户端连接 Coordinator，覆盖登录、设备、T
 - 归档确认和归档后的只读状态。已归档、无法恢复或启动失败时隐藏旧对话输入区。
 
 验收：从空列表创建独立对话，完成多轮交互并归档；各异常都有明确反馈或恢复入口。网页新建的 Thread 不属于 Project，设备离线时留在原设备等待，状态未知时不自动重发。回复结束显示空闲，Baton 不判定任务成功或失败。
-
-设计：`design/screens/threads.elyx`、`design/blocks/new-thread.elyx`、`design/blocks/thread-list.elyx`、`design/blocks/thread-detail.elyx`。
-
 ## 4. 创建项目并交给项目助手推进
 
 路径：新建项目 → 描述目标 → 发起工作 → 助手开 Thread 或执行命令 → 查看进展和回复。
@@ -118,9 +107,6 @@ Web UI 默认通过 HTTP 客户端连接 Coordinator，覆盖登录、设备、T
 - 助手切换运行设备的提示；停止当前助手运行，已有 Thread 继续执行。
 
 验收：用模拟场景覆盖“要求两台设备分别执行工作 → 出现两条 Thread → 分别回复 → 项目助手汇报”；真实链路验证消息保存、助手启动、工具调用、实际 Thread 执行及汇报。主对话、概览和 Thread 列表保持一致，用户发起的一轮与项目助手发起的一轮按规格呈现不同的后续通知行为。
-
-设计：`design/screens/new-project.elyx`、`design/screens/project.elyx`、`design/screens/project-thread.elyx`、`design/blocks/project-page.elyx`、`design/blocks/project-header.elyx`、`design/blocks/overview.elyx`、`design/blocks/conversation.elyx`。
-
 ## 5. 查看执行过程、附件与文件
 
 路径：打开回复或过程记录 → 查看执行细节 → 打开附件或文件 → 必要时引用内容向项目助手提问。
@@ -138,9 +124,6 @@ Web UI 默认通过 HTTP 客户端连接 Coordinator，覆盖登录、设备、T
 - 引用携带对应的 Thread、回复位置、设备、路径、行号或事项标识；超过规格上限时截短并注明来源和原长度。
 
 验收：用户能从回复查看具体过程和文件，再将带来源的片段送回主对话。独立 Thread 没有项目上下文时，不默认选择其他项目作为提问对象。
-
-设计：`design/blocks/thread-detail.elyx`、`design/blocks/file-preview.elyx`、`design/screens/project-thread.elyx`、`design/screens/threads.elyx`。
-
 ## 6. 处理需要用户决定的事项
 
 路径：发现待处理数量 → 打开 Inbox 或对话内事项 → 查看上下文 → 回答或关闭 → 项目继续推进。
@@ -157,27 +140,21 @@ Web UI 默认通过 HTTP 客户端连接 Coordinator，覆盖登录、设备、T
 - 系统事项：查看原因、前往项目、重试、解决；也可关闭通知。系统事项没有选项或文字回复，不按普通问题处理。
 
 验收：从任意入口处理一次，其他位置同步更新，待处理数量随之变化。普通事项的回答交给项目助手处理，选项不直接执行设备操作；系统事项遵循独立的重试和关闭规则。
-
-设计：`design/screens/inbox.elyx`、`design/blocks/attention-card.elyx`，以及 `design/screens/project.elyx` 的需要处理状态。
-
 ## 7. 维护、暂停与归档项目
 
 路径：打开项目设置或记忆 → 修改长期信息 → 暂停与恢复 → 归档 → 查看保留记录。
 
 范围：
 
-- 修改名称、目标、订阅和模型，自动保存反馈与失败处理。
+- 修改名称、目标、订阅和模型，点 `Save changes` 一次提交；显示未保存、保存中、已保存和失败重试，失败保留输入。未保存的修改留在草稿里，应用内离开再回来仍在，刷新或关闭标签页前由浏览器确认。
 - 展示模型修改从下一次运行生效。
 - 查看、添加和编辑记忆，显示版本、来源和时间；按真实修订接口分页读取历史，处理保存冲突并保留草稿。
 - 暂停项目：主对话新输入等待，Thread 和事项仍可操作。
 - 恢复项目：继续处理暂停期间保存的输入。
-- 归档确认：停止项目助手、撤回未处理事项，保留对话和记忆，已有 Thread 工作继续。
+- 归档确认：停止项目助手和项目中仍在工作的 Thread，撤回未处理事项，保留对话、记忆和 Thread 记录。保存归档期间显示进度，失败时在确认弹窗内重试。归档后按 Thread 实际状态说明：设备确认前显示仍在停止或等待设备连接，停止未生效时提示打开 Thread 再次停止。
 - 归档项目的入口、记录查看及只读界面。
 
 验收：修改后的名称和信息在各处一致；停止当前运行、暂停项目、归档项目的影响分别可见。归档 Project 不等于归档其中的 Thread。
-
-设计：`design/screens/project-settings.elyx`、`design/screens/project.elyx` 的暂停状态、`design/blocks/overview.elyx` 的记忆视图。
-
 ## 真实后端接入与部署验收
 
 以下范围与流程 0～7 一起验收。部署结果和实际证据在最终验收时写入仓库外的 handoff 文件。
@@ -207,7 +184,7 @@ Web UI 默认通过 HTTP 客户端连接 Coordinator，覆盖登录、设备、T
 
 ## 设计覆盖
 
-设计稿的页面、组件和画板索引见 [设计目录](../../design/README.md) 与 [界面流程](../../design/FLOWS.md)。以下交互已有对应设计状态，前端实施时按所属流程验证。
+以下交互已有对应设计状态，前端实施时按所属流程验证。
 
 | 所属流程 | 对应交互 |
 |---|---|
@@ -217,7 +194,7 @@ Web UI 默认通过 HTTP 客户端连接 Coordinator，覆盖登录、设备、T
 | 4 | 空项目的后续交互、无满足条件设备时的具体原因、停止助手运行反馈 |
 | 5 | 历史加载与分页、文件不可用、引用预填及长引用处理 |
 | 6 | 已处理事项列表、回答表单、处理冲突、处理后的卡片状态 |
-| 7 | 记忆编辑与保存冲突、自动保存失败、归档项目入口和只读页面 |
+| 7 | 记忆编辑与保存冲突、设置保存失败、归档项目入口和只读页面 |
 
 开始对应流程时读取相关画板和组件，通过实际交互验证设计；发现新缺口时先明确交互，再同步设计与实现。补充设计沿用现有组件和文案规则。
 

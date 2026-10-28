@@ -656,6 +656,21 @@ describe('HTTP thread contracts', () => {
     expect(await refreshes.get(op.id)!()).toMatchObject({ phase: 'failed', detail: 'Cannot confirm process cleanup' })
   })
 
+  it('reports a stop the device did not carry out and allows stopping again', async () => {
+    let t = thread({ status: 'running', stop_requested_at: later })
+    const { api, refreshes } = setup((url) => (url.pathname.endsWith('/timeline') ? { events: [] } : t))
+    const op = await api.stopThread(threadId)
+    t = thread({ status: 'running', stop_requested_at: later, stop_failure: 'stop_unavailable' })
+    expect(await refreshes.get(op.id)!()).toMatchObject({ phase: 'failed' })
+    const failed = await api.getThread(threadId)
+    expect(failed).toMatchObject({ status: 'running', pending: null, stopFailed: true })
+    expect(threadView(failed, device())).toMatchObject({
+      status: { label: 'Stop failed' },
+      group: 'attention',
+      notice: { title: "Couldn't stop Codex", detail: 'Codex may still be running.' },
+    })
+  })
+
   it('keeps withdrawal queued until a device report arrives and preserves conflicts', async () => {
     let conflict = false
     let events = [accepted()]

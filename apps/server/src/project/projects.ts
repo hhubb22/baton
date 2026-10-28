@@ -26,6 +26,7 @@ export { projectStatus } from './view.ts'
 export { listProjectRunCandidates, scheduleProjectRun, claimProjectCommands } from './scheduling.ts'
 export { scheduleMemoryJobs } from './memory-jobs.ts'
 import { stopProjectMemory } from './memory-jobs.ts'
+import * as threads from '../threads/index.ts'
 
 export const getProject = Effect.fn('getProject')(function* (employee: string, project: string) {
   yield* projectDecode(P.UUID, project)
@@ -128,6 +129,16 @@ export const patchProject = Effect.fn('patchProject')(function* (
       }
       if (updated.status === 'archived')
         yield* sql`UPDATE attention_requests SET state='withdrawn',withdraw_reason='Project 已归档',version=version+1,updated_at=clock_timestamp() WHERE project_id=${id} AND employee_id=${employee} AND state='open'`
+      // 归档时为仍有工作的 Thread 保存停止请求，设备确认前 Thread 保持 stop_requested_at 未确认
+      if (updated.status === 'archived' && old.status !== 'archived') {
+        const running = yield* sql<{ id: string }>`SELECT t.id FROM threads t
+          WHERE t.employee_id=${employee} AND t.project_id=${id} AND t.status<>'archived'
+            AND (t.status IN ('waiting_device','running')
+              OR EXISTS(SELECT 1 FROM thread_turns v WHERE v.thread_id=t.id AND v.ended_at IS NULL)
+              OR EXISTS(SELECT 1 FROM thread_messages m WHERE m.thread_id=t.id AND m.status IN ('accepted','queued')))
+          ORDER BY t.id`
+        for (const thread of running) yield* threads.stop(employee, thread.id)
+      }
       if (updated.status !== 'active') yield* releaseProjectRun(agent, 'finished', `project_${updated.status}`)
       if (
         updated.status !== 'active' ||

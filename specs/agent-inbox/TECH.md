@@ -54,13 +54,13 @@ Agent 行锁串行化同 Project 的创建。先按工具调用身份查找已�
 
 成功处理保存状态、选项 ID 和标签、文字、员工 ID、时间、`client_request_id`，增加版本。Agent 事项在同一事务插入唯一 `attention_answer`，`source_key=attention:{id}:resolution`，包含事项 ID、标题、状态和回答，JSON 上限 32 KiB。锁顺序是 `attention_requests` → `project_agent_input_queue`。
 
-离线和暂停不影响处理（IB-11）。归档事务先锁 Agent，撤回该 Project 所有 open 事项，原因为「Project 已归档」，再结束运行（IB-16）。
+离线和暂停不影响处理（IB-11）。归档事务先锁 Agent，撤回该 Project 所有 open 事项，原因为「Project 已归档」，为仍有执行中轮次、待发消息或处于 `waiting_device` / `running` 的 Thread 保存停止请求，再结束运行（IB-16）。停止请求走员工停止 Thread 的同一入口，设备确认前 Thread 的 `stop_confirmed_at` 为空。
 
 **系统事项。** 普通模型失败计数恰好到 3 时创建系统提示，主对话保持 `active`，之后自动尝试保持 15 分钟退避；新的用户消息清除退避，同一消息的幂等重发不清除。保存 assistant 回复成功或显式 Retry 会清零失败计数，并将仍 open 的系统提示改为 `resolved`（IB-18、IB-19）。用户关闭后同一轮持续失败不重建，计数清零后下次再次到 3 才创建。系统提示的创建、解决和关闭不进入输入队列。锁顺序为 Agent → conversation → attention_request。
 
 ### 5. Web 页面
 
-`/inbox` 列出待处理和已处理事项，`/inbox/{id}`、主对话里 `inbox.ask` 的位置和关联 Thread 里显示同一张事项卡片（IB-08）。卡片只用于等用户决定的事项，按 `design/` 实现。
+`/inbox` 列出待处理和已处理事项，`/inbox/{id}`、主对话里 `inbox.ask` 的位置和关联 Thread 里显示同一张事项卡片（IB-08）。卡片只用于等用户决定的事项。
 
 Markdown 使用 `react-markdown` 和 `remark-gfm` 渲染，启用 `skipHtml`，禁用图片，链接只保留有效的 `http`、`https` 和 `mailto` URL 并在新窗口打开，使用 `noopener noreferrer`，不自动加载外部资源（IB-07）。选项默认显示前 5 个，其余通过按钮在原位展开；同 Project 的待处理 Agent 问题达到 10 个时显示整理提示。回答和关闭携带版本与请求标识；冲突后读取当前记录，响应丢失后由用户查询处理结果，不自动重发。Inbox 数量、已展开的列表和当前事项每 5 秒查询一次。
 

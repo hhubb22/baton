@@ -1,7 +1,7 @@
 import * as stylex from '@stylexjs/stylex'
 
-// 图标直接取自设计稿资源，黑色描边或填充换成 currentColor，颜色跟随文字。
-const sources = import.meta.glob<string>('../../../design/resources/assets/*.svg', {
+// 图标取自 src/assets，黑色描边或填充换成 currentColor，颜色跟随文字。
+const sources = import.meta.glob<string>('../assets/*.svg', {
   query: '?raw',
   import: 'default',
   eager: true,

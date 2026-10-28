@@ -131,6 +131,8 @@ export const Thread = Schema.Struct({
   archive_requested_at: Schema.optionalKey(Schema.NullOr(Timestamp)),
   stop_requested_at: Schema.optionalKey(Schema.NullOr(Timestamp)),
   stop_confirmed_at: Schema.optionalKey(Schema.NullOr(Timestamp)),
+  // 停止请求未确认且没有待发的停止命令时，给出最近一条停止命令没有生效的原因。
+  stop_failure: Schema.optionalKey(Schema.NullOr(boundedText(4096))),
   last_reported_at: Schema.optionalKey(Schema.NullOr(Timestamp)),
   last_worker_seq: NonNegativeInteger,
   version: NonNegativeInteger,

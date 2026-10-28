@@ -674,6 +674,7 @@ export class MockStore {
         this.setPhase(operation, 'stopped')
       } else {
         thread.pending = 'stop'
+        thread.stopFailed = false
         thread.stopCanceled = canceled
         this.sendStop(thread, operation)
       }
@@ -1340,6 +1341,7 @@ ${response}`,
         this.replies.delete(projectId)
         this.interrupted.delete(projectId)
         this.world.passiveInputs = this.world.passiveInputs.filter((input) => input.projectId !== projectId)
+        this.stopProjectThreads(projectId)
         for (const item of this.world.inbox) {
           if (item.projectId !== projectId || item.status !== 'pending') continue
           item.status = 'withdrawn'
@@ -1355,8 +1357,28 @@ ${response}`,
         }
       }
     }
-    this.emit('projects', 'inbox')
+    this.emit('projects', 'inbox', 'threads', 'messages', 'operations')
     return project
+  }
+
+  // 归档 Project 时停止仍在工作的 Thread；运行中的等设备确认，离线时停止请求等设备连上再发。
+  private stopProjectThreads(projectId: ID) {
+    for (const thread of this.world.threads) {
+      if (thread.projectId !== projectId || thread.pending) continue
+      if (thread.status !== 'running' && thread.status !== 'waiting') continue
+      const operation = this.createOperation('stopThread', thread.id)
+      const canceled = this.withdrawPending(thread)
+      if (thread.status === 'waiting') {
+        thread.status = 'idle'
+        this.setPhase(operation, 'stopped')
+      } else {
+        thread.pending = 'stop'
+        thread.stopFailed = false
+        thread.stopCanceled = canceled
+        this.sendStop(thread, operation)
+      }
+      thread.updatedAt = this.scheduler.now()
+    }
   }
 
   saveMemory(input: SaveMemoryInput): MemorySave {

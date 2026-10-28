@@ -42,24 +42,45 @@ async function replace(user: ReturnType<typeof userEvent.setup>, field: HTMLElem
 async function openSettings(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole('button', { name: 'Project actions' }))
   await user.click(await screen.findByRole('menuitem', { name: 'Settings' }))
-  return screen.findByRole('dialog', { name: /· settings$/ })
+  await screen.findByRole('heading', { name: 'Project settings' })
+}
+
+async function save(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: 'Save changes' }))
+}
+
+function settingsStatus() {
+  return screen.getByRole('status')
+}
+
+async function back(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: 'Back to project' }))
+  await waitFor(() => expect(screen.queryByRole('heading', { name: 'Project settings' })).not.toBeInTheDocument())
 }
 
 beforeEach(() => localStorage.clear())
 
 describe('project maintenance', () => {
-  it('opens settings from project actions and syncs name and goal after blur', async () => {
+  it('saves name and goal only when Save changes is clicked', async () => {
     const user = userEvent.setup()
-    const { router } = setup()
-    const dialog = await openSettings(user)
+    const { router, client } = setup()
+    const update = vi.spyOn(client, 'updateProject')
+    await openSettings(user)
     expect(router.state.location.search).toMatchObject({ settings: true })
-    await replace(user, within(dialog).getByLabelText('Project name'), 'Release compatibility')
-    await user.click(within(dialog).getByLabelText(/^Goal/))
-    await waitFor(() => expect(within(dialog).getByRole('status')).toHaveTextContent('Saved'))
-    await replace(user, within(dialog).getByLabelText(/^Goal/), 'Verify Windows and Linux before release.')
-    await user.click(within(dialog).getByLabelText('Project name'))
-    await waitFor(() => expect(within(dialog).getByRole('status')).toHaveTextContent('Saved'))
-    await user.click(within(dialog).getByRole('button', { name: 'Done' }))
+    await replace(user, screen.getByLabelText('Name'), 'Release compatibility')
+    await user.click(screen.getByLabelText(/^Goal/))
+    await replace(user, screen.getByLabelText(/^Goal/), 'Verify Windows and Linux before release.')
+    await user.click(screen.getByLabelText('Name'))
+    expect(settingsStatus()).toHaveTextContent('Changes not saved')
+    expect(update).not.toHaveBeenCalled()
+    await save(user)
+    await waitFor(() => expect(settingsStatus()).toHaveTextContent('Saved'))
+    expect(update).toHaveBeenCalledTimes(1)
+    expect(update).toHaveBeenCalledWith({
+      projectId: 'prj-compat',
+      patch: { name: 'Release compatibility', goal: 'Verify Windows and Linux before release.' },
+    })
+    await back(user)
     expect(await screen.findByRole('heading', { name: 'Release compatibility' })).toBeInTheDocument()
     expect(
       within(screen.getByRole('navigation', { name: 'Workspace' })).getByRole('link', {
@@ -72,9 +93,9 @@ describe('project maintenance', () => {
       ),
     ).toBeInTheDocument()
     expect(router.state.location.search.settings).toBeUndefined()
-    const reopened = await openSettings(user)
-    expect(within(reopened).getByLabelText('Project name')).toHaveValue('Release compatibility')
-    expect(within(reopened).getByLabelText(/^Goal/)).toHaveValue('Verify Windows and Linux before release.')
+    await openSettings(user)
+    expect(screen.getByLabelText('Name')).toHaveValue('Release compatibility')
+    expect(screen.getByLabelText(/^Goal/)).toHaveValue('Verify Windows and Linux before release.')
   })
 
   it('saves optional memory embeddings, retains a failed draft and turns them off', async () => {
@@ -83,29 +104,28 @@ describe('project maintenance', () => {
       vi.spyOn(client, 'updateProject').mockRejectedValueOnce(new ClientError('unavailable', 'Disconnected'))
     })
     const update = vi.spyOn(client, 'updateProject')
-    const dialog = await screen.findByRole('dialog', { name: 'Compatibility · settings' })
-    expect(within(dialog).getByRole('switch', { name: 'Memory embeddings' })).not.toBeChecked()
-    await user.click(within(dialog).getByRole('switch', { name: 'Memory embeddings' }))
-    await replace(user, within(dialog).getByLabelText('Embedding base URL'), 'http://localhost:11434/v1')
-    await replace(user, within(dialog).getByLabelText(/^Device credential name/), 'local-embeddings')
-    await replace(user, within(dialog).getByLabelText('Embedding model'), 'local-embed')
-    await user.click(within(dialog).getByLabelText('Project name'))
-    expect(await within(dialog).findByText("Couldn't save. Try again.")).toBeInTheDocument()
-    await user.click(within(dialog).getByRole('button', { name: 'Done' }))
-    const reopened = await openSettings(user)
-    expect(within(reopened).getByLabelText('Embedding model')).toHaveValue('local-embed')
-    await user.click(within(reopened).getByLabelText('Embedding model'))
-    await user.click(within(reopened).getByLabelText('Project name'))
-    await waitFor(() => expect(within(reopened).getByRole('status')).toHaveTextContent('Saved'))
+    await screen.findByRole('heading', { name: 'Project settings' })
+    expect(screen.getByRole('switch', { name: 'Memory embeddings' })).not.toBeChecked()
+    await user.click(screen.getByRole('switch', { name: 'Memory embeddings' }))
+    await replace(user, screen.getByLabelText('Embedding base URL'), 'http://localhost:11434/v1')
+    await replace(user, screen.getByLabelText(/^Device credential name/), 'local-embeddings')
+    await replace(user, screen.getByLabelText('Embedding model'), 'local-embed')
+    await user.click(screen.getByLabelText('Name'))
+    expect(update).not.toHaveBeenCalled()
+    await save(user)
+    expect(await screen.findByText("Couldn't save. Try again.")).toBeInTheDocument()
+    expect(screen.getByLabelText('Embedding model')).toHaveValue('local-embed')
+    await user.click(screen.getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(settingsStatus()).toHaveTextContent('Saved'))
     expect((await client.listProjects()).find((project) => project.id === 'prj-compat')?.memoryEmbedding).toEqual({
       base_url: 'http://localhost:11434/v1',
       model: 'local-embed',
       credential_profile: 'local-embeddings',
       config_id: expect.any(String),
     })
-    await replace(user, within(reopened).getByLabelText('Embedding model'), 'another-embed')
-    await user.click(within(reopened).getByLabelText('Project name'))
-    await waitFor(() => expect(within(reopened).getByRole('status')).toHaveTextContent('Saved'))
+    await replace(user, screen.getByLabelText('Embedding model'), 'another-embed')
+    await save(user)
+    await waitFor(() => expect(settingsStatus()).toHaveTextContent('Saved'))
     expect(update).toHaveBeenLastCalledWith({
       projectId: 'prj-compat',
       patch: {
@@ -116,90 +136,83 @@ describe('project maintenance', () => {
         },
       },
     })
-    await user.click(within(reopened).getByRole('switch', { name: 'Memory embeddings' }))
-    await waitFor(() => expect(within(reopened).getByRole('status')).toHaveTextContent('Saved'))
+    await user.click(screen.getByRole('switch', { name: 'Memory embeddings' }))
+    expect(settingsStatus()).toHaveTextContent('Changes not saved')
+    await save(user)
+    await waitFor(() => expect(settingsStatus()).toHaveTextContent('Saved'))
     expect(update).toHaveBeenLastCalledWith({ projectId: 'prj-compat', patch: { memoryEmbedding: null } })
-    expect(within(reopened).queryByLabelText('Embedding model')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Embedding model')).not.toBeInTheDocument()
     expect((await client.listProjects()).find((project) => project.id === 'prj-compat')?.memoryEmbedding).toBeNull()
   })
 
-  it('closes with an invalid draft, pauses the saved project and lets the draft be discarded', async () => {
+  it('keeps an invalid name draft, pauses the saved project and lets the draft be discarded', async () => {
     const user = userEvent.setup()
     const { client } = setup(settingsPath)
     const update = vi.spyOn(client, 'updateProject')
-    const dialog = await screen.findByRole('dialog', { name: 'Compatibility · settings' })
-    await replace(user, within(dialog).getByLabelText('Project name'), '   ')
-    await user.click(within(dialog).getByRole('button', { name: 'Pause' }))
-    expect(await within(dialog).findByRole('button', { name: 'Resume' })).toBeInTheDocument()
-    expect(within(dialog).getByLabelText('Project name')).toHaveValue('   ')
+    await screen.findByRole('heading', { name: 'Project settings' })
+    await replace(user, screen.getByLabelText('Name'), '   ')
+    await save(user)
+    expect(await screen.findByText('Enter a project name.', { selector: 'p' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Name')).toHaveAttribute('aria-invalid', 'true')
+    expect(settingsStatus()).toHaveTextContent('Changes not saved')
+    await user.click(screen.getByRole('button', { name: 'Pause' }))
+    expect(await screen.findByRole('button', { name: 'Resume' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Name')).toHaveValue('   ')
     expect(update).not.toHaveBeenCalled()
     expect((await client.listProjects()).find((project) => project.id === 'prj-compat')?.status).toBe('paused')
-    await user.click(within(dialog).getByRole('button', { name: 'Done' }))
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    const reopened = await openSettings(user)
-    expect(within(reopened).getByLabelText('Project name')).toHaveValue('   ')
-    await user.click(within(reopened).getByRole('button', { name: 'Discard changes' }))
-    expect(within(reopened).getByLabelText('Project name')).toHaveValue('Compatibility')
+    await back(user)
+    await openSettings(user)
+    expect(screen.getByLabelText('Name')).toHaveValue('   ')
+    await user.click(screen.getByRole('button', { name: 'Discard changes' }))
+    expect(screen.getByLabelText('Name')).toHaveValue('Compatibility')
+    expect(settingsStatus()).toHaveTextContent('')
     expect(update).not.toHaveBeenCalled()
   })
 
-  it('retains failed settings across closing and saves the same edits after reopening', async () => {
+  it('keeps failed settings when leaving and saves the same edits after returning', async () => {
     const user = userEvent.setup()
     const { router } = setup(settingsPath, 'normal', (client) => {
       vi.spyOn(client, 'updateProject').mockRejectedValueOnce(new ClientError('unavailable', 'Disconnected'))
     })
-    const dialog = await screen.findByRole('dialog', { name: 'Compatibility · settings' })
-    await replace(user, within(dialog).getByLabelText(/^Goal/), 'Keep this goal after failure.')
-    await user.click(within(dialog).getByLabelText('Project name'))
-    expect(await within(dialog).findByText("Couldn't save. Try again.")).toBeInTheDocument()
-    expect(within(dialog).getByLabelText(/^Goal/)).toHaveValue('Keep this goal after failure.')
-    await user.click(within(dialog).getByRole('button', { name: 'Done' }))
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    await screen.findByRole('heading', { name: 'Project settings' })
+    await replace(user, screen.getByLabelText(/^Goal/), 'Keep this goal after failure.')
+    await save(user)
+    expect(await screen.findByText("Couldn't save. Try again.")).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+    expect(screen.getByLabelText(/^Goal/)).toHaveValue('Keep this goal after failure.')
+    await back(user)
     await act(() =>
       router.navigate({ to: '/projects/$projectId', params: { projectId: 'prj-compat' }, search: { settings: true } }),
     )
-    const reopened = await screen.findByRole('dialog', { name: 'Compatibility · settings' })
-    expect(within(reopened).getByLabelText(/^Goal/)).toHaveValue('Keep this goal after failure.')
-    await user.click(within(reopened).getByLabelText('Project name'))
-    await user.click(within(reopened).getByLabelText(/^Goal/))
-    await waitFor(() => expect(within(reopened).getByRole('status')).toHaveTextContent('Saved'))
-    await user.click(within(reopened).getByRole('button', { name: 'Done' }))
+    await screen.findByRole('heading', { name: 'Project settings' })
+    expect(screen.getByLabelText(/^Goal/)).toHaveValue('Keep this goal after failure.')
+    expect(settingsStatus()).toHaveTextContent('Changes not saved')
+    await save(user)
+    await waitFor(() => expect(settingsStatus()).toHaveTextContent('Saved'))
+    await back(user)
     expect(
       await within(screen.getByRole('complementary', { name: 'Overview' })).findByText('Keep this goal after failure.'),
     ).toBeInTheDocument()
   })
 
-  it('keeps newer drafts and the paused status when an earlier settings response arrives later', async () => {
+  it('asks the browser to confirm before unloading unsaved settings', async () => {
     const user = userEvent.setup()
-    let release: (() => void) | undefined
-    const { client } = setup(settingsPath, 'normal', (client) => {
-      const update = client.updateProject.bind(client)
-      vi.spyOn(client, 'updateProject').mockImplementationOnce(async (input) => {
-        const saved = await update(input)
-        await new Promise<void>((resolve) => {
-          release = resolve
-        })
-        return saved
-      })
-    })
-    const dialog = await screen.findByRole('dialog', { name: 'Compatibility · settings' })
-    await replace(user, within(dialog).getByLabelText('Project name'), 'Earlier name')
-    await user.click(within(dialog).getByLabelText(/^Goal/))
-    await waitFor(() => expect(release).toBeDefined())
-    await replace(user, within(dialog).getByLabelText('Project name'), '   ')
-    await user.click(within(dialog).getByRole('button', { name: 'Pause' }))
-    expect(await within(dialog).findByRole('button', { name: 'Resume' })).toBeInTheDocument()
-    await act(async () => release?.())
-    expect(await within(dialog).findByText('Enter a project name.', { selector: 'p' })).toBeInTheDocument()
-    expect(within(dialog).getByLabelText('Project name')).toHaveValue('   ')
-    expect(within(dialog).getByRole('button', { name: 'Resume' })).toBeInTheDocument()
-    expect((await client.listProjects()).find((project) => project.id === 'prj-compat')).toMatchObject({
-      name: 'Earlier name',
-      status: 'paused',
-    })
+    setup(settingsPath)
+    await screen.findByRole('heading', { name: 'Project settings' })
+    const unload = () => {
+      const event = new Event('beforeunload', { cancelable: true })
+      window.dispatchEvent(event)
+      return event.defaultPrevented
+    }
+    expect(unload()).toBe(false)
+    await replace(user, screen.getByLabelText('Name'), 'Unsaved name')
+    expect(unload()).toBe(true)
+    await save(user)
+    await waitFor(() => expect(settingsStatus()).toHaveTextContent('Saved'))
+    expect(unload()).toBe(false)
   })
 
-  it('preserves newer settings during delayed saves and after browser back and reopening', async () => {
+  it('preserves edits made while saving and after browser back and returning', async () => {
     const user = userEvent.setup()
     let updateSpy!: MockInstance<ReturnType<typeof createMockClient>['updateProject']>
     const { client, scheduler, router } = setup(settingsPath, 'normal', (client, clock) => {
@@ -210,45 +223,32 @@ describe('project maintenance', () => {
         return update(snapshot)
       })
     })
-    const dialog = await screen.findByRole('dialog', { name: 'Compatibility · settings' })
-    const name = within(dialog).getByLabelText('Project name')
-    await replace(user, name, 'First name')
-    await user.click(within(dialog).getByLabelText(/^Goal/))
-    expect(within(dialog).getByRole('status')).toHaveTextContent('Saving…')
-    await replace(user, name, 'Latest name')
-    await replace(user, within(dialog).getByLabelText(/^Goal/), 'The latest goal must survive.')
-    await user.click(name)
+    await screen.findByRole('heading', { name: 'Project settings' })
+    await replace(user, screen.getByLabelText('Name'), 'First name')
+    await save(user)
+    expect(settingsStatus()).toHaveTextContent('Saving…')
+    await replace(user, screen.getByLabelText('Name'), 'Latest name')
+    await replace(user, screen.getByLabelText(/^Goal/), 'The latest goal must survive.')
     await advance(scheduler, browserLatency.save)
-    expect(within(dialog).getByLabelText('Project name')).toHaveValue('Latest name')
-    expect(within(dialog).getByLabelText(/^Goal/)).toHaveValue('The latest goal must survive.')
+    await waitFor(() => expect(settingsStatus()).toHaveTextContent('Changes not saved'))
+    expect(screen.getByLabelText('Name')).toHaveValue('Latest name')
+    expect(screen.getByLabelText(/^Goal/)).toHaveValue('The latest goal must survive.')
+    expect(updateSpy.mock.calls.map(([input]) => input.patch)).toEqual([{ name: 'First name' }])
+    await save(user)
     await advance(scheduler, browserLatency.save)
-    await waitFor(() => expect(within(dialog).getByRole('status')).toHaveTextContent('Saved'))
-    await user.click(within(dialog).getByRole('button', { name: 'Done' }))
+    await waitFor(() => expect(settingsStatus()).toHaveTextContent('Saved'))
+    await back(user)
     expect(await screen.findByRole('heading', { name: 'Latest name' })).toBeInTheDocument()
-    const reopened = await openSettings(user)
-    expect(within(reopened).getByLabelText(/^Goal/)).toHaveValue('The latest goal must survive.')
 
-    await replace(user, within(reopened).getByLabelText('Project name'), 'Before navigating back')
-    await user.click(within(reopened).getByLabelText(/^Goal/))
-    expect(within(reopened).getByRole('status')).toHaveTextContent('Saving…')
-    await replace(user, within(reopened).getByLabelText('Project name'), 'Queued in old dialog')
+    await openSettings(user)
+    await replace(user, screen.getByLabelText('Name'), 'Unsaved before navigating back')
     await act(async () => router.history.back())
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    const remounted = await openSettings(user)
-    expect(within(remounted).getByLabelText('Project name')).toHaveValue('Queued in old dialog')
-    await replace(user, within(remounted).getByLabelText('Project name'), 'After reopening settings')
-    await user.click(within(remounted).getByLabelText(/^Goal/))
-    await advance(scheduler, browserLatency.save)
-    expect(within(remounted).getByLabelText('Project name')).toHaveValue('After reopening settings')
-    await advance(scheduler, browserLatency.save)
-    await waitFor(() => expect(within(remounted).getByRole('status')).toHaveTextContent('Saved'))
-    await user.click(within(remounted).getByRole('button', { name: 'Done' }))
-    expect(await screen.findByRole('heading', { name: 'After reopening settings' })).toBeInTheDocument()
-    await advance(scheduler, browserLatency.save * 3)
-    expect((await client.listProjects()).find((project) => project.id === 'prj-compat')?.name).toBe(
-      'After reopening settings',
-    )
-    expect(updateSpy.mock.calls.map(([input]) => input.patch.name)).not.toContain('Queued in old dialog')
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Project settings' })).not.toBeInTheDocument())
+    await openSettings(user)
+    expect(screen.getByLabelText('Name')).toHaveValue('Unsaved before navigating back')
+    expect(settingsStatus()).toHaveTextContent('Changes not saved')
+    expect(updateSpy).toHaveBeenCalledTimes(2)
+    expect((await client.listProjects()).find((project) => project.id === 'prj-compat')?.name).toBe('Latest name')
   })
 
   it('keeps new memory drafts in their own project across browser history', async () => {
@@ -290,13 +290,14 @@ describe('project maintenance', () => {
   it('explains when a model change takes effect and preserves the active run', async () => {
     const user = userEvent.setup()
     const { client } = setup('/projects/prj-baton?settings=true')
-    const dialog = await screen.findByRole('dialog', { name: 'Baton Dev · settings' })
-    expect(within(dialog).getByText('Applies from the next run.')).toBeInTheDocument()
-    await user.selectOptions(within(dialog).getByLabelText('Subscription'), 'Claude')
-    expect(within(dialog).getByLabelText('Project assistant model')).toHaveValue('claude-opus-5-5')
-    await user.selectOptions(within(dialog).getByLabelText('Project assistant model'), 'claude-sonnet-5-5')
-    await waitFor(() => expect(within(dialog).getByRole('status')).toHaveTextContent('Saved'))
-    await user.click(within(dialog).getByRole('button', { name: 'Done' }))
+    await screen.findByRole('heading', { name: 'Project settings' })
+    expect(screen.getByText('Changes apply from the next run.')).toBeInTheDocument()
+    await user.selectOptions(screen.getByLabelText('Subscription'), 'Claude')
+    expect(screen.getByLabelText('Project assistant model')).toHaveValue('claude-opus-5-5')
+    await user.selectOptions(screen.getByLabelText('Project assistant model'), 'claude-sonnet-5-5')
+    await save(user)
+    await waitFor(() => expect(settingsStatus()).toHaveTextContent('Saved'))
+    await back(user)
     expect(await screen.findByRole('button', { name: 'Stop run' })).toBeInTheDocument()
     const project = (await client.listProjects()).find((item) => item.id === 'prj-baton')!
     expect(project).toMatchObject({
@@ -304,8 +305,8 @@ describe('project maintenance', () => {
       model: 'claude-sonnet-5-5',
       agent: { state: 'running', deviceId: 'dev-ubuntu' },
     })
-    const reopened = await openSettings(user)
-    expect(within(reopened).getByLabelText('Project assistant model')).toHaveValue('claude-sonnet-5-5')
+    await openSettings(user)
+    expect(screen.getByLabelText('Project assistant model')).toHaveValue('claude-sonnet-5-5')
   })
 
   it('recovers failed project and memory reads with Retry project and Retry memory', async () => {
@@ -384,7 +385,7 @@ describe('project maintenance', () => {
     const memory = await screen.findByRole('region', { name: 'Project memory' })
     expect(await within(memory).findByText('Memory search needs device credentials')).toBeInTheDocument()
     await user.click(within(memory).getByRole('button', { name: 'Open settings' }))
-    expect(await screen.findByRole('dialog', { name: 'Compatibility · settings' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Project settings' })).toBeInTheDocument()
   })
 
   it('keeps routine waiting and transient memory failures out of the interface', async () => {
@@ -587,15 +588,16 @@ describe('project maintenance', () => {
     await user.click(await screen.findByRole('button', { name: 'Project actions' }))
     await user.click(await screen.findByRole('menuitem', { name: 'Archive project' }))
     expect(router.state.location.search).toMatchObject({ settings: true, archive: true })
-    const dialog = await screen.findByRole('dialog', { name: 'Archive “Compatibility”?' })
+    const dialog = await screen.findByRole('dialog', { name: 'Archive project?' })
     expect(
       within(dialog).getByText(
-        'Stops the project assistant and closes 2 open questions. Chat, memory, and threads are kept.',
+        'Stops the project assistant and its running threads, and closes 2 open questions. Chat, memory, and thread history are kept.',
       ),
     ).toBeInTheDocument()
     await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
-    const settings = await screen.findByRole('dialog', { name: 'Compatibility · settings' })
-    await user.click(within(settings).getByRole('button', { name: 'Done' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.getByRole('heading', { name: 'Project settings' })).toBeInTheDocument()
+    await back(user)
     expect(screen.getByLabelText('Message the project assistant')).toBeInTheDocument()
     expect((await client.listProjects()).find((project) => project.id === 'prj-compat')?.status).toBe('active')
     expect(
@@ -608,14 +610,17 @@ describe('project maintenance', () => {
     const { scheduler, router, client } = setup(`${settingsPath}&archive=true`, 'normal', (client) => {
       vi.spyOn(client, 'setProjectStatus').mockRejectedValueOnce(new ClientError('unavailable', 'Disconnected'))
     })
-    const dialog = await screen.findByRole('dialog', { name: 'Archive “Compatibility”?' })
-    await user.click(within(dialog).getByRole('button', { name: 'Archive' }))
-    expect(await within(dialog).findByRole('alert')).toHaveTextContent("Couldn't archive. Try again.")
+    const dialog = await screen.findByRole('dialog', { name: 'Archive project?' })
+    await user.click(within(dialog).getByRole('button', { name: 'Archive project' }))
+    const failed = await screen.findByRole('dialog', { name: 'Archive project?' })
+    expect(await within(failed).findByRole('alert')).toHaveTextContent("Couldn't archive. Try again.")
     expect((await client.listProjects()).find((project) => project.id === 'prj-compat')?.status).toBe('active')
-    await user.click(within(dialog).getByRole('button', { name: 'Archive' }))
-    const settings = await screen.findByRole('dialog', { name: 'Compatibility · settings' })
-    expect(within(settings).getByText('Read-only')).toBeInTheDocument()
-    await user.click(within(settings).getByRole('button', { name: 'Done' }))
+    await user.click(within(failed).getByRole('button', { name: 'Archive project' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(await screen.findByText('Read-only. Chat, memory, and thread history are kept.')).toBeInTheDocument()
+    expect(screen.getByLabelText('Name')).toHaveAttribute('readonly')
+    expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument()
+    await back(user)
     expect((await screen.findAllByText('Project archived')).length).toBeGreaterThan(0)
     expect(screen.queryByLabelText('Message the project assistant')).not.toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Conversation' })).toHaveTextContent(
@@ -656,16 +661,69 @@ describe('project maintenance', () => {
     expect(router.state.location.pathname).toBe('/projects/archived')
     await user.click(screen.getByRole('link', { name: /Compatibility/ }))
     expect((await screen.findAllByText('Project archived')).length).toBeGreaterThan(0)
-    const dialog = await openSettings(user)
-    for (const label of ['Project name', 'Goal', 'Subscription', 'Project assistant model']) {
-      expect(within(dialog).getByLabelText(label, { exact: false })).toHaveAttribute('readonly')
+    await openSettings(user)
+    for (const label of ['Name', 'Goal', 'Subscription', 'Project assistant model']) {
+      expect(screen.getByLabelText(label, { exact: false })).toHaveAttribute('readonly')
     }
-    expect(within(dialog).queryByRole('button', { name: /^(Pause|Resume|Archive)$/ })).not.toBeInTheDocument()
-    await user.click(within(dialog).getByRole('button', { name: 'Done' }))
+    expect(screen.queryByRole('button', { name: /^(Pause|Resume|Archive|Save changes)$/ })).not.toBeInTheDocument()
+    await back(user)
     await user.click(screen.getByRole('tab', { name: /Memory/ }))
     const memory = await screen.findByRole('region', { name: 'Project memory' })
     expect(within(memory).getByText(originalMemory)).toBeInTheDocument()
     expect(within(memory).queryByRole('button', { name: 'Add memory' })).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Message the project assistant')).not.toBeInTheDocument()
+  })
+
+  it('stops running threads on archive and reports them as stopping until the device confirms', async () => {
+    const user = userEvent.setup()
+    let release!: () => void
+    const { client, scheduler } = setup('/projects/prj-baton?settings=true&archive=true', 'normal', (client) => {
+      const setStatus = client.setProjectStatus.bind(client)
+      vi.spyOn(client, 'setProjectStatus').mockImplementationOnce(async (input) => {
+        await new Promise<void>((resolve) => {
+          release = resolve
+        })
+        return setStatus(input)
+      })
+    })
+    const dialog = await screen.findByRole('dialog', { name: 'Archive project?' })
+    await user.click(within(dialog).getByRole('button', { name: 'Archive project' }))
+    const progress = await screen.findByRole('dialog', { name: 'Archiving project' })
+    expect(within(progress).getByText('Saving archive status…')).toBeInTheDocument()
+    expect(within(progress).getByText('Stop requests go to online devices.')).toBeInTheDocument()
+    await act(async () => release())
+    expect(await screen.findByText('Read-only. 1 thread still stopping.')).toBeInTheDocument()
+    expect((await client.listThreads()).find((thread) => thread.id === 'thr-gateway')).toMatchObject({
+      status: 'running',
+      pending: 'stop',
+    })
+    await advance(scheduler, browserLatency.device)
+    expect(await screen.findByText('Read-only. Chat, memory, and thread history are kept.')).toBeInTheDocument()
+    expect((await client.listThreads()).find((thread) => thread.id === 'thr-gateway')).toMatchObject({
+      status: 'stopped',
+      pending: null,
+    })
+    expect((await client.listProjects()).find((project) => project.id === 'prj-baton')?.agent.state).toBe('stopped')
+    expect((await client.listProjectEntries('prj-baton')).length).toBeGreaterThan(0)
+  })
+
+  it('keeps a thread stop pending while its device is offline after archive', async () => {
+    const user = userEvent.setup()
+    const { client, scheduler } = setup('/projects/prj-baton?settings=true&archive=true', 'normal', (client) => {
+      client.controls.setDeviceConnection('dev-ubuntu', 'offline')
+    })
+    const dialog = await screen.findByRole('dialog', { name: 'Archive project?' })
+    await user.click(within(dialog).getByRole('button', { name: 'Archive project' }))
+    expect(await screen.findByText('Read-only. 1 thread will stop when Ubuntu Dev connects.')).toBeInTheDocument()
+    await advance(scheduler, browserLatency.device * 2)
+    expect(screen.getByText('Read-only. 1 thread will stop when Ubuntu Dev connects.')).toBeInTheDocument()
+    expect((await client.listThreads()).find((thread) => thread.id === 'thr-gateway')).toMatchObject({
+      status: 'running',
+      pending: 'stop',
+    })
+    act(() => client.controls.setDeviceConnection('dev-ubuntu', 'online'))
+    expect(await screen.findByText('Read-only. 1 thread still stopping.')).toBeInTheDocument()
+    await advance(scheduler, browserLatency.device)
+    expect(await screen.findByText('Read-only. Chat, memory, and thread history are kept.')).toBeInTheDocument()
   })
 })

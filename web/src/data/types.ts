@@ -145,6 +145,8 @@ export interface Thread {
   stop: ThreadStop | null
   // 已提交、还在等设备确认的停止或归档。设备确认前 status 保持原样。
   pending: 'stop' | 'archive' | null
+  // 最近一次停止设备没有执行（拒绝了命令，或命令在恢复备份后不再发送），可以再停一次。此时 pending 为 null。
+  stopFailed?: boolean
   // 尚未收到实际打开或恢复完成的执行结果。
   starting?: boolean
   resumePending?: boolean

@@ -375,7 +375,7 @@ describe('project pause and archive', () => {
     expect(store.projectEntries(id)).toEqual(before)
     expect(store.project(id).status).toBe(status)
     expect(store.project(id).agent.state).toBe(status === 'paused' ? 'idle' : 'stopped')
-    expect(store.thread('thr-gateway').status).toBe('running')
+    expect(store.thread('thr-gateway').status).toBe(status === 'paused' ? 'running' : 'stopped')
   })
 
   it('never wakes an archived project from Thread results or device reconnection', () => {
@@ -388,7 +388,7 @@ describe('project pause and archive', () => {
     scheduler.advance(browserLatency.run * 4)
     expect(store.projectEntries(id)).toEqual(before)
     expect(store.project(id).agent.state).toBe('stopped')
-    expect(store.thread('thr-gateway').status).toBe('idle')
+    expect(store.thread('thr-gateway')).toMatchObject({ status: 'stopped', pending: null })
   })
 
   it('rejects archived project writes, including retries, and retains readable records', () => {

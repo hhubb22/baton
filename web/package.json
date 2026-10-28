@@ -11,7 +11,6 @@
     "format:check": "vp fmt --check .",
     "typecheck": "tsc -b --pretty false",
     "test": "vp test run",
-    "tokens": "node scripts/tokens.mjs",
     "preview": "vp preview"
   },
   "dependencies": {

@@ -458,8 +458,14 @@ export function useUpdateProject(projectId: ID) {
 
 export function useSetProjectStatus() {
   const client = useClient()
+  const cache = useQueryClient()
   return useMutation({
     mutationFn: (input: { projectId: ID; status: 'active' | 'paused' | 'archived' }) => client.setProjectStatus(input),
+    // 归档会为 Project 的 Thread 保存停止请求，Thread 列表随之刷新。
+    onSuccess: (_, { status }) => {
+      void cache.invalidateQueries({ queryKey: keys.projects })
+      if (status === 'archived') void cache.invalidateQueries({ queryKey: keys.threads })
+    },
   })
 }
 

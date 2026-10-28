@@ -14,6 +14,7 @@ import {
   insertMessage,
   normalizeMessage,
   readThread,
+  stopFailure,
   touch,
   uuid,
   type DB,
@@ -167,13 +168,12 @@ const action = (
           yield* sql`UPDATE threads SET status='archived',stop_code=NULL,archive_requested_at=COALESCE(archive_requested_at,clock_timestamp()),archived_at=clock_timestamp() WHERE id=${threadID}`
           yield* audit(t, 'thread.archived', {}, actor, actorID)
         } else {
-          const frozenStop = yield* sql`SELECT id FROM thread_outbox WHERE thread_id=${threadID}
-            AND action='stop' AND completed_at IS NULL AND next_attempt_at='infinity'
-            AND NOT EXISTS(SELECT 1 FROM thread_outbox current_stop WHERE current_stop.thread_id=${threadID}
-              AND current_stop.action='stop' AND current_stop.completed_at IS NULL AND current_stop.next_attempt_at<>'infinity') LIMIT 1`
+          // 上一次停止被设备拒绝或命令被冻结时，重新发出停止。
+          const failedStop =
+            yield* sql`SELECT 1 FROM threads t WHERE t.id=${threadID} AND (${sql.literal(stopFailure)}) IS NOT NULL`
           if (kind === 'archive')
             yield* sql`UPDATE threads SET archive_requested_at=COALESCE(archive_requested_at,clock_timestamp()) WHERE id=${threadID}`
-          if (!t.stop_requested_at || t.stop_confirmed_at || frozenStop.length) {
+          if (!t.stop_requested_at || t.stop_confirmed_at || failedStop.length) {
             yield* sql`UPDATE threads SET stop_requested_at=clock_timestamp(),stop_confirmed_at=NULL WHERE id=${threadID}`
             yield* enqueue(t, 'stop')
           }
@@ -390,6 +390,7 @@ export const list = (employeeID: string, query: P.ThreadListQuery = {}): DB<P.Th
         value: P.ThreadSummary
       }>`SELECT jsonb_strip_nulls(to_jsonb(t)-'request_hash'-'exec_wait_until') || jsonb_build_object(
     'node_online',COALESCE(p.online,false),'node_synced',COALESCE(p.synced,false),'node_last_contact_at',p.last_contact_at,
+    'stop_failure',${sql.literal(stopFailure)},
     'title',COALESCE((SELECT left(split_part(content,chr(10),1),120) FROM thread_messages WHERE thread_id=t.id ORDER BY created_at,id LIMIT 1),t.working_directory),
     'current_turn',(SELECT jsonb_strip_nulls(to_jsonb(v)-'employee_id') FROM thread_turns v WHERE thread_id=t.id AND ended_at IS NULL),
     'stop_canceled',(SELECT count(*)::integer FROM thread_events e WHERE e.thread_id=t.id AND kind='message.withdrawn' AND id>COALESCE((SELECT max(id) FROM thread_events WHERE thread_id=t.id AND kind IN ('stop.requested','archive.requested')),9223372036854775807))) AS value

@@ -6,15 +6,7 @@ export default defineConfig({
       typeAware: true,
       typeCheck: true,
     },
-    ignorePatterns: [
-      '**/dist/**',
-      '**/_generated/**',
-      'upstream/**',
-      '.agents/**',
-      '.claude/**',
-      'design/**',
-      'third_party/**',
-    ],
+    ignorePatterns: ['**/dist/**', '**/_generated/**', 'upstream/**', '.agents/**', '.claude/**', 'third_party/**'],
     overrides: [
       {
         files: ['tools/*.test.mjs'],
@@ -48,7 +40,6 @@ export default defineConfig({
       '**/*.md',
       '.agents/**',
       '.claude/**',
-      'design/**',
       'third_party/**',
     ],
   },

@@ -1,9 +1,9 @@
 import * as stylex from '@stylexjs/stylex'
-import day from '../../../design/resources/assets/backdrop-day.jpg'
-import night from '../../../design/resources/assets/backdrop-night.jpg'
+import day from '../assets/backdrop-day.jpg'
+import night from '../assets/backdrop-night.jpg'
 import { colors } from './tokens.stylex'
 
-// 背景图沿用设计稿：浅色主题用日景，深色主题用夜景。
+// 浅色主题用日景背景图，深色主题用夜景。
 export function sceneImage(theme: 'light' | 'dark') {
   return `url(${theme === 'light' ? day : night})`
 }

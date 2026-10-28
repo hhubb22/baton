@@ -176,7 +176,7 @@ function MemoryEditor({ project, note, onClose }: { project: Project; note: Memo
         </>
       }
     >
-      {archived && <Banner icon="archive" title="Project archived" detail="Read-only. Threads keep running." />}
+      {archived && <Banner icon="archive" title="Project archived" detail="Read-only." />}
       <Field label="Memory" error={error}>
         {(props) => (
           <TextArea
@@ -250,7 +250,6 @@ function MemoryEditor({ project, note, onClose }: { project: Project; note: Memo
   )
 }
 
-// @elyx design/blocks/overview.elyx#overviewMemory
 export function ProjectMemory({ project }: { project: Project }) {
   const memory = useProjectMemory(project.id)
   const status = useMemoryStatus(project.id, project.status === 'active')

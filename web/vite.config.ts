@@ -36,8 +36,6 @@ export default defineConfig({
           },
         }
       : undefined,
-    // 图标直接读 design/resources/assets。
-    fs: { allow: ['..'] },
   },
   build: {
     outDir: '../apps/server/dist/web',

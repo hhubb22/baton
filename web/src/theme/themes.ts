@@ -1,4 +1,4 @@
-// 由 scripts/tokens.mjs 从 design/tokens 生成，不要手改。修改设计稿后运行 `pnpm --dir web tokens`。
+// 浅色与深色主题的颜色取值，键与 tokens.stylex.ts 的 colors 一致。
 import * as stylex from '@stylexjs/stylex'
 import { colors } from './tokens.stylex'
 

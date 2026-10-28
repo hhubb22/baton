@@ -924,6 +924,48 @@ it('commits ordered turns and replies once, rolls back invalid reports, and requ
     expect((await run(threads.view({ employeeId: f.employee }, t.id))).status).toBe('archived')
   }))
 
+it('reports a stop the device rejected and sends a new stop on retry', () =>
+  withTestDatabase(async ({ run }) => {
+    const f = await fixture(run)
+    const t = await open(run, f)
+    for (const command of await run(threads.claimCommands()))
+      await run(
+        threads.processReceipt(f.source, command.message_id, {
+          type: 'thread.command_result',
+          thread_id: t.id,
+          ok: true,
+          storage_generation: 'generation',
+        }),
+      )
+    await run(
+      threads.processReport(
+        f.source,
+        report(t.id, 3, 'turn.started', { worker_turn_seq: 1, client_message_id: f.input.message.client_message_id }),
+      ),
+    )
+    const requested = await run(threads.stop(f.employee, t.id))
+    expect(requested.stop_failure).toBeNull()
+    const stop = (await run(threads.claimCommands())).find((c) => c.body.action === 'stop')!
+    await run(
+      threads.processReceipt(f.source, stop.message_id, {
+        type: 'thread.command_result',
+        thread_id: t.id,
+        ok: false,
+        code: 'stop_unavailable',
+      }),
+    )
+    const failed = await run(threads.view({ employeeId: f.employee }, t.id))
+    expect(failed).toMatchObject({ status: 'running', stop_failure: 'stop_unavailable' })
+    expect(failed.stop_confirmed_at).toBeFalsy()
+    const listed = await run(threads.list(f.employee))
+    expect(listed.threads?.find((item) => item.id === t.id)?.stop_failure).toBe('stop_unavailable')
+
+    expect((await run(threads.stop(f.employee, t.id))).stop_failure).toBeNull()
+    const retry = (await run(threads.claimCommands())).filter((c) => c.body.action === 'stop')
+    expect(retry).toHaveLength(1)
+    expect(retry[0]!.message_id).not.toBe(stop.message_id)
+  }))
+
 it('classifies missing history by durable dispatch facts and rejects replaced connections', () =>
   withTestDatabase(async ({ run, restart }) => {
     const f = await fixture(run)

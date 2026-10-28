@@ -43,6 +43,7 @@ type ThreadDTO = {
   retry_open_allowed?: boolean
   stop_requested_at?: string
   stop_confirmed_at?: string
+  stop_failure?: string | null
   archive_requested_at?: string
   node_online: boolean
   node_synced: boolean
@@ -229,13 +230,14 @@ function mapThread(t: ThreadDTO, events: EventDTO[]): Thread {
     status: statuses[t.status] ?? 'unknown',
     stop: stopOf(t),
     pending:
-      t.status === 'archived'
+      t.status === 'archived' || t.stop_failure
         ? null
         : t.archive_requested_at
           ? 'archive'
           : t.stop_requested_at && !t.stop_confirmed_at
             ? 'stop'
             : null,
+    stopFailed: t.status !== 'archived' && !!t.stop_failure,
     starting: !t.opened_at && !['stopped', 'unknown', 'archived'].includes(t.status),
     resumePending: t.resume_pending,
     retryOpenAllowed: t.retry_open_allowed,
@@ -526,6 +528,7 @@ export function createThreadAPI(
     if (t.status === 'unknown')
       return { phase: 'failed', detail: t.status_reason || 'The device could not confirm the action.' }
     if (kind === 'stopThread' && t.stop_confirmed_at) return { phase: 'stopped', detail: t.status_reason || null }
+    if (t.stop_failure) return { phase: 'failed', detail: "The device didn't stop it." }
     return { phase: !t.node_online || !t.node_synced ? 'waitingDevice' : 'stopping', detail: t.status_reason || null }
   }
   async function action(kind: 'stopThread' | 'archiveThread' | 'resumeThread', threadId: string) {

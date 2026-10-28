@@ -109,6 +109,15 @@ export function threadView(
   if (thread.status === 'archived') {
     return view({ tone: 'hollow', label: 'Archived' }, 'archived', notice('Archived', ''), false)
   }
+  if (thread.stopFailed && thread.status === 'running') {
+    return view(
+      { tone: 'attention', label: 'Stop failed' },
+      'attention',
+      notice(`Couldn't stop ${agent}`, `${agent} may still be running.`, null, 'attention'),
+      true,
+      reachable,
+    )
+  }
   if (thread.pending === 'archive') {
     if (reachable) {
       return view(

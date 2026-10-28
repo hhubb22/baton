@@ -42,7 +42,6 @@ const styles = stylex.create({
   project: { flexShrink: 0, color: colors.text },
 })
 
-// @elyx design/screens/inbox.elyx#inbox
 export function InboxPage() {
   const inbox = useInbox()
   const projects = useProjects()

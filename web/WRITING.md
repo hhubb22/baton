@@ -1,6 +1,6 @@
 # Baton UX Writing 规范
 
-本规范定义 Baton 界面文案的交互原则、场景写法与语言格式约定，适用于界面设计（`design/`）与 Web 前端（`web/`）。
+本规范定义 Baton 界面文案的交互原则、场景写法与语言格式约定，适用于界面设计与 Web 前端（`web/`）。
 
 Baton 的底层跨越了中心服务、节点守护进程、项目代理和多个执行进程，但呈现在界面上的心智模型只保留三件事：
 
@@ -88,7 +88,7 @@ Baton 的底层跨越了中心服务、节点守护进程、项目代理和多�
 
 | 场景 | 推荐写法 | 避免写法 |
 |---|---|---|
-| 归档项目确认弹窗 | `Stops the project assistant and closes 1 open question. Chat, memory, and threads are kept.`<br>停止项目助手，并关闭 1 个待回答的问题。对话、记忆和 Thread 都保留。 | `The Project Agent will stop its current run and will not start again. 1 open attention item will be withdrawn as Project archived. Conversation history, memory, and Threads are preserved.` |
+| 归档项目确认弹窗 | `Stops the project assistant and its running threads, and closes 1 open question. Chat, memory, and thread history are kept.`<br>停止项目助手和运行中的 Thread，并关闭 1 个待回答的问题。对话、记忆和 Thread 记录都保留。 | `The Project Agent will stop its current run and will not start again. 1 open attention item will be withdrawn as Project archived. Conversation history, memory, and Threads are preserved.` |
 | 断开并移除电脑 | `Agents already running on it keep running locally.`<br>上面正在运行的助手会在本地继续执行。 | `Disconnects immediately; running Agents on an offline device will not be stopped.` |
 | 开启命令行执行权限 | 开关标签 `Allow project assistant to run commands`，下方一行 `Shell commands the project assistant runs itself. Threads set their own access.`；打开时弹窗确认，正文一句 `Commands run directly as kaken and can reach files outside your folders.`<br>只管项目助手自己的命令，Thread 的权限在新建时设置。打开前说清实际影响：以 kaken 身份直接运行，能访问文件夹之外的文件。 | `Project Agent can run arbitrary commands inside registered directories as kaken via zsh. Baton does not sandbox or inspect these commands.` |
 

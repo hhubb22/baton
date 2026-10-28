@@ -73,7 +73,6 @@ const statusLabels = {
 }
 const blankDraft: ItemDraft = { option: null, note: '', replying: false }
 
-// @elyx design/blocks/attention-card.elyx#attentionCard
 export function AttentionCard({
   item,
   onHandled,

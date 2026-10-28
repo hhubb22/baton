@@ -3,7 +3,7 @@ import { AttentionCard } from '../app/AttentionCard'
 import { InboxFeedback } from '../app/InboxFeedback'
 import { ProjectRecovery } from '../app/ProjectRecovery'
 import { ProjectMemory } from '../app/ProjectMemory'
-import { ProjectSettingsDialog } from '../app/ProjectSettingsDialog'
+import { ArchivedNotice, ProjectSettings } from '../app/ProjectSettings'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { FilePreview } from '../app/FilePreview'
@@ -719,18 +719,19 @@ function Overview({
 function DockBanner({
   project,
   devices,
+  threads,
   onViewDevices,
   onResume,
   resuming,
 }: {
   project: Project
   devices: Device[]
+  threads: Thread[]
   onViewDevices: () => void
   onResume: () => void
   resuming: boolean
 }) {
-  if (project.status === 'archived')
-    return <Banner icon="archive" title="Project archived" detail="Read-only. Threads keep running." />
+  if (project.status === 'archived') return <ArchivedNotice project={project} threads={threads} devices={devices} />
   if (project.status === 'paused') {
     return (
       <Banner
@@ -966,6 +967,18 @@ export function ProjectPage() {
           : null)
   const previewDevice = project.agent.deviceId ?? projectThreads[0]?.deviceId
 
+  if (search.settings)
+    return (
+      <div {...stylex.props(styles.layout)}>
+        <ProjectSettings
+          key={project.id}
+          project={project}
+          initialArchive={search.archive}
+          onBack={() => settings(false)}
+        />
+      </div>
+    )
+
   let conversation
   if (entries.isPending) {
     conversation = <p {...stylex.props(text.caption, styles.muted)}>Loading conversation…</p>
@@ -1094,6 +1107,7 @@ export function ProjectPage() {
             <DockBanner
               project={project}
               devices={allDevices}
+              threads={projectThreads}
               onViewDevices={() => void navigate({ to: '/devices' })}
               onResume={() => onStatus('active')}
               resuming={changeStatus.isPending}
@@ -1168,14 +1182,6 @@ export function ProjectPage() {
             }
           />
         )
-      )}
-      {search.settings && (
-        <ProjectSettingsDialog
-          key={project.id}
-          project={project}
-          initialArchive={search.archive}
-          onClose={() => settings(false)}
-        />
       )}
       {previewPath && previewDevice && (
         <FilePreview

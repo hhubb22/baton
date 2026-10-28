@@ -1,4 +1,4 @@
-// 由 scripts/tokens.mjs 从 design/tokens 生成，不要手改。修改设计稿后运行 `pnpm --dir web tokens`。
+// 设计 token：颜色、间距、圆角和尺寸。新颜色同时在 themes.ts 补上浅色和深色取值。
 import * as stylex from '@stylexjs/stylex'
 
 // 主题默认跟随系统；用户手动选择时由 themes.ts 覆盖。

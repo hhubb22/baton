@@ -172,7 +172,7 @@ node apps/batond/dist/batond.cjs project-runtime login-api-key anthropic < key-f
 
 ## 规格与设计文档
 
-- 界面设计与流程：[design/README.md](design/README.md)
+- 界面文案：[web/WRITING.md](web/WRITING.md)
 - 全局规格：[PRODUCT](specs/baton/PRODUCT.md)、[TECH](specs/baton/TECH.md)
 - Agent 适配：[PRODUCT](specs/agent-adapters/PRODUCT.md)、[TECH](specs/agent-adapters/TECH.md)
 - Project Agent：[PRODUCT](specs/project-agent/PRODUCT.md)、[TECH](specs/project-agent/TECH.md)

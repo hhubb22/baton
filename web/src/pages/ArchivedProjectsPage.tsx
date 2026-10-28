@@ -20,7 +20,6 @@ const styles = stylex.create({
   content: { display: 'flex', flexDirection: 'column', gap: '4px', minWidth: 0 },
 })
 
-// @elyx design/screens/project.elyx#archivedProjects
 export function ArchivedProjectsPage() {
   const projects = useProjects()
   const archived = (projects.data ?? [])

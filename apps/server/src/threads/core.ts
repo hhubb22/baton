@@ -18,6 +18,15 @@ export const decode = <S extends Schema.ConstraintDecoder<unknown>>(schema: S, v
   })
 export const uuid = randomUUID
 export type ThreadScope = { employeeId: string; projectId?: string }
+// 停止请求未确认、也没有待发的停止命令时，取最近一条停止命令的原因：设备拒绝或报告失败时用设备给的原因，
+// 恢复备份后冻结的命令为 stop_suspended。设备已接受、还在等停止报告时为 NULL。
+export const stopFailure = `CASE WHEN t.stop_requested_at IS NOT NULL AND t.stop_confirmed_at IS NULL
+    AND NOT EXISTS(SELECT 1 FROM thread_outbox s WHERE s.thread_id=t.id AND s.action='stop'
+      AND s.completed_at IS NULL AND s.next_attempt_at<>'infinity')
+  THEN (SELECT CASE WHEN s.completed_at IS NULL THEN 'stop_suspended'
+      WHEN s.completion->>'command_outcome'='succeeded' THEN NULL
+      ELSE COALESCE(NULLIF(s.completion->>'reason',''),'stop_failed') END
+    FROM thread_outbox s WHERE s.thread_id=t.id AND s.action='stop' ORDER BY s.id DESC LIMIT 1) END`
 export const readThread = (employee: string, id: string, lock = false, projectId?: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
@@ -29,7 +38,8 @@ export const readThread = (employee: string, id: string, lock = false, projectId
     const rows = yield* sql<{
       value: Thread
     }>`SELECT jsonb_strip_nulls(to_jsonb(t)-'request_hash'-'exec_wait_until') || jsonb_build_object(
-    'node_online',COALESCE(p.online,false),'node_synced',COALESCE(p.synced,false),'node_last_contact_at',p.last_contact_at) AS value
+    'node_online',COALESCE(p.online,false),'node_synced',COALESCE(p.synced,false),'node_last_contact_at',p.last_contact_at,
+    'stop_failure',${sql.literal(stopFailure)}) AS value
     FROM threads t LEFT JOIN node_presence p ON p.node_id=t.node_id AND p.employee_id=t.employee_id
     WHERE t.employee_id=${employee} AND t.id=${id} AND (${projectId ?? null}::uuid IS NULL OR t.project_id=${projectId ?? null})`
     if (!rows.length) return yield* Effect.fail(failure('not_found', 404))

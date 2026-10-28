@@ -1,12 +1,13 @@
 # Baton Web UI
 
-员工 Web UI，按 `design/` 的 Elyx 设计稿实现，文案遵循 `design/WRITING.md`。构建、开发和检查命令写在仓库根目录的 README。
+员工 Web UI，文案遵循 [WRITING.md](WRITING.md)。构建、开发和检查命令写在仓库根目录的 README。
 
 ## 目录
 
 | 目录 | 内容 |
 |---|---|
-| `src/theme` | 设计 token、字体、浅色和深色主题。`tokens.stylex.ts` 与 `themes.ts` 由 `pnpm tokens` 从 `design/tokens` 生成，不手改 |
+| `src/theme` | 设计 token、字体、浅色和深色主题；新颜色在 `tokens.stylex.ts` 声明，在 `themes.ts` 补上两套主题的取值 |
+| `src/assets` | 图标 SVG、品牌标识、favicon 和背景图；黑色单色图标在 `Icon` 里换成 `currentColor` |
 | `src/ui` | 通用组件：按钮、状态点、横幅、卡片、输入区、菜单、弹窗等 |
 | `src/app` | 路由、侧栏和页面框架，以及多个页面共用的 Thread 行、Thread 详情、事项卡片、受限 Markdown、项目设置与记忆编辑、文件预览和选择目录弹窗 |
 | `src/pages` | 各路由的页面 |
@@ -104,5 +105,3 @@ Memory 展示最新内容、版本、来源和时间，可添加、编辑并查�
 样式用 `stylex.create` 定义，颜色、间距、圆角和尺寸取自 `src/theme/tokens.stylex.ts`，文字样式取自 `src/theme/text.ts`。页面不写内联 `style`，因为生产环境的 CSP 只允许同源样式表；Base UI 通过 `CSPProvider disableStyleElements` 关闭运行时插入的 `<style>`。
 
 开发、构建和测试使用 Vite+。代码格式与推荐 lint 规则由根目录 `vite.config.ts` 中的 Oxfmt、Oxlint 配置统一管理；改完运行 `pnpm check`，单独格式化运行 `pnpm --dir web format`。依赖统一使用根工作区锁文件。Markdown 不参与格式化，表格沿用仓库其他文档的紧凑写法。
-
-修改 `design/tokens` 后运行 `pnpm --dir web tokens` 重新生成主题文件。

@@ -17,8 +17,7 @@ Baton 是跨设备 AI Agent 协同系统，由 TypeScript 中心服务（`apps/s
 | `upstream/t3code` | Baton 的 t3code fork submodule，固定提交；workspace 收录所需 `@t3tools/*` 包、`effect-acp` 和 `effect-codex-app-server` |
 | `runtimes/project-agent` | Project Agent 的模型、工具、压缩与恢复，通过 stdio JSON-RPC 与 batond 通信 |
 | `migrations` | 中心 PostgreSQL 的版本化 SQL 迁移，由 `apps/server/src/database.ts` 执行与核对 |
-| `web` | React + TypeScript + StyleX + Vite 前端，默认构建到 `apps/server/dist/web`，产物不提交 Git；界面文案遵循 `design/WRITING.md` |
-| `design` | 界面设计与文案规范；修改前先读 `design/AGENTS.md` |
+| `web` | React + TypeScript + StyleX + Vite 前端，默认构建到 `apps/server/dist/web`，产物不提交 Git；界面文案遵循 `web/WRITING.md` |
 | `specs` | 持久产品规格（`PRODUCT.md`）与技术设计（`TECH.md`） |
 
 ## 常用构建与验证命令

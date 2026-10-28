@@ -4,7 +4,6 @@ bin
 **/node_modules
 runtimes/project-agent/dist
 apps/*/dist
-design/renders
 **/.DS_Store
 *.log
 .env

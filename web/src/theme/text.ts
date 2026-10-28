@@ -2,7 +2,7 @@ import * as stylex from '@stylexjs/stylex'
 import { fonts, weight } from './base.stylex'
 import { colors } from './tokens.stylex'
 
-// 对应 design/foundations/typography.elyx 的文字样式。字距按 Inter 的字号规则收紧，caption 用等宽数字。
+// 界面文字样式。字距按 Inter 的字号规则收紧，caption 用等宽数字。
 export const text = stylex.create({
   body: { fontSize: '14px', lineHeight: 1.6, letterSpacing: '-0.006em', fontWeight: weight.regular },
   title: { fontSize: '20px', lineHeight: 1.4, letterSpacing: '-0.017em', fontWeight: weight.semibold },

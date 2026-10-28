@@ -651,6 +651,104 @@ describe('failure recovery and suspension', () => {
       }),
     30_000,
   )
+
+  it(
+    'archives a Project by requesting stops for its working threads while keeping records',
+    async () =>
+      withTestDatabase(async ({ run }) => {
+        const { employeeId: employee, nodeId: node } = await seedNode(run, {
+          online: false,
+          report: {
+            ...projectRuntimeReport,
+            agents: [
+              {
+                agent_type: 'cursor',
+                version: '1.0.35',
+                status: 'available',
+                models: [{ id: 'default', name: 'Default' }],
+                default_model: 'default',
+                capabilities: {
+                  create: true,
+                  queue: true,
+                  steer: false,
+                  stop: true,
+                  resume: true,
+                  switch_model: false,
+                },
+              },
+            ],
+          },
+        })
+        const p = await run(
+          projects.createProject(employee, {
+            title: 'Project',
+            goal: 'Goal',
+            provider: 'openai-codex',
+            model: 'gpt-5',
+          }),
+        )
+        const thread = async () =>
+          (
+            await run(
+              threads.create(employee, {
+                client_thread_id: randomUUID(),
+                node_id: node,
+                agent_type: 'cursor',
+                working_directory: '/workspace',
+                message: { client_message_id: randomUUID(), content: 'work' },
+              }),
+            )
+          ).thread.id
+        const working = await thread(),
+          idle = await thread(),
+          other = await thread()
+        await run(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            yield* sql`UPDATE threads SET project_id=${p.id} WHERE id IN (${working},${idle})`
+            yield* sql`UPDATE thread_messages SET status='sent' WHERE thread_id=${idle}`
+            yield* sql`UPDATE threads SET status='idle' WHERE id=${idle}`
+            yield* sql`INSERT INTO attention_requests(id,employee_id,project_id,agent_id,conversation_id,source,condition_type,condition_object_id,title,content)
+              VALUES(${randomUUID()},${employee},${p.id},${p.agent.id},${p.conversation.id},'system','project_needs_attention',${p.id},'Question','Body')`
+          }),
+        )
+        await run(projects.patchProject(employee, p.id, { status: 'archived' }))
+        await run(projects.patchProject(employee, p.id, { status: 'archived' }))
+        const rows = await run(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            return yield* sql<{
+              id: string
+              status: string
+              stop_requested: boolean
+              stop_confirmed: boolean
+              stops: number
+              messages: number
+            }>`SELECT t.id,t.status,t.stop_requested_at IS NOT NULL AS stop_requested,t.stop_confirmed_at IS NOT NULL AS stop_confirmed,
+              (SELECT count(*)::int FROM thread_outbox o WHERE o.thread_id=t.id AND o.action='stop') AS stops,
+              (SELECT count(*)::int FROM thread_messages m WHERE m.thread_id=t.id) AS messages
+              FROM threads t WHERE t.id IN (${working},${idle},${other})`
+          }),
+        )
+        const requests = await run(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            return yield* sql<{ state: string }>`SELECT state FROM attention_requests WHERE project_id=${p.id}`
+          }),
+        )
+        expect(requests).toEqual([{ state: 'withdrawn' }])
+        const byId = Object.fromEntries(rows.map((row) => [row.id, row]))
+        // 设备离线时停止请求保存为待确认，Thread 记录与消息保留
+        expect(byId[working]).toMatchObject({ stop_requested: true, stop_confirmed: false, stops: 1, messages: 1 })
+        expect(byId[working]!.status).not.toBe('stopped')
+        expect(byId[idle]).toMatchObject({ status: 'idle', stop_requested: false, stops: 0, messages: 1 })
+        expect(byId[other]).toMatchObject({ stop_requested: false, stops: 0 })
+        const archived = await run(projects.getProject(employee, p.id))
+        expect(archived.status).toBe('archived')
+        expect((await run(projects.projectStatus(employee, p.id))).state).toBe('archived')
+      }),
+    30_000,
+  )
 })
 
 describe('runtime frame budgets', () => {
