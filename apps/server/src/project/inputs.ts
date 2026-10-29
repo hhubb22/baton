@@ -5,7 +5,6 @@ import { activeInputSQL, checkPayloadSize, projectDecode, projectError } from '.
 
 const ProjectInputType = Schema.Literals([
   'user_message',
-  'attention_answer',
   'turn_ended',
   'thread_message_failed',
   'thread_reply',
@@ -24,7 +23,6 @@ export const insertProjectInput = Effect.fn('insertProjectInput')(function* (
   const command = yield* projectDecode(Schema.Record(Schema.String, Schema.Unknown), payload)
   const limits = {
     user_message: 72,
-    attention_answer: 32,
     turn_ended: 'command_result' in command ? 72 : 4,
     thread_message_failed: 40,
     thread_reply: 40,

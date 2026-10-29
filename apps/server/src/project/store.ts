@@ -6,6 +6,8 @@ import { normalizeProjectEvent } from './message-reference.ts'
 import { AppError } from '../errors.ts'
 import { dbError, type DatabaseEffect } from '../database.ts'
 import { notificationCause, saveProjectNotification } from '../desktop-notifications.ts'
+import { latestReplySeqSQL, projectAttentionSQL } from './attention.ts'
+export { activeInputSQL, recoveryWorkSQL } from './attention.ts'
 
 export const projectError = (code = 'conflict', status = 409) => new AppError(status, code)
 export const projectTransaction = <A>(
@@ -25,6 +27,8 @@ export const decodeProjectEvent = (value: unknown) =>
 export const jsonBytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value))
 export const projectSelection = (sql: SqlClient.SqlClient) => sql`jsonb_build_object(
  'id',p.id,'title',p.title,'emoji',p.emoji,'goal',p.goal,'memory_embedding',p.memory_embedding,'status',p.status,'version',p.version,'created_at',p.created_at,'updated_at',p.updated_at,
+ 'attention',${projectAttentionSQL(sql)},'attention_reason',CASE WHEN p.status='active' AND c.failure_count>=3 THEN c.attention_reason ELSE NULL END,
+ 'latest_reply_seq',${latestReplySeqSQL(sql)},'read_reply_seq',c.read_reply_seq,
  'agent',jsonb_strip_nulls(jsonb_build_object('id',a.id,'provider',a.provider,'model',a.model,'source_node_id',a.source_node_id)),
  'conversation',jsonb_build_object('id',c.id,'state',c.state,'last_seq',c.next_seq-1))`
 export const readProject = Effect.fn('readProject')(function* (employee: string, id: string) {
@@ -116,13 +120,6 @@ export const releaseProjectRun = Effect.fn('releaseProjectRun')(function* (
     )
   }
 })
-export const activeInputSQL = (sql: SqlClient.SqlClient) =>
-  sql`('user_message','attention_answer','turn_ended','thread_message_failed')`
-export const recoveryWorkSQL = (sql: SqlClient.SqlClient) => sql`(
- EXISTS(SELECT 1 FROM project_agent_input_queue q WHERE q.agent_id=a.id AND delivered_seq IS NULL AND source_type IN ${activeInputSQL(sql)})
- OR EXISTS(SELECT 1 FROM conversation_events e WHERE e.conversation_id=c.id
- AND e.seq=(SELECT max(t.seq) FROM conversation_events t WHERE t.conversation_id=c.id AND t.kind<>'compaction')
- AND (e.kind IN ('input','tool_result') OR (e.kind='assistant' AND jsonb_path_exists(e.payload,'$.message.content[*] ? (@.type == "toolCall")')))))`
 export const boundedProjectText = (text: string, limit: number): string => {
   const bytes = Buffer.from(text)
   if (bytes.length <= limit) return text

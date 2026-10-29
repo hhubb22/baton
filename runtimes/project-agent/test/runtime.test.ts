@@ -517,7 +517,6 @@ test('Thread 变化通知可无 version，停止结果由中心保存后返回�
   assert.match(backend.events.find((event) => event.kind === 'tool_result')!.payload.message.content[0].text, /stopped/)
   assert.equal(fixture.faux.state.callCount, 2)
 })
-
 test('等待被停止或租约丢失时直接退出，不写工具结果或 finish', async () => {
   for (const phase of ['poll_wake', 'wait_tool']) {
     const backend = new LocalWaitBackend()
@@ -1042,35 +1041,5 @@ test('Thread 工具按 assistant 中的顺序保存参数和结果，再继续�
     calls.map((_, i) => i + 2),
   )
   assert.equal(backend.effects, calls.length)
-  assert.equal(fixture.faux.state.callCount, 2)
-})
-
-test('模型创建事项后继续调用 Inbox 工具，参数和结果经中心保存', async () => {
-  const backend = new Backend()
-  const calls = [
-    fauxToolCall(
-      'inbox.ask',
-      {
-        title: '请决定',
-        thread_id: 'thread-1',
-        content: '[证据](https://example.org)',
-        options: [{ id: 'go', label: '继续' }],
-        allow_text: true,
-      },
-      { id: 'ask' },
-    ),
-    fauxToolCall('inbox.list', {}, { id: 'list' }),
-    fauxToolCall('inbox.get', { request_id: 'request-1' }, { id: 'get' }),
-    fauxToolCall('inbox.withdraw', { request_id: 'request-1', reason: '情况变化' }, { id: 'withdraw' }),
-  ]
-  const fixture = setup(backend, [() => fauxAssistantMessage(calls), () => assistant()])
-  await fixture.runtime.start()
-  const saved = backend.events.find((event) => event.kind === 'assistant')
-  assert.deepEqual(saved?.payload.message.content, calls)
-  assert.deepEqual(
-    backend.events.filter((event) => event.kind === 'tool_result').map((event) => event.payload.message.toolName),
-    ['inbox.ask', 'inbox.list', 'inbox.get', 'inbox.withdraw'],
-  )
-  assert.equal(backend.effects, 4)
   assert.equal(fixture.faux.state.callCount, 2)
 })

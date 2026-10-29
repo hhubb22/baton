@@ -203,39 +203,4 @@ export const toolDefinitions = [
       timeout_seconds: Type.Optional(Type.Integer({ minimum: 1, default: 7200 })),
     }),
   },
-  {
-    name: 'inbox.ask',
-    description:
-      '创建请用户处理的事项，可通过 thread_id 关联本 Project 的 Thread，立即返回事项 ID。展示内容为不超过 32 KiB 的 Markdown，链接允许 http、https、mailto，HTML 和图片不渲染。相同待处理事项会复用；10 项起提示整理，仍可创建。建议最多 5 个选项，可展开至 50 个，选项 JSON 总计不超过 16 KiB；没有选项时必须允许文字回复。',
-    parameters: obj({
-      title: str(),
-      content: str(),
-      options: Type.Array(
-        obj({
-          id: str(),
-          label: str(),
-          description: opt(),
-          recommended: Type.Optional(Type.Boolean()),
-        }),
-        { maxItems: 50 },
-      ),
-      allow_text: Type.Boolean(),
-      thread_id: opt(),
-    }),
-  },
-  {
-    name: 'inbox.list',
-    description: '列出本 Project 的事项及其状态。',
-    parameters: obj({ after_id: opt(), ...page }),
-  },
-  {
-    name: 'inbox.get',
-    description: '读取本 Project 的完整事项、关联 Thread ID 和处理结果。',
-    parameters: obj({ request_id: str(), ...page }),
-  },
-  {
-    name: 'inbox.withdraw',
-    description: '撤回本 Project 的待处理 Agent 事项，必须说明原因；已处理时返回当前状态和处理结果。系统事项不能撤回。',
-    parameters: obj({ request_id: str(), reason: str() }),
-  },
 ]

@@ -6,6 +6,7 @@ import type * as P from '@baton/protocol'
 import { seedNode, withTestDatabase, type TestDatabase } from '../testing/database.ts'
 import * as threads from './index.ts'
 import { activitySnapshot, replayNotifications } from '../desktop-notifications.ts'
+import { createProject } from '../project/projects.ts'
 
 type Run = TestDatabase['run']
 const query = (statement: string, ...parameters: ReadonlyArray<string | number | boolean>) =>
@@ -252,6 +253,13 @@ it('counts each waiting Thread once across multiple questions and clears answere
         ),
       )
     expect((await run(activitySnapshot(f.employeeId))).waiting_count).toBe(1)
+    const project = await run(
+      createProject(f.employeeId, { title: 'Failing', goal: '', provider: 'openai-codex', model: 'gpt-5' }),
+    )
+    await run(
+      query("UPDATE conversations SET failure_count=3,attention_reason='failed' WHERE id=$1", project.conversation.id),
+    )
+    expect(await run(activitySnapshot(f.employeeId))).toMatchObject({ running_count: 1, waiting_count: 1 })
     await run(threads.answer(f.employeeId, f.thread.id, { request_id: 'first', decision: 'cancel' }))
     expect((await run(activitySnapshot(f.employeeId))).waiting_count).toBe(1)
     await run(threads.answer(f.employeeId, f.thread.id, { request_id: 'second', decision: 'cancel' }))

@@ -10,7 +10,6 @@ const reference = {
   deviceId: null,
   path: '/workspace/source.ts',
   lines: { from: 1, to: 2 },
-  itemId: null,
   excerpt: 'selected code',
   bytes: 13,
 }

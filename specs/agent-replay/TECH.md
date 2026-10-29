@@ -36,7 +36,7 @@ Kiro 转录说明见 [fork README](../../upstream/t3code/packages/provider-acp-r
 | Worker | `apps/batond/src/worker/index.test.ts` | 持久回执、intent 不重发、控制代次、停止证据、回复与 outbox、失败后继续队列 |
 | 进程所有权 | `apps/batond/src/agent-host/reclaim.integration.test.ts`、`src/agents/kiro/reclaim.integration.test.ts`、`src/platform/host-process-group.integration.test.ts` | 真实本地子孙进程、独立进程组登记、正常关闭及强杀后的回收 |
 | 远程主链路 | `e2e/src/remote.integration.test.ts`、`provider-agents.integration.test.ts` | 中心、节点、独立 Worker，经网页 API 发送、回复、停止和恢复 |
-| Project | `e2e/src/project.integration.test.ts` 与 Runtime 包测试 | 本地模型替身贯穿主对话、工具、Thread、事项、记忆、租约与恢复 |
+| Project | `e2e/src/project.integration.test.ts` 与 Runtime 包测试 | 本地模型替身贯穿主对话、工具、Thread、记忆、租约与恢复 |
 
 跨 app 测试通过声明的 workspace 导出使用节点转录辅助模块。`e2e/src/testing/provider-replay-worker.ts` 分派 Cursor、Pi、Codex、Kiro 的真实 Worker 与 provider host 回放。Cursor 使用上游 `provider_thread_resume.ndjson`，保留原生身份与消息，应用节点测试层的运行提示和 sandbox 转换，再按 host 生命周期切段。remote 与 Project 场景使用 `e2e/src/testing/replay-worker.ts` 的本地 ThreadAgent 替身，验证协调、存储与恢复，不经过 provider host。数据库中断、ACK 丢失、中心与节点重启使用真实本机 PostgreSQL、HTTP、WebSocket、SQLite 和 IPC。
 

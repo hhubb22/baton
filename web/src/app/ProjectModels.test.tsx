@@ -9,7 +9,7 @@ import type { Device, Project } from '../data/types'
 import { App } from './App'
 import { createAppRouter } from './router'
 
-function setup(path = '/inbox', configure?: (devices: Device[]) => void) {
+function setup(path = '/threads', configure?: (devices: Device[]) => void) {
   const world = createWorld('normal', Date.now())
   for (const device of world.devices) device.subscriptions = []
   configure?.(world.devices)
@@ -63,7 +63,7 @@ beforeEach(() => localStorage.clear())
 describe('device project model catalogs', () => {
   it('merges reported models across devices, deduplicates them and creates with the chosen real model', async () => {
     const user = userEvent.setup()
-    const { createProject, router } = setup('/inbox', reportedModels)
+    const { createProject, router } = setup('/threads', reportedModels)
     const dialog = await newProject(user)
     const model = within(dialog).getByLabelText('模型')
     expect(model).toHaveValue('gpt-5.4')
@@ -90,7 +90,7 @@ describe('device project model catalogs', () => {
 
   it('includes the selected project emoji when creating a project', async () => {
     const user = userEvent.setup()
-    const { createProject } = setup('/inbox', reportedModels)
+    const { createProject } = setup('/threads', reportedModels)
     const dialog = await newProject(user)
     await user.type(within(dialog).getByLabelText('名称'), 'Emoji project')
     await user.click(within(dialog).getByRole('button', { name: '🚀' }))
@@ -100,7 +100,7 @@ describe('device project model catalogs', () => {
 
   it('offers device guidance and explicit manual entry when no device is registered', async () => {
     const user = userEvent.setup()
-    const { createProject } = setup('/inbox', (devices) => devices.splice(0))
+    const { createProject } = setup('/threads', (devices) => devices.splice(0))
     const dialog = await newProject(user)
     expect(within(dialog).getByText(/设备上没有可用模型/)).toBeInTheDocument()
     expect(within(dialog).getByRole('link', { name: '连接设备' })).toHaveAttribute('href', '/devices?connect=true')
@@ -123,7 +123,7 @@ describe('device project model catalogs', () => {
 
   it('shows empty catalogs without mock models when a device has not reported any', async () => {
     const user = userEvent.setup()
-    setup('/inbox', (devices) => {
+    setup('/threads', (devices) => {
       devices[0].hasRuntime = true
       devices[0].subscriptions = [{ provider: 'ChatGPT', signedIn: true }]
     })
@@ -137,7 +137,7 @@ describe('device project model catalogs', () => {
 
   it('allows reported models from signed-out devices and explains that messages will wait', async () => {
     const user = userEvent.setup()
-    setup('/inbox', (devices) => {
+    setup('/threads', (devices) => {
       devices[0].hasRuntime = true
       devices[0].subscriptions = [{ provider: 'xAI', signedIn: false, models: ['grok-4'] }]
     })

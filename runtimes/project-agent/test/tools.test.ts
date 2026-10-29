@@ -12,20 +12,7 @@ const create = {
   working_directory: '/repo',
   message: '修复登录并运行测试',
 }
-const ask = {
-  title: '请决定',
-  content: '[详情](https://example.org)',
-  options: [{ id: 'go', label: '继续', recommended: true }],
-  allow_text: true,
-}
-
-test('Inbox 工具允许超过五个选项并保留数量预算', () => {
-  const options = Array.from({ length: 50 }, (_, index) => ({ id: `option-${index}`, label: `选项 ${index}` }))
-  assert.deepEqual(validate('inbox.ask', { ...ask, options }), { ...ask, options })
-  assert.throws(() => validate('inbox.ask', { ...ask, options: [...options, { id: 'extra', label: '更多' }] }))
-})
-
-test('固定工具顺序与 Thread、Inbox 契约一致', () => {
+test('固定工具顺序与 Thread 契约一致', () => {
   assert.deepEqual(
     toolDefinitions.map((tool) => tool.name),
     [
@@ -49,10 +36,6 @@ test('固定工具顺序与 Thread、Inbox 契约一致', () => {
       'threads.read',
       'threads.trace',
       'nodes.exec',
-      'inbox.ask',
-      'inbox.list',
-      'inbox.get',
-      'inbox.withdraw',
     ],
   )
   for (const [name, args] of [
@@ -70,8 +53,6 @@ test('固定工具顺序与 Thread、Inbox 契约一致', () => {
     ['threads.read', { thread_id: 'thread-1', after_turn: 0, through_turn: 1, offset: 0, max_bytes: 32768 }],
     ['threads.trace', { thread_id: 'thread-1', worker_turn_seq: 1 }],
     ['threads.trace', { thread_id: 'thread-1', worker_turn_seq: 1, cursor: 'page-2', offset: 1, max_bytes: 32768 }],
-    ['inbox.ask', ask],
-    ['inbox.ask', { ...ask, thread_id: 'thread-1' }],
   ] as const) {
     assert.deepEqual(validate(name, args), args)
   }
@@ -95,8 +76,6 @@ test('Thread 工具拒绝旧参数、缺少必填字段及无效模式和读取�
     ['threads.trace', { thread_id: 'thread-1', worker_turn_seq: 0 }],
     ['threads.trace', { thread_id: 'thread-1', worker_turn_seq: 1, max_bytes: 32769 }],
     ['threads.trace', { thread_id: 'thread-1', worker_turn_seq: 1, employee_id: 'other' }],
-    ['inbox.ask', { ...ask, summary: '旧摘要' }],
-    ['inbox.ask', { ...ask, task_id: 'task-1' }],
   ] as const) {
     assert.throws(() => validate(name, args), name)
   }

@@ -18,7 +18,6 @@ import * as Auth from '../auth.ts'
 import * as Nodes from '../nodes.ts'
 import * as Threads from '../threads/index.ts'
 import * as Projects from '../project/projects.ts'
-import * as Inbox from '../inbox.ts'
 import { AppError } from '../errors.ts'
 import type { HTTPOptions } from './options.ts'
 
@@ -50,7 +49,6 @@ export const httpFailure = (error: unknown, requestId: string): HttpFailure => {
     message: appError.message,
     request_id: requestId,
     ...(status === 409 ? appError.details : {}),
-    ...(status === 409 && appError.code === 'inbox_conflict' ? { error: appError.code } : {}),
   }
 }
 export const httpBusiness = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -140,12 +138,6 @@ export const httpSecurity = () =>
                       Effect.mapError(() => new AppError(400, 'invalid_request', '请求格式无效')),
                     )
                     yield* Projects.getProject(session.employee.id, id)
-                  }
-                  if (endpoint.params && 'requestId' in params) {
-                    const id = yield* Schema.decodeUnknownEffect(UUID)(params.requestId).pipe(
-                      Effect.mapError(() => new AppError(400, 'invalid_request', '请求格式无效')),
-                    )
-                    yield* Inbox.getAttentionRequest(session.employee.id, id)
                   }
                   if (endpoint.payload.size > 0) yield* checkJson
                   const seen = new Set<string>()

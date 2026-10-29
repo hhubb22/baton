@@ -7,6 +7,33 @@ import { desktopActivity, notificationScope, relayDesktopNotifications } from '.
 import { createMockClient } from './mock/client'
 import { createDesktopBridge } from '../test/desktop'
 
+it('counts projects needing attention alongside waiting threads', async () => {
+  const client = createMockClient('normal')
+  const thread = (await client.listThreads())[0]!
+  const project = (await client.listProjects())[0]!
+  const waiting = {
+    ...thread,
+    status: 'idle' as const,
+    pendingQuestions: [{ request_id: 'q', kind: 'user_input' as const, questions: [] }],
+  }
+  const activity = desktopActivity(
+    [waiting],
+    [
+      { ...project, id: 'a', latestReplySeq: 2, readReplySeq: 1 },
+      { ...project, id: 'b', latestReplySeq: 3, readReplySeq: 2, attention: 'failing' },
+      { ...project, id: 'c', latestReplySeq: 2, readReplySeq: 2 },
+    ],
+  )
+  expect(activity.waiting).toBe(3)
+  expect(activity.threads.map((entry) => entry.id)).toEqual([thread.id])
+})
+
+it('keeps a newer reply unread when an older reply is marked read', async () => {
+  const client = createMockClient('normal')
+  await client.markProjectRead('prj-compat', 2)
+  expect(await client.getProject('prj-compat')).toMatchObject({ latestReplySeq: 3, readReplySeq: 2 })
+})
+
 const event = (cursor: string): BrowserNotification => ({
   type: 'notification',
   event_id: `00000000-0000-4000-8000-${cursor.padStart(12, '0').slice(-12)}`,
@@ -155,68 +182,4 @@ describe('desktop notification relay', () => {
     await Promise.resolve()
     expect(f.bridge.deliverNotifications).not.toHaveBeenCalled()
   })
-})
-
-it('bounds tray labels to 512 while relaying 4096-character notification titles unchanged', async () => {
-  const client = createMockClient('normal')
-  const thread = (await client.listThreads())[0]!
-  const question = (await client.listInbox()).find((item) => item.kind === 'question')!
-  const title = 't'.repeat(1000)
-  expect(
-    desktopActivity([{ ...thread, title }], [{ ...question, status: 'pending', threadId: thread.id }]).threads,
-  ).toEqual([{ id: thread.id, title: title.slice(0, 512) }])
-  const f = relayFixture()
-  const notification = { ...event('1'), title: 'n'.repeat(4096), body: 'b'.repeat(4096) }
-  f.replay.mockResolvedValueOnce({ events: [notification], cursor: '1', has_more: false })
-  const stop = f.start()
-  await waitFor(() =>
-    expect(f.bridge.deliverNotifications).toHaveBeenCalledWith({ scope, events: [notification], cursor: '1' }),
-  )
-  stop()
-})
-
-it('counts distinct waiting threads on every device, including project threads, and caps the menu at five', async () => {
-  const client = createMockClient('normal')
-  const base = (await client.listThreads())[0]!
-  const item = (await client.listInbox()).find((entry) => entry.kind === 'question')!
-  const threads = Array.from({ length: 7 }, (_, index) => ({
-    ...base,
-    id: `thread-${index}`,
-    deviceId: `device-${index}`,
-    projectId: index % 2 ? 'project' : null,
-    status: index < 2 ? ('running' as const) : ('idle' as const),
-    pendingQuestions: [{ request_id: `request-${index}`, kind: 'user_input' as const, questions: [] }],
-    updatedAt: index,
-  }))
-  const inbox = [
-    { ...item, id: 'one', status: 'pending' as const, threadId: 'thread-0' },
-    { ...item, id: 'two', status: 'pending' as const, threadId: 'thread-0' },
-    { ...item, id: 'project-only', status: 'pending' as const, threadId: null },
-    { ...item, id: 'system', kind: 'system' as const, status: 'pending' as const, threadId: 'ignored' },
-  ]
-  const archived = {
-    ...base,
-    id: 'archived',
-    status: 'archived' as const,
-    pendingQuestions: threads[0]!.pendingQuestions,
-  }
-  const activity = desktopActivity([...threads, archived], inbox)
-  expect(activity.running).toBe(2)
-  expect(activity.waiting).toBe(7)
-  expect(activity.threads.map((thread) => thread.id)).toEqual([
-    'thread-6',
-    'thread-5',
-    'thread-4',
-    'thread-3',
-    'thread-2',
-  ])
-  expect(
-    desktopActivity(
-      [{ ...base, id: 'only-inbox', pendingQuestions: [] }],
-      [
-        { ...item, status: 'pending', threadId: 'only-inbox' },
-        { ...item, status: 'answered', threadId: 'other' },
-      ],
-    ).waiting,
-  ).toBe(1)
 })

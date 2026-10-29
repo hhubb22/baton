@@ -1,7 +1,5 @@
 import * as stylex from '@stylexjs/stylex'
 import { SyncStatus } from '../app/SyncStatus'
-import { AttentionCard } from '../app/AttentionCard'
-import { InboxFeedback } from '../app/InboxFeedback'
 import { ProjectRecovery } from '../app/ProjectRecovery'
 import { ProjectMemory } from '../app/ProjectMemory'
 import { ArchivedNotice, ProjectSettings } from '../app/ProjectSettings'
@@ -34,7 +32,6 @@ import { desktopCapability, useDesktopStatus, useLocalDesktop } from '../data/de
 import {
   assistantWait,
   deviceConnectionView,
-  pendingInbox,
   projectAgentStatus,
   relativeTime,
   runTimer,
@@ -45,10 +42,10 @@ import {
   keys,
   useClient,
   useDevices,
-  useInbox,
   useProjectEntries,
   useProjectHistory,
   useProjectMemory,
+  useRetryProject,
   useProjects,
   useSendProjectMessage,
   useSetProjectStatus,
@@ -60,7 +57,6 @@ import type {
   Delivery,
   Device,
   EntryThreads,
-  InboxItem,
   MemoryNote,
   ProcessStep,
   Project,
@@ -653,20 +649,16 @@ function Overview({
   project,
   devices,
   threads,
-  pending,
   memory,
   onOpenThread,
-  onOpenInbox,
   tab,
   onTabChange,
 }: {
   project: Project
   devices: Device[]
   threads: Thread[]
-  pending: InboxItem[]
   memory: MemoryNote[] | undefined
   onOpenThread: (threadId: string) => void
-  onOpenInbox: () => void
   tab: 'threads' | 'memory'
   onTabChange: (tab: 'threads' | 'memory') => void
 }) {
@@ -760,22 +752,7 @@ function Overview({
       />
       {tab === 'threads' && (
         <>
-          {live.length === 0 && pending.length === 0 && <p {...stylex.props(text.small, styles.faint)}>暂无对话</p>}
-          {pending.length > 0 && (
-            <section aria-label="待决定" {...stylex.props(styles.group)}>
-              <h3 {...stylex.props(text.captionMedium, styles.groupLabel)}>待决定</h3>
-              {pending.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={onOpenInbox}
-                  {...stylex.props(text.small, styles.overviewRow, focusRing.ring)}
-                >
-                  <span {...stylex.props(styles.threadTitle, text.truncate)}>{item.title}</span>
-                </button>
-              ))}
-            </section>
-          )}
+          {live.length === 0 && <p {...stylex.props(text.small, styles.faint)}>暂无对话</p>}
           {groups
             .filter((group) => group.threads.length > 0)
             .map((group) => (
@@ -828,6 +805,8 @@ function DockBanner({
   onViewDevices,
   onResume,
   resuming,
+  onRetry,
+  retrying,
 }: {
   project: Project
   devices: Device[]
@@ -835,6 +814,8 @@ function DockBanner({
   onViewDevices: () => void
   onResume: () => void
   resuming: boolean
+  onRetry: () => void
+  retrying: boolean
 }) {
   if (project.status === 'archived') return <ArchivedNotice project={project} threads={threads} devices={devices} />
   if (project.status === 'paused') {
@@ -851,6 +832,19 @@ function DockBanner({
       />
     )
   }
+  if (project.attention === 'failing')
+    return (
+      <Banner
+        attention
+        icon="alert"
+        title={project.attentionReason || '项目助手遇到问题'}
+        action={
+          <Button small disabled={retrying} onClick={onRetry}>
+            {retrying ? '正在重试…' : '重试'}
+          </Button>
+        }
+      />
+    )
   switch (project.agent.state) {
     case 'blocked':
       return <ProjectRecovery project={project} />
@@ -914,12 +908,12 @@ export function ProjectPage() {
   const projects = useProjects()
   const devices = useDevices()
   const threads = useThreads()
-  const inbox = useInbox()
   const entries = useProjectEntries(projectId)
   const history = useProjectHistory(projectId)
   const memory = useProjectMemory(projectId)
   const send = useSendProjectMessage()
   const stop = useStopProjectRun()
+  const retry = useRetryProject()
   const changeStatus = useSetProjectStatus()
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const timelineRef = useRef<HTMLDivElement>(null)
@@ -966,6 +960,46 @@ export function ProjectPage() {
   const now = useNow(60_000)
   const list = entries.data ?? []
   const project = projects.data?.find((item) => item.id === projectId)
+  useEffect(() => {
+    const timeline = timelineRef.current
+    const seq = project?.latestReplySeq
+    if (!timeline || search.settings || !seq || seq <= project.readReplySeq || entries.isFetching) return
+    const reply = entries.data?.find((entry) => entry.kind === 'assistant' && entry.sourceSeq === seq)
+    if (!reply) return
+    let pending = false
+    const check = () => {
+      if (pending || document.visibilityState !== 'visible') return
+      if (timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop > 32) return
+      const element = Array.from(timeline.querySelectorAll('[data-entry-id]')).find(
+        (candidate) => candidate.getAttribute('data-entry-id') === reply.id,
+      )
+      if (!element) return
+      const bounds = element.getBoundingClientRect()
+      const area = timeline.getBoundingClientRect()
+      if (bounds.bottom > area.bottom || bounds.bottom <= area.top || bounds.bottom > window.innerHeight) return
+      pending = true
+      void client.markProjectRead(projectId, seq).catch(() => {
+        pending = false
+      })
+    }
+    timeline.addEventListener('scroll', check)
+    document.addEventListener('visibilitychange', check)
+    window.addEventListener('resize', check)
+    check()
+    return () => {
+      timeline.removeEventListener('scroll', check)
+      document.removeEventListener('visibilitychange', check)
+      window.removeEventListener('resize', check)
+    }
+  }, [
+    client,
+    entries.data,
+    entries.isFetching,
+    project?.latestReplySeq,
+    project?.readReplySeq,
+    projectId,
+    search.settings,
+  ])
   const preview = project?.agent.preview
   const [previousPreview, setPreviousPreview] = useState<{
     projectId: string
@@ -1236,7 +1270,6 @@ export function ProjectPage() {
       }),
     })
   const status = projectAgentStatus(project, allDevices)
-  const pending = pendingInbox(inbox.data ?? [], project.id)
   const waitingMessages = list.filter(
     (entry) => entry.kind === 'user' && (entry.delivery === 'waitingDevice' || entry.delivery === 'saved'),
   ).length
@@ -1248,6 +1281,7 @@ export function ProjectPage() {
     dockHidden &&
     project.status === 'active' &&
     !['blocked', 'waitingDevice', 'stopping', 'stopped'].includes(project.agent.state) &&
+    project.attention !== 'failing' &&
     !error
   const statusLine =
     error ??
@@ -1281,12 +1315,7 @@ export function ProjectPage() {
         }
       />
     )
-  } else if (
-    !livePreview &&
-    interruptedPreview?.projectId !== projectId &&
-    list.length === 0 &&
-    !(inbox.data ?? []).some((item) => item.projectId === projectId)
-  ) {
+  } else if (!livePreview && interruptedPreview?.projectId !== projectId && list.length === 0) {
     conversation = <EmptyConversation project={project} />
   } else {
     const anchorAt = (seq: number) =>
@@ -1302,12 +1331,8 @@ export function ProjectPage() {
             ? anchorAt(entry.streamAnchor) + 0.1
             : entry.createdAt,
         entry,
-        item: null,
         streaming: false,
       })),
-      ...(inbox.data ?? [])
-        .filter((item) => item.projectId === projectId)
-        .map((item) => ({ id: item.id, at: item.createdAt, entry: null, item, streaming: false })),
       ...(livePreview
         ? [
             {
@@ -1322,7 +1347,6 @@ export function ProjectPage() {
                 threads: null,
                 createdAt: previewAt,
               },
-              item: null,
               streaming: !!preview,
             },
           ]
@@ -1339,34 +1363,29 @@ export function ProjectPage() {
                 body: interruptedPreview.pending ? '上一条回复的保存状态待确认。' : '回复中断，内容未保存。',
                 createdAt: anchorAt(interruptedPreview.afterSeq),
               },
-              item: null,
               streaming: false,
             },
           ]
         : []),
     ].sort((a, b) => a.at - b.at || a.id.localeCompare(b.id))
-    conversation = timeline.map(({ id, at, entry, item, streaming }, index) => {
+    conversation = timeline.map(({ id, at, entry, streaming }, index) => {
       const previous = timeline[index - 1]
       const day = dayLabel(at, now)
       return (
-        <div key={id} {...stylex.props(styles.assistant)}>
+        <div key={id} data-entry-id={entry?.id} {...stylex.props(styles.assistant)}>
           {(!previous || dayLabel(previous.at, now) !== day) && (
             <span {...stylex.props(text.caption, styles.day)}>{day}</span>
           )}
-          {item ? (
-            <AttentionCard item={item} inProject />
-          ) : (
-            entry && (
-              <Entry
-                entry={entry}
-                threads={projectThreads}
-                devices={allDevices}
-                openThread={search.thread}
-                onOpenThread={onOpenThread}
-                onOpenPath={setPreviewPath}
-                streaming={streaming}
-              />
-            )
+          {entry && (
+            <Entry
+              entry={entry}
+              threads={projectThreads}
+              devices={allDevices}
+              openThread={search.thread}
+              onOpenThread={onOpenThread}
+              onOpenPath={setPreviewPath}
+              streaming={streaming}
+            />
           )}
           {streaming && livePreview?.truncated && (
             <span {...stylex.props(text.caption, styles.faint)}>预览已截断，正在等待完整回复。</span>
@@ -1388,7 +1407,7 @@ export function ProjectPage() {
         }
         status={
           <>
-            {(status.label !== '空闲' || waitingMessages > 0) && (
+            {project.attention !== 'failing' && (status.label !== '空闲' || waitingMessages > 0) && (
               <span {...stylex.props(text.caption, styles.headerStatus, headerTone(status.tone))}>
                 {status.label}
                 {waitingMessages > 0 && ` · ${waitingMessages} 条消息待发送`}
@@ -1474,7 +1493,6 @@ export function ProjectPage() {
             {...stylex.props(styles.timeline)}
           >
             <div {...stylex.props(styles.entries)}>
-              <InboxFeedback />
               {conversation}
               {(running || stopping) && project.agent.activity && (
                 <span role="status" {...stylex.props(text.small, styles.activity)}>
@@ -1497,13 +1515,14 @@ export function ProjectPage() {
                 onViewDevices={() => void navigate({ to: '/devices' })}
                 onResume={() => onStatus('active')}
                 resuming={changeStatus.isPending}
+                onRetry={() => retry.mutate(project.id, { onError: () => setError('无法重试，请再试一次。') })}
+                retrying={retry.isPending}
               />
             </div>
-            {search.thread && (counts.running > 0 || counts.waiting > 0 || pending.length > 0) && (
+            {search.thread && (counts.running > 0 || counts.waiting > 0) && (
               <div aria-label="项目对话" {...stylex.props(styles.chips)}>
                 {counts.running > 0 && <StatusChip tone="info" label="运行中" count={counts.running} />}
                 {counts.waiting > 0 && <StatusChip tone="hollow" label="等待设备" count={counts.waiting} />}
-                {pending.length > 0 && <StatusChip tone="attention" label="待决定" count={pending.length} />}
               </div>
             )}
             {project.status !== 'archived' && (
@@ -1565,10 +1584,8 @@ export function ProjectPage() {
               project={project}
               devices={allDevices}
               threads={projectThreads}
-              pending={pending}
               memory={memory.data}
               onOpenThread={onOpenThread}
-              onOpenInbox={() => void navigate({ to: '/inbox' })}
               tab={search.view === 'memory' ? 'memory' : 'threads'}
               onTabChange={(tab) =>
                 void navigate({

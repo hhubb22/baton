@@ -96,7 +96,7 @@ const ToolCall = Schema.Struct({ type: Schema.Literal('toolCall'), id: Schema.St
 const quote = (text: string) =>
   process.platform === 'win32' ? `'${text.replaceAll("'", "''")}'` : `'${text.replaceAll("'", "'\\''")}'`
 
-test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates replay Cursor, shell, memory and Inbox', async () => {
+test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates replay Cursor, shell and memory', async () => {
   const database = await openTestDatabase()
   const directory = await realpath(await mkdtemp(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'bt3-')))
   const nodeDirectory = join(directory, 'node'),
@@ -287,17 +287,6 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
     await expect
       .poll(async () => (await device()).runtime_report?.project_runtime?.providers?.[0]?.status, { timeout: 10000 })
       .toBe('available')
-    let inbox: P.AttentionRequest | undefined
-    await expect
-      .poll(
-        async () => {
-          const page = await alice<P.InboxPage>(`/inbox?project_id=${project.id}`)
-          inbox = page.body.requests?.find((r) => r.title === '确认继续验证')
-          return inbox?.state
-        },
-        { timeout: 10000 },
-      )
-      .toBe('open')
     const events = async () => {
       const page = await alice<P.ProjectEventPage>(`/projects/${project.id}/events?limit=100`)
       expect(page.status, JSON.stringify(page.body)).toBe(200)
@@ -323,14 +312,6 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
       content: '通过真实 Runtime 保存的项目记忆',
     })
     expect((await bob(`/projects/${project.id}/memory/${memory.id}`)).status).toBe(404)
-    expect((await bob(`/attention-requests/${inbox!.id}`)).status).toBe(404)
-    const answer = {
-      expected_version: inbox!.version,
-      client_request_id: randomUUID(),
-      option_id: 'continue',
-      text: '由用户补充的验证说明',
-    }
-    expect((await bob(`/attention-requests/${inbox!.id}/answer`, 'POST', answer)).status).toBe(404)
     const updated = await alice<P.ProjectMemory>(`/projects/${project.id}/memory/${memory.id}`, 'PUT', {
       operation_id: randomUUID(),
       expected_revision: 1,
@@ -339,12 +320,11 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
     })
     expect(updated.status, JSON.stringify(updated.body)).toBe(200)
     expect(updated.body).toMatchObject({ revision: 2, author: 'user' })
-    const answered = await alice<P.AttentionRequest>(`/attention-requests/${inbox!.id}/answer`, 'POST', answer)
-    expect(answered.status, JSON.stringify(answered.body)).toBe(200)
-    expect(answered.body).toMatchObject({ state: 'answered', resolution: { option_id: 'continue', text: answer.text } })
-    await expect
-      .poll(async () => JSON.stringify(await events()).includes('已读取用户回答'), { timeout: 15000 })
-      .toBe(true)
+    const followUp = await alice(`/projects/${project.id}/messages`, 'POST', {
+      client_message_id: randomUUID(),
+      content: '记忆已核对，请继续',
+    })
+    expect(followUp.status).toBe(202)
     await expect.poll(async () => (await status()).run?.stop_acked_at, { timeout: 10000 }).toBeTruthy()
     const starts = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ pid: P.PositiveInteger, run_id: P.UUID })))(
       (await readFile(join(runtimeDirectory, 'runtime-starts.jsonl'), 'utf8'))
@@ -363,7 +343,6 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
     expect(toolResults.map((entry) => entry.message.toolName)).toEqual([
       'memory.read',
       'memory.remember',
-      'inbox.ask',
       'threads.create',
       'nodes.exec',
     ])
@@ -446,8 +425,8 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
           FROM project_agent_input_queue WHERE agent_id=${project.agent.id} ORDER BY id`
       }),
     )
-    expect(facts.filter((f) => f.source_type === 'user_message')).toHaveLength(1)
-    for (const source of ['thread_reply', 'turn_ended', 'attention_answer', 'memory_updated'])
+    expect(facts.filter((f) => f.source_type === 'user_message')).toHaveLength(2)
+    for (const source of ['thread_reply', 'turn_ended', 'memory_updated'])
       expect(facts.some((f) => f.source_type === source && f.delivered_seq !== null)).toBe(true)
     expect(new Set(facts.map((f) => f.source_key)).size).toBe(facts.length)
     const shell = threadPage.body.threads!.find((thread) => thread.agent_type === 'shell')!
@@ -473,7 +452,6 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
     await daemon
     await expect.poll(async () => (await device()).online, { timeout: 10_000 }).toBe(false)
     expect(await readTurnTrace(alice, shell.id)).toEqual(steps)
-    expect((await bob<P.InboxPage>('/inbox?state=all')).body.requests).toEqual([])
     expect((await bob<P.ProjectsResponse>('/projects')).body.projects).toEqual([])
     expect(await readFile(join(runtimeDirectory, 'local-subscription'), 'utf8')).toBe('local-login-complete')
     expect(JSON.stringify((await device()).runtime_report)).not.toContain('local-login-complete')

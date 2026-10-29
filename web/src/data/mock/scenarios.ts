@@ -2,7 +2,6 @@ import type {
   Account,
   Device,
   DeviceAgent,
-  InboxItem,
   MemoryNote,
   Message,
   OutputChunk,
@@ -24,11 +23,7 @@ export const scenarioIds = [
   'offline',
   'waiting',
   'error',
-  'conflict',
   'signedOut',
-  'inbox',
-  'inboxPaused',
-  'inboxWithdrawn',
   'maintenance',
   'maintenanceError',
   'memoryConflict',
@@ -48,11 +43,7 @@ export const scenarioLabels: Record<ScenarioId, string> = {
   offline: '离线',
   waiting: '等待',
   error: '错误',
-  conflict: '冲突',
   signedOut: '已退出登录',
-  inbox: '问题和历史',
-  inboxPaused: '问题 · 项目已暂停',
-  inboxWithdrawn: '回复时问题被撤回',
   maintenance: '项目维护',
   maintenanceError: '项目维护 · 保存和读取失败',
   memoryConflict: '记忆 · 助手版本已更新',
@@ -195,6 +186,10 @@ function projects(now: number): Project[] {
   return [
     {
       id: 'prj-baton',
+      attention: null,
+      attentionReason: null,
+      latestReplySeq: 2,
+      readReplySeq: 2,
       archivedAt: null,
       name: 'Baton Dev',
       hue: 'slate',
@@ -208,6 +203,10 @@ function projects(now: number): Project[] {
     },
     {
       id: 'prj-compat',
+      attention: null,
+      attentionReason: null,
+      latestReplySeq: 3,
+      readReplySeq: 0,
       archivedAt: null,
       name: 'Compatibility',
       hue: 'amber',
@@ -221,6 +220,10 @@ function projects(now: number): Project[] {
     },
     {
       id: 'prj-docs',
+      attention: 'failing',
+      attentionReason: 'Claude 登录已过期',
+      latestReplySeq: 0,
+      readReplySeq: 0,
       archivedAt: null,
       name: 'Docs Cleanup',
       hue: 'violet',
@@ -234,6 +237,10 @@ function projects(now: number): Project[] {
     },
     {
       id: 'prj-switch',
+      attention: null,
+      attentionReason: null,
+      latestReplySeq: 0,
+      readReplySeq: 0,
       archivedAt: null,
       name: 'Switch Patrol',
       hue: 'green',
@@ -262,6 +269,7 @@ function projectEntries(now: number): ProjectEntry[] {
     },
     {
       id: 'ent-baton-2',
+      sourceSeq: 2,
       projectId: 'prj-baton',
       kind: 'assistant',
       process: [{ kind: 'note', body: 'Gateway code is in `/home/kaken/work/baton/apps/server/src` on Ubuntu Dev.' }],
@@ -280,6 +288,7 @@ function projectEntries(now: number): ProjectEntry[] {
     },
     {
       id: 'ent-compat-2',
+      sourceSeq: 2,
       projectId: 'prj-compat',
       kind: 'assistant',
       process: [
@@ -299,11 +308,12 @@ function projectEntries(now: number): ProjectEntry[] {
     },
     {
       id: 'ent-compat-3',
+      sourceSeq: 3,
       projectId: 'prj-compat',
       kind: 'assistant',
       process: [],
       threads: { action: 'replies', threadIds: ['thr-compat'] },
-      body: 'The suite finished with 2 failures in `path.test.ts`. Both come from Windows drive letters. I asked in your inbox whether to skip them for now, and which runner should run the nightly suite.',
+      body: 'The suite finished with 2 failures in `path.test.ts`. Both come from Windows drive letters. Should I skip them for now, and which runner should run the nightly suite?',
       createdAt: now - 2 * hour,
     },
   ]
@@ -697,41 +707,6 @@ function directories(): Record<string, string[]> {
   }
 }
 
-function inbox(now: number): InboxItem[] {
-  return [
-    {
-      id: 'itm-compat-paths',
-      projectId: 'prj-compat',
-      threadId: 'thr-compat',
-      kind: 'question',
-      title: 'Skip Windows path tests for now?',
-      body: '2 tests fail only on Windows because of drive letters.',
-      options: ['Skip them and open a follow-up', 'Fix them before merging'],
-      recommended: 1,
-      allowText: true,
-      status: 'pending',
-      result: null,
-      revision: 1,
-      createdAt: now - 2 * hour,
-    },
-    {
-      id: 'itm-compat-runner',
-      projectId: 'prj-compat',
-      threadId: null,
-      kind: 'question',
-      title: 'Which runner should run nightly?',
-      body: 'MacBook Pro sleeps at night. Ubuntu Dev is always on.',
-      options: ['Ubuntu Dev', 'MacBook Pro'],
-      recommended: 0,
-      allowText: false,
-      status: 'pending',
-      result: null,
-      revision: 1,
-      createdAt: now - 90 * minute,
-    },
-  ]
-}
-
 const gatewayTs = `import type { RawData } from 'ws'
 
 export const webSocketText = (data: RawData): string =>
@@ -876,16 +851,12 @@ function base(now: number): World {
     assistantContexts: {},
     threads: threads(now),
     messages: messages(now),
-    inbox: inbox(now),
     operations: [],
     files: files(),
     traces: traces(),
     outputs: outputs(),
     outputLoss: [],
     failingReads: [],
-    answeredElsewhere: {},
-    withdrawnElsewhere: {},
-    failItemSaves: 0,
     enrollments: [],
     directories: directories(),
     stubbornStops: [],
@@ -997,19 +968,6 @@ export function createWorld(id: ScenarioId, now: number): World {
       project.status = 'archived'
       project.archivedAt = now - hour
       project.agent = { ...project.agent, state: 'stopped', reason: null, activity: null }
-      for (const item of world.inbox) {
-        if (item.projectId !== project.id || item.status !== 'pending') continue
-        item.status = 'withdrawn'
-        item.revision += 1
-        item.result = {
-          option: null,
-          note: '',
-          actor: account.name,
-          at: project.archivedAt,
-          reason: '项目已归档',
-          inputId: null,
-        }
-      }
       return world
     }
     case 'empty':
@@ -1022,7 +980,6 @@ export function createWorld(id: ScenarioId, now: number): World {
         memory: [],
         threads: [],
         messages: [],
-        inbox: [],
         files: {},
         traces: {},
         outputs: {},
@@ -1035,55 +992,7 @@ export function createWorld(id: ScenarioId, now: number): World {
         messages: [],
         traces: {},
         outputs: {},
-        inbox: world.inbox.filter((item) => item.threadId === null),
       }
-    case 'inbox':
-    case 'inboxPaused': {
-      world.inbox.push({
-        id: 'itm-compat-notes',
-        projectId: 'prj-compat',
-        threadId: null,
-        kind: 'question',
-        title: 'What should the release notes mention?',
-        body: '**Windows support** needs a release note.\n\n- Include the drive-letter fix\n- Mention the nightly runner\n\nSee [release guidance](https://example.com/releases).',
-        options: [],
-        recommended: null,
-        allowText: true,
-        status: 'pending',
-        result: null,
-        revision: 1,
-        createdAt: now - 5 * minute,
-      })
-      for (const [index, status] of (['answered', 'closed', 'withdrawn', 'resolved'] as const).entries()) {
-        world.inbox.push({
-          id: `itm-history-${status}`,
-          projectId: 'prj-compat',
-          threadId: 'thr-compat',
-          kind: status === 'resolved' ? 'system' : 'question',
-          title: `Release preparation · ${status}`,
-          body: 'Past context is kept with the result.',
-          options: [],
-          recommended: null,
-          allowText: status !== 'resolved',
-          status,
-          result: {
-            option: null,
-            note: status === 'answered' ? 'Include Windows support.' : '',
-            actor: status === 'withdrawn' ? 'Project assistant' : account.name,
-            at: now - hour,
-            reason: status === 'withdrawn' ? 'The newer test run replaced this question.' : null,
-            inputId: null,
-          },
-          revision: 2,
-          createdAt: now - (index + 4) * hour,
-        })
-      }
-      if (id === 'inboxPaused') world.projects.find((item) => item.id === 'prj-compat')!.status = 'paused'
-      return world
-    }
-    case 'inboxWithdrawn':
-      world.withdrawnElsewhere['itm-compat-paths'] = 'A newer test run replaced this question.'
-      return world
     case 'signedOut':
       return { ...world, session: { account: null, defaultDeviceId: null, ended: null } }
     case 'offline': {
@@ -1147,6 +1056,8 @@ export function createWorld(id: ScenarioId, now: number): World {
         item.provider === 'Claude' ? { ...item, signedIn: false } : item,
       )
       const docs = world.projects.find((item) => item.id === 'prj-docs')!
+      docs.attention = null
+      docs.attentionReason = null
       docs.agent = {
         state: 'waitingDevice',
         deviceId: null,
@@ -1204,32 +1115,12 @@ export function createWorld(id: ScenarioId, now: number): World {
       }
       // 第一次新建 Project 保存失败，重试成功。
       world.failProjectSaves = 1
-      world.failItemSaves = 1
       // 这些内容第一次读取失败，重试成功。
       world.failingReads.push(
         'trace:msg-webui-2',
         fileKey('file:dev-ubuntu', `${ubuntuRepo}/apps/server/src/gateway.test.ts`),
       )
-      world.inbox.push({
-        id: 'itm-baton-signin',
-        projectId: 'prj-baton',
-        threadId: null,
-        kind: 'system',
-        title: 'ChatGPT sign-in expired',
-        body: 'Sign in to ChatGPT on Ubuntu Dev, then resume the project.',
-        options: [],
-        recommended: null,
-        allowText: false,
-        status: 'pending',
-        result: null,
-        revision: 1,
-        createdAt: now - 10 * minute,
-      })
       return world
     }
-    case 'conflict':
-      // 第一个问题已经在另一个页面回答过，这里回答会得到冲突。
-      world.answeredElsewhere['itm-compat-paths'] = 'Fix them before merging'
-      return world
   }
 }

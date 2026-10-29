@@ -1,8 +1,8 @@
 import * as stylex from '@stylexjs/stylex'
 import { useEffect, useRef, useState } from 'react'
 import { ClientError } from '../data/client'
-import { pendingInbox, threadView } from '../data/derive'
-import { useInbox, useSetProjectStatus, useThreads, useUpdateProject } from '../data/queries'
+import { threadView } from '../data/derive'
+import { useSetProjectStatus, useThreads, useUpdateProject } from '../data/queries'
 import type { Device, Project, ProjectPatch, Thread } from '../data/types'
 import { ProjectEmojiPicker, validProjectEmoji } from '../ui/ProjectEmojiPicker'
 import { text } from '../theme/text'
@@ -72,7 +72,6 @@ export function ProjectSettings({
   const { catalog, devices } = useProjectModelCatalog()
   const update = useUpdateProject(project.id)
   const status = useSetProjectStatus()
-  const inbox = useInbox()
   const threads = useThreads()
   const draft = useDraft(workspace.settingsDrafts, project.id)
   const mounted = useRef(true)
@@ -183,8 +182,6 @@ export function ProjectSettings({
     setConfirm(false)
     setActionError(null)
   }
-  const questionCount = pendingInbox(inbox.data ?? [], project.id).length
-  const questions = inbox.data ? `${questionCount} 个待处理问题` : '所有待处理问题'
   const projectThreads = (threads.data ?? []).filter((item) => item.projectId === project.id)
 
   const feedback = saving ? (
@@ -376,7 +373,7 @@ export function ProjectSettings({
         <Dialog
           open
           title="归档项目？"
-          description={`停止项目助手和运行中的对话，并关闭 ${questions}。聊天、记忆和对话记录会保留。${dirty ? '未保存的设置更改会被放弃。' : ''}`}
+          description={`停止项目助手和运行中的对话。聊天、记忆和对话记录会保留。${dirty ? '未保存的设置更改会被放弃。' : ''}`}
           onOpenChange={(open) => {
             if (!open) closeConfirm()
           }}

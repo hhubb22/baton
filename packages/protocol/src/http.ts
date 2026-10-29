@@ -150,12 +150,6 @@ export const MemorySourceQuery = Schema.Struct({
   offset: Schema.optionalKey(memoryInteger(0, Number.MAX_SAFE_INTEGER)),
   max_bytes: Schema.optionalKey(memoryInteger(4, 32768)),
 })
-export const InboxQuery = Schema.Struct({
-  state: Schema.optionalKey(Schema.Literals(['open', 'done', 'all'])),
-  cursor: Schema.optionalKey(boundedText(4096)),
-  project_id: Schema.optionalKey(UUID),
-  thread_id: Schema.optionalKey(UUID),
-})
 export const httpSchemas = {
   EmptyInput,
   BrowserReady,
@@ -172,7 +166,6 @@ export const httpSchemas = {
   ProjectMessagesQuery,
   ProjectEventsQuery,
   MemoryRevisionsQuery,
-  InboxQuery,
 } as const
 export type EmptyInput = typeof EmptyInput.Type
 export type BrowserReady = typeof BrowserReady.Type
@@ -186,4 +179,3 @@ export type ProjectListQuery = typeof ProjectListQuery.Type
 export type ProjectMessagesQuery = typeof ProjectMessagesQuery.Type
 export type ProjectEventsQuery = typeof ProjectEventsQuery.Type
 export type MemoryRevisionsQuery = typeof MemoryRevisionsQuery.Type
-export type InboxQuery = typeof InboxQuery.Type

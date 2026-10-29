@@ -187,7 +187,7 @@ describe('app', () => {
 
   it('keeps the username after invalid credentials and returns to the requested page', async () => {
     const user = userEvent.setup()
-    const { router } = renderApp('/inbox', 'signedOut')
+    const { router } = renderApp('/threads', 'signedOut')
     await user.type(await screen.findByLabelText('用户名'), 'kaken')
     await signIn(user, 'wrong')
     expect(await screen.findByText('用户名或密码错误。')).toBeInTheDocument()
@@ -196,8 +196,8 @@ describe('app', () => {
     expect(screen.getByLabelText('密码')).toHaveFocus()
 
     await signIn(user)
-    expect(await screen.findByRole('heading', { name: '待处理' })).toBeInTheDocument()
-    expect(router.state.location.pathname).toBe('/inbox')
+    expect(await screen.findByRole('link', { name: /对话/ })).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe('/threads')
   })
 
   it('explains an expired sign-in and returns to the same thread', async () => {
@@ -290,9 +290,9 @@ describe('app', () => {
     expect(within(sidebar).getByRole('link', { name: /Baton/ })).toHaveAttribute('aria-current', 'page')
     expect(within(sidebar).getByRole('link', { name: /对话/ })).not.toHaveAttribute('aria-current')
 
-    await user.click(within(sidebar).getByRole('link', { name: /待处理/ }))
-    expect(router.state.location.pathname).toBe('/inbox')
-    expect(within(sidebar).getByRole('link', { name: /待处理/ })).toHaveAttribute('aria-current', 'page')
+    await user.click(within(sidebar).getByRole('link', { name: /对话/ }))
+    expect(router.state.location.pathname).toBe('/threads')
+    expect(within(sidebar).getByRole('link', { name: /对话/ })).toHaveAttribute('aria-current', 'page')
   })
 
   it('updates thread, project and file preview when a device goes offline', async () => {
@@ -625,11 +625,13 @@ describe('projects', () => {
         }
       }
     })
-    expect(await screen.findByRole('article', { name: '项目助手正在回复' })).toHaveTextContent('Almost done.')
+    const preview = await screen.findByRole('article', { name: '项目助手正在回复' })
+    expect(preview).toHaveTextContent('Almost done.')
     saved = true
     act(() => notify?.({ topics: ['projects'] }))
     await waitFor(() => expect(release).toBeDefined())
-    expect(screen.getByRole('article', { name: '项目助手正在回复' })).toHaveTextContent('Almost done.')
+    expect(preview).toBeVisible()
+    expect(preview).toHaveTextContent('Almost done.')
     act(() => release?.())
     await waitFor(() => expect(screen.queryByRole('article', { name: '项目助手正在回复' })).not.toBeInTheDocument())
     expect(screen.getByRole('article', { name: '项目助手' })).toHaveTextContent('Almost done.')
@@ -703,7 +705,7 @@ describe('projects', () => {
     expect(screen.getByRole('button', { name: /nodes.exec.*等待结果/ })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /threads.create.*失败/ }))
     expect(screen.getByText('Device unavailable')).toBeInTheDocument()
-    expect(screen.getByText('Checking the result.')).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: '对话' })).getByText('Checking the result.')).toBeInTheDocument()
   })
 
   it('opens two threads, shows their replies and opens one beside the conversation', async () => {
@@ -1389,13 +1391,6 @@ describe('execution details', () => {
     )
   })
 
-  it('labels question choices in their thread and omits its repeated title', async () => {
-    renderApp('/threads?thread=thr-compat')
-    const question = await screen.findByRole('region', { name: 'Skip Windows path tests for now?' })
-    expect(within(question).getByRole('radio', { name: 'Fix them before merging，推荐' })).toBeInTheDocument()
-    expect(within(question).queryByText('Run compat suite on Windows')).not.toBeInTheDocument()
-  })
-
   it('marks lost live output after the device reconnects', async () => {
     const { client } = renderApp('/threads?thread=thr-gateway', 'offline')
     const detail = await screen.findByRole('complementary', { name: 'Fix gateway reconnect race' })
@@ -1642,27 +1637,5 @@ describe('execution details', () => {
     await user.click(await screen.findByRole('button', { name: '复制所选内容' }))
     expect(await screen.findByText('已复制')).toBeInTheDocument()
     expect(await navigator.clipboard.readText()).toMatch(/Scaffold is in place/)
-  })
-
-  it('switches the selected inbox question in the detail pane', async () => {
-    const user = userEvent.setup()
-    renderApp('/inbox')
-    expect(await screen.findByRole('region', { name: 'Which runner should run nightly?' })).toBeInTheDocument()
-    const other = await screen.findByRole('button', { name: /Skip Windows path tests for now\?/ })
-    await user.click(other)
-    expect(other).toHaveAttribute('aria-pressed', 'true')
-    expect(await screen.findByRole('region', { name: 'Skip Windows path tests for now?' })).toBeInTheDocument()
-    expect(screen.queryByRole('region', { name: 'Which runner should run nightly?' })).not.toBeInTheDocument()
-  })
-
-  it('asks the project assistant about an inbox question', async () => {
-    const user = userEvent.setup()
-    const { router } = renderApp('/inbox')
-    await screen.findByRole('region', { name: 'Which runner should run nightly?' })
-    select(await screen.findByText('MacBook Pro sleeps at night. Ubuntu Dev is always on.'))
-    await user.click(await screen.findByRole('button', { name: '询问项目助手' }))
-    await waitFor(() => expect(router.state.location.pathname).toBe('/projects/prj-compat'))
-    const reference = await screen.findByRole('figure', { name: '引用：Which runner should run nightly?' })
-    expect(within(reference).getByText(/MacBook Pro sleeps at night/)).toBeInTheDocument()
   })
 })

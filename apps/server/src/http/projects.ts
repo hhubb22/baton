@@ -4,7 +4,6 @@ import { BatonHttpApi, CurrentBrowserSession } from '@baton/protocol/http-api'
 import * as P from '@baton/protocol'
 import * as Projects from '../project/projects.ts'
 import * as Memory from '../project/memory/index.ts'
-import * as Inbox from '../inbox.ts'
 import { decodeResponse, httpBusiness } from './security.ts'
 import type { HTTPOptions } from './options.ts'
 
@@ -44,6 +43,13 @@ export const projectHttpHandlers = (options: HTTPOptions) => {
         .handle('get', ({ params }) =>
           current((employee) =>
             Projects.getProject(employee, params.projectId).pipe(Effect.flatMap(decodeResponse(P.Project))),
+          ),
+        )
+        .handle('markRead', ({ params, payload }) =>
+          current((employee) =>
+            Projects.markProjectRead(employee, params.projectId, payload.seq).pipe(
+              Effect.tap(() => changed(employee, params.projectId)),
+            ),
           ),
         )
         .handle('update', ({ params, payload }) =>
@@ -170,35 +176,6 @@ export const projectHttpHandlers = (options: HTTPOptions) => {
               query.after_revision,
               query.limit,
             ).pipe(Effect.flatMap(decodeResponse(P.MemoryRevisionsResponse))),
-          ),
-        ),
-    ),
-    HttpApiBuilder.group(BatonHttpApi, 'inbox', (handlers) =>
-      handlers
-        .handle('list', ({ query }) =>
-          current((employee) => Inbox.listInbox(employee, query).pipe(Effect.flatMap(decodeResponse(P.InboxPage)))),
-        )
-        .handle('get', ({ params }) =>
-          current((employee) =>
-            Inbox.getAttentionRequest(employee, params.requestId).pipe(
-              Effect.flatMap(decodeResponse(P.AttentionRequest)),
-            ),
-          ),
-        )
-        .handle('answer', ({ params, payload }) =>
-          current((employee) =>
-            Inbox.handleAttentionRequest(employee, params.requestId, payload).pipe(
-              Effect.tap((request) => changed(employee, request.project_id)),
-              Effect.flatMap(decodeResponse(P.AttentionRequest)),
-            ),
-          ),
-        )
-        .handle('close', ({ params, payload }) =>
-          current((employee) =>
-            Inbox.handleAttentionRequest(employee, params.requestId, payload, true).pipe(
-              Effect.tap((request) => changed(employee, request.project_id)),
-              Effect.flatMap(decodeResponse(P.AttentionRequest)),
-            ),
           ),
         ),
     ),

@@ -4,6 +4,7 @@ import * as SqlClient from 'effect/sql/SqlClient'
 import * as P from '@baton/protocol'
 import { transaction } from './database.ts'
 import { AppError } from './errors.ts'
+import { latestReplySeqSQL } from './project/attention.ts'
 
 type NotificationInput = Omit<P.BrowserNotification, 'type' | 'event_id' | 'cursor'>
 const boundedTitle = (title: string) => Array.from(title).slice(0, 1000).join('')
@@ -264,19 +265,20 @@ export const activitySnapshot = Effect.fn('browserActivitySnapshot')(function* (
   const [snapshot] = yield* sql<{ value: P.ActivitySnapshot }>`WITH waiting AS (
     SELECT t.id,t.project_id,t.last_activity_at,COALESCE((SELECT left(split_part(m.content,chr(10),1),120)
       FROM thread_messages m WHERE m.thread_id=t.id ORDER BY m.created_at,m.id LIMIT 1),left(t.working_directory,1000)) AS title
-    FROM threads t WHERE t.employee_id=${employeeId} AND t.status<>'archived' AND (
-      (t.status='running' AND t.stop_requested_at IS NULL AND t.archive_requested_at IS NULL AND EXISTS(
+    FROM threads t WHERE t.employee_id=${employeeId} AND t.status<>'archived' AND
+      t.status='running' AND t.stop_requested_at IS NULL AND t.archive_requested_at IS NULL AND EXISTS(
         SELECT 1 FROM thread_events e JOIN thread_turns v ON v.thread_id=e.thread_id
           AND v.worker_turn_seq=(e.payload->>'worker_turn_seq')::bigint AND v.ended_at IS NULL
         WHERE e.thread_id=t.id AND e.kind='question.pending'
           AND NOT EXISTS(SELECT 1 FROM thread_events done WHERE done.thread_id=t.id
             AND done.kind IN ('question.resolved','question.answered')
-            AND done.payload->>'request_id'=e.payload->'question'->>'request_id')))
-      OR EXISTS(SELECT 1 FROM attention_requests r WHERE r.employee_id=t.employee_id
-        AND r.thread_id=t.id AND r.source='agent' AND r.state='open'))
+            AND done.payload->>'request_id'=e.payload->'question'->>'request_id'))
   ) SELECT jsonb_build_object(
     'running_count',(SELECT count(*) FROM threads WHERE employee_id=${employeeId} AND status='running'),
-    'waiting_count',(SELECT count(*) FROM waiting),
+    'waiting_count',(SELECT count(*) FROM waiting)+(SELECT count(*) FROM projects p
+      JOIN project_agents a ON a.project_id=p.id AND a.employee_id=p.employee_id
+      JOIN conversations c ON c.agent_id=a.id AND c.employee_id=a.employee_id
+      WHERE p.employee_id=${employeeId} AND p.status<>'archived' AND ${latestReplySeqSQL(sql)}>c.read_reply_seq),
     'waiting_threads',COALESCE((SELECT jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
       'thread_id',id,'project_id',project_id,'title',title))) FROM (
         SELECT * FROM waiting ORDER BY last_activity_at DESC,id LIMIT 5) w),'[]'::jsonb)) AS value`

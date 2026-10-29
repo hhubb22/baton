@@ -88,19 +88,9 @@ if (command === 'probe') {
           { id: 't3-memory-write' },
         ),
       )
-    if (!text.includes('t3-inbox-ask'))
+    if (!text.includes('t3-thread-create'))
       return fauxAssistantMessage(
         [
-          fauxToolCall(
-            'inbox.ask',
-            {
-              title: '确认继续验证',
-              content: '本地工具已就绪，请确认继续。',
-              options: [{ id: 'continue', label: '继续' }],
-              allow_text: true,
-            },
-            { id: 't3-inbox-ask' },
-          ),
           fauxToolCall(
             'threads.create',
             {
@@ -126,12 +116,8 @@ if (command === 'probe') {
         ],
         { timestamp: 1 },
       )
-    const seen = ['attention_answer', 'thread_reply', 'turn_ended', 'memory_updated'].filter((type) =>
-      text.includes(type),
-    )
-    observedAllInputs = ['attention_answer', 'thread_reply', 'turn_ended', 'memory_updated'].every((type) =>
-      seen.includes(type),
-    )
+    const seen = ['thread_reply', 'turn_ended', 'memory_updated'].filter((type) => text.includes(type))
+    observedAllInputs = ['thread_reply', 'turn_ended', 'memory_updated'].every((type) => seen.includes(type))
     return fauxAssistantMessage(
       `T3 收到输入：${seen.join('、')}。${text.includes('reply:t3 replay task') ? '已读取 Cursor 回复。' : ''}${text.includes('由用户补充的验证说明') ? '已读取用户回答。' : ''}`,
       { timestamp: 2 + context.messages.length },

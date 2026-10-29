@@ -91,7 +91,7 @@ daemon 和 CLI 使用 `agents/probe.ts` 的 `probeAgents`。默认按 Cursor、P
 
 #### 3.3 领域协议
 
-`packages/protocol/src/{thread,project,device,auth,inbox}.ts` 定义领域 Schema；`node.ts`、`worker.ts` 与 `http-api.ts` 组合传输契约。领域 Schema 不反向依赖传输层。
+`packages/protocol/src/{thread,project,device,auth}.ts` 定义领域 Schema；`node.ts`、`worker.ts` 与 `http-api.ts` 组合传输契约。领域 Schema 不反向依赖传输层。
 
 `ThreadSummary` 与 `ThreadView` 从 `Thread` 派生，保留整体检查。`SessionResponse` 和 `EnrollmentResponse` 分别在 auth、device 中唯一定义，HTTP 层引用并添加元数据。未知字段、动态 JSON、字段省略与 HTTP 严格解码按各传输入口的既有契约处理。
 

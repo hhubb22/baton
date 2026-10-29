@@ -1,7 +1,7 @@
 import type { ProjectMemory, MemoryRevision, MemoryWorkStatus, ProjectMessageReference } from '@baton/protocol'
 import { ClientError, type BatonClient } from '../client'
 import { shortenExcerpt } from '../derive'
-import type { InboxItem, MemoryNote, ProcessStep, Project, ProjectEntry, Reference } from '../types'
+import type { MemoryNote, ProcessStep, Project, ProjectEntry, Reference } from '../types'
 import { apiPath, timestamp, type HttpContext } from './context'
 import { HttpError } from './transport'
 
@@ -9,6 +9,7 @@ type ProjectAPI = Pick<
   BatonClient,
   | 'listProjects'
   | 'getProject'
+  | 'markProjectRead'
   | 'listProjectEntries'
   | 'readProjectTimeline'
   | 'listProjectMemory'
@@ -22,8 +23,6 @@ type ProjectAPI = Pick<
   | 'memorySources'
   | 'stopProjectRun'
   | 'retryProject'
-  | 'listInbox'
-  | 'handleItem'
 >
 
 interface ProjectDTO {
@@ -32,6 +31,10 @@ interface ProjectDTO {
   emoji?: string
   goal: string
   status: Project['status']
+  attention: Project['attention']
+  attention_reason: string | null
+  latest_reply_seq: number
+  read_reply_seq: number
   created_at: string
   updated_at: string
   agent: { provider: string; model: string; source_node_id?: string }
@@ -95,22 +98,6 @@ interface InputDTO {
 }
 type MemoryDTO = ProjectMemory
 type MemoryRevisionDTO = MemoryRevision
-interface InboxDTO {
-  id: string
-  project_id: string
-  thread_id?: string
-  source: 'agent' | 'system'
-  title: string
-  content: string
-  options: { id: string; label: string; recommended?: boolean }[] | null
-  allow_text: boolean
-  state: 'open' | 'answered' | 'closed' | 'withdrawn' | 'resolved'
-  version: number
-  resolution?: { client_request_id?: string; employee_id: string; option_label?: string; text?: string }
-  resolved_at?: string
-  withdraw_reason?: string
-  created_at: string
-}
 
 const root = '/projects'
 const projectPath = (id: string) => `${root}/${apiPath(id)}`
@@ -195,6 +182,10 @@ export function mapProject(p: ProjectDTO, status: StatusDTO): Project {
     emoji: p.emoji ?? '📁',
     hue: 'slate',
     status: p.status,
+    attention: p.attention ?? null,
+    attentionReason: p.attention_reason ?? null,
+    latestReplySeq: p.latest_reply_seq,
+    readReplySeq: p.read_reply_seq,
     archivedAt: p.status === 'archived' ? timestamp(p.updated_at) : null,
     goal: p.goal,
     subscription: subscription(p.agent.provider),
@@ -226,35 +217,6 @@ export function mapProject(p: ProjectDTO, status: StatusDTO): Project {
           : null,
     },
     createdAt: timestamp(p.created_at),
-  }
-}
-
-export function mapInboxItem(item: InboxDTO): InboxItem {
-  const recommended = (item.options ?? []).findIndex((option) => option.recommended)
-  return {
-    id: item.id,
-    projectId: item.project_id,
-    threadId: item.thread_id || null,
-    kind: item.source === 'system' ? 'system' : 'question',
-    title: item.title,
-    body: item.content,
-    options: (item.options ?? []).map((option) => option.label),
-    recommended: recommended < 0 ? null : recommended,
-    allowText: item.allow_text,
-    status: item.state === 'open' ? 'pending' : item.state,
-    result:
-      item.resolution || item.resolved_at
-        ? {
-            option: item.resolution?.option_label ?? null,
-            note: item.resolution?.text ?? '',
-            actor: item.resolution?.employee_id ?? '',
-            at: timestamp(item.resolved_at),
-            reason: item.withdraw_reason || null,
-            inputId: null,
-          }
-        : null,
-    revision: item.version,
-    createdAt: timestamp(item.created_at),
   }
 }
 
@@ -474,13 +436,6 @@ function conflict(error: unknown): { payload?: Record<string, unknown> } | null 
 }
 
 export function createProjectAPI(ctx: HttpContext): ProjectAPI {
-  const inbox = new Map<string, InboxDTO>()
-  const rememberItem = (item: InboxDTO): InboxDTO => {
-    const previous = inbox.get(item.id)
-    if (previous && previous.version > item.version) return previous
-    inbox.set(item.id, item)
-    return item
-  }
   const enrich = async (p: ProjectDTO) => mapProject(p, await ctx.request<StatusDTO>(`${projectPath(p.id)}/status`))
   async function readMemory(projectId: string, note: MemoryDTO): Promise<MemoryNote> {
     const revisions: MemoryRevisionDTO[] = []
@@ -527,7 +482,7 @@ export function createProjectAPI(ctx: HttpContext): ProjectAPI {
       lastSeq: seq,
     }
   }
-  const emit = () => ctx.emit('projects', 'inbox', 'messages', 'threads')
+  const emit = () => ctx.emit('projects', 'messages', 'threads')
   async function patch(id: string, body: unknown) {
     const p = await ctx.request<ProjectDTO>(projectPath(id), json('PATCH', body))
     emit()
@@ -716,64 +671,9 @@ export function createProjectAPI(ctx: HttpContext): ProjectAPI {
     },
     stopProjectRun: (id) => runAction(id, 'stop'),
     retryProject: (id) => runAction(id, 'retry'),
-    async listInbox() {
-      const items: InboxItem[] = []
-      let cursor = ''
-      const seen = new Set<string>()
-      do {
-        const page = await ctx.request<{ requests: InboxDTO[]; next_cursor?: string }>(
-          `/inbox?state=all${cursor ? `&cursor=${apiPath(cursor)}` : ''}`,
-        )
-        for (const item of page.requests) items.push(mapInboxItem(rememberItem(item)))
-        cursor = page.next_cursor ?? ''
-        if (cursor && seen.has(cursor)) throw new ClientError('unavailable', '待处理事项分页未推进')
-        seen.add(cursor)
-      } while (cursor)
-      return items
-    },
-    async handleItem(input) {
-      const path = `/attention-requests/${apiPath(input.itemId)}`
-      const item = inbox.get(input.itemId) ?? (await ctx.request<InboxDTO>(path))
-      const finish = (value: InboxDTO, phase: 'done' | 'conflict') => {
-        const current = rememberItem(value)
-        const result = mapInboxItem(current).result
-        const detail =
-          phase === 'conflict'
-            ? [current.state, result?.option, result?.note, result?.actor, result?.reason].filter(Boolean).join(' · ')
-            : null
-        const operation = ctx.operation('answerItem', input.itemId, phase, detail)
-        emit()
-        ctx.emit('operations')
-        return operation
-      }
-      const decision = input.decision
-      const clientRequestId = await stableId(
-        `attention:${input.itemId}:${input.revision}:${JSON.stringify(decision.kind === 'close' ? ['close'] : ['answer', decision.option, decision.note])}`,
-      )
-      if (item.resolution?.client_request_id === clientRequestId) return finish(item, 'done')
-      if (item.version !== input.revision || item.state !== 'open') return finish(item, 'conflict')
-      const option =
-        decision.kind === 'answer' && decision.option !== null
-          ? (item.options ?? []).filter((option) => option.label === decision.option)
-          : []
-      if (decision.kind === 'answer' && decision.option !== null && option.length !== 1)
-        throw new ClientError('invalid', '所选选项不可用或不明确')
-      const body = {
-        expected_version: input.revision,
-        client_request_id: clientRequestId,
-        ...(decision.kind === 'answer' ? { option_id: option[0]?.id ?? '', text: decision.note } : {}),
-      }
-      try {
-        return finish(
-          await ctx.request<InboxDTO>(`${path}/${decision.kind === 'close' ? 'close' : 'answer'}`, json('POST', body)),
-          'done',
-        )
-      } catch (error) {
-        const clash = conflict(error)
-        if (!clash) throw error
-        const current = clash.payload?.current as InboxDTO | undefined
-        return finish(current ?? (await ctx.request<InboxDTO>(path)), 'conflict')
-      }
+    async markProjectRead(id, seq) {
+      await ctx.request(`${projectPath(id)}/read`, json('POST', { seq }))
+      ctx.emit('projects')
     },
   }
 }

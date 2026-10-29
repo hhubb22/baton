@@ -29,8 +29,6 @@ import type {
   ProcessStep,
   FilePreview,
   FileReadOptions,
-  ItemDecision,
-  InboxItem,
   LiveOutput,
   Project,
   ProjectEntry,
@@ -124,7 +122,7 @@ const newDeviceDefaults: Record<DeviceOS, Pick<Device, 'system' | 'folders' | 'r
   Windows: { system: 'Windows 11 24H2', folders: ['C:\\src'], repos: ['C:\\src\\baton'], shell: 'pwsh' },
 }
 
-// 模拟后端的状态变化规则集中在这里：设备上下线、消息投递、停止和事项处理。
+// 模拟后端的状态变化规则集中在这里：设备上下线、消息投递和停止。
 // 页面和 MockClient 都不直接改 World。
 export class MockStore {
   private world: World
@@ -222,7 +220,7 @@ export class MockStore {
     this.startExistingRuns()
     this.startStreamingDemo()
     this.startProjectStreamingDemo()
-    this.emit('session', 'devices', 'projects', 'threads', 'messages', 'inbox', 'files', 'operations')
+    this.emit('session', 'devices', 'projects', 'threads', 'messages', 'files', 'operations')
   }
 
   private startStreamingDemo() {
@@ -254,15 +252,15 @@ export class MockStore {
     const second = this.world.projectEntries.find((item) => item.id === 'ent-compat-3')!
     if (first.kind !== 'assistant' || second.kind !== 'assistant') return
     const thread = this.world.threads.find((item) => item.id === 'thr-compat')!
-    const questions = this.world.inbox.filter((item) => item.projectId === project.id)
     this.world.projectEntries = this.world.projectEntries.filter(
       (item) => item.id !== first.id && item.id !== second.id,
     )
     this.world.threads = this.world.threads.filter((item) => item.id !== thread.id)
-    this.world.inbox = this.world.inbox.filter((item) => item.projectId !== project.id)
     project.agent.state = 'running'
     project.agent.activity = null
     project.agent.lastSeq = 0
+    project.latestReplySeq = 0
+    project.readReplySeq = 0
     this.schedule(1500, () => {
       this.world.projectEntries.push({
         id: 'ent-project-stream-tool',
@@ -321,6 +319,7 @@ export class MockStore {
       this.schedule(savedAt, () => {
         project.agent.preview = null
         project.agent.lastSeq = afterSeq + 1
+        project.latestReplySeq = afterSeq + 1
         this.world.projectEntries.push({
           id,
           projectId: project.id,
@@ -351,10 +350,8 @@ export class MockStore {
     })
     const secondSaved = stream(second.body, firstSaved + 2500, 5, 'ent-project-stream-final')
     this.schedule(secondSaved + 500, () => {
-      for (const [index, question] of questions.entries())
-        this.world.inbox.push({ ...question, createdAt: this.scheduler.now() + index })
       project.agent.state = 'idle'
-      this.emit('projects', 'inbox')
+      this.emit('projects')
     })
   }
 
@@ -954,123 +951,24 @@ export class MockStore {
     return operation
   }
 
-  handleItem(itemId: ID, decision: ItemDecision, revision: number): Operation {
-    const item = this.world.inbox.find((entry) => entry.id === itemId)
-    if (!item) throw new ClientError('notFound', '此问题已不可用。')
-    const project = this.project(item.projectId)
-    const elsewhere = this.world.answeredElsewhere[itemId]
-    if (elsewhere !== undefined && item.status === 'pending') {
-      delete this.world.answeredElsewhere[itemId]
-      this.saveDecision(item, { kind: 'answer', option: elsewhere, note: '' })
-    }
-    const withdrawn = this.world.withdrawnElsewhere[itemId]
-    if (withdrawn !== undefined && item.status === 'pending') {
-      delete this.world.withdrawnElsewhere[itemId]
-      this.withdrawItem(itemId, withdrawn)
-    }
-    if (item.status !== 'pending' || item.revision !== revision) {
-      const detail =
-        item.status === 'answered'
-          ? `Already answered: ${[item.result?.option, item.result?.note].filter(Boolean).join(' · ')}`
-          : 'Already handled'
-      const operation = this.createOperation('answerItem', itemId)
-      this.setPhase(operation, 'conflict', detail)
-      this.emit('inbox', 'projects', 'operations')
-      return operation
-    }
-    if (project.status === 'archived') throw new ClientError('invalid', '项目已归档。')
-    if (decision.kind === 'answer') {
-      if (item.kind === 'system') throw new ClientError('invalid', '请前往项目重试。')
-      if (decision.option !== null && !item.options.includes(decision.option)) {
-        throw new ClientError('invalid', '请选择一个可用选项。')
-      }
-      if (decision.option === null && !item.allowText) throw new ClientError('invalid', '请选择一个选项。')
-      if (decision.option === null && !decision.note.trim()) throw new ClientError('invalid', '请输入回复。')
-      if (new TextEncoder().encode(decision.note).length > 4096) {
-        throw new ClientError('invalid', '回复不能超过 4 KB。')
-      }
-    }
-    if (this.world.failItemSaves > 0) {
-      this.world.failItemSaves -= 1
-      throw new ClientError('unavailable', '无法保存回复，选择和备注已保留。请重试。')
-    }
-    this.saveDecision(item, decision)
-    const operation = this.createOperation('answerItem', itemId)
-    this.setPhase(operation, 'done')
-    this.emit('inbox', 'projects', 'operations')
-    return operation
-  }
-
-  private saveDecision(item: InboxItem, decision: ItemDecision) {
-    const project = this.project(item.projectId)
-    item.status = decision.kind === 'close' ? 'closed' : 'answered'
-    item.revision += 1
-    item.result = {
-      option: decision.kind === 'answer' ? decision.option : null,
-      note: decision.kind === 'answer' ? decision.note.trim() : '',
-      actor: this.world.session.account?.name ?? 'You',
-      at: this.scheduler.now(),
-      reason: null,
-      inputId: null,
-    }
-    if (item.kind === 'system') return
-    const response =
-      decision.kind === 'close' ? 'Closed question' : [item.result.option, item.result.note].filter(Boolean).join('\n')
-    const entry: UserEntry = {
-      id: this.nextId('ent'),
-      projectId: item.projectId,
-      kind: 'user',
-      body: `Question ${item.id}: ${item.title}
-${response}`,
-      delivery: 'saved',
-      reference: null,
-      createdAt: this.scheduler.now(),
-    }
-    this.world.projectEntries.push(entry)
-    item.result.inputId = entry.id
-    this.wake(project)
-  }
-
-  withdrawItem(itemId: ID, reason: string) {
-    const item = this.world.inbox.find((entry) => entry.id === itemId)
-    if (!item || item.kind === 'system' || item.status !== 'pending') return
-    item.status = 'withdrawn'
-    item.revision += 1
-    item.result = {
-      option: null,
-      note: '',
-      actor: 'Project assistant',
-      at: this.scheduler.now(),
-      reason,
-      inputId: null,
-    }
-    this.emit('inbox')
-  }
-
   retryProject(projectId: ID) {
     const project = this.project(projectId)
     if (project.status !== 'active') throw new ClientError('invalid', '请先恢复项目，再重试。')
+    if (project.attention === 'failing') {
+      project.attention = null
+      project.attentionReason = null
+      this.wake(project)
+      this.emit('projects')
+      return project
+    }
     if (project.agent.state !== 'blocked') return project
     if (!this.pickDevice(project)) {
       throw new ClientError('invalid', '没有可用设备。请在在线设备上登录后重试，消息已保存。')
     }
-    for (const item of this.world.inbox) {
-      if (item.projectId !== projectId || item.kind !== 'system' || item.status !== 'pending') continue
-      item.status = 'resolved'
-      item.revision += 1
-      item.result = {
-        option: null,
-        note: '',
-        actor: this.world.session.account?.name ?? 'You',
-        at: this.scheduler.now(),
-        reason: null,
-        inputId: null,
-      }
-    }
     project.agent = { ...project.agent, state: 'idle', reason: null }
     this.interrupted.add(projectId)
     this.wake(project)
-    this.emit('projects', 'inbox')
+    this.emit('projects')
     return project
   }
 
@@ -1403,6 +1301,10 @@ ${response}`,
       emoji: input.emoji ?? '📁',
       hue: projectHues.find((hue) => !used.has(hue)) ?? projectHues[this.world.projects.length % projectHues.length],
       status: 'active',
+      attention: null,
+      attentionReason: null,
+      latestReplySeq: 0,
+      readReplySeq: 0,
       archivedAt: null,
       goal: input.goal.trim(),
       subscription: input.subscription,
@@ -1512,6 +1414,10 @@ ${response}`,
       throw new ClientError('unavailable', 'Baton 无法保存项目状态，请重试。')
     }
     project.status = status
+    if (status !== 'active') {
+      project.attention = null
+      project.attentionReason = null
+    }
     if (status === 'active') {
       this.wake(project)
     } else {
@@ -1530,22 +1436,11 @@ ${response}`,
         this.interrupted.delete(projectId)
         this.world.passiveInputs = this.world.passiveInputs.filter((input) => input.projectId !== projectId)
         this.stopProjectThreads(projectId)
-        for (const item of this.world.inbox) {
-          if (item.projectId !== projectId || item.status !== 'pending') continue
-          item.status = 'withdrawn'
-          item.revision += 1
-          item.result = {
-            option: null,
-            note: '',
-            actor: this.world.session.account?.name ?? 'You',
-            at: this.scheduler.now(),
-            reason: '项目已归档',
-            inputId: null,
-          }
-        }
+        project.attention = null
+        project.attentionReason = null
       }
     }
-    this.emit('projects', 'inbox', 'threads', 'messages', 'operations')
+    this.emit('projects', 'threads', 'messages', 'operations')
     return project
   }
 
@@ -1693,6 +1588,12 @@ ${response}`,
     return this.world.projectEntries.filter((item) => item.projectId === projectId)
   }
 
+  markProjectRead(projectId: ID, seq: number) {
+    const project = this.project(projectId)
+    project.readReplySeq = Math.max(project.readReplySeq, Math.min(seq, project.latestReplySeq))
+    this.emit('projects')
+  }
+
   listProjects() {
     this.failOnce('projects')
     return this.world.projects
@@ -1725,6 +1626,8 @@ ${response}`,
       createdAt: this.scheduler.now(),
     }
     this.world.projectEntries.push(entry)
+    project.attention = null
+    project.attentionReason = null
     this.projectClientIds.set(clientId, { id: entry.id, body })
     this.emit('projects')
 
@@ -1812,10 +1715,12 @@ ${response}`,
   }
 
   private pushAssistant(project: Project, process: ProcessStep[], threads: EntryThreads | null, body: string) {
+    const sourceSeq = ++project.latestReplySeq
     this.world.projectEntries.push({
       id: this.nextId('ent'),
       projectId: project.id,
       kind: 'assistant',
+      sourceSeq,
       process,
       threads,
       body,

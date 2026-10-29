@@ -34,3 +34,7 @@
 .message-body [role='region'][aria-label='表格'] {
   margin-bottom: 0.8em;
 }
+
+.message-body > :last-child {
+  margin-bottom: 0;
+}

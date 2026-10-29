@@ -8,8 +8,6 @@ import type {
   FileReadOptions,
   FolderListing,
   ID,
-  InboxItem,
-  ItemDecision,
   IssuedEnrollment,
   LiveOutput,
   MemoryNote,
@@ -32,7 +30,7 @@ import type {
 } from './types'
 
 // 数据变化按主题通知；带对象的通知只刷新该对象及共享列表。
-export type Topic = 'session' | 'devices' | 'projects' | 'threads' | 'messages' | 'inbox' | 'files' | 'operations'
+export type Topic = 'session' | 'devices' | 'projects' | 'threads' | 'messages' | 'files' | 'operations'
 
 export interface ChangeEvent {
   topics: Topic[]
@@ -80,6 +78,7 @@ export interface BatonClient {
   listDeviceFolders(deviceId: ID): Promise<string[]>
   listProjects(): Promise<Project[]>
   getProject(projectId: ID): Promise<Project>
+  markProjectRead(projectId: ID, seq: number): Promise<void>
   // Project 主对话：你的消息、助手的回复和系统说明，按时间排列。
   listProjectEntries(projectId: ID): Promise<ProjectEntry[]>
   readProjectTimeline?(
@@ -92,7 +91,6 @@ export interface BatonClient {
   listMessages(threadId: ID): Promise<Message[]>
   // 客户端支持已读状态时，在消息显示后清除未读标记。
   markThreadRead?(threadId: ID): void
-  listInbox(): Promise<InboxItem[]>
   readFile(deviceId: ID, path: string, continuation?: FileReadOptions): Promise<FilePreview>
   // 按中心返回的游标读取过程，设备离线时仍可读取。
   readTrace(messageId: ID, cursor?: string): Promise<Trace>
@@ -143,7 +141,7 @@ export interface BatonClient {
     clientId: string
   }): Promise<Project>
   // 消息先保存；没有设备能运行助手时一直等待，不会过期。
-  // reference 是从回复、文件或事项里选中的一段，作为普通消息的一部分发给助手。
+  // reference 是从回复或文件里选中的一段，作为普通消息的一部分发给助手。
   sendProjectMessage(input: {
     projectId: ID
     body: string
@@ -157,8 +155,7 @@ export interface BatonClient {
   memorySources(projectId: ID, note: MemoryNote): Promise<MemorySourceView[]>
   // 只停止助手这一次运行，它开的 Thread 继续执行。
   stopProjectRun(projectId: ID): Promise<Project>
-  handleItem(input: { itemId: ID; decision: ItemDecision; revision: number }): Promise<Operation>
-  // 重试解除系统阻塞，同时解决尚未关闭的系统通知，不产生事项回答。
+  // 重试解除系统阻塞。
   retryProject(projectId: ID): Promise<Project>
 
   setDefaultDevice(deviceId: ID): Promise<Session>

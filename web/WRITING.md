@@ -6,7 +6,7 @@ Baton 的底层跨越了中心服务、节点守护进程、项目代理和多�
 
 1. 你有几台自己的电脑（Devices）。
 2. 你可以在任意电脑的文件夹里，直接和某个编程助手（Codex、Kiro、Pi）对话（Threads）。
-3. 你可以建一个长期项目（Project），在里面交代目标，让项目助手替你在各台电脑上开对话、跑命令，遇到拿不准的事再来问你（Inbox）。
+3. 你可以建一个长期项目（Project），在里面交代目标，让项目助手替你在各台电脑上开对话、跑命令，遇到拿不准的事在主对话里问你。
 
 用户不需要知道系统的进程架构、消息队列和调度规则，就能看懂每一个界面并完成操作。
 
@@ -25,11 +25,9 @@ Baton 的底层跨越了中心服务、节点守护进程、项目代理和多�
 | `Turn`（一轮执行） | 当前这一条回复或这一次运行 | `Current reply` / `Current run` | 当前回复 / 本次运行 |
 | `Steer` vs `Queue`（插入与排队） | 助手正忙时，新消息是等它忙完再发，还是现在立刻发进去 | `Send next` vs `Send now` | 下一条发送 vs 立即插话 |
 | `Eligible device`（满足条件的设备） | 在线且已登录所需模型账号的电脑 | `An online device with ChatGPT signed in` | 已登录 ChatGPT 的在线设备 |
-| `Attention item`（待处理事项） | 需要你拍板的问题 | `Question` / `Waiting for your reply` | 待你决定的问题 |
 | `Thread` 与 Project 主对话 | Agent 在某台设备某个目录里的对话，和项目助手的对话是两回事 | 前者一律叫 `thread`（`New thread`、`Archive thread`、`No threads yet`），后者叫 `main chat`；`chat` 只作动词或用在 `main chat` 里 | Thread / 主对话 |
-| 界面里的 `item` / `items` | Inbox 里等你处理的东西 | 按类型写 `question`、`notice`，或省掉名词（`3 waiting for you`、`Nothing waiting`）；处理过的列表叫 `Handled` | 问题、提示、已处理 |
 | `Node` / 电脑 | 用户连进 Baton 的机器 | 状态、按钮、报错和设置写 `device` 或设备名；只在讲接入一台实体电脑时写 `computer`（`Connect the computers where your code lives`） | 设备 / 电脑 |
-| `System attention item` / `Created by Baton` | 运行出错暂停了，需要你处理 | 直接写具体故障（如 `ChatGPT sign-in expired`） | 直接写具体故障（如 `ChatGPT 登录已过期`） |
+| `attention: failing`（故障） | 项目助手连续出错停下了，需要你处理 | 直接写具体故障（如 `ChatGPT sign-in expired`） | 直接写具体故障（如 `ChatGPT 登录已过期`） |
 | `Enroll device` / `Enrollment token` | 把一台电脑连进 Baton / 连接用的临时口令 | `Connect a device` / `Setup code` | 连接新设备 / 接入口令 |
 | `Revoke device`（吊销凭据） | 断开并移除这台电脑 | `Disconnect device` | 断开并移除设备 |
 | `Registered directories`（登记目录） | 这台电脑上允许 Baton 访问的文件夹 | `Folders`（`Folders on Ubuntu Dev`） | 文件夹 |
@@ -57,7 +55,7 @@ Baton 的底层跨越了中心服务、节点守护进程、项目代理和多�
 3. 上下文在容器上写一次。设备、Agent 和目录写在标题栏或输入区下方那一行，行内、提示文字和状态里不再重复；一组 Thread 共用同一台设备或同一个 Agent 时，组里的行省略它。
 4. 横幅以标题为主。标题一句话写清哪个对象出了什么事；说明只在补充标题没交代、又影响下一步的事实时才写，例如什么会保留、什么会丢，最多一句；动作按钮自己说明怎么恢复，正文不再复述。
 5. 说明文字（Helper text）只给不可逆或有安全后果的操作：归档、断开、停止、开放命令权限、重置口令。其余字段、开关和按钮靠标签自己说清，不在下面加一段解释何时生效。
-6. 页面和空状态不写介绍段。页面标题用事实（`3 devices, 2 online`、`3 waiting for you`），空状态写一句短语（`No threads yet`）加一个起步动作，不写这个页面是做什么的。
+6. 页面和空状态不写介绍段。页面标题用事实（`3 devices, 2 online`），空状态写一句短语（`No threads yet`）加一个起步动作，不写这个页面是做什么的。
 7. 字数上限：状态名三个词以内；横幅标题十个词以内，说明一句、十五个词以内；按钮两三个词。超出时先删重复，再删正常状态，最后才压缩措辞。
 
 ### 3. 以用户的任务为中心（Task-oriented）
@@ -78,7 +76,6 @@ Baton 的底层跨越了中心服务、节点守护进程、项目代理和多�
 |---|---|---|
 | 助手运行中发消息的方式切换 | `Send next` / `Send now`<br>不支持打断时无需显示切换器，只在输入框旁提示 `Sends after current reply`（当前回复结束后发出） | `Queue` / `Steer`<br>`Queue only · steering unsupported` |
 | 接入新电脑的入口与口令重发 | `Connect a device` / `Get a new code`（连接设备 / 获取新口令） | `Enroll device` / `Regenerate` |
-| 关闭一条不打算回答的问题 | `Skip` 或 `Close question`（跳过 / 关闭问题） | `Dismiss` |
 | 报错横幅里跳转到项目 | `Go to project` 或直接提供 `Retry`（前往项目 / 重试） | `Open Project to retry` |
 | 撤回还在排队的已发消息 | `Sending next · Cancel`（等待发送 · 取消） | `Queued · Withdraw` |
 
@@ -88,7 +85,7 @@ Baton 的底层跨越了中心服务、节点守护进程、项目代理和多�
 
 | 场景 | 推荐写法 | 避免写法 |
 |---|---|---|
-| 归档项目确认弹窗 | `Stops the project assistant and its running threads, and closes 1 open question. Chat, memory, and thread history are kept.`<br>停止项目助手和运行中的 Thread，并关闭 1 个待回答的问题。对话、记忆和 Thread 记录都保留。 | `The Project Agent will stop its current run and will not start again. 1 open attention item will be withdrawn as Project archived. Conversation history, memory, and Threads are preserved.` |
+| 归档项目确认弹窗 | `Stops the project assistant and its running threads. Chat, memory, and thread history are kept.`<br>停止项目助手和运行中的 Thread。对话、记忆和 Thread 记录都保留。 | `The Project Agent will stop its current run and will not start again. Conversation history, memory, and Threads are preserved.` |
 | 断开并移除电脑 | `Agents already running on it keep running locally.`<br>上面正在运行的助手会在本地继续执行。 | `Disconnects immediately; running Agents on an offline device will not be stopped.` |
 | 开启命令行执行权限 | 开关标签 `Allow project assistant to run commands`，下方一行 `Shell commands the project assistant runs itself. Threads set their own access.`；打开时弹窗确认，正文一句 `Commands run directly as kaken and can reach files outside your folders.`<br>只管项目助手自己的命令，Thread 的权限在新建时设置。打开前说清实际影响：以 kaken 身份直接运行，能访问文件夹之外的文件。 | `Project Agent can run arbitrary commands inside registered directories as kaken via zsh. Baton does not sandbox or inspect these commands.` |
 
@@ -99,7 +96,7 @@ Baton 的底层跨越了中心服务、节点守护进程、项目代理和多�
 1. 输入框占位符只写发送对象的 Agent（`Message Codex…`），设备和目录写在输入区下方那一行，不在占位符里重复，也不放使用规则。
 2. 目标电脑离线或助手正忙时，原因写在输入区上方的横幅里一次；工具栏和消息下方只留短状态（`Sends when online`、`Sending next · Cancel`）。电脑在线且空闲时，工具栏保持干净，不写状态字样。
 3. 字段格式或权限说明只在第 2 条第 5 款允许的场景写在输入框下方，不在用户填写中途弹警告。
-4. 跨页面的阻塞问题（如某台电脑上的登录过期导致项目停摆）同时显示在对应项目输入区上方和 Inbox 里，在任一处解决即同步消失。
+4. 跨页面的阻塞问题（如某台电脑上的登录过期导致项目停摆）在对应项目输入区上方写完整原因并提供重试。
 
 ### 7. 准确表达系统状态（Accurate Feedback）
 
@@ -142,12 +139,12 @@ Baton 的底层跨越了中心服务、节点守护进程、项目代理和多�
 
 | 界面场景 | 核心要求 | 正面示例 |
 |---|---|---|
-| 侧栏与导航 | 用简短复数名词，不加 `My` / `Your` | `Inbox`、`Threads`、`Devices`、`Projects` |
+| 侧栏与导航 | 用简短复数名词，不加 `My` / `Your` | `Threads`、`Devices`、`Projects` |
 | 输入框占位符 | 只写对话对象，电脑写在输入区下方 | 主对话：`Ask the project assistant…`<br>独立对话：`Message Codex…` |
 | 过程记录折叠行 | 用过去式动词短语汇总实际做过的事，不写“思考完成” | `Ran 1 command, saved 1 note`<br>`Ran 1 command, edited 1 file` |
 | 暂停横幅 | 标题说谁停了，说明只写会保留什么，按钮负责恢复 | 标题：`Project paused`<br>说明：`New messages wait until you resume.`<br>按钮：`Resume` |
 | 超时停止横幅 | 标题说为什么停，说明只写本地改动还在；接着聊靠输入框本身 | 标题：`Stopped at the 2-hour limit`<br>说明：`Changed files were kept.` |
-| 待决定问题卡片 | 标题直接提问，选项是具体行动动词短语，不用内部状态词 | 标题：`1 reconnect test failed on Windows. What should we do next?`<br>选项 1：`Find the cause and fix it`（标 `Recommended`）<br>选项 2：`Run the test once more`<br>选项 3：`Skip for now and test Ubuntu` |
+| 项目故障 | 在输入区上方写完整原因，并提供重试按钮 | `ChatGPT 登录已过期` / `重试` |
 | 空状态 | 一个短语说这里还没有什么，加一个起步动作；不解释页面用途 | `No threads yet` |
 | 连接新电脑弹窗 | 按步骤写清：选系统、运行命令、粘贴口令 | 标题：`Connect a device`<br>口令标签：`Setup code`，有效期写在旁边 `10 min`<br>命令标签：`Run in terminal`<br>底部状态：`Waiting for device…` |
 
@@ -165,7 +162,7 @@ Baton 的底层跨越了中心服务、节点守护进程、项目代理和多�
 
 1. 全部界面元素（页面标题、弹窗标题、横幅标题、按钮、菜单项、标签、状态词）统一使用 **Sentence case**，只大写句首第一个词和专有名词。
 2. 只有在指代具体产品或品牌名时才大写首字母：`Baton`、`Codex`、`Kiro`、`Pi`、`ChatGPT`、`Claude`、`Windows`、`macOS`、`Ubuntu`。
-3. 取消句中人为造出的大写概念词：句中写 `project`、`thread`、`inbox`、`memory` 时一律用普通小写名词，不写成 `switching models mid-Thread` 或 `Open Project to retry`。
+3. 取消句中人为造出的大写概念词：句中写 `project`、`thread`、`memory` 时一律用普通小写名词，不写成 `switching models mid-Thread` 或 `Open Project to retry`。
 4. 按钮、标签和状态片省略冠词（`a`、`an`、`the`）；横幅正文、空状态和表单说明保留完整冠词和自然语序，不写成电报体。
 5. 涉及安全边界、数据去向或不可逆后果的句子，使用完整否定形式（`does not`、`will not`、`cannot`），不用缩略式。
 

@@ -27,6 +27,7 @@ export { listProjectRunCandidates, scheduleProjectRun, claimProjectCommands } fr
 export { scheduleMemoryJobs } from './memory-jobs.ts'
 import { stopProjectMemory } from './memory-jobs.ts'
 import * as threads from '../threads/index.ts'
+import { latestReplySeqSQL } from './attention.ts'
 
 const validateModelSource = Effect.fnUntraced(function* (employee: string, provider: string, nodeId: string | null) {
   const api = /^api-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(provider)
@@ -42,6 +43,21 @@ export const getProject = Effect.fn('getProject')(function* (employee: string, p
   yield* projectDecode(P.UUID, project)
   return yield* readProject(employee, project)
 }, Effect.mapError(dbError))
+export const markProjectRead = Effect.fn('markProjectRead')(function* (employee: string, project: string, seq: number) {
+  yield* projectDecode(P.UUID, project)
+  yield* projectDecode(P.NonNegativeInteger, seq)
+  return yield* projectTransaction(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const rows =
+        yield* sql`UPDATE conversations c SET read_reply_seq=GREATEST(c.read_reply_seq,LEAST(${seq},${latestReplySeqSQL(sql)}))
+      FROM project_agents a JOIN projects p ON p.id=a.project_id AND p.employee_id=a.employee_id
+      WHERE c.agent_id=a.id AND c.employee_id=a.employee_id AND p.id=${project} AND p.employee_id=${employee} RETURNING c.id`
+      if (!rows.length) return yield* Effect.fail(projectError('not_found', 404))
+      return { ok: true as const }
+    }),
+  )
+})
 export const createProject = Effect.fn('createProject')(function* (employee: string, input: P.CreateProjectInput) {
   const decoded = yield* projectDecode(P.CreateProjectInput, input)
   yield* projectDecode(P.summary(1024), decoded.provider)
@@ -146,8 +162,6 @@ export const patchProject = Effect.fn('patchProject')(function* (
           payload,
         )
       }
-      if (updated.status === 'archived')
-        yield* sql`UPDATE attention_requests SET state='withdrawn',withdraw_reason='Project 已归档',version=version+1,updated_at=clock_timestamp() WHERE project_id=${id} AND employee_id=${employee} AND state='open'`
       // 归档时为仍有工作的 Thread 保存停止请求，设备确认前 Thread 保持 stop_requested_at 未确认
       if (updated.status === 'archived' && old.status !== 'archived') {
         const running = yield* sql<{ id: string }>`SELECT t.id FROM threads t
@@ -273,7 +287,6 @@ export const retryProject = Effect.fn('retryProject')(function* (employee: strin
       const sql = yield* SqlClient.SqlClient,
         agent = yield* lockProjectAgent(employee, id)
       yield* sql`UPDATE conversations SET state='active',failure_count=0,next_attempt_at=NULL,attention_reason=NULL WHERE agent_id=${agent}`
-      yield* sql`UPDATE attention_requests SET state='resolved',version=version+1,resolved_at=clock_timestamp(),updated_at=clock_timestamp() WHERE employee_id=${employee} AND project_id=${id} AND source='system' AND state='open'`
       return { ok: true as const }
     }),
   )

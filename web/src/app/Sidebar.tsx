@@ -1,19 +1,18 @@
 import * as stylex from '@stylexjs/stylex'
 import { Link, useLocation, useNavigate } from '@tanstack/react-router'
 import { useState, type ReactNode } from 'react'
-import { liveThreads, pendingInbox } from '../data/derive'
-import { useInbox, useProjects, useSession, useThreads } from '../data/queries'
+import { liveThreads } from '../data/derive'
+import { useProjects, useSession, useThreads } from '../data/queries'
 import type { Project } from '../data/types'
 import { weight } from '../theme/base.stylex'
 import { useTheme, type ThemeMode } from '../theme/ThemeProvider'
 import { text } from '../theme/text'
 import { colors, radius, size, space } from '../theme/tokens.stylex'
 import { Avatar, PersonAvatar } from '../ui/Avatar'
-import { Count } from '../ui/Badge'
+import { Count, UnreadDot } from '../ui/Badge'
 import { focusRing, IconButton } from '../ui/Button'
 import { Icon, type IconName } from '../ui/Icon'
 import { Menu, MenuHeading, MenuOption, MenuRule } from '../ui/Menu'
-import { StatusDot } from '../ui/Status'
 import { useWorkspace } from './workspace'
 
 const styles = stylex.create({
@@ -141,7 +140,7 @@ function NavRow({
   trailing,
   collapsed,
 }: {
-  to: '/inbox' | '/threads' | '/devices'
+  to: '/threads' | '/devices'
   icon: IconName
   label: string
   trailing?: ReactNode
@@ -164,16 +163,11 @@ function NavRow({
   )
 }
 
-function ProjectTrailing({ project, pending }: { project: Project; pending: number }) {
-  if (project.status === 'paused') return null
-  if (pending > 0) return <Count value={pending} label={`${pending} 个问题待回复`} />
-  if (project.agent.state === 'running') return <StatusDot tone="agent" label="运行中" />
-  if (project.agent.state === 'stopping') return <StatusDot tone="agent" label="正在停止" />
-  if (project.agent.state === 'waitingDevice') return <span {...stylex.props(text.caption, text.faint)}>等待设备</span>
-  return null
+function ProjectTrailing({ project }: { project: Project }) {
+  return project.latestReplySeq > project.readReplySeq ? <UnreadDot /> : null
 }
 
-function ProjectRow({ project, pending }: { project: Project; pending: number }) {
+function ProjectRow({ project }: { project: Project }) {
   const { pathname } = useLocation()
   const active = pathname === `/projects/${project.id}`
   return (
@@ -189,7 +183,7 @@ function ProjectRow({ project, pending }: { project: Project; pending: number })
       <span {...stylex.props(styles.rowLabel, text.truncate, project.status === 'paused' && styles.pausedName)}>
         {project.name}
       </span>
-      <ProjectTrailing project={project} pending={pending} />
+      <ProjectTrailing project={project} />
     </Link>
   )
 }
@@ -201,12 +195,10 @@ export function Sidebar() {
   const session = useSession()
   const projects = useProjects()
   const threads = useThreads()
-  const inbox = useInbox()
   const { collapsed, toggleSidebar, signingOut, signOut } = useWorkspace()
   const { mode, setMode } = useTheme()
 
   const account = session.data?.account
-  const pending = pendingInbox(inbox.data ?? [])
   const unread = liveThreads(threads.data ?? []).filter((item) => item.unread).length
   const visibleProjects = (projects.data ?? []).filter((item) => item.status !== 'archived')
 
@@ -260,13 +252,6 @@ export function Sidebar() {
       </div>
       <div {...stylex.props(styles.nav)}>
         <NavRow
-          to="/inbox"
-          icon="inbox"
-          label="待处理"
-          collapsed={collapsed}
-          trailing={pending.length > 0 && <Count value={pending.length} label={`${pending.length} 个问题待回复`} />}
-        />
-        <NavRow
           to="/threads"
           icon="threads"
           label="对话"
@@ -294,7 +279,6 @@ function ProjectList({
   loaded: boolean
   unavailable: boolean
 }) {
-  const inbox = useInbox()
   const { newProject } = useWorkspace()
   const [headerHovered, setHeaderHovered] = useState(false)
   return (
@@ -319,7 +303,7 @@ function ProjectList({
         {unavailable && <span {...stylex.props(text.caption, styles.empty)}>无法加载项目</span>}
         {loaded && projects.length === 0 && <span {...stylex.props(text.caption, styles.empty)}>暂无项目</span>}
         {projects.map((project) => (
-          <ProjectRow key={project.id} project={project} pending={pendingInbox(inbox.data ?? [], project.id).length} />
+          <ProjectRow key={project.id} project={project} />
         ))}
       </div>
     </>

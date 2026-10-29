@@ -13,8 +13,6 @@ import { ClientError, type BatonClient, type ChangeEvent } from './client'
 import type {
   AgentKind,
   ID,
-  ItemDecision,
-  InboxItem,
   Message,
   Operation,
   Project,
@@ -47,7 +45,6 @@ export const keys = {
   threadOrder: ['threadOrder'] as const,
   thread: (id: ID) => ['threads', 'detail', id] as const,
   messages: (threadId: ID) => ['messages', threadId] as const,
-  inbox: ['inbox'] as const,
   activity: ['activity'] as const,
   file: (deviceId: ID, path: string) => ['files', deviceId, path] as const,
   // 过程保存在中心，随消息更新，与设备连接状态无关。
@@ -110,8 +107,6 @@ function refreshListItem<T extends { id: ID }>(
 function invalidateEntity(client: BatonClient, queryClient: QueryClient, target: NonNullable<ChangeEvent['target']>) {
   const messages = queryClient.getQueryData<Message[]>(keys.messages(target.id)) ?? []
   const messageIds = new Set(messages.map((message) => message.id))
-  const items = queryClient.getQueryData<InboxItem[]>(keys.inbox) ?? []
-  const itemIds = new Set(items.filter((item) => item.projectId === target.id).map((item) => item.id))
   void queryClient.invalidateQueries({
     predicate: ({ queryKey: [group, kind, id], state }) => {
       if (target.type === 'thread') {
@@ -125,15 +120,10 @@ function invalidateEntity(client: BatonClient, queryClient: QueryClient, target:
         if (group === 'operations') {
           const operation = state.data as Operation | undefined
           if (operation?.kind === 'sendMessage') return messageIds.has(operation.targetId)
-          return operation?.kind !== 'answerItem' && operation?.targetId === target.id
+          return operation?.targetId === target.id
         }
       } else {
         if (group === 'projects') return id === target.id
-        if (group === 'inbox') return true
-        if (group === 'operations') {
-          const operation = state.data as Operation | undefined
-          return operation?.kind === 'answerItem' && itemIds.has(operation.targetId)
-        }
       }
       return false
     },
@@ -156,7 +146,7 @@ export function ClientProvider({ client, children }: { client: BatonClient; chil
     const pending = new Map<string, NonNullable<ChangeEvent['target']>>()
     let timer: ReturnType<typeof setTimeout> | undefined
     const unsubscribe = client.subscribe(({ topics, target, browserEvent }) => {
-      if (browserEvent || (!target && topics.some((topic) => ['threads', 'inbox', 'projects'].includes(topic))))
+      if (browserEvent || (!target && topics.some((topic) => ['threads', 'projects'].includes(topic))))
         void queryClient.invalidateQueries({ queryKey: keys.activity })
       if (target) {
         pending.set(`${target.type}:${target.id}`, target)
@@ -328,11 +318,6 @@ export function useActivity() {
     enabled: !!client.getActivity,
     refetchOnMount: 'always',
   })
-}
-
-export function useInbox() {
-  const client = useClient()
-  return useQuery({ queryKey: keys.inbox, queryFn: () => client.listInbox() })
 }
 
 // 文件内容按需读取；设备不可用时由预览界面隐藏旧正文。
@@ -586,13 +571,6 @@ export function useMemorySources(projectId: ID, note: import('./types').MemoryNo
 export function useStopProjectRun() {
   const client = useClient()
   return useMutation({ mutationFn: (projectId: ID) => client.stopProjectRun(projectId) })
-}
-
-export function useHandleItem() {
-  const client = useClient()
-  return useMutation({
-    mutationFn: (input: { itemId: ID; decision: ItemDecision; revision: number }) => client.handleItem(input),
-  })
 }
 
 export function useRetryProject() {

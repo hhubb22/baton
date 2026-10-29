@@ -120,7 +120,7 @@ describe('on-demand device reads', () => {
     await waitFor(() => expect(Object.values(result.current).every((query) => query.isSuccess)).toBe(true))
     for (let round = 0; round < 3; round++) {
       await act(async () => {
-        f.publish(['devices', 'files', 'projects', 'threads', 'messages', 'inbox', 'operations'])
+        f.publish(['devices', 'files', 'projects', 'threads', 'messages', 'operations'])
       })
       await waitFor(() => expect(f.listDevices).toHaveBeenCalledTimes(round + 2))
       expect(f.listMessages).toHaveBeenCalledTimes(round + 2)

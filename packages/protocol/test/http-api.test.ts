@@ -5,7 +5,7 @@ import { EnrollmentResponse as DeviceEnrollmentResponse, SessionResponse as Auth
 
 it('generates schemas, statuses and cookie security for every implemented HTTP endpoint', () => {
   const endpoints = Object.values(BatonHttpApi.groups).flatMap((group) => Object.values(group.endpoints))
-  expect(endpoints).toHaveLength(64)
+  expect(endpoints).toHaveLength(61)
   const document = httpOpenApi()
   expect(document.info.title).toBe('Baton HTTP API')
   expect(document.paths['/api/v1/release']?.get?.responses).toHaveProperty('200')
@@ -26,7 +26,6 @@ it('generates schemas, statuses and cookie security for every implemented HTTP e
     expect(document.paths[path]?.get?.responses).toHaveProperty('200')
     expect(document.paths[path]?.get?.security).toEqual([{ session: [] }])
   }
-  expect(document.paths['/api/v1/attention-requests/{requestId}/answer']?.post?.responses).toHaveProperty('409')
   expect(document.paths['/api/v1/nodes/{nodeId}/roots']?.get?.responses).toHaveProperty('200')
   expect(document.paths['/api/v1/nodes/{nodeId}/roots']?.get?.security).toEqual([{ session: [] }])
   expect(document.paths['/api/v1/nodes/{nodeId}/roots']?.delete?.requestBody).toMatchObject({ required: true })

@@ -169,7 +169,7 @@ Thread 历史使用中心已保存的记录：`thread_messages` 保存员工和 
 
 ## MCP 注入
 
-上游 adapter 已按各 Agent 协议注入 `McpProviderSessionConfig`（endpoint、authorizationHeader、capabilities）。第一版宿主只接上 `McpProviderSessions`，不写入配置。以后向 Thread 中的 Agent 提供 Baton 工具（Thread、事项、记忆、`nodes.exec`）时，由 batond 开本地 MCP endpoint，按 Thread 发放凭据并经 WSS 转发到中心复用 Project 工具的权限检查；这项能力单独写规格，放在第一版之后。
+上游 adapter 已按各 Agent 协议注入 `McpProviderSessionConfig`（endpoint、authorizationHeader、capabilities）。第一版宿主只接上 `McpProviderSessions`，不写入配置。以后向 Thread 中的 Agent 提供 Baton 工具（Thread、记忆、`nodes.exec`）时，由 batond 开本地 MCP endpoint，按 Thread 发放凭据并经 WSS 转发到中心复用 Project 工具的权限检查；这项能力单独写规格，放在第一版之后。
 
 ## 注册、配置与设备能力（R-01～R-03、R-07、R-12）
 

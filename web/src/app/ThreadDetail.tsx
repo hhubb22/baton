@@ -30,7 +30,6 @@ import {
   useDevices,
   useMessages,
   useClient,
-  useInbox,
   useLiveOutput,
   useProjects,
   useOperation,
@@ -51,10 +50,8 @@ import { Dialog, DialogClose } from '../ui/Dialog'
 import { Icon } from '../ui/Icon'
 import { Menu, MenuOption } from '../ui/Menu'
 import { StatusDot, type Tone } from '../ui/Status'
-import { AttentionCard } from './AttentionCard'
 import { ThreadAccessMenu } from './ThreadAccessMenu'
 import { LocalThreadActions } from './LocalThreadActions'
-import { InboxFeedback } from './InboxFeedback'
 import { FilePreview } from './FilePreview'
 import { MessageBody } from './MessageBody'
 import { MessageActions } from './MessageActions'
@@ -477,7 +474,6 @@ export function ThreadDetail({
   )
   const devices = useDevices()
   const messages = useMessages(threadId)
-  const inbox = useInbox()
   const projects = useProjects()
   const send = useSendMessage()
   const cancelMessage = useCancelMessage()
@@ -774,7 +770,6 @@ export function ThreadDetail({
       deviceId: thread.deviceId,
       path: null,
       lines: null,
-      itemId: null,
       ...shortenExcerpt(value),
     }
     return () => workspace.askProject(projectId, reference)
@@ -824,7 +819,6 @@ export function ThreadDetail({
               at,
               order: (message.timelineOrder ?? Number.MAX_SAFE_INTEGER) - 0.5,
               message: null,
-              item: null,
               liveTurn: seq,
               count,
               active: liveTurn,
@@ -839,7 +833,6 @@ export function ThreadDetail({
         at,
         order: message.timelineOrder ?? Number.MAX_SAFE_INTEGER,
         message,
-        item: null,
         liveTurn: null,
         count: undefined,
         active: false,
@@ -999,7 +992,6 @@ export function ThreadDetail({
             describe={describeSelection}
             style={[styles.messages, layout === 'panel' && styles.messagesPanel]}
           >
-            <InboxFeedback />
             {messages.isPending && <p {...stylex.props(text.caption, styles.muted)}>正在加载消息…</p>}
             {messages.isError && !messages.data && (
               <Banner
@@ -1023,29 +1015,15 @@ export function ThreadDetail({
                       at: Number.MAX_SAFE_INTEGER - 1,
                       order: Number.MAX_SAFE_INTEGER,
                       message: null,
-                      item: null,
                       liveTurn: thread.runTurnSeq,
                       count: undefined,
                       active: true,
                     },
                   ]
                 : []),
-              ...(inbox.data ?? [])
-                .filter((item) => item.threadId === threadId)
-                .map((item) => ({
-                  id: item.id,
-                  at: item.createdAt,
-                  order: 0,
-                  message: null,
-                  item,
-                  liveTurn: null,
-                  count: undefined,
-                  active: false,
-                })),
             ]
               .sort((a, b) => a.at - b.at || a.order - b.order || a.id.localeCompare(b.id))
-              .map(({ message, item, id, liveTurn, count, active }) => {
-                if (item) return <AttentionCard key={id} item={item} inThread />
+              .map(({ message, id, liveTurn, count, active }) => {
                 if (liveTurn !== null)
                   return (
                     <TurnActivityTrace

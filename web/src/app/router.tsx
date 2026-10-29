@@ -3,7 +3,6 @@ import { createRootRoute, createRoute, createRouter, Outlet } from '@tanstack/re
 import { ArchivedProjectsPage } from '../pages/ArchivedProjectsPage'
 import { DevicesPage } from '../pages/DevicesPage'
 import { HomePage } from '../pages/HomePage'
-import { InboxPage } from '../pages/InboxPage'
 import { LoginPage } from '../pages/LoginPage'
 import { PasswordPage } from '../pages/PasswordPage'
 import { ProjectPage } from '../pages/ProjectPage'
@@ -48,10 +47,6 @@ export interface ThreadsSearch {
   // 新对话：focus 聚焦顶部输入区，folder 打开选择目录；from 用这个 Thread 的设备和目录预填。
   compose?: 'focus' | 'folder'
   from?: string
-}
-
-export interface InboxSearch {
-  handled?: true
 }
 
 export interface ProjectSearch {
@@ -107,12 +102,6 @@ const routeTree = rootRoute.addChildren([
   passwordRoute,
   workspaceRoute.addChildren([
     createRoute({ getParentRoute: () => workspaceRoute, path: '/', component: HomePage }),
-    createRoute({
-      getParentRoute: () => workspaceRoute,
-      path: '/inbox',
-      component: InboxPage,
-      validateSearch: (search: Record<string, unknown>): InboxSearch => ({ handled: flag(search.handled) }),
-    }),
     createRoute({
       getParentRoute: () => workspaceRoute,
       path: '/threads',

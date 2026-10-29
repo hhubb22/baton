@@ -114,7 +114,6 @@ export const appendAssistant = Effect.fn('appendProjectAssistant')(function* (
   if (!calls.length && payload.message.stopReason !== 'error' && payload.message.stopReason !== 'aborted')
     yield* registerMemoryJob(binding, event.seq)
   yield* sql`UPDATE conversations SET failure_count=0,next_attempt_at=NULL,attention_reason=NULL WHERE id=${binding.conversationId}`
-  yield* sql`UPDATE attention_requests SET state='resolved',version=version+1,resolved_at=clock_timestamp(),updated_at=clock_timestamp() WHERE project_id=${binding.projectId} AND source='system' AND state='open'`
   return event
 })
 export const readRuntimeEvents = Effect.fn('readProjectRuntimeEvents')(function* (
@@ -153,7 +152,7 @@ export const claimInputs = Effect.fn('claimProjectInputs')(function* (binding: P
   yield* assertToolsResolved(binding)
   const sql = yield* SqlClient.SqlClient
   const active =
-    yield* sql`SELECT 1 FROM project_agent_input_queue WHERE agent_id=${binding.agentId} AND delivered_seq IS NULL AND source_type IN ('user_message','attention_answer','turn_ended','thread_message_failed') LIMIT 1`
+    yield* sql`SELECT 1 FROM project_agent_input_queue WHERE agent_id=${binding.agentId} AND delivered_seq IS NULL AND source_type IN ('user_message','turn_ended','thread_message_failed') LIMIT 1`
   if (!active.length) return { payload_bytes: 0, input_count: 0 }
   const rows = yield* sql<{
     value: P.ProjectQueuedInput
@@ -189,7 +188,7 @@ export const claimInputs = Effect.fn('claimProjectInputs')(function* (binding: P
  (q.id=ANY(${ids}::bigint[]) OR (q.source_type='memory_updated' AND EXISTS(SELECT 1 FROM project_agent_input_queue s
  WHERE s.id=ANY(${ids}::bigint[]) AND s.source_type='memory_updated' AND s.payload->>'entry_id'=q.payload->>'entry_id' AND (s.payload->>'revision')::bigint>=(q.payload->>'revision')::bigint)))`
   for (const item of chosen) {
-    if (['user_message', 'attention_answer', 'thread_reply', 'turn_ended'].includes(item.source_type))
+    if (['user_message', 'thread_reply', 'turn_ended'].includes(item.source_type))
       yield* registerEventSource(binding.employeeId, binding.projectId, event.seq, event.seq, item.id)
   }
   return { event, payload_bytes: size, input_count: chosen.length }

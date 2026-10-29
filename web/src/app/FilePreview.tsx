@@ -556,7 +556,6 @@ function FileContent({
         deviceId,
         path,
         lines: { from, to },
-        itemId: null,
         excerpt,
         bytes,
       }

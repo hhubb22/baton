@@ -99,11 +99,10 @@ it('stores optional public configuration, queues revisions, commits bound vector
         const sql = yield* SqlClient.SqlClient
         return yield* sql<{
           failure_count: number
-          attention: number
-        }>`SELECT failure_count,(SELECT count(*)::float8 FROM attention_requests WHERE project_id=${c.projectId}) AS attention FROM conversations WHERE id=${c.conversationId}`
+        }>`SELECT failure_count FROM conversations WHERE id=${c.conversationId}`
       }),
     )
-    expect(effects).toEqual({ failure_count: 0, attention: 0 })
+    expect(effects).toEqual({ failure_count: 0 })
     expect(changed.memory_embedding!.config_id).not.toBe(config.config_id)
     expect(await db.run(transaction(commitEmbedding(c.employeeId, c.projectId, revised)))).toEqual({ accepted: false })
     await db.run(

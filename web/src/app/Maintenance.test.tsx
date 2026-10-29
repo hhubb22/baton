@@ -1,5 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router'
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vite-plus/test'
 import { ClientError } from '../data/client'
@@ -61,6 +61,50 @@ async function back(user: ReturnType<typeof userEvent.setup>) {
 beforeEach(() => localStorage.clear())
 
 describe('project maintenance', () => {
+  it('shows unread projects as dots', async () => {
+    setup('/threads')
+    const nav = await screen.findByRole('navigation', { name: '工作区' })
+    const link = await within(nav).findByRole('link', { name: /Compatibility/ })
+    expect(within(link).getByRole('img', { name: '未读' })).toBeInTheDocument()
+    expect(screen.queryByText('等你回复')).not.toBeInTheDocument()
+  })
+
+  it('marks the saved latest reply read only when visible at the bottom', async () => {
+    let mark!: ReturnType<typeof vi.spyOn>
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+    const { client } = setup(projectPath, 'normal', (value) => {
+      mark = vi.spyOn(value, 'markProjectRead')
+    })
+    await screen.findByText(/The suite finished with 2 failures/)
+    const timeline = screen.getByRole('region', { name: '对话' })
+    const reply = timeline.querySelector('[data-entry-id="ent-compat-3"]')!
+    Object.defineProperties(timeline, {
+      scrollHeight: { configurable: true, value: 1000 },
+      clientHeight: { configurable: true, value: 500 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+    })
+    vi.spyOn(timeline, 'getBoundingClientRect').mockReturnValue({ top: 0, bottom: 500 } as DOMRect)
+    vi.spyOn(reply, 'getBoundingClientRect').mockReturnValue({ top: 100, bottom: 200 } as DOMRect)
+    fireEvent.scroll(timeline)
+    expect(mark).not.toHaveBeenCalled()
+    visibility.mockReturnValue('visible')
+    fireEvent(document, new Event('visibilitychange'))
+    expect(mark).not.toHaveBeenCalled()
+    timeline.scrollTop = 500
+    fireEvent.scroll(timeline)
+    await waitFor(() => expect(mark).toHaveBeenCalledWith('prj-compat', 3))
+    await waitFor(async () => expect((await client.getProject('prj-compat')).readReplySeq).toBe(3))
+    visibility.mockRestore()
+  })
+
+  it('shows the failure reason and retries the project', async () => {
+    const user = userEvent.setup()
+    const { client } = setup('/projects/prj-docs')
+    const retry = vi.spyOn(client, 'retryProject')
+    expect(await screen.findByText('Claude 登录已过期')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: '重试' }))
+    await waitFor(() => expect(retry).toHaveBeenCalledWith('prj-docs'))
+  })
   it('saves name and goal only when Save changes is clicked', async () => {
     const user = userEvent.setup()
     const { router, client } = setup()
@@ -353,7 +397,7 @@ describe('project maintenance', () => {
   it('shows one actionable memory warning and clears it after sign-in without adding chat notices', async () => {
     const user = userEvent.setup()
     let attention: ('login_required' | 'credential_missing')[] = ['login_required']
-    const { client } = setup(memoryPath, 'normal', (client) => {
+    setup(memoryPath, 'normal', (client) => {
       vi.spyOn(client, 'getMemoryStatus').mockImplementation(async () => ({
         pending_batches: 2,
         attention,
@@ -365,7 +409,6 @@ describe('project maintenance', () => {
     expect(await within(memory).findByText('更新记忆需要登录')).toBeInTheDocument()
     expect(screen.getAllByText('更新记忆需要登录')).toHaveLength(1)
     expect(screen.getByRole('region', { name: '对话' })).not.toHaveTextContent('Memory updates need sign-in')
-    expect((await client.listInbox()).some((item) => item.title.includes('Memory updates'))).toBe(false)
     attention = []
     await user.click(screen.getByRole('tab', { name: /对话/ }))
     await user.click(screen.getByRole('tab', { name: /记忆/ }))
@@ -531,59 +574,6 @@ describe('project maintenance', () => {
     expect(within(history).getByText(originalMemory)).toBeVisible()
   })
 
-  it('saves messages and Inbox answers while paused, lets threads run, and reads the backlog on resume', async () => {
-    const user = userEvent.setup()
-    const { client, scheduler, router } = setup(projectPath, 'inboxPaused')
-    expect(await screen.findByText('项目已暂停')).toBeInTheDocument()
-    await user.type(screen.getByLabelText('给项目助手发消息'), 'Read this after resuming.{Enter}')
-    expect(await screen.findByText('Read this after resuming.')).toBeInTheDocument()
-    await advance(scheduler, browserLatency.save)
-    expect(
-      (await client.listProjectEntries('prj-compat')).find(
-        (entry) => entry.kind === 'user' && entry.body === 'Read this after resuming.',
-      ),
-    ).toMatchObject({ delivery: 'saved' })
-    await act(() => router.navigate({ to: '/inbox' }))
-    const question = await screen.findByRole('region', { name: 'What should the release notes mention?' })
-    await user.click(within(question).getByRole('radio', { name: /其他…/ }))
-    await user.type(within(question).getByLabelText('你的回复'), 'Mention Windows support.')
-    await user.click(within(question).getByRole('button', { name: '发送回复' }))
-    expect(
-      await within(await screen.findByRole('region', { name: '最近的处理结果' })).findByText(
-        '回复已保存 · 恢复项目后读取',
-      ),
-    ).toBeInTheDocument()
-    await act(() =>
-      router.navigate({
-        to: '/projects/$projectId',
-        params: { projectId: 'prj-compat' },
-        search: { thread: 'thr-compat' },
-      }),
-    )
-    await screen.findByRole('region', { name: '消息记录' })
-    const thread = screen.getByRole('complementary', { name: 'Run compat suite on Windows' })
-    act(() => client.controls.setDeviceConnection('dev-windows', 'online'))
-    await user.type(await within(thread).findByLabelText('消息'), 'Keep running the suite.{Enter}')
-    await advance(scheduler, browserLatency.save + browserLatency.run)
-    expect(await within(thread).findByText('Done. The change is ready for review.')).toBeInTheDocument()
-    expect(screen.getByText('项目已暂停')).toBeInTheDocument()
-    expect((await client.listProjects()).find((project) => project.id === 'prj-compat')?.agent.state).toBe('idle')
-    await user.click(screen.getByRole('button', { name: '恢复项目' }))
-    await waitFor(() => expect(screen.queryByText('项目已暂停')).not.toBeInTheDocument())
-    await advance(scheduler, browserLatency.run * 2)
-    const entries = await client.listProjectEntries('prj-compat')
-    expect(entries.find((entry) => entry.kind === 'user' && entry.body === 'Read this after resuming.')).toMatchObject({
-      delivery: 'delivered',
-    })
-    expect(
-      entries.some(
-        (entry) =>
-          entry.kind === 'user' && entry.body.includes('Mention Windows support.') && entry.delivery === 'delivered',
-      ),
-    ).toBe(true)
-    expect(screen.getByRole('region', { name: '对话' })).toHaveTextContent('Read this after resuming.')
-  })
-
   it('explains archiving and lets cancellation return to the unchanged project', async () => {
     const user = userEvent.setup()
     const { client, router } = setup()
@@ -591,18 +581,13 @@ describe('project maintenance', () => {
     await user.click(await screen.findByRole('menuitem', { name: '归档项目' }))
     expect(router.state.location.search).toMatchObject({ settings: true, archive: true })
     const dialog = await screen.findByRole('dialog', { name: '归档项目？' })
-    expect(
-      within(dialog).getByText('停止项目助手和运行中的对话，并关闭 2 个待处理问题。聊天、记忆和对话记录会保留。'),
-    ).toBeInTheDocument()
+    expect(within(dialog).getByText('停止项目助手和运行中的对话。聊天、记忆和对话记录会保留。')).toBeInTheDocument()
     await user.click(within(dialog).getByRole('button', { name: '取消' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(screen.getByRole('heading', { name: '项目设置' })).toBeInTheDocument()
     await back(user)
     expect(screen.getByLabelText('给项目助手发消息')).toBeInTheDocument()
     expect((await client.listProjects()).find((project) => project.id === 'prj-compat')?.status).toBe('active')
-    expect(
-      (await client.listInbox()).filter((item) => item.projectId === 'prj-compat' && item.status === 'pending'),
-    ).toHaveLength(2)
   })
 
   it('retries a failed archive, hides the project composer and keeps conversation, memory and threads', async () => {
@@ -629,11 +614,6 @@ describe('project maintenance', () => {
     expect(
       within(screen.getByRole('navigation', { name: '工作区' })).queryByRole('link', { name: /Compatibility/ }),
     ).not.toBeInTheDocument()
-    expect(
-      (await client.listInbox())
-        .filter((item) => item.projectId === 'prj-compat')
-        .every((item) => item.status === 'withdrawn'),
-    ).toBe(true)
     await user.click(screen.getByRole('button', { name: '显示概览' }))
     await user.click(screen.getByRole('tab', { name: /记忆/ }))
     const memory = await screen.findByRole('region', { name: '项目记忆' })

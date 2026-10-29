@@ -6,7 +6,6 @@ import { seedNode, withTestDatabase } from './testing/database.ts'
 import { projectToolFixture } from './testing/project-tools.ts'
 import { transaction } from './database.ts'
 import { AppError } from './errors.ts'
-import { createAgentAttention } from './inbox.ts'
 import { lockNodeSource, revokeNode } from './nodes.ts'
 import * as threads from './threads/index.ts'
 import { randomUUID } from 'node:crypto'
@@ -202,35 +201,21 @@ it('finishes a Node-locked Thread report while Project release waits for that No
     )
   }))
 
-it.each(['finished', 'failed'] as const)(
-  'records Project questions, %s replies and credential revocation once',
-  (state) =>
-    withTestDatabase(async (db) => {
-      const { context: c, nodeId } = await projectToolFixture(db)
-      const ask = { title: 'Which target?', content: 'Select a target.', options: [], allow_text: true }
-      await db.run(createAgentAttention(c, 'question-tool', ask))
-      await db.run(createAgentAttention(c, 'question-tool', ask))
-      await db.run(projectTransaction(releaseProjectRun(c.agentId, state, state === 'failed' ? 'failed' : '')))
-      await db.run(projectTransaction(releaseProjectRun(c.agentId, state, state === 'failed' ? 'failed' : '')))
-      await db.run(revokeNode(c.employeeId, nodeId))
-      await db.run(revokeNode(c.employeeId, nodeId))
-      const { events } = await db.run(replayNotifications(c.employeeId, '0'))
-      expect(events.map((event) => event.kind)).toEqual([
-        'question',
-        state === 'finished' ? 'turn_ended' : 'turn_failed',
-        'device_rejected',
-      ])
-      expect(events[0]).toMatchObject({ project_id: c.projectId, body: 'Which target?' })
-      expect(events[1]!.body).toBe(
-        state === 'finished' ? 'Project assistant finished replying.' : 'Project assistant could not finish replying.',
-      )
-      expect(events[2]).toMatchObject({ node_id: nodeId })
-      const saved = await db.run(
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          return yield* sql`SELECT id FROM attention_requests WHERE project_id=${c.projectId}`
-        }),
-      )
-      expect(saved).toHaveLength(1)
-    }),
+it.each(['finished', 'failed'] as const)('records Project %s replies and credential revocation once', (state) =>
+  withTestDatabase(async (db) => {
+    const { context: c, nodeId } = await projectToolFixture(db)
+    await db.run(projectTransaction(releaseProjectRun(c.agentId, state, state === 'failed' ? 'failed' : '')))
+    await db.run(projectTransaction(releaseProjectRun(c.agentId, state, state === 'failed' ? 'failed' : '')))
+    await db.run(revokeNode(c.employeeId, nodeId))
+    await db.run(revokeNode(c.employeeId, nodeId))
+    const { events } = await db.run(replayNotifications(c.employeeId, '0'))
+    expect(events.map((event) => event.kind)).toEqual([
+      state === 'finished' ? 'turn_ended' : 'turn_failed',
+      'device_rejected',
+    ])
+    expect(events[0]!.body).toBe(
+      state === 'finished' ? 'Project assistant finished replying.' : 'Project assistant could not finish replying.',
+    )
+    expect(events[1]).toMatchObject({ node_id: nodeId })
+  }),
 )

@@ -320,7 +320,7 @@ it('validates payloads, queries, paths, response shapes and available feature ro
   expect(diagnostics.status).toBe(200)
   expect(Schema.decodeUnknownSync(P.Diagnostics)(await diagnostics.json()).release).toEqual(P.releaseMetadata())
   expect((await request('/api/v1/threads')).status).toBe(200)
-  for (const path of ['/api/v1/projects', '/api/v1/inbox']) {
+  for (const path of ['/api/v1/projects']) {
     const response = await request(path)
     expect(response.status).toBe(200)
   }
@@ -334,8 +334,19 @@ it('validates payloads, queries, paths, response shapes and available feature ro
   const document = await request('/api/v1/openapi.json')
   expect(document.status).toBe(200)
   expect(await document.json()).toMatchObject({
-    paths: { '/api/v1/threads': { post: { responses: { '201': expect.anything() } } } },
+    paths: {
+      '/api/v1/threads': { post: { responses: { '201': expect.anything() } } },
+      '/api/v1/projects/{projectId}/read': {
+        post: { requestBody: expect.anything(), responses: { '200': expect.anything() } },
+      },
+    },
   })
+  const project = await request('/api/v1/projects', 'POST', { title: 'Read', provider: 'openai-codex', model: 'gpt-5' })
+  const created = Schema.decodeUnknownSync(P.Project)(await project.json())
+  const readPath = `/api/v1/projects/${created.id}/read`
+  expect((await request(readPath, 'POST', { seq: -1 })).status).toBe(400)
+  expect((await request(readPath, 'POST', { seq: Number.MAX_SAFE_INTEGER + 1 })).status).toBe(400)
+  expect((await request(readPath, 'POST', { seq: 0 })).status).toBe(200)
   expect((await request('/api/v1/openapi.json', 'GET', undefined, { cookie: '' })).status).toBe(401)
 })
 

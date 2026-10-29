@@ -9,10 +9,21 @@ import * as projects from './projects.ts'
 import { insertProjectInput } from './inputs.ts'
 import { contextualRuntimeRequest } from '../testing/project-context.ts'
 import * as threads from '../threads/index.ts'
+import { activitySnapshot } from '../desktop-notifications.ts'
 
 type Run = TestDatabase['run']
 const projectRuntimeReport: P.RuntimeReport = {
   project_runtime: { version: '0.1.0', providers: [{ provider: 'openai-codex', status: 'available' }] },
+  agents: [
+    {
+      agent_type: 'cursor',
+      version: '1.0.35',
+      status: 'available',
+      models: [{ id: 'default', name: 'Default' }],
+      default_model: 'default',
+      capabilities: { create: true, queue: true, steer: false, stop: true, resume: true, switch_model: false },
+    },
+  ],
   roots: [{ root_id: 'dev', path: '/workspace' }],
   repos: [],
   exec: { enabled: true, shell: '/bin/sh' },
@@ -124,6 +135,42 @@ describe('Project creation and messages', () => {
   )
 
   it(
+    'persists a Thread reference in a Project message',
+    async () =>
+      withTestDatabase(async ({ run }) => {
+        const a = await fixture(run)
+        const p = await a.create()
+        const reference: P.ProjectMessageReference = {
+          kind: 'thread',
+          title: 'Work',
+          threadId: randomUUID(),
+          reply: 1,
+          deviceId: a.node,
+          path: null,
+          lines: null,
+          excerpt: 'Done',
+          bytes: 4,
+        }
+        const saved = await run(
+          projects.acceptProjectMessage(a.employee, p.id, {
+            client_message_id: randomUUID(),
+            content: 'Review',
+            reference,
+          }),
+        )
+        expect(saved.reference).toEqual(reference)
+        expect((await run(projects.projectMessages(a.employee, p.id))).messages[0]?.reference).toEqual(reference)
+        const r = await a.start(p)
+        const claim = result(P.ProjectClaim, await r.rpc('claim_inputs', { last_seq: 0 }))
+        const payload = claim.event!.payload as { message: { content: { text: string }[] } }
+        expect(JSON.parse(payload.message.content[0]!.text)).toContainEqual(
+          expect.objectContaining({ payload: { content: 'Review', reference } }),
+        )
+      }),
+    30_000,
+  )
+
+  it(
     'persists references separately, rejects changed references and reads legacy messages and events',
     async () =>
       withTestDatabase(async ({ run }) => {
@@ -137,7 +184,6 @@ describe('Project creation and messages', () => {
           deviceId: null,
           path: '/workspace/source.ts',
           lines: { from: 1, to: 2 },
-          itemId: null,
           excerpt: 'selected code',
           bytes: 13,
         }
@@ -554,6 +600,63 @@ describe('input notification and batching', () => {
 
 describe('failure recovery and suspension', () => {
   it(
+    'tracks unread replies monotonically across new replies, pauses and archival',
+    async () =>
+      withTestDatabase(async ({ run }) => {
+        const a = await fixture(run)
+        const p = await a.create()
+        const r = await a.start(p)
+        const claim = result(P.ProjectClaim, await r.rpc('claim_inputs', { last_seq: 0 }))
+        const first = result(
+          P.ProjectEvent,
+          await r.rpc('append_event', {
+            last_seq: claim.event!.seq,
+            client_event_id: randomUUID(),
+            payload: assistant(),
+          }),
+        )
+        expect(await run(projects.getProject(a.employee, p.id))).toMatchObject({
+          latest_reply_seq: first.seq,
+          read_reply_seq: 0,
+          attention: null,
+        })
+        expect(await run(activitySnapshot(a.employee))).toMatchObject({ waiting_count: 1 })
+        await run(projects.markProjectRead(a.employee, p.id, first.seq))
+        expect(await run(activitySnapshot(a.employee))).toMatchObject({ waiting_count: 0 })
+        const second = result(
+          P.ProjectEvent,
+          await r.rpc('append_event', { last_seq: first.seq, client_event_id: randomUUID(), payload: assistant() }),
+        )
+        await r.rpc('append_event', {
+          last_seq: second.seq,
+          client_event_id: randomUUID(),
+          payload: assistant([{ type: 'toolCall', id: 'call', name: 'test', arguments: {} }]),
+        })
+        expect((await run(projects.getProject(a.employee, p.id))).latest_reply_seq).toBe(second.seq)
+        await run(projects.markProjectRead(a.employee, p.id, first.seq))
+        expect((await run(projects.listProjects(a.employee))).projects[0]).toMatchObject({
+          latest_reply_seq: second.seq,
+          read_reply_seq: first.seq,
+        })
+        await run(projects.patchProject(a.employee, p.id, { status: 'paused' }))
+        expect(await run(activitySnapshot(a.employee))).toMatchObject({ waiting_count: 1 })
+        await run(projects.patchProject(a.employee, p.id, { status: 'archived' }))
+        expect(await run(activitySnapshot(a.employee))).toMatchObject({ waiting_count: 0 })
+        await run(projects.markProjectRead(a.employee, p.id, 999999))
+        await run(projects.markProjectRead(a.employee, p.id, first.seq))
+        expect(await run(projects.getProject(a.employee, p.id))).toMatchObject({
+          latest_reply_seq: second.seq,
+          read_reply_seq: second.seq,
+        })
+        expect(await run(activitySnapshot(a.employee))).toMatchObject({ waiting_count: 0 })
+        const b = await fixture(run)
+        await expect(run(projects.markProjectRead(b.employee, p.id, second.seq))).rejects.toMatchObject({
+          code: 'not_found',
+        })
+      }),
+    30_000,
+  )
+  it(
     'keeps retrying after repeated failures and lets only new input bypass backoff',
     async () =>
       withTestDatabase(async ({ run }) => {
@@ -569,6 +672,8 @@ describe('failure recovery and suspension', () => {
           expect(status.waiting_reason).toBe('retry_backoff')
           expect(status.last_error).toBe('model failed')
           expect((await run(projects.getProject(a.employee, p.id))).conversation.state).toBe('active')
+          expect((await run(projects.getProject(a.employee, p.id))).attention).toBe(i >= 2 ? 'failing' : null)
+          expect((await run(projects.listProjects(a.employee))).projects[0]?.attention).toBe(i >= 2 ? 'failing' : null)
           const [delay] = await run(
             Effect.gen(function* () {
               const sql = yield* SqlClient.SqlClient
@@ -624,27 +729,21 @@ describe('failure recovery and suspension', () => {
             lease_epoch: command.lease_epoch,
           }),
         )
-        const [count] = await run(
+        expect((await run(projects.getProject(a.employee, p.id))).attention).toBe('failing')
+        expect(await run(activitySnapshot(a.employee))).toMatchObject({ running_count: 0, waiting_count: 0 })
+        await run(projects.retryProject(a.employee, p.id))
+        expect((await run(projects.getProject(a.employee, p.id))).attention).not.toBe('failing')
+        const recovered = await a.start(p)
+        await run(
           Effect.gen(function* () {
             const sql = yield* SqlClient.SqlClient
-            return yield* sql<{
-              n: string
-            }>`SELECT count(*) AS n FROM attention_requests WHERE project_id=${p.id} AND source='system' AND state='open'`
+            yield* sql`UPDATE conversations SET failure_count=3,attention_reason='model failed' WHERE id=${p.conversation.id}`
           }),
         )
-        expect(Number(count!.n)).toBe(1)
-        const recovered = await a.start(p)
+        expect((await run(projects.getProject(a.employee, p.id))).attention).toBe('failing')
         await recovered.rpc('append_event', { last_seq: 0, client_event_id: randomUUID(), payload: assistant() })
         expect((await run(projects.projectStatus(a.employee, p.id))).last_error).toBeNull()
-        const [open] = await run(
-          Effect.gen(function* () {
-            const sql = yield* SqlClient.SqlClient
-            return yield* sql<{
-              n: string
-            }>`SELECT count(*) AS n FROM attention_requests WHERE project_id=${p.id} AND state='open'`
-          }),
-        )
-        expect(Number(open!.n)).toBe(0)
+        expect((await run(projects.getProject(a.employee, p.id))).attention).not.toBe('failing')
         await run(projects.retryProject(a.employee, p.id))
         expect((await run(projects.getProject(a.employee, p.id))).conversation.state).toBe('active')
         await run(projects.patchProject(a.employee, p.id, { status: 'archived' }))
@@ -722,8 +821,6 @@ describe('failure recovery and suspension', () => {
             yield* sql`UPDATE threads SET project_id=${p.id} WHERE id IN (${working},${idle})`
             yield* sql`UPDATE thread_messages SET status='sent' WHERE thread_id=${idle}`
             yield* sql`UPDATE threads SET status='idle' WHERE id=${idle}`
-            yield* sql`INSERT INTO attention_requests(id,employee_id,project_id,agent_id,conversation_id,source,condition_type,condition_object_id,title,content)
-              VALUES(${randomUUID()},${employee},${p.id},${p.agent.id},${p.conversation.id},'system','project_needs_attention',${p.id},'Question','Body')`
           }),
         )
         await run(projects.patchProject(employee, p.id, { status: 'archived' }))
@@ -744,13 +841,6 @@ describe('failure recovery and suspension', () => {
               FROM threads t WHERE t.id IN (${working},${idle},${other})`
           }),
         )
-        const requests = await run(
-          Effect.gen(function* () {
-            const sql = yield* SqlClient.SqlClient
-            return yield* sql<{ state: string }>`SELECT state FROM attention_requests WHERE project_id=${p.id}`
-          }),
-        )
-        expect(requests).toEqual([{ state: 'withdrawn' }])
         const byId = Object.fromEntries(rows.map((row) => [row.id, row]))
         // 设备离线时停止请求保存为待确认，Thread 记录与消息保留
         expect(byId[working]).toMatchObject({ stop_requested: true, stop_confirmed: false, stops: 1, messages: 1 })

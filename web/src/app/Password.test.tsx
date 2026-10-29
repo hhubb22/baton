@@ -15,11 +15,7 @@ function jsonBody(body: RequestInit['body']): string {
   return body
 }
 
-function setup(
-  path = '/inbox?handled=true',
-  authenticated = false,
-  options: { mustChange?: boolean; username?: string } = {},
-) {
+function setup(path = '/threads', authenticated = false, options: { mustChange?: boolean; username?: string } = {}) {
   let signedIn = authenticated
   let mustChange = options.mustChange ?? true
   let password = 'initial-password'
@@ -58,7 +54,7 @@ function setup(
       })
     if (path === '/nodes') return Response.json({ nodes: [], default_device: {} })
     if (path === '/projects') return Response.json({ projects: [] })
-    if (path.startsWith('/inbox?')) return Response.json({ requests: [] })
+    if (path.startsWith('/threads?')) return Response.json({ requests: [] })
     throw new Error(`Unexpected request: ${path}`)
   })
   const client = createHttpClient({ fetch: fetcher, WebSocket: null, pollInterval: 1_000_000 })
@@ -94,7 +90,7 @@ describe('password change', () => {
     await user.click(screen.getByRole('button', { name: '登录' }))
     expect(await screen.findByRole('heading', { name: '修改密码' })).toBeInTheDocument()
     expect(router.state.location.pathname).toBe('/password')
-    expect(router.state.location.search.redirect).toBe('/inbox?handled=true')
+    expect(router.state.location.search.redirect).toBe('/threads')
     expect(screen.queryByRole('navigation', { name: '工作区' })).not.toBeInTheDocument()
     expect(requests.some((request) => request.path === '/nodes' || request.path === '/projects')).toBe(false)
 
@@ -104,7 +100,7 @@ describe('password change', () => {
     expect(await screen.findByText('密码已更新')).toBeInTheDocument()
     expect(screen.getByText('使用新密码重新登录。')).toBeInTheDocument()
     expect(router.state.location.pathname).toBe('/login')
-    expect(router.state.location.search.redirect).toBe('/inbox?handled=true')
+    expect(router.state.location.search.redirect).toBe('/threads')
     expect(requests.find((request) => request.path === '/me/password')?.body).toEqual({
       current_password: 'initial-password',
       new_password: 'updated-password',
@@ -112,21 +108,21 @@ describe('password change', () => {
     await user.type(screen.getByLabelText('用户名'), 'kaken')
     await user.type(screen.getByLabelText('密码'), 'updated-password')
     await user.click(screen.getByRole('button', { name: '登录' }))
-    expect(await screen.findByRole('heading', { name: '已处理' })).toBeInTheDocument()
-    expect(router.state.location.href).toBe('/inbox?handled=true')
+    expect(await screen.findByRole('link', { name: '对话' })).toBeInTheDocument()
+    expect(router.state.location.href).toBe('/threads')
   })
 
   it('returns signed-out visitors to login with their requested workspace page', async () => {
-    const { router } = setup('/password?redirect=%2Finbox%3Fhandled%3Dtrue')
+    const { router } = setup('/password?redirect=%2Fthreads')
     expect(await screen.findByRole('heading', { name: '登录 Baton' })).toBeInTheDocument()
     expect(router.state.location.pathname).toBe('/login')
-    expect(router.state.location.search.redirect).toBe('/inbox?handled=true')
+    expect(router.state.location.search.redirect).toBe('/threads')
   })
 
   it('opens the requested workspace page for an account that has already changed its password', async () => {
-    const { router } = setup('/password?redirect=%2Finbox%3Fhandled%3Dtrue', true, { mustChange: false })
-    expect(await screen.findByRole('heading', { name: '已处理' })).toBeInTheDocument()
-    expect(router.state.location.href).toBe('/inbox?handled=true')
+    const { router } = setup('/password?redirect=%2Fthreads', true, { mustChange: false })
+    expect(await screen.findByRole('link', { name: '对话' })).toBeInTheDocument()
+    expect(router.state.location.href).toBe('/threads')
   })
 
   it('requires a password different from the username, ignoring case', async () => {
@@ -152,13 +148,13 @@ describe('password change', () => {
   it('guards direct workspace navigation until the password is changed', async () => {
     const { router, requests } = setup('/devices', true)
     expect(await screen.findByRole('heading', { name: '修改密码' })).toBeInTheDocument()
-    await act(() => router.navigate({ to: '/inbox' }))
+    await act(() => router.navigate({ to: '/threads' }))
     await waitFor(() => expect(router.state.location.pathname).toBe('/password'))
     expect(screen.queryByRole('navigation', { name: '工作区' })).not.toBeInTheDocument()
     expect(requests.every((request) => request.path === '/me')).toBe(true)
   })
 
-  it.each(['//example.com', '/\\example.com', '/login', '/password?redirect=/inbox', '/x/../login'])(
+  it.each(['//example.com', '/\\example.com', '/login', '/password?redirect=/threads', '/x/../login'])(
     'drops unsafe or recursive redirects: %s',
     async (redirect) => {
       const { router } = setup(`/login?redirect=${encodeURIComponent(redirect)}`, true)

@@ -1,6 +1,6 @@
 # Baton
 
-Baton 是跨设备 AI Agent 协同系统。员工使用管理员分配的本地账号登录中心服务，注册并管理自己的设备，在指定设备和目录中使用 Cursor、Pi、Codex、Kiro Thread，也可以通过 Project Agent 主对话协调多个 Thread。中心保存输入、回复、附件引用、事项和记忆；原生会话与模型凭据保存在设备上。
+Baton 是跨设备 AI Agent 协同系统。员工使用管理员分配的本地账号登录中心服务，注册并管理自己的设备，在指定设备和目录中使用 Cursor、Pi、Codex、Kiro Thread，也可以通过 Project Agent 主对话协调多个 Thread。中心保存输入、回复、附件引用和记忆；原生会话与模型凭据保存在设备上。
 
 目录职责见 [Agent Guide](AGENTS.md#核心架构与目录)，领域名词见 [术语表](GLOSSARY.md)，执行与恢复机制见 [技术设计](specs/baton/TECH.md)。
 
@@ -129,7 +129,7 @@ Linux 需要有效的 `XDG_RUNTIME_DIR` 和 systemd 用户实例；`status` 还�
 
 ### Project 与模型订阅
 
-网页可管理 Project 主对话、事项、记忆与历史版本、目录授权、附件预览及本机命令执行开关。Project 使用设备本地的 ChatGPT、xAI 或 Claude 配置，按租约启动独立 Runtime；本机执行开关默认关闭，`nodes.exec` 通过受限 shell Thread 执行命令。
+网页可管理 Project 主对话、记忆与历史版本、目录授权、附件预览及本机命令执行开关。Project 使用设备本地的 ChatGPT、xAI 或 Claude 配置，按租约启动独立 Runtime；本机执行开关默认关闭，`nodes.exec` 通过受限 shell Thread 执行命令。
 
 设备详情按 Runtime 报告的登录方式显示入口。ChatGPT 和 xAI 支持设备码登录，凭据保存在设备上，完成后立即刷新报告。终端登录和状态查询可使用：
 
@@ -177,7 +177,6 @@ node apps/batond/dist/batond.cjs project-runtime connection-key <连接 ID> < ke
 - Agent 适配：[PRODUCT](specs/agent-adapters/PRODUCT.md)、[TECH](specs/agent-adapters/TECH.md)
 - Project Agent：[PRODUCT](specs/project-agent/PRODUCT.md)、[TECH](specs/project-agent/TECH.md)
 - Project 长期记忆草案：[PRODUCT](specs/project-memory/PRODUCT.md)、[TECH](specs/project-memory/TECH.md)
-- Agent Inbox：[PRODUCT](specs/agent-inbox/PRODUCT.md)、[TECH](specs/agent-inbox/TECH.md)
 - 上游转录与回放：[TECH](specs/agent-replay/TECH.md)
 - 术语与代码命名：[GLOSSARY](GLOSSARY.md)
 - 目录与验证入口：[AGENTS](AGENTS.md)

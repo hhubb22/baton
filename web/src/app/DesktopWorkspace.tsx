@@ -8,7 +8,7 @@ import {
   notificationScope,
   relayDesktopNotifications,
 } from '../data/desktop-notifications'
-import { useActivity, useClient, useInbox, useSession, useThreads } from '../data/queries'
+import { useActivity, useClient, useProjects, useSession, useThreads } from '../data/queries'
 import { Banner } from '../ui/Banner'
 
 const TargetNotice = createContext<string | null>(null)
@@ -90,15 +90,15 @@ function TrayActivity() {
   const bridge = desktopCapability('tray-status')!
   const snapshot = useActivity()
   const threads = useThreads()
-  const inbox = useInbox()
+  const projects = useProjects()
   const activity = useMemo(
     () =>
       snapshot.data
         ? desktopActivitySnapshot(snapshot.data)
         : client.getActivity
           ? { running: 0, waiting: 0, threads: [] }
-          : desktopActivity(threads.data ?? [], inbox.data ?? []),
-    [client, snapshot.data, threads.data, inbox.data],
+          : desktopActivity(threads.data ?? [], projects.data ?? []),
+    [client, snapshot.data, threads.data, projects.data],
   )
   useEffect(() => {
     void bridge.setActivity?.(activity).catch(() => {})

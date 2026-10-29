@@ -279,7 +279,7 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
   }
   function refreshAll() {
     nodeRead = null
-    emit('devices', 'projects', 'threads', 'messages', 'inbox', 'operations')
+    emit('devices', 'projects', 'threads', 'messages', 'operations')
   }
   function refreshVisible() {
     if (globalThis.document?.visibilityState === 'visible') refreshAll()
@@ -318,7 +318,7 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
       }
       if (message.type === 'nodes.changed') {
         nodeRead = null
-        emit('devices', 'projects', 'threads', 'messages', 'inbox', 'operations', 'files')
+        emit('devices', 'projects', 'threads', 'messages', 'operations', 'files')
       }
       if (
         message.type === 'devices.changed' &&
@@ -333,8 +333,7 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
       if (message.type === 'thread.changed' || message.type === 'project.changed') {
         const type = message.type === 'thread.changed' ? 'thread' : 'project'
         const id = type === 'thread' ? message.thread_id : message.project_id
-        const topics: Topic[] =
-          type === 'thread' ? ['threads', 'messages', 'operations'] : ['projects', 'inbox', 'operations']
+        const topics: Topic[] = type === 'thread' ? ['threads', 'messages', 'operations'] : ['projects', 'operations']
         if (
           message.change === 'detail' &&
           typeof id === 'string' &&

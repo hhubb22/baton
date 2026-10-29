@@ -2,7 +2,7 @@
 
 本文统一产品与代码中的领域叫法，并列出定义、代码名和容易混淆的含义。
 
-## 身份、对话与事项
+## 身份与对话
 
 | 领域术语 | 一句话定义 | 代码中的名字与入口 | 易混点 |
 | --- | --- | --- | --- |
@@ -15,15 +15,12 @@
 | Turn / 回合 | Thread 中从一条 queue 输入被原生接受到对应终态的一轮执行。 | `ThreadTurn`、`worker_turn_seq`、`turn.started`、`turn.ended`，见 [thread.ts](packages/protocol/src/thread.ts)。 | steer 输入加入当前回合；`worker_seq` 是报告序号，`worker_turn_seq` 是回合序号，`executionId` 是原生执行关联标识。 |
 | 回复 | Agent 在一个回合内给出的一条消息，可带附件。 | `AgentEvent` 的 `reply`、`ThreadReport.content`、`thread_replies`，见 [agent.ts](apps/batond/src/worker/agent.ts) 和 [reports.ts](apps/server/src/threads/reports.ts)。 | 一个回合可以有多条回复；实时文本增量与持久回复分别处理，中心正文可以被截断。 |
 | 附件 | 回复引用的文件或代码提交等资源。 | `ThreadReport.attachments`、`parseThreadAttachments`，见 [attachments.ts](apps/batond/src/devices/attachments.ts)。 | 文件引用携带 `node_id`、`root_id`、`path` 和访问状态；提交引用携带仓库地址与完整 SHA，引用本身不保存文件内容。 |
-| Project | 员工交给 Project Agent 持续推进的一件事及其相关对话、Thread、记忆和事项。 | `Project`、`project_id`，见 [project.ts](packages/protocol/src/project.ts)。 | Project 可为 `active`、`paused` 或 `archived`；其中的执行 Thread 各有自己的状态和生命周期。 |
+| Project | 员工交给 Project Agent 持续推进的一件事及其相关对话、Thread 和记忆。 | `Project`、`project_id`，见 [project.ts](packages/protocol/src/project.ts)。 | Project 可为 `active`、`paused` 或 `archived`；其中的执行 Thread 各有自己的状态和生命周期。 |
 | Project Agent | 一个 Project 的长期协调身份及其模型配置。 | `ProjectAgent`、`project_agents`，见 [project.ts](packages/protocol/src/project.ts) 和 [projects.ts](apps/server/src/project/projects.ts)。 | 它通过工具协调执行 Thread；一次 Runtime run 只承载它的一次运行。 |
 | 主对话 / Conversation | Project Agent 在中心保存的连续对话事件序列。 | `ProjectConversation`、`ProjectEvent`、`conversations`，见 [project.ts](packages/protocol/src/project.ts)。 | 主对话的 `seq` 与 Thread 的报告、回合和时间线序号各自计数；主对话也称 primary conversation。 |
 | Project Runtime run | Project Agent 在指定设备上持有租约的一次进程执行。 | `Run`、`run_id`、`agent_runs`，见 [manager.ts](apps/batond/src/project/manager.ts) 和 [scheduling.ts](apps/server/src/project/scheduling.ts)。 | 以 `(run_id, lease_epoch)` 识别授权运行；一个 Project 可以经历多次 run，Thread Turn 则是执行对话中的回合。 |
-| Project 输入 | 等待并入主对话的用户消息、事项回答、记忆变化或执行反馈。 | `project_agent_input_queue`、`source_type`、`wake_required`、`delivered_seq`，见 [inputs.ts](apps/server/src/project/inputs.ts)、[events.ts](apps/server/src/project/events.ts) 和 [runtime.ts](apps/server/src/project/runtime.ts)。 | `wake_required=false` 可只表示唤醒通知已确认；`delivered_seq` 才记录输入已并入的主对话事件。 |
-| 事项 | Project Agent 或 Baton 系统创建的、供员工处理且具有稳定 ID 与状态的请求或提示。 | `AttentionRequest`、`attention_requests`，见 [inbox.ts](packages/protocol/src/inbox.ts) 和 [中心事项实现](apps/server/src/inbox.ts)。 | 系统提示可没有选项且禁止文字回复；Thread 原生 Agent 问题通过另一套生命周期处理。 |
-| Agent Inbox | 集中列出员工本人各 Project 待处理事项的界面。 | `InboxPage`、`open_count`、`listInbox`，见 [inbox.ts](packages/protocol/src/inbox.ts) 和 [中心事项实现](apps/server/src/inbox.ts)。 | Inbox 是事项的集合视图；主对话和关联 Thread 中展示的是同一个事项。 |
-| 展示内容 | 事项中供员工展开阅读的一段受限 Markdown。 | `AttentionRequest.content`、`InboxAsk.content`、`validInboxMarkdown`，见 [inbox.ts](apps/server/src/inbox.ts)。 | 它与事项标题、选项和员工回复分别保存；最多 32 KiB，不渲染 HTML 或图片。 |
-| Agent 问题 | 原生执行 Agent 在当前 Turn 内发出的、等待员工回答的请求。 | `ThreadQuestion`、`pending_questions`、`question.pending`，见 [thread-question.ts](packages/protocol/src/thread-question.ts) 和 [thread.ts](packages/protocol/src/thread.ts)。 | `request_id` 标识原生问题；答案通过 Thread 持久命令投递，Inbox 事项使用独立 ID 和状态。 |
+| Project 输入 | 等待并入主对话的用户消息、记忆变化、Project 更新或执行反馈。 | `project_agent_input_queue`、`source_type`、`wake_required`、`delivered_seq`，见 [inputs.ts](apps/server/src/project/inputs.ts)、[events.ts](apps/server/src/project/events.ts) 和 [runtime.ts](apps/server/src/project/runtime.ts)。 | `wake_required=false` 可只表示唤醒通知已确认；`delivered_seq` 才记录输入已并入的主对话事件。 |
+| Agent 问题 | 原生执行 Agent 在当前 Turn 内发出的、等待员工回答的请求。 | `ThreadQuestion`、`pending_questions`、`question.pending`，见 [thread-question.ts](packages/protocol/src/thread-question.ts) 和 [thread.ts](packages/protocol/src/thread.ts)。 | `request_id` 标识原生问题；答案通过 Thread 持久命令投递。 |
 | 上下文压缩 / Compaction | 保存缩减后的模型历史视图并保留中心原始事件的操作。 | `CompactionPayload`、`commit_compaction`，见 [compaction.ts](runtimes/project-agent/src/compaction.ts) 和 [runtime.ts](runtimes/project-agent/src/runtime.ts)。 | 摘要和清除工具结果视图都可形成 compaction；`through_seq` 与 `cleared_tool_result_seqs` 描述视图范围，中心原文继续保留。 |
 
 ## 执行边界与输入投递

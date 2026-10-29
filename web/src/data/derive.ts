@@ -8,7 +8,6 @@ import type {
   DeviceAgent,
   FilePreview,
   ID,
-  InboxItem,
   Message,
   Operation,
   Project,
@@ -439,12 +438,6 @@ export function shortenExcerpt(selected: string) {
   if (bytes.length <= referenceLimit) return { excerpt: selected, bytes: bytes.length }
   const excerpt = new TextDecoder().decode(bytes.slice(0, referenceLimit)).replace(/\uFFFD$/, '')
   return { excerpt, bytes: bytes.length }
-}
-
-export function pendingInbox(items: InboxItem[], projectId?: ID) {
-  return items
-    .filter((item) => item.status === 'pending' && (!projectId || item.projectId === projectId))
-    .sort((a, b) => b.createdAt - a.createdAt)
 }
 
 function connectionCounts(devices: Device[]) {

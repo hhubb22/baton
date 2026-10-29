@@ -1,6 +1,6 @@
 # TypeScript 开发中心
 
-`@baton/server` 提供员工登录、设备管理、Cursor / Pi / Codex / Kiro 远程 Thread、Project 调度、主对话、事项和记忆，以及持久命令、回复时间线和实时输出。它与 [`apps/batond`](../batond/README.md) 的出站 WSS 节点连接配合，网页静态目录由中心构建脚本生成并由中心提供。
+`@baton/server` 提供员工登录、设备管理、Cursor / Pi / Codex / Kiro 远程 Thread、Project 调度、主对话和记忆，以及持久命令、回复时间线和实时输出。它与 [`apps/batond`](../batond/README.md) 的出站 WSS 节点连接配合，网页静态目录由中心构建脚本生成并由中心提供。
 
 中心的 Project 实现位于 `src/project/`。`runtimeRequest` 接收节点 Runtime 请求，在一个事务内检查租约、执行工具、保存结果事件并消费对应输入；工具执行与输入消费由该入口内部处理。工具重试返回已保存的结果，失效租约会回滚本次副作用，等待 shell 工具的 pending 查询使用独立只读事务。
 
@@ -73,15 +73,15 @@ Project 工具 `threads.trace` 使用相同查询，参数为 `thread_id`、`wor
 
 已登录员工通过 `GET /api/v1/events/replay?after=<cursor>&limit=100` 按序补读通知，响应为 `{events,cursor,has_more}`，每页最多 100 条。省略 `after` 时先为当前已提交的 intent 分配游标，再返回空事件列表和当前游标，供首次启动建立起点，后台随后投递这些历史通知也不会使客户端重复消费；传入游标后返回严格晚于该游标的已提交事件。游标按员工和中心隔离，不能超过当前员工已保存的最大值。客户端在 WebSocket ready、重连和通知到达后串行补读，持久保存处理进度；已通知、被聚焦规则抑制和关闭通知时消费的事件都应推进游标，重新加载时不会重新弹出。
 
-`GET /api/v1/activity` 从与网页相同的 Thread 和事项记录读取员工全部设备的状态。`running_count` 是 running Thread 数；`waiting_count` 是存在当前未回答问题或关联未处理 Agent 事项的非归档 Thread 数，同一 Thread 只计一次。没有关联 Thread 的 Project 问题照常通知，但不计入等待 Thread 数。`waiting_threads` 按最近活动排序，最多返回五个不同 Thread 的 ID、标题和可选 Project ID。
+`GET /api/v1/activity` 读取员工全部设备的 Thread 与 Project 状态。`running_count` 是 running Thread 数；`waiting_count` 是存在当前未回答问题的非归档 Thread 数与有未读回复的非归档 Project 数之和，同一 Thread 只计一次。暂停的 Project 仍计入未读回复；故障状态不单独计数。`waiting_threads` 按最近活动排序，最多返回五个不同 Thread 的 ID、标题和可选 Project ID。
 
 实时输出由 Worker 保留当前 Turn 最近 256 KiB，每次读取最多 16 KiB，游标为 `epoch:字节偏移`。Turn 结束和切换时清空；淘汰、旧 epoch 或上游丢失输出时返回 `gap:true`。HTTP 输出查询和浏览器 WebSocket 复用设备临时 RPC，中心不持久化实时输出。
 
 ## Project 与设备管理
 
-网页可创建、配置、暂停和归档 Project，发送主对话消息、处理事项、编辑、停用和显式恢复记忆，并按需查看来源与历史版本。设置关闭后保留未保存草稿，暂停和恢复独立于描述字段的保存。输入、对话事件、工具结果和记忆都保存在 PostgreSQL；主对话消息使用独立的 `reference` 字段保存引用，正文不拼接引用标签。旧队列与历史输入事件的有效引用后缀由中心读取时拆分，原始事件保持不变。Runtime 使用设备本地订阅，按需启动。默认设备符合在线、同步、provider 和配置名额条件时优先使用，否则选择同一员工的其他合格设备。已声明 provider 的认证状态为 unknown 时允许启动检查；明确未登录或凭据权限错误时显示对应原因。没有可用设备时保留输入并显示等待原因。
+网页可创建、配置、暂停和归档 Project，发送主对话消息、编辑、停用和显式恢复记忆，并按需查看来源与历史版本。设置关闭后保留未保存草稿，暂停和恢复独立于描述字段的保存。输入、对话事件、工具结果和记忆都保存在 PostgreSQL；主对话消息使用独立的 `reference` 字段保存引用，正文不拼接引用标签。旧队列与历史输入事件的有效引用后缀由中心读取时拆分，原始事件保持不变。Runtime 使用设备本地订阅，按需启动。默认设备符合在线、同步、provider 和配置名额条件时优先使用，否则选择同一员工的其他合格设备。已声明 provider 的认证状态为 unknown 时允许启动检查；明确未登录或凭据权限错误时显示对应原因。没有可用设备时保留输入并显示等待原因。
 
-中心按独立额度处理 Thread 命令和 Project 的 start、stop、wake，发送前持久保存重试时间。Project 租约为 60 秒，节点每 20 秒续租，58 秒未成功续租即停止 Runtime。暂停或停止 Project 作废租约；已创建的 Thread 按各自生命周期继续运行。模型请求持续失败后依次退避 1、5、15 分钟，连续三次失败显示系统提示，此后仍按 15 分钟间隔尝试。新用户消息或显式重试可提前继续，同一消息的重发不改变退避；保存模型回复后解决系统提示。事项处理携带版本与请求标识，记忆写入携带 `expected_revision` 与 `operation_id`，冲突响应返回当前记录且网页保留草稿。员工 API、前台记忆工具和后台整理共享 `project/memory/` 的 `planChange` 与 `executeChange`：前者锁定状态并完成全部校验，后者同事务保存修订、证据、操作结果、抑制记录和检索投影，修订作者按调用方记为 user、agent 或 background。`memory.recall` 与 POST memory/recall 使用 PG 有界候选、Orama 3.1.18 排序、片段与来源引用，并按状态和事实时间过滤。`prepare_context` 保存核心要求、相关片段、`core_epoch`、期限，以及 Runtime 传入的记忆工具读取版本中仍为当前修订的部分；保存新 assistant 和首次提交工具时，只在核心代次、快照读到的条目版本或期限变化时拒绝，已登记 nodes.exec 继续原等待。摘要提交不再核对记忆快照。Project 可保存默认关闭的公开 memory_embedding 配置；中心登记 pending/ready 向量，核对配置/修订/文本哈希，在 pgvector `vector` 列上按余弦距离精确排序取前 20，再与词法候选做 RRF 融合。数据库须安装 pgvector 0.5 及以上版本，连接的 search_path 为 Baton schema 加 public。设备 SDK、密钥 CLI、查询向量、后台生成和设置 UI 已接通。来源正文使用授权字节分页；角色从原始队列/事件确定，员工编辑来源由程序记录。最终回复和 project_memory_jobs 在同一事务保存，整理按不可变来源和字节游标分页，read_sources 附带同批次其他来源与批次前最近一条回复作为只读上下文，lookup_items 附带未解除的停用和纠正断言；后台 attempt 复用 agent_runs 与 start/stop 投递，但使用独立 claim。空闲设备每次只运行一个后台任务，前台有工作时撤销后台，停止回执前保留占用。commit_chunk 按提案逐条校验并返回 outcomes，被拒提案记录错误码，其余提案和游标照常提交；未带 final 时修订冲突回滚整片，带 final 时冲突提案记为被拒。进度、回执和提交尝试的 attempt_id 同事务保存。finish 时本次尝试没有提交分片则按 1、5、15 分钟退避，同一分片连续三次内容失败后跳过并记录原因；永久停放的批次不阻塞后续批次。暂停保留工作，归档拒绝提交。等待、错误、退避与成本只记入后台诊断，失败不改变前台 failure_count。见 [长期记忆设计](../../specs/project-memory/TECH.md)。
+中心按独立额度处理 Thread 命令和 Project 的 start、stop、wake，发送前持久保存重试时间。Project 租约为 60 秒，节点每 20 秒续租，58 秒未成功续租即停止 Runtime。暂停或停止 Project 作废租约；已创建的 Thread 按各自生命周期继续运行。模型请求持续失败后依次退避 1、5、15 分钟，连续三次失败显示故障状态及原因，此后仍按 15 分钟间隔尝试。新用户消息或显式重试可提前继续，同一消息的重发不改变退避；保存模型回复后清除失败计数和故障状态。记忆写入携带 `expected_revision` 与 `operation_id`，冲突响应返回当前记录且网页保留草稿。员工 API、前台记忆工具和后台整理共享 `project/memory/` 的 `planChange` 与 `executeChange`：前者锁定状态并完成全部校验，后者同事务保存修订、证据、操作结果、抑制记录和检索投影，修订作者按调用方记为 user、agent 或 background。`memory.recall` 与 POST memory/recall 使用 PG 有界候选、Orama 3.1.18 排序、片段与来源引用，并按状态和事实时间过滤。`prepare_context` 保存核心要求、相关片段、`core_epoch`、期限，以及 Runtime 传入的记忆工具读取版本中仍为当前修订的部分；保存新 assistant 和首次提交工具时，只在核心代次、快照读到的条目版本或期限变化时拒绝，已登记 nodes.exec 继续原等待。摘要提交不再核对记忆快照。Project 可保存默认关闭的公开 memory_embedding 配置；中心登记 pending/ready 向量，核对配置/修订/文本哈希，在 pgvector `vector` 列上按余弦距离精确排序取前 20，再与词法候选做 RRF 融合。数据库须安装 pgvector 0.5 及以上版本，连接的 search_path 为 Baton schema 加 public。设备 SDK、密钥 CLI、查询向量、后台生成和设置 UI 已接通。来源正文使用授权字节分页；角色从原始队列/事件确定，员工编辑来源由程序记录。最终回复和 project_memory_jobs 在同一事务保存，整理按不可变来源和字节游标分页，read_sources 附带同批次其他来源与批次前最近一条回复作为只读上下文，lookup_items 附带未解除的停用和纠正断言；后台 attempt 复用 agent_runs 与 start/stop 投递，但使用独立 claim。空闲设备每次只运行一个后台任务，前台有工作时撤销后台，停止回执前保留占用。commit_chunk 按提案逐条校验并返回 outcomes，被拒提案记录错误码，其余提案和游标照常提交；未带 final 时修订冲突回滚整片，带 final 时冲突提案记为被拒。进度、回执和提交尝试的 attempt_id 同事务保存。finish 时本次尝试没有提交分片则按 1、5、15 分钟退避，同一分片连续三次内容失败后跳过并记录原因；永久停放的批次不阻塞后续批次。暂停保留工作，归档拒绝提交。等待、错误、退避与成本只记入后台诊断，失败不改变前台 failure_count。见 [长期记忆设计](../../specs/project-memory/TECH.md)。
 
 在线且已同步的设备支持目录增删、命令执行授权和订阅设备码登录；HTTP 在设备确认操作标识及保存值后才返回成功。目录、仓库、shell 与订阅状态通过能力报告刷新。文件预览按偏移和版本每次读取最多 64 KiB，网页可继续读取，文件变化时要求重新打开。目录游标可以继续扫描全部条目；POSIX 文件名保留冒号和反斜杠，Windows 保留驱动器与 ADS 防护。符号链接越界、二进制内容和无效游标均被拒绝；祖先目录仅 ctime 变化时丢弃读取并完整重新授权，最多尝试 3 次。
 
@@ -89,7 +89,7 @@ Project 工具 `threads.trace` 使用相同查询，参数为 `thread_id`、`wor
 
 ## HTTP 契约与追踪
 
-`src/http/` 提供路由 handler、安全校验与静态文件服务，依赖 Gateway 的请求、通知、断线及诊断操作。`packages/protocol/src/http-api.ts` 使用 Effect `HttpApi` 定义登录、账号、设备、Thread、Project、事项、记忆和诊断接口的路径、入参、响应与错误。服务端通过同一声明构建路由并验证请求和返回值。已登录且完成改密的员工可读取 `GET /api/v1/openapi.json`；文档由契约生成，写请求继续要求允许的 Origin 和会话 CSRF token。
+`src/http/` 提供路由 handler、安全校验与静态文件服务，依赖 Gateway 的请求、通知、断线及诊断操作。`packages/protocol/src/http-api.ts` 使用 Effect `HttpApi` 定义登录、账号、设备、Thread、Project、记忆和诊断接口的路径、入参、响应与错误。服务端通过同一声明构建路由并验证请求和返回值。已登录且完成改密的员工可读取 `GET /api/v1/openapi.json`；文档由契约生成，写请求继续要求允许的 Origin 和会话 CSRF token。
 
 中心、节点和 Worker 使用 Effect 原生 tracing，默认服务名分别为 `baton-server`、`batond`、`baton-worker`。设置 `OTEL_EXPORTER_OTLP_ENDPOINT` 后，通过 OTLP/HTTP JSON 导出到其 `/v1/traces`；也可用 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` 指定完整地址。未配置地址时不发起导出请求。`OTEL_TRACES_EXPORTER=none` 可显式关闭，`OTEL_RESOURCE_ATTRIBUTES` 可附加部署属性。
 
@@ -111,7 +111,7 @@ docker run --rm --name baton-tracing \
 
 | 功能                                             | TS 当前响应                                                                                          |
 | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
-| Project、Inbox、记忆及历史版本 | 提供 Project 创建与配置、主对话、运行状态、事项处理和版本冲突响应 |
+| Project、记忆及历史版本 | 提供 Project 创建与配置、主对话、运行状态和版本冲突响应 |
 | 在线设备授权目录增删、Project 执行授权、订阅登录 | 等待设备保存确认，订阅凭据留在设备 |
 | 文件和附件预览 | 授权根内目录分页和受限文本预览；越界与二进制内容拒绝 |
 | 受限 shell Thread | 仅供 Project `nodes.exec` 使用，要求目标设备本机已开启执行授权 |

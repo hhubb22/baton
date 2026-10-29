@@ -1,19 +1,21 @@
 import type { ActivitySnapshot } from '@baton/protocol'
 import type { BatonClient } from './client'
 import type { DesktopActivity, DesktopBridge } from './desktop'
-import type { InboxItem, Thread } from './types'
+import type { Project, Thread } from './types'
 
 // 托盘复用网页数据，不按当前页面的设备或 Project 筛选。
-export function desktopActivity(threads: Thread[], inbox: InboxItem[]): DesktopActivity {
+export function desktopActivity(threads: Thread[], projects: Project[]): DesktopActivity {
   const active = threads.filter((thread) => thread.status !== 'archived')
-  const questions = inbox.filter((item) => item.status === 'pending' && item.kind === 'question')
-  const waitingIds = new Set(questions.flatMap((item) => (item.threadId ? [item.threadId] : [])))
+  const waitingIds = new Set<string>()
   for (const thread of active) {
     if (thread.pendingQuestions?.length) waitingIds.add(thread.id)
   }
   return {
     running: active.filter((thread) => thread.status === 'running').length,
-    waiting: active.filter((thread) => waitingIds.has(thread.id)).length,
+    waiting:
+      active.filter((thread) => waitingIds.has(thread.id)).length +
+      projects.filter((project) => project.status !== 'archived' && project.latestReplySeq > project.readReplySeq)
+        .length,
     threads: active
       .filter((thread) => waitingIds.has(thread.id))
       .sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id))

@@ -1,4 +1,4 @@
-// 界面使用的业务对象。字段按 specs/baton、specs/project-agent、specs/agent-inbox 的行为规格取名，
+// 界面使用的业务对象。字段按 specs/baton、specs/project-agent 的行为规格取名，
 // 对象之间只用稳定 ID 关联，派生状态见 derive.ts。
 
 import type { MemoryEmbeddingConfig, MemoryEmbeddingConfigInput, ThreadTraceStep } from '@baton/protocol'
@@ -238,10 +238,10 @@ export interface LiveOutput {
   workerTurnSeq?: number
 }
 
-// 选中一段内容去问 Project 助手时带上的来源。Thread 回复写 Thread 和第几条回复；文件再写设备、路径和行号；事项写事项 ID。
+// 选中一段内容去问 Project 助手时带上的来源。
 export interface Reference {
-  kind: 'thread' | 'file' | 'item'
-  // 来源的名字：Thread 标题、文件名或事项标题。
+  kind: 'thread' | 'file'
+  // 来源的名字：Thread 标题或文件名。
   title: string
   threadId: ID | null
   // 第几条 Agent 回复，从 1 开始。
@@ -249,7 +249,6 @@ export interface Reference {
   deviceId: ID | null
   path: string | null
   lines: { from: number; to: number } | null
-  itemId: ID | null
   // 选中的文字。超过 8 KiB 时只保留开头。
   excerpt: string
   // 选中文字原来的 UTF-8 字节数。
@@ -267,6 +266,10 @@ export interface Project {
   emoji?: string
   hue: 'slate' | 'amber' | 'violet' | 'green' | 'blue' | 'rose'
   status: ProjectStatus
+  attention: 'failing' | null
+  attentionReason: string | null
+  latestReplySeq: number
+  readReplySeq: number
   archivedAt: number | null
   goal: string
   // Project 助手使用的订阅和模型，修改后从下一次运行开始生效。
@@ -383,41 +386,7 @@ export interface MemorySourceView {
 
 export type MemorySave = { state: 'saved' | 'conflict'; note: MemoryNote }
 
-export type InboxStatus = 'pending' | 'answered' | 'closed' | 'withdrawn' | 'resolved'
-
-export interface InboxItem {
-  id: ID
-  projectId: ID
-  threadId: ID | null
-  kind: 'question' | 'system'
-  title: string
-  body: string
-  options: string[]
-  recommended: number | null
-  allowText: boolean
-  status: InboxStatus
-  result: {
-    option: string | null
-    note: string
-    actor: string
-    at: number
-    reason: string | null
-    inputId: ID | null
-  } | null
-  // 每次处理都会递增，用来发现其他页面或设备已经处理过。
-  revision: number
-  createdAt: number
-}
-
-export type ItemDecision = { kind: 'answer'; option: string | null; note: string } | { kind: 'close' }
-
-export type OperationKind =
-  | 'createThread'
-  | 'sendMessage'
-  | 'stopThread'
-  | 'archiveThread'
-  | 'resumeThread'
-  | 'answerItem'
+export type OperationKind = 'createThread' | 'sendMessage' | 'stopThread' | 'archiveThread' | 'resumeThread'
 
 // 操作确认的各个阶段，界面据此区分已提交、已保存、等待设备、执行中和已停止。
 export type OperationPhase =

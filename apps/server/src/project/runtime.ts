@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { Effect, Schema } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import * as P from '@baton/protocol'
@@ -17,7 +17,6 @@ import {
   projectMemoryIndex,
   searchProjectHistory,
 } from './memory/index.ts'
-import { createAgentAttention, getAttentionRequest, listProjectAttention, withdrawAttention } from '../inbox.ts'
 import * as threads from '../threads/index.ts'
 import { lockNodeSource, recordNodeBusiness, revalidateNodeSource } from '../nodes.ts'
 import {
@@ -206,8 +205,6 @@ const toolRequest = Effect.fn('callProjectTool')(function* (
     'threads.get',
     'threads.read',
     'threads.trace',
-    'inbox.list',
-    'inbox.get',
   ].includes(call.name)
   const result = existingExec
     ? yield* waitProjectTool(ctx, finish.finish_wait ?? false)
@@ -442,13 +439,8 @@ export const runtimeRequest = Effect.fn('projectRuntimeRequest')(function* (
         case 'report_failure': {
           const reason = boundedProjectText(request.reason ?? '', 1024)
           if (request.operation === 'report_failure') {
-            const [conversation] = yield* sql<{
-              failure_count: number
-            }>`UPDATE conversations SET failure_count=LEAST(failure_count::bigint+1,2147483647)::integer,next_attempt_at=clock_timestamp()+CASE WHEN failure_count=0 THEN interval '1 minute' WHEN failure_count=1 THEN interval '5 minutes' ELSE interval '15 minutes' END,
- state='active',attention_reason=${reason} WHERE id=${b.conversationId} RETURNING failure_count`
-            if (conversation?.failure_count === 3)
-              yield* sql`INSERT INTO attention_requests(id,employee_id,project_id,agent_id,conversation_id,source,condition_type,condition_object_id,title,content)
- VALUES(${randomUUID()},${b.employeeId},${b.projectId},${b.agentId},${b.conversationId},'system','project_needs_attention',${b.projectId},'Project 需要处理',${reason}) ON CONFLICT DO NOTHING`
+            yield* sql`UPDATE conversations SET failure_count=LEAST(failure_count::bigint+1,2147483647)::integer,next_attempt_at=clock_timestamp()+CASE WHEN failure_count=0 THEN interval '1 minute' WHEN failure_count=1 THEN interval '5 minutes' ELSE interval '15 minutes' END,
+ state='active',attention_reason=${reason} WHERE id=${b.conversationId}`
           }
           yield* checkLease(b)
           yield* releaseProjectRun(
@@ -591,13 +583,6 @@ const schemas = {
     working_directory: P.nonemptyText(4096),
     wait_seconds: Schema.optionalKey(P.NonNegativeInteger.check(Schema.isLessThanOrEqualTo(600))),
     timeout_seconds: Schema.optionalKey(P.PositiveInteger.check(Schema.isLessThanOrEqualTo(2147483647))),
-  }),
-  'inbox.ask': P.InboxAsk,
-  'inbox.list': Schema.Struct({ ...afterId, ...pageFields }),
-  'inbox.get': Schema.Struct({ request_id: P.UUID, ...pageFields }),
-  'inbox.withdraw': Schema.Struct({
-    request_id: P.UUID,
-    reason: P.nonemptyText(800).check(Schema.isMaxCodePoints(200)),
   }),
 }
 
@@ -872,56 +857,6 @@ const executeBusiness = Effect.fnUntraced(function* (
         )
       const thread = yield* pendingExec(c)
       return { ...pendingValue(thread), changedThreadId: thread.id }
-    }
-    case 'inbox.ask': {
-      const a = yield* strictDecode(schemas[name], args)
-      const r = yield* createAgentAttention(c, c.toolCallId, a)
-      return { value: { request_id: r.id, state: r.state, version: r.version, read_tool: 'inbox.get' } }
-    }
-    case 'inbox.list': {
-      const a = yield* strictDecode(schemas[name], args)
-      const r = yield* listProjectAttention(c, a.after_id)
-      return {
-        value: yield* page(
-          {
-            ...r,
-            requests: r.requests.map(({ id, title, source, state, version, thread_id, created_at, resolution }) => ({
-              request_id: id,
-              title,
-              source,
-              state,
-              version,
-              thread_id,
-              created_at,
-              resolution,
-            })),
-          },
-          a,
-        ),
-      }
-    }
-    case 'inbox.get': {
-      const a = yield* strictDecode(schemas[name], args)
-      const r = yield* getAttentionRequest(c.employeeId, a.request_id)
-      if (r.project_id !== c.projectId) return yield* Effect.fail(new AppError(404, 'not_found'))
-      return { value: yield* page(r, a) }
-    }
-    case 'inbox.withdraw': {
-      const a = yield* strictDecode(schemas[name], args)
-      const r = yield* withdrawAttention(c, a.request_id, a.reason)
-      const value = {
-        request_id: r.id,
-        state: r.state,
-        version: r.version,
-        read_tool: 'inbox.get',
-        ...(r.resolution ? { resolution: r.resolution } : {}),
-      }
-      return {
-        value:
-          resultBytes(value) <= 30000
-            ? value
-            : { request_id: r.id, state: r.state, version: r.version, read_tool: 'inbox.get', truncated: true },
-      }
     }
     default:
       return yield* Effect.fail(new AppError(422, 'unknown_tool'))

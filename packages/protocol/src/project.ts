@@ -111,6 +111,10 @@ export const Project = Schema.Struct({
   ),
   goal: boundedText(64 * 1024),
   status: Schema.Literals(['active', 'paused', 'archived']),
+  attention: Schema.NullOr(Schema.Literal('failing')),
+  attention_reason: Schema.NullOr(Text),
+  latest_reply_seq: NonNegativeInteger,
+  read_reply_seq: NonNegativeInteger,
   version: NonNegativeInteger,
   created_at: Timestamp,
   updated_at: Timestamp,
@@ -166,7 +170,7 @@ export const ProjectEventPage = Schema.Struct({
 export type ProjectEventPage = typeof ProjectEventPage.Type
 
 export const ProjectMessageReference = Schema.Struct({
-  kind: Schema.Literals(['thread', 'file', 'item']),
+  kind: Schema.Literals(['thread', 'file']),
   title: boundedText(4096),
   threadId: Schema.NullOr(Text),
   reply: Schema.NullOr(PositiveInteger),
@@ -177,7 +181,6 @@ export const ProjectMessageReference = Schema.Struct({
       Schema.makeFilter((value) => value.to >= value.from),
     ),
   ),
-  itemId: Schema.NullOr(Text),
   excerpt: boundedText(8 * 1024),
   bytes: NonNegativeInteger,
 }).check(

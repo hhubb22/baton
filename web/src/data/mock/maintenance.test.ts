@@ -272,31 +272,6 @@ describe('project pause and archive', () => {
     expect(assistants(store, id).filter((entry) => entry.threads?.action === 'replies')).toHaveLength(1)
   })
 
-  it('keeps running Threads and Inbox answers usable during pause', () => {
-    const { store, scheduler } = setup()
-    store.setProjectStatus('prj-baton', 'paused')
-    expect(store.thread('thr-gateway').status).toBe('running')
-    store.setProjectStatus(projectId, 'paused')
-    const item = store.snapshot().inbox.find((item) => item.id === 'itm-compat-paths')!
-    store.handleItem(item.id, { kind: 'answer', option: item.options[0], note: '' }, item.revision)
-    const op = store.sendMessage('thr-compat', 'Hello', 'thread-message')
-    store.setDeviceConnection('dev-windows', 'online')
-    scheduler.advance(browserLatency.save + browserLatency.run)
-    expect(store.operation(op.id).phase).toBe('done')
-    expect(store.thread('thr-gateway').status).toBe('idle')
-    expect(
-      store
-        .projectEntries(projectId)
-        .find(
-          (entry) =>
-            entry.id === store.snapshot().inbox.find((item) => item.id === 'itm-compat-paths')!.result!.inputId,
-        ),
-    ).toMatchObject({ delivery: 'saved' })
-    store.setProjectStatus(projectId, 'active')
-    scheduler.advance(browserLatency.run / 2)
-    expect(assistants(store)).toHaveLength(3)
-  })
-
   it('preserves a system block across pause and resume until Retry', () => {
     const { store, scheduler } = setup('error')
     const id = 'prj-baton'
@@ -308,13 +283,11 @@ describe('project pause and archive', () => {
     store.setProjectStatus(id, 'active')
     expect(store.project(id).agent).toEqual(blocked)
     expect([first.delivery, second.delivery]).toEqual(['saved', 'saved'])
-    expect(store.snapshot().inbox.find((item) => item.id === 'itm-baton-signin')!.status).toBe('pending')
     store.retryProject(id)
     expect(store.project(id).agent.state).toBe('running')
     expect([first.delivery, second.delivery]).toEqual(['delivered', 'delivered'])
     scheduler.advance(browserLatency.run / 2)
     expect(assistants(store, id)).toHaveLength(2)
-    expect(store.snapshot().inbox.find((item) => item.id === 'itm-baton-signin')!.status).toBe('resolved')
   })
 
   it('archives with a stable timestamp, withdrawing both questions and system notices', () => {
@@ -330,15 +303,10 @@ describe('project pause and archive', () => {
     expect(after.threads).toEqual(before.threads)
     expect(after.memory).toEqual(before.memory)
     expect(after.projectEntries).toEqual(before.projectEntries)
-    for (const item of after.inbox.filter((item) => item.projectId === id || item.projectId === projectId)) {
-      expect(item).toMatchObject({ status: 'withdrawn', revision: 2, result: { reason: '项目已归档' } })
-    }
-    expect(events.at(-1)).toEqual(expect.arrayContaining(['projects', 'inbox']))
+    expect(events.at(-1)).toEqual(expect.arrayContaining(['projects']))
     scheduler.advance(100)
-    const inbox = store.snapshot().inbox
     const eventCount = events.length
     expect(store.setProjectStatus(id, 'archived')).toMatchObject({ archivedAt, status: 'archived' })
-    expect(store.snapshot().inbox).toEqual(inbox)
     expect(events).toHaveLength(eventCount)
     for (const status of ['active', 'paused'] as const) {
       expect(() => store.setProjectStatus(id, status)).toThrow(expect.objectContaining({ code: 'invalid' }))
@@ -491,12 +459,6 @@ describe('maintenance client and scenarios', () => {
       expect.objectContaining({ code: 'unavailable' }),
     )
     expect(store.project(projectId)).toMatchObject({ status: 'active', archivedAt: null })
-    expect(
-      store
-        .snapshot()
-        .inbox.filter((item) => item.projectId === projectId)
-        .every((item) => item.status === 'pending'),
-    ).toBe(true)
     expect(store.setProjectStatus(projectId, 'archived').status).toBe('archived')
   })
 
@@ -643,12 +605,6 @@ describe('maintenance client and scenarios', () => {
     expect(store.projectMemory(projectId)).toHaveLength(1)
     expect(store.projectEntries(projectId)).toHaveLength(3)
     expect(store.thread('thr-compat').status).toBe('idle')
-    expect(
-      store
-        .snapshot()
-        .inbox.filter((item) => item.projectId === projectId)
-        .every((item) => item.status === 'withdrawn'),
-    ).toBe(true)
     const project = store.createProject(
       { name: 'New project', goal: '', subscription: 'ChatGPT', model: 'gpt-6.1-mini' },
       'new-project',

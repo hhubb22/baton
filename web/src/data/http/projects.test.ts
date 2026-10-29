@@ -3,9 +3,9 @@ import { MemoryRevisionsResponse, type ProjectMemory } from '@baton/protocol'
 import { createTransport } from './transport'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import { ClientError } from '../client'
-import type { Operation, Reference } from '../types'
+import type { Reference } from '../types'
 import type { HttpContext } from './context'
-import { createProjectAPI, mapInboxItem, mapProject, mapProjectEntries } from './projects'
+import { createProjectAPI, mapProject, mapProjectEntries } from './projects'
 
 function jsonBody(body: RequestInit['body']): string {
   if (typeof body !== 'string') throw new TypeError('Expected a JSON string request body')
@@ -25,6 +25,10 @@ const project = {
   title: 'Baton',
   goal: 'Ship the coordinator',
   status: 'active' as const,
+  attention: null,
+  attention_reason: null,
+  latest_reply_seq: 4,
+  read_reply_seq: 2,
   agent: { provider: 'openai-codex', model: 'gpt-5.4' },
   memory_embedding: null,
   conversation: { id: conversationId, state: 'active', last_seq: 4 },
@@ -57,22 +61,6 @@ const memory: ProjectMemory = {
   revision: 3,
   author: 'agent' as const,
   updated_at: at,
-}
-const item = {
-  id: itemId,
-  project_id: projectId,
-  thread_id: threadId,
-  source: 'agent' as const,
-  title: 'Choose a platform',
-  content: 'Which device should run the tests?',
-  options: [
-    { id: 'linux', label: 'Linux', recommended: true },
-    { id: 'mac', label: 'macOS' },
-  ],
-  allow_text: true,
-  state: 'open' as const,
-  version: 1,
-  created_at: at,
 }
 const message = { id: 81, client_message_id: 'client-1', content: 'Run the tests', created_at: at }
 const event = (
@@ -133,7 +121,19 @@ beforeEach(async () => {
 })
 afterEach(() => vi.unstubAllGlobals())
 
-describe('Project and Inbox DTO mapping', () => {
+describe('Project DTO mapping', () => {
+  it('sends the observed reply sequence to the read endpoint', async () => {
+    const f = setup([{ path: `${base}/read`, method: 'POST', body: { seq: 4 }, response: { ok: true } }])
+    await f.api.markProjectRead(projectId, 4)
+    f.done()
+  })
+  it('maps attention and its failure reason', () => {
+    expect(mapProject({ ...project, attention: 'failing', attention_reason: '模型连接失败' }, status)).toMatchObject({
+      attention: 'failing',
+      attentionReason: '模型连接失败',
+    })
+    expect(mapProject(project, status)).toMatchObject({ latestReplySeq: 4, readReplySeq: 2 })
+  })
   it('reads one project and its status without listing or enriching unrelated projects', async () => {
     const f = setup([
       { path: base, response: project },
@@ -215,43 +215,6 @@ describe('Project and Inbox DTO mapping', () => {
     expect(await mapProjectEntries(projectId, events, [])).toMatchObject([
       { kind: 'note', body: expect.stringContaining('stopped') },
     ])
-  })
-
-  it('maps actual option labels, resolutions and system withdrawals', () => {
-    expect(mapInboxItem(item)).toMatchObject({
-      kind: 'question',
-      options: ['Linux', 'macOS'],
-      recommended: 0,
-      status: 'pending',
-      revision: 1,
-      result: null,
-    })
-    expect(
-      mapInboxItem({
-        ...item,
-        state: 'answered',
-        resolution: { employee_id: 'employee-id', option_label: 'macOS', text: 'Use the laptop' },
-        resolved_at: at,
-      }),
-    ).toMatchObject({
-      result: { option: 'macOS', note: 'Use the laptop', actor: 'employee-id', at: Date.parse(at), inputId: null },
-    })
-    expect(
-      mapInboxItem({
-        ...item,
-        source: 'system',
-        options: null,
-        state: 'withdrawn',
-        withdraw_reason: 'Project 已归档',
-        resolved_at: at,
-      }),
-    ).toMatchObject({
-      kind: 'system',
-      options: [],
-      recommended: null,
-      status: 'withdrawn',
-      result: { reason: 'Project 已归档' },
-    })
   })
 
   it('merges claimed input and queued messages using stable UUIDs', async () => {
@@ -524,7 +487,6 @@ describe('Project HTTP contract', () => {
       deviceId: itemId,
       path: '/src/apps/server/src/server.ts',
       lines: { from: 10, to: 12 },
-      itemId: null,
       excerpt: '汉'.repeat(4000),
       bytes: 12000,
     }
@@ -606,7 +568,7 @@ describe('Project HTTP contract', () => {
     expect(await h.api.setProjectStatus({ projectId, status: 'paused' })).toMatchObject({ status: 'paused' })
     expect((await h.api.stopProjectRun(projectId)).agent.state).toBe('stopping')
     expect((await h.api.retryProject(projectId)).agent.state).toBe('waitingDevice')
-    expect(h.emit).toHaveBeenCalledWith('projects', 'inbox', 'messages', 'threads')
+    expect(h.emit).toHaveBeenCalledWith('projects', 'messages', 'threads')
     h.done()
   })
 
@@ -776,148 +738,6 @@ describe('Project HTTP contract', () => {
       { path: `${base}/events?limit=100&after_seq=0`, response: { events: [], next_after_seq: 0, has_more: true } },
     ])
     await expect(h.api.listProjectEntries(projectId)).rejects.toMatchObject({ code: 'unavailable' })
-    h.done()
-  })
-})
-
-describe('Inbox HTTP contract', () => {
-  it('requests every page including handled items and preserves backend option IDs', async () => {
-    const h = setup([
-      { path: '/api/v1/inbox?state=all', response: { requests: [item], next_cursor: 'opaque/cursor+token' } },
-      {
-        path: '/api/v1/inbox?state=all&cursor=opaque%2Fcursor%2Btoken',
-        response: { requests: [{ ...item, id: noteId, state: 'resolved', resolved_at: at }] },
-      },
-      {
-        path: `/api/v1/attention-requests/${itemId}/answer`,
-        method: 'POST',
-        body: {
-          expected_version: 1,
-          client_request_id: expect.stringMatching(uuid),
-          option_id: 'linux',
-          text: 'Run all tests',
-        },
-        response: {
-          ...item,
-          state: 'answered',
-          version: 2,
-          resolution: { employee_id: projectId, option_label: 'Linux', text: 'Run all tests' },
-          resolved_at: at,
-        },
-      },
-    ])
-    expect(await h.api.listInbox()).toHaveLength(2)
-    expect(
-      await h.api.handleItem({
-        itemId,
-        revision: 1,
-        decision: { kind: 'answer', option: 'Linux', note: 'Run all tests' },
-      }),
-    ).toMatchObject({ kind: 'answerItem', targetId: itemId, phase: 'done' })
-    expect(h.emit).toHaveBeenCalledWith('operations')
-    h.done()
-  })
-
-  it('returns conflict with the actual winning resolution and emits changes', async () => {
-    const current = {
-      ...item,
-      state: 'answered',
-      version: 2,
-      resolution: { employee_id: projectId, option_label: 'macOS', text: 'Use my laptop' },
-      resolved_at: at,
-    }
-    const h = setup([
-      { path: `/api/v1/attention-requests/${itemId}`, response: item },
-      {
-        path: `/api/v1/attention-requests/${itemId}/answer`,
-        method: 'POST',
-        response: { error: 'conflict', current },
-        status: 409,
-      },
-      { path: '/api/v1/inbox?state=all', response: { requests: [current] } },
-    ])
-    const operation: Operation = await h.api.handleItem({
-      itemId,
-      revision: 1,
-      decision: { kind: 'answer', option: 'Linux', note: '' },
-    })
-    expect(operation).toMatchObject({ phase: 'conflict', detail: expect.stringContaining('macOS') })
-    expect(operation.detail).toContain('Use my laptop')
-    expect(h.emit).toHaveBeenCalledWith('projects', 'inbox', 'messages', 'threads')
-    expect(await h.api.listInbox()).toMatchObject([
-      { status: 'answered', revision: 2, result: { option: 'macOS', note: 'Use my laptop' } },
-    ])
-    h.done()
-  })
-
-  it('closes a system item with an idempotent request ID and no answer fields', async () => {
-    const h = setup([
-      { path: `/api/v1/attention-requests/${itemId}`, response: { ...item, source: 'system', options: [] } },
-      {
-        path: `/api/v1/attention-requests/${itemId}/close`,
-        method: 'POST',
-        body: { expected_version: 1, client_request_id: expect.stringMatching(uuid) },
-        response: { ...item, source: 'system', state: 'closed', version: 2 },
-      },
-    ])
-    expect(await h.api.handleItem({ itemId, revision: 1, decision: { kind: 'close' } })).toMatchObject({
-      phase: 'done',
-    })
-    h.done()
-  })
-
-  it('recovers current state via GET when a conflict error has no payload', async () => {
-    const h = setup([])
-    let count = 0
-    h.ctx.request = async <T>(_path: string, init?: RequestInit) => {
-      if (init) throw new ClientError('conflict', 'Already handled')
-      return (
-        ++count === 1
-          ? item
-          : { ...item, state: 'withdrawn', version: 2, withdraw_reason: 'Cancelled', resolved_at: at }
-      ) as T
-    }
-    expect(await h.api.handleItem({ itemId, revision: 1, decision: { kind: 'close' } })).toMatchObject({
-      phase: 'conflict',
-      detail: expect.stringContaining('Cancelled'),
-    })
-  })
-
-  it('returns the committed operation when the same answer is retried', async () => {
-    const h = setup([])
-    const paths: string[] = []
-    h.ctx.request = async <T>(path: string, init?: RequestInit): Promise<T> => {
-      paths.push(path)
-      if (!init) return item as T
-      const body = JSON.parse(jsonBody(init.body)) as { client_request_id: string }
-      return {
-        ...item,
-        state: 'answered',
-        version: 2,
-        resolution: { client_request_id: body.client_request_id, employee_id: projectId, option_label: 'Linux' },
-        resolved_at: at,
-      } as T
-    }
-    const decision = { kind: 'answer' as const, option: 'Linux', note: '' }
-    expect(await h.api.handleItem({ itemId, revision: 1, decision })).toMatchObject({ phase: 'done' })
-    expect(
-      await h.api.handleItem({ itemId, revision: 1, decision: { note: '', option: 'Linux', kind: 'answer' } }),
-    ).toMatchObject({ phase: 'done' })
-    expect(await h.api.handleItem({ itemId, revision: 1, decision: { ...decision, option: 'macOS' } })).toMatchObject({
-      phase: 'conflict',
-      detail: expect.stringContaining('Linux'),
-    })
-    expect(paths).toHaveLength(2)
-  })
-
-  it('does not submit a stale decision or guess an unknown option ID', async () => {
-    const h = setup([{ path: `/api/v1/attention-requests/${itemId}`, response: { ...item, version: 2 } }])
-    expect(await h.api.handleItem({ itemId, revision: 1, decision: { kind: 'close' } })).toMatchObject({
-      phase: 'conflict',
-    })
-    await expect(
-      h.api.handleItem({ itemId, revision: 2, decision: { kind: 'answer', option: 'Windows', note: '' } }),
-    ).rejects.toMatchObject({ code: 'invalid' })
     h.done()
   })
 })

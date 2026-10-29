@@ -12,7 +12,6 @@ import * as T from './thread.ts'
 import * as P from './project.ts'
 import * as D from './device.ts'
 import * as A from './auth.ts'
-import * as I from './inbox.ts'
 import * as C from './common.ts'
 import { SessionResponse } from './auth.ts'
 import { EnrollmentResponse, DefaultDeviceResponse } from './device.ts'
@@ -50,7 +49,7 @@ export class CurrentBrowserSession extends Context.Service<CurrentBrowserSession
 const errorBody = Schema.Struct({
   ...C.ErrorResponse.fields,
   current_revision: Schema.optionalKey(NonNegativeInteger),
-  current: Schema.optionalKey(Schema.NullOr(Schema.Union([P.ProjectMemory, I.AttentionRequest]))),
+  current: Schema.optionalKey(Schema.NullOr(P.ProjectMemory)),
   error: Schema.optionalKey(Schema.String),
 })
 const failure = <const Status extends number>(status: Status) =>
@@ -286,6 +285,11 @@ const Projects = HttpApiGroup.make('projects')
       success: P.Project.pipe(HttpApiSchema.status(201)),
     }),
     Endpoint.get('get', '/api/v1/projects/:projectId', { params: projectParams, success: P.Project }),
+    Endpoint.post('markRead', '/api/v1/projects/:projectId/read', {
+      params: projectParams,
+      payload: Schema.Struct({ seq: NonNegativeInteger }),
+      success: C.OKResponse,
+    }),
     Endpoint.patch('update', '/api/v1/projects/:projectId', {
       params: projectParams,
       payload: P.PatchProjectInput,
@@ -362,35 +366,12 @@ const Projects = HttpApiGroup.make('projects')
   )
   .middleware(BrowserRequest)
 
-const Inbox = HttpApiGroup.make('inbox')
-  .add(
-    Endpoint.get('list', '/api/v1/inbox', { query: Q.InboxQuery, success: I.InboxPage }),
-    Endpoint.get('get', '/api/v1/attention-requests/:requestId', {
-      params: { requestId: UUID },
-      success: I.AttentionRequest,
-    }),
-    Endpoint.post('answer', '/api/v1/attention-requests/:requestId/answer', {
-      params: { requestId: UUID },
-      payload: I.HandleAttentionInput,
-      success: I.AttentionRequest,
-    }),
-    Endpoint.post('close', '/api/v1/attention-requests/:requestId/close', {
-      params: { requestId: UUID },
-      payload: Schema.Struct({
-        expected_version: I.HandleAttentionInput.fields.expected_version,
-        client_request_id: I.HandleAttentionInput.fields.client_request_id,
-      }),
-      success: I.AttentionRequest,
-    }),
-  )
-  .middleware(BrowserRequest)
-
 const System = HttpApiGroup.make('system')
   .add(Endpoint.get('diagnostics', '/api/v1/diagnostics', { success: Diagnostics }))
   .middleware(BrowserRequest)
 
 export const BatonHttpApi = HttpApi.make('baton')
-  .add(Public, Account, Nodes, Threads, Projects, Inbox, System)
+  .add(Public, Account, Nodes, Threads, Projects, System)
   .annotate(HttpApi.PayloadParseOptions, { onExcessProperty: 'error' })
   .annotate(HttpApi.QueryParseOptions, { onExcessProperty: 'error' })
   .annotateMerge(
@@ -398,7 +379,7 @@ export const BatonHttpApi = HttpApi.make('baton')
       title: 'Baton HTTP API',
       version: '0.0.0',
       description:
-        'TypeScript center HTTP endpoints for accounts, devices, Threads, Projects, memory and Inbox. Mutations require an allowed Origin and, for cookie sessions, X-CSRF-Token.',
+        'TypeScript center HTTP endpoints for accounts, devices, Threads, Projects and memory. Mutations require an allowed Origin and, for cookie sessions, X-CSRF-Token.',
     }),
   )
 

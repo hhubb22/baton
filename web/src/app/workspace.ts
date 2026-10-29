@@ -2,12 +2,6 @@ import { createContext, useContext } from 'react'
 import type { ID, ProjectPatch, Reference } from '../data/types'
 import type { DraftStore } from './drafts'
 
-export interface ItemDraft {
-  option: string | null
-  note: string
-  replying: boolean
-}
-
 export interface MemoryDraft {
   body: string
   version: number | null
@@ -27,8 +21,7 @@ export interface Workspace {
   // 把引用放进 Project 输入区并打开这个 Project；已经在这个 Project 页时不跳转。
   askProject: (projectId: ID, reference: Reference) => void
   clearReference: (projectId: ID) => void
-  // 事项回复按事项保存，设置按 Project 保存，记忆按 Project 和条目保存；关闭页面或弹窗后保留。
-  itemDrafts: DraftStore<ItemDraft>
+  // 设置按 Project 保存，记忆按 Project 和条目保存；关闭页面或弹窗后保留。
   settingsDrafts: DraftStore<ProjectPatch>
   memoryDrafts: DraftStore<MemoryDraft>
 }

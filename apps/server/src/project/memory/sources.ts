@@ -57,14 +57,15 @@ export const registerEventSource = Effect.fnUntraced(function* (
       source_type: string
       payload: P.ProjectQueuedInput['payload']
     }>`SELECT source_type,payload FROM project_agent_input_queue WHERE employee_id=${employeeId} AND agent_id=${binding.agent_id} AND id=${inputId} AND delivered_seq=${seq}`
-    if (!row || !['user_message', 'attention_answer', 'thread_reply', 'turn_ended'].includes(row.source_type))
+    if (!row || !['user_message', 'thread_reply', 'turn_ended'].includes(row.source_type))
       return yield* Effect.fail(new AppError(422, 'invalid_evidence'))
     const payload = yield* strictDecode(Schema.Record(Schema.String, Schema.Json), row.payload)
-    const role = ['user_message', 'attention_answer'].includes(row.source_type)
-      ? 'user'
-      : row.source_type === 'turn_ended' && payload.command_result
-        ? 'execution'
-        : 'agent_report'
+    const role =
+      row.source_type === 'user_message'
+        ? 'user'
+        : row.source_type === 'turn_ended' && payload.command_result
+          ? 'execution'
+          : 'agent_report'
     const text =
       typeof payload.content === 'string' && row.source_type === 'user_message' && payload.reference == null
         ? payload.content

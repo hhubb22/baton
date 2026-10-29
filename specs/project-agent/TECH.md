@@ -2,7 +2,7 @@
 
 Status: approved
 Owner: Asa
-Basis: [PRODUCT.md](PRODUCT.md) PA-01～PA-23；[Agent Inbox 行为规格](../agent-inbox/PRODUCT.md)；[Baton TECH](../baton/TECH.md)。外部依赖版本：Pi `earendil-works/pi@482c138`（各包 1.3.0）、DSH `deepseek-ai/deepseek-harness@687f282`。
+Basis: [PRODUCT.md](PRODUCT.md) PA-01～PA-26；[Baton TECH](../baton/TECH.md)。外部依赖版本：Pi `earendil-works/pi@482c138`（各包 1.3.0）、DSH `deepseek-ai/deepseek-harness@687f282`。
 
 ## Context
 
@@ -90,7 +90,7 @@ Runtime 进程的工作目录是一个空的控制目录。pi-agent-core 本身�
 |---|---|---|
 | `projects` | id, employee_id, client_project_id, create_request, title, goal, status, version, created_at, updated_at | `status` 为 active / paused / archived；可选 `client_project_id` 在员工内唯一，`create_request` 保存原始创建请求供幂等比较；没有设备、仓库、目录字段 |
 | `project_agents` | id, employee_id, project_id, provider, model, prompt_version, lease_run_id, lease_epoch, lease_until | 每个 Project 一行；`provider` 和 `model` 由用户选择，修改从下一次运行起生效；租约直接放在这一行，`lease_epoch` 只增不减 |
-| `conversations` | id, employee_id, agent_id, kind, next_seq, compaction_seq, state, attention_reason, failure_count, next_attempt_at | 本期每个 Agent 一个 `primary` 对话；`state` 为 active / needs_attention |
+| `conversations` | id, employee_id, agent_id, kind, next_seq, compaction_seq, state, attention_reason, failure_count, next_attempt_at, read_reply_seq | 本期每个 Agent 一个 `primary` 对话；`state` 为 active / needs_attention；`read_reply_seq` 是单调递增的已读回复水位 |
 | `conversation_events` | conversation_id, seq, employee_id, kind, client_event_id, tool_call_id, run_id, lease_epoch, payload, created_at | 主键 `(conversation_id, seq)`；`(conversation_id, client_event_id)` 唯一；`kind=tool_result` 时 `(conversation_id, tool_call_id)` 唯一；只允许 INSERT |
 | `project_agent_input_queue` | id, employee_id, agent_id, source_type, source_key, payload, payload_hash, delivered_seq, created_at | 输入队列；`(agent_id, source_key)` 唯一；`delivered_seq` 为空表示待处理；领取后保留 |
 | `agent_runs` | id, employee_id, agent_id, node_id, lease_epoch, state, placement_reason, started_at, ended_at, end_reason | 每次运行一行；运行位置只记在这里 |
@@ -100,7 +100,7 @@ Runtime 进程的工作目录是一个空的控制目录。pi-agent-core 本身�
 
 `threads` 带可空列 `project_id`、`origin_conversation_id`、`origin_tool_call_id`，后两列唯一。只有 Project Agent 新建的 Thread 填写这三列；员工新建的 Thread 三列都为空。`thread_turns.initiator` 记录这一轮由员工还是 Project Agent 开启，Project Agent 开启时另记 `origin_tool_call_id`。
 
-输入队列是 Coordinator 内部的数据，用户界面上的待办事项不用这张表。事项表由 Agent Inbox 的技术设计定义。`source_type` 有七种，分成两类。
+输入队列是 Coordinator 内部的数据，界面不直接展示。`source_type` 有六种，分成两类。
 
 | source_type | 类别 | 来源 | payload 上限 |
 |---|---|---|---|
@@ -108,11 +108,10 @@ Runtime 进程的工作目录是一个空的控制目录。pi-agent-core 本身�
 | `thread_reply` | 被动 | Project Agent 开启的一轮里，Agent 的一条回复（第 9 节） | 40 KiB |
 | `thread_message_failed` | 主动 | Project Agent 的消息在 Turn 开始前因模型选择失败而撤回，包含 Thread ID、消息 ID、工具调用 ID 和原因（第 9 节） | 40 KiB |
 | `turn_ended` | 主动 | Project Agent 开启的一轮结束；shell Thread 的这一条带命令输出（第 9、10 节） | 4 KiB；带命令输出时 72 KiB |
-| `attention_answer` | 主动 | 用户回答或关闭一个事项（Agent Inbox IB-12），内容是事项 ID、标题、选中的选项和最多 4 KiB 的文字；上限包含 JSON 转义 | 32 KiB |
 | `memory_updated` | 被动 | 用户在界面上新建或修改记忆（第 6.4 节） | 1 KiB |
 | `project_updated` | 被动 | 用户修改 Project 标题或目标（第 6.1 节） | 4 KiB |
 
-Project 消息的 HTTP 请求、响应和输入队列 payload 使用独立的 `reference` 字段，包含来源类型（thread / file / item）、标题、Thread 与回复编号、设备与文件路径、行号、事项 ID、≤ 8 KiB 的引用文字及原始字节数。同一 `client_message_id` 的正文或引用变化返回 `message_conflict`。新消息即使没有引用也在队列 payload 保存 `reference: null`，正文中的标签作为普通文字保留。中心读取旧队列与对话输入事件时，仅将正文末尾完整且通过引用 Schema 校验的 `<baton-reference version="1">` 拆成 `content` 和 `reference`；不完整或无效的后缀保留原文，数据库里的原始事件保持不变。网页只读取结构化字段，Runtime 随输入 JSON 读取引用；`history.read` 同样返回拆分后的字段。有引用的用户消息按完整 payload 登记记忆来源，因此引用原文可被 `history.search` 检索，并供后台 `read_sources` 读取；无引用消息仍以正文登记来源。
+Project 消息的 HTTP 请求、响应和输入队列 payload 使用独立的 `reference` 字段，包含来源类型（thread / file）、标题、Thread 与回复编号、设备与文件路径、行号、≤ 8 KiB 的引用文字及原始字节数。同一 `client_message_id` 的正文或引用变化返回 `message_conflict`。新消息即使没有引用也在队列 payload 保存 `reference: null`，正文中的标签作为普通文字保留。中心读取旧队列与对话输入事件时，仅将正文末尾完整且通过引用 Schema 校验的 `<baton-reference version="1">` 拆成 `content` 和 `reference`；不完整或无效的后缀保留原文，数据库里的原始事件保持不变。网页只读取结构化字段，Runtime 随输入 JSON 读取引用；`history.read` 同样返回拆分后的字段。有引用的用户消息按完整 payload 登记记忆来源，因此引用原文可被 `history.search` 检索，并供后台 `read_sources` 读取；无引用消息仍以正文登记来源。
 
 主动输入会触发放置和唤醒；被动输入只记录变化，等下一批主动输入一起交给模型（第 4 节）。`thread_reply` 条目包含 Thread ID、Turn 序号、回复序号、正文和附件，正文超过 32 KiB 时保留开头和结尾，并注明原长度和「完整内容用 `threads.read` 读取」。这些上限在写入时检查，所以每一条都能放进一次领取。
 
@@ -179,7 +178,7 @@ Project 消息的 HTTP 请求、响应和输入队列 payload 使用独立的 `r
 
 重新发出的 `call_tool` 不会重复产生副作用：如果该 `tool_call_id` 已有 `tool_result`，Coordinator 直接返回已保存的结果；如果没有，说明原来的事务没有提交，副作用也没有发生，这次正常执行。这依赖第 7 节的规则：所有工具的中心状态变化和 `tool_result` 在同一个事务里提交，`nodes.exec` 的等待结果除外。`threads.create`、`threads.send` 和 `nodes.exec` 的副作用发生在设备上，事务里只保存 Thread 和消息意图，靠 `client_message_id` 的唯一性保证只发出一次（第 9、10 节）。
 
-模型请求失败时，Runtime 在本次运行内重试 3 次，间隔 5、15、45 秒。仍然失败就调用 `report_failure`，Coordinator 把 `failure_count` 加一，设置 `next_attempt_at`（依次推迟 1、5、15 分钟，此后保持 15 分钟），本次运行结束，对话保持 active。`failure_count` 达到 3 时创建一个系统事项，界面保留最后的错误；退避到期后扫描继续放置。新的用户消息在 Agent 锁下写入，并清除退避；同一消息 ID 的重发不清除退避。用户通过 `POST /api/v1/projects/{id}/retry` 显式重试后清零，并解决仍 open 的系统事项。`POST /api/v1/projects/{id}/stop` 作废当前租约并结束这次运行；未领取的主动输入仍可在后续扫描时触发新的运行。这两个接口沿用员工会话、同源和 CSRF 校验，正文为 JSON `{}`，拒绝未知字段和查询参数，成功返回 `200 {"ok":true}`，其他员工的 Project 返回 404。任何一次 assistant 消息保存成功都会把 `failure_count` 清零，清除退避和错误，并解决系统事项。失败的模型输出不写入对话；租约失效、未解决的工具调用和副作用去重仍分别由原有检查保护。
+模型请求失败时，Runtime 在本次运行内重试 3 次，间隔 5、15、45 秒。仍然失败就调用 `report_failure`，Coordinator 把 `failure_count` 加一，设置 `next_attempt_at`（依次推迟 1、5、15 分钟，此后保持 15 分钟），本次运行结束，对话保持 active。`failure_count` 达到 3 时 Project 显示故障（第 11 节），界面保留最后的错误；退避到期后扫描继续放置。新的用户消息在 Agent 锁下写入，并清除退避；同一消息 ID 的重发不清除退避。用户通过 `POST /api/v1/projects/{id}/retry` 显式重试后清零。`POST /api/v1/projects/{id}/stop` 作废当前租约并结束这次运行；未领取的主动输入仍可在后续扫描时触发新的运行。这两个接口沿用员工会话、同源和 CSRF 校验，正文为 JSON `{}`，拒绝未知字段和查询参数，成功返回 `200 {"ok":true}`，其他员工的 Project 返回 404。任何一次 assistant 消息保存成功都会把 `failure_count` 清零，清除退避和错误。失败的模型输出不写入对话；租约失效、未解决的工具调用和副作用去重仍分别由原有检查保护。
 
 订阅需要重新登录、设备全部离线这类情况不算失败，不增加 `failure_count`。它们体现为放置时找不到合格节点，界面显示等待原因。
 
@@ -189,7 +188,7 @@ Project 消息的 HTTP 请求、响应和输入队列 payload 使用独立的 `r
 
 Runtime 按以下顺序构造请求：
 
-1. 系统提示词，由 `prompt_version` 决定。内容包括角色说明、Project 标题和目标、工具使用规则。不包含时间、设备名或其他每次会变的信息。Runtime 将 `{version,title,goal}` 快照保存在 assistant payload 的 `prompt` 字段，恢复时复用最早保留的快照；压缩生成器将新快照保存到 compaction payload 的 `prompt` 字段。该元数据不进入 pi-ai 消息正文。
+1. 系统提示词，由 `prompt_version` 决定。内容包括角色说明、Project 标题和目标、工具使用规则，以及需要用户决定时的提问方式（PA-24）。不包含时间、设备名或其他每次会变的信息。Runtime 将 `{version,title,goal}` 快照保存在 assistant payload 的 `prompt` 字段，恢复时复用最早保留的快照；压缩生成器将新快照保存到 compaction payload 的 `prompt` 字段。该元数据不进入 pi-ai 消息正文。
 2. 工具定义，顺序固定。
 3. 最新 `compaction` 事件生成的开头消息（如果有）。
 4. `compaction.through_seq` 之后的全部事件，按 `seq` 排列；被清除的工具结果替换为占位文字。
@@ -256,10 +255,6 @@ Project 标题或目标被修改后，新的系统提示词从下一次压缩起
 | `threads.read` | 只读 | 按 Turn 读取消息和回复正文，每个 Turn 附过程项数量 | 自身 |
 | `threads.trace` | 只读 | 按 `thread_id`、`worker_turn_seq` 和可选 `cursor` 读取一轮的过程项，与浏览器 trace 接口的数据和分页相同，不脱敏（Baton TECH「过程记录」） | 自身 |
 | `nodes.exec` | 写入 | 在开启了命令执行的节点上执行一条命令，参数见第 10 节 | `threads.read` |
-| `inbox.ask` | 写入 | 创建一个请用户处理的事项（Agent Inbox IB-01） | `inbox.list`、`inbox.get` |
-| `inbox.list` | 只读 | 列出本 Project 的事项及其状态 | 自身 |
-| `inbox.get` | 只读 | 读取一个事项的完整内容和处理结果 | 自身 |
-| `inbox.withdraw` | 写入 | 撤回一个待处理事项，必须写明原因 | `inbox.get` |
 
 单个工具输出不超过 32 KiB，超出时返回截断标记和继续读取的方式。
 
@@ -291,7 +286,6 @@ Project 标题或目标被修改后，新的系统提示词从下一次压缩起
 | `threads.read` | `thread_id`；可选 `after_turn`、`through_turn` |
 | `threads.trace` | `thread_id`、`worker_turn_seq`；可选 `cursor` |
 | `nodes.exec` | 第 10 节 |
-| `inbox.*` | 见 Agent Inbox TECH 第 3 节 |
 
 memory.recall 直接返回有界片段、条目/修订/来源引用、得分与截断/降级标识；全文通过 memory.read 读取。其他只读工具接受 offset、max_bytes，结果采用 `{encoding:"json", text, offset, total_bytes, truncated, next_offset?}`：先把完整业务结果编码为 JSON，再按 UTF-8 字节取片段。调用方在 `truncated=true` 时以同样的业务参数和 `next_offset` 继续读取，拼接 `text` 后解析 JSON。`max_bytes` 默认 16 KiB、最大 32 KiB；中心按实际 JSON 编码后的容量进一步缩短片段，整个工具结果 payload 不超过 32 KiB。记忆续读可固定 `revision`，`threads.read` 续读固定 `through_turn`。`threads.trace` 的业务 JSON 是与浏览器相同的过程项页（最多 50 项、1 MiB）；首次读取时可省略 `cursor`，工具片段外包装返回 `page_cursor`，绑定已提交报告的序号上限及本页起点。后续片段保持 `thread_id`、`worker_turn_seq` 不变，把外包装的 `page_cursor` 作为 `cursor`，配合 `next_offset` 读完这页 JSON，再以页内的 `next_cursor` 请求下一页并将 `offset` 归零。`offset > 0` 时必须提供 `cursor`，否则返回 `snapshot_cursor_required`。同一快照不包含之后到达的项；省略 `cursor` 从头刷新以读取新项。
 
@@ -299,8 +293,6 @@ memory.recall 直接返回有界片段、条目/修订/来源引用、得分与�
 
 写工具返回资源 ID、版本或状态及 `read_tool`。记忆冲突返回当前版本和内容，超限时返回截断标记及 `memory.read` 入口。
 
-
-`inbox.ask` 的展示内容是最多 32 KiB 的 Markdown，链接允许 `http`、`https` 和 `mailto`，危险协议继续拒绝，HTML、图片和自动外部资源加载保持关闭。Coordinator 在工具事务内检查长度、选项声明和关联 Thread 归属，复用相同的待处理事项；10 个待处理事项为界面软提示。选项推荐不超过 5 个，允许最多 50 个且 JSON 总量不超过 16 KiB，网页展开后可查看全部选项。不合规时保存 `is_error` 结果。工具参数和事项事务见 [Agent Inbox TECH](../agent-inbox/TECH.md) 第 3、4 节。
 
 ### 8. 节点能力报告
 
@@ -392,6 +384,8 @@ batond 通过 Gateway 的控制队列传送 `node.runtime_report`，正文为 `{
 
 界面使用的只读接口：
 
+- `GET /api/v1/projects`：每个 Project 附 `latest_reply_seq` 和 `read_reply_seq`。前者取最新已保存、含文本且不含 `toolCall` 的 assistant 事件序号，没有符合条件的回复时为 0；后者是持久保存的单调已读水位。前者大于后者表示未读。用户消息和工具更新不改变最新回复序号。`attention` 由主对话失败记录推导，为 `failing` 或 `null`，故障原因取 `attention_reason`。
+- `POST /api/v1/projects/{id}/read`：请求 `{seq}`，推进已读回复水位。网页仅在页面可见且读到最新回复时发送该回复序号；浏览旧记录或页面处于后台不推进。暂停保留水位，归档的 Project 不展示未读或计入桌面待处理数。桌面待处理数为有未读回复的非归档 Project 数与有未回答问题的非归档 Thread 数之和。
 - `GET /api/v1/projects/{id}/status`：`state`、`waiting_reason`、`pending_inputs`、`last_error`、`next_attempt_at`、`last_seq`，以及最近一次运行的设备、放置原因、是否仍有效和停止回执。
 - `GET /api/v1/projects/{id}/messages`：尚未领取的用户消息，按 `after_id` 分页；指定 `client_message_id` 时返回该消息，用于恢复发送响应。
 - `GET /api/v1/threads?project_id={id}`：本 Project 的 Thread，都由 Project Agent 新建。
@@ -416,7 +410,8 @@ Runtime 的 `preview` 操作发送 `{last_seq, payload:{text, truncated}}` 文�
 | PA-11、PA-12、PA-A05 | 在 assistant 保存前后、`threads.create` / `threads.send` 事务前后、`tool_result` 返回前后杀掉 Runtime | Thread 数大于 1；消息发出两次；同一 `tool_call_id` 有两条结果 | 进程测试，故障注入 |
 | PA-12 | 对话在上次压缩后累计 1 MiB 事件，然后重启 Runtime | `bootstrap` 或某页响应超过 192 KiB；分页构造出的消息列表与一次性读取的不一致 | 进程测试 |
 | PA-09 | 模型替身快速回复后不再写入输入；另一组持续写入超过 15 分钟 | 闲置 180 秒后没有退出；超过上限仍在领取；退出时停止了 Thread | 进程测试 |
-| PA-13 | 模型替身持续返回错误 | 重试次数或推迟时间不符；三次起没有系统事项；退避到期未自动恢复；同一消息重发清除了退避 | 进程测试 |
+| PA-13、PA-25 | 模型替身持续返回错误，之后恢复 | 重试次数或推迟时间不符；三次起 Project 列表没有 `failing`；退避到期未自动恢复；同一消息重发清除了退避；回复保存成功后仍为 `failing` | 进程测试 |
+| PA-25、PA-A18 | 保存助手正文、工具调用和用户消息；前后台切换、阅读旧记录与最新回复；暂停、归档 Project | 正文回复未产生未读；工具或用户消息改变最新回复水位；旧记录或后台清除未读；已读水位倒退；暂停丢失未读；归档仍显示或计数 | PostgreSQL 集成与网页测试 |
 | PA-14、PA-A06 | 同一对话在 macOS 和 Windows 上各运行一次，记录实际请求 | 系统提示词、工具定义或历史消息不一致 | 真实 Runtime 进程与本地模型替身 |
 | PA-15、PA-16 | 大工具输出、长单轮及多轮对话越过阈值 | 没有压缩；工具配对或恢复位置改变；原文丢失 | Runtime 确定性测试、Store 事务测试 |
 | PA-17 | 模型替身和员工同时修改同一条记忆；员工连续修改 3 次后发消息 | 后写入覆盖前者而没有冲突；只有通知时启动了运行；同一条记忆出现多条通知 | 集成，模型替身 |

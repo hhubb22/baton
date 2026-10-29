@@ -123,6 +123,7 @@ export function createMockClient(
 
     listDevices: () => guarded(() => store.snapshot().devices),
     listProjects: () => guarded(() => store.listProjects()),
+    markProjectRead: (projectId, seq) => guarded(() => store.markProjectRead(projectId, seq)),
     getProject: (projectId) => guarded(() => store.project(projectId)),
     listProjectEntries: (projectId) => guarded(() => store.projectEntries(projectId)),
     listProjectMemory: (projectId) => guarded(() => store.projectMemory(projectId)),
@@ -139,7 +140,6 @@ export function createMockClient(
     },
     listMessages: (threadId) => guarded(() => store.snapshot().messages.filter((item) => item.threadId === threadId)),
     markThreadRead: (threadId) => store.markThreadRead(threadId),
-    listInbox: () => guarded(() => store.snapshot().inbox),
     readFile: (deviceId, path, continuation) => guarded(() => store.readFile(deviceId, path, continuation)),
     listFolders: (deviceId, path) => guarded(() => store.listFolders(deviceId, path)),
     readTrace: (messageId, cursor) => guarded(() => store.readTrace(messageId, cursor)),
@@ -228,11 +228,6 @@ export function createMockClient(
       await connect(latency.read)
       signedIn()
       return structuredClone(store.stopProjectRun(projectId))
-    },
-    async handleItem({ itemId, decision, revision }) {
-      await connect(latency.save)
-      signedIn()
-      return structuredClone(store.handleItem(itemId, decision, revision))
     },
     async retryProject(projectId) {
       await connect(latency.save)

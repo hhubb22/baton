@@ -98,7 +98,7 @@ Cursor store 子进程禁用 fetch 和 HTTP(S) 请求。上述加载检查不调
 
 中心与节点构建入口、统一构建和 SEA 打包都接受 `--version <带 v 前缀的发布版本> --commit <完整小写 Git 哈希>`，两个参数一起指定；未指定时版本和提交均为 `development`。构建通过 esbuild 编译常量注入身份，不从运行环境变量读取版本。`packages/protocol/src/release.mjs` 是共享来源，中心、daemon、Worker、agent-host、watchdog 和 Runtime 的 `--version` 及诊断使用同一份元数据。中心版本查询无需数据库配置；节点及子进程另报告 SEA 和 Node 运行信息。开发 bundle 的 Runtime 与 watchdog 从同一 bundle 启动，直接源码入口仍通过 tsx 运行。
 
-`release.json` 和安装包清单保存 `version`、`commit`、`platform`、`arch`、`protocol_version`、`schema_version`、`ledger_versions` 和 `supported_daemon_versions`。当前协议版本为 1，中心迁移版本为 `0013_thread_thinking.sql`，账本 `node`、`project`、`thread` 均为格式 1。构建核对中心迁移目录的最新文件与声明一致，账本检查直接使用共享格式常量。首版仅支持当前 daemon 发布版本，连接时执行该声明的准入检查；增量迁移来源及应用回切范围尚待相应升级实现声明。包内元数据与程序输出不一致时，安装包检查和归档失败；归档器不能给旧二进制重新贴标。
+`release.json` 和安装包清单保存 `version`、`commit`、`platform`、`arch`、`protocol_version`、`schema_version`、`ledger_versions` 和 `supported_daemon_versions`。当前协议版本为 1，中心迁移版本为 `0015_project_read.sql`，账本 `node`、`project`、`thread` 均为格式 1。构建核对中心迁移目录的最新文件与声明一致，账本检查直接使用共享格式常量。首版仅支持当前 daemon 发布版本，连接时执行该声明的准入检查；增量迁移来源及应用回切范围尚待相应升级实现声明。包内元数据与程序输出不一致时，安装包检查和归档失败；归档器不能给旧二进制重新贴标。
 
 发布组合按 `supported_daemon_versions` 精确匹配，首版列表为 `[当前版本]`，不计算 N−1 窗口、不解析版本范围或 SemVer。节点和中心的协议版本必须一致。双方均为 `development` 时正常连接；一方为 `development` 时也放行版本号差异，便于本地源码与发布包联调，协议版本仍须一致。Agent 的 CLI 版本、模型和系统组合继续按既有准入规则处理。
 
@@ -212,7 +212,7 @@ prepare 之前升级未支持该能力的 daemon 时，由发布说明要求停�
 
 | 材料 | 位置与恢复范围 |
 |---|---|
-| 中心数据库 | `BATON_DATABASE_URL` 指向的 PostgreSQL 数据库，Baton schema 由 `BATON_DB_SCHEMA` 指定、默认 `public`。包含账号、设备与默认选择、Project、记忆与修订、事项、Thread 历史、命令与报告证据，以及 `schema_migrations`。备份须包含恢复所需的 pgvector 扩展及 schema 依赖 |
+| 中心数据库 | `BATON_DATABASE_URL` 指向的 PostgreSQL 数据库，Baton schema 由 `BATON_DB_SCHEMA` 指定、默认 `public`。包含账号、设备与默认选择、Project、记忆与修订、Thread 历史、命令与报告证据，以及 `schema_migrations`。备份须包含恢复所需的 pgvector 扩展及 schema 依赖 |
 | 中心签名密钥 | `BATON_NODE_SIGNING_KEY` 指定的原文件，默认中心工作目录的 `node-signing.key`。与数据库配套保存，恢复原权限和所有者；缺失或无效时停止恢复后处理 |
 | 中心部署配置 | 实际服务管理器、容器或启动脚本中的环境变量与配置文件，包括数据库与 schema、密钥路径、公开 Origin、监听地址、TLS 证书和私钥、反向代理配置及使用的程序版本。恢复数据库不恢复这些文件 |
 | 设备私有数据 | `--data-dir`，默认 `~/.baton-ts`，Windows 为 `%USERPROFILE%\.baton-ts`。整体保留 `identity.json`、`reauth-pending.json`（存在时）、目录和执行授权配置、`node.db`、`project-runtime.db`、`threads/<Thread ID>/thread.db`、原生映射和 SDK 状态、`full-output/`，以及存在的 SQLite WAL。不能只复制主数据库文件或只保存身份文件 |
@@ -224,7 +224,7 @@ prepare 之前升级未支持该能力的 daemon 时，由发布说明要求停�
 
 设备 `upgrade migrate` 已在独占锁下自动生成并校验数据目录备份，范围与位置见「设备准备与切换」；当前没有独立的 batond 备份或自动恢复命令。人工保存或恢复设备数据前，须停止 daemon、所有 Worker、agent-host、watchdog、前后台 Runtime 及其他共享原生存储的写入者，确认它们退出，再整体复制数据与存在的 WAL。停止 daemon 不代表其他进程已退出；不满足这些条件的设备副本不能宣称为一致备份。私有目录和凭据保持原权限，Windows 的 ACL 边界见平台说明。
 
-普通升级备份默认只恢复到新执行开放之前。业务开放后恢复旧快照前，管理员先保存当前数据与设备执行证据，列明备份之后会丢失的账号/口令和权限变化、Thread 输入与输出、Project 事件、记忆修订及事项处理范围，说明原生会话与工作目录是否同步回退，并取得执行者确认。副作用可能已在设备或外部系统发生，旧快照里的 `queued` 或零次派发不能证明没有执行。不得把旧 PID 直接当成现存进程证据。
+普通升级备份默认只恢复到新执行开放之前。业务开放后恢复旧快照前，管理员先保存当前数据与设备执行证据，列明备份之后会丢失的账号/口令和权限变化、Thread 输入与输出、Project 事件及记忆修订范围，说明原生会话与工作目录是否同步回退，并取得执行者确认。副作用可能已在设备或外部系统发生，旧快照里的 `queued` 或零次派发不能证明没有执行。不得把旧 PID 直接当成现存进程证据。
 
 中心恢复步骤：
 

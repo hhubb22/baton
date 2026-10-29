@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
 import { Effect } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import * as P from '@baton/protocol'
 import { expect, it } from 'vite-plus/test'
 import { seedNode, withTestDatabase, type TestDatabase } from '../testing/database.ts'
 import * as threads from './index.ts'
-import { migrateDatabase } from '../database.ts'
 
 type Run = TestDatabase['run']
 const query = <A extends object = Record<string, unknown>>(text: string, ...args: string[]) =>
@@ -221,11 +221,6 @@ it('migrates live and acknowledged challenges without changing business history 
     const messages = await run(query('SELECT * FROM thread_messages ORDER BY id'))
     await run(query('DROP TABLE thread_activity_probes'))
     await run(query('DROP SEQUENCE thread_activity_check_seq'))
-    await run(query('DROP TABLE browser_notifications, browser_notification_cursors'))
-    await run(query('ALTER TABLE project_agents DROP COLUMN source_node_id'))
-    await run(query('ALTER TABLE projects DROP COLUMN emoji'))
-    await run(query('ALTER TABLE thread_messages DROP COLUMN thinking'))
-    await run(query("DELETE FROM schema_migrations WHERE version>='0009_thread_activity_probes.sql'"))
     const commands = [randomUUID(), randomUUID(), randomUUID()]
     const checks = await run(
       Effect.gen(function* () {
@@ -256,7 +251,11 @@ it('migrates live and acknowledged challenges without changing business history 
         VALUES(${f.employeeId},${f.thread.id},'turn.activity_checked','device',${f.nodeId},${JSON.stringify(result)}::jsonb)`
       }),
     )
-    await run(migrateDatabase())
+    const migration = await readFile(
+      new URL('../../../../migrations/0009_thread_activity_probes.sql', import.meta.url),
+      'utf8',
+    )
+    for (const statement of migration.split(';').filter((part) => part.trim())) await run(query(statement))
     expect(await run(query('SELECT * FROM thread_events ORDER BY id'))).toEqual(history)
     expect(await run(query('SELECT * FROM thread_messages ORDER BY id'))).toEqual(messages)
     const before = await credential(run, f.credentialId)

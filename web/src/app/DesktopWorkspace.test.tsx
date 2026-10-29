@@ -84,7 +84,7 @@ describe('desktop workspace', () => {
     await waitFor(() => expect(f.bridge.notificationCursor).toHaveBeenCalled())
     const session = await f.client.getSession()
     expect(f.bridge.notificationCursor).toHaveBeenCalledWith(notificationScope(location.origin, session.account!.id))
-    const expected = desktopActivity(await f.client.listThreads(), await f.client.listInbox())
+    const expected = desktopActivity(await f.client.listThreads(), await f.client.listProjects())
     await waitFor(() => expect(f.bridge.setActivity).toHaveBeenLastCalledWith(expected))
     await act(() => f.router.navigate({ to: '/threads', search: { thread: 'thr-fix' } }))
     await waitFor(() => expect(f.bridge.viewingThread).toHaveBeenLastCalledWith('thr-fix'))
@@ -96,7 +96,7 @@ describe('desktop workspace', () => {
       }),
     )
     await waitFor(() => expect(f.bridge.viewingThread).toHaveBeenLastCalledWith('thr-webui'))
-    await act(() => f.router.navigate({ to: '/inbox' }))
+    await act(() => f.router.navigate({ to: '/threads' }))
     await waitFor(() => expect(f.bridge.viewingThread).toHaveBeenLastCalledWith(null))
     await act(() => f.client.signOut())
     await waitFor(() => expect(f.router.state.location.pathname).toBe('/login'))
@@ -154,6 +154,6 @@ it('resolves deleted and archived threads without navigating to unavailable deta
     throw new ClientError('unavailable', 'offline')
   }
   await expect(resolveDesktopTarget(client, { thread_id: thread.id })).rejects.toMatchObject({ code: 'unavailable' })
-  expect(viewedThread('/inbox', { thread: thread.id })).toBeNull()
+  expect(viewedThread('/threads', { thread: thread.id })).toBe(thread.id)
   expect(viewedThread('/devices', { thread: thread.id })).toBeNull()
 })

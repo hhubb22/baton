@@ -10,7 +10,6 @@
 | `project.ts` | Project、对话、事件、记忆、运行与 Runtime 请求及结果 |
 | `device.ts` | 设备注册、身份、能力报告、授权目录、文件浏览和订阅登录 |
 | `auth.ts` | 员工、登录、密码与浏览器会话 |
-| `inbox.ts` | 事项、选项、处理输入与分页 |
 | `http-api.ts` | 组合领域 Schema 与 Effect HttpApi 的路径、参数、状态及响应头，供中心路由与 OpenAPI 共用 |
 | `http.ts` | HTTP 查询参数与浏览器事件 |
 | `node.ts` | 节点 Frame、两个方向的业务消息联合类型与 `NodeBody` |
@@ -79,7 +78,7 @@ withdraw 在撤回事实持久保存后以 succeeded 结束；已经无法撤回
 浏览器变更通知按员工发送，事件只提示重新读取已保存的数据：
 
 - `thread.changed` 携带 `thread_id: UUID` 和 `change: "detail"`，覆盖该 Thread 的列表摘要、详情、消息和报告。
-- `project.changed` 携带 `project_id: UUID` 和 `change: "detail"`，覆盖该 Project 的列表摘要、运行状态、消息、事件、事项和记忆。
+- `project.changed` 携带 `project_id: UUID` 和 `change: "detail"`，覆盖该 Project 的列表摘要、运行状态、消息、事件和记忆。
 - `nodes.changed` 携带 `node_id: UUID`，用于节点同步及断线状态变化。浏览器刷新该节点及其关联 Thread、Project 的状态。
 
 中心发送的 Thread、Project 通知必须携带对象 ID；浏览器收到旧中心无 ID 的通知或无法判断通知范围时，退回全量刷新。通知队列按事件类型和对象 ID 合并，同一对象的重复提示可合并，不同对象的提示分别保留。Project Runtime 工具创建或修改 Thread 时同时通知该 Thread 和所属 Project；Thread 回执、报告与 HTTP 修改也通知所属 Project。
@@ -104,6 +103,6 @@ Thread 历史通过中心时间线读取已保存的输入、回复和事件，�
 
 验证命令与按包筛选方法见 [AGENTS.md](../../AGENTS.md#常用构建与验证命令)。
 
-协议包使用少量 TS 自写样例验证 Thread 派生对象往返、字段约束与未知字段容忍、命令完成身份、open 成功回执的存储代次、Worker 就绪关系、问题与回答容量，以及 Inbox 选项约束。HTTP 契约测试核对路径、参数、响应与错误声明，并验证 Session、Enrollment 在领域与 HTTP 入口的响应约束。已有调用方覆盖的 Schema 随对应业务测试验证。
+协议包使用少量 TS 自写样例验证 Thread 派生对象往返、字段约束与未知字段容忍、命令完成身份、open 成功回执的存储代次、Worker 就绪关系及问题与回答容量。HTTP 契约测试核对路径、参数、响应与错误声明，并验证 Session、Enrollment 在领域与 HTTP 入口的响应约束。已有调用方覆盖的 Schema 随对应业务测试验证。
 
 中心、节点、Worker 和网页的调用方测试验证这些契约在实际路由、命令接收、异步完成和事件消费中的使用。协议包只检查传输形状及局部关系；账本事务、ACK 与完成到达顺序、数据库 JSONB 容量、权限、租约、Agent 行为、跨系统进程和安装包由对应模块验证。

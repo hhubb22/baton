@@ -583,7 +583,7 @@ describe('remote Cursor threads', () => {
     expect(screen.getByRole('button', { name: '读取完整输出' })).toBeInTheDocument()
   })
 
-  it('creates, opens and sends over HTTP while Project and Inbox endpoints return 501', async () => {
+  it('creates, opens and sends over HTTP while Project endpoints return 501', async () => {
     const user = userEvent.setup()
     const { state, fetcher } = mount()
     const input = await screen.findByLabelText('新对话消息')

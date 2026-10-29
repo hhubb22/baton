@@ -1,7 +1,7 @@
 # Baton 技术设计
 
 Status: draft
-Basis: [行为规格](PRODUCT.md) R-01～R-25。Project Agent 见 [Project Agent TECH](../project-agent/TECH.md)，事项见 [Agent Inbox TECH](../agent-inbox/TECH.md)。
+Basis: [行为规格](PRODUCT.md) R-01～R-25。Project Agent 见 [Project Agent TECH](../project-agent/TECH.md)。
 
 Thread 上游执行模式与首版遥测为待实施设计；其他章节记录现行架构。设备凭据按有效业务滑动计算 30 天闲置期限，原设备通过一次性凭据重新认证。后端与设备的发布基线、升级和恢复设计见 [release TECH](../release/TECH.md)。
 
@@ -188,13 +188,13 @@ Windows 第一版按账本保存的 PID 与创建时间核对身份，再用 `ta
 | `thread_events` | 只追加的审计事件：新建、消息接受、停止请求、归档、状态变化，附操作者与时间（R-23） |
 | `thread_activity_probes` | 每个 Thread 一行的短期探活状态，保存 60 秒有效期内的 challenge、命令和连接身份、Turn、发出时间及确认结果；后续探活清除过期 challenge |
 | `thread_outbox` | open、message、withdraw、stop、resume、settings、answer 的下行命令意图；下一次尝试时间、尝试次数、接收确认与完成结果 |
-| Project 相关表 | 见 Project Agent TECH 与 Agent Inbox TECH |
+| Project 相关表 | 见 Project Agent TECH |
 
 `threads` 以 `(employee_id, id)` 为复合唯一键，所有引用使用包含 `employee_id` 的复合外键。`client_thread_id` 在员工内唯一；Project Agent 创建的 Thread 另以 `(origin_conversation_id, origin_tool_call_id)` 唯一。
 
 ### 迁移
 
-中心迁移从 `migrations/0001_initial.sql` 的当前 schema 基线创建员工、设备、Thread、Project、主对话、记忆和事项表。首个内部发布前允许重建实验数据；首版起冻结已发布迁移，通过新增版本迁移保留数据。迁移校验、SQLite 格式版本与失败恢复按 [发布升级设计](../release/TECH.md#持久格式与迁移)实施。
+中心迁移从 `migrations/0001_initial.sql` 的当前 schema 基线创建员工、设备、Thread、Project、主对话和记忆表。首个内部发布前允许重建实验数据；首版起冻结已发布迁移，通过新增版本迁移保留数据。迁移校验、SQLite 格式版本与失败恢复按 [发布升级设计](../release/TECH.md#持久格式与迁移)实施。
 
 Thread、消息和 Turn 直接包含模型字段，消息保存 `status_reason`，Project 输入类型为当前七种输入。
 
@@ -373,7 +373,7 @@ URL 相对 `/api/v1`。读取检查员工会话与资源归属，写入另检查
 | `GET /threads/{id}/trace` | 必填 `worker_turn_seq`，可选 `cursor`，返回 `{ok, code?, steps, page_cursor, next_cursor?}`，数据取自 `thread_turn_items`，不访问设备。每个步骤含 `item_id`、`type`、`status`、`ordinal`、`parent_id`、`title`、起止时间、`truncated`、`original_bytes`、可选 `full_output` 引用和上游 `data`；分页规则见「过程记录」。该 Turn 没有过程项时返回 `ok:false, code:"trace_missing"`，指定 Turn 不存在返回 404 |
 | `/events` | 浏览器 WebSocket，订阅 Thread 的实时输出与状态变化 |
 
-登录、默认设备、文件浏览和 Inbox 沿用各自接口；Project 创建、对话与记忆修订契约见 Project Agent TECH。Thread 使用独立的 Store 和协议；`/tasks*`、`/sessions*`、`/acceptances` 业务接口已移除。
+登录、默认设备和文件浏览沿用各自接口；Project 创建、对话与记忆修订契约见 Project Agent TECH。Thread 使用独立的 Store 和协议；`/tasks*`、`/sessions*`、`/acceptances` 业务接口已移除。
 
 Thread 列表摘要在一次 SQL 查询中读取。`title` 取首条已接受消息的首行，最多 120 个 Unicode 字符；为空时依次使用工作目录和 Thread ID。`current_turn` 为未结束的 Turn，`stop_canceled` 为最近一次停止或归档请求之后的单条消息撤回事件数，无请求时为 0。浏览器刷新列表只请求列表分页，打开会话后才读取对应的详情和 timeline。
 

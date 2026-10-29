@@ -1,4 +1,4 @@
-import type { AttentionRequest, ProjectMemory, NodeVersionIncompatibility } from '@baton/protocol'
+import type { ProjectMemory, NodeVersionIncompatibility } from '@baton/protocol'
 
 export class AppError extends Error {
   constructor(
@@ -6,7 +6,7 @@ export class AppError extends Error {
     readonly code: string,
     message: string = code,
     readonly details?: {
-      readonly current?: ProjectMemory | AttentionRequest | null
+      readonly current?: ProjectMemory | null
       readonly current_revision?: number
       readonly version_incompatibility?: NodeVersionIncompatibility
     },

@@ -242,7 +242,6 @@ describe('entity change notifications', () => {
       { queryKey: keys.operation('op-two'), value: { kind: 'resumeThread', targetId: 'two' } },
       { queryKey: keys.operation('send-one'), value: { kind: 'sendMessage', targetId: 'reply-one' } },
       { queryKey: keys.operation('send-two'), value: { kind: 'sendMessage', targetId: 'reply-two' } },
-      { queryKey: keys.operation('op-item'), value: { kind: 'answerItem', targetId: 'item' } },
       { queryKey: keys.projects, value: [] },
       { queryKey: keys.projectEntries('project-one'), value: [] },
       { queryKey: keys.projectEntries('project-two'), value: [] },
@@ -252,7 +251,6 @@ describe('entity change notifications', () => {
       { queryKey: keys.memoryStatus('project-two'), value: {} },
       { queryKey: keys.memorySources('project-one', 'note', 1), value: [] },
       { queryKey: keys.memorySources('project-two', 'note', 1), value: [] },
-      { queryKey: keys.inbox, value: [{ id: 'item', projectId: 'project-one' }] },
     ].map((row) => ({ ...row, queryFn: vi.fn(async () => row.value) }))
     const { result } = renderHook(() => useQueries({ queries: rows }), { wrapper: wrapperFor(client) })
     await waitFor(() => expect(result.current.every((query) => query.isSuccess)).toBe(true))
@@ -274,16 +272,14 @@ describe('entity change notifications', () => {
     )
     for (const row of rows) row.queryFn.mockClear()
     await act(async () =>
-      publish({ topics: ['projects', 'inbox', 'operations'], target: { type: 'project', id: 'project-one' } }),
+      publish({ topics: ['projects', 'operations'], target: { type: 'project', id: 'project-one' } }),
     )
     await waitFor(() =>
       expect(refreshed()).toEqual([
-        keys.operation('op-item'),
         keys.projectEntries('project-one'),
         keys.projectMemory('project-one'),
         keys.memoryStatus('project-one'),
         keys.memorySources('project-one', 'note', 1),
-        keys.inbox,
       ]),
     )
   })
@@ -352,7 +348,7 @@ describe('entity change notifications', () => {
       online = true
       Socket.current.receive({ type: 'nodes.changed', node_id: firstId })
       expect(listener).toHaveBeenLastCalledWith({
-        topics: ['devices', 'projects', 'threads', 'messages', 'inbox', 'operations', 'files'],
+        topics: ['devices', 'projects', 'threads', 'messages', 'operations', 'files'],
       })
       expect((await client.listDevices())[0].connection).toBe('online')
     } finally {
@@ -371,7 +367,7 @@ describe('entity change notifications', () => {
       const client = createHttpClient({ fetch, WebSocket: Socket as unknown as typeof WebSocket })
       const listener = vi.fn()
       const unsubscribe = client.subscribe(listener)
-      const topics = type === 'thread' ? ['threads', 'messages', 'operations'] : ['projects', 'inbox', 'operations']
+      const topics = type === 'thread' ? ['threads', 'messages', 'operations'] : ['projects', 'operations']
       try {
         await client.getSession()
         Socket.current.receive({ type: `${type}.changed`, [`${type}_id`]: firstId, change: 'detail' })

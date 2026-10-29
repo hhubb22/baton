@@ -1,7 +1,7 @@
 import * as stylex from '@stylexjs/stylex'
 import { Navigate, Outlet, useLocation, useRouter } from '@tanstack/react-router'
 import { useEffect, useMemo, useState } from 'react'
-import { useInbox, useSession, useSignOut } from '../data/queries'
+import { useProjects, useSession, useSignOut } from '../data/queries'
 import type { ID, ProjectPatch, Reference } from '../data/types'
 import { text } from '../theme/text'
 import { colors, size, space } from '../theme/tokens.stylex'
@@ -13,7 +13,7 @@ import { NewProjectDialog } from './NewProjectDialog'
 import { Page } from './Page'
 import type { LoginNotice } from './router'
 import { Sidebar } from './Sidebar'
-import { WorkspaceContext, type ItemDraft, type MemoryDraft, type Workspace } from './workspace'
+import { WorkspaceContext, type MemoryDraft, type Workspace } from './workspace'
 
 const styles = stylex.create({
   shell: {
@@ -77,8 +77,10 @@ function Main({ failedAt, onRetry }: { failedAt: string | null; onRetry: () => v
 }
 
 function WorkspaceTitle() {
-  const inbox = useInbox()
-  const count = (inbox.data ?? []).filter((item) => item.status === 'pending').length
+  const projects = useProjects()
+  const count = (projects.data ?? []).filter(
+    (project) => project.status !== 'archived' && project.latestReplySeq > project.readReplySeq,
+  ).length
   useEffect(() => {
     document.title = count > 0 ? `(${count}) Baton` : 'Baton'
     return () => {
@@ -98,7 +100,6 @@ export function WorkspaceLayout() {
   const [creatingProject, setCreatingProject] = useState(false)
   const [references, setReferences] = useState<Record<ID, Reference>>({})
   const [drafts] = useState(() => ({
-    itemDrafts: createDraftStore<ItemDraft>(),
     settingsDrafts: createDraftStore<ProjectPatch>(),
     memoryDrafts: createDraftStore<MemoryDraft>(),
   }))

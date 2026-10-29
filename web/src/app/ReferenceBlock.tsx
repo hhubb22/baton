@@ -64,11 +64,8 @@ export function ReferenceBlock({ reference, onRemove }: { reference: Reference; 
     case 'file':
       meta = [thread?.title ?? null, reply, deviceName].filter((item): item is string => item !== null)
       break
-    case 'item':
-      meta = [`问题 ${reference.itemId}`]
-      break
   }
-  const icon = reference.kind === 'file' ? 'file' : reference.kind === 'item' ? 'inbox' : 'message'
+  const icon = reference.kind === 'file' ? 'file' : 'message'
 
   return (
     <figure aria-label={`引用：${reference.title}`} {...stylex.props(styles.block, !onRemove && styles.inBubble)}>

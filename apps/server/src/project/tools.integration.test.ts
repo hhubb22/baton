@@ -151,22 +151,6 @@ it('executes Project tools, bounds read results, rejects unknown arguments and p
     expect(unpack(await call('threads.read', { thread_id: id }))).toMatchObject({ turns: [], through_turn: 0 })
     expect(await call('threads.stop', { thread_id: id })).not.toHaveProperty('isError', true)
     expect(await call('threads.archive', { thread_id: id })).not.toHaveProperty('isError', true)
-    const ask = await call('inbox.ask', {
-      title: 'Continue?',
-      content: 'Details',
-      options: [],
-      allow_text: true,
-      thread_id: id,
-    })
-    const requestId = (ask.value as { request_id: string }).request_id
-    expect(unpack(await call('inbox.list', {})).requests).toHaveLength(1)
-    expect(unpack(await call('inbox.get', { request_id: requestId }))).toMatchObject({
-      title: 'Continue?',
-      state: 'open',
-    })
-    expect(await call('inbox.withdraw', { request_id: requestId, reason: 'Resolved elsewhere' })).toMatchObject({
-      value: { state: 'withdrawn' },
-    })
     expect(
       await call('nodes.exec', {
         node_id: nodeId,
@@ -189,13 +173,6 @@ it('executes Project tools, bounds read results, rejects unknown arguments and p
     })
     expect(
       await db.run(callProjectTool({ ...other.context, toolCallId: 'read-memory' }, 'memory.read', { item_id: entry })),
-    ).toMatchObject({
-      isError: true,
-    })
-    expect(
-      await db.run(
-        callProjectTool({ ...other.context, toolCallId: 'read-inbox' }, 'inbox.get', { request_id: requestId }),
-      ),
     ).toMatchObject({
       isError: true,
     })
