@@ -4,6 +4,9 @@ import type { Device, ID, Operation, OperationKind, OperationPhase } from '../ty
 export interface HttpContext {
   request<T>(path: string, init?: RequestInit): Promise<T>
   emit(...topics: Topic[]): void
+  threadChanged?(id: ID): void
+  threadRevision?(id: ID): string
+  sessionRevision?(): number
   devices(): Promise<Device[]>
   operation(
     kind: OperationKind,

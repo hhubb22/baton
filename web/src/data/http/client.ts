@@ -189,9 +189,19 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
   let signedIn = false
   let ended: Session['ended'] = null
   let timer: ReturnType<typeof setInterval> | null = null
+  let refreshTimer: ReturnType<typeof setInterval> | null = null
   let socket: WebSocket | null = null
+  let socketReady = false
   let nodeRead: Promise<NodesDTO> | null = null
+  let allThreadRevision = 0
+  let sessionRevision = 0
+  const threadRevisions = new Map<string, number>()
   const publish = (event: ChangeEvent) => {
+    if (event.target?.type === 'thread') {
+      threadRevisions.set(event.target.id, (threadRevisions.get(event.target.id) ?? 0) + 1)
+    } else if (event.topics.includes('threads') || event.topics.includes('messages')) {
+      allThreadRevision += 1
+    }
     for (const listener of listeners) listener(event)
   }
   const emit = (...topics: Topic[]) => publish({ topics })
@@ -200,6 +210,7 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
     onUnauthorized: () => {
       if (signedIn) {
         signedIn = false
+        sessionRevision += 1
         ended = 'expired'
         stop()
         output.clear()
@@ -225,7 +236,15 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
     operations.set(value.id, { operation: value, refresh })
     return value
   }
-  const ctx: HttpContext = { request, emit, devices: listDevices, operation }
+  const ctx: HttpContext = {
+    request,
+    emit,
+    threadChanged: (id) => publish({ topics: ['threads', 'messages', 'operations'], target: { type: 'thread', id } }),
+    threadRevision: (id) => `${allThreadRevision}:${threadRevisions.get(id) ?? 0}`,
+    sessionRevision: () => sessionRevision,
+    devices: listDevices,
+    operation,
+  }
   const origin = options.origin ?? globalThis.location?.origin ?? 'https://localhost'
   const enrollment = (value: EnrollmentDTO): Enrollment => ({
     id: value.enrollment_id ?? value.id ?? '',
@@ -238,18 +257,32 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
   function stop() {
     if (timer) clearInterval(timer)
     timer = null
+    if (refreshTimer) clearInterval(refreshTimer)
+    refreshTimer = null
+    globalThis.document?.removeEventListener('visibilitychange', refreshVisible)
     const previous = socket
     socket = null
+    socketReady = false
     output.setConnection(null)
     previous?.close()
   }
   function start() {
     if (!signedIn || listeners.size === 0 || timer) return
     timer = setInterval(() => {
-      emit('devices', 'projects', 'threads', 'messages', 'inbox', 'operations', 'files')
       if (!socket) connectSocket()
+      if (socketReady) emit('operations')
+      else refreshAll()
     }, options.pollInterval ?? 2000)
+    refreshTimer = setInterval(refreshAll, 30000)
+    globalThis.document?.addEventListener('visibilitychange', refreshVisible)
     connectSocket()
+  }
+  function refreshAll() {
+    nodeRead = null
+    emit('devices', 'projects', 'threads', 'messages', 'inbox', 'operations')
+  }
+  function refreshVisible() {
+    if (globalThis.document?.visibilityState === 'visible') refreshAll()
   }
   function connectSocket() {
     const Socket = options.WebSocket === undefined ? globalThis.WebSocket : options.WebSocket
@@ -273,10 +306,12 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
       } catch {
         return
       }
+      if (message.type === 'ready') refreshAll()
       if (message.type === 'ready' || message.type === 'notification') {
         publish({ topics: [], browserEvent: message as BrowserEvent })
       }
       if (message.type === 'ready') {
+        socketReady = true
         output.setConnection((subscription) => {
           if (socket === next && next.readyState === 1) next.send(JSON.stringify(subscription))
         })
@@ -315,6 +350,7 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
     next.onclose = () => {
       if (socket === next) {
         socket = null
+        socketReady = false
         output.setConnection(null)
         emit('session')
       }
@@ -367,11 +403,14 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
     async signOut() {
       await request('/logout', { method: 'POST', body: '{}' })
       signedIn = false
+      sessionRevision += 1
       ended = null
       stop()
       transport.clear()
       output.clear()
       operations.clear()
+      allThreadRevision += 1
+      threadRevisions.clear()
       emit('session')
     },
     async changePassword(currentPassword, newPassword) {
@@ -381,6 +420,7 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
       })
       transport.clear()
       signedIn = false
+      sessionRevision += 1
       stop()
       output.clear()
       return { account: null, defaultDeviceId: null, ended: null }

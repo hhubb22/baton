@@ -133,7 +133,10 @@ describe('entity change notifications', () => {
       await waitFor(() => expect(Object.values(result.current).every((query) => query.isSuccess)).toBe(true))
       fetch.mockClear()
       revisions.set(firstId, 2)
-      act(() => Socket.current.receive({ type: 'thread.changed', thread_id: firstId, change: 'detail' }))
+      act(() => {
+        for (let i = 0; i < 3; i += 1)
+          Socket.current.receive({ type: 'thread.changed', thread_id: firstId, change: 'detail' })
+      })
       await waitFor(() => {
         expect(result.current.first.data?.title).toBe(`${firstId}: 2`)
         expect(result.current.threads.data?.[0].title).toBe(`${firstId}: 2`)
@@ -146,6 +149,7 @@ describe('entity change notifications', () => {
       expect(new Set(paths)).toEqual(
         new Set([`/api/v1/threads/${firstId}`, `/api/v1/threads/${firstId}/timeline?limit=100`]),
       )
+      expect(paths).toHaveLength(2)
       expect(paths.some((path) => path.includes(secondId))).toBe(false)
 
       revisions.set(secondId, 2)
@@ -154,6 +158,62 @@ describe('entity change notifications', () => {
         expect(result.current.second.data?.title).toBe(`${secondId}: 2`)
         expect(result.current.secondMessages.data?.[0].body).toBe('Reply 2')
       })
+    } finally {
+      unmount()
+    }
+  })
+
+  it('shares concurrent thread reads and refreshes after a change during the first read', async () => {
+    let release!: () => void
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let revision = 1
+    let timelineCalls = 0
+    const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
+      const path = new URL(requestURL(input), 'https://baton.test').pathname
+      if (path === '/api/v1/me') return Response.json({ employee: { id: 'employee', display_name: 'Alice' } })
+      if (path === '/api/v1/nodes') return Response.json({ nodes: [], default_device: {} })
+      if (path.endsWith('/timeline')) {
+        const current = revision
+        timelineCalls += 1
+        if (timelineCalls === 1) await blocked
+        return Response.json({
+          events: [
+            {
+              id: 1,
+              kind: 'reply',
+              created_at: '2026-10-27T00:00:00Z',
+              payload: { event_id: 'reply', content: `Reply ${current}` },
+            },
+          ],
+        })
+      }
+      return Response.json({
+        id: firstId,
+        title: `Thread ${revision}`,
+        node_id: 'desk',
+        agent_type: 'cursor',
+        model: 'auto',
+        working_directory: '/work',
+        status: 'idle',
+        created_at: '2026-10-27T00:00:00Z',
+        last_activity_at: '2026-10-27T00:00:00Z',
+      })
+    })
+    const client = createHttpClient({ fetch, WebSocket: Socket as unknown as typeof WebSocket, pollInterval: 60000 })
+    const { result, unmount } = renderHook(
+      () => ({ session: useSession(), thread: useThread(firstId), messages: useMessages(firstId) }),
+      { wrapper: wrapperFor(client) },
+    )
+    try {
+      await waitFor(() => expect(timelineCalls).toBe(1))
+      revision = 2
+      act(() => Socket.current.receive({ type: 'thread.changed', thread_id: firstId, change: 'detail' }))
+      release()
+      await waitFor(() => expect(result.current.messages.data?.[0]?.body).toBe('Reply 2'))
+      expect(result.current.thread.data?.title).toBe('Thread 2')
+      expect(timelineCalls).toBe(2)
     } finally {
       unmount()
     }
@@ -202,26 +262,30 @@ describe('entity change notifications', () => {
     await act(async () =>
       publish({ topics: ['threads', 'messages', 'operations'], target: { type: 'thread', id: 'one' } }),
     )
-    expect(refreshed()).toEqual([
-      keys.thread('one'),
-      keys.messages('one'),
-      keys.trace('reply-one'),
-      keys.output('one'),
-      keys.operation('op-one'),
-      keys.operation('send-one'),
-    ])
+    await waitFor(() =>
+      expect(refreshed()).toEqual([
+        keys.thread('one'),
+        keys.messages('one'),
+        keys.trace('reply-one'),
+        keys.output('one'),
+        keys.operation('op-one'),
+        keys.operation('send-one'),
+      ]),
+    )
     for (const row of rows) row.queryFn.mockClear()
     await act(async () =>
       publish({ topics: ['projects', 'inbox', 'operations'], target: { type: 'project', id: 'project-one' } }),
     )
-    expect(refreshed()).toEqual([
-      keys.operation('op-item'),
-      keys.projectEntries('project-one'),
-      keys.projectMemory('project-one'),
-      keys.memoryStatus('project-one'),
-      keys.memorySources('project-one', 'note', 1),
-      keys.inbox,
-    ])
+    await waitFor(() =>
+      expect(refreshed()).toEqual([
+        keys.operation('op-item'),
+        keys.projectEntries('project-one'),
+        keys.projectMemory('project-one'),
+        keys.memoryStatus('project-one'),
+        keys.memorySources('project-one', 'note', 1),
+        keys.inbox,
+      ]),
+    )
   })
 
   it.each(['thread', 'project'] as const)('patches a loaded %s list without an active detail query', async (type) => {

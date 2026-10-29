@@ -151,24 +151,35 @@ function invalidateEntity(client: BatonClient, queryClient: QueryClient, target:
 export function ClientProvider({ client, children }: { client: BatonClient; children: ReactNode }) {
   const [queryClient] = useState(createQueryClient)
 
-  useEffect(
-    () =>
-      client.subscribe(({ topics, target, browserEvent }) => {
-        if (browserEvent || target || topics.some((topic) => ['threads', 'inbox', 'projects'].includes(topic)))
+  useEffect(() => {
+    const pending = new Map<string, NonNullable<ChangeEvent['target']>>()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const unsubscribe = client.subscribe(({ topics, target, browserEvent }) => {
+      if (browserEvent || (!target && topics.some((topic) => ['threads', 'inbox', 'projects'].includes(topic))))
+        void queryClient.invalidateQueries({ queryKey: keys.activity })
+      if (target) {
+        pending.set(`${target.type}:${target.id}`, target)
+        timer ??= setTimeout(() => {
+          timer = undefined
+          const targets = [...pending.values()]
+          pending.clear()
           void queryClient.invalidateQueries({ queryKey: keys.activity })
-        if (target) {
-          invalidateEntity(client, queryClient, target)
-          return
-        }
-        for (const topic of topics)
-          void queryClient.invalidateQueries({
-            queryKey: [topic],
-            predicate: ({ queryKey: [group, kind] }) =>
-              group !== 'files' && !(group === 'devices' && (kind === 'folders' || kind === 'allowedFolders')),
-          })
-      }),
-    [client, queryClient],
-  )
+          for (const item of targets) invalidateEntity(client, queryClient, item)
+        }, 75)
+        return
+      }
+      for (const topic of topics)
+        void queryClient.invalidateQueries({
+          queryKey: [topic],
+          predicate: ({ queryKey: [group, kind] }) =>
+            group !== 'files' && !(group === 'devices' && (kind === 'folders' || kind === 'allowedFolders')),
+        })
+    })
+    return () => {
+      unsubscribe()
+      if (timer) clearTimeout(timer)
+    }
+  }, [client, queryClient])
 
   return (
     <ClientContext value={client}>
@@ -189,7 +200,11 @@ export function useDownloads() {
 
 export function useDevices() {
   const client = useClient()
-  return useQuery({ queryKey: keys.devices, queryFn: () => client.listDevices() })
+  return useQuery({
+    queryKey: keys.devices,
+    queryFn: () => client.listDevices(),
+    refetchInterval: 2000,
+  })
 }
 
 export function useDeviceFolders(deviceId: ID, connected: boolean) {
@@ -208,6 +223,7 @@ export function useEnrollment(id: ID | null) {
     queryKey: keys.enrollment(id ?? ''),
     queryFn: () => client.getEnrollment(id!),
     enabled: id !== null,
+    refetchInterval: 2000,
   })
 }
 
@@ -316,7 +332,13 @@ export function useLiveOutput(threadId: ID, enabled: boolean) {
       else void queryClient.invalidateQueries({ queryKey: keys.output(threadId), exact: true })
     })
   }, [client, queryClient, threadId, enabled])
-  return useQuery({ queryKey: keys.output(threadId), queryFn: () => client.readOutput(threadId), enabled, gcTime: 0 })
+  return useQuery({
+    queryKey: keys.output(threadId),
+    queryFn: () => client.readOutput(threadId),
+    enabled,
+    gcTime: 0,
+    refetchInterval: 2000,
+  })
 }
 
 export function useFolders(deviceId: ID | null, path: string | null) {

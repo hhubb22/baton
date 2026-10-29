@@ -126,6 +126,93 @@ function setup(handler: Handler, devices: Device[] = [device()]) {
 const rootResponse = { kind: 'roots', roots: [{ id: 'root-id', path: '/work' }], truncated: false }
 
 describe('HTTP thread contracts', () => {
+  it('starts a fresh read when a mutation changes a thread during an earlier read', async () => {
+    let release!: () => void
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let revision = 0
+    let calls = 0
+    const { api, ctx } = setup(async (url) => {
+      if (!url.pathname.endsWith('/timeline')) return thread()
+      calls += 1
+      if (calls === 1) {
+        await blocked
+        return { events: [accepted()] }
+      }
+      return { events: [accepted(), event(2, 'message.withdrawn', { client_message_id: 'client-message' })] }
+    })
+    ctx.threadRevision = () => String(revision)
+    ctx.threadChanged = vi.fn()
+    const old = api.getThread(threadId)
+    await vi.waitFor(() => expect(calls).toBe(1))
+    revision += 1
+    const latest = await api.listMessages(threadId)
+    expect(latest[0].delivery).toBe('withdrawn')
+    release()
+    await old
+    expect(calls).toBe(2)
+  })
+
+  it('does not reuse or publish a pending read after the session changes', async () => {
+    let release!: () => void
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let session = 1
+    let calls = 0
+    const { api, ctx } = setup(async (url) => {
+      if (!url.pathname.endsWith('/timeline')) return thread()
+      calls += 1
+      if (calls === 1) await blocked
+      return { events: [] }
+    })
+    ctx.sessionRevision = () => session
+    const old = api.getThread(threadId)
+    await vi.waitFor(() => expect(calls).toBe(1))
+    session += 1
+    expect((await api.getThread(threadId)).id).toBe(threadId)
+    release()
+    await expect(old).rejects.toMatchObject({ code: 'unavailable' })
+    expect(calls).toBe(2)
+  })
+
+  it('returns the withdrawn message when an older timeline read is still pending', async () => {
+    let release!: () => void
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let revision = 0
+    let calls = 0
+    let withdrawn = false
+    const { api, ctx } = setup(async (url, init) => {
+      if (init.method === 'POST') {
+        withdrawn = true
+        return {}
+      }
+      if (!url.pathname.endsWith('/timeline')) return thread()
+      calls += 1
+      if (calls === 2) await blocked
+      return {
+        events: withdrawn
+          ? [accepted(), event(2, 'message.withdrawn', { client_message_id: 'client-message' })]
+          : [accepted()],
+      }
+    })
+    ctx.threadRevision = () => String(revision)
+    ctx.threadChanged = () => {
+      revision += 1
+    }
+    await api.listMessages(threadId)
+    const older = api.getThread(threadId)
+    await vi.waitFor(() => expect(calls).toBe(2))
+    const result = await api.cancelMessage(messageId)
+    expect(result.delivery).toBe('withdrawn')
+    release()
+    await older
+    expect(calls).toBe(3)
+  })
+
   it('sends the selected thinking option for new and queued messages and restores it on read', async () => {
     const thinking = { id: 'reasoningEffort' as const, value: 'high' }
     const bodies: Record<string, unknown>[] = []

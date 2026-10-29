@@ -1,6 +1,16 @@
 import * as stylex from '@stylexjs/stylex'
 import { useNavigate } from '@tanstack/react-router'
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject, type UIEvent } from 'react'
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+  type UIEvent,
+} from 'react'
 import { ClientError } from '../data/client'
 import {
   agentNames,
@@ -237,7 +247,7 @@ function errorText(cause: unknown, fallback: string) {
 }
 
 // reply 是 Agent 回复的序号，选中文字引用时写明来源。
-function MessageItem({
+const MessageItem = memo(function MessageItem({
   message,
   agent,
   deviceId,
@@ -259,12 +269,12 @@ function MessageItem({
   command?: boolean
   latest?: boolean
   outputGap?: boolean
-  onOpen: (deviceId: ID, path: string) => void
+  onOpen: (reply: number | null, deviceId: ID, path: string) => void
   onCancel: (message: Message) => void
 }) {
   const [actionsRevealed, setActionsRevealed] = useState(false)
   // 回复里的路径指向 Thread 所在设备。
-  const onOpenPath = (path: string) => onOpen(deviceId, path)
+  const onOpenPath = (path: string) => onOpen(reply, deviceId, path)
   const notice = threadMessageNotice(message, agent)
   if (message.role === 'activity') {
     return (
@@ -302,7 +312,11 @@ function MessageItem({
           <MessageBody body={message.body} onOpenPath={onOpenPath} streaming={message.streaming} />
         </div>
         {message.fullOutput && <FullOutput threadId={message.threadId} reference={message.fullOutput} />}
-        <Attachments attachments={message.attachments} devices={devices} onOpen={onOpen} />
+        <Attachments
+          attachments={message.attachments}
+          devices={devices}
+          onOpen={(id, path) => onOpen(reply, id, path)}
+        />
         {message.body && <MessageActions body={message.body} thread />}
       </article>
     )
@@ -360,7 +374,7 @@ function MessageItem({
       )}
     </article>
   )
-}
+})
 
 function NoticeCard({
   notice,
@@ -455,6 +469,7 @@ export function ThreadDetail({
   const projects = useProjects()
   const send = useSendMessage()
   const cancelMessage = useCancelMessage()
+  const cancel = cancelMessage.mutate
   const setModel = useSetThreadModel()
   const answerQuestion = useAnswerThreadQuestion()
   const stop = useStopThread()
@@ -479,6 +494,18 @@ export function ThreadDetail({
   const scrollThread = useRef(threadId)
   const workspace = useWorkspace()
   const resumeOperation = useOperation(resumeId)
+  const openMessageFile = useCallback((reply: number | null, deviceId: ID, path: string) => {
+    setPreview({ deviceId, path, reply })
+  }, [])
+  const onCancel = useCallback(
+    (message: Message) => {
+      setError(null)
+      cancel(message.id, {
+        onError: (cause) => setError(errorText(cause, '无法取消，请重试。')),
+      })
+    },
+    [cancel],
+  )
 
   const thread = threadQuery.data
   const projectArchived = projects.data?.find((item) => item.id === thread?.projectId)?.status === 'archived'
@@ -685,13 +712,6 @@ export function ThreadDetail({
     setModel.mutate({ threadId, model }, { onError: (cause) => setError(errorText(cause, '无法更换模型，请重试。')) })
   }
 
-  const onCancel = (message: Message) => {
-    setError(null)
-    cancelMessage.mutate(message.id, {
-      onError: (cause) => setError(errorText(cause, '无法取消，请重试。')),
-    })
-  }
-
   const onStop = () => {
     stop.mutate(threadId, {
       onSuccess: () => setConfirm(null),
@@ -854,7 +874,7 @@ export function ThreadDetail({
                     command={thread.agent === null}
                     latest={message.id === latestReplyId}
                     outputGap={message === liveReply && output?.chunks.some((chunk) => chunk.kind === 'gap')}
-                    onOpen={openFile(reply)}
+                    onOpen={openMessageFile}
                     onCancel={onCancel}
                   />
                 )

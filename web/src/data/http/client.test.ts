@@ -511,6 +511,46 @@ describe('HTTP account and devices', () => {
     expect(fetch).toHaveBeenCalledTimes(1)
   })
 
+  it('uses fast fallback before ready, calibrates on ready and visibility, and cleans up timers', async () => {
+    vi.useFakeTimers()
+    class Socket {
+      static current: Socket
+      onmessage: ((event: { data: string }) => void) | null = null
+      onclose: (() => void) | null = null
+      constructor() {
+        Socket.current = this
+      }
+      close() {
+        this.onclose?.()
+      }
+      receive(value: unknown) {
+        this.onmessage?.({ data: JSON.stringify(value) })
+      }
+    }
+    const fetch = fetcher()
+      .mockResolvedValueOnce(response({ employee, csrf_token: 'current' }))
+      .mockResolvedValueOnce(response({ nodes: [], default_device: {} }))
+    const client = createHttpClient({ fetch, WebSocket: Socket as unknown as typeof WebSocket, pollInterval: 2000 })
+    const changes = vi.fn()
+    const unsubscribe = client.subscribe(changes)
+    await client.getSession()
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(changes.mock.calls.some(([event]) => event.topics.includes('threads'))).toBe(true)
+    changes.mockClear()
+    Socket.current.receive({ type: 'ready' })
+    expect(changes.mock.calls.some(([event]) => event.topics.includes('threads'))).toBe(true)
+    changes.mockClear()
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(changes.mock.calls.some(([event]) => event.topics.includes('threads'))).toBe(false)
+    document.dispatchEvent(new Event('visibilitychange'))
+    expect(changes.mock.calls.some(([event]) => event.topics.includes('threads'))).toBe(true)
+    changes.mockClear()
+    unsubscribe()
+    document.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(30000)
+    expect(changes).not.toHaveBeenCalled()
+  })
+
   it('subscribes over the event socket, resumes after reconnecting, and unsubscribes without closing it', async () => {
     vi.useFakeTimers()
     class Socket {

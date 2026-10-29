@@ -7,6 +7,18 @@ import { createHttpClient } from '../data/http/client'
 import { App } from './App'
 import { createAppRouter } from './router'
 
+const bodyRender = vi.hoisted(() => vi.fn())
+vi.mock('./MessageBody', async (importOriginal) => {
+  const original = await importOriginal<typeof import('./MessageBody')>()
+  return {
+    ...original,
+    MessageBody: (props: Parameters<typeof original.MessageBody>[0]) => {
+      bodyRender(props.body)
+      return <original.MessageBody {...props} />
+    },
+  }
+})
+
 function requestURL(input: RequestInfo | URL): string {
   return input instanceof Request ? input.url : input.toString()
 }
@@ -162,6 +174,22 @@ function mount(
 beforeEach(() => localStorage.clear())
 
 describe('remote Cursor threads', () => {
+  it('keeps saved message bodies rendered while editing the composer', async () => {
+    const user = userEvent.setup()
+    const { state } = mount({ existing: true, status: 'idle' })
+    state.thread.opened_at = at
+    state.events.push({
+      id: 1,
+      kind: 'reply',
+      created_at: at,
+      payload: { event_id: 'saved', content: 'Saved response' },
+    })
+    expect(await screen.findByText('Saved response')).toBeInTheDocument()
+    const input = screen.getByLabelText('消息')
+    bodyRender.mockClear()
+    await user.type(input, 'Next question')
+    expect(bodyRender.mock.calls.filter(([body]) => body === 'Saved response')).toHaveLength(0)
+  })
   it.each([
     { reason: 'completed', replies: 2, count: 2 },
     { reason: 'failed', replies: 0, count: 1 },

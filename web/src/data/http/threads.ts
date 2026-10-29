@@ -275,6 +275,14 @@ export function createThreadAPI(
   const clientIDs = new Map<string, string>()
   const messages = new Map<string, MessageDTO>()
   const replies = new Map<string, { threadId: string; seq: number }>()
+  const reads = new Map<
+    string,
+    {
+      session: number | undefined
+      revision: string | undefined
+      promise: Promise<{ t: ThreadDTO; events: EventDTO[] }>
+    }
+  >()
   const uuid = (scope: string, clientId: string) => {
     if (!clientId) throw new ClientError('invalid', 'A client ID is required.')
     const key = JSON.stringify([scope, clientId])
@@ -305,6 +313,30 @@ export function createThreadAPI(
     return events
   }
   const view = (id: string) => ctx.request<ThreadDTO>(threadPath(id))
+  function readThread(id: string): Promise<{ t: ThreadDTO; events: EventDTO[] }> {
+    const session = ctx.sessionRevision?.()
+    const revision = ctx.threadRevision?.(id)
+    const pending = reads.get(id)
+    if (pending && pending.session === session && pending.revision === revision) return pending.promise
+    const read = (async () => {
+      const [t, events] = await Promise.all([view(id), timeline(id)])
+      if (session !== ctx.sessionRevision?.()) throw new ClientError('unavailable', '会话已结束。')
+      if (revision !== ctx.threadRevision?.(id)) {
+        setTimeout(() => {
+          if (session === ctx.sessionRevision?.()) ctx.threadChanged?.(id)
+        }, 0)
+      }
+      return { t, events }
+    })().finally(() => {
+      if (reads.get(id)?.promise === read) reads.delete(id)
+    })
+    reads.set(id, { session, revision, promise: read })
+    return read
+  }
+  const changed = (id: string) => {
+    if (ctx.threadChanged) ctx.threadChanged(id)
+    else ctx.emit('threads', 'messages', 'operations')
+  }
   async function agentFor(t: Pick<ThreadDTO, 'node_id' | 'agent_type'>) {
     const device = (await ctx.devices()).find((device) => device.id === t.node_id)
     const agent = device?.agents.find((agent) => agent.kind === t.agent_type)
@@ -536,7 +568,7 @@ export function createThreadAPI(
     const baseline = kind === 'resumeThread' ? ((await timeline(threadId)).at(-1)?.id ?? 0) : 0
     const endpoint = kind === 'stopThread' ? 'stop' : kind === 'archiveThread' ? 'archive' : 'resume'
     const t = await ctx.request<ThreadDTO>(`${threadPath(threadId)}/${endpoint}`, post({}))
-    ctx.emit('threads', 'messages', 'operations')
+    changed(threadId)
     const phase: Phase =
       kind === 'resumeThread'
         ? { phase: !t.node_online || !t.node_synced ? ('waitingDevice' as const) : ('saved' as const) }
@@ -581,7 +613,7 @@ export function createThreadAPI(
   const api: ThreadAPI = {
     async answerThreadQuestion({ threadId, answer }) {
       const updated = await ctx.request<ThreadDTO>(`${threadPath(threadId)}/answer`, post(answer))
-      ctx.emit('threads', 'messages')
+      changed(threadId)
       return mapThread(updated, await timeline(threadId))
     },
     async listThreads() {
@@ -600,11 +632,11 @@ export function createThreadAPI(
       return all.map((t) => mapThread(t, []))
     },
     async getThread(threadId) {
-      const [t, events] = await Promise.all([view(threadId), timeline(threadId)])
+      const { t, events } = await readThread(threadId)
       return mapThread(t, events)
     },
     async listMessages(threadId) {
-      const [t, events] = await Promise.all([view(threadId), timeline(threadId)])
+      const { t, events } = await readThread(threadId)
       return readMessages(t, events)
     },
     async createThread(input) {
@@ -628,7 +660,7 @@ export function createThreadAPI(
         }),
       )
       const refresh = () => executionPhase(t.id, messageId)
-      ctx.emit('threads', 'messages', 'operations')
+      changed(t.id)
       const phase: Phase =
         t.status === 'unknown' || (t.status === 'stopped' && !t.opened_at)
           ? { phase: 'failed', detail: t.status_reason || '助手无法启动。' }
@@ -651,7 +683,7 @@ export function createThreadAPI(
       )
       messages.set(m.id, m)
       const phase = messagePhase(m, t, [])
-      ctx.emit('threads', 'messages', 'operations')
+      changed(t.id)
       return ctx.operation('sendMessage', m.id, phase.phase, phase.detail, () => executionPhase(t.id, clientId))
     },
     async cancelMessage(messageId) {
@@ -665,7 +697,7 @@ export function createThreadAPI(
       }
       if (!message) throw new ClientError('notFound', '找不到消息。')
       await ctx.request(`${threadPath(message.thread_id)}/messages/${apiPath(messageId)}/withdraw`, post({}))
-      ctx.emit('threads', 'messages')
+      changed(message.thread_id)
       const updated = (await api.listMessages(message.thread_id)).find((item) => item.id === messageId)
       return updated ?? unavailable('设备尚未确认消息状态。')
     },
@@ -674,7 +706,7 @@ export function createThreadAPI(
       const agent = await agentFor(t)
       if (!agent.abilities.switchModel) throw new ClientError('invalid', '此助手不支持切换模型。')
       const updated = await ctx.request<ThreadDTO>(`${threadPath(threadId)}/model`, post({ model }))
-      ctx.emit('threads')
+      changed(threadId)
       return mapThread(updated, await timeline(threadId))
     },
     async setThreadExecutionLimit({ threadId, executionTimeoutSeconds }) {
@@ -682,7 +714,7 @@ export function createThreadAPI(
         method: 'PATCH',
         body: JSON.stringify({ execution_timeout_seconds: executionTimeoutSeconds }),
       })
-      ctx.emit('threads')
+      changed(threadId)
       return mapThread(updated, await timeline(threadId))
     },
     stopThread: (id) => action('stopThread', id),
