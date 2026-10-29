@@ -100,3 +100,80 @@ it('只转发同批完整且经过共享规则遮挡的回放事件', () => {
   duplicateCounter.attributes.push(metadata('rr-web.chunk', 1))
   expect(JSON.stringify(filterForward('logs', wrap([duplicateCounter]), { employeeId }))).not.toContain('rr-web.event')
 })
+
+it('覆盖日志身份并限制指标标签', () => {
+  const spoof = '33333333-3333-4333-8333-333333333333'
+  const resource = {
+    attributes: [attr('service.name', { stringValue: 'batond' }), attr('baton.node.id', { stringValue: spoof })],
+  }
+  const logs = filterForward(
+    'logs',
+    {
+      resourceLogs: [
+        {
+          resource,
+          scopeLogs: [
+            {
+              logRecords: [
+                {
+                  timeUnixNano: '1',
+                  body: { stringValue: 'baton.wait.start' },
+                  attributes: [
+                    attr('baton.employee.id', { stringValue: spoof }),
+                    attr('private', { stringValue: 'secret' }),
+                  ],
+                },
+                { timeUnixNano: '1', body: { stringValue: 'secret' }, attributes: [] },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    { employeeId, nodeId },
+  )
+  const encodedLogs = JSON.stringify(logs)
+  expect(encodedLogs).toContain(employeeId)
+  expect(encodedLogs).toContain(nodeId)
+  expect(encodedLogs).not.toContain(spoof)
+  expect(encodedLogs).not.toContain('secret')
+  const metrics = filterForward(
+    'metrics',
+    {
+      resourceMetrics: [
+        {
+          resource,
+          scopeMetrics: [
+            {
+              metrics: [
+                {
+                  name: 'baton.workers.active',
+                  description: 'secret',
+                  gauge: {
+                    dataPoints: [
+                      {
+                        timeUnixNano: '1',
+                        asDouble: 1,
+                        attributes: [
+                          attr('baton.agent', { stringValue: 'pi' }),
+                          attr('baton.thread.id', { stringValue: spoof }),
+                        ],
+                        exemplars: [{ value: 'secret' }],
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    { employeeId, nodeId },
+  )
+  const encodedMetrics = JSON.stringify(metrics)
+  expect(encodedMetrics).toContain('baton.agent')
+  expect(encodedMetrics).not.toContain('baton.thread.id')
+  expect(encodedMetrics).not.toContain(spoof)
+  expect(encodedMetrics).not.toContain('secret')
+})

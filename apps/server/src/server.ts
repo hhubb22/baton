@@ -31,6 +31,7 @@ import { filterForward } from '@baton/telemetry/forward'
 import { makeTelemetryForwardClient, telemetryForwardEnabled } from './telemetry-forward-client.ts'
 
 export interface ServerOptions {
+  readonly telemetryEnv?: NodeJS.ProcessEnv
   readonly host?: string
   readonly port?: number
   readonly allowedOrigins: ReadonlyArray<string>
@@ -61,7 +62,8 @@ export const startServer = (
     const services = yield* Effect.context<SqlClient.SqlClient>()
     const scope = yield* Effect.scope
     const tracer = yield* Tracer.Tracer
-    const forwardTelemetry = makeTelemetryForwardClient()
+    const telemetryEnv = options.telemetryEnv ?? process.env
+    const forwardTelemetry = makeTelemetryForwardClient(telemetryEnv)
     const projectWaits = makeProjectWaitObserver()
     const memoryWaits = makeMemoryWaitObserver()
     yield* Effect.forkIn(serverMetricsLoop(projectWaits), scope)
@@ -135,7 +137,7 @@ export const startServer = (
               heartbeat: (source) => run('heartbeat', Nodes.touchNode(source)),
               disconnected: (source) => run('disconnect', Nodes.disconnectNode(source)),
               telemetry: (source, body) => {
-                if (!telemetryForwardEnabled() || !forwardTelemetry.available()) return
+                if (!telemetryForwardEnabled(telemetryEnv) || !forwardTelemetry.available()) return
                 try {
                   const payload = filterForward(body.signal, body.payload, {
                     employeeId: source.employee_id,
@@ -162,7 +164,7 @@ export const startServer = (
                     return {
                       type: 'node.sync_result',
                       ok: true,
-                      ...(telemetryForwardEnabled() ? { telemetry: { forward: true as const } } : {}),
+                      ...(telemetryForwardEnabled(telemetryEnv) ? { telemetry: { forward: true as const } } : {}),
                     }
                   case 'node.upgrade_state': {
                     try {

@@ -8,6 +8,7 @@
     "./daemon/cli": "./src/daemon/cli.ts",
     "./daemon/identity": "./src/daemon/identity.ts",
     "./daemon/transport": "./src/daemon/transport.ts",
+    "./daemon/telemetry-relay": "./src/daemon/telemetry-relay.ts",
     "./devices/roots": "./src/devices/roots.ts",
     "./daemon/host": "./src/daemon/host.ts",
     "./daemon/worker-runner": "./src/daemon/worker-runner.ts",

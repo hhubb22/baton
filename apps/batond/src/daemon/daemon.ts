@@ -346,6 +346,7 @@ async function connected(options: {
       if (body.type === 'node.sync_result') {
         if (env.correlation_id === syncId) {
           if (body.ok) {
+            if (options.telemetryRelay) options.telemetryRelay.send = undefined
             if (body.telemetry?.forward && options.telemetryRelay) {
               const relay = options.telemetryRelay
               relay.send = (signal, payload) => {

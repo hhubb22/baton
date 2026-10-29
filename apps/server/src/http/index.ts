@@ -195,7 +195,7 @@ export const httpApplication = (options: HTTPOptions) =>
           request.method === 'POST' &&
           (path === '/api/v1/telemetry/v1/traces' || path === '/api/v1/telemetry/v1/logs')
         ) {
-          if (!telemetryForwardEnabled() || !options.forwardTelemetry) return yield* notFound()
+          if (!telemetryForwardEnabled(options.telemetryEnv) || !options.forwardTelemetry) return yield* notFound()
           const signal = path.endsWith('/traces') ? 'traces' : 'logs'
           const session = yield* authorizeBrowser(false, signal === 'traces')
           const chunks = yield* Stream.runFoldEffect(

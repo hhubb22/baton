@@ -4,6 +4,7 @@ import type { CredentialSigner } from '../nodes.ts'
 import type { TelemetrySignal } from '../telemetry-forward-client.ts'
 
 export interface HTTPOptions {
+  readonly telemetryEnv?: NodeJS.ProcessEnv
   readonly allowedOrigins: ReadonlyArray<string>
   readonly signer: CredentialSigner
   readonly sessionTTLSeconds?: number

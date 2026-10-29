@@ -80,18 +80,17 @@ it('forwards daemon telemetry only while synchronized and connected', async () =
   const signals = new Set<string>()
   const forwarded: unknown[] = []
   let socket: WebSocket | undefined
+  let syncId = ''
   wss.on('connection', (current) => {
     socket = current
     current.on('message', (raw) => {
       const frame = JSON.parse(webSocketText(raw)) as Frame
       if (frame.kind === 'auth') current.send(JSON.stringify({ kind: 'auth_result', ok: true }))
       const body = bodyOf(frame)
-      if (body?.type === 'node.sync')
-        control(
-          current,
-          { type: 'node.sync_result', ok: true, telemetry: { forward: true } },
-          (frame.envelope as unknown as Envelope).message_id,
-        )
+      if (body?.type === 'node.sync') {
+        syncId = (frame.envelope as unknown as Envelope).message_id
+        control(current, { type: 'node.sync_result', ok: true, telemetry: { forward: true } }, syncId)
+      }
       if (body?.type === 'telemetry.export' && typeof body.signal === 'string') {
         signals.add(body.signal)
         forwarded.push(body.payload)
@@ -102,9 +101,9 @@ it('forwards daemon telemetry only while synchronized and connected', async () =
   await vi.waitFor(() => expect(signals.has('traces')).toBe(true), { timeout: 5000 })
   await vi.waitFor(() => expect(signals.has('logs')).toBe(true), { timeout: 5000 })
   await vi.waitFor(() => expect(signals.has('metrics')).toBe(true), { timeout: 5000 })
-  socket?.terminate()
+  control(socket!, { type: 'node.sync_result', ok: true }, syncId)
   await vi.waitFor(() => expect(relay.send).toBeUndefined())
-  const marker = randomUUID()
+  const disabledMarker = randomUUID()
   const authorization = decodeURIComponent(relay.headers.slice('authorization='.length))
   const post = (value: string) =>
     fetch(`${relay.endpoint}/v1/traces`, {
@@ -112,6 +111,16 @@ it('forwards daemon telemetry only while synchronized and connected', async () =
       headers: { authorization, 'content-type': 'application/json' },
       body: JSON.stringify({ value }),
     })
+  await post(disabledMarker)
+  control(socket!, { type: 'node.sync_result', ok: true, telemetry: { forward: true } }, syncId)
+  await vi.waitFor(() => expect(relay.send).toBeDefined())
+  const afterReenabled = randomUUID()
+  await post(afterReenabled)
+  await vi.waitFor(() => expect(JSON.stringify(forwarded)).toContain(afterReenabled))
+  expect(JSON.stringify(forwarded)).not.toContain(disabledMarker)
+  socket?.terminate()
+  await vi.waitFor(() => expect(relay.send).toBeUndefined())
+  const marker = randomUUID()
   await post(marker)
   await vi.waitFor(() => expect(relay.send).toBeDefined(), { timeout: 5000 })
   const current = randomUUID()

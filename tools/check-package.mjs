@@ -8,6 +8,7 @@ import { validatePackageManifest } from './package-release.mjs'
 import { validateReleaseMetadata } from './lib/release.mjs'
 import { environment, isolatedEnv, withTemporaryInstallation } from './lib/installation.mjs'
 import { measureWorkerStartup } from './measure/worker-startup.mjs'
+import { scanTelemetryArtifacts } from './lib/telemetry-scan.mjs'
 
 function run(executable, args, options) {
   const result = spawnSync(executable, args, {
@@ -232,6 +233,9 @@ async function main() {
     const home = join(root, 'home')
     await mkdir(home, { mode: 0o700 })
     const options = { cwd: home, env: isolatedEnv(home) }
+    await check('telemetryConfigurationLeak', () =>
+      scanTelemetryArtifacts([installed, resolve('apps/server/dist/web')]),
+    )
     await check('help', () => {
       const result = run(executable, ['--help'], options)
       assert.equal(result.status, 0, result.stderr)

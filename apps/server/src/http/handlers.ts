@@ -84,13 +84,12 @@ export const httpHandlers = (options: HTTPOptions, downloads?: Downloads) => {
           CurrentBrowserSession.pipe(
             Effect.map((session) => ({
               ...session,
-              ...(telemetryForwardEnabled()
+              ...(telemetryForwardEnabled(options.telemetryEnv)
                 ? {
-                    telemetry: {
-                      ...(process.env.BATON_WEB_SESSION_REPLAY === 'masked'
+                    telemetry:
+                      (options.telemetryEnv ?? process.env).BATON_WEB_SESSION_REPLAY === 'masked'
                         ? { session_replay: 'masked' as const }
-                        : {}),
-                    },
+                        : {},
                   }
                 : {}),
             })),

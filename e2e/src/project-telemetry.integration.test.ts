@@ -7,9 +7,9 @@ import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import { Effect, Exit, Scope } from 'effect'
 import type { TraceData } from 'effect/observability/OtlpTracer'
-import { expect, test, vi } from 'vite-plus/test'
+import { expect, test } from 'vite-plus/test'
 import * as P from '@baton/protocol'
-import { telemetryLayer } from '@baton/telemetry'
+import { telemetryEnvironment, telemetryLayer } from '@baton/telemetry'
 import { createDatabaseRuntime } from '@baton/server/database'
 import { startServer } from '@baton/server/server'
 import { openTestDatabase } from '@baton/server/testing/database'
@@ -18,11 +18,18 @@ import * as Nodes from '@baton/server/nodes'
 import { registerNode } from '@baton/batond/daemon/identity'
 import { runDaemon } from '@baton/batond/daemon/daemon'
 import { connectWebSocket } from '@baton/batond/daemon/transport'
+import { startTelemetryRelay } from '@baton/batond/daemon/telemetry-relay'
 
 test('exports the center placement and real Project Runtime model call in one trace', async () => {
   const spans: Array<TraceData['resourceSpans'][number]['scopeSpans'][number]['spans'][number] & { service: string }> =
     []
+  const authorization: Array<string | undefined> = []
+  const resources: Array<{
+    service: string
+    attributes: TraceData['resourceSpans'][number]['resource']['attributes']
+  }> = []
   const collector = createServer((request, response) => {
+    authorization.push(request.headers.authorization)
     let body = ''
     request.on('data', (chunk) => {
       body += String(chunk)
@@ -32,6 +39,7 @@ test('exports the center placement and real Project Runtime model call in one tr
       for (const resource of data.resourceSpans) {
         const service =
           resource.resource.attributes.find((entry) => entry.key === 'service.name')?.value.stringValue ?? ''
+        resources.push({ service, attributes: resource.resource.attributes })
         for (const scope of resource.scopeSpans) for (const span of scope.spans) spans.push({ ...span, service })
       }
       response.writeHead(200).end('{}')
@@ -39,12 +47,19 @@ test('exports the center placement and real Project Runtime model call in one tr
   })
   await new Promise<void>((resolve) => collector.listen(0, '127.0.0.1', resolve))
   const address = collector.address() as { port: number }
-  vi.stubEnv('OTEL_EXPORTER_OTLP_TRACES_ENDPOINT', `http://127.0.0.1:${address.port}/v1/traces`)
-  vi.stubEnv('OTEL_LOGS_EXPORTER', 'none')
-  vi.stubEnv('OTEL_METRICS_EXPORTER', 'none')
-  vi.stubEnv('OTEL_BSP_SCHEDULE_DELAY', '30')
+  const telemetryEnv = {
+    OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `http://127.0.0.1:${address.port}/v1/traces`,
+    OTEL_EXPORTER_OTLP_HEADERS: 'authorization=local-test-key',
+    OTEL_LOGS_EXPORTER: 'none',
+    OTEL_METRICS_EXPORTER: 'none',
+    OTEL_BSP_SCHEDULE_DELAY: '30',
+  }
+  const relay = await startTelemetryRelay()
   const database = await openTestDatabase()
-  const runtime = createDatabaseRuntime({ url: database.url, schema: database.schema }, telemetryLayer('baton-server'))
+  const runtime = createDatabaseRuntime(
+    { url: database.url, schema: database.schema },
+    telemetryLayer('baton-server', telemetryEnv),
+  )
   const directory = await realpath(await mkdtemp(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'bpt-')))
   const nodeDirectory = join(directory, 'node')
   const scope = Scope.makeUnsafe()
@@ -57,6 +72,7 @@ test('exports the center placement and real Project Runtime model call in one tr
         port: 0,
         allowedOrigins: ['https://baton.local'],
         signer: Nodes.CredentialSigner.generate(),
+        telemetryEnv,
         dispatchMs: 20,
         projectDispatchMs: 20,
         heartbeatMs: 1000,
@@ -115,13 +131,23 @@ test('exports the center placement and real Project Runtime model call in one tr
         runDaemon({
           dataDirectory: nodeDirectory,
           identity,
+          telemetryRelay: relay,
           probe: async () => [],
           heartbeatMs: 1000,
           pollIntervalMs: 20,
           transport: (_url, options) => connectWebSocket(`ws://127.0.0.1:${running.port}/v1/node`, options),
           project: { runtimeCommand: { file: process.execPath, args: ['--import', loader, fileURLToPath(entry)] } },
         }),
-      ).pipe(Effect.provide(telemetryLayer('batond', { ...process.env, BATON_TELEMETRY_NODE_ID: identity.node_id }))),
+      ).pipe(
+        Effect.provide(
+          telemetryLayer('batond', {
+            ...process.env,
+            ...telemetryEnvironment(relay),
+            BATON_TELEMETRY_NODE_ID: identity.node_id,
+            OTEL_BSP_SCHEDULE_DELAY: '30',
+          }),
+        ),
+      ),
       { signal: controller.signal },
     )
     await expect
@@ -188,15 +214,23 @@ test('exports the center placement and real Project Runtime model call in one tr
         (span) => span.service === 'baton-server' && span.name === 'baton.http.request' && span.traceId === trace,
       ),
     ).toBe(true)
+    expect(authorization.every((value) => value === 'local-test-key')).toBe(true)
+    for (const resource of resources.filter((entry) => ['batond', 'baton-project-runtime'].includes(entry.service))) {
+      expect(resource.attributes).toContainEqual({ key: 'baton.node.id', value: { stringValue: identity.node_id } })
+      expect(resource.attributes).toContainEqual({
+        key: 'baton.employee.id',
+        value: { stringValue: identity.employee_id },
+      })
+    }
   } finally {
     controller.abort()
     await daemon
     await runtime.runPromise(Scope.close(scope, Exit.void))
     await runtime.dispose()
+    await relay.close()
     await database.close()
     collector.closeAllConnections()
     await new Promise<void>((resolve) => collector.close(() => resolve()))
-    vi.unstubAllEnvs()
     await rm(directory, { recursive: true, force: true })
   }
 }, 60000)
