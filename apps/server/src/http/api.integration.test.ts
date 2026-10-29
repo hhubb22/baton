@@ -9,6 +9,7 @@ import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
+import { gzipSync } from 'node:zlib'
 import { DownloadsResponse } from '@baton/protocol/http-api'
 import { downloadArchive, writeChecksum } from '../testing/downloads.ts'
 import { httpApplication, httpRouteTemplate } from './index.ts'
@@ -26,6 +27,7 @@ let token = ''
 let csrf = ''
 let nodeId = ''
 const notifications: Array<{ employeeId: string; event: P.BrowserEvent }> = []
+const forwarded: Array<{ signal: string; employeeId: string; payload: unknown }> = []
 let application: Effect.Success<ReturnType<typeof httpApplication>>
 let heldStarted: (() => void) | undefined
 const origin = 'https://baton.local'
@@ -144,6 +146,7 @@ beforeAll(async () => {
       allowedOrigins: [origin],
       signer,
       gateway: () => gateway,
+      forwardTelemetry: (signal, payload, employeeId) => forwarded.push({ signal, payload, employeeId }),
       webDirectory: join(directory, 'web'),
       downloads: { directory: join(directory, 'packages'), cacheDirectory: join(directory, 'cache') },
     }).pipe(Effect.provideService(Scope.Scope, scope)),
@@ -305,30 +308,62 @@ it('preserves login, password, origin and CSRF gates before decoding endpoint re
 it('returns browser telemetry only to an authenticated session when configured', async () => {
   await login(readyPassword, 'httpready')
   const previous = {
-    endpoint: process.env.BATON_WEB_OTLP_ENDPOINT,
-    key: process.env.BATON_WEB_OTLP_KEY,
+    endpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
+    forward: process.env.BATON_TELEMETRY_FORWARD,
     replay: process.env.BATON_WEB_SESSION_REPLAY,
   }
   try {
-    delete process.env.BATON_WEB_OTLP_ENDPOINT
-    delete process.env.BATON_WEB_OTLP_KEY
+    delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT
+    delete process.env.BATON_TELEMETRY_FORWARD
     expect(await (await request('/api/v1/me')).json()).not.toHaveProperty('telemetry')
-    process.env.BATON_WEB_OTLP_ENDPOINT = 'https://collector.example'
-    process.env.BATON_WEB_OTLP_KEY = 'ingestion-key'
+    process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'https://collector.example'
     process.env.BATON_WEB_SESSION_REPLAY = 'masked'
     expect(await (await request('/api/v1/me')).json()).toMatchObject({
-      telemetry: { endpoint: 'https://collector.example', key: 'ingestion-key', session_replay: 'masked' },
+      telemetry: { session_replay: 'masked' },
     })
     expect((await request('/api/v1/me', 'GET', undefined, { cookie: '' })).status).toBe(401)
   } finally {
     for (const [key, value] of Object.entries({
-      BATON_WEB_OTLP_ENDPOINT: previous.endpoint,
-      BATON_WEB_OTLP_KEY: previous.key,
+      OTEL_EXPORTER_OTLP_ENDPOINT: previous.endpoint,
+      BATON_TELEMETRY_FORWARD: previous.forward,
       BATON_WEB_SESSION_REPLAY: previous.replay,
     })) {
       if (value === undefined) delete process.env[key]
       else process.env[key] = value
     }
+  }
+})
+
+it('requires origin and session for browser telemetry, and CSRF for traces', async () => {
+  await login(readyPassword, 'httpready')
+  const previous = process.env.OTEL_EXPORTER_OTLP_ENDPOINT
+  const previousForward = process.env.BATON_TELEMETRY_FORWARD
+  try {
+    process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://127.0.0.1:4318'
+    const path = '/api/v1/telemetry/v1/traces'
+    expect((await request(path, 'POST', {}, { origin: 'https://untrusted.local' })).status).toBe(403)
+    expect((await request(path, 'POST', {}, { cookie: '' })).status).toBe(401)
+    expect((await request(path, 'POST', {}, { 'x-csrf-token': '' })).status).toBe(403)
+    expect((await request(path, 'POST', {})).status).toBe(200)
+    expect(forwarded.at(-1)?.signal).toBe('traces')
+    expect((await request('/api/v1/telemetry/v1/logs', 'POST', {}, { 'x-csrf-token': '' })).status).toBe(200)
+    expect((await request(path, 'POST', { large: 'x'.repeat(1024 * 1024) })).status).toBe(413)
+    const compressed = gzipSync(Buffer.alloc(1024 * 1024 + 1))
+    const oversizedReplay = await handle(
+      new Request('http://localhost/api/v1/telemetry/v1/logs', {
+        method: 'POST',
+        headers: { origin, cookie: token, 'content-type': 'application/x-protobuf', 'content-encoding': 'gzip' },
+        body: compressed,
+      }),
+    )
+    expect(oversizedReplay.status).toBe(413)
+    process.env.BATON_TELEMETRY_FORWARD = 'off'
+    expect((await request(path, 'POST', {})).status).toBe(404)
+  } finally {
+    if (previous === undefined) delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT
+    else process.env.OTEL_EXPORTER_OTLP_ENDPOINT = previous
+    if (previousForward === undefined) delete process.env.BATON_TELEMETRY_FORWARD
+    else process.env.BATON_TELEMETRY_FORWARD = previousForward
   }
 })
 

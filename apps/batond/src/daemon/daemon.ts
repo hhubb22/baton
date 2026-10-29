@@ -345,7 +345,7 @@ async function connected(options: {
       if (body.type === 'node.sync_result') {
         if (env.correlation_id === syncId) {
           if (body.ok) {
-            if (options.dynamicTelemetry) options.dynamicTelemetry.current = body.telemetry
+            if (options.dynamicTelemetry) options.dynamicTelemetry.current = undefined
             synced = true
             options.connectivity(true)
             projects?.setTransport(projectRPC.request)

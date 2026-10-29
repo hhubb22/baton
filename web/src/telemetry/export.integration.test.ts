@@ -6,6 +6,8 @@ import { trace } from '@opentelemetry/api'
 import Rum from '@hyperdx/otel-web'
 import { expect, it, vi } from 'vite-plus/test'
 import { startTelemetry, stopTelemetry, traceSocket } from './index'
+import { decodeReplayProtobuf } from '@baton/telemetry/protobuf'
+import { filterForward } from '@baton/telemetry/forward'
 
 function protobufFields(bytes: Uint8Array, path: readonly number[]): Uint8Array[] {
   const reader = Reader.create(bytes)
@@ -155,6 +157,13 @@ it('filters serialized traces and masked replay, and stops collection on logout'
     expect(socketSpan).toBeDefined()
     expect(socketSpan.traceId).not.toBe(request.traceId)
     expect(decoded).toContain('rr-web.event')
+    const forwardedReplay = payloads
+      .filter((payload) => payload.url.endsWith('/v1/logs'))
+      .map(({ body }) =>
+        filterForward('logs', decodeReplayProtobuf(body), { employeeId: '11111111-1111-4111-8111-111111111111' }),
+      )
+    expect(JSON.stringify(forwardedReplay)).toContain('rr-web.event')
+    expect(JSON.stringify(forwardedReplay)).not.toContain('secret-')
     const events = payloads
       .filter((payload) => payload.url.endsWith('/v1/logs'))
       .flatMap(({ body }) =>

@@ -1,6 +1,6 @@
 import { readFile, realpath } from 'node:fs/promises'
 import { resolve, relative, extname, isAbsolute, sep } from 'node:path'
-import { Cause, Effect, Exit, Layer } from 'effect'
+import { Cause, Effect, Exit, Layer, Stream } from 'effect'
 import { NodeHttpPlatform } from '@effect/platform-node'
 import { HttpRouter, HttpServer } from 'effect/http'
 import * as Request from 'effect/http/HttpServerRequest'
@@ -19,6 +19,8 @@ import { AppError } from '../errors.ts'
 import type { HTTPOptions } from './options.ts'
 import { httpHandlers } from './handlers.ts'
 import { authorizeBrowser, checkOrigin, HttpRequestId, httpFailure, httpSecurity, newRequestId } from './security.ts'
+import { telemetryForwardEnabled } from '../telemetry-forward-client.ts'
+import { decodeReplayProtobuf } from '@baton/telemetry/protobuf'
 export { cookieToken } from './security.ts'
 
 const json = (value: unknown, status = 200) =>
@@ -189,6 +191,47 @@ export const httpApplication = (options: HTTPOptions) =>
         }
         if (!path.startsWith('/api/')) return yield* staticResponse(options)
         yield* checkOrigin(options)
+        if (
+          request.method === 'POST' &&
+          (path === '/api/v1/telemetry/v1/traces' || path === '/api/v1/telemetry/v1/logs')
+        ) {
+          if (!telemetryForwardEnabled() || !options.forwardTelemetry) return yield* notFound()
+          const signal = path.endsWith('/traces') ? 'traces' : 'logs'
+          const session = yield* authorizeBrowser(false, signal === 'traces')
+          const chunks = yield* Stream.runFoldEffect(
+            request.stream,
+            () => ({ size: 0, chunks: [] as Uint8Array[] }),
+            (acc, chunk) => {
+              const size = acc.size + chunk.byteLength
+              return size > 1024 * 1024
+                ? Effect.fail(new AppError(413, 'payload_too_large'))
+                : Effect.succeed({ size, chunks: [...acc.chunks, chunk] })
+            },
+          )
+          const bytes = Buffer.concat(chunks.chunks)
+          const decoded = yield* Effect.try({
+            try: () => {
+              if (
+                signal === 'logs' &&
+                request.headers['content-encoding'] === 'gzip' &&
+                /^application\/x-protobuf(?:;|$)/i.test(request.headers['content-type'] ?? '')
+              )
+                return decodeReplayProtobuf(bytes)
+              if (!/^application\/json(?:;|$)/i.test(request.headers['content-type'] ?? ''))
+                throw new AppError(415, 'unsupported_media_type')
+              return JSON.parse(bytes.toString('utf8')) as unknown
+            },
+            catch: (error) =>
+              error instanceof AppError
+                ? error
+                : error instanceof RangeError ||
+                    (error instanceof Error && 'code' in error && error.code === 'ERR_BUFFER_TOO_LARGE')
+                  ? new AppError(413, 'payload_too_large')
+                  : new AppError(400, 'invalid_telemetry'),
+          })
+          options.forwardTelemetry(signal, decoded, session.employee.id)
+          return json({})
+        }
         if (path === '/api/v1/openapi.json' && request.method === 'GET') {
           yield* authorizeBrowser(false)
           return json(httpOpenApi())

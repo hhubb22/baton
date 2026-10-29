@@ -107,7 +107,15 @@ export const NodeFrame = Schema.Union([AuthFrame, AuthResultFrame, HeartbeatFram
 )
 export type NodeFrame = typeof NodeFrame.Type
 
+export const TelemetryExport = Schema.Struct({
+  type: Schema.Literal('telemetry.export'),
+  signal: Schema.Literals(['traces', 'logs', 'metrics']),
+  payload: Schema.Json,
+}).check(jsonLimit(MaxMessageBytes))
+export type TelemetryExport = typeof TelemetryExport.Type
+
 export const NodeToControlBody = Schema.Union([
+  TelemetryExport,
   NodeSyncRequest,
   NodeUpgradeStateRequest,
   ThreadCommandResult,

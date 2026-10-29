@@ -119,6 +119,20 @@ async function fixture(
   return { gateway, base, employeeId, nodeId, seen, connect, source: () => source! }
 }
 
+test('丢弃处理失败的遥测并继续处理心跳', async () => {
+  const telemetry = vi.fn(() => {
+    throw new Error('malformed telemetry')
+  })
+  const heartbeat = vi.fn(async () => undefined)
+  const f = await fixture({ telemetry, heartbeat })
+  const { ws } = await f.connect()
+  ws.send(JSON.stringify(envelope({ type: 'telemetry.export', signal: 'logs', payload: { malformed: true } })))
+  await expect.poll(() => telemetry.mock.calls.length).toBe(1)
+  ws.send(JSON.stringify({ kind: 'heartbeat' }))
+  await expect.poll(() => heartbeat.mock.calls.length).toBe(1)
+  expect(ws.readyState).toBe(WebSocket.OPEN)
+})
+
 test('propagates the actual WSS enqueue span independently of command content', async () => {
   const spans: Tracer.NativeSpan[] = []
   const tracer = Tracer.make({

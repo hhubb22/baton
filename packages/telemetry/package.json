@@ -5,7 +5,11 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./attributes": "./src/attributes.ts"
+    "./attributes": "./src/attributes.ts",
+    "./forward": "./src/forward.ts",
+    "./protobuf": "./src/protobuf.ts",
+    "./otlp-config": "./src/otlp-config.ts",
+    "./replay": "./src/replay.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -14,7 +18,8 @@
   },
   "dependencies": {
     "effect": "catalog:",
-    "@baton/protocol": "workspace:*"
+    "@baton/protocol": "workspace:*",
+    "protobufjs": "7.6.5"
   },
   "devDependencies": {
     "@types/node": "catalog:",

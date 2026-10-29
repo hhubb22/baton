@@ -18,6 +18,16 @@ const state: NodeUpgradeState = {
   phase: 'draining',
 }
 
+it('遥测消息只接受三种信号且受节点消息容量限制', () => {
+  for (const signal of ['traces', 'logs', 'metrics']) {
+    expect(Schema.is(NodeToControlBody)({ type: 'telemetry.export', signal, payload: { records: [] } })).toBe(true)
+  }
+  expect(Schema.is(NodeToControlBody)({ type: 'telemetry.export', signal: 'other', payload: {} })).toBe(false)
+  expect(
+    Schema.is(NodeToControlBody)({ type: 'telemetry.export', signal: 'logs', payload: 'x'.repeat(256 * 1024) }),
+  ).toBe(false)
+})
+
 it('升级阶段消息在各自方向及完整联合中往返，公开字段不包含本地路径或失败原因', () => {
   for (const phase of ['draining', 'ready', 'migrating', 'syncing', 'completed', 'cancelled', 'failed'] as const) {
     const current = { ...state, phase }

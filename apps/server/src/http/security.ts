@@ -77,11 +77,12 @@ export const checkOrigin = (options: HTTPOptions) =>
       return yield* Effect.fail(new AppError(403, 'origin_rejected'))
   })
 
-export const authorizeBrowser = (allowPasswordChange: boolean) =>
+export const authorizeBrowser = (allowPasswordChange: boolean, requireCsrf = true) =>
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest
     const session = yield* Auth.lookupSession(cookieToken(request.headers.cookie ?? ''))
     if (
+      requireCsrf &&
       request.method !== 'GET' &&
       request.method !== 'HEAD' &&
       !Auth.checkCSRF(session, request.headers['x-csrf-token'] ?? '')

@@ -538,6 +538,9 @@ importers:
       effect:
         specifier: 'catalog:'
         version: 4.0.6
+      protobufjs:
+        specifier: 7.6.5
+        version: 7.6.5
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -9293,7 +9296,7 @@ snapshots:
       '@protobufjs/path': 1.1.2
       '@protobufjs/pool': 1.1.0
       '@protobufjs/utf8': 1.1.2
-      '@types/node': 24.19.2
+      '@types/node': 26.6.5
       long: 5.3.2
 
   protobufjs@7.6.6:

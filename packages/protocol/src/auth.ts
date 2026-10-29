@@ -28,8 +28,6 @@ export const SessionResponse = Schema.Struct({
   expires_at: Timestamp,
   telemetry: Schema.optionalKey(
     Schema.Struct({
-      endpoint: Schema.String,
-      key: Schema.String,
       session_replay: Schema.optionalKey(Schema.Literal('masked')),
     }),
   ),

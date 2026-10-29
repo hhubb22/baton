@@ -15,6 +15,8 @@ import type { KeyValue } from 'effect/observability/OtlpResource'
 import { TraceContext } from '@baton/protocol/trace'
 import * as Statement from 'effect/sql/Statement'
 import { safeAttributes } from './attributes.js'
+import { metricNames, metricValues } from './metrics.js'
+import { otlpTimeout, otlpTimeouts } from './otlp-config.js'
 
 export type { TraceContext } from '@baton/protocol/trace'
 
@@ -103,47 +105,6 @@ export const tracePromise = async <A>(
   if (Exit.isFailure(exit)) throw Cause.squash(exit.cause)
   return exit.value
 }
-
-const metricValues: Record<string, ReadonlySet<string>> = {
-  'baton.command.action': new Set([
-    'open',
-    'message',
-    'withdraw',
-    'stop',
-    'resume',
-    'settings',
-    'answer',
-    'check_activity',
-  ]),
-  'baton.turn.result': new Set([
-    'completed',
-    'failed',
-    'stopped',
-    'lost',
-    'unknown',
-    'waiting_device',
-    'running',
-    'idle',
-    'archived',
-  ]),
-  'baton.memory.job.state': new Set(['pending', 'claimed', 'running', 'completed', 'cancelled']),
-  'baton.wait.reason': new Set(['device_offline', 'approval', 'credential_missing', 'queue', 'lease', 'backoff']),
-  'baton.agent': new Set(['codex', 'cursor', 'pi', 'kiro', 'shell', 'project']),
-}
-const metricNames = new Set([
-  'baton.nodes.online',
-  'baton.outbox.pending',
-  'baton.outbox.oldest_age_s',
-  'baton.threads',
-  'baton.project.runs.active',
-  'baton.memory.jobs',
-  'baton.wait.oldest_age_s',
-  'baton.ledger.bytes',
-  'baton.ledger.budget_ratio',
-  'baton.reports.unacked',
-  'baton.reports.oldest_age_s',
-  'baton.workers.active',
-])
 
 /** Keep native spans and timings; redact payload-derived attributes, events and error details at export. */
 const safeResource = (attributes: KeyValue[], nodeId?: string) =>
@@ -364,24 +325,8 @@ export const telemetryLayer = (
   if (dynamic)
     for (const signal of ['TRACES', 'LOGS', 'METRICS'])
       exporterEnv[`OTEL_EXPORTER_OTLP_${signal}_ENDPOINT`] = `http://baton-telemetry.invalid/v1/${signal.toLowerCase()}`
-  const timeoutFor = (signal: string) => {
-    const value = Number(env[`OTEL_EXPORTER_OTLP_${signal}_TIMEOUT`] ?? env.OTEL_EXPORTER_OTLP_TIMEOUT ?? 3000)
-    return Number.isFinite(value) && value > 0 ? Math.min(value, 3000) : 3000
-  }
-  const timeouts: Record<string, number> = {}
-  for (const signal of ['TRACES', 'LOGS', 'METRICS']) {
-    const endpoint = exporterEnv[`OTEL_EXPORTER_OTLP_${signal}_ENDPOINT`] ?? exporterEnv.OTEL_EXPORTER_OTLP_ENDPOINT
-    if (!endpoint) continue
-    try {
-      const url = new URL(endpoint)
-      if (!exporterEnv[`OTEL_EXPORTER_OTLP_${signal}_ENDPOINT`])
-        url.pathname += `${url.pathname.endsWith('/') ? '' : '/'}v1/${signal.toLowerCase()}`
-      const normalized = url.toString()
-      timeouts[normalized] = Math.min(timeouts[normalized] ?? 3000, timeoutFor(signal))
-    } catch {
-      // Configuration parsing reports invalid endpoints.
-    }
-  }
+  const timeoutFor = (signal: 'TRACES' | 'LOGS' | 'METRICS') => otlpTimeout(env, signal)
+  const timeouts = otlpTimeouts(env, exporterEnv)
   const provider = ConfigProvider.fromEnv({
     env: {
       ...exporterEnv,

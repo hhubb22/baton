@@ -20,6 +20,7 @@ import { projectHttpHandlers } from './projects.ts'
 import { readThreadOutput } from '../full-output.ts'
 import * as DeviceManagement from '../device-management.ts'
 import { cookieToken, httpBusiness, decodeResponse } from './security.ts'
+import { telemetryForwardEnabled } from '../telemetry-forward-client.ts'
 
 export const httpHandlers = (options: HTTPOptions, downloads?: Downloads) => {
   const changed = (employeeId: string, threadId: string) =>
@@ -83,11 +84,9 @@ export const httpHandlers = (options: HTTPOptions, downloads?: Downloads) => {
           CurrentBrowserSession.pipe(
             Effect.map((session) => ({
               ...session,
-              ...(process.env.BATON_WEB_OTLP_ENDPOINT && process.env.BATON_WEB_OTLP_KEY
+              ...(telemetryForwardEnabled()
                 ? {
                     telemetry: {
-                      endpoint: process.env.BATON_WEB_OTLP_ENDPOINT,
-                      key: process.env.BATON_WEB_OTLP_KEY,
                       ...(process.env.BATON_WEB_SESSION_REPLAY === 'masked'
                         ? { session_replay: 'masked' as const }
                         : {}),

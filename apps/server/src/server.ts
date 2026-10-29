@@ -27,6 +27,8 @@ import { cookieToken, httpApplication } from './http/index.ts'
 import { notifyThreadChanged } from './notifications.ts'
 import { claimNotificationBroadcasts } from './desktop-notifications.ts'
 import { makeMemoryWaitObserver, makeProjectWaitObserver, serverMetricsLoop } from './telemetry.ts'
+import { filterForward } from '@baton/telemetry/forward'
+import { makeTelemetryForwardClient, telemetryForwardEnabled } from './telemetry-forward-client.ts'
 
 export interface ServerOptions {
   readonly host?: string
@@ -59,6 +61,7 @@ export const startServer = (
     const services = yield* Effect.context<SqlClient.SqlClient>()
     const scope = yield* Effect.scope
     const tracer = yield* Tracer.Tracer
+    const forwardTelemetry = makeTelemetryForwardClient()
     const projectWaits = makeProjectWaitObserver()
     const memoryWaits = makeMemoryWaitObserver()
     yield* Effect.forkIn(serverMetricsLoop(projectWaits), scope)
@@ -131,6 +134,18 @@ export const startServer = (
               validate: (source) => run('validate', Nodes.revalidateNodeSource(source, false)),
               heartbeat: (source) => run('heartbeat', Nodes.touchNode(source)),
               disconnected: (source) => run('disconnect', Nodes.disconnectNode(source)),
+              telemetry: (source, body) => {
+                if (!telemetryForwardEnabled() || !forwardTelemetry.available()) return
+                try {
+                  const payload = filterForward(body.signal, body.payload, {
+                    employeeId: source.employee_id,
+                    nodeId: source.node_id,
+                  })
+                  if (payload) forwardTelemetry(body.signal, payload)
+                } catch {
+                  /* 丢弃格式错误的遥测。 */
+                }
+              },
               handle: async (source, envelope) => {
                 const body = Schema.decodeUnknownSync(P.NodeToControlBody)(envelope.body)
                 switch (body.type) {
@@ -147,16 +162,7 @@ export const startServer = (
                     return {
                       type: 'node.sync_result',
                       ok: true,
-                      ...(process.env.BATON_DEVICE_OTLP_ENDPOINT
-                        ? {
-                            telemetry: {
-                              endpoint: process.env.BATON_DEVICE_OTLP_ENDPOINT,
-                              ...(process.env.BATON_DEVICE_OTLP_HEADERS
-                                ? { headers: process.env.BATON_DEVICE_OTLP_HEADERS }
-                                : {}),
-                            },
-                          }
-                        : {}),
+                      ...(telemetryForwardEnabled() ? { telemetry: { forward: true as const } } : {}),
                     }
                   case 'node.upgrade_state': {
                     try {
@@ -260,7 +266,19 @@ export const startServer = (
       ),
       (owned) => Effect.promise(() => owned.close()),
     )
-    const application = yield* httpApplication({ ...options, gateway: () => gateway })
+    const application = yield* httpApplication({
+      ...options,
+      gateway: () => gateway,
+      forwardTelemetry: (signal, input, employeeId) => {
+        if (!forwardTelemetry.available()) return
+        try {
+          const payload = filterForward(signal, input, { employeeId })
+          if (payload) forwardTelemetry(signal, payload)
+        } catch {
+          /* 丢弃格式错误的遥测。 */
+        }
+      },
+    })
     const handler = yield* NodeHttpServer.makeHandler(
       application.pipe((self) => httpGate.withPermit(self)),
       { scope },

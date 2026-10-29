@@ -3,7 +3,7 @@ import type { IncomingMessage, Server } from 'node:http'
 import { Effect, Predicate, Schema, Tracer } from 'effect'
 import { captureTrace, withTraceSpan } from '@baton/telemetry'
 import { WebSocket, WebSocketServer, type RawData } from 'ws'
-import { AuthFrame, BrowserSubscription, Envelope, NodeToControlBody } from '@baton/protocol'
+import { AuthFrame, BrowserSubscription, Envelope, NodeToControlBody, TelemetryExport } from '@baton/protocol'
 import type {
   BrowserEvent,
   SessionResult,
@@ -78,6 +78,7 @@ export interface GatewayHandlers {
   heartbeat(source: NodeSource): Promise<void>
   disconnected(source: NodeSource): Promise<void>
   handle(source: NodeSource, envelope: Envelope): Promise<Body | undefined>
+  telemetry?(source: NodeSource, body: typeof TelemetryExport.Type): void
   browser(cookie: string): Promise<string>
   thread(employeeId: string, threadId: string): Promise<void>
   output(employeeId: string, threadId: string, cursor?: string): Promise<SessionResult>
@@ -395,6 +396,26 @@ export class Gateway {
             )
           }
         })()
+        return
+      }
+      if (
+        frame.kind === 'envelope' &&
+        Predicate.isObject(frame.envelope) &&
+        Predicate.isObject(frame.envelope.body) &&
+        frame.envelope.body.type === 'telemetry.export'
+      ) {
+        const current = connection
+        if (!current.synced || queued || this.nodes.get(current.source.node_id) !== current) return
+        const envelope = Schema.decodeUnknownOption(Envelope)(frame.envelope)
+        if (envelope._tag === 'None' || envelope.value.route.to !== 'control') return
+        const body = Schema.decodeUnknownOption(TelemetryExport)(envelope.value.body)
+        if (body._tag === 'Some') {
+          try {
+            this.handlers.telemetry?.(current.source, body.value)
+          } catch {
+            /* 丢弃格式错误的遥测。 */
+          }
+        }
         return
       }
       if (Date.now() - rateStart >= 1000) {
