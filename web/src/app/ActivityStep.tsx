@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex'
-import type { ReactNode } from 'react'
+import { lazy, Suspense, type ReactNode } from 'react'
 import { baseName, fileSize } from '../data/derive'
 import type { Device, TraceStep } from '../data/types'
 import { fonts } from '../theme/base.stylex'
@@ -7,6 +7,8 @@ import { text } from '../theme/text'
 import { colors, space } from '../theme/tokens.stylex'
 import { Icon, type IconName } from '../ui/Icon'
 import { FullOutput } from './FullOutput'
+
+const ChangeDiff = lazy(() => import('./ChangeDiff').then((module) => ({ default: module.ChangeDiff })))
 
 const styles = stylex.create({
   root: { display: 'flex', flexDirection: 'column', gap: space.xs, alignSelf: 'stretch', minWidth: 0 },
@@ -109,16 +111,25 @@ function presentation(step: TraceStep): { label: string; icon: IconName; body: R
                 {typeof data.deletions === 'number' ? `−${data.deletions}` : ''}
               </span>
             )}
-            <Output
-              label="File changes"
-              value={
-                data.diffStr ??
-                data.changes ??
-                (data.oldStr !== undefined || data.newStr !== undefined
-                  ? { before: data.oldStr, after: data.newStr }
-                  : undefined)
-              }
-            />
+            {typeof data.diffStr === 'string' ? (
+              <Suspense fallback={<Output label="File changes" value={data.diffStr} />}>
+                <ChangeDiff
+                  patch={data.diffStr}
+                  path={path}
+                  fallback={<Output label="File changes" value={data.diffStr} />}
+                />
+              </Suspense>
+            ) : (
+              <Output
+                label="File changes"
+                value={
+                  data.changes ??
+                  (data.oldStr !== undefined || data.newStr !== undefined
+                    ? { before: data.oldStr, after: data.newStr }
+                    : undefined)
+                }
+              />
+            )}
           </>
         ),
       }

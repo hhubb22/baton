@@ -120,6 +120,7 @@ type ThreadAPI = Pick<
   | 'archiveThread'
   | 'resumeThread'
   | 'readTrace'
+  | 'readTurnTrace'
   | 'readOutput'
   | 'listFolders'
   | 'readFile'
@@ -245,6 +246,7 @@ function mapThread(t: ThreadDTO, events: EventDTO[]): Thread {
     createdAt: timestamp(t.created_at),
     updatedAt: timestamp(t.last_activity_at),
     runStartedAt: t.current_turn ? timestamp(t.current_turn.started_at) : null,
+    runTurnSeq: t.current_turn?.worker_turn_seq,
     unread: false,
   }
 }
@@ -694,9 +696,14 @@ export function createThreadAPI(
         reply = replies.get(messageId)
       }
       if (!reply) throw new ClientError('notFound', 'The reply was not found.')
-      const query = new URLSearchParams({ worker_turn_seq: String(reply.seq) })
+      const trace = await api.readTurnTrace!(reply.threadId, reply.seq, cursor)
+      return { ...trace, messageId }
+    },
+    async readTurnTrace(threadId, turnSeq, cursor): Promise<Trace> {
+      const messageId = `turn:${threadId}:${turnSeq}`
+      const query = new URLSearchParams({ worker_turn_seq: String(turnSeq) })
       if (cursor !== undefined) query.set('cursor', cursor)
-      const result = await ctx.request<ThreadTrace>(`${threadPath(reply.threadId)}/trace?${query}`)
+      const result = await ctx.request<ThreadTrace>(`${threadPath(threadId)}/trace?${query}`)
       if (!result.ok) {
         if (result.code === 'trace_missing') return { state: 'unavailable', messageId, reason: 'missing' }
         unavailable("Couldn't load this activity. Try again.")

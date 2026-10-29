@@ -778,6 +778,14 @@ describe('HTTP thread contracts', () => {
     expect(await api.readTrace(replyId)).toEqual({ state: 'unavailable', messageId: replyId, reason: 'missing' })
   })
 
+  it('reads activity for an ongoing turn before a reply exists', async () => {
+    const { api, fetcher } = setup((url) =>
+      url.pathname.endsWith('/trace') ? { ok: true, page_cursor: 'snapshot:start', steps: [traceStep()] } : thread(),
+    )
+    expect(await api.readTurnTrace!(threadId, 7)).toMatchObject({ state: 'ready', steps: [traceStep()] })
+    expect(requestURL(fetcher.mock.calls.at(-1)![0])).toBe(`/api/v1/threads/${threadId}/trace?worker_turn_seq=7`)
+  })
+
   it('reads all trace pages with opaque cursors while the device is offline and preserves raw JSON', async () => {
     const raw = 'Saved\u0000\ud800<img src=x> https://example.test'
     const steps = Array.from({ length: 120 }, (_, ordinal) =>

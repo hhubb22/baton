@@ -28,7 +28,15 @@ Vite 代理保持后端 TLS 证书验证。后端使用私有 CA 时，在启动
 
 ## 数据
 
-Thread 和 Project 的聊天正文使用 Streamdown 渲染 Markdown；Thread 的 Agent 回复在生成时逐段显示，保存的同一条回复出现后替换实时内容。行内代码中的绝对路径可打开文件预览。图片和原始 HTML 不渲染，链接只允许 HTTP、HTTPS 和 mailto。shell 实时输出以纯文本显示。
+Thread 和 Project 的聊天正文使用 Streamdown 渲染 Markdown；Thread 的 Agent 回复在生成时逐段显示，保存的同一条回复出现后替换实时内容。Project 助手生成时显示带历史序号的文本预览；已保存的后续事件到达时隐藏旧预览，正式回复以持久内容为准。预览每秒最多更新一次，超限时标记截断。行内代码中的绝对路径可打开文件预览。图片和原始 HTML 不渲染，链接只允许 HTTP、HTTPS 和 mailto。shell 实时输出以纯文本显示。
+
+Project 助手的活动默认折叠为命令、工具和笔记的数量；展开后可逐项查看命令输出或工具输入与结果。工具调用按调用 ID 与结果配对，未收到结果和调用失败分别标记；关联 Thread、回复和设备状态仍显示在对话中。
+
+文件预览用 Highlights 为支持的语言着色，无法加载高亮器、不支持的语言或超过 262,144 个 UTF-16 代码单元的内容以原文显示；行选择和分片续读沿用相同的文本。执行过程中的 unified diff 使用 Diffs 展示；无法解析的变更和工具错误显示原文。Highlights 需要浏览器允许 WebAssembly 和 SIMD；Diffs 在不可用时使用 Shiki 的 JavaScript 后端。
+
+对话使用流式 Markdown 展示回复，支持中文强调、表格、块级公式和 Mermaid 图表。代码高亮在 Worker 中计算，Worker 不可用时回退到主线程；流式代码保留已有高亮，新增内容先显示原文。图表禁用外部链接和图片，无法渲染时显示源码；部署时的图片 CSP 须允许 `data:` 才能显示图表预览。
+
+Thread 回复的操作栏在桌面悬停或键盘聚焦时显示；触屏上最新回复的操作栏常显，点按较早回复可显示其操作。回复复制与提交 SHA 复制分别作用于各自内容。
 
 页面只通过 `BatonClient` 读写数据。对象之间用稳定 ID 关联，客户端按主题（devices、threads、files 等）和可选的变更对象发出通知，`ClientProvider` 收到后刷新对应查询，所以设备状态变化会同时反映到 Thread、Project 和文件预览。
 
@@ -84,6 +92,7 @@ Memory 展示最新内容、版本、来源和时间，可添加、编辑并查�
 |---|---|
 | `normal` | 三台设备、四个 Project、进行中的 Thread 和待处理事项。Baton Dev 的助手开了一个 Thread 正在等回复，Compatibility 的助手已经汇报结果。`Rebuild web UI foundation` 的回复包含 Markdown 示例、执行过程、文件和提交附件；Ubuntu Dev 的 `logs` 目录里有超过 64 KB 的日志，模拟文件树的 `apps/server/src/testing/data` 中有二进制样本 |
 | `streamingMarkdown` | `Streaming Markdown demo` 逐段生成包含表格、代码块和链接的回复；通过场景面板的重置按钮重新播放 |
+| `streamingProject` | Compatibility 的模拟助手逐段生成回复，再显示工具调用和返回结果；通过场景面板的重置按钮重新播放 |
 | `downloads` | 提供 macOS、Linux CLI 与 macOS、Windows 桌面下载元数据，展示安装命令和接入链接；模拟文件不可实际下载 |
 | `noDownloads` | 下载未启用，注册对话框显示原有终端命令 |
 | `empty` | 已登录但还没有设备，显示首次使用引导 |
@@ -107,6 +116,6 @@ Memory 展示最新内容、版本、来源和时间，可添加、编辑并查�
 
 ## StyleX 约定
 
-样式用 `stylex.create` 定义，颜色、间距、圆角和尺寸取自 `src/theme/tokens.stylex.ts`，文字样式取自 `src/theme/text.ts`。页面不写内联 `style`，因为生产环境的 CSP 只允许同源样式表；Base UI 通过 `CSPProvider disableStyleElements` 关闭运行时插入的 `<style>`。
+样式用 `stylex.create` 定义，颜色、间距、圆角和尺寸取自 `src/theme/tokens.stylex.ts`，文字样式取自 `src/theme/text.ts`。流式 Markdown 使用 `@lobehub/streamdown`，该组件会插入动画样式和内联动画时序；部署时的 CSP 须允许内联样式。Base UI 通过 `CSPProvider disableStyleElements` 关闭自身运行时插入的 `<style>`。
 
 开发、构建和测试使用 Vite+。代码格式与推荐 lint 规则由根目录 `vite.config.ts` 中的 Oxfmt、Oxlint 配置统一管理；改完运行 `pnpm check`，单独格式化运行 `pnpm --dir web format`。依赖统一使用根工作区锁文件。Markdown 不参与格式化，表格沿用仓库其他文档的紧凑写法。

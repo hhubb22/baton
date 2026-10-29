@@ -1,0 +1,29 @@
+.attention-card-options .openui-radio-item-container {
+  align-items: center;
+  box-sizing: border-box;
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--openui-highlight-subtle);
+}
+
+.attention-card-options .openui-radio-item-container:hover {
+  background: var(--openui-highlight);
+}
+
+.attention-card-options .openui-radio-item-container:has(.openui-radio-item-root[data-state='checked']) {
+  background: var(--openui-info-background);
+}
+
+.attention-card-options .openui-radio-item-root {
+  margin-top: 0;
+}
+
+.attention-card-options .openui-radio-item-root[data-state='unchecked'] .openui-radio-item-svg-border {
+  stroke: var(--openui-text-neutral-secondary);
+}
+
+.attention-card-options .openui-radio-item-root:focus-visible {
+  outline: 2px solid var(--openui-interactive-accent-default);
+  outline-offset: 3px;
+}

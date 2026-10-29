@@ -21,6 +21,7 @@ import { Button, focusRing, IconButton } from '../ui/Button'
 import { Icon } from '../ui/Icon'
 import { ResizablePane } from '../ui/ResizablePane'
 import { useWorkspace } from './workspace'
+import { HighlightedLine, useHighlightedLines } from './CodeHighlight'
 import { copySelection, copyText, SelectionArea } from './SelectionMenu'
 
 const styles = stylex.create({
@@ -470,6 +471,7 @@ function FileContent({
   const client = useClient()
   const [appended, setAppended] = useState<FilePreviewData | null>(null)
   const current = appended ?? preview.data
+  const highlighted = useHighlightedLines(current?.state === 'ready' ? current.content : '', path)
   const continuation = useMutation({
     mutationFn: async (options: FileReadOptions) => {
       const next = await client.readFile(deviceId, path, options)
@@ -585,7 +587,9 @@ function FileContent({
                   <span aria-hidden {...stylex.props(styles.gutter)}>
                     {number}
                   </span>
-                  <span {...stylex.props(styles.code)}>{line || ' '}</span>
+                  <span {...stylex.props(styles.code)}>
+                    <HighlightedLine line={line} tokens={highlighted?.[index]} />
+                  </span>
                 </div>
               )
             })}

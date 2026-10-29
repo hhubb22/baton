@@ -1,11 +1,13 @@
 import { createMemoryHistory } from '@tanstack/react-router'
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import { createMockClient } from '../data/mock/client'
 import type { ScenarioId } from '../data/mock/scenarios'
 import { manualScheduler } from '../data/mock/scheduler'
 import { browserLatency } from '../data/mock/store'
+import type { ChangeEvent } from '../data/client'
+import type { ProjectEntry } from '../data/types'
 import { App } from './App'
 import { createAppRouter } from './router'
 
@@ -331,6 +333,285 @@ describe('projects', () => {
     await advance(scheduler, 500)
     await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/projects\/prj-/))
     expect(await screen.findAllByText('Retry me')).not.toHaveLength(0)
+  })
+
+  it('shows project activity as expandable steps without hiding the thread or reply', async () => {
+    const user = userEvent.setup()
+    renderApp('/projects/prj-compat')
+    const group = await screen.findByRole('button', { name: 'Ran 1 command · 1 note' })
+    expect(group).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByText('4f2c9e1 Add drive letter cases to path tests')).not.toBeInTheDocument()
+    await user.click(group)
+    const command = screen.getByRole('button', { name: /git -C ~\/src\/compat-suite log -1 --oneline/ })
+    expect(command).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByText(/Compat suite is in/)).toBeInTheDocument()
+    await user.click(command)
+    expect(screen.getByText('4f2c9e1 Add drive letter cases to path tests')).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Opened 1 thread' })).toBeInTheDocument()
+    expect(screen.getByText(/Opened a thread on Windows Desktop/)).toBeInTheDocument()
+    await user.click(command)
+    expect(screen.queryByText('4f2c9e1 Add drive letter cases to path tests')).not.toBeInTheDocument()
+  })
+
+  it('streams a project preview and replaces it when the saved reply arrives before status refresh', async () => {
+    let preview: { afterSeq: number; text: string; truncated: boolean } | null = {
+      afterSeq: 7,
+      text: 'Checking **the',
+      truncated: false,
+    }
+    let entries: ProjectEntry[] = [
+      { id: 'before', projectId: 'prj-compat', kind: 'note', body: 'Started', createdAt: 1, sourceSeq: 7 },
+    ]
+    let notify: ((event: ChangeEvent) => void) | undefined
+    renderApp('/projects/prj-compat', 'normal', (client) => {
+      const list = client.listProjects.bind(client)
+      client.listProjects = async () =>
+        (await list()).map((project) =>
+          project.id === 'prj-compat'
+            ? { ...project, agent: { ...project.agent, state: 'running', activity: null, preview } }
+            : project,
+        )
+      client.listProjectEntries = async () => entries
+      client.subscribe = (listener) => {
+        notify = listener
+        return () => {
+          notify = undefined
+        }
+      }
+    })
+    const refresh = () => act(() => notify?.({ topics: ['projects'] }))
+    const live = await screen.findByRole('article', { name: 'Project assistant response in progress' })
+    expect(live).toHaveTextContent('Checking')
+    const conversation = screen.getByRole('region', { name: 'Conversation' })
+    Object.defineProperties(conversation, { scrollHeight: { value: 1000 }, clientHeight: { value: 200 } })
+    conversation.scrollTop = 200
+    fireEvent.scroll(conversation)
+
+    preview = { afterSeq: 7, text: 'Checking **the result**.', truncated: false }
+    refresh()
+    await waitFor(() => expect(live).toHaveTextContent('Checking the result.'))
+    expect(conversation.scrollTop).toBe(200)
+
+    entries = [
+      ...entries,
+      {
+        id: 'saved',
+        projectId: 'prj-compat',
+        kind: 'assistant',
+        process: [],
+        threads: null,
+        body: 'Checking **the result**.',
+        createdAt: 2,
+        sourceSeq: 8,
+        streamAnchor: 7,
+      },
+    ]
+    refresh()
+    await waitFor(() =>
+      expect(screen.queryByRole('article', { name: 'Project assistant response in progress' })).not.toBeInTheDocument(),
+    )
+    expect(screen.getByRole('article', { name: 'Project assistant' })).toBe(live)
+    expect(screen.getByRole('article', { name: 'Project assistant' })).toHaveTextContent('Checking the result.')
+    preview = null
+    refresh()
+    await waitFor(() =>
+      expect(screen.queryByRole('article', { name: 'Project assistant response in progress' })).not.toBeInTheDocument(),
+    )
+  })
+
+  it('places the live preview after the latest thread event even when its timestamp is ahead of the page clock', async () => {
+    let saved = false
+    let notify: ((event: ChangeEvent) => void) | undefined
+    const threadTime = Date.now() + 60_000
+    renderApp('/projects/prj-compat', 'normal', (client) => {
+      const list = client.listProjects.bind(client)
+      client.listProjects = async () =>
+        (await list()).map((project) =>
+          project.id === 'prj-compat'
+            ? {
+                ...project,
+                agent: {
+                  ...project.agent,
+                  state: 'running',
+                  activity: null,
+                  preview: { afterSeq: 5, text: 'Final reply', truncated: false },
+                },
+              }
+            : project,
+        )
+      client.listProjectEntries = async (projectId) => [
+        {
+          id: 'thread-reply',
+          projectId,
+          kind: 'assistant',
+          body: '',
+          process: [],
+          threads: { action: 'replies', threadIds: ['thr-compat'] },
+          createdAt: threadTime,
+          sourceSeq: 5,
+        },
+        ...(saved
+          ? [
+              {
+                id: 'saved-reply',
+                projectId,
+                kind: 'assistant' as const,
+                body: 'Final reply',
+                process: [],
+                threads: null,
+                createdAt: threadTime + 1,
+                sourceSeq: 6,
+                streamAnchor: 5,
+              },
+            ]
+          : []),
+      ]
+      client.subscribe = (listener) => {
+        notify = listener
+        return () => {
+          notify = undefined
+        }
+      }
+    })
+    const thread = await screen.findByRole('region', { name: 'Replies from 1 thread' })
+    const preview = await screen.findByRole('article', { name: 'Project assistant response in progress' })
+    expect(thread.compareDocumentPosition(preview) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    saved = true
+    act(() => notify?.({ topics: ['projects'] }))
+    await waitFor(() => expect(preview).toHaveAttribute('aria-label', 'Project assistant'))
+    expect(thread.compareDocumentPosition(preview) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('keeps a preview visible while a newer saved reply is still loading', async () => {
+    let saved = false
+    let release: (() => void) | undefined
+    let notify: ((event: ChangeEvent) => void) | undefined
+    renderApp('/projects/prj-compat', 'normal', (client) => {
+      const list = client.listProjects.bind(client)
+      client.listProjects = async () =>
+        (await list()).map((project) =>
+          project.id === 'prj-compat'
+            ? {
+                ...project,
+                agent: {
+                  ...project.agent,
+                  state: saved ? 'idle' : 'running',
+                  activity: null,
+                  lastSeq: saved ? 8 : 7,
+                  preview: saved ? null : { afterSeq: 7, text: 'Almost done.', truncated: false },
+                },
+              }
+            : project,
+        )
+      client.listProjectEntries = async (projectId) => {
+        if (!saved) return []
+        await new Promise<void>((resolve) => {
+          release = resolve
+        })
+        return [
+          {
+            id: 'saved',
+            projectId,
+            createdAt: 1,
+            sourceSeq: 8,
+            streamAnchor: 7,
+            kind: 'assistant',
+            process: [],
+            threads: null,
+            body: 'Almost done.',
+          },
+        ]
+      }
+      client.subscribe = (listener) => {
+        notify = listener
+        return () => {
+          notify = undefined
+        }
+      }
+    })
+    expect(await screen.findByRole('article', { name: 'Project assistant response in progress' })).toHaveTextContent(
+      'Almost done.',
+    )
+    saved = true
+    act(() => notify?.({ topics: ['projects'] }))
+    await waitFor(() => expect(release).toBeDefined())
+    expect(screen.getByRole('article', { name: 'Project assistant response in progress' })).toHaveTextContent(
+      'Almost done.',
+    )
+    act(() => release?.())
+    await waitFor(() =>
+      expect(screen.queryByRole('article', { name: 'Project assistant response in progress' })).not.toBeInTheDocument(),
+    )
+    expect(screen.getByRole('article', { name: 'Project assistant' })).toHaveTextContent('Almost done.')
+  })
+
+  it('updates a pending project tool in place when its result arrives', async () => {
+    const user = userEvent.setup()
+    let completed = false
+    let notify: ((event: ChangeEvent) => void) | undefined
+    renderApp('/projects/prj-compat', 'normal', (client) => {
+      client.listProjectEntries = async (projectId) => [
+        {
+          id: 'tool-live',
+          projectId,
+          createdAt: 1,
+          sourceSeq: 5,
+          kind: 'assistant',
+          body: '',
+          threads: null,
+          process: [
+            {
+              kind: 'tool',
+              name: 'nodes.exec',
+              input: '{"command":"pwd"}',
+              output: completed ? '/work' : null,
+              status: completed ? 'completed' : 'pending',
+            },
+          ],
+        },
+      ]
+      client.subscribe = (listener) => {
+        notify = listener
+        return () => {
+          notify = undefined
+        }
+      }
+    })
+    const command = await screen.findByRole('button', { name: /pwd.*Awaiting result/ })
+    await user.click(command)
+    expect(screen.getAllByText('Awaiting result')).toHaveLength(2)
+    completed = true
+    act(() => notify?.({ topics: ['projects'] }))
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /pwd.*Result received/ })).toHaveAttribute('aria-expanded', 'true'),
+    )
+    expect(screen.getByText('/work')).toBeInTheDocument()
+  })
+
+  it('keeps failed and unfinished tool calls visible in project activity', async () => {
+    const user = userEvent.setup()
+    renderApp('/projects/prj-compat', 'normal', (client) => {
+      client.listProjectEntries = async (projectId) => [
+        {
+          id: 'tool-entry',
+          projectId,
+          createdAt: Date.now(),
+          kind: 'assistant',
+          body: 'Checking the result.',
+          threads: null,
+          process: [
+            { kind: 'tool', name: 'nodes.exec', input: '{"command":"pwd"}', output: null, status: 'pending' },
+            { kind: 'tool', name: 'threads.create', input: '{}', output: 'Device unavailable', status: 'failed' },
+          ],
+        },
+      ]
+    })
+    const group = await screen.findByRole('button', { name: /Ran 1 command · used 1 tool.*1 failed step/ })
+    expect(group).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: /pwd.*Awaiting result/ })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /Open thread.*Failed/ }))
+    expect(screen.getByText('Device unavailable')).toBeInTheDocument()
+    expect(screen.getByText('Checking the result.')).toBeInTheDocument()
   })
 
   it('opens two threads, shows their replies and opens one beside the conversation', async () => {
@@ -958,7 +1239,10 @@ describe('execution details', () => {
     const { client } = renderApp('/threads?thread=thr-gateway')
     const detail = await screen.findByRole('complementary', { name: 'Fix gateway reconnect race' })
     const attachments = await within(detail).findByRole('list', { name: 'Attachments' })
-    expect(within(attachments).getByText('9b1e4d7a2c5f8e0b3d6a9c2f5e8b1d4a7c0e3f62')).toBeInTheDocument()
+    expect(within(attachments).getByText('9b1e4d7a2c5f…')).toHaveAttribute(
+      'title',
+      '9b1e4d7a2c5f8e0b3d6a9c2f5e8b1d4a7c0e3f62',
+    )
 
     await user.click(within(attachments).getByRole('button', { name: 'Copy commit SHA' }))
     expect(await navigator.clipboard.readText()).toBe('9b1e4d7a2c5f8e0b3d6a9c2f5e8b1d4a7c0e3f62')
@@ -970,7 +1254,16 @@ describe('execution details', () => {
 
     await user.click(within(attachments).getByRole('button', { name: 'View reconnect.log' }))
     const preview = await screen.findByRole('dialog', { name: 'logs/reconnect.log' })
-    expect(await within(preview).findByText(/FAIL reconnects after sleep/)).toBeInTheDocument()
+    expect(await within(preview).findByRole('region', { name: 'Contents of reconnect.log' })).toHaveTextContent(
+      /FAIL reconnects after sleep/,
+    )
+  })
+
+  it('labels question choices in their thread and omits its repeated title', async () => {
+    renderApp('/threads?thread=thr-compat')
+    const question = await screen.findByRole('region', { name: 'Skip Windows path tests for now?' })
+    expect(within(question).getByRole('radio', { name: 'Fix them before merging, suggested' })).toBeInTheDocument()
+    expect(within(question).queryByText('Run compat suite on Windows')).not.toBeInTheDocument()
   })
 
   it('marks lost live output after the device reconnects', async () => {
@@ -982,6 +1275,148 @@ describe('execution details', () => {
     act(() => client.controls.setDeviceConnection('dev-ubuntu', 'online'))
     expect(await within(detail).findByText('Earlier output not kept')).toBeInTheDocument()
     expect(within(detail).getByLabelText('Live output')).toHaveTextContent(/waiting for resume/)
+  })
+
+  it('keeps the live thread reply mounted when its saved message arrives', async () => {
+    let saved = false
+    let readIdle = false
+    let releaseMessages: (() => void) | undefined
+    const pendingMessages = new Promise<void>((resolve) => {
+      releaseMessages = resolve
+    })
+    let notify: ((event: ChangeEvent) => void) | undefined
+    renderApp('/threads?thread=thr-gateway', 'normal', (client) => {
+      const list = client.listMessages.bind(client)
+      const getThread = client.getThread.bind(client)
+      client.getThread = async (id) => {
+        const thread = await getThread(id)
+        if (saved && id === 'thr-gateway') {
+          readIdle = true
+          return { ...thread, status: 'idle', runStartedAt: null }
+        }
+        return thread
+      }
+      client.listMessages = async (threadId) => {
+        const messages = await list(threadId)
+        if (saved && threadId === 'thr-gateway') await pendingMessages
+        return saved && threadId === 'thr-gateway'
+          ? [
+              ...messages,
+              {
+                id: 'saved-live-reply',
+                threadId,
+                role: 'agent',
+                sender: 'agent',
+                body: 'Streaming reply',
+                replyId: 'native-reply',
+                workerTurnSeq: 7,
+                createdAt: Date.now(),
+                delivery: 'delivered',
+                activity: null,
+                attachments: [],
+              },
+            ]
+          : messages
+      }
+      client.readOutput = async (threadId) => ({
+        threadId,
+        replyId: 'native-reply',
+        workerTurnSeq: 7,
+        chunks: [{ kind: 'gap' }, { kind: 'text', text: 'Streaming reply' }],
+      })
+      client.subscribeOutput = undefined
+      client.subscribe = (listener) => {
+        notify = listener
+        return () => {
+          notify = undefined
+        }
+      }
+    })
+    const live = await screen.findByText(
+      (_, node) => node?.tagName === 'ARTICLE' && node.textContent?.includes('Streaming reply') === true,
+    )
+    expect(within(live).getByText('Earlier output not kept')).toBeInTheDocument()
+    saved = true
+    act(() => notify?.({ topics: ['messages'], target: { type: 'thread', id: 'thr-gateway' } }))
+    await waitFor(() => expect(readIdle).toBe(true))
+    await waitFor(() =>
+      expect(screen.getByRole('complementary', { name: 'Fix gateway reconnect race' })).toHaveTextContent('Idle'),
+    )
+    expect(live).toBeInTheDocument()
+    await act(async () => releaseMessages?.())
+    await waitFor(() => expect(live).toHaveAttribute('id', 'message-saved-live-reply'))
+    expect(live).toHaveTextContent('Streaming reply')
+    expect(within(live).queryByText('Earlier output not kept')).not.toBeInTheDocument()
+  })
+
+  it('shows reported activity while a turn is still running', async () => {
+    let reported = false
+    renderApp('/threads?thread=thr-gateway', 'normal', (client) => {
+      const getThread = client.getThread.bind(client)
+      client.getThread = async (id) => ({ ...(await getThread(id)), runTurnSeq: 7 })
+      client.readTurnTrace = async () =>
+        reported
+          ? {
+              state: 'ready',
+              messageId: 'turn',
+              steps: [
+                {
+                  item_id: 'step',
+                  type: 'command_execution',
+                  status: 'completed',
+                  ordinal: 1,
+                  data: { input: 'pnpm verify', output: 'done' },
+                  truncated: false,
+                  original_bytes: 4,
+                },
+              ],
+            }
+          : { state: 'unavailable', messageId: 'turn', reason: 'missing' }
+    })
+    await screen.findByRole('complementary', { name: 'Fix gateway reconnect race' })
+    expect(screen.queryByText('pnpm verify')).not.toBeInTheDocument()
+    reported = true
+    expect(await screen.findByText('pnpm verify', {}, { timeout: 4000 })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Activity · 1 step/ })).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('follows growing thread content only while the reader is at the bottom', async () => {
+    const observers: { target?: Element; notify: () => void }[] = []
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        private entry: { target?: Element; notify: () => void }
+        constructor(callback: () => void) {
+          this.entry = { notify: callback }
+          observers.push(this.entry)
+        }
+        observe(target: Element) {
+          this.entry.target = target
+        }
+        unobserve() {}
+        disconnect() {}
+      },
+    )
+    try {
+      renderApp('/threads?thread=thr-gateway')
+      const timeline = await screen.findByRole('region', { name: 'Messages' })
+      await waitFor(() =>
+        expect(observers.some((observer) => observer.target === timeline.firstElementChild)).toBe(true),
+      )
+      const observer = observers.find((value) => value.target === timeline.firstElementChild)!
+      Object.defineProperties(timeline, { scrollHeight: { value: 1000, writable: true }, clientHeight: { value: 200 } })
+      timeline.scrollTop = 200
+      fireEvent.scroll(timeline)
+      act(() => observer.notify())
+      expect(timeline.scrollTop).toBe(200)
+      timeline.scrollTop = 800
+      fireEvent.scroll(timeline)
+      Object.defineProperty(timeline, 'scrollHeight', { value: 1200 })
+      act(() => observer.notify())
+      expect(timeline.scrollTop).toBe(1200)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it('browses folders in the file preview and explains files it cannot show', async () => {
@@ -1002,7 +1437,9 @@ describe('execution details', () => {
     await user.click(await within(folders).findByRole('button', { name: /gateway\.test\.ts/ }))
     expect(await within(preview).findByText("Couldn't read this file")).toBeInTheDocument()
     await user.click(within(preview).getByRole('button', { name: 'Retry' }))
-    expect(await within(preview).findByText(/test\('decodes WebSocket data'/)).toBeInTheDocument()
+    expect(await within(preview).findByRole('region', { name: 'Contents of gateway.test.ts' })).toHaveTextContent(
+      /test\('decodes WebSocket data'/,
+    )
 
     await user.click(await within(folders).findByRole('button', { name: /^testing/ }))
     await user.click(await within(folders).findByRole('button', { name: /^data/ }))

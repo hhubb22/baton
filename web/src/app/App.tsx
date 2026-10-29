@@ -7,7 +7,7 @@ import { ThemeProvider } from '../theme/ThemeProvider'
 import { createAppRouter } from './router'
 
 // 页面只依赖 BatonClient，测试和开发时传入模拟实现。
-// CSP 只允许同源样式表，Base UI 不再插入 <style>。
+// Base UI 复用静态样式表，不在运行时插入 <style>。
 export function App({
   client,
   router: given,

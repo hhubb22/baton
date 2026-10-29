@@ -84,6 +84,7 @@ export interface BatonClient {
   readFile(deviceId: ID, path: string, continuation?: FileReadOptions): Promise<FilePreview>
   // 按中心返回的游标读取过程，设备离线时仍可读取。
   readTrace(messageId: ID, cursor?: string): Promise<Trace>
+  readTurnTrace?(threadId: ID, turnSeq: number, cursor?: string): Promise<Trace>
   // 执行中的一轮的实时输出，这一轮结束后为空。
   readOutput(threadId: ID): Promise<LiveOutput>
   // 推送输出快照；null 表示连接或读取状态变化，需要重读。返回函数取消订阅。

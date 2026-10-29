@@ -160,6 +160,7 @@ export class MockStore {
     this.world = createWorld(scenarioId, scheduler.now())
     this.startExistingRuns()
     this.startStreamingDemo()
+    this.startProjectStreamingDemo()
   }
 
   get scenario() {
@@ -220,6 +221,7 @@ export class MockStore {
     this.world = createWorld(scenarioId, this.scheduler.now())
     this.startExistingRuns()
     this.startStreamingDemo()
+    this.startProjectStreamingDemo()
     this.emit('session', 'devices', 'projects', 'threads', 'messages', 'inbox', 'files', 'operations')
   }
 
@@ -230,7 +232,10 @@ export class MockStore {
       '## 检查结果\n\n已经完成 **网关重连** 的检查，下面是测试结果。\n\n' +
       '| 项目 | 结果 |\n| --- | --- |\n| 重连 | 通过 |\n| 消息恢复 | 通过 |\n\n' +
       '运行以下命令可以再次验证：\n\n```sh\npnpm --filter @baton/server test:unit\n```\n\n' +
-      '相关文件：`~/src/baton/README.md`。\n\n- 保留原有连接状态\n- 断线后重新订阅\n- 记录无法补齐的输出缺口\n\n更多信息见 [React 文档](https://react.dev/)。'
+      '相关文件：`~/src/baton/README.md`。已验证**自动恢复**，结果如下。\n\n' +
+      '$$\n\\text{pass rate} = \\frac{47}{48}\n$$\n\n' +
+      '```mermaid\ngraph LR\n  A[Disconnected] --> B[Reconnect]\n```\n\n' +
+      '- 保留原有连接状态\n- 断线后重新订阅\n- 记录无法补齐的输出缺口\n\n更多信息见 [React 文档](https://react.dev/)。'
     const characters = Array.from(content)
     const step = 3
     for (let end = step; end < characters.length + step; end += step) {
@@ -240,6 +245,117 @@ export class MockStore {
         this.emit('messages')
       })
     }
+  }
+
+  private startProjectStreamingDemo() {
+    if (this.scenarioId !== 'streamingProject') return
+    const project = this.world.projects.find((item) => item.id === 'prj-compat')!
+    const first = this.world.projectEntries.find((item) => item.id === 'ent-compat-2')!
+    const second = this.world.projectEntries.find((item) => item.id === 'ent-compat-3')!
+    if (first.kind !== 'assistant' || second.kind !== 'assistant') return
+    const thread = this.world.threads.find((item) => item.id === 'thr-compat')!
+    const questions = this.world.inbox.filter((item) => item.projectId === project.id)
+    this.world.projectEntries = this.world.projectEntries.filter(
+      (item) => item.id !== first.id && item.id !== second.id,
+    )
+    this.world.threads = this.world.threads.filter((item) => item.id !== thread.id)
+    this.world.inbox = this.world.inbox.filter((item) => item.projectId !== project.id)
+    project.agent.state = 'running'
+    project.agent.activity = null
+    project.agent.lastSeq = 0
+    this.schedule(1500, () => {
+      this.world.projectEntries.push({
+        id: 'ent-project-stream-tool',
+        projectId: project.id,
+        kind: 'assistant',
+        body: '',
+        threads: null,
+        process: [
+          {
+            kind: 'tool',
+            name: 'nodes.exec',
+            input: '{"command":"git -C ~/src/compat-suite log -1 --oneline"}',
+            output: null,
+            status: 'pending',
+          },
+        ],
+        createdAt: this.scheduler.now(),
+        sourceSeq: 1,
+      })
+      project.agent.lastSeq = 1
+      this.emit('projects')
+    })
+    this.schedule(3000, () => {
+      const entry = this.world.projectEntries.find((item) => item.id === 'ent-project-stream-tool')
+      if (entry?.kind !== 'assistant') return
+      const tool = entry.process[0]
+      if (tool?.kind !== 'tool') return
+      tool.status = 'completed'
+      tool.output = '{"output":"4f2c9e1 Add drive letter cases to path tests","exit_code":0}'
+      entry.process.push(first.process[1]!)
+      project.agent.lastSeq = 2
+      this.emit('projects')
+    })
+    this.schedule(4500, () => {
+      thread.status = 'running'
+      this.world.threads.push(thread)
+      this.world.projectEntries.push({
+        ...first,
+        id: 'ent-project-stream-opened',
+        body: '',
+        process: [],
+        createdAt: this.scheduler.now(),
+        sourceSeq: 3,
+      })
+      project.agent.lastSeq = 3
+      this.emit('projects', 'threads')
+    })
+    const stream = (message: string, start: number, afterSeq: number, id: string) => {
+      for (let end = 8; end < message.length + 8; end += 8) {
+        this.schedule(start + (end / 8) * 200, () => {
+          project.agent.preview = { afterSeq, text: message.slice(0, end), truncated: false }
+          this.emit('projects')
+        })
+      }
+      const savedAt = start + Math.ceil(message.length / 8) * 200 + 350
+      this.schedule(savedAt, () => {
+        project.agent.preview = null
+        project.agent.lastSeq = afterSeq + 1
+        this.world.projectEntries.push({
+          id,
+          projectId: project.id,
+          kind: 'assistant',
+          body: message,
+          process: [],
+          threads: null,
+          createdAt: this.scheduler.now(),
+          sourceSeq: afterSeq + 1,
+          streamAnchor: afterSeq,
+        })
+        this.emit('projects')
+      })
+      return savedAt
+    }
+    const firstSaved = stream(first.body, 5500, 3, 'ent-project-stream-text')
+    this.schedule(firstSaved + 2000, () => {
+      thread.status = 'idle'
+      this.world.projectEntries.push({
+        ...second,
+        id: 'ent-project-stream-replies',
+        body: '',
+        createdAt: this.scheduler.now(),
+        sourceSeq: 5,
+      })
+      project.agent.lastSeq = 5
+      this.emit('projects', 'threads')
+    })
+    const secondSaved = stream(second.body, firstSaved + 2500, 5, 'ent-project-stream-final')
+    this.schedule(secondSaved + 500, () => {
+      for (const [index, question] of questions.entries())
+        this.world.inbox.push({ ...question, createdAt: this.scheduler.now() + index })
+      project.agent.state = 'idle'
+      this.emit('projects', 'inbox')
+    })
   }
 
   // ---- 查询辅助 ----

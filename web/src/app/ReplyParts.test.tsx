@@ -42,24 +42,31 @@ it('renders live reply Markdown and hides it when the same reply is saved', asyn
   const client = createMockClient('normal', { latency: { read: 0, save: 0, device: 0, run: 8000 } })
   const thread = (await client.listThreads()).find((item) => item.id === 'thr-gateway')!
   const device = (await client.listDevices()).find((item) => item.id === thread.deviceId)
-  client.readOutput = async () => ({
+  const output = {
     threadId: thread.id,
     replyId: 'native-reply',
     workerTurnSeq: 3,
-    chunks: [{ kind: 'text', text: '**Streaming**' }],
-  })
-  client.subscribeOutput = undefined
+    chunks: [{ kind: 'text' as const, text: '**Streaming**' }],
+  }
   const view = (messages: Message[]) => (
     <ClientProvider client={client}>
-      <LiveOutput thread={thread} device={device} live now={Date.now()} messages={messages} onOpenPath={() => {}} />
+      <LiveOutput
+        thread={thread}
+        device={device}
+        live
+        now={Date.now()}
+        messages={messages}
+        output={output}
+        onOpenPath={() => {}}
+      />
     </ClientProvider>
   )
-  const { rerender } = render(view([]))
-  expect((await screen.findByText('Streaming')).tagName).toBe('STRONG')
+  const { container, rerender } = render(view([]))
+  await vi.waitFor(() => expect(container.querySelector('strong')).toHaveTextContent('Streaming'))
   rerender(view([{ ...message, replyId: 'native-reply', workerTurnSeq: 2 }]))
-  expect(screen.getByText('Streaming')).toBeInTheDocument()
+  expect(container.querySelector('strong')).toHaveTextContent('Streaming')
   rerender(view([{ ...message, replyId: 'native-reply', workerTurnSeq: 3 }]))
-  expect(screen.queryByText('Streaming')).not.toBeInTheDocument()
+  expect(container.querySelector('strong')).toBeNull()
 })
 
 function setup(readTrace: BatonClient['readTrace'], device?: Device, reply: Message = message) {

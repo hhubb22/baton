@@ -1,5 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router'
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import { ClientError } from '../data/client'
@@ -28,6 +28,16 @@ const runnerQuestion = 'Which runner should run nightly?'
 beforeEach(() => localStorage.clear())
 
 describe('inbox decisions', () => {
+  it('labels pending questions and identifies their source in the project conversation', async () => {
+    setup('/projects/prj-compat')
+    const linked = await screen.findByRole('region', { name: pathsQuestion })
+    const projectQuestion = await screen.findByRole('region', { name: runnerQuestion })
+    expect(within(linked).getByText('Needs reply')).toBeInTheDocument()
+    expect(within(linked).getByRole('link', { name: 'Run compat suite on Windows' })).toBeInTheDocument()
+    expect(within(projectQuestion).getByText('Needs reply')).toBeInTheDocument()
+    expect(within(projectQuestion).getByText('Project')).toBeInTheDocument()
+  })
+
   it('shows a reminder at ten questions and expands options beyond the first five', async () => {
     const user = userEvent.setup()
     setup('/inbox', 'normal', (client) => {
@@ -50,13 +60,13 @@ describe('inbox decisions', () => {
     })
     const card = await screen.findByRole('region', { name: pathsQuestion })
     expect(within(card).getByText(/10 questions waiting in this project/)).toBeInTheDocument()
-    expect(within(card).getByRole('button', { name: /Choice 5/ })).toBeInTheDocument()
-    expect(within(card).queryByRole('button', { name: /Choice 6/ })).not.toBeInTheDocument()
+    expect(within(card).getByRole('radio', { name: /Choice 5/ })).toBeInTheDocument()
+    expect(within(card).queryByRole('radio', { name: /Choice 6/ })).not.toBeInTheDocument()
     await user.click(within(card).getByRole('button', { name: 'Show all 7 options' }))
-    await user.click(within(card).getByRole('button', { name: /Choice 7/ }))
-    expect(within(card).getByRole('button', { name: /Choice 7/ })).toHaveAttribute('aria-pressed', 'true')
+    await user.click(within(card).getByRole('radio', { name: /Choice 7/ }))
+    expect(within(card).getByRole('radio', { name: /Choice 7/ })).toHaveAttribute('aria-checked', 'true')
     await user.click(within(card).getByRole('button', { name: 'Show fewer options' }))
-    expect(within(card).queryByRole('button', { name: /Choice 7/ })).not.toBeInTheDocument()
+    expect(within(card).queryByRole('radio', { name: /Choice 7/ })).not.toBeInTheDocument()
   })
 
   it.each(['/projects/prj-compat', '/threads/thr-compat'])(
@@ -94,7 +104,7 @@ describe('inbox decisions', () => {
     const card = await screen.findByRole('region', { name: pathsQuestion })
     expect(screen.getByText('2 tests fail only on Windows because of drive letters.')).toBeInTheDocument()
     expect(document.title).toBe('(2) Baton')
-    await user.click(within(card).getByRole('button', { name: /Fix them before merging/ }))
+    await user.click(within(card).getByRole('radio', { name: /Fix them before merging/ }))
     await user.type(within(card).getByLabelText('Note (optional)'), 'Keep the regression tests.')
     await user.click(within(card).getByRole('button', { name: 'Send reply' }))
     const recent = await screen.findByRole('region', { name: 'Latest result' })
@@ -125,7 +135,7 @@ describe('inbox decisions', () => {
     const { router } = setup('/inbox', 'conflict')
     await user.click(await screen.findByRole('button', { name: new RegExp(pathsQuestion.replace('?', '\\?')) }))
     const card = await screen.findByRole('region', { name: pathsQuestion })
-    await user.click(within(card).getByRole('button', { name: /Skip them and open a follow-up/ }))
+    await user.click(within(card).getByRole('radio', { name: /Skip them and open a follow-up/ }))
     await user.type(within(card).getByLabelText('Note (optional)'), 'Tomorrow')
     await act(() => router.navigate({ to: '/projects/$projectId', params: { projectId: 'prj-compat' } }))
     const inProject = await screen.findByRole('region', { name: pathsQuestion })
@@ -142,10 +152,17 @@ describe('inbox decisions', () => {
   it('validates text replies, retains them on failure, and saves while paused', async () => {
     const user = userEvent.setup()
     const { client } = setup('/inbox', 'inboxPaused')
+    const handleItem = vi.spyOn(client, 'handleItem')
     const card = await screen.findByRole('region', { name: 'What should the release notes mention?' })
-    await user.click(within(card).getByRole('button', { name: /Other…/ }))
+    await user.click(within(card).getByRole('radio', { name: /Other…/ }))
+    expect(within(card).queryByText('Up to 4 KB of text')).not.toBeInTheDocument()
     await user.click(within(card).getByRole('button', { name: 'Send reply' }))
     expect(within(card).getByText('Choose an option or write a reply.')).toBeInTheDocument()
+    fireEvent.change(within(card).getByLabelText('Your reply'), { target: { value: '界'.repeat(1366) } })
+    await user.click(within(card).getByRole('button', { name: 'Send reply' }))
+    expect(within(card).getByText('Over 4 KB. Shorten it to send.')).toBeInTheDocument()
+    expect(handleItem).not.toHaveBeenCalled()
+    fireEvent.change(within(card).getByLabelText('Your reply'), { target: { value: '' } })
     await user.type(within(card).getByLabelText('Your reply'), 'Mention Windows support.')
     act(() => client.controls.setReachable(false))
     await user.click(within(card).getByRole('button', { name: 'Send reply' }))
@@ -180,7 +197,7 @@ describe('inbox decisions', () => {
     const { router, client } = setup('/inbox', 'error')
     const card = await screen.findByRole('region', { name: 'ChatGPT sign-in expired' })
     expect(within(card).queryByRole('textbox')).not.toBeInTheDocument()
-    expect(within(card).queryByRole('button', { name: /Other…/ })).not.toBeInTheDocument()
+    expect(within(card).queryByRole('radio', { name: /Other…/ })).not.toBeInTheDocument()
     await user.click(within(card).getByRole('button', { name: 'Close notice' }))
     // 场景的第一次保存失败，通知和入口保留。
     expect(await within(card).findByRole('alert')).toHaveTextContent("Couldn't close this notice. Try again.")

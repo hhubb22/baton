@@ -117,7 +117,7 @@ const styles = stylex.create({
     paddingLeft: '2px',
     borderWidth: 0,
     borderRadius: radius.sm,
-    backgroundColor: { default: 'transparent', ':hover': colors.hover },
+    backgroundColor: 'transparent',
     color: colors.text,
     textAlign: 'start',
   },

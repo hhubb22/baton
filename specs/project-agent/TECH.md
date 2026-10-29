@@ -397,7 +397,7 @@ batond 通过 Gateway 的控制队列传送 `node.runtime_report`，正文为 `{
 - `GET /api/v1/threads?project_id={id}`：本 Project 的 Thread，都由 Project Agent 新建。
 - `GET /api/v1/projects/{id}/memory/{mid}/revisions`：校验本人 Project 与条目归属，按修订号升序读取所有保留版本；接受 `after_revision`（默认 0）和 `limit`（默认 50、最多 100），返回 `{revisions,next_after_revision?}`。每条修订为 `{revision,title,content,author,created_at}`，`title` 可空；`author` 为 `user` / `agent`，表示修改来源。客户端按游标读取全部页面，标题、正文、来源和时间均取各次修订记录。
 
-Runtime 的 `preview` 操作发送 `{last_seq, payload:{text, truncated}}` 文本快照，最多 32 KiB、每秒一次。Coordinator 在内存里为每个运行保留最新快照，30 秒过期，不保存到对话历史；`status` 只在 `after_seq` 等于当前历史尾部时附带它。
+Runtime 的 `preview` 操作发送 `{last_seq, payload:{text, truncated}}` 文本快照，最多 32 KiB，发送间隔至少 200 毫秒。Coordinator 在内存里为每个运行保留最新快照，30 秒过期，不保存到对话历史；同一历史序号的非空快照间隔至少 150 毫秒，清空预览和切换历史序号不受限流影响。`status` 只在 `after_seq` 等于当前历史尾部时附带它。网页平滑展示流式 Markdown，并在正式回复到达后保留同一渲染实例，完成剩余文字的显示；已加载更高序号的事件时隐藏旧快照，正式回复以持久事件为准。
 
 暂停 Project 通过 Project 状态作废运行租约，不停止 Thread（PA-23）。设置弹窗允许随时关闭，未保存字段草稿保留在当前浏览器工作区，重开后继续编辑；可显式丢弃草稿。暂停和恢复直接修改已保存 Project 的状态，独立于描述字段的校验和保存；并发响应后重新读取中心记录。
 

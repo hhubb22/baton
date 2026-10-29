@@ -157,16 +157,21 @@ describe('Project and Inbox DTO mapping', () => {
           ...status,
           state: 'running',
           run: { node_id: threadId, effective: true },
-          preview: { after_seq: 4, text: 'Checking devices' },
+          preview: { after_seq: 4, text: 'Checking devices', truncated: true },
         },
       ),
     ).toMatchObject({
       subscription: 'xAI',
-      agent: { state: 'running', deviceId: threadId, activity: 'Checking devices' },
+      agent: {
+        state: 'running',
+        deviceId: threadId,
+        activity: null,
+        preview: { afterSeq: 4, text: 'Checking devices', truncated: true },
+      },
     })
     expect(
       mapProject(project, { ...status, state: 'running', preview: { after_seq: 3, text: 'Old preview' } }).agent
-        .activity,
+        .preview,
     ).toBeNull()
     expect(mapProject({ ...project, agent: { provider: 'xai', model: 'grok-4' } }, status).subscription).toBe('xAI')
   })
@@ -256,7 +261,7 @@ describe('Project and Inbox DTO mapping', () => {
     const pending = await mapProjectEntries(projectId, [], [message])
     const entries = await mapProjectEntries(projectId, [claimed], [message])
     expect(entries).toHaveLength(1)
-    expect(entries[0]).toEqual({ ...pending[0], delivery: 'delivered' })
+    expect(entries[0]).toEqual({ ...pending[0], delivery: 'delivered', sourceSeq: 1 })
     expect(entries[0].id).toMatch(uuid)
   })
 
@@ -306,14 +311,17 @@ describe('Project and Inbox DTO mapping', () => {
       threads: { action: 'opened', threadIds: [threadId] },
       process: expect.arrayContaining([
         {
-          kind: 'note',
-          body: 'threads.create\n{"node_id":"33333333-3333-4333-8333-333333333333","message":"Run tests"}',
+          kind: 'tool',
+          name: 'threads.create',
+          input: expect.stringContaining('Run tests'),
+          output: expect.stringContaining('waiting'),
+          status: 'completed',
         },
       ]),
     })
     expect(entries[1]).toMatchObject({ threads: { action: 'messaged', threadIds: [threadId] } })
     expect(entries[2]).toMatchObject({ body: 'Tests passed', threads: { action: 'replies', threadIds: [threadId] } })
-    expect(entries[3]).toMatchObject({ body: 'The tests passed on Linux.' })
+    expect(entries[3]).toMatchObject({ body: 'The tests passed on Linux.', streamAnchor: 4 })
     expect(JSON.stringify(entries)).not.toContain('private reasoning')
     expect(new Set(entries.map((entry) => entry.id)).size).toBe(4)
   })
@@ -348,10 +356,30 @@ describe('Project and Inbox DTO mapping', () => {
     const entries = await mapProjectEntries(projectId, events, [])
     expect(entries[0]).toMatchObject({
       threads: null,
-      process: expect.arrayContaining([{ kind: 'note', body: expect.stringContaining('PASS') }]),
+      process: expect.arrayContaining([
+        expect.objectContaining({ kind: 'tool', name: 'nodes.exec', output: expect.stringContaining('PASS') }),
+      ]),
     })
-    expect(entries[1]).toMatchObject({ threads: null })
+    expect(entries[1]).toMatchObject({
+      threads: null,
+      process: [
+        { kind: 'tool', name: 'threads.create', status: 'failed', output: expect.stringContaining('unavailable') },
+      ],
+    })
     expect(JSON.stringify(entries)).not.toContain('durationMs')
+  })
+
+  it('keeps an unfinished tool call as awaiting a result', async () => {
+    const entries = await mapProjectEntries(
+      projectId,
+      [event(1, 'assistant', [{ type: 'toolCall', id: 'pending', name: 'nodes.exec', arguments: { command: 'pwd' } }])],
+      [],
+    )
+    expect(entries[0]).toMatchObject({
+      process: [
+        { kind: 'tool', name: 'nodes.exec', input: expect.stringContaining('pwd'), output: null, status: 'pending' },
+      ],
+    })
   })
 })
 
@@ -530,7 +558,11 @@ describe('Project HTTP contract', () => {
         payload: { content: requests[0].content, reference: requests[0].reference },
       },
     ])
-    expect((await mapProjectEntries(projectId, [claimed], []))[0]).toEqual({ ...first, delivery: 'delivered' })
+    expect((await mapProjectEntries(projectId, [claimed], []))[0]).toEqual({
+      ...first,
+      delivery: 'delivered',
+      sourceSeq: 1,
+    })
   })
 
   it('patches settings and status, and reads project/status after stop and retry', async () => {

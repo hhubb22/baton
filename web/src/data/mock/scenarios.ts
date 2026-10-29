@@ -16,6 +16,7 @@ import { fileKey, type DeviceFile, type World } from './world'
 export const scenarioIds = [
   'normal',
   'streamingMarkdown',
+  'streamingProject',
   'downloads',
   'noDownloads',
   'empty',
@@ -39,6 +40,7 @@ export type ScenarioId = (typeof scenarioIds)[number]
 export const scenarioLabels: Record<ScenarioId, string> = {
   normal: 'Normal',
   streamingMarkdown: 'Streaming Markdown',
+  streamingProject: 'Streaming project activity',
   downloads: 'Device downloads',
   noDownloads: 'No device downloads',
   empty: 'Empty',
@@ -772,7 +774,10 @@ function files(): Record<string, DeviceFile> {
 // 设备上保存的回复过程，只在展开时按需读取。
 function traces(): Record<string, TraceStep[]> {
   const command = (input: string, output: string) => ({ type: 'command_execution', data: { input, output } })
-  const file = (fileName: string) => ({ type: 'file_change', data: { fileName } })
+  const file = (fileName: string, diffStr?: string) => ({
+    type: 'file_change',
+    data: { fileName, ...(diffStr === undefined ? {} : { diffStr }) },
+  })
   const tool = (toolName: string, input: string) => ({ type: 'dynamic_tool', data: { toolName, input } })
   const records = {
     'msg-gateway-r1': [
@@ -785,7 +790,10 @@ function traces(): Record<string, TraceStep[]> {
     'msg-webui-2': [
       command('pnpm create vite web --template react-ts', 'Scaffolding project in ~/src/baton/web...\nDone.'),
       tool('Read', '~/src/baton/specs/web-ui/PLAN.md'),
-      file('~/src/baton/web/vite.config.ts'),
+      file(
+        '~/src/baton/web/vite.config.ts',
+        "@@ -1,5 +1,9 @@\n import { defineConfig } from 'vite'\n \n export default defineConfig({\n-  plugins: [],\n+  plugins: [react()],\n+  server: {\n+    host: 'localhost',\n+    port: 5173,\n+  },\n })\n",
+      ),
       command(
         'pnpm --dir web build',
         'vite v7.1.4 building for production...\n✓ 42 modules transformed.\n✓ built in 1.84s',
@@ -945,6 +953,7 @@ export function createWorld(id: ScenarioId, now: number): World {
       )
       return world
     }
+    case 'streamingProject':
     case 'normal':
     case 'downloads':
     case 'noDownloads':

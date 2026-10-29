@@ -19,6 +19,7 @@ import {
   useMessages,
   useClient,
   useInbox,
+  useLiveOutput,
   useProjects,
   useOperation,
   useResumeThread,
@@ -44,9 +45,10 @@ import { LocalThreadActions } from './LocalThreadActions'
 import { InboxFeedback } from './InboxFeedback'
 import { FilePreview } from './FilePreview'
 import { MessageBody } from './MessageBody'
+import { MessageActions } from './MessageActions'
 import { FullOutput } from './FullOutput'
 import { Page, pane } from './Page'
-import { ActivityTrace, Attachments, LiveOutput } from './ReplyParts'
+import { ActivityTrace, Attachments, LiveActivityTrace, LiveOutput } from './ReplyParts'
 import { copySelection, SelectionArea } from './SelectionMenu'
 import { ThreadQuestionForm } from './ThreadQuestionForm'
 import { ThreadQuestionAnswerStatus } from './ThreadQuestionAnswerStatus'
@@ -84,12 +86,12 @@ const styles = stylex.create({
   messages: {
     display: 'flex',
     flexDirection: 'column',
-    gap: space.lg,
+    gap: space.xl,
     width: '100%',
     maxWidth: size.measure,
     marginInline: 'auto',
     padding: space.xl,
-    paddingBottom: 'calc(var(--thread-dock-height, 160px) + 16px)',
+    paddingBottom: space.xl,
   },
   messagesPanel: { paddingInline: space.lg },
   userItem: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' },
@@ -103,7 +105,7 @@ const styles = stylex.create({
     backgroundColor: colors.subtle,
   },
   withdrawn: { color: colors.muted },
-  agent: { display: 'flex', flexDirection: 'column', gap: space.sm, alignSelf: 'stretch' },
+  agent: { display: 'flex', flexDirection: 'column', gap: space.md, alignSelf: 'stretch', minWidth: 0 },
   note: { display: 'inline-flex', alignItems: 'center', gap: '4px', color: colors.faint },
   noteUnknown: { color: colors.attentionText },
   link: {
@@ -118,29 +120,16 @@ const styles = stylex.create({
   danger: { color: colors.danger },
   attention: { color: colors.attentionText },
   dock: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    zIndex: 1,
-    pointerEvents: 'none',
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    paddingTop: '24px',
+    flexShrink: 0,
+    maxHeight: '55%',
+    overflowY: 'auto',
+    paddingTop: space.md,
     paddingInline: space.xl,
     paddingBottom: space.md,
-    backgroundImage: `linear-gradient(to bottom, transparent, color-mix(in srgb, ${colors.surface} 70%, transparent))`,
-    opacity: 1,
-    transform: 'translateY(0)',
-    transition: 'opacity 180ms cubic-bezier(0.23, 1, 0.32, 1), transform 180ms cubic-bezier(0.23, 1, 0.32, 1)',
-    '@media (prefers-reduced-motion: reduce)': { transition: 'opacity 120ms ease', transform: 'none' },
-  },
-  dockHidden: {
-    opacity: 0,
-    transform: 'translateY(12px)',
-    transition: 'opacity 280ms ease, transform 280ms cubic-bezier(0.23, 1, 0.32, 1)',
-    '@media (prefers-reduced-motion: reduce)': { transition: 'opacity 120ms ease', transform: 'none' },
+    backgroundColor: colors.surface,
   },
   dockContent: {
     display: 'flex',
@@ -149,7 +138,6 @@ const styles = stylex.create({
     gap: space.sm,
     width: '100%',
     maxWidth: size.measure,
-    pointerEvents: 'auto',
   },
   dockPanel: { paddingInline: space.lg },
   notice: {
@@ -167,6 +155,8 @@ const styles = stylex.create({
     borderRadius: '10px',
   },
   noticeDanger: { backgroundColor: colors.dangerSoft },
+  noticeCompact: { padding: 0, borderWidth: 0, backgroundColor: 'transparent' },
+  noticeBodyCompact: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', gap: '4px' },
   noticeAttention: {
     paddingBlock: '14px',
     paddingLeft: '18px',
@@ -180,7 +170,7 @@ const styles = stylex.create({
   noticeDetailInverse: { color: colors.onInverseMuted },
   noticeBody: { display: 'flex', flexDirection: 'column', gap: '2px', flexGrow: 1, minWidth: 0 },
   composer: { maxWidth: size.measure },
-  status: { width: '100%', maxWidth: size.measure, minHeight: '18px', color: colors.muted },
+  status: { width: '100%', maxWidth: size.measure, color: colors.muted },
   footer: {
     display: 'flex',
     alignItems: 'center',
@@ -258,6 +248,8 @@ function MessageItem({
   devices,
   reply,
   command = false,
+  latest = false,
+  outputGap = false,
   onOpen,
   onCancel,
 }: {
@@ -268,9 +260,12 @@ function MessageItem({
   devices: Device[]
   reply: number | null
   command?: boolean
+  latest?: boolean
+  outputGap?: boolean
   onOpen: (deviceId: ID, path: string) => void
   onCancel: (message: Message) => void
 }) {
+  const [actionsRevealed, setActionsRevealed] = useState(false)
   // 回复里的路径指向 Thread 所在设备。
   const onOpenPath = (path: string) => onOpen(deviceId, path)
   const notice = threadMessageNotice(message, agent)
@@ -292,13 +287,26 @@ function MessageItem({
   }
   if (message.role === 'agent') {
     return (
-      <article id={`message-${message.id}`} {...stylex.props(text.body, styles.agent)}>
+      <article
+        id={`message-${message.id}`}
+        data-thread-reply=""
+        data-latest-reply={latest ? '' : undefined}
+        data-actions-revealed={actionsRevealed ? '' : undefined}
+        onPointerUp={(event) => {
+          if (event.pointerType !== 'touch' || latest || !(event.target instanceof Element)) return
+          if (event.target.closest('button, a, input, textarea, select') || !window.getSelection()?.isCollapsed) return
+          setActionsRevealed((shown) => !shown)
+        }}
+        {...stylex.props(text.body, styles.agent)}
+      >
         <ActivityTrace message={message} device={device} command={command} />
         <div data-reply={reply}>
+          {outputGap && <span {...stylex.props(text.caption, styles.muted)}>Earlier output not kept</span>}
           <MessageBody body={message.body} onOpenPath={onOpenPath} streaming={message.streaming} />
         </div>
         {message.fullOutput && <FullOutput threadId={message.threadId} reference={message.fullOutput} />}
         <Attachments attachments={message.attachments} devices={devices} onOpen={onOpen} />
+        {message.body && <MessageActions body={message.body} thread />}
       </article>
     )
   }
@@ -357,18 +365,32 @@ function MessageItem({
   )
 }
 
-function NoticeCard({ notice, action }: { notice: ThreadNotice; action: ReactNode }) {
+function NoticeCard({
+  notice,
+  action,
+  compact = false,
+}: {
+  notice: ThreadNotice
+  action: ReactNode
+  compact?: boolean
+}) {
   return (
     <div
       role="status"
       {...stylex.props(
         styles.notice,
+        compact && styles.noticeCompact,
         notice.tone === 'danger' && styles.noticeDanger,
         notice.tone === 'attention' && styles.noticeAttention,
       )}
     >
-      <div {...stylex.props(styles.noticeBody)}>
-        <span {...stylex.props(text.label)}>{notice.title}</span>
+      <div {...stylex.props(styles.noticeBody, compact && styles.noticeBodyCompact)}>
+        <span {...stylex.props(compact ? text.caption : text.label)}>{notice.title}</span>
+        {compact && notice.detail && (
+          <span aria-hidden="true" {...stylex.props(text.caption, styles.muted)}>
+            ·
+          </span>
+        )}
         {notice.detail && (
           <span
             {...stylex.props(text.caption, styles.muted, notice.tone === 'attention' && styles.noticeDetailInverse)}
@@ -426,6 +448,10 @@ export function ThreadDetail({
   const navigate = useNavigate()
   const client = useClient()
   const threadQuery = useThread(threadId)
+  const liveOutput = useLiveOutput(
+    threadId,
+    threadQuery.data?.status === 'running' && threadQuery.data.runStartedAt !== null,
+  )
   const devices = useDevices()
   const messages = useMessages(threadId)
   const inbox = useInbox()
@@ -442,17 +468,14 @@ export function ThreadDetail({
   const [error, setError] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<Confirm>(null)
   const [resumeId, setResumeId] = useState<string | null>(null)
+  const [previousOutput, setPreviousOutput] = useState<{
+    threadId: ID
+    value: NonNullable<typeof liveOutput.data>
+  } | null>(null)
   const [preview, setPreview] = useState<{ deviceId: ID; path: string; reply: number | null } | null>(null)
   const timelineRef = useRef<HTMLDivElement | null>(null)
-  const dockRef = useRef<HTMLDivElement | null>(null)
-  const scrollAnchor = useRef(0)
-  const [dockState, setDockState] = useState({ threadId, hidden: false })
-  if (dockState.threadId !== threadId) setDockState({ threadId, hidden: false })
-  const dockHidden = dockState.threadId === threadId && dockState.hidden
-  const setDockHidden = (hidden: boolean) =>
-    setDockState((current) =>
-      current.threadId === threadId && current.hidden === hidden ? current : { threadId, hidden },
-    )
+  const atLiveEdge = useRef(true)
+  const scrollThread = useRef(threadId)
   const workspace = useWorkspace()
   const resumeOperation = useOperation(resumeId)
 
@@ -462,6 +485,59 @@ export function ThreadDetail({
   const device = devices.data?.find((item) => item.id === thread?.deviceId)
   const agent = device?.agents.find((item) => item.kind === thread?.agent)
   const list = messages.data ?? []
+  const currentOutput = liveOutput.data
+  if (
+    thread?.status === 'running' &&
+    currentOutput?.replyId &&
+    currentOutput.workerTurnSeq !== undefined &&
+    currentOutput.chunks.length > 0 &&
+    (previousOutput?.threadId !== threadId || previousOutput.value !== currentOutput)
+  ) {
+    setPreviousOutput({ threadId, value: currentOutput })
+  } else if (
+    previousOutput &&
+    (previousOutput.threadId !== threadId || (thread?.status !== 'running' && !messages.isFetching))
+  ) {
+    setPreviousOutput(null)
+  }
+  const output =
+    thread?.status === 'running'
+      ? currentOutput
+      : messages.isFetching && previousOutput?.threadId === threadId
+        ? previousOutput.value
+        : undefined
+  const liveReply =
+    thread?.agent &&
+    output?.replyId &&
+    output.workerTurnSeq !== undefined &&
+    output.chunks.length > 0 &&
+    !list.some(
+      (message) =>
+        message.role === 'agent' &&
+        message.replyId === output.replyId &&
+        message.workerTurnSeq === output.workerTurnSeq,
+    )
+      ? {
+          id: `live:${output.workerTurnSeq}:${output.replyId}`,
+          threadId,
+          role: 'agent' as const,
+          sender: 'agent' as const,
+          body: output.chunks
+            .filter((chunk) => chunk.kind === 'text')
+            .map((chunk) => chunk.text)
+            .join(''),
+          streaming: true,
+          replyId: output.replyId,
+          workerTurnSeq: output.workerTurnSeq,
+          createdAt: Number.MAX_SAFE_INTEGER,
+          delivery: 'delivered' as const,
+          activity: null,
+          attachments: [],
+        }
+      : null
+  const latestReplyId = [...list, ...(liveReply ? [liveReply] : [])].findLast(
+    (message) => message.role === 'agent' && !!message.body,
+  )?.id
   const view = thread
     ? threadView(thread, device, {
         resume: agent?.abilities.resume,
@@ -470,28 +546,35 @@ export function ThreadDetail({
     : null
   const now = useNow(view?.live ? 1000 : null)
 
-  // 新消息出现时滚到最后。
+  // 用户停留在底部时跟随新消息；切换 Thread 时回到最新内容。
   useEffect(() => {
     const node = timelineRef.current
-    if (node) {
+    if (scrollThread.current !== threadId) {
+      scrollThread.current = threadId
+      atLiveEdge.current = true
+    }
+    if (node && atLiveEdge.current) {
       node.scrollTop = node.scrollHeight
-      scrollAnchor.current = node.scrollTop
     }
   }, [list.length, threadId])
 
   useLayoutEffect(() => {
-    const dock = dockRef.current
-    const main = dock?.parentElement
-    if (!dock || !main) return
-    const update = () => main.style.setProperty('--thread-dock-height', `${dock.offsetHeight}px`)
-    update()
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update)
-    observer?.observe(dock)
-    return () => {
-      observer?.disconnect()
-      main.style.removeProperty('--thread-dock-height')
+    const timeline = timelineRef.current
+    const content = timeline?.firstElementChild
+    if (!timeline || !content || typeof ResizeObserver === 'undefined') return
+    const follow = () => {
+      if (!atLiveEdge.current) return
+      timeline.scrollTop = timeline.scrollHeight
     }
-  }, [thread?.id, layout])
+    const observer = new ResizeObserver(follow)
+    const viewportObserver = new ResizeObserver(follow)
+    observer.observe(content)
+    viewportObserver.observe(timeline)
+    return () => {
+      observer.disconnect()
+      viewportObserver.disconnect()
+    }
+  }, [threadId, threadQuery.isSuccess])
 
   useEffect(() => {
     if (thread?.unread && messages.isSuccess && !messages.isFetching) client.markThreadRead?.(threadId)
@@ -651,26 +734,9 @@ export function ThreadDetail({
   else if (thread.pending === 'stop' && view.live) status = 'Stopping…'
   else if (running) status = mode === 'now' ? 'Sends during the current reply' : 'Sends after current reply'
 
-  const canHideDock =
-    !!view.composer &&
-    !view.notice &&
-    !thread.pendingQuestions?.length &&
-    !thread.questionAnswers?.length &&
-    !error &&
-    !resumeFailed
-  const hideDock = dockHidden && canHideDock
   function onTimelineScroll(event: UIEvent<HTMLDivElement>) {
     const timeline = event.currentTarget
-    const top = timeline.scrollTop
-    const delta = top - scrollAnchor.current
-    if (timeline.scrollHeight - timeline.clientHeight - top <= 2) {
-      scrollAnchor.current = top
-      setDockHidden(false)
-    } else if (Math.abs(delta) >= 12) {
-      scrollAnchor.current = top
-      if (delta > 0) setDockHidden(false)
-      else if (canHideDock && !dockRef.current?.contains(document.activeElement)) setDockHidden(true)
-    }
+    atLiveEdge.current = timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop <= 32
   }
 
   const menuItems = [
@@ -729,19 +795,43 @@ export function ThreadDetail({
               />
             )}
             {[
-              ...list.map((message) => ({ id: message.id, at: message.createdAt, message, item: null })),
+              ...[...list, ...(liveReply ? [liveReply] : [])].map((message) => ({
+                id:
+                  message.role === 'agent' && message.replyId && message.workerTurnSeq !== undefined
+                    ? `reply:${message.workerTurnSeq}:${message.replyId}`
+                    : message.id,
+                at: message.createdAt,
+                message,
+                item: null,
+                liveTurn: null,
+              })),
+              ...(thread.status === 'running' &&
+              thread.runTurnSeq !== undefined &&
+              !list.some((message) => message.workerTurnSeq === thread.runTurnSeq && (message.traceItemCount ?? 0) > 0)
+                ? [
+                    {
+                      id: `activity:${thread.runTurnSeq}`,
+                      at: Number.MAX_SAFE_INTEGER - 1,
+                      message: null,
+                      item: null,
+                      liveTurn: thread.runTurnSeq,
+                    },
+                  ]
+                : []),
               ...(inbox.data ?? [])
                 .filter((item) => item.threadId === threadId)
-                .map((item) => ({ id: item.id, at: item.createdAt, message: null, item })),
+                .map((item) => ({ id: item.id, at: item.createdAt, message: null, item, liveTurn: null })),
             ]
               .sort((a, b) => a.at - b.at)
-              .map(({ message, item, id }) => {
-                if (item) return <AttentionCard key={id} item={item} />
+              .map(({ message, item, id, liveTurn }) => {
+                if (item) return <AttentionCard key={id} item={item} inThread />
+                if (liveTurn !== null)
+                  return <LiveActivityTrace key={id} threadId={threadId} turnSeq={liveTurn} device={device} />
                 if (!message) return null
                 const reply = message.role === 'agent' ? ++replies : null
                 return (
                   <MessageItem
-                    key={message.id}
+                    key={id}
                     message={message}
                     agent={thread.agent}
                     deviceId={thread.deviceId}
@@ -749,6 +839,8 @@ export function ThreadDetail({
                     devices={deviceList}
                     reply={reply}
                     command={thread.agent === null}
+                    latest={message.id === latestReplyId}
+                    outputGap={message === liveReply && output?.chunks.some((chunk) => chunk.kind === 'gap')}
                     onOpen={openFile(reply)}
                     onCancel={onCancel}
                   />
@@ -761,15 +853,12 @@ export function ThreadDetail({
               now={now}
               messages={list}
               onOpenPath={(path) => openFile(null)(thread.deviceId, path)}
+              output={output}
+              showReply={liveReply === null && output?.workerTurnSeq === undefined}
             />
           </SelectionArea>
         </div>
-        <div
-          ref={dockRef}
-          inert={hideDock || undefined}
-          aria-hidden={hideDock || undefined}
-          {...stylex.props(styles.dock, layout === 'panel' && styles.dockPanel, hideDock && styles.dockHidden)}
-        >
+        <div {...stylex.props(styles.dock, layout === 'panel' && styles.dockPanel)}>
           <div {...stylex.props(styles.dockContent)}>
             {thread.pendingQuestions?.map((question) => (
               <ThreadQuestionForm
@@ -789,6 +878,7 @@ export function ThreadDetail({
             {view.notice && (
               <NoticeCard
                 notice={view.notice}
+                compact={thread.status === 'idle' && device?.connection !== 'online' && !view.notice.action}
                 action={
                   view.notice.action && (
                     <Button small onClick={() => onAction(view.notice!.action!)}>
@@ -860,12 +950,18 @@ export function ThreadDetail({
                 }
               />
             )}
-            <span
-              role="status"
-              {...stylex.props(text.caption, styles.status, (error !== null || resumeFailed !== null) && styles.danger)}
-            >
-              {status}
-            </span>
+            {status && (
+              <span
+                role="status"
+                {...stylex.props(
+                  text.caption,
+                  styles.status,
+                  (error !== null || resumeFailed !== null) && styles.danger,
+                )}
+              >
+                {status}
+              </span>
+            )}
             <div {...stylex.props(text.caption, styles.footer)}>
               <span {...stylex.props(styles.footerItem)}>
                 <Icon name="laptop" size={12} />

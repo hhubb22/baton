@@ -1,4 +1,9 @@
 import * as stylex from '@stylexjs/stylex'
+import { Button as OpenUIButton } from '@openuidev/react-ui/Button'
+import { Card } from '@openuidev/react-ui/Card'
+import { RadioGroup } from '@openuidev/react-ui/RadioGroup'
+import { RadioItem } from '@openuidev/react-ui/RadioItem'
+import { TextArea as OpenUITextArea } from '@openuidev/react-ui/TextArea'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
 import { ClientError } from '../data/client'
@@ -9,54 +14,57 @@ import { weight } from '../theme/base.stylex'
 import { text } from '../theme/text'
 import { colors, radius, size, space } from '../theme/tokens.stylex'
 import { Avatar } from '../ui/Avatar'
-import { branch } from '../ui/Branch'
-import { Button, focusRing, IconButton } from '../ui/Button'
-import { Field, TextArea } from '../ui/Field'
+import { Button, IconButton } from '../ui/Button'
+import { Field } from '../ui/Field'
 import { Icon } from '../ui/Icon'
 import { StatusDot } from '../ui/Status'
 import { RestrictedMarkdown } from './RestrictedMarkdown'
 import { copySelection, SelectionArea } from './SelectionMenu'
 import { useDraft } from './drafts'
 import { useWorkspace, type ItemDraft } from './workspace'
+import '@openuidev/react-ui/defaults.css'
+import '@openuidev/react-ui/styles/card.css'
+import '@openuidev/react-ui/styles/radioGroup.css'
+import '@openuidev/react-ui/styles/radioItem.css'
+import '@openuidev/react-ui/styles/textArea.css'
+import '@openuidev/react-ui/styles/button.css'
+import './attention-card.css'
 
 const styles = stylex.create({
-  item: { display: 'flex', flexDirection: 'column', gap: '10px', minWidth: 0, overflowWrap: 'anywhere' },
+  item: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space.md,
+    minWidth: 0,
+    overflowWrap: 'anywhere',
+    padding: space.xl,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surface,
+  },
+  inThread: { padding: space.lg },
   row: { display: 'flex', alignItems: 'center', gap: space.sm, minWidth: 0 },
+  status: { display: 'inline-flex', alignItems: 'center', gap: '6px', flexShrink: 0, color: colors.muted },
   project: { minWidth: 0, color: colors.text, fontWeight: weight.medium, textDecoration: 'none' },
   meta: { minWidth: 0, color: colors.faint, textDecoration: 'none' },
   close: { marginLeft: 'auto', width: size.compact, height: size.compact },
-  body: { color: colors.muted },
-  action: { alignSelf: 'flex-start' },
-  option: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: space.sm,
-    width: '100%',
-    minWidth: 0,
-    paddingBlock: '6px',
-    paddingInline: space.sm,
-    borderWidth: 0,
-    borderRadius: radius.md,
-    textAlign: 'left',
-    color: colors.text,
-    backgroundColor: { default: 'transparent', ':hover': colors.hover },
-  },
-  selected: { backgroundColor: { default: colors.accentSoft, ':hover': colors.accentSoft } },
-  // 选项序号的键帽。
-  number: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-    width: '20px',
-    height: '20px',
+  body: { maxWidth: '70ch' },
+  options: { marginTop: space.xs },
+  recommended: {
+    display: 'inline-block',
+    marginLeft: space.sm,
+    paddingInline: '6px',
     borderRadius: radius.sm,
-    backgroundColor: colors.subtle,
-    color: colors.muted,
+    color: colors.agentText,
+    backgroundColor: colors.agentSoft,
+    fontSize: '11px',
+    fontWeight: weight.medium,
+    lineHeight: '20px',
+    verticalAlign: 'middle',
   },
-  optionLabel: { flexGrow: 1 },
-  suggested: { fontWeight: weight.medium },
-  recommended: { flexShrink: 0, color: colors.agentText },
+  action: { alignSelf: 'flex-start' },
   form: { display: 'flex', flexDirection: 'column', gap: space.sm },
   actions: { display: 'flex', gap: space.sm, justifyContent: 'flex-end' },
   result: { display: 'flex', flexDirection: 'column', gap: space.xxs, whiteSpace: 'pre-wrap', color: colors.muted },
@@ -79,12 +87,14 @@ export function AttentionCard({
   feedback,
   showProject = false,
   detail = false,
+  inThread = false,
 }: {
   item: InboxItem
   showProject?: boolean
   onHandled?: (itemId: string, feedback: string | null) => void
   feedback?: string | null
   detail?: boolean
+  inThread?: boolean
 }) {
   const projects = useProjects()
   const threads = useThreads()
@@ -162,201 +172,208 @@ export function AttentionCard({
 
   const done = !pending && item.result
   return (
-    <section aria-label={item.title} {...stylex.props(styles.item)}>
-      <div {...stylex.props(text.caption, styles.row)}>
-        {showProject && project && (
-          <>
-            <Avatar name={project.name} hue={project.hue} emoji={project.emoji} />
+    <section aria-label={item.title}>
+      <Card width="full" {...stylex.props(styles.item, inThread && styles.inThread)}>
+        <div {...stylex.props(text.caption, styles.row)}>
+          {showProject && project && (
+            <>
+              <Avatar name={project.name} hue={project.hue} emoji={project.emoji} />
+              <Link
+                to="/projects/$projectId"
+                params={{ projectId: project.id }}
+                {...stylex.props(styles.project, text.truncate)}
+              >
+                {project.name}
+              </Link>
+            </>
+          )}
+          <span {...stylex.props(styles.status)}>
+            <StatusDot tone={pending ? 'attention' : 'neutral'} />
+            {archived ? 'Project archived' : pending ? 'Needs reply' : statusLabels[item.status]}
+          </span>
+          {thread && !inThread ? (
             <Link
               to="/projects/$projectId"
-              params={{ projectId: project.id }}
-              {...stylex.props(styles.project, text.truncate)}
+              params={{ projectId: item.projectId }}
+              search={{ thread: thread.id }}
+              {...stylex.props(styles.meta, text.truncate)}
             >
-              {project.name}
+              {thread.title}
             </Link>
-          </>
-        )}
-        {(!showProject || system) && <StatusDot tone={pending ? 'attention' : 'neutral'} />}
-        {thread ? (
-          <Link
-            to="/projects/$projectId"
-            params={{ projectId: item.projectId }}
-            search={{ thread: thread.id }}
-            {...stylex.props(styles.meta, text.truncate)}
-          >
-            {thread.title}
-          </Link>
-        ) : (
-          system && !showProject && <span {...stylex.props(styles.meta)}>Baton</span>
-        )}
-        {pending && (
-          <IconButton
-            icon="close"
-            label={system ? 'Close notice' : 'Close question'}
-            onClick={() => submit({ kind: 'close' })}
-            style={styles.close}
-          />
-        )}
-      </div>
-      <h2 {...stylex.props(text.heading, detail && text.title)}>{item.title}</h2>
-      {!done && (
-        <SelectionArea
-          label={archived ? 'Copy selection' : 'Ask project assistant'}
-          icon={archived ? 'copy' : 'reply'}
-          describe={describe}
-        >
-          <div {...stylex.props(text.small, styles.body)}>
-            <RestrictedMarkdown body={item.body} />
-          </div>
-        </SelectionArea>
-      )}
-      {pending && !system && (
-        <>
-          {pendingCount >= 10 && (
-            <p {...stylex.props(text.caption, styles.meta)}>
-              {pendingCount} questions waiting in this project. Consider answering or closing older questions.
-            </p>
-          )}
-          <div {...stylex.props(branch.line)}>
-            {visibleOptions.map((option, index) => (
-              <button
-                type="button"
-                key={option}
-                aria-pressed={draft.option === option}
-                onClick={() => {
-                  if (handle.isPending) return
-                  setError(null)
-                  setDraft({ ...draft, option, replying: true })
-                }}
-                {...stylex.props(text.small, styles.option, draft.option === option && styles.selected, focusRing.ring)}
-              >
-                <span {...stylex.props(text.caption, styles.number)}>{index + 1}</span>
-                <span {...stylex.props(styles.optionLabel, index === item.recommended && styles.suggested)}>
-                  {option}
-                </span>
-                {index === item.recommended && (
-                  <span {...stylex.props(text.caption, styles.recommended)}>Suggested</span>
-                )}
-              </button>
-            ))}
-            {item.allowText && (
-              <button
-                type="button"
-                aria-pressed={draft.replying && draft.option === null}
-                onClick={() => {
-                  if (handle.isPending) return
-                  setError(null)
-                  setDraft({ ...draft, option: null, replying: true })
-                }}
-                {...stylex.props(
-                  text.small,
-                  styles.option,
-                  draft.replying && draft.option === null && styles.selected,
-                  focusRing.ring,
-                )}
-              >
-                <span {...stylex.props(text.caption, styles.number)}>{item.options.length + 1}</span>
-                <span {...stylex.props(styles.optionLabel)}>Other…</span>
-              </button>
-            )}
-          </div>
-          {item.options.length > 5 && (
-            <Button
-              small
-              variant="ghost"
-              aria-expanded={optionsExpanded}
-              onClick={() => setOptionsExpanded(!optionsExpanded)}
-            >
-              {optionsExpanded ? 'Show fewer options' : `Show all ${item.options.length} options`}
-            </Button>
-          )}
-          {draft.replying && (
-            <form
-              onSubmit={(event) => {
-                event.preventDefault()
-                submit({ kind: 'answer', option: draft.option, note: draft.note })
-              }}
-              {...stylex.props(styles.form)}
-            >
-              <Field
-                label={draft.option === null ? 'Your reply' : 'Note'}
-                optional={draft.option !== null}
-                helper="Up to 4 KB of text"
-                error={error}
-              >
-                {(props) => (
-                  <TextArea
-                    {...props}
-                    autoFocus
-                    value={draft.note}
-                    readOnly={handle.isPending}
-                    onChange={(event) => setDraft({ ...draft, note: event.target.value })}
-                  />
-                )}
-              </Field>
-              <div {...stylex.props(styles.actions)}>
-                <Button
-                  small
-                  variant="ghost"
-                  onClick={() => {
-                    if (!handle.isPending) {
-                      workspace.itemDrafts.set(item.id, null)
-                      setError(null)
-                    }
-                  }}
-                >
-                  Cancel
-                </Button>
-                <Button small type="submit">
-                  {handle.isPending ? 'Saving…' : 'Send reply'}
-                </Button>
-              </div>
-            </form>
-          )}
-        </>
-      )}
-      {pending && system && (
-        <Button
-          small
-          style={styles.action}
-          onClick={() => void navigate({ to: '/projects/$projectId', params: { projectId: item.projectId } })}
-        >
-          Go to project
-        </Button>
-      )}
-      {!pending && item.result && (
-        <div role="status" {...stylex.props(text.small, styles.result)}>
-          <p {...stylex.props(styles.resultLine)}>
-            <Icon name="check" size={12} />
-            <span>
-              {[item.result.option, item.result.note].filter(Boolean).join(' · ') || statusLabels[item.status]} ·{' '}
-              {item.result.actor} · {clockTime(item.result.at)}
-            </span>
-          </p>
-          {item.result.reason && <p>{item.result.reason}</p>}
-          {waiting && (
-            <p>
-              {project?.status === 'paused'
-                ? 'Reply saved · read after you resume'
-                : project?.agent.state === 'waitingDevice'
-                  ? 'Reply saved · read when a device is online'
-                  : project?.agent.state === 'blocked'
-                    ? 'Reply saved · retry from the project when ready'
-                    : 'Reply saved'}
-            </p>
+          ) : !thread && !showProject ? (
+            <span {...stylex.props(styles.meta)}>{system ? 'Baton' : 'Project'}</span>
+          ) : null}
+          {pending && (
+            <IconButton
+              icon="close"
+              label={system ? 'Close notice' : 'Close question'}
+              onClick={() => submit({ kind: 'close' })}
+              style={styles.close}
+            />
           )}
         </div>
-      )}
-      {(error ?? feedback) && (!pending || !draft.replying || system) && (
-        <p role="alert" {...stylex.props(text.caption, styles.error)}>
-          {error ?? feedback}
-        </p>
-      )}
-      {handle.isPending && !draft.replying && (
-        <p role="status" {...stylex.props(text.caption, styles.meta)}>
-          Saving reply…
-        </p>
-      )}
+        <h2 {...stylex.props(text.heading, detail && text.title)}>{item.title}</h2>
+        {!done && (
+          <SelectionArea
+            label={archived ? 'Copy selection' : 'Ask project assistant'}
+            icon={archived ? 'copy' : 'reply'}
+            describe={describe}
+          >
+            <div {...stylex.props(styles.body)}>
+              <RestrictedMarkdown body={item.body} muted />
+            </div>
+          </SelectionArea>
+        )}
+        {pending && !system && (
+          <>
+            {pendingCount >= 10 && (
+              <p {...stylex.props(text.caption, styles.meta)}>
+                {pendingCount} questions waiting in this project. Consider answering or closing older questions.
+              </p>
+            )}
+            <RadioGroup
+              aria-label={item.title}
+              value={
+                draft.replying ? (draft.option === null ? 'other' : String(item.options.indexOf(draft.option))) : ''
+              }
+              disabled={handle.isPending}
+              onValueChange={(value) => {
+                setError(null)
+                setDraft({
+                  ...draft,
+                  option: value === 'other' ? null : (item.options[Number(value)] ?? null),
+                  replying: true,
+                })
+              }}
+              className={`attention-card-options ${stylex.props(styles.options).className ?? ''}`}
+            >
+              {[
+                ...visibleOptions.map((option, index) => (
+                  <RadioItem
+                    key={index}
+                    value={String(index)}
+                    ref={(element) =>
+                      element?.setAttribute('aria-label', `${option}${index === item.recommended ? ', suggested' : ''}`)
+                    }
+                    label={
+                      <>
+                        {option}
+                        {index === item.recommended && <span {...stylex.props(styles.recommended)}>Suggested</span>}
+                      </>
+                    }
+                  />
+                )),
+                ...(item.allowText
+                  ? [
+                      <RadioItem
+                        key="other"
+                        value="other"
+                        label="Other…"
+                        ref={(element) => element?.setAttribute('aria-label', 'Other…')}
+                      />,
+                    ]
+                  : []),
+              ]}
+            </RadioGroup>
+            {item.options.length > 5 && (
+              <Button
+                small
+                variant="ghost"
+                aria-expanded={optionsExpanded}
+                onClick={() => setOptionsExpanded(!optionsExpanded)}
+              >
+                {optionsExpanded ? 'Show fewer options' : `Show all ${item.options.length} options`}
+              </Button>
+            )}
+            {draft.replying && (
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  submit({ kind: 'answer', option: draft.option, note: draft.note })
+                }}
+                {...stylex.props(styles.form)}
+              >
+                <Field
+                  label={draft.option === null ? 'Your reply' : 'Note'}
+                  optional={draft.option !== null}
+                  error={error}
+                >
+                  {(props) => (
+                    <OpenUITextArea
+                      {...props}
+                      hasError={Boolean(error)}
+                      autoFocus
+                      value={draft.note}
+                      readOnly={handle.isPending}
+                      onChange={(event) => setDraft({ ...draft, note: event.target.value })}
+                    />
+                  )}
+                </Field>
+                <div {...stylex.props(styles.actions)}>
+                  <OpenUIButton
+                    size="small"
+                    variant="tertiary"
+                    type="button"
+                    onClick={() => {
+                      if (!handle.isPending) {
+                        workspace.itemDrafts.set(item.id, null)
+                        setError(null)
+                      }
+                    }}
+                  >
+                    Cancel
+                  </OpenUIButton>
+                  <OpenUIButton size="small" type="submit">
+                    {handle.isPending ? 'Saving…' : 'Send reply'}
+                  </OpenUIButton>
+                </div>
+              </form>
+            )}
+          </>
+        )}
+        {pending && system && (
+          <Button
+            small
+            style={styles.action}
+            onClick={() => void navigate({ to: '/projects/$projectId', params: { projectId: item.projectId } })}
+          >
+            Go to project
+          </Button>
+        )}
+        {!pending && item.result && (
+          <div role="status" {...stylex.props(text.small, styles.result)}>
+            <p {...stylex.props(styles.resultLine)}>
+              <Icon name="check" size={12} />
+              <span>
+                {[item.result.option, item.result.note].filter(Boolean).join(' · ') || statusLabels[item.status]} ·{' '}
+                {item.result.actor} · {clockTime(item.result.at)}
+              </span>
+            </p>
+            {item.result.reason && <p>{item.result.reason}</p>}
+            {waiting && (
+              <p>
+                {project?.status === 'paused'
+                  ? 'Reply saved · read after you resume'
+                  : project?.agent.state === 'waitingDevice'
+                    ? 'Reply saved · read when a device is online'
+                    : project?.agent.state === 'blocked'
+                      ? 'Reply saved · retry from the project when ready'
+                      : 'Reply saved'}
+              </p>
+            )}
+          </div>
+        )}
+        {(error ?? feedback) && (!pending || !draft.replying || system) && (
+          <p role="alert" {...stylex.props(text.caption, styles.error)}>
+            {error ?? feedback}
+          </p>
+        )}
+        {handle.isPending && !draft.replying && (
+          <p role="status" {...stylex.props(text.caption, styles.meta)}>
+            Saving reply…
+          </p>
+        )}
+      </Card>
     </section>
   )
 }

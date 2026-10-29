@@ -44,6 +44,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     )
     const root = document.documentElement
     root.className = props.className ?? ''
+    if (mode === 'system') delete root.dataset.openuiTheme
+    else root.dataset.openuiTheme = mode
   }, [mode])
 
   const setMode = (next: ThemeMode) => {

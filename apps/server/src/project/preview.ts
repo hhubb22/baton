@@ -15,7 +15,8 @@ export const saveProjectPreview = Effect.fn('saveProjectPreview')(function* (
   const now = yield* DateTime.now,
     ms = DateTime.toEpochMillis(now)
   for (const [id, entry] of previews) if (entry.expires <= ms) previews.delete(id)
-  if ((previews.get(runId)?.updated ?? 0) + 1000 > ms) return
+  const previous = previews.get(runId)
+  if (p.text && previous?.value.text && previous.value.after_seq === afterSeq && previous.updated + 150 > ms) return
   if (previews.size >= 256 && !previews.has(runId)) previews.delete(previews.keys().next().value!)
   previews.set(runId, {
     value: { after_seq: afterSeq, text: p.text, truncated: p.truncated, updated_at: DateTime.formatIso(now) },

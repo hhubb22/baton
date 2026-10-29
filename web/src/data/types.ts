@@ -167,6 +167,7 @@ export interface Thread {
   createdAt: number
   updatedAt: number
   runStartedAt: number | null
+  runTurnSeq?: number
   unread: boolean
 }
 
@@ -276,6 +277,10 @@ export interface Project {
     reason: string | null
     // 运行中正在做的事，例如 `Reading your message…`，显示在主对话末尾。
     activity: string | null
+    // 未保存的文本快照，仅对应该序号之后正在生成的一条回复。
+    preview?: { afterSeq: number; text: string; truncated: boolean } | null
+    // 中心已持久化的历史尾序号。
+    lastSeq?: number
   }
   createdAt: number
 }
@@ -290,6 +295,7 @@ export type ProjectPatch = Partial<
 export type ProcessStep =
   | { kind: 'command'; deviceId: ID; command: string; exitCode: number; output: string; durationMs: number }
   | { kind: 'note'; body: string }
+  | { kind: 'tool'; name: string; input: string; output: string | null; status: 'pending' | 'completed' | 'failed' }
 
 // 回复里提到的 Thread：本次新开的、发了消息的，或汇报回复的。
 export interface EntryThreads {
@@ -301,12 +307,19 @@ interface EntryBase {
   id: ID
   projectId: ID
   createdAt: number
+  sourceSeq?: number
 }
 
 // 主对话的一条记录：你的消息、助手的一轮回复，或系统说明（切换设备、停止等）。
 export type ProjectEntry =
   | (EntryBase & { kind: 'user'; body: string; delivery: Delivery; reference: Reference | null })
-  | (EntryBase & { kind: 'assistant'; process: ProcessStep[]; threads: EntryThreads | null; body: string })
+  | (EntryBase & {
+      kind: 'assistant'
+      process: ProcessStep[]
+      threads: EntryThreads | null
+      body: string
+      streamAnchor?: number
+    })
   | (EntryBase & { kind: 'note'; body: string })
 
 export interface MemoryVersion {

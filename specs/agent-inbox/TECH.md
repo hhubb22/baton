@@ -64,6 +64,8 @@ Agent 行锁串行化同 Project 的创建。先按工具调用身份查找已�
 
 Markdown 使用 `react-markdown` 和 `remark-gfm` 渲染，启用 `skipHtml`，禁用图片，链接只保留有效的 `http`、`https` 和 `mailto` URL 并在新窗口打开，使用 `noopener noreferrer`，不自动加载外部资源（IB-07）。选项默认显示前 5 个，其余通过按钮在原位展开；同 Project 的待处理 Agent 问题达到 10 个时显示整理提示。回答和关闭携带版本与请求标识；冲突后读取当前记录，响应丢失后由用户查询处理结果，不自动重发。Inbox 数量、已展开的列表和当前事项每 5 秒查询一次。
 
+事项卡片的容器、单选项、回复输入框和回复按钮使用 OpenUI 默认组件与主题；深浅色跟随 Baton 的设置。事项数据、草稿和处理操作由 Baton 管理。
+
 选中文字后的「问 Project Agent」把文字和来源（Thread ID 与回复位置、文件的设备路径行号、事项 ID）预填到主对话输入框（IB-13）。引用按 UTF-8 截至 8 KiB，超限注明原始字节长度。草稿只在当前页面内存中，用户提交后才写入普通消息接口。
 
 ## Testing and validation

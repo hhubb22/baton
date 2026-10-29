@@ -1,6 +1,6 @@
 import * as stylex from '@stylexjs/stylex'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
-import { useEffect, useRef, useState, type UIEvent } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { FolderDialog } from '../app/FolderDialog'
 import { useLocalDirectoryPicker } from '../app/LocalDirectoryPicker'
 import { Page } from '../app/Page'
@@ -45,7 +45,7 @@ const styles = stylex.create({
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 'max(320px, calc(100cqh - 120px))',
+    minHeight: 'clamp(280px, calc(100cqh - 300px), 480px)',
     gap: space.xs,
     paddingBottom: space.xl,
   },
@@ -54,9 +54,6 @@ const styles = stylex.create({
     display: 'flex',
     flexDirection: 'column',
     gap: space.lg,
-    minHeight: 'calc(100cqh - 40px)',
-    opacity: 0.65,
-    '@media (prefers-reduced-motion: reduce)': { opacity: 1 },
   },
   composerFrame: { position: 'relative', zIndex: 1 },
   locationBar: {
@@ -385,41 +382,12 @@ export function ThreadsPage() {
   const projects = useProjects()
   const create = useCreateThread()
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
-  const composerGroupRef = useRef<HTMLDivElement>(null)
-  const threadListRef = useRef<HTMLDivElement>(null)
   const [draft, setDraft] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [location, setLocation] = useState<Location | null>(null)
   const [agentChoice, setAgentChoice] = useState<AgentChoice | null>(null)
   const [browseDevice, setBrowseDevice] = useState<string | null>(null)
   const [collapsedGroups, setCollapsedGroups] = useState<ThreadGroup[]>([])
-
-  const listScrollPosition = (body: HTMLDivElement) => {
-    const list = threadListRef.current
-    if (!list) return 0
-    return Math.min(
-      body.scrollHeight - body.clientHeight,
-      list.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop,
-    )
-  }
-
-  const onPageScroll = (event: UIEvent<HTMLDivElement>) => {
-    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-    const target = listScrollPosition(event.currentTarget)
-    const progress = reduceMotion || target <= 0 ? 0 : Math.min(1, event.currentTarget.scrollTop / target)
-    if (composerGroupRef.current) {
-      composerGroupRef.current.style.opacity = reduceMotion ? '' : String(1 - progress)
-      composerGroupRef.current.style.pointerEvents = progress >= 1 ? 'none' : ''
-    }
-    if (threadListRef.current) threadListRef.current.style.opacity = reduceMotion ? '' : String(0.65 + progress * 0.35)
-  }
-
-  const onPageScrollEnd = (body: HTMLDivElement) => {
-    const target = listScrollPosition(body)
-    if (body.scrollTop <= 1 || body.scrollTop >= target - 1) return
-    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-    body.scrollTo({ top: body.scrollTop < target / 2 ? 0 : target, behavior: reduceMotion ? 'instant' : 'smooth' })
-  }
 
   const allThreads = threads.data ?? []
   const allDevices = devices.data ?? []
@@ -601,7 +569,7 @@ export function ThreadsPage() {
 
   return (
     <div {...stylex.props(styles.layout)}>
-      <Page title="Threads" sizedBody bottomFade onBodyScroll={onPageScroll} onBodyScrollEnd={onPageScrollEnd}>
+      <Page title="Threads" sizedBody bottomFade>
         <div {...stylex.props(styles.content)}>
           {devices.isError ? (
             <Banner
@@ -630,7 +598,7 @@ export function ThreadsPage() {
             />
           ) : (
             <div {...stylex.props(styles.composerArea)}>
-              <div ref={composerGroupRef} {...stylex.props(styles.composerGroup)}>
+              <div {...stylex.props(styles.composerGroup)}>
                 <div {...stylex.props(styles.composerFrame)}>
                   <Composer
                     roomy
@@ -687,7 +655,7 @@ export function ThreadsPage() {
               </span>
             </div>
           )}
-          <div ref={threadListRef} {...stylex.props(styles.threadList)}>
+          <div {...stylex.props(styles.threadList)}>
             <div {...stylex.props(styles.filters)}>
               <Menu trigger={<Chip icon="laptop">{filterDevice?.name ?? 'All devices'}</Chip>}>
                 <MenuOption selected={!search.device} onSelect={() => setSearch({ device: undefined })}>

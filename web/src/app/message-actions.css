@@ -1,0 +1,38 @@
+.thread-reply-actions {
+  display: flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 4px;
+  min-height: 28px;
+  margin-top: -8px;
+  color: inherit;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+}
+
+.thread-reply-actions button {
+  width: 28px;
+  height: 28px;
+  justify-content: center;
+}
+
+[data-thread-reply]:hover .thread-reply-actions,
+[data-thread-reply]:focus-within .thread-reply-actions,
+[data-thread-reply][data-actions-revealed] .thread-reply-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (hover: none) {
+  [data-thread-reply][data-latest-reply] .thread-reply-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thread-reply-actions {
+    transition: none;
+  }
+}

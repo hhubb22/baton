@@ -294,6 +294,18 @@ export function useTrace(messageId: ID, enabled: boolean) {
   })
 }
 
+export function useLiveTrace(threadId: ID, turnSeq: number | undefined, enabled: boolean) {
+  const client = useClient()
+  return useInfiniteQuery({
+    queryKey: ['liveTrace', threadId, turnSeq],
+    queryFn: ({ pageParam }) => client.readTurnTrace!(threadId, turnSeq!, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (page) => (page.state === 'ready' ? page.nextCursor : undefined),
+    enabled: enabled && turnSeq !== undefined && !!client.readTurnTrace,
+    refetchInterval: 1500,
+  })
+}
+
 export function useLiveOutput(threadId: ID, enabled: boolean) {
   const client = useClient()
   const queryClient = useQueryClient()

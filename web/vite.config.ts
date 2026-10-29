@@ -44,6 +44,7 @@ export default defineConfig({
     assetsDir: 'assets',
   },
   test: {
+    server: { deps: { inline: ['@openuidev/react-ui'] } },
     fsModuleCachePath: 'node_modules/.vitest-cache',
     environment: 'jsdom',
     setupFiles: './src/test/setup.ts',

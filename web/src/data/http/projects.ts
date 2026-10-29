@@ -1,7 +1,7 @@
 import type { ProjectMemory, MemoryRevision, MemoryWorkStatus, ProjectMessageReference } from '@baton/protocol'
 import { ClientError, type BatonClient } from '../client'
 import { shortenExcerpt } from '../derive'
-import type { InboxItem, MemoryNote, Project, ProjectEntry, Reference } from '../types'
+import type { InboxItem, MemoryNote, ProcessStep, Project, ProjectEntry, Reference } from '../types'
 import { apiPath, timestamp, type HttpContext } from './context'
 import { HttpError } from './transport'
 
@@ -49,7 +49,7 @@ interface StatusDTO {
     end_reason?: string
     stop_acked_at?: string
   }
-  preview?: { after_seq: number; text: string }
+  preview?: { after_seq: number; text: string; truncated?: boolean }
 }
 interface MessageDTO {
   id: number
@@ -192,8 +192,16 @@ export function mapProject(p: ProjectDTO, status: StatusDTO): Project {
               ? 'Waiting for the selected API connection'
               : (status.waiting_reason ?? status.last_error ?? null)
             : null,
-      activity:
-        state === 'running' && status.preview?.after_seq === status.last_seq ? status.preview.text || null : null,
+      activity: null,
+      lastSeq: status.last_seq,
+      preview:
+        state === 'running' && status.preview?.after_seq === status.last_seq && status.preview.text
+          ? {
+              afterSeq: status.preview.after_seq,
+              text: status.preview.text,
+              truncated: status.preview.truncated ?? false,
+            }
+          : null,
     },
     createdAt: timestamp(p.created_at),
   }
@@ -298,12 +306,16 @@ export async function mapProjectEntries(
 ): Promise<ProjectEntry[]> {
   const entries: ProjectEntry[] = []
   const delivered = new Set<string>()
-  const calls = new Map<string, { entry: Extract<ProjectEntry, { kind: 'assistant' }>; block: Block }>()
+  const calls = new Map<
+    string,
+    { entry: Extract<ProjectEntry, { kind: 'assistant' }>; block: Block; step: Extract<ProcessStep, { kind: 'tool' }> }
+  >()
   for (const event of [...events].sort((a, b) => a.seq - b.seq)) {
     const base = {
       id: await stableId(`project-event:${event.conversation_id}:${event.seq}`),
       projectId,
       createdAt: timestamp(event.created_at),
+      sourceSeq: event.seq,
     }
     const message = event.payload.message
     if (event.kind === 'input') {
@@ -320,16 +332,17 @@ export async function mapProjectEntries(
         if (input.source_type === 'user_message' && typeof input.payload.content === 'string') {
           const clientId = input.source_key.slice('user:'.length)
           delivered.add(clientId)
-          entries.push(
-            await userEntry(
+          entries.push({
+            ...(await userEntry(
               projectId,
               clientId,
               input.payload.content,
               event.created_at,
               true,
               input.payload.reference as ProjectMessageReference | null | undefined,
-            ),
-          )
+            )),
+            sourceSeq: event.seq,
+          })
         } else {
           const inputBase = { ...base, id: await stableId(`project-input:${projectId}:${input.id}`) }
           if (
@@ -354,14 +367,22 @@ export async function mapProjectEntries(
       const entry: Extract<ProjectEntry, { kind: 'assistant' }> = {
         ...base,
         kind: 'assistant',
+        streamAnchor: event.seq - 1,
         body: text(message.content),
         process: [],
         threads: null,
       }
       for (const block of typeof message.content === 'string' ? [] : message.content) {
         if (block.type !== 'toolCall' || !block.id) continue
-        calls.set(block.id, { entry, block })
-        entry.process.push({ kind: 'note', body: `${block.name ?? ''}\n${JSON.stringify(block.arguments ?? {})}` })
+        const step: Extract<ProcessStep, { kind: 'tool' }> = {
+          kind: 'tool',
+          name: block.name || 'Tool',
+          input: JSON.stringify(block.arguments ?? {}, null, 2),
+          output: null,
+          status: 'pending',
+        }
+        calls.set(block.id, { entry, block, step })
+        entry.process.push(step)
       }
       entries.push(entry)
     } else if (event.kind === 'tool_result' && message) {
@@ -371,7 +392,8 @@ export async function mapProjectEntries(
         entries.push({ ...base, kind: 'note', body: `${message.toolName ?? ''}\n${output}` })
         continue
       }
-      call.entry.process.push({ kind: 'note', body: output })
+      call.step.output = output
+      call.step.status = message.isError ? 'failed' : 'completed'
       const result = parseObject(output)
       const name = call.block.name
       if (

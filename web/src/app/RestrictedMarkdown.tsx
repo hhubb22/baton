@@ -18,6 +18,7 @@ const styles = stylex.create({
     overflowWrap: 'anywhere',
   },
   paragraph: { margin: 0 },
+  muted: { color: colors.muted, fontWeight: '400' },
   strong: { fontWeight: weight.semibold },
   code: {
     fontFamily: fonts.mono,
@@ -146,9 +147,17 @@ export const markdownComponents: Components = {
     ),
 }
 
-export function RestrictedMarkdown({ body }: { body: string }) {
+export function RestrictedMarkdown({
+  body,
+  muted = false,
+  small = false,
+}: {
+  body: string
+  muted?: boolean
+  small?: boolean
+}) {
   return (
-    <div {...stylex.props(text.body, styles.body)}>
+    <div {...stylex.props(small ? text.small : text.body, styles.body, muted && styles.muted)}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         allowedElements={allowedElements}

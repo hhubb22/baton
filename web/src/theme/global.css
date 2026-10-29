@@ -59,3 +59,21 @@ a {
 svg {
   display: block;
 }
+
+[data-live-activity] {
+  opacity: 1;
+  transition: opacity 150ms cubic-bezier(0.23, 1, 0.32, 1);
+  @starting-style {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .streamdown-animated .stream-char {
+    animation: none !important;
+    opacity: 1;
+  }
+  [data-live-activity] {
+    transition: none;
+  }
+}

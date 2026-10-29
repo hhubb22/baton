@@ -67,6 +67,9 @@ overrides:
   micromark-extension-gfm-table: 2.1.1
   micromark-util-types: 2.0.2
 patchedDependencies:
+  # https://github.com/LodyAI/Lody/blob/7574983b77ab5b1f9a10326adf5d77d0b3c28b3b/patches/%40lobehub__streamdown%401.4.0.patch
+  # 已存在的回复在挂载时直接显示，新增内容仍按流式动画显示。
+  '@lobehub/streamdown@1.4.0': patches/@lobehub__streamdown@1.4.0.patch
   mdast-util-math@3.0.0: upstream/t3code/patches/mdast-util-math@3.0.0.patch
   micromark-extension-llm-math@3.1.0: upstream/t3code/patches/micromark-extension-llm-math@3.1.0.patch
   micromark-extension-gfm-table@2.1.1: upstream/t3code/patches/micromark-extension-gfm-table@2.1.1.patch

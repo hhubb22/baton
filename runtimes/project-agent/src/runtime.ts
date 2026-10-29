@@ -502,7 +502,7 @@ export class ProjectRuntime {
           for await (const event of stream) {
             if (event.type === 'text_delta') {
               if (Buffer.byteLength(preview) < 32 * 1024 + 4) preview = (preview + event.delta).slice(0, 32 * 1024 + 4)
-              if (this.timer.now() - lastPreview >= 1000) {
+              if (this.timer.now() - lastPreview >= 200) {
                 lastPreview = this.timer.now()
                 await publishPreview(preview)
               }

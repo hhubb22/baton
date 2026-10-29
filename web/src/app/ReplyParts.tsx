@@ -1,12 +1,11 @@
 import * as stylex from '@stylexjs/stylex'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { activityLine, baseName, clockTime, fileSize, runTimer } from '../data/derive'
-import { useLiveOutput, useTrace } from '../data/queries'
-import type { Attachment, Device, Message, Thread } from '../data/types'
+import { useLiveTrace, useTrace } from '../data/queries'
+import type { Attachment, Device, LiveOutput as LiveOutputData, Message, Thread } from '../data/types'
 import { fonts } from '../theme/base.stylex'
 import { text } from '../theme/text'
 import { colors, radius, space } from '../theme/tokens.stylex'
-import { branch } from '../ui/Branch'
 import { Button, focusRing } from '../ui/Button'
 import { Icon } from '../ui/Icon'
 import { StatusDot } from '../ui/Status'
@@ -15,6 +14,9 @@ import { ActivityStep } from './ActivityStep'
 import { MessageBody } from './MessageBody'
 
 const styles = stylex.create({
+  trace: {
+    minWidth: 0,
+  },
   toggle: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -33,7 +35,7 @@ const styles = stylex.create({
     marginTop: '6px',
     marginLeft: '5px',
     paddingLeft: space.md,
-    borderLeftWidth: '2px',
+    borderLeftWidth: '1px',
     borderLeftStyle: 'solid',
     borderLeftColor: colors.borderSoft,
   },
@@ -51,11 +53,31 @@ const styles = stylex.create({
     alignItems: 'flex-start',
     gap: space.md,
     paddingBlock: space.xs,
-    paddingInline: space.sm,
+  },
+  attachmentList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space.xs,
+    minWidth: 0,
+    padding: 0,
+    margin: 0,
+    listStyle: 'none',
   },
   attachmentIcon: { flexShrink: 0, marginTop: '3px', color: colors.muted },
   attachmentBody: { display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0 },
-  sha: { overflowWrap: 'anywhere' },
+  attachmentAction: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    width: '28px',
+    height: '28px',
+    padding: 0,
+    borderWidth: 0,
+    borderRadius: radius.sm,
+    backgroundColor: { default: 'transparent', ':hover': colors.hover },
+    color: { default: colors.muted, ':hover': colors.text },
+  },
   live: { display: 'flex', flexDirection: 'column', gap: space.sm },
   liveHead: { display: 'inline-flex', alignItems: 'center', gap: '6px' },
   liveBox: {
@@ -152,12 +174,12 @@ export function ActivityTrace({
   }
 
   return (
-    <div>
+    <div {...stylex.props(styles.trace)}>
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
-        {...stylex.props(text.small, styles.toggle, focusRing.ring)}
+        {...stylex.props(text.caption, styles.toggle, focusRing.ring)}
       >
         <Icon name={open ? 'chevron-down' : 'chevron-right'} size={12} />
         {message.activity
@@ -167,6 +189,56 @@ export function ActivityTrace({
             : `Activity · ${message.traceItemCount} ${message.traceItemCount === 1 ? 'step' : 'steps'}`}
       </button>
       {open && <div {...stylex.props(styles.steps)}>{content}</div>}
+    </div>
+  )
+}
+
+export function LiveActivityTrace({
+  threadId,
+  turnSeq,
+  device,
+}: {
+  threadId: string
+  turnSeq: number
+  device: Device | undefined
+}) {
+  const [open, setOpen] = useState(true)
+  const trace = useLiveTrace(threadId, turnSeq, true)
+  const steps = trace.data?.pages.flatMap((page) => (page.state === 'ready' ? page.steps : [])) ?? []
+  if (steps.length === 0) return null
+  return (
+    <div {...stylex.props(styles.trace)}>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        {...stylex.props(text.caption, styles.toggle, focusRing.ring)}
+      >
+        <Icon name={open ? 'chevron-down' : 'chevron-right'} size={12} />
+        Activity · {steps.length} {steps.length === 1 ? 'step' : 'steps'}
+      </button>
+      {open && (
+        <div {...stylex.props(styles.steps)}>
+          {steps.map((step) => (
+            <ActivityStep key={step.item_id} step={step} threadId={threadId} device={device} />
+          ))}
+          {trace.hasNextPage && (
+            <Button
+              small
+              onClick={() => {
+                if (!trace.isFetching) void trace.fetchNextPage()
+              }}
+            >
+              Load more activity
+            </Button>
+          )}
+          {trace.isError && (
+            <p role="status" {...stylex.props(text.small, styles.muted)}>
+              Couldn't load activity.
+            </p>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -183,7 +255,7 @@ export function Attachments({
 }) {
   if (attachments.length === 0) return null
   return (
-    <ul aria-label="Attachments" {...stylex.props(branch.line)}>
+    <ul aria-label="Attachments" {...stylex.props(styles.attachmentList)}>
       {attachments.map((item) =>
         item.kind === 'file' ? (
           <FileRow
@@ -253,7 +325,9 @@ function CommitRow({ item }: { item: Extract<Attachment, { kind: 'commit' }> }) 
         <Icon name="commit" size={14} />
       </span>
       <div {...stylex.props(styles.attachmentBody)}>
-        <code {...stylex.props(text.mono, styles.sha)}>{item.sha}</code>
+        <code title={item.sha} aria-label={item.sha} {...stylex.props(text.mono, text.truncate)}>
+          {item.sha.length > 12 ? `${item.sha.slice(0, 12)}…` : item.sha}
+        </code>
         <span title={item.subject} {...stylex.props(text.caption, styles.muted, text.truncate)}>
           {item.repo} · {item.subject}
         </span>
@@ -266,10 +340,11 @@ function CommitRow({ item }: { item: Extract<Attachment, { kind: 'commit' }> }) 
       <button
         type="button"
         aria-label={copied ? 'Copied commit SHA' : 'Copy commit SHA'}
+        title={copied ? 'Copied commit SHA' : 'Copy commit SHA'}
         onClick={() => void copy()}
-        {...stylex.props(text.small, styles.link, focusRing.ring)}
+        {...stylex.props(styles.attachmentAction, focusRing.ring)}
       >
-        {copied ? 'Copied' : 'Copy'}
+        <Icon name={copied ? 'check' : 'copy'} size={14} />
       </button>
     </li>
   )
@@ -283,6 +358,8 @@ export function LiveOutput({
   now,
   messages,
   onOpenPath,
+  output,
+  showReply = true,
 }: {
   thread: Thread
   device: Device | undefined
@@ -290,19 +367,20 @@ export function LiveOutput({
   now: number
   messages: Message[]
   onOpenPath: (path: string) => void
+  output?: LiveOutputData
+  showReply?: boolean
 }) {
   const running = thread.status === 'running' && thread.runStartedAt !== null
-  const output = useLiveOutput(thread.id, running)
   const boxRef = useRef<HTMLPreElement | null>(null)
-  const chunks = output.data?.chunks ?? []
-  const replyId = output.data?.replyId
+  const chunks = output?.chunks ?? []
+  const replyId = output?.replyId
   const isReply = thread.agent !== null && replyId !== undefined
   const saved =
     isReply &&
-    output.data?.workerTurnSeq !== undefined &&
+    output?.workerTurnSeq !== undefined &&
     messages.some(
       (message) =>
-        message.role === 'agent' && message.replyId === replyId && message.workerTurnSeq === output.data?.workerTurnSeq,
+        message.role === 'agent' && message.replyId === replyId && message.workerTurnSeq === output?.workerTurnSeq,
     )
 
   // 新输出到达时滚到最后。
@@ -326,7 +404,7 @@ export function LiveOutput({
           No report since {device ? clockTime(device.lastSeenAt) : 'the device was removed'}
         </span>
       )}
-      {isReply && !saved && chunks.length > 0 && (
+      {showReply && isReply && !saved && chunks.length > 0 && (
         <div>
           {chunks.some((chunk) => chunk.kind === 'gap') && (
             <span {...stylex.props(text.caption, styles.gap)}>Earlier output not kept</span>

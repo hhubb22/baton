@@ -544,7 +544,7 @@ describe('project maintenance', () => {
     ).toMatchObject({ delivery: 'saved' })
     await act(() => router.navigate({ to: '/inbox' }))
     const question = await screen.findByRole('region', { name: 'What should the release notes mention?' })
-    await user.click(within(question).getByRole('button', { name: /Other…/ }))
+    await user.click(within(question).getByRole('radio', { name: /Other…/ }))
     await user.type(within(question).getByLabelText('Your reply'), 'Mention Windows support.')
     await user.click(within(question).getByRole('button', { name: 'Send reply' }))
     expect(

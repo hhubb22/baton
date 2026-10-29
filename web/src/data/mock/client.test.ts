@@ -56,6 +56,28 @@ describe('mock downloads', () => {
 })
 
 describe('mock scenarios', () => {
+  it('replays project preview, saved reply and tool result after reset', async () => {
+    const { client, scheduler } = setup('streamingProject')
+    expect((await client.listProjectEntries('prj-compat')).map((entry) => entry.id)).toEqual(['ent-compat-1'])
+    scheduler.advance(1600)
+    expect(await client.listProjectEntries('prj-compat')).toContainEqual(
+      expect.objectContaining({ process: [expect.objectContaining({ status: 'pending' })] }),
+    )
+    scheduler.advance(2400)
+    expect(await client.listProjectEntries('prj-compat')).toContainEqual(
+      expect.objectContaining({ process: expect.arrayContaining([expect.objectContaining({ kind: 'note' })]) }),
+    )
+    scheduler.advance(3000)
+    const partial = (await client.listProjects()).find((project) => project.id === 'prj-compat')!
+    expect(partial.agent.preview?.text).toContain('Opened')
+    scheduler.advance(60000)
+    const entries = await client.listProjectEntries('prj-compat')
+    expect(entries).toContainEqual(expect.objectContaining({ body: expect.stringContaining('2 failures') }))
+    expect((await client.listProjects()).find((project) => project.id === 'prj-compat')?.agent.state).toBe('idle')
+    client.controls.reset()
+    expect((await client.listProjectEntries('prj-compat')).map((entry) => entry.id)).toEqual(['ent-compat-1'])
+  })
+
   it('streams Markdown and restarts it on reset', async () => {
     const { client, scheduler } = setup('streamingMarkdown')
     expect((await client.listMessages('thr-webui'))[0]).toMatchObject({ body: '', streaming: true })

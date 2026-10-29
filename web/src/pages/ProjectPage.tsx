@@ -8,6 +8,8 @@ import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useEffect, useLayoutEffect, useRef, useState, type UIEvent } from 'react'
 import { FilePreview } from '../app/FilePreview'
 import { MessageBody } from '../app/MessageBody'
+import { MessageActions } from '../app/MessageActions'
+import { RestrictedMarkdown } from '../app/RestrictedMarkdown'
 import { Page, pane } from '../app/Page'
 import { ReferenceBlock } from '../app/ReferenceBlock'
 import type { ProjectSearch } from '../app/router'
@@ -58,7 +60,6 @@ import { colors, radius, size, space } from '../theme/tokens.stylex'
 import { Avatar } from '../ui/Avatar'
 import { Banner } from '../ui/Banner'
 import { Button, focusRing, IconButton } from '../ui/Button'
-import { branch } from '../ui/Branch'
 import { Composer } from '../ui/Composer'
 import { Icon } from '../ui/Icon'
 import { Menu, MenuOption, MenuRule } from '../ui/Menu'
@@ -93,7 +94,7 @@ const styles = stylex.create({
   entries: {
     display: 'flex',
     flexDirection: 'column',
-    gap: space.lg,
+    gap: space.xl,
     width: '100%',
     maxWidth: size.measure,
     marginInline: 'auto',
@@ -110,13 +111,21 @@ const styles = stylex.create({
     backgroundColor: colors.subtle,
   },
   withdrawn: { color: colors.muted },
-  assistant: { display: 'flex', flexDirection: 'column', gap: space.md },
+  assistant: { display: 'flex', flexDirection: 'column', gap: space.lg, minWidth: 0 },
+  assistantBody: { maxWidth: '70ch', lineHeight: 1.65 },
+  process: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space.sm,
+    minWidth: 0,
+  },
   processToggle: {
     display: 'inline-flex',
     alignItems: 'center',
-    gap: space.xs,
+    gap: space.sm,
     alignSelf: 'flex-start',
-    padding: 0,
+    paddingBlock: space.xs,
+    paddingInline: 0,
     borderWidth: 0,
     backgroundColor: 'transparent',
     color: { default: colors.muted, ':hover': colors.text },
@@ -124,26 +133,56 @@ const styles = stylex.create({
   steps: {
     display: 'flex',
     flexDirection: 'column',
-    gap: space.sm,
+    gap: space.xs,
+    marginLeft: '5px',
     paddingLeft: space.md,
-    borderLeftWidth: '2px',
+    borderLeftWidth: '1px',
     borderLeftStyle: 'solid',
-    borderLeftColor: colors.borderSoft,
+    borderLeftColor: colors.border,
   },
-  step: { display: 'flex', flexDirection: 'column', gap: space.xs },
-  stepHead: { display: 'flex', alignItems: 'baseline', gap: space.sm, flexWrap: 'wrap' },
+  step: { display: 'flex', flexDirection: 'column', minWidth: 0 },
+  stepToggle: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: space.sm,
+    width: '100%',
+    minWidth: 0,
+    paddingBlock: space.xs,
+    paddingInline: space.xs,
+    borderWidth: 0,
+    borderRadius: radius.sm,
+    backgroundColor: { default: 'transparent', ':hover': colors.hover },
+    color: colors.muted,
+    textAlign: 'left',
+  },
+  stepIcon: { marginTop: '2px', color: colors.faint },
+  stepName: { flexGrow: 1, minWidth: 0, overflowWrap: 'anywhere' },
+  stepStatus: { flexShrink: 1, maxWidth: '45%', overflowWrap: 'anywhere', color: colors.faint, textAlign: 'right' },
+  stepDetail: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space.xs,
+    marginLeft: '22px',
+    paddingBlock: space.sm,
+    paddingInline: space.md,
+    borderRadius: radius.sm,
+    backgroundColor: colors.subtle,
+  },
+  detailLabel: { color: colors.faint },
+  detailText: { margin: 0, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
+  noteRow: { display: 'flex', alignItems: 'flex-start', gap: space.sm, padding: space.xs, color: colors.muted },
+  noteBody: { minWidth: 0, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
   output: {
     margin: 0,
     maxHeight: '200px',
     overflow: 'auto',
-    padding: space.sm,
-    borderRadius: radius.sm,
-    backgroundColor: colors.subtle,
     fontFamily: fonts.mono,
     fontSize: '12px',
     whiteSpace: 'pre-wrap',
+    overflowWrap: 'anywhere',
   },
-  threadGroup: { display: 'flex', flexDirection: 'column', gap: space.xs },
+  threadGroup: { display: 'flex', flexDirection: 'column', gap: space.sm, minWidth: 0 },
+  threadGroupTitle: { display: 'flex', alignItems: 'center', gap: space.sm, color: colors.muted },
   groupTitle: { flexGrow: 1 },
   threadRow: {
     display: 'flex',
@@ -152,9 +191,11 @@ const styles = stylex.create({
     width: '100%',
     minHeight: size.comfortable,
     paddingInline: space.sm,
-    borderWidth: 0,
     borderRadius: radius.md,
-    backgroundColor: { default: 'transparent', ':hover': colors.hover },
+    backgroundColor: { default: colors.surface, ':hover': colors.hover },
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: colors.borderSoft,
     color: colors.text,
     textAlign: 'left',
   },
@@ -172,6 +213,7 @@ const styles = stylex.create({
     textAlign: 'left',
   },
   threadTitle: { flexGrow: 1, flexBasis: 0, minWidth: 0 },
+  threadIcon: { flexShrink: 0, color: colors.muted },
   folderTag: { flexShrink: 1, minWidth: 0, color: colors.faint },
   threadMeta: { flexShrink: 0, color: colors.muted, whiteSpace: 'nowrap' },
   note: { alignSelf: 'center', color: colors.faint, textAlign: 'center' },
@@ -324,13 +366,56 @@ function deliveryNote(delivery: Delivery) {
 }
 
 function processSummary(steps: ProcessStep[]) {
-  const commands = steps.filter((step) => step.kind === 'command').length
-  const notes = steps.length - commands
+  const commands = steps.filter(
+    (step) => step.kind === 'command' || (step.kind === 'tool' && step.name === 'nodes.exec'),
+  ).length
+  const notes = steps.filter((step) => step.kind === 'note').length
+  const tools = steps.filter((step) => step.kind === 'tool' && step.name !== 'nodes.exec').length
   const parts = []
   if (commands > 0) parts.push(`ran ${plural(commands, 'command')}`)
-  if (notes > 0) parts.push(`saved ${plural(notes, 'note')}`)
-  const line = parts.join(', ')
+  if (tools > 0) parts.push(`used ${plural(tools, 'tool')}`)
+  if (notes > 0) parts.push(`${plural(notes, 'note')}`)
+  const line = parts.join(' · ')
   return line.charAt(0).toUpperCase() + line.slice(1)
+}
+
+function toolLabel(step: Extract<ProcessStep, { kind: 'tool' }>) {
+  if (step.name === 'nodes.exec') {
+    try {
+      const input: unknown = JSON.parse(step.input)
+      if (input && typeof input === 'object' && 'command' in input && typeof input.command === 'string')
+        return input.command
+    } catch {
+      // 无法解析时保留工具名称。
+    }
+    return 'Run command'
+  }
+  const labels: Record<string, string> = {
+    'threads.create': 'Open thread',
+    'threads.send': 'Send to thread',
+    'threads.read': 'Read thread',
+    'threads.list': 'List threads',
+    'threads.get': 'Check thread',
+    'threads.trace': 'Read thread activity',
+    'threads.stop': 'Stop thread',
+    'threads.resume': 'Resume thread',
+    'threads.archive': 'Archive thread',
+    'threads.withdraw': 'Withdraw message',
+    'devices.list': 'List devices',
+    'inbox.ask': 'Ask a question',
+    'inbox.list': 'List questions',
+    'inbox.get': 'Read question',
+    'inbox.withdraw': 'Withdraw question',
+    'history.search': 'Search conversation',
+    'history.read': 'Read conversation',
+    'memory.recall': 'Search memory',
+    'memory.read': 'Read memory',
+    'memory.remember': 'Save memory',
+    'memory.correct': 'Update memory',
+    'memory.retire': 'Retire memory',
+    'memory.restore': 'Restore memory',
+  }
+  return labels[step.name] ?? step.name
 }
 
 const cardTitles: Record<EntryThreads['action'], (count: number) => string> = {
@@ -339,42 +424,98 @@ const cardTitles: Record<EntryThreads['action'], (count: number) => string> = {
   replies: (count) => `Replies from ${plural(count, 'thread')}`,
 }
 
-function ProcessLine({ steps, devices }: { steps: ProcessStep[]; devices: Device[] }) {
+function ProcessItem({ step, devices, live }: { step: ProcessStep; devices: Device[]; live: boolean }) {
   const [open, setOpen] = useState(false)
+  if (step.kind === 'note') {
+    return (
+      <div data-live-activity={live ? '' : undefined} {...stylex.props(text.small, styles.noteRow)}>
+        <Icon name="details" size={14} style={styles.stepIcon} />
+        <div {...stylex.props(styles.noteBody)}>
+          <RestrictedMarkdown body={step.body} muted small />
+        </div>
+      </div>
+    )
+  }
+  const isCommand = step.kind === 'command'
+  const failed = isCommand ? step.exitCode !== 0 : step.status === 'failed'
+  const status = isCommand
+    ? `${devices.find((item) => item.id === step.deviceId)?.name ?? 'Removed device'} · exit ${step.exitCode} · ${(step.durationMs / 1000).toFixed(1)}s`
+    : step.status === 'pending'
+      ? 'Awaiting result'
+      : step.status === 'failed'
+        ? 'Failed'
+        : 'Result received'
+  const isShell = isCommand || step.name === 'nodes.exec'
+  const label = isCommand ? step.command : toolLabel(step)
   return (
-    <>
+    <div data-live-activity={live ? '' : undefined} {...stylex.props(styles.step)}>
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
+        {...stylex.props(text.small, styles.stepToggle, focusRing.ring)}
+      >
+        <Icon name={isShell ? 'terminal' : 'tool'} size={14} style={styles.stepIcon} />
+        <span {...stylex.props(styles.stepName, isShell && text.mono)}>{label}</span>
+        <span {...stylex.props(text.caption, styles.stepStatus, failed && styles.danger)}>{status}</span>
+        <Icon name={open ? 'chevron-down' : 'chevron-right'} size={12} style={styles.stepIcon} />
+      </button>
+      {open && (
+        <div {...stylex.props(styles.stepDetail)}>
+          {!isCommand && (
+            <>
+              <span {...stylex.props(text.caption, styles.detailLabel)}>Input</span>
+              <pre {...stylex.props(text.mono, styles.detailText)}>{step.input}</pre>
+            </>
+          )}
+          {step.output && (
+            <>
+              <span {...stylex.props(text.caption, styles.detailLabel)}>{isCommand ? 'Output' : 'Result'}</span>
+              <pre {...stylex.props(styles.output)}>{step.output}</pre>
+            </>
+          )}
+          {!step.output && (
+            <span {...stylex.props(text.caption, styles.faint)}>
+              {!isCommand && step.status === 'pending' ? 'Awaiting result' : 'No output'}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ProcessLine({ steps, devices }: { steps: ProcessStep[]; devices: Device[] }) {
+  const [open, setOpen] = useState(() => steps.some((step) => step.kind === 'tool' && step.status === 'pending'))
+  const [live, setLive] = useState(() => steps.some((step) => step.kind === 'tool' && step.status === 'pending'))
+  const failures = steps.filter((step) =>
+    step.kind === 'command' ? step.exitCode !== 0 : step.kind === 'tool' && step.status === 'failed',
+  ).length
+  const awaiting = steps.filter((step) => step.kind === 'tool' && step.status === 'pending').length
+  return (
+    <div data-live-activity={awaiting > 0 ? '' : undefined} {...stylex.props(styles.process)}>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => {
+          setOpen(!open)
+          setLive(false)
+        }}
         {...stylex.props(text.caption, styles.processToggle, focusRing.ring)}
       >
         <Icon name={open ? 'chevron-down' : 'chevron-right'} size={12} />
         {processSummary(steps)}
+        {failures > 0 && <span {...stylex.props(styles.danger)}>{plural(failures, 'failed step')}</span>}
+        {awaiting > 0 && <span {...stylex.props(styles.faint)}>Awaiting {plural(awaiting, 'result')}</span>}
       </button>
       {open && (
         <div {...stylex.props(styles.steps)}>
-          {steps.map((step, index) =>
-            step.kind === 'command' ? (
-              <div key={index} {...stylex.props(styles.step)}>
-                <div {...stylex.props(styles.stepHead)}>
-                  <code {...stylex.props(text.mono)}>{step.command}</code>
-                  <span {...stylex.props(text.caption, step.exitCode === 0 ? styles.faint : styles.danger)}>
-                    {devices.find((item) => item.id === step.deviceId)?.name ?? 'Removed device'} · exit {step.exitCode}{' '}
-                    · {(step.durationMs / 1000).toFixed(1)}s
-                  </span>
-                </div>
-                {step.output && <pre {...stylex.props(styles.output)}>{step.output}</pre>}
-              </div>
-            ) : (
-              <p key={index} {...stylex.props(text.small, styles.muted)}>
-                Saved note: {step.body}
-              </p>
-            ),
-          )}
+          {steps.map((step, index) => (
+            <ProcessItem key={index} step={step} devices={devices} live={live} />
+          ))}
         </div>
       )}
-    </>
+    </div>
   )
 }
 
@@ -412,6 +553,7 @@ function ThreadButton({
         focusRing.ring,
       )}
     >
+      <Icon name="threads" size={15} style={styles.threadIcon} />
       <StatusDot tone={view.status.tone} />
       <span {...stylex.props(styles.threadTitle, text.truncate)}>{thread.title}</span>
       <span {...stylex.props(text.mono, styles.folderTag, text.truncate)}>{folderName(thread.folder)}</span>
@@ -452,14 +594,14 @@ function ThreadCard({
   const status = threadCardStatus(threads)
   return (
     <section aria-label={cardTitles[info.action](threads.length)} {...stylex.props(styles.threadGroup)}>
-      <div {...stylex.props(text.small, branch.title)}>
+      <div {...stylex.props(text.captionMedium, styles.threadGroupTitle)}>
         <span {...stylex.props(styles.groupTitle)}>{cardTitles[info.action](threads.length)}</span>
         <span {...stylex.props(text.caption, styles.headerStatus, statusTextStyle(status.tone))}>
           <StatusDot tone={status.tone} />
           {status.label}
         </span>
       </div>
-      <div {...stylex.props(branch.line)}>
+      <div>
         {threads.map((thread) => (
           <ThreadButton
             key={thread.id}
@@ -483,6 +625,7 @@ function Entry({
   now,
   onOpenThread,
   onOpenPath,
+  streaming = false,
 }: {
   entry: ProjectEntry
   threads: Thread[]
@@ -491,6 +634,7 @@ function Entry({
   now: number
   onOpenThread: (threadId: string) => void
   onOpenPath: (path: string) => void
+  streaming?: boolean
 }) {
   switch (entry.kind) {
     case 'user': {
@@ -507,7 +651,10 @@ function Entry({
     }
     case 'assistant':
       return (
-        <article aria-label="Project assistant" {...stylex.props(styles.assistant)}>
+        <article
+          aria-label={streaming ? 'Project assistant response in progress' : 'Project assistant'}
+          {...stylex.props(styles.assistant)}
+        >
           {entry.process.length > 0 && <ProcessLine steps={entry.process} devices={devices} />}
           {entry.threads && (
             <ThreadCard
@@ -520,10 +667,11 @@ function Entry({
             />
           )}
           {entry.body && (
-            <div {...stylex.props(text.body)}>
-              <MessageBody body={entry.body} onOpenPath={onOpenPath} />
+            <div {...stylex.props(text.body, styles.assistantBody)}>
+              <MessageBody body={entry.body} onOpenPath={onOpenPath} streaming={streaming} />
             </div>
           )}
+          {entry.body && <MessageActions body={entry.body} />}
         </article>
       )
     case 'note':
@@ -845,6 +993,8 @@ export function ProjectPage() {
   const timelineRef = useRef<HTMLDivElement>(null)
   const dockRef = useRef<HTMLDivElement>(null)
   const scrollAnchor = useRef(0)
+  const atLiveEdge = useRef(true)
+  const scrollProject = useRef(projectId)
   const [dockState, setDockState] = useState({ projectId, hidden: false })
   if (dockState.projectId !== projectId) setDockState({ projectId, hidden: false })
   const dockHidden = dockState.projectId === projectId && dockState.hidden
@@ -868,25 +1018,76 @@ export function ProjectPage() {
   const projectThreads = (threads.data ?? []).filter((item) => item.projectId === projectId)
   const now = useNow(projectThreads.some((item) => item.status === 'running') ? 1000 : 60_000)
   const list = entries.data ?? []
+  const project = projects.data?.find((item) => item.id === projectId)
+  const preview = project?.agent.preview
+  const [previousPreview, setPreviousPreview] = useState<{
+    projectId: string
+    value: NonNullable<Project['agent']['preview']>
+  } | null>(null)
+  if (
+    preview &&
+    (!previousPreview ||
+      previousPreview.projectId !== projectId ||
+      previousPreview.value.afterSeq !== preview.afterSeq ||
+      previousPreview.value.text !== preview.text ||
+      previousPreview.value.truncated !== preview.truncated)
+  ) {
+    setPreviousPreview({ projectId, value: preview })
+  } else if (!preview && !entries.isFetching && previousPreview) {
+    setPreviousPreview(null)
+  }
+  const waitingForSaved =
+    !preview &&
+    entries.isFetching &&
+    previousPreview !== null &&
+    previousPreview.projectId === projectId &&
+    project?.agent.lastSeq !== undefined &&
+    project.agent.lastSeq > previousPreview.value.afterSeq
+      ? previousPreview.value
+      : null
+  const candidatePreview = preview ?? waitingForSaved
+  const livePreview =
+    entries.isSuccess &&
+    candidatePreview &&
+    !list.some((entry) => entry.sourceSeq !== undefined && entry.sourceSeq > candidatePreview.afterSeq)
+      ? candidatePreview
+      : null
 
-  // 新记录到达时滚到底部。
+  // 新内容只在用户停留在底部时跟随；切换项目时回到最新内容。
   useEffect(() => {
     const timeline = timelineRef.current
-    if (timeline) {
+    if (scrollProject.current !== projectId) {
+      scrollProject.current = projectId
+      atLiveEdge.current = true
+    }
+    if (timeline && atLiveEdge.current) {
       timeline.scrollTop = timeline.scrollHeight
       scrollAnchor.current = timeline.scrollTop
     }
-  }, [list.length, projectId])
+  }, [entries.data, livePreview?.text, projectId])
+
+  useLayoutEffect(() => {
+    const timeline = timelineRef.current
+    const content = timeline?.firstElementChild
+    if (!timeline || !content || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => {
+      if (!atLiveEdge.current) return
+      timeline.scrollTop = timeline.scrollHeight
+      scrollAnchor.current = timeline.scrollTop
+    })
+    observer.observe(content)
+    return () => observer.disconnect()
+  }, [projectId, projects.isSuccess])
 
   // 从别处选中内容带过来时，把焦点放到输入区。
   useEffect(() => {
     if (reference) inputRef.current?.focus()
   }, [reference])
 
-  const project = projects.data?.find((item) => item.id === projectId)
   function onTimelineScroll(event: UIEvent<HTMLDivElement>) {
     const timeline = event.currentTarget
     const top = timeline.scrollTop
+    atLiveEdge.current = timeline.scrollHeight - timeline.clientHeight - top <= 32
     const delta = top - scrollAnchor.current
     if (timeline.scrollHeight - timeline.clientHeight - top <= 2) {
       scrollAnchor.current = top
@@ -1068,16 +1269,50 @@ export function ProjectPage() {
         }
       />
     )
-  } else if (list.length === 0 && !(inbox.data ?? []).some((item) => item.projectId === projectId)) {
+  } else if (!livePreview && list.length === 0 && !(inbox.data ?? []).some((item) => item.projectId === projectId)) {
     conversation = <EmptyConversation project={project} />
   } else {
+    const previewAt = livePreview
+      ? list.reduce(
+          (latest, entry) =>
+            entry.sourceSeq !== undefined && entry.sourceSeq <= livePreview.afterSeq
+              ? Math.max(latest, entry.createdAt)
+              : latest,
+          now,
+        )
+      : now
     const timeline = [
-      ...list.map((entry) => ({ id: entry.id, at: entry.createdAt, entry, item: null })),
+      ...list.map((entry) => ({
+        id: entry.kind === 'assistant' && entry.streamAnchor !== undefined ? `stream-${entry.streamAnchor}` : entry.id,
+        at: entry.createdAt,
+        entry,
+        item: null,
+        streaming: false,
+      })),
       ...(inbox.data ?? [])
         .filter((item) => item.projectId === projectId)
-        .map((item) => ({ id: item.id, at: item.createdAt, entry: null, item })),
+        .map((item) => ({ id: item.id, at: item.createdAt, entry: null, item, streaming: false })),
+      ...(livePreview
+        ? [
+            {
+              id: `stream-${livePreview.afterSeq}`,
+              at: previewAt,
+              entry: {
+                id: `preview-${livePreview.afterSeq}`,
+                projectId,
+                kind: 'assistant' as const,
+                body: livePreview.text,
+                process: [],
+                threads: null,
+                createdAt: previewAt,
+              },
+              item: null,
+              streaming: true,
+            },
+          ]
+        : []),
     ].sort((a, b) => a.at - b.at)
-    conversation = timeline.map(({ id, at, entry, item }, index) => {
+    conversation = timeline.map(({ id, at, entry, item, streaming }, index) => {
       const previous = timeline[index - 1]
       const day = dayLabel(at, now)
       return (
@@ -1097,8 +1332,12 @@ export function ProjectPage() {
                 now={now}
                 onOpenThread={onOpenThread}
                 onOpenPath={setPreviewPath}
+                streaming={streaming}
               />
             )
+          )}
+          {streaming && livePreview?.truncated && (
+            <span {...stylex.props(text.caption, styles.faint)}>Preview truncated. Waiting for the full reply.</span>
           )}
         </div>
       )
