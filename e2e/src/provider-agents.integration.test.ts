@@ -473,11 +473,12 @@ test('exports one trace from HTTP through Worker and Pi agent-host', async () =>
       expect(
         spans.some((span) => span.service === 'batond' && span.name === 'baton.report' && span.traceId === trace),
       ).toBe(true)
-      expect(
-        spans.some(
-          (span) => span.service === 'baton-server' && span.name === 'baton.http.request' && span.traceId === trace,
-        ),
-      ).toBe(true)
+      const http = spans.find(
+        (span) => span.service === 'baton-server' && span.name === 'baton.http.request' && span.traceId === trace,
+      )!
+      expect(http.attributes.find((attribute) => attribute.key === 'baton.employee.id')?.value.stringValue).toMatch(
+        /^[0-9a-f-]{36}$/,
+      )
     })
   } finally {
     vi.unstubAllEnvs()

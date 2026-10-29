@@ -125,6 +125,7 @@ export const httpSecurity = () =>
               httpBusiness(
                 Effect.gen(function* () {
                   const session = yield* authorizeBrowser(group.identifier === 'account')
+                  yield* Effect.annotateCurrentSpan('baton.employee.id', session.employee.id)
                   const { params } = yield* HttpRouter.RouteContext
                   if (endpoint.params && ('nodeId' in params || 'threadId' in params)) {
                     const id = yield* Schema.decodeUnknownEffect(UUID)(params.nodeId ?? params.threadId).pipe(

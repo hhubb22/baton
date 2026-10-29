@@ -351,6 +351,17 @@ it('persists request trace separately from business identity and dispatches it a
     expect(claimed[0]!.body.trace_context?.traceparent.split('-')[1]).toBe('a'.repeat(32))
     const dispatch = spans.find((span) => span.name === 'baton.command.dispatch')!
     expect(Option.getOrUndefined(dispatch.parent)?.spanId).toBe(records[0]!.trace_context.traceparent.split('-')[2])
+    expect(dispatch.attributes.get('baton.retry.count')).toBe(0)
+    await afterRestart(
+      query('UPDATE thread_outbox SET next_attempt_at=clock_timestamp() WHERE message_id=$1', claimed[0]!.message_id),
+    )
+    await afterRestart(threads.claimCommands().pipe(Effect.provideService(Tracer.Tracer, tracer)))
+    expect(
+      spans
+        .filter((span) => span.name === 'baton.command.dispatch')
+        .at(-1)
+        ?.attributes.get('baton.retry.count'),
+    ).toBe(1)
   }))
 
 it('persists browser execution limits and dispatches idempotent settings with their original budgets', () =>

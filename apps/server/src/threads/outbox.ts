@@ -24,6 +24,7 @@ interface Outbox {
   node_id: string
   message_id: string
   action: ThreadCommand['action']
+  attempts: number
   trace_context: TraceContext | null
   payload: {
     client_message_id?: string
@@ -122,7 +123,7 @@ export const claimCommands = (): DB<ClaimedCommand[]> =>
         }
         const dispatchTrace = yield* withTraceSpan(captureTrace, 'baton.command.dispatch', o.trace_context, {
           kind: 'producer',
-          attributes: { 'baton.command.id': o.message_id, 'baton.thread.id': t.id },
+          attributes: { 'baton.command.id': o.message_id, 'baton.thread.id': t.id, 'baton.retry.count': o.attempts },
         })
         if (dispatchTrace) Object.assign(body, { trace_context: dispatchTrace })
         if (

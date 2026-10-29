@@ -232,7 +232,9 @@ describe('reliable Worker', () => {
         yield* completed(worker, input.command_id!)
         const turn = spans.find((span) => span.name === 'baton.turn')!
         expect(turn.status._tag).toBe('Started')
-        yield* Queue.offer(f.events, event(input.client_message_id!, 'reply'))
+        const reply = event(input.client_message_id!, 'reply')
+        if (reply.type !== 'reply') throw new Error('Expected reply')
+        yield* Queue.offer(f.events, { ...reply, truncated: true, original_bytes: 512 })
         yield* Queue.offer(f.events, {
           ...delta(input.client_message_id!, ''),
           type: 'end',
@@ -246,6 +248,66 @@ describe('reliable Worker', () => {
         expect(turn.attributes.get('baton.turn.first_output_ms')).toEqual(expect.any(Number))
         expect(turn.attributes.get('baton.usage.reported')).toBe(true)
         expect(turn.attributes.get('gen_ai.usage.input_tokens')).toBe(0)
+        const output = spans.find((span) => span.name === 'baton.output')!
+        expect(output.attributes.get('baton.output.truncated')).toBe(true)
+        expect(output.attributes.get('baton.output.bytes')).toBe(512)
+      }).pipe(Effect.provideService(Tracer.Tracer, tracer))
+    }),
+  )
+
+  it.effect('records the confirmed stop result on the command trace', () =>
+    fixture((dbPath) => {
+      const spans: Tracer.NativeSpan[] = []
+      const tracer = Tracer.make({
+        span(options) {
+          const span = new Tracer.NativeSpan(options)
+          spans.push(span)
+          return span
+        },
+      })
+      return Effect.gen(function* () {
+        const { cfg, worker } = yield* readyWorker(dbPath)
+        const stopping = request(cfg, 'thread_stop')
+        yield* worker.handle(stopping)
+        yield* completed(worker, stopping.command_id!)
+        expect(spans.find((span) => span.name === 'baton.worker.stop')?.attributes.get('baton.stop.result')).toBe(
+          'stopped',
+        )
+      }).pipe(Effect.provideService(Tracer.Tracer, tracer))
+    }),
+  )
+
+  it.effect('records an unknown stop outcome without inventing confirmation', () =>
+    fixture((dbPath) => {
+      const spans: Tracer.NativeSpan[] = []
+      const tracer = Tracer.make({
+        span(options) {
+          const span = new Tracer.NativeSpan(options)
+          spans.push(span)
+          return span
+        },
+      })
+      return Effect.gen(function* () {
+        const cfg = config()
+        const f = yield* fake
+        f.sendTask = Effect.never
+        const worker = yield* makeWorker({ dbPath, agentFactory: () => f.agent, stopTimeoutMs: 200 })
+        yield* worker.handle(request(cfg, 'thread_open'))
+        yield* opened(worker)
+        const input = message(cfg)
+        yield* worker.handle(input)
+        yield* called(f, `send:${input.client_message_id}`)
+        const stopping = request(cfg, 'thread_stop')
+        yield* worker.handle(stopping)
+        yield* Queue.offer(f.events, {
+          type: 'exited',
+          reason: 'Process tree termination confirmed',
+          processTreeStopped: true,
+        })
+        yield* completed(worker, stopping.command_id!)
+        expect(spans.find((span) => span.name === 'baton.worker.stop')?.attributes.get('baton.stop.result')).toBe(
+          'unknown',
+        )
       }).pipe(Effect.provideService(Tracer.Tracer, tracer))
     }),
   )

@@ -390,6 +390,19 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         'baton.thread.id': state.config?.thread_id ?? '',
         'baton.node.id': state.config?.node_id ?? '',
       }
+      for (const command of Object.values(state.commands)) {
+        const old = previous.commands[command.receipt.command_id]
+        if (command.receipt.action !== 'stop' || (old && !isPending(old)) || isPending(command)) continue
+        const outcome = command.status.command_outcome
+        if (outcome !== 'succeeded' && outcome !== 'unknown') continue
+        yield* withTraceSpan(Effect.void, 'baton.worker.stop', command.trace_context, {
+          attributes: {
+            ...waitAttributes,
+            'baton.command.id': command.receipt.command_id,
+            'baton.stop.result': outcome === 'succeeded' ? 'stopped' : 'unknown',
+          },
+        })
+      }
       for (const message of Object.values(state.messages)) {
         if (message.input.mode !== 'queue') continue
         const old = previous.messages[message.input.id]
@@ -820,6 +833,19 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         if (turn && !turn.output) {
           turn.output = true
           turn.span.attribute('baton.turn.first_output_ms', Math.max(0, clock.currentTimeMillisUnsafe() - turn.started))
+        }
+        if (event.truncated !== undefined || event.original_bytes !== undefined) {
+          yield* withTraceSpan(Effect.void, 'baton.output', message.trace_context, {
+            ...(turn ? { parent: turn.span } : {}),
+            attributes: {
+              ...(event.truncated === undefined ? {} : { 'baton.output.truncated': event.truncated }),
+              ...(event.original_bytes === undefined ||
+              !Number.isSafeInteger(event.original_bytes) ||
+              event.original_bytes < 0
+                ? {}
+                : { 'baton.output.bytes': event.original_bytes }),
+            },
+          })
         }
       }
       if (event.type === 'end' && event.tokenUsage !== undefined) {
