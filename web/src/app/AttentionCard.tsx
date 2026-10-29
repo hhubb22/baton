@@ -45,6 +45,7 @@ const styles = stylex.create({
     backgroundColor: colors.surface,
   },
   inThread: { padding: space.lg },
+  inProject: { padding: 0, borderWidth: 0, borderRadius: 0, backgroundColor: 'transparent' },
   row: { display: 'flex', alignItems: 'center', gap: space.sm, minWidth: 0 },
   status: { display: 'inline-flex', alignItems: 'center', gap: '6px', flexShrink: 0, color: colors.muted },
   project: { minWidth: 0, color: colors.text, fontWeight: weight.medium, textDecoration: 'none' },
@@ -88,6 +89,7 @@ export function AttentionCard({
   showProject = false,
   detail = false,
   inThread = false,
+  inProject = false,
 }: {
   item: InboxItem
   showProject?: boolean
@@ -95,6 +97,7 @@ export function AttentionCard({
   feedback?: string | null
   detail?: boolean
   inThread?: boolean
+  inProject?: boolean
 }) {
   const projects = useProjects()
   const threads = useThreads()
@@ -171,7 +174,7 @@ export function AttentionCard({
   const done = !pending && item.result
   return (
     <section aria-label={item.title}>
-      <Card width="full" {...stylex.props(styles.item, inThread && styles.inThread)}>
+      <Card width="full" {...stylex.props(styles.item, inThread && styles.inThread, inProject && styles.inProject)}>
         <div {...stylex.props(text.caption, styles.row)}>
           {showProject && project && (
             <>
@@ -186,7 +189,7 @@ export function AttentionCard({
             </>
           )}
           <span {...stylex.props(styles.status)}>
-            <StatusDot tone={pending ? 'attention' : 'neutral'} />
+            {!inProject && <StatusDot tone={pending ? 'attention' : 'neutral'} />}
             {archived ? '项目已归档' : pending ? '待回复' : statusLabels[item.status]}
           </span>
           {thread && !inThread ? (
@@ -198,7 +201,7 @@ export function AttentionCard({
             >
               {thread.title}
             </Link>
-          ) : !thread && !showProject ? (
+          ) : !thread && !showProject && !inProject ? (
             <span {...stylex.props(styles.meta)}>{system ? 'Baton' : '项目'}</span>
           ) : null}
           {pending && (

@@ -35,7 +35,7 @@ describe('inbox decisions', () => {
     expect(within(linked).getByText('待回复')).toBeInTheDocument()
     expect(within(linked).getByRole('link', { name: 'Run compat suite on Windows' })).toBeInTheDocument()
     expect(within(projectQuestion).getByText('待回复')).toBeInTheDocument()
-    expect(within(projectQuestion).getByText('项目')).toBeInTheDocument()
+    expect(within(projectQuestion).queryByRole('img', { name: '待回复' })).not.toBeInTheDocument()
   })
 
   it('shows a reminder at ten questions and expands options beyond the first five', async () => {

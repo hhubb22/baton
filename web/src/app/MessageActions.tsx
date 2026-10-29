@@ -20,6 +20,7 @@ const styles = stylex.create({
     backgroundColor: { default: 'transparent', ':hover': colors.hover },
     color: { default: colors.faint, ':hover': colors.text },
   },
+  projectButton: { width: '30px', height: '30px', marginLeft: '-7px', justifyContent: 'center' },
 })
 
 export function MessageActions({ body, thread = false }: { body: string; thread?: boolean }) {
@@ -54,6 +55,7 @@ export function MessageActions({ body, thread = false }: { body: string; thread?
   ) : (
     <button
       type="button"
+      title={status === 'copied' ? '已复制回复' : '复制回复'}
       aria-label={status === 'copied' ? '已复制回复' : '复制回复'}
       onClick={() =>
         void copyText(body).then(
@@ -61,10 +63,10 @@ export function MessageActions({ body, thread = false }: { body: string; thread?
           () => setStatus('error'),
         )
       }
-      {...stylex.props(text.caption, styles.button, focusRing.ring)}
+      {...stylex.props(text.caption, styles.button, styles.projectButton, focusRing.ring)}
     >
-      <Icon name={status === 'copied' ? 'check' : 'copy'} size={12} />
-      {status === 'copied' ? '已复制' : status === 'error' ? '复制失败' : '复制'}
+      <Icon name={status === 'copied' ? 'check' : 'copy'} size={16} />
+      {status === 'error' && <span role="status">复制失败</span>}
     </button>
   )
 }

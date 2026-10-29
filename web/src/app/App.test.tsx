@@ -433,8 +433,11 @@ describe('projects', () => {
   it('shows project activity as expandable steps without hiding the thread or reply', async () => {
     const user = userEvent.setup()
     renderApp('/projects/prj-compat')
-    const group = await screen.findByRole('button', { name: '运行 1 条命令 · 1 条记录' })
+    const group = (await screen.findAllByRole('button', { name: '执行过程' }))[0]!
+    expect(screen.queryByRole('complementary', { name: '概览' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '显示概览' })).toHaveAttribute('aria-expanded', 'false')
     expect(group).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('region', { name: '已新建 1 个对话' })).not.toBeInTheDocument()
     expect(screen.queryByText('4f2c9e1 Add drive letter cases to path tests')).not.toBeInTheDocument()
     await user.click(group)
     const command = screen.getByRole('button', { name: /git -C ~\/src\/compat-suite log -1 --oneline/ })
@@ -511,6 +514,7 @@ describe('projects', () => {
   })
 
   it('places the live preview after the latest thread event even when its timestamp is ahead of the page clock', async () => {
+    const user = userEvent.setup()
     let saved = false
     let notify: ((event: ChangeEvent) => void) | undefined
     const threadTime = Date.now() + 60_000
@@ -564,6 +568,7 @@ describe('projects', () => {
         }
       }
     })
+    await user.click(await screen.findByRole('button', { name: '执行过程' }))
     const thread = await screen.findByRole('region', { name: '来自 1 个对话的回复' })
     const preview = await screen.findByRole('article', { name: '项目助手正在回复' })
     expect(thread.compareDocumentPosition(preview) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -662,13 +667,14 @@ describe('projects', () => {
         }
       }
     })
-    const command = await screen.findByRole('button', { name: /pwd.*等待结果/ })
+    await user.click(await screen.findByRole('button', { name: '正在处理' }))
+    const command = await screen.findByRole('button', { name: /nodes.exec.*等待结果/ })
     await user.click(command)
     expect(screen.getAllByText('等待结果')).toHaveLength(2)
     completed = true
     act(() => notify?.({ topics: ['projects'] }))
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /pwd.*已收到结果/ })).toHaveAttribute('aria-expanded', 'true'),
+      expect(screen.getByRole('button', { name: 'nodes.exec' })).toHaveAttribute('aria-expanded', 'true'),
     )
     expect(screen.getByText('/work')).toBeInTheDocument()
   })
@@ -691,10 +697,11 @@ describe('projects', () => {
         },
       ]
     })
-    const group = await screen.findByRole('button', { name: /运行 1 条命令 · 使用 1 个工具.*1 个步骤失败/ })
-    expect(group).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByRole('button', { name: /pwd.*等待结果/ })).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: /新建对话.*失败/ }))
+    const group = await screen.findByRole('button', { name: '正在处理' })
+    expect(group).toHaveAttribute('aria-expanded', 'false')
+    await user.click(group)
+    expect(screen.getByRole('button', { name: /nodes.exec.*等待结果/ })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /threads.create.*失败/ }))
     expect(screen.getByText('Device unavailable')).toBeInTheDocument()
     expect(screen.getByText('Checking the result.')).toBeInTheDocument()
   })
@@ -709,14 +716,15 @@ describe('projects', () => {
       'Run the compat suite on MacBook Pro and Ubuntu Dev.{Enter}',
     )
     await advance(scheduler, browserLatency.save + browserLatency.run / 2)
-    const opened = await screen.findByRole('region', { name: '已新建 2 个对话' })
-    expect(within(opened).getByText('2 个运行中')).toBeInTheDocument()
+    await user.click((await screen.findAllByRole('button', { name: '执行过程' })).at(-1)!)
+    await screen.findByRole('region', { name: '已新建 2 个对话' })
+    await user.click(screen.getByRole('button', { name: '显示概览' }))
     const overview = screen.getByRole('complementary', { name: '概览' })
     expect(within(overview).getByRole('tab', { name: /对话/ })).toHaveTextContent('2')
 
     await advance(scheduler, browserLatency.run * 2)
+    await user.click((await screen.findAllByRole('button', { name: '执行过程' })).at(-1)!)
     const replies = await screen.findByRole('region', { name: '来自 2 个对话的回复' })
-    expect(within(replies).getByText('已全部回复')).toBeInTheDocument()
     expect(screen.getByText(/^Both threads finished\./)).toBeInTheDocument()
 
     await user.click(within(replies).getAllByRole('button')[0])
@@ -745,6 +753,7 @@ describe('projects', () => {
     expect(screen.getByText('已请求停止')).toBeInTheDocument()
     await advance(scheduler, browserLatency.device + 100)
     expect(await screen.findByText('You stopped the project assistant')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '显示概览' }))
     const overview = screen.getByRole('complementary', { name: '概览' })
     expect(within(within(overview).getByRole('region', { name: '运行中' })).getByText(/gateway/i)).toBeInTheDocument()
   })

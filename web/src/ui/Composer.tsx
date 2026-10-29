@@ -29,6 +29,7 @@ const styles = stylex.create({
     borderRadius: '28px',
   },
   roomy: { maxWidth: '840px' },
+  project: { maxWidth: '640px', boxShadow: 'none' },
   header: { cursor: 'auto' },
   compactHeader: { gridColumn: '1 / -1' },
   input: {
@@ -102,6 +103,7 @@ export function Composer({
   inputRef,
   style,
   roomy = false,
+  project = false,
 }: {
   value: string
   onChange: (value: string) => void
@@ -116,6 +118,7 @@ export function Composer({
   inputRef?: RefObject<HTMLTextAreaElement | null>
   style?: stylex.StyleXStyles
   roomy?: boolean
+  project?: boolean
 }) {
   const localRef = useRef<HTMLTextAreaElement | null>(null)
   const empty = value.trim() === ''
@@ -159,7 +162,13 @@ export function Composer({
 
   return (
     <div
-      {...stylex.props(styles.composer, compact && styles.compact, roomy && styles.roomy, style)}
+      {...stylex.props(
+        styles.composer,
+        compact && styles.compact,
+        roomy && styles.roomy,
+        project && styles.project,
+        style,
+      )}
       onClick={() => ref.current?.focus()}
     >
       {header && (

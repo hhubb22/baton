@@ -82,6 +82,7 @@ describe('project maintenance', () => {
     })
     await back(user)
     expect(await screen.findByRole('heading', { name: 'Release compatibility' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '显示概览' }))
     expect(
       within(screen.getByRole('navigation', { name: '工作区' })).getByRole('link', {
         name: /Release compatibility/,
@@ -188,6 +189,7 @@ describe('project maintenance', () => {
     await save(user)
     await waitFor(() => expect(settingsStatus()).toHaveTextContent('已保存'))
     await back(user)
+    await user.click(screen.getByRole('button', { name: '显示概览' }))
     expect(
       await within(screen.getByRole('complementary', { name: '概览' })).findByText('Keep this goal after failure.'),
     ).toBeInTheDocument()
@@ -331,6 +333,7 @@ describe('project maintenance', () => {
     expect(memorySpy).toHaveBeenCalledTimes(1)
 
     failing = false
+    await user.click(screen.getByRole('button', { name: '显示概览' }))
     await user.click(screen.getByRole('tab', { name: /记忆/ }))
     const memory = await screen.findByRole('region', { name: '项目记忆' })
     expect(await within(memory).findByText('无法加载项目记忆')).toBeInTheDocument()
@@ -631,6 +634,7 @@ describe('project maintenance', () => {
         .filter((item) => item.projectId === 'prj-compat')
         .every((item) => item.status === 'withdrawn'),
     ).toBe(true)
+    await user.click(screen.getByRole('button', { name: '显示概览' }))
     await user.click(screen.getByRole('tab', { name: /记忆/ }))
     const memory = await screen.findByRole('region', { name: '项目记忆' })
     expect(within(memory).getByText(originalMemory)).toBeInTheDocument()
@@ -666,6 +670,7 @@ describe('project maintenance', () => {
     }
     expect(screen.queryByRole('button', { name: /^(Pause|Resume|Archive|Save changes)$/ })).not.toBeInTheDocument()
     await back(user)
+    await user.click(screen.getByRole('button', { name: '显示概览' }))
     await user.click(screen.getByRole('tab', { name: /记忆/ }))
     const memory = await screen.findByRole('region', { name: '项目记忆' })
     expect(within(memory).getByText(originalMemory)).toBeInTheDocument()

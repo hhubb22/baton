@@ -110,6 +110,7 @@ describe('local thread actions', () => {
   it('offers actions on local project thread rows, with no project directory or picker', async () => {
     const f = fixture('/projects/prj-baton', localBridge({ ...registeredDesktop, node_id: 'dev-ubuntu' }))
     f.show()
+    await f.user.click(await screen.findByRole('button', { name: '显示概览' }))
     const overview = await screen.findByRole('complementary', { name: '概览' })
     await within(overview).findByRole('button', { name: '在编辑器中打开' })
     const thread = within(overview).getByRole('button', { name: /Fix gateway reconnect race/ })

@@ -7,12 +7,22 @@ import { ProjectMemory } from '../app/ProjectMemory'
 import { ArchivedNotice, ProjectSettings } from '../app/ProjectSettings'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type UIEvent } from 'react'
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type UIEvent,
+} from 'react'
 import { FilePreview } from '../app/FilePreview'
 import { MessageBody } from '../app/MessageBody'
 import { MessageActions } from '../app/MessageActions'
 import { RestrictedMarkdown } from '../app/RestrictedMarkdown'
-import { Page, pane } from '../app/Page'
+import { Page } from '../app/Page'
 import { ReferenceBlock } from '../app/ReferenceBlock'
 import type { ProjectSearch } from '../app/router'
 import { statusTextStyle, ThreadDetail, type RecoverAction } from '../app/ThreadDetail'
@@ -22,15 +32,12 @@ import { useWorkspace } from '../app/workspace'
 import { ClientError, isAccessError } from '../data/client'
 import { desktopCapability, useDesktopStatus, useLocalDesktop } from '../data/desktop'
 import {
-  agentNames,
   assistantWait,
   deviceConnectionView,
-  folderName,
   pendingInbox,
   projectAgentStatus,
   relativeTime,
   runTimer,
-  threadCardStatus,
   threadView,
 } from '../data/derive'
 import {
@@ -70,7 +77,7 @@ import { Composer } from '../ui/Composer'
 import { Icon } from '../ui/Icon'
 import { Menu, MenuOption, MenuRule } from '../ui/Menu'
 import { ResizablePane } from '../ui/ResizablePane'
-import { StatusChip, StatusDot, type Tone } from '../ui/Status'
+import { StatusChip, type Tone } from '../ui/Status'
 import { Tabs } from '../ui/Tabs'
 
 const styles = stylex.create({
@@ -89,20 +96,27 @@ const styles = stylex.create({
   muted: { color: colors.muted },
   faint: { color: colors.faint },
   danger: { color: colors.danger },
-  main: { position: 'relative', display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 },
+  main: {
+    position: 'relative',
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    minHeight: 0,
+    overflow: 'clip',
+  },
   timeline: {
     flexGrow: 1,
     minHeight: 0,
     overflowY: 'auto',
+    scrollbarWidth: 'none',
     outline: 'none',
   },
-  timelineWithOverview: { paddingRight: 'var(--project-panel-width, 0px)' },
   entries: {
     display: 'flex',
     flexDirection: 'column',
     gap: space.xl,
     width: '100%',
-    maxWidth: size.measure,
+    maxWidth: '688px',
     marginInline: 'auto',
     padding: space.xl,
     paddingBottom: 'calc(var(--project-dock-height, 160px) + 16px)',
@@ -113,17 +127,22 @@ const styles = stylex.create({
     maxWidth: '85%',
     paddingBlock: space.sm,
     paddingInline: space.md,
-    borderRadius: '14px',
+    borderRadius: '24px',
     backgroundColor: colors.subtle,
+    fontSize: '16px',
   },
   withdrawn: { color: colors.muted },
   assistant: { display: 'flex', flexDirection: 'column', gap: space.lg, minWidth: 0 },
-  assistantBody: { maxWidth: '70ch', lineHeight: 1.65 },
+  assistantBody: { fontSize: '16px', lineHeight: 1.65 },
   process: {
     display: 'flex',
     flexDirection: 'column',
     gap: space.sm,
     minWidth: 0,
+    paddingBottom: space.sm,
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: colors.borderSoft,
   },
   processToggle: {
     display: 'inline-flex',
@@ -140,11 +159,6 @@ const styles = stylex.create({
     display: 'flex',
     flexDirection: 'column',
     gap: space.xs,
-    marginLeft: '5px',
-    paddingLeft: space.md,
-    borderLeftWidth: '1px',
-    borderLeftStyle: 'solid',
-    borderLeftColor: colors.border,
   },
   step: { display: 'flex', flexDirection: 'column', minWidth: 0 },
   stepToggle: {
@@ -154,7 +168,7 @@ const styles = stylex.create({
     width: '100%',
     minWidth: 0,
     paddingBlock: space.xs,
-    paddingInline: space.xs,
+    paddingInline: 0,
     borderWidth: 0,
     borderRadius: radius.sm,
     backgroundColor: { default: 'transparent', ':hover': colors.hover },
@@ -168,15 +182,13 @@ const styles = stylex.create({
     display: 'flex',
     flexDirection: 'column',
     gap: space.xs,
-    marginLeft: '22px',
+    marginLeft: '24px',
     paddingBlock: space.sm,
-    paddingInline: space.md,
-    borderRadius: radius.sm,
-    backgroundColor: colors.subtle,
+    paddingInline: 0,
   },
   detailLabel: { color: colors.faint },
   detailText: { margin: 0, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
-  noteRow: { display: 'flex', alignItems: 'flex-start', gap: space.sm, padding: space.xs, color: colors.muted },
+  noteRow: { display: 'flex', alignItems: 'flex-start', gap: space.sm, paddingBlock: space.xs, color: colors.muted },
   noteBody: { minWidth: 0, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
   output: {
     margin: 0,
@@ -188,20 +200,16 @@ const styles = stylex.create({
     overflowWrap: 'anywhere',
   },
   threadGroup: { display: 'flex', flexDirection: 'column', gap: space.sm, minWidth: 0 },
-  threadGroupTitle: { display: 'flex', alignItems: 'center', gap: space.sm, color: colors.muted },
-  groupTitle: { flexGrow: 1 },
   threadRow: {
     display: 'flex',
     alignItems: 'center',
     gap: space.sm,
     width: '100%',
     minHeight: size.comfortable,
-    paddingInline: space.sm,
+    paddingInline: 0,
     borderRadius: radius.md,
-    backgroundColor: { default: colors.surface, ':hover': colors.hover },
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: colors.borderSoft,
+    backgroundColor: { default: 'transparent', ':hover': colors.hover },
+    borderWidth: 0,
     color: colors.text,
     textAlign: 'left',
   },
@@ -220,7 +228,6 @@ const styles = stylex.create({
   },
   threadTitle: { flexGrow: 1, flexBasis: 0, minWidth: 0 },
   threadIcon: { flexShrink: 0, color: colors.muted },
-  folderTag: { flexShrink: 1, minWidth: 0, color: colors.faint },
   threadMeta: { flexShrink: 0, color: colors.muted, whiteSpace: 'nowrap' },
   note: { alignSelf: 'center', color: colors.faint, textAlign: 'center' },
   activity: { display: 'inline-flex', alignItems: 'center', gap: space.sm, color: colors.agentText },
@@ -260,9 +267,9 @@ const styles = stylex.create({
     '@media (prefers-reduced-motion: reduce)': { transition: 'opacity 120ms ease', transform: 'none' },
   },
   dockInteractive: { pointerEvents: 'auto' },
-  dockBanner: { width: '100%', maxWidth: size.measure, pointerEvents: 'auto', ':empty': { display: 'none' } },
-  chips: { display: 'flex', flexWrap: 'wrap', gap: space.xs, width: '100%', maxWidth: size.measure },
-  status: { width: '100%', maxWidth: size.measure, minHeight: '18px', color: colors.muted },
+  dockBanner: { width: '100%', maxWidth: '640px', pointerEvents: 'auto', ':empty': { display: 'none' } },
+  chips: { display: 'flex', flexWrap: 'wrap', gap: space.xs, width: '100%', maxWidth: '640px' },
+  status: { width: '100%', maxWidth: '640px', minHeight: '18px', color: colors.muted },
   overview: {
     display: 'flex',
     pointerEvents: 'auto',
@@ -367,71 +374,18 @@ function deliveryNote(delivery: Delivery) {
   }
 }
 
-function processSummary(steps: ProcessStep[]) {
-  const commands = steps.filter(
-    (step) => step.kind === 'command' || (step.kind === 'tool' && step.name === 'nodes.exec'),
-  ).length
-  const notes = steps.filter((step) => step.kind === 'note').length
-  const tools = steps.filter((step) => step.kind === 'tool' && step.name !== 'nodes.exec').length
-  const parts = []
-  if (commands > 0) parts.push(`运行 ${commands} 条命令`)
-  if (tools > 0) parts.push(`使用 ${tools} 个工具`)
-  if (notes > 0) parts.push(`${notes} 条记录`)
-  const line = parts.join(' · ')
-  return line.charAt(0).toUpperCase() + line.slice(1)
-}
-
-function toolLabel(step: Extract<ProcessStep, { kind: 'tool' }>) {
-  if (step.name === 'nodes.exec') {
-    try {
-      const input: unknown = JSON.parse(step.input)
-      if (input && typeof input === 'object' && 'command' in input && typeof input.command === 'string')
-        return input.command
-    } catch {
-      // 无法解析时保留工具名称。
-    }
-    return '运行命令'
-  }
-  const labels: Record<string, string> = {
-    'threads.create': '新建对话',
-    'threads.send': '发送到对话',
-    'threads.read': '读取对话',
-    'threads.list': '查看对话列表',
-    'threads.get': '查看对话',
-    'threads.trace': '查看对话执行过程',
-    'threads.stop': '停止对话',
-    'threads.resume': '恢复对话',
-    'threads.archive': '归档对话',
-    'threads.withdraw': '撤回消息',
-    'devices.list': '查看设备',
-    'inbox.ask': '提出问题',
-    'inbox.list': '查看问题列表',
-    'inbox.get': '查看问题',
-    'inbox.withdraw': '撤回问题',
-    'history.search': '搜索对话',
-    'history.read': '读取对话',
-    'memory.recall': '搜索记忆',
-    'memory.read': '读取记忆',
-    'memory.remember': '保存记忆',
-    'memory.correct': '更新记忆',
-    'memory.retire': '停用记忆',
-    'memory.restore': '恢复记忆',
-  }
-  return labels[step.name] ?? step.name
-}
-
 const cardTitles: Record<EntryThreads['action'], (count: number) => string> = {
   opened: (count) => `已新建 ${count} 个对话`,
   messaged: (count) => `已向 ${count} 个对话发送消息`,
   replies: (count) => `来自 ${count} 个对话的回复`,
 }
 
-function ProcessItem({ step, devices, live }: { step: ProcessStep; devices: Device[]; live: boolean }) {
+function ProcessItem({ step, devices }: { step: ProcessStep; devices: Device[] }) {
   const [open, setOpen] = useState(false)
   if (step.kind === 'note') {
     return (
-      <div data-live-activity={live ? '' : undefined} {...stylex.props(text.small, styles.noteRow)}>
-        <Icon name="details" size={14} style={styles.stepIcon} />
+      <div {...stylex.props(text.small, styles.noteRow)}>
+        <Icon name="details" size={16} style={styles.stepIcon} />
         <div {...stylex.props(styles.noteBody)}>
           <RestrictedMarkdown body={step.body} muted small />
         </div>
@@ -441,29 +395,37 @@ function ProcessItem({ step, devices, live }: { step: ProcessStep; devices: Devi
   const isCommand = step.kind === 'command'
   const failed = isCommand ? step.exitCode !== 0 : step.status === 'failed'
   const status = isCommand
-    ? `${devices.find((item) => item.id === step.deviceId)?.name ?? '设备已移除'} · 退出码 ${step.exitCode} · ${(step.durationMs / 1000).toFixed(1)} 秒`
+    ? step.exitCode !== 0
+      ? `退出码 ${step.exitCode}`
+      : null
     : step.status === 'pending'
       ? '等待结果'
       : step.status === 'failed'
         ? '失败'
-        : '已收到结果'
+        : null
   const isShell = isCommand || step.name === 'nodes.exec'
-  const label = isCommand ? step.command : toolLabel(step)
+  const label = isCommand ? step.command : step.name
   return (
-    <div data-live-activity={live ? '' : undefined} {...stylex.props(styles.step)}>
+    <div {...stylex.props(styles.step)}>
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
         {...stylex.props(text.small, styles.stepToggle, focusRing.ring)}
       >
-        <Icon name={isShell ? 'terminal' : 'tool'} size={14} style={styles.stepIcon} />
+        <Icon name={isShell ? 'terminal' : 'tool'} size={16} style={styles.stepIcon} />
         <span {...stylex.props(styles.stepName, isShell && text.mono)}>{label}</span>
         <span {...stylex.props(text.caption, styles.stepStatus, failed && styles.danger)}>{status}</span>
         <Icon name={open ? 'chevron-down' : 'chevron-right'} size={12} style={styles.stepIcon} />
       </button>
       {open && (
         <div {...stylex.props(styles.stepDetail)}>
+          {isCommand && (
+            <span {...stylex.props(text.caption, styles.detailLabel)}>
+              {devices.find((item) => item.id === step.deviceId)?.name ?? '设备已移除'} · 退出码 {step.exitCode} ·{' '}
+              {(step.durationMs / 1000).toFixed(1)} 秒
+            </span>
+          )}
           {!isCommand && (
             <>
               <span {...stylex.props(text.caption, styles.detailLabel)}>输入</span>
@@ -487,34 +449,26 @@ function ProcessItem({ step, devices, live }: { step: ProcessStep; devices: Devi
   )
 }
 
-function ProcessLine({ steps, devices }: { steps: ProcessStep[]; devices: Device[] }) {
-  const [open, setOpen] = useState(() => steps.some((step) => step.kind === 'tool' && step.status === 'pending'))
-  const [live, setLive] = useState(() => steps.some((step) => step.kind === 'tool' && step.status === 'pending'))
-  const failures = steps.filter((step) =>
-    step.kind === 'command' ? step.exitCode !== 0 : step.kind === 'tool' && step.status === 'failed',
-  ).length
+function ProcessLine({ steps, devices, children }: { steps: ProcessStep[]; devices: Device[]; children?: ReactNode }) {
+  const [open, setOpen] = useState(false)
   const awaiting = steps.filter((step) => step.kind === 'tool' && step.status === 'pending').length
   return (
     <div data-live-activity={awaiting > 0 ? '' : undefined} {...stylex.props(styles.process)}>
       <button
         type="button"
         aria-expanded={open}
-        onClick={() => {
-          setOpen(!open)
-          setLive(false)
-        }}
+        onClick={() => setOpen(!open)}
         {...stylex.props(text.caption, styles.processToggle, focusRing.ring)}
       >
+        {awaiting > 0 ? '正在处理' : '执行过程'}
         <Icon name={open ? 'chevron-down' : 'chevron-right'} size={12} />
-        {processSummary(steps)}
-        {failures > 0 && <span {...stylex.props(styles.danger)}>{`${failures} 个步骤失败`}</span>}
-        {awaiting > 0 && <span {...stylex.props(styles.faint)}>等待 {awaiting} 个结果</span>}
       </button>
       {open && (
         <div {...stylex.props(styles.steps)}>
           {steps.map((step, index) => (
-            <ProcessItem key={index} step={step} devices={devices} live={live} />
+            <ProcessItem key={index} step={step} devices={devices} />
           ))}
+          {children}
         </div>
       )}
     </div>
@@ -537,11 +491,12 @@ function ThreadButton({
   const timer = view.live && thread.runStartedAt !== null ? runTimer(thread.runStartedAt, now) : null
   const desktop = useLocalDesktop(thread.deviceId, 'open-local')
   const local = !!desktop.bridge?.openLocal
-  const status = (
-    <span {...stylex.props(text.caption, styles.threadMeta, statusTextStyle(view.status.tone))}>
-      {timer ? `${view.status.label} · ${timer}` : view.status.label}
-    </span>
-  )
+  const status =
+    view.group === 'idle' ? null : (
+      <span {...stylex.props(text.caption, styles.threadMeta, statusTextStyle(view.status.tone))}>
+        {timer ? `${view.status.label} · ${timer}` : view.status.label}
+      </span>
+    )
   const button = (
     <button
       type="button"
@@ -554,13 +509,8 @@ function ThreadButton({
         focusRing.ring,
       )}
     >
-      <Icon name="threads" size={15} style={styles.threadIcon} />
-      <StatusDot tone={view.status.tone} />
+      <Icon name="threads" size={16} style={styles.threadIcon} />
       <span {...stylex.props(styles.threadTitle, text.truncate)}>{thread.title}</span>
-      <span {...stylex.props(text.mono, styles.folderTag, text.truncate)}>{folderName(thread.folder)}</span>
-      <span {...stylex.props(text.caption, styles.threadMeta)}>
-        {device?.name ?? '设备已移除'} · {thread.agent ? agentNames[thread.agent] : '命令'}
-      </span>
       {!local && status}
     </button>
   )
@@ -590,16 +540,8 @@ function ThreadCard({
 }) {
   const threads = info.threadIds.flatMap((id) => all.filter((item) => item.id === id))
   if (threads.length === 0) return null
-  const status = threadCardStatus(threads)
   return (
     <section aria-label={cardTitles[info.action](threads.length)} {...stylex.props(styles.threadGroup)}>
-      <div {...stylex.props(text.captionMedium, styles.threadGroupTitle)}>
-        <span {...stylex.props(styles.groupTitle)}>{cardTitles[info.action](threads.length)}</span>
-        <span {...stylex.props(text.caption, styles.headerStatus, statusTextStyle(status.tone))}>
-          <StatusDot tone={status.tone} />
-          {status.label}
-        </span>
-      </div>
       <div>
         {threads.map((thread) => (
           <ThreadButton
@@ -648,15 +590,18 @@ const Entry = memo(function Entry({
     case 'assistant':
       return (
         <article aria-label={streaming ? '项目助手正在回复' : '项目助手'} {...stylex.props(styles.assistant)}>
-          {entry.process.length > 0 && <ProcessLine steps={entry.process} devices={devices} />}
-          {entry.threads && (
-            <ThreadCard
-              threads={entry.threads}
-              all={threads}
-              devices={devices}
-              openThread={openThread}
-              onOpen={onOpenThread}
-            />
+          {(entry.process.length > 0 || entry.threads) && (
+            <ProcessLine steps={entry.process} devices={devices}>
+              {entry.threads && (
+                <ThreadCard
+                  threads={entry.threads}
+                  all={threads}
+                  devices={devices}
+                  openThread={openThread}
+                  onOpen={onOpenThread}
+                />
+              )}
+            </ProcessLine>
           )}
           {entry.body && (
             <div {...stylex.props(text.body, styles.assistantBody)}>
@@ -757,7 +702,7 @@ function Overview({
       <>
         <Icon name="message" size={16} style={styles.muted} />
         <span {...stylex.props(styles.threadTitle, text.truncate)}>{thread.title}</span>
-        <StatusDot tone={view.status.tone} label={view.status.label} />
+        <span {...stylex.props(text.caption, statusTextStyle(view.status.tone))}>{view.status.label}</span>
         <span {...stylex.props(text.caption, styles.rowTime)}>{relativeTime(thread.updatedAt, now)}</span>
       </>
     )
@@ -826,7 +771,6 @@ function Overview({
                   onClick={onOpenInbox}
                   {...stylex.props(text.small, styles.overviewRow, focusRing.ring)}
                 >
-                  <StatusDot tone="attention" />
                   <span {...stylex.props(styles.threadTitle, text.truncate)}>{item.title}</span>
                 </button>
               ))}
@@ -994,7 +938,7 @@ export function ProjectPage() {
   const [error, setError] = useState<string | null>(null)
   // 发送失败后正文没改就沿用同一个 clientId，重试不会多出一条消息。
   const [failed, setFailed] = useState<{ body: string; clientId: string } | null>(null)
-  const [overviewState, setOverviewState] = useState({ projectId, open: true })
+  const [overviewState, setOverviewState] = useState({ projectId, open: search.view === 'memory' })
   const onOpenThread = useCallback(
     (threadId: string) => {
       setOverviewState({ projectId, open: true })
@@ -1006,8 +950,8 @@ export function ProjectPage() {
     },
     [navigate, projectId],
   )
-  if (overviewState.projectId !== projectId) setOverviewState({ projectId, open: true })
-  const overviewOpen = overviewState.projectId === projectId ? overviewState.open : true
+  if (overviewState.projectId !== projectId) setOverviewState({ projectId, open: search.view === 'memory' })
+  const overviewOpen = overviewState.projectId === projectId ? overviewState.open : search.view === 'memory'
   const setOverviewOpen = (open: boolean) => setOverviewState({ projectId, open })
   const [previewPath, setPreviewPath] = useState<string | null>(null)
   const workspace = useWorkspace()
@@ -1410,7 +1354,7 @@ export function ProjectPage() {
             <span {...stylex.props(text.caption, styles.day)}>{day}</span>
           )}
           {item ? (
-            <AttentionCard item={item} />
+            <AttentionCard item={item} inProject />
           ) : (
             entry && (
               <Entry
@@ -1433,7 +1377,7 @@ export function ProjectPage() {
   }
 
   return (
-    <div {...stylex.props(styles.layout, pane.card)}>
+    <div {...stylex.props(styles.layout)}>
       <Page
         embedded
         title={
@@ -1444,11 +1388,12 @@ export function ProjectPage() {
         }
         status={
           <>
-            <span {...stylex.props(text.caption, styles.headerStatus, headerTone(status.tone))}>
-              <StatusDot tone={status.tone} />
-              {status.label}
-              {waitingMessages > 0 && ` · ${waitingMessages} 条消息待发送`}
-            </span>
+            {(status.label !== '空闲' || waitingMessages > 0) && (
+              <span {...stylex.props(text.caption, styles.headerStatus, headerTone(status.tone))}>
+                {status.label}
+                {waitingMessages > 0 && ` · ${waitingMessages} 条消息待发送`}
+              </span>
+            )}
             {running && (
               <Button variant="ghost" small icon="stop" onClick={onStop}>
                 停止运行
@@ -1526,14 +1471,13 @@ export function ProjectPage() {
             role="region"
             aria-label="对话"
             onScroll={onTimelineScroll}
-            {...stylex.props(styles.timeline, overviewOpen && !search.thread && styles.timelineWithOverview)}
+            {...stylex.props(styles.timeline)}
           >
             <div {...stylex.props(styles.entries)}>
               <InboxFeedback />
               {conversation}
               {(running || stopping) && project.agent.activity && (
                 <span role="status" {...stylex.props(text.small, styles.activity)}>
-                  <StatusDot tone="agent" />
                   {project.agent.activity}
                 </span>
               )}
@@ -1564,6 +1508,7 @@ export function ProjectPage() {
             )}
             {project.status !== 'archived' && (
               <Composer
+                project
                 label="给项目助手发消息"
                 style={styles.dockInteractive}
                 inputRef={inputRef}

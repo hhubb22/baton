@@ -69,7 +69,7 @@ Project Agent 请用户做决定的事项见 [Agent Inbox 行为规格](../agent
 
 ### 界面与暂停
 
-- PA-22：用户可以在桌面浏览器里查看 Project 列表、主对话、Thread 列表和每个 Thread、项目记忆、等待原因和当前运行实例所在的设备。主对话里，Project Agent 开 Thread、执行命令各显示为一行，点开查看。所有设备离线时仍可发送消息，界面显示消息正在等待设备。Project Agent 运行时，用户可以停止这次运行，它开的 Thread 不受影响。手机和窄屏布局暂不支持。
+- PA-22：用户可以在桌面浏览器里查看 Project 列表、主对话、Thread 列表和每个 Thread、项目记忆、等待原因和当前运行实例所在的设备。主对话以居中列显示，概览默认收起；助手的过程默认折叠，展开后可以查看工具名称、参数和结果，并打开关联 Thread。所有设备离线时仍可发送消息，界面显示消息正在等待设备。Project Agent 运行时，用户可以停止这次运行，它开的 Thread 不受影响。手机和窄屏布局暂不支持。
 - PA-23：用户暂停 Project 后，Project Agent 不再启动，Thread 照常可用。期间产生的输入全部保存。用户恢复 Project 后，Project Agent 按 PA-10 处理这些输入。
 
 ## 验收

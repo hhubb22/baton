@@ -386,7 +386,7 @@ batond 通过 Gateway 的控制队列传送 `node.runtime_report`，正文为 `{
 
 ### 11. Web
 
-`/projects/{id}` 展示主对话、Project 的 Thread 列表、记忆和运行状态。主对话里，`threads.create`、`threads.send`、`nodes.exec` 的工具调用各显示为一行，例如「给 Windows 台式机派发了一个任务」「执行了 1 条命令」，点开进入 Thread。页面每 2 秒查询中心记录。
+`/projects/{id}` 展示主对话、Project 的 Thread 列表、记忆和运行状态。主对话和输入框使用最大 640px 的同一阅读列，在主内容区域水平居中；概览默认收起，开关概览不改变聊天内容的位置和宽度。聊天区保留滚动能力，隐藏滚动条轨道。过程默认折叠，展开后显示记录中的工具名称、参数和结果；关联 Thread 提供打开入口。页面定期查询中心记录。
 
 界面通过 `POST /api/v1/projects` 创建 Project，正文为 `{title,goal,provider,model,client_project_id?}`。可选客户端标识必须为规范 UUID；在同一员工内，存储的原始 `create_request` 与重发 JSON 相等时返回同一个 Project 的当前记录，内容不同返回 `409 project_conflict`。原始请求独立于后续设置修改保留；省略标识时每次创建新 Project。首次创建与幂等重发均返回 201。
 
