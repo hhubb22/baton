@@ -164,7 +164,7 @@ node apps/batond/dist/batond.cjs project-runtime connection-key <连接 ID> < ke
 | `BATON_ENROLLMENT_TOKEN` | 节点注册 / 重新认证 | 一次性凭据，也可用 `--enrollment-file` |
 | `BATON_PROJECT_RUNTIME_DATA_DIR` | 节点 / Runtime | 模型凭据目录，默认 `~/.baton/project-runtime` |
 
-控制操作预算、临时 RPC 名额和 OTLP 追踪配置见 [中心文档](apps/server/README.md)。
+控制操作预算、临时 RPC 名额和 OTLP 追踪配置见 [中心文档](apps/server/README.md)。遥测后端地址和 key 配置在中心，节点与网页经中心转发；设备本地可单独配置 OTLP 用于排查。
 
 ## 本地开发与测试
 

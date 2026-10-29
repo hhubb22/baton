@@ -6,7 +6,7 @@
 
 Runtime 编入 batond 的 SEA，通过 `project-runtime` 子命令运行；进程与 stdio 契约见 [Runtime 子命令约定](../README.md)。部署、设备接入与登录命令统一见 [根 README](../../README.md)，开发与验证入口见 [AGENTS.md](../../AGENTS.md#常用构建与验证命令)。
 
-Runtime 接收中心放置时保存的 trace context，记录 Run、模型调用、工具与压缩 span；每个进程报告自己的构建版本。provider 取成功解析的模型信息，未报告时省略；模型 ID 原样保留。只有上游明确报告有效用量时才写 token 计数。硬 SIGTERM 保留原有进程终止语义，未结束的 span 不导出。配置和排障见[可观测性设计](../../specs/observability/TECH.md)。
+Runtime 接收中心放置时保存的 trace context，记录 Run、模型调用、工具与压缩 span；每个进程报告自己的构建版本。默认经节点本机接收端和中心转发，设备配置本地 OTLP 时直接导出。provider 取成功解析的模型信息，未报告时省略；模型 ID 原样保留。只有上游明确报告有效用量时才写 token 计数。硬 SIGTERM 保留原有进程终止语义，未结束的 span 不导出。配置和排障见[可观测性设计](../../specs/observability/TECH.md)。
 
 Runtime 使用同一份 provider 注册表生成执行实例、模型目录、认证探测和登录入口，当前注册 `openai-codex`（ChatGPT）、`xai`（xAI）和 `anthropic`（Claude）。ChatGPT 使用 OAuth，xAI 与 Claude 支持 OAuth 或 API key。登录可选择已实现的交互方式，取消会结束登录进程。API key 从设备本地标准输入接受非空单行文本，最多 16 KiB，允许末尾换行；每个 provider 保存一份凭据，API key 会替换同 provider 的 OAuth 登录。Runtime 只读取自己的凭据目录，实际模型请求确认授权有效性。
 

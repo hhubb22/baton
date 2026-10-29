@@ -2,7 +2,7 @@
 
 `@baton/e2e` 通过声明的 workspace 依赖启动 TypeScript 中心、节点和本地 Worker，验证远程 Thread、Project、数据库中断恢复及 Gateway 报告流控。模型行为使用上游静态转录、确定性回放和本地替身，不调用在线模型。
 
-遥测集成测试使用本机 OTLP 接收器，验证中心 HTTP → Worker → Pi agent-host → 报告，以及中心 → Project Runtime → 本地模型替身的 trace 关联和 Turn 字段。模型替身返回截断工具调用以验证失败终态，不使用在线模型。
+遥测集成测试使用本机 OTLP 后端替身，验证网页 traceparent → 中心 HTTP → Worker → Pi agent-host → 报告，以及中心 → Project Runtime → 本地模型替身的 trace 关联和 Turn 字段；设备数据经本机接收端和中心转发。测试通过已登录 HTTP 请求提交网页 span，真实网页 SDK 的序列化和回放由网页测试验证。模型替身返回截断工具调用以验证失败终态，不使用在线模型。
 
 `src/provider-agents.integration.test.ts` 通过网页使用的 HTTP API 创建 Thread、接收回复、停止、恢复原生会话并再次发送，覆盖 Cursor、Pi、Codex、Kiro 的独立 Worker 与真实 provider host。`src/testing/provider-replay-worker.ts` 复用生产 Worker 的 Agent factory，只按本地原生状态文件选择首次或恢复转录。Cursor 使用 `apps/batond/src/testing/cursor/replay-host.ts` 与上游 `provider-cursor/src/testing/fixtures/provider_thread_resume.ndjson`，保留录制的会话 ID 和消息，沿用节点包的 sandbox 与 runtime instructions 转换，再按 host 生命周期拆为两段。其他 provider 复用节点包导出的转录辅助模块；数据来源与适配边界见[回放测试设计](../specs/agent-replay/TECH.md)。
 

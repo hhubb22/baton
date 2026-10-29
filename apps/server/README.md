@@ -8,7 +8,7 @@
 
 中心构建生成 bundle、相邻的网页和 SQL 迁移，输出布局见 [工具说明](../../tools/README.md#本地开发)。环境要求、账号、HTTPS、设备接入和通用配置见 [根文档](../../README.md)。
 
-中心可通过 `OTEL_EXPORTER_OTLP_ENDPOINT` 导出遥测。设置 `BATON_DEVICE_OTLP_ENDPOINT` 和可选 `BATON_DEVICE_OTLP_HEADERS` 可在设备同步时下发导出配置；设置 `BATON_WEB_OTLP_ENDPOINT`、`BATON_WEB_OTLP_KEY` 可向已登录网页提供采集地址和写入 key，`BATON_WEB_SESSION_REPLAY=masked` 才启用遮挡回放。配置、敏感字段和本地 ClickStack 示例见[可观测性设计](../../specs/observability/TECH.md)与[遥测包](../../packages/telemetry/README.md)。
+中心使用 `OTEL_EXPORTER_OTLP_ENDPOINT` 和 `OTEL_EXPORTER_OTLP_HEADERS` 导出并转发遥测；设置 `BATON_TELEMETRY_FORWARD=off` 可关闭设备与网页转发，`BATON_WEB_SESSION_REPLAY=masked` 启用遮挡回放。设备和网页不接收后端地址或 key。配置、敏感字段和本地 ClickStack 示例见[可观测性设计](../../specs/observability/TECH.md)与[遥测包](../../packages/telemetry/README.md)。
 
 `node server.cjs --version` 无需数据库配置即可输出构建版本、提交、平台、协议与格式版本；默认身份为 `development`。公开只读的 `GET /api/v1/release` 返回相同发布元数据，无需登录，不访问或续期设备凭据；已登录诊断的 `release` 字段与其一致。构建参数见工具说明，节点身份验证后、登记连接和同步前按支持清单及协议版本核对；不兼容返回 `node_version_incompatible` 并关闭连接，不改写业务、outbox 或设备凭据。development 联调允许版本号不同，协议仍须一致。
 
@@ -91,9 +91,11 @@ Project 工具 `threads.trace` 使用相同查询，参数为 `thread_id`、`wor
 
 ## HTTP 契约与追踪
 
-`src/http/` 提供路由 handler、安全校验与静态文件服务，依赖 Gateway 的请求、通知、断线及诊断操作。`packages/protocol/src/http-api.ts` 使用 Effect `HttpApi` 定义登录、账号、设备、Thread、Project、记忆和诊断接口的路径、入参、响应与错误。服务端通过同一声明构建路由并验证请求和返回值。已登录且完成改密的员工可读取 `GET /api/v1/openapi.json`；文档由契约生成，写请求继续要求允许的 Origin 和会话 CSRF token。
+`src/http/` 提供路由 handler、安全校验与静态文件服务，依赖 Gateway 的请求、通知、断线及诊断操作。`packages/protocol/src/http-api.ts` 使用 Effect `HttpApi` 定义登录、账号、设备、Thread、Project、记忆和诊断接口的路径、入参、响应与错误。服务端通过同一声明构建路由并验证请求和返回值。已登录且完成改密的员工可读取 `GET /api/v1/openapi.json`；文档由契约生成，契约中的写请求要求允许的 Origin 和会话 CSRF token。
 
 中心、节点、Worker、agent-host 和 Project Runtime 使用 Effect 原生 OTLP/HTTP 追踪、日志和指标。未配置地址时不发起导出请求；信号地址、关闭开关和资源属性见[遥测包](../../packages/telemetry/README.md)。
+
+网页使用同源 `POST /api/v1/telemetry/v1/traces` 和 `/logs`，两者要求已登录会话和允许的 Origin；traces 还校验 CSRF token。固定版本录制器不提供自定义请求头，logs 依靠 Origin 与 `SameSite=Strict` 会话 Cookie。logs 支持 gzip OTLP protobuf，压缩请求和解压结果各限 1 MiB；JSON 请求也限 1 MiB。转发关闭返回 404，网页在下一次 trace 导出收到 404 后停止采集。中心覆盖认证身份并过滤后转发，最多四个并发请求，失败后暂停 60 秒。
 
 HTTP 接受标准 `traceparent` 和可选 `tracestate`。命令的追踪上下文独立保存在中心 outbox、节点账本及 Worker 命令和消息记录中，经 WSS 和认证 IPC 传递；重连、重复派发和 Worker 恢复继续关联持久来源。追踪元数据不参与业务内容摘要或幂等判断。数据库查询耗时、事务事件和连接等待随 Effect span 导出，查询文本、绑定参数、消息正文、凭据及原始错误详情不导出。
 

@@ -1,5 +1,7 @@
 # ClickStack 仪表盘与告警
 
+遥测后端地址和 ingestion key 只需配置在中心的 `OTEL_EXPORTER_OTLP_ENDPOINT` 与 `OTEL_EXPORTER_OTLP_HEADERS`；节点和网页经中心转发。设备本地配置 `OTEL_EXPORTER_OTLP_*` 可直接导出，排障步骤见 [AGENTS.md](../../AGENTS.md#遥测排障)。
+
 `dashboard.json` 和 `alerts.json` 是按 ClickStack 外部 API 结构编写的模板。它们使用默认 OTLP Map 列结构；实际部署可能使用不同数据库、表名或 JSON 列，先通过 MCP 查看 source 与列结构，再调整表达式。模板中的 `__TRACE_SOURCE_ID__`、`__LOG_SOURCE_ID__`、`__METRIC_SOURCE_ID__`、`__CONNECTION_ID__` 和 `__WEBHOOK_ID__` 必须替换为当前团队的实际 ID。不要把 key 写进模板或提交到仓库。
 
 仪表盘覆盖 Turn 首输出 p50/p95、完成率、积压、断线恢复、数据库耗时、账本占用、Project Run 结果与模型用量。按版本分组的结果可以比较不同进程的版本。模型用量缺失单独计数，不当作零。

@@ -8,9 +8,11 @@ Basis: [Baton R-22、R-23](../baton/PRODUCT.md)；[发布 RL-A09](../release/PRO
 
 中心、batond、Worker、agent-host 和 Project Runtime 通过 OTLP/HTTP 导出 traces、logs 和 metrics。网页通过 HyperDX 的底层 RUM 和录制器导出追踪与可选回放，封装在 `web/src/telemetry/` 里。参考后端是自托管的 HyperDX（ClickStack）。
 
+遥测后端的地址和 key 只在中心配置。设备和网页把数据发给自己已经连着的中心，由中心过滤后转发。安装包和网页构建产物只写入版本和提交，不包含遥测地址或 key。部署者不配置，就没有任何数据离开这套部署。
+
 一条员工消息对应一条完整的 trace：从网页发送开始，经过中心 HTTP、outbox、WSS、batond、认证 IPC、Worker、agent-host 和 provider，到回复报告回中心结束。Project Run 同样从中心放置开始，经过 batond，进入 Runtime 的模型调用和工具调用。每个 Turn 和每次 Run 有一个根 span，记录相关标识、结果与已报告用量，支持按版本、provider、系统和错误码查询。
 
-默认不导出。没有配置导出地址时不发起连接。导出失败、超时或达到并发上限时丢弃当前批次，不阻塞业务。
+默认不向后端导出。中心没有配置导出地址时，中心不发起连接，设备不向中心发送遥测，网页不加载导出器；设备进程可能向本机接收端发送后被丢弃。导出或转发失败、超时、达到并发上限时丢弃当前批次，不阻塞业务。
 
 ```mermaid
 flowchart LR
@@ -20,12 +22,12 @@ flowchart LR
     K -->|effect/rpc| H[agent-host]
     H --> P[provider]
     D -->|stdio JSON-RPC| R[Project Runtime]
-    W -.OTLP.-> X[(HyperDX)]
-    S -.OTLP.-> X
-    D -.OTLP.-> X
-    K -.OTLP.-> X
-    H -.OTLP.-> X
-    R -.OTLP.-> X
+    K -.OTLP 本机.-> D
+    H -.OTLP 本机.-> D
+    R -.OTLP 本机.-> D
+    D -.telemetry.export / WSS.-> S
+    W -.同源 /api/v1/telemetry.-> S
+    S -.OTLP + key.-> X[(HyperDX)]
 ```
 
 ## 2. 传播
@@ -48,7 +50,7 @@ traces、普通 logs 和 metrics 共用 `packages/telemetry` 的字段白名单�
 
 ### 资源属性
 
-每个进程报告自己实际运行的程序，不继承父进程。daemon 升级后还在运行的旧 Worker，继续报告旧版本。
+每个进程的资源身份取自己实际运行的程序，不继承父进程。daemon 重启后仍存活的旧 Worker 保留旧构建身份，但其本机转发受第 6 节和第 9 节的端口生命周期限制。
 
 | 键 | 内容 |
 |---|---|
@@ -135,15 +137,44 @@ Project Runtime 的 `gen_ai.*` span 也能被只认生成式 AI 语义约定的�
 
 配置沿用标准环境变量：`OTEL_EXPORTER_OTLP_ENDPOINT`，以及分信号的 `OTEL_EXPORTER_OTLP_{TRACES,LOGS,METRICS}_ENDPOINT`、`OTEL_EXPORTER_OTLP_HEADERS`、`OTEL_RESOURCE_ATTRIBUTES`，还有 `OTEL_{TRACES,LOGS,METRICS}_EXPORTER=none`。HyperDX 的 ingestion key 放在 `OTEL_EXPORTER_OTLP_HEADERS` 里。相同 endpoint 对不同信号设置不同超时时，共享客户端采用其中较短的上限；指标默认每 30 秒导出，可由 `OTEL_METRIC_EXPORT_INTERVAL` 覆盖。
 
-中心设置 `BATON_DEVICE_OTLP_ENDPOINT` 和 `BATON_DEVICE_OTLP_HEADERS` 后，在节点连接后回复的 `node.sync_result` 里作为可选字段 `telemetry` 发送。batond 收到配置后立即应用于本次运行，并供后续启动的 Worker、agent-host 和 Runtime 使用。下发的 headers 只保存在 batond 内存里，通过环境变量传给子进程，不写进账本、日志或命令行。节点本地的 `OTEL_*` 环境变量优先于中心下发的值。不认识这个字段的节点直接忽略。中心不下发时，节点按自己的环境变量运行。
+### 中心
 
-网页的导出配置也由中心在运行时提供：中心设置 `BATON_WEB_OTLP_ENDPOINT`、`BATON_WEB_OTLP_KEY`，以及可选的 `BATON_WEB_SESSION_REPLAY=masked`。已登录员工通过 `GET /me` 读取 `telemetry` 字段。网页构建产物里不写死任何地址。浏览器直接把数据发到 HyperDX 的 collector，collector 要允许来自中心域名的跨域请求。浏览器 key 只用于写入数据，权限按 HyperDX 的 ingestion key 设置。
+中心用自己的 `OTEL_*` 配置导出自身数据，同一份地址和 headers 也用于转发设备和网页的数据。中心配置了导出地址时默认开启转发；设置 `BATON_TELEMETRY_FORWARD=off` 后只导出中心自身的数据。转发开启时：
 
-采样：现在的数据量全量采样也没问题。以后数据量变大，在 collector 上做尾部采样，保留出错和慢的 trace。
+- 中心在 `node.sync_result` 里带上可选字段 `telemetry: { forward: true }`，不带地址或 headers。
+- `GET /me` 返回 `telemetry` 字段，只含可选的 `session_replay: "masked"`，不含地址或 key。是否开启回放由 `BATON_WEB_SESSION_REPLAY=masked` 决定。
+
+转发前，中心解码 OTLP JSON；网页回放还接受 gzip 压缩的 OTLP protobuf，压缩请求和解压结果各限 1 MiB。中心再做三件事：
+
+1. 按第 3 节的白名单过滤。回放记录按第 7 节的受限结构校验，不符合的整条丢弃。
+2. 设备数据的 `baton.node.id` 和 `baton.employee.id` 改成该连接认证出的身份，网页数据的 `baton.employee.id` 改成会话身份，网页数据不带 `baton.node.id`。`service.name` 不在第 3 节列出的集合里时，整批丢弃。
+3. 重新编码后发给后端。
+
+转发使用独立的导出客户端，和中心自身导出的名额分开，避免设备流量挤掉中心数据。转发最多 4 个并发请求，单次最长三秒；超时、失败或名额用满时丢弃当前批次，失败后暂停六十秒。转发不落库、不重试，也不给发送方回执。
+
+### 设备
+
+batond 在本机启动一个 OTLP/HTTP 接收端，只监听 `127.0.0.1` 的随机端口，并要求带上每次启动随机生成的令牌。batond 通过现有的环境变量继承路径，把这个地址和令牌交给 Worker、agent-host 和 Runtime。令牌不写进账本、日志或命令行。
+
+batond 自己的数据和本机接收到的数据，在中心下发 `forward: true` 期间，打包成节点消息 `telemetry.export` 经 WSS 发给中心。消息体为 `{ type, signal, payload }`，`signal` 取 `traces`、`logs`、`metrics`，单条不超过 `MaxMessageBytes`，子进程导出的批次大小按这个上限设置，超过上限的批次丢弃。`telemetry.export` 的优先级最低：节点发送队列有积压、连接断开或没有收到 `forward: true` 时直接丢弃，不进账本、不重发。
+
+设备本地设置了 `OTEL_EXPORTER_OTLP_*` 时，batond 和子进程采用本地配置，不经过中心，也不启动本机接收端；本地没有地址时不导出。这种方式用于单机排查，或者在中心不可用时观察设备。daemon 重启后，仍存活的旧 Worker 继续使用旧随机端口和令牌，无法通过新 daemon 转发，直到该 Worker 重启。
+
+### 网页
+
+网页把追踪和回放发到同源的 `/api/v1/telemetry/v1/{traces,logs}`。中心要求有效的登录会话并校验 Origin；traces 使用自定义请求头并校验 CSRF token。固定版本回放录制器不支持自定义请求头，logs 依靠 Origin 和 `SameSite=Strict` 会话 Cookie。单个请求体不超过 1 MiB，超过时返回 413。转发关闭时返回 404；网页下一次追踪导出收到 404 后停止采集，已排队的回放批次仍可能发送。
+
+### 构建与部署
+
+安装包、桌面客户端和网页构建产物里只有版本和提交，不包含遥测地址或 key。换后端或轮换 key，只需要修改中心的环境变量并重启中心，不需要重新发版或升级设备。第三方部署的中心不配置遥测，它的设备和网页就不会向外发送数据。
+
+### 采样
+
+现在的数据量全量采样也没问题。以后数据量变大，在 collector 上做尾部采样，保留出错和慢的 trace。
 
 ## 7. 网页
 
-`web/src/telemetry/` 在取得配置后懒加载官方 `@hyperdx/otel-web` 和 `@hyperdx/otel-web-session-recorder`。追踪通过自定义导出器过滤实际载荷；录制器通过 rrweb eventProcessor 在发送前过滤完整快照和增量事件。
+`web/src/telemetry/` 在 `GET /me` 返回 `telemetry` 字段后懒加载官方 `@hyperdx/otel-web` 和 `@hyperdx/otel-web-session-recorder`，导出地址固定为同源的 `/api/v1/telemetry`，不使用 key。追踪通过自定义导出器过滤实际载荷；录制器通过 rrweb eventProcessor 在发送前过滤完整快照和增量事件。
 
 - 仅对中心同源 `/api/` 请求传播 trace context
 - console 不采集，网络请求和响应的头和正文不采集
@@ -179,6 +210,9 @@ ClickStack 自带 MCP server，Claude Code、Codex 可以直接查 logs、traces
 ## 9. 边界
 
 - 遥测不可用时业务照常运行。没有任何业务逻辑读取遥测结果。
+- 中心不可用期间，设备和网页的遥测直接丢弃；中心自身的数据同时中断，从中心那一侧也能看出这段时间出了问题。需要观察设备时，在设备上设置本地 `OTEL_*` 直连后端。
+- daemon 重启后仍存活的旧 Worker 保留旧本机端口和令牌，不能向新 daemon 转发；重启 Worker 后采用新端口。双版本运行时的完整遥测验收尚未执行。
+- 转发会增加中心的流量和 CPU。数据量变大时，在中心旁部署 collector，中心改为转发给它。
 - R-23 要求的在线设备、连接、队列和 Thread 状态诊断，仍然由中心的诊断接口提供给管理员。HyperDX 是开发者深入排查用的，二者使用同一组字段名。
 - 中心诊断接口和员工 status API 读的是数据库，不依赖 HyperDX。
 - 产品分析（漏斗、留存、问卷）不在本设计范围内。
@@ -191,7 +225,11 @@ ClickStack 自带 MCP server，Claude Code、Codex 可以直接查 logs、traces
 | R-23 | 一条消息从中心 HTTP 进入，经 Worker 和 agent-host 回放替身完成；一次 Project Run 经 Runtime 本地模型替身完成。用本地 OTLP 接收替身收集数据 | 链路上的 span 不属于同一 trace；`baton.turn` 缺少必填字段；模型未报告用量时写成 0 | `e2e/src/provider-agents.integration.test.ts`、`e2e/src/project-telemetry.integration.test.ts` 已通过 |
 | R-23、RL-A09 | 两个构建版本的 batond 和 Worker 同时运行，产生等待、失败、停止和恢复 | 资源属性的版本不是该进程实际运行的版本 | 待手工验证 |
 | R-23 | 导出端不响应、返回错误、超过并发上限 | 业务结果改变，或关闭等待超过上限 | `packages/telemetry/tests/tracing.test.ts` 已通过 |
-| R-23 | 节点在 `node.sync_result` 里收到 `telemetry` 字段；同时有本地 `OTEL_*` 环境变量；收到未知字段 | 本地配置被覆盖，或未知字段导致拒绝 | `apps/batond/src/daemon/reconnect.test.ts`、`packages/telemetry/tests/tracing.test.ts` 已通过 |
-| R-22 | 网页没有配置、有配置、开启回放 | 没有配置时发起连接；回放没有遮住文字或输入；采集了 console 或请求正文 | `web/src/telemetry/config.test.ts`、`export.integration.test.ts` 已通过 |
+| R-23 | 节点收到或没收到 `forward: true`；同时有本地 `OTEL_*` 环境变量；连接断开；发送队列有积压；批次超过 `MaxMessageBytes` | 没有 `forward: true` 时仍发送；本地配置被覆盖；遥测进入账本、被重发或延迟业务消息 | `apps/batond/src/daemon/{reconnect,transport,telemetry-relay,cli}.test.ts`、`packages/telemetry/tests/tracing.test.ts` 已通过 |
+| R-22、R-23 | 设备和网页的数据带伪造的 `baton.node.id`、`baton.employee.id`、白名单外属性、未知 `service.name` 和不合规的回放记录；后端不响应 | 伪造身份被转发；白名单外内容到达后端；转发影响中心自身导出或业务请求 | `packages/telemetry/tests/forward.test.ts`、`apps/server/src/telemetry-forward-client.test.ts` 已通过 |
+| R-22 | 未登录、Origin 不符、请求体超过 1 MiB、转发关闭时访问 `/api/v1/telemetry` | 请求被接受或被转发 | `apps/server/src/http/api.integration.test.ts` 已通过 |
+| R-22 | 检查 `node.sync_result`、`GET /me`、网页构建产物和 SEA 安装包 | 出现遥测地址、headers 或 key | `e2e/src/provider-agents.integration.test.ts`、`tools/telemetry-scan.test.mjs` 和 `tools/check-package.mjs` 已通过 |
+| R-22 | 网页没有配置、有配置、开启回放 | 没有配置时发起连接；回放没有遮住文字或输入；采集了 console 或请求正文；发往同源以外的地址 | `web/src/telemetry/{config,export.integration,disabled.integration,loading}.test.ts` 已通过 |
+| R-23 | 一条消息从网页到 agent-host、一次 Project Run 到 Runtime，数据经 batond 和中心转发到本地 OTLP 接收替身 | 链路断成多条 trace，或经转发后丢字段 | `e2e/src/provider-agents.integration.test.ts`、`e2e/src/project-telemetry.integration.test.ts` 已通过；浏览器界面到真实后端完整链路待手工验证 |
 
-跨 app 测试分别验证 HTTP → Worker → Pi agent-host → 报告，以及中心 → Project Runtime → 本地模型替身的同 trace。双版本进程同时运行并覆盖等待、失败、停止和恢复尚待手工验证；构建身份和伪造环境变量覆盖检查不能替代该验证。硬 SIGTERM 会终止 Runtime，未结束的 span 不导出，等待日志与指标用于诊断。
+跨 app 测试以已登录 HTTP 会话提交网页测试 span 和消息，验证 HTTP → Worker → Pi agent-host → 报告，以及中心 → Project Runtime → 本地模型替身的同 trace；网页 SDK 的实际序列化和回放另由网页测试验证。双版本进程同时运行并覆盖等待、失败、停止和恢复，以及浏览器界面到真实遥测后端的完整链路尚待手工验证；构建身份和伪造环境变量覆盖检查不能替代该验证。硬 SIGTERM 会终止 Runtime，未结束的 span 不导出，等待日志与指标用于诊断。

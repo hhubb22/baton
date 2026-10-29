@@ -6,7 +6,7 @@
 
 ## 开发入口
 
-节点同步成功后立即采用中心下发的 OTLP 配置，后续 Worker、agent-host 和 Project Runtime 继承该配置；节点本地 `OTEL_*` 优先。下发 headers 只保存在内存并经环境变量传给子进程，不写账本或命令行。等待事件和周期指标来自现有状态与账本；账本预算比率目前只用于观察，不阻止新 Thread。旧开发账本可以自行重建，程序不会自动删除本地数据。详见[可观测性设计](../../specs/observability/TECH.md)。
+中心同步允许转发时，节点通过随机端口的本机 OTLP 接收端收集自身和子进程数据，再经 WSS 发给中心。本机令牌只经环境变量传给 Worker、agent-host 和 Project Runtime，不写账本或命令行。节点本地设置 `OTEL_EXPORTER_OTLP_*` 时使用本地配置，不启动转发接收端。等待事件和周期指标来自现有状态与账本；账本预算比率目前只用于观察，不阻止新 Thread。旧开发账本可以自行重建，程序不会自动删除本地数据。详见[可观测性设计](../../specs/observability/TECH.md)。
 
 环境要求、安装和构建命令见 [AGENTS.md](../../AGENTS.md#常用构建与验证命令)，参数见 [工具说明](../../tools/README.md#本地开发)。统一入口为 `src/index.ts`，调用 `src/cli.ts` 导出的 `runBatondCLI(args)`；开发 bundle 的 Project Runtime 与 watchdog 使用同一 bundle 的子命令，直接源码运行使用 Runtime 包解析的 tsx loader。
 
@@ -138,7 +138,7 @@ Worker 重启后，queued 输入可继续调度；已有 intent 只用新的只�
 
 ## 追踪
 
-节点与独立 Worker 使用 `@baton/telemetry`，默认服务名为 `batond` 和 `baton-worker`。设置 `OTEL_EXPORTER_OTLP_ENDPOINT` 或 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` 可启用 OTLP/HTTP JSON 导出，Worker 继承配置；默认不连接采集端。配置和本地查看命令见 [中心追踪说明](../server/README.md#http-契约与追踪)。
+节点与独立 Worker 使用 `@baton/telemetry`，默认服务名为 `batond` 和 `baton-worker`。中心允许转发时，子进程向本机接收端发送 OTLP/HTTP；连接断开、未启用或发送队列有积压时丢弃批次。设备本地设置 `OTEL_EXPORTER_OTLP_*` 时子进程继承本地配置并直接导出。daemon 重启后仍存活的旧 Worker 保留旧端口和令牌，直到 Worker 重启前无法通过新 daemon 转发。配置和本地查看命令见 [中心追踪说明](../server/README.md#http-契约与追踪)。
 
 中心持久命令携带标准 trace context，经节点账本和认证 IPC 传入 Worker。接收、派发、执行和恢复按命令、Thread 与原始上下文关联；追踪元数据独立于命令和消息的业务摘要，重试不会因为新的 span 身份而产生内容冲突。SQLite 提交核查与执行恢复语义继续由账本决定。
 

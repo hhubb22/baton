@@ -515,11 +515,11 @@ TypeScript 的 `GET /nodes/{id}/files` 通过 `root_id`、`path` 浏览目录和
 
 ### 首版遥测
 
-R-23 的首版遥测按 [可观测性 TECH](../observability/TECH.md) 实现，`packages/telemetry` 提供 OTLP/HTTP 追踪、日志和指标导出及有界并发。中心、daemon、Worker、agent-host 和 Runtime 各自报告构建元数据里的发布版本与提交。恢复或升级时读取实际运行程序的元数据，仍存活的旧 Worker 报告自己的旧版本。
+R-23 的首版遥测按 [可观测性 TECH](../observability/TECH.md) 实现，`packages/telemetry` 提供 OTLP/HTTP 追踪、日志和指标导出及有界并发。中心、daemon、Worker、agent-host 和 Runtime 的资源身份取各自构建元数据里的发布版本与提交。daemon 重启后仍存活的旧 Worker 保留旧身份，但不能通过新 daemon 的本机接收端转发，直到 Worker 重启。
 
 trace 从网页贯穿到 agent-host 和 Project Runtime。每个 Turn 和每次 Project Run 有一个根 span，带有界的标识、Agent/provider/model、固定错误码、等待原因、重试次数、停止与恢复结果、耗时和 token 用量。模型未报告 token 时不写该字段，另用 `baton.usage.reported` 标明。等待状态的进出写成日志，积压和占用作为周期指标上报。traces、logs 和 metrics 共用一份属性白名单，查询、路径、消息、记忆、证据和工具正文不进导出。记忆的工作积压、召回降级与成本字段按 [memory TECH](../project-memory/TECH.md#可见性与实施边界)维护。
 
-未配置 OTLP 时保持现有本地诊断，不连接采集端。中心可以把设备的导出配置随 `node.sync_result` 下发，也在运行时把网页的导出配置交给已登录员工。导出阻塞与失败继续有界丢弃，不阻塞业务。发布与升级的版本关联验收见 RL-A09。
+未配置 OTLP 时保持现有本地诊断，不连接采集端。后端地址和 key 只在中心配置；设备经 WSS 的 `telemetry.export`、网页经同源 `/api/v1/telemetry` 把数据交给中心，中心按认证身份改写标识、再过滤后转发。安装包和网页构建产物不含遥测地址或 key。导出阻塞与失败继续有界丢弃，不阻塞业务。发布与升级的版本关联验收见 RL-A09。
 
 ## 部署
 
