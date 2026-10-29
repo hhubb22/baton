@@ -1,11 +1,13 @@
 import * as stylex from '@stylexjs/stylex'
+import { SyncStatus } from '../app/SyncStatus'
 import { AttentionCard } from '../app/AttentionCard'
 import { InboxFeedback } from '../app/InboxFeedback'
 import { ProjectRecovery } from '../app/ProjectRecovery'
 import { ProjectMemory } from '../app/ProjectMemory'
 import { ArchivedNotice, ProjectSettings } from '../app/ProjectSettings'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
-import { useEffect, useLayoutEffect, useRef, useState, type UIEvent } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type UIEvent } from 'react'
 import { FilePreview } from '../app/FilePreview'
 import { MessageBody } from '../app/MessageBody'
 import { MessageActions } from '../app/MessageActions'
@@ -17,7 +19,7 @@ import { statusTextStyle, ThreadDetail, type RecoverAction } from '../app/Thread
 import { useNow } from '../app/useNow'
 import { LocalThreadActions } from '../app/LocalThreadActions'
 import { useWorkspace } from '../app/workspace'
-import { ClientError } from '../data/client'
+import { ClientError, isAccessError } from '../data/client'
 import { desktopCapability, useDesktopStatus, useLocalDesktop } from '../data/desktop'
 import {
   agentNames,
@@ -33,15 +35,19 @@ import {
 } from '../data/derive'
 import {
   newClientId,
+  keys,
+  useClient,
   useDevices,
   useInbox,
   useProjectEntries,
+  useProjectHistory,
   useProjectMemory,
   useProjects,
   useSendProjectMessage,
   useSetProjectStatus,
   useStopProjectRun,
   useThreads,
+  useStableThreadOrder,
 } from '../data/queries'
 import type {
   Delivery,
@@ -519,16 +525,15 @@ function ThreadButton({
   thread,
   device,
   selected,
-  now,
   onOpen,
 }: {
   thread: Thread
   device: Device | undefined
   selected: boolean
-  now: number
   onOpen: () => void
 }) {
   const view = threadView(thread, device)
+  const now = useNow(view.live ? 1000 : 60_000)
   const timer = view.live && thread.runStartedAt !== null ? runTimer(thread.runStartedAt, now) : null
   const desktop = useLocalDesktop(thread.deviceId, 'open-local')
   const local = !!desktop.bridge?.openLocal
@@ -575,14 +580,12 @@ function ThreadCard({
   all,
   devices,
   openThread,
-  now,
   onOpen,
 }: {
   threads: EntryThreads
   all: Thread[]
   devices: Device[]
   openThread: string | undefined
-  now: number
   onOpen: (threadId: string) => void
 }) {
   const threads = info.threadIds.flatMap((id) => all.filter((item) => item.id === id))
@@ -604,7 +607,6 @@ function ThreadCard({
             thread={thread}
             device={devices.find((item) => item.id === thread.deviceId)}
             selected={thread.id === openThread}
-            now={now}
             onOpen={() => onOpen(thread.id)}
           />
         ))}
@@ -613,12 +615,11 @@ function ThreadCard({
   )
 }
 
-function Entry({
+const Entry = memo(function Entry({
   entry,
   threads,
   devices,
   openThread,
-  now,
   onOpenThread,
   onOpenPath,
   streaming = false,
@@ -627,7 +628,6 @@ function Entry({
   threads: Thread[]
   devices: Device[]
   openThread: string | undefined
-  now: number
   onOpenThread: (threadId: string) => void
   onOpenPath: (path: string) => void
   streaming?: boolean
@@ -655,7 +655,6 @@ function Entry({
               all={threads}
               devices={devices}
               openThread={openThread}
-              now={now}
               onOpen={onOpenThread}
             />
           )}
@@ -670,7 +669,7 @@ function Entry({
     case 'note':
       return <p {...stylex.props(text.caption, styles.note)}>{entry.body}</p>
   }
-}
+})
 
 // 主对话没有内容时的引导。
 function EmptyConversation({ project }: { project: Project }) {
@@ -743,8 +742,7 @@ function Overview({
       ),
     ]),
   )
-  const inGroup = (...groups: string[]) =>
-    live.filter((thread) => groups.includes(views.get(thread.id)!.group)).sort((a, b) => b.updatedAt - a.updatedAt)
+  const inGroup = (...groups: string[]) => live.filter((thread) => groups.includes(views.get(thread.id)!.group))
   const recent = inGroup('idle')
   const groups = [
     { label: '需要处理', threads: inGroup('attention') },
@@ -964,6 +962,8 @@ function headerTone(tone: Tone) {
 }
 
 export function ProjectPage() {
+  const client = useClient()
+  const queryClient = useQueryClient()
   const { projectId } = useParams({ from: '/workspace/projects/$projectId' })
   const search: ProjectSearch = useSearch({ from: '/workspace/projects/$projectId' })
   const navigate = useNavigate()
@@ -972,6 +972,7 @@ export function ProjectPage() {
   const threads = useThreads()
   const inbox = useInbox()
   const entries = useProjectEntries(projectId)
+  const history = useProjectHistory(projectId)
   const memory = useProjectMemory(projectId)
   const send = useSendProjectMessage()
   const stop = useStopProjectRun()
@@ -994,6 +995,17 @@ export function ProjectPage() {
   // 发送失败后正文没改就沿用同一个 clientId，重试不会多出一条消息。
   const [failed, setFailed] = useState<{ body: string; clientId: string } | null>(null)
   const [overviewState, setOverviewState] = useState({ projectId, open: true })
+  const onOpenThread = useCallback(
+    (threadId: string) => {
+      setOverviewState({ projectId, open: true })
+      void navigate({
+        to: '/projects/$projectId',
+        params: { projectId },
+        search: (prev: ProjectSearch) => ({ ...prev, thread: threadId }),
+      })
+    },
+    [navigate, projectId],
+  )
   if (overviewState.projectId !== projectId) setOverviewState({ projectId, open: true })
   const overviewOpen = overviewState.projectId === projectId ? overviewState.open : true
   const setOverviewOpen = (open: boolean) => setOverviewState({ projectId, open })
@@ -1001,44 +1013,127 @@ export function ProjectPage() {
   const workspace = useWorkspace()
   const reference = workspace.references[projectId] ?? null
 
-  const allDevices = devices.data ?? []
-  const projectThreads = (threads.data ?? []).filter((item) => item.projectId === projectId)
-  const now = useNow(projectThreads.some((item) => item.status === 'running') ? 1000 : 60_000)
+  const allDevices = isAccessError(devices.error) ? [] : (devices.data ?? [])
+  const orderedThreads = useStableThreadOrder(isAccessError(threads.error) ? [] : (threads.data ?? []))
+  const projectThreads = useMemo(
+    () => orderedThreads.filter((item) => item.projectId === projectId),
+    [orderedThreads, projectId],
+  )
+  const now = useNow(60_000)
   const list = entries.data ?? []
   const project = projects.data?.find((item) => item.id === projectId)
   const preview = project?.agent.preview
   const [previousPreview, setPreviousPreview] = useState<{
     projectId: string
     value: NonNullable<Project['agent']['preview']>
+    runId?: string
   } | null>(null)
+  const [interruptedPreview, setInterruptedPreview] = useState<{
+    projectId: string
+    afterSeq: number
+    pending: boolean
+  } | null>(null)
+  const [confirmationFailed, setConfirmationFailed] = useState(false)
+  const [confirmationAttempt, setConfirmationAttempt] = useState(0)
   if (
     preview &&
+    !list.some(
+      (entry) =>
+        entry.kind === 'assistant' &&
+        entry.streamAnchor === preview.afterSeq &&
+        (!project?.agent.runId || entry.runId === project.agent.runId),
+    ) &&
     (!previousPreview ||
       previousPreview.projectId !== projectId ||
       previousPreview.value.afterSeq !== preview.afterSeq ||
       previousPreview.value.text !== preview.text ||
       previousPreview.value.truncated !== preview.truncated)
   ) {
-    setPreviousPreview({ projectId, value: preview })
-  } else if (!preview && !entries.isFetching && previousPreview) {
-    setPreviousPreview(null)
-  }
-  const waitingForSaved =
-    !preview &&
-    entries.isFetching &&
-    previousPreview !== null &&
+    if (
+      previousPreview &&
+      previousPreview.projectId === projectId &&
+      previousPreview.runId &&
+      project?.agent.runId &&
+      previousPreview.runId !== project.agent.runId
+    )
+      setInterruptedPreview({ projectId, afterSeq: previousPreview.value.afterSeq, pending: true })
+    setPreviousPreview({ projectId, value: preview, runId: project?.agent.runId })
+    if (confirmationFailed) setConfirmationFailed(false)
+  } else if (
+    previousPreview &&
     previousPreview.projectId === projectId &&
-    project?.agent.lastSeq !== undefined &&
-    project.agent.lastSeq > previousPreview.value.afterSeq
-      ? previousPreview.value
-      : null
-  const candidatePreview = preview ?? waitingForSaved
-  const livePreview =
-    entries.isSuccess &&
+    previousPreview.runId &&
+    project?.agent.runId &&
+    previousPreview.runId !== project.agent.runId
+  ) {
+    setInterruptedPreview({ projectId, afterSeq: previousPreview.value.afterSeq, pending: true })
+    setPreviousPreview(null)
+    if (confirmationFailed) setConfirmationFailed(false)
+  }
+  const candidatePreview =
+    preview ?? (previousPreview && previousPreview.projectId === projectId ? previousPreview.value : null)
+  const previewRunId = preview ? project?.agent.runId : previousPreview?.runId
+  const matchedPreview =
     candidatePreview &&
-    !list.some((entry) => entry.sourceSeq !== undefined && entry.sourceSeq > candidatePreview.afterSeq)
+    list.some(
+      (entry) =>
+        entry.kind === 'assistant' &&
+        entry.streamAnchor === candidatePreview.afterSeq &&
+        (!previewRunId || entry.runId === previewRunId),
+    )
+  const livePreview =
+    entries.data &&
+    candidatePreview &&
+    !matchedPreview &&
+    (!previewRunId || !project?.agent.runId || previewRunId === project.agent.runId)
       ? candidatePreview
       : null
+  if (matchedPreview && previousPreview && previousPreview.projectId === projectId) {
+    setPreviousPreview(null)
+    if (confirmationFailed) setConfirmationFailed(false)
+  }
+  const runId = project?.agent.runId
+  const runState = project?.agent.runState
+  const lastSeq = project?.agent.lastSeq
+  useEffect(() => {
+    const saved = previousPreview
+    if (
+      !saved ||
+      saved.projectId !== projectId ||
+      !saved.runId ||
+      runId !== saved.runId ||
+      !['finished', 'lost', 'failed'].includes(runState ?? '') ||
+      lastSeq === undefined ||
+      !client.readProjectTimeline
+    )
+      return
+    let cancelled = false
+    void client
+      .readProjectTimeline(projectId)
+      .then((data) => {
+        if (cancelled) return
+        if (data.lastSeq < lastSeq) {
+          setConfirmationFailed(true)
+          return
+        }
+        queryClient.setQueryData<typeof data>(keys.projectEntries(projectId), (current) =>
+          !current || current.lastSeq < data.lastSeq ? data : current,
+        )
+        const matched = data.entries.some(
+          (entry) =>
+            entry.kind === 'assistant' && entry.streamAnchor === saved.value.afterSeq && entry.runId === saved.runId,
+        )
+        if (!matched) setInterruptedPreview({ projectId, afterSeq: saved.value.afterSeq, pending: false })
+        setConfirmationFailed(false)
+        setPreviousPreview((current) => (current === saved ? null : current))
+      })
+      .catch(() => {
+        if (!cancelled) setConfirmationFailed(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [previousPreview, projectId, runId, runState, lastSeq, client, queryClient, confirmationAttempt])
 
   // 新内容只在用户停留在底部时跟随；切换项目时回到最新内容。
   useEffect(() => {
@@ -1104,7 +1199,7 @@ export function ProjectPage() {
       main.style.removeProperty('--project-dock-height')
     }
   }, [project?.id, search.settings])
-  if (projects.data && !project) {
+  if (isAccessError(projects.error) || isAccessError(entries.error) || (projects.data && !project)) {
     return (
       <Page title="未找到项目">
         <div {...stylex.props(styles.entries)}>
@@ -1142,11 +1237,6 @@ export function ProjectPage() {
       params: { projectId },
       search: (prev: ProjectSearch) => ({ ...prev, thread }),
     })
-
-  const onOpenThread = (threadId: string) => {
-    setOverviewOpen(true)
-    setThread(threadId)
-  }
 
   const onRecover = (action: RecoverAction, thread: Thread) =>
     void navigate({
@@ -1235,7 +1325,7 @@ export function ProjectPage() {
   let conversation
   if (entries.isPending) {
     conversation = <p {...stylex.props(text.caption, styles.muted)}>正在加载对话…</p>
-  } else if (entries.isError) {
+  } else if (entries.isError && !entries.data) {
     conversation = (
       <Banner
         icon="alert"
@@ -1247,22 +1337,26 @@ export function ProjectPage() {
         }
       />
     )
-  } else if (!livePreview && list.length === 0 && !(inbox.data ?? []).some((item) => item.projectId === projectId)) {
+  } else if (
+    !livePreview &&
+    interruptedPreview?.projectId !== projectId &&
+    list.length === 0 &&
+    !(inbox.data ?? []).some((item) => item.projectId === projectId)
+  ) {
     conversation = <EmptyConversation project={project} />
   } else {
-    const previewAt = livePreview
-      ? list.reduce(
-          (latest, entry) =>
-            entry.sourceSeq !== undefined && entry.sourceSeq <= livePreview.afterSeq
-              ? Math.max(latest, entry.createdAt)
-              : latest,
-          now,
-        )
-      : now
+    const anchorAt = (seq: number) =>
+      (seq === 0
+        ? project.createdAt
+        : (history.data?.anchors[seq] ?? list.find((entry) => entry.sourceSeq === seq)?.createdAt)) ?? project.createdAt
+    const previewAt = livePreview ? anchorAt(livePreview.afterSeq) + 0.1 : project.createdAt
     const timeline = [
       ...list.map((entry) => ({
         id: entry.kind === 'assistant' && entry.streamAnchor !== undefined ? `stream-${entry.streamAnchor}` : entry.id,
-        at: entry.createdAt,
+        at:
+          entry.kind === 'assistant' && entry.streamAnchor !== undefined
+            ? anchorAt(entry.streamAnchor) + 0.1
+            : entry.createdAt,
         entry,
         item: null,
         streaming: false,
@@ -1285,11 +1379,28 @@ export function ProjectPage() {
                 createdAt: previewAt,
               },
               item: null,
-              streaming: true,
+              streaming: !!preview,
             },
           ]
         : []),
-    ].sort((a, b) => a.at - b.at)
+      ...(interruptedPreview && interruptedPreview.projectId === projectId
+        ? [
+            {
+              id: `interrupted-${interruptedPreview.afterSeq}`,
+              at: anchorAt(interruptedPreview.afterSeq) + 0.1,
+              entry: {
+                id: `interrupted-${interruptedPreview.afterSeq}`,
+                projectId,
+                kind: 'note' as const,
+                body: interruptedPreview.pending ? '上一条回复的保存状态待确认。' : '回复中断，内容未保存。',
+                createdAt: anchorAt(interruptedPreview.afterSeq),
+              },
+              item: null,
+              streaming: false,
+            },
+          ]
+        : []),
+    ].sort((a, b) => a.at - b.at || a.id.localeCompare(b.id))
     conversation = timeline.map(({ id, at, entry, item, streaming }, index) => {
       const previous = timeline[index - 1]
       const day = dayLabel(at, now)
@@ -1307,7 +1418,6 @@ export function ProjectPage() {
                 threads={projectThreads}
                 devices={allDevices}
                 openThread={search.thread}
-                now={now}
                 onOpenThread={onOpenThread}
                 onOpenPath={setPreviewPath}
                 streaming={streaming}
@@ -1345,6 +1455,34 @@ export function ProjectPage() {
               </Button>
             )}
             {stopping && <span {...stylex.props(text.caption, styles.muted)}>已请求停止</span>}
+            {confirmationFailed && (
+              <span role="status" {...stylex.props(text.caption, styles.muted)}>
+                无法确认回复是否保存{' '}
+                <Button
+                  small
+                  variant="ghost"
+                  onClick={() => {
+                    setConfirmationFailed(false)
+                    setConfirmationAttempt((value) => value + 1)
+                  }}
+                >
+                  重试确认
+                </Button>
+              </span>
+            )}
+            {((entries.isError && entries.data) ||
+              (projects.isError && projects.data) ||
+              (threads.isError && threads.data) ||
+              (devices.isError && devices.data)) && (
+              <SyncStatus
+                retry={() => {
+                  void entries.refetch()
+                  void projects.refetch()
+                  void threads.refetch()
+                  void devices.refetch()
+                }}
+              />
+            )}
           </>
         }
         actions={

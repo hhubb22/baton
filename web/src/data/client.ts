@@ -56,6 +56,15 @@ export class ClientError extends Error {
   }
 }
 
+export function isAccessError(error: unknown): boolean {
+  return (
+    error instanceof ClientError &&
+    (error.code === 'unauthorized' ||
+      error.code === 'notFound' ||
+      ('status' in error && (error.status === 403 || error.status === 404)))
+  )
+}
+
 // 页面只通过这个接口读写数据。模拟实现见 mock/，接入后端时换成真实实现。
 export interface BatonClient {
   readonly mode?: 'http' | 'mock'
@@ -73,6 +82,9 @@ export interface BatonClient {
   getProject(projectId: ID): Promise<Project>
   // Project 主对话：你的消息、助手的回复和系统说明，按时间排列。
   listProjectEntries(projectId: ID): Promise<ProjectEntry[]>
+  readProjectTimeline?(
+    projectId: ID,
+  ): Promise<{ entries: ProjectEntry[]; anchors: Record<number, number>; lastSeq: number }>
   listProjectMemory(projectId: ID): Promise<MemoryNote[]>
   getMemoryStatus(projectId: ID): Promise<MemoryWorkStatus>
   listThreads(): Promise<Thread[]>

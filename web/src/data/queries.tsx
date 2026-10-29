@@ -8,7 +8,7 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query'
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ClientError, type BatonClient, type ChangeEvent } from './client'
 import type {
   AgentKind,
@@ -44,6 +44,7 @@ export const keys = {
   memorySources: (projectId: ID, noteId?: ID, version?: number) =>
     ['projects', 'memorySources', projectId, noteId, version] as const,
   threads: ['threads'] as const,
+  threadOrder: ['threadOrder'] as const,
   thread: (id: ID) => ['threads', 'detail', id] as const,
   messages: (threadId: ID) => ['messages', threadId] as const,
   inbox: ['inbox'] as const,
@@ -234,7 +235,25 @@ export function useProjects() {
 
 export function useProjectEntries(projectId: ID) {
   const client = useClient()
-  return useQuery({ queryKey: keys.projectEntries(projectId), queryFn: () => client.listProjectEntries(projectId) })
+  return useQuery({
+    queryKey: keys.projectEntries(projectId),
+    queryFn: () => projectTimeline(client, projectId),
+    select: (history) => history.entries,
+  })
+}
+
+function projectTimeline(client: BatonClient, projectId: ID) {
+  return (
+    client.readProjectTimeline?.(projectId) ??
+    client
+      .listProjectEntries(projectId)
+      .then((entries) => ({ entries, anchors: {} as Record<number, number>, lastSeq: -1 }))
+  )
+}
+
+export function useProjectHistory(projectId: ID) {
+  const client = useClient()
+  return useQuery({ queryKey: keys.projectEntries(projectId), queryFn: () => projectTimeline(client, projectId) })
 }
 
 export function useProjectMemory(projectId: ID) {
@@ -261,6 +280,34 @@ export function useMemoryStatus(projectId: ID, active: boolean) {
 export function useThreads() {
   const client = useClient()
   return useQuery({ queryKey: keys.threads, queryFn: () => client.listThreads() })
+}
+
+export function useStableThreadOrder(threads: Thread[]) {
+  const { data: sent } = useQuery({
+    queryKey: keys.threadOrder,
+    queryFn: async () => ({}) as Record<string, number>,
+    initialData: {} as Record<string, number>,
+    enabled: false,
+  })
+  const [order, setOrder] = useState<{ ids: string[]; sent: Record<string, number> }>(() => ({ ids: [], sent }))
+  const present = new Set(threads.map((thread) => thread.id))
+  let ids = order.ids.filter((id) => present.has(id))
+  const known = new Set(ids)
+  const added = threads.filter((thread) => !known.has(thread.id)).sort((a, b) => b.updatedAt - a.updatedAt)
+  ids = [...added.map((thread) => thread.id), ...ids]
+  const moved = threads
+    .filter((thread) => (sent[thread.id] ?? 0) > (order.sent[thread.id] ?? 0))
+    .sort((a, b) => sent[b.id] - sent[a.id])
+  for (const thread of moved.reverse()) {
+    ids = [thread.id, ...ids.filter((id) => id !== thread.id)]
+  }
+  if (sent !== order.sent || ids.length !== order.ids.length || ids.some((id, index) => id !== order.ids[index]))
+    setOrder({ ids, sent })
+  const orderKey = JSON.stringify(ids)
+  return useMemo(() => {
+    const rank = new Map((JSON.parse(orderKey) as string[]).map((id, index) => [id, index]))
+    return [...threads].sort((a, b) => rank.get(a.id)! - rank.get(b.id)!)
+  }, [threads, orderKey])
 }
 
 export function useThread(threadId: ID) {
@@ -310,7 +357,7 @@ export function useTrace(messageId: ID, enabled: boolean) {
   })
 }
 
-export function useLiveTrace(threadId: ID, turnSeq: number | undefined, enabled: boolean) {
+export function useLiveTrace(threadId: ID, turnSeq: number | undefined, enabled: boolean, live = true) {
   const client = useClient()
   return useInfiniteQuery({
     queryKey: ['liveTrace', threadId, turnSeq],
@@ -318,7 +365,7 @@ export function useLiveTrace(threadId: ID, turnSeq: number | undefined, enabled:
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (page) => (page.state === 'ready' ? page.nextCursor : undefined),
     enabled: enabled && turnSeq !== undefined && !!client.readTurnTrace,
-    refetchInterval: 1500,
+    refetchInterval: live ? 1500 : false,
   })
 }
 
@@ -408,6 +455,7 @@ export function useCreateThread() {
 
 export function useSendMessage() {
   const client = useClient()
+  const cache = useQueryClient()
   return useMutation({
     mutationFn: (input: {
       threadId: ID
@@ -416,6 +464,12 @@ export function useSendMessage() {
       mode?: SendMode
       thinking?: import('@baton/protocol').ThinkingSelection
     }) => client.sendMessage(input),
+    onSuccess: (_operation, input) => {
+      cache.setQueryData<Record<string, number>>(keys.threadOrder, (sent) => ({
+        ...sent,
+        [input.threadId]: Math.max(Date.now(), ...Object.values(sent ?? {}).map((value) => value + 1)),
+      }))
+    },
   })
 }
 

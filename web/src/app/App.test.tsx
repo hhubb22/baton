@@ -8,8 +8,21 @@ import { manualScheduler } from '../data/mock/scheduler'
 import { browserLatency } from '../data/mock/store'
 import type { ChangeEvent } from '../data/client'
 import type { ProjectEntry } from '../data/types'
+import { HttpError } from '../data/http/transport'
 import { App } from './App'
 import { createAppRouter } from './router'
+
+const projectBodyRender = vi.hoisted(() => vi.fn())
+vi.mock('./MessageBody', async (importOriginal) => {
+  const original = await importOriginal<typeof import('./MessageBody')>()
+  return {
+    ...original,
+    MessageBody: (props: Parameters<typeof original.MessageBody>[0]) => {
+      projectBodyRender(props.body)
+      return <original.MessageBody {...props} />
+    },
+  }
+})
 
 function renderApp(
   path: string,
@@ -36,6 +49,36 @@ async function openAccountMenu(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('app', () => {
+  it.each([
+    ['/threads', 'threads', 'Rebuild web UI foundation'],
+    ['/devices', 'devices', 'Ubuntu Dev'],
+    ['/projects/prj-baton', 'projects', 'Baton'],
+  ] as const)('keeps %s content after a background 502', async (path, topic, content) => {
+    let notify!: (event: ChangeEvent) => void
+    let failed = false
+    renderApp(path, 'normal', (client) => {
+      const subscribe = client.subscribe.bind(client)
+      client.subscribe = (listener) => {
+        notify = listener
+        return subscribe(listener)
+      }
+      if (topic === 'threads') {
+        const read = client.listThreads.bind(client)
+        client.listThreads = () => (failed ? Promise.reject(new HttpError(502, { code: 'unavailable' })) : read())
+      } else if (topic === 'devices') {
+        const read = client.listDevices.bind(client)
+        client.listDevices = () => (failed ? Promise.reject(new HttpError(502, { code: 'unavailable' })) : read())
+      } else {
+        const read = client.listProjects.bind(client)
+        client.listProjects = () => (failed ? Promise.reject(new HttpError(502, { code: 'unavailable' })) : read())
+      }
+    })
+    expect(await screen.findAllByText(content, { exact: false })).not.toHaveLength(0)
+    failed = true
+    act(() => notify({ topics: [topic] }))
+    expect(await screen.findByText(/更新失败，显示上次内容/)).toBeInTheDocument()
+    expect(screen.getAllByText(content, { exact: false })).not.toHaveLength(0)
+  })
   it('shows the first-visit guide when no device is connected', async () => {
     renderApp('/', 'empty')
     expect(await screen.findByRole('heading', { name: '连接第一台设备' })).toBeInTheDocument()
@@ -285,6 +328,61 @@ describe('app', () => {
 })
 
 describe('projects', () => {
+  it('does not rerender saved project messages while a thread timer advances', async () => {
+    renderApp('/projects/prj-baton', 'normal')
+    await screen.findByText(/Opened a thread on Ubuntu Dev/)
+    projectBodyRender.mockClear()
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1100))
+    })
+    expect(projectBodyRender).not.toHaveBeenCalled()
+  })
+  it('keeps a preview until its run is terminal and a later history read proves it was not saved', async () => {
+    let notify!: (event: ChangeEvent) => void
+    let finished = false
+    let reads = 0
+    let failConfirmation = true
+    renderApp('/projects/prj-baton', 'normal', (client) => {
+      const list = client.listProjects.bind(client)
+      client.listProjects = async () =>
+        (await list()).map((project) =>
+          project.id === 'prj-baton'
+            ? {
+                ...project,
+                agent: {
+                  ...project.agent,
+                  state: finished ? 'idle' : 'running',
+                  runId: 'run-1',
+                  runState: finished ? 'failed' : 'running',
+                  lastSeq: 5,
+                  preview: finished ? null : { afterSeq: 5, text: 'Temporary answer', truncated: false },
+                },
+              }
+            : project,
+        )
+      client.readProjectTimeline = async () => {
+        reads += 1
+        if (finished && failConfirmation) throw new Error('offline')
+        return { entries: [], anchors: { 5: 1234 }, lastSeq: 5 }
+      }
+      client.subscribe = (listener) => {
+        notify = listener
+        return () => {}
+      }
+    })
+    const preview = await screen.findByRole('article', { name: '项目助手正在回复' })
+    expect(preview).toHaveTextContent('Temporary answer')
+    const before = reads
+    finished = true
+    act(() => notify({ topics: ['projects'] }))
+    expect(await screen.findByText('无法确认回复是否保存')).toBeInTheDocument()
+    expect(preview).toHaveTextContent('Temporary answer')
+    failConfirmation = false
+    await userEvent.setup().click(screen.getByRole('button', { name: '重试确认' }))
+    expect(await screen.findByText('回复中断，内容未保存。')).toBeInTheDocument()
+    expect(reads).toBeGreaterThan(before)
+    expect(screen.queryByText('Temporary answer')).not.toBeInTheDocument()
+  })
   async function advance(scheduler: ReturnType<typeof manualScheduler>, ms: number) {
     for (let passed = 0; passed < ms; passed += 50) {
       await act(async () => scheduler.advance(Math.min(50, ms - passed)))
@@ -1206,6 +1304,22 @@ describe('devices', () => {
 })
 
 describe('execution details', () => {
+  it('retries the output read without replacing saved messages', async () => {
+    let reads = 0
+    renderApp('/threads?thread=thr-gateway', 'normal', (client) => {
+      client.subscribeOutput = undefined
+      client.readOutput = async (threadId) => {
+        reads += 1
+        if (reads === 1) throw new Error('unavailable')
+        return { threadId, chunks: [] }
+      }
+    })
+    const notice = await screen.findByText('无法读取实时输出')
+    const before = reads
+    await userEvent.setup().click(within(notice).getByRole('button', { name: '重试' }))
+    await waitFor(() => expect(reads).toBeGreaterThan(before))
+    expect(await screen.findByText(/did not reconnect within 30s/)).toBeInTheDocument()
+  })
   async function advance(scheduler: ReturnType<typeof manualScheduler>, ms: number) {
     for (let passed = 0; passed < ms; passed += 50) {
       await act(async () => scheduler.advance(Math.min(50, ms - passed)))
@@ -1477,8 +1591,8 @@ describe('execution details', () => {
         ]
       }
     })
-    const detail = await screen.findByRole('complementary', { name: 'Fix gateway reconnect race' })
-    expect(await within(detail).findByRole('heading', { name: 'Codex 未能完成此回复' })).toBeInTheDocument()
+    await screen.findByRole('heading', { name: 'Codex 未能完成此回复' })
+    const detail = screen.getByRole('complementary', { name: 'Fix gateway reconnect race' })
     const failure = within(detail).getByText(reason)
     expect(failure.closest('[data-reply]')).toBeNull()
     const reply = await within(detail).findByText(/did not reconnect within 30s/)

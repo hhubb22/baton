@@ -74,6 +74,7 @@ function HighlightedCode({ value, language }: { value: string; language: string 
 }
 
 export function MessageCodeBlock({ children }: { children?: ReactNode }) {
+  const streaming = useContext(MessageStreamingContext)
   const [copyStatus, setCopyStatus] = useState<'copied' | 'error' | null>(null)
   const [showSource, setShowSource] = useState(false)
   useEffect(() => {
@@ -91,7 +92,7 @@ export function MessageCodeBlock({ children }: { children?: ReactNode }) {
       <div {...stylex.props(text.caption, styles.header)}>
         <span>{language || '代码'}</span>
         <div>
-          {language === 'mermaid' && (
+          {language === 'mermaid' && !streaming && (
             <button
               type="button"
               onClick={() => setShowSource(!showSource)}
@@ -116,7 +117,7 @@ export function MessageCodeBlock({ children }: { children?: ReactNode }) {
           </button>
         </div>
       </div>
-      {language === 'mermaid' && !showSource ? (
+      {language === 'mermaid' && !showSource && !streaming ? (
         <MessageDiagram source={value} />
       ) : (
         <pre aria-label="代码块" tabIndex={0} {...stylex.props(styles.pre, focusRing.ring)}>

@@ -91,11 +91,6 @@ export function MessageBody({
     return () => document.removeEventListener('selectionchange', update)
   }, [])
   if (streaming && !active) setActive(true)
-  useEffect(() => {
-    if (streaming || selectedText !== null || !active) return
-    const timer = window.setTimeout(() => setActive(false), 1000)
-    return () => window.clearTimeout(timer)
-  }, [streaming, active, selectedText])
   const components = useMemo<Components>(
     () => ({
       ...markdownComponents,
@@ -134,7 +129,7 @@ export function MessageBody({
   )
   return (
     <div ref={root} className={`message-body ${stylex.props(styles.body).className ?? ''}`}>
-      <MessageStreamingContext value={active && !reducedMotion}>
+      <MessageStreamingContext value={streaming}>
         {active && !reducedMotion ? (
           <Suspense fallback={staticContent}>
             <StreamingMarkdown

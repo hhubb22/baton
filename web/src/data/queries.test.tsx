@@ -16,6 +16,8 @@ import {
   useLiveOutput,
   useMessages,
   useRemoveDeviceFolder,
+  useSendMessage,
+  useStableThreadOrder,
 } from './queries'
 
 function setup(request: HttpContext['request']) {
@@ -31,6 +33,33 @@ function setup(request: HttpContext['request']) {
   const wrapper = ({ children }: { children: ReactNode }) => <ClientProvider client={client}>{children}</ClientProvider>
   return { output, client, wrapper, listMessages }
 }
+
+it('keeps thread order during background updates and moves a locally sent thread forward', async () => {
+  const client = createMockClient('normal', { latency: { read: 0, save: 0, device: 0, run: 8000 } })
+  const initial = (await client.listThreads())
+    .slice(0, 2)
+    .map((thread, index) => ({ ...thread, updatedAt: 100 - index }))
+  vi.spyOn(client, 'sendMessage').mockResolvedValue({
+    id: 'op',
+    kind: 'sendMessage',
+    targetId: 'message',
+    phase: 'saved',
+    detail: null,
+    updatedAt: 0,
+  })
+  const wrapper = ({ children }: { children: ReactNode }) => <ClientProvider client={client}>{children}</ClientProvider>
+  const { result, rerender } = renderHook(
+    ({ threads }) => ({ ordered: useStableThreadOrder(threads), send: useSendMessage() }),
+    { wrapper, initialProps: { threads: initial } },
+  )
+  expect(result.current.ordered.map((thread) => thread.id)).toEqual(initial.map((thread) => thread.id))
+  rerender({ threads: [initial[0], { ...initial[1], updatedAt: 200 }] })
+  expect(result.current.ordered.map((thread) => thread.id)).toEqual(initial.map((thread) => thread.id))
+  await act(async () => {
+    await result.current.send.mutateAsync({ threadId: initial[1].id, body: 'Next', clientId: 'send' })
+  })
+  await waitFor(() => expect(result.current.ordered.map((thread) => thread.id)).toEqual([initial[1].id, initial[0].id]))
+})
 
 describe('download queries', () => {
   it('shares the manifest between consumers and refreshes it on request', async () => {

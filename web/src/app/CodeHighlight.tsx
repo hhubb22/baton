@@ -2,7 +2,7 @@ import * as stylex from '@stylexjs/stylex'
 import { useEffect, useState } from 'react'
 import { useResolvedTheme } from '../theme/ThemeProvider'
 import type { ThemedToken } from '@pierre/highlights'
-import { requestHighlight } from './highlight-worker'
+import { cachedHighlight, requestHighlight } from './highlight-worker'
 
 const styles = stylex.create({
   blue: { color: '#005cc5' },
@@ -60,6 +60,7 @@ interface HighlightedLines {
 export function useHighlightedLines(content: string, path: string, streaming = false) {
   const theme = useResolvedTheme()
   const [result, setResult] = useState<HighlightedLines | null>(null)
+  const cached = !streaming ? cachedHighlight(content, path, theme) : undefined
 
   useEffect(() => {
     if (!content || content.length > 256 * 1024) return
@@ -77,6 +78,7 @@ export function useHighlightedLines(content: string, path: string, streaming = f
     }
   }, [content, path, theme, streaming])
 
+  if (cached) return cached
   if (!result || result.path !== path || result.theme !== theme) return null
   if (result.content === content) return result.lines
   if (!content.startsWith(result.content)) return null

@@ -557,9 +557,10 @@ describe('project maintenance', () => {
         search: { thread: 'thr-compat' },
       }),
     )
-    const thread = await screen.findByRole('complementary', { name: 'Run compat suite on Windows' })
+    await screen.findByRole('region', { name: '消息记录' })
+    const thread = screen.getByRole('complementary', { name: 'Run compat suite on Windows' })
     act(() => client.controls.setDeviceConnection('dev-windows', 'online'))
-    await user.type(within(thread).getByLabelText('消息'), 'Keep running the suite.{Enter}')
+    await user.type(await within(thread).findByLabelText('消息'), 'Keep running the suite.{Enter}')
     await advance(scheduler, browserLatency.save + browserLatency.run)
     expect(await within(thread).findByText('Done. The change is ready for review.')).toBeInTheDocument()
     expect(screen.getByText('项目已暂停')).toBeInTheDocument()
@@ -640,9 +641,10 @@ describe('project maintenance', () => {
         search: { thread: 'thr-compat' },
       }),
     )
-    const thread = await screen.findByRole('complementary', { name: 'Run compat suite on Windows' })
+    await screen.findByRole('region', { name: '消息记录' })
+    const thread = screen.getByRole('complementary', { name: 'Run compat suite on Windows' })
     act(() => client.controls.setDeviceConnection('dev-windows', 'online'))
-    await user.type(within(thread).getByLabelText('消息'), 'Continue after project archive.{Enter}')
+    await user.type(await within(thread).findByLabelText('消息'), 'Continue after project archive.{Enter}')
     await advance(scheduler, browserLatency.save + browserLatency.run)
     expect(await within(thread).findByText('Done. The change is ready for review.')).toBeInTheDocument()
     expect(screen.queryByLabelText('给项目助手发消息')).not.toBeInTheDocument()

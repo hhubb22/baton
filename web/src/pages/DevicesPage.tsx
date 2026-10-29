@@ -1,4 +1,6 @@
 import * as stylex from '@stylexjs/stylex'
+import { isAccessError } from '../data/client'
+import { SyncStatus } from '../app/SyncStatus'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { EnrollDialog } from '../app/EnrollDialog'
@@ -579,7 +581,7 @@ export function DevicesPage() {
   let body
   if (devices.isPending) {
     body = <p {...stylex.props(text.small, text.muted)}>正在加载设备…</p>
-  } else if (devices.isError) {
+  } else if (devices.isError && (!devices.data || isAccessError(devices.error))) {
     body = (
       <NoticeBox notice={{ title: '无法加载设备' }}>
         <Button small icon="refresh" onClick={() => void devices.refetch()}>
@@ -633,7 +635,10 @@ export function DevicesPage() {
   }
 
   return (
-    <Page title="设备">
+    <Page
+      title="设备"
+      status={devices.isError && devices.data ? <SyncStatus retry={() => void devices.refetch()} /> : undefined}
+    >
       <div {...stylex.props(styles.column)}>
         <div {...stylex.props(styles.intro)}>
           <h2 ref={headingRef} tabIndex={-1} {...stylex.props(text.title, styles.heading)}>

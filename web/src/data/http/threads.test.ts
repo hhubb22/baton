@@ -126,6 +126,39 @@ function setup(handler: Handler, devices: Device[] = [device()]) {
 const rootResponse = { kind: 'roots', roots: [{ id: 'root-id', path: '/work' }], truncated: false }
 
 describe('HTTP thread contracts', () => {
+  it('uses the persisted turn start for replies and inputs across independent timeline reads', async () => {
+    const turn = event(2, 'turn.started', { worker_turn_seq: 7 }, later)
+    const events = [
+      accepted(),
+      turn,
+      event(3, 'message.sent', { client_message_id: 'client-message', worker_turn_seq: 7 }),
+      event(
+        4,
+        'reply',
+        { worker_turn_seq: 7, content: 'First', event_id: 'first', metadata: { reply_id: 'first' } },
+        '2026-10-23T02:02:00Z',
+      ),
+      event(
+        5,
+        'reply',
+        { worker_turn_seq: 7, content: 'Second', event_id: 'second', metadata: { reply_id: 'second' } },
+        '2026-10-23T02:03:00Z',
+      ),
+    ]
+    const h = setup((url) => (url.pathname.endsWith('/timeline') ? { events } : thread()))
+    const first = await h.api.listMessages(threadId)
+    const reopened = await h.api.listMessages(threadId)
+    expect(first.map((item) => [item.body, item.timelineAt, item.timelineOrder])).toEqual(
+      reopened.map((item) => [item.body, item.timelineAt, item.timelineOrder]),
+    )
+    expect(first.every((item) => item.timelineAt === Date.parse(later))).toBe(true)
+    expect((await h.api.getThread(threadId)).timelineTurns?.[0]).toMatchObject({
+      seq: 7,
+      startedAt: Date.parse(later),
+      ended: false,
+      replyIds: ['first', 'second'],
+    })
+  })
   it('starts a fresh read when a mutation changes a thread during an earlier read', async () => {
     let release!: () => void
     const blocked = new Promise<void>((resolve) => {

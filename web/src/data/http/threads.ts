@@ -218,6 +218,17 @@ function mapThread(t: ThreadDTO, events: EventDTO[]): Thread {
     (event) => event.kind === 'stop.requested' || event.kind === 'archive.requested',
   )
   const canceled = latestStop < 0 ? [] : events.slice(latestStop).filter((event) => event.kind === 'message.withdrawn')
+  const turns = new Map<number, { seq: number; startedAt: number; ended: boolean; replyIds: string[] }>()
+  for (const event of events) {
+    const seq = event.payload.worker_turn_seq
+    if (seq === undefined) continue
+    if (event.kind === 'turn.started')
+      turns.set(seq, { seq, startedAt: timestamp(event.created_at), ended: false, replyIds: [] })
+    const turn = turns.get(seq)
+    if (turn && event.kind === 'turn.ended') turn.ended = true
+    if (turn && event.kind === 'reply' && event.payload.metadata?.reply_id)
+      turn.replyIds.push(event.payload.metadata.reply_id)
+  }
   return {
     pendingQuestions: t.pending_questions ?? [],
     questionAnswers: t.question_answers ?? [],
@@ -249,6 +260,7 @@ function mapThread(t: ThreadDTO, events: EventDTO[]): Thread {
     updatedAt: timestamp(t.last_activity_at),
     runStartedAt: t.current_turn ? timestamp(t.current_turn.started_at) : null,
     runTurnSeq: t.current_turn?.worker_turn_seq,
+    timelineTurns: [...turns.values()],
     unread: false,
   }
 }
@@ -411,6 +423,7 @@ export function createThreadAPI(
       role: 'user',
       sender: m.sender === 'project_agent' ? 'projectAgent' : 'you',
       body: m.content,
+      workerTurnSeq: m.worker_turn_seq,
       createdAt: timestamp(m.created_at),
       delivery: deliveryOf(m, t),
       activity: null,
@@ -418,6 +431,13 @@ export function createThreadAPI(
     }
   }
   async function readMessages(t: ThreadDTO, events: EventDTO[]): Promise<Message[]> {
+    const turnStarts = new Map(
+      events.flatMap((event) =>
+        event.kind === 'turn.started' && event.payload.worker_turn_seq !== undefined
+          ? [[event.payload.worker_turn_seq, timestamp(event.created_at)] as const]
+          : [],
+      ),
+    )
     const accepted = new Map<string, MessageDTO>()
     const result: Message[] = []
     const turnReplies = new Map<number, Message[]>()
@@ -449,6 +469,8 @@ export function createThreadAPI(
           traceItemCount: 0,
           sender: 'agent',
           body: event.payload.content ?? '',
+          workerTurnSeq: event.payload.worker_turn_seq,
+          timelineAt: turnStarts.get(event.payload.worker_turn_seq ?? -1),
           createdAt: timestamp(event.created_at),
           delivery: 'delivered',
           activity: null,
@@ -467,6 +489,7 @@ export function createThreadAPI(
           body: event.payload.content ?? '',
           replyId: event.payload.metadata?.reply_id,
           workerTurnSeq: event.payload.worker_turn_seq,
+          timelineAt: turnStarts.get(event.payload.worker_turn_seq ?? -1),
           createdAt: timestamp(event.created_at),
           delivery: 'delivered',
           activity: event.payload.metadata?.activity ?? null,
@@ -512,6 +535,8 @@ export function createThreadAPI(
           role: 'activity',
           sender: 'agent',
           body: '',
+          workerTurnSeq: seq,
+          timelineAt: turnStarts.get(seq),
           createdAt: timestamp(event.created_at),
           delivery: 'delivered',
           activity: null,
@@ -522,7 +547,13 @@ export function createThreadAPI(
       }
     }
     for (const m of [...(t.pending_messages ?? []), ...(t.failed_messages ?? [])]) accepted.set(m.client_message_id, m)
-    result.push(...[...accepted.values()].map((m) => userMessage(m, t)))
+    result.push(
+      ...[...accepted.values()].map((m) => ({
+        ...userMessage(m, t),
+        timelineAt: m.worker_turn_seq === undefined ? undefined : turnStarts.get(m.worker_turn_seq),
+      })),
+    )
+    for (const item of result) item.timelineOrder = order.get(item.id)
     return result.sort(
       (a, b) => a.createdAt - b.createdAt || (order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity),
     )

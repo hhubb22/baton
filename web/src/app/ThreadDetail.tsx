@@ -1,4 +1,5 @@
 import * as stylex from '@stylexjs/stylex'
+import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import {
   memo,
@@ -11,7 +12,7 @@ import {
   type RefObject,
   type UIEvent,
 } from 'react'
-import { ClientError } from '../data/client'
+import { ClientError, isAccessError } from '../data/client'
 import {
   agentNames,
   shortenExcerpt,
@@ -22,6 +23,7 @@ import {
 } from '../data/derive'
 import {
   newClientId,
+  keys,
   useArchiveThread,
   useAnswerThreadQuestion,
   useCancelMessage,
@@ -58,7 +60,7 @@ import { MessageBody } from './MessageBody'
 import { MessageActions } from './MessageActions'
 import { FullOutput } from './FullOutput'
 import { Page, pane } from './Page'
-import { ActivityTrace, Attachments, LiveActivityTrace, LiveOutput } from './ReplyParts'
+import { ActivityTrace, Attachments, TurnActivityTrace, LiveOutput } from './ReplyParts'
 import { copySelection, SelectionArea } from './SelectionMenu'
 import { ThreadQuestionForm } from './ThreadQuestionForm'
 import { ThreadQuestionAnswerStatus } from './ThreadQuestionAnswerStatus'
@@ -94,6 +96,7 @@ const styles = stylex.create({
   split: { display: 'flex', height: '100%', minHeight: 0 },
   main: { position: 'relative', display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0, minHeight: 0 },
   timeline: { flexGrow: 1, minHeight: 0, overflowY: 'auto', outline: 'none' },
+  syncNotice: { position: 'absolute', top: space.sm, right: space.md, zIndex: 1, backgroundColor: colors.surface },
   messages: {
     display: 'flex',
     flexDirection: 'column',
@@ -257,6 +260,7 @@ const MessageItem = memo(function MessageItem({
   command = false,
   latest = false,
   outputGap = false,
+  traceInMessage = true,
   onOpen,
   onCancel,
 }: {
@@ -269,6 +273,7 @@ const MessageItem = memo(function MessageItem({
   command?: boolean
   latest?: boolean
   outputGap?: boolean
+  traceInMessage?: boolean
   onOpen: (reply: number | null, deviceId: ID, path: string) => void
   onCancel: (message: Message) => void
 }) {
@@ -276,17 +281,23 @@ const MessageItem = memo(function MessageItem({
   // 回复里的路径指向 Thread 所在设备。
   const onOpenPath = (path: string) => onOpen(reply, deviceId, path)
   const notice = threadMessageNotice(message, agent)
+  if (message.role === 'interrupted')
+    return (
+      <p role="status" {...stylex.props(text.caption, styles.muted)}>
+        {message.body}
+      </p>
+    )
   if (message.role === 'activity') {
     return (
       <article id={`message-${message.id}`} {...stylex.props(styles.agent)}>
-        <ActivityTrace message={message} device={device} command={command} />
+        {traceInMessage && <ActivityTrace message={message} device={device} command={command} />}
       </article>
     )
   }
   if (notice) {
     return (
       <article id={`message-${message.id}`} {...stylex.props(styles.agent)}>
-        <ActivityTrace message={message} device={device} command={command} />
+        {traceInMessage && <ActivityTrace message={message} device={device} command={command} />}
         <h3 {...stylex.props(text.bodyMedium)}>{notice.title}</h3>
         {notice.detail && <p {...stylex.props(text.body, styles.muted)}>{notice.detail}</p>}
       </article>
@@ -306,7 +317,7 @@ const MessageItem = memo(function MessageItem({
         }}
         {...stylex.props(text.body, styles.agent)}
       >
-        <ActivityTrace message={message} device={device} command={command} />
+        {traceInMessage && <ActivityTrace message={message} device={device} command={command} />}
         <div data-reply={reply}>
           {outputGap && <span {...stylex.props(text.caption, styles.muted)}>较早的输出未保留</span>}
           <MessageBody body={message.body} onOpenPath={onOpenPath} streaming={message.streaming} />
@@ -458,6 +469,7 @@ export function ThreadDetail({
 }) {
   const navigate = useNavigate()
   const client = useClient()
+  const queryClient = useQueryClient()
   const threadQuery = useThread(threadId)
   const liveOutput = useLiveOutput(
     threadId,
@@ -487,6 +499,13 @@ export function ThreadDetail({
   const [previousOutput, setPreviousOutput] = useState<{
     threadId: ID
     value: NonNullable<typeof liveOutput.data>
+  } | null>(null)
+  const [interruptedOutput, setInterruptedOutput] = useState<{
+    threadId: string
+    seq: number
+    at: number
+    pending?: boolean
+    replyId?: string
   } | null>(null)
   const [preview, setPreview] = useState<{ deviceId: ID; path: string; reply: number | null } | null>(null)
   const timelineRef = useRef<HTMLDivElement | null>(null)
@@ -523,26 +542,99 @@ export function ThreadDetail({
       : undefined
   const list = messages.data ?? []
   const currentOutput = liveOutput.data
+  const currentOutputMatched =
+    currentOutput?.replyId &&
+    currentOutput.workerTurnSeq !== undefined &&
+    list.some(
+      (message) =>
+        message.role === 'agent' &&
+        message.replyId === currentOutput.replyId &&
+        message.workerTurnSeq === currentOutput.workerTurnSeq,
+    )
+  const savedOutput = previousOutput?.threadId === threadId ? previousOutput.value : undefined
+  const savedOutputMatched =
+    savedOutput?.replyId &&
+    savedOutput.workerTurnSeq !== undefined &&
+    list.some(
+      (message) =>
+        message.role === 'agent' &&
+        message.replyId === savedOutput.replyId &&
+        message.workerTurnSeq === savedOutput.workerTurnSeq,
+    )
+  const endedTurn = thread?.timelineTurns?.find((turn) => turn.seq === savedOutput?.workerTurnSeq && turn.ended)
+  const interrupted = !!endedTurn && !!savedOutput?.replyId && !endedTurn.replyIds.includes(savedOutput.replyId)
+  const currentTurn = thread?.timelineTurns?.find((turn) => turn.seq === currentOutput?.workerTurnSeq && turn.ended)
+  const currentInterrupted =
+    !!currentTurn && !!currentOutput?.replyId && !currentTurn.replyIds.includes(currentOutput.replyId)
   if (
     thread?.status === 'running' &&
     currentOutput?.replyId &&
     currentOutput.workerTurnSeq !== undefined &&
+    (thread.runTurnSeq === undefined || thread.runTurnSeq === currentOutput.workerTurnSeq) &&
     currentOutput.chunks.length > 0 &&
+    !thread.timelineTurns?.some((turn) => turn.seq === currentOutput.workerTurnSeq && turn.ended) &&
+    !currentOutputMatched &&
     (previousOutput?.threadId !== threadId || previousOutput.value !== currentOutput)
   ) {
     setPreviousOutput({ threadId, value: currentOutput })
   } else if (
     previousOutput &&
-    (previousOutput.threadId !== threadId || (thread?.status !== 'running' && !messages.isFetching))
+    (previousOutput.threadId !== threadId ||
+      savedOutputMatched ||
+      interrupted ||
+      (thread?.status === 'running' &&
+        thread.runTurnSeq !== undefined &&
+        thread.runTurnSeq !== previousOutput.value.workerTurnSeq))
   ) {
+    if (interrupted && endedTurn) setInterruptedOutput({ threadId, seq: endedTurn.seq, at: endedTurn.startedAt })
+    else if (
+      previousOutput.threadId === threadId &&
+      thread?.status === 'running' &&
+      thread.runTurnSeq !== undefined &&
+      thread.runTurnSeq !== previousOutput.value.workerTurnSeq &&
+      previousOutput.value.workerTurnSeq !== undefined &&
+      !savedOutputMatched
+    )
+      setInterruptedOutput({
+        threadId,
+        seq: previousOutput.value.workerTurnSeq,
+        at:
+          thread.timelineTurns?.find((turn) => turn.seq === previousOutput.value.workerTurnSeq)?.startedAt ??
+          thread.runStartedAt ??
+          0,
+        pending: true,
+        replyId: previousOutput.value.replyId,
+      })
     setPreviousOutput(null)
   }
+  const pendingTurn =
+    interruptedOutput?.pending && interruptedOutput.threadId === threadId
+      ? thread?.timelineTurns?.find((turn) => turn.seq === interruptedOutput.seq && turn.ended)
+      : undefined
+  if (pendingTurn && interruptedOutput) {
+    const replyExists = !!interruptedOutput.replyId && pendingTurn.replyIds.includes(interruptedOutput.replyId)
+    const replyLoaded = list.some(
+      (message) => message.workerTurnSeq === pendingTurn.seq && message.replyId === interruptedOutput.replyId,
+    )
+    if (!replyExists) setInterruptedOutput({ ...interruptedOutput, pending: false })
+    else if (replyLoaded) setInterruptedOutput(null)
+  }
   const output =
-    thread?.status === 'running'
-      ? currentOutput
-      : messages.isFetching && previousOutput?.threadId === threadId
-        ? previousOutput.value
-        : undefined
+    interrupted || currentInterrupted
+      ? undefined
+      : thread?.status === 'running'
+        ? currentOutput &&
+          currentOutput.chunks.length > 0 &&
+          (thread.runTurnSeq === undefined || currentOutput.workerTurnSeq === thread.runTurnSeq)
+          ? currentOutput
+          : thread.runTurnSeq === undefined || thread.runTurnSeq === savedOutput?.workerTurnSeq
+            ? savedOutput
+            : undefined
+        : !savedOutputMatched && !interrupted
+          ? savedOutput
+          : undefined
+  const liveAt =
+    thread?.timelineTurns?.find((turn) => turn.seq === output?.workerTurnSeq)?.startedAt ?? thread?.runStartedAt ?? 0
   const liveReply =
     thread?.agent &&
     output?.replyId &&
@@ -563,10 +655,12 @@ export function ThreadDetail({
             .filter((chunk) => chunk.kind === 'text')
             .map((chunk) => chunk.text)
             .join(''),
-          streaming: true,
+          streaming: thread.status === 'running' && !!currentOutput?.replyId && currentOutput.chunks.length > 0,
           replyId: output.replyId,
           workerTurnSeq: output.workerTurnSeq,
-          createdAt: Number.MAX_SAFE_INTEGER,
+          createdAt: liveAt,
+          timelineAt: liveAt,
+          timelineOrder: Number.MAX_SAFE_INTEGER,
           delivery: 'delivered' as const,
           activity: null,
           attachments: [],
@@ -617,14 +711,14 @@ export function ThreadDetail({
     if (thread?.unread && messages.isSuccess && !messages.isFetching) client.markThreadRead?.(threadId)
   }, [client, threadId, thread?.unread, messages.isSuccess, messages.isFetching])
 
-  if (threadQuery.error instanceof ClientError && threadQuery.error.code === 'notFound') {
+  if (isAccessError(threadQuery.error) || isAccessError(messages.error)) {
     return (
       <Shell layout={layout} title="未找到对话" onClose={onClose}>
         <p {...stylex.props(text.body, styles.empty)}>对话已删除，或你已无权访问。</p>
       </Shell>
     )
   }
-  if (threadQuery.isError) {
+  if (threadQuery.isError && !thread) {
     return (
       <Shell layout={layout} title="对话" onClose={onClose}>
         <div {...stylex.props(styles.empty)}>
@@ -641,7 +735,18 @@ export function ThreadDetail({
       </Shell>
     )
   }
-  if (!thread || !view) return null
+  if (!thread || !view)
+    return (
+      <Shell
+        layout={layout}
+        title={queryClient.getQueryData<Thread[]>(keys.threads)?.find((item) => item.id === threadId)?.title ?? '对话'}
+        onClose={onClose}
+      >
+        <p role="status" {...stylex.props(text.caption, styles.empty)}>
+          正在加载对话…
+        </p>
+      </Shell>
+    )
 
   const name = device?.name ?? '设备'
   const agentName = thread.agent ? agentNames[thread.agent] : '命令'
@@ -676,6 +781,71 @@ export function ThreadDetail({
   }
 
   let replies = 0
+  const interruption: Message | null =
+    interruptedOutput?.threadId === threadId
+      ? {
+          id: `interrupted:${interruptedOutput.seq}`,
+          threadId,
+          role: 'interrupted',
+          sender: 'agent',
+          body: interruptedOutput.pending ? '上一条回复的保存状态待确认。' : '回复中断，内容未保存。',
+          createdAt: interruptedOutput.at,
+          timelineAt: interruptedOutput.at,
+          workerTurnSeq: interruptedOutput.seq,
+          delivery: 'delivered',
+          activity: null,
+          traceItemCount: 0,
+          attachments: [],
+        }
+      : null
+  const activityTurns = new Set<number>()
+  const activityCounts = new Map<number, { count: number; messageId: string }>()
+  for (const item of list) {
+    if (item.workerTurnSeq !== undefined && (item.traceItemCount ?? 0) > 0)
+      activityCounts.set(item.workerTurnSeq, { count: item.traceItemCount!, messageId: item.id })
+  }
+  const timelineMessages = [
+    ...list,
+    ...(liveReply ? [liveReply] : []),
+    ...(interruption ? [interruption] : []),
+  ].flatMap((message) => {
+    const seq = message.workerTurnSeq
+    const liveTurn = thread.status === 'running' && thread.runTurnSeq === seq
+    const count = seq === undefined ? undefined : activityCounts.get(seq)?.count
+    const at = message.timelineAt ?? message.createdAt
+    const activity =
+      message.role !== 'user' && seq !== undefined && !activityTurns.has(seq) && (liveTurn || (count ?? 0) > 0)
+    if (activity) activityTurns.add(seq)
+    return [
+      ...(activity
+        ? [
+            {
+              id: `activity:${seq}`,
+              at,
+              order: (message.timelineOrder ?? Number.MAX_SAFE_INTEGER) - 0.5,
+              message: null,
+              item: null,
+              liveTurn: seq,
+              count,
+              active: liveTurn,
+            },
+          ]
+        : []),
+      {
+        id:
+          message.role === 'agent' && message.replyId && seq !== undefined
+            ? `reply:${seq}:${message.replyId}`
+            : message.id,
+        at,
+        order: message.timelineOrder ?? Number.MAX_SAFE_INTEGER,
+        message,
+        item: null,
+        liveTurn: null,
+        count: undefined,
+        active: false,
+      },
+    ]
+  })
   const openFile = (reply: number | null) => (deviceId: ID, path: string) => setPreview({ deviceId, path, reply })
   const deviceList = devices.data ?? []
 
@@ -800,6 +970,21 @@ export function ThreadDetail({
   const body = (
     <div {...stylex.props(styles.split)}>
       <div {...stylex.props(styles.main)}>
+        {(threadQuery.isError || (messages.isError && messages.data)) && (
+          <div role="status" {...stylex.props(text.caption, styles.syncNotice)}>
+            更新失败，显示上次内容。{' '}
+            <button
+              type="button"
+              onClick={() => {
+                void threadQuery.refetch()
+                void messages.refetch()
+              }}
+              {...stylex.props(styles.link, focusRing.ring)}
+            >
+              重试
+            </button>
+          </div>
+        )}
         <div
           ref={timelineRef}
           tabIndex={-1}
@@ -816,7 +1001,7 @@ export function ThreadDetail({
           >
             <InboxFeedback />
             {messages.isPending && <p {...stylex.props(text.caption, styles.muted)}>正在加载消息…</p>}
-            {messages.isError && (
+            {messages.isError && !messages.data && (
               <Banner
                 icon="alert"
                 title="无法加载消息"
@@ -828,38 +1013,51 @@ export function ThreadDetail({
               />
             )}
             {[
-              ...[...list, ...(liveReply ? [liveReply] : [])].map((message) => ({
-                id:
-                  message.role === 'agent' && message.replyId && message.workerTurnSeq !== undefined
-                    ? `reply:${message.workerTurnSeq}:${message.replyId}`
-                    : message.id,
-                at: message.createdAt,
-                message,
-                item: null,
-                liveTurn: null,
-              })),
+              ...timelineMessages,
               ...(thread.status === 'running' &&
               thread.runTurnSeq !== undefined &&
-              !list.some((message) => message.workerTurnSeq === thread.runTurnSeq && (message.traceItemCount ?? 0) > 0)
+              !activityTurns.has(thread.runTurnSeq)
                 ? [
                     {
                       id: `activity:${thread.runTurnSeq}`,
                       at: Number.MAX_SAFE_INTEGER - 1,
+                      order: Number.MAX_SAFE_INTEGER,
                       message: null,
                       item: null,
                       liveTurn: thread.runTurnSeq,
+                      count: undefined,
+                      active: true,
                     },
                   ]
                 : []),
               ...(inbox.data ?? [])
                 .filter((item) => item.threadId === threadId)
-                .map((item) => ({ id: item.id, at: item.createdAt, message: null, item, liveTurn: null })),
+                .map((item) => ({
+                  id: item.id,
+                  at: item.createdAt,
+                  order: 0,
+                  message: null,
+                  item,
+                  liveTurn: null,
+                  count: undefined,
+                  active: false,
+                })),
             ]
-              .sort((a, b) => a.at - b.at)
-              .map(({ message, item, id, liveTurn }) => {
+              .sort((a, b) => a.at - b.at || a.order - b.order || a.id.localeCompare(b.id))
+              .map(({ message, item, id, liveTurn, count, active }) => {
                 if (item) return <AttentionCard key={id} item={item} inThread />
                 if (liveTurn !== null)
-                  return <LiveActivityTrace key={id} threadId={threadId} turnSeq={liveTurn} device={device} />
+                  return (
+                    <TurnActivityTrace
+                      key={id}
+                      threadId={threadId}
+                      turnSeq={liveTurn}
+                      device={device}
+                      live={active}
+                      count={count}
+                      messageId={activityCounts.get(liveTurn)?.messageId}
+                    />
+                  )
                 if (!message) return null
                 const reply = message.role === 'agent' ? ++replies : null
                 return (
@@ -874,6 +1072,7 @@ export function ThreadDetail({
                     command={thread.agent === null}
                     latest={message.id === latestReplyId}
                     outputGap={message === liveReply && output?.chunks.some((chunk) => chunk.kind === 'gap')}
+                    traceInMessage={message.workerTurnSeq === undefined || !activityTurns.has(message.workerTurnSeq)}
                     onOpen={openMessageFile}
                     onCancel={onCancel}
                   />
@@ -887,6 +1086,8 @@ export function ThreadDetail({
               messages={list}
               onOpenPath={(path) => openFile(null)(thread.deviceId, path)}
               output={output}
+              outputError={liveOutput.isError && device?.connection === 'online'}
+              onRetryOutput={() => void liveOutput.refetch()}
               showReply={liveReply === null && output?.workerTurnSeq === undefined}
             />
           </SelectionArea>
@@ -1100,7 +1301,7 @@ function Shell({
 }) {
   if (layout === 'page') return <Page title={title}>{children}</Page>
   return (
-    <aside aria-label={title} {...stylex.props(styles.panel)}>
+    <aside aria-label={title} {...stylex.props(styles.panel, pane.card)}>
       <div {...stylex.props(styles.header)}>
         <h2 {...stylex.props(text.bodyMedium, styles.headerStatus, text.truncate)}>{title}</h2>
         {onClose && <IconButton icon="close" label="关闭对话" onClick={onClose} />}

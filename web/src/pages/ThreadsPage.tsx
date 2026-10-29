@@ -11,7 +11,7 @@ import { ThreadModelMenu, type ThreadModelChoice } from '../app/ThreadModelMenu'
 import { modelThinking, ThinkingMenu } from '../app/ThinkingMenu'
 import { ResizablePane } from '../ui/ResizablePane'
 import { useNow } from '../app/useNow'
-import { ClientError } from '../data/client'
+import { ClientError, isAccessError } from '../data/client'
 import {
   agentNames,
   defaultLocation,
@@ -25,7 +25,16 @@ import {
   type Location,
   type ThreadGroup,
 } from '../data/derive'
-import { newClientId, useCreateThread, useDevices, useProjects, useSession, useThreads } from '../data/queries'
+import {
+  newClientId,
+  useCreateThread,
+  useDevices,
+  useProjects,
+  useSession,
+  useStableThreadOrder,
+  useThreads,
+} from '../data/queries'
+import { SyncStatus } from '../app/SyncStatus'
 import type { Device, Project, Thread } from '../data/types'
 import { text } from '../theme/text'
 import { colors, radius, size, space } from '../theme/tokens.stylex'
@@ -394,8 +403,8 @@ export function ThreadsPage() {
   const [browseDevice, setBrowseDevice] = useState<string | null>(null)
   const [collapsedGroups, setCollapsedGroups] = useState<ThreadGroup[]>([])
 
-  const allThreads = threads.data ?? []
-  const allDevices = devices.data ?? []
+  const allThreads = useStableThreadOrder(isAccessError(threads.error) ? [] : (threads.data ?? []))
+  const allDevices = isAccessError(devices.error) ? [] : (devices.data ?? [])
   const current = location ?? defaultLocation(allThreads, allDevices, session.data?.defaultDeviceId ?? null)
   const device = allDevices.find((item) => item.id === current?.deviceId)
   const choice = resolveAgent(device, agentChoice)
@@ -502,9 +511,7 @@ export function ThreadsPage() {
   const groups = threadGroups
     .map((group) => ({
       ...group,
-      threads: filtered
-        .filter((thread) => views.get(thread.id)?.group === (group.id satisfies ThreadGroup))
-        .sort((a, b) => b.updatedAt - a.updatedAt),
+      threads: filtered.filter((thread) => views.get(thread.id)?.group === (group.id satisfies ThreadGroup)),
     }))
     .filter((group) => group.threads.length > 0)
 
@@ -516,7 +523,7 @@ export function ThreadsPage() {
   let list
   if (threads.isPending) {
     list = <p {...stylex.props(text.caption, styles.muted)}>正在加载对话…</p>
-  } else if (threads.isError) {
+  } else if (threads.isError && (!threads.data || isAccessError(threads.error))) {
     list = (
       <Banner
         icon="alert"
@@ -585,9 +592,26 @@ export function ThreadsPage() {
 
   return (
     <div {...stylex.props(styles.layout)}>
-      <Page title="对话" sizedBody bottomFade>
+      <Page
+        title="对话"
+        sizedBody
+        bottomFade
+        status={
+          (threads.isError && threads.data) ||
+          (devices.isError && devices.data) ||
+          (projects.isError && projects.data) ? (
+            <SyncStatus
+              retry={() => {
+                void threads.refetch()
+                void devices.refetch()
+                void projects.refetch()
+              }}
+            />
+          ) : undefined
+        }
+      >
         <div {...stylex.props(styles.content)}>
-          {devices.isError ? (
+          {devices.isError && (!devices.data || isAccessError(devices.error)) ? (
             <Banner
               icon="alert"
               title="无法加载设备"
@@ -680,7 +704,7 @@ export function ThreadsPage() {
                   </MenuOption>
                 ))}
               </Menu>
-              {projects.isError ? (
+              {projects.isError && (!projects.data || isAccessError(projects.error)) ? (
                 <span {...stylex.props(text.caption, styles.muted)}>无法加载项目</span>
               ) : (
                 <Menu

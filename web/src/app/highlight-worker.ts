@@ -7,6 +7,10 @@ const pending = new Map<number, { resolve: (lines: ThemedToken[][] | null) => vo
 const cache = new Map<string, { lines: ThemedToken[][]; size: number }>()
 let cacheSize = 0
 
+export function cachedHighlight(content: string, path: string, theme: 'light' | 'dark') {
+  return cache.get(JSON.stringify([theme, path, content]))?.lines
+}
+
 function getWorker(): Worker | null {
   if (worker !== undefined) return worker
   if (typeof Worker === 'undefined') return (worker = null)

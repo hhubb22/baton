@@ -10,6 +10,7 @@ type ProjectAPI = Pick<
   | 'listProjects'
   | 'getProject'
   | 'listProjectEntries'
+  | 'readProjectTimeline'
   | 'listProjectMemory'
   | 'getMemoryStatus'
   | 'createProject'
@@ -44,6 +45,8 @@ interface StatusDTO {
   last_seq: number
   pending_inputs: number
   run?: {
+    id?: string
+    state?: string
     node_id: string
     effective: boolean
     end_reason?: string
@@ -70,6 +73,7 @@ interface EventDTO {
   conversation_id: string
   seq: number
   kind: string
+  run_id?: string | null
   tool_call_id?: string
   created_at: string
   payload: {
@@ -210,6 +214,8 @@ export function mapProject(p: ProjectDTO, status: StatusDTO): Project {
             : null,
       activity: null,
       lastSeq: status.last_seq,
+      runId: status.run?.id,
+      runState: status.run?.state,
       preview:
         state === 'running' && status.preview?.after_seq === status.last_seq && status.preview.text
           ? {
@@ -384,6 +390,7 @@ export async function mapProjectEntries(
         ...base,
         kind: 'assistant',
         streamAnchor: event.seq - 1,
+        runId: event.run_id ?? undefined,
         body: text(message.content),
         process: [],
         threads: null,
@@ -490,6 +497,36 @@ export function createProjectAPI(ctx: HttpContext): ProjectAPI {
     return mapMemory(projectId, note, revisions)
   }
   const readProject = async (id: string) => enrich(await ctx.request<ProjectDTO>(projectPath(id)))
+  async function readProjectTimeline(projectId: string) {
+    const events: EventDTO[] = []
+    let seq = 0
+    let more: boolean
+    do {
+      const page = await ctx.request<{ events: EventDTO[]; next_after_seq: number; has_more: boolean }>(
+        `${projectPath(projectId)}/events?limit=100&after_seq=${seq}`,
+      )
+      events.push(...page.events)
+      more = page.has_more
+      if (more && page.next_after_seq <= seq) throw new ClientError('unavailable', '事件分页未推进')
+      seq = page.next_after_seq
+    } while (more)
+    const messages: MessageDTO[] = []
+    let after = 0
+    do {
+      const page = await ctx.request<{ messages: MessageDTO[]; next_after_id?: number }>(
+        `${projectPath(projectId)}/messages?limit=100&after_id=${after}`,
+      )
+      messages.push(...page.messages)
+      const next = page.next_after_id ?? 0
+      if (next && next <= after) throw new ClientError('unavailable', '消息分页未推进')
+      after = next
+    } while (after)
+    return {
+      entries: await mapProjectEntries(projectId, events, messages),
+      anchors: Object.fromEntries(events.map((event) => [event.seq, timestamp(event.created_at)])),
+      lastSeq: seq,
+    }
+  }
   const emit = () => ctx.emit('projects', 'inbox', 'messages', 'threads')
   async function patch(id: string, body: unknown) {
     const p = await ctx.request<ProjectDTO>(projectPath(id), json('PATCH', body))
@@ -517,31 +554,9 @@ export function createProjectAPI(ctx: HttpContext): ProjectAPI {
       } while (after)
       return Promise.all(all.map(enrich))
     },
+    readProjectTimeline,
     async listProjectEntries(projectId) {
-      const events: EventDTO[] = []
-      let seq = 0
-      let more: boolean
-      do {
-        const page = await ctx.request<{ events: EventDTO[]; next_after_seq: number; has_more: boolean }>(
-          `${projectPath(projectId)}/events?limit=100&after_seq=${seq}`,
-        )
-        events.push(...page.events)
-        more = page.has_more
-        if (more && page.next_after_seq <= seq) throw new ClientError('unavailable', '事件分页未推进')
-        seq = page.next_after_seq
-      } while (more)
-      const messages: MessageDTO[] = []
-      let after = 0
-      do {
-        const page = await ctx.request<{ messages: MessageDTO[]; next_after_id?: number }>(
-          `${projectPath(projectId)}/messages?limit=100&after_id=${after}`,
-        )
-        messages.push(...page.messages)
-        const next = page.next_after_id ?? 0
-        if (next && next <= after) throw new ClientError('unavailable', '消息分页未推进')
-        after = next
-      } while (after)
-      return mapProjectEntries(projectId, events, messages)
+      return (await readProjectTimeline(projectId)).entries
     },
     async listProjectMemory(projectId) {
       const notes: MemoryDTO[] = []

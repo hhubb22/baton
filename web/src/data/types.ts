@@ -170,6 +170,7 @@ export interface Thread {
   updatedAt: number
   runStartedAt: number | null
   runTurnSeq?: number
+  timelineTurns?: { seq: number; startedAt: number; ended: boolean; replyIds: string[] }[]
   unread: boolean
 }
 
@@ -189,7 +190,7 @@ export interface FullOutputReference {
 export interface Message {
   id: ID
   threadId: ID
-  role: 'user' | 'agent' | 'failure' | 'activity'
+  role: 'user' | 'agent' | 'failure' | 'activity' | 'interrupted'
   // 发给 Agent 的消息可能来自你，也可能来自 Project Agent。
   sender: 'you' | 'projectAgent' | 'agent'
   body: string
@@ -197,6 +198,8 @@ export interface Message {
   streaming?: boolean
   replyId?: string
   workerTurnSeq?: number
+  timelineAt?: number
+  timelineOrder?: number
   createdAt: number
   delivery: Delivery
   // 一轮实际做过的事的摘要；过程从中心读取。
@@ -283,6 +286,8 @@ export interface Project {
     preview?: { afterSeq: number; text: string; truncated: boolean } | null
     // 中心已持久化的历史尾序号。
     lastSeq?: number
+    runId?: string
+    runState?: string
   }
   createdAt: number
 }
@@ -321,6 +326,7 @@ export type ProjectEntry =
       threads: EntryThreads | null
       body: string
       streamAnchor?: number
+      runId?: string
     })
   | (EntryBase & { kind: 'note'; body: string })
 

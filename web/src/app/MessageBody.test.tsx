@@ -90,9 +90,20 @@ it('reveals an appended response gradually and finishes it after streaming ends'
   rerender(<MessageBody body="Hello world 🌏 again" onOpenPath={open} />)
   await waitFor(() => expect(container).toHaveTextContent('Hello world 🌏 again'))
   expect(container.firstChild).toBe(root)
-  await waitFor(() => expect(container.querySelector('.streamdown-animated')).not.toBeInTheDocument(), {
-    timeout: 2000,
-  })
+  expect(container.querySelector('.streamdown-animated')).toBeInTheDocument()
+})
+
+it('preserves the code block when streaming finishes and defers Mermaid rendering', async () => {
+  const source = 'graph LR\n  A[Start] --> B[Done]'
+  const body = `\`\`\`mermaid\n${source}\n\`\`\``
+  const { rerender } = render(<MessageBody body={body} streaming onOpenPath={() => {}} />)
+  const code = await screen.findByLabelText('代码块')
+  const copy = screen.getByRole('button', { name: '复制代码' })
+  expect(code).toHaveTextContent('A[Start] --> B[Done]')
+  expect(screen.queryByRole('img', { name: '图表' })).not.toBeInTheDocument()
+  rerender(<MessageBody body={body} onOpenPath={() => {}} />)
+  expect(screen.getByRole('button', { name: '复制代码' })).toBe(copy)
+  expect(await screen.findByRole('img', { name: '图表' })).toBeInTheDocument()
 })
 
 it('keeps selected text stable while the reply continues streaming', async () => {

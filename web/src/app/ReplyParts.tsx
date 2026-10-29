@@ -1,7 +1,7 @@
 import * as stylex from '@stylexjs/stylex'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { activityLine, baseName, clockTime, fileSize, runTimer } from '../data/derive'
-import { useLiveTrace, useTrace } from '../data/queries'
+import { useClient, useLiveTrace, useTrace } from '../data/queries'
 import type { Attachment, Device, LiveOutput as LiveOutputData, Message, Thread } from '../data/types'
 import { fonts } from '../theme/base.stylex'
 import { text } from '../theme/text'
@@ -189,19 +189,34 @@ export function ActivityTrace({
   )
 }
 
-export function LiveActivityTrace({
+export function TurnActivityTrace({
   threadId,
   turnSeq,
   device,
+  live = true,
+  count,
+  messageId,
 }: {
   threadId: string
   turnSeq: number
   device: Device | undefined
+  live?: boolean
+  count?: number
+  messageId?: string
 }) {
-  const [open, setOpen] = useState(true)
-  const trace = useLiveTrace(threadId, turnSeq, true)
+  const [open, setOpen] = useState(live)
+  const client = useClient()
+  const turnTrace = useLiveTrace(threadId, turnSeq, (live || open) && !!client.readTurnTrace, live)
+  const savedTrace = useTrace(messageId ?? '', !client.readTurnTrace && open && !!messageId)
+  const trace = client.readTurnTrace ? turnTrace : savedTrace
+  const refetch = trace.refetch
+  const wasLive = useRef(live)
+  useEffect(() => {
+    if (wasLive.current && !live) void refetch()
+    wasLive.current = live
+  }, [live, refetch])
   const steps = trace.data?.pages.flatMap((page) => (page.state === 'ready' ? page.steps : [])) ?? []
-  if (steps.length === 0) return null
+  if (steps.length === 0 && !(count && count > 0)) return null
   return (
     <div {...stylex.props(styles.trace)}>
       <button
@@ -211,13 +226,14 @@ export function LiveActivityTrace({
         {...stylex.props(text.caption, styles.toggle, focusRing.ring)}
       >
         <Icon name={open ? 'chevron-down' : 'chevron-right'} size={12} />
-        执行过程 · {steps.length} 个步骤
+        执行过程 · {count ?? steps.length} 个步骤
       </button>
       {open && (
         <div {...stylex.props(styles.steps)}>
           {steps.map((step) => (
             <ActivityStep key={step.item_id} step={step} threadId={threadId} device={device} />
           ))}
+          {trace.isPending && <p {...stylex.props(text.small, styles.muted)}>正在加载执行过程…</p>}
           {trace.hasNextPage && (
             <Button
               small
@@ -229,9 +245,14 @@ export function LiveActivityTrace({
             </Button>
           )}
           {trace.isError && (
-            <p role="status" {...stylex.props(text.small, styles.muted)}>
-              无法加载执行过程。
-            </p>
+            <>
+              <p role="status" {...stylex.props(text.small, styles.muted)}>
+                无法加载执行过程。
+              </p>
+              <Button small onClick={() => void trace.refetch()}>
+                重试
+              </Button>
+            </>
           )}
         </div>
       )}
@@ -355,6 +376,8 @@ export function LiveOutput({
   messages,
   onOpenPath,
   output,
+  outputError = false,
+  onRetryOutput,
   showReply = true,
 }: {
   thread: Thread
@@ -364,6 +387,8 @@ export function LiveOutput({
   messages: Message[]
   onOpenPath: (path: string) => void
   output?: LiveOutputData
+  outputError?: boolean
+  onRetryOutput?: () => void
   showReply?: boolean
 }) {
   const running = thread.status === 'running' && thread.runStartedAt !== null
@@ -433,6 +458,14 @@ export function LiveOutput({
         <span {...stylex.props(text.caption, styles.liveFoot)}>
           <Icon name="offline" size={12} />
           连接已断开
+        </span>
+      )}
+      {outputError && (
+        <span role="status" {...stylex.props(text.caption, styles.liveFoot)}>
+          无法读取实时输出{' '}
+          <button type="button" onClick={onRetryOutput} {...stylex.props(styles.link, focusRing.ring)}>
+            重试
+          </button>
         </span>
       )}
     </div>
