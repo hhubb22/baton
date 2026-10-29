@@ -1,5 +1,4 @@
 import { gunzipSync } from 'node:zlib'
-import { createServer } from 'node:http'
 import { Reader } from 'protobufjs/minimal'
 import { Replayer, type eventWithTime } from 'rrweb'
 import { trace } from '@opentelemetry/api'
@@ -8,6 +7,11 @@ import { expect, it, vi } from 'vite-plus/test'
 import { startTelemetry, stopTelemetry, traceSocket } from './index'
 import { decodeReplayProtobuf } from '@baton/telemetry/protobuf'
 import { filterForward } from '@baton/telemetry/forward'
+
+vi.mock(
+  '@opentelemetry/exporter-trace-otlp-http',
+  async () => import('@opentelemetry/exporter-trace-otlp-http/build/esm/platform/browser/OTLPTraceExporter.js'),
+)
 
 function protobufFields(bytes: Uint8Array, path: readonly number[]): Uint8Array[] {
   const reader = Reader.create(bytes)
@@ -25,22 +29,13 @@ function protobufFields(bytes: Uint8Array, path: readonly number[]): Uint8Array[
 it('filters serialized traces and masked replay, and stops collection on logout', async () => {
   const payloads: Array<{ url: string; body: Uint8Array }> = []
   const calls: Array<{ url: string; headers: Headers }> = []
-  const server = createServer((request, response) => {
-    const chunks: Buffer[] = []
-    request.on('data', (chunk: Buffer) => chunks.push(chunk))
-    request.on('end', () => {
-      payloads.push({ url: request.url!, body: Buffer.concat(chunks) })
-      response.writeHead(200).end('{}')
-    })
-  })
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
-  const address = server.address() as { port: number }
   const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
     calls.push({ url, headers: new Headers(init?.headers) })
     const body = init?.body
-    if (url.includes('/v1/logs') && body instanceof Uint8Array) payloads.push({ url, body })
-    else if (url.includes('/v1/logs') && typeof body === 'string')
+    if (url.includes('/api/v1/telemetry/') && ArrayBuffer.isView(body))
+      payloads.push({ url, body: new Uint8Array(body.buffer, body.byteOffset, body.byteLength) })
+    else if (url.includes('/api/v1/telemetry/') && typeof body === 'string')
       payloads.push({ url, body: new TextEncoder().encode(body) })
     return new Response('{}', { status: 200 })
   })
@@ -51,7 +46,7 @@ it('filters serialized traces and masked replay, and stops collection on logout'
     '<div title="secret-title" data-private="secret-data">secret-text<input placeholder="secret-placeholder" value="secret-input"></div>'
   document.body.append(element)
   try {
-    startTelemetry({ endpoint: `http://127.0.0.1:${address.port}`, key: 'test-key', session_replay: 'masked' })
+    startTelemetry({ session_replay: 'masked' }, () => 'test-csrf')
     await fetch(`${window.location.origin}/api/v1/threads`, {
       method: 'POST',
       body: 'secret-body',
@@ -85,7 +80,26 @@ it('filters serialized traces and masked replay, and stops collection on logout'
     await vi.waitFor(() => expect(payloads.some((payload) => payload.url.endsWith('/v1/logs'))).toBe(true), {
       timeout: 7000,
     })
+    expect(calls.map((call) => call.url)).toContain(`${window.location.origin}/api/v1/telemetry/v1/traces`)
     expect(payloads.some((payload) => payload.url.endsWith('/v1/traces'))).toBe(true)
+    expect(
+      calls
+        .filter((call) => call.url.endsWith('/v1/traces'))
+        .every(
+          (call) =>
+            call.url === `${window.location.origin}/api/v1/telemetry/v1/traces` &&
+            call.headers.get('x-csrf-token') === 'test-csrf' &&
+            !call.headers.has('authorization'),
+        ),
+    ).toBe(true)
+    expect(
+      calls
+        .filter((call) => call.url.endsWith('/v1/logs'))
+        .every(
+          (call) =>
+            call.url === `${window.location.origin}/api/v1/telemetry/v1/logs` && !call.headers.has('authorization'),
+        ),
+    ).toBe(true)
     const decoded = payloads
       .map(({ body }) => {
         try {
@@ -178,16 +192,6 @@ it('filters serialized traces and masked replay, and stops collection on logout'
     expect(fullText).toContain('***********')
     expect(fullText).not.toContain('secret-')
     expect(JSON.stringify(mutation)).not.toContain('secret-')
-    const replayer = new Replayer(events as eventWithTime[], {
-      root: document.body,
-      showWarning: false,
-      UNSAFE_replayCanvas: true,
-    })
-    if (replayer.iframe.contentWindow) replayer.iframe.contentWindow.scrollTo = () => {}
-    replayer.play()
-    await new Promise((resolve) => setTimeout(resolve, 50))
-    expect(replayer.iframe.contentDocument?.body.textContent).not.toContain('secret')
-    replayer.pause()
     stopTelemetry()
     expect(Rum.inited).toBe(false)
     window.dispatchEvent(new Event('unload'))
@@ -202,8 +206,18 @@ it('filters serialized traces and masked replay, and stops collection on logout'
         .map(({ body }) => gunzipSync(body).toString('utf8'))
         .join(''),
     ).not.toContain('secret-after-logout')
+    const replayer = new Replayer(events as eventWithTime[], {
+      root: document.body,
+      showWarning: false,
+      UNSAFE_replayCanvas: true,
+    })
+    if (replayer.iframe.contentWindow) replayer.iframe.contentWindow.scrollTo = () => {}
+    replayer.play()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(replayer.iframe.contentDocument?.body.textContent).not.toContain('secret')
+    replayer.destroy()
     const before = payloads.length
-    startTelemetry({ endpoint: `http://127.0.0.1:${address.port}`, key: 'test-key', session_replay: 'masked' })
+    startTelemetry({ session_replay: 'masked' }, () => 'test-csrf')
     trace.getTracer('baton-web').startSpan('baton.web.exception').end()
     await Rum.provider!.forceFlush()
     expect(payloads.slice(before).some((payload) => payload.url.endsWith('/v1/traces'))).toBe(true)
@@ -215,7 +229,5 @@ it('filters serialized traces and masked replay, and stops collection on logout'
     element.remove()
     intervals.mockRestore()
     vi.unstubAllGlobals()
-    server.closeAllConnections()
-    await new Promise<void>((resolve) => server.close(() => resolve()))
   }
 }, 10000)

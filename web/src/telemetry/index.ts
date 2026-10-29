@@ -10,15 +10,15 @@ import { setExceptionReporter } from './runtime'
 declare const __BATON_BUILD__: { version: string; commit: string }
 
 export interface TelemetryConfig {
-  endpoint: string
-  key: string
   session_replay?: 'masked'
 }
 let active: string | undefined
+let generation = 0
 let removeErrors: (() => void) | undefined
 
 export function stopTelemetry() {
   if (!active) return
+  generation++
   removeErrors?.()
   setExceptionReporter()
   removeErrors = undefined
@@ -27,34 +27,40 @@ export function stopTelemetry() {
   active = undefined
 }
 
-export function startTelemetry(config: TelemetryConfig) {
+export function startTelemetry(config: TelemetryConfig, getCsrf: () => string | null) {
   const identity = JSON.stringify(config)
   if (identity === active) return
   stopTelemetry()
-  const url = new URL(config.endpoint)
-  if (!['http:', 'https:'].includes(url.protocol)) return
-  const base = url.toString().replace(/\/$/, '')
+  const currentGeneration = ++generation
+  const base = new URL('/api/v1/telemetry', window.location.origin).toString()
   const api = new RegExp(`^${window.location.origin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/api/`)
   const ignored = new RegExp(`^(?!${window.location.origin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/api/|/api/)`)
   active = identity
   Rum._internalInit({
     url: `${base}/v1/traces`,
-    apiKey: config.key,
     applicationName: 'baton-web',
     allowInsecureUrl: true,
-    ignoreUrls: [ignored],
+    ignoreUrls: [
+      ignored,
+      /^\/api\/v1\/telemetry(?:\/|$)/,
+      new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:/|$)`),
+    ],
     instrumentations: {
       ...INSTRUMENTATIONS_ALL_DISABLED,
       fetch: { propagateTraceHeaderCorsUrls: [api], advancedNetworkCapture: () => false },
     },
     exporter: {
-      factory: ({ url: exportUrl, authHeader }) =>
+      factory: ({ url: exportUrl }) =>
         privateExporter(
           new OTLPTraceExporter({
             url: exportUrl,
-            headers: authHeader ? { authorization: authHeader } : {},
+            headers: async () => ({ 'x-csrf-token': getCsrf() ?? '' }),
           }),
           config.session_replay === 'masked',
+          () =>
+            queueMicrotask(() => {
+              if (generation === currentGeneration) stopTelemetry()
+            }),
         ),
     },
   })
@@ -109,7 +115,6 @@ export function startTelemetry(config: TelemetryConfig) {
   if (config.session_replay === 'masked' && attributes['rum.sessionId']) {
     let lookup: ((id: number) => Node | null) | undefined
     Recorder.init({
-      apiKey: config.key,
       url: `${base}/v1/logs`,
       maskAllInputs: true,
       maskTextSelector: '*',

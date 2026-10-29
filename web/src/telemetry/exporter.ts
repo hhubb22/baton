@@ -77,12 +77,15 @@ export function filteredSpan(span: ReadableSpan, replay = false): ReadableSpan {
 
 declare const __BATON_BUILD__: { version: string; commit: string }
 
-export function privateExporter(exporter: SpanExporter, replay = false): SpanExporter {
+export function privateExporter(exporter: SpanExporter, replay = false, onDisabled?: () => void): SpanExporter {
   return {
     export: (spans, result) =>
       exporter.export(
         spans.map((span) => filteredSpan(span, replay)),
-        result,
+        (outcome) => {
+          if (outcome.error?.message === 'Fetch request failed with non-retryable status 404') onDisabled?.()
+          result(outcome)
+        },
       ),
     shutdown: () => exporter.shutdown(),
     forceFlush: () => exporter.forceFlush?.() ?? Promise.resolve(),

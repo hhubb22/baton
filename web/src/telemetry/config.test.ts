@@ -16,18 +16,15 @@ it('loads telemetry only after a configured session and stops on logout', async 
   const fetcher = vi
     .fn()
     .mockResolvedValueOnce(new Response(JSON.stringify({ csrf_token: 'one' })))
-    .mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({ csrf_token: 'two', telemetry: { endpoint: 'http://collector', key: 'write-key' } }),
-      ),
-    )
+    .mockResolvedValueOnce(new Response(JSON.stringify({ csrf_token: 'two', telemetry: {} })))
   const transport = createTransport({ fetch: fetcher })
   await transport.request('/me')
   expect(sdk.loaded).not.toHaveBeenCalled()
   expect(sdk.startTelemetry).not.toHaveBeenCalled()
   expect(sdk.stopTelemetry).not.toHaveBeenCalled()
   await transport.request('/me')
-  expect(sdk.startTelemetry).toHaveBeenCalledWith({ endpoint: 'http://collector', key: 'write-key' })
+  expect(sdk.startTelemetry).toHaveBeenCalledWith({}, expect.any(Function))
+  expect(sdk.startTelemetry.mock.calls[0]![1]()).toBe('two')
   transport.clear()
   expect(sdk.stopTelemetry).toHaveBeenCalledOnce()
 })
