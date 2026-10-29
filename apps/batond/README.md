@@ -118,6 +118,8 @@ pnpm --filter @baton/batond dev resume --thread-id <UUID>
 
 Kiro 的 local settings 使用 `agentId: kiro`、`commandPath: kiro-cli`，从 PATH 查找程序；host 仅继承系统必要环境变量，不提供 `BATON_KIRO_*` 或 `KIRO_HOME` 入口。Kiro 模型取 `model ?? adapter_config.model ?? 'default'`；`default` 在原生 `session/new` 中省略，具体 ID 经 `_meta.kiro.modelId` 传递，整个 Thread 固定该选择。
 
+Agent host 继承启动 Worker 时环境中的 `NODE_EXTRA_CA_CERTS`、`SSL_CERT_FILE`、`SSL_CERT_DIR`，以及 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY` 和对应的小写变量，值原样传递。证书文件和目录应使用绝对路径，并位于运行 Agent 的设备上。修改环境变量后重启 batond 和相关 Thread Worker，使新启动的 Agent host 读取新值。各 Agent 及其网络库对 CA 和代理变量的支持不同；变量传入进程不保证 Agent 会使用它们。`--ca-file` 用于节点与中心的连接，不配置 Agent 的证书信任。
+
 `open` 返回 Thread ID 和持久接收回执。启动、发送、恢复和停止的实际终态通过 `command --command-id <UUID>` 或 `reports` 查询；Worker 就绪与 Agent 就绪分别报告。`message` 支持 `--message-id`，执行命令支持 `--command-id`，重试时保留原标识。相同命令 ID、相同内容复用回执和结果，内容冲突会被拒绝。
 
 `withdraw --message-id <ID>` 撤回尚未提交的输入。`reports --after-worker-seq <序号>` 顺序读取有界报告，`ack --event-id <UUID> --worker-seq <序号>` 确认已消费报告。设备不保存原生历史。网页时间线按中心保存的 Thread 输入、回复和事件分页，实时输出通过输出接口读取。

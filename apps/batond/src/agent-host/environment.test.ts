@@ -24,6 +24,27 @@ it('keeps another Agent from seeing the Cursor key', () => {
   expect(agentEnvironment('shell', { PATH: '/usr/bin', CURSOR_API_KEY: 'cursor-key' })).toEqual({ PATH: '/usr/bin' })
 })
 
+it('passes certificate and proxy variables unchanged to every Agent', () => {
+  const network = {
+    NODE_EXTRA_CA_CERTS: '/certs/extra.pem',
+    SSL_CERT_FILE: '/certs/ca.pem',
+    SSL_CERT_DIR: '/certs',
+    HTTP_PROXY: 'http://proxy:8080',
+    HTTPS_PROXY: 'http://proxy:8081',
+    ALL_PROXY: 'socks5://proxy:1080',
+    NO_PROXY: 'localhost,.example.com',
+    http_proxy: 'http://proxy:8082',
+    https_proxy: 'http://proxy:8083',
+    all_proxy: 'socks5://proxy:1081',
+    no_proxy: '',
+  }
+  for (const agent of ['cursor', 'pi', 'codex', 'kiro']) {
+    expect(
+      agentEnvironment(agent, { ...network, OPENAI_API_KEY: 'secret', NODE_TLS_REJECT_UNAUTHORIZED: '0' }),
+    ).toEqual(network)
+  }
+})
+
 it('passes the account directory only to the Agent that reads it', () => {
   const source = {
     PATH: '/usr/bin',
