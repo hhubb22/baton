@@ -98,6 +98,12 @@ class Manager implements ProjectManager {
   }
   probe = (signal?: AbortSignal) => this.runner.probe(signal)
   subscriptions = (signal?: AbortSignal) => this.probe(signal)
+  configureConnection = (
+    action: 'save' | 'delete' | 'get',
+    connection: import('@baton/protocol').ModelConnection,
+    signal?: AbortSignal,
+  ) => this.runner.configureConnection(action, connection, signal)
+  logout = (provider: string, signal?: AbortSignal) => this.runner.logout(provider, signal)
   report = (signal?: AbortSignal) => this.runner.report(signal)
   login = (provider: string, signal?: AbortSignal) => this.runner.login(provider, signal)
   startDeviceLogin = (provider: string, signal?: AbortSignal, onDone?: () => void) =>

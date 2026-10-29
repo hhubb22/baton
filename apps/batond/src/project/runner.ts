@@ -5,7 +5,7 @@ import { createRequire } from 'node:module'
 import { randomUUID } from 'node:crypto'
 import { isSea } from 'node:sea'
 import { Schema } from 'effect'
-import { ProjectRuntime, normalizeProjectProvider } from '@baton/protocol'
+import { ProjectRuntime, ModelConnection, normalizeProjectProvider } from '@baton/protocol'
 import {
   spawnOwnedProcess,
   type OwnedProcess,
@@ -217,6 +217,59 @@ export class RuntimeRunner {
       if (input) process.stdin.unpipe(input)
       signal?.removeEventListener('abort', stop)
       if (owned) await this.reap(owned)
+    }
+  }
+  async configureConnection(action: 'save' | 'delete' | 'get', connection: ModelConnection, signal?: AbortSignal) {
+    const bounded = AbortSignal.any([AbortSignal.timeout(10_000), ...(signal ? [signal] : [])])
+    const args =
+      action === 'save'
+        ? ['connection-save']
+        : [action === 'get' ? 'connection-get' : 'connection-delete', connection.id]
+    let output: Promise<Buffer> | undefined
+    const owned = await this.spawn(args, bounded, undefined, undefined, undefined, (child) => {
+      if (action === 'get') output = captureRuntimeOutput(child.stdout, 64 * 1024, false, bounded)
+    })
+    const stop = () => {
+      void this.reap(owned).catch(() => {})
+    }
+    bounded.addEventListener('abort', stop, { once: true })
+    try {
+      owned.stdin.end(action === 'save' ? JSON.stringify(connection) : undefined)
+      if (action !== 'get') owned.stdout.resume()
+      const bytes = output ? await output : undefined
+      if ((await owned.exited).code !== 0) throw new Error('连接配置失败')
+      bounded.throwIfAborted()
+      if (action !== 'get') this.options.onReportChanged?.()
+      if (bytes)
+        return Schema.decodeUnknownSync(ModelConnection)(
+          JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)),
+        )
+    } finally {
+      bounded.removeEventListener('abort', stop)
+      await this.reap(owned)
+    }
+  }
+  async logout(provider: string, signal?: AbortSignal) {
+    provider = normalizeProvider(provider)
+    await this.loginStarts.get(provider)?.catch(() => undefined)
+    const login = this.logins.get(provider)
+    login?.cancel.abort()
+    await login?.done.catch(() => undefined)
+    const bounded = AbortSignal.any([AbortSignal.timeout(10_000), ...(signal ? [signal] : [])])
+    const owned = await this.spawn(['logout', provider], bounded)
+    const stop = () => {
+      void this.reap(owned).catch(() => {})
+    }
+    bounded.addEventListener('abort', stop, { once: true })
+    try {
+      owned.stdin.end()
+      owned.stdout.resume()
+      if ((await owned.exited).code !== 0) throw new Error('退出订阅失败')
+      bounded.throwIfAborted()
+      this.options.onReportChanged?.()
+    } finally {
+      bounded.removeEventListener('abort', stop)
+      await this.reap(owned)
     }
   }
   async startDeviceLogin(provider: string, signal?: AbortSignal, onDone?: () => void): Promise<DeviceLoginCode> {

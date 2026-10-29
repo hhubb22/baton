@@ -16,7 +16,7 @@ import {
   writeProjectExec,
   sanitizeOrigin,
 } from './index.ts'
-import { RuntimeRunner, defaultWatchdogCommand } from '../project/runner.ts'
+import { RuntimeRunner, defaultRuntimeCommand, defaultWatchdogCommand } from '../project/runner.ts'
 import { startProcessWatchdog } from '../platform/process.ts'
 
 const temporary: string[] = []
@@ -35,6 +35,49 @@ const request = (root_id?: string, path?: string) => ({
   operation_id: randomUUID(),
   ...(root_id ? { root_id } : {}),
   ...(path ? { path } : {}),
+})
+
+it('saves, reads and deletes connection metadata through the device service and real Runtime process', async () => {
+  const data = await directory()
+  const watchdog = process.platform === 'win32' ? undefined : await startProcessWatchdog(defaultWatchdogCommand())
+  if (watchdog) services.push(watchdog)
+  const runner = new RuntimeRunner(
+    {
+      dataDir: data,
+      runtimeCommand: {
+        ...defaultRuntimeCommand(),
+        env: { BATON_PROJECT_RUNTIME_DATA_DIR: join(data, 'credentials') },
+      },
+    },
+    watchdog,
+    { add: async () => {}, remove: async () => {} },
+  )
+  services.push(runner)
+  const service = await makeDeviceService({
+    dataDirectory: data,
+    runtime: {
+      probe: (signal) => runner.probe(signal),
+      startDeviceLogin: (provider, signal, onDone) => runner.startDeviceLogin(provider, signal, onDone),
+      configureConnection: (action, connection, signal) => runner.configureConnection(action, connection, signal),
+    },
+  })
+  services.push(service)
+  const connection = {
+    id: randomUUID(),
+    name: 'Local',
+    protocol: 'openai-responses' as const,
+    base_url: 'http://127.0.0.1:8080/v1',
+    models: ['model'],
+  }
+  const command = (action: 'save' | 'get' | 'delete') =>
+    service.handle({ type: 'node.model_connection', operation_id: randomUUID(), action, connection })
+  expect(await command('save')).toMatchObject({ ok: true })
+  expect((await runner.probe()).providers?.find((item) => item.provider === `api-${connection.id}`)?.status).toBe(
+    'login_required',
+  )
+  expect(await command('get')).toMatchObject({ ok: true, connection })
+  expect(await command('delete')).toMatchObject({ ok: true })
+  expect(await command('get')).toMatchObject({ ok: false })
 })
 
 it('keeps shell configuration under concurrent toggles and fails closed on invalid files or held locks', async () => {

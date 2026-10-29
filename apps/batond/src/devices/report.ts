@@ -28,7 +28,10 @@ export function boundRuntimeReport(report: RuntimeReport, maxBytes = 64 * 1024):
     }
   }
   for (const provider of [...providers].reverse()) {
-    while (tooLarge() && provider.models.length) provider.models.pop()
+    while (tooLarge() && provider.models.length) {
+      provider.models.pop()
+      Object.assign(provider, { models_truncated: true })
+    }
   }
   while (tooLarge() && roots.length) roots.pop()
   if (tooLarge()) throw new Error('设备报告超出容量限制')

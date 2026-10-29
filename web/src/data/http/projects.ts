@@ -33,7 +33,7 @@ interface ProjectDTO {
   status: Project['status']
   created_at: string
   updated_at: string
-  agent: { provider: string; model: string }
+  agent: { provider: string; model: string; source_node_id?: string }
   memory_embedding: Project['memoryEmbedding']
   conversation: { id: string; state: string; last_seq: number }
 }
@@ -178,6 +178,7 @@ export function mapProject(p: ProjectDTO, status: StatusDTO): Project {
     archivedAt: p.status === 'archived' ? timestamp(p.updated_at) : null,
     goal: p.goal,
     subscription: subscription(p.agent.provider),
+    sourceNodeId: p.agent.source_node_id ?? null,
     model: p.agent.model,
     memoryEmbedding: p.memory_embedding,
     agent: {
@@ -187,7 +188,9 @@ export function mapProject(p: ProjectDTO, status: StatusDTO): Project {
         state === 'blocked'
           ? (status.last_error ?? null)
           : state === 'waitingDevice'
-            ? (status.waiting_reason ?? status.last_error ?? null)
+            ? p.agent.source_node_id
+              ? 'Waiting for the selected API connection'
+              : (status.waiting_reason ?? status.last_error ?? null)
             : null,
       activity:
         state === 'running' && status.preview?.after_seq === status.last_seq ? status.preview.text || null : null,
@@ -522,6 +525,7 @@ export function createProjectAPI(ctx: HttpContext): ProjectAPI {
         ...(input.emoji ? { emoji: input.emoji } : {}),
         goal: input.goal,
         provider: provider(input.subscription),
+        ...(input.sourceNodeId ? { source_node_id: input.sourceNodeId } : {}),
         model: input.model,
         client_project_id: await stableId(input.clientId),
       }
@@ -555,6 +559,7 @@ export function createProjectAPI(ctx: HttpContext): ProjectAPI {
         ...(changes.emoji !== undefined ? { emoji: changes.emoji } : {}),
         ...(changes.goal !== undefined ? { goal: changes.goal } : {}),
         ...(changes.subscription !== undefined ? { provider: provider(changes.subscription) } : {}),
+        ...(changes.sourceNodeId !== undefined ? { source_node_id: changes.sourceNodeId } : {}),
         ...(changes.model !== undefined ? { model: changes.model } : {}),
         ...(changes.memoryEmbedding !== undefined
           ? {

@@ -251,6 +251,32 @@ export const httpHandlers = (options: HTTPOptions, downloads?: Downloads) => {
             }),
           ),
         )
+        .handle('modelConnection', ({ params, payload }) =>
+          httpBusiness(
+            Effect.gen(function* () {
+              const { employee } = yield* CurrentBrowserSession
+              return yield* DeviceManagement.configureModelConnection(
+                employee.id,
+                params.nodeId,
+                payload,
+                options.gateway(),
+              )
+            }),
+          ),
+        )
+        .handle('subscriptionLogout', ({ params, payload }) =>
+          httpBusiness(
+            Effect.gen(function* () {
+              const { employee } = yield* CurrentBrowserSession
+              return yield* DeviceManagement.logoutSubscription(
+                employee.id,
+                params.nodeId,
+                payload.provider,
+                options.gateway(),
+              )
+            }),
+          ),
+        )
         .handle('files', ({ params, query }) =>
           httpBusiness(
             Effect.gen(function* () {

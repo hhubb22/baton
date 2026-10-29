@@ -229,6 +229,34 @@ export const RuntimeModel = Schema.Struct({
 })
 export type RuntimeModel = typeof RuntimeModel.Type
 
+export const ModelConnection = Schema.Struct({
+  id: UUID,
+  name: nonemptyText(128).check(Schema.isTrimmed()),
+  protocol: Schema.Literals(['openai-responses', 'openai-completions', 'anthropic-messages']),
+  base_url: nonemptyText(2048),
+  models: Schema.Array(nonemptyText(512).check(Schema.isTrimmed())).check(Schema.isMaxLength(64), Schema.isUnique()),
+})
+export type ModelConnection = typeof ModelConnection.Type
+
+export const ModelConnectionInput = Schema.Struct({
+  action: Schema.Literals(['save', 'delete', 'get']),
+  connection: ModelConnection,
+})
+export const ModelConnectionRequest = Schema.Struct({
+  type: Schema.Literal('node.model_connection'),
+  operation_id: UUID,
+  ...ModelConnectionInput.fields,
+})
+export type ModelConnectionRequest = typeof ModelConnectionRequest.Type
+export const ModelConnectionResult = Schema.Struct({
+  type: Schema.Literal('node.model_connection_result'),
+  operation_id: UUID,
+  ok: Schema.Boolean,
+  code: Schema.optionalKey(Text),
+  connection: Schema.optionalKey(ModelConnection),
+})
+export type ModelConnectionResult = typeof ModelConnectionResult.Type
+
 export const ThreadCapabilities = Schema.Struct({
   create: Schema.Boolean,
   queue: Schema.Boolean,
@@ -251,6 +279,15 @@ export const RuntimeAgent = Schema.Struct({
 export type RuntimeAgent = typeof RuntimeAgent.Type
 
 export const RuntimeProvider = Schema.Struct({
+  models_truncated: Schema.optionalKey(Schema.Boolean),
+  connection: Schema.optionalKey(
+    Schema.Struct({
+      id: UUID,
+      name: nonemptyText(128),
+      protocol: Schema.Literals(['openai-responses', 'openai-completions', 'anthropic-messages']),
+      base_url: nonemptyText(2048),
+    }),
+  ),
   models: Schema.optionalKey(
     Schema.NullOr(Schema.Array(RuntimeModel).check(Schema.isMaxLength(64))).check(uniqueBy((value) => value.id)),
   ),
@@ -508,6 +545,20 @@ export const SubscriptionLoginResult = Schema.Struct({
   expires_in_seconds: Schema.optionalKey(Integer),
 })
 export type SubscriptionLoginResult = typeof SubscriptionLoginResult.Type
+
+export const SubscriptionLogoutRequest = Schema.Struct({
+  type: Schema.Literal('node.subscription_logout'),
+  operation_id: UUID,
+  provider: Text,
+})
+export type SubscriptionLogoutRequest = typeof SubscriptionLogoutRequest.Type
+export const SubscriptionLogoutResult = Schema.Struct({
+  type: Schema.Literal('node.subscription_logout_result'),
+  operation_id: UUID,
+  ok: Schema.Boolean,
+  code: Schema.optionalKey(Text),
+})
+export type SubscriptionLogoutResult = typeof SubscriptionLogoutResult.Type
 
 export const UpdateBrowseRootsInput = Schema.Struct({
   path: Text,

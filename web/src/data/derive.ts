@@ -351,6 +351,21 @@ export interface AssistantWait {
 
 // 没有设备能运行 Project 助手时，主对话上方的说明。
 export function assistantWait(project: Project, devices: Device[]): AssistantWait {
+  if (project.sourceNodeId) {
+    const device = devices.find((item) => item.id === project.sourceNodeId)
+    const connection = device?.modelConnections?.find((item) => `api-${item.id}` === project.subscription)
+    const name = connection?.name ?? 'The selected API connection'
+    const detail = !device
+      ? 'Choose another model source in project settings.'
+      : device.connection !== 'online'
+        ? `Reconnect ${device.name} to continue.`
+        : !connection
+          ? `Choose another model source in project settings.`
+          : connection.keyNeeded
+            ? `Add an API key on ${device.name}.`
+            : `Waiting for ${device.name} to run the project assistant.`
+    return { title: `${name} is unavailable`, detail, overview: `Waiting for ${name}` }
+  }
   const subscription = project.subscription
   const count = `${devices.length} ${devices.length === 1 ? 'device' : 'devices'}`
   if (devices.length > 0 && devices.every((item) => item.connection !== 'online')) {

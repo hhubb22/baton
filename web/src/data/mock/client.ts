@@ -264,6 +264,16 @@ export function createMockClient(
       signedIn()
       return structuredClone(store.removeDeviceFolder(deviceId, path))
     },
+    async configureModelConnection({ deviceId, action, connection }) {
+      await connect(latency.save)
+      signedIn()
+      return structuredClone(store.configureModelConnection(deviceId, action, connection))
+    },
+    async logoutSubscription({ deviceId, provider }) {
+      await connect(latency.save)
+      signedIn()
+      store.logoutSubscription(deviceId, provider)
+    },
     async startSubscriptionLogin({ deviceId, provider }) {
       await connect(latency.save)
       signedIn()

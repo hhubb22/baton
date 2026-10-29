@@ -118,6 +118,7 @@ export interface BatonClient {
     emoji?: string
     goal: string
     subscription: string
+    sourceNodeId?: string | null
     model: string
     clientId: string
   }): Promise<Project>
@@ -144,6 +145,12 @@ export interface BatonClient {
   addDeviceFolder(input: { deviceId: ID; path: string }): Promise<Device>
   removeDeviceFolder(input: { deviceId: ID; path: string }): Promise<Device>
   startSubscriptionLogin(input: { deviceId: ID; provider: string }): Promise<SubscriptionLoginChallenge>
+  configureModelConnection(input: {
+    deviceId: ID
+    action: 'save' | 'delete' | 'get'
+    connection: import('./types').ModelConnection
+  }): Promise<import('./types').ModelConnection | undefined>
+  logoutSubscription(input: { deviceId: ID; provider: string }): Promise<void>
   setCommandAccess(input: { deviceId: ID; enabled: boolean }): Promise<Device>
   // 返回时中心已经拒绝这台设备的新连接并关闭了当前连接。
   removeDevice(deviceId: ID): Promise<void>

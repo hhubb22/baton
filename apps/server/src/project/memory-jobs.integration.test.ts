@@ -10,6 +10,49 @@ import { runtimeRequest } from './runtime.ts'
 import { scheduleMemoryJobs } from './memory-jobs.ts'
 import { changeProjectMemory, listProjectMemory, writeProjectMemory } from './memory/index.ts'
 
+it('keeps an embedding claim on another device when the chat source is device-bound', async () => {
+  await withTestDatabase(async ({ run }) => {
+    const report: P.RuntimeReport = {
+      roots: [],
+      repos: [],
+      exec: { enabled: false, shell: '/bin/sh' },
+      project_runtime: { version: '0.1.0', memory_protocol: 1, providers: [] },
+    }
+    const owner = await seedNode(run, { report, online: false })
+    const other = await seedNode(run, { employeeId: owner.employeeId, report })
+    const project = await run(
+      projects.createProject(owner.employeeId, {
+        title: 'Embedding',
+        provider: `api-${randomUUID()}`,
+        model: 'chat',
+        source_node_id: owner.nodeId,
+        memory_embedding: { base_url: 'http://localhost:4321/v1', model: 'embedding' },
+      }),
+    )
+    const id = randomUUID()
+    await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql`INSERT INTO project_memory_jobs(id,employee_id,project_id,conversation_id,kind,input_seq,through_seq) VALUES(${id},${owner.employeeId},${project.id},${project.conversation.id},'embedding',0,0)`
+      }),
+    )
+    await run(scheduleMemoryJobs())
+    const [first] = await run(projects.claimProjectCommands('project_memory_start'))
+    expect(first?.node_id).toBe(other.nodeId)
+    await run(scheduleMemoryJobs())
+    const state = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        return yield* sql<{
+          state: string
+          attempt_id: string
+        }>`SELECT state,attempt_id FROM project_memory_jobs WHERE id=${id}`
+      }),
+    )
+    expect(state[0]).toMatchObject({ state: 'claimed', attempt_id: first!.command.run_id })
+  })
+})
+
 it('registers the final reply before finish, backs off attempts without progress and commits proposals independently', async () => {
   await withTestDatabase(async ({ run }) => {
     const node = await seedNode(run, {

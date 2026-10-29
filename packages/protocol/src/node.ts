@@ -20,6 +20,10 @@ import {
   RuntimeReportResult,
   SubscriptionLoginRequest,
   SubscriptionLoginResult,
+  ModelConnectionRequest,
+  ModelConnectionResult,
+  SubscriptionLogoutRequest,
+  SubscriptionLogoutResult,
 } from './device.ts'
 import { ProjectRunCommand, ProjectRuntimeRequest, ProjectRuntimeResult } from './project.ts'
 import {
@@ -115,6 +119,8 @@ export const NodeToControlBody = Schema.Union([
   BrowseRootsResult,
   BrowseRootsGetResult,
   SubscriptionLoginResult,
+  ModelConnectionResult,
+  SubscriptionLogoutResult,
   ProjectRuntimeRequest,
 ])
 export type NodeToControlBody = typeof NodeToControlBody.Type
@@ -130,6 +136,8 @@ export const ControlToNodeBody = Schema.Union([
   BrowseRootsRequest,
   BrowseRootsGetRequest,
   SubscriptionLoginRequest,
+  ModelConnectionRequest,
+  SubscriptionLogoutRequest,
   ProjectRunCommand,
   ProjectRuntimeResult,
 ])

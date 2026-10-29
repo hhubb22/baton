@@ -28,6 +28,16 @@ export { scheduleMemoryJobs } from './memory-jobs.ts'
 import { stopProjectMemory } from './memory-jobs.ts'
 import * as threads from '../threads/index.ts'
 
+const validateModelSource = Effect.fnUntraced(function* (employee: string, provider: string, nodeId: string | null) {
+  const api = /^api-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(provider)
+  if (api !== (nodeId !== null)) return yield* Effect.fail(projectError('invalid', 422))
+  if (nodeId) {
+    const sql = yield* SqlClient.SqlClient
+    const nodes = yield* sql`SELECT id FROM nodes WHERE id=${nodeId} AND employee_id=${employee} AND revoked_at IS NULL`
+    if (!nodes.length) return yield* Effect.fail(projectError('invalid', 422))
+  }
+})
+
 export const getProject = Effect.fn('getProject')(function* (employee: string, project: string) {
   yield* projectDecode(P.UUID, project)
   return yield* readProject(employee, project)
@@ -40,6 +50,7 @@ export const createProject = Effect.fn('createProject')(function* (employee: str
   return yield* projectTransaction(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
+      yield* validateModelSource(employee, decoded.provider, decoded.source_node_id ?? null)
       const id = randomUUID(),
         agent = randomUUID(),
         conversation = randomUUID()
@@ -56,7 +67,7 @@ export const createProject = Effect.fn('createProject')(function* (employee: str
         if (!old?.matches) return yield* Effect.fail(projectError('project_conflict'))
         return yield* readProject(employee, old.id)
       }
-      yield* sql`INSERT INTO project_agents(id,employee_id,project_id,provider,model) VALUES(${agent},${employee},${id},${decoded.provider},${decoded.model})`
+      yield* sql`INSERT INTO project_agents(id,employee_id,project_id,provider,model,source_node_id) VALUES(${agent},${employee},${id},${decoded.provider},${decoded.model},${decoded.source_node_id ?? null})`
       yield* sql`INSERT INTO conversations(id,employee_id,agent_id) VALUES(${conversation},${employee},${agent})`
       return yield* readProject(employee, id)
     }),
@@ -95,12 +106,19 @@ export const patchProject = Effect.fn('patchProject')(function* (
         emoji: patch.emoji ?? old.emoji,
         goal: patch.goal ?? old.goal,
         status: patch.status ?? old.status,
-        agent: { ...old.agent, provider: patch.provider ?? old.agent.provider, model: patch.model ?? old.agent.model },
+        agent: {
+          ...old.agent,
+          provider: patch.provider ?? old.agent.provider,
+          model: patch.model ?? old.agent.model,
+          source_node_id:
+            patch.source_node_id === undefined ? (old.agent.source_node_id ?? null) : patch.source_node_id,
+        },
       })
       yield* projectDecode(P.summary(1024), value.agent.provider)
       yield* projectDecode(P.summary(1024), value.agent.model)
+      yield* validateModelSource(employee, value.agent.provider, value.agent.source_node_id ?? null)
       yield* sql`UPDATE projects SET memory_embedding=${value.memory_embedding ? JSON.stringify(value.memory_embedding) : null}::jsonb,title=${value.title},emoji=${value.emoji},goal=${value.goal},status=${value.status},version=version+1,updated_at=clock_timestamp() WHERE id=${id} AND employee_id=${employee}`
-      yield* sql`UPDATE project_agents SET provider=${value.agent.provider},model=${value.agent.model} WHERE id=${agent}`
+      yield* sql`UPDATE project_agents SET provider=${value.agent.provider},model=${value.agent.model},source_node_id=${value.agent.source_node_id ?? null} WHERE id=${agent}`
       if (old.memory_embedding?.config_id !== value.memory_embedding?.config_id) {
         yield* lockMemoryState(employee, id)
         yield* queueEmbeddings(employee, id)
@@ -144,6 +162,7 @@ export const patchProject = Effect.fn('patchProject')(function* (
       if (
         updated.status !== 'active' ||
         updated.agent.provider !== old.agent.provider ||
+        updated.agent.source_node_id !== old.agent.source_node_id ||
         updated.agent.model !== old.agent.model ||
         updated.memory_embedding?.config_id !== old.memory_embedding?.config_id
       )

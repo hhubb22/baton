@@ -164,7 +164,7 @@ Web UI 默认通过 HTTP 客户端连接 Coordinator，覆盖登录、设备、T
 - 默认入口使用 `src/data/http`，JSON 请求、Cookie 与 WebSocket 均通过页面同源的 `/api/v1`。开发模式仅在地址中显式带有 `?mock=1` 或 `?scenario=<id>` 时启用 mock 和场景面板；生产构建始终使用真实客户端。
 - Vite 可通过 `BATON_DEV_BACKEND` 代理 `/api` 的 HTTP 与 WebSocket 请求，并调整 Origin。后端 TLS 证书持续验证；私有 CA 通过启动 Node.js 前设置 `NODE_EXTRA_CA_CERTS` 加入信任链。
 - 页面刷新后通过 `/me` 恢复会话并取得 CSRF token；需要 CSRF 校验的写请求缺少 token 时先获取，遇到 `csrf_rejected` 时刷新并重试一次。验证未登录、会话失效、权限拒绝、首次改密和重新登录的页面行为。
-- Project 模型目录来自设备的 `project_runtime.providers[].models`，Thread 模型目录来自对应 Agent 报告。核对 ChatGPT 与 `openai-codex`、xAI 与 `xai`、Claude 与 `anthropic` 的映射，以及未上报目录、手填 provider ID、认证缺失和设备不可用的反馈。Project Runtime 当前注册这三个 provider；设备页按 `login_methods` 显示设备码登录或本地 OAuth/API key 配置入口。
+- Project 模型目录来自设备的 `project_runtime.providers[].models`，Thread 模型目录来自对应 Agent 报告。Project 来源按订阅和设备所属 API 连接分组；设备页分别管理订阅和连接，密钥只通过本机桥接或目标设备 CLI 保存。
 - 核对 Project、Thread、消息、Inbox、文件、执行过程和历史的真实 DTO、错误与分页契约。创建和消息重试沿用同一客户端标识，返回已有记录或实际冲突结果。
 - 已登录且有页面订阅时连接 `/api/v1/events`，通过 `thread.changed` 刷新 Thread、消息和操作状态；每 2 秒轮询刷新相关查询，补充其他状态并在事件连接断开后继续更新、尝试重连。
 - 已保存的业务数据由 Coordinator 和设备持久化。验证保存后刷新、重新登录、直接打开页面和跨入口读取的一致性。完整历史、执行过程与文件按设备的实际可用性读取；未保存的事项、设置和记忆草稿及引用选择仅留在工作区，离开工作区或刷新后清除。

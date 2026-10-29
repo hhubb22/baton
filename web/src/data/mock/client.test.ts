@@ -954,6 +954,41 @@ describe('projects', () => {
     ])
   })
 
+  it('wakes waiting work when the project switches to an available API connection', async () => {
+    const { client, scheduler } = setup('modelSources')
+    const project = await client.createProject({
+      name: 'API',
+      emoji: '🚀',
+      goal: '',
+      subscription: 'api-11111111-1111-4111-8111-111111111111',
+      sourceNodeId: 'dev-ubuntu',
+      model: 'local-model',
+      clientId: 'api-project',
+    })
+    await client.sendProjectMessage({ projectId: project.id, body: 'Start', clientId: 'api-message' })
+    scheduler.advance(0)
+    expect((await client.listProjects()).find((item) => item.id === project.id)?.agent.state).toBe('waitingDevice')
+    await client.updateProject({
+      projectId: project.id,
+      patch: {
+        emoji: '🛠️',
+        subscription: 'api-22222222-2222-4222-8222-222222222222',
+        sourceNodeId: 'dev-ubuntu',
+        model: 'claude-model',
+      },
+    })
+    expect((await client.listProjects()).find((item) => item.id === project.id)?.emoji).toBe('🛠️')
+    expect((await client.listProjects()).find((item) => item.id === project.id)?.agent).toMatchObject({
+      state: 'running',
+      deviceId: 'dev-ubuntu',
+    })
+    await client.updateProject({ projectId: project.id, patch: { model: 'another-model' } })
+    expect((await client.listProjects()).find((item) => item.id === project.id)?.agent).toMatchObject({
+      state: 'running',
+      deviceId: 'dev-ubuntu',
+    })
+  })
+
   it('switches device with a note and resumes after reconnect', async () => {
     const { client, scheduler } = setup()
     client.controls.setDeviceConnection('dev-ubuntu', 'offline')

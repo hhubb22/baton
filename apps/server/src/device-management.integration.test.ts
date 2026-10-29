@@ -64,6 +64,28 @@ const gateway = (
 })
 
 describe('authenticated device management confirmation', () => {
+  it('authorizes model connection metadata operations before sending them to the device', async () => {
+    const { identity } = await node()
+    const connection = {
+      id: randomUUID(),
+      name: 'Gateway',
+      protocol: 'openai-responses' as const,
+      base_url: 'http://localhost:8080/v1',
+      models: ['model'],
+    }
+    let sent = 0
+    const transport = gateway(async (body) => {
+      sent++
+      return { type: 'node.model_connection_result', operation_id: body.operation_id, ok: true, connection }
+    })
+    await expect(
+      run(Devices.configureModelConnection(bob.id, identity.node_id, { action: 'get', connection }, transport)),
+    ).rejects.toMatchObject({ code: 'forbidden' })
+    expect(sent).toBe(0)
+    expect(
+      await run(Devices.configureModelConnection(alice.id, identity.node_id, { action: 'get', connection }, transport)),
+    ).toEqual({ connection })
+  })
   it.each(['files', 'roots-read', 'roots-set', 'login', 'exec'] as const)(
     'renews the original credential only after a confirmed %s response',
     async (kind) => {

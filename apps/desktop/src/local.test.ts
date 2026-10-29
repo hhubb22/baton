@@ -44,7 +44,7 @@ it('requires the authenticated center employee to own the local identity', () =>
 })
 
 it('declares all three versioned local capabilities', () => {
-  for (const name of ['open-local', 'pick-directory', 'diagnostics'])
+  for (const name of ['open-local', 'pick-directory', 'diagnostics', 'model-connection-key'])
     expect(desktopCapabilities).toContainEqual({ name, version: 1 })
 })
 
@@ -56,7 +56,7 @@ it('every local IPC rejects foreign windows, subframes and setup pages before pe
     (event) => authorizeBridge(event.url, identity.coordinator_url, event.main),
     actions,
   )
-  expect(handlers.size).toBe(6)
+  expect(handlers.size).toBe(7)
   for (const handler of handlers.values())
     for (const event of [
       { url: 'https://elsewhere.test', main: true },
@@ -66,6 +66,17 @@ it('every local IPC rejects foreign windows, subframes and setup pages before pe
       await expect(handler(event, { nodeId: node })).rejects.toThrow('只有中心主页面')
   expect(dependencies.identity).not.toHaveBeenCalled()
   expect(dependencies.openDirectory).not.toHaveBeenCalled()
+})
+
+it('writes a connection key only for this computer', async () => {
+  const { actions, dependencies } = fixture()
+  dependencies.setModelConnectionKey = vi.fn(async () => {})
+  await expect(
+    actions.setModelConnectionKey({ nodeId: other, connectionId: thread, key: 'offline-key' }),
+  ).rejects.toThrow('not this computer')
+  expect(dependencies.setModelConnectionKey).not.toHaveBeenCalled()
+  await actions.setModelConnectionKey({ nodeId: node, connectionId: thread, key: 'offline-key' })
+  expect(dependencies.setModelConnectionKey).toHaveBeenCalledWith(thread, 'offline-key')
 })
 
 it('opens only a locally recorded work directory for an authenticated local Thread', async () => {

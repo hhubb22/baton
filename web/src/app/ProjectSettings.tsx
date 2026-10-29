@@ -108,7 +108,7 @@ export function ProjectSettings({
     workspace.settingsDrafts.set(project.id, (current) => {
       const merged: ProjectPatch = { ...current, ...next }
       for (const key of Object.keys(merged) as (keyof ProjectPatch)[]) {
-        if (JSON.stringify(merged[key]) === JSON.stringify(project[key])) delete merged[key]
+        if (JSON.stringify(merged[key] ?? null) === JSON.stringify(project[key] ?? null)) delete merged[key]
       }
       return Object.keys(merged).length > 0 ? merged : null
     })
@@ -262,7 +262,7 @@ export function ProjectSettings({
         <div {...stylex.props(styles.section)}>
           <ProjectModelFields
             catalog={catalog}
-            value={{ subscription: values.subscription, model: values.model }}
+            value={{ subscription: values.subscription, model: values.model, sourceNodeId: values.sourceNodeId }}
             onChange={change}
             readOnly={archived}
             loading={devices.isPending}

@@ -59,6 +59,16 @@ export interface Subscription {
   models?: string[]
 }
 
+export interface ModelConnection {
+  id: string
+  name: string
+  protocol: 'openai-responses' | 'openai-completions' | 'anthropic-messages'
+  base_url: string
+  models: string[]
+  keyNeeded: boolean
+  modelsTruncated?: boolean
+}
+
 export interface SubscriptionLoginChallenge {
   provider: string
   verificationUri: string
@@ -86,6 +96,7 @@ export interface Device {
   registeredAt: number
   agents: DeviceAgent[]
   subscriptions: Subscription[]
+  modelConnections?: ModelConnection[]
   // 设备上装了 Project Agent Runtime，Project 助手才能在这台设备上运行。
   hasRuntime: boolean
   // 允许 Agent 访问的目录，可在网页或设备本机管理。
@@ -254,6 +265,7 @@ export interface Project {
   goal: string
   // Project 助手使用的订阅和模型，修改后从下一次运行开始生效。
   subscription: string
+  sourceNodeId?: string | null
   model: string
   memoryEmbedding: MemoryEmbeddingConfig | null
   agent: {
@@ -268,7 +280,9 @@ export interface Project {
   createdAt: number
 }
 
-export type ProjectPatch = Partial<Pick<Project, 'name' | 'emoji' | 'goal' | 'subscription' | 'model'>> & {
+export type ProjectPatch = Partial<
+  Pick<Project, 'name' | 'emoji' | 'goal' | 'subscription' | 'model' | 'sourceNodeId'>
+> & {
   memoryEmbedding?: MemoryEmbeddingConfigInput | null
 }
 

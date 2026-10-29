@@ -23,6 +23,8 @@ if (process.isMainFrame && origin && location.origin === origin) {
       openLogs: (input: { nodeId: string }): Promise<void> => ipcRenderer.invoke('baton:open-logs', input),
       copyDiagnostics: (input: { nodeId: string }): Promise<void> =>
         ipcRenderer.invoke('baton:copy-diagnostics', input),
+      setModelConnectionKey: (input: { nodeId: string; connectionId: string; key: string }): Promise<void> =>
+        ipcRenderer.invoke('baton:model-connection-key', input),
       notificationCursor: (scope: string): Promise<string | null> =>
         ipcRenderer.invoke('baton:notification-cursor', scope),
       deliverNotifications: (input: { scope: string; events: NativeNotice[]; cursor: string | null }): Promise<void> =>

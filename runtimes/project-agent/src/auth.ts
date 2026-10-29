@@ -6,6 +6,7 @@ import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-code
 import { xaiProvider } from '@earendil-works/pi-ai/providers/xai'
 import { anthropicProvider } from '@earendil-works/pi-ai/providers/anthropic'
 import { FileCredentials } from './credentials.js'
+import { Connections, connectionProvider } from './connections.js'
 
 export const VERSION = BUILD.version
 // 设备码能力由对应 OAuth 流程决定；其余认证方式和模型直接取自 provider。
@@ -39,20 +40,12 @@ export async function probe(store = credentials()) {
       const credential = await store.read(provider.id)
       if (credential?.type === 'oauth' && provider.auth.oauth && credential.refresh && credential.access)
         status = 'available'
-      if (
-        credential?.type === 'api_key' &&
-        provider.auth.apiKey &&
-        typeof credential.key === 'string' &&
-        credential.key.trim()
-      )
-        status = 'available'
     } catch (error) {
       status = 'unknown'
       reason = error instanceof Error && credentialErrors.has(error.message) ? error.message : 'credential_read_failed'
     }
     const loginMethods: ('oauth' | 'api_key' | 'device_code')[] = []
     if (provider.auth.oauth) loginMethods.push('oauth')
-    if (provider.auth.apiKey?.login) loginMethods.push('api_key')
     if (deviceCode) loginMethods.push('device_code')
     const models = provider
       .getModels()
@@ -66,7 +59,29 @@ export async function probe(store = credentials()) {
       ...(reason ? { reason } : {}),
     })
   }
-  return { version: VERSION, release: releaseMetadata(), memory_protocol: 1, providers }
+  for (const connection of await new Connections(store).list()) {
+    providers.push({
+      provider: `api-${connection.id}`,
+      status: connection.key_needed ? 'login_required' : 'available',
+      models: connection.models.map((id) => ({ id, name: id })),
+      login_methods: [],
+      reason: undefined,
+      connection: {
+        id: connection.id,
+        name: connection.name,
+        protocol: connection.protocol,
+        base_url: connection.base_url,
+      },
+    })
+  }
+  const result = { version: VERSION, release: releaseMetadata(), memory_protocol: 1, providers }
+  for (const provider of [...providers].reverse()) {
+    while (Buffer.byteLength(JSON.stringify(result)) > 48 * 1024 && provider.models.length) {
+      provider.models.pop()
+      Object.assign(provider, { models_truncated: true })
+    }
+  }
+  return result
 }
 export async function runtimeModels(store = credentials()) {
   const models = createModels({
@@ -74,25 +89,6 @@ export async function runtimeModels(store = credentials()) {
     authContext: { env: async () => undefined, fileExists: async () => false },
   })
   for (const { provider } of registrations) models.setProvider(provider)
+  for (const connection of await new Connections(store).list()) models.setProvider(connectionProvider(connection))
   return models
-}
-
-export async function loginApiKey(providerId: string, key: string, store = credentials()) {
-  const { provider } = registeredProvider(providerId)
-  if (!provider.auth.apiKey?.login) throw new Error('api_key_unsupported')
-  const trimmed = key.trim()
-  if (
-    !trimmed ||
-    Buffer.byteLength(trimmed) > 16 * 1024 ||
-    Array.from(trimmed).some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)
-  )
-    throw new Error('api_key_invalid')
-  const models = await runtimeModels(store)
-  await models.login(providerId, 'api_key', {
-    async prompt(question) {
-      if (question.type !== 'secret') throw new Error('api_key_prompt_unsupported')
-      return trimmed
-    },
-    notify() {},
-  })
 }

@@ -292,7 +292,7 @@ describe('project maintenance', () => {
     const { client } = setup('/projects/prj-baton?settings=true')
     await screen.findByRole('heading', { name: 'Project settings' })
     expect(screen.getByText('Changes apply from the next run.')).toBeInTheDocument()
-    await user.selectOptions(screen.getByLabelText('Subscription'), 'Claude')
+    await user.selectOptions(screen.getByLabelText('Model source'), '|Claude')
     expect(screen.getByLabelText('Project assistant model')).toHaveValue('claude-opus-5-5')
     await user.selectOptions(screen.getByLabelText('Project assistant model'), 'claude-sonnet-5-5')
     await save(user)
@@ -663,7 +663,7 @@ describe('project maintenance', () => {
     await user.click(screen.getByRole('link', { name: /Compatibility/ }))
     expect((await screen.findAllByText('Project archived')).length).toBeGreaterThan(0)
     await openSettings(user)
-    for (const label of ['Name', 'Goal', 'Subscription', 'Project assistant model']) {
+    for (const label of ['Name', 'Goal', 'Model source', 'Project assistant model']) {
       expect(screen.getByLabelText(label, { exact: false })).toHaveAttribute('readonly')
     }
     expect(screen.queryByRole('button', { name: /^(Pause|Resume|Archive|Save changes)$/ })).not.toBeInTheDocument()

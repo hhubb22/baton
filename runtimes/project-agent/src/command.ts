@@ -3,9 +3,10 @@ import { createConnection } from 'node:net'
 import { createInterface } from 'node:readline/promises'
 import { parseArgs } from 'node:util'
 import { StdioClient, frames, writeFrame } from './stdio.js'
-import { probe, runtimeModels, registeredProvider, loginApiKey } from './auth.js'
+import { probe, runtimeModels, registeredProvider, credentials } from './auth.js'
 import { checkedRPC, type Request } from './protocol.js'
 import { createDeviceCodeLoginInteraction, createLoginInteraction } from './login.js'
+import { Connections } from './connections.js'
 
 async function ipc(request: Request): Promise<unknown> {
   const endpoint = process.env.BATON_PROJECT_RUNTIME_ENDPOINT,
@@ -31,24 +32,40 @@ export async function runProjectRuntimeCLI(args: string[]): Promise<void> {
     console.log(JSON.stringify(await probe()))
     return
   }
-  if (command === 'login-api-key' || command === 'embedding-key') {
-    if (command === 'login-api-key' && !registeredProvider(provider).provider.auth.apiKey?.login)
-      throw new Error('api_key_unsupported')
+  if (command === 'embedding-key' || command === 'connection-key' || command === 'connection-save') {
     if (process.stdin.isTTY) throw new Error('api_key_stdin_required')
     const chunks: Buffer[] = []
     let bytes = 0
     for await (const chunk of process.stdin) {
       const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
       bytes += data.length
-      if (bytes > 16 * 1024) throw new Error('api_key_invalid')
+      if (bytes > (command === 'connection-save' ? 64 * 1024 : 16 * 1024)) throw new Error('api_key_invalid')
       chunks.push(data)
     }
     const key = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks))
-    if (command === 'embedding-key') {
+    if (command === 'connection-key') await new Connections(credentials()).setKey(provider, key)
+    else if (command === 'connection-save') await new Connections(credentials()).save(JSON.parse(key))
+    else if (command === 'embedding-key') {
       const { saveEmbeddingKey } = await import('./embeddings.js')
       await saveEmbeddingKey(provider, key)
-    } else await loginApiKey(provider, key)
-    console.error('API key 已保存。')
+    }
+    console.error(command === 'connection-save' ? '连接配置已保存。' : 'API key 已保存。')
+    return
+  }
+  if (command === 'connection-delete') {
+    await new Connections(credentials()).delete(provider)
+    return
+  }
+  if (command === 'connection-get') {
+    const connection = (await new Connections(credentials()).list()).find((item) => item.id === provider)
+    if (!connection) throw new Error('connection_not_found')
+    const { key_needed: _keyNeeded, ...metadata } = connection
+    console.log(JSON.stringify(metadata))
+    return
+  }
+  if (command === 'logout') {
+    registeredProvider(provider)
+    await credentials().delete(provider)
     return
   }
   if (command === 'login-device') {
@@ -116,7 +133,7 @@ export async function runProjectRuntimeCLI(args: string[]): Promise<void> {
   }
   if (command !== 'run' && command !== 'memory')
     throw new Error(
-      'usage: baton-project-runtime run|memory|probe|login <provider>|login-device <provider>|login-api-key <provider> < key-file|embedding-key <profile> < key-file|--version',
+      'usage: baton-project-runtime run|memory|probe|login <provider>|login-device <provider>|connection-key <id> < key-file|embedding-key <profile> < key-file|--version',
     )
   const { values } = parseArgs({
     args: args.slice(1),
@@ -170,7 +187,7 @@ export function reportProjectRuntimeError(error: unknown): void {
   const messages: Record<string, string> = {
     unsupported_provider: '该 provider 未注册，请运行 probe 查看已实现的 provider。',
     api_key_unsupported: '该 provider 不支持 API key，请使用订阅登录。',
-    api_key_stdin_required: '从标准输入读取 API key：login-api-key <provider> < 私有密钥文件。',
+    api_key_stdin_required: '从标准输入读取 API key：connection-key <id> < 私有密钥文件。',
     api_key_invalid: 'API key 不能为空，须为单行文本且不超过 16 KiB。',
     device_code_unsupported: '该 provider 支持终端登录，请使用 login <provider>。',
   }

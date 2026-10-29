@@ -25,6 +25,8 @@ const rpcResponses = new Map([
   ['node.browse_roots_set', 'node.browse_roots_result'],
   ['node.browse_roots_get', 'node.browse_roots_get_result'],
   ['node.subscription_login', 'node.subscription_login_result'],
+  ['node.model_connection', 'node.model_connection_result'],
+  ['node.subscription_logout', 'node.subscription_logout_result'],
 ])
 const defaultRPCTimeouts: Readonly<Record<string, number>> = {
   'files.browse': 12_000,
@@ -32,6 +34,8 @@ const defaultRPCTimeouts: Readonly<Record<string, number>> = {
   'node.project_exec_set': 5000,
   'node.browse_roots_set': 5000,
   'node.subscription_login': 12_000,
+  'node.model_connection': 12_000,
+  'node.subscription_logout': 12_000,
 }
 export const checkNodeVersion = (
   daemon: Pick<NodeAuth, 'daemon_version' | 'protocol_version'>,
@@ -418,6 +422,8 @@ export class Gateway {
               'node.browse_roots_result',
               'node.browse_roots_get_result',
               'node.subscription_login_result',
+              'node.model_connection_result',
+              'node.subscription_logout_result',
               'project_runtime.request',
             ].includes(body.type)
           )
@@ -450,7 +456,9 @@ export class Gateway {
             body.type === 'node.project_exec_result' ||
             body.type === 'node.browse_roots_result' ||
             body.type === 'node.browse_roots_get_result' ||
-            body.type === 'node.subscription_login_result'
+            body.type === 'node.subscription_login_result' ||
+            body.type === 'node.model_connection_result' ||
+            body.type === 'node.subscription_logout_result'
           ) {
             await this.handlers.validate(current.source)
             const pending = this.rpc.get(envelope.correlation_id ?? '')

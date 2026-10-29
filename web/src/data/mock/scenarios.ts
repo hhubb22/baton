@@ -32,6 +32,7 @@ export const scenarioIds = [
   'maintenanceError',
   'memoryConflict',
   'archived',
+  'modelSources',
 ] as const
 export type ScenarioId = (typeof scenarioIds)[number]
 
@@ -54,6 +55,7 @@ export const scenarioLabels: Record<ScenarioId, string> = {
   maintenanceError: 'Maintenance · save and read errors',
   memoryConflict: 'Memory · newer assistant version',
   archived: 'Archived project',
+  modelSources: 'Model sources',
 }
 
 export function isScenarioId(value: unknown): value is ScenarioId {
@@ -903,6 +905,28 @@ function setDevice(world: World, id: string, connection: Device['connection'], l
 export function createWorld(id: ScenarioId, now: number): World {
   const world = base(now)
   switch (id) {
+    case 'modelSources': {
+      const device = world.devices.find((item) => item.id === 'dev-ubuntu')!
+      device.modelConnections = [
+        {
+          id: '11111111-1111-4111-8111-111111111111',
+          name: 'Local gateway',
+          protocol: 'openai-completions',
+          base_url: 'http://localhost:8080/v1',
+          models: ['local-model'],
+          keyNeeded: true,
+        },
+        {
+          id: '22222222-2222-4222-8222-222222222222',
+          name: 'Team API',
+          protocol: 'anthropic-messages',
+          base_url: 'https://api.anthropic.com',
+          models: ['claude-model'],
+          keyNeeded: false,
+        },
+      ]
+      return world
+    }
     case 'streamingMarkdown': {
       const target = findThread(world, 'thr-webui')
       target.title = 'Streaming Markdown demo'
