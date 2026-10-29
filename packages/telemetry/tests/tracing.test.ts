@@ -58,63 +58,69 @@ it('exports to a local OTLP capture endpoint on scope release and redacts automa
   try {
     const error = new Error('secret prompt credential SQL parameter')
     const result = await Effect.runPromise(
-      Effect.exit(
-        withTraceSpan(
-          Effect.gen(function* () {
-            yield* withTraceSpan(
-              Effect.gen(function* () {
-                const span = yield* Effect.currentSpan
-                span.event('effect.sql.transaction.commit', BigInt(Date.now()) * 1_000_000n, { token: 'secret' })
-                span.event('effect.sql.transaction.secret', BigInt(Date.now()) * 1_000_000n)
-                span.event('exception', BigInt(Date.now()) * 1_000_000n, { message: 'secret' })
-                expect(yield* Statement.SpanPropagationEnabled).toBe(true)
-                yield* withTraceSpan(Effect.void, 'sql.connection.wait', undefined, {
-                  attributes: { 'db.client.connection.wait_time_ms': 12.5 },
-                })
-              }),
-              'sql.execute',
-              undefined,
-              { attributes: { 'db.query.text': 'secret initial SQL', 'db.operation.name': 'SELECT' } },
-            )
-            yield* Effect.annotateCurrentSpan({
-              'db.query.text': 'secret SQL parameter',
-              'baton.command.id': 'command',
-            })
-            yield* withTraceSpan(Effect.void, 'baton.usage.missing', undefined, {
-              attributes: {
-                'baton.usage.reported': false,
-                'gen_ai.usage.input_tokens': 0,
-                'gen_ai.request.model': 'custom-invalid-model',
-              },
-            })
-            yield* withTraceSpan(Effect.void, 'baton.usage.zero', undefined, {
-              attributes: {
-                'baton.usage.reported': true,
-                'gen_ai.usage.input_tokens': 0,
-              },
-            })
-            yield* Effect.log('secret body /private/path')
-            yield* Effect.log('baton.wait.start').pipe(
-              Effect.annotateLogs({ 'baton.wait.reason': 'queue', secret: 'secret annotation' }),
-            )
-            yield* Metric.update(
-              Metric.gauge('baton.workers.active', {
-                description: 'secret description',
-                attributes: { 'baton.agent': 'codex', 'baton.thread.id': 'secret thread', secret: 'secret label' },
-              }),
-              1,
-            )
-            yield* Effect.promise(() =>
-              vi.waitFor(() => {
-                expect(payloads.some((body) => body.includes('resourceLogs'))).toBe(true)
-                expect(payloads.some((body) => body.includes('resourceMetrics'))).toBe(true)
-              }),
-            )
-            return yield* Effect.fail(error)
+      Effect.gen(function* () {
+        const exit = yield* Effect.exit(
+          withTraceSpan(
+            Effect.gen(function* () {
+              yield* withTraceSpan(
+                Effect.gen(function* () {
+                  const span = yield* Effect.currentSpan
+                  span.event('effect.sql.transaction.commit', BigInt(Date.now()) * 1_000_000n, { token: 'secret' })
+                  span.event('effect.sql.transaction.secret', BigInt(Date.now()) * 1_000_000n)
+                  span.event('exception', BigInt(Date.now()) * 1_000_000n, { message: 'secret' })
+                  expect(yield* Statement.SpanPropagationEnabled).toBe(true)
+                  yield* withTraceSpan(Effect.void, 'sql.connection.wait', undefined, {
+                    attributes: { 'db.client.connection.wait_time_ms': 12.5 },
+                  })
+                }),
+                'sql.execute',
+                undefined,
+                { attributes: { 'db.query.text': 'secret initial SQL', 'db.operation.name': 'SELECT' } },
+              )
+              yield* Effect.annotateCurrentSpan({
+                'db.query.text': 'secret SQL parameter',
+                'baton.command.id': 'command',
+              })
+              yield* withTraceSpan(Effect.void, 'baton.usage.missing', undefined, {
+                attributes: {
+                  'baton.usage.reported': false,
+                  'gen_ai.usage.input_tokens': 0,
+                  'gen_ai.request.model': 'custom-invalid-model',
+                },
+              })
+              yield* withTraceSpan(Effect.void, 'baton.usage.zero', undefined, {
+                attributes: {
+                  'baton.usage.reported': true,
+                  'gen_ai.usage.input_tokens': 0,
+                },
+              })
+              return yield* Effect.fail(error)
+            }),
+            'baton.failure',
+          ),
+        )
+        yield* Effect.promise(() =>
+          vi.waitFor(() => expect(payloads.some((body) => body.includes('resourceSpans'))).toBe(true)),
+        )
+        yield* Effect.log('secret body /private/path')
+        yield* Effect.log('baton.wait.start').pipe(
+          Effect.annotateLogs({ 'baton.wait.reason': 'queue', secret: 'secret annotation' }),
+        )
+        yield* Effect.promise(() =>
+          vi.waitFor(() => expect(payloads.some((body) => body.includes('resourceLogs'))).toBe(true)),
+        )
+        yield* Metric.update(
+          Metric.gauge('baton.workers.active', {
+            description: 'secret description',
+            attributes: { 'baton.agent': 'codex', 'baton.thread.id': 'secret thread', secret: 'secret label' },
           }),
-          'baton.failure',
-        ),
-      ).pipe(
+          1,
+        )
+        yield* Effect.promise(() =>
+          vi.waitFor(() => expect(payloads.some((body) => body.includes('resourceMetrics'))).toBe(true)),
+        )
+        return exit
+      }).pipe(
         Effect.provide(
           telemetryLayer('test-worker', {
             OTEL_EXPORTER_OTLP_ENDPOINT: `http://127.0.0.1:${address.port}`,
@@ -123,7 +129,8 @@ it('exports to a local OTLP capture endpoint on scope release and redacts automa
             OTEL_SERVICE_VERSION: 'spoof',
             BATON_TELEMETRY_NODE_ID: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
             OTEL_BLRP_SCHEDULE_DELAY: '30',
-            OTEL_METRIC_EXPORT_INTERVAL: '100',
+            OTEL_BSP_SCHEDULE_DELAY: '30',
+            OTEL_METRIC_EXPORT_INTERVAL: '500',
           }),
         ),
       ),

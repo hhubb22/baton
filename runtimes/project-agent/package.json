@@ -6,7 +6,8 @@
   "exports": {
     "./testing/integration-worker": "./test/integration-worker.ts",
     "./testing/project-worker": "./test/t3-worker.ts",
-    "./testing/memory-worker": "./test/memory-flow-worker.ts"
+    "./testing/memory-worker": "./test/memory-flow-worker.ts",
+    "./testing/tracing-worker": "./test/tracing-worker.ts"
   },
   "engines": {
     "node": ">=26.0.0"

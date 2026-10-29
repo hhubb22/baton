@@ -14,7 +14,7 @@ import type { TraceData } from 'effect/observability/OtlpTracer'
 import type { KeyValue } from 'effect/observability/OtlpResource'
 import { TraceContext } from '@baton/protocol/trace'
 import * as Statement from 'effect/sql/Statement'
-import { safeAttributes } from './attributes.ts'
+import { safeAttributes } from './attributes.js'
 
 export type { TraceContext } from '@baton/protocol/trace'
 

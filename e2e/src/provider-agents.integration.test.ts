@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { createServer } from 'node:http'
 import { chmod, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -6,7 +7,10 @@ import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 import { Effect, Exit, Schema, Scope } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
-import { expect, test } from 'vite-plus/test'
+import { expect, test, vi } from 'vite-plus/test'
+import { telemetryLayer } from '@baton/telemetry'
+import { createDatabaseRuntime } from '@baton/server/database'
+import type { TraceData } from 'effect/observability/OtlpTracer'
 import * as P from '@baton/protocol'
 import { startServer } from '@baton/server/server'
 import { openTestDatabase } from '@baton/server/testing/database'
@@ -31,6 +35,7 @@ interface ProviderThreadOptions {
   version: string
   prepareTranscripts?: (directory: string) => Promise<string | void>
   thinking?: P.ThinkingSelection
+  trace?: string
 }
 
 interface ProviderThreadContext {
@@ -83,7 +88,7 @@ const cases: ReadonlyArray<
 ]
 
 async function withProviderThread(
-  { agentType, model, version, prepareTranscripts, thinking }: ProviderThreadOptions,
+  { agentType, model, version, prepareTranscripts, thinking, trace }: ProviderThreadOptions,
   run: (context: ProviderThreadContext) => Promise<void>,
 ) {
   const database = await openTestDatabase()
@@ -96,6 +101,9 @@ async function withProviderThread(
   const scope = await Effect.runPromise(Scope.make())
   let daemon: Promise<unknown> | undefined
   let threadId: string | undefined
+  const tracedRuntime = trace
+    ? createDatabaseRuntime({ url: database.url, schema: database.schema }, telemetryLayer('baton-server'))
+    : undefined
   try {
     if (agentType === 'cursor') {
       // Cursor host 从 bundle 旁加载已安装的 SDK 及其原生资源。
@@ -196,7 +204,7 @@ async function withProviderThread(
       await Codex.writeCodexTranscript(join(directory, 'codex-resumed.ndjson'), Codex.resumedOnly(transcript))
     }
     const origin = 'https://baton.local'
-    const running = await database.run(
+    const running = await (tracedRuntime ?? database.runtime).runPromise(
       startServer({
         port: 0,
         allowedOrigins: [origin],
@@ -213,7 +221,15 @@ async function withProviderThread(
     const request = async (path: string, method = 'GET', data?: unknown) => {
       const response = await fetch(`${base}/api/v1${path}`, {
         method,
-        headers: { Origin: origin, 'content-type': 'application/json', Cookie: cookie, 'X-CSRF-Token': csrf },
+        headers: {
+          Origin: origin,
+          'content-type': 'application/json',
+          Cookie: cookie,
+          'X-CSRF-Token': csrf,
+          ...(trace && path === '/threads' && method === 'POST'
+            ? { traceparent: `00-${trace}-${'b'.repeat(16)}-01` }
+            : {}),
+        },
         ...(data === undefined ? {} : { body: JSON.stringify(data) }),
       })
       const nextCookie = response.headers.get('set-cookie')
@@ -294,7 +310,7 @@ async function withProviderThread(
           probeIntervalMs: 60_000,
           transport: (_url, options) => connectWebSocket(`ws://127.0.0.1:${running.port}/v1/node`, options),
         }),
-      ),
+      ).pipe(Effect.provide(telemetryLayer('batond', { ...process.env, BATON_TELEMETRY_NODE_ID: identity.node_id }))),
       { signal: controller.signal },
     )
     await expect
@@ -366,11 +382,109 @@ async function withProviderThread(
           .toBe(true)
       }
     }
-    await database.run(Scope.close(scope, Exit.void))
+    await (tracedRuntime ?? database.runtime).runPromise(Scope.close(scope, Exit.void))
+    await tracedRuntime?.dispose()
     await database.close()
     await rm(directory, { recursive: true, force: true })
   }
 }
+
+test('exports one trace from HTTP through Worker and Pi agent-host', async () => {
+  const trace = 'a'.repeat(32)
+  const spans: Array<TraceData['resourceSpans'][number]['scopeSpans'][number]['spans'][number] & { service: string }> =
+    []
+  const collector = createServer((request, response) => {
+    let body = ''
+    request.on('data', (chunk) => {
+      body += String(chunk)
+    })
+    request.on('end', () => {
+      const data = JSON.parse(body) as TraceData
+      for (const resource of data.resourceSpans) {
+        const service =
+          resource.resource.attributes.find((item) => item.key === 'service.name')?.value.stringValue ?? ''
+        for (const scope of resource.scopeSpans) for (const span of scope.spans) spans.push({ ...span, service })
+      }
+      response.writeHead(200).end('{}')
+    })
+  })
+  await new Promise<void>((resolve) => collector.listen(0, '127.0.0.1', resolve))
+  const address = collector.address() as { port: number }
+  vi.stubEnv('OTEL_EXPORTER_OTLP_TRACES_ENDPOINT', `http://127.0.0.1:${address.port}/v1/traces`)
+  vi.stubEnv('OTEL_LOGS_EXPORTER', 'none')
+  vi.stubEnv('OTEL_METRICS_EXPORTER', 'none')
+  vi.stubEnv('OTEL_BSP_SCHEDULE_DELAY', '30')
+  try {
+    await withProviderThread({ ...cases[1]!, trace }, async ({ replies, threadId }) => {
+      await expect.poll(async () => (await replies()).length, { timeout: 15000 }).toBe(1)
+      await expect
+        .poll(
+          () =>
+            spans.some(
+              (span) =>
+                span.service === 'baton-agent-host' && span.name === 'baton.agent.turn' && span.traceId === trace,
+            ),
+          { timeout: 10000 },
+        )
+        .toBe(true)
+      await expect
+        .poll(
+          () =>
+            spans.some(
+              (span) => span.service === 'baton-worker' && span.name === 'baton.turn' && span.traceId === trace,
+            ),
+          { timeout: 10000 },
+        )
+        .toBe(true)
+      const turn = spans.find(
+        (span) => span.service === 'baton-worker' && span.name === 'baton.turn' && span.traceId === trace,
+      )!
+      expect(
+        spans.filter((span) => span.service === 'baton-worker' && span.name === 'baton.turn' && span.traceId === trace),
+      ).toHaveLength(1)
+      const attributes = Object.fromEntries(turn.attributes.map(({ key, value }) => [key, value]))
+      expect(attributes['baton.thread.id']).toEqual({ stringValue: threadId })
+      expect(attributes['baton.node.id']?.stringValue).toMatch(/^[0-9a-f-]{36}$/)
+      expect(attributes['baton.command.id']?.stringValue).toMatch(/^[0-9a-f-]{36}$/)
+      expect(Number(attributes['baton.turn.seq']?.intValue)).toBeGreaterThan(0)
+      expect(attributes['baton.agent']).toEqual({ stringValue: 'pi' })
+      expect(attributes['gen_ai.request.model']).toEqual({ stringValue: cases[1]!.model })
+      expect(attributes['baton.turn.result']).toEqual({ stringValue: 'completed' })
+      expect(
+        Number(
+          attributes['baton.turn.first_output_ms']?.intValue ?? attributes['baton.turn.first_output_ms']?.doubleValue,
+        ),
+      ).toBeGreaterThanOrEqual(0)
+      expect(attributes['baton.usage.reported']).toBeDefined()
+      if (attributes['baton.usage.reported']?.boolValue === false) {
+        expect(attributes['gen_ai.usage.input_tokens']).toBeUndefined()
+        expect(attributes['gen_ai.usage.output_tokens']).toBeUndefined()
+      }
+      await expect
+        .poll(
+          () =>
+            spans.some(
+              (span) =>
+                span.service === 'baton-server' && span.name === 'baton.report.receive' && span.traceId === trace,
+            ),
+          { timeout: 10000 },
+        )
+        .toBe(true)
+      expect(
+        spans.some((span) => span.service === 'batond' && span.name === 'baton.report' && span.traceId === trace),
+      ).toBe(true)
+      expect(
+        spans.some(
+          (span) => span.service === 'baton-server' && span.name === 'baton.http.request' && span.traceId === trace,
+        ),
+      ).toBe(true)
+    })
+  } finally {
+    vi.unstubAllEnvs()
+    collector.closeAllConnections()
+    await new Promise<void>((resolve) => collector.close(() => resolve()))
+  }
+}, 45000)
 
 test('Codex thinking selection travels from HTTP through the Worker to the native turn', async () => {
   const thinking = { id: 'reasoningEffort' as const, value: 'high' }

@@ -92,6 +92,7 @@ it('passes current telemetry headers to Runtime through its environment', async 
   delete process.env.OTEL_EXPORTER_OTLP_HEADERS
   try {
     let output = ''
+    let outputEnded: Promise<void> | undefined
     const owned = await runner.spawn(
       ['run'],
       new AbortController().signal,
@@ -99,11 +100,13 @@ it('passes current telemetry headers to Runtime through its environment', async 
       undefined,
       undefined,
       (child) => {
+        outputEnded = new Promise((resolve) => child.stdout.once('end', resolve))
         child.stdout.on('data', (chunk) => {
           output += String(chunk)
         })
       },
     )
+    await outputEnded
     await runner.reap(owned)
     const result = JSON.parse(output) as { headers: string; argv: string[] }
     expect(result.headers).toBe('authorization=remote-key')

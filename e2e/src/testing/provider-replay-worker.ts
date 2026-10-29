@@ -5,6 +5,7 @@ import { parseArgs } from 'node:util'
 import { Effect } from 'effect'
 import { runWorker } from '@baton/batond/daemon/worker-runner'
 import { runWatchdogCommand } from '@baton/batond/platform/process'
+import { telemetryLayer } from '@baton/telemetry'
 
 async function main() {
   const entry = process.argv[1]
@@ -51,7 +52,7 @@ async function main() {
         threadId,
         command: { executable: process.execPath, args: [entry] },
       }),
-    ),
+    ).pipe(Effect.provide(telemetryLayer('baton-worker'))),
     { signal: controller.signal },
   ).catch((error: unknown) => {
     if (!controller.signal.aborted) throw error

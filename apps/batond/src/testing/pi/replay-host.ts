@@ -3,6 +3,7 @@ import { Effect, Predicate } from 'effect'
 import { layerPiReplaySpawner, type PiRpcReplayTranscript } from '@t3tools/provider-pi/testing'
 import { runAgentHost, type AgentHostModule } from '../../agent-host/host.ts'
 import { piHostDriver } from '../../agents/pi/host-driver.ts'
+import { telemetryLayer } from '@baton/telemetry'
 import { readPiTranscript } from './transcripts.ts'
 
 export { readPiTranscript } from './transcripts.ts'
@@ -46,7 +47,7 @@ if (values.transcript && values.cwd && values.state) {
         agentType: 'pi',
         paths: { workingDirectory: values.cwd, privateDirectory: values.state },
       }),
-    ),
+    ).pipe(Effect.provide(telemetryLayer('baton-agent-host'))),
     { signal: controller.signal },
   ).catch(() => {
     if (!controller.signal.aborted) process.exitCode = 1
