@@ -1,0 +1,1230 @@
+<!doctype html>
+<html lang="zh-CN">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Baton · 对话时间线</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #f9f9fa;
+      --surface: #fff;
+      --panel: #efeff0;
+      --text: #1b1b1b;
+      --muted: #5c5c5e;
+      --faint: #6a6c71;
+      --line: #e2e2e2;
+      --hover: #f2f2f3;
+      --accent: #5e6ac1;
+      --attention: #9d4616;
+      --code: #f5f5f6;
+    }
+    html.dark {
+      color-scheme: dark;
+      --canvas: #181819;
+      --surface: #202022;
+      --panel: #171718;
+      --text: #eeeef0;
+      --muted: #b2b2b8;
+      --faint: #9999a2;
+      --line: #38383d;
+      --hover: #2b2b2f;
+      --accent: #a5adfa;
+      --attention: #e6b48c;
+      --code: #252528;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      background: var(--canvas);
+      color: var(--text);
+      font:
+        14px/1.6 Inter,
+        -apple-system,
+        BlinkMacSystemFont,
+        'Segoe UI',
+        'PingFang SC',
+        sans-serif;
+    }
+    button,
+    input,
+    textarea,
+    select {
+      font: inherit;
+      color: inherit;
+    }
+    button,
+    select {
+      cursor: pointer;
+    }
+    button {
+      border: 0;
+      background: transparent;
+      border-radius: 6px;
+      padding: 5px 9px;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }
+    button:hover {
+      background: var(--hover);
+    }
+    button:focus-visible,
+    summary:focus-visible,
+    textarea:focus-visible,
+    select:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 3px;
+    }
+    button:disabled {
+      cursor: default;
+      opacity: 0.5;
+    }
+    ::selection {
+      background: #a9b5ed66;
+    }
+    svg {
+      width: 16px;
+      height: 16px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      flex-shrink: 0;
+    }
+    h1,
+    h2,
+    p {
+      margin: 0;
+    }
+    h1 {
+      font-size: 14px;
+      font-weight: 600;
+    }
+    h2 {
+      font-size: 14px;
+      font-weight: 600;
+    }
+    code,
+    pre {
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 12px;
+    }
+    code {
+      background: var(--code);
+      padding: 2px 5px;
+      border-radius: 4px;
+    }
+    pre {
+      background: var(--code);
+      padding: 12px 14px;
+      overflow: auto;
+      border-radius: 6px;
+      margin: 8px 0;
+      line-height: 1.7;
+      white-space: pre-wrap;
+    }
+    small,
+    .meta {
+      font-size: 12px;
+      color: var(--faint);
+    }
+    [hidden] {
+      display: none !important;
+    }
+    .lab {
+      min-height: 76px;
+      display: flex;
+      gap: 20px;
+      align-items: center;
+      padding: 13px 28px;
+      border-bottom: 1px solid var(--line);
+      flex-wrap: wrap;
+      background: var(--surface);
+    }
+    .lab-title {
+      font-size: 12px;
+      color: var(--muted);
+      margin-right: 4px;
+    }
+    .switch {
+      display: flex;
+      padding: 3px;
+      background: var(--panel);
+      border-radius: 8px;
+      gap: 3px;
+    }
+    .switch button {
+      padding: 5px 12px;
+      font-size: 13px;
+    }
+    .switch button[aria-pressed='true'] {
+      background: var(--surface);
+      box-shadow: 0 1px 3px #00000012;
+      color: var(--text);
+    }
+    .controls {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    select {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--surface);
+      padding: 5px 7px;
+    }
+    .note {
+      padding: 10px 28px;
+      color: var(--muted);
+      font-size: 12px;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .frame {
+      height: calc(100dvh - 135px);
+      min-height: 580px;
+      max-width: 1460px;
+      margin: 0 auto 16px;
+      display: grid;
+      grid-template-columns: 186px minmax(0, 1fr);
+      padding: 0 18px 0 0;
+      gap: 8px;
+    }
+    .nav {
+      padding: 16px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 0 9px;
+      font-weight: 650;
+      letter-spacing: -0.3px;
+      font-size: 16px;
+    }
+    .brand svg {
+      width: 20px;
+      height: 20px;
+    }
+    .nav-group {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .nav-label {
+      font-size: 11px;
+      color: var(--faint);
+      padding: 0 10px 8px;
+    }
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 10px;
+      color: var(--muted);
+      font-size: 13px;
+      border-radius: 7px;
+    }
+    .nav-item.selected {
+      background: var(--line);
+      color: var(--text);
+    }
+    .nav-footer {
+      margin-top: auto;
+      font-size: 12px;
+      color: var(--muted);
+      padding: 12px 10px;
+    }
+    .workspace {
+      border: 1px solid var(--line);
+      background: var(--surface);
+      border-radius: 12px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      position: relative;
+    }
+    .header {
+      height: 58px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      border-bottom: 1px solid var(--line);
+    }
+    .header-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .header-title .divider {
+      color: var(--faint);
+    }
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .stage {
+      display: flex;
+      min-height: 0;
+      flex: 1;
+    }
+    .conversation {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+    .timeline {
+      overflow: auto;
+      scrollbar-width: thin;
+      scrollbar-color: var(--line) transparent;
+      flex: 1;
+      min-height: 0;
+      padding: 24px 32px 12px;
+    }
+    .lane {
+      max-width: 720px;
+      margin: auto;
+    }
+    .date {
+      text-align: center;
+      font-size: 11px;
+      color: var(--faint);
+      margin-bottom: 24px;
+    }
+    .user {
+      max-width: 85%;
+      width: fit-content;
+      margin-left: auto;
+      background: var(--hover);
+      padding: 10px 14px;
+      border-radius: 14px;
+      line-height: 1.65;
+    }
+    .user-meta {
+      text-align: right;
+      margin: 4px 0 22px;
+      font-size: 11px;
+      color: var(--faint);
+    }
+    .turn {
+      margin-bottom: 26px;
+    }
+    .work summary {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 12px;
+      list-style: none;
+      width: fit-content;
+      min-height: 28px;
+    }
+    .work summary::-webkit-details-marker {
+      display: none;
+    }
+    .chevron {
+      width: 14px;
+      height: 14px;
+      transition: transform 160ms ease-out;
+    }
+    .work[open] summary .chevron {
+      transform: rotate(90deg);
+    }
+    .worklog {
+      margin: 4px 0 12px;
+      max-height: 288px;
+      overflow: auto;
+      scrollbar-width: thin;
+    }
+    .step {
+      min-height: 26px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .step svg {
+      width: 16px;
+      height: 16px;
+    }
+    .step .state {
+      color: var(--faint);
+      font-size: 11px;
+      margin-left: 4px;
+    }
+    .step-details {
+      margin: 2px 0 6px 24px;
+    }
+    .step-details summary {
+      font-size: 12px;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .step-details pre {
+      max-height: 230px;
+    }
+    .body {
+      margin-top: 8px;
+      line-height: 1.8;
+      max-width: 70ch;
+    }
+    .body p + p {
+      margin-top: 10px;
+    }
+    .body strong {
+      font-weight: 600;
+    }
+    .artifacts {
+      margin-top: 12px;
+    }
+    .artifact-label {
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+    .thread-row {
+      display: flex;
+      width: 100%;
+      text-align: left;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 0;
+      border-radius: 5px;
+      font-size: 13px;
+    }
+    .thread-row .name {
+      flex: 0 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .thread-row .platform {
+      font-size: 11px;
+      color: var(--faint);
+    }
+    .thread-row .arrow {
+      margin-left: auto;
+      color: var(--faint);
+      width: 14px;
+    }
+    .thread-row:hover {
+      padding-left: 6px;
+      padding-right: 6px;
+    }
+    .dot {
+      width: 5px;
+      height: 5px;
+      background: var(--faint);
+      border-radius: 50%;
+      display: inline-block;
+      flex-shrink: 0;
+    }
+    .running .dot {
+      background: var(--accent);
+    }
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      height: 30px;
+      margin-top: 4px;
+      color: var(--faint);
+      font-size: 11px;
+      opacity: 0;
+      transition: opacity 130ms ease-out;
+    }
+    .actions button {
+      padding: 3px 0;
+      font-size: 12px;
+    }
+    .actions button:hover {
+      color: var(--text);
+      background: transparent;
+    }
+    .turn:hover > .actions,
+    .turn:focus-within > .actions,
+    .turn.latest > .actions {
+      opacity: 1;
+    }
+    .actions svg {
+      width: 14px;
+      height: 14px;
+    }
+    .actions time {
+      font-variant-numeric: tabular-nums;
+    }
+    .decision {
+      margin-top: 16px;
+      padding: 12px 0 0;
+      border-top: 1px solid var(--line);
+    }
+    .decision-title {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--attention);
+      margin-bottom: 6px;
+    }
+    .decision p {
+      font-size: 13px;
+      line-height: 1.7;
+    }
+    .decision-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .primary {
+      background: var(--text);
+      color: var(--surface);
+      padding: 6px 12px;
+      font-size: 12px;
+    }
+    .primary:hover {
+      background: var(--muted);
+    }
+    .secondary {
+      font-size: 12px;
+      background: var(--hover);
+      padding: 6px 12px;
+    }
+    .dock {
+      padding: 12px 24px 16px;
+      flex-shrink: 0;
+      background: var(--surface);
+    }
+    .composer {
+      max-width: 720px;
+      margin: auto;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px 14px 9px;
+      background: var(--surface);
+    }
+    textarea {
+      width: 100%;
+      border: 0;
+      outline: none;
+      background: transparent;
+      resize: none;
+      display: block;
+      min-height: 40px;
+      max-height: 90px;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    textarea::placeholder {
+      color: var(--faint);
+    }
+    .composer-foot {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .composer-foot span {
+      font-size: 11px;
+      color: var(--faint);
+    }
+    .send {
+      background: var(--text);
+      color: var(--surface);
+      width: 28px;
+      height: 28px;
+      padding: 6px;
+      border-radius: 8px;
+    }
+    .send:hover {
+      background: var(--muted);
+    }
+    .overview {
+      width: 226px;
+      flex-shrink: 0;
+      padding: 22px 18px;
+      border-left: 1px solid var(--line);
+      font-size: 12px;
+    }
+    .overview h2 {
+      font-size: 12px;
+      margin-bottom: 18px;
+    }
+    .overview p {
+      color: var(--muted);
+      line-height: 1.8;
+    }
+    .overview-label {
+      color: var(--faint);
+      margin: 24px 0 8px;
+      font-size: 11px;
+    }
+    .overview .thread-row {
+      font-size: 12px;
+      align-items: flex-start;
+      padding: 6px 0;
+    }
+    .overview .name {
+      white-space: normal;
+    }
+    .overview .dot {
+      margin-top: 7px;
+    }
+    .overview .thread-row svg {
+      margin-top: 2px;
+    }
+    .branch .artifacts {
+      margin-left: 7px;
+      padding-left: 20px;
+      border-left: 1px solid var(--line);
+    }
+    .branch .thread-row {
+      position: relative;
+    }
+    .branch .thread-row:before {
+      content: '';
+      position: absolute;
+      left: -20px;
+      top: 15px;
+      width: 12px;
+      border-top: 1px solid var(--line);
+    }
+    .branch .body {
+      margin-top: 12px;
+    }
+    .branch .artifacts .artifact-label {
+      margin-bottom: 6px;
+    }
+    .branch .decision {
+      margin-left: 7px;
+      padding-left: 20px;
+      border-left: 1px solid var(--line);
+      border-top: 0;
+      padding-top: 2px;
+    }
+    .compact .frame {
+      max-width: 790px;
+      grid-template-columns: 1fr;
+      padding: 0 16px;
+    }
+    .compact .nav,
+    .compact .overview {
+      display: none;
+    }
+    .compact .timeline {
+      padding: 22px 24px;
+    }
+    .drawer {
+      position: absolute;
+      right: 0;
+      top: 58px;
+      bottom: 0;
+      width: min(440px, 100%);
+      background: var(--surface);
+      border-left: 1px solid var(--line);
+      padding: 20px 24px;
+      z-index: 3;
+      overflow: auto;
+      box-shadow: -10px 0 28px #00000008;
+    }
+    .drawer-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+    .drawer .meta {
+      margin-top: 8px;
+    }
+    .drawer pre {
+      margin-top: 18px;
+    }
+    .drawer h2 {
+      font-size: 15px;
+    }
+    .result {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 10px;
+    }
+    .new-message {
+      margin-bottom: 24px;
+    }
+    .feedback {
+      min-height: 18px;
+      font-size: 11px;
+      color: var(--muted);
+      max-width: 720px;
+      margin: 3px auto 0;
+    }
+    .status-pulse {
+      display: inline-block;
+      width: 5px;
+      height: 5px;
+      margin-right: 5px;
+      background: var(--accent);
+      border-radius: 50%;
+    }
+    .turn {
+      margin-bottom: 12px;
+    }
+    .actions {
+      height: 24px;
+    }
+    .thread-row:hover {
+      padding-left: 0;
+      padding-right: 0;
+    }
+    .compact #overview-toggle {
+      display: none;
+    }
+    @media (max-width: 1050px) {
+      .overview,
+      #overview-toggle {
+        display: none;
+      }
+      .frame {
+        grid-template-columns: 158px 1fr;
+      }
+    }
+    @media (max-width: 700px) {
+      .lab {
+        padding: 10px 16px;
+        gap: 10px;
+      }
+      .controls {
+        margin-left: 0;
+        flex-wrap: wrap;
+      }
+      .lab-title {
+        display: none;
+      }
+      .note {
+        padding: 8px 16px;
+      }
+      .note .hint {
+        display: none;
+      }
+      .frame {
+        grid-template-columns: 1fr;
+        padding: 0 10px;
+        height: calc(100dvh - 160px);
+        min-height: 540px;
+      }
+      .nav {
+        display: none;
+      }
+      .header {
+        padding: 0 16px;
+      }
+      .header-title .divider,
+      .header-title .meta {
+        display: none;
+      }
+      .timeline {
+        padding: 20px 18px;
+      }
+      .dock {
+        padding: 10px 14px;
+      }
+      .thread-row .platform {
+        display: none;
+      }
+      .user {
+        max-width: 94%;
+      }
+      .header-actions .meta {
+        display: none;
+      }
+    }
+    @media (hover: none) {
+      .actions {
+        opacity: 1;
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        transition: none !important;
+      }
+    }
+  </style>
+  <link rel="stylesheet" href="agent-timeline-detail.css" />
+  <link rel="stylesheet" href="agent-chat-layout.css" />
+  <svg hidden aria-hidden="true">
+    <defs>
+      <symbol id="chevron" viewBox="0 0 256 256">
+        <path
+          d="M181.66,133.66l-80,80a8,8,0,0,1-11.32-11.32L164.69,128,90.34,53.66a8,8,0,0,1,11.32-11.32l80,80A8,8,0,0,1,181.66,133.66Z"
+        />
+      </symbol>
+      <symbol id="thread" viewBox="0 0 256 256">
+        <path
+          d="M168,112a8,8,0,0,1-8,8H96a8,8,0,0,1,0-16h64A8,8,0,0,1,168,112Zm-8,24H96a8,8,0,0,0,0,16h64a8,8,0,0,0,0-16Zm72-8A104,104,0,0,1,79.12,219.82L45.07,231.17a16,16,0,0,1-20.24-20.24l11.35-34.05A104,104,0,1,1,232,128Zm-16,0A88,88,0,1,0,51.81,172.06a8,8,0,0,1,.66,6.54L40,216,77.4,203.53a7.85,7.85,0,0,1,2.53-.42,8,8,0,0,1,4,1.08A88,88,0,0,0,216,128Z"
+        />
+      </symbol>
+      <symbol id="copy" viewBox="0 0 256 256">
+        <path
+          d="M184,64H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H184a8,8,0,0,0,8-8V72A8,8,0,0,0,184,64Zm-8,144H48V80H176ZM224,40V184a8,8,0,0,1-16,0V48H72a8,8,0,0,1,0-16H216A8,8,0,0,1,224,40Z"
+        />
+      </symbol>
+      <symbol id="arrow" viewBox="0 0 256 256">
+        <path
+          d="M221.66,133.66l-72,72a8,8,0,0,1-11.32-11.32L196.69,136H40a8,8,0,0,1,0-16H196.69L138.34,61.66a8,8,0,0,1,11.32-11.32l72,72A8,8,0,0,1,221.66,133.66Z"
+        />
+      </symbol>
+      <symbol id="check" viewBox="0 0 256 256">
+        <path
+          d="M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z"
+        />
+      </symbol>
+      <symbol id="terminal" viewBox="0 0 256 256">
+        <path
+          d="M117.31,134l-72,64a8,8,0,1,1-10.63-12L100,128,34.69,70A8,8,0,1,1,45.32,58l72,64a8,8,0,0,1,0,12ZM216,184H120a8,8,0,0,0,0,16h96a8,8,0,0,0,0-16Z"
+        />
+      </symbol>
+      <symbol id="close" viewBox="0 0 256 256">
+        <path
+          d="M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z"
+        />
+      </symbol>
+      <symbol id="up" viewBox="0 0 256 256">
+        <path
+          d="M205.66,117.66a8,8,0,0,1-11.32,0L136,59.31V216a8,8,0,0,1-16,0V59.31L61.66,117.66a8,8,0,0,1-11.32-11.32l72-72a8,8,0,0,1,11.32,0l72,72A8,8,0,0,1,205.66,117.66Z"
+        />
+      </symbol>
+      <symbol id="sun" viewBox="0 0 256 256">
+        <path
+          d="M120,40V16a8,8,0,0,1,16,0V40a8,8,0,0,1-16,0Zm72,88a64,64,0,1,1-64-64A64.07,64.07,0,0,1,192,128Zm-16,0a48,48,0,1,0-48,48A48.05,48.05,0,0,0,176,128ZM58.34,69.66A8,8,0,0,0,69.66,58.34l-16-16A8,8,0,0,0,42.34,53.66Zm0,116.68-16,16a8,8,0,0,0,11.32,11.32l16-16a8,8,0,0,0-11.32-11.32ZM192,72a8,8,0,0,0,5.66-2.34l16-16a8,8,0,0,0-11.32-11.32l-16,16A8,8,0,0,0,192,72Zm5.66,114.34a8,8,0,0,0-11.32,11.32l16,16a8,8,0,0,0,11.32-11.32ZM48,128a8,8,0,0,0-8-8H16a8,8,0,0,0,0,16H40A8,8,0,0,0,48,128Zm80,80a8,8,0,0,0-8,8v24a8,8,0,0,0,16,0V216A8,8,0,0,0,128,208Zm112-88H216a8,8,0,0,0,0,16h24a8,8,0,0,0,0-16Z"
+        />
+      </symbol>
+      <symbol id="folder" viewBox="0 0 256 256">
+        <path
+          d="M216,72H130.67L102.93,51.2a16.12,16.12,0,0,0-9.6-3.2H40A16,16,0,0,0,24,64V200a16,16,0,0,0,16,16H216.89A15.13,15.13,0,0,0,232,200.89V88A16,16,0,0,0,216,72Zm0,128H40V64H93.33L123.2,86.4A8,8,0,0,0,128,88h88Z"
+        />
+      </symbol>
+      <symbol id="inbox" viewBox="0 0 256 256">
+        <path
+          d="M208,32H48A16,16,0,0,0,32,48V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V48A16,16,0,0,0,208,32Zm0,16V152h-28.7A15.86,15.86,0,0,0,168,156.69L148.69,176H107.31L88,156.69A15.86,15.86,0,0,0,76.69,152H48V48Zm0,160H48V168H76.69L96,187.31A15.86,15.86,0,0,0,107.31,192h41.38A15.86,15.86,0,0,0,160,187.31L179.31,168H208v40Z"
+        />
+      </symbol>
+    </defs>
+  </svg>
+  <div class="lab">
+    <span class="lab-title">对话时间线 · 交互原型</span>
+    <strong class="chosen">Chat 布局</strong>
+    <div class="controls">
+      <label
+        >状态
+        <select id="scenario">
+          <option value="decision">等待决定</option>
+          <option value="running">运行中</option>
+          <option value="complete">已完成</option>
+          <option value="error">连接中断</option>
+        </select></label
+      ><button id="guides" aria-pressed="false">查看对齐线</button
+      ><button id="width" aria-pressed="false">窄面板</button
+      ><button id="theme" aria-label="切换深色主题">
+        <svg><use href="#sun" /></svg></button
+      ><button id="reset">重置</button>
+    </div>
+  </div>
+  <div class="note">
+    <span id="direction">用留白区分回复组；过程、正文与产物共用左边缘。</span
+    ><span class="hint">示例数据 · 可展开过程、打开子对话、回答事项</span>
+  </div>
+  <div class="frame">
+    <aside class="nav" aria-label="工作区导航示意">
+      <div class="brand">
+        <svg><use href="#thread" /></svg>Baton
+      </div>
+      <div class="nav-group">
+        <div class="nav-item">
+          <svg><use href="#inbox" /></svg>收件箱 <small style="margin-left: auto">1</small>
+        </div>
+        <div class="nav-item">
+          <svg><use href="#thread" /></svg>对话
+        </div>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">项目</div>
+        <div class="nav-item selected">
+          <svg><use href="#folder" /></svg>Windows 兼容性
+        </div>
+        <div class="nav-item">
+          <svg><use href="#folder" /></svg>桌面客户端
+        </div>
+      </div>
+      <div class="nav-footer">Jiajian 的工作区</div>
+    </aside>
+    <main class="workspace">
+      <header class="header">
+        <div class="header-title">
+          <h1>Windows 兼容性</h1>
+          <span class="divider">/</span><span class="meta">项目对话</span>
+        </div>
+        <div class="header-actions">
+          <button class="meta" id="header-state" aria-label="定位当前进度">等待你的决定</button
+          ><button id="overview-toggle" aria-pressed="true" aria-label="切换项目概览">
+            <svg><use href="#folder" /></svg>
+          </button>
+        </div>
+      </header>
+      <div class="stage">
+        <section class="conversation" aria-label="项目对话">
+          <div class="timeline" id="timeline">
+            <div class="lane">
+              <div class="date">今天 · 10 月 29 日</div>
+              <div class="user">检查 Windows 兼容性，跑一下测试。先告诉我需要改哪些地方。</div>
+              <div class="user-meta">你 · 14:32</div>
+              <article class="turn" aria-label="助手第一轮回复">
+                <details class="work" id="work-one">
+                  <summary>
+                    <svg class="chevron"><use href="#chevron" /></svg><span>执行过程</span><span class="meta"></span>
+                  </summary>
+                  <div class="worklog">
+                    <div class="step">threads.create</div>
+                    <div class="step">threads.send</div>
+                  </div>
+                </details>
+                <div class="body">
+                  <p>我会分别检查进程退出和文件访问，先运行现有测试。两项检查会在独立对话中进行。</p>
+                </div>
+                <div class="artifacts">
+                  <button class="thread-row" data-thread="compat">
+                    <svg><use href="#thread" /></svg><span class="name">Windows 兼容性测试</span
+                    ><svg class="arrow"><use href="#arrow" /></svg></button
+                  ><button class="thread-row" data-thread="files">
+                    <svg><use href="#thread" /></svg><span class="name">文件句柄与进程回收</span
+                    ><svg class="arrow"><use href="#arrow" /></svg>
+                  </button>
+                </div>
+                <div class="actions">
+                  <button data-copy="first" aria-label="复制第一轮回复">
+                    <svg><use href="#copy" /></svg>复制</button
+                  ><time>14:32</time>
+                </div>
+              </article>
+              <article class="turn latest" aria-label="助手第二轮回复">
+                <details class="work" id="work-two">
+                  <summary>
+                    <svg class="chevron"><use href="#chevron" /></svg><span id="work-summary">执行过程</span
+                    ><span class="meta" id="work-duration"></span>
+                  </summary>
+                  <div class="worklog">
+                    <details class="tool-event">
+                      <summary>nodes.exec <span class="state">pnpm test</span></summary>
+                      <pre aria-label="工具输出">
+{"thread_id":"33333333-3333-4333-8333-333333333333","command_result":{"output":"PASS","exit_code":0}}</pre>
+                    </details>
+                    <details class="tool-event">
+                      <summary>threads.create <span class="state">调用失败</span></summary>
+                      <pre aria-label="工具输出">{"thread_id":"ignored","error":"unavailable"}</pre>
+                    </details>
+                  </div>
+                </details>
+                <div class="body" id="result-body">
+                  <p>测试命令返回了 PASS，退出码为 0。随后创建对话失败，工具返回 unavailable。</p>
+                </div>
+                <div class="actions">
+                  <button data-copy="second" aria-label="复制第二轮回复">
+                    <svg><use href="#copy" /></svg>复制</button
+                  ><time id="reply-time">14:34</time>
+                </div>
+                <section class="decision" id="decision" aria-label="待处理事项">
+                  <div class="decision-title">需要你决定</div>
+                  <p id="question">是否继续修复这两处问题，并重新运行 Windows 测试？</p>
+                  <div class="decision-actions" id="decision-actions">
+                    <button class="primary" data-answer="continue">继续修复并测试</button
+                    ><button class="secondary" data-answer="pause">先保留检查结果</button>
+                  </div>
+                  <p class="result" id="decision-result" role="status" hidden></p>
+                </section>
+              </article>
+              <div id="new-messages"></div>
+            </div>
+          </div>
+          <footer class="dock">
+            <form class="composer" id="compose">
+              <textarea id="draft" aria-label="消息" placeholder="给项目助手发消息…" rows="2"></textarea>
+              <div class="composer-foot">
+                <span>项目助手 · Codex</span
+                ><button type="submit" class="send" id="send" aria-label="发送消息" disabled>
+                  <svg><use href="#up" /></svg>
+                </button>
+              </div>
+            </form>
+            <div class="feedback" id="feedback" role="status"></div>
+          </footer>
+        </section>
+        <aside class="overview" id="overview">
+          <h2>项目概览</h2>
+          <p>确认节点在 Windows 上的进程退出与文件访问行为。</p>
+          <div class="overview-label">关联对话 · 2</div>
+          <button class="thread-row" data-thread="compat"><span class="name">Windows 兼容性测试</span></button
+          ><button class="thread-row" data-thread="files"><span class="name">文件句柄与进程回收</span></button>
+          <div class="overview-label">工作目录</div>
+          <code>C:\work\baton</code>
+          <div class="overview-label">设备</div>
+          <p>Windows 开发机</p>
+        </aside>
+      </div>
+      <aside class="drawer" id="drawer" aria-label="子对话详情" hidden>
+        <div class="drawer-head">
+          <span class="meta">关联对话</span
+          ><button id="close-drawer" aria-label="关闭子对话">
+            <svg><use href="#close" /></svg>
+          </button>
+        </div>
+        <h2 id="drawer-title"></h2>
+        <p class="meta" id="drawer-meta"></p>
+        <div class="body" id="drawer-body"></div>
+        <pre id="drawer-code"></pre>
+      </aside>
+    </main>
+  </div>
+  <script>
+    const $ = (s) => document.querySelector(s)
+    const params = new URLSearchParams(location.search)
+    let variant = params.get('variant') === 'branch' ? 'branch' : 'space'
+    let answer = null
+    let openedBy = null
+    const first = '我会分别检查进程退出和文件访问，先运行现有测试。两项检查会在独立对话中进行。'
+    const result = '<p>测试命令返回了 PASS，退出码为 0。随后创建对话失败，工具返回 unavailable。</p>'
+    function setVariant(value) {
+      variant = value
+      document.body.classList.toggle('branch', value === 'branch')
+      document
+        .querySelectorAll('[data-variant]')
+        .forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.variant === value)))
+      $('#direction').textContent =
+        value === 'branch'
+          ? '正文保持完整；细线只标记子对话与待处理事项的从属关系。'
+          : '用留白区分回复组；过程、正文与产物共用左边缘。'
+      const u = new URL(location)
+      u.searchParams.set('variant', value)
+      history.replaceState(null, '', u)
+    }
+    function renderState() {
+      const state = $('#scenario').value
+      const running = state === 'running'
+      const completed = state === 'complete'
+      const failed = state === 'error'
+      document.body.classList.toggle('running', running)
+      $('#work-summary').textContent = running ? '正在处理' : failed ? '连接中断' : '执行过程'
+      $('#work-duration').textContent = ''
+      $('#result-body').innerHTML = running || failed ? '<p>正在等待命令返回。</p>' : result
+      $('#reply-time').textContent = running ? '正在生成' : failed ? '内容保留至断线前' : '14:34'
+      $('#decision').hidden = running || completed || failed
+      $('#connection-note').hidden = !failed
+      $('#header-state').textContent = running
+        ? '正在检查'
+        : failed
+          ? '连接中断'
+          : completed
+            ? '检查完成'
+            : answer
+              ? '决定已记录'
+              : '等待你的决定'
+      $('#decision-actions').hidden = !!answer
+      $('#decision-result').hidden = !answer
+      $('#decision-result').textContent =
+        answer === 'continue' ? '已确认继续修复。示例中已记录此决定。' : '已保留检查结果，暂不修改。'
+      $('#work-two .worklog').innerHTML =
+        running || failed
+          ? '<div class="step"><svg><use href="#terminal"/></svg><span>nodes.exec</span><span class="state">' +
+            (failed ? '连接中断' : '等待返回') +
+            '</span></div>'
+          : savedWorklog
+      document.querySelectorAll('.overview [data-thread]').forEach((b) => {
+        b.dataset.state = b.dataset.thread === 'compat' ? (running ? '运行中' : failed ? '连接中断' : '') : ''
+        b.setAttribute('aria-label', b.textContent.trim() + (b.dataset.state ? ' · ' + b.dataset.state : ''))
+      })
+    }
+    document.querySelectorAll('[data-variant]').forEach((b) => (b.onclick = () => setVariant(b.dataset.variant)))
+    $('#scenario').onchange = () => {
+      answer = null
+      renderState()
+    }
+    $('#theme').onclick = () => {
+      const dark = document.documentElement.classList.toggle('dark')
+      $('#theme').setAttribute('aria-label', dark ? '切换浅色主题' : '切换深色主题')
+    }
+    $('#width').onclick = () => {
+      const narrow = document.body.classList.toggle('compact')
+      $('#width').setAttribute('aria-pressed', String(narrow))
+      $('#width').textContent = narrow ? '完整宽度' : '窄面板'
+    }
+    $('#overview-toggle').onclick = () => {
+      const hidden = ($('#overview').hidden = !$('#overview').hidden)
+      $('#overview-toggle').setAttribute('aria-pressed', String(!hidden))
+    }
+    document.querySelectorAll('[data-answer]').forEach(
+      (b) =>
+        (b.onclick = () => {
+          answer = b.dataset.answer
+          renderState()
+        }),
+    )
+    const threads = {
+      compat: {
+        title: 'Windows 兼容性测试',
+        meta: 'Windows 开发机 · Codex',
+        body: '示例关联对话，尚未接入实际消息。',
+        code: '',
+      },
+      files: {
+        title: '文件句柄与进程回收',
+        meta: 'Windows 开发机 · Cursor',
+        body: '示例关联对话，尚未接入实际消息。',
+        code: '',
+      },
+    }
+    document.querySelectorAll('[data-thread]').forEach(
+      (b) =>
+        (b.onclick = () => {
+          openedBy = b
+          const t = threads[b.dataset.thread]
+          const state = $('#scenario').value
+          const pending = b.dataset.thread === 'compat' && (state === 'running' || state === 'error')
+          $('#drawer-title').textContent = t.title
+          $('#drawer-meta').textContent = t.meta
+          $('#drawer-body').textContent = pending
+            ? state === 'error'
+              ? '设备连接中断，测试结果尚未返回。'
+              : '测试正在运行，等待结果返回。'
+            : t.body
+          $('#drawer-code').textContent = pending ? 'pnpm --filter @baton/batond test' : t.code
+          $('#drawer').hidden = false
+          $('#close-drawer').focus()
+        }),
+    )
+    function closeDrawer() {
+      $('#drawer').hidden = true
+      openedBy?.focus()
+    }
+    $('#close-drawer').onclick = closeDrawer
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !$('#drawer').hidden) closeDrawer()
+    })
+    document.querySelectorAll('[data-copy]').forEach(
+      (b) =>
+        (b.onclick = async () => {
+          try {
+            await navigator.clipboard.writeText(b.dataset.copy === 'first' ? first : $('#result-body').textContent)
+            $('#feedback').textContent = '已复制回复'
+          } catch {
+            $('#feedback').textContent = '无法访问剪贴板，请选中文字后复制。'
+          }
+        }),
+    )
+    $('#draft').oninput = () => ($('#send').disabled = !$('#draft').value.trim())
+    $('#compose').onsubmit = (e) => {
+      e.preventDefault()
+      const value = $('#draft').value.trim()
+      if (!value) return
+      const wrap = document.createElement('div')
+      wrap.className = 'new-message'
+      const user = document.createElement('div')
+      user.className = 'user'
+      user.textContent = value
+      const response = document.createElement('p')
+      response.className = 'body'
+      response.textContent = '消息已加入原型。这里仅演示布局，不会启动 Agent。'
+      wrap.append(user, response)
+      $('#new-messages').append(wrap)
+      $('#draft').value = ''
+      $('#send').disabled = true
+      $('#timeline').scrollTop = $('#timeline').scrollHeight
+      $('#feedback').textContent = '示例消息已发送'
+    }
+    $('#reset').onclick = () => {
+      answer = null
+      $('#scenario').value = 'decision'
+      $('#work-one').open = false
+      $('#work-two').open = false
+      $('#decision-result').hidden = true
+      $('#new-messages').replaceChildren()
+      $('#feedback').textContent = ' '
+      $('#draft').value = ''
+      $('#send').disabled = true
+      $('#drawer').hidden = true
+      $('#timeline').scrollTop = 0
+      renderState()
+    }
+    const savedWorklog = $('#work-two .worklog').innerHTML
+    $('#question').textContent = '是否重试创建对话？'
+    document.querySelector('[data-answer="continue"]').textContent = '重试'
+    $('#work-one>summary span').textContent = '执行过程'
+    $('#work-one>summary .meta').textContent = ''
+    $('#work-one .worklog').append(document.querySelector('.artifacts'))
+    $('#overview').hidden = true
+    $('#overview-toggle').setAttribute('aria-pressed', 'false')
+    $('#draft').rows = 1
+    $('#draft').placeholder = '给 Baton 发消息'
+    document.querySelectorAll('[data-copy]').forEach((button) => {
+      button.title = '复制回复'
+      ;[...button.childNodes].filter((node) => node.nodeType === Node.TEXT_NODE).forEach((node) => node.remove())
+    })
+    $('#draft').addEventListener('input', () => {
+      const draft = $('#draft')
+      draft.style.height = '28px'
+      draft.style.height = Math.min(draft.scrollHeight, 112) + 'px'
+    })
+    $('#compose').addEventListener('submit', () => {
+      $('#draft').style.height = '28px'
+    })
+    $('#reset').addEventListener('click', () => {
+      $('#draft').style.height = '28px'
+    })
+    $('#decision-result').tabIndex = -1
+    document
+      .querySelectorAll('[data-answer]')
+      .forEach((button) => button.addEventListener('click', () => $('#decision-result').focus()))
+    const connectionNote = document.createElement('div')
+    connectionNote.id = 'connection-note'
+    connectionNote.className = 'connection-note'
+    connectionNote.hidden = true
+    connectionNote.setAttribute('role', 'status')
+    connectionNote.innerHTML =
+      '<span>设备暂时离线，已收到的内容仍保留。</span><button type="button" id="reconnect">重新连接</button>'
+    $('#result-body').after(connectionNote)
+    $('#reconnect').onclick = () => {
+      $('#scenario').value = 'running'
+      renderState()
+      $('#feedback').textContent = '已恢复连接，继续等待检查结果。'
+    }
+    $('#guides').onclick = () => {
+      const visible = document.body.classList.toggle('guides')
+      $('#guides').setAttribute('aria-pressed', String(visible))
+    }
+    $('#header-state').onclick = () => {
+      const target = !$('#decision').hidden ? $('#decision') : $('#work-two')
+      target.scrollIntoView({ block: 'center', behavior: 'auto' })
+      if (target === $('#decision')) {
+        const button = target.querySelector('button:not([disabled])')
+        if (button && !$('#decision-actions').hidden) button.focus({ preventScroll: true })
+      } else target.querySelector('summary').focus({ preventScroll: true })
+    }
+    if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
+    setVariant('space')
+    $('#direction').textContent = '正文与辅助文字共用起点；图标留在左侧 24px 槽位。'
+    renderState()
+  </script>
+</html>

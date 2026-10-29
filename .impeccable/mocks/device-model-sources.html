@@ -1,0 +1,883 @@
+<div id="baton-model-sources-design">
+  <div class="bms-preview-bar">
+    <div class="viz-row" aria-label="设计流程">
+      <button type="button" class="btn btn-ghost" data-preview="devices" aria-pressed="true">设备详情</button>
+      <button type="button" class="btn btn-ghost" data-preview="editor" aria-pressed="false">添加 API 连接</button>
+      <button type="button" class="btn btn-ghost" data-preview="project" aria-pressed="false">项目选择</button>
+    </div>
+    <span class="bms-preview-note">交互草图 · 示例数据</span>
+  </div>
+  <div class="viz-dotted-background bms-stage">
+    <div class="bms-product" aria-label="Baton 模型来源设计">
+      <div id="bms-screen"></div>
+    </div>
+  </div>
+</div>
+<style>
+  #baton-model-sources-design {
+    width: 100%;
+  }
+  #baton-model-sources-design .bms-preview-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+    padding-right: 84px;
+  }
+  #baton-model-sources-design .bms-preview-note {
+    font:
+      400 12px/1.5 system-ui,
+      sans-serif;
+    color: light-dark(#69717b, #a8aeb7);
+  }
+  #baton-model-sources-design .bms-stage {
+    padding: 20px;
+    border-radius: 14px;
+  }
+  #baton-model-sources-design .bms-product {
+    --bms-canvas: light-dark(rgb(98.1% 98.4% 99%), rgb(7% 7.8% 9.2%));
+    --bms-surface: light-dark(#fff, rgb(10% 10.9% 12.6%));
+    --bms-text: light-dark(rgb(11% 12.3% 14.5%), rgb(93.5% 94.2% 95.2%));
+    --bms-muted: light-dark(rgb(28.6% 30.3% 33.3%), rgb(69.3% 70.7% 73.2%));
+    --bms-border: light-dark(rgb(10.2% 12.3% 16.1% / 13%), rgb(93.5% 94.2% 95.2% / 12%));
+    --bms-soft-border: light-dark(rgb(10.2% 12.3% 16.1% / 9%), rgb(93.5% 94.2% 95.2% / 8%));
+    --bms-hover: light-dark(rgb(10.2% 12.3% 16.1% / 4%), rgb(93.5% 94.2% 95.2% / 6%));
+    --bms-selected: light-dark(rgb(10.2% 12.3% 16.1% / 7%), rgb(93.5% 94.2% 95.2% / 9%));
+    --bms-accent: light-dark(rgb(16.5% 41.2% 90%), rgb(15.8% 43.6% 89%));
+    --bms-link: light-dark(rgb(15.6% 36% 76.2%), rgb(48.5% 70.6% 98.8%));
+    --bms-danger: light-dark(rgb(74.4% 18.4% 18.2%), rgb(96.5% 42.5% 41.1%));
+    --bms-success: light-dark(rgb(9.5% 47.8% 23.1%), rgb(37.7% 78% 50.5%));
+    --bms-attention: light-dark(rgb(61.6% 27.3% 8.6%), rgb(96.6% 66.9% 41.9%));
+    color: var(--bms-text);
+    background: var(--bms-canvas);
+    border: 1px solid var(--bms-border);
+    border-radius: 12px;
+    font:
+      400 14px/1.6 Inter,
+      -apple-system,
+      BlinkMacSystemFont,
+      'Segoe UI',
+      'PingFang SC',
+      sans-serif;
+    letter-spacing: -0.006em;
+    overflow-wrap: anywhere;
+  }
+  #baton-model-sources-design .bms-product * {
+    box-sizing: border-box;
+  }
+  #baton-model-sources-design .bms-product button,
+  #baton-model-sources-design .bms-product input,
+  #baton-model-sources-design .bms-product select,
+  #baton-model-sources-design .bms-product textarea {
+    font: inherit;
+    letter-spacing: inherit;
+  }
+  #baton-model-sources-design .bms-product button {
+    color: inherit;
+  }
+  #baton-model-sources-design .bms-product button:focus-visible,
+  #baton-model-sources-design .bms-product :is(input, select, textarea):focus-visible {
+    outline: 2px solid var(--bms-accent);
+    outline-offset: 3px;
+  }
+  #baton-model-sources-design .bms-product ::selection {
+    background: var(--bms-selected);
+  }
+  #baton-model-sources-design .bms-product :is(input, textarea) {
+    caret-color: var(--bms-accent);
+  }
+  #baton-model-sources-design .bms-product ::placeholder {
+    color: var(--bms-muted);
+    opacity: 1;
+  }
+  #baton-model-sources-design .bms-topbar {
+    padding: 15px 24px;
+    border-bottom: 1px solid var(--bms-soft-border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--bms-surface);
+    border-radius: 12px 12px 0 0;
+  }
+  #baton-model-sources-design .bms-topbar > span:first-child {
+    font-weight: 500;
+  }
+  #baton-model-sources-design .bms-divider {
+    color: var(--bms-muted);
+  }
+  #baton-model-sources-design .bms-body {
+    max-width: 720px;
+    margin: auto;
+    padding: 28px 28px 32px;
+  }
+  #baton-model-sources-design .bms-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 22px;
+  }
+  #baton-model-sources-design .bms-product h2 {
+    font-size: 18px;
+    line-height: 1.4;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    margin: 0;
+  }
+  #baton-model-sources-design .bms-product h3 {
+    font-size: 14px;
+    line-height: 1.6;
+    font-weight: 500;
+    margin: 0;
+  }
+  #baton-model-sources-design .bms-product p {
+    margin: 0;
+  }
+  #baton-model-sources-design .bms-muted {
+    color: var(--bms-muted);
+  }
+  #baton-model-sources-design .bms-small {
+    font-size: 12px;
+  }
+  #baton-model-sources-design .bms-label {
+    font-weight: 500;
+  }
+  #baton-model-sources-design .bms-device {
+    border-top: 1px solid var(--bms-soft-border);
+  }
+  #baton-model-sources-design .bms-device:last-child {
+    border-bottom: 1px solid var(--bms-soft-border);
+  }
+  #baton-model-sources-design .bms-device-toggle {
+    appearance: none;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    text-align: left;
+    border: 0;
+    padding: 13px 12px;
+    background: transparent;
+  }
+  #baton-model-sources-design .bms-device-toggle:hover {
+    background: var(--bms-hover);
+  }
+  #baton-model-sources-design .bms-device-toggle[aria-expanded='true'] {
+    background: var(--bms-selected);
+  }
+  #baton-model-sources-design .bms-device-identity {
+    flex: 1;
+    min-width: 0;
+  }
+  #baton-model-sources-design .bms-name-line {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    flex-wrap: wrap;
+  }
+  #baton-model-sources-design .bms-detail {
+    padding: 24px 12px 26px 40px;
+  }
+  #baton-model-sources-design .bms-group + .bms-group {
+    margin-top: 26px;
+  }
+  #baton-model-sources-design .bms-section-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 12px;
+    margin-bottom: 5px;
+  }
+  #baton-model-sources-design .bms-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 45px;
+    padding: 8px 0;
+  }
+  #baton-model-sources-design .bms-row + .bms-row {
+    border-top: 1px solid var(--bms-soft-border);
+  }
+  #baton-model-sources-design .bms-grow {
+    flex: 1;
+    min-width: 0;
+  }
+  #baton-model-sources-design .bms-row-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--bms-muted);
+    font-size: 12px;
+  }
+  #baton-model-sources-design .bms-dot {
+    display: inline-block;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--bms-success);
+    flex-shrink: 0;
+  }
+  #baton-model-sources-design .bms-offline {
+    background: var(--bms-muted);
+  }
+  #baton-model-sources-design .bms-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 30px;
+    padding: 3px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--bms-border);
+    background: var(--bms-surface);
+    white-space: nowrap;
+  }
+  #baton-model-sources-design .bms-button:hover {
+    background: var(--bms-hover);
+  }
+  #baton-model-sources-design .bms-button:active {
+    background: var(--bms-selected);
+  }
+  #baton-model-sources-design .bms-primary {
+    color: #fff !important;
+    background: var(--bms-accent);
+    border-color: transparent;
+  }
+  #baton-model-sources-design .bms-primary:hover {
+    background: color-mix(in srgb, var(--bms-accent), var(--bms-text) 12%);
+  }
+  #baton-model-sources-design .bms-link {
+    border: 0;
+    background: transparent;
+    padding: 3px 0;
+    color: var(--bms-link) !important;
+    min-height: 28px;
+  }
+  #baton-model-sources-design .bms-link:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  #baton-model-sources-design .bms-back {
+    margin-bottom: 16px;
+    display: inline-flex;
+    gap: 5px;
+    align-items: center;
+  }
+  #baton-model-sources-design .bms-connection {
+    display: flex;
+    width: 100%;
+    text-align: left;
+    align-items: center;
+    gap: 12px;
+    border: 0;
+    border-top: 1px solid var(--bms-soft-border);
+    background: transparent;
+    padding: 11px 0;
+  }
+  #baton-model-sources-design .bms-connection:hover {
+    background: var(--bms-hover);
+  }
+  #baton-model-sources-design .bms-connection:first-child {
+    border-top: 0;
+  }
+  #baton-model-sources-design .bms-connection .bms-small {
+    display: block;
+    margin-top: 1px;
+  }
+  #baton-model-sources-design .bms-rule {
+    height: 1px;
+    border: 0;
+    background: var(--bms-soft-border);
+    margin: 24px 0 20px;
+  }
+  #baton-model-sources-design .bms-permission {
+    display: flex;
+    align-items: start;
+    gap: 16px;
+  }
+  #baton-model-sources-design .bms-permission input {
+    accent-color: var(--bms-accent);
+    margin-top: 5px;
+  }
+  #baton-model-sources-design .bms-form {
+    max-width: 480px;
+    margin: 0 auto;
+  }
+  #baton-model-sources-design .bms-form h2 {
+    margin-bottom: 24px;
+  }
+  #baton-model-sources-design .bms-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 20px;
+  }
+  #baton-model-sources-design .bms-field label {
+    font-weight: 500;
+  }
+  #baton-model-sources-design .bms-control {
+    display: block;
+    width: 100%;
+    padding: 6px 10px;
+    min-height: 36px;
+    color: var(--bms-text);
+    background: var(--bms-surface);
+    border: 1px solid var(--bms-border);
+    border-radius: 6px;
+  }
+  #baton-model-sources-design textarea.bms-control {
+    resize: vertical;
+    min-height: 72px;
+  }
+  #baton-model-sources-design .bms-key-field {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  #baton-model-sources-design .bms-key-field .bms-control {
+    flex: 1;
+    min-width: 0;
+  }
+  #baton-model-sources-design .bms-key-field .bms-button {
+    flex-shrink: 0;
+  }
+  #baton-model-sources-design .bms-error {
+    color: var(--bms-danger);
+    font-size: 12px;
+  }
+  #baton-model-sources-design .bms-field [aria-invalid='true'] {
+    border-color: var(--bms-danger);
+  }
+  #baton-model-sources-design .bms-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-top: 4px;
+    flex-wrap: wrap;
+  }
+  #baton-model-sources-design .bms-actions > .bms-spacer {
+    margin-left: auto;
+  }
+  #baton-model-sources-design .bms-danger {
+    color: var(--bms-danger) !important;
+  }
+  #baton-model-sources-design .bms-endpoint {
+    font-size: 12px;
+    color: var(--bms-muted);
+    overflow-wrap: anywhere;
+  }
+  #baton-model-sources-design .bms-remote-key {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 0;
+  }
+  #baton-model-sources-design .bms-inline-notice {
+    margin-top: 12px;
+    border-top: 1px solid var(--bms-soft-border);
+    padding-top: 12px;
+  }
+  #baton-model-sources-design .bms-inline-notice p + p {
+    margin-top: 8px;
+  }
+  #baton-model-sources-design .bms-device-hint {
+    display: flex;
+    gap: 7px;
+    align-items: center;
+    color: var(--bms-muted);
+    font-size: 12px;
+  }
+  #baton-model-sources-design .bms-status {
+    margin-top: 12px;
+    min-height: 20px;
+    color: var(--bms-muted);
+    font-size: 12px;
+  }
+  #baton-model-sources-design .bms-code {
+    background: var(--bms-surface);
+    border: 1px solid var(--bms-border);
+    border-radius: 6px;
+    padding: 12px;
+    font:
+      400 12px/1.6 ui-monospace,
+      SFMono-Regular,
+      monospace;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    margin: 12px 0;
+  }
+  #baton-model-sources-design .bms-product [hidden] {
+    display: none !important;
+  }
+  #baton-model-sources-design .bms-product svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+  }
+  #baton-model-sources-design .bms-mobile-status {
+    display: none;
+  }
+  @media (max-width: 540px) {
+    #baton-model-sources-design .bms-stage {
+      padding: 8px;
+    }
+    #baton-model-sources-design .bms-body {
+      padding: 22px 16px 24px;
+    }
+    #baton-model-sources-design .bms-topbar {
+      padding: 13px 16px;
+    }
+    #baton-model-sources-design .bms-detail {
+      padding: 20px 10px;
+    }
+    #baton-model-sources-design .bms-preview-bar {
+      padding-right: 0;
+    }
+    #baton-model-sources-design .bms-row {
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    #baton-model-sources-design .bms-device-toggle {
+      padding-inline: 8px;
+      gap: 8px;
+    }
+    #baton-model-sources-design .bms-device-toggle > .bms-row-status {
+      display: none;
+    }
+    #baton-model-sources-design .bms-mobile-status {
+      display: inline;
+    }
+  }
+  @media (pointer: coarse) {
+    #baton-model-sources-design .bms-product button {
+      min-height: 44px;
+    }
+    #baton-model-sources-design .bms-control {
+      min-height: 44px;
+      font-size: 16px;
+    }
+  }
+</style>
+<script>
+  ;(() => {
+    const root = document.getElementById('baton-model-sources-design')
+    const screen = root.querySelector('#bms-screen')
+    const icons = () => {
+      if (globalThis.lucide) globalThis.lucide.createIcons({ attrs: { width: 16, height: 16 } })
+    }
+    const icon = (name) => `<i data-lucide="${name}" aria-hidden="true"></i>`
+    const esc = (value) =>
+      String(value).replace(
+        /[&<>"']/g,
+        (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
+      )
+    const devices = [
+      { id: 'mac', name: 'MacBook Pro', os: 'macOS', local: true, online: true, signedIn: ['ChatGPT'] },
+      { id: 'ubuntu', name: 'Ubuntu Dev', os: 'Ubuntu', local: false, online: true, signedIn: ['ChatGPT', 'Claude'] },
+      { id: 'windows', name: 'Windows Desktop', os: 'Windows 11', local: false, online: false, signedIn: [] },
+    ]
+    const formats = {
+      responses: 'OpenAI Responses',
+      completions: 'OpenAI Chat Completions',
+      anthropic: 'Anthropic Messages',
+    }
+    let connections = [
+      {
+        id: 'openai-work',
+        device: 'mac',
+        name: 'OpenAI work',
+        format: 'responses',
+        url: 'https://api.openai.com/v1',
+        models: ['gpt-6.1-sol', 'gpt-6.1-mini'],
+        hasKey: true,
+      },
+      {
+        id: 'company-gateway',
+        device: 'ubuntu',
+        name: 'Company gateway',
+        format: 'anthropic',
+        url: 'https://gateway.example.com',
+        models: ['claude-sonnet-5-5', 'claude-haiku-5-5'],
+        hasKey: true,
+      },
+    ]
+    let nextConnection = 3
+    let state = {
+      view: 'devices',
+      device: 'mac',
+      editor: null,
+      source: 'sub:ChatGPT',
+      model: 'gpt-6.1-sol',
+      commandAccess: true,
+    }
+    const stored = window.openai?.widgetState?.privateContent
+    if (stored && typeof stored === 'object') {
+      if (['devices', 'editor', 'project'].includes(stored.view)) state.view = stored.view
+      if (devices.some((d) => d.id === stored.device)) state.device = stored.device
+    }
+    let deleteOpen = false
+    let subscriptionOpen = null
+    let notice = ''
+    const currentDevice = () => devices.find((d) => d.id === state.device)
+    const remember = () => {
+      if (!window.openai?.setWidgetState) return
+      window.openai
+        .setWidgetState({
+          modelContent: {
+            configurationScope: 'device',
+            view: state.view,
+            device: currentDevice().name,
+            modelSource: state.source,
+            model: state.model,
+          },
+          privateContent: { view: state.view, device: state.device },
+        })
+        .catch(() => {})
+    }
+    const navigate = (view) => {
+      state.view = view
+      deleteOpen = false
+      subscriptionOpen = null
+      notice = ''
+      render()
+      remember()
+    }
+    const topbar = (trail) =>
+      `<div class="bms-topbar"><span>Baton</span><span class="bms-divider">/</span><span>${trail}</span></div>`
+    const button = (label, action, extra = '') =>
+      `<button type="button" class="bms-button cursor-interaction ${extra}" data-action="${action}">${label}</button>`
+    function subscriptionRows(device) {
+      return ['ChatGPT', 'Claude']
+        .map((provider) => {
+          const signed = device.signedIn.includes(provider)
+          return `<div class="bms-row"><span class="bms-grow">${provider}</span>${signed ? '<span class="bms-muted bms-small">Signed in</span>' : ''}<button type="button" class="bms-button cursor-interaction bms-small" data-subscription="${provider}">${signed ? 'Manage…' : 'Sign in…'}</button></div>`
+        })
+        .join('')
+    }
+    function devicesView() {
+      return `${topbar('Devices')}<div class="bms-body"><div class="bms-heading"><h2>3 devices, 2 online</h2></div>${devices
+        .map((device) => {
+          const expanded = state.device === device.id
+          const list = connections.filter((c) => c.device === device.id)
+          return `<section class="bms-device"><button type="button" class="bms-device-toggle cursor-interaction" data-device="${device.id}" aria-expanded="${expanded}" aria-controls="bms-detail-${device.id}">${icon('laptop')}<span class="bms-device-identity"><span class="bms-name-line"><span class="bms-label">${device.name}</span>${device.local ? '<span class="bms-small bms-muted">This computer</span>' : ''}</span><span class="bms-small bms-muted">${device.os}<span class="bms-mobile-status"> · ${device.online ? 'Online' : 'Offline'}</span></span></span><span class="bms-row-status"><span class="bms-dot ${device.online ? '' : 'bms-offline'}"></span>${device.online ? 'Online' : 'Offline'}</span>${icon(expanded ? 'chevron-down' : 'chevron-right')}</button><div id="bms-detail-${device.id}" class="bms-detail" ${expanded ? '' : 'hidden'}>
+        <section class="bms-group" aria-label="Subscriptions"><div class="bms-section-head"><h3>Subscriptions</h3></div>${subscriptionRows(device)}${expanded && subscriptionOpen ? subscriptionPanel() : ''}</section>
+        <section class="bms-group" aria-label="API connections"><div class="bms-section-head"><h3>API connections</h3><button type="button" class="bms-button bms-small cursor-interaction" data-add-device="${device.id}">${icon('plus')}Add connection</button></div>${list.length ? list.map((c) => `<button type="button" class="bms-connection cursor-interaction" data-edit="${c.id}" aria-label="Edit ${esc(c.name)}"><span class="bms-grow"><span>${esc(c.name)}</span><span class="bms-muted bms-small">${formats[c.format]} · ${esc(new URL(c.url).host)}</span></span>${!c.hasKey ? '<span class="bms-small bms-muted">Key needed</span>' : ''}${icon('chevron-right')}</button>`).join('') : '<p class="bms-muted bms-small" style="padding:10px 0">No API connections</p>'}</section>
+        ${!device.online ? `<p class="bms-small bms-muted" style="margin-top:20px" role="status">${notice || 'Reconnect Windows Desktop to change its model sources.'}</p>` : ''}
+        <hr class="bms-rule"><label class="bms-permission"><span class="bms-grow"><span class="bms-label">Allow project assistant to run commands</span><span class="bms-small bms-muted" style="display:block">Threads set their own access.</span></span><input type="checkbox" role="switch" aria-label="Allow project assistant to run commands" data-command ${state.commandAccess ? 'checked' : ''}></label>
+      </div></section>`
+        })
+        .join('')}</div>`
+    }
+    function subscriptionPanel() {
+      const d = currentDevice()
+      const signed = d.signedIn.includes(subscriptionOpen)
+      const heading = `${signed ? 'Manage' : 'Sign in to'} ${subscriptionOpen} on ${d.name}`
+      return `<section class="bms-inline-notice" aria-label="${heading}"><h3>${heading}</h3>${signed ? `<p class="bms-muted bms-small" style="margin-top:8px">Signing out makes this subscription unavailable for new project runs on ${d.name}.</p><div class="bms-actions" style="margin-top:12px">${button('Close', 'close-sub')}${button('Sign out', 'sign-out', 'bms-danger')}</div>` : subscriptionOpen === 'Claude' ? `<p class="bms-muted bms-small" style="margin-top:8px">Run in a terminal on ${d.name}:</p><pre class="bms-code">baton-project-runtime login anthropic</pre><div class="bms-actions">${button('Close', 'close-sub')}<span class="bms-small bms-muted">Waiting for sign-in…</span></div>` : `<p class="bms-muted bms-small" style="margin-top:8px">Open the subscription sign-in page and enter the device code.</p><div class="bms-code">DEMO-CODE</div><div class="bms-actions">${button('Close', 'close-sub')}<span class="bms-small bms-muted">Waiting for sign-in…</span></div>`}</section>`
+    }
+    function editorView() {
+      const device = currentDevice()
+      const entry = connections.find((c) => c.id === state.editor)
+      const data = entry || {
+        name: '',
+        format: 'responses',
+        url: 'https://api.openai.com/v1',
+        models: [],
+        hasKey: false,
+      }
+      return `${topbar('Devices')}<div class="bms-body"><div class="bms-form"><button type="button" class="bms-link bms-back cursor-interaction" data-action="back">${icon('arrow-left')}${device.name}</button><h2>${entry ? 'Edit API connection' : 'Add API connection'}</h2><form id="bms-connection-form" novalidate>
+      <div class="bms-field"><label for="bms-connection-name">Connection name</label><input id="bms-connection-name" class="bms-control" name="name" value="${esc(data.name)}" placeholder="e.g. Company gateway" maxlength="80" required><span class="bms-error" id="bms-name-error" role="alert" hidden></span></div>
+      <div class="bms-field"><label for="bms-format">API format</label><select id="bms-format" class="bms-control" name="format">${Object.entries(
+        formats,
+      )
+        .map(([id, label]) => `<option value="${id}" ${data.format === id ? 'selected' : ''}>${label}</option>`)
+        .join('')}</select></div>
+      <div class="bms-field"><label for="bms-url">Base URL</label><input id="bms-url" class="bms-control" name="url" type="url" value="${esc(data.url)}" spellcheck="false" required><span id="bms-endpoint" class="bms-endpoint"></span><span id="bms-url-error" class="bms-error" role="alert" hidden></span></div>
+      <div class="bms-field"><label for="${device.local ? 'bms-key' : 'bms-key-remote'}">API key</label>${device.local ? `<div class="bms-key-field"><input id="bms-key" class="bms-control" name="key" type="password" autocomplete="off" placeholder="${data.hasKey ? 'Saved on this device · leave blank to keep' : 'Enter API key'}"><button type="button" class="bms-button cursor-interaction" data-action="reveal-key" aria-label="Show API key" aria-pressed="false">${icon('eye')}</button></div><span class="bms-muted bms-small">Stored only on ${device.name}.</span><span id="bms-key-error" class="bms-error" role="alert" hidden></span>` : `<div class="bms-remote-key" id="bms-key-remote">${icon('key-round')}<span class="bms-grow bms-small">${data.hasKey ? `Key saved on ${device.name}` : `Set the key on ${device.name}`}</span></div><p class="bms-small bms-muted">Enter the key in that device’s terminal. Connection details can be edited here.</p>`}</div>
+      <div class="bms-field"><label for="bms-models">Model IDs</label><textarea id="bms-models" class="bms-control" name="models" rows="2" placeholder="One model ID per line" spellcheck="false" required>${esc(data.models.join('\n'))}</textarea><span id="bms-models-error" class="bms-error" role="alert" hidden></span></div>
+      <div class="bms-actions">${entry ? button('Delete connection…', 'delete', 'bms-link bms-danger') : ''}<span class="bms-spacer"></span>${button('Cancel', 'back')}<button type="button" data-action="save-connection" class="bms-button bms-primary cursor-interaction">${entry ? 'Save changes' : 'Add connection'}</button></div>
+      ${deleteOpen ? `<section class="bms-inline-notice" aria-label="Delete connection"><p class="bms-small">${state.source === `api:${entry.id}` ? 'Baton Dev uses this connection. Deleting it leaves the project waiting for another model source.' : `Delete ${esc(entry.name)} from ${device.name}?`}</p><div class="bms-actions" style="margin-top:12px">${button('Keep connection', 'keep')}${button('Delete connection', 'confirm-delete', 'bms-danger')}</div></section>` : ''}
+    </form></div></div>`
+    }
+    function sources() {
+      return [
+        {
+          id: 'sub:ChatGPT',
+          name: 'ChatGPT subscription',
+          devices: devices.filter((d) => d.signedIn.includes('ChatGPT')),
+          models: ['gpt-6.1-sol', 'gpt-6.1-mini'],
+        },
+        {
+          id: 'sub:Claude',
+          name: 'Claude subscription',
+          devices: devices.filter((d) => d.signedIn.includes('Claude')),
+          models: ['claude-sonnet-5-5', 'claude-haiku-5-5'],
+        },
+        ...connections.map((c) => ({
+          id: `api:${c.id}`,
+          name: c.name,
+          devices: devices.filter((d) => d.id === c.device),
+          models: c.models,
+          needsKey: !c.hasKey,
+        })),
+      ]
+    }
+    function projectView() {
+      const list = sources()
+      const chosen = list.find((s) => s.id === state.source)
+      const availability = !chosen
+        ? 'Choose another source to resume this project.'
+        : chosen.needsKey
+          ? `Key needed on ${chosen.devices[0].name}`
+          : chosen.devices.length
+            ? `Available on ${chosen.devices.map((d) => d.name).join(' · ')}`
+            : 'Sign in to this subscription on a device.'
+      return `${topbar('Baton Dev / Settings')}<div class="bms-body"><div class="bms-form"><h2>Project assistant</h2><div class="bms-field"><label for="bms-project-source">Model source</label><select id="bms-project-source" class="bms-control">${!chosen ? '<option value="">Choose a model source</option>' : ''}<optgroup label="Subscriptions">${list
+        .filter((s) => s.id.startsWith('sub:'))
+        .map((s) => `<option value="${s.id}" ${state.source === s.id ? 'selected' : ''}>${s.name}</option>`)
+        .join('')}</optgroup>${
+        connections.length
+          ? `<optgroup label="API connections">${list
+              .filter((s) => s.id.startsWith('api:'))
+              .map(
+                (s) =>
+                  `<option value="${s.id}" ${state.source === s.id ? 'selected' : ''}>${esc(s.name)} · ${s.devices[0].name}</option>`,
+              )
+              .join('')}</optgroup>`
+          : ''
+      }</select></div><div class="bms-field"><label for="bms-project-model">Model</label><select id="bms-project-model" class="bms-control" ${!chosen ? 'disabled' : ''}>${chosen ? chosen.models.map((m) => `<option ${state.model === m ? 'selected' : ''}>${esc(m)}</option>`).join('') : '<option>Choose a source first</option>'}</select></div><div class="bms-device-hint">${icon('laptop')}<span>${availability}</span></div><hr class="bms-rule"><div class="bms-actions"><button type="button" class="bms-link cursor-interaction" data-action="manage-sources">Manage model sources…</button><span class="bms-spacer"></span>${button('Save changes', 'save-project', 'bms-primary')}</div><p class="bms-status" role="status">${esc(notice)}</p></div></div>`
+    }
+    function endpoint() {
+      const input = screen.querySelector('#bms-url')
+      const select = screen.querySelector('#bms-format')
+      const output = screen.querySelector('#bms-endpoint')
+      if (!input || !select || !output) return
+      let value = input.value.trim().replace(/\/+$/, '')
+      const path =
+        select.value === 'responses'
+          ? '/responses'
+          : select.value === 'completions'
+            ? '/chat/completions'
+            : '/v1/messages'
+      output.textContent = value
+        ? `POST ${value}${select.value === 'anthropic' && /\/v1$/.test(value) ? '/messages' : path}`
+        : ''
+    }
+    function render() {
+      root
+        .querySelectorAll('[data-preview]')
+        .forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.preview === state.view)))
+      screen.innerHTML =
+        state.view === 'devices' ? devicesView() : state.view === 'editor' ? editorView() : projectView()
+      endpoint()
+      icons()
+    }
+    root.addEventListener('click', (event) => {
+      const target = event.target.closest('button')
+      if (!target) return
+      if (target.dataset.preview) {
+        if (target.dataset.preview === 'editor') state.editor = null
+        navigate(target.dataset.preview)
+        return
+      }
+      if (target.dataset.device) {
+        state.device = target.dataset.device
+        subscriptionOpen = null
+        render()
+        remember()
+        return
+      }
+      if (target.dataset.addDevice) {
+        state.device = target.dataset.addDevice
+        if (!currentDevice().online) {
+          notice = 'Reconnect Windows Desktop to add an API connection.'
+          render()
+          return
+        }
+        state.editor = null
+        navigate('editor')
+        return
+      }
+      if (target.dataset.edit) {
+        const c = connections.find((x) => x.id === target.dataset.edit)
+        state.editor = c.id
+        state.device = c.device
+        navigate('editor')
+        return
+      }
+      if (target.dataset.subscription) {
+        if (!currentDevice().online) {
+          notice = 'Reconnect Windows Desktop to manage subscriptions.'
+          render()
+          return
+        }
+        subscriptionOpen = target.dataset.subscription
+        render()
+        return
+      }
+      const action = target.dataset.action
+      if (action === 'back') navigate('devices')
+      if (action === 'manage-sources') {
+        const c = connections.find((x) => `api:${x.id}` === state.source)
+        if (c) state.device = c.device
+        navigate('devices')
+      }
+      if (action === 'close-sub') {
+        subscriptionOpen = null
+        render()
+      }
+      if (action === 'sign-out') {
+        currentDevice().signedIn = currentDevice().signedIn.filter((p) => p !== subscriptionOpen)
+        subscriptionOpen = null
+        render()
+      }
+      if (action === 'reveal-key') {
+        const input = screen.querySelector('#bms-key')
+        const show = input.type === 'password'
+        input.type = show ? 'text' : 'password'
+        target.setAttribute('aria-label', show ? 'Hide API key' : 'Show API key')
+        target.setAttribute('aria-pressed', String(show))
+        target.innerHTML = icon(show ? 'eye-off' : 'eye')
+        icons()
+      }
+      if (action === 'delete' || action === 'keep') {
+        deleteOpen = action === 'delete'
+        const form = screen.querySelector('form')
+        const draft = {
+          name: form.elements.name.value,
+          format: form.elements.format.value,
+          url: form.elements.url.value,
+          models: form.elements.models.value,
+          key: form.elements.key?.value,
+        }
+        render()
+        const next = screen.querySelector('form')
+        Object.entries(draft).forEach(([name, value]) => {
+          if (next.elements[name] && value !== undefined) next.elements[name].value = value
+        })
+        endpoint()
+      }
+      if (action === 'confirm-delete') {
+        connections = connections.filter((c) => c.id !== state.editor)
+        state.editor = null
+        navigate('devices')
+      }
+      if (action === 'save-project') {
+        notice = 'Saved'
+        render()
+        remember()
+      }
+      if (action === 'save-connection') saveConnection(screen.querySelector('#bms-connection-form'))
+    })
+    root.addEventListener('input', (event) => {
+      if (event.target.id === 'bms-url') endpoint()
+      const map = { 'bms-connection-name': 'name', 'bms-url': 'url', 'bms-key': 'key', 'bms-models': 'models' }
+      const key = map[event.target.id]
+      if (key) {
+        event.target.removeAttribute('aria-invalid')
+        const error = screen.querySelector(`#bms-${key}-error`)
+        if (error) error.hidden = true
+      }
+    })
+    root.addEventListener('change', (event) => {
+      if (event.target.id === 'bms-format') {
+        const url = screen.querySelector('#bms-url')
+        if (['https://api.openai.com/v1', 'https://api.anthropic.com'].includes(url.value))
+          url.value = event.target.value === 'anthropic' ? 'https://api.anthropic.com' : 'https://api.openai.com/v1'
+        endpoint()
+      }
+      if (event.target.id === 'bms-project-source') {
+        state.source = event.target.value
+        state.model = sources().find((s) => s.id === state.source)?.models[0] || ''
+        notice = ''
+        render()
+        remember()
+      }
+      if (event.target.id === 'bms-project-model') {
+        state.model = event.target.value
+        notice = ''
+        remember()
+      }
+      if (event.target.hasAttribute('data-command')) state.commandAccess = event.target.checked
+    })
+    function saveConnection(form) {
+      const entry = connections.find((c) => c.id === state.editor)
+      const name = form.elements.name.value.trim()
+      const url = form.elements.url.value.trim().replace(/\/+$/, '')
+      const models = [
+        ...new Set(
+          form.elements.models.value
+            .split('\n')
+            .map((m) => m.trim())
+            .filter(Boolean),
+        ),
+      ]
+      let valid = true
+      const error = (field, message) => {
+        const output = screen.querySelector(`#bms-${field}-error`)
+        output.textContent = message
+        output.hidden = false
+        const input = field === 'name' ? form.elements.name : form.elements[field]
+        input.setAttribute('aria-invalid', 'true')
+        if (valid) input.focus()
+        valid = false
+      }
+      if (!name) error('name', 'Enter a connection name.')
+      else if (
+        connections.some(
+          (c) => c.device === state.device && c.id !== state.editor && c.name.toLowerCase() === name.toLowerCase(),
+        )
+      )
+        error('name', 'Use a different name on this device.')
+      try {
+        if (!['http:', 'https:'].includes(new URL(url).protocol)) throw new Error()
+      } catch {
+        error('url', 'Enter an HTTP or HTTPS base URL.')
+      }
+      if (currentDevice().local && !entry?.hasKey && !form.elements.key.value.trim()) error('key', 'Enter an API key.')
+      if (!models.length) error('models', 'Enter at least one model ID.')
+      if (!valid) return
+      const next = {
+        id: entry?.id || `connection-${nextConnection++}`,
+        device: state.device,
+        name,
+        format: form.elements.format.value,
+        url,
+        models,
+        hasKey: entry?.hasKey || Boolean(form.elements.key?.value.trim()),
+      }
+      if (entry) connections = connections.map((c) => (c.id === entry.id ? next : c))
+      else connections.push(next)
+      if (form.elements.key) form.elements.key.value = ''
+      state.editor = null
+      navigate('devices')
+    }
+    root.addEventListener('submit', (event) => {
+      if (event.target.id !== 'bms-connection-form') return
+      event.preventDefault()
+      saveConnection(event.target)
+    })
+    root.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && event.target.matches('#bms-connection-form input')) {
+        event.preventDefault()
+        saveConnection(event.target.form)
+      }
+    })
+    window.addEventListener('openai:set_globals', (event) => {
+      const next = event.detail?.globals?.widgetState?.privateContent
+      if (!next) return
+      let changed = false
+      if (['devices', 'editor', 'project'].includes(next.view) && next.view !== state.view) {
+        state.view = next.view
+        changed = true
+      }
+      if (devices.some((d) => d.id === next.device) && next.device !== state.device) {
+        state.device = next.device
+        changed = true
+      }
+      if (changed) render()
+    })
+    render()
+  })()
+</script>
